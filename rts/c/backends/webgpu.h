@@ -421,7 +421,7 @@ static void gpu_create_kernel(struct futhark_context *ctx,
   };
   kernel->pipeline_layout = wgpuDeviceCreatePipelineLayout(ctx->device, &pl);
 
-  // Create constants / overrides. 
+  // Create constants / overrides.
   WGPUConstantEntry *const_entries = calloc(ctx->num_overrides,
                                             sizeof(WGPUConstantEntry));
   for (int i = 0; i < ctx->num_overrides; i++) {

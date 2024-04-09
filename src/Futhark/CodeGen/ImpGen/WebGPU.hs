@@ -26,12 +26,14 @@ import Futhark.Util (convFloat, zEncodeText)
 import Futhark.Util.Pretty (docText)
 import Language.Futhark.Warnings (Warnings)
 import Data.List (foldl')
+import Data.Functor ((<&>))
 
 -- State carried during WebGPU translation.
 data WebGPUS = WebGPUS
   { -- | Accumulated code.
     wsCode :: T.Text,
     wsSizes :: M.Map Name SizeClass,
+    wsMacroDefs :: [(Name, KernelConstExp)],
     -- | Interface of kernels already generated into wsCode.
     wsKernels :: [(WGSL.Ident, KernelInterface)],
     wsNextBindSlot :: Int
@@ -44,6 +46,10 @@ type WebGPUM = State WebGPUS
 addSize :: Name -> SizeClass -> WebGPUM ()
 addSize key sclass =
   modify $ \s -> s {wsSizes = M.insert key sclass $ wsSizes s}
+
+addMacroDef :: Name -> KernelConstExp -> WebGPUM ()
+addMacroDef key e =
+  modify $ \s -> s {wsMacroDefs = (key, e) : wsMacroDefs s}
 
 addCode :: T.Text -> WebGPUM ()
 addCode code =
@@ -145,8 +151,9 @@ genKernel = do
   kernel <- asks krKernel
   let name = textToIdent $ nameToText (ImpGPU.kernelName kernel)
 
-  (overrideDecls, overrideInits) <- genConstAndBuiltinDecls
+  (overrideDecls, overrideMacroDefs, overrideInits) <- genConstAndBuiltinDecls
   gen $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
+  lift $ mapM_ (uncurry addMacroDef) overrideMacroDefs
 
   (scalarDecls, scalarCopies) <- genScalarDecls
   gen $ docText (WGSL.prettyDecls scalarDecls <> "\n\n")
@@ -206,6 +213,7 @@ kernelsToWebGPU prog =
       initial_state = WebGPUS {
         wsCode = mempty,
         wsSizes = mempty,
+        wsMacroDefs = mempty,
         wsKernels = mempty,
         wsNextBindSlot = 0
       }
@@ -219,7 +227,7 @@ kernelsToWebGPU prog =
 
       kernels = M.fromList $ map (first nameFromText) (wsKernels translation)
       webgpu_prelude = RTS.scalar <> RTS.scalar8 <> RTS.scalar16 <> RTS.scalar64
-      constants = mempty
+      constants = wsMacroDefs translation
       -- TODO: Compute functions using tuning params
       params = M.map (, S.empty) $ wsSizes translation
       failures = mempty
@@ -625,32 +633,44 @@ genMemoryDecls = do
     rename (name, _) = (name, ) <$> mkGlobalIdent name
 
 -- | Generate `override` declarations for kernel 'ConstUse's and
--- backend-provided values (like block size and lockstep width).
+-- backend-provided values (like block size and lockstep width). The returned
+-- (name, expression) pairs are the corresponding expressions to be evaluated
+-- on the host and passed to the kernel.
 -- Some ConstUses can require additional code inserted at the beginning of the
 -- kernel before they can be used, these are contained in the returned
 -- statement.
-genConstAndBuiltinDecls :: KernelM ([WGSL.Declaration], WGSL.Stmt)
+genConstAndBuiltinDecls :: KernelM
+  ([WGSL.Declaration], [(Name, KernelConstExp)], WGSL.Stmt)
 genConstAndBuiltinDecls = do
   kernel <- asks krKernel
 
-  builtins <- sequence [builtinLockstepWidth, builtinBlockSize]
+  let blockDimExp = case ImpGPU.kernelBlockSize kernel of
+                      [Right e] -> e
+                      _ -> error "TODO: no non-const or >1dim block sizes yet"
+  builtins <- sequence
+                [builtinLockstepWidth <&> (,ValueExp (IntValue (Int32Value 1))),
+                 builtinBlockSize <&> (,blockDimExp)]
   let builtinDecls =
-        [WGSL.OverrideDecl n (WGSL.Prim WGSL.Int32)
-         (Just $ WGSL.IntExp 0) | n <- builtins]
+        [WGSL.OverrideDecl n (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
+          | (n, _) <- builtins]
+  let builtinMap =
+        [(nameFromText n, e) | (n, e) <- builtins]
 
-  let consts = [nameToIdent n | ImpGPU.ConstUse n _ <- ImpGPU.kernelUses kernel]
-  moduleNames <- mapM mkGlobalIdent consts
+  let consts = [(n, e) | ImpGPU.ConstUse n e <- ImpGPU.kernelUses kernel]
+  moduleNames <- mapM (mkGlobalIdent . nameToIdent . fst) consts
+  let constMap = [(nameFromText i, e) | ((_, e), i) <- zip consts moduleNames]
   let constDecls = [WGSL.OverrideDecl (i <> "_x") (WGSL.Prim WGSL.Int32)
-                    (Just $ WGSL.IntExp 0) | i <- moduleNames]
+                     (Just $ WGSL.IntExp 0) | i <- moduleNames]
   let constInits =
-        [WGSL.Seq (WGSL.DeclareVar n (WGSL.Prim wgslInt64))
-          (WGSL.Assign n (WGSL.CallExp "i64" [WGSL.VarExp (i <> "_x"),
-                                              WGSL.IntExp 0]))
-          | (n, i) <- zip consts moduleNames]
+        [WGSL.Seq (WGSL.DeclareVar (nameToIdent n) (WGSL.Prim wgslInt64))
+          (WGSL.Assign (nameToIdent n) (WGSL.CallExp "i64" [WGSL.VarExp (i <> "_x"),
+                                                            WGSL.IntExp 0]))
+          | ((n, _), i) <- zip consts moduleNames]
 
   let decls = builtinDecls ++ constDecls
+  let fullMap = builtinMap ++ constMap
   sequence_ [addOverride n | WGSL.OverrideDecl n _ _ <- decls]
-  pure (decls, WGSL.stmts constInits)
+  pure (decls, fullMap, WGSL.stmts constInits)
 
 nameToIdent :: VName -> WGSL.Ident
 nameToIdent = zEncodeText . prettyText
