@@ -9,7 +9,6 @@ typedef struct wgpu_wait_info {
 } wgpu_wait_info;
 
 void wgpu_map_sync_callback(WGPUBufferMapAsyncStatus status, void *info_v) {
-  printf("map_sync_callback\n");
   wgpu_wait_info *info = (wgpu_wait_info *)info_v;
   *((WGPUBufferMapAsyncStatus *) info->result) = status;
   info->released = true;
@@ -512,6 +511,7 @@ struct wgpu_kernel_info *wgpu_get_kernel_info(const char *name) {
 
 // Types.
 struct wgpu_kernel {
+  struct wgpu_kernel_info *info;
   WGPUBindGroupLayout bind_group_layout;
   WGPUPipelineLayout pipeline_layout;
   WGPUComputePipeline pipeline;
@@ -523,13 +523,13 @@ typedef WGPUBuffer gpu_mem;
 static void gpu_create_kernel(struct futhark_context *ctx,
                               gpu_kernel *kernel_out,
                               const char *name) {
-  printf("Create kernel %s\n", name);
   if (ctx->debugging) {
     fprintf(ctx->log, "Creating kernel %s.\n", name);
   }
 
   struct wgpu_kernel_info *kernel_info = wgpu_get_kernel_info(name);
   struct wgpu_kernel *kernel = malloc(sizeof(struct wgpu_kernel));
+  kernel->info = kernel_info;
   
   // Create bind group layout.
   WGPUBindGroupLayoutEntry *bgl_entries
@@ -666,10 +666,6 @@ static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
   // no other good option to use here), so we ignore the sync parameter.
   (void)sync;
 
-  printf("host2gpu: <%p + %lld> -> <%p + %lld> (%lld)\n", src, src_offset, dst, dst_offset, nbytes);
-  for (int i = 0; i < 3; i++) {
-    printf("  %p: %d\n", ((int*)src) + i, *((int*)src+i));
-  }
   wgpuQueueWriteBuffer(ctx->queue, dst, dst_offset, src + src_offset, nbytes);
   return FUTHARK_SUCCESS;
 }
@@ -687,7 +683,6 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
   };
   WGPUBuffer readback = wgpuDeviceCreateBuffer(ctx->device, &desc);
   
-  printf("gpu cpy: <%p + %lld> -> %p (%lld)\n", src, src_offset, readback, nbytes);
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
   wgpuCommandEncoderCopyBufferToBuffer(encoder,
     src, src_offset,
@@ -697,21 +692,15 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
   WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
 
-  printf("Starting map of %p\n", readback);
   // TODO: Could we do an actual async mapping here if `sync` is false?
   WGPUBufferMapAsyncStatus status = 
     wgpu_map_buffer_sync(readback, WGPUMapMode_Read, 0, nbytes);
-  printf("sync map ended with %d\n", status);
   if (status != WGPUBufferMapAsyncStatus_Success) {
     futhark_panic(-1, "Failed to copy from device memory with error %d\n",
                   status);
   }
 
   const void *mapped = wgpuBufferGetConstMappedRange(readback, 0, nbytes);
-  printf("mapped readback at %p\n", mapped);
-  for (int i = 0; i < 3; i++) {
-    printf("  %p: %d\n", ((int*)mapped)+i, *(((int*)mapped)+i));
-  }
   memcpy(dst + dst_offset, mapped, nbytes);
 
   wgpuBufferUnmap(readback);
@@ -730,12 +719,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
   // TODO: Deal with `block` not matching what's set in the pipeline constants
   // at creation time. Also, there, deal with no const block size being
   // available at all.
-
-  printf("launch %s\n", name);
-  printf("  grid: %d, %d, %d\n", grid[0], grid[1], grid[2]);
-  printf("  block: %d, %d, %d\n", block[0], block[1], block[2]);
-
-  struct wgpu_kernel_info *kernel_info = wgpu_get_kernel_info(name);
+  struct wgpu_kernel_info *kernel_info = kernel->info;
 
   if (num_args != kernel_info->num_scalars + kernel_info->num_bindings) {
     futhark_panic(-1, "Kernel %s called with num_args not maching its info\n",
@@ -744,7 +728,6 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 
   void *scalars = malloc(kernel_info->scalars_size);
   for (int i = 0; i < kernel_info->num_scalars; i++) {
-    printf("  scalar %d: %d\n", i, *((int *)args[i]));
     memcpy(scalars + kernel_info->scalar_offsets[i], args[i], args_sizes[i]);
   }
 
@@ -759,7 +742,6 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     // specifying the size.
     entry->offset = 0;
     entry->size = wgpuBufferGetSize(entry->buffer);
-    printf("  binding %d: %p (%lld)\n", entry->binding, entry->buffer, entry->size);
   }
 
   wgpuQueueWriteBuffer(ctx->queue, kernel->scalars_buffer, 0,
