@@ -1,3 +1,5 @@
+-- Task: Create automated test suite.
+-- Task: refactor forward to decouple it from substitution logic.
 -- Task: Change representation to more restricted one
 --   where Exp is a leaf/term in an SoP and cases are
 --   of type (Exp, SoP Exp). Possibly rename Exp lol.
