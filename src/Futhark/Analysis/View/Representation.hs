@@ -27,7 +27,6 @@
 -- XXX use case perdicates for simplifying ranges in case values
 --     TODO change Iota to SoP.Range? Then Empty just becomes mempty.
 -- XXX make tests/refinement/iota0 reduce to just 0.
--- XXX Also recurse into conditions in `hoistIf` (see TODOs).
 -- XXX Rebase this on top of master (don't need Refinement type machinery rn).
 -- XXX Check that iterators/domains are compatible.
 -- XXX Make iterators over same domains unify.
@@ -68,7 +67,6 @@ data Exp =
       Exp         -- array
       Exp         -- index
   | SoP (SoP Exp)
-  | If Exp Exp Exp
   | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit)
   | -- Predicate expressions follow here for simplicity.
     -- I'm assuming it's safe because the source program was typechecked.
@@ -180,7 +178,6 @@ instance ASTMappable (Exp, Exp) where
 instance ASTMappable Exp where
   astMap _ Recurrence = pure Recurrence
   astMap m (Var x) = mapOnExp m $ Var x
-  astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
   astMap m (Sum i lb ub e) = Sum <$> mapOnExp m i <*> mapOnExp m lb <*> mapOnExp m ub <*> mapOnExp m e
   astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> mapOnExp m i
   astMap m (SoP sop) = do
@@ -263,13 +260,6 @@ instance Pretty Exp where
       <> "∈"
       <> brackets (commasep [pretty lb, "...", pretty ub])
       <+> parens (pretty e)
-  pretty (If c t f) =
-    "If"
-      <+> parens (pretty c)
-      <+> "then"
-      <+> parens (pretty t)
-      <+> "else"
-      <+> parens (pretty f)
   pretty (SoP sop) = pretty sop
   pretty (Indicator p) = iversonbrackets (pretty p)
     where
