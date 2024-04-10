@@ -30,15 +30,34 @@ options :: [FunOptDescr RefineConfig]
 options =
   [ ]
 
-tests :: [(FilePath, [String])]
+-- Expected (name, index function in prettyString format).
+-- prettyString format used for janky equality testing.
+type Test = (String, [String])
+-- File along with Test.
+tests :: [(FilePath, [Test])]
 tests =
-  [ ("tests/refinement/part2indices.fut", [
-      "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
-      "    | (conds₆₀₇₀)[i₆₁₇₆] => -1 + Σj₆₁₇₂∈[0, ..., i₆₁₇₆] (⟦(conds₆₀₇₀)[j₆₁₇₂]⟧)",
-      "    | ¬((conds₆₀₇₀)[i₆₁₇₆]) => -1 + Σj₆₁₇₂∈[0, ..., -1 + n₆₀₆₈] (⟦(conds₆₀₇₀)[j₆₁₇₂]⟧) + Σj₆₁₇₄∈[0, ..., i₆₁₇₆] (⟦¬((conds₆₀₇₀)[j₆₁₇₄])⟧)"
-    ])
+  [ ("tests/refinement/part2indices.fut",
+     [ ("inds", [
+        "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
+        "    | (conds₆₀₇₀)[i₆₁₇₆] => -1 + Σj₆₁₇₂∈[0, ..., i₆₁₇₆] (⟦(conds₆₀₇₀)[j₆₁₇₂]⟧)",
+        "    | ¬((conds₆₀₇₀)[i₆₁₇₆]) => -1 + Σj₆₁₇₂∈[0, ..., -1 + n₆₀₆₈] (⟦(conds₆₀₇₀)[j₆₁₇₂]⟧) + Σj₆₁₇₄∈[0, ..., i₆₁₇₆] (⟦¬((conds₆₀₇₀)[j₆₁₇₄])⟧)"
+       ])
+     ]),
+    ("tests/refinement/part2indices_neg_conds.fut",
+     [ ("inds", [
+        "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
+        "    | (conds₆₀₇₀)[i₆₁₇₆] => -1 + Σj₆₁₇₂∈[0, ..., i₆₁₇₆] (⟦(conds₆₀₇₀)[j₆₁₇₂]⟧)",
+        "    | ¬((conds₆₀₇₀)[i₆₁₇₆]) => -1 + Σj₆₁₇₂∈[0, ..., -1 + n₆₀₆₈] (⟦(conds₆₀₇₀)[j₆₁₇₂]⟧) + Σj₆₁₇₄∈[0, ..., i₆₁₇₆] (⟦¬((conds₆₀₇₀)[j₆₁₇₄])⟧)"
+       ])
+     ]),
+    ("tests/refinement/part2indices_scan_exc.fut",
+     [ ("inds", [
+        "∀i₆₂₀₄ ∈ iota n₆₀₆₈ .",
+        "    | (conds₆₀₇₀)[i₆₂₀₄] => Σj₆₂₀₀∈[1, ..., i₆₂₀₄] (⟦(conds₆₀₇₀)[-1 + j₆₂₀₀]⟧)",
+        "    | ¬((conds₆₀₇₀)[i₆₂₀₄]) => -1 + Σj₆₂₀₀∈[1, ..., n₆₀₆₈] (⟦(conds₆₀₇₀)[-1 + j₆₂₀₀]⟧) + Σj₆₂₀₂∈[0, ..., i₆₂₀₄] (⟦¬((conds₆₀₇₀)[j₆₂₀₂])⟧)"
+       ])
+     ])
   ]
-
 -- Remove leading and trailing whitespace.
 trim :: String -> String
 trim = f . f
@@ -58,15 +77,19 @@ runAllTests = do
   mapM_ runTest tests
 
 -- | Run test on a specific file.
-runTest :: (FilePath, [String]) -> IO ()
+runTest :: (FilePath, [Test]) -> IO ()
 runTest (file, expected) = do
   putStrLn $ "Running test on file: " ++ file
   (_warnings, imports, src) <- readProgramOrDie file
   let res = M.mapKeys baseString $ mkViewProg src imports
-  let actual = res M.! "inds"
-  if map strip expected == map strip (lines (prettyString actual))
+  let passed = all (checkTest res) expected
+  if passed
   then putStrLn $ "Test passed: " ++ file
   else error $ "Test failed: " ++ file
+  where
+    checkTest res (name, expected_indxfn) =
+      let actual = res M.! name
+      in  map strip expected_indxfn == map strip (lines (prettyString actual))
 
 -- | Run @futhark refinement@.
 main :: String -> [String] -> IO ()
