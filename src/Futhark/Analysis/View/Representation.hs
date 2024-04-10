@@ -59,7 +59,6 @@ import Debug.Trace (traceM)
 
 data Exp =
     Var VName
-  | Array [Exp]
   | Sum
       Exp         -- index
       Exp         -- lower bound
@@ -181,7 +180,6 @@ instance ASTMappable (Exp, Exp) where
 instance ASTMappable Exp where
   astMap _ Recurrence = pure Recurrence
   astMap m (Var x) = mapOnExp m $ Var x
-  astMap m (Array ts) = Array <$> traverse (mapOnExp m) ts
   astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
   astMap m (Sum i lb ub e) = Sum <$> mapOnExp m i <*> mapOnExp m lb <*> mapOnExp m ub <*> mapOnExp m e
   astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> mapOnExp m i
@@ -258,7 +256,6 @@ prettyName (VName vn i) = pretty vn <> pretty (mapMaybe subscript (show i))
 instance Pretty Exp where
   pretty Recurrence = "%₍₋₁₎"
   pretty (Var x) = prettyName x
-  pretty (Array ts) = pretty ts
   pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)
   pretty (Sum i lb ub e) =
     "Σ"

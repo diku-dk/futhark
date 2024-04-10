@@ -173,18 +173,21 @@ forward e@(E.AppExp (E.Index xs slice _) _)
     idxCombineIt Empty _ = Empty
     idxCombineIt a b = combineIt a b
 -- Nodes.
-forward (E.ArrayLit es _ _) = do
-  es' <- mapM forward es
-  let arrs = foldr (combineCases f) (toCases $ Array []) (getCases es')
-  let it = foldl1 combineIt (getIters es')
-  normalise $ View it arrs
-  where
-    getCases [] = []
-    getCases (View _ body : xs) = body : getCases xs
-    getIters [] = []
-    getIters (View it _ : xs) = it : getIters xs
-    f y (Array acc) = Array (y : acc)
-    f _ _ = error "impossible"
+forward (E.ArrayLit _es _ _) =
+  -- TODO support arrays via multi-dim index functions.
+  error "forward on array literal"
+  -- do
+  -- es' <- mapM forward es
+  -- let arrs = foldr (combineCases f) (toCases $ Array []) (getCases es')
+  -- let it = foldl1 combineIt (getIters es')
+  -- normalise $ View it arrs
+  -- where
+  --   getCases [] = []
+  --   getCases (View _ body : xs) = body : getCases xs
+  --   getIters [] = []
+  --   getIters (View it _ : xs) = it : getIters xs
+  --   f y (Array acc) = Array (y : acc)
+  --   f _ _ = error "impossible"
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) =
   substituteNameE vn x y >>= forward >>= normalise
 forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
