@@ -188,8 +188,13 @@ onKernel kernel = do
   let r = KernelR kernel M.empty
   ((), (), w) <- runRWST genKernel r ()
   name <- finishKernel r w
+  let numBlocks = ImpGPU.kernelNumBlocks kernel
+  let blockDim = ImpGPU.kernelBlockSize kernel
+  let scalarArgs = [ValueKArg (LeafExp n t) t | ImpGPU.ScalarUse n t <- ImpGPU.kernelUses kernel]
+  let memArgs = [MemKArg n | ImpGPU.MemoryUse n <- ImpGPU.kernelUses kernel]
+  let args = scalarArgs ++ memArgs
   -- TODO: return something sensible.
-  pure $ LaunchKernel SafetyNone name 0 [] [] []
+  pure $ LaunchKernel SafetyNone name 0 args numBlocks blockDim
 
 onHostOp :: ImpGPU.HostOp -> WebGPUM HostOp
 onHostOp (ImpGPU.CallKernel k) = onKernel k
