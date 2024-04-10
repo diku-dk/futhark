@@ -3,6 +3,7 @@
 -- Task: Change representation to more restricted one
 --   where Exp is a leaf/term in an SoP and cases are
 --   of type (Exp, SoP Exp). Possibly rename Exp lol.
+--   Use SoP.Rel for relations?
 -- Task: mkFlagArray
 --   [ ] Extend representation to allow Union iterator
 --   [ ] Support necessary scatter rule
