@@ -56,8 +56,40 @@ tests =
         "    | (conds₆₀₇₀)[i₆₂₀₄] => Σj₆₂₀₀∈[1, ..., i₆₂₀₄] (⟦(conds₆₀₇₀)[-1 + j₆₂₀₀]⟧)",
         "    | ¬((conds₆₀₇₀)[i₆₂₀₄]) => -1 + Σj₆₂₀₀∈[1, ..., n₆₀₆₈] (⟦(conds₆₀₇₀)[-1 + j₆₂₀₀]⟧) + Σj₆₂₀₂∈[0, ..., i₆₂₀₄] (⟦¬((conds₆₀₇₀)[j₆₂₀₂])⟧)"
        ])
+     ]),
+    ("tests/refinement/refine_iterator1.fut",
+     [ ("zs", [
+        "∀i₆₂₁₉ ∈ iota n₆₀₆₈ .",
+        "    | i₆₂₁₉ == 0 => (xs₆₀₆₉)[0]",
+        "    | ¬(i₆₂₁₉ == 0) => 1337"
+       ])
+     ]),
+    ("tests/refinement/refine_iterator2.fut",
+     [ ("zs", [
+        "∀i₆₂₂₃ ∈ iota n₆₁₀₆ .",
+        "    | i₆₂₂₃ <= n₆₁₀₆ => Σj₆₂₂₁∈[0, ..., i₆₂₂₃] ((xs₆₁₀₇)[j₆₂₂₁])",
+        "    | ¬(i₆₂₂₃ <= n₆₁₀₆) => i₆₂₂₃"
+       ])
+     ]),
+    ("tests/refinement/refine_iterator3.fut",
+     [ ("zs", [
+        "∀i₆₂₂₇ ∈ iota n₆₁₄₂ .",
+        "    | i₆₂₂₇ < 0 => Σj₆₂₂₅∈[0, ..., i₆₂₂₇] ((xs₆₁₄₃)[j₆₂₂₅])",
+        "    | ¬(i₆₂₂₇ < 0) => i₆₂₂₇"
+       ])
+     ]),
+    ("tests/refinement/refine_iterator4.fut",
+     [ ("zs", [
+        "∀i₆₂₃₁ ∈ iota n₆₁₇₉ .",
+        "    | i₆₂₃₁ == 3 => Σj₆₂₂₉∈[0, ..., 3] ((xs₆₁₈₀)[j₆₂₂₉])",
+        "    | ¬(i₆₂₃₁ == 3) => i₆₂₃₁"
+       ])
      ])
   ]
+
+
+
+
 -- Remove leading and trailing whitespace.
 trim :: String -> String
 trim = f . f
