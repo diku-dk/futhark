@@ -36,16 +36,20 @@ import Debug.Trace (traceM)
 
 data Exp =
     Var VName
+  -- | SumSlice
+  --     VName       -- array
+  --     (SoP Exp)   -- lower bound
+  --     (SoP Exp)   -- upper bound
   | Sum
-      Exp         -- index
-      Exp         -- lower bound
-      Exp         -- upper bound
+      VName       -- index
+      (SoP Exp)   -- lower bound
+      (SoP Exp)   -- upper bound
       Exp         -- indexed expression
-  | Idx
+  | Idx -- XXX VName (SoP Exp)
       Exp         -- array
       Exp         -- index
-  | SoP (SoP Exp)
-  | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit)
+  | SoP (SoP Exp) -- XXX Remove!
+  | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit) -- XXX (SoP Exp)
   | -- Predicate expressions follow here for simplicity.
     -- I'm assuming it's safe because the source program was typechecked.
     -- TODO CNF
@@ -136,8 +140,10 @@ insertView :: VName -> View -> ViewM ()
 insertView x v =
   modify $ \env -> env {views = M.insert x v $ views env}
 
-newtype ASTMapper m = ASTMapper
-  { mapOnExp :: Exp -> m Exp }
+data ASTMapper m = ASTMapper
+  { mapOnExp :: Exp -> m Exp,
+    mapOnVName :: VName -> m VName
+  }
 
 class ASTMappable a where
   astMap :: (Monad m) => ASTMapper m -> a -> m a
@@ -153,10 +159,25 @@ instance ASTMappable (Cases Exp) where
 instance ASTMappable (Exp, Exp) where
   astMap m (p, e) = (,) <$> mapOnExp m p <*> mapOnExp m e
 
+-- TODO test and think about this...
+instance ASTMappable (SoP Exp) where
+  astMap m sop = do
+    foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
+    where
+      g (ts, n) = do
+        ts' <- traverse (mapOnExp m) ts
+        pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map expToSoP ts')
+
 instance ASTMappable Exp where
   astMap _ Recurrence = pure Recurrence
-  astMap m (Var x) = mapOnExp m $ Var x
-  astMap m (Sum i lb ub e) = Sum <$> mapOnExp m i <*> mapOnExp m lb <*> mapOnExp m ub <*> mapOnExp m e
+  -- astMap m (Var x) = Var <$> mapOnVName m x
+  astMap m (Var x) = do
+    vn <- mapOnVName m x
+    mapOnExp m $ Var vn
+  -- astMap m (SumSlice vn lb ub) =
+  --   SumSlice <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
+  astMap m (Sum i lb ub e) =
+    Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> mapOnExp m e
   astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> mapOnExp m i
   astMap m (SoP sop) = do
     sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
@@ -191,7 +212,8 @@ flatten = idMap m
             \e ->
               case e of
                 Var x -> pure $ Var x
-                _ -> astMap m e
+                _ -> astMap m e,
+          mapOnVName = pure
         }
 
 instance ToSoP Exp E.Exp where
@@ -232,9 +254,13 @@ instance Pretty Exp where
   pretty Recurrence = "%₍₋₁₎"
   pretty (Var x) = prettyName x
   pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)
+  -- pretty (SumSlice vn lb ub) =
+  --   "Σ"
+  --     <> parens (prettyName vn)
+  --     <> brackets (pretty lb <+> ":" <+> pretty ub)
   pretty (Sum i lb ub e) =
     "Σ"
-      <> pretty i
+      <> prettyName i
       <> "∈"
       <> brackets (commasep [pretty lb, "...", pretty ub])
       <+> parens (pretty e)
@@ -285,7 +311,9 @@ substituteNames substitutions x = do
   where
     substituter subst =
       ASTMapper
-        { mapOnExp = onExp subst }
+        { mapOnExp = onExp subst,
+          mapOnVName = pure
+        }
     onExp subst e@(Var x') =
       case M.lookup x' subst of
         Just x'' -> pure x''
@@ -301,8 +329,12 @@ substituteNames' substitutions x = do
   runIdentity $ astMap (substituter substitutions) x
   where
     substituter subst =
+      -- ASTMapper
+      --   { mapOnExp = onExp subst }
       ASTMapper
-        { mapOnExp = onExp subst }
+        { mapOnExp = onExp subst,
+          mapOnVName = pure
+        }
     onExp subst e@(Var x') =
       case M.lookup x' subst of
         Just x'' -> pure x''

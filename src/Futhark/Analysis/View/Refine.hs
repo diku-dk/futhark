@@ -14,15 +14,15 @@ import Futhark.Util.Pretty
 import Debug.Trace (traceM)
 
 
-mkRange :: Exp -> Exp -> SoP.Range Exp
-mkRange lb ub = SoP.Range (S.singleton . expToSoP $ lb) 1 (S.singleton . expToSoP $ ub)
+mkRange :: SoP.SoP Exp -> SoP.SoP Exp -> SoP.Range Exp
+mkRange lb ub = SoP.Range (S.singleton lb) 1 (S.singleton ub)
 
-int :: Int -> Exp
-int n = SoP (SoP.int2SoP (toInteger n))
+int :: Int -> SoP.SoP Exp
+int n = SoP.int2SoP (toInteger n)
 
 addIterator :: Iterator -> ViewM ()
 addIterator (Forall i (Iota (Var n))) = do
-  addRange (Var i) (mkRange (int 0) (Var n))
+  addRange (Var i) (mkRange (int 0) (expToSoP $ Var n))
   addRange (Var n) (mkRange (int 1) (int maxBound))
 addIterator _ = pure ()
 
@@ -65,7 +65,9 @@ refineView (View it (Cases cases)) = do
   where
     m =
       ASTMapper
-        { mapOnExp = refineExp }
+        { mapOnExp = refineExp,
+          mapOnVName = pure
+        }
 
     refineCase :: (Exp, Exp) -> ViewM Exp
     refineCase (p, v)
@@ -105,16 +107,29 @@ refineView (View it (Cases cases)) = do
       b <- expToSoP x $<$ expToSoP y
       pure $ if b then Bool True else e
     refineExp (Sum j lb ub e) = do
-      start <- refineExp lb
-      end <- refineExp ub
+      -- XXX test this after changing Sum.
+      start <- astMap m lb
+      end <- astMap m ub
       case (start, end) of
-        (SoP a, SoP b) | SoP.padWithZero a == SoP.padWithZero b -> do
+        (a, b) | SoP.padWithZero a == SoP.padWithZero b -> do
             -- If the sum has only one term (one iteration), eliminate it.
-            addEquiv j b -- j is unique to the sum.
+            addEquiv (Var j) b -- j is unique to the sum.
             refineExp e
         _ -> do
-          addRange j (mkRange start end)
+          addRange (Var j) (mkRange start end)
           Sum j start end <$> refineExp e
+    -- refineExp (SumSlice vn lb ub) = do
+    --   -- XXX test this after changing Sum.
+    --   start <- astMap m lb
+    --   end <- astMap m ub
+    --   case (start, end) of
+    --     (a, b) | SoP.padWithZero a == SoP.padWithZero b -> do
+    --         -- If the slice is just a single element, eliminate the sum over it.
+    --         pure $ Idx (Var vn) (SoP a)
+    --     _ -> do
+    --       -- addRange j (mkRange start end)
+    --       -- Sum j start end <$> refineExp e
+    --       pure $ SumSlice vn start end
     refineExp v = astMap m v
 
 refineCasePredicate :: Exp -> ViewM Exp
