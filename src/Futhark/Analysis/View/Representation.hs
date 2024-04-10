@@ -1,42 +1,17 @@
--- XXX use case predicates for simplifying ranges in case values
--- e.g. n = 0 => sum (0, n-1) can be simplified
--- XXX add negation of disjunction of previous cases
--- XXX Next: Make it robust: play with part2indices; rewrite it in other ways such as
---       [x] fflgs using negation on conds
---       [x] introduce let bindings inside maps
---       [x] Make substition of view into conditions of other view
---           work. See tests/refinement/nikolaj/view_cond.fut and hoistCases'.
---       [x] part2indices_scan_exc; exclusive scan is not
---           recognised due to early substitution of tflags_rot.
---       [x] part2indices_scan_exc; make Sum merge
---           Just do a simple quadratic complexity rule that rewrites
---              x[i] + sum_{j=i+1}^n x[j]  to  sum_{j=i}^n x[j]
---           and
---              sum_{j=k}^i x[j] + sum_{j=i+1}^n x[j]  to  sum_{j=k}^n x[j].
---       [ ] use parts from partition2L as inspiration fro changes, like:
---           let begs   = scan (+) 0 shp --- prepend 0 here; prepend 0 to shp
---       - etc
--- Next: mkFlagArray
+-- Task: Change representation to more restricted one
+--   where Exp is a leaf/term in an SoP and cases are
+--   of type (Exp, SoP Exp). Possibly rename Exp lol.
+-- Task: mkFlagArray
 --   [ ] Extend representation to allow Union iterator
 --   [ ] Support necessary scatter rule
--- Next: partition2L
---       - empty segments may be problematic in lstL;
---         maybe add outer condition to index funciton representation?
--- Next: prove that partition2indices result is actually a permutation of 0...n-1
+-- Task: partition2L
+--   Empty segments may be problematic in lstL; maybe
+--   add outer condition to index funciton representation?
+-- Task: prove that partition2indices index function
+--   is a permutation of 0...n-1.
 --
--- XXX use case perdicates for simplifying ranges in case values
---     TODO change Iota to SoP.Range? Then Empty just becomes mempty.
--- XXX make tests/refinement/iota0 reduce to just 0.
--- XXX Rebase this on top of master (don't need Refinement type machinery rn).
--- XXX Check that iterators/domains are compatible.
--- XXX Make iterators over same domains unify.
--- XXX handle let bindings inside expressions
--- [1, let x = 2 in x]
--- XXX handle subexpressions that ought to be views
--- map id [[1, 2], map (+1) [1,2]]
--- A simple first implementation could simply create a name
--- for the map subexp, create a view for iti and then reference
--- that here. Later on it would get substituted.
+-- Task: TODO change Iota to SoP.Range? Then Empty just becomes mempty.
+-- Task: Rebase this on top of master (don't need Refinement type machinery rn).
 
 module Futhark.Analysis.View.Representation where
 
