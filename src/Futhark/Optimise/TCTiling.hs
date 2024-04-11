@@ -7,7 +7,6 @@ import Control.Monad
 import Data.Char
 import Data.List (elemIndex, findIndices)
 import Data.Map.Strict qualified as M
-import Data.Maybe
 import Futhark.IR.GPU
 import Futhark.Optimise.BlkRegTiling (matchCodeStreamCode, processIndirections)
 import Futhark.Optimise.TileLoops.Shared
@@ -46,12 +45,8 @@ reductionLoopBody tc_env qq0 arrs_in = do
 
   redomap_inputs_shr <- forM2 shr_arrs arr_metas $ copyGlb2Shr (Var qq)
 
-  reg_tiles_out <- forLoop_ tq reg_tiles_in $ \q reg_tiles_merge -> do
-    letExp "reg_tiles"
-      =<< eIf
-        (toExp $ le64 qq + le64 q .<. pe64 len_q)
-        (accumulateRegTile q reg_tiles_merge redomap_inputs_shr)
-        (resultBodyM [Var reg_tiles_merge])
+  reg_tiles_out <- forLoop_ tq reg_tiles_in $
+    accumulateRegTile redomap_inputs_shr
 
   pure $ reg_tiles_out : redomap_inputs_shr
   where
@@ -62,13 +57,10 @@ reductionLoopBody tc_env qq0 arrs_in = do
       t <- stripArray (shapeRank shmem_shape) <$> lookupType shr_arr
       acc_p <- newParam "acc_p" $ Acc (paramName cert_p) shmem_shape [t] NoUniqueness
 
-      -- The copy is essentially an LMAD copy. The strategy is to flatten the
-      -- tblock and then unflatten it to fit the dimensions of the array in
-      -- shared memory, using a virtualization loop in case the tile is larger
-      -- than the tblock, and a boundary guard for the converse. This is easily
-      -- achieved using SegVirt.
-      -- TODO: need to (validate) test how this interacts with shmem_shape now
-      -- that there is padding.
+      -- The strategy is to flatten the tblock and then unflatten it to fit the
+      -- dimensions of the array in shared memory, using a virtualization loop
+      -- in case the tile is larger than the tblock, and a boundary guard for
+      -- the converse. This is easily achieved using SegVirt.
       lam <- mkLambda [cert_p, acc_p] $ do
         fmap varsRes $
           segMapND "foo" (SegThreadInBlock SegVirt) ResultNoSimplify tile_dims $
@@ -125,9 +117,9 @@ reductionLoopBody tc_env qq0 arrs_in = do
         base_arr = baseArr arr_meta
         base_arr_dims = baseArrDims arr_meta
 
-    accumulateRegTile :: VName -> VName -> [VName] -> Builder GPU (Body GPU)
-    accumulateRegTile q reg_tiles_in shr_arrs = do
-      reg_tiles_out <- segMapND_ "reg_tiles_out" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
+    accumulateRegTile :: [VName] -> VName -> VName -> Builder GPU VName
+    accumulateRegTile shr_arrs q reg_tiles_in =
+      segMapND_ "reg_tiles_out" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
         reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
         reg_tile_out <- forLoopNest_ tiles_R reg_tile_in $ \loop_inds reg_tile_merge -> do
 
@@ -159,14 +151,11 @@ reductionLoopBody tc_env qq0 arrs_in = do
 
         pure [varRes reg_tile_out]
 
-      resultBodyM [Var reg_tiles_out]
-
     arr_metas = arrsInfo tc_env
     kernel_params = kernelParams tc_env
     tq = tileSeq kernel_params
     tiles_T = tilesT kernel_params
     tiles_R = tilesR kernel_params
-    len_q = commonDim kernel_params
 
 doTCTiling :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 doTCTiling _env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
