@@ -1690,7 +1690,7 @@ isIntrinsicFunction qname args loc = do
       acc' <- head <$> internaliseExpToVars "acc" acc
       i' <- internaliseExp1 "acc_i" i
       vs <- internaliseExp "acc_v" v
-      fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
+      fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc Safe acc' [i'] vs
     handleAccs _ _ = Nothing
 
     handleAD [f, x, v] fname
