@@ -1,10 +1,11 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
@@ -395,7 +396,7 @@ seqStm'
           phys <- newVName "phys_tid"
           binops' <- renameSegBinOp binops
 
-          let lvl' = SegThreadInBlock SegNoVirt 
+          let lvl' = SegThreadInBlock SegNoVirt
           let space' = SegSpace phys [(tid', grpSize env'')]
           results <- mapM (buildKernelResult env'') scanReds
           let ts' = L.take numResConsumed ts
@@ -436,7 +437,7 @@ seqStm'
           iot <- buildSeqFactorIota env
           let env'' = updateEnvTid env tid'
           lambSOAC <- buildSOACLambda env'' usedArrays iot kbody' ts
-          let scans = L.map (\(l, n) -> Scan l n) $ L.zip scanLambdas nes
+          let scans = L.zipWith Scan scanLambdas nes
           let scanSoac = scanomapSOAC scans lambSOAC
           es <- mapM (getChunk env'') usedArrays
           res <-
@@ -452,7 +453,7 @@ seqStm'
                   L.take numResConsumed res
           fused <- mapM (buildKernelResult env'') fusedReds
 
-          let lvl' = SegThreadInBlock SegNoVirt 
+          let lvl' = SegThreadInBlock SegNoVirt
           let space' = SegSpace phys [(tid', grpSize env)]
           let types' = scremaType (seqFactor env) scanSoac
           pure (usedRes ++ fused, lvl', space', types')
@@ -463,7 +464,7 @@ seqStm'
               L.map
                 (\s -> setOuterDims s 2 (Shape [grpsizeOld env]))
                 shapes
-        let tps' = L.map (\(t, s) -> setArrayShape t s) (L.zip tps shapes')
+        let tps' = L.zipWith setArrayShape tps shapes'
         -- let tps' = mapM setArrayShape tps (Shape [grpsizeOld env])
         pat' <- updateSegOpPatTypes 0 pat tps'
         lift $
@@ -520,12 +521,7 @@ seqStm' _ stm = lift $ do addStm stm
 updateSegOpPatTypes :: Int -> Pat Type -> [Type] -> SeqBuilder (Pat Type)
 updateSegOpPatTypes keep pat tps = do
   let (patKeep, patUpdate) = L.splitAt keep $ patElems pat
-  pure $
-    Pat $
-      patKeep
-        ++ L.map
-          (\(p, t) -> setPatElemDec p t)
-          (L.zip patUpdate (L.drop keep tps))
+  pure $ Pat $ patKeep ++ L.zipWith setPatElemDec patUpdate (L.drop keep tps)
 
 seqScatter :: Env -> Stm GPU -> SeqBuilder ()
 seqScatter
@@ -562,10 +558,9 @@ seqScatter
                 ( \(slice, vs) -> do
                     let is =
                           L.map
-                            ( \dim ->
-                                case dim of
-                                  DimFix d -> d
-                                  _ -> error "please no"
+                            ( \case
+                                DimFix d -> d
+                                _ -> error "please no"
                             )
                             (unSlice slice)
                     vs : is
@@ -573,10 +568,9 @@ seqScatter
                 $ concat upds
         let upd'' =
               L.filter
-                ( \u ->
-                    case u of
-                      Var _ -> True
-                      _ -> False
+                ( \case
+                    Var _ -> True
+                    _ -> False
                 )
                 upds'
         let updNames = S.fromList $ L.map (\(Var n) -> n) upd''
@@ -697,10 +691,9 @@ seqScatter
         let vs' = M.findWithDefault vs vs mapping
         let dims' =
               L.map
-                ( \d ->
-                    case d of
-                      DimFix d' -> DimFix $ M.findWithDefault d' d' mapping
-                      d' -> d' -- should never happen
+                ( \case
+                    DimFix d' -> DimFix $ M.findWithDefault d' d' mapping
+                    d' -> d' -- should never happen
                 )
                 dims
         (Slice dims', vs')
@@ -904,7 +897,7 @@ mkIntmRed env kbody retTs binops = do
     lambSOAC <- buildSOACLambda env' usedArrs iot kbody' retTs
     -- TODO analyze if any fused maps then produce reduce?
     -- we build the reduce as a scan initially
-    let scans = L.map (\(l, n) -> Scan l n) $ L.zip lambda ne
+    let scans = L.zipWith Scan lambda ne
     let screma = scanomapSOAC scans lambSOAC
     chunks <- mapM (getChunk env') usedArrs
 
@@ -943,7 +936,7 @@ mkIntmRed env kbody retTs binops = do
             letSubExp "red_res" $ BasicOp $ Index (getVName r) (Slice newDims)
         )
     let res' = redRes ++ mapRes
-    let lvl' = SegThreadInBlock SegNoVirt 
+    let lvl' = SegThreadInBlock SegNoVirt
     let space' = SegSpace phys [(tid, grpSize env)]
     let kres = L.map (Returns ResultMaySimplify mempty) res'
     types' <- mapM subExpType res'
@@ -1125,7 +1118,7 @@ mkTiles env = do
       let slice = Slice [DimSlice start (seqFactor env) (intConst Int64 1)]
       chunk <- letSubExp "chunk" $ BasicOp $ Index tileStaging slice
 
-      let lvl = SegThreadInBlock SegNoVirt 
+      let lvl = SegThreadInBlock SegNoVirt
       let space = SegSpace phys [(tid, grpSize env)]
       let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
       let res = [Returns ResultPrivate mempty chunk]
