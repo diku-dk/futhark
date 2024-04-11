@@ -120,7 +120,7 @@ def initialise_opencl_object(
     interactive=False,
     platform_pref=None,
     device_pref=None,
-    default_tblock_size=None,
+    default_group_size=None,
     default_num_groups=None,
     default_tile_size=None,
     default_reg_tile_size=None,
@@ -146,24 +146,31 @@ def initialise_opencl_object(
 
     check_types(self, required_types)
 
-    max_tblock_size = int(self.device.max_work_tblock_size)
-    max_tile_size = int(np.sqrt(self.device.max_work_tblock_size))
+    max_group_size = int(self.device.max_work_group_size)
+    max_tile_size = int(np.sqrt(self.device.max_work_group_size))
 
-    self.max_tblock_size = max_tblock_size
+    self.max_thread_block_size = max_group_size
     self.max_tile_size = max_tile_size
     self.max_threshold = 0
-    self.max_num_groups = 0
+    self.max_grid_size = 0
 
-    self.max_local_memory = int(self.device.local_mem_size)
+    self.max_shared_memory = int(self.device.local_mem_size)
 
     # Futhark reserves 4 bytes of local memory for its own purposes.
-    self.max_local_memory -= 4
+    self.max_shared_memory -= 4
 
     # See comment in rts/c/opencl.h.
     if self.platform.name.find("NVIDIA CUDA") >= 0:
-        self.max_local_memory -= 12
+        self.max_shared_memory -= 12
     elif self.platform.name.find("AMD") >= 0:
-        self.max_local_memory -= 16
+        self.max_shared_memory -= 16
+
+    self.max_registers = int(2**16)  # Not sure how to query for this.
+
+    self.max_cache = self.device.get_info(cl.device_info.GLOBAL_MEM_CACHE_SIZE)
+
+    if self.max_cache == 0:
+        self.max_cache = 1024 * 1024
 
     self.free_list = {}
 
@@ -176,9 +183,9 @@ def initialise_opencl_object(
     )
     self.failure_is_an_option = np.int32(0)
 
-    if "default_tblock_size" in sizes:
-        default_tblock_size = sizes["default_tblock_size"]
-        del sizes["default_tblock_size"]
+    if "default_group_size" in sizes:
+        default_group_size = sizes["default_group_size"]
+        del sizes["default_group_size"]
 
     if "default_num_groups" in sizes:
         default_num_groups = sizes["default_num_groups"]
@@ -196,13 +203,13 @@ def initialise_opencl_object(
         default_threshold = sizes["default_threshold"]
         del sizes["default_threshold"]
 
-    default_tblock_size_set = default_tblock_size != None
+    default_group_size_set = default_group_size != None
     default_tile_size_set = default_tile_size != None
     default_sizes = apply_size_heuristics(
         self,
         size_heuristics,
         {
-            "tblock_size": default_tblock_size,
+            "group_size": default_group_size,
             "tile_size": default_tile_size,
             "reg_tile_size": default_reg_tile_size,
             "num_groups": default_num_groups,
@@ -210,21 +217,21 @@ def initialise_opencl_object(
             "threshold": default_threshold,
         },
     )
-    default_tblock_size = default_sizes["tblock_size"]
+    default_group_size = default_sizes["group_size"]
     default_num_groups = default_sizes["num_groups"]
     default_threshold = default_sizes["threshold"]
     default_tile_size = default_sizes["tile_size"]
     default_reg_tile_size = default_sizes["reg_tile_size"]
     lockstep_width = default_sizes["lockstep_width"]
 
-    if default_tblock_size > max_tblock_size:
-        if default_tblock_size_set:
+    if default_group_size > max_group_size:
+        if default_group_size_set:
             sys.stderr.write(
                 "Note: Device limits group size to {} (down from {})\n".format(
-                    max_tile_size, default_tblock_size
+                    max_tile_size, default_group_size
                 )
             )
-        default_tblock_size = max_tblock_size
+        default_group_size = max_group_size
 
     if default_tile_size > max_tile_size:
         if default_tile_size_set:
@@ -247,11 +254,11 @@ def initialise_opencl_object(
 
     self.sizes = {}
     for k, v in all_sizes.items():
-        if v["class"] == "tblock_size":
-            max_value = max_tblock_size
-            default_value = default_tblock_size
-        elif v["class"] == "num_groups":
-            max_value = max_tblock_size  # Intentional!
+        if v["class"] == "thread_block_size":
+            max_value = max_group_size
+            default_value = default_group_size
+        elif v["class"] == "grid_size":
+            max_value = max_group_size  # Intentional!
             default_value = default_num_groups
         elif v["class"] == "tile_size":
             max_value = max_tile_size
@@ -283,7 +290,9 @@ def initialise_opencl_object(
     if len(program_src) >= 0:
         build_options += ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
 
-        build_options += ["-D{}={}".format("max_tblock_size", max_tblock_size)]
+        build_options += [
+            "-D{}={}".format("max_thread_block_size", max_group_size)
+        ]
 
         build_options += [
             "-D{}={}".format(

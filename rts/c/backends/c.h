@@ -43,6 +43,7 @@ struct futhark_context {
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
   struct program* program;
+  bool program_initialised;
 };
 
 int backend_context_setup(struct futhark_context* ctx) {

@@ -1316,6 +1316,10 @@ primFuns =
       f32 "erfc32" erfcf,
       f64 "erfc64" erfc,
       --
+      f16_2 "copysign16" $ \x y -> convFloat (copysign (convFloat x) (convFloat y)),
+      f32_2 "copysign32" copysignf,
+      f64_2 "copysign64" copysign,
+      --
       i8 "clz8" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
       i16 "clz16" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
       i32 "clz32" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,

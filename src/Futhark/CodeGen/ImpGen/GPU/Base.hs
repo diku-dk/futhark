@@ -21,7 +21,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     defKernelAttrs,
     lvlKernelAttrs,
     allocLocal,
-    kernelAlloc,
     compileThreadResult,
     virtualiseBlocks,
     kernelLoop,
@@ -115,30 +114,32 @@ keyWithEntryPoint fname key =
 
 allocLocal :: AllocCompiler GPUMem r Imp.KernelOp
 allocLocal mem size =
-  sOp $ Imp.LocalAlloc mem size
+  sOp $ Imp.SharedAlloc mem size
 
-kernelAlloc ::
+threadAlloc ::
   Pat LetDecMem ->
   SubExp ->
   Space ->
   InKernelGen ()
-kernelAlloc (Pat [_]) _ ScalarSpace {} =
+threadAlloc (Pat [_]) _ ScalarSpace {} =
   -- Handled by the declaration of the memory block, which is then
   -- translated to an actual scalar variable during C code generation.
   pure ()
-kernelAlloc (Pat [mem]) size (Space "shared") =
-  allocLocal (patElemName mem) $ Imp.bytes $ pe64 size
-kernelAlloc (Pat [mem]) _ _ =
-  compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel."
-kernelAlloc dest _ _ =
+threadAlloc (Pat [mem]) _ _ =
+  compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel thread."
+threadAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
 
-updateAcc :: VName -> [SubExp] -> [SubExp] -> InKernelGen ()
-updateAcc acc is vs = sComment "UpdateAcc" $ do
+updateAcc :: Safety -> VName -> [SubExp] -> [SubExp] -> InKernelGen ()
+updateAcc safety acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map pe64 is
   (c, space, arrs, dims, op) <- lookupAcc acc is'
-  sWhen (inBounds (Slice (map DimFix is')) dims) $
+  let boundsCheck =
+        case safety of
+          Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
+          _ -> id
+  boundsCheck $
     case op of
       Nothing ->
         forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
@@ -179,8 +180,8 @@ compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =
 compileThreadExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
-compileThreadExp _ (BasicOp (UpdateAcc acc is vs)) =
-  updateAcc acc is vs
+compileThreadExp _ (BasicOp (UpdateAcc safety acc is vs)) =
+  updateAcc safety acc is vs
 compileThreadExp dest e =
   defCompileExp dest e
 
@@ -663,7 +664,7 @@ blockReduceWithOffset offset w lam arrs = do
 
 compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
-  kernelAlloc pat size space
+  threadAlloc pat size space
 compileThreadOp pat _ =
   compilerBugS $ "compileThreadOp: cannot compile rhs of binding " ++ prettyString pat
 
@@ -978,7 +979,7 @@ kernelInitialisationSimple num_tblocks tblock_size = do
 
   let set_constants = do
         dPrim_ local_tid int32
-        dPrim_ inner_tblock_size int64
+        dPrim_ inner_tblock_size int32
         dPrim_ wave_size int32
         dPrim_ tblock_id int32
 
@@ -1000,7 +1001,7 @@ isActive limit = case actives of
     active i = (Imp.le64 i .<.)
 
 -- | Change every memory block to be in the global address space,
--- except those who are in the local memory space.  This only affects
+-- except those who are in the shared memory space.  This only affects
 -- generated code - we still need to make sure that the memory is
 -- actually present on the device (and declared as variables in the
 -- kernel).
@@ -1121,7 +1122,7 @@ virtualiseBlocks _ _ m = do
 data KernelAttrs = KernelAttrs
   { -- | Can this kernel execute correctly even if previous kernels failed?
     kAttrFailureTolerant :: Bool,
-    -- | Does whatever launch this kernel check for local memory capacity itself?
+    -- | Does whatever launch this kernel check for shared memory capacity itself?
     kAttrCheckSharedMemory :: Bool,
     -- | Number of blocks.
     kAttrNumBlocks :: Count NumBlocks SubExp,
@@ -1230,7 +1231,7 @@ sKernelOp attrs constants ops name m = do
       x <- isConstExp vtable $ untyped e
       pure $
         case x of
-          Just (LeafExp kc _) -> Right kc
+          Just kc -> Right kc
           _ -> Left $ untyped e
 
     constToUse (v, e) = Imp.ConstUse v e
@@ -1314,11 +1315,11 @@ replicateForType bt = do
 
 replicateIsFill :: VName -> SubExp -> CallKernelGen (Maybe (CallKernelGen ()))
 replicateIsFill arr v = do
-  ArrayEntry (MemLoc arr_mem arr_shape arr_ixfun) _ <- lookupArray arr
+  ArrayEntry (MemLoc arr_mem arr_shape arr_lmad) _ <- lookupArray arr
   v_t <- subExpType v
   case v_t of
     Prim v_t'
-      | LMAD.isDirect arr_ixfun -> pure $
+      | LMAD.isDirect arr_lmad -> pure $
           Just $ do
             fname <- replicateForType v_t'
             emit $
@@ -1417,8 +1418,8 @@ sIota ::
   IntType ->
   CallKernelGen ()
 sIota arr n x s et = do
-  ArrayEntry (MemLoc arr_mem _ arr_ixfun) _ <- lookupArray arr
-  if LMAD.isDirect arr_ixfun
+  ArrayEntry (MemLoc arr_mem _ arr_lmad) _ <- lookupArray arr
+  if LMAD.isDirect arr_lmad
     then do
       fname <- iotaForType et
       emit $

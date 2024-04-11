@@ -612,15 +612,8 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
     Dynamic _ -> pure (Project vn e0' tp loc, Dynamic $ toParam Observe tp')
     HoleSV _ hloc -> pure (Project vn e0' tp loc, HoleSV tp' hloc)
     _ -> error $ "Projection of an expression with static value " ++ show sv0
-defuncExp (AppExp (LetWith id1 id2 idxs e1 body loc) res) = do
-  e1' <- defuncExp' e1
-  idxs' <- mapM defuncDimIndex idxs
-  let id1_binding =
-        Binding Nothing $ Dynamic $ toParam Observe $ unInfo $ identType id1
-  (body', sv) <-
-    localEnv (M.singleton (identName id1) id1_binding) $
-      defuncExp body
-  pure (AppExp (LetWith id1 id2 idxs' e1' body' loc) res, sv)
+defuncExp (AppExp LetWith {} _) =
+  error "defuncExp: unexpected LetWith"
 defuncExp expr@(AppExp (Index e0 idxs loc) res) = do
   e0' <- defuncExp' e0
   idxs' <- mapM defuncDimIndex idxs
@@ -752,11 +745,7 @@ etaExpand e_t e = do
         M.fromList . zip (retDims ret) $
           map (ExpSubst . flip sizeFromName mempty . qualName) ext'
       ret' = applySubst (`M.lookup` extsubst) ret
-      e' =
-        mkApply
-          e
-          (zip3 (map (fst . snd) ps) (repeat Nothing) vars)
-          (AppRes (toStruct $ retType ret') ext')
+      e' = mkApply e (map (Nothing,) vars) $ AppRes (toStruct $ retType ret') ext'
   pure (params, e', ret)
   where
     getType (RetType _ (Scalar (Arrow _ p d t1 t2))) =
@@ -914,9 +903,9 @@ liftedName _ _ = "defunc"
 defuncApplyArg ::
   String ->
   (Exp, StaticVal) ->
-  (((Diet, Maybe VName), Exp), [ParamType]) ->
+  ((Maybe VName, Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
-defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext), arg), _) = do
+defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) ((argext, arg), _) = do
   (arg', arg_sv) <- defuncExp arg
   let env' = alwaysMatchPatSV pat arg_sv
       dims = mempty
@@ -962,23 +951,23 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext
 
   let f_t = toStruct $ typeOf f'
       arg_t = toStruct $ typeOf arg'
-      fname_t = foldFunType [toParam Observe f_t, toParam d arg_t] lifted_rettype
+      fname_t = foldFunType [toParam Observe f_t, toParam (diet (patternType pat)) arg_t] lifted_rettype
       fname' = Var (qualName fname) (Info fname_t) (srclocOf arg)
   callret <- unRetType lifted_rettype
 
   pure
-    ( mkApply fname' [(Observe, Nothing, f'), (Observe, argext, arg')] callret,
+    ( mkApply fname' [(Nothing, f'), (argext, arg')] callret,
       sv
     )
 -- If 'f' is a dynamic function, we just leave the application in
 -- place, but we update the types since it may be partially
 -- applied or return a higher-order value.
-defuncApplyArg _ (f', DynamicFun _ sv) (((d, argext), arg), argtypes) = do
+defuncApplyArg _ (f', DynamicFun _ sv) ((argext, arg), argtypes) = do
   (arg', _) <- defuncExp arg
   let (argtypes', rettype) = dynamicFunType sv argtypes
       restype = foldFunType argtypes' (RetType [] rettype)
       callret = AppRes restype []
-      apply_e = mkApply f' [(d, argext, arg')] callret
+      apply_e = mkApply f' [(argext, arg')] callret
   pure (apply_e, sv)
 --
 defuncApplyArg fname_s (_, sv) ((_, arg), _) =
@@ -995,7 +984,7 @@ updateReturn (AppRes ret1 ext1) (AppExp apply (Info (AppRes ret2 ext2))) =
   AppExp apply $ Info $ AppRes (combineTypeShapes ret1 ret2) (ext1 <> ext2)
 updateReturn _ e = e
 
-defuncApply :: Exp -> NE.NonEmpty ((Diet, Maybe VName), Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
+defuncApply :: Exp -> NE.NonEmpty (Maybe VName, Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
 defuncApply f args appres loc = do
   (f', f_sv) <- defuncApplyFunction f (length args)
   case f_sv of

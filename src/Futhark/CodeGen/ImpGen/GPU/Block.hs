@@ -45,7 +45,7 @@ flattenArray k flat arr = do
 
 sliceArray :: Imp.TExp Int64 -> TV Int64 -> VName -> ImpM rep r op VName
 sliceArray start size arr = do
-  MemLoc mem _ ixfun <- entryArrayLoc <$> lookupArray arr
+  MemLoc mem _ lmad <- entryArrayLoc <$> lookupArray arr
   arr_t <- lookupType arr
   let slice =
         fullSliceNum
@@ -56,7 +56,7 @@ sliceArray start size arr = do
     (elemType arr_t)
     (arrayShape arr_t `setOuterDim` Var (tvVar size))
     mem
-    $ LMAD.slice ixfun slice
+    $ LMAD.slice lmad slice
 
 -- | @applyLambda lam dests args@ emits code that:
 --
@@ -281,9 +281,9 @@ compileBlockExp (Pat [pe]) (BasicOp (Opaque _ se)) =
 compileBlockExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
-compileBlockExp _ (BasicOp (UpdateAcc acc is vs)) = do
+compileBlockExp _ (BasicOp (UpdateAcc safety acc is vs)) = do
   ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-  sWhen (ltid .==. 0) $ updateAcc acc is vs
+  sWhen (ltid .==. 0) $ updateAcc safety acc is vs
   sOp $ Imp.Barrier Imp.FenceLocal
 compileBlockExp (Pat [dest]) (BasicOp (Replicate ds se)) | ds /= mempty = do
   flat <- newVName "rep_flat"
@@ -336,9 +336,25 @@ compileBlockExp dest e = do
     doSync Match {} = True
     doSync _ = False
 
+blockAlloc ::
+  Pat LetDecMem ->
+  SubExp ->
+  Space ->
+  InKernelGen ()
+blockAlloc (Pat [_]) _ ScalarSpace {} =
+  -- Handled by the declaration of the memory block, which is then
+  -- translated to an actual scalar variable during C code generation.
+  pure ()
+blockAlloc (Pat [mem]) size (Space "shared") =
+  allocLocal (patElemName mem) $ Imp.bytes $ pe64 size
+blockAlloc (Pat [mem]) _ _ =
+  compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel block."
+blockAlloc dest _ _ =
+  error $ "Invalid target for in-kernel allocation: " ++ show dest
+
 compileBlockOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileBlockOp pat (Alloc size space) =
-  kernelAlloc pat size space
+  blockAlloc pat size space
 compileBlockOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   compileFlatId space
 
@@ -671,7 +687,7 @@ compileBlockResult space pe (Returns _ _ what) = do
       localOps threadOperations $
         sWhen (kernelLocalThreadId constants .==. 0) $
           copyDWIMFix (patElemName pe) gids what []
-    else -- If the result of the block is an array in local memory, we
+    else -- If the result of the block is an array in shared memory, we
     -- store it by collective copying among all the threads of the
     -- block.  TODO: also do this if the array is in global memory
     -- (but this is a bit more tricky, synchronisation-wise).

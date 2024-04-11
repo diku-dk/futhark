@@ -119,7 +119,7 @@ cType :: Manifest -> TypeName -> C.Type
 cType manifest tname =
   case M.lookup tname $ manifestTypes manifest of
     Just (TypeArray ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
-    Just (TypeOpaque ctype _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
+    Just (TypeOpaque ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
     Nothing -> uncurry primAPIType $ scalarToPrim tname
 
 -- First component is forward declaration so we don't have to worry
@@ -156,7 +156,7 @@ typeBoilerplate _ (tname, TypeArray _ et rank ops) =
                 .aux = &$id:aux_name
               };|]
       )
-typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record) =
+typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record _sumops) =
   let type_name = typeStructName tname
       aux_name = type_name <> "_aux"
       (record_edecls, record_init) = recordDefs type_name record

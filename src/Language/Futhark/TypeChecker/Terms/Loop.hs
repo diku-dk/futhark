@@ -102,7 +102,7 @@ wellTypedLoopArg src sparams pat arg = do
 
 -- | An un-checked loop.
 type UncheckedLoop =
-  (UncheckedPat ParamType, UncheckedExp, LoopFormBase NoInfo Name, UncheckedExp)
+  (PatBase NoInfo VName ParamType, ExpBase NoInfo VName, LoopFormBase NoInfo VName, ExpBase NoInfo VName)
 
 -- | A loop that has been type-checked.
 type CheckedLoop =
@@ -111,7 +111,7 @@ type CheckedLoop =
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkLoop ::
-  (UncheckedExp -> TermTypeM Exp) ->
+  (ExpBase NoInfo VName -> TermTypeM Exp) ->
   UncheckedLoop ->
   SrcLoc ->
   TermTypeM (CheckedLoop, AppRes)

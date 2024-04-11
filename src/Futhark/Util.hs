@@ -22,6 +22,7 @@ module Futhark.Util
     maybeNth,
     maybeHead,
     unsnoc,
+    lookupWithIndex,
     splitFromEnd,
     splitAt3,
     focusNth,
@@ -161,7 +162,7 @@ dropLast n = reverse . drop n . reverse
 mapEither :: (a -> Either b c) -> [a] -> ([b], [c])
 mapEither f l = partitionEithers $ map f l
 
--- | A combination of 'partition' and 'mapMaybe'
+-- | A combination of 'Data.List.partition' and 'mapMaybe'
 partitionMaybe :: (a -> Maybe b) -> [a] -> ([b], [a])
 partitionMaybe f = helper ([], [])
   where
@@ -187,6 +188,11 @@ unsnoc :: [a] -> Maybe ([a], a)
 unsnoc [] = Nothing
 unsnoc [x] = Just ([], x)
 unsnoc (x : xs) = unsnoc xs >>= \(ys, y) -> Just (x : ys, y)
+
+-- | Lookup a value, returning also the index at which it appears.
+lookupWithIndex :: (Eq a) => a -> [(a, b)] -> Maybe (Int, b)
+lookupWithIndex needle haystack =
+  lookup needle $ zip (map fst haystack) (zip [0 ..] (map snd haystack))
 
 -- | Like 'splitAt', but from the end.
 splitFromEnd :: Int -> [a] -> ([a], [a])
@@ -476,13 +482,15 @@ fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'
 
+-- | Like 'concatMap', but monoidal and monadic.
 concatMapM :: (Monad m, Monoid b) => (a -> m b) -> [a] -> m b
 concatMapM f xs = mconcat <$> mapM f xs
 
--- | Topological sorting of an array with an adjancency function,
--- if there is a cycle, it cause an error
--- @a `dep` b@ means 'a -> b', and the returned array guarantee that for i < j,
--- @not ( (ret !! j) `dep` (ret !! i) )@.
+-- | Topological sorting of an array with an adjancency function, if
+-- there is a cycle, it causes an error. @dep a b@ means @a -> b@,
+-- and the returned array guarantee that for i < j:
+--
+-- @not ( dep (ret !! j) (ret !! i) )@.
 topologicalSort :: (a -> a -> Bool) -> [a] -> [a]
 topologicalSort dep nodes =
   fst $ execState (mapM_ (sorting . snd) nodes_idx) (mempty, mempty)

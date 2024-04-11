@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Perform a restricted form of loop tiling within SegMaps.  We only
--- tile primitive types, to avoid excessive local memory use.
+-- tile primitive types, to avoid excessive shared memory use.
 module Futhark.Optimise.TileLoops (tileLoops) where
 
 import Control.Monad

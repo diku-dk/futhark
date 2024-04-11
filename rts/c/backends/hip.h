@@ -89,6 +89,8 @@ struct futhark_context_config {
   int num_build_opts;
   char* *build_opts;
 
+  int unified_memory;
+
   char* preferred_device;
   int preferred_device_num;
 
@@ -110,6 +112,8 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->preferred_device_num = 0;
   cfg->preferred_device = strdup("");
   cfg->program = strconcat(gpu_program);
+
+  cfg->unified_memory = 0;
 
   cfg->default_block_size = 256;
   cfg->default_grid_size = 0; // Set properly later.
@@ -164,6 +168,10 @@ const char* futhark_context_config_get_program(struct futhark_context_config *cf
 void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
   free(cfg->program);
   cfg->program = strdup(s);
+}
+
+void futhark_context_config_set_unified_memory(struct futhark_context_config* cfg, int flag) {
+  cfg->unified_memory = flag;
 }
 
 void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
@@ -248,6 +256,7 @@ struct futhark_context {
   struct event_list event_list;
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
+  bool program_initialised;
   // Uniform fields above.
 
   void* global_failure;
@@ -676,6 +685,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->total_runtime = 0;
   ctx->peak_mem_usage_device = 0;
   ctx->cur_mem_usage_device = 0;
+  ctx->kernels = NULL;
 
   HIP_SUCCEED_FATAL(hipInit(0));
   if (hip_device_setup(ctx) != 0) {
@@ -683,6 +693,18 @@ int backend_context_setup(struct futhark_context* ctx) {
   }
 
   free_list_init(&ctx->gpu_free_list);
+
+  if (ctx->cfg->unified_memory == 2) {
+    ctx->cfg->unified_memory = device_query(ctx->dev, hipDeviceAttributeManagedMemory);
+  }
+
+  if (ctx->cfg->logging) {
+    if (ctx->cfg->unified_memory) {
+      fprintf(ctx->log, "Using managed memory\n");
+    } else {
+      fprintf(ctx->log, "Using unmanaged memory\n");
+    }
+  }
 
   ctx->max_shared_memory = device_query(ctx->dev, hipDeviceAttributeMaxSharedMemoryPerBlock);
   ctx->max_thread_block_size = device_query(ctx->dev, hipDeviceAttributeMaxThreadsPerBlock);
@@ -724,12 +746,15 @@ int backend_context_setup(struct futhark_context* ctx) {
 }
 
 void backend_context_teardown(struct futhark_context* ctx) {
-  free_builtin_kernels(ctx, ctx->kernels);
-  hipFree(ctx->global_failure);
-  hipFree(ctx->global_failure_args);
-  HIP_SUCCEED_FATAL(gpu_free_all(ctx));
-  HIP_SUCCEED_FATAL(hipStreamDestroy(ctx->stream));
-  HIP_SUCCEED_FATAL(hipModuleUnload(ctx->module));
+  if (ctx->kernels != NULL) {
+    free_builtin_kernels(ctx, ctx->kernels);
+    hipFree(ctx->global_failure);
+    hipFree(ctx->global_failure_args);
+    HIP_SUCCEED_FATAL(gpu_free_all(ctx));
+    HIP_SUCCEED_FATAL(hipStreamDestroy(ctx->stream));
+    HIP_SUCCEED_FATAL(hipModuleUnload(ctx->module));
+  }
+  free_list_destroy(&ctx->gpu_free_list);
 }
 
 // GPU ABSTRACTION LAYER
@@ -804,7 +829,7 @@ static int gpu_memcpy(struct futhark_context* ctx,
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
   }
   HIP_SUCCEED_OR_RETURN(hipMemcpyWithStream((unsigned char*)dst+dst_offset, (unsigned char*)src+src_offset,
-                                            nbytes, hipMemcpyDeviceToDevice ,ctx->stream));
+                                            nbytes, hipMemcpyDeviceToDevice, ctx->stream));
   if (event != NULL) {
     HIP_SUCCEED_FATAL(hipEventRecord(event->end, ctx->stream));
   }
@@ -902,7 +927,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
               msgprintf("Kernel %s with\n"
                         "  grid=(%d,%d,%d)\n"
                         "  block=(%d,%d,%d)\n"
-                        "  local memory=%d",
+                        "  shared memory=%d",
                         name,
                         grid[0], grid[1], grid[2],
                         block[0], block[1], block[2],
@@ -933,7 +958,14 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 }
 
 static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *mem_out) {
-  hipError_t res = hipMalloc(mem_out, size);
+  hipError_t res;
+
+  if (ctx->cfg->unified_memory) {
+    res = hipMallocManaged(mem_out, size, hipMemAttachGlobal);
+  } else {
+    res = hipMalloc(mem_out, size);
+  }
+
   if (res == hipErrorOutOfMemory) {
     return FUTHARK_OUT_OF_MEMORY;
   }

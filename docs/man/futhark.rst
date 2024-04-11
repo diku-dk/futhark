@@ -31,11 +31,11 @@ Compare two JSON files produced by the ``--json`` option of
 :ref:`futhark-bench(1)`.  The results show speedup of the latter file
 compared to the former.
 
-futhark check [-w] PROGRAM
---------------------------
+futhark check [-w] [-Werror] PROGRAM
+------------------------------------
 
-Check whether a Futhark program type checks.  With ``-w``, no warnings
-are printed.
+Check whether a Futhark program type checks. With ``-w``, no warnings
+are printed. With ``--Werror``, warnings are treated as errors.
 
 futhark check-syntax PROGRAM
 ----------------------------

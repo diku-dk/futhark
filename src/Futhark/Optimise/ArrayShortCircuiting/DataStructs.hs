@@ -40,7 +40,7 @@ import Data.Set qualified as S
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem as GPU
 import Futhark.IR.MCMem as MC
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SeqMem
 import Futhark.Util.Pretty hiding (line, sep, (</>))
 import Prelude
@@ -50,7 +50,7 @@ import Prelude
 type ScopeTab rep = Scope (Aliases rep)
 
 -- | An LMAD specialized to TPrimExps (a typed primexp)
-type LmadRef = IxFun.LMAD (TPrimExp Int64 VName)
+type LmadRef = LMAD.LMAD (TPrimExp Int64 VName)
 
 -- | Summary of all memory accesses at a given point in the code
 data AccessSummary
@@ -110,7 +110,7 @@ data ArrayMemBound = MemBlock
   { primType :: PrimType,
     shape :: Shape,
     memName :: VName,
-    ixfun :: IxFun
+    ixfun :: LMAD
   }
 
 -- | Free variable substitutions
@@ -132,7 +132,7 @@ data CoalsEntry = CoalsEntry
   { -- | destination memory block
     dstmem :: VName,
     -- | index function of the destination (used for rebasing)
-    dstind :: IxFun,
+    dstind :: LMAD,
     -- | aliased destination memory blocks can appear
     --   due to repeated (optimistic) coalescing.
     alsmem :: Names,

@@ -213,10 +213,8 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, MatchDec ret ifsort) =
 -- precise.
 removeDeadBranchResult :: (BuilderOps rep) => BottomUpRuleMatch rep
 removeDeadBranchResult (_, used) pat _ (cond, cases, defbody, MatchDec rettype ifsort)
-  | -- Only if there is no existential binding...
-    all (`notNameIn` foldMap freeIn (patElems pat)) (patNames pat),
-    -- Figure out which of the names in 'pat' are used...
-    patused <- map (`UT.isUsedDirectly` used) $ patNames pat,
+  | -- Figure out which of the names in 'pat' are used...
+    patused <- map keep $ patNames pat,
     -- If they are not all used, then this rule applies.
     not (and patused) = do
       -- Remove the parts of the branch-results that correspond to dead
@@ -226,12 +224,23 @@ removeDeadBranchResult (_, used) pat _ (cond, cases, defbody, MatchDec rettype i
           pick = map snd . filter fst . zip patused
           pat' = pick $ patElems pat
           rettype' = pick rettype
+          -- We also need to adjust the existential references in the
+          -- branch type.
+          exts = scanl (+) 0 [if b then 1 else 0 | b <- patused]
+          adjust = mapExt (exts !!)
       Simplify $ do
         cases' <- mapM (traverse $ onBody pick) cases
         defbody' <- onBody pick defbody
-        letBind (Pat pat') $ Match cond cases' defbody' $ MatchDec rettype' ifsort
+        letBind (Pat pat') $ Match cond cases' defbody' $ MatchDec (map adjust rettype') ifsort
   | otherwise = Skip
   where
+    usedDirectly v = v `UT.isUsedDirectly` used
+    usedIndirectly v =
+      any
+        (\pe -> v `nameIn` freeIn pe && usedDirectly (patElemName pe))
+        (patElems pat)
+    keep v = usedDirectly v || usedIndirectly v
+
     onBody pick (Body _ stms res) = mkBodyM stms $ pick res
 
 topDownRules :: (BuilderOps rep) => [TopDownRule rep]

@@ -3,7 +3,6 @@
 module Futhark.LSP.Tool
   ( getHoverInfoFromState,
     findDefinitionRange,
-    rangeFromSrcLoc,
     rangeFromLoc,
     posToUri,
     computeMapping,
@@ -19,7 +18,7 @@ import Futhark.LSP.PositionMapping
     toStalePos,
   )
 import Futhark.LSP.State (State (..), getStaleContent, getStaleMapping)
-import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), SrcLoc, locOf)
+import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos))
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Prop (isBuiltinLoc)
 import Language.Futhark.Query
@@ -127,7 +126,3 @@ getEndPos (Pos _ l c _) =
 rangeFromLoc :: Loc -> Range
 rangeFromLoc (Loc start end) = Range (getStartPos start) (getEndPos end)
 rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not found, throw error after moving to vfs
-
--- | Create an LSP 'Range' from a Futhark 'SrcLoc'.
-rangeFromSrcLoc :: SrcLoc -> Range
-rangeFromSrcLoc = rangeFromLoc . locOf

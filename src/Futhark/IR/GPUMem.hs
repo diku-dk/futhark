@@ -40,18 +40,6 @@ instance RepTypes GPUMem where
 instance ASTRep GPUMem where
   expTypesFromPat = pure . map snd . bodyReturnsFromPat
 
-instance OpReturns (HostOp NoOp GPUMem) where
-  opReturns (SegOp op) = segOpReturns op
-  opReturns k = extReturns <$> opType k
-
-instance OpReturns (HostOp NoOp (Aliases GPUMem)) where
-  opReturns (SegOp op) = segOpReturns op
-  opReturns k = extReturns <$> opType k
-
-instance OpReturns (HostOp NoOp (Engine.Wise GPUMem)) where
-  opReturns (SegOp op) = segOpReturns op
-  opReturns k = extReturns <$> opType k
-
 instance PrettyRep GPUMem
 
 instance TC.Checkable GPUMem where
@@ -101,17 +89,17 @@ simpleGPUMem =
   simpleGeneric usage $ simplifyKernelOp $ const $ pure (NoOp, mempty)
   where
     -- Slightly hackily and very inefficiently, we look at the inside
-    -- of SegOps to figure out the sizes of local memory allocations,
+    -- of SegOps to figure out the sizes of shared memory allocations,
     -- and add usages for those sizes.  This is necessary so the
     -- simplifier will hoist those sizes out as far as possible (most
     -- importantly, past the versioning If, but see also #1569).
     usage (SegOp (SegMap _ _ _ kbody)) = localAllocs kbody
     usage _ = mempty
-    localAllocs = foldMap stmLocalAlloc . kernelBodyStms
-    stmLocalAlloc = expLocalAlloc . stmExp
-    expLocalAlloc (Op (Alloc (Var v) _)) =
+    localAllocs = foldMap stmSharedAlloc . kernelBodyStms
+    stmSharedAlloc = expSharedAlloc . stmExp
+    expSharedAlloc (Op (Alloc (Var v) _)) =
       UT.sizeUsage v
-    expLocalAlloc (Op (Inner (SegOp (SegMap _ _ _ kbody)))) =
+    expSharedAlloc (Op (Inner (SegOp (SegMap _ _ _ kbody)))) =
       localAllocs kbody
-    expLocalAlloc _ =
+    expSharedAlloc _ =
       mempty

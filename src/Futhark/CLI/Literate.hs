@@ -1,5 +1,14 @@
 -- | @futhark literate@
-module Futhark.CLI.Literate (main) where
+--
+-- Also contains various utility definitions used by "Futhark.CLI.Script".
+module Futhark.CLI.Literate
+  ( main,
+    Options (..),
+    initialOptions,
+    scriptCommandLineOptions,
+    prepareServer,
+  )
+where
 
 import Codec.BMP qualified as BMP
 import Control.Monad
@@ -651,6 +660,8 @@ literateBuiltin "loadaudio" vs =
 literateBuiltin f vs =
   scriptBuiltin "." f vs
 
+-- | Some of these only make sense for @futhark literate@, but enough
+-- are also sensible for @futhark script@ that we can share them.
 data Options = Options
   { scriptBackend :: String,
     scriptFuthark :: Maybe FilePath,
@@ -662,6 +673,7 @@ data Options = Options
     scriptStopOnError :: Bool
   }
 
+-- | The configuration before any user-provided options are processed.
 initialOptions :: Options
 initialOptions =
   Options
@@ -1061,8 +1073,9 @@ processScript env script = do
   cleanupImgDir env $ mconcat files
   pure (foldl' min Success failures, T.intercalate "\n" outputs)
 
-commandLineOptions :: [FunOptDescr Options]
-commandLineOptions =
+-- | Common command line options that transform 'Options'.
+scriptCommandLineOptions :: [FunOptDescr Options]
+scriptCommandLineOptions =
   [ Option
       []
       ["backend"]
@@ -1110,18 +1123,65 @@ commandLineOptions =
       "v"
       ["verbose"]
       (NoArg $ Right $ \config -> config {scriptVerbose = scriptVerbose config + 1})
-      "Enable logging. Pass multiple times for more.",
-    Option
-      "o"
-      ["output"]
-      (ReqArg (\opt -> Right $ \config -> config {scriptOutput = Just opt}) "FILE")
-      "Override output file. Image directory is set to basename appended with -img/.",
-    Option
-      []
-      ["stop-on-error"]
-      (NoArg $ Right $ \config -> config {scriptStopOnError = True})
-      "Stop and do not produce output file if any directive fails."
+      "Enable logging. Pass multiple times for more."
   ]
+
+commandLineOptions :: [FunOptDescr Options]
+commandLineOptions =
+  scriptCommandLineOptions
+    <> [ Option
+           "o"
+           ["output"]
+           (ReqArg (\opt -> Right $ \config -> config {scriptOutput = Just opt}) "FILE")
+           "Override output file. Image directory is set to basename appended with -img/.",
+         Option
+           []
+           ["stop-on-error"]
+           (NoArg $ Right $ \config -> config {scriptStopOnError = True})
+           "Stop and do not produce output file if any directive fails."
+       ]
+
+-- | Start up (and eventually shut down) a Futhark server
+-- corresponding to the provided program. If the program has a @.fut@
+-- extension, it will be compiled automatically.
+prepareServer :: FilePath -> Options -> (ScriptServer -> IO a) -> IO a
+prepareServer prog opts f = do
+  futhark <- maybe getExecutablePath pure $ scriptFuthark opts
+
+  let is_fut = takeExtension prog == ".fut"
+
+  unless (scriptSkipCompilation opts || not is_fut) $ do
+    let compile_options = "--server" : scriptCompilerOptions opts
+    when (scriptVerbose opts > 0) $
+      T.hPutStrLn stderr $
+        "Compiling " <> T.pack prog <> "..."
+    when (scriptVerbose opts > 1) $
+      T.hPutStrLn stderr $
+        T.pack $
+          unwords compile_options
+
+    let onError err = do
+          mapM_ (T.hPutStrLn stderr) err
+          exitFailure
+
+    void $
+      either onError pure <=< runExceptT $
+        compileProgram compile_options (FutharkExe futhark) (scriptBackend opts) prog
+
+  let run_options = scriptExtraOptions opts
+      onLine "call" l = T.putStrLn l
+      onLine "startup" l = T.putStrLn l
+      onLine _ _ = pure ()
+      prog' = if is_fut then dropExtension prog else prog
+      cfg =
+        (futharkServerCfg ("." </> prog') run_options)
+          { cfgOnLine =
+              if scriptVerbose opts > 0
+                then onLine
+                else const . const $ pure ()
+          }
+
+  withScriptServer cfg f
 
 -- | Run @futhark literate@.
 main :: String -> [String] -> IO ()
@@ -1129,55 +1189,27 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
   case args of
     [prog] -> Just $ do
       futhark <- maybe getExecutablePath pure $ scriptFuthark opts
-
-      script <- parseProgFile prog
-
-      unless (scriptSkipCompilation opts) $ do
-        let entryOpt v = "--entry-point=" ++ T.unpack v
-            compile_options =
-              "--server"
-                : map entryOpt (S.toList (varsInScripts script))
-                ++ scriptCompilerOptions opts
-        when (scriptVerbose opts > 0) $
-          T.hPutStrLn stderr $
-            "Compiling " <> T.pack prog <> "..."
-        when (scriptVerbose opts > 1) $
-          T.hPutStrLn stderr $
-            T.pack $
-              unwords compile_options
-
-        let onError err = do
-              mapM_ (T.hPutStrLn stderr) err
-              exitFailure
-        void $
-          either onError pure <=< runExceptT $
-            compileProgram compile_options (FutharkExe futhark) (scriptBackend opts) prog
-
       let onError err = do
             T.hPutStrLn stderr err
             exitFailure
       proghash <-
         either onError pure <=< runExceptT $
           system futhark ["hash", prog] mempty
-
-      let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
-          prog_dir = takeDirectory prog
-          imgdir = dropExtension (takeFileName mdfile) <> "-img"
-          run_options = scriptExtraOptions opts
-          onLine "call" l = T.putStrLn l
-          onLine _ _ = pure ()
-          cfg =
-            (futharkServerCfg ("." </> dropExtension prog) run_options)
-              { cfgOnLine =
-                  if scriptVerbose opts > 0
-                    then onLine
-                    else const . const $ pure ()
-              }
+      script <- parseProgFile prog
 
       orig_dir <- getCurrentDirectory
-
-      withScriptServer cfg $ \server -> do
-        let env =
+      let entryOpt v = "--entry-point=" ++ T.unpack v
+          opts' =
+            opts
+              { scriptCompilerOptions =
+                  map entryOpt (S.toList (varsInScripts script))
+                    <> scriptCompilerOptions opts
+              }
+      prepareServer prog opts' $ \server -> do
+        let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
+            prog_dir = takeDirectory prog
+            imgdir = dropExtension (takeFileName mdfile) <> "-img"
+            env =
               Env
                 { envServer = server,
                   envOpts = opts,

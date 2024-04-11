@@ -24,6 +24,7 @@ import Futhark.IR.SOACS qualified as SOACS
 import Futhark.IR.Seq qualified as Seq
 import Futhark.IR.SeqMem qualified as SeqMem
 import Futhark.IR.TypeCheck (Checkable, checkProg)
+import Futhark.Internalise.ApplyTypeAbbrs as ApplyTypeAbbrs
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.FullNormalise as FullNormalise
@@ -204,41 +205,41 @@ kernelsMemProg _ (GPUMem prog) =
   pure prog
 kernelsMemProg name rep =
   externalErrorS $
-    "Pass "
-      ++ name
-      ++ " expects GPUMem representation, but got "
-      ++ representation rep
+    "Pass '"
+      <> name
+      <> "' expects GPUMem representation, but got "
+      <> representation rep
 
 soacsProg :: String -> UntypedPassState -> FutharkM (Prog SOACS.SOACS)
 soacsProg _ (SOACS prog) =
   pure prog
 soacsProg name rep =
   externalErrorS $
-    "Pass "
-      ++ name
-      ++ " expects SOACS representation, but got "
-      ++ representation rep
+    "Pass '"
+      <> name
+      <> "' expects SOACS representation, but got "
+      <> representation rep
 
 kernelsProg :: String -> UntypedPassState -> FutharkM (Prog GPU.GPU)
 kernelsProg _ (GPU prog) =
   pure prog
 kernelsProg name rep =
   externalErrorS $
-    "Pass " ++ name ++ " expects GPU representation, but got " ++ representation rep
+    "Pass '" <> name <> "' expects GPU representation, but got " <> representation rep
 
 seqMemProg :: String -> UntypedPassState -> FutharkM (Prog SeqMem.SeqMem)
 seqMemProg _ (SeqMem prog) =
   pure prog
 seqMemProg name rep =
   externalErrorS $
-    "Pass " ++ name ++ " expects SeqMem representation, but got " ++ representation rep
+    "Pass '" <> name <> "' expects SeqMem representation, but got " <> representation rep
 
 mcMemProg :: String -> UntypedPassState -> FutharkM (Prog MCMem.MCMem)
 mcMemProg _ (MCMem prog) =
   pure prog
 mcMemProg name rep =
   externalErrorS $
-    "Pass " ++ name ++ " expects MCMem representation, but got " ++ representation rep
+    "Pass '" <> name <> "' expects MCMem representation, but got " <> representation rep
 
 typedPassOption ::
   (Checkable torep) =>
@@ -325,7 +326,7 @@ allocateOption short =
         <$> runPipeline (onePass MC.explicitAllocations) config prog
     perform s _ =
       externalErrorS $
-        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+        "Pass '" <> passDescription pass <> "' cannot operate on " <> representation s
 
     long = [passLongOption pass]
     pass = Seq.explicitAllocations
@@ -725,42 +726,49 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   else prettyString $ fileProg fm
         Defunctorise -> do
           (_, imports, src) <- readProgram'
-          liftIO $ p $ evalState (Defunctorise.transformProg imports) src
+          liftIO $
+            p $
+              flip evalState src $
+                Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
         FullNormalise -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
-        Monomorphise -> do
-          (_, imports, src) <- readProgram'
-          liftIO $
-            p $
-              flip evalState src $
-                Defunctorise.transformProg imports
-                  >>= FullNormalise.transformProg
-                  >>= Monomorphise.transformProg
         LiftLambdas -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
-                  >>= Monomorphise.transformProg
-                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
+        Monomorphise -> do
+          (_, imports, src) <- readProgram'
+          liftIO $
+            p $
+              flip evalState src $
+                Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
+                  >>= FullNormalise.transformProg
+                  >>= LiftLambdas.transformProg
+                  >>= Monomorphise.transformProg
         Defunctionalise -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
+                  >>= LiftLambdas.transformProg
                   >>= Monomorphise.transformProg
                   >>= ReplaceRecords.transformProg
-                  >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} -> do
           let (base, ext) = splitExtension file

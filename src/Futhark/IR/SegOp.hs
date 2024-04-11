@@ -523,10 +523,10 @@ segOpType (SegHist _ space ops _ _) = do
     dims = segSpaceDims space
     segment_dims = init dims
 
-instance TypedOp (SegOp lvl rep) where
+instance TypedOp (SegOp lvl) where
   opType = pure . staticShapes . segOpType
 
-instance (ASTConstraints lvl, Aliased rep) => AliasedOp (SegOp lvl rep) where
+instance (ASTConstraints lvl) => AliasedOp (SegOp lvl) where
   opAliases = map (const mempty) . segOpType
 
   consumedInOp (SegMap _ _ _ kbody) =
@@ -993,10 +993,7 @@ instance (ASTRep rep) => ST.IndexOp (SegOp lvl rep) where
         | otherwise = lift Nothing
   indexOp _ _ _ _ = Nothing
 
-instance
-  (ASTRep rep, ASTConstraints lvl) =>
-  IsOp (SegOp lvl rep)
-  where
+instance (ASTConstraints lvl) => IsOp (SegOp lvl) where
   cheapOp _ = False
   safeOp _ = True
   opDependencies op = replicate (length (segOpType op)) (freeIn op)
@@ -1233,11 +1230,7 @@ topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres
   when (kres == kres') cannotSimplify
 
   kbody <- mkKernelBodyM kstms kres'
-  addStm $
-    Let (Pat kpes') dec $
-      Op $
-        segOp $
-          SegMap lvl space ts' kbody
+  addStm $ Let (Pat kpes') dec $ Op $ segOp $ SegMap lvl space ts' kbody
   where
     isInvariant Constant {} = True
     isInvariant (Var v) = isJust $ ST.lookup v vtable
@@ -1255,7 +1248,7 @@ topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres
 
 -- If a SegRed contains two reduction operations that have the same
 -- vector shape, merge them together.  This saves on communication
--- overhead, but can in principle lead to more local memory usage.
+-- overhead, but can in principle lead to more shared memory usage.
 topDownSegOp _ (Pat pes) _ (SegRed lvl space ops ts kbody)
   | length ops > 1,
     op_groupings <-
@@ -1428,7 +1421,7 @@ kernelBodyReturns = zipWithM correct . kernelBodyResult
 -- | Like 'segOpType', but for memory representations.
 segOpReturns ::
   (Mem rep inner, Monad m, HasScope rep m) =>
-  SegOp lvl somerep ->
+  SegOp lvl rep ->
   m [ExpReturns]
 segOpReturns k@(SegMap _ _ _ kbody) =
   kernelBodyReturns kbody . extReturns =<< opType k

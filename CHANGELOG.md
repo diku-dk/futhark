@@ -15,6 +15,125 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Bugs related to deduplication of array payloads in sum types.
+  Unfortunately, fixed by just not deduplicating in those cases.
+
+## [0.25.15]
+
+### Added
+
+* Incremental Flattening generates fewer redundant code versions.
+
+* Better simplification of slices. (#2125)
+
+### Fixed
+
+* Ignore type suffixes when unifying expressions (#2124).
+
+* In the C API, opaque types that correspond to an array of an opaque
+  type are now once again named `futhark_opaque_arr_...`.
+
+* `cuda` backend did not correctly profile CPU-to-GPU scalar copies.
+
+## [0.25.14]
+
+### Added
+
+* The prelude definition of `filter` is now more memory efficient,
+  particularly when the output is much smaller than the input. (#2109)
+
+* New configuration for GPU backends:
+  `futhark_context_config_set_unified_memory`, also available on
+  executables as ``--unified-memory``.
+
+* The "raw" API functions now do something potentially useful, but are
+  still considered experimental.
+
+* `futhark --version` now reports GHC version.
+
+### Fixed
+
+* Incorrect type checking of let-bound sizes occurring multiple times
+  in pattern. (#2103).
+
+* A concatenation simplification would sometimes mess up sizes.
+  (#2104)
+
+* Bug related to monomorphisation of polymorphic local functions
+  (#2106).
+
+* Rare crash in short circuiting.
+
+* Referencing an unbound type parameter could crash the type checker
+  (#2113, #2114).
+
+* Futhark now works with GHC 9.8 (#2105).
+
+## [0.25.13]
+
+### Added
+
+* Incremental flattening of `map`-`scan` compositions with nested
+  parallelism (similar to the logic for `map`-`reduce` compositions
+  that we have had for years).
+
+* `futhark script`, for running FutharkScript expressions from the
+  command line.
+
+* `futhark repl` now prints out a message when it ignores a breakpoint
+  during initialisation. (#2098)
+
+### Fixed
+
+* Flattening of `scatter` with multi-dimensional elements (#2089).
+
+* Some instances of not-actually-irregular allocations were mistakenly
+  interpreted as irregular. Fixing this was a dividend of the memory
+  representation simplifications of 0.25.12.
+
+* Obscure issue related to expansion of shared memory allocations (#2092).
+
+* A crash in alias checking under some rare circumstances (#2096).
+
+* Mishandling of existential sizes for top level constants. (#2099)
+
+* Compiler crash when generating code for copying nothing at all. (#2100)
+
+## [0.25.12]
+
+### Added
+
+* `f16.copysign`, `f32.copysign`, `f64.copysign`.
+
+* Trailing commas are now allowed for all syntactical elements that
+  involve comma-separation. (#2068)
+
+* The C API now allows destruction and construction of sum types (with
+  some caveats). (#2074)
+
+* An overall reduction in memory copies, through simplifying the
+  internal representation.
+
+### Fixed
+
+* C API would define distinct entry point types for Futhark types that
+  differed only in naming of sizes (#2080).
+
+* `==` and `!=` on sum types with array payloads. Constructing them is
+  now a bit slower, though. (#2081)
+
+* Somewhat obscure simplification error caused by neglecting to update
+  metadata when removing dead scatter outputs.
+
+* Compiler crash due to the type checker forgetting to respect the
+  explicitly ascribed non-consuming diet of loop parameters (#2067).
+
+* Size inference did incomplete level/scope checking, which could
+  result in circular sizes, which usually manifested as the type
+  checker going into an infinite loop (#2073).
+
+* The OpenCL backend now more gracefully handles lack of platform.
+
 ## [0.25.11]
 
 ### Added

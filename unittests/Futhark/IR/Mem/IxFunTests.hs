@@ -11,10 +11,10 @@ import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.Mem.IxFun qualified as IxFunLMAD
 import Futhark.IR.Mem.IxFun.Alg qualified as IxFunAlg
 import Futhark.IR.Mem.IxFunWrapper
 import Futhark.IR.Mem.IxFunWrapper qualified as IxFunWrap
+import Futhark.IR.Mem.LMAD qualified as IxFunLMAD
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
 import Futhark.IR.Syntax.Core ()
@@ -49,7 +49,7 @@ allPoints dims =
           ([], x)
           strides
 
-compareIxFuns :: Maybe (IxFunLMAD.IxFun Int) -> IxFunAlg.IxFun Int -> Assertion
+compareIxFuns :: Maybe (IxFunLMAD.LMAD Int) -> IxFunAlg.IxFun Int -> Assertion
 compareIxFuns (Just ixfunLMAD) ixfunAlg =
   let lmadShape = IxFunLMAD.shape ixfunLMAD
       algShape = IxFunAlg.shape ixfunAlg

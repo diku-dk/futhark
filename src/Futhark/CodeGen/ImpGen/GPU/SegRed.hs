@@ -44,9 +44,9 @@
 --
 -- An optimization specfically targeted at non-segmented and large-segments
 -- segmented reductions with non-commutative is made: The stage one main loop is
--- essentially stripmined by a factor `chunk`, inserting collective copies via
--- local memory of each reduction parameter going into the intra-block (partial)
--- reductions. This saves a factor `chunk` number of intra-block reductions at
+-- essentially stripmined by a factor *chunk*, inserting collective copies via
+-- shared memory of each reduction parameter going into the intra-block (partial)
+-- reductions. This saves a factor *chunk* number of intra-block reductions at
 -- the cost of some overhead in collective copies.
 module Futhark.CodeGen.ImpGen.GPU.SegRed
   ( compileSegRed,
@@ -173,7 +173,7 @@ compileSegRed' pat grid space segbinops map_body_cont
         else Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
 
 -- | Prepare intermediate arrays for the reduction.  Prim-typed
--- arguments go in local memory (so we need to do the allocation of
+-- arguments go in shared memory (so we need to do the allocation of
 -- those arrays inside the kernel), while array-typed arguments go in
 -- global memory.  Allocations for the latter have already been
 -- performed.  This policy is baked into how the allocations are done
@@ -478,7 +478,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
             [(ltid + 1) * segment_size_nonzero - 1]
 
       -- Finally another barrier, because we will be writing to the
-      -- local memory array first thing in the next iteration.
+      -- shared memory array first thing in the next iteration.
       sOp $ Imp.Barrier Imp.FenceLocal
 
 largeSegmentsReduction :: DoCompileSegRed
@@ -858,7 +858,7 @@ noncommPrimParamsStageOneBody slugs body_cont glb_ind_var global_tid q n chunk d
 
     sOp $ Imp.ErrorSync Imp.FenceLocal
 
-    sComment "effectualize collective copies in local memory" $ do
+    sComment "effectualize collective copies in shared memory" $ do
       forM_ slugs $ \slug -> do
         let coll_copy_arrs = slugCollCopyArrs slug
         let priv_chunks = slugPrivChunks slug
@@ -1031,7 +1031,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
 -- Intermediate memory for the nonsegmented and large segments non-commutative
 -- reductions with all primitive parameters:
 --
---   These kernels need local memory for 1) the initial collective copy, 2) the
+--   These kernels need shared memory for 1) the initial collective copy, 2) the
 --   (virtualized) block reductions, and (TODO: this one not implemented yet!)
 --   3) the final single-block collective copy. There are no dependencies
 --   between these three stages, so we can reuse the same pool of local mem for
@@ -1046,7 +1046,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
 --   requires `tblock_size * CHUNK * max elem_sizes`, since the collective copies
 --   are performed in sequence (ie. inputs to different reduction operators need
 --   not be held in local mem simultaneously).
---   2) The intra-block reductions of local memory held per-thread results
+--   2) The intra-block reductions of shared memory held per-thread results
 --   require `tblock_size * sum elem_sizes` bytes, since per-thread results for
 --   all fused reductions are block-reduced simultaneously.
 --   3) If tblock_size < num_tblocks, then after the final single-block collective
@@ -1065,12 +1065,12 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
 --   `num_tblocks > tblock_size * CHUNK`, but this is unlikely, in which case 2)
 --   and 3), respectively, will dominate.
 --
---   Aside from local memory, these kernels also require a CHUNK-sized array of
+--   Aside from shared memory, these kernels also require a CHUNK-sized array of
 --   thread-private register memory per reduction operator.
 --
 -- For all other reductions, ie. commutative reductions, reductions with at
 -- least one non-primitive operator, and small segments reductions:
 --
---   These kernels use local memory only for the intra-block reductions, and
+--   These kernels use shared memory only for the intra-block reductions, and
 --   since they do not use chunking or CHUNK, they all require onlly `tblock_size
---   * max elem_sizes` bytes of local memory and no thread-private register mem.
+--   * max elem_sizes` bytes of shared memory and no thread-private register mem.

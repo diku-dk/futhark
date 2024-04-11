@@ -12,7 +12,7 @@ import Control.Monad
 import Data.Set qualified as S
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 
@@ -25,7 +25,6 @@ allocAtLevel :: SegLevel -> AllocM GPU GPUMem a -> AllocM GPU GPUMem a
 allocAtLevel lvl = local $ \env ->
   env
     { allocSpace = space,
-      aggressiveReuse = True,
       allocInOp = handleHostOp (Just lvl)
     }
   where
@@ -102,8 +101,8 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
   dims <- arrayDims <$> lookupType v
   let perm_inv = rearrangeInverse perm
       dims' = rearrangeShape perm dims
-      ixfun = IxFun.permute (IxFun.iota $ map pe64 dims') perm_inv
-  pure [Hint ixfun $ Space "device"]
+      lmad = LMAD.permute (LMAD.iota 0 $ map pe64 dims') perm_inv
+  pure [Hint lmad $ Space "device"]
 kernelExpHints (Op (Inner (SegOp (SegMap lvl@(SegThread _ _) space ts body)))) =
   zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
 kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space reds ts body)))) =
@@ -133,7 +132,7 @@ mapResultHint _lvl space = hint
           pure $ Hint (innermost space_dims (arrayDims t)) $ Space "device"
     hint _ _ = pure NoHint
 
-innermost :: [SubExp] -> [SubExp] -> IxFun
+innermost :: [SubExp] -> [SubExp] -> LMAD
 innermost space_dims t_dims =
   let r = length t_dims
       dims = space_dims ++ t_dims
@@ -142,9 +141,9 @@ innermost space_dims t_dims =
           ++ [0 .. length space_dims - 1]
       perm_inv = rearrangeInverse perm
       dims_perm = rearrangeShape perm dims
-      ixfun_base = IxFun.iota $ map pe64 dims_perm
-      ixfun_rearranged = IxFun.permute ixfun_base perm_inv
-   in ixfun_rearranged
+      lmad_base = LMAD.iota 0 $ map pe64 dims_perm
+      lmad_rearranged = LMAD.permute lmad_base perm_inv
+   in lmad_rearranged
 
 semiStatic :: S.Set VName -> SubExp -> Bool
 semiStatic _ Constant {} = True
@@ -163,9 +162,8 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
                   dims = seg_dims ++ map pe64 (arrayDims t)
                   nilSlice d = DimSlice 0 d 0
                in Hint
-                    ( IxFun.slice (IxFun.iota dims) $
-                        fullSliceNum dims $
-                          map nilSlice seg_dims
+                    ( LMAD.slice (LMAD.iota 0 dims) $
+                        fullSliceNum dims (map nilSlice seg_dims)
                     )
                     $ ScalarSpace (arrayDims t)
                     $ elemType t
@@ -183,8 +181,8 @@ inThreadExpHints e = do
     maybePrivate consts t
       | Just (Array pt shape _) <- hasStaticShape t,
         all (semiStatic consts) $ shapeDims shape = do
-          let ixfun = IxFun.iota $ map pe64 $ shapeDims shape
-          pure $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
+          let lmad = LMAD.iota 0 $ map pe64 $ shapeDims shape
+          pure $ Hint lmad $ ScalarSpace (shapeDims shape) pt
       | otherwise =
           pure NoHint
 

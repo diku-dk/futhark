@@ -61,7 +61,6 @@ module Futhark.IR.Prop.Types
     DeclTyped (..),
     ExtTyped (..),
     DeclExtTyped (..),
-    SetType (..),
     FixExt (..),
   )
 where
@@ -599,20 +598,6 @@ class (FixExt t) => DeclExtTyped t where
 instance DeclExtTyped DeclExtType where
   declExtTypeOf = id
 
--- | Typeclass for things whose type can be changed.
-class (Typed a) => SetType a where
-  setType :: a -> Type -> a
-
-instance SetType Type where
-  setType _ t = t
-
-instance (SetType b) => SetType (a, b) where
-  setType (a, b) t = (a, setType b t)
-
-instance (SetType dec) => SetType (PatElem dec) where
-  setType (PatElem name dec) t =
-    PatElem name $ setType dec t
-
 -- | Something with an existential context that can be (partially)
 -- fixed.
 class FixExt t where
@@ -620,14 +605,20 @@ class FixExt t where
   -- value.
   fixExt :: Int -> SubExp -> t -> t
 
+  -- | Map a function onto any existential.
+  mapExt :: (Int -> Int) -> t -> t
+
 instance (FixExt shape, ArrayShape shape) => FixExt (TypeBase shape u) where
   fixExt i se = modifyArrayShape $ fixExt i se
+  mapExt f = modifyArrayShape $ mapExt f
 
 instance (FixExt d) => FixExt (ShapeBase d) where
   fixExt i se = fmap $ fixExt i se
+  mapExt f = fmap $ mapExt f
 
 instance (FixExt a) => FixExt [a] where
   fixExt i se = fmap $ fixExt i se
+  mapExt f = fmap $ mapExt f
 
 instance FixExt ExtSize where
   fixExt i se (Ext j)
@@ -636,5 +627,9 @@ instance FixExt ExtSize where
     | otherwise = Ext j
   fixExt _ _ (Free x) = Free x
 
+  mapExt f (Ext i) = Ext $ f i
+  mapExt _ (Free x) = Free x
+
 instance FixExt () where
   fixExt _ _ () = ()
+  mapExt _ () = ()

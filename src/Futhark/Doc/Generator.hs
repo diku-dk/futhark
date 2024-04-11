@@ -20,7 +20,7 @@ import Futhark.Util.Pretty (Doc, docText, pretty)
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Semantic
-import Language.Futhark.TypeChecker.Monad hiding (warn)
+import Language.Futhark.Warnings
 import System.FilePath (makeRelative, splitPath, (-<.>), (</>))
 import Text.Blaze.Html5 (AttributeValue, Html, toHtml, (!))
 import Text.Blaze.Html5 qualified as H
@@ -85,7 +85,7 @@ data IndexWhat = IndexValue | IndexFunction | IndexModule | IndexModuleType | In
 -- can generate an index.
 type Documented = M.Map VName IndexWhat
 
-warn :: SrcLoc -> Doc () -> DocM ()
+warn :: Loc -> Doc () -> DocM ()
 warn loc s = lift $ lift $ tell $ singleWarning loc s
 
 document :: VName -> IndexWhat -> DocM ()
@@ -628,7 +628,7 @@ synopsisSpec spec = case spec of
     specRow (keyword "module " <> vnameSynopsisDef name) ": " <$> synopsisModTypeExp sig
   IncludeSpec e _ -> fullRow . (keyword "include " <>) <$> synopsisModTypeExp e
 
-typeExpHtml :: TypeExp Info VName -> DocM Html
+typeExpHtml :: TypeExp Exp VName -> DocM Html
 typeExpHtml e = case e of
   TEUnique t _ -> ("*" <>) <$> typeExpHtml t
   TEArray d at _ -> do
@@ -709,11 +709,11 @@ relativise dest src =
 dimDeclHtml :: Size -> DocM Html
 dimDeclHtml = pure . brackets . toHtml . prettyString
 
-dimExpHtml :: SizeExp Info VName -> DocM Html
+dimExpHtml :: SizeExp Exp -> DocM Html
 dimExpHtml (SizeExpAny _) = pure $ brackets mempty
 dimExpHtml (SizeExp e _) = pure $ brackets $ toHtml $ prettyString e
 
-typeArgExpHtml :: TypeArgExp Info VName -> DocM Html
+typeArgExpHtml :: TypeArgExp Exp VName -> DocM Html
 typeArgExpHtml (TypeArgExpSize d) = dimExpHtml d
 typeArgExpHtml (TypeArgExpType d) = typeExpHtml d
 
@@ -734,10 +734,10 @@ docHtml (Just (DocComment doc loc)) =
   H.preEscapedText
     . GFM.commonmarkToHtml [] [GFM.extAutolink]
     . T.pack
-    <$> identifierLinks loc (T.unpack doc)
+    <$> identifierLinks (locOf loc) (T.unpack doc)
 docHtml Nothing = pure mempty
 
-identifierLinks :: SrcLoc -> String -> DocM String
+identifierLinks :: Loc -> String -> DocM String
 identifierLinks _ [] = pure []
 identifierLinks loc s
   | Just ((name, namespace, file), s') <- identifierReference s = do

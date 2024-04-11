@@ -102,40 +102,40 @@ jobs:
         name: futhark-nightly-macos-x86_64.tar.xz
         path: futhark-nightly-macos-x86_64.tar.xz
 
-  build-windows-cabal:
-    runs-on: windows-2019
+  # build-windows-cabal:
+  #   runs-on: windows-2019
 
-    steps:
-    - uses: actions/checkout@v3
+  #   steps:
+  #   - uses: actions/checkout@v3
 
-    - id: setup-haskell
-      uses: haskell-actions/setup@v2
-      with:
-        ghc-version: '9.4.4'
+  #   - id: setup-haskell
+  #     uses: haskell-actions/setup@v2
+  #     with:
+  #       ghc-version: '9.4.4'
 
-    - uses: actions/cache@v3
-      name: Cache cabal stuff
-      with:
-        path: |
-          ${{ steps.setup-haskell.outputs.cabal-store }}
-          dist-newstyle
-        key: ${{ runner.os }}-cabal-${{ hashFiles('futhark.cabal', 'cabal.project') }}
+  #   - uses: actions/cache@v3
+  #     name: Cache cabal stuff
+  #     with:
+  #       path: |
+  #         ${{ steps.setup-haskell.outputs.cabal-store }}
+  #         dist-newstyle
+  #       key: ${{ runner.os }}-cabal-${{ hashFiles('futhark.cabal', 'cabal.project') }}
 
-    - name: Build
-      shell: bash
-      run: |
-        cabal update
-        try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
-        try || try || try
-    - uses: papeloto/action-zip@v1.1
-      with:
-        files: futhark.exe
-        dest: futhark-nightly-windows-x86_64.zip
+  #   - name: Build
+  #     shell: bash
+  #     run: |
+  #       cabal update
+  #       try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
+  #       try || try || try
+  #   - uses: papeloto/action-zip@v1.1
+  #     with:
+  #       files: futhark.exe
+  #       dest: futhark-nightly-windows-x86_64.zip
 
-    - uses: actions/upload-artifact@v1
-      with:
-        name: futhark-nightly-windows-x86_64.zip
-        path: futhark-nightly-windows-x86_64.zip
+  #   - uses: actions/upload-artifact@v1
+  #     with:
+  #       name: futhark-nightly-windows-x86_64.zip
+  #       path: futhark-nightly-windows-x86_64.zip
 
 
   haskell-test-style:
@@ -333,7 +333,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers oclgrind nvidia-cuda-dev nvidia-opencl-dev
+        sudo apt-get install -y opencl-headers oclgrind nvidia-opencl-dev
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -344,6 +344,30 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
         futhark test tests -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
+
+  test-pyoclgrind:
+    runs-on: ubuntu-22.04
+    needs: [build-linux-nix]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y opencl-headers oclgrind virtualenv
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    - run: |
+        set -e
+        virtualenv virtualenv
+        source virtualenv/bin/activate
+        pip install numpy pyopencl jsonschema
+        futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
   # test-opencl:
   #   runs-on: opencl
@@ -402,12 +426,13 @@ jobs:
           pip install jsonschema
           module unload cuda
           module load cuda/11.8
+          nvidia-smi --query-gpu=gpu_name --format=csv,noheader
           futhark test tests \
             --backend=cuda \
             --cache-extension=cache \
             --concurrency=8
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
-        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl,hendrixgpu18fl
 
   # test-hip:
   #   runs-on: MI100
@@ -596,7 +621,7 @@ jobs:
 
   deploy-nightly:
     runs-on: ubuntu-22.04
-    needs: [build-linux-nix, build-mac-cabal, build-windows-cabal, test-tools]
+    needs: [build-linux-nix, build-mac-cabal, test-tools]
     if: github.ref == 'refs/heads/master'
 
     steps:
@@ -606,9 +631,9 @@ jobs:
         key: ${{ secrets.SSHKEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS }}
 
-    - uses: actions/download-artifact@v3
-      with:
-        name: futhark-nightly-windows-x86_64.zip
+    # - uses: actions/download-artifact@v3
+    #   with:
+    #     name: futhark-nightly-windows-x86_64.zip
 
     - uses: actions/download-artifact@v3
       with:
@@ -624,7 +649,7 @@ jobs:
 
     - name: scp tarballs to server
       run: |
-        scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark-nightly-linux-x86_64.tar.xz futhark-nightly-macos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+        scp -o StrictHostKeyChecking=no futhark-nightly-linux-x86_64.tar.xz futhark-nightly-macos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
     - name: copy docs to server
       run: |
@@ -639,6 +664,5 @@ jobs:
         prerelease: true
         title: "nightly"
         files: |
-          futhark-nightly-windows-x86_64.zip
           futhark-nightly-linux-x86_64.tar.xz
           futhark-nightly-macos-x86_64.tar.xz

@@ -558,6 +558,8 @@ checkOpaques (OpaqueTypes types) = descend [] types
       descend (name : known) ts
     check known (OpaqueRecord fs) =
       mapM_ (checkEntryPointType known . snd) fs
+    check known (OpaqueSum _ cs) =
+      mapM_ (mapM_ (checkEntryPointType known . fst) . snd) cs
     check _ (OpaqueType _) =
       pure ()
     checkEntryPointType known (TypeOpaque s) =
@@ -931,7 +933,7 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
   where
     checkPart ErrorString {} = pure ()
     checkPart (ErrorVal t x) = require [Prim t] x
-checkBasicOp (UpdateAcc acc is ses) = do
+checkBasicOp (UpdateAcc _ acc is ses) = do
   (shape, ts) <- checkAccIdent acc
 
   unless (length ses == length ts) . bad . TypeError $
@@ -1437,7 +1439,7 @@ requirePrimExp t e = context ("in PrimExp " <> prettyText e) $ do
     prettyText e <> " must have type " <> prettyText t
 
 -- | The class of representations that can be type-checked.
-class (AliasableRep rep, TypedOp (OpC rep (Aliases rep))) => Checkable rep where
+class (AliasableRep rep, TypedOp (OpC rep)) => Checkable rep where
   checkExpDec :: ExpDec rep -> TypeM rep ()
   checkBodyDec :: BodyDec rep -> TypeM rep ()
   checkFParamDec :: VName -> FParamInfo rep -> TypeM rep ()

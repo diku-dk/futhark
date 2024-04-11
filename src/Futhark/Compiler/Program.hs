@@ -300,7 +300,7 @@ typeCheckProg orig_imports orig_src =
               NE.:| map warningToError (listWarnings prog_ws)
         (prog_ws, Right (m, src')) ->
           let warnHole (loc, t) =
-                singleWarning (E.srclocOf loc) $ "Hole of type: " <> align (pretty t)
+                singleWarning (E.locOf loc) $ "Hole of type: " <> align (pretty t)
               prog_ws' = prog_ws <> foldMap warnHole (E.progHoles (fileProg m))
            in Right
                 ( imports ++ [LoadedFile path import_name (CheckedFile src prog_ws' m) mod_time],

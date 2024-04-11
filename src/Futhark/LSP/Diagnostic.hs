@@ -15,8 +15,8 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.Compiler.Program (ProgError (..))
-import Futhark.LSP.Tool (posToUri, rangeFromLoc, rangeFromSrcLoc)
-import Futhark.Util.Loc (Loc (..), SrcLoc, locOf)
+import Futhark.LSP.Tool (posToUri, rangeFromLoc)
+import Futhark.Util.Loc (Loc (..))
 import Futhark.Util.Pretty (Doc, docText)
 import Language.LSP.Diagnostics (partitionBySource)
 import Language.LSP.Protocol.Lens (HasVersion (version))
@@ -49,21 +49,19 @@ publish uri_diags_map = for_ uri_diags_map $ \(uri, diags) -> do
     (partitionBySource diags)
 
 -- | Send warning diagnostics to the client.
-publishWarningDiagnostics :: [(SrcLoc, Doc a)] -> LspT () IO ()
+publishWarningDiagnostics :: [(Loc, Doc a)] -> LspT () IO ()
 publishWarningDiagnostics warnings = do
   publish $ M.assocs $ M.unionsWith (++) $ map onWarn warnings
   where
-    onWarn (srcloc, msg) =
-      case locOf srcloc of
-        NoLoc -> mempty
-        Loc pos _ ->
-          M.singleton
-            (posToUri pos)
-            [ mkDiagnostic
-                (rangeFromSrcLoc srcloc)
-                DiagnosticSeverity_Warning
-                (docText msg)
-            ]
+    onWarn (NoLoc, _) = mempty
+    onWarn (loc@(Loc pos _), msg) =
+      M.singleton
+        (posToUri pos)
+        [ mkDiagnostic
+            (rangeFromLoc loc)
+            DiagnosticSeverity_Warning
+            (docText msg)
+        ]
 
 -- | Send error diagnostics to the client.
 publishErrorDiagnostics :: NE.NonEmpty ProgError -> LspT () IO ()

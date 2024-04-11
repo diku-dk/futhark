@@ -24,7 +24,6 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq
 import Futhark.IR.GPU
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Optimise.TileLoops.Shared
@@ -80,7 +79,7 @@ kkLoopBody
   epilogue = do
     let (map_t1, map_t2) = (pt_A, pt_B)
     kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
-    -- copy A to local memory
+    -- copy A to shared memory
     (a_loc, aCopyLoc2Reg) <-
       copyGlb2ShMem kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_init')
 
@@ -101,9 +100,9 @@ kkLoopBody
           ( do
               reg_mem <- segMap2D "reg_mem" segthd_lvl ResultPrivate (ty, tx) $
                 \(ltid_y, ltid_x) -> do
-                  -- copy A from local memory to registers
+                  -- copy A from shared memory to registers
                   asss <- aCopyLoc2Reg k ltid_y
-                  -- copy B from local memory to registers
+                  -- copy B from shared memory to registers
                   bsss <- bCopyLoc2Reg k ltid_x
                   pure $ varsRes [asss, bsss]
               let [asss, bsss] = reg_mem
@@ -140,14 +139,13 @@ kkLoopBody
       isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
         | [slc_X'] <- patNames pat,
           slc_X == slc_X',
-          Just ixf_fn <- M.lookup x ixfn_env,
-          (IxFun.IxFun lmad _) <- ixf_fn =
+          Just lmad <- M.lookup x ixfn_env =
             innerHasStride1 lmad
       isInnerCoal _ _ _ =
         error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"
       innerHasStride1 lmad =
         let lmad_dims = LMAD.dims lmad
-            stride = IxFun.ldStride $ last lmad_dims
+            stride = LMAD.ldStride $ last lmad_dims
          in stride == pe64 (intConst Int64 1)
       --
       mkRedomapOneTileBody acc_merge asss bsss fits_ij = do
@@ -438,7 +436,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
       foldl getAccumStm False $ reverse $ stmsToList acc_code
       where
         getAccumStm True _ = True
-        getAccumStm False (Let (Pat [pat_el]) _aux (BasicOp (UpdateAcc _acc_nm _ind vals)))
+        getAccumStm False (Let (Pat [pat_el]) _aux (BasicOp (UpdateAcc Safe _acc_nm _ind vals)))
           | [v] <- vals,
             patElemName pat_el == res_nm =
               v == Var redomap_orig_res

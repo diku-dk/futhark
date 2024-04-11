@@ -32,6 +32,7 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, CanBeAliased (..))
 import Futhark.IR.GPU.Sizes
+import Futhark.IR.Mem (OpReturns (..), extReturns)
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
 import Futhark.IR.TypeCheck qualified as TC
@@ -196,21 +197,6 @@ instance Rename SizeOp where
     CalcNumBlocks <$> rename w <*> pure max_num_tblocks <*> rename tblock_size
   rename x = pure x
 
-instance IsOp SizeOp where
-  safeOp _ = True
-  cheapOp _ = True
-  opDependencies op = [freeIn op]
-
-instance TypedOp SizeOp where
-  opType (GetSize _ _) = pure [Prim int64]
-  opType (GetSizeMax _) = pure [Prim int64]
-  opType CmpSizeLe {} = pure [Prim Bool]
-  opType CalcNumBlocks {} = pure [Prim int64]
-
-instance AliasedOp SizeOp where
-  opAliases _ = [mempty]
-  consumedInOp _ = mempty
-
 instance FreeIn SizeOp where
   freeIn' (CmpSizeLe _ _ x) = freeIn' x
   freeIn' (CalcNumBlocks w _ tblock_size) = freeIn' w <> freeIn' tblock_size
@@ -282,15 +268,15 @@ instance (ASTRep rep, Rename (op rep)) => Rename (HostOp op rep) where
   rename (SizeOp op) = SizeOp <$> rename op
   rename (GPUBody ts body) = GPUBody <$> rename ts <*> rename body
 
-instance (ASTRep rep, IsOp (op rep)) => IsOp (HostOp op rep) where
+instance (IsOp op) => IsOp (HostOp op) where
   safeOp (SegOp op) = safeOp op
   safeOp (OtherOp op) = safeOp op
-  safeOp (SizeOp op) = safeOp op
+  safeOp (SizeOp _) = True
   safeOp (GPUBody _ body) = all (safeExp . stmExp) $ bodyStms body
 
   cheapOp (SegOp op) = cheapOp op
   cheapOp (OtherOp op) = cheapOp op
-  cheapOp (SizeOp op) = cheapOp op
+  cheapOp (SizeOp _) = True
   cheapOp (GPUBody types body) =
     -- Current GPUBody usage only benefits from hoisting kernels that
     -- transfer scalars to device.
@@ -298,26 +284,29 @@ instance (ASTRep rep, IsOp (op rep)) => IsOp (HostOp op rep) where
 
   opDependencies (SegOp op) = opDependencies op
   opDependencies (OtherOp op) = opDependencies op
-  opDependencies op@(SizeOp {}) = [freeIn op]
+  opDependencies (SizeOp op) = [freeIn op]
   opDependencies (GPUBody _ body) =
     replicate (length . bodyResult $ body) (freeIn body)
 
-instance (TypedOp (op rep)) => TypedOp (HostOp op rep) where
+instance (TypedOp op) => TypedOp (HostOp op) where
   opType (SegOp op) = opType op
   opType (OtherOp op) = opType op
-  opType (SizeOp op) = opType op
+  opType (SizeOp (GetSize _ _)) = pure [Prim int64]
+  opType (SizeOp (GetSizeMax _)) = pure [Prim int64]
+  opType (SizeOp CmpSizeLe {}) = pure [Prim Bool]
+  opType (SizeOp (CalcNumBlocks {})) = pure [Prim int64]
   opType (GPUBody ts _) =
     pure $ staticShapes $ map (`arrayOfRow` intConst Int64 1) ts
 
-instance (Aliased rep, AliasedOp (op rep)) => AliasedOp (HostOp op rep) where
+instance (AliasedOp op) => AliasedOp (HostOp op) where
   opAliases (SegOp op) = opAliases op
   opAliases (OtherOp op) = opAliases op
-  opAliases (SizeOp op) = opAliases op
+  opAliases (SizeOp _) = [mempty]
   opAliases (GPUBody ts _) = map (const mempty) ts
 
   consumedInOp (SegOp op) = consumedInOp op
   consumedInOp (OtherOp op) = consumedInOp op
-  consumedInOp (SizeOp op) = consumedInOp op
+  consumedInOp (SizeOp _) = mempty
   consumedInOp (GPUBody _ body) = consumedInBody body
 
 instance (ASTRep rep, FreeIn (op rep)) => FreeIn (HostOp op rep) where
@@ -337,6 +326,10 @@ instance (CanBeWise op) => CanBeWise (HostOp op) where
   addOpWisdom (OtherOp op) = OtherOp $ addOpWisdom op
   addOpWisdom (SizeOp op) = SizeOp op
   addOpWisdom (GPUBody ts body) = GPUBody ts $ informBody body
+
+instance OpReturns (HostOp NoOp) where
+  opReturns (SegOp op) = segOpReturns op
+  opReturns k = extReturns <$> opType k
 
 instance (ASTRep rep, ST.IndexOp (op rep)) => ST.IndexOp (HostOp op rep) where
   indexOp vtable k (SegOp op) is = ST.indexOp vtable k op is
