@@ -1,7 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# OPTIONS_GHC -Wno-name-shadowing #-}
-{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
@@ -9,11 +6,10 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.IntMap.Strict as IM
+import Data.IntMap.Strict qualified as IM
 import Data.List qualified as L
-import Data.Map as M
-import Data.Sequence
-import Data.Set as S
+import Data.Map qualified as M
+import Data.Set qualified as S
 import Futhark.Builder.Class
 import Futhark.Construct
 import Futhark.IR.GPU
@@ -240,13 +236,11 @@ seqStm
       isOneStm _ = False
 
       mkMatchBody :: Stm GPU -> Builder GPU (Body GPU)
-      mkMatchBody stm = do
-        let (Let pat' aux' exp') = stm
+      mkMatchBody (Let pat' aux' exp') = do
         newPat <- renamePat pat'
         newExp <- renameExp exp'
         let newStm = Let newPat aux' newExp
-        let (Let pat' _ _) = newStm
-        let pNames = L.map patElemName $ patElems pat'
+        let pNames = L.map patElemName $ patElems newPat
         let res = L.map (SubExpRes mempty . Var) pNames
         pure $ Body mempty (stmsFromList [newStm]) res
 seqStm (Let pat aux (Match scrutinee cases def dec)) = do
@@ -350,14 +344,14 @@ seqStm'
     | isScatter kbody = seqScatter env stm
     | otherwise = do
         let tid = fst $ head $ unSegSpace space
-        exp <- buildSegMap' $ do
+        e <- buildSegMap' $ do
           phys <- newVName "phys_tid"
           let env' = updateEnvTid env tid
-          usedArrays <- lift $ do getUsedArraysIn env kbody
-          iot <- lift $ do buildSeqFactorIota env
-          lambSOAC <- lift $ do buildSOACLambda env' usedArrays iot kbody ts
+          usedArrays <- lift $ getUsedArraysIn env kbody
+          iot <- lift $ buildSeqFactorIota env
+          lambSOAC <- lift $ buildSOACLambda env' usedArrays iot kbody ts
           let screma = mapSOAC lambSOAC
-          chunks <- lift $ do mapM (getChunk env') usedArrays
+          chunks <- lift $ mapM (getChunk env') usedArrays
           res <- lift $ do
             letTupExp' "res" $
               Op $
@@ -369,7 +363,7 @@ seqStm'
           pure (kres, lvl, space', types')
 
         let names = patNames pat
-        lift $ do letBindNames names exp
+        lift $ do letBindNames names e
 seqStm'
   env
   ( Let
@@ -540,11 +534,7 @@ seqScatter
         -- Create the Loop expression
         let (dests, upds) =
               L.unzip $
-                L.map
-                  ( \(WriteReturns _ dest upds) ->
-                      (dest, upds)
-                  )
-                  (kernelBodyResult kbody)
+                L.map (\(WriteReturns _ dest us) -> (dest, us)) (kernelBodyResult kbody)
         loopInit <-
           forM dests $ \d -> do
             tp <- lookupType d
@@ -575,13 +565,7 @@ seqScatter
                 upds'
         let updNames = S.fromList $ L.map (\(Var n) -> n) upd''
         -- Intersect it with all pattern names from the kbody
-        let names =
-              S.fromList
-                $ L.concatMap
-                  ( \(Let pat _ _) ->
-                      patNames pat
-                  )
-                $ kernelBodyStms kbody
+        let names = S.fromList $ L.concatMap (patNames . stmPat) $ kernelBodyStms kbody
         -- The names that should have "producing statements"
         let pStms = S.toList $ S.difference updNames names
 
@@ -636,12 +620,12 @@ seqScatter
                         2 -> Slice [DimFix $ Var tid, DimFix i']
                         _ -> error "Scatter more than two dimensions"
                   addStm $ Let pat' aux' (BasicOp (Index arr' slice'))
-                stm -> addStm stm
+                _ -> addStm stm
 
             -- Potentially create more statements and create a mapping from the
             -- original name to the new subExp
             mapping <- forM pStms $ \nm -> do
-              offset <-
+              iota_offset <-
                 letSubExp "iota_offset"
                   =<< eBinOp
                     (Mul Int64 OverflowUndef)
@@ -651,7 +635,7 @@ seqScatter
                 letSubExp "iota_val"
                   =<< eBinOp
                     (Add Int64 OverflowUndef)
-                    (eSubExp offset)
+                    (eSubExp iota_offset)
                     (eSubExp i')
               pure (Var nm, val)
             let valMap = M.fromList mapping
@@ -713,10 +697,10 @@ fixReturnTypes :: Pat (LetDec GPU) -> Result -> SeqBuilder Result
 fixReturnTypes pat result = do
   let pelems = patElems pat
   let pairs = L.zip pelems result
-  mapM fix pairs
+  mapM f pairs
   where
-    fix :: (PatElem Type, SubExpRes) -> SeqBuilder SubExpRes
-    fix (pelem, subres) = do
+    f :: (PatElem Type, SubExpRes) -> SeqBuilder SubExpRes
+    f (pelem, subres) = do
       let pdec = patElemDec pelem
       sdec <- subExpResType subres
 
@@ -994,7 +978,7 @@ kbodyToBodyWithStms (KernelBody dec stms res) stms' =
   let res' = L.map (subExpRes . kernelResultSubExp) res
    in Body
         { bodyDec = dec,
-          bodyStms = stms' >< stms,
+          bodyStms = stms' <> stms,
           bodyResult = res'
         }
 
