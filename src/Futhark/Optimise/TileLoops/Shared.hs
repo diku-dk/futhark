@@ -112,9 +112,6 @@ forLoop i_bound merge body = do
 
   letTupExp "loop" $
     Loop (zip loop_inits $ map Var merge) loop_form loop_body
-  where
-    makeLoopInit m =
-      lookupType m >>= newParam (baseString m ++ "_merge") . flip toDecl Unique
 
 -- | Like forLoop, but with just one merge variable.
 forLoop_ ::

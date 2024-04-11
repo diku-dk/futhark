@@ -42,14 +42,14 @@ reductionLoopBody ::
   Builder GPU [VName]
 reductionLoopBody tc_env qq0 arrs_in = do
   let (reg_tiles_in : shr_arrs) = arrs_in
-  qq <- letSubExp "qq" =<< toExp (le64 qq0 * pe64 tq)
+  qq <- letExp "qq" =<< toExp (le64 qq0 * pe64 tq)
 
-  redomap_inputs_shr <- forM2 shr_arrs arr_metas $ copyGlb2Shr qq
+  redomap_inputs_shr <- forM2 shr_arrs arr_metas $ copyGlb2Shr (Var qq)
 
   reg_tiles_out <- forLoop_ tq reg_tiles_in $ \q reg_tiles_merge -> do
     letExp "reg_tiles"
       =<< eIf
-        (toExp $ pe64 qq + le64 q .<. pe64 len_q)
+        (toExp $ le64 qq + le64 q .<. pe64 len_q)
         (accumulateRegTile q reg_tiles_merge redomap_inputs_shr)
         (resultBodyM [Var reg_tiles_merge])
 
@@ -77,12 +77,8 @@ reductionLoopBody tc_env qq0 arrs_in = do
       letExp (baseString shr_arr) $
         WithAcc [(shmem_shape, [shr_arr], Nothing)] lam
       where
-        tile_dims = tileDims arr_meta
-        shmem_shape = Shape $ shmemDims arr_meta
-        tb_offsets = gatherFor_ (tbOffsets tc_env) qq arr_meta
-        base_arr = baseArr arr_meta
-        base_arr_dims = baseArrDims arr_meta
 
+        loopBody :: VName -> [VName] -> Builder GPU Result
         loopBody acc inds = do
           -- The shared mem indices are simply the unflattened indices, while
           -- the global mem indices need to have tblock offsets added onto them.
@@ -123,32 +119,44 @@ reductionLoopBody tc_env qq0 arrs_in = do
                   shr_arr_inds
                   [Var glb_elem]
 
-    -- TODO: document this.
+        tile_dims = tileDims arr_meta
+        shmem_shape = Shape $ shmemDims arr_meta
+        tb_offsets = gatherFor_ (tbOffsets tc_env) qq arr_meta
+        base_arr = baseArr arr_meta
+        base_arr_dims = baseArrDims arr_meta
+
+    accumulateRegTile :: VName -> VName -> [VName] -> Builder GPU (Body GPU)
     accumulateRegTile q reg_tiles_in shr_arrs = do
       reg_tiles_out <- segMapND_ "reg_tiles_out" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
         reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
         reg_tile_out <- forLoopNest_ tiles_R reg_tile_in $ \loop_inds reg_tile_merge -> do
-          dummy_ltid <- letExp "dummy_ltid_q" =<< toExp se0
-          let dummy_tile = se1
 
+          -- Compute lists of indices for each redomap operand. For each
+          -- dimension, we need an index of the form `ltid * reg_tile +
+          -- loop_ind`, so for the reduction dimension, use a dummy ltid and
+          -- reg_tile.
+          dummy_ltid <- letExp "dummy_ltid_q" =<< toExp se0
+          let dummy_regtile = se1
           shr_inds <- forM arr_metas $ \meta -> do
             let ltids' = gatherFor_ ltids dummy_ltid meta
-            let tiles_R' = gatherFor_ tiles_R dummy_tile meta
+            let tiles_R' = gatherFor_ tiles_R dummy_regtile meta
             let loop_inds' = gatherFor_ loop_inds q meta
             forM3 ltids' tiles_R' loop_inds' $ \ltid tile loop_ind ->
               letExp "shr_ind" =<< toExp (le64 ltid * pe64 tile + le64 loop_ind)
 
-          map_operands <- forM2 shr_arrs shr_inds $ \arr inds ->
-            index (baseString arr ++ "_elem") arr inds
-
-          acc <- index "acc" reg_tile_merge loop_inds
-
+          -- Compute map and reduction results and update the register tile.
           map_f <- renameLambda $ mapLam tc_env
           red_op <- renameLambda $ redLam tc_env
 
-          map_res <- eLambda map_f $ map (eSubExp . Var) map_operands
-          red_res <- eLambda red_op $ map eSubExp $ Var acc : map resSubExp map_res
+          map_operands <- forM2 shr_arrs shr_inds $ \arr inds ->
+            eSubExp . Var <$> index (baseString arr ++ "_elem") arr inds
+          map_res <- eLambda map_f map_operands
+
+          acc <- eSubExp . Var <$> index "acc" reg_tile_merge loop_inds
+          red_res <- eLambda red_op $ acc : map (eSubExp . resSubExp) map_res
+
           update "res" reg_tile_merge loop_inds $ resSubExp $ head red_res
+
         pure [varRes reg_tile_out]
 
       resultBodyM [Var reg_tiles_out]
@@ -368,15 +376,12 @@ data TCEnv = TCEnv
 
 -- | All the information needed to handle a given operand array.
 -- TODO: give a proper name to this one.
--- TODO: should this carry variant gtids?
 data ArrMeta = ArrMeta
   { baseArr :: VName,
     baseArrDims :: [SubExp],
     tileDims :: [SubExp],
     shmemDims :: [SubExp],
-    arrTbOffsets :: [SubExp],
-    variantDims_ :: [Maybe Int],
-    variantDims :: [Int],
+    variantDims :: [Maybe Int],
     arrLoadStm :: Stm GPU
   }
   deriving (Show)
@@ -391,11 +396,8 @@ gather_ xs x = map (maybe x (xs !!) . checkIdx)
       | i `elem` indices xs = Just i
     checkIdx _ = Nothing
 
-gatherFor :: [a] -> ArrMeta -> [a]
-gatherFor src arr = gather src $ variantDims arr
-
 gatherFor_ :: [a] -> a -> ArrMeta -> [a]
-gatherFor_ src x arr = gather_ src x $ variantDims_ arr
+gatherFor_ src x arr = gather_ src x $ variantDims arr
 
 makeTCKernelParams ::
   [VName] ->
@@ -500,18 +502,17 @@ makeTCEnv kernel_params load_stms map_lam red_lam red_ne = do
           -- array, the indices computed here are the same as those returned
           -- by `variantInnerDimsPerArr`, but in different order.
           let var_gtids = map (flip elemIndex inner_dims) dims
-          let var_gtids' = catMaybes var_gtids
 
           -- Then, for each dimension of each array, extract the TR tile and
           -- tblock offset corresponding to this dimension. For the tile
           -- dims, we insert tile_seq in the index of the array dim not
           -- represented in inner_dims.
           let tile_dims = gather_ tiles_TR tile_seq var_gtids
-          -- let tb_offsets' = gather tb_offsets var_gtids'
 
           let inner_dim = last tile_dims
           inner_dim_pad <-
-          --   letSubExp (baseString inner_dim ++ "_pad")
+            -- TODO: give a better name to the padded dimension.
+            -- letSubExp (baseString inner_dim ++ "_pad")
             letSubExp "inner_dim_pad"
               =<< toExp (pe64 inner_dim + pe64 se1)
           let tile_dims_pad = init tile_dims ++ [inner_dim_pad]
@@ -521,15 +522,10 @@ makeTCEnv kernel_params load_stms map_lam red_lam red_ne = do
               dims
               tile_dims
               tile_dims_pad
-              undefined -- tb_offsets'
               var_gtids
-              var_gtids'
               load_stm
       )
   where
-    -- getArraysFromLoadStm :: Stm GPU -> (VName, VName)
-    -- getArraysFromLoadStm (Let pat _ (BasicOp (Index arr _))) =
-    --   (patElemName $ head $ patElems pat, arr)
     getArrayFromLoadStm :: Stm GPU -> VName
     getArrayFromLoadStm (Let _ _ (BasicOp (Index arr _))) = arr
     getArrayFromLoadStm stm =
