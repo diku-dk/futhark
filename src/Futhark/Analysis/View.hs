@@ -126,8 +126,6 @@ forward (E.Negate (E.IntLit x _ _) _) =
   normalise . toView . SoP $ SoP.negSoP $ SoP.int2SoP x
 -- Potential substitions.
 forward e@(E.Var (E.QualName _ vn) _ _) = do
-  -- Gets previous top-level views.
-  -- traceM $ "🪲 Var " <> prettyString e
   views <- gets views
   case M.lookup vn views of
     Just v@(View _ e2) -> do
@@ -135,37 +133,17 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
       pure v
     _ ->
       pure $ View Empty (toCases $ Var vn)
-forward e@(E.AppExp (E.Index xs slice _) _)
-  | [E.DimFix idx] <- slice, -- XXX support only simple indexing for now
-    (E.Var (E.QualName _ vn) _ _) <- stripExp xs = do
-      View i e_i <- forward idx
-      -- Gets previous top-level views.
-      views <- gets views
-      case M.lookup vn views of
-        Just (View Empty xs') -> do
-          traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString xs')
-          normalise $ View i (combineCases Idx xs' e_i)
-        Just (View j xs')
-          | Just j' <- iteratorName j -> do
-          traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString xs')
-          -- Substitute j for each value in e_i, combining cases.
-          cs <- sequence $
-                  [seq' ((cx :&&) <$> substituteName j' vx cy, substituteName j' vx vy)
-                      | (cx, vx) <- casesToList e_i, (cy, vy) <- casesToList xs']
-          normalise $ View (idxCombineIt i j) (Cases . NE.fromList $ cs)
-          where
-            seq' (x, y) = do
-              x' <- x
-              y' <- y
-              pure (x', y')
-        _ -> do
-          -- TODO this is duplicated below.
-          View j xs' <- forward xs
-          normalise $ View (idxCombineIt i j) (combineCases Idx xs' e_i)
+forward (E.AppExp (E.Index xs slice _) _)
   | [E.DimFix idx] <- slice = do -- XXX support only simple indexing for now
-    View i e_i <- forward idx
-    View it_xs xs' <- forward xs
-    normalise $ View (idxCombineIt i it_xs) (combineCases Idx xs' e_i)
+      View i e_i <- forward idx
+      View j xs' <- forward xs
+      let cs = case iteratorName j of
+                 Just j' -> -- Substitute j for each value in e_i, combining cases.
+                   Cases . NE.fromList $
+                     [(ci :&& substituteName' j' vi cx, substituteName' j' vi vx)
+                       | (ci, vi) <- casesToList e_i, (cx, vx) <- casesToList xs']
+                 Nothing -> combineCases Idx xs' e_i
+      normalise $ View (idxCombineIt i j) cs
   where
     -- Special version of combineIt for substituting into
     -- indexing statements; if the destination is a scalar,

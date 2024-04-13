@@ -341,6 +341,9 @@ substituteNames' substitutions x = do
         Nothing -> pure e
     onExp subst e = astMap (substituter subst) e
 
+substituteName' :: ASTMappable x => VName -> Exp -> x -> x
+substituteName' vn x = substituteNames' (M.singleton vn x)
+
 -- Convert expression to Negation Normal Form.
 toNNF :: Exp -> Exp
 toNNF (Not (Not x)) = x

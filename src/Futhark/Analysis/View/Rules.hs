@@ -81,7 +81,7 @@ normalise view =
         -- Relies on sorting of SoP and Exp to match.
         mergeUb ([Sum j lb ub e1], 1) ([e2], 1) =
             let ubp1 = ub SoP..+. SoP.int2SoP 1
-            in  if substituteNames' (M.singleton j (SoP ubp1)) e1 == e2
+            in  if substituteName' j (SoP ubp1) e1 == e2
                 then Just ([Sum j lb ubp1 e1], 1)
                 else Nothing
         mergeUb _ _ = Nothing
@@ -89,7 +89,7 @@ normalise view =
         -- Relies on sorting of SoP and Exp to match.
         mergeLb ([Sum j lb ub e1], 1) ([e2], 1) =
             let lbm1 = lb SoP..-. SoP.int2SoP 1
-            in  if substituteNames' (M.singleton j (SoP lbm1)) e1 == e2
+            in  if substituteName' j (SoP lbm1) e1 == e2
                 then Just ([Sum j lbm1 ub e1], 1)
                 else Nothing
         mergeLb _ _ = Nothing
