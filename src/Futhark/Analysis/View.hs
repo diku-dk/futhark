@@ -135,21 +135,17 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
       pure $ View Empty (toCases $ Var vn)
 forward (E.AppExp (E.Index xs slice _) _)
   | [E.DimFix idx] <- slice = do -- XXX support only simple indexing for now
-      View i e_i <- forward idx
+      View i idx' <- forward idx
       View j xs' <- forward xs
       let cs = case iteratorName j of
-                 Just j' -> -- Substitute j for each value in e_i, combining cases.
+                 Just j' -> -- Substitute j for each value in idx', combining cases.
                    Cases . NE.fromList $
                      [(ci :&& substituteName' j' vi cx, substituteName' j' vi vx)
-                       | (ci, vi) <- casesToList e_i, (cx, vx) <- casesToList xs']
-                 Nothing -> combineCases Idx xs' e_i
-      normalise $ View (idxCombineIt i j) cs
-  where
-    -- Special version of combineIt for substituting into
-    -- indexing statements; if the destination is a scalar,
-    -- then indexing statement reduces the source iterator to Empty.
-    idxCombineIt Empty _ = Empty
-    idxCombineIt a b = combineIt a b
+                       | (ci, vi) <- casesToList idx', (cx, vx) <- casesToList xs']
+                 Nothing -> combineCases Idx xs' idx'
+      -- If the view of idx is a single point, then the resulting view
+      -- alsoshould be a single point (scalar/Empty).
+      normalise $ View (if i == Empty then Empty else combineIt i j) cs
 -- Nodes.
 forward (E.ArrayLit _es _ _) =
   -- TODO support arrays via multi-dim index functions.
