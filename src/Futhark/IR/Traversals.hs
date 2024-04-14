@@ -166,9 +166,9 @@ mapExpM tv (BasicOp (Assert e msg loc)) =
   BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
 mapExpM tv (BasicOp (Opaque op e)) =
   BasicOp <$> (Opaque op <$> mapOnSubExp tv e)
-mapExpM tv (BasicOp (UpdateAcc v is ses)) =
+mapExpM tv (BasicOp (UpdateAcc safety v is ses)) =
   BasicOp
-    <$> ( UpdateAcc
+    <$> ( UpdateAcc safety
             <$> mapOnVName tv v
             <*> mapM (mapOnSubExp tv) is
             <*> mapM (mapOnSubExp tv) ses
@@ -327,7 +327,7 @@ walkExpM tv (BasicOp (Assert e msg _)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
 walkExpM tv (BasicOp (Opaque _ e)) =
   walkOnSubExp tv e
-walkExpM tv (BasicOp (UpdateAcc v is ses)) = do
+walkExpM tv (BasicOp (UpdateAcc _ v is ses)) = do
   walkOnVName tv v
   mapM_ (walkOnSubExp tv) is
   mapM_ (walkOnSubExp tv) ses

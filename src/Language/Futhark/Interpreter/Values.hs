@@ -109,9 +109,9 @@ data Value m
 
 instance Show (Value m) where
   show (ValuePrim v) = "ValuePrim " <> show v <> ""
-  show (ValueArray shape vs) = unwords ["ValueArray", show shape, show vs]
-  show (ValueRecord fs) = "ValueRecord " <> show fs
-  show (ValueSum shape c vs) = unwords ["ValueSum", show shape, show c, show vs]
+  show (ValueArray shape vs) = unwords ["ValueArray", "(" <> show shape <> ")", "(" <> show vs <> ")"]
+  show (ValueRecord fs) = "ValueRecord " <> "(" <> show fs <> ")"
+  show (ValueSum shape c vs) = unwords ["ValueSum", "(" <> show shape <> ")", show c, "(" <> show vs <> ")"]
   show ValueFun {} = "ValueFun _"
   show ValueAcc {} = "ValueAcc _"
 

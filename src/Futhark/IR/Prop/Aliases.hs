@@ -180,7 +180,7 @@ consumedInExp (WithAcc inputs lam) =
     inputConsumed (_, arrs, _) = namesFromList arrs
 consumedInExp (BasicOp (Update _ src _ _)) = oneName src
 consumedInExp (BasicOp (FlatUpdate src _ _)) = oneName src
-consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
+consumedInExp (BasicOp (UpdateAcc _ acc _ _)) = oneName acc
 consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op
 
