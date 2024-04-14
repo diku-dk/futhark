@@ -142,7 +142,7 @@ forward (E.AppExp (E.Index xs slice _) _)
                    Cases . NE.fromList $
                      [(ci :&& substituteName' j' vi cx, substituteName' j' vi vx)
                        | (ci, vi) <- casesToList idx', (cx, vx) <- casesToList xs']
-                 Nothing -> combineCases Idx xs' idx'
+                 Nothing -> combineCases (\xs i -> Idx xs (expToSoP i)) xs' idx'
       -- If the view of idx is a single point, then the resulting view
       -- alsoshould be a single point (scalar/Empty).
       normalise $ View (if i == Empty then Empty else combineIt i j) cs

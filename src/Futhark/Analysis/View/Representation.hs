@@ -45,9 +45,9 @@ data Exp =
       (SoP Exp)   -- lower bound
       (SoP Exp)   -- upper bound
       Exp         -- indexed expression
-  | Idx -- XXX VName (SoP Exp)
-      Exp         -- array
-      Exp         -- index
+  | Idx
+      Exp         -- array -- XXX VName
+      (SoP Exp)   -- index
   | SoP (SoP Exp) -- XXX Remove!
   | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit) -- XXX (SoP Exp)
   | -- Predicate expressions follow here for simplicity.
@@ -178,7 +178,7 @@ instance ASTMappable Exp where
   --   SumSlice <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
   astMap m (Sum i lb ub e) =
     Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> mapOnExp m e
-  astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> mapOnExp m i
+  astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> astMap m i
   astMap m (SoP sop) = do
     sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
     case SoP.justSym sop' of
