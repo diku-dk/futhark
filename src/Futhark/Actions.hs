@@ -539,6 +539,8 @@ compileWebGPUAction fcfg mode outpath =
           hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
           extra_options = 
+            --[ "-DUSE_DAWN"
+            --]
             [ "-sUSE_WEBGPU",
               "-sASYNCIFY"
             ]
@@ -550,6 +552,7 @@ compileWebGPUAction fcfg mode outpath =
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CWebGPU.asExecutable cprog
+          --runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
           runEMCC cpath outpath ["-O", "-std=c99"] ["-lm"] extra_options
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CWebGPU.asServer cprog

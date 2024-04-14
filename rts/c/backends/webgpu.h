@@ -14,7 +14,8 @@ void wgpu_map_sync_callback(WGPUBufferMapAsyncStatus status, void *info_v) {
   info->released = true;
 }
 
-WGPUBufferMapAsyncStatus wgpu_map_buffer_sync(WGPUBuffer buffer,
+WGPUBufferMapAsyncStatus wgpu_map_buffer_sync(WGPUInstance instance,
+                                              WGPUBuffer buffer,
                                               WGPUMapModeFlags mode,
                                               size_t offset, size_t size) {
   WGPUBufferMapAsyncStatus status;
@@ -23,6 +24,18 @@ WGPUBufferMapAsyncStatus wgpu_map_buffer_sync(WGPUBuffer buffer,
     .result = (void *)&status,
   };
 
+#ifdef USE_DAWN
+  WGPUBufferMapCallbackInfo cb_info = {
+    .mode = WGPUCallbackMode_WaitAnyOnly,
+    .callback = wgpu_map_sync_callback,
+    .userdata = (void *) &info,
+  };
+  WGPUFuture f = wgpuBufferMapAsyncF(buffer, mode, offset, size, cb_info);
+  WGPUFutureWaitInfo f_info = { .future = f };
+  while (!info.released) {
+    wgpuInstanceWaitAny(instance, 1, &f_info, 0);
+  }
+#else
   wgpuBufferMapAsync(buffer, mode, offset, size,
                      wgpu_map_sync_callback, (void *) &info);
 
@@ -31,6 +44,7 @@ WGPUBufferMapAsyncStatus wgpu_map_buffer_sync(WGPUBuffer buffer,
   while (!info.released) {
     emscripten_sleep(0);
   }
+#endif
 
   return status;
 }
@@ -61,12 +75,25 @@ wgpu_request_adapter_result wgpu_request_adapter_sync(
     .result = (void *)&result,
   };
 
+#ifdef USE_DAWN
+  WGPURequestAdapterCallbackInfo cb_info = {
+    .mode = WGPUCallbackMode_WaitAnyOnly,
+    .callback = wgpu_request_adapter_callback,
+    .userdata = (void *) &info,
+  };
+  WGPUFuture f = wgpuInstanceRequestAdapterF(instance, options, cb_info);
+  WGPUFutureWaitInfo f_info = { .future = f };
+  while (!info.released) {
+    wgpuInstanceWaitAny(instance, 1, &f_info, 0);
+  }
+#else
   wgpuInstanceRequestAdapter(instance, options, wgpu_request_adapter_callback,
                              (void *)&info);
 
   while (!info.released) {
     emscripten_sleep(0);
   }
+#endif
 
   return result;
 }
@@ -90,19 +117,35 @@ void wgpu_request_device_callback(WGPURequestDeviceStatus status,
 }
 
 wgpu_request_device_result wgpu_request_device_sync(
-    WGPUAdapter adapter, WGPUDeviceDescriptor const * descriptor) {
+    WGPUInstance instance,
+    WGPUAdapter adapter,
+    WGPUDeviceDescriptor const * descriptor
+) {
   wgpu_request_device_result result = {};
   wgpu_wait_info info = {
     .released = false,
     .result = (void *)&result,
   };
 
+#ifdef USE_DAWN
+  WGPURequestDeviceCallbackInfo cb_info = {
+    .mode = WGPUCallbackMode_WaitAnyOnly,
+    .callback = wgpu_request_device_callback,
+    .userdata = (void *) &info,
+  };
+  WGPUFuture f = wgpuAdapterRequestDeviceF(adapter, descriptor, cb_info);
+  WGPUFutureWaitInfo f_info = { .future = f };
+  while (!info.released) {
+    wgpuInstanceWaitAny(instance, 1, &f_info, 0);
+  }
+#else
   wgpuAdapterRequestDevice(adapter, descriptor, wgpu_request_device_callback,
                            (void *)&info);
 
   while (!info.released) {
     emscripten_sleep(0);
   }
+#endif
 
   return result;
 }
@@ -114,13 +157,27 @@ void wgpu_on_work_done_callback(WGPUQueueWorkDoneStatus status,
   info->released = true;
 }
 
-WGPUQueueWorkDoneStatus wgpu_block_until_work_done(WGPUQueue queue) {
+WGPUQueueWorkDoneStatus wgpu_block_until_work_done(WGPUInstance instance,
+                                                   WGPUQueue queue) {
   WGPUQueueWorkDoneStatus status;
   wgpu_wait_info info = {
     .released = false,
     .result = (void *)&status,
   };
 
+
+#ifdef USE_DAWN
+  WGPUQueueWorkDoneCallbackInfo cb_info = {
+    .mode = WGPUCallbackMode_WaitAnyOnly,
+    .callback = wgpu_on_work_done_callback,
+    .userdata = (void *) &info,
+  };
+  WGPUFuture f = wgpuQueueOnSubmittedWorkDoneF(queue, cb_info);
+  WGPUFutureWaitInfo f_info = { .future = f };
+  while (!info.released) {
+    wgpuInstanceWaitAny(instance, 1, &f_info, 0);
+  }
+#else
   // TODO: What does the signalValue (second arg) mean here?
   wgpuQueueOnSubmittedWorkDone(queue, 0, wgpu_on_work_done_callback,
                                (void *)&info);
@@ -128,6 +185,7 @@ WGPUQueueWorkDoneStatus wgpu_block_until_work_done(WGPUQueue queue) {
   while (!info.released) {
     emscripten_sleep(0);
   }
+#endif
 
   return status;
 }
@@ -317,7 +375,8 @@ struct futhark_context {
 
 int futhark_context_sync(struct futhark_context *ctx) {
   // TODO: All the error handling stuff.
-  WGPUQueueWorkDoneStatus status = wgpu_block_until_work_done(ctx->queue);
+  WGPUQueueWorkDoneStatus status = wgpu_block_until_work_done(ctx->instance,
+                                                              ctx->queue);
   if (status != WGPUQueueWorkDoneStatus_Success) {
     futhark_panic(-1, "Failed to wait for work to be done, status: %d\n",
                   status);
@@ -419,7 +478,7 @@ int backend_context_setup(struct futhark_context *ctx) {
   ctx->adapter = adapter_result.adapter;
 
   wgpu_request_device_result device_result
-    = wgpu_request_device_sync(ctx->adapter, NULL);
+    = wgpu_request_device_sync(ctx->instance, ctx->adapter, NULL);
   if (device_result.status != WGPURequestDeviceStatus_Success) {
     if (device_result.message != NULL) {
       futhark_panic(-1, "Could not get WebGPU device, status: %d\nMessage: %s\n",
@@ -629,7 +688,8 @@ static int gpu_scalar_from_device(struct futhark_context *ctx,
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
 
   WGPUBufferMapAsyncStatus status = 
-    wgpu_map_buffer_sync(ctx->scalar_readback_buffer, WGPUMapMode_Read, 0, size);
+    wgpu_map_buffer_sync(ctx->instance, ctx->scalar_readback_buffer,
+                         WGPUMapMode_Read, 0, size);
   if (status != WGPUBufferMapAsyncStatus_Success) {
     futhark_panic(-1, "Failed to read scalar from device memory with error %d\n",
                   status);
@@ -694,7 +754,7 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
 
   // TODO: Could we do an actual async mapping here if `sync` is false?
   WGPUBufferMapAsyncStatus status = 
-    wgpu_map_buffer_sync(readback, WGPUMapMode_Read, 0, nbytes);
+    wgpu_map_buffer_sync(ctx->instance, readback, WGPUMapMode_Read, 0, nbytes);
   if (status != WGPUBufferMapAsyncStatus_Success) {
     futhark_panic(-1, "Failed to copy from device memory with error %d\n",
                   status);

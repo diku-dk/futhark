@@ -123,7 +123,11 @@ compileProg version prog = do
         { GC.opsMemoryType = webgpuMemoryType }
     webgpu_includes =
       [untrimming|
-       #include <webgpu/webgpu.h>
-       #include <emscripten.h>
-       #include <emscripten/html5_webgpu.h>
+       #ifdef USE_DAWN
+         #include <dawn/webgpu.h>
+       #else
+         #include <webgpu/webgpu.h>
+         #include <emscripten.h>
+         #include <emscripten/html5_webgpu.h>
+       #endif
       |]
