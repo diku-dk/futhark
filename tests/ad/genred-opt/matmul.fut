@@ -16,7 +16,7 @@
 --    [0.000000f64, 1.000000f64]]]]
 -- }
 
-let dotprod xs ys = f64.sum (map2 (+) xs ys)
+let dotprod xs ys = f64.sum (map2 (*) xs ys)
 
 let matmul xss yss = map (\xs -> map (dotprod xs) (transpose yss)) xss
 
