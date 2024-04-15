@@ -128,14 +128,12 @@ getBool e =
     Left _ -> error ("getBool type error on " <> show e)
     Right b -> b
 
-isBoolType :: E.Info E.PatType -> Bool
-isBoolType (E.Info {E.unInfo = info}) =
+getPrimType :: E.Info E.PatType -> Maybe E.PrimType
+getPrimType (E.Info {E.unInfo = info}) =
   case info of
-    E.Scalar scalarTypeBase -> isBoolType' scalarTypeBase
-    E.Array _ _ _ scalarTypeBase -> isBoolType' scalarTypeBase
-  where
-    isBoolType' (E.Prim E.Bool) = True
-    isBoolType' _ = False
+    E.Scalar (E.Prim t) -> Just t
+    E.Array _ _ _ (E.Prim t) -> Just t
+    _ -> Nothing
 
 normalise = pure -- XXX Remove this!
 
@@ -160,9 +158,9 @@ forward e@(E.Var (E.QualName _ vn) t _) = do
       traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
       pure v
     _ ->
-      let cs = if isBoolType t then Left . toCases . SoP.sym2SoP $ Var vn
-                               else Right . toCases $ BoolVar vn
-      in  pure $ View Empty cs
+      case getPrimType t of
+        Just E.Bool -> pure . View Empty $ Right . toCases $ BoolVar vn
+        _ -> pure . toView $ SoP.sym2SoP (Var vn)
 forward (E.AppExp (E.Index xs slice _) _)
   | [E.DimFix idx] <- slice = do -- XXX support only simple indexing for now
       View i idx' <- forward idx
