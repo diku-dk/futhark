@@ -5,7 +5,8 @@ import Data.List.NonEmpty()
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (mapMaybe, fromMaybe)
 import Futhark.Analysis.View.Representation
-import Futhark.Analysis.View.Refine
+-- import Futhark.Analysis.View.Refine
+-- import Futhark.Analysis.View.Rules
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
 import Futhark.SoP.SoP qualified as SoP
@@ -15,10 +16,11 @@ import Language.Futhark qualified as E
 import qualified Data.Map as M
 import Debug.Trace (traceM, trace)
 import qualified Data.Set as S
-import Futhark.Analysis.View.Rules
 import Language.Futhark.Traversals qualified as T
 import Data.Functor.Identity
 import Control.Monad.RWS.Strict hiding (Sum)
+import Futhark.SoP.SoP (SoP)
+import Data.Either (isRight)
 
 
 --------------------------------------------------------------
@@ -64,14 +66,22 @@ getFun :: E.Exp -> Maybe String
 getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
 getFun _ = Nothing
 
-getSize :: E.Exp -> ViewM Exp
+getSize :: E.Exp -> SoP Term
 getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape =
-    toExp dim
+    convertSize dim
 getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape =
-    toExp dim
+    convertSize dim
 getSize e = error $ "getSize:" <> prettyString e <> "\n" <> show e
+
+-- Used for converting sizes of function arguments.
+convertSize :: E.Exp -> SoP Term
+convertSize (E.Var (E.QualName _ x) _ _) = SoP.sym2SoP $ Var x
+convertSize (E.Parens e _) = convertSize e
+convertSize (E.Attr _ e _) = convertSize e
+convertSize (E.IntLit x _ _) = SoP.int2SoP x
+convertSize e = error ("convertSize not implemented for: " <> show e)
 
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
@@ -82,13 +92,14 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     traceM (prettyString p <> " = " <> prettyString e)
     newView <- forward e
     tracePrettyM newView
-    newView1 <- rewrite newView
-    tracePrettyM newView1
-    traceM "🪨 refining"
-    newView2 <- refineView newView1 >>= rewrite
-    tracePrettyM newView2
-    traceM "\n"
-    insertView x newView2
+    -- newView1 <- rewrite newView
+    -- tracePrettyM newView1
+    -- traceM "🪨 refining"
+    -- newView2 <- refineView newView1 >>= rewrite
+    -- tracePrettyM newView2
+    -- traceM "\n"
+    -- insertView x newView2
+    insertView x newView
     forwards body
     pure ()
 forwards _ = pure ()
@@ -100,39 +111,58 @@ combineIt it Empty = it
 combineIt d1 d2 | d1 == d2 = d1
 combineIt _ _ = undefined
 
-combineCases :: (Exp -> Exp -> Exp) -> Cases Exp -> Cases Exp -> Cases Exp
+combineCases :: (SoP Term -> SoP Term -> SoP Term) -> Cases (SoP Term)-> Cases (SoP Term) -> Cases (SoP Term)
 combineCases f (Cases xs) (Cases ys) =
   Cases . NE.fromList $
     [(cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
 
-casesToList :: Cases a -> [(a, a)]
+casesToList :: Cases a -> [(BoolExp, a)]
 casesToList (Cases xs) = NE.toList xs
 
-toView :: Exp -> View
-toView e = View Empty (toCases e)
+toView :: SoP Term -> View
+toView e = View Empty (Left $ toCases e)
+
+getBool :: (Show a, Show b) => Either a b -> b
+getBool e =
+  case e of
+    Left _ -> error ("getBool type error on " <> show e)
+    Right b -> b
+
+isBoolType :: E.Info E.PatType -> Bool
+isBoolType (E.Info {E.unInfo = info}) =
+  case info of
+    E.Scalar scalarTypeBase -> isBoolType' scalarTypeBase
+    E.Array _ _ _ scalarTypeBase -> isBoolType' scalarTypeBase
+  where
+    isBoolType' (E.Prim E.Bool) = True
+    isBoolType' _ = False
+
+normalise = pure -- XXX Remove this!
 
 forward :: E.Exp -> ViewM View
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 forward (E.Not e _) = do
   View it e' <- forward e
-  pure $ View it $ cmapValues (toNNF . Not) e'
+  pure $ View it $ Right $ cmapValues (toNNF . Not) (getBool e')
 -- Leaves.
 forward (E.Literal (E.BoolValue x) _) =
-  pure . toView $ Bool x
+  pure $ View Empty (Right . toCases $ Bool x)
 forward (E.IntLit x _ _) =
-  pure . toView . SoP $ SoP.int2SoP x
+  pure . toView $ SoP.int2SoP x
 forward (E.Negate (E.IntLit x _ _) _) =
-  normalise . toView . SoP $ SoP.negSoP $ SoP.int2SoP x
+  normalise . toView . SoP.negSoP $ SoP.int2SoP x
 -- Potential substitions.
-forward e@(E.Var (E.QualName _ vn) _ _) = do
+forward e@(E.Var (E.QualName _ vn) t _) = do
   views <- gets views
   case M.lookup vn views of
     Just v@(View _ e2) -> do
       traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
       pure v
     _ ->
-      pure $ View Empty (toCases $ Var vn)
+      let cs = if isBoolType t then Left . toCases . SoP.sym2SoP $ Var vn
+                               else Right . toCases $ BoolVar vn
+      in  pure $ View Empty cs
 forward (E.AppExp (E.Index xs slice _) _)
   | [E.DimFix idx] <- slice = do -- XXX support only simple indexing for now
       View i idx' <- forward idx
@@ -237,7 +267,7 @@ forward (E.AppExp (E.Apply f args _) _)
           _ -> error ("scan not implemented for bin op: " <> show vn)
       -- Note forward on indexed xs.
       View it_xs xs <- forward (index xs' i)
-      let base_case = i' :== SoP (SoP.int2SoP 0)
+      let base_case = i' :== (SoP.int2SoP 0)
       let e1 = [(base_case :&& cx, vx) | (cx, vx) <- casesToList xs]
       let e2 = [(Not base_case :&& cx, Recurrence `op` vx) | (cx, vx) <- casesToList xs]
       let it = combineIt (Forall i (Iota sz)) it_xs
@@ -300,15 +330,6 @@ forward e = error $ "forward on " <> show e
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
 getArgs = map (stripExp . snd) . NE.toList
-
--- Used for converting sizes of function arguments.
-toExp :: E.Exp -> ViewM Exp
-toExp (E.Var (E.QualName _ x) _ _) =
-  pure $ Var x
-toExp (E.Parens e _) = toExp e
-toExp (E.Attr _ e _) = toExp e
-toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
-toExp e = error ("toExp not implemented for: " <> show e)
 
 index :: E.Exp -> E.VName -> E.Exp
 index xs i =
