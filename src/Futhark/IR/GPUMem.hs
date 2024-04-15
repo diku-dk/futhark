@@ -40,18 +40,6 @@ instance RepTypes GPUMem where
 instance ASTRep GPUMem where
   expTypesFromPat = pure . map snd . bodyReturnsFromPat
 
-instance OpReturns (HostOp NoOp GPUMem) where
-  opReturns (SegOp op) = segOpReturns op
-  opReturns k = extReturns <$> opType k
-
-instance OpReturns (HostOp NoOp (Aliases GPUMem)) where
-  opReturns (SegOp op) = segOpReturns op
-  opReturns k = extReturns <$> opType k
-
-instance OpReturns (HostOp NoOp (Engine.Wise GPUMem)) where
-  opReturns (SegOp op) = segOpReturns op
-  opReturns k = extReturns <$> opType k
-
 instance PrettyRep GPUMem
 
 instance TC.Checkable GPUMem where

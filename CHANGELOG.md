@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+* Bugs related to deduplication of array payloads in sum types.
+  Unfortunately, fixed by just not deduplicating in those cases.
+
+## [0.25.15]
+
+### Added
+
+* Incremental Flattening generates fewer redundant code versions.
+
+* Better simplification of slices. (#2125)
+
+### Fixed
+
+* Ignore type suffixes when unifying expressions (#2124).
+
+* In the C API, opaque types that correspond to an array of an opaque
+  type are now once again named `futhark_opaque_arr_...`.
+
+* `cuda` backend did not correctly profile CPU-to-GPU scalar copies.
+
+## [0.25.14]
+
+### Added
+
 * The prelude definition of `filter` is now more memory efficient,
   particularly when the output is much smaller than the input. (#2109)
 
@@ -16,9 +46,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `futhark_context_config_set_unified_memory`, also available on
   executables as ``--unified-memory``.
 
-### Removed
+* The "raw" API functions now do something potentially useful, but are
+  still considered experimental.
 
-### Changed
+* `futhark --version` now reports GHC version.
 
 ### Fixed
 
@@ -35,6 +66,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Referencing an unbound type parameter could crash the type checker
   (#2113, #2114).
+
+* Futhark now works with GHC 9.8 (#2105).
 
 ## [0.25.13]
 

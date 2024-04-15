@@ -4,8 +4,8 @@
 }:
 mkDerivation {
   pname = "futhark-manifest";
-  version = "1.3.0.0";
-  sha256 = "778996f0086e35fe0c36fd2dd66cc6db0704053845ba44cfcee0d5d4c2a4df54";
+  version = "1.4.0.0";
+  sha256 = "c626568b5298abc4d1083ec9d6044962a6c4b1fc5599f6c793714ed4c3300fbb";
   libraryHaskellDepends = [ aeson base bytestring containers text ];
   testHaskellDepends = [
     base QuickCheck quickcheck-instances tasty tasty-hunit

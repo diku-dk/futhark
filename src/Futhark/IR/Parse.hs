@@ -317,9 +317,10 @@ pBasicOp =
       ArrayLit
         <$> brackets (pSubExp `sepBy` pComma)
         <*> (lexeme ":" *> "[]" *> pType),
-      keyword "update_acc"
-        *> parens
-          (UpdateAcc <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
+      do
+        safety <-
+          choice [keyword "update_acc_unsafe" $> Unsafe, keyword "update_acc" $> Safe]
+        parens (UpdateAcc safety <$> pVName <* pComma <*> pSubExps <* pComma <*> pSubExps),
       --
       pConvOp "sext" SExt pIntType pIntType,
       pConvOp "zext" ZExt pIntType pIntType,
