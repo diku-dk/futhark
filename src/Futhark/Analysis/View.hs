@@ -8,6 +8,7 @@ import Futhark.Analysis.View.Representation
 import Futhark.Analysis.View.Refine
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
+import Futhark.SoP.SoP (SoP)
 import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark.Semantic
 import Language.Futhark (VName)
@@ -100,15 +101,15 @@ combineIt it Empty = it
 combineIt d1 d2 | d1 == d2 = d1
 combineIt _ _ = undefined
 
-combineCases :: (Exp -> Exp -> Exp) -> Cases Exp -> Cases Exp -> Cases Exp
+combineCases :: (SoP Exp -> SoP Exp -> SoP Exp) -> Cases -> Cases -> Cases
 combineCases f (Cases xs) (Cases ys) =
   Cases . NE.fromList $
     [(cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
 
-casesToList :: Cases a -> [(a, a)]
+casesToList :: Cases -> [(Pred, SoP Exp)]
 casesToList (Cases xs) = NE.toList xs
 
-toView :: Exp -> View
+toView :: SoP Exp -> View
 toView e = View Empty (toCases e)
 
 forward :: E.Exp -> ViewM View
