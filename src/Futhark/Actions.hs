@@ -534,11 +534,12 @@ compileWebGPUAction fcfg mode outpath =
     }
   where
     helper prog = do
-      cprog <- handleWarnings fcfg $ CWebGPU.compileProg versionString prog
+      (cprog, exports) <-
+        handleWarnings fcfg $ CWebGPU.compileProg versionString prog
       let cpath = outpath `addExtension` "c"
-          hpath = outpath `addExtension` "h"
+          _hpath = outpath `addExtension` "h"
           jsonpath = outpath `addExtension` "json"
-          extra_options = 
+          extra_options =
             --[ "-DUSE_DAWN"
             --]
             [ "-sUSE_WEBGPU",
@@ -546,10 +547,14 @@ compileWebGPUAction fcfg mode outpath =
             ]
       case mode of
         ToLibrary -> do
-          let (header, impl, manifest) = CWebGPU.asLibrary cprog
-          liftIO $ T.writeFile hpath $ cPrependHeader header
+          let (_header, impl, manifest) = CWebGPU.asLibrary cprog
+          --liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
           liftIO $ T.writeFile jsonpath manifest
+          let exportArg = "-sEXPORTED_FUNCTIONS=" ++
+                            intercalate "," ['_' : T.unpack e | e <- exports]
+          runEMCC cpath outpath ["-O", "-std=c99"] ["-lm"]
+            (exportArg : extra_options)
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CWebGPU.asExecutable cprog
           --runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
@@ -562,7 +567,7 @@ cmdEMCFLAGS :: [String] -> [String]
 cmdEMCFLAGS def = maybe def words $ lookup "EMCFLAGS" unixEnvironment
 
 wasmFlags :: FilePath -> [String] -> Bool -> [String]
-wasmFlags classpath expfuns lib = 
+wasmFlags classpath expfuns lib =
   ["-lnodefs.js"]
   ++ ["-s", "--extern-post-js", classpath]
   ++ (if lib

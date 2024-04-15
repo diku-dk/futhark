@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.CWebGPU
 where
 
 import Data.Map qualified as M
+import Data.Maybe (mapMaybe)
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
@@ -26,12 +27,13 @@ import Futhark.IR.GPUMem hiding
     GetSizeMax,
   )
 import Futhark.MonadFreshNames
+import Futhark.Util (zEncodeText)
 import Language.C.Quote.C qualified as C
 import NeatInterpolation (untrimming)
 
 mkKernelInfos :: M.Map Name KernelInterface -> GC.CompilerM HostOp () ()
 mkKernelInfos kernels = do
-  mapM_ GC.earlyDecl 
+  mapM_ GC.earlyDecl
     [C.cunit|typedef struct wgpu_kernel_info {
                char *name;
                typename size_t num_scalars;
@@ -49,7 +51,7 @@ mkKernelInfos kernels = do
                = {$inits:info_inits};|]
   where
     num_kernels = M.size kernels
-    sc_offs_decl (n, k) = 
+    sc_offs_decl (n, k) =
       let offs = map (\o -> [C.cinit|$int:o|]) (scalarsOffsets k)
        in [C.cunit|static typename size_t $id:(n <> "_scalar_offsets")[] 
                      = {$inits:offs};|]
@@ -100,13 +102,13 @@ webgpuMemoryType "device" = pure [C.cty|typename WGPUBuffer|]
 webgpuMemoryType space = error $ "WebGPU backend does not support '" ++ space ++ "' memory space."
 
 -- | Compile the program to C with calls to WebGPU.
-compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem
+            -> m (ImpGen.Warnings, (GC.CParts, [T.Text]))
 compileProg version prog = do
   ( ws,
     Program wgsl_code wgsl_prelude macros kernels params failures prog'
     ) <- ImpGen.compileProg prog
-  (ws,)
-    <$> GC.compileProg
+  (ws,) . (,entryPointExports prog') <$> GC.compileProg
       "webgpu"
       version
       params
@@ -117,6 +119,13 @@ compileProg version prog = do
       cliOptions
       prog'
   where
+    entryPointExports prog' =
+      let Functions fs = defFuns prog'
+          entry (Function (Just (EntryPoint e _ _)) _ _ _) = Just $ 
+            "futhark_entry_" <> nameToText e
+          entry (Function Nothing _ _ _) = Nothing
+       in mapMaybe (entry . snd) fs
+      --map (zEncodeText . nameToText . ("_gpu_kernel_" <>)) (M.keys ks)
     operations :: GC.Operations HostOp ()
     operations =
       gpuOperations
