@@ -89,16 +89,11 @@ arrayLibraryFunctions pub space pt signed rank = do
       [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
 
   new_raw_body <- collect $ do
-    prepare_new
-    copy
-      CopyNoBarrier
-      [C.cexp|arr->mem.mem|]
-      [C.cexp|0|]
-      space
-      [C.cexp|data|]
-      [C.cexp|offset|]
-      space
-      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+    resetMem [C.cexp|arr->mem|] space
+    stm [C.cstm|arr->mem.mem = data;|]
+    forM_ [0 .. rank - 1] $ \i ->
+      let dim_s = "dim" ++ show i
+       in stm [C.cstm|arr->shape[$int:i] = $id:dim_s;|]
 
   free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
 
@@ -126,7 +121,7 @@ arrayLibraryFunctions pub space pt signed rank = do
   proto
     [C.cedecl|$ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params);|]
   proto
-    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, typename int64_t offset, $params:shape_params);|]
+    [C.cedecl|$ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, $params:shape_params);|]
   proto
     [C.cedecl|int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   proto
@@ -154,7 +149,7 @@ arrayLibraryFunctions pub space pt signed rank = do
             return arr;
           }
 
-          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, typename int64_t offset, $params:shape_params) {
+          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, $ty:memty data, $params:shape_params) {
             int err = 0;
             $ty:array_type* bad = NULL;
             $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
@@ -193,7 +188,9 @@ arrayLibraryFunctions pub space pt signed rank = do
       { Manifest.arrayFree = free_array,
         Manifest.arrayShape = shape_array,
         Manifest.arrayValues = values_array,
-        Manifest.arrayNew = new_array
+        Manifest.arrayNew = new_array,
+        Manifest.arrayNewRaw = new_raw_array,
+        Manifest.arrayValuesRaw = values_raw_array
       }
 
 lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType

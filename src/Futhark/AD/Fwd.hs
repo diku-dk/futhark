@@ -362,11 +362,11 @@ fwdSOAC _ _ VJP {} =
   error "fwdSOAC: nested VJP not allowed."
 
 fwdStm :: Stm SOACS -> ADM ()
-fwdStm (Let pat aux (BasicOp (UpdateAcc acc i x))) = do
+fwdStm (Let pat aux (BasicOp (UpdateAcc safety acc i x))) = do
   pat' <- bundleNewPat pat
   x' <- bundleTangents x
   acc_tan <- tangent acc
-  addStm $ Let pat' aux $ BasicOp $ UpdateAcc acc_tan i x'
+  addStm $ Let pat' aux $ BasicOp $ UpdateAcc safety acc_tan i x'
 fwdStm stm@(Let pat aux (BasicOp e)) = do
   -- XXX: this has to be too naive.
   unless (any isAcc $ patTypes pat) $

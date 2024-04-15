@@ -113,7 +113,7 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->preferred_device = strdup("");
   cfg->program = strconcat(gpu_program);
 
-  cfg->unified_memory = 2;
+  cfg->unified_memory = 0;
 
   cfg->default_block_size = 256;
   cfg->default_grid_size = 0; // Set properly later.
@@ -829,7 +829,7 @@ static int gpu_memcpy(struct futhark_context* ctx,
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
   }
   HIP_SUCCEED_OR_RETURN(hipMemcpyWithStream((unsigned char*)dst+dst_offset, (unsigned char*)src+src_offset,
-                                            nbytes, hipMemcpyDeviceToDevice ,ctx->stream));
+                                            nbytes, hipMemcpyDeviceToDevice, ctx->stream));
   if (event != NULL) {
     HIP_SUCCEED_FATAL(hipEventRecord(event->end, ctx->stream));
   }

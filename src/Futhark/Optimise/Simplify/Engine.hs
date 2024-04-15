@@ -959,10 +959,12 @@ type SimplifiableRep rep =
     TraverseOpStms (Wise rep),
     CanBeWise (OpC rep),
     ST.IndexOp (Op (Wise rep)),
-    AliasedOp (Op (Wise rep)),
+    IsOp (OpC rep),
+    ASTConstraints (OpC rep (Wise rep)),
+    AliasedOp (OpC (Wise rep)),
     RephraseOp (OpC rep),
     BuilderOps (Wise rep),
-    IsOp (Op rep)
+    IsOp (OpC rep)
   )
 
 class Simplifiable e where

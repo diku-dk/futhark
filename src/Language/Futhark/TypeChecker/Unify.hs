@@ -1152,8 +1152,10 @@ newDimOnMismatch loc t1 t2 = do
   pure (t, M.elems seen)
   where
     r = RigidCond t1 t2
+    same (e1, e2) =
+      maybe False (all same) $ similarExps e1 e2
     onDims _ d1 d2
-      | d1 == d2 = pure d1
+      | same (d1, d2) = pure d1
       | otherwise = do
           -- Remember mismatches we have seen before and reuse the
           -- same new size.

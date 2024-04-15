@@ -4,6 +4,7 @@
 # Configuration is mostly read from cabal.project.
 
 PREFIX?=$(HOME)/.local
+INSTALLBIN?=$(PREFIX)/bin/futhark
 
 UNAME:=$(shell uname)
 
@@ -25,8 +26,8 @@ build:
 	cabal build
 
 install: build
-	install -d $(PREFIX)/bin/
-	install "$$(cabal -v0 list-bin exe:futhark)" $(PREFIX)/bin/futhark
+	install -d $(shell dirname $(INSTALLBIN))
+	install "$$(cabal -v0 list-bin exe:futhark)" $(INSTALLBIN)
 
 docs:
 	cabal haddock \

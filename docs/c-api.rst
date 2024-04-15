@@ -258,16 +258,16 @@ will not result in a double free.
    call :c:func:`futhark_free_i32_1d`.  Multi-dimensional arrays are
    assumed to be in row-major form.  Returns ``NULL`` on failure.
 
-.. c:function:: struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx, char *data, int64_t offset, int64_t dim0)
+.. c:function:: struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx, char *data, int64_t dim0)
 
-   Create an array based on *raw* data, as well as an offset into it.
-   This differs little from :c:func:`futhark_i32_1d` when using the
-   ``c`` backend, but when using e.g. the ``opencl`` backend, the
-   ``data`` parameter will be a ``cl_mem``.  It is the caller's
-   responsibility to eventually call :c:func:`futhark_free_i32_1d`.
-   The ``data`` pointer must remain valid for the lifetime of the
-   array.  Unless you are very careful, this basically means for the
-   lifetime of the context.  Returns ``NULL`` on failure.
+   Create an array based on *raw* data, which is used for the
+   representation of the array. The ``data`` pointer must remain valid
+   for the lifetime of the array and will not be freed by Futhark.
+   Returns ``NULL`` on failure. The type of the ``data`` argument
+   depends on the backend, and is for example ``cl_mem`` when using
+   the OpenCL backend.
+
+   **This is an experimental and unstable interface.**
 
 .. c:function:: int futhark_free_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
@@ -288,6 +288,16 @@ will not result in a double free.
    dimension.  The lifetime of the shape is the same as ``arr``, and
    must *not* be manually freed.  Assuming ``arr`` is a valid
    object, this function cannot fail.
+
+.. c:function:: char* futhark_values_raw_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
+
+   Return a pointer to the underlying storage of the array. The return
+   type depends on the backend, and is for example ``cl_mem`` when
+   using the OpenCL backend. If using unified memory with the ``hip``
+   or ``cuda`` backends, the pointer can be accessed directly from CPU
+   code.
+
+   **This is an experimental and unstable interface.**
 
 .. _opaques:
 
@@ -521,12 +531,12 @@ The following API functions are available when using the ``opencl``,
    on the backend and hardware in use. The following values are
    supported:
 
-   * 0: never use managed memory.
+   * 0: never use unified memory (the default on ``hip``).
 
-   * 1: always use managed memory.
+   * 1: always use unified memory.
 
    * 2: use managed memory if the device claims to support it (the
-     default).
+     default on ``cuda``).
 
 Exotic
 ~~~~~~

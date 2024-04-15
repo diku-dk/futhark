@@ -361,5 +361,6 @@ transformValBind valbind = do
   body' <- transformBody $ valBindBody valbind
   pure $ valbind {valBindBody = body'}
 
+-- | Fully normalise top level bindings.
 transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
 transformProg = mapM transformValBind

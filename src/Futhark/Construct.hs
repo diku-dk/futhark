@@ -688,7 +688,7 @@ simpleMkLetNames ::
   ( ExpDec rep ~ (),
     LetDec rep ~ Type,
     MonadFreshNames m,
-    TypedOp (Op rep),
+    TypedOp (OpC rep),
     HasScope rep m
   ) =>
   [VName] ->

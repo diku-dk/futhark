@@ -167,9 +167,11 @@ type Mem rep inner =
     RetType rep ~ RetTypeMem,
     BranchType rep ~ BranchTypeMem,
     ASTRep rep,
-    OpReturns (inner rep),
+    OpReturns inner,
     RephraseOp inner,
-    Op rep ~ MemOp inner rep
+    ASTConstraints (inner rep),
+    FreeIn (inner rep),
+    OpC rep ~ MemOp inner
   )
 
 instance IsRetType FunReturns where
@@ -201,11 +203,11 @@ instance (FreeIn (inner rep)) => FreeIn (MemOp inner rep) where
   freeIn' (Alloc size _) = freeIn' size
   freeIn' (Inner k) = freeIn' k
 
-instance (TypedOp (inner rep)) => TypedOp (MemOp inner rep) where
+instance (TypedOp inner) => TypedOp (MemOp inner) where
   opType (Alloc _ space) = pure [Mem space]
   opType (Inner k) = opType k
 
-instance (AliasedOp (inner rep)) => AliasedOp (MemOp inner rep) where
+instance (AliasedOp inner) => AliasedOp (MemOp inner) where
   opAliases Alloc {} = [mempty]
   opAliases (Inner k) = opAliases k
 
@@ -233,13 +235,13 @@ instance (OpMetrics (inner rep)) => OpMetrics (MemOp inner rep) where
   opMetrics Alloc {} = seen "Alloc"
   opMetrics (Inner k) = opMetrics k
 
-instance (IsOp (inner rep)) => IsOp (MemOp inner rep) where
+instance (IsOp inner) => IsOp (MemOp inner) where
   safeOp (Alloc (Constant (IntValue (Int64Value k))) _) = k >= 0
   safeOp Alloc {} = False
   safeOp (Inner k) = safeOp k
   cheapOp (Inner k) = cheapOp k
   cheapOp Alloc {} = True
-  opDependencies op@(Alloc {}) = [freeIn op]
+  opDependencies (Alloc _ e) = [freeIn e]
   opDependencies (Inner op) = opDependencies op
 
 instance (CanBeWise inner) => CanBeWise (MemOp inner) where
@@ -1152,14 +1154,14 @@ flatSliceInfo v slice@(FlatSlice offset idxs) = do
     & pure
 
 class (IsOp op) => OpReturns op where
-  opReturns :: (Mem rep inner, Monad m, HasScope rep m) => op -> m [ExpReturns]
+  opReturns :: (Mem rep inner, Monad m, HasScope rep m) => op rep -> m [ExpReturns]
   opReturns op = extReturns <$> opType op
 
-instance (OpReturns (inner rep)) => OpReturns (MemOp inner rep) where
+instance (OpReturns inner) => OpReturns (MemOp inner) where
   opReturns (Alloc _ space) = pure [MemMem space]
   opReturns (Inner op) = opReturns op
 
-instance OpReturns (NoOp rep) where
+instance OpReturns NoOp where
   opReturns NoOp = pure []
 
 applyFunReturns ::

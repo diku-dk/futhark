@@ -316,14 +316,14 @@ interchangeWithAcc1
 
       trExp i (WithAcc acc_inputs lam) =
         WithAcc acc_inputs <$> trLam i lam
-      trExp i (BasicOp (UpdateAcc acc is ses)) = do
+      trExp i (BasicOp (UpdateAcc safety acc is ses)) = do
         acc_t <- lookupType acc
         pure $ case acc_t of
           Acc cert _ _ _
             | cert `elem` acc_certs ->
-                BasicOp $ UpdateAcc acc (i : is) ses
+                BasicOp $ UpdateAcc safety acc (i : is) ses
           _ ->
-            BasicOp $ UpdateAcc acc is ses
+            BasicOp $ UpdateAcc safety acc is ses
       trExp i e = mapExpM mapper e
         where
           mapper =

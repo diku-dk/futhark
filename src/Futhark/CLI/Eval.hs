@@ -26,6 +26,7 @@ import System.FilePath
 import System.IO
 import Prelude
 
+-- | Run @futhark eval@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions interpreterConfig options "options... <exprs...>" run
   where

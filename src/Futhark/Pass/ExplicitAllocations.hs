@@ -1040,14 +1040,15 @@ mkLetNamesB' space dec names e = do
 mkLetNamesB'' ::
   ( Mem rep inner,
     LetDec rep ~ LetDecMem,
-    OpReturns (inner (Engine.Wise rep)),
+    OpReturns inner,
     ExpDec rep ~ (),
     Rep m ~ Engine.Wise rep,
     HasScope (Engine.Wise rep) m,
     MonadBuilder m,
-    AliasedOp (inner (Engine.Wise rep)),
+    AliasedOp inner,
     RephraseOp (MemOp inner),
-    Engine.CanBeWise inner
+    Engine.CanBeWise inner,
+    ASTConstraints (inner (Engine.Wise rep))
   ) =>
   Space ->
   [VName] ->
@@ -1082,9 +1083,9 @@ simplifiable ::
     Mem (Engine.Wise rep) inner,
     Engine.CanBeWise inner,
     RephraseOp inner,
-    IsOp (inner rep),
-    OpReturns (inner (Engine.Wise rep)),
-    AliasedOp (inner (Engine.Wise rep)),
+    IsOp inner,
+    OpReturns inner,
+    AliasedOp inner,
     IndexOp (inner (Engine.Wise rep))
   ) =>
   (inner (Engine.Wise rep) -> UT.UsageTable) ->
