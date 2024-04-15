@@ -37,34 +37,36 @@ import Debug.Trace (traceM)
 data Exp =
     Var VName
   -- | SumSlice
-  --     VName        -- array
-  --     (SoP Exp)    -- lower bound
-  --     (SoP Exp)    -- upper bound
+  --     VName       -- array
+  --     (SoP Exp)   -- lower bound
+  --     (SoP Exp)   -- upper bound
   | Sum
-      VName        -- index
-      (SoP Exp)    -- lower bound
-      (SoP Exp)    -- upper bound
-      Exp          -- indexed expression
+      VName       -- index
+      (SoP Exp)   -- lower bound
+      (SoP Exp)   -- upper bound
+      Exp         -- indexed expression
   | Idx
-      Exp          -- array -- XXX VName
-      (SoP Exp)    -- index
-  | Indicator Pred -- predicate (the corresponding value of 0 or 1 is implicit)
+      Exp         -- array -- XXX VName
+      (SoP Exp)   -- index
+  | SoP (SoP Exp) -- XXX Remove!
+  | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit) -- XXX (SoP Exp)
+  | -- Predicate expressions follow here for simplicity.
+    -- I'm assuming it's safe because the source program was typechecked.
+    -- TODO CNF
+    Bool Bool
+    -- TODO change this to SoP.Rel?
+  | Not Exp
+  | (:==) Exp Exp
+  | (:<) Exp Exp
+  | (:>) Exp Exp
+  | (:/=) Exp Exp
+  | (:>=) Exp Exp
+  | (:<=) Exp Exp
+  | (:&&) Exp Exp
+  | (:||) Exp Exp
   | -- Keep Recurrence last for ordering in Ord; we depend
     -- on this for Rule matching.
     Recurrence -- self-reference y[i-1]
-  deriving (Show, Eq, Ord)
-
-data Pred =
-    Bool Bool
-  | Not Pred
-  | (:==) (SoP Exp) (SoP Exp)
-  | (:<) (SoP Exp) (SoP Exp)
-  | (:>) (SoP Exp) (SoP Exp)
-  | (:/=) (SoP Exp) (SoP Exp)
-  | (:>=) (SoP Exp) (SoP Exp)
-  | (:<=) (SoP Exp) (SoP Exp)
-  | (:&&) Pred Pred
-  | (:||) Pred Pred
   deriving (Show, Eq, Ord)
 
 data Domain = Iota Exp      -- [0, ..., n-1]
@@ -87,13 +89,13 @@ instance Eq Iterator where
   (Forall _ dom_i) == (Forall _ dom_j) = dom_i == dom_j
   _ == _ = False -- TODO
 
-newtype Cases = Cases (NE.NonEmpty (Pred, SoP Exp))
+newtype Cases a = Cases (NE.NonEmpty (a, a))
   deriving (Show, Eq)
 
 -- TODO add "bottom" for failure?
 data View = View
   { iterator :: Iterator,
-    value :: Cases
+    value :: Cases Exp
   }
   deriving (Show, Eq)
 
@@ -151,11 +153,11 @@ instance ASTMappable View where
   astMap m (View (Forall i dom) e) = View (Forall i dom) <$> astMap m e
   astMap m (View Empty e) = View Empty <$> astMap m e
 
-instance ASTMappable Cases where
+instance ASTMappable (Cases Exp) where
   astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
 
-instance ASTMappable (Pred, SoP Exp) where
-  astMap m (p, e) = (,) <$> astMap m p <*> astMap m e
+instance ASTMappable (Exp, Exp) where
+  astMap m (p, e) = (,) <$> mapOnExp m p <*> mapOnExp m e
 
 -- TODO test and think about this...
 instance ASTMappable (SoP Exp) where
@@ -164,7 +166,7 @@ instance ASTMappable (SoP Exp) where
     where
       g (ts, n) = do
         ts' <- traverse (mapOnExp m) ts
-        pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map SoP.sym2SoP ts')
+        pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map expToSoP ts')
 
 instance ASTMappable Exp where
   astMap _ Recurrence = pure Recurrence
@@ -177,21 +179,26 @@ instance ASTMappable Exp where
   astMap m (Sum i lb ub e) =
     Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> mapOnExp m e
   astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> astMap m i
-  astMap m (Indicator p) = Indicator <$> astMap m p
-
-instance ASTMappable Pred where
+  astMap m (SoP sop) = do
+    sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
+    case SoP.justSym sop' of
+      Just x -> pure x
+      Nothing -> pure $ SoP sop'
+    where
+      g (ts, n) = do
+        ts' <- traverse (mapOnExp m) ts
+        pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map expToSoP ts')
+  astMap m (Indicator p) = Indicator <$> mapOnExp m p
   astMap _ x@(Bool {}) = pure x
-  astMap m (Not x) = Not <$> astMap m x
-  -- astMap m (SoP x) = SoP <$> astMap m x
-  astMap m (x :== y) = (:==) <$> astMap m x <*> astMap m y
-  astMap m (x :< y) = (:<) <$> astMap m x <*> astMap m y
-  astMap m (x :> y) = (:>) <$> astMap m x <*> astMap m y
-  astMap m (x :/= y) = (:/=) <$> astMap m x <*> astMap m y
-  astMap m (x :>= y) = (:>=) <$> astMap m x <*> astMap m y
-  astMap m (x :<= y) = (:<=) <$> astMap m x <*> astMap m y
-  astMap m (x :&& y) = (:&&) <$> astMap m x <*> astMap m y
-  astMap m (x :|| y) = (:||) <$> astMap m x <*> astMap m y
-
+  astMap m (Not x) = Not <$> mapOnExp m x
+  astMap m (x :== y) = (:==) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :< y) = (:<) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :> y) = (:>) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :/= y) = (:/=) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :>= y) = (:>=) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :<= y) = (:<=) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :&& y) = (:&&) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :|| y) = (:||) <$> mapOnExp m x <*> mapOnExp m y
 
 idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
 idMap m = runIdentity . astMap m
@@ -214,20 +221,20 @@ instance ToSoP Exp E.Exp where
     x <- lookupUntransPE e
     pure (1, SoP.sym2SoP x)
 
--- expToSoP :: Exp -> SoP Exp
--- expToSoP e =
---   case flatten e of
---     SoP sop -> sop
---     e' -> SoP.sym2SoP e'
+expToSoP :: Exp -> SoP Exp
+expToSoP e =
+  case flatten e of
+    SoP sop -> sop
+    e' -> SoP.sym2SoP e'
 
--- (~-~) :: Exp -> Exp -> Exp
--- x ~-~ y = flatten $ SoP $ expToSoP x SoP..-. expToSoP y
+(~-~) :: Exp -> Exp -> Exp
+x ~-~ y = flatten $ SoP $ expToSoP x SoP..-. expToSoP y
 
--- (~+~) :: Exp -> Exp -> Exp
--- x ~+~ y = flatten $ SoP $ expToSoP x SoP..+. expToSoP y
+(~+~) :: Exp -> Exp -> Exp
+x ~+~ y = flatten $ SoP $ expToSoP x SoP..+. expToSoP y
 
--- (~*~) :: Exp -> Exp -> Exp
--- x ~*~ y = flatten $ SoP $ expToSoP x SoP..*. expToSoP y
+(~*~) :: Exp -> Exp -> Exp
+x ~*~ y = flatten $ SoP $ expToSoP x SoP..*. expToSoP y
 
 -- (~<~) :: Exp -> Exp -> Exp
 -- x ~<~ y = flatten $ SoP (expToSoP x) :< SoP (expToSoP y)
@@ -257,14 +264,12 @@ instance Pretty Exp where
       <> "∈"
       <> brackets (commasep [pretty lb, "...", pretty ub])
       <+> parens (pretty e)
+  pretty (SoP sop) = pretty sop
   pretty (Indicator p) = iversonbrackets (pretty p)
     where
       iversonbrackets = enclose "⟦" "⟧"
-
-instance Pretty Pred where
   pretty (Bool x) = pretty x
   pretty (Not x) = "¬" <> parens (pretty x)
-  -- pretty (SoP x) = pretty x
   pretty (x :== y) = pretty x <+> "==" <+> pretty y
   pretty (x :< y) = pretty x <+> "<" <+> pretty y
   pretty (x :> y) = pretty x <+> ">" <+> pretty y
@@ -274,7 +279,7 @@ instance Pretty Pred where
   pretty (x :&& y) = pretty x <+> "&&" <+> pretty y
   pretty (x :|| y) = pretty x <+> "||" <+> pretty y
 
-instance Pretty Cases where
+instance Pretty a => Pretty (Cases a) where
   pretty (Cases cases) = -- stack (map prettyCase (NE.toList cases))
     line <> indent 4 (stack (map prettyCase (NE.toList cases)))
     where
@@ -340,7 +345,7 @@ substituteName' :: ASTMappable x => VName -> Exp -> x -> x
 substituteName' vn x = substituteNames' (M.singleton vn x)
 
 -- Convert expression to Negation Normal Form.
-toNNF :: Pred -> Pred
+toNNF :: Exp -> Exp
 toNNF (Not (Not x)) = x
 toNNF (Not (Bool True)) = Bool False
 toNNF (Not (Bool False)) = Bool True
@@ -349,10 +354,10 @@ toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
 toNNF x = x
 
 -- A kind of map that only admits type-preserving functions.
-cmap :: ((Pred, SoP Exp) -> (Pred, SoP Exp)) -> Cases -> Cases
+cmap :: ((a, a) -> (a, a)) -> Cases a -> Cases a
 cmap f (Cases xs) = Cases (fmap f xs)
 
-cmapValues :: (SoP Exp -> SoP Exp) -> Cases -> Cases
+cmapValues :: (a -> a) -> Cases a -> Cases a
 cmapValues f = cmap (second f)
 
 getSoP :: SoP.SoP Exp -> [([Exp], Integer)]
@@ -361,5 +366,5 @@ getSoP = SoP.sopToLists . SoP.normalize
 debugM :: Applicative f => String -> f ()
 debugM x = traceM $ "🪲 " <> x
 
-toCases :: SoP Exp -> Cases
+toCases :: Exp -> Cases Exp
 toCases e = Cases (NE.singleton (Bool True, e))
