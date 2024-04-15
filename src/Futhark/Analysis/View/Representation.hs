@@ -66,7 +66,7 @@ data BoolExp =
     -- Bool could be encoded as a relation, though.
   deriving (Show, Eq, Ord)
 
-type Exp = Either (SoP Term) BoolExp
+-- type Exp = Either (SoP Term) BoolExp
 
 data Domain = Iota (SoP Term) -- [0, ..., n-1]
             | Range (SoP Term) (SoP Term) -- [from, ..., to]
@@ -88,13 +88,13 @@ instance Eq Iterator where
   (Forall _ dom_i) == (Forall _ dom_j) = dom_i == dom_j
   _ == _ = False -- TODO
 
-newtype Cases = Cases (NE.NonEmpty (BoolExp, Exp))
+newtype Cases a = Cases (NE.NonEmpty (BoolExp, a))
   deriving (Show, Eq)
 
 -- TODO add "bottom" for failure?
 data View = View
   { iterator :: Iterator,
-    value :: Cases
+    value :: Either (Cases (SoP Term)) (Cases BoolExp)
   }
   deriving (Show, Eq)
 
@@ -102,7 +102,7 @@ type Views = M.Map VName View
 
 data VEnv = VEnv
   { vnamesource :: VNameSource,
-    algenv :: AlgEnv Exp E.Exp,
+    algenv :: AlgEnv (Either BoolExp (SoP Term)) E.Exp,
     views :: Views
   }
 
@@ -140,8 +140,7 @@ insertView x v =
   modify $ \env -> env {views = M.insert x v $ views env}
 
 data ASTMapper m = ASTMapper
-  { mapOnExp :: Exp -> m Exp,
-    mapOnBoolExp :: BoolExp -> m BoolExp,
+  { mapOnBoolExp :: BoolExp -> m BoolExp,
     mapOnTerm :: Term -> m Term,
     mapOnVName :: VName -> m VName
   }
@@ -154,11 +153,25 @@ instance ASTMappable View where
   astMap m (View (Forall i dom) e) = View (Forall i dom) <$> astMap m e
   astMap m (View Empty e) = View Empty <$> astMap m e
 
-instance ASTMappable Cases where
-  astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
+instance (ASTMappable a, ASTMappable b) => ASTMappable (Either a b) where
+  astMap m (Left x) = Left <$> astMap m x
+  astMap m (Right y) = Right <$> astMap m y
 
-instance ASTMappable (BoolExp, Exp) where
-  astMap m (p, e) = (,) <$> mapOnBoolExp m p <*> mapOnExp m e
+instance ASTMappable a => ASTMappable (Cases a) where
+  astMap m (Cases xs) = Cases <$> traverse (astMap m) xs
+
+instance ASTMappable a => ASTMappable (BoolExp, a) where
+  astMap m (p, e) = (,) <$> mapOnBoolExp m p <*> astMap m e
+
+-- instance ASTMappable Cases where
+--   astMap m (Left sops) = Left <$> traverse (astMap m) sops
+--   astMap m (Right bools) = Right <$> traverse (astMap m) bools
+
+-- instance ASTMappable (BoolExp, SoP Term) where
+--   astMap m (p, e) = (,) <$> mapOnBoolExp m p <*> astMap m e
+
+-- instance ASTMappable (BoolExp, BoolExp) where
+--   astMap m (p, e) = (,) <$> mapOnBoolExp m p <*> mapOnBoolExp m e
 
 -- TODO test and think about this...
 instance ASTMappable (SoP Term) where
@@ -201,9 +214,9 @@ instance ASTMappable BoolExp where
   -- astMap m (Rel (x :<: y)) = let lol = (:<:) <$> astMap m x <*> astMap m y
   --                            in  Rel <$> lol
 
-instance ASTMappable Exp where
-  astMap m (Left sop) = Left <$> astMap m sop
-  astMap m (Right bool) = Right <$> astMap m bool
+-- instance ASTMappable Exp where
+--   astMap m (Left sop) = Left <$> astMap m sop
+--   astMap m (Right bool) = Right <$> astMap m bool
 
 -- idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
 -- idMap m = runIdentity . astMap m
@@ -286,15 +299,28 @@ instance Pretty BoolExp where
   pretty (x :>= y) = pretty x <+> ">=" <+> pretty y
   pretty (x :<= y) = pretty x <+> "<=" <+> pretty y
 
-instance Pretty Exp where
-  pretty (Left sop) = pretty sop
-  pretty (Right bool) = pretty bool
+-- instance Pretty Exp where
+--   pretty (Left sop) = pretty sop
+--   pretty (Right bool) = pretty bool
 
-instance Pretty Cases where
-  pretty (Cases cases) = -- stack (map prettyCase (NE.toList cases))
+-- prettyCases_ :: (Pretty a1, Pretty a2) => NE.NonEmpty (a1, a2) -> Doc ann
+-- prettyCases_ cases = -- stack (map prettyCase (NE.toList cases))
+--   line <> indent 4 (stack (map prettyCase (NE.toList cases)))
+--   where
+--     prettyCase (p, e) = "|" <+> pretty p <+> "=>" <+> pretty e
+-- instance Pretty Cases where
+--   pretty (Left sops) = prettyCases_ sops
+--   pretty (Right bools) = prettyCases_ bools
+
+instance Pretty a => Pretty (Cases a) where
+  pretty (Cases cases) =
     line <> indent 4 (stack (map prettyCase (NE.toList cases)))
     where
       prettyCase (p, e) = "|" <+> pretty p <+> "=>" <+> pretty e
+
+instance (Pretty a, Pretty b) => Pretty (Either (Cases a) (Cases b)) where
+  pretty (Left x) = "{L}" <+> pretty x
+  pretty (Right x) = "{R}" <+> pretty x
 
 instance Pretty Domain where
   pretty (Iota e) = "iota" <+> pretty e
@@ -344,8 +370,7 @@ substituteNames' substitutions x = do
   where
     substituter subst =
       ASTMapper
-        { mapOnExp = astMap (substituter subst),
-          mapOnTerm = onTerm subst,
+        { mapOnTerm = onTerm subst,
           mapOnBoolExp = pure,
           mapOnVName = pure
         }
@@ -369,17 +394,17 @@ toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
 toNNF x = x
 
 -- A kind of map that only admits type-preserving functions.
-cmap :: ((BoolExp, Exp) -> (BoolExp, Exp)) -> Cases -> Cases
+cmap :: ((BoolExp, a) -> (BoolExp, a)) -> Cases a -> Cases a
 cmap f (Cases xs) = Cases (fmap f xs)
 
-cmapValues :: (Exp -> Exp) -> Cases -> Cases
+cmapValues :: (a -> a) -> Cases a -> Cases a
 cmapValues f = cmap (second f)
 
-getSoP :: SoP.SoP Exp -> [([Exp], Integer)]
+getSoP :: SoP Term -> [([Term], Integer)]
 getSoP = SoP.sopToLists . SoP.normalize
 
 debugM :: Applicative f => String -> f ()
 debugM x = traceM $ "🪲 " <> x
 
-toCases :: Exp -> Cases
+toCases :: a -> Cases a
 toCases e = Cases (NE.singleton (Bool True, e))
