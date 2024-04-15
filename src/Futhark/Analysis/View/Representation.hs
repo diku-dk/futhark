@@ -57,13 +57,12 @@ data Exp =
 data Pred =
     Bool Bool
   | Not Pred
-  | SoP (SoP Exp)
-  | (:==) Pred Pred
-  | (:<) Pred Pred
-  | (:>) Pred Pred
-  | (:/=) Pred Pred
-  | (:>=) Pred Pred
-  | (:<=) Pred Pred
+  | (:==) (SoP Exp) (SoP Exp)
+  | (:<) (SoP Exp) (SoP Exp)
+  | (:>) (SoP Exp) (SoP Exp)
+  | (:/=) (SoP Exp) (SoP Exp)
+  | (:>=) (SoP Exp) (SoP Exp)
+  | (:<=) (SoP Exp) (SoP Exp)
   | (:&&) Pred Pred
   | (:||) Pred Pred
   deriving (Show, Eq, Ord)
@@ -183,7 +182,7 @@ instance ASTMappable Exp where
 instance ASTMappable Pred where
   astMap _ x@(Bool {}) = pure x
   astMap m (Not x) = Not <$> astMap m x
-  astMap m (SoP x) = SoP <$> astMap m x
+  -- astMap m (SoP x) = SoP <$> astMap m x
   astMap m (x :== y) = (:==) <$> astMap m x <*> astMap m y
   astMap m (x :< y) = (:<) <$> astMap m x <*> astMap m y
   astMap m (x :> y) = (:>) <$> astMap m x <*> astMap m y
@@ -265,7 +264,7 @@ instance Pretty Exp where
 instance Pretty Pred where
   pretty (Bool x) = pretty x
   pretty (Not x) = "¬" <> parens (pretty x)
-  pretty (SoP x) = pretty x
+  -- pretty (SoP x) = pretty x
   pretty (x :== y) = pretty x <+> "==" <+> pretty y
   pretty (x :< y) = pretty x <+> "<" <+> pretty y
   pretty (x :> y) = pretty x <+> ">" <+> pretty y

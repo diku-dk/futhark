@@ -5,7 +5,8 @@ import Data.List.NonEmpty()
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (mapMaybe, fromMaybe)
 import Futhark.Analysis.View.Representation
-import Futhark.Analysis.View.Refine
+-- import Futhark.Analysis.View.Refine
+-- import Futhark.Analysis.View.Rules
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
 import Futhark.SoP.SoP (SoP)
@@ -16,7 +17,6 @@ import Language.Futhark qualified as E
 import qualified Data.Map as M
 import Debug.Trace (traceM, trace)
 import qualified Data.Set as S
-import Futhark.Analysis.View.Rules
 import Language.Futhark.Traversals qualified as T
 import Data.Functor.Identity
 import Control.Monad.RWS.Strict hiding (Sum)
@@ -83,13 +83,14 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     traceM (prettyString p <> " = " <> prettyString e)
     newView <- forward e
     tracePrettyM newView
-    newView1 <- rewrite newView
-    tracePrettyM newView1
-    traceM "🪨 refining"
-    newView2 <- refineView newView1 >>= rewrite
-    tracePrettyM newView2
-    traceM "\n"
-    insertView x newView2
+    -- newView1 <- rewrite newView
+    -- tracePrettyM newView1
+    -- traceM "🪨 refining"
+    -- newView2 <- refineView newView1 >>= rewrite
+    -- tracePrettyM newView2
+    -- traceM "\n"
+    -- insertView x newView2
+    insertView x newView
     forwards body
     pure ()
 forwards _ = pure ()
@@ -112,19 +113,25 @@ casesToList (Cases xs) = NE.toList xs
 toView :: SoP Exp -> View
 toView e = View Empty (toCases e)
 
+-- XXX remove!
+normalise = pure
+
 forward :: E.Exp -> ViewM View
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 forward (E.Not e _) = do
   View it e' <- forward e
-  pure $ View it $ cmapValues (toNNF . Not) e'
+  pure $ View it $ cmapValues (SoP.mapSymSoP_ notIndicator) e'
+  where
+    notIndicator (Indicator x) = Indicator (toNNF . Not $ x)
+    notIndicator _ = undefined
 -- Leaves.
 forward (E.Literal (E.BoolValue x) _) =
-  pure . toView $ Bool x
+  pure . toView $ SoP.sym2SoP (Indicator (Bool x))
 forward (E.IntLit x _ _) =
-  pure . toView . SoP $ SoP.int2SoP x
+  pure . toView . SoP.int2SoP $ x
 forward (E.Negate (E.IntLit x _ _) _) =
-  normalise . toView . SoP $ SoP.negSoP $ SoP.int2SoP x
+  normalise . toView . SoP.negSoP $ SoP.int2SoP x
 -- Potential substitions.
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   views <- gets views
@@ -133,7 +140,7 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
       traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
       pure v
     _ ->
-      pure $ View Empty (toCases $ Var vn)
+      pure $ View Empty (toCases . SoP.sym2SoP $ Var vn)
 forward (E.AppExp (E.Index xs slice _) _)
   | [E.DimFix idx] <- slice = do -- XXX support only simple indexing for now
       View i idx' <- forward idx
@@ -143,7 +150,7 @@ forward (E.AppExp (E.Index xs slice _) _)
                    Cases . NE.fromList $
                      [(ci :&& substituteName' j' vi cx, substituteName' j' vi vx)
                        | (ci, vi) <- casesToList idx', (cx, vx) <- casesToList xs']
-                 Nothing -> combineCases (\xs i -> Idx xs (expToSoP i)) xs' idx'
+                 Nothing -> combineCases (\xs i -> Idx xs i) xs' idx'
       -- If the view of idx is a single point, then the resulting view
       -- alsoshould be a single point (scalar/Empty).
       normalise $ View (if i == Empty then Empty else combineIt i j) cs
@@ -238,7 +245,7 @@ forward (E.AppExp (E.Apply f args _) _)
           _ -> error ("scan not implemented for bin op: " <> show vn)
       -- Note forward on indexed xs.
       View it_xs xs <- forward (index xs' i)
-      let base_case = i' :== SoP (SoP.int2SoP 0)
+      let base_case = i' :== SoP.int2SoP 0
       let e1 = [(base_case :&& cx, vx) | (cx, vx) <- casesToList xs]
       let e2 = [(Not base_case :&& cx, Recurrence `op` vx) | (cx, vx) <- casesToList xs]
       let it = combineIt (Forall i (Iota sz)) it_xs
@@ -308,7 +315,7 @@ toExp (E.Var (E.QualName _ x) _ _) =
   pure $ Var x
 toExp (E.Parens e _) = toExp e
 toExp (E.Attr _ e _) = toExp e
-toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
+toExp (E.IntLit x _ _) = pure . SoP.int2SoP $ x
 toExp e = error ("toExp not implemented for: " <> show e)
 
 index :: E.Exp -> E.VName -> E.Exp
