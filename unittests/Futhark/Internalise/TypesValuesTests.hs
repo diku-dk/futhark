@@ -59,9 +59,9 @@ sumTypeTests =
                 ("bar", [Pure "[?0]i64"])
               ]
           )
-          @?= ( [Pure "[?0]i64"],
+          @?= ( [Pure "[?0]i64", Pure "[?0]i64"],
                 [ ("bar", [0]),
-                  ("foo", [0])
+                  ("foo", [1])
                 ]
               ),
       testCase

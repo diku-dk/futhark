@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Bugs related to deduplication of array payloads in sum types.
+  Unfortunately, fixed by just not deduplicating in those cases.
+
 ## [0.25.15]
 
 ### Added
