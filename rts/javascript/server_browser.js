@@ -3,7 +3,7 @@
 class BrowserServer {
   constructor(ctx, port) {
     this.ctx = ctx;
-    this.socket = new WebSocket("ws://localhost:" + port);
+    this.socket = new WebSocket("ws://" + window.location.host + "/ws");
     this.socket.onopen = (event) => {
       this.socket.send("A test message");
     }
@@ -27,9 +27,6 @@ async function getBufferValues(m, ctx, buf) {
 async function runServer() {
   const m = await Module();
 
-  const urlParams = new URLSearchParams(window.location.search);
-  const port = urlParams.get('port');
-  
   const cfg = m.futhark_context_config_new();
   const ctx = await m.futhark_context_new(cfg);
   
@@ -48,7 +45,7 @@ async function runServer() {
   const [outValPtr, outVals] = await getBufferValues(m, ctx, output);
   console.log("output: ", outVals, " at ", outValPtr);
 
-  const server = new BrowserServer(null, port);
+  const server = new BrowserServer(ctx);
   
   m.free(inValPtr);
   m.free(outValPtr);

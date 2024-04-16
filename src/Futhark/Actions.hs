@@ -237,6 +237,7 @@ runCC cpath outpath cflags_def ldflags = do
             ++ cmdCFLAGS cflags_def
             ++
             -- The default LDFLAGS are always added.
+            -- The default LDFLAGS are always added.
             ldflags
         )
         mempty
@@ -272,6 +273,8 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
             ++ [cpath, "-o", outpath]
             ++ cmdCFLAGS cflags_def
             ++
+            -- The default LDFLAGS are always added.
+            -- The default LDFLAGS are always added.
             -- The default LDFLAGS are always added.
             ldflags
         )
@@ -526,7 +529,7 @@ compilePyOpenCLAction fcfg mode outpath =
 
 -- | The @futhark webgpu@ action.
 compileWebGPUAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
-compileWebGPUAction fcfg mode outpath =
+compileWebGPUAction fcfg mode tgtpath =
   Action
     { actionName = "Compile to WebGPU",
       actionDescription = "Compile to WebGPU",
@@ -536,10 +539,13 @@ compileWebGPUAction fcfg mode outpath =
     helper prog = do
       (cprog, jslib, exports) <-
         handleWarnings fcfg $ CWebGPU.compileProg versionString prog
-      let cpath = outpath `addExtension` "c"
-          jslibpath = outpath `addExtension` "wrapper.js"
-          jsserverpath = outpath `addExtension` "server.js"
-          jsonpath = outpath `addExtension` "json"
+      let outpath = if takeExtension tgtpath == "js"
+                       then tgtpath
+                       else tgtpath `addExtension` "js"
+          cpath = tgtpath `addExtension` "c"
+          jslibpath = tgtpath `addExtension` "wrapper.js"
+          jsserverpath = tgtpath `addExtension` "server.js"
+          jsonpath = tgtpath `addExtension` "json"
           extra_options =
             --[ "-DUSE_DAWN"
             --]
@@ -574,7 +580,7 @@ compileWebGPUAction fcfg mode outpath =
           liftIO $ T.writeFile jsserverpath server
           let serverArgs = [ "-s", "--extern-post-js", jsserverpath ]
           -- TODO: optimization
-          runEMCC cpath outpath ["-O0", "-std=c99"] ["-lm"] 
+          runEMCC cpath outpath ["-O0", "-std=c99"] ["-lm"]
             (serverArgs ++ export_option : extra_options)
 
 cmdEMCFLAGS :: [String] -> [String]
