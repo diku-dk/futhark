@@ -7,11 +7,12 @@ module Futhark.CodeGen.Backends.CWebGPU
     GC.asLibrary,
     GC.asExecutable,
     GC.asServer,
+    asJSServer,
   )
 where
 
 import Data.Map qualified as M
-import Data.Maybe (mapMaybe)
+import Data.Maybe (maybeToList)
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
@@ -20,6 +21,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsWebGPUH)
+import Futhark.CodeGen.RTS.JavaScript (serverBrowserJs)
 import Futhark.IR.GPUMem hiding
   ( HostOp,
     CmpSizeLe,
@@ -27,9 +29,8 @@ import Futhark.IR.GPUMem hiding
     GetSizeMax,
   )
 import Futhark.MonadFreshNames
-import Futhark.Util (zEncodeText)
 import Language.C.Quote.C qualified as C
-import NeatInterpolation (untrimming)
+import NeatInterpolation (text, untrimming)
 
 mkKernelInfos :: M.Map Name KernelInterface -> GC.CompilerM HostOp () ()
 mkKernelInfos kernels = do
@@ -101,31 +102,78 @@ webgpuMemoryType :: GC.MemoryType HostOp ()
 webgpuMemoryType "device" = pure [C.cty|typename WGPUBuffer|]
 webgpuMemoryType space = error $ "WebGPU backend does not support '" ++ space ++ "' memory space."
 
--- | Compile the program to C with calls to WebGPU.
+data JsWrapper = JsWrapper T.Text T.Text [T.Text] Bool
+mkWrapper :: JsWrapper -> T.Text
+mkWrapper (JsWrapper name returnType argTypes async) =
+  [text|
+    Module['${name}'] = Module.cwrap('${name}', '${returnType}', [${args}], $opts);|]
+    where args = T.intercalate ", " argStrings
+          argStrings = 
+            map (\a -> if a == "null" then a else "'" <> a <> "'") argTypes
+          opts = if async then "{async: true}" else "undefined"
+
+-- TODO: Bad hardcoded list
+-- Note that both pointers and scalar numbers (integers and floats) both turn
+-- into 'number' in JS, so that is almost all of our types.
+-- The exception is 'array', where Emscripten's cwrap lets us pass in a native
+-- JS array that gets copied and turned into a pointer argument behind the
+-- scenes.
+builtinWrappers :: [JsWrapper]
+builtinWrappers =
+  [ JsWrapper "malloc" "number" ["number"] False,
+    JsWrapper "free" "null" ["number"] False,
+    JsWrapper "futhark_context_config_new" "number" [] False,
+    JsWrapper "futhark_context_new" "number" ["number"] True,
+    JsWrapper "futhark_context_sync" "number" ["number"] True,
+    JsWrapper "futhark_new_i32_1d" "number" ["number", "array", "number"] True,
+    JsWrapper "futhark_free_i32_1d" "number" ["number", "number"] True,
+    JsWrapper "futhark_values_i32_1d" "number" ["number", "number", "number"] True,
+    JsWrapper "futhark_shape_i32_1d" "number" ["number", "number"] False
+  ]
+
+entryWrappers :: Definitions a -> [JsWrapper]
+entryWrappers (Definitions _ _ (Functions fs)) = do
+  (_, f) <- fs
+  entry <- maybeToList (functionEntry f)
+  let name = "futhark_entry_" <> nameToText (entryPointName entry)
+  let numArgs = length (functionInput f) + length (functionOutput f)
+  pure $ JsWrapper name "number" (replicate numArgs "number") True
+
+-- | Compile the program to C with calls to WebGPU, along with a JS wrapper
+-- library.
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem
-            -> m (ImpGen.Warnings, (GC.CParts, [T.Text]))
+            -> m (ImpGen.Warnings, (GC.CParts, T.Text, [T.Text]))
 compileProg version prog = do
   ( ws,
     Program wgsl_code wgsl_prelude macros kernels params failures prog'
     ) <- ImpGen.compileProg prog
-  (ws,) . (,entryPointExports prog') <$> GC.compileProg
-      "webgpu"
-      version
-      params
-      operations
-      (mkBoilerplate (wgsl_prelude <> wgsl_code) macros kernels [] failures)
-      webgpu_includes
-      (Space "device", [Space "device", DefaultSpace])
-      cliOptions
-      prog'
+  c <- GC.compileProg
+        "webgpu"
+        version
+        params
+        operations
+        (mkBoilerplate (wgsl_prelude <> wgsl_code) macros kernels [] failures)
+        webgpu_includes
+        (Space "device", [Space "device", DefaultSpace])
+        cliOptions
+        prog'
+  let wrappers = builtinWrappers ++ entryWrappers prog'
+  let js = T.intercalate "\n" (map mkWrapper wrappers)
+  let exports = [n | JsWrapper n _ _ _ <- wrappers]
+  pure (ws, (c, js, exports))
   where
-    entryPointExports prog' =
-      let Functions fs = defFuns prog'
-          entry (Function (Just (EntryPoint e _ _)) _ _ _) = Just $ 
-            "futhark_entry_" <> nameToText e
-          entry (Function Nothing _ _ _) = Nothing
-       in mapMaybe (entry . snd) fs
-      --map (zEncodeText . nameToText . ("_gpu_kernel_" <>)) (M.keys ks)
+    --defaultExports = 
+    --  -- TODO: This is a bad hardcoded list
+    --  [ "futhark_context_config_new", "futhark_context_new",
+    --    "futhark_new_i32_1d",
+    --    "malloc", "free"
+    --  ]
+    --entryPointExports prog' =
+    --  let Functions fs = defFuns prog'
+    --      entry (Function (Just (EntryPoint e _ _)) _ _ _) = Just $ 
+    --        "futhark_entry_" <> nameToText e
+    --      entry (Function Nothing _ _ _) = Nothing
+    --   in mapMaybe (entry . snd) fs
     operations :: GC.Operations HostOp ()
     operations =
       gpuOperations
@@ -140,3 +188,10 @@ compileProg version prog = do
          #include <emscripten/html5_webgpu.h>
        #endif
       |]
+
+-- | As server script. Speaks custom server protocol to local Python server
+-- wrapper that speaks the actual server protocol.
+asJSServer :: GC.CParts -> (T.Text, T.Text)
+asJSServer parts = 
+  let (_, c, _) = GC.asLibrary parts
+   in (c, serverBrowserJs)

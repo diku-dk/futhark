@@ -534,34 +534,48 @@ compileWebGPUAction fcfg mode outpath =
     }
   where
     helper prog = do
-      (cprog, exports) <-
+      (cprog, jslib, exports) <-
         handleWarnings fcfg $ CWebGPU.compileProg versionString prog
       let cpath = outpath `addExtension` "c"
-          _hpath = outpath `addExtension` "h"
+          jslibpath = outpath `addExtension` "wrapper.js"
+          jsserverpath = outpath `addExtension` "server.js"
           jsonpath = outpath `addExtension` "json"
           extra_options =
             --[ "-DUSE_DAWN"
             --]
             [ "-sUSE_WEBGPU",
-              "-sASYNCIFY"
+              "-sASYNCIFY",
+              "-sMODULARIZE",
+              "-sEXPORTED_RUNTIME_METHODS=cwrap",
+              "-s", "--post-js", jslibpath,
+              "-gsource-map",
+              "-g3"
             ]
+          export_option = "-sEXPORTED_FUNCTIONS="
+            ++ intercalate "," ['_' : T.unpack e | e <- exports]
       case mode of
         ToLibrary -> do
           let (_header, impl, manifest) = CWebGPU.asLibrary cprog
           --liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jslibpath jslib
           liftIO $ T.writeFile jsonpath manifest
-          let exportArg = "-sEXPORTED_FUNCTIONS=" ++
-                            intercalate "," ['_' : T.unpack e | e <- exports]
           runEMCC cpath outpath ["-O", "-std=c99"] ["-lm"]
-            (exportArg : extra_options)
+            (export_option : extra_options)
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CWebGPU.asExecutable cprog
+          liftIO $ T.writeFile jslibpath jslib
           --runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
           runEMCC cpath outpath ["-O", "-std=c99"] ["-lm"] extra_options
         ToServer -> do
-          liftIO $ T.writeFile cpath $ cPrependHeader $ CWebGPU.asServer cprog
-          runEMCC cpath outpath ["-O", "-std=c99"] ["-lm"] extra_options
+          let (impl, server) = CWebGPU.asJSServer cprog
+          liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jslibpath jslib
+          liftIO $ T.writeFile jsserverpath server
+          let serverArgs = [ "-s", "--extern-post-js", jsserverpath ]
+          -- TODO: optimization
+          runEMCC cpath outpath ["-O0", "-std=c99"] ["-lm"] 
+            (serverArgs ++ export_option : extra_options)
 
 cmdEMCFLAGS :: [String] -> [String]
 cmdEMCFLAGS def = maybe def words $ lookup "EMCFLAGS" unixEnvironment

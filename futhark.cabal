@@ -67,6 +67,7 @@ extra-source-files:
     rts/cuda/prelude.cu
     rts/futhark-doc/style.css
     rts/javascript/server.js
+    rts/javascript/server_browser.js
     rts/javascript/values.js
     rts/javascript/wrapperclasses.js
     rts/opencl/copy.cl
