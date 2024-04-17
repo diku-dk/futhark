@@ -47,7 +47,8 @@ debugType s v =
 myDebug :: String -> a -> a
 myDebug s = trace $ concat [sep, "\n", s', "\n", sep]
   where
-    s' = intercalate "\n" $ map ("DEBUG: " ++) $ lines s
+    -- s' = intercalate "\n" $ map ("DEBUG: " ++) $ lines s
+    s' = s
     sep = replicate 100 '='
 
 myDebugM :: Applicative f => String -> f ()
@@ -59,8 +60,8 @@ type TileM = ReaderT (Scope GPU) (State VNameSource)
 data TileKind = TilePartial | TileFull
 
 -- | List of valid indices into a given list.
-indices :: Traversable t => t a -> [Int]
-indices xs = [0 .. length xs - 1]
+indices :: [a] -> [Int]
+indices = map fst . zip [0..]
 
 -- | Ceiled integer division expression
 ceilDiv :: (MonadBuilder m) => SubExp -> SubExp -> m (Exp (Rep m))
