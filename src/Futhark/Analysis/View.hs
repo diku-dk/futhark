@@ -293,6 +293,27 @@ forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
+      i <- newNameFromString "i"
+      -- XXX support only map over one array for now.
+      let xs = head args'
+      View iter_xs cases_xs <- forward (head args')
+      View iter_body cases_body <- forward body
+      let sz = getSize xs
+      -- Make susbtitutions from function arguments to array names.
+      let params' = map E.patNames params
+      -- TODO params' is a [Set], I assume because we might have
+      --   map (\(x, y) -> ...) xys
+      -- meaning x needs to be substituted by x[i].0
+      let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
+      let arg0 = head params''
+      -- XXX seems alright; but needs to support mapN (part2indices uses map3)
+      normalise $ sub arg0 (View iter_xs cases_xs) (View (Forall i (Iota sz)) cases_body)
+      -- debugM ("body' " <> prettyString body')
+      -- v <- newNameFromString "v"
+      -- normalise $ sub v body' (View (Forall i (Iota sz)) (toCases $ Var v))
+  | Just fname <- getFun f,
+    "oldmap" `L.isPrefixOf` fname,
+    E.Lambda params body _ _ _ : args' <- getArgs args = do
       -- traceM ("🪲 map body: " <> show body <> "\n")
       -- 0. Create iterator and transform expression to use it
       i <- newNameFromString "i"
