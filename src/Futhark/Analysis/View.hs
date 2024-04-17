@@ -20,7 +20,7 @@ import Language.Futhark.Traversals qualified as T
 import Data.Functor.Identity
 import Control.Monad.RWS.Strict hiding (Sum)
 import Futhark.SoP.SoP (SoP)
-import Data.Either (isRight)
+import Data.Either (isRight, fromLeft)
 
 
 --------------------------------------------------------------
@@ -137,6 +137,19 @@ getPrimType (E.Info {E.unInfo = info}) =
 
 normalise = pure -- XXX Remove this!
 
+combineIdx :: View -> View -> Either (Cases (SoP Term)) (Cases BoolExp)
+combineIdx (View iter_xs (Left xs)) (View iter_idx (Left idx))
+  | Just i <- iteratorName iter_xs =
+    Left . Cases . NE.fromList $
+      [(ci :&& substituteName' i vi cx, substituteName' i vi vx)
+          | (ci, vi) <- casesToList idx, (cx, vx) <- casesToList xs]
+combineIdx (View iter_xs (Left xs)) (View iter_idx (Left idx))
+  | Nothing <- iteratorName iter_xs =
+    undefined
+combineIdx (View i (Right xs)) (View j (Left idx)) =
+  undefined
+combineIdx _ _ = error "subIdx: Type error: indices must be SoP."
+
 forward :: E.Exp -> ViewM View
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
@@ -162,14 +175,15 @@ forward e@(E.Var (E.QualName _ vn) t _) = do
         Just E.Bool -> pure . View Empty $ Right . toCases $ BoolVar vn
         _ -> pure . toView $ SoP.sym2SoP (Var vn)
 forward (E.AppExp (E.Index xs slice _) _)
-  | [E.DimFix idx] <- slice = do -- XXX support only simple indexing for now
-      View i idx' <- forward idx
+  | [E.DimFix idx''] <- slice = do -- XXX support only simple indexing for now
+      View i idx' <- forward idx''
+      let idx = fromLeft (error "type error") idx'
       View j xs' <- forward xs
       let cs = case iteratorName j of
                  Just j' -> -- Substitute j for each value in idx', combining cases.
                    Cases . NE.fromList $
                      [(ci :&& substituteName' j' vi cx, substituteName' j' vi vx)
-                       | (ci, vi) <- casesToList idx', (cx, vx) <- casesToList xs']
+                       | (ci, vi) <- casesToList idx, (cx, vx) <- casesToList xs']
                  Nothing -> combineCases (\xs i -> Idx xs (expToSoP i)) xs' idx'
       -- If the view of idx is a single point, then the resulting view
       -- alsoshould be a single point (scalar/Empty).

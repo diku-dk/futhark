@@ -1,9 +1,9 @@
--- Task: Create automated test suite.
 -- Task: refactor forward to decouple it from substitution logic.
 -- Task: Change representation to more restricted one
 --   where Exp is a leaf/term in an SoP and cases are
 --   of type (Exp, SoP Exp). Possibly rename Exp lol.
 --   Use SoP.Rel for relations?
+-- Task: Simplify+normalise while building views with forward.
 -- Task: mkFlagArray
 --   [ ] Extend representation to allow Union iterator
 --   [ ] Support necessary scatter rule
@@ -33,6 +33,15 @@ import Data.List.NonEmpty qualified as NE
 import Futhark.SoP.Monad
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Debug.Trace (traceM)
+
+-- ys = Forall i. xs[SoP i+1]
+-- zs = Forall j. ys[SoP (sum [0,...,j])]
+
+-- Substitute i for SoP (sum [0,...,j]):
+--   zs = Forall j. xs[SoP (SoP (sum [0,...,j])) + 1]
+-- requires knowing something about the context that i is in
+-- because we must immediately flatten to:
+--   zs = Forall j. xs[SoP (sum [0,...,j]) + 1]
 
 data Term =
     Var VName
