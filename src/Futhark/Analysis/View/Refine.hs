@@ -95,7 +95,7 @@ refineView (View it (Cases cases)) = do
       sop <- substEquivs $ expToSoP $ Var vn
       case getSoP sop of
         [([Var x], 1)] -> pure $ Var x
-        _ -> pure $ SoP sop
+        _ -> pure $ SoP2 sop
       -- pure (Var vn)
     refineExp e@(x :== y) = do
       b <- expToSoP x $==$ expToSoP y

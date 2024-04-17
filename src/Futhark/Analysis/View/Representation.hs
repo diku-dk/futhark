@@ -32,7 +32,7 @@ import Control.Monad.RWS.Strict hiding (Sum)
 import Data.List.NonEmpty qualified as NE
 import Futhark.SoP.Monad
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Debug.Trace (traceM)
+import Debug.Trace (traceM, trace)
 
 data Exp =
     Var VName
@@ -48,8 +48,8 @@ data Exp =
   | Idx
       Exp         -- array -- XXX VName
       (SoP Exp)   -- index
-  | SoP (SoP Exp) -- XXX Remove!
-  | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit) -- XXX (SoP Exp)
+  | SoP2 (SoP Exp) -- XXX Remove!
+  | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit)
   | -- Predicate expressions follow here for simplicity.
     -- I'm assuming it's safe because the source program was typechecked.
     -- TODO CNF
@@ -179,11 +179,11 @@ instance ASTMappable Exp where
   astMap m (Sum i lb ub e) =
     Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> mapOnExp m e
   astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> astMap m i
-  astMap m (SoP sop) = do
+  astMap m (SoP2 sop) = do
     sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
     case SoP.justSym sop' of
       Just x -> pure x
-      Nothing -> pure $ SoP sop'
+      Nothing -> pure $ SoP2 sop'
     where
       g (ts, n) = do
         ts' <- traverse (mapOnExp m) ts
@@ -224,17 +224,17 @@ instance ToSoP Exp E.Exp where
 expToSoP :: Exp -> SoP Exp
 expToSoP e =
   case flatten e of
-    SoP sop -> sop
+    SoP2 sop -> sop
     e' -> SoP.sym2SoP e'
 
 (~-~) :: Exp -> Exp -> Exp
-x ~-~ y = flatten $ SoP $ expToSoP x SoP..-. expToSoP y
+x ~-~ y = flatten $ SoP2 $ expToSoP x SoP..-. expToSoP y
 
 (~+~) :: Exp -> Exp -> Exp
-x ~+~ y = flatten $ SoP $ expToSoP x SoP..+. expToSoP y
+x ~+~ y = flatten $ SoP2 $ expToSoP x SoP..+. expToSoP y
 
 (~*~) :: Exp -> Exp -> Exp
-x ~*~ y = flatten $ SoP $ expToSoP x SoP..*. expToSoP y
+x ~*~ y = flatten $ SoP2 $ expToSoP x SoP..*. expToSoP y
 
 -- (~<~) :: Exp -> Exp -> Exp
 -- x ~<~ y = flatten $ SoP (expToSoP x) :< SoP (expToSoP y)
@@ -264,7 +264,7 @@ instance Pretty Exp where
       <> "∈"
       <> brackets (commasep [pretty lb, "...", pretty ub])
       <+> parens (pretty e)
-  pretty (SoP sop) = pretty sop
+  pretty (SoP2 sop) = pretty sop
   pretty (Indicator p) = iversonbrackets (pretty p)
     where
       iversonbrackets = enclose "⟦" "⟧"
@@ -305,27 +305,8 @@ instance Pretty Views where
   pretty env =
     stack $ map (\(a, b) -> pretty a <+> "=" <+> pretty b) $ M.toList env
 
-substituteNames :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
+substituteNames :: ASTMappable x => M.Map VName Exp -> x -> x
 substituteNames substitutions x = do
-  pure $ runIdentity $ astMap (substituter substitutions) x
-  where
-    substituter subst =
-      ASTMapper
-        { mapOnExp = onExp subst,
-          mapOnVName = pure
-        }
-    onExp subst e@(Var x') =
-      case M.lookup x' subst of
-        Just x'' -> pure x''
-        Nothing -> pure e
-    onExp subst e = astMap (substituter subst) e
-
-substituteName :: ASTMappable x => VName -> Exp -> x -> ViewM x
-substituteName vn x = substituteNames (M.singleton vn x)
-
--- TODO keep this or the monadic one...
-substituteNames' :: ASTMappable x => M.Map VName Exp -> x -> x
-substituteNames' substitutions x = do
   runIdentity $ astMap (substituter substitutions) x
   where
     substituter subst =
@@ -341,8 +322,8 @@ substituteNames' substitutions x = do
         Nothing -> pure e
     onExp subst e = astMap (substituter subst) e
 
-substituteName' :: ASTMappable x => VName -> Exp -> x -> x
-substituteName' vn x = substituteNames' (M.singleton vn x)
+substituteName :: ASTMappable x => VName -> Exp -> x -> x
+substituteName vn x = substituteNames (M.singleton vn x)
 
 -- Convert expression to Negation Normal Form.
 toNNF :: Exp -> Exp
@@ -365,6 +346,9 @@ getSoP = SoP.sopToLists . SoP.normalize
 
 debugM :: Applicative f => String -> f ()
 debugM x = traceM $ "🪲 " <> x
+
+debug :: String -> a -> a
+debug msg = trace ("🪲 " <> msg)
 
 toCases :: Exp -> Cases Exp
 toCases e = Cases (NE.singleton (Bool True, e))

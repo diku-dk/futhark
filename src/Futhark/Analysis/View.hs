@@ -64,14 +64,22 @@ getFun :: E.Exp -> Maybe String
 getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
 getFun _ = Nothing
 
-getSize :: E.Exp -> ViewM Exp
+getSize :: E.Exp -> Exp
 getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape =
-    toExp dim
+    convertSize dim
 getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape =
-    toExp dim
+    convertSize dim
 getSize e = error $ "getSize:" <> prettyString e <> "\n" <> show e
+
+-- Used for converting sizes of function arguments.
+convertSize :: E.Exp -> Exp
+convertSize (E.Var (E.QualName _ x) _ _) = Var x
+convertSize (E.Parens e _) = convertSize e
+convertSize (E.Attr _ e _) = convertSize e
+convertSize (E.IntLit x _ _) = SoP2 $ SoP.int2SoP x
+convertSize e = error ("convertSize not implemented for: " <> show e)
 
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
@@ -82,6 +90,7 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     traceM (prettyString p <> " = " <> prettyString e)
     newView <- forward e
     tracePrettyM newView
+    traceM (show newView)
     newView1 <- rewrite newView
     tracePrettyM newView1
     traceM "🪨 refining"
@@ -111,6 +120,48 @@ casesToList (Cases xs) = NE.toList xs
 toView :: Exp -> View
 toView e = View Empty (toCases e)
 
+-- Substitution rules for indexing. These are the rules
+-- shown in the document. (All other substitutions are
+-- an implementation detail because we don't have the program
+-- in administrative normal form.)
+sub :: VName -> View -> View -> View
+sub x q@(View (Forall i xD) xs) r@(View (Forall j yD) ys)
+  | xD == yD =
+  -- Substitution Rule 1 where y indexes x.
+    debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n   in " <> prettyString r) $ View
+      (Forall j yD)
+      (Cases . NE.fromList $ do
+        (xcond, xval) <- casesToList $ substituteName i (Var j) xs
+        (ycond, yval) <- casesToList ys
+        pure (substituteName x xval ycond :&& xcond,
+              substituteName x xval yval))
+sub x q@(View Empty xs) r@(View (Forall j yD) ys) =
+  -- No rule in document (substituting scalar into index function).
+  debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n   in " <> prettyString r) $
+    View
+      (Forall j yD)
+      (Cases . NE.fromList $ do
+        (xcond, xval) <- casesToList xs
+        (ycond, yval) <- casesToList ys
+        pure (substituteName x xval ycond :&& xcond,
+              substituteName x xval yval))
+sub x q@(View Empty xs) r@(View Empty ys) =
+  -- No rule in document (substituting scalar into scalar).
+  -- NOTE this can be merged with the above case.
+  debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n   in " <> prettyString r) $
+    View
+      Empty
+      (Cases . NE.fromList $ do
+        (xcond, xval) <- casesToList xs
+        (ycond, yval) <- casesToList ys
+        pure (substituteName x xval ycond :&& xcond,
+              substituteName x xval yval))
+sub x q r =
+  error $ "💀 sub "
+          <> prettyString x <> " for "
+          <> prettyString q <> "\n   in "
+          <> prettyString r
+
 forward :: E.Exp -> ViewM View
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
@@ -121,9 +172,9 @@ forward (E.Not e _) = do
 forward (E.Literal (E.BoolValue x) _) =
   pure . toView $ Bool x
 forward (E.IntLit x _ _) =
-  pure . toView . SoP $ SoP.int2SoP x
+  pure . toView . SoP2 $ SoP.int2SoP x
 forward (E.Negate (E.IntLit x _ _) _) =
-  normalise . toView . SoP $ SoP.negSoP $ SoP.int2SoP x
+  normalise . toView . SoP2 $ SoP.negSoP $ SoP.int2SoP x
 -- Potential substitions.
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   views <- gets views
@@ -133,19 +184,58 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
       pure v
     _ ->
       pure $ View Empty (toCases $ Var vn)
-forward (E.AppExp (E.Index xs slice _) _)
-  | [E.DimFix idx] <- slice = do -- XXX support only simple indexing for now
-      View i idx' <- forward idx
-      View j xs' <- forward xs
-      let cs = case iteratorName j of
-                 Just j' -> -- Substitute j for each value in idx', combining cases.
-                   Cases . NE.fromList $
-                     [(ci :&& substituteName' j' vi cx, substituteName' j' vi vx)
-                       | (ci, vi) <- casesToList idx', (cx, vx) <- casesToList xs']
-                 Nothing -> combineCases (\xs i -> Idx xs (expToSoP i)) xs' idx'
-      -- If the view of idx is a single point, then the resulting view
-      -- alsoshould be a single point (scalar/Empty).
-      normalise $ View (if i == Empty then Empty else combineIt i j) cs
+forward (E.AppExp (E.Index xs' slice _) _)
+  | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
+      View iter_idx idx <- forward idx'
+      View iter_xs xs <- forward xs'
+      i <- newNameFromString "i"
+      debugM ("index " <> prettyString xs' <> " by " <> prettyString idx')
+      case iteratorName iter_xs of
+        Just j -> do
+          -- XXX Something is wrong here when building view for
+          --
+          -- def f [n] 't (x: [n]i64) : {[n]i64 | \res-> permutationOf res (0...n-1)} =
+          --   let a = scan (+) 0i64 x
+          --   let iota_n = iota n
+          --   let b = map (\i -> a[i]) iota_n
+          --   in b
+          --
+          -- 🪲 index iota_n by i
+          -- 🪲 sub i_6108 for .
+          --     | True => i₆₁₀₉
+          --    in ∀i₆₁₀₈ ∈ iota n₆₀₆₈ .
+          --     | True => i₆₁₀₈
+          -- ...
+          -- 🪲 index a by iota_n[i]
+          -- 🪲 sub i_6103 for ∀i₆₁₀₈ ∈ iota n₆₀₆₈ .
+          --     | True => i₆₁₀₉
+          --
+          -- Note that the iterator does not match the value.
+          -- The first substitution, however, is due to how I handle
+          -- scan/map initially---forward is not run on the args,
+          -- instead I index the arg (array) in E.Exp format.
+          -- Fix that and come back here.
+          --
+          -- In particular, I would expect that I can make
+          -- iter_idx take precedence over iter_xs as iter_idx
+          -- is the "destination" (i.e., xs[0] results in just
+          -- a scalar; the iterator of View Empty . |True => 0.)
+          -- Right now iter_xs is the destination. This is _wrong_
+          -- but works for most programs.
+          normalise $ sub j (View iter_idx idx) (View iter_xs xs)
+          -- x <- newNameFromString "x"
+          -- let y = View iter_idx (toCases $ Var x)
+          -- debugM (prettyString (View iter_xs xs))
+          -- let y' = sub x (View iter_xs xs) y
+          -- normalise $ sub i (View iter_idx idx) y'
+        Nothing -> do
+          -- xs is a variable or array literal.
+          x <- newNameFromString "x"
+          let y = View iter_idx
+                       (Cases . NE.singleton $ (Bool True,
+                                                Idx (Var x) (expToSoP $ Var i)))
+          let y' = sub i (View iter_idx idx) y
+          normalise $ sub x (View iter_xs xs) y'
 -- Nodes.
 forward (E.ArrayLit _es _ _) =
   -- TODO support arrays via multi-dim index functions.
@@ -210,7 +300,7 @@ forward (E.AppExp (E.Apply f args _) _)
       -- Add support for any expression by creating views for function
       -- applications. Literals also need to be handled.
       -- After this, maybe don't use mapMaybe in arrs below.
-      sz <- getSize (head args')
+      let sz = getSize (head args')
       -- Make susbtitutions from function arguments to array names.
       let params' = map E.patNames params
       -- TODO params' is a [Set], I assume because we might have
@@ -226,7 +316,7 @@ forward (E.AppExp (E.Apply f args _) _)
       normalise $ View it body''
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
-      sz <- getSize xs'
+      let sz = getSize xs'
       i <- newNameFromString "i"
       let i' = Var i
       op <-
@@ -237,11 +327,17 @@ forward (E.AppExp (E.Apply f args _) _)
           _ -> error ("scan not implemented for bin op: " <> show vn)
       -- Note forward on indexed xs.
       View it_xs xs <- forward (index xs' i)
-      let base_case = i' :== SoP (SoP.int2SoP 0)
-      let e1 = [(base_case :&& cx, vx) | (cx, vx) <- casesToList xs]
-      let e2 = [(Not base_case :&& cx, Recurrence `op` vx) | (cx, vx) <- casesToList xs]
-      let it = combineIt (Forall i (Iota sz)) it_xs
-      normalise $ View it (Cases . NE.fromList $ e1 ++ e2)
+      let base_case = i' :== SoP2 (SoP.int2SoP 0)
+      x <- newNameFromString "x"
+      let y = View
+                (Forall i (Iota sz))
+                (Cases . NE.fromList $
+                  [(base_case, Var x), (Not base_case, Recurrence `op` Var x)])
+      normalise $ sub x (View it_xs xs) y
+      -- let e1 = [(base_case :&& cx, vx) | (cx, vx) <- casesToList xs]
+      -- let e2 = [(Not base_case :&& cx, Recurrence `op` vx) | (cx, vx) <- casesToList xs]
+      -- let it = combineIt (Forall i (Iota sz)) it_xs
+      -- normalise $ View it (Cases . NE.fromList $ e1 ++ e2)
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
       -- Scatter in-bounds-monotonic indices.
@@ -300,15 +396,6 @@ forward e = error $ "forward on " <> show e
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
 getArgs = map (stripExp . snd) . NE.toList
-
--- Used for converting sizes of function arguments.
-toExp :: E.Exp -> ViewM Exp
-toExp (E.Var (E.QualName _ x) _ _) =
-  pure $ Var x
-toExp (E.Parens e _) = toExp e
-toExp (E.Attr _ e _) = toExp e
-toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
-toExp e = error ("toExp not implemented for: " <> show e)
 
 index :: E.Exp -> E.VName -> E.Exp
 index xs i =

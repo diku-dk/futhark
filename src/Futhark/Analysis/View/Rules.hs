@@ -42,10 +42,10 @@ normalise view =
         (Bool False, b) -> pure b
         (a, Bool False) -> pure a
         (a, b) -> pure $ a :|| b
-    normExp x@(SoP _) = do
+    normExp x@(SoP2 _) = do
       x' <- astMap m x
       case x' of
-        SoP sop -> pure . SoP . normaliseNegation . mergeSums $ sop
+        SoP2 sop -> pure . SoP2 . normaliseNegation . mergeSums $ sop
         _ -> pure x'
       where
         -- TODO extend this to find any 1 + -1*[[c]] without them being adjacent
@@ -81,7 +81,7 @@ normalise view =
         -- Relies on sorting of SoP and Exp to match.
         mergeUb ([Sum j lb ub e1], 1) ([e2], 1) =
             let ubp1 = ub SoP..+. SoP.int2SoP 1
-            in  if substituteName' j (SoP ubp1) e1 == e2
+            in  if substituteName j (SoP2 ubp1) e1 == e2
                 then Just ([Sum j lb ubp1 e1], 1)
                 else Nothing
         mergeUb _ _ = Nothing
@@ -89,7 +89,7 @@ normalise view =
         -- Relies on sorting of SoP and Exp to match.
         mergeLb ([Sum j lb ub e1], 1) ([e2], 1) =
             let lbm1 = lb SoP..-. SoP.int2SoP 1
-            in  if substituteName' j (SoP lbm1) e1 == e2
+            in  if substituteName j (SoP2 lbm1) e1 == e2
                 then Just ([Sum j lbm1 ub e1], 1)
                 else Nothing
         mergeLb _ _ = Nothing
@@ -141,9 +141,9 @@ simplifyRule3 (View it (Cases cases))
             preds
             sops
   in  trace "👀 Using Simplification Rule 3" $
-        pure $ View it $ Cases (NE.singleton (Bool True, SoP sumOfIndicators))
+        pure $ View it $ Cases (NE.singleton (Bool True, SoP2 sumOfIndicators))
   where
-    justConstant (SoP sop) = SoP.justConstant sop
+    justConstant (SoP2 sop) = SoP.justConstant sop
     justConstant _ = Nothing
 simplifyRule3 v = pure v
 
@@ -164,18 +164,18 @@ rewriteRule4 (View it@(Forall i'' (Iota _)) (Cases cases))
     Just x' <- justTermPlusRecurence x,
     i == i',
     i == i'',
-    b == SoP (SoP.int2SoP 0), -- Domain is iota so b must be 0.
+    b == SoP2 (SoP.int2SoP 0), -- Domain is iota so b must be 0.
     b == b' = do
       traceM "👀 Using Rule 4 (recursive sum)"
       let lb = expToSoP b SoP..+. SoP.int2SoP 1 -- XXX change once Idx changes
       let ub = SoP.sym2SoP (Var i) -- XXX change once Idx changes
       j <- newNameFromString "j"
-      base <- substituteName i b e
-      x'' <- substituteName i (Var j) x'
+      let base = substituteName i b e
+      let x'' = substituteName i (Var j) x'
       pure $ View it (toCases $ base ~+~ Sum j lb ub x'')
   where
     justTermPlusRecurence :: Exp -> Maybe Exp
-    justTermPlusRecurence (SoP sop)
+    justTermPlusRecurence (SoP2 sop)
       | [([x], 1), ([Recurrence], 1)] <- getSoP sop =
           Just x
     justTermPlusRecurence _ = Nothing
