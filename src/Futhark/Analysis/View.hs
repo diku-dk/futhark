@@ -100,14 +100,11 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     traceM (prettyString p <> " = " <> prettyString e)
     newView <- forward e
     tracePrettyM newView
-    traceM (show newView)
-    newView1 <- rewrite newView
-    tracePrettyM newView1
     traceM "🪨 refining"
-    newView2 <- refineView newView1 >>= rewrite
-    tracePrettyM newView2
+    newView' <- rewrite newView >>= refineView >>= rewrite
+    tracePrettyM newView'
     traceM "\n"
-    insertView x newView2
+    insertView x newView'
     forwards body
     pure ()
 forwards _ = pure ()
@@ -116,9 +113,6 @@ forwards _ = pure ()
 forward :: E.Exp -> ViewM View
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
-forward (E.Not e _) = do
-  View it e' <- forward e
-  normalise $ View it $ cmapValues Not e'
 -- Leaves.
 forward (E.Literal (E.BoolValue x) _) =
   normalise . toScalarView $ Bool x
@@ -126,7 +120,6 @@ forward (E.IntLit x _ _) =
   normalise . toScalarView . SoP2 $ SoP.int2SoP x
 forward (E.Negate (E.IntLit x _ _) _) =
   normalise . toScalarView . SoP2 $ SoP.negSoP $ SoP.int2SoP x
--- Potential substitions.
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   views <- gets views
   case M.lookup vn views of
@@ -143,6 +136,7 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
         Nothing ->
           -- Canonical scalar representation.
           normalise $ View Empty (toCases $ Var vn)
+-- Nodes.
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
       View iter_idx idx <- forward idx'
@@ -168,16 +162,18 @@ forward (E.AppExp (E.Index xs' slice _) _)
           -- So the result is a scalar because i₆₀₉₃ is a scalar in this context,
           -- because we are inside the body of the map lambda.
           -- (I think this is correct; i₆₀₉₃ is a program variable like x₆₀₇₀.)
-          normalise $ sub j (View iter_idx idx) (View iter_idx xs)
+          rewrite $ sub j (View iter_idx idx) (View iter_idx xs)
         Nothing ->
           error "indexing into a scalar"
--- Nodes.
+forward (E.Not e _) = do
+  View it e' <- forward e
+  rewrite $ View it $ cmapValues Not e'
 forward (E.ArrayLit _es _ _) =
   error "forward on array literal"
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) = do
   x' <- forward x
   y' <- forward y
-  normalise $ sub vn x' y'
+  rewrite $ sub vn x' y'
 forward (E.AppExp (E.BinOp (op, _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
@@ -186,7 +182,7 @@ forward (E.AppExp (E.BinOp (op, _) _ (x', _) (y', _) _) _)
       vy <- forward y'
       a <- newNameFromString "a"
       b <- newNameFromString "b"
-      let doOp bopExp = normalise $
+      let doOp bopExp = rewrite $
                           sub b vy $
                             sub a (View iter_x x) $
                               View iter_x (toCases $ bopExp (Var a) (Var b))
@@ -212,7 +208,7 @@ forward (E.AppExp (E.If c t f _) _) = do
   f_branch <- newNameFromString "f_branch"
   let y = View iter_c (Cases . NE.fromList $ [(Var cond, Var t_branch),
                                               (Not $ Var cond, Var f_branch)])
-  normalise $
+  rewrite $
     sub f_branch vf $
       sub t_branch vt $
         sub cond (View iter_c c') y
@@ -236,7 +232,7 @@ forward (E.AppExp (E.Apply f args _) _)
       let paramNames = mconcat $ map (S.toList . E.patNames) params
       --               ^ XXX mconcat is wrong, see above
       let s y (paramName, paramView) = sub paramName paramView y
-      normalise $
+      rewrite $
         foldl s (View iter_y cases_body) (zip paramNames xss)
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
@@ -255,7 +251,7 @@ forward (E.AppExp (E.Apply f args _) _)
                 iter_xs
                 (Cases . NE.fromList $
                   [(base_case, Var x), (Not base_case, Recurrence `op` Var x)])
-      normalise $ sub x (View iter_xs xs) y
+      rewrite $ sub x (View iter_xs xs) y
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
       -- Scatter in-bounds-monotonic indices.
@@ -292,7 +288,7 @@ forward (E.AppExp (E.Apply f args _) _)
       i <- newNameFromString "i"
       case view of
         View Empty (Cases ((Bool True, m) NE.:| [])) ->
-              normalise $ View (Forall i (Iota m)) (toCases $ Var i)
+              rewrite $ View (Forall i (Iota m)) (toCases $ Var i)
         _ -> undefined -- TODO We've no way to express this yet.
                        -- Have talked with Cosmin about an "outer if" before.
   | Just "replicate" <- getFun f,
@@ -303,10 +299,10 @@ forward (E.AppExp (E.Apply f args _) _)
       case (n', x') of
         (View Empty (Cases ((Bool True, m) NE.:| [])),
          View Empty cases) -> -- XXX support only 1D arrays for now.
-              normalise $ View (Forall i (Iota m)) cases
+              simplify $ View (Forall i (Iota m)) cases
         _ -> undefined -- TODO See iota comment.
   | Just "not" <- getFun f,
     [arg] <- getArgs args = do
       View it body <- forward arg
-      normalise $ View it (cmapValues (toNNF . Not) body)
+      rewrite $ View it (cmapValues (toNNF . Not) body)
 forward e = error $ "forward on " <> show e

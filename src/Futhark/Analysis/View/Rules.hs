@@ -109,7 +109,8 @@ normalise view =
 
 simplify :: View -> ViewM View
 simplify view =
-  removeDeadCases view
+  normalise view
+  >>= removeDeadCases
   >>= simplifyRule3
   >>= removeDeadCases
   >>= normalise
