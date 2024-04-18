@@ -221,32 +221,23 @@ forward (E.AppExp (E.Index xs' slice _) _)
           error "indexing into a scalar"
 -- Nodes.
 forward (E.ArrayLit _es _ _) =
-  -- TODO support arrays via multi-dim index functions.
   error "forward on array literal"
-  -- do
-  -- es' <- mapM forward es
-  -- let arrs = foldr (combineCases f) (toCases $ Array []) (getCases es')
-  -- let it = foldl1 combineIt (getIters es')
-  -- normalise $ View it arrs
-  -- where
-  --   getCases [] = []
-  --   getCases (View _ body : xs) = body : getCases xs
-  --   getIters [] = []
-  --   getIters (View it _ : xs) = it : getIters xs
-  --   f y (Array acc) = Array (y : acc)
-  --   f _ _ = error "impossible"
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) = do
   x' <- forward x
   y' <- forward y
   normalise $ sub vn x' y'
-forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
+forward (E.AppExp (E.BinOp (op, _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
     Just bop <- L.find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
-      View it_x x <- forward e_x
-      View it_y y <- forward e_y
-      let it = combineIt it_x it_y
-      let doOp bopExp = normalise $ View it (combineCases bopExp x y)
+      View iter_x x <- forward x'
+      vy <- forward y'
+      a <- newNameFromString "a"
+      b <- newNameFromString "b"
+      let doOp bopExp = normalise $
+                          sub b vy $
+                            sub a (View iter_x x) $
+                              View iter_x (toCases $ bopExp (Var a) (Var b))
       case bop of
         E.Plus -> doOp (~+~)
         E.Times -> doOp (~*~)
@@ -259,21 +250,20 @@ forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
         E.LogOr -> doOp (:||)
         _ -> error ("forward not implemented for bin op: " <> show bop)
 forward (E.AppExp (E.If c t f _) _) = do
-  View it_c c' <- forward c
-  View it_t t' <- forward t
-  View it_f f' <- forward f
+  View iter_c c' <- forward c
+  vt <- forward t
+  vf <- forward f
   -- Negating `c` means negating the case _values_ of c, keeping the
   -- conditions of any nested if-statements (case conditions) untouched.
-  let neg_c' = cmapValues (toNNF . Not) c'
-  let cases_t = [(cc :&& cx, vx) | cc <- flattenCases c',
-                                   (cx, vx) <- casesToList t']
-  let cases_f = [(neg_cc :&& cx, vx) | neg_cc <- flattenCases neg_c',
-                                       (cx, vx) <- casesToList f']
-  let it = combineIt it_c $ combineIt it_t it_f
-  normalise $ View it (Cases . NE.fromList $ cases_t ++ cases_f)
-  where
-    -- `c` has cases, so the case conditions and values are put in conjunction.
-    flattenCases (Cases xs) = NE.toList $ fmap (uncurry (:&&)) xs
+  cond <- newNameFromString "cond"
+  t_branch <- newNameFromString "t_branch"
+  f_branch <- newNameFromString "f_branch"
+  let y = View iter_c (Cases . NE.fromList $ [(Var cond, Var t_branch),
+                                              (Not $ Var cond, Var f_branch)])
+  normalise $
+    sub f_branch vf $
+      sub t_branch vt $
+        sub cond (View iter_c c') y
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
