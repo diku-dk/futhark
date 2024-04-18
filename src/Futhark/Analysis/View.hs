@@ -1,9 +1,9 @@
 module Futhark.Analysis.View (mkIndexFnProg) where
 
 import Data.List qualified as L
-import Data.List.NonEmpty()
+import Data.List.NonEmpty(NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe, catMaybes, fromJust)
 import Futhark.Analysis.View.Representation
 import Futhark.Analysis.View.Refine
 import Futhark.Analysis.View.Substitution
@@ -17,6 +17,7 @@ import Debug.Trace (traceM, trace)
 import qualified Data.Set as S
 import Futhark.Analysis.View.Rules
 import Control.Monad.RWS.Strict hiding (Sum)
+import Futhark.SoP.SoP (justConstant)
 
 
 --------------------------------------------------------------
@@ -256,38 +257,46 @@ forward (E.AppExp (E.Apply f args _) _)
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
       -- Scatter in-bounds-monotonic indices.
       --
-      -- b has at least size m
+      -- b has size at least m
       -- b[k-1] <= b[k] for all k     (e.g., sum of positive ints; can be checked from SoP?)
       -- inds = ∀k ∈ [1, ..., m] .
-      --     | c1 => OOB              (c1 may depend on i)
-      --     | c2 => b[k-1]           (c2 may depend on i)
-      -- dest has size b[m-1]
+      --     | c  => b[k-1]           (c may depend on i)
+      --     | ¬c => OOB
+      -- dest has size b[m-1]         (to ensure conclusion covers all of dest)
+      -- OOB < 0 or OOB >= b[m-1]
       -- y = scatter dest inds vals
       -- ___________________________________________________
-      -- y = ∀i ∈ ⋃k=1,...,m ([b[k-1], ..., b[k]]) .
-      --     | i == inds[k] => vals[k]
-      --     | i /= inds[k] => dest[i]
+      -- y = ∀i ∈ Union k=1,...,m ([b[k-1], ..., b[k]]) .
+      --     | i == inds[k] && c  => vals[k]   (c may depend on k)
+      --     | i /= inds[k] || ¬c => dest[i]
       --
       -- From type checking, we have:
       -- scatter : (dest : [n]t) -> (inds : [m]i64) -> (vals : [m]t) : [n]t
       -- * inds and vals are same size
       -- * dest and result are same size
-      inds <- forward inds_arg
+      IndexFn iter_inds inds <- forward inds_arg
+      let inds_fn = IndexFn iter_inds inds
       -- get size m
-      -- extract b from inds
+      let Forall i (Iota m) = iter_inds -- TODO don't do unsafe matching.
+      -- extract cases from inds
+      let Cases ((c, x) :| [(neg_c, y)]) = inds
+      unless (c == (toNNF . Not $ neg_c)) (error "this should never happen")
+      -- Check that exactly one branch is OOB---and determine which.
+      (oob, b) <- fromJust <$> getOOB inds_fn -- TODO handle Nothing case.
       -- check monotonicity on b
+      lol <- checkMonotonic inds_fn
       -- check that cases match pattern with OOB < 0 or OOB > b[m-1]
       vals <- forward vals_arg
       -- check that iterator matches that of inds
       dest <- forward dest_arg
       -- check dest has size b[m-1]
-      undefined
+      pure inds_fn
   | Just "iota" <- getFun f,
     [n] <- getArgs args = do
       indexfn <- forward n
       i <- newNameFromString "i"
       case indexfn of
-        IndexFn Empty (Cases ((Bool True, m) NE.:| [])) ->
+        IndexFn Empty (Cases ((Bool True, m) :| [])) ->
               rewrite $ IndexFn (Forall i (Iota m)) (toCases $ Var i)
         _ -> undefined -- TODO We've no way to express this yet.
                        -- Have talked with Cosmin about an "outer if" before.
@@ -297,7 +306,7 @@ forward (E.AppExp (E.Apply f args _) _)
       x' <- forward x
       i <- newNameFromString "i"
       case (n', x') of
-        (IndexFn Empty (Cases ((Bool True, m) NE.:| [])),
+        (IndexFn Empty (Cases ((Bool True, m) :| [])),
          IndexFn Empty cases) -> -- XXX support only 1D arrays for now.
               simplify $ IndexFn (Forall i (Iota m)) cases
         _ -> undefined -- TODO See iota comment.
@@ -306,3 +315,49 @@ forward (E.AppExp (E.Apply f args _) _)
       IndexFn it body <- forward arg
       rewrite $ IndexFn it (cmapValues (toNNF . Not) body)
 forward e = error $ "forward on " <> show e
+
+-- Check that exactly one branch is OOB---and determine which.
+-- Returns Just (OOB, non-OOB), if decidable, else Nothing.
+-- TODO add suport for non-negative OOB.
+getOOB :: IndexFn -> IndexFnM (Maybe (Term, Term))
+getOOB (IndexFn iter cases)
+  | Cases ((c, x) :| [(neg_c, y)]) <- cases,
+    c == (toNNF . Not $ neg_c) = do
+      let test = cmapValues (:< (SoP2 $ SoP.int2SoP 0)) cases
+      IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
+      -- Swap (x, y) so that OOB is first.
+      let res' = case res of
+                   ((_, Bool True) :| [(_, y')]) | y' /= Bool True ->
+                     Just (x, y)
+                   ((_, x') :| [(_, Bool True)]) | x' /= Bool True ->
+                     Just (y, x)
+                   _ -> Nothing
+      debugM ("getOOB " <> prettyString (IndexFn iter (Cases res)))
+      debugM ("getOOB res: " <> prettyString res')
+      pure res'
+getOOB _ = pure Nothing
+
+-- Goal right now is to prove that the Sum is in fact positive.
+-- Currently get:
+-- 🪲 refine (¬((aoa_shp₆₀₇₁)[i₆₁₇₂] < 0), Σj₆₁₆₄∈[1, ..., i₆₁₇₂] ((aoa_shp₆₀₇₁)[-1 + j₆₁₆₄]) >= 0) Alg env: Untranslatable environment:
+-- dir:
+-- []
+-- inv:
+-- []
+-- Equivalence environment:
+-- []
+-- Ranges:
+-- [max{1} <= m₆₀₆₉ <= min{9223372036854775807}, max{0} <= i₆₁₇₂ <= min{m₆₀₆₉}, max{0} <= (aoa_shp₆₀₇₁)[i₆₁₇₂] <= min{}]
+-- 🪲 QQ Sum (VName (Name "j") 6164) (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},1)]}) (SoP {getTerms = fromList [(Term {getTerm = fromOccurList [(Var (VName (Name "i") 6172),1)]},1)]}) (Idx (Var (VName (Name "aoa_shp") 6071)) (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "j") 6164),1)]},1)]}))
+-- 🪲 QQ SoP2 (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},0)]})
+-- 🪲 QQ False
+-- The   ^ conclusion is False despite the fact that we have 0 <= aoa_shp
+-- in the env. This makes sense as the (SoP) refinement is oblivious to the
+-- Sum term. Make it aware of this somehow.
+checkMonotonic (IndexFn iter cases) = do
+  -- A first step towards this test is that each term is non-negative.
+  let test = cmapValues (:>= (SoP2 $ SoP.int2SoP 0)) cases
+  IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
+  debugM ("checkMonotonic " <> prettyString (IndexFn iter (Cases res)))
+  -- debugM ("checkMonotonic res: " <> prettyString res)
+  pure res
