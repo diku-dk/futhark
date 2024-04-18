@@ -55,6 +55,13 @@ tests =
         "    | ¬((conds₆₀₇₀)[i₆₁₇₆]) => -1 + Σj₆₁₇₂∈[0, ..., -1 + n₆₀₆₈] (⟦(conds₆₀₇₀)[j₆₁₇₂]⟧) + Σj₆₁₇₄∈[0, ..., i₆₁₇₆] (⟦¬((conds₆₀₇₀)[j₆₁₇₄])⟧)"
        ])
      ]),
+    ("tests/refinement/part2indices_let_inside_map.fut",
+     [ ("inds", [
+        "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
+        "    | (conds₆₀₇₀)[i₆₁₇₆] => -1 + Σj₆₁₇₂∈[0, ..., i₆₁₇₆] (⟦(conds₆₀₇₀)[j₆₁₇₂]⟧)",
+        "    | ¬((conds₆₀₇₀)[i₆₁₇₆]) => -1 + Σj₆₁₇₂∈[0, ..., -1 + n₆₀₆₈] (⟦(conds₆₀₇₀)[j₆₁₇₂]⟧) + Σj₆₁₇₄∈[0, ..., i₆₁₇₆] (⟦¬((conds₆₀₇₀)[j₆₁₇₄])⟧)"
+       ])
+     ]),
     ("tests/refinement/part2indices_neg_conds.fut",
      [ ("inds", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",

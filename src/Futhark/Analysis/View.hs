@@ -240,13 +240,10 @@ forward (E.ArrayLit _es _ _) =
   --   getIters (View it _ : xs) = it : getIters xs
   --   f y (Array acc) = Array (y : acc)
   --   f _ _ = error "impossible"
-forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) =
-  -- TODO get rid of substituteNameE and then
-  -- vx <- forward x
-  -- vy <- forward y
-  -- normalise $ sub x vx vy
-  -- ??
-  substituteNameE vn x y >>= forward >>= normalise
+forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) = do
+  x' <- forward x
+  y' <- forward y
+  normalise $ sub vn x' y'
 forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
@@ -380,28 +377,3 @@ forward e = error $ "forward on " <> show e
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
 getArgs = map (stripExp . snd) . NE.toList
-
--- Not to be confused with substituteNames lmao.
-substituteNamesE :: M.Map E.VName E.Exp -> E.Exp -> ViewM E.Exp
-substituteNamesE = onExp
-  where
-    substituter subst =
-      T.ASTMapper
-        { T.mapOnExp = onExp subst,
-          T.mapOnName = pure,
-          T.mapOnStructType = T.astMap (substituter subst),
-          T.mapOnPatType = T.astMap (substituter subst),
-          T.mapOnStructRetType = T.astMap (substituter subst),
-          T.mapOnPatRetType = T.astMap (substituter subst)
-        }
-      -- T.identityMapper
-      --   { T.mapOnExp = onExp subst }
-    onExp :: M.Map VName E.Exp -> E.ExpBase E.Info VName -> ViewM (E.ExpBase E.Info VName)
-    onExp subst e@(E.Var (E.QualName _ x) _ _) =
-      case M.lookup x subst of
-        Just x' -> pure x'
-        Nothing -> pure e
-    onExp subst e = T.astMap (substituter subst) e
-
-substituteNameE :: VName -> E.Exp -> E.Exp -> ViewM E.Exp
-substituteNameE vn x = substituteNamesE (M.singleton vn x)
