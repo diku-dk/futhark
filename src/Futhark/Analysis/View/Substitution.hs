@@ -5,6 +5,7 @@ import Futhark.Analysis.View.Representation
 import qualified Data.List.NonEmpty as NE
 
 -- Substitution rules.
+-- 'sub vn x y' substitutes name 'vn' for view 'x' in view 'y'.
 sub :: VName -> View -> View -> View
 sub x q@(View (Forall i xD) xs) r@(View (Forall j yD) ys)
   | xD == yD =
