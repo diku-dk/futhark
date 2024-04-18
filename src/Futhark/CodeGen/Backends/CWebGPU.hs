@@ -33,6 +33,7 @@ import Language.C.Quote.C qualified as C
 import NeatInterpolation (text, untrimming)
 
 import Debug.Trace (traceShowM)
+import Data.Bifunctor (first, Bifunctor (second), bimap)
 
 mkKernelInfos :: M.Map Name KernelInterface -> GC.CompilerM HostOp () ()
 mkKernelInfos kernels = do
@@ -108,7 +109,7 @@ jsBoilerplate :: Definitions a -> T.Text
 jsBoilerplate prog = jsContext prog
 
 jsContext :: Definitions a -> T.Text
-jsContext (Definitions _ _ (Functions funs)) = 
+jsContext (Definitions _ _ (Functions funs)) =
   [text|
   class FutharkContext {
     ${constructor}
@@ -116,7 +117,7 @@ jsContext (Definitions _ _ (Functions funs)) =
     ${builtins}
   }|]
   where
-    constructor = 
+    constructor =
       [text|
       constructor(module) {
         this.m = module;
@@ -131,11 +132,12 @@ jsContext (Definitions _ _ (Functions funs)) =
     mkSig (EntryPoint name results args)
       -- Keep original entry point name, the one in the signature is the name of
       -- the corresponding function.
-      = (name, JsWrapperSig undefined undefined undefined undefined) -- TODO
+      = (name, JsWrapperSig "signame" undefined undefined undefined) -- TODO
     entryPointEntries = T.intercalate ",\n" $ map
-      (\(n, sig) -> [text|'${nameToText n}': ${sigName sig}|]) entryPointSigs
-    entryPointFuns = undefined
-    builtins = undefined
+      ((\(n, sig) -> [text|'${n}': ${sig}|]) . bimap nameToText sigName)
+      entryPointSigs
+    entryPointFuns = ""
+    builtins = ""
 
 data JsWrapperSig = JsWrapperSig
   { sigName :: T.Text,
@@ -151,7 +153,7 @@ mkWrapper (JsWrapper name returnType argTypes async) =
   [text|
     Module['${name}'] = Module.cwrap('${name}', '${returnType}', [${args}], $opts);|]
     where args = T.intercalate ", " argStrings
-          argStrings = 
+          argStrings =
             map (\a -> if a == "null" then a else "'" <> a <> "'") argTypes
           opts = if async then "{async: true}" else "undefined"
 
@@ -203,8 +205,9 @@ compileProg version prog = do
         prog'
   let wrappers = builtinWrappers ++ entryWrappers prog'
   let js = T.intercalate "\n" (map mkWrapper wrappers)
+  let newJs = "\n// New JS from here\n" <> jsBoilerplate prog'
   let exports = [n | JsWrapper n _ _ _ <- wrappers]
-  pure (ws, (c, js, exports))
+  pure (ws, (c, js <> newJs, exports))
   where
     --defaultExports = 
     --  -- TODO: This is a bad hardcoded list
@@ -236,6 +239,6 @@ compileProg version prog = do
 -- | As server script. Speaks custom server protocol to local Python server
 -- wrapper that speaks the actual server protocol.
 asJSServer :: GC.CParts -> (T.Text, T.Text)
-asJSServer parts = 
+asJSServer parts =
   let (_, c, _) = GC.asLibrary parts
    in (c, serverWsJs)

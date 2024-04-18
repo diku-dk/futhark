@@ -1,4 +1,4 @@
-// Start of server_browser.js
+// Start of server_ws.js
 
 class BrowserServer {
   constructor(ctx, port) {
@@ -78,4 +78,4 @@ async function runServer() {
 
 runServer();
 
-// End of server_browser.js
+// End of server_ws.js
