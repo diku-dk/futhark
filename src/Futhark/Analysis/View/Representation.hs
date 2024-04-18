@@ -353,3 +353,9 @@ debug msg = trace ("🪲 " <> msg)
 
 toCases :: Exp -> Cases Exp
 toCases e = Cases (NE.singleton (Bool True, e))
+
+casesToList :: Cases a -> [(a, a)]
+casesToList (Cases xs) = NE.toList xs
+
+toScalarView :: Exp -> View
+toScalarView e = View Empty (toCases e)

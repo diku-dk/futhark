@@ -112,24 +112,6 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     pure ()
 forwards _ = pure ()
 
-
-combineIt :: Iterator -> Iterator -> Iterator
-combineIt Empty it = it
-combineIt it Empty = it
-combineIt d1 d2 | d1 == d2 = d1
-combineIt _ _ = undefined
-
-combineCases :: (Exp -> Exp -> Exp) -> Cases Exp -> Cases Exp -> Cases Exp
-combineCases f (Cases xs) (Cases ys) =
-  Cases . NE.fromList $
-    [(cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
-
-casesToList :: Cases a -> [(a, a)]
-casesToList (Cases xs) = NE.toList xs
-
-toView :: Exp -> View
-toView e = View Empty (toCases e)
-
 -- Substitution rules for indexing. These are the rules
 -- shown in the document. (All other substitutions are
 -- an implementation detail because we don't have the program
@@ -166,14 +148,14 @@ forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 forward (E.Not e _) = do
   View it e' <- forward e
-  pure $ View it $ cmapValues (toNNF . Not) e'
+  normalise $ View it $ cmapValues Not e'
 -- Leaves.
 forward (E.Literal (E.BoolValue x) _) =
-  pure . toView $ Bool x
+  normalise . toScalarView $ Bool x
 forward (E.IntLit x _ _) =
-  pure . toView . SoP2 $ SoP.int2SoP x
+  normalise . toScalarView . SoP2 $ SoP.int2SoP x
 forward (E.Negate (E.IntLit x _ _) _) =
-  normalise . toView . SoP2 $ SoP.negSoP $ SoP.int2SoP x
+  normalise . toScalarView . SoP2 $ SoP.negSoP $ SoP.int2SoP x
 -- Potential substitions.
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   views <- gets views
@@ -186,11 +168,11 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
         Just sz -> do
           -- Canonical array representation.
           i <- newNameFromString "i"
-          pure $ View (Forall i (Iota sz))
-                      (toCases $ Idx (Var vn) (expToSoP (Var i)))
+          normalise $ View (Forall i (Iota sz))
+                           (toCases $ Idx (Var vn) (expToSoP (Var i)))
         Nothing ->
           -- Canonical scalar representation.
-          pure $ View Empty (toCases $ Var vn)
+          normalise $ View Empty (toCases $ Var vn)
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
       View iter_idx idx <- forward idx'
