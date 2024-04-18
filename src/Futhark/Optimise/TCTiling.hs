@@ -48,6 +48,9 @@ reductionLoopBody tc_env qq0 arrs_in = do
   redomap_inputs_shr <- forM2 shr_arrs arr_metas $ copyGlb2Shr (Var qq)
 
   reg_tiles_out <-
+    -- TODO: for some reason, the __syncthreads that should be placed *after*
+    -- this loop is placed at the bottom of the loop body. find out how to
+    -- change this.
     forLoop_ tq reg_tiles_in $
       accumulateRegTile redomap_inputs_shr
 
@@ -66,24 +69,25 @@ reductionLoopBody tc_env qq0 arrs_in = do
       -- dimensions of the array in shared memory, using a virtualization loop
       -- in case the tile is larger than the tblock, and a boundary guard for
       -- the converse. This is easily achieved using SegVirt.
+
       lam <- mkLambda [cert_p, acc_p] $ do
         fmap varsRes $
           segMapND "foo" (SegThreadInBlock SegVirt) ResultNoSimplify tile_dims $
-            \ltids ->
-              copyLoopBody (paramName acc_p) $
-                maybe ltids (gather ltids) (lmadPerm arr_meta)
+            copyLoopBody (paramName acc_p)
 
       letExp (baseString shr_arr) $
         WithAcc [(shmem_shape, [shr_arr], Nothing)] lam
       where
         copyLoopBody :: VName -> [VName] -> Builder GPU Result
-        copyLoopBody acc inds = do
+        copyLoopBody acc ltids = do
+
           -- The shared mem indices are simply the unflattened indices, while
           -- the global mem indices need to have tblock offsets added onto them.
-          let shr_arr_inds = map Var inds
+          let shr_arr_inds = map Var ltids
           glb_arr_inds <-
-            forM2 tb_offsets inds $ \offset ind ->
-              letExp "glb_ind" =<< toExp (pe64 offset + le64 ind)
+            forM2 tb_offsets ltids $ \tb_offset ltid -> do
+              letExp "glb_ind" =<< toExp (pe64 tb_offset + le64 ltid)
+
 
           -- Perform a boundary check and read from the global mem array!
           in_bounds <-
@@ -95,11 +99,14 @@ reductionLoopBody tc_env qq0 arrs_in = do
                       glb_arr_inds
                       base_arr_dims
                 )
+
+          -- Repermute the global array indices to match.
+          let glb_arr_inds_perm = arrPerm arr_meta glb_arr_inds
           glb_elem <-
             letExp (baseString base_arr)
               =<< eIf
                 (toExp in_bounds)
-                ( index "glb_elem" base_arr glb_arr_inds
+                ( index "glb_elem" base_arr glb_arr_inds_perm
                     >>= resultBodyM . (: []) . Var
                 )
                 -- TODO: the reduce neutral element is a placeholder here. It
@@ -117,11 +124,11 @@ reductionLoopBody tc_env qq0 arrs_in = do
                   shr_arr_inds
                   [Var glb_elem]
 
-        tile_dims = tileDims arr_meta
         shmem_shape = Shape $ shmemDims arr_meta
-        tb_offsets = gatherFor_ (tbOffsets tc_env) qq arr_meta
-        base_arr = baseArr arr_meta
+        tile_dims = tileDims arr_meta
+        tb_offsets = arrGather_ arr_meta (tbOffsets tc_env) qq
         base_arr_dims = baseArrDims arr_meta
+        base_arr = baseArr arr_meta
 
     accumulateRegTile :: [VName] -> VName -> VName -> Builder GPU VName
     accumulateRegTile shr_arrs q reg_tiles_in =
@@ -136,9 +143,9 @@ reductionLoopBody tc_env qq0 arrs_in = do
           dummy_ltid <- letExp "dummy_ltid_q" =<< toExp se0
           let dummy_regtile = se1
           shr_inds <- forM arr_metas $ \meta -> do
-            let ltids' = gatherFor_ ltids dummy_ltid meta
-            let tiles_R' = gatherFor_ tiles_R dummy_regtile meta
-            let loop_inds' = gatherFor_ loop_inds q meta
+            let ltids' = arrGather_ meta ltids dummy_ltid
+            let tiles_R' = arrGather_ meta tiles_R dummy_regtile
+            let loop_inds' = arrGather_ meta loop_inds q
             forM3 ltids' tiles_R' loop_inds' $ \ltid tile loop_ind ->
               letExp "shr_ind" =<< toExp (le64 ltid * pe64 tile + le64 loop_ind)
 
@@ -393,8 +400,11 @@ gather_ xs x = map (maybe x (xs !!) . checkIdx)
       | i `elem` indices xs = Just i
     checkIdx _ = Nothing
 
-gatherFor_ :: [a] -> a -> ArrMeta -> [a]
-gatherFor_ src x arr = gather_ src x $ variantDims arr
+arrGather_ :: ArrMeta -> [a] -> a -> [a]
+arrGather_ meta src x = gather_ src x $ variantDims meta
+
+arrPerm :: ArrMeta -> [a] -> [a]
+arrPerm meta xs = maybe xs (gather xs) (lmadPerm meta)
 
 makeTCKernelParams ::
   [VName] ->
@@ -538,7 +548,12 @@ makeTCEnv env kernel_params load_stms map_lam red_lam red_ne = do
       -- will be ordered by the inner dimensions. Note that for each
       -- array, the indices computed here are the same as those returned
       -- by `variantInnerDimsPerArr`, but in different order.
-      let var_gtids = map (flip elemIndex inner_dims) dims
+      -- TODO: document why perm is necessary.
+      let lmad_perm = findLMADPerm env base_arr
+      let inv_lmad_perm = map snd . sort . (`zip` [0..]) <$> lmad_perm
+
+      let dims' = maybe dims (gather dims) inv_lmad_perm
+      let var_gtids = map (flip elemIndex inner_dims) dims'
 
       -- Then, for each dimension of each array, extract the TR tile and
       -- tblock offset corresponding to this dimension. For the tile
@@ -546,20 +561,21 @@ makeTCEnv env kernel_params load_stms map_lam red_lam red_ne = do
       -- represented in inner_dims.
       let tile_dims = gather_ tiles_TR tile_seq var_gtids
 
-      let inner_dim = last tile_dims
-      inner_dim_pad <-
-        -- TODO: give a better name to the padded dimension.
-        -- letSubExp (baseString inner_dim ++ "_pad")
-        letSubExp "inner_dim_pad"
-          =<< toExp (pe64 inner_dim + pe64 se1)
-      let shmem_dims = init tile_dims ++ [inner_dim_pad]
-
-      let lmad_perm = findLMADPerm env base_arr
+      -- TODO: find out how to handle padding now that we permute certain
+      -- things.
+      -- let inner_dim = last tile_dims
+      -- inner_dim_pad <-
+      --   -- TODO: give a better name to the padded dimension.
+      --   -- letSubExp (baseString inner_dim ++ "_pad")
+      --   letSubExp "inner_dim_pad"
+      --     =<< toExp (pe64 inner_dim + pe64 se1)
+      -- let shmem_dims = init tile_dims ++ [inner_dim_pad]
+      let shmem_dims = tile_dims
 
       pure $
         ArrMeta
           base_arr
-          dims
+          dims'
           tile_dims
           shmem_dims
           var_gtids
