@@ -87,6 +87,7 @@ iteratorName _ = Nothing
 
 instance Eq Iterator where
   (Forall _ dom_i) == (Forall _ dom_j) = dom_i == dom_j
+  Empty == Empty = True
   _ == _ = False -- TODO
 
 newtype Cases a = Cases (NE.NonEmpty (a, a))

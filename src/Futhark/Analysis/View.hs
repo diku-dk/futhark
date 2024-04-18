@@ -64,14 +64,16 @@ getFun :: E.Exp -> Maybe String
 getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
 getFun _ = Nothing
 
-getSize :: E.Exp -> Exp
+getSize :: E.Exp -> Maybe Exp
+getSize (E.Var _ (E.Info {E.unInfo = E.Scalar _}) _) =
+  Nothing
 getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape =
-    convertSize dim
+    Just $ convertSize dim
 getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape =
-    convertSize dim
-getSize e = error $ "getSize:" <> prettyString e <> "\n" <> show e
+    Just $ convertSize dim
+getSize e = error $ "getSize: " <> prettyString e <> "\n" <> show e
 
 -- Used for converting sizes of function arguments.
 convertSize :: E.Exp -> Exp
@@ -183,7 +185,15 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
       traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
       pure v
     _ ->
-      pure $ View Empty (toCases $ Var vn)
+      case getSize e of
+        Just sz -> do
+          -- Canonical array representation.
+          i <- newNameFromString "i"
+          pure $ View (Forall i (Iota sz))
+                      (toCases $ Idx (Var vn) (expToSoP (Var i)))
+        Nothing ->
+          -- Canonical scalar representation.
+          pure $ View Empty (toCases $ Var vn)
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
       View iter_idx idx <- forward idx'
@@ -194,29 +204,7 @@ forward (E.AppExp (E.Index xs' slice _) _)
         Just j -> do
           -- XXX Something is wrong here when building view for
           --
-          -- def f [n] 't (x: [n]i64) : {[n]i64 | \res-> permutationOf res (0...n-1)} =
-          --   let a = scan (+) 0i64 x
-          --   let iota_n = iota n
-          --   let b = map (\i -> a[i]) iota_n
-          --   in b
-          --
-          -- 🪲 index iota_n by i
-          -- 🪲 sub i_6108 for .
-          --     | True => i₆₁₀₉
-          --    in ∀i₆₁₀₈ ∈ iota n₆₀₆₈ .
-          --     | True => i₆₁₀₈
-          -- ...
-          -- 🪲 index a by iota_n[i]
-          -- 🪲 sub i_6103 for ∀i₆₁₀₈ ∈ iota n₆₀₆₈ .
-          --     | True => i₆₁₀₉
-          --
-          -- Note that the iterator does not match the value.
-          -- The first substitution, however, is due to how I handle
-          -- scan/map initially---forward is not run on the args,
-          -- instead I index the arg (array) in E.Exp format.
-          -- Fix that and come back here.
-          --
-          -- In particular, I would expect that I can make
+          -- I would expect that I can make
           -- iter_idx take precedence over iter_xs as iter_idx
           -- is the "destination" (i.e., xs[0] results in just
           -- a scalar; the iterator of View Empty . |True => 0.)
@@ -253,6 +241,11 @@ forward (E.ArrayLit _es _ _) =
   --   f y (Array acc) = Array (y : acc)
   --   f _ _ = error "impossible"
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) =
+  -- TODO get rid of substituteNameE and then
+  -- vx <- forward x
+  -- vy <- forward y
+  -- normalise $ sub x vx vy
+  -- ??
   substituteNameE vn x y >>= forward >>= normalise
 forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
@@ -293,77 +286,47 @@ forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
-      i <- newNameFromString "i"
-      -- XXX support only map over one array for now.
-      let xs = head args'
-      View iter_xs cases_xs <- forward (head args')
+      xss <- mapM forward args'
+      let View iter_y _ = head xss
+      -- TODO use iter_body; likely needed for nested maps?
       View iter_body cases_body <- forward body
-      let sz = getSize xs
+      unless (iter_body == iter_y || iter_body == Empty)
+             (error $ "map: got incompatible iterator from map lambda body: "
+                      <> show iter_body)
+      debugM ("map args " <> prettyString xss)
+      debugM ("map body " <> prettyString (View iter_body cases_body))
       -- Make susbtitutions from function arguments to array names.
-      let params' = map E.patNames params
-      -- TODO params' is a [Set], I assume because we might have
+      -- TODO `map E.patNames params` is a [Set], I assume because we might have
       --   map (\(x, y) -> ...) xys
       -- meaning x needs to be substituted by x[i].0
-      let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
-      let arg0 = head params''
-      -- XXX seems alright; but needs to support mapN (part2indices uses map3)
-      normalise $ sub arg0 (View iter_xs cases_xs) (View (Forall i (Iota sz)) cases_body)
-      -- debugM ("body' " <> prettyString body')
-      -- v <- newNameFromString "v"
-      -- normalise $ sub v body' (View (Forall i (Iota sz)) (toCases $ Var v))
-  | Just fname <- getFun f,
-    "oldmap" `L.isPrefixOf` fname,
-    E.Lambda params body _ _ _ : args' <- getArgs args = do
-      -- traceM ("🪲 map body: " <> show body <> "\n")
-      -- 0. Create iterator and transform expression to use it
-      i <- newNameFromString "i"
-      -- TODO Right now we only support variables as arguments.
-      -- Add support for any expression by creating views for function
-      -- applications. Literals also need to be handled.
-      -- After this, maybe don't use mapMaybe in arrs below.
-      let sz = getSize (head args')
-      -- Make susbtitutions from function arguments to array names.
-      let params' = map E.patNames params
-      -- TODO params' is a [Set], I assume because we might have
-      --   map (\(x, y) -> ...) xys
-      -- meaning x needs to be substituted by x[i].0
-      let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
-      let subst = M.fromList (zip params'' (map (`index` i) args'))
-      body' <- substituteNamesE subst body
-      -- traceM $ "#### subst: " <> show subst
-      -- traceM $ "#### body transformed: " <> show body'
-      View it_body body'' <- forward body'
-      let it = combineIt (Forall i (Iota sz)) it_body
-      normalise $ View it body''
+      let paramNames = mconcat $ map (S.toList . E.patNames) params
+      --               ^ XXX mconcat is wrong, see above
+      let s y (paramName, paramView) = sub paramName paramView y
+      normalise $
+        foldl s (View iter_y cases_body) (zip paramNames xss)
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
-      let sz = getSize xs'
-      i <- newNameFromString "i"
-      let i' = Var i
+      View iter_xs xs <- forward xs'
+      let Just i = iteratorName iter_xs
+      -- TODO should verify that _ne matches op
       op <-
         case E.baseString vn of
           "+" -> pure (~+~)
           "-" -> pure (~-~)
           "*" -> pure (~*~)
           _ -> error ("scan not implemented for bin op: " <> show vn)
-      -- Note forward on indexed xs.
-      View it_xs xs <- forward (index xs' i)
-      let base_case = i' :== SoP2 (SoP.int2SoP 0)
+      let base_case = Var i :== SoP2 (SoP.int2SoP 0)
       x <- newNameFromString "x"
       let y = View
-                (Forall i (Iota sz))
+                iter_xs
                 (Cases . NE.fromList $
                   [(base_case, Var x), (Not base_case, Recurrence `op` Var x)])
-      normalise $ sub x (View it_xs xs) y
-      -- let e1 = [(base_case :&& cx, vx) | (cx, vx) <- casesToList xs]
-      -- let e2 = [(Not base_case :&& cx, Recurrence `op` vx) | (cx, vx) <- casesToList xs]
-      -- let it = combineIt (Forall i (Iota sz)) it_xs
-      -- normalise $ View it (Cases . NE.fromList $ e1 ++ e2)
+      normalise $ sub x (View iter_xs xs) y
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
       -- Scatter in-bounds-monotonic indices.
       --
-      -- b has size m
+      -- b has at least size m
       -- b[k-1] <= b[k] for all k     (e.g., sum of positive ints; can be checked from SoP?)
       -- inds = ∀k ∈ [1, ..., m] .
       --     | c1 => OOB              (c1 may depend on i)
@@ -418,12 +381,6 @@ forward e = error $ "forward on " <> show e
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
 getArgs = map (stripExp . snd) . NE.toList
 
-index :: E.Exp -> E.VName -> E.Exp
-index xs i =
-  E.AppExp (E.Index xs [E.DimFix i'] mempty) (E.Info $ E.AppRes (E.typeOf xs) [])
-  where
-    i' = E.Var (E.QualName [] i) (E.Info . E.Scalar . E.Prim . E.Signed $ E.Int64) mempty
-
 -- Not to be confused with substituteNames lmao.
 substituteNamesE :: M.Map E.VName E.Exp -> E.Exp -> ViewM E.Exp
 substituteNamesE = onExp
@@ -442,8 +399,6 @@ substituteNamesE = onExp
     onExp :: M.Map VName E.Exp -> E.ExpBase E.Info VName -> ViewM (E.ExpBase E.Info VName)
     onExp subst e@(E.Var (E.QualName _ x) _ _) =
       case M.lookup x subst of
-        -- Just x' -> trace ("hihi substituting " <> prettyString x <> " for " <> prettyString x') $ pure x'
-        -- Nothing -> error $ show e
         Just x' -> pure x'
         Nothing -> pure e
     onExp subst e = T.astMap (substituter subst) e

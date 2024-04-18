@@ -36,7 +36,19 @@ type Test = (String, [String])
 -- File along with Test.
 tests :: [(FilePath, [Test])]
 tests =
-  [ ("tests/refinement/part2indices.fut",
+  [ ("tests/refinement/scalar.fut",
+     [ ("y", [
+        "∀i₆₁₇₆ ∈ iota x₆₀₆₈ .",
+        "    | True => x₆₀₆₈"
+       ])
+     ]),
+    ("tests/refinement/map.fut",
+     [ ("y", [
+        "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
+        "    | True => (xs₆₀₇₀)[i₆₁₇₆]"
+       ])
+     ]),
+    ("tests/refinement/part2indices.fut",
      [ ("inds", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
         "    | (conds₆₀₇₀)[i₆₁₇₆] => -1 + Σj₆₁₇₂∈[0, ..., i₆₁₇₆] (⟦(conds₆₀₇₀)[j₆₁₇₂]⟧)",
