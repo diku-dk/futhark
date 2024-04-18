@@ -132,7 +132,7 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
           -- Canonical array representation.
           i <- newNameFromString "i"
           normalise $ IndexFn (Forall i (Iota sz))
-                           (toCases $ Idx (Var vn) (expToSoP (Var i)))
+                           (toCases $ Idx (Var vn) (termToSoP (Var i)))
         Nothing ->
           -- Canonical scalar representation.
           normalise $ IndexFn Empty (toCases $ Var vn)

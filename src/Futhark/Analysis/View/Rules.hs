@@ -169,7 +169,7 @@ rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
     b == SoP2 (SoP.int2SoP 0), -- Domain is iota so b must be 0.
     b == b' = do
       traceM "👀 Using Rule 4 (recursive sum)"
-      let lb = expToSoP b SoP..+. SoP.int2SoP 1
+      let lb = termToSoP b SoP..+. SoP.int2SoP 1
       let ub = SoP.sym2SoP (Var i)
       j <- newNameFromString "j"
       let base = substituteName i b e

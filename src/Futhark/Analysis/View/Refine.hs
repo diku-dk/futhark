@@ -22,7 +22,7 @@ int n = SoP.int2SoP (toInteger n)
 
 addIterator :: Iterator -> IndexFnM ()
 addIterator (Forall i (Iota (Var n))) = do
-  addRange (Var i) (mkRange (int 0) (expToSoP $ Var n))
+  addRange (Var i) (mkRange (int 0) (termToSoP $ Var n))
   addRange (Var n) (mkRange (int 1) (int maxBound))
 addIterator _ = pure ()
 
@@ -34,11 +34,18 @@ delIterator _ = pure ()
 
 -- I assume exp is already in NNF.
 toRel :: Term -> Maybe (Rel Term)
-toRel (x :<= y) = Just $ expToSoP x :<=: expToSoP y
-toRel (x :< y)  = Just $ expToSoP x :<: expToSoP y
-toRel (x :> y)  = Just $ expToSoP x :>: expToSoP y
-toRel (x :>= y) = Just $ expToSoP x :>=: expToSoP y
-toRel (x :== y) = Just $ expToSoP x :==: expToSoP y
+toRel (x :<= y) = Just $ termToSoP x :<=: termToSoP y
+toRel (x :< y)  = Just $ termToSoP x :<: termToSoP y
+toRel (x :> y)  = Just $ termToSoP x :>: termToSoP y
+toRel (x :>= y) = Just $ termToSoP x :>=: termToSoP y
+toRel (x :== y) = Just $ termToSoP x :==: termToSoP y
+toRel (Not (x :<= y)) = Just $ termToSoP x :>: termToSoP y
+toRel (Not (x :< y))  = Just $ termToSoP x :>=: termToSoP y
+toRel (Not (x :> y))  = Just $ termToSoP x :<=: termToSoP y
+toRel (Not (x :>= y)) = Just $ termToSoP x :<: termToSoP y
+-- toRel (Not (x :== y)) = Just $ termToSoP x :/=: termToSoP y
+-- TODO the above is checkable as 'x > y || x < y',
+-- which appears to be doable if we run each check separately?
 toRel (x :&& y) = (:&&:) <$> toRel x <*> toRel y
 toRel (_ :|| _) = undefined -- there is :||: but unsure if we need DNF/CNF first
 toRel _ = Nothing
@@ -83,7 +90,7 @@ refineIndexFn (IndexFn it (Cases cases)) = do
 
     -- NOTE the FME solver returns False if the expression is false
     -- _or_ if the result is unknown. Hence only True results may be used.
-    -- XXX Not is outside the SoP repr. Should it be converted in expToSoP?
+    -- XXX Not is outside the SoP repr. Should it be converted in termToSoP?
     -- refineTerm :: AlgEnv Exp E.Exp -> Exp -> IndexFnM Term
     refineTerm :: Term -> IndexFnM Term
     refineTerm (Var vn) = do
@@ -92,19 +99,28 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       -- substitution---then unpack the SoP representation.
       -- Is this even a good idea? Maybe everything should just be
       -- SoP at some point.
-      sop <- substEquivs $ expToSoP $ Var vn
+      sop <- substEquivs $ termToSoP $ Var vn
       case getSoP sop of
         [([Var x], 1)] -> pure $ Var x
         _ -> pure $ SoP2 sop
       -- pure (Var vn)
     refineTerm e@(x :== y) = do
-      b <- expToSoP x $==$ expToSoP y
+      b <- termToSoP x $==$ termToSoP y
       pure $ if b then Bool True else e
     refineTerm e@(x :> y)  = do
-      b <- expToSoP x $>$ expToSoP y
+      b <- termToSoP x $>$ termToSoP y
+      pure $ if b then Bool True else e
+    refineTerm e@(x :>= y)  = do
+      b <- termToSoP x $>=$ termToSoP y
+      debugM ("QQ " <> show x)
+      debugM ("QQ " <> show y)
+      debugM ("QQ " <> show b)
       pure $ if b then Bool True else e
     refineTerm e@(x :< y)  = do
-      b <- expToSoP x $<$ expToSoP y
+      b <- termToSoP x $<$ termToSoP y
+      pure $ if b then Bool True else e
+    refineTerm e@(x :<= y)  = do
+      b <- termToSoP x $<=$ termToSoP y
       pure $ if b then Bool True else e
     refineTerm (Sum j lb ub e) = do
       -- XXX test this after changing Sum.

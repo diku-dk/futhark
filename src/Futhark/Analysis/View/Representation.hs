@@ -167,7 +167,7 @@ instance ASTMappable (SoP Term) where
     where
       g (ts, n) = do
         ts' <- traverse (mapOnTerm m) ts
-        pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map expToSoP ts')
+        pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map termToSoP ts')
 
 instance ASTMappable Term where
   astMap _ Recurrence = pure Recurrence
@@ -188,7 +188,7 @@ instance ASTMappable Term where
     where
       g (ts, n) = do
         ts' <- traverse (mapOnTerm m) ts
-        pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map expToSoP ts')
+        pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map termToSoP ts')
   astMap m (Indicator p) = Indicator <$> mapOnTerm m p
   astMap _ x@(Bool {}) = pure x
   astMap m (Not x) = Not <$> mapOnTerm m x
@@ -222,29 +222,29 @@ instance ToSoP Term E.Exp where
     x <- lookupUntransPE e
     pure (1, SoP.sym2SoP x)
 
-expToSoP :: Term -> SoP Term
-expToSoP e =
+termToSoP :: Term -> SoP Term
+termToSoP e =
   case flatten e of
     SoP2 sop -> sop
     e' -> SoP.sym2SoP e'
 
 (~-~) :: Term -> Term -> Term
-x ~-~ y = flatten $ SoP2 $ expToSoP x SoP..-. expToSoP y
+x ~-~ y = flatten $ SoP2 $ termToSoP x SoP..-. termToSoP y
 
 (~+~) :: Term -> Term -> Term
-x ~+~ y = flatten $ SoP2 $ expToSoP x SoP..+. expToSoP y
+x ~+~ y = flatten $ SoP2 $ termToSoP x SoP..+. termToSoP y
 
 (~*~) :: Term -> Term -> Term
-x ~*~ y = flatten $ SoP2 $ expToSoP x SoP..*. expToSoP y
+x ~*~ y = flatten $ SoP2 $ termToSoP x SoP..*. termToSoP y
 
 -- (~<~) :: Term -> Term -> Term
--- x ~<~ y = flatten $ SoP (expToSoP x) :< SoP (expToSoP y)
+-- x ~<~ y = flatten $ SoP (termToSoP x) :< SoP (termToSoP y)
 
 -- (~>~) :: Term -> Term -> Term
--- x ~>~ y = flatten $ SoP (expToSoP x) :> SoP (expToSoP y)
+-- x ~>~ y = flatten $ SoP (termToSoP x) :> SoP (termToSoP y)
 
 -- (~==~) :: Term -> Term -> Term
--- x ~==~ y = flatten $ SoP (expToSoP x) :== SoP (expToSoP y)
+-- x ~==~ y = flatten $ SoP (termToSoP x) :== SoP (termToSoP y)
 
 prettyName :: VName -> Doc a
 prettyName (VName vn i) = pretty vn <> pretty (mapMaybe subscript (show i))
