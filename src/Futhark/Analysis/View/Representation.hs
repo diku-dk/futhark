@@ -46,9 +46,9 @@ data Exp =
       (SoP Exp)   -- upper bound
       Exp         -- indexed expression
   | Idx
-      Exp         -- array -- XXX VName
+      Exp         -- array
       (SoP Exp)   -- index
-  | SoP2 (SoP Exp) -- XXX Remove!
+  | SoP2 (SoP Exp)
   | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit)
   | -- Predicate expressions follow here for simplicity.
     -- I'm assuming it's safe because the source program was typechecked.
@@ -311,8 +311,6 @@ substituteNames substitutions x = do
   runIdentity $ astMap (substituter substitutions) x
   where
     substituter subst =
-      -- ASTMapper
-      --   { mapOnExp = onExp subst }
       ASTMapper
         { mapOnExp = onExp subst,
           mapOnVName = pure

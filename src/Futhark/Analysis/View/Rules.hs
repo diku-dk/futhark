@@ -7,12 +7,13 @@ import Data.Bifunctor (bimap)
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.MonadFreshNames
-import qualified Data.Map as M
 
 normalise :: View -> ViewM View
 normalise view =
   pure $ toNNF' $ idMap m view
   where
+    toNNF' (View i (Cases cs)) =
+      View i (Cases (NE.map (bimap toNNF toNNF) cs))
     m =
       ASTMapper
         { mapOnExp = normExp,
@@ -168,8 +169,8 @@ rewriteRule4 (View it@(Forall i'' (Iota _)) (Cases cases))
     b == SoP2 (SoP.int2SoP 0), -- Domain is iota so b must be 0.
     b == b' = do
       traceM "👀 Using Rule 4 (recursive sum)"
-      let lb = expToSoP b SoP..+. SoP.int2SoP 1 -- XXX change once Idx changes
-      let ub = SoP.sym2SoP (Var i) -- XXX change once Idx changes
+      let lb = expToSoP b SoP..+. SoP.int2SoP 1
+      let ub = SoP.sym2SoP (Var i)
       j <- newNameFromString "j"
       let base = substituteName i b e
       let x'' = substituteName i (Var j) x'
@@ -187,37 +188,3 @@ rewrite view =
   simplify view >>=
   rewriteRule4 >>=
   simplify
-
-toNNF' :: View -> View
-toNNF' (View i (Cases cs)) =
-  View i (Cases (NE.map (bimap toNNF toNNF) cs))
-
--- -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
--- --    | i == b => e              (e may depend on i)
--- --    | i /= b => y[i-1] ⊕ x[i]
--- -- _______________________________________________________________
--- -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . e{b/i} ⊕ (⊕[b+1:i] x)
--- --
--- -- If e{b/i} happens to be x[b] it later simplifies to
--- -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (⊕[b:i] x)
--- rewriteRule4 (View it@(Forall i'' (Iota _)) (Cases cases))
---   | (Var i :== b, e) :| [(Not (Var i' :== b'), x)] <- cases,
---     -- Just (Idx (Var x') (Var i''')) <- justTermPlusRecurence x,
---     Just (Indicator (Idx (Var x') (Var i'''))) <- justTermPlusRecurence x,
---     i == i',
---     i == i'',
---     i == i''',
---     b == SoP (SoP.int2SoP 0), -- Domain is iota so b must be 0.
---     b == b' = do
---       traceM "👀 Using Rule 4 (recursive sum)"
---       let lb = expToSoP b SoP..+. SoP.int2SoP 1 -- XXX change once Idx changes
---       let ub = SoP.sym2SoP (Var i) -- XXX change once Idx changes
---       base <- substituteName i b e
---       pure $ View it (toCases $ base ~+~ SumSlice x' lb ub)
---   where
---     justTermPlusRecurence :: Exp -> Maybe Exp
---     justTermPlusRecurence (SoP sop)
---       | [([x], 1), ([Recurrence], 1)] <- getSoP sop =
---           Just x
---     justTermPlusRecurence _ = Nothing
--- rewriteRule4 view = pure view
