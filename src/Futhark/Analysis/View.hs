@@ -6,11 +6,11 @@ import Data.List.NonEmpty qualified as NE
 import Data.Maybe (fromMaybe)
 import Futhark.Analysis.View.Representation
 import Futhark.Analysis.View.Refine
+import Futhark.Analysis.View.Substitution
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
 import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark.Semantic
-import Language.Futhark (VName)
 import Language.Futhark qualified as E
 import qualified Data.Map as M
 import Debug.Trace (traceM, trace)
@@ -112,36 +112,6 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     pure ()
 forwards _ = pure ()
 
--- Substitution rules for indexing. These are the rules
--- shown in the document. (All other substitutions are
--- an implementation detail because we don't have the program
--- in administrative normal form.)
-sub :: VName -> View -> View -> View
-sub x q@(View (Forall i xD) xs) r@(View (Forall j yD) ys)
-  | xD == yD =
-  -- Substitution Rule 1 where y indexes x.
-    debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n   in " <> prettyString r) $ View
-      (Forall j yD)
-      (Cases . NE.fromList $ do
-        (xcond, xval) <- casesToList $ substituteName i (Var j) xs
-        (ycond, yval) <- casesToList ys
-        pure (substituteName x xval ycond :&& xcond,
-              substituteName x xval yval))
-sub x q@(View Empty xs) r@(View iter_y ys) =
-  -- No rule in document (substituting scalar into index function).
-  debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n   in " <> prettyString r) $
-    View
-      iter_y
-      (Cases . NE.fromList $ do
-        (xcond, xval) <- casesToList xs
-        (ycond, yval) <- casesToList ys
-        pure (substituteName x xval ycond :&& xcond,
-              substituteName x xval yval))
-sub x q r =
-  error $ "💀 sub "
-          <> prettyString x <> " for "
-          <> prettyString q <> "\n   in "
-          <> prettyString r
 
 forward :: E.Exp -> ViewM View
 forward (E.Parens e _) = forward e

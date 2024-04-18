@@ -178,6 +178,7 @@ library
       Futhark.Analysis.View.Representation
       Futhark.Analysis.View.Rules
       Futhark.Analysis.View.Refine
+      Futhark.Analysis.View.Substitution
       Futhark.Analysis.Refinement
       Futhark.Analysis.Refinement.CNF
       Futhark.Analysis.Refinement.Forward
