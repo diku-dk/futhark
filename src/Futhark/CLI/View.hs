@@ -42,6 +42,12 @@ tests =
         "    | True => x₆₀₆₈"
        ])
      ]),
+    ("tests/refinement/array_to_scalar.fut",
+     [ ("y", [
+        ".",
+        "    | True => (xs₆₀₆₈)[i₆₁₇₆]"
+       ])
+     ]),
     ("tests/refinement/map.fut",
      [ ("y", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",

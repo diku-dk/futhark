@@ -145,22 +145,11 @@ sub x q@(View (Forall i xD) xs) r@(View (Forall j yD) ys)
         (ycond, yval) <- casesToList ys
         pure (substituteName x xval ycond :&& xcond,
               substituteName x xval yval))
-sub x q@(View Empty xs) r@(View (Forall j yD) ys) =
+sub x q@(View Empty xs) r@(View iter_y ys) =
   -- No rule in document (substituting scalar into index function).
   debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n   in " <> prettyString r) $
     View
-      (Forall j yD)
-      (Cases . NE.fromList $ do
-        (xcond, xval) <- casesToList xs
-        (ycond, yval) <- casesToList ys
-        pure (substituteName x xval ycond :&& xcond,
-              substituteName x xval yval))
-sub x q@(View Empty xs) r@(View Empty ys) =
-  -- No rule in document (substituting scalar into scalar).
-  -- NOTE this can be merged with the above case.
-  debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n   in " <> prettyString r) $
-    View
-      Empty
+      iter_y
       (Cases . NE.fromList $ do
         (xcond, xval) <- casesToList xs
         (ycond, yval) <- casesToList ys
@@ -189,8 +178,8 @@ forward (E.Negate (E.IntLit x _ _) _) =
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   views <- gets views
   case M.lookup vn views of
-    Just v@(View _ e2) -> do
-      traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
+    Just v@(View _ _) -> do
+      traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString v)
       pure v
     _ ->
       case getSize e of
@@ -206,32 +195,30 @@ forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
       View iter_idx idx <- forward idx'
       View iter_xs xs <- forward xs'
-      i <- newNameFromString "i"
       debugM ("index " <> prettyString xs' <> " by " <> prettyString idx')
       case iteratorName iter_xs of
         Just j -> do
-          -- XXX Something is wrong here when building view for
-          --
-          -- I would expect that I can make
-          -- iter_idx take precedence over iter_xs as iter_idx
-          -- is the "destination" (i.e., xs[0] results in just
-          -- a scalar; the iterator of View Empty . |True => 0.)
-          -- Right now iter_xs is the destination. This is _wrong_
-          -- but works for most programs.
-          normalise $ sub j (View iter_idx idx) (View iter_xs xs)
-          -- x <- newNameFromString "x"
-          -- let y = View iter_idx (toCases $ Var x)
-          -- debugM (prettyString (View iter_xs xs))
-          -- let y' = sub x (View iter_xs xs) y
-          -- normalise $ sub i (View iter_idx idx) y'
-        Nothing -> do
-          -- xs is a variable or array literal.
-          x <- newNameFromString "x"
-          let y = View iter_idx
-                       (Cases . NE.singleton $ (Bool True,
-                                                Idx (Var x) (expToSoP $ Var i)))
-          let y' = sub i (View iter_idx idx) y
-          normalise $ sub x (View iter_xs xs) y'
+          -- This case can be funky. Treating `a[i]` inside the map lambda
+          --   let a = scan (+) 0i64 x
+          --   let b = map (\i -> a[i]) (iota n)
+          -- yields:
+          --   index a by i
+          --   a: ∀i₆₁₀₂ ∈ iota n₆₀₆₈ .
+          --     | True => Σj₆₁₀₄∈[0, ..., i₆₁₀₂] ((x₆₀₇₀)[j₆₁₀₄])
+          --   i: .
+          --     | True => i₆₀₉₃
+          --   sub i_6102 for .
+          --     | True => i₆₀₉₃
+          --    in .
+          --     | True => Σj₆₁₀₄∈[0, ..., i₆₁₀₂] ((x₆₀₇₀)[j₆₁₀₄])
+          --   sub result: .
+          --     | True => Σj₆₁₀₄∈[0, ..., i₆₀₉₃] ((x₆₀₇₀)[j₆₁₀₄])
+          -- So the result is a scalar because i₆₀₉₃ is a scalar in this context,
+          -- because we are inside the body of the map lambda.
+          -- (I think this is correct; i₆₀₉₃ is a program variable like x₆₀₇₀.)
+          normalise $ sub j (View iter_idx idx) (View iter_idx xs)
+        Nothing ->
+          error "indexing into a scalar"
 -- Nodes.
 forward (E.ArrayLit _es _ _) =
   -- TODO support arrays via multi-dim index functions.
