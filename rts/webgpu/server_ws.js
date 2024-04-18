@@ -3,6 +3,8 @@
 class BrowserServer {
   constructor(ctx, port) {
     this.ctx = ctx;
+    this.vars = {};
+
     this.socket = new WebSocket("ws://" + window.location.host + "/ws");
     this.socket.onopen = (event) => {
       this.socket.send("A test message");
@@ -11,6 +13,26 @@ class BrowserServer {
       console.log(event.data);
     };
     console.log("Created server");
+  }
+
+  check_var(name) {
+    if (!(name in this.vars)) {
+      throw 'Unknown variable: ' + name;
+    }
+  }
+
+  set_var(name, val, typ) {
+    this.vars[name] = {val: val, typ: typ};
+  }
+
+  get_type(name) {
+    this.check_var(name);
+    return this.vars[name].typ;
+  }
+
+  get_var(name) {
+    this.check_var(name);
+    return this.vars[name].val;
   }
 }
 

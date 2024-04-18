@@ -12,7 +12,7 @@ module Futhark.CodeGen.Backends.CWebGPU
 where
 
 import Data.Map qualified as M
-import Data.Maybe (maybeToList)
+import Data.Maybe (mapMaybe, maybeToList)
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
@@ -21,7 +21,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsWebGPUH)
-import Futhark.CodeGen.RTS.JavaScript (serverBrowserJs)
+import Futhark.CodeGen.RTS.WebGPU (serverWsJs)
 import Futhark.IR.GPUMem hiding
   ( HostOp,
     CmpSizeLe,
@@ -31,6 +31,8 @@ import Futhark.IR.GPUMem hiding
 import Futhark.MonadFreshNames
 import Language.C.Quote.C qualified as C
 import NeatInterpolation (text, untrimming)
+
+import Debug.Trace (traceShowM)
 
 mkKernelInfos :: M.Map Name KernelInterface -> GC.CompilerM HostOp () ()
 mkKernelInfos kernels = do
@@ -102,7 +104,48 @@ webgpuMemoryType :: GC.MemoryType HostOp ()
 webgpuMemoryType "device" = pure [C.cty|typename WGPUBuffer|]
 webgpuMemoryType space = error $ "WebGPU backend does not support '" ++ space ++ "' memory space."
 
+jsBoilerplate :: Definitions a -> T.Text
+jsBoilerplate prog = jsContext prog
+
+jsContext :: Definitions a -> T.Text
+jsContext (Definitions _ _ (Functions funs)) = 
+  [text|
+  class FutharkContext {
+    ${constructor}
+    ${entryPointFuns}
+    ${builtins}
+  }|]
+  where
+    constructor = 
+      [text|
+      constructor(module) {
+        this.m = module;
+        this.cfg = this.m._futhark_context_config_new();
+        this.ctx = this.m._futhark_context_new(this.cfg);
+        this.entry_points = {
+          ${entryPointEntries}
+        };
+      }|]
+    entryPoints = mapMaybe (functionEntry . snd) funs
+    entryPointSigs = map mkSig entryPoints
+    mkSig (EntryPoint name results args)
+      -- Keep original entry point name, the one in the signature is the name of
+      -- the corresponding function.
+      = (name, JsWrapperSig undefined undefined undefined undefined) -- TODO
+    entryPointEntries = T.intercalate ",\n" $ map
+      (\(n, sig) -> [text|'${nameToText n}': ${sigName sig}|]) entryPointSigs
+    entryPointFuns = undefined
+    builtins = undefined
+
+data JsWrapperSig = JsWrapperSig
+  { sigName :: T.Text,
+    sigArgs :: [T.Text],
+    sigReturns :: [T.Text],
+    sigAsync :: Bool
+  }
+
 data JsWrapper = JsWrapper T.Text T.Text [T.Text] Bool
+
 mkWrapper :: JsWrapper -> T.Text
 mkWrapper (JsWrapper name returnType argTypes async) =
   [text|
@@ -147,6 +190,7 @@ compileProg version prog = do
   ( ws,
     Program wgsl_code wgsl_prelude macros kernels params failures prog'
     ) <- ImpGen.compileProg prog
+  traceShowM prog'
   c <- GC.compileProg
         "webgpu"
         version
@@ -194,4 +238,4 @@ compileProg version prog = do
 asJSServer :: GC.CParts -> (T.Text, T.Text)
 asJSServer parts = 
   let (_, c, _) = GC.asLibrary parts
-   in (c, serverBrowserJs)
+   in (c, serverWsJs)

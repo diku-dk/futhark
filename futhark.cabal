@@ -67,7 +67,6 @@ extra-source-files:
     rts/cuda/prelude.cu
     rts/futhark-doc/style.css
     rts/javascript/server.js
-    rts/javascript/server_browser.js
     rts/javascript/values.js
     rts/javascript/wrapperclasses.js
     rts/opencl/copy.cl
@@ -80,6 +79,7 @@ extra-source-files:
     rts/python/values.py
     rts/python/opencl.py
     rts/python/scalar.py
+    rts/webgpu/server_ws.js
     rts/wgsl/scalar.wgsl
     rts/wgsl/scalar8.wgsl
     rts/wgsl/scalar16.wgsl
@@ -215,6 +215,7 @@ library
       Futhark.CodeGen.RTS.OpenCL
       Futhark.CodeGen.RTS.Python
       Futhark.CodeGen.RTS.JavaScript
+      Futhark.CodeGen.RTS.WebGPU
       Futhark.CodeGen.RTS.WGSL
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.GPU
