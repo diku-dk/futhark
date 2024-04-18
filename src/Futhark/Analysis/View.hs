@@ -3,7 +3,7 @@ module Futhark.Analysis.View (mkViewProg) where
 import Data.List qualified as L
 import Data.List.NonEmpty()
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Maybe (fromMaybe)
 import Futhark.Analysis.View.Representation
 import Futhark.Analysis.View.Refine
 import Futhark.MonadFreshNames
@@ -16,14 +16,48 @@ import qualified Data.Map as M
 import Debug.Trace (traceM, trace)
 import qualified Data.Set as S
 import Futhark.Analysis.View.Rules
-import Language.Futhark.Traversals qualified as T
-import Data.Functor.Identity
 import Control.Monad.RWS.Strict hiding (Sum)
 
 
 --------------------------------------------------------------
 tracePrettyM :: (Applicative f, Pretty a) => a -> f ()
 tracePrettyM = traceM . prettyString
+--------------------------------------------------------------
+
+--------------------------------------------------------------
+-- Extracting information from E.Exp.
+--------------------------------------------------------------
+getFun :: E.Exp -> Maybe String
+getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
+getFun _ = Nothing
+
+getSize :: E.Exp -> Maybe Exp
+getSize (E.Var _ (E.Info {E.unInfo = E.Scalar _}) _) =
+  Nothing
+getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
+  | dim:_ <- E.shapeDims shape =
+    Just $ convertSize dim
+getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
+  | dim:_ <- E.shapeDims shape =
+    Just $ convertSize dim
+getSize e = error $ "getSize: " <> prettyString e <> "\n" <> show e
+
+-- Used for converting sizes of function arguments.
+convertSize :: E.Exp -> Exp
+convertSize (E.Var (E.QualName _ x) _ _) = Var x
+convertSize (E.Parens e _) = convertSize e
+convertSize (E.Attr _ e _) = convertSize e
+convertSize (E.IntLit x _ _) = SoP2 $ SoP.int2SoP x
+convertSize e = error ("convertSize not implemented for: " <> show e)
+
+-- Strip unused information.
+getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
+getArgs = map (stripExp . snd) . NE.toList
+  where
+    stripExp x = fromMaybe x (E.stripExp x)
+
+--------------------------------------------------------------
+-- Refine source program
 --------------------------------------------------------------
 
 -- mkViewProg :: VNameSource -> [E.Dec] -> Views
@@ -59,32 +93,6 @@ mkViewValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
       pure ()
     _ -> pure ()
 
-
-getFun :: E.Exp -> Maybe String
-getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
-getFun _ = Nothing
-
-getSize :: E.Exp -> Maybe Exp
-getSize (E.Var _ (E.Info {E.unInfo = E.Scalar _}) _) =
-  Nothing
-getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
-  | dim:_ <- E.shapeDims shape =
-    Just $ convertSize dim
-getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
-  | dim:_ <- E.shapeDims shape =
-    Just $ convertSize dim
-getSize e = error $ "getSize: " <> prettyString e <> "\n" <> show e
-
--- Used for converting sizes of function arguments.
-convertSize :: E.Exp -> Exp
-convertSize (E.Var (E.QualName _ x) _ _) = Var x
-convertSize (E.Parens e _) = convertSize e
-convertSize (E.Attr _ e _) = convertSize e
-convertSize (E.IntLit x _ _) = SoP2 $ SoP.int2SoP x
-convertSize e = error ("convertSize not implemented for: " <> show e)
-
-stripExp :: E.Exp -> E.Exp
-stripExp x = fromMaybe x (E.stripExp x)
 
 forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
@@ -373,7 +381,3 @@ forward (E.AppExp (E.Apply f args _) _)
       View it body <- forward arg
       normalise $ View it (cmapValues (toNNF . Not) body)
 forward e = error $ "forward on " <> show e
-
--- Strip unused information.
-getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
-getArgs = map (stripExp . snd) . NE.toList
