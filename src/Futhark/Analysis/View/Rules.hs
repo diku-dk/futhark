@@ -16,13 +16,13 @@ normalise view =
       View i (Cases (NE.map (bimap toNNF toNNF) cs))
     m =
       ASTMapper
-        { mapOnExp = normExp,
+        { mapOnTerm = normTerm,
           mapOnVName = pure
         }
-    normExp (Var x) = pure $ Var x
-    normExp (x :&& y) = do
-      x' <- normExp x
-      y' <- normExp y
+    normTerm (Var x) = pure $ Var x
+    normTerm (x :&& y) = do
+      x' <- normTerm x
+      y' <- normTerm y
       case (x', y') of
         (Bool True, b) -> pure b
         (a, Bool True) -> pure a
@@ -34,16 +34,16 @@ normalise view =
           pure (Bool False)
         (a, b) ->
           pure $ a :&& b
-    normExp (x :|| y) = do
-      x' <- normExp x
-      y' <- normExp y
+    normTerm (x :|| y) = do
+      x' <- normTerm x
+      y' <- normTerm y
       case (x', y') of
         (Bool True, _) -> pure (Bool True)
         (_, Bool True) -> pure (Bool True)
         (Bool False, b) -> pure b
         (a, Bool False) -> pure a
         (a, b) -> pure $ a :|| b
-    normExp x@(SoP2 _) = do
+    normTerm x@(SoP2 _) = do
       x' <- astMap m x
       case x' of
         SoP2 sop -> pure . SoP2 . normaliseNegation . mergeSums $ sop
@@ -79,7 +79,7 @@ normalise view =
             z -> z
 
         -- Rewrite sum_{j=lb}^ub e(j) + e(lb+1) ==> sum_{j=lb}^{ub+1} e(j).
-        -- Relies on sorting of SoP and Exp to match.
+        -- Relies on sorting of SoP and Term to match.
         mergeUb ([Sum j lb ub e1], 1) ([e2], 1) =
             let ubp1 = ub SoP..+. SoP.int2SoP 1
             in  if substituteName j (SoP2 ubp1) e1 == e2
@@ -87,7 +87,7 @@ normalise view =
                 else Nothing
         mergeUb _ _ = Nothing
         -- Rewrite sum_{j=lb}^ub e(j) + e(lb-1) ==> sum_{j=lb-1}^ub e(j).
-        -- Relies on sorting of SoP and Exp to match.
+        -- Relies on sorting of SoP and Term to match.
         mergeLb ([Sum j lb ub e1], 1) ([e2], 1) =
             let lbm1 = lb SoP..-. SoP.int2SoP 1
             in  if substituteName j (SoP2 lbm1) e1 == e2
@@ -96,7 +96,7 @@ normalise view =
         mergeLb _ _ = Nothing
 
         -- -- Rewrite sum e[lb:ub] + e[ub+1] ==> sum e[lb:ub+1].
-        -- -- Relies on sorting of SoP and Exp to match.
+        -- -- Relies on sorting of SoP and Term to match.
         -- merge ([SumSlice x lb ub], 1) ([Idx y i], 1)
         --   | x == y,
         --     i == ub SoP..+. SoP.int2SoP 1 =
@@ -106,7 +106,7 @@ normalise view =
         --     i == lb SoP..-. SoP.int2SoP 1 =
         --       Just ([SumSlice x i ub], 1)
         -- merge _ _ = Nothing
-    normExp v = astMap m v
+    normTerm v = astMap m v
 
 simplify :: View -> ViewM View
 simplify view =
@@ -176,7 +176,7 @@ rewriteRule4 (View it@(Forall i'' (Iota _)) (Cases cases))
       let x'' = substituteName i (Var j) x'
       pure $ View it (toCases $ base ~+~ Sum j lb ub x'')
   where
-    justTermPlusRecurence :: Exp -> Maybe Exp
+    justTermPlusRecurence :: Term -> Maybe Term
     justTermPlusRecurence (SoP2 sop)
       | [([x], 1), ([Recurrence], 1)] <- getSoP sop =
           Just x

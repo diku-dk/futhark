@@ -14,10 +14,10 @@ import Futhark.Util.Pretty
 import Debug.Trace (traceM)
 
 
-mkRange :: SoP.SoP Exp -> SoP.SoP Exp -> SoP.Range Exp
+mkRange :: SoP.SoP Term -> SoP.SoP Term -> SoP.Range Term
 mkRange lb ub = SoP.Range (S.singleton lb) 1 (S.singleton ub)
 
-int :: Int -> SoP.SoP Exp
+int :: Int -> SoP.SoP Term
 int n = SoP.int2SoP (toInteger n)
 
 addIterator :: Iterator -> ViewM ()
@@ -33,7 +33,7 @@ delIterator (Forall i (Iota (Var n))) = do
 delIterator _ = pure ()
 
 -- I assume exp is already in NNF.
-toRel :: Exp -> Maybe (Rel Exp)
+toRel :: Term -> Maybe (Rel Term)
 toRel (x :<= y) = Just $ expToSoP x :<=: expToSoP y
 toRel (x :< y)  = Just $ expToSoP x :<: expToSoP y
 toRel (x :> y)  = Just $ expToSoP x :>: expToSoP y
@@ -58,18 +58,18 @@ refineView (View it (Cases cases)) = do
   (preds'', vals'') <- rollbackAlgEnv (
     do
       addIterator it
-      preds' <- mapM refineExp preds
+      preds' <- mapM refineTerm preds
       vals' <- mapM refineCase (zip preds' vals)
       pure (preds', vals'))
   pure $ View it (Cases . NE.fromList $ zip preds'' vals'')
   where
     m =
       ASTMapper
-        { mapOnExp = refineExp,
+        { mapOnTerm = refineTerm,
           mapOnVName = pure
         }
 
-    refineCase :: (Exp, Exp) -> ViewM Exp
+    refineCase :: (Term, Term) -> ViewM Term
     refineCase (p, v)
       | Just rel <- toRel p =
         rollbackAlgEnv (
@@ -77,16 +77,16 @@ refineView (View it (Cases cases)) = do
             addRel rel
             env' <- gets algenv
             debugM $ "refine " <> prettyString (p,v) <> " Alg env: " <> prettyString env'
-            refineExp v)
+            refineTerm v)
     refineCase (_, v) =
-      refineExp v
+      refineTerm v
 
     -- NOTE the FME solver returns False if the expression is false
     -- _or_ if the result is unknown. Hence only True results may be used.
     -- XXX Not is outside the SoP repr. Should it be converted in expToSoP?
-    -- refineExp :: AlgEnv Exp E.Exp -> Exp -> ViewM Exp
-    refineExp :: Exp -> ViewM Exp
-    refineExp (Var vn) = do
+    -- refineTerm :: AlgEnv Exp E.Exp -> Exp -> ViewM Term
+    refineTerm :: Term -> ViewM Term
+    refineTerm (Var vn) = do
       -- TODO case statement is untested.
       -- If the substitution is simply a variable---or if there's no
       -- substitution---then unpack the SoP representation.
@@ -97,16 +97,16 @@ refineView (View it (Cases cases)) = do
         [([Var x], 1)] -> pure $ Var x
         _ -> pure $ SoP2 sop
       -- pure (Var vn)
-    refineExp e@(x :== y) = do
+    refineTerm e@(x :== y) = do
       b <- expToSoP x $==$ expToSoP y
       pure $ if b then Bool True else e
-    refineExp e@(x :> y)  = do
+    refineTerm e@(x :> y)  = do
       b <- expToSoP x $>$ expToSoP y
       pure $ if b then Bool True else e
-    refineExp e@(x :< y)  = do
+    refineTerm e@(x :< y)  = do
       b <- expToSoP x $<$ expToSoP y
       pure $ if b then Bool True else e
-    refineExp (Sum j lb ub e) = do
+    refineTerm (Sum j lb ub e) = do
       -- XXX test this after changing Sum.
       start <- astMap m lb
       end <- astMap m ub
@@ -114,11 +114,11 @@ refineView (View it (Cases cases)) = do
         (a, b) | SoP.padWithZero a == SoP.padWithZero b -> do
             -- If the sum has only one term (one iteration), eliminate it.
             addEquiv (Var j) b -- j is unique to the sum.
-            refineExp e
+            refineTerm e
         _ -> do
           addRange (Var j) (mkRange start end)
-          Sum j start end <$> refineExp e
-    -- refineExp (SumSlice vn lb ub) = do
+          Sum j start end <$> refineTerm e
+    -- refineTerm (SumSlice vn lb ub) = do
     --   -- XXX test this after changing Sum.
     --   start <- astMap m lb
     --   end <- astMap m ub
@@ -128,9 +128,9 @@ refineView (View it (Cases cases)) = do
     --         pure $ Idx (Var vn) (SoP a)
     --     _ -> do
     --       -- addRange j (mkRange start end)
-    --       -- Sum j start end <$> refineExp e
+    --       -- Sum j start end <$> refineTerm e
     --       pure $ SumSlice vn start end
-    refineExp v = astMap m v
+    refineTerm v = astMap m v
 
-refineCasePredicate :: Exp -> ViewM Exp
+refineCasePredicate :: Term -> ViewM Term
 refineCasePredicate = undefined

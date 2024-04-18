@@ -31,7 +31,7 @@ getFun :: E.Exp -> Maybe String
 getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
 getFun _ = Nothing
 
-getSize :: E.Exp -> Maybe Exp
+getSize :: E.Exp -> Maybe Term
 getSize (E.Var _ (E.Info {E.unInfo = E.Scalar _}) _) =
   Nothing
 getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
@@ -43,7 +43,7 @@ getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
 getSize e = error $ "getSize: " <> prettyString e <> "\n" <> show e
 
 -- Used for converting sizes of function arguments.
-convertSize :: E.Exp -> Exp
+convertSize :: E.Exp -> Term
 convertSize (E.Var (E.QualName _ x) _ _) = Var x
 convertSize (E.Parens e _) = convertSize e
 convertSize (E.Attr _ e _) = convertSize e
@@ -182,10 +182,10 @@ forward (E.AppExp (E.BinOp (op, _) _ (x', _) (y', _) _) _)
       vy <- forward y'
       a <- newNameFromString "a"
       b <- newNameFromString "b"
-      let doOp bopExp = rewrite $
+      let doOp op = rewrite $
                           sub b vy $
                             sub a (View iter_x x) $
-                              View iter_x (toCases $ bopExp (Var a) (Var b))
+                              View iter_x (toCases $ op (Var a) (Var b))
       case bop of
         E.Plus -> doOp (~+~)
         E.Times -> doOp (~*~)

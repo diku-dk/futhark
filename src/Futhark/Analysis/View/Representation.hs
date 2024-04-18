@@ -34,7 +34,7 @@ import Futhark.SoP.Monad
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Debug.Trace (traceM, trace)
 
-data Exp =
+data Term =
     Var VName
   -- | SumSlice
   --     VName       -- array
@@ -42,39 +42,39 @@ data Exp =
   --     (SoP Exp)   -- upper bound
   | Sum
       VName       -- index
-      (SoP Exp)   -- lower bound
-      (SoP Exp)   -- upper bound
-      Exp         -- indexed expression
+      (SoP Term)   -- lower bound
+      (SoP Term)   -- upper bound
+      Term         -- indexed expression
   | Idx
-      Exp         -- array
-      (SoP Exp)   -- index
-  | SoP2 (SoP Exp)
-  | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit)
+      Term         -- array
+      (SoP Term)   -- index
+  | SoP2 (SoP Term)
+  | Indicator Term -- predicate (the corresponding value of 0 or 1 is implicit)
   | -- Predicate expressions follow here for simplicity.
     -- I'm assuming it's safe because the source program was typechecked.
     -- TODO CNF
     Bool Bool
     -- TODO change this to SoP.Rel?
-  | Not Exp
-  | (:==) Exp Exp
-  | (:<) Exp Exp
-  | (:>) Exp Exp
-  | (:/=) Exp Exp
-  | (:>=) Exp Exp
-  | (:<=) Exp Exp
-  | (:&&) Exp Exp
-  | (:||) Exp Exp
+  | Not Term
+  | (:==) Term Term
+  | (:<) Term Term
+  | (:>) Term Term
+  | (:/=) Term Term
+  | (:>=) Term Term
+  | (:<=) Term Term
+  | (:&&) Term Term
+  | (:||) Term Term
   | -- Keep Recurrence last for ordering in Ord; we depend
     -- on this for Rule matching.
     Recurrence -- self-reference y[i-1]
   deriving (Show, Eq, Ord)
 
-data Domain = Iota Exp      -- [0, ..., n-1]
-            | Range Exp Exp -- [from, ..., to]
-            | Union         -- Union_{k=1}^{m-1} [b_{k-1}, ..., b_k)
-                VName       -- k
-                Exp         -- m
-                Domain      -- D
+data Domain = Iota Term       -- [0, ..., n-1]
+            | Range Term Term -- [from, ..., to]
+            | Union           -- Union_{k=1}^{m-1} [b_{k-1}, ..., b_k)
+                VName         -- k
+                Term          -- m
+                Domain        -- D
   deriving (Show, Eq, Ord)
 
 data Iterator = Forall VName Domain
@@ -96,7 +96,7 @@ newtype Cases a = Cases (NE.NonEmpty (a, a))
 -- TODO add "bottom" for failure?
 data View = View
   { iterator :: Iterator,
-    value :: Cases Exp
+    value :: Cases Term
   }
   deriving (Show, Eq)
 
@@ -104,7 +104,7 @@ type Views = M.Map VName View
 
 data VEnv = VEnv
   { vnamesource :: VNameSource,
-    algenv :: AlgEnv Exp E.Exp,
+    algenv :: AlgEnv Term E.Exp,
     views :: Views
   }
 
@@ -123,10 +123,10 @@ instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
 
 -- This is required by MonadSoP.
-instance Nameable Exp where
+instance Nameable Term where
   mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
 
-instance MonadSoP Exp E.Exp ViewM where
+instance MonadSoP Term E.Exp ViewM where
   getUntrans = gets (untrans . algenv)
   getRanges = gets (ranges . algenv)
   getEquivs = gets (equivs . algenv)
@@ -142,7 +142,7 @@ insertView x v =
   modify $ \env -> env {views = M.insert x v $ views env}
 
 data ASTMapper m = ASTMapper
-  { mapOnExp :: Exp -> m Exp,
+  { mapOnTerm :: Term -> m Term,
     mapOnVName :: VName -> m VName
   }
 
@@ -154,32 +154,32 @@ instance ASTMappable View where
   astMap m (View (Forall i dom) e) = View (Forall i dom) <$> astMap m e
   astMap m (View Empty e) = View Empty <$> astMap m e
 
-instance ASTMappable (Cases Exp) where
+instance ASTMappable (Cases Term) where
   astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
 
-instance ASTMappable (Exp, Exp) where
-  astMap m (p, e) = (,) <$> mapOnExp m p <*> mapOnExp m e
+instance ASTMappable (Term, Term) where
+  astMap m (p, e) = (,) <$> mapOnTerm m p <*> mapOnTerm m e
 
 -- TODO test and think about this...
-instance ASTMappable (SoP Exp) where
+instance ASTMappable (SoP Term) where
   astMap m sop = do
     foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
     where
       g (ts, n) = do
-        ts' <- traverse (mapOnExp m) ts
+        ts' <- traverse (mapOnTerm m) ts
         pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map expToSoP ts')
 
-instance ASTMappable Exp where
+instance ASTMappable Term where
   astMap _ Recurrence = pure Recurrence
   -- astMap m (Var x) = Var <$> mapOnVName m x
   astMap m (Var x) = do
     vn <- mapOnVName m x
-    mapOnExp m $ Var vn
+    mapOnTerm m $ Var vn
   -- astMap m (SumSlice vn lb ub) =
   --   SumSlice <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
   astMap m (Sum i lb ub e) =
-    Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> mapOnExp m e
-  astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> astMap m i
+    Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> mapOnTerm m e
+  astMap m (Idx xs i) = Idx <$> mapOnTerm m xs <*> astMap m i
   astMap m (SoP2 sop) = do
     sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
     case SoP.justSym sop' of
@@ -187,19 +187,19 @@ instance ASTMappable Exp where
       Nothing -> pure $ SoP2 sop'
     where
       g (ts, n) = do
-        ts' <- traverse (mapOnExp m) ts
+        ts' <- traverse (mapOnTerm m) ts
         pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map expToSoP ts')
-  astMap m (Indicator p) = Indicator <$> mapOnExp m p
+  astMap m (Indicator p) = Indicator <$> mapOnTerm m p
   astMap _ x@(Bool {}) = pure x
-  astMap m (Not x) = Not <$> mapOnExp m x
-  astMap m (x :== y) = (:==) <$> mapOnExp m x <*> mapOnExp m y
-  astMap m (x :< y) = (:<) <$> mapOnExp m x <*> mapOnExp m y
-  astMap m (x :> y) = (:>) <$> mapOnExp m x <*> mapOnExp m y
-  astMap m (x :/= y) = (:/=) <$> mapOnExp m x <*> mapOnExp m y
-  astMap m (x :>= y) = (:>=) <$> mapOnExp m x <*> mapOnExp m y
-  astMap m (x :<= y) = (:<=) <$> mapOnExp m x <*> mapOnExp m y
-  astMap m (x :&& y) = (:&&) <$> mapOnExp m x <*> mapOnExp m y
-  astMap m (x :|| y) = (:||) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (Not x) = Not <$> mapOnTerm m x
+  astMap m (x :== y) = (:==) <$> mapOnTerm m x <*> mapOnTerm m y
+  astMap m (x :< y) = (:<) <$> mapOnTerm m x <*> mapOnTerm m y
+  astMap m (x :> y) = (:>) <$> mapOnTerm m x <*> mapOnTerm m y
+  astMap m (x :/= y) = (:/=) <$> mapOnTerm m x <*> mapOnTerm m y
+  astMap m (x :>= y) = (:>=) <$> mapOnTerm m x <*> mapOnTerm m y
+  astMap m (x :<= y) = (:<=) <$> mapOnTerm m x <*> mapOnTerm m y
+  astMap m (x :&& y) = (:&&) <$> mapOnTerm m x <*> mapOnTerm m y
+  astMap m (x :|| y) = (:||) <$> mapOnTerm m x <*> mapOnTerm m y
 
 idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
 idMap m = runIdentity . astMap m
@@ -209,7 +209,7 @@ flatten = idMap m
   where
     m =
       ASTMapper
-        { mapOnExp =
+        { mapOnTerm =
             \e ->
               case e of
                 Var x -> pure $ Var x
@@ -217,33 +217,33 @@ flatten = idMap m
           mapOnVName = pure
         }
 
-instance ToSoP Exp E.Exp where
+instance ToSoP Term E.Exp where
   toSoPNum e = do
     x <- lookupUntransPE e
     pure (1, SoP.sym2SoP x)
 
-expToSoP :: Exp -> SoP Exp
+expToSoP :: Term -> SoP Term
 expToSoP e =
   case flatten e of
     SoP2 sop -> sop
     e' -> SoP.sym2SoP e'
 
-(~-~) :: Exp -> Exp -> Exp
+(~-~) :: Term -> Term -> Term
 x ~-~ y = flatten $ SoP2 $ expToSoP x SoP..-. expToSoP y
 
-(~+~) :: Exp -> Exp -> Exp
+(~+~) :: Term -> Term -> Term
 x ~+~ y = flatten $ SoP2 $ expToSoP x SoP..+. expToSoP y
 
-(~*~) :: Exp -> Exp -> Exp
+(~*~) :: Term -> Term -> Term
 x ~*~ y = flatten $ SoP2 $ expToSoP x SoP..*. expToSoP y
 
--- (~<~) :: Exp -> Exp -> Exp
+-- (~<~) :: Term -> Term -> Term
 -- x ~<~ y = flatten $ SoP (expToSoP x) :< SoP (expToSoP y)
 
--- (~>~) :: Exp -> Exp -> Exp
+-- (~>~) :: Term -> Term -> Term
 -- x ~>~ y = flatten $ SoP (expToSoP x) :> SoP (expToSoP y)
 
--- (~==~) :: Exp -> Exp -> Exp
+-- (~==~) :: Term -> Term -> Term
 -- x ~==~ y = flatten $ SoP (expToSoP x) :== SoP (expToSoP y)
 
 prettyName :: VName -> Doc a
@@ -251,7 +251,7 @@ prettyName (VName vn i) = pretty vn <> pretty (mapMaybe subscript (show i))
   where
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
-instance Pretty Exp where
+instance Pretty Term where
   pretty Recurrence = "%₍₋₁₎"
   pretty (Var x) = prettyName x
   pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)
@@ -306,26 +306,26 @@ instance Pretty Views where
   pretty env =
     stack $ map (\(a, b) -> pretty a <+> "=" <+> pretty b) $ M.toList env
 
-substituteNames :: ASTMappable x => M.Map VName Exp -> x -> x
+substituteNames :: ASTMappable x => M.Map VName Term -> x -> x
 substituteNames substitutions x = do
   runIdentity $ astMap (substituter substitutions) x
   where
     substituter subst =
       ASTMapper
-        { mapOnExp = onExp subst,
+        { mapOnTerm = onTerm subst,
           mapOnVName = pure
         }
-    onExp subst e@(Var x') =
+    onTerm subst e@(Var x') =
       case M.lookup x' subst of
         Just x'' -> pure x''
         Nothing -> pure e
-    onExp subst e = astMap (substituter subst) e
+    onTerm subst e = astMap (substituter subst) e
 
-substituteName :: ASTMappable x => VName -> Exp -> x -> x
+substituteName :: ASTMappable x => VName -> Term -> x -> x
 substituteName vn x = substituteNames (M.singleton vn x)
 
 -- Convert expression to Negation Normal Form.
-toNNF :: Exp -> Exp
+toNNF :: Term -> Term
 toNNF (Not (Not x)) = x
 toNNF (Not (Bool True)) = Bool False
 toNNF (Not (Bool False)) = Bool True
@@ -340,7 +340,7 @@ cmap f (Cases xs) = Cases (fmap f xs)
 cmapValues :: (a -> a) -> Cases a -> Cases a
 cmapValues f = cmap (second f)
 
-getSoP :: SoP.SoP Exp -> [([Exp], Integer)]
+getSoP :: SoP.SoP Term -> [([Term], Integer)]
 getSoP = SoP.sopToLists . SoP.normalize
 
 debugM :: Applicative f => String -> f ()
@@ -349,11 +349,11 @@ debugM x = traceM $ "🪲 " <> x
 debug :: String -> a -> a
 debug msg = trace ("🪲 " <> msg)
 
-toCases :: Exp -> Cases Exp
+toCases :: Term -> Cases Term
 toCases e = Cases (NE.singleton (Bool True, e))
 
 casesToList :: Cases a -> [(a, a)]
 casesToList (Cases xs) = NE.toList xs
 
-toScalarView :: Exp -> View
+toScalarView :: Term -> View
 toScalarView e = View Empty (toCases e)
