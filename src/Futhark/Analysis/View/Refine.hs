@@ -20,13 +20,13 @@ mkRange lb ub = SoP.Range (S.singleton lb) 1 (S.singleton ub)
 int :: Int -> SoP.SoP Term
 int n = SoP.int2SoP (toInteger n)
 
-addIterator :: Iterator -> ViewM ()
+addIterator :: Iterator -> IndexFnM ()
 addIterator (Forall i (Iota (Var n))) = do
   addRange (Var i) (mkRange (int 0) (expToSoP $ Var n))
   addRange (Var n) (mkRange (int 1) (int maxBound))
 addIterator _ = pure ()
 
-delIterator :: Iterator -> ViewM ()
+delIterator :: Iterator -> IndexFnM ()
 delIterator (Forall i (Iota (Var n))) = do
   delFromEnv (Var i)
   delFromEnv (Var n)
@@ -44,15 +44,15 @@ toRel (_ :|| _) = undefined -- there is :||: but unsure if we need DNF/CNF first
 toRel _ = Nothing
 
 -- Do `computation` in a separate scope for AlgEnv.
-rollbackAlgEnv :: ViewM a -> ViewM a
+rollbackAlgEnv :: IndexFnM a -> IndexFnM a
 rollbackAlgEnv computation = do
   alg <- gets algenv
   res <- computation
   modify (\env -> env { algenv = alg })
   pure res
 
-refineView :: View -> ViewM View
-refineView (View it (Cases cases)) = do
+refineIndexFn :: IndexFn -> IndexFnM IndexFn
+refineIndexFn (IndexFn it (Cases cases)) = do
   let preds = NE.toList $ NE.map fst cases
   let vals = NE.toList $ NE.map snd cases
   (preds'', vals'') <- rollbackAlgEnv (
@@ -61,7 +61,7 @@ refineView (View it (Cases cases)) = do
       preds' <- mapM refineTerm preds
       vals' <- mapM refineCase (zip preds' vals)
       pure (preds', vals'))
-  pure $ View it (Cases . NE.fromList $ zip preds'' vals'')
+  pure $ IndexFn it (Cases . NE.fromList $ zip preds'' vals'')
   where
     m =
       ASTMapper
@@ -69,7 +69,7 @@ refineView (View it (Cases cases)) = do
           mapOnVName = pure
         }
 
-    refineCase :: (Term, Term) -> ViewM Term
+    refineCase :: (Term, Term) -> IndexFnM Term
     refineCase (p, v)
       | Just rel <- toRel p =
         rollbackAlgEnv (
@@ -84,8 +84,8 @@ refineView (View it (Cases cases)) = do
     -- NOTE the FME solver returns False if the expression is false
     -- _or_ if the result is unknown. Hence only True results may be used.
     -- XXX Not is outside the SoP repr. Should it be converted in expToSoP?
-    -- refineTerm :: AlgEnv Exp E.Exp -> Exp -> ViewM Term
-    refineTerm :: Term -> ViewM Term
+    -- refineTerm :: AlgEnv Exp E.Exp -> Exp -> IndexFnM Term
+    refineTerm :: Term -> IndexFnM Term
     refineTerm (Var vn) = do
       -- TODO case statement is untested.
       -- If the substitution is simply a variable---or if there's no
@@ -132,5 +132,5 @@ refineView (View it (Cases cases)) = do
     --       pure $ SumSlice vn start end
     refineTerm v = astMap m v
 
-refineCasePredicate :: Term -> ViewM Term
+refineCasePredicate :: Term -> IndexFnM Term
 refineCasePredicate = undefined

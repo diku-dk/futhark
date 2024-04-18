@@ -147,7 +147,7 @@ runTest :: (FilePath, [Test]) -> IO ()
 runTest (file, expected) = do
   putStrLn $ "Running test on file: " ++ file
   (_warnings, imports, src) <- readProgramOrDie file
-  let res = M.mapKeys baseString $ mkViewProg src imports
+  let res = M.mapKeys baseString $ mkIndexFnProg src imports
   let passed = all (checkTest res) expected
   if passed
   then putStrLn $ "Test passed: " ++ file
@@ -168,12 +168,12 @@ main = mainWithOptions newRefineConfig options "program" $ \args cfg ->
         liftIO $
           hPutDoc stderr $
             prettyWarnings warnings
-      -- putStrLn $ "Proved: " <> take 100 (show (mkViewProg vns imps)) <> "..."
+      -- putStrLn $ "Proved: " <> take 100 (show (mkIndexFnProg vns imps)) <> "..."
       -- let valbinds = flip evalState src $
       --                  Defunctorise.transformProg imports
       --                  >>= FullNormalise.transformProg
-      -- let res = mkViewProg src valbinds
-      let res = mkViewProg src imports
+      -- let res = mkIndexFnProg src valbinds
+      let res = mkIndexFnProg src imports
       putStrLn "\nIndex function:\n---------------\n"
       putDoc (pretty res)
     _ -> Nothing

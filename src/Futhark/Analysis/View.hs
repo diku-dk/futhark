@@ -1,4 +1,4 @@
-module Futhark.Analysis.View (mkViewProg) where
+module Futhark.Analysis.View (mkIndexFnProg) where
 
 import Data.List qualified as L
 import Data.List.NonEmpty()
@@ -60,32 +60,32 @@ getArgs = map (stripExp . snd) . NE.toList
 -- Refine source program
 --------------------------------------------------------------
 
--- mkViewProg :: VNameSource -> [E.Dec] -> Views
--- mkViewProg vns prog = tracePretty $ execViewM (mkViewDecs prog) vns
-mkViewProg :: VNameSource -> Imports -> Views
-mkViewProg vns prog = execViewM (mkViewImports prog) vns
+-- mkIndexFnProg :: VNameSource -> [E.Dec] -> IndexFns
+-- mkIndexFnProg vns prog = tracePretty $ execIndexFnM (mkIndexFnDecs prog) vns
+mkIndexFnProg :: VNameSource -> Imports -> IndexFns
+mkIndexFnProg vns prog = execIndexFnM (mkIndexFnImports prog) vns
 
-mkViewImports :: [(ImportName, FileModule)] -> ViewM ()
-mkViewImports = mapM_ (mkViewDecs . E.progDecs . fileProg . snd)
+mkIndexFnImports :: [(ImportName, FileModule)] -> IndexFnM ()
+mkIndexFnImports = mapM_ (mkIndexFnDecs . E.progDecs . fileProg . snd)
 -- A program is a list of declarations (DecBase); functions are value bindings
 -- (ValBind). Everything is in an AppExp.
 
-mkViewDecs :: [E.Dec] -> ViewM ()
-mkViewDecs [] = pure ()
-mkViewDecs (E.ValDec vb : rest) = do
-  mkViewValBind vb
-  mkViewDecs rest
-mkViewDecs (_ : ds) = mkViewDecs ds
+mkIndexFnDecs :: [E.Dec] -> IndexFnM ()
+mkIndexFnDecs [] = pure ()
+mkIndexFnDecs (E.ValDec vb : rest) = do
+  mkIndexFnValBind vb
+  mkIndexFnDecs rest
+mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
-mkViewValBind :: E.ValBind -> ViewM ()
-mkViewValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
+mkIndexFnValBind :: E.ValBind -> IndexFnM ()
+mkIndexFnValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
   -- mapM_ paramRefs params
   -- forwards body
   case ret of
     Just (E.TERefine _t _goal _) -> do
       -- We don't really care about the goal right now, as
       -- we just want to express the value binding as an index function.
-      traceM ("\n====\nmkViewValBind: " <> prettyString vn)
+      traceM ("\n====\nmkIndexFnValBind: " <> prettyString vn)
       traceM ("\nTo prove:\n--------\n" <> prettyString ret)
       traceM ("\nWith params\n-----------\n" <> prettyString params)
       traceM ("\nFor body\n--------\n" <> prettyString body <> "\n====\n")
@@ -94,36 +94,36 @@ mkViewValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
     _ -> pure ()
 
 
-forwards :: E.Exp -> ViewM ()
+forwards :: E.Exp -> IndexFnM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
-    newView <- forward e
-    tracePrettyM newView
+    newIndexFn <- forward e
+    tracePrettyM newIndexFn
     traceM "🪨 refining"
-    newView' <- rewrite newView >>= refineView >>= rewrite
-    tracePrettyM newView'
+    newIndexFn' <- rewrite newIndexFn >>= refineIndexFn >>= rewrite
+    tracePrettyM newIndexFn'
     traceM "\n"
-    insertView x newView'
+    insertIndexFn x newIndexFn'
     forwards body
     pure ()
 forwards _ = pure ()
 
 
-forward :: E.Exp -> ViewM View
+forward :: E.Exp -> IndexFnM IndexFn
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 -- Leaves.
 forward (E.Literal (E.BoolValue x) _) =
-  normalise . toScalarView $ Bool x
+  normalise . toScalarIndexFn $ Bool x
 forward (E.IntLit x _ _) =
-  normalise . toScalarView . SoP2 $ SoP.int2SoP x
+  normalise . toScalarIndexFn . SoP2 $ SoP.int2SoP x
 forward (E.Negate (E.IntLit x _ _) _) =
-  normalise . toScalarView . SoP2 $ SoP.negSoP $ SoP.int2SoP x
+  normalise . toScalarIndexFn . SoP2 $ SoP.negSoP $ SoP.int2SoP x
 forward e@(E.Var (E.QualName _ vn) _ _) = do
-  views <- gets views
-  case M.lookup vn views of
-    Just v@(View _ _) -> do
+  indexfns <- gets indexfns
+  case M.lookup vn indexfns of
+    Just v@(IndexFn _ _) -> do
       traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString v)
       pure v
     _ ->
@@ -131,16 +131,16 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
         Just sz -> do
           -- Canonical array representation.
           i <- newNameFromString "i"
-          normalise $ View (Forall i (Iota sz))
+          normalise $ IndexFn (Forall i (Iota sz))
                            (toCases $ Idx (Var vn) (expToSoP (Var i)))
         Nothing ->
           -- Canonical scalar representation.
-          normalise $ View Empty (toCases $ Var vn)
+          normalise $ IndexFn Empty (toCases $ Var vn)
 -- Nodes.
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
-      View iter_idx idx <- forward idx'
-      View iter_xs xs <- forward xs'
+      IndexFn iter_idx idx <- forward idx'
+      IndexFn iter_xs xs <- forward xs'
       debugM ("index " <> prettyString xs' <> " by " <> prettyString idx')
       case iteratorName iter_xs of
         Just j -> do
@@ -162,12 +162,12 @@ forward (E.AppExp (E.Index xs' slice _) _)
           -- So the result is a scalar because i₆₀₉₃ is a scalar in this context,
           -- because we are inside the body of the map lambda.
           -- (I think this is correct; i₆₀₉₃ is a program variable like x₆₀₇₀.)
-          rewrite $ sub j (View iter_idx idx) (View iter_idx xs)
+          rewrite $ sub j (IndexFn iter_idx idx) (IndexFn iter_idx xs)
         Nothing ->
           error "indexing into a scalar"
 forward (E.Not e _) = do
-  View it e' <- forward e
-  rewrite $ View it $ cmapValues Not e'
+  IndexFn it e' <- forward e
+  rewrite $ IndexFn it $ cmapValues Not e'
 forward (E.ArrayLit _es _ _) =
   error "forward on array literal"
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) = do
@@ -178,14 +178,14 @@ forward (E.AppExp (E.BinOp (op, _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
     Just bop <- L.find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
-      View iter_x x <- forward x'
+      IndexFn iter_x x <- forward x'
       vy <- forward y'
       a <- newNameFromString "a"
       b <- newNameFromString "b"
       let doOp op = rewrite $
                           sub b vy $
-                            sub a (View iter_x x) $
-                              View iter_x (toCases $ op (Var a) (Var b))
+                            sub a (IndexFn iter_x x) $
+                              IndexFn iter_x (toCases $ op (Var a) (Var b))
       case bop of
         E.Plus -> doOp (~+~)
         E.Times -> doOp (~*~)
@@ -198,7 +198,7 @@ forward (E.AppExp (E.BinOp (op, _) _ (x', _) (y', _) _) _)
         E.LogOr -> doOp (:||)
         _ -> error ("forward not implemented for bin op: " <> show bop)
 forward (E.AppExp (E.If c t f _) _) = do
-  View iter_c c' <- forward c
+  IndexFn iter_c c' <- forward c
   vt <- forward t
   vf <- forward f
   -- Negating `c` means negating the case _values_ of c, keeping the
@@ -206,37 +206,37 @@ forward (E.AppExp (E.If c t f _) _) = do
   cond <- newNameFromString "cond"
   t_branch <- newNameFromString "t_branch"
   f_branch <- newNameFromString "f_branch"
-  let y = View iter_c (Cases . NE.fromList $ [(Var cond, Var t_branch),
+  let y = IndexFn iter_c (Cases . NE.fromList $ [(Var cond, Var t_branch),
                                               (Not $ Var cond, Var f_branch)])
   rewrite $
     sub f_branch vf $
       sub t_branch vt $
-        sub cond (View iter_c c') y
+        sub cond (IndexFn iter_c c') y
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
       xss <- mapM forward args'
-      let View iter_y _ = head xss
+      let IndexFn iter_y _ = head xss
       -- TODO use iter_body; likely needed for nested maps?
-      View iter_body cases_body <- forward body
+      IndexFn iter_body cases_body <- forward body
       unless (iter_body == iter_y || iter_body == Empty)
              (error $ "map: got incompatible iterator from map lambda body: "
                       <> show iter_body)
       debugM ("map args " <> prettyString xss)
-      debugM ("map body " <> prettyString (View iter_body cases_body))
+      debugM ("map body " <> prettyString (IndexFn iter_body cases_body))
       -- Make susbtitutions from function arguments to array names.
       -- TODO `map E.patNames params` is a [Set], I assume because we might have
       --   map (\(x, y) -> ...) xys
       -- meaning x needs to be substituted by x[i].0
       let paramNames = mconcat $ map (S.toList . E.patNames) params
       --               ^ XXX mconcat is wrong, see above
-      let s y (paramName, paramView) = sub paramName paramView y
+      let s y (paramName, paramIndexFn) = sub paramName paramIndexFn y
       rewrite $
-        foldl s (View iter_y cases_body) (zip paramNames xss)
+        foldl s (IndexFn iter_y cases_body) (zip paramNames xss)
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
-      View iter_xs xs <- forward xs'
+      IndexFn iter_xs xs <- forward xs'
       let Just i = iteratorName iter_xs
       -- TODO should verify that _ne matches op
       op <-
@@ -247,11 +247,11 @@ forward (E.AppExp (E.Apply f args _) _)
           _ -> error ("scan not implemented for bin op: " <> show vn)
       let base_case = Var i :== SoP2 (SoP.int2SoP 0)
       x <- newNameFromString "x"
-      let y = View
+      let y = IndexFn
                 iter_xs
                 (Cases . NE.fromList $
                   [(base_case, Var x), (Not base_case, Recurrence `op` Var x)])
-      rewrite $ sub x (View iter_xs xs) y
+      rewrite $ sub x (IndexFn iter_xs xs) y
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
       -- Scatter in-bounds-monotonic indices.
@@ -284,11 +284,11 @@ forward (E.AppExp (E.Apply f args _) _)
       undefined
   | Just "iota" <- getFun f,
     [n] <- getArgs args = do
-      view <- forward n
+      indexfn <- forward n
       i <- newNameFromString "i"
-      case view of
-        View Empty (Cases ((Bool True, m) NE.:| [])) ->
-              rewrite $ View (Forall i (Iota m)) (toCases $ Var i)
+      case indexfn of
+        IndexFn Empty (Cases ((Bool True, m) NE.:| [])) ->
+              rewrite $ IndexFn (Forall i (Iota m)) (toCases $ Var i)
         _ -> undefined -- TODO We've no way to express this yet.
                        -- Have talked with Cosmin about an "outer if" before.
   | Just "replicate" <- getFun f,
@@ -297,12 +297,12 @@ forward (E.AppExp (E.Apply f args _) _)
       x' <- forward x
       i <- newNameFromString "i"
       case (n', x') of
-        (View Empty (Cases ((Bool True, m) NE.:| [])),
-         View Empty cases) -> -- XXX support only 1D arrays for now.
-              simplify $ View (Forall i (Iota m)) cases
+        (IndexFn Empty (Cases ((Bool True, m) NE.:| [])),
+         IndexFn Empty cases) -> -- XXX support only 1D arrays for now.
+              simplify $ IndexFn (Forall i (Iota m)) cases
         _ -> undefined -- TODO See iota comment.
   | Just "not" <- getFun f,
     [arg] <- getArgs args = do
-      View it body <- forward arg
-      rewrite $ View it (cmapValues (toNNF . Not) body)
+      IndexFn it body <- forward arg
+      rewrite $ IndexFn it (cmapValues (toNNF . Not) body)
 forward e = error $ "forward on " <> show e

@@ -8,12 +8,12 @@ import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.MonadFreshNames
 
-normalise :: View -> ViewM View
-normalise view =
-  pure $ toNNF' $ idMap m view
+normalise :: IndexFn -> IndexFnM IndexFn
+normalise indexfn =
+  pure $ toNNF' $ idMap m indexfn
   where
-    toNNF' (View i (Cases cs)) =
-      View i (Cases (NE.map (bimap toNNF toNNF) cs))
+    toNNF' (IndexFn i (Cases cs)) =
+      IndexFn i (Cases (NE.map (bimap toNNF toNNF) cs))
     m =
       ASTMapper
         { mapOnTerm = normTerm,
@@ -108,32 +108,32 @@ normalise view =
         -- merge _ _ = Nothing
     normTerm v = astMap m v
 
-simplify :: View -> ViewM View
-simplify view =
-  normalise view
+simplify :: IndexFn -> IndexFnM IndexFn
+simplify indexfn =
+  normalise indexfn
   >>= removeDeadCases
   >>= simplifyRule3
   >>= removeDeadCases
   >>= normalise
 
-removeDeadCases :: View -> ViewM View
-removeDeadCases (View it (Cases cases))
+removeDeadCases :: IndexFn -> IndexFnM IndexFn
+removeDeadCases (IndexFn it (Cases cases))
   | xs <- NE.filter f cases,
     not $ null xs,
     length xs /= length cases = -- Something actualy got removed.
   trace "👀 Removing dead cases" $
-    pure $ View it $ Cases (NE.fromList xs)
+    pure $ IndexFn it $ Cases (NE.fromList xs)
   where
     f (Bool False, _) = False
     f _ = True
-removeDeadCases view = pure view
+removeDeadCases indexfn = pure indexfn
 
 -- TODO Maybe this should only apply to | True => 1 | False => 0
 -- (and its negation)?
 -- Applies if all case values are integer constants.
-simplifyRule3 :: View -> ViewM View
-simplifyRule3 v@(View _ (Cases ((Bool True, _) NE.:| []))) = pure v
-simplifyRule3 (View it (Cases cases))
+simplifyRule3 :: IndexFn -> IndexFnM IndexFn
+simplifyRule3 v@(IndexFn _ (Cases ((Bool True, _) NE.:| []))) = pure v
+simplifyRule3 (IndexFn it (Cases cases))
   | Just sops <- mapM (justConstant . snd) cases =
   let preds = NE.map fst cases
       sumOfIndicators =
@@ -143,14 +143,14 @@ simplifyRule3 (View it (Cases cases))
             preds
             sops
   in  trace "👀 Using Simplification Rule 3" $
-        pure $ View it $ Cases (NE.singleton (Bool True, SoP2 sumOfIndicators))
+        pure $ IndexFn it $ Cases (NE.singleton (Bool True, SoP2 sumOfIndicators))
   where
     justConstant (SoP2 sop) = SoP.justConstant sop
     justConstant _ = Nothing
 simplifyRule3 v = pure v
 
 
-rewriteRule4 :: View -> ViewM View
+rewriteRule4 :: IndexFn -> IndexFnM IndexFn
 -- Rule 4 (recursive sum)
 --
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
@@ -161,7 +161,7 @@ rewriteRule4 :: View -> ViewM View
 --
 -- If e{b/i} happens to be x[b] it later simplifies to
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (Σ_{j=b}^i x[j])
-rewriteRule4 (View it@(Forall i'' (Iota _)) (Cases cases))
+rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
   | (Var i :== b, e) :| [(Not (Var i' :== b'), x)] <- cases,
     Just x' <- justTermPlusRecurence x,
     i == i',
@@ -174,17 +174,17 @@ rewriteRule4 (View it@(Forall i'' (Iota _)) (Cases cases))
       j <- newNameFromString "j"
       let base = substituteName i b e
       let x'' = substituteName i (Var j) x'
-      pure $ View it (toCases $ base ~+~ Sum j lb ub x'')
+      pure $ IndexFn it (toCases $ base ~+~ Sum j lb ub x'')
   where
     justTermPlusRecurence :: Term -> Maybe Term
     justTermPlusRecurence (SoP2 sop)
       | [([x], 1), ([Recurrence], 1)] <- getSoP sop =
           Just x
     justTermPlusRecurence _ = Nothing
-rewriteRule4 view = pure view
+rewriteRule4 indexfn = pure indexfn
 
-rewrite :: View -> ViewM View
-rewrite view =
-  simplify view >>=
+rewrite :: IndexFn -> IndexFnM IndexFn
+rewrite indexfn =
+  simplify indexfn >>=
   rewriteRule4 >>=
   simplify

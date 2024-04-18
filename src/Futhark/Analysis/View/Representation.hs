@@ -94,22 +94,22 @@ newtype Cases a = Cases (NE.NonEmpty (a, a))
   deriving (Show, Eq)
 
 -- TODO add "bottom" for failure?
-data View = View
+data IndexFn = IndexFn
   { iterator :: Iterator,
     value :: Cases Term
   }
   deriving (Show, Eq)
 
-type Views = M.Map VName View
+type IndexFns = M.Map VName IndexFn
 
 data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Term E.Exp,
-    views :: Views
+    indexfns :: IndexFns
   }
 
--- The View monad keeps a source of fresh names and writes views.
-newtype ViewM a = ViewM (RWS () () VEnv a)
+-- The IndexFn monad keeps a source of fresh names and writes indexfns.
+newtype IndexFnM a = IndexFnM (RWS () () VEnv a)
   deriving
     ( Applicative,
       Functor,
@@ -126,20 +126,20 @@ instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
 instance Nameable Term where
   mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
 
-instance MonadSoP Term E.Exp ViewM where
+instance MonadSoP Term E.Exp IndexFnM where
   getUntrans = gets (untrans . algenv)
   getRanges = gets (ranges . algenv)
   getEquivs = gets (equivs . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
 
-execViewM :: ViewM a -> VNameSource -> Views
-execViewM (ViewM m) vns = views . fst $ execRWS m () s
+execIndexFnM :: IndexFnM a -> VNameSource -> IndexFns
+execIndexFnM (IndexFnM m) vns = indexfns . fst $ execRWS m () s
   where
     s = VEnv vns mempty mempty
 
-insertView :: VName -> View -> ViewM ()
-insertView x v =
-  modify $ \env -> env {views = M.insert x v $ views env}
+insertIndexFn :: VName -> IndexFn -> IndexFnM ()
+insertIndexFn x v =
+  modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
 
 data ASTMapper m = ASTMapper
   { mapOnTerm :: Term -> m Term,
@@ -150,9 +150,9 @@ class ASTMappable a where
   astMap :: (Monad m) => ASTMapper m -> a -> m a
 
 -- Mapping over AST for substitutions.
-instance ASTMappable View where
-  astMap m (View (Forall i dom) e) = View (Forall i dom) <$> astMap m e
-  astMap m (View Empty e) = View Empty <$> astMap m e
+instance ASTMappable IndexFn where
+  astMap m (IndexFn (Forall i dom) e) = IndexFn (Forall i dom) <$> astMap m e
+  astMap m (IndexFn Empty e) = IndexFn Empty <$> astMap m e
 
 instance ASTMappable (Cases Term) where
   astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
@@ -297,12 +297,12 @@ instance Pretty Domain where
       <> commasep ["1", "...", pretty e]
       <+> parens (pretty dom)
 
-instance Pretty View where
-  pretty (View (Forall i dom) e) =
+instance Pretty IndexFn where
+  pretty (IndexFn (Forall i dom) e) =
     "∀" <> prettyName i <+> "∈" <+> pretty dom <+> "." <+> pretty e
-  pretty (View Empty e) = "." <+> pretty e
+  pretty (IndexFn Empty e) = "." <+> pretty e
 
-instance Pretty Views where
+instance Pretty IndexFns where
   pretty env =
     stack $ map (\(a, b) -> pretty a <+> "=" <+> pretty b) $ M.toList env
 
@@ -355,5 +355,5 @@ toCases e = Cases (NE.singleton (Bool True, e))
 casesToList :: Cases a -> [(a, a)]
 casesToList (Cases xs) = NE.toList xs
 
-toScalarView :: Term -> View
-toScalarView e = View Empty (toCases e)
+toScalarIndexFn :: Term -> IndexFn
+toScalarIndexFn e = IndexFn Empty (toCases e)
