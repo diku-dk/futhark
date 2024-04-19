@@ -101,8 +101,7 @@ tests =
     ("tests/refinement/refine_iterator2.fut",
      [ ("zs", [
         "∀i₆₂₂₃ ∈ iota n₆₁₀₆ .",
-        "    | i₆₂₂₃ <= n₆₁₀₆ => Σj₆₂₂₁∈[0, ..., i₆₂₂₃] ((xs₆₁₀₇)[j₆₂₂₁])",
-        "    | ¬(i₆₂₂₃ <= n₆₁₀₆) => i₆₂₂₃"
+        "    | True => Σj₆₂₂₁∈[0, ..., i₆₂₂₃] ((xs₆₁₀₇)[j₆₂₂₁])"
        ])
      ]),
     ("tests/refinement/refine_iterator3.fut",

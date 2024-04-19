@@ -41,10 +41,10 @@ data Term =
   --     (SoP Exp)   -- lower bound
   --     (SoP Exp)   -- upper bound
   | Sum
-      VName       -- index
+      VName        -- index
       (SoP Term)   -- lower bound
       (SoP Term)   -- upper bound
-      Term         -- indexed expression
+      (SoP Term)   -- indexed expression
   | Idx
       Term         -- array
       (SoP Term)   -- index
@@ -178,7 +178,7 @@ instance ASTMappable Term where
   -- astMap m (SumSlice vn lb ub) =
   --   SumSlice <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
   astMap m (Sum i lb ub e) =
-    Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> mapOnTerm m e
+    Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> astMap m e
   astMap m (Idx xs i) = Idx <$> mapOnTerm m xs <*> astMap m i
   astMap m (SoP2 sop) = do
     sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)

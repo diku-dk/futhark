@@ -56,8 +56,9 @@ normalise indexfn =
             SoP.sym2SoP $ Indicator (Not c)
         normaliseNegation sop = sop
 
-        -- Takes a sum of products which may have Sum terms and tries to absorb terms into
-        -- those Sums. Time complexity is quadratic in the number of terms in the SoP.
+        -- Takes a sum of products which may have Sum terms and merges other
+        -- compatible terms into those Sums. Time complexity is quadratic in
+        -- the number of terms in the SoP.
         mergeSums sop =
           let sop' = getSoP sop
           in SoP.sopFromList $
@@ -82,7 +83,7 @@ normalise indexfn =
         -- Relies on sorting of SoP and Term to match.
         mergeUb ([Sum j lb ub e1], 1) ([e2], 1) =
             let ubp1 = ub SoP..+. SoP.int2SoP 1
-            in  if substituteName j (SoP2 ubp1) e1 == e2
+            in  if substituteName j (SoP2 ubp1) e1 == termToSoP e2
                 then Just ([Sum j lb ubp1 e1], 1)
                 else Nothing
         mergeUb _ _ = Nothing
@@ -90,7 +91,7 @@ normalise indexfn =
         -- Relies on sorting of SoP and Term to match.
         mergeLb ([Sum j lb ub e1], 1) ([e2], 1) =
             let lbm1 = lb SoP..-. SoP.int2SoP 1
-            in  if substituteName j (SoP2 lbm1) e1 == e2
+            in  if substituteName j (SoP2 lbm1) e1 == termToSoP e2
                 then Just ([Sum j lbm1 ub e1], 1)
                 else Nothing
         mergeLb _ _ = Nothing
@@ -173,7 +174,7 @@ rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
       let ub = SoP.sym2SoP (Var i)
       j <- newNameFromString "j"
       let base = substituteName i b e
-      let x'' = substituteName i (Var j) x'
+      let x'' = termToSoP $ substituteName i (Var j) x'
       pure $ IndexFn it (toCases $ base ~+~ Sum j lb ub x'')
   where
     justTermPlusRecurence :: Term -> Maybe Term
