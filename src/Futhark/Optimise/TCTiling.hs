@@ -46,14 +46,7 @@ reductionLoopBody tc_env qq0 arrs_in = do
   qq <- letExp "qq" =<< toExp (le64 qq0 * pe64 tq)
 
   redomap_inputs_shr <- forM2 shr_arrs arr_metas $ copyGlb2Shr (Var qq)
-
-  reg_tiles_out <-
-    -- TODO: for some reason, the __syncthreads that should be placed *after*
-    -- this loop is placed at the bottom of the loop body. find out how to
-    -- change this.
-    forLoop_ tq reg_tiles_in $
-      accumulateRegTile redomap_inputs_shr
-
+  reg_tiles_out <- accumulateRegTile redomap_inputs_shr reg_tiles_in
   pure $ reg_tiles_out : redomap_inputs_shr
   where
     copyGlb2Shr :: SubExp -> VName -> ArrMeta -> Builder GPU VName
@@ -130,37 +123,38 @@ reductionLoopBody tc_env qq0 arrs_in = do
         base_arr_dims = baseArrDims arr_meta
         base_arr = baseArr arr_meta
 
-    accumulateRegTile :: [VName] -> VName -> VName -> Builder GPU VName
-    accumulateRegTile shr_arrs q reg_tiles_in =
+    accumulateRegTile :: [VName] -> VName -> Builder GPU VName
+    accumulateRegTile shr_arrs reg_tiles_in =
       segMapND_ "reg_tiles_out" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
         reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
-        reg_tile_out <- forLoopNest_ tiles_R reg_tile_in $ \loop_inds reg_tile_merge -> do
+        reg_tile_out <- forLoopNest_ (tq : tiles_R) reg_tile_in $
+          \(q : loop_inds) reg_tile_merge -> do
 
-          -- Compute lists of indices for each redomap operand. For each
-          -- dimension, we need an index of the form `ltid * reg_tile +
-          -- loop_ind`, so for the reduction dimension, use a dummy ltid and
-          -- reg_tile.
-          dummy_ltid <- letExp "dummy_ltid_q" =<< toExp se0
-          let dummy_regtile = se1
-          shr_inds <- forM arr_metas $ \meta -> do
-            let ltids' = arrGather_ meta ltids dummy_ltid
-            let tiles_R' = arrGather_ meta tiles_R dummy_regtile
-            let loop_inds' = arrGather_ meta loop_inds q
-            forM3 ltids' tiles_R' loop_inds' $ \ltid tile loop_ind ->
-              letExp "shr_ind" =<< toExp (le64 ltid * pe64 tile + le64 loop_ind)
+            -- Compute lists of indices for each redomap operand. For each
+            -- dimension, we need an index of the form `ltid * reg_tile +
+            -- loop_ind`, so for the reduction dimension, use a dummy ltid and
+            -- reg_tile.
+            dummy_ltid <- letExp "dummy_ltid_q" =<< toExp se0
+            let dummy_regtile = se1
+            shr_inds <- forM arr_metas $ \meta -> do
+              let ltids' = arrGather_ meta ltids dummy_ltid
+              let tiles_R' = arrGather_ meta tiles_R dummy_regtile
+              let loop_inds' = arrGather_ meta loop_inds q
+              forM3 ltids' tiles_R' loop_inds' $ \ltid tile loop_ind ->
+                letExp "shr_ind" =<< toExp (le64 ltid * pe64 tile + le64 loop_ind)
 
-          -- Compute map and reduction results and update the register tile.
-          map_f <- renameLambda $ mapLam tc_env
-          red_op <- renameLambda $ redLam tc_env
+            -- Compute map and reduction results and update the register tile.
+            map_f <- renameLambda $ mapLam tc_env
+            red_op <- renameLambda $ redLam tc_env
 
-          map_operands <- forM2 shr_arrs shr_inds $ \arr inds ->
-            eSubExp . Var <$> index (baseString arr ++ "_elem") arr inds
-          map_res <- eLambda map_f map_operands
+            map_operands <- forM2 shr_arrs shr_inds $ \arr inds ->
+              eSubExp . Var <$> index (baseString arr ++ "_elem") arr inds
+            map_res <- eLambda map_f map_operands
 
-          acc <- eSubExp . Var <$> index "acc" reg_tile_merge loop_inds
-          red_res <- eLambda red_op $ acc : map (eSubExp . resSubExp) map_res
+            acc <- eSubExp . Var <$> index "acc" reg_tile_merge loop_inds
+            red_res <- eLambda red_op $ acc : map (eSubExp . resSubExp) map_res
 
-          update "res" reg_tile_merge loop_inds $ resSubExp $ head red_res
+            update "res" reg_tile_merge loop_inds $ resSubExp $ head red_res
 
         pure [varRes reg_tile_out]
 
