@@ -85,6 +85,25 @@ iteratorName :: Iterator -> Maybe VName
 iteratorName (Forall vn _) = Just vn
 iteratorName _ = Nothing
 
+-- The final value that the iterator takes on.
+-- (Given monotonicity in the Domain, this is also the maximum value.)
+iteratorEnd :: Iterator -> Maybe Term
+iteratorEnd (Forall _ dom) = Just (domainEnd dom)
+iteratorEnd _ = Nothing
+
+-- The final value in the domain (which is ordered).
+domainEnd :: Domain -> Term
+domainEnd (Iota n) = n
+domainEnd (Range _ end) = end
+domainEnd (Union _k _m _dom) =
+  undefined -- don't want to implement this before I can test it.
+  -- domainEnd (substituteName k m dom) -- substitution should actually be m-1
+-- instance ASTMappable Domain where
+--   astMap m (Iota n) = Iota <$> astMap m n
+--   astMap m (Range start end) = Range <$> astMap m start <*> astMap m end
+--   astMap m (Union k n dom) = Union <$> mapOnVName m k <*> astMap m n <*> astMap m dom
+
+
 instance Eq Iterator where
   (Forall _ dom_i) == (Forall _ dom_j) = dom_i == dom_j
   Empty == Empty = True

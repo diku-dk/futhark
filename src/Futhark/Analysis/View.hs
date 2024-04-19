@@ -275,20 +275,26 @@ forward (E.AppExp (E.Apply f args _) _)
       -- * inds and vals are same size
       -- * dest and result are same size
       IndexFn iter_inds inds <- forward inds_arg
-      let inds_fn = IndexFn iter_inds inds
-      -- get size m
-      let Forall i (Iota m) = iter_inds -- TODO don't do unsafe matching.
-      -- extract cases from inds
+      -- let Forall i (Iota m) = iter_inds -- TODO don't do unsafe matching.
       let Cases ((c, x) :| [(neg_c, y)]) = inds
       unless (c == (toNNF . Not $ neg_c)) (error "this should never happen")
+      vals <- forward vals_arg
+      IndexFn iter_dest dest <- forward dest_arg
+      -- The size of dest is the final value that the iterator takes on
+      -- since b is monotonically increasing. (Later we check that
+      -- sz_dest == b[m-1] to actually confirm that there's a correspondence.)
+      let Just sz_dest = iteratorEnd iter_dest -- TODO unsafe
+      debugM ("sz_dest " <> prettyString sz_dest)
+      let inds_fn = IndexFn iter_inds inds
       -- Check that exactly one branch is OOB---and determine which.
-      (oob, b) <- fromJust <$> getOOB inds_fn -- TODO handle Nothing case.
+      (oob, b) <- fromJust <$> getOOB (SoP.int2SoP 0) (termToSoP sz_dest) inds_fn
+      -- TODO ^handle Nothing case.
+      -- TODO ^Refinement won't say that 1 + u > u when u is a Sum
+      -- even though this is true for any integer-valued term u.
       -- check monotonicity on b
       lol <- checkMonotonic inds_fn
       -- check that cases match pattern with OOB < 0 or OOB > b[m-1]
-      vals <- forward vals_arg
       -- check that iterator matches that of inds
-      dest <- forward dest_arg
       -- check dest has size b[m-1]
       pure inds_fn
   | Just "iota" <- getFun f,
@@ -319,11 +325,13 @@ forward e = error $ "forward on " <> show e
 -- Check that exactly one branch is OOB---and determine which.
 -- Returns Just (OOB, non-OOB), if decidable, else Nothing.
 -- TODO add suport for non-negative OOB.
-getOOB :: IndexFn -> IndexFnM (Maybe (Term, Term))
-getOOB (IndexFn iter cases)
+getOOB :: SoP.SoP Term -> SoP.SoP Term -> IndexFn -> IndexFnM (Maybe (Term, Term))
+getOOB lower_bound upper_bound (IndexFn iter cases)
   | Cases ((c, x) :| [(neg_c, y)]) <- cases,
     c == (toNNF . Not $ neg_c) = do
-      let test = cmapValues (:< (SoP2 $ SoP.int2SoP 0)) cases
+      let test =
+           cmapValues (\v -> v :< SoP2 lower_bound :|| v :> SoP2 upper_bound)
+                      cases
       IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
       -- Swap (x, y) so that OOB is first.
       let res' = case res of
@@ -335,7 +343,7 @@ getOOB (IndexFn iter cases)
       debugM ("getOOB " <> prettyString (IndexFn iter (Cases res)))
       debugM ("getOOB res: " <> prettyString res')
       pure res'
-getOOB _ = pure Nothing
+getOOB _ _ _ = pure Nothing
 
 -- Goal right now is to prove that the Sum is in fact positive.
 -- Currently get:
