@@ -260,7 +260,7 @@ instance Pretty Term where
   --     <> parens (prettyName vn)
   --     <> brackets (pretty lb <+> ":" <+> pretty ub)
   pretty (Sum i lb ub e) =
-    "Σ"
+    "∑"
       <> prettyName i
       <> "∈"
       <> brackets (commasep [pretty lb, "...", pretty ub])
@@ -284,7 +284,7 @@ instance Pretty a => Pretty (Cases a) where
   pretty (Cases cases) = -- stack (map prettyCase (NE.toList cases))
     line <> indent 4 (stack (map prettyCase (NE.toList cases)))
     where
-      prettyCase (p, e) = "|" <+> pretty p <+> "=>" <+> pretty e
+      prettyCase (p, e) = "|" <+> pretty p <+> "⇒ " <+> pretty e
 
 instance Pretty Domain where
   pretty (Iota e) = "iota" <+> pretty e
