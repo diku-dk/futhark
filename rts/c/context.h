@@ -79,6 +79,52 @@ static void add_event(struct futhark_context* ctx,
   add_event_to_list(&ctx->event_list, name, description, data, f);
 }
 
+char *futhark_context_get_error(struct futhark_context *ctx) {
+  char *error = ctx->error;
+  ctx->error = NULL;
+  return error;
+}
+
+void futhark_context_config_set_debugging(struct futhark_context_config *cfg, int flag) {
+    cfg->profiling = cfg->logging = cfg->debugging = flag;
+}
+
+void futhark_context_config_set_profiling(struct futhark_context_config *cfg, int flag) {
+    cfg->profiling = flag;
+}
+
+void futhark_context_config_set_logging(struct futhark_context_config *cfg, int flag) {
+    cfg->logging = flag;
+}
+
+void futhark_context_config_set_cache_file(struct futhark_context_config *cfg, const char *f) {
+  cfg->cache_fname = strdup(f);
+}
+
+int futhark_get_tuning_param_count(void) {
+  return num_tuning_params;
+}
+
+const char *futhark_get_tuning_param_name(int i) {
+  return tuning_param_names[i];
+}
+
+const char *futhark_get_tuning_param_class(int i) {
+    return tuning_param_classes[i];
+}
+
+void futhark_context_set_logging_file(struct futhark_context *ctx, FILE *f){
+  ctx->log = f;
+}
+
+void futhark_context_pause_profiling(struct futhark_context *ctx) {
+  ctx->profiling_paused = 1;
+}
+
+void futhark_context_unpause_profiling(struct futhark_context *ctx) {
+  ctx->profiling_paused = 0;
+}
+
 struct futhark_context_config* futhark_context_config_new(void) {
   struct futhark_context_config* cfg = malloc(sizeof(struct futhark_context_config));
   if (cfg == NULL) {
