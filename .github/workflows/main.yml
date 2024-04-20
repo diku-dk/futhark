@@ -1,10 +1,11 @@
 name: CI
 
-on:
-  pull_request:
+on: workflow_dispatch
+# on:
+#   pull_request:
 
-  push:
-    branches: [ master ]
+#   push:
+#     branches: [ master ]
 
 jobs:
   build-linux-nix:
@@ -102,40 +103,40 @@ jobs:
         name: futhark-nightly-macos-x86_64.tar.xz
         path: futhark-nightly-macos-x86_64.tar.xz
 
-  # build-windows-cabal:
-  #   runs-on: windows-2019
+  build-windows-cabal:
+    runs-on: windows-latest
 
-  #   steps:
-  #   - uses: actions/checkout@v3
+    steps:
+    - uses: actions/checkout@v3
 
-  #   - id: setup-haskell
-  #     uses: haskell-actions/setup@v2
-  #     with:
-  #       ghc-version: '9.4.4'
+    - id: setup-haskell
+      uses: haskell-actions/setup@v2
+      with:
+        ghc-version: '9.8.1'
 
-  #   - uses: actions/cache@v3
-  #     name: Cache cabal stuff
-  #     with:
-  #       path: |
-  #         ${{ steps.setup-haskell.outputs.cabal-store }}
-  #         dist-newstyle
-  #       key: ${{ runner.os }}-cabal-${{ hashFiles('futhark.cabal', 'cabal.project') }}
+    - uses: actions/cache@v3
+      name: Cache cabal stuff
+      with:
+        path: |
+          ${{ steps.setup-haskell.outputs.cabal-store }}
+          dist-newstyle
+        key: ${{ runner.os }}-cabal-${{ hashFiles('futhark.cabal', 'cabal.project') }}
 
-  #   - name: Build
-  #     shell: bash
-  #     run: |
-  #       cabal update
-  #       try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
-  #       try || try || try
-  #   - uses: papeloto/action-zip@v1.1
-  #     with:
-  #       files: futhark.exe
-  #       dest: futhark-nightly-windows-x86_64.zip
+    - name: Build
+      shell: bash
+      run: |
+        cabal update
+        try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
+        try || try || try
+    - uses: papeloto/action-zip@v1.1
+      with:
+        files: futhark.exe
+        dest: futhark-nightly-windows-x86_64.zip
 
-  #   - uses: actions/upload-artifact@v1
-  #     with:
-  #       name: futhark-nightly-windows-x86_64.zip
-  #       path: futhark-nightly-windows-x86_64.zip
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-nightly-windows-x86_64.zip
+        path: futhark-nightly-windows-x86_64.zip
 
 
   haskell-test-style:
