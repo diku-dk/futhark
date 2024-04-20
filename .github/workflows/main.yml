@@ -1,11 +1,10 @@
 name: CI
 
-on: workflow_dispatch
-# on:
-#   pull_request:
+on:
+  pull_request:
 
-#   push:
-#     branches: [ master ]
+  push:
+    branches: [ master ]
 
 jobs:
   build-linux-nix:
