@@ -631,9 +631,9 @@ jobs:
         key: ${{ secrets.SSHKEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS }}
 
-    # - uses: actions/download-artifact@v3
-    #   with:
-    #     name: futhark-nightly-windows-x86_64.zip
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-nightly-windows-x86_64.zip
 
     - uses: actions/download-artifact@v3
       with:
