@@ -37,10 +37,10 @@ instance Layout GPU where
 
     -- Check if any of the dependencies are too complex to reason about
     let dimAccesses' = filter (isJust . originalVar) dimAccesses
-    let deps = mapMaybe originalVar dimAccesses'
-    let counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
-    let primExps = mapM (join . (`M.lookup` primExpTable)) deps
-    let inscrutable = maybe True (any (uncurry isInscrutable) . flip zip counters) primExps
+        deps = mapMaybe originalVar dimAccesses'
+        counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
+        primExps = mapM (join . (`M.lookup` primExpTable)) deps
+        inscrutable = maybe True (any (uncurry isInscrutable) . flip zip counters) primExps
 
     -- Create a candidate permutation
     let perm = map fst $ sortGPU (zip arr_layout dimAccesses)
@@ -105,10 +105,10 @@ multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_
 
   -- Check if any of the dependencies are too complex to reason about
   let dimAccesses' = filter (isJust . originalVar) dimAccesses
-  let deps = mapMaybe originalVar dimAccesses'
-  let counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
-  let primExps = mapM (join . (`M.lookup` primExpTable)) deps
-  let inscrutable = maybe True (any (uncurry isInscrutable) . flip zip counters) primExps
+      deps = mapMaybe originalVar dimAccesses'
+      counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
+      primExps = mapM (join . (`M.lookup` primExpTable)) deps
+      inscrutable = maybe True (any (uncurry isInscrutable) . flip zip counters) primExps
 
   -- Create a candidate permutation
   let perm = map fst $ sortMC (zip arr_layout dimAccesses)
@@ -126,14 +126,14 @@ commonPermutationEliminators :: [Int] -> [BodyType] -> Bool
 commonPermutationEliminators perm nest = do
   -- Don't manifest if the permutation is the permutation is invalid
   let is_invalid_perm = not (L.sort perm `L.isPrefixOf` [0 ..])
-  -- Don't manifest if the permutation is the identity permutation
-  let is_identity = perm `L.isPrefixOf` [0 ..]
-  -- or is not a transpose.
-  let inefficient_transpose = (isNothing . isMapTranspose) perm
-  -- or if the last idx remains last
-  let static_last_idx = last perm == length perm - 1
-  -- Don't manifest if the array is defined inside a segOp or loop body
-  let inside_undesired = any undesired nest
+      -- Don't manifest if the permutation is the identity permutation
+      is_identity = perm `L.isPrefixOf` [0 ..]
+      -- or is not a transpose.
+      inefficient_transpose = (isNothing . isMapTranspose) perm
+      -- or if the last idx remains last
+      static_last_idx = last perm == length perm - 1
+      -- Don't manifest if the array is defined inside a segOp or loop body
+      inside_undesired = any undesired nest
 
   is_invalid_perm || is_identity || inefficient_transpose || static_last_idx || inside_undesired
   where
@@ -188,11 +188,11 @@ sortMC =
   where
     dimdexMCcmp (ia, a) (ib, b) = do
       let depsA = dependencies a
-      let depsB = dependencies b
-      let deps1' = map (f ia . snd) $ M.toList depsA
-      let deps2' = map (f ib . snd) $ M.toList depsB
-      let aggr1 = foldl maxIdxPat Nothing deps1'
-      let aggr2 = foldl maxIdxPat Nothing deps2'
+          depsB = dependencies b
+          deps1' = map (f ia . snd) $ M.toList depsA
+          deps2' = map (f ib . snd) $ M.toList depsB
+          aggr1 = foldl maxIdxPat Nothing deps1'
+          aggr2 = foldl maxIdxPat Nothing deps2'
       cmpIdxPat aggr1 aggr2
       where
         cmpIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Ordering
