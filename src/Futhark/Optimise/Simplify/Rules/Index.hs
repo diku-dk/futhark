@@ -7,6 +7,7 @@ module Futhark.Optimise.Simplify.Rules.Index
   )
 where
 
+import Control.Monad (guard)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
@@ -30,6 +31,14 @@ isCt0 _ = False
 data IndexResult
   = IndexResult Certs VName (Slice SubExp)
   | SubExpResult Certs SubExp
+
+-- Fake expressions that we can recognise.
+fakeIndices :: [TPrimExp Int64 VName]
+fakeIndices = map f [0 :: Int ..]
+  where
+    f i = isInt64 $ LeafExp (VName v (negate i)) $ IntType Int64
+      where
+        v = nameFromText ("fake_" <> showText i)
 
 -- | Try to simplify an index operation.
 simplifyIndexing ::
@@ -60,6 +69,22 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
           Just $
             IndexResult cs arr . Slice . map DimFix
               <$> mapM (toSubExp "index_primexp") inds''
+      | Just (ST.IndexedArray cs arr inds'') <-
+          ST.index' idd (fixSlice (pe64 <$> Slice inds) (map fst matches)) vtable,
+        all (worthInlining . untyped) inds'',
+        arr `ST.available` vtable,
+        all (`ST.elem` vtable) (unCerts cs),
+        Just inds''' <- mapM okIdx inds'' -> do
+          Just $ IndexResult cs arr . Slice <$> sequence inds'''
+      where
+        matches = zip fakeIndices $ sliceDims $ Slice inds
+        okIdx i =
+          case lookup i matches of
+            Just w ->
+              Just $ pure $ DimSlice (constant (0 :: Int64)) w (constant (1 :: Int64))
+            Nothing -> do
+              guard $ not $ any ((`namesIntersect` freeIn i) . freeIn . fst) matches
+              Just $ DimFix <$> toSubExp "index_primexp" i
     Nothing -> Nothing
     Just (SubExp (Var v), cs) ->
       Just $ pure $ IndexResult cs v $ Slice inds

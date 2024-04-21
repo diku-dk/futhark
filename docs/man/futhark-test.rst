@@ -170,7 +170,9 @@ OPTIONS
   to the binary running ``futhark test`` itself.
 
 --no-terminal
-  Print each result on a line by itself, without line buffering.
+
+  Change the output format to be suitable for noninteractive
+  terminals. Prints a status message roughly every minute.
 
 --no-tuning
 

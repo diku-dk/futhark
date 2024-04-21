@@ -130,12 +130,16 @@ threadAlloc (Pat [mem]) _ _ =
 threadAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
 
-updateAcc :: VName -> [SubExp] -> [SubExp] -> InKernelGen ()
-updateAcc acc is vs = sComment "UpdateAcc" $ do
+updateAcc :: Safety -> VName -> [SubExp] -> [SubExp] -> InKernelGen ()
+updateAcc safety acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map pe64 is
   (c, space, arrs, dims, op) <- lookupAcc acc is'
-  sWhen (inBounds (Slice (map DimFix is')) dims) $
+  let boundsCheck =
+        case safety of
+          Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
+          _ -> id
+  boundsCheck $
     case op of
       Nothing ->
         forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
@@ -176,8 +180,8 @@ compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =
 compileThreadExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
-compileThreadExp _ (BasicOp (UpdateAcc acc is vs)) =
-  updateAcc acc is vs
+compileThreadExp _ (BasicOp (UpdateAcc safety acc is vs)) =
+  updateAcc safety acc is vs
 compileThreadExp dest e =
   defCompileExp dest e
 
@@ -975,7 +979,7 @@ kernelInitialisationSimple num_tblocks tblock_size = do
 
   let set_constants = do
         dPrim_ local_tid int32
-        dPrim_ inner_tblock_size int64
+        dPrim_ inner_tblock_size int32
         dPrim_ wave_size int32
         dPrim_ tblock_id int32
 
@@ -1227,7 +1231,7 @@ sKernelOp attrs constants ops name m = do
       x <- isConstExp vtable $ untyped e
       pure $
         case x of
-          Just (LeafExp kc _) -> Right kc
+          Just kc -> Right kc
           _ -> Left $ untyped e
 
     constToUse (v, e) = Imp.ConstUse v e

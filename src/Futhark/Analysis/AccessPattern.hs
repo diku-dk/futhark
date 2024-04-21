@@ -519,7 +519,8 @@ analyseBasicOp ctx expression pats = do
         (Scratch _ subexprs) -> concatVariableInfos mempty subexprs
         (Reshape _ (Shape shape_subexp) name) -> concatVariableInfos (oneName name) shape_subexp
         (Rearrange _ name) -> varInfoFromNames ctx $ oneName name
-        (UpdateAcc name lsubexprs rsubexprs) -> concatVariableInfos (oneName name) (lsubexprs ++ rsubexprs)
+        (UpdateAcc _ name lsubexprs rsubexprs) ->
+          concatVariableInfos (oneName name) (lsubexprs ++ rsubexprs)
         (FlatIndex name _) -> varInfoFromNames ctx $ oneName name
         (FlatUpdate name _ source) -> varInfoFromNames ctx $ namesFromList [name, source]
   let ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats

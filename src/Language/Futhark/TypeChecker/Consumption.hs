@@ -705,23 +705,25 @@ checkExp :: Exp -> CheckM (Exp, TypeAliases)
 
 --
 checkExp (AppExp (Apply f args loc) appres) = do
-  (args', args_als) <- NE.unzip <$> checkArgs args
   (f', f_als) <- checkExp f
+  (args', args_als) <- NE.unzip <$> checkArgs (toRes Nonunique f_als) args
   res_als <- checkFuncall loc (fname f) f_als args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
   where
     fname (Var v _ _) = Just v
     fname (AppExp (Apply e _ _) _) = fname e
     fname _ = Nothing
-    checkArg' prev (Info (d, p), e) = do
+    checkArg' prev d (Info p, e) = do
       (e', e_als) <- checkArg prev (second (const d) (typeOf e)) e
-      pure ((Info (d, p), e'), e_als)
+      pure ((Info p, e'), e_als)
 
-    checkArgs (x NE.:| args') = do
+    checkArgs (Scalar (Arrow _ _ d _ (RetType _ rt))) (x NE.:| args') = do
       -- Note Futhark uses right-to-left evaluation of applications.
-      args'' <- maybe (pure []) (fmap NE.toList . checkArgs) $ NE.nonEmpty args'
-      (x', x_als) <- checkArg' (map (first snd) args'') x
+      args'' <- maybe (pure []) (fmap NE.toList . checkArgs rt) $ NE.nonEmpty args'
+      (x', x_als) <- checkArg' (map (first snd) args'') d x
       pure $ (x', x_als) NE.:| args''
+    checkArgs t _ =
+      error $ "checkArgs: " <> prettyString t
 
 --
 checkExp (AppExp (Loop sparams pat args form body loc) appres) = do
@@ -973,7 +975,7 @@ checkGlobalAliases loc params body_t = do
 -- | Type-check a value definition.  This also infers a new return
 -- type that may be more unique than previously.
 checkValDef ::
-  (VName, [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Info VName), SrcLoc) ->
+  (VName, [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Exp VName), SrcLoc) ->
   ((Exp, ResRetType), [TypeError])
 checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (locOf loc) $ do
   fmap fst . bindingParams params $ do

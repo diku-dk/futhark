@@ -535,6 +535,19 @@ $entry_point_decls
 
       mapM_ earlyDecl $ concat memfuns
       type_funs <- generateAPITypes arr_space types
+
+      headerDecl InitDecl [C.cedecl|void futhark_context_config_set_debugging(struct futhark_context_config* cfg, int flag);|]
+      headerDecl InitDecl [C.cedecl|void futhark_context_config_set_profiling(struct futhark_context_config* cfg, int flag);|]
+      headerDecl InitDecl [C.cedecl|void futhark_context_config_set_logging(struct futhark_context_config* cfg, int flag);|]
+      headerDecl MiscDecl [C.cedecl|void futhark_context_config_set_cache_file(struct futhark_context_config* cfg, const char *f);|]
+      headerDecl InitDecl [C.cedecl|int futhark_get_tuning_param_count(void);|]
+      headerDecl InitDecl [C.cedecl|const char* futhark_get_tuning_param_name(int);|]
+      headerDecl InitDecl [C.cedecl|const char* futhark_get_tuning_param_class(int);|]
+      headerDecl MiscDecl [C.cedecl|char* futhark_context_get_error(struct futhark_context* ctx);|]
+      headerDecl MiscDecl [C.cedecl|void futhark_context_set_logging_file(struct futhark_context* ctx, typename FILE* f);|]
+      headerDecl MiscDecl [C.cedecl|void futhark_context_pause_profiling(struct futhark_context* ctx);|]
+      headerDecl MiscDecl [C.cedecl|void futhark_context_unpause_profiling(struct futhark_context* ctx);|]
+
       generateCommonLibFuns memreport
 
       pure
@@ -583,57 +596,7 @@ generateTuningParams params = do
 generateCommonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 generateCommonLibFuns memreport = do
   ctx <- contextType
-  cfg <- configType
   ops <- asks envOperations
-
-  publicDef_ "context_config_set_debugging" InitDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
-                         cfg->profiling = cfg->logging = cfg->debugging = flag;
-                       }|]
-    )
-
-  publicDef_ "context_config_set_profiling" InitDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
-                         cfg->profiling = flag;
-                       }|]
-    )
-
-  publicDef_ "context_config_set_logging" InitDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
-                         cfg->logging = flag;
-                       }|]
-    )
-
-  publicDef_ "context_config_set_cache_file" MiscDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:cfg* cfg, const char *f);|],
-      [C.cedecl|void $id:s($ty:cfg* cfg, const char *f) {
-                 cfg->cache_fname = strdup(f);
-               }|]
-    )
-
-  publicDef_ "get_tuning_param_count" InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(void);|],
-      [C.cedecl|int $id:s(void) {
-                return num_tuning_params;
-              }|]
-    )
-
-  publicDef_ "get_tuning_param_name" InitDecl $ \s ->
-    ( [C.cedecl|const char* $id:s(int);|],
-      [C.cedecl|const char* $id:s(int i) {
-                return tuning_param_names[i];
-              }|]
-    )
-
-  publicDef_ "get_tuning_param_class" InitDecl $ \s ->
-    ( [C.cedecl|const char* $id:s(int);|],
-      [C.cedecl|const char* $id:s(int i) {
-                return tuning_param_classes[i];
-              }|]
-    )
 
   sync <- publicName "context_sync"
   let comma = [C.citem|str_builder_char(&builder, ',');|]
@@ -650,39 +613,13 @@ generateCommonLibFuns memreport = do
                  str_builder_str(&builder, "\"memory\":{");
                  $items:(L.intersperse comma memreport)
                  str_builder_str(&builder, "},\"events\":[");
-                 report_events_in_list(&ctx->event_list, &builder);
-                 str_builder_str(&builder, "]}");
-                 return builder.str;
-               }|]
-    )
-
-  publicDef_ "context_get_error" MiscDecl $ \s ->
-    ( [C.cedecl|char* $id:s($ty:ctx* ctx);|],
-      [C.cedecl|char* $id:s($ty:ctx* ctx) {
-                         char* error = ctx->error;
-                         ctx->error = NULL;
-                         return error;
-                       }|]
-    )
-
-  publicDef_ "context_set_logging_file" MiscDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:ctx* ctx, typename FILE* f);|],
-      [C.cedecl|void $id:s($ty:ctx* ctx, typename FILE* f) {
-                  ctx->log = f;
-                }|]
-    )
-
-  publicDef_ "context_pause_profiling" MiscDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:ctx* ctx);|],
-      [C.cedecl|void $id:s($ty:ctx* ctx) {
-                 ctx->profiling_paused = 1;
-               }|]
-    )
-
-  publicDef_ "context_unpause_profiling" MiscDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:ctx* ctx);|],
-      [C.cedecl|void $id:s($ty:ctx* ctx) {
-                 ctx->profiling_paused = 0;
+                 if (report_events_in_list(&ctx->event_list, &builder) != 0) {
+                   free(builder.str);
+                   return NULL;
+                 } else {
+                   str_builder_str(&builder, "]}");
+                   return builder.str;
+                 }
                }|]
     )
 

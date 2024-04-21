@@ -673,6 +673,7 @@ data Options = Options
     scriptStopOnError :: Bool
   }
 
+-- | The configuration before any user-provided options are processed.
 initialOptions :: Options
 initialOptions =
   Options
@@ -1072,6 +1073,7 @@ processScript env script = do
   cleanupImgDir env $ mconcat files
   pure (foldl' min Success failures, T.intercalate "\n" outputs)
 
+-- | Common command line options that transform 'Options'.
 scriptCommandLineOptions :: [FunOptDescr Options]
 scriptCommandLineOptions =
   [ Option
@@ -1139,6 +1141,9 @@ commandLineOptions =
            "Stop and do not produce output file if any directive fails."
        ]
 
+-- | Start up (and eventually shut down) a Futhark server
+-- corresponding to the provided program. If the program has a @.fut@
+-- extension, it will be compiled automatically.
 prepareServer :: FilePath -> Options -> (ScriptServer -> IO a) -> IO a
 prepareServer prog opts f = do
   futhark <- maybe getExecutablePath pure $ scriptFuthark opts
@@ -1165,6 +1170,7 @@ prepareServer prog opts f = do
 
   let run_options = scriptExtraOptions opts
       onLine "call" l = T.putStrLn l
+      onLine "startup" l = T.putStrLn l
       onLine _ _ = pure ()
       prog' = if is_fut then dropExtension prog else prog
       cfg =

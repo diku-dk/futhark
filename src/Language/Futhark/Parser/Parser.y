@@ -502,7 +502,7 @@ TypeExpAtom :: { UncheckedTypeExp }
 Constr :: { (Name, Loc) }
         : constructor { let L _ (CONSTRUCTOR c) = $1 in (c, locOf $1) }
 
-TypeArg :: { TypeArgExp NoInfo Name }
+TypeArg :: { TypeArgExp UncheckedExp Name }
          : SizeExp %prec top
            { TypeArgExpSize $1 }
          | TypeExpAtom
@@ -522,7 +522,7 @@ TupleTypes :: { [UncheckedTypeExp] }
             | TypeExp ',' TupleTypes { $1 : $3 }
 
 
-SizeExp :: { SizeExp NoInfo Name }
+SizeExp :: { SizeExp UncheckedExp }
          : '[' Exp ']'    { SizeExp $2 (srcspan $1 $>) }
          | '['     ']'    { SizeExpAny (srcspan $1 $>) }
          | '...[' Exp ']' { SizeExp $2 (srcspan $1 $>) }

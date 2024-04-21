@@ -400,7 +400,7 @@ warnings ws = modify $ \s -> s {stateWarnings = ws <> stateWarnings s}
 -- | Emit a warning about something the user should be aware of.
 warn :: (Located loc) => loc -> [loc] -> T.Text -> ImpM rep r op ()
 warn loc locs problem =
-  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) (pretty problem)
+  warnings $ singleWarning' (locOf loc) (map locOf locs) (pretty problem)
 
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM rep r op ()
@@ -775,7 +775,10 @@ compileExp pat e = do
 caseMatch :: [SubExp] -> [Maybe PrimValue] -> Imp.TExp Bool
 caseMatch ses vs = foldl (.&&.) true (zipWith cmp ses vs)
   where
-    cmp se (Just v) = isBool $ toExp' (primValueType v) se ~==~ ValueExp v
+    cmp se (Just (BoolValue True)) =
+      isBool $ toExp' Bool se
+    cmp se (Just v) =
+      isBool $ toExp' (primValueType v) se ~==~ ValueExp v
     cmp _ Nothing = true
 
 defCompileExp ::
@@ -969,7 +972,7 @@ defCompileBasicOp _ Rearrange {} =
   pure ()
 defCompileBasicOp _ Reshape {} =
   pure ()
-defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
+defCompileBasicOp _ (UpdateAcc safety acc is vs) = sComment "UpdateAcc" $ do
   -- We are abusing the comment mechanism to wrap the operator in
   -- braces when we end up generating code.  This is necessary because
   -- we might otherwise end up declaring lambda parameters (if any)
@@ -982,7 +985,11 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
   -- index parameters.
   (_, _, arrs, dims, op) <- lookupAcc acc is'
 
-  sWhen (inBounds (Slice (map DimFix is')) dims) $
+  let boundsCheck =
+        case safety of
+          Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
+          _ -> id
+  boundsCheck $
     case op of
       Nothing ->
         -- Scatter-like.

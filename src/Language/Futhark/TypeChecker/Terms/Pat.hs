@@ -5,19 +5,16 @@ module Language.Futhark.TypeChecker.Terms.Pat
     bindingPat,
     bindingIdent,
     bindingSizes,
-    doNotShadow,
   )
 where
 
 import Control.Monad
-import Control.Monad.State
-import Data.Bitraversable
+import Data.Bifunctor
 import Data.Either
 import Data.List (find, isPrefixOf, sort)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Data.Text qualified as T
 import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
@@ -26,27 +23,14 @@ import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import Prelude hiding (mod)
 
--- | Names that may not be shadowed.
-doNotShadow :: [Name]
-doNotShadow = ["&&", "||"]
-
-nonrigidFor :: [SizeBinder VName] -> StructType -> TermTypeM StructType
-nonrigidFor [] t = pure t -- Minor optimisation.
-nonrigidFor sizes t = evalStateT (bitraverse onDim pure t) mempty
+nonrigidFor :: [(SizeBinder VName, QualName VName)] -> StructType -> StructType
+nonrigidFor [] = id -- Minor optimisation.
+nonrigidFor sizes = first onDim
   where
-    onDim (Var (QualName _ v) typ loc)
-      | Just size <- find ((== v) . sizeName) sizes = do
-          prev <- gets $ lookup v
-          case prev of
-            Nothing -> do
-              v' <- lift $ newID $ baseName v
-              lift . constrain v' . Size Nothing $
-                mkUsage size "ambiguous size of bound expression"
-              modify ((v, v') :)
-              pure $ Var (qualName v') typ loc
-            Just v' ->
-              pure $ Var (qualName v') typ loc
-    onDim d = pure d
+    onDim (Var (QualName _ v) info loc)
+      | Just (_, v') <- find ((== v) . sizeName . fst) sizes =
+          Var v' info loc
+    onDim d = d
 
 -- | Bind these identifiers locally while running the provided action.
 binding ::
@@ -62,8 +46,8 @@ binding idents m =
     -- integers, because they may become integers later due to
     -- inference...
     forM_ idents $ \ident ->
-      constrain (identName ident) $ ParamSize $ srclocOf ident
-    m <* checkIfUsed
+      constrain (identName ident) $ ParamSize $ locOf ident
+    m
   where
     bindVars = foldl bindVar
 
@@ -72,15 +56,6 @@ binding idents m =
         { scopeVtable =
             M.insert name (BoundV [] tp) $ scopeVtable scope
         }
-
-    checkIfUsed = do
-      used <- gets stateUsed
-      forM_ (filter ((`S.notMember` used) . identName) idents) $ \ident ->
-        unless ("_" `T.isPrefixOf` nameToText (baseName (identName ident))) $
-          warn ident $
-            "Unused variable "
-              <> dquotes (prettyName (identName ident))
-              <> "."
 
 bindingTypes ::
   [Either (VName, TypeBinding) (VName, Constraint)] ->
@@ -104,57 +79,34 @@ bindingTypeParams tparams =
   where
     typeParamType (TypeParamType l v loc) =
       [ Left (v, TypeAbbr l [] $ RetType [] $ Scalar (TypeVar mempty (qualName v) [])),
-        Right (v, ParamType l loc)
+        Right (v, ParamType l $ locOf loc)
       ]
     typeParamType (TypeParamDim v loc) =
-      [Right (v, ParamSize loc)]
+      [Right (v, ParamSize $ locOf loc)]
 
 typeParamIdent :: TypeParam -> Maybe (Ident StructType)
 typeParamIdent (TypeParamDim v loc) =
   Just $ Ident v (Info $ Scalar $ Prim $ Signed Int64) loc
 typeParamIdent _ = Nothing
 
--- | Bind a single term-level identifier.
-bindingIdent ::
-  IdentBase NoInfo Name StructType ->
-  StructType ->
-  (Ident StructType -> TermTypeM a) ->
-  TermTypeM a
-bindingIdent (Ident v NoInfo vloc) t m =
-  bindSpaced [(Term, v)] $ do
-    v' <- checkName Term v vloc
-    let ident = Ident v' (Info t) vloc
-    binding [ident] $ m ident
-
 -- | Bind @let@-bound sizes.  This is usually followed by 'bindingPat'
 -- immediately afterwards.
-bindingSizes :: [SizeBinder Name] -> ([SizeBinder VName] -> TermTypeM a) -> TermTypeM a
-bindingSizes [] m = m [] -- Minor optimisation.
-bindingSizes sizes m = do
-  foldM_ lookForDuplicates mempty sizes
-  bindSpaced (map sizeWithSpace sizes) $ do
-    sizes' <- mapM check sizes
-    binding (map sizeWithType sizes') $ m sizes'
+bindingSizes :: [SizeBinder VName] -> TermTypeM a -> TermTypeM a
+bindingSizes [] m = m -- Minor optimisation.
+bindingSizes sizes m = binding (map sizeWithType sizes) m
   where
-    lookForDuplicates prev size
-      | Just prevloc <- M.lookup (sizeName size) prev =
-          typeError size mempty $
-            "Size name also bound at "
-              <> pretty (locStrRel (srclocOf size) prevloc)
-              <> "."
-      | otherwise =
-          pure $ M.insert (sizeName size) (srclocOf size) prev
-
-    sizeWithSpace size =
-      (Term, sizeName size)
     sizeWithType size =
       Ident (sizeName size) (Info (Scalar (Prim (Signed Int64)))) (srclocOf size)
 
-    check (SizeBinder v loc) =
-      SizeBinder <$> checkName Term v loc <*> pure loc
-
-sizeBinderToParam :: SizeBinder VName -> UncheckedTypeParam
-sizeBinderToParam (SizeBinder v loc) = TypeParamDim (baseName v) loc
+-- | Bind a single term-level identifier.
+bindingIdent ::
+  IdentBase NoInfo VName StructType ->
+  StructType ->
+  (Ident StructType -> TermTypeM a) ->
+  TermTypeM a
+bindingIdent (Ident v NoInfo vloc) t m = do
+  let ident = Ident v (Info t) vloc
+  binding [ident] $ m ident
 
 -- All this complexity is just so we can handle un-suffixed numeric
 -- literals in patterns.
@@ -171,24 +123,19 @@ patLitMkType (PatLitPrim v) _ =
   pure $ Scalar $ Prim $ primValueType v
 
 checkPat' ::
-  [SizeBinder VName] ->
-  UncheckedPat ParamType ->
+  [(SizeBinder VName, QualName VName)] ->
+  PatBase NoInfo VName ParamType ->
   Inferred ParamType ->
   TermTypeM (Pat ParamType)
 checkPat' sizes (PatParens p loc) t =
   PatParens <$> checkPat' sizes p t <*> pure loc
 checkPat' sizes (PatAttr attr p loc) t =
   PatAttr <$> checkAttr attr <*> checkPat' sizes p t <*> pure loc
-checkPat' _ (Id name _ loc) _
-  | name `elem` doNotShadow =
-      typeError loc mempty $ "The" <+> pretty name <+> "operator may not be redefined."
-checkPat' _ (Id name NoInfo loc) (Ascribed t) = do
-  name' <- newID name
-  pure $ Id name' (Info t) loc
+checkPat' _ (Id name NoInfo loc) (Ascribed t) =
+  pure $ Id name (Info t) loc
 checkPat' _ (Id name NoInfo loc) NoneInferred = do
-  name' <- newID name
   t <- newTypeVar loc "t"
-  pure $ Id name' (Info t) loc
+  pure $ Id name (Info t) loc
 checkPat' _ (Wildcard _ loc) (Ascribed t) =
   pure $ Wildcard (Info t) loc
 checkPat' _ (Wildcard NoInfo loc) NoneInferred = do
@@ -239,7 +186,7 @@ checkPat' sizes (PatAscription p t loc) maybe_outer_t = do
 
   case maybe_outer_t of
     Ascribed outer_t -> do
-      st_forunify <- nonrigidFor sizes $ toStruct st
+      let st_forunify = nonrigidFor sizes $ toStruct st
       unify (mkUsage loc "explicit type ascription") st_forunify (toStruct outer_t)
 
       PatAscription
@@ -290,58 +237,57 @@ checkPat' sizes (PatConstr n NoInfo ps loc) NoneInferred = do
     usage = mkUsage loc "matching against constructor"
 
 checkPat ::
-  [SizeBinder VName] ->
-  UncheckedPat (TypeBase Size u) ->
+  [(SizeBinder VName, QualName VName)] ->
+  PatBase NoInfo VName (TypeBase Size u) ->
   Inferred StructType ->
   (Pat ParamType -> TermTypeM a) ->
   TermTypeM a
 checkPat sizes p t m = do
-  checkForDuplicateNames (map sizeBinderToParam sizes) [p]
   p' <-
     onFailure (CheckingPat (fmap toStruct p) t) $
       checkPat' sizes (fmap (toParam Observe) p) (fmap (toParam Observe) t)
 
   let explicit = mustBeExplicitInType $ patternStructType p'
 
-  case filter ((`S.member` explicit) . sizeName) sizes of
-    size : _ ->
+  case filter ((`S.member` explicit) . sizeName . fst) sizes of
+    (size, _) : _ ->
       typeError size mempty $
         "Cannot bind"
           <+> pretty size
           <+> "as it is never used as the size of a concrete (non-function) value."
     [] ->
-      bindNameMap (patNameMap p') $ m p'
+      m p'
 
 -- | Check and bind a @let@-pattern.
 bindingPat ::
   [SizeBinder VName] ->
-  UncheckedPat (TypeBase Size u) ->
+  PatBase NoInfo VName (TypeBase Size u) ->
   StructType ->
   (Pat ParamType -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
-  checkPat sizes p (Ascribed t) $ \p' -> binding (patIdents (fmap toStruct p')) $
+  substs <- mapM mkSizeSubst sizes
+  checkPat substs p (Ascribed t) $ \p' -> binding (patIdents (fmap toStruct p')) $
     case filter ((`S.notMember` fvVars (freeInPat p')) . sizeName) sizes of
       [] -> m p'
       size : _ -> unusedSize size
-
-patNameMap :: Pat t -> NameMap
-patNameMap = M.fromList . map asTerm . patNames
   where
-    asTerm v = ((Term, baseName v), qualName v)
+    mkSizeSubst v = do
+      v' <- newID $ baseName $ sizeName v
+      constrain v' . Size Nothing $
+        mkUsage v "ambiguous size of bound expression"
+      pure (v, qualName v')
 
 -- | Check and bind type and value parameters.
 bindingParams ::
-  [UncheckedTypeParam] ->
-  [UncheckedPat ParamType] ->
-  ([TypeParam] -> [Pat ParamType] -> TermTypeM a) ->
+  [TypeParam] ->
+  [PatBase NoInfo VName ParamType] ->
+  ([Pat ParamType] -> TermTypeM a) ->
   TermTypeM a
-bindingParams tps orig_ps m = do
-  checkForDuplicateNames tps orig_ps
-  checkTypeParams tps $ \tps' -> bindingTypeParams tps' $ do
-    let descend ps' (p : ps) =
-          checkPat [] p NoneInferred $ \p' ->
-            binding (patIdents $ fmap toStruct p') $ incLevel $ descend (p' : ps') ps
-        descend ps' [] = m tps' $ reverse ps'
+bindingParams tps orig_ps m = bindingTypeParams tps $ do
+  let descend ps' (p : ps) =
+        checkPat [] p NoneInferred $ \p' ->
+          binding (patIdents $ fmap toStruct p') $ incLevel $ descend (p' : ps') ps
+      descend ps' [] = m $ reverse ps'
 
-    incLevel $ descend [] orig_ps
+  incLevel $ descend [] orig_ps

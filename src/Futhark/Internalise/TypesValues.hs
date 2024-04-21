@@ -299,7 +299,8 @@ internaliseConstructors cs =
       where
         size = sum . map length
         f (ts', js, new_ts) t
-          | Just (_, j) <- find ((== fmap fromDecl t) . fst) ts' =
+          | all primType t,
+            Just (_, j) <- find ((== fmap fromDecl t) . fst) ts' =
               ( delete (fmap fromDecl t, j) ts',
                 js ++ take (length t) [j ..],
                 new_ts

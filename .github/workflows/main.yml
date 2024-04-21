@@ -103,7 +103,7 @@ jobs:
         path: futhark-nightly-macos-x86_64.tar.xz
 
   build-windows-cabal:
-    runs-on: windows-2019
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v3
@@ -111,7 +111,7 @@ jobs:
     - id: setup-haskell
       uses: haskell-actions/setup@v2
       with:
-        ghc-version: '9.4.4'
+        ghc-version: '9.8.1'
 
     - uses: actions/cache@v3
       name: Cache cabal stuff
@@ -426,12 +426,13 @@ jobs:
           pip install jsonschema
           module unload cuda
           module load cuda/11.8
+          nvidia-smi --query-gpu=gpu_name --format=csv,noheader
           futhark test tests \
             --backend=cuda \
             --cache-extension=cache \
             --concurrency=8
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
-        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl,hendrixgpu18fl
 
   # test-hip:
   #   runs-on: MI100
@@ -620,7 +621,7 @@ jobs:
 
   deploy-nightly:
     runs-on: ubuntu-22.04
-    needs: [build-linux-nix, build-mac-cabal, build-windows-cabal, test-tools]
+    needs: [build-linux-nix, build-mac-cabal, test-tools]
     if: github.ref == 'refs/heads/master'
 
     steps:
@@ -648,7 +649,7 @@ jobs:
 
     - name: scp tarballs to server
       run: |
-        scp -o StrictHostKeyChecking=no futhark-nightly-windows-x86_64.zip futhark-nightly-linux-x86_64.tar.xz futhark-nightly-macos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+        scp -o StrictHostKeyChecking=no futhark-nightly-linux-x86_64.tar.xz futhark-nightly-macos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
     - name: copy docs to server
       run: |
@@ -663,6 +664,6 @@ jobs:
         prerelease: true
         title: "nightly"
         files: |
-          futhark-nightly-windows-x86_64.zip
           futhark-nightly-linux-x86_64.tar.xz
           futhark-nightly-macos-x86_64.tar.xz
+          futhark-nightly-windows-x86_64.zip

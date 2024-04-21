@@ -153,7 +153,7 @@ defaultEntryPoint = nameFromString "main"
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
-arrayRank :: TypeBase dim as -> Int
+arrayRank :: TypeBase () u -> Int
 arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
@@ -310,7 +310,7 @@ arrayOf = arrayOfWithAliases mempty
 arrayOfWithAliases ::
   u ->
   Shape dim ->
-  TypeBase dim u ->
+  TypeBase dim u' ->
   TypeBase dim u
 arrayOfWithAliases u shape2 (Array _ shape1 et) =
   Array u (shape2 <> shape1) et
@@ -567,7 +567,7 @@ patternOrderZero :: Pat (TypeBase d u) -> Bool
 patternOrderZero = orderZero . patternType
 
 -- | The set of identifiers bound in a pattern.
-patIdents :: Pat t -> [Ident t]
+patIdents :: PatBase f vn t -> [IdentBase f vn t]
 patIdents (Id v t loc) = [Ident v t loc]
 patIdents (PatParens p _) = patIdents p
 patIdents (TuplePat pats _) = foldMap patIdents pats
@@ -1376,12 +1376,20 @@ similarSlices slice1 slice2
 
 -- | If these two expressions are structurally similar at top level as
 -- sizes, produce their subexpressions (which are not necessarily
--- similar, but you can check for that!).  This is the machinery
--- underlying expresssion unification.
+-- similar, but you can check for that!). This is the machinery
+-- underlying expresssion unification. We assume that the expressions
+-- have the same type.
 similarExps :: Exp -> Exp -> Maybe [(Exp, Exp)]
 similarExps e1 e2 | bareExp e1 == bareExp e2 = Just []
 similarExps e1 e2 | Just e1' <- stripExp e1 = similarExps e1' e2
 similarExps e1 e2 | Just e2' <- stripExp e2 = similarExps e1 e2'
+similarExps (IntLit x _ _) (Literal v _) =
+  case v of
+    SignedValue (Int8Value y) | x == toInteger y -> Just []
+    SignedValue (Int16Value y) | x == toInteger y -> Just []
+    SignedValue (Int32Value y) | x == toInteger y -> Just []
+    SignedValue (Int64Value y) | x == toInteger y -> Just []
+    _ -> Nothing
 similarExps
   (AppExp (BinOp (op1, _) _ (x1, _) (y1, _) _) _)
   (AppExp (BinOp (op2, _) _ (x2, _) (y2, _) _) _)
@@ -1499,7 +1507,7 @@ type Case = CaseBase Info VName
 type UncheckedType = TypeBase (Shape Name) ()
 
 -- | An unchecked type expression.
-type UncheckedTypeExp = TypeExp NoInfo Name
+type UncheckedTypeExp = TypeExp UncheckedExp Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name

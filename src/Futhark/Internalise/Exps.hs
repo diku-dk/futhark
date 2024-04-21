@@ -1484,7 +1484,7 @@ findFuncall (E.Apply f args _)
   | E.Hole (Info _) loc <- f =
       (FunctionHole loc, map onArg $ NE.toList args)
   where
-    onArg (Info (_, argext), e) = (e, argext)
+    onArg (Info argext, e) = (e, argext)
 findFuncall e =
   error $ "Invalid function expression in application:\n" ++ prettyString e
 
@@ -1685,7 +1685,7 @@ isIntrinsicFunction qname args loc = do
       acc' <- head <$> internaliseExpToVars "acc" acc
       i' <- internaliseExp1 "acc_i" i
       vs <- internaliseExp "acc_v" v
-      fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
+      fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc Safe acc' [i'] vs
     handleAccs _ _ = Nothing
 
     handleAD [f, x, v] fname

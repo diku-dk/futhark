@@ -619,34 +619,34 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
 -- | A lambda is worth sequentialising if it contains enough nested
 -- parallelism of an interesting kind.
 worthSequentialising :: Lambda SOACS -> Bool
-worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
+worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
   where
-    bodyInterest body =
-      sum $ interest <$> bodyStms body
-    interest stm
+    bodyInterest depth body =
+      sum $ interest depth <$> bodyStms body
+    interest depth stm
       | "sequential" `inAttrs` attrs =
           0 :: Int
       | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm,
         isJust $ isMapSOAC form =
           if sequential_inner
             then 0
-            else bodyInterest (lambdaBody lam')
+            else bodyInterest (depth + 1) (lambdaBody lam')
       | Op Scatter {} <- stmExp stm =
           0 -- Basically a map.
       | Loop _ ForLoop {} body <- stmExp stm =
-          bodyInterest body * 10
+          bodyInterest (depth + 1) body * 10
       | WithAcc _ withacc_lam <- stmExp stm =
-          bodyInterest (lambdaBody withacc_lam)
+          bodyInterest (depth + 1) (lambdaBody withacc_lam)
       | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm =
           1
-            + bodyInterest (lambdaBody lam')
+            + bodyInterest (depth + 1) (lambdaBody lam')
             +
-            -- Give this a bigger score if it's a redomap, as these
-            -- are often tileable and thus benefit more from
-            -- sequentialisation.
-            case isRedomapSOAC form of
-              Just _ -> 1
-              Nothing -> 0
+            -- Give this a bigger score if it's a redomap just inside
+            -- the the outer lambda, as these are often tileable and
+            -- thus benefit more from sequentialisation.
+            case (isRedomapSOAC form, depth) of
+              (Just _, 0) -> 1
+              _ -> 0
       | otherwise =
           0
       where

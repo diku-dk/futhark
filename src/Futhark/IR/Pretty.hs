@@ -234,13 +234,17 @@ instance Pretty BasicOp where
   pretty (Manifest perm e) = "manifest" <> apply [apply (map pretty perm), pretty e]
   pretty (Assert e msg (loc, _)) =
     "assert" <> apply [pretty e, pretty msg, pretty $ show $ locStr loc]
-  pretty (UpdateAcc acc is v) =
-    "update_acc"
+  pretty (UpdateAcc safety acc is v) =
+    update_acc_str
       <> apply
         [ pretty acc,
           ppTuple' $ map pretty is,
           ppTuple' $ map pretty v
         ]
+    where
+      update_acc_str = case safety of
+        Safe -> "update_acc"
+        Unsafe -> "update_acc_unsafe"
 
 instance (Pretty a) => Pretty (ErrorMsg a) where
   pretty (ErrorMsg parts) = braces $ align $ commasep $ map p parts
