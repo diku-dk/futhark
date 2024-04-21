@@ -666,3 +666,4 @@ jobs:
         files: |
           futhark-nightly-linux-x86_64.tar.xz
           futhark-nightly-macos-x86_64.tar.xz
+          futhark-nightly-windows-x86_64.zip
