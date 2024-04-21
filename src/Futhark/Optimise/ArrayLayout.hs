@@ -1,4 +1,8 @@
-module Futhark.Optimise.ArrayLayout (optimiseArrayLayoutGPU, optimiseArrayLayoutMC) where
+module Futhark.Optimise.ArrayLayout
+  ( optimiseArrayLayoutGPU,
+    optimiseArrayLayoutMC,
+  )
+where
 
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
