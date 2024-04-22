@@ -128,7 +128,8 @@ stmToPrimExps scope stm = do
           modify $ M.insert name (Just $ LeafExp name pt)
         _ -> pure ()
 
--- | Checks if a name is in the PrimExpTable and construct a `PrimExp` if it is not
+-- | Checks if a name is in the PrimExpTable and construct a `PrimExp`
+-- if it is not
 toPrimExp :: (RepTypes rep) => Scope rep -> PrimExpTable -> VName -> Maybe (PrimExp VName)
 toPrimExp scope primExpTable name = case M.lookup name primExpTable of
   Just maybePrimExp
@@ -137,13 +138,13 @@ toPrimExp scope primExpTable name = case M.lookup name primExpTable of
     (Just (Prim pt)) -> Just $ LeafExp name pt
     _ -> Nothing
 
--- | Adds the parameters of a SegOp as well as the statements in its body
--- to the PrimExpTable
+-- | Adds the parameters of a SegOp as well as the statements in its
+-- body to the PrimExpTable
 segOpToPrimExps :: (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> SegOp lvl rep -> State PrimExpTable ()
 segOpToPrimExps scope op = do
   forM_ (map fst $ unSegSpace $ segSpace op) $ \name ->
     modify $ M.insert name $ Just $ LeafExp name int64
-  kernelToBodyPrimExps scope (segBody op) -- Recurse into the kernel body
+  kernelToBodyPrimExps scope (segBody op)
 
 instance PrimExpAnalysis GPU where
   opPrimExp scope gpu_op
