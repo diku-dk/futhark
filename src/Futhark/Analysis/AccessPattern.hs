@@ -244,7 +244,7 @@ analyseDimAccesss :: (Analyse rep) => Prog rep -> IndexTable rep
 analyseDimAccesss = foldMap' analyseFunction . progFuns
 
 -- | Analyse each statement in a function body.
-analyseFunction :: forall rep. (Analyse rep) => FunDef rep -> IndexTable rep
+analyseFunction :: (Analyse rep) => FunDef rep -> IndexTable rep
 analyseFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- Create a context containing the function parameters
