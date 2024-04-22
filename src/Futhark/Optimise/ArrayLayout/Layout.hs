@@ -101,7 +101,7 @@ commonPermutationEliminators perm nest = do
       -- Don't manifest if the permutation is the identity permutation
       is_identity = perm `L.isPrefixOf` [0 ..]
       -- or is not a transpose.
-      inefficient_transpose = (isNothing . isMapTranspose) perm
+      inefficient_transpose = isNothing $ isMapTranspose perm
       -- or if the last idx remains last
       static_last_idx = last perm == length perm - 1
       -- Don't manifest if the array is defined inside a segOp or loop body
