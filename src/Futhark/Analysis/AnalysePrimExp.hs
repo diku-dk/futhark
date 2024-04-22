@@ -141,15 +141,9 @@ toPrimExp scope primExpTable name = case M.lookup name primExpTable of
 -- to the PrimExpTable
 segOpToPrimExps :: (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> SegOp lvl rep -> State PrimExpTable ()
 segOpToPrimExps scope op = do
-  segOpParamsToPrimExps scope op -- Add the parameters of the SegOp to the PrimExpTable
-  kernelToBodyPrimExps scope (segBody op) -- Recurse into the kernel body
-
--- | Adds the parameters of a SegOp to the PrimExpTable
-segOpParamsToPrimExps :: (RepTypes rep) => Scope rep -> SegOp lvl rep -> State PrimExpTable ()
-segOpParamsToPrimExps scope op = do
-  primExpTable <- get
   forM_ (map fst $ unSegSpace $ segSpace op) $ \name ->
     modify $ M.insert name $ Just $ LeafExp name int64
+  kernelToBodyPrimExps scope (segBody op) -- Recurse into the kernel body
 
 instance PrimExpAnalysis GPU where
   opPrimExp scope gpu_op
