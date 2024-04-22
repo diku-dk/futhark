@@ -302,23 +302,21 @@ forward (E.AppExp (E.Apply f args _) _)
       i <- newNameFromString "i"
       vals_k <- newNameFromString "vals_k"
       dest_i <- newNameFromString "dest_i"
-      -- let cond = Var i :== b :&& cond_b
       -- Purely aesthetic renaming of k to ensure that "k" is printed
       -- (and not, e.g., "i").
       k' <- newNameFromString "k"
       let b' = substituteName k (Var k') b
-      debugM (show k)
-      debugM (show b)
-      debugM (show k')
-      debugM (show b')
+      let cond = Var i :== b' :&& cond_b
+      debugM ("cond_b " <> show cond_b)
       let y = IndexFn (Forall i (Cat k' m b'))
-                      (Cases . NE.fromList $ [(Var i :== b', Var vals_k),
-                                              (Not (Var i :== b'), Var dest_i)])
-      -- let b_fn = IndexFn iter_inds (Cases . NE.singleton $ (cond_b, b)) -- XXX invalid index fn
-      let y' = sub vals_k vals_fn y
+                      (Cases . NE.fromList $ [(cond, Var vals_k),
+                                              (Not cond, Var dest_i)])
+      -- TODO ^ should probably substitute b in using sub rather than using it
+      -- directly.
       let dest_fn = IndexFn iter_dest dest
-      let y'' = sub dest_i dest_fn y'
-      normalise y''
+      normalise $
+        sub dest_i dest_fn $
+          sub vals_k vals_fn y
   | Just "iota" <- getFun f,
     [n] <- getArgs args = do
       indexfn <- forward n
