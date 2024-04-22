@@ -100,7 +100,7 @@ stmToPrimExpsTestsGPU =
             let expected =
                   M.fromList
                     [ ("defunc_0_map_res_5125", Nothing),
-                      ("gtid_5126", Just (LeafExp "n_5142" (IntType Int64)))
+                      ("gtid_5126", Just (LeafExp "gtid_5126" (IntType Int64)))
                     ]
             res @?= expected,
         testCase "SegMap body" $
@@ -120,7 +120,7 @@ stmToPrimExpsTestsGPU =
             let expected =
                   M.fromList
                     [ ("defunc_0_map_res_5125", Nothing),
-                      ("gtid_5126", Just (LeafExp "n_5142" (IntType Int64))),
+                      ("gtid_5126", Just (LeafExp "gtid_5126" (IntType Int64))),
                       ("eta_p_5128", Nothing),
                       ( "lifted_lambda_res_5129",
                         Just
@@ -223,7 +223,7 @@ stmToPrimExpsTestsMC =
           let expected =
                 M.fromList
                   [ ("defunc_0_map_res_5125", Nothing),
-                    ("gtid_5126", Just (LeafExp "n_5142" (IntType Int64)))
+                    ("gtid_5126", Just (LeafExp "gtid_5126" (IntType Int64)))
                   ]
           res @?= expected,
         testCase "SegMap body" $ do
@@ -242,7 +242,7 @@ stmToPrimExpsTestsMC =
           let expected =
                 M.fromList
                   [ ("defunc_0_map_res_5125", Nothing),
-                    ("gtid_5126", Just (LeafExp "n_5142" (IntType Int64))),
+                    ("gtid_5126", Just (LeafExp "gtid_5126" (IntType Int64))),
                     ("eta_p_5128", Nothing),
                     ( "lifted_lambda_res_5129",
                       Just
