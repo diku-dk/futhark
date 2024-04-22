@@ -158,6 +158,7 @@ transformKernelBody perm_table expmap seg_name (KernelBody b stms res) = do
     mempty
 
 traverseKernelBodyArrayIndexes ::
+  forall m rep.
   (Monad m, Transform rep) =>
   VName -> -- seg_name
   ArrayIndexTransform m ->
@@ -193,7 +194,7 @@ traverseKernelBodyArrayIndexes seg_name coalesce (KernelBody b kstms kres) =
         }
 
     mapper =
-      identityMapper
+      (identityMapper @rep)
         { mapOnBody = const onBody,
           mapOnOp = onOp soac_mapper
         }
