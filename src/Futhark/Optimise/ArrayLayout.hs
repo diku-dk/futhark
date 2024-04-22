@@ -9,7 +9,7 @@ import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.AnalysePrimExp
 import Futhark.Builder
-import Futhark.IR.Aliases
+import Futhark.IR
 import Futhark.IR.GPU (GPU)
 import Futhark.IR.MC (MC)
 import Futhark.Optimise.ArrayLayout.Layout
@@ -27,13 +27,14 @@ optimiseArrayLayout s =
       -- Compute primExps for all variables
       let primExpTable = primExpAnalysis prog
       -- Compute permutations to acheive coalescence for all arrays
-      let permutation_table = layoutTableFromIndexTable primExpTable index_table
+      let permutation_table =
+            layoutTableFromIndexTable primExpTable index_table
       -- Insert permutations in the AST
       intraproceduralTransformation (onStms permutation_table) prog
   where
     onStms layout_table scope stms = do
       let m = localScope scope $ transformStms layout_table mempty stms
-      fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
+      fmap fst $ modifyNameSource $ runState $ runBuilderT m M.empty
 
 -- | The optimisation performed on the GPU representation.
 optimiseArrayLayoutGPU :: Pass GPU GPU

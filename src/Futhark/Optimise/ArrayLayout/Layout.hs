@@ -23,10 +23,11 @@ type Permutation = [Int]
 type LayoutTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
 
 class (PrimExpAnalysis rep) => Layout rep where
-  -- | Return a coalescing permutation that will be used to create a manifest of the array.
-  -- Returns Nothing if the array is already in the optimal layout or if the array access
-  -- is too complex to confidently determine the optimal layout.
-  -- Map each list of `DimAccess` in the IndexTable to a permutation in a generic way
+  -- | Return a coalescing permutation that will be used to create a
+  -- manifest of the array. Returns Nothing if the array is already in
+  -- the optimal layout or if the array access is too complex to
+  -- confidently determine the optimal layout. Map each list of
+  -- `DimAccess` in the IndexTable to a permutation in a generic way
   -- that can be handled uniquely by each backend.
   permutationFromDimAccess :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 
@@ -98,8 +99,8 @@ multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_
     then Nothing
     else Just perm
 
--- | like mapMaybe, but works on nested maps. Eliminates "dangling" maps / rows
--- with missing (Nothing) values.
+-- | like mapMaybe, but works on nested maps. Eliminates "dangling"
+-- maps / rows with missing (Nothing) values.
 tableMapMaybe :: (k0 -> k1 -> k2 -> a -> Maybe b) -> M.Map k0 (M.Map k1 (M.Map k2 a)) -> M.Map k0 (M.Map k1 (M.Map k2 b))
 tableMapMaybe f =
   M.mapMaybeWithKey $
@@ -110,9 +111,9 @@ tableMapMaybe f =
 
     mapToMaybe g = maybeMap . M.mapMaybeWithKey g
 
--- | Given an ordering function for `DimAccess`, and an IndexTable, return
--- a LayoutTable.
--- We remove entries with no results after `permutationFromDimAccess`
+-- | Given an ordering function for `DimAccess`, and an IndexTable,
+-- return a LayoutTable. We remove entries with no results after
+-- `permutationFromDimAccess`
 layoutTableFromIndexTable :: (Layout rep) => PrimExpTable -> IndexTable rep -> LayoutTable
 layoutTableFromIndexTable primExpTable =
   tableMapMaybe (permutationFromDimAccess primExpTable)
