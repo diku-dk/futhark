@@ -40,24 +40,41 @@ primExpAnalysis prog = initialState <> foldMap' (uncurry funToPrimExp) scopesAnd
     initialState =
       M.singleton (VName "slice" 0) $ Just $ LeafExp (VName "slice" 0) $ IntType Int64
 
-funToPrimExp :: (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> FunDef rep -> PrimExpTable
+funToPrimExp ::
+  (PrimExpAnalysis rep, RepTypes rep) =>
+  Scope rep ->
+  FunDef rep ->
+  PrimExpTable
 funToPrimExp scope fundef = execState (bodyToPrimExps scope (funDefBody fundef)) mempty
 
 -- | Adds the statements of a body to the PrimExpTable
-bodyToPrimExps :: (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> Body rep -> State PrimExpTable ()
+bodyToPrimExps ::
+  (PrimExpAnalysis rep, RepTypes rep) =>
+  Scope rep ->
+  Body rep ->
+  State PrimExpTable ()
 bodyToPrimExps scope body = mapM_ (stmToPrimExps scope') (bodyStms body)
   where
     scope' = scope <> scopeOf (bodyStms body)
 
 -- | Adds the statements of a kernel body to the PrimExpTable
-kernelToBodyPrimExps :: (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> KernelBody rep -> State PrimExpTable ()
+kernelToBodyPrimExps ::
+  (PrimExpAnalysis rep, RepTypes rep) =>
+  Scope rep ->
+  KernelBody rep ->
+  State PrimExpTable ()
 kernelToBodyPrimExps scope kbody = mapM_ (stmToPrimExps scope') (kernelBodyStms kbody)
   where
     scope' = scope <> scopeOf (kernelBodyStms kbody)
 
 -- | Adds a statement to the PrimExpTable. If it can't be resolved as a `PrimExp`,
 -- it will be added as `Nothing`.
-stmToPrimExps :: forall rep. (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> Stm rep -> State PrimExpTable ()
+stmToPrimExps ::
+  forall rep.
+  (PrimExpAnalysis rep, RepTypes rep) =>
+  Scope rep ->
+  Stm rep ->
+  State PrimExpTable ()
 stmToPrimExps scope stm = do
   primExpTable <- get
   case stm of
@@ -65,15 +82,20 @@ stmToPrimExps scope stm = do
       | Just primExp <- primExpFromExp (toPrimExp scope primExpTable) e ->
           -- The statement can be resolved as a `PrimExp`.
           -- For each pattern element, insert the PrimExp in the primExpTable
-          forM_ pat_elems $ \(PatElem name _) -> modify $ M.insert name (Just primExp)
+          forM_ pat_elems $ \pe ->
+            modify $ M.insert (patElemName pe) (Just primExp)
       | otherwise -> do
           -- The statement can't be resolved as a `PrimExp`.
-          walk (stmExp stm) -- Traverse the rest of the AST
-          primExpTable' <- get -- Get the updated PrimExpTable after traversing the AST
-          -- Add pattern elements that can't be resolved as `PrimExp` to the `PrimExpTable` as `Nothing`
-          forM_ pat_elems $ \(PatElem name _) -> case M.lookup name primExpTable' of
-            Nothing -> modify $ M.insert name Nothing
-            _ -> pure ()
+          walk (stmExp stm) -- Traverse the rest of the AST Get the
+          -- updated PrimExpTable after traversing the AST
+          primExpTable' <- get
+
+          -- Add pattern elements that can't be resolved as `PrimExp`
+          -- to the `PrimExpTable` as `Nothing`
+          forM_ pat_elems $ \pe ->
+            case M.lookup (patElemName pe) primExpTable' of
+              Nothing -> modify $ M.insert (patElemName pe) Nothing
+              Just _ -> pure ()
   where
     walk e = do
       -- Handle most cases using the walker
