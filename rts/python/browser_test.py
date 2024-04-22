@@ -62,7 +62,8 @@ async def handle_ws(request):
 eprint("Wrapping", script_name)
 app = web.Application()
 app.add_routes(
-    [web.get('/index.html', handle_index),
+    [web.get('/', handle_index),
+     web.get('/index.html', handle_index),
      web.get(f'/{script_name}', handle_file),
      web.get(f'/{wasm_name}', handle_file),
      web.get(f'/{wasm_map_name}', handle_file),

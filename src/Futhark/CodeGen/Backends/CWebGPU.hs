@@ -12,7 +12,8 @@ module Futhark.CodeGen.Backends.CWebGPU
 where
 
 import Data.Map qualified as M
-import Data.Maybe (mapMaybe, maybeToList)
+import Data.Maybe (mapMaybe)
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
@@ -22,18 +23,12 @@ import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsWebGPUH)
 import Futhark.CodeGen.RTS.WebGPU (serverWsJs)
-import Futhark.IR.GPUMem hiding
-  ( HostOp,
-    CmpSizeLe,
-    GetSize,
-    GetSizeMax,
-  )
+import Futhark.IR.GPUMem (Prog, GPUMem)
 import Futhark.MonadFreshNames
 import Language.C.Quote.C qualified as C
 import NeatInterpolation (text, untrimming)
-
+import Futhark.Util (showText)
 import Debug.Trace (traceShowM)
-import Data.Bifunctor (first, Bifunctor (second), bimap)
 
 mkKernelInfos :: M.Map Name KernelInterface -> GC.CompilerM HostOp () ()
 mkKernelInfos kernels = do
@@ -105,46 +100,174 @@ webgpuMemoryType :: GC.MemoryType HostOp ()
 webgpuMemoryType "device" = pure [C.cty|typename WGPUBuffer|]
 webgpuMemoryType space = error $ "WebGPU backend does not support '" ++ space ++ "' memory space."
 
-jsBoilerplate :: Definitions a -> T.Text
-jsBoilerplate prog = jsContext prog
+jsBoilerplate :: Definitions a -> (T.Text, [T.Text])
+jsBoilerplate prog =
+  let (context, exports) = mkJsContext prog
+   in (context, exports ++ builtinExports)
+  where
+    builtinExports =
+      ["malloc", "free",
+       "futhark_context_config_new", "futhark_context_new",
+       "futhark_context_config_free", "futhark_context_free",
+       "futhark_context_sync",
+       "futhark_new_i32_1d", "futhark_free_i32_1d",
+       "futhark_values_i32_1d", "futhark_shape_i32_1d"]
 
-jsContext :: Definitions a -> T.Text
-jsContext (Definitions _ _ (Functions funs)) =
-  [text|
-  class FutharkContext {
-    ${constructor}
-    ${entryPointFuns}
-    ${builtins}
-  }|]
+-- Argument should be a direct function call to a WASM function that needs to
+-- be handled asynchronously. The return value evaluates to a Promise yielding
+-- the function result when awaited.
+-- Can currently only be used for code generated into the FutharkModule class.
+-- TODO: I don't think we can do this properly like this. For async functions,
+-- we should just use ccall put making sure to pass 'number' for arrays too to
+-- avoid the automatic conversion.
+asyncCall :: T.Text -> Bool -> [T.Text] -> T.Text
+asyncCall func hasReturn args =
+  [text|this.m.ccall('${func}', ${ret}, ${argTypes}, ${argList}, {async: true})|]
+  where
+    ret = if hasReturn then "'number'" else "null"
+    argTypes =
+      "[" <> T.intercalate ", " (replicate (length args) "'number'") <> "]"
+    argList =
+      "[" <> T.intercalate ", " args <> "]"
+
+mkJsContext :: Definitions a -> (T.Text, [T.Text])
+mkJsContext (Definitions _ _ (Functions funs)) =
+  ([text|
+   class FutharkModule {
+     ${constructor}
+     ${free}
+     ${entryPointFuns}
+     ${builtins}
+     ${valueFuns}
+   }|], entryExports ++ valueExports)
   where
     constructor =
       [text|
-      constructor(module) {
+      constructor() {
+        this.m = undefined;
+      }
+      async init(module) {
         this.m = module;
         this.cfg = this.m._futhark_context_config_new();
-        this.ctx = this.m._futhark_context_new(this.cfg);
+        this.ctx = await ${newContext};
         this.entry_points = {
           ${entryPointEntries}
         };
       }|]
+    newContext = asyncCall "futhark_context_new" True ["this.cfg"]
+    free =
+      [text|
+      free() {
+        this.m._futhark_context_free(this.ctx);
+        this.m._futhark_context_config_free(this.cfg);
+      }|]
     entryPoints = mapMaybe (functionEntry . snd) funs
-    entryPointSigs = map mkSig entryPoints
-    mkSig (EntryPoint name results args)
-      -- Keep original entry point name, the one in the signature is the name of
-      -- the corresponding function.
-      = (name, JsWrapperSig "signame" undefined undefined undefined) -- TODO
+    jsEntryPoints = map mkJsEntryPoint entryPoints
     entryPointEntries = T.intercalate ",\n" $ map
-      ((\(n, sig) -> [text|'${n}': ${sig}|]) . bimap nameToText sigName)
-      entryPointSigs
-    entryPointFuns = ""
-    builtins = ""
+      (\e -> let n = entryName e
+                 f = entryFun e
+              in [text|'${n}': this.${f}|]) jsEntryPoints
+    entryPointFuns = T.intercalate "\n" $ map mkEntryFun jsEntryPoints
+    entryExports = map entryInternalFun jsEntryPoints
+    (valueFuns, valueExports) = mkJsValueFuns entryPoints
+    builtins =
+      [text|
+      malloc(nbytes) {
+        return this.m._malloc(nbytes);
+      }
+      free(ptr) {
+        return this.m._free(ptr);
+      }
+      async context_sync() {
+        return await ${syncCall};
+      }|]
+    syncCall = asyncCall "futhark_context_sync" True ["this.ctx"]
 
-data JsWrapperSig = JsWrapperSig
-  { sigName :: T.Text,
-    sigArgs :: [T.Text],
-    sigReturns :: [T.Text],
-    sigAsync :: Bool
+data JsEntryPoint = JsEntryPoint
+  { entryName :: T.Text,
+    entryFun :: T.Text,
+    entryInternalFun :: T.Text,
+    entryIn :: [T.Text],
+    -- Currently only records size as we need that to allocate space for out
+    -- parameters.
+    entryOut :: [Int]
   }
+
+mkJsEntryPoint :: EntryPoint -> JsEntryPoint
+mkJsEntryPoint (EntryPoint name results args) = JsEntryPoint n fun ifun ins outs
+  where
+    n = nameToText name
+    fun = "entry_" <> n
+    ifun = "futhark_entry_" <> n
+    ins = map (nameToText . fst . fst) args
+    outs = map (valSize . snd) results
+    -- TODO: Hardcoding sizeof(ptr) = 4 here seems not great
+    valSize (OpaqueValue {}) = 4
+    valSize (TransparentValue (ArrayValue {})) = 4
+    valSize (TransparentValue (ScalarValue t _ _)) = primByteSize t
+
+mkEntryFun :: JsEntryPoint -> T.Text
+mkEntryFun e =
+  [text|
+  async ${fun}(${inputs}) {
+    ${allocOuts}
+    await ${internalCall};
+    return [${outPtrs}];
+  }
+  |]
+  where
+    fun = entryFun e
+    inputs = T.intercalate ", " (entryIn e)
+    outNames = zipWith (\i _ -> "out" <> showText i) [0..] (entryOut e)
+    outSizes = map showText (entryOut e)
+    outPtrs = T.intercalate ", " outNames
+    allocOuts = T.intercalate "\n" $
+      zipWith (\n sz -> [text|const ${n} = this.m._malloc(${sz});|])
+        outNames outSizes
+    internalCall = asyncCall
+      (entryInternalFun e) True (["this.ctx"] ++ entryIn e ++ outNames)
+
+mkJsValueFuns :: [EntryPoint] -> (T.Text, [T.Text])
+mkJsValueFuns entries =
+  -- TODO: Only supports transparent arrays right now.
+  let extVals =
+        concatMap (map snd . entryPointResults) entries
+        ++ concatMap (map snd . entryPointArgs) entries
+      transpVals = [v | TransparentValue v <- extVals]
+      arrVals = S.toList $ S.fromList
+        [(typ, sgn, shp) | ArrayValue _ _ typ sgn shp <- transpVals]
+      (funs, exports) = unzip $ map mkJsArrayFuns arrVals
+   in (T.intercalate "\n" funs, concat exports)
+
+mkJsArrayFuns :: (PrimType, Signedness, [DimSize]) -> (T.Text, [T.Text])
+mkJsArrayFuns (typ, sign, shp) =
+  ([text|
+  async new_${name}(data, ${shapeParams}) {
+    return ${newCall};
+  }
+  async free_${name}(arr) {
+    return ${freeCall};
+  }
+  async values_${name}(arr, data) {
+    return ${valuesCall};
+  }
+  shape_${name}(arr) {
+    return this.m._futhark_shape_${name}(this.ctx, arr);
+  }
+  |], exports)
+  where
+    rank = length shp
+    name = GC.arrayName typ sign rank
+    shapeNames = ["dim" <> prettyText i | i <- [0 .. rank - 1]]
+    shapeParams = T.intercalate ", " shapeNames
+    newCall = asyncCall 
+      ("futhark_new_" <> name) True (["this.ctx", "data"] ++ shapeNames)
+    freeCall = asyncCall
+      ("futhark_free_" <> name) True ["this.ctx", "arr"]
+    valuesCall = asyncCall
+      ("futhark_values_" <> name) True ["this.ctx", "arr", "data"]
+    exports = ["futhark_new_" <> name, "futhark_free_" <> name,
+               "futhark_values_" <> name, "futhark_shape_" <> name]
 
 data JsWrapper = JsWrapper T.Text T.Text [T.Text] Bool
 
@@ -158,31 +281,31 @@ mkWrapper (JsWrapper name returnType argTypes async) =
           opts = if async then "{async: true}" else "undefined"
 
 -- TODO: Bad hardcoded list
--- Note that both pointers and scalar numbers (integers and floats) both turn
+-- Note that pointers and scalar numbers (integers and floats) both turn
 -- into 'number' in JS, so that is almost all of our types.
 -- The exception is 'array', where Emscripten's cwrap lets us pass in a native
 -- JS array that gets copied and turned into a pointer argument behind the
 -- scenes.
 builtinWrappers :: [JsWrapper]
 builtinWrappers =
-  [ JsWrapper "malloc" "number" ["number"] False,
-    JsWrapper "free" "null" ["number"] False,
-    JsWrapper "futhark_context_config_new" "number" [] False,
-    JsWrapper "futhark_context_new" "number" ["number"] True,
-    JsWrapper "futhark_context_sync" "number" ["number"] True,
-    JsWrapper "futhark_new_i32_1d" "number" ["number", "array", "number"] True,
-    JsWrapper "futhark_free_i32_1d" "number" ["number", "number"] True,
-    JsWrapper "futhark_values_i32_1d" "number" ["number", "number", "number"] True,
-    JsWrapper "futhark_shape_i32_1d" "number" ["number", "number"] False
+  [ --JsWrapper "malloc" "number" ["number"] False,
+    --JsWrapper "free" "null" ["number"] False,
+    --JsWrapper "futhark_context_config_new" "number" [] False,
+    --JsWrapper "futhark_context_new" "number" ["number"] True,
+    --JsWrapper "futhark_context_sync" "number" ["number"] True,
+    --JsWrapper "futhark_new_i32_1d" "number" ["number", "array", "number"] True,
+    --JsWrapper "futhark_free_i32_1d" "number" ["number", "number"] True,
+    --JsWrapper "futhark_values_i32_1d" "number" ["number", "number", "number"] True,
+    --JsWrapper "futhark_shape_i32_1d" "number" ["number", "number"] False
   ]
 
-entryWrappers :: Definitions a -> [JsWrapper]
-entryWrappers (Definitions _ _ (Functions fs)) = do
-  (_, f) <- fs
-  entry <- maybeToList (functionEntry f)
-  let name = "futhark_entry_" <> nameToText (entryPointName entry)
-  let numArgs = length (functionInput f) + length (functionOutput f)
-  pure $ JsWrapper name "number" (replicate numArgs "number") True
+--entryWrappers :: Definitions a -> [JsWrapper]
+--entryWrappers (Definitions _ _ (Functions fs)) = do
+--  (_, f) <- fs
+--  entry <- maybeToList (functionEntry f)
+--  let name = "futhark_entry_" <> nameToText (entryPointName entry)
+--  let numArgs = length (functionInput f) + length (functionOutput f)
+--  pure $ JsWrapper name "number" (replicate numArgs "number") True
 
 -- | Compile the program to C with calls to WebGPU, along with a JS wrapper
 -- library.
@@ -192,7 +315,7 @@ compileProg version prog = do
   ( ws,
     Program wgsl_code wgsl_prelude macros kernels params failures prog'
     ) <- ImpGen.compileProg prog
-  traceShowM prog'
+  traceShowM (mapMaybe (functionEntry . snd) (unFunctions (defFuns prog')))
   c <- GC.compileProg
         "webgpu"
         version
@@ -203,24 +326,13 @@ compileProg version prog = do
         (Space "device", [Space "device", DefaultSpace])
         cliOptions
         prog'
-  let wrappers = builtinWrappers ++ entryWrappers prog'
-  let js = T.intercalate "\n" (map mkWrapper wrappers)
-  let newJs = "\n// New JS from here\n" <> jsBoilerplate prog'
-  let exports = [n | JsWrapper n _ _ _ <- wrappers]
-  pure (ws, (c, js <> newJs, exports))
+  let oldWrappers = builtinWrappers
+  let oldJs = T.intercalate "\n" (map mkWrapper oldWrappers)
+  let (js, exports) = jsBoilerplate prog'
+  let newJs = "\n// New JS from here\n" <> js
+  let oldExports = [n | JsWrapper n _ _ _ <- oldWrappers]
+  pure (ws, (c, oldJs <> newJs, oldExports ++ exports))
   where
-    --defaultExports = 
-    --  -- TODO: This is a bad hardcoded list
-    --  [ "futhark_context_config_new", "futhark_context_new",
-    --    "futhark_new_i32_1d",
-    --    "malloc", "free"
-    --  ]
-    --entryPointExports prog' =
-    --  let Functions fs = defFuns prog'
-    --      entry (Function (Just (EntryPoint e _ _)) _ _ _) = Just $ 
-    --        "futhark_entry_" <> nameToText e
-    --      entry (Function Nothing _ _ _) = Nothing
-    --   in mapMaybe (entry . snd) fs
     operations :: GC.Operations HostOp ()
     operations =
       gpuOperations

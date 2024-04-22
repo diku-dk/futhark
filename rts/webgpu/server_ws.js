@@ -36,44 +36,50 @@ class BrowserServer {
   }
 }
 
-async function getBufferValues(m, ctx, buf) {
-  const shape = m.futhark_shape_i32_1d(ctx, buf);
-  const len = m.HEAP32[shape / 4];
-  const vals = m.malloc(len * 4);
-  await m.futhark_values_i32_1d(ctx, buf, vals);
-  await m.futhark_context_sync(ctx);
+async function newBuffer(fut, data) {
+  const buf = fut.malloc(data.byteLength);
+  const view = fut.m.HEAP8.subarray(buf, buf + data.byteLength);
+  view.set(new Int8Array(data.buffer));
 
-  return [vals, m.HEAP32.subarray(vals/4, vals/4 + len)];
+  const arr = await fut.new_i32_1d(buf, data.length);
+  fut.free(buf);
+  return arr;
+}
+
+async function getBufferValues(fut, buf) {
+  const shape = fut.shape_i32_1d(buf);
+  const len = fut.m.HEAP32[shape / 4];
+  const vals = fut.malloc(len * 4);
+  await fut.values_i32_1d(buf, vals);
+  await fut.context_sync();
+  return [vals, fut.m.HEAP32.subarray(vals/4, vals/4 + len)];
 }
 
 async function runServer() {
   const m = await Module();
+  const fut = new FutharkModule();
+  await fut.init(m);
 
-  const cfg = m.futhark_context_config_new();
-  const ctx = await m.futhark_context_new(cfg);
-  
   const inData = new Int32Array([1,2,3,4,5,6,7,8,9,10]);
-  const inBuf = new Uint8Array(inData.buffer);
-  const input = await m.futhark_new_i32_1d(ctx, inBuf, inData.length);
+  const input = await newBuffer(fut, inData);
 
-  const [inValPtr, inVals] = await getBufferValues(m, ctx, input);
+  const [inValPtr, inVals] = await getBufferValues(fut, input);
   console.log("input: ", inVals, " at ", inValPtr);
 
-  const outPtrPtr = m.malloc(4);
-
-  await m.futhark_entry_main(ctx, outPtrPtr, input);
+  const outPtrPtr = fut.malloc(4);
+  await fut.entry_main(outPtrPtr, input);
 
   const output = m.HEAP32[outPtrPtr / 4];
-  const [outValPtr, outVals] = await getBufferValues(m, ctx, output);
+  const [outValPtr, outVals] = await getBufferValues(fut, output);
   console.log("output: ", outVals, " at ", outValPtr);
 
   const server = new BrowserServer(ctx);
   
-  m.free(inValPtr);
-  m.free(outValPtr);
-  m.free(outPtrPtr);
-  await m.futhark_free_i32_1d(ctx, input);
-  await m.futhark_free_i32_1d(ctx, output);
+  fut.free(inValPtr);
+  fut.free(outValPtr);
+  fut.free(outPtrPtr);
+  await fut.free_i32_1d(input);
+  await fut.free_i32_1d(output);
 }
 
 runServer();

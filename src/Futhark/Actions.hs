@@ -552,10 +552,10 @@ compileWebGPUAction fcfg mode tgtpath =
             [ "-sUSE_WEBGPU",
               "-sASYNCIFY",
               "-sMODULARIZE",
-              "-sEXPORTED_RUNTIME_METHODS=cwrap",
-              "-s", "--post-js", jslibpath,
-              "-gsource-map",
-              "-g3"
+              "-sEXPORTED_RUNTIME_METHODS=cwrap,ccall,Asyncify",
+              "-s", "--extern-post-js", jslibpath,
+              --"-gsource-map",
+              "-g"
             ]
           export_option = "-sEXPORTED_FUNCTIONS="
             ++ intercalate "," ['_' : T.unpack e | e <- exports]
@@ -581,7 +581,7 @@ compileWebGPUAction fcfg mode tgtpath =
           let serverArgs = [ "-s", "--extern-post-js", jsserverpath ]
           -- TODO: optimization
           runEMCC cpath outpath ["-O0", "-std=c99"] ["-lm"]
-            (serverArgs ++ export_option : extra_options)
+            (export_option : extra_options ++ serverArgs)
 
 cmdEMCFLAGS :: [String] -> [String]
 cmdEMCFLAGS def = maybe def words $ lookup "EMCFLAGS" unixEnvironment
