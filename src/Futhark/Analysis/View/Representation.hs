@@ -69,6 +69,9 @@ data Term =
     Recurrence -- self-reference y[i-1]
   deriving (Show, Eq, Ord)
 
+infixr 3 :&&
+infixr 2 :||
+
 data Domain = Iota Term       -- [0, ..., n-1]
             | Range Term Term -- [from, ..., to]
             | Union           -- Union_{k=1}^{m-1} [b_{k-1}, ..., b_k)

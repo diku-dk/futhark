@@ -5,7 +5,8 @@ import Data.List.NonEmpty(NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (fromMaybe, mapMaybe, catMaybes, fromJust)
 import Futhark.Analysis.View.Representation
-import Futhark.Analysis.View.Refine
+import Futhark.Analysis.View.Refine hiding (debugM)
+import Futhark.Analysis.View.Rules
 import Futhark.Analysis.View.Substitution
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
@@ -15,9 +16,9 @@ import Language.Futhark qualified as E
 import qualified Data.Map as M
 import Debug.Trace (traceM, trace)
 import qualified Data.Set as S
-import Futhark.Analysis.View.Rules
 import Control.Monad.RWS.Strict hiding (Sum)
 import Futhark.SoP.SoP (justConstant)
+import Language.Futhark.Primitive (allIntTypes, PrimType (IntType))
 
 
 --------------------------------------------------------------
@@ -117,6 +118,8 @@ forward (E.Attr _ e _) = forward e
 -- Leaves.
 forward (E.Literal (E.BoolValue x) _) =
   normalise . toScalarIndexFn $ Bool x
+forward (E.Literal (E.SignedValue (E.Int64Value x)) _) =
+  normalise . toScalarIndexFn . SoP2 . SoP.int2SoP $ toInteger x
 forward (E.IntLit x _ _) =
   normalise . toScalarIndexFn . SoP2 $ SoP.int2SoP x
 forward (E.Negate (E.IntLit x _ _) _) =
@@ -324,14 +327,16 @@ forward e = error $ "forward on " <> show e
 
 -- Check that exactly one branch is OOB---and determine which.
 -- Returns Just (OOB, non-OOB), if decidable, else Nothing.
--- TODO add suport for non-negative OOB.
 getOOB :: SoP.SoP Term -> SoP.SoP Term -> IndexFn -> IndexFnM (Maybe (Term, Term))
 getOOB lower_bound upper_bound (IndexFn iter cases)
   | Cases ((c, x) :| [(neg_c, y)]) <- cases,
     c == (toNNF . Not $ neg_c) = do
       let test =
-           cmapValues (\v -> v :< SoP2 lower_bound :|| v :> SoP2 upper_bound)
+           cmapValues (\v -> SoP2 (termToSoP v) :< SoP2 lower_bound :|| SoP2 (termToSoP v) :>= SoP2 upper_bound)
                       cases
+      -- debugM $ "test reflexivity " <> prettyString (map (\(_,v) -> (v, v == v)) (casesToList cases))
+      -- debugM $ "test eq bounds " <> prettyString (map (\(_,v) -> (v,SoP2 upper_bound, v == SoP2 upper_bound)) (casesToList cases))
+      -- debugM $ "test eq bounds termToSoP " <> prettyString (map (\(_,v) -> (v,SoP2 upper_bound, termToSoP v == upper_bound)) (casesToList cases))
       IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
       -- Swap (x, y) so that OOB is first.
       let res' = case res of

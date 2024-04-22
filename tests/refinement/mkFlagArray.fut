@@ -11,7 +11,7 @@ let mkFlagArray 't [m]
   --            ) shape shp_scn
   let shp_ind =
         map2 (\ shp ind ->
-                if shp == 0 then aoa_len+1 else ind
+                if shp == 0 then aoa_len else ind
              ) shape shp_scn
   let zeros = replicate aoa_len zero
   let res = scatter zeros shp_ind xs

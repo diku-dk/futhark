@@ -3,7 +3,7 @@ module Futhark.Analysis.View.Refine where
 import Futhark.SoP.Monad (AlgEnv (ranges), addRange, delFromEnv, substEquivs, addEquiv)
 import Language.Futhark qualified as E
 import Futhark.SoP.FourierMotzkin
-import Futhark.Analysis.View.Representation
+import Futhark.Analysis.View.Representation hiding (debugM)
 import Control.Monad.RWS hiding (Sum)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as S
@@ -14,6 +14,9 @@ import Futhark.Util.Pretty
 import Debug.Trace (traceM)
 import qualified Data.Map as M
 
+
+debugM :: Applicative f => String -> f ()
+debugM x = traceM $ "🐞 " <> x
 
 mkRange :: SoP.SoP Term -> SoP.SoP Term -> SoP.Range Term
 mkRange lb ub = SoP.Range (S.singleton lb) 1 (S.singleton ub)
@@ -121,6 +124,8 @@ refineIndexFn (IndexFn it (Cases cases)) = do
     refineTerm e@(x :>= y)  = do
       x' <- refineTerm x
       y' <- refineTerm y
+      env' <- gets algenv
+      debugM ("refine " <> prettyString e <> "\n  " <> prettyString (ranges env'))
       -- TODO don't do this twice lol. First is to get the sum in the env.
       b <- termToSoP x' $>=$ termToSoP y'
       refineSumRangesInEnv
@@ -152,7 +157,7 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       x' <- refineTerm x
       y' <- refineTerm y
       env' <- gets algenv
-      debugM ("refine ||  " <> prettyString (ranges env'))
+      debugM ("refine " <> prettyString e <> "\n  " <> prettyString (ranges env'))
       case (x', y') of
         (Bool True, _) -> pure $ Bool True
         (_, Bool True) -> pure $ Bool True
@@ -225,7 +230,7 @@ refineIndexFn (IndexFn it (Cases cases)) = do
 refineSumRangesInEnv :: IndexFnM ()
 refineSumRangesInEnv = do
   ranges <- ranges <$> gets algenv
-  debugM $ "refineSumRangesInEnv " <> prettyString ranges
+  -- debugM $ "refineSumRangesInEnv " <> prettyString ranges
   mapM_ (refineSumRange . fst) (M.toList ranges)
   where
     zero = SoP.int2SoP 0
