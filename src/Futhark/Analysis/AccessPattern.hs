@@ -22,6 +22,7 @@ module Futhark.Analysis.AccessPattern
   )
 where
 
+import Data.Bifunctor
 import Data.Either
 import Data.Foldable
 import Data.List qualified as L
@@ -255,7 +256,7 @@ analyseStmsPrimitive :: (Analyse rep) => Context rep -> [Stm rep] -> (Context re
 analyseStmsPrimitive ctx =
   -- Fold over statements in body
   foldl'
-    (\(c, r) stm -> onSnd (unionIndexTables r) $ analyseStm c stm)
+    (\(c, r) stm -> second (unionIndexTables r) $ analyseStm c stm)
     (ctx, mempty)
 
 -- | Same as analyseStmsPrimitive, but change the resulting context into
@@ -558,8 +559,7 @@ analyseMatch ctx pats body parents =
    in foldl
         ( \(ctx', res) b ->
             -- This Little Maneuver's Gonna Cost Us 51 Years
-            onFst constLevel
-              . onSnd (unionIndexTables res)
+            bimap constLevel (unionIndexTables res)
               . analyseStms ctx' CondBodyName pats
               . stmsToList
               $ bodyStms b
@@ -584,7 +584,7 @@ analyseLoop ctx bindings loop body pats = do
 
 analyseApply :: Context rep -> [VName] -> [(SubExp, Diet)] -> (Context rep, IndexTable rep)
 analyseApply ctx pats diets =
-  onFst
+  first
     ( \ctx' ->
         foldl' extend ctx' $ map (\pat -> oneContext pat $ varInfoFromNames ctx' $ mconcat $ map (getDeps . fst) diets) pats
     )
@@ -673,14 +673,6 @@ reduceDependencies ctx v =
         ConstType -> mempty
 
 -- Misc functions
-
--- | Apply `f` to first/left part of tuple.
-onFst :: (a -> c) -> (a, b) -> (c, b)
-onFst f (x, y) = (f x, y)
-
--- | Apply `f` to second/right part of tuple.
-onSnd :: (b -> c) -> (a, b) -> (a, c)
-onSnd f (x, y) = (x, f y)
 
 -- Instances for AST types that we actually support
 instance Analyse GPU where
