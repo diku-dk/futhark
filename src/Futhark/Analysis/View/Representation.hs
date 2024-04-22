@@ -73,11 +73,10 @@ infixr 3 :&&
 infixr 2 :||
 
 data Domain = Iota Term       -- [0, ..., n-1]
-            | Range Term Term -- [from, ..., to]
-            | Union           -- Union_{k=1}^{m-1} [b_{k-1}, ..., b_k)
+            | Cat             -- Catenate_{k=1}^{m-1} [b_{k-1}, ..., b_k)
                 VName         -- k
                 Term          -- m
-                Domain        -- D
+                Term          -- b
   deriving (Show, Eq, Ord)
 
 data Iterator = Forall VName Domain
@@ -97,14 +96,12 @@ iteratorEnd _ = Nothing
 -- The final value in the domain (which is ordered).
 domainEnd :: Domain -> Term
 domainEnd (Iota n) = n
-domainEnd (Range _ end) = end
-domainEnd (Union _k _m _dom) =
+domainEnd (Cat _k _m _b) =
   undefined -- don't want to implement this before I can test it.
   -- domainEnd (substituteName k m dom) -- substitution should actually be m-1
 -- instance ASTMappable Domain where
 --   astMap m (Iota n) = Iota <$> astMap m n
---   astMap m (Range start end) = Range <$> astMap m start <*> astMap m end
---   astMap m (Union k n dom) = Union <$> mapOnVName m k <*> astMap m n <*> astMap m dom
+--   astMap m (Union k n b) = Union <$> mapOnVName m k <*> astMap m n <*> astMap m b
 
 
 instance Eq Iterator where
@@ -193,7 +190,7 @@ instance ASTMappable (SoP Term) where
 
 instance ASTMappable Term where
   astMap _ Recurrence = pure Recurrence
-  -- astMap m (Var x) = Var <$> mapOnVName m x
+  -- astMap m (Var x) = mapOnTerm m (Var x)
   astMap m (Var x) = do
     vn <- mapOnVName m x
     mapOnTerm m $ Var vn
@@ -311,11 +308,9 @@ instance Pretty a => Pretty (Cases a) where
 
 instance Pretty Domain where
   pretty (Iota e) = "iota" <+> pretty e
-  pretty (Range start end) =
-      brackets (commasep [pretty start, "...", pretty end])
-  pretty (Union k e dom) =
-    "⋃"
-      <> pretty k
+  pretty (Cat k e dom) =
+    "⊎"
+      <> prettyName k
       <> "="
       <> commasep ["1", "...", pretty e]
       <+> parens (pretty dom)

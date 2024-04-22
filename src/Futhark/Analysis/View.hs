@@ -262,14 +262,15 @@ forward (E.AppExp (E.Apply f args _) _)
       --
       -- b has size at least m
       -- b[k-1] <= b[k] for all k     (e.g., sum of positive ints; can be checked from SoP?)
-      -- inds = ∀k ∈ [1, ..., m] .
-      --     | c  => b[k-1]           (c may depend on i)
+      -- inds = ∀k ∈ [0, ..., m) .
+      --     | c  => b[k]             (c may depend on k)
       --     | ¬c => OOB
       -- dest has size b[m-1]         (to ensure conclusion covers all of dest)
+      -- b[0] is 0
       -- OOB < 0 or OOB >= b[m-1]
       -- y = scatter dest inds vals
       -- ___________________________________________________
-      -- y = ∀i ∈ Union k=1,...,m ([b[k-1], ..., b[k]]) .
+      -- y = ∀i ∈ Cat k=1,...,m-1 [b[k-1], ..., b[k]] .
       --     | i == inds[k] && c  => vals[k]   (c may depend on k)
       --     | i /= inds[k] || ¬c => dest[i]
       --
@@ -281,7 +282,7 @@ forward (E.AppExp (E.Apply f args _) _)
       -- let Forall i (Iota m) = iter_inds -- TODO don't do unsafe matching.
       let Cases ((c, x) :| [(neg_c, y)]) = inds
       unless (c == (toNNF . Not $ neg_c)) (error "this should never happen")
-      vals <- forward vals_arg
+      vals_fn <- forward vals_arg
       IndexFn iter_dest dest <- forward dest_arg
       -- The size of dest is the final value that the iterator takes on
       -- since b is monotonically increasing. (Later we check that
@@ -290,16 +291,34 @@ forward (E.AppExp (E.Apply f args _) _)
       debugM ("sz_dest " <> prettyString sz_dest)
       let inds_fn = IndexFn iter_inds inds
       -- Check that exactly one branch is OOB---and determine which.
-      (oob, b) <- fromJust <$> getOOB (SoP.int2SoP 0) (termToSoP sz_dest) inds_fn
+      ((_, oob), (cond_b, b)) <- fromJust <$> getOOB (SoP.int2SoP 0) (termToSoP sz_dest) inds_fn
       -- TODO ^handle Nothing case.
-      -- TODO ^Refinement won't say that 1 + u > u when u is a Sum
-      -- even though this is true for any integer-valued term u.
       -- check monotonicity on b
-      lol <- checkMonotonic inds_fn
+      lol <- checkMonotonic iter_inds (cond_b, b)
       -- check that cases match pattern with OOB < 0 or OOB > b[m-1]
       -- check that iterator matches that of inds
       -- check dest has size b[m-1]
-      pure inds_fn
+      let Forall k (Iota m) = iter_inds
+      i <- newNameFromString "i"
+      vals_k <- newNameFromString "vals_k"
+      dest_i <- newNameFromString "dest_i"
+      -- let cond = Var i :== b :&& cond_b
+      -- Purely aesthetic renaming of k to ensure that "k" is printed
+      -- (and not, e.g., "i").
+      k' <- newNameFromString "k"
+      let b' = substituteName k (Var k') b
+      debugM (show k)
+      debugM (show b)
+      debugM (show k')
+      debugM (show b')
+      let y = IndexFn (Forall i (Cat k' m b'))
+                      (Cases . NE.fromList $ [(Var i :== b', Var vals_k),
+                                              (Not (Var i :== b'), Var dest_i)])
+      -- let b_fn = IndexFn iter_inds (Cases . NE.singleton $ (cond_b, b)) -- XXX invalid index fn
+      let y' = sub vals_k vals_fn y
+      let dest_fn = IndexFn iter_dest dest
+      let y'' = sub dest_i dest_fn y'
+      normalise y''
   | Just "iota" <- getFun f,
     [n] <- getArgs args = do
       indexfn <- forward n
@@ -327,7 +346,10 @@ forward e = error $ "forward on " <> show e
 
 -- Check that exactly one branch is OOB---and determine which.
 -- Returns Just (OOB, non-OOB), if decidable, else Nothing.
-getOOB :: SoP.SoP Term -> SoP.SoP Term -> IndexFn -> IndexFnM (Maybe (Term, Term))
+getOOB :: SoP.SoP Term
+  -> SoP.SoP Term
+  -> IndexFn
+  -> IndexFnM (Maybe ((Term, Term), (Term, Term)))
 getOOB lower_bound upper_bound (IndexFn iter cases)
   | Cases ((c, x) :| [(neg_c, y)]) <- cases,
     c == (toNNF . Not $ neg_c) = do
@@ -340,10 +362,10 @@ getOOB lower_bound upper_bound (IndexFn iter cases)
       IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
       -- Swap (x, y) so that OOB is first.
       let res' = case res of
-                   ((_, Bool True) :| [(_, y')]) | y' /= Bool True ->
-                     Just (x, y)
-                   ((_, x') :| [(_, Bool True)]) | x' /= Bool True ->
-                     Just (y, x)
+                   ((cx, Bool True) :| [(cy, y')]) | y' /= Bool True ->
+                     Just ((cx, x), (cy, y))
+                   ((cx, x') :| [(cy, Bool True)]) | x' /= Bool True ->
+                     Just ((cy, y), (cx, x))
                    _ -> Nothing
       debugM ("getOOB " <> prettyString (IndexFn iter (Cases res)))
       debugM ("getOOB res: " <> prettyString res')
@@ -367,9 +389,10 @@ getOOB _ _ _ = pure Nothing
 -- The   ^ conclusion is False despite the fact that we have 0 <= aoa_shp
 -- in the env. This makes sense as the (SoP) refinement is oblivious to the
 -- Sum term. Make it aware of this somehow.
-checkMonotonic (IndexFn iter cases) = do
+checkMonotonic iter (cond, x) = do
   -- A first step towards this test is that each term is non-negative.
-  let test = cmapValues (:>= (SoP2 $ SoP.int2SoP 0)) cases
+  let test = Cases . NE.singleton $ (cond, x :>= SoP2 (SoP.int2SoP 0))
+  debugM $ "checkMonotonic test " <> prettyString test
   IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
   debugM ("checkMonotonic " <> prettyString (IndexFn iter (Cases res)))
   -- debugM ("checkMonotonic res: " <> prettyString res)

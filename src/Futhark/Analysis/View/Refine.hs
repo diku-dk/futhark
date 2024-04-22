@@ -90,7 +90,7 @@ refineIndexFn (IndexFn it (Cases cases)) = do
           do
             addRel rel
             env' <- gets algenv
-            debugM $ "refine " <> prettyString (p,v) <> " Alg env: " <> prettyString env'
+            debugM $ "refine CASE " <> prettyString (p,v) <> " Alg env: " <> prettyString env'
             refineTerm v)
     refineCase (_, v) =
       refineTerm v
@@ -130,11 +130,9 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       b <- termToSoP x' $>=$ termToSoP y'
       refineSumRangesInEnv
       b <- termToSoP x' $>=$ termToSoP y'
-      debugM ("QQ " <> show x)
-      debugM ("QQ " <> show y)
-      debugM ("QQ " <> show b)
       env' <- gets algenv
       debugM ("QQ " <> prettyString (ranges env'))
+      debugM ("QQ " <> prettyString b)
       pure $ if b then Bool True else e
     refineTerm e@(x :< y)  = do
       x' <- refineTerm x
@@ -144,7 +142,6 @@ refineIndexFn (IndexFn it (Cases cases)) = do
     refineTerm e@(x :<= y)  = do
       x' <- refineTerm x
       y' <- refineTerm y
-      -- TODO refine x and y first??
       b <- termToSoP x' $<=$ termToSoP y'
       pure $ if b then Bool True else e
     refineTerm e@(x :&& y)  = do

@@ -155,13 +155,13 @@ rewriteRule4 :: IndexFn -> IndexFnM IndexFn
 -- Rule 4 (recursive sum)
 --
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
---    | i == b => e              (e may depend on i)
---    | i /= b => y[i-1] + x[i]
+--    | i == b => e1              (e1 may depend on i)
+--    | i /= b => y[i-1] + e2     (e2 may depend on i)
 -- _______________________________________________________________
--- y = ∀i ∈ [b, b+1, ..., b + n - 1] . e{b/i} + (Σ_{j=b+1}^i x[j])
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] . e1{b/i} + (Σ_{j=b+1}^i e2{j/i})
 --
--- If e{b/i} happens to be x[b] it later simplifies to
--- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (Σ_{j=b}^i x[j])
+-- If e1{b/i} == e2{j/i}, it later simplifies to
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (Σ_{j=b}^i e2{j/i})
 rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
   | (Var i :== b, e) :| [(Not (Var i' :== b'), x)] <- cases,
     Just x' <- justTermPlusRecurence x,
