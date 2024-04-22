@@ -276,6 +276,7 @@ prettyName (VName vn i) = pretty vn <> pretty (mapMaybe subscript (show i))
 instance Pretty Term where
   pretty Recurrence = "%₍₋₁₎"
   pretty (Var x) = prettyName x
+  pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
   pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)
   -- pretty (SumSlice vn lb ub) =
   --   "Σ"
