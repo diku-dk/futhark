@@ -38,7 +38,11 @@ import Futhark.IR.SeqMem
 import Futhark.Util.Pretty
 
 class Analyse rep where
-  analyseOp :: Op rep -> (Context rep -> [VName] -> (Context rep, IndexTable rep))
+  analyseOp ::
+    Op rep ->
+    Context rep ->
+    [VName] ->
+    (Context rep, IndexTable rep)
 
 -- | For each array access in a program, this data structure stores the
 -- dependencies of each dimension in the access, the array name, and the
@@ -92,7 +96,6 @@ data Dependency = Dependency
   deriving (Eq, Show)
 
 instance Semigroup (DimAccess rep) where
-  (<>) :: DimAccess rep -> DimAccess rep -> DimAccess rep
   adeps <> bdeps =
     DimAccess
       (dependencies adeps <> dependencies bdeps)
@@ -121,15 +124,16 @@ analysisPropagateByTransitivity idx_table =
     foldlArrayNameMap
     idx_table
   where
-    -- VName -> M.Map ArrayName (M.Map IndexExprName ([DimAccess rep]))
     aggregateResults arr_name =
       maybe
         mempty
         foldlArrayNameMap
-        ((M.!?) (M.mapKeys vnameFromSegOp idx_table) arr_name)
+        (M.mapKeys vnameFromSegOp idx_table M.!? arr_name)
 
     foldlArrayNameMap aMap =
-      foldl (M.unionWith M.union) aMap (map aggregateResults $ M.keys $ M.mapKeys (\(a, _, _) -> a) aMap)
+      foldl (M.unionWith M.union) aMap $
+        map (aggregateResults . \(a, _, _) -> a) $
+          M.keys aMap
 
 --
 -- Helper types and functions to perform the analysis.
@@ -161,14 +165,12 @@ instance Monoid (Context rep) where
       }
 
 instance Semigroup (Context rep) where
-  (<>)
-    (Context ass0 slices0 lastBody0 lvl0)
-    (Context ass1 slices1 lastBody1 lvl1) =
-      Context
-        ((<>) ass0 ass1)
-        ((<>) slices0 slices1)
-        ((++) lastBody0 lastBody1)
-        $ max lvl0 lvl1
+  Context ass0 slices0 lastBody0 lvl0 <> Context ass1 slices1 lastBody1 lvl1 =
+    Context
+      (ass0 <> ass1)
+      (slices0 <> slices1)
+      (lastBody0 <> lastBody1)
+      (max lvl0 lvl1)
 
 -- | Extend a context with another context.
 -- We never have to consider the case where VNames clash in the context, since
@@ -177,13 +179,10 @@ extend :: Context rep -> Context rep -> Context rep
 extend = (<>)
 
 allSegMap :: Context rep -> [SegOpName]
-allSegMap (Context _ _ parents _) =
-  mapMaybe
-    ( \case
-        (SegOpName o) -> Just o
-        _ -> Nothing
-    )
-    parents
+allSegMap (Context _ _ parents _) = mapMaybe f parents
+  where
+    f (SegOpName o) = Just o
+    f _ = Nothing
 
 -- | Context Value (VariableInfo) is the type used in the context to categorize
 -- assignments. For example, a pattern might depend on a function parameter, a
@@ -367,30 +366,39 @@ analyseStm ctx (Let pats _ e) = do
   -- Get the name of the first element in a pattern
   let pattern_names = map patElemName $ patElems pats
 
-  -- Construct the result and Context from the subexpression. If the subexpression
-  -- is a body, we recurse into it.
+  -- Construct the result and Context from the subexpression. If the
+  -- subexpression is a body, we recurse into it.
   case e of
-    (BasicOp (Index name (Slice dim_subexp))) -> analyseIndex ctx pattern_names name dim_subexp
-    (BasicOp (Update _ name (Slice dim_subexp) _subexp)) -> analyseIndex ctx pattern_names name dim_subexp
-    (BasicOp op) -> analyseBasicOp ctx op pattern_names
-    (Match conds cases default_body _) -> analyseMatch (contextFromNames ctx (varInfoZeroDeps ctx) $ concatMap (namesToList . getDeps) conds) pattern_names default_body $ map caseBody cases
-    (Loop bindings loop body) -> analyseLoop ctx bindings loop body pattern_names
-    (Apply _name diets _ _) -> analyseApply ctx pattern_names diets
-    (WithAcc _ _) -> (ctx, mempty) -- ignored
-    (Op op) -> analyseOp op ctx pattern_names
+    BasicOp (Index name (Slice dim_subexp)) ->
+      analyseIndex ctx pattern_names name dim_subexp
+    BasicOp (Update _ name (Slice dim_subexp) _subexp) ->
+      analyseIndex ctx pattern_names name dim_subexp
+    BasicOp op ->
+      analyseBasicOp ctx op pattern_names
+    Match conds cases default_body _ ->
+      analyseMatch ctx' pattern_names default_body $ map caseBody cases
+      where
+        ctx' =
+          contextFromNames ctx (varInfoZeroDeps ctx) $
+            concatMap (namesToList . getDeps) conds
+    Loop bindings loop body ->
+      analyseLoop ctx bindings loop body pattern_names
+    Apply _name diets _ _ ->
+      analyseApply ctx pattern_names diets
+    WithAcc _ _ ->
+      (ctx, mempty) -- ignored
+    Op op ->
+      analyseOp op ctx pattern_names
 
 -- If left, this is just a regular index. If right, a slice happened.
 getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Either [DimAccess rep] [DimAccess rep]
 getIndexDependencies ctx dims =
   fst $
     foldr
-      ( \idx (a, i) -> do
+      ( \idx (a, i) ->
           let acc =
-                either
-                  (matchDimIndex idx)
-                  (forceRight . matchDimIndex idx)
-                  a
-          (acc, i - 1)
+                either (matchDimIndex idx) (forceRight . matchDimIndex idx) a
+           in (acc, i - 1)
       )
       (Left [], length dims - 1)
       dims
