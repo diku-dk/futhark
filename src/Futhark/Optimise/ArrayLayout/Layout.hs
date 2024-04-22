@@ -14,7 +14,7 @@ import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.AccessPattern
-import Futhark.Analysis.AnalysePrimExp
+import Futhark.Analysis.AnalysePrimExp (PrimExpTable)
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC
@@ -30,7 +30,7 @@ type LayoutTable =
         (M.Map IndexExprName Permutation)
     )
 
-class (PrimExpAnalysis rep) => Layout rep where
+class Layout rep where
   -- | Produce a coalescing permutation that will be used to create a
   -- manifest of the array. Returns Nothing if the array is already in
   -- the optimal layout or if the array access is too complex to
@@ -115,6 +115,36 @@ commonPermutationEliminators perm nest = do
       LoopBodyName _ -> True
       _ -> False
 
+sortMC :: [(Int, DimAccess rep)] -> [(Int, DimAccess rep)]
+sortMC =
+  L.sortBy dimdexMCcmp
+  where
+    dimdexMCcmp (ia, a) (ib, b) = do
+      let aggr1 =
+            foldl max' Nothing $ map (f ia . snd) $ M.toList $ dependencies a
+          aggr2 =
+            foldl max' Nothing $ map (f ib . snd) $ M.toList $ dependencies b
+      cmpIdxPat aggr1 aggr2
+      where
+        cmpIdxPat Nothing Nothing = EQ
+        cmpIdxPat (Just _) Nothing = GT
+        cmpIdxPat Nothing (Just _) = LT
+        cmpIdxPat
+          (Just (iterL, lvlL, original_lvl_L))
+          (Just (iterR, lvlR, original_lvl_R)) =
+            case (iterL, iterR) of
+              (ThreadID, ThreadID) -> (lvlL, original_lvl_L) `compare` (lvlR, original_lvl_R)
+              (ThreadID, _) -> LT
+              (_, ThreadID) -> GT
+              _ -> (lvlL, original_lvl_L) `compare` (lvlR, original_lvl_R)
+
+        max' lhs rhs =
+          case cmpIdxPat lhs rhs of
+            LT -> rhs
+            _ -> lhs
+
+        f og (Dependency lvl varType) = Just (varType, lvl, og)
+
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name dimAccesses = do
   -- Dont accept indices where the last index is invariant
@@ -135,32 +165,20 @@ multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_
     then Nothing
     else Just perm
 
--- | like mapMaybe, but works on nested maps. Eliminates "dangling"
--- maps / rows with missing (Nothing) values.
-tableMapMaybe :: (k0 -> k1 -> k2 -> a -> Maybe b) -> M.Map k0 (M.Map k1 (M.Map k2 a)) -> M.Map k0 (M.Map k1 (M.Map k2 b))
-tableMapMaybe f =
-  M.mapMaybeWithKey $
-    \key0 -> mapToMaybe $ mapToMaybe . f key0
-  where
-    maybeMap :: M.Map k a -> Maybe (M.Map k a)
-    maybeMap val = if null val then Nothing else Just val
-
-    mapToMaybe g = maybeMap . M.mapMaybeWithKey g
+instance Layout MC where
+  permutationFromDimAccess = multicorePermutation
 
 sortGPU :: [(Int, DimAccess rep)] -> [(Int, DimAccess rep)]
 sortGPU =
   L.sortBy dimdexGPUcmp
   where
     dimdexGPUcmp (ia, a) (ib, b) = do
-      let depsA = dependencies a
-      let depsB = dependencies b
-      let deps1' = map (f ia . snd) $ M.toList depsA
-      let deps2' = map (f ib . snd) $ M.toList depsB
-      let aggr1 = foldl maxIdxPat Nothing deps1'
-      let aggr2 = foldl maxIdxPat Nothing deps2'
+      let aggr1 =
+            foldl max' Nothing $ map (f ia . snd) $ M.toList $ dependencies a
+          aggr2 =
+            foldl max' Nothing $ map (f ib . snd) $ M.toList $ dependencies b
       cmpIdxPat aggr1 aggr2
       where
-        cmpIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Ordering
         cmpIdxPat Nothing Nothing = EQ
         cmpIdxPat (Just _) Nothing = GT
         cmpIdxPat Nothing (Just _) = LT
@@ -172,74 +190,56 @@ sortGPU =
             (_, ThreadID) -> LT
             _ -> (lvlL, original_lvl_L) `compare` (lvlR, original_lvl_R)
 
-        maxIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int)
-        maxIdxPat lhs rhs =
+        max' lhs rhs =
           case cmpIdxPat lhs rhs of
             LT -> rhs
             _ -> lhs
 
         f og (Dependency lvl varType) = Just (varType, lvl, og)
 
-sortMC :: [(Int, DimAccess rep)] -> [(Int, DimAccess rep)]
-sortMC =
-  L.sortBy dimdexMCcmp
-  where
-    dimdexMCcmp (ia, a) (ib, b) = do
-      let depsA = dependencies a
-          depsB = dependencies b
-          deps1' = map (f ia . snd) $ M.toList depsA
-          deps2' = map (f ib . snd) $ M.toList depsB
-          aggr1 = foldl maxIdxPat Nothing deps1'
-          aggr2 = foldl maxIdxPat Nothing deps2'
-      cmpIdxPat aggr1 aggr2
-      where
-        cmpIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Ordering
-        cmpIdxPat Nothing Nothing = EQ
-        cmpIdxPat (Just _) Nothing = GT
-        cmpIdxPat Nothing (Just _) = LT
-        cmpIdxPat
-          (Just (iterL, lvlL, original_lvl_L))
-          (Just (iterR, lvlR, original_lvl_R)) =
-            case (iterL, iterR) of
-              (ThreadID, ThreadID) -> (lvlL, original_lvl_L) `compare` (lvlR, original_lvl_R)
-              (ThreadID, _) -> LT
-              (_, ThreadID) -> GT
-              _ -> (lvlL, original_lvl_L) `compare` (lvlR, original_lvl_R)
+gpuPermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
+gpuPermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name dimAccesses = do
+  -- Dont accept indices where the last index is invariant
+  let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
-        maxIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int)
-        maxIdxPat lhs rhs =
-          case cmpIdxPat lhs rhs of
-            LT -> rhs
-            _ -> lhs
+  -- Check if any of the dependencies are too complex to reason about
+  let dimAccesses' = filter (isJust . originalVar) dimAccesses
+      deps = mapMaybe originalVar dimAccesses'
+      counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
+      primExps = mapM (join . (`M.lookup` primExpTable)) deps
+      inscrutable = maybe True (any (uncurry isInscrutable) . flip zip counters) primExps
 
-        f og (Dependency lvl varType) = Just (varType, lvl, og)
+  -- Create a candidate permutation
+  let perm = map fst $ sortGPU (zip arr_layout dimAccesses)
 
-instance Layout MC where
-  permutationFromDimAccess = multicorePermutation
+  -- Check if we want to manifest this array with the permutation
+  if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest
+    then Nothing
+    else Just perm
 
 instance Layout GPU where
-  permutationFromDimAccess primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name dimAccesses = do
-    -- Dont accept indices where the last index is invariant
-    let lastIdxIsInvariant = isInvariant $ last dimAccesses
+  permutationFromDimAccess = gpuPermutation
 
-    -- Check if any of the dependencies are too complex to reason about
-    let dimAccesses' = filter (isJust . originalVar) dimAccesses
-        deps = mapMaybe originalVar dimAccesses'
-        counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
-        primExps = mapM (join . (`M.lookup` primExpTable)) deps
-        inscrutable = maybe True (any (uncurry isInscrutable) . flip zip counters) primExps
+-- | like mapMaybe, but works on nested maps. Eliminates "dangling"
+-- maps / rows with missing (Nothing) values.
+tableMapMaybe ::
+  (k0 -> k1 -> k2 -> a -> Maybe b) ->
+  M.Map k0 (M.Map k1 (M.Map k2 a)) ->
+  M.Map k0 (M.Map k1 (M.Map k2 b))
+tableMapMaybe f =
+  M.mapMaybeWithKey $ \key0 -> mapToMaybe $ mapToMaybe . f key0
+  where
+    maybeMap :: M.Map k a -> Maybe (M.Map k a)
+    maybeMap val = if null val then Nothing else Just val
 
-    -- Create a candidate permutation
-    let perm = map fst $ sortGPU (zip arr_layout dimAccesses)
-
-    -- Check if we want to manifest this array with the permutation
-    if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest
-      then Nothing
-      else Just perm
+    mapToMaybe g = maybeMap . M.mapMaybeWithKey g
 
 -- | Given an ordering function for `DimAccess`, and an IndexTable,
 -- return a LayoutTable. We remove entries with no results after
 -- `permutationFromDimAccess`
-layoutTableFromIndexTable :: (Layout rep) => PrimExpTable -> IndexTable rep -> LayoutTable
-layoutTableFromIndexTable primExpTable =
-  tableMapMaybe (permutationFromDimAccess primExpTable)
+layoutTableFromIndexTable ::
+  (Layout rep) =>
+  PrimExpTable ->
+  IndexTable rep ->
+  LayoutTable
+layoutTableFromIndexTable = tableMapMaybe . permutationFromDimAccess
