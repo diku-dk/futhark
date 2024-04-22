@@ -45,6 +45,14 @@ class Layout rep where
     [DimAccess rep] ->
     Maybe Permutation
 
+isInscrutableExp :: PrimExp VName -> Bool
+isInscrutableExp (LeafExp _ _) = False
+isInscrutableExp (ValueExp _) = False
+isInscrutableExp (BinOpExp _ a b) =
+  isInscrutableExp a || isInscrutableExp b
+-- TODO: Handle UnOpExp
+isInscrutableExp _ = True
+
 isInscrutable :: PrimExp VName -> Bool -> Bool
 isInscrutable op@(BinOpExp {}) counter =
   if counter
@@ -53,16 +61,8 @@ isInscrutable op@(BinOpExp {}) counter =
       -- Maximum allowable stride, might need tuning.
       Just (s, _) -> s > 8
       Nothing -> True
-    else isInscrutableRec op
-isInscrutable op _ = isInscrutableRec op
-
-isInscrutableRec :: PrimExp VName -> Bool
-isInscrutableRec (LeafExp _ _) = False
-isInscrutableRec (ValueExp _) = False
-isInscrutableRec (BinOpExp _ a b) =
-  isInscrutableRec a || isInscrutableRec b
--- TODO: Handle UnOpExp
-isInscrutableRec _ = True
+    else isInscrutableExp op
+isInscrutable op _ = isInscrutableExp op
 
 reduceStrideAndOffset :: PrimExp l -> Maybe (Int, Int)
 reduceStrideAndOffset (LeafExp _ _) = Just (1, 0)
