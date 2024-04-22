@@ -1,3 +1,5 @@
+-- | Compute a mapping from variables to their corresponding (fully
+-- expanded) PrimExps.
 module Futhark.Analysis.AnalysePrimExp
   ( primExpAnalysis,
     stmToPrimExps,
@@ -146,11 +148,8 @@ segOpToPrimExps scope op = do
 segOpParamsToPrimExps :: (RepTypes rep) => Scope rep -> SegOp lvl rep -> State PrimExpTable ()
 segOpParamsToPrimExps scope op = do
   primExpTable <- get
-  let params = unSegSpace $ segSpace op :: [(VName, SubExp)]
-  forM_ params $ \(name, subExpr) ->
-    case primExpFromSubExpM (toPrimExp scope primExpTable) subExpr of
-      Just primExp -> modify $ M.insert name (Just primExp)
-      Nothing -> pure ()
+  forM_ (map fst $ unSegSpace $ segSpace op) $ \name ->
+    modify $ M.insert name $ Just $ LeafExp name int64
 
 instance PrimExpAnalysis GPU where
   opPrimExp scope gpu_op
