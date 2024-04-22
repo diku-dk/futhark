@@ -12,8 +12,8 @@ import Futhark.Builder
 import Futhark.IR
 import Futhark.IR.GPU (GPU)
 import Futhark.IR.MC (MC)
-import Futhark.Optimise.ArrayLayout.Layout
-import Futhark.Optimise.ArrayLayout.Transform
+import Futhark.Optimise.ArrayLayout.Layout (layoutTableFromIndexTable)
+import Futhark.Optimise.ArrayLayout.Transform (Transform, transformStms)
 import Futhark.Pass
 
 optimiseArrayLayout :: (Transform rep, BuilderOps rep) => String -> Pass rep rep

@@ -1,46 +1,51 @@
 -- | Do various kernel optimisations - mostly related to coalescing.
-module Futhark.Optimise.ArrayLayout.Transform (Transform, transformStms) where
+module Futhark.Optimise.ArrayLayout.Transform
+  ( Transform,
+    transformStms,
+  )
+where
 
 import Control.Monad
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
-import Futhark.Analysis.AccessPattern
+import Futhark.Analysis.AccessPattern (IndexExprName, SegOpName (..))
 import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC
-import Futhark.Optimise.ArrayLayout.Layout
+import Futhark.Optimise.ArrayLayout.Layout (Layout, LayoutTable, Permutation)
 
 class (Layout rep) => Transform rep where
-  onOp :: forall m. (Monad m) => SOACMapper rep rep m -> Op rep -> m (Op rep)
-  transformOp :: LayoutTable -> ExpMap rep -> Stm rep -> Op rep -> TransformM rep (LayoutTable, ExpMap rep)
+  onOp ::
+    forall m.
+    (Monad m) =>
+    SOACMapper rep rep m ->
+    Op rep ->
+    m (Op rep)
+  transformOp ::
+    LayoutTable ->
+    ExpMap rep ->
+    Stm rep ->
+    Op rep ->
+    TransformM rep (LayoutTable, ExpMap rep)
 
 type TransformM rep = Builder rep
 
 -- | A map from the name of an expression to the expression that defines it.
 type ExpMap rep = M.Map VName (Stm rep)
 
-transformStms :: (Transform rep, BuilderOps rep) => LayoutTable -> ExpMap rep -> Stms rep -> TransformM rep (Stms rep)
-transformStms perm_table expmap stms = collectStms_ $ foldM_ transformStm (perm_table, expmap) stms
-
-transformStm :: (Transform rep, BuilderOps rep) => (LayoutTable, ExpMap rep) -> Stm rep -> TransformM rep (LayoutTable, ExpMap rep)
-transformStm (perm_table, expmap) (Let pat aux (Op op)) = transformOp perm_table expmap (Let pat aux (Op op)) op
-transformStm (perm_table, expmap) (Let pat aux e) = do
-  e' <- mapExpM (transform perm_table expmap) e
-  let stm' = Let pat aux e'
-  addStm stm'
-  pure (perm_table, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
-
 instance Transform GPU where
-  onOp soac_mapper (Futhark.IR.GPU.OtherOp soac) = Futhark.IR.GPU.OtherOp <$> mapSOACM soac_mapper soac
+  onOp soac_mapper (Futhark.IR.GPU.OtherOp soac) =
+    Futhark.IR.GPU.OtherOp <$> mapSOACM soac_mapper soac
   onOp _ op = pure op
   transformOp perm_table expmap stm gpuOp
     | (SegOp op) <- gpuOp = transformSegOpGPU perm_table expmap stm op
     | _ <- gpuOp = transformRestOp perm_table expmap stm
 
 instance Transform MC where
-  onOp soac_mapper (Futhark.IR.MC.OtherOp soac) = Futhark.IR.MC.OtherOp <$> mapSOACM soac_mapper soac
+  onOp soac_mapper (Futhark.IR.MC.OtherOp soac) =
+    Futhark.IR.MC.OtherOp <$> mapSOACM soac_mapper soac
   onOp _ op = pure op
   transformOp perm_table expmap stm mcOp
     | ParOp maybe_par_segop seqSegOp <- mcOp = transformSegOpMC perm_table expmap stm maybe_par_segop seqSegOp
@@ -48,8 +53,8 @@ instance Transform MC where
 
 transformSegOpGPU :: LayoutTable -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> TransformM GPU (LayoutTable, ExpMap GPU)
 transformSegOpGPU perm_table expmap stm@(Let pat aux _) op =
-  -- Optimization: Only traverse the body of the SegOp if it is represented in
-  -- the layout table
+  -- Optimization: Only traverse the body of the SegOp if it is
+  -- represented in the layout table
   case M.lookup patternName (M.mapKeys vnameFromSegOp perm_table) of
     Nothing -> do
       addStm stm
@@ -72,8 +77,8 @@ transformSegOpMC :: LayoutTable -> ExpMap MC -> Stm MC -> Maybe (SegOp () MC) ->
 transformSegOpMC perm_table expmap (Let pat aux _) maybe_par_segop seqSegOp
   | Nothing <- maybe_par_segop = add Nothing
   | Just par_segop <- maybe_par_segop =
-      -- Optimization: Only traverse the body of the SegOp if it is represented in
-      -- the layout table
+      -- Optimization: Only traverse the body of the SegOp if it is
+      -- represented in the layout table
       case M.lookup patternName (M.mapKeys vnameFromSegOp perm_table) of
         Nothing -> add (Just par_segop)
         Just _ -> do
@@ -108,13 +113,23 @@ transformBody perm_table expmap (Body b stms res) = do
   pure $ Body b stms' res
 
 -- | Recursively transform the statements in the body of a SegGroup kernel.
-transformSegGroupKernelBody :: (Transform rep, BuilderOps rep) => LayoutTable -> ExpMap rep -> KernelBody rep -> TransformM rep (KernelBody rep)
+transformSegGroupKernelBody ::
+  (Transform rep, BuilderOps rep) =>
+  LayoutTable ->
+  ExpMap rep ->
+  KernelBody rep ->
+  TransformM rep (KernelBody rep)
 transformSegGroupKernelBody perm_table expmap (KernelBody b stms res) = do
   stms' <- transformStms perm_table expmap stms
   pure $ KernelBody b stms' res
 
 -- | Transform the statements in the body of a SegThread kernel.
-transformSegThreadKernelBody :: (Transform rep, BuilderOps rep) => LayoutTable -> VName -> KernelBody rep -> TransformM rep (KernelBody rep)
+transformSegThreadKernelBody ::
+  (Transform rep, BuilderOps rep) =>
+  LayoutTable ->
+  VName ->
+  KernelBody rep ->
+  TransformM rep (KernelBody rep)
 transformSegThreadKernelBody perm_table seg_name kbody = do
   evalStateT
     ( traverseKernelBodyArrayIndexes
@@ -124,7 +139,13 @@ transformSegThreadKernelBody perm_table seg_name kbody = do
     )
     mempty
 
-transformKernelBody :: (Transform rep, BuilderOps rep) => LayoutTable -> ExpMap rep -> VName -> KernelBody rep -> TransformM rep (KernelBody rep)
+transformKernelBody ::
+  (Transform rep, BuilderOps rep) =>
+  LayoutTable ->
+  ExpMap rep ->
+  VName ->
+  KernelBody rep ->
+  TransformM rep (KernelBody rep)
 transformKernelBody perm_table expmap seg_name (KernelBody b stms res) = do
   stms' <- transformStms perm_table expmap stms
   let kbody' = KernelBody b stms' res
@@ -137,7 +158,6 @@ transformKernelBody perm_table expmap seg_name (KernelBody b stms res) = do
     mempty
 
 traverseKernelBodyArrayIndexes ::
-  forall m rep.
   (Monad m, Transform rep) =>
   VName -> -- seg_name
   ArrayIndexTransform m ->
@@ -173,7 +193,7 @@ traverseKernelBodyArrayIndexes seg_name coalesce (KernelBody b kstms kres) =
         }
 
     mapper =
-      (identityMapper @rep)
+      identityMapper
         { mapOnBody = const onBody,
           mapOnOp = onOp soac_mapper
         }
@@ -234,3 +254,23 @@ lookupPermutation perm_table seg_name idx_name arr_name =
       case M.lookup arr_name (M.mapKeys (\(n, _, _) -> n) arrayNameMap) of
         Nothing -> Nothing
         Just idxs -> M.lookup idx_name idxs
+
+transformStm ::
+  (Transform rep, BuilderOps rep) =>
+  (LayoutTable, ExpMap rep) ->
+  Stm rep ->
+  TransformM rep (LayoutTable, ExpMap rep)
+transformStm (perm_table, expmap) (Let pat aux (Op op)) = transformOp perm_table expmap (Let pat aux (Op op)) op
+transformStm (perm_table, expmap) (Let pat aux e) = do
+  e' <- mapExpM (transform perm_table expmap) e
+  let stm' = Let pat aux e'
+  addStm stm'
+  pure (perm_table, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+
+transformStms ::
+  (Transform rep, BuilderOps rep) =>
+  LayoutTable ->
+  ExpMap rep ->
+  Stms rep ->
+  TransformM rep (Stms rep)
+transformStms perm_table expmap stms = collectStms_ $ foldM_ transformStm (perm_table, expmap) stms

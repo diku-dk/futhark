@@ -2,8 +2,10 @@ module Futhark.Optimise.ArrayLayout.Layout
   ( layoutTableFromIndexTable,
     Layout,
     Permutation,
-    commonPermutationEliminators,
     LayoutTable,
+
+    -- * Exposed for testing
+    commonPermutationEliminators,
   )
 where
 
@@ -20,16 +22,28 @@ import Futhark.IR.MCMem
 
 type Permutation = [Int]
 
-type LayoutTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
+type LayoutTable =
+  M.Map
+    SegOpName
+    ( M.Map
+        ArrayName
+        (M.Map IndexExprName Permutation)
+    )
 
 class (PrimExpAnalysis rep) => Layout rep where
-  -- | Return a coalescing permutation that will be used to create a
+  -- | Produce a coalescing permutation that will be used to create a
   -- manifest of the array. Returns Nothing if the array is already in
   -- the optimal layout or if the array access is too complex to
   -- confidently determine the optimal layout. Map each list of
-  -- `DimAccess` in the IndexTable to a permutation in a generic way
+  -- 'DimAccess' in the IndexTable to a permutation in a generic way
   -- that can be handled uniquely by each backend.
-  permutationFromDimAccess :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
+  permutationFromDimAccess ::
+    PrimExpTable ->
+    SegOpName ->
+    ArrayName ->
+    IndexExprName ->
+    [DimAccess rep] ->
+    Maybe Permutation
 
 isInscrutable :: PrimExp VName -> Bool -> Bool
 isInscrutable op@(BinOpExp {}) counter =
@@ -79,6 +93,28 @@ reduceStrideAndOffset (BinOpExp oper a b) = case (a, b) of
     reduce _ _ = Nothing
 reduceStrideAndOffset _ = Nothing
 
+-- | Reasons common to all backends to not manifest an array.
+commonPermutationEliminators :: [Int] -> [BodyType] -> Bool
+commonPermutationEliminators perm nest = do
+  -- Don't manifest if the permutation is the permutation is invalid
+  let is_invalid_perm = not (L.sort perm `L.isPrefixOf` [0 ..])
+      -- Don't manifest if the permutation is the identity permutation
+      is_identity = perm `L.isPrefixOf` [0 ..]
+      -- or is not a transpose.
+      inefficient_transpose = (isNothing . isMapTranspose) perm
+      -- or if the last idx remains last
+      static_last_idx = last perm == length perm - 1
+      -- Don't manifest if the array is defined inside a segOp or loop body
+      inside_undesired = any undesired nest
+
+  is_invalid_perm || is_identity || inefficient_transpose || static_last_idx || inside_undesired
+  where
+    undesired :: BodyType -> Bool
+    undesired bodyType = case bodyType of
+      SegOpName _ -> True
+      LoopBodyName _ -> True
+      _ -> False
+
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name dimAccesses = do
   -- Dont accept indices where the last index is invariant
@@ -110,13 +146,6 @@ tableMapMaybe f =
     maybeMap val = if null val then Nothing else Just val
 
     mapToMaybe g = maybeMap . M.mapMaybeWithKey g
-
--- | Given an ordering function for `DimAccess`, and an IndexTable,
--- return a LayoutTable. We remove entries with no results after
--- `permutationFromDimAccess`
-layoutTableFromIndexTable :: (Layout rep) => PrimExpTable -> IndexTable rep -> LayoutTable
-layoutTableFromIndexTable primExpTable =
-  tableMapMaybe (permutationFromDimAccess primExpTable)
 
 sortGPU :: [(Int, DimAccess rep)] -> [(Int, DimAccess rep)]
 sortGPU =
@@ -185,28 +214,6 @@ sortMC =
 
         f og (Dependency lvl varType) = Just (varType, lvl, og)
 
--- | Reasons common to all backends to not manifest an array.
-commonPermutationEliminators :: [Int] -> [BodyType] -> Bool
-commonPermutationEliminators perm nest = do
-  -- Don't manifest if the permutation is the permutation is invalid
-  let is_invalid_perm = not (L.sort perm `L.isPrefixOf` [0 ..])
-      -- Don't manifest if the permutation is the identity permutation
-      is_identity = perm `L.isPrefixOf` [0 ..]
-      -- or is not a transpose.
-      inefficient_transpose = (isNothing . isMapTranspose) perm
-      -- or if the last idx remains last
-      static_last_idx = last perm == length perm - 1
-      -- Don't manifest if the array is defined inside a segOp or loop body
-      inside_undesired = any undesired nest
-
-  is_invalid_perm || is_identity || inefficient_transpose || static_last_idx || inside_undesired
-  where
-    undesired :: BodyType -> Bool
-    undesired bodyType = case bodyType of
-      SegOpName _ -> True
-      LoopBodyName _ -> True
-      _ -> False
-
 instance Layout MC where
   permutationFromDimAccess = multicorePermutation
 
@@ -229,3 +236,10 @@ instance Layout GPU where
     if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest
       then Nothing
       else Just perm
+
+-- | Given an ordering function for `DimAccess`, and an IndexTable,
+-- return a LayoutTable. We remove entries with no results after
+-- `permutationFromDimAccess`
+layoutTableFromIndexTable :: (Layout rep) => PrimExpTable -> IndexTable rep -> LayoutTable
+layoutTableFromIndexTable primExpTable =
+  tableMapMaybe (permutationFromDimAccess primExpTable)
