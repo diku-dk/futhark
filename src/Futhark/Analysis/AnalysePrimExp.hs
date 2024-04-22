@@ -88,7 +88,7 @@ stmToPrimExps scope stm = do
             modify $ M.insert (patElemName pe) (Just primExp)
       | otherwise -> do
           -- The statement can't be resolved as a `PrimExp`.
-          walk (stmExp stm) -- Traverse the rest of the AST Get the
+          walk $ stmExp stm -- Traverse the rest of the AST Get the
           -- updated PrimExpTable after traversing the AST
           primExpTable' <- get
 
@@ -104,9 +104,8 @@ stmToPrimExps scope stm = do
       walkExpM walker e
       -- Additionally, handle loop parameters
       case e of
-        (Loop _ (ForLoop iter t subExp) _) -> do
-          let primExp = primExpFromSubExp (IntType t) subExp
-          modify $ M.insert iter (Just primExp)
+        Loop _ (ForLoop i t _) _ ->
+          modify $ M.insert i $ Just $ LeafExp i $ IntType t
         _ -> pure ()
 
     walker =
