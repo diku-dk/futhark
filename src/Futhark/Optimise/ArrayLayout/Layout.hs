@@ -104,7 +104,7 @@ commonPermutationEliminators perm nest = do
       inefficient_transpose = isNothing $ isMapTranspose perm
       -- or if the last idx remains last
       static_last_idx = last perm == length perm - 1
-      -- Don't manifest if the array is defined inside a segOp or loop body
+      -- Don't manifest if the array is defined inside a segOp
       inside_undesired = any undesired nest
 
   is_invalid_perm
@@ -116,7 +116,6 @@ commonPermutationEliminators perm nest = do
     undesired :: BodyType -> Bool
     undesired bodyType = case bodyType of
       SegOpName _ -> True
-      LoopBodyName _ -> True
       _ -> False
 
 sortMC :: [(Int, DimAccess rep)] -> [(Int, DimAccess rep)]
