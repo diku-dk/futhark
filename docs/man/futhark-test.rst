@@ -164,6 +164,11 @@ OPTIONS
 -t
   Type-check the programs, but do not run them.
 
+-s
+
+  Run ``structure`` tests. These are not run by default. When this
+  option is passed, no other testing is done.
+
 --futhark=program
 
   The program used to perform operations (eg. compilation).  Defaults
