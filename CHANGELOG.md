@@ -9,8 +9,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* futhark-test: `--no-terminal` now prints status messages even when
+* ``futhark test``: `--no-terminal` now prints status messages even when
   no failures occur.
+
+* ``futhark test`` no longer runs ``structure`` tests by default. Pass
+  ``-s`` to run them.
 
 ### Removed
 
