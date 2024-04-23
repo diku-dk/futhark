@@ -50,7 +50,8 @@ isInscrutableExp (LeafExp _ _) = False
 isInscrutableExp (ValueExp _) = False
 isInscrutableExp (BinOpExp _ a b) =
   isInscrutableExp a || isInscrutableExp b
--- TODO: Handle UnOpExp
+isInscrutableExp (UnOpExp _ a) =
+  isInscrutableExp a
 isInscrutableExp _ = True
 
 isInscrutable :: PrimExp VName -> Bool -> Bool
@@ -60,7 +61,7 @@ isInscrutable op@(BinOpExp {}) counter =
     case reduceStrideAndOffset op of
       -- Maximum allowable stride, might need tuning.
       Just (s, _) -> s > 8
-      Nothing -> True
+      Nothing -> isInscrutableExp op
     else isInscrutableExp op
 isInscrutable op _ = isInscrutableExp op
 
