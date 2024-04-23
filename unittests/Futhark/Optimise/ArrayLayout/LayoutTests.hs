@@ -21,7 +21,7 @@ commonPermutationEliminatorsTests :: TestTree
 commonPermutationEliminatorsTests =
   testGroup
     "commonPermutationEliminators"
-    [permutationTests, nestTests, dimAccessTests, constInLastIndexElimTests]
+    [permutationTests, nestTests, dimAccessTests, constIndexElimTests]
 
 permutationTests :: TestTree
 permutationTests =
@@ -76,11 +76,11 @@ nestTests = testGroup "Nests" $
 dimAccessTests :: TestTree
 dimAccessTests = testGroup "DimAccesses" [] -- TODO: Write tests for the part of commonPermutationEliminators that checks the complexity of the DimAccesses.
 
-constInLastIndexElimTests :: TestTree
-constInLastIndexElimTests =
+constIndexElimTests :: TestTree
+constIndexElimTests =
   testGroup
-    "constantInLastIndexElimination"
-    [ testCase "gpu eliminates indexes with constant in last dim" $ do
+    "constIndexElimTests"
+    [ testCase "gpu eliminates indexes with constant in any dim" $ do
         let primExpTable =
               M.fromList
                 [ ("gtid_4", Just (LeafExp "n_4" (IntType Int64))),
@@ -90,9 +90,9 @@ constInLastIndexElimTests =
       testCase "gpu ignores when not last" $ do
         let primExpTable =
               M.fromList
-                [ ("gtid_4", Just (LeafExp "n_4" (IntType Int64))),
-                  ("gtid_5", Just (LeafExp "n_4" (IntType Int64))),
-                  ("i_6", Just (LeafExp "n_4" (IntType Int64)))
+                [ ("gtid_4", Just (LeafExp "gtid_4" (IntType Int64))),
+                  ("gtid_5", Just (LeafExp "gtid_5" (IntType Int64))),
+                  ("i_6", Just (LeafExp "i_6" (IntType Int64)))
                 ]
         layoutTableFromIndexTable primExpTable accessTableGPUrev
           @?= M.fromList
@@ -110,8 +110,8 @@ constInLastIndexElimTests =
     accessTableGPU =
       singleAccess
         [ singleParAccess 0 "gtid_4",
-          singleSeqAccess 1 "i_5",
-          DimAccess mempty Nothing
+          DimAccess mempty Nothing,
+          singleSeqAccess 1 "i_5"
         ]
 
     accessTableGPUrev :: IndexTable GPU
@@ -119,8 +119,8 @@ constInLastIndexElimTests =
       singleAccess
         [ singleParAccess 1 "gtid_4",
           singleParAccess 2 "gtid_5",
-          DimAccess mempty Nothing,
-          singleSeqAccess 1 "i_6"
+          singleSeqAccess 0 "i_5",
+          singleSeqAccess 2 "gtid_4"
         ]
 
 singleAccess :: [DimAccess rep] -> IndexTable rep
