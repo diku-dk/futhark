@@ -38,21 +38,6 @@ import Futhark.IR.Seq
 import Futhark.IR.SeqMem
 import Futhark.Util.Pretty
 
-class Analyse rep where
-  analyseOp ::
-    Op rep ->
-    Context rep ->
-    [VName] ->
-    (Context rep, IndexTable rep)
-
--- | For each array access in a program, this data structure stores the
--- dependencies of each dimension in the access, the array name, and the
--- name of the SegOp that the access is contained in.
--- Each DimAccess element corresponds to an access to a given dimension
--- in the given array, in the same order of the dimensions.
-type IndexTable rep =
-  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName [DimAccess rep]))
-
 -- | Name of a SegOp, used to identify the SegOp that an array access is
 -- contained in.
 data SegOpName
@@ -62,19 +47,29 @@ data SegOpName
   | SegmentedHist {vnameFromSegOp :: VName}
   deriving (Eq, Ord, Show)
 
+-- | Name of an array indexing expression. Taken from the pattern of
+-- the expression.
 type IndexExprName = VName
-
--- | Stores the name of an array,
--- the nest of loops, kernels, conditionals in which it is allocated,
--- and the layout of the array.
--- The latter is currently unused, but might be useful in the future.
-type ArrayName = (VName, [BodyType], [Int])
 
 data BodyType
   = SegOpName SegOpName
   | LoopBodyName VName
   | CondBodyName VName
   deriving (Show, Ord, Eq)
+
+-- | Stores the name of an array, the nest of loops, kernels,
+-- conditionals in which it is constructed, and the existing layout of
+-- the array. The latter is currently largely unused and not
+-- trustworthy, but might be useful in the future.
+type ArrayName = (VName, [BodyType], [Int])
+
+-- | Tuple of patternName and nested `level` it index occurred at, as well as
+-- what the actual iteration type is.
+data Dependency = Dependency
+  { lvl :: Int,
+    varType :: VarType
+  }
+  deriving (Eq, Show)
 
 -- | Collect all features of access to a specific dimension of an array.
 data DimAccess rep = DimAccess
@@ -85,14 +80,6 @@ data DimAccess rep = DimAccess
     -- | Used to store the name of the original expression from which `dependencies`
     -- was computed. `Nothing` if it is a constant.
     originalVar :: Maybe VName
-  }
-  deriving (Eq, Show)
-
--- | Tuple of patternName and nested `level` it index occurred at, as well as
--- what the actual iteration type is.
-data Dependency = Dependency
-  { lvl :: Int,
-    varType :: VarType
   }
   deriving (Eq, Show)
 
@@ -110,6 +97,14 @@ instance Monoid (DimAccess rep) where
 
 isInvariant :: DimAccess rep -> Bool
 isInvariant = null . dependencies
+
+-- | For each array access in a program, this data structure stores the
+-- dependencies of each dimension in the access, the array name, and the
+-- name of the SegOp that the access is contained in.
+-- Each DimAccess element corresponds to an access to a given dimension
+-- in the given array, in the same order of the dimensions.
+type IndexTable rep =
+  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName [DimAccess rep]))
 
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
 unionIndexTables = M.unionWith (M.unionWith M.union)
@@ -210,11 +205,7 @@ isCounter _ = False
 
 varInfoFromNames :: Context rep -> Names -> VariableInfo rep
 varInfoFromNames ctx names = do
-  VariableInfo
-    names
-    (currentLevel ctx)
-    (parents ctx)
-    Variable
+  VariableInfo names (currentLevel ctx) (parents ctx) Variable
 
 -- | Wrapper around the constructur of Context.
 oneContext :: VName -> VariableInfo rep -> Context rep
@@ -229,15 +220,16 @@ oneContext name var_info =
 -- | Create a singular varInfo with no dependencies.
 varInfoZeroDeps :: Context rep -> VariableInfo rep
 varInfoZeroDeps ctx =
-  VariableInfo
-    mempty
-    (currentLevel ctx)
-    (parents ctx)
-    Variable -- variable is a very common type
+  VariableInfo mempty (currentLevel ctx) (parents ctx) Variable
 
 -- | Create a singular context from a segspace
 contextFromNames :: Context rep -> VariableInfo rep -> [VName] -> Context rep
 contextFromNames ctx var_info = foldl' extend ctx . map (`oneContext` var_info)
+
+-- | A representation where we can analyse access patterns.
+class Analyse rep where
+  -- | Analyse the op for this representation.
+  analyseOp :: Op rep -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 
 -- | Analyse each `entry` and accumulate the results.
 analyseDimAccesses :: (Analyse rep) => Prog rep -> IndexTable rep
