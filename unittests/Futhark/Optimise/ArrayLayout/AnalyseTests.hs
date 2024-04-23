@@ -1,4 +1,4 @@
-module Futhark.Pass.OptimiseArrayLayout.AnalyseTests (tests) where
+module Futhark.Optimise.ArrayLayout.AnalyseTests (tests) where
 
 import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern
@@ -15,7 +15,7 @@ analyseStmTests :: TestTree
 analyseStmTests =
   testGroup
     "analyseStm"
-    [analyseIndexTests, analyseDimAccesssTests]
+    [analyseIndexTests, analyseDimAccessesTests]
 
 analyseIndexTests :: TestTree
 analyseIndexTests =
@@ -183,9 +183,9 @@ analyseIndexTests =
 
       [testCase0, testCase1, testCase2, testCase3, testCase4]
 
-analyseDimAccesssTests :: TestTree
-analyseDimAccesssTests = testGroup
-  "analyseDimAccesss"
+analyseDimAccessesTests :: TestTree
+analyseDimAccessesTests = testGroup
+  "analyseDimAccesses"
   $ do
     let testCase0 = testCase "Fold" $ do
           let indexTable =
@@ -204,7 +204,7 @@ analyseDimAccesssTests = testGroup
                         ]
                     )
                   ]
-          let indexTable' = (analyseDimAccesss @GPU) prog0
+          let indexTable' = (analyseDimAccesses @GPU) prog0
           indexTable' @?= indexTable
 
     [testCase0]

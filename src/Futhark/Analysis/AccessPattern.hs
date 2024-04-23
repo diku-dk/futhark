@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Futhark.Analysis.AccessPattern
-  ( analyseDimAccesss,
+  ( analyseDimAccesses,
     analyseFunction,
     vnameFromSegOp,
     analysisPropagateByTransitivity,
@@ -240,8 +240,8 @@ contextFromNames :: Context rep -> VariableInfo rep -> [VName] -> Context rep
 contextFromNames ctx var_info = foldl' extend ctx . map (`oneContext` var_info)
 
 -- | Analyse each `entry` and accumulate the results.
-analyseDimAccesss :: (Analyse rep) => Prog rep -> IndexTable rep
-analyseDimAccesss = foldMap' analyseFunction . progFuns
+analyseDimAccesses :: (Analyse rep) => Prog rep -> IndexTable rep
+analyseDimAccesses = foldMap' analyseFunction . progFuns
 
 -- | Analyse each statement in a function body.
 analyseFunction :: (Analyse rep) => FunDef rep -> IndexTable rep

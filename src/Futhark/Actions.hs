@@ -141,7 +141,7 @@ printMemoryAccessAnalysis =
   Action
     { actionName = "array-access-analysis",
       actionDescription = "Prettyprint the array access analysis to standard output.",
-      actionProcedure = liftIO . putStrLn . prettyString . analyseDimAccesss
+      actionProcedure = liftIO . putStrLn . prettyString . analyseDimAccesses
     }
 
 -- | Print call graph to stdout.

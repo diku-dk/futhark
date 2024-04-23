@@ -14,7 +14,7 @@ import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.AccessPattern
-import Futhark.Analysis.AnalysePrimExp (PrimExpTable)
+import Futhark.Analysis.PrimExp.Table (PrimExpTable)
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC

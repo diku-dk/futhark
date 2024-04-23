@@ -1,4 +1,4 @@
-module Futhark.Pass.OptimiseArrayLayout.LayoutTests (tests) where
+module Futhark.Optimise.ArrayLayout.LayoutTests (tests) where
 
 import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern

@@ -123,7 +123,6 @@ library
       Futhark.AD.Rev.Scatter
       Futhark.AD.Rev.SOAC
       Futhark.Analysis.AccessPattern
-      Futhark.Analysis.AnalysePrimExp
       Futhark.Analysis.AlgSimplify
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
@@ -139,6 +138,7 @@ library
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
+      Futhark.Analysis.PrimExp.Table
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench
@@ -505,6 +505,7 @@ test-suite unit
   other-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
+      Futhark.Analysis.PrimExp.TableTests
       Futhark.BenchTests
       Futhark.IR.GPUTests
       Futhark.IR.MCTests
@@ -519,10 +520,9 @@ test-suite unit
       Futhark.IR.SyntaxTests
       Futhark.Internalise.TypesValuesTests
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
-      Futhark.Pass.OptimiseArrayLayout.AnalysePrimExpTests
-      Futhark.Pass.OptimiseArrayLayout.AnalyseTests
-      Futhark.Pass.OptimiseArrayLayout.LayoutTests
-      Futhark.Pass.OptimiseArrayLayoutTests
+      Futhark.Optimise.ArrayLayout.AnalyseTests
+      Futhark.Optimise.ArrayLayout.LayoutTests
+      Futhark.Optimise.ArrayLayoutTests
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
       Language.Futhark.CoreTests

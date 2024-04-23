@@ -9,7 +9,7 @@ import Control.Monad
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern (IndexExprName, SegOpName (..))
-import Futhark.Analysis.AnalysePrimExp (PrimExpAnalysis)
+import Futhark.Analysis.PrimExp.Table (PrimExpAnalysis)
 import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.Aliases

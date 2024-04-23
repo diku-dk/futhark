@@ -1,9 +1,9 @@
-module Futhark.Pass.OptimiseArrayLayout.AnalysePrimExpTests (tests) where
+module Futhark.Analysis.PrimExp.TableTests (tests) where
 
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
-import Futhark.Analysis.AnalysePrimExp
 import Futhark.Analysis.PrimExp
+import Futhark.Analysis.PrimExp.Table
 import Futhark.IR.GPU
 import Futhark.IR.GPUTests ()
 import Futhark.IR.MC
