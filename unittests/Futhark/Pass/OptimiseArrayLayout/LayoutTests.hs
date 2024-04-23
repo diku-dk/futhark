@@ -67,9 +67,9 @@ nestTests = testGroup "Nests" $
           [ ("[]", [], False),
             ("[CondBodyName]", [CondBodyName] <*> names, False),
             ("[SegOpName]", [SegOpName . SegmentedMap] <*> names, True),
-            ("[LoopBodyName]", [LoopBodyName] <*> names, True),
+            ("[LoopBodyName]", [LoopBodyName] <*> names, False),
             ("[SegOpName, CondBodyName]", [SegOpName . SegmentedMap, CondBodyName] <*> names, True),
-            ("[CondBodyName, LoopBodyName]", [CondBodyName, LoopBodyName] <*> names, True)
+            ("[CondBodyName, LoopBodyName]", [CondBodyName, LoopBodyName] <*> names, False)
           ]
       ]
 

@@ -65,7 +65,7 @@ stmToPrimExpsTestsGPU =
           let expected =
                 M.fromList
                   [ ("defunc_0_f_res_5207", Nothing),
-                    ("i_5208", Just (LeafExp "m_5143" (IntType Int64))),
+                    ("i_5208", Just (LeafExp "i_5208" (IntType Int64))),
                     ("acc_5209", Just (LeafExp "acc_5209" (IntType Int64)))
                   ]
           res @?= expected,
@@ -75,7 +75,7 @@ stmToPrimExpsTestsGPU =
           let expected =
                 M.fromList
                   [ ("defunc_0_f_res_5207", Nothing),
-                    ("i_5208", Just (LeafExp "m_5143" (IntType Int64))),
+                    ("i_5208", Just (LeafExp "i_5208" (IntType Int64))),
                     ("acc_5209", Just (LeafExp "acc_5209" (IntType Int64))),
                     ("b_5210", Nothing),
                     ( "defunc_0_f_res_5211",
@@ -179,7 +179,7 @@ stmToPrimExpsTestsMC =
           let expected =
                 M.fromList
                   [ ("defunc_0_f_res_5207", Nothing),
-                    ("i_5208", Just (LeafExp "m_5143" (IntType Int64))),
+                    ("i_5208", Just (LeafExp "i_5208" (IntType Int64))),
                     ("acc_5209", Just (LeafExp "acc_5209" (IntType Int64)))
                   ]
           res @?= expected,
@@ -199,7 +199,7 @@ stmToPrimExpsTestsMC =
           let expected =
                 M.fromList
                   [ ("defunc_0_f_res_5207", Nothing),
-                    ("i_5208", Just (LeafExp "m_5143" (IntType Int64))),
+                    ("i_5208", Just (LeafExp "i_5208" (IntType Int64))),
                     ("acc_5209", Just (LeafExp "acc_5209" (IntType Int64))),
                     ("b_5210", Nothing),
                     ( "defunc_0_f_res_5211",
