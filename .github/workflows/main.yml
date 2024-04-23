@@ -219,6 +219,25 @@ jobs:
     - run: |
         futhark test -i tests
 
+  test-structure:
+    runs-on: ubuntu-22.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    - run: |
+        futhark test -s tests
+
   test-c:
     runs-on: ubuntu-22.04
     needs: [build-linux-nix]

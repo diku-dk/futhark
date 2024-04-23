@@ -114,6 +114,8 @@ data TestMode
     Compiled
   | -- | Test interpreted code.
     Interpreted
+  | -- | Perform structure tests.
+    Structure
   deriving (Eq, Show)
 
 data TestCase = TestCase
@@ -250,7 +252,7 @@ runTestCase (TestCase mode program testcase progs) = do
           ]
   case testAction testcase of
     CompileTimeFailure expected_error ->
-      unless (mode == Internalise) . context checkctx $ do
+      unless (mode `elem` [Structure, Internalise]) . context checkctx $ do
         (code, _, err) <-
           liftIO $ readProcessWithExitCode futhark ["check", program] ""
         case code of
@@ -286,10 +288,12 @@ runTestCase (TestCase mode program testcase progs) = do
           -- so force just one data set at a time here.
           ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
 
+      when (mode == Structure) $
+        mapM_ (testMetrics progs program) structures
+
       when (mode `elem` [Compile, Compiled]) $
         context ("Compiling with --backend=" <> T.pack backend) $ do
           compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
-          mapM_ (testMetrics progs program) structures
           unless (mode == Compile) $ do
             (tuning_opts, _) <-
               liftIO $ determineTuning (configTuning progs) program
@@ -732,6 +736,11 @@ commandLineOptions =
       ["compile"]
       (NoArg $ Right $ \config -> config {configTestMode = Compile})
       "Only compile, do not run.",
+    Option
+      "s"
+      ["structure"]
+      (NoArg $ Right $ \config -> config {configTestMode = Structure})
+      "Perform structure tests.",
     Option
       "I"
       ["internalise"]
