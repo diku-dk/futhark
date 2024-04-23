@@ -209,8 +209,13 @@ gpuPermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name d
   -- occurs?
   let outermost_par = mininum $ foldMap (map lvl . parDeps) dimAccesses
       invariantToPar = (< outermost_par) . lvl
-  -- Dont care about indexing where the last index is invariant
+
+  -- Do nothing if last index is invariant to segop.
   let lastIdxIsInvariant = all invariantToPar $ dependencies $ last dimAccesses
+
+  -- Do nothing if any index is constant, because otherwise we can end
+  -- up transposing a too-large array.
+  let anyIsConstant = any (null . dependencies) dimAccesses
 
   -- Check if any of the dependencies are too complex to reason about
   let dimAccesses' = filter (isJust . originalVar) dimAccesses
@@ -223,7 +228,10 @@ gpuPermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name d
   let perm = map fst $ sortGPU (zip arr_layout dimAccesses)
 
   -- Check if we want to manifest this array with the permutation
-  if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest
+  if lastIdxIsInvariant
+    || anyIsConstant
+    || inscrutable
+    || commonPermutationEliminators perm nest
     then Nothing
     else Just perm
   where
