@@ -19,6 +19,7 @@ import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC
 import Futhark.IR.MCMem
+import Futhark.Util (mininum)
 
 type Permutation = [Int]
 
@@ -203,8 +204,13 @@ sortGPU =
 
 gpuPermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 gpuPermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name dimAccesses = do
-  -- Dont accept indices where the last index is invariant
-  let lastIdxIsInvariant = isInvariant $ last dimAccesses
+  -- Find the outermost parallel level. XXX: this is a bit hacky. Why
+  -- don't we simply know at this point the nest in which this index
+  -- occurs?
+  let outermost_par = mininum $ foldMap (map lvl . parDeps) dimAccesses
+      invariantToPar = (< outermost_par) . lvl
+  -- Dont care about indexing where the last index is invariant
+  let lastIdxIsInvariant = all invariantToPar $ dependencies $ last dimAccesses
 
   -- Check if any of the dependencies are too complex to reason about
   let dimAccesses' = filter (isJust . originalVar) dimAccesses
@@ -220,6 +226,8 @@ gpuPermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name d
   if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest
     then Nothing
     else Just perm
+  where
+    parDeps = filter ((== ThreadID) . varType) . M.elems . dependencies
 
 instance Layout GPU where
   permutationFromDimAccess = gpuPermutation
