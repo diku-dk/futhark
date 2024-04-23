@@ -107,7 +107,11 @@ commonPermutationEliminators perm nest = do
       -- Don't manifest if the array is defined inside a segOp or loop body
       inside_undesired = any undesired nest
 
-  is_invalid_perm || is_identity || inefficient_transpose || static_last_idx || inside_undesired
+  is_invalid_perm
+    || is_identity
+    || inefficient_transpose
+    || static_last_idx
+    || inside_undesired
   where
     undesired :: BodyType -> Bool
     undesired bodyType = case bodyType of
