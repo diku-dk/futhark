@@ -66,8 +66,7 @@ async function runServer() {
   const [inValPtr, inVals] = await getBufferValues(fut, input);
   console.log("input: ", inVals, " at ", inValPtr);
 
-  const outPtrPtr = fut.malloc(4);
-  await fut.entry_main(outPtrPtr, input);
+  const [outPtrPtr] = await fut.entry_main(input);
 
   const output = m.HEAP32[outPtrPtr / 4];
   const [outValPtr, outVals] = await getBufferValues(fut, output);

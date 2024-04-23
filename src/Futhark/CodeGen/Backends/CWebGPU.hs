@@ -225,7 +225,8 @@ mkEntryFun e =
       zipWith (\n sz -> [text|const ${n} = this.m._malloc(${sz});|])
         outNames outSizes
     internalCall = asyncCall
-      (entryInternalFun e) True (["this.ctx"] ++ entryIn e ++ outNames)
+      --(entryInternalFun e) True (["this.ctx"] ++ entryIn e ++ outNames)
+      (entryInternalFun e) True (["this.ctx"] ++ outNames ++ entryIn e)
 
 mkJsValueFuns :: [EntryPoint] -> (T.Text, [T.Text])
 mkJsValueFuns entries =
@@ -243,13 +244,13 @@ mkJsArrayFuns :: (PrimType, Signedness, [DimSize]) -> (T.Text, [T.Text])
 mkJsArrayFuns (typ, sign, shp) =
   ([text|
   async new_${name}(data, ${shapeParams}) {
-    return ${newCall};
+    return await ${newCall};
   }
   async free_${name}(arr) {
-    return ${freeCall};
+    return await ${freeCall};
   }
   async values_${name}(arr, data) {
-    return ${valuesCall};
+    return await ${valuesCall};
   }
   shape_${name}(arr) {
     return this.m._futhark_shape_${name}(this.ctx, arr);
