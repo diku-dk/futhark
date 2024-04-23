@@ -1,8 +1,8 @@
 // Start of server_ws.js
 
 class BrowserServer {
-  constructor(ctx, port) {
-    this.ctx = ctx;
+  constructor(fut, port) {
+    this.fut = fut;
     this.vars = {};
 
     this.socket = new WebSocket("ws://" + window.location.host + "/ws");
@@ -15,9 +15,16 @@ class BrowserServer {
     console.log("Created server");
   }
 
+  get_entry_point(entry) {
+    if (entry in this.fut.entry_points) {
+      return this.fut.entry_points[entry];
+    }
+    throw "Unknown entry point: " + entry;
+  }
+
   check_var(name) {
     if (!(name in this.vars)) {
-      throw 'Unknown variable: ' + name;
+      throw "Unknown variable: " + name;
     }
   }
 
@@ -72,7 +79,7 @@ async function runServer() {
   const [outValPtr, outVals] = await getBufferValues(fut, output);
   console.log("output: ", outVals, " at ", outValPtr);
 
-  const server = new BrowserServer(ctx);
+  const server = new BrowserServer(fut);
   
   fut.free(inValPtr);
   fut.free(outValPtr);

@@ -7,6 +7,8 @@ import aiohttp
 from aiohttp import web
 
 program_name = sys.argv[1]
+serve_only = len(sys.argv) > 2 and sys.argv[2] == "--serve-only"
+
 script_name = program_name + ".js"
 wasm_name = program_name + ".wasm"
 wasm_map_name = program_name + ".wasm.map"
@@ -60,8 +62,19 @@ async def handle_ws(request):
 
     eprint("ws connection closed")
 
-eprint("Wrapping", script_name)
-eprint("Source name is", source_name)
+async def start_server(app):
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8100)
+    await site.start()
+    
+    while True:
+        await asyncio.sleep(3600)
+
+if serve_only:
+    eprint(f"Wrapping {script_name}; only providing web server")
+    eprint("Hosting at 0.0.0.0:8100")
+
 app = web.Application()
 app.add_routes(
     [web.get('/', handle_index),
@@ -71,6 +84,5 @@ app.add_routes(
      web.get(f'/{wasm_map_name}', handle_file),
      web.get(f'/{source_name}', handle_file),
      web.get('/ws', handle_ws)])
-web.run_app(app, port=8100)
 
-#asyncio.run(main())
+asyncio.run(start_server(app))
