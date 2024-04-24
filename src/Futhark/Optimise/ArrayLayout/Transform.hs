@@ -40,7 +40,11 @@ instance Transform GPU where
     Futhark.IR.GPU.OtherOp <$> mapSOACM soac_mapper soac
   onOp _ op = pure op
   transformOp perm_table expmap stm gpuOp
-    | (SegOp op) <- gpuOp = transformSegOpGPU perm_table expmap stm op
+    | SegOp op <- gpuOp,
+      -- TODO: handle non-segthread cases. This requires some care to
+      -- avoid doing huge manifests at the block level.
+      SegThread {} <- segLevel op =
+        transformSegOpGPU perm_table expmap stm op
     | _ <- gpuOp = transformRestOp perm_table expmap stm
 
 instance Transform MC where
