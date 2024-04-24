@@ -5,11 +5,9 @@ module Futhark.Optimise.ArrayLayout
 where
 
 import Control.Monad.State.Strict
-import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern (Analyse, analyseDimAccesses)
 import Futhark.Analysis.PrimExp.Table (primExpTable)
 import Futhark.Builder
-import Futhark.IR
 import Futhark.IR.GPU (GPU)
 import Futhark.IR.MC (MC)
 import Futhark.Optimise.ArrayLayout.Layout (layoutTableFromIndexTable)
