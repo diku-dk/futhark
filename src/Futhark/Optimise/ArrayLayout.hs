@@ -27,8 +27,7 @@ optimiseArrayLayout s =
       -- Compute primExps for all variables
       let table = primExpTable prog
       -- Compute permutations to acheive coalescence for all arrays
-      let permutation_table =
-            layoutTableFromIndexTable table index_table
+      let permutation_table = layoutTableFromIndexTable table index_table
       -- Insert permutations in the AST
       intraproceduralTransformation (onStms permutation_table) prog
   where
