@@ -233,7 +233,7 @@ instance Pretty AddressSpace where
 
 instance Pretty Declaration where
   pretty (FunDecl fun) = pretty fun
-  pretty (StructDecl struct) = pretty struct <> ";"
+  pretty (StructDecl struct) = pretty struct
   pretty (VarDecl attribs as name typ) =
     hsep (map pretty attribs) </>
     "var<" <> pretty as <> ">" <+> pretty name <+> ":" <+> pretty typ <> ";"
