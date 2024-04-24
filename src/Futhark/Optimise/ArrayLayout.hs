@@ -32,8 +32,8 @@ optimiseArrayLayout s =
       intraproceduralTransformation (onStms permutation_table) prog
   where
     onStms layout_table scope stms = do
-      let m = localScope scope $ transformStms layout_table mempty stms
-      fmap fst $ modifyNameSource $ runState $ runBuilderT m M.empty
+      let m = transformStms layout_table mempty stms
+      fmap fst $ modifyNameSource $ runState $ runBuilderT m scope
 
 -- | The optimisation performed on the GPU representation.
 optimiseArrayLayoutGPU :: Pass GPU GPU

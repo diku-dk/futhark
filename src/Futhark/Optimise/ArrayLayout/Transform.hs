@@ -84,11 +84,8 @@ transformSegOpMC perm_table expmap (Let pat aux _) maybe_par_segop seqSegOp
       -- Optimization: Only traverse the body of the SegOp if it is
       -- represented in the layout table
       case M.lookup patternName (M.mapKeys vnameFromSegOp perm_table) of
-        Nothing -> add (Just par_segop)
-        Just _ -> do
-          -- Map the parallel part of the ParOp
-          par_segop' <- mapSegOpM mapper par_segop
-          add (Just par_segop')
+        Nothing -> add $ Just par_segop
+        Just _ -> add . Just =<< mapSegOpM mapper par_segop
   where
     add maybe_par_segop' = do
       -- Map the sequential part of the ParOp
