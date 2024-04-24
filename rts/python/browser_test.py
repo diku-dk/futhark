@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import json
+import shlex
 import sys
 
 import asyncio
@@ -53,16 +55,29 @@ async def handle_ws(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
-    async for msg in ws:
+    toWS = request.app['toWS']
+    toStdIO = request.app['toStdIO']
+
+    # Notify that we have a browser connected
+    toStdIO.put_nowait("connected")
+
+    while True:
+        cmd, args = await toWS.get()
+        await ws.send_json({ "cmd": cmd, "args": args })
+        msg = await ws.receive()
+
         if msg.type == aiohttp.WSMsgType.ERROR:
             eprint("ws connection closed with exception %s" % ws.exception())
-        elif msg.type == aiohttp.WSMsgType.TEXT:
-            eprint("ws data: %s" % msg.data)
-            await ws.send_str("test reply")
+            break
+
+        resp = json.loads(msg.data)
+        toStdIO.put_nowait((resp['status'], resp['text']))
 
     eprint("ws connection closed")
 
-async def start_server(app):
+async def start_server(app, toWS, toStdIO):
+    app['toWS'] = toWS
+    app['toStdIO'] = toStdIO
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8100)
@@ -70,10 +85,6 @@ async def start_server(app):
     
     while True:
         await asyncio.sleep(3600)
-
-if serve_only:
-    eprint(f"Wrapping {script_name}; only providing web server")
-    eprint("Hosting at 0.0.0.0:8100")
 
 app = web.Application()
 app.add_routes(
@@ -85,4 +96,38 @@ app.add_routes(
      web.get(f'/{source_name}', handle_file),
      web.get('/ws', handle_ws)])
 
-asyncio.run(start_server(app))
+async def read_stdin_line():
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, sys.stdin.readline)
+
+async def handle_stdio(toWS, toStdIO):
+    # Wait for an initial signal that a web browser client has connected.
+    await toStdIO.get()
+    eprint("Browser client detected, starting Futhark server protocol")
+    while True:
+        line = await read_stdin_line()
+        command, *args = shlex.split(line)
+        toWS.put_nowait((command, args))
+        status, text = await toStdIO.get()
+        if status == "ok":
+            print(text)
+            print("%%% OK")
+        else:
+            print("%%% FAILURE")
+            print(text)
+            print("%%% OK")
+
+async def main():
+    if serve_only:
+        eprint(f"Wrapping {script_name}; only providing web server")
+        eprint("Hosting at 0.0.0.0:8100")
+        await start_server(app)
+    else:
+        eprint(f"Wrapping {script_name}; proxying the Futhark server protocol")
+        toWS = asyncio.Queue()
+        toStdIO = asyncio.Queue()
+        await asyncio.gather(
+                start_server(app, toWS, toStdIO),
+                handle_stdio(toWS, toStdIO))
+    
+asyncio.run(main())

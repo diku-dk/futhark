@@ -6,13 +6,12 @@ class BrowserServer {
     this.vars = {};
 
     this.socket = new WebSocket("ws://" + window.location.host + "/ws");
-    this.socket.onopen = (event) => {
-      this.socket.send("A test message");
-    }
     this.socket.onmessage = (event) => {
-      console.log(event.data);
+      const msg = JSON.parse(event.data);
+      console.log(msg);
+      this.socket.send(JSON.stringify({ status: "ok", text: "some output" }));
     };
-    console.log("Created server");
+    console.log("Created WS client.");
   }
 
   get_entry_point(entry) {
