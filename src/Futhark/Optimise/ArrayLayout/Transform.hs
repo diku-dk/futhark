@@ -135,7 +135,7 @@ transformSegThreadKernelBody perm_table seg_name kbody = do
   evalStateT
     ( traverseKernelBodyArrayIndexes
         seg_name
-        (ensureTransformdAccess perm_table)
+        (ensureTransformedAccess perm_table)
         kbody
     )
     mempty
@@ -153,7 +153,7 @@ transformKernelBody perm_table expmap seg_name (KernelBody b stms res) = do
   evalStateT
     ( traverseKernelBodyArrayIndexes
         seg_name
-        (ensureTransformdAccess perm_table)
+        (ensureTransformedAccess perm_table)
         kbody'
     )
     mempty
@@ -211,41 +211,34 @@ type ArrayIndexTransform m =
   Slice SubExp -> -- slice
   m (Maybe (VName, Slice SubExp))
 
-ensureTransformdAccess ::
+ensureTransformedAccess ::
   (MonadBuilder m) =>
   LayoutTable ->
   ArrayIndexTransform (StateT Replacements m)
-ensureTransformdAccess
-  perm_table
-  seg_name
-  idx_name
-  arr
-  slice = do
-    -- Check if the array has the optimal layout in memory.
-    -- If it does not, replace it with a manifest to allocate
-    -- it with the optimal layout
-    case lookupPermutation perm_table seg_name idx_name arr of
-      Nothing -> pure $ Just (arr, slice)
-      Just perm -> do
-        seen <- gets $ M.lookup (arr, perm)
-        case seen of
-          -- Already created a manifest for this array + permutation.
-          -- So, just replace the name and don't make a new manifest.
-          Just arr' -> pure $ Just (arr', slice)
-          Nothing -> do
-            replace perm =<< lift (manifest perm arr)
-    where
-      replace perm arr' = do
-        -- Store the fact that we have seen this array + permutation
-        -- so we don't make duplicate manifests
-        modify $ M.insert (arr, perm) arr'
-        -- Return the new manifest
-        pure $ Just (arr', slice)
+ensureTransformedAccess perm_table seg_name idx_name arr slice = do
+  -- Check if the array has the optimal layout in memory.
+  -- If it does not, replace it with a manifest to allocate
+  -- it with the optimal layout
+  case lookupPermutation perm_table seg_name idx_name arr of
+    Nothing -> pure $ Just (arr, slice)
+    Just perm -> do
+      seen <- gets $ M.lookup (arr, perm)
+      case seen of
+        -- Already created a manifest for this array + permutation.
+        -- So, just replace the name and don't make a new manifest.
+        Just arr' -> pure $ Just (arr', slice)
+        Nothing -> replace perm =<< lift (manifest perm arr)
+  where
+    replace perm arr' = do
+      -- Store the fact that we have seen this array + permutation
+      -- so we don't make duplicate manifests
+      modify $ M.insert (arr, perm) arr'
+      -- Return the new manifest
+      pure $ Just (arr', slice)
 
-      manifest perm array = do
-        letExp (baseString array ++ "_coalesced") $
-          BasicOp $
-            Manifest perm array
+    manifest perm array =
+      letExp (baseString array ++ "_coalesced") $
+        BasicOp (Manifest perm array)
 
 lookupPermutation :: LayoutTable -> VName -> IndexExprName -> VName -> Maybe Permutation
 lookupPermutation perm_table seg_name idx_name arr_name =
