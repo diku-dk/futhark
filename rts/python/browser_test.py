@@ -104,6 +104,7 @@ async def handle_stdio(toWS, toStdIO):
     # Wait for an initial signal that a web browser client has connected.
     await toStdIO.get()
     eprint("Browser client detected, starting Futhark server protocol")
+    print("%%% OK")
     while True:
         line = await read_stdin_line()
         command, *args = shlex.split(line)

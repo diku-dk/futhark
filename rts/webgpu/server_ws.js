@@ -5,11 +5,23 @@ class BrowserServer {
     this.fut = fut;
     this.vars = {};
 
+    this.commands = {
+      'entry_points': this.cmd_entry_points.bind(this),
+    };
+
     this.socket = new WebSocket("ws://" + window.location.host + "/ws");
     this.socket.onmessage = (event) => {
       const msg = JSON.parse(event.data);
-      console.log(msg);
-      this.socket.send(JSON.stringify({ status: "ok", text: "some output" }));
+
+      let resp = undefined;
+      try {
+        const fun = this.commands[msg.cmd];
+        const res = fun(...msg.args);
+        resp = { status: "ok", text: res };
+      } catch (ex) {
+        resp = { status: "fail", text: ex.toString() };
+      }
+      this.socket.send(JSON.stringify(resp));
     };
     console.log("Created WS client.");
   }
@@ -39,6 +51,11 @@ class BrowserServer {
   get_var(name) {
     this.check_var(name);
     return this.vars[name].val;
+  }
+
+  cmd_entry_points() {
+    const entries = Object.keys(this.fut.entry_points);
+    return entries.join("\n");
   }
 }
 
