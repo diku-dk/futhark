@@ -69,8 +69,8 @@ jobs:
     - name: Install dependencies
       run: |
         brew install cabal-install ghc sphinx-doc
-        echo "/usr/local/opt/sphinx-doc/bin" >> $GITHUB_PATH
-        echo "/usr/local/opt/ghc/bin" >> $GITHUB_PATH
+        echo "/opt/homebrew/opt/sphinx-doc/bin" >> $GITHUB_PATH
+        echo "/opt/homebrew/opt/ghc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v3
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -668,7 +668,7 @@ jobs:
 
     - name: scp tarballs to server
       run: |
-        scp -o StrictHostKeyChecking=no futhark-nightly-linux-x86_64.tar.xz futhark-nightly-macos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+        scp -o StrictHostKeyChecking=no futhark-nightly-*-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
     - name: copy docs to server
       run: |
