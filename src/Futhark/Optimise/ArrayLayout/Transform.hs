@@ -52,7 +52,8 @@ instance Transform MC where
     Futhark.IR.MC.OtherOp <$> mapSOACM soac_mapper soac
   onOp _ op = pure op
   transformOp perm_table expmap stm mcOp
-    | ParOp maybe_par_segop seqSegOp <- mcOp = transformSegOpMC perm_table expmap stm maybe_par_segop seqSegOp
+    | ParOp maybe_par_segop seqSegOp <- mcOp =
+        transformSegOpMC perm_table expmap stm maybe_par_segop seqSegOp
     | _ <- mcOp = transformRestOp perm_table expmap stm
 
 transformSegOpGPU :: LayoutTable -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> TransformM GPU (LayoutTable, ExpMap GPU)
@@ -109,9 +110,8 @@ transform perm_table expmap =
 
 -- | Recursively transform the statements in a body.
 transformBody :: (Transform rep, BuilderOps rep) => LayoutTable -> ExpMap rep -> Body rep -> TransformM rep (Body rep)
-transformBody perm_table expmap (Body b stms res) = do
-  stms' <- transformStms perm_table expmap stms
-  pure $ Body b stms' res
+transformBody perm_table expmap (Body b stms res) =
+  Body b <$> transformStms perm_table expmap stms <*> pure res
 
 -- | Recursively transform the statements in the body of a SegGroup kernel.
 transformSegGroupKernelBody ::
@@ -120,9 +120,8 @@ transformSegGroupKernelBody ::
   ExpMap rep ->
   KernelBody rep ->
   TransformM rep (KernelBody rep)
-transformSegGroupKernelBody perm_table expmap (KernelBody b stms res) = do
-  stms' <- transformStms perm_table expmap stms
-  pure $ KernelBody b stms' res
+transformSegGroupKernelBody perm_table expmap (KernelBody b stms res) =
+  KernelBody b <$> transformStms perm_table expmap stms <*> pure res
 
 -- | Transform the statements in the body of a SegThread kernel.
 transformSegThreadKernelBody ::
@@ -149,12 +148,11 @@ transformKernelBody ::
   TransformM rep (KernelBody rep)
 transformKernelBody perm_table expmap seg_name (KernelBody b stms res) = do
   stms' <- transformStms perm_table expmap stms
-  let kbody' = KernelBody b stms' res
   evalStateT
     ( traverseKernelBodyArrayIndexes
         seg_name
         (ensureTransformedAccess perm_table)
-        kbody'
+        (KernelBody b stms' res)
     )
     mempty
 
@@ -268,4 +266,5 @@ transformStms ::
   ExpMap rep ->
   Stms rep ->
   TransformM rep (Stms rep)
-transformStms perm_table expmap stms = collectStms_ $ foldM_ transformStm (perm_table, expmap) stms
+transformStms perm_table expmap stms =
+  collectStms_ $ foldM_ transformStm (perm_table, expmap) stms
