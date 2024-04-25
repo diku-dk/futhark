@@ -23,7 +23,6 @@ module Futhark.Analysis.AccessPattern
 where
 
 import Data.Bifunctor
-import Data.Either
 import Data.Foldable
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
@@ -265,15 +264,9 @@ analyseStms ctx body_constructor pats body = do
         foldl unionIndexTables indexTable
           $ mapMaybe
             ( uncurry $ \_idx_expression (array_name, patterns, dim_indices) ->
-                -- This might crash some examples? (from undefined above)
-                Just $
-                  snd $
-                    analyseIndex'
-                      -- Should we use recContex instead of ctx''?
-                      ctx''
-                      patterns
-                      array_name
-                      dim_indices
+                Just . snd $
+                  -- Should we use recContex instead of ctx''?
+                  analyseIndex' ctx'' patterns array_name dim_indices
             )
           $ M.toList slices_new
 
@@ -321,36 +314,19 @@ analyseStms ctx body_constructor pats body = do
                   -- 0. Add dependencies in ctx to result
 
                     let (deps_in_ctx, deps_not_in_ctx) =
-                          partitionEithers
-                            $ map
-                              ( \d ->
-                                  if d `M.member` local_assignments
-                                    then Left d
-                                    else Right d
-                              )
-                            $ namesToList dependencies
-                     in let deps_not_in_ctx' =
-                              M.fromList $
-                                mapMaybe
-                                  ( \d -> case M.lookup d throwaway_assignments of
-                                      Just var_info' -> Just (d, var_info')
-                                      _ -> Nothing
-                                  )
-                                  deps_not_in_ctx
-                         in result
-                              <> namesFromList deps_in_ctx
-                              <> rmOutOfScopeDeps
-                                ctx'
-                                deps_not_in_ctx'
+                          L.partition (`M.member` local_assignments) $
+                            namesToList dependencies
+                        deps_not_in_ctx' =
+                          M.fromList $
+                            mapMaybe
+                              (\d -> (d,) <$> M.lookup d throwaway_assignments)
+                              deps_not_in_ctx
+                     in result
+                          <> namesFromList deps_in_ctx
+                          <> rmOutOfScopeDeps ctx' deps_not_in_ctx'
         )
         mempty
         new_assignments
-
-getDeps :: SubExp -> Names
-getDeps subexp =
-  case subexp of
-    (Var v) -> oneName v
-    (Constant _) -> mempty
 
 -- | Analyse a rep statement and return the updated context and array index
 -- descriptors.
@@ -373,7 +349,7 @@ analyseStm ctx (Let pats _ e) = do
       where
         ctx' =
           contextFromNames ctx (varInfoZeroDeps ctx) $
-            concatMap (namesToList . getDeps) conds
+            concatMap (namesToList . freeIn) conds
     Loop bindings loop body ->
       analyseLoop ctx bindings loop body pattern_names
     Apply _name diets _ _ ->
@@ -389,9 +365,9 @@ getIndexDependencies ctx dims =
   fst $
     foldr
       ( \idx (a, i) ->
-          let acc =
-                either (matchDimIndex idx) (forceRight . matchDimIndex idx) a
-           in (acc, i - 1)
+          ( either (matchDimIndex idx) (forceRight . matchDimIndex idx) a,
+            i - 1
+          )
       )
       (Left [], length dims - 1)
       dims
@@ -447,20 +423,19 @@ analyseIndex ctx pats arr_name dim_indices = do
       (context {slices = M.insert (head pats) (array_name, pats, dims) $ slices context}, mempty)
 
     index :: Context rep -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
-    index context array_name dim_access =
-      let (name, _, _) = array_name
-       in -- If the arrayname is a `DimSlice` we want to fixup the access
-          case M.lookup name $ slices context of
-            Nothing -> analyseIndex' context pats array_name dim_access
-            Just (arr_name', pats', slice_access) -> do
-              analyseIndex'
-                context
-                pats'
-                arr_name'
-                (init slice_access ++ [head dim_access <> last slice_access] ++ drop 1 dim_access)
+    index context array_name@(name, _, _) dim_access =
+      -- If the arrayname is a `DimSlice` we want to fixup the access
+      case M.lookup name $ slices context of
+        Nothing -> analyseIndex' context pats array_name dim_access
+        Just (arr_name', pats', slice_access) ->
+          analyseIndex'
+            context
+            pats'
+            arr_name'
+            (init slice_access ++ [head dim_access <> last slice_access] ++ drop 1 dim_access)
 
 analyseIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> [VName] -> Context rep
-analyseIndexContextFromIndices ctx dim_accesses pats = do
+analyseIndexContextFromIndices ctx dim_accesses pats =
   let subexprs =
         mapMaybe
           ( \case
@@ -471,30 +446,34 @@ analyseIndexContextFromIndices ctx dim_accesses pats = do
           )
           dim_accesses
 
-  -- Add each non-constant DimIndex as a dependency to the index expression
-  let var_info = varInfoFromNames ctx $ namesFromList subexprs
+      -- Add each non-constant DimIndex as a dependency to the index expression
+      var_info = varInfoFromNames ctx $ namesFromList subexprs
+   in -- Extend context with the dependencies index expression
+      foldl' extend ctx $ map (`oneContext` var_info) pats
 
-  -- Extend context with the dependencies index expression
-  foldl' extend ctx $ map (`oneContext` var_info) pats
-
-analyseIndex' :: Context rep -> [VName] -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
+analyseIndex' ::
+  Context rep ->
+  [VName] ->
+  ArrayName ->
+  [DimAccess rep] ->
+  (Context rep, IndexTable rep)
 analyseIndex' ctx _ _ [] = (ctx, mempty)
 analyseIndex' ctx _ _ [_] = (ctx, mempty)
-analyseIndex' ctx pats arr_name dim_accesses = do
+analyseIndex' ctx pats arr_name dim_accesses =
   -- Get the name of all segmaps in the current "callstack"
   let segmaps = allSegMap ctx
-  let idx_expr_name = pats --                                                IndexExprName
-  -- For each pattern, create a mapping to the dimensional indices
-  let map_ixd_expr = map (`M.singleton` dim_accesses) idx_expr_name --       IndexExprName |-> [DimAccess]
-  -- For each pattern -> [DimAccess] mapping, create a mapping from the array
-  -- name that was indexed.
-  let map_array = map (M.singleton arr_name) map_ixd_expr --   ArrayName |-> IndexExprName |-> [DimAccess]
-  -- ∀ (arr_name -> IdxExp -> [DimAccess]) mappings, create a mapping from all
-  -- segmaps in current callstack (segThread & segGroups alike).
-  let results = concatMap (\ma -> map (`M.singleton` ma) segmaps) map_array
+      idx_expr_name = pats --                                                IndexExprName
+      -- For each pattern, create a mapping to the dimensional indices
+      map_ixd_expr = map (`M.singleton` dim_accesses) idx_expr_name --       IndexExprName |-> [DimAccess]
+      -- For each pattern -> [DimAccess] mapping, create a mapping from the array
+      -- name that was indexed.
+      map_array = map (M.singleton arr_name) map_ixd_expr --   ArrayName |-> IndexExprName |-> [DimAccess]
+      -- ∀ (arr_name -> IdxExp -> [DimAccess]) mappings, create a mapping from all
+      -- segmaps in current callstack (segThread & segGroups alike).
+      results = concatMap (\ma -> map (`M.singleton` ma) segmaps) map_array
 
-  let res = foldl' unionIndexTables mempty results
-  (ctx, res)
+      res = foldl' unionIndexTables mempty results
+   in (ctx, res)
 
 analyseBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable rep)
 analyseBasicOp ctx expression pats = do
@@ -528,9 +507,7 @@ analyseBasicOp ctx expression pats = do
   (ctx', mempty)
   where
     concatVariableInfos ne nn =
-      varInfoFromNames
-        ctx
-        (foldl' (\a -> (<>) a . analyseSubExpr pats ctx) ne nn)
+      varInfoFromNames ctx (ne <> mconcat (map (analyseSubExpr pats ctx) nn))
 
     varInfoFromSubExpr (Constant _) = (varInfoFromNames ctx mempty) {variableType = ConstType}
     varInfoFromSubExpr (Var v) =
@@ -578,7 +555,7 @@ analyseApply :: Context rep -> [VName] -> [(SubExp, Diet)] -> (Context rep, Inde
 analyseApply ctx pats diets =
   first
     ( \ctx' ->
-        foldl' extend ctx' $ map (\pat -> oneContext pat $ varInfoFromNames ctx' $ mconcat $ map (getDeps . fst) diets) pats
+        foldl' extend ctx' $ map (\pat -> oneContext pat $ varInfoFromNames ctx' $ mconcat $ map (freeIn . fst) diets) pats
     )
     (ctx, mempty)
 
