@@ -100,9 +100,9 @@ webgpuMemoryType :: GC.MemoryType HostOp ()
 webgpuMemoryType "device" = pure [C.cty|typename WGPUBuffer|]
 webgpuMemoryType space = error $ "WebGPU backend does not support '" ++ space ++ "' memory space."
 
-jsBoilerplate :: Definitions a -> (T.Text, [T.Text])
-jsBoilerplate prog =
-  let (context, exports) = mkJsContext prog
+jsBoilerplate :: Definitions a -> T.Text -> (T.Text, [T.Text])
+jsBoilerplate prog manifest =
+  let (context, exports) = mkJsContext prog manifest
    in (context, exports ++ builtinExports)
   where
     builtinExports =
@@ -130,8 +130,8 @@ asyncCall func hasReturn args =
     argList =
       "[" <> T.intercalate ", " args <> "]"
 
-mkJsContext :: Definitions a -> (T.Text, [T.Text])
-mkJsContext (Definitions _ _ (Functions funs)) =
+mkJsContext :: Definitions a -> T.Text -> (T.Text, [T.Text])
+mkJsContext (Definitions _ _ (Functions funs)) manifest =
   ([text|
    class FutharkModule {
      ${constructor}
@@ -145,6 +145,7 @@ mkJsContext (Definitions _ _ (Functions funs)) =
       [text|
       constructor() {
         this.m = undefined;
+        this.manifest = ${manifest};
       }
       async init(module) {
         this.m = module;
@@ -329,7 +330,7 @@ compileProg version prog = do
         prog'
   let oldWrappers = builtinWrappers
   let oldJs = T.intercalate "\n" (map mkWrapper oldWrappers)
-  let (js, exports) = jsBoilerplate prog'
+  let (js, exports) = jsBoilerplate prog' (GC.cJsonManifest c)
   let newJs = "\n// New JS from here\n" <> js
   let oldExports = [n | JsWrapper n _ _ _ <- oldWrappers]
   pure (ws, (c, oldJs <> newJs, oldExports ++ exports))

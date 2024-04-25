@@ -7,11 +7,15 @@ class BrowserServer {
 
     this.commands = {
       'entry_points': this.cmd_entry_points.bind(this),
+      'inputs': this.cmd_inputs.bind(this),
+      'outputs': this.cmd_outputs.bind(this),
+      'restore': this.cmd_restore.bind(this),
     };
 
     this.socket = new WebSocket("ws://" + window.location.host + "/ws");
     this.socket.onmessage = (event) => {
       const msg = JSON.parse(event.data);
+      console.log("got message:", msg);
 
       let resp = undefined;
       try {
@@ -31,6 +35,26 @@ class BrowserServer {
       return this.fut.entry_points[entry];
     }
     throw "Unknown entry point: " + entry;
+  }
+
+  get_manifest_entry_point(entry) {
+    if (entry in this.fut.manifest.entry_points) {
+      return this.fut.manifest.entry_points[entry];
+    }
+    throw "Unknown entry point: " + entry;
+  }
+
+  get_manifest_type(type) {
+    if (type in this.fut.manifest.types) {
+      return this.fut.manifest.types[type];
+    }
+    throw "Unknown type: " + type;
+  }
+
+  fut_function(fullName) {
+    const name = fullName.replace("futhark_", "");
+    let fun = fut[name];
+    return fun.bind(this.fut);
   }
 
   check_var(name) {
@@ -56,6 +80,38 @@ class BrowserServer {
   cmd_entry_points() {
     const entries = Object.keys(this.fut.entry_points);
     return entries.join("\n");
+  }
+
+  cmd_inputs(entry) {
+    const entry_info = this.get_manifest_entry_point(entry);
+    const inputs = entry_info.inputs.map(function(arg) {
+      if (arg.unique) { return "*" + arg.type; }
+      return arg.type;
+    });
+    return inputs.join("\n");
+  }
+
+  cmd_outputs(entry) {
+    const entry_info = this.get_manifest_entry_point(entry);
+    const outputs = entry_info.outputs.map(function(arg) {
+      if (arg.unique) { return "*" + arg.type; }
+      return arg.type;
+    });
+    return outputs.join("\n");
+  }
+
+  cmd_restore(data, ...varsAndTypes) {
+    for (let i = 0; i < data.length; i++) {
+      const name = varsAndTypes[i*2];
+      const type = varsAndTypes[i*2 + 1];
+      const type_info = get_manifest_type(type);
+      const new_fun = fut_function(type_info.ops.new)
+      // TODO: This only works for 1d arrays
+      const val = new_fun(data[i], data[i].length);
+      set_var(name, val, type);
+    }
+
+    return "";
   }
 }
 

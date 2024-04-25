@@ -8,8 +8,20 @@ import asyncio
 import aiohttp
 from aiohttp import web
 
+import values
+
 program_name = sys.argv[1]
 serve_only = len(sys.argv) > 2 and sys.argv[2] == "--serve-only"
+
+if program_name.startswith("./"):
+    program_name = program_name[2:]
+
+#log_path = sys.argv[3] if len(sys.argv) > 3 and sys.argv[2] == "--log" else None
+log_path = "./test_log"
+
+log_file = None
+if log_path is not None:
+    log_file = open(log_path, "w")
 
 script_name = program_name + ".js"
 wasm_name = program_name + ".wasm"
@@ -17,7 +29,9 @@ wasm_map_name = program_name + ".wasm.map"
 source_name = program_name + ".c"
 
 def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
+    print(*args, file=sys.stderr, flush=True, **kwargs)
+    if log_file is not None:
+        print(*args, file=log_file, flush=True, **kwargs)
 
 index_page = (f"<!DOCTYPE html>\n"
               f"<html>\n"
@@ -51,6 +65,33 @@ async def handle_file(request):
 
     return web.Response(body=contents, content_type=content_type)
 
+def restore_val(reader, typename):
+    # TODO: This ignore opaque types
+    return read_value(typename, reader)
+
+def wrap_restore(args):
+    orig_args = args
+    fname = args[0]
+    args = args[1:]
+
+    data = list()
+
+    # TODO: This ignores a lot of error handling right now.
+    eprint("Restoring values from", fname, "with args", args)
+    with open(fname, "rb") as f:
+        eprint("Opened file")
+        reader = ReaderInput(f)
+        eprint("Created reader")
+        while args != []:
+            typename = args[1]
+            args = args[2:]
+            eprint("Trying to restore", typename)
+            val = restore_val(reader, typename)
+            eprint("Restored val:", val)
+            data.append(val)
+
+    return [data] + orig_args[1:]
+
 async def handle_ws(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
@@ -63,6 +104,10 @@ async def handle_ws(request):
 
     while True:
         cmd, args = await toWS.get()
+
+        if cmd == "restore":
+            args = wrap_restore(args)
+
         await ws.send_json({ "cmd": cmd, "args": args })
         msg = await ws.receive()
 
@@ -104,19 +149,19 @@ async def handle_stdio(toWS, toStdIO):
     # Wait for an initial signal that a web browser client has connected.
     await toStdIO.get()
     eprint("Browser client detected, starting Futhark server protocol")
-    print("%%% OK")
+    print("%%% OK", flush=True)
     while True:
         line = await read_stdin_line()
         command, *args = shlex.split(line)
         toWS.put_nowait((command, args))
         status, text = await toStdIO.get()
         if status == "ok":
-            print(text)
-            print("%%% OK")
+            print(text, flush=True)
+            print("%%% OK", flush=True)
         else:
-            print("%%% FAILURE")
-            print(text)
-            print("%%% OK")
+            print("%%% FAILURE", flush=True)
+            print(text, flush=True)
+            print("%%% OK", flush=True)
 
 async def main():
     if serve_only:
