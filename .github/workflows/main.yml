@@ -69,8 +69,8 @@ jobs:
     - name: Install dependencies
       run: |
         brew install cabal-install ghc sphinx-doc
-        echo "/usr/local/opt/sphinx-doc/bin" >> $GITHUB_PATH
-        echo "/usr/local/opt/ghc/bin" >> $GITHUB_PATH
+        echo "/opt/homebrew/opt/sphinx-doc/bin" >> $GITHUB_PATH
+        echo "/opt/homebrew/opt/ghc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v3
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
