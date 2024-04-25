@@ -175,30 +175,28 @@ jobs:
     - name: Type check
       run: nix-shell --pure --run "mypy ."
 
-  # Fails mysteriously right now.
-  #
-  # build-docs:
-  #   runs-on: ubuntu-22.04
+  build-docs:
+    runs-on: ubuntu-22.04
 
-  #   steps:
-  #   - uses: actions/checkout@v3
+    steps:
+    - uses: actions/checkout@v3
 
-  #   - name: Install Nix
-  #     uses: cachix/install-nix-action@v18
+    - name: Install Nix
+      uses: cachix/install-nix-action@v20
 
-  #   - uses: actions/cache@v3
-  #     name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
-  #     with:
-  #       path: |
-  #         ~/.cabal/packages
-  #         ~/.cabal/store
-  #         dist-newstyle
-  #       key: ${{ runner.os }}-${{ hashFiles('nix/sources.json', 'futhark.cabal', 'cabal.project') }}-haddock
+    - uses: actions/cache@v3
+      name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
+      with:
+        path: |
+          ~/.cabal/packages
+          ~/.cabal/store
+          dist-newstyle
+        key: ${{ runner.os }}-${{ hashFiles('nix/sources.json', 'futhark.cabal', 'cabal.project') }}-docs
 
-  #   - name: Run haddock
-  #     run: |
-  #         nix-shell --pure --run "make configure"
-  #         nix-shell --pure --run "make docs"
+    - name: Run haddock
+      run: |
+          nix-shell --pure --run "make configure"
+          nix-shell --pure --run "make docs"
 
   test-interpreter:
     runs-on: ubuntu-22.04
