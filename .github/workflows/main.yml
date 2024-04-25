@@ -668,7 +668,7 @@ jobs:
 
     - name: scp tarballs to server
       run: |
-        scp -o StrictHostKeyChecking=no futhark-nightly-linux-x86_64.tar.xz futhark-nightly-macos-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+        scp -o StrictHostKeyChecking=no futhark-nightly-*-x86_64.tar.xz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
     - name: copy docs to server
       run: |
