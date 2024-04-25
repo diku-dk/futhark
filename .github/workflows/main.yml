@@ -640,7 +640,7 @@ jobs:
 
   deploy-nightly:
     runs-on: ubuntu-22.04
-    needs: [build-linux-nix, build-mac-cabal, test-tools]
+    needs: [build-linux-nix, build-mac-cabal, build-windows-cabal, test-tools]
     if: github.ref == 'refs/heads/master'
 
     steps:
