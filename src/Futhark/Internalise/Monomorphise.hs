@@ -980,68 +980,67 @@ monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
   MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, attrs, loc)) inst_t = do
-  isolateNormalisation $ do
-    let bind_t = funType params rettype
-    (substs, t_shape_params) <-
-      typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
-    let shape_names = S.fromList $ map typeParamName $ shape_params ++ t_shape_params
-        substs' = M.map (Subst []) substs
-        substStructType =
-          substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
-        params' = map (substPat substStructType) params
-    params'' <- withArgs shape_names $ mapM transformPat params'
-    exp_naming <- paramGetClean
+monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
+  let bind_t = funType params rettype
+  (substs, t_shape_params) <-
+    typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
+  let shape_names = S.fromList $ map typeParamName $ shape_params ++ t_shape_params
+      substs' = M.map (Subst []) substs
+      substStructType =
+        substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
+      params' = map (substPat substStructType) params
+  params'' <- withArgs shape_names $ mapM transformPat params'
+  exp_naming <- paramGetClean
 
-    let args = S.fromList $ foldMap patNames params
-        arg_params = map snd exp_naming
+  let args = S.fromList $ foldMap patNames params
+      arg_params = map snd exp_naming
 
-    rettype' <-
-      withParams exp_naming $
-        withArgs (args <> shape_names) $
-          hardTransformRetType (applySubst (`M.lookup` substs') rettype)
-    extNaming <- paramGetClean
-    scope <- S.union shape_names <$> askScope'
-    let (rettype'', new_params) = arrowArg scope args arg_params rettype'
-        bind_t' = substTypesAny (`M.lookup` substs') bind_t
-        (shape_params_explicit, shape_params_implicit) =
-          partition ((`S.member` (mustBeExplicitInBinding bind_t'' `S.union` mustBeExplicitInBinding bind_t')) . typeParamName) $
-            shape_params ++ t_shape_params ++ map (`TypeParamDim` mempty) (S.toList new_params)
-        exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
+  rettype' <-
+    withParams exp_naming $
+      withArgs (args <> shape_names) $
+        hardTransformRetType (applySubst (`M.lookup` substs') rettype)
+  extNaming <- paramGetClean
+  scope <- S.union shape_names <$> askScope'
+  let (rettype'', new_params) = arrowArg scope args arg_params rettype'
+      bind_t' = substTypesAny (`M.lookup` substs') bind_t
+      (shape_params_explicit, shape_params_implicit) =
+        partition ((`S.member` (mustBeExplicitInBinding bind_t'' `S.union` mustBeExplicitInBinding bind_t')) . typeParamName) $
+          shape_params ++ t_shape_params ++ map (`TypeParamDim` mempty) (S.toList new_params)
+      exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
 
-        bind_t'' = funType params'' rettype''
-        bind_r = exp_naming <> extNaming
-    body' <- updateExpTypes (`M.lookup` substs') body
-    body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
-    scope' <- S.union (shape_names <> args) <$> askScope'
-    body''' <-
-      expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< get)
+      bind_t'' = funType params'' rettype''
+      bind_r = exp_naming <> extNaming
+  body' <- updateExpTypes (`M.lookup` substs') body
+  body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
+  scope' <- S.union (shape_names <> args) <$> askScope'
+  body''' <-
+    expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< get)
 
-    seen_before <- elem name . map (fst . fst) <$> getLifts
-    name' <-
-      if null tparams && not entry && not seen_before
-        then pure name
-        else newName name
+  seen_before <- elem name . map (fst . fst) <$> getLifts
+  name' <-
+    if null tparams && not entry && not seen_before
+      then pure name
+      else newName name
 
-    pure
-      ( name',
-        inferSizeArgs shape_params_explicit bind_t'' bind_r,
-        if entry
-          then
-            toValBinding
-              name'
-              (shape_params_explicit ++ shape_params_implicit)
-              params''
-              rettype''
-              (entryAssert exp_naming body''')
-          else
-            toValBinding
-              name'
-              shape_params_implicit
-              (map shapeParam shape_params_explicit ++ params'')
-              rettype''
-              body'''
-      )
+  pure
+    ( name',
+      inferSizeArgs shape_params_explicit bind_t'' bind_r,
+      if entry
+        then
+          toValBinding
+            name'
+            (shape_params_explicit ++ shape_params_implicit)
+            params''
+            rettype''
+            (entryAssert exp_naming body''')
+        else
+          toValBinding
+            name'
+            shape_params_implicit
+            (map shapeParam shape_params_explicit ++ params'')
+            rettype''
+            body'''
+    )
   where
     askScope' = S.filter (`notElem` retDims rettype) <$> askScope
 
