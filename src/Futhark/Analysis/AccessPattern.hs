@@ -115,9 +115,7 @@ unionIndexTables = M.unionWith (M.unionWith M.union)
 -- Runs in n²
 analysisPropagateByTransitivity :: IndexTable rep -> IndexTable rep
 analysisPropagateByTransitivity idx_table =
-  M.map
-    foldlArrayNameMap
-    idx_table
+  M.map foldlArrayNameMap idx_table
   where
     aggregateResults arr_name =
       maybe
@@ -236,11 +234,11 @@ analyseDimAccesses = foldMap' analyseFunction . progFuns
 
 -- | Analyse each statement in a function body.
 analyseFunction :: (Analyse rep) => FunDef rep -> IndexTable rep
-analyseFunction func = do
+analyseFunction func =
   let stms = stmsToList . bodyStms $ funDefBody func
-  -- Create a context containing the function parameters
-  let ctx = contextFromNames mempty (varInfoZeroDeps ctx) $ map paramName $ funDefParams func
-  snd $ analyseStmsPrimitive ctx stms
+      -- Create a context containing the function parameters
+      ctx = contextFromNames mempty (varInfoZeroDeps ctx) $ map paramName $ funDefParams func
+   in snd $ analyseStmsPrimitive ctx stms
 
 -- | Analyse each statement in a list of statements.
 analyseStmsPrimitive :: (Analyse rep) => Context rep -> [Stm rep] -> (Context rep, IndexTable rep)
@@ -301,32 +299,28 @@ analyseStms ctx body_constructor pats body = do
 
     -- Recursively looks up dependencies, until they're in scope or empty set.
     rmOutOfScopeDeps :: Context rep -> M.Map VName (VariableInfo rep) -> Names
-    rmOutOfScopeDeps ctx' new_assignments = do
+    rmOutOfScopeDeps ctx' new_assignments =
       let throwaway_assignments = assignments ctx'
-      let local_assignments = assignments ctx
-      M.foldlWithKey
-        ( \result a var_info ->
-            let dependencies = deps var_info
-             in -- if the VName of the assignment exists in the context, we are good
-                if a `M.member` local_assignments
-                  then result <> oneName a
-                  else -- Otherwise, recurse on its dependencies;
-                  -- 0. Add dependencies in ctx to result
+          local_assignments = assignments ctx
+          f result a var_info =
+            -- if the VName of the assignment exists in the context, we are good
+            if a `M.member` local_assignments
+              then result <> oneName a
+              else -- Otherwise, recurse on its dependencies;
+              -- 0. Add dependencies in ctx to result
 
-                    let (deps_in_ctx, deps_not_in_ctx) =
-                          L.partition (`M.member` local_assignments) $
-                            namesToList dependencies
-                        deps_not_in_ctx' =
-                          M.fromList $
-                            mapMaybe
-                              (\d -> (d,) <$> M.lookup d throwaway_assignments)
-                              deps_not_in_ctx
-                     in result
-                          <> namesFromList deps_in_ctx
-                          <> rmOutOfScopeDeps ctx' deps_not_in_ctx'
-        )
-        mempty
-        new_assignments
+                let (deps_in_ctx, deps_not_in_ctx) =
+                      L.partition (`M.member` local_assignments) $
+                        namesToList (deps var_info)
+                    deps_not_in_ctx' =
+                      M.fromList $
+                        mapMaybe
+                          (\d -> (d,) <$> M.lookup d throwaway_assignments)
+                          deps_not_in_ctx
+                 in result
+                      <> namesFromList deps_in_ctx
+                      <> rmOutOfScopeDeps ctx' deps_not_in_ctx'
+       in M.foldlWithKey f mempty new_assignments
 
 -- | Analyse a rep statement and return the updated context and array index
 -- descriptors.
@@ -365,41 +359,36 @@ getIndexDependencies ctx dims =
   fst $
     foldr
       ( \idx (a, i) ->
-          ( either (matchDimIndex idx) (forceRight . matchDimIndex idx) a,
+          ( either (matchDimIndex idx) (either Right Right . matchDimIndex idx) a,
             i - 1
           )
       )
       (Left [], length dims - 1)
       dims
   where
-    matchDimIndex idx accumulator =
-      case idx of
-        (DimFix subExpression) ->
-          Left $ consolidate ctx subExpression : accumulator
-        -- If we encounter a DimSlice, add it to a map of `DimSlice`s and check
-        -- result later.
-        (DimSlice offset num_elems stride) -> do
-          -- We assume that a slice is iterated sequentially, so we have to
-          -- create a fake dependency for the slice.
-          let dimAccess' = DimAccess (M.singleton (VName "slice" 0) $ Dependency (currentLevel ctx) LoopVar) (Just $ VName "slice" 0)
-          let cons = consolidate ctx
-          let dimAccess = dimAccess' <> cons offset <> cons num_elems <> cons stride
-          Right $ dimAccess : accumulator
-
-    forceRight (Left a) = Right a
-    forceRight (Right a) = Right a
+    matchDimIndex (DimFix subExpression) accumulator =
+      Left $ consolidate ctx subExpression : accumulator
+    -- If we encounter a DimSlice, add it to a map of `DimSlice`s and check
+    -- result later.
+    matchDimIndex (DimSlice offset num_elems stride) accumulator =
+      -- We assume that a slice is iterated sequentially, so we have to
+      -- create a fake dependency for the slice.
+      let dimAccess' = DimAccess (M.singleton (VName "slice" 0) $ Dependency (currentLevel ctx) LoopVar) (Just $ VName "slice" 0)
+          cons = consolidate ctx
+          dimAccess = dimAccess' <> cons offset <> cons num_elems <> cons stride
+       in Right $ dimAccess : accumulator
 
 -- | Gets the dependencies of each dimension and either returns a result, or
 -- adds a slice to the context.
 analyseIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
-analyseIndex ctx pats arr_name dim_indices = do
+analyseIndex ctx pats arr_name dim_indices =
   -- Get the dependendencies of each dimension
   let dependencies = getIndexDependencies ctx dim_indices
-  -- Extend the current context with current pattern(s) and its deps
-  let ctx' = analyseIndexContextFromIndices ctx dim_indices pats
+      -- Extend the current context with current pattern(s) and its deps
+      ctx' = analyseIndexContextFromIndices ctx dim_indices pats
 
-  -- The bodytype(s) are used in the result construction
-  let array_name' =
+      -- The bodytype(s) are used in the result construction
+      array_name' =
         -- For now, we assume the array is in row-major-order, hence the
         -- identity permutation. In the future, we might want to infer its
         -- layout, for example, if the array is the result of a transposition.
@@ -412,11 +401,7 @@ analyseIndex ctx pats arr_name dim_indices = do
               . L.find (\(n, _, _) -> n == arr_name)
               -- 0. Get the "stack" of bodytypes for each assignment
               $ map (\(n, vi) -> (n, parents_nest vi, layout)) (M.toList $ assignments ctx')
-
-  either
-    (index ctx' array_name')
-    (slice ctx' array_name')
-    dependencies
+   in either (index ctx' array_name') (slice ctx' array_name') dependencies
   where
     slice :: Context rep -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
     slice context array_name dims =
@@ -439,10 +424,9 @@ analyseIndexContextFromIndices ctx dim_accesses pats =
   let subexprs =
         mapMaybe
           ( \case
-              (DimFix subExpression) -> case subExpression of
-                (Var v) -> Just v
-                (Constant _) -> Nothing
-              (DimSlice _offs _n _stride) -> Nothing
+              DimFix (Var v) -> Just v
+              DimFix (Constant _) -> Nothing
+              DimSlice _offs _n _stride -> Nothing
           )
           dim_accesses
 
@@ -476,35 +460,35 @@ analyseIndex' ctx pats arr_name dim_accesses =
    in (ctx, res)
 
 analyseBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable rep)
-analyseBasicOp ctx expression pats = do
+analyseBasicOp ctx expression pats =
   -- Construct a VariableInfo from the subexpressions
   let ctx_val = case expression of
-        (SubExp subexp) -> varInfoFromSubExpr subexp
-        (Opaque _ subexp) -> varInfoFromSubExpr subexp
-        (ArrayLit subexps _t) -> concatVariableInfos mempty subexps
-        (UnOp _ subexp) -> varInfoFromSubExpr subexp
-        (BinOp _ lsubexp rsubexp) -> concatVariableInfos mempty [lsubexp, rsubexp]
-        (CmpOp _ lsubexp rsubexp) -> concatVariableInfos mempty [lsubexp, rsubexp]
-        (ConvOp _ subexp) -> varInfoFromSubExpr subexp
-        (Assert subexp _ _) -> varInfoFromSubExpr subexp
-        (Index name _) ->
+        SubExp se -> varInfoFromSubExpr se
+        Opaque _ se -> varInfoFromSubExpr se
+        ArrayLit ses _t -> concatVariableInfos mempty ses
+        UnOp _ se -> varInfoFromSubExpr se
+        BinOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
+        CmpOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
+        ConvOp _ se -> varInfoFromSubExpr se
+        Assert se _ _ -> varInfoFromSubExpr se
+        Index name _ ->
           error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
-        (Update _ name _slice _subexp) ->
+        Update _ name _slice _subexp ->
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
-        (Concat _ _ length_subexp) -> varInfoFromSubExpr length_subexp
-        (Manifest _dim name) -> varInfoFromNames ctx $ oneName name
-        (Iota end start stride _) -> concatVariableInfos mempty [end, start, stride]
-        (Replicate (Shape shape) value') -> concatVariableInfos mempty (value' : shape)
-        (Scratch _ subexprs) -> concatVariableInfos mempty subexprs
-        (Reshape _ (Shape shape_subexp) name) -> concatVariableInfos (oneName name) shape_subexp
-        (Rearrange _ name) -> varInfoFromNames ctx $ oneName name
-        (UpdateAcc _ name lsubexprs rsubexprs) ->
+        Concat _ _ length_subexp -> varInfoFromSubExpr length_subexp
+        Manifest _dim name -> varInfoFromNames ctx $ oneName name
+        Iota end start stride _ -> concatVariableInfos mempty [end, start, stride]
+        Replicate (Shape shape) value' -> concatVariableInfos mempty (value' : shape)
+        Scratch _ sers -> concatVariableInfos mempty sers
+        Reshape _ (Shape shape_subexp) name -> concatVariableInfos (oneName name) shape_subexp
+        Rearrange _ name -> varInfoFromNames ctx $ oneName name
+        UpdateAcc _ name lsubexprs rsubexprs ->
           concatVariableInfos (oneName name) (lsubexprs ++ rsubexprs)
-        (FlatIndex name _) -> varInfoFromNames ctx $ oneName name
-        (FlatUpdate name _ source) -> varInfoFromNames ctx $ namesFromList [name, source]
-  let ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
-  (ctx', mempty)
+        FlatIndex name _ -> varInfoFromNames ctx $ oneName name
+        FlatUpdate name _ source -> varInfoFromNames ctx $ namesFromList [name, source]
+      ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
+   in (ctx', mempty)
   where
     concatVariableInfos ne nn =
       varInfoFromNames ctx (ne <> mconcat (map (analyseSubExpr pats ctx) nn))
@@ -512,7 +496,7 @@ analyseBasicOp ctx expression pats = do
     varInfoFromSubExpr (Constant _) = (varInfoFromNames ctx mempty) {variableType = ConstType}
     varInfoFromSubExpr (Var v) =
       case M.lookup v (assignments ctx) of
-        (Just _) -> (varInfoFromNames ctx $ oneName v) {variableType = Variable}
+        Just _ -> (varInfoFromNames ctx $ oneName v) {variableType = Variable}
         Nothing ->
           error $
             "Failed to lookup variable \""
@@ -545,19 +529,17 @@ analyseLoop ctx bindings loop body pats = do
   let ctx' =
         contextFromNames ctx'' ((varInfoZeroDeps ctx) {variableType = LoopVar}) $
           case loop of
-            (WhileLoop iterVar) -> iterVar : map (paramName . fst) bindings
-            (ForLoop iterVar _ _) -> iterVar : map (paramName . fst) bindings
+            WhileLoop iv -> iv : map (paramName . fst) bindings
+            ForLoop iv _ _ -> iv : map (paramName . fst) bindings
 
   -- Extend context with the loop expression
   analyseStms ctx' LoopBodyName pats $ stmsToList $ bodyStms body
 
 analyseApply :: Context rep -> [VName] -> [(SubExp, Diet)] -> (Context rep, IndexTable rep)
 analyseApply ctx pats diets =
-  first
-    ( \ctx' ->
-        foldl' extend ctx' $ map (\pat -> oneContext pat $ varInfoFromNames ctx' $ mconcat $ map (freeIn . fst) diets) pats
-    )
-    (ctx, mempty)
+  ( foldl' extend ctx $ map (\pat -> oneContext pat $ varInfoFromNames ctx $ mconcat $ map (freeIn . fst) diets) pats,
+    mempty
+  )
 
 segOpType :: SegOp lvl rep -> VName -> SegOpName
 segOpType (SegMap {}) = SegmentedMap
@@ -566,10 +548,10 @@ segOpType (SegScan {}) = SegmentedScan
 segOpType (SegHist {}) = SegmentedHist
 
 analyseSegOp :: (Analyse rep) => SegOp lvl rep -> Context rep -> [VName] -> (Context rep, IndexTable rep)
-analyseSegOp op ctx pats = do
+analyseSegOp op ctx pats =
   let next_level = currentLevel ctx + length (unSegSpace $ segSpace op) - 1
-  let ctx' = ctx {currentLevel = next_level}
-  let segspace_context =
+      ctx' = ctx {currentLevel = next_level}
+      segspace_context =
         foldl' extend ctx'
           . map (\(n, i) -> oneContext n $ VariableInfo mempty (currentLevel ctx + i) (parents ctx') ThreadID)
           . (\segspace_params -> zip segspace_params [0 ..])
@@ -577,18 +559,22 @@ analyseSegOp op ctx pats = do
           . map fst
           . unSegSpace
           $ segSpace op
-  -- Analyse statements in the SegOp body
-  analyseStms segspace_context (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
+   in -- Analyse statements in the SegOp body
+      analyseStms segspace_context (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
 
 analyseSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable rep)
-analyseSizeOp op ctx pats = do
+analyseSizeOp op ctx pats =
   let ctx' = case op of
-        (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
-        (CalcNumBlocks lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
+        CmpSizeLe _name _class subexp -> subexprsToContext [subexp]
+        CalcNumBlocks lsubexp _name rsubexp -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
-  -- Add sizeOp to context
-  let ctx'' = foldl' extend ctx' $ map (\pat -> oneContext pat $ (varInfoZeroDeps ctx) {parents_nest = parents ctx'}) pats
-  (ctx'', mempty)
+      -- Add sizeOp to context
+      ctx'' =
+        foldl' extend ctx' $
+          map
+            (\pat -> oneContext pat $ (varInfoZeroDeps ctx) {parents_nest = parents ctx'})
+            pats
+   in (ctx'', mempty)
   where
     subexprsToContext =
       contextFromNames ctx (varInfoZeroDeps ctx)
@@ -723,8 +709,16 @@ instance Pretty (DimAccess rep) where
       Just n ->
         length (dependencies dim_access) == 1 && n == head (map fst $ M.toList $ dependencies dim_access)
         -- Only print the original name if it is different from the first (and single) dependency
-      then "dependencies" <+> equals <+> align (prettyDeps $ dependencies dim_access)
-      else "dependencies" <+> equals <+> pretty (originalVar dim_access) <+> "->" <+> align (prettyDeps $ dependencies dim_access)
+      then
+        "dependencies"
+          <+> equals
+          <+> align (prettyDeps $ dependencies dim_access)
+      else
+        "dependencies"
+          <+> equals
+          <+> pretty (originalVar dim_access)
+          <+> "->"
+          <+> align (prettyDeps $ dependencies dim_access)
     where
       prettyDeps = braces . commasep . map printPair . M.toList
       printPair (name, Dependency lvl vtype) = pretty name <+> pretty lvl <+> pretty vtype
