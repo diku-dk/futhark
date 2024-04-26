@@ -11,6 +11,7 @@ module Futhark.Util
     nubByOrd,
     mapAccumLM,
     maxinum,
+    mininum,
     chunk,
     chunks,
     chunkLike,
@@ -146,6 +147,10 @@ chunkLike as = chunks (map length as)
 -- | Like 'maximum', but returns zero for an empty list.
 maxinum :: (Num a, Ord a, Foldable f) => f a -> a
 maxinum = foldl' max 0
+
+-- | Like 'minimum', but returns zero for an empty list.
+mininum :: (Num a, Ord a, Foldable f) => f a -> a
+mininum xs = foldl' min (maxinum xs) xs
 
 -- | @dropAt i n@ drops @n@ elements starting at element @i@.
 dropAt :: Int -> Int -> [a] -> [a]
