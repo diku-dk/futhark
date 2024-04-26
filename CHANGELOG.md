@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * ``futhark test`` no longer runs ``structure`` tests by default. Pass
   ``-s`` to run them.
 
+* Rewritten array layout optimisation pass by Bjarke Pedersen and
+  Oscar Nelin. Minor speedup for some programs, but is more
+  importantly a principled foundation for further improvements.
+
 ### Removed
 
 ### Changed
