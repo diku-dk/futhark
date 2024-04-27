@@ -1007,8 +1007,12 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
   scope <- S.union shape_names <$> askScope'
   let (rettype'', new_params) = arrowArg scope args arg_params rettype'
       bind_t' = substTypesAny (`M.lookup` substs') bind_t
+      mkExplicit =
+        flip
+          S.member
+          (mustBeExplicitInBinding bind_t'' <> mustBeExplicitInBinding bind_t')
       (shape_params_explicit, shape_params_implicit) =
-        partition ((`S.member` (mustBeExplicitInBinding bind_t'' `S.union` mustBeExplicitInBinding bind_t')) . typeParamName) $
+        partition (mkExplicit . typeParamName) $
           shape_params ++ t_shape_params ++ map (`TypeParamDim` mempty) (S.toList new_params)
       exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
 
