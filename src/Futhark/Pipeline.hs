@@ -78,7 +78,7 @@ instance MonadLogger FutharkM where
         now <- liftIO getCurrentTime
         let delta :: Double
             delta = fromRational $ toRational (now `diffUTCTime` prev)
-            prefix = printf "[  +%.6f] " delta
+            prefix = printf "[  +%7.3f] " delta
         modify $ \s -> s {futharkPrevLog = now}
         when verb $ liftIO $ T.hPutStrLn stderr $ T.pack prefix <> msg
 
@@ -160,7 +160,7 @@ onePass pass = Pipeline perform
   where
     perform cfg prog = do
       when (pipelineVerbose cfg) . logMsg $
-        "Running pass " <> T.pack (passName pass)
+        "Running pass: " <> T.pack (passName pass)
       prog' <- runPass pass prog
       -- Spark validation in a separate task and speculatively execute
       -- next pass.  If the next pass throws an exception, we better
