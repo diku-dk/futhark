@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Bugs related to deduplication of array payloads in sum types.
   Unfortunately, fixed by just not deduplicating in those cases.
 
+* Frontend bug related to turning size expressions into variables
+  (#2136).
+
+* Another exotic monomorphisation bug.
+
 ## [0.25.15]
 
 ### Added
