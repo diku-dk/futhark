@@ -153,7 +153,7 @@ defaultEntryPoint = nameFromString "main"
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
-arrayRank :: TypeBase () u -> Int
+arrayRank :: TypeBase d u -> Int
 arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.

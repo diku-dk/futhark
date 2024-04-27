@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Frontend bug related to turning size expressions into variables
   (#2136).
 
+* Another exotic monomorphisation bug.
+
 ## [0.25.15]
 
 ### Added

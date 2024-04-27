@@ -285,22 +285,16 @@ scoping argset m =
 -- Given instantiated type of function, produce size arguments.
 type InferSizeArgs = StructType -> MonoM [Exp]
 
+-- | The integer encodes an equivalence class, so we can keep
+-- track of sizes that are statically identical.
 data MonoSize
-  = -- | The integer encodes an equivalence class, so we can keep
-    -- track of sizes that are statically identical.
-    MonoKnown Int
-  | MonoAnon
-  deriving (Show)
-
--- We treat all MonoAnon as identical.
-instance Eq MonoSize where
-  MonoKnown x == MonoKnown y = x == y
-  MonoAnon == MonoAnon = True
-  _ == _ = False
+  = MonoKnown Int
+  | MonoAnon Int
+  deriving (Eq, Show)
 
 instance Pretty MonoSize where
   pretty (MonoKnown i) = "?" <> pretty i
-  pretty MonoAnon = "?"
+  pretty (MonoAnon i) = "??" <> pretty i
 
 instance Pretty (Shape MonoSize) where
   pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
@@ -322,10 +316,16 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
     noExtsScalar (Arrow as p d t1 (RetType _ t2)) =
       Arrow as p d (noExts t1) (RetType [] (noExts t2))
     noExtsScalar t = t
-    onDim bound _ e
+    onDim bound _ d
       -- A locally bound size.
-      | any (`S.member` bound) $ fvVars $ freeInExp e =
-          pure MonoAnon
+      | any (`S.member` bound) $ fvVars $ freeInExp d = do
+          (i, m) <- get
+          case M.lookup d m of
+            Just prev ->
+              pure $ MonoAnon prev
+            Nothing -> do
+              put (i + 1, M.insert d i m)
+              pure $ MonoAnon i
     onDim _ _ d = do
       (i, m) <- get
       case M.lookup d m of
@@ -987,7 +987,7 @@ monomorphiseBinding ::
 monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
   let bind_t = funType params rettype
   (substs, t_shape_params) <-
-    typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
+    typeSubstsM loc bind_t $ noNamedParams inst_t
   let shape_names = S.fromList $ map typeParamName $ shape_params ++ t_shape_params
       substs' = M.map (Subst []) substs
       substStructType =
@@ -1095,7 +1095,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
 typeSubstsM ::
   (MonadFreshNames m) =>
   SrcLoc ->
-  TypeBase () NoUniqueness ->
+  StructType ->
   MonoType ->
   m (M.Map VName StructRetType, [TypeParam])
 typeSubstsM loc orig_t1 orig_t2 =
@@ -1107,10 +1107,13 @@ typeSubstsM loc orig_t1 orig_t2 =
     subRet t1 (RetType _ t2) =
       sub t1 t2
 
-    sub t1@Array {} t2@Array {}
-      | Just t1' <- peelArray (arrayRank t1) t1,
-        Just t2' <- peelArray (arrayRank t1) t2 =
-          sub t1' t2'
+    sub t1@(Array _ (Shape (d1 : _)) _) t2@(Array _ (Shape (d2 : _)) _) = do
+      case d2 of
+        MonoAnon i -> do
+          (ts, sizes) <- get
+          put (ts, M.insert i d1 sizes)
+        _ -> pure ()
+      sub (stripArray 1 t1) (stripArray 1 t2)
     sub (Scalar (TypeVar _ v _)) t =
       unless (baseTag (qualLeaf v) <= maxIntrinsicTag) $
         addSubst v $
@@ -1143,11 +1146,15 @@ typeSubstsM loc orig_t1 orig_t2 =
         Nothing -> do
           d <- lift $ lift $ newVName "d"
           tell [TypeParamDim d loc]
-          put (ts, M.insert i d sizes)
+          put (ts, M.insert i (sizeFromName (qualName d) mempty) sizes)
           pure $ sizeFromName (qualName d) mempty
         Just d ->
-          pure $ sizeFromName (qualName d) mempty
-    onDim MonoAnon = pure anySize
+          pure d
+    onDim (MonoAnon i) = do
+      (_, sizes) <- get
+      case M.lookup i sizes of
+        Nothing -> pure anySize
+        Just d -> pure d
 
 -- Perform a given substitution on the types in a pattern.
 substPat :: (t -> t) -> Pat t -> Pat t
