@@ -352,6 +352,9 @@ addLifted fname il liftf =
 lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
 lookupLifted fname t = lookup (fname, t) <$> getLifts
 
+sizeVarName :: Exp -> String
+sizeVarName e = "d<{" <> prettyString (bareExp e) <> "}>"
+
 -- | Creates a new expression replacement if needed, this always produces normalised sizes.
 -- (e.g. single variable or constant)
 replaceExp :: Exp -> MonoM Exp
@@ -366,7 +369,7 @@ replaceExp e =
         (Just vn, _) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Nothing) -> do
-          vn <- newNameFromString $ "d<{" ++ prettyString (bareExp e) ++ "}>"
+          vn <- newNameFromString $ sizeVarName e
           modify ((e', vn) :)
           pure $ sizeFromName (qualName vn) (srclocOf e)
   where
