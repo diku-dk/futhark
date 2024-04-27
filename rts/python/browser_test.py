@@ -3,12 +3,14 @@
 import json
 import shlex
 import sys
+from io import BytesIO
 
 import asyncio
 import aiohttp
 from aiohttp import web
 
-import values
+import numpy as np
+from values import ReaderInput, read_value, construct_binary_value
 
 program_name = sys.argv[1]
 serve_only = len(sys.argv) > 2 and sys.argv[2] == "--serve-only"
@@ -66,7 +68,7 @@ async def handle_file(request):
     return web.Response(body=contents, content_type=content_type)
 
 def restore_val(reader, typename):
-    # TODO: This ignore opaque types
+    # TODO: This ignores opaque types
     return read_value(typename, reader)
 
 def wrap_restore(args):
@@ -77,20 +79,28 @@ def wrap_restore(args):
     data = list()
 
     # TODO: This ignores a lot of error handling right now.
-    eprint("Restoring values from", fname, "with args", args)
     with open(fname, "rb") as f:
-        eprint("Opened file")
         reader = ReaderInput(f)
-        eprint("Created reader")
         while args != []:
             typename = args[1]
             args = args[2:]
-            eprint("Trying to restore", typename)
             val = restore_val(reader, typename)
-            eprint("Restored val:", val)
-            data.append(val)
+            data.append(val.tolist())
 
     return [data] + orig_args[1:]
+
+def store_val(f, val):
+    f.write(construct_binary_value(val))
+
+def wrap_store_resp(fname, resp):
+    types = resp['types']
+    data_strings = resp['data']
+    with open(fname, "wb") as f:
+        for (typ, text) in zip(types, data_strings):
+            reader = ReaderInput(BytesIO(text.encode('utf-8')))
+            val = read_value(typ, reader)
+            store_val(f, val)
+    return ""
 
 async def handle_ws(request):
     ws = web.WebSocketResponse()
@@ -105,8 +115,14 @@ async def handle_ws(request):
     while True:
         cmd, args = await toWS.get()
 
+        if cmd == "close":
+            break
+
+        orig_args = args
         if cmd == "restore":
             args = wrap_restore(args)
+        elif cmd == "store":
+            args = args[1:]
 
         await ws.send_json({ "cmd": cmd, "args": args })
         msg = await ws.receive()
@@ -116,20 +132,35 @@ async def handle_ws(request):
             break
 
         resp = json.loads(msg.data)
-        toStdIO.put_nowait((resp['status'], resp['text']))
+        eprint("Got response:", resp)
 
-    eprint("ws connection closed")
+        text = ""
+        if cmd == "store":
+            text = wrap_store_resp(orig_args[0], resp)
+        else:
+            text = resp['text']
+
+        toStdIO.put_nowait((resp['status'], text))
+
+    if not ws.closed:
+        await ws.close()
+
+    eprint("WS connection closed, stopping server")
+    app['stop'].set()
 
 async def start_server(app, toWS, toStdIO):
     app['toWS'] = toWS
     app['toStdIO'] = toStdIO
+
+    app['stop'] = asyncio.Event()
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8100)
+
     await site.start()
-    
-    while True:
-        await asyncio.sleep(3600)
+    await app['stop'].wait()
+    await runner.cleanup()
 
 app = web.Application()
 app.add_routes(
@@ -148,13 +179,23 @@ async def read_stdin_line():
 async def handle_stdio(toWS, toStdIO):
     # Wait for an initial signal that a web browser client has connected.
     await toStdIO.get()
+
     eprint("Browser client detected, starting Futhark server protocol")
     print("%%% OK", flush=True)
+
     while True:
         line = await read_stdin_line()
+        eprint("Got line:", line.rstrip())
+
+        if line.strip() == "":
+            toWS.put_nowait(("close", []))
+            break
+
         command, *args = shlex.split(line)
+
         toWS.put_nowait((command, args))
         status, text = await toStdIO.get()
+
         if status == "ok":
             print(text, flush=True)
             print("%%% OK", flush=True)

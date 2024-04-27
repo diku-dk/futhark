@@ -167,7 +167,7 @@ mkJsContext (Definitions _ _ (Functions funs)) manifest =
     entryPointEntries = T.intercalate ",\n" $ map
       (\e -> let n = entryName e
                  f = entryFun e
-              in [text|'${n}': this.${f}|]) jsEntryPoints
+              in [text|'${n}': this.${f}.bind(this)|]) jsEntryPoints
     entryPointFuns = T.intercalate "\n" $ map mkEntryFun jsEntryPoints
     entryExports = map entryInternalFun jsEntryPoints
     (valueFuns, valueExports) = mkJsValueFuns entryPoints

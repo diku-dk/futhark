@@ -721,8 +721,6 @@ static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
                            int64_t nbytes) {
   if (nbytes <= 0) { return FUTHARK_SUCCESS; }
 
-  printf("host2gpu: %p -> %p (%lld)\n", src, dst, nbytes);
-
   // There is no async copy to device memory at the moment (the spec for
   // `writeBuffer` specifies that a copy of the data is always made and there is
   // no other good option to use here), so we ignore the sync parameter.
@@ -737,8 +735,6 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
                            gpu_mem src, int64_t src_offset,
                            int64_t nbytes) {
   if (nbytes <= 0) { return FUTHARK_SUCCESS; }
-
-  printf("gpu2host: %p -> %p (%lld)\n", src, dst, nbytes);
 
   WGPUBufferDescriptor desc = {
     .label = "tmp_readback",
@@ -851,7 +847,6 @@ static int gpu_alloc_actual(struct futhark_context *ctx,
            | WGPUBufferUsage_Storage,
   };
   *mem_out = wgpuDeviceCreateBuffer(ctx->device, &desc);
-  printf("alloc_actual(%zu) -> setting %p to %p\n", size, mem_out, *mem_out);
   return FUTHARK_SUCCESS;
 }
 
