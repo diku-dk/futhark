@@ -73,7 +73,7 @@ modifyNameSource :: (MonadFreshNames m) => (VNameSource -> (a, VNameSource)) -> 
 modifyNameSource m = do
   src <- getNameSource
   let (x, src') = m src
-  putNameSource src'
+  src' `seq` putNameSource src'
   pure x
 
 -- | Produce a fresh name, using the given name as a template.
