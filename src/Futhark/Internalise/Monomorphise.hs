@@ -225,7 +225,8 @@ askIntros argset =
 parametrizing :: S.Set VName -> MonoM ExpReplacements
 parametrizing argset = do
   intros <- askIntros argset
-  (params, nxtBind) <- gets $ partition (not . S.disjoint intros . fvVars . freeInExp . unReplaced . fst)
+  let usesIntros = not . S.disjoint intros . fvVars . freeInExp
+  (params, nxtBind) <- gets $ partition (usesIntros . unReplaced . fst)
   put nxtBind
   pure params
 
@@ -433,15 +434,15 @@ transformType typ =
       Record <$> traverse transformType fs
     transformScalarSizes (Sum cs) =
       Sum <$> (traverse . traverse) transformType cs
-    transformScalarSizes (Arrow as argName d argT retT) = do
-      retT' <- transformRetTypeSizes argset retT
-      Arrow as argName d <$> transformType argT <*> pure retT'
+    transformScalarSizes (Arrow as argName d argT retT) =
+      Arrow as argName d
+        <$> transformType argT
+        <*> transformRetTypeSizes argset retT
       where
         argset =
-          fvVars (freeInType argT)
-            <> case argName of
-              Unnamed -> mempty
-              Named vn -> S.singleton vn
+          case argName of
+            Unnamed -> mempty
+            Named vn -> S.singleton vn
     transformScalarSizes (TypeVar u qn args) =
       TypeVar u qn <$> mapM onArg args
       where
