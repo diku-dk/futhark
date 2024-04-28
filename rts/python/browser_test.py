@@ -3,6 +3,7 @@
 import argparse
 import json
 import shlex
+import subprocess
 import sys
 from io import BytesIO
 
@@ -158,6 +159,20 @@ async def handle_ws(request):
     eprint("WS connection closed, stopping server")
     app['stop'].set()
 
+def start_browser():
+    browser = subprocess.Popen(
+            ["/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+             "http://localhost:8100",
+             "--headless=new"],
+            shell=False,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+    return browser
+
+def stop_browser(browser):
+    # TODO: This doesn't actually work yet
+    browser.kill()
+
 async def start_server(app, toWS, toStdIO):
     app['toWS'] = toWS
     app['toStdIO'] = toStdIO
@@ -169,8 +184,15 @@ async def start_server(app, toWS, toStdIO):
     site = web.TCPSite(runner, '0.0.0.0', 8100)
 
     await site.start()
+
+    if not args.no_browser:
+        browser = start_browser()
+
     await app['stop'].wait()
     await runner.cleanup()
+
+    if not args.no_browser:
+        stop_browser(browser)
 
 app = web.Application()
 app.add_routes(
