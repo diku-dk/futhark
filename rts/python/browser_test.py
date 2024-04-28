@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import argparse
 import json
 import shlex
 import sys
@@ -8,27 +9,36 @@ from io import BytesIO
 import asyncio
 import aiohttp
 from aiohttp import web
-
 import numpy as np
+
 from values import ReaderInput, read_value, construct_binary_value
 
-program_name = sys.argv[1]
-serve_only = len(sys.argv) > 2 and sys.argv[2] == "--serve-only"
+parser = argparse.ArgumentParser()
+parser.add_argument("program",
+                    help="the program to wrap (without .js or other file extension)")
+parser.add_argument("--no-server-proxy",
+                    help=("only act as HTTP server, do not proxy Futhark server protocol\n"
+                          "(implies --no-browser)"),
+                    action="store_true")
+parser.add_argument("--no-browser",
+                    help="do not start a browser, instead wait for one to connect",
+                    action="store_true")
+parser.add_argument("--log",
+                    help="log file for debug output")
+args = parser.parse_args()
 
+program_name = args.program
 if program_name.startswith("./"):
     program_name = program_name[2:]
-
-#log_path = sys.argv[3] if len(sys.argv) > 3 and sys.argv[2] == "--log" else None
-log_path = "./test_log"
-
-log_file = None
-if log_path is not None:
-    log_file = open(log_path, "w")
-
 script_name = program_name + ".js"
 wasm_name = program_name + ".wasm"
 wasm_map_name = program_name + ".wasm.map"
 source_name = program_name + ".c"
+
+log_path = args.log
+log_file = None
+if log_path is not None:
+    log_file = open(log_path, "w")
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, flush=True, **kwargs)
@@ -205,14 +215,14 @@ async def handle_stdio(toWS, toStdIO):
             print("%%% OK", flush=True)
 
 async def main():
-    if serve_only:
+    toWS = asyncio.Queue()
+    toStdIO = asyncio.Queue()
+    if args.no_server_proxy:
         eprint(f"Wrapping {script_name}; only providing web server")
         eprint("Hosting at 0.0.0.0:8100")
-        await start_server(app)
+        await start_server(app, toWS, toStdIO)
     else:
         eprint(f"Wrapping {script_name}; proxying the Futhark server protocol")
-        toWS = asyncio.Queue()
-        toStdIO = asyncio.Queue()
         await asyncio.gather(
                 start_server(app, toWS, toStdIO),
                 handle_stdio(toWS, toStdIO))
