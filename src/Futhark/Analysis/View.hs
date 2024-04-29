@@ -34,23 +34,25 @@ getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
 getFun _ = Nothing
 
 getSize :: E.Exp -> Maybe Term
-getSize (E.Var _ (E.Info {E.unInfo = E.Scalar _}) _) =
-  Nothing
-getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
-  | dim:_ <- E.shapeDims shape =
-    Just $ convertSize dim
-getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
-  | dim:_ <- E.shapeDims shape =
-    Just $ convertSize dim
+getSize (E.Var _ (E.Info {E.unInfo = E.Scalar (E.Refinement ty _)}) _) =
+  -- TODO why are all refinements scalar?
+  sizeOfTypeBase ty
+getSize (E.Var _ (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
+getSize (E.ArrayLit [] (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
 getSize e = error $ "getSize: " <> prettyString e <> "\n" <> show e
 
--- Used for converting sizes of function arguments.
-convertSize :: E.Exp -> Term
-convertSize (E.Var (E.QualName _ x) _ _) = Var x
-convertSize (E.Parens e _) = convertSize e
-convertSize (E.Attr _ e _) = convertSize e
-convertSize (E.IntLit x _ _) = SoP2 $ SoP.int2SoP x
-convertSize e = error ("convertSize not implemented for: " <> show e)
+sizeOfTypeBase :: E.TypeBase E.Exp as -> Maybe Term
+sizeOfTypeBase (E.Array _ _ shape _)
+  | dim:_ <- E.shapeDims shape =
+    Just $ convertSize dim
+  where
+    convertSize (E.Var (E.QualName _ x) _ _) = Var x
+    convertSize (E.Parens e _) = convertSize e
+    convertSize (E.Attr _ e _) = convertSize e
+    convertSize (E.IntLit x _ _) = SoP2 $ SoP.int2SoP x
+    convertSize e = error ("convertSize not implemented for: " <> show e)
+sizeOfTypeBase _ = Nothing
+
 
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
@@ -270,7 +272,7 @@ forward (E.AppExp (E.Apply f args _) _)
       -- OOB < 0 or OOB >= b[m-1]
       -- y = scatter dest inds vals
       -- ___________________________________________________
-      -- y = ∀i ∈ Cat k=1,...,m-1 [b[k-1], ..., b[k]] .
+      -- y = ∀i ∈ ⊎k=1,...,m-1 [b[k-1], ..., b[k]] .
       --     | i == inds[k] && c  => vals[k]   (c may depend on k)
       --     | i /= inds[k] || ¬c => dest[i]
       --
@@ -390,8 +392,7 @@ getOOB _ _ _ = pure Nothing
 checkMonotonic iter (cond, x) = do
   -- A first step towards this test is that each term is non-negative.
   let test = Cases . NE.singleton $ (cond, x :>= SoP2 (SoP.int2SoP 0))
-  debugM $ "checkMonotonic test " <> prettyString test
+  debugM $ "checkMonotonic test: " <> prettyString test
   IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
-  debugM ("checkMonotonic " <> prettyString (IndexFn iter (Cases res)))
-  -- debugM ("checkMonotonic res: " <> prettyString res)
+  debugM ("checkMonotonic result: " <> prettyString (IndexFn iter (Cases res)))
   pure res

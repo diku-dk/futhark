@@ -1,6 +1,6 @@
 let mkFlagArray 't [m]
         (zero: t)
-        (shape: [m]i64)
+        (shape: {[m]i64 | \res-> true})
         (xs: [m]t) : {[]t | \res-> is_indexfn res} =
   let shp_rot = map (\ i -> if i==0 then 0 else shape[i-1]) (iota m)
   let shp_scn = scan (+) 0i64 shp_rot
