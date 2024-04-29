@@ -296,7 +296,9 @@ forward (E.AppExp (E.Apply f args _) _)
       ((_, oob), (cond_b, b)) <- fromJust <$> getOOB (SoP.int2SoP 0) (termToSoP sz_dest) inds_fn
       -- TODO ^handle Nothing case.
       -- check monotonicity on b
-      lol <- checkMonotonic iter_inds (cond_b, b)
+      isMonotonic <- checkMonotonic iter_inds (cond_b, b)
+      -- TODO allow monotonically decreasing by just reversing b
+      unless isMonotonic (error "couldn't prove that scatter indices are monotonically increasing")
       -- check that cases match pattern with OOB < 0 or OOB > b[m-1]
       -- check that iterator matches that of inds
       -- check dest has size b[m-1]
@@ -389,10 +391,13 @@ getOOB _ _ _ = pure Nothing
 -- The   ^ conclusion is False despite the fact that we have 0 <= aoa_shp
 -- in the env. This makes sense as the (SoP) refinement is oblivious to the
 -- Sum term. Make it aware of this somehow.
+checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
 checkMonotonic iter (cond, x) = do
   -- A first step towards this test is that each term is non-negative.
   let test = Cases . NE.singleton $ (cond, x :>= SoP2 (SoP.int2SoP 0))
   debugM $ "checkMonotonic test: " <> prettyString test
   IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
   debugM ("checkMonotonic result: " <> prettyString (IndexFn iter (Cases res)))
-  pure res
+  case res of
+    (_, Bool True) :| [] -> pure True
+    _ -> pure False

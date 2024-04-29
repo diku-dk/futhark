@@ -54,7 +54,8 @@ toRel (Not (x :>= y)) = Just $ termToSoP x :<: termToSoP y
 -- TODO the above is checkable as 'x > y || x < y',
 -- which appears to be doable if we run each check separately?
 toRel (x :&& y) = (:&&:) <$> toRel x <*> toRel y
-toRel (_ :|| _) = error "toRel on :||" -- there is :||: but unsure if we need DNF/CNF first
+toRel (x :|| y) = (:||:) <$> toRel x <*> toRel y
+-- toRel (_ :|| _) = error "toRel on :||" -- there is :||: but unsure if we need DNF/CNF first
 toRel _ = Nothing
 
 -- Do `computation` in a separate scope for AlgEnv.
