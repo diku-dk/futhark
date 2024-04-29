@@ -5,12 +5,15 @@ import json
 import shlex
 import subprocess
 import sys
+import os
 from io import BytesIO
 
 import asyncio
 import aiohttp
 from aiohttp import web
 import numpy as np
+
+from selenium import webdriver
 
 from values import ReaderInput, read_value, construct_binary_value
 
@@ -24,6 +27,9 @@ parser.add_argument("--no-server-proxy",
 parser.add_argument("--no-browser",
                     help="do not start a browser, instead wait for one to connect",
                     action="store_true")
+parser.add_argument("--web-driver",
+                    help=("URL of a remote WebDriver to connec to.\n"
+                          "Can also be set via WEB_DRIVER_URL env variable."))
 parser.add_argument("--log",
                     help="log file for debug output")
 args = parser.parse_args()
@@ -40,6 +46,10 @@ log_path = args.log
 log_file = None
 if log_path is not None:
     log_file = open(log_path, "w")
+
+remote_driver_url = os.environ.get("WEB_DRIVER_URL")
+if remote_driver_url is None:
+    remote_driver_url = args.web_driver
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, flush=True, **kwargs)
@@ -160,18 +170,19 @@ async def handle_ws(request):
     app['stop'].set()
 
 def start_browser():
-    browser = subprocess.Popen(
-            ["/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-             "http://localhost:8100",
-             "--headless=new"],
-            shell=False,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL)
-    return browser
+    options = webdriver.ChromeOptions()
+    if remote_driver_url is not None:
+        driver = webdriver.Remote(command_executor=remote_driver_url, options=options)
+    else:
+        driver = webdriver.Chrome(options=options)
 
-def stop_browser(browser):
-    # TODO: This doesn't actually work yet
-    browser.kill()
+    loop = asyncio.get_running_loop()
+    get_task = loop.run_in_executor(None, driver.get, "http://localhost:8100")
+
+    return driver, get_task
+
+def stop_browser(driver):
+    driver.quit()
 
 async def start_server(app, toWS, toStdIO):
     app['toWS'] = toWS
@@ -186,13 +197,14 @@ async def start_server(app, toWS, toStdIO):
     await site.start()
 
     if not args.no_browser:
-        browser = start_browser()
+        driver, get_task = start_browser()
 
     await app['stop'].wait()
+    await get_task
     await runner.cleanup()
 
     if not args.no_browser:
-        stop_browser(browser)
+        stop_browser(driver)
 
 app = web.Application()
 app.add_routes(
