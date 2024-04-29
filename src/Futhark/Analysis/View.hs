@@ -19,6 +19,35 @@ import qualified Data.Set as S
 import Control.Monad.RWS.Strict hiding (Sum)
 import Futhark.SoP.SoP (justConstant)
 import Language.Futhark.Primitive (allIntTypes, PrimType (IntType))
+import Futhark.SoP.Monad (addRange)
+
+
+--------------------------------------------------------------
+-- Vile and wicked temporary code.
+--------------------------------------------------------------
+handleRefinementTypes :: E.Exp -> IndexFnM ()
+handleRefinementTypes (E.Var (E.QualName _ vn)
+                             (E.Info {E.unInfo = E.Scalar lol@(E.Refinement _ty ref)}) _) =
+  trace ("## hi refinement" <> show lol)
+  (handleRefinement ref) vn
+handleRefinementTypes _ = pure ()
+
+-- Type refinements are on the form (arg: {t | \x -> f x})
+-- where arg is applied to \x -> f x.
+-- This function takes a refinement \x -> f x and returns a function
+-- that handles this refinement when applied to a name (i.e., arg).
+handleRefinement :: E.ExpBase E.Info E.VName -> E.VName -> IndexFnM ()
+handleRefinement (E.Lambda [E.Id x _ _] (E.AppExp (E.Apply f args _) _) _ _ _)
+  | Just "forall" <- getFun f,
+    [E.Var (E.QualName _ x') _ _,
+     E.OpSectionRight (E.QualName [] opvn) _ (E.IntLit c _ _) _ _ _] <- getArgs args,
+    x == x' = do -- Make sure that lambda arg is applied to forall.
+      case E.baseString opvn of
+        ">=" ->
+          \name ->
+            addRange (Var name) (mkRangeLB (SoP.int2SoP c))
+        _ -> const undefined
+handleRefinement _ = \_ -> pure ()
 
 
 --------------------------------------------------------------
@@ -98,6 +127,7 @@ mkIndexFnValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
     _ -> pure ()
 
 
+
 forwards :: E.Exp -> IndexFnM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
@@ -132,7 +162,8 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
     Just v@(IndexFn _ _) -> do
       traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString v)
       pure v
-    _ ->
+    _ -> do
+      handleRefinementTypes e
       case getSize e of
         Just sz -> do
           -- Canonical array representation.
@@ -374,26 +405,18 @@ getOOB lower_bound upper_bound (IndexFn iter cases)
       pure res'
 getOOB _ _ _ = pure Nothing
 
--- Goal right now is to prove that the Sum is in fact positive.
--- Currently get:
--- 🪲 refine (¬((aoa_shp₆₀₇₁)[i₆₁₇₂] < 0), Σj₆₁₆₄∈[1, ..., i₆₁₇₂] ((aoa_shp₆₀₇₁)[-1 + j₆₁₆₄]) >= 0) Alg env: Untranslatable environment:
--- dir:
--- []
--- inv:
--- []
--- Equivalence environment:
--- []
--- Ranges:
--- [max{1} <= m₆₀₆₉ <= min{9223372036854775807}, max{0} <= i₆₁₇₂ <= min{m₆₀₆₉}, max{0} <= (aoa_shp₆₀₇₁)[i₆₁₇₂] <= min{}]
--- 🪲 QQ Sum (VName (Name "j") 6164) (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},1)]}) (SoP {getTerms = fromList [(Term {getTerm = fromOccurList [(Var (VName (Name "i") 6172),1)]},1)]}) (Idx (Var (VName (Name "aoa_shp") 6071)) (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "j") 6164),1)]},1)]}))
--- 🪲 QQ SoP2 (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},0)]})
--- 🪲 QQ False
--- The   ^ conclusion is False despite the fact that we have 0 <= aoa_shp
--- in the env. This makes sense as the (SoP) refinement is oblivious to the
--- Sum term. Make it aware of this somehow.
 checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
 checkMonotonic iter (cond, x) = do
-  -- A first step towards this test is that each term is non-negative.
+  -- i is name in iter
+  -- new name q
+  -- new name r
+  -- add range q in [min iter,r]
+  -- add range r in [0,max iter]
+  -- test that x{q/i} <= x{r/i}
+  -- ie
+  --           x{r/i} - x{q/i} >= 0
+  -- if x = ∑j∈[lb, ..., i] a[j] then we can just check
+  --   0 <= min{shp}
   let test = Cases . NE.singleton $ (cond, x :>= SoP2 (SoP.int2SoP 0))
   debugM $ "checkMonotonic test: " <> prettyString test
   IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
