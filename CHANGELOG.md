@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   Oscar Nelin. Minor speedup for some programs, but is more
   importantly a principled foundation for further improvements.
 
+* Better error message when exceeding shared memory limits.
+
 ### Removed
 
 ### Changed
