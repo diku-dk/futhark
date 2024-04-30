@@ -60,6 +60,8 @@ import Data.List
     intersperse,
     isPrefixOf,
     partition,
+    unzip4,
+    zip4,
   )
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -1331,6 +1333,20 @@ bottomUpSegOp ::
   Rule rep
 -- Some SegOp results can be moved outside the SegOp, which can
 -- simplify further analysis.
+bottomUpSegOp (_vtable, used) (Pat kpes) dec segop
+  -- Remove dead results. This is a bit tricky to do with scan/red
+  -- results, so we only deal with map results for now.
+  | (_, kpes', kts', kres') <- unzip4 $ filter keep $ zip4 [0 ..] kpes kts kres,
+    kpes' /= kpes = Simplify $ do
+      kbody' <- localScope (scopeOfSegSpace space) $ mkKernelBodyM kstms kres'
+      addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody'
+  where
+    space = segSpace segop
+    (kts, KernelBody _ kstms kres, num_nonmap_results, mk_segop) =
+      segOpGuts segop
+
+    keep (i, pe, _, _) =
+      i < num_nonmap_results || patElemName pe `UT.used` used
 bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres

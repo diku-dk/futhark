@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Better error message when exceeding shared memory limits.
 
+* Better dead code removal for the GPU representation (minor impact on
+  some programs).
+
 ### Removed
 
 ### Changed
