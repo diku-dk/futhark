@@ -1056,8 +1056,14 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              void* args[num_args],
                              size_t args_sizes[num_args]) {
   (void) args_sizes;
-  int64_t time_start = 0, time_end = 0;
 
+  if (shared_mem_bytes > ctx->max_shared_memory) {
+    set_error(ctx, msgprintf("Kernel %s with %d bytes of memory exceeds device limit of %d\n",
+                             name, shared_mem_bytes, (int)ctx->max_shared_memory));
+    return 1;
+  }
+
+  int64_t time_start = 0, time_end = 0;
   if (ctx->debugging) {
     time_start = get_wall_time();
   }
