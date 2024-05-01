@@ -124,13 +124,17 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       start <- astMap m lb
       end <- astMap m ub
       case (start, end) of
-        (a, b) | SoP.padWithZero a == SoP.padWithZero b -> do
+        (a, b) | SoP.padWithZero a == SoP.padWithZero b ->
+          rollbackAlgEnv (do
             -- If the sum has only one term (one iteration), eliminate it.
-            addEquiv (Var j) b -- j is unique to the sum.
+            addEquiv (Var j) b
             refineTerm (SoP2 e)
-        _ -> do
-          addRange (Var j) (mkRange start end)
-          Sum j start end <$> astMap m e
+          )
+        _ ->
+          rollbackAlgEnv (do
+            addRange (Var j) (mkRange start end)
+            Sum j start end <$> astMap m e
+          )
     -- refineTerm (SumSlice vn lb ub) = do
     --   -- XXX test this after changing Sum.
     --   start <- astMap m lb
