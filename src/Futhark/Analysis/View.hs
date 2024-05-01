@@ -25,6 +25,8 @@ import Futhark.SoP.Monad (addRange)
 --------------------------------------------------------------
 -- Vile and wicked temporary code.
 --------------------------------------------------------------
+-- This function handles type refinements. Type refinements are on the
+-- form (arg: {t | \x -> f x}) where arg is applied to \x -> f x.
 handleRefinementTypes :: E.Exp -> IndexFnM ()
 handleRefinementTypes (E.Var (E.QualName _ vn)
                              (E.Info {E.unInfo = E.Scalar lol@(E.Refinement _ty ref)}) _) =
@@ -32,10 +34,12 @@ handleRefinementTypes (E.Var (E.QualName _ vn)
   (handleRefinement ref) vn
 handleRefinementTypes _ = pure ()
 
--- Type refinements are on the form (arg: {t | \x -> f x})
--- where arg is applied to \x -> f x.
--- This function takes a refinement \x -> f x and returns a function
--- that handles this refinement when applied to a name (i.e., arg).
+-- This function takes a type refinement \x -> f x and returns a function
+-- that handles this refinement when applied to a name (i.e., arg
+-- for (arg: {t | \x -> f x})).
+--   For example, the refinement \x -> forall x (>= 0) will return
+-- a function that takes a name and adds a range with that name
+-- lower bounded by 0 to the environment.
 handleRefinement :: E.ExpBase E.Info E.VName -> E.VName -> IndexFnM ()
 handleRefinement (E.Lambda [E.Id x _ _] (E.AppExp (E.Apply f args _) _) _ _ _)
   | Just "forall" <- getFun f,
@@ -406,7 +410,7 @@ getOOB lower_bound upper_bound (IndexFn iter cases)
 getOOB _ _ _ = pure Nothing
 
 checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
-checkMonotonic iter (cond, x) = do
+checkMonotonic iter@(Forall i dom) (cond, x) = do
   -- i is name in iter
   -- new name q
   -- new name r
@@ -417,10 +421,15 @@ checkMonotonic iter (cond, x) = do
   --           x{r/i} - x{q/i} >= 0
   -- if x = ∑j∈[lb, ..., i] a[j] then we can just check
   --   0 <= min{shp}
-  let test = Cases . NE.singleton $ (cond, x :>= SoP2 (SoP.int2SoP 0))
-  debugM $ "checkMonotonic test: " <> prettyString test
-  IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
+  -- q <- newNameFromString "q"
+  -- r <- newNameFromString "r"
+  -- addRange (mkRange )
+  let test = (cond, x :>= SoP2 (SoP.int2SoP 0))
+  let test' = IndexFn iter (Cases . NE.singleton $ test)
+  debugM $ "checkMonotonic test: " <> prettyString test'
+  IndexFn _ (Cases res) <- refineIndexFn test'
   debugM ("checkMonotonic result: " <> prettyString (IndexFn iter (Cases res)))
   case res of
     (_, Bool True) :| [] -> pure True
     _ -> pure False
+checkMonotonic _ _ = pure False

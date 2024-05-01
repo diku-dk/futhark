@@ -33,6 +33,7 @@ import Data.List.NonEmpty qualified as NE
 import Futhark.SoP.Monad
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Debug.Trace (traceM, trace)
+import Data.Text (unpack)
 
 data Term =
     Var VName
@@ -380,3 +381,8 @@ casesToList (Cases xs) = NE.toList xs
 
 toScalarIndexFn :: Term -> IndexFn
 toScalarIndexFn e = IndexFn Empty (toCases e)
+
+prettyRanges :: Pretty u => M.Map u (SoP.Range u) -> String
+prettyRanges = toString . indent 4 . stack . map pretty . M.toList
+  where
+    toString = unpack . docText

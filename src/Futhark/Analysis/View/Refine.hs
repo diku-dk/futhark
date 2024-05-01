@@ -112,54 +112,13 @@ refineIndexFn (IndexFn it (Cases cases)) = do
         [([Var x], 1)] -> pure $ Var x
         _ -> pure $ SoP2 sop
       -- pure (Var vn)
-    refineTerm e@(x :== y) = do
-      x' <- refineTerm x
-      y' <- refineTerm y
-      b <- termToSoP x' $==$ termToSoP y'
-      pure $ if b then Bool True else e
-    refineTerm e@(x :> y)  = do
-      x' <- refineTerm x
-      y' <- refineTerm y
-      b <- termToSoP x' $>$ termToSoP y'
-      pure $ if b then Bool True else e
-    refineTerm e@(x :>= y)  = do
-      x' <- refineTerm x
-      y' <- refineTerm y
-      env' <- gets algenv
-      debugM ("refine " <> prettyString e <> "\n  " <> prettyString (ranges env'))
-      -- TODO don't do this twice lol. First is to get the sum in the env.
-      b <- termToSoP x' $>=$ termToSoP y'
-      refineSumRangesInEnv
-      b <- termToSoP x' $>=$ termToSoP y'
-      env' <- gets algenv
-      debugM ("QQ " <> prettyString (ranges env'))
-      debugM ("QQ " <> prettyString b)
-      pure $ if b then Bool True else e
-    refineTerm e@(x :< y)  = do
-      x' <- refineTerm x
-      y' <- refineTerm y
-      b <- termToSoP x' $<$ termToSoP y'
-      pure $ if b then Bool True else e
-    refineTerm e@(x :<= y)  = do
-      x' <- refineTerm x
-      y' <- refineTerm y
-      b <- termToSoP x' $<=$ termToSoP y'
-      pure $ if b then Bool True else e
-    refineTerm e@(x :&& y)  = do
-      x' <- refineTerm x
-      y' <- refineTerm y
-      case (x', y') of
-        (Bool True, Bool True) -> pure $ Bool True
-        _ -> pure e
-    refineTerm e@(x :|| y)  = do
-      x' <- refineTerm x
-      y' <- refineTerm y
-      env' <- gets algenv
-      debugM ("refine " <> prettyString e <> "\n  " <> prettyString (ranges env'))
-      case (x', y') of
-        (Bool True, _) -> pure $ Bool True
-        (_, Bool True) -> pure $ Bool True
-        _ -> pure e
+    refineTerm (x :== y) = refineRelation (:==) x y
+    refineTerm (x :> y)  = refineRelation (:>) x y
+    refineTerm (x :>= y) = refineRelation (:>=) x y
+    refineTerm (x :< y) = refineRelation (:<) x y
+    refineTerm (x :<= y) = refineRelation (:<=) x y
+    refineTerm (x :&& y) = refineRelation (:&&) x y
+    refineTerm (x :|| y) = refineRelation (:||) x y
     refineTerm (Sum j lb ub e) = do
       -- XXX test this after changing Sum.
       start <- astMap m lb
@@ -171,7 +130,7 @@ refineIndexFn (IndexFn it (Cases cases)) = do
             refineTerm (SoP2 e)
         _ -> do
           addRange (Var j) (mkRange start end)
-          Sum j start end <$> (termToSoP <$> refineTerm (SoP2 e))
+          Sum j start end <$> astMap m e
     -- refineTerm (SumSlice vn lb ub) = do
     --   -- XXX test this after changing Sum.
     --   start <- astMap m lb
@@ -185,6 +144,35 @@ refineIndexFn (IndexFn it (Cases cases)) = do
     --       -- Sum j start end <$> refineTerm e
     --       pure $ SumSlice vn start end
     refineTerm v = astMap m v
+
+    refineRelation rel x y = do
+      x' <- refineTerm x
+      y' <- refineTerm y
+      env' <- gets algenv
+      debugM ("refine " <> prettyString (x `rel` y) <> "\nWith ranges:\n" <> prettyRanges (ranges env'))
+      debugM ("x' = " <> prettyString x')
+      debugM ("y' = " <> prettyString y')
+      -- TODO don't do this twice lol. First is to get the sum in the env.
+      b <- solve (x' `rel` y')
+      unless b refineSumsInEnv
+      b' <- if b then pure b else solve (x' `rel` y')
+      env'' <- gets algenv
+      debugM ("Ranges after refinement:\n" <> prettyRanges (ranges env''))
+      debugM ("Result: " <> prettyString b')
+      pure $ if b' then Bool True else x' `rel` y'
+      where
+        -- Use Fourier-Motzkin elimination to determine the truth value
+        -- of an expresion, if it can be determined in the given environment.
+        -- If the truth value cannot be determined, False is also returned.
+        solve (Bool True :&& Bool True) = pure True
+        solve (Bool True :|| _) = pure True
+        solve (_ :|| Bool True) = pure True
+        solve (a :== b) = termToSoP a $==$ termToSoP b
+        solve (a :> b)  = termToSoP a $>$ termToSoP b
+        solve (a :>= b) = termToSoP a $>=$ termToSoP b
+        solve (a :< b)  = termToSoP a $<$ termToSoP b
+        solve (a :<= b) = termToSoP a $<=$ termToSoP b
+        solve _ = pure False
 
 -- Want to add sum terms as _symbols_ to the env denoting the test.
 -- (Use addRel like for done the predicates above.)
@@ -225,8 +213,8 @@ refineIndexFn (IndexFn it (Cases cases)) = do
 -- using monotonicity logic.
 -- The reason I don't do this in the case for Sum is that I think
 -- the sums only end up in the env when there's a relation on them?
-refineSumRangesInEnv :: IndexFnM ()
-refineSumRangesInEnv = do
+refineSumsInEnv :: IndexFnM ()
+refineSumsInEnv = do
   ranges <- ranges <$> gets algenv
   -- debugM $ "refineSumRangesInEnv " <> prettyString ranges
   mapM_ (refineSumRange . fst) (M.toList ranges)
@@ -242,4 +230,3 @@ refineSumRangesInEnv = do
                <> " is " <> prettyString b
       when b $ addRange t (mkRangeLB zero)
     refineSumRange _ = pure ()
-
