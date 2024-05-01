@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:           futhark
-version:        0.26.0
+version:        0.25.16
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -122,6 +122,7 @@ library
       Futhark.AD.Rev.Scan
       Futhark.AD.Rev.Scatter
       Futhark.AD.Rev.SOAC
+      Futhark.Analysis.AccessPattern
       Futhark.Analysis.AlgSimplify
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
@@ -137,6 +138,7 @@ library
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
+      Futhark.Analysis.PrimExp.Table
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench
@@ -323,6 +325,9 @@ library
       Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
       Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
       Futhark.Optimise.MergeGPUBodies
+      Futhark.Optimise.ArrayLayout
+      Futhark.Optimise.ArrayLayout.Transform
+      Futhark.Optimise.ArrayLayout.Layout
       Futhark.Optimise.ReduceDeviceSyncs
       Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
       Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
@@ -360,7 +365,6 @@ library
       Futhark.Pass.ExtractKernels.ToGPU
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
-      Futhark.Pass.KernelBabysitting
       Futhark.Pass.LiftAllocations
       Futhark.Pass.LowerAllocations
       Futhark.Pass.Simplify
@@ -501,6 +505,7 @@ test-suite unit
   other-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
+      Futhark.Analysis.PrimExp.TableTests
       Futhark.BenchTests
       Futhark.IR.GPUTests
       Futhark.IR.MCTests
@@ -515,6 +520,9 @@ test-suite unit
       Futhark.IR.SyntaxTests
       Futhark.Internalise.TypesValuesTests
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
+      Futhark.Optimise.ArrayLayout.AnalyseTests
+      Futhark.Optimise.ArrayLayout.LayoutTests
+      Futhark.Optimise.ArrayLayoutTests
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
       Language.Futhark.CoreTests
@@ -525,6 +533,7 @@ test-suite unit
       Paths_futhark
   build-depends:
       QuickCheck >=2.8
+      , mtl >=2.2.1
     , base
     , containers
     , free

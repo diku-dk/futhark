@@ -1,6 +1,4 @@
 -- ==
--- compiled random input {[2048][4096]f32 [4096][2048]f32} auto output
-
 -- compiled random input {[2011][4011]f32 [4011][1011]f32} auto output
 -- compiled random input {[128][1024]f32 [1024][128]f32} auto output
 -- compiled random input {[128][4096]f32 [4096][128]f32} auto output
@@ -13,6 +11,9 @@
 --   [ [22.0f32, 28.0f32], [40.0f32, 52.0f32] ]
 -- }
 --
+
+-- compiled random input {[2048][4096]f32 [4096][2048]f32} auto output
+
 
 let dotproduct [n] (x: [n]f32) (y: [n]f32) =
     map2 (*) x y |> reduce (+) 0
