@@ -1,17 +1,17 @@
+{-# OPTIONS_GHC -fno-warn-type-defaults #-}
+
 module Futhark.Solve.SimplexTests
   ( tests,
   )
 where
 
 import Data.Vector.Unboxed qualified as V
-import Debug.Trace
 import Futhark.Solve.LP
 import Futhark.Solve.Matrix qualified as M
 import Futhark.Solve.Simplex
 import Test.Tasty
 import Test.Tasty.HUnit
 import Prelude hiding (or)
-import Prelude qualified
 
 tests :: TestTree
 tests =
@@ -69,10 +69,8 @@ tests =
               case simplexLP lp of
                 Nothing -> False
                 Just (z, sol) ->
-                  and
-                    [ z `approxEq` (14.08 :: Double),
-                      and $ zipWith approxEq (V.toList sol) [1.3, 3.3]
-                    ],
+                  (z `approxEq` (14.08 :: Double))
+                    && and (zipWith approxEq (V.toList sol) [1.3, 3.3]),
       testCase "5" $
         let lp =
               LP
@@ -88,10 +86,8 @@ tests =
               case simplexLP lp of
                 Nothing -> False
                 Just (z, sol) ->
-                  and
-                    [ z `approxEq` (0 :: Double),
-                      and $ zipWith approxEq (V.toList sol) [0]
-                    ],
+                  (z `approxEq` (0 :: Double))
+                    && and (zipWith approxEq (V.toList sol) [0]),
       testCase "6" $
         let lp =
               LP
@@ -107,10 +103,8 @@ tests =
               case simplexLP lp of
                 Nothing -> False
                 Just (z, sol) ->
-                  and
-                    [ z `approxEq` (5 :: Double),
-                      and $ zipWith approxEq (V.toList sol) [5]
-                    ],
+                  z `approxEq` (5 :: Double)
+                    && and (zipWith approxEq (V.toList sol) [5]),
       testCase "7" $
         let prog =
               LinearProg
@@ -121,17 +115,14 @@ tests =
                       var "b1" ~+~ var "b2" ~<=~ constant 1
                     ]
                 }
-            (lp, idxmap) = linearProgToLP prog
-            lpe = convert lp
+            (lp, _idxmap) = linearProgToLP prog
          in assertBool
               (unlines [show $ simplexLP lp])
               $ case simplexLP lp of
                 Nothing -> False
                 Just (z, sol) ->
-                  and
-                    [ z `approxEq` (10 :: Double),
-                      and $ zipWith (==) (V.toList sol) [1, 0, 10]
-                    ],
+                  (z `approxEq` (10 :: Double))
+                    && and (zipWith (==) (V.toList sol) [1, 0, 10]),
       testCase "8" $
         let prog =
               LinearProg
@@ -143,13 +134,12 @@ tests =
                     ]
                       <> oneIsZero ("b1", "x1") ("b2", "x2")
                 }
-            (lp, idxmap) = linearProgToLP prog
-            lpe = convert lp
+            (lp, _idxmap) = linearProgToLP prog
          in assertBool
               (unlines [show $ simplexLP lp])
               $ case simplexLP lp of
                 Nothing -> False
-                Just (z, sol) ->
+                Just (z, _sol) ->
                   and
                     [ z `approxEq` (15 :: Double)
                     ],
@@ -192,13 +182,12 @@ tests =
                       var "b_R2" ~+~ var "b_M3" ~<=~ constant 1
                     ]
                 }
-            (lp, idxmap) = linearProgToLP prog
-            lpe = convert lp
+            (lp, _idxmap) = linearProgToLP prog
          in assertBool
               (unlines [show $ simplexLP lp])
               $ case simplexLP lp of
                 Nothing -> False
-                Just (z, sol) ->
+                Just (z, _sol) ->
                   and
                     [ z `approxEq` (0 :: Double)
                     ],
@@ -217,17 +206,16 @@ tests =
                       var "0b_R" ~+~ var "1b_M" ~<=~ constant 1
                     ]
                 }
-            (lp, idxmap) = linearProgToLP prog
-            lpe = convert lp
+            (lp, _idxmap) = linearProgToLP prog
          in assertBool
               (unlines [show $ simplexLP lp])
               $ case simplexLP lp of
                 Nothing -> False
-                Just (z, sol) ->
+                Just (z, _sol) ->
                   and
                     [ z `approxEq` (0 :: Double)
                     ]
     ]
 
 approxEq :: (Fractional a, Ord a) => a -> a -> Bool
-approxEq x1 x2 = (abs $ x1 - x2) < 10 ^^ (-10 :: Int)
+approxEq x1 x2 = abs (x1 - x2) < 10 ^^ (-10 :: Int)

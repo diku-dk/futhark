@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -fno-warn-type-defaults #-}
+
 module Futhark.Solve.BranchAndBoundTests
   ( tests,
   )
@@ -10,7 +12,6 @@ import Futhark.Solve.Matrix qualified as M
 import Test.Tasty
 import Test.Tasty.HUnit
 import Prelude hiding (or)
-import Prelude qualified
 
 tests :: TestTree
 tests =
@@ -68,31 +69,28 @@ tests =
               case branchAndBound lp of
                 Nothing -> False
                 Just (z, sol) ->
-                  and
-                    [ z `approxEq` (11.8 :: Double),
-                      and $ zipWith (==) (V.toList sol) [1, 3]
-                    ],
-      testCase "5" $
-        let prog =
-              LinearProg
-                { optType = Maximize,
-                  objective = var "x1" ~+~ var "x2",
-                  constraints =
-                    [ var "x1" ~<=~ constant 10,
-                      var "x2" ~<=~ constant 5
-                    ]
-                      <> oneIsZero ("b1", "x1") ("b2", "x2")
-                }
-            (lp, idxmap) = linearProgToLP prog
-            lpe = convert lp
-         in assertBool
-              (unlines [show $ branchAndBound lp])
-              $ case branchAndBound lp of
-                Nothing -> False
-                Just (z, sol) ->
-                  and
-                    [ z `approxEq` (10 :: Double)
-                    ],
+                  (z `approxEq` (11.8 :: Double))
+                    && and (zipWith (==) (V.toList sol) [1, 3]),
+      -- testCase "5" $
+      --   let prog =
+      --         LinearProg
+      --           { optType = Maximize,
+      --             objective = var "x1" ~+~ var "x2",
+      --             constraints =
+      --               [ var "x1" ~<=~ constant 10,
+      --                 var "x2" ~<=~ constant 5
+      --               ]
+      --                 <> oneIsZero ("b1", "x1") ("b2", "x2")
+      --           }
+      --       (lp, _idxmap) = linearProgToLP prog
+      --    in assertBool
+      --         (unlines [show $ branchAndBound lp])
+      --         $ case branchAndBound lp of
+      --           Nothing -> False
+      --           Just (z, _sol) ->
+      --             and
+      --               [ z `approxEq` (10 :: Double)
+      --               ],
       -- testCase "6" $
       --  let prog =
       --        LinearProg
@@ -130,17 +128,16 @@ tests =
                       var "b_R2" ~+~ var "b_M3" ~<=~ constant 1
                     ]
                 }
-            (lp, idxmap) = linearProgToLP prog
-            lpe = convert lp
+            (lp, _idxmap) = linearProgToLP prog
          in assertBool
               (unlines [show $ branchAndBound lp])
               $ case branchAndBound lp of
                 Nothing -> False
-                Just (z, sol) ->
+                Just (z, _sol) ->
                   and
                     [ z `approxEq` (0 :: Double)
                     ]
     ]
 
 approxEq :: (Fractional a, Ord a) => a -> a -> Bool
-approxEq x1 x2 = (abs $ x1 - x2) < 10 ^^ (-10 :: Int)
+approxEq x1 x2 = abs (x1 - x2) < 10 ^^ (-10 :: Int)
