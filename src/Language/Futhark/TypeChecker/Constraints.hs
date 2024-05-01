@@ -213,7 +213,7 @@ unifySharedFields reason fs1 fs2 =
     solveEq reason ts1 ts2
 
 mustSupportEql :: Reason -> Type -> SolveM ()
-mustSupportEql reason t = pure ()
+mustSupportEql _reason _t = pure ()
 
 -- Precondition: 'v' is currently flexible.
 subTyVar :: Reason -> VName -> Int -> Type -> SolveM ()

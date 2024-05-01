@@ -32,23 +32,18 @@ module Futhark.Solve.LP
   )
 where
 
-import Control.Monad.LPMonad
-import Data.Char (isAscii)
-import Data.List qualified as L
 import Data.Map (Map)
-import Data.Map qualified as Map
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Set (Set)
 import Data.Set qualified as S
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
-import Debug.Trace
 import Futhark.Solve.Matrix (Matrix (..))
-import Futhark.Solve.Matrix qualified as M
+import Futhark.Solve.Matrix qualified as Matrix
 import Futhark.Util.Pretty
 import Language.Futhark.Pretty
 import Prelude hiding (max, min, or)
-import Prelude qualified
 
 -- | A linear program. 'LP c a d' represents the program
 --
@@ -79,24 +74,25 @@ data LPE a = LPE
   }
   deriving (Eq, Show)
 
-rowEchelonLPE :: (Show a, Unbox a, Fractional a, Ord a) => LPE a -> LPE a
+rowEchelonLPE :: (Unbox a, Fractional a, Ord a) => LPE a -> LPE a
 rowEchelonLPE (LPE c a d) =
-  LPE c (M.sliceCols (V.generate (ncols a) id) ad) (M.getCol (ncols a) ad)
+  LPE c (Matrix.sliceCols (V.generate (ncols a) id) ad) (Matrix.getCol (ncols a) ad)
   where
     ad =
-      M.filterRows (V.any (Prelude./= 0)) $
-        (M.rowEchelon $ a M.<|> M.fromColVector d)
+      Matrix.filterRows
+        (V.any (Prelude./= 0))
+        (Matrix.rowEchelon $ a Matrix.<|> Matrix.fromColVector d)
 
 -- | Converts an 'LP' into an equivalent 'LPE' by introducing slack
 -- variables.
-convert :: (Show a, Num a, Unbox a) => LP a -> LPE a
+convert :: (Num a, Unbox a) => LP a -> LPE a
 convert (LP c a d) = LPE c' a' d
   where
-    a' = a M.<|> M.diagonal (V.replicate (M.nrows a) 1)
-    c' = c V.++ V.replicate (M.nrows a) 0
+    a' = a Matrix.<|> Matrix.diagonal (V.replicate (Matrix.nrows a) 1)
+    c' = c V.++ V.replicate (Matrix.nrows a) 0
 
 -- | Linear sum of variables.
-newtype LSum v a = LSum {lsum :: (Map (Maybe v) a)}
+newtype LSum v a = LSum {lsum :: Map (Maybe v) a}
   deriving (Show, Eq)
 
 instance (IsName v, Pretty a, Eq a, Num a) => Pretty (LSum v a) where
@@ -108,10 +104,10 @@ instance (IsName v, Pretty a, Eq a, Num a) => Pretty (LSum v a) where
               Nothing -> pretty a
               Just k' -> (if a == 1 then mempty else pretty a <> "*") <> prettyName k'
         )
-      $ Map.toList m
+      $ M.toList m
 
 isConstant :: (Ord v) => LSum v a -> Bool
-isConstant (LSum m) = Map.keysSet m `S.isSubsetOf` S.singleton Nothing
+isConstant (LSum m) = M.keysSet m `S.isSubsetOf` S.singleton Nothing
 
 instance Functor (LSum v) where
   fmap f (LSum m) = LSum $ fmap f m
@@ -120,7 +116,7 @@ class Vars a v where
   vars :: a -> Set v
 
 instance (Ord v) => Vars (LSum v a) v where
-  vars = S.fromList . catMaybes . Map.keys . lsum
+  vars = S.fromList . catMaybes . M.keys . lsum
 
 -- | Type of constraint
 data CType = Equal | LessEq
@@ -159,7 +155,7 @@ data LinearProg v a = LinearProg
 
 instance (IsName v, Pretty a, Eq a, Num a) => Pretty (LinearProg v a) where
   pretty (LinearProg opt obj cs) =
-    vcat $
+    vcat
       [ pretty opt,
         indent 2 $ pretty obj,
         "subject to",
@@ -172,10 +168,10 @@ instance (Ord v) => Vars (LinearProg v a) v where
       <> foldMap vars (constraints lp)
 
 bigM :: (Num a) => a
-bigM = 2 ^ 10
+bigM = 2 ^ (10 :: Int)
 
 -- max{x, y} = z
-max :: (Eq a, Num a, Ord v) => v -> LSum v a -> LSum v a -> LSum v a -> [Constraint v a]
+max :: (Num a, Ord v) => v -> LSum v a -> LSum v a -> LSum v a -> [Constraint v a]
 max b x y z =
   [ z ~>=~ x,
     z ~>=~ y,
@@ -184,7 +180,7 @@ max b x y z =
   ]
 
 -- min{x, y} = z
-min :: (Eq a, Num a, Ord v) => v -> v -> v -> v -> [Constraint v a]
+min :: (Num a, Ord v) => v -> v -> v -> v -> [Constraint v a]
 min b x y z =
   [ var z ~<=~ var x,
     var z ~<=~ var y,
@@ -192,7 +188,7 @@ min b x y z =
     var z ~>=~ var y ~-~ bigM ~*~ var b
   ]
 
-oneIsZero :: (Eq a, Num a, Ord v) => (v, v) -> (v, v) -> [Constraint v a]
+oneIsZero :: (Num a, Ord v) => (v, v) -> (v, v) -> [Constraint v a]
 oneIsZero (b1, x1) (b2, x2) =
   mkC b1 x1
     <> mkC b2 x2
@@ -202,7 +198,7 @@ oneIsZero (b1, x1) (b2, x2) =
       [ var x ~<=~ bigM ~*~ var b
       ]
 
-or :: (Eq a, Num a, Ord v) => v -> v -> Constraint v a -> Constraint v a -> [Constraint v a]
+or :: (Num a, Ord v) => v -> v -> Constraint v a -> Constraint v a -> [Constraint v a]
 or b1 b2 c1 c2 =
   mkC b1 c1
     <> mkC b2 c2
@@ -216,93 +212,88 @@ or b1 b2 c1 c2 =
       [ l ~<=~ r ~+~ bigM ~*~ (constant 1 ~-~ var b)
       ]
 
-bin :: (Num a, Ord v) => v -> Constraint v a
+bin :: (Num a) => v -> Constraint v a
 bin v = Constraint LessEq (var v) (constant 1)
 
-(~==~) :: (Num a, Ord v) => LSum v a -> LSum v a -> Constraint v a
+(~==~) :: LSum v a -> LSum v a -> Constraint v a
 l ~==~ r = Constraint Equal l r
 
 infix 4 ~==~
 
-(~<=~) :: (Num a, Ord v) => LSum v a -> LSum v a -> Constraint v a
+(~<=~) :: LSum v a -> LSum v a -> Constraint v a
 l ~<=~ r = Constraint LessEq l r
 
 infix 4 ~<=~
 
-(~>=~) :: (Num a, Ord v) => LSum v a -> LSum v a -> Constraint v a
+(~>=~) :: (Num a) => LSum v a -> LSum v a -> Constraint v a
 l ~>=~ r = Constraint LessEq (neg l) (neg r)
 
 infix 4 ~>=~
 
 normalize :: (Eq a, Num a) => LSum v a -> LSum v a
-normalize = LSum . Map.filter (/= 0) . lsum
+normalize = LSum . M.filter (/= 0) . lsum
 
 var :: (Num a) => v -> LSum v a
-var v = LSum $ Map.singleton (Just v) (fromInteger 1)
+var v = LSum $ M.singleton (Just v) 1
 
 constant :: a -> LSum v a
-constant = LSum . Map.singleton Nothing
+constant = LSum . M.singleton Nothing
 
 cval :: (Num a, Ord v) => LSum v a -> a
 cval = (! Nothing)
 
-(~+~) :: (Eq a, Num a, Ord v) => LSum v a -> LSum v a -> LSum v a
--- (LSum x) ~+~ (LSum y) = normalize $ LSum $ Map.unionWith (+) x y
-(LSum x) ~+~ (LSum y) = LSum $ Map.unionWith (+) x y
+(~+~) :: (Ord v, Num a) => LSum v a -> LSum v a -> LSum v a
+(LSum x) ~+~ (LSum y) = LSum $ M.unionWith (+) x y
 
 infixl 6 ~+~
 
-(~-~) :: (Eq a, Num a, Ord v) => LSum v a -> LSum v a -> LSum v a
-x ~-~ y = x ~+~ (neg y)
+(~-~) :: (Ord v, Num a) => LSum v a -> LSum v a -> LSum v a
+x ~-~ y = x ~+~ neg y
 
 infixl 6 ~-~
 
-(~*~) :: (Eq a, Num a, Ord v) => a -> LSum v a -> LSum v a
--- a ~*~ s = normalize $ fmap (a *) s
+(~*~) :: (Num a) => a -> LSum v a -> LSum v a
 a ~*~ s = fmap (a *) s
 
 infixl 7 ~*~
 
 (!) :: (Num a, Ord v) => LSum v a -> Maybe v -> a
-(LSum m) ! v =
-  case m Map.!? v of
-    Nothing -> 0
-    Just a -> a
+(LSum m) ! v = fromMaybe 0 (m M.!? v)
 
-neg :: (Num a, Ord v) => LSum v a -> LSum v a
+neg :: (Num a) => LSum v a -> LSum v a
 neg (LSum x) = LSum $ fmap negate x
 
 -- | Converts a linear program given with a list of constraints
 -- into the standard form.
 linearProgToLP ::
   forall v a.
-  (Unbox a, Num a, Ord v, Eq a) =>
+  (Unbox a, Num a, Ord v) =>
   LinearProg v a ->
   (LP a, Map Int v)
 linearProgToLP (LinearProg otype obj cs) =
-  (LP c a d, idxMap)
+  let c = mkRow $ convertObj otype obj
+      a = Matrix.fromVectors $ map (mkRow . fst) cs'
+      d = V.fromList $ map snd cs'
+   in (LP c a d, idxMap)
   where
     cs' = foldMap (convertEqCType . splitConstraint) cs
     idxMap =
-      Map.fromList $
+      M.fromList $
         zip [0 ..] $
           catMaybes $
-            Map.keys $
+            M.keys $
               mconcat $
                 map (lsum . fst) cs'
-    mkRow s = V.generate (Map.size idxMap) $ \i -> s ! Just (idxMap Map.! i)
-    c = mkRow $ convertObj otype obj
-    a = M.fromVectors $ map (mkRow . fst) cs'
-    d = V.fromList $ map snd cs'
+    mkRow s = V.generate (M.size idxMap) $ \i -> s ! Just (idxMap M.! i)
+
+    convertEqCType :: (CType, LSum v a, a) -> [(LSum v a, a)]
+    convertEqCType (Equal, s, a) = [(s, a), (neg s, negate a)]
+    convertEqCType (LessEq, s, a) = [(s, a)]
 
     splitConstraint :: Constraint v a -> (CType, LSum v a, a)
     splitConstraint (Constraint ctype l r) =
       let c = negate $ cval (l ~-~ r)
        in (ctype, l ~-~ r ~-~ constant c, c)
-
-    convertEqCType :: (CType, LSum v a, a) -> [(LSum v a, a)]
-    convertEqCType (Equal, s, a) = [(s, a), (neg s, negate a)]
-    convertEqCType (LessEq, s, a) = [(s, a)]
 
     convertObj :: OptType -> LSum v a -> LSum v a
     convertObj Maximize s = s
@@ -312,24 +303,24 @@ linearProgToLP (LinearProg otype obj cs) =
 -- into the equational form. Assumes no <= constraints.
 linearProgToLPE ::
   forall v a.
-  (Unbox a, Num a, Ord v, Eq a) =>
+  (Unbox a, Num a, Ord v) =>
   LinearProg v a ->
   (LPE a, Map Int v)
 linearProgToLPE (LinearProg otype obj cs) =
-  (LPE c a d, idxMap)
+  let c = mkRow $ convertObj otype obj
+      a = Matrix.fromVectors $ map (mkRow . fst) cs'
+      d = V.fromList $ map snd cs'
+   in (LPE c a d, idxMap)
   where
     cs' = map (checkOnlyEqType . splitConstraint) cs
     idxMap =
-      Map.fromList $
+      M.fromList $
         zip [0 ..] $
           catMaybes $
-            Map.keys $
+            M.keys $
               mconcat $
                 map (lsum . fst) cs'
-    mkRow s = V.generate (Map.size idxMap) $ \i -> s ! Just (idxMap Map.! i)
-    c = mkRow $ convertObj otype obj
-    a = M.fromVectors $ map (mkRow . fst) cs'
-    d = V.fromList $ map snd cs'
+    mkRow s = V.generate (M.size idxMap) $ \i -> s ! Just (idxMap M.! i)
 
     splitConstraint :: Constraint v a -> (CType, LSum v a, a)
     splitConstraint (Constraint ctype l r) =
@@ -343,15 +334,3 @@ linearProgToLPE (LinearProg otype obj cs) =
     convertObj :: OptType -> LSum v a -> LSum v a
     convertObj Maximize s = s
     convertObj Minimize s = neg s
-
-test1 :: LPE Double
-test1 =
-  LPE
-    { pc = V.fromList [5.5, 2.1],
-      pA =
-        M.fromLists
-          [ [-1, 1],
-            [8, 2]
-          ],
-      pd = V.fromList [2, 17]
-    }

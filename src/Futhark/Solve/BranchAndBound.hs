@@ -5,7 +5,6 @@ import Data.Maybe
 import Data.Set qualified as S
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
-import Debug.Trace
 import Futhark.Solve.LP (LP (..))
 import Futhark.Solve.Matrix
 import Futhark.Solve.Simplex
@@ -54,7 +53,7 @@ branchAndBound prob@(LP _ a d) = (zopt,) <$> mopt
 
     -- TODO: use isInt x = x == round x
     -- requires a better 'rowEchelon' implementation for matrices
-    isInt x = (abs (fromIntegral (round x) - x)) <= 10 ^^ (-10)
+    isInt x = abs (fromIntegral (round x :: Int) - x) <= 10 ^^ ((-10) :: Int)
     mkProblem =
       M.foldrWithKey
         ( \idx bound acc -> addBound acc idx bound

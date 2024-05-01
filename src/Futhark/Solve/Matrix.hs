@@ -36,7 +36,6 @@ module Futhark.Solve.Matrix
 where
 
 import Data.List qualified as L
-import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
@@ -84,7 +83,7 @@ fromVectors :: (Unbox a) => [Vector a] -> Matrix a
 fromVectors [] = empty
 fromVectors vs =
   Matrix
-    { elems = V.concat $ vs,
+    { elems = V.concat vs,
       nrows = length vs,
       ncols = V.length $ head vs
     }
@@ -263,18 +262,7 @@ update :: (Unbox a) => Matrix a -> Vector ((Int, Int), a) -> Matrix a
 update m upds =
   generate
     ( \i j ->
-        case (M.fromList $ V.toList upds) M.!? (i, j) of
-          Nothing -> m ! (i, j)
-          Just x -> x
-    )
-    (nrows m)
-    (ncols m)
-
-update_ :: (Unbox a) => Matrix a -> Map (Int, Int) a -> Matrix a
-update_ m upds =
-  generate
-    ( \i j ->
-        case upds M.!? (i, j) of
+        case M.fromList (V.toList upds) M.!? (i, j) of
           Nothing -> m ! (i, j)
           Just x -> x
     )
@@ -282,7 +270,7 @@ update_ m upds =
     (ncols m)
 
 -- This version doesn't maintain integrality of the entries.
-rowEchelon :: (Num a, Fractional a, Unbox a, Ord a) => Matrix a -> Matrix a
+rowEchelon :: (Fractional a, Unbox a, Ord a) => Matrix a -> Matrix a
 rowEchelon = rowEchelon' 0 0
   where
     rowEchelon' h k m@(Matrix _ nr nc)

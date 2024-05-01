@@ -249,7 +249,7 @@ newTypeOverloaded :: SrcLoc -> Name -> [PrimType] -> TermM (TypeBase d NoUniquen
 newTypeOverloaded loc name pts =
   tyVarType NoUniqueness <$> newTyVarWith name (TyVarPrim (locOf loc) pts)
 
-newSVar :: (Located loc) => loc -> Name -> TermM SVar
+newSVar :: loc -> Name -> TermM SVar
 newSVar _loc desc = do
   i <- incCounter
   newID $ mkTypeVarName desc i
@@ -426,7 +426,7 @@ lookupVar loc qn@(QualName qs name) = do
       if null tparams && null qs
         then pure t
         else do
-          (tnames, t') <- instTypeScheme qn loc tparams t
+          (_tnames, t') <- instTypeScheme qn loc tparams t
           -- TODO - qualify type names, like in the old type checker.
           pure t'
     Just EqualityF -> do
@@ -707,22 +707,12 @@ checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
       AutoMap {autoRep = toShape r_var, autoMap = toShape m_var, autoFrame = toShape m_var <> fframe}
     )
   where
-    -- stripFrame :: Shape Size -> Type -> Type
-    -- stripFrame frame (Array u ds t) =
-    --  let mnew_shape = Shape <$> L.stripPrefix (toSComp <$> shapeDims frame) (shapeDims ds)
-    --   in case mnew_shape of
-    --        Nothing -> Scalar t
-    --        Just new_shape -> arrayOfWithAliases u new_shape $ Scalar t
-    -- stripFrame _ t = t
-
-    isFunType (Scalar Arrow {}) = True
-    isFunType _ = False -- (fix)
     toSComp (Var (QualName [] x) _ _) = SVar x
     toSComp _ = error ""
     toShape = Shape . pure
     split (Scalar (Arrow _ _ _ a (RetType _ b))) =
       pure (a, b `setUniqueness` NoUniqueness)
-    split (Array u s t) = do
+    split (Array _u s t) = do
       (a, b) <- split $ Scalar t
       pure (arrayOf s a, arrayOf s b)
     split ftype' = do
@@ -1373,7 +1363,7 @@ checkSingleExp e = runTermM $ do
   cts <- gets termConstraints
   tyvars <- gets termTyVars
   artificial <- gets termArtificial
-  ((cts', artificial', tyvars'), _, e'') <-
+  ((cts', _artificial', tyvars'), _, e'') <-
     rankAnalysis1 (srclocOf e') cts tyvars artificial [] e'
   case solve cts' tyvars' of
     Left err -> pure (Left err, e'')
@@ -1396,7 +1386,7 @@ checkSizeExp e = runTermM $ do
   (cts_tyvars', _, es') <- unzip3 <$> rankAnalysis (srclocOf e) cts tyvars artificial [] e'
 
   solutions <-
-    forM cts_tyvars' $ \(cts', artificial', tyvars') ->
+    forM cts_tyvars' $ \(cts', _artificial', tyvars') ->
       bitraverse pure (traverse (doDefaults mempty)) $ solve cts' tyvars'
 
   case (solutions, es') of

@@ -23,17 +23,14 @@ module Futhark.Internalise.FullNormalise (transformProg) where
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
-import Data.Functor.Identity
 import Data.List (zip4)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
-import Debug.Trace
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
 import Language.Futhark
-import Language.Futhark.Pretty
 import Language.Futhark.Primitive (intValue)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
@@ -502,14 +499,14 @@ transformProg = mapM transformValBind
 expandAMAnnotations :: (MonadFreshNames m) => Exp -> m Exp
 expandAMAnnotations e =
   case e of
-    (AppExp (Apply f args loc) (Info res))
+    (AppExp (Apply f args _) (Info res))
       | ((exts, ams), arg_es) <-
           first unzip $ unzip $ map (first unInfo) $ NE.toList args,
         any (/= mempty) ams -> do
           f' <- expandAMAnnotations f
           arg_es' <- mapM expandAMAnnotations arg_es
           let diets = funDiets $ typeOf f
-          withMapNest loc (zip4 exts ams arg_es' diets) $ \args' -> do
+          withMapNest (zip4 exts ams arg_es' diets) $ \args' -> do
             let rettype =
                   case unfoldFunTypeWithRet $ typeOf f' of
                     Nothing -> error "Function type expected."
@@ -525,7 +522,7 @@ expandAMAnnotations e =
     (AppExp (BinOp op (Info t) (x, Info (xext, xam)) (y, Info (yext, yam)) loc) (Info res)) -> do
       x' <- expandAMAnnotations x
       y' <- expandAMAnnotations y
-      withMapNest loc [(xext, xam, x', Observe), (yext, yam, y', Observe)] $ \[x'', y''] ->
+      withMapNest [(xext, xam, x', Observe), (yext, yam, y', Observe)] $ \[x'', y''] ->
         pure $
           AppExp
             ( BinOp
@@ -542,31 +539,13 @@ expandAMAnnotations e =
       Just (v, ExpSubst arg)
     parSub _ = Nothing
 
-    setNewType e t = astMap identityMapper {mapOnStructType = const $ pure t} e
-
     funDiets :: TypeBase dim as -> [Diet]
     funDiets (Scalar (Arrow _ _ d _ (RetType _ t2))) = d : funDiets t2
     funDiets _ = []
 
-    dropDims :: Int -> TypeBase dim as -> TypeBase dim as
-    dropDims n (Scalar (Arrow u p diet t1 (RetType ds t2))) =
-      Scalar (Arrow u p diet (stripArray n t1) (RetType ds (dropDims n t2)))
-    dropDims n t = stripArray n t
-
-    innerFType :: TypeBase dim as -> [AutoMap] -> TypeBase dim as
-    innerFType (Scalar (Arrow u p diet t1 (RetType ds t2))) ams =
-      Scalar $ Arrow u p diet t1 $ RetType ds $ innerFType' t2 ams
-      where
-        innerFType' t [] = t
-        innerFType' (Scalar (Arrow u p diet t1 (RetType ds t2))) (am : ams) =
-          Scalar $ Arrow u p diet (dropDims (shapeRank (autoMap am)) t1) $ RetType ds $ innerFType' t2 ams
-        innerFType' t [am] = dropDims (shapeRank (autoMap am)) t
-        innerFType' _ _ = error ""
-    innerFType _ _ = error ""
-
 type Level = Int
 
-data AutoMapArg = AutoMapArg
+newtype AutoMapArg = AutoMapArg
   { amArg :: Exp
   }
   deriving (Show)
@@ -582,13 +561,12 @@ data AutoMapParam = AutoMapParam
 withMapNest ::
   forall m.
   (MonadFreshNames m) =>
-  SrcLoc ->
   [(Maybe VName, AutoMap, Exp, Diet)] ->
   ([Exp] -> m Exp) ->
   m Exp
-withMapNest loc args f = do
+withMapNest nest_args f = do
   (param_map, arg_map) <-
-    bimap combineMaps combineMaps . unzip <$> mapM buildArgMap args
+    bimap combineMaps combineMaps . unzip <$> mapM buildArgMap nest_args
   buildMapNest param_map arg_map $ maximum $ M.keys arg_map
   where
     combineMaps :: (Ord k) => [M.Map k v] -> M.Map k [v]
@@ -609,17 +587,17 @@ withMapNest loc args f = do
               args = map amArg $ arg_map M.! l
           body <- buildMapNest param_map arg_map (l - 1)
           pure $
-            mkMap map_dim params body args $
+            mkMap params body args $
               RetType [] $
                 arrayOfWithAliases Nonunique (Shape [map_dim]) (typeOf body)
 
     buildArgMap ::
       (Maybe VName, AutoMap, Exp, Diet) ->
       m (M.Map Level AutoMapParam, M.Map Level AutoMapArg)
-    buildArgMap (ext, am, arg, diet) =
-      foldM (mkArgsAndParams arg) mempty $ reverse [0 .. trueLevel am]
+    buildArgMap (_ext, am, arg, arg_diet) =
+      foldM mkArgsAndParams mempty $ reverse [0 .. trueLevel am]
       where
-        mkArgsAndParams arg (p_map, a_map) l
+        mkArgsAndParams (p_map, a_map) l
           | l == 0 = do
               let arg' = maybe arg (paramToExp . amParam) (p_map M.!? 1)
               rarg <- mkReplicateShape (autoRep am `shapePrefix` autoFrame am) arg'
@@ -628,7 +606,7 @@ withMapNest loc args f = do
               p <- mkAMParam (typeOf arg) l
               let d = outerDim am l
               pure
-                ( M.insert l (AutoMapParam p d diet) p_map,
+                ( M.insert l (AutoMapParam p d arg_diet) p_map,
                   M.insert l (AutoMapArg arg) a_map
                 )
           | l < trueLevel am && l > 0 = do
@@ -639,7 +617,7 @@ withMapNest loc args f = do
                       amParam $
                         p_map M.! (l + 1)
               pure
-                ( M.insert l (AutoMapParam p d diet) p_map,
+                ( M.insert l (AutoMapParam p d arg_diet) p_map,
                   M.insert l (AutoMapArg arg') a_map
                 )
           | otherwise = error "Impossible."
@@ -672,13 +650,13 @@ mkReplicate :: (MonadFreshNames m) => Exp -> Exp -> m Exp
 mkReplicate dim e = do
   x <- mkParam "x" (Scalar $ Prim $ Unsigned Int64)
   pure $
-    mkMap dim [(Observe, x)] e [xs] $
+    mkMap [(Observe, x)] e [xs] $
       RetType mempty (arrayOfWithAliases Unique (Shape [dim]) (typeOf e))
   where
     xs =
       AppExp
         ( Range
-            (Literal (UnsignedValue $ intValue Int64 0) mempty)
+            (Literal (UnsignedValue $ intValue Int64 (0 :: Int)) mempty)
             Nothing
             (UpToExclusive dim)
             mempty
@@ -686,8 +664,8 @@ mkReplicate dim e = do
         ( Info $ AppRes (arrayOf (Shape [dim]) (Scalar $ Prim $ Unsigned Int64)) []
         )
 
-mkMap :: Exp -> [(Diet, Pat ParamType)] -> Exp -> [Exp] -> ResRetType -> Exp
-mkMap dim params body arrs rettype =
+mkMap :: [(Diet, Pat ParamType)] -> Exp -> [Exp] -> ResRetType -> Exp
+mkMap params body arrs rettype =
   mkApply mapN args (AppRes (toStruct $ retType rettype) [])
   where
     args = map (Nothing,mempty,) $ lambda : arrs

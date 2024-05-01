@@ -1,6 +1,7 @@
 module Futhark.Solve.GLPK (glpk) where
 
 import Control.Monad
+import Data.Bifunctor
 import Data.LinearProgram
 import Data.Map qualified as M
 import Data.Maybe
@@ -8,7 +9,7 @@ import Data.Set qualified as S
 import Futhark.Solve.LP qualified as F
 import System.IO.Silently
 
-linearProgToGLPK :: (Ord v, Eq a, Num a) => F.LinearProg v a -> (LP v a)
+linearProgToGLPK :: (Ord v, Num a) => F.LinearProg v a -> LP v a
 linearProgToGLPK prog =
   LP
     { direction = cOptType $ F.optType prog,
@@ -54,6 +55,6 @@ glpk' lp
       pure $ pure (0, M.fromList $ map (,0) $ S.toList $ F.vars lp)
   | otherwise = do
       (_, mres) <- glpSolveVars opts $ linearProgToGLPK lp
-      pure $ (\(opt, vs) -> (truncate opt, fmap truncate vs)) <$> mres
+      pure $ bimap truncate (fmap truncate) <$> mres
   where
     opts = mipDefaults {msgLev = MsgAll}

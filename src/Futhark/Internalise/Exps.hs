@@ -1583,7 +1583,7 @@ isIntrinsicFunction ::
   [E.Exp] ->
   SrcLoc ->
   Maybe (String -> InternaliseM [SubExp])
-isIntrinsicFunction qname args loc = do
+isIntrinsicFunction qname all_args loc = do
   guard $ baseTag (qualLeaf qname) <= maxIntrinsicTag
   let handlers =
         [ handleSign,
@@ -1593,7 +1593,7 @@ isIntrinsicFunction qname args loc = do
           handleAD,
           handleRest
         ]
-  msum [h args $ baseString $ qualLeaf qname | h <- handlers]
+  msum [h all_args $ baseString $ qualLeaf qname | h <- handlers]
   where
     handleSign [x] "sign_i8" = Just $ toSigned I.Int8 x
     handleSign [x] "sign_i16" = Just $ toSigned I.Int16 x

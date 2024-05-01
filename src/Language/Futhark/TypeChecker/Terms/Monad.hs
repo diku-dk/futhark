@@ -60,7 +60,6 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.FreshNames hiding (newName)
 import Futhark.FreshNames qualified
-import Futhark.Util
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -533,8 +532,6 @@ instance MonadTypeChecker TermTypeM where
 lookupVar :: SrcLoc -> QualName VName -> StructType -> TermTypeM StructType
 lookupVar loc qn@(QualName qs name) inst_t = do
   scope <- lookupQualNameEnv qn
-  let usage = mkUsage loc $ docText $ "use of " <> dquotes (pretty qn)
-
   case M.lookup name $ scopeVtable scope of
     Nothing ->
       error $ "lookupVar: " <> show qn

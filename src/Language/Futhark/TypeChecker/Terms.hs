@@ -1046,7 +1046,7 @@ checkOneExp e = do
   (maybe_tysubsts, e') <- Terms2.checkSingleExp e
   case maybe_tysubsts of
     Left err -> throwError err
-    Right (generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
+    Right (_generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       let t = typeOf e''
       (tparams, _, _) <-
@@ -1064,7 +1064,7 @@ checkSizeExp e = do
   (maybe_tysubsts, e') <- Terms2.checkSizeExp e
   case maybe_tysubsts of
     Left err -> throwError err
-    Right (generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
+    Right (_generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       when (hasBinding e'') $
         typeError (srclocOf e'') mempty . withIndexLink "size-expression-bind" $
