@@ -747,7 +747,7 @@ mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
   ry_name <- nameFromString . prettyString <$> newVName "Ry"
 
   -- until we change the copying to use lmads we need to
-  --   guarantee that Tx=Ty and Rx = Ry and Tx | Tk
+  --   guarantee that Tx=Ty AND Rx = Ry AND Tx | Tk
   -- for matrix multiplication it would be safe if they aren't
   --   but not for any of the other three cases!
   (ty, ry) <- getParTiles ("Ty", "Ry") (ty_name, ry_name) height_A
