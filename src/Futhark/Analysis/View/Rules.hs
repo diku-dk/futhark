@@ -207,6 +207,36 @@ rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
         [Recurrence] `elem` map fst termsWithFactors =
           Just . SoP.sopFromList $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
     justTermPlusRecurence _ = Nothing
+-- rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
+--   | (Var i :== b, e) :| [(Not (Var i' :== b'), x)] <- cases,
+--     -- Extract terms (multiplied symbols, factor) from the sum of products.
+--     Just terms <- justTermPlusRecurence x,
+--     i == i',
+--     i == i'',
+--     b == SoP2 (SoP.int2SoP 0), -- Domain is iota so b must be 0.
+--     b == b' = do
+--       traceM "👀 Using Rule 4 (recursive sum)"
+--       let lb = termToSoP b SoP..+. SoP.int2SoP 1
+--       let ub = SoP.sym2SoP (Var i)
+--       j <- newNameFromString "j"
+--       let base = substituteName i b e
+--       -- Create a sum for each product (term) in the sum of products,
+--       -- pulling factors outside the sum.
+--       -- XXX this craziness exemplifies why Sum should probably be SumSlice...
+--       let sums = map (\(symbs, c) ->
+--                         SoP2 . SoP.scaleSoP c . termToSoP $
+--                           Sum j lb ub $
+--                             substituteName i (Var j) $
+--                               SoP.term2SoP symbs 1
+--                      ) terms
+--       pure $ IndexFn it (toCases $ base ~+~ foldl1 (~+~) sums)
+--   where
+--     justTermPlusRecurence :: Term -> Maybe [([Term], Integer)]
+--     justTermPlusRecurence (SoP2 sop)
+--       | termsWithFactors <- SoP.sopToLists sop,
+--         [Recurrence] `elem` map fst termsWithFactors =
+--           Just $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
+--     justTermPlusRecurence _ = Nothing
 rewriteRule4 indexfn = pure indexfn
 
 rewrite :: IndexFn -> IndexFnM IndexFn
