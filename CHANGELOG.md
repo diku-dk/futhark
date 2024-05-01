@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.25.16]
+
+### Added
+
 * ``futhark test``: `--no-terminal` now prints status messages even when
   no failures occur.
 
@@ -19,9 +29,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   Oscar Nelin. Minor speedup for some programs, but is more
   importantly a principled foundation for further improvements.
 
-### Removed
+* Better error message when exceeding shared memory limits.
 
-### Changed
+* Better dead code removal for the GPU representation (minor impact on
+  some programs).
 
 ### Fixed
 
