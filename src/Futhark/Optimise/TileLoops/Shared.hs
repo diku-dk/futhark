@@ -47,7 +47,6 @@ update se_desc arr indices new_elem =
   letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) indices) new_elem
 
 forLoop' ::
-  IntType ->
   SubExp -> -- loop var
   [VName] -> -- loop inits
   ( VName ->
@@ -55,10 +54,9 @@ forLoop' ::
     Builder GPU (Body GPU)
   ) ->
   Builder GPU [VName]
-forLoop' int_tp i_bound merge body = do
+forLoop' i_bound merge body = do
   i <- newVName "i" -- could give this as arg to the function
-  -- let loop_form = ForLoop i Int64 i_bound
-  let loop_form = ForLoop i int_tp i_bound
+  let loop_form = ForLoop i Int64 i_bound
 
   merge_ts <- mapM lookupType merge
   loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Unique) merge_ts
@@ -72,13 +70,12 @@ forLoop' int_tp i_bound merge body = do
     Loop (zip loop_inits $ map Var merge) loop_form loop_body
 
 forLoop ::
-  IntType ->
   SubExp ->
   [VName] ->
   (VName -> [VName] -> Builder GPU (Body GPU)) ->
   Builder GPU VName
-forLoop int_tp i_bound merge body = do
-  res_list <- forLoop' int_tp i_bound merge body
+forLoop i_bound merge body = do
+  res_list <- forLoop' i_bound merge body
   pure $ head res_list
 
 segMap1D ::
@@ -168,7 +165,7 @@ segScatter2D ::
   (SubExp, SubExp) -> -- (dim_y, dim_x)
   ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
   Builder GPU VName
-segScatter2D desc updt_arr seq_dims (dim_y, dim_x) f = do
+segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f = do
   ltid_flat <- newVName "ltid_flat"
   ltid_y <- newVName "ltid_y"
   ltid_x <- newVName "ltid_x"

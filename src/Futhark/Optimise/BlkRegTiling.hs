@@ -134,8 +134,8 @@ kkLoopBody
       --
       --
       mkCompLoopRxRy fits_ij css_init (a_idx_fn, b_idx_fn) (ltid_y, ltid_x) = do
-        css <- forLoop Int64 ry [css_init] $ \i [css_merge] -> do
-          css <- forLoop Int64 rx [css_merge] $ \j [css_merge'] ->
+        css <- forLoop ry [css_init] $ \i [css_merge] -> do
+          css <- forLoop rx [css_merge] $ \j [css_merge'] ->
             resultBodyM
               =<< letTupExp' "foo"
               =<< eIf
@@ -187,7 +187,7 @@ kkLoopBody
           \(ltid_y, ltid_x) -> do
             css_init <- index "css_init" css_merge [ltid_y, ltid_x]
 
-            css <- forLoop Int64 tk [css_init] $ \k [acc_merge] ->
+            css <- forLoop tk [css_init] $ \k [acc_merge] ->
               resultBodyM
                 =<< letTupExp' "foo"
                 =<< eIf
@@ -362,7 +362,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                 )
 
           prologue_res_list <-
-            forLoop' Int64 (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
+            forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
               \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
                 off_t <- letExp "off_t" =<< toExp (pe64 rk * le64 gid_t + le64 kk0)
                 process_full_tiles <-
@@ -453,8 +453,8 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         rss_init <- getAccumFV res_tp
         rssss_list <- segMap2D "rssss" segthd_lvl ResultMaySimplify (ty, tx) $ \(ltid_y, ltid_x) -> do
           (css, ii, jj) <- getThdRedomapRes (rx, ry) (ltid_x, ltid_y) (iii, jjj, redomap_res)
-          rss <- forLoop Int64 ry [rss_init] $ \i [rss_merge] -> do
-            rss' <- forLoop Int64 rx [rss_merge] $ \j [rss_merge'] -> do
+          rss <- forLoop ry [rss_init] $ \i [rss_merge] -> do
+            rss' <- forLoop rx [rss_merge] $ \j [rss_merge'] -> do
               prereqAddCode2 (gtid_x, gtid_y) (ii, i, jj, j) (css, redomap_orig_res)
               let code2_subs = substituteNames (M.singleton rss_init rss_merge') code2'
 
@@ -550,7 +550,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                 )
 
           prologue_res_list <-
-            forLoop' Int64 (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
+            forLoop' (Var full_tiles) [cssss, a_loc_init, b_loc_init] $
               \kk0 [thd_res_merge, a_loc_merge, b_loc_merge] -> do
                 process_full_tiles <-
                   kkLoopBody env ct_arg kk0 (thd_res_merge, a_loc_merge, b_loc_merge) False
@@ -604,8 +604,8 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
               rssss_list <- segMap2D "rssss" segthd_lvl ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
                 rss_init <- scratch "rss_init" (elemType res_tp) [ry, rx]
                 (css, ii, jj) <- getThdRedomapRes (rx, ry) (ltid_x, ltid_y) (iii, jjj, redomap_res)
-                rss <- forLoop Int64 ry [rss_init] $ \i [rss_merge] -> do
-                  rss' <- forLoop Int64 rx [rss_merge] $ \j [rss_merge'] -> do
+                rss <- forLoop ry [rss_init] $ \i [rss_merge] -> do
+                  rss' <- forLoop rx [rss_merge] $ \j [rss_merge'] -> do
                     prereqAddCode2 (gtid_x, gtid_y) (ii, i, jj, j) (css, redomap_orig_res)
 
                     res_el <-
@@ -766,15 +766,11 @@ mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
         if is_B_not_transp
           then pe64 ty * pe64 ry
           else pe64 se0
-  -- if A not transposed, its shmem should be [ty*ry][tk]
-  -- we pad to [ty*ry][tk+1] size to minimize bank conflicts
   a_loc_sz <-
     letSubExp "a_loc_sz"
       =<< toExp (pe64 ty * pe64 ry * pe64 tk)
   -- if B is transposed, its shmem should be [tk][tx*rx]
   -- we pad as above, by assuming tx*rx == ty*ry >= tk
-  -- ToDo: we can decrease the size by checking at this
-  --       point whether A and B are transposed (or not).
   b_loc_sz <-
     letSubExp "b_loc_sz"
       =<< toExp (pe64 tx * pe64 rx * pe64 tk + pad_term)
@@ -812,8 +808,8 @@ initRegShmem
     -- initialize register mem with neutral elements.
     cssss_list <- segMap2D "cssss" segthd_lvl ResultPrivate (ty, tx) $ \_ -> do
       css_init <- scratch "css_init" red_t [ry, rx]
-      css <- forLoop Int64 ry [css_init] $ \i [css_merge] -> do
-        css' <- forLoop Int64 rx [css_merge] $ \j [css_merge'] -> do
+      css <- forLoop ry [css_init] $ \i [css_merge] -> do
+        css' <- forLoop rx [css_merge] $ \j [css_merge'] -> do
           css'' <- update "css" css_merge' [i, j] red_ne
           resultBodyM [Var css'']
         resultBodyM [Var css']
@@ -1121,7 +1117,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
           reg_arr_nms <- segMap2D "res" segthd_lvl ResultPrivate (ty, tx) $ \_ ->
             forM (zip red_nes red_res_tps) $ \(red_ne, red_t) -> do
               css_init <- scratch "res_init" (elemType red_t) [rz]
-              css <- forLoop Int64 rz [css_init] $ \i [css_merge] -> do
+              css <- forLoop rz [css_init] $ \i [css_merge] -> do
                 css' <- update "css" css_merge [i] red_ne
                 resultBodyM [Var css']
               pure $ varRes css
@@ -1132,14 +1128,14 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
             scratch (baseString nm ++ "_loc") ptp [rz]
 
           prologue_res_list <-
-            forLoop' Int64 common_dim (reg_arr_nms ++ loc_arr_nms) $
+            forLoop' common_dim (reg_arr_nms ++ loc_arr_nms) $
               \q var_nms -> do
                 let reg_arr_merge_nms = take (length red_nes) var_nms
                 let loc_arr_merge_nms = drop (length red_nes) var_nms
 
                 -- collective copy from global to shared memory
                 loc_arr_nms' <-
-                  forLoop' Int64 count_shmem loc_arr_merge_nms $ \tt loc_arr_merge2_nms -> do
+                  forLoop' count_shmem loc_arr_merge_nms $ \tt loc_arr_merge2_nms -> do
                     loc_arr_merge2_nms' <-
                       forM (zip loc_arr_merge2_nms (M.toList tab_out)) $ \(loc_Y_nm, (glb_Y_nm, (ptp_Y, load_Y))) -> do
                         ltid_flat <- newVName "ltid_flat"
@@ -1198,7 +1194,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                                   index (baseString inp_arr_nm) inp_arr_nm [q]
                               -- build the loop of count R whose body is semantically the redomap code
                               reg_arr_merge_nms' <-
-                                forLoop' Int64 rz reg_arr_merge_nms_slc $ \i reg_arr_mm_nms -> do
+                                forLoop' rz reg_arr_merge_nms_slc $ \i reg_arr_mm_nms -> do
                                   letBindNames [gtid_z] =<< toExp (le64 ii + le64 i)
                                   resultBodyM
                                     =<< letTupExp' "redomap_lam"
@@ -1247,7 +1243,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                 forM (zip kertp redomap_res) $ \(res_tp, res) -> do
                   rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
                   fmap varRes $
-                    forLoop Int64 rz [rss_init] $ \i [rss] -> do
+                    forLoop rz [rss_init] $ \i [rss] -> do
                       let slice = Slice [DimFix $ Var i, DimFix se0, DimFix se0]
                       thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
                       rss' <- letSubExp "rss" $ BasicOp $ Update Unsafe rss slice $ Var thread_res
@@ -1257,7 +1253,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                 letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
                 rss_init <- forM kertp $ \res_tp ->
                   scratch "rss_init" (elemType res_tp) [rz, se1, se1]
-                rss <- forLoop' Int64 rz rss_init $ \i rss_merge -> do
+                rss <- forLoop' rz rss_init $ \i rss_merge -> do
                   letBindNames [gtid_z] =<< toExp (le64 ii + le64 i)
                   forM_ (zip redomap_orig_res redomap_res) $ \(o_res, n_res) -> do
                     c <- index "redomap_thd" n_res [ltid_y, ltid_x, i]
