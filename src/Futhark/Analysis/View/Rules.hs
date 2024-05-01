@@ -43,6 +43,26 @@ normalise indexfn =
         (Bool False, b) -> pure b
         (a, Bool False) -> pure a
         (a, b) -> pure $ a :|| b
+    normTerm (Sum j lb ub x) = do
+      lb' <- astMap m lb
+      ub' <- astMap m ub
+      x' <- astMap m x
+      -- List of (multiplied symbols, factor) typed [([Term], Integer)].
+      let terms = SoP.sopToLists x'
+      -- Create a sum for each product (term) in the sum of products,
+      -- pulling factors outside the sum.
+      -- XXX this craziness exemplifies why Sum should probably be SumSlice...
+      let sums = map (\(symbs, c) ->
+                        let term = SoP.term2SoP symbs 1
+                        in  case SoP.justConstant term of
+                              Just k ->
+                                -- This would be c*∑j∈[lb, ..., ub] k so rewrite it to (ub - lb + 1) * c * k.
+                                SoP.scaleSoP c (SoP.scaleSoP k (ub' SoP..-. lb' SoP..+. SoP.int2SoP 1))
+                              _ ->
+                                SoP.scaleSoP c . termToSoP $ Sum j lb ub term
+                     ) terms
+      -- Create sum of products of (sums of sum of products).
+      pure $ SoP2 $ foldl1 (SoP..+.) sums
     normTerm x@(SoP2 _) = do
       x' <- astMap m x
       case x' of
@@ -51,9 +71,10 @@ normalise indexfn =
       where
         -- TODO extend this to find any 1 + -1*[[c]] without them being adjacent
         -- or the only terms.
-        normaliseNegation sop -- 1 + -1*[[c]] => [[not c]]
-          | [([], 1), ([Indicator c], -1)] <- getSoP sop =
-            SoP.sym2SoP $ Indicator (Not c)
+        normaliseNegation sop -- [[not c]] => 1 + -1*[[c]]
+          | [([Indicator (Not c)], 1)] <- getSoP sop =
+            SoP.int2SoP 1 SoP..-. SoP.sym2SoP (Indicator c)
+          -- | [([], 1), ([Indicator (Not c)], -1)] <- getSoP sop =
         normaliseNegation sop = sop
 
         -- Takes a sum of products which may have Sum terms and merges other
@@ -81,18 +102,20 @@ normalise indexfn =
 
         -- Rewrite sum_{j=lb}^ub e(j) + e(lb+1) ==> sum_{j=lb}^{ub+1} e(j).
         -- Relies on sorting of SoP and Term to match.
-        mergeUb ([Sum j lb ub e1], 1) ([e2], 1) =
+        mergeUb ([Sum j lb ub e1], c) ([e2], c')
+          | c == c' =
             let ubp1 = ub SoP..+. SoP.int2SoP 1
             in  if substituteName j (SoP2 ubp1) e1 == termToSoP e2
-                then Just ([Sum j lb ubp1 e1], 1)
+                then Just ([Sum j lb ubp1 e1], c)
                 else Nothing
         mergeUb _ _ = Nothing
         -- Rewrite sum_{j=lb}^ub e(j) + e(lb-1) ==> sum_{j=lb-1}^ub e(j).
         -- Relies on sorting of SoP and Term to match.
-        mergeLb ([Sum j lb ub e1], 1) ([e2], 1) =
+        mergeLb ([Sum j lb ub e1], c) ([e2], c')
+          | c == c' =
             let lbm1 = lb SoP..-. SoP.int2SoP 1
             in  if substituteName j (SoP2 lbm1) e1 == termToSoP e2
-                then Just ([Sum j lbm1 ub e1], 1)
+                then Just ([Sum j lbm1 ub e1], c)
                 else Nothing
         mergeLb _ _ = Nothing
 
@@ -163,8 +186,9 @@ rewriteRule4 :: IndexFn -> IndexFnM IndexFn
 -- If e1{b/i} == e2{j/i}, it later simplifies to
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (Σ_{j=b}^i e2{j/i})
 rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
-  | (Var i :== b, e) :| [(Not (Var i' :== b'), x)] <- cases,
-    Just x' <- justTermPlusRecurence x,
+  | (Var i :== b, e1) :| [(Not (Var i' :== b'), x)] <- cases,
+    -- Extract terms (multiplied symbols, factor) from the sum of products.
+    Just e2 <- justTermPlusRecurence x,
     i == i',
     i == i'',
     b == SoP2 (SoP.int2SoP 0), -- Domain is iota so b must be 0.
@@ -173,14 +197,15 @@ rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
       let lb = termToSoP b SoP..+. SoP.int2SoP 1
       let ub = SoP.sym2SoP (Var i)
       j <- newNameFromString "j"
-      let base = substituteName i b e
-      let x'' = termToSoP $ substituteName i (Var j) x'
-      pure $ IndexFn it (toCases $ base ~+~ Sum j lb ub x'')
+      let e1' = substituteName i b e1
+      let e2' = substituteName i (Var j) e2
+      pure $ IndexFn it (toCases $ e1' ~+~ Sum j lb ub e2')
   where
-    justTermPlusRecurence :: Term -> Maybe Term
+    justTermPlusRecurence :: Term -> Maybe (SoP.SoP Term)
     justTermPlusRecurence (SoP2 sop)
-      | [([x], 1), ([Recurrence], 1)] <- getSoP sop =
-          Just x
+      | termsWithFactors <- SoP.sopToLists sop,
+        [Recurrence] `elem` map fst termsWithFactors =
+          Just . SoP.sopFromList $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
     justTermPlusRecurence _ = Nothing
 rewriteRule4 indexfn = pure indexfn
 
