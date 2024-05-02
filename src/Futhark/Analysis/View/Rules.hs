@@ -43,6 +43,12 @@ normalise indexfn =
         (Bool False, b) -> pure b
         (a, Bool False) -> pure a
         (a, b) -> pure $ a :|| b
+    normTerm (Indicator c) = do
+      c' <- normTerm c
+      case c' of
+        -- [[not x]] => 1 + -1*[[x]]
+        Not x -> pure . SoP2 $ SoP.int2SoP 1 SoP..-. SoP.sym2SoP (Indicator x)
+        _ -> pure (Indicator c')
     normTerm (Sum j lb ub x) = do
       lb' <- astMap m lb
       ub' <- astMap m ub
@@ -66,17 +72,9 @@ normalise indexfn =
     normTerm x@(SoP2 _) = do
       x' <- astMap m x
       case x' of
-        SoP2 sop -> pure . SoP2 . normaliseNegation . mergeSums $ sop
+        SoP2 sop -> pure . SoP2 . mergeSums $ sop
         _ -> pure x'
       where
-        -- TODO extend this to find any 1 + -1*[[c]] without them being adjacent
-        -- or the only terms.
-        normaliseNegation sop -- [[not c]] => 1 + -1*[[c]]
-          | [([Indicator (Not c)], 1)] <- getSoP sop =
-            SoP.int2SoP 1 SoP..-. SoP.sym2SoP (Indicator c)
-          -- | [([], 1), ([Indicator (Not c)], -1)] <- getSoP sop =
-        normaliseNegation sop = sop
-
         -- Takes a sum of products which may have Sum terms and merges other
         -- compatible terms into those Sums. Time complexity is quadratic in
         -- the number of terms in the SoP.
