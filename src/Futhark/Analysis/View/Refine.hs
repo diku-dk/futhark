@@ -152,18 +152,8 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       start <- astMap m lb
       end <- astMap m ub
       -- If the slice is empty or just a single element, eliminate the sum.
-      debugM $ "start " <> show start
-      debugM $ "end " <> show end
-      debugM $ "start " <> prettyString start
-      debugM $ "end " <> prettyString end
-      hm <- lookupRange (SoP2 end)
-      debugM $ "hm " <> prettyString hm
-      should_be_false <- start $<=$ end
-      debugM $ "should_be_false " <> show should_be_false
       single <- start $==$ end
       empty <- start $>$ end
-      debugM $ "single " <> show single
-      debugM $ "empty " <> show empty
       case () of
         _ | single -> pure $ Idx (Var x) start
         _ | empty -> pure . SoP2 $ SoP.int2SoP 0

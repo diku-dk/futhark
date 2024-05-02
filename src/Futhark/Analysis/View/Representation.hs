@@ -41,6 +41,10 @@ data Term =
       VName       -- array
       (SoP Term)   -- lower bound
       (SoP Term)   -- upper bound
+  | SumSliceIndicator
+      VName       -- array
+      (SoP Term)   -- lower bound
+      (SoP Term)   -- upper bound
   | Sum
       VName        -- index
       (SoP Term)   -- lower bound
@@ -103,6 +107,10 @@ domainEnd (Cat _k _m _b) =
 -- instance ASTMappable Domain where
 --   astMap m (Iota n) = Iota <$> astMap m n
 --   astMap m (Union k n b) = Union <$> mapOnVName m k <*> astMap m n <*> astMap m b
+
+domainStart :: Domain -> Term
+domainStart (Iota _) = SoP2 (SoP.int2SoP 0)
+domainStart (Cat _k _m _b) = undefined
 
 
 instance Eq Iterator where
@@ -197,6 +205,8 @@ instance ASTMappable Term where
     mapOnTerm m $ Var vn
   astMap m (SumSlice vn lb ub) =
     SumSlice <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
+  astMap m (SumSliceIndicator vn lb ub) =
+    SumSliceIndicator <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
   astMap m (Sum i lb ub e) =
     Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> astMap m e
   astMap m (Idx xs i) = Idx <$> mapOnTerm m xs <*> astMap m i
@@ -279,6 +289,10 @@ instance Pretty Term where
   pretty (SumSlice vn lb ub) =
     "∑"
       <> prettyName vn
+      <> brackets (pretty lb <+> ":" <+> pretty ub)
+  pretty (SumSliceIndicator vn lb ub) =
+    "∑"
+      <> pretty (Indicator (Var vn))
       <> brackets (pretty lb <+> ":" <+> pretty ub)
   pretty (Sum i lb ub e) =
     "∑"

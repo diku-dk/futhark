@@ -66,7 +66,15 @@ normalise indexfn =
                                 -- This would be c*∑j∈[lb, ..., ub] k so rewrite it to (ub - lb + 1) * c * k.
                                 SoP.scaleSoP c (SoP.scaleSoP k (ub' SoP..-. lb' SoP..+. SoP.int2SoP 1))
                               _ ->
-                                SoP.scaleSoP c . termToSoP $ Sum j lb ub term
+                                case SoP.sopToLists of
+                                  [([Idx (Var x) j], 1), ([Recurrence], 1)] ->
+                                    SoP.scaleSoP c . termToSoP $ Sum j lb ub term
+--       | [([Idx (Var x) j], 1), ([Recurrence], 1)] <- SoP.sopToLists sop =
+--         Just (False, x, j)
+--     justTermPlusRecurence (SoP2 sop)
+--       | [([Indicator (Idx (Var x) j)], 1), ([Recurrence], 1)] <- SoP.sopToLists sop =
+                                  _ ->
+                                    SoP.scaleSoP c . termToSoP $ Sum j lb ub term
                      ) terms
       -- Create sum of products of (sums of sum of products).
       pure $ SoP2 $ foldl1 (SoP..+.) sums
@@ -128,6 +136,14 @@ normalise indexfn =
           | y == y',
             i == lb SoP..-. SoP.int2SoP 1 =
               Just ([SumSlice y i ub], 1)
+        merge ([SumSliceIndicator y lb ub], 1) ([Indicator (Idx (Var y') i)], 1)
+          | y == y',
+            i == ub SoP..+. SoP.int2SoP 1 =
+              Just ([SumSliceIndicator y lb i], 1)
+        merge ([SumSliceIndicator y lb ub], 1) ([Indicator (Idx (Var y') i)], 1)
+          | y == y',
+            i == lb SoP..-. SoP.int2SoP 1 =
+              Just ([SumSliceIndicator y i ub], 1)
         merge _ _ = Nothing
     normTerm v = astMap m v
 
@@ -184,26 +200,32 @@ rewriteRule4 :: IndexFn -> IndexFnM IndexFn
 --
 -- If e1{b/i} == x[i], it later simplifies to
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (Σ_{j=b}^i x[j])
-rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
-  | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
-    -- Extract terms (multiplied symbols, factor) from the sum of products.
-    Just (x, j) <- justTermPlusRecurence recur,
-    j == termToSoP (Var i),
-    i == i',
-    i == i'',
-    b == SoP2 (SoP.int2SoP 0), -- Domain is iota so b must be 0.
-    b == b' = do
-      traceM "👀 Using Rule 4 (recursive sum)"
-      let lb = termToSoP b SoP..+. SoP.int2SoP 1
-      let ub = SoP.sym2SoP (Var i)
-      let e1' = substituteName i b e1
-      pure $ IndexFn it (toCases $ e1' ~+~ SumSlice x lb ub)
-  where
-    justTermPlusRecurence :: Term -> Maybe (VName, SoP.SoP Term)
-    justTermPlusRecurence (SoP2 sop)
-      | [([Idx (Var x) j], 1), ([Recurrence], 1)] <- SoP.sopToLists sop =
-        Just (x, j)
-    justTermPlusRecurence _ = Nothing
+-- rewriteRule4 (IndexFn it@(Forall i'' dom@(Iota _)) (Cases cases))
+--   | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
+--     -- Extract terms (multiplied symbols, factor) from the sum of products.
+--     Just (isIndicator, x, j) <- justTermPlusRecurence recur,
+--     -- j == termToSoP (Var i),
+--     i == i',
+--     i == i'',
+--     b == domainStart dom,
+--     b == b' = do
+--       traceM "👀 Using Rule 4 (recursive sum)"
+--       -- let lb = termToSoP b SoP..+. SoP.int2SoP 1
+--       -- let ub = SoP.sym2SoP (Var i)
+--       let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) j
+--       let ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
+--       let e1' = substituteName i b e1
+--       let sumslice = if isIndicator then SumSliceIndicator else SumSlice
+--       pure $ IndexFn it (toCases $ e1' ~+~ sumslice x lb ub)
+--   where
+--     justTermPlusRecurence :: Term -> Maybe (Bool, VName, SoP.SoP Term)
+--     justTermPlusRecurence (SoP2 sop)
+--       | [([Idx (Var x) j], 1), ([Recurrence], 1)] <- SoP.sopToLists sop =
+--         Just (False, x, j)
+--     justTermPlusRecurence (SoP2 sop)
+--       | [([Indicator (Idx (Var x) j)], 1), ([Recurrence], 1)] <- SoP.sopToLists sop =
+--         Just (True, x, j)
+--     justTermPlusRecurence _ = Nothing
 -- Rule 4 (recursive sum)g
 --
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
@@ -224,7 +246,8 @@ rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
     b == b' = do
       traceM "👀 Using Rule 4 (recursive sum)"
       let lb = termToSoP b SoP..+. SoP.int2SoP 1
-      let ub = SoP.sym2SoP (Var i)
+      -- let ub = SoP.sym2SoP (Var i)
+      let ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
       j <- newNameFromString "j"
       let e1' = substituteName i b e1
       let e2' = substituteName i (Var j) e2
