@@ -15,8 +15,34 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.25.16]
+
+### Added
+
+* ``futhark test``: `--no-terminal` now prints status messages even when
+  no failures occur.
+
+* ``futhark test`` no longer runs ``structure`` tests by default. Pass
+  ``-s`` to run them.
+
+* Rewritten array layout optimisation pass by Bjarke Pedersen and
+  Oscar Nelin. Minor speedup for some programs, but is more
+  importantly a principled foundation for further improvements.
+
+* Better error message when exceeding shared memory limits.
+
+* Better dead code removal for the GPU representation (minor impact on
+  some programs).
+
+### Fixed
+
 * Bugs related to deduplication of array payloads in sum types.
   Unfortunately, fixed by just not deduplicating in those cases.
+
+* Frontend bug related to turning size expressions into variables
+  (#2136).
+
+* Another exotic monomorphisation bug.
 
 ## [0.25.15]
 

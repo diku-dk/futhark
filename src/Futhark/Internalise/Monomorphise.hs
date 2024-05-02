@@ -225,7 +225,8 @@ askIntros argset =
 parametrizing :: S.Set VName -> MonoM ExpReplacements
 parametrizing argset = do
   intros <- askIntros argset
-  (params, nxtBind) <- gets $ partition (not . S.disjoint intros . fvVars . freeInExp . unReplaced . fst)
+  let usesIntros = not . S.disjoint intros . fvVars . freeInExp
+  (params, nxtBind) <- gets $ partition (usesIntros . unReplaced . fst)
   put nxtBind
   pure params
 
@@ -284,22 +285,16 @@ scoping argset m =
 -- Given instantiated type of function, produce size arguments.
 type InferSizeArgs = StructType -> MonoM [Exp]
 
+-- | The integer encodes an equivalence class, so we can keep
+-- track of sizes that are statically identical.
 data MonoSize
-  = -- | The integer encodes an equivalence class, so we can keep
-    -- track of sizes that are statically identical.
-    MonoKnown Int
-  | MonoAnon
-  deriving (Show)
-
--- We treat all MonoAnon as identical.
-instance Eq MonoSize where
-  MonoKnown x == MonoKnown y = x == y
-  MonoAnon == MonoAnon = True
-  _ == _ = False
+  = MonoKnown Int
+  | MonoAnon Int
+  deriving (Eq, Show)
 
 instance Pretty MonoSize where
   pretty (MonoKnown i) = "?" <> pretty i
-  pretty MonoAnon = "?"
+  pretty (MonoAnon i) = "??" <> pretty i
 
 instance Pretty (Shape MonoSize) where
   pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
@@ -321,10 +316,16 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
     noExtsScalar (Arrow as p d t1 (RetType _ t2)) =
       Arrow as p d (noExts t1) (RetType [] (noExts t2))
     noExtsScalar t = t
-    onDim bound _ e
+    onDim bound _ d
       -- A locally bound size.
-      | any (`S.member` bound) $ fvVars $ freeInExp e =
-          pure MonoAnon
+      | any (`S.member` bound) $ fvVars $ freeInExp d = do
+          (i, m) <- get
+          case M.lookup d m of
+            Just prev ->
+              pure $ MonoAnon prev
+            Nothing -> do
+              put (i + 1, M.insert d i m)
+              pure $ MonoAnon i
     onDim _ _ d = do
       (i, m) <- get
       case M.lookup d m of
@@ -351,6 +352,9 @@ addLifted fname il liftf =
 lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
 lookupLifted fname t = lookup (fname, t) <$> getLifts
 
+sizeVarName :: Exp -> String
+sizeVarName e = "d<{" <> prettyString (bareExp e) <> "}>"
+
 -- | Creates a new expression replacement if needed, this always produces normalised sizes.
 -- (e.g. single variable or constant)
 replaceExp :: Exp -> MonoM Exp
@@ -365,7 +369,7 @@ replaceExp e =
         (Just vn, _) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Nothing) -> do
-          vn <- newNameFromString $ "d<{" ++ prettyString (bareExp e) ++ "}>"
+          vn <- newNameFromString $ sizeVarName e
           modify ((e', vn) :)
           pure $ sizeFromName (qualName vn) (srclocOf e)
   where
@@ -433,15 +437,15 @@ transformType typ =
       Record <$> traverse transformType fs
     transformScalarSizes (Sum cs) =
       Sum <$> (traverse . traverse) transformType cs
-    transformScalarSizes (Arrow as argName d argT retT) = do
-      retT' <- transformRetTypeSizes argset retT
-      Arrow as argName d <$> transformType argT <*> pure retT'
+    transformScalarSizes (Arrow as argName d argT retT) =
+      Arrow as argName d
+        <$> transformType argT
+        <*> transformRetTypeSizes argset retT
       where
         argset =
-          fvVars (freeInType argT)
-            <> case argName of
-              Unnamed -> mempty
-              Named vn -> S.singleton vn
+          case argName of
+            Unnamed -> mempty
+            Named vn -> S.singleton vn
     transformScalarSizes (TypeVar u qn args) =
       TypeVar u qn <$> mapM onArg args
       where
@@ -980,68 +984,71 @@ monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
   MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, attrs, loc)) inst_t = do
-  isolateNormalisation $ do
-    let bind_t = funType params rettype
-    (substs, t_shape_params) <-
-      typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
-    let shape_names = S.fromList $ map typeParamName $ shape_params ++ t_shape_params
-        substs' = M.map (Subst []) substs
-        substStructType =
-          substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
-        params' = map (substPat substStructType) params
-    params'' <- withArgs shape_names $ mapM transformPat params'
-    exp_naming <- paramGetClean
+monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
+  let bind_t = funType params rettype
+  (substs, t_shape_params) <-
+    typeSubstsM loc bind_t $ noNamedParams inst_t
+  let shape_names = S.fromList $ map typeParamName $ shape_params ++ t_shape_params
+      substs' = M.map (Subst []) substs
+      substStructType =
+        substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
+      params' = map (substPat substStructType) params
+  params'' <- withArgs shape_names $ mapM transformPat params'
+  exp_naming <- paramGetClean
 
-    let args = S.fromList $ foldMap patNames params
-        arg_params = map snd exp_naming
+  let args = S.fromList $ foldMap patNames params
+      arg_params = map snd exp_naming
 
-    rettype' <-
-      withParams exp_naming $
-        withArgs (args <> shape_names) $
-          hardTransformRetType (applySubst (`M.lookup` substs') rettype)
-    extNaming <- paramGetClean
-    scope <- S.union shape_names <$> askScope'
-    let (rettype'', new_params) = arrowArg scope args arg_params rettype'
-        bind_t' = substTypesAny (`M.lookup` substs') bind_t
-        (shape_params_explicit, shape_params_implicit) =
-          partition ((`S.member` (mustBeExplicitInBinding bind_t'' `S.union` mustBeExplicitInBinding bind_t')) . typeParamName) $
-            shape_params ++ t_shape_params ++ map (`TypeParamDim` mempty) (S.toList new_params)
-        exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
+  rettype' <-
+    withParams exp_naming $
+      withArgs (args <> shape_names) $
+        hardTransformRetType (applySubst (`M.lookup` substs') rettype)
+  extNaming <- paramGetClean
+  scope <- S.union shape_names <$> askScope'
+  let (rettype'', new_params) = arrowArg scope args arg_params rettype'
+      bind_t' = substTypesAny (`M.lookup` substs') bind_t
+      mkExplicit =
+        flip
+          S.member
+          (mustBeExplicitInBinding bind_t'' <> mustBeExplicitInBinding bind_t')
+      (shape_params_explicit, shape_params_implicit) =
+        partition (mkExplicit . typeParamName) $
+          shape_params ++ t_shape_params ++ map (`TypeParamDim` mempty) (S.toList new_params)
+      exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
 
-        bind_t'' = funType params'' rettype''
-        bind_r = exp_naming <> extNaming
-    body' <- updateExpTypes (`M.lookup` substs') body
-    body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
-    scope' <- S.union (shape_names <> args) <$> askScope'
-    body''' <-
-      expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< get)
+      bind_t'' = funType params'' rettype''
+      bind_r = exp_naming <> extNaming
+  body' <- updateExpTypes (`M.lookup` substs') body
+  body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
+  scope' <- S.union (shape_names <> args) <$> askScope'
+  body''' <-
+    expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< get)
 
-    seen_before <- elem name . map (fst . fst) <$> getLifts
-    name' <-
-      if null tparams && not entry && not seen_before
-        then pure name
-        else newName name
+  seen_before <- elem name . map (fst . fst) <$> getLifts
+  name' <-
+    if null tparams && not entry && not seen_before
+      then pure name
+      else newName name
 
-    pure
-      ( name',
-        inferSizeArgs shape_params_explicit bind_t'' bind_r,
-        if entry
-          then
-            toValBinding
-              name'
-              (shape_params_explicit ++ shape_params_implicit)
-              params''
-              rettype''
-              (entryAssert exp_naming body''')
-          else
-            toValBinding
-              name'
-              shape_params_implicit
-              (map shapeParam shape_params_explicit ++ params'')
-              rettype''
-              body'''
-      )
+  pure
+    ( name',
+      inferSizeArgs shape_params_explicit bind_t'' bind_r,
+      if entry
+        then
+          toValBinding
+            name'
+            (shape_params_explicit ++ shape_params_implicit)
+            params''
+            rettype''
+            (entryAssert exp_naming body''')
+        else
+          toValBinding
+            name'
+            shape_params_implicit
+            (map shapeParam shape_params_explicit ++ params'')
+            rettype''
+            body'''
+    )
   where
     askScope' = S.filter (`notElem` retDims rettype) <$> askScope
 
@@ -1088,7 +1095,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
 typeSubstsM ::
   (MonadFreshNames m) =>
   SrcLoc ->
-  TypeBase () NoUniqueness ->
+  StructType ->
   MonoType ->
   m (M.Map VName StructRetType, [TypeParam])
 typeSubstsM loc orig_t1 orig_t2 =
@@ -1100,10 +1107,13 @@ typeSubstsM loc orig_t1 orig_t2 =
     subRet t1 (RetType _ t2) =
       sub t1 t2
 
-    sub t1@Array {} t2@Array {}
-      | Just t1' <- peelArray (arrayRank t1) t1,
-        Just t2' <- peelArray (arrayRank t1) t2 =
-          sub t1' t2'
+    sub t1@(Array _ (Shape (d1 : _)) _) t2@(Array _ (Shape (d2 : _)) _) = do
+      case d2 of
+        MonoAnon i -> do
+          (ts, sizes) <- get
+          put (ts, M.insert i d1 sizes)
+        _ -> pure ()
+      sub (stripArray 1 t1) (stripArray 1 t2)
     sub (Scalar (TypeVar _ v _)) t =
       unless (baseTag (qualLeaf v) <= maxIntrinsicTag) $
         addSubst v $
@@ -1136,11 +1146,15 @@ typeSubstsM loc orig_t1 orig_t2 =
         Nothing -> do
           d <- lift $ lift $ newVName "d"
           tell [TypeParamDim d loc]
-          put (ts, M.insert i d sizes)
+          put (ts, M.insert i (sizeFromName (qualName d) mempty) sizes)
           pure $ sizeFromName (qualName d) mempty
         Just d ->
-          pure $ sizeFromName (qualName d) mempty
-    onDim MonoAnon = pure anySize
+          pure d
+    onDim (MonoAnon i) = do
+      (_, sizes) <- get
+      case M.lookup i sizes of
+        Nothing -> pure anySize
+        Just d -> pure d
 
 -- Perform a given substitution on the types in a pattern.
 substPat :: (t -> t) -> Pat t -> Pat t

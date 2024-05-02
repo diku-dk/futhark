@@ -10,6 +10,7 @@ import Data.Maybe
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Actions
+import Futhark.Analysis.AccessPattern (Analyse)
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI hiding (compilerMain)
@@ -31,6 +32,7 @@ import Futhark.Internalise.FullNormalise as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.ReplaceRecords as ReplaceRecords
+import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
@@ -51,7 +53,6 @@ import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
-import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
@@ -159,7 +160,8 @@ data UntypedAction
   | PolyAction
       ( forall (rep :: Data.Kind.Type).
         ( AliasableRep rep,
-          (OpMetrics (Op rep))
+          (OpMetrics (Op rep)),
+          Analyse rep
         ) =>
         Action rep
       )
@@ -233,6 +235,13 @@ seqMemProg name rep =
   externalErrorS $
     "Pass '" <> name <> "' expects SeqMem representation, but got " <> representation rep
 
+mcProg :: String -> UntypedPassState -> FutharkM (Prog MC.MC)
+mcProg _ (MC prog) =
+  pure prog
+mcProg name rep =
+  externalErrorS $
+    "Pass " ++ name ++ " expects MC representation, but got " ++ representation rep
+
 mcMemProg :: String -> UntypedPassState -> FutharkM (Prog MCMem.MCMem)
 mcMemProg _ (MCMem prog) =
   pure prog
@@ -266,6 +275,13 @@ kernelsPassOption ::
   FutharkOption
 kernelsPassOption =
   typedPassOption kernelsProg GPU
+
+mcPassOption ::
+  Pass MC.MC MC.MC ->
+  String ->
+  FutharkOption
+mcPassOption =
+  typedPassOption mcProg MC
 
 seqMemPassOption ::
   Pass SeqMem.SeqMem SeqMem.SeqMem ->
@@ -352,6 +368,21 @@ cseOption short =
     long = [passLongOption pass]
     pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
 
+sinkOption :: String -> FutharkOption
+sinkOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where
+    perform (GPU prog) config =
+      GPU <$> runPipeline (onePass sinkGPU) config prog
+    perform (MC prog) config =
+      MC <$> runPipeline (onePass sinkMC) config prog
+    perform s _ =
+      externalErrorS $
+        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+
+    long = [passLongOption pass]
+    pass = sinkGPU
+
 pipelineOption ::
   (UntypedPassState -> Maybe (Prog fromrep)) ->
   String ->
@@ -382,6 +413,23 @@ soacsPipelineOption ::
   [String] ->
   FutharkOption
 soacsPipelineOption = pipelineOption getSOACSProg "SOACS" SOACS
+
+unstreamOption :: String -> FutharkOption
+unstreamOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where
+    perform (GPU prog) config =
+      GPU
+        <$> runPipeline (onePass unstreamGPU) config prog
+    perform (MC prog) config =
+      MC
+        <$> runPipeline (onePass unstreamMC) config prog
+    perform s _ =
+      externalErrorS $
+        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+
+    long = [passLongOption pass]
+    pass = unstreamGPU
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
@@ -529,6 +577,11 @@ commandLineOptions =
       )
       "Print memory alias information.",
     Option
+      "z"
+      ["memory-access-pattern"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printMemoryAccessAnalysis})
+      "Print the result of analysing memory access patterns. Currently only for --gpu --mc.",
+    Option
       []
       ["call-graph"]
       (NoArg $ Right $ \opts -> opts {futharkAction = SOACSAction callGraphAction})
@@ -608,11 +661,12 @@ commandLineOptions =
     soacsPassOption removeDeadFunctions [],
     soacsPassOption applyAD [],
     soacsPassOption applyADInnermost [],
-    kernelsPassOption babysitKernels [],
+    kernelsPassOption optimiseArrayLayoutGPU [],
+    mcPassOption optimiseArrayLayoutMC [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],
-    kernelsPassOption unstreamGPU [],
-    kernelsPassOption sinkGPU [],
+    unstreamOption [],
+    sinkOption [],
     kernelsPassOption reduceDeviceSyncs [],
     typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],

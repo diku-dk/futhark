@@ -1,5 +1,12 @@
 // Start of tuning.h.
 
+
+int is_blank_line_or_comment(const char *s) {
+  size_t i = strspn(s, " \t");
+  return s[i] == '\0' || // Line is blank.
+         strncmp(s + i, "--", 2) == 0; // Line is comment.
+}
+
 static char* load_tuning_file(const char *fname,
                               void *cfg,
                               int (*set_tuning_param)(void*, const char*, size_t)) {
@@ -16,6 +23,9 @@ static char* load_tuning_file(const char *fname,
   int lineno = 0;
   while (fgets(line, max_line_len, f) != NULL) {
     lineno++;
+    if (is_blank_line_or_comment(line)) {
+      continue;
+    }
     char *eql = strstr(line, "=");
     if (eql) {
       *eql = 0;
