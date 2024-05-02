@@ -7,6 +7,7 @@ import Data.Bifunctor (bimap)
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.MonadFreshNames
+import Language.Futhark (VName)
 
 normalise :: IndexFn -> IndexFnM IndexFn
 normalise indexfn =
@@ -81,7 +82,7 @@ normalise indexfn =
         mergeSums sop =
           let sop' = getSoP sop
           in SoP.sopFromList $
-               foldl (absorbTerm (applyFirstMatch [mergeUb, mergeLb])) [] sop'
+               foldl (absorbTerm (applyFirstMatch [merge, mergeUb, mergeLb])) [] sop'
 
         absorbTerm _ [] term = [term]
         absorbTerm f (t:ts) term
@@ -117,17 +118,17 @@ normalise indexfn =
                 else Nothing
         mergeLb _ _ = Nothing
 
-        -- -- Rewrite sum e[lb:ub] + e[ub+1] ==> sum e[lb:ub+1].
-        -- -- Relies on sorting of SoP and Term to match.
-        -- merge ([SumSlice x lb ub], 1) ([Idx y i], 1)
-        --   | x == y,
-        --     i == ub SoP..+. SoP.int2SoP 1 =
-        --       Just ([SumSlice x lb i], 1)
-        -- merge ([SumSlice x lb ub], 1) ([Idx y i], 1)
-        --   | x == y,
-        --     i == lb SoP..-. SoP.int2SoP 1 =
-        --       Just ([SumSlice x i ub], 1)
-        -- merge _ _ = Nothing
+        -- Rewrite sum y[lb:ub] + y[ub+1] ==> sum y[lb:ub+1].
+        -- Relies on sorting of SoP and Term to match.
+        merge ([SumSlice y lb ub], 1) ([Idx (Var y') i], 1)
+          | y == y',
+            i == ub SoP..+. SoP.int2SoP 1 =
+              Just ([SumSlice y lb i], 1)
+        merge ([SumSlice y lb ub], 1) ([Idx (Var y') i], 1)
+          | y == y',
+            i == lb SoP..-. SoP.int2SoP 1 =
+              Just ([SumSlice y i ub], 1)
+        merge _ _ = Nothing
     normTerm v = astMap m v
 
 simplify :: IndexFn -> IndexFnM IndexFn
@@ -177,11 +178,41 @@ rewriteRule4 :: IndexFn -> IndexFnM IndexFn
 --
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
 --    | i == b => e1              (e1 may depend on i)
+--    | i /= b => y[i-1] + x[i]
+-- _______________________________________________________________
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] . e1{b/i} + (Σ_{j=b+1}^i x[j])
+--
+-- If e1{b/i} == x[i], it later simplifies to
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (Σ_{j=b}^i x[j])
+rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
+  | (Var i :== b, e1) :| [(Not (Var i' :== b'), recur)] <- cases,
+    -- Extract terms (multiplied symbols, factor) from the sum of products.
+    Just (x, j) <- justTermPlusRecurence recur,
+    j == termToSoP (Var i),
+    i == i',
+    i == i'',
+    b == SoP2 (SoP.int2SoP 0), -- Domain is iota so b must be 0.
+    b == b' = do
+      traceM "👀 Using Rule 4 (recursive sum)"
+      let lb = termToSoP b SoP..+. SoP.int2SoP 1
+      let ub = SoP.sym2SoP (Var i)
+      let e1' = substituteName i b e1
+      pure $ IndexFn it (toCases $ e1' ~+~ SumSlice x lb ub)
+  where
+    justTermPlusRecurence :: Term -> Maybe (VName, SoP.SoP Term)
+    justTermPlusRecurence (SoP2 sop)
+      | [([Idx (Var x) j], 1), ([Recurrence], 1)] <- SoP.sopToLists sop =
+        Just (x, j)
+    justTermPlusRecurence _ = Nothing
+-- Rule 4 (recursive sum)g
+--
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
+--    | i == b => e1              (e1 may depend on i)
 --    | i /= b => y[i-1] + e2     (e2 may depend on i)
 -- _______________________________________________________________
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . e1{b/i} + (Σ_{j=b+1}^i e2{j/i})
 --
--- If e1{b/i} == e2{j/i}, it later simplifies to
+-- If e1{b/i} == e2{b/i}, it later simplifies to
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (Σ_{j=b}^i e2{j/i})
 rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
   | (Var i :== b, e1) :| [(Not (Var i' :== b'), x)] <- cases,

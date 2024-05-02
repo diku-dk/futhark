@@ -101,13 +101,13 @@ tests =
     ("tests/refinement/refine_iterator2.fut",
      [ ("zs", [
         "∀i₆₂₂₃ ∈ iota n₆₁₀₆ .",
-        "    | True ⇒  ∑j₆₂₂₁∈[0, ..., i₆₂₂₃] (xs₆₁₀₇[j₆₂₂₁])"
+        "    | True ⇒  ∑xs₆₀₆₉[0 : i₆₂₂₃]"
        ])
      ]),
     ("tests/refinement/refine_iterator3.fut",
      [ ("zs", [
         "∀i₆₂₂₇ ∈ iota n₆₁₄₂ .",
-        "    | i₆₂₂₇ < 0 ⇒  ∑j₆₂₂₅∈[0, ..., i₆₂₂₇] (xs₆₁₄₃[j₆₂₂₅])",
+        "    | i₆₂₂₇ < 0 ⇒  ∑xs₆₁₄₃[0 : i₆₂₂₇]",
         "    | ¬(i₆₂₂₇ < 0) ⇒  i₆₂₂₇"
        ])
      ]),

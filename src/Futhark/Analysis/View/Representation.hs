@@ -37,10 +37,10 @@ import Data.Text (unpack)
 
 data Term =
     Var VName
-  -- | SumSlice
-  --     VName       -- array
-  --     (SoP Exp)   -- lower bound
-  --     (SoP Exp)   -- upper bound
+  | SumSlice
+      VName       -- array
+      (SoP Term)   -- lower bound
+      (SoP Term)   -- upper bound
   | Sum
       VName        -- index
       (SoP Term)   -- lower bound
@@ -195,8 +195,8 @@ instance ASTMappable Term where
   astMap m (Var x) = do
     vn <- mapOnVName m x
     mapOnTerm m $ Var vn
-  -- astMap m (SumSlice vn lb ub) =
-  --   SumSlice <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
+  astMap m (SumSlice vn lb ub) =
+    SumSlice <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
   astMap m (Sum i lb ub e) =
     Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> astMap m e
   astMap m (Idx xs i) = Idx <$> mapOnTerm m xs <*> astMap m i
@@ -276,10 +276,10 @@ instance Pretty Term where
   pretty (Var x) = prettyName x
   pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
   pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)
-  -- pretty (SumSlice vn lb ub) =
-  --   "Σ"
-  --     <> parens (prettyName vn)
-  --     <> brackets (pretty lb <+> ":" <+> pretty ub)
+  pretty (SumSlice vn lb ub) =
+    "∑"
+      <> prettyName vn
+      <> brackets (pretty lb <+> ":" <+> pretty ub)
   pretty (Sum i lb ub e) =
     "∑"
       <> prettyName i

@@ -1,7 +1,6 @@
 module Futhark.Analysis.View.Refine where
 
 import Futhark.SoP.Monad (AlgEnv (ranges), addRange, delFromEnv, substEquivs, addEquiv)
-import Language.Futhark qualified as E
 import Futhark.SoP.FourierMotzkin
 import Futhark.Analysis.View.Representation hiding (debugM)
 import Control.Monad.RWS hiding (Sum)
@@ -135,18 +134,16 @@ refineIndexFn (IndexFn it (Cases cases)) = do
             addRange (Var j) (mkRange start end)
             Sum j start end <$> astMap m e
           )
-    -- refineTerm (SumSlice vn lb ub) = do
-    --   -- XXX test this after changing Sum.
-    --   start <- astMap m lb
-    --   end <- astMap m ub
-    --   case (start, end) of
-    --     (a, b) | SoP.padWithZero a == SoP.padWithZero b -> do
-    --         -- If the slice is just a single element, eliminate the sum over it.
-    --         pure $ Idx (Var vn) (SoP a)
-    --     _ -> do
-    --       -- addRange j (mkRange start end)
-    --       -- Sum j start end <$> refineTerm e
-    --       pure $ SumSlice vn start end
+    refineTerm (SumSlice x lb ub) = do
+      start <- astMap m lb
+      end <- astMap m ub
+      -- If the slice is empty or just a single element, eliminate the sum.
+      single <- start $==$ end
+      empty <- start $>$ end
+      case () of
+        _ | single -> pure $ Idx (Var x) start
+        _ | empty -> pure . SoP2 $ SoP.int2SoP 0
+        _ -> pure $ SumSlice x start end
     refineTerm v = astMap m v
 
     refineRelation rel x y = do
