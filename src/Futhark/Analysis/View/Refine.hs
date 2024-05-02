@@ -1,6 +1,6 @@
 module Futhark.Analysis.View.Refine where
 
-import Futhark.SoP.Monad (AlgEnv (ranges), addRange, delFromEnv, substEquivs, addEquiv)
+import Futhark.SoP.Monad (AlgEnv (ranges), addRange, delFromEnv, substEquivs, addEquiv, lookupRange)
 import Futhark.SoP.FourierMotzkin
 import Futhark.Analysis.View.Representation hiding (debugM)
 import Control.Monad.RWS hiding (Sum)
@@ -45,10 +45,11 @@ toRel (x :< y)  = Just $ termToSoP x :<: termToSoP y
 toRel (x :> y)  = Just $ termToSoP x :>: termToSoP y
 toRel (x :>= y) = Just $ termToSoP x :>=: termToSoP y
 toRel (x :== y) = Just $ termToSoP x :==: termToSoP y
-toRel (Not (x :<= y)) = Just $ termToSoP x :>: termToSoP y
-toRel (Not (x :< y))  = Just $ termToSoP x :>=: termToSoP y
-toRel (Not (x :> y))  = Just $ termToSoP x :<=: termToSoP y
-toRel (Not (x :>= y)) = Just $ termToSoP x :<: termToSoP y
+-- toRel (x :/= y) = Just $ termToSoP x :/=: termToSoP y
+-- toRel (Not (x :<= y)) = Just $ termToSoP x :>: termToSoP y
+-- toRel (Not (x :< y))  = Just $ termToSoP x :>=: termToSoP y
+-- toRel (Not (x :> y))  = Just $ termToSoP x :<=: termToSoP y
+-- toRel (Not (x :>= y)) = Just $ termToSoP x :<: termToSoP y
 -- toRel (Not (x :== y)) = Just $ termToSoP x :/=: termToSoP y
 -- TODO the above is checkable as 'x > y || x < y',
 -- which appears to be doable if we run each check separately?
@@ -69,13 +70,21 @@ refineIndexFn :: IndexFn -> IndexFnM IndexFn
 refineIndexFn (IndexFn it (Cases cases)) = do
   let preds = NE.toList $ NE.map fst cases
   let vals = NE.toList $ NE.map snd cases
-  (preds'', vals'') <- rollbackAlgEnv (
+  (preds', vals') <- rollbackAlgEnv (
     do
       addIterator it
-      preds' <- mapM refineTerm preds
-      vals' <- mapM refineCase (zip preds' vals)
-      pure (preds', vals'))
-  pure $ IndexFn it (Cases . NE.fromList $ zip preds'' vals'')
+      ps <- mapM refineTerm preds
+      -- Eliminate cases for which the predicate is always False. (The solver
+      -- may return false when the query is undecidable, so we instead check
+      -- if the negated predicate is True.)
+      -- TODO can we return Nothing when undecidable instead?
+      neg_preds <- mapM (refineTerm . toNNF . Not) ps
+      let (_, ps', vs) = unzip3 $
+                           filter (\(negp, _, _) -> negp /= Bool True) $
+                             zip3 neg_preds ps vals
+      vs' <- mapM refineCase (zip ps' vs)
+      pure (ps', vs'))
+  pure $ IndexFn it (Cases . NE.fromList $ zip preds' vals')
   where
     m =
       ASTMapper
@@ -88,9 +97,12 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       | Just rel <- toRel p =
         rollbackAlgEnv (
           do
+            debugM $ "refine CASE " <> prettyString (p,v)
+            p' <- refineTerm (toNNF (Not p))
+            traceM $ "refined predicate " <> prettyString p'
             addRel rel
             env' <- gets algenv
-            debugM $ "refine CASE " <> prettyString (p,v) <> " Alg env: " <> prettyString env'
+            traceM $ "Alg env: " <> prettyString env'
             refineTerm v)
     refineCase (_, v) =
       refineTerm v
@@ -112,6 +124,7 @@ refineIndexFn (IndexFn it (Cases cases)) = do
         _ -> pure $ SoP2 sop
       -- pure (Var vn)
     refineTerm (x :== y) = refineRelation (:==) x y
+    refineTerm (x :/= y) = refineRelation (:/=) x y
     refineTerm (x :> y)  = refineRelation (:>) x y
     refineTerm (x :>= y) = refineRelation (:>=) x y
     refineTerm (x :< y) = refineRelation (:<) x y
@@ -135,11 +148,22 @@ refineIndexFn (IndexFn it (Cases cases)) = do
             Sum j start end <$> astMap m e
           )
     refineTerm (SumSlice x lb ub) = do
+      debugM $ "SumSlice " <> prettyString x <> " " <> prettyString lb <> " " <> prettyString ub
       start <- astMap m lb
       end <- astMap m ub
       -- If the slice is empty or just a single element, eliminate the sum.
+      debugM $ "start " <> show start
+      debugM $ "end " <> show end
+      debugM $ "start " <> prettyString start
+      debugM $ "end " <> prettyString end
+      hm <- lookupRange (SoP2 end)
+      debugM $ "hm " <> prettyString hm
+      should_be_false <- start $<=$ end
+      debugM $ "should_be_false " <> show should_be_false
       single <- start $==$ end
       empty <- start $>$ end
+      debugM $ "single " <> show single
+      debugM $ "empty " <> show empty
       case () of
         _ | single -> pure $ Idx (Var x) start
         _ | empty -> pure . SoP2 $ SoP.int2SoP 0
@@ -151,15 +175,15 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       y' <- refineTerm y
       env' <- gets algenv
       debugM ("refine " <> prettyString (x `rel` y) <> "\nWith ranges:\n" <> prettyRanges (ranges env'))
-      debugM ("x' = " <> prettyString x')
-      debugM ("y' = " <> prettyString y')
+      traceM ("x' = " <> prettyString x')
+      traceM ("y' = " <> prettyString y')
       -- TODO don't do this twice lol. First is to get the sum in the env.
       b <- solve (x' `rel` y')
       unless b refineSumsInEnv
       b' <- if b then pure b else solve (x' `rel` y')
       env'' <- gets algenv
-      debugM ("Ranges after refinement:\n" <> prettyRanges (ranges env''))
-      debugM ("Result: " <> prettyString b')
+      traceM ("Ranges after refinement:\n" <> prettyRanges (ranges env''))
+      traceM ("Result: " <> prettyString b')
       pure $ if b' then Bool True else x' `rel` y'
       where
         -- Use Fourier-Motzkin elimination to determine the truth value

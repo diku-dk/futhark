@@ -3,7 +3,6 @@ module Futhark.Analysis.View.Rules where
 import Futhark.Analysis.View.Representation
 import Debug.Trace (trace, traceM)
 import Data.List.NonEmpty (NonEmpty((:|)))
-import Data.Bifunctor (bimap)
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.MonadFreshNames
@@ -11,16 +10,17 @@ import Language.Futhark (VName)
 
 normalise :: IndexFn -> IndexFnM IndexFn
 normalise indexfn =
-  pure $ toNNF' $ idMap m indexfn
+  pure $ idMap m indexfn
   where
-    toNNF' (IndexFn i (Cases cs)) =
-      IndexFn i (Cases (NE.map (bimap toNNF toNNF) cs))
     m =
       ASTMapper
         { mapOnTerm = normTerm,
           mapOnVName = pure
         }
     normTerm (Var x) = pure $ Var x
+    normTerm (Not x) = do
+      x' <- normTerm x
+      pure $ toNNF (Not x')
     normTerm (x :&& y) = do
       x' <- normTerm x
       y' <- normTerm y
@@ -185,7 +185,7 @@ rewriteRule4 :: IndexFn -> IndexFnM IndexFn
 -- If e1{b/i} == x[i], it later simplifies to
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (Σ_{j=b}^i x[j])
 rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
-  | (Var i :== b, e1) :| [(Not (Var i' :== b'), recur)] <- cases,
+  | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
     -- Extract terms (multiplied symbols, factor) from the sum of products.
     Just (x, j) <- justTermPlusRecurence recur,
     j == termToSoP (Var i),
@@ -215,7 +215,7 @@ rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
 -- If e1{b/i} == e2{b/i}, it later simplifies to
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (Σ_{j=b}^i e2{j/i})
 rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
-  | (Var i :== b, e1) :| [(Not (Var i' :== b'), x)] <- cases,
+  | (Var i :== b, e1) :| [(Var i' :/= b', x)] <- cases,
     -- Extract terms (multiplied symbols, factor) from the sum of products.
     Just e2 <- justTermPlusRecurence x,
     i == i',

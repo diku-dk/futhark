@@ -355,6 +355,12 @@ toNNF (Not (Bool True)) = Bool False
 toNNF (Not (Bool False)) = Bool True
 toNNF (Not (x :|| y)) = toNNF (Not x) :&& toNNF (Not y)
 toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
+toNNF (Not (x :== y)) = x :/= y
+toNNF (Not (x :< y)) = x :>= y
+toNNF (Not (x :> y)) = x :<= y
+toNNF (Not (x :/= y)) = x :== y
+toNNF (Not (x :>= y)) = x :< y
+toNNF (Not (x :<= y)) = x :> y
 toNNF x = x
 
 -- A kind of map that only admits type-preserving functions.

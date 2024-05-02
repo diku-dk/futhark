@@ -353,7 +353,7 @@ forward (E.AppExp (E.Apply f args _) _)
       -- TODO ^ should probably substitute b in using sub rather than using it
       -- directly.
       let dest_fn = IndexFn iter_dest dest
-      normalise $
+      rewrite $
         sub dest_i dest_fn $
           sub vals_k vals_fn y
   | Just "iota" <- getFun f,
