@@ -28,7 +28,6 @@ import Futhark.MonadFreshNames
 import Language.C.Quote.C qualified as C
 import NeatInterpolation (text, untrimming)
 import Futhark.Util (showText)
-import Debug.Trace (traceShowM)
 
 mkKernelInfos :: M.Map Name KernelInterface -> GC.CompilerM HostOp () ()
 mkKernelInfos kernels = do
@@ -117,9 +116,6 @@ jsBoilerplate prog manifest =
 -- be handled asynchronously. The return value evaluates to a Promise yielding
 -- the function result when awaited.
 -- Can currently only be used for code generated into the FutharkModule class.
--- TODO: I don't think we can do this properly like this. For async functions,
--- we should just use ccall put making sure to pass 'number' for arrays too to
--- avoid the automatic conversion.
 asyncCall :: T.Text -> Bool -> [T.Text] -> T.Text
 asyncCall func hasReturn args =
   [text|this.m.ccall('${func}', ${ret}, ${argTypes}, ${argList}, {async: true})|]
@@ -219,14 +215,13 @@ mkEntryFun e =
   where
     fun = entryFun e
     inputs = T.intercalate ", " (entryIn e)
-    outNames = zipWith (\i _ -> "out" <> showText i) [0..] (entryOut e)
+    outNames = zipWith (\i _ -> "out" <> showText i) [(0::Int)..] (entryOut e)
     outSizes = map showText (entryOut e)
     outPtrs = T.intercalate ", " outNames
     allocOuts = T.intercalate "\n" $
       zipWith (\n sz -> [text|const ${n} = this.m._malloc(${sz});|])
         outNames outSizes
     internalCall = asyncCall
-      --(entryInternalFun e) True (["this.ctx"] ++ entryIn e ++ outNames)
       (entryInternalFun e) True (["this.ctx"] ++ outNames ++ entryIn e)
 
 mkJsValueFuns :: [EntryPoint] -> (T.Text, [T.Text])
@@ -271,44 +266,6 @@ mkJsArrayFuns (typ, sign, shp) =
     exports = ["futhark_new_" <> name, "futhark_free_" <> name,
                "futhark_values_" <> name, "futhark_shape_" <> name]
 
-data JsWrapper = JsWrapper T.Text T.Text [T.Text] Bool
-
-mkWrapper :: JsWrapper -> T.Text
-mkWrapper (JsWrapper name returnType argTypes async) =
-  [text|
-    Module['${name}'] = Module.cwrap('${name}', '${returnType}', [${args}], $opts);|]
-    where args = T.intercalate ", " argStrings
-          argStrings =
-            map (\a -> if a == "null" then a else "'" <> a <> "'") argTypes
-          opts = if async then "{async: true}" else "undefined"
-
--- TODO: Bad hardcoded list
--- Note that pointers and scalar numbers (integers and floats) both turn
--- into 'number' in JS, so that is almost all of our types.
--- The exception is 'array', where Emscripten's cwrap lets us pass in a native
--- JS array that gets copied and turned into a pointer argument behind the
--- scenes.
-builtinWrappers :: [JsWrapper]
-builtinWrappers =
-  [ --JsWrapper "malloc" "number" ["number"] False,
-    --JsWrapper "free" "null" ["number"] False,
-    --JsWrapper "futhark_context_config_new" "number" [] False,
-    --JsWrapper "futhark_context_new" "number" ["number"] True,
-    --JsWrapper "futhark_context_sync" "number" ["number"] True,
-    --JsWrapper "futhark_new_i32_1d" "number" ["number", "array", "number"] True,
-    --JsWrapper "futhark_free_i32_1d" "number" ["number", "number"] True,
-    --JsWrapper "futhark_values_i32_1d" "number" ["number", "number", "number"] True,
-    --JsWrapper "futhark_shape_i32_1d" "number" ["number", "number"] False
-  ]
-
---entryWrappers :: Definitions a -> [JsWrapper]
---entryWrappers (Definitions _ _ (Functions fs)) = do
---  (_, f) <- fs
---  entry <- maybeToList (functionEntry f)
---  let name = "futhark_entry_" <> nameToText (entryPointName entry)
---  let numArgs = length (functionInput f) + length (functionOutput f)
---  pure $ JsWrapper name "number" (replicate numArgs "number") True
-
 -- | Compile the program to C with calls to WebGPU, along with a JS wrapper
 -- library.
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem
@@ -317,7 +274,6 @@ compileProg version prog = do
   ( ws,
     Program wgsl_code wgsl_prelude macros kernels params failures prog'
     ) <- ImpGen.compileProg prog
-  traceShowM (mapMaybe (functionEntry . snd) (unFunctions (defFuns prog')))
   c <- GC.compileProg
         "webgpu"
         version
@@ -328,12 +284,8 @@ compileProg version prog = do
         (Space "device", [Space "device", DefaultSpace])
         cliOptions
         prog'
-  let oldWrappers = builtinWrappers
-  let oldJs = T.intercalate "\n" (map mkWrapper oldWrappers)
   let (js, exports) = jsBoilerplate prog' (GC.cJsonManifest c)
-  let newJs = "\n// New JS from here\n" <> js
-  let oldExports = [n | JsWrapper n _ _ _ <- oldWrappers]
-  pure (ws, (c, oldJs <> newJs, oldExports ++ exports))
+  pure (ws, (c, js, exports))
   where
     operations :: GC.Operations HostOp ()
     operations =
