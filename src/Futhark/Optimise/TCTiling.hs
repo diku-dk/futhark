@@ -1,11 +1,10 @@
-{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Optimise.TCTiling (doTCTiling) where
 
 import Control.Monad
 import Data.Char
-import Data.List (elemIndex, findIndices, permutations, sort)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Futhark.Analysis.PrimExp
 import Futhark.IR.GPU
@@ -18,14 +17,8 @@ import Futhark.Transform.Rename
 forM2 :: Monad m => [a] -> [b] -> (a -> b -> m c) -> m [c]
 forM2 xs ys f = zipWithM f xs ys
 
--- forM2_ :: Monad m => [a] -> [b] -> (a -> b -> m c) -> m ()
--- forM2_ xs ys f = forM2 xs ys f >> pure ()
-
 forM3 :: Monad m => [a] -> [b] -> [c] -> (a -> b -> c -> m d) -> m [d]
 forM3 xs ys zs f = forM (zip3 xs ys zs) (\(a, b, c) -> f a b c)
-
--- forM3_ :: Monad m => [a] -> [b] -> [c] -> (a -> b -> c -> m d) -> m ()
--- forM3_ xs ys zs f = forM3 xs ys zs f >> pure ()
 
 se0 :: SubExp
 se0 = intConst Int64 0
@@ -39,16 +32,22 @@ seglvl_thd = SegThreadInBlock $ SegNoVirtFull $ SegSeqDims []
 reductionLoopBody ::
   TCEnv ->
   VName ->
+  VName ->
   [VName] ->
   Builder GPU [VName]
-reductionLoopBody tc_env qq0 arrs_in = do
-  let (reg_tiles_in : shr_arrs) = arrs_in
-  qq <- letExp "qq" =<< toExp (le64 qq0 * pe64 tq)
+reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in = do
+  qq <- letExp "qq" =<< toExp (le64 qq0 * pe64 tile_seq)
 
-  redomap_inputs_shr <- forM2 shr_arrs arr_metas $ copyGlb2Shr (Var qq)
-  reg_tiles_out <- accumulateRegTile redomap_inputs_shr reg_tiles_in
+  redomap_inputs_shr <- forM2 shr_arrs_in arr_metas $ copyGlb2Shr (Var qq)
+  reg_tiles_out <- accumulateRegTile redomap_inputs_shr
   pure $ reg_tiles_out : redomap_inputs_shr
   where
+    arr_metas = arrsInfo tc_env
+    kernel_params = kernelParams tc_env
+    tile_seq = tileSeq kernel_params
+    tiles_T = tilesT kernel_params
+    tiles_R = tilesR kernel_params
+
     copyGlb2Shr :: SubExp -> VName -> ArrMeta -> Builder GPU VName
     copyGlb2Shr qq shr_arr arr_meta = do
       -- Setup parameters for the WithAcc.
@@ -62,7 +61,6 @@ reductionLoopBody tc_env qq0 arrs_in = do
       -- dimensions of the array in shared memory, using a virtualization loop
       -- in case the tile is larger than the tblock, and a boundary guard for
       -- the converse. This is easily achieved using SegVirt.
-
       lam <- mkLambda [cert_p, acc_p] $ do
         fmap varsRes $
           segMapND "foo" (SegThreadInBlock SegVirt) ResultNoSimplify tile_dims $
@@ -78,9 +76,8 @@ reductionLoopBody tc_env qq0 arrs_in = do
           -- the global mem indices need to have tblock offsets added onto them.
           let shr_arr_inds = map Var ltids
           glb_arr_inds <-
-            forM2 tb_offsets ltids $ \tb_offset ltid -> do
+            forM2 block_offsets ltids $ \tb_offset ltid -> do
               letExp "glb_ind" =<< toExp (pe64 tb_offset + le64 ltid)
-
 
           -- Perform a boundary check and read from the global mem array!
           in_bounds <-
@@ -102,10 +99,37 @@ reductionLoopBody tc_env qq0 arrs_in = do
                 ( index "glb_elem" base_arr glb_arr_inds_perm
                     >>= resultBodyM . (: []) . Var
                 )
-                -- TODO: the reduce neutral element is a placeholder here. It
-                -- will fail in many cases, e.g. if the map input type is
-                -- different from the reduce input element type.
-                (resultBodyM [redNe tc_env])
+                -- TODO: here, we simply insert a zero (or zero-like value) into
+                -- shmem whenever we are outside bounds. However, this only
+                -- suceeds whenever:
+                --
+                -- `f zero_0 _ = f _ zero_1 = red_ne`
+                --
+                -- where `f` is the map function; `zero_0` and `zero_1` are the
+                -- zero-like values for the two given array element types; and
+                -- `red_ne` is the reduce neutral element.
+                --
+                -- This is seldom the case in general, however it happens to
+                -- hold for regular tensor contraction and MM, hence it is used
+                -- for testing for the time being.
+                --
+                -- There is a big TODO in figuring out the best solution to this
+                -- problem. The simplest solution is to simply have a
+                -- corresponding boundary guard in the register tile
+                -- accumulation step, however this greatly and negatively
+                -- affects performance.
+                --
+                -- Another solution is to statically examine whether `zero_0`
+                -- and `zero_1` exist s.t. the above condition holds, but this
+                -- analysis can be difficult or impossible, and the values may
+                -- not even exist.
+                --
+                -- Alternatively (on Cosmin's suggestion), the user can manually
+                -- pass a padding value as an attribute in the Futhark source
+                -- code. Personally, I think this is very hacky, obscure to most
+                -- users, error-prone, and an anti-pattern. Also, attributes
+                -- only support passing integral values, not float values.
+                (eBody [eBlank $ Prim $ shmemElemType arr_meta])
 
           -- Finally, update shared mem array accumulator.
           fmap varsRes $
@@ -119,17 +143,16 @@ reductionLoopBody tc_env qq0 arrs_in = do
 
         shmem_shape = Shape $ shmemDims arr_meta
         tile_dims = tileDims arr_meta
-        tb_offsets = arrGather_ arr_meta (tbOffsets tc_env) qq
+        block_offsets = arrGather_ arr_meta (blockOffsets tc_env) qq
         base_arr_dims = baseArrDims arr_meta
         base_arr = baseArr arr_meta
 
-    accumulateRegTile :: [VName] -> VName -> Builder GPU VName
-    accumulateRegTile shr_arrs reg_tiles_in =
+    accumulateRegTile :: [VName] -> Builder GPU VName
+    accumulateRegTile redomap_inputs_shr =
       segMapND_ "reg_tiles_out" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
         reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
-        reg_tile_out <- forLoopNest_ (tq : tiles_R) reg_tile_in $
+        reg_tile_out <- forLoopNest_ (tile_seq : tiles_R) reg_tile_in $
           \(q : loop_inds) reg_tile_merge -> do
-
             -- Compute lists of indices for each redomap operand. For each
             -- dimension, we need an index of the form `ltid * reg_tile +
             -- loop_ind`, so for the reduction dimension, use a dummy ltid and
@@ -147,7 +170,7 @@ reductionLoopBody tc_env qq0 arrs_in = do
             map_f <- renameLambda $ mapLam tc_env
             red_op <- renameLambda $ redLam tc_env
 
-            map_operands <- forM2 shr_arrs shr_inds $ \arr inds ->
+            map_operands <- forM2 redomap_inputs_shr shr_inds $ \arr inds ->
               eSubExp . Var <$> index (baseString arr ++ "_elem") arr inds
             map_res <- eLambda map_f map_operands
 
@@ -158,11 +181,6 @@ reductionLoopBody tc_env qq0 arrs_in = do
 
         pure [varRes reg_tile_out]
 
-    arr_metas = arrsInfo tc_env
-    kernel_params = kernelParams tc_env
-    tq = tileSeq kernel_params
-    tiles_T = tilesT kernel_params
-    tiles_R = tilesR kernel_params
 
 doTCTiling :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
@@ -172,8 +190,8 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- TODO: why, though? what else do we do in this case?
     certs == mempty,
     -- the kernel should have exactly one primtyped result.
-    [res_type] <- ts,
-    primType res_type,
+    [res_t] <- ts,
+    primType res_t,
     all_gtids_dims <- unSegSpace seg_space,
     -- TODO: for now, I test only source programs with no outer parallel
     --       dimensions, ie. all dims in the segspace pertain to the
@@ -191,24 +209,25 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     Just (code1, screma_stmt@(Let pat_redomap _ (Op _)), code2') <-
       matchCodeStreamCode kstms,
     -- checks that the Screma SOAC is actually a redomap and normalizes it
-    Just (common_dim, redomap_arrs, (_is_comm, red_lam, red_nes, map_lam)) <- isTileableRedomap screma_stmt,
+    Just (common_dim, redomap_arrs, (_is_comm, red_lam, red_nes, map_lam)) <-
+      isTileableRedomap screma_stmt,
     -- TODO: Cosmin's implementation mentioned rearranging the below couple of
     --       conditions. better look into this.
     -- check that exactly two 1D arrays are streamed through redomap,
     -- and the result of redomap is one scalar
     length redomap_arrs == 2,
     [red_ne] <- red_nes,
-    [_red_t, _] <- map paramDec $ lambdaParams red_lam,
-    primType _red_t,
-    map_ts_ <- map paramDec $ lambdaParams map_lam,
-    all primType map_ts_,
-    map_ts@[_map_t1, _map_t2] <- map elemType map_ts_,
+    [red_t, _] <- map paramDec $ lambdaParams red_lam,
+    primType red_t,
+    map_ts@[_, _] <- map paramDec $ lambdaParams map_lam,
+    all primType map_ts,
     initial_variance <- M.map mempty $ scopeOfSegSpace seg_space,
     variance <- varianceInStms initial_variance kstms,
     -- assert that all redomap arrays are variant to some, but not all innermost
     -- dimensions of the kernel.
     -- TODO: find out whether/where/how to use the returned information.
-    Just (var_dims_per_arr, var_inds_per_arr) <- variantInnerDimsPerArr variance redomap_arrs gtids,
+    Just (var_dims_per_arr, var_inds_per_arr) <-
+      variantInnerDimsPerArr variance redomap_arrs gtids,
     -- TODO: all of the below guards are lifted from Cosmin's code.
     --       find out which of them are relevant here, and whether they need to
     --       be changed/generalized.
@@ -217,19 +236,19 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- get the variables on which the first result of redomap depends on
     (redomap_orig_res : _) <- patNames pat_redomap,
     Just red_res_variance <- M.lookup redomap_orig_res variance, -- variance of the reduce result
-
     -- we furthermore check that code1 is only formed by
     -- 1. statements that slice some globally-declared arrays
     --    to produce the input for the redomap, and
     -- 2. potentially some statements on which the redomap
     --    is independent; these are recorded in `code2''`
-    Just (code2'', table_load_stms) <- processIndirections code1 redomap_arrs red_res_variance,
+    Just (code2'', table_load_stms) <-
+      processIndirections code1 redomap_arrs red_res_variance,
     -- extract the stms loading slices from redomap arrays and check that there
     -- is one such stm for each redomap array.
     Just load_stms <- mapM (`M.lookup` table_load_stms) redomap_arrs,
     True = do
       let _code2 = code2' <> code2''
-
+      let map_prim_ts = map elemType map_ts
 
       (new_kernel, host_stms) <- runBuilder $ do
         kernel_params@( TCKernelParams
@@ -251,26 +270,29 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
           makeTCKernelParams gtids inner_dims common_dim
 
         (ret_seggroup, stms_seggroup) <- runBuilder $ do
-          tc_env <- makeTCEnv env kernel_params load_stms map_lam red_lam red_ne
+          tc_env <- makeTCEnv env kernel_params load_stms map_lam red_lam map_prim_ts
 
           -- Zero-initialize register tile.
           reg_tiles_init <- segMapND_ "reg_tiles" seglvl_thd ResultPrivate tiles_T $ \_ -> do
-            reg_tile_init <- scratch "reg_tile_init" (elemType res_type) tiles_R
+            reg_tile_init <- scratch "reg_tile_init" (elemType res_t) tiles_R
             css <- forLoopNest_ tiles_R reg_tile_init $ \loop_inds merge ->
               update "reg_tile" merge loop_inds red_ne
             pure [varRes css]
 
           -- Declare shared memory arrays.
           shr_arrs_init <-
-            forM2 map_ts (arrsInfo tc_env) $ \t arr ->
-              scratch ("shr_" ++ baseString (baseArr arr)) t $ shmemDims arr
+            forM (arrsInfo tc_env) $ \arr ->
+              scratch
+                ("shr_" ++ baseString (baseArr arr))
+                (shmemElemType arr)
+                (shmemDims arr)
 
           num_seq_tiles <- letSubExp "num_seq_tiles" =<< ceilDiv common_dim tile_seq
 
           reduction_loop_res <-
             forLoop num_seq_tiles (reg_tiles_init : shr_arrs_init) $
-              reductionLoopBody tc_env
-
+              \qq0 (reg_tiles_merge : shr_arrs_merge) ->
+                reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge
           let reg_tiles_res : _ = reduction_loop_res
 
           let regtile_ret_dims =
@@ -324,7 +346,7 @@ variantInnerDimsPerArr variance arrs inner_dims
     n_dims = length inner_dims
     variantInnerDimsForArr arr =
       let arr_variance = M.findWithDefault mempty arr variance
-       in findIndices (`nameIn` arr_variance) inner_dims
+       in L.findIndices (`nameIn` arr_variance) inner_dims
     allUnique (x : xs) = x `notElem` xs && allUnique xs
     allUnique _ = True
 
@@ -359,12 +381,11 @@ data TCKernelParams = TCKernelParams
 -- carries the kernel parameters declared in host scope.
 data TCEnv = TCEnv
   { kernelParams :: TCKernelParams,
-    -- Tblock offset for each dimension in the result.
-    tbOffsets :: [SubExp],
+    -- Block offset for each dimension in the result.
+    blockOffsets :: [SubExp],
     -- Lambdas for the map function and reduction operators for the contraction.
     mapLam :: Lambda GPU,
     redLam :: Lambda GPU,
-    redNe :: SubExp,
     -- For each reduction array, the information needed to handle this
     -- particular array during code generation.
     arrsInfo :: [ArrMeta]
@@ -378,6 +399,7 @@ data ArrMeta = ArrMeta
     baseArrDims :: [SubExp],
     tileDims :: [SubExp],
     shmemDims :: [SubExp],
+    shmemElemType :: PrimType,
     variantDims :: [Maybe Int],
     arrLoadStm :: Stm GPU,
     lmadPerm :: Maybe [Int]
@@ -472,15 +494,12 @@ findLMADPerm (_, ixfn_env) arr = do
   let shape0 = map (untyped . LMAD.ldShape) lmad
       strides0 = map (toFlatPrimExp . untyped . LMAD.ldStride) lmad
 
-  msum $ map (tryPerm strides0) $ permutations shape0
+  -- For each permutation of the LMAD shape; compute the strides for this
+  -- permutation and test them against the known strides. Then, pick the first
+  -- succeeding set of strides.
+  msum $ map (isPermutationOf strides0 . stridesFor) $ L.permutations shape0
   where
-    -- Given a permutation of the LMAD shape; compute the strides for this
-    -- permutation and test them against the known strides.
-    tryPerm expected_strides perm =
-      expected_strides `isPermutationOf` stridesFor perm
-
-    stridesFor =
-      map toFlatPrimExp . (++ [val1]) . (scanr1 binopMul) . tail
+    stridesFor = map toFlatPrimExp . (++ [val1]) . (scanr1 binopMul) . tail
     binopMul = BinOpExp (Mul Int64 OverflowUndef)
     val1 = ValueExp (IntValue (Int64Value 1))
 
@@ -488,7 +507,7 @@ findLMADPerm (_, ixfn_env) arr = do
     -- product. Used to more reliably check equality between LMADs (in
     -- isPermutationOf).
     toFlatPrimExp :: PrimExp VName -> FlatPrimExp
-    toFlatPrimExp = Product . sort . flattenProducts . flattenMulOps
+    toFlatPrimExp = Product . L.sort . flattenProducts . flattenMulOps
       where
         flattenMulOps (BinOpExp Mul {} e1 e2) =
           Product $ map toFlatPrimExp [e1, e2]
@@ -503,9 +522,9 @@ makeTCEnv ::
   [Stm GPU] ->
   Lambda GPU ->
   Lambda GPU ->
-  SubExp ->
+  [PrimType] ->
   Builder GPU TCEnv
-makeTCEnv env kernel_params load_stms map_lam red_lam red_ne = do
+makeTCEnv env kernel_params load_stms map_lam red_lam map_ts = do
   -- We need to extract the dimensions of each input array, and unfortunately
   -- the Redomap passed into this module only indirectly carries this
   -- information, as part of the kernel stms loading each redomap input slice.
@@ -518,20 +537,22 @@ makeTCEnv env kernel_params load_stms map_lam red_lam red_ne = do
   -- and (N: (Tx, Rx)) as in the 2D case -- as well as to generate boundary
   -- checks later on.
   let base_arrs = map getArrayFromLoadStm load_stms
-  dims_per_arr <- mapM getArrDims base_arrs
 
-  tb_offsets <-
+  block_offsets <-
     forM3 inner_dim_names tbids tiles_TR $
       \dim_name tbid tile_TR ->
         letSubExp ("tb_offset_" ++ dim_name)
           =<< toExp (le64 tbid * pe64 tile_TR)
 
-  fmap (TCEnv kernel_params tb_offsets map_lam red_lam red_ne)
+  fmap (TCEnv kernel_params block_offsets map_lam red_lam)
     $ forM3
       base_arrs
-      dims_per_arr
       load_stms
-    $ \base_arr dims load_stm -> do
+      map_ts
+    $ \base_arr load_stm shmem_elem_type -> do
+
+      dims <- getArrDims base_arr
+
       -- It's not pretty, but we somehow need to extract the tile
       -- dimensions and tblock offsets corresponding to each dimension
       -- of each array, and below mess accomplishes this.
@@ -544,10 +565,10 @@ makeTCEnv env kernel_params load_stms map_lam red_lam red_ne = do
       -- by `variantInnerDimsPerArr`, but in different order.
       -- TODO: document why perm is necessary.
       let lmad_perm = findLMADPerm env base_arr
-      let inv_lmad_perm = map snd . sort . (`zip` [0..]) <$> lmad_perm
+      let inv_lmad_perm = map snd . L.sort . (`zip` [0 ..]) <$> lmad_perm
 
       let dims' = maybe dims (gather dims) inv_lmad_perm
-      let var_gtids = map (flip elemIndex inner_dims) dims'
+      let var_gtids = map (`L.elemIndex` inner_dims) dims'
 
       -- Then, for each dimension of each array, extract the TR tile and
       -- tblock offset corresponding to this dimension. For the tile
@@ -555,16 +576,15 @@ makeTCEnv env kernel_params load_stms map_lam red_lam red_ne = do
       -- represented in inner_dims.
       let tile_dims = gather_ tiles_TR tile_seq var_gtids
 
-      -- TODO: find out how to handle padding now that we permute certain
-      -- things.
-      -- let inner_dim = last tile_dims
-      -- inner_dim_pad <-
-      --   -- TODO: give a better name to the padded dimension.
-      --   -- letSubExp (baseString inner_dim ++ "_pad")
-      --   letSubExp "inner_dim_pad"
-      --     =<< toExp (pe64 inner_dim + pe64 se1)
-      -- let shmem_dims = init tile_dims ++ [inner_dim_pad]
-      let shmem_dims = tile_dims
+      -- TODO: decide pad_term dynamically, based on the given array.
+      let pad_term = pe64 se1
+      let inner_dim = last tile_dims
+      inner_dim_pad <-
+        -- TODO: give a better name to the padded dimension.
+        -- letSubExp (baseString inner_dim ++ "_pad")
+        letSubExp "inner_dim_pad"
+          =<< toExp (pe64 inner_dim + pad_term)
+      let shmem_dims = init tile_dims ++ [inner_dim_pad]
 
       pure $
         ArrMeta
@@ -572,6 +592,7 @@ makeTCEnv env kernel_params load_stms map_lam red_lam red_ne = do
           dims'
           tile_dims
           shmem_dims
+          shmem_elem_type
           var_gtids
           load_stm
           lmad_perm
