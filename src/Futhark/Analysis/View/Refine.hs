@@ -169,15 +169,11 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       debugM ("refine " <> prettyString (x `rel` y) <> "\nWith ranges:\n" <> prettyRanges (ranges env'))
       traceM ("x' = " <> prettyString x')
       traceM ("y' = " <> prettyString y')
-      -- TODO don't do this twice lol. First is to get the sum in the env.
       b <- solve (x' `rel` y')
-      -- unless b refineSumsInEnv
-      -- b' <- if b then pure b else solve (x' `rel` y')
-      let b' = b
       env'' <- gets algenv
       traceM ("Ranges after refinement:\n" <> prettyRanges (ranges env''))
-      traceM ("Result: " <> prettyString b')
-      pure $ if b' then Bool True else x' `rel` y'
+      traceM ("Result: " <> prettyString b)
+      pure $ if b then Bool True else x' `rel` y'
       where
         -- Use Fourier-Motzkin elimination to determine the truth value
         -- of an expresion, if it can be determined in the given environment.
@@ -212,36 +208,37 @@ refineIndexFn (IndexFn it (Cases cases)) = do
 --     refineSumRange _ = pure ()
 
 checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
--- checkMonotonic iter@(Forall i dom) (cond, x) = do
---   -- i is name in iter
---   -- new name q
---   -- new name r
---   -- add range q in [min iter,r]
---   -- add range r in [min iter,max iter]
---   -- test that x{q/i} <= x{r/i}
---   q <- newNameFromString "q"
---   r <- newNameFromString "r"
---   let (min_iter, max_iter) = (termToSoP $ domainStart dom, termToSoP $ domainEnd dom)
---   addRange (Var r) (mkRange min_iter max_iter)
---   addRange (Var q) (mkRange min_iter (SoP.sym2SoP $ Var r))
---   let x_q = substituteName i (Var q) x
---   let x_r = substituteName i (Var r) x
---   let test = (cond, x_q :>= x_r)
---   -- Have:
---   --   max{} <= ∑shape₆₀₈₁[0 : -1 + q₆₁₈₈] <= min{}
---   --   max{0} <= ∑shape₆₀₈₁[0 : -1 + r₆₁₈₉] <= min{}
---   -- Need that:
---   --   max{} <= ∑shape₆₀₈₁[0 : -1 + q₆₁₈₈] <= min{∑shape₆₀₈₁[0 : -1 + r₆₁₈₉]}
---   let test' = IndexFn iter (Cases . NE.singleton $ test)
---   debugM $ "checkMonotonic test: " <> prettyString test'
---   IndexFn _ (Cases res) <- refineIndexFn test'
---   debugM ("checkMonotonic result: " <> prettyString (IndexFn iter (Cases res)))
---   case res of
---     (_, Bool True) :| [] -> pure True
---     _ -> pure False
 checkMonotonic iter@(Forall _ _) (cond, SumSlice xs _ _) = do
   -- For a SumSlice it's sufficient to check that each term is non-negative.
   let test = (cond, Var xs :>= SoP2 (SoP.int2SoP 0))
+  let test' = IndexFn iter (Cases . NE.singleton $ test)
+  debugM $ "checkMonotonic test: " <> prettyString test'
+  IndexFn _ (Cases res) <- refineIndexFn test'
+  debugM ("checkMonotonic result: " <> prettyString (IndexFn iter (Cases res)))
+  case res of
+    (_, Bool True) :| [] -> pure True
+    _ -> pure False
+checkMonotonic iter@(Forall i dom) (cond, x) = do
+-- TODO This case is not doing anything right now.
+  -- i is name in iter
+  -- new name q
+  -- new name r
+  -- add range q in [min iter,r]
+  -- add range r in [min iter,max iter]
+  -- test that x{q/i} <= x{r/i}
+  q <- newNameFromString "q"
+  r <- newNameFromString "r"
+  let (min_iter, max_iter) = (termToSoP $ domainStart dom, termToSoP $ domainEnd dom)
+  addRange (Var r) (mkRange min_iter max_iter)
+  addRange (Var q) (mkRange min_iter (SoP.sym2SoP $ Var r))
+  let x_q = substituteName i (Var q) x
+  let x_r = substituteName i (Var r) x
+  let test = (cond, x_q :>= x_r)
+  -- Have:
+  --   max{} <= ∑shape₆₀₈₁[0 : -1 + q₆₁₈₈] <= min{}
+  --   max{0} <= ∑shape₆₀₈₁[0 : -1 + r₆₁₈₉] <= min{}
+  -- Need that:
+  --   max{} <= ∑shape₆₀₈₁[0 : -1 + q₆₁₈₈] <= min{∑shape₆₀₈₁[0 : -1 + r₆₁₈₉]}
   let test' = IndexFn iter (Cases . NE.singleton $ test)
   debugM $ "checkMonotonic test: " <> prettyString test'
   IndexFn _ (Cases res) <- refineIndexFn test'
