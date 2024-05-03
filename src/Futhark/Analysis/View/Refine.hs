@@ -131,22 +131,22 @@ refineIndexFn (IndexFn it (Cases cases)) = do
     refineTerm (x :<= y) = refineRelation (:<=) x y
     refineTerm (x :&& y) = refineRelation (:&&) x y
     refineTerm (x :|| y) = refineRelation (:||) x y
-    refineTerm (Sum j lb ub e) = do
-      -- XXX test this after changing Sum.
-      start <- astMap m lb
-      end <- astMap m ub
-      case (start, end) of
-        (a, b) | SoP.padWithZero a == SoP.padWithZero b ->
-          rollbackAlgEnv (do
-            -- If the sum has only one term (one iteration), eliminate it.
-            addEquiv (Var j) b
-            refineTerm (SoP2 e)
-          )
-        _ ->
-          rollbackAlgEnv (do
-            addRange (Var j) (mkRange start end)
-            Sum j start end <$> astMap m e
-          )
+    -- refineTerm (Sum j lb ub e) = do
+    --   -- XXX test this after changing Sum.
+    --   start <- astMap m lb
+    --   end <- astMap m ub
+    --   case (start, end) of
+    --     (a, b) | SoP.padWithZero a == SoP.padWithZero b ->
+    --       rollbackAlgEnv (do
+    --         -- If the sum has only one term (one iteration), eliminate it.
+    --         addEquiv (Var j) b
+    --         refineTerm (SoP2 e)
+    --       )
+    --     _ ->
+    --       rollbackAlgEnv (do
+    --         addRange (Var j) (mkRange start end)
+    --         Sum j start end <$> astMap m e
+    --       )
     refineTerm (SumSlice x lb ub) = do
       debugM $ "SumSlice " <> prettyString x <> " " <> prettyString lb <> " " <> prettyString ub
       start <- astMap m lb
@@ -234,14 +234,14 @@ refineSumsInEnv = do
   -- debugM $ "refineSumRangesInEnv " <> prettyString ranges
   mapM_ (refineSumRange . fst) (M.toList ranges)
   where
-    zero = SoP.int2SoP 0
+    -- zero = SoP.int2SoP 0
     refineSumRange :: Term -> IndexFnM ()
-    refineSumRange t@(Sum _ _ _ term) = do
-      -- if term is non-negative for all j in [lb,ub],
-      -- then the sum itself is non-negative
-      b <- term $>=$ zero
-      debugM $ "refineSumRangesInEnv "
-               <> prettyString (SoP2 term :>= SoP2 zero)
-               <> " is " <> prettyString b
-      when b $ addRange t (mkRangeLB zero)
+    -- refineSumRange t@(Sum _ _ _ term) = do
+    --   -- if term is non-negative for all j in [lb,ub],
+    --   -- then the sum itself is non-negative
+    --   b <- term $>=$ zero
+    --   debugM $ "refineSumRangesInEnv "
+    --            <> prettyString (SoP2 term :>= SoP2 zero)
+    --            <> " is " <> prettyString b
+    --   when b $ addRange t (mkRangeLB zero)
     refineSumRange _ = pure ()

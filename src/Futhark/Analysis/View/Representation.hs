@@ -45,11 +45,11 @@ data Term =
       VName       -- array
       (SoP Term)   -- lower bound
       (SoP Term)   -- upper bound
-  | Sum
-      VName        -- index
-      (SoP Term)   -- lower bound
-      (SoP Term)   -- upper bound
-      (SoP Term)   -- indexed expression
+  -- | Sum
+  --     VName        -- index
+  --     (SoP Term)   -- lower bound
+  --     (SoP Term)   -- upper bound
+  --     (SoP Term)   -- indexed expression
   | Idx
       Term         -- array
       (SoP Term)   -- index
@@ -207,8 +207,8 @@ instance ASTMappable Term where
     SumSlice <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
   astMap m (SumSliceIndicator vn lb ub) =
     SumSliceIndicator <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
-  astMap m (Sum i lb ub e) =
-    Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> astMap m e
+  -- astMap m (Sum i lb ub e) =
+  --   Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> astMap m e
   astMap m (Idx xs i) = Idx <$> mapOnTerm m xs <*> astMap m i
   astMap m (SoP2 sop) = do
     sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
@@ -294,12 +294,12 @@ instance Pretty Term where
     "∑"
       <> pretty (Indicator (Var vn))
       <> brackets (pretty lb <+> ":" <+> pretty ub)
-  pretty (Sum i lb ub e) =
-    "∑"
-      <> prettyName i
-      <> "∈"
-      <> brackets (commasep [pretty lb, "...", pretty ub])
-      <+> parens (pretty e)
+  -- pretty (Sum i lb ub e) =
+  --   "∑"
+  --     <> prettyName i
+  --     <> "∈"
+  --     <> brackets (commasep [pretty lb, "...", pretty ub])
+  --     <+> parens (pretty e)
   pretty (SoP2 sop) = pretty sop
   pretty (Indicator p) = iversonbrackets (pretty p)
     where
