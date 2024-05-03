@@ -293,6 +293,11 @@ forward (E.AppExp (E.Apply f args _) _)
                 (Cases . NE.fromList $
                   [(base_case, Var x), (Not base_case, Recurrence `op` Var x)])
       rewrite $ sub x (IndexFn iter_xs xs) y
+  | Just "scan" <- getFun f,
+    -- [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
+    [E.Lambda params body _ _ _, _ne, xs'] <- getArgs args = do
+    trace (show $ getArgs args) undefined
+    -- pure $ IndexFn Empty (toCases . SoP2 $ SoP.int2SoP 0)
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
       -- Scatter in-bounds-monotonic indices.
@@ -328,34 +333,36 @@ forward (E.AppExp (E.Apply f args _) _)
       debugM ("sz_dest " <> prettyString sz_dest)
       let inds_fn = IndexFn iter_inds inds
       -- Check that exactly one branch is OOB---and determine which.
-      ((_, oob), (cond_b, b)) <- fromJust <$> getOOB (SoP.int2SoP 0) (termToSoP sz_dest) inds_fn
-      -- TODO ^handle Nothing case.
-      -- check monotonicity on b
-      isMonotonic <- checkMonotonic iter_inds (cond_b, b)
-      -- TODO allow monotonically decreasing by just reversing b
-      unless isMonotonic (error "couldn't prove that scatter indices are monotonically increasing")
-      -- check that cases match pattern with OOB < 0 or OOB > b[m-1]
-      -- check that iterator matches that of inds
-      -- check dest has size b[m-1]
-      let Forall k (Iota m) = iter_inds
-      i <- newNameFromString "i"
-      vals_k <- newNameFromString "vals_k"
-      dest_i <- newNameFromString "dest_i"
-      -- Purely aesthetic renaming of k to ensure that "k" is printed
-      -- (and not, e.g., "i").
-      k' <- newNameFromString "k"
-      let b' = substituteName k (Var k') b
-      let cond = Var i :== b' :&& cond_b
-      debugM ("cond_b " <> show cond_b)
-      let y = IndexFn (Forall i (Cat k' m b'))
-                      (Cases . NE.fromList $ [(cond, Var vals_k),
-                                              (Not cond, Var dest_i)])
-      -- TODO ^ should probably substitute b in using sub rather than using it
-      -- directly.
-      let dest_fn = IndexFn iter_dest dest
-      rewrite $
-        sub dest_i dest_fn $
-          sub vals_k vals_fn y
+      oob_test <- getOOB (SoP.int2SoP 0) (termToSoP sz_dest) inds_fn
+      case oob_test of
+        Just ((_, oob), (cond_b, b)) -> do
+          -- check monotonicity on b
+          isMonotonic <- checkMonotonic iter_inds (cond_b, b)
+          -- TODO allow monotonically decreasing by just reversing b
+          unless isMonotonic (error "couldn't prove that scatter indices are monotonically increasing")
+          -- check that cases match pattern with OOB < 0 or OOB > b[m-1]
+          -- check that iterator matches that of inds
+          -- check dest has size b[m-1]
+          let Forall k (Iota m) = iter_inds
+          i <- newNameFromString "i"
+          vals_k <- newNameFromString "vals_k"
+          dest_i <- newNameFromString "dest_i"
+          -- Purely aesthetic renaming of k to ensure that "k" is printed
+          -- (and not, e.g., "i").
+          k' <- newNameFromString "k"
+          let b' = substituteName k (Var k') b
+          let cond = Var i :== b' :&& cond_b
+          debugM ("cond_b " <> show cond_b)
+          let y = IndexFn (Forall i (Cat k' m b'))
+                          (Cases . NE.fromList $ [(cond, Var vals_k),
+                                                  (Not cond, Var dest_i)])
+          -- TODO ^ should probably substitute b in using sub rather than using it
+          -- directly.
+          let dest_fn = IndexFn iter_dest dest
+          rewrite $
+            sub dest_i dest_fn $
+              sub vals_k vals_fn y
+        Nothing -> error "🤡 unhandled scatter"
   | Just "iota" <- getFun f,
     [n] <- getArgs args = do
       indexfn <- forward n
