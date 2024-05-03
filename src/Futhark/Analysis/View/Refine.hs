@@ -189,59 +189,22 @@ refineIndexFn (IndexFn it (Cases cases)) = do
         solve (a :<= b) = termToSoP a $<=$ termToSoP b
         solve _ = pure False
 
--- Want to add sum terms as _symbols_ to the env denoting the test.
--- (Use addRel like for done the predicates above.)
--- For example, see how in the following, the ranges include that
--- shape[i] is non-negative!
--- We also have that 0 <= i <= m.
--- Not sure if the machinery will be able to chain the fact that
--- the term shape[j-1] in Sum_j=1^i shape[j-1] is also positive.
--- (At least we need to add j to the environment.)
---
--- 🪲 refine (¬((shape₆₀₇₁)[i₆₁₇₂] < 0), Σj₆₁₆₄∈[1, ..., i₆₁₇₂] ((shape₆₀₇₁)[-1 + j₆₁₆₄])) Alg env: Untranslatable environment:
--- dir:
--- []
--- inv:
--- []
--- Equivalence environment:
--- []
--- Ranges:
--- [max{1} <= m₆₀₆₉ <= min{9223372036854775807}, max{0} <= i₆₁₇₂ <= min{m₆₀₆₉}, max{0} <= (shape₆₀₇₁)[i₆₁₇₂] <= min{}]
-
--- If the sum ranges are constant after refinement,
--- we could unroll it!
--- refineSums :: Term -> IndexFnM Term
--- refineSums (SoP2 x :>= SoP2 y) =
---   -- Treat as x - y >= 0.
---   -- So check that t
---   let rewrite = x .-. y :>=
---   undefined
--- refineSums _ = undefined
-
--- [max{1} <= m₆₀₆₉ <= min{9223372036854775807}
---  max{1} <= j₆₁₆₄ <= min{i₆₁₇₂},
---  max{0} <= i₆₁₇₂ <= min{m₆₀₆₉}, 
---  max{} <= Σj₆₁₆₄∈[1, ..., i₆₁₇₂] ((shape₆₀₇₁)[-1 + j₆₁₆₄]) <= min{}, 
---  max{0} <= (shape₆₀₇₁)[i₆₁₇₂] <= min{}]
-
 -- Takes any Sum in the alg env ranges and adds min/max values
 -- using monotonicity logic.
--- The reason I don't do this in the case for Sum is that I think
--- the sums only end up in the env when there's a relation on them?
 refineSumsInEnv :: IndexFnM ()
 refineSumsInEnv = do
   ranges <- ranges <$> gets algenv
   -- debugM $ "refineSumRangesInEnv " <> prettyString ranges
   mapM_ (refineSumRange . fst) (M.toList ranges)
   where
-    -- zero = SoP.int2SoP 0
+    zero = SoP.int2SoP 0
     refineSumRange :: Term -> IndexFnM ()
-    -- refineSumRange t@(Sum _ _ _ term) = do
-    --   -- if term is non-negative for all j in [lb,ub],
-    --   -- then the sum itself is non-negative
-    --   b <- term $>=$ zero
-    --   debugM $ "refineSumRangesInEnv "
-    --            <> prettyString (SoP2 term :>= SoP2 zero)
-    --            <> " is " <> prettyString b
-    --   when b $ addRange t (mkRangeLB zero)
+    refineSumRange t@(SumSlice vn _ _) = do
+      -- If the array being summed over is non-negative at all locations,
+      -- then the sum itself is non-negative.
+      b <- SoP.sym2SoP (Var vn) $>=$ zero
+      when b $ addRange t (mkRangeLB zero)
+    refineSumRange t@(SumSliceIndicator {}) = do
+      -- A sum over indicators is always non-negative.
+      addRange t (mkRangeLB zero)
     refineSumRange _ = pure ()
