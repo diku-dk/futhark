@@ -31,8 +31,6 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 
--- import Debug.Trace
-
 se0 :: SubExp
 se0 = intConst Int64 0
 
@@ -196,9 +194,7 @@ kkLoopBody
                         then le64 kk + le64 k .<. pe64 common_dim
                         else true -- if in prologue, always compute redomap.
                   )
-                  ( do
-                      mkCompLoopRxRy fits_ij acc_merge (a_idx_fn k, b_idx_fn k) (ltid_y, ltid_x)
-                  )
+                  (mkCompLoopRxRy fits_ij acc_merge (a_idx_fn k, b_idx_fn k) (ltid_y, ltid_x))
                   (resultBodyM [Var acc_merge])
 
             pure [varRes css]
@@ -741,9 +737,7 @@ mkTileMemSizes ::
     )
 mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
   tk_name <- nameFromString . prettyString <$> newVName "Tk"
-  _tx_name <- nameFromString . prettyString <$> newVName "Tx"
   ty_name <- nameFromString . prettyString <$> newVName "Ty"
-  _rx_name <- nameFromString . prettyString <$> newVName "Rx"
   ry_name <- nameFromString . prettyString <$> newVName "Ry"
 
   -- until we change the copying to use lmads we need to
@@ -751,7 +745,6 @@ mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
   -- for matrix multiplication it would be safe if they aren't
   --   but not for any of the other three cases!
   (ty, ry) <- getParTiles ("Ty", "Ry") (ty_name, ry_name) height_A
-  -- (tx, rx) <- getParTiles ("Tx", "Rx") (tx_name, rx_name) _width_B
   let (tx, rx) = (ty, ry)
   tk <- getSeqTile "Tk" tk_name common_dim tx ty
 
