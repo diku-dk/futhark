@@ -4,6 +4,7 @@ import Futhark.SoP.Monad (AlgEnv (ranges), addRange, delFromEnv, substEquivs, ad
 import Futhark.SoP.FourierMotzkin
 import Futhark.Analysis.View.Representation hiding (debugM)
 import Control.Monad.RWS hiding (Sum)
+import Data.List.NonEmpty(NonEmpty ((:|)))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as S
 import qualified Futhark.SoP.SoP as SoP
@@ -12,6 +13,7 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.Util.Pretty
 import Debug.Trace (traceM)
 import qualified Data.Map as M
+import Futhark.MonadFreshNames (newNameFromString)
 
 
 debugM :: Applicative f => String -> f ()
@@ -169,8 +171,9 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       traceM ("y' = " <> prettyString y')
       -- TODO don't do this twice lol. First is to get the sum in the env.
       b <- solve (x' `rel` y')
-      unless b refineSumsInEnv
-      b' <- if b then pure b else solve (x' `rel` y')
+      -- unless b refineSumsInEnv
+      -- b' <- if b then pure b else solve (x' `rel` y')
+      let b' = b
       env'' <- gets algenv
       traceM ("Ranges after refinement:\n" <> prettyRanges (ranges env''))
       traceM ("Result: " <> prettyString b')
@@ -191,20 +194,59 @@ refineIndexFn (IndexFn it (Cases cases)) = do
 
 -- Takes any Sum in the alg env ranges and adds min/max values
 -- using monotonicity logic.
-refineSumsInEnv :: IndexFnM ()
-refineSumsInEnv = do
-  ranges <- ranges <$> gets algenv
-  -- debugM $ "refineSumRangesInEnv " <> prettyString ranges
-  mapM_ (refineSumRange . fst) (M.toList ranges)
-  where
-    zero = SoP.int2SoP 0
-    refineSumRange :: Term -> IndexFnM ()
-    refineSumRange t@(SumSlice vn _ _) = do
-      -- If the array being summed over is non-negative at all locations,
-      -- then the sum itself is non-negative.
-      b <- SoP.sym2SoP (Var vn) $>=$ zero
-      when b $ addRange t (mkRangeLB zero)
-    refineSumRange t@(SumSliceIndicator {}) = do
-      -- A sum over indicators is always non-negative.
-      addRange t (mkRangeLB zero)
-    refineSumRange _ = pure ()
+-- refineSumsInEnv :: IndexFnM ()
+-- refineSumsInEnv = do
+--   ranges <- ranges <$> gets algenv
+--   mapM_ (refineSumRange . fst) (M.toList ranges)
+--   where
+--     zero = SoP.int2SoP 0
+--     refineSumRange :: Term -> IndexFnM ()
+--     refineSumRange t@(SumSlice vn _ _) = do
+--       -- If the array being summed over is non-negative at all locations,
+--       -- then the sum itself is non-negative.
+--       b <- SoP.sym2SoP (Var vn) $>=$ zero
+--       when b $ addRange t (mkRangeLB zero)
+--     refineSumRange t@(SumSliceIndicator {}) = do
+--       -- A sum over indicators is always non-negative.
+--       addRange t (mkRangeLB zero)
+--     refineSumRange _ = pure ()
+
+checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
+-- checkMonotonic iter@(Forall i dom) (cond, x) = do
+--   -- i is name in iter
+--   -- new name q
+--   -- new name r
+--   -- add range q in [min iter,r]
+--   -- add range r in [min iter,max iter]
+--   -- test that x{q/i} <= x{r/i}
+--   q <- newNameFromString "q"
+--   r <- newNameFromString "r"
+--   let (min_iter, max_iter) = (termToSoP $ domainStart dom, termToSoP $ domainEnd dom)
+--   addRange (Var r) (mkRange min_iter max_iter)
+--   addRange (Var q) (mkRange min_iter (SoP.sym2SoP $ Var r))
+--   let x_q = substituteName i (Var q) x
+--   let x_r = substituteName i (Var r) x
+--   let test = (cond, x_q :>= x_r)
+--   -- Have:
+--   --   max{} <= ∑shape₆₀₈₁[0 : -1 + q₆₁₈₈] <= min{}
+--   --   max{0} <= ∑shape₆₀₈₁[0 : -1 + r₆₁₈₉] <= min{}
+--   -- Need that:
+--   --   max{} <= ∑shape₆₀₈₁[0 : -1 + q₆₁₈₈] <= min{∑shape₆₀₈₁[0 : -1 + r₆₁₈₉]}
+--   let test' = IndexFn iter (Cases . NE.singleton $ test)
+--   debugM $ "checkMonotonic test: " <> prettyString test'
+--   IndexFn _ (Cases res) <- refineIndexFn test'
+--   debugM ("checkMonotonic result: " <> prettyString (IndexFn iter (Cases res)))
+--   case res of
+--     (_, Bool True) :| [] -> pure True
+--     _ -> pure False
+checkMonotonic iter@(Forall _ _) (cond, SumSlice xs _ _) = do
+  -- For a SumSlice it's sufficient to check that each term is non-negative.
+  let test = (cond, Var xs :>= SoP2 (SoP.int2SoP 0))
+  let test' = IndexFn iter (Cases . NE.singleton $ test)
+  debugM $ "checkMonotonic test: " <> prettyString test'
+  IndexFn _ (Cases res) <- refineIndexFn test'
+  debugM ("checkMonotonic result: " <> prettyString (IndexFn iter (Cases res)))
+  case res of
+    (_, Bool True) :| [] -> pure True
+    _ -> pure False
+checkMonotonic _ _ = pure False

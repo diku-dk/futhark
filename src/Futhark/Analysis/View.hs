@@ -408,28 +408,3 @@ getOOB lower_bound upper_bound (IndexFn iter cases)
       debugM ("getOOB res: " <> prettyString res')
       pure res'
 getOOB _ _ _ = pure Nothing
-
-checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
-checkMonotonic iter@(Forall i dom) (cond, x) = do
-  -- i is name in iter
-  -- new name q
-  -- new name r
-  -- add range q in [min iter,r]
-  -- add range r in [0,max iter]
-  -- test that x{q/i} <= x{r/i}
-  -- ie
-  --           x{r/i} - x{q/i} >= 0
-  -- if x = ∑j∈[lb, ..., i] a[j] then we can just check
-  --   0 <= min{shp}
-  -- q <- newNameFromString "q"
-  -- r <- newNameFromString "r"
-  -- addRange (mkRange )
-  let test = (cond, x :>= SoP2 (SoP.int2SoP 0))
-  let test' = IndexFn iter (Cases . NE.singleton $ test)
-  debugM $ "checkMonotonic test: " <> prettyString test'
-  IndexFn _ (Cases res) <- refineIndexFn test'
-  debugM ("checkMonotonic result: " <> prettyString (IndexFn iter (Cases res)))
-  case res of
-    (_, Bool True) :| [] -> pure True
-    _ -> pure False
-checkMonotonic _ _ = pure False

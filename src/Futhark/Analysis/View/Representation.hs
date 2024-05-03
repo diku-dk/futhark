@@ -1,17 +1,14 @@
--- Task: Create automated test suite.
--- Task: refactor forward to decouple it from substitution logic.
--- Task: Change representation to more restricted one
---   where Exp is a leaf/term in an SoP and cases are
---   of type (Exp, SoP Exp). Possibly rename Exp lol.
---   Use SoP.Rel for relations?
 -- Task: mkFlagArray
---   [ ] Extend representation to allow Union iterator
---   [ ] Support necessary scatter rule
+--   [x] Extend representation to allow Union iterator
+--   [x] Support necessary scatter rule
+-- Task: Make Fourier-Motzkin elimination return Nothing when undecidable?
+--   This would be useful in refineIndexFn (see TODO there).
 -- Task: partition2L
 --   Empty segments may be problematic in lstL; maybe
 --   add outer condition to index funciton representation?
 -- Task: prove that partition2indices index function
 --   is a permutation of 0...n-1.
+-- Task: Use SoP.Rel for relations?
 --
 -- Task: TODO change Iota to SoP.Range? Then Empty just becomes mempty.
 -- Task: Rebase this on top of master (don't need Refinement type machinery rn).
@@ -19,7 +16,7 @@
 module Futhark.Analysis.View.Representation where
 
 import Data.Map.Strict qualified as M
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromJust)
 import Data.Bifunctor (second)
 import Futhark.SoP.SoP (SoP)
 import Futhark.SoP.SoP qualified as SoP
@@ -276,8 +273,9 @@ x ~*~ y = flatten $ SoP2 $ termToSoP x SoP..*. termToSoP y
 -- (~==~) :: Term -> Term -> Term
 -- x ~==~ y = flatten $ SoP (termToSoP x) :== SoP (termToSoP y)
 
+
 prettyName :: VName -> Doc a
-prettyName (VName vn i) = pretty vn <> pretty (mapMaybe subscript (show i))
+prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show (i - 6000)))
   where
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
