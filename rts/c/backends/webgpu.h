@@ -552,6 +552,9 @@ void backend_context_teardown(struct futhark_context *ctx) {
 //
 //   size_t num_bindings; // excluding the scalars binding
 //   uint32_t *binding_indices;
+//
+//   size_t num_overrides;
+//   char **used_overrides;
 struct wgpu_kernel_info;
 static size_t wgpu_num_kernel_infos;
 static wgpu_kernel_info wgpu_kernel_infos[];
@@ -625,12 +628,22 @@ static void gpu_create_kernel(struct futhark_context *ctx,
   kernel->pipeline_layout = wgpuDeviceCreatePipelineLayout(ctx->device, &pl);
 
   // Create constants / overrides.
-  WGPUConstantEntry *const_entries = calloc(ctx->num_overrides,
+  // TODO: We should be able to just set all overrides from the context and
+  // remove the used_overrides from kernel_info. It only exists because
+  // Chrome/Dawn currently complains if we set unused constants, see
+  // https://issues.chromium.org/issues/338624452.
+  WGPUConstantEntry *const_entries = calloc(kernel_info->num_overrides,
                                             sizeof(WGPUConstantEntry));
+  int const_idx = 0;
   for (int i = 0; i < ctx->num_overrides; i++) {
-    WGPUConstantEntry *entry = &const_entries[i];
-    entry->key = ctx->override_names[i];
-    entry->value = ctx->override_values[i];
+    for (int j = 0; j < kernel_info->num_overrides; j++) {
+      if (strcmp(kernel_info->used_overrides[j], ctx->override_names[i]) == 0) {
+        WGPUConstantEntry *entry = &const_entries[const_idx];
+        entry->key = ctx->override_names[i];
+        entry->value = ctx->override_values[i];
+        const_idx++;
+      }
+    }
   }
 
   // Create pipeline.
@@ -639,7 +652,7 @@ static void gpu_create_kernel(struct futhark_context *ctx,
     .compute = {
       .module = ctx->module,
       .entryPoint = kernel_info->name,
-      .constantCount = ctx->num_overrides,
+      .constantCount = kernel_info->num_overrides,
       .constants = const_entries,
     }
   };

@@ -40,10 +40,13 @@ mkKernelInfos kernels = do
                typename size_t *scalar_offsets;
                typename size_t num_bindings;
                typename uint32_t *binding_indices;
+               typename size_t num_overrides;
+               char **used_overrides;
              } wgpu_kernel_info;
              static typename size_t wgpu_num_kernel_infos = $exp:num_kernels; |]
   mapM_ GC.earlyDecl $ concatMap sc_offs_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap bind_idxs_decl (M.toList kernels)
+  mapM_ GC.earlyDecl $ concatMap used_overrides_decl (M.toList kernels)
   mapM_ GC.earlyDecl
     [C.cunit|static struct wgpu_kernel_info wgpu_kernel_infos[]
                = {$inits:info_inits};|]
@@ -57,9 +60,15 @@ mkKernelInfos kernels = do
       let idxs = map (\i -> [C.cinit|$int:i|]) (memBindSlots k)
        in [C.cunit|static typename uint32_t $id:(n <> "_binding_indices")[]
                      = {$inits:idxs};|]
+    used_overrides_decl (n, k) =
+      let overrides = map (\o -> [C.cinit|$string:(T.unpack o)|])
+                        (overrideNames k)
+       in [C.cunit|static char* $id:(n <> "_used_overrides")[]
+                    = {$inits:overrides};|]
     info_init (n, k) =
       let num_scalars = length (scalarsOffsets k)
           num_bindings = length (memBindSlots k)
+          num_overrides = length (overrideNames k)
        in [C.cinit|{ .name = $string:(T.unpack (idText (C.toIdent n mempty))),
                      .num_scalars = $int:num_scalars,
                      .scalars_binding = $int:(scalarsBindSlot k),
@@ -67,6 +76,8 @@ mkKernelInfos kernels = do
                      .scalar_offsets = $id:(n <> "_scalar_offsets"),
                      .num_bindings = $int:num_bindings,
                      .binding_indices = $id:(n <> "_binding_indices"),
+                     .num_overrides = $int:num_overrides,
+                     .used_overrides = $id:(n <> "_used_overrides"),
                    }|]
     info_inits = map info_init (M.toList kernels)
 

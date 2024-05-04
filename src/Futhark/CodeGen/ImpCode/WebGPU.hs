@@ -32,9 +32,11 @@ data KernelInterface = KernelInterface
     scalarsBindSlot :: Int,
     -- | Bind slot indices for all memory arguments.
     memBindSlots :: [Int],
-    -- | Names of all the override declarations used by the kernel. Only
-    -- required for the ad-hoc WGSL testing setup, in normal code generation
+    -- | Names of all the override declarations used by the kernel. Should only
+    -- be required for the ad-hoc WGSL testing setup, in normal code generation
     -- these get passed through 'webgpuMacroDefs'.
+    -- Currently also used to work around a Chrome/Dawn bug, see
+    -- `gpu_create_kernel` in rts/c/backends/webgpu.h.
     overrideNames :: [T.Text]
   }
 

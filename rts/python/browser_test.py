@@ -200,7 +200,8 @@ async def start_server(app, toWS, toStdIO):
         driver, get_task = start_browser()
 
     await app['stop'].wait()
-    await get_task
+    if not args.no_browser:
+        await get_task
     await runner.cleanup()
 
     if not args.no_browser:
