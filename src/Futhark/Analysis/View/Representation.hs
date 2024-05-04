@@ -52,6 +52,7 @@ data Term =
       (SoP Term)   -- index
   | SoP2 (SoP Term)
   | Indicator Term -- predicate (the corresponding value of 0 or 1 is implicit)
+  | Tuple [Term]
   | -- Predicate expressions follow here for simplicity.
     -- I'm assuming it's safe because the source program was typechecked.
     -- TODO CNF
@@ -217,6 +218,7 @@ instance ASTMappable Term where
         ts' <- traverse (mapOnTerm m) ts
         pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map termToSoP ts')
   astMap m (Indicator p) = Indicator <$> mapOnTerm m p
+  astMap m (Tuple ts) = Tuple <$> mapM (mapOnTerm m) ts
   astMap _ x@(Bool {}) = pure x
   astMap m (Not x) = Not <$> mapOnTerm m x
   astMap m (x :== y) = (:==) <$> mapOnTerm m x <*> mapOnTerm m y
@@ -302,6 +304,7 @@ instance Pretty Term where
   pretty (Indicator p) = iversonbrackets (pretty p)
     where
       iversonbrackets = enclose "⟦" "⟧"
+  pretty (Tuple ts) = parens . commasep . map pretty $ ts
   pretty (Bool x) = pretty x
   pretty (Not x) = "¬" <> parens (pretty x)
   pretty (x :== y) = pretty x <+> "==" <+> pretty y

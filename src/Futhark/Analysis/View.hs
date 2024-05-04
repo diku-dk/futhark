@@ -296,8 +296,24 @@ forward (E.AppExp (E.Apply f args _) _)
   | Just "scan" <- getFun f,
     -- [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
     [E.Lambda params body _ _ _, _ne, xs'] <- getArgs args = do
-    trace (show $ getArgs args) undefined
-    -- pure $ IndexFn Empty (toCases . SoP2 $ SoP.int2SoP 0)
+      -- check if params are tuple, then xs must be unzipped before forward (so never hit zip case)
+      case head params of
+        E.TuplePat [E.Id x1 _ _, E.Id x2 _ _] _ ->
+          trace (show xs') undefined
+        _ -> undefined
+      -- pure $ IndexFn Empty (toCases . SoP2 $ SoP.int2SoP 0)
+  | Just fname <- getFun f,
+    "zip" `L.isPrefixOf` fname = do
+      xss <- mapM forward (getArgs args)
+      vns <- mapM (\_ -> newNameFromString "xs") xss
+      let IndexFn iter1 _ = head xss
+      let y = foldl (\acc (vn, xs) -> sub vn xs acc)
+                    (IndexFn iter1 (toCases . Tuple $ map Var vns))
+                    (zip vns xss)
+      -- trace (prettyString xss)
+      --       (error "no obvious way to return zipped index functions")
+      rewrite y
+      -- pure $ IndexFn Empty (toCases . SoP2 $ SoP.int2SoP 0)
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
       -- Scatter in-bounds-monotonic indices.
