@@ -665,7 +665,8 @@ matchesBlkRegTile seg_space kstms
     map_t2_0 <- elemType map_t2t,
     -- checks that the input arrays to redomap are variant to
     -- exactly one of the two innermost dimensions of the kernel
-    Just var_dims <- isInvarTo1of2InnerDims mempty seg_space variance arrs,
+    inner_dims <- takeLast 2 $ map fst $ unSegSpace seg_space,
+    Just var_dims <- isInvarToAllButOneInnerDim mempty inner_dims variance arrs,
     -- get the variables on which the first result of redomap depends on
     [redomap_orig_res] <- patNames pat_redomap,
     Just res_red_var <- M.lookup redomap_orig_res variance, -- variance of the reduce result
@@ -836,40 +837,21 @@ matchCodeStreamCode kstms = do
     isScremaStm _ = False
 
 -- | Checks that all streamed arrays are variant to exacly one of
---   the two innermost parallel dimensions, and conversely, for
---   each of the two innermost parallel dimensions, there is at
+--   the innermost parallel dimensions, and conversely, for
+--   each of the innermost parallel dimensions, there is at
 --   least one streamed array variant to it. The result is the
 --   number of the only variant parallel dimension for each array.
-isInvarTo1of2InnerDims ::
-  Names ->
-  SegSpace ->
-  VarianceTable ->
-  [VName] ->
-  Maybe [Int]
-isInvarTo1of2InnerDims branch_variant segspace =
-  let n_dims = 2
-      inner_dims = takeLast n_dims $ map fst $ unSegSpace segspace
-   in isInvarToAllButOneInnerDim n_dims branch_variant inner_dims
-
 isInvarToAllButOneInnerDim ::
-  Int ->
   Names ->
   [VName] ->
   VarianceTable ->
   [VName] ->
   Maybe [Int]
-isInvarToAllButOneInnerDim n_dims branch_variant dims variance arrs
-  | length dims /= n_dims =
-      error $
-        "isInvarToAllButOneInnerDim error: Expected "
-          ++ show n_dims
-          ++ " dims, but got "
-          ++ show (length dims)
-  | all (`notNameIn` branch_variant) dims,
-    Just inner_perm <- mapM arrIsVarToExactly1InnerDim arrs,
-    all (`elem` inner_perm) [0 .. n_dims - 1] =
-      pure inner_perm
-  | otherwise = Nothing
+isInvarToAllButOneInnerDim branch_variant dims variance arrs = do
+  guard $ all (`notNameIn` branch_variant) dims
+  inner_perm <- mapM arrIsVarToExactly1InnerDim arrs
+  guard $ all (`elem` inner_perm) $ indices dims
+  pure inner_perm
   where
     arrIsVarToExactly1InnerDim :: VName -> Maybe Int
     arrIsVarToExactly1InnerDim arr
@@ -878,6 +860,7 @@ isInvarToAllButOneInnerDim n_dims branch_variant dims variance arrs
       | otherwise = Nothing
       where
         variants = M.findWithDefault mempty arr variance
+
 
 processIndirections ::
   Stms GPU -> -- code1
@@ -940,14 +923,6 @@ variantToDim :: VarianceTable -> VName -> VName -> Bool
 variantToDim variance gid_outer nm =
   gid_outer == nm || nameIn gid_outer (M.findWithDefault mempty nm variance)
 
--- | Checks that all streamed arrays are variant to exacly one of
---   the three innermost parallel dimensions, and conversely, for
---   each of the three innermost parallel dimensions, there is at
---   least one streamed array variant to it. The result is the
---   number of the only variant parallel dimension for each array.
-isInvarTo2of3InnerDims :: Names -> [VName] -> VarianceTable -> [VName] -> Maybe [Int]
-isInvarTo2of3InnerDims = isInvarToAllButOneInnerDim 3
-
 -- | Expects a kernel statement as argument.
 --   CONDITIONS for 3D tiling optimization to fire are:
 --     1. a) The kernel body can be broken into
@@ -997,7 +972,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     all primType red_res_tps,
     -- checks that the input arrays to redomap are variant to
     -- exactly one of the two innermost dimensions of the kernel
-    Just _ <- isInvarTo2of3InnerDims mempty (map fst inner_dims) variance inp_soac_arrs,
+    Just _ <- isInvarToAllButOneInnerDim mempty (map fst inner_dims) variance inp_soac_arrs,
     -- get the free variables on which the result of redomap depends on
     redomap_orig_res <- patElems pat_redomap,
     res_red_var <- -- variance of the reduce result

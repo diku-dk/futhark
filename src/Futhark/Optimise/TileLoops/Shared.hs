@@ -30,7 +30,7 @@ where
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (foldl', intercalate, zip4)
+import Data.List (foldl', zip4)
 import Data.Map qualified as M
 import Debug.Trace
 import Futhark.IR.GPU
@@ -47,7 +47,6 @@ debugType s v =
 myDebug :: String -> a -> a
 myDebug s = trace $ concat [sep, "\n", s', "\n", sep]
   where
-    -- s' = intercalate "\n" $ map ("DEBUG: " ++) $ lines s
     s' = s
     sep = replicate 100 '='
 
