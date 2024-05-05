@@ -268,6 +268,10 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
       -- not sufficiently detrimental to performance that it is necessary.
       let use_epilogue = not $ AttrName "no_epilogue" `inAttrs` stmAuxAttrs aux
 
+      -- TODO: for now, we manually *enable* shmem padding using source language
+      -- attributes. should obviously automate this somehow.
+      let pad_flags = map (\s -> AttrName s `inAttrs` stmAuxAttrs aux) ["pad_A", "pad_B"]
+
       (new_kernel, host_stms) <- runBuilder $ do
         kernel_params@( TCKernelParams
                           _gtids
@@ -288,7 +292,7 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
           makeTCKernelParams gtids inner_dims common_dim
 
         (ret_seggroup, stms_seggroup) <- runBuilder $ do
-          tc_env <- makeTCEnv env kernel_params load_stms map_lam red_lam map_prim_ts
+          tc_env <- makeTCEnv env kernel_params load_stms map_lam red_lam map_prim_ts pad_flags
 
           -- Zero-initialize register tile.
           reg_tiles_init <- segMapND_ "reg_tiles" seglvl_thd ResultPrivate tiles_T $ \_ -> do
@@ -583,20 +587,9 @@ makeTCEnv ::
   Lambda GPU ->
   Lambda GPU ->
   [PrimType] ->
+  [Bool] ->
   Builder GPU TCEnv
-makeTCEnv env kernel_params load_stms map_lam red_lam map_ts = do
-  -- We need to extract the dimensions of each input array, and unfortunately
-  -- the Redomap passed into this module only indirectly carries this
-  -- information, as part of the kernel stms loading each redomap input slice.
-  -- It'd be more convenient if the Redomap carried not only the VNames of its
-  -- operands slices, but also the base arrays (if any) whence each slice comes,
-  -- or at least the dimensionality of.
-  --
-  -- In any case, this information is necessary in order to match tile dims with
-  -- the dims of each input array -- since these are not simply (M: (Ty, Ry))
-  -- and (N: (Tx, Rx)) as in the 2D case -- as well as to generate boundary
-  -- checks later on.
-  let base_arrs = map getArrayFromLoadStm load_stms
+makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
 
   block_offsets <-
     forM3 inner_dim_names tbids tiles_TR $
@@ -606,11 +599,27 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts = do
 
   fmap (TCEnv kernel_params block_offsets map_lam red_lam)
     $ forM3
-      base_arrs
       load_stms
       map_ts
-    $ \base_arr load_stm shmem_elem_type -> do
+      pad_flags
+    $ \load_stm shmem_elem_type do_pad -> do
 
+      -- We need to extract the dimensions of each input array, and unfortunately
+      -- the Redomap passed into this module only indirectly carries this
+      -- information, as part of the kernel stms loading each redomap input slice.
+      -- It'd be more convenient if the Redomap carried not only the VNames of its
+      -- operands slices, but also the base arrays (if any) whence each slice comes,
+      -- or at least the dimensionality thereof.
+      --
+      -- In any case, this information is necessary in order to match tile dims with
+      -- the dims of each input array -- since these are not simply (M: (Ty, Ry))
+      -- and (N: (Tx, Rx)) as in the 2D case -- as well as to generate boundary
+      -- checks later on.
+      --
+      -- Additionally, as it turned out, it is more convenient to load directly
+      -- from these base arrays, rather than binding computed indices to gtids
+      -- and inserting the load statements. Again, it would
+      let base_arr = getArrayFromLoadStm load_stm
       dims <- getArrDims base_arr
 
       -- It's not pretty, but we somehow need to extract the tile
@@ -637,7 +646,7 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts = do
       let tile_dims = gather_ tiles_TR tile_seq var_gtids
 
       -- TODO: decide pad_term dynamically, based on the given array.
-      let pad_term = pe64 se1
+      let pad_term = pe64 $ if do_pad then se1 else se0
       let inner_dim = last tile_dims
       inner_dim_pad <-
         -- TODO: give a better name to the padded dimension.
