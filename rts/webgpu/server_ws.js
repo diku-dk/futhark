@@ -35,6 +35,10 @@ class BrowserServer {
       'store': this.cmd_store.bind(this),
       'free': this.cmd_free.bind(this),
       'call': this.cmd_call.bind(this),
+      'clear': this.cmd_clear.bind(this),
+      'report': this.cmd_report.bind(this),
+      'pause_profiling': this.cmd_pause_profiling.bind(this),
+      'unpause_profiling': this.cmd_unpause_profiling.bind(this),
     };
 
     this.socket = new WebSocket("ws://" + window.location.host + "/ws");
@@ -44,6 +48,10 @@ class BrowserServer {
 
       let resp = undefined;
       try {
+        if (!(msg.cmd in this.commands)) {
+          throw "Unknown command: " + msg.cmd;
+        }
+
         const fun = this.commands[msg.cmd];
         const res = await fun(...msg.args);
         if (typeof res == "string") {
@@ -194,13 +202,37 @@ class BrowserServer {
     const outNames = outsAndIns.slice(0, outCount);
     const inNames = outsAndIns.slice(outCount, outsAndIns.length);
     const ins = inNames.map((n) => this.get_var(n).val);
+
+    const startTime = performance.now();
     const outs = await entry_fun(...ins);
+    const endTime = performance.now();
+
     for (let i = 0; i < outNames.length; i++) {
       // TODO: This assumes that size of the value is 4 bytes
       const outVal = this.fut.m.HEAP32[outs[i] / 4];
       this.set_var(outNames[i], outVal, entry_info.outputs[i].type);
       this.fut.free(outs[i]);
     }
+
+    return "runtime: " + Math.round((endTime - startTime) * 1000).toString();
+  }
+
+  async cmd_clear() {
+    await this.fut.clear_caches();
+    return "";
+  }
+
+  async cmd_report() {
+    return await this.fut.report();
+  }
+
+  async cmd_pause_profiling() {
+    await this.fut.pause_profiling();
+    return "";
+  }
+
+  async cmd_unpause_profiling() {
+    await this.fut.unpause_profiling();
     return "";
   }
 }

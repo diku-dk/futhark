@@ -119,7 +119,9 @@ jsBoilerplate prog manifest =
       ["malloc", "free",
        "futhark_context_config_new", "futhark_context_new",
        "futhark_context_config_free", "futhark_context_free",
-       "futhark_context_sync",
+       "futhark_context_sync", "futhark_context_clear_caches",
+       "futhark_context_report", "futhark_context_pause_profiling",
+       "futhark_context_unpause_profiling",
        "futhark_new_i32_1d", "futhark_free_i32_1d",
        "futhark_values_i32_1d", "futhark_shape_i32_1d"]
 
@@ -188,8 +190,27 @@ mkJsContext (Definitions _ _ (Functions funs)) manifest =
       }
       async context_sync() {
         return await ${syncCall};
-      }|]
+      }
+      async clear_caches() {
+        return await ${clearCall};
+      }
+      async report() {
+        return await this.m.ccall('futhark_context_report', 'string',
+          ['number'], [this.ctx], {async: true});
+      }
+      async pause_profiling() {
+        return await ${pauseProfilingCall};
+      }
+      async unpause_profiling() {
+        return await ${unpauseProfilingCall};
+      }
+      |]
     syncCall = asyncCall "futhark_context_sync" True ["this.ctx"]
+    clearCall = asyncCall "futhark_context_clear_caches" True ["this.ctx"]
+    pauseProfilingCall =
+      asyncCall "futhark_context_pause_profiling" False ["this.ctx"]
+    unpauseProfilingCall =
+      asyncCall "futhark_context_unpause_profiling" False ["this.ctx"]
 
 data JsEntryPoint = JsEntryPoint
   { entryName :: T.Text,
