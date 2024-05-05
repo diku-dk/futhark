@@ -68,8 +68,18 @@ index_page = (f"<!DOCTYPE html>\n"
               f"</html>"
              )
 
+default_headers = \
+    {
+        # This makes the site an "isolated context", most
+        # notably improving timing measurement resolution
+        # from 100 microseconds to 5 microseconds.
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Embedder-Policy': 'require-corp'
+    }
+
 async def handle_index(request):
-    return web.Response(text=index_page, content_type="text/html")
+    return web.Response(text=index_page, content_type="text/html",
+                        headers=default_headers)
 
 async def handle_file(request):
     file = request.rel_url.path.lstrip('/')
@@ -86,7 +96,8 @@ async def handle_file(request):
     with open(file, "rb") as f:
         contents = f.read()
 
-    return web.Response(body=contents, content_type=content_type)
+    return web.Response(body=contents, content_type=content_type,
+                        headers=default_headers)
 
 def restore_val(reader, typename):
     # TODO: This ignores opaque types
