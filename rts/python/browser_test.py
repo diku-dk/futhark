@@ -27,6 +27,9 @@ parser.add_argument("--no-server-proxy",
 parser.add_argument("--no-browser",
                     help="do not start a browser, instead wait for one to connect",
                     action="store_true")
+parser.add_argument("--show-browser",
+                    help="disable headless mode for browser",
+                    action="store_true")
 parser.add_argument("--web-driver",
                     help=("URL of a remote WebDriver to connec to.\n"
                           "Can also be set via WEB_DRIVER_URL env variable."))
@@ -182,6 +185,8 @@ async def handle_ws(request):
 
 def start_browser():
     options = webdriver.ChromeOptions()
+    if not args.show_browser:
+        options.add_argument("--headless=new")
     if remote_driver_url is not None:
         driver = webdriver.Remote(command_executor=remote_driver_url, options=options)
     else:
