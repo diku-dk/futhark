@@ -25,7 +25,8 @@ parser.add_argument("--no-server-proxy",
                           "(implies --no-browser)"),
                     action="store_true")
 parser.add_argument("--no-browser",
-                    help="do not start a browser, instead wait for one to connect",
+                    help=("do not start a browser, instead wait for one to connect.\n",
+                          "Can also be set via NO_BROWSER=1 env variable."),
                     action="store_true")
 parser.add_argument("--show-browser",
                     help=("disable headless mode for browser.\n"
@@ -58,6 +59,14 @@ if log_path is not None:
 remote_driver_url = os.environ.get("WEB_DRIVER_URL")
 if remote_driver_url is None:
     remote_driver_url = args.web_driver
+
+no_browser = os.environ.get("NO_BROWSER")
+if no_browser == "0":
+    no_browser = False
+elif no_browser == "1":
+    no_browser = True
+elif no_browser is None:
+    no_browser = args.no_browser
 
 headless = os.environ.get("HEADLESS")
 if headless == "0":
@@ -183,7 +192,7 @@ async def handle_ws(request):
         eprint("Got response:", resp)
 
         text = ""
-        if cmd == "store":
+        if cmd == "store" and resp['status'] == 'ok':
             text = wrap_store_resp(orig_args[0], resp)
         else:
             text = resp['text']
@@ -225,15 +234,15 @@ async def start_server(app, toWS, toStdIO):
 
     await site.start()
 
-    if not args.no_browser:
+    if not no_browser:
         driver, get_task = start_browser()
 
     await app['stop'].wait()
-    if not args.no_browser:
+    if not no_browser:
         await get_task
     await runner.cleanup()
 
-    if not args.no_browser:
+    if not no_browser:
         stop_browser(driver)
 
 app = web.Application()

@@ -563,9 +563,9 @@ compileWebGPUAction fcfg mode tgtpath =
             [ "-sUSE_WEBGPU",
               "-sASYNCIFY",
               "-sMODULARIZE",
+              "-sWASM_BIGINT",
               "-sEXPORTED_RUNTIME_METHODS=cwrap,ccall,Asyncify",
               "--extern-post-js", jslibpath,
-              --"-gsource-map",
               "-g"
             ]
           export_option = "-sEXPORTED_FUNCTIONS="

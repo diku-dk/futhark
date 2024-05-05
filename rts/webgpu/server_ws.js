@@ -65,6 +65,7 @@ class BrowserServer {
           resp = res;
         }
       } catch (ex) {
+        console.log(ex);
         resp = { status: "fail", text: ex.toString() };
       }
       this.socket.send(JSON.stringify(resp));
@@ -149,12 +150,14 @@ class BrowserServer {
       const type_info = this.get_manifest_type(type);
       const new_fun = this.fut_function(type_info.ops.new)
 
-      const buf = this.fut.malloc(data[i].length * 4);
-      for (let j = 0; j < data[i].length; j++) {
+      // TODO: 32-bit int specific
+      const len = data[i].length;
+      const buf = this.fut.malloc(len * 4);
+      for (let j = 0; j < len; j++) {
         this.fut.m.HEAP32[buf / 4 + j] = data[i][j];
       }
 
-      const val = await new_fun(buf, data[i].length);
+      const val = await new_fun(buf, BigInt(len));
       this.set_var(name, val, type);
 
       this.fut.free(buf);
@@ -169,20 +172,22 @@ class BrowserServer {
     for (const name of vars) {
       const {val, typ} = this.get_var(name);
       const type_info = this.get_manifest_type(typ);
-      const values_fun = this.fut_function(type_info.ops.values);
-      const shape_fun = this.fut_function(type_info.ops.shape);
+      //const shape_fun = this.fut_function(type_info.ops.shape);
+      const values_fun = this.fut_function(type_info.ops.values + "_js");
 
       // TODO: This really needs to be abstracted, only works for []i32
-      const shape = shape_fun(val);
-      const len = this.fut.m.HEAP32[shape / 4];
-      const buf = this.fut.malloc(len * 4);
-      await values_fun(val, buf);
-      await this.fut.context_sync();
+      //const shape = shape_fun(val);
+      //const len = this.fut.m.HEAP32[shape / 4];
+      //const buf = this.fut.malloc(len * 4);
+      //await values_fun(val, buf);
+      //await this.fut.context_sync();
+      const values = await values_fun(val);
 
-      data.push(Array.from(this.fut.m.HEAP32.subarray(buf/4, buf/4 + len)));
+      //data.push(Array.from(this.fut.m.HEAP32.subarray(buf/4, buf/4 + len)));
+      data.push(values);
       types.push(typ);
 
-      this.fut.free(buf);
+      //this.fut.free(buf);
     }
 
     const data_strings = data.map((a) => "[" + a.toString() + "]");

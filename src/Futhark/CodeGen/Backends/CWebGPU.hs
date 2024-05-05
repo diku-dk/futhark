@@ -283,10 +283,23 @@ mkJsArrayFuns (typ, sign, shp) =
   shape_${name}(arr) {
     return this.m._futhark_shape_${name}(this.ctx, arr);
   }
+  async values_${name}_js(arr) {
+    // TODO: This currently only works for 1d arrays.
+    const shape = this.shape_${name}(arr);
+    const len = Number(this.m.HEAP64[shape / 8]);
+    const vals = this.malloc(len * ${elemSize});
+    await this.values_${name}(arr, vals);
+    await this.context_sync();
+    const idx = vals / ${elemSize};
+    const ret = ${valuesArrayCopy};
+    this.free(vals);
+    return ret;
+  }
   |], exports)
   where
     rank = length shp
     name = GC.arrayName typ sign rank
+    elemSize = showText (primByteSize typ :: Int)
     shapeNames = ["dim" <> prettyText i | i <- [0 .. rank - 1]]
     shapeParams = T.intercalate ", " shapeNames
     newCall = asyncCall 
@@ -295,8 +308,35 @@ mkJsArrayFuns (typ, sign, shp) =
       ("futhark_free_" <> name) True ["this.ctx", "arr"]
     valuesCall = asyncCall
       ("futhark_values_" <> name) True ["this.ctx", "arr", "data"]
+    valuesArrayCopy = primWasmArrayCopy typ sign "idx" "len"
     exports = ["futhark_new_" <> name, "futhark_free_" <> name,
                "futhark_values_" <> name, "futhark_shape_" <> name]
+
+primWasmHeap :: PrimType -> Signedness -> T.Text
+primWasmHeap Bool _ = "HEAP8"
+primWasmHeap (IntType Int8) Unsigned = "HEAPU8"
+primWasmHeap (IntType Int8) Signed = "HEAP8"
+primWasmHeap (IntType Int16) Unsigned = "HEAPU16"
+primWasmHeap (IntType Int16) Signed = "HEAP16"
+primWasmHeap (IntType Int32) Unsigned = "HEAPU32"
+primWasmHeap (IntType Int32) Signed = "HEAP32"
+primWasmHeap (IntType Int64) Unsigned = "HEAPU64"
+primWasmHeap (IntType Int64) Signed = "HEAP64"
+primWasmHeap (FloatType Float16) _ = error "f16 wasm heap op: unimplemented"
+primWasmHeap (FloatType Float32) _ = "HEAPF32"
+primWasmHeap (FloatType Float64) _ = "HEAPF64"
+primWasmHeap Unit _ = error "unit wasm heap op: unimplemented"
+
+primWasmArrayCopy :: PrimType -> Signedness -> T.Text -> T.Text -> T.Text
+primWasmArrayCopy t@(IntType _) sign idx len =
+  let heapVar = primWasmHeap t sign
+   in [text|Array.from(this.m.${heapVar}.subarray(${idx}, ${idx} + ${len}))|]
+primWasmArrayCopy t@(FloatType _) sign idx len =
+  let heapVar = primWasmHeap t sign
+   in [text|Array.from(this.m.${heapVar}.subarray(${idx}, ${idx} + ${len}))|]
+primWasmArrayCopy Bool _ idx len =
+  [text|Array.from(this.m.HEAP8.subarray(${idx}, ${idx} + ${len})) .map((x) => x != 0)|]
+primWasmArrayCopy Unit _ _ _ = error "unit copy from WASM heap: unimplemented"
 
 -- | Compile the program to C with calls to WebGPU, along with a JS wrapper
 -- library.
