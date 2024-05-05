@@ -34,12 +34,13 @@ reductionLoopBody ::
   VName ->
   VName ->
   [VName] ->
+  Bool ->
   Builder GPU [VName]
-reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in = do
+reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
   qq <- letExp "qq" =<< toExp (le64 qq0 * pe64 tile_seq)
 
-  redomap_inputs_shr <- forM2 shr_arrs_in arr_metas $ copyGlb2Shr (Var qq)
-  reg_tiles_out <- accumulateRegTile redomap_inputs_shr
+  redomap_inputs_shr <- forM2 shr_arrs_in arr_metas $ copyGlb2Shr qq
+  reg_tiles_out <- accumulateRegTile qq redomap_inputs_shr
   pure $ reg_tiles_out : redomap_inputs_shr
   where
     arr_metas = arrsInfo tc_env
@@ -47,8 +48,9 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in = do
     tile_seq = tileSeq kernel_params
     tiles_T = tilesT kernel_params
     tiles_R = tilesR kernel_params
+    common_dim = commonDim kernel_params
 
-    copyGlb2Shr :: SubExp -> VName -> ArrMeta -> Builder GPU VName
+    copyGlb2Shr :: VName -> VName -> ArrMeta -> Builder GPU VName
     copyGlb2Shr qq shr_arr arr_meta = do
       -- Setup parameters for the WithAcc.
       cert_p <- newParam "cert_p" $ Prim Unit
@@ -143,16 +145,31 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in = do
 
         shmem_shape = Shape $ shmemDims arr_meta
         tile_dims = tileDims arr_meta
-        block_offsets = arrGather_ arr_meta (blockOffsets tc_env) qq
+        block_offsets = arrGather_ arr_meta (blockOffsets tc_env) (Var qq)
         base_arr_dims = baseArrDims arr_meta
         base_arr = baseArr arr_meta
 
-    accumulateRegTile :: [VName] -> Builder GPU VName
-    accumulateRegTile redomap_inputs_shr =
+    accumulateRegTile :: VName -> [VName] -> Builder GPU VName
+    accumulateRegTile qq redomap_inputs_shr =
       segMapND_ "reg_tiles_out" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
         reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
-        reg_tile_out <- forLoopNest_ (tile_seq : tiles_R) reg_tile_in $
-          \(q : loop_inds) reg_tile_merge -> do
+        fmap ((: []) . varRes) $
+          forLoop_ tile_seq reg_tile_in $ \q reg_tile_in' ->
+            letExp "reg_tile_acc"
+              =<< eIf
+                ( toExp $
+                    -- if we are in the prologue, accumulate unconditionally!
+                    fromBool is_prologue
+                      .||. le64 qq + le64 q .<. pe64 common_dim
+                )
+                ( accumulateRegTileInnerLoopNest ltids q reg_tile_in'
+                    >>= resultBodyM . (: []) . Var
+                )
+                (resultBodyM [Var reg_tile_in'])
+      where
+        accumulateRegTileInnerLoopNest :: [VName] -> VName -> VName -> Builder GPU VName
+        accumulateRegTileInnerLoopNest ltids q reg_tile_in =
+          forLoopNest_ tiles_R reg_tile_in $ \loop_inds reg_tile_merge -> do
             -- Compute lists of indices for each redomap operand. For each
             -- dimension, we need an index of the form `ltid * reg_tile +
             -- loop_ind`, so for the reduction dimension, use a dummy ltid and
@@ -179,8 +196,6 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in = do
 
             update "res" reg_tile_merge loop_inds $ resSubExp $ head red_res
 
-        pure [varRes reg_tile_out]
-
 
 doTCTiling :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
@@ -199,7 +214,6 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- TODO: find out how to reliably extract the inner dims of the segspace.
     --       perhaps inner dims are all those onto which the kernel result is
     --       variant and at least (or exactly) one redomap array is variant?
-    -- (rem_outer_gtids_dims, inner_gtids_dims) <- undefined -- splitFromEnd n_inner_dims all_gtids_dims,
     (rem_outer_gtids_dims, inner_gtids_dims) <- ([], all_gtids_dims), -- TODO: placeholder.
     (gtids, inner_dims) <- unzip inner_gtids_dims,
     -- check that the kernel fits the pattern:
@@ -226,8 +240,7 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- assert that all redomap arrays are variant to some, but not all innermost
     -- dimensions of the kernel.
     -- TODO: find out whether/where/how to use the returned information.
-    Just (var_dims_per_arr, var_inds_per_arr) <-
-      variantInnerDimsPerArr variance redomap_arrs gtids,
+    Just var_inds_per_arr <- variantDimsPerArr variance redomap_arrs gtids,
     -- TODO: all of the below guards are lifted from Cosmin's code.
     --       find out which of them are relevant here, and whether they need to
     --       be changed/generalized.
@@ -245,10 +258,15 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
       processIndirections code1 redomap_arrs red_res_variance,
     -- extract the stms loading slices from redomap arrays and check that there
     -- is one such stm for each redomap array.
-    Just load_stms <- mapM (`M.lookup` table_load_stms) redomap_arrs,
-    True = do
+    Just load_stms <- mapM (`M.lookup` table_load_stms) redomap_arrs = do
       let _code2 = code2' <> code2''
       let map_prim_ts = map elemType map_ts
+
+      -- TODO: for now, we manually disable the prologue/epilogue treatment when
+      -- suitable. However, ideally this would be done automatically, or not at
+      -- all, if there turns out to be a better method, or if the epilogue is
+      -- not sufficiently detrimental to performance that it is necessary.
+      let use_epilogue = not $ AttrName "no_epilogue" `inAttrs` stmAuxAttrs aux
 
       (new_kernel, host_stms) <- runBuilder $ do
         kernel_params@( TCKernelParams
@@ -287,13 +305,26 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                 (shmemElemType arr)
                 (shmemDims arr)
 
-          num_seq_tiles <- letSubExp "num_seq_tiles" =<< ceilDiv common_dim tile_seq
+          ~(reg_tiles_res : _shr_arrs_out) <-
+            case use_epilogue of
+              True -> do
+                myDebugM "Compiling TC expression WITH epilogue"
+                num_full_tiles <-
+                  letExp "num_full_tiles" . BasicOp $
+                    BinOp (SQuot Int64 Unsafe) common_dim tile_seq
 
-          reduction_loop_res <-
-            forLoop num_seq_tiles (reg_tiles_init : shr_arrs_init) $
-              \qq0 (reg_tiles_merge : shr_arrs_merge) ->
-                reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge
-          let reg_tiles_res : _ = reduction_loop_res
+                ~(reg_tiles' : shr_arrs') <-
+                  forLoop (Var num_full_tiles) (reg_tiles_init : shr_arrs_init) $
+                    \qq0 (reg_tiles_merge : shr_arrs_merge) ->
+                      reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
+
+                reductionLoopBody tc_env num_full_tiles reg_tiles' shr_arrs' False
+              _ -> do
+                myDebugM "Compiling TC expression WITHOUT epilogue"
+                num_seq_tiles <- letSubExp "num_seq_tiles" =<< ceilDiv common_dim tile_seq
+                forLoop num_seq_tiles (reg_tiles_init : shr_arrs_init) $
+                  \qq0 (reg_tiles_merge : shr_arrs_merge) ->
+                    reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
 
           let regtile_ret_dims =
                 map ((,se1,se1) . snd) rem_outer_gtids_dims
@@ -306,8 +337,8 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
             space' = SegSpace tbid_flat (rem_outer_gtids_dims ++ zip tbids grid_dims)
             kbody' = KernelBody () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
-
       -- END HOST BUILDER
+
       pure $ Just (host_stms, new_kernel)
 doTCTiling _seg_space _kstms = pure Nothing
 
@@ -316,39 +347,64 @@ doTCTiling _seg_space _kstms = pure Nothing
 -- variant to at least 1 and not all inner dims, and that at least one array is
 -- variant to each inner dim. If these assertions hold; returns list of indices
 -- of variant dims for each array.
--- TODO: instead of the indices of variant dims, should this function return
---       simply the variant dims?
-variantInnerDimsPerArr ::
+-- TODO: Dimensions on which all redomap arrays are variant should be
+-- interchanged outwards.
+variantDimsPerArr ::
   VarianceTable ->
   [VName] ->
   [VName] ->
-  Maybe ([[VName]], [[Int]])
-variantInnerDimsPerArr variance arrs inner_dims
-  -- TODO: what is this check (lifted from Cosmin's original implementation) and
-  -- is it relevant here?
-  -- all (`notNameIn` branch_variant) inner_dims,
+  Maybe [[Int]]
+variantDimsPerArr variance arrs dims = do
+  let var_inds_per_arr = map variantInnerDimsForArr arrs
+  let var_dims_per_arr = map (gather dims) var_inds_per_arr
 
-  | var_inds_per_arr <- map variantInnerDimsForArr arrs,
-    var_dims_per_arr <- map (gather inner_dims) var_inds_per_arr,
-    -- assert that all arrays are variant to some, but not all inner_dims.
-    -- TODO: is below check sufficient to check this assertion?
-    --       perhaps this assertion should be (or already is) made elsewhere.
-    all ((`elem` [1 .. n_dims - 1]) . length) var_dims_per_arr,
-    -- assert that at least one array is variant to each inner dim.
-    -- TODO: is there a better, more correct, or safer way to assert this?
-    all (`elem` concat var_dims_per_arr) inner_dims,
-    -- assert no overlap in variance between arrays.
-    -- TODO: is this check necessary?
-    allUnique $ concat var_dims_per_arr =
-      pure (var_dims_per_arr, var_inds_per_arr)
-  | otherwise = Nothing
+  -- Interchange those dimensions of the segspace on which all redomap arrays
+  -- are variant outwards.
+  let segspace_dims_perm =
+        uncurry (++) $
+          L.partition
+            -- Check that given dim is in var_dims of all arrays.
+            (\dim -> all (elem dim) var_dims_per_arr)
+            dims
+  let segspace_perm = dims `isPermutationOf` segspace_dims_perm
+
+  myDebugM $
+    "variantDimsPerArr\ndims:\n"
+      ++ prettyString dims
+      ++ "\ndims':\n"
+      ++ show segspace_dims_perm
+      ++ "\nperm:\n"
+      ++ show segspace_perm
+      ++ "\nvar_inds_per_arr:\n"
+      ++ show var_inds_per_arr
+
+  -- assert that all arrays are variant to some, but not all dims.
+  -- TODO: is below check sufficient to check this assertion?
+  --       perhaps this assertion should be (or already is) made elsewhere.
+  guard $ all ((`elem` [1 .. n_dims - 1]) . length) var_inds_per_arr
+
+  -- for each dim, assert that at least one array is variant to this dim.
+  -- TODO: is there a better, more correct, or safer way to assert this?
+  -- Actually, I think this can safely be assumed to already hold, due to these
+  -- parallel dimensions already having been interchanged outwards in an earlier
+  -- compiler stage, but I might be wrong on this.
+  guard $ all (`elem` concat var_dims_per_arr) dims
+
+  -- assert no overlap in variance between arrays.
+  -- TODO: is this check necessary or even desired? for exactly 2 redomap
+  -- arrays, overlap in variance means all redomap arrays are variant to the
+  -- given parallel dimension, and thus it would have been interchanged outwards
+  -- (given the above TODO is implemented).
+  -- guard $ allUnique $ concat var_inds_per_arr
+
+  pure var_inds_per_arr
   where
-    n_dims = length inner_dims
+    n_dims = length dims
     variantInnerDimsForArr arr =
       let arr_variance = M.findWithDefault mempty arr variance
-       in L.findIndices (`nameIn` arr_variance) inner_dims
-    allUnique (x : xs) = x `notElem` xs && allUnique xs
-    allUnique _ = True
+       in L.findIndices (`nameIn` arr_variance) dims
+    -- allUnique (x : xs) = x `notElem` xs && allUnique xs
+    -- allUnique _ = True
 
 -- | All the various kernel parameters and related information we need to
 -- declare and/or compute in host code.
@@ -447,10 +503,14 @@ makeTCKernelParams gtids inner_dims_se common_dim_se = do
   grid_dims <-
     zipWithM ceilDiv inner_dims_se tiles_TR
       >>= zipWithM letSubExp (map ("grid_dim_" ++) inner_dim_names)
-  grid_size_flat <- letSubExp "grid_size_flat" =<< toExp (product $ map pe64 grid_dims)
+  grid_size_flat <-
+    letSubExp "grid_size_flat"
+      =<< toExp (product $ map pe64 grid_dims)
 
   let tblock_dims = tiles_T
-  tblock_size_flat <- letSubExp "tblock_size_flat" =<< toExp (product $ map pe64 tiles_T)
+  tblock_size_flat <-
+    letSubExp "tblock_size_flat"
+      =<< toExp (product $ map pe64 tiles_T)
 
   pure $
     TCKernelParams
@@ -562,7 +622,7 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts = do
       -- extract the corresponding tblock offsets and tile dims, which
       -- will be ordered by the inner dimensions. Note that for each
       -- array, the indices computed here are the same as those returned
-      -- by `variantInnerDimsPerArr`, but in different order.
+      -- by `variantDimsPerArr`, but in different order.
       -- TODO: document why perm is necessary.
       let lmad_perm = findLMADPerm env base_arr
       let inv_lmad_perm = map snd . L.sort . (`zip` [0 ..]) <$> lmad_perm
@@ -597,7 +657,6 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts = do
           load_stm
           lmad_perm
   where
-
     getArrayFromLoadStm :: Stm GPU -> VName
     getArrayFromLoadStm (Let _ _ (BasicOp (Index arr _))) = arr
     getArrayFromLoadStm stm =
