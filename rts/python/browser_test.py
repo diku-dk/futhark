@@ -28,13 +28,15 @@ parser.add_argument("--no-browser",
                     help="do not start a browser, instead wait for one to connect",
                     action="store_true")
 parser.add_argument("--show-browser",
-                    help="disable headless mode for browser",
+                    help=("disable headless mode for browser.\n"
+                          "Can also be set via HEADLESS=0 env variable."),
                     action="store_true")
 parser.add_argument("--web-driver",
                     help=("URL of a remote WebDriver to connec to.\n"
                           "Can also be set via WEB_DRIVER_URL env variable."))
 parser.add_argument("--log",
-                    help="log file for debug output")
+                    help=("log file for debug output.\n"
+                          "Can also be set via LOG_FILE env variable."))
 args = parser.parse_args()
 
 program_name = args.program
@@ -45,7 +47,10 @@ wasm_name = program_name + ".wasm"
 wasm_map_name = program_name + ".wasm.map"
 source_name = program_name + ".c"
 
-log_path = args.log
+log_path = os.environ.get("LOG_FILE")
+if log_path is None:
+    log_path = args.log
+
 log_file = None
 if log_path is not None:
     log_file = open(log_path, "w")
@@ -53,6 +58,14 @@ if log_path is not None:
 remote_driver_url = os.environ.get("WEB_DRIVER_URL")
 if remote_driver_url is None:
     remote_driver_url = args.web_driver
+
+headless = os.environ.get("HEADLESS")
+if headless == "0":
+    headless = False
+elif headless == "1":
+    headless = True
+elif headless is None:
+    headless = not args.show_browser
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, flush=True, **kwargs)
@@ -185,7 +198,7 @@ async def handle_ws(request):
 
 def start_browser():
     options = webdriver.ChromeOptions()
-    if not args.show_browser:
+    if headless:
         options.add_argument("--headless=new")
     if remote_driver_url is not None:
         driver = webdriver.Remote(command_executor=remote_driver_url, options=options)

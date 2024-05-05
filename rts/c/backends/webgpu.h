@@ -749,9 +749,14 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
                            int64_t nbytes) {
   if (nbytes <= 0) { return FUTHARK_SUCCESS; }
 
+  // Bound storage buffers and copy operations must have sizes multiple of 4.
+  // Note that copying more than `nbytes` is safe because we also pad all
+  // buffers when allocating them.
+  int64_t buf_size = ((nbytes + 4 - 1) / 4) * 4;
+
   WGPUBufferDescriptor desc = {
     .label = "tmp_readback",
-    .size = nbytes,
+    .size = buf_size,
     .usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst,
   };
   WGPUBuffer readback = wgpuDeviceCreateBuffer(ctx->device, &desc);
@@ -760,20 +765,20 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
   wgpuCommandEncoderCopyBufferToBuffer(encoder,
     src, src_offset,
     readback, 0,
-    nbytes);
+    buf_size);
 
   WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
 
   // TODO: Could we do an actual async mapping here if `sync` is false?
   WGPUBufferMapAsyncStatus status = 
-    wgpu_map_buffer_sync(ctx->instance, readback, WGPUMapMode_Read, 0, nbytes);
+    wgpu_map_buffer_sync(ctx->instance, readback, WGPUMapMode_Read, 0, buf_size);
   if (status != WGPUBufferMapAsyncStatus_Success) {
     futhark_panic(-1, "Failed to copy from device memory with error %d\n",
                   status);
   }
 
-  const void *mapped = wgpuBufferGetConstMappedRange(readback, 0, nbytes);
+  const void *mapped = wgpuBufferGetConstMappedRange(readback, 0, buf_size);
   memcpy(dst + dst_offset, mapped, nbytes);
 
   wgpuBufferUnmap(readback);
@@ -853,6 +858,9 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 
 static int gpu_alloc_actual(struct futhark_context *ctx,
                             size_t size, gpu_mem *mem_out) {
+  // Storage buffers bindings must have an effective size that is amultiple of
+  // 4, so we round up all allocations.
+  size = ((size + 4 - 1) / 4) * 4;
   WGPUBufferDescriptor desc = {
     .size = size,
     .usage = WGPUBufferUsage_CopySrc

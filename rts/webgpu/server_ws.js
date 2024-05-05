@@ -54,6 +54,9 @@ class BrowserServer {
 
         const fun = this.commands[msg.cmd];
         const res = await fun(...msg.args);
+
+        await this.fut.context_sync();
+
         if (typeof res == "string") {
           resp = { status: "ok", text: res };
         }
@@ -205,6 +208,7 @@ class BrowserServer {
 
     const startTime = performance.now();
     const outs = await entry_fun(...ins);
+    await this.fut.context_sync();
     const endTime = performance.now();
 
     for (let i = 0; i < outNames.length; i++) {
