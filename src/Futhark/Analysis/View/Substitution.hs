@@ -26,6 +26,18 @@ sub x q@(IndexFn (Forall i (Iota {})) xs) r@(IndexFn (Forall j yD) ys) =
         (ycond, yval) <- casesToList ys
         pure (substituteName x xval ycond :&& xcond,
               substituteName x xval yval))
+sub x q@(IndexFn (Forall i (Cat k m b)) xs) r@(IndexFn iter_y@(Forall j (Cat k' m' b')) ys)
+  | k == k',
+    m == m',
+    b == b' =
+      debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n   in " <> prettyString r) $
+        IndexFn
+          iter_y
+          (Cases . NE.fromList $ do
+            (xcond, xval) <- casesToList $ substituteName i (Var j) xs
+            (ycond, yval) <- casesToList ys
+            pure (substituteName x xval ycond :&& xcond,
+                  substituteName x xval yval))
 sub x q r =
   error $ "💀 sub "
           <> prettyString x <> " for "

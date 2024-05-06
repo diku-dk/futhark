@@ -203,7 +203,7 @@ rewriteRule4 :: IndexFn -> IndexFnM IndexFn
 -- _______________________________________________________________
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
 --    e1{b/i} + (Σ_{j=b+1}^i e2.0{j/i}) + ... + (Σ_{j=b+1}^i e2.l{j/i})
-rewriteRule4 (IndexFn it@(Forall i'' dom@(Iota _)) (Cases cases))
+rewriteRule4 (IndexFn it@(Forall i'' dom) (Cases cases))
   | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
     -- Extract terms (multiplied symbols, factor) from the sum of products.
     Just terms <- justAffinePlusRecurence recur,
@@ -211,7 +211,7 @@ rewriteRule4 (IndexFn it@(Forall i'' dom@(Iota _)) (Cases cases))
     Just sums <- mapM (mkSum i b) terms,
     i == i',
     i == i'',
-    b == domainStart dom,
+    domainCheck b dom,
     b == b' = do
       traceM "👀 Using Rule 4 (recursive sum)"
       let e1' = substituteName i b e1
@@ -224,6 +224,9 @@ rewriteRule4 (IndexFn it@(Forall i'' dom@(Iota _)) (Cases cases))
         isAffineSoP sop =
           Just $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
     justAffinePlusRecurence _ = Nothing
+
+    domainCheck begin (Iota n) = begin == domainStart (Iota n)
+    domainCheck begin (Cat _k _m seg_start) = begin == seg_start
 
     -- Create sum for (term, factor), pulling the factor outside the sum.
     mkSum i b ([], c) =
