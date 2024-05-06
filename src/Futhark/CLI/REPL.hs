@@ -101,7 +101,7 @@ repl maybe_prog = do
         Left err ->
           error $ "Failed to initialise interpreter state: " <> T.unpack (docText err)
         Right s -> do
-          liftIO $ putDoc prog_err
+          liftIO $ putDocLn prog_err
           pure s {futharkiLoaded = maybe_prog}
     Right s ->
       pure s
