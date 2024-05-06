@@ -18,7 +18,7 @@ module Futhark.Test
     ensureReferenceOutput,
     determineTuning,
     determineCache,
-    binaryName,
+    BinaryName,
     futharkServerCfg,
     V.Mismatch,
     V.Value,
@@ -335,9 +335,11 @@ getExpectedResult futhark prog entry tr =
     RunTimeFailure err ->
       pure $ RunTimeFailure err
 
--- | The name we use for compiled programs.
-binaryName :: FilePath -> FilePath
-binaryName = dropExtension
+-- | Function from name of @.fut@ file to name of the compiled
+-- program. Using something interesting can make it safe for multiple
+-- benchmarking instances to use the same directory concurrently, as
+-- long as they use different suffixes for the compiled programs.
+type BinaryName = FilePath -> FilePath
 
 -- | @compileProgram extra_options futhark backend program@ compiles
 -- @program@ with the command @futhark backend extra-options...@, and
@@ -346,11 +348,12 @@ binaryName = dropExtension
 compileProgram ::
   (MonadIO m, MonadError [T.Text] m) =>
   [String] ->
+  BinaryName ->
   FutharkExe ->
   String ->
   FilePath ->
   m (SBS.ByteString, SBS.ByteString)
-compileProgram extra_options (FutharkExe futhark) backend program = do
+compileProgram extra_options binaryName (FutharkExe futhark) backend program = do
   (futcode, stdout, stderr) <- liftIO $ readProcessWithExitCode futhark (backend : options) ""
   case futcode of
     ExitFailure 127 -> throwError [progNotFound $ T.pack futhark]
@@ -374,11 +377,12 @@ runProgram ::
   FutharkExe ->
   FilePath ->
   [String] ->
+  BinaryName ->
   String ->
   T.Text ->
   Values ->
   IO (ExitCode, SBS.ByteString, SBS.ByteString)
-runProgram futhark runner extra_options prog entry input = do
+runProgram futhark runner extra_options binaryName prog entry input = do
   let progbin = binaryName prog
       dir = takeDirectory prog
       binpath = "." </> progbin
@@ -415,11 +419,11 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
   missing <- filterM isReferenceMissing $ concatMap entryAndRuns ios
 
   unless (null missing) $ do
-    void $ compileProgram [] futhark compiler prog
+    void $ compileProgram [] dropExtension futhark compiler prog
 
     res <- liftIO $
       flip (pmapIO concurrency) missing $ \(entry, tr) -> do
-        (code, stdout, stderr) <- runProgram futhark "" ["-b"] prog entry $ runInput tr
+        (code, stdout, stderr) <- runProgram futhark "" ["-b"] dropExtension prog entry $ runInput tr
         case code of
           ExitFailure e ->
             pure $

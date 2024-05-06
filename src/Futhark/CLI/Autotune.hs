@@ -117,6 +117,9 @@ restoreTuningParams opts server = mapM_ opt
   where
     opt (name, _) = setTuningParam server name (optDefaultThreshold opts)
 
+binaryName :: BinaryName
+binaryName = dropExtension
+
 prepare :: AutotuneOptions -> FutharkExe -> FilePath -> IO [(DatasetName, RunDataset, T.Text)]
 prepare opts futhark prog = do
   spec <-
@@ -140,7 +143,7 @@ prepare opts futhark prog = do
                 putStrLn $ binaryName prog ++ " does not exist, but --skip-compilation passed."
                 exitFailure
           else do
-            res <- prepareBenchmarkProgram Nothing copts prog ios
+            res <- prepareBenchmarkProgram Nothing copts binaryName prog ios
             case res of
               Left (err, errstr) -> do
                 putStrLn err

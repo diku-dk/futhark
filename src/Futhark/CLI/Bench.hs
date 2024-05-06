@@ -67,7 +67,8 @@ data BenchOptions = BenchOptions
     optConcurrency :: Maybe Int,
     optProfile :: Bool,
     optVerbose :: Int,
-    optTestSpec :: Maybe FilePath
+    optTestSpec :: Maybe FilePath,
+    optSuffix :: String
   }
 
 initialBenchOptions :: BenchOptions
@@ -93,8 +94,12 @@ initialBenchOptions =
       optConcurrency = Nothing,
       optProfile = False,
       optVerbose = 0,
-      optTestSpec = Nothing
+      optTestSpec = Nothing,
+      optSuffix = ""
     }
+
+binaryName :: BenchOptions -> BinaryName
+binaryName opts = (<> optSuffix opts) . dropExtension
 
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
@@ -176,18 +181,18 @@ compileBenchmark opts (program, program_spec) = do
         any hasRuns cases ->
           if optSkipCompilation opts
             then do
-              exists <- doesFileExist $ binaryName program
+              exists <- doesFileExist $ binaryName opts program
               if exists
                 then pure $ Right (program, cases)
                 else do
-                  putStrLn $ binaryName program ++ " does not exist, but --skip-compilation passed."
+                  putStrLn $ binaryName opts program ++ " does not exist, but --skip-compilation passed."
                   pure $ Left FailedToCompile
             else do
               putStr $ "Compiling " ++ program ++ "...\n"
 
               compile_opts <- compileOptions opts
 
-              res <- prepareBenchmarkProgram (optConcurrency opts) compile_opts program cases
+              res <- prepareBenchmarkProgram (optConcurrency opts) compile_opts (binaryName opts) program cases
 
               case res of
                 Left (err, errstr) -> do
@@ -628,7 +633,12 @@ commandLineOptions =
       "P"
       ["profile"]
       (NoArg $ Right $ \config -> config {optProfile = True})
-      "Collect profiling information."
+      "Collect profiling information.",
+    Option
+      []
+      ["suffix"]
+      (ReqArg (\s -> Right $ \config -> config {optSuffix = s}) "STR")
+      "Add this suffix to compiled files."
   ]
   where
     max_timeout :: Int

@@ -153,6 +153,12 @@ OPTIONS
   use the same syntax as normal, but *without* line comment prefixes.
   A ``==`` is still expected.
 
+--suffix=STR
+
+  Append this suffix to the program name (after stripping ``.fut``) to
+  generate the name of the compiled executables. Defaults to no
+  suffix.
+
 --timeout=seconds
 
   If the runtime for a dataset exceeds this integral number of

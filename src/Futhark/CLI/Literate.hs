@@ -1166,7 +1166,7 @@ prepareServer prog opts f = do
 
     void $
       either onError pure <=< runExceptT $
-        compileProgram compile_options (FutharkExe futhark) (scriptBackend opts) prog
+        compileProgram compile_options dropExtension (FutharkExe futhark) (scriptBackend opts) prog
 
   let run_options = scriptExtraOptions opts
       onLine "call" l = T.putStrLn l

@@ -393,7 +393,7 @@ runResult _ (ExitFailure _) _ stderr_s =
 
 compileTestProgram :: [String] -> FutharkExe -> String -> FilePath -> [WarningTest] -> TestM ()
 compileTestProgram extra_options futhark backend program warnings = do
-  (_, futerr) <- compileProgram ("--server" : extra_options) futhark backend program
+  (_, futerr) <- compileProgram ("--server" : extra_options) dropExtension futhark backend program
   testWarnings warnings futerr
 
 compareResult ::

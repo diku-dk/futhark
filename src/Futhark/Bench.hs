@@ -7,10 +7,10 @@ module Futhark.Bench
     Result (..),
     encodeBenchResults,
     decodeBenchResults,
-    binaryName,
     benchmarkDataset,
     RunOptions (..),
     prepareBenchmarkProgram,
+    BinaryName,
     CompileOptions (..),
     module Futhark.Profile,
   )
@@ -404,10 +404,11 @@ prepareBenchmarkProgram ::
   (MonadIO m) =>
   Maybe Int ->
   CompileOptions ->
+  BinaryName ->
   FilePath ->
   [InputOutputs] ->
   m (Either (String, Maybe SBS.ByteString) ())
-prepareBenchmarkProgram concurrency opts program cases = do
+prepareBenchmarkProgram concurrency opts binaryName program cases = do
   let futhark = compFuthark opts
 
   ref_res <- runExceptT $ ensureReferenceOutput concurrency (FutharkExe futhark) "c" program cases

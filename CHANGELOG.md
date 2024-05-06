@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark bench` now allows `--suffix` to allow multiple benchmarking
+  operations to use the same directory.
+
 ### Removed
 
 ### Changed
