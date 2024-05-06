@@ -393,8 +393,13 @@ forward (E.AppExp (E.Apply f args _) _)
       -- y = scatter dest inds vals
       -- ___________________________________________________
       -- y = ∀i ∈ ⊎k=1,...,m-1 [b[k-1], ..., b[k]] .
-      --     | i == inds[k] && c  => vals[k]   (c may depend on k)
-      --     | i /= inds[k] || ¬c => dest[i]
+      --     | i == inds[k] => vals[k]
+      --     | i /= inds[k] => dest[i]
+      --
+      -- Note that c and ¬c are not in the conclusion for later pattern matching.
+      -- Leaving them out is safe, because i == inds[k] only if inds[k] == b[k],
+      -- which implies c. The latter case is just a negation of the first and
+      -- so ¬c also disappears.
       --
       -- From type checking, we have:
       -- scatter : (dest : [n]t) -> (inds : [m]i64) -> (vals : [m]t) : [n]t
@@ -431,7 +436,8 @@ forward (E.AppExp (E.Apply f args _) _)
           -- (and not, e.g., "i").
           k' <- newNameFromString "k"
           let b' = substituteName k (Var k') b
-          let cond = Var i :== b' :&& cond_b
+          -- Leave out cond_b; see comment.
+          let cond = Var i :== b' -- :&& cond_b
           debugM ("cond_b " <> show cond_b)
           let y = IndexFn (Forall i (Cat k' m b'))
                           (Cases . NE.fromList $ [(cond, Var vals_k),

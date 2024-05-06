@@ -109,7 +109,7 @@ domainEnd (Cat _k _m _b) =
 
 domainStart :: Domain -> Term
 domainStart (Iota _) = SoP2 (SoP.int2SoP 0)
-domainStart (Cat _k _m _b) = undefined
+domainStart (Cat k _m b) = substituteName k (SoP2 $ SoP.int2SoP 0) b
 
 
 instance Eq Iterator where
@@ -325,16 +325,16 @@ instance Pretty a => Pretty (Cases a) where
 
 instance Pretty Domain where
   pretty (Iota e) = "iota" <+> pretty e
-  pretty (Cat k e dom) =
+  pretty (Cat k m b) =
     "⊎"
       <> prettyName k
       <> "="
-      <> commasep ["1", "...", pretty e]
-      -- <> "iota" <+> pretty e
-      <+> parens (commasep [
-            pretty (SoP.padWithZero . termToSoP $ substituteName k (Var k ~-~ SoP2 (SoP.int2SoP 1)) dom),
+      -- <> commasep ["0", "...", pretty (termToSoP $ e ~-~ SoP2 (SoP.int2SoP 1))]
+      <> "iota" <+> pretty m
+      <+> brackets (commasep [
+            pretty (termToSoP b),
             "...",
-            pretty (SoP.padWithZero (termToSoP dom))
+            pretty (termToSoP $ substituteName k (Var k ~+~ SoP2 (SoP.int2SoP 1)) b)
           ])
 
 instance Pretty IndexFn where
