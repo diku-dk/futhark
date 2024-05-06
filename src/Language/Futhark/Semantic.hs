@@ -23,7 +23,7 @@ where
 
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
-import Futhark.Util (dropLast, fromPOSIX, toPOSIX)
+import Futhark.Util (fromPOSIX, toPOSIX)
 import Futhark.Util.Pretty
 import Language.Futhark
 import System.FilePath qualified as Native
@@ -41,15 +41,14 @@ mkInitialImport = ImportName . Posix.normalise . toPOSIX
 mkImportFrom :: ImportName -> String -> ImportName
 mkImportFrom (ImportName includer) includee
   | Posix.isAbsolute includee = ImportName includee
-  | otherwise = ImportName $ Posix.normalise $ Posix.joinPath $ includer' ++ includee'
+  | otherwise =
+      ImportName . Posix.normalise . Posix.joinPath . resolveDotDot [] $
+        init (Posix.splitPath includer) ++ Posix.splitPath includee
   where
-    (dotdots, includee') = span ("../" ==) $ Posix.splitPath includee
-    includer_parts = init $ Posix.splitPath includer
-    includer'
-      | length dotdots > length includer_parts =
-          replicate (length dotdots - length includer_parts) "../"
-      | otherwise =
-          dropLast (length dotdots) includer_parts
+    resolveDotDot parts [] = reverse parts
+    resolveDotDot parts@("../" : _) ("../" : todo) = resolveDotDot ("../" : parts) todo
+    resolveDotDot (_ : parts) ("../" : todo) = resolveDotDot parts todo
+    resolveDotDot parts (p : todo) = resolveDotDot (p : parts) todo
 
 -- | Create a @.fut@ file corresponding to an 'ImportName'.
 includeToFilePath :: ImportName -> Native.FilePath
