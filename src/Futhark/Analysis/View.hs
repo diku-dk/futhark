@@ -289,11 +289,12 @@ forward (E.AppExp (E.Apply f args _) _)
       -- TODO `map E.patNames params` is a [Set], I assume because we might have
       --   map (\(x, y) -> ...) xys
       -- meaning x needs to be substituted by x[i].0
-      let paramNames = mconcat $ map (S.toList . E.patNames) params
-      --               ^ XXX mconcat is wrong, see above
+      let paramNames :: [E.VName] = mconcat $ map (S.toList . E.patNames) params
+      let xss_flat :: [IndexFn] = mconcat $ map unzipT xss
       let s y (paramName, paramIndexFn) = sub paramName paramIndexFn y
+      -- let y1 = foldl s y 
       rewrite $
-        foldl s (IndexFn iter_y cases_body) (zip paramNames xss)
+        foldl s (IndexFn iter_y cases_body) (zip paramNames xss_flat)
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       IndexFn iter_xs xs <- forward xs'
@@ -392,7 +393,7 @@ forward (E.AppExp (E.Apply f args _) _)
       -- OOB < 0 or OOB >= b[m-1]
       -- y = scatter dest inds vals
       -- ___________________________________________________
-      -- y = ∀i ∈ ⊎k=1,...,m-1 [b[k-1], ..., b[k]] .
+      -- y = ∀i ∈ ⊎k=iota m [b[k], ..., b[k+1]] .
       --     | i == inds[k] => vals[k]
       --     | i /= inds[k] => dest[i]
       --
