@@ -81,9 +81,16 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       -- if the negated predicate is True.)
       -- TODO can we return Nothing when undecidable instead?
       neg_preds <- mapM (refineTerm . toNNF . Not) ps
-      let (_, ps', vs) = unzip3 $
+      let (_neg_ps', ps', vs) = unzip3 $
                            filter (\(negp, _, _) -> negp /= Bool True) $
                              zip3 neg_preds ps vals
+      -- Cases are considered sequentially, so negation of previous cases
+      -- are part of current predicate.
+      -- let psInformed = zipWith (:&&) (init $ scanl (:&&) (Bool True) neg_ps') ps'
+      -- let neg_preds = map (toNNF . Not) preds
+      -- let psInformed = zipWith (:&&)
+      --                          (init $ scanl (:&&) (Bool True) neg_preds)
+      --                          preds
       vs' <- mapM refineCase (zip ps' vs)
       pure (ps', vs'))
   pure $ IndexFn it (Cases . NE.fromList $ zip preds' vals')

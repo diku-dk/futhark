@@ -15,6 +15,7 @@
 
 module Futhark.Analysis.View.Representation where
 
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust)
 import Data.Bifunctor (second)
@@ -277,7 +278,7 @@ x ~*~ y = flatten $ SoP2 $ termToSoP x SoP..*. termToSoP y
 
 
 prettyName :: VName -> Doc a
-prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show (i - 6000)))
+prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
   where
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
@@ -407,3 +408,26 @@ prettyRanges :: Pretty u => M.Map u (SoP.Range u) -> String
 prettyRanges = toString . indent 4 . stack . map pretty . M.toList
   where
     toString = unpack . docText
+
+unzipT :: IndexFn -> [IndexFn]
+unzipT (IndexFn iter (Cases cases))
+  | Just vss <- mapM (getTuple . snd) (NE.toList cases),
+    n <- length (head vss),
+    all ((==) n . length) vss = -- All branches are n-tuples.
+    let cs = map fst (NE.toList cases)
+    in map (\vs ->
+              IndexFn iter (Cases . NE.fromList . dedup $ zip cs vs))
+           (L.transpose vss)
+    where
+      getTuple (Tuple vs) = Just vs
+      getTuple _ = Nothing
+      -- Unzipping may duplicate values, e.g., | b => (x, x) | b => (x, y)
+      -- yields | b => x | not b => x for the first projection.
+      dedup ((c,v):cs) | all ((==) v . snd) cs =
+          [(foldl (:||) c (map fst cs), v)]
+      dedup cs = cs
+unzipT index_fn = [index_fn]
+-- unzipT index_fn = error $ "unzipT not implemented for " <> prettyString index_fn
+
+getIterator :: IndexFn -> Iterator
+getIterator (IndexFn iter _) = iter

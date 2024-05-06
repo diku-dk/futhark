@@ -43,6 +43,7 @@ normalise indexfn =
         (_, Bool True) -> pure (Bool True)
         (Bool False, b) -> pure b
         (a, Bool False) -> pure a
+        (a, b) | a == toNNF (Not b) -> pure (Bool True) -- A tautology.
         (a, b) -> pure $ a :|| b
     normTerm (Indicator c) = do
       c' <- normTerm c

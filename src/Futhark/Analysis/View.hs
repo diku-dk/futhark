@@ -137,15 +137,26 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
     newIndexFn <- forward e
-    tracePrettyM newIndexFn
-    traceM "🪨 refining"
-    newIndexFn' <- rewrite newIndexFn >>= refineIndexFn >>= rewrite
-    tracePrettyM newIndexFn'
-    traceM "\n"
-    insertIndexFn x newIndexFn'
+    postProcess x newIndexFn
     forwards body
     pure ()
+forwards (E.AppExp (E.LetPat _ ps@(E.TuplePat {}) e body _) _)
+  | names <- S.toList $ E.patNames ps = do
+    ys <- unzipT <$> forward e
+    forM_ (zip names ys) (uncurry postProcess)
+    forwards body
+    pure ()
+    -- trace ("###" <> prettyString yss) $ pure ()
 forwards _ = pure ()
+
+postProcess :: E.VName -> IndexFn -> IndexFnM ()
+postProcess vn indexfn = do
+  tracePrettyM indexfn
+  traceM "🪨 refining"
+  indexfn' <- rewrite indexfn >>= refineIndexFn >>= rewrite
+  tracePrettyM indexfn'
+  traceM "\n"
+  insertIndexFn vn indexfn'
 
 
 forward :: E.Exp -> IndexFnM IndexFn
@@ -178,6 +189,14 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
           -- Canonical scalar representation.
           normalise $ IndexFn Empty (toCases $ Var vn)
 -- Nodes.
+forward (E.TupLit es _) = do
+  xs <- mapM forward es
+  vns <- mapM (\_ -> newNameFromString "xs") xs
+  let IndexFn iter1 _ = head xs
+  rewrite $
+    foldl (\acc (vn, x) -> sub vn x acc)
+          (IndexFn iter1 (toCases . Tuple $ map Var vns))
+          (zip vns xs)
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
       IndexFn iter_idx idx <- forward idx'
@@ -215,9 +234,9 @@ forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) = do
   x' <- forward x
   y' <- forward y
   rewrite $ sub vn x' y'
-forward (E.AppExp (E.BinOp (op, _) _ (x', _) (y', _) _) _)
-  | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
-    name <- E.baseString $ E.qualLeaf op,
+forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
+  | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
+    name <- E.baseString $ E.qualLeaf op',
     Just bop <- L.find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
       IndexFn iter_x x <- forward x'
       vy <- forward y'
@@ -295,25 +314,70 @@ forward (E.AppExp (E.Apply f args _) _)
       rewrite $ sub x (IndexFn iter_xs xs) y
   | Just "scan" <- getFun f,
     -- [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
-    [E.Lambda params body _ _ _, _ne, xs'] <- getArgs args = do
+    [E.Lambda params body' _ _ _, _ne, xs'] <- getArgs args,
+    [paramNames_x, paramNames_y] <- map (S.toList . E.patNames) params = do
       -- check if params are tuple, then xs must be unzipped before forward (so never hit zip case)
-      case head params of
-        E.TuplePat [E.Id x1 _ _, E.Id x2 _ _] _ ->
-          trace (show xs') undefined
-        _ -> undefined
+      xs <- forward xs'
+      body <- forward body'
+      let paramNames = [paramNames_x, paramNames_y]
+      debugM ("paramIndexFns " <> prettyString xs)
+      debugM ("paramNames " <> prettyString paramNames)
+      debugM ("unzipT xs " <> prettyString (unzipT xs))
+      debugM ("unzipT body " <> prettyString (unzipT body))
+      ff <- mapM normalise $ unzipT xs
+      debugM ("unzipT xs normalised " <> prettyString ff)
+      gg <- mapM normalise $ unzipT body
+      debugM ("unzipT body normalised " <> prettyString gg)
+      -- let zip4 as bs cs ds = zipWith (\(a,b) (c,d) -> (a,b,c,d)) (zip as bs) (zip cs ds)
+      -- y_unzipped <- forM (zip4 (unzipT xs) (unzipT body) paramNames_x paramNames_y)
+      --                    (\(x, b, vnx, vny) -> do
+      --                       vn <- newNameFromString "body"
+      --                       pure $
+      --                         sub vnx (toScalarIndexFn Recurrence) $
+      --                           sub vny x $
+      --                             sub vn b $
+      --                               IndexFn (getIterator xs) (toCases (Var vn))
+      --                    )
+      -- debugM ("y_unzipped head " <> prettyString (head y_unzipped))
+      -- debugM ("y_unzipped last " <> prettyString (last y_unzipped))
+      -- If case values are identifcal, drop conditions?
+      -- .      | y_flag₆₀₈₉ ⇒  x_flag₆₀₈₅ || y_flag₆₀₈₉
+      --        | ¬(y_flag₆₀₈₉) ⇒  x_flag₆₀₈₅ || y_flag₆₀₈₉,
+      -- rewrite $ head y_unzipped
+
+      -- Our semantics are sequential here, so we can just decide that the scan
+      -- is a scanl with x always being the accumulator and y always being
+      -- an element of the array being scanned over.
+      let s y (paramName, paramIndexFn) = sub paramName paramIndexFn y
+      vn <- newNameFromString "body"
+      let y = sub vn body $ IndexFn (getIterator xs) (toCases (Var vn))
+      debugM ("y " <> prettyString y)
+      let y1 = foldl s y (zip paramNames_y (unzipT xs))
+      debugM ("y " <> prettyString y)
+      let y2 = foldl s y1 (zip paramNames_x (repeat (toScalarIndexFn Recurrence)))
+      -- y_unzipped <- mapM rewrite $ unzipT y2
+      -- debugM ("y_unzipped head " <> prettyString (head y_unzipped))
+      -- debugM ("y_unzipped last " <> prettyString (last y_unzipped))
+      rewrite y2
+      -- case paramNames_x of
+      --   [x1, x2] ->
+      --     trace (prettyString body) undefined
+      --   _ -> undefined
       -- pure $ IndexFn Empty (toCases . SoP2 $ SoP.int2SoP 0)
   | Just fname <- getFun f,
     "zip" `L.isPrefixOf` fname = do
       xss <- mapM forward (getArgs args)
       vns <- mapM (\_ -> newNameFromString "xs") xss
       let IndexFn iter1 _ = head xss
-      let y = foldl (\acc (vn, xs) -> sub vn xs acc)
-                    (IndexFn iter1 (toCases . Tuple $ map Var vns))
-                    (zip vns xss)
-      -- trace (prettyString xss)
-      --       (error "no obvious way to return zipped index functions")
-      rewrite y
-      -- pure $ IndexFn Empty (toCases . SoP2 $ SoP.int2SoP 0)
+      rewrite $
+        foldl (\acc (vn, xs) -> sub vn xs acc)
+              (IndexFn iter1 (toCases . Tuple $ map Var vns))
+              (zip vns xss)
+  | Just fname <- getFun f,
+    "unzip" `L.isPrefixOf` fname,
+    [xs'] <- getArgs args = do
+      -- XXX unzip is a no-op.
+      forward xs' >>= rewrite
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
       -- Scatter in-bounds-monotonic indices.
