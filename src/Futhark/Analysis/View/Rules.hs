@@ -5,8 +5,7 @@ import Debug.Trace (trace, traceM)
 import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
-import Futhark.MonadFreshNames
-import Language.Futhark (VName)
+import Data.Set (notMember)
 
 normalise :: IndexFn -> IndexFnM IndexFn
 normalise indexfn =
@@ -190,8 +189,13 @@ simplifyRule3 v = pure v
 isAffineSoP :: Ord a => SoP.SoP a -> Bool
 isAffineSoP sop = all ((<= 1) . length . fst) (SoP.sopToLists sop)
 
-rewriteRule4 :: IndexFn -> IndexFnM IndexFn
--- Rule 4 (recursive sum)
+domainSegStart :: Domain -> Term
+domainSegStart (Iota n) = domainStart (Iota n)
+domainSegStart (Cat _k _m seg_start) = seg_start
+
+
+rewritePrefixSum :: IndexFn -> IndexFnM IndexFn
+-- Rule 4 (prefix sum)
 --
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
 --    | i == b => e1              (e1 may depend on i)
@@ -203,7 +207,7 @@ rewriteRule4 :: IndexFn -> IndexFnM IndexFn
 -- _______________________________________________________________
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
 --    e1{b/i} + (Σ_{j=b+1}^i e2.0{j/i}) + ... + (Σ_{j=b+1}^i e2.l{j/i})
-rewriteRule4 (IndexFn it@(Forall i'' dom) (Cases cases))
+rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
   | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
     -- Extract terms (multiplied symbols, factor) from the sum of products.
     Just terms <- justAffinePlusRecurence recur,
@@ -211,8 +215,8 @@ rewriteRule4 (IndexFn it@(Forall i'' dom) (Cases cases))
     Just sums <- mapM (mkSum i b) terms,
     i == i',
     i == i'',
-    domainCheck b dom,
-    b == b' = do
+    b == b',
+    b == domainSegStart dom = do
       traceM "👀 Using Rule 4 (recursive sum)"
       let e1' = substituteName i b e1
       pure $ IndexFn it (toCases $ e1' ~+~ SoP2 (foldl1 (SoP..+.) sums))
@@ -224,9 +228,6 @@ rewriteRule4 (IndexFn it@(Forall i'' dom) (Cases cases))
         isAffineSoP sop =
           Just $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
     justAffinePlusRecurence _ = Nothing
-
-    domainCheck begin (Iota n) = begin == domainStart (Iota n)
-    domainCheck begin (Cat _k _m seg_start) = begin == seg_start
 
     -- Create sum for (term, factor), pulling the factor outside the sum.
     mkSum i b ([], c) =
@@ -243,68 +244,33 @@ rewriteRule4 (IndexFn it@(Forall i'' dom) (Cases cases))
           ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
       in Just . SoP.scaleSoP c . termToSoP $ SumSliceIndicator x lb ub
     mkSum _ _ (_, _) = Nothing
--- rewriteRule4 (IndexFn it@(Forall i'' dom@(Iota _)) (Cases cases))
---   | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
---     -- Extract terms (multiplied symbols, factor) from the sum of products.
---     Just (isIndicator, x, j) <- justTermPlusRecurence recur,
---     -- j == termToSoP (Var i),
---     i == i',
---     i == i'',
---     b == domainStart dom,
---     b == b' = do
---       traceM "👀 Using Rule 4 (recursive sum)"
---       -- let lb = termToSoP b SoP..+. SoP.int2SoP 1
---       -- let ub = SoP.sym2SoP (Var i)
---       let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) j
---       let ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
---       let e1' = substituteName i b e1
---       let sumslice = if isIndicator then SumSliceIndicator else SumSlice
---       pure $ IndexFn it (toCases $ e1' ~+~ sumslice x lb ub)
---   where
---     justTermPlusRecurence :: Term -> Maybe (Bool, VName, SoP.SoP Term)
---     justTermPlusRecurence (SoP2 sop)
---       | [([Idx (Var x) j], 1), ([Recurrence], 1)] <- SoP.sopToLists sop =
---         Just (False, x, j)
---     justTermPlusRecurence (SoP2 sop)
---       | [([Indicator (Idx (Var x) j)], 1), ([Recurrence], 1)] <- SoP.sopToLists sop =
---         Just (True, x, j)
---     justTermPlusRecurence _ = Nothing
--- Rule 4 (recursive sum)g
+rewritePrefixSum indexfn = pure indexfn
+
+rewriteCarry :: IndexFn -> IndexFnM IndexFn
+-- Rule 5 (carry)
 --
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
---    | i == b => e1              (e1 may depend on i)
---    | i /= b => y[i-1] + e2     (e2 may depend on i)
--- _______________________________________________________________
--- y = ∀i ∈ [b, b+1, ..., b + n - 1] . e1{b/i} + (Σ_{j=b+1}^i e2{j/i})
+--    | i == b => e1              (e1 may NOT depend on i)
+--    | i /= b => y[i-1]
 --
--- If e1{b/i} == e2{b/i}, it later simplifies to
--- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (Σ_{j=b}^i e2{j/i})
--- rewriteRule4 (IndexFn it@(Forall i'' (Iota _)) (Cases cases))
---   | (Var i :== b, e1) :| [(Var i' :/= b', x)] <- cases,
---     -- Extract terms (multiplied symbols, factor) from the sum of products.
---     Just e2 <- justTermPlusRecurence x,
---     i == i',
---     i == i'',
---     b == SoP2 (SoP.int2SoP 0), -- Domain is iota so b must be 0.
---     b == b' = do
---       traceM "👀 Using Rule 4 (recursive sum)"
---       let lb = termToSoP b SoP..+. SoP.int2SoP 1
---       let ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
---       j <- newNameFromString "j"
---       let e1' = substituteName i b e1
---       let e2' = substituteName i (Var j) e2
---       pure $ IndexFn it (toCases $ e1' ~+~ Sum j lb ub e2')
---   where
---     justTermPlusRecurence :: Term -> Maybe (SoP.SoP Term)
---     justTermPlusRecurence (SoP2 sop)
---       | termsWithFactors <- SoP.sopToLists sop,
---         [Recurrence] `elem` map fst termsWithFactors =
---           Just . SoP.sopFromList $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
---     justTermPlusRecurence _ = Nothing
-rewriteRule4 indexfn = pure indexfn
+-- Note that e1 could depend on, for example, k in
+-- i ∈ ⊎k₆₂₁₄=iota m₆₀₆₉ [b, b+1, ..., b + n - 1].
+-- _______________________________________________________________
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] . c
+rewriteCarry (IndexFn it@(Forall i'' dom) (Cases cases))
+  | (Var i :== b, c) :| [(Var i' :/= b', Recurrence)] <- cases,
+    i == i',
+    i == i'',
+    b == b',
+    b == domainSegStart dom,
+    i `notMember` freeIn c =
+      pure $ IndexFn it (toCases c)
+rewriteCarry indexfn = pure indexfn
 
 rewrite :: IndexFn -> IndexFnM IndexFn
 rewrite indexfn =
   simplify indexfn >>=
-  rewriteRule4 >>=
+  rewritePrefixSum >>=
+  simplify >>=
+  rewriteCarry >>=
   simplify

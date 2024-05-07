@@ -155,6 +155,7 @@ postProcess vn indexfn = do
   traceM "🪨 refining"
   indexfn' <- rewrite indexfn >>= refineIndexFn >>= rewrite
   tracePrettyM indexfn'
+  traceM (show indexfn')
   traceM "\n"
   insertIndexFn vn indexfn'
 

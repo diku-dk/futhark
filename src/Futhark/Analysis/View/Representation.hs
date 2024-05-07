@@ -32,6 +32,7 @@ import Futhark.SoP.Monad
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Debug.Trace (traceM, trace)
 import Data.Text (unpack)
+import qualified Data.Set as S
 
 data Term =
     Var VName
@@ -118,7 +119,7 @@ instance Eq Iterator where
   _ == _ = False -- TODO
 
 newtype Cases a = Cases (NE.NonEmpty (a, a))
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 -- TODO add "bottom" for failure?
 data IndexFn = IndexFn
@@ -431,3 +432,33 @@ unzipT index_fn = [index_fn]
 
 getIterator :: IndexFn -> Iterator
 getIterator (IndexFn iter _) = iter
+
+class Ord a => FreeIn a where
+  freeIn :: a -> S.Set VName
+
+instance FreeIn (SoP Term) where
+  freeIn sop =
+    let frees :: S.Set Term = SoP.free sop
+    in  foldMap freeIn frees
+
+instance FreeIn Term where
+  freeIn (Var vn) = S.singleton vn
+  freeIn (SumSlice vn lb ub) = S.singleton vn <> freeIn lb <> freeIn ub
+  freeIn (SumSliceIndicator vn lb ub) = S.singleton vn <> freeIn lb <> freeIn ub
+  freeIn (Idx xs i) = freeIn xs <> freeIn i
+  freeIn (SoP2 sop) = freeIn sop
+  freeIn (Indicator t) = freeIn t
+  freeIn (Tuple ts) = foldMap freeIn ts
+  freeIn (Bool _) = mempty
+  freeIn (Not t) = freeIn t
+  freeIn (a :== b) = freeIn a <> freeIn b
+  freeIn (a :< b) = freeIn a <> freeIn b
+  freeIn (a :> b) = freeIn a <> freeIn b
+  freeIn (a :/= b) = freeIn a <> freeIn b
+  freeIn (a :>= b) = freeIn a <> freeIn b
+  freeIn (a :<= b) = freeIn a <> freeIn b
+  freeIn (a :&& b) = freeIn a <> freeIn b
+  freeIn (a :|| b) = freeIn a <> freeIn b
+  freeIn Recurrence = mempty
+-- instance FreeIn (Cases Term) where
+--   freeIn (Cases cases) = foldMap (\(c,v) -> freeIn c <> freeIn v) cases
