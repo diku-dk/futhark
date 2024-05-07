@@ -12,7 +12,6 @@ import Futhark.SoP.SoP (Rel (..))
 import Futhark.SoP.Refine (addRel)
 import Futhark.Util.Pretty
 import Debug.Trace (traceM)
-import qualified Data.Map as M
 import Futhark.MonadFreshNames (newNameFromString)
 
 
@@ -107,11 +106,7 @@ refineIndexFn (IndexFn it (Cases cases)) = do
         rollbackAlgEnv (
           do
             debugM $ "refine CASE " <> prettyString (p,v)
-            p' <- refineTerm (toNNF (Not p))
-            traceM $ "refined predicate " <> prettyString p'
             addRel rel
-            env' <- gets algenv
-            traceM $ "Alg env: " <> prettyString env'
             refineTerm v)
     refineCase (_, v) =
       refineTerm v
@@ -157,7 +152,6 @@ refineIndexFn (IndexFn it (Cases cases)) = do
     --         Sum j start end <$> astMap m e
     --       )
     refineTerm (SumSlice x lb ub) = do
-      debugM $ "SumSlice " <> prettyString x <> " " <> prettyString lb <> " " <> prettyString ub
       start <- astMap m lb
       end <- astMap m ub
       -- If the slice is empty or just a single element, eliminate the sum.
@@ -172,14 +166,7 @@ refineIndexFn (IndexFn it (Cases cases)) = do
     refineRelation rel x y = do
       x' <- refineTerm x
       y' <- refineTerm y
-      env' <- gets algenv
-      debugM ("refine " <> prettyString (x `rel` y) <> "\nWith ranges:\n" <> prettyRanges (ranges env'))
-      traceM ("x' = " <> prettyString x')
-      traceM ("y' = " <> prettyString y')
       b <- solve (x' `rel` y')
-      env'' <- gets algenv
-      traceM ("Ranges after refinement:\n" <> prettyRanges (ranges env''))
-      traceM ("Result: " <> prettyString b)
       pure $ if b then Bool True else x' `rel` y'
       where
         -- Use Fourier-Motzkin elimination to determine the truth value
@@ -219,9 +206,7 @@ checkMonotonic iter@(Forall _ _) (cond, SumSlice xs _ _) = do
   -- For a SumSlice it's sufficient to check that each term is non-negative.
   let test = (cond, Var xs :>= SoP2 (SoP.int2SoP 0))
   let test' = IndexFn iter (Cases . NE.singleton $ test)
-  debugM $ "checkMonotonic test: " <> prettyString test'
   IndexFn _ (Cases res) <- refineIndexFn test'
-  debugM ("checkMonotonic result: " <> prettyString (IndexFn iter (Cases res)))
   case res of
     (_, Bool True) :| [] -> pure True
     _ -> pure False
@@ -247,9 +232,7 @@ checkMonotonic iter@(Forall i dom) (cond, x) = do
   -- Need that:
   --   max{} <= ∑shape₆₀₈₁[0 : -1 + q₆₁₈₈] <= min{∑shape₆₀₈₁[0 : -1 + r₆₁₈₉]}
   let test' = IndexFn iter (Cases . NE.singleton $ test)
-  debugM $ "checkMonotonic test: " <> prettyString test'
   IndexFn _ (Cases res) <- refineIndexFn test'
-  debugM ("checkMonotonic result: " <> prettyString (IndexFn iter (Cases res)))
   case res of
     (_, Bool True) :| [] -> pure True
     _ -> pure False

@@ -137,25 +137,27 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
     newIndexFn <- forward e
-    postProcess x newIndexFn
+    refineAndBind x newIndexFn
     forwards body
     pure ()
-forwards (E.AppExp (E.LetPat _ ps@(E.TuplePat {}) e body _) _)
-  | names <- S.toList $ E.patNames ps = do
+forwards (E.AppExp (E.LetPat _ (E.TuplePat patterns _) e body _) _) = do
     ys <- unzipT <$> forward e
-    forM_ (zip names ys) (uncurry postProcess)
+    forM_ (zip patterns ys) refineAndBind'
     forwards body
     pure ()
-    -- trace ("###" <> prettyString yss) $ pure ()
+    where
+      -- Wrap refineAndBind to discard results otherwise bound to wildcards.
+      refineAndBind' (E.Wildcard {}, _) = pure ()
+      refineAndBind' (E.Id vn _ _, indexfn) = refineAndBind vn indexfn
+      refineAndBind' x = error ("not implemented for " <> show x)
 forwards _ = pure ()
 
-postProcess :: E.VName -> IndexFn -> IndexFnM ()
-postProcess vn indexfn = do
+refineAndBind :: E.VName -> IndexFn -> IndexFnM ()
+refineAndBind vn indexfn = do
   tracePrettyM indexfn
   traceM "🪨 refining"
   indexfn' <- rewrite indexfn >>= refineIndexFn >>= rewrite
   tracePrettyM indexfn'
-  traceM (show indexfn')
   traceM "\n"
   insertIndexFn vn indexfn'
 
@@ -284,18 +286,15 @@ forward (E.AppExp (E.Apply f args _) _)
       unless (iter_body == iter_y || iter_body == Empty)
              (error $ "map: got incompatible iterator from map lambda body: "
                       <> show iter_body)
-      debugM ("map args " <> prettyString xss)
-      debugM ("map body " <> prettyString (IndexFn iter_body cases_body))
       -- Make susbtitutions from function arguments to array names.
       -- TODO `map E.patNames params` is a [Set], I assume because we might have
       --   map (\(x, y) -> ...) xys
       -- meaning x needs to be substituted by x[i].0
       let paramNames :: [E.VName] = mconcat $ map (S.toList . E.patNames) params
       let xss_flat :: [IndexFn] = mconcat $ map unzipT xss
-      let s y (paramName, paramIndexFn) = sub paramName paramIndexFn y
-      -- let y1 = foldl s y 
-      rewrite $
-        foldl s (IndexFn iter_y cases_body) (zip paramNames xss_flat)
+      let s y (paramName, paramIndexFn) = simplify $ sub paramName paramIndexFn y
+      foldM s (IndexFn iter_y cases_body) (zip paramNames xss_flat)
+        >>= rewrite
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       IndexFn iter_xs xs <- forward xs'
@@ -315,57 +314,19 @@ forward (E.AppExp (E.Apply f args _) _)
                   [(base_case, Var x), (Not base_case, Recurrence `op` Var x)])
       rewrite $ sub x (IndexFn iter_xs xs) y
   | Just "scan" <- getFun f,
-    -- [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
     [E.Lambda params body' _ _ _, _ne, xs'] <- getArgs args,
     [paramNames_x, paramNames_y] <- map (S.toList . E.patNames) params = do
-      -- check if params are tuple, then xs must be unzipped before forward (so never hit zip case)
       xs <- forward xs'
       body <- forward body'
-      let paramNames = [paramNames_x, paramNames_y]
-      debugM ("paramIndexFns " <> prettyString xs)
-      debugM ("paramNames " <> prettyString paramNames)
-      debugM ("unzipT xs " <> prettyString (unzipT xs))
-      debugM ("unzipT body " <> prettyString (unzipT body))
-      ff <- mapM normalise $ unzipT xs
-      debugM ("unzipT xs normalised " <> prettyString ff)
-      gg <- mapM normalise $ unzipT body
-      debugM ("unzipT body normalised " <> prettyString gg)
-      -- let zip4 as bs cs ds = zipWith (\(a,b) (c,d) -> (a,b,c,d)) (zip as bs) (zip cs ds)
-      -- y_unzipped <- forM (zip4 (unzipT xs) (unzipT body) paramNames_x paramNames_y)
-      --                    (\(x, b, vnx, vny) -> do
-      --                       vn <- newNameFromString "body"
-      --                       pure $
-      --                         sub vnx (toScalarIndexFn Recurrence) $
-      --                           sub vny x $
-      --                             sub vn b $
-      --                               IndexFn (getIterator xs) (toCases (Var vn))
-      --                    )
-      -- debugM ("y_unzipped head " <> prettyString (head y_unzipped))
-      -- debugM ("y_unzipped last " <> prettyString (last y_unzipped))
-      -- If case values are identifcal, drop conditions?
-      -- .      | y_flag₆₀₈₉ ⇒  x_flag₆₀₈₅ || y_flag₆₀₈₉
-      --        | ¬(y_flag₆₀₈₉) ⇒  x_flag₆₀₈₅ || y_flag₆₀₈₉,
-      -- rewrite $ head y_unzipped
-
-      -- Our semantics are sequential here, so we can just decide that the scan
+      -- Our semantics are sequential, so we can just decide that the scan
       -- is a scanl with x always being the accumulator and y always being
       -- an element of the array being scanned over.
-      let s y (paramName, paramIndexFn) = sub paramName paramIndexFn y
+      let s y (paramName, paramIndexFn) = simplify $ sub paramName paramIndexFn y
       vn <- newNameFromString "body"
       let y = sub vn body $ IndexFn (getIterator xs) (toCases (Var vn))
-      debugM ("y " <> prettyString y)
-      let y1 = foldl s y (zip paramNames_y (unzipT xs))
-      debugM ("y " <> prettyString y)
-      let y2 = foldl s y1 (zip paramNames_x (repeat (toScalarIndexFn Recurrence)))
-      -- y_unzipped <- mapM rewrite $ unzipT y2
-      -- debugM ("y_unzipped head " <> prettyString (head y_unzipped))
-      -- debugM ("y_unzipped last " <> prettyString (last y_unzipped))
-      rewrite y2
-      -- case paramNames_x of
-      --   [x1, x2] ->
-      --     trace (prettyString body) undefined
-      --   _ -> undefined
-      -- pure $ IndexFn Empty (toCases . SoP2 $ SoP.int2SoP 0)
+      foldM s y (zip paramNames_y (unzipT xs))
+        >>= \y' -> foldM s y' (zip paramNames_x (repeat (toScalarIndexFn Recurrence)))
+        >>= rewrite
   | Just fname <- getFun f,
     "zip" `L.isPrefixOf` fname = do
       xss <- mapM forward (getArgs args)
