@@ -332,11 +332,11 @@ instance Pretty Domain where
       <> "="
       -- <> commasep ["0", "...", pretty (termToSoP $ e ~-~ SoP2 (SoP.int2SoP 1))]
       <> "iota" <+> pretty m
-      <+> brackets (commasep [
+      <+> "[" <> commasep [
             pretty (termToSoP b),
             "...",
             pretty (termToSoP $ substituteName k (Var k ~+~ SoP2 (SoP.int2SoP 1)) b)
-          ])
+          ] <> ")"
 
 instance Pretty IndexFn where
   pretty (IndexFn (Forall i dom) e) =

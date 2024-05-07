@@ -119,14 +119,14 @@ tests =
      ]),
     ("tests/refinement/mkFlagArray.fut",
      [ ("res", [
-        "∀i₆₁₈₈ ∈ ⊎k₆₁₉₁=iota m₆₀₆₉ [∑shape₆₀₈₁[0 : -1 + k₆₁₉₁], ..., ∑shape₆₀₈₁[0 : k₆₁₉₁]] .",
+        "∀i₆₁₈₈ ∈ ⊎k₆₁₉₁=iota m₆₀₆₉ [∑shape₆₀₈₁[0 : -1 + k₆₁₉₁], ..., ∑shape₆₀₈₁[0 : k₆₁₉₁]) .",
         "    | i₆₁₈₈ == ∑shape₆₀₈₁[0 : -1 + k₆₁₉₁] ⇒  xs₆₀₈₂[∑shape₆₀₈₁[0 : -1 + k₆₁₉₁]]",
         "    | i₆₁₈₈ /= ∑shape₆₀₈₁[0 : -1 + k₆₁₉₁] ⇒  zero₆₀₇₀"
        ])
      ]),
     ("tests/refinement/sgmsum.fut",
      [ ("ys", [
-        "∀i₆₁₉₆ ∈ ⊎k₆₁₉₉=iota m₆₀₆₉ [∑shape₆₀₈₁[0 : -1 + k₆₁₉₉], ..., ∑shape₆₀₈₁[0 : k₆₁₉₉]] .",
+        "∀i₆₁₉₆ ∈ ⊎k₆₁₉₉=iota m₆₀₆₉ [∑shape₆₀₈₁[0 : -1 + k₆₁₉₉], ..., ∑shape₆₀₈₁[0 : k₆₁₉₉]) .",
         "    | True ⇒  ∑xs₆₀₈₂[∑shape₆₀₈₁[0 : -1 + k₆₁₉₉] : i₆₁₉₆ + ∑shape₆₀₈₁[0 : -1 + k₆₁₉₉]]"
        ])
      ])
