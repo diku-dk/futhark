@@ -1,6 +1,7 @@
 module Futhark.Analysis.View.Rules where
 
 import Futhark.Analysis.View.Representation
+import Futhark.Analysis.View.Monad
 import Debug.Trace (trace, traceM)
 import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NE

@@ -5,6 +5,7 @@ module Futhark.CLI.View (main) where
 import Control.Monad
 import Control.Monad.IO.Class
 import Futhark.Analysis.View
+import Futhark.Analysis.View.Latex
 import Futhark.Compiler
 import Futhark.Util.Options
 import Futhark.Util.Pretty (hPutDoc, putDoc, Pretty (pretty), prettyString)
@@ -20,15 +21,25 @@ import Language.Futhark.Core (baseString)
 -- import Control.Monad.State
 -- import Debug.Trace (traceM)
 
-newtype RefineConfig = RefineConfig
-  { checkWarn :: Bool }
+data RefineConfig = RefineConfig
+  { checkWarn :: Bool,
+    laTeX :: Maybe FilePath
+  }
 
 newRefineConfig :: RefineConfig
-newRefineConfig = RefineConfig True
+newRefineConfig = RefineConfig True Nothing
 
 options :: [FunOptDescr RefineConfig]
 options =
-  [ ]
+  [ Option
+      "l"
+      ["filepath"]
+      ( ReqArg
+          (\fp -> Right $ \config -> config {laTeX = Just fp})
+          "FILEPATH"
+      )
+      "Print LaTeX trace."
+  ]
 
 -- Expected (name, index function in prettyString format).
 -- prettyString format used for janky equality testing.
@@ -158,14 +169,14 @@ runTest :: (FilePath, [Test]) -> IO ()
 runTest (file, expected) = do
   putStrLn $ "Running test on file: " ++ file
   (_warnings, imports, src) <- readProgramOrDie file
-  let res = M.mapKeys baseString $ mkIndexFnProg src imports
-  let passed = all (checkTest res) expected
+  let (res, _) = mkIndexFnProg src imports
+  let passed = all (checkTest . M.mapKeys baseString $ res) expected
   if passed
   then putStrLn $ "Test passed: " ++ file
   else error $ "Test failed: " ++ file
   where
-    checkTest res (name, expected_indxfn) =
-      let actual = res M.! name
+    checkTest actuals (name, expected_indxfn) =
+      let actual = actuals M.! name
       in  map strip expected_indxfn == map strip (lines (prettyString actual))
 
 -- | Run @futhark refinement@.
@@ -184,8 +195,12 @@ main = mainWithOptions newRefineConfig options "program" $ \args cfg ->
       --                  Defunctorise.transformProg imports
       --                  >>= FullNormalise.transformProg
       -- let res = mkIndexFnProg src valbinds
-      let res = mkIndexFnProg src imports
+      let (res, log) = mkIndexFnProg src imports
       putStrLn "\nIndex function:\n---------------\n"
       putDoc (pretty res)
+
+      case laTeX cfg of
+        Just fp -> mkLaTeX fp log
+        _ -> pure ()
     _ -> Nothing
 

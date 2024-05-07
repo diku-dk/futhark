@@ -23,30 +23,32 @@ let part2indicesL [n] [m]
          (false, 0i64)
          zipped
   let (_flags, outinds) = unzip flags_ys
-  in outinds
+  -- in outinds
 
-  -- let tflgsL = map (\c -> if c then 1i64 else 0i64) condsL
-  -- let fflgsL = map (\b -> 1 - b) tflgsL
+  let tflgsL = map (\c -> if c then 1i64 else 0i64) condsL
+  let fflgsL = map (\b -> 1 - b) tflgsL
 
-  -- -- let indsTL = sgmSumInt flags tflgsL
-  -- let zipped = zip flags tflgsL
-  -- let flags_ys =
-  --   scan (\(x_flag,x) (y_flag,y) ->
-  --          (x_flag || y_flag,
-  --           if y_flag then y else x + y))
-  --        (false, 0i64)
-  --        zipped
-  -- let (_flags, indsTL) = unzip flags_ys
+  -- let indsTL = sgmSumInt flags tflgsL
+  let zipped = zip flags tflgsL
+  let flags_ys =
+    scan (\(x_flag,x) (y_flag,y) ->
+           (x_flag || y_flag,
+            if y_flag then y else x + y))
+         (false, 0i64)
+         zipped
+  let (_flags, indsTL) = unzip flags_ys
+  -- in indsTL
 
-  -- -- let tmpL   = sgmSumInt flags fflgsL
-  -- let zipped = zip flags fflgsL
-  -- let flags_ys =
-  --   scan (\(x_flag,x) (y_flag,y) ->
-  --          (x_flag || y_flag,
-  --           if y_flag then y else x + y))
-  --        (false, 0i64)
-  --        zipped
-  -- let (_flags, tmpL) = unzip flags_ys
+  -- let tmpL   = sgmSumInt flags fflgsL
+  let zipped = zip flags fflgsL
+  let flags_ys =
+    scan (\(x_flag,x) (y_flag,y) ->
+           (x_flag || y_flag,
+            if y_flag then y else x + y))
+         (false, 0i64)
+         zipped
+  let (_flags, tmpL) = unzip flags_ys
+  in tmpL
 
   -- -- let lst = indsT[n-1]
   -- let begs   = scan (+) 0 shape --- prepend 0 here; prepend 0 to shp
@@ -57,11 +59,11 @@ let part2indicesL [n] [m]
   -- let indsFL = map2 (\t sgmind-> t + #[unsafe] lstL[sgmind]) tmpL outinds
   -- in indsFL
 
-  -- -- let indsL = map4(\c indT indF sgmind->
-  -- --                       let offs = if sgmind > 0 then #[unsafe] begs[sgmind-1] else 0i64
-  -- --                       in  if c then offs + indT - 1
-  -- --                                else offs + indF - 1
-  -- --                 ) condsL indsTL indsFL outinds
+  -- let indsL = map4(\c indT indF sgmind->
+  --                       let offs = if sgmind > 0 then #[unsafe] begs[sgmind-1] else 0i64
+  --                       in  if c then offs + indT - 1
+  --                                else offs + indF - 1
+  --                 ) condsL indsTL indsFL outinds
 
-  -- -- let fltarrL = scatter (replicate n dummy) indsL arr
-  -- -- in  fltarrL
+  -- let fltarrL = scatter (replicate n dummy) indsL arr
+  -- in  fltarrL

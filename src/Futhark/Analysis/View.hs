@@ -5,6 +5,7 @@ import Data.List.NonEmpty(NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (fromMaybe, mapMaybe, catMaybes, fromJust)
 import Futhark.Analysis.View.Representation
+import Futhark.Analysis.View.Monad
 import Futhark.Analysis.View.Refine hiding (debugM)
 import Futhark.Analysis.View.Rules
 import Futhark.Analysis.View.Substitution
@@ -99,7 +100,7 @@ getArgs = map (stripExp . snd) . NE.toList
 
 -- mkIndexFnProg :: VNameSource -> [E.Dec] -> IndexFns
 -- mkIndexFnProg vns prog = tracePretty $ execIndexFnM (mkIndexFnDecs prog) vns
-mkIndexFnProg :: VNameSource -> Imports -> IndexFns
+mkIndexFnProg :: VNameSource -> Imports -> (IndexFns, [Log])
 mkIndexFnProg vns prog = execIndexFnM (mkIndexFnImports prog) vns
 
 mkIndexFnImports :: [(ImportName, FileModule)] -> IndexFnM ()
@@ -446,12 +447,9 @@ getOOB :: SoP.SoP Term
 getOOB lower_bound upper_bound (IndexFn iter cases)
   | Cases ((c, x) :| [(neg_c, y)]) <- cases,
     c == (toNNF . Not $ neg_c) = do
-      let test =
-           cmapValues (\v -> SoP2 (termToSoP v) :< SoP2 lower_bound :|| SoP2 (termToSoP v) :>= SoP2 upper_bound)
-                      cases
-      -- debugM $ "test reflexivity " <> prettyString (map (\(_,v) -> (v, v == v)) (casesToList cases))
-      -- debugM $ "test eq bounds " <> prettyString (map (\(_,v) -> (v,SoP2 upper_bound, v == SoP2 upper_bound)) (casesToList cases))
-      -- debugM $ "test eq bounds termToSoP " <> prettyString (map (\(_,v) -> (v,SoP2 upper_bound, termToSoP v == upper_bound)) (casesToList cases))
+      let test = cmapValues (\v -> SoP2 (termToSoP v) :< SoP2 lower_bound
+                                   :|| SoP2 (termToSoP v) :>= SoP2 upper_bound)
+                            cases
       IndexFn _ (Cases res) <- refineIndexFn (IndexFn iter test)
       -- Swap (x, y) so that OOB is first.
       let res' = case res of
@@ -460,7 +458,5 @@ getOOB lower_bound upper_bound (IndexFn iter cases)
                    ((cx, x') :| [(cy, Bool True)]) | x' /= Bool True ->
                      Just ((cy, y), (cx, x))
                    _ -> Nothing
-      debugM ("getOOB " <> prettyString (IndexFn iter (Cases res)))
-      debugM ("getOOB res: " <> prettyString res')
       pure res'
 getOOB _ _ _ = pure Nothing

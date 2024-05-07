@@ -16,12 +16,12 @@
 module Futhark.Analysis.View.Representation where
 
 import Data.List qualified as L
+import Futhark.MonadFreshNames
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust)
 import Data.Bifunctor (second)
 import Futhark.SoP.SoP (SoP)
 import Futhark.SoP.SoP qualified as SoP
-import Futhark.MonadFreshNames
 import Language.Futhark (VName (VName))
 import Language.Futhark qualified as E
 import Futhark.Util.Pretty
@@ -37,11 +37,11 @@ import qualified Data.Set as S
 data Term =
     Var VName
   | SumSlice
-      VName       -- array
+      VName        -- array
       (SoP Term)   -- lower bound
       (SoP Term)   -- upper bound
   | SumSliceIndicator
-      VName       -- array
+      VName        -- array
       (SoP Term)   -- lower bound
       (SoP Term)   -- upper bound
   -- | Sum
@@ -76,6 +76,10 @@ data Term =
 
 infixr 3 :&&
 infixr 2 :||
+
+-- This is required by MonadSoP.
+instance Nameable Term where
+  mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
 
 data Domain = Iota Term       -- [0, ..., n-1]
             | Cat             -- Catenate_{k=1}^{m-1} [b_{k-1}, ..., b_k)
@@ -129,45 +133,6 @@ data IndexFn = IndexFn
   deriving (Show, Eq)
 
 type IndexFns = M.Map VName IndexFn
-
-data VEnv = VEnv
-  { vnamesource :: VNameSource,
-    algenv :: AlgEnv Term E.Exp,
-    indexfns :: IndexFns
-  }
-
--- The IndexFn monad keeps a source of fresh names and writes indexfns.
-newtype IndexFnM a = IndexFnM (RWS () () VEnv a)
-  deriving
-    ( Applicative,
-      Functor,
-      Monad,
-      MonadFreshNames,
-      MonadState VEnv
-    )
-
-instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
-  getNameSource = gets vnamesource
-  putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
-
--- This is required by MonadSoP.
-instance Nameable Term where
-  mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
-
-instance MonadSoP Term E.Exp IndexFnM where
-  getUntrans = gets (untrans . algenv)
-  getRanges = gets (ranges . algenv)
-  getEquivs = gets (equivs . algenv)
-  modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
-
-execIndexFnM :: IndexFnM a -> VNameSource -> IndexFns
-execIndexFnM (IndexFnM m) vns = indexfns . fst $ execRWS m () s
-  where
-    s = VEnv vns mempty mempty
-
-insertIndexFn :: VName -> IndexFn -> IndexFnM ()
-insertIndexFn x v =
-  modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
 
 data ASTMapper m = ASTMapper
   { mapOnTerm :: Term -> m Term,

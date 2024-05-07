@@ -3,6 +3,7 @@ module Futhark.Analysis.View.Refine where
 import Futhark.SoP.Monad (AlgEnv (ranges), addRange, delFromEnv, substEquivs, addEquiv, lookupRange)
 import Futhark.SoP.FourierMotzkin
 import Futhark.Analysis.View.Representation hiding (debugM)
+import Futhark.Analysis.View.Monad
 import Control.Monad.RWS hiding (Sum)
 import Data.List.NonEmpty(NonEmpty ((:|)))
 import qualified Data.List.NonEmpty as NE

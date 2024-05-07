@@ -176,6 +176,8 @@ library
       Futhark.Analysis.PrimExp.Simplify
       Futhark.Analysis.View
       Futhark.Analysis.View.Representation
+      Futhark.Analysis.View.Monad
+      Futhark.Analysis.View.Latex
       Futhark.Analysis.View.Rules
       Futhark.Analysis.View.Refine
       Futhark.Analysis.View.Substitution
