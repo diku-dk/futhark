@@ -108,6 +108,24 @@ type UncheckedLoop =
 type CheckedLoop =
   ([VName], Pat ParamType, Exp, LoopFormBase Info VName, Exp)
 
+checkForImpossible :: Loc -> S.Set VName -> ParamType -> TermTypeM ()
+checkForImpossible loc known_before pat_t = do
+  cs <- getConstraints
+  let bad v = do
+        guard $ v `S.notMember` known_before
+        (_, UnknownSize v_loc _) <- M.lookup v cs
+        Just . typeError (srclocOf loc) mempty $
+          "Inferred type for loop parameter is"
+            </> indent 2 (pretty pat_t)
+            </> "but"
+            <+> dquotes (prettyName v)
+            <+> "is an existential size created inside the loop body at"
+            <+> pretty (locStrRel loc v_loc)
+            <> "."
+  case mapMaybe bad $ S.toList $ fvVars $ freeInType pat_t of
+    problem : _ -> problem
+    [] -> pure ()
+
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkLoop ::
@@ -155,9 +173,12 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
   -- dim handling (2)
   let checkLoopReturnSize mergepat' loopbody' = do
         loopbody_t <- expTypeFully loopbody'
-        pat_t <-
-          someDimsFreshInType loc "loop" new_dims
-            =<< normTypeFully (patternType mergepat')
+        mergepat_t <- normTypeFully (patternType mergepat')
+
+        let ok_names = known_before <> S.fromList new_dims
+        checkForImpossible (locOf mergepat) ok_names mergepat_t
+
+        pat_t <- someDimsFreshInType loc "loop" new_dims mergepat_t
 
         -- We are ignoring the dimensions here, because any mismatches
         -- should be turned into fresh size variables.
