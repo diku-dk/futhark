@@ -14,6 +14,7 @@ import Futhark.Pkg.SolveTests qualified
 import Futhark.Solve.BranchAndBoundTests qualified
 import Futhark.Solve.SimplexTests qualified
 import Language.Futhark.PrimitiveTests qualified
+import Language.Futhark.SemanticTests qualified
 import Language.Futhark.SyntaxTests qualified
 import Language.Futhark.TypeCheckerTests qualified
 import Test.Tasty
@@ -35,6 +36,7 @@ allTests =
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests.tests,
       Futhark.Analysis.AlgSimplifyTests.tests,
       Language.Futhark.TypeCheckerTests.tests,
+      Language.Futhark.SemanticTests.tests,
       Futhark.Solve.SimplexTests.tests,
       Futhark.Solve.BranchAndBoundTests.tests,
       Futhark.Optimise.ArrayLayoutTests.tests

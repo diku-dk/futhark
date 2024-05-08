@@ -540,6 +540,7 @@ test-suite unit
       Futhark.Solve.SimplexTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
+      Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
       Language.Futhark.TypeCheckerTests

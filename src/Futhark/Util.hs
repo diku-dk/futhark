@@ -515,7 +515,8 @@ topologicalSort dep nodes =
         mapM_ sorting $ mapMaybe (depends_of node) nodes_idx
         modify $ bimap (node :) (IM.insert i False)
 
--- | 'traceM', but only if @FUTHARK_COMPILER_DEBUGGING@ is set to to the appropriate level.
+-- | 'traceM', but only if @FUTHARK_COMPILER_DEBUGGING@ is set to to
+-- the appropriate level.
 debugTraceM :: (Monad m) => Int -> String -> m ()
 debugTraceM level
   | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" level = traceM
