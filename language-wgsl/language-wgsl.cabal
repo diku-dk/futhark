@@ -1,0 +1,43 @@
+cabal-version:      3.4
+name:               language-wgsl
+version:            0.1.0.0
+synopsis:           The WebGPU Shader Language.
+
+description:        A package implementing a (partial) AST definition for the
+                    WebGPU Shader Language, including a prettyprinter.
+
+license:            ISC
+license-file:       LICENSE
+author:             Sebastian Paarmann
+maintainer:         sepa@di.ku.dk
+-- copyright:
+category:           Language
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+-- extra-source-files:
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  Language.WGSL
+    build-depends:    base >=4.15 && <5,
+                      text,
+                      prettyprinter >= 1.7
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+      OverloadedStrings
+
+test-suite language-wgsl-test
+    import:           warnings
+    default-language: GHC2021
+    default-extensions:
+      OverloadedStrings
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.17.2.1,
+        language-wgsl
