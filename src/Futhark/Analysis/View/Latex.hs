@@ -3,6 +3,7 @@ module Futhark.Analysis.View.Latex
     LaTeXC (..),
     ToLaTeX (..),
     LaTeX (..),
+    prettyLaTeX,
   )
 where
 
@@ -21,12 +22,16 @@ import Text.LaTeX.Packages.Inputenc
 import Text.LaTeX.Packages.Trees.Qtree
 import Prelude hiding (concat)
 import qualified Data.List.NonEmpty as NE
-import Futhark.Util.Pretty (prettyString)
+import Futhark.Util.Pretty (prettyString, Pretty)
 
 class ToLaTeX a where
   toLaTeX_ :: (Eq l, LaTeXC l) => Int -> a -> l
   toLaTeX :: (Eq l, LaTeXC l) => a -> l
   toLaTeX = toLaTeX_ 0
+
+prettyLaTeX :: (Pretty a, LaTeXC l) => a -> l
+prettyLaTeX =
+  verbatim . fromString . prettyString
 
 concatWith :: (Foldable t, LaTeXC l) => (l -> l -> l) -> t l -> l
 concatWith _ ls
@@ -171,7 +176,7 @@ instance ToLaTeX (E.VName, IndexFn) where
     ]
 
 instance ToLaTeX E.Exp where
-  toLaTeX_ _ = verbatim . fromString . prettyString
+  toLaTeX_ _ = prettyLaTeX
 
 instance ToLaTeX E.Pat where
   toLaTeX_ _ = texttt . fromString . prettyString
@@ -203,7 +208,6 @@ mkLaTeX fp as =
         intersperse
           "\n"
           [ raw "\\begin{document}",
-            -- prog,
             raw "\\hoffset=-1in",
             raw "\\voffset=-1in",
             vbox x,

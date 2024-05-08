@@ -117,7 +117,7 @@ mkIndexFnDecs (E.ValDec vb : rest) = do
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 mkIndexFnValBind :: E.ValBind -> IndexFnM ()
-mkIndexFnValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
+mkIndexFnValBind prog@(E.ValBind _ vn ret _ _ params body _ _ _) =
   -- mapM_ paramRefs params
   -- forwards body
   case ret of
@@ -128,7 +128,8 @@ mkIndexFnValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
       traceM ("\nTo prove:\n--------\n" <> prettyString ret)
       traceM ("\nWith params\n-----------\n" <> prettyString params)
       traceM ("\nFor body\n--------\n" <> prettyString body <> "\n====\n")
-      -- tell [toLaTeX body]
+      tell [prettyLaTeX prog]
+      tell ["To prove:" <> prettyLaTeX ret]
       forwards body
       pure ()
     _ -> pure ()
