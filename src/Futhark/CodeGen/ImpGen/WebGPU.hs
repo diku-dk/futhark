@@ -193,7 +193,6 @@ onKernel kernel = do
   let scalarArgs = [ValueKArg (LeafExp n t) t | ImpGPU.ScalarUse n t <- ImpGPU.kernelUses kernel]
   let memArgs = [MemKArg n | ImpGPU.MemoryUse n <- ImpGPU.kernelUses kernel]
   let args = scalarArgs ++ memArgs
-  -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone name 0 args numBlocks blockDim
 
 onHostOp :: ImpGPU.HostOp -> WebGPUM HostOp

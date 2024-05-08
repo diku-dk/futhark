@@ -374,8 +374,8 @@ compileProg version prog = do
        #endif
       |]
 
--- | As server script. Speaks custom server protocol to local Python server
--- wrapper that speaks the actual server protocol.
+-- | As server script. Speaks custom protocol to local Python server
+-- wrapper that speaks the actual Futhark server protocol.
 asJSServer :: GC.CParts -> (T.Text, T.Text)
 asJSServer parts =
   let (_, c, _) = GC.asLibrary parts

@@ -248,7 +248,6 @@ runCC cpath outpath cflags_def ldflags = do
             ++ cmdCFLAGS cflags_def
             ++
             -- The default LDFLAGS are always added.
-            -- The default LDFLAGS are always added.
             ldflags
         )
         mempty
@@ -284,8 +283,6 @@ runISPC ispcpath outpath cpath ispcextension ispc_flags cflags_def ldflags = do
             ++ [cpath, "-o", outpath]
             ++ cmdCFLAGS cflags_def
             ++
-            -- The default LDFLAGS are always added.
-            -- The default LDFLAGS are always added.
             -- The default LDFLAGS are always added.
             ldflags
         )
