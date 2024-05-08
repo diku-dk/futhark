@@ -21,6 +21,7 @@ import Text.LaTeX.Packages.Inputenc
 import Text.LaTeX.Packages.Trees.Qtree
 import Prelude hiding (concat)
 import qualified Data.List.NonEmpty as NE
+import Futhark.Util.Pretty (prettyString)
 
 class ToLaTeX a where
   toLaTeX_ :: (Eq l, LaTeXC l) => Int -> a -> l
@@ -103,7 +104,7 @@ instance (ToLaTeX u, Ord u) => ToLaTeX (SoP.SoP u) where
       neg_neg_terms = map (second negate) neg_terms
 
 instance ToLaTeX E.VName where
-  toLaTeX_ _ vn = fromString $ E.baseString vn
+  toLaTeX_ _ vn = fromString (E.baseString vn) !: num (E.baseTag vn)
 
 instance ToLaTeX Term where
   toLaTeX_ p (Var x) = toLaTeX_ p x
@@ -112,13 +113,13 @@ instance ToLaTeX Term where
   toLaTeX_ _ (SumSliceIndicator xs lb ub) =
     tsum <> indicator <> autoParens (toLaTeX xs)
       <> autoSquareBrackets (toLaTeX lb <> " : " <> toLaTeX ub)
-  toLaTeX_ p (Idx xs i) = toLaTeX_ p xs <> autoSquareBrackets (toLaTeX_ p i)
+  toLaTeX_ p (Idx xs i) = toLaTeX_ p xs <> autoSquareBrackets (toLaTeX i)
   toLaTeX_ p (SoP2 sop) = toLaTeX_ p sop
   toLaTeX_ p (Indicator sop) = indicator <> autoParens (toLaTeX_ p sop)
   toLaTeX_ _ (Tuple es) =
     autoParens $ concatWith (surround ", ") $ map toLaTeX es
   toLaTeX_ _ (Bool b) = mathtt $ fromString $ show b
-  toLaTeX_ _ (Not x) = neg $ toLaTeX_ 9 x
+  toLaTeX_ _ (Not x) = neg . autoParens $ toLaTeX_ 9 x
   toLaTeX_ _ (x :== y) = toLaTeX_ 3 x =: toLaTeX_ 3 y
   toLaTeX_ _ (x :< y) = toLaTeX_ 3 x <: toLaTeX_ 3 y
   toLaTeX_ _ (x :> y) = toLaTeX_ 3 x >: toLaTeX_ 3 y
@@ -143,16 +144,37 @@ autoOpenEndedInterval x = commS "left[" <> x <> commS "right)"
 instance ToLaTeX Domain where
   toLaTeX_ _ (Iota e) = mathtt "iota" <> space <> toLaTeX e
   toLaTeX_ _ (Cat k m b) =
-    raw "\\mathbin{+\\mkern-10mu+}" !: toLaTeX k =: toLaTeX m
+    comm0 "biguplus" !: (toLaTeX k
+      =: mathtt "iota" <> space <> toLaTeX m)
       <> autoOpenEndedInterval
            (toLaTeX b
-              <> raw ", \\dots "
+              <> raw ", \\dots, "
               <> toLaTeX (termToSoP $ substituteName k (Var k ~+~ SoP2 (SoP.int2SoP 1)) b))
 
 instance ToLaTeX IndexFn where
+  toLaTeX_ _ (IndexFn (Forall i dom@(Iota {})) e) =
+    equation_ $ forall <> toLaTeX i `in_` toLaTeX dom <> raw "~.~" <> toLaTeX e
   toLaTeX_ _ (IndexFn (Forall i dom) e) =
-    forall <> toLaTeX i <> toLaTeX dom <> raw "~.~" <> toLaTeX e
-  toLaTeX_ _ (IndexFn Empty e) = raw ".~" <> toLaTeX e
+    align_ [forall <> toLaTeX i `in_` mempty & toLaTeX dom <> raw "~.~" <> lnbk & toLaTeX e]
+  toLaTeX_ _ (IndexFn Empty e) = equation_ $ raw "\\bullet~.~" <> toLaTeX e
+
+instance ToLaTeX (E.VName, IndexFn) where
+  toLaTeX_ _ (vn, IndexFn (Forall i dom) e) =
+    align_ [
+      toLaTeX vn & mempty
+        =: forall <> toLaTeX i `in_` toLaTeX dom <> raw "~.~" <> lnbk & toLaTeX e
+    ]
+  toLaTeX_ _ (vn, IndexFn Empty e) =
+    align_ [
+      toLaTeX vn & mempty
+        =: raw "\\bullet~.~" <> lnbk & toLaTeX e
+    ]
+
+instance ToLaTeX E.Exp where
+  toLaTeX_ _ = verbatim . fromString . prettyString
+
+instance ToLaTeX E.Pat where
+  toLaTeX_ _ = texttt . fromString . prettyString
 
 instance ToLaTeX LaTeX where
   toLaTeX_ _ = fromLaTeX
@@ -163,22 +185,25 @@ mkLaTeX fp as =
   where
     content :: LaTeX
     content =
-      mconcat
-        [ documentclass [a0paper] article,
-          usepackage [] qtree,
-          usepackage [utf8] inputenc,
-          usepackage [] amsmath,
-          usepackage [] amssymb,
-          fit $
-            align_ $
-              intersperse "\n" $
-                map toLaTeX as
-        ]
+      mconcat $
+        intersperse
+          "\n"
+          [ documentclass [a0paper] article,
+            usepackage [] qtree,
+            usepackage [utf8] inputenc,
+            usepackage [] amsmath,
+            usepackage [] amssymb,
+            fit $
+              mconcat $
+                intersperse "\n" $
+                  map toLaTeX as
+          ]
     fit x =
       mconcat $
         intersperse
           "\n"
           [ raw "\\begin{document}",
+            -- prog,
             raw "\\hoffset=-1in",
             raw "\\voffset=-1in",
             vbox x,

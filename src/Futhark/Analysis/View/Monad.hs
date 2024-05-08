@@ -7,7 +7,6 @@ import Language.Futhark qualified as E
 import Control.Monad.RWS.Strict hiding (Sum)
 import Data.Map.Strict qualified as M
 import Futhark.Analysis.Refinement.Latex (LaTeX)
-import Prelude hiding (log)
 
 type Log = LaTeX
 
@@ -24,7 +23,8 @@ newtype IndexFnM a = IndexFnM (RWS () [Log] VEnv a)
       Functor,
       Monad,
       MonadFreshNames,
-      MonadState VEnv
+      MonadState VEnv,
+      MonadWriter [Log]
     )
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
@@ -40,7 +40,7 @@ instance MonadSoP Term E.Exp IndexFnM where
 execIndexFnM :: IndexFnM a -> VNameSource -> (IndexFns, [Log])
 execIndexFnM (IndexFnM m) vns = getRes $ execRWS m () s
   where
-    getRes (env, log) = (indexfns env, log)
+    getRes (env, w) = (indexfns env, w)
     s = VEnv vns mempty mempty
 
 insertIndexFn :: E.VName -> IndexFn -> IndexFnM ()

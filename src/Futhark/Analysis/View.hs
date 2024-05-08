@@ -3,7 +3,7 @@ module Futhark.Analysis.View (mkIndexFnProg) where
 import Data.List qualified as L
 import Data.List.NonEmpty(NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe, mapMaybe, catMaybes, fromJust)
+import Data.Maybe (fromMaybe)
 import Futhark.Analysis.View.Representation
 import Futhark.Analysis.View.Monad
 import Futhark.Analysis.View.Refine hiding (debugM)
@@ -18,9 +18,10 @@ import qualified Data.Map as M
 import Debug.Trace (traceM, trace)
 import qualified Data.Set as S
 import Control.Monad.RWS.Strict hiding (Sum)
-import Futhark.SoP.SoP (justConstant)
-import Language.Futhark.Primitive (allIntTypes, PrimType (IntType))
 import Futhark.SoP.Monad (addRange)
+import qualified Text.LaTeX.Packages.AMSMath as Math
+import Text.LaTeX.Base (textbf, newline)
+import Futhark.Analysis.View.Latex
 
 
 --------------------------------------------------------------
@@ -127,6 +128,7 @@ mkIndexFnValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
       traceM ("\nTo prove:\n--------\n" <> prettyString ret)
       traceM ("\nWith params\n-----------\n" <> prettyString params)
       traceM ("\nFor body\n--------\n" <> prettyString body <> "\n====\n")
+      -- tell [toLaTeX body]
       forwards body
       pure ()
     _ -> pure ()
@@ -137,11 +139,14 @@ forwards :: E.Exp -> IndexFnM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
+    tell [textbf "Forward on " <> Math.math (toLaTeX x) <> toLaTeX e]
     newIndexFn <- forward e
     refineAndBind x newIndexFn
     forwards body
     pure ()
-forwards (E.AppExp (E.LetPat _ (E.TuplePat patterns _) e body _) _) = do
+forwards (E.AppExp (E.LetPat _ p@(E.TuplePat patterns _) e body _) _) = do
+    traceM (prettyString patterns <> " = " <> prettyString e)
+    tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX e]
     ys <- unzipT <$> forward e
     forM_ (zip patterns ys) refineAndBind'
     forwards body
@@ -160,6 +165,7 @@ refineAndBind vn indexfn = do
   indexfn' <- rewrite indexfn >>= refineIndexFn >>= rewrite
   tracePrettyM indexfn'
   traceM "\n"
+  tell ["resulting in", toLaTeX (vn, indexfn')]
   insertIndexFn vn indexfn'
 
 
@@ -197,10 +203,10 @@ forward (E.TupLit es _) = do
   xs <- mapM forward es
   vns <- mapM (\_ -> newNameFromString "xs") xs
   let IndexFn iter1 _ = head xs
-  rewrite $
-    foldl (\acc (vn, x) -> sub vn x acc)
-          (IndexFn iter1 (toCases . Tuple $ map Var vns))
-          (zip vns xs)
+  foldM (\acc (vn, x) -> sub vn x acc)
+        (IndexFn iter1 (toCases . Tuple $ map Var vns))
+        (zip vns xs)
+    >>= rewrite
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
       IndexFn iter_idx idx <- forward idx'
@@ -226,7 +232,8 @@ forward (E.AppExp (E.Index xs' slice _) _)
           -- So the result is a scalar because i₆₀₉₃ is a scalar in this context,
           -- because we are inside the body of the map lambda.
           -- (I think this is correct; i₆₀₉₃ is a program variable like x₆₀₇₀.)
-          rewrite $ sub j (IndexFn iter_idx idx) (IndexFn iter_idx xs)
+          sub j (IndexFn iter_idx idx) (IndexFn iter_idx xs)
+            >>= rewrite
         Nothing ->
           error "indexing into a scalar"
 forward (E.Not e _) = do
@@ -237,19 +244,19 @@ forward (E.ArrayLit _es _ _) =
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) = do
   x' <- forward x
   y' <- forward y
-  rewrite $ sub vn x' y'
+  sub vn x' y' >>= rewrite
 forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op',
     Just bop <- L.find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
-      IndexFn iter_x x <- forward x'
+      vx <- forward x'
+      let IndexFn iter_x _ = vx
       vy <- forward y'
       a <- newNameFromString "a"
       b <- newNameFromString "b"
-      let doOp op = rewrite $
-                          sub b vy $
-                            sub a (IndexFn iter_x x) $
-                              IndexFn iter_x (toCases $ op (Var a) (Var b))
+      let doOp op = sub a vx (IndexFn iter_x (toCases $ op (Var a) (Var b)))
+                      >>= sub b vy
+                        >>= rewrite
       case bop of
         E.Plus -> doOp (~+~)
         E.Times -> doOp (~*~)
@@ -272,10 +279,10 @@ forward (E.AppExp (E.If c t f _) _) = do
   f_branch <- newNameFromString "f_branch"
   let y = IndexFn iter_c (Cases . NE.fromList $ [(Var cond, Var t_branch),
                                               (Not $ Var cond, Var f_branch)])
-  rewrite $
-    sub f_branch vf $
-      sub t_branch vt $
-        sub cond (IndexFn iter_c c') y
+  sub cond (IndexFn iter_c c') y
+    >>= sub t_branch vt
+      >>= sub f_branch vf
+        >>= rewrite
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
@@ -293,7 +300,9 @@ forward (E.AppExp (E.Apply f args _) _)
       -- meaning x needs to be substituted by x[i].0
       let paramNames :: [E.VName] = mconcat $ map (S.toList . E.patNames) params
       let xss_flat :: [IndexFn] = mconcat $ map unzipT xss
-      let s y (paramName, paramIndexFn) = simplify $ sub paramName paramIndexFn y
+      let s y (paramName, paramIndexFn) = sub paramName paramIndexFn y >>= simplify
+      let y' = IndexFn iter_y cases_body
+      tell ["Using map rule ", toLaTeX y']
       foldM s (IndexFn iter_y cases_body) (zip paramNames xss_flat)
         >>= rewrite
   | Just "scan" <- getFun f,
@@ -308,12 +317,14 @@ forward (E.AppExp (E.Apply f args _) _)
           "*" -> pure (~*~)
           _ -> error ("scan not implemented for bin op: " <> show vn)
       let base_case = Var i :== SoP2 (SoP.int2SoP 0)
-      x <- newNameFromString "x"
+      x <- newNameFromString "a"
       let y = IndexFn
                 iter_xs
                 (Cases . NE.fromList $
                   [(base_case, Var x), (Not base_case, Recurrence `op` Var x)])
-      rewrite $ sub x (IndexFn iter_xs xs) y
+      tell ["Using scan rule ", toLaTeX y]
+      sub x (IndexFn iter_xs xs) y
+        >>= rewrite
   | Just "scan" <- getFun f,
     [E.Lambda params body' _ _ _, _ne, xs'] <- getArgs args,
     [paramNames_x, paramNames_y] <- map (S.toList . E.patNames) params = do
@@ -322,25 +333,28 @@ forward (E.AppExp (E.Apply f args _) _)
       -- Our semantics are sequential, so we can just decide that the scan
       -- is a scanl with x always being the accumulator and y always being
       -- an element of the array being scanned over.
-      let s y (paramName, paramIndexFn) = simplify $ sub paramName paramIndexFn y
+      let s y (paramName, paramIndexFn) = sub paramName paramIndexFn y
+                                            >>= simplify
       vn <- newNameFromString "body"
-      let y = sub vn body $ IndexFn (getIterator xs) (toCases (Var vn))
+      y <- sub vn body (IndexFn (getIterator xs) (toCases (Var vn))) >>= simplify
+      tell ["Using scan rule", toLaTeX y]
       foldM s y (zip paramNames_y (unzipT xs))
         >>= \y' -> foldM s y' (zip paramNames_x (repeat (toScalarIndexFn Recurrence)))
-        >>= rewrite
+          >>= rewrite
   | Just fname <- getFun f,
     "zip" `L.isPrefixOf` fname = do
       xss <- mapM forward (getArgs args)
       vns <- mapM (\_ -> newNameFromString "xs") xss
       let IndexFn iter1 _ = head xss
-      rewrite $
-        foldl (\acc (vn, xs) -> sub vn xs acc)
-              (IndexFn iter1 (toCases . Tuple $ map Var vns))
-              (zip vns xss)
+      let y = IndexFn iter1 (toCases . Tuple $ map Var vns)
+      tell ["Using zip rule ", toLaTeX y]
+      rewrite =<<
+        foldM (\acc (vn, xs) -> sub vn xs acc) y (zip vns xss)
   | Just fname <- getFun f,
     "unzip" `L.isPrefixOf` fname,
     [xs'] <- getArgs args = do
       -- XXX unzip is a no-op.
+      tell ["Using unzip rule" <> newline]
       forward xs' >>= rewrite
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
@@ -406,12 +420,13 @@ forward (E.AppExp (E.Apply f args _) _)
           let y = IndexFn (Forall i (Cat k' m b'))
                           (Cases . NE.fromList $ [(cond, Var vals_k),
                                                   (Not cond, Var dest_i)])
+          tell ["Using Scatter in-bounds-monotonic indices rule ", toLaTeX y]
           -- TODO ^ should probably substitute b in using sub rather than using it
           -- directly.
           let dest_fn = IndexFn iter_dest dest
-          rewrite $
-            sub dest_i dest_fn $
-              sub vals_k vals_fn y
+          sub vals_k vals_fn y
+            >>= sub dest_i dest_fn
+              >>= rewrite
         Nothing -> error "🤡 unhandled scatter"
   | Just "iota" <- getFun f,
     [n] <- getArgs args = do

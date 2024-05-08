@@ -7,6 +7,8 @@ import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Data.Set (notMember)
+import qualified Text.LaTeX.Packages.AMSMath as Math
+import Control.Monad.RWS
 
 normalise :: IndexFn -> IndexFnM IndexFn
 normalise indexfn =
@@ -219,6 +221,7 @@ rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
     b == b',
     b == domainSegStart dom = do
       traceM "👀 Using Rule 4 (recursive sum)"
+      tell ["Using prefix sum rule"]
       let e1' = substituteName i b e1
       pure $ IndexFn it (toCases $ e1' ~+~ SoP2 (foldl1 (SoP..+.) sums))
   where
@@ -264,7 +267,8 @@ rewriteCarry (IndexFn it@(Forall i'' dom) (Cases cases))
     i == i'',
     b == b',
     b == domainSegStart dom,
-    i `notMember` freeIn c =
+    i `notMember` freeIn c = do
+      tell ["Using carry rule"]
       pure $ IndexFn it (toCases c)
 rewriteCarry indexfn = pure indexfn
 
