@@ -7,7 +7,6 @@ import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Data.Set (notMember)
-import qualified Text.LaTeX.Packages.AMSMath as Math
 import Control.Monad.RWS
 
 normalise :: IndexFn -> IndexFnM IndexFn
@@ -53,72 +52,24 @@ normalise indexfn =
         -- [[not x]] => 1 + -1*[[x]]
         Not x -> pure . SoP2 $ SoP.int2SoP 1 SoP..-. SoP.sym2SoP (Indicator x)
         _ -> pure (Indicator c')
-    -- normTerm (Sum j lb ub x) = do
-    --   lb' <- astMap m lb
-    --   ub' <- astMap m ub
-    --   x' <- astMap m x
-    --   -- List of (multiplied symbols, factor) typed [([Term], Integer)].
-    --   let terms = SoP.sopToLists x'
-    --   -- Create a sum for each product (term) in the sum of products,
-    --   -- pulling factors outside the sum.
-    --   let sums = map (\(symbs, c) ->
-    --                     let term = SoP.term2SoP symbs 1
-    --                     in  case SoP.justConstant term of
-    --                           Just k ->
-    --                             -- This would be c*∑j∈[lb, ..., ub] k so rewrite it to (ub - lb + 1) * c * k.
-    --                             SoP.scaleSoP c (SoP.scaleSoP k (ub' SoP..-. lb' SoP..+. SoP.int2SoP 1))
-    --                           _ ->
-    --                             SoP.scaleSoP c . termToSoP $ Sum j lb ub term
-    --                  ) terms
-    --   -- Create sum of products of (sums of sum of products).
-    --   pure $ SoP2 $ foldl1 (SoP..+.) sums
     normTerm x@(SoP2 _) = do
-      x' <- astMap m x
-      case x' of
-        SoP2 sop -> pure . SoP2 . mergeSums $ sop
-        _ -> pure x'
+      mergeSums <$> astMap m x
       where
         -- Takes a sum of products which may have Sum terms and merges other
         -- compatible terms into those Sums. Time complexity is quadratic in
         -- the number of terms in the SoP.
-        mergeSums sop =
-          let sop' = getSoP sop
-          in SoP.sopFromList $
-               foldl (absorbTerm merge) [] sop'
+        -- mergeSums sop =
+        --   SoP.sopFromList $ foldl (absorbTerm merge) [] (getSoP sop)
+        mergeSums :: Term -> Term
+        mergeSums (SoP2 s) = do
+          SoP2 $ SoP.sopFromList (foldl absorbTerm [] (getSoP s))
+        mergeSums t = t
 
-        absorbTerm _ [] term = [term]
-        absorbTerm f (t:ts) term
-          | Just t' <- f t term =
+        absorbTerm [] t2 = [t2]
+        absorbTerm (t1:ts) t2
+          | Just t' <- merge t1 t2 =
             t':ts
-        absorbTerm f (t:ts) term = t : absorbTerm f ts term
-
-        -- -- Naively apply the first function with a Just result
-        -- -- from a list of functions.
-        -- applyFirstMatch :: [a -> a -> Maybe a] -> a -> a -> Maybe a
-        -- applyFirstMatch [] _ _ = Nothing
-        -- applyFirstMatch (f:fs) x y =
-        --   case f x y of
-        --     Nothing -> applyFirstMatch fs x y
-        --     z -> z
-
-        -- -- Rewrite sum_{j=lb}^ub e(j) + e(lb+1) ==> sum_{j=lb}^{ub+1} e(j).
-        -- -- Relies on sorting of SoP and Term to match.
-        -- mergeUb ([Sum j lb ub e1], c) ([e2], c')
-        --   | c == c' =
-        --     let ubp1 = ub SoP..+. SoP.int2SoP 1
-        --     in  if substituteName j (SoP2 ubp1) e1 == termToSoP e2
-        --         then Just ([Sum j lb ubp1 e1], c)
-        --         else Nothing
-        -- mergeUb _ _ = Nothing
-        -- -- Rewrite sum_{j=lb}^ub e(j) + e(lb-1) ==> sum_{j=lb-1}^ub e(j).
-        -- -- Relies on sorting of SoP and Term to match.
-        -- mergeLb ([Sum j lb ub e1], c) ([e2], c')
-        --   | c == c' =
-        --     let lbm1 = lb SoP..-. SoP.int2SoP 1
-        --     in  if substituteName j (SoP2 lbm1) e1 == termToSoP e2
-        --         then Just ([Sum j lbm1 ub e1], c)
-        --         else Nothing
-        -- mergeLb _ _ = Nothing
+        absorbTerm (t1:ts) t2 = t1 : absorbTerm ts t2
 
         -- Rewrite sum y[lb:ub] + y[ub+1] ==> sum y[lb:ub+1].
         -- Relies on sorting of SoP and Term to match.

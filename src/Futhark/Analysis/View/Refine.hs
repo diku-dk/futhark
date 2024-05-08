@@ -1,6 +1,6 @@
 module Futhark.Analysis.View.Refine where
 
-import Futhark.SoP.Monad (AlgEnv (ranges), addRange, delFromEnv, substEquivs, addEquiv, lookupRange)
+import Futhark.SoP.Monad (addRange, delFromEnv, substEquivs)
 import Futhark.SoP.FourierMotzkin
 import Futhark.Analysis.View.Representation hiding (debugM)
 import Futhark.Analysis.View.Monad
@@ -127,7 +127,6 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       case getSoP sop of
         [([Var x], 1)] -> pure $ Var x
         _ -> pure $ SoP2 sop
-      -- pure (Var vn)
     refineTerm (x :== y) = refineRelation (:==) x y
     refineTerm (x :/= y) = refineRelation (:/=) x y
     refineTerm (x :> y)  = refineRelation (:>) x y
@@ -136,22 +135,6 @@ refineIndexFn (IndexFn it (Cases cases)) = do
     refineTerm (x :<= y) = refineRelation (:<=) x y
     refineTerm (x :&& y) = refineRelation (:&&) x y
     refineTerm (x :|| y) = refineRelation (:||) x y
-    -- refineTerm (Sum j lb ub e) = do
-    --   -- XXX test this after changing Sum.
-    --   start <- astMap m lb
-    --   end <- astMap m ub
-    --   case (start, end) of
-    --     (a, b) | SoP.padWithZero a == SoP.padWithZero b ->
-    --       rollbackAlgEnv (do
-    --         -- If the sum has only one term (one iteration), eliminate it.
-    --         addEquiv (Var j) b
-    --         refineTerm (SoP2 e)
-    --       )
-    --     _ ->
-    --       rollbackAlgEnv (do
-    --         addRange (Var j) (mkRange start end)
-    --         Sum j start end <$> astMap m e
-    --       )
     refineTerm (SumSlice x lb ub) = do
       start <- astMap m lb
       end <- astMap m ub
@@ -162,6 +145,48 @@ refineIndexFn (IndexFn it (Cases cases)) = do
         _ | single -> pure $ Idx (Var x) start
         _ | empty -> pure . SoP2 $ SoP.int2SoP 0
         _ -> pure $ SumSlice x start end
+    refineTerm x@(SoP2 _) = do
+      astMap m x >>= mergeSums
+      where
+        -- Takes a sum of products which may have Sum terms and merges other
+        -- compatible terms into those Sums. Time complexity is quadratic in
+        -- the number of terms in the SoP.
+        mergeSums :: Term -> IndexFnM Term
+        mergeSums (SoP2 s) = do
+          SoP2 . SoP.sopFromList <$> foldM absorbTerm [] (getSoP s)
+        mergeSums t = pure t
+
+        absorbTerm [] t2 = pure [t2]
+        absorbTerm (t1:ts) t2 = do
+          debugM $ "merge on " <> show t1 <> " with " <> show t2
+          res <- merge t1 t2
+          case res of
+            Just t' -> pure (t':ts)
+            Nothing -> do
+              ts' <- absorbTerm ts t2
+              pure (t1 : ts')
+
+        -- Rewrite sum y[lb:ub] - sum y[lb:mid] ==> sum y[mid+1:ub]
+        -- with mid <= ub.
+        -- Relies on sorting of SoP and Term to match.
+        merge :: ([Term], Integer) -> ([Term], Integer) -> IndexFnM (Maybe ([Term], Integer))
+        merge ([SumSlice y lb ub], 1) ([SumSlice y' lb' mid], -1)
+          | y == y',
+            lb == lb' = do
+              b <- mid $<=$ ub
+              pure $
+                if b
+                then Just ([SumSlice y (mid SoP..+. SoP.int2SoP 1) ub], 1)
+                else Nothing
+        merge ([SumSliceIndicator y lb ub], 1) ([SumSliceIndicator y' lb' mid], -1)
+          | y == y',
+            lb == lb' = do
+              b <- mid $<=$ ub
+              pure $
+                if b
+                then Just ([SumSliceIndicator y (mid SoP..+. SoP.int2SoP 1) ub], 1)
+                else Nothing
+        merge _ _ = pure Nothing
     refineTerm v = astMap m v
 
     refineRelation rel x y = do

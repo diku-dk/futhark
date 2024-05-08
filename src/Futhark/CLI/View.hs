@@ -78,28 +78,28 @@ tests =
      [ ("inds", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
         "    | conds₆₀₇₀[i₆₁₇₆] ⇒  -1 + ∑⟦conds₆₀₇₀⟧[0 : i₆₁₇₆]",
-        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑⟦conds₆₀₇₀⟧[0 : -1 + n₆₀₆₈] + -1*∑⟦conds₆₀₇₀⟧[0 : i₆₁₇₆]"
+        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑⟦conds₆₀₇₀⟧[1 + i₆₁₇₆ : -1 + n₆₀₆₈]"
        ])
      ]),
     ("tests/refinement/part2indices_let_inside_map.fut",
      [ ("inds", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
         "    | conds₆₀₇₀[i₆₁₇₆] ⇒  -1 + ∑⟦conds₆₀₇₀⟧[0 : i₆₁₇₆]",
-        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑⟦conds₆₀₇₀⟧[0 : -1 + n₆₀₆₈] + -1*∑⟦conds₆₀₇₀⟧[0 : i₆₁₇₆]"
+        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑⟦conds₆₀₇₀⟧[1 + i₆₁₇₆ : -1 + n₆₀₆₈]"
        ])
      ]),
     ("tests/refinement/part2indices_neg_conds.fut",
      [ ("inds", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
         "    | conds₆₀₇₀[i₆₁₇₆] ⇒  -1 + ∑⟦conds₆₀₇₀⟧[0 : i₆₁₇₆]",
-        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑⟦conds₆₀₇₀⟧[0 : -1 + n₆₀₆₈] + -1*∑⟦conds₆₀₇₀⟧[0 : i₆₁₇₆]"
+        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑⟦conds₆₀₇₀⟧[1 + i₆₁₇₆ : -1 + n₆₀₆₈]"
        ])
      ]),
     ("tests/refinement/part2indices_scan_exc.fut",
      [ ("inds", [
         "∀i₆₂₀₄ ∈ iota n₆₀₆₈ .",
         "    | conds₆₀₇₀[i₆₂₀₄] ⇒  ∑⟦conds₆₀₇₀⟧[0 : -1 + i₆₂₀₄]",
-        "    | ¬(conds₆₀₇₀[i₆₂₀₄]) ⇒  i₆₂₀₄ + ∑⟦conds₆₀₇₀⟧[0 : -1 + n₆₀₆₈] + -1*∑⟦conds₆₀₇₀⟧[0 : i₆₂₀₄]"
+        "    | ¬(conds₆₀₇₀[i₆₂₀₄]) ⇒  i₆₂₀₄ + ∑⟦conds₆₀₇₀⟧[1 + i₆₁₇₆ : -1 + n₆₀₆₈]"
        ])
      ]),
     ("tests/refinement/refine_iterator1.fut",
