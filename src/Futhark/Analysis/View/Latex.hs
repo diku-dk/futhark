@@ -31,7 +31,11 @@ class ToLaTeX a where
 
 prettyLaTeX :: (Pretty a, LaTeXC l) => a -> l
 prettyLaTeX =
-  verbatim . fromString . prettyString
+  verbatim . fromString . filter stripId . prettyString
+  where
+    nums :: [Char]
+    nums = "₀₁₂₃₄₅₆₇₈₉"
+    stripId c = c `notElem` nums
 
 concatWith :: (Foldable t, LaTeXC l) => (l -> l -> l) -> t l -> l
 concatWith _ ls

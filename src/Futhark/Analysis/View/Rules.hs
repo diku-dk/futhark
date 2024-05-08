@@ -158,8 +158,8 @@ removeDeadCases (IndexFn it (Cases cases))
   | xs <- NE.filter f cases,
     not $ null xs,
     length xs /= length cases = -- Something actualy got removed.
-  trace "👀 Removing dead cases" $
-    pure $ IndexFn it $ Cases (NE.fromList xs)
+      trace "👀 Removing dead cases" $
+        pure $ IndexFn it $ Cases (NE.fromList xs)
   where
     f (Bool False, _) = False
     f _ = True
@@ -171,16 +171,17 @@ removeDeadCases indexfn = pure indexfn
 simplifyRule3 :: IndexFn -> IndexFnM IndexFn
 simplifyRule3 v@(IndexFn _ (Cases ((Bool True, _) NE.:| []))) = pure v
 simplifyRule3 (IndexFn it (Cases cases))
-  | Just sops <- mapM (justConstant . snd) cases =
-  let preds = NE.map fst cases
-      sumOfIndicators =
-        SoP.normalize . foldl1 (SoP..+.) . NE.toList $
-          NE.zipWith
-            (\p x -> SoP.sym2SoP (Indicator p) SoP..*. SoP.int2SoP x)
-            preds
-            sops
-  in  trace "👀 Using Simplification Rule 3" $
-        pure $ IndexFn it $ Cases (NE.singleton (Bool True, SoP2 sumOfIndicators))
+  | Just sops <- mapM (justConstant . snd) cases = do
+    let preds = NE.map fst cases
+        sumOfIndicators =
+          SoP.normalize . foldl1 (SoP..+.) . NE.toList $
+            NE.zipWith
+              (\p x -> SoP.sym2SoP (Indicator p) SoP..*. SoP.int2SoP x)
+              preds
+              sops
+    traceM "👀 Using simplification rule: integer-valued cases"
+    tell ["Using simplification rule: integer-valued cases"]
+    pure $ IndexFn it $ Cases (NE.singleton (Bool True, SoP2 sumOfIndicators))
   where
     justConstant (SoP2 sop) = SoP.justConstant sop
     justConstant _ = Nothing
