@@ -112,14 +112,14 @@ mkIndexFnImports = mapM_ (mkIndexFnDecs . E.progDecs . fileProg . snd)
 mkIndexFnDecs :: [E.Dec] -> IndexFnM ()
 mkIndexFnDecs [] = pure ()
 mkIndexFnDecs (E.ValDec vb : rest) = do
+  clearIndexFns
   mkIndexFnValBind vb
   mkIndexFnDecs rest
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
+-- toplevel_indexfns
 mkIndexFnValBind :: E.ValBind -> IndexFnM ()
 mkIndexFnValBind prog@(E.ValBind _ vn ret _ _ params body _ _ _) =
-  -- mapM_ paramRefs params
-  -- forwards body
   case ret of
     Just (E.TERefine _t _goal _) -> do
       -- We don't really care about the goal right now, as
@@ -130,35 +130,40 @@ mkIndexFnValBind prog@(E.ValBind _ vn ret _ _ params body _ _ _) =
       traceM ("\nFor body\n--------\n" <> prettyString body <> "\n====\n")
       tell [prettyLaTeX prog]
       tell ["To prove:" <> prettyLaTeX ret]
-      forwards body
+      forwards (vn, params) body
       pure ()
     _ -> pure ()
 
 
 
-forwards :: E.Exp -> IndexFnM ()
-forwards (E.AppExp (E.LetPat _ p e body _) _)
+forwards :: (E.VName, [E.Pat]) -> E.Exp -> IndexFnM ()
+forwards info (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
     tell [textbf "Forward on " <> Math.math (toLaTeX x) <> toLaTeX e]
     newIndexFn <- forward e
     refineAndBind x newIndexFn
-    forwards body
+    forwards info body
     pure ()
-forwards (E.AppExp (E.LetPat _ p@(E.TuplePat patterns _) e body _) _) = do
+forwards toplevel_vn (E.AppExp (E.LetPat _ p@(E.TuplePat patterns _) e body _) _) = do
     traceM (prettyString patterns <> " = " <> prettyString e)
     tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX e]
     ys <- unzipT <$> forward e
     forM_ (zip patterns ys) refineAndBind'
-    forwards body
+    forwards toplevel_vn body
     pure ()
     where
       -- Wrap refineAndBind to discard results otherwise bound to wildcards.
       refineAndBind' (E.Wildcard {}, _) = pure ()
       refineAndBind' (E.Id vn _ _, indexfn) = refineAndBind vn indexfn
       refineAndBind' x = error ("not implemented for " <> show x)
-forwards _ = pure ()
+forwards (toplevel_vn, params) e = do
+  indexfn <- forward e
+  refineAndBind toplevel_vn indexfn
+  insertTopLevel (E.baseString toplevel_vn) params indexfn
+  pure ()
 
+-- toplevel_indexfns
 refineAndBind :: E.VName -> IndexFn -> IndexFnM ()
 refineAndBind vn indexfn = do
   tracePrettyM indexfn
@@ -185,9 +190,9 @@ forward (E.Negate (E.IntLit x _ _) _) =
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   indexfns <- gets indexfns
   case M.lookup vn indexfns of
-    Just v@(IndexFn _ _) -> do
-      traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString v)
-      pure v
+    Just indexfn -> do
+      traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString indexfn)
+      pure indexfn
     _ -> do
       handleRefinementTypes e
       case getSize e of
@@ -452,6 +457,24 @@ forward (E.AppExp (E.Apply f args _) _)
     [arg] <- getArgs args = do
       IndexFn it body <- forward arg
       rewrite $ IndexFn it (cmapValues (toNNF . Not) body)
+  | Just g <- getFun f,
+    args' <- getArgs args = do
+      -- XXX
+      -- 1. save also names of unsubstituted variables (parameters)
+      -- for toplevel index fns
+      -- 2. substitute each for x in xs (forward on args)
+      toplevel_indexfns <- gets toplevel_indexfns
+      case M.lookup g toplevel_indexfns of
+        Just (fun@(IndexFn it cs), params) -> do
+          traceM ("🪸 using function " <> prettyString fun)
+          let argnames = S.toList . mconcat $ map E.patNames params
+          xs <- mapM forward args'
+          when (length argnames /= length xs) (error "must be fully applied")
+          traceM ("🪸 using function " <> prettyString (zip argnames xs))
+          let s y (paramName, x) = sub paramName x y
+          foldM s fun (zip argnames xs)
+        _ -> do
+          error $ "forward on unhandled function " <> prettyString g
 forward e = error $ "forward on " <> show e
 
 -- Check that exactly one branch is OOB---and determine which.

@@ -13,7 +13,8 @@ type Log = LaTeX
 data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Term E.Exp,
-    indexfns :: IndexFns
+    indexfns :: IndexFns,
+    toplevel_indexfns :: M.Map String (IndexFn, [E.Pat])
   }
 
 -- The IndexFn monad keeps a source of fresh names and writes indexfns.
@@ -41,8 +42,17 @@ execIndexFnM :: IndexFnM a -> VNameSource -> (IndexFns, [Log])
 execIndexFnM (IndexFnM m) vns = getRes $ execRWS m () s
   where
     getRes (env, w) = (indexfns env, w)
-    s = VEnv vns mempty mempty
+    s = VEnv vns mempty mempty mempty
 
 insertIndexFn :: E.VName -> IndexFn -> IndexFnM ()
 insertIndexFn x v =
   modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
+
+insertTopLevel :: String -> [E.Pat] -> IndexFn -> IndexFnM ()
+insertTopLevel x params v =
+  modify $ \env -> env {toplevel_indexfns = M.insert x (v, params) $ toplevel_indexfns env}
+
+-- Clear non-top-level index functions.
+clearIndexFns :: IndexFnM ()
+clearIndexFns =
+  modify $ \env -> env {indexfns = mempty}

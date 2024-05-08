@@ -137,7 +137,7 @@ instance ToLaTeX Term where
   toLaTeX_ _ (x :<= y) = toLaTeX_ 3 x <=: toLaTeX_ 3 y
   toLaTeX_ _ (x :&& y) = toLaTeX_ 2 x `wedge` toLaTeX_ 2 y
   toLaTeX_ _ (x :|| y) = toLaTeX_ 1 x `vee` toLaTeX_ 1 y
-  toLaTeX_ _ Recurrence = omega
+  toLaTeX_ _ Recurrence = raw "\\circlearrowleft"
 
 instance (ToLaTeX a) => ToLaTeX [a] where
   toLaTeX_ p = mconcat . intersperse lnbk . map (toLaTeX_ p)
