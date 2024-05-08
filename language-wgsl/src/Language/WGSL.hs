@@ -1,4 +1,4 @@
-module Futhark.CodeGen.ImpGen.WGSL
+module Language.WGSL
   ( Ident,
     PrimType (..),
     hsLayout,
@@ -19,18 +19,25 @@ module Futhark.CodeGen.ImpGen.WGSL
     stmts,
     bindingAttribs,
     to_i32,
-    prettyDecls
+    prettyDecls,
   )
 where
 
 import Data.Text qualified as T
-import Futhark.Util.Pretty
+import Prettyprinter
 
 type Ident = T.Text
 
-data PrimType = Bool | Int32 | UInt32 | Float16 | Float32
-              | Vec2 PrimType | Vec3 PrimType | Vec4 PrimType
-              | Atomic PrimType
+data PrimType
+  = Bool
+  | Int32
+  | UInt32
+  | Float16
+  | Float32
+  | Vec2 PrimType
+  | Vec3 PrimType
+  | Vec4 PrimType
+  | Atomic PrimType
   deriving (Show)
 
 -- | AlignOf and SizeOf of host-shareable primitive types.
@@ -57,17 +64,20 @@ structLayout fields = do
   fieldLayouts <- mapM hsLayout fields
   let (fieldAligns, fieldSizes) = unzip fieldLayouts
   let structAlign = maximum fieldAligns
-  let fieldOffsets = scanl
-        (\prev_off (al, prev_sz) -> roundUp al (prev_off + prev_sz))
-        0 (zip (tail fieldAligns) fieldSizes)
+  let fieldOffsets =
+        scanl
+          (\prev_off (al, prev_sz) -> roundUp al (prev_off + prev_sz))
+          0
+          (zip (tail fieldAligns) fieldSizes)
   let structSize = roundUp structAlign (last fieldOffsets + last fieldSizes)
   pure (fieldOffsets, structAlign, structSize)
-    where 
-      roundUp k n = ceiling ((fromIntegral n :: Double) / fromIntegral k) * k
+  where
+    roundUp k n = ceiling ((fromIntegral n :: Double) / fromIntegral k) * k
 
 data Typ = Prim PrimType | Array PrimType | Named Ident
 
 type BinOp = T.Text
+
 type UnOp = T.Text
 
 data Exp
@@ -95,6 +105,7 @@ data Stmt
   | Call Ident [Exp]
 
 data Attrib = Attrib Ident [Exp]
+
 data Param = Param Ident Typ [Attrib]
 
 data Function = Function
@@ -105,21 +116,24 @@ data Function = Function
   }
 
 data Field = Field Ident Typ
+
 data Struct = Struct Ident [Field]
 
 data AccessMode = ReadOnly | ReadWrite
+
 -- Uniform buffers are always read-only.
 data AddressSpace = Storage AccessMode | Uniform
 
-data Declaration = FunDecl Function
-                 | StructDecl Struct
-                 | VarDecl [Attrib] AddressSpace Ident Typ
-                 | OverrideDecl Ident Typ (Maybe Exp)
+data Declaration
+  = FunDecl Function
+  | StructDecl Struct
+  | VarDecl [Attrib] AddressSpace Ident Typ
+  | OverrideDecl Ident Typ (Maybe Exp)
 
 stmts :: [Stmt] -> Stmt
 stmts [] = Skip
 stmts [s] = s
-stmts (s:ss) = Seq s (stmts ss)
+stmts (s : ss) = Seq s (stmts ss)
 
 bindingAttribs :: Int -> Int -> [Attrib]
 bindingAttribs grp binding =
@@ -127,6 +141,27 @@ bindingAttribs grp binding =
 
 to_i32 :: Exp -> Exp
 to_i32 e = CallExp "bitcast<i32>" [e]
+
+--- Prettyprinting definitions
+
+-- | Separate with commas.
+commasep :: [Doc a] -> Doc a
+commasep = hsep . punctuate comma
+
+-- | Like commasep, but a newline after every comma.
+commastack :: [Doc a] -> Doc a
+commastack = align . vsep . punctuate comma
+
+-- | Separate with semicolons and newlines.
+semistack :: [Doc a] -> Doc a
+semistack = align . vsep . punctuate semi
+
+-- | Separate with linebreaks.
+stack :: [Doc a] -> Doc a
+stack = align . mconcat . punctuate line
+
+(</>) :: Doc a -> Doc a -> Doc a
+a </> b = a <> line <> b
 
 instance Pretty PrimType where
   pretty Bool = "bool"
@@ -166,29 +201,53 @@ instance Pretty Stmt where
     pretty x <> brackets (pretty i) <+> "=" <+> pretty e
   pretty (If cond Skip Skip) = "if" <+> pretty cond <+> "{ }"
   pretty (If cond th Skip) =
-    "if" <+> pretty cond <+> "{"
-    </> indent 2 (pretty th) <> ";"
-    </> "}"
+    "if"
+      <+> pretty cond
+      <+> "{"
+        </> indent 2 (pretty th)
+      <> ";"
+        </> "}"
   pretty (If cond Skip el) =
-    "if" <+> pretty cond <+> "{ }"
-    </> "else {"
-    </> indent 2 (pretty el) <> ";"
-    </> "}"
+    "if"
+      <+> pretty cond
+      <+> "{ }"
+        </> "else {"
+        </> indent 2 (pretty el)
+      <> ";"
+        </> "}"
   pretty (If cond th el) =
-    "if" <+> pretty cond <+> "{"
-    </> indent 2 (pretty th) <> ";"
-    </> "} else {"
-    </> indent 2 (pretty el) <> ";"
-    </> "}"
+    "if"
+      <+> pretty cond
+      <+> "{"
+        </> indent 2 (pretty th)
+      <> ";"
+        </> "} else {"
+        </> indent 2 (pretty el)
+      <> ";"
+        </> "}"
   pretty (For x initializer cond upd body) =
-    "for" <+> parens ("var" <+> pretty x <+> "=" <+> pretty initializer <> ";"
-                     <+> pretty cond <> ";" <+> pretty upd) <+> "{"
-    </> indent 2 (pretty body) <> ";"
-    </> "}"
+    "for"
+      <+> parens
+        ( "var"
+            <+> pretty x
+            <+> "="
+            <+> pretty initializer
+            <> ";"
+            <+> pretty cond
+            <> ";"
+            <+> pretty upd
+        )
+      <+> "{"
+        </> indent 2 (pretty body)
+      <> ";"
+        </> "}"
   pretty (While cond body) =
-    "while" <+> pretty cond <+> "{"
-    </> indent 2 (pretty body) <> ";"
-    </> "}"
+    "while"
+      <+> pretty cond
+      <+> "{"
+        </> indent 2 (pretty body)
+      <> ";"
+        </> "}"
   pretty (Call f args) = pretty f <> parens (commasep $ map pretty args)
 
 instance Pretty Attrib where
@@ -197,31 +256,35 @@ instance Pretty Attrib where
     "@" <> pretty name <> parens (commasep $ map pretty args)
 
 instance Pretty Param where
-  pretty (Param name typ attribs) = stack
-    [ hsep (map pretty attribs),
-      pretty name <+> ":" <+> pretty typ
-    ]
+  pretty (Param name typ attribs) =
+    stack
+      [ hsep (map pretty attribs),
+        pretty name <+> ":" <+> pretty typ
+      ]
 
 prettyParams :: [Param] -> Doc a
 prettyParams [] = "()"
 prettyParams params = "(" </> indent 2 (commastack (map pretty params)) </> ")"
 
 instance Pretty Function where
-  pretty (Function name attribs params body) = stack
-    [ hsep (map pretty attribs),
-      "fn" <+> pretty name <> prettyParams params <+> "{",
-      indent 2 (pretty body),
-      "}"
-    ]
+  pretty (Function name attribs params body) =
+    stack
+      [ hsep (map pretty attribs),
+        "fn" <+> pretty name <> prettyParams params <+> "{",
+        indent 2 (pretty body),
+        "}"
+      ]
 
 instance Pretty Field where
   pretty (Field name typ) = pretty name <+> ":" <+> pretty typ
 
 instance Pretty Struct where
   pretty (Struct name fields) =
-    "struct" <+> pretty name <+> "{"
-    </> indent 2 (commastack (map pretty fields))
-    </> "}"
+    "struct"
+      <+> pretty name
+      <+> "{"
+        </> indent 2 (commastack (map pretty fields))
+        </> "}"
 
 instance Pretty AccessMode where
   pretty ReadOnly = "read"
@@ -235,13 +298,24 @@ instance Pretty Declaration where
   pretty (FunDecl fun) = pretty fun
   pretty (StructDecl struct) = pretty struct
   pretty (VarDecl attribs as name typ) =
-    hsep (map pretty attribs) </>
-    "var<" <> pretty as <> ">" <+> pretty name <+> ":" <+> pretty typ <> ";"
+    hsep (map pretty attribs)
+      </> "var<"
+      <> pretty as
+      <> ">"
+      <+> pretty name
+      <+> ":"
+      <+> pretty typ
+      <> ";"
   pretty (OverrideDecl name typ Nothing) =
     "override" <+> pretty name <+> ":" <+> pretty typ <> ";"
   pretty (OverrideDecl name typ (Just initial)) =
-    "override" <+> pretty name <+> ":" <+> pretty typ
-      <+> "=" <+> pretty initial <> ";"
+    "override"
+      <+> pretty name
+      <+> ":"
+      <+> pretty typ
+      <+> "="
+      <+> pretty initial
+      <> ";"
 
 prettyDecls :: [Declaration] -> Doc a
 prettyDecls decls = stack (map pretty decls)

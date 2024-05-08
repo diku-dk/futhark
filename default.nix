@@ -37,6 +37,9 @@ let
           zlib =
             haskellPackagesNew.callPackage ./nix/zlib.nix {zlib=pkgs.zlib;};
 
+          language-wgsl =
+            haskellPackagesOld.callCabal2nix "language-wgsl" ./language-wgsl {};
+
           futhark =
             # callCabal2Nix does not do a great job at determining
             # which files must be included as source, which causes

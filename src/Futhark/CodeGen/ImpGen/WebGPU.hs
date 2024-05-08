@@ -11,13 +11,14 @@ import Control.Monad.Trans.RWS hiding (get, modify, put)
 import Control.Monad.Trans.State
 import Data.Bifunctor (first, second)
 import Data.Bits qualified as Bits
+import Data.Functor ((<&>))
+import Data.List (foldl')
 import Data.Map qualified as M
 import Data.Maybe (catMaybes)
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.WebGPU
-import Futhark.CodeGen.ImpGen.WGSL qualified as WGSL
 import Futhark.CodeGen.ImpGen.GPU qualified as ImpGPU
 import Futhark.CodeGen.RTS.WGSL qualified as RTS
 import Futhark.IR.GPUMem qualified as F
@@ -25,8 +26,7 @@ import Futhark.MonadFreshNames
 import Futhark.Util (convFloat, zEncodeText)
 import Futhark.Util.Pretty (docText)
 import Language.Futhark.Warnings (Warnings)
-import Data.List (foldl')
-import Data.Functor ((<&>))
+import Language.WGSL qualified as WGSL
 
 -- State carried during WebGPU translation.
 data WebGPUS = WebGPUS

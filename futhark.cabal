@@ -247,7 +247,6 @@ library
       Futhark.CodeGen.ImpGen.Multicore.SegScan
       Futhark.CodeGen.ImpGen.OpenCL
       Futhark.CodeGen.ImpGen.Sequential
-      Futhark.CodeGen.ImpGen.WGSL
       Futhark.CodeGen.ImpGen.WebGPU
       Futhark.CodeGen.OpenCL.Heuristics
       Futhark.Compiler
@@ -505,6 +504,7 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
+    , language-wgsl
 
 executable futhark
   import: common

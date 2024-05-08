@@ -72,14 +72,14 @@ testCasesLiteral (ProgramTest _ _ (RunCases ios _ _)) =
 testCasesLiteral t = "// Unsupported test: " <> testDescription t
 
 data JsTestSpec = JsTestSpec 
-  { jsEntryPoint :: T.Text,
-    jsRuns :: [JsTestRun]
+  { _jsEntryPoint :: T.Text,
+    _jsRuns :: [JsTestRun]
   }
 data JsTestRun = JsTestRun
-  { jsInputTypes :: [V.PrimType],
-    jsInput :: [V.Value],
-    jsExpectedTypes :: [V.PrimType],
-    jsExpected :: [V.Value]
+  { _jsInputTypes :: [V.PrimType],
+    _jsInput :: [V.Value],
+    _jsExpectedTypes :: [V.PrimType],
+    _jsExpected :: [V.Value]
   }
 
 mkTestSpec :: InputOutputs -> JsTestSpec
