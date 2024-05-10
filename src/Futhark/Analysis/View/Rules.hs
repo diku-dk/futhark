@@ -2,7 +2,6 @@ module Futhark.Analysis.View.Rules where
 
 import Futhark.Analysis.View.Representation
 import Futhark.Analysis.View.Monad
-import Debug.Trace (trace, traceM)
 import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
@@ -109,8 +108,7 @@ removeDeadCases (IndexFn it (Cases cases))
   | xs <- NE.filter f cases,
     not $ null xs,
     length xs /= length cases = -- Something actualy got removed.
-      trace "👀 Removing dead cases" $
-        pure $ IndexFn it $ Cases (NE.fromList xs)
+      pure $ IndexFn it $ Cases (NE.fromList xs)
   where
     f (Bool False, _) = False
     f _ = True
@@ -130,7 +128,6 @@ simplifyRule3 (IndexFn it (Cases cases))
               (\p x -> SoP.sym2SoP (Indicator p) SoP..*. SoP.int2SoP x)
               preds
               sops
-    traceM "👀 Using simplification rule: integer-valued cases"
     tell ["Using simplification rule: integer-valued cases"]
     pure $ IndexFn it $ Cases (NE.singleton (Bool True, SoP2 sumOfIndicators))
   where
@@ -172,7 +169,6 @@ rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
     i == i'',
     b == b',
     b == domainSegStart dom = do
-      traceM "👀 Using Rule 4 (recursive sum)"
       tell ["Using prefix sum rule"]
       let e1' = substituteName i b e1
       pure $ IndexFn it (toCases $ e1' ~+~ SoP2 (foldl1 (SoP..+.) sums))

@@ -358,9 +358,6 @@ getSoP = SoP.sopToLists . SoP.normalize
 debugM :: Applicative f => String -> f ()
 debugM x = traceM $ "🪲 " <> x
 
-debug :: String -> a -> a
-debug msg = trace ("🪲 " <> msg)
-
 toCases :: Term -> Cases Term
 toCases e = Cases (NE.singleton (Bool True, e))
 

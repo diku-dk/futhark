@@ -119,24 +119,22 @@ mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 -- toplevel_indexfns
 mkIndexFnValBind :: E.ValBind -> IndexFnM ()
-mkIndexFnValBind prog@(E.ValBind _ vn ret _ _ params body _ _ _) =
+mkIndexFnValBind val@(E.ValBind _ vn ret _ _ _params body _ _ _) = do
+  insertTopLevel vn val
   case ret of
     Just (E.TERefine _t _goal _) -> do
       -- We don't really care about the goal right now, as
       -- we just want to express the value binding as an index function.
-      traceM ("\n====\nmkIndexFnValBind: " <> prettyString vn)
-      traceM ("\nTo prove:\n--------\n" <> prettyString ret)
-      traceM ("\nWith params\n-----------\n" <> prettyString params)
-      traceM ("\nFor body\n--------\n" <> prettyString body <> "\n====\n")
-      tell [prettyLaTeX prog]
+      traceM ("\n====\nmkIndexFnValBind:\n\n" <> prettyString val)
+      traceM ("\nTo prove:\n--------\n" <> prettyString ret <> "\n====\n")
+      tell [prettyLaTeX val]
       tell ["To prove:" <> prettyLaTeX ret]
-      forwards (vn, params) body
+      forwards vn body
       pure ()
     _ -> pure ()
 
 
-
-forwards :: (E.VName, [E.Pat]) -> E.Exp -> IndexFnM ()
+forwards :: E.VName -> E.Exp -> IndexFnM ()
 forwards info (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
@@ -145,29 +143,27 @@ forwards info (E.AppExp (E.LetPat _ p e body _) _)
     refineAndBind x newIndexFn
     forwards info body
     pure ()
-forwards toplevel_vn (E.AppExp (E.LetPat _ p@(E.TuplePat patterns _) e body _) _) = do
+forwards info (E.AppExp (E.LetPat _ p@(E.TuplePat patterns _) e body _) _) = do
     traceM (prettyString patterns <> " = " <> prettyString e)
     tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX e]
     ys <- unzipT <$> forward e
     forM_ (zip patterns ys) refineAndBind'
-    forwards toplevel_vn body
+    forwards info body
     pure ()
     where
       -- Wrap refineAndBind to discard results otherwise bound to wildcards.
       refineAndBind' (E.Wildcard {}, _) = pure ()
       refineAndBind' (E.Id vn _ _, indexfn) = refineAndBind vn indexfn
       refineAndBind' x = error ("not implemented for " <> show x)
-forwards (toplevel_vn, params) e = do
+forwards toplevel_vn e = do
   indexfn <- forward e
   refineAndBind toplevel_vn indexfn
-  insertTopLevel (E.baseString toplevel_vn) params indexfn
   pure ()
 
 -- toplevel_indexfns
 refineAndBind :: E.VName -> IndexFn -> IndexFnM ()
 refineAndBind vn indexfn = do
   tracePrettyM indexfn
-  traceM "🪨 refining"
   indexfn' <- rewrite indexfn >>= refineIndexFn >>= rewrite
   tracePrettyM indexfn'
   traceM "\n"
@@ -191,9 +187,10 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
   indexfns <- gets indexfns
   case M.lookup vn indexfns of
     Just indexfn -> do
-      traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString indexfn)
+      traceM ("🌪️🎭 sub " <> prettyString vn <> " for " <> prettyString indexfn)
       pure indexfn
     _ -> do
+      debugM ("creating index function for " <> prettyString vn)
       handleRefinementTypes e
       case getSize e of
         Just sz -> do
@@ -217,27 +214,8 @@ forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
       IndexFn iter_idx idx <- forward idx'
       IndexFn iter_xs xs <- forward xs'
-      debugM ("index " <> prettyString xs' <> " by " <> prettyString idx')
       case iteratorName iter_xs of
         Just j -> do
-          -- This case can be funky. Treating `a[i]` inside the map lambda
-          --   let a = scan (+) 0i64 x
-          --   let b = map (\i -> a[i]) (iota n)
-          -- yields:
-          --   index a by i
-          --   a: ∀i₆₁₀₂ ∈ iota n₆₀₆₈ .
-          --     | True => Σj₆₁₀₄∈[0, ..., i₆₁₀₂] ((x₆₀₇₀)[j₆₁₀₄])
-          --   i: .
-          --     | True => i₆₀₉₃
-          --   sub i_6102 for .
-          --     | True => i₆₀₉₃
-          --    in .
-          --     | True => Σj₆₁₀₄∈[0, ..., i₆₁₀₂] ((x₆₀₇₀)[j₆₁₀₄])
-          --   sub result: .
-          --     | True => Σj₆₁₀₄∈[0, ..., i₆₀₉₃] ((x₆₀₇₀)[j₆₁₀₄])
-          -- So the result is a scalar because i₆₀₉₃ is a scalar in this context,
-          -- because we are inside the body of the map lambda.
-          -- (I think this is correct; i₆₀₉₃ is a program variable like x₆₀₇₀.)
           sub j (IndexFn iter_idx idx) (IndexFn iter_idx xs)
             >>= rewrite
         Nothing ->
@@ -289,6 +267,9 @@ forward (E.AppExp (E.If c t f _) _) = do
     >>= sub t_branch vt
       >>= sub f_branch vf
         >>= rewrite
+forward e | trace ("forward\n  " ++ prettyString e) False =
+  -- All calls after this case get traced.
+  undefined
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
@@ -459,20 +440,18 @@ forward (E.AppExp (E.Apply f args _) _)
       rewrite $ IndexFn it (cmapValues (toNNF . Not) body)
   | Just g <- getFun f,
     args' <- getArgs args = do
-      -- XXX
-      -- 1. save also names of unsubstituted variables (parameters)
-      -- for toplevel index fns
-      -- 2. substitute each for x in xs (forward on args)
-      toplevel_indexfns <- gets toplevel_indexfns
-      case M.lookup g toplevel_indexfns of
-        Just (fun@(IndexFn it cs), params) -> do
-          traceM ("🪸 using function " <> prettyString fun)
-          let argnames = S.toList . mconcat $ map E.patNames params
+      -- Handle references to user-defined top-level function definitions.
+      toplevel <- gets toplevel
+      case M.lookup g toplevel of
+        Just val -> do
           xs <- mapM forward args'
+          let argnames =
+                S.toList . mconcat . map E.patNames $ E.valBindParams val
           when (length argnames /= length xs) (error "must be fully applied")
-          traceM ("🪸 using function " <> prettyString (zip argnames xs))
-          let s y (paramName, x) = sub paramName x y
-          foldM s fun (zip argnames xs)
+          traceM ("🪅 inlining " <> prettyString (E.valBindName val))
+          debugM ("adding indexfns\n  " <> prettyString (zip argnames xs))
+          forM_ (zip argnames xs) (uncurry insertIndexFn)
+          forward (E.valBindBody val)
         _ -> do
           error $ "forward on unhandled function " <> prettyString g
 forward e = error $ "forward on " <> show e

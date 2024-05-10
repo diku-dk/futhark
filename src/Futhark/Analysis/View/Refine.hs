@@ -106,7 +106,7 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       | Just rel <- toRel p =
         rollbackAlgEnv (
           do
-            debugM $ "refine CASE " <> prettyString (p,v)
+            -- debugM $ "refine CASE " <> prettyString (p,v)
             addRel rel
             refineTerm v)
     refineCase (_, v) =
@@ -158,7 +158,6 @@ refineIndexFn (IndexFn it (Cases cases)) = do
 
         absorbTerm [] t2 = pure [t2]
         absorbTerm (t1:ts) t2 = do
-          debugM $ "merge on " <> show t1 <> " with " <> show t2
           res <- merge t1 t2
           case res of
             Just t' -> pure (t':ts)

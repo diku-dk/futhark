@@ -14,7 +14,7 @@ data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Term E.Exp,
     indexfns :: IndexFns,
-    toplevel_indexfns :: M.Map String (IndexFn, [E.Pat])
+    toplevel :: M.Map String E.ValBind
   }
 
 -- The IndexFn monad keeps a source of fresh names and writes indexfns.
@@ -48,9 +48,10 @@ insertIndexFn :: E.VName -> IndexFn -> IndexFnM ()
 insertIndexFn x v =
   modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
 
-insertTopLevel :: String -> [E.Pat] -> IndexFn -> IndexFnM ()
-insertTopLevel x params v =
-  modify $ \env -> env {toplevel_indexfns = M.insert x (v, params) $ toplevel_indexfns env}
+insertTopLevel :: E.VName -> E.ValBind -> IndexFnM ()
+insertTopLevel vn val =
+  modify $
+    \env -> env {toplevel = M.insert (E.baseString vn) val $ toplevel env}
 
 -- Clear non-top-level index functions.
 clearIndexFns :: IndexFnM ()
