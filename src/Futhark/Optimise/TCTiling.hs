@@ -283,27 +283,34 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                 (shmemElemType arr)
                 (shmemDims arr)
 
-          ~(reg_tiles_res : _shr_arrs_out) <-
-            case use_epilogue of
-              True -> do
-                myDebugM "Compiling TC expression WITH epilogue"
-                num_full_tiles <-
-                  letExp "num_full_tiles" . BasicOp $
-                    BinOp (SQuot Int64 Unsafe) common_dim tile_seq
+          ~(reg_tiles_res : _) <-
+            if use_epilogue then do
+              myDebugM "Compiling TC expression WITH epilogue"
+              num_full_tiles <-
+                letExp "num_full_tiles" . BasicOp $
+                  BinOp (SQuot Int64 Unsafe) common_dim tile_seq
+              remainder <-
+                letExp "remainder" . BasicOp $
+                  BinOp (SRem Int64 Unsafe) common_dim tile_seq
 
-                ~(reg_tiles' : shr_arrs') <-
-                  forLoop (Var num_full_tiles) (reg_tiles_init : shr_arrs_init) $
-                    \qq0 (reg_tiles_merge : shr_arrs_merge) ->
-                      reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
-
-                reductionLoopBody tc_env num_full_tiles reg_tiles' shr_arrs' False
-              _ -> do
-                myDebugM "Compiling TC expression WITHOUT epilogue"
-                num_seq_tiles <- letSubExp "num_seq_tiles" =<< ceilDiv common_dim tile_seq
-                forLoop num_seq_tiles (reg_tiles_init : shr_arrs_init) $
+              ~prologue_res@(reg_tiles' : shr_arrs') <-
+                forLoop (Var num_full_tiles) (reg_tiles_init : shr_arrs_init) $
                   \qq0 (reg_tiles_merge : shr_arrs_merge) ->
                     reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
 
+              letTupExp "reduction_res"
+                =<< eIf
+                  (toExp $ le64 remainder .==. 0)
+                  (resultBodyM $ map Var prologue_res)
+                  ( resultBody . map Var
+                      <$> reductionLoopBody tc_env num_full_tiles reg_tiles' shr_arrs' False
+                  )
+            else do
+              myDebugM "Compiling TC expression WITHOUT epilogue"
+              num_seq_tiles <- letSubExp "num_seq_tiles" =<< ceilDiv common_dim tile_seq
+              forLoop num_seq_tiles (reg_tiles_init : shr_arrs_init) $
+                \qq0 (reg_tiles_merge : shr_arrs_merge) ->
+                  reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
 
           let regtile_ret_dims =
                 map ((,se1,se1) . snd) rem_outer_gtids_dims
