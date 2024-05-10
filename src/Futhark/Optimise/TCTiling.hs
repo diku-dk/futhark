@@ -103,34 +103,8 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                 )
                 -- TODO: here, we simply insert a zero (or zero-like value) into
                 -- shmem whenever we are outside bounds. However, this only
-                -- suceeds whenever:
-                --
-                -- `f zero_0 _ = f _ zero_1 = red_ne`
-                --
-                -- where `f` is the map function; `zero_0` and `zero_1` are the
-                -- zero-like values for the two given array element types; and
-                -- `red_ne` is the reduce neutral element.
-                --
-                -- This is seldom the case in general, however it happens to
-                -- hold for regular tensor contraction and MM, hence it is used
-                -- for testing for the time being.
-                --
-                -- There is a big TODO in figuring out the best solution to this
-                -- problem. The simplest solution is to simply have a
-                -- corresponding boundary guard in the register tile
-                -- accumulation step, however this greatly and negatively
-                -- affects performance.
-                --
-                -- Another solution is to statically examine whether `zero_0`
-                -- and `zero_1` exist s.t. the above condition holds, but this
-                -- analysis can be difficult or impossible, and the values may
-                -- not even exist.
-                --
-                -- Alternatively (on Cosmin's suggestion), the user can manually
-                -- pass a padding value as an attribute in the Futhark source
-                -- code. Personally, I think this is very hacky, obscure to most
-                -- users, error-prone, and an anti-pattern. Also, attributes
-                -- only support passing integral values, not float values.
+                -- succeeds in certain cases.
+                -- See note [ShmemZeroPaddingOnGlobalMemOOB].
                 (eBody [eBlank $ Prim $ shmemElemType arr_meta])
 
           -- Finally, update shared mem array accumulator.
@@ -330,6 +304,7 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                   \qq0 (reg_tiles_merge : shr_arrs_merge) ->
                     reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
 
+
           let regtile_ret_dims =
                 map ((,se1,se1) . snd) rem_outer_gtids_dims
                   ++ zip3 inner_dims tiles_T tiles_R
@@ -358,25 +333,25 @@ variantDimsPerArr ::
   [VName] ->
   [VName] ->
   Maybe [[Int]]
-variantDimsPerArr variance arrs dims = do
+variantDimsPerArr variance arrs segspace_dims = do
   let var_inds_per_arr = map variantInnerDimsForArr arrs
-  let var_dims_per_arr = map (gather dims) var_inds_per_arr
+  let var_dims_per_arr = map (gather segspace_dims) var_inds_per_arr
 
   -- Interchange those dimensions of the segspace on which all redomap arrays
   -- are variant outwards.
-  let segspace_dims_perm =
-        uncurry (++) $
-          L.partition
-            -- Check that given dim is in var_dims of all arrays.
-            (\dim -> all (elem dim) var_dims_per_arr)
-            dims
-  let segspace_perm = dims `isPermutationOf` segspace_dims_perm
+  let (outer_dims, tc_dims) =
+        L.partition
+          -- Check that given dim is in var_dims of all arrays.
+          (\dim -> all (elem dim) var_dims_per_arr)
+          segspace_dims
+  let segspace_dims' = outer_dims ++ tc_dims
+  let segspace_perm = segspace_dims `isPermutationOf` segspace_dims'
 
   myDebugM $
-    "variantDimsPerArr\ndims:\n"
-      ++ prettyString dims
-      ++ "\ndims':\n"
-      ++ show segspace_dims_perm
+    "variantDimsPerArr\nsegspace_dims:\n"
+      ++ prettyString segspace_dims
+      ++ "\nsegspace_dims':\n"
+      ++ show segspace_dims'
       ++ "\nperm:\n"
       ++ show segspace_perm
       ++ "\nvar_inds_per_arr:\n"
@@ -392,7 +367,7 @@ variantDimsPerArr variance arrs dims = do
   -- Actually, I think this can safely be assumed to already hold, due to these
   -- parallel dimensions already having been interchanged outwards in an earlier
   -- compiler stage, but I might be wrong on this.
-  guard $ all (`elem` concat var_dims_per_arr) dims
+  guard $ all (`elem` concat var_dims_per_arr) segspace_dims
 
   -- assert no overlap in variance between arrays.
   -- TODO: is this check necessary or even desired? for exactly 2 redomap
@@ -403,10 +378,10 @@ variantDimsPerArr variance arrs dims = do
 
   pure var_inds_per_arr
   where
-    n_dims = length dims
+    n_dims = length segspace_dims
     variantInnerDimsForArr arr =
       let arr_variance = M.findWithDefault mempty arr variance
-       in L.findIndices (`nameIn` arr_variance) dims
+       in L.findIndices (`nameIn` arr_variance) segspace_dims
     -- allUnique (x : xs) = x `notElem` xs && allUnique xs
     -- allUnique _ = True
 
@@ -567,9 +542,10 @@ findLMADPerm (_, ixfn_env) arr = do
     binopMul = BinOpExp (Mul Int64 OverflowUndef)
     val1 = ValueExp (IntValue (Int64Value 1))
 
-    -- Flattens a nested PrimExp if that PrimExp happens to represent a simple
-    -- product. Used to more reliably check equality between LMADs (in
-    -- isPermutationOf).
+    -- Flattens a nested PrimExp (if that PrimExp happens to represent a simple
+    -- product) to a [FlatPrimExp], which can then be sorted to check for
+    -- equality. Used to more reliably check equality between LMAD strides.
+    -- See note [FlattenPrimExps].
     toFlatPrimExp :: PrimExp VName -> FlatPrimExp
     toFlatPrimExp = Product . L.sort . flattenProducts . flattenMulOps
       where
@@ -609,12 +585,12 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
       -- information, as part of the kernel stms loading each redomap input slice.
       -- It'd be more convenient if the Redomap carried not only the VNames of its
       -- operands slices, but also the base arrays (if any) whence each slice comes,
-      -- or at least the dimensionality thereof.
+      -- or at least the layout thereof.
       --
-      -- In any case, this information is necessary in order to match tile dims with
-      -- the dims of each input array -- since these are not simply (M: (Ty, Ry))
-      -- and (N: (Tx, Rx)) as in the 2D case -- as well as to generate boundary
-      -- checks later on.
+      -- In any case, this information is necessary in order to match tile dims
+      -- with the dims of each input array -- since these are not simply
+      -- (M: (Ty, Ry)), (N: (Tx, Rx)), and (U: Tk) as in the 2D case -- as well as
+      -- to generate boundary checks later on.
       --
       -- Additionally, as it turned out, it is more convenient to load directly
       -- from these base arrays, rather than binding computed indices to gtids
@@ -674,12 +650,13 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
           ++ prettyString stm
 
     getArrDims :: VName -> Builder GPU [SubExp]
-    -- TODO: can also use this non-throwing definition using Types.arrayDims (?)
-    -- getArrDims = pure . arrayDims <=< lookupType
-    getArrDims = pure . arrDims <=< lookupType
+    -- TODO: can also use this non-throwing definition using Types.arrayDims,
+    -- but it returns mempty for non-array types which must be handled somehow.
+    -- getArrDims x = arrayDims <$> lookupType x
+    getArrDims x = arrayDims' <$> lookupType x
       where
-        arrDims (Array _ shape _) = shapeDims shape
-        arrDims tp =
+        arrayDims' (Array _ shape _) = shapeDims shape
+        arrayDims' tp =
           error $ "getTileDimsForArr error: expected array type, got: " ++ prettyString tp
 
     tbids = tbidVns kernel_params
@@ -687,3 +664,103 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
     tile_seq = tileSeq kernel_params
     inner_dim_names = innerDimNames kernel_params
     inner_dims = innerDims kernel_params
+
+
+-- Note [ShmemZeroPaddingOnGlobalMemOOB] When copying from global to shared
+-- memory, we need to handle out-of-bounds reads from global memory. For the
+-- time being, we write a padding value to shared memory. This padding value is
+-- a zero (or zero-like) value from the corresponding element type.
+--
+-- However, this "solution" succeeds only when the following condition holds:
+--
+-- `f zero_0 _ = f _ zero_1 = red_ne`
+--
+-- where `f` is the map function; `zero_0` and `zero_1` are the zero-like values
+-- for the two given shmem array element types; and `red_ne` is the reduce
+-- neutral element.
+--
+-- This is seldom the case in general, however it happens to hold for regular
+-- tensor contraction and MM, hence it is used for testing for the time being.
+--
+-- There is a big TODO in figuring out the best solution to this problem which
+-- will also generalize nicely to arbitrary contractions.
+--
+-- The simple solution is the prologue/epilogue treatment, in which the last
+-- iteration of the main reduction loop is unrolled and a boundary guard
+-- corresponding to the one we had on global memory is inserted into the
+-- register tile accumulation step s.t. we never process garbage values in the
+-- reduction (or, at least, they do not affect those entries of the register
+-- tile which are eventually written to global mem). However, this will
+-- inevitably affect performance, and the difference is more noticeable the less
+-- full tiles we have in the common dimension.
+--
+-- As an example, for regular MM of 2000x2000 matrices with a reduction dim tile
+-- of Tk = 32, we will have floor(2000 / 32) = 62 full tiles and 1 partial tile,
+-- so here the epilogue is largely amortized by the size of the prologue. But
+-- for tensor contractions of higher-rank tensors, each dimension typically is
+-- not very large. If we have, say, 30x30x30x30 tensors and a reduction dim tile
+-- of Tk = 16, then we will have 1 full tile and 1 partial tile, and now the
+-- epilogue dominates.
+--
+--
+-- Another solution is to statically examine whether `zero_0` and `zero_1` exist
+-- s.t. the above condition holds, but this analysis can be difficult or
+-- impossible, and the values may not even exist.
+--
+-- Alternatively (on Cosmin's suggestion), the user can manually pass a padding
+-- value as an attribute in the Futhark source code. Personally, I think this is
+-- very hacky, obscure to most users, error-prone, and an anti-pattern. Also,
+-- attributes only support passing integral values, not float values.
+
+
+-- Note [FlattenPrimExps]
+-- In reverse-engineering LMAD permutations, we need to check equality between
+-- LMAD strides. To do so, we in turn need to check equality between product
+-- expressions. From commutativity and distributivity of multiplication, we of
+-- course expect the two strides lists:
+--
+-- `[(a * b) * c, b * c, c, 1]`
+--
+-- and
+--
+-- `[(c * b) * a, c * b, c, 1]`
+--
+-- to be equal, since we have (a * b) * c = (c * b) * a, and so on.
+--
+-- However, the `Eq` instance for `PrimExp`s is not quite so sophisticated, so
+-- we need a way to "normalize" product `PrimExp`s. To accomplish this, we
+-- "flatten" nested `Mul` expressions and sort them (using the `Ord` instance
+-- for `PrimExp`).
+--
+-- Example: Before flattening, the three `PrimExp` expressions:
+--
+-- exp1 = `BinOpExp Mul (BinOpExp Mul a b) c`
+-- exp2 = `BinOpExp Mul (BinOpExp Mul c b) a`
+-- exp3 = `BinOpExp Mul a (BinOpExp Mul b c)`
+--
+-- where a, b, c are `PrimExp`, would not test equal. However, all three
+-- expressions flatten to:
+--
+-- `Product [OpaquePrimExp a, OpaquePrimExp b, OpaquePrimExp c]`
+--
+-- and hence we have `(exp1 == exp2) && (exp2 == exp3)`. Yay!
+--
+--
+-- Note that if any of the expressions `a, b, c` are nested non-`Mul` `PrimExp`s
+-- where ordering matters, then the flattening and sorting is not reliable.
+-- As an example, the two expressions:
+--
+-- exp4 = `BinOpExp Mul (BinOpExp Add a (BinOpExp Mul b c)) d`
+-- exp5 = `BinOpExp Mul (BinOpExp Add (BinOpExp Mul b c) a) d`
+--
+-- would "flatten" to
+--
+-- `Product [OpaquePrimExp (BinOpExp Add a (BinOpExp Mul b c)), OpaquePrimExp d]`
+-- and
+-- `Product [OpaquePrimExp (BinOpExp Add (BinOpExp Mul b c) a), OpaquePrimExp d]`
+--
+-- respectively, which would not test equal, meaning that in terms of testing
+-- equality, this flattening is only reliable for simple product `PrimExp`s.
+--
+-- Hence it should be considered a proof of concept, and there is a big TODO in
+-- making this reliable.
