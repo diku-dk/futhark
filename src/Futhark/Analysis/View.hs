@@ -20,7 +20,7 @@ import qualified Data.Set as S
 import Control.Monad.RWS.Strict hiding (Sum)
 import Futhark.SoP.Monad (addRange)
 import qualified Text.LaTeX.Packages.AMSMath as Math
-import Text.LaTeX.Base (textbf, newline)
+import Text.LaTeX (textbf, newline, hrulefill, noindent)
 import Futhark.Analysis.View.Latex
 
 
@@ -127,7 +127,7 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ _params body _ _ _) = do
       -- we just want to express the value binding as an index function.
       traceM ("\n====\nmkIndexFnValBind:\n\n" <> prettyString val)
       traceM ("\nTo prove:\n--------\n" <> prettyString ret <> "\n====\n")
-      tell [prettyLaTeX val]
+      tell [noindent <> hrulefill <> prettyLaTeX val]
       tell ["To prove:" <> prettyLaTeX ret]
       forwards vn body
       pure ()
