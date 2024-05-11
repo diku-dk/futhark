@@ -7,12 +7,14 @@ fn norm_i8(a: i8) -> i32 {
   return a & 0x000000ff;
 }
 
+fn norm_u8(a: i8) -> i32 {
+  return a & 0x000000ff;
+}
+
 fn read_i8(buffer: ptr<storage, array<atomic<i8>>, read_write>, i: i32) -> i8 {
   let elem_idx = i / 4;
   let idx_in_elem = i % 4;
 
-  // mem: b0b1b2b3
-  // int: b3b2b1b0
   let v = atomicLoad(&((*buffer)[elem_idx]));
   return norm_i8(v >> bitcast<u32>(idx_in_elem * 8));
 }
@@ -30,8 +32,6 @@ fn write_i8(buffer: ptr<storage, array<atomic<i8>>, read_write>,
   let elem_idx = i / 4;
   let idx_in_elem = i % 4;
 
-  // mem: b0b1b2b3
-  // int: b3b2b1b0
   let shift_amt = bitcast<u32>(idx_in_elem * 8);
 
   let mask = 0xff << shift_amt;
@@ -65,6 +65,30 @@ fn sub_i8(a: i8, b: i8) -> i8 {
 
 fn mul_i8(a: i8, b: i8) -> i8 {
   return norm_i8(a * b);
+}
+
+fn udiv_i8(a: i8, b: i8) -> i8 {
+  return norm_i8(udiv_i32(norm_u8(a), norm_u8(b)));
+}
+
+fn udiv_up_i8(a: i8, b: i8) -> i8 {
+  return norm_i8(udiv_up_i32(norm_u8(a), norm_u8(b)));
+}
+
+fn sdiv_i8(a: i8, b: i8) -> i8 {
+  return sdiv_i32(a, b);
+}
+
+fn sdiv_up_i8(a: i8, b: i8) -> i8 {
+  return sdiv_up_i32(a, b);
+}
+
+fn umod_i8(a: i8, b: i8) -> i8 {
+  return norm_i8(umod_i32(norm_u8(a), norm_u8(b)));
+}
+
+fn smod_i8(a: i8, b: i8) -> i8 {
+  return smod_i32(a, b);
 }
 
 fn umin_i8(a: i8, b: i8) -> i8 {

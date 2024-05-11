@@ -7,6 +7,10 @@ fn norm_i16(a: i16) -> i32 {
   return a & 0x0000ffff;
 }
 
+fn norm_u16(a: i16) -> i32 {
+  return a & 0x0000ffff;
+}
+
 fn read_i16(buffer: ptr<storage, array<atomic<i16>>, read_write>, i: i32) -> i16 {
   let elem_idx = i / 2;
   let idx_in_elem = i % 2;
@@ -47,6 +51,30 @@ fn sub_i16(a: i16, b: i16) -> i16 {
 
 fn mul_i16(a: i16, b: i16) -> i16 {
   return norm_i16(a * b);
+}
+
+fn udiv_i16(a: i16, b: i16) -> i16 {
+  return norm_i16(udiv_i32(norm_u16(a), norm_u16(b)));
+}
+
+fn udiv_up_i16(a: i16, b: i16) -> i16 {
+  return norm_i16(udiv_up_i32(norm_u16(a), norm_u16(b)));
+}
+
+fn sdiv_i16(a: i16, b: i16) -> i16 {
+  return sdiv_i32(a, b);
+}
+
+fn sdiv_up_i16(a: i16, b: i16) -> i16 {
+  return sdiv_up_i32(a, b);
+}
+
+fn umod_i16(a: i16, b: i16) -> i16 {
+  return norm_i16(umod_i32(norm_u16(a), norm_u16(b)));
+}
+
+fn smod_i16(a: i16, b: i16) -> i16 {
+  return smod_i32(a, b);
 }
 
 fn umin_i16(a: i16, b: i16) -> i16 {
