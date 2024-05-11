@@ -720,9 +720,16 @@ static int gpu_memcpy(struct futhark_context *ctx,
                       gpu_mem dst, int64_t dst_offset,
                       gpu_mem src, int64_t src_offset,
                       int64_t nbytes) {
+  // Bound storage buffers and copy operations must have sizes multiple of 4.
+  // Note that copying more than `nbytes` is memory-safe because we also pad all
+  // buffers when allocating them.
+  // It could however corrupt data if the copy is in the middle of the buffer,
+  // like in host2gpu. TODO: Also check for it here.
+  int64_t copy_size = ((nbytes + 4 - 1) / 4) * 4;
+
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
   wgpuCommandEncoderCopyBufferToBuffer(encoder,
-      src, src_offset, dst, dst_offset, nbytes);
+      src, src_offset, dst, dst_offset, copy_size);
   WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
   return FUTHARK_SUCCESS;
