@@ -208,20 +208,28 @@ async def handle_ws(request):
 def start_browser():
     options = webdriver.ChromeOptions()
 
-    options.add_argument("--enable-unsafe-webgpu")
-    options.add_argument("--enable-features=Vulkan")
-
     if headless:
-        # https://developer.chrome.com/blog/supercharge-web-ai-testing#enable-webgpu
         options.add_argument("--headless=new")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--use-angle=vulkan")
-        options.add_argument("--disable-vulkan-surface")
 
     if remote_driver_url is not None:
         driver = webdriver.Remote(command_executor=remote_driver_url, options=options)
     else:
+        # Need these extra options when running properly on Linux, but
+        # specifying them on Windows is not allowed. For now, just assume a
+        # remote driver will run on Windows and a local one on Linux, this check
+        # might need to be adjusted if we ever use remote drivers where the
+        # remote is also Linux.
+        options.add_argument("--enable-unsafe-webgpu")
+        options.add_argument("--enable-features=Vulkan")
+
+        if headless:
+            # https://developer.chrome.com/blog/supercharge-web-ai-testing#enable-webgpu
+            options.add_argument("--no-sandbox")
+            options.add_argument("--use-angle=vulkan")
+            options.add_argument("--disable-vulkan-surface")
+
         driver = webdriver.Chrome(options=options)
+
 
     loop = asyncio.get_running_loop()
     get_task = loop.run_in_executor(None, driver.get, "http://localhost:8100")
