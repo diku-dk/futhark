@@ -22,12 +22,11 @@ import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsWebGPUH)
-import Futhark.CodeGen.RTS.WebGPU (serverWsJs)
+import Futhark.CodeGen.RTS.WebGPU (serverWsJs, utilJs, valuesJs, wrappersJs)
 import Futhark.IR.GPUMem (Prog, GPUMem)
 import Futhark.MonadFreshNames
 import Language.C.Quote.C qualified as C
 import NeatInterpolation (text, untrimming)
-import Futhark.Util (showText)
 
 mkKernelInfos :: M.Map Name KernelInterface -> GC.CompilerM HostOp () ()
 mkKernelInfos kernels = do
@@ -113,7 +112,8 @@ webgpuMemoryType space = error $ "WebGPU backend does not support '" ++ space ++
 jsBoilerplate :: Definitions a -> T.Text -> (T.Text, [T.Text])
 jsBoilerplate prog manifest =
   let (context, exports) = mkJsContext prog manifest
-   in (context, exports ++ builtinExports)
+      prelude = T.intercalate "\n" [utilJs, valuesJs, wrappersJs]
+   in (prelude <> "\n" <> context, exports ++ builtinExports)
   where
     builtinExports =
       ["malloc", "free",
@@ -121,9 +121,7 @@ jsBoilerplate prog manifest =
        "futhark_context_config_free", "futhark_context_free",
        "futhark_context_sync", "futhark_context_clear_caches",
        "futhark_context_report", "futhark_context_pause_profiling",
-       "futhark_context_unpause_profiling",
-       "futhark_new_i32_1d", "futhark_free_i32_1d",
-       "futhark_values_i32_1d", "futhark_shape_i32_1d"]
+       "futhark_context_unpause_profiling"]
 
 -- Argument should be a direct function call to a WASM function that needs to
 -- be handled asynchronously. The return value evaluates to a Promise yielding
@@ -145,9 +143,7 @@ mkJsContext (Definitions _ _ (Functions funs)) manifest =
    class FutharkModule {
      ${constructor}
      ${free}
-     ${entryPointFuns}
      ${builtins}
-     ${valueFuns}
    }|], entryExports ++ valueExports)
   where
     constructor =
@@ -160,9 +156,10 @@ mkJsContext (Definitions _ _ (Functions funs)) manifest =
         this.m = module;
         this.cfg = this.m._futhark_context_config_new();
         this.ctx = await ${newContext};
-        this.entry_points = {
-          ${entryPointEntries}
-        };
+        this.available_entry_points = {};
+        this.types = {};
+        ${valueClasses}
+        ${entryPointFuns}
       }|]
     newContext = asyncCall "futhark_context_new" True ["this.cfg"]
     free =
@@ -172,14 +169,8 @@ mkJsContext (Definitions _ _ (Functions funs)) manifest =
         this.m._futhark_context_config_free(this.cfg);
       }|]
     entryPoints = mapMaybe (functionEntry . snd) funs
-    jsEntryPoints = map mkJsEntryPoint entryPoints
-    entryPointEntries = T.intercalate ",\n" $ map
-      (\e -> let n = entryName e
-                 f = entryFun e
-              in [text|'${n}': this.${f}.bind(this)|]) jsEntryPoints
-    entryPointFuns = T.intercalate "\n" $ map mkEntryFun jsEntryPoints
-    entryExports = map entryInternalFun jsEntryPoints
-    (valueFuns, valueExports) = mkJsValueFuns entryPoints
+    (entryPointFuns, entryExports) = mkJsEntryPoints entryPoints
+    (valueClasses, valueExports) = mkJsValueClasses entryPoints
     builtins =
       [text|
       malloc(nbytes) {
@@ -212,52 +203,19 @@ mkJsContext (Definitions _ _ (Functions funs)) manifest =
     unpauseProfilingCall =
       asyncCall "futhark_context_unpause_profiling" False ["this.ctx"]
 
-data JsEntryPoint = JsEntryPoint
-  { entryName :: T.Text,
-    entryFun :: T.Text,
-    entryInternalFun :: T.Text,
-    entryIn :: [T.Text],
-    -- Currently only records size as we need that to allocate space for out
-    -- parameters.
-    entryOut :: [Int]
-  }
-
-mkJsEntryPoint :: EntryPoint -> JsEntryPoint
-mkJsEntryPoint (EntryPoint name results args) = JsEntryPoint n fun ifun ins outs
+mkJsEntryPoints :: [EntryPoint] -> (T.Text, [T.Text])
+mkJsEntryPoints entries = (T.intercalate "\n" entryFuns, entryExports)
   where
-    n = nameToText name
-    fun = "entry_" <> n
-    ifun = "futhark_entry_" <> n
-    ins = map (nameToText . fst . fst) args
-    outs = map (valSize . snd) results
-    -- TODO: Hardcoding sizeof(ptr) = 4 here seems not great
-    valSize (OpaqueValue {}) = 4
-    valSize (TransparentValue (ArrayValue {})) = 4
-    valSize (TransparentValue (ScalarValue t _ _)) = primByteSize t
+    entryNames = map (nameToText . entryPointName) entries
+    entryFuns = map entryFun entryNames
+    entryExports = map entryExport entryNames
+    entryFun name = 
+      [text|this.entry_${name} = make_entry_function(this, '${name}');
+            this.available_entry_points['${name}'] = this.entry_${name}.bind(this);|]
+    entryExport name = "futhark_entry_" <> name
 
-mkEntryFun :: JsEntryPoint -> T.Text
-mkEntryFun e =
-  [text|
-  async ${fun}(${inputs}) {
-    ${allocOuts}
-    await ${internalCall};
-    return [${outPtrs}];
-  }
-  |]
-  where
-    fun = entryFun e
-    inputs = T.intercalate ", " (entryIn e)
-    outNames = zipWith (\i _ -> "out" <> showText i) [(0::Int)..] (entryOut e)
-    outSizes = map showText (entryOut e)
-    outPtrs = T.intercalate ", " outNames
-    allocOuts = T.intercalate "\n" $
-      zipWith (\n sz -> [text|const ${n} = this.m._malloc(${sz});|])
-        outNames outSizes
-    internalCall = asyncCall
-      (entryInternalFun e) True (["this.ctx"] ++ outNames ++ entryIn e)
-
-mkJsValueFuns :: [EntryPoint] -> (T.Text, [T.Text])
-mkJsValueFuns entries =
+mkJsValueClasses :: [EntryPoint] -> (T.Text, [T.Text])
+mkJsValueClasses entries =
   -- TODO: Only supports transparent arrays right now.
   let extVals =
         concatMap (map snd . entryPointResults) entries
@@ -265,78 +223,22 @@ mkJsValueFuns entries =
       transpVals = [v | TransparentValue v <- extVals]
       arrVals = S.toList $ S.fromList
         [(typ, sgn, shp) | ArrayValue _ _ typ sgn shp <- transpVals]
-      (funs, exports) = unzip $ map mkJsArrayFuns arrVals
-   in (T.intercalate "\n" funs, concat exports)
+      (cls, exports) = unzip $ map mkJsArrayClass arrVals
+   in (T.intercalate "\n" cls, concat exports)
 
-mkJsArrayFuns :: (PrimType, Signedness, [DimSize]) -> (T.Text, [T.Text])
-mkJsArrayFuns (typ, sign, shp) =
+mkJsArrayClass :: (PrimType, Signedness, [DimSize]) -> (T.Text, [T.Text])
+mkJsArrayClass (typ, sign, shp) =
   ([text|
-  async new_${name}(data, ${shapeParams}) {
-    return await ${newCall};
-  }
-  async free_${name}(arr) {
-    return await ${freeCall};
-  }
-  async values_${name}(arr, data) {
-    return await ${valuesCall};
-  }
-  shape_${name}(arr) {
-    return this.m._futhark_shape_${name}(this.ctx, arr);
-  }
-  async values_${name}_js(arr) {
-    // TODO: This currently only works for 1d arrays.
-    const shape = this.shape_${name}(arr);
-    const len = Number(this.m.HEAP64[shape / 8]);
-    const vals = this.malloc(len * ${elemSize});
-    await this.values_${name}(arr, vals);
-    await this.context_sync();
-    const idx = vals / ${elemSize};
-    const ret = ${valuesArrayCopy};
-    this.free(vals);
-    return ret;
-  }
+    this.${name} = make_array_class(this, '${prettyName}');
+    this.types['${prettyName}'] = this.${name};
   |], exports)
   where
     rank = length shp
-    name = GC.arrayName typ sign rank
-    elemSize = showText (primByteSize typ :: Int)
-    shapeNames = ["dim" <> prettyText i | i <- [0 .. rank - 1]]
-    shapeParams = T.intercalate ", " shapeNames
-    newCall = asyncCall 
-      ("futhark_new_" <> name) True (["this.ctx", "data"] ++ shapeNames)
-    freeCall = asyncCall
-      ("futhark_free_" <> name) True ["this.ctx", "arr"]
-    valuesCall = asyncCall
-      ("futhark_values_" <> name) True ["this.ctx", "arr", "data"]
-    valuesArrayCopy = primWasmArrayCopy typ sign "idx" "len"
+    elemName = prettySigned (sign == Unsigned) typ
+    prettyName = mconcat (replicate rank "[]") <> elemName
+    name = elemName <> "_" <> prettyText rank <> "d"
     exports = ["futhark_new_" <> name, "futhark_free_" <> name,
                "futhark_values_" <> name, "futhark_shape_" <> name]
-
-primWasmHeap :: PrimType -> Signedness -> T.Text
-primWasmHeap Bool _ = "HEAP8"
-primWasmHeap (IntType Int8) Unsigned = "HEAPU8"
-primWasmHeap (IntType Int8) Signed = "HEAP8"
-primWasmHeap (IntType Int16) Unsigned = "HEAPU16"
-primWasmHeap (IntType Int16) Signed = "HEAP16"
-primWasmHeap (IntType Int32) Unsigned = "HEAPU32"
-primWasmHeap (IntType Int32) Signed = "HEAP32"
-primWasmHeap (IntType Int64) Unsigned = "HEAPU64"
-primWasmHeap (IntType Int64) Signed = "HEAP64"
-primWasmHeap (FloatType Float16) _ = error "f16 wasm heap op: unimplemented"
-primWasmHeap (FloatType Float32) _ = "HEAPF32"
-primWasmHeap (FloatType Float64) _ = "HEAPF64"
-primWasmHeap Unit _ = error "unit wasm heap op: unimplemented"
-
-primWasmArrayCopy :: PrimType -> Signedness -> T.Text -> T.Text -> T.Text
-primWasmArrayCopy t@(IntType _) sign idx len =
-  let heapVar = primWasmHeap t sign
-   in [text|Array.from(this.m.${heapVar}.subarray(${idx}, ${idx} + ${len}))|]
-primWasmArrayCopy t@(FloatType _) sign idx len =
-  let heapVar = primWasmHeap t sign
-   in [text|Array.from(this.m.${heapVar}.subarray(${idx}, ${idx} + ${len}))|]
-primWasmArrayCopy Bool _ idx len =
-  [text|Array.from(this.m.HEAP8.subarray(${idx}, ${idx} + ${len})) .map((x) => x != 0)|]
-primWasmArrayCopy Unit _ _ _ = error "unit copy from WASM heap: unimplemented"
 
 -- | Compile the program to C with calls to WebGPU, along with a JS wrapper
 -- library.

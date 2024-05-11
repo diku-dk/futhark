@@ -1,27 +1,5 @@
 // Start of server_ws.js
 
-// TODO: Really need to make the naming and casing in here consistent
-
-// TODO: These are mostly just for debugging
-async function newBuffer(fut, data) {
-  const buf = fut.malloc(data.byteLength);
-  const view = fut.m.HEAP8.subarray(buf, buf + data.byteLength);
-  view.set(new Int8Array(data.buffer));
-
-  const arr = await fut.new_i32_1d(buf, data.length);
-  fut.free(buf);
-  return arr;
-}
-
-async function getBufferValues(fut, buf) {
-  const shape = fut.shape_i32_1d(buf);
-  const len = fut.m.HEAP32[shape / 4];
-  const vals = fut.malloc(len * 4);
-  await fut.values_i32_1d(buf, vals);
-  await fut.context_sync();
-  return [vals, fut.m.HEAP32.subarray(vals/4, vals/4 + len)];
-}
-
 class BrowserServer {
   constructor(fut, port) {
     this.fut = fut;
@@ -74,8 +52,8 @@ class BrowserServer {
   }
 
   get_entry_point(entry) {
-    if (entry in this.fut.entry_points) {
-      return this.fut.entry_points[entry];
+    if (entry in this.fut.available_entry_points) {
+      return this.fut.available_entry_points[entry];
     }
     throw "Unknown entry point: " + entry;
   }
@@ -92,12 +70,6 @@ class BrowserServer {
       return this.fut.manifest.types[type];
     }
     throw "Unknown type: " + type;
-  }
-
-  fut_function(fullName) {
-    const name = fullName.replace("futhark_", "");
-    let fun = this.fut[name];
-    return fun.bind(this.fut);
   }
 
   check_var(name) {
@@ -120,7 +92,7 @@ class BrowserServer {
   }
 
   async cmd_entry_points() {
-    const entries = Object.keys(this.fut.entry_points);
+    const entries = Object.keys(this.fut.available_entry_points);
     return entries.join("\n");
   }
 
@@ -142,63 +114,69 @@ class BrowserServer {
     return outputs.join("\n");
   }
 
-  async cmd_restore(data, ...varsAndTypes) {
-    for (let i = 0; i < data.length; i++) {
-      // TODO: This only works for 1d arrays
-      const name = varsAndTypes[i*2];
-      const type = varsAndTypes[i*2 + 1];
-      const type_info = this.get_manifest_type(type);
-      const new_fun = this.fut_function(type_info.ops.new)
+  async cmd_restore(data_b64, ...varsAndTypes) {
+    const data = Uint8Array.from(atob(data_b64), c => c.charCodeAt(0));
+    const reader = new FutharkReader(data);
 
-      // TODO: 32-bit int specific
-      const len = data[i].length;
-      const buf = this.fut.malloc(len * 4);
-      for (let j = 0; j < len; j++) {
-        this.fut.m.HEAP32[buf / 4 + j] = data[i][j];
+    for (let i = 0; i < varsAndTypes.length; i += 2) {
+      const name = varsAndTypes[i];
+      const type = varsAndTypes[i+1];
+
+      const raw_val = reader.read_value(type);
+
+      let val = undefined;
+      if (type in this.fut.manifest.types) {
+        const type_info = this.get_manifest_type(type);
+        futhark_assert(type_info.kind == "array");
+
+        const [data, shape] = raw_val;
+        val = this.fut.types[type].from_data(data, ...shape);
+      }
+      else {
+        // Scalar.
+        val = raw_val;
       }
 
-      const val = await new_fun(buf, BigInt(len));
       this.set_var(name, val, type);
-
-      this.fut.free(buf);
     }
 
     return "";
   }
 
   async cmd_store(...vars) {
-    let data = [];
+    let data = "";
     let types = [];
     for (const name of vars) {
       const {val, typ} = this.get_var(name);
-      const type_info = this.get_manifest_type(typ);
-      //const shape_fun = this.fut_function(type_info.ops.shape);
-      const values_fun = this.fut_function(type_info.ops.values + "_js");
 
-      // TODO: This really needs to be abstracted, only works for []i32
-      //const shape = shape_fun(val);
-      //const len = this.fut.m.HEAP32[shape / 4];
-      //const buf = this.fut.malloc(len * 4);
-      //await values_fun(val, buf);
-      //await this.fut.context_sync();
-      const values = await values_fun(val);
+      let to_write = undefined;
+      if (typ in this.fut.manifest.types) {
+        const type_info = this.get_manifest_type(typ);
+        futhark_assert(type_info.kind == "array");
 
-      //data.push(Array.from(this.fut.m.HEAP32.subarray(buf/4, buf/4 + len)));
-      data.push(values);
+        const values = await val.values();
+        const shape = val.get_shape();
+        to_write = [values, shape];
+      }
+      else {
+        // Scalar.
+        to_write = val;
+      }
+
+      const encoded = new FutharkWriter().encode_value(to_write, typ);
+      data += btoa(String.fromCharCode.apply(null, encoded));
+
       types.push(typ);
-
-      //this.fut.free(buf);
     }
 
-    const data_strings = data.map((a) => "[" + a.toString() + "]");
-    return {'data': data_strings, 'types': types};
+    return {'data': data, 'types': types};
   }
 
   async cmd_free(name) {
     const {val, typ} = this.get_var(name);
-    const type_info = this.get_manifest_type(typ);
-    const free_fun = this.fut_function(type_info.ops.free);
-    await free_fun(val);
+    if (val instanceof FutharkArray) {
+      val.free();
+    }
     this.delete_var(name);
     return "";
   }
@@ -217,10 +195,7 @@ class BrowserServer {
     const endTime = performance.now();
 
     for (let i = 0; i < outNames.length; i++) {
-      // TODO: This assumes that size of the value is 4 bytes
-      const outVal = this.fut.m.HEAP32[outs[i] / 4];
-      this.set_var(outNames[i], outVal, entry_info.outputs[i].type);
-      this.fut.free(outs[i]);
+      this.set_var(outNames[i], outs[i], entry_info.outputs[i].type);
     }
 
     return "runtime: " + Math.round((endTime - startTime) * 1000).toString();
@@ -248,29 +223,14 @@ class BrowserServer {
 
 async function runServer() {
   const m = await Module();
-  const fut = new FutharkModule();
+
+  // Setting fut into the global scope makes debugging a bit easier, and this is
+  // not intended to be embedded into anything other than the internal
+  // `futhark test` / `futhark bench` support anyway.
+  window.fut = new FutharkModule();
   await fut.init(m);
 
-  //const inData = new Int32Array([1,2,3,4,5,6,7,8,9,10]);
-  //const input = await newBuffer(fut, inData);
-
-  //const [inValPtr, inVals] = await getBufferValues(fut, input);
-  //console.log("input: ", inVals, " at ", inValPtr);
-
-  //const [outPtrPtr] = await fut.entry_main(input);
-
-  //const output = m.HEAP32[outPtrPtr / 4];
-  //const [outValPtr, outVals] = await getBufferValues(fut, output);
-  //console.log("output: ", outVals, " at ", outValPtr);
-
-  //
-  //fut.free(inValPtr);
-  //fut.free(outValPtr);
-  //fut.free(outPtrPtr);
-  //await fut.free_i32_1d(input);
-  //await fut.free_i32_1d(output);
- 
-  const server = new BrowserServer(fut);
+  window.server = new BrowserServer(fut);
 }
 
 runServer();

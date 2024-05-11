@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import base64
 import json
 import shlex
 import subprocess
@@ -14,8 +15,6 @@ from aiohttp import web
 import numpy as np
 
 from selenium import webdriver
-
-from values import ReaderInput, read_value, construct_binary_value
 
 parser = argparse.ArgumentParser()
 parser.add_argument("program",
@@ -124,39 +123,20 @@ async def handle_file(request):
     return web.Response(body=contents, content_type=content_type,
                         headers=default_headers)
 
-def restore_val(reader, typename):
-    # TODO: This ignores opaque types
-    return read_value(typename, reader)
-
 def wrap_restore(args):
-    orig_args = args
     fname = args[0]
-    args = args[1:]
 
-    data = list()
-
-    # TODO: This ignores a lot of error handling right now.
     with open(fname, "rb") as f:
-        reader = ReaderInput(f)
-        while args != []:
-            typename = args[1]
-            args = args[2:]
-            val = restore_val(reader, typename)
-            data.append(val.tolist())
+        data = f.read()
 
-    return [data] + orig_args[1:]
+    data = base64.b64encode(data).decode('utf-8')
 
-def store_val(f, val):
-    f.write(construct_binary_value(val))
+    return [data] + args[1:]
 
 def wrap_store_resp(fname, resp):
-    types = resp['types']
-    data_strings = resp['data']
+    data = base64.b64decode(resp['data'].encode('utf-8'))
     with open(fname, "wb") as f:
-        for (typ, text) in zip(types, data_strings):
-            reader = ReaderInput(BytesIO(text.encode('utf-8')))
-            val = read_value(typ, reader)
-            store_val(f, val)
+        f.write(data)
     return ""
 
 async def handle_ws(request):
