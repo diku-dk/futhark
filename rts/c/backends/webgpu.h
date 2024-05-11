@@ -739,7 +739,32 @@ static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
   // no other good option to use here), so we ignore the sync parameter.
   (void)sync;
 
-  wgpuQueueWriteBuffer(ctx->queue, dst, dst_offset, src + src_offset, nbytes);
+  // Bound storage buffers and copy operations must have sizes multiple of 4.
+  // Note that writing more than `nbytes` is safe because we also pad all
+  // buffers when allocating them, but we can't guarantee that the `src` here
+  // has enough bytes.
+  // If this is a copy somewhere into the middle of `dst`, it is also possible
+  // we overwrite some data here, which would be bad.
+  // TODO: Write a check for that case.
+  int64_t copy_size = ((nbytes + 4 - 1) / 4) * 4;
+  unsigned char *buf;
+  int64_t offset;
+  if (copy_size > nbytes) {
+    buf = malloc(copy_size);
+    offset = 0;
+    memcpy(buf, src + src_offset, copy_size);
+  }
+  else {
+    buf = src;
+    offset = src_offset;
+  }
+
+  wgpuQueueWriteBuffer(ctx->queue, dst, dst_offset, buf + offset, copy_size);
+
+  if (buf != src) {
+    free(buf);
+  }
+
   return FUTHARK_SUCCESS;
 }
 
@@ -750,7 +775,7 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
   if (nbytes <= 0) { return FUTHARK_SUCCESS; }
 
   // Bound storage buffers and copy operations must have sizes multiple of 4.
-  // Note that copying more than `nbytes` is safe because we also pad all
+  // Note that mapping more than `nbytes` is safe because we also pad all
   // buffers when allocating them.
   int64_t buf_size = ((nbytes + 4 - 1) / 4) * 4;
 
