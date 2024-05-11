@@ -230,7 +230,10 @@ kernelsToWebGPU prog =
         Definitions types (Constants ps consts') (Functions funs')
 
       kernels = M.fromList $ map (first nameFromText) (wsKernels translation)
-      webgpu_prelude = RTS.scalar <> RTS.scalar8 <> RTS.scalar16 <> RTS.scalar64
+      -- Put scalar32 in front of the other integer types since they are all
+      -- internally represented using i32.
+      webgpu_prelude = mconcat
+        [RTS.scalar, RTS.scalar32, RTS.scalar8, RTS.scalar16, RTS.scalar64]
       constants = wsMacroDefs translation
       -- TODO: Compute functions using tuning params
       params = M.map (, S.empty) $ wsSizes translation

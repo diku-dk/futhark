@@ -5,6 +5,7 @@ module Futhark.CodeGen.RTS.WGSL
   ( scalar,
     scalar8,
     scalar16,
+    scalar32,
     scalar64
   )
 where
@@ -26,6 +27,11 @@ scalar8 = $(embedStringFile "rts/wgsl/scalar8.wgsl")
 scalar16 :: T.Text
 scalar16 = $(embedStringFile "rts/wgsl/scalar16.wgsl")
 {-# NOINLINE scalar16 #-}
+
+-- | @rts/wgsl/scalar32.wgsl@
+scalar32 :: T.Text
+scalar32 = $(embedStringFile "rts/wgsl/scalar32.wgsl")
+{-# NOINLINE scalar32 #-}
 
 -- | @rts/wgsl/scalar64.wgsl@
 scalar64 :: T.Text
