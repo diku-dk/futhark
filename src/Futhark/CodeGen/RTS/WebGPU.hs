@@ -5,7 +5,7 @@ module Futhark.CodeGen.RTS.WebGPU
   ( serverWsJs,
     utilJs,
     valuesJs,
-    wrappersJs
+    wrappersJs,
   )
 where
 

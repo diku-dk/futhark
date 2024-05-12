@@ -205,22 +205,22 @@ instance Pretty Stmt where
     "if"
       <+> pretty cond
       <+> "{"
-        </> indent 2 (pretty th) <> ";"
+      </> indent 2 (pretty th) <> ";"
       </> "}"
   pretty (If cond Skip el) =
     "if"
       <+> pretty cond
       <+> "{ }"
       </> "else {"
-        </> indent 2 (pretty el) <> ";"
+      </> indent 2 (pretty el) <> ";"
       </> "}"
   pretty (If cond th el) =
     "if"
       <+> pretty cond
       <+> "{"
-        </> indent 2 (pretty th) <> ";"
+      </> indent 2 (pretty th) <> ";"
       </> "} else {"
-        </> indent 2 (pretty el) <> ";"
+      </> indent 2 (pretty el) <> ";"
       </> "}"
   pretty (For x initializer cond upd body) =
     "for"
@@ -229,19 +229,19 @@ instance Pretty Stmt where
             <+> pretty x
             <+> "="
             <+> pretty initializer
-            <> ";"
+              <> ";"
             <+> pretty cond
-            <> ";"
+              <> ";"
             <+> pretty upd
         )
       <+> "{"
-        </> indent 2 (pretty body) <> ";"
+      </> indent 2 (pretty body) <> ";"
       </> "}"
   pretty (While cond body) =
     "while"
       <+> pretty cond
       <+> "{"
-        </> indent 2 (pretty body) <> ";"
+      </> indent 2 (pretty body) <> ";"
       </> "}"
   pretty (Call f args) = pretty f <> parens (commasep $ map pretty args)
 
@@ -266,7 +266,7 @@ instance Pretty Function where
     stack
       [ hsep (map pretty attribs),
         "fn" <+> pretty name <> prettyParams params <+> "{",
-          indent 2 (pretty body) <> ";",
+        indent 2 (pretty body) <> ";",
         "}"
       ]
 
@@ -278,8 +278,8 @@ instance Pretty Struct where
     "struct"
       <+> pretty name
       <+> "{"
-        </> indent 2 (commastack (map pretty fields))
-        </> "}"
+      </> indent 2 (commastack (map pretty fields))
+      </> "}"
 
 instance Pretty AccessMode where
   pretty ReadOnly = "read"
@@ -295,12 +295,12 @@ instance Pretty Declaration where
   pretty (VarDecl attribs as name typ) =
     hsep (map pretty attribs)
       </> "var<"
-      <> pretty as
-      <> ">"
+        <> pretty as
+        <> ">"
       <+> pretty name
       <+> ":"
       <+> pretty typ
-      <> ";"
+        <> ";"
   pretty (OverrideDecl name typ Nothing) =
     "override" <+> pretty name <+> ":" <+> pretty typ <> ";"
   pretty (OverrideDecl name typ (Just initial)) =
@@ -310,7 +310,7 @@ instance Pretty Declaration where
       <+> pretty typ
       <+> "="
       <+> pretty initial
-      <> ";"
+        <> ";"
 
 prettyDecls :: [Declaration] -> Doc a
 prettyDecls decls = stack (map pretty decls)

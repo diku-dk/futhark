@@ -22,7 +22,7 @@ import Futhark.Util.Pretty
 --
 -- Arguments are assumed to be passed as all scalars first, and then all memory
 -- bindings.
-data KernelInterface = KernelInterface 
+data KernelInterface = KernelInterface
   { safety :: KernelSafety,
     -- | Offsets of all fields in the corresponding scalars struct.
     scalarsOffsets :: [Int],
@@ -63,10 +63,8 @@ instance Pretty Program where
   pretty prog =
     -- TODO: print everything
     "webgpu {"
-      </> "== SHADER START =="
       </> indent 2 (stack $ map pretty $ T.lines $ webgpuPrelude prog)
       </> indent 2 (stack $ map pretty $ T.lines $ webgpuProgram prog)
-      </> "== SHADER END =="
       </> "}"
       </> ""
-      <> pretty (hostDefinitions prog)
+        <> pretty (hostDefinitions prog)

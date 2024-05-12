@@ -1,6 +1,5 @@
 -- | Common definitions for imperative code augmented with the ability to launch
 -- kernels.
-
 module Futhark.CodeGen.ImpCode.Kernels
   ( KernelName,
     KernelArg (..),
@@ -78,4 +77,3 @@ data HostOp
 
 instance Pretty HostOp where
   pretty = pretty . show
-

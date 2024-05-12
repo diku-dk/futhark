@@ -6,7 +6,7 @@ module Futhark.CodeGen.RTS.WGSL
     scalar8,
     scalar16,
     scalar32,
-    scalar64
+    scalar64,
   )
 where
 
