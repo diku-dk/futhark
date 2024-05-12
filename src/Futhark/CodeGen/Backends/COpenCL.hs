@@ -21,10 +21,10 @@ import Futhark.CodeGen.ImpGen.OpenCL qualified as ImpGen
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.RTS.C (backendsOpenclH)
 import Futhark.IR.GPUMem hiding
-  ( HostOp,
-    CmpSizeLe,
+  ( CmpSizeLe,
     GetSize,
     GetSizeMax,
+    HostOp,
   )
 import Futhark.MonadFreshNames
 import Language.C.Quote.OpenCL qualified as C

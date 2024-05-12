@@ -525,7 +525,7 @@ commandLineOptions =
       ["test-webgpu-kernels"]
       ( NoArg $
           Right $ \opts ->
---type BackendAction rep = FutharkConfig -> CompilerMode -> FilePath -> Action rep
+            -- type BackendAction rep = FutharkConfig -> CompilerMode -> FilePath -> Action rep
             opts {futharkAction = GPUMemAction $ \_ _ -> webgpuTestKernelsAction}
       )
       "Translate pipeline result to ImpWebGPU and generate test runner input.",

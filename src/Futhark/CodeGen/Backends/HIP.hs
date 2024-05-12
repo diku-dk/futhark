@@ -19,10 +19,10 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.ImpGen.HIP qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsHipH)
 import Futhark.IR.GPUMem hiding
-  ( HostOp,
-    CmpSizeLe,
+  ( CmpSizeLe,
     GetSize,
     GetSizeMax,
+    HostOp,
   )
 import Futhark.MonadFreshNames
 import Language.C.Quote.OpenCL qualified as C

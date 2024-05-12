@@ -65,7 +65,7 @@ data KernelR = KernelR
   }
 
 addRenames :: [(WGSL.Ident, WGSL.Ident)] -> KernelR -> KernelR
-addRenames renames r = r { krNameReplacements = insert (krNameReplacements r) }
+addRenames renames r = r {krNameReplacements = insert (krNameReplacements r)}
   where
     insert m' = foldl' (\m (k, v) -> M.insert k v m) m' renames
 
@@ -97,7 +97,8 @@ mkGlobalIdent ident = do
 -- map.
 getIdent :: (F.Pretty a) => a -> KernelM WGSL.Ident
 getIdent name = asks (M.findWithDefault t t . krNameReplacements)
-  where t = zEncodeText $ prettyText name
+  where
+    t = zEncodeText $ prettyText name
 
 -- | Get a new, unused binding index and add it to the list of bind slots used
 -- by the current kernel.
@@ -123,31 +124,37 @@ finishKernel :: KernelR -> KernelW -> WebGPUM KernelName
 finishKernel (KernelR kernel _) kw = do
   s <- get
   let (offsets, _align, size) = case WGSL.structLayout (kwScalars kw) of
-                                  Just t -> t
-                                  Nothing -> ([], 4, 4) -- dummy layout
+        Just t -> t
+        Nothing -> ([], 4, 4) -- dummy layout
   let name = nameToText $ ImpGPU.kernelName kernel
-  let interface = KernelInterface {
-    safety = SafetyNone, -- TODO
-    scalarsOffsets = offsets,
-    scalarsSize = size,
-    scalarsBindSlot = head (kwBindSlots kw),
-    memBindSlots = tail (kwBindSlots kw),
-    overrideNames = kwOverrides kw,
-    dynamicBlockDims = kwDynamicBlockDims kw
-  }
+  let interface =
+        KernelInterface
+          { safety = SafetyNone, -- TODO
+            scalarsOffsets = offsets,
+            scalarsSize = size,
+            scalarsBindSlot = head (kwBindSlots kw),
+            memBindSlots = tail (kwBindSlots kw),
+            overrideNames = kwOverrides kw,
+            dynamicBlockDims = kwDynamicBlockDims kw
+          }
   put $ s {wsKernels = wsKernels s <> [(name, interface)]}
   pure (nameFromText name)
 
 entryParams :: [WGSL.Param]
 entryParams =
-  [ WGSL.Param "workgroup_id" (WGSL.Prim (WGSL.Vec3 WGSL.UInt32))
+  [ WGSL.Param
+      "workgroup_id"
+      (WGSL.Prim (WGSL.Vec3 WGSL.UInt32))
       [WGSL.Attrib "builtin" [WGSL.VarExp "workgroup_id"]],
-    WGSL.Param "local_id" (WGSL.Prim (WGSL.Vec3 WGSL.UInt32))
+    WGSL.Param
+      "local_id"
+      (WGSL.Prim (WGSL.Vec3 WGSL.UInt32))
       [WGSL.Attrib "builtin" [WGSL.VarExp "local_invocation_id"]]
   ]
 
 builtinLockstepWidth :: KernelM WGSL.Ident
 builtinLockstepWidth = mkGlobalIdent "lockstep_width"
+
 builtinBlockSize :: Int -> KernelM WGSL.Ident
 builtinBlockSize 0 = mkGlobalIdent "block_size_x"
 builtinBlockSize 1 = mkGlobalIdent "block_size_y"
@@ -160,8 +167,8 @@ genKernel = do
   kernel <- asks krKernel
   let name = textToIdent $ nameToText (ImpGPU.kernelName kernel)
 
-  (overrideDecls, overrideMacroDefs, blockDimNames, overrideInits)
-    <- genConstAndBuiltinDecls
+  (overrideDecls, overrideMacroDefs, blockDimNames, overrideInits) <-
+    genConstAndBuiltinDecls
   gen $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
   lift $ mapM_ (uncurry addMacroDef) overrideMacroDefs
 
@@ -171,26 +178,29 @@ genKernel = do
   (memDecls, memRenames) <- genMemoryDecls
   gen $ docText (WGSL.prettyDecls memDecls <> "\n\n")
 
-  wgslBody <- local (addRenames memRenames) $
-    genWGSLStm (ImpGPU.kernelBody kernel)
+  wgslBody <-
+    local (addRenames memRenames) $
+      genWGSLStm (ImpGPU.kernelBody kernel)
   let body = WGSL.stmts [overrideInits, scalarCopies, wgslBody]
 
-  let attribs = [WGSL.Attrib "compute" [],
-                 WGSL.Attrib "workgroup_size" (map WGSL.VarExp blockDimNames)]
+  let attribs =
+        [ WGSL.Attrib "compute" [],
+          WGSL.Attrib "workgroup_size" (map WGSL.VarExp blockDimNames)
+        ]
 
-  let wgslFun = WGSL.Function
-                  { WGSL.funName = name,
-                    WGSL.funAttribs = attribs,
-                    WGSL.funParams = entryParams,
-                    WGSL.funBody = body
-                  }
+  let wgslFun =
+        WGSL.Function
+          { WGSL.funName = name,
+            WGSL.funAttribs = attribs,
+            WGSL.funParams = entryParams,
+            WGSL.funBody = body
+          }
   gen $ prettyText wgslFun
   gen "\n"
 
   pure ()
-    where
-      gen = lift . addCode
-
+  where
+    gen = lift . addCode
 
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
@@ -223,13 +233,14 @@ kernelsToWebGPU prog =
         (ImpGPU.Constants ps consts)
         (ImpGPU.Functions funs) = prog
 
-      initial_state = WebGPUS {
-        wsCode = mempty,
-        wsSizes = mempty,
-        wsMacroDefs = mempty,
-        wsKernels = mempty,
-        wsNextBindSlot = 0
-      }
+      initial_state =
+        WebGPUS
+          { wsCode = mempty,
+            wsSizes = mempty,
+            wsMacroDefs = mempty,
+            wsKernels = mempty,
+            wsNextBindSlot = 0
+          }
 
       ((consts', funs'), translation) =
         flip runState initial_state $
@@ -241,11 +252,12 @@ kernelsToWebGPU prog =
       kernels = M.fromList $ map (first nameFromText) (wsKernels translation)
       -- Put scalar32 in front of the other integer types since they are all
       -- internally represented using i32.
-      webgpu_prelude = mconcat
-        [RTS.scalar, RTS.scalar32, RTS.scalar8, RTS.scalar16, RTS.scalar64]
+      webgpu_prelude =
+        mconcat
+          [RTS.scalar, RTS.scalar32, RTS.scalar8, RTS.scalar16, RTS.scalar64]
       constants = wsMacroDefs translation
       -- TODO: Compute functions using tuning params
-      params = M.map (, S.empty) $ wsSizes translation
+      params = M.map (,S.empty) $ wsSizes translation
       failures = mempty
    in Program
         { webgpuProgram = wsCode translation,
@@ -284,14 +296,22 @@ wgslBufferType (IntType Int8) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int16) = WGSL.Array $ WGSL.Atomic wgslInt16
 wgslBufferType t = WGSL.Array $ wgslPrimType t
 
-genFunWrite :: WGSL.Ident -> VName -> Count Elements (TExp Int64) -> Exp
-            -> KernelM WGSL.Stmt
+genFunWrite ::
+  WGSL.Ident ->
+  VName ->
+  Count Elements (TExp Int64) ->
+  Exp ->
+  KernelM WGSL.Stmt
 genFunWrite fun mem i v =
   let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
    in WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
 
-genFunRead :: WGSL.Ident -> VName -> VName -> Count Elements (TExp Int64)
-            -> KernelM WGSL.Stmt
+genFunRead ::
+  WGSL.Ident ->
+  VName ->
+  VName ->
+  Count Elements (TExp Int64) ->
+  KernelM WGSL.Stmt
 genFunRead fun tgt mem i =
   let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
       call = WGSL.CallExp fun <$> sequence [buf, indexExp i]
@@ -303,23 +323,32 @@ genWGSLStm (s1 :>>: s2) = liftM2 WGSL.Seq (genWGSLStm s1) (genWGSLStm s2)
 genWGSLStm (For iName bound body) = do
   boundExp <- genWGSLExp bound
   bodyStm <- genWGSLStm body
-  pure $ WGSL.For i zero (lt (WGSL.VarExp i) boundExp)
-    (WGSL.Assign i $ add (WGSL.VarExp i) (WGSL.IntExp 1)) bodyStm
+  pure $
+    WGSL.For
+      i
+      zero
+      (lt (WGSL.VarExp i) boundExp)
+      (WGSL.Assign i $ add (WGSL.VarExp i) (WGSL.IntExp 1))
+      bodyStm
   where
     i = nameToIdent iName
     boundIntType = case primExpType bound of
-                     IntType t -> t
-                     _ -> error "non-integer Exp for loop bound"
+      IntType t -> t
+      _ -> error "non-integer Exp for loop bound"
     add = wgslBinOp $ Add boundIntType OverflowWrap
     lt = wgslCmpOp $ CmpUlt boundIntType
     zero = case boundIntType of
-             Int64 -> WGSL.VarExp "zero_i64"
-             _ -> WGSL.IntExp 0
-genWGSLStm (While cond body) = liftM2
-  WGSL.While (genWGSLExp $ untyped cond) (genWGSLStm body)
+      Int64 -> WGSL.VarExp "zero_i64"
+      _ -> WGSL.IntExp 0
+genWGSLStm (While cond body) =
+  liftM2
+    WGSL.While
+    (genWGSLExp $ untyped cond)
+    (genWGSLStm body)
 genWGSLStm (DeclareMem _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
-genWGSLStm (DeclareScalar name _ typ) = pure $
-  WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ wgslPrimType typ)
+genWGSLStm (DeclareScalar name _ typ) =
+  pure $
+    WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ wgslPrimType typ)
 genWGSLStm (DeclareArray {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Allocate {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Free _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
@@ -344,38 +373,50 @@ genWGSLStm (Call [dest] f args) = do
       getArg (MemArg n) = WGSL.VarExp <$> getIdent n
   argExps <- mapM getArg args
   WGSL.Assign <$> getIdent dest <*> pure (fun argExps)
-genWGSLStm (Call {}) = pure $
-  WGSL.Comment "TODO: Multi-dest calls not supported"
-genWGSLStm (If cond cThen cElse) = liftM3
-  WGSL.If (genWGSLExp $ untyped cond) (genWGSLStm cThen) (genWGSLStm cElse)
+genWGSLStm (Call {}) =
+  pure $
+    WGSL.Comment "TODO: Multi-dest calls not supported"
+genWGSLStm (If cond cThen cElse) =
+  liftM3
+    WGSL.If
+    (genWGSLExp $ untyped cond)
+    (genWGSLStm cThen)
+    (genWGSLStm cElse)
 genWGSLStm (Assert {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Comment c s) = WGSL.Seq (WGSL.Comment c) <$> genWGSLStm s
 genWGSLStm (DebugPrint _ _) = pure WGSL.Skip
 genWGSLStm (TracePrint _) = pure WGSL.Skip
 genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = do
   destId <- getIdent dest
-  pure $ WGSL.Assign destId $
-    WGSL.to_i32 (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i))
+  pure $
+    WGSL.Assign destId $
+      WGSL.to_i32 (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i))
 genWGSLStm (Op (ImpGPU.GetLocalId dest i)) = do
   destId <- getIdent dest
-  pure $ WGSL.Assign destId $
-    WGSL.to_i32 (WGSL.IndexExp "local_id" (WGSL.IntExp i))
+  pure $
+    WGSL.Assign destId $
+      WGSL.to_i32 (WGSL.IndexExp "local_id" (WGSL.IntExp i))
 genWGSLStm (Op (ImpGPU.GetLocalSize dest i)) = do
   destId <- getIdent dest
   WGSL.Assign destId . WGSL.VarExp <$> builtinBlockSize i
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = do
   destId <- getIdent dest
   WGSL.Assign destId . WGSL.VarExp <$> builtinLockstepWidth
-genWGSLStm (Op (ImpGPU.Atomic _ _)) = pure $
-  WGSL.Comment "TODO: Unimplemented statement"
-genWGSLStm (Op (ImpGPU.Barrier _)) = pure $
-  WGSL.Comment "TODO: Unimplemented statement"
-genWGSLStm (Op (ImpGPU.MemFence _)) = pure $
-  WGSL.Comment "TODO: Unimplemented statement"
-genWGSLStm (Op (ImpGPU.SharedAlloc _ _)) = pure $
-  WGSL.Comment "TODO: Unimplemented statement"
-genWGSLStm (Op (ImpGPU.ErrorSync _)) = pure $
-  WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Op (ImpGPU.Atomic _ _)) =
+  pure $
+    WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Op (ImpGPU.Barrier _)) =
+  pure $
+    WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Op (ImpGPU.MemFence _)) =
+  pure $
+    WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Op (ImpGPU.SharedAlloc _ _)) =
+  pure $
+    WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Op (ImpGPU.ErrorSync _)) =
+  pure $
+    WGSL.Comment "TODO: Unimplemented statement"
 
 call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
 call1 f a = WGSL.CallExp f [a]
@@ -588,23 +629,32 @@ genScalarDecls = do
 
   -- TODO: This probably needs to use the wgslBufferType to ensure
   -- host-shareable scalar structs. Should then convert in the copy stmt below.
-  let scalars = [(nameToIdent name, WGSL.Prim $ wgslPrimType typ)
-                  | ImpGPU.ScalarUse name typ <- uses]
+  let scalars =
+        [ (nameToIdent name, WGSL.Prim $ wgslPrimType typ)
+          | ImpGPU.ScalarUse name typ <- uses
+        ]
   let scalarFields = case scalars of
-                  [] -> [("_dummy_scalar", WGSL.Prim WGSL.Int32)]
-                  sclrs -> sclrs
-  let structDecl = WGSL.StructDecl $
-        WGSL.Struct structName (map (uncurry WGSL.Field) scalarFields)
+        [] -> [("_dummy_scalar", WGSL.Prim WGSL.Int32)]
+        sclrs -> sclrs
+  let structDecl =
+        WGSL.StructDecl $
+          WGSL.Struct structName (map (uncurry WGSL.Field) scalarFields)
 
   mapM_ addScalar [t | (_, WGSL.Prim t) <- scalars]
 
   slot <- assignBindSlot
   let bufferAttribs = WGSL.bindingAttribs 0 slot
-  let bufferDecl = WGSL.VarDecl
-        bufferAttribs WGSL.Uniform bufferName (WGSL.Named structName)
+  let bufferDecl =
+        WGSL.VarDecl
+          bufferAttribs
+          WGSL.Uniform
+          bufferName
+          (WGSL.Named structName)
 
-  let copy (name, typ) = [WGSL.DeclareVar name typ,
-                          WGSL.Assign name (WGSL.FieldExp bufferName name)]
+  let copy (name, typ) =
+        [ WGSL.DeclareVar name typ,
+          WGSL.Assign name (WGSL.FieldExp bufferName name)
+        ]
   let copies = WGSL.stmts $ concatMap copy scalars
 
   pure ([structDecl, bufferDecl], copies)
@@ -647,9 +697,13 @@ genMemoryDecls = do
     moduleDecl (name, typ) = do
       ident <- mkGlobalIdent name
       slot <- assignBindSlot
-      pure $ WGSL.VarDecl (WGSL.bindingAttribs 0 slot)
-        (WGSL.Storage WGSL.ReadWrite) ident (wgslBufferType typ)
-    rename (name, _) = (name, ) <$> mkGlobalIdent name
+      pure $
+        WGSL.VarDecl
+          (WGSL.bindingAttribs 0 slot)
+          (WGSL.Storage WGSL.ReadWrite)
+          ident
+          (wgslBufferType typ)
+    rename (name, _) = (name,) <$> mkGlobalIdent name
 
 -- | Generate `override` declarations for kernel 'ConstUse's and
 -- backend-provided values (like block size and lockstep width). The returned
@@ -658,20 +712,22 @@ genMemoryDecls = do
 -- Some ConstUses can require additional code inserted at the beginning of the
 -- kernel before they can be used, these are contained in the returned
 -- statement.
-genConstAndBuiltinDecls :: KernelM
-  ([WGSL.Declaration], [(Name, KernelConstExp)], [WGSL.Ident], WGSL.Stmt)
+genConstAndBuiltinDecls ::
+  KernelM
+    ([WGSL.Declaration], [(Name, KernelConstExp)], [WGSL.Ident], WGSL.Stmt)
 genConstAndBuiltinDecls = do
   kernel <- asks krKernel
 
-  let blockDimExps = zip [0..] $ ImpGPU.kernelBlockSize kernel
+  let blockDimExps = zip [0 ..] $ ImpGPU.kernelBlockSize kernel
   blockDimNames <- mapM (builtinBlockSize . fst) blockDimExps
   let blockDims = zip blockDimExps blockDimNames
   let constBlockDims = [(i, n, e) | ((i, Right e), n) <- blockDims]
   let dynBlockDims = [(i, n, e) | ((i, Left e), n) <- blockDims]
 
-  let blockDimDecls = map
-        (\n -> WGSL.OverrideDecl n (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0))
-        blockDimNames
+  let blockDimDecls =
+        map
+          (\n -> WGSL.OverrideDecl n (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0))
+          blockDimNames
   -- KernelConstExp block dims get generated into the general macro/override
   -- machinery.
   let blockDimMap = [(nameFromText n, e) | (_, n, e) <- constBlockDims]
@@ -681,46 +737,62 @@ genConstAndBuiltinDecls = do
   -- do so once we have the value for the dimension.
   mapM_ (uncurry addDynamicBlockDim) [(i, n) | (i, n, _e) <- dynBlockDims]
 
-  builtins <- sequence
-                [builtinLockstepWidth <&> (,ValueExp (IntValue (Int32Value 1)))]
+  builtins <-
+    sequence
+      [builtinLockstepWidth <&> (,ValueExp (IntValue (Int32Value 1)))]
   let builtinDecls =
-        [WGSL.OverrideDecl n (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
-          | (n, _) <- builtins]
+        [ WGSL.OverrideDecl n (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
+          | (n, _) <- builtins
+        ]
   let builtinMap =
         [(nameFromText n, e) | (n, e) <- builtins]
 
   let consts = [(n, e) | ImpGPU.ConstUse n e <- ImpGPU.kernelUses kernel]
-  moduleNames <- mapM (\c -> do
-    let n = nameToIdent $ fst c
-    lo <- mkGlobalIdent (n <> "_lo")
-    hi <- mkGlobalIdent (n <> "_hi")
-    pure (lo, hi)) consts
+  moduleNames <-
+    mapM
+      ( \c -> do
+          let n = nameToIdent $ fst c
+          lo <- mkGlobalIdent (n <> "_lo")
+          hi <- mkGlobalIdent (n <> "_hi")
+          pure (lo, hi)
+      )
+      consts
 
-  let mkLo e = untyped $
-        (TPrimExp e :: TPrimExp Int64 KernelConst) .&. 0x00000000ffffffff
-  let mkHi e = untyped $
-        (TPrimExp e :: TPrimExp Int64 KernelConst) .>>. 32
+  let mkLo e =
+        untyped $
+          (TPrimExp e :: TPrimExp Int64 KernelConst) .&. 0x00000000ffffffff
+  let mkHi e =
+        untyped $
+          (TPrimExp e :: TPrimExp Int64 KernelConst) .>>. 32
 
   let mkConst (n, e) (lo, hi) =
         case primExpType e of
           IntType Int64 ->
-            ([(nameFromText lo, mkLo e), (nameFromText hi, mkHi e)],
-             [WGSL.OverrideDecl lo (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0),
-              WGSL.OverrideDecl hi (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)],
-             WGSL.Seq
-              (WGSL.DeclareVar (nameToIdent n) (WGSL.Prim wgslInt64))
-              (WGSL.Assign (nameToIdent n)
-                (WGSL.CallExp "i64" [WGSL.VarExp lo, WGSL.VarExp hi])))
+            ( [(nameFromText lo, mkLo e), (nameFromText hi, mkHi e)],
+              [ WGSL.OverrideDecl lo (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0),
+                WGSL.OverrideDecl hi (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
+              ],
+              WGSL.Seq
+                (WGSL.DeclareVar (nameToIdent n) (WGSL.Prim wgslInt64))
+                ( WGSL.Assign
+                    (nameToIdent n)
+                    (WGSL.CallExp "i64" [WGSL.VarExp lo, WGSL.VarExp hi])
+                )
+            )
           _ ->
-            ([(nameFromText lo, e)],
-             [WGSL.OverrideDecl lo (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)],
-             WGSL.Seq
-              (WGSL.DeclareVar (nameToIdent n) (WGSL.Prim wgslInt64))
-              (WGSL.Assign (nameToIdent n)
-                (WGSL.CallExp "i64" [WGSL.VarExp lo, WGSL.IntExp 0])))
+            ( [(nameFromText lo, e)],
+              [WGSL.OverrideDecl lo (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)],
+              WGSL.Seq
+                (WGSL.DeclareVar (nameToIdent n) (WGSL.Prim wgslInt64))
+                ( WGSL.Assign
+                    (nameToIdent n)
+                    (WGSL.CallExp "i64" [WGSL.VarExp lo, WGSL.IntExp 0])
+                )
+            )
 
-  let (constMap, constDecls, constInits) = unzip3 $
-        zipWith mkConst consts moduleNames
+  let (constMap, constDecls, constInits) =
+        unzip3 $
+          zipWith mkConst consts moduleNames
 
   let decls = blockDimDecls ++ builtinDecls ++ concat constDecls
   let fullMap = blockDimMap ++ builtinMap ++ concat constMap

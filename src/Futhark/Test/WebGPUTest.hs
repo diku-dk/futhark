@@ -1,11 +1,13 @@
-module Futhark.Test.WebGPUTest 
-  ( generateTests
+module Futhark.Test.WebGPUTest
+  ( generateTests,
   )
 where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Text qualified as T
+import Data.List (foldl')
 import Data.Map qualified as M
+import Data.Maybe (mapMaybe)
+import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU (compileProg)
 import Futhark.IR.GPUMem qualified as F
@@ -13,11 +15,12 @@ import Futhark.MonadFreshNames
 import Futhark.Test.Spec
 import Futhark.Test.Values qualified as V
 import Futhark.Util.Pretty
-import Data.Maybe (mapMaybe)
-import Data.List (foldl')
 
-generateTests :: (MonadFreshNames m, MonadIO m) =>
-  FilePath -> F.Prog F.GPUMem -> m T.Text
+generateTests ::
+  (MonadFreshNames m, MonadIO m) =>
+  FilePath ->
+  F.Prog F.GPUMem ->
+  m T.Text
 generateTests path prog = do
   compiled <- snd <$> compileProg prog
   spec <- liftIO $ testSpecFromProgramOrDie (path <> ".fut")
@@ -27,11 +30,12 @@ generateTests path prog = do
   pure (tests <> "\n\n" <> info <> "\n\n" <> shader)
 
 shaderLiteral :: Program -> T.Text
-shaderLiteral prog = "window.shader = `\n"
-  <> webgpuPrelude prog
-  <> "\n"
-  <> webgpuProgram prog
-  <> "\n`;"
+shaderLiteral prog =
+  "window.shader = `\n"
+    <> webgpuPrelude prog
+    <> "\n"
+    <> webgpuProgram prog
+    <> "\n`;"
 
 -- window.kernels = [
 --   { name: 'some_vname_5568',
@@ -46,13 +50,18 @@ kernelInfoLiteral prog = "window.kernels = " <> docText fmtInfos <> ";"
     infos = M.toList $ webgpuKernels prog
     fmtInfos = "[" </> indent 2 (commastack $ map fmtInfo infos) </> "]"
     fmtInfo (name, ki) =
-      "{" </> indent 2 (
-        "name: '" <> pretty name <> "',"
-        </> "overrides: [" <> commasep
-          (map (\o -> "'" <> pretty o <> "'") (overrideNames ki)) <> "],"
-        </> "scalarsBindSlot: " <> pretty (scalarsBindSlot ki) <> ","
-        </> "bindSlots: " <> pretty (memBindSlots ki) <> ","
-      ) </> "}"
+      "{"
+        </> indent
+          2
+          ( "name: '" <> pretty name <> "',"
+              </> "overrides: ["
+                <> commasep
+                  (map (\o -> "'" <> pretty o <> "'") (overrideNames ki))
+                <> "],"
+              </> "scalarsBindSlot: " <> pretty (scalarsBindSlot ki) <> ","
+              </> "bindSlots: " <> pretty (memBindSlots ki) <> ","
+          )
+        </> "}"
 
 -- window.tests = [
 --   { entry: 'someName',
@@ -71,10 +80,11 @@ testCasesLiteral (ProgramTest _ _ (RunCases ios _ _)) =
    in "window.tests = [\n" <> foldl' (<>) "" specs <> "];"
 testCasesLiteral t = "// Unsupported test: " <> testDescription t
 
-data JsTestSpec = JsTestSpec 
+data JsTestSpec = JsTestSpec
   { _jsEntryPoint :: T.Text,
     _jsRuns :: [JsTestRun]
   }
+
 data JsTestRun = JsTestRun
   { _jsInputTypes :: [V.PrimType],
     _jsInput :: [V.Value],
@@ -86,27 +96,42 @@ mkTestSpec :: InputOutputs -> JsTestSpec
 mkTestSpec (InputOutputs entry runs) = JsTestSpec entry (mapMaybe mkRun runs)
 
 mkRun :: TestRun -> Maybe JsTestRun
-mkRun (TestRun _ (Values vals)
-                 (Succeeds (Just (SuccessValues (Values expected)))) _ _) =
-  let inputTyps = map V.valueElemType vals
-      expectedTyps = map V.valueElemType expected
-   in Just $ JsTestRun inputTyps vals expectedTyps expected
+mkRun
+  ( TestRun
+      _
+      (Values vals)
+      (Succeeds (Just (SuccessValues (Values expected))))
+      _
+      _
+    ) =
+    let inputTyps = map V.valueElemType vals
+        expectedTyps = map V.valueElemType expected
+     in Just $ JsTestRun inputTyps vals expectedTyps expected
 mkRun _ = Nothing
 
 instance Pretty JsTestRun where
   pretty (JsTestRun inputTyps input expectedTyps expected) =
-    "{" </> indent 2 (
-      "inputTypes: ["
-        <> commasep (map (\t -> "'" <> pretty (V.primTypeText t) <> "'")
-            inputTyps)
-        <> "],"
-      </> "input: " <> fmt inputTyps input <> ","
-      </> "expectedTypes: [" 
-        <> commasep (map (\t -> "'" <> pretty (V.primTypeText t) <> "'")
-            expectedTyps)
-        <> "],"
-      </> "expected: " <> fmt expectedTyps expected <> ","
-    ) </> "}"
+    "{"
+      </> indent
+        2
+        ( "inputTypes: ["
+            <> commasep
+              ( map
+                  (\t -> "'" <> pretty (V.primTypeText t) <> "'")
+                  inputTyps
+              )
+            <> "],"
+            </> "input: " <> fmt inputTyps input <> ","
+            </> "expectedTypes: ["
+              <> commasep
+                ( map
+                    (\t -> "'" <> pretty (V.primTypeText t) <> "'")
+                    expectedTyps
+                )
+              <> "],"
+            </> "expected: " <> fmt expectedTyps expected <> ","
+        )
+      </> "}"
     where
       fmtVal V.I64 v = pretty v <> "n"
       fmtVal V.U64 v = pretty v <> "n"
@@ -115,17 +140,25 @@ instance Pretty JsTestRun where
       -- Hacky way to avoid the 'i32', 'i64' etc. suffixes as they are not valid
       -- JS.
       fixAnnots typ d = pretty $ T.replace (V.primTypeText typ) "" (docText d)
-      fixSpecials d = pretty $
-        T.replace ".nan" "NaN" $ T.replace ".inf" "Infinity" $ docText d
-      fmtArray typ vs = fixSpecials $ fixAnnots typ $
-        fmtArrRaw typ (V.valueElems vs)
+      fixSpecials d =
+        pretty $
+          T.replace ".nan" "NaN" $
+            T.replace ".inf" "Infinity" $
+              docText d
+      fmtArray typ vs =
+        fixSpecials $
+          fixAnnots typ $
+            fmtArrRaw typ (V.valueElems vs)
       fmt typs vss = "[" <> commasep (zipWith fmtArray typs vss) <> "]"
 
 instance Pretty JsTestSpec where
   pretty (JsTestSpec entry runs) =
-    "{" </> indent 2 (
-      "entry: '" <> pretty entry <> "',"
-      </> "runs: ["
-      </> indent 2 (commastack $ map pretty runs)
-      </> "],"
-    ) </> "}"
+    "{"
+      </> indent
+        2
+        ( "entry: '" <> pretty entry <> "',"
+            </> "runs: ["
+            </> indent 2 (commastack $ map pretty runs)
+            </> "],"
+        )
+      </> "}"

@@ -25,7 +25,7 @@ module Futhark.Actions
     compileMulticoreToWASMAction,
     compilePythonAction,
     compilePyOpenCLAction,
-    compileWebGPUAction
+    compileWebGPUAction,
   )
 where
 
@@ -547,48 +547,59 @@ compileWebGPUAction fcfg mode tgtpath =
     helper prog = do
       (cprog, jslib, exports) <-
         handleWarnings fcfg $ CWebGPU.compileProg versionString prog
-      let outpath = if takeExtension tgtpath == "js"
-                       then tgtpath
-                       else tgtpath `addExtension` "js"
+      let outpath =
+            if takeExtension tgtpath == "js"
+              then tgtpath
+              else tgtpath `addExtension` "js"
           cpath = tgtpath `addExtension` "c"
           jslibpath = tgtpath `addExtension` "wrapper.js"
           jsserverpath = tgtpath `addExtension` "server.js"
           jsonpath = tgtpath `addExtension` "json"
           extra_options =
-            --[ "-DUSE_DAWN"
-            --]
+            -- [ "-DUSE_DAWN"
+            -- ]
             [ "-sUSE_WEBGPU",
               "-sASYNCIFY",
               "-sMODULARIZE",
               "-sWASM_BIGINT",
               "-sEXPORTED_RUNTIME_METHODS=cwrap,ccall,Asyncify",
-              "--extern-post-js", jslibpath,
+              "--extern-post-js",
+              jslibpath,
               "-g"
             ]
-          export_option = "-sEXPORTED_FUNCTIONS="
-            ++ intercalate "," ['_' : T.unpack e | e <- exports]
+          export_option =
+            "-sEXPORTED_FUNCTIONS="
+              ++ intercalate "," ['_' : T.unpack e | e <- exports]
       case mode of
         ToLibrary -> do
           let (_header, impl, manifest) = CWebGPU.asLibrary cprog
-          --liftIO $ T.writeFile hpath $ cPrependHeader header
+          -- liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
           liftIO $ T.writeFile jslibpath jslib
           liftIO $ T.writeFile jsonpath manifest
-          runEMCC cpath outpath ["-O", "-std=c99"] ["-lm"]
+          runEMCC
+            cpath
+            outpath
+            ["-O", "-std=c99"]
+            ["-lm"]
             (export_option : extra_options)
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CWebGPU.asExecutable cprog
           liftIO $ T.writeFile jslibpath jslib
-          --runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+          -- runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
           runEMCC cpath outpath ["-O", "-std=c99"] ["-lm"] extra_options
         ToServer -> do
           let (impl, server) = CWebGPU.asJSServer cprog
           liftIO $ T.writeFile cpath $ cPrependHeader impl
           liftIO $ T.writeFile jslibpath jslib
           liftIO $ T.writeFile jsserverpath server
-          let serverArgs = [ "--extern-post-js", jsserverpath ]
+          let serverArgs = ["--extern-post-js", jsserverpath]
           -- TODO: optimization
-          runEMCC cpath outpath ["-O0", "-std=c99"] ["-lm"]
+          runEMCC
+            cpath
+            outpath
+            ["-O0", "-std=c99"]
+            ["-lm"]
             (export_option : extra_options ++ serverArgs)
 
 cmdEMCFLAGS :: [String] -> [String]
@@ -597,16 +608,17 @@ cmdEMCFLAGS def = maybe def words $ lookup "EMCFLAGS" unixEnvironment
 wasmFlags :: FilePath -> [String] -> Bool -> [String]
 wasmFlags classpath expfuns lib =
   ["-lnodefs.js"]
-  ++ ["-s", "--extern-post-js", classpath]
-  ++ (if lib
-         then ["-s", "EXPORT_NAME=loadWASM"]
-         else []
-     )
-  ++ ["-s", "WASM_BIGINT"]
-  ++ ["-s", "EXPORTED_FUNCTIONS=["
-              ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
-              ++ "]"
-     ]
+    ++ ["-s", "--extern-post-js", classpath]
+    ++ ( if lib
+           then ["-s", "EXPORT_NAME=loadWASM"]
+           else []
+       )
+    ++ ["-s", "WASM_BIGINT"]
+    ++ [ "-s",
+         "EXPORTED_FUNCTIONS=["
+           ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
+           ++ "]"
+       ]
 
 runEMCC :: String -> String -> [String] -> [String] -> [String] -> FutharkM ()
 runEMCC cpath outpath cflags_def ldflags extra_flags = do
@@ -650,13 +662,21 @@ compileCtoWASMAction fcfg mode outpath =
         ToLibrary -> do
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath SequentialWASM.libraryExports
-          runEMCC cpath mjspath ["-O3", "-msimd128"] ["-lm"]
+          runEMCC
+            cpath
+            mjspath
+            ["-O3", "-msimd128"]
+            ["-lm"]
             (wasmFlags classpath exps True)
         _ -> do
           -- Non-server executables are not supported.
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath SequentialWASM.runServer
-          runEMCC cpath outpath ["-O3", "-msimd128"] ["-lm"]
+          runEMCC
+            cpath
+            outpath
+            ["-O3", "-msimd128"]
+            ["-lm"]
             (wasmFlags classpath exps False)
     writeLibs cprog jsprog = do
       let (h, imp, _) = SequentialC.asLibrary cprog
@@ -686,13 +706,21 @@ compileMulticoreToWASMAction fcfg mode outpath =
         ToLibrary -> do
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath MulticoreWASM.libraryExports
-          runEMCC cpath mjspath ["-O3", "-msimd128"] ["-lm", "-pthread"]
+          runEMCC
+            cpath
+            mjspath
+            ["-O3", "-msimd128"]
+            ["-lm", "-pthread"]
             (wasmFlags classpath exps True)
         _ -> do
           -- Non-server executables are not supported.
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath MulticoreWASM.runServer
-          runEMCC cpath outpath ["-O3", "-msimd128"] ["-lm", "-pthread"]
+          runEMCC
+            cpath
+            outpath
+            ["-O3", "-msimd128"]
+            ["-lm", "-pthread"]
             (wasmFlags classpath exps False)
 
     writeLibs cprog jsprog = do

@@ -29,7 +29,7 @@ module Futhark.CodeGen.RTS.C
     backendsHipH,
     backendsCH,
     backendsMulticoreH,
-    backendsWebGPUH
+    backendsWebGPUH,
   )
 where
 
