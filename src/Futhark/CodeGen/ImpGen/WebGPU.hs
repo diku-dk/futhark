@@ -664,18 +664,40 @@ genConstAndBuiltinDecls = do
         [(nameFromText n, e) | (n, e) <- builtins]
 
   let consts = [(n, e) | ImpGPU.ConstUse n e <- ImpGPU.kernelUses kernel]
-  moduleNames <- mapM (mkGlobalIdent . (<> "_x") . nameToIdent . fst) consts
-  let constMap = [(nameFromText i, e) | ((_, e), i) <- zip consts moduleNames]
-  let constDecls = [WGSL.OverrideDecl i (WGSL.Prim WGSL.Int32)
-                     (Just $ WGSL.IntExp 0) | i <- moduleNames]
-  let constInits =
-        [WGSL.Seq (WGSL.DeclareVar (nameToIdent n) (WGSL.Prim wgslInt64))
-          (WGSL.Assign (nameToIdent n) (WGSL.CallExp "i64" [WGSL.VarExp i,
-                                                            WGSL.IntExp 0]))
-          | ((n, _), i) <- zip consts moduleNames]
+  moduleNames <- mapM (\c -> do
+    let n = nameToIdent $ fst c
+    lo <- mkGlobalIdent (n <> "_lo")
+    hi <- mkGlobalIdent (n <> "_hi")
+    pure (lo, hi)) consts
 
-  let decls = builtinDecls ++ constDecls
-  let fullMap = builtinMap ++ constMap
+  let mkLo e = untyped $
+        (TPrimExp e :: TPrimExp Int64 KernelConst) .&. 0x00000000ffffffff
+  let mkHi e = untyped $
+        (TPrimExp e :: TPrimExp Int64 KernelConst) .>>. 32
+
+  let mkConst (n, e) (lo, hi) =
+        case primExpType e of
+          IntType Int64 ->
+            ([(nameFromText lo, mkLo e), (nameFromText hi, mkHi e)],
+             [WGSL.OverrideDecl lo (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0),
+              WGSL.OverrideDecl hi (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)],
+             WGSL.Seq
+              (WGSL.DeclareVar (nameToIdent n) (WGSL.Prim wgslInt64))
+              (WGSL.Assign (nameToIdent n)
+                (WGSL.CallExp "i64" [WGSL.VarExp lo, WGSL.VarExp hi])))
+          _ ->
+            ([(nameFromText lo, e)],
+             [WGSL.OverrideDecl lo (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)],
+             WGSL.Seq
+              (WGSL.DeclareVar (nameToIdent n) (WGSL.Prim wgslInt64))
+              (WGSL.Assign (nameToIdent n)
+                (WGSL.CallExp "i64" [WGSL.VarExp lo, WGSL.IntExp 0])))
+
+  let (constMap, constDecls, constInits) = unzip3 $
+        zipWith mkConst consts moduleNames
+
+  let decls = builtinDecls ++ concat constDecls
+  let fullMap = builtinMap ++ concat constMap
   sequence_ [addOverride n | WGSL.OverrideDecl n _ _ <- decls]
   pure (decls, fullMap, WGSL.stmts constInits)
 
