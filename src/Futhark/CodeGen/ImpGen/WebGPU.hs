@@ -71,16 +71,17 @@ addRenames renames r = r { krNameReplacements = insert (krNameReplacements r) }
 
 data KernelW = KernelW
   { kwOverrides :: [WGSL.Ident],
+    kwDynamicBlockDims :: [(Int, WGSL.Ident)],
     kwScalars :: [WGSL.PrimType],
     kwBindSlots :: [Int]
   }
 
 instance Semigroup KernelW where
-  (KernelW ao as ab) <> (KernelW bo bs bb) =
-    KernelW (ao <> bo) (as <> bs) (ab <> bb)
+  (KernelW ao ad as ab) <> (KernelW bo bd bs bb) =
+    KernelW (ao <> bo) (ad <> bd) (as <> bs) (ab <> bb)
 
 instance Monoid KernelW where
-  mempty = KernelW [] [] []
+  mempty = KernelW [] [] [] []
 
 type KernelM = RWST KernelR KernelW () WebGPUM
 
@@ -104,16 +105,19 @@ assignBindSlot :: KernelM Int
 assignBindSlot = do
   wState <- lift get
   let slot = wsNextBindSlot wState
-  tell (KernelW [] [] [slot])
+  tell (KernelW [] [] [] [slot])
   lift $ put (wState {wsNextBindSlot = slot + 1})
   pure slot
 
+addDynamicBlockDim :: Int -> WGSL.Ident -> KernelM ()
+addDynamicBlockDim dim ident = tell (KernelW [ident] [(dim, ident)] [] [])
+
 -- | Write an override declaration to add to the current kernel's interface.
 addOverride :: WGSL.Ident -> KernelM ()
-addOverride ident = tell (KernelW [ident] [] [])
+addOverride ident = tell (KernelW [ident] [] [] [])
 
 addScalar :: WGSL.PrimType -> KernelM ()
-addScalar typ = tell (KernelW [] [typ] [])
+addScalar typ = tell (KernelW [] [] [typ] [])
 
 finishKernel :: KernelR -> KernelW -> WebGPUM KernelName
 finishKernel (KernelR kernel _) kw = do
@@ -128,7 +132,8 @@ finishKernel (KernelR kernel _) kw = do
     scalarsSize = size,
     scalarsBindSlot = head (kwBindSlots kw),
     memBindSlots = tail (kwBindSlots kw),
-    overrideNames = kwOverrides kw
+    overrideNames = kwOverrides kw,
+    dynamicBlockDims = kwDynamicBlockDims kw
   }
   put $ s {wsKernels = wsKernels s <> [(name, interface)]}
   pure (nameFromText name)
@@ -141,9 +146,13 @@ entryParams =
       [WGSL.Attrib "builtin" [WGSL.VarExp "local_invocation_id"]]
   ]
 
-builtinLockstepWidth, builtinBlockSize :: KernelM WGSL.Ident
+builtinLockstepWidth :: KernelM WGSL.Ident
 builtinLockstepWidth = mkGlobalIdent "lockstep_width"
-builtinBlockSize = mkGlobalIdent "block_size"
+builtinBlockSize :: Int -> KernelM WGSL.Ident
+builtinBlockSize 0 = mkGlobalIdent "block_size_x"
+builtinBlockSize 1 = mkGlobalIdent "block_size_y"
+builtinBlockSize 2 = mkGlobalIdent "block_size_z"
+builtinBlockSize _ = error "invalid block size dimension"
 
 -- Main function for translating an ImpGPU kernel to a WebGPU kernel.
 genKernel :: KernelM ()
@@ -151,7 +160,8 @@ genKernel = do
   kernel <- asks krKernel
   let name = textToIdent $ nameToText (ImpGPU.kernelName kernel)
 
-  (overrideDecls, overrideMacroDefs, overrideInits) <- genConstAndBuiltinDecls
+  (overrideDecls, overrideMacroDefs, blockDimNames, overrideInits)
+    <- genConstAndBuiltinDecls
   gen $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
   lift $ mapM_ (uncurry addMacroDef) overrideMacroDefs
 
@@ -165,9 +175,8 @@ genKernel = do
     genWGSLStm (ImpGPU.kernelBody kernel)
   let body = WGSL.stmts [overrideInits, scalarCopies, wgslBody]
 
-  blockSize <- builtinBlockSize
   let attribs = [WGSL.Attrib "compute" [],
-                 WGSL.Attrib "workgroup_size" [WGSL.VarExp blockSize]]
+                 WGSL.Attrib "workgroup_size" (map WGSL.VarExp blockDimNames)]
 
   let wgslFun = WGSL.Function
                   { WGSL.funName = name,
@@ -351,9 +360,9 @@ genWGSLStm (Op (ImpGPU.GetLocalId dest i)) = do
   destId <- getIdent dest
   pure $ WGSL.Assign destId $
     WGSL.to_i32 (WGSL.IndexExp "local_id" (WGSL.IntExp i))
-genWGSLStm (Op (ImpGPU.GetLocalSize dest _)) = do
+genWGSLStm (Op (ImpGPU.GetLocalSize dest i)) = do
   destId <- getIdent dest
-  WGSL.Assign destId . WGSL.VarExp <$> builtinBlockSize
+  WGSL.Assign destId . WGSL.VarExp <$> builtinBlockSize i
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = do
   destId <- getIdent dest
   WGSL.Assign destId . WGSL.VarExp <$> builtinLockstepWidth
@@ -647,16 +656,30 @@ genMemoryDecls = do
 -- kernel before they can be used, these are contained in the returned
 -- statement.
 genConstAndBuiltinDecls :: KernelM
-  ([WGSL.Declaration], [(Name, KernelConstExp)], WGSL.Stmt)
+  ([WGSL.Declaration], [(Name, KernelConstExp)], [WGSL.Ident], WGSL.Stmt)
 genConstAndBuiltinDecls = do
   kernel <- asks krKernel
 
-  let blockDimExp = case ImpGPU.kernelBlockSize kernel of
-                      [Right e] -> e
-                      _ -> error "TODO: no non-const or >1dim block sizes yet"
+  let blockDimExps = zip [0..] $ ImpGPU.kernelBlockSize kernel
+  blockDimNames <- mapM (builtinBlockSize . fst) blockDimExps
+  let blockDims = zip blockDimExps blockDimNames
+  let constBlockDims = [(i, n, e) | ((i, Right e), n) <- blockDims]
+  let dynBlockDims = [(i, n, e) | ((i, Left e), n) <- blockDims]
+
+  let blockDimDecls = map
+        (\n -> WGSL.OverrideDecl n (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0))
+        blockDimNames
+  -- KernelConstExp block dims get generated into the general macro/override
+  -- machinery.
+  let blockDimMap = [(nameFromText n, e) | (_, n, e) <- constBlockDims]
+
+  -- Dynamic block dimensions instead get generated into their own list, and
+  -- cause pipelines to be created later if any are present, since we can only
+  -- do so once we have the value for the dimension.
+  mapM_ (uncurry addDynamicBlockDim) [(i, n) | (i, n, _e) <- dynBlockDims]
+
   builtins <- sequence
-                [builtinLockstepWidth <&> (,ValueExp (IntValue (Int32Value 1))),
-                 builtinBlockSize <&> (,blockDimExp)]
+                [builtinLockstepWidth <&> (,ValueExp (IntValue (Int32Value 1)))]
   let builtinDecls =
         [WGSL.OverrideDecl n (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
           | (n, _) <- builtins]
@@ -696,10 +719,10 @@ genConstAndBuiltinDecls = do
   let (constMap, constDecls, constInits) = unzip3 $
         zipWith mkConst consts moduleNames
 
-  let decls = builtinDecls ++ concat constDecls
-  let fullMap = builtinMap ++ concat constMap
+  let decls = blockDimDecls ++ builtinDecls ++ concat constDecls
+  let fullMap = blockDimMap ++ builtinMap ++ concat constMap
   sequence_ [addOverride n | WGSL.OverrideDecl n _ _ <- decls]
-  pure (decls, fullMap, WGSL.stmts constInits)
+  pure (decls, fullMap, blockDimNames, WGSL.stmts constInits)
 
 nameToIdent :: VName -> WGSL.Ident
 nameToIdent = zEncodeText . prettyText

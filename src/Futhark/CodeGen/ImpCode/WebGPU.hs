@@ -37,7 +37,10 @@ data KernelInterface = KernelInterface
     -- these get passed through 'webgpuMacroDefs'.
     -- Currently also used to work around a Chrome/Dawn bug, see
     -- `gpu_create_kernel` in rts/c/backends/webgpu.h.
-    overrideNames :: [T.Text]
+    overrideNames :: [T.Text],
+    -- | Dynamic block dimensions, with the corresponding override name. They
+    -- are also included in `overrideNames`.
+    dynamicBlockDims :: [(Int, T.Text)]
   }
 
 -- | A program calling WebGPU kernels.

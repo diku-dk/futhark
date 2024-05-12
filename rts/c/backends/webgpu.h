@@ -555,6 +555,10 @@ void backend_context_teardown(struct futhark_context *ctx) {
 //
 //   size_t num_overrides;
 //   char **used_overrides;
+
+//   size_t num_dynamic_block_dims;
+//   uint32_t *dynamic_block_dim_indices;
+//   char **dynamic_block_dim_names;
 struct wgpu_kernel_info;
 static size_t wgpu_num_kernel_infos;
 static wgpu_kernel_info wgpu_kernel_infos[];
@@ -574,10 +578,23 @@ struct wgpu_kernel_info *wgpu_get_kernel_info(const char *name) {
 // Types.
 struct wgpu_kernel {
   struct wgpu_kernel_info *info;
+
+  WGPUBuffer scalars_buffer;
   WGPUBindGroupLayout bind_group_layout;
   WGPUPipelineLayout pipeline_layout;
+
+  // True if we can create a single pipeline in `gpu_create_kernel`. If false,
+  // need to create a new pipeline for every kernel launch.
+  bool static_pipeline;
+
+  // Only set if static_pipeline.
   WGPUComputePipeline pipeline;
-  WGPUBuffer scalars_buffer;
+
+  // Only set if !static_pipeline.
+  WGPUConstantEntry *const_entries;
+  // How many entries are already set; there is enough space in the allocation
+  // to additionally set the dynamic block dimension entries.
+  int const_entries_set;
 };
 typedef struct wgpu_kernel* gpu_kernel;
 typedef WGPUBuffer gpu_mem;
@@ -592,6 +609,13 @@ static void gpu_create_kernel(struct futhark_context *ctx,
   struct wgpu_kernel_info *kernel_info = wgpu_get_kernel_info(name);
   struct wgpu_kernel *kernel = malloc(sizeof(struct wgpu_kernel));
   kernel->info = kernel_info;
+
+  WGPUBufferDescriptor scalars_desc = {
+    .label = "kernel scalars",
+    .size = kernel_info->scalars_size,
+    .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst
+  };
+  kernel->scalars_buffer = wgpuDeviceCreateBuffer(ctx->device, &scalars_desc);
   
   // Create bind group layout.
   WGPUBindGroupLayoutEntry *bgl_entries
@@ -646,25 +670,25 @@ static void gpu_create_kernel(struct futhark_context *ctx,
     }
   }
 
-  // Create pipeline.
-  WGPUComputePipelineDescriptor desc = {
-    .layout = kernel->pipeline_layout,
-    .compute = {
-      .module = ctx->module,
-      .entryPoint = kernel_info->name,
-      .constantCount = kernel_info->num_overrides,
-      .constants = const_entries,
-    }
-  };
-  kernel->pipeline = wgpuDeviceCreateComputePipeline(ctx->device, &desc);
-  free(const_entries);
-
-  WGPUBufferDescriptor scalars_desc = {
-    .label = "kernel scalars",
-    .size = kernel_info->scalars_size,
-    .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst
-  };
-  kernel->scalars_buffer = wgpuDeviceCreateBuffer(ctx->device, &scalars_desc);
+  kernel->static_pipeline = kernel_info->num_dynamic_block_dims > 0;
+  if (!kernel->static_pipeline) {
+    kernel->const_entries = const_entries;
+    kernel->const_entries_set = const_idx;
+  }
+  else {
+    // Create pipeline.
+    WGPUComputePipelineDescriptor desc = {
+      .layout = kernel->pipeline_layout,
+      .compute = {
+        .module = ctx->module,
+        .entryPoint = kernel_info->name,
+        .constantCount = kernel_info->num_overrides,
+        .constants = const_entries,
+      }
+    };
+    kernel->pipeline = wgpuDeviceCreateComputePipeline(ctx->device, &desc);
+    free(const_entries);
+  }
 
   *kernel_out = kernel;
 }
@@ -826,9 +850,6 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              int num_args,
                              void* args[num_args],
                              size_t args_sizes[num_args]) {
-  // TODO: Deal with `block` not matching what's set in the pipeline constants
-  // at creation time. Also, there, deal with no const block size being
-  // available at all.
   struct wgpu_kernel_info *kernel_info = kernel->info;
 
   if (num_args != kernel_info->num_scalars + kernel_info->num_bindings) {
@@ -870,11 +891,33 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
   };
   WGPUBindGroup bg = wgpuDeviceCreateBindGroup(ctx->device, &bg_desc);
 
+  WGPUComputePipeline pipeline;
+  if (kernel->static_pipeline) { pipeline = kernel->pipeline; }
+  else {
+    for (int i = 0; i < kernel_info->num_dynamic_block_dims; i++) {
+      WGPUConstantEntry *entry =
+        &kernel->const_entries[kernel->const_entries_set + i];
+      entry->key = kernel_info->dynamic_block_dim_names[i];
+      entry->value = (double) block[kernel_info->dynamic_block_dim_indices[i]];
+    }
+
+    WGPUComputePipelineDescriptor desc = {
+      .layout = kernel->pipeline_layout,
+      .compute = {
+        .module = ctx->module,
+        .entryPoint = kernel_info->name,
+        .constantCount = kernel_info->num_overrides,
+        .constants = kernel->const_entries,
+      }
+    };
+    pipeline = wgpuDeviceCreateComputePipeline(ctx->device, &desc);
+  }
+
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
 
   WGPUComputePassEncoder pass_encoder
     = wgpuCommandEncoderBeginComputePass(encoder, NULL);
-  wgpuComputePassEncoderSetPipeline(pass_encoder, kernel->pipeline);
+  wgpuComputePassEncoderSetPipeline(pass_encoder, pipeline);
   wgpuComputePassEncoderSetBindGroup(pass_encoder, 0, bg, 0, NULL);
   wgpuComputePassEncoderDispatchWorkgroups(pass_encoder,
                                            grid[0], grid[1], grid[2]);

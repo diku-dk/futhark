@@ -41,11 +41,16 @@ mkKernelInfos kernels = do
                typename uint32_t *binding_indices;
                typename size_t num_overrides;
                char **used_overrides;
+               typename size_t num_dynamic_block_dims;
+               typename uint32_t *dynamic_block_dim_indices;
+               char **dynamic_block_dim_names;
              } wgpu_kernel_info;
              static typename size_t wgpu_num_kernel_infos = $exp:num_kernels; |]
   mapM_ GC.earlyDecl $ concatMap sc_offs_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap bind_idxs_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap used_overrides_decl (M.toList kernels)
+  mapM_ GC.earlyDecl $ concatMap dynamic_block_dim_indices_decl (M.toList kernels)
+  mapM_ GC.earlyDecl $ concatMap dynamic_block_dim_names_decl (M.toList kernels)
   mapM_ GC.earlyDecl
     [C.cunit|static struct wgpu_kernel_info wgpu_kernel_infos[]
                = {$inits:info_inits};|]
@@ -64,10 +69,20 @@ mkKernelInfos kernels = do
                         (overrideNames k)
        in [C.cunit|static char* $id:(n <> "_used_overrides")[]
                     = {$inits:overrides};|]
+    dynamic_block_dim_indices_decl (n, k) =
+      let idxs = map ((\i -> [C.cinit|$int:i|]) . fst) (dynamicBlockDims k)
+       in [C.cunit|static typename uint32_t $id:(n <> "_dynamic_block_dim_indices")[]
+                    = {$inits:idxs};|]
+    dynamic_block_dim_names_decl (n, k) =
+      let names = map ((\d -> [C.cinit|$string:(T.unpack d)|]) . snd)
+                    (dynamicBlockDims k)
+       in [C.cunit|static char* $id:(n <> "_dynamic_block_dim_names")[]
+                    = {$inits:names};|]
     info_init (n, k) =
       let num_scalars = length (scalarsOffsets k)
           num_bindings = length (memBindSlots k)
           num_overrides = length (overrideNames k)
+          num_dynamic_block_dims = length (dynamicBlockDims k)
        in [C.cinit|{ .name = $string:(T.unpack (idText (C.toIdent n mempty))),
                      .num_scalars = $int:num_scalars,
                      .scalars_binding = $int:(scalarsBindSlot k),
@@ -77,6 +92,11 @@ mkKernelInfos kernels = do
                      .binding_indices = $id:(n <> "_binding_indices"),
                      .num_overrides = $int:num_overrides,
                      .used_overrides = $id:(n <> "_used_overrides"),
+                     .num_dynamic_block_dims = $int:num_dynamic_block_dims,
+                     .dynamic_block_dim_indices =
+                        $id:(n <> "_dynamic_block_dim_indices"),
+                     .dynamic_block_dim_names =
+                        $id:(n <> "_dynamic_block_dim_names"),
                    }|]
     info_inits = map info_init (M.toList kernels)
 
