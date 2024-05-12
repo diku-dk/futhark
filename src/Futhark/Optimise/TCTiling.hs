@@ -673,10 +673,11 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
     inner_dims = innerDims kernel_params
 
 
--- Note [ShmemZeroPaddingOnGlobalMemOOB] When copying from global to shared
--- memory, we need to handle out-of-bounds reads from global memory. For the
--- time being, we write a padding value to shared memory. This padding value is
--- a zero (or zero-like) value from the corresponding element type.
+-- Note [ShmemZeroPaddingOnGlobalMemOOB]
+-- When copying from global to shared memory, we need to handle out-of-bounds
+-- reads from global memory. For the time being, we write a padding value to
+-- shared memory. This padding value is a zero (or zero-like) value from the
+-- corresponding element type.
 --
 -- However, this "solution" succeeds only when the following condition holds:
 --
