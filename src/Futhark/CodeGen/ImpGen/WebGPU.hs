@@ -124,7 +124,7 @@ finishKernel (KernelR kernel _) kw = do
   s <- get
   let (offsets, _align, size) = case WGSL.structLayout (kwScalars kw) of
                                   Just t -> t
-                                  Nothing -> error "invalid scalars struct"
+                                  Nothing -> ([], 4, 4) -- dummy layout
   let name = nameToText $ ImpGPU.kernelName kernel
   let interface = KernelInterface {
     safety = SafetyNone, -- TODO
@@ -590,8 +590,11 @@ genScalarDecls = do
   -- host-shareable scalar structs. Should then convert in the copy stmt below.
   let scalars = [(nameToIdent name, WGSL.Prim $ wgslPrimType typ)
                   | ImpGPU.ScalarUse name typ <- uses]
+  let scalarFields = case scalars of
+                  [] -> [("_dummy_scalar", WGSL.Prim WGSL.Int32)]
+                  sclrs -> sclrs
   let structDecl = WGSL.StructDecl $
-        WGSL.Struct structName (map (uncurry WGSL.Field) scalars)
+        WGSL.Struct structName (map (uncurry WGSL.Field) scalarFields)
 
   mapM_ addScalar [t | (_, WGSL.Prim t) <- scalars]
 

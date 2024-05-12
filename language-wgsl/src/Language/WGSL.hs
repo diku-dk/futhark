@@ -60,6 +60,7 @@ hsLayout (Atomic t) = hsLayout t
 -- | Field offsets, AlignOf, and SizeOf of a host-shareable struct type with the
 -- given fields.
 structLayout :: [PrimType] -> Maybe ([Int], Int, Int)
+structLayout [] = Nothing
 structLayout fields = do
   fieldLayouts <- mapM hsLayout fields
   let (fieldAligns, fieldSizes) = unzip fieldLayouts
@@ -204,27 +205,23 @@ instance Pretty Stmt where
     "if"
       <+> pretty cond
       <+> "{"
-        </> indent 2 (pretty th)
-      <> ";"
-        </> "}"
+        </> indent 2 (pretty th) <> ";"
+      </> "}"
   pretty (If cond Skip el) =
     "if"
       <+> pretty cond
       <+> "{ }"
-        </> "else {"
-        </> indent 2 (pretty el)
-      <> ";"
-        </> "}"
+      </> "else {"
+        </> indent 2 (pretty el) <> ";"
+      </> "}"
   pretty (If cond th el) =
     "if"
       <+> pretty cond
       <+> "{"
-        </> indent 2 (pretty th)
-      <> ";"
-        </> "} else {"
-        </> indent 2 (pretty el)
-      <> ";"
-        </> "}"
+        </> indent 2 (pretty th) <> ";"
+      </> "} else {"
+        </> indent 2 (pretty el) <> ";"
+      </> "}"
   pretty (For x initializer cond upd body) =
     "for"
       <+> parens
@@ -238,16 +235,14 @@ instance Pretty Stmt where
             <+> pretty upd
         )
       <+> "{"
-        </> indent 2 (pretty body)
-      <> ";"
-        </> "}"
+        </> indent 2 (pretty body) <> ";"
+      </> "}"
   pretty (While cond body) =
     "while"
       <+> pretty cond
       <+> "{"
-        </> indent 2 (pretty body)
-      <> ";"
-        </> "}"
+        </> indent 2 (pretty body) <> ";"
+      </> "}"
   pretty (Call f args) = pretty f <> parens (commasep $ map pretty args)
 
 instance Pretty Attrib where
@@ -271,7 +266,7 @@ instance Pretty Function where
     stack
       [ hsep (map pretty attribs),
         "fn" <+> pretty name <> prettyParams params <+> "{",
-        indent 2 (pretty body),
+          indent 2 (pretty body) <> ";",
         "}"
       ]
 
