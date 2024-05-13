@@ -26,11 +26,10 @@ import Language.Futhark (VName (VName))
 import Language.Futhark qualified as E
 import Futhark.Util.Pretty
 import Data.Functor.Identity
-import Control.Monad.RWS.Strict hiding (Sum)
 import Data.List.NonEmpty qualified as NE
 import Futhark.SoP.Monad
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Debug.Trace (traceM, trace)
+import Debug.Trace (traceM)
 import Data.Text (unpack)
 import qualified Data.Set as S
 
@@ -290,7 +289,8 @@ instance Pretty a => Pretty (Cases a) where
       prettyCase (p, e) = "|" <+> pretty p <+> "⇒ " <+> pretty e
 
 instance Pretty Domain where
-  pretty (Iota e) = "iota" <+> pretty e
+  pretty (Iota (Var vn)) = "iota" <+> pretty (Var vn)
+  pretty (Iota e) = "iota" <+> parens (pretty e)
   pretty (Cat k m b) =
     "⊎"
       <> prettyName k

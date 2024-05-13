@@ -140,6 +140,16 @@ tests =
         "∀i₆₁₉₆ ∈ ⊎k₆₁₉₉=iota m₆₀₆₉ [∑shape₆₀₈₁[0 : -1 + k₆₁₉₉], ..., ∑shape₆₀₈₁[0 : k₆₁₉₉]) .",
         "    | True ⇒  ∑xs₆₀₈₂[∑shape₆₀₈₁[0 : -1 + k₆₁₉₉] : i₆₁₉₆ + ∑shape₆₀₈₁[0 : -1 + k₆₁₉₉]]"
        ])
+     ]),
+    ("tests/refinement/use_previous.fut",
+     [ ("fun2", [
+        "∀i₆₁₇₆ ∈ iota (-1 + n₆₀₆₈) .",
+        "    | True ⇒  2674 + 2*inputs₆₀₇₀[1 + i₆₁₇₆]"
+       ]),
+       ("fun3", [
+        "∀i₆₁₇₆ ∈ iota (-1 + n₆₀₆₈) .",
+        "    | True ⇒  2674"
+       ])
      ])
   ]
 

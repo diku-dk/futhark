@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use void" #-}
 module Futhark.Analysis.View (mkIndexFnProg) where
 
 import Data.List qualified as L
@@ -112,15 +114,13 @@ mkIndexFnImports = mapM_ (mkIndexFnDecs . E.progDecs . fileProg . snd)
 mkIndexFnDecs :: [E.Dec] -> IndexFnM ()
 mkIndexFnDecs [] = pure ()
 mkIndexFnDecs (E.ValDec vb : rest) = do
-  clearIndexFns
   mkIndexFnValBind vb
   mkIndexFnDecs rest
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 -- toplevel_indexfns
 mkIndexFnValBind :: E.ValBind -> IndexFnM ()
-mkIndexFnValBind val@(E.ValBind _ vn ret _ _ _params body _ _ _) = do
-  insertTopLevel vn val
+mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
   case ret of
     Just (E.TERefine _t _goal _) -> do
       -- We don't really care about the goal right now, as
@@ -129,51 +129,45 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ _params body _ _ _) = do
       traceM ("\nTo prove:\n--------\n" <> prettyString ret <> "\n====\n")
       tell [noindent <> hrulefill <> prettyLaTeX val]
       tell ["To prove:" <> prettyLaTeX ret]
-      forwards vn body
+      indexfn <- forward body >>= refineAndBind vn
+      insertTopLevel vn (params, indexfn)
       pure ()
     _ -> pure ()
 
-
-forwards :: E.VName -> E.Exp -> IndexFnM ()
-forwards info (E.AppExp (E.LetPat _ p e body _) _)
-  | (E.Named x, _, _) <- E.patternParam p = do
-    traceM (prettyString p <> " = " <> prettyString e)
-    tell [textbf "Forward on " <> Math.math (toLaTeX x) <> toLaTeX e]
-    newIndexFn <- forward e
-    refineAndBind x newIndexFn
-    forwards info body
-    pure ()
-forwards info (E.AppExp (E.LetPat _ p@(E.TuplePat patterns _) e body _) _) = do
-    traceM (prettyString patterns <> " = " <> prettyString e)
-    tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX e]
-    ys <- unzipT <$> forward e
-    forM_ (zip patterns ys) refineAndBind'
-    forwards info body
-    pure ()
-    where
-      -- Wrap refineAndBind to discard results otherwise bound to wildcards.
-      refineAndBind' (E.Wildcard {}, _) = pure ()
-      refineAndBind' (E.Id vn _ _, indexfn) = refineAndBind vn indexfn
-      refineAndBind' x = error ("not implemented for " <> show x)
-forwards toplevel_vn e = do
-  indexfn <- forward e
-  refineAndBind toplevel_vn indexfn
-  pure ()
-
--- toplevel_indexfns
-refineAndBind :: E.VName -> IndexFn -> IndexFnM ()
+refineAndBind :: E.VName -> IndexFn -> IndexFnM IndexFn
 refineAndBind vn indexfn = do
-  tracePrettyM indexfn
   indexfn' <- rewrite indexfn >>= refineIndexFn >>= rewrite
+  insertIndexFn vn indexfn'
   tracePrettyM indexfn'
   traceM "\n"
   tell ["resulting in", toLaTeX (vn, indexfn')]
-  insertIndexFn vn indexfn'
+  pure indexfn'
 
+sub' :: IndexFn -> (E.VName, IndexFn) -> IndexFnM IndexFn
+sub' y (paramName, paramIndexFn) =
+  sub paramName paramIndexFn y >>= simplify
 
 forward :: E.Exp -> IndexFnM IndexFn
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
+-- Let-bindings.
+forward (E.AppExp (E.LetPat _ p@(E.Id vn _ _) x body _) _) = do
+  traceM (prettyString p <> " = " <> prettyString x)
+  tell [textbf "Forward on " <> Math.math (toLaTeX vn) <> toLaTeX x]
+  _ <- refineAndBind vn =<< forward x
+  forward body
+forward (E.AppExp (E.LetPat _ p@(E.TuplePat patterns _) x body _) _) = do
+    traceM (prettyString patterns <> " = " <> prettyString x)
+    tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX x]
+    xs <- unzipT <$> forward x
+    forM_ (zip patterns xs) refineAndBind'
+    forward body
+    where
+      -- Wrap refineAndBind to discard results otherwise bound to wildcards.
+      refineAndBind' (E.Wildcard {}, _) = pure ()
+      refineAndBind' (E.Id vn _ _, indexfn) =
+        refineAndBind vn indexfn >> pure ()
+      refineAndBind' e = error ("not implemented for " <> show e)
 -- Leaves.
 forward (E.Literal (E.BoolValue x) _) =
   normalise . toScalarIndexFn $ Bool x
@@ -217,7 +211,6 @@ forward (E.AppExp (E.Index xs' slice _) _)
       case iteratorName iter_xs of
         Just j -> do
           sub j (IndexFn iter_idx idx) (IndexFn iter_idx xs)
-            >>= rewrite
         Nothing ->
           error "indexing into a scalar"
 forward (E.Not e _) = do
@@ -225,10 +218,6 @@ forward (E.Not e _) = do
   rewrite $ IndexFn it $ cmapValues Not e'
 forward (E.ArrayLit _es _ _) =
   error "forward on array literal"
-forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) = do
-  x' <- forward x
-  y' <- forward y
-  sub vn x' y' >>= rewrite
 forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op',
@@ -287,10 +276,9 @@ forward (E.AppExp (E.Apply f args _) _)
       -- meaning x needs to be substituted by x[i].0
       let paramNames :: [E.VName] = mconcat $ map (S.toList . E.patNames) params
       let xss_flat :: [IndexFn] = mconcat $ map unzipT xss
-      let s y (paramName, paramIndexFn) = sub paramName paramIndexFn y >>= simplify
       let y' = IndexFn iter_y cases_body
       tell ["Using map rule ", toLaTeX y']
-      foldM s (IndexFn iter_y cases_body) (zip paramNames xss_flat)
+      foldM sub' y' (zip paramNames xss_flat)
         >>= rewrite
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
@@ -320,13 +308,11 @@ forward (E.AppExp (E.Apply f args _) _)
       -- Our semantics are sequential, so we can just decide that the scan
       -- is a scanl with x always being the accumulator and y always being
       -- an element of the array being scanned over.
-      let s y (paramName, paramIndexFn) = sub paramName paramIndexFn y
-                                            >>= simplify
       vn <- newNameFromString "body"
       y <- sub vn body (IndexFn (getIterator xs) (toCases (Var vn))) >>= simplify
       tell ["Using scan rule", toLaTeX y]
-      foldM s y (zip paramNames_y (unzipT xs))
-        >>= \y' -> foldM s y' (zip paramNames_x (repeat (toScalarIndexFn Recurrence)))
+      foldM sub' y (zip paramNames_y (unzipT xs))
+        >>= \y' -> foldM sub' y' (zip paramNames_x (repeat (toScalarIndexFn Recurrence)))
           >>= rewrite
   | Just fname <- getFun f,
     "zip" `L.isPrefixOf` fname = do
@@ -372,6 +358,7 @@ forward (E.AppExp (E.Apply f args _) _)
       -- * dest and result are same size
       IndexFn iter_inds inds <- forward inds_arg
       -- let Forall i (Iota m) = iter_inds -- TODO don't do unsafe matching.
+      debugM (prettyString inds)
       let Cases ((c, x) :| [(neg_c, y)]) = inds
       unless (c == (toNNF . Not $ neg_c)) (error "this should never happen")
       vals_fn <- forward vals_arg
@@ -443,15 +430,13 @@ forward (E.AppExp (E.Apply f args _) _)
       -- Handle references to user-defined top-level function definitions.
       toplevel <- gets toplevel
       case M.lookup g toplevel of
-        Just val -> do
+        Just (params, ixfn) -> do
           xs <- mapM forward args'
           let argnames =
-                S.toList . mconcat . map E.patNames $ E.valBindParams val
+                S.toList . mconcat . map E.patNames $ params
           when (length argnames /= length xs) (error "must be fully applied")
-          traceM ("🪅 inlining " <> prettyString (E.valBindName val))
-          debugM ("adding indexfns\n  " <> prettyString (zip argnames xs))
-          forM_ (zip argnames xs) (uncurry insertIndexFn)
-          forward (E.valBindBody val)
+          foldM sub' ixfn (zip argnames xs)
+              >>= rewrite
         _ -> do
           error $ "forward on unhandled function " <> prettyString g
 forward e = error $ "forward on " <> show e

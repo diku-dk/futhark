@@ -5,3 +5,7 @@ let fun2 [n] (inputs: [n]i64) : {[n-1]i64 | \res-> is_indexfn res} =
   -- let zs = fun1 (replicate n 0)
   let zs = fun1 inputs
   in map (\x -> x * 2) zs
+
+let fun3 [n] (_inputs: [n]i64) : {[n-1]i64 | \res-> is_indexfn res} =
+  let zs = fun1 (replicate n 0)
+  in map (\x -> x * 2) zs
