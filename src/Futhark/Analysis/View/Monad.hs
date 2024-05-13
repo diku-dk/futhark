@@ -52,3 +52,7 @@ insertTopLevel :: E.VName -> ([E.Pat], IndexFn) -> IndexFnM ()
 insertTopLevel vn (args, ixfn) =
   modify $
     \env -> env {toplevel = M.insert (E.baseString vn) (args, ixfn) $ toplevel env}
+
+clearAlgEnv :: IndexFnM ()
+clearAlgEnv =
+  modify $ \env -> env {algenv = mempty}

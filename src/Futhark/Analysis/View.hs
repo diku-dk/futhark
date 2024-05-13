@@ -20,7 +20,7 @@ import qualified Data.Map as M
 import Debug.Trace (traceM, trace)
 import qualified Data.Set as S
 import Control.Monad.RWS.Strict hiding (Sum)
-import Futhark.SoP.Monad (addRange)
+import Futhark.SoP.Monad (addRange, addEquiv)
 import qualified Text.LaTeX.Packages.AMSMath as Math
 import Text.LaTeX (textbf, newline, hrulefill, noindent)
 import Futhark.Analysis.View.Latex
@@ -33,9 +33,8 @@ import Futhark.Analysis.View.Latex
 -- form (arg: {t | \x -> f x}) where arg is applied to \x -> f x.
 handleRefinementTypes :: E.Exp -> IndexFnM ()
 handleRefinementTypes (E.Var (E.QualName _ vn)
-                             (E.Info {E.unInfo = E.Scalar lol@(E.Refinement _ty ref)}) _) =
-  trace ("## hi refinement" <> show lol)
-  (handleRefinement ref) vn
+                             (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) _) =
+  handleRefinement ref vn
 handleRefinementTypes _ = pure ()
 
 -- This function takes a type refinement \x -> f x and returns a function
@@ -44,18 +43,44 @@ handleRefinementTypes _ = pure ()
 --   For example, the refinement \x -> forall x (>= 0) will return
 -- a function that takes a name and adds a range with that name
 -- lower bounded by 0 to the environment.
-handleRefinement :: E.ExpBase E.Info E.VName -> E.VName -> IndexFnM ()
-handleRefinement (E.Lambda [E.Id x _ _] (E.AppExp (E.Apply f args _) _) _ _ _)
+handleRefinement :: E.Exp -> (E.VName -> IndexFnM ())
+handleRefinement ref | trace ("handleRefinement: " <> prettyString ref <> "\n" <> show ref) False = undefined
+handleRefinement (E.Lambda [E.Id x _ _] e _ _ _) =
+  \name -> handleRefinement' name x e
+handleRefinement _ = undefined
+
+handleRefinement' :: E.VName -> E.VName -> E.Exp -> IndexFnM ()
+handleRefinement' name x (E.AppExp (E.Apply f args _) _)
   | Just "forall" <- getFun f,
     [E.Var (E.QualName _ x') _ _,
-     E.OpSectionRight (E.QualName [] opvn) _ (E.IntLit c _ _) _ _ _] <- getArgs args,
+     E.OpSectionRight (E.QualName [] opvn) _ operand _ _ _] <- getArgs args,
     x == x' = do -- Make sure that lambda arg is applied to forall.
       case E.baseString opvn of
         ">=" ->
-          \name ->
-            addRange (Var name) (mkRangeLB (SoP.int2SoP c))
-        _ -> const undefined
-handleRefinement _ = \_ -> pure ()
+          addRange (Var name) (mkRangeLB $ fromExp operand)
+        _ -> undefined
+handleRefinement' name x (E.AppExp (E.BinOp (op', _) _ (E.Var (E.QualName _ x') _ _, _) (y', _) _) _)
+  | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
+    fn <- E.baseString $ E.qualLeaf op',
+    Just bop <- L.find ((fn ==) . prettyString) [minBound .. maxBound :: E.BinOp],
+    x == x' =
+      case bop of
+        E.Equal ->
+          let y = fromExp y'
+          in  addRange (Var name) (mkRange y y)
+        _ -> undefined
+handleRefinement' _ _ _ = pure ()
+
+fromExp :: E.Exp -> SoP.SoP Term
+fromExp (E.IntLit c _ _) =
+  SoP.int2SoP c
+fromExp (E.AppExp (E.Apply f args _) _)
+  | Just "sum" <- getFun f,
+    [arg@(E.Var (E.QualName _ x) _ _)] <- getArgs args =
+      case getSize arg of
+        Just n -> termToSoP $ SumSlice x (SoP.int2SoP 0) (SoP.sym2SoP n SoP..-. SoP.int2SoP 1)
+        Nothing -> undefined
+fromExp _ = undefined
 
 
 --------------------------------------------------------------
@@ -114,6 +139,7 @@ mkIndexFnImports = mapM_ (mkIndexFnDecs . E.progDecs . fileProg . snd)
 mkIndexFnDecs :: [E.Dec] -> IndexFnM ()
 mkIndexFnDecs [] = pure ()
 mkIndexFnDecs (E.ValDec vb : rest) = do
+  clearAlgEnv
   mkIndexFnValBind vb
   mkIndexFnDecs rest
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds

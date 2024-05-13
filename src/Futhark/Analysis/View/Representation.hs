@@ -29,7 +29,7 @@ import Data.Functor.Identity
 import Data.List.NonEmpty qualified as NE
 import Futhark.SoP.Monad
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Debug.Trace (traceM)
+import Debug.Trace (traceM, trace)
 import Data.Text (unpack)
 import qualified Data.Set as S
 
@@ -85,7 +85,7 @@ data Domain = Iota Term       -- [0, ..., n-1]
                 VName         -- k
                 Term          -- m
                 Term          -- b
-  deriving (Show, Eq, Ord)
+  deriving (Show, Ord)
 
 data Iterator = Forall VName Domain
               | Empty    -- Promoted variable.
@@ -104,22 +104,29 @@ iteratorEnd _ = Nothing
 -- The final value in the domain (which is ordered).
 domainEnd :: Domain -> Term
 domainEnd (Iota n) = n
-domainEnd (Cat _k _m _b) =
-  undefined -- don't want to implement this before I can test it.
-  -- domainEnd (substituteName k m dom) -- substitution should actually be m-1
--- instance ASTMappable Domain where
---   astMap m (Iota n) = Iota <$> astMap m n
---   astMap m (Union k n b) = Union <$> mapOnVName m k <*> astMap m n <*> astMap m b
+domainEnd (Cat k m b) = substituteName k m b
 
 domainStart :: Domain -> Term
 domainStart (Iota _) = SoP2 (SoP.int2SoP 0)
-domainStart (Cat k _m b) = substituteName k (SoP2 $ SoP.int2SoP 0) b
+domainStart (Cat k _ b) = substituteName k (SoP2 $ SoP.int2SoP 0) b
 
+
+instance Eq Domain where
+  u == v | trace ("Domain equality check:\n  " <> prettyString u <> " == " <> prettyString v) False = undefined
+  u == v =
+    trace ("Domain start u: " <> prettyString (domainStart u)) $
+    trace ("Domain start v: " <> prettyString (domainStart v)) $
+    trace ("Domain end u: " <> prettyString (domainEnd u)) $
+    trace ("Domain end v: " <> prettyString (domainEnd v)) $
+    -- Since the whole domain must be covered by an index function,
+    -- it is sufficient to check that starts and ends are equal.
+    domainStart u == domainStart v && domainEnd u == domainEnd v
 
 instance Eq Iterator where
-  (Forall _ dom_i) == (Forall _ dom_j) = dom_i == dom_j
+  (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
+  (Forall _ u) == (Forall _ v) = u == v
   Empty == Empty = True
-  _ == _ = False -- TODO
+  _ == _ = False
 
 newtype Cases a = Cases (NE.NonEmpty (a, a))
   deriving (Show, Eq, Ord)

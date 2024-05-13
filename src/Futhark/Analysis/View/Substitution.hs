@@ -3,7 +3,7 @@ import Language.Futhark (VName)
 import Futhark.Util.Pretty
 import Futhark.Analysis.View.Representation
 import qualified Data.List.NonEmpty as NE
-import Futhark.Analysis.View.Monad (IndexFnM)
+import Futhark.Analysis.View.Monad (IndexFnM, VEnv (algenv))
 import qualified Text.LaTeX.Packages.AMSMath as Math
 import Control.Monad.RWS
 import Futhark.Analysis.View.Latex (toLaTeX)
@@ -42,21 +42,36 @@ sub x q@(IndexFn (Forall i (Cat k m b)) xs) r@(IndexFn iter_y@(Forall j (Cat k' 
   | k == k',
     m == m',
     b == b' = do
+      -- Substitution Rule 4. (NOTE Indexing may depend on i/j and k.)
       tell ["Substitute " <> Math.math (toLaTeX x) <> " for " <> toLaTeX q]
       pure $
         debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n  in " <> prettyString r) $
         IndexFn
           iter_y
           (Cases . NE.fromList $ do
-            (xcond, xval) <- casesToList $ substituteName i (Var j) xs
+            (xcond, xval) <- casesToList xs
             (ycond, yval) <- casesToList ys
             pure (substituteIdx (i, x, xval) (j, ycond) :&& xcond,
                   substituteIdx (i, x, xval) (j, yval)))
-sub x q r =
+sub x q@(IndexFn iter_x@(Forall i xD) xs) r@(IndexFn (Forall j yD@(Iota {})) ys)
+  | xD == yD = do
+      tell ["Substitute " <> Math.math (toLaTeX x) <> " for " <> toLaTeX q]
+      pure $
+        debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n  in " <> prettyString r) $
+        IndexFn
+          iter_x -- XXX iter_x
+          (Cases . NE.fromList $ do
+            (xcond, xval) <- casesToList xs
+            (ycond, yval) <- casesToList $ substituteName j (Var i) ys
+            pure (substituteIdx (i, x, xval) (i, ycond) :&& xcond,
+                  substituteIdx (i, x, xval) (i, yval)))
+sub x q r = do
+  algenv <- gets algenv
   pure . error $ "💀 sub "
           <> prettyString x <> " for "
           <> prettyString q <> "\n   in "
           <> prettyString r
+          <> prettyString algenv
 
 substituteIdx :: ASTMappable a => (VName, VName, Term) -> (VName, a) -> a
 substituteIdx (i, x, xval) (j, y) = do
