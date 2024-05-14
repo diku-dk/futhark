@@ -182,8 +182,8 @@ runTest (file, expected) = do
   let (res, _) = mkIndexFnProg src imports
   let passed = all (checkTest . M.mapKeys baseString $ res) expected
   if passed
-  then putStrLn $ "Test passed: " ++ file
-  else error $ "Test failed: " ++ file
+  then putStrLn $ "\ESC[1;32mTest passed:\ESC[0m " ++ file
+  else error $ "\ESC[1;31mTest failed:\ESC[0m " ++ file
   where
     checkTest actuals (name, expected_indxfn) =
       let actual = actuals M.! name
