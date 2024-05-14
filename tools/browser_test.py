@@ -31,8 +31,8 @@ parser.add_argument(
 parser.add_argument(
     "--no-browser",
     help=(
-        "do not start a browser, instead wait for one to connect.\n",
-        "Can also be set via NO_BROWSER=1 env variable.",
+        "do not start a browser, instead wait for one to connect.\n"
+        "Can also be set via NO_BROWSER=1 env variable."
     ),
     action="store_true",
 )
@@ -80,18 +80,20 @@ remote_driver_url = os.environ.get("WEB_DRIVER_URL")
 if remote_driver_url is None:
     remote_driver_url = args.web_driver
 
-no_browser = os.environ.get("NO_BROWSER")
-if no_browser == "0":
+no_browser_env = os.environ.get("NO_BROWSER")
+no_browser = None
+if no_browser_env == "0":
     no_browser = False
-elif no_browser == "1":
+elif no_browser_env == "1":
     no_browser = True
 elif no_browser is None:
     no_browser = args.no_browser
 
-headless = os.environ.get("HEADLESS")
-if headless == "0":
+headless_env = os.environ.get("HEADLESS")
+headless = None
+if headless_env == "0":
     headless = False
-elif headless == "1":
+elif headless_env == "1":
     headless = True
 elif headless is None:
     headless = not args.show_browser
