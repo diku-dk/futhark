@@ -97,14 +97,14 @@ getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
 getFun _ = Nothing
 
 getSize :: E.Exp -> Maybe Term
-getSize (E.Var _ (E.Info {E.unInfo = E.Scalar (E.Refinement ty _)}) _) =
-  -- TODO why are all refinements scalar?
-  sizeOfTypeBase ty
 getSize (E.Var _ (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
 getSize (E.ArrayLit [] (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
 getSize e = error $ "getSize: " <> prettyString e <> "\n" <> show e
 
 sizeOfTypeBase :: E.TypeBase E.Exp as -> Maybe Term
+sizeOfTypeBase (E.Scalar (E.Refinement ty _)) =
+  -- TODO why are all refinements scalar?
+  sizeOfTypeBase ty
 sizeOfTypeBase (E.Array _ _ shape _)
   | dim:_ <- E.shapeDims shape =
     Just $ convertSize dim
