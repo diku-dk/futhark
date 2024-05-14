@@ -179,6 +179,10 @@ instance ToLaTeX (E.VName, IndexFn) where
         =: raw "\\bullet~.~" <> lnbk & toLaTeX e
     ]
 
+instance ToLaTeX (E.VName, Term) where
+  toLaTeX_ _ (vn, t) =
+    equation_ (toLaTeX vn =: toLaTeX t)
+
 instance ToLaTeX E.Exp where
   toLaTeX_ _ = prettyLaTeX
 

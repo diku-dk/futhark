@@ -28,7 +28,7 @@ sub x (IndexFn Empty xs) (IndexFn iter_y ys) =
               substituteName x xval yval))
 sub x q@(IndexFn (Forall i (Iota {})) xs) r@(IndexFn (Forall j yD) ys) = do
   -- Substitution Rules 1 and 2.
-  tell ["Substitute " <> Math.math (toLaTeX x) <> " for " <> toLaTeX q]
+  tell ["Substitute(1/2) " <> Math.math (toLaTeX x) <> " for " <> toLaTeX q]
   pure $
     debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n  in " <> prettyString r) $
       IndexFn
@@ -43,7 +43,7 @@ sub x q@(IndexFn (Forall i (Cat k m b)) xs) r@(IndexFn iter_y@(Forall j (Cat k' 
     m == m',
     b == b' = do
       -- Substitution Rule 4. (NOTE Indexing may depend on i/j and k.)
-      tell ["Substitute " <> Math.math (toLaTeX x) <> " for " <> toLaTeX q]
+      tell ["Substitute(4) " <> Math.math (toLaTeX x) <> " for " <> toLaTeX q]
       pure $
         debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n  in " <> prettyString r) $
         IndexFn
@@ -55,7 +55,7 @@ sub x q@(IndexFn (Forall i (Cat k m b)) xs) r@(IndexFn iter_y@(Forall j (Cat k' 
                   substituteIdx (i, x, xval) (j, yval)))
 sub x q@(IndexFn iter_x@(Forall i xD) xs) r@(IndexFn (Forall j yD@(Iota {})) ys)
   | xD == yD = do
-      tell ["Substitute " <> Math.math (toLaTeX x) <> " for " <> toLaTeX q]
+      tell ["Substitute(?) " <> Math.math (toLaTeX x) <> " for " <> toLaTeX q]
       pure $
         debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n  in " <> prettyString r) $
         IndexFn

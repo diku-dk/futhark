@@ -262,7 +262,7 @@ prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show 
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
 instance Pretty Term where
-  pretty Recurrence = "%₍₋₁₎"
+  pretty Recurrence = "↺ "
   pretty (Var x) = prettyName x
   pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
   pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)

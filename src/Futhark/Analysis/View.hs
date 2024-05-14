@@ -5,7 +5,7 @@ module Futhark.Analysis.View (mkIndexFnProg) where
 import Data.List qualified as L
 import Data.List.NonEmpty(NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe, catMaybes)
 import Futhark.Analysis.View.Representation
 import Futhark.Analysis.View.Monad
 import Futhark.Analysis.View.Refine hiding (debugM)
@@ -465,15 +465,32 @@ forward (E.AppExp (E.Apply f args _) _)
           let argnames = S.toList . mconcat . map E.patNames $ params
           when (length argnames /= length xs) (error "must be fully applied")
           -- Substitute size parameters for sizes of index functions xs.
-          let sz_xs = mapMaybe size xs
-          let sz_params = mapMaybe (getVName . sizeOfTypeBase . E.patternType) params
+          sz_xs <- mapM size xs
+          -- let sz_xs = map size xs
+          let sz_params = map (getVName . sizeOfTypeBase . E.patternType) params
+          debugM ("sz_xs " <> prettyString sz_xs)
+          debugM ("sz_params " <> prettyString sz_params)
           when (length sz_xs /= length sz_params) (error "sizes don't align")
-          let ixfn' = substituteNames (M.fromList $ zip sz_params sz_xs) ixfn
+          let sz_xs' = catMaybes sz_xs
+          let sz_params' = catMaybes sz_params
+          let ixfn' = substituteNames (M.fromList $ zip sz_params' sz_xs') ixfn
+          tell ["We have " <> toLaTeX (g, ixfn)]
+          tell ["Substituting size parameters ("
+                <> Math.math (mconcat $ L.intersperse ", " $ map toLaTeX sz_params')
+                <> ") for sizes of arguments, we get\n" <> toLaTeX (g, ixfn')]
+          -- tell ["We have " <> toLaTeX (g, ixfn)
+          --       <> "where, substituting size parameters for sizes of arguments,"]
+          -- forM_ (zip sz_params' sz_xs') (\a -> tell [toLaTeX a])
+          -- tell ["we get\n" <> toLaTeX (g, ixfn')]
           rewrite =<< foldM sub' ixfn' (zip argnames xs)
           where
-            size (IndexFn Empty _) = Nothing
+            size :: IndexFn -> IndexFnM (Maybe Term)
+            size (IndexFn Empty _) = pure Nothing
             size (IndexFn (Forall _ dom) _) =
-              Just $ domainEnd dom ~-~ domainStart dom
+              fmap Just $
+                normalise =<<
+                  refineTerm =<<
+                    normalise (domainEnd dom ~-~ domainStart dom)
             getVName (Just (Var vn)) = Just vn
             getVName _ = Nothing
         _ -> do
