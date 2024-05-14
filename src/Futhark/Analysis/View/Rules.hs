@@ -8,7 +8,7 @@ import qualified Futhark.SoP.SoP as SoP
 import Data.Set (notMember)
 import Control.Monad.RWS
 
-normalise :: IndexFn -> IndexFnM IndexFn
+normalise :: (Applicative f, ASTMappable a) => a -> f a
 normalise indexfn =
   pure $ idMap m indexfn
   where

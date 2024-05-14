@@ -95,12 +95,6 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       pure (ps', vs'))
   pure $ IndexFn it (Cases . NE.fromList $ zip preds' vals')
   where
-    m =
-      ASTMapper
-        { mapOnTerm = refineTerm,
-          mapOnVName = pure
-        }
-
     refineCase :: (Term, Term) -> IndexFnM Term
     refineCase (p, v)
       | Just rel <- toRel p =
@@ -112,12 +106,19 @@ refineIndexFn (IndexFn it (Cases cases)) = do
     refineCase (_, v) =
       refineTerm v
 
-    -- NOTE the FME solver returns False if the expression is false
-    -- _or_ if the result is unknown. Hence only True results may be used.
-    -- XXX Not is outside the SoP repr. Should it be converted in termToSoP?
-    -- refineTerm :: AlgEnv Exp E.Exp -> Exp -> IndexFnM Term
-    refineTerm :: Term -> IndexFnM Term
-    refineTerm (Var vn) = do
+-- NOTE the FME solver returns False if the expression is false
+-- _or_ if the result is unknown. Hence only True results may be used.
+-- XXX Not is outside the SoP repr. Should it be converted in termToSoP?
+refineTerm :: Term -> IndexFnM Term
+refineTerm t =
+  refineT t
+  where
+    m =
+      ASTMapper
+        { mapOnTerm = refineT,
+          mapOnVName = pure
+        }
+    refineT (Var vn) = do
       -- TODO case statement is untested.
       -- If the substitution is simply a variable---or if there's no
       -- substitution---then unpack the SoP representation.
@@ -127,15 +128,15 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       case getSoP sop of
         [([Var x], 1)] -> pure $ Var x
         _ -> pure $ SoP2 sop
-    refineTerm (x :== y) = refineRelation (:==) x y
-    refineTerm (x :/= y) = refineRelation (:/=) x y
-    refineTerm (x :> y)  = refineRelation (:>) x y
-    refineTerm (x :>= y) = refineRelation (:>=) x y
-    refineTerm (x :< y) = refineRelation (:<) x y
-    refineTerm (x :<= y) = refineRelation (:<=) x y
-    refineTerm (x :&& y) = refineRelation (:&&) x y
-    refineTerm (x :|| y) = refineRelation (:||) x y
-    refineTerm (SumSlice x lb ub) = do
+    refineT (x :== y) = refineRelation (:==) x y
+    refineT (x :/= y) = refineRelation (:/=) x y
+    refineT (x :> y)  = refineRelation (:>) x y
+    refineT (x :>= y) = refineRelation (:>=) x y
+    refineT (x :< y) = refineRelation (:<) x y
+    refineT (x :<= y) = refineRelation (:<=) x y
+    refineT (x :&& y) = refineRelation (:&&) x y
+    refineT (x :|| y) = refineRelation (:||) x y
+    refineT (SumSlice x lb ub) = do
       start <- astMap m lb
       end <- astMap m ub
       -- If the slice is empty or just a single element, eliminate the sum.
@@ -145,7 +146,7 @@ refineIndexFn (IndexFn it (Cases cases)) = do
         _ | single -> pure $ Idx (Var x) start
         _ | empty -> pure . SoP2 $ SoP.int2SoP 0
         _ -> pure $ SumSlice x start end
-    refineTerm x@(SoP2 _) = do
+    refineT x@(SoP2 _) = do
       astMap m x >>= mergeSums
       where
         -- Takes a sum of products which may have Sum terms and merges other
@@ -186,26 +187,27 @@ refineIndexFn (IndexFn it (Cases cases)) = do
                 then Just ([SumSliceIndicator y (mid SoP..+. SoP.int2SoP 1) ub], 1)
                 else Nothing
         merge _ _ = pure Nothing
-    refineTerm v = astMap m v
+    refineT v = astMap m v
 
-    refineRelation rel x y = do
-      x' <- refineTerm x
-      y' <- refineTerm y
-      b <- solve (x' `rel` y')
-      pure $ if b then Bool True else x' `rel` y'
-      where
-        -- Use Fourier-Motzkin elimination to determine the truth value
-        -- of an expresion, if it can be determined in the given environment.
-        -- If the truth value cannot be determined, False is also returned.
-        solve (Bool True :&& Bool True) = pure True
-        solve (Bool True :|| _) = pure True
-        solve (_ :|| Bool True) = pure True
-        solve (a :== b) = termToSoP a $==$ termToSoP b
-        solve (a :> b)  = termToSoP a $>$ termToSoP b
-        solve (a :>= b) = termToSoP a $>=$ termToSoP b
-        solve (a :< b)  = termToSoP a $<$ termToSoP b
-        solve (a :<= b) = termToSoP a $<=$ termToSoP b
-        solve _ = pure False
+refineRelation :: (Term -> Term -> Term) -> Term -> Term -> IndexFnM Term
+refineRelation rel x y = do
+  x' <- refineTerm x
+  y' <- refineTerm y
+  b <- solve (x' `rel` y')
+  pure $ if b then Bool True else x' `rel` y'
+  where
+    -- Use Fourier-Motzkin elimination to determine the truth value
+    -- of an expresion, if it can be determined in the given environment.
+    -- If the truth value cannot be determined, False is also returned.
+    solve (Bool True :&& Bool True) = pure True
+    solve (Bool True :|| _) = pure True
+    solve (_ :|| Bool True) = pure True
+    solve (a :== b) = termToSoP a $==$ termToSoP b
+    solve (a :> b)  = termToSoP a $>$ termToSoP b
+    solve (a :>= b) = termToSoP a $>=$ termToSoP b
+    solve (a :< b)  = termToSoP a $<$ termToSoP b
+    solve (a :<= b) = termToSoP a $<=$ termToSoP b
+    solve _ = pure False
 
 -- Takes any Sum in the alg env ranges and adds min/max values
 -- using monotonicity logic.
