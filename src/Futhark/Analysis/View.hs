@@ -5,7 +5,7 @@ module Futhark.Analysis.View (mkIndexFnProg) where
 import Data.List qualified as L
 import Data.List.NonEmpty(NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Futhark.Analysis.View.Representation
 import Futhark.Analysis.View.Monad
 import Futhark.Analysis.View.Refine hiding (debugM)
@@ -24,6 +24,7 @@ import Futhark.SoP.Monad (addRange, addEquiv)
 import qualified Text.LaTeX.Packages.AMSMath as Math
 import Text.LaTeX (textbf, newline, hrulefill, noindent)
 import Futhark.Analysis.View.Latex
+import Language.Futhark.Traversals (bareExp)
 
 
 --------------------------------------------------------------
@@ -44,7 +45,7 @@ handleRefinementTypes _ = pure ()
 -- a function that takes a name and adds a range with that name
 -- lower bounded by 0 to the environment.
 handleRefinement :: E.Exp -> (E.VName -> IndexFnM ())
-handleRefinement ref | trace ("handleRefinement: " <> prettyString ref <> "\n" <> show ref) False = undefined
+handleRefinement ref | trace ("handleRefinement: " <> prettyString ref) False = undefined
 handleRefinement (E.Lambda [E.Id x _ _] e _ _ _) =
   \name -> handleRefinement' name x e
 handleRefinement _ = undefined
@@ -157,6 +158,8 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
       tell ["To prove:" <> prettyLaTeX ret]
       indexfn <- forward body >>= refineAndBind vn
       insertTopLevel vn (params, indexfn)
+      algenv <- gets algenv
+      debugM ("AlgEnv\n" <> prettyString algenv)
       pure ()
     _ -> pure ()
 
@@ -451,20 +454,31 @@ forward (E.AppExp (E.Apply f args _) _)
     [arg] <- getArgs args = do
       IndexFn it body <- forward arg
       rewrite $ IndexFn it (cmapValues (toNNF . Not) body)
-  | Just g <- getFun f,
+  | (E.Var (E.QualName [] g) _ _) <- f,
     args' <- getArgs args = do
       -- Handle references to user-defined top-level function definitions.
       toplevel <- gets toplevel
       case M.lookup g toplevel of
         Just (params, ixfn) -> do
+          -- Substitute parameter names for arguments.
           xs <- mapM forward args'
-          let argnames =
-                S.toList . mconcat . map E.patNames $ params
+          let argnames = S.toList . mconcat . map E.patNames $ params
           when (length argnames /= length xs) (error "must be fully applied")
-          foldM sub' ixfn (zip argnames xs)
-              >>= rewrite
+          -- Substitute size parameters for sizes of index functions xs.
+          let sz_xs = mapMaybe size xs
+          let sz_params = mapMaybe (getVName . sizeOfTypeBase . E.patternType) params
+          when (length sz_xs /= length sz_params) (error "sizes don't align")
+          let ixfn' = substituteNames (M.fromList $ zip sz_params sz_xs) ixfn
+          rewrite =<< foldM sub' ixfn' (zip argnames xs)
+          where
+            size (IndexFn Empty _) = Nothing
+            size (IndexFn (Forall _ dom) _) =
+              Just $ domainEnd dom ~-~ domainStart dom
+            getVName (Just (Var vn)) = Just vn
+            getVName _ = Nothing
         _ -> do
-          error $ "forward on unhandled function " <> prettyString g
+          error $
+            "forward on unhandled function " <> prettyString g <> "\n" <> show g
 forward e = error $ "forward on " <> show e
 
 -- Check that exactly one branch is OOB---and determine which.
