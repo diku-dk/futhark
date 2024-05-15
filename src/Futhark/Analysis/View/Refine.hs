@@ -146,6 +146,17 @@ refineTerm t =
         _ | single -> pure $ Idx (Var x) start
         _ | empty -> pure . SoP2 $ SoP.int2SoP 0
         _ -> pure $ SumSlice x start end
+    refineT (Sum j lb ub e) = do
+      start <- astMap m lb
+      end <- astMap m ub
+      x <- astMap m e
+      -- If the iteration space is empty or just a single element, eliminate the sum.
+      single <- start $==$ end
+      empty <- start $>$ end
+      case () of
+        _ | single -> pure $ substituteName j (SoP2 start) (SoP2 x)
+        _ | empty -> pure . SoP2 $ SoP.int2SoP 0
+        _ -> pure $ Sum j start end x
     refineT x@(SoP2 _) = do
       astMap m x >>= mergeSums
       where
@@ -185,6 +196,14 @@ refineTerm t =
               pure $
                 if b
                 then Just ([SumSliceIndicator y (mid SoP..+. SoP.int2SoP 1) ub], 1)
+                else Nothing
+        merge ([Sum j a z e1], 1) ([Sum j' a' b e2], -1)
+          | e1 == substituteName j' (Var j) e2,
+            a == a' = do
+              test <- b $<=$ z
+              pure $
+                if test
+                then Just ([Sum j (b SoP..+. SoP.int2SoP 1) z e1], 1)
                 else Nothing
         merge _ _ = pure Nothing
     refineT v = astMap m v
@@ -232,6 +251,17 @@ checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
 checkMonotonic iter@(Forall _ _) (cond, SumSlice xs _ _) = do
   -- For a SumSlice it's sufficient to check that each term is non-negative.
   let test = (cond, Var xs :>= SoP2 (SoP.int2SoP 0))
+  let test' = IndexFn iter (Cases . NE.singleton $ test)
+  IndexFn _ (Cases res) <- refineIndexFn test'
+  case res of
+    (_, Bool True) :| [] -> pure True
+    _ -> pure False
+checkMonotonic iter@(Forall _ _) (cond, Sum j lb ub e)
+  | [([Idx (Var xs) _], 1)] <- getSoP e = do
+  -- TODO limited to SumSlice case.
+  -- For a SumSlice it's sufficient to check that each term is non-negative.
+  let test = (cond, Var xs :>= SoP2 (SoP.int2SoP 0))
+  debugM ("** checkMonotonic test **" <> prettyString test)
   let test' = IndexFn iter (Cases . NE.singleton $ test)
   IndexFn _ (Cases res) <- refineIndexFn test'
   case res of

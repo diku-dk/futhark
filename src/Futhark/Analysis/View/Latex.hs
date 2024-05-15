@@ -122,6 +122,8 @@ instance ToLaTeX Term where
   toLaTeX_ _ (SumSliceIndicator xs lb ub) =
     tsum <> indicator <> autoParens (toLaTeX xs)
       <> autoSquareBrackets (toLaTeX lb <> " : " <> toLaTeX ub)
+  toLaTeX_ _ (Sum j lb ub e) =
+    sumFromTo (toLaTeX j =: toLaTeX lb) (toLaTeX ub) <> autoParens (toLaTeX e)
   toLaTeX_ p (Idx xs i) = toLaTeX_ p xs <> autoSquareBrackets (toLaTeX i)
   toLaTeX_ p (SoP2 sop) = toLaTeX_ p sop
   toLaTeX_ p (Indicator sop) = indicator <> autoParens (toLaTeX_ p sop)

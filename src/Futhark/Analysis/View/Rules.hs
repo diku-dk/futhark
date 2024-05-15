@@ -6,7 +6,8 @@ import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Data.Set (notMember)
-import Control.Monad.RWS
+import Control.Monad.RWS hiding (Sum)
+import Futhark.MonadFreshNames (newNameFromString)
 
 normalise :: (Applicative f, ASTMappable a) => a -> f a
 normalise indexfn =
@@ -51,6 +52,25 @@ normalise indexfn =
         -- [[not x]] => 1 + -1*[[x]]
         Not x -> pure . SoP2 $ SoP.int2SoP 1 SoP..-. SoP.sym2SoP (Indicator x)
         _ -> pure (Indicator c')
+    normTerm (Sum j lb ub x) = do
+      lb' <- astMap m lb
+      ub' <- astMap m ub
+      x' <- astMap m x
+      -- List of (multiplied symbols, factor) typed [([Term], Integer)].
+      let terms = SoP.sopToLists x'
+      -- Create a sum for each product (term) in the sum of products,
+      -- pulling factors outside the sum.
+      let sums = map (\(symbs, c) ->
+                        let term = SoP.term2SoP symbs 1
+                        in  case SoP.justConstant term of
+                              Just k ->
+                                -- This would be c*∑j∈[lb, ..., ub] k so rewrite it to (ub - lb + 1) * c * k.
+                                SoP.scaleSoP c (SoP.scaleSoP k (ub' SoP..-. lb' SoP..+. SoP.int2SoP 1))
+                              _ ->
+                                SoP.scaleSoP c . termToSoP $ Sum j lb' ub' term
+                     ) terms
+      -- Create sum of products of (sums of sum of products).
+      pure $ SoP2 $ foldl1 (SoP..+.) sums
     normTerm x@(SoP2 _) = do
       mergeSums <$> astMap m x
       where
@@ -92,6 +112,16 @@ normalise indexfn =
             c == c',
             i == lb SoP..-. SoP.int2SoP 1 =
               Just ([SumSliceIndicator y i ub], c)
+        merge ([Sum j lb ub e1], c) ([e2], c')
+          | c == c',
+            ubp1 <- ub SoP..+. SoP.int2SoP 1,
+            substituteName j (SoP2 ubp1) e1 == termToSoP e2 =
+              Just ([Sum j lb ubp1 e1], c)
+        merge ([Sum j lb ub e1], c) ([e2], c')
+          | c == c',
+            lbm1 <- lb SoP..-. SoP.int2SoP 1,
+            substituteName j (SoP2 lbm1) e1 == termToSoP e2 =
+              Just ([Sum j lbm1 ub e1], c)
         merge _ _ = Nothing
     normTerm v = astMap m v
 
@@ -168,6 +198,7 @@ rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
     i == i',
     i == i'',
     b == b',
+    False,
     b == domainSegStart dom = do
       tell ["Using prefix sum rule"]
       let e1' = substituteName i b e1
@@ -196,6 +227,51 @@ rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
           ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
       in Just . SoP.scaleSoP c . termToSoP $ SumSliceIndicator x lb ub
     mkSum _ _ (_, _) = Nothing
+-- Rule 4 (prefix sum)
+--
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
+--    | i == b => e1              (e1 may depend on i)
+--    | i /= b => y[i-1] + e2     (e2 may depend on i)
+-- _______________________________________________________________
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
+--    e1{b/i} + (Σ_{j=b+1}^i e2{j/i})
+rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
+  | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
+    -- Extract terms (multiplied symbols, factor) from the sum of products.
+    Just terms <- justAffinePlusRecurence recur,
+    i == i',
+    i == i'',
+    b == b',
+    b == domainSegStart dom = do
+      tell ["Using prefix sum rule"]
+      let lb = termToSoP b SoP..+. SoP.int2SoP 1
+      let ub = termToSoP (Var i)
+      j <- newNameFromString "j"
+      let e1' = substituteName i b e1
+      let e2 = substituteName i (Var j) $ SoP.sopFromList terms
+      pure $ IndexFn it (toCases $ e1' ~+~ Sum j lb ub e2)
+  where
+    justAffinePlusRecurence :: Term -> Maybe [([Term], Integer)]
+    justAffinePlusRecurence (SoP2 sop)
+      | termsWithFactors <- SoP.sopToLists sop,
+        [Recurrence] `elem` map fst termsWithFactors,
+        isAffineSoP sop = -- TODO doesn't need to be affine
+          Just $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
+    justAffinePlusRecurence _ = Nothing
+
+    -- Create sum for (term, factor), pulling the factor outside the sum.
+    -- mkSum :: a -> Term -> ([Term], Integer)
+    -- mkSum i b ([], c) =
+    --   -- This would be ∑j∈[lb, ..., ub] c so rewrite it to (ub - lb + 1) * c.
+    --   let lb = termToSoP b SoP..+. SoP.int2SoP 1
+    --       ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
+    --   in  pure $ SoP.scaleSoP c (ub SoP..-. lb SoP..+. SoP.int2SoP 1)
+    -- mkSum i b (es, c) = do
+    --   let lb = termToSoP b SoP..+. SoP.int2SoP 1
+    --   let ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
+    --   j <- newNameFromString "j"
+    --   let es' = SoP.sopFromList (substituteName i (Var j) es, c)
+    --   pure . SoP.scaleSoP c . termToSoP $ Sum j lb ub es'
 rewritePrefixSum indexfn = pure indexfn
 
 rewriteCarry :: IndexFn -> IndexFnM IndexFn
