@@ -216,15 +216,15 @@ rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
     mkSum i b ([], c) =
       -- This would be ∑j∈[lb, ..., ub] c so rewrite it to (ub - lb + 1) * c.
       let lb = termToSoP b SoP..+. SoP.int2SoP 1
-          ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
+          ub = termToSoP (Var i)
       in Just $ SoP.scaleSoP c (ub SoP..-. lb SoP..+. SoP.int2SoP 1)
     mkSum i b ([Idx (Var x) j], c) =
       let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) j
-          ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
+          ub = j
       in Just . SoP.scaleSoP c . termToSoP $ SumSlice x lb ub
     mkSum i b ([Indicator (Idx (Var x) j)], c) =
       let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) j
-          ub = lb SoP..+. termToSoP (Var i) SoP..-. SoP.int2SoP 1
+          ub = j
       in Just . SoP.scaleSoP c . termToSoP $ SumSliceIndicator x lb ub
     mkSum _ _ (_, _) = Nothing
 -- Rule 4 (prefix sum)

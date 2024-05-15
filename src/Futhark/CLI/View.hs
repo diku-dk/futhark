@@ -138,7 +138,7 @@ tests =
     ("tests/refinement/sgmsum.fut",
      [ ("ys", [
         "∀i₆₁₉₆ ∈ ⊎k₆₁₉₉=iota m₆₀₆₉ [∑shape₆₀₈₁[0 : -1 + k₆₁₉₉], ..., ∑shape₆₀₈₁[0 : k₆₁₉₉]) .",
-        "    | True ⇒  ∑xs₆₀₈₂[∑shape₆₀₈₁[0 : -1 + k₆₁₉₉] : i₆₁₉₆ + ∑shape₆₀₈₁[0 : -1 + k₆₁₉₉]]"
+        "    | True ⇒  ∑xs₆₀₈₂[∑shape₆₀₈₁[0 : -1 + k₆₁₉₉] : i₆₁₉₆]"
        ])
      ]),
     ("tests/refinement/use_previous.fut",
