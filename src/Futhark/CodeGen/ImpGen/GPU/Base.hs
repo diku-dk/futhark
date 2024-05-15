@@ -45,6 +45,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     Locking (..),
     AtomicUpdate (..),
     DoAtomicUpdate,
+    writeAtomic,
   )
 where
 
@@ -673,6 +674,25 @@ compileThreadOp pat (Alloc size space) =
 compileThreadOp pat _ =
   compilerBugS $ "compileThreadOp: cannot compile rhs of binding " ++ prettyString pat
 
+-- | Perform a scalar write followed by a fence.
+writeAtomic ::
+  VName ->
+  [Imp.TExp Int64] ->
+  SubExp ->
+  [Imp.TExp Int64] ->
+  InKernelGen ()
+writeAtomic dst dst_is src src_is = do
+  t <- subExpType src
+  case t of
+    Prim pt -> do
+      (dst_mem, dst_space, dst_offset) <- fullyIndexArray dst dst_is
+      tmp <- dPrimSV "tmp" pt
+      copyDWIMFix (tvVar tmp) [] src src_is
+      sOp . Imp.Atomic dst_space $
+        Imp.AtomicWrite pt dst_mem dst_offset (untyped (tvExp tmp))
+    _ ->
+      error $ "writeAtomic: " <> prettyString t
+
 -- | Locking strategy used for an atomic update.
 data Locking = Locking
   { -- | Array containing the lock.
@@ -818,8 +838,6 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
             zipWithM_ (writeArray bucket) arrs $
               map (Var . paramName) acc_params
 
-      fence = sOp $ Imp.MemFence $ fenceForSpace space
-
   -- While-loop: Try to insert your value
   sWhile (tvExp continue) $ do
     try_acquire_lock
@@ -828,12 +846,10 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
       bind_acc_params
       op_body
       do_hist
-      fence
       release_lock
       break_loop
-    fence
   where
-    writeArray bucket arr val = copyDWIMFix arr bucket val []
+    writeArray bucket arr val = writeAtomic arr bucket val []
 
 atomicUpdateCAS ::
   Space ->

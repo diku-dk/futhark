@@ -928,8 +928,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
   sComment "first thread in block saves block result to global memory" $
     sWhen (ltid32 .==. 0) $ do
       forM_ (take (length nes) $ zip block_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
-        copyDWIMFix v [0, sExt64 tblock_id] (Var acc) acc_is
-      sOp $ Imp.MemFence Imp.FenceGlobal
+        writeAtomic v [0, sExt64 tblock_id] (Var acc) acc_is
       -- Increment the counter, thus stating that our result is
       -- available.
       sOp
