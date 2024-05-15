@@ -222,7 +222,11 @@ mkLaTeX fp as =
             raw "\\pdfpageheight=\\dimexpr\\ht0+\\dp0\\relax",
             raw "\\pdfpagewidth=\\wd0",
             raw "\\shipout\\box0",
-            raw "\\stop"
+            raw "\\hoffset=0in",
+            raw "\\voffset=0in",
+            raw "\\pdfpagewidth=\\paperwidth",
+            raw "\\pdfpageheight=\\paperheight",
+            raw "\\end{document}"
           ]
 
     vbox x = raw "\\setbox0" <> liftL (\l -> TeXComm "vbox" [FixArg l]) x
