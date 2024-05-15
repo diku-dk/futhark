@@ -49,6 +49,7 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
     tiles_T = tilesT kernel_params
     tiles_R = tilesR kernel_params
     common_dim = commonDim kernel_params
+    tblock_size_flat = tblockSizeFlat kernel_params
 
     copyGlb2Shr :: VName -> VName -> ArrMeta -> Builder GPU VName
     copyGlb2Shr qq shr_arr arr_meta = do
@@ -59,27 +60,41 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
         newParam (baseString shr_arr) $
           Acc (paramName cert_p) shmem_shape [t] NoUniqueness
 
+      tile_size_flat <-
+        letSubExp "tile_size_flat"
+          =<< toExp (product $ map pe64 tile_dims)
       -- The strategy is to flatten the tblock and then unflatten it to fit the
       -- dimensions of the array in shared memory, using a virtualization loop
       -- in case the tile is larger than the tblock, and a boundary guard for
-      -- the converse. This is easily achieved using SegVirt.
+      -- the converse. This is easily achieved using SegVirt, but whereas
+      -- SegVirt wraps the entire loop body in an `if (i < tile_size_flat)`
+      -- guard, we want that guard only on the write to shared memory. Hence
+      -- we must manually build the virtualization loop, which unfortunately
+      -- bloats the code a bit here.
+      iters <- letSubExp "virt_iters" =<< ceilDiv tile_size_flat tblock_size_flat
       lam <- mkLambda [cert_p, acc_p] $ do
-        fmap varsRes $
-          segMapND "foo" (SegThreadInBlock SegVirt) ResultNoSimplify tile_dims $
-            copyLoopBody (paramName acc_p)
+        fmap (varsRes . (: [])) $
+          segMapND_ "foo" seglvl_thd ResultNoSimplify [tile_size_flat] $ \[ltid] ->
+            fmap (varsRes . (: [])) $
+              forLoop_ iters (paramName acc_p) $ \i0 acc_merge -> do
+                i <- letExp "i" =<< toExp (le64 i0 * pe64 tblock_size_flat + le64 ltid)
+                copyLoopBody tile_size_flat acc_merge i
 
       letExp (baseString shr_arr) $
         WithAcc [(shmem_shape, [shr_arr], Nothing)] lam
       where
-        copyLoopBody :: VName -> [VName] -> Builder GPU Result
-        copyLoopBody acc ltids = do
+        copyLoopBody :: SubExp -> VName -> VName -> Builder GPU VName
+        copyLoopBody tile_size_flat acc i = do
+          unflattened_inds <-
+            forM (unflattenIndex tile_dims' $ le64 i) $
+              letSubExp "unflat_ind" <=< toExp
 
           -- The shared mem indices are simply the unflattened indices, while
           -- the global mem indices need to have tblock offsets added onto them.
-          let shr_arr_inds = map Var ltids
+          let shr_arr_inds = unflattened_inds
           glb_arr_inds <-
-            forM2 block_offsets ltids $ \tb_offset ltid -> do
-              letExp "glb_ind" =<< toExp (pe64 tb_offset + le64 ltid)
+            forM2 block_offsets unflattened_inds $ \tb_offset i -> do
+              letExp "glb_ind" =<< toExp (pe64 tb_offset + pe64 i)
 
           -- Perform a boundary check and read from the global mem array!
           in_bounds <-
@@ -103,22 +118,27 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                 )
                 -- TODO: here, we simply insert a zero (or zero-like value) into
                 -- shmem whenever we are outside bounds. However, this only
-                -- succeeds in certain cases.
+                -- succeeds in certain cases, unless we explicitly handle
+                -- residual tiles in an epilogue.
                 -- See note [ShmemZeroPaddingOnGlobalMemOOB].
                 (eBody [eBlank $ Prim $ shmemElemType arr_meta])
 
           -- Finally, update shared mem array accumulator.
-          fmap varsRes $
-            letTupExp "acc_out" $
-              BasicOp $
-                UpdateAcc
-                  Unsafe
-                  acc
-                  shr_arr_inds
-                  [Var glb_elem]
+          letExp "acc_out"
+            =<< eIf
+              (toExp $ le64 i .<. pe64 tile_size_flat)
+              ( resultBodyM . map Var <=< letTupExp "acc_updated" . BasicOp $
+                  UpdateAcc
+                    Unsafe
+                    acc
+                    shr_arr_inds
+                    [Var glb_elem]
+              )
+              (resultBodyM [Var acc])
 
         shmem_shape = Shape $ shmemDims arr_meta
         tile_dims = tileDims arr_meta
+        tile_dims' = map pe64 tile_dims
         block_offsets = arrGather_ arr_meta (blockOffsets tc_env) (Var qq)
         base_arr_dims = baseArrDims arr_meta
         base_arr = baseArr arr_meta
@@ -169,7 +189,6 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
             red_res <- eLambda red_op $ acc : map (eSubExp . resSubExp) map_res
 
             update "res" reg_tile_merge loop_inds $ resSubExp $ head red_res
-
 
 doTCTiling :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
@@ -244,7 +263,7 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
 
       -- TODO: for now, we manually *enable* shmem padding using source language
       -- attributes. should obviously automate this somehow.
-      let pad_flags = map (\s -> AttrName s `inAttrs` stmAuxAttrs aux) ["pad_A", "pad_B"]
+      let pad_flags = map ((`inAttrs` stmAuxAttrs aux) . AttrName) ["pad_A", "pad_B"]
 
       (new_kernel, host_stms) <- runBuilder $ do
         kernel_params@( TCKernelParams
@@ -284,33 +303,34 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                 (shmemDims arr)
 
           ~(reg_tiles_res : _) <-
-            if use_epilogue then do
-              myDebugM "Compiling TC expression WITH epilogue"
-              num_full_tiles <-
-                letExp "num_full_tiles" . BasicOp $
-                  BinOp (SQuot Int64 Unsafe) common_dim tile_seq
-              remainder <-
-                letExp "remainder" . BasicOp $
-                  BinOp (SRem Int64 Unsafe) common_dim tile_seq
+            case use_epilogue of
+              True -> do
+                myDebugM "Compiling TC expression WITH epilogue"
+                num_full_tiles <-
+                  letExp "num_full_tiles" . BasicOp $
+                    BinOp (SQuot Int64 Unsafe) common_dim tile_seq
+                remainder <-
+                  letExp "remainder" . BasicOp $
+                    BinOp (SRem Int64 Unsafe) common_dim tile_seq
 
-              ~prologue_res@(reg_tiles' : shr_arrs') <-
-                forLoop (Var num_full_tiles) (reg_tiles_init : shr_arrs_init) $
+                ~prologue_res@(reg_tiles' : shr_arrs') <-
+                  forLoop (Var num_full_tiles) (reg_tiles_init : shr_arrs_init) $
+                    \qq0 (reg_tiles_merge : shr_arrs_merge) ->
+                      reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
+
+                letTupExp "reduction_res"
+                  =<< eIf
+                    (toExp $ le64 remainder .==. 0)
+                    (resultBodyM $ map Var prologue_res)
+                    ( resultBody . map Var
+                        <$> reductionLoopBody tc_env num_full_tiles reg_tiles' shr_arrs' False
+                    )
+              _ -> do
+                myDebugM "Compiling TC expression WITHOUT epilogue"
+                num_seq_tiles <- letSubExp "num_seq_tiles" =<< ceilDiv common_dim tile_seq
+                forLoop num_seq_tiles (reg_tiles_init : shr_arrs_init) $
                   \qq0 (reg_tiles_merge : shr_arrs_merge) ->
                     reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
-
-              letTupExp "reduction_res"
-                =<< eIf
-                  (toExp $ le64 remainder .==. 0)
-                  (resultBodyM $ map Var prologue_res)
-                  ( resultBody . map Var
-                      <$> reductionLoopBody tc_env num_full_tiles reg_tiles' shr_arrs' False
-                  )
-            else do
-              myDebugM "Compiling TC expression WITHOUT epilogue"
-              num_seq_tiles <- letSubExp "num_seq_tiles" =<< ceilDiv common_dim tile_seq
-              forLoop num_seq_tiles (reg_tiles_init : shr_arrs_init) $
-                \qq0 (reg_tiles_merge : shr_arrs_merge) ->
-                  reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
 
           let regtile_ret_dims =
                 map ((,se1,se1) . snd) rem_outer_gtids_dims
@@ -354,6 +374,7 @@ variantDimsPerArr variance arrs segspace_dims = do
   let segspace_dims' = outer_dims ++ tc_dims
   let segspace_perm = segspace_dims `isPermutationOf` segspace_dims'
 
+  
   myDebugM $
     "variantDimsPerArr\nsegspace_dims:\n"
       ++ prettyString segspace_dims
@@ -603,7 +624,7 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
       -- from these base arrays, rather than binding computed indices to gtids
       -- and inserting the load statements. Again, it would
       let base_arr = getArrayFromLoadStm load_stm
-      dims <- getArrDims base_arr
+      dims' <- getArrDims base_arr
 
       -- It's not pretty, but we somehow need to extract the tile
       -- dimensions and tblock offsets corresponding to each dimension
@@ -619,14 +640,14 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
       let lmad_perm = findLMADPerm env base_arr
       let inv_lmad_perm = map snd . L.sort . (`zip` [0 ..]) <$> lmad_perm
 
-      let dims' = maybe dims (gather dims) inv_lmad_perm
-      let var_gtids = map (`L.elemIndex` inner_dims) dims'
+      let dims = maybe dims' (gather dims') inv_lmad_perm
+      let var_inds = map (`L.elemIndex` inner_dims) dims
 
       -- Then, for each dimension of each array, extract the TR tile and
       -- tblock offset corresponding to this dimension. For the tile
       -- dims, we insert tile_seq in the index of the array dim not
       -- represented in inner_dims.
-      let tile_dims = gather_ tiles_TR tile_seq var_gtids
+      let tile_dims = gather_ tiles_TR tile_seq var_inds
 
       -- TODO: decide pad_term dynamically, based on the given array.
       let pad_term = pe64 $ if do_pad then se1 else se0
@@ -641,11 +662,11 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
       pure $
         ArrMeta
           base_arr
-          dims'
+          dims
           tile_dims
           shmem_dims
           shmem_elem_type
-          var_gtids
+          var_inds
           load_stm
           lmad_perm
   where
@@ -671,6 +692,7 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
     tile_seq = tileSeq kernel_params
     inner_dim_names = innerDimNames kernel_params
     inner_dims = innerDims kernel_params
+    inner_dim_ind = length inner_dims - 1
 
 
 -- Note [ShmemZeroPaddingOnGlobalMemOOB]
@@ -690,17 +712,14 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
 -- This is seldom the case in general, however it happens to hold for regular
 -- tensor contraction and MM, hence it is used for testing for the time being.
 --
--- There is a big TODO in figuring out the best solution to this problem which
--- will also generalize nicely to arbitrary contractions.
---
--- The simple solution is the prologue/epilogue treatment, in which the last
--- iteration of the main reduction loop is unrolled and a boundary guard
--- corresponding to the one we had on global memory is inserted into the
--- register tile accumulation step s.t. we never process garbage values in the
--- reduction (or, at least, they do not affect those entries of the register
--- tile which are eventually written to global mem). However, this will
--- inevitably affect performance, and the difference is more noticeable the less
--- full tiles we have in the common dimension.
+-- The simple solution (and the one implemented) is the prologue/epilogue
+-- treatment, in which the last iteration of the main reduction loop is unrolled
+-- and a boundary guard corresponding to the one we had on global memory is
+-- inserted into the register tile accumulation step s.t. we never process
+-- garbage values in the reduction (or, at least, they do not affect those
+-- entries of the register tile which are eventually written to global mem).
+-- However, this will inevitably affect performance, and the difference is more
+-- noticeable the less full tiles we have in the common dimension.
 --
 -- As an example, for regular MM of 2000x2000 matrices with a reduction dim tile
 -- of Tk = 32, we will have floor(2000 / 32) = 62 full tiles and 1 partial tile,
@@ -720,6 +739,8 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts pad_flags = do
 -- very hacky, obscure to most users, error-prone, and an anti-pattern. Also,
 -- attributes only support passing integral values, not float values.
 
+-- There is a big TODO in figuring out the best solution to this problem which
+-- will also generalize best to arbitrary contractions.
 
 -- Note [FlattenPrimExps]
 -- In reverse-engineering LMAD permutations, we need to check equality between
