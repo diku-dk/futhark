@@ -57,8 +57,9 @@ handleRefinement' name x (E.AppExp (E.Apply f args _) _)
      E.OpSectionRight (E.QualName [] opvn) _ operand _ _ _] <- getArgs args,
     x == x' = do -- Make sure that lambda arg is applied to forall.
       case E.baseString opvn of
-        ">=" ->
-          addRange (Var name) (mkRangeLB $ fromExp operand)
+        ">=" -> do
+          lb <- fromExp operand
+          addRange (Var name) (mkRangeLB lb)
         _ -> undefined
 handleRefinement' name x (E.AppExp (E.BinOp (op', _) _ (E.Var (E.QualName _ x') _ _, _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
@@ -66,20 +67,24 @@ handleRefinement' name x (E.AppExp (E.BinOp (op', _) _ (E.Var (E.QualName _ x') 
     Just bop <- L.find ((fn ==) . prettyString) [minBound .. maxBound :: E.BinOp],
     x == x' =
       case bop of
-        E.Equal ->
-          let y = fromExp y'
-          in  addRange (Var name) (mkRange y y)
+        E.Equal -> do
+          y <- fromExp y'
+          addRange (Var name) (mkRange y y)
         _ -> undefined
 handleRefinement' _ _ _ = pure ()
 
-fromExp :: E.Exp -> SoP.SoP Term
+fromExp :: E.Exp -> IndexFnM (SoP.SoP Term)
 fromExp (E.IntLit c _ _) =
-  SoP.int2SoP c
+  pure $ SoP.int2SoP c
 fromExp (E.AppExp (E.Apply f args _) _)
   | Just "sum" <- getFun f,
     [arg@(E.Var (E.QualName _ x) _ _)] <- getArgs args =
       case getSize arg of
-        Just n -> termToSoP $ SumSlice x (SoP.int2SoP 0) (SoP.sym2SoP n SoP..-. SoP.int2SoP 1)
+        Just n -> do
+          j <- newNameFromString "j"
+          pure . termToSoP $
+            Sum j (SoP.int2SoP 0) (SoP.sym2SoP n SoP..-. SoP.int2SoP 1)
+                  (termToSoP $ Idx (Var x) (termToSoP $ Var j))
         Nothing -> undefined
 fromExp _ = undefined
 

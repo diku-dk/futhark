@@ -136,16 +136,6 @@ refineTerm t =
     refineT (x :<= y) = refineRelation (:<=) x y
     refineT (x :&& y) = refineRelation (:&&) x y
     refineT (x :|| y) = refineRelation (:||) x y
-    refineT (SumSlice x lb ub) = do
-      start <- astMap m lb
-      end <- astMap m ub
-      -- If the slice is empty or just a single element, eliminate the sum.
-      single <- start $==$ end
-      empty <- start $>$ end
-      case () of
-        _ | single -> pure $ Idx (Var x) start
-        _ | empty -> pure . SoP2 $ SoP.int2SoP 0
-        _ -> pure $ SumSlice x start end
     refineT (Sum j lb ub e) = do
       start <- astMap m lb
       end <- astMap m ub
@@ -181,22 +171,6 @@ refineTerm t =
         -- with mid <= ub.
         -- Relies on sorting of SoP and Term to match.
         merge :: ([Term], Integer) -> ([Term], Integer) -> IndexFnM (Maybe ([Term], Integer))
-        merge ([SumSlice y lb ub], 1) ([SumSlice y' lb' mid], -1)
-          | y == y',
-            lb == lb' = do
-              b <- mid $<=$ ub
-              pure $
-                if b
-                then Just ([SumSlice y (mid SoP..+. SoP.int2SoP 1) ub], 1)
-                else Nothing
-        merge ([SumSliceIndicator y lb ub], 1) ([SumSliceIndicator y' lb' mid], -1)
-          | y == y',
-            lb == lb' = do
-              b <- mid $<=$ ub
-              pure $
-                if b
-                then Just ([SumSliceIndicator y (mid SoP..+. SoP.int2SoP 1) ub], 1)
-                else Nothing
         merge ([Sum j a z e1], 1) ([Sum j' a' b e2], -1)
           | e1 == substituteName j' (Var j) e2,
             a == a' = do
@@ -228,35 +202,8 @@ refineRelation rel x y = do
     solve (a :<= b) = termToSoP a $<=$ termToSoP b
     solve _ = pure False
 
--- Takes any Sum in the alg env ranges and adds min/max values
--- using monotonicity logic.
--- refineSumsInEnv :: IndexFnM ()
--- refineSumsInEnv = do
---   ranges <- ranges <$> gets algenv
---   mapM_ (refineSumRange . fst) (M.toList ranges)
---   where
---     zero = SoP.int2SoP 0
---     refineSumRange :: Term -> IndexFnM ()
---     refineSumRange t@(SumSlice vn _ _) = do
---       -- If the array being summed over is non-negative at all locations,
---       -- then the sum itself is non-negative.
---       b <- SoP.sym2SoP (Var vn) $>=$ zero
---       when b $ addRange t (mkRangeLB zero)
---     refineSumRange t@(SumSliceIndicator {}) = do
---       -- A sum over indicators is always non-negative.
---       addRange t (mkRangeLB zero)
---     refineSumRange _ = pure ()
-
 checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
-checkMonotonic iter@(Forall _ _) (cond, SumSlice xs _ _) = do
-  -- For a SumSlice it's sufficient to check that each term is non-negative.
-  let test = (cond, Var xs :>= SoP2 (SoP.int2SoP 0))
-  let test' = IndexFn iter (Cases . NE.singleton $ test)
-  IndexFn _ (Cases res) <- refineIndexFn test'
-  case res of
-    (_, Bool True) :| [] -> pure True
-    _ -> pure False
-checkMonotonic iter@(Forall _ _) (cond, Sum j lb ub e)
+checkMonotonic iter@(Forall _ _) (cond, Sum _ _ _ e)
   | [([Idx (Var xs) _], 1)] <- getSoP e = do
   -- TODO limited to SumSlice case.
   -- For a SumSlice it's sufficient to check that each term is non-negative.

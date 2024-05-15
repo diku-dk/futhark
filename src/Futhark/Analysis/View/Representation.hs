@@ -35,14 +35,6 @@ import qualified Data.Set as S
 
 data Term =
     Var VName
-  | SumSlice
-      VName        -- array
-      (SoP Term)   -- lower bound
-      (SoP Term)   -- upper bound
-  | SumSliceIndicator
-      VName        -- array
-      (SoP Term)   -- lower bound
-      (SoP Term)   -- upper bound
   | Sum
       VName        -- index
       (SoP Term)   -- lower bound
@@ -181,10 +173,6 @@ instance ASTMappable Term where
   astMap m (Var x) = do
     vn <- mapOnVName m x
     mapOnTerm m $ Var vn
-  astMap m (SumSlice vn lb ub) =
-    SumSlice <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
-  astMap m (SumSliceIndicator vn lb ub) =
-    SumSliceIndicator <$> mapOnVName m vn <*> astMap m lb <*> astMap m ub
   astMap m (Sum i lb ub e) =
     Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> astMap m e
   astMap m (Idx xs i) = Idx <$> mapOnTerm m xs <*> astMap m i
@@ -266,14 +254,16 @@ instance Pretty Term where
   pretty (Var x) = prettyName x
   pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
   pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)
-  pretty (SumSlice vn lb ub) =
+  pretty (Sum i lb ub e)
+    | [([Idx (Var vn) idx], 1)] <- getSoP e =
     "∑"
       <> prettyName vn
-      <> brackets (pretty lb <+> ":" <+> pretty ub)
-  pretty (SumSliceIndicator vn lb ub) =
+      <> brackets (pretty (substituteName i (SoP2 lb) idx) <+> ":" <+> pretty (substituteName i (SoP2 ub) idx))
+  pretty (Sum i lb ub e)
+    | [([Indicator (Idx (Var vn) idx)], 1)] <- getSoP e =
     "∑"
       <> pretty (Indicator (Var vn))
-      <> brackets (pretty lb <+> ":" <+> pretty ub)
+      <> brackets (pretty (substituteName i (SoP2 lb) idx) <+> ":" <+> pretty (substituteName i (SoP2 ub) idx))
   pretty (Sum i lb ub e) =
     "∑"
       <> prettyName i
@@ -419,8 +409,6 @@ instance FreeIn (SoP Term) where
 
 instance FreeIn Term where
   freeIn (Var vn) = S.singleton vn
-  freeIn (SumSlice vn lb ub) = S.singleton vn <> freeIn lb <> freeIn ub
-  freeIn (SumSliceIndicator vn lb ub) = S.singleton vn <> freeIn lb <> freeIn ub
   freeIn (Sum _ lb ub e) = freeIn lb <> freeIn ub <> freeIn e
   freeIn (Idx xs i) = freeIn xs <> freeIn i
   freeIn (SoP2 sop) = freeIn sop
