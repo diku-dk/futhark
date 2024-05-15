@@ -28,16 +28,18 @@ sub x (IndexFn Empty xs) (IndexFn iter_y ys) =
               substituteName x xval yval))
 sub x q@(IndexFn (Forall i (Iota {})) xs) r@(IndexFn (Forall j yD) ys) = do
   -- Substitution Rules 1 and 2.
-  tell ["Substitute(1/2) " <> Math.math (toLaTeX x) <> " for " <> toLaTeX q]
+  let res =
+        IndexFn
+          (Forall j yD)
+          (Cases . NE.fromList $ do
+            (xcond, xval) <- casesToList xs
+            (ycond, yval) <- casesToList ys
+            pure (substituteIdx (i, x, xval) (j, ycond) :&& xcond,
+                  substituteIdx (i, x, xval) (j, yval)))
+  tell ["Substitute(1/2) " <> Math.math (toLaTeX x) <> " for " <> toLaTeX q <> " to get " <> toLaTeX res]
   pure $
     debug ("sub " <> prettyString x <> " for " <> prettyString q <> "\n  in " <> prettyString r) $
-      IndexFn
-        (Forall j yD)
-        (Cases . NE.fromList $ do
-          (xcond, xval) <- casesToList xs
-          (ycond, yval) <- casesToList ys
-          pure (substituteIdx (i, x, xval) (j, ycond) :&& xcond,
-                substituteIdx (i, x, xval) (j, yval)))
+    res
 sub x q@(IndexFn (Forall i (Cat k m b)) xs) r@(IndexFn iter_y@(Forall j (Cat k' m' b')) ys)
   | k == k',
     m == m',
@@ -73,19 +75,23 @@ sub x q r = do
           <> prettyString r
           <> prettyString algenv
 
-substituteIdx :: ASTMappable a => (VName, VName, Term) -> (VName, a) -> a
-substituteIdx (i, x, xval) (j, y) = do
-  runIdentity $ astMap substituter y
+-- substituteIdx :: ASTMappable a => (VName, VName, Term) -> (VName, a) -> a
+substituteIdx :: (VName, VName, Term) -> (VName, Term) -> Term
+substituteIdx (i, x, xval) (j, y) =
+  runIdentity $ onTerm y
   where
     substituter =
       ASTMapper
         { mapOnTerm = onTerm,
           mapOnVName = pure
         }
+    onTerm e | debug ("onTerm " <> prettyString e) False = undefined
     onTerm (Var vn) | vn == x =
+      debug ("(1) vn, xval " <> prettyString vn <> ", " <> prettyString xval)
       pure (substituteName i (Var j) xval)
     onTerm e@(Var _) =
       pure e
     onTerm (Idx (Var vn) idx) | vn == x =
+      debug ("(2) vn, xval " <> prettyString vn <> ", " <> prettyString xval)
       pure (flatten $ substituteName i (SoP2 idx) xval)
     onTerm e = astMap substituter e

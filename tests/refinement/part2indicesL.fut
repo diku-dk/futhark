@@ -29,18 +29,20 @@ def sgm_sum [n] 't
 
 let partition2L 't [m]
                 (dummy: i64)
-                (shape: {[m]i64 | \shp -> forall shp (>= 0)})
-                (n: {i64 | \n' -> n' == sum shape})
+                (shape2: {[m]i64 | \shp -> forall shp (>= 0)})
+                (n: {i64 | \n' -> n' == sum shape2})
                 -- `shape` is the shape of condsL and arr
                 (condsL: [n]bool)
                 (arr: [n]i64) : {[n]i64 | \res-> is_indexfn res} =
-  let begs  = scan (+) 0 shape
+  let begs  = scan (+) 0 shape2
   -- n is only passed because `:> [n]bool` doesn't work
-  let flags = mk_flag_array false shape (replicate m true) n
+  -- let flags = mk_flag_array 0i64 shape2 (replicate m 1i64) n
+  let flags = mk_flag_array 0i64 shape2 (iota m) n
+  in flags
 
-  let xs_outinds = map2 (\f i -> if f then i else 0) flags (iota n)
-  let outinds = sgm_sum flags xs_outinds
-  in outinds
+  -- let xs_outinds = map2 (\f i -> if f then i else 0) flags (iota n)
+  -- let outinds = sgm_sum flags xs_outinds
+  -- in outinds
 
   -- let tflgsL = map (\c -> if c then 1i64 else 0i64) condsL
   -- let fflgsL = map (\b -> 1 - b) tflgsL
