@@ -131,8 +131,8 @@ iteratorEnd _ = Nothing
 
 -- The final value in the domain (which is ordered).
 domainEnd :: Domain -> Term
-domainEnd (Iota n) = n
-domainEnd (Cat k m b) = substituteName k m b
+domainEnd (Iota n) = n ~-~ SoP2 (SoP.int2SoP 1)
+domainEnd (Cat k m b) = substituteName k m b ~-~ SoP2 (SoP.int2SoP 1)
 
 domainStart :: Domain -> Term
 domainStart (Iota _) = SoP2 (SoP.int2SoP 0)
@@ -204,10 +204,8 @@ instance ASTMappable (SoP Term) where
 
 instance ASTMappable Term where
   astMap _ Recurrence = pure Recurrence
-  -- astMap m (Var x) = mapOnTerm m (Var x)
   astMap m (Var x) = do
-    vn <- mapOnVName m x
-    mapOnTerm m $ Var vn
+    mapOnTerm m . Var =<< mapOnVName m x
   astMap m (Sum i lb ub e) =
     Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> astMap m e
   astMap m (Idx xs i) = Idx <$> mapOnTerm m xs <*> astMap m i

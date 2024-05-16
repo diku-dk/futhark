@@ -496,11 +496,12 @@ forward (E.AppExp (E.Apply f args _) _)
           where
             size :: IndexFn -> IndexFnM (Maybe Term)
             size (IndexFn Empty _) = pure Nothing
-            size (IndexFn (Forall _ dom) _) =
+            size (IndexFn (Forall _ d) _) =
               fmap Just $
                 normalise =<<
                   refineTerm =<<
-                    normalise (domainEnd dom ~-~ domainStart dom)
+                    normalise
+                      (domainEnd d ~-~ domainStart d ~+~ SoP2 (SoP.int2SoP 1))
             getVName (Just (Var vn)) = Just vn
             getVName _ = Nothing
         _ -> do

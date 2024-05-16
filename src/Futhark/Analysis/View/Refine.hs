@@ -29,9 +29,13 @@ int :: Int -> SoP.SoP Term
 int n = SoP.int2SoP (toInteger n)
 
 addIterator :: Iterator -> IndexFnM ()
-addIterator (Forall i (Iota (Var n))) = do
-  addRange (Var i) (mkRange (int 0) (termToSoP (Var n) SoP..-. int 1))
-  addRange (Var n) (mkRange (int 1) (int maxBound))
+addIterator (Forall i dom@(Iota e)) = do
+  addRange (Var i) (mkRange (termToSoP $ domainStart dom) (termToSoP $ domainEnd dom))
+  addRange e (mkRange (int 1) (int maxBound))
+addIterator (Forall i dom@(Cat k m _)) = do
+  addRange (Var k) (mkRange (int 0) (termToSoP m SoP..-. int 1))
+  addRange (Var i) (mkRange (termToSoP $ domainStart dom) (termToSoP $ domainEnd dom))
+  addRange m (mkRange (int 1) (int maxBound))
 addIterator _ = pure ()
 
 delIterator :: Iterator -> IndexFnM ()
