@@ -173,7 +173,7 @@ rewritePrefixSum :: IndexFn -> IndexFnM IndexFn
 rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
   | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
     -- Extract terms (multiplied symbols, factor) from the sum of products.
-    Just terms <- justAffinePlusRecurence recur,
+    Just terms <- justAffinePlusRecurrence recur,
     -- Create a sum for each product (term) in the sum of products.
     i == i',
     i == i'',
@@ -189,13 +189,13 @@ rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
       sums <- mapM (mkSum i b) terms
       pure $ IndexFn it (toCases $ e1' ~+~ SoP2 (foldl1 (SoP..+.) sums))
   where
-    justAffinePlusRecurence :: Term -> Maybe [([Term], Integer)]
-    justAffinePlusRecurence (SoP2 sop)
-      | termsWithFactors <- SoP.sopToLists sop,
+    justAffinePlusRecurrence :: Term -> Maybe [([Term], Integer)]
+    justAffinePlusRecurrence (SoP2 sop)
+      | termsWithFactors <- SoP.sopToLists (SoP.padWithZero sop),
         [Recurrence] `elem` map fst termsWithFactors,
         isAffineSoP sop =
           Just $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
-    justAffinePlusRecurence _ = Nothing
+    justAffinePlusRecurrence _ = Nothing
 
     -- Create sum for (term, factor), pulling the factor outside the sum.
     -- mkSum :: a -> Term -> ([Term], Integer)
