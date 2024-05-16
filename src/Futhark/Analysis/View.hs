@@ -69,7 +69,7 @@ handleRefinement' name x (E.AppExp (E.BinOp (op', _) _ (E.Var (E.QualName _ x') 
       case bop of
         E.Equal -> do
           y <- fromExp y'
-          addRange (Var name) (mkRange y y)
+          addEquiv (Var name) y
         _ -> undefined
 handleRefinement' _ _ _ = pure ()
 
@@ -427,8 +427,8 @@ forward (E.AppExp (E.Apply f args _) _)
           let cond = Var i :== b' -- :&& cond_b
           debugM ("cond_b " <> show cond_b)
           let y = IndexFn (Forall i (Cat k' m b'))
-                          (Cases . NE.fromList $ [(cond, Var vals_k),
-                                                  (Not cond, Var dest_i)])
+                          (Cases . NE.fromList $ [(cond, idx vals_k k'),
+                                                  (Not cond, idx dest_i i)])
           tell ["Using Scatter in-bounds-monotonic indices rule ", toLaTeX y]
           -- TODO ^ should probably substitute b in using sub rather than using it
           -- directly.
@@ -436,6 +436,8 @@ forward (E.AppExp (E.Apply f args _) _)
           sub vals_k vals_fn y
             >>= sub dest_i dest_fn
               >>= rewrite
+          where
+            idx arr ind = Idx (Var arr) (termToSoP $ Var ind)
         Nothing -> error "🤡 unhandled scatter"
   | Just "iota" <- getFun f,
     [n] <- getArgs args = do
@@ -483,7 +485,9 @@ forward (E.AppExp (E.Apply f args _) _)
           tell ["We have " <> toLaTeX (g, ixfn)]
           tell ["Substituting size parameters ("
                 <> Math.math (mconcat $ L.intersperse ", " $ map toLaTeX sz_params')
-                <> ") for sizes of arguments, we get\n" <> toLaTeX (g, ixfn')]
+                <> ") for sizes of arguments:"
+                <> Math.equation_ (mconcat $ L.intersperse ", " $ map toLaTeX sz_xs')
+                <> "we get" <> toLaTeX (g, ixfn')]
           -- tell ["We have " <> toLaTeX (g, ixfn)
           --       <> "where, substituting size parameters for sizes of arguments,"]
           -- forM_ (zip sz_params' sz_xs') (\a -> tell [toLaTeX a])
