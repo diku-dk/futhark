@@ -474,7 +474,7 @@ data ArrMeta = ArrMeta
     shmemStrides :: [SubExp],
     variantInds :: [Maybe Int],
     arrLoadStm :: Stm GPU,
-    lmadPerm :: Maybe [Int]
+    lmadPerm :: [Int]
   }
   deriving (Show)
 
@@ -492,7 +492,7 @@ arrGather_ :: ArrMeta -> [a] -> a -> [a]
 arrGather_ meta src x = gather_ src x $ variantInds meta
 
 arrPerm :: ArrMeta -> [a] -> [a]
-arrPerm meta xs = maybe xs (gather xs) (lmadPerm meta)
+arrPerm meta xs = gather xs $ lmadPerm meta
 
 makeTCKernelParams ::
   [VName] ->
@@ -601,7 +601,7 @@ makeTCEnv ::
   Lambda GPU ->
   [PrimType] ->
   Builder GPU TCEnv
-makeTCEnv env kernel_params load_stms map_lam red_lam map_ts = do
+makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
 
   tblock_offsets <-
     forM3 inner_dim_names tbids tiles_TR $
@@ -614,41 +614,61 @@ makeTCEnv env kernel_params load_stms map_lam red_lam map_ts = do
       load_stms
     $ \load_stm -> do
 
-      -- We need to extract the dimensions of each input array, and unfortunately
-      -- the Redomap passed into this module only indirectly carries this
-      -- information, as part of the kernel stms loading each redomap input slice.
-      -- It'd be more convenient if the Redomap carried not only the VNames of its
-      -- operands slices, but also the base arrays (if any) whence each slice comes,
-      -- or at least the layout thereof.
+      -- TODO: should probably gather all of the comments made here in a note.
+
+      -- We need to extract the dimensions of each input array, and
+      -- unfortunately the Redomap passed into this module only indirectly
+      -- carries this information, as part of the kernel stms loading each
+      -- redomap input slice. It'd be more convenient if the Redomap carried not
+      -- only the VNames of its operands slices, but also the base arrays (if
+      -- any) whence each slice comes, or at least the layout thereof.
       --
-      -- In any case, this information is necessary in order to match tile dims
-      -- with the dims of each input array -- since these are not simply
-      -- (M: (Ty, Ry)), (N: (Tx, Rx)), and (U: Tk) as in the 2D case -- as well as
-      -- to generate boundary checks later on.
+      -- In any case, knowledge of the actual layout of a given input array is
+      -- necessary in order to correctly map the global-to-shmem tile copy to
+      -- the tblock dimensions (to obtain coalesced access on both shmem
+      -- inputs), as well as to generate the boundary guard on the read, and to
+      -- match tile sizes to each input array, since these are not simply
+      -- (M: (Ty, Ry)), (N: (Tx, Rx)), and (U: Tk) as in the 2D case.
       --
-      -- Additionally, as it turned out, it is more convenient to load directly
-      -- from these base arrays, rather than binding computed indices to gtids
-      -- and inserting the load statements. Again, it would
+      -- Additionally, as it turned out, it was simply more convenient to load
+      -- directly from these base arrays, rather than binding computed indices
+      -- to gtids and inserting load statements.
       let base_arr = getArrayFromLoadStm load_stm
       arr_t <- lookupType base_arr
       let dims' = arrayDims arr_t
       let shmem_elem_type = elemType arr_t
 
-      -- It's not pretty, but we somehow need to extract the tile
-      -- dimensions and tblock offsets corresponding to each dimension
-      -- of each array, and below mess accomplishes this.
+      -- In fact, we need not only the layout for each array, but also the index
+      -- in the segspace of each dimension, s.t. later we may extract tblock
+      -- offsets, loop variables, and other information associated with this
+      -- given shmem array. Below mess accomplishes this:
       --
-      -- First, for each dimension in each array, find the index in
-      -- inner_dims of this dimension. These indices can then be used to
-      -- extract the corresponding tblock offsets and tile dims, which
-      -- will be ordered by the inner dimensions. Note that for each
-      -- array, the indices computed here are the same as those returned
-      -- by `variantDimsPerArr`, but in different order.
-      -- TODO: document why perm is necessary.
-      let lmad_perm = findLMADPerm env base_arr
-      let inv_lmad_perm = map snd . L.sort . (`zip` [0 ..]) <$> lmad_perm
+      -- First, for each dimension in the array, determine the index into
+      -- inner_dims of this dimension. Note that the indices computed here are
+      -- the same as those returned by `variantDimsPerArr` for the given array,
+      -- but in different order -- those computed by `variantDimsPerArr` are
+      -- ordered by their occurence in the map nest (outermost first), while
+      -- these are ordered by the array layout (outermost first).
+      --
+      -- Then, later in code generation, when we compute e.g. a set of tblock
+      -- offsets or a set of loop indices based on the segspace, we can, for
+      -- each input array, extract the tblock offsets and loop indices
+      -- corresponding to this particular array.
+      --
+      -- Unfortunately, it is not quite as simple as that. If the array layout
+      -- has been rearranged at some point before reaching this module, then we
+      -- must reverse-engineer the original array layout from associated LMAD
+      -- information. However, since LMADs do not carry permutation information,
+      -- we must reverse-engineer it by trying all possible permutations of the
+      -- known dimensions for the array (see function `findLMADPerm`). Again,
+      -- none of this would be necessary if information on the base array was
+      -- available somehow.
+      -- If an array has not been rearranged, the identity permutation is
+      -- recorded.
+      let lmad_perm = maybe (indices dims') id $ findLMADPerm env base_arr
+      let inv_lmad_perm = map snd $ L.sort $ zip lmad_perm [0 ..]
 
-      let dims = maybe dims' (gather dims') inv_lmad_perm
+      let dims = gather dims' inv_lmad_perm
       let var_inds = map (`L.elemIndex` inner_dims) dims
 
       -- Then, for each dimension of each array, extract the TR tile and
