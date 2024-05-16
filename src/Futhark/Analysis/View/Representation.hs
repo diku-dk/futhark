@@ -63,10 +63,46 @@ data Term =
   | -- Keep Recurrence last for ordering in Ord; we depend
     -- on this for Rule matching.
     Recurrence -- self-reference y[i-1]
-  deriving (Show, Eq, Ord)
+  deriving (Show, Ord)
 
 infixr 3 :&&
 infixr 2 :||
+
+instance Eq Term where
+  (Var vn) == (Var vn') =
+    vn == vn'
+  (Sum j lb ub e) == (Sum j' lb' ub' e') =
+    lb == lb' && ub == ub' && e == substituteName j' (Var j) e'
+  (Idx vn i) == (Idx vn' i') =
+    vn == vn' && i == i'
+  (SoP2 sop) == (SoP2 sop') =
+    sop == sop'
+  (Indicator e) == (Indicator e') =
+    e == e'
+  (Tuple ts) == (Tuple ts') =
+    ts == ts'
+  (Bool b) == (Bool b') =
+    b == b'
+  (Not t) == (Not t') =
+    t == t'
+  (t1 :== t2) == (t1' :== t2') =
+    t1 == t1' && t2 == t2'
+  (t1 :< t2) == (t1' :< t2') =
+    t1 == t1' && t2 == t2'
+  (t1 :> t2) == (t1' :> t2') =
+    t1 == t1' && t2 == t2'
+  (t1 :/= t2) == (t1' :/= t2') =
+    t1 == t1' && t2 == t2'
+  (t1 :>= t2) == (t1' :>= t2') =
+    t1 == t1' && t2 == t2'
+  (t1 :<= t2) == (t1' :<= t2') =
+    t1 == t1' && t2 == t2'
+  (t1 :&& t2) == (t1' :&& t2') =
+    t1 == t1' && t2 == t2'
+  (t1 :|| t2) == (t1' :|| t2') =
+    t1 == t1' && t2 == t2'
+  Recurrence == Recurrence = True
+  _ == _ = False
 
 -- This is required by MonadSoP.
 instance Nameable Term where
@@ -101,7 +137,6 @@ domainEnd (Cat k m b) = substituteName k m b
 domainStart :: Domain -> Term
 domainStart (Iota _) = SoP2 (SoP.int2SoP 0)
 domainStart (Cat k _ b) = substituteName k (SoP2 $ SoP.int2SoP 0) b
-
 
 instance Eq Domain where
   u == v | trace ("Domain equality check:\n  " <> prettyString u <> " == " <> prettyString v) False = undefined
