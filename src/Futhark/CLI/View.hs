@@ -77,29 +77,29 @@ tests =
     ("tests/refinement/part2indices.fut",
      [ ("inds", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
-        "    | conds₆₀₇₀[i₆₁₇₆] ⇒  -1 + ∑⟦conds₆₀₇₀⟧[0 : i₆₁₇₆]",
-        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑⟦conds₆₀₇₀⟧[1 + i₆₁₇₆ : -1 + n₆₀₆₈]"
+        "    | conds₆₀₇₀[i₆₁₇₆] ⇒  -1 + ∑j₆₁₇₆∈[0, ..., i₆₁₇₆] (⟦conds₆₀₇₀[j₆₁₇₆]⟧)",
+        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑j₆₁₇₆∈[1 + i₆₁₇₆, ..., -1 + n₆₀₆₈] (⟦conds₆₀₇₀[j₆₁₇₆]⟧)"
        ])
      ]),
     ("tests/refinement/part2indices_let_inside_map.fut",
      [ ("inds", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
-        "    | conds₆₀₇₀[i₆₁₇₆] ⇒  -1 + ∑⟦conds₆₀₇₀⟧[0 : i₆₁₇₆]",
-        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑⟦conds₆₀₇₀⟧[1 + i₆₁₇₆ : -1 + n₆₀₆₈]"
+        "    | conds₆₀₇₀[i₆₁₇₆] ⇒  -1 + ∑j₆₁₇₆∈[0, ..., i₆₁₇₆] (⟦conds₆₀₇₀[j₆₁₇₆]⟧)",
+        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑j₆₁₇₆∈[1 + i₆₁₈₈, ..., -1 + n₆₀₆₈] (⟦conds₆₀₇₀[j₆₁₇₆]⟧)"
        ])
      ]),
     ("tests/refinement/part2indices_neg_conds.fut",
      [ ("inds", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
-        "    | conds₆₀₇₀[i₆₁₇₆] ⇒  -1 + ∑⟦conds₆₀₇₀⟧[0 : i₆₁₇₆]",
-        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑⟦conds₆₀₇₀⟧[1 + i₆₁₇₆ : -1 + n₆₀₆₈]"
+        "    | conds₆₀₇₀[i₆₁₇₆] ⇒  -1 + ∑j₆₁₇₆∈[0, ..., i₆₁₇₆] (⟦conds₆₀₇₀[j₆₁₇₆]⟧)",
+        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑j₆₁₇₆∈[1 + i₆₁₈₈, ..., -1 + n₆₀₆₈] (⟦conds₆₀₇₀[j₆₁₇₆]⟧)"
        ])
      ]),
     ("tests/refinement/part2indices_scan_exc.fut",
      [ ("inds", [
-        "∀i₆₂₀₄ ∈ iota n₆₀₆₈ .",
-        "    | conds₆₀₇₀[i₆₂₀₄] ⇒  ∑⟦conds₆₀₇₀⟧[0 : -1 + i₆₂₀₄]",
-        "    | ¬(conds₆₀₇₀[i₆₂₀₄]) ⇒  i₆₂₀₄ + ∑⟦conds₆₀₇₀⟧[1 + i₆₁₇₆ : -1 + n₆₀₆₈]"
+        "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
+        "    | conds₆₀₇₀[i₆₁₇₆] ⇒  ∑j₆₁₇₆∈[0, ..., -1 + i₆₁₇₆] (⟦conds₆₀₇₀[j₆₁₇₆]⟧)",
+        "    | ¬(conds₆₀₇₀[i₆₁₇₆]) ⇒  i₆₁₇₆ + ∑j₆₁₇₆∈[1 + i₆₁₇₆, ..., -1 + n₆₀₆₈] (⟦conds₆₀₇₀[j₆₁₇₆]⟧)"
        ])
      ]),
     ("tests/refinement/refine_iterator1.fut",
@@ -111,8 +111,8 @@ tests =
      ]),
     ("tests/refinement/refine_iterator2.fut",
      [ ("zs", [
-        "∀i₆₂₂₃ ∈ iota n₆₁₀₆ .",
-        "    | True ⇒  ∑xs₆₀₆₉[0 : i₆₂₂₃]"
+        "∀i₆₁₀₇ ∈ iota n₆₀₆₈ .",
+        "    | True ⇒  ∑j₆₁₀₆∈[0, ..., i₆₁₀₇] (xs₆₀₆₉[j₆₁₀₆])"
        ])
      ]),
     ("tests/refinement/refine_iterator3.fut",
@@ -124,21 +124,21 @@ tests =
     ("tests/refinement/refine_iterator4.fut",
      [ ("zs", [
         "∀i₆₂₃₁ ∈ iota n₆₁₇₉ .",
-        "    | i₆₂₃₁ == 3 ⇒  ∑xs₆₁₈₀[0 : 3]",
+        "    | i₆₂₃₁ == 3 ⇒  ∑j₆₁₀₇∈[0, ..., 3] (xs₆₀₆₉[j₆₁₀₇])",
         "    | i₆₂₃₁ /= 3 ⇒  i₆₂₃₁"
        ])
      ]),
     ("tests/refinement/mkFlagArray.fut",
      [ ("res", [
-        "∀i₆₁₈₈ ∈ ⊎k₆₁₉₁=iota m₆₀₆₉ [∑shape₆₀₈₁[0 : -1 + k₆₁₉₁], ..., ∑shape₆₀₈₁[0 : k₆₁₉₁]) .",
-        "    | i₆₁₈₈ == ∑shape₆₀₈₁[0 : -1 + k₆₁₉₁] ⇒  xs₆₀₈₂[∑shape₆₀₈₁[0 : -1 + k₆₁₉₁]]",
-        "    | i₆₁₈₈ /= ∑shape₆₀₈₁[0 : -1 + k₆₁₉₁] ⇒  zero₆₀₇₀"
+        "∀i₆₁₈₉ ∈ ⊎k₆₁₉₂=iota m₆₀₆₉ [∑j₆₁₇₃∈[0, ..., -1 + k₆₁₉₂] (shape₆₀₈₁[j₆₁₇₃]), ..., ∑j₆₁₇₃∈[0, ..., k₆₁₉₂] (shape₆₀₈₁[j₆₁₇₃])) .",
+        "    | i₆₁₈₉ == ∑j₆₁₇₃∈[0, ..., -1 + k₆₁₉₂] (shape₆₀₈₁[j₆₁₇₃]) ⇒  xs₆₀₈₂[∑j₆₁₇₃∈[0, ..., -1 + k₆₁₉₂] (shape₆₀₈₁[j₆₁₇₃])]",
+        "    | i₆₁₈₉ /= ∑j₆₁₇₃∈[0, ..., -1 + k₆₁₉₂] (shape₆₀₈₁[j₆₁₇₃]) ⇒  zero₆₀₇₀"
        ])
      ]),
     ("tests/refinement/sgmsum.fut",
      [ ("ys", [
-        "∀i₆₁₉₆ ∈ ⊎k₆₁₉₉=iota m₆₀₆₉ [∑shape₆₀₈₁[0 : -1 + k₆₁₉₉], ..., ∑shape₆₀₈₁[0 : k₆₁₉₉]) .",
-        "    | True ⇒  ∑xs₆₀₈₂[∑shape₆₀₈₁[0 : -1 + k₆₁₉₉] : i₆₁₉₆]"
+        "∀i₆₁₉₇ ∈ ⊎k₆₂₀₀=iota m₆₀₆₉ [∑j₆₁₈₈∈[0, ..., -1 + k₆₂₀₀] (shape₆₀₈₁[j₆₁₈₈]), ..., ∑j₆₁₈₈∈[0, ..., k₆₂₀₀] (shape₆₀₈₁[j₆₁₈₈])) .",
+        "    | True ⇒  ∑j₆₂₁₄∈[∑j₆₁₈₈∈[0, ..., -1 + k₆₂₀₀] (shape₆₀₈₁[j₆₁₈₈]), ..., i₆₁₉₇] (xs₆₀₈₂[j₆₂₁₄])"
        ])
      ]),
     ("tests/refinement/use_previous.fut",
@@ -152,7 +152,7 @@ tests =
        ]),
        ("fun4", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
-        "    | True ⇒  2*∑inputs₆₁₅₉[0 : i₆₁₇₆]"
+        "    | True ⇒  2*∑j₆₂₃₇∈[0, ..., i₆₁₇₆] (inputs₆₁₇₄[j₆₂₃₇])"
        ]),
        ("fun5", [
         "∀i₆₁₇₆ ∈ iota n₆₀₆₈ .",
