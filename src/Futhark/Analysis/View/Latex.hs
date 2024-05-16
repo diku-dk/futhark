@@ -147,11 +147,14 @@ instance (ToLaTeX a) => ToLaTeX (Cases a) where
 autoOpenEndedInterval :: LaTeXC l => l -> l
 autoOpenEndedInterval x = commS "left[" <> x <> commS "right)"
 
+
+catFromTo :: LaTeXC a => a -> a -> a
+catFromTo x y = commS "biguplus" <> raw"_" <> braces x <> raw"^" <> braces y
+
 instance ToLaTeX Domain where
   toLaTeX_ _ (Iota e) = mathtt "iota" <> space <> toLaTeX e
   toLaTeX_ _ (Cat k m b) =
-    comm0 "biguplus" !: (toLaTeX k
-      =: mathtt "iota" <> space <> toLaTeX m)
+    catFromTo (toLaTeX k =: "0") (toLaTeX (m ~-~ SoP2 (SoP.int2SoP 1)))
       <> autoOpenEndedInterval
            (toLaTeX b
               <> raw ", \\dots, "
