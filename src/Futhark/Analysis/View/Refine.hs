@@ -200,6 +200,7 @@ refineRelation rel x y = do
     solve (Bool True :|| _) = pure True
     solve (_ :|| Bool True) = pure True
     solve (a :== b) = termToSoP a $==$ termToSoP b
+    solve (a :/= b) = termToSoP a $/=$ termToSoP b
     solve (a :> b)  = termToSoP a $>$ termToSoP b
     solve (a :>= b) = termToSoP a $>=$ termToSoP b
     solve (a :< b)  = termToSoP a $<$ termToSoP b
