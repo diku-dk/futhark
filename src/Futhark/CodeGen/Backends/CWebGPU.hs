@@ -45,6 +45,8 @@ mkKernelInfos kernels = do
                typename size_t num_dynamic_block_dims;
                typename uint32_t *dynamic_block_dim_indices;
                char **dynamic_block_dim_names;
+               typename uint32_t num_shared_mem_overrides;
+               char **shared_mem_overrides;
              } wgpu_kernel_info;
              static typename size_t wgpu_num_kernel_infos = $exp:num_kernels; |]
   mapM_ GC.earlyDecl $ concatMap sc_offs_decl (M.toList kernels)
@@ -52,6 +54,7 @@ mkKernelInfos kernels = do
   mapM_ GC.earlyDecl $ concatMap used_overrides_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap dynamic_block_dim_indices_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap dynamic_block_dim_names_decl (M.toList kernels)
+  mapM_ GC.earlyDecl $ concatMap shared_mem_overrides_decl (M.toList kernels)
   mapM_
     GC.earlyDecl
     [C.cunit|static struct wgpu_kernel_info wgpu_kernel_infos[]
@@ -84,11 +87,19 @@ mkKernelInfos kernels = do
               (dynamicBlockDims k)
        in [C.cunit|static char* $id:(n <> "_dynamic_block_dim_names")[]
                     = {$inits:names};|]
+    shared_mem_overrides_decl (n, k) =
+      let names =
+            map
+              (\d -> [C.cinit|$string:(T.unpack d)|])
+              (sharedMemoryOverrides k)
+       in [C.cunit|static char* $id:(n <> "_shared_mem_overrides")[]
+                    = {$inits:names};|]
     info_init (n, k) =
       let num_scalars = length (scalarsOffsets k)
           num_bindings = length (memBindSlots k)
           num_overrides = length (overrideNames k)
           num_dynamic_block_dims = length (dynamicBlockDims k)
+          num_shared_mem_overrides = length (sharedMemoryOverrides k)
        in [C.cinit|{ .name = $string:(T.unpack (idText (C.toIdent n mempty))),
                      .num_scalars = $int:num_scalars,
                      .scalars_binding = $int:(scalarsBindSlot k),
@@ -103,6 +114,9 @@ mkKernelInfos kernels = do
                         $id:(n <> "_dynamic_block_dim_indices"),
                      .dynamic_block_dim_names =
                         $id:(n <> "_dynamic_block_dim_names"),
+                     .num_shared_mem_overrides = $int:num_shared_mem_overrides,
+                     .shared_mem_overrides =
+                        $id:(n <> "_shared_mem_overrides"),
                    }|]
     info_inits = map info_init (M.toList kernels)
 

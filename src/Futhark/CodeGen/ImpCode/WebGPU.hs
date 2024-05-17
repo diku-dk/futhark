@@ -20,8 +20,8 @@ import Futhark.Util.Pretty
 
 -- | The interface to a WebGPU/WGSL kernel.
 --
--- Arguments are assumed to be passed as all scalars first, and then all memory
--- bindings.
+-- Arguments are assumed to be passed as shared memory sizes first, then
+-- scalars, and then memory bindings.
 data KernelInterface = KernelInterface
   { safety :: KernelSafety,
     -- | Offsets of all fields in the corresponding scalars struct.
@@ -40,7 +40,10 @@ data KernelInterface = KernelInterface
     overrideNames :: [T.Text],
     -- | Dynamic block dimensions, with the corresponding override name. They
     -- are also included in `overrideNames`.
-    dynamicBlockDims :: [(Int, T.Text)]
+    dynamicBlockDims :: [(Int, T.Text)],
+    -- | Override names for shared memory sizes. They are also included in
+    -- `overrideNames`.
+    sharedMemoryOverrides :: [T.Text]
   }
 
 -- | A program calling WebGPU kernels.

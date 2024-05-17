@@ -559,6 +559,9 @@ void backend_context_teardown(struct futhark_context *ctx) {
 //   size_t num_dynamic_block_dims;
 //   uint32_t *dynamic_block_dim_indices;
 //   char **dynamic_block_dim_names;
+//
+//   size_t num_shared_mem_overrides;
+//   char **shared_mem_overrides;
 struct wgpu_kernel_info;
 static size_t wgpu_num_kernel_infos;
 static wgpu_kernel_info wgpu_kernel_infos[];
@@ -593,7 +596,7 @@ struct wgpu_kernel {
   // Only set if !static_pipeline.
   WGPUConstantEntry *const_entries;
   // How many entries are already set; there is enough space in the allocation
-  // to additionally set the dynamic block dimension entries.
+  // to additionally set the shared memory and dynamic block dimension entries.
   int const_entries_set;
 };
 typedef struct wgpu_kernel* gpu_kernel;
@@ -670,7 +673,9 @@ static void gpu_create_kernel(struct futhark_context *ctx,
     }
   }
 
-  kernel->static_pipeline = kernel_info->num_dynamic_block_dims > 0;
+  kernel->static_pipeline = 
+    kernel_info->num_dynamic_block_dims == 0 
+    && kernel_info->num_shared_mem_overrides == 0;
   if (!kernel->static_pipeline) {
     kernel->const_entries = const_entries;
     kernel->const_entries_set = const_idx;
@@ -852,14 +857,23 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              size_t args_sizes[num_args]) {
   struct wgpu_kernel_info *kernel_info = kernel->info;
 
-  if (num_args != kernel_info->num_scalars + kernel_info->num_bindings) {
+  if (num_args != 
+      kernel_info->num_shared_mem_overrides 
+      + kernel_info->num_scalars 
+      + kernel_info->num_bindings
+  ) {
     futhark_panic(-1, "Kernel %s called with num_args not maching its info\n",
                   name);
   }
 
+  int shared_mem_start = 0;
+  int scalars_start = shared_mem_start + kernel_info->num_shared_mem_overrides;
+  int mem_start = scalars_start + kernel_info->num_scalars;
+
   void *scalars = malloc(kernel_info->scalars_size);
   for (int i = 0; i < kernel_info->num_scalars; i++) {
-    memcpy(scalars + kernel_info->scalar_offsets[i], args[i], args_sizes[i]);
+    memcpy(scalars + kernel_info->scalar_offsets[i],
+        args[scalars_start + i], args_sizes[scalars_start + i]);
   }
 
   WGPUBindGroupEntry *bg_entries = calloc(1 + kernel_info->num_bindings,
@@ -867,7 +881,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
   for (int i = 0; i < kernel_info->num_bindings; i++) {
     WGPUBindGroupEntry *entry = &bg_entries[1 + i];
     entry->binding = kernel_info->binding_indices[i];
-    entry->buffer = (gpu_mem) *((gpu_mem *)args[kernel_info->num_scalars + i]);
+    entry->buffer = (gpu_mem) *((gpu_mem *)args[mem_start + i]);
     // In theory setting (offset, size) to (0, 0) should also work and mean
     // 'the entire buffer', but as of writing this, Firefox requires
     // specifying the size.
@@ -894,11 +908,18 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
   WGPUComputePipeline pipeline;
   if (kernel->static_pipeline) { pipeline = kernel->pipeline; }
   else {
+    int const_entry_idx = kernel->const_entries_set;
     for (int i = 0; i < kernel_info->num_dynamic_block_dims; i++) {
-      WGPUConstantEntry *entry =
-        &kernel->const_entries[kernel->const_entries_set + i];
+      WGPUConstantEntry *entry = &kernel->const_entries[const_entry_idx];
+      const_entry_idx++;
       entry->key = kernel_info->dynamic_block_dim_names[i];
       entry->value = (double) block[kernel_info->dynamic_block_dim_indices[i]];
+    }
+    for (int i = 0; i < kernel_info->num_shared_mem_overrides; i++) {
+      WGPUConstantEntry *entry = &kernel->const_entries[const_entry_idx];
+      const_entry_idx++;
+      entry->key = kernel_info->shared_mem_overrides[i];
+      entry->value = (double) *((int32_t *) args[shared_mem_start + i]);
     }
 
     WGPUComputePipelineDescriptor desc = {

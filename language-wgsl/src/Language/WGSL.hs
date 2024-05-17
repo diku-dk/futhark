@@ -75,7 +75,7 @@ structLayout fields = do
   where
     roundUp k n = ceiling ((fromIntegral n :: Double) / fromIntegral k) * k
 
-data Typ = Prim PrimType | Array PrimType | Named Ident
+data Typ = Prim PrimType | Array PrimType (Maybe Exp) | Named Ident
 
 type BinOp = T.Text
 
@@ -97,6 +97,7 @@ data Stmt
   = Skip
   | Comment T.Text
   | Seq Stmt Stmt
+  | Let Ident Exp
   | DeclareVar Ident Typ
   | Assign Ident Exp
   | AssignIndex Ident Exp Exp
@@ -123,7 +124,7 @@ data Struct = Struct Ident [Field]
 data AccessMode = ReadOnly | ReadWrite
 
 -- Uniform buffers are always read-only.
-data AddressSpace = Storage AccessMode | Uniform
+data AddressSpace = Storage AccessMode | Uniform | Workgroup
 
 data Declaration
   = FunDecl Function
@@ -177,7 +178,8 @@ instance Pretty PrimType where
 
 instance Pretty Typ where
   pretty (Prim t) = pretty t
-  pretty (Array t) = "array<" <> pretty t <> ">"
+  pretty (Array t Nothing) = "array<" <> pretty t <> ">"
+  pretty (Array t sz) = "array<" <> pretty t <> ", " <> pretty sz <> ">"
   pretty (Named t) = pretty t
 
 instance Pretty Exp where
@@ -194,8 +196,9 @@ instance Pretty Exp where
 
 instance Pretty Stmt where
   pretty Skip = ";"
-  pretty (Comment c) = "//" <+> (pretty c)
+  pretty (Comment c) = "//" <+> pretty c
   pretty (Seq s1 s2) = semistack [pretty s1, pretty s2]
+  pretty (Let x e) = "let" <+> pretty x <+> "=" <+> pretty e
   pretty (DeclareVar x t) = "var" <+> pretty x <+> ":" <+> pretty t
   pretty (Assign x e) = pretty x <+> "=" <+> pretty e
   pretty (AssignIndex x i e) =
@@ -288,6 +291,7 @@ instance Pretty AccessMode where
 instance Pretty AddressSpace where
   pretty (Storage am) = "storage" <> "," <> pretty am
   pretty Uniform = "uniform"
+  pretty Workgroup = "workgroup"
 
 instance Pretty Declaration where
   pretty (FunDecl fun) = pretty fun

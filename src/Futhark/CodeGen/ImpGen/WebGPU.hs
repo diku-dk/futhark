@@ -11,7 +11,6 @@ import Control.Monad.Trans.RWS
 import Control.Monad.Trans.State qualified as State
 import Data.Bifunctor (first, second)
 import Data.Bits qualified as Bits
-import Data.List (foldl')
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Set qualified as S
@@ -67,17 +66,16 @@ data KernelState = KernelState
     -- These describe the kernel interface.
     ksOverrides :: [WGSL.Ident],
     ksBlockDims :: [(Int, WGSL.Ident, Bool)],
+    ksSharedMem :: [(WGSL.Ident, Exp)],
     ksScalars :: [WGSL.PrimType],
     ksBindSlots :: [Int]
   }
 
 type KernelM = RWST KernelR () KernelState WebGPUM
 
-addRenames :: [(WGSL.Ident, WGSL.Ident)] -> KernelM ()
-addRenames renames = modify $
-  \s -> s {ksNameReplacements = insert (ksNameReplacements s)}
-  where
-    insert m' = foldl' (\m (k, v) -> M.insert k v m) m' renames
+addRename :: WGSL.Ident -> WGSL.Ident -> KernelM ()
+addRename old new = modify $
+  \s -> s {ksNameReplacements = M.insert old new (ksNameReplacements s)}
 
 -- | Some names generated are unique in the scope of a single kernel but are
 -- translated to module-scope identifiers in WGSL. This modifies an identifier
@@ -126,6 +124,13 @@ addBlockDim :: Int -> WGSL.Ident -> Bool -> KernelM ()
 addBlockDim dim ident dynamic =
   modify $ \s -> s {ksBlockDims = (dim, ident, dynamic) : ksBlockDims s}
 
+-- | Registers an override identifier as describing the size of a shared memory
+-- buffer, with the expression being evaluated to get the size when launching
+-- the kernel.
+addSharedMem :: WGSL.Ident -> Exp -> KernelM ()
+addSharedMem ident e =
+  modify $ \s -> s {ksSharedMem = (ident, e) : ksSharedMem s}
+
 -- | Add a scalar struct field.
 addScalar :: WGSL.PrimType -> KernelM ()
 addScalar typ = modify $ \s -> s {ksScalars = ksScalars s ++ [typ]}
@@ -152,7 +157,7 @@ builtinBlockSize 2 = mkGlobalIdent "block_size_z"
 builtinBlockSize _ = error "invalid block size dimension"
 
 -- Main function for translating an ImpGPU kernel to a WebGPU kernel.
-genKernel :: ImpGPU.Kernel -> WebGPUM KernelName
+genKernel :: ImpGPU.Kernel -> WebGPUM (KernelName, [(Exp, PrimType)])
 genKernel kernel = do
   let initial =
         KernelState
@@ -162,6 +167,7 @@ genKernel kernel = do
             ksNameReplacements = mempty,
             ksOverrides = mempty,
             ksBlockDims = mempty,
+            ksSharedMem = mempty,
             ksScalars = mempty,
             ksBindSlots = mempty
           }
@@ -190,6 +196,7 @@ genKernel kernel = do
         -- dummy layout with single i32 instead of empty structs
         fromMaybe ([], 4, 4) (WGSL.structLayout (ksScalars s))
   let dynamicBlockDims = [(dim, n) | (dim, n, True) <- ksBlockDims s]
+  let (sharedMemOverrides, sharedMemExps) = unzip $ ksSharedMem s
   let interface =
         KernelInterface
           { safety = SafetyNone, -- TODO
@@ -198,10 +205,11 @@ genKernel kernel = do
             scalarsBindSlot = head (ksBindSlots s),
             memBindSlots = tail (ksBindSlots s),
             overrideNames = ksOverrides s,
-            dynamicBlockDims = dynamicBlockDims
+            dynamicBlockDims = dynamicBlockDims,
+            sharedMemoryOverrides = sharedMemOverrides
           }
   State.modify $ \ws -> ws {wsKernels = wsKernels ws <> [(name, interface)]}
-  pure (nameFromText name)
+  pure (nameFromText name, map (,IntType Int32) sharedMemExps)
   where
     gen = do
       genConstAndBuiltinDecls
@@ -215,15 +223,16 @@ genKernel kernel = do
 
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
-  name <- genKernel kernel
+  (name, extraArgExps) <- genKernel kernel
   let numBlocks = ImpGPU.kernelNumBlocks kernel
   let blockDim = ImpGPU.kernelBlockSize kernel
+  let extraArgs = [ValueKArg e t | (e, t) <- extraArgExps]
   let scalarArgs =
         [ ValueKArg (LeafExp n t) t
           | ImpGPU.ScalarUse n t <- ImpGPU.kernelUses kernel
         ]
   let memArgs = [MemKArg n | ImpGPU.MemoryUse n <- ImpGPU.kernelUses kernel]
-  let args = scalarArgs ++ memArgs
+  let args = extraArgs ++ scalarArgs ++ memArgs
   pure $ LaunchKernel SafetyNone name 0 args numBlocks blockDim
 
 onHostOp :: ImpGPU.HostOp -> WebGPUM HostOp
@@ -302,7 +311,7 @@ wgslPrimType Bool = WGSL.Bool
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
 wgslPrimType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
 
-wgslBufferType :: PrimType -> WGSL.Typ
+wgslBufferType :: PrimType -> Maybe WGSL.Exp -> WGSL.Typ
 wgslBufferType Bool = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int8) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int16) = WGSL.Array $ WGSL.Atomic wgslInt16
@@ -360,6 +369,18 @@ genWGSLStm (While cond body) =
     WGSL.While
     (genWGSLExp $ untyped cond)
     (genWGSLStm body)
+genWGSLStm (DeclareMem name (Space "shared")) = do
+  let name' = nameToIdent name
+  moduleName <- mkGlobalIdent name'
+  sizeName <- mkGlobalIdent $ name' <> "_size"
+
+  elemPrimType <- findSingleMemoryType name
+  let bufType = wgslBufferType elemPrimType (Just $ WGSL.VarExp sizeName)
+
+  addOverride sizeName (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
+  addDecl $ WGSL.VarDecl [] WGSL.Workgroup moduleName bufType
+  addRename name' moduleName
+  pure $ WGSL.Comment $ "declare_shared: " <> name'
 genWGSLStm s@(DeclareMem _ _) = unsupported s
 genWGSLStm (DeclareScalar name _ typ) =
   pure $
@@ -418,14 +439,23 @@ genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = do
   destId <- getIdent dest
   WGSL.Assign destId . WGSL.VarExp <$> builtinLockstepWidth
 genWGSLStm s@(Op (ImpGPU.Atomic _ _)) = unsupported s
-genWGSLStm s@(Op (ImpGPU.Barrier _)) = unsupported s
+genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceLocal)) =
+  pure $ WGSL.Call "workgroupBarrier" []
+genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceGlobal)) =
+  pure $ WGSL.Call "storageBarrier" []
 genWGSLStm s@(Op (ImpGPU.MemFence _)) = unsupported s
-genWGSLStm s@(Op (ImpGPU.SharedAlloc name size)) = unsupported s -- do
--- types <- findMemoryTypes name
--- let elemType =
---      case types of
---        [t] -> wgslBufferType t
---        _ -> error "Using buffer at multiple types not supported in WebGPU backend"
+genWGSLStm (Op (ImpGPU.SharedAlloc name size)) = do
+  let name' = nameToIdent name
+  sizeName <- mkGlobalIdent $ name' <> "_size"
+
+  elemPrimType <- findSingleMemoryType name
+  let elemSize = primByteSize elemPrimType :: Int32
+  let sizeExp =
+        zExt Int32 (untyped (unCount size))
+          ~/~ ValueExp (IntValue $ Int32Value elemSize)
+
+  addSharedMem sizeName sizeExp
+  pure $ WGSL.Comment $ "shared_alloc: " <> name'
 genWGSLStm s@(Op (ImpGPU.ErrorSync _)) = unsupported s
 
 call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
@@ -621,11 +651,14 @@ genWGSLExp (UnOpExp op e) = wgslUnOp op <$> genWGSLExp e
 genWGSLExp (ConvOpExp op e) = wgslConvOp op <$> genWGSLExp e
 genWGSLExp _ = pure $ WGSL.StringExp "<not implemented>"
 
-indexExp :: Count Elements (TExp Int64) -> KernelM WGSL.Exp
 -- We support 64-bit arithmetic, but since WGSL does not have support for it,
 -- we cannot use a 64-bit value as an index, so we have to truncate it to 32
 -- bits.
-indexExp = genWGSLExp . ConvOpExp (ZExt Int64 Int32) . untyped . unCount
+indexExp :: Count Elements (TExp Int64) -> KernelM WGSL.Exp
+-- There are many occasions where we would end up extending to 64 bit and
+-- immediately truncating, avoid that.
+indexExp (Count (TPrimExp (ConvOpExp (SExt Int32 Int64) e))) = genWGSLExp e
+indexExp c = (genWGSLExp . ConvOpExp (ZExt Int64 Int32) . untyped . unCount) c
 
 -- | Generate a struct declaration and corresponding uniform binding declaration
 -- for all the scalar 'KernelUse's. Also generate a block of statements that
@@ -677,6 +710,13 @@ findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
     find (If _ s1 s2) = find s1 <> find s2
     find _ = S.empty
 
+findSingleMemoryType :: VName -> KernelM ImpGPU.PrimType
+findSingleMemoryType name = do
+  types <- findMemoryTypes name
+  case types of
+    [t] -> pure t
+    _ -> error "Using buffer at multiple types not supported in WebGPU backend"
+
 -- | Generate binding declarations for memory buffers used by kernel. Produces
 -- additional name replacements because it makes the binding names unique.
 --
@@ -688,8 +728,7 @@ genMemoryDecls = do
   uses <- asks (ImpGPU.kernelUses . krKernel)
   memUses <- catMaybes <$> sequence [withType n | ImpGPU.MemoryUse n <- uses]
   mapM_ moduleDecl memUses
-  renames <- mapM rename memUses
-  addRenames renames
+  mapM_ rename memUses
   where
     withType name = do
       types <- findMemoryTypes name
@@ -706,8 +745,8 @@ genMemoryDecls = do
           (WGSL.bindingAttribs 0 slot)
           (WGSL.Storage WGSL.ReadWrite)
           ident
-          (wgslBufferType typ)
-    rename (name, _) = (name,) <$> mkGlobalIdent name
+          (wgslBufferType typ Nothing)
+    rename (name, _) = mkGlobalIdent name >>= addRename name
 
 -- | Generate `override` declarations for kernel 'ConstUse's and
 -- backend-provided values (like block size and lockstep width).
