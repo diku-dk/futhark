@@ -36,7 +36,7 @@ reductionLoopBody ::
   Bool ->
   Builder GPU [VName]
 reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
-  qq <- letExp "qq" =<< toExp (le64 qq0 * pe64 tile_seq)
+  qq <- letExp "qq" =<< toExp (le64 qq0 * pe64 tile_Q)
 
   redomap_inputs_shr <- forM2 shr_arrs_in arr_metas $ copyGlb2Shr qq
   reg_tiles_out <- accumulateRegTile qq redomap_inputs_shr
@@ -44,7 +44,7 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
   where
     arr_metas = arrsInfo tc_env
     kernel_params = kernelParams tc_env
-    tile_seq = tileSeq kernel_params
+    tile_Q = tileQ kernel_params
     tiles_T = tilesT kernel_params
     tiles_R = tilesR kernel_params
     common_dim = commonDim kernel_params
@@ -125,7 +125,7 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                 -- TODO: here, we simply insert a zero (or zero-like value) into
                 -- shmem whenever we are outside bounds. However, this only
                 -- succeeds in certain cases, unless we explicitly handle
-                -- residual tiles in an epilogue.
+                -- residual tiles in an epilogue (which we do).
                 -- See note [ShmemZeroPaddingOnGlobalMemOOB].
                 (eBody [eBlank $ Prim $ shmemElemType arr_meta])
 
@@ -154,7 +154,7 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
       segMapND_ "reg_tiles_out" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
         reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
         fmap ((: []) . varRes) $
-          forLoop_ tile_seq reg_tile_in $ \q reg_tile_in' ->
+          forLoop_ tile_Q reg_tile_in $ \q reg_tile_in' ->
             letExp "reg_tile_acc"
               =<< eIf
                 ( toExp $
@@ -283,7 +283,7 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
                           tiles_T
                           tiles_R
                           _tiles_TR
-                          tile_seq
+                          tile_Q
                           grid_dims
                           grid_size_flat
                           _tblock_dims
@@ -315,29 +315,29 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
             case use_epilogue of
               True -> do
                 myDebugM "Compiling TC expression WITH epilogue"
-                num_full_tiles <-
-                  letExp "num_full_tiles" . BasicOp $
-                    BinOp (SQuot Int64 Unsafe) common_dim tile_seq
-                remainder <-
-                  letExp "remainder" . BasicOp $
-                    BinOp (SRem Int64 Unsafe) common_dim tile_seq
+                num_full_Q_tiles <-
+                  letExp "num_full_Q_tiles" . BasicOp $
+                    BinOp (SQuot Int64 Unsafe) common_dim tile_Q
+                residual_input <-
+                  letExp "residual_input" . BasicOp $
+                    BinOp (SRem Int64 Unsafe) common_dim tile_Q
 
                 ~prologue_res@(reg_tiles' : shr_arrs') <-
-                  forLoop (Var num_full_tiles) (reg_tiles_init : shr_arrs_init) $
+                  forLoop (Var num_full_Q_tiles) (reg_tiles_init : shr_arrs_init) $
                     \qq0 (reg_tiles_merge : shr_arrs_merge) ->
                       reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
 
                 letTupExp "reduction_res"
                   =<< eIf
-                    (toExp $ le64 remainder .==. 0)
+                    (toExp $ le64 residual_input .==. 0)
                     (resultBodyM $ map Var prologue_res)
                     ( resultBody . map Var
-                        <$> reductionLoopBody tc_env num_full_tiles reg_tiles' shr_arrs' False
+                        <$> reductionLoopBody tc_env num_full_Q_tiles reg_tiles' shr_arrs' False
                     )
               _ -> do
                 myDebugM "Compiling TC expression WITHOUT epilogue"
-                num_seq_tiles <- letSubExp "num_seq_tiles" =<< ceilDiv common_dim tile_seq
-                forLoop num_seq_tiles (reg_tiles_init : shr_arrs_init) $
+                num_q_tiles <- letSubExp "num_Q_tiles" =<< ceilDiv common_dim tile_Q
+                forLoop num_q_tiles (reg_tiles_init : shr_arrs_init) $
                   \qq0 (reg_tiles_merge : shr_arrs_merge) ->
                     reductionLoopBody tc_env qq0 reg_tiles_merge shr_arrs_merge True
 
@@ -436,7 +436,7 @@ data TCKernelParams = TCKernelParams
     tilesR :: [SubExp],
     tilesTR :: [SubExp],
     -- Tile size for the sequential (reduction) dimension.
-    tileSeq :: SubExp,
+    tileQ :: SubExp,
     -- Grid and tblock parameters.
     gridDims :: [SubExp],
     gridSizeFlat :: SubExp,
@@ -508,7 +508,7 @@ makeTCKernelParams gtids inner_dims_se common_dim_se = do
   tbid_flat <- newVName "tbid_flat"
 
   -- tile sizes.
-  tile_seq <- letTileSE SizeTile tile_common_dim_vn
+  tile_Q <- letTileSE SizeTile tile_common_dim_vn
   tiles_T <- mapM (letTileSE SizeTile) tile_T_vns
   tiles_R <- mapM (letTileSE SizeRegTile) tile_R_vns
   tiles_TR <-
@@ -537,7 +537,7 @@ makeTCKernelParams gtids inner_dims_se common_dim_se = do
       tiles_T
       tiles_R
       tiles_TR
-      tile_seq
+      tile_Q
       grid_dims
       grid_size_flat
       tblock_dims
@@ -548,7 +548,7 @@ makeTCKernelParams gtids inner_dims_se common_dim_se = do
     inner_dim_names
       | Just name_strs <- mapM getNameStrFor inner_dims_se = name_strs
       | otherwise = map show $ indices inner_dims_se
-    common_dim_name = maybe "seq" id $ getNameStrFor common_dim_se
+    common_dim_name = maybe "Q" id $ getNameStrFor common_dim_se
 
     getNameStrFor (Var v) = Just $ filter isAscii $ baseString v
     getNameStrFor _ = Nothing
@@ -673,13 +673,14 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
 
       -- Then, for each dimension of each array, extract the TR tile and
       -- tblock offset corresponding to this dimension. For the tile
-      -- dims, we insert tile_seq in the index of the array dim not
+      -- dims, we insert tile_Q in the index of the array dim not
       -- represented in inner_dims.
-      let tile_dims = gather_ tiles_TR tile_seq var_inds
+      let tile_dims = gather_ tiles_TR tile_Q var_inds
       let tile_dims_pe = map pe64 tile_dims
 
       -- Determine whether this array is a candidate for padding. If so, we need
       -- to take this into account in its flat size and the computed strides.
+      let innerProducts = scanr (*) 1 . tail
       ~(shmem_size_flat', shmem_strides') <-
 
         -- An array is candidate for padding if one of its dimensions is indexed
@@ -698,16 +699,15 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
             tmp <- letSubExp "tmp" $ BasicOp $ BinOp (SRem Int64 Unsafe) size_pre_pad se2
             pad_term <- letSubExp "pad_term" =<< toExp (1 - pe64 tmp)
 
-            let inner_size_flat = product inner_shmem_dims + pe64 pad_term
+            let inner_size_flat = pe64 size_pre_pad + pe64 pad_term
 
-                getStrides = scanr (*) 1 . tail
-                outer_strides = init $ getStrides $ outer_shmem_dims ++ [inner_size_flat]
-                inner_strides = getStrides inner_shmem_dims
+                outer_strides = init $ innerProducts $ outer_shmem_dims ++ [inner_size_flat]
+                inner_strides = innerProducts inner_shmem_dims
 
                 size_flat = product outer_shmem_dims * inner_size_flat
             pure (size_flat, outer_strides ++ inner_strides)
 
-          _ -> pure (product tile_dims_pe, scanr (*) (pe64 se1) $ tail tile_dims_pe)
+          _ -> pure (product tile_dims_pe, innerProducts tile_dims_pe)
 
       shmem_size_flat <- letSubExp "shmem_size_flat" =<< toExp shmem_size_flat'
       shmem_strides <- mapM (letSubExp "shmem_stride" <=< toExp) shmem_strides'
@@ -734,7 +734,7 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
 
     tbids = tbidVns kernel_params
     tiles_TR = tilesTR kernel_params
-    tile_seq = tileSeq kernel_params
+    tile_Q = tileQ kernel_params
     inner_dim_names = innerDimNames kernel_params
     inner_dims = innerDims kernel_params
     inner_dim_ind = length inner_dims - 1
