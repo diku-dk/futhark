@@ -287,6 +287,16 @@ instance Pretty Term where
   pretty (Var x) = prettyName x
   pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
   pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)
+  pretty (Sum i lb ub e)
+    | [([Idx (Var vn) idx], 1)] <- getSoP e =
+    "∑"
+      <> prettyName vn
+      <> brackets (pretty (substituteName i (SoP2 lb) idx) <+> ":" <+> pretty (substituteName i (SoP2 ub) idx))
+  pretty (Sum i lb ub e)
+    | [([Indicator (Idx (Var vn) idx)], 1)] <- getSoP e =
+    "∑"
+      <> pretty (Indicator (Var vn))
+      <> brackets (pretty (substituteName i (SoP2 lb) idx) <+> ":" <+> pretty (substituteName i (SoP2 ub) idx))
   pretty (Sum i lb ub e) =
     "∑"
       <> prettyName i
