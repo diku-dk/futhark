@@ -73,12 +73,17 @@ rollbackAlgEnv computation = do
   pure res
 
 refineIndexFn :: IndexFn -> IndexFnM IndexFn
-refineIndexFn (IndexFn it (Cases cases)) = do
-  let preds = NE.toList $ NE.map fst cases
-  let vals = NE.toList $ NE.map snd cases
-  (preds', vals') <- rollbackAlgEnv (
+refineIndexFn (IndexFn it xs) = do
+  xs' <- rollbackAlgEnv (
     do
       addIterator it
+      refineCases xs)
+  pure $ IndexFn it xs'
+  where
+    refineCases :: Cases Term -> IndexFnM (Cases Term)
+    refineCases cases = do
+      let preds = casePredicates cases
+      let vals = caseValues cases
       ps <- mapM refineTerm preds
       -- Eliminate cases for which the predicate is always False. (The solver
       -- may return false when the query is undecidable, so we instead check
@@ -96,26 +101,53 @@ refineIndexFn (IndexFn it (Cases cases)) = do
       --                          (init $ scanl (:&&) (Bool True) neg_preds)
       --                          preds
       vs' <- mapM refineCase (zip ps' vs)
-      pure (ps', vs'))
-  pure $ IndexFn it (Cases . NE.fromList $ zip preds' vals')
-  where
+      -- Attempt to merge cases that are equivalent given their predicates.
+      -- For example, in
+      --   | k > 0  => sum_{j=0}^{k-1} e_j
+      --   | k <= 0 => 0
+      -- the second case is covered by the first when k <= 0. So we want just:
+      --   | True  => sum_{j=0}^{k-1} e_j
+      cs <- mergeEquivCases (zip ps' vs')
+      pure $ listToCases cs
+
     refineCase :: (Term, Term) -> IndexFnM Term
     refineCase (p, v)
       | Just rel <- toRel p =
         rollbackAlgEnv (
           do
-            -- debugM $ "refine CASE " <> prettyString (p,v)
             addRel rel
             refineTerm v)
     refineCase (_, v) =
       refineTerm v
 
+    mergeEquivCases cs@[(_p1,v1), (p2,v2)] = do
+      v1' <- refineCase (p2, v1)
+      if v1' == v2
+      then pure [(Bool True, v1)]
+      else pure cs
+    mergeEquivCases cs = pure cs
+    -- More general version that merges any two cases
+    -- (not necessary and seems like a good way to introduce bugs):
+    -- mergeCase x =
+    --   foldM merge (x, Bool True, [])
+    --   where
+    --     merge ((p1,v1), neg_prev, unmerged) (p2,v2) = do
+    --       p2' <- refineTerm $ neg_prev :&& p2
+    --       v1' <- refineCase (p2', v1)
+    --       if v1' == v2
+    --       then pure ((p1 :|| p2', v1), neg_prev, unmerged)
+    --       else pure ((p1, v1), neg_prev :&& Not p2, (p2,v2):unmerged)
+    -- mergeCases [] = pure []
+    -- mergeCases (c:cs) = do
+    --   (merged, _, rest) <- mergeCase c cs
+    --   cs' <- mergeCases rest
+    --   pure $ merged : cs'
+
 -- NOTE the FME solver returns False if the expression is false
 -- _or_ if the result is unknown. Hence only True results may be used.
 -- XXX Not is outside the SoP repr. Should it be converted in termToSoP?
 refineTerm :: Term -> IndexFnM Term
-refineTerm t =
-  refineT t
+refineTerm = refineT
   where
     m =
       ASTMapper
@@ -160,7 +192,7 @@ refineTerm t =
         mergeSums :: Term -> IndexFnM Term
         mergeSums (SoP2 s) = do
           SoP2 . SoP.sopFromList <$> foldM absorbTerm [] (getSoP s)
-        mergeSums t = pure t
+        mergeSums e = pure e
 
         absorbTerm [] t2 = pure [t2]
         absorbTerm (t1:ts) t2 = do

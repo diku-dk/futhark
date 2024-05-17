@@ -391,6 +391,20 @@ toCases e = Cases (NE.singleton (Bool True, e))
 casesToList :: Cases a -> [(a, a)]
 casesToList (Cases xs) = NE.toList xs
 
+listToCases :: [(a, a)] -> Cases a
+listToCases = Cases . NE.fromList
+
+listsToCases :: [a] -> [a] -> Cases a
+listsToCases preds vals | length preds == length vals =
+  listToCases $ zip preds vals
+listsToCases _ _= error "listsToCases: lists have different lengths"
+
+casePredicates :: Cases a -> [a]
+casePredicates = map fst . casesToList
+
+caseValues :: Cases a -> [a]
+caseValues = map snd . casesToList
+
 toScalarIndexFn :: Term -> IndexFn
 toScalarIndexFn e = IndexFn Empty (toCases e)
 

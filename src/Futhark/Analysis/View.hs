@@ -285,8 +285,8 @@ forward (E.AppExp (E.If c t f _) _) = do
   cond <- newNameFromString "cond"
   t_branch <- newNameFromString "t_branch"
   f_branch <- newNameFromString "f_branch"
-  let y = IndexFn iter_c (Cases . NE.fromList $ [(Var cond, Var t_branch),
-                                              (Not $ Var cond, Var f_branch)])
+  let y = IndexFn iter_c (listToCases [(Var cond, Var t_branch),
+                                       (Not $ Var cond, Var f_branch)])
   sub cond (IndexFn iter_c c') y
     >>= sub t_branch vt
       >>= sub f_branch vf
@@ -330,7 +330,7 @@ forward (E.AppExp (E.Apply f args _) _)
       x <- newNameFromString "a"
       let y = IndexFn
                 iter_xs
-                (Cases . NE.fromList $
+                (listToCases
                   [(base_case, Var x), (Not base_case, Recurrence `op` Var x)])
       tell ["Using scan rule ", toLaTeX y]
       sub x (IndexFn iter_xs xs) y
@@ -427,8 +427,8 @@ forward (E.AppExp (E.Apply f args _) _)
           let cond = Var i :== b' -- :&& cond_b
           debugM ("cond_b " <> show cond_b)
           let y = IndexFn (Forall i (Cat k' m b'))
-                          (Cases . NE.fromList $ [(cond, idx vals_k k'),
-                                                  (Not cond, idx dest_i i)])
+                          (listToCases [(cond, idx vals_k k'),
+                                        (Not cond, idx dest_i i)])
           tell ["Using Scatter in-bounds-monotonic indices rule ", toLaTeX y]
           -- TODO ^ should probably substitute b in using sub rather than using it
           -- directly.
