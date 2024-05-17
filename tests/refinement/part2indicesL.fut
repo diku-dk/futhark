@@ -29,39 +29,43 @@ def sgm_sum [n] 't
 
 let partition2L 't [m]
                 (dummy: i64)
-                (shape2: {[m]i64 | \shp -> forall shp (>= 0)})
-                (n: {i64 | \n' -> n' == sum shape2})
-                -- `shape` is the shape of condsL and arr
-                (condsL: [n]bool)
+                (shp: {[m]i64 | \shp -> forall shp (>= 0)})
+                (n: {i64 | \n' -> n' == sum shp})
+                -- `shape` is the shape of csL and arr
+                (csL: [n]bool)
                 (arr: [n]i64) : {[n]i64 | \res-> is_indexfn res} =
-  let begs  = scan (+) 0 shape2
-  -- n is only passed because `:> [n]bool` doesn't work
-  -- let flags = mk_flag_array 0i64 shape2 (replicate m 1i64) n
-  let flags = mk_flag_array 0i64 shape2 (iota m) n
-  in flags
+  let flags1 = map (\i -> i + 1) (iota m)
+  let flags_int = mk_flag_array 0i64 shp flags1 n
+  let flags_sgmind = map (\f -> if f == 0 then 0 else f-1) flags_int
+  let flags = map (\f -> f > 0) flags_int
+  let seg = sgm_sum flags flags_sgmind
 
-  -- let xs_outinds = map2 (\f i -> if f then i else 0) flags (iota n)
-  -- let outinds = sgm_sum flags xs_outinds
-  -- in outinds
+  let tflgsL = map (\c -> if c then 1i64 else 0i64) csL
+  let fflgsL = map (\b -> 1 - b) tflgsL
+  -- in fflgsL
 
-  -- let tflgsL = map (\c -> if c then 1i64 else 0i64) condsL
-  -- let fflgsL = map (\b -> 1 - b) tflgsL
-
-  -- let indsTL = sgmSumInt flags tflgsL
-  -- let tmpL   = sgmSumInt flags fflgsL
+  let indsTL = sgm_sum flags tflgsL -- CHECK
+  let tmpL   = sgm_sum flags fflgsL -- CHECK (but different from hand deriv)
+  let begs  = scan (+) 0 shp -- CHECK
 
   -- -- let lst = indsT[n-1]
-  -- let lstL   = map2 (\s b -> if s==0 then -1 else #[unsafe] indsTL[b-1]
-  --                   ) shp begs
+  let lstL   = map2 (\s b -> if s==0 then -1 else #[unsafe] indsTL[b-1]
+                    ) shp begs
+              -- CHECK
 
   -- -- let indsF = map (+lst) tmp
-  -- let indsFL = map2 (\t sgmind-> t + #[unsafe] lstL[sgmind]) tmpL outinds
+  let indsFL = map2 (\t sgmind-> t + #[unsafe] lstL[sgmind]) tmpL seg
+  -- ^CHECK (slightly different from hand deriv due to tmpL)
+  -- in indsFL
 
-  -- let indsL = map4(\c indT indF sgmind->
-  --                       let offs = if sgmind > 0 then #[unsafe] begs[sgmind-1] else 0i64
-  --                       in  if c then offs + indT - 1
-  --                                else offs + indF - 1
-  --                 ) condsL indsTL indsFL outinds
+  let offsL= map (\segi -> if segi > 0 then begs[segi-1] else 0i64) seg
+  -- ^CHECK
+  let indsL = map4(\c indT indF offset ->
+                      if c then offset + indT - 1
+                           else offset + indF - 1
+                  ) csL indsTL indsFL offsL
+  -- ^CHECK
+  in indsL
 
   -- let fltarrL = scatter (replicate n dummy) indsL arr
   -- in  (lstL, fltarrL)

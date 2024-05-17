@@ -14,7 +14,6 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.Util.Pretty
 import Debug.Trace (traceM)
 import Futhark.MonadFreshNames (newNameFromString)
-import Futhark.Analysis.View.Latex (toLaTeX)
 
 
 debugM :: Applicative f => String -> f ()
@@ -36,14 +35,10 @@ addIterator :: Iterator -> IndexFnM ()
 addIterator (Forall i dom@(Iota e)) = do
   addRange (Var i) (mkRange (termToSoP $ domainStart dom) (termToSoP $ domainEnd dom))
   addRange e (mkRange (int 1) (int maxBound))
-addIterator (Forall i dom@(Cat k m b)) = do
+addIterator (Forall i dom@(Cat k m _)) = do
   addRange (Var k) (mkRange (int 0) (termToSoP m SoP..-. int 1))
   addRange (Var i) (mkRange (termToSoP $ domainStart dom) (termToSoP $ domainEnd dom))
-  -- addRange (Var i) (mkRangeUB (termToSoP b SoP..-. int 1)) -- i is also bounded by the current interval
-  -- XXX ^ want to add this for final sum simplification in partition2L
-  -- it breaks stuff tho.
-  -- 1. make sure everything works with sumslice without this
-  -- 2. figure out why this would break stuff
+  addRange (Var i) (mkRangeUB (termToSoP (intervalEnd dom) SoP..-. int 1))
   addRange m (mkRange (int 1) (int maxBound))
 addIterator _ = pure ()
 

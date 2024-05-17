@@ -144,6 +144,14 @@ domainStart :: Domain -> Term
 domainStart (Iota _) = SoP2 (SoP.int2SoP 0)
 domainStart (Cat k _ b) = substituteName k (SoP2 $ SoP.int2SoP 0) b
 
+intervalStart :: Domain -> Term
+intervalStart (Cat _ _ b) = b
+intervalStart (Iota _) = error "intervalStart on iota"
+
+intervalEnd :: Domain -> Term
+intervalEnd (Cat k _ b) = substituteName k (Var k ~+~ SoP2 (SoP.int2SoP 1)) b
+intervalEnd (Iota _) = error "intervalEnd on iota"
+
 instance Eq Domain where
   u == v | trace ("Domain equality check:\n  " <> prettyString u <> " == " <> prettyString v) False = undefined
   u == v =
@@ -335,16 +343,15 @@ instance Pretty a => Pretty (Cases a) where
 instance Pretty Domain where
   pretty (Iota (Var vn)) = "iota" <+> pretty (Var vn)
   pretty (Iota e) = "iota" <+> parens (pretty e)
-  pretty (Cat k m b) =
+  pretty dom@(Cat k m _) =
     "⊎"
       <> prettyName k
       <> "="
-      -- <> commasep ["0", "...", pretty (termToSoP $ e ~-~ SoP2 (SoP.int2SoP 1))]
       <> "iota" <+> pretty m
       <+> "[" <> commasep [
-            pretty (termToSoP b),
+            pretty (intervalStart dom),
             "...",
-            pretty (termToSoP $ substituteName k (Var k ~+~ SoP2 (SoP.int2SoP 1)) b)
+            pretty (intervalEnd dom)
           ] <> ")"
 
 instance Pretty IndexFn where
