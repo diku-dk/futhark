@@ -40,6 +40,10 @@ data Term =
       (SoP Term)   -- lower bound
       (SoP Term)   -- upper bound
       (SoP Term)   -- indexed expression
+  | SumSlice
+      Term         -- array term
+      (SoP Term)   -- lower bound
+      (SoP Term)   -- upper bound
   | Idx
       Term         -- array
       (SoP Term)   -- index
@@ -73,6 +77,8 @@ instance Eq Term where
     vn == vn'
   (Sum j lb ub e) == (Sum j' lb' ub' e') =
     lb == lb' && ub == ub' && e == substituteName j' (Var j) e'
+  (SumSlice e lb ub) == (SumSlice e' lb' ub') =
+    e == e' && lb == lb' && ub == ub'
   (Idx vn i) == (Idx vn' i') =
     vn == vn' && i == i'
   (SoP2 sop) == (SoP2 sop') =
@@ -208,6 +214,8 @@ instance ASTMappable Term where
     mapOnTerm m . Var =<< mapOnVName m x
   astMap m (Sum i lb ub e) =
     Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> astMap m e
+  astMap m (SumSlice e lb ub) =
+    SumSlice <$> mapOnTerm m e <*> astMap m lb <*> astMap m ub
   astMap m (Idx xs i) = Idx <$> mapOnTerm m xs <*> astMap m i
   astMap m (SoP2 sop) = do
     sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
@@ -287,22 +295,21 @@ instance Pretty Term where
   pretty (Var x) = prettyName x
   pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
   pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)
-  pretty (Sum i lb ub e)
-    | [([Idx (Var vn) idx], 1)] <- getSoP e =
-    "∑"
-      <> prettyName vn
-      <> brackets (pretty (substituteName i (SoP2 lb) idx) <+> ":" <+> pretty (substituteName i (SoP2 ub) idx))
-  pretty (Sum i lb ub e)
-    | [([Indicator (Idx (Var vn) idx)], 1)] <- getSoP e =
-    "∑"
-      <> pretty (Indicator (Var vn))
-      <> brackets (pretty (substituteName i (SoP2 lb) idx) <+> ":" <+> pretty (substituteName i (SoP2 ub) idx))
   pretty (Sum i lb ub e) =
     "∑"
       <> prettyName i
       <> "∈"
       <> brackets (commasep [pretty lb, "...", pretty ub])
       <+> parens (pretty e)
+  pretty (SumSlice e lb ub) =
+    "∑"
+      <> autoParens e
+      <> brackets (pretty lb <+> ":" <+> pretty ub)
+    where
+      autoParens x@(Var _) = pretty x
+      autoParens x@(Indicator _) = pretty x
+      autoParens x@(SoP2 sop) | Just _ <- SoP.justSym sop = pretty x
+      autoParens x = parens (pretty x)
   pretty (SoP2 sop) = pretty sop
   pretty (Indicator p) = iversonbrackets (pretty p)
     where
@@ -457,6 +464,7 @@ instance FreeIn (SoP Term) where
 instance FreeIn Term where
   freeIn (Var vn) = S.singleton vn
   freeIn (Sum _ lb ub e) = freeIn lb <> freeIn ub <> freeIn e
+  freeIn (SumSlice e lb ub) = freeIn e <> freeIn lb <> freeIn ub
   freeIn (Idx xs i) = freeIn xs <> freeIn i
   freeIn (SoP2 sop) = freeIn sop
   freeIn (Indicator t) = freeIn t
@@ -474,3 +482,8 @@ instance FreeIn Term where
   freeIn Recurrence = mempty
 -- instance FreeIn (Cases Term) where
 --   freeIn (Cases cases) = foldMap (\(c,v) -> freeIn c <> freeIn v) cases
+
+-- Check that SoP is a linear combination of symbols (possibly with a
+-- constant term) and return a list of it's terms.
+isAffineSoP :: Ord a => SoP.SoP a -> Bool
+isAffineSoP sop = all ((<= 1) . length . fst) (SoP.sopToLists sop)

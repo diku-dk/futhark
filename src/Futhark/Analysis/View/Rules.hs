@@ -8,6 +8,8 @@ import qualified Futhark.SoP.SoP as SoP
 import Data.Set (notMember)
 import Control.Monad.RWS hiding (Sum)
 import Futhark.MonadFreshNames (newNameFromString)
+import Futhark.Util.Pretty (prettyString)
+import Debug.Trace (trace)
 
 normalise :: (Applicative f, ASTMappable a) => a -> f a
 normalise indexfn =
@@ -92,6 +94,7 @@ normalise indexfn =
 
         -- Rewrite sum y[lb:ub] + y[ub+1] ==> sum y[lb:ub+1].
         -- Relies on sorting of SoP and Term to match.
+        -- merge a b | trace ("merge " <> prettyString a <> " " <> prettyString b <> "\n" <> show a <> "\n" <> show b) False = undefined
         merge ([Sum j lb ub e1], c) ([e2], c')
           | c == c',
             ubp1 <- ub SoP..+. SoP.int2SoP 1,
@@ -102,6 +105,30 @@ normalise indexfn =
             lbm1 <- lb SoP..-. SoP.int2SoP 1,
             substituteName j (SoP2 lbm1) e1 == termToSoP e2 =
               Just ([Sum j lbm1 ub e1], c)
+        merge ([SumSlice e1 lb ub], c) ([Idx e2 i], c')
+          | ubp1 <- ub SoP..+. SoP.int2SoP 1,
+            i == ubp1,
+            c == c',
+            e1 == e2 =
+              Just ([SumSlice e1 lb ubp1], c)
+        merge ([SumSlice e1 lb ub], c) ([Idx e2 i], c')
+          | lbm1 <- lb SoP..-. SoP.int2SoP 1,
+            i == lbm1,
+            c == c',
+            e1 == e2 =
+              Just ([SumSlice e1 lbm1 ub], c)
+        merge ([SumSlice e1 lb ub], c) ([Indicator (Idx e2 i)], c')
+          | ubp1 <- ub SoP..+. SoP.int2SoP 1,
+            i == ubp1,
+            c == c',
+            e1 == Indicator e2 =
+              Just ([SumSlice e1 lb ubp1], c)
+        merge ([SumSlice e1 lb ub], c) ([Indicator (Idx e2 i)], c')
+          | lbm1 <- lb SoP..-. SoP.int2SoP 1,
+            i == lbm1,
+            c == c',
+            e1 == Indicator e2 =
+              Just ([SumSlice e1 lbm1 ub], c)
         merge _ _ = Nothing
     normTerm v = astMap m v
 
@@ -146,17 +173,62 @@ simplifyRule3 (IndexFn it (Cases cases))
 simplifyRule3 v = pure v
 
 
--- Check that SoP is a linear combination of symbols (possibly with a
--- constant term) and return a list of it's terms.
-isAffineSoP :: Ord a => SoP.SoP a -> Bool
-isAffineSoP sop = all ((<= 1) . length . fst) (SoP.sopToLists sop)
-
 domainSegStart :: Domain -> Term
 domainSegStart (Iota n) = domainStart (Iota n)
 domainSegStart (Cat _k _m seg_start) = seg_start
 
 
 rewritePrefixSum :: IndexFn -> IndexFnM IndexFn
+-- Rule 4 (prefix sum)
+--
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
+--    | i == b => e1              (e1 may depend on i)
+--    | i /= b => y[i-1] + e2     (e2 may depend on i)
+--
+-- e2 is an affine SoP where each term is either a constant,
+-- an indexing statement or an indicator of an indexing statement.
+-- Below, we write e2.0, ..., e2.l for each term.
+-- _______________________________________________________________
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
+--    e1{b/i} + (Σ_{j=b+1}^i e2.0{j/i}) + ... + (Σ_{j=b+1}^i e2.l{j/i})
+rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
+  | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
+    -- Extract terms (multiplied symbols, factor) from the sum of products.
+    Just terms <- justAffinePlusRecurrence recur,
+    -- Create a sum for each product (term) in the sum of products.
+    Just sums <- mapM (mkSum i b) terms,
+    i == i',
+    i == i'',
+    b == b',
+    b == domainSegStart dom = do
+      tell ["Using prefix sum rule"]
+      let e1' = substituteName i b e1
+      pure $ IndexFn it (toCases $ e1' ~+~ SoP2 (foldl1 (SoP..+.) sums))
+  where
+    justAffinePlusRecurrence :: Term -> Maybe [([Term], Integer)]
+    justAffinePlusRecurrence (SoP2 sop)
+      | termsWithFactors <- SoP.sopToLists (SoP.padWithZero sop),
+        [Recurrence] `elem` map fst termsWithFactors,
+        isAffineSoP sop =
+          Just $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
+    justAffinePlusRecurrence _ = Nothing
+
+    -- Create sum for (term, factor), pulling the factor outside the sum.
+    -- mkSum :: a -> Term -> ([Term], Integer)
+    mkSum i b ([], c) =
+      -- This would be ∑j∈[lb, ..., ub] c so rewrite it to (ub - lb + 1) * c.
+      let lb = termToSoP b SoP..+. SoP.int2SoP 1
+          ub = termToSoP (Var i)
+      in  pure $ SoP.scaleSoP c (ub SoP..-. lb SoP..+. SoP.int2SoP 1)
+    mkSum i b ([Idx (Var x) idx], c) = do
+      let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) idx
+      pure . SoP.scaleSoP c . termToSoP $
+        SumSlice (Var x) lb idx
+    mkSum i b ([Indicator (Idx (Var x) idx)], c) = do
+      let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) idx
+      pure . SoP.scaleSoP c . termToSoP $
+        SumSlice (Indicator (Var x)) lb idx
+    mkSum _ _ _ = Nothing
 -- Rule 4 (prefix sum)
 --
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .

@@ -57,9 +57,8 @@ handleRefinement' name x (E.AppExp (E.Apply f args _) _)
      E.OpSectionRight (E.QualName [] opvn) _ operand _ _ _] <- getArgs args,
     x == x' = do -- Make sure that lambda arg is applied to forall.
       case E.baseString opvn of
-        ">=" -> do
-          lb <- fromExp operand
-          addRange (Var name) (mkRangeLB lb)
+        ">=" ->
+          addRange (Var name) (mkRangeLB $ fromExp operand)
         _ -> undefined
 handleRefinement' name x (E.AppExp (E.BinOp (op', _) _ (E.Var (E.QualName _ x') _ _, _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
@@ -67,24 +66,21 @@ handleRefinement' name x (E.AppExp (E.BinOp (op', _) _ (E.Var (E.QualName _ x') 
     Just bop <- L.find ((fn ==) . prettyString) [minBound .. maxBound :: E.BinOp],
     x == x' =
       case bop of
-        E.Equal -> do
-          y <- fromExp y'
-          addEquiv (Var name) y
+        E.Equal ->
+          addEquiv (Var name) (fromExp y')
         _ -> undefined
 handleRefinement' _ _ _ = pure ()
 
-fromExp :: E.Exp -> IndexFnM (SoP.SoP Term)
+fromExp :: E.Exp -> SoP.SoP Term
 fromExp (E.IntLit c _ _) =
-  pure $ SoP.int2SoP c
+  SoP.int2SoP c
 fromExp (E.AppExp (E.Apply f args _) _)
   | Just "sum" <- getFun f,
     [arg@(E.Var (E.QualName _ x) _ _)] <- getArgs args =
       case getSize arg of
-        Just n -> do
-          j <- newNameFromString "j"
-          pure . termToSoP $
-            Sum j (SoP.int2SoP 0) (SoP.sym2SoP n SoP..-. SoP.int2SoP 1)
-                  (termToSoP $ Idx (Var x) (termToSoP $ Var j))
+        Just n ->
+          termToSoP $
+            SumSlice (Var x) (SoP.int2SoP 0) (SoP.sym2SoP n SoP..-. SoP.int2SoP 1)
         Nothing -> undefined
 fromExp _ = undefined
 
@@ -340,9 +336,9 @@ forward (E.AppExp (E.Apply f args _) _)
     [paramNames_x, paramNames_y] <- map (S.toList . E.patNames) params = do
       xs <- forward xs'
       body <- forward body'
-      -- Our semantics are sequential, so we can just decide that the scan
-      -- is a scanl with x always being the accumulator and y always being
-      -- an element of the array being scanned over.
+      -- Our semantics are sequential and (f, ne) is a monoid, so we can safely
+      -- pick the application precedence that results in in a scanl with x as
+      -- the accumulator and y as an element of the array being scanned over.
       vn <- newNameFromString "body"
       y <- sub vn body (IndexFn (getIterator xs) (toCases (Var vn))) >>= simplify
       tell ["Using scan rule", toLaTeX y]

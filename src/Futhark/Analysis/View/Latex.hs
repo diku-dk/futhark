@@ -119,6 +119,8 @@ instance ToLaTeX Term where
   toLaTeX_ p (Var x) = toLaTeX_ p x
   toLaTeX_ _ (Sum j lb ub e) =
     sumFromTo (toLaTeX j =: toLaTeX lb) (toLaTeX ub) <> autoParens (toLaTeX e)
+  toLaTeX_ _ (SumSlice xs lb ub) =
+    tsum <> autoParens (toLaTeX xs) <> autoSquareBrackets (toLaTeX lb <> " : " <> toLaTeX ub)
   toLaTeX_ p (Idx xs i) = toLaTeX_ p xs <> autoSquareBrackets (toLaTeX i)
   toLaTeX_ p (SoP2 sop) = toLaTeX_ p sop
   toLaTeX_ p (Indicator sop) = indicator <> autoParens (toLaTeX_ p sop)

@@ -14,6 +14,7 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.Util.Pretty
 import Debug.Trace (traceM)
 import Futhark.MonadFreshNames (newNameFromString)
+import Futhark.Analysis.View.Latex (toLaTeX)
 
 
 debugM :: Applicative f => String -> f ()
@@ -23,7 +24,10 @@ mkRange :: SoP.SoP Term -> SoP.SoP Term -> SoP.Range Term
 mkRange lb ub = SoP.Range (S.singleton lb) 1 (S.singleton ub)
 
 mkRangeLB :: SoP.SoP Term -> SoP.Range Term
-mkRangeLB lb = SoP.Range (S.singleton lb) 1 mempty
+mkRangeLB x = SoP.Range (S.singleton x) 1 mempty
+
+mkRangeUB :: SoP.SoP Term -> SoP.Range Term
+mkRangeUB x = SoP.Range mempty 1 (S.singleton x)
 
 int :: Int -> SoP.SoP Term
 int n = SoP.int2SoP (toInteger n)
@@ -32,9 +36,14 @@ addIterator :: Iterator -> IndexFnM ()
 addIterator (Forall i dom@(Iota e)) = do
   addRange (Var i) (mkRange (termToSoP $ domainStart dom) (termToSoP $ domainEnd dom))
   addRange e (mkRange (int 1) (int maxBound))
-addIterator (Forall i dom@(Cat k m _)) = do
+addIterator (Forall i dom@(Cat k m b)) = do
   addRange (Var k) (mkRange (int 0) (termToSoP m SoP..-. int 1))
   addRange (Var i) (mkRange (termToSoP $ domainStart dom) (termToSoP $ domainEnd dom))
+  -- addRange (Var i) (mkRangeUB (termToSoP b SoP..-. int 1)) -- i is also bounded by the current interval
+  -- XXX ^ want to add this for final sum simplification in partition2L
+  -- it breaks stuff tho.
+  -- 1. make sure everything works with sumslice without this
+  -- 2. figure out why this would break stuff
   addRange m (mkRange (int 1) (int maxBound))
 addIterator _ = pure ()
 
@@ -183,6 +192,17 @@ refineTerm = refineT
         _ | single -> pure $ substituteName j (SoP2 start) (SoP2 x)
         _ | empty -> pure . SoP2 $ SoP.int2SoP 0
         _ -> pure $ Sum j start end x
+    refineT (SumSlice e lb ub) = do
+      start <- astMap m lb
+      end <- astMap m ub
+      e' <- astMap m e
+      -- If the iteration space is empty or just a single element, eliminate the sum.
+      single <- start $==$ end
+      empty <- start $>$ end
+      case () of
+        _ | single -> pure $ Idx e' start
+        _ | empty -> pure . SoP2 $ SoP.int2SoP 0
+        _ -> pure $ SumSlice e' start end
     refineT x@(SoP2 _) = do
       astMap m x >>= mergeSums
       where
@@ -215,6 +235,21 @@ refineTerm = refineT
                 if test
                 then Just ([Sum j (b SoP..+. SoP.int2SoP 1) z e1], 1)
                 else Nothing
+        merge ([SumSlice e1 a z], 1) ([SumSlice e2 a' b], -1)
+          | e1 == e2,
+            a == a' = do
+              -- tell ["MERGE SUM SLICEEEE"] -- <> Math.math (toLaTeX (SumSlice e1 a z) <> " " <> toLaTeX (SumSlice e2 a' b)]
+              test <- b $<=$ z
+              -- tell [toLaTeX (Bool test)]
+              debugM $ "MERGE SUM SLICEEE " <> prettyString (SoP2 b :<= SoP2 z) <> " is " <> show test
+              debugM $ "1 * " <> prettyString (SumSlice e1 a z)
+              debugM $ "-1 * " <> prettyString (SumSlice e2 a' b)
+              algenv <- gets algenv
+              debugM $ "AlgEnv" <> prettyString algenv <> "\n"
+              pure $
+                if test
+                then Just ([SumSlice e1 (b SoP..+. SoP.int2SoP 1) z], 1)
+                else Nothing
         merge _ _ = pure Nothing
     refineT v = astMap m v
 
@@ -242,6 +277,17 @@ refineRelation rel x y = do
 checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
 checkMonotonic iter@(Forall _ _) (cond, Sum _ _ _ e)
   | [([Idx (Var xs) _], 1)] <- getSoP e = do
+  -- TODO limited to SumSlice case.
+  -- For a SumSlice it's sufficient to check that each term is non-negative.
+  let test = (cond, Var xs :>= SoP2 (SoP.int2SoP 0))
+  debugM ("** checkMonotonic test **" <> prettyString test)
+  let test' = IndexFn iter (Cases . NE.singleton $ test)
+  IndexFn _ (Cases res) <- refineIndexFn test'
+  case res of
+    (_, Bool True) :| [] -> pure True
+    _ -> pure False
+checkMonotonic iter@(Forall _ _) (cond, SumSlice e _ _)
+  | [([Var xs], 1)] <- getSoP (termToSoP e) = do
   -- TODO limited to SumSlice case.
   -- For a SumSlice it's sufficient to check that each term is non-negative.
   let test = (cond, Var xs :>= SoP2 (SoP.int2SoP 0))

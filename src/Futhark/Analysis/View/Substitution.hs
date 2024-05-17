@@ -10,6 +10,7 @@ import Futhark.Analysis.View.Latex (toLaTeX)
 import Data.Functor.Identity
 import Debug.Trace (trace)
 import Futhark.Analysis.View.Refine (refineTerm)
+import Futhark.SoP.SoP (scaleSoP, (.-.), (.+.), int2SoP, padWithZero, sopToLists, SoP)
 
 debug :: String -> a -> a
 debug msg = trace ("🌪️🎭 " <> msg)
@@ -139,4 +140,79 @@ substituteIdx (i, x, xval) (j, y) =
     onTerm (Idx (Var vn) idx) | vn == x =
       -- debug ("(2) vn, xval " <> prettyString vn <> ", " <> prettyString xval)
       pure (flatten $ substituteName i (SoP2 idx) xval)
+    onTerm (SumSlice e lb ub) | e == Var x || e == Indicator (Var x) =
+      case justAffine (termToSoP xval) >>= mapM (mkSum e) of
+        Just sums ->
+          pure $ SoP2 (foldl1 (.+.) sums)
+        Nothing -> error "gg, need sums over non-affine terms"
+      where
+        justAffine :: SoP Term -> Maybe [([Term], Integer)]
+        justAffine e1 | trace ("justAffine: " <> prettyString e1) False = undefined
+        justAffine sop
+          | termsWithFactors <- sopToLists (padWithZero sop),
+            isAffineSoP sop =
+              Just termsWithFactors
+        justAffine _ = Nothing
+
+        mkSum e1 e2 | trace ("mkSum: " <> prettyString e1 <> " " <> prettyString e2) False = undefined
+        mkSum _ ([], c) =
+          -- This would be ∑(c)[lb : ub] c so rewrite it to (ub - lb + 1) * c.
+          pure $ scaleSoP c (ub .-. lb .+. int2SoP 1)
+        mkSum (Var _) ([Idx (Var vnx) idx], c) = do
+          pure . scaleSoP c . termToSoP $
+            SumSlice (Var vnx) (substituteName i (SoP2 lb) idx) (substituteName i (SoP2 ub) idx)
+        mkSum (Var _) ([Indicator (Idx (Var vnx) idx)], c) = do
+          pure . scaleSoP c . termToSoP $
+            SumSlice (Indicator (Var vnx)) (substituteName i (SoP2 lb) idx) (substituteName i (SoP2 ub) idx)
+        mkSum (Indicator (Var _)) ([Idx (Var vnx) idx], c) = do
+          pure . scaleSoP c . termToSoP $
+            SumSlice (Indicator (Var vnx)) (substituteName i (SoP2 lb) idx) (substituteName i (SoP2 ub) idx)
+        mkSum _ _ = Nothing
     onTerm e = astMap m e
+-- (Case 1)
+-- sub xs for
+--   forall i in iota n . | True => inputs[i-1]
+-- in
+--   forall i in iota n . | True => ∑(xs₆₁₅₉)[1, ..., i₆₂₃₅]
+--
+-- (Case 2)
+-- sub xs for
+--   forall i in iota n . | True => 1
+-- in
+--   forall i in iota n . | True => ∑(xs₆₁₅₉)[1, ..., i₆₂₃₅]
+--
+-- (Case 3)
+-- sub xs for
+--   forall i in iota n . | True => True
+-- in
+--   forall i in iota n . | True => ∑(⟦xs₆₁₅₉⟧)[1, ..., i₆₂₃₅]
+--
+-- (Case 4)
+-- sub xs for
+--   forall i in iota n . | True => ⟦True⟧
+-- in
+--   forall i in iota n . | True => ∑(xs₆₁₅₉)[1, ..., i₆₂₃₅]
+--
+-- In case 1,
+-- onTerm (SumSlice e lb ub) | e == (Var x) || e == (Indicator (Var x)) =
+--   case justAffine xval >>= mapM (mkSum e) of
+--     Just sums ->
+--       SoP2 (foldl1 (SoP..+.) sums)
+--     Nothing -> error "gg, need sums over non-affine terms"
+--   where
+--     mkSum i (Var vn) ([], c) =
+--       -- This would be ∑(c)[lb : ub] c so rewrite it to (ub - lb + 1) * c.
+--       pure $ SoP.scaleSoP c (ub SoP..-. lb SoP..+. SoP.int2SoP 1)
+--     mkSum i (Var vn) ([Idx (Var vnx) idx], c) = do
+--       let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) idx
+--       pure . SoP.scaleSoP c . termToSoP $
+--         SumSlice (Var vnx) (substituteName i lb idx) (substituteName i ub idx)
+--     mkSum i (Var vn) ([Indicator (Idx (Var vnx) idx)] idx], c) = do
+--       let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) idx
+--       pure . SoP.scaleSoP c . termToSoP $
+--         SumSlice (Indicator (Var vnx)) (substituteName i lb idx) (substituteName i ub idx)
+--     mkSum i (Indicator (Var vn)) ([Idx (Var vnx) idx], c) = do
+--       let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) idx
+--       pure . SoP.scaleSoP c . termToSoP $
+--         SumSlice (Indicator (Var vnx)) (substituteName i lb idx) (substituteName i ub idx)
+--     mkSum _ _ _ = Nothing
