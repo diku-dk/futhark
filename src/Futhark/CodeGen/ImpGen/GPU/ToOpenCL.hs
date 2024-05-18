@@ -151,7 +151,7 @@ pointerQuals "device" = pointerQuals "global"
 pointerQuals s = error $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
 -- In-kernel name and per-threadblock size in bytes.
-type SharedMemoryUse = (VName, Count Bytes (TExp Int64))
+type SharedMemoryUse = (VName, Count Bytes (TExp Int64), PrimType)
 
 data KernelState = KernelState
   { kernelSharedMemory :: [SharedMemoryUse],
@@ -360,7 +360,8 @@ onKernel target kernel = do
 
   let (_, shared_memory_init) =
         L.mapAccumL prepareSharedMemory [C.cexp|0|] (kernelSharedMemory kstate)
-      shared_memory_bytes = sum $ map (padTo8 . snd) $ kernelSharedMemory kstate
+      shared_memory_bytes =
+        sum $ map (\(_, size, t) -> padToAligned size t) $ kernelSharedMemory kstate
 
   let (use_params, unpack_params) =
         unzip $ mapMaybe useAsParam $ kernelUses kernel
@@ -484,14 +485,16 @@ onKernel target kernel = do
     name = kernelName kernel
     num_tblocks = kernelNumBlocks kernel
     tblock_size = kernelBlockSize kernel
-    padTo8 e = e + ((8 - (e `rem` 8)) `rem` 8)
+    padToAligned e t = e + ((k - (e `rem` k)) `rem` k)
+      where
+        k = primByteSize t
 
-    prepareSharedMemory offset (mem, Count size) =
+    prepareSharedMemory offset (mem, Count size, align) =
       let offset_v = nameFromText $ prettyText mem <> "_offset"
        in ( [C.cexp|$id:offset_v|],
             [C.citems|
              volatile __local $ty:defaultMemBlockType $id:mem = &shared_mem[$exp:offset];
-             const typename int64_t $id:offset_v = $exp:offset + $exp:(padTo8 size);
+             const typename int64_t $id:offset_v = $exp:offset + $exp:(padToAligned size align);
              |]
           )
 
@@ -638,10 +641,10 @@ inKernelOperations env mode body =
       GC.stm [C.cstm|mem_fence_local();|]
     kernelOps (MemFence FenceGlobal) =
       GC.stm [C.cstm|mem_fence_global();|]
-    kernelOps (SharedAlloc name size) = do
+    kernelOps (SharedAlloc name size align) = do
       name' <- newVName $ prettyString name ++ "_backing"
       GC.modifyUserState $ \s ->
-        s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
+        s {kernelSharedMemory = (name', size, align) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel

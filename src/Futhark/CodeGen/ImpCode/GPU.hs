@@ -173,7 +173,8 @@ data KernelOp
   | Atomic Space AtomicOp
   | Barrier Fence
   | MemFence Fence
-  | SharedAlloc VName (Count Bytes (TExp Int64))
+  | -- | The 'PrimType' denotes alignment restrictions.
+    SharedAlloc VName (Count Bytes (TExp Int64)) PrimType
   | -- | Perform a barrier and also check whether any
     -- threads have failed an assertion.  Make sure all
     -- threads would reach all 'ErrorSync's if any of them
@@ -241,8 +242,9 @@ instance Pretty KernelOp where
     "mem_fence_local()"
   pretty (MemFence FenceGlobal) =
     "mem_fence_global()"
-  pretty (SharedAlloc name size) =
-    pretty name <+> equals <+> "shared_alloc" <> parens (pretty size)
+  pretty (SharedAlloc name size t) =
+    pretty name <+> equals <+> "shared_alloc"
+      <> parens (commasep [pretty size, pretty t])
   pretty (ErrorSync FenceLocal) =
     "error_sync_local()"
   pretty (ErrorSync FenceGlobal) =
@@ -316,7 +318,7 @@ instance Pretty KernelOp where
 
 instance FreeIn KernelOp where
   freeIn' (Atomic _ op) = freeIn' op
-  freeIn' (SharedAlloc _ size) = freeIn' size
+  freeIn' (SharedAlloc _ size _) = freeIn' size
   freeIn' _ = mempty
 
 brace :: Doc a -> Doc a
