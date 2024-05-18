@@ -554,16 +554,17 @@ prepareIntermediateArraysLocal num_subhistos_per_block blocks_per_segment =
       -- Initialise local-memory sub-histograms.  These are
       -- represented as two-dimensional arrays.
       let init_local_subhistos hist_H_chk = do
-            local_subhistos <-
-              forM (histType op) $ \t -> do
-                let sub_local_shape =
-                      Shape [tvSize num_subhistos_per_block]
-                        <> setOuterDims (arrayShape t) (histRank op) (Shape [hist_H_chk])
-                sAllocArray
-                  "subhistogram_local"
-                  (elemType t)
-                  sub_local_shape
-                  (Space "shared")
+            local_subhistos <- forM (histType op) $ \t -> do
+              let subhisto_shape =
+                    setOuterDims
+                      (arrayShape t)
+                      (histRank op)
+                      (Shape [hist_H_chk])
+              sAllocArray
+                "subhistogram_local"
+                (elemType t)
+                (Shape [tvSize num_subhistos_per_block] <> subhisto_shape)
+                (Space "shared")
 
             do_op' <- mk_op hist_H_chk
 
