@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Handling of `..` in `import` paths (again).
+
+* Detection of impossible loop parameter sizes (#2144).
+
 ## [0.25.16]
 
 ### Added

@@ -165,20 +165,18 @@ data RigidSource
     RigidArg (Maybe (QualName VName)) T.Text
   | -- | An existential return size.
     RigidRet (Maybe (QualName VName))
-  | RigidLoop
+  | -- | Similarly to 'RigidRet', but produce by a loop.
+    RigidLoop
   | -- | Produced by a complicated slice expression.
     RigidSlice (Maybe Size) T.Text
   | -- | Produced by a complicated range expression.
     RigidRange
-  | -- | Produced by a range expression with this bound.
-    RigidBound T.Text
   | -- | Mismatch in branches.
     RigidCond StructType StructType
   | -- | Invented during unification.
     RigidUnify
-  | RigidOutOfScope Loc VName
-  | -- | Blank dimension in coercion.
-    RigidCoerce
+  | -- | A name used in a size went out of scope.
+    RigidOutOfScope Loc VName
   deriving (Eq, Ord, Show)
 
 -- | The ridigity of a size variable.  All rigid sizes are tagged with
@@ -222,12 +220,6 @@ prettySource ctx loc RigidLoop =
   "is unknown size of value returned at" <+> pretty (locStrRel ctx loc) <> "."
 prettySource ctx loc RigidRange =
   "is unknown length of range at" <+> pretty (locStrRel ctx loc) <> "."
-prettySource ctx loc (RigidBound bound) =
-  "generated from expression"
-    </> indent 2 (shorten (pretty bound))
-    </> "used in range at "
-    <> pretty (locStrRel ctx loc)
-    <> "."
 prettySource ctx loc (RigidOutOfScope boundloc v) =
   "is an unknown size arising from "
     <> dquotes (prettyName v)
@@ -236,10 +228,6 @@ prettySource ctx loc (RigidOutOfScope boundloc v) =
     <> "."
       </> "Originally bound at "
     <> pretty (locStrRel ctx boundloc)
-    <> "."
-prettySource ctx loc RigidCoerce =
-  "is an unknown size arising from empty dimension in coercion at"
-    <+> pretty (locStrRel ctx loc)
     <> "."
 prettySource _ _ RigidUnify =
   "is an artificial size invented during unification of functions with anonymous sizes."
