@@ -993,10 +993,13 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   local_mem_needed <-
     dPrimVE "local_mem_needed" $
       hist_el_size * sExt64 (tvExp hist_M)
+  -- We add one to the memory requirement because if the chunk
+  -- otherwise *exactly* fits, it might actually *not* fit in the case
+  -- of a multi-value operator, as we individually round up the sizes
+  -- of the component arrays. (Very rare edge case.)
   hist_S <-
-    dPrimVE "hist_S" $
-      sExt32 $
-        (hist_H * local_mem_needed) `divUp` tvExp hist_L
+    dPrimVE "hist_S" . sExt32 $
+      (hist_H * local_mem_needed + 1) `divUp` tvExp hist_L
   let max_S = case bodyPassage kbody of
         MustBeSinglePass -> 1
         MayBeMultiPass -> fromIntegral $ maxinum $ map slugMaxLocalMemPasses slugs

@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Detection of impossible loop parameter sizes (#2144).
 
+* Rare case where GPU histograms would use slightly too much shared
+  memory and fail at run-time.
+
 ## [0.25.16]
 
 ### Added
