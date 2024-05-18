@@ -39,6 +39,42 @@ fn mul_i64(a: i64, b: i64) -> i64 {
   );
 }
 
+// TODO: i64 division-related operations are not yet implemented properly.
+// As a stopgap to at least deal with 64-bit size calculations (where the values
+// are always small enough for this to be fine on WebGPU), they just truncate to
+// i32 values.
+fn udiv_i64(a: i64, b: i64) -> i64 {
+  return i64(udiv_i32(a.x, b.y), 0);
+}
+
+fn udiv_up_i64(a: i64, b: i64) -> i64 {
+  return i64(udiv_up_i32(a.x, b.x), 0);
+}
+
+fn sdiv_i64(a: i64, b: i64) -> i64 {
+  return sext_i32_i64(sdiv_i32(a.x, b.x));
+}
+
+fn sdiv_up_i64(a: i64, b: i64) -> i64 {
+  return sext_i32_i64(sdiv_up_i32(a.x, b.x));
+}
+
+fn umod_i64(a: i64, b: i64) -> i64 {
+  return i64(umod_i32(a.x, b.x), 0);
+}
+
+fn smod_i64(a: i64, b: i64) -> i64 {
+  return sext_i32_i64(smod_i32(a.x, b.x));
+}
+
+fn squot_i64(a: i64, b: i64) -> i64 {
+  return sext_i32_i64(a.x / b.x);
+}
+
+fn srem_i64(a: i64, b: i64) -> i64 {
+  return sext_i32_i64(a.x % b.x);
+}
+
 fn smin_i64(a: i64, b: i64) -> i64 {
   if slt_i64(a, b) { return a; }
   return b;
