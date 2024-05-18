@@ -298,19 +298,14 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
     -- "Average element size" as computed by a formula that also takes
     -- locking into account.
     slugElSize (SegHistSlug op _ _ do_op) =
-      case do_op of
-        AtomicLocking {} ->
-          sExt32 $
-            unCount $
-              sum $
-                map (typeSize . (`arrayOfShape` histOpShape op)) $
-                  Prim int32 : lambdaReturnType (histOp op)
-        _ ->
-          sExt32 $
-            unCount $
-              sum $
-                map (typeSize . (`arrayOfShape` histOpShape op)) $
-                  lambdaReturnType (histOp op)
+      sExt32 . unCount . sum $
+        case do_op of
+          AtomicLocking {} ->
+            map (typeSize . (`arrayOfShape` histOpShape op)) $
+              Prim int32 : lambdaReturnType (histOp op)
+          _ ->
+            map (typeSize . (`arrayOfShape` histOpShape op)) $
+              lambdaReturnType (histOp op)
 
     onOp hist_L2 hist_M_min hist_S hist_RACE_exp l slug = do
       let SegHistSlug op num_subhistos subhisto_info do_op = slug
@@ -609,22 +604,17 @@ histKernelLocalPass
         num_subhistos_per_block = tvExp num_subhistos_per_block_var
         segment_size' = pe64 segment_size
 
-    num_segments <-
-      dPrimVE "num_segments" $
-        product $
-          map pe64 segment_dims
+    num_segments <- dPrimVE "num_segments" $ product $ map pe64 segment_dims
 
     hist_H_chks <- forM (map slugOp slugs) $ \op ->
       dPrimV "hist_H_chk" $ histSize op `divUp` sExt64 hist_S
 
     histo_sizes <- forM (zip slugs hist_H_chks) $ \(slug, hist_H_chk) -> do
       let histo_dims =
-            tvExp hist_H_chk
-              : map pe64 (shapeDims (histOpShape (slugOp slug)))
+            tvExp hist_H_chk : map pe64 (shapeDims (histOpShape (slugOp slug)))
       histo_size <-
         dPrimVE "histo_size" $ product histo_dims
-      let block_hists_size =
-            sExt64 num_subhistos_per_block * histo_size
+      let block_hists_size = sExt64 num_subhistos_per_block * histo_size
       init_per_thread <-
         dPrimVE "init_per_thread" $ sExt32 $ block_hists_size `divUp` pe64 (unCount tblock_size)
       pure (histo_dims, histo_size, init_per_thread)
