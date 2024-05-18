@@ -113,8 +113,8 @@ keyWithEntryPoint fname key =
   nameFromString $ maybe "" ((++ ".") . nameToString) fname ++ nameToString key
 
 allocLocal :: AllocCompiler GPUMem r Imp.KernelOp
-allocLocal mem size align =
-  sOp $ Imp.SharedAlloc mem size align
+allocLocal mem size =
+  sOp $ Imp.SharedAlloc mem size
 
 threadAlloc ::
   Pat LetDecMem ->
@@ -167,7 +167,7 @@ updateAcc safety acc is vs = sComment "UpdateAcc" $ do
 -- the given number of elements.  Initialised with a replicate.
 genZeroes :: String -> Int -> CallKernelGen VName
 genZeroes desc n = genConstants $ do
-  counters_mem <- sAlloc (desc <> "_mem") (4 * fromIntegral n) int32 (Space "device")
+  counters_mem <- sAlloc (desc <> "_mem") (4 * fromIntegral n) (Space "device")
   let shape = Shape [intConst Int64 (fromIntegral n)]
   counters <- sArrayInMem desc int32 shape counters_mem
   sReplicate counters $ intConst Int32 0
