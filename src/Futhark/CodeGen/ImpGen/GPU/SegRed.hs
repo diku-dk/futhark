@@ -214,7 +214,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
             <$> dPrimVE "offset" (sum_ byte_offs elem_size)
 
       -- total pool of local mem.
-      lmem <- sAlloc "local_mem" lmem_total_size int64 (Space "shared")
+      lmem <- sAlloc "local_mem" lmem_total_size (Space "shared")
       let arrInLMem ptype name len_se offset =
             sArray
               (name ++ "_" ++ prettyString ptype)

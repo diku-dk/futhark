@@ -145,7 +145,7 @@ import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
 import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (noLoc)
-import Futhark.Util.Pretty hiding (align, nest, space)
+import Futhark.Util.Pretty hiding (nest, space)
 import Language.Futhark.Warnings
 import Prelude hiding (mod, quot)
 
@@ -165,8 +165,7 @@ type CopyCompiler rep r op =
   ImpM rep r op ()
 
 -- | An alternate way of compiling an allocation.
-type AllocCompiler rep r op =
-  VName -> Count Bytes (Imp.TExp Int64) -> PrimType -> ImpM rep r op ()
+type AllocCompiler rep r op = VName -> Count Bytes (Imp.TExp Int64) -> ImpM rep r op ()
 
 data Operations rep r op = Operations
   { opsExpCompiler :: ExpCompiler rep r op,
@@ -1615,8 +1614,12 @@ copyDWIMFix dest dest_is src src_is =
 -- memory-typed element.
 compileAlloc ::
   (Mem rep inner) => Pat (LetDec rep) -> SubExp -> Space -> ImpM rep r op ()
-compileAlloc (Pat [mem]) e space =
-  sAlloc_ (patElemName mem) (Imp.bytes $ pe64 e) int64 space
+compileAlloc (Pat [mem]) e space = do
+  let e' = Imp.bytes $ pe64 e
+  allocator <- asks $ M.lookup space . envAllocCompilers
+  case allocator of
+    Nothing -> emit $ Imp.Allocate (patElemName mem) e' space
+    Just allocator' -> allocator' (patElemName mem) e'
 compileAlloc pat _ _ =
   error $ "compileAlloc: Invalid pattern: " ++ prettyString pat
 
@@ -1699,27 +1702,17 @@ sDeclareMem name space = do
   addVar name' $ MemVar Nothing $ MemEntry space
   pure name'
 
-sAlloc_ ::
-  VName ->
-  Count Bytes (Imp.TExp Int64) ->
-  PrimType ->
-  Space ->
-  ImpM rep r op ()
-sAlloc_ name' size' align space = do
+sAlloc_ :: VName -> Count Bytes (Imp.TExp Int64) -> Space -> ImpM rep r op ()
+sAlloc_ name' size' space = do
   allocator <- asks $ M.lookup space . envAllocCompilers
   case allocator of
     Nothing -> emit $ Imp.Allocate name' size' space
-    Just allocator' -> allocator' name' size' align
+    Just allocator' -> allocator' name' size'
 
-sAlloc ::
-  String ->
-  Count Bytes (Imp.TExp Int64) ->
-  PrimType ->
-  Space ->
-  ImpM rep r op VName
-sAlloc name size align space = do
+sAlloc :: String -> Count Bytes (Imp.TExp Int64) -> Space -> ImpM rep r op VName
+sAlloc name size space = do
   name' <- sDeclareMem name space
-  sAlloc_ name' size align space
+  sAlloc_ name' size space
   pure name'
 
 sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
@@ -1740,9 +1733,8 @@ sArrayInMem name pt shape mem =
 sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM rep r op VName
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
-      bytes = typeSize (Array pt shape NoUniqueness)
-  mem <- sAlloc (name ++ "_mem") bytes pt space
-  let iota_lmad = LMAD.iota 0 $ map pe64 permuted_dims
+  mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
+  let iota_lmad = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
     LMAD.permute iota_lmad $
       rearrangeInverse perm
