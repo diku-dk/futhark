@@ -118,29 +118,28 @@ computeHistoUsage space op = do
         $ map pe64
         $ shapeDims subhistos_shape
 
-    pure $
-      SubhistosInfo subhistos $ do
-        let unitHistoCase =
-              emit $
-                Imp.SetMem subhistos_mem (memLocName dest_mem) $
-                  Space "device"
+    pure . SubhistosInfo subhistos $ do
+      let unitHistoCase =
+            emit $
+              Imp.SetMem subhistos_mem (memLocName dest_mem) $
+                Space "device"
 
-            multiHistoCase = do
-              let num_elems = product $ map pe64 $ shapeDims subhistos_shape
-                  subhistos_mem_size =
-                    Imp.bytes $
-                      Imp.unCount (Imp.elements num_elems `Imp.withElemType` elemType dest_t)
+          multiHistoCase = do
+            let num_elems = product $ map pe64 $ shapeDims subhistos_shape
+                subhistos_mem_size =
+                  Imp.bytes $
+                    Imp.unCount (Imp.elements num_elems `Imp.withElemType` elemType dest_t)
 
-              sAlloc_ subhistos_mem subhistos_mem_size $ Space "device"
-              sReplicate subhistos ne
-              subhistos_t <- lookupType subhistos
-              let slice =
-                    fullSliceNum (map pe64 $ arrayDims subhistos_t) $
-                      map (unitSlice 0 . pe64 . snd) segment_dims
-                        ++ [DimFix 0]
-              sUpdate subhistos slice $ Var dest
+            sAlloc_ subhistos_mem subhistos_mem_size (elemType dest_t) $ Space "device"
+            sReplicate subhistos ne
+            subhistos_t <- lookupType subhistos
+            let slice =
+                  fullSliceNum (map pe64 $ arrayDims subhistos_t) $
+                    map (unitSlice 0 . pe64 . snd) segment_dims
+                      ++ [DimFix 0]
+            sUpdate subhistos slice $ Var dest
 
-        sIf (tvExp num_subhistos .==. 1) unitHistoCase multiHistoCase
+      sIf (tvExp num_subhistos .==. 1) unitHistoCase multiHistoCase
 
   let h = histSpaceUsage op
       segmented_h = h * product (map (Imp.bytes . pe64) $ init $ segSpaceDims space)

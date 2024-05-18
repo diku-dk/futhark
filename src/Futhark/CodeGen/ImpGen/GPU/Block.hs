@@ -225,7 +225,7 @@ prepareIntraBlockSegHist segments tblock_size =
               l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
               locks_t = Array int32 (Shape [unCount tblock_size]) NoUniqueness
 
-          locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "shared"
+          locks_mem <- sAlloc "locks_mem" (typeSize locks_t) int32 $ Space "shared"
           dArray locks int32 (arrayShape locks_t) locks_mem $
             LMAD.iota 0 . map pe64 . arrayDims $
               locks_t
@@ -346,7 +346,7 @@ blockAlloc (Pat [_]) _ ScalarSpace {} =
   -- translated to an actual scalar variable during C code generation.
   pure ()
 blockAlloc (Pat [mem]) size (Space "shared") =
-  allocLocal (patElemName mem) $ Imp.bytes $ pe64 size
+  allocLocal (patElemName mem) (Imp.bytes $ pe64 size) int64
 blockAlloc (Pat [mem]) _ _ =
   compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel block."
 blockAlloc dest _ _ =

@@ -193,13 +193,13 @@ checkSharedMemoryReqs in_scope code = do
     getKernel _ = []
 
     localAllocSizes = foldMap localAllocSize
-    localAllocSize (Imp.SharedAlloc _ size) = [size]
+    localAllocSize (Imp.SharedAlloc _ size align) = [(size, align)]
     localAllocSize _ = []
 
-    -- These allocations will actually be padded to an 8-byte aligned
-    -- size, so we should take that into account when checking whether
-    -- they fit.
-    alignedSize x = nextMul x 8
+    -- These allocations will actually be padded to an aligned size,
+    -- so we should take that into account when checking whether they
+    -- fit.
+    alignedSize (x, t) = nextMul x (primByteSize t)
 
 withAcc ::
   Pat LetDecMem ->

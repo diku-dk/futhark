@@ -67,7 +67,7 @@ createLocalArrays (Count block_size) chunk types = do
 
   sComment "Allocate reusable shared memory" $ pure ()
 
-  localMem <- sAlloc "local_mem" size (Space "shared")
+  localMem <- sAlloc "local_mem" size int64 (Space "shared")
   transposeArrayLength <- dPrimV "trans_arr_len" workSize
 
   sharedId <- sArrayInMem "shared_id" int32 (Shape [constant (1 :: Int32)]) localMem

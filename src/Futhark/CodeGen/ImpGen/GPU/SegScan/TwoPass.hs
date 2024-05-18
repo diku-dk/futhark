@@ -29,7 +29,7 @@ makeLocalArrays (Count tblock_size) num_threads scans = do
   (arrs, mems_and_sizes) <- runStateT (mapM onScan scans) mempty
   let maxSize sizes = Imp.bytes $ foldl' sMax64 1 $ map Imp.unCount sizes
   forM_ mems_and_sizes $ \(sizes, mem) ->
-    sAlloc_ mem (maxSize sizes) (Space "shared")
+    sAlloc_ mem (maxSize sizes) int64 (Space "shared")
   pure arrs
   where
     onScan (SegBinOp _ scan_op nes _) = do
