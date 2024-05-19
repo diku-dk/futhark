@@ -38,11 +38,11 @@ reductionLoopBody ::
 reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
   qq <- letExp "qq" =<< toExp (le64 qq0 * pe64 tile_Q)
 
-  redomap_inputs_shr <- forM2 shr_arrs_in arr_metas $ copyGlb2Shr qq
+  redomap_inputs_shr <- forM2 shr_arrs_in arr_infos $ copyGlb2Shr qq
   reg_tiles_out <- accumulateRegTile qq redomap_inputs_shr
   pure $ reg_tiles_out : redomap_inputs_shr
   where
-    arr_metas = arrsInfo tc_env
+    arr_infos = arrsInfo tc_env
     kernel_params = kernelParams tc_env
     tile_Q = tileQ kernel_params
     tiles_T = tilesT kernel_params
@@ -50,14 +50,14 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
     common_dim = commonDim kernel_params
     tblock_size_flat = tblockSizeFlat kernel_params
 
-    copyGlb2Shr :: VName -> VName -> ArrMeta -> Builder GPU VName
-    copyGlb2Shr qq shr_arr arr_meta = do
+    copyGlb2Shr :: VName -> VName -> ArrInfo -> Builder GPU VName
+    copyGlb2Shr qq shr_arr arr_info = do
       -- Setup parameters for the WithAcc.
       cert_p <- newParam "cert_p" $ Prim Unit
-      t <- stripArray (shapeRank shmem_shape) <$> lookupType shr_arr
+      t <- stripArray (shapeRank smem_shape) <$> lookupType shr_arr
       acc_p <-
         newParam (baseString shr_arr) $
-          Acc (paramName cert_p) shmem_shape [t] NoUniqueness
+          Acc (paramName cert_p) smem_shape [t] NoUniqueness
 
       tile_size_flat <-
         letSubExp "tile_size_flat"
@@ -80,9 +80,9 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                 copyLoopBody tile_size_flat acc_merge i
 
       letExp (baseString shr_arr) $
-        WithAcc [(shmem_shape, [shr_arr], Nothing)] lam
+        WithAcc [(smem_shape, [shr_arr], Nothing)] lam
       where
-        shmem_strides = shmemStrides arr_meta
+        smem_strides = smemStrides arr_info
         copyLoopBody :: SubExp -> VName -> VName -> Builder GPU VName
         copyLoopBody tile_size_flat acc i = do
           unflat_inds <-
@@ -94,7 +94,7 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
               zipWith
                 (\ind s -> pe64 ind * pe64 s)
                 unflat_inds
-                shmem_strides
+                smem_strides
 
           -- The shared mem indices are simply the unflattened indices, while
           -- the global mem indices need to have tblock offsets added onto them.
@@ -114,7 +114,7 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                 )
 
           -- Repermute the global array indices to match.
-          let glb_inds_perm = arrPerm arr_meta glb_inds
+          let glb_inds_perm = arrPerm arr_info glb_inds
           glb_elem <-
             letExp (baseString base_arr)
               =<< eIf
@@ -123,11 +123,11 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                     >>= resultBodyM . (: []) . Var
                 )
                 -- TODO: here, we simply insert a zero (or zero-like value) into
-                -- shmem whenever we are outside bounds. However, this only
+                -- smem whenever we are outside bounds. However, this only
                 -- succeeds in certain cases, unless we explicitly handle
                 -- residual tiles in an epilogue (which we do).
-                -- See note [ShmemZeroPaddingOnGlobalMemOOB].
-                (eBody [eBlank $ Prim $ shmemElemType arr_meta])
+                -- See note [SmemZeroPaddingOnGlobalMemOOB].
+                (eBody [eBlank $ Prim $ smemElemType arr_info])
 
           -- Finally, update shared mem array accumulator.
           letExp "acc_out"
@@ -142,12 +142,12 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
               )
               (resultBodyM [Var acc])
 
-        shmem_shape = Shape [shmemSizeFlat arr_meta]
-        tile_dims = tileDims arr_meta
+        smem_shape = Shape [smemSizeFlat arr_info]
+        tile_dims = tileDims arr_info
         tile_dims' = map pe64 tile_dims
-        tblock_offsets = arrGather_ arr_meta (tblockOffsets tc_env) (Var qq)
-        base_arr_dims = baseArrDims arr_meta
-        base_arr = baseArr arr_meta
+        tblock_offsets = arrGather_ arr_info (tblockOffsets tc_env) (Var qq)
+        base_arr_dims = baseArrDims arr_info
+        base_arr = baseArr arr_info
 
     accumulateRegTile :: VName -> [VName] -> Builder GPU VName
     accumulateRegTile qq redomap_inputs_shr =
@@ -176,10 +176,10 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
             -- reg_tile.
             dummy_ltid <- letExp "dummy_ltid_q" =<< toExp se0
             let dummy_regtile = se1
-            shr_inds_flat <- forM arr_metas $ \meta -> do
-              let ltids' = arrGather_ meta ltids dummy_ltid
-              let tiles_R' = arrGather_ meta tiles_R dummy_regtile
-              let loop_inds' = arrGather_ meta loop_inds q
+            shr_inds_flat <- forM arr_infos $ \arr -> do
+              let ltids' = arrGather_ arr ltids dummy_ltid
+              let tiles_R' = arrGather_ arr tiles_R dummy_regtile
+              let loop_inds' = arrGather_ arr loop_inds q
               inds <-
                 forM3 ltids' tiles_R' loop_inds' $ \ltid tile loop_ind ->
                   letSubExp "shr_ind" =<< toExp (le64 ltid * pe64 tile + le64 loop_ind)
@@ -187,7 +187,7 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                 zipWith
                   (\ind s -> le64 ind * le64 s)
                   inds
-                  (shmemStrides meta)
+                  (smemStrides arr)
 
 
             -- Compute map and reduction results and update the register tile.
@@ -308,8 +308,8 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
             forM (arrsInfo tc_env) $ \arr ->
               scratch
                 ("shr_" ++ baseString (baseArr arr))
-                (shmemElemType arr)
-                [shmemSizeFlat arr]
+                (smemElemType arr)
+                [smemSizeFlat arr]
 
           ~(reg_tiles_res : _) <-
             case use_epilogue of
@@ -459,22 +459,22 @@ data TCEnv = TCEnv
     redLam :: Lambda GPU,
     -- For each reduction array, the information needed to handle this
     -- particular array during code generation.
-    arrsInfo :: [ArrMeta]
+    arrsInfo :: [ArrInfo]
   }
   deriving (Show)
 
 -- | All the information needed to handle a given operand array.
 -- TODO: give a proper name to this one.
-data ArrMeta = ArrMeta
+data ArrInfo = ArrInfo
   { baseArr :: VName,
     baseArrDims :: [SubExp],
-    tileDims :: [SubExp],
-    shmemElemType :: PrimType,
-    shmemSizeFlat :: SubExp,
-    shmemStrides :: [SubExp],
-    variantInds :: [Maybe Int],
     arrLoadStm :: Stm GPU,
-    lmadPerm :: [Int]
+    lmadPerm :: [Int],
+    varDimInds :: [Maybe Int],
+    tileDims :: [SubExp],
+    smemSizeFlat :: SubExp,
+    smemStrides :: [SubExp],
+    smemElemType :: PrimType
   }
   deriving (Show)
 
@@ -488,11 +488,11 @@ gather_ xs x = map (maybe x (xs !!) . checkIdx)
       | i `elem` indices xs = Just i
     checkIdx _ = Nothing
 
-arrGather_ :: ArrMeta -> [a] -> a -> [a]
-arrGather_ meta src x = gather_ src x $ variantInds meta
+arrGather_ :: ArrInfo -> [a] -> a -> [a]
+arrGather_ info src x = gather_ src x $ varDimInds info
 
-arrPerm :: ArrMeta -> [a] -> [a]
-arrPerm meta xs = gather xs $ lmadPerm meta
+arrPerm :: ArrInfo -> [a] -> [a]
+arrPerm info xs = gather xs $ lmadPerm info
 
 makeTCKernelParams ::
   [VName] ->
@@ -624,8 +624,8 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
       -- any) whence each slice comes, or at least the layout thereof.
       --
       -- In any case, knowledge of the actual layout of a given input array is
-      -- necessary in order to correctly map the global-to-shmem tile copy to
-      -- the tblock dimensions (to obtain coalesced access on both shmem
+      -- necessary in order to correctly map the global-to-smem tile copy to
+      -- the tblock dimensions (to obtain coalesced access on both smem
       -- inputs), as well as to generate the boundary guard on the read, and to
       -- match tile sizes to each input array, since these are not simply
       -- (M: (Ty, Ry)), (N: (Tx, Rx)), and (U: Tk) as in the 2D case.
@@ -636,12 +636,12 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
       let base_arr = getArrayFromLoadStm load_stm
       arr_t <- lookupType base_arr
       let dims' = arrayDims arr_t
-      let shmem_elem_type = elemType arr_t
+      let smem_elem_type = elemType arr_t
 
       -- In fact, we need not only the layout for each array, but also the index
       -- in the segspace of each dimension, s.t. later we may extract tblock
       -- offsets, loop variables, and other information associated with this
-      -- given shmem array. Below mess accomplishes this:
+      -- given smem array. Below mess accomplishes this:
       --
       -- First, for each dimension in the array, determine the index into
       -- inner_dims of this dimension. Note that the indices computed here are
@@ -668,8 +668,8 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
       let lmad_perm = maybe (indices dims') id $ findLMADPerm env base_arr
       let inv_lmad_perm = map snd $ L.sort $ zip lmad_perm [0 ..]
 
-      let dims = gather dims' inv_lmad_perm
-      let var_inds = map (`L.elemIndex` inner_dims) dims
+      let base_arr_dims = gather dims' inv_lmad_perm
+      let var_inds = map (`L.elemIndex` inner_dims) base_arr_dims
 
       -- Then, for each dimension of each array, extract the TR tile and
       -- tblock offset corresponding to this dimension. For the tile
@@ -681,7 +681,7 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
       -- Determine whether this array is a candidate for padding. If so, we need
       -- to take this into account in its flat size and the computed strides.
       let innerProducts = scanr (*) 1 . tail
-      ~(shmem_size_flat', shmem_strides') <-
+      ~(smem_size_flat', smem_strides') <-
 
         -- An array is candidate for padding if one of its dimensions is indexed
         -- by the inner thread index UNLESS that dimension happens to also be
@@ -689,40 +689,40 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
         case Just inner_dim_ind `L.elemIndex` init var_inds of
           Just i -> do
             -- Split on the index at which the inner tiles need padding.
-            let (outer_shmem_dims, inner_shmem_dims) = splitAt (i + 1) tile_dims_pe
+            let (outer_smem_dims, inner_smem_dims) = splitAt (i + 1) tile_dims_pe
 
             -- We only need padding when the inner size is a multiple of 2, so
             -- the padding term is `1 - (size_pre_pad % 2)`.
             -- TODO: I bind these two because I can't seem to get `rem` to work
             -- with TPrimExps. is there a better way?
-            size_pre_pad <- letSubExp "size_pre_pad" =<< toExp (product inner_shmem_dims)
+            size_pre_pad <- letSubExp "size_pre_pad" =<< toExp (product inner_smem_dims)
             tmp <- letSubExp "tmp" $ BasicOp $ BinOp (SRem Int64 Unsafe) size_pre_pad se2
             pad_term <- letSubExp "pad_term" =<< toExp (1 - pe64 tmp)
 
             let inner_size_flat = pe64 size_pre_pad + pe64 pad_term
 
-                outer_strides = init $ innerProducts $ outer_shmem_dims ++ [inner_size_flat]
-                inner_strides = innerProducts inner_shmem_dims
+                outer_strides = init $ innerProducts $ outer_smem_dims ++ [inner_size_flat]
+                inner_strides = innerProducts inner_smem_dims
 
-                size_flat = product outer_shmem_dims * inner_size_flat
+                size_flat = product outer_smem_dims * inner_size_flat
             pure (size_flat, outer_strides ++ inner_strides)
 
           _ -> pure (product tile_dims_pe, innerProducts tile_dims_pe)
 
-      shmem_size_flat <- letSubExp "shmem_size_flat" =<< toExp shmem_size_flat'
-      shmem_strides <- mapM (letSubExp "shmem_stride" <=< toExp) shmem_strides'
+      smem_size_flat <- letSubExp "smem_size_flat" =<< toExp smem_size_flat'
+      smem_strides <- mapM (letSubExp "smem_stride" <=< toExp) smem_strides'
 
       pure $
-        ArrMeta
+        ArrInfo
           base_arr
-          dims
-          tile_dims
-          shmem_elem_type
-          shmem_size_flat
-          shmem_strides
-          var_inds
+          base_arr_dims
           load_stm
           lmad_perm
+          var_inds
+          tile_dims
+          smem_size_flat
+          smem_strides
+          smem_elem_type
 
   where
     getArrayFromLoadStm :: Stm GPU -> VName
@@ -740,7 +740,7 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
     inner_dim_ind = length inner_dims - 1
 
 
--- Note [ShmemZeroPaddingOnGlobalMemOOB]
+-- Note [SmemZeroPaddingOnGlobalMemOOB]
 -- When copying from global to shared memory, we need to handle out-of-bounds
 -- reads from global memory. For the time being, we write a padding value to
 -- shared memory. This padding value is a zero (or zero-like) value from the
@@ -751,7 +751,7 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
 -- `f zero_0 _ = f _ zero_1 = red_ne`
 --
 -- where `f` is the map function; `zero_0` and `zero_1` are the zero-like values
--- for the two given shmem array element types; and `red_ne` is the reduce
+-- for the two given smem array element types; and `red_ne` is the reduce
 -- neutral element.
 --
 -- This is seldom the case in general, however it happens to hold for regular
