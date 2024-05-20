@@ -88,7 +88,9 @@ type CallKernelGen = ImpM GPUMem HostEnv Imp.HostOp
 type InKernelGen = ImpM GPUMem KernelEnv Imp.KernelOp
 
 data KernelConstants = KernelConstants
-  { kernelGlobalThreadId :: Imp.TExp Int32,
+  { -- | This must be an Int64 because that is what it is in scope as
+    -- at the IR levels.
+    kernelGlobalThreadId :: Imp.TExp Int64,
     kernelLocalThreadId :: Imp.TExp Int32,
     kernelBlockId :: Imp.TExp Int32,
     kernelGlobalThreadIdVar :: VName,
@@ -961,7 +963,7 @@ kernelInitialisationSimple num_tblocks tblock_size = do
       tblock_size' = Imp.pe64 (unCount tblock_size)
       constants =
         KernelConstants
-          { kernelGlobalThreadId = Imp.le32 global_tid,
+          { kernelGlobalThreadId = Imp.le64 global_tid,
             kernelLocalThreadId = Imp.le32 local_tid,
             kernelBlockId = Imp.le32 tblock_id,
             kernelGlobalThreadIdVar = global_tid,
@@ -987,7 +989,7 @@ kernelInitialisationSimple num_tblocks tblock_size = do
         sOp (Imp.GetLocalSize inner_tblock_size 0)
         sOp (Imp.GetLockstepWidth wave_size)
         sOp (Imp.GetBlockId tblock_id 0)
-        dPrimV_ global_tid $ le32 tblock_id * le32 inner_tblock_size + le32 local_tid
+        dPrimV_ global_tid $ sExt64 $ le32 tblock_id * le32 inner_tblock_size + le32 local_tid
 
   pure (constants, set_constants)
 
@@ -1053,7 +1055,7 @@ simpleKernelConstants kernel_size desc = do
 
       constants =
         KernelConstants
-          { kernelGlobalThreadId = Imp.le32 thread_gtid,
+          { kernelGlobalThreadId = Imp.le64 thread_gtid,
             kernelLocalThreadId = Imp.le32 thread_ltid,
             kernelBlockId = Imp.le32 tblock_id,
             kernelGlobalThreadIdVar = thread_gtid,
@@ -1071,7 +1073,7 @@ simpleKernelConstants kernel_size desc = do
 
       wrapKernel m = do
         dPrim_ thread_ltid int32
-        dPrim_ inner_tblock_size int64
+        dPrim_ inner_tblock_size int32
         dPrim_ tblock_id int32
         sOp (Imp.GetLocalId thread_ltid 0)
         sOp (Imp.GetLocalSize inner_tblock_size 0)
@@ -1199,7 +1201,7 @@ sKernelThread ::
   KernelAttrs ->
   InKernelGen () ->
   CallKernelGen ()
-sKernelThread = sKernel threadOperations kernelGlobalThreadId
+sKernelThread = sKernel threadOperations (sExt32 . kernelGlobalThreadId)
 
 sKernelOp ::
   KernelAttrs ->
