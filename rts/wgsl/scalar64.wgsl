@@ -212,4 +212,8 @@ fn i64_to_bool(a: i64) -> bool {
   if eq_i64(a, zero_i64) { return false; } else { return true; }
 }
 
+fn i64_to_f32(a: i64) -> f32 {
+  return f32(a.x) + f32(a.y) * 2e32f;
+}
+
 // End of scalar64.wgsl
