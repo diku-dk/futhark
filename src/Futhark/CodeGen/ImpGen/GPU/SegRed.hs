@@ -687,7 +687,7 @@ reductionStageOne ::
   InKernelGen [Lambda GPUMem]
 reductionStageOne gtids n global_tid q chunk threads_per_segment slugs body_cont = do
   constants <- kernelConstants <$> askEnv
-  let glb_ind_var = mkTV (last gtids) int64
+  let glb_ind_var = mkTV (last gtids)
       ltid = sExt64 $ kernelLocalThreadId constants
 
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs

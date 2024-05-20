@@ -602,7 +602,7 @@ sKernelBlock ::
   KernelAttrs ->
   InKernelGen () ->
   CallKernelGen ()
-sKernelBlock = sKernel blockOperations kernelBlockId
+sKernelBlock = sKernel blockOperations $ sExt64 . kernelBlockId
 
 compileBlockResult ::
   SegSpace ->

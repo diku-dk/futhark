@@ -3,6 +3,9 @@
 
 module Futhark.CodeGen.ImpGen.GPU.Base
   ( KernelConstants (..),
+    kernelGlobalThreadId,
+    kernelLocalThreadId,
+    kernelBlockId,
     threadOperations,
     keyWithEntryPoint,
     CallKernelGen,
@@ -88,14 +91,9 @@ type CallKernelGen = ImpM GPUMem HostEnv Imp.HostOp
 type InKernelGen = ImpM GPUMem KernelEnv Imp.KernelOp
 
 data KernelConstants = KernelConstants
-  { -- | This must be an Int64 because that is what it is in scope as
-    -- at the IR levels.
-    kernelGlobalThreadId :: Imp.TExp Int64,
-    kernelLocalThreadId :: Imp.TExp Int32,
-    kernelBlockId :: Imp.TExp Int32,
-    kernelGlobalThreadIdVar :: VName,
-    kernelLocalThreadIdVar :: VName,
-    kernelBlockIdVar :: VName,
+  { kernelGlobalThreadIdVar :: TV Int32,
+    kernelLocalThreadIdVar :: TV Int32,
+    kernelBlockIdVar :: TV Int32,
     kernelNumBlocksCount :: Count NumBlocks SubExp,
     kernelBlockSizeCount :: Count BlockSize SubExp,
     kernelNumBlocks :: Imp.TExp Int64,
@@ -109,6 +107,11 @@ data KernelConstants = KernelConstants
     -- iterations the virtualisation loop needs.
     kernelChunkItersMap :: M.Map [SubExp] (Imp.TExp Int32)
   }
+
+kernelGlobalThreadId, kernelLocalThreadId, kernelBlockId :: KernelConstants -> Imp.TExp Int32
+kernelGlobalThreadId = tvExp . kernelGlobalThreadIdVar
+kernelLocalThreadId = tvExp . kernelLocalThreadIdVar
+kernelBlockId = tvExp . kernelBlockIdVar
 
 keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
@@ -963,14 +966,11 @@ kernelInitialisationSimple num_tblocks tblock_size = do
       tblock_size' = Imp.pe64 (unCount tblock_size)
       constants =
         KernelConstants
-          { kernelGlobalThreadId = Imp.le64 global_tid,
-            kernelLocalThreadId = Imp.le32 local_tid,
-            kernelBlockId = Imp.le32 tblock_id,
-            kernelGlobalThreadIdVar = global_tid,
-            kernelLocalThreadIdVar = local_tid,
+          { kernelGlobalThreadIdVar = mkTV global_tid,
+            kernelLocalThreadIdVar = mkTV local_tid,
+            kernelBlockIdVar = mkTV tblock_id,
             kernelNumBlocksCount = num_tblocks,
             kernelBlockSizeCount = tblock_size,
-            kernelBlockIdVar = tblock_id,
             kernelNumBlocks = num_tblocks',
             kernelBlockSize = tblock_size',
             kernelNumThreads = sExt32 (tblock_size' * num_tblocks'),
@@ -989,7 +989,7 @@ kernelInitialisationSimple num_tblocks tblock_size = do
         sOp (Imp.GetLocalSize inner_tblock_size 0)
         sOp (Imp.GetLockstepWidth wave_size)
         sOp (Imp.GetBlockId tblock_id 0)
-        dPrimV_ global_tid $ sExt64 $ le32 tblock_id * le32 inner_tblock_size + le32 local_tid
+        dPrimV_ global_tid $ le32 tblock_id * le32 inner_tblock_size + le32 local_tid
 
   pure (constants, set_constants)
 
@@ -1055,12 +1055,9 @@ simpleKernelConstants kernel_size desc = do
 
       constants =
         KernelConstants
-          { kernelGlobalThreadId = Imp.le64 thread_gtid,
-            kernelLocalThreadId = Imp.le32 thread_ltid,
-            kernelBlockId = Imp.le32 tblock_id,
-            kernelGlobalThreadIdVar = thread_gtid,
-            kernelLocalThreadIdVar = thread_ltid,
-            kernelBlockIdVar = tblock_id,
+          { kernelGlobalThreadIdVar = mkTV thread_gtid,
+            kernelLocalThreadIdVar = mkTV thread_ltid,
+            kernelBlockIdVar = mkTV tblock_id,
             kernelNumBlocksCount = num_tblocks,
             kernelBlockSizeCount = tblock_size,
             kernelNumBlocks = num_tblocks',
@@ -1116,9 +1113,8 @@ virtualiseBlocks SegVirt required_blocks m = do
     -- Make sure the virtual block is actually done before we let
     -- another virtual block have its way with it.
     sOp $ Imp.ErrorSync Imp.FenceGlobal
-virtualiseBlocks _ _ m = do
-  gid <- kernelBlockIdVar . kernelConstants <$> askEnv
-  m $ Imp.le32 gid
+virtualiseBlocks _ _ m =
+  m . tvExp . kernelBlockIdVar . kernelConstants =<< askEnv
 
 -- | Various extra configuration of the kernel being generated.
 data KernelAttrs = KernelAttrs
@@ -1180,7 +1176,7 @@ lvlKernelAttrs lvl =
 
 sKernel ::
   Operations GPUMem KernelEnv Imp.KernelOp ->
-  (KernelConstants -> Imp.TExp Int32) ->
+  (KernelConstants -> Imp.TExp Int64) ->
   String ->
   VName ->
   KernelAttrs ->
@@ -1201,7 +1197,7 @@ sKernelThread ::
   KernelAttrs ->
   InKernelGen () ->
   CallKernelGen ()
-sKernelThread = sKernel threadOperations (sExt32 . kernelGlobalThreadId)
+sKernelThread = sKernel threadOperations $ sExt64 . kernelGlobalThreadId
 
 sKernelOp ::
   KernelAttrs ->
@@ -1280,7 +1276,7 @@ sReplicateKernel arr se = do
   let name =
         keyWithEntryPoint fname $
           nameFromString $
-            "replicate_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
+            "replicate_" ++ show (baseTag $ tvVar $ kernelGlobalThreadIdVar constants)
 
   sKernelFailureTolerant True threadOperations constants name $
     virtualise $ \gtid -> do
@@ -1364,7 +1360,7 @@ sIotaKernel arr n x s et = do
             "iota_"
               ++ prettyString et
               ++ "_"
-              ++ show (baseTag $ kernelGlobalThreadIdVar constants)
+              ++ show (baseTag $ tvVar $ kernelGlobalThreadIdVar constants)
 
   sKernelFailureTolerant True threadOperations constants name $
     virtualise $ \gtid ->
