@@ -37,6 +37,7 @@ import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
+import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
@@ -663,6 +664,7 @@ commandLineOptions =
     soacsPassOption applyADInnermost [],
     kernelsPassOption optimiseArrayLayoutGPU [],
     mcPassOption optimiseArrayLayoutMC [],
+    kernelsPassOption optimiseGenRed [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],
     unstreamOption [],
