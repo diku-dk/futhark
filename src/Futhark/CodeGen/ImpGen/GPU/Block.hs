@@ -196,7 +196,7 @@ partitionSeqDims (SegSeqDims seq_is) space =
 compileFlatId :: SegSpace -> InKernelGen ()
 compileFlatId space = do
   ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-  dPrimV_ (segFlat space) ltid
+  dPrimV_ (segFlat space) $ sExt64 ltid
 
 -- Construct the necessary lock arrays for an intra-block histogram.
 prepareIntraBlockSegHist ::
