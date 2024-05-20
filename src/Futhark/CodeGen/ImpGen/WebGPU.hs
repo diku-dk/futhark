@@ -5,7 +5,7 @@ module Futhark.CodeGen.ImpGen.WebGPU
   )
 where
 
-import Control.Monad (forM_, liftM2, liftM3)
+import Control.Monad (forM, forM_, liftM2, liftM3)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.RWS
 import Control.Monad.Trans.State qualified as State
@@ -631,12 +631,23 @@ genScalarDecls = do
   bufferName <- mkGlobalIdent "scalars"
   uses <- asks (ImpGPU.kernelUses . krKernel)
 
-  -- TODO: This probably needs to use the wgslBufferType to ensure
-  -- host-shareable scalar structs. Should then convert in the copy stmt below.
-  let scalars =
-        [ (nameToIdent name, WGSL.Prim $ wgslPrimType typ)
-          | ImpGPU.ScalarUse name typ <- uses
-        ]
+  let scalarUses = [(nameToIdent name, typ) | ImpGPU.ScalarUse name typ <- uses]
+  scalars <- forM scalarUses $
+    \(name, typ) -> do
+      let varPrimTyp = wgslPrimType typ
+      let fieldPrimTyp = case typ of
+                           Bool -> WGSL.Int32 -- bool is not host-shareable
+                           _ -> varPrimTyp
+      let wrapCopy e = case typ of
+                         Bool -> WGSL.CallExp "bool" [e]
+                         _ -> e
+
+      addScalar fieldPrimTyp
+      addInitStmt $ WGSL.DeclareVar name (WGSL.Prim varPrimTyp)
+      addInitStmt $ WGSL.Assign name (wrapCopy $ WGSL.FieldExp bufferName name)
+
+      pure (name, WGSL.Prim fieldPrimTyp)
+
   let scalarFields = case scalars of
         [] -> [("_dummy_scalar", WGSL.Prim WGSL.Int32)]
         sclrs -> sclrs
@@ -644,18 +655,10 @@ genScalarDecls = do
     WGSL.StructDecl $
       WGSL.Struct structName (map (uncurry WGSL.Field) scalarFields)
 
-  mapM_ addScalar [t | (_, WGSL.Prim t) <- scalars]
-
   slot <- assignBindSlot
   let bufferAttribs = WGSL.bindingAttribs 0 slot
   addDecl $
     WGSL.VarDecl bufferAttribs WGSL.Uniform bufferName (WGSL.Named structName)
-
-  let copy (name, typ) =
-        [ WGSL.DeclareVar name typ,
-          WGSL.Assign name (WGSL.FieldExp bufferName name)
-        ]
-  mapM_ addInitStmt $ concatMap copy scalars
 
 -- | Internally, memory buffers are untyped but WGSL requires us to annotate the
 -- binding with a type. Search the kernel body for any reads and writes to the
