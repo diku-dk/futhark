@@ -398,7 +398,7 @@ histKernelGlobalPass map_pes num_tblocks tblock_size space slugs kbody histogram
     -- Compute subhistogram index for each thread, per histogram.
     subhisto_inds <- forM slugs $ \slug ->
       dPrimVE "subhisto_ind" $
-        kernelGlobalThreadId constants
+        sExt32 (kernelGlobalThreadId constants)
           `quot` ( kernelNumThreads constants
                      `divUp` sExt32 (tvExp (slugNumSubhistos slug))
                  )
