@@ -50,7 +50,7 @@ module Futhark.CodeGen.ImpGen
 
     -- * Building Blocks
     TV,
-    mkTV,
+    MkTV (..),
     tvSize,
     tvExp,
     tvVar,
@@ -1180,12 +1180,32 @@ funcallTargets dests =
 -- It is still easy to cheat when you need to.
 data TV t = TV VName PrimType
 
--- | Create a typed variable from a name and a dynamic type.  Note
--- that there is no guarantee that the dynamic type corresponds to the
--- inferred static type, but the latter will at least have to be used
--- consistently.
-mkTV :: VName -> PrimType -> TV t
-mkTV = TV
+-- | A type class that helps ensuring that the type annotation in a
+-- 'TV' is correct.
+class MkTV t where
+  -- | Create a typed variable from a name and a dynamic type.
+  mkTV :: VName -> TV t
+
+instance MkTV Int8 where
+  mkTV v = TV v (IntType Int8)
+
+instance MkTV Int16 where
+  mkTV v = TV v (IntType Int16)
+
+instance MkTV Int32 where
+  mkTV v = TV v (IntType Int32)
+
+instance MkTV Int64 where
+  mkTV v = TV v (IntType Int64)
+
+instance MkTV Half where
+  mkTV v = TV v (FloatType Float16)
+
+instance MkTV Float where
+  mkTV v = TV v (FloatType Float32)
+
+instance MkTV Double where
+  mkTV v = TV v (FloatType Float64)
 
 -- | Convert a typed variable to a size (a SubExp).
 tvSize :: TV t -> Imp.DimSize
