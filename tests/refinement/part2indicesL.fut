@@ -27,7 +27,7 @@ def sgm_sum [n] 't
   let (_flags, ys) = unzip flags_ys
   in ys
 
-let partition2L 't [m]
+let part2indicesL 't [m]
                 (dummy: i64)
                 (shp: {[m]i64 | \shp -> forall shp (>= 0)})
                 (n: {i64 | \n' -> n' == sum shp})
