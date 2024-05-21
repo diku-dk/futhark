@@ -674,6 +674,7 @@ findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
     find (For _ _ body) = find body
     find (While _ body) = find body
     find (If _ s1 s2) = find s1 <> find s2
+    find (Comment _ s) = find s
     find _ = S.empty
 
 findSingleMemoryType :: VName -> KernelM ImpGPU.PrimType
