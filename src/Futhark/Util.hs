@@ -69,7 +69,7 @@ import Data.Either
 import Data.Foldable (fold, toList)
 import Data.Function ((&))
 import Data.IntMap qualified as IM
-import Data.List (findIndex, foldl', genericDrop, genericSplitAt, sortBy)
+import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
@@ -98,7 +98,7 @@ nubOrd = nubByOrd compare
 
 -- | Like @nubBy@, but without the quadratic runtime.
 nubByOrd :: (a -> a -> Ordering) -> [a] -> [a]
-nubByOrd cmp = map NE.head . NE.groupBy eq . sortBy cmp
+nubByOrd cmp = map NE.head . NE.groupBy eq . L.sortBy cmp
   where
     eq x y = cmp x y == EQ
 
@@ -181,7 +181,7 @@ partitionMaybe f = helper ([], [])
 -- | Return the list element at the given index, if the index is valid.
 maybeNth :: (Integral int) => int -> [a] -> Maybe a
 maybeNth i l
-  | i >= 0, v : _ <- genericDrop i l = Just v
+  | i >= 0, v : _ <- L.genericDrop i l = Just v
   | otherwise = Nothing
 
 -- | Return the first element of the list, if it exists.
@@ -209,14 +209,14 @@ splitAt3 n m l =
 -- valid, along with the elements before and after.
 focusNth :: (Integral int) => int -> [a] -> Maybe ([a], a, [a])
 focusNth i xs
-  | (bef, x : aft) <- genericSplitAt i xs = Just (bef, x, aft)
+  | (bef, x : aft) <- L.genericSplitAt i xs = Just (bef, x, aft)
   | otherwise = Nothing
 
 -- | Return the first list element that satisifes a predicate, along with the
 -- elements before and after.
 focusMaybe :: (a -> Maybe b) -> [a] -> Maybe ([a], b, [a])
 focusMaybe f xs = do
-  idx <- findIndex (isJust . f) xs
+  idx <- L.findIndex (isJust . f) xs
   (before, focus, after) <- focusNth idx xs
   res <- f focus
   pure (before, res, after)

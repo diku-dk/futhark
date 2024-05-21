@@ -20,7 +20,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
 import Data.Bifunctor
-import Data.List (find, foldl', sort, unzip4, (\\))
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Futhark.Util (nubOrd)
@@ -103,7 +103,7 @@ evalTypeExp df (TEParens te loc) = do
   pure (TEParens te' loc, svars, ts, ls)
 --
 evalTypeExp df (TETuple ts loc) = do
-  (ts', svars, ts_s, ls) <- unzip4 <$> mapM (evalTypeExp df) ts
+  (ts', svars, ts_s, ls) <- L.unzip4 <$> mapM (evalTypeExp df) ts
   pure
     ( TETuple ts' loc,
       mconcat svars,
@@ -114,7 +114,7 @@ evalTypeExp df (TETuple ts loc) = do
 evalTypeExp df t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
-  unless (sort field_names == sort (nubOrd field_names)) $
+  unless (L.sort field_names == L.sort (nubOrd field_names)) $
     typeError loc mempty $
       "Duplicate record fields in" <+> pretty t <> "."
 
@@ -200,7 +200,7 @@ evalTypeExp df (TEDim dims t loc) = do
   bindDims dims $ do
     (t', svars, RetType t_dims st, l) <- evalTypeExp df t
     let (witnessed, _) = determineSizeWitnesses $ toStruct st
-    case find (`S.notMember` witnessed) dims of
+    case L.find (`S.notMember` witnessed) dims of
       Just d ->
         typeError loc mempty . withIndexLink "unused-existential" $
           "Existential size "
@@ -220,7 +220,7 @@ evalTypeExp df (TEDim dims t loc) = do
 --
 evalTypeExp df t@(TESum cs loc) = do
   let constructors = map fst cs
-  unless (sort constructors == sort (nubOrd constructors)) $
+  unless (L.sort constructors == L.sort (nubOrd constructors)) $
     typeError loc mempty $
       "Duplicate constructors in" <+> pretty t
 
@@ -495,7 +495,7 @@ substTypesRet lookupSubst ot =
     onRetType (RetType dims t) = do
       ext <- get
       let (t', ext') = runState (onType t) ext
-          new_ext = ext' \\ ext
+          new_ext = ext' L.\\ ext
       case t of
         Scalar Arrow {} -> do
           put ext'
