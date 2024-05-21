@@ -352,7 +352,7 @@ genWGSLStm (For iName bound body) = do
       i
       zero
       (lt (WGSL.VarExp i) boundExp)
-      (WGSL.Assign i $ add (WGSL.VarExp i) (WGSL.IntExp 1))
+      (WGSL.Assign i $ add (WGSL.VarExp i) one)
       bodyStm
   where
     i = nameToIdent iName
@@ -361,9 +361,9 @@ genWGSLStm (For iName bound body) = do
       _ -> error "non-integer Exp for loop bound"
     add = wgslBinOp $ Add boundIntType OverflowWrap
     lt = wgslCmpOp $ CmpUlt boundIntType
-    zero = case boundIntType of
-      Int64 -> WGSL.VarExp "zero_i64"
-      _ -> WGSL.IntExp 0
+    (zero, one) = case boundIntType of
+                    Int64 -> (WGSL.VarExp "zero_i64", WGSL.VarExp "one_i64")
+                    _ -> (WGSL.IntExp 0, WGSL.IntExp 1)
 genWGSLStm (While cond body) =
   liftM2
     WGSL.While
