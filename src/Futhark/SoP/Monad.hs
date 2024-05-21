@@ -105,7 +105,7 @@ newtype SoPMT u e m a = SoPMT (StateT (AlgEnv u e) m a)
 instance MonadTrans (SoPMT u e) where
   lift = SoPMT . lift
 
-instance (MonadFreshNames m) => MonadFreshNames (SoPMT u e m) where
+instance MonadFreshNames m => MonadFreshNames (SoPMT u e m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
@@ -113,7 +113,7 @@ instance (MonadFreshNames m) => MonadFreshNames (StateT (AlgEnv u e) m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance (MonadReader r m) => MonadReader r (SoPMT u e m) where
+instance MonadReader r m => MonadReader r (SoPMT u e m) where
   ask = SoPMT $ lift ask
   local f (SoPMT m) =
     SoPMT $ do
@@ -122,18 +122,18 @@ instance (MonadReader r m) => MonadReader r (SoPMT u e m) where
       put env'
       pure a
 
-instance (MonadState s m) => MonadState s (SoPMT u e m) where
+instance MonadState s m => MonadState s (SoPMT u e m) where
   get = SoPMT $ lift get
   put = SoPMT . lift . put
 
-instance (MonadWriter w m) => MonadWriter w (SoPMT u e m) where
+instance MonadWriter w m => MonadWriter w (SoPMT u e m) where
   tell = SoPMT . lift . tell
   listen (SoPMT m) = SoPMT $ listen m
   pass (SoPMT m) = SoPMT $ pass m
 
 type SoPM u e = SoPMT u e (State VNameSource)
 
-runSoPMT :: (MonadFreshNames m) => AlgEnv u e -> SoPMT u e m a -> m (a, AlgEnv u e)
+runSoPMT :: MonadFreshNames m => AlgEnv u e -> SoPMT u e m a -> m (a, AlgEnv u e)
 runSoPMT env (SoPMT sm) = runStateT sm env
 
 runSoPMT_ :: (Ord u, Ord e, MonadFreshNames m) => SoPMT u e m a -> m (a, AlgEnv u e)
@@ -145,7 +145,7 @@ runSoPM env = flip evalState mempty . runSoPMT env
 runSoPM_ :: (Ord u, Ord e) => SoPM u e a -> (a, AlgEnv u e)
 runSoPM_ = runSoPM mempty
 
-evalSoPMT :: (MonadFreshNames m) => AlgEnv u e -> SoPMT u e m a -> m a
+evalSoPMT :: MonadFreshNames m => AlgEnv u e -> SoPMT u e m a -> m a
 evalSoPMT env m = fst <$> runSoPMT env m
 
 evalSoPMT_ :: (Ord u, Ord e, MonadFreshNames m) => SoPMT u e m a -> m a
@@ -177,7 +177,7 @@ instance
   modifyEnv f = SoPMT $ modify f
 
 -- \| Insert a symbol equal to an untranslatable 'PrimExp'.
-addUntrans :: (MonadSoP u e m) => u -> e -> m ()
+addUntrans :: MonadSoP u e m => u -> e -> m ()
 addUntrans sym pe =
   modifyEnv $ \env ->
     env
@@ -189,12 +189,12 @@ addUntrans sym pe =
       }
 
 -- \| Look-up the sum-of-products representation of a symbol.
-lookupSoP :: (MonadSoP u e m) => u -> m (Maybe (SoP u))
+lookupSoP :: MonadSoP u e m => u -> m (Maybe (SoP u))
 lookupSoP x = (M.!? x) <$> getEquivs
 
 -- \| Look-up the symbol for a 'PrimExp'. If no symbol is bound
 --    to the expression, bind a new one.
-lookupUntransPE :: (MonadSoP u e m) => e -> m u
+lookupUntransPE :: MonadSoP u e m => e -> m u
 lookupUntransPE pe = do
   inv_map <- inv <$> getUntrans
   case inv_map M.!? pe of
@@ -205,12 +205,12 @@ lookupUntransPE pe = do
     Just x -> pure x
 
 -- \| Look-up the untranslatable 'PrimExp' bound to the given symbol.
-lookupUntransSym :: (MonadSoP u e m) => u -> m (Maybe e)
+lookupUntransSym :: MonadSoP u e m => u -> m (Maybe e)
 lookupUntransSym sym = ((M.!? sym) . dir) <$> getUntrans
 
 -- \| Look-up the range of a symbol. If no such range exists,
 --    return the empty range (and add it to the environment).
-lookupRange :: (MonadSoP u e m) => u -> m (Range u)
+lookupRange :: MonadSoP u e m => u -> m (Range u)
 lookupRange sym = do
   mr <- (M.!? sym) <$> getRanges
   case mr of
@@ -224,14 +224,14 @@ lookupRange sym = do
 
 -- \| Add range information for a symbol; augments the existing
 --   range.
-addRange :: (MonadSoP u e m) => u -> Range u -> m ()
+addRange :: MonadSoP u e m => u -> Range u -> m ()
 addRange sym r =
   modifyEnv $ \env ->
     env {ranges = M.insertWith (<>) sym r (ranges env)}
 
 -- \| Add equivalent information for a symbol; unsafe and
 -- should only be used for newly introduced variables.
-addEquiv :: (MonadSoP u e m) => u -> SoP u -> m ()
+addEquiv :: MonadSoP u e m => u -> SoP u -> m ()
 addEquiv sym sop = do
   -- sop' <- substEquivs sop
   modifyEnv $ \env ->
@@ -276,12 +276,7 @@ type EquivEnv u = Map u (SoP u)
 -- | The range environment binds a variable name to a range.
 type RangeEnv u = Map u (Range u)
 
-type PropEnv u = Map u Properties
-
-data Properties = Monotonic
-  deriving (Show, Eq, Ord)
-
-instance (Pretty u) => Pretty (RangeEnv u) where
+instance Pretty u => Pretty (RangeEnv u) where
   pretty = pretty . M.toList
 
 -- | The main algebraic environment.
@@ -291,18 +286,16 @@ data AlgEnv u e = AlgEnv
     -- | Binds symbols to their sum-of-product representation..
     equivs :: EquivEnv u,
     -- | Binds symbols to ranges (in sum-of-product form).
-    ranges :: RangeEnv u,
-    -- | Symbol table to store properties.
-    props :: PropEnv u
+    ranges :: RangeEnv u
   }
   deriving (Ord, Show, Eq)
 
 instance (Ord u, Ord e) => Semigroup (AlgEnv u e) where
-  AlgEnv u1 s1 r1 p1 <> AlgEnv u2 s2 r2 p2 =
-    AlgEnv (u1 <> u2) (s1 <> s2) (r1 <> r2) (p1 <> p2)
+  AlgEnv u1 s1 r1 <> AlgEnv u2 s2 r2 =
+    AlgEnv (u1 <> u2) (s1 <> s2) (r1 <> r2)
 
 instance (Ord u, Ord e) => Monoid (AlgEnv u e) where
-  mempty = AlgEnv mempty mempty mempty mempty
+  mempty = AlgEnv mempty mempty mempty
 
 instance (Pretty u, Pretty e) => Pretty (AlgEnv u e) where
   pretty (env) =
@@ -335,11 +328,11 @@ transClosInRanges rs syms =
                   active'' = S.union new_syms active'
                in transClosHelper rs' clos_syms' seen' active''
 
-substEquivs :: (MonadSoP u e m) => SoP u -> m (SoP u)
+substEquivs :: MonadSoP u e m => SoP u -> m (SoP u)
 substEquivs sop = flip substitute sop <$> getEquivs
 
 -- | Removes a symbol from the environment
-delFromEnv :: (MonadSoP u e m) => u -> m ()
+delFromEnv :: MonadSoP u e m => u -> m ()
 delFromEnv x =
   modifyEnv $ \env ->
     env
