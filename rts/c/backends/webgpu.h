@@ -477,8 +477,13 @@ int backend_context_setup(struct futhark_context *ctx) {
   }
   ctx->adapter = adapter_result.adapter;
 
+  WGPUFeatureName required_features[] = { WGPUFeatureName_ShaderF16 };
+  WGPUDeviceDescriptor device_desc = {
+    .requiredFeatureCount = 1,
+    .requiredFeatures = required_features,
+  };
   wgpu_request_device_result device_result
-    = wgpu_request_device_sync(ctx->instance, ctx->adapter, NULL);
+    = wgpu_request_device_sync(ctx->instance, ctx->adapter, &device_desc);
   if (device_result.status != WGPURequestDeviceStatus_Success) {
     if (device_result.message != NULL) {
       futhark_panic(-1, "Could not get WebGPU device, status: %d\nMessage: %s\n",

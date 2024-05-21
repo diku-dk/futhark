@@ -275,7 +275,13 @@ kernelsToWebGPU prog =
       -- internally represented using i32.
       webgpu_prelude =
         mconcat
-          [RTS.scalar, RTS.scalar32, RTS.scalar8, RTS.scalar16, RTS.scalar64]
+          [ "enable f16;\n",
+            RTS.scalar,
+            RTS.scalar32,
+            RTS.scalar8,
+            RTS.scalar16,
+            RTS.scalar64
+          ]
       constants = wsMacroDefs translation
       -- TODO: Compute functions using tuning params
       params = M.map (,S.empty) $ wsSizes translation
