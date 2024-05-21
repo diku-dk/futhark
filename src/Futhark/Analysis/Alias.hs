@@ -22,7 +22,7 @@ module Futhark.Analysis.Alias
   )
 where
 
-import Data.List (foldl')
+import Data.List qualified as L
 import Data.Map qualified as M
 import Futhark.IR.Aliases
 
@@ -64,7 +64,7 @@ analyseStms ::
   Stms rep ->
   (Stms (Aliases rep), AliasesAndConsumed)
 analyseStms orig_aliases =
-  withoutBound . foldl' f (mempty, (orig_aliases, mempty)) . stmsToList
+  withoutBound . L.foldl' f (mempty, (orig_aliases, mempty)) . stmsToList
   where
     withoutBound (stms, (aliases, consumed)) =
       let bound = foldMap (namesFromList . patNames . stmPat) stms

@@ -30,7 +30,7 @@ where
 import Data.Bits
 import Data.Foldable qualified as Foldable
 import Data.IntMap.Strict qualified as IM
-import Data.List (foldl')
+import Data.List qualified as L
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Prelude hiding (lookup)
@@ -64,7 +64,7 @@ used = lookupPred $ const True
 
 -- | Expand the usage table based on aliasing information.
 expand :: (VName -> Names) -> UsageTable -> UsageTable
-expand look (UsageTable m) = UsageTable $ foldl' grow m $ IM.toList m
+expand look (UsageTable m) = UsageTable $ L.foldl' grow m $ IM.toList m
   where
     grow m' (k, v) =
       foldl'

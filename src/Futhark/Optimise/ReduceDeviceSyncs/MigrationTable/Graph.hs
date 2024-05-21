@@ -83,7 +83,7 @@ where
 
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
-import Data.List (foldl')
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust)
 import Prelude hiding (lookup)
@@ -286,7 +286,7 @@ route src g =
 -- in @srcs@. Returns the ids for the vertices connected to each found sink.
 routeMany :: [Id] -> Graph m -> ([Id], Graph m)
 routeMany srcs graph =
-  foldl' f ([], graph) srcs
+  L.foldl' f ([], graph) srcs
   where
     f (snks, g) src =
       case route src g of
@@ -489,7 +489,7 @@ route' p d prev et i g
       let (res, g0) = f g (IM.insert i d p)
        in case res of
             CycleDetected d' as _
-              | d == d' -> (DeadEnd, foldl' (\g1 a -> a g1) g0 as)
+              | d == d' -> (DeadEnd, L.foldl' (\g1 a -> a g1) g0 as)
             _ | otherwise -> (res, g0)
 
     routeAll rev v g0 p0 =

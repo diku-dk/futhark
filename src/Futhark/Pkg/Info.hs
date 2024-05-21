@@ -22,7 +22,7 @@ import Control.Monad (unless, void)
 import Control.Monad.IO.Class
 import Data.ByteString qualified as BS
 import Data.IORef
-import Data.List (foldl', intersperse)
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
@@ -322,7 +322,7 @@ lookupPackageRev cachedir p v
                 [] -> "Package " <> p <> " has no versions.  Invalid package path?"
                 ks ->
                   "Known versions: "
-                    <> T.concat (intersperse ", " $ map prettySemVer ks)
+                    <> T.concat (L.intersperse ", " $ map prettySemVer ks)
               major
                 | (_, vs) <- majorRevOfPkg p,
                   _svMajor v `notElem` vs =
