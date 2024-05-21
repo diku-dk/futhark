@@ -164,13 +164,20 @@ OPTIONS
 -t
   Type-check the programs, but do not run them.
 
+-s
+
+  Run ``structure`` tests. These are not run by default. When this
+  option is passed, no other testing is done.
+
 --futhark=program
 
   The program used to perform operations (eg. compilation).  Defaults
   to the binary running ``futhark test`` itself.
 
 --no-terminal
-  Print each result on a line by itself, without line buffering.
+
+  Change the output format to be suitable for noninteractive
+  terminals. Prints a status message roughly every minute.
 
 --no-tuning
 

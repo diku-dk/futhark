@@ -913,6 +913,13 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              void* args[num_args],
                              size_t args_sizes[num_args]) {
   (void) args_sizes;
+
+  if (shared_mem_bytes > ctx->max_shared_memory) {
+    set_error(ctx, msgprintf("Kernel %s with %d bytes of memory exceeds device limit of %d\n",
+                             name, shared_mem_bytes, (int)ctx->max_shared_memory));
+    return 1;
+  }
+
   int64_t time_start = 0, time_end = 0;
   if (ctx->debugging) {
     time_start = get_wall_time();
@@ -951,7 +958,10 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     HIP_SUCCEED_FATAL(hipStreamSynchronize(ctx->stream));
     time_end = get_wall_time();
     long int time_diff = time_end - time_start;
-    fprintf(ctx->log, "  runtime: %ldus\n\n", time_diff);
+    fprintf(ctx->log, "  runtime: %ldus\n", time_diff);
+  }
+  if (ctx->logging) {
+    fprintf(ctx->log, "\n");
   }
 
   return FUTHARK_SUCCESS;

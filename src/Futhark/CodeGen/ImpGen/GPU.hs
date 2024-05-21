@@ -125,7 +125,7 @@ opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblo
           sExt64 (tvExp max_num_tblocks)
   -- We also don't want zero blocks.
   let num_tblocks = sMax64 1 num_tblocks_maybe_zero
-  mkTV (patElemName pe) int32 <-- sExt32 num_tblocks
+  mkTV (patElemName pe) <-- sExt32 num_tblocks
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
 opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do

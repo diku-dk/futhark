@@ -143,7 +143,8 @@ OPTIONS
 --skip-compilation
 
   Do not run the compiler, and instead assume that each benchmark
-  program has already been compiled.  Use with caution.
+  program has already been compiled into a server-mode executable. Use
+  with caution.
 
 --spec-file=FILE
 

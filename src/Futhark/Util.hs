@@ -11,6 +11,7 @@ module Futhark.Util
     nubByOrd,
     mapAccumLM,
     maxinum,
+    mininum,
     chunk,
     chunks,
     chunkLike,
@@ -51,6 +52,7 @@ module Futhark.Util
     fixPoint,
     concatMapM,
     topologicalSort,
+    debugTraceM,
   )
 where
 
@@ -77,6 +79,7 @@ import Data.Text.Encoding qualified as T
 import Data.Text.Encoding.Error qualified as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
+import Debug.Trace
 import Numeric
 import System.Directory.Tree qualified as Dir
 import System.Environment
@@ -144,6 +147,10 @@ chunkLike as = chunks (map length as)
 -- | Like 'maximum', but returns zero for an empty list.
 maxinum :: (Num a, Ord a, Foldable f) => f a -> a
 maxinum = foldl' max 0
+
+-- | Like 'minimum', but returns zero for an empty list.
+mininum :: (Num a, Ord a, Foldable f) => f a -> a
+mininum xs = foldl' min (maxinum xs) xs
 
 -- | @dropAt i n@ drops @n@ elements starting at element @i@.
 dropAt :: Int -> Int -> [a] -> [a]
@@ -507,3 +514,10 @@ topologicalSort dep nodes =
         modify $ second $ IM.insert i True
         mapM_ sorting $ mapMaybe (depends_of node) nodes_idx
         modify $ bimap (node :) (IM.insert i False)
+
+-- | 'traceM', but only if @FUTHARK_COMPILER_DEBUGGING@ is set to to
+-- the appropriate level.
+debugTraceM :: (Monad m) => Int -> String -> m ()
+debugTraceM level
+  | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" level = traceM
+  | otherwise = const $ pure ()

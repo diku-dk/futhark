@@ -31,7 +31,7 @@ versionString :: T.Text
 versionString =
   T.pack (showVersion version)
     <> unreleased
-    <> "\n"
+    <> ".\n"
     <> gitversion $$tGitInfoCwdTry
     <> ghcversion
   where
@@ -42,7 +42,7 @@ versionString =
     gitversion (Left _) =
       case commitIdFromFile of
         Nothing -> ""
-        Just commit -> "git: " <> T.pack commit
+        Just commit -> "git: " <> T.pack commit <> "\n"
     gitversion (Right gi) =
       mconcat
         [ "git: ",

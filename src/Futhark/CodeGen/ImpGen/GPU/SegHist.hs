@@ -298,19 +298,14 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
     -- "Average element size" as computed by a formula that also takes
     -- locking into account.
     slugElSize (SegHistSlug op _ _ do_op) =
-      case do_op of
-        AtomicLocking {} ->
-          sExt32 $
-            unCount $
-              sum $
-                map (typeSize . (`arrayOfShape` histOpShape op)) $
-                  Prim int32 : lambdaReturnType (histOp op)
-        _ ->
-          sExt32 $
-            unCount $
-              sum $
-                map (typeSize . (`arrayOfShape` histOpShape op)) $
-                  lambdaReturnType (histOp op)
+      sExt32 . unCount . sum $
+        case do_op of
+          AtomicLocking {} ->
+            map (typeSize . (`arrayOfShape` histOpShape op)) $
+              Prim int32 : lambdaReturnType (histOp op)
+          _ ->
+            map (typeSize . (`arrayOfShape` histOpShape op)) $
+              lambdaReturnType (histOp op)
 
     onOp hist_L2 hist_M_min hist_S hist_RACE_exp l slug = do
       let SegHistSlug op num_subhistos subhisto_info do_op = slug
@@ -403,7 +398,7 @@ histKernelGlobalPass map_pes num_tblocks tblock_size space slugs kbody histogram
     -- Compute subhistogram index for each thread, per histogram.
     subhisto_inds <- forM slugs $ \slug ->
       dPrimVE "subhisto_ind" $
-        kernelGlobalThreadId constants
+        sExt32 (kernelGlobalThreadId constants)
           `quot` ( kernelNumThreads constants
                      `divUp` sExt32 (tvExp (slugNumSubhistos slug))
                  )
@@ -554,16 +549,17 @@ prepareIntermediateArraysLocal num_subhistos_per_block blocks_per_segment =
       -- Initialise local-memory sub-histograms.  These are
       -- represented as two-dimensional arrays.
       let init_local_subhistos hist_H_chk = do
-            local_subhistos <-
-              forM (histType op) $ \t -> do
-                let sub_local_shape =
-                      Shape [tvSize num_subhistos_per_block]
-                        <> setOuterDims (arrayShape t) (histRank op) (Shape [hist_H_chk])
-                sAllocArray
-                  "subhistogram_local"
-                  (elemType t)
-                  sub_local_shape
-                  (Space "shared")
+            local_subhistos <- forM (histType op) $ \t -> do
+              let subhisto_shape =
+                    setOuterDims
+                      (arrayShape t)
+                      (histRank op)
+                      (Shape [hist_H_chk])
+              sAllocArray
+                "subhistogram_local"
+                (elemType t)
+                (Shape [tvSize num_subhistos_per_block] <> subhisto_shape)
+                (Space "shared")
 
             do_op' <- mk_op hist_H_chk
 
@@ -608,22 +604,17 @@ histKernelLocalPass
         num_subhistos_per_block = tvExp num_subhistos_per_block_var
         segment_size' = pe64 segment_size
 
-    num_segments <-
-      dPrimVE "num_segments" $
-        product $
-          map pe64 segment_dims
+    num_segments <- dPrimVE "num_segments" $ product $ map pe64 segment_dims
 
     hist_H_chks <- forM (map slugOp slugs) $ \op ->
       dPrimV "hist_H_chk" $ histSize op `divUp` sExt64 hist_S
 
     histo_sizes <- forM (zip slugs hist_H_chks) $ \(slug, hist_H_chk) -> do
       let histo_dims =
-            tvExp hist_H_chk
-              : map pe64 (shapeDims (histOpShape (slugOp slug)))
+            tvExp hist_H_chk : map pe64 (shapeDims (histOpShape (slugOp slug)))
       histo_size <-
         dPrimVE "histo_size" $ product histo_dims
-      let block_hists_size =
-            sExt64 num_subhistos_per_block * histo_size
+      let block_hists_size = sExt64 num_subhistos_per_block * histo_size
       init_per_thread <-
         dPrimVE "init_per_thread" $ sExt32 $ block_hists_size `divUp` pe64 (unCount tblock_size)
       pure (histo_dims, histo_size, init_per_thread)
@@ -1003,10 +994,13 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   local_mem_needed <-
     dPrimVE "local_mem_needed" $
       hist_el_size * sExt64 (tvExp hist_M)
+  -- We add one to the memory requirement because if the chunk
+  -- otherwise *exactly* fits, it might actually *not* fit in the case
+  -- of a multi-value operator, as we individually round up the sizes
+  -- of the component arrays. (Very rare edge case.)
   hist_S <-
-    dPrimVE "hist_S" $
-      sExt32 $
-        (hist_H * local_mem_needed) `divUp` tvExp hist_L
+    dPrimVE "hist_S" . sExt32 $
+      (hist_H * local_mem_needed + 1) `divUp` tvExp hist_L
   let max_S = case bodyPassage kbody of
         MustBeSinglePass -> 1
         MayBeMultiPass -> fromIntegral $ maxinum $ map slugMaxLocalMemPasses slugs
