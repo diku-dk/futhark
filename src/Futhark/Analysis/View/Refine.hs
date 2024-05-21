@@ -176,17 +176,6 @@ refineTerm = refineT
     refineT (x :<= y) = refineRelation (:<=) x y
     refineT (x :&& y) = refineRelation (:&&) x y
     refineT (x :|| y) = refineRelation (:||) x y
-    refineT (Sum j lb ub e) = do
-      start <- astMap m lb
-      end <- astMap m ub
-      x <- astMap m e
-      -- If the iteration space is empty or just a single element, eliminate the sum.
-      single <- start $==$ end
-      empty <- start $>$ end
-      case () of
-        _ | single -> pure $ substituteName j (SoP2 start) (SoP2 x)
-        _ | empty -> pure . SoP2 $ SoP.int2SoP 0
-        _ -> pure $ Sum j start end x
     refineT (SumSlice e lb ub) = do
       start <- astMap m lb
       end <- astMap m ub
@@ -222,25 +211,10 @@ refineTerm = refineT
         -- with mid <= ub.
         -- Relies on sorting of SoP and Term to match.
         merge :: ([Term], Integer) -> ([Term], Integer) -> IndexFnM (Maybe ([Term], Integer))
-        merge ([Sum j a z e1], 1) ([Sum j' a' b e2], -1)
-          | e1 == substituteName j' (Var j) e2,
-            a == a' = do
-              test <- b $<=$ z
-              pure $
-                if test
-                then Just ([Sum j (b SoP..+. SoP.int2SoP 1) z e1], 1)
-                else Nothing
         merge ([SumSlice e1 a z], 1) ([SumSlice e2 a' b], -1)
           | e1 == e2,
             a == a' = do
-              -- tell ["MERGE SUM SLICEEEE"] -- <> Math.math (toLaTeX (SumSlice e1 a z) <> " " <> toLaTeX (SumSlice e2 a' b)]
               test <- b $<=$ z
-              -- tell [toLaTeX (Bool test)]
-              debugM $ "MERGE SUM SLICEEE " <> prettyString (SoP2 b :<= SoP2 z) <> " is " <> show test
-              debugM $ "1 * " <> prettyString (SumSlice e1 a z)
-              debugM $ "-1 * " <> prettyString (SumSlice e2 a' b)
-              algenv <- gets algenv
-              debugM $ "AlgEnv" <> prettyString algenv <> "\n"
               pure $
                 if test
                 then Just ([SumSlice e1 (b SoP..+. SoP.int2SoP 1) z], 1)
@@ -270,17 +244,6 @@ refineRelation rel x y = do
     solve _ = pure False
 
 checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
-checkMonotonic iter@(Forall _ _) (cond, Sum _ _ _ e)
-  | [([Idx (Var xs) _], 1)] <- getSoP e = do
-  -- TODO limited to SumSlice case.
-  -- For a SumSlice it's sufficient to check that each term is non-negative.
-  let test = (cond, Var xs :>= SoP2 (SoP.int2SoP 0))
-  debugM ("** checkMonotonic test **" <> prettyString test)
-  let test' = IndexFn iter (Cases . NE.singleton $ test)
-  IndexFn _ (Cases res) <- refineIndexFn test'
-  case res of
-    (_, Bool True) :| [] -> pure True
-    _ -> pure False
 checkMonotonic iter@(Forall _ _) (cond, SumSlice e _ _)
   | [([Var xs], 1)] <- getSoP (termToSoP e) = do
   -- TODO limited to SumSlice case.

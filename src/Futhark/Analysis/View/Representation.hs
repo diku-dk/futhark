@@ -35,11 +35,6 @@ import qualified Data.Set as S
 
 data Term =
     Var VName
-  | Sum
-      VName        -- index
-      (SoP Term)   -- lower bound
-      (SoP Term)   -- upper bound
-      (SoP Term)   -- indexed expression
   | SumSlice
       Term         -- array term
       (SoP Term)   -- lower bound
@@ -67,48 +62,10 @@ data Term =
   | -- Keep Recurrence last for ordering in Ord; we depend
     -- on this for Rule matching.
     Recurrence -- self-reference y[i-1]
-  deriving (Show, Ord)
+  deriving (Show, Eq, Ord)
 
 infixr 3 :&&
 infixr 2 :||
-
-instance Eq Term where
-  (Var vn) == (Var vn') =
-    vn == vn'
-  (Sum j lb ub e) == (Sum j' lb' ub' e') =
-    lb == lb' && ub == ub' && e == substituteName j' (Var j) e'
-  (SumSlice e lb ub) == (SumSlice e' lb' ub') =
-    e == e' && lb == lb' && ub == ub'
-  (Idx vn i) == (Idx vn' i') =
-    vn == vn' && i == i'
-  (SoP2 sop) == (SoP2 sop') =
-    sop == sop'
-  (Indicator e) == (Indicator e') =
-    e == e'
-  (Tuple ts) == (Tuple ts') =
-    ts == ts'
-  (Bool b) == (Bool b') =
-    b == b'
-  (Not t) == (Not t') =
-    t == t'
-  (t1 :== t2) == (t1' :== t2') =
-    t1 == t1' && t2 == t2'
-  (t1 :< t2) == (t1' :< t2') =
-    t1 == t1' && t2 == t2'
-  (t1 :> t2) == (t1' :> t2') =
-    t1 == t1' && t2 == t2'
-  (t1 :/= t2) == (t1' :/= t2') =
-    t1 == t1' && t2 == t2'
-  (t1 :>= t2) == (t1' :>= t2') =
-    t1 == t1' && t2 == t2'
-  (t1 :<= t2) == (t1' :<= t2') =
-    t1 == t1' && t2 == t2'
-  (t1 :&& t2) == (t1' :&& t2') =
-    t1 == t1' && t2 == t2'
-  (t1 :|| t2) == (t1' :|| t2') =
-    t1 == t1' && t2 == t2'
-  Recurrence == Recurrence = True
-  _ == _ = False
 
 -- This is required by MonadSoP.
 instance Nameable Term where
@@ -220,8 +177,6 @@ instance ASTMappable Term where
   astMap _ Recurrence = pure Recurrence
   astMap m (Var x) = do
     mapOnTerm m . Var =<< mapOnVName m x
-  astMap m (Sum i lb ub e) =
-    Sum <$> mapOnVName m i <*> astMap m lb <*> astMap m ub <*> astMap m e
   astMap m (SumSlice e lb ub) =
     SumSlice <$> mapOnTerm m e <*> astMap m lb <*> astMap m ub
   astMap m (Idx xs i) = Idx <$> mapOnTerm m xs <*> astMap m i
@@ -303,12 +258,6 @@ instance Pretty Term where
   pretty (Var x) = prettyName x
   pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
   pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)
-  pretty (Sum i lb ub e) =
-    "∑"
-      <> prettyName i
-      <> "∈"
-      <> brackets (commasep [pretty lb, "...", pretty ub])
-      <+> parens (pretty e)
   pretty (SumSlice e lb ub) =
     "∑"
       <> autoParens e
@@ -470,7 +419,6 @@ instance FreeIn (SoP Term) where
 
 instance FreeIn Term where
   freeIn (Var vn) = S.singleton vn
-  freeIn (Sum _ lb ub e) = freeIn lb <> freeIn ub <> freeIn e
   freeIn (SumSlice e lb ub) = freeIn e <> freeIn lb <> freeIn ub
   freeIn (Idx xs i) = freeIn xs <> freeIn i
   freeIn (SoP2 sop) = freeIn sop

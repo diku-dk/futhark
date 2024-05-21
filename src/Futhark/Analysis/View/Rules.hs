@@ -54,33 +54,12 @@ normalise indexfn =
         -- [[not x]] => 1 + -1*[[x]]
         Not x -> pure . SoP2 $ SoP.int2SoP 1 SoP..-. SoP.sym2SoP (Indicator x)
         _ -> pure (Indicator c')
-    normTerm (Sum j lb ub x) = do
-      lb' <- astMap m lb
-      ub' <- astMap m ub
-      x' <- astMap m x
-      -- List of (multiplied symbols, factor) typed [([Term], Integer)].
-      let terms = SoP.sopToLists x'
-      -- Create a sum for each product (term) in the sum of products,
-      -- pulling factors outside the sum.
-      let sums = map (\(symbs, c) ->
-                        let term = SoP.term2SoP symbs 1
-                        in  case SoP.justConstant term of
-                              Just k ->
-                                -- This would be c*∑j∈[lb, ..., ub] k so rewrite it to (ub - lb + 1) * c * k.
-                                SoP.scaleSoP c (SoP.scaleSoP k (ub' SoP..-. lb' SoP..+. SoP.int2SoP 1))
-                              _ ->
-                                SoP.scaleSoP c . termToSoP $ Sum j lb' ub' term
-                     ) terms
-      -- Create sum of products of (sums of sum of products).
-      pure $ SoP2 $ foldl1 (SoP..+.) sums
     normTerm x@(SoP2 _) = do
       mergeSums <$> astMap m x
       where
         -- Takes a sum of products which may have Sum terms and merges other
         -- compatible terms into those Sums. Time complexity is quadratic in
         -- the number of terms in the SoP.
-        -- mergeSums sop =
-        --   SoP.sopFromList $ foldl (absorbTerm merge) [] (getSoP sop)
         mergeSums :: Term -> Term
         mergeSums (SoP2 s) = do
           SoP2 $ SoP.sopFromList (foldl absorbTerm [] (getSoP s))
@@ -95,16 +74,6 @@ normalise indexfn =
         -- Rewrite sum y[lb:ub] + y[ub+1] ==> sum y[lb:ub+1].
         -- Relies on sorting of SoP and Term to match.
         -- merge a b | trace ("merge " <> prettyString a <> " " <> prettyString b <> "\n" <> show a <> "\n" <> show b) False = undefined
-        merge ([Sum j lb ub e1], c) ([e2], c')
-          | c == c',
-            ubp1 <- ub SoP..+. SoP.int2SoP 1,
-            substituteName j (SoP2 ubp1) e1 == termToSoP e2 =
-              Just ([Sum j lb ubp1 e1], c)
-        merge ([Sum j lb ub e1], c) ([e2], c')
-          | c == c',
-            lbm1 <- lb SoP..-. SoP.int2SoP 1,
-            substituteName j (SoP2 lbm1) e1 == termToSoP e2 =
-              Just ([Sum j lbm1 ub e1], c)
         merge ([SumSlice e1 lb ub], c) ([Idx e2 i], c')
           | ubp1 <- ub SoP..+. SoP.int2SoP 1,
             i == ubp1,
@@ -229,69 +198,6 @@ rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
       pure . SoP.scaleSoP c . termToSoP $
         SumSlice (Indicator (Var x)) lb idx
     mkSum _ _ _ = Nothing
--- Rule 4 (prefix sum)
---
--- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
---    | i == b => e1              (e1 may depend on i)
---    | i /= b => y[i-1] + e2     (e2 may depend on i)
---
--- e2 is an affine SoP where each term is either a constant,
--- an indexing statement or an indicator of an indexing statement.
--- Below, we write e2.0, ..., e2.l for each term.
--- TODO doesn't need to be affine
--- _______________________________________________________________
--- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
---    e1{b/i} + (Σ_{j=b+1}^i e2.0{j/i}) + ... + (Σ_{j=b+1}^i e2.l{j/i})
-rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
-  | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
-    -- Extract terms (multiplied symbols, factor) from the sum of products.
-    Just terms <- justAffinePlusRecurrence recur,
-    -- Create a sum for each product (term) in the sum of products.
-    i == i',
-    i == i'',
-    b == b',
-    b == domainSegStart dom = do
-      tell ["Using prefix sum rule"]
-      -- let lb = termToSoP b SoP..+. SoP.int2SoP 1
-      -- let ub = termToSoP (Var i)
-      -- j <- newNameFromString "j"
-      -- let e2 = substituteName i (Var j) $ SoP.sopFromList terms
-      -- pure $ IndexFn it (toCases $ e1' ~+~ Sum j lb ub e2)
-      let e1' = substituteName i b e1
-      sums <- mapM (mkSum i b) terms
-      pure $ IndexFn it (toCases $ e1' ~+~ SoP2 (foldl1 (SoP..+.) sums))
-  where
-    justAffinePlusRecurrence :: Term -> Maybe [([Term], Integer)]
-    justAffinePlusRecurrence (SoP2 sop)
-      | termsWithFactors <- SoP.sopToLists (SoP.padWithZero sop),
-        [Recurrence] `elem` map fst termsWithFactors,
-        isAffineSoP sop =
-          Just $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
-    justAffinePlusRecurrence _ = Nothing
-
-    -- Create sum for (term, factor), pulling the factor outside the sum.
-    -- mkSum :: a -> Term -> ([Term], Integer)
-    mkSum i b ([], c) =
-      -- This would be ∑j∈[lb, ..., ub] c so rewrite it to (ub - lb + 1) * c.
-      let lb = termToSoP b SoP..+. SoP.int2SoP 1
-          ub = termToSoP (Var i)
-      in  pure $ SoP.scaleSoP c (ub SoP..-. lb SoP..+. SoP.int2SoP 1)
-    mkSum i b ([Idx (Var x) idx], c) = do
-      let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) idx
-      j <- newNameFromString "j"
-      pure . SoP.scaleSoP c . termToSoP $
-        Sum j lb idx (termToSoP $ Idx (Var x) (SoP.sym2SoP (Var j)))
-    mkSum i b ([Indicator (Idx (Var x) idx)], c) = do
-      let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) idx
-      j <- newNameFromString "j"
-      pure . SoP.scaleSoP c . termToSoP $
-        Sum j lb idx (termToSoP . Indicator $ Idx (Var x) (SoP.sym2SoP (Var j)))
-    mkSum i b (es, c) = do
-      let lb = termToSoP b SoP..+. SoP.int2SoP 1
-          ub = termToSoP (Var i)
-      j <- newNameFromString "j"
-      let es' = substituteName i (Var j) $ SoP.sopFromList [(es, 1)]
-      pure . SoP.scaleSoP c . termToSoP $ Sum j lb ub es'
 rewritePrefixSum indexfn = pure indexfn
 
 rewriteCarry :: IndexFn -> IndexFnM IndexFn
