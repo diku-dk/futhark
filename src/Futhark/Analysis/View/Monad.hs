@@ -1,12 +1,12 @@
 module Futhark.Analysis.View.Monad where
 
-import Control.Monad.RWS.Strict hiding (Sum)
-import Data.Map.Strict qualified as M
-import Futhark.Analysis.Refinement.Latex (LaTeX)
 import Futhark.Analysis.View.Representation
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad
 import Language.Futhark qualified as E
+import Control.Monad.RWS.Strict hiding (Sum)
+import Data.Map.Strict qualified as M
+import Futhark.Analysis.Refinement.Latex (LaTeX)
 
 type Log = LaTeX
 
@@ -36,7 +36,6 @@ instance MonadSoP Term E.Exp IndexFnM where
   getUntrans = gets (untrans . algenv)
   getRanges = gets (ranges . algenv)
   getEquivs = gets (equivs . algenv)
-  getProps = gets (props . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
 
 execIndexFnM :: IndexFnM a -> VNameSource -> (IndexFns, [Log])
