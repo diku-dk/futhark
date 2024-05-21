@@ -80,4 +80,12 @@ fn usignum_i32(a: i32) -> i32 {
   return 1;
 }
 
+fn u32_to_f16(a: i32) -> f16 {
+  return f16(bitcast<u32>(a));
+}
+
+fn u32_to_f32(a: i32) -> f32 {
+  return f32(bitcast<u32>(a));
+}
+
 // End of scalar32.wgsl

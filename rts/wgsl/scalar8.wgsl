@@ -164,6 +164,15 @@ fn trunc_i64_i8(a: i64) -> i8 {
   return trunc_i32_i8(a.x);
 }
 
+fn u8_to_f16(a: i8) -> f16 {
+  return f16(bitcast<u32>(a));
+}
+
+fn u8_to_f32(a: i8) -> f32 {
+  return f32(bitcast<u32>(a));
+}
+
+
 fn bool_to_i8(a: bool) -> i8 {
   if a { return 1; } else { return 0; }
 }

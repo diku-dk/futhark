@@ -368,8 +368,8 @@ genWGSLStm (For iName bound body) = do
     add = wgslBinOp $ Add boundIntType OverflowWrap
     lt = wgslCmpOp $ CmpUlt boundIntType
     (zero, one) = case boundIntType of
-                    Int64 -> (WGSL.VarExp "zero_i64", WGSL.VarExp "one_i64")
-                    _ -> (WGSL.IntExp 0, WGSL.IntExp 1)
+      Int64 -> (WGSL.VarExp "zero_i64", WGSL.VarExp "one_i64")
+      _ -> (WGSL.IntExp 0, WGSL.IntExp 1)
 genWGSLStm (While cond body) =
   liftM2
     WGSL.While
@@ -579,6 +579,16 @@ wgslConvOp op a = WGSL.CallExp (fun op) [a]
     fun (SExt Int64 Int16) = "trunc_i64_i16"
     fun (ZExt Int64 Int32) = "trunc_i64_i32"
     fun (SExt Int64 Int32) = "trunc_i64_i32"
+    fun (UIToFP Int8 Float16) = "u8_to_f16"
+    fun (UIToFP Int16 Float16) = "u16_to_f16"
+    fun (UIToFP Int32 Float16) = "u32_to_f16"
+    fun (UIToFP Int64 Float16) = "u64_to_f16"
+    fun (UIToFP Int8 Float32) = "u8_to_f32"
+    fun (UIToFP Int16 Float32) = "u16_to_f32"
+    fun (UIToFP Int32 Float32) = "u32_to_f32"
+    fun (UIToFP Int64 Float32) = "u64_to_f32"
+    fun (SIToFP Int64 Float16) = "i64_to_f16"
+    fun (SIToFP _ Float16) = "f16"
     fun (SIToFP Int64 Float32) = "i64_to_f32"
     fun (SIToFP _ Float32) = "f32"
     fun (IToB Int64) = "i64_to_bool"
@@ -644,11 +654,11 @@ genScalarDecls = do
     \(name, typ) -> do
       let varPrimTyp = wgslPrimType typ
       let fieldPrimTyp = case typ of
-                           Bool -> WGSL.Int32 -- bool is not host-shareable
-                           _ -> varPrimTyp
+            Bool -> WGSL.Int32 -- bool is not host-shareable
+            _ -> varPrimTyp
       let wrapCopy e = case typ of
-                         Bool -> WGSL.CallExp "bool" [e]
-                         _ -> e
+            Bool -> WGSL.CallExp "bool" [e]
+            _ -> e
 
       addScalar fieldPrimTyp
       addInitStmt $ WGSL.DeclareVar name (WGSL.Prim varPrimTyp)

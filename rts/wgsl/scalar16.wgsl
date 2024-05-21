@@ -138,6 +138,14 @@ fn trunc_i64_i16(a: i64) -> i16 {
   return trunc_i32_i16(a.x);
 }
 
+fn u16_to_f16(a: i16) -> f16 {
+  return f16(bitcast<u32>(a));
+}
+
+fn u16_to_f32(a: i16) -> f32 {
+  return f32(bitcast<u32>(a));
+}
+
 fn bool_to_i16(a: bool) -> i16 {
   if a { return 1; } else { return 0; }
 }

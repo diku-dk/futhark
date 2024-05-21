@@ -212,8 +212,36 @@ fn i64_to_bool(a: i64) -> bool {
   if eq_i64(a, zero_i64) { return false; } else { return true; }
 }
 
+// TODO: This is not accurate to a real i64->f16 conversion, but hopefully good
+// enough for now.
+fn i64_to_f16(a: i64) -> f16 {
+  if (a.y == -1) {
+    if (a.x > 0) { return -f16(a.x); }
+    else { return f16(a.x); }
+  }
+  // Just ignoring the high bits. They will be out of range of f16 anyway, and
+  // since WGSL does not even spec that infinity works as expected, I'm not sure
+  // what else to do here.
+  return f16(a.x);
+}
+
+// TODO: This is not accurate to a real i64->f32 conversion, but hopefully good
+// enough for now.
 fn i64_to_f32(a: i64) -> f32 {
-  return f32(a.x) + f32(a.y) * 2e32f;
+  if (a.y == -1) {
+    if (a.x > 0) { return -f32(a.x); }
+    else { return f32(a.x); }
+  }
+  return f32(bitcast<u32>(a.x)) + f32(a.y) * 2e32f;
+}
+
+fn u64_to_f16(a: i64) -> f16 {
+  // See i64_to_f16 regarding the high bits.
+  return f16(bitcast<u32>(a.x));
+}
+
+fn u64_to_f32(a: i64) -> f32 {
+  return f32(bitcast<u32>(a.x)) + f32(bitcast<u32>(a.y)) * 2e32f;
 }
 
 // End of scalar64.wgsl
