@@ -58,10 +58,13 @@ import Language.Futhark hiding (Shape, matchDims)
 import Language.Futhark qualified as F
 import Language.Futhark.Interpreter.Values hiding (Value)
 import Language.Futhark.Interpreter.Values qualified
+import Language.Futhark.Interpreter.AD qualified as AD
 import Language.Futhark.Primitive (floatValue, intValue)
 import Language.Futhark.Primitive qualified as P
 import Language.Futhark.Semantic qualified as T
 import Prelude hiding (break, mod)
+
+import Debug.Trace qualified as DBG
 
 data StackFrame = StackFrame
   { stackFrameLoc :: Loc,
@@ -1288,7 +1291,7 @@ initialCtx =
         (getF, putF, P.doBinOp (f Float32)),
         (getF, putF, P.doBinOp (f Float64))
       ]
-    arithOp f g = Just $ bopDef $ intOp f ++ floatOp g
+    arithOp f g = Just $ bopDef (AD.OpBin $ g Float64) $ intOp f ++ floatOp g
 
     flipCmps = map (\(f, g, h) -> (f, g, flip h))
     sintCmp f =
@@ -1397,12 +1400,34 @@ initialCtx =
                       pure . ValueFun $ \g ->
                         pure . ValueFun $ \h -> f x y z a b c d e g h
 
-    bopDef fs = fun2 $ \x y ->
+    bopDef op fs = fun2 $ \x y ->
       case (x, y) of
         (ValuePrim x', ValuePrim y')
           | Just z <- msum $ map (`bopDef'` (x', y')) fs -> do
               breakOnNaN [x', y'] z
               pure $ ValuePrim z
+
+        (ValueSeed x', ValueSeed y') -> do
+          -- Calculate the derivative
+          case AD.doOp op [AD.Seed x', AD.Seed y'] of
+            Just (AD.Seed v'') -> pure $ ValueSeed v''
+            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj))"
+        
+        (ValuePrim x', ValueSeed y') -> do
+          -- Calculate the derivative
+          case AD.doOp op [AD.Primal $ fromJust $ getV x', AD.Seed y'] of
+            Just (AD.Seed v'') -> pure $ ValueSeed v''
+            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj))"
+
+        (ValueSeed x', ValuePrim y') -> do
+          -- Calculate the derivative
+          case AD.doOp op [AD.Seed x', AD.Primal $ fromJust $ getV y'] of
+            Just (AD.Seed v'') -> pure $ ValueSeed v''
+            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj))"
+        
         _ ->
           bad noLoc mempty . docText $
             "Cannot apply operator to arguments"
@@ -1465,32 +1490,32 @@ initialCtx =
     def "**" = arithOp P.Pow P.FPow
     def "/" =
       Just $
-        bopDef $
+        bopDef (AD.OpBin $ P.FDiv Float64) $
           sintOp (`P.SDiv` P.Unsafe)
             ++ uintOp (`P.UDiv` P.Unsafe)
             ++ floatOp P.FDiv
     def "%" =
       Just $
-        bopDef $
+        bopDef (AD.OpBin $ P.FMod Float64) $
           sintOp (`P.SMod` P.Unsafe)
             ++ uintOp (`P.UMod` P.Unsafe)
             ++ floatOp P.FMod
     def "//" =
       Just $
-        bopDef $
+        bopDef (AD.OpBin $ P.UDiv Int64 P.Unsafe) $
           sintOp (`P.SQuot` P.Unsafe)
             ++ uintOp (`P.UDiv` P.Unsafe)
     def "%%" =
       Just $
-        bopDef $
+        bopDef (AD.OpBin $ P.UMod Int64 P.Unsafe) $
           sintOp (`P.SRem` P.Unsafe)
             ++ uintOp (`P.UMod` P.Unsafe)
-    def "^" = Just $ bopDef $ intOp P.Xor
-    def "&" = Just $ bopDef $ intOp P.And
-    def "|" = Just $ bopDef $ intOp P.Or
-    def ">>" = Just $ bopDef $ sintOp P.AShr ++ uintOp P.LShr
-    def "<<" = Just $ bopDef $ intOp P.Shl
-    def ">>>" = Just $ bopDef $ sintOp P.LShr ++ uintOp P.LShr
+    def "^" = Just $ bopDef (AD.OpBin $ P.Xor Int64) $ intOp P.Xor
+    def "&" = Just $ bopDef (AD.OpBin $ P.And Int64) $ intOp P.And
+    def "|" = Just $ bopDef (AD.OpBin $ P.Or Int64) $ intOp P.Or
+    def ">>" = Just $ bopDef (AD.OpBin $ P.LShr Int64) $ sintOp P.AShr ++ uintOp P.LShr
+    def "<<" = Just $ bopDef (AD.OpBin $ P.Shl Int64) $ intOp P.Shl
+    def ">>>" = Just $ bopDef (AD.OpBin $ P.LShr Int64) $ sintOp P.LShr ++ uintOp P.LShr
     def "==" = Just $
       fun2 $
         \xs ys -> pure $ ValuePrim $ BoolValue $ xs == ys
@@ -1507,14 +1532,14 @@ initialCtx =
         pure $ ValuePrim $ BoolValue $ asBool x || asBool y
     def "<" =
       Just $
-        bopDef $
+        bopDef (AD.OpCmp $ P.CmpUlt Int64) $
           sintCmp P.CmpSlt
             ++ uintCmp P.CmpUlt
             ++ floatCmp P.FCmpLt
             ++ boolCmp P.CmpLlt
     def ">" =
       Just $
-        bopDef $
+        bopDef (AD.OpCmp $ P.CmpUlt Int64) $
           flipCmps $
             sintCmp P.CmpSlt
               ++ uintCmp P.CmpUlt
@@ -1522,14 +1547,14 @@ initialCtx =
               ++ boolCmp P.CmpLlt
     def "<=" =
       Just $
-        bopDef $
+        bopDef (AD.OpCmp $ P.CmpUle Int64) $
           sintCmp P.CmpSle
             ++ uintCmp P.CmpUle
             ++ floatCmp P.FCmpLe
             ++ boolCmp P.CmpLle
     def ">=" =
       Just $
-        bopDef $
+        bopDef (AD.OpCmp $ P.CmpUle Int64) $
           flipCmps $
             sintCmp P.CmpSle
               ++ uintCmp P.CmpUle
@@ -1921,11 +1946,84 @@ initialCtx =
           else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "manifest" = Just $ fun1 pure
     def "vjp2" = Just $
-      fun3 $
-        \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
+      fun3 $ \f v s -> do
+        -- Increment the depth
+        depth <- do
+          env <- getExts
+          let depth = case M.lookup (VName (nameFromString "$AD_DEPTH") (-1)) env of
+                Just (ValuePrim (UnsignedValue (Int32Value d))) -> d
+                Nothing -> 1
+                _ -> error "Invalid AD depth"
+          putExtSize (VName (nameFromString "$AD_DEPTH") (-1)) $ ValuePrim $ UnsignedValue $ Int32Value $ depth + 1
+          pure $ fromIntegral depth
+
+        -- Impregnate the values
+        let addSeeds i v = case v of
+              ValuePrim v' -> (i + 1, ValueSeed $ AD.VjpSeed depth $ AD.TapeId i $ AD.Primal $ fromJust $ getV v')
+              ValueSeed v' -> (i + 1, ValueSeed $ AD.VjpSeed depth $ AD.TapeId i $ AD.Seed v')
+              ValueRecord m -> second ValueRecord $ M.mapAccum addSeeds i m
+              _ -> error "Not implemented (gs3g3ss)" -- TODO: Arrays?
+        let v' = snd $ addSeeds 0 v
+
+        -- Run the function
+        out <- apply noLoc mempty f v'
+
+        -- Derive the seeds
+        let deriveSeeds v = case v of
+              ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
+              ValueSeed s@(AD.VjpSeed d tp) ->
+                if d == depth then
+                  case M.lookup 0 (fromJust $ AD.deriveVjp tp) of
+                    Just (AD.Seed   v') -> ValueSeed v'
+                    Just (AD.Primal v') -> ValuePrim $ putV v'
+                    _ -> ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
+                else ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
+              ValueRecord m -> ValueRecord $ M.map deriveSeeds m
+              _ -> error "Not implemented (d19h782)" -- TODO: Arrays?
+
+        -- Make sure to return a tuple
+        let k = deriveSeeds out
+        pure $ toTuple [k, k] -- TODO: ???
+
     def "jvp2" = Just $
-      fun3 $
-        \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
+      fun3 $ \f v s -> do
+        -- Increment the depth
+        depth <- do
+          env <- getExts
+          let depth = case M.lookup (VName (nameFromString "$AD_DEPTH") (-1)) env of
+                Just (ValuePrim (UnsignedValue (Int32Value d))) -> d
+                Nothing -> 1
+                _ -> error "Invalid AD depth"
+          putExtSize (VName (nameFromString "$AD_DEPTH") (-1)) $ ValuePrim $ UnsignedValue $ Int32Value $ depth + 1
+          pure $ fromIntegral depth
+
+        -- Impregnate the values
+        let addSeeds i v = case v of
+              ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth (fromJust $ getV v') $ M.fromList [(i, AD.Primal $ AD.valueAsType (fromJust $ getV v') 1)])
+              ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.value $ AD.primal se) $ M.fromList [(i, AD.Primal $ AD.valueAsType (AD.value $ AD.primal se) 1)])
+              ValueRecord m -> second ValueRecord $ M.mapAccum addSeeds i m
+              _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
+        let v' = snd $ addSeeds 0 v
+
+        -- Run the function
+        out <- apply noLoc mempty f v'
+
+        -- Derive the seeds
+        let deriveSeeds v = case v of
+              ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
+              ValueSeed s@(AD.JvpSeed d _ m) ->
+                if d == depth then
+                  case M.lookup 0 m of
+                    Just (AD.Seed   v') -> ValueSeed v'
+                    Just (AD.Primal v') -> ValuePrim $ putV v'
+                    _ -> ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
+                else ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
+              ValueRecord m -> ValueRecord $ M.map deriveSeeds m
+              _ -> error "Not implemented (d19hasd782)" -- TODO: Arrays?
+
+        -- Make sure to return a tuple
+        let k = deriveSeeds out
+        pure $ toTuple [k, k] -- TODO: ???
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s

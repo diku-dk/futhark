@@ -41,6 +41,8 @@ import Language.Futhark hiding (Shape, matchDims)
 import Language.Futhark.Primitive qualified as P
 import Prelude hiding (break, mod)
 
+import Language.Futhark.Interpreter.AD qualified as AD
+
 prettyRecord :: (a -> Doc ann) -> M.Map Name a -> Doc ann
 prettyRecord p m
   | Just vs <- areTupleFields m =
@@ -106,6 +108,8 @@ data Value m
     ValueSum ValueShape Name [Value m]
   | -- The shape, the update function, and the array.
     ValueAcc ValueShape (Value m -> Value m -> m (Value m)) !(Array Int (Value m))
+  | -- An AD seed
+    ValueSeed AD.ADSeed
 
 instance Show (Value m) where
   show (ValuePrim v) = "ValuePrim " <> show v <> ""
@@ -114,6 +118,7 @@ instance Show (Value m) where
   show (ValueSum shape c vs) = unwords ["ValueSum", "(" <> show shape <> ")", show c, "(" <> show vs <> ")"]
   show ValueFun {} = "ValueFun _"
   show ValueAcc {} = "ValueAcc _"
+  show (ValueSeed s) = "ValueSeed " <> show s
 
 instance Eq (Value m) where
   ValuePrim (SignedValue x) == ValuePrim (SignedValue y) =
@@ -145,6 +150,7 @@ prettyValueWith pprPrim = pprPrec 0
     pprPrec _ ValueAcc {} = "#<acc>"
     pprPrec p (ValueSum _ n vs) =
       parensIf (p > (0 :: Int)) $ "#" <> sep (pretty n : map (pprPrec 1) vs)
+    pprPrec _ (ValueSeed s) = pretty $ show s -- TODO
     pprElem v@ValueArray {} = pprPrec 0 v
     pprElem v = group $ pprPrec 0 v
 
