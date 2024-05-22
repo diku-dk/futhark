@@ -1411,19 +1411,19 @@ initialCtx =
           case AD.doOp op [AD.Seed x', AD.Seed y'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj))"
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj1))"
         
         (ValuePrim x', ValueSeed y') -> do
           case AD.doOp op [AD.Primal $ fromJust $ getV x', AD.Seed y'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj))"
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj2))"
 
         (ValueSeed x', ValuePrim y') -> do
           case AD.doOp op [AD.Seed x', AD.Primal $ fromJust $ getV y'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj))"
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj3))"
         
         _ ->
           bad noLoc mempty . docText $
@@ -1449,7 +1449,7 @@ initialCtx =
           case AD.doOp op [AD.Seed x'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj))"
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj4))"
 
         _ ->
           bad noLoc mempty . docText $
@@ -1461,7 +1461,7 @@ initialCtx =
           x' <- valf x
           retf =<< op x'
 
-    tbopDef f = fun1 $ \v ->
+    tbopDef op f = fun1 $ \v ->
       case fromTuple v of
         Just [ValuePrim x, ValuePrim y]
           | Just x' <- getV x,
@@ -1469,6 +1469,25 @@ initialCtx =
             Just z <- putV <$> f x' y' -> do
               breakOnNaN [x, y] z
               pure $ ValuePrim z
+
+        Just [ValueSeed x', ValueSeed y'] -> do
+          case AD.doOp op [AD.Seed x', AD.Seed y'] of
+            Just (AD.Seed v'') -> pure $ ValueSeed v''
+            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj5))"
+        
+        Just [ValuePrim x', ValueSeed y'] -> do
+          case AD.doOp op [AD.Primal $ fromJust $ getV x', AD.Seed y'] of
+            Just (AD.Seed v'') -> pure $ ValueSeed v''
+            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj6))"
+
+        Just [ValueSeed x', ValuePrim y'] -> do
+          case AD.doOp op [AD.Seed x', AD.Primal $ fromJust $ getV y'] of
+            Just (AD.Seed v'') -> pure $ ValueSeed v''
+            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj7))"
+          
         _ ->
           bad noLoc mempty . docText $
             "Cannot apply operator to argument"
@@ -1566,9 +1585,9 @@ initialCtx =
               ++ boolCmp P.CmpLle
     def s
       | Just bop <- find ((s ==) . prettyString) P.allBinOps =
-          Just $ tbopDef $ P.doBinOp bop
+          Just $ tbopDef (AD.OpBin bop) $ P.doBinOp bop
       | Just unop <- find ((s ==) . prettyString) P.allCmpOps =
-          Just $ tbopDef $ \x y -> P.BoolValue <$> P.doCmpOp unop x y
+          Just $ tbopDef (AD.OpCmp unop) $ \x y -> P.BoolValue <$> P.doCmpOp unop x y
       | Just cop <- find ((s ==) . prettyString) P.allConvOps =
           Just $ unopDef (AD.OpConv cop) [(getV, Just . putV, P.doConvOp cop)]
       | Just unop <- find ((s ==) . prettyString) P.allUnOps =
@@ -1977,9 +1996,9 @@ initialCtx =
               ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
               ValueSeed s@(AD.VjpSeed d tp) ->
                 if d == depth then
-                  case M.lookup 0 (fromJust $ AD.deriveVjp tp) of
-                    Just (AD.Seed   v') -> ValueSeed v'
-                    Just (AD.Primal v') -> ValuePrim $ putV v'
+                  case M.lookup 0 <$> AD.deriveVjp tp of
+                    Just (Just (AD.Seed   v')) -> ValueSeed v'
+                    Just (Just (AD.Primal v')) -> ValuePrim $ putV v'
                     _ -> ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
                 else ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
               ValueRecord m -> ValueRecord $ M.map deriveSeeds m

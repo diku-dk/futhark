@@ -59,10 +59,11 @@ data Op
   | OpConv ConvOp
 
 instance Show Op where
-  show (OpBin op) = show op
-  show (OpCmp op) = show op
-  show (OpUn  op) = show op
-  show (OpFn  fn) = show fn
+  show (OpBin  op) = show op
+  show (OpCmp  op) = show op
+  show (OpUn   op) = show op
+  show (OpFn   fn) = show fn
+  show (OpConv op) = show op
 
 value :: ADValue -> PrimValue
 value (Primal v) = v
@@ -94,14 +95,22 @@ doOp :: Op -> [ADValue] -> Maybe ADValue
 doOp op p = do
   let p' = map value p
   v <- case (op, p') of
-    (OpBin op', [x, y]) -> doBinOp op' x y
-    (OpCmp op', [x, y]) -> BoolValue <$> doCmpOp op' x y
-    (OpUn  op', [x])    -> doUnOp op' x
-    (OpFn  fn,  _)      -> do
+    (OpBin  op', [x, y]) -> doBinOp op' x y
+    (OpCmp  op', [x, y]) -> BoolValue <$> doCmpOp op' x y
+    (OpUn   op', [x])    -> doUnOp op' x
+    (OpConv op', [x])    -> doConvOp op' x
+    (OpFn   fn,  _)      -> do
       (_, _, f) <- M.lookup fn primFuns
       f p'
     _ -> error "Not implemented"
-  handleOp op p v
+
+  case op of
+    (OpBin _)  -> handleOp op p v
+    (OpUn _)   -> handleOp op p v
+    (OpFn _)   -> handleOp op p v
+    --(OpConv _) -> TODO
+    _ -> Just $ Primal v
+    
 
 deriveOp :: Op -> [PrimExp VName] -> Maybe [PrimExp VName]
 deriveOp (OpBin op) [x, y] = Just $ do
@@ -147,13 +156,19 @@ runPrimExp (BinOpExp op x y) m = do
   x' <- runPrimExp x m
   y' <- runPrimExp y m
   doOp (OpBin op) [x', y']
+runPrimExp (CmpOpExp op x y) m = do
+  x' <- runPrimExp x m
+  y' <- runPrimExp y m
+  doOp (OpCmp op) [x', y']
 runPrimExp (UnOpExp op x) m = do
   x' <- runPrimExp x m
   doOp (OpUn op) [x']
+runPrimExp (ConvOpExp op x) m = do
+  x' <- runPrimExp x m
+  doOp (OpConv op) [x']
 runPrimExp (FunExp fn p _) m = do
   p' <- mapM (`runPrimExp` m) p
   doOp (OpFn fn) p'
-runPrimExp _ _ = error "Unimplemented (839uirjowk)"
 
 
 -- VJP
