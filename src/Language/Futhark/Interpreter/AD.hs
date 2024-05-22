@@ -91,25 +91,58 @@ valueAsType v c = case v of
   FloatValue (Float64Value _) -> FloatValue $ Float64Value $ fromRational c
   _ -> error $ "No valid prim value for " ++ show v
 
+opTypeMatch :: Op -> [PrimValue] -> Bool
+opTypeMatch (OpBin  op) p = all (\x ->      binOpType  op  == primValueType x) p
+opTypeMatch (OpCmp  op) p = all (\x ->      cmpOpType  op  == primValueType x) p
+opTypeMatch (OpUn   op) p = all (\x ->      unOpType   op  == primValueType x) p
+opTypeMatch (OpConv op) p = all (\x -> fst (convOpType op) == primValueType x) p
+opTypeMatch (OpFn   fn) p = case M.lookup fn primFuns of
+                          Just (t, _, _) -> and $ zipWith (\x y -> x == primValueType y) t p
+                          Nothing -> False
+
+opReturnType :: Op -> PrimType
+opReturnType (OpBin  op) = binOpType  op
+opReturnType (OpCmp  op) = cmpOpType  op
+opReturnType (OpUn   op) = unOpType   op
+opReturnType (OpConv op) = snd $ convOpType op
+opReturnType (OpFn   fn) = fromJust $ do
+                            (_, t, _) <- M.lookup fn primFuns
+                            Just t
+
+addFor :: Op -> Op
+addFor op = OpBin $ fromJust $ case opReturnType op of
+  IntType t -> Just $ Add t OverflowUndef
+  FloatType t -> Just $ FAdd t
+  _ -> Nothing
+
+multiplyFor :: Op -> Op
+multiplyFor op = OpBin $ fromJust $ case opReturnType op of
+  IntType t -> Just $ Mul t OverflowUndef
+  FloatType t -> Just $ FMul t
+  _ -> Nothing
+
 doOp :: Op -> [ADValue] -> Maybe ADValue
 doOp op p = do
   let p' = map value p
-  v <- case (op, p') of
-    (OpBin  op', [x, y]) -> doBinOp op' x y
-    (OpCmp  op', [x, y]) -> BoolValue <$> doCmpOp op' x y
-    (OpUn   op', [x])    -> doUnOp op' x
-    (OpConv op', [x])    -> doConvOp op' x
-    (OpFn   fn,  _)      -> do
-      (_, _, f) <- M.lookup fn primFuns
-      f p'
-    _ -> error "Not implemented"
+  if opTypeMatch op p' then do
+    v <- case (op, p') of
+      (OpBin  op', [x, y]) -> doBinOp op' x y
+      (OpCmp  op', [x, y]) -> BoolValue <$> doCmpOp op' x y
+      (OpUn   op', [x])    -> doUnOp op' x
+      (OpConv op', [x])    -> doConvOp op' x
+      (OpFn   fn,  _)      -> do
+        (_, _, f) <- M.lookup fn primFuns
+        f p'
+      _ -> error "Not implemented"
 
-  case op of
-    (OpBin _)  -> handleOp op p v
-    (OpCmp _)  -> Just $ Primal v
-    (OpUn _)   -> handleOp op p v
-    (OpFn _)   -> handleOp op p v
-    (OpConv _) -> Nothing
+    case op of
+      (OpBin _)  -> handleOp op p v
+      (OpCmp _)  -> Just $ Primal v
+      (OpUn _)   -> handleOp op p v
+      (OpFn _)   -> handleOp op p v
+      (OpConv _) -> Nothing
+
+  else Nothing
 
 deriveOp :: Op -> [PrimExp VName] -> Maybe [PrimExp VName]
 deriveOp (OpBin op) [x, y] = Just $ do
@@ -146,7 +179,7 @@ handleOp op p v = do
                      Left _  -> False) d of
       Just (Right (VjpSeed {})) -> Seed . VjpSeed maxDepth <$> vjpHandleFn op d v'
       Just (Right (JvpSeed _ h _ _)) -> jvpHandleFn op d maxDepth h v'
-      _ -> Just $ Primal v -- TODO: This never happens, so maybe remove it in some way?
+      _ -> Just $ Primal v -- ?TODO: This never happens, so maybe remove it in some way?
 
 runPrimExp :: PrimExp VName -> M.Map VName ADValue -> Maybe ADValue
 runPrimExp (LeafExp n _) m = M.lookup n m
@@ -194,7 +227,7 @@ vjpHandleFn op p v = do
   let p' = map (\case
         Right (VjpSeed _ t) -> t
         Left v' -> TapePrim v'
-        _ -> error "TODO: This is not possible (28ruajio)") p
+        _ -> error "And unknown error occured") p -- ?TODO: This is impossible
   Just $ TapeOp op p' v
 
 tapeValue :: Tape -> ADValue
@@ -216,12 +249,12 @@ deriveTape (TapeOp op p _) v = do
 
   -- Derive parameters and combine
   pd <- zipWithM deriveTape p v'
-  combineDerivatives pd v
+  combineDerivatives pd v op
 
-combineDerivatives :: [M.Map Int ADValue] -> ADValue -> Maybe (M.Map Int ADValue)
-combineDerivatives d v = do
-  let add x y = fromJust $ doOp (OpBin $ FAdd Float64) [x, y]
-  let mul x y = fromJust $ doOp (OpBin $ FMul Float64) [x, y] -- TODO: Remove fromJust?
+combineDerivatives :: [M.Map Int ADValue] -> ADValue -> Op -> Maybe (M.Map Int ADValue)
+combineDerivatives d v op = do
+  let add x y = fromJust $ doOp (addFor      op) [x, y]
+  let mul x y = fromJust $ doOp (multiplyFor op) [x, y]
   Just $ foldl (M.unionWith add) M.empty $ map (M.map $ mul v) d
 
 
@@ -234,7 +267,7 @@ jvpHandleFn op p d h av = if h <= 0 then Just av
     let p' = map (\case
           Right (JvpSeed _ h v' m) -> (h, v', m)
           Left  v' -> (0, v', M.empty)
-          _ -> error "TODO: This is impossible (98ruwik)") p
+          _ -> error "And unknown error occured") p -- ?TODO: This is impossible
 
     -- Create a unique name for each parameter
     let n = map (VName "d") [1..length p]
@@ -243,18 +276,18 @@ jvpHandleFn op p d h av = if h <= 0 then Just av
     -- Derive the function using the parameters
     op' <- deriveOp op $ map (`LeafExp` FloatType Float64) n -- TODO: Correct type
     v' <- mapM (`runPrimExp` m) op'
-    
+
     let didx = S.toList $ foldl (\x (_, _, m') -> S.union x (S.fromList $ M.keys m')) S.empty p'
     case mapM (\idx -> do
           -- Get derivatives
-          let mul a b = doOp (OpBin $ FMul Float64) [a, b] -- TODO: Correct type
+          let mul a b = doOp (multiplyFor op) [a, b]
           vs <- zipWithM (\d' (_, t, m') ->
                 case M.lookup idx m' of
                   Just v'' -> mul d' v''
                   _ -> Just $ Primal $ valueAsType (value t) 0) v' p'
 
           -- Sum them up
-          let add a b = doOp (OpBin $ FAdd Float64) [a, b] -- TODO: Correct type
+          let add a b = doOp (addFor op) [a, b]
           Just $ do
             k <- foldlM add (Primal $ FloatValue $ Float64Value 0 {- TODO -}) vs
             pure (idx, k)) didx of

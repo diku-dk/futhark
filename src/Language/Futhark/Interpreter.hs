@@ -1274,44 +1274,44 @@ initialCtx =
     types = M.mapMaybeWithKey (const . tdef . baseString) intrinsics
 
     sintOp f =
-      [ (getS, putS, P.doBinOp (f Int8)),
-        (getS, putS, P.doBinOp (f Int16)),
-        (getS, putS, P.doBinOp (f Int32)),
-        (getS, putS, P.doBinOp (f Int64))
+      [ (getS, putS, P.doBinOp (f Int8), adBinOp $ AD.OpBin (f Int8)),
+        (getS, putS, P.doBinOp (f Int16), adBinOp $ AD.OpBin (f Int16)),
+        (getS, putS, P.doBinOp (f Int32), adBinOp $ AD.OpBin (f Int32)),
+        (getS, putS, P.doBinOp (f Int64), adBinOp $ AD.OpBin (f Int64))
       ]
     uintOp f =
-      [ (getU, putU, P.doBinOp (f Int8)),
-        (getU, putU, P.doBinOp (f Int16)),
-        (getU, putU, P.doBinOp (f Int32)),
-        (getU, putU, P.doBinOp (f Int64))
+      [ (getU, putU, P.doBinOp (f Int8), adBinOp $ AD.OpBin (f Int8)),
+        (getU, putU, P.doBinOp (f Int16), adBinOp $ AD.OpBin (f Int16)),
+        (getU, putU, P.doBinOp (f Int32), adBinOp $ AD.OpBin (f Int32)),
+        (getU, putU, P.doBinOp (f Int64), adBinOp $ AD.OpBin (f Int64))
       ]
     intOp f = sintOp f ++ uintOp f
     floatOp f =
-      [ (getF, putF, P.doBinOp (f Float16)),
-        (getF, putF, P.doBinOp (f Float32)),
-        (getF, putF, P.doBinOp (f Float64))
+      [ (getF, putF, P.doBinOp (f Float16), adBinOp $ AD.OpBin (f Float16)),
+        (getF, putF, P.doBinOp (f Float32), adBinOp $ AD.OpBin (f Float32)),
+        (getF, putF, P.doBinOp (f Float64), adBinOp $ AD.OpBin (f Float64))
       ]
-    arithOp f g = Just $ bopDef (AD.OpBin $ g Float64) $ intOp f ++ floatOp g
+    arithOp f g = Just $ bopDef $ intOp f ++ floatOp g
 
-    flipCmps = map (\(f, g, h) -> (f, g, flip h))
+    flipCmps = map (\(f, g, h, o) -> (f, g, flip h, flip o))
     sintCmp f =
-      [ (getS, Just . BoolValue, P.doCmpOp (f Int8)),
-        (getS, Just . BoolValue, P.doCmpOp (f Int16)),
-        (getS, Just . BoolValue, P.doCmpOp (f Int32)),
-        (getS, Just . BoolValue, P.doCmpOp (f Int64))
+      [ (getS, Just . BoolValue, P.doCmpOp (f Int8), adBinOp $ AD.OpCmp (f Int8)),
+        (getS, Just . BoolValue, P.doCmpOp (f Int16), adBinOp $ AD.OpCmp (f Int16)),
+        (getS, Just . BoolValue, P.doCmpOp (f Int32), adBinOp $ AD.OpCmp (f Int32)),
+        (getS, Just . BoolValue, P.doCmpOp (f Int64), adBinOp $ AD.OpCmp (f Int64))
       ]
     uintCmp f =
-      [ (getU, Just . BoolValue, P.doCmpOp (f Int8)),
-        (getU, Just . BoolValue, P.doCmpOp (f Int16)),
-        (getU, Just . BoolValue, P.doCmpOp (f Int32)),
-        (getU, Just . BoolValue, P.doCmpOp (f Int64))
+      [ (getU, Just . BoolValue, P.doCmpOp (f Int8), adBinOp $ AD.OpCmp (f Int8)),
+        (getU, Just . BoolValue, P.doCmpOp (f Int16), adBinOp $ AD.OpCmp (f Int16)),
+        (getU, Just . BoolValue, P.doCmpOp (f Int32), adBinOp $ AD.OpCmp (f Int32)),
+        (getU, Just . BoolValue, P.doCmpOp (f Int64), adBinOp $ AD.OpCmp (f Int64))
       ]
     floatCmp f =
-      [ (getF, Just . BoolValue, P.doCmpOp (f Float16)),
-        (getF, Just . BoolValue, P.doCmpOp (f Float32)),
-        (getF, Just . BoolValue, P.doCmpOp (f Float64))
+      [ (getF, Just . BoolValue, P.doCmpOp (f Float16), adBinOp $ AD.OpCmp (f Float16)),
+        (getF, Just . BoolValue, P.doCmpOp (f Float32), adBinOp $ AD.OpCmp (f Float32)),
+        (getF, Just . BoolValue, P.doCmpOp (f Float64), adBinOp $ AD.OpCmp (f Float64))
       ]
-    boolCmp f = [(getB, Just . BoolValue, P.doCmpOp f)]
+    boolCmp f = [(getB, Just . BoolValue, P.doCmpOp f, adBinOp $ AD.OpCmp f)]
 
     getV (SignedValue x) = Just $ P.IntValue x
     getV (UnsignedValue x) = Just $ P.IntValue x
@@ -1341,6 +1341,18 @@ initialCtx =
     getB _ = Nothing
     putB (P.BoolValue x) = Just $ BoolValue x
     putB _ = Nothing
+
+    adToValue v = case v of
+          AD.Seed s -> ValueSeed s
+          AD.Primal v -> ValuePrim $ putV v
+    adToPrim v = putV $ AD.value v
+    valueToAD v = case v of
+          ValuePrim v' -> primToAD v'
+          ValueSeed x' -> AD.Seed x'
+          _ -> error "Invalid AD value"
+    primToAD v = AD.Primal $ fromJust $ getV v
+    adBinOp op x y = AD.doOp op [x, y]
+    adUnOp op x = AD.doOp op [x]
 
     fun1 f =
       TermValue Nothing $ ValueFun $ \x -> f x
@@ -1400,30 +1412,25 @@ initialCtx =
                       pure . ValueFun $ \g ->
                         pure . ValueFun $ \h -> f x y z a b c d e g h
 
-    bopDef op fs = fun2 $ \x y ->
+    bopDef fs = fun2 $ \x y ->
       case (x, y) of
         (ValuePrim x', ValuePrim y')
           | Just z <- msum $ map (`bopDef'` (x', y')) fs -> do
               breakOnNaN [x', y'] z
               pure $ ValuePrim z
 
-        (ValueSeed x', ValueSeed y') -> do
-          case AD.doOp op [AD.Seed x', AD.Seed y'] of
-            Just (AD.Seed v'') -> pure $ ValueSeed v''
-            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj1))"
-        
-        (ValuePrim x', ValueSeed y') -> do
-          case AD.doOp op [AD.Primal $ fromJust $ getV x', AD.Seed y'] of
-            Just (AD.Seed v'') -> pure $ ValueSeed v''
-            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj2))"
-
-        (ValueSeed x', ValuePrim y') -> do
-          case AD.doOp op [AD.Seed x', AD.Primal $ fromJust $ getV y'] of
-            Just (AD.Seed v'') -> pure $ ValueSeed v''
-            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj3))"
+        (ValueSeed x', ValueSeed y')
+          | Just z <- msum $ map (`bopDefDiff'` (AD.Seed x', AD.Seed y')) fs -> do
+              breakOnNaN [adToPrim $ AD.primal x', adToPrim $ AD.primal y'] (adToPrim z)
+              pure $ adToValue z
+        (ValuePrim x', ValueSeed y')
+          | Just z <- msum $ map (`bopDefDiff'` (primToAD x', AD.Seed y')) fs -> do
+              breakOnNaN [x', adToPrim $ AD.primal y'] (adToPrim z)
+              pure $ adToValue z
+        (ValueSeed x', ValuePrim y')
+          | Just z <- msum $ map (`bopDefDiff'` (AD.Seed x', primToAD y')) fs -> do
+              breakOnNaN [adToPrim $ AD.primal x', y'] (adToPrim z)
+              pure $ adToValue z
         
         _ ->
           bad noLoc mempty . docText $
@@ -1433,23 +1440,23 @@ initialCtx =
               <+> dquotes (prettyValue y)
               <> "."
       where
-        bopDef' (valf, retf, op) (x, y) = do
+        bopDef' (valf, retf, op, _) (x, y) = do
           x' <- valf x
           y' <- valf y
           retf =<< op x' y'
+        bopDefDiff' (_, _, _, dop) (x, y) = dop x y
 
-    unopDef op fs = fun1 $ \x ->
+    unopDef fs = fun1 $ \x ->
       case x of
         (ValuePrim x')
           | Just r <- msum $ map (`unopDef'` x') fs -> do
               breakOnNaN [x'] r
               pure $ ValuePrim r
 
-        (ValueSeed x') -> do
-          case AD.doOp op [AD.Seed x'] of
-            Just (AD.Seed v'') -> pure $ ValueSeed v''
-            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj4))"
+        (ValueSeed x')
+          | Just r <- msum $ map (`unopDefDiff'` AD.Seed x') fs -> do
+              breakOnNaN [adToPrim $ AD.primal x'] (adToPrim r)
+              pure $ adToValue r
 
         _ ->
           bad noLoc mempty . docText $
@@ -1457,9 +1464,10 @@ initialCtx =
               <+> dquotes (prettyValue x)
               <> "."
       where
-        unopDef' (valf, retf, op) x = do
+        unopDef' (valf, retf, op, _) x = do
           x' <- valf x
           retf =<< op x'
+        unopDefDiff' (_, _, _, dop) = dop
 
     tbopDef op f = fun1 $ \v ->
       case fromTuple v of
@@ -1474,19 +1482,19 @@ initialCtx =
           case AD.doOp op [AD.Seed x', AD.Seed y'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj5))"
+            Nothing -> error $ "No derivative found for " ++ show op
         
         Just [ValuePrim x', ValueSeed y'] -> do
           case AD.doOp op [AD.Primal $ fromJust $ getV x', AD.Seed y'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj6))"
+            Nothing -> error $ "No derivative found for " ++ show op
 
         Just [ValueSeed x', ValuePrim y'] -> do
           case AD.doOp op [AD.Seed x', AD.Primal $ fromJust $ getV y'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
-            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj7))"
+            Nothing -> error $ "No derivative found for " ++ show op
           
         _ ->
           bad noLoc mempty . docText $
@@ -1496,16 +1504,16 @@ initialCtx =
 
     def "!" =
       Just $
-        unopDef (AD.OpUn $ P.Complement Int64)
-          [ (getS, putS, P.doUnOp $ P.Complement Int8),
-            (getS, putS, P.doUnOp $ P.Complement Int16),
-            (getS, putS, P.doUnOp $ P.Complement Int32),
-            (getS, putS, P.doUnOp $ P.Complement Int64),
-            (getU, putU, P.doUnOp $ P.Complement Int8),
-            (getU, putU, P.doUnOp $ P.Complement Int16),
-            (getU, putU, P.doUnOp $ P.Complement Int32),
-            (getU, putU, P.doUnOp $ P.Complement Int64),
-            (getB, putB, P.doUnOp P.Not)
+        unopDef
+          [ (getS, putS, P.doUnOp $ P.Complement Int8, adUnOp $ AD.OpUn $ P.Complement Int8),
+            (getS, putS, P.doUnOp $ P.Complement Int16, adUnOp $ AD.OpUn $ P.Complement Int16),
+            (getS, putS, P.doUnOp $ P.Complement Int32, adUnOp $ AD.OpUn $ P.Complement Int32),
+            (getS, putS, P.doUnOp $ P.Complement Int64, adUnOp $ AD.OpUn $ P.Complement Int64),
+            (getU, putU, P.doUnOp $ P.Complement Int8, adUnOp $ AD.OpUn $ P.Complement Int8),
+            (getU, putU, P.doUnOp $ P.Complement Int16, adUnOp $ AD.OpUn $ P.Complement Int16),
+            (getU, putU, P.doUnOp $ P.Complement Int32, adUnOp $ AD.OpUn $ P.Complement Int32),
+            (getU, putU, P.doUnOp $ P.Complement Int64, adUnOp $ AD.OpUn $ P.Complement Int64),
+            (getB, putB, P.doUnOp P.Not, adUnOp $ AD.OpUn P.Not)
           ]
     def "+" = arithOp (`P.Add` P.OverflowWrap) P.FAdd
     def "-" = arithOp (`P.Sub` P.OverflowWrap) P.FSub
@@ -1513,32 +1521,32 @@ initialCtx =
     def "**" = arithOp P.Pow P.FPow
     def "/" =
       Just $
-        bopDef (AD.OpBin $ P.FDiv Float64) $
+        bopDef $
           sintOp (`P.SDiv` P.Unsafe)
             ++ uintOp (`P.UDiv` P.Unsafe)
             ++ floatOp P.FDiv
     def "%" =
       Just $
-        bopDef (AD.OpBin $ P.FMod Float64) $
+        bopDef $
           sintOp (`P.SMod` P.Unsafe)
             ++ uintOp (`P.UMod` P.Unsafe)
             ++ floatOp P.FMod
     def "//" =
       Just $
-        bopDef (AD.OpBin $ P.UDiv Int64 P.Unsafe) $
+        bopDef $
           sintOp (`P.SQuot` P.Unsafe)
             ++ uintOp (`P.UDiv` P.Unsafe)
     def "%%" =
       Just $
-        bopDef (AD.OpBin $ P.UMod Int64 P.Unsafe) $
+        bopDef $
           sintOp (`P.SRem` P.Unsafe)
             ++ uintOp (`P.UMod` P.Unsafe)
-    def "^" = Just $ bopDef (AD.OpBin $ P.Xor Int64) $ intOp P.Xor
-    def "&" = Just $ bopDef (AD.OpBin $ P.And Int64) $ intOp P.And
-    def "|" = Just $ bopDef (AD.OpBin $ P.Or Int64) $ intOp P.Or
-    def ">>" = Just $ bopDef (AD.OpBin $ P.LShr Int64) $ sintOp P.AShr ++ uintOp P.LShr
-    def "<<" = Just $ bopDef (AD.OpBin $ P.Shl Int64) $ intOp P.Shl
-    def ">>>" = Just $ bopDef (AD.OpBin $ P.LShr Int64) $ sintOp P.LShr ++ uintOp P.LShr
+    def "^" = Just $ bopDef $ intOp P.Xor
+    def "&" = Just $ bopDef $ intOp P.And
+    def "|" = Just $ bopDef $ intOp P.Or
+    def ">>" = Just $ bopDef $ sintOp P.AShr ++ uintOp P.LShr
+    def "<<" = Just $ bopDef $ intOp P.Shl
+    def ">>>" = Just $ bopDef $ sintOp P.LShr ++ uintOp P.LShr
     def "==" = Just $
       fun2 $
         \xs ys -> pure $ ValuePrim $ BoolValue $ xs == ys
@@ -1555,14 +1563,14 @@ initialCtx =
         pure $ ValuePrim $ BoolValue $ asBool x || asBool y
     def "<" =
       Just $
-        bopDef (AD.OpCmp $ P.CmpUlt Int64) $
+        bopDef $
           sintCmp P.CmpSlt
             ++ uintCmp P.CmpUlt
             ++ floatCmp P.FCmpLt
             ++ boolCmp P.CmpLlt
     def ">" =
       Just $
-        bopDef (AD.OpCmp $ P.CmpUlt Int64) $
+        bopDef $
           flipCmps $
             sintCmp P.CmpSlt
               ++ uintCmp P.CmpUlt
@@ -1570,14 +1578,14 @@ initialCtx =
               ++ boolCmp P.CmpLlt
     def "<=" =
       Just $
-        bopDef (AD.OpCmp $ P.CmpUle Int64) $
+        bopDef $
           sintCmp P.CmpSle
             ++ uintCmp P.CmpUle
             ++ floatCmp P.FCmpLe
             ++ boolCmp P.CmpLle
     def ">=" =
       Just $
-        bopDef (AD.OpCmp $ P.CmpUle Int64) $
+        bopDef $
           flipCmps $
             sintCmp P.CmpSle
               ++ uintCmp P.CmpUle
@@ -1589,23 +1597,30 @@ initialCtx =
       | Just unop <- find ((s ==) . prettyString) P.allCmpOps =
           Just $ tbopDef (AD.OpCmp unop) $ \x y -> P.BoolValue <$> P.doCmpOp unop x y
       | Just cop <- find ((s ==) . prettyString) P.allConvOps =
-          Just $ unopDef (AD.OpConv cop) [(getV, Just . putV, P.doConvOp cop)]
+          Just $ unopDef [(getV, Just . putV, P.doConvOp cop, adUnOp $ AD.OpConv cop)]
       | Just unop <- find ((s ==) . prettyString) P.allUnOps =
-          Just $ unopDef (AD.OpUn unop) [(getV, Just . putV, P.doUnOp unop)]
+          Just $ unopDef [(getV, Just . putV, P.doUnOp unop, adUnOp $ AD.OpUn unop)]
       | Just (pts, _, f) <- M.lookup s P.primFuns =
           case length pts of
-            1 -> Just $ unopDef (AD.OpFn s) [(getV, Just . putV, f . pure)]
+            1 -> Just $ unopDef [(getV, Just . putV, f . pure, adUnOp $ AD.OpFn s)]
             _ -> Just $
               fun1 $ \x -> do
-                let getV' (ValuePrim v) = Just v
-                    getV' _ = Nothing
-                case mapM getV' =<< fromTuple x of
-                  Just vs
-                    | Just res <- fmap putV . f =<< mapM getV vs -> do
-                        breakOnNaN vs res
-                        pure $ ValuePrim res
-                  _ ->
-                    error $ "Cannot apply " <> prettyString s ++ " to " <> show x
+                let primOnly = all (\x -> case x of
+                      ValueSeed _ -> False
+                      _ -> True) $ fromJust $ fromTuple x
+                if primOnly then do
+                  let getV' (ValuePrim v) = Just v
+                      getV' _ = Nothing
+                  case mapM getV' =<< fromTuple x of
+                    Just vs
+                      | Just res <- fmap putV . f =<< mapM getV vs -> do
+                          breakOnNaN vs res
+                          pure $ ValuePrim res
+                    _ ->
+                      error $ "Cannot apply " <> prettyString s ++ " to " <> show x
+                else case AD.doOp (AD.OpFn s) $ map valueToAD $ fromJust $ fromTuple x of
+                  Just v -> pure $ adToValue v
+                  Nothing -> error $ "No derivative found for " <> show x
       | "sign_" `isPrefixOf` s =
           Just $
             fun1 $ \x ->

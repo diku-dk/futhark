@@ -150,7 +150,7 @@ prettyValueWith pprPrim = pprPrec 0
     pprPrec _ ValueAcc {} = "#<acc>"
     pprPrec p (ValueSum _ n vs) =
       parensIf (p > (0 :: Int)) $ "#" <> sep (pretty n : map (pprPrec 1) vs)
-    pprPrec _ (ValueSeed s) = pretty $ show s -- TODO
+    pprPrec _ (ValueSeed s) = pretty $ show s -- ?TODO
     pprElem v@ValueArray {} = pprPrec 0 v
     pprElem v = group $ pprPrec 0 v
 
