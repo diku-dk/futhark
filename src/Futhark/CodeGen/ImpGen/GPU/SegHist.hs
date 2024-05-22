@@ -38,7 +38,7 @@
 module Futhark.CodeGen.ImpGen.GPU.SegHist (compileSegHist) where
 
 import Control.Monad
-import Data.List (foldl', genericLength, zip5)
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
@@ -226,7 +226,7 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
   hist_RF <-
     dPrimVE "hist_RF" $
       sum (map (r64 . pe64 . histRaceFactor . slugOp) slugs)
-        / genericLength slugs
+        / L.genericLength slugs
 
   hist_el_size <- dPrimVE "hist_el_size" $ sum $ map slugElAvgSize slugs
 
@@ -291,9 +291,9 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
     slugElAvgSize slug@(SegHistSlug op _ _ do_op) =
       case do_op of
         AtomicLocking {} ->
-          slugElSize slug `quot` (1 + genericLength (lambdaReturnType (histOp op)))
+          slugElSize slug `quot` (1 + L.genericLength (lambdaReturnType (histOp op)))
         _ ->
-          slugElSize slug `quot` genericLength (lambdaReturnType (histOp op))
+          slugElSize slug `quot` L.genericLength (lambdaReturnType (histOp op))
 
     -- "Average element size" as computed by a formula that also takes
     -- locking into account.
@@ -435,7 +435,7 @@ histKernelGlobalPass map_pes num_tblocks tblock_size space slugs kbody histogram
                   map kernelResultSubExp red_res
 
           sComment "perform atomic updates" $
-            forM_ (zip5 (map slugOp slugs) histograms red_res_split subhisto_inds hist_H_chks) $
+            forM_ (L.zip5 (map slugOp slugs) histograms red_res_split subhisto_inds hist_H_chks) $
               \( HistOp dest_shape _ _ _ shape lam,
                  do_op,
                  (bucket, vs'),
@@ -960,7 +960,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
         dPrimVE "work_asymp_M_max" $
           (hist_Nout * hist_N)
             `quot` ( (q_small * unCount num_tblocks' * hist_H)
-                       `quot` genericLength slugs
+                       `quot` L.genericLength slugs
                    )
 
   -- Number of subhistograms per result histogram.
@@ -1096,7 +1096,7 @@ compileSegHist (Pat pes) lvl space ops kbody = do
           _ -> Nothing
     hist_el_size <-
       dPrimVE "hist_el_size" $
-        foldl' (+) (h `divUp` hist_H) $
+        L.foldl' (+) (h `divUp` hist_H) $
           mapMaybe lockSize slugs
 
     -- Input elements contributing to each histogram.
@@ -1107,7 +1107,7 @@ compileSegHist (Pat pes) lvl space ops kbody = do
       dPrimVE "hist_RF" $
         sExt32 $
           sum (map (pe64 . histRaceFactor . slugOp) slugs)
-            `quot` genericLength slugs
+            `quot` L.genericLength slugs
 
     let hist_T = sExt32 $ unCount num_tblocks' * unCount tblock_size'
     emit $ Imp.DebugPrint "\n# SegHist" Nothing
