@@ -36,12 +36,12 @@ import Data.Foldable (foldlM)
 
 data ADSeed
   = VjpSeed Int Tape
-  | JvpSeed Int PrimValue (M.Map Int ADValue)
+  | JvpSeed Int Int ADValue (M.Map Int ADValue)
 
 instance Show ADSeed where
   show :: ADSeed -> String
   show (VjpSeed d v) = "VjpSeed d" <> show d <> " " <> show v
-  show (JvpSeed d v dv) = "JvpSeed d" <> show d <> " " <> show v <> " " <> show dv
+  show (JvpSeed d _ v dv) = "JvpSeed d" <> show d <> " " <> show v <> " " <> show dv
 
 data ADValue
   = Primal PrimValue
@@ -71,11 +71,11 @@ value (Seed s) = value $ primal s
 
 depth :: ADSeed -> Int
 depth (VjpSeed d _) = d
-depth (JvpSeed d _ _) = d
+depth (JvpSeed d _ _ _) = d
 
 primal :: ADSeed -> ADValue
 primal (VjpSeed _ v) = tapeValue v
-primal (JvpSeed _ v _) = Primal v
+primal (JvpSeed _ _ v _) = v
 
 deriveVjp :: Tape -> Maybe (M.Map Int ADValue)
 deriveVjp tp = deriveTape tp (Primal $ valueAsType (value $ tapeValue tp) 1)
@@ -106,11 +106,10 @@ doOp op p = do
 
   case op of
     (OpBin _)  -> handleOp op p v
+    (OpCmp _)  -> Just $ Primal v
     (OpUn _)   -> handleOp op p v
     (OpFn _)   -> handleOp op p v
-    --(OpConv _) -> TODO
-    _ -> Just $ Primal v
-    
+    (OpConv _) -> Nothing
 
 deriveOp :: Op -> [PrimExp VName] -> Maybe [PrimExp VName]
 deriveOp (OpBin op) [x, y] = Just $ do
@@ -146,7 +145,7 @@ handleOp op p v = do
     case find (\case Right _ -> True
                      Left _  -> False) d of
       Just (Right (VjpSeed {})) -> Seed . VjpSeed maxDepth <$> vjpHandleFn op d v'
-      Just (Right (JvpSeed {})) -> Seed . JvpSeed maxDepth v <$> jvpHandleFn op d maxDepth
+      Just (Right (JvpSeed _ h _ _)) -> jvpHandleFn op d maxDepth h v'
       _ -> Just $ Primal v -- TODO: This never happens, so maybe remove it in some way?
 
 runPrimExp :: PrimExp VName -> M.Map VName ADValue -> Maybe ADValue
@@ -228,36 +227,39 @@ combineDerivatives d v = do
 
 -- JVP
 
-jvpHandleFn :: Op -> [Either ADValue ADSeed] -> Int -> Maybe (M.Map Int ADValue) 
-jvpHandleFn op p d = do
-  -- Turn everything into jvp values
-  let p' = map (\case
-        Right (JvpSeed _ v' m) -> (v', m)
-        Left  v' -> (value v', M.empty)
-        _ -> error "TODO: This is impossible (98ruwik)") p
+jvpHandleFn :: Op -> [Either ADValue ADSeed] -> Int -> Int -> ADValue -> Maybe ADValue
+jvpHandleFn op p d h av = if h <= 0 then Just av
+  else do
+    -- Turn everything into jvp values
+    let p' = map (\case
+          Right (JvpSeed _ h v' m) -> (h, v', m)
+          Left  v' -> (0, v', M.empty)
+          _ -> error "TODO: This is impossible (98ruwik)") p
 
-  -- Create a unique name for each parameter
-  let n = map (VName "d") [1..length p]
-  let m = M.fromList $ zip n $ map (\(a, b) -> Seed $ JvpSeed (d - 1) a b) p'
+    -- Create a unique name for each parameter
+    let n = map (VName "d") [1..length p]
+    let m = M.fromList $ zip n $ map (\(h, v, m) -> Seed $ JvpSeed d (h - 1) v m) p'
 
-  -- Derive the function using the parameters
-  op' <- deriveOp op $ map (`LeafExp` FloatType Float64) n -- TODO: Correct type
-  v' <- mapM (`runPrimExp` m) op'
-  
-  let didx = S.toList $ foldl (\x (_, m') -> S.union x (S.fromList $ M.keys m')) S.empty p'
-  case mapM (\idx -> do
-        -- Get derivatives
-        let mul a b = doOp (OpBin $ FMul Float64) [a, b] -- TODO: Correct type
-        vs <- zipWithM (\d' (t, m') ->
-              case M.lookup idx m' of
-                Just v'' -> mul d' v''
-                _ -> Just $ Primal $ valueAsType t 0) v' p'
+    -- Derive the function using the parameters
+    op' <- deriveOp op $ map (`LeafExp` FloatType Float64) n -- TODO: Correct type
+    v' <- mapM (`runPrimExp` m) op'
+    
+    let didx = S.toList $ foldl (\x (_, _, m') -> S.union x (S.fromList $ M.keys m')) S.empty p'
+    case mapM (\idx -> do
+          -- Get derivatives
+          let mul a b = doOp (OpBin $ FMul Float64) [a, b] -- TODO: Correct type
+          vs <- zipWithM (\d' (_, t, m') ->
+                case M.lookup idx m' of
+                  Just v'' -> mul d' v''
+                  _ -> Just $ Primal $ valueAsType (value t) 0) v' p'
 
-        -- Sum them up
-        let add a b = doOp (OpBin $ FAdd Float64) [a, b] -- TODO: Correct type
-        Just $ do
-          k <- foldlM add (Primal $ FloatValue $ Float64Value 0 {- TODO -}) vs
-          pure (idx, k)) didx of
+          -- Sum them up
+          let add a b = doOp (OpBin $ FAdd Float64) [a, b] -- TODO: Correct type
+          Just $ do
+            k <- foldlM add (Primal $ FloatValue $ Float64Value 0 {- TODO -}) vs
+            pure (idx, k)) didx of
 
-    Just k -> M.fromList <$> sequence k
-    Nothing -> Just M.empty
+      Just k -> do
+        m <- M.fromList <$> sequence k
+        Just $ Seed $ JvpSeed d h av m
+      Nothing -> Just $ Seed $ JvpSeed d h av M.empty

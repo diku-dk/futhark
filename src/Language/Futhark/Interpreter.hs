@@ -2022,23 +2022,27 @@ initialCtx =
 
         -- Impregnate the values
         let addSeeds i v = case v of
-              ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth (fromJust $ getV v') $ M.fromList [(i, AD.Primal $ AD.valueAsType (fromJust $ getV v') 1)])
-              ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.value $ AD.primal se) $ M.fromList [(i, AD.Primal $ AD.valueAsType (AD.value $ AD.primal se) 1)])
+              ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth depth (AD.Primal $ fromJust $ getV v') $ M.fromList [(i, AD.Primal $ AD.valueAsType (fromJust $ getV v') 1)])
+              ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth depth (AD.Seed se) $ M.fromList [(i, AD.Primal $ AD.valueAsType (AD.value $ AD.primal se) 1)])
               ValueRecord m -> second ValueRecord $ M.mapAccum addSeeds i m
               _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
-        let v' = snd $ addSeeds 0 v
+        let v' = snd $ addSeeds (depth * 10) v
 
         -- Run the function
         out <- apply noLoc mempty f v'
 
+        let unpackValue v = case v of
+              AD.Primal v -> ValuePrim $ putV v
+              AD.Seed s -> if AD.depth s >= depth then unpackValue $ AD.primal s
+                                                  else ValueSeed s
+
         -- Derive the seeds
         let deriveSeeds v = case v of
               ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
-              ValueSeed s@(AD.JvpSeed d _ m) ->
+              ValueSeed s@(AD.JvpSeed d _ _ m) ->
                 if d == depth then
-                  case M.lookup 0 m of
-                    Just (AD.Seed   v') -> ValueSeed v'
-                    Just (AD.Primal v') -> ValuePrim $ putV v'
+                  case M.lookup (depth * 10) m of
+                    Just v -> unpackValue v
                     _ -> ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
                 else ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
               ValueRecord m -> ValueRecord $ M.map deriveSeeds m
