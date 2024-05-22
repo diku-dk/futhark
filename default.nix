@@ -68,13 +68,26 @@ let
                 enableLibraryProfiling = false;
                 configureFlags = [
                   "--ghc-option=-Werror"
-                  "--ghc-option=-optl=-static"
                   "--ghc-option=-split-sections"
+                  "--ghc-option=-optl=-static"
                   "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"
+                  # Static linking crud
                   "--extra-lib-dirs=${pkgs.glibc.static}/lib"
                   "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
-                  "--extra-lib-dirs=${pkgs.zlib.static}/lib"
                   "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
+                  # The ones below are due to GHC's runtime system
+                  # depending on libdw (DWARF info), which depends on
+                  # a bunch of compression algorithms.
+                  "--ghc-option=-optl=-lbz2"
+                  "--ghc-option=-optl=-lz"
+                  "--ghc-option=-optl=-lelf"
+                  "--ghc-option=-optl=-llzma"
+                  "--ghc-option=-optl=-lzstd"
+                  "--extra-lib-dirs=${pkgs.zlib.static}/lib"
+                  "--extra-lib-dirs=${(pkgs.xz.override { enableStatic = true; }).out}/lib"
+                  "--extra-lib-dirs=${(pkgs.zstd.override { enableStatic = true; }).out}/lib"
+                  "--extra-lib-dirs=${(pkgs.bzip2.override { enableStatic = true; }).out}/lib"
+                  "--extra-lib-dirs=${(pkgs.elfutils.overrideAttrs (old: { dontDisableStatic= true; })).out}/lib"
                 ];
 
                 preBuild = ''
