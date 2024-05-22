@@ -11,6 +11,7 @@ import Control.Monad.Trans.RWS
 import Control.Monad.Trans.State qualified as State
 import Data.Bifunctor (first, second)
 import Data.Bits qualified as Bits
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Set qualified as S
@@ -21,7 +22,7 @@ import Futhark.CodeGen.ImpGen.GPU qualified as ImpGPU
 import Futhark.CodeGen.RTS.WGSL qualified as RTS
 import Futhark.IR.GPUMem qualified as F
 import Futhark.MonadFreshNames
-import Futhark.Util (convFloat, zEncodeText)
+import Futhark.Util (convFloat, zEncodeText, nubOrd)
 import Futhark.Util.Pretty (docText)
 import Language.Futhark.Warnings (Warnings)
 import Language.WGSL qualified as WGSL
@@ -317,11 +318,14 @@ wgslPrimType Bool = WGSL.Bool
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
 wgslPrimType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
 
-wgslBufferType :: PrimType -> Maybe WGSL.Exp -> WGSL.Typ
-wgslBufferType Bool = WGSL.Array $ WGSL.Atomic wgslInt8
-wgslBufferType (IntType Int8) = WGSL.Array $ WGSL.Atomic wgslInt8
-wgslBufferType (IntType Int16) = WGSL.Array $ WGSL.Atomic wgslInt16
-wgslBufferType t = WGSL.Array $ wgslPrimType t
+wgslBufferType :: (PrimType, Bool, Signedness) -> Maybe WGSL.Exp -> WGSL.Typ
+wgslBufferType (Bool, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
+wgslBufferType (IntType Int8, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
+wgslBufferType (IntType Int16, _, _) = WGSL.Array $ WGSL.Atomic wgslInt16
+wgslBufferType (IntType Int32, False, _) = WGSL.Array WGSL.Int32
+wgslBufferType (IntType Int32, True, Signed) = WGSL.Array $ WGSL.Atomic WGSL.Int32
+wgslBufferType (IntType Int32, True, Unsigned) = WGSL.Array $ WGSL.Atomic WGSL.UInt32
+wgslBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
 genFunWrite ::
   WGSL.Ident ->
@@ -380,13 +384,17 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
   moduleName <- mkGlobalIdent name'
   sizeName <- mkGlobalIdent $ name' <> "_size"
 
-  elemPrimType <- findSingleMemoryType name
-  let bufType = wgslBufferType elemPrimType (Just $ WGSL.VarExp sizeName)
+  maybeElemPrimType <- findSingleMemoryType name
+  case maybeElemPrimType of
+    Just elemPrimType -> do
+      let bufType = wgslBufferType elemPrimType (Just $ WGSL.VarExp sizeName)
 
-  addOverride sizeName (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
-  addDecl $ WGSL.VarDecl [] WGSL.Workgroup moduleName bufType
-  addRename name' moduleName
-  pure $ WGSL.Comment $ "declare_shared: " <> name'
+      addOverride sizeName (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
+      addDecl $ WGSL.VarDecl [] WGSL.Workgroup moduleName bufType
+      addRename name' moduleName
+      pure $ WGSL.Comment $ "declare_shared: " <> name'
+    Nothing ->
+      pure $ WGSL.Comment $ "discard declare_shared: " <> name'
 genWGSLStm s@(DeclareMem _ _) = unsupported s
 genWGSLStm (DeclareScalar name _ typ) =
   pure $
@@ -444,6 +452,15 @@ genWGSLStm (Op (ImpGPU.GetLocalSize dest i)) = do
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = do
   destId <- getIdent dest
   WGSL.Assign destId . WGSL.VarExp <$> builtinLockstepWidth
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAdd _ dest mem i e))) = do
+  idx <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
+  val <- genWGSLExp e
+  let call = WGSL.CallExp "atomicAdd" [WGSL.UnOpExp "&" idx, val]
+  WGSL.Assign <$> getIdent dest <*> pure call
+  --let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
+  --    call = WGSL.CallExp fun <$> sequence [buf, indexExp i]
+  -- in WGSL.Assign <$> getIdent tgt <*> call
+genWGSLStm s@(Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd {}))) = unsupported s
 genWGSLStm s@(Op (ImpGPU.Atomic _ _)) = unsupported s
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceLocal)) =
   pure $ WGSL.Call "workgroupBarrier" []
@@ -454,14 +471,18 @@ genWGSLStm (Op (ImpGPU.SharedAlloc name size)) = do
   let name' = nameToIdent name
   sizeName <- mkGlobalIdent $ name' <> "_size"
 
-  elemPrimType <- findSingleMemoryType name
-  let elemSize = primByteSize elemPrimType :: Int32
-  let sizeExp =
-        zExt Int32 (untyped (unCount size))
-          ~/~ ValueExp (IntValue $ Int32Value elemSize)
+  maybeElemPrimType <- findSingleMemoryType name
+  case maybeElemPrimType of
+    Just (elemPrimType, _, _) -> do
+      let elemSize = primByteSize elemPrimType :: Int32
+      let sizeExp =
+            zExt Int32 (untyped (unCount size))
+              ~/~ ValueExp (IntValue $ Int32Value elemSize)
 
-  addSharedMem sizeName sizeExp
-  pure $ WGSL.Comment $ "shared_alloc: " <> name'
+      addSharedMem sizeName sizeExp
+      pure $ WGSL.Comment $ "shared_alloc: " <> name'
+    Nothing ->
+      pure $ WGSL.Comment $ "discard shared_alloc: " <> name'
 genWGSLStm s@(Op (ImpGPU.ErrorSync _)) = unsupported s
 
 call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
@@ -678,14 +699,53 @@ genScalarDecls = do
   addDecl $
     WGSL.VarDecl bufferAttribs WGSL.Uniform bufferName (WGSL.Named structName)
 
+atomicOpArray :: ImpGPU.AtomicOp -> VName
+atomicOpArray (ImpGPU.AtomicAdd _ _ n _ _) = n
+atomicOpArray (ImpGPU.AtomicFAdd _ _ n _ _) = n
+atomicOpArray (ImpGPU.AtomicSMax _ _ n _ _) = n
+atomicOpArray (ImpGPU.AtomicSMin _ _ n _ _) = n
+atomicOpArray (ImpGPU.AtomicUMax _ _ n _ _) = n
+atomicOpArray (ImpGPU.AtomicUMin _ _ n _ _) = n
+atomicOpArray (ImpGPU.AtomicAnd _ _ n _ _) = n
+atomicOpArray (ImpGPU.AtomicOr _ _ n _ _) = n
+atomicOpArray (ImpGPU.AtomicXor _ _ n _ _) = n
+atomicOpArray (ImpGPU.AtomicCmpXchg _ _ n _ _ _) = n
+atomicOpArray (ImpGPU.AtomicXchg _ _ n _ _) = n
+
+-- Usually we declare all our variables as the signed type and re-interpret when
+-- necessary for operations. We can't do an AtomicU{Min,Max} on an `atomic<i32>`
+-- however. If the only atomic op is a UMin/UMax, we thus declare the buffer
+-- unsigned. Otherwise, we have no chance.
+-- TODO: This is actually not right. Most of these should have an
+-- "indeterminate" signedness, so that any combination of those and one of
+-- s{min,max} and u{min,max} is valid.
+atomicOpType :: ImpGPU.AtomicOp -> (PrimType, Signedness)
+atomicOpType (ImpGPU.AtomicAdd t _ _ _ _) = (IntType t, Signed)
+atomicOpType (ImpGPU.AtomicFAdd t _ _ _ _) = (FloatType t, Signed)
+atomicOpType (ImpGPU.AtomicSMax t _ _ _ _) = (IntType t, Signed)
+atomicOpType (ImpGPU.AtomicSMin t _ _ _ _) = (IntType t, Signed)
+atomicOpType (ImpGPU.AtomicUMax t _ _ _ _) = (IntType t, Unsigned)
+atomicOpType (ImpGPU.AtomicUMin t _ _ _ _) = (IntType t, Unsigned)
+atomicOpType (ImpGPU.AtomicAnd t _ _ _ _) = (IntType t, Signed)
+atomicOpType (ImpGPU.AtomicOr t _ _ _ _) = (IntType t, Signed)
+atomicOpType (ImpGPU.AtomicXor t _ _ _ _) = (IntType t, Signed)
+atomicOpType (ImpGPU.AtomicCmpXchg t _ _ _ _ _) = (t, Signed)
+atomicOpType (ImpGPU.AtomicXchg t _ _ _ _) = (t, Signed)
+
 -- | Internally, memory buffers are untyped but WGSL requires us to annotate the
 -- binding with a type. Search the kernel body for any reads and writes to the
 -- given buffer and return all types it is accessed at.
-findMemoryTypes :: VName -> KernelM [ImpGPU.PrimType]
+-- The bool indicates an atomic type. The Signedness is only relevant for atomic
+-- types as described for `atomicOpType`.
+-- TODO: Should we worry about the Space in the Atomic?
+findMemoryTypes :: VName -> KernelM [(PrimType, Bool, Signedness)]
 findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
   where
-    find (ImpGPU.Write n _ t _ _ _) | n == name = S.singleton t
-    find (ImpGPU.Read _ n _ t _ _) | n == name = S.singleton t
+    find (ImpGPU.Write n _ t _ _ _) | n == name = S.singleton (t, False, Signed)
+    find (ImpGPU.Read _ n _ t _ _) | n == name = S.singleton (t, False, Signed)
+    find (Op (ImpGPU.Atomic _ op)) | atomicOpArray op == name =
+      let (t, sgn) = atomicOpType op
+       in S.singleton (t, True, sgn)
     find (s1 :>>: s2) = find s1 <> find s2
     find (For _ _ body) = find body
     find (While _ body) = find body
@@ -693,12 +753,29 @@ findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
     find (Comment _ s) = find s
     find _ = S.empty
 
-findSingleMemoryType :: VName -> KernelM ImpGPU.PrimType
+findSingleMemoryType :: VName -> KernelM (Maybe (PrimType, Bool, Signedness))
 findSingleMemoryType name = do
   types <- findMemoryTypes name
-  case types of
-    [t] -> pure t
-    _ -> error "Using buffer at multiple types not supported in WebGPU backend"
+  let prims = nubOrd $ map (\(t, _, _) -> t) types
+  case prims of
+    [] -> pure Nothing
+    [prim] -> do
+      -- Only used at one primitive type. If it is an integer <=32 bit and there
+      -- are atomic accesses, make it the appropriate atomic type. Otherwise,
+      -- make sure there is only one type combination total.
+      let atomic = L.find (\(_, a, _) -> a) types
+      case atomic of
+        Just (_, _, sgn) | canBeAtomic prim ->
+          if all (\(_, _, s) -> s == sgn) types
+             then pure $ Just (prim, True, sgn)
+             else error "Atomic type used at multiple signednesses"
+        Just _ -> error "Non i32 or u32 used atomically"
+        Nothing -> pure $ Just (prim, False, Signed)
+    _tooMany -> error "Buffer used at multiple types"
+  where
+    canBeAtomic (IntType Int64) = False
+    canBeAtomic (IntType _) = True
+    canBeAtomic _ = False
 
 -- | Generate binding declarations for memory buffers used by kernel. Produces
 -- additional name replacements because it makes the binding names unique.
@@ -714,12 +791,8 @@ genMemoryDecls = do
   mapM_ rename memUses
   where
     withType name = do
-      types <- findMemoryTypes name
-      case types of
-        [] -> pure Nothing -- No declarations for unused buffers
-        [t] -> pure $ Just (nameToIdent name, t)
-        _more ->
-          error "Using buffer at multiple types not supported in WebGPU backend"
+      typ <- findSingleMemoryType name
+      pure $ (nameToIdent name,) <$> typ
     moduleDecl (name, typ) = do
       ident <- mkGlobalIdent name
       slot <- assignBindSlot
