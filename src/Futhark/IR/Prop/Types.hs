@@ -67,7 +67,7 @@ where
 
 import Control.Monad
 import Control.Monad.State
-import Data.List (elemIndex, foldl')
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -502,7 +502,7 @@ existentialiseExtTypes inaccessible = map makeBoundShapesFree
     makeBoundShapesFree =
       modifyArrayShape $ fmap checkDim
     checkDim (Free (Var v))
-      | Just i <- v `elemIndex` inaccessible =
+      | Just i <- v `L.elemIndex` inaccessible =
           Ext i
     checkDim d = d
 
@@ -523,7 +523,7 @@ dimMapping ::
   [t2] ->
   res
 dimMapping getDims1 getDims2 f comb ts1 ts2 =
-  foldl' comb mempty $ concat $ zipWith (zipWith f) (map getDims1 ts1) (map getDims2 ts2)
+  L.foldl' comb mempty $ concat $ zipWith (zipWith f) (map getDims1 ts1) (map getDims2 ts2)
 
 -- | @IntType Int8@
 int8 :: PrimType
