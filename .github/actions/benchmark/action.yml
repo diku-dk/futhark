@@ -19,10 +19,12 @@ runs:
   using: "composite"
   steps:
     - name: Download Benchmarks.
-      shell: bash
-      run: |
-        cd futhark-benchmarks
-        ./get-data.sh external-data.txt
+      uses: ./.github/actions/futhark-slurm
+      with:
+        script: |
+          cd futhark-benchmarks
+          ./get-data.sh external-data.txt
+        slurm-options: --time=10:00 -c 1
 
     - uses: ./.github/actions/futhark-slurm
       with:
