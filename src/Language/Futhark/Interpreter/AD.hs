@@ -52,10 +52,11 @@ instance Show ADValue where
   show (Seed s) = "Seed " <> show s
 
 data Op
-  = OpBin BinOp
-  | OpCmp CmpOp
-  | OpUn  UnOp
-  | OpFn  String
+  = OpBin  BinOp
+  | OpCmp  CmpOp
+  | OpUn   UnOp
+  | OpFn   String
+  | OpConv ConvOp
 
 instance Show Op where
   show (OpBin op) = show op

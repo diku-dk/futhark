@@ -1408,21 +1408,18 @@ initialCtx =
               pure $ ValuePrim z
 
         (ValueSeed x', ValueSeed y') -> do
-          -- Calculate the derivative
           case AD.doOp op [AD.Seed x', AD.Seed y'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
             Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj))"
         
         (ValuePrim x', ValueSeed y') -> do
-          -- Calculate the derivative
           case AD.doOp op [AD.Primal $ fromJust $ getV x', AD.Seed y'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
             Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj))"
 
         (ValueSeed x', ValuePrim y') -> do
-          -- Calculate the derivative
           case AD.doOp op [AD.Seed x', AD.Primal $ fromJust $ getV y'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
@@ -1441,12 +1438,19 @@ initialCtx =
           y' <- valf y
           retf =<< op x' y'
 
-    unopDef fs = fun1 $ \x ->
+    unopDef op fs = fun1 $ \x ->
       case x of
         (ValuePrim x')
           | Just r <- msum $ map (`unopDef'` x') fs -> do
               breakOnNaN [x'] r
               pure $ ValuePrim r
+
+        (ValueSeed x') -> do
+          case AD.doOp op [AD.Seed x'] of
+            Just (AD.Seed v'') -> pure $ ValueSeed v''
+            Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
+            Nothing -> error $ "No derivative found for " ++ show op ++ " (TODO (389uaoj))"
+
         _ ->
           bad noLoc mempty . docText $
             "Cannot apply function to argument"
@@ -1473,7 +1477,7 @@ initialCtx =
 
     def "!" =
       Just $
-        unopDef
+        unopDef (AD.OpUn $ P.Complement Int64)
           [ (getS, putS, P.doUnOp $ P.Complement Int8),
             (getS, putS, P.doUnOp $ P.Complement Int16),
             (getS, putS, P.doUnOp $ P.Complement Int32),
@@ -1566,12 +1570,12 @@ initialCtx =
       | Just unop <- find ((s ==) . prettyString) P.allCmpOps =
           Just $ tbopDef $ \x y -> P.BoolValue <$> P.doCmpOp unop x y
       | Just cop <- find ((s ==) . prettyString) P.allConvOps =
-          Just $ unopDef [(getV, Just . putV, P.doConvOp cop)]
+          Just $ unopDef (AD.OpConv cop) [(getV, Just . putV, P.doConvOp cop)]
       | Just unop <- find ((s ==) . prettyString) P.allUnOps =
-          Just $ unopDef [(getV, Just . putV, P.doUnOp unop)]
+          Just $ unopDef (AD.OpUn unop) [(getV, Just . putV, P.doUnOp unop)]
       | Just (pts, _, f) <- M.lookup s P.primFuns =
           case length pts of
-            1 -> Just $ unopDef [(getV, Just . putV, f . pure)]
+            1 -> Just $ unopDef (AD.OpFn s) [(getV, Just . putV, f . pure)]
             _ -> Just $
               fun1 $ \x -> do
                 let getV' (ValuePrim v) = Just v
