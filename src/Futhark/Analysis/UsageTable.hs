@@ -67,7 +67,7 @@ expand :: (VName -> Names) -> UsageTable -> UsageTable
 expand look (UsageTable m) = UsageTable $ L.foldl' grow m $ IM.toList m
   where
     grow m' (k, v) =
-      foldl'
+      L.foldl'
         (grow'' $ v `withoutU` presentU)
         m'
         (namesIntMap $ look $ VName (nameFromString "") k)
