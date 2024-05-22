@@ -59,7 +59,7 @@ mustBeExplicitInBinding :: StructType -> S.Set VName
 mustBeExplicitInBinding bind_t =
   let (ts, ret) = unfoldFunType bind_t
       alsoRet = M.unionWith (&&) $ M.fromList $ map (,True) (S.toList (fvVars (freeInType ret)))
-   in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map toStruct ts
+   in S.fromList $ M.keys $ M.filter id $ alsoRet $ L.foldl' onType mempty $ map toStruct ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
 
@@ -108,7 +108,7 @@ evalTypeExp df (TETuple ts loc) = do
     ( TETuple ts' loc,
       mconcat svars,
       RetType (foldMap retDims ts_s) $ Scalar $ tupleRecord $ map retType ts_s,
-      foldl' max Unlifted ls
+      L.foldl' max Unlifted ls
     )
 --
 evalTypeExp df t@(TERecord fs loc) = do
@@ -127,7 +127,7 @@ evalTypeExp df t@(TERecord fs loc) = do
     ( TERecord (M.toList fs') loc,
       fs_svars,
       RetType (foldMap retDims ts_s) $ Scalar $ Record $ M.map retType ts_s,
-      foldl' max Unlifted ls
+      L.foldl' max Unlifted ls
     )
 --
 evalTypeExp df (TEArray d t loc) = do
@@ -239,7 +239,7 @@ evalTypeExp df t@(TESum cs loc) = do
         Scalar $
           Sum $
             M.map (map retType) ts_s,
-      foldl' max Unlifted ls
+      L.foldl' max Unlifted ls
     )
 evalTypeExp df ote@TEApply {} = do
   (tname, tname_loc, targs) <- rootAndArgs ote

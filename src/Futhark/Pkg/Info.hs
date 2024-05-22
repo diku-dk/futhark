@@ -356,4 +356,4 @@ lookupNewestRev cachedir p = do
     [] -> do
       logMsg $ "Package " <> p <> " has no released versions.  Using HEAD."
       fst <$> lookupPackageCommit cachedir p Nothing
-    v : vs -> pure $ foldl' max v vs
+    v : vs -> pure $ L.foldl' max v vs
