@@ -112,32 +112,10 @@ substituteIdx i (x, xterm) yterm =
       pure $ if vn == x then xterm else Var vn
     onTerm (Idx (Var vn) idx) | vn == x =
       pure (flatten $ substituteName i (SoP2 idx) xterm)
-    onTerm (SumSlice e lb ub) | e == Var x || e == Indicator (Var x) =
-      case justAffine (termToSoP xterm) >>= mapM (mkSum e) of
-        Just sums ->
-          pure $ SoP2 (foldl1 (.+.) sums)
+    onTerm (SumSlice e lb ub) | e == Var x || e == Indicator (Var x) = do
+      e' <- onTerm e
+      case justAffine e' of
+        Just terms ->
+          pure . SoP2 $ mkSumOfSums i lb ub terms
         Nothing -> error "gg, need sums over non-affine terms"
-      where
-        justAffine :: SoP Term -> Maybe [([Term], Integer)]
-        justAffine e1 | trace ("justAffine: " <> prettyString e1) False = undefined
-        justAffine sop
-          | termsWithFactors <- sopToLists (padWithZero sop),
-            isAffineSoP sop =
-              Just termsWithFactors
-        justAffine _ = Nothing
-
-        mkSum e1 e2 | trace ("mkSum: " <> prettyString e1 <> " " <> prettyString e2) False = undefined
-        mkSum _ ([], c) =
-          -- This would be ∑(c)[lb : ub] c so rewrite it to (ub - lb + 1) * c.
-          pure $ scaleSoP c (ub .-. lb .+. int2SoP 1)
-        mkSum (Var _) ([Idx (Var vnx) idx], c) = do
-          pure . scaleSoP c . termToSoP $
-            SumSlice (Var vnx) (substituteName i (SoP2 lb) idx) (substituteName i (SoP2 ub) idx)
-        mkSum (Var _) ([Indicator (Idx (Var vnx) idx)], c) = do
-          pure . scaleSoP c . termToSoP $
-            SumSlice (Indicator (Var vnx)) (substituteName i (SoP2 lb) idx) (substituteName i (SoP2 ub) idx)
-        mkSum (Indicator (Var _)) ([Idx (Var vnx) idx], c) = do
-          pure . scaleSoP c . termToSoP $
-            SumSlice (Indicator (Var vnx)) (substituteName i (SoP2 lb) idx) (substituteName i (SoP2 ub) idx)
-        mkSum _ _ = Nothing
     onTerm e = astMap m e

@@ -459,3 +459,29 @@ instance FreeIn Term where
 -- constant term) and return a list of it's terms.
 isAffineSoP :: Ord a => SoP.SoP a -> Bool
 isAffineSoP sop = all ((<= 1) . length . fst) (SoP.sopToLists sop)
+
+-- If the term can be viewed as a linear combination of symbols,
+-- return a list of it's terms on the form (symbols, scaling factor).
+justAffine :: Term -> Maybe [([Term], Integer)]
+justAffine (SoP2 sop) =
+  if isAffineSoP sop
+  then Just $ SoP.sopToLists (SoP.padWithZero sop)
+  else Nothing
+justAffine t = justAffine (SoP2 $ termToSoP t)
+
+mkSum :: VName -> SoP Term -> SoP Term -> ([Term], Integer) -> SoP Term
+mkSum _ lb ub ([], c) =
+  SoP.scaleSoP c (ub SoP..-. lb SoP..+. SoP.int2SoP 1)
+mkSum i lb ub ([e], c)
+  | Just (x, idx) <- extractIdx e =
+  SoP.scaleSoP c . termToSoP $
+    SumSlice x (substituteName i (SoP2 lb) idx) (substituteName i (SoP2 ub) idx)
+  where
+    extractIdx (Idx (Var x) idx) = pure (Var x, idx)
+    extractIdx (Indicator (Idx (Var x) idx)) = pure (Indicator (Var x), idx)
+    extractIdx _ = Nothing
+mkSum _ _ _ _ =
+  undefined
+
+mkSumOfSums :: VName -> SoP Term -> SoP Term -> [([Term], Integer)] -> SoP Term
+mkSumOfSums i lb ub terms = foldl1 (SoP..+.) (map (mkSum i lb ub) terms)

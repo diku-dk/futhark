@@ -161,41 +161,23 @@ rewritePrefixSum :: IndexFn -> IndexFnM IndexFn
 rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
   | (Var i :== b, e1) :| [(Var i' :/= b', recur)] <- cases,
     -- Extract terms (multiplied symbols, factor) from the sum of products.
-    Just terms <- justAffinePlusRecurrence recur,
+    Just terms <- justAffine recur >>= justPlusRecurrence,
     -- Create a sum for each product (term) in the sum of products.
-    Just sums <- mapM (mkSum i b) terms,
+    -- Just sums <- mapM (mkSumZ i b) terms,
     i == i',
     i == i'',
     b == b',
     b == domainSegStart dom = do
       tell ["Using prefix sum rule"]
-      let e1' = substituteName i b e1
-      pure $ IndexFn it (toCases $ e1' ~+~ SoP2 (foldl1 (.+.) sums))
-  where
-    justAffinePlusRecurrence :: Term -> Maybe [([Term], Integer)]
-    justAffinePlusRecurrence (SoP2 sop)
-      | termsWithFactors <- sopToLists (SoP.padWithZero sop),
-        [Recurrence] `elem` map fst termsWithFactors,
-        isAffineSoP sop =
-          Just $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
-    justAffinePlusRecurrence _ = Nothing
-
-    -- Create sum for (term, factor), pulling the factor outside the sum.
-    -- mkSum :: a -> Term -> ([Term], Integer)
-    mkSum i b ([], c) =
-      -- This would be ∑j∈[lb, ..., ub] c so rewrite it to (ub - lb + 1) * c.
       let lb = termToSoP b .+. int2SoP 1
-          ub = termToSoP (Var i)
-      in  pure $ scaleSoP c (ub .-. lb .+. int2SoP 1)
-    mkSum i b ([Idx (Var x) idx], c) = do
-      let lb = substituteName i (SoP2 $ termToSoP b .+. int2SoP 1) idx
-      pure . scaleSoP c . termToSoP $
-        SumSlice (Var x) lb idx
-    mkSum i b ([Indicator (Idx (Var x) idx)], c) = do
-      let lb = substituteName i (SoP2 $ termToSoP b .+. int2SoP 1) idx
-      pure . scaleSoP c . termToSoP $
-        SumSlice (Indicator (Var x)) lb idx
-    mkSum _ _ _ = Nothing
+      let ub = termToSoP (Var i)
+      let e1' = substituteName i b e1
+      pure $ IndexFn it (toCases $ e1' ~+~ SoP2 (mkSumOfSums i lb ub terms))
+  where
+    justPlusRecurrence termsWithFactors
+      | [Recurrence] `elem` map fst termsWithFactors =
+          Just $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
+    justPlusRecurrence _ = Nothing
 rewritePrefixSum indexfn = pure indexfn
 
 rewriteCarry :: IndexFn -> IndexFnM IndexFn
