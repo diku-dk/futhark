@@ -303,10 +303,13 @@ instance Pretty Domain where
             pretty (intervalEnd dom)
           ] <> ")"
 
+instance Pretty Iterator where
+  pretty (Forall i dom) =
+    "∀" <> prettyName i <+> "∈" <+> pretty dom
+  pretty Empty = ""
+
 instance Pretty IndexFn where
-  pretty (IndexFn (Forall i dom) e) =
-    "∀" <> prettyName i <+> "∈" <+> pretty dom <+> "." <+> pretty e
-  pretty (IndexFn Empty e) = "." <+> pretty e
+  pretty (IndexFn iter e) = pretty iter <+> "." <+> pretty e
 
 instance Pretty IndexFns where
   pretty env =
@@ -329,6 +332,20 @@ substituteNames substitutions x = do
 
 substituteName :: ASTMappable x => VName -> Term -> x -> x
 substituteName vn x = substituteNames (M.singleton vn x)
+
+-- Rename 'x' to 'y' in 'e'.
+rename :: ASTMappable x => VName -> VName -> x -> x
+rename x y e = do
+  runIdentity $ astMap renamer e
+  where
+    renamer =
+      ASTMapper
+        { mapOnTerm = onTerm,
+          mapOnVName = \vn -> pure $ if vn == x then y else vn
+        }
+    onTerm (Var vn) | vn == x = pure (Var y)
+    onTerm (Var vn) = pure (Var vn)
+    onTerm expr = astMap renamer expr
 
 -- Convert expression to Negation Normal Form.
 toNNF :: Term -> Term
