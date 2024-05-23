@@ -256,7 +256,7 @@ subHistogram pat space histops num_histos kbody = do
                   sComment "perform updates" $ do
                     -- Create new set of uniform buckets
                     -- That is extract each bucket from a SIMD vector lane
-                    extract_buckets <- mapM (dPrim "extract_bucket" . (primExpType . untyped)) bucket'
+                    extract_buckets <- mapM (dPrimSV "extract_bucket" . (primExpType . untyped)) bucket'
                     forM_ (zip extract_buckets bucket') $ \(x, y) ->
                       emit $ Imp.Op $ Imp.ExtractLane (tvVar x) (untyped y) (untyped j)
                     let bucket'' = map tvExp extract_buckets
@@ -269,11 +269,10 @@ subHistogram pat space histops num_histos kbody = do
                         forM_ (zip vs_params' vs') $ \(p, res) ->
                           ifPrimType (paramType p) $ \pt -> do
                             -- Hack to copy varying load into uniform result variable
-                            tmp <- dPrim "tmp" pt
-                            copyDWIMFix (tvVar tmp) [] res is'
-                            extractVectorLane j $
-                              pure $
-                                Imp.SetScalar (paramName p) (Imp.LeafExp (tvVar tmp) pt)
+                            tmp <- dPrimS "tmp" pt
+                            copyDWIMFix tmp [] res is'
+                            extractVectorLane j . pure $
+                              Imp.SetScalar (paramName p) (toExp' pt tmp)
                         updateHisto histop' histop_subhistograms (bucket'' ++ is') j acc_params'
 
     -- Copy the task-local subhistograms to the global subhistograms,
@@ -299,7 +298,7 @@ subHistogram pat space histops num_histos kbody = do
         segred_op = SegBinOp Noncommutative (histOp op) (histNeutral op) (histOpShape op)
 
     red_code <- collect $ do
-      nsubtasks <- dPrim "nsubtasks" int32
+      nsubtasks <- dPrim "nsubtasks"
       sOp $ Imp.GetNumTasks $ tvVar nsubtasks
       emit <=< compileSegRed' (Pat red_pes) segred_space [segred_op] nsubtasks $ \red_cont ->
         red_cont $

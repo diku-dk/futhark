@@ -494,7 +494,7 @@ compileSegScan pat lvl space scans kbody = do
   -- Since stage 2 involves a group size equal to the number of groups
   -- used for stage 1, we have to cap this number to the maximum group
   -- size.
-  stage1_max_num_tblocks <- dPrim "stage1_max_num_tblocks" int64
+  stage1_max_num_tblocks <- dPrim "stage1_max_num_tblocks"
   sOp $ Imp.GetSizeMax (tvVar stage1_max_num_tblocks) SizeThreadBlock
 
   stage1_num_tblocks <-

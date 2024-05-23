@@ -110,7 +110,7 @@ opCompiler (Pat [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblock_size))) = do
   fname <- askFunction
-  max_num_tblocks :: TV Int32 <- dPrim "max_num_tblocks" int32
+  max_num_tblocks :: TV Int64 <- dPrim "max_num_tblocks"
   sOp $
     Imp.GetSize (tvVar max_num_tblocks) (keyWithEntryPoint fname max_num_tblocks_key) $
       sizeClassWithEntryPoint fname SizeGrid
@@ -179,7 +179,7 @@ checkSharedMemoryReqs in_scope code = do
   if not $ all in_scope $ namesToList $ freeIn alloc_sizes
     then pure Nothing
     else do
-      shared_memory_capacity :: TV Int32 <- dPrim "shared_memory_capacity" int32
+      shared_memory_capacity :: TV Int64 <- dPrim "shared_memory_capacity"
       sOp $ Imp.GetSizeMax (tvVar shared_memory_capacity) SizeSharedMemory
 
       let shared_memory_capacity_64 =

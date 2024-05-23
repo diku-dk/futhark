@@ -140,7 +140,7 @@ genAccumulators slugs =
         case paramType p of
           Prim pt
             | shape == mempty ->
-                tvVar <$> dPrim "local_acc" pt
+                dPrimS "local_acc" pt
             | otherwise ->
                 sAllocArray "local_acc" pt shape DefaultSpace
           _ ->

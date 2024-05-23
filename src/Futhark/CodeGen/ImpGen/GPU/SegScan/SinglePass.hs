@@ -116,8 +116,8 @@ inBlockScanLookback ::
   Lambda GPUMem ->
   InKernelGen ()
 inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everythingVolatile $ do
-  flg_x <- dPrim "flg_x" p_int8
-  flg_y <- dPrim "flg_y" p_int8
+  flg_x :: TV Int8 <- dPrim "flg_x"
+  flg_y :: TV Int8 <- dPrim "flg_y"
   let flg_param_x = Param mempty (tvVar flg_x) (MemPrim p_int8)
       flg_param_y = Param mempty (tvVar flg_y) (MemPrim p_int8)
       flg_y_exp = tvExp flg_y
@@ -126,7 +126,7 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
 
   dLParams (lambdaParams scan_lam)
 
-  skip_threads <- dPrim "skip_threads" int32
+  skip_threads <- dPrim "skip_threads"
   let in_block_thread_active =
         tvExp skip_threads .<=. in_block_id
       actual_params = lambdaParams scan_lam
@@ -288,7 +288,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
     -- We could use virtualiseBlocks, but this introduces a barrier which is
     -- redundant in this case, and also we don't need to base virtual block IDs
     -- on the loop variable, but rather on the dynamic IDs.
-    phys_block_id <- dPrim "phys_block_id" int32
+    phys_block_id <- dPrim "phys_block_id"
     sOp $ Imp.GetBlockId (tvVar phys_block_id) 0
     iters <-
       dPrimVE "virtloop_bound" $
@@ -296,7 +296,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
           `divUp` num_phys_blocks_e
 
     sFor "virtloop_i" iters $ const $ do
-      dyn_id <- dPrim "dynamic_id" int32
+      dyn_id <- dPrim "dynamic_id"
       sComment "First thread in block fetches this block's dynamic_id" $ do
         sWhen (ltid32 .==. 0) $ do
           (globalIdMem, _, globalIdOff) <- fullyIndexArray global_id [0]
@@ -421,7 +421,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
       scan_op1 <- renameLambda $ segBinOpLambda scan_op
 
-      accs <- mapM (dPrim "acc") tys
+      accs <- mapM (dPrimSV "acc") tys
       sComment "Scan results (with warp scan)" $ do
         blockScan
           crossesSegment
@@ -484,7 +484,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
           -- sWhen
           sOp local_fence
 
-          status <- dPrim "status" int8 :: InKernelGen (TV Int8)
+          status :: TV Int8 <- dPrim "status"
           copyDWIMFix (tvVar status) [] (Var warpscan) [0]
 
           sIf

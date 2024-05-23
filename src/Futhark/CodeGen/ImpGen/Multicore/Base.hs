@@ -86,8 +86,8 @@ getSpace (SegMap _ space _ _) = space
 
 getLoopBounds :: MulticoreGen (Imp.TExp Int64, Imp.TExp Int64)
 getLoopBounds = do
-  start <- dPrim "start" int64
-  end <- dPrim "end" int64
+  start <- dPrim "start"
+  end <- dPrim "end"
   emit $ Imp.Op $ Imp.GetLoopBounds (tvVar start) (tvVar end)
   pure (tvExp start, tvExp end)
 
@@ -278,7 +278,7 @@ extractVectorLane j code = do
         -- ISPC v1.17 does not support extract on f16 yet..
         -- Thus we do this stupid conversion to f32
         Prim (FloatType Float16) -> do
-          tv <- dPrim "hack_extract_f16" (FloatType Float32)
+          tv :: TV Float <- dPrim "hack_extract_f16"
           emit $ Imp.SetScalar (tvVar tv) e
           emit $ Imp.Op $ Imp.ExtractLane vname (untyped $ tvExp tv) ut_exp
         _ -> emit $ Imp.Op $ Imp.ExtractLane vname e ut_exp
@@ -383,14 +383,14 @@ atomicUpdateLocking atomicBinOp lam
         -- compare-and-swap if 32 bits.
         forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
           -- Common variables.
-          old <- dPrim "old" t
+          old <- dPrimS "old" t
 
           (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
 
-          case opHasAtomicSupport (tvVar old) arr' (sExt32 <$> bucket_offset) op of
+          case opHasAtomicSupport old arr' (sExt32 <$> bucket_offset) op of
             Just f -> sOp $ f $ Imp.var y t
             Nothing ->
-              atomicUpdateCAS t a (tvVar old) bucket x $
+              atomicUpdateCAS t a old bucket x $
                 x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
     opHasAtomicSupport old arr' bucket' bop = do
@@ -406,12 +406,12 @@ atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
     supportedPrims (primBitSize t) = AtomicCAS $ \[arr] bucket -> do
-      old <- dPrim "old" t
-      atomicUpdateCAS t arr (tvVar old) bucket (paramName xp) $
+      old <- dPrimS "old" t
+      atomicUpdateCAS t arr old bucket (paramName xp) $
         compileBody' [xp] $
           lambdaBody op
 atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
-  old <- dPrim "old" int32
+  old <- dPrim "old"
   continue <- dPrimVol "continue" int32 (0 :: Imp.TExp Int32)
 
   -- Correctly index into locks.
@@ -512,7 +512,7 @@ atomicUpdateCAS t arr old bucket x do_op = do
 
   everythingVolatile $ copyDWIMFix old [] (Var arr) bucket
 
-  old_bits_v <- tvVar <$> dPrim "old_bits" int
+  old_bits_v <- dPrimS "old_bits" int
   old_bits_v <~~ toBits (Imp.var old t)
   let old_bits = Imp.var old_bits_v int
 

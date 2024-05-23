@@ -97,7 +97,7 @@ computeHistoUsage space op = do
 
   -- Create names for the intermediate array memory blocks,
   -- memory block sizes, arrays, and number of subhistograms.
-  num_subhistos <- dPrim "num_subhistos" int32
+  num_subhistos <- dPrim "num_subhistos"
   subhisto_infos <- forM (zip (histDest op) (histNeutral op)) $ \(dest, ne) -> do
     dest_t <- lookupType dest
     dest_mem <- entryArrayLoc <$> lookupArray dest
@@ -242,7 +242,7 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
           t64 $
             r64 hist_T / hist_C_max
 
-  hist_L2 <- dPrim "L2_size" int32
+  hist_L2 :: TV Int32 <- dPrim "L2_size"
   -- Equivalent to F_L2*L2 in paper.
   sOp $ Imp.GetSizeMax (tvVar hist_L2) Imp.SizeCache
 
@@ -253,7 +253,7 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
         (hist_k_RF * hist_RF)
           / (hist_L2_ln_sz / r64 hist_el_size)
 
-  hist_S <- dPrim "hist_S" int32
+  hist_S <- dPrim "hist_S"
 
   -- For sparse histograms (H exceeds N) we only want a single chunk.
   sIf
@@ -887,10 +887,10 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
       segment_dims = init space_sizes
       segmented = not $ null segment_dims
 
-  hist_L <- dPrim "hist_L" int32
+  hist_L :: TV Int64 <- dPrim "hist_L"
   sOp $ Imp.GetSizeMax (tvVar hist_L) Imp.SizeSharedMemory
 
-  max_tblock_size <- dPrim "max_tblock_size" int32
+  max_tblock_size :: TV Int64 <- dPrim "max_tblock_size"
   sOp $ Imp.GetSizeMax (tvVar max_tblock_size) Imp.SizeThreadBlock
 
   -- XXX: we need to record for later use that max_tblock_size is the
