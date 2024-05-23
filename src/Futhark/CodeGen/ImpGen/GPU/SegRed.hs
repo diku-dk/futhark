@@ -920,7 +920,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
       red_arrs = slugBlockRedArrs slug
       block_res_arrs = blockResArrs slug
 
-  old_counter <- dPrim "old_counter" int32
+  old_counter :: TV Int32 <- dPrim "old_counter" int32
   (counter_mem, _, counter_offset) <-
     fullyIndexArray
       counters
@@ -942,7 +942,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
         $ untyped (1 :: Imp.TExp Int32)
       -- Now check if we were the last block to write our result.  If
       -- so, it is our responsibility to produce the final result.
-      sWrite sync_arr [0] $ untyped $ tvExp old_counter .==. blocks_per_segment - 1
+      sWrite sync_arr [0] $ untyped $ tvExp old_counter .==. sExt32 (blocks_per_segment - 1)
 
   sOp $ Imp.Barrier Imp.FenceGlobal
 
