@@ -4,12 +4,10 @@ import Futhark.Analysis.View.Representation
 import Futhark.Analysis.View.Monad
 import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NE
-import qualified Futhark.SoP.SoP as SoP
 import Data.Set (notMember)
 import Control.Monad.RWS hiding (Sum)
-import Futhark.MonadFreshNames (newNameFromString)
-import Futhark.Util.Pretty (prettyString)
-import Debug.Trace (trace)
+import qualified Futhark.SoP.SoP as SoP
+import Futhark.SoP.SoP (int2SoP, sym2SoP, sopFromList, sopToLists, scaleSoP, (.+.), (.-.), (.*.))
 
 normalise :: (Applicative f, ASTMappable a) => a -> f a
 normalise indexfn =
@@ -52,7 +50,7 @@ normalise indexfn =
       c' <- normTerm c
       case c' of
         -- [[not x]] => 1 + -1*[[x]]
-        Not x -> pure . SoP2 $ SoP.int2SoP 1 SoP..-. SoP.sym2SoP (Indicator x)
+        Not x -> pure . SoP2 $ int2SoP 1 .-. sym2SoP (Indicator x)
         _ -> pure (Indicator c')
     normTerm x@(SoP2 _) = do
       mergeSums <$> astMap m x
@@ -62,7 +60,7 @@ normalise indexfn =
         -- the number of terms in the SoP.
         mergeSums :: Term -> Term
         mergeSums (SoP2 s) = do
-          SoP2 $ SoP.sopFromList (foldl absorbTerm [] (getSoP s))
+          SoP2 $ sopFromList (foldl absorbTerm [] (getSoP s))
         mergeSums t = t
 
         absorbTerm [] t2 = [t2]
@@ -75,25 +73,25 @@ normalise indexfn =
         -- Relies on sorting of SoP and Term to match.
         -- merge a b | trace ("merge " <> prettyString a <> " " <> prettyString b <> "\n" <> show a <> "\n" <> show b) False = undefined
         merge ([SumSlice e1 lb ub], c) ([Idx e2 i], c')
-          | ubp1 <- ub SoP..+. SoP.int2SoP 1,
+          | ubp1 <- ub .+. int2SoP 1,
             i == ubp1,
             c == c',
             e1 == e2 =
               Just ([SumSlice e1 lb ubp1], c)
         merge ([SumSlice e1 lb ub], c) ([Idx e2 i], c')
-          | lbm1 <- lb SoP..-. SoP.int2SoP 1,
+          | lbm1 <- lb .-. int2SoP 1,
             i == lbm1,
             c == c',
             e1 == e2 =
               Just ([SumSlice e1 lbm1 ub], c)
         merge ([SumSlice e1 lb ub], c) ([Indicator (Idx e2 i)], c')
-          | ubp1 <- ub SoP..+. SoP.int2SoP 1,
+          | ubp1 <- ub .+. int2SoP 1,
             i == ubp1,
             c == c',
             e1 == Indicator e2 =
               Just ([SumSlice e1 lb ubp1], c)
         merge ([SumSlice e1 lb ub], c) ([Indicator (Idx e2 i)], c')
-          | lbm1 <- lb SoP..-. SoP.int2SoP 1,
+          | lbm1 <- lb .-. int2SoP 1,
             i == lbm1,
             c == c',
             e1 == Indicator e2 =
@@ -129,9 +127,9 @@ simplifyRule3 (IndexFn it (Cases cases))
   | Just sops <- mapM (justConstant . snd) cases = do
     let preds = NE.map fst cases
         sumOfIndicators =
-          SoP.normalize . foldl1 (SoP..+.) . NE.toList $
+          SoP.normalize . foldl1 (.+.) . NE.toList $
             NE.zipWith
-              (\p x -> SoP.sym2SoP (Indicator p) SoP..*. SoP.int2SoP x)
+              (\p x -> sym2SoP (Indicator p) .*. int2SoP x)
               preds
               sops
     tell ["Using simplification rule: integer-valued cases"]
@@ -172,11 +170,11 @@ rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
     b == domainSegStart dom = do
       tell ["Using prefix sum rule"]
       let e1' = substituteName i b e1
-      pure $ IndexFn it (toCases $ e1' ~+~ SoP2 (foldl1 (SoP..+.) sums))
+      pure $ IndexFn it (toCases $ e1' ~+~ SoP2 (foldl1 (.+.) sums))
   where
     justAffinePlusRecurrence :: Term -> Maybe [([Term], Integer)]
     justAffinePlusRecurrence (SoP2 sop)
-      | termsWithFactors <- SoP.sopToLists (SoP.padWithZero sop),
+      | termsWithFactors <- sopToLists (SoP.padWithZero sop),
         [Recurrence] `elem` map fst termsWithFactors,
         isAffineSoP sop =
           Just $ filter (\(ts,_) -> ts /= [Recurrence]) termsWithFactors
@@ -186,16 +184,16 @@ rewritePrefixSum (IndexFn it@(Forall i'' dom) (Cases cases))
     -- mkSum :: a -> Term -> ([Term], Integer)
     mkSum i b ([], c) =
       -- This would be ∑j∈[lb, ..., ub] c so rewrite it to (ub - lb + 1) * c.
-      let lb = termToSoP b SoP..+. SoP.int2SoP 1
+      let lb = termToSoP b .+. int2SoP 1
           ub = termToSoP (Var i)
-      in  pure $ SoP.scaleSoP c (ub SoP..-. lb SoP..+. SoP.int2SoP 1)
+      in  pure $ scaleSoP c (ub .-. lb .+. int2SoP 1)
     mkSum i b ([Idx (Var x) idx], c) = do
-      let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) idx
-      pure . SoP.scaleSoP c . termToSoP $
+      let lb = substituteName i (SoP2 $ termToSoP b .+. int2SoP 1) idx
+      pure . scaleSoP c . termToSoP $
         SumSlice (Var x) lb idx
     mkSum i b ([Indicator (Idx (Var x) idx)], c) = do
-      let lb = substituteName i (SoP2 $ termToSoP b SoP..+. SoP.int2SoP 1) idx
-      pure . SoP.scaleSoP c . termToSoP $
+      let lb = substituteName i (SoP2 $ termToSoP b .+. int2SoP 1) idx
+      pure . scaleSoP c . termToSoP $
         SumSlice (Indicator (Var x)) lb idx
     mkSum _ _ _ = Nothing
 rewritePrefixSum indexfn = pure indexfn
