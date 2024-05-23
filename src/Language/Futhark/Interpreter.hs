@@ -262,7 +262,7 @@ checkShape _ shape2 =
 
 type Value = Language.Futhark.Interpreter.Values.Value EvalM
 
-asInteger :: Value -> Integer
+asInteger :: Value -> Integer -- TODO: Seeds!
 asInteger (ValuePrim (SignedValue v)) = P.valueIntegral v
 asInteger (ValuePrim (UnsignedValue v)) =
   toInteger (P.valueIntegral (P.doZExt v Int64) :: Word64)
@@ -271,14 +271,14 @@ asInteger v = error $ "Unexpectedly not an integer: " <> show v
 asInt :: Value -> Int
 asInt = fromIntegral . asInteger
 
-asSigned :: Value -> IntValue
+asSigned :: Value -> IntValue -- TODO: Seeds!
 asSigned (ValuePrim (SignedValue v)) = v
 asSigned v = error $ "Unexpected not a signed integer: " <> show v
 
 asInt64 :: Value -> Int64
 asInt64 = fromIntegral . asInteger
 
-asBool :: Value -> Bool
+asBool :: Value -> Bool -- TODO: Seeds!
 asBool (ValuePrim (BoolValue x)) = x
 asBool v = error $ "Unexpectedly not a boolean: " <> show v
 
@@ -1345,11 +1345,11 @@ initialCtx =
     adToValue v = case v of
           AD.Seed s -> ValueSeed s
           AD.Primal v -> ValuePrim $ putV v
-    adToPrim v = putV $ AD.value v
     valueToAD v = case v of
           ValuePrim v' -> primToAD v'
           ValueSeed x' -> AD.Seed x'
           _ -> error "Invalid AD value"
+    adToPrim v = putV $ AD.value v
     primToAD v = AD.Primal $ fromJust $ getV v
     adBinOp op x y = AD.doOp op [x, y]
     adUnOp op x = AD.doOp op [x]
@@ -2036,9 +2036,9 @@ initialCtx =
           pure $ fromIntegral depth
 
         -- Impregnate the values
-        let addSeeds i v = case v of
-              ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth depth (AD.Primal $ fromJust $ getV v') $ M.fromList [(i, AD.Primal $ AD.valueAsType (fromJust $ getV v') 1)])
-              ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth depth (AD.Seed se) $ M.fromList [(i, AD.Primal $ AD.valueAsType (AD.value $ AD.primal se) 1)])
+        let addSeeds i v = case v of -- TODO: Height = Depth?
+              ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Primal $ fromJust $ getV v') $ M.fromList [(i, AD.Primal $ AD.valueAsType (fromJust $ getV v') 1)])
+              ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Seed se) $ M.fromList [(i, AD.Primal $ AD.valueAsType (AD.value $ AD.primal se) 1)])
               ValueRecord m -> second ValueRecord $ M.mapAccum addSeeds i m
               _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
         let v' = snd $ addSeeds (depth * 10) v
@@ -2054,7 +2054,7 @@ initialCtx =
         -- Derive the seeds
         let deriveSeeds v = case v of
               ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
-              ValueSeed s@(AD.JvpSeed d _ _ m) ->
+              ValueSeed s@(AD.JvpSeed d _ m) ->
                 if d == depth then
                   case M.lookup (depth * 10) m of
                     Just v -> unpackValue v

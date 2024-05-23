@@ -36,12 +36,12 @@ import Data.Foldable (foldlM)
 
 data ADSeed
   = VjpSeed Int Tape
-  | JvpSeed Int Int ADValue (M.Map Int ADValue)
+  | JvpSeed Int ADValue (M.Map Int ADValue)
 
 instance Show ADSeed where
   show :: ADSeed -> String
   show (VjpSeed d v) = "VjpSeed d" <> show d <> " " <> show v
-  show (JvpSeed d _ v dv) = "JvpSeed d" <> show d <> " " <> show v <> " " <> show dv
+  show (JvpSeed d v dv) = "JvpSeed d" <> show d <> " " <> show v <> " " <> show dv
 
 data ADValue
   = Primal PrimValue
@@ -71,11 +71,11 @@ value (Seed s) = value $ primal s
 
 depth :: ADSeed -> Int
 depth (VjpSeed d _) = d
-depth (JvpSeed d _ _ _) = d
+depth (JvpSeed d _ _) = d
 
 primal :: ADSeed -> ADValue
 primal (VjpSeed _ v) = tapeValue v
-primal (JvpSeed _ _ v _) = v
+primal (JvpSeed _ v _) = v
 
 deriveVjp :: Tape -> Maybe (M.Map Int ADValue)
 deriveVjp tp = deriveTape tp (Primal $ valueAsType (value $ tapeValue tp) 1)
@@ -178,7 +178,7 @@ handleOp op p v = do
     case find (\case Right _ -> True
                      Left _  -> False) d of
       Just (Right (VjpSeed {})) -> Seed . VjpSeed maxDepth <$> vjpHandleFn op d v'
-      Just (Right (JvpSeed _ h _ _)) -> jvpHandleFn op d maxDepth h v'
+      Just (Right (JvpSeed {})) -> jvpHandleFn op d maxDepth v'
       _ -> Just $ Primal v -- ?TODO: This never happens, so maybe remove it in some way?
 
 runPrimExp :: PrimExp VName -> M.Map VName ADValue -> Maybe ADValue
@@ -260,39 +260,38 @@ combineDerivatives d v op = do
 
 -- JVP
 
-jvpHandleFn :: Op -> [Either ADValue ADSeed] -> Int -> Int -> ADValue -> Maybe ADValue
-jvpHandleFn op p d h av = if h <= 0 then Just av
-  else do
-    -- Turn everything into jvp values
-    let p' = map (\case
-          Right (JvpSeed _ h v' m) -> (h, v', m)
-          Left  v' -> (0, v', M.empty)
-          _ -> error "And unknown error occured") p -- ?TODO: This is impossible
+jvpHandleFn :: Op -> [Either ADValue ADSeed] -> Int -> ADValue -> Maybe ADValue
+jvpHandleFn op p d av = do
+  -- Turn everything into jvp values
+  let p' = map (\case
+        Right (JvpSeed _ v' m) -> (v', m)
+        Left  v' -> (v', M.empty)
+        _ -> error "And unknown error occured") p -- ?TODO: This is impossible
 
-    -- Create a unique name for each parameter
-    let n = map (VName "d") [1..length p]
-    let m = M.fromList $ zip n $ map (\(h, v, m) -> Seed $ JvpSeed d (h - 1) v m) p'
+  -- Create a unique name for each parameter
+  let n = map (VName "d") [1..length p]
+  let m = M.fromList $ zip n $ map fst p'
 
-    -- Derive the function using the parameters
-    op' <- deriveOp op $ map (`LeafExp` FloatType Float64) n -- TODO: Correct type
-    v' <- mapM (`runPrimExp` m) op'
+  -- Derive the function using the parameters
+  op' <- deriveOp op $ map (`LeafExp` FloatType Float64) n -- TODO: Correct type
+  v' <- mapM (`runPrimExp` m) op'
 
-    let didx = S.toList $ foldl (\x (_, _, m') -> S.union x (S.fromList $ M.keys m')) S.empty p'
-    case mapM (\idx -> do
-          -- Get derivatives
-          let mul a b = doOp (multiplyFor op) [a, b]
-          vs <- zipWithM (\d' (_, t, m') ->
-                case M.lookup idx m' of
-                  Just v'' -> mul d' v''
-                  _ -> Just $ Primal $ valueAsType (value t) 0) v' p'
+  let didx = S.toList $ foldl (\x (_, m') -> S.union x (S.fromList $ M.keys m')) S.empty p'
+  case mapM (\idx -> do
+        -- Get derivatives
+        let mul a b = doOp (multiplyFor op) [a, b]
+        vs <- zipWithM (\d' (t, m') ->
+              case M.lookup idx m' of
+                Just v'' -> mul d' v''
+                _ -> Just $ Primal $ valueAsType (value t) 0) v' p'
 
-          -- Sum them up
-          let add a b = doOp (addFor op) [a, b]
-          Just $ do
-            k <- foldlM add (Primal $ FloatValue $ Float64Value 0 {- TODO -}) vs
-            pure (idx, k)) didx of
+        -- Sum them up
+        let add a b = doOp (addFor op) [a, b]
+        Just $ do
+          k <- foldlM add (Primal $ FloatValue $ Float64Value 0 {- TODO -}) vs
+          pure (idx, k)) didx of
 
-      Just k -> do
-        m <- M.fromList <$> sequence k
-        Just $ Seed $ JvpSeed d h av m
-      Nothing -> Just $ Seed $ JvpSeed d h av M.empty
+    Just k -> do
+      m <- M.fromList <$> sequence k
+      Just $ Seed $ JvpSeed d av m
+    Nothing -> Just $ Seed $ JvpSeed d av M.empty
