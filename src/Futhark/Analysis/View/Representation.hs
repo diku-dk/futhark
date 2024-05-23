@@ -148,11 +148,11 @@ class ASTMappable a where
 
 -- Mapping over AST for substitutions.
 instance ASTMappable IndexFn where
-  astMap m (IndexFn (Forall i dom) e) = do
-    dom' <- astMap m dom
-    e' <- astMap m e
-    pure $ IndexFn (Forall i dom') e'
-  astMap m (IndexFn Empty e) = IndexFn Empty <$> astMap m e
+  astMap m (IndexFn iter e) = IndexFn <$> astMap m iter <*> astMap m e
+
+instance ASTMappable Iterator where
+  astMap m (Forall i dom) = Forall <$> mapOnVName m i <*> astMap m dom
+  astMap _ Empty = pure Empty
 
 instance ASTMappable Domain where
   astMap m (Iota n) = Iota <$> mapOnTerm m n
