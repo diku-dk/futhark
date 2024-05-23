@@ -123,7 +123,7 @@ where
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
-import Data.List (foldl', sortOn, transpose)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Futhark.Builder
 import Futhark.IR
@@ -213,8 +213,8 @@ eParam = eSubExp . Var . paramName
 removeRedundantScrutinees :: [SubExp] -> [Case b] -> ([SubExp], [Case b])
 removeRedundantScrutinees ses cases =
   let (ses', vs) =
-        unzip $ filter interesting $ zip ses $ transpose (map casePat cases)
-   in (ses', zipWith Case (transpose vs) $ map caseBody cases)
+        unzip $ filter interesting $ zip ses $ L.transpose (map casePat cases)
+   in (ses', zipWith Case (L.transpose vs) $ map caseBody cases)
   where
     interesting = any (/= Nothing) . snd
 
@@ -230,7 +230,7 @@ eMatch' ses cases_m defbody_m sort = do
   cases <- mapM (traverse insertStmsM) cases_m
   defbody <- insertStmsM defbody_m
   ts <-
-    foldl' generaliseExtTypes
+    L.foldl' generaliseExtTypes
       <$> bodyExtType defbody
       <*> mapM (bodyExtType . caseBody) cases
   cases' <- mapM (traverse $ addContextForBranch ts) cases
@@ -242,7 +242,7 @@ eMatch' ses cases_m defbody_m sort = do
     addContextForBranch ts (Body _ stms val_res) = do
       body_ts <- extendedScope (traverse subExpResType val_res) stmsscope
       let ctx_res =
-            map snd $ sortOn fst $ M.toList $ shapeExtMapping ts body_ts
+            map snd $ L.sortOn fst $ M.toList $ shapeExtMapping ts body_ts
       mkBodyM stms $ subExpsRes ctx_res ++ val_res
       where
         stmsscope = scopeOf stms

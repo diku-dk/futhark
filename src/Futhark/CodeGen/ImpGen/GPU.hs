@@ -13,7 +13,7 @@ module Futhark.CodeGen.ImpGen.GPU
 where
 
 import Control.Monad
-import Data.List (foldl')
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
@@ -186,7 +186,7 @@ checkSharedMemoryReqs in_scope code = do
             sExt64 $ tvExp shared_memory_capacity
           fits size =
             unCount size .<=. shared_memory_capacity_64
-      pure $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
+      pure $ Just $ L.foldl' (.&&.) true (map fits alloc_sizes)
   where
     getGPU = foldMap getKernel
     getKernel (Imp.CallKernel k) | Imp.kernelCheckSharedMemory k = [k]

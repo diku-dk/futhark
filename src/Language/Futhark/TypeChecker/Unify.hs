@@ -31,7 +31,7 @@ where
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
-import Data.List (foldl', intersect)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -502,7 +502,7 @@ unifyWith onDims usage = subunify False
 
                 -- Delete the size variables we introduced to represent
                 -- the existential sizes.
-                modifyConstraints $ \m -> foldl' (flip M.delete) m (b1_dims <> b2_dims)
+                modifyConstraints $ \m -> L.foldl' (flip M.delete) m (b1_dims <> b2_dims)
             where
               (b1', b2') =
                 -- Replace one parameter name with the other in the
@@ -861,7 +861,7 @@ linkVarToTypes usage vn ts = do
   vn_constraint <- M.lookup vn <$> getConstraints
   case vn_constraint of
     Just (lvl, Overloaded vn_ts vn_usage) ->
-      case ts `intersect` vn_ts of
+      case ts `L.intersect` vn_ts of
         [] ->
           unifyError usage mempty noBreadCrumbs $
             "Type constrained to one of"

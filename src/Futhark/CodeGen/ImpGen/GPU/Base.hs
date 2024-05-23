@@ -49,7 +49,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
 where
 
 import Control.Monad
-import Data.List (foldl')
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
@@ -256,7 +256,7 @@ fenceForSpace _ = Imp.FenceGlobal
 
 -- | If we are touching these arrays, which kind of fence do we need?
 fenceForArrays :: [VName] -> InKernelGen Imp.Fence
-fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
+fenceForArrays = fmap (L.foldl' max Imp.FenceLocal) . mapM need
   where
     need arr =
       fmap (fenceForSpace . entryMemSpace)
