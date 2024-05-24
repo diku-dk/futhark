@@ -979,7 +979,7 @@ static int gpu_memcpy(struct futhark_context* ctx,
               (event_report_fn)cuda_event_report);
     CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
   }
-  CUDA_SUCCEED_OR_RETURN(cuMemcpy(dst+dst_offset, src+src_offset, nbytes));
+  CUDA_SUCCEED_OR_RETURN(cuMemcpyAsync(dst+dst_offset, src+src_offset, nbytes, ctx->stream));
   if (event != NULL) {
     CUDA_SUCCEED_FATAL(cuEventRecord(event->end, ctx->stream));
   }
