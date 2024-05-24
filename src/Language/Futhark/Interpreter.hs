@@ -1995,6 +1995,14 @@ initialCtx =
           putExtSize (VName (nameFromString "$AD_DEPTH") (-1)) $ ValuePrim $ UnsignedValue $ Int32Value $ depth + 1
           pure $ fromIntegral depth
 
+        -- Get the seed values
+        let getSeeds v = case v of
+              ValuePrim _ -> [valueToAD v]
+              ValueSeed _ -> [valueToAD v]
+              ValueRecord m -> foldl1 (++) (M.map getSeeds m)
+              _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
+        let s' = getSeeds s
+
         -- Impregnate the values
         let addSeeds i v = case v of
               ValuePrim v' -> (i + 1, ValueSeed $ AD.VjpSeed depth $ AD.TapeId i $ AD.Primal $ fromJust $ getV v')
@@ -2007,20 +2015,27 @@ initialCtx =
         out <- apply noLoc mempty f v'
 
         -- Derive the seeds
-        let deriveSeeds v = case v of
-              ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
+        let deriveSeeds j i v = case v of
+              ValuePrim v' -> (i + 1, primToAD v')
               ValueSeed s@(AD.VjpSeed d tp) ->
                 if d == depth then
-                  case M.lookup 0 <$> AD.deriveVjp tp of
-                    Just (Just (AD.Seed   v')) -> ValueSeed v'
-                    Just (Just (AD.Primal v')) -> ValuePrim $ putV v'
-                    _ -> ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
-                else ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
-              ValueRecord m -> ValueRecord $ M.map deriveSeeds m
+                  case M.lookup j <$> AD.deriveVjp tp (s' !! i) of
+                    Just (Just v') -> (i + 1, v')
+                    _ -> (i + 1, AD.Primal $ AD.valueAsType (AD.value $ AD.primal s) 0)
+                else (i + 1, AD.Primal $ AD.valueAsType (AD.value $ AD.primal s) 0)
+              ValueRecord m -> do
+                let acc = M.mapAccum (deriveSeeds j) i m -- TODO: Fix types
+                (fst acc, foldl (\x y -> fromJust $ adBinOp (AD.OpBin $ P.FAdd Float64) x y) (AD.Primal $ P.FloatValue $ Float64Value 0) $ M.elems $ snd acc)
+              _ -> error "Not implemented (d19h782)" -- TODO: Arrays?
+        
+        let deriveFromV i v = case v of
+              ValuePrim _ -> (i + 1, adToValue $ snd $ deriveSeeds i 0 out)
+              ValueSeed _ -> (i + 1, adToValue $ snd $ deriveSeeds i 0 out)
+              ValueRecord m -> second ValueRecord $ M.mapAccum deriveFromV i m
               _ -> error "Not implemented (d19h782)" -- TODO: Arrays?
 
         -- Make sure to return a tuple
-        let k = deriveSeeds out
+        let k = snd $ deriveFromV 0 v
         pure $ toTuple [k, k] -- TODO: ???
 
     def "jvp2" = Just $
@@ -2035,30 +2050,31 @@ initialCtx =
           putExtSize (VName (nameFromString "$AD_DEPTH") (-1)) $ ValuePrim $ UnsignedValue $ Int32Value $ depth + 1
           pure $ fromIntegral depth
 
+        -- Get the seed values
+        let getSeeds v = case v of
+              ValuePrim _ -> [valueToAD v]
+              ValueSeed _ -> [valueToAD v]
+              ValueRecord m -> foldl1 (++) (M.map getSeeds m)
+              _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
+        let s' = getSeeds s
+
         -- Impregnate the values
-        let addSeeds i v = case v of -- TODO: Height = Depth?
-              ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Primal $ fromJust $ getV v') $ M.fromList [(i, AD.Primal $ AD.valueAsType (fromJust $ getV v') 1)])
-              ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Seed se) $ M.fromList [(i, AD.Primal $ AD.valueAsType (AD.value $ AD.primal se) 1)])
+        let addSeeds i v = case v of
+              ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Primal $ fromJust $ getV v') $ M.fromList [(i, s' !! i)])
+              ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Seed se) $ M.fromList [(i, s' !! i)])
               ValueRecord m -> second ValueRecord $ M.mapAccum addSeeds i m
               _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
-        let v' = snd $ addSeeds (depth * 10) v
+        let v' = snd $ addSeeds 0 v
 
         -- Run the function
         out <- apply noLoc mempty f v'
-
-        let unpackValue v = case v of
-              AD.Primal v -> ValuePrim $ putV v
-              AD.Seed s -> if AD.depth s >= depth then unpackValue $ AD.primal s
-                                                  else ValueSeed s
 
         -- Derive the seeds
         let deriveSeeds v = case v of
               ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
               ValueSeed s@(AD.JvpSeed d _ m) ->
-                if d == depth then
-                  case M.lookup (depth * 10) m of
-                    Just v -> unpackValue v
-                    _ -> ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
+                if d == depth then -- TODO: Fix add op
+                  adToValue $ foldl (\x y -> fromJust $ adBinOp (AD.OpBin $ P.FAdd Float64) x y) (AD.Primal $ AD.valueAsType (AD.value $ AD.primal s) 0) $ M.elems m
                 else ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
               ValueRecord m -> ValueRecord $ M.map deriveSeeds m
               _ -> error "Not implemented (d19hasd782)" -- TODO: Arrays?

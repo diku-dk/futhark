@@ -15,6 +15,8 @@ module Language.Futhark.Interpreter.AD
     valueAsType,
     prettytp,
 
+    addFor,
+
     doOp,
     handleOp,
   )
@@ -77,9 +79,6 @@ primal :: ADSeed -> ADValue
 primal (VjpSeed _ v) = tapeValue v
 primal (JvpSeed _ v _) = v
 
-deriveVjp :: Tape -> Maybe (M.Map Int ADValue)
-deriveVjp tp = deriveTape tp (Primal $ valueAsType (value $ tapeValue tp) 1)
-
 valueAsType :: PrimValue -> Rational -> PrimValue
 valueAsType v c = case v of
   IntValue (Int8Value _)      -> IntValue $ Int8Value $ round c
@@ -101,9 +100,9 @@ opTypeMatch (OpFn   fn) p = case M.lookup fn primFuns of
                           Nothing -> False
 
 opReturnType :: Op -> PrimType
-opReturnType (OpBin  op) = binOpType  op
-opReturnType (OpCmp  op) = cmpOpType  op
-opReturnType (OpUn   op) = unOpType   op
+opReturnType (OpBin  op) = binOpType op
+opReturnType (OpCmp  op) = cmpOpType op
+opReturnType (OpUn   op) = unOpType  op
 opReturnType (OpConv op) = snd $ convOpType op
 opReturnType (OpFn   fn) = fromJust $ do
                             (_, t, _) <- M.lookup fn primFuns
@@ -235,10 +234,10 @@ tapeValue (TapeId _ v) = v
 tapeValue (TapePrim v) = v
 tapeValue (TapeOp _ _ o) = o
 
-deriveTape :: Tape -> ADValue -> Maybe (M.Map Int ADValue)
-deriveTape (TapeId i _) v = Just $ M.fromList [(i, v)]
-deriveTape (TapePrim _) _ = Just M.empty
-deriveTape (TapeOp op p _) v = do
+deriveVjp :: Tape -> ADValue -> Maybe (M.Map Int ADValue)
+deriveVjp (TapeId i _) v = Just $ M.fromList [(i, v)]
+deriveVjp (TapePrim _) _ = Just M.empty
+deriveVjp (TapeOp op p _) v = do
   -- Create a unique name for each parameter
   let n = map (VName "d") [1..length p]
   let m = M.fromList $ zip n $ map tapeValue p
@@ -248,7 +247,7 @@ deriveTape (TapeOp op p _) v = do
   v' <- mapM (`runPrimExp` m) op'
 
   -- Derive parameters and combine
-  pd <- zipWithM deriveTape p v'
+  pd <- zipWithM deriveVjp p v'
   combineDerivatives pd v op
 
 combineDerivatives :: [M.Map Int ADValue] -> ADValue -> Op -> Maybe (M.Map Int ADValue)
