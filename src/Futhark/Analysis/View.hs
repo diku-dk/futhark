@@ -5,7 +5,7 @@ module Futhark.Analysis.View (mkIndexFnProg) where
 import Data.List qualified as L
 import Data.List.NonEmpty(NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe, mapMaybe, catMaybes)
+import Data.Maybe (fromMaybe, catMaybes)
 import Futhark.Analysis.View.Representation
 import Futhark.Analysis.View.Monad
 import Futhark.Analysis.View.Refine hiding (debugM)
@@ -22,9 +22,9 @@ import qualified Data.Set as S
 import Control.Monad.RWS.Strict hiding (Sum)
 import Futhark.SoP.Monad (addRange, addEquiv)
 import qualified Text.LaTeX.Packages.AMSMath as Math
-import Text.LaTeX (textbf, newline, hrulefill, noindent, section')
+import Text.LaTeX (textbf, newline, section')
 import Futhark.Analysis.View.Latex
-import Language.Futhark.Traversals (bareExp)
+import Futhark.SoP.FourierMotzkin (($==$))
 
 
 --------------------------------------------------------------
@@ -33,6 +33,10 @@ import Language.Futhark.Traversals (bareExp)
 -- This function handles type refinements. Type refinements are on the
 -- form (arg: {t | \x -> f x}) where arg is applied to \x -> f x.
 handleRefinementTypes :: E.Exp -> IndexFnM ()
+handleRefinementTypes (E.Var (E.QualName _ vn)
+                             (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) _)
+  | trace ("handleRefinementTypes " <> prettyString vn <> ": " <> prettyString ref) False =
+      undefined
 handleRefinementTypes (E.Var (E.QualName _ vn)
                              (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) _) =
   handleRefinement ref vn
@@ -45,7 +49,6 @@ handleRefinementTypes _ = pure ()
 -- a function that takes a name and adds a range with that name
 -- lower bounded by 0 to the environment.
 handleRefinement :: E.Exp -> (E.VName -> IndexFnM ())
-handleRefinement ref | trace ("handleRefinement: " <> prettyString ref) False = undefined
 handleRefinement (E.Lambda [E.Id x _ _] e _ _ _) =
   \name -> handleRefinement' name x e
 handleRefinement _ = undefined
@@ -394,20 +397,22 @@ forward (E.AppExp (E.Apply f args _) _)
       unless (c == (toNNF . Not $ neg_c)) (error "this should never happen")
       vals_fn <- forward vals_arg
       IndexFn iter_dest dest <- forward dest_arg
+      let sz_dest =
+            case iteratorEnd iter_dest of
+              Just end -> end
+              Nothing -> error "scatter: Destination domain empty or end unknown."
       -- The size of dest is the final value that the iterator takes on
       -- since b is monotonically increasing. (Later we check that
       -- sz_dest == b[m-1] to actually confirm that there's a correspondence.)
-      let Just sz_dest = iteratorEnd iter_dest -- TODO unsafe
-      debugM ("sz_dest " <> prettyString sz_dest)
       let inds_fn = IndexFn iter_inds inds
       -- Check that exactly one branch is OOB---and determine which.
       oob_test <- getOOB (SoP.int2SoP 0) (termToSoP sz_dest) inds_fn
       case oob_test of
-        Just ((_, oob), (cond_b, b)) -> do
+        Just ((_, _oob), (cond_b, b)) -> do
           -- check monotonicity on b
           isMonotonic <- checkMonotonic iter_inds (cond_b, b)
           -- TODO allow monotonically decreasing by just reversing b
-          unless isMonotonic (error "couldn't prove that scatter indices are monotonically increasing")
+          unless isMonotonic (error "scatter: Couldn't prove that indices are monotonically increasing.")
           -- check that cases match pattern with OOB < 0 or OOB > b[m-1]
           -- check that iterator matches that of inds
           -- check dest has size b[m-1]
@@ -421,8 +426,15 @@ forward (E.AppExp (E.Apply f args _) _)
           let b' = substituteName k (Var k') b
           -- Leave out cond_b; see comment.
           let cond = Var i :== b' -- :&& cond_b
+          let ydom = Cat k' m b'
+          d <- refineTerm $ domainEnd ydom :== sz_dest
+          let domainIsCovered =
+                case d of
+                  Bool True -> True
+                  _ -> False
+          unless domainIsCovered (error "scatter: Destination domain not covered.")
           debugM ("cond_b " <> show cond_b)
-          let y = IndexFn (Forall i (Cat k' m b'))
+          let y = IndexFn (Forall i ydom)
                           (listToCases [(cond, idx vals_k k'),
                                         (Not cond, idx dest_i i)])
           tell ["Using Scatter in-bounds-monotonic indices rule ", toLaTeX y]

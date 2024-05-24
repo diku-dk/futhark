@@ -1,8 +1,8 @@
 let mk_flag_array 't 'a [m]
-        (zero: t)
         (shape: {[m]i64 | \shp -> forall shp (>= 0)})
-        (xs: [m]t)
-        (n: {i64 | \n' -> n' == sum shape}): {[n]t | \res-> is_indexfn res} =
+        (n: {i64 | \n' -> n' == sum shape})
+        (zero: t)
+        (xs: [m]t) : {[n]t | \res-> is_indexfn res} =
   let shp_rot = map (\ i -> if i==0 then 0 else shape[i-1]) (iota m)
   let shp_scn = scan (+) 0i64 shp_rot
   let shp_ind =
@@ -33,7 +33,7 @@ let mkseg [m]
       (n: {i64 | \n' -> n' == sum shape})
       : {[]i64 | \res-> is_indexfn res} =
   let flags1 = map (\i -> i + 1) (iota m)
-  let flags = mk_flag_array 0i64 shape flags1 n
+  let flags = mk_flag_array shape n 0i64 flags1
   let flags_sgmind = map (\f -> if f == 0 then 0 else f-1) flags
   let flags_bool = map (\f -> f > 0) flags
   let outinds = sgm_sum flags_bool flags_sgmind

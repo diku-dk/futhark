@@ -243,14 +243,6 @@ refineRelation rel x y = do
     solve (a :<= b) = termToSoP a $<=$ termToSoP b
     solve _ = pure False
 
-equivD :: Domain -> Domain -> IndexFnM Bool
-equivD xD yD = do
-  xStart <- refineTerm $ domainStart xD
-  yStart <- refineTerm $ domainStart yD
-  xEnd <- refineTerm $ domainEnd xD
-  yEnd <- refineTerm $ domainEnd yD
-  pure $ xStart == yStart && xEnd == yEnd
-
 checkMonotonic :: Iterator -> (Term, Term) -> IndexFnM Bool
 checkMonotonic iter@(Forall _ _) (cond, SumSlice e _ _)
   | [([Var xs], 1)] <- getSoP (termToSoP e) = do

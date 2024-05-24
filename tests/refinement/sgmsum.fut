@@ -1,5 +1,6 @@
-def segmented_sum [n][m] 't
+def segmented_sum [m] 't
       (shape: {[m]i64 | \shp -> forall shp (>= 0)})
+      (n: {i64 | \n' -> n' == sum shape})
       (xs: [n]i64): {[n]i64 | \res-> is_indexfn res} =
   -- mkFlagArray
   let shp_rot = map (\ i -> if i==0 then 0 else shape[i-1]) (iota m)
