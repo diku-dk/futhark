@@ -960,7 +960,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
         Imp.Atomic DefaultSpace $
           Imp.AtomicAdd Int32 (tvVar old_counter) counter_mem counter_offset $
             untyped $
-              negate blocks_per_segment
+              sExt32 (negate blocks_per_segment)
 
     sLoopNest (slugShape slug) $ \vec_is -> do
       unless (null $ slugShape slug) $
