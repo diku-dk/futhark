@@ -8,7 +8,8 @@ where
 import Control.Monad (forM, forM_, liftM2, liftM3)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.RWS
-import Control.Monad.Trans.State qualified as State
+import Control.Monad.Trans.State qualified as StateT
+import Control.Monad.State.Class qualified as State
 import Data.Bifunctor (first, second)
 import Data.Bits qualified as Bits
 import Data.List qualified as L
@@ -29,7 +30,8 @@ import Language.WGSL qualified as WGSL
 
 -- State carried during WebGPU translation.
 data WebGPUS = WebGPUS
-  { -- | Accumulated code.
+  { wsNameSrc :: VNameSource,
+    -- | Accumulated code.
     wsCode :: T.Text,
     wsSizes :: M.Map Name SizeClass,
     wsMacroDefs :: [(Name, KernelConstExp)],
@@ -39,7 +41,20 @@ data WebGPUS = WebGPUS
   }
 
 -- The monad in which we perform the overall translation.
-type WebGPUM = State.State WebGPUS
+newtype WebGPUM a = WebGPUM (StateT.State WebGPUS a)
+  deriving
+    ( Functor,
+      Applicative,
+      Monad,
+      State.MonadState WebGPUS
+    )
+
+instance MonadFreshNames WebGPUM where
+  getNameSource = State.gets wsNameSrc
+  putNameSource src = State.modify $ \s -> s {wsNameSrc = src}
+
+runWebGPUM :: WebGPUM a -> WebGPUS -> (a, WebGPUS)
+runWebGPUM (WebGPUM m) = StateT.runState m
 
 addSize :: Name -> SizeClass -> WebGPUM ()
 addSize key sclass =
@@ -131,6 +146,12 @@ addBlockDim dim ident dynamic =
 addSharedMem :: WGSL.Ident -> Exp -> KernelM ()
 addSharedMem ident e =
   modify $ \s -> s {ksSharedMem = (ident, e) : ksSharedMem s}
+
+-- | Whether the identifier is the name of a shared memory allocation.
+-- TODO: Should probably store the allocation name in the state instead of
+-- reconstructing the _size name here.
+isShared :: WGSL.Ident -> KernelM Bool
+isShared ident = any (\(sz, _) -> sz == ident <> "_size") <$> gets ksSharedMem
 
 -- | Add a scalar struct field.
 addScalar :: WGSL.PrimType -> KernelM ()
@@ -257,7 +278,8 @@ kernelsToWebGPU prog =
 
       initial_state =
         WebGPUS
-          { wsCode = mempty,
+          { wsNameSrc = blankNameSource,
+            wsCode = mempty,
             wsSizes = mempty,
             wsMacroDefs = mempty,
             wsKernels = mempty,
@@ -265,7 +287,7 @@ kernelsToWebGPU prog =
           }
 
       ((consts', funs'), translation) =
-        flip State.runState initial_state $
+        flip runWebGPUM initial_state $
           (,) <$> traverse onHostOp consts <*> traverse (traverse (traverse onHostOp)) funs
 
       prog' =
@@ -333,9 +355,19 @@ genFunWrite ::
   Count Elements (TExp Int64) ->
   Exp ->
   KernelM WGSL.Stmt
-genFunWrite fun mem i v =
-  let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
-   in WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
+genFunWrite fun mem i v = do
+  mem' <- getIdent mem
+  shared <- isShared mem'
+  if shared
+     then do
+       let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
+       WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
+     else do
+       let fun' = fun <> "_wg"
+       idxName <- newVName "wgpu_elem_idx"
+       -- TODO: do the right thing here
+       let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
+       WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
 
 genFunRead ::
   WGSL.Ident ->
@@ -343,10 +375,13 @@ genFunRead ::
   VName ->
   Count Elements (TExp Int64) ->
   KernelM WGSL.Stmt
-genFunRead fun tgt mem i =
-  let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
-      call = WGSL.CallExp fun <$> sequence [buf, indexExp i]
-   in WGSL.Assign <$> getIdent tgt <*> call
+genFunRead fun tgt mem i = do
+  mem' <- getIdent mem
+  shared <- isShared mem'
+  let fun' = if shared then fun <> "_wg" else fun
+  let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
+  let call = WGSL.CallExp fun' <$> sequence [buf, indexExp i]
+  WGSL.Assign <$> getIdent tgt <*> call
 
 unsupported :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
 unsupported stmt = pure $ WGSL.Comment $ "Unsupported stmt: " <> prettyText stmt
