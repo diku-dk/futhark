@@ -35,22 +35,22 @@ leqDomains a b = do
     Bool True -> pure True
     _ -> pure False
 
-unifyDomains :: Domain -> Domain -> IndexFnM (Maybe Domain)
-unifyDomains iota1@(Iota {}) iota2@(Iota {}) = do
+getCompatibleDomain :: Domain -> Domain -> IndexFnM (Maybe Domain)
+getCompatibleDomain iota1@(Iota {}) iota2@(Iota {}) = do
   whenM (iota2 `leqDomains` iota1) iota2
-unifyDomains (Iota m) cat@(Cat _ m' _)
+getCompatibleDomain (Iota m) cat@(Cat _ m' _)
   | m == m' =
       pure (Just cat)
-unifyDomains iota@(Iota {}) cat@(Cat {}) = do
+getCompatibleDomain iota@(Iota {}) cat@(Cat {}) = do
   whenM (iota `eqDomains` cat) cat
-unifyDomains cat@(Cat {}) iota@(Iota {}) = do
+getCompatibleDomain cat@(Cat {}) iota@(Iota {}) = do
   whenM (cat `eqDomains` iota) cat
-unifyDomains (Cat k m b) cat2@(Cat k' m' b')
+getCompatibleDomain (Cat k m b) cat2@(Cat k' m' b')
   | k == k',
     m == m',
     b == b' =
       pure (Just cat2)
-unifyDomains _ _ = pure Nothing
+getCompatibleDomain _ _ = pure Nothing
 
 -- Substitution rules.
 -- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
@@ -74,7 +74,7 @@ sub' x (IndexFn Empty xs) (IndexFn iter_y ys) =
         pure $ substituteName x xval (ycond :&& xcond, yval))
 sub' x q@(IndexFn (Forall i dx) xs) r@(IndexFn (Forall i' dy) ys)
   | i == i' = do
-  d' <- unifyDomains dx dy
+  d' <- getCompatibleDomain dx dy
   case d' of
     Just d'' -> do
       -- This is solely to handle substitution of parameters for top-level defs.
