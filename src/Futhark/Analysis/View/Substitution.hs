@@ -45,12 +45,10 @@ getCompatibleDomain iota@(Iota {}) cat@(Cat {}) = do
   whenM (iota `eqDomains` cat) cat
 getCompatibleDomain cat@(Cat {}) iota@(Iota {}) = do
   whenM (cat `eqDomains` iota) cat
-getCompatibleDomain (Cat k m b) cat2@(Cat k' m' b')
-  | k == k',
-    m == m',
-    b == b' =
-      pure (Just cat2)
-getCompatibleDomain _ _ = pure Nothing
+getCompatibleDomain (Cat k m b) cat2@(Cat k' m' b') =
+  if k == k' && m == m' && b == b' -- TODO could just rename k in x?
+  then pure (Just cat2)
+  else pure Nothing
 
 -- Substitution rules.
 -- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
