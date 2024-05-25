@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Faster device-to-device copies on CUDA.
 
+* "More correctly" detect L2 cache size for OpenCL backend on AMD GPUs.
+
 ### Added
 
 ### Removed
