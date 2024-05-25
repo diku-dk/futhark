@@ -238,6 +238,14 @@ genKernel kernel = do
       genScalarDecls
       genMemoryDecls
 
+      -- FIXME: This is only required to work around a Chrome bug that otherwise
+      -- causes the shader to fail compilation if the kernel never accesses the
+      -- lockstep width. See `gpu_create_kernel` in `rts/c/backends/webgpu.h`
+      -- for more details.
+      lsw <- builtinLockstepWidth
+      addInitStmt $
+        WGSL.Let "_dummy_lockstep_width" (WGSL.VarExp lsw)
+
       wgslBody <- genWGSLStm (ImpGPU.kernelBody kernel)
       addBodyStmt wgslBody
 
