@@ -451,7 +451,7 @@ jobs:
             --cache-extension=cache \
             --concurrency=8
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
-        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl,hendrixgpu18fl
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:a100:1 --job-name=fut-cuda-test
 
   # test-hip:
   #   runs-on: MI100
