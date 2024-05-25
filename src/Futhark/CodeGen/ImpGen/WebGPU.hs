@@ -8,8 +8,7 @@ where
 import Control.Monad (forM, forM_, liftM2, liftM3)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.RWS
-import Control.Monad.Trans.State qualified as StateT
-import Control.Monad.State.Class qualified as State
+import Control.Monad.Trans.State qualified as State
 import Data.Bifunctor (first, second)
 import Data.Bits qualified as Bits
 import Data.List qualified as L
@@ -30,8 +29,7 @@ import Language.WGSL qualified as WGSL
 
 -- State carried during WebGPU translation.
 data WebGPUS = WebGPUS
-  { wsNameSrc :: VNameSource,
-    -- | Accumulated code.
+  { -- | Accumulated code.
     wsCode :: T.Text,
     wsSizes :: M.Map Name SizeClass,
     wsMacroDefs :: [(Name, KernelConstExp)],
@@ -41,20 +39,7 @@ data WebGPUS = WebGPUS
   }
 
 -- The monad in which we perform the overall translation.
-newtype WebGPUM a = WebGPUM (StateT.State WebGPUS a)
-  deriving
-    ( Functor,
-      Applicative,
-      Monad,
-      State.MonadState WebGPUS
-    )
-
-instance MonadFreshNames WebGPUM where
-  getNameSource = State.gets wsNameSrc
-  putNameSource src = State.modify $ \s -> s {wsNameSrc = src}
-
-runWebGPUM :: WebGPUM a -> WebGPUS -> (a, WebGPUS)
-runWebGPUM (WebGPUM m) = StateT.runState m
+type WebGPUM = State.State WebGPUS
 
 addSize :: Name -> SizeClass -> WebGPUM ()
 addSize key sclass =
@@ -286,8 +271,7 @@ kernelsToWebGPU prog =
 
       initial_state =
         WebGPUS
-          { wsNameSrc = blankNameSource,
-            wsCode = mempty,
+          { wsCode = mempty,
             wsSizes = mempty,
             wsMacroDefs = mempty,
             wsKernels = mempty,
@@ -295,7 +279,7 @@ kernelsToWebGPU prog =
           }
 
       ((consts', funs'), translation) =
-        flip runWebGPUM initial_state $
+        flip State.runState initial_state $
           (,) <$> traverse onHostOp consts <*> traverse (traverse (traverse onHostOp)) funs
 
       prog' =
@@ -353,43 +337,56 @@ wgslBufferType (Bool, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int8, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int16, _, _) = WGSL.Array $ WGSL.Atomic wgslInt16
 wgslBufferType (IntType Int32, False, _) = WGSL.Array WGSL.Int32
-wgslBufferType (IntType Int32, True, Signed) = WGSL.Array $ WGSL.Atomic WGSL.Int32
-wgslBufferType (IntType Int32, True, Unsigned) = WGSL.Array $ WGSL.Atomic WGSL.UInt32
+wgslBufferType (IntType Int32, True, Signed) =
+  WGSL.Array $ WGSL.Atomic WGSL.Int32
+wgslBufferType (IntType Int32, True, Unsigned) =
+  WGSL.Array $ WGSL.Atomic WGSL.UInt32
 wgslBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
-genFunWrite ::
+wgslSharedBufferType ::
+  (PrimType, Bool, Signedness) ->
+  Maybe WGSL.Exp ->
+  WGSL.Typ
+wgslSharedBufferType (Bool, _, _) = WGSL.Array $ WGSL.Bool
+wgslSharedBufferType (IntType Int8, _, _) = WGSL.Array $ WGSL.Int32
+wgslSharedBufferType (IntType Int16, _, _) = WGSL.Array $ WGSL.Int32
+wgslSharedBufferType (IntType Int32, False, _) = WGSL.Array WGSL.Int32
+wgslSharedBufferType (IntType Int32, True, Signed) =
+  WGSL.Array $ WGSL.Atomic WGSL.Int32
+wgslSharedBufferType (IntType Int32, True, Unsigned) =
+  WGSL.Array $ WGSL.Atomic WGSL.UInt32
+wgslSharedBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
+
+genArrayWrite ::
   WGSL.Ident ->
   VName ->
   Count Elements (TExp Int64) ->
   Exp ->
   KernelM WGSL.Stmt
-genFunWrite fun mem i v = do
+genArrayWrite fun mem i v = do
   mem' <- getIdent mem
   shared <- isShared mem'
-  if shared
-     then do
-       let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
-       WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
-     else do
-       let fun' = fun <> "_wg"
-       idxName <- newVName "wgpu_elem_idx"
-       -- TODO: do the right thing here
-       let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
-       WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
+  if not shared
+     then let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
+           in WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
+     else WGSL.AssignIndex mem' <$> indexExp i <*> genWGSLExp v
 
-genFunRead ::
+genArrayRead ::
   WGSL.Ident ->
   VName ->
   VName ->
   Count Elements (TExp Int64) ->
   KernelM WGSL.Stmt
-genFunRead fun tgt mem i = do
+genArrayRead fun tgt mem i = do
+  tgt' <- getIdent tgt
   mem' <- getIdent mem
   shared <- isShared mem'
-  let fun' = if shared then fun <> "_wg" else fun
-  let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
-  let call = WGSL.CallExp fun' <$> sequence [buf, indexExp i]
-  WGSL.Assign <$> getIdent tgt <*> call
+  if not shared
+     then
+       let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
+           call = WGSL.CallExp fun <$> sequence [buf, indexExp i]
+        in WGSL.Assign tgt' <$> call
+     else WGSL.Assign tgt' . WGSL.IndexExp mem' <$> indexExp i
 
 unsupported :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
 unsupported stmt = pure $ WGSL.Comment $ "Unsupported stmt: " <> prettyText stmt
@@ -430,7 +427,8 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
   maybeElemPrimType <- findSingleMemoryType name
   case maybeElemPrimType of
     Just elemPrimType -> do
-      let bufType = wgslBufferType elemPrimType (Just $ WGSL.VarExp sizeName)
+      let bufType = wgslSharedBufferType elemPrimType
+                      (Just $ WGSL.VarExp sizeName)
 
       addOverride sizeName (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
       addDecl $ WGSL.VarDecl [] WGSL.Workgroup moduleName bufType
@@ -446,16 +444,16 @@ genWGSLStm s@(DeclareArray {}) = unsupported s
 genWGSLStm s@(Allocate {}) = unsupported s
 genWGSLStm s@(Free _ _) = unsupported s
 genWGSLStm s@(Copy {}) = unsupported s
-genWGSLStm (Write mem i Bool _ _ v) = genFunWrite "write_bool" mem i v
-genWGSLStm (Write mem i (IntType Int8) _ _ v) = genFunWrite "write_i8" mem i v
-genWGSLStm (Write mem i (IntType Int16) _ _ v) = genFunWrite "write_i16" mem i v
+genWGSLStm (Write mem i Bool _ _ v) = genArrayWrite "write_bool" mem i v
+genWGSLStm (Write mem i (IntType Int8) _ _ v) = genArrayWrite "write_i8" mem i v
+genWGSLStm (Write mem i (IntType Int16) _ _ v) = genArrayWrite "write_i16" mem i v
 genWGSLStm (Write mem i _ _ _ v) =
   liftM3 WGSL.AssignIndex (getIdent mem) (indexExp i) (genWGSLExp v)
 genWGSLStm (SetScalar name e) =
   liftM2 WGSL.Assign (getIdent name) (genWGSLExp e)
-genWGSLStm (Read tgt mem i Bool _ _) = genFunRead "read_bool" tgt mem i
-genWGSLStm (Read tgt mem i (IntType Int8) _ _) = genFunRead "read_i8" tgt mem i
-genWGSLStm (Read tgt mem i (IntType Int16) _ _) = genFunRead "read_i16" tgt mem i
+genWGSLStm (Read tgt mem i Bool _ _) = genArrayRead "read_bool" tgt mem i
+genWGSLStm (Read tgt mem i (IntType Int8) _ _) = genArrayRead "read_i8" tgt mem i
+genWGSLStm (Read tgt mem i (IntType Int16) _ _) = genArrayRead "read_i16" tgt mem i
 genWGSLStm (Read tgt mem i _ _ _) =
   let index = liftM2 WGSL.IndexExp (getIdent mem) (indexExp i)
    in liftM2 WGSL.Assign (getIdent tgt) index
@@ -468,7 +466,7 @@ genWGSLStm (Call [dest] f args) = do
   WGSL.Assign <$> getIdent dest <*> pure (fun argExps)
 genWGSLStm (Call {}) =
   pure $
-    WGSL.Comment "TODO: Multi-dest calls not supported"
+    WGSL.Comment "TODO: Multi-destination calls not supported"
 genWGSLStm (If cond cThen cElse) =
   liftM3
     WGSL.If
@@ -500,9 +498,6 @@ genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAdd _ dest mem i e))) = do
   val <- genWGSLExp e
   let call = WGSL.CallExp "atomicAdd" [WGSL.UnOpExp "&" idx, val]
   WGSL.Assign <$> getIdent dest <*> pure call
-  --let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
-  --    call = WGSL.CallExp fun <$> sequence [buf, indexExp i]
-  -- in WGSL.Assign <$> getIdent tgt <*> call
 genWGSLStm s@(Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd {}))) = unsupported s
 genWGSLStm s@(Op (ImpGPU.Atomic _ _)) = unsupported s
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceLocal)) =

@@ -20,8 +20,8 @@ fn read_i16(buffer: ptr<storage, array<atomic<i16>>, read_write>, i: i32) -> i16
 }
 
 fn write_i16(buffer: ptr<storage, array<atomic<i16>>, read_write>,
-            i: i32,
-			val: i16
+             i: i32,
+             val: i16
 ) {
   let elem_idx = i / 2;
   let idx_in_elem = i % 2;

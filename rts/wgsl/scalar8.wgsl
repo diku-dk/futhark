@@ -27,7 +27,7 @@ fn read_bool(buffer: ptr<storage, array<atomic<i8>>, read_write>,
 
 fn write_i8(buffer: ptr<storage, array<atomic<i8>>, read_write>,
             i: i32,
-			val: i8
+            val: i8
 ) {
   let elem_idx = i / 4;
   let idx_in_elem = i % 4;
@@ -44,8 +44,8 @@ fn write_i8(buffer: ptr<storage, array<atomic<i8>>, read_write>,
 }
 
 fn write_bool(buffer: ptr<storage, array<atomic<i8>>, read_write>,
-            i: i32,
-			val: bool
+              i: i32,
+              val: bool
 ) {
   if val { write_i8(buffer, i, 1); }
   else { write_i8(buffer, i, 0); }
