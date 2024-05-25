@@ -174,6 +174,7 @@ data KernelOp
   | Barrier Fence
   | MemFence Fence
   | SharedAlloc VName (Count Bytes (TExp Int64))
+  | UniformRead VName VName (Count Elements (TExp Int64)) PrimType Space
   | -- | Perform a barrier and also check whether any
     -- threads have failed an assertion.  Make sure all
     -- threads would reach all 'ErrorSync's if any of them
@@ -247,6 +248,14 @@ instance Pretty KernelOp where
     "error_sync_local()"
   pretty (ErrorSync FenceGlobal) =
     "error_sync_global()"
+  pretty (UniformRead name v is bt space') =
+    pretty name
+      <+> "<-"
+      <+> "read_uniform"
+      <> parens (commasep
+           [ pretty v <> langle <> pretty bt <> pretty space' <> rangle,
+             pretty is
+           ])
   pretty (Atomic _ (AtomicAdd t old arr ind x)) =
     pretty old
       <+> "<-"

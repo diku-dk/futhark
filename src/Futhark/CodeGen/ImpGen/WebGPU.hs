@@ -521,6 +521,12 @@ genWGSLStm (Op (ImpGPU.SharedAlloc name size)) = do
       pure $ WGSL.Comment $ "shared_alloc: " <> name'
     Nothing ->
       pure $ WGSL.Comment $ "discard shared_alloc: " <> name'
+genWGSLStm (Op (ImpGPU.UniformRead tgt mem i _ _)) = do
+  tgt' <- getIdent tgt
+  mem' <- getIdent mem
+  i' <- indexExp i
+  pure $ WGSL.Assign tgt' $
+    WGSL.CallExp "workgroupUniformLoad" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
 genWGSLStm s@(Op (ImpGPU.ErrorSync _)) = unsupported s
 
 call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
