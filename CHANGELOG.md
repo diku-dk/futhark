@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.26.0]
 
+* Faster device-to-device copies on CUDA.
+
 ### Added
 
 ### Removed
