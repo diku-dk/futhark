@@ -388,6 +388,19 @@ genArrayRead fun tgt mem i = do
         in WGSL.Assign tgt' <$> call
      else WGSL.Assign tgt' . WGSL.IndexExp mem' <$> indexExp i
 
+genIntAtomicOp ::
+  WGSL.Ident ->
+  VName ->
+  VName ->
+  Count Elements (TExp Int64) ->
+  Exp ->
+  KernelM WGSL.Stmt
+genIntAtomicOp fun dest mem i e = do
+  idx <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
+  val <- genWGSLExp e
+  let call = WGSL.CallExp fun [WGSL.UnOpExp "&" idx, val]
+  WGSL.Assign <$> getIdent dest <*> pure call
+
 unsupported :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
 unsupported stmt = pure $ WGSL.Comment $ "Unsupported stmt: " <> prettyText stmt
 
@@ -493,13 +506,34 @@ genWGSLStm (Op (ImpGPU.GetLocalSize dest i)) = do
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = do
   destId <- getIdent dest
   WGSL.Assign destId . WGSL.VarExp <$> builtinLockstepWidth
-genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAdd _ dest mem i e))) = do
-  idx <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
-  val <- genWGSLExp e
-  let call = WGSL.CallExp "atomicAdd" [WGSL.UnOpExp "&" idx, val]
-  WGSL.Assign <$> getIdent dest <*> pure call
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAdd _ dest mem i e))) =
+  genIntAtomicOp "atomicAdd" dest mem i e
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicSMax _ dest mem i e))) =
+  genIntAtomicOp "atomicMax" dest mem i e
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicSMin _ dest mem i e))) =
+  genIntAtomicOp "atomicMin" dest mem i e
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicUMax _ dest mem i e))) =
+  genIntAtomicOp "atomicMax" dest mem i e
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicUMin _ dest mem i e))) =
+  genIntAtomicOp "atomicMin" dest mem i e
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAnd _ dest mem i e))) =
+  genIntAtomicOp "atomicAnd" dest mem i e
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicOr _ dest mem i e))) =
+  genIntAtomicOp "atomicOr" dest mem i e
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXor _ dest mem i e))) =
+  genIntAtomicOp "atomicXor" dest mem i e
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg _ dest mem i cmp val))) = do
+  i' <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
+  val' <- genWGSLExp val
+  cmp' <- genWGSLExp cmp
+  let call = WGSL.CallExp
+               "atomicCompareExchangeWeak"
+               [WGSL.UnOpExp "&" i', cmp', val']
+  let res = WGSL.FieldExp call "old_value"
+  WGSL.Assign <$> getIdent dest <*> pure res
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = do
+  genIntAtomicOp "atomicExchange" dest mem i e
 genWGSLStm s@(Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd {}))) = unsupported s
-genWGSLStm s@(Op (ImpGPU.Atomic _ _)) = unsupported s
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceLocal)) =
   pure $ WGSL.Call "workgroupBarrier" []
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceGlobal)) =
@@ -733,7 +767,8 @@ genScalarDecls = do
 
       addScalar fieldPrimTyp
       addInitStmt $ WGSL.DeclareVar name (WGSL.Prim varPrimTyp)
-      addInitStmt $ WGSL.Assign name (wrapCopy $ WGSL.FieldExp bufferName name)
+      addInitStmt $
+        WGSL.Assign name (wrapCopy $ WGSL.FieldExp (WGSL.VarExp bufferName) name)
 
       pure (name, WGSL.Prim fieldPrimTyp)
 

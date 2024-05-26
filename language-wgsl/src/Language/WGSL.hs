@@ -91,7 +91,7 @@ data Exp
   | UnOpExp UnOp Exp
   | CallExp Ident [Exp]
   | IndexExp Ident Exp
-  | FieldExp Ident Ident
+  | FieldExp Exp Ident
 
 data Stmt
   = Skip
