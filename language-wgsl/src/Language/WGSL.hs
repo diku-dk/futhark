@@ -183,7 +183,8 @@ instance Pretty Typ where
   pretty (Named t) = pretty t
 
 instance Pretty Exp where
-  pretty (BoolExp x) = pretty x
+  pretty (BoolExp True) = "true"
+  pretty (BoolExp False) = "false"
   pretty (IntExp x) = pretty x
   pretty (FloatExp x) = pretty x
   pretty (StringExp x) = pretty $ show x
