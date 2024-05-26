@@ -113,7 +113,11 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                       base_arr_dims
                 )
 
-          -- Repermute the global array indices to match.
+          -- We initially permuted base array dimensions to match the actual
+          -- layout in memory, such that we were able to map it to the thread
+          -- block. However, we must make to sure re-permute it before executing
+          -- the read, since the `index` function assumes the indices are given
+          -- in order of the *rearranged* array. Insane, I know.
           let glb_inds_perm = arrPerm arr_info glb_inds
           glb_elem <-
             letExp (baseString base_arr)
@@ -122,7 +126,7 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                 ( index "glb_elem" base_arr glb_inds_perm
                     >>= resultBodyM . (: []) . Var
                 )
-                -- TODO: here, we simply insert a zero (or zero-like value) into
+                -- Here, we simply insert a zero (or zero-like value) into
                 -- smem whenever we are outside bounds. However, this only
                 -- succeeds in certain cases, unless we explicitly handle
                 -- residual tiles in an epilogue (which we do).
@@ -162,8 +166,8 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                     fromBool is_prologue
                       .||. le64 qq + le64 q .<. pe64 common_dim
                 )
-                ( accumulateRegTileInnerLoopNest ltids q reg_tile_in'
-                    >>= resultBodyM . (: []) . Var
+                ( resultBody . (: []) . Var
+                    <$> accumulateRegTileInnerLoopNest ltids q reg_tile_in'
                 )
                 (resultBodyM [Var reg_tile_in'])
       where
@@ -188,7 +192,6 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                   (\ind s -> le64 ind * le64 s)
                   inds
                   (smemStrides arr)
-
 
             -- Compute map and reduction results and update the register tile.
             map_f <- renameLambda $ mapLam tc_env
@@ -217,7 +220,7 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- TODO: for now, I test only source programs with no outer parallel
     --       dimensions, ie. all dims in the segspace pertain to the
     --       contraction.
-    -- TODO: find out how to reliably extract the inner dims of the segspace.
+    --       find out how to reliably extract the inner dims of the segspace.
     --       perhaps inner dims are all those onto which the kernel result is
     --       variant and at least (or exactly) one redomap array is variant?
     (rem_outer_gtids_dims, inner_gtids_dims) <- ([], all_gtids_dims), -- TODO: placeholder.
@@ -246,7 +249,7 @@ doTCTiling env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbo
     -- assert that all redomap arrays are variant to some, but not all innermost
     -- dimensions of the kernel.
     -- TODO: find out whether/where/how to use the returned information.
-    Just var_inds_per_arr <- variantDimsPerArr variance redomap_arrs gtids,
+    Just _var_inds_per_arr <- variantDimsPerArr variance redomap_arrs gtids,
     -- TODO: all of the below guards are lifted from Cosmin's code.
     --       find out which of them are relevant here, and whether they need to
     --       be changed/generalized.
@@ -369,29 +372,29 @@ variantDimsPerArr ::
   [VName] ->
   [VName] ->
   Maybe [[Int]]
-variantDimsPerArr variance arrs segspace_dims = do
+variantDimsPerArr variance arrs gtids = do
   let var_inds_per_arr = map variantInnerDimsForArr arrs
-  let var_dims_per_arr = map (gather segspace_dims) var_inds_per_arr
+  let var_gtids_per_arr = map (gather gtids) var_inds_per_arr
 
   -- Interchange those dimensions of the segspace on which all redomap arrays
   -- are variant outwards.
   let (outer_dims, tc_dims) =
         L.partition
           -- Check that given dim is in var_dims of all arrays.
-          (\dim -> all (elem dim) var_dims_per_arr)
-          segspace_dims
+          (\dim -> all (elem dim) var_gtids_per_arr)
+          gtids
   let segspace_dims' = outer_dims ++ tc_dims
-  let segspace_perm = segspace_dims `isPermutationOf` segspace_dims'
+  let segspace_perm = gtids `isPermutationOf` segspace_dims'
 
-  myDebugM $
-    "variantDimsPerArr\nsegspace_dims:\n"
-      ++ prettyString segspace_dims
-      ++ "\nsegspace_dims':\n"
-      ++ show segspace_dims'
-      ++ "\nperm:\n"
-      ++ show segspace_perm
-      ++ "\nvar_inds_per_arr:\n"
-      ++ show var_inds_per_arr
+  -- myDebugM $
+  --   "variantDimsPerArr\nsegspace_dims:\n"
+  --     ++ prettyString gtids
+  --     ++ "\nsegspace_dims':\n"
+  --     ++ show segspace_dims'
+  --     ++ "\nperm:\n"
+  --     ++ show segspace_perm
+  --     ++ "\nvar_inds_per_arr:\n"
+  --     ++ show var_inds_per_arr
 
   -- assert that all arrays are variant to some, but not all dims.
   -- TODO: is below check sufficient to check this assertion?
@@ -403,7 +406,7 @@ variantDimsPerArr variance arrs segspace_dims = do
   -- Actually, I think this can safely be assumed to already hold, due to these
   -- parallel dimensions already having been interchanged outwards in an earlier
   -- compiler stage, but I might be wrong on this.
-  guard $ all (`elem` concat var_dims_per_arr) segspace_dims
+  guard $ all (`elem` concat var_gtids_per_arr) gtids
 
   -- assert no overlap in variance between arrays.
   -- TODO: is this check necessary or even desired? for exactly 2 redomap
@@ -414,10 +417,10 @@ variantDimsPerArr variance arrs segspace_dims = do
 
   pure var_inds_per_arr
   where
-    n_dims = length segspace_dims
+    n_dims = length gtids
     variantInnerDimsForArr arr =
       let arr_variance = M.findWithDefault mempty arr variance
-       in L.findIndices (`nameIn` arr_variance) segspace_dims
+       in L.findIndices (`nameIn` arr_variance) gtids
     -- allUnique (x : xs) = x `notElem` xs && allUnique xs
     -- allUnique _ = True
 
@@ -484,9 +487,9 @@ gather xs = map (xs !!) . filter (`elem` indices xs)
 gather_ :: [a] -> a -> [Maybe Int] -> [a]
 gather_ xs x = map (maybe x (xs !!) . checkIdx)
   where
-    checkIdx (Just i)
-      | i `elem` indices xs = Just i
-    checkIdx _ = Nothing
+    checkIdx i
+      | Just j <- i, j `elem` indices xs = i
+      | otherwise = Nothing
 
 arrGather_ :: ArrInfo -> [a] -> a -> [a]
 arrGather_ info src x = gather_ src x $ varDimInds info
@@ -564,20 +567,22 @@ data FlatPrimExp = Product [FlatPrimExp] | OpaquePrimExp (PrimExp VName)
 -- arrays of `n` dims. For n <= 6 dims this is fine-ish, but for ~7 and up it
 -- quickly becomes a problem. Can also find the correct permutation using
 -- iterative search in quadratic-ish time.
-findLMADPerm :: Env -> VName -> Maybe [Int]
+findLMADPerm :: Env -> VName -> Builder GPU [Int]
 findLMADPerm (_, ixfn_env) arr = do
-  lmad <- LMAD.dims <$> M.lookup arr ixfn_env
-  let shape0 = map (untyped . LMAD.ldShape) lmad
-      strides0 = map (toFlatPrimExp . untyped . LMAD.ldStride) lmad
-
-  -- For each permutation of the LMAD shape; compute the strides for this
-  -- permutation and test them against the known strides. Then, pick the first
-  -- succeeding set of strides.
-  msum $ map (isPermutationOf strides0 . stridesFor) $ L.permutations shape0
+  case maybe_lmad_perm of
+    Just res -> pure res
+    _ -> indices . arrayDims <$> lookupType arr
   where
-    stridesFor = map toFlatPrimExp . (++ [val1]) . (scanr1 binopMul) . tail
-    binopMul = BinOpExp (Mul Int64 OverflowUndef)
-    val1 = ValueExp (IntValue (Int64Value 1))
+    maybe_lmad_perm = do
+      lmad <- LMAD.dims <$> M.lookup arr ixfn_env
+      let shape = map (untyped . LMAD.ldShape) lmad
+          strides0 = map (toFlatPrimExp . untyped . LMAD.ldStride) lmad
+      -- Test each permutation against the known strides; pick first succeeding.
+      msum $ map (isPermutationOf strides0 . strides) $ L.permutations shape
+
+    strides = map toFlatPrimExp . (++ [val1]) . scanr1 binopMul . tail
+    binopMul = BinOpExp $ Mul Int64 OverflowUndef
+    val1 = ValueExp $ IntValue $ Int64Value 1
 
     -- Flattens a nested PrimExp (if that PrimExp happens to represent a simple
     -- product) to a [FlatPrimExp], which can then be sorted to check for
@@ -586,8 +591,7 @@ findLMADPerm (_, ixfn_env) arr = do
     toFlatPrimExp :: PrimExp VName -> FlatPrimExp
     toFlatPrimExp = Product . L.sort . flattenProducts . flattenMulOps
       where
-        flattenMulOps (BinOpExp Mul {} e1 e2) =
-          Product $ map toFlatPrimExp [e1, e2]
+        flattenMulOps (BinOpExp Mul {} e1 e2) = Product $ map toFlatPrimExp [e1, e2]
         flattenMulOps e = OpaquePrimExp e
 
         flattenProducts (Product es) = concatMap flattenProducts es
@@ -613,7 +617,6 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
     $ forM
       load_stms
     $ \load_stm -> do
-
       -- TODO: should probably gather all of the comments made here in a note.
 
       -- We need to extract the dimensions of each input array, and
@@ -665,10 +668,11 @@ makeTCEnv env kernel_params load_stms map_lam red_lam _map_ts = do
       -- available somehow.
       -- If an array has not been rearranged, the identity permutation is
       -- recorded.
-      let lmad_perm = maybe (indices dims') id $ findLMADPerm env base_arr
+      lmad_perm <- findLMADPerm env base_arr
       let inv_lmad_perm = map snd $ L.sort $ zip lmad_perm [0 ..]
 
       let base_arr_dims = gather dims' inv_lmad_perm
+      -- TODO: handle the case where multiple dimensions have the same name.
       let var_inds = map (`L.elemIndex` inner_dims) base_arr_dims
 
       -- Then, for each dimension of each array, extract the TR tile and
