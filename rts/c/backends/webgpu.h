@@ -763,8 +763,16 @@ static int gpu_memcpy(struct futhark_context *ctx,
   // Note that copying more than `nbytes` is memory-safe because we also pad all
   // buffers when allocating them.
   // It could however corrupt data if the copy is in the middle of the buffer,
-  // like in host2gpu. TODO: Also check for it here.
+  // like in host2gpu.
   int64_t copy_size = ((nbytes + 4 - 1) / 4) * 4;
+  if (copy_size > nbytes) {
+    // Potential for an issue if we're not at the end of the destination buffer.
+    // Find its size to make sure.
+    uint64_t dst_size = wgpuBufferGetSize(dst);
+    if (dst_offset + copy_size != dst_size) {
+      futhark_panic(-1, "gpu_memcpy: Would corrupt data due to padding!\n");
+    }
+  }
 
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
   wgpuCommandEncoderCopyBufferToBuffer(encoder,
@@ -791,8 +799,16 @@ static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
   // has enough bytes.
   // If this is a copy somewhere into the middle of `dst`, it is also possible
   // we overwrite some data here, which would be bad.
-  // TODO: Write a check for that case.
   int64_t copy_size = ((nbytes + 4 - 1) / 4) * 4;
+  if (copy_size > nbytes) {
+    // Potential for an issue if we're not at the end of the destination buffer.
+    // Find its size to make sure.
+    uint64_t dst_size = wgpuBufferGetSize(dst);
+    if (dst_offset + copy_size != dst_size) {
+      futhark_panic(-1, "memcpy_host2gpu: Would corrupt data due to padding!\n");
+    }
+  }
+
   unsigned char *buf;
   int64_t offset;
   if (copy_size > nbytes) {
