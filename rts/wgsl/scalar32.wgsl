@@ -80,6 +80,14 @@ fn usignum_i32(a: i32) -> i32 {
   return 1;
 }
 
+fn f16_to_u32(a: f16) -> i32 {
+  return bitcast<i32>(u32(a));
+}
+
+fn f32_to_u32(a: f32) -> i32 {
+  return bitcast<i32>(u32(a));
+}
+
 fn u32_to_f16(a: i32) -> f16 {
   return f16(bitcast<u32>(a));
 }
