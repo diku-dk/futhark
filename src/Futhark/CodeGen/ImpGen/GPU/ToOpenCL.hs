@@ -643,7 +643,8 @@ inKernelOperations env mode body =
       GC.modifyUserState $ \s ->
         s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
-    kernelOps (UniformRead {}) = error "TODO: Implement this here too"
+    kernelOps (UniformRead dest src i typ space) =
+      GC.compileCode (Read dest src i typ space Nonvolatile)
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
       pending <- kernelSyncPending <$> GC.getUserState
