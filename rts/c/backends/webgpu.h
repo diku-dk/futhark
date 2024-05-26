@@ -336,7 +336,6 @@ struct futhark_context {
   char *error;
   lock_t error_lock;
   FILE *log;
-  // TODO: What are constants? Should I be using this overrides/macros?
   struct constants *constants;
   struct free_list free_list;
   struct event_list event_list;
@@ -369,6 +368,7 @@ struct futhark_context {
   struct free_list gpu_free_list;
 
   size_t lockstep_width;
+  size_t max_thread_block_size;
 
   struct builtin_kernels* kernels;
 };
@@ -461,6 +461,11 @@ int backend_context_setup(struct futhark_context *ctx) {
   ctx->peak_mem_usage_device = 0;
   ctx->cur_mem_usage_device = 0;
   ctx->kernels = NULL;
+
+  // This is the default limit from the spec, which will always be the actual
+  // limit unless we explicitly request a larger one (which we do not currently
+  // do).
+  ctx->max_thread_block_size = 256;
 
   ctx->instance = wgpuCreateInstance(NULL);
 
