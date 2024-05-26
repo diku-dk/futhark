@@ -133,10 +133,14 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                 -- See note [SmemZeroPaddingOnGlobalMemOOB].
                 (eBody [eBlank $ Prim $ smemElemType arr_info])
 
+          -- Check bounds on shmem only if tblock size does not divide tile size.
+          tblock_divides_tile <-
+            fmap ((.==. 0) . le64) . letExp "tblock_divides_tile" . BasicOp $
+              BinOp (SRem Int64 Unsafe) tile_size_flat tblock_size_flat
           -- Finally, update shared mem array accumulator.
           letExp "acc_out"
             =<< eIf
-              (toExp $ le64 i .<. pe64 tile_size_flat)
+              (toExp $ tblock_divides_tile .||. le64 i .<. pe64 tile_size_flat)
               ( resultBodyM . map Var <=< letTupExp "acc_updated" . BasicOp $
                   UpdateAcc
                     Unsafe
@@ -385,16 +389,6 @@ variantDimsPerArr variance arrs gtids = do
           gtids
   let segspace_dims' = outer_dims ++ tc_dims
   let segspace_perm = gtids `isPermutationOf` segspace_dims'
-
-  -- myDebugM $
-  --   "variantDimsPerArr\nsegspace_dims:\n"
-  --     ++ prettyString gtids
-  --     ++ "\nsegspace_dims':\n"
-  --     ++ show segspace_dims'
-  --     ++ "\nperm:\n"
-  --     ++ show segspace_perm
-  --     ++ "\nvar_inds_per_arr:\n"
-  --     ++ show var_inds_per_arr
 
   -- assert that all arrays are variant to some, but not all dims.
   -- TODO: is below check sufficient to check this assertion?
