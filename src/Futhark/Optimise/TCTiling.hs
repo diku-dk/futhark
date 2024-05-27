@@ -51,11 +51,10 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
     common_dim = commonDim kernel_params
     tblock_size_flat = tblockSizeFlat kernel_params
 
-    is_mm = all ((== 2) . length . tileDims) arr_infos && length tblock_dims == 2
-    copyGlb2Shr = if is_mm then copyGlb2ShrMM else copyGlb2ShrGeneral
+    is_MM = all ((== 2) . length . tileDims) arr_infos && length tblock_dims == 2
 
-    copyGlb2ShrMM :: VName -> VName -> ArrInfo -> Builder GPU VName
-    copyGlb2ShrMM qq shr_arr arr_info = do
+    copyGlb2Shr :: VName -> VName -> ArrInfo -> Builder GPU VName
+    copyGlb2Shr qq shr_arr arr_info = do
       -- Setup parameters for the WithAcc.
       cert_p <- newParam "cert_p" $ Prim Unit
       t <- stripArray (shapeRank smem_shape) <$> lookupType shr_arr
@@ -63,153 +62,84 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
         newParam (baseString shr_arr) $
           Acc (paramName cert_p) smem_shape [t] NoUniqueness
 
-      loop_bounds <-
-        zipWithM
-          ( \tile_dim tblock_dim ->
-              letSubExp "loop_bound" =<< ceilDiv tile_dim tblock_dim
-          )
-          tile_dims
-          (tblockDims kernel_params)
+      lam <- mkLambda [cert_p, acc_p] $
+        case is_MM of
+          True -> do
+            -- In the special MM case, we generate a loop nest similar to the
+            -- one in BlkRegTiling, i.e. a 2-loop nest of dimensions:
+            --
+            --   ceil(s0 / Ta), ceil(s1 / Tb)
+            --
+            -- where [s0][s1] is the size of the shmem slice and (Ta, Tb) are
+            -- the tblock dimensions. As an example, for the regular MM, i.e.
+            -- Z_ab = X_aq * Y_qb, the first operand shmem array has dimensions 
+            -- [Ta * Ra][Tq], and hence the loop nest has dimensions:
+            --
+            --   Ra, ceil(Tq / Tb).
+            loop_bounds <-
+              zipWithM
+                ( \tile_dim tblock_dim ->
+                    letSubExp "loop_bound" =<< ceilDiv tile_dim tblock_dim
+                )
+                tile_dims
+                (tblockDims kernel_params)
 
-      lam <- mkLambda [cert_p, acc_p] $ do
-        fmap (varsRes . (: [])) $
-          segMapND_ "foo" seglvl_thd ResultNoSimplify tblock_dims $ \ltids ->
-            fmap (varsRes . (: [])) $
-              forLoopNest_ loop_bounds (paramName acc_p) $ \loop_inds acc_merge -> do
-                inds' <-
-                  forM3
-                    loop_inds
-                    tblock_dims
-                    ltids
-                    ( \loop_ind dim ltid ->
-                        letExp "ind" =<< toExp (le64 loop_ind * pe64 dim + le64 ltid)
-                    )
-                copyLoopBodyMM inds' acc_merge
+            fmap varsRes $
+              segMapND "foo" seglvl_thd ResultNoSimplify tblock_dims $ \ltids ->
+                fmap (varsRes . (: [])) $
+                  forLoopNest_ loop_bounds (paramName acc_p) $ \loop_inds acc_merge -> do
+                    inds' <-
+                      forM3
+                        loop_inds
+                        tblock_dims
+                        ltids
+                        ( \loop_ind dim ltid ->
+                            letExp "ind" =<< toExp (le64 loop_ind * pe64 dim + le64 ltid)
+                        )
+                    copyLoopBody acc_merge undefined inds'
+          _ -> do
+            -- In the general case, we use a flat LMAD copy.
+            --
+            -- The strategy is to flatten the tblock and then unflatten it to fit the
+            -- dimensions of the array in shared memory, using a virtualization loop
+            -- in case the tile is larger than the tblock, and a boundary guard for
+            -- the converse. This is easily achieved using SegVirt, but whereas
+            -- SegVirt wraps the entire loop body in an `if (i < tile_size_flat)`
+            -- guard, we want that guard only on the write to shared memory. Hence
+            -- we must manually build the virtualization loop, which unfortunately
+            -- bloats the code a bit here.
+            tile_size_flat <- letSubExp "tile_size_flat" <=< toExp $ product tile_dims'
+            iters <- letSubExp "virt_iters" =<< ceilDiv tile_size_flat tblock_size_flat
+            fmap varsRes $
+              segMap1D "foo" seglvl_thd ResultNoSimplify tile_size_flat $ \ltid ->
+                fmap (varsRes . (: [])) $
+                  forLoop_ iters (paramName acc_p) $ \i0 acc_merge -> do
+                    i <- letExp "flat_virttid" =<< toExp (le64 i0 * pe64 tblock_size_flat + le64 ltid)
+                    unflat_inds <-
+                      forM (unflattenIndex tile_dims' $ le64 i) $
+                        letExp "unflat_ind" <=< toExp
+                    copyLoopBody acc_merge i unflat_inds
 
       letExp (baseString shr_arr) $
         WithAcc [(smem_shape, [shr_arr], Nothing)] lam
+
       where
+        smem_strides = smemStrides arr_info
         smem_shape = Shape [smemSizeFlat arr_info]
         tile_dims = tileDims arr_info
+        tile_dims' = map pe64 tile_dims
         tblock_offsets = arrGather_ arr_info (tblockOffsets tc_env) (Var qq)
         base_arr_dims = baseArrDims arr_info
         base_arr = baseArr arr_info
-        smem_strides = smemStrides arr_info
-        copyLoopBodyMM :: [VName] -> VName -> Builder GPU VName
-        copyLoopBodyMM inds@[_, _] acc = do
 
-          glb_inds <-
-            forM2 tblock_offsets inds $ \tb_offset ind ->
-              letExp "glb_ind" =<< toExp (pe64 tb_offset + le64 ind)
-
-          -- Perform a boundary check and read from the global mem array!
-          in_bounds <-
-            letExp "in_bounds"
-              =<< toExp
-                ( foldr (.&&.) true $
-                    zipWith
-                      (\ind dim -> le64 ind .<. pe64 dim)
-                      glb_inds
-                      base_arr_dims
-                )
-
-          let glb_inds_perm = arrPerm arr_info glb_inds
-          glb_elem <-
-            letExp (baseString base_arr)
-              =<< eIf
-                (toExp in_bounds)
-                ( index "glb_elem" base_arr glb_inds_perm
-                    >>= resultBodyM . (: []) . Var
-                )
-                (eBody [eBlank $ Prim $ smemElemType arr_info])
-
-          -- If tblock dims divide tile dims, we can skip the bounds check.
-          tblock_divides_tile <-
-            fmap (foldr (.&&.) true) $
-              zipWithM
-                ( \tile_dim tblock_dim ->
-                    fmap ((.==. 0) . le64) . letExp "tblock_divides_tile" . BasicOp $
-                      BinOp (SRem Int64 Unsafe) tile_dim tblock_dim
-                )
-                tile_dims
-                tblock_dims
-          -- Smem bounds check.
-          let in_smem_bounds =
-                foldr (.&&.) true $
-                  zipWith (\ind dim -> le64 ind .<. pe64 dim) inds tile_dims
-
-          -- Flat smem index.
-          shr_ind_flat <-
-            letTupExp' "shr_ind_flat" <=< toExp . sum $
-              zipWith (\ind s -> le64 ind * pe64 s) inds smem_strides
-          -- Finally, update shared mem array accumulator.
-          letExp "acc_out"
-            =<< eIf
-              (toExp $ tblock_divides_tile .||. in_smem_bounds)
-              -- (toExp $ in_smem_bounds)
-              ( resultBodyM . map Var <=< letTupExp "acc_updated" . BasicOp $
-                  UpdateAcc
-                    Unsafe
-                    acc
-                    shr_ind_flat
-                    [Var glb_elem]
-              )
-              (resultBodyM [Var acc])
-        copyLoopBodyMM _ _ = error "Impossible case in copyLoopBodyMM!"
-
-    ----------------------------------------------------------------------------
-    ----------------------------------------------------------------------------
-    copyGlb2ShrGeneral :: VName -> VName -> ArrInfo -> Builder GPU VName
-    copyGlb2ShrGeneral qq shr_arr arr_info = do
-      -- Setup parameters for the WithAcc.
-      cert_p <- newParam "cert_p" $ Prim Unit
-      t <- stripArray (shapeRank smem_shape) <$> lookupType shr_arr
-      acc_p <-
-        newParam (baseString shr_arr) $
-          Acc (paramName cert_p) smem_shape [t] NoUniqueness
-
-      tile_size_flat <-
-        letSubExp "tile_size_flat"
-          =<< toExp (product $ map pe64 tile_dims)
-      -- The strategy is to flatten the tblock and then unflatten it to fit the
-      -- dimensions of the array in shared memory, using a virtualization loop
-      -- in case the tile is larger than the tblock, and a boundary guard for
-      -- the converse. This is easily achieved using SegVirt, but whereas
-      -- SegVirt wraps the entire loop body in an `if (i < tile_size_flat)`
-      -- guard, we want that guard only on the write to shared memory. Hence
-      -- we must manually build the virtualization loop, which unfortunately
-      -- bloats the code a bit here.
-      iters <- letSubExp "virt_iters" =<< ceilDiv tile_size_flat tblock_size_flat
-      lam <- mkLambda [cert_p, acc_p] $ do
-        fmap varsRes $
-          segMap1D "foo" seglvl_thd ResultNoSimplify tile_size_flat $ \ltid ->
-            fmap (varsRes . (: [])) $
-              forLoop_ iters (paramName acc_p) $ \i0 acc_merge -> do
-                i <- letExp "flat_virttid" =<< toExp (le64 i0 * pe64 tblock_size_flat + le64 ltid)
-                copyLoopBody tile_size_flat acc_merge i
-
-      letExp (baseString shr_arr) $
-        WithAcc [(smem_shape, [shr_arr], Nothing)] lam
-      where
-        smem_strides = smemStrides arr_info
-        copyLoopBody :: SubExp -> VName -> VName -> Builder GPU VName
-        copyLoopBody tile_size_flat acc i = do
-          unflat_inds <-
-            forM (unflattenIndex tile_dims' $ le64 i) $
-              letSubExp "unflat_ind" <=< toExp
-
-          shr_ind_flat <-
-            letTupExp' "shr_ind_flat" <=< toExp . sum $
-              zipWith
-                (\ind s -> pe64 ind * pe64 s)
-                unflat_inds
-                smem_strides
+        copyLoopBody :: VName -> VName -> [VName] -> Builder GPU VName
+        copyLoopBody acc i inds = do
 
           -- The shared mem indices are simply the unflattened indices, while
           -- the global mem indices need to have tblock offsets added onto them.
           glb_inds <-
-            forM2 tblock_offsets unflat_inds $ \tb_offset ind ->
-              letExp "glb_ind" =<< toExp (pe64 tb_offset + pe64 ind)
+            forM2 tblock_offsets inds $ \tb_offset ind ->
+              letExp "glb_ind" =<< toExp (pe64 tb_offset + le64 ind)
 
           -- Perform a boundary check and read from the global mem array!
           in_bounds <-
@@ -242,14 +172,16 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
                 -- See note [SmemZeroPaddingOnGlobalMemOOB].
                 (eBody [eBlank $ Prim $ smemElemType arr_info])
 
-          -- Check bounds on shmem only if tblock size does not divide tile size.
-          tblock_divides_tile <-
-            fmap ((.==. 0) . le64) . letExp "tblock_divides_tile" . BasicOp $
-              BinOp (SRem Int64 Unsafe) tile_size_flat tblock_size_flat
+
+          -- Flat smem index (including padding, if any).
+          shr_ind_flat <-
+            letTupExp' "shr_ind_flat" <=< toExp . sum $
+              zipWith (\ind s -> le64 ind * pe64 s) inds smem_strides
+
           -- Finally, update shared mem array accumulator.
           letExp "acc_out"
             =<< eIf
-              (toExp $ tblock_divides_tile .||. le64 i .<. pe64 tile_size_flat)
+              (toExp =<< smem_bounds_check)
               ( resultBodyM . map Var <=< letTupExp "acc_updated" . BasicOp $
                   UpdateAcc
                     Unsafe
@@ -259,12 +191,25 @@ reductionLoopBody tc_env qq0 reg_tiles_in shr_arrs_in is_prologue = do
               )
               (resultBodyM [Var acc])
 
-        smem_shape = Shape [smemSizeFlat arr_info]
-        tile_dims = tileDims arr_info
-        tile_dims' = map pe64 tile_dims
-        tblock_offsets = arrGather_ arr_info (tblockOffsets tc_env) (Var qq)
-        base_arr_dims = baseArrDims arr_info
-        base_arr = baseArr arr_info
+          where
+            smem_bounds_check
+              | is_MM = smemBoundsCheck inds tile_dims
+              | otherwise = do
+                  tile_size_flat <- letSubExp "tile_size_flat" <=< toExp $ product tile_dims'
+                  smemBoundsCheck [i] [tile_size_flat]
+            smemBoundsCheck inds' dims =
+              fmap (foldr (.&&.) true) $
+                forM3
+                  tblock_dims
+                  dims
+                  inds'
+                  ( \tblock_dim tile_dim ind -> do
+                      tile_fits_tblock <-
+                        fmap ((.==. 0) . le64) . letExp "tile_fits_tblock" . BasicOp $
+                          BinOp (SRem Int64 Unsafe) tile_dim tblock_dim
+                      pure $ tile_fits_tblock .||. le64 ind .<. pe64 tile_dim
+                  )
+
 
     accumulateRegTile :: VName -> [VName] -> Builder GPU VName
     accumulateRegTile qq redomap_inputs_shr =
