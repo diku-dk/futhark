@@ -561,7 +561,7 @@ genWGSLStm (Op (ImpGPU.UniformRead tgt mem i _ _)) = do
   i' <- indexExp i
   pure $ WGSL.Assign tgt' $
     WGSL.CallExp "workgroupUniformLoad" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
-genWGSLStm s@(Op (ImpGPU.ErrorSync _)) = unsupported s
+genWGSLStm (Op (ImpGPU.ErrorSync f)) = genWGSLStm $ Op (ImpGPU.Barrier f)
 
 call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
 call1 f a = WGSL.CallExp f [a]
