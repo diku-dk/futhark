@@ -734,6 +734,17 @@ inKernelOperations env mode body =
       doAtomicCmpXchg s t old arr ind cmp val [C.cty|int|]
     atomicOps s (AtomicXchg t old arr ind val) =
       doAtomicXchg s t old arr ind val [C.cty|int|]
+    atomicOps s (AtomicWrite t arr ind val) = do
+      ind' <- GC.compileExp $ untyped $ unCount ind
+      val' <- toStorage t <$> GC.compileExp val
+      let quals = case s of
+            Space sid -> pointerQuals sid
+            _ -> pointerQuals "global"
+      GC.stm [C.cstm|(($tyquals:quals $ty:(primStorageType t)*)$id:arr)[$exp:ind'] = $exp:val';|]
+      GC.stm $
+        case s of
+          Space "shared" -> [C.cstm|mem_fence_local();|]
+          _ -> [C.cstm|mem_fence_global();|]
 
     cannotAllocate :: GC.Allocate KernelOp KernelState
     cannotAllocate _ =
