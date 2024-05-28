@@ -5,7 +5,7 @@ module Futhark.CodeGen.ImpGen.WebGPU
   )
 where
 
-import Control.Monad (forM, forM_, liftM2, liftM3)
+import Control.Monad (forM, forM_, liftM2, liftM3, when)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.RWS
 import Control.Monad.Trans.State qualified as State
@@ -67,7 +67,10 @@ data KernelState = KernelState
     -- These describe the kernel interface.
     ksOverrides :: [WGSL.Ident],
     ksBlockDims :: [(Int, WGSL.Ident, Bool)],
+    -- TODO: Might be nice to combine sharedMem and atomicMem into some more
+    -- general information about memory in scope
     ksSharedMem :: [(WGSL.Ident, Exp)],
+    ksAtomicMem :: [WGSL.Ident],
     ksScalars :: [WGSL.PrimType],
     ksBindSlots :: [Int]
   }
@@ -132,11 +135,17 @@ addSharedMem :: WGSL.Ident -> Exp -> KernelM ()
 addSharedMem ident e =
   modify $ \s -> s {ksSharedMem = (ident, e) : ksSharedMem s}
 
+addAtomicMem :: WGSL.Ident -> KernelM ()
+addAtomicMem ident = modify $ \s -> s {ksAtomicMem = ident : ksAtomicMem s}
+
 -- | Whether the identifier is the name of a shared memory allocation.
 -- TODO: Should probably store the allocation name in the state instead of
 -- reconstructing the _size name here.
 isShared :: WGSL.Ident -> KernelM Bool
 isShared ident = any (\(sz, _) -> sz == ident <> "_size") <$> gets ksSharedMem
+
+isAtomic :: WGSL.Ident -> KernelM Bool
+isAtomic ident = any (\i -> i == ident) <$> gets ksAtomicMem
 
 -- | Add a scalar struct field.
 addScalar :: WGSL.PrimType -> KernelM ()
@@ -174,6 +183,7 @@ genKernel kernel = do
             ksNameReplacements = mempty,
             ksOverrides = mempty,
             ksBlockDims = mempty,
+            ksAtomicMem = mempty,
             ksSharedMem = mempty,
             ksScalars = mempty,
             ksBindSlots = mempty
@@ -439,12 +449,13 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
 
   maybeElemPrimType <- findSingleMemoryType name
   case maybeElemPrimType of
-    Just elemPrimType -> do
+    Just elemPrimType@(_, atomic, _) -> do
       let bufType = wgslSharedBufferType elemPrimType
                       (Just $ WGSL.VarExp sizeName)
 
       addOverride sizeName (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
       addDecl $ WGSL.VarDecl [] WGSL.Workgroup moduleName bufType
+      when atomic $ addAtomicMem moduleName
       addRename name' moduleName
       pure $ WGSL.Comment $ "declare_shared: " <> name'
     Nothing ->
@@ -460,16 +471,30 @@ genWGSLStm s@(Copy {}) = unsupported s
 genWGSLStm (Write mem i Bool _ _ v) = genArrayWrite "write_bool" mem i v
 genWGSLStm (Write mem i (IntType Int8) _ _ v) = genArrayWrite "write_i8" mem i v
 genWGSLStm (Write mem i (IntType Int16) _ _ v) = genArrayWrite "write_i16" mem i v
-genWGSLStm (Write mem i _ _ _ v) =
-  liftM3 WGSL.AssignIndex (getIdent mem) (indexExp i) (genWGSLExp v)
+genWGSLStm (Write mem i _ _ _ v) = do
+  mem' <- getIdent mem
+  i' <- indexExp i
+  v' <- genWGSLExp v
+  atomic <- isAtomic mem'
+  if atomic
+     then pure $ WGSL.Call "atomicStore"
+                   [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i', v']
+     else pure $ WGSL.AssignIndex mem' i' v'
 genWGSLStm (SetScalar name e) =
   liftM2 WGSL.Assign (getIdent name) (genWGSLExp e)
 genWGSLStm (Read tgt mem i Bool _ _) = genArrayRead "read_bool" tgt mem i
 genWGSLStm (Read tgt mem i (IntType Int8) _ _) = genArrayRead "read_i8" tgt mem i
 genWGSLStm (Read tgt mem i (IntType Int16) _ _) = genArrayRead "read_i16" tgt mem i
-genWGSLStm (Read tgt mem i _ _ _) =
-  let index = liftM2 WGSL.IndexExp (getIdent mem) (indexExp i)
-   in liftM2 WGSL.Assign (getIdent tgt) index
+genWGSLStm (Read tgt mem i _ _ _) = do
+  tgt' <- getIdent tgt
+  mem' <- getIdent mem
+  i' <- indexExp i
+  atomic <- isAtomic mem'
+  let e = if atomic
+            then WGSL.CallExp "atomicLoad"
+                   [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
+            else WGSL.IndexExp mem' i'
+  pure $ WGSL.Assign tgt' e
 genWGSLStm s@(SetMem {}) = unsupported s
 genWGSLStm (Call [dest] f args) = do
   fun <- WGSL.CallExp . ("futrts_" <>) <$> getIdent f
@@ -881,6 +906,8 @@ genMemoryDecls = do
     moduleDecl (name, typ) = do
       ident <- mkGlobalIdent name
       slot <- assignBindSlot
+      let (_, atomic, _) = typ
+      when atomic $ addAtomicMem ident
       addDecl $
         WGSL.VarDecl
           (WGSL.bindingAttribs 0 slot)
