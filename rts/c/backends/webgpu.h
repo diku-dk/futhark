@@ -369,6 +369,8 @@ struct futhark_context {
 
   size_t lockstep_width;
   size_t max_thread_block_size;
+  size_t max_shared_memory;
+  size_t max_cache;
 
   struct builtin_kernels* kernels;
 };
@@ -462,10 +464,15 @@ int backend_context_setup(struct futhark_context *ctx) {
   ctx->cur_mem_usage_device = 0;
   ctx->kernels = NULL;
 
-  // This is the default limit from the spec, which will always be the actual
+  // These are the default limits from the spec, which will always be the actual
   // limit unless we explicitly request a larger one (which we do not currently
   // do).
   ctx->max_thread_block_size = 256;
+  ctx->max_shared_memory = 16384;
+
+  // This is a number we picked semi-arbitrarily (2 MiB). There does not seem to
+  // be a way to get L2 cache size from the WebGPU API.
+  ctx->max_cache = 2097152;
 
   ctx->instance = wgpuCreateInstance(NULL);
 
