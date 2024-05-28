@@ -13,7 +13,6 @@ module Language.Futhark.Interpreter.AD
     deriveVjp,
 
     valueAsType,
-    prettytp,
 
     addFor,
 
@@ -208,13 +207,6 @@ data Tape
   = TapeId Int ADValue
   | TapePrim ADValue
   | TapeOp Op [Tape] ADValue
-
-prettytp :: Tape -> String
-prettytp (TapeId i _) = "d" <> show i
-prettytp (TapePrim v) = show v
-prettytp (TapeOp op [a] _) = show op <> "(" <> prettytp a <> ")"
-prettytp (TapeOp op [a, b] _) = "(" <> prettytp a <> " " <> show op <> " " <> prettytp b <> ")"
-prettytp _ = error "no prettytp"
 
 instance Show Tape where
   show (TapeId i v) = "TapeId " <> show i <> " " <> show v
