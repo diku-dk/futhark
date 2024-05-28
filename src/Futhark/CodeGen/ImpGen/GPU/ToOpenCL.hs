@@ -736,11 +736,11 @@ inKernelOperations env mode body =
       doAtomicXchg s t old arr ind val [C.cty|int|]
     atomicOps s (AtomicWrite t arr ind val) = do
       ind' <- GC.compileExp $ untyped $ unCount ind
-      val' <- GC.compileExp val
+      val' <- toStorage t <$> GC.compileExp val
       let quals = case s of
             Space sid -> pointerQuals sid
             _ -> pointerQuals "global"
-      GC.stm [C.cstm|(($tyquals:quals $ty:(primTypeToCType t)*)$id:arr)[$exp:ind'] = $exp:val';|]
+      GC.stm [C.cstm|(($tyquals:quals $ty:(primStorageType t)*)$id:arr)[$exp:ind'] = $exp:val';|]
       GC.stm $
         case s of
           Space "shared" -> [C.cstm|mem_fence_local();|]
