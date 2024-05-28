@@ -682,16 +682,14 @@ writeAtomic ::
   [Imp.TExp Int64] ->
   InKernelGen ()
 writeAtomic dst dst_is src src_is = do
-  t <- subExpType src
-  case t of
-    Prim pt -> do
-      (dst_mem, dst_space, dst_offset) <- fullyIndexArray dst dst_is
-      tmp <- dPrimSV "tmp" pt
-      copyDWIMFix (tvVar tmp) [] src src_is
-      sOp . Imp.Atomic dst_space $
-        Imp.AtomicWrite pt dst_mem dst_offset (untyped (tvExp tmp))
-    _ ->
-      error $ "writeAtomic: " <> prettyString t
+  t <- stripArray (length dst_is) <$> lookupType dst
+  sLoopSpace (map pe64 (arrayDims t)) $ \is -> do
+    let pt = elemType t
+    (dst_mem, dst_space, dst_offset) <- fullyIndexArray dst (dst_is ++ is)
+    tmp <- dPrimSV "tmp" pt
+    copyDWIMFix (tvVar tmp) [] src (src_is ++ is)
+    sOp . Imp.Atomic dst_space $
+      Imp.AtomicWrite pt dst_mem dst_offset (untyped (tvExp tmp))
 
 -- | Locking strategy used for an atomic update.
 data Locking = Locking
