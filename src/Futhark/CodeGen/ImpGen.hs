@@ -44,6 +44,7 @@ module Futhark.CodeGen.ImpGen
     -- * Lookups
     lookupVar,
     lookupArray,
+    lookupArraySpace,
     lookupMemory,
     lookupAcc,
     askAttrs,
@@ -1368,6 +1369,7 @@ lookupMemory name = do
     MemVar _ entry -> pure entry
     _ -> error $ "Unknown memory block: " ++ prettyString name
 
+-- | In which memory space is this array allocated?
 lookupArraySpace :: VName -> ImpM rep r op Space
 lookupArraySpace =
   fmap entryMemSpace . lookupMemory
