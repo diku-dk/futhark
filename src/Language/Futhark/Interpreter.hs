@@ -1985,15 +1985,8 @@ initialCtx =
     def "manifest" = Just $ fun1 pure
     def "vjp2" = Just $
       fun3 $ \f v s -> do
-        -- Increment the depth
-        depth <- do
-          env <- getExts
-          let depth = case M.lookup (VName (nameFromString "$AD_DEPTH") (-1)) env of
-                Just (ValuePrim (UnsignedValue (Int32Value d))) -> d
-                Nothing -> 1
-                _ -> error "Invalid AD depth"
-          putExtSize (VName (nameFromString "$AD_DEPTH") (-1)) $ ValuePrim $ UnsignedValue $ Int32Value $ depth + 1
-          pure $ fromIntegral depth
+        -- Get the depth
+        depth <- length <$> stacktrace
 
         -- Get the seed values
         let getSeeds v = case v of
@@ -2040,15 +2033,8 @@ initialCtx =
 
     def "jvp2" = Just $
       fun3 $ \f v s -> do
-        -- Increment the depth
-        depth <- do
-          env <- getExts
-          let depth = case M.lookup (VName (nameFromString "$AD_DEPTH") (-1)) env of
-                Just (ValuePrim (UnsignedValue (Int32Value d))) -> d
-                Nothing -> 1
-                _ -> error "Invalid AD depth"
-          putExtSize (VName (nameFromString "$AD_DEPTH") (-1)) $ ValuePrim $ UnsignedValue $ Int32Value $ depth + 1
-          pure $ fromIntegral depth
+        -- Get the depth
+        depth <- length <$> stacktrace
 
         -- Get the seed values
         let getSeeds v = case v of
