@@ -4,7 +4,7 @@ let mkFlagArray 't [m]
         (xs: [m]t) : {[]t | \res-> is_indexfn res} =
   let shp_rot = map (\ i -> if i==0 then 0 else shape[i-1]) (iota m)
   let shp_scn = scan (+) 0i64 shp_rot
-  let aoa_len = shp_scn[m-1] + shape[m-1] -- if m > 0 cond
+  let aoa_len = if m > 0 then shp_scn[m-1] + shape[m-1] else 0
   let shp_ind =
         map2 (\ shp ind ->
                 if shp <= 0 then -1 else ind
