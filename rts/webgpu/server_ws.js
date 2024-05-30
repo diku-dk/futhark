@@ -52,8 +52,8 @@ class BrowserServer {
   }
 
   get_entry_point(entry) {
-    if (entry in this.fut.available_entry_points) {
-      return this.fut.available_entry_points[entry];
+    if (entry in this.fut.entry) {
+      return this.fut.entry[entry];
     }
     throw "Unknown entry point: " + entry;
   }

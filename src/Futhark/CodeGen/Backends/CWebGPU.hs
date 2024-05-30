@@ -204,7 +204,7 @@ mkJsContext (Definitions _ _ (Functions funs)) manifest =
         this.m = module;
         this.cfg = this.m._futhark_context_config_new();
         this.ctx = await ${newContext};
-        this.available_entry_points = {};
+        this.entry = {};
         this.types = {};
         ${valueClasses}
         ${entryPointFuns}
@@ -258,8 +258,7 @@ mkJsEntryPoints entries = (T.intercalate "\n" entryFuns, entryExports)
     entryFuns = map entryFun entryNames
     entryExports = map entryExport entryNames
     entryFun name =
-      [text|this.entry_${name} = make_entry_function(this, '${name}');
-            this.available_entry_points['${name}'] = this.entry_${name}.bind(this);|]
+      [text|this.entry['${name}'] = make_entry_function(this, '${name}').bind(this);|]
     entryExport name = "futhark_entry_" <> name
 
 mkJsValueClasses :: [EntryPoint] -> (T.Text, [T.Text])
