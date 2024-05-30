@@ -80,7 +80,7 @@ primal (JvpSeed _ v _) = v
 
 valueAsType :: PrimValue -> Rational -> PrimValue
 valueAsType v c = case v of
-  IntValue (Int8Value _)      -> IntValue $ Int8Value $ round c
+  IntValue (Int8Value _)      -> IntValue $ Int8Value  $ round c
   IntValue (Int16Value _)     -> IntValue $ Int16Value $ round c
   IntValue (Int32Value _)     -> IntValue $ Int32Value $ round c
   IntValue (Int64Value _)     -> IntValue $ Int64Value $ round c
@@ -118,6 +118,19 @@ multiplyFor op = OpBin $ fromJust $ case opReturnType op of
   IntType t -> Just $ Mul t OverflowUndef
   FloatType t -> Just $ FMul t
   _ -> Nothing
+
+typeAsValue :: PrimType -> Rational -> PrimValue
+typeAsValue t c = case t of
+  IntType t' -> case t' of
+    Int8  -> IntValue $ Int8Value  $ round c
+    Int16 -> IntValue $ Int16Value $ round c
+    Int32 -> IntValue $ Int32Value $ round c
+    Int64 -> IntValue $ Int64Value $ round c
+  FloatType t' -> case t' of
+    Float16 -> FloatValue $ Float16Value $ fromRational c
+    Float32 -> FloatValue $ Float32Value $ fromRational c
+    Float64 -> FloatValue $ Float64Value $ fromRational c
+  _ -> error $ "No valid prim value for " ++ show t
 
 doOp :: Op -> [ADValue] -> Maybe ADValue
 doOp op p = do
@@ -235,7 +248,7 @@ deriveVjp (TapeOp op p _) v = do
   let m = M.fromList $ zip n $ map tapeValue p
 
   -- Derive the function using the parameters
-  op' <- deriveOp op $ map (`LeafExp` FloatType Float64) n -- TODO: Correct type
+  op' <- deriveOp op $ map (`LeafExp` opReturnType op) n
   v' <- mapM (`runPrimExp` m) op'
 
   -- Derive parameters and combine
@@ -264,7 +277,7 @@ jvpHandleFn op p d av = do
   let m = M.fromList $ zip n $ map fst p'
 
   -- Derive the function using the parameters
-  op' <- deriveOp op $ map (`LeafExp` FloatType Float64) n -- TODO: Correct type
+  op' <- deriveOp op $ map (`LeafExp` opReturnType op) n
   v' <- mapM (`runPrimExp` m) op'
 
   let didx = S.toList $ foldl (\x (_, m') -> S.union x (S.fromList $ M.keys m')) S.empty p'
@@ -279,7 +292,7 @@ jvpHandleFn op p d av = do
         -- Sum them up
         let add a b = doOp (addFor op) [a, b]
         Just $ do
-          k <- foldlM add (Primal $ FloatValue $ Float64Value 0 {- TODO -}) vs
+          k <- foldlM add (Primal $ typeAsValue (opReturnType op) 0) vs
           pure (idx, k)) didx of
 
     Just k -> do
