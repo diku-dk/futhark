@@ -2046,8 +2046,8 @@ initialCtx =
 
         -- Impregnate the values
         let addSeeds i v = case v of
-              ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Primal $ fromJust $ getV v') $ M.fromList [(i, s' !! i)])
-              ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Seed se) $ M.fromList [(i, s' !! i)])
+              ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Primal $ fromJust $ getV v') $ s' !! i)
+              ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Seed se) $ s' !! i)
               ValueRecord m -> second ValueRecord $ M.mapAccum addSeeds i m
               _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
         let v' = snd $ addSeeds 0 v
@@ -2058,9 +2058,9 @@ initialCtx =
         -- Derive the seeds
         let deriveSeeds v = case v of
               ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
-              ValueSeed s@(AD.JvpSeed d _ m) ->
+              ValueSeed s@(AD.JvpSeed d _ d') ->
                 if d == depth then -- TODO: Fix add op
-                  adToValue $ foldl (\x y -> fromJust $ adBinOp (AD.OpBin $ P.FAdd Float64) x y) (AD.Primal $ AD.valueAsType (AD.value $ AD.primal s) 0) $ M.elems m
+                  adToValue d'
                 else ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
               ValueRecord m -> ValueRecord $ M.map deriveSeeds m
               _ -> error "Not implemented (d19hasd782)" -- TODO: Arrays?

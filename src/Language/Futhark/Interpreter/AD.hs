@@ -37,7 +37,7 @@ import Data.Foldable (foldlM)
 
 data ADSeed
   = VjpSeed Int Tape
-  | JvpSeed Int ADValue (M.Map Int ADValue)
+  | JvpSeed Int ADValue ADValue
 
 instance Show ADSeed where
   show :: ADSeed -> String
@@ -269,7 +269,7 @@ jvpHandleFn op p d av = do
   -- Turn everything into jvp values
   let p' = map (\case
         Right (JvpSeed _ v' m) -> (v', m)
-        Left  v' -> (v', M.empty)
+        Left  v' -> (v', Primal $ valueAsType (value v') 0)
         _ -> error "And unknown error occured") p -- ?TODO: This is impossible
 
   -- Create a unique name for each parameter
@@ -280,22 +280,10 @@ jvpHandleFn op p d av = do
   op' <- deriveOp op $ map (`LeafExp` opReturnType op) n
   v' <- mapM (`runPrimExp` m) op'
 
-  let didx = S.toList $ foldl (\x (_, m') -> S.union x (S.fromList $ M.keys m')) S.empty p'
-  case mapM (\idx -> do
-        -- Get derivatives
-        let mul a b = doOp (multiplyFor op) [a, b]
-        vs <- zipWithM (\d' (t, m') ->
-              case M.lookup idx m' of
-                Just v'' -> mul d' v''
-                _ -> Just $ Primal $ valueAsType (value t) 0) v' p'
+  -- Get derivatives
+  let mul a b = doOp (multiplyFor op) [a, b]
+  vs <- zipWithM (\d' (_, v'') -> mul d' v'') v' p'
 
-        -- Sum them up
-        let add a b = doOp (addFor op) [a, b]
-        Just $ do
-          k <- foldlM add (Primal $ typeAsValue (opReturnType op) 0) vs
-          pure (idx, k)) didx of
-
-    Just k -> do
-      m <- M.fromList <$> sequence k
-      Just $ Seed $ JvpSeed d av m
-    Nothing -> Just $ Seed $ JvpSeed d av M.empty
+  -- Sum them up
+  let add a b = doOp (addFor op) [a, b]
+  Seed . JvpSeed d av <$> foldlM add (Primal $ typeAsValue (opReturnType op) 0) vs
