@@ -44,7 +44,7 @@ parallelCopy pt destloc srcloc = do
       is <- dIndexSpace' "i" (map pe64 srcshape) i
       (_, destspace, destidx) <- fullyIndexArray' destloc is
       (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
-      tmp <- tvVar <$> dPrim "tmp" pt
+      tmp <- dPrimS "tmp" pt
       emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
       emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
 
@@ -134,7 +134,7 @@ compileMCOp pat (ParOp par_op op) = do
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   iterations <- getIterationDomain op space
   seq_code <- collect $ localOps inThreadOps $ do
-    nsubtasks <- dPrim "nsubtasks" int32
+    nsubtasks <- dPrim "nsubtasks"
     sOp $ Imp.GetNumTasks $ tvVar nsubtasks
     emit =<< compileSegOp pat op nsubtasks
   retvals <- getReturnParams pat op
@@ -146,7 +146,7 @@ compileMCOp pat (ParOp par_op op) = do
       let space' = getSpace nested_op
       dPrimV_ (segFlat space') (0 :: Imp.TExp Int64)
       par_code <- collect $ do
-        nsubtasks <- dPrim "nsubtasks" int32
+        nsubtasks <- dPrim "nsubtasks"
         sOp $ Imp.GetNumTasks $ tvVar nsubtasks
         emit =<< compileSegOp pat nested_op nsubtasks
       pure $ Just $ Imp.ParallelTask par_code

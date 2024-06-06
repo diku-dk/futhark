@@ -6,7 +6,7 @@ module Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass (compileSegScan) where
 
 import Control.Monad
 import Control.Monad.State
-import Data.List (delete, find, foldl', zip4)
+import Data.List qualified as L
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
@@ -27,7 +27,7 @@ makeLocalArrays ::
   InKernelGen [[VName]]
 makeLocalArrays (Count tblock_size) num_threads scans = do
   (arrs, mems_and_sizes) <- runStateT (mapM onScan scans) mempty
-  let maxSize sizes = Imp.bytes $ foldl' sMax64 1 $ map Imp.unCount sizes
+  let maxSize sizes = Imp.bytes $ L.foldl' sMax64 1 $ map Imp.unCount sizes
   forM_ mems_and_sizes $ \(sizes, mem) ->
     sAlloc_ mem (maxSize sizes) (Space "shared")
   pure arrs
@@ -56,9 +56,9 @@ makeLocalArrays (Count tblock_size) num_threads scans = do
     getMem pt shape = do
       let size = typeSize $ Array pt shape NoUniqueness
       mems <- get
-      case (find ((size `elem`) . fst) mems, mems) of
+      case (L.find ((size `elem`) . fst) mems, mems) of
         (Just mem, _) -> do
-          modify $ delete mem
+          modify $ L.delete mem
           pure mem
         (Nothing, (size', mem) : mems') -> do
           put mems'
@@ -353,7 +353,7 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_tblocks crossesS
     -- Construct segment indices.
     zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ tvExp flat_idx
 
-    forM_ (zip4 scans per_scan_local_arrs per_scan_rets per_scan_pes) $
+    forM_ (L.zip4 scans per_scan_local_arrs per_scan_rets per_scan_pes) $
       \(SegBinOp _ scan_op nes vec_shape, local_arrs, rets, pes) ->
         sLoopNest vec_shape $ \vec_is -> do
           let glob_is = map Imp.le64 gtids ++ vec_is
@@ -494,7 +494,7 @@ compileSegScan pat lvl space scans kbody = do
   -- Since stage 2 involves a group size equal to the number of groups
   -- used for stage 1, we have to cap this number to the maximum group
   -- size.
-  stage1_max_num_tblocks <- dPrim "stage1_max_num_tblocks" int64
+  stage1_max_num_tblocks <- dPrim "stage1_max_num_tblocks"
   sOp $ Imp.GetSizeMax (tvVar stage1_max_num_tblocks) SizeThreadBlock
 
   stage1_num_tblocks <-

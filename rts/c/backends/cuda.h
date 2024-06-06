@@ -979,7 +979,7 @@ static int gpu_memcpy(struct futhark_context* ctx,
               (event_report_fn)cuda_event_report);
     CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
   }
-  CUDA_SUCCEED_OR_RETURN(cuMemcpy(dst+dst_offset, src+src_offset, nbytes));
+  CUDA_SUCCEED_OR_RETURN(cuMemcpyAsync(dst+dst_offset, src+src_offset, nbytes, ctx->stream));
   if (event != NULL) {
     CUDA_SUCCEED_FATAL(cuEventRecord(event->end, ctx->stream));
   }
@@ -1101,7 +1101,10 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     CUDA_SUCCEED_FATAL(cuCtxSynchronize());
     time_end = get_wall_time();
     long int time_diff = time_end - time_start;
-    fprintf(ctx->log, "  runtime: %ldus\n\n", time_diff);
+    fprintf(ctx->log, "  runtime: %ldus\n", time_diff);
+  }
+  if (ctx->logging) {
+    fprintf(ctx->log, "\n");
   }
 
   return FUTHARK_SUCCESS;

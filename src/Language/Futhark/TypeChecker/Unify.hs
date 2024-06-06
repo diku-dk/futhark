@@ -27,7 +27,7 @@ where
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
-import Data.List (foldl')
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -452,7 +452,7 @@ unifyWith onDims usage = subunify False
 
                 -- Delete the size variables we introduced to represent
                 -- the existential sizes.
-                modifyConstraints $ \m -> foldl' (flip M.delete) m (b1_dims <> b2_dims)
+                modifyConstraints $ \m -> L.foldl' (flip M.delete) m (b1_dims <> b2_dims)
             where
               (b1', b2') =
                 -- Replace one parameter name with the other in the

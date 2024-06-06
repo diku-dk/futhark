@@ -1,5 +1,12 @@
 packages: futhark.cabal
-index-state: 2024-05-01T04:59:38Z
+index-state: 2024-05-22T04:42:44Z
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
+
+allow-newer: base, template-haskell
+
+source-repository-package
+    type: git
+    location: https://github.com/ludat/glpk-hs.git
+    tag: efcb8354daa1205de2b862898353da2e4beb76b2

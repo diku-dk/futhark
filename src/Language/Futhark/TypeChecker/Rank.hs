@@ -4,6 +4,7 @@ module Language.Futhark.TypeChecker.Rank
   )
 where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
@@ -282,7 +283,7 @@ rankAnalysis _ [] tyVars artificial params body =
   pure [(([], artificial, tyVars), params, body)]
 rankAnalysis loc cs tyVars artificial params body = do
   debugTraceM 3 $
-    unlines $
+    unlines
       [ "##rankAnalysis",
         "cs:",
         unlines $ map prettyString cs,
@@ -382,16 +383,7 @@ addRankInfo :: (MonadTypeChecker m) => TyVar -> SubstT m ()
 addRankInfo t = do
   rs <- asks envRanks
   if fromMaybe 0 (rs M.!? t) == 0
-    then do
-      old_tyvars <- asks envTyVars
-      case old_tyvars M.!? t of
-        -- Probably not needed
-        -- Just (lvl, TyVarFree) ->
-        --  -- is anyPrimType right here?
-        --  modify $
-        --    \s -> s {substTyVars = M.insert t (lvl, TyVarPrim anyPrimType) $ substTyVars s}
-        _ ->
-          pure ()
+    then pure ()
     else do
       new_vars <- gets substNewVars
       maybe new_var (const $ pure ()) $ new_vars M.!? t

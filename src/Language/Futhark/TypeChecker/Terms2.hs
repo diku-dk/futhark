@@ -43,6 +43,7 @@ module Language.Futhark.TypeChecker.Terms2
   )
 where
 
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State

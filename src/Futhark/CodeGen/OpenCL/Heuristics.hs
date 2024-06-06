@@ -58,6 +58,7 @@ sizeHeuristicsTable =
     SizeHeuristic "" DeviceGPU TileSize 16,
     SizeHeuristic "" DeviceGPU RegTileSize 4,
     SizeHeuristic "" DeviceGPU Threshold $ 32 * 1024,
+    --
     SizeHeuristic "" DeviceCPU LockstepWidth 1,
     SizeHeuristic "" DeviceCPU NumBlocks max_compute_units,
     SizeHeuristic "" DeviceCPU BlockSize 32,

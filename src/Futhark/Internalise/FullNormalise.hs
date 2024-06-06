@@ -20,6 +20,7 @@
 -- still needed in monomorphisation for now.
 module Futhark.Internalise.FullNormalise (transformProg) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
