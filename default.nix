@@ -38,7 +38,7 @@ let
             haskellPackagesNew.callPackage ./nix/zlib.nix {zlib=pkgs.zlib;};
 
           gasp =
-            haskellPackagesNew.callPackage ./nix/.nix {};
+            haskellPackagesNew.callPackage ./nix/gasp.nix {};
 
           glpk-hs =
             haskellPackagesNew.callPackage ./nix/glpk-hs.nix {};
