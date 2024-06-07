@@ -38,6 +38,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.Aliases
+import Futhark.IR.GPU
 import Futhark.IR.GPUMem as GPU
 import Futhark.IR.MCMem as MC
 import Futhark.IR.Mem.LMAD qualified as LMAD
@@ -328,6 +329,9 @@ instance HasMemBlock (Aliases MCMem) where
       Just (FParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
       Just (LParamName (MemArray tp shp _ (ArrayIn m idx))) -> Just (MemBlock tp shp m idx)
       _ -> Nothing
+
+instance HasMemBlock (Aliases GPU) where
+  getScopeMemInfo _ _ = Nothing
 
 -- | @True@ if the expression returns a "fresh" array.
 createsNewArrOK :: Exp rep -> Bool

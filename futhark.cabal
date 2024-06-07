@@ -306,6 +306,7 @@ library
       Futhark.LSP.State
       Futhark.LSP.PositionMapping
       Futhark.MonadFreshNames
+      Futhark.Optimise.FuseIntraScatter
       Futhark.Optimise.EffSeqIntra
       Futhark.Optimise.EffSeqIntra.Helper
       Futhark.Optimise.IntraSeq

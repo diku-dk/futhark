@@ -35,6 +35,7 @@ import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Optimise.EffSeqIntra
 import Futhark.Optimise.IntraSeq
+import Futhark.Optimise.FuseIntraScatter
 import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
@@ -89,7 +90,8 @@ gpuPipeline =
     >>> onePass extractKernels
     >>> passes
       [ simplifyGPU,
-        effSeqIntra,
+        fuseIntraScatter,
+        -- effSeqIntra,
         -- intraSeq,
         optimiseGenRed,
         simplifyGPU,

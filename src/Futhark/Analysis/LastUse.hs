@@ -13,6 +13,7 @@ module Futhark.Analysis.LastUse
   ( lastUseSeqMem,
     lastUseGPUMem,
     lastUseMCMem,
+    lastUseGPUNoMem,
     LUTabFun,
     LUTabProg,
   )
@@ -27,6 +28,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import Futhark.IR.Aliases
+import Futhark.IR.GPU
 import Futhark.IR.GPUMem
 import Futhark.IR.GPUMem qualified as GPU
 import Futhark.IR.MCMem
@@ -118,6 +120,10 @@ lastUseGPUMem = runLastUseM (lastUseMemOp lastUseGPUOp) . lastUseProg
 -- | Perform last-use analysis on a 'Prog' in 'MCMem'
 lastUseMCMem :: Prog (Aliases MCMem) -> LUTabProg
 lastUseMCMem = runLastUseM (lastUseMemOp lastUseMCOp) . lastUseProg
+
+-- | Perform last-use analysis on a 'Prog' in 'GPU'
+lastUseGPUNoMem :: Prog (Aliases GPU) -> LUTabProg
+lastUseGPUNoMem = runLastUseM lastUseGPUNoMemOp . lastUseProg
 
 -- | Performing the last-use analysis on a body.
 --
@@ -339,6 +345,19 @@ lastUseGPUOp (GPUBody tps body) used_nms = do
   (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
   pure (body_lutab, lu_vars, used_nms' <> used_nms'')
 lastUseGPUOp (SegOp op) used_nms =
+  lastUseSegOp op used_nms
+
+lastUseGPUNoMemOp :: HostOp SOAC (Aliases GPU) -> Names -> LastUseM GPU (LUTabFun, Names, Names)
+lastUseGPUNoMemOp (GPU.OtherOp _) used_nms =
+  pure (mempty, mempty, used_nms)
+lastUseGPUNoMemOp (SizeOp sop) used_nms = do
+  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn sop
+  pure (mempty, lu_vars, used_nms')
+lastUseGPUNoMemOp (GPUBody tps body) used_nms = do
+  (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
+  (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
+  pure (body_lutab, lu_vars, used_nms' <> used_nms'')
+lastUseGPUNoMemOp (SegOp op) used_nms =
   lastUseSegOp op used_nms
 
 lastUseMCOp :: MCOp NoOp (Aliases MCMem) -> Names -> LastUseM MCMem (LUTabFun, Names, Names)
