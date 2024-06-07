@@ -1,5 +1,5 @@
 -- ==
--- structure gpu-mem { Alloc 1 }
+-- structure gpu-mem { Alloc 2 }
 
 let lud_internal [m][b] (top_per: [m][b][b]f32) (lft_per: [m][b][b]f32) (mat_slice: [m][m][b][b]f32): *[m][m][b][b]f32 =
   let top_slice = map transpose top_per in

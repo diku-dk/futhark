@@ -33,7 +33,7 @@ can be compiled to an executable program as follows::
 
 This makes use of the ``futhark c`` compiler, but any other will work
 as well.  The compiler will automatically invoke ``cc`` to produce an
-executable binary called ``prog``.  If we had used ``futhark py``
+executable binary called ``prog``.  If we had used ``futhark python``
 instead of ``futhark c``, the ``prog`` file would instead have
 contained Python code, along with a `shebang`_ for easy execution.  In
 general, when compiling file ``foo.fut``, the result will be written
@@ -535,7 +535,7 @@ See also :ref:`futhark-opencl(1)`.
 Generating Python
 ^^^^^^^^^^^^^^^^^
 
-The ``futhark py`` and ``futhark pyopencl`` compilers both support
+The ``futhark python`` and ``futhark pyopencl`` compilers both support
 generating reusable Python code, although the latter of these
 generates code of sufficient performance to be worthwhile.  The
 following mentions options and parameters only available for

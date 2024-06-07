@@ -10,7 +10,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
   ( TermTypeM,
     runTermTypeM,
     ValBinding (..),
-    SizeSource (SourceBound, SourceSlice),
+    SizeSource (SourceSlice),
     Inferred (..),
     Checking (..),
     withEnv,
@@ -241,7 +241,6 @@ instance Ord FName where
 -- encountered in multiple locations.
 data SizeSource
   = SourceArg FName (ExpBase NoInfo VName)
-  | SourceBound (ExpBase NoInfo VName)
   | SourceSlice
       (Maybe Size)
       (Maybe (ExpBase NoInfo VName))
@@ -491,8 +490,6 @@ extSize loc e = do
   let rsrc = case e of
         SourceArg (FName fname) e' ->
           RigidArg fname $ prettyTextOneLine e'
-        SourceBound e' ->
-          RigidBound $ prettyTextOneLine e'
         SourceSlice d i j s ->
           RigidSlice d $ prettyTextOneLine $ DimSlice i j s
   d <- newRigidDim loc rsrc "n"

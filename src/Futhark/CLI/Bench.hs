@@ -527,7 +527,7 @@ commandLineOptions =
       []
       ["skip-compilation"]
       (NoArg $ Right $ \config -> config {optSkipCompilation = True})
-      "Use already compiled program.",
+      "Use already compiled server-mode program.",
     Option
       []
       ["exclude-case"]
