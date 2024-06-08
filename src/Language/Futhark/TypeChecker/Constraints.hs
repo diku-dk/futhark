@@ -115,30 +115,39 @@ instance Located TyVarInfo where
 
 type TyVar = VName
 
--- | If a VName is not in this map, it is assumed to be rigid. The
--- integer is the level.
-type TyVars = M.Map TyVar (Int, TyVarInfo)
+-- | The level at which a type variable is bound.  Higher means
+-- deeper.  We can only unify a type variable at level @i@ with a type
+-- @t@ if all type names that occur in @t@ are at most at level @i@.
+type Level = Int
+
+-- | If a VName is not in this map, it is assumed to be rigid.
+type TyVars = M.Map TyVar (Level, TyVarInfo)
 
 data TyVarSol
   = -- | Has been substituted with this.
-    TyVarSol Int Type
-  | -- | Replaced by this other type variable.
-    TyVarLink VName
+    TyVarSol Level Type
   | -- | Not substituted yet; has this constraint.
-    TyVarUnsol Int TyVarInfo
+    TyVarUnsol Level TyVarInfo
   deriving (Show)
 
-newtype SolverState = SolverState {solverTyVars :: M.Map TyVar TyVarSol}
+tyVarSolLevel :: TyVarSol -> Level
+tyVarSolLevel (TyVarSol lvl _) = lvl
+tyVarSolLevel (TyVarUnsol lvl _) = lvl
+
+newtype SolverState = SolverState
+  { -- | Left means linked to this other type variable.
+    solverTyVars :: M.Map TyVar (Either VName TyVarSol)
+  }
 
 initialState :: TyVars -> SolverState
-initialState tyvars = SolverState $ M.map (uncurry TyVarUnsol) tyvars
+initialState tyvars = SolverState $ M.map (Right . uncurry TyVarUnsol) tyvars
 
-substTyVar :: (Monoid u) => M.Map TyVar TyVarSol -> VName -> Maybe (TypeBase SComp u)
+substTyVar :: (Monoid u) => M.Map TyVar (Either VName TyVarSol) -> VName -> Maybe (TypeBase SComp u)
 substTyVar m v =
   case M.lookup v m of
-    Just (TyVarLink v') -> substTyVar m v'
-    Just (TyVarSol _ t') -> Just $ second (const mempty) $ substTyVars (substTyVar m) t'
-    Just (TyVarUnsol {}) -> Nothing
+    Just (Left v') -> substTyVar m v'
+    Just (Right (TyVarSol _ t')) -> Just $ second (const mempty) $ substTyVars (substTyVar m) t'
+    Just (Right (TyVarUnsol {})) -> Nothing
     Nothing -> Nothing
 
 lookupTyVar :: TyVar -> SolveM (Int, Either TyVarInfo Type)
@@ -146,9 +155,9 @@ lookupTyVar orig = do
   tyvars <- gets solverTyVars
   let f v = case M.lookup v tyvars of
         Nothing -> error $ "Unknown tyvar: " <> prettyNameString v
-        Just (TyVarSol lvl t) -> pure (lvl, Right t)
-        Just (TyVarLink v') -> f v'
-        Just (TyVarUnsol lvl info) -> pure (lvl, Left info)
+        Just (Left v') -> f v'
+        Just (Right (TyVarSol lvl t)) -> pure (lvl, Right t)
+        Just (Right (TyVarUnsol lvl info)) -> pure (lvl, Left info)
   f orig
 
 -- | A solution maps a type variable to its substitution. This
@@ -162,15 +171,15 @@ solution s =
     M.mapMaybe mkSubst $ solverTyVars s
   )
   where
-    mkSubst (TyVarSol _lvl t) =
+    mkSubst (Right (TyVarSol _lvl t)) =
       Just $ Right $ first (const ()) $ substTyVars (substTyVar (solverTyVars s)) t
-    mkSubst (TyVarLink v') =
+    mkSubst (Left v') =
       Just . fromMaybe (Right $ Scalar $ TypeVar mempty (qualName v') []) $
         mkSubst =<< M.lookup v' (solverTyVars s)
-    mkSubst (TyVarUnsol _ (TyVarPrim _ pts)) = Just $ Left pts
+    mkSubst (Right (TyVarUnsol _ (TyVarPrim _ pts))) = Just $ Left pts
     mkSubst _ = Nothing
 
-    unconstrained (v, TyVarUnsol _ (TyVarFree _)) = Just v
+    unconstrained (v, Right (TyVarUnsol _ (TyVarFree _))) = Just v
     unconstrained _ = Nothing
 
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except TypeError) a}
@@ -216,15 +225,27 @@ unifySharedFields reason fs1 fs2 =
 mustSupportEql :: Reason -> Type -> SolveM ()
 mustSupportEql _reason _t = pure ()
 
+scopeViolation :: Reason -> VName -> Type -> SolveM a
+scopeViolation reason v tp =
+  throwError . TypeError (locOf reason) mempty $
+    "Cannot unify type"
+      </> indent 2 (pretty tp)
+      </> "with"
+      <+> dquotes (prettyName v)
+      <+> "(scope violation)."
+      </> "This is because"
+      <+> dquotes (prettyName v)
+      <+> "is rigidly bound in a deeper scope."
+
 -- Precondition: 'v' is currently flexible.
 subTyVar :: Reason -> VName -> Int -> Type -> SolveM ()
 subTyVar reason v lvl t = do
   occursCheck reason v t
   v_info <- gets $ M.lookup v . solverTyVars
   case (v_info, t) of
-    (Just (TyVarUnsol _ TyVarFree {}), _) ->
+    (Just (Right (TyVarUnsol _ TyVarFree {})), _) ->
       pure ()
-    ( Just (TyVarUnsol _ (TyVarPrim _ v_pts)),
+    ( Just (Right (TyVarUnsol _ (TyVarPrim _ v_pts))),
       _
       ) ->
         if t `elem` map (Scalar . Prim) v_pts
@@ -235,7 +256,7 @@ subTyVar reason v lvl t = do
                 </> indent 2 (pretty v_pts)
                 </> "with"
                 </> indent 2 (pretty t)
-    ( Just (TyVarUnsol _ (TyVarSum _ cs1)),
+    ( Just (Right (TyVarUnsol _ (TyVarSum _ cs1))),
       Scalar (Sum cs2)
       ) ->
         if all (`elem` M.keys cs2) (M.keys cs1)
@@ -246,7 +267,7 @@ subTyVar reason v lvl t = do
                 </> indent 2 (pretty (Sum cs1))
                 </> "with type"
                 </> indent 2 (pretty (Sum cs2))
-    ( Just (TyVarUnsol _ (TyVarSum _ cs1)),
+    ( Just (Right (TyVarUnsol _ (TyVarSum _ cs1))),
       _
       ) ->
         throwError . TypeError (locOf reason) mempty $
@@ -254,7 +275,7 @@ subTyVar reason v lvl t = do
             </> indent 2 (pretty (Sum cs1))
             </> "with type"
             </> indent 2 (pretty t)
-    ( Just (TyVarUnsol _ (TyVarRecord _ fs1)),
+    ( Just (Right (TyVarUnsol _ (TyVarRecord _ fs1))),
       Scalar (Record fs2)
       ) ->
         if all (`elem` M.keys fs2) (M.keys fs1)
@@ -265,7 +286,7 @@ subTyVar reason v lvl t = do
                 </> indent 2 (pretty (Record fs1))
                 </> "with record type"
                 </> indent 2 (pretty (Record fs2))
-    ( Just (TyVarUnsol _ (TyVarRecord _ fs1)),
+    ( Just (Right (TyVarUnsol _ (TyVarRecord _ fs1))),
       _
       ) ->
         throwError . TypeError (locOf reason) mempty $
@@ -273,43 +294,48 @@ subTyVar reason v lvl t = do
             </> indent 2 (pretty (Record fs1))
             </> "with type"
             </> indent 2 (pretty t)
-    (Just (TyVarUnsol _ (TyVarEql _)), _) ->
+    (Just (Right (TyVarUnsol _ (TyVarEql _))), _) ->
       mustSupportEql reason t
     --
     -- Internal error cases
-    (Just TyVarSol {}, _) ->
+    (Just (Right TyVarSol {}), _) ->
       error $ "Type variable already solved: " <> prettyNameString v
-    (Just TyVarLink {}, _) ->
+    (Just Left {}, _) ->
       error $ "Type variable already linked: " <> prettyNameString v
     (Nothing, _) ->
       error $ "linkTyVar: Nothing v: " <> prettyNameString v
 
   setInfo v (TyVarSol lvl t)
 
+setLink :: TyVar -> VName -> SolveM ()
+setLink v info = modify $ \s -> s {solverTyVars = M.insert v (Left info) $ solverTyVars s}
+
 setInfo :: TyVar -> TyVarSol -> SolveM ()
-setInfo v info = modify $ \s -> s {solverTyVars = M.insert v info $ solverTyVars s}
+setInfo v info = modify $ \s -> s {solverTyVars = M.insert v (Right info) $ solverTyVars s}
 
 -- Precondition: 'v' is currently flexible and 't' has no solution.
 linkTyVar :: Reason -> VName -> VName -> SolveM ()
 linkTyVar reason v t = do
-  occursCheck reason v $ Scalar $ TypeVar NoUniqueness (qualName t) []
-  v_info <- gets $ M.lookup v . solverTyVars
+  v_info <- gets $ either alreadyLinked id . fromMaybe unknown . M.lookup v . solverTyVars
   (lvl, t') <- lookupTyVar t
+  let tp = Scalar $ TypeVar NoUniqueness (qualName t) []
+  occursCheck reason v tp
+
   case (v_info, t') of
     -- When either is completely unconstrained.
-    (Just (TyVarUnsol _ TyVarFree {}), _) ->
+    (TyVarUnsol _ TyVarFree {}, _) ->
       pure ()
-    ( Just (TyVarUnsol _ info),
+    ( TyVarUnsol _ info,
       Left (TyVarFree {})
       ) ->
         setInfo t (TyVarUnsol lvl info)
     --
     -- TyVarPrim cases
-    ( Just (TyVarUnsol _ info@TyVarPrim {}),
+    ( TyVarUnsol _ info@TyVarPrim {},
       Left TyVarEql {}
       ) ->
         setInfo t (TyVarUnsol lvl info)
-    ( Just (TyVarUnsol _ (TyVarPrim _ v_pts)),
+    ( TyVarUnsol _ (TyVarPrim _ v_pts),
       Left (TyVarPrim t_loc t_pts)
       ) ->
         let pts = L.intersect v_pts t_pts
@@ -321,14 +347,14 @@ linkTyVar reason v t = do
                     </> "with type that must be one of"
                     </> indent 2 (pretty t_pts)
               else setInfo t (TyVarUnsol lvl (TyVarPrim t_loc pts))
-    ( Just (TyVarUnsol _ (TyVarPrim _ v_pts)),
+    ( TyVarUnsol _ (TyVarPrim _ v_pts),
       Left TyVarRecord {}
       ) ->
         throwError . TypeError (locOf reason) mempty $
           "Cannot unify type that must be one of"
             </> indent 2 (pretty v_pts)
             </> "with type that must be record."
-    ( Just (TyVarUnsol _ (TyVarPrim _ v_pts)),
+    ( TyVarUnsol _ (TyVarPrim _ v_pts),
       Left TyVarSum {}
       ) ->
         throwError . TypeError (locOf reason) mempty $
@@ -337,19 +363,19 @@ linkTyVar reason v t = do
             </> "with type that must be sum."
     --
     -- TyVarSum cases
-    ( Just (TyVarUnsol _ (TyVarSum _ cs1)),
+    ( TyVarUnsol _ (TyVarSum _ cs1),
       Left (TyVarSum loc cs2)
       ) -> do
         unifySharedConstructors reason cs1 cs2
         let cs3 = cs1 <> cs2
         setInfo t (TyVarUnsol lvl (TyVarSum loc cs3))
-    ( Just (TyVarUnsol _ TyVarSum {}),
+    ( TyVarUnsol _ TyVarSum {},
       Left (TyVarPrim _ pts)
       ) ->
         throwError . TypeError (locOf reason) mempty $
           "A sum type cannot be one of"
             </> indent 2 (pretty pts)
-    ( Just (TyVarUnsol _ (TyVarSum _ cs1)),
+    ( TyVarUnsol _ (TyVarSum _ cs1),
       Left (TyVarRecord _ fs)
       ) ->
         throwError . TypeError (locOf reason) mempty $
@@ -357,25 +383,25 @@ linkTyVar reason v t = do
             </> indent 2 (pretty (Sum cs1))
             </> "with type"
             </> indent 2 (pretty (Scalar (Record fs)))
-    ( Just (TyVarUnsol _ (TyVarSum _ cs1)),
+    ( TyVarUnsol _ (TyVarSum _ cs1),
       Left (TyVarEql _)
       ) ->
         mapM_ (mapM_ (mustSupportEql reason)) cs1
     --
     -- TyVarRecord cases
-    ( Just (TyVarUnsol _ (TyVarRecord _ fs1)),
+    ( TyVarUnsol _ (TyVarRecord _ fs1),
       Left (TyVarRecord loc fs2)
       ) -> do
         unifySharedFields reason fs1 fs2
         let fs3 = fs1 <> fs2
         setInfo t (TyVarUnsol lvl (TyVarRecord loc fs3))
-    ( Just (TyVarUnsol _ TyVarRecord {}),
+    ( TyVarUnsol _ TyVarRecord {},
       Left (TyVarPrim _ pts)
       ) ->
         throwError . TypeError (locOf reason) mempty $
           "A record type cannot be one of"
             </> indent 2 (pretty pts)
-    ( Just (TyVarUnsol _ (TyVarRecord _ fs1)),
+    ( TyVarUnsol _ (TyVarRecord _ fs1),
       Left (TyVarSum _ cs)
       ) ->
         throwError . TypeError (locOf reason) mempty $
@@ -383,33 +409,33 @@ linkTyVar reason v t = do
             </> indent 2 (pretty (Record fs1))
             </> "with type"
             </> indent 2 (pretty (Scalar (Sum cs)))
-    ( Just (TyVarUnsol _ (TyVarRecord _ fs1)),
+    ( TyVarUnsol _ (TyVarRecord _ fs1),
       Left (TyVarEql _)
       ) ->
         mapM_ (mustSupportEql reason) fs1
     --
     -- TyVarEql cases
-    (Just (TyVarUnsol _ (TyVarEql _)), Left TyVarPrim {}) ->
+    (TyVarUnsol _ (TyVarEql _), Left TyVarPrim {}) ->
       pure ()
-    (Just (TyVarUnsol _ (TyVarEql _)), Left TyVarEql {}) ->
+    (TyVarUnsol _ (TyVarEql _), Left TyVarEql {}) ->
       pure ()
-    (Just (TyVarUnsol _ (TyVarEql _)), Left (TyVarRecord _ fs)) ->
+    (TyVarUnsol _ (TyVarEql _), Left (TyVarRecord _ fs)) ->
       mustSupportEql reason $ Scalar $ Record fs
-    (Just (TyVarUnsol _ (TyVarEql _)), Left (TyVarSum _ cs)) ->
+    (TyVarUnsol _ (TyVarEql _), Left (TyVarSum _ cs)) ->
       mustSupportEql reason $ Scalar $ Sum cs
     --
     -- Internal error cases
-    (Just TyVarSol {}, _) ->
-      error $ "Type variable already solved: " <> prettyNameString v
-    (Just TyVarLink {}, _) ->
-      error $ "Type variable already linked: " <> prettyNameString v
-    (Nothing, _) ->
-      error $ "linkTyVar: Nothing v: " <> prettyNameString v
+    (TyVarSol {}, _) ->
+      alreadySolved
     (_, Right t'') ->
       error $ "linkTyVar: rhs " <> prettyNameString t <> " is solved as " <> prettyString t''
 
   -- Finally insert the actual link.
-  setInfo v (TyVarLink t)
+  setLink v t
+  where
+    unknown = error $ "linkTyVar: Nothing v: " <> prettyNameString v
+    alreadyLinked = error $ "Type variable already linked: " <> prettyNameString v
+    alreadySolved = error $ "Type variable already solved: " <> prettyNameString v
 
 -- Unify at the root, emitting new equalities that must hold.
 unify :: Type -> Type -> Maybe [(Type, Type)]
@@ -459,14 +485,14 @@ solveEq reason orig_t1 orig_t2 = do
     solveCt' (t1, t2) = do
       tyvars <- gets solverTyVars
       let flexible v = case M.lookup v tyvars of
-            Just (TyVarLink v') -> flexible v'
-            Just (TyVarUnsol lvl _) -> Just lvl
-            Just (TyVarSol _ _) -> Nothing
+            Just (Left v') -> flexible v'
+            Just (Right (TyVarUnsol lvl _)) -> Just lvl
+            Just (Right (TyVarSol _ _)) -> Nothing
             Nothing -> Nothing
           sub t@(Scalar (TypeVar u (QualName [] v) [])) =
             case M.lookup v tyvars of
-              Just (TyVarLink v') -> sub $ Scalar (TypeVar u (QualName [] v') [])
-              Just (TyVarSol _ t') -> sub t'
+              Just (Left v') -> sub $ Scalar (TypeVar u (QualName [] v') [])
+              Just (Right (TyVarSol _ t')) -> sub t'
               _ -> t
           sub t = t
       case (sub t1, sub t2) of
