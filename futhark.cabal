@@ -307,6 +307,8 @@ library
       Futhark.LSP.PositionMapping
       Futhark.MonadFreshNames
       Futhark.Optimise.FuseIntraScatter
+      Futhark.Optimise.FuseIntraScatter.DataStructs
+      Futhark.Optimise.FuseIntraScatter.FuseInstance
       Futhark.Optimise.EffSeqIntra
       Futhark.Optimise.EffSeqIntra.Helper
       Futhark.Optimise.IntraSeq

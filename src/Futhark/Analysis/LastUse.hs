@@ -36,6 +36,7 @@ import Futhark.IR.MCMem qualified as MC
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Util
+-- import Debug.Trace
 
 -- | Maps a name indentifying a Stm to the last uses in that Stm.
 type LUTabFun = M.Map VName Names
@@ -358,7 +359,14 @@ lastUseGPUNoMemOp (GPUBody tps body) used_nms = do
   (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
   pure (body_lutab, lu_vars, used_nms' <> used_nms'')
 lastUseGPUNoMemOp (SegOp op) used_nms =
-  lastUseSegOp op used_nms
+  lastUseSegOp' op used_nms
+  where
+    lastUseSegOp' segmap@(SegMap _ _ tps kbody) usednms = do
+      (usednms', _) <- lastUsedInNames usednms $ freeIn tps
+      (body_lutab, usednms'') <- lastUseKernelBody kbody (mempty, usednms')
+      (_, lu_vars) <- lastUsedInNames usednms $ freeIn segmap
+      pure (body_lutab, lu_vars, usednms' <> usednms'')
+    lastUseSegOp' segop usednms = lastUseSegOp segop usednms
 
 lastUseMCOp :: MCOp NoOp (Aliases MCMem) -> Names -> LastUseM MCMem (LUTabFun, Names, Names)
 lastUseMCOp (MC.OtherOp NoOp) used_nms =
