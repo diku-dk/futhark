@@ -603,7 +603,7 @@ consolidate ctx (Var v) = DimAccess (reduceDependencies ctx v) (Just v)
 reduceDependencies :: Context rep -> VName -> M.Map VName Dependency
 reduceDependencies ctx v =
   case M.lookup v (assignments ctx) of
-    Nothing -> error $ "Unable to find " ++ prettyString v
+    Nothing -> mempty -- Means a global.
     Just (VariableInfo deps lvl _parents t) ->
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
