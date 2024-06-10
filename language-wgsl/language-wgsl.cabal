@@ -39,5 +39,5 @@ test-suite language-wgsl-test
     hs-source-dirs:   test
     main-is:          Main.hs
     build-depends:
-        base ^>=4.17.2.1,
+        base >=4.15 && <5,
         language-wgsl
