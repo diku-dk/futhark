@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Rare case where GPU histograms would use slightly too much shared
   memory and fail at run-time.
 
+* Rare crash in layout optimisation.
+
 ## [0.25.16]
 
 ### Added

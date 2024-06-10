@@ -590,23 +590,9 @@ analyseOtherOp ctx _ = (ctx, mempty)
 
 -- | Returns an intmap of names, to be used as dependencies in construction of
 -- VariableInfos.
--- Throws an error if SubExp contains a name not in context. This behaviour
--- might be thrown out in the future, as it is mostly just a very verbose way to
--- ensure that we capture all necessary variables in the context at the moment
--- of development.
 analyseSubExp :: [VName] -> Context rep -> SubExp -> Names
 analyseSubExp _ _ (Constant _) = mempty
-analyseSubExp pp ctx (Var v) =
-  case M.lookup v (assignments ctx) of
-    (Just _) -> oneName v
-    Nothing ->
-      error $
-        "Failed to lookup variable \""
-          ++ prettyString v
-          ++ "\npat: "
-          ++ prettyString pp
-          ++ "\n\nContext\n"
-          ++ show ctx
+analyseSubExp _ _ (Var v) = oneName v
 
 -- | Reduce a DimFix into its set of dependencies
 consolidate :: Context rep -> SubExp -> DimAccess rep
