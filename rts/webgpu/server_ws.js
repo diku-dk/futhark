@@ -1,5 +1,15 @@
 // Start of server_ws.js
 
+// https://stackoverflow.com/a/66046176/3112547
+async function bufferToBase64(buffer) {
+  const base64url = await new Promise(r => {
+    const reader = new FileReader();
+    reader.onload= () => r(reader.result);
+    reader.readAsDataURL(new Blob([buffer]));
+  });
+  return base64url.slice(base64url.indexOf(',') + 1);
+}
+
 class BrowserServer {
   constructor(fut, port) {
     this.fut = fut;
@@ -164,7 +174,7 @@ class BrowserServer {
       }
 
       const encoded = new FutharkWriter().encode_value(to_write, typ);
-      data += btoa(String.fromCharCode.apply(null, encoded));
+      data += await bufferToBase64(encoded);
 
       types.push(typ);
     }
