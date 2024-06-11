@@ -564,8 +564,8 @@ compileWebGPUAction fcfg mode tgtpath =
               "-sWASM_BIGINT",
               "-sEXPORTED_RUNTIME_METHODS=cwrap,ccall,Asyncify",
               "--extern-post-js",
-              jslibpath,
-              "-g"
+              jslibpath
+              --"-g"
             ]
           export_option =
             "-sEXPORTED_FUNCTIONS="
@@ -573,32 +573,29 @@ compileWebGPUAction fcfg mode tgtpath =
       case mode of
         ToLibrary -> do
           let (_header, impl, manifest) = CWebGPU.asLibrary cprog
-          -- liftIO $ T.writeFile hpath $ cPrependHeader header
           liftIO $ T.writeFile cpath $ cPrependHeader impl
           liftIO $ T.writeFile jslibpath jslib
           liftIO $ T.writeFile jsonpath manifest
           runEMCC
             cpath
             outpath
-            ["-O", "-std=c99"]
+            ["-O3", "-std=c99"]
             ["-lm"]
             (export_option : extra_options)
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CWebGPU.asExecutable cprog
           liftIO $ T.writeFile jslibpath jslib
-          -- runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
-          runEMCC cpath outpath ["-O", "-std=c99"] ["-lm"] extra_options
+          runEMCC cpath outpath ["-O3", "-std=c99"] ["-lm"] extra_options
         ToServer -> do
           let (impl, server) = CWebGPU.asJSServer cprog
           liftIO $ T.writeFile cpath $ cPrependHeader impl
           liftIO $ T.writeFile jslibpath jslib
           liftIO $ T.writeFile jsserverpath server
           let serverArgs = ["--extern-post-js", jsserverpath]
-          -- TODO: optimization
           runEMCC
             cpath
             outpath
-            ["-O0", "-std=c99"]
+            ["-O3", "-std=c99"]
             ["-lm"]
             (export_option : extra_options ++ serverArgs)
 
