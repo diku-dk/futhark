@@ -558,6 +558,11 @@ genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg _ dest mem i cmp val))) = 
   WGSL.Assign <$> getIdent dest <*> pure res
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = do
   genIntAtomicOp "atomicExchange" dest mem i e
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicWrite _ mem i v))) = do
+  mem' <- getIdent mem
+  i' <- indexExp i
+  v' <- genWGSLExp v
+  pure $ WGSL.Call "atomicStore" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i', v']
 genWGSLStm s@(Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd {}))) = unsupported s
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceLocal)) =
   pure $ WGSL.Call "workgroupBarrier" []
@@ -821,6 +826,7 @@ atomicOpArray (ImpGPU.AtomicOr _ _ n _ _) = n
 atomicOpArray (ImpGPU.AtomicXor _ _ n _ _) = n
 atomicOpArray (ImpGPU.AtomicCmpXchg _ _ n _ _ _) = n
 atomicOpArray (ImpGPU.AtomicXchg _ _ n _ _) = n
+atomicOpArray (ImpGPU.AtomicWrite _ n _ _) = n
 
 -- Usually we declare all our variables as the signed type and re-interpret when
 -- necessary for operations. We can't do an AtomicU{Min,Max} on an `atomic<i32>`
@@ -841,13 +847,13 @@ atomicOpType (ImpGPU.AtomicOr t _ _ _ _) = (IntType t, Signed)
 atomicOpType (ImpGPU.AtomicXor t _ _ _ _) = (IntType t, Signed)
 atomicOpType (ImpGPU.AtomicCmpXchg t _ _ _ _ _) = (t, Signed)
 atomicOpType (ImpGPU.AtomicXchg t _ _ _ _) = (t, Signed)
+atomicOpType (ImpGPU.AtomicWrite t _ _ _) = (t, Signed)
 
 -- | Internally, memory buffers are untyped but WGSL requires us to annotate the
 -- binding with a type. Search the kernel body for any reads and writes to the
 -- given buffer and return all types it is accessed at.
 -- The bool indicates an atomic type. The Signedness is only relevant for atomic
 -- types as described for `atomicOpType`.
--- TODO: Should we worry about the Space in the Atomic?
 findMemoryTypes :: VName -> KernelM [(PrimType, Bool, Signedness)]
 findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
   where
