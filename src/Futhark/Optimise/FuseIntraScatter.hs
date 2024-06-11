@@ -10,7 +10,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 -- import Data.List qualified as L
 import Data.Map.Strict qualified as M
-import Data.Maybe
+-- import Data.Maybe
 import Data.Sequence (Seq (..))
 import Futhark.Builder
 import Futhark.IR.GPU
@@ -43,10 +43,11 @@ fuseIntraScatter =
     onFun scope_cts lu_tab_funs _ fd = do
       let lu_tab = lu_tab_funs M.! funDefName fd
           scope0 = scope_cts <> scopeOfFParams (funDefParams fd)
-      body' <- trace ("\n Cosmin Svope0: "++show scope0) $ onBdy scope0 lu_tab $ funDefBody fd
+      body' <- trace ("\n Cosmin Scope0: "++show scope0 ++ "\n") $
+                onBdy scope0 lu_tab $ funDefBody fd
       pure $ fd { funDefBody = body' }
     onBdy scope0 lu_tab body = do
-      let td_env = TopDownEnv  mempty []
+      let td_env = FISEnv mempty lu_tab
           bu_env = BottomUpEnv lu_tab mempty mempty
       modifyNameSource $
           runState $
@@ -59,20 +60,15 @@ fuseIntraScatter =
       pure $ body { bodyStms = stms }
 --}
 
-updateTDEnv :: TopDownEnv -> Stm GPU -> TopDownEnv
+updateTDEnv :: FISEnv -> Stm GPU -> FISEnv
 updateTDEnv td_env _ = td_env
 
-fuseIScatStms :: (TopDownEnv, BottomUpEnv GPU) -> Stms GPU -> FuseIScatM ( (TopDownEnv, BottomUpEnv GPU), Stms GPU )
+fuseIScatStms :: (FISEnv, BottomUpEnv GPU) -> Stms GPU -> FuseIScatM ( (FISEnv, BottomUpEnv GPU), Stms GPU )
 fuseIScatStms env Empty = 
   pure (env, Empty)
 fuseIScatStms (td_env, bu_env) (stm :<| stms) = do
   scope0 <- askScope
   let scope = scope0 <> scopeOf stms
-  -- let lu_tab = lutab bu_env
-  --     scope_lst  = M.toList scope
-  --     arr_el = scope_lst !! 4 
-  -- tp <- lookupType (fst arr_el)
-  -- return $ trace ("COSMIN FUSE!!! LUTAB: " ++ prettyString (M.toList lu_tab) ++ "\n ScopeTab: "++show scope++"\n Arr: "++show (fst arr_el) ++ " info: "++ show tp) $ stms
   -- We build the top-down env in a top-down manner, of course
       td_env' = updateTDEnv td_env stm
   -- But our analysis advances bottom-up
@@ -81,9 +77,11 @@ fuseIScatStms (td_env, bu_env) (stm :<| stms) = do
     (env'', cur_stms') <- fuseIScatStm env' stm
     pure (env'', cur_stms' <>  stms')
 
-fuseIScatBdy :: (TopDownEnv, BottomUpEnv GPU) -> Body GPU -> FuseIScatM (Body GPU)
-fuseIScatBdy env bdy = do
-  bdy' <- fuseInCurrentBody env bdy
+fuseIScatBdy :: (FISEnv, BottomUpEnv GPU) -> Body GPU -> FuseIScatM (Body GPU)
+fuseIScatBdy env@(td_env, _) bdy = do
+  scope0 <- askScope
+  bdy' <- localScope (scope0 <> scopeOf (bodyStms bdy)) $ do
+            fuseInCurrentBody td_env bdy
   (_, stms') <- fuseIScatStms env (bodyStms bdy')
   return $ Body (bodyDec bdy') stms' (bodyResult bdy')
 
@@ -95,24 +93,7 @@ fuseIScatBdy env (Body () stms res) = do
   return $ Body () stms' res
 --}
 
-fuseIScatStm :: (TopDownEnv, BottomUpEnv GPU) -> Stm GPU -> FuseIScatM ( (TopDownEnv, BottomUpEnv GPU), Stms GPU )
-fuseIScatStm (td_env, bu_env) scat_stm@(Let pat _aux (Op (SegOp old_kernel))) 
-  | SegMap SegThread {} _space _kertp kbody@(KernelBody () _kstms kres) <- old_kernel,
-    dst_idx_vals <- mapMaybe getScatterResult kres, 
-    length dst_idx_vals == length kres,
-    fvs <- trace ("Scatter Stmt!!!" ++ show pat) (freeIn kbody),
-    fst_pe : _ <- patElems pat,
-    lastuses <- M.lookup (patElemName fst_pe) (lutab bu_env),
-    lus <- filter (isLU lastuses) (namesToList fvs),
-    trace ("Scatter Stmt: "++show lus) (not (null lus)) = do
-  let bu_env' = bu_env { scatters = (scatters bu_env) <> (oneStm scat_stm) }
-  pure ( (td_env, bu_env'), oneStm scat_stm )
-  where
-    getScatterResult (WriteReturns _ dst_nm idx_vals) =
-      Just (dst_nm, idx_vals)
-    getScatterResult _ = Nothing
-    isLU (Just lastuses) nm = nameIn nm lastuses
-    isLU Nothing _ = False
+fuseIScatStm :: (FISEnv, BottomUpEnv GPU) -> Stm GPU -> FuseIScatM ( (FISEnv, BottomUpEnv GPU), Stms GPU )
 fuseIScatStm env (Let pat aux e) = do
   -- env' <- changeEnv env (head $ patNames pat) e
   e' <- mapExpM (optimise env) e
@@ -121,22 +102,22 @@ fuseIScatStm env (Let pat aux e) = do
     optimise env' = identityMapper {mapOnBody = \scope -> localScope scope . fuseIScatBdy env'}
 
 
-fuseInCurrentBody :: (TopDownEnv, BottomUpEnv GPU) -> Body GPU -> FuseIScatM (Body GPU)
-fuseInCurrentBody env (Body aux stms res) = do
+fuseInCurrentBody :: FISEnv -> Body GPU -> FuseIScatM (Body GPU)
+fuseInCurrentBody td_env (Body aux stms res) = do
   let scatters = filter isScatter (stmsToList stms)
   m_res <- tryRec scatters
   case m_res of
     Nothing -> return $ Body aux stms res
       -- ^ no fusion was possible; recurse in each statement
-    Just (stms_before, _orig_intra, stms_interm, _orig_scatter, stms_after, fused_intra) -> do
+    Just (stms_before, stms_new, stms_after) -> do
       -- ^ we performed a fusion: update statements
-        let new_stms = stms_before <> oneStm fused_intra <> stms_interm <> stms_after
-        fuseInCurrentBody env (Body aux new_stms res)
+        let new_stms = stms_before <> stms_new <> stms_after
+        fuseInCurrentBody td_env (Body aux new_stms res)
   where
-    tryRec :: [Stm GPU] -> FuseIScatM (Maybe (Stms GPU, Stm GPU, Stms GPU, Stm GPU, Stms GPU, Stm GPU))
+    tryRec :: [Stm GPU] -> FuseIScatM (Maybe (Stms GPU, Stms GPU, Stms GPU))
     tryRec [] = return Nothing
     tryRec (scat_stm:scat_stms) = do
-      m_res <- fuseInstance stms scat_stm
+      m_res <- fuseInstance td_env stms scat_stm
       case m_res of
         Nothing -> tryRec scat_stms
         Just inst_res-> return $ Just inst_res

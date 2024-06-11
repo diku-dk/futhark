@@ -78,4 +78,4 @@ entry radixIt (m: i64) (bq: i64)
              |> transpose
   let (xs', inds') = unzip <|
                 map3Intra (ker2Blk bit_beg lgH) hist16 hist64T (unflatten xs)
-  in  scatter xs (flatten inds') (flatten xs')
+  in  scatter (replicate (m*bq) 0u32) (flatten inds') (flatten xs')
