@@ -184,9 +184,10 @@ data KernelOp
     ErrorSync Fence
   deriving (Show)
 
--- | Atomic operations return the value stored before the update.
--- This old value is stored in the first 'VName'.  The second 'VName'
--- is the memory block to update.  The 'Exp' is the new value.
+-- | Atomic operations return the value stored before the update. This
+-- old value is stored in the first 'VName' (except for
+-- 'AtomicWrite'). The second 'VName' is the memory block to update.
+-- The 'Exp' is the new value.
 data AtomicOp
   = AtomicAdd IntType VName VName (Count Elements (TExp Int64)) Exp
   | AtomicFAdd FloatType VName VName (Count Elements (TExp Int64)) Exp
@@ -199,6 +200,9 @@ data AtomicOp
   | AtomicXor IntType VName VName (Count Elements (TExp Int64)) Exp
   | AtomicCmpXchg PrimType VName VName (Count Elements (TExp Int64)) Exp Exp
   | AtomicXchg PrimType VName VName (Count Elements (TExp Int64)) Exp
+  | -- | Corresponds to a write followed by a memory fence. The old
+    -- value is not read.
+    AtomicWrite PrimType VName (Count Elements (TExp Int64)) Exp
   deriving (Show)
 
 instance FreeIn AtomicOp where
@@ -213,6 +217,7 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicXor _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
   freeIn' (AtomicCmpXchg _ _ arr i x y) = freeIn' arr <> freeIn' i <> freeIn' x <> freeIn' y
   freeIn' (AtomicXchg _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
+  freeIn' (AtomicWrite _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
 instance Pretty KernelOp where
   pretty (GetBlockId dest i) =
@@ -320,6 +325,10 @@ instance Pretty KernelOp where
     pretty old
       <+> "<-"
       <+> "atomic_xchg"
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+  pretty (Atomic _ (AtomicWrite t arr ind x)) =
+    "atomic_write"
       <> pretty t
       <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
 

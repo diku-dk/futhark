@@ -80,7 +80,7 @@ cliOptions =
            { optionLongName = "build-option",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "OPT",
-             optionDescription = "Add an additional build option to the string passed to NVRTC.",
+             optionDescription = "Add an additional build option to the string passed to HIPRTC.",
              optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
            }
        ]

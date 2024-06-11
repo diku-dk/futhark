@@ -463,20 +463,20 @@ analyseBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable 
 analyseBasicOp ctx expression pats =
   -- Construct a VariableInfo from the subexpressions
   let ctx_val = case expression of
-        SubExp se -> varInfoFromSubExpr se
-        Opaque _ se -> varInfoFromSubExpr se
+        SubExp se -> varInfoFromSubExp se
+        Opaque _ se -> varInfoFromSubExp se
         ArrayLit ses _t -> concatVariableInfos mempty ses
-        UnOp _ se -> varInfoFromSubExpr se
+        UnOp _ se -> varInfoFromSubExp se
         BinOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
         CmpOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
-        ConvOp _ se -> varInfoFromSubExpr se
-        Assert se _ _ -> varInfoFromSubExpr se
+        ConvOp _ se -> varInfoFromSubExp se
+        Assert se _ _ -> varInfoFromSubExp se
         Index name _ ->
           error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
         Update _ name _slice _subexp ->
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
-        Concat _ _ length_subexp -> varInfoFromSubExpr length_subexp
+        Concat _ _ length_subexp -> varInfoFromSubExp length_subexp
         Manifest _dim name -> varInfoFromNames ctx $ oneName name
         Iota end start stride _ -> concatVariableInfos mempty [end, start, stride]
         Replicate (Shape shape) value' -> concatVariableInfos mempty (value' : shape)
@@ -491,10 +491,10 @@ analyseBasicOp ctx expression pats =
    in (ctx', mempty)
   where
     concatVariableInfos ne nn =
-      varInfoFromNames ctx (ne <> mconcat (map (analyseSubExpr pats ctx) nn))
+      varInfoFromNames ctx (ne <> mconcat (map (analyseSubExp pats ctx) nn))
 
-    varInfoFromSubExpr (Constant _) = (varInfoFromNames ctx mempty) {variableType = ConstType}
-    varInfoFromSubExpr (Var v) =
+    varInfoFromSubExp (Constant _) = (varInfoFromNames ctx mempty) {variableType = ConstType}
+    varInfoFromSubExp (Var v) =
       case M.lookup v (assignments ctx) of
         Just _ -> (varInfoFromNames ctx $ oneName v) {variableType = Variable}
         Nothing ->
@@ -578,7 +578,7 @@ analyseSizeOp op ctx pats =
   where
     subexprsToContext =
       contextFromNames ctx (varInfoZeroDeps ctx)
-        . concatMap (namesToList . analyseSubExpr pats ctx)
+        . concatMap (namesToList . analyseSubExp pats ctx)
 
 -- | Analyse statements in a rep body.
 analyseGPUBody :: (Analyse rep) => Body rep -> Context rep -> (Context rep, IndexTable rep)
@@ -590,23 +590,9 @@ analyseOtherOp ctx _ = (ctx, mempty)
 
 -- | Returns an intmap of names, to be used as dependencies in construction of
 -- VariableInfos.
--- Throws an error if SubExp contains a name not in context. This behaviour
--- might be thrown out in the future, as it is mostly just a very verbose way to
--- ensure that we capture all necessary variables in the context at the moment
--- of development.
-analyseSubExpr :: [VName] -> Context rep -> SubExp -> Names
-analyseSubExpr _ _ (Constant _) = mempty
-analyseSubExpr pp ctx (Var v) =
-  case M.lookup v (assignments ctx) of
-    (Just _) -> oneName v
-    Nothing ->
-      error $
-        "Failed to lookup variable \""
-          ++ prettyString v
-          ++ "\npat: "
-          ++ prettyString pp
-          ++ "\n\nContext\n"
-          ++ show ctx
+analyseSubExp :: [VName] -> Context rep -> SubExp -> Names
+analyseSubExp _ _ (Constant _) = mempty
+analyseSubExp _ _ (Var v) = oneName v
 
 -- | Reduce a DimFix into its set of dependencies
 consolidate :: Context rep -> SubExp -> DimAccess rep
@@ -617,7 +603,7 @@ consolidate ctx (Var v) = DimAccess (reduceDependencies ctx v) (Just v)
 reduceDependencies :: Context rep -> VName -> M.Map VName Dependency
 reduceDependencies ctx v =
   case M.lookup v (assignments ctx) of
-    Nothing -> error $ "Unable to find " ++ prettyString v
+    Nothing -> mempty -- Means a global.
     Just (VariableInfo deps lvl _parents t) ->
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
