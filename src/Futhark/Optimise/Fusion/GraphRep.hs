@@ -94,7 +94,7 @@ data NodeT
 instance Show EdgeT where
   show (Dep vName) = "Dep " <> prettyString vName
   show (InfDep vName) = "iDep " <> prettyString vName
-  show (Cons _) = "Cons"
+  show (Cons vName) = "Cons " <> prettyString vName
   show (Fake _) = "Fake"
   show (Res _) = "Res"
   show (Alias _) = "Alias"
