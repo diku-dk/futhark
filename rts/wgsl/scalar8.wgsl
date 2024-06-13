@@ -172,6 +172,14 @@ fn f32_to_u8(a: f32) -> i8 {
   return norm_u8(i32(u32(a)));
 }
 
+fn f16_to_i8(a: f16) -> i8 {
+  return norm_i8(i32(a));
+}
+
+fn f32_to_i8(a: f32) -> i8 {
+  return norm_i8(i32(a));
+}
+
 fn u8_to_f16(a: i8) -> f16 {
   return f16(bitcast<u32>(a));
 }

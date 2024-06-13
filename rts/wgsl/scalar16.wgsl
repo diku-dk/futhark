@@ -146,6 +146,14 @@ fn f32_to_u16(a: f32) -> i16 {
   return norm_u16(i32(u32(a)));
 }
 
+fn f16_to_i16(a: f16) -> i16 {
+  return norm_i16(i32(a));
+}
+
+fn f32_to_i16(a: f32) -> i16 {
+  return norm_i16(i32(a));
+}
+
 fn u16_to_f16(a: i16) -> f16 {
   return f16(bitcast<u32>(a));
 }
