@@ -320,6 +320,7 @@ library
       Futhark.Optimise.Fusion.Composing
       Futhark.Optimise.Fusion.GraphRep
       Futhark.Optimise.Fusion.TryFusion
+      Futhark.Optimise.Fusion.SpecRules
       Futhark.Optimise.GenRedOpt
       Futhark.Optimise.HistAccs
       Futhark.Optimise.InliningDeadFun

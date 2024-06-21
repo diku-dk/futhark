@@ -23,11 +23,12 @@ import Futhark.IR.SOACS qualified as Futhark
 import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Optimise.Fusion.TryFusion qualified as TF
+import Futhark.Optimise.Fusion.SpecRules qualified as SF
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 
-import Debug.Trace
+-- import Debug.Trace
 
 data FusionEnv = FusionEnv
   { vNameSource :: VNameSource,
@@ -369,48 +370,21 @@ removeUnusedOutputs :: DepGraphAug FusionM
 removeUnusedOutputs = mapAcross removeUnusedOutputsFromContext
 
 tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
-tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} 
-  | (_, soac_nodeT) <- node_to_fuse,
-    SoacNode scat_trsfs scat_pat scat_soac scat_aux <- soac_nodeT,
-    H.Scatter _ _ _ _ <- scat_soac,
-    [pat_el_nm] <- map patElemName (patElems scat_pat),
-    "scatter_res_9806" == prettyString pat_el_nm,
-    node_to_fuse_id <- nodeFromLNode node_to_fuse,
-    (Just (dep_on_scat, scat_node, scat_lab, scat_dep_on), g') <- G.match node_to_fuse_id g,
-    [(scat_v_e, scat_v_n), (_cons_e,_cons_n), (_dcons_e, _dcons_n), (_scat_i_e,_scat_i_n), (_asrt_e,_asrt_n), (_scat_l_e,_scat_len_n) ] <- scat_dep_on,
-    node_to_fuse_id == scat_node,
-    (Just ctx_rshp@(dep_on_val, val_node, val_lab, val_dep_on), g'') <- G.match scat_v_n g',
-    null dep_on_val,
-    (_, rshp_nodeT) <- G.labNode' ctx_rshp,
-    TransNode rshp_res trsf rshp_inp <- rshp_nodeT,
-    _ : (_map_e, map_n) : _ <- val_dep_on,
-    (Just ctx_map@(dep_on_map, map_node, map_lab, map_dep_on), _g''') <- G.match map_n g'',
-    (_, map_nodeT) <- G.labNode' ctx_map,
-    SoacNode _soac_trsf map_pat map_soac _aux <- map_nodeT,
-    --
-    trace ("\nCOSMIN scatter:\n" ++ prettyString scat_soac ++
-           "\nG.lpre: " ++ show (G.lpre g node_to_fuse_id) ++
-           "\ntransforms:\n" ++ show scat_trsfs ++
-           "\nPattern: " ++ prettyString scat_pat ++
-           "\nAux: " ++ show scat_aux ++
-           "\nScat-node-id: " ++ show node_to_fuse_id ++
-           "\nContext: " ++ show dep_on_scat ++ " | " ++
-               show scat_node ++ " | " ++ show scat_lab ++
-               show scat_dep_on ++
-           "\nMatching node: " ++ show scat_v_e ++
-             " deps_on_val: " ++ show dep_on_val ++
-             " node: " ++ show val_node ++ " " ++ show val_lab ++
-             " val_dep_on: " ++ show val_dep_on ++
-           "\nReshape-Stmt: " ++ prettyString rshp_res ++ " " ++ show trsf ++ " " ++ prettyString rshp_inp ++
-           "\nMatching map node: " ++ show map_lab ++ " of id: " ++ show map_node ++
-             " deps_on_map: " ++ show dep_on_map ++
-             -- " node: " ++ show map_node ++ " " ++ show map_lab ++
-             " map_dep_on: " ++ show map_dep_on ++
-           "\nMap-Stmt:\n" ++ prettyString map_pat ++ " = " ++
-              "\n" ++ prettyString map_soac ++ 
-           "\nDG: " ++ pprg dg
-          ) $ False = do
-  pure dg
+tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g}
+  | not (G.gelem (nodeFromLNode node_to_fuse) g) = pure dg
+  -- ^ Node might have been fused away since.
+tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
+  spec_rule_res <- SF.ruleMFScat node_to_fuse dg
+  -- ^ specialized fusion rules such as the one
+  --   enabling map-flatten-scatter fusion
+  case spec_rule_res of
+    Just dg'-> pure dg'
+    Nothing -> applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
+  where
+    node_to_fuse_id = nodeFromLNode node_to_fuse
+    fuses_with = map fst $ filter (isDep . snd) $ G.lpre g node_to_fuse_id
+
+{--
 tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
   if G.gelem node_to_fuse_id g -- Node might have been fused away since.
     then applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
@@ -418,6 +392,7 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
   where
     fuses_with = map fst $ filter (isDep . snd) $ G.lpre g (nodeFromLNode node_to_fuse)
     node_to_fuse_id = nodeFromLNode node_to_fuse
+--}
 
 doVerticalFusion :: DepGraphAug FusionM
 doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relevant $ G.labNodes (dgGraph dg)) dg
