@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark repl` no longer asks for confirmation on EOF.
+
 ## [0.25.17]
 
 * Faster device-to-device copies on CUDA.
