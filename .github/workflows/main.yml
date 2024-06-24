@@ -520,7 +520,7 @@ jobs:
     - uses: mymindstorm/setup-emsdk@v12
       with:
         version: 2.0.18
-        actions-cache-folder: 'emsdk-cache'
+        actions-cache-folder: 'emsdk-mc-cache'
 
     - uses: actions/setup-node@v3.5.1
       with:
