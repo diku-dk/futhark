@@ -385,7 +385,7 @@ jobs:
         set -e
         virtualenv virtualenv
         source virtualenv/bin/activate
-        pip install numpy pyopencl jsonschema
+        pip install 'numpy<2.0.0' pyopencl jsonschema
         futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
   # test-opencl:
