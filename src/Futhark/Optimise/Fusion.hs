@@ -12,6 +12,7 @@ import Control.Monad.State
 import Data.Graph.Inductive.Graph qualified as G
 import Data.Graph.Inductive.Query.DFS qualified as Q
 import Data.List qualified as L
+import qualified Data.Set as S
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
@@ -28,7 +29,7 @@ import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 
--- import Debug.Trace
+import Debug.Trace
 
 data FusionEnv = FusionEnv
   { vNameSource :: VNameSource,
@@ -305,6 +306,37 @@ vFuseNodeT
         H.addTransform
           (H.Index cs (fullSlice (H.inputType inp) [ds]))
           inp
+vFuseNodeT
+  edges 
+  infusible 
+  (SoacNode ots1 pat1 soac@(H.Screma w form s_inps) aux1, is1, os1)
+  (StmNode (Let pat2 aux2 wae@(WithAcc w_inps lam)), os2)
+    | null infusible,
+      ots1 == mempty = do
+    let wacc_cons_nms = S.fromList $ concatMap (\(_,nms,_)->nms) w_inps
+        soac_prod_nms = map patElemName $ patElems pat2
+        soac_indep_nms= map getName is1
+        safe = all (\ soac_res -> not (S.member soac_res wacc_cons_nms)) $
+                soac_indep_nms ++ soac_prod_nms
+    scope <- askScope
+    bdy' <-
+      runBodyBuilder $ do
+        buildBody_ . localScope (scope <> scopeOfLParams (lambdaParams lam)) $ do
+          soac' <- H.toExp soac
+          addStm $ Let pat1 aux1 soac'
+          mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam
+          pure $ bodyResult $ lambdaBody lam
+    let lam' = lam { lambdaBody = bdy' }
+    if safe
+    then trace ("WAcc is1: " ++ show is1 ++ " os1: " ++ show os1 ++ 
+           " os2: " ++ show os2 ++ "\n\tpat1: " ++ prettyString pat1 ++
+           "\n\twacc_pat: " ++ prettyString pat2 ++
+           "\n\tedges: " ++ show edges ++ 
+           "\n\tinfusible: " ++ show infusible) $
+          fusedSomething $
+            StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'
+    else pure $ Nothing
+--
 vFuseNodeT _ _ _ _ = pure Nothing
 
 resFromLambda :: Lambda rep -> Result

@@ -17,7 +17,7 @@ import Data.Graph.Inductive.Graph qualified as G
 -- import Data.Graph.Inductive.Query.DFS qualified as Q
 import Data.List qualified as L
 -- import Data.Map.Strict qualified as M
--- import qualified Data.Set as S
+import qualified Data.Set as S
 import Data.Maybe
 -- import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.HORep.SOAC qualified as H
@@ -213,7 +213,7 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
     --   inputs to scatter
     (t1s,t2s) <- unzip drct_tups0,
     drct_tups <- zip t1s $ zip t2s (lambdaParams scat_lam),
-    (_ctxs_iots,drct_iots)<- unzip $ filter (isIota . snd . fst . snd) drct_tups,
+    (ctxs_iots,drct_iots)<- unzip $ filter (isIota . snd . fst . snd) drct_tups,
     (ctxs_rshp,drct_rshp) <- unzip $ filter (not . isIota . snd . fst . snd) drct_tups,
     length drct_iots + length drct_rshp == length scat_inp,
     -- ^ direct dependencies are either flatten reshapes or iotas.
@@ -237,11 +237,22 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
   let all_cert_rshp = foldl (<>) mempty certs_rshps
       aux = stmAux wacc_stm
       aux' = aux { stmAuxCerts = all_cert_rshp <> stmAuxCerts aux }
-      wacc_stm' = wacc_stm { stmAux = aux' }  
+      wacc_stm' = wacc_stm { stmAux = aux' }
+  -- get the input deps of iotas
+      fiot acc (_,_,_,inp_deps_iot) =
+        acc <> inp_deps_iot
+      deps_of_iotas = foldl fiot mempty ctxs_iots
+      --
+      iota_nms = S.fromList $ map (fst . fst) rep_iotas
+      notIota (dep, _) = not $ S.member (getName dep) iota_nms
+      inp_deps_wo_iotas = filter notIota inp_deps
   -- generate a new node for the with-acc-stmt and its associated context
+  -- add the inpdeps of iotas but remove the iota themselves from deps.
       new_withacc_nT  = StmNode wacc_stm'
-      new_withacc_ctx = (out_deps, scat_node_id, new_withacc_nT, inp_deps)
+      inp_deps' = inp_deps_wo_iotas <> deps_of_iotas
+      new_withacc_ctx = (out_deps, scat_node_id, new_withacc_nT, inp_deps')
       
+      -- do we need to use `fusedSomething` ??
       new_node = G.node' new_withacc_ctx
       dg' = dg {dgGraph = new_withacc_ctx G.& G.delNodes [new_node] g}
       
@@ -260,7 +271,10 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
            "\nIota-Rep: " ++ show rep_iotas ++
            "\nRshp-Rep: " ++ show rep_rshps ++
            "\n\n\nWithAccStmt:\n" ++ prettyString wacc_stm' ++
-           "\n\nDrct ctxts: " ++ show drct_ctxs
+           "\n\nDrct ctxts: " ++ show drct_ctxs ++
+           "\n\nInp-Deps-Result: " ++ show inp_deps' ++
+           "\nIota-Ctx: " ++ show ctxs_iots ++
+           "\n\n\nNew-DG: " ++ pprg dg'
         ) $
     pure $ Just dg'
   where
