@@ -631,4 +631,5 @@ prettyBinOp p bop x y =
     precedence Backtick = 9
     rprecedence Minus = 10
     rprecedence Divide = 10
-    rprecedence op = precedence op
+    rprecedence PipeLeft = -1
+    rprecedence op = precedence op + 1
