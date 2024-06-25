@@ -20,7 +20,7 @@ import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty (expText, idText)
 import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
-import Futhark.CodeGen.ImpCode.OpenCL
+import Futhark.CodeGen.ImpCode.Kernels
 import Futhark.CodeGen.RTS.C (gpuH, gpuPrototypesH)
 import Futhark.MonadFreshNames
 import Futhark.Util (chunk)
@@ -136,7 +136,7 @@ genLaunchKernel safety kernel_name shared_memory args num_tblocks tblock_size = 
           v'
         )
 
-callKernel :: GC.OpCompiler OpenCL ()
+callKernel :: GC.OpCompiler HostOp ()
 callKernel (GetSize v key) =
   GC.stm [C.cstm|$id:v = $exp:(getParamByKey key);|]
 callKernel (CmpSizeLe v key x) = do
@@ -286,7 +286,7 @@ syncArg :: GC.CopyBarrier -> C.Exp
 syncArg GC.CopyBarrier = [C.cexp|true|]
 syncArg GC.CopyNoBarrier = [C.cexp|false|]
 
-copyGPU :: GC.Copy OpenCL ()
+copyGPU :: GC.Copy HostOp ()
 copyGPU _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes =
   GC.stm
     [C.cstm|err = gpu_memcpy(ctx, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
@@ -299,7 +299,7 @@ copyGPU b dstmem dstidx (Space "device") srcmem srcidx DefaultSpace nbytes =
 copyGPU _ _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
-gpuOperations :: GC.Operations OpenCL ()
+gpuOperations :: GC.Operations HostOp ()
 gpuOperations =
   GC.defaultOperations
     { GC.opsCompiler = callKernel,
@@ -416,7 +416,7 @@ generateGPUBoilerplate ::
   [Name] ->
   [PrimType] ->
   [FailureMsg] ->
-  GC.CompilerM OpenCL () ()
+  GC.CompilerM HostOp () ()
 generateGPUBoilerplate gpu_program macros backendH kernels types failures = do
   createKernels kernels
   let gpu_program_fragments =
