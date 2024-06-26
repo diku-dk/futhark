@@ -34,7 +34,7 @@ substituteTypesInMTy substs (MTy abs mod) = MTy abs $ substituteTypesInMod subst
 substituteTypesInEnv :: TypeSubs -> Env -> Env
 substituteTypesInEnv substs env =
   env
-    { envVtable = M.map (substituteTypesInBoundV substs) $ envVtable env,
+    { envVtable = M.map (snd . substituteTypesInBoundV substs) $ envVtable env,
       envTypeTable = M.mapWithKey subT $ envTypeTable env,
       envModTable = M.map (substituteTypesInMod substs) $ envModTable env
     }
@@ -44,10 +44,14 @@ substituteTypesInEnv substs env =
     subT _ (TypeAbbr l ps (RetType dims t)) =
       TypeAbbr l ps $ applySubst substs $ RetType dims t
 
-substituteTypesInBoundV :: TypeSubs -> BoundV -> BoundV
+-- Also returns names of new sizes arising from substituting a
+-- size-lifted type at the outermost part of the type. This is a
+-- somewhat rare case (see #2120). The right solution is to generally
+-- fresh (or at least unique) names.
+substituteTypesInBoundV :: TypeSubs -> BoundV -> ([VName], BoundV)
 substituteTypesInBoundV substs (BoundV tps t) =
   let RetType dims t' = applySubst substs $ RetType [] t
-   in BoundV (tps ++ map (`TypeParamDim` mempty) dims) t'
+   in (dims, BoundV (tps <> map (`TypeParamDim` mempty) dims) t')
 
 -- | All names defined anywhere in the 'Env'.
 allNamesInEnv :: Env -> S.Set VName
@@ -346,6 +350,11 @@ missingVal loc name =
   Left . TypeError loc mempty $
     "Module does not define a value named" <+> pretty name <> "."
 
+topLevelSize :: Loc -> VName -> Either TypeError b
+topLevelSize loc name =
+  Left . TypeError loc mempty $
+    "Type substitution in" <+> dquotes (prettyName name) <+> "results in a top-level size."
+
 missingMod :: (Pretty a) => Loc -> a -> Either TypeError b
 missingMod loc name =
   Left . TypeError loc mempty $
@@ -499,7 +508,11 @@ matchMTys orig_mty orig_mty_sig =
       -- abstract types first.
       val_substs <- fmap M.fromList $
         forM (M.toList $ envVtable sig) $ \(name, spec_bv) -> do
-          let spec_bv' = substituteTypesInBoundV (`M.lookup` abs_subst_to_type) spec_bv
+          let (spec_dims, spec_bv') =
+                substituteTypesInBoundV (`M.lookup` abs_subst_to_type) spec_bv
+              (spec_witnesses, _) = determineSizeWitnesses $ boundValType spec_bv'
+          -- The hacky check for #2120.
+          when (any (`S.member` spec_witnesses) spec_dims) $ topLevelSize loc name
           case findBinding envVtable Term (baseName name) env of
             Just (name', bv) -> matchVal loc quals name spec_bv' name' bv
             _ -> missingVal loc (baseName name)
