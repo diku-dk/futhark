@@ -1581,6 +1581,10 @@ then returns a module that exposes only the functionality described by
 the module type.  This is how internal details of a module can be
 hidden.
 
+As a slightly ad-hoc limitation, ascription is forbidden when a type
+substitution of size-lifted types occurs in a size appearing at the
+top level.
+
 ``\(p: mt1): mt2 -> e``
 .......................
 
