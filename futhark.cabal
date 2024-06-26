@@ -396,6 +396,7 @@ library
       Language.Futhark
       Language.Futhark.Core
       Language.Futhark.Interpreter
+      Language.Futhark.Interpreter.AD
       Language.Futhark.Interpreter.Values
       Language.Futhark.FreeVars
       Language.Futhark.Parser
