@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark repl` no longer asks for confirmation on EOF.
 
+* Obscure oversight related to abstract size-lifted types (#2120).
+
 ## [0.25.17]
 
 * Faster device-to-device copies on CUDA.
