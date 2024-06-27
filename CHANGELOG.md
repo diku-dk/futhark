@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Obscure oversight related to abstract size-lifted types (#2120).
 
+* Accidential exponential-time algorithm in layout optimisation for
+  multicore backends (#2151).
+
 ## [0.25.17]
 
 * Faster device-to-device copies on CUDA.
