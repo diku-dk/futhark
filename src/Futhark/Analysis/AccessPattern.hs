@@ -628,8 +628,8 @@ instance Analyse MC where
     | ParOp Nothing seq_segop <- mc_op = analyseSegOp seq_segop
     | ParOp (Just segop) seq_segop <- mc_op = \ctx name -> do
         let (ctx', res') = analyseSegOp segop ctx name
-        let (ctx'', res'') = analyseSegOp seq_segop ctx name
-        (ctx' <> ctx'', unionIndexTables res' res'')
+        let (ctx'', res'') = analyseSegOp seq_segop ctx' name
+        (ctx'', unionIndexTables res' res'')
     | Futhark.IR.MC.OtherOp _ <- mc_op = analyseOtherOp
 
 -- Unfortunately we need these instances, even though they may never appear.
