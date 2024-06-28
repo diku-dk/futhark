@@ -102,7 +102,7 @@ wellTypedLoopArg src sparams pat arg = do
 
 -- | An un-checked loop.
 type UncheckedLoop =
-  (PatBase NoInfo VName ParamType, ExpBase NoInfo VName, LoopFormBase NoInfo VName, ExpBase NoInfo VName)
+  (Pat ParamType, Exp, LoopFormBase Info VName, Exp)
 
 -- | A loop that has been type-checked.
 type CheckedLoop =
@@ -129,7 +129,7 @@ checkForImpossible loc known_before pat_t = do
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkLoop ::
-  (ExpBase NoInfo VName -> TermTypeM Exp) ->
+  (Exp -> TermTypeM Exp) ->
   UncheckedLoop ->
   SrcLoc ->
   TermTypeM (CheckedLoop, AppRes)
@@ -241,20 +241,18 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
   (sparams, mergepat', form', loopbody') <-
     case form of
       For i uboundexp -> do
-        uboundexp' <-
-          require "being the bound in a 'for' loop" anySignedType
-            =<< checkExp uboundexp
-        bound_t <- expTypeFully uboundexp'
-        bindingIdent i bound_t $ \i' ->
-          bindingPat [] mergepat merge_t $ \mergepat' -> incLevel $ do
-            loopbody' <- checkExp loopbody
-            (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-            pure
-              ( sparams,
-                mergepat'',
-                For i' uboundexp',
-                loopbody'
-              )
+        uboundexp' <- checkExp uboundexp
+        it <- expType uboundexp'
+        let i' = i {identType = Info it}
+        bindingIdent i' . bindingParam mergepat merge_t $ \mergepat' -> incLevel $ do
+          loopbody' <- checkExp loopbody
+          (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
+          pure
+            ( sparams,
+              mergepat'',
+              For i' uboundexp',
+              loopbody'
+            )
       ForIn xpat e -> do
         (arr_t, _) <- newArrayType (mkUsage' (srclocOf e)) "e" 1
         e' <- unifies "being iterated in a 'for-in' loop" arr_t =<< checkExp e
@@ -263,7 +261,7 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
           _
             | Just t' <- peelArray 1 t ->
                 bindingPat [] xpat t' $ \xpat' ->
-                  bindingPat [] mergepat merge_t $ \mergepat' -> incLevel $ do
+                  bindingParam mergepat merge_t $ \mergepat' -> incLevel $ do
                     loopbody' <- checkExp loopbody
                     (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
                     pure
@@ -277,7 +275,7 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
                   "Iteratee of a for-in loop must be an array, but expression has type"
                     <+> pretty t
       While cond ->
-        bindingPat [] mergepat merge_t $ \mergepat' ->
+        bindingParam mergepat merge_t $ \mergepat' ->
           incLevel $ do
             cond' <-
               checkExp cond

@@ -20,4 +20,3 @@ let dotproduct [n] (x: [n]f32) (y: [n]f32) =
 
 let main [m][n][q]  (A: [m][q]f32) (B: [q][n]f32) : [m][n]f32 =
     map (\ Arow -> map (\Bcol -> dotproduct Arow Bcol) (transpose B)) A
-

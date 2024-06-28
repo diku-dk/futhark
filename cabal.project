@@ -5,3 +5,8 @@ package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
 
 allow-newer: base, template-haskell
+
+source-repository-package
+    type: git
+    location: https://github.com/ludat/glpk-hs.git
+    tag: efcb8354daa1205de2b862898353da2e4beb76b2
