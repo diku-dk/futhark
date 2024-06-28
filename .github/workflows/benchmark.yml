@@ -18,9 +18,9 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v20
+      uses: cachix/install-nix-action@v27
 
-    - uses: cachix/cachix-action@v12
+    - uses: cachix/cachix-action@v15
       with:
         name: futhark
         signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
