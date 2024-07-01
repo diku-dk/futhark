@@ -400,11 +400,13 @@ types.
 .. c:function:: int futhark_new_opaque_t(struct futhark_context *ctx, struct futhark_opaque_t **out, const struct futhark_opaque_t2 *bar, const struct futhark_opaque_t1 *foo);
 
    Construct a record in ``*out`` which has the given values for the
-   ``bar`` and ``foo`` fields.  The parameters are the
-   fields in alphabetic order.  Tuple fields are named ``vX`` where
-   ``X`` is an integer.  The resulting record *aliases* the values
-   provided for ``bar`` and ``foo``, but has its own lifetime, and all
-   values must be individually freed when they are no longer needed.
+   ``bar`` and ``foo`` fields. The parameters are the fields in
+   alphabetic order. As a special case, if the record is a tuple
+   (i.e., has numeric fields), the parameters are ordered numerically.
+   Tuple fields are named ``vX`` where ``X`` is an integer. The
+   resulting record *aliases* the values provided for ``bar`` and
+   ``foo``, but has its own lifetime, and all values must be
+   individually freed when they are no longer needed.
 
 .. c:function:: int futhark_project_opaque_t_bar(struct futhark_context *ctx, struct futhark_opaque_t2 **out, const struct futhark_opaque_t *obj);
 
