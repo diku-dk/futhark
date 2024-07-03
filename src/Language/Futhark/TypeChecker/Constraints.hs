@@ -11,6 +11,9 @@ module Language.Futhark.TypeChecker.Constraints
     TyVars,
     Solution,
     solve,
+    -- To hide warnings
+    tyVarSolLevel,
+    scopeViolation,
   )
 where
 
