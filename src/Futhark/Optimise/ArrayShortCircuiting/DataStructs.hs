@@ -336,6 +336,7 @@ createsNewArrOK (BasicOp Iota {}) = True
 createsNewArrOK (BasicOp Manifest {}) = True
 createsNewArrOK (BasicOp Concat {}) = True
 createsNewArrOK (BasicOp ArrayLit {}) = True
+createsNewArrOK (BasicOp ArrayVal {}) = True
 createsNewArrOK (BasicOp Scratch {}) = True
 createsNewArrOK _ = False
 
