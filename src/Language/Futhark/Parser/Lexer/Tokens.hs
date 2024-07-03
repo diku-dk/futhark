@@ -21,10 +21,8 @@ module Language.Futhark.Parser.Lexer.Tokens
 where
 
 import Data.ByteString.Lazy qualified as BS
-import Data.Char (ord)
 import Data.Either
 import Data.List (find)
-import Data.Loc (Pos (..))
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.Read qualified as T
