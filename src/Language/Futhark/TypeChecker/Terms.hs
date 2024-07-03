@@ -389,6 +389,8 @@ checkExp (RecordLit fs loc) =
               <+> pretty (locStrRel rloc sloc)
               <> "."
         Nothing -> pure ()
+-- No need to type check this, as these are only produced by the
+-- parser if the elements are monomorphic and all match.
 checkExp (ArrayVal vs t loc) =
   pure $ ArrayVal vs t loc
 checkExp (ArrayLit all_es _ loc) =
