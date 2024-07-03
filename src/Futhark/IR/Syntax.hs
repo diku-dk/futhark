@@ -328,6 +328,12 @@ data BasicOp
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the element type of the rows of the array.
     ArrayLit [SubExp] Type
+  | -- | A one-dimensional array literal that contains only constants.
+    -- This is a fast-path for representing very large array literals
+    -- that show up in some programs. The key rule for processing this
+    -- in compiler passes is that you should never need to look at the
+    -- individual elements.
+    ArrayVal [PrimValue] PrimType
   | -- | Unary operation.
     UnOp UnOp SubExp
   | -- | Binary operation.
