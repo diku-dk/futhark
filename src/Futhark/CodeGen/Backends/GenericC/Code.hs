@@ -22,7 +22,7 @@ import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
-import Futhark.CodeGen.Backends.GenericC.Pretty (expText, typeText)
+import Futhark.CodeGen.Backends.GenericC.Pretty (expText, idText, typeText)
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
@@ -373,7 +373,7 @@ compileCode (DeclareArray name t vs) = do
             "static "
               <> typeText ct
               <> " "
-              <> prettyText name_realtype
+              <> idText (C.toIdent name_realtype mempty)
               <> "["
               <> prettyText (length vs')
               <> "] = { "
