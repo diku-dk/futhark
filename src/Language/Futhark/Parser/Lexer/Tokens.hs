@@ -16,7 +16,6 @@ module Language.Futhark.Parser.Lexer.Tokens
     binToken,
     hexToken,
     romToken,
-    advance,
     readHexRealLit,
   )
 where
@@ -191,14 +190,6 @@ romToken f = tokenS $ f . fromRoman
 {-# INLINE tokenS #-}
 tokenS :: (T.Text -> a) -> BS.ByteString -> a
 tokenS f = f . T.decodeUtf8 . BS.toStrict
-
-advance :: Pos -> BS.ByteString -> Pos
-advance orig_pos = BS.foldl' advance' orig_pos . BS.init
-  where
-    advance' (Pos f !line !col !addr) c
-      | c == nl = Pos f (line + 1) 1 (addr + 1)
-      | otherwise = Pos f line (col + 1) (addr + 1)
-    nl = fromIntegral $ ord '\n'
 
 symbol :: [Name] -> Name -> Token
 symbol [] q
