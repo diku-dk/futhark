@@ -482,6 +482,9 @@ graphStm stm = do
       -- Whether the rows are primitive constants or arrays, without any scalar
       -- variable operands such ArrayLit cannot directly prevent a scalar read.
       graphHostOnly e
+    BasicOp ArrayVal {} ->
+      -- As above.
+      graphHostOnly e
     BasicOp Update {} ->
       graphHostOnly e
     BasicOp Concat {} ->

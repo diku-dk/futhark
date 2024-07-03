@@ -245,6 +245,8 @@ resolveExp (Attr attr e loc) =
   Attr <$> resolveAttrInfo attr <*> resolveExp e <*> pure loc
 resolveExp (TupLit es loc) =
   TupLit <$> mapM resolveExp es <*> pure loc
+resolveExp (ArrayVal vs t loc) =
+  pure $ ArrayVal vs t loc
 resolveExp (ArrayLit es NoInfo loc) =
   ArrayLit <$> mapM resolveExp es <*> pure NoInfo <*> pure loc
 resolveExp (Negate e loc) =

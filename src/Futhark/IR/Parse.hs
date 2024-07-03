@@ -314,6 +314,10 @@ pBasicOp =
           <*> pFlatSlice
           <* lexeme "="
           <*> pVName,
+      try $
+        ArrayVal
+          <$> brackets (pPrimValue `sepBy` pComma)
+          <*> (lexeme ":" *> "[]" *> pPrimType),
       ArrayLit
         <$> brackets (pSubExp `sepBy` pComma)
         <*> (lexeme ":" *> "[]" *> pType),

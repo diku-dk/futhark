@@ -93,6 +93,9 @@ getUseSumFromStm td_env coal_tab (Let _ _ (BasicOp (Index arr (Slice slc))))
     isFix _ = False
 getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Index {})) = Just ([], []) -- incomplete slices
 getUseSumFromStm _ _ (Let Pat {} _ (BasicOp FlatIndex {})) = Just ([], []) -- incomplete slices
+getUseSumFromStm td_env coal_tab (Let (Pat pes) _ (BasicOp ArrayVal {})) =
+  let wrts = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) pes
+   in Just (wrts, wrts)
 getUseSumFromStm td_env coal_tab (Let (Pat pes) _ (BasicOp (ArrayLit ses _))) =
   let rds = mapMaybe (getDirAliasedIxfn td_env coal_tab) $ mapMaybe seName ses
       wrts = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) pes

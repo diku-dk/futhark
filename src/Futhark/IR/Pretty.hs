@@ -198,6 +198,11 @@ instance Pretty BasicOp where
       <+> colon
       <+> "[]"
       <> pretty rt
+  pretty (ArrayVal vs t) =
+    brackets (commasep $ map pretty vs)
+      <+> colon
+      <+> "[]"
+      <> pretty t
   pretty (BinOp bop x y) = pretty bop <> parens (pretty x <> comma <+> pretty y)
   pretty (CmpOp op x y) = pretty op <> parens (pretty x <> comma <+> pretty y)
   pretty (ConvOp conv x) =

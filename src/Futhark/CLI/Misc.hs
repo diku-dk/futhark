@@ -128,7 +128,7 @@ mainTokens = mainWithOptions () [] "program" $ \args () ->
         Just (Right (Left e)) -> do
           hPrint stderr e
           exitWith $ ExitFailure 2
-        Just (Right (Right (tokens, _))) ->
+        Just (Right (Right tokens)) ->
           mapM_ printToken tokens
     _ -> Nothing
   where

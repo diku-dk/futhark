@@ -954,6 +954,7 @@ checkExp e@IntLit {} = noAliases e
 checkExp e@FloatLit {} = noAliases e
 checkExp e@Literal {} = noAliases e
 checkExp e@StringLit {} = noAliases e
+checkExp e@ArrayVal {} = noAliases e
 checkExp e@ArrayLit {} = noAliases e
 checkExp e@Negate {} = noAliases e
 checkExp e@Not {} = noAliases e

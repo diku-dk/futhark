@@ -17,6 +17,7 @@ module Language.Futhark.Parser.Monad
     mustBe,
     primNegate,
     applyExp,
+    arrayLitExp,
     patternExp,
     addDocSpec,
     addAttrSpec,
@@ -110,6 +111,17 @@ type ParserMonad = ExceptT SyntaxError (State ParserState)
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l - 1) l
+
+arrayLitExp :: [UncheckedExp] -> SrcLoc -> UncheckedExp
+arrayLitExp es loc
+  | Just (v : vs) <- mapM isLiteral es,
+    all ((primValueType v ==) . primValueType) vs =
+      ArrayVal (v : vs) (primValueType v) loc
+  | otherwise =
+      ArrayLit es NoInfo loc
+  where
+    isLiteral (Literal v _) = Just v
+    isLiteral _ = Nothing
 
 applyExp :: NE.NonEmpty UncheckedExp -> ParserMonad UncheckedExp
 applyExp all_es@((Constr n [] _ loc1) NE.:| es) =

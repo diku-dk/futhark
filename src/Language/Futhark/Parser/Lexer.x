@@ -196,20 +196,19 @@ getToken state@(pos,c,s,n) =
       let x = action (BS.take (n'-n) s)
       x `seq` Right (state', (pos, pos', x))
 
-scanTokens :: Pos -> BS.ByteString -> Either LexerError ([L Token], Pos)
-scanTokens pos str = loop $ initialLexerState pos str
+scanTokens :: Pos -> BS.ByteString -> Either LexerError [L Token]
+scanTokens pos str = fmap reverse $ loop [] $ initialLexerState pos str
   where
-   loop s = do
+   loop toks s = do
      (s', tok) <- getToken s
      case tok of
        (start, end, EOF) ->
-         pure ([], end)
-       (start, end, t) -> do
-         (rest, endpos) <- loop s'
-         pure (L (Loc start end) t : rest, endpos)
+         pure toks
+       (start, end, t) ->
+         loop (L (Loc start end) t:toks) s'
 
 -- | Given a starting position, produce tokens from the given text (or
 -- a lexer error).  Returns the final position.
-scanTokensText :: Pos -> T.Text -> Either LexerError ([L Token], Pos)
+scanTokensText :: Pos -> T.Text -> Either LexerError [L Token]
 scanTokensText pos = scanTokens pos . BS.fromStrict . T.encodeUtf8
 }

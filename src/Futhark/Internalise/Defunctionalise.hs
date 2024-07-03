@@ -507,6 +507,8 @@ defuncExp (RecordLit fs loc) = do
         _ ->
           let tp = Info $ structTypeFromSV sv
            in pure (RecordFieldImplicit vn tp loc', (baseName vn, sv))
+defuncExp e@(ArrayVal vs t loc) =
+  pure (ArrayVal vs t loc, Dynamic $ toParam Observe $ typeOf e)
 defuncExp (ArrayLit es t@(Info t') loc) = do
   es' <- mapM defuncExp' es
   pure (ArrayLit es' t loc, Dynamic $ toParam Observe t')

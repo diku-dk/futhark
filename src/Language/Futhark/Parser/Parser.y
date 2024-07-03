@@ -605,8 +605,8 @@ Atom : PrimLit        { Literal (fst $1) (srclocOf (snd $1)) }
      | '(' Exp ')'            { Parens $2 (srcspan $1 $>) }
      | '(' Exp ',' Exps1 ')'  { TupLit ($2 : $4) (srcspan $1 $>) }
      | '('      ')'           { TupLit [] (srcspan $1 $>) }
-     | '[' Exps1 ']'          { ArrayLit $2 NoInfo (srcspan $1 $>) }
-     | '['       ']'          { ArrayLit [] NoInfo (srcspan $1 $>) }
+     | '[' Exps1 ']'          { arrayLitExp $2 (srcspan $1 $>) }
+     | '['       ']'          { arrayLitExp [] (srcspan $1 $>) }
 
      | id { let L loc (ID v)  = $1 in Var (QualName [] v) NoInfo (srclocOf loc) }
 
