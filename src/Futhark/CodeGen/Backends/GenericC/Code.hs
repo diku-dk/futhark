@@ -22,6 +22,7 @@ import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
+import Futhark.CodeGen.Backends.GenericC.Pretty (expText, typeText)
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
@@ -366,8 +367,19 @@ compileCode (DeclareArray name t vs) = do
   let ct = primTypeToCType t
   case vs of
     ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:v|] | v <- vs']
-      earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
+      -- To handle very large literal arrays (which are inefficient
+      -- with language-c-quote, see #2160), we do our own formatting and inject it as a string.
+      let array_decl =
+            "static "
+              <> typeText ct
+              <> " "
+              <> prettyText name_realtype
+              <> "["
+              <> prettyText (length vs')
+              <> "] = { "
+              <> T.intercalate "," (map (expText . flip C.toExp mempty) vs')
+              <> "};"
+      earlyDecl [C.cedecl|$esc:(T.unpack array_decl)|]
     ArrayZeros n ->
       earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
   -- Fake a memory block.
