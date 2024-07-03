@@ -628,6 +628,9 @@ internaliseExp desc (E.RecordLit orig_fields _) =
           (baseName name)
           (E.Var (E.qualName name) t loc)
           loc
+internaliseExp desc (E.ArrayVal vs t _) =
+  fmap pure . letSubExp desc . I.BasicOp $
+    I.ArrayVal (map internalisePrimValue vs) (internalisePrimType t)
 internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
   -- If this is a multidimensional array literal of primitives, we
   -- treat it specially by flattening it out followed by a reshape.
