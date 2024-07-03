@@ -389,6 +389,8 @@ checkExp (RecordLit fs loc) =
               <+> pretty (locStrRel rloc sloc)
               <> "."
         Nothing -> pure ()
+checkExp (ArrayVal vs t loc) =
+  pure $ ArrayVal vs t loc
 checkExp (ArrayLit all_es _ loc) =
   -- Construct the result type and unify all elements with it.  We
   -- only create a type variable for empty arrays; otherwise we use

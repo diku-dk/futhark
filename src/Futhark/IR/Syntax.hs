@@ -332,7 +332,8 @@ data BasicOp
     -- This is a fast-path for representing very large array literals
     -- that show up in some programs. The key rule for processing this
     -- in compiler passes is that you should never need to look at the
-    -- individual elements.
+    -- individual elements. Has exactly the same semantics as an
+    -- 'ArrayLit'.
     ArrayVal [PrimValue] PrimType
   | -- | Unary operation.
     UnOp UnOp SubExp

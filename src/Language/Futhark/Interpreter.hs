@@ -966,6 +966,9 @@ eval env (ArrayLit (v : vs) _ _) = do
   v' <- eval env v
   vs' <- mapM (eval env) vs
   pure $ toArray' (valueShape v') (v' : vs')
+eval _ (ArrayVal vs _ _) =
+  -- Probably will not ever be used.
+  pure $ toArray' ShapeLeaf $ map ValuePrim vs
 eval env (AppExp e (Info (AppRes t retext))) = do
   let t' = expandType env $ toStruct t
   v <- evalAppExp env e
