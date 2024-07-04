@@ -107,6 +107,9 @@ diffBasicOp pat aux e m =
     Assert {} ->
       void $ commonBasicOp pat aux e m
     --
+    ArrayVal {} ->
+      void $ commonBasicOp pat aux e m
+    --
     ArrayLit elems _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       t <- lookupType pat_adj

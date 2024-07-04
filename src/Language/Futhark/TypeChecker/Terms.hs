@@ -369,6 +369,10 @@ checkExp (RecordLit fs loc) =
     checkField (RecordFieldImplicit name (Info t) rloc) = do
       t' <- lookupVar rloc (qualName name) t
       pure $ RecordFieldImplicit name (Info t') rloc
+-- No need to type check this, as these are only produced by the
+-- parser if the elements are monomorphic and all match.
+checkExp (ArrayVal vs t loc) =
+  pure $ ArrayVal vs t loc
 checkExp (ArrayLit all_es _ loc) =
   -- Construct the result type and unify all elements with it.  We
   -- only create a type variable for empty arrays; otherwise we use

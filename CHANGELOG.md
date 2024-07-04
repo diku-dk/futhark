@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * New prelude function: `rep`, an implicit form of `replicate`.
 
+* Improved handling of large monomorphic single-dimensional array
+  literals (#2160).
+
 ### Removed
 
 ### Changed

@@ -374,6 +374,8 @@ prettyExp _ (RecordLit fs _)
   where
     fieldArray (RecordFieldExplicit _ e _) = hasArrayLit e
     fieldArray RecordFieldImplicit {} = False
+prettyExp _ (ArrayVal vs _ _) =
+  brackets (commasep $ map pretty vs)
 prettyExp _ (ArrayLit es t _) =
   brackets (commasep $ map pretty es) <> prettyInst t
 prettyExp _ (StringLit s _) =

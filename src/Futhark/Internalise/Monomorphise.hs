@@ -638,6 +638,8 @@ transformExp (RecordLit fs loc) =
           (baseName v)
           (Var (qualName v) t' loc)
           loc
+transformExp (ArrayVal vs t loc) =
+  pure $ ArrayVal vs t loc
 transformExp (ArrayLit es t loc) =
   ArrayLit <$> mapM transformExp es <*> traverse transformType t <*> pure loc
 transformExp (AppExp e res) =

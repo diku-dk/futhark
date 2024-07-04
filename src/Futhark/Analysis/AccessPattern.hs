@@ -465,6 +465,7 @@ analyseBasicOp ctx expression pats =
   let ctx_val = case expression of
         SubExp se -> varInfoFromSubExp se
         Opaque _ se -> varInfoFromSubExp se
+        ArrayVal _ _ -> (varInfoFromNames ctx mempty) {variableType = ConstType}
         ArrayLit ses _t -> concatVariableInfos mempty ses
         UnOp _ se -> varInfoFromSubExp se
         BinOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]

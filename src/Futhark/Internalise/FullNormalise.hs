@@ -177,9 +177,18 @@ getOrdering _ (RecordLit fs loc) = do
       pure $ RecordFieldExplicit n e' floc
     f (RecordFieldImplicit v t _) =
       f $ RecordFieldExplicit (baseName v) (Var (qualName v) t loc) loc
-getOrdering _ (ArrayLit es ty loc) = do
-  es' <- mapM (getOrdering False) es
-  pure $ ArrayLit es' ty loc
+getOrdering _ (ArrayVal vs t loc) =
+  pure $ ArrayVal vs t loc
+getOrdering _ (ArrayLit es ty loc)
+  | Just vs <- mapM isLiteral es,
+    Info (Array _ (Shape [_]) (Prim t)) <- ty =
+      pure $ ArrayVal vs t loc
+  | otherwise = do
+      es' <- mapM (getOrdering False) es
+      pure $ ArrayLit es' ty loc
+  where
+    isLiteral (Literal v _) = Just v
+    isLiteral _ = Nothing
 getOrdering _ (Project n e ty loc) = do
   e' <- getOrdering False e
   pure $ Project n e' ty loc

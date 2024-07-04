@@ -832,6 +832,12 @@ data ExpBase f vn
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the row type of the rows of the array.
     ArrayLit [ExpBase f vn] (f StructType) SrcLoc
+  | -- | Array value constants, where the elements are known to be
+    -- constant primitives. This is a fast-path variant of 'ArrayLit'
+    -- that will never be constructed by the parser, but may result
+    -- from normalisation later on. Has exactly the same semantics as
+    -- an 'ArrayLit'.
+    ArrayVal [PrimValue] PrimType SrcLoc
   | -- | An attribute applied to the following expression.
     Attr (AttrInfo vn) (ExpBase f vn) SrcLoc
   | Project Name (ExpBase f vn) (f StructType) SrcLoc
@@ -903,6 +909,7 @@ instance Located (ExpBase f vn) where
   locOf (RecordLit _ pos) = locOf pos
   locOf (Project _ _ _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
+  locOf (ArrayVal _ _ loc) = locOf loc
   locOf (StringLit _ loc) = locOf loc
   locOf (Var _ _ loc) = locOf loc
   locOf (Ascript _ _ loc) = locOf loc

@@ -856,6 +856,10 @@ checkExp (Literal v loc) =
   pure $ Literal v loc
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
+-- No need to type check this, as these are only produced by the
+-- parser if the elements are monomorphic and all match.
+checkExp (ArrayVal vs t loc) =
+  pure $ ArrayVal vs t loc
 checkExp (ArrayLit es _ loc) = do
   -- TODO: this will produce an enormous number of constraints and
   -- type variables for pathologically large arrays with
