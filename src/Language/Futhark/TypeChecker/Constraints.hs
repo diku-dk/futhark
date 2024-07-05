@@ -9,6 +9,7 @@ module Language.Futhark.TypeChecker.Constraints
     TyVarInfo (..),
     TyVar,
     TyVars,
+    TyParams,
     Solution,
     solve,
     -- To hide warnings
@@ -86,8 +87,8 @@ instance Pretty Ct where
 
 type Constraints = [Ct]
 
--- | Information about a type variable. Every type variable is
--- associated with a location, which is the original syntax element
+-- | Information about a flexible type variable. Every type variable
+-- is associated with a location, which is the original syntax element
 -- that it is the type of.
 data TyVarInfo
   = -- | Can be substituted with anything.
@@ -123,18 +124,26 @@ type TyVar = VName
 -- @t@ if all type names that occur in @t@ are at most at level @i@.
 type Level = Int
 
--- | If a VName is not in this map, it is assumed to be rigid.
+-- | If a VName is not in this map, it should be in the 'TyParams' -
+-- the exception is abstract types, which are just missing (and
+-- assumed to have smallest possible level).
 type TyVars = M.Map TyVar (Level, TyVarInfo)
+
+-- | Explicit type parameters.
+type TyParams = M.Map TyVar (Level, Loc)
 
 data TyVarSol
   = -- | Has been substituted with this.
     TyVarSol Level Type
+  | -- | Is an explicit type parameter in the source program.
+    TyVarParam Level Loc
   | -- | Not substituted yet; has this constraint.
     TyVarUnsol Level TyVarInfo
   deriving (Show)
 
 tyVarSolLevel :: TyVarSol -> Level
 tyVarSolLevel (TyVarSol lvl _) = lvl
+tyVarSolLevel (TyVarParam lvl _) = lvl
 tyVarSolLevel (TyVarUnsol lvl _) = lvl
 
 newtype SolverState = SolverState
@@ -142,14 +151,18 @@ newtype SolverState = SolverState
     solverTyVars :: M.Map TyVar (Either VName TyVarSol)
   }
 
-initialState :: TyVars -> SolverState
-initialState tyvars = SolverState $ M.map (Right . uncurry TyVarUnsol) tyvars
+initialState :: TyParams -> TyVars -> SolverState
+initialState typarams tyvars = SolverState $ M.map g typarams <> M.map f tyvars
+  where
+    f (lvl, info) = Right $ TyVarUnsol lvl info
+    g (lvl, loc) = Right $ TyVarParam lvl loc
 
 substTyVar :: (Monoid u) => M.Map TyVar (Either VName TyVarSol) -> VName -> Maybe (TypeBase SComp u)
 substTyVar m v =
   case M.lookup v m of
     Just (Left v') -> substTyVar m v'
     Just (Right (TyVarSol _ t')) -> Just $ second (const mempty) $ substTyVars (substTyVar m) t'
+    Just (Right TyVarParam {}) -> Nothing
     Just (Right (TyVarUnsol {})) -> Nothing
     Nothing -> Nothing
 
@@ -160,6 +173,8 @@ lookupTyVar orig = do
         Nothing -> error $ "Unknown tyvar: " <> prettyNameString v
         Just (Left v') -> f v'
         Just (Right (TyVarSol lvl t)) -> pure (lvl, Right t)
+        Just (Right (TyVarParam lvl _)) ->
+          pure (lvl, Right $ Scalar $ TypeVar mempty (qualName orig) [])
         Just (Right (TyVarUnsol lvl info)) -> pure (lvl, Left info)
   f orig
 
@@ -303,6 +318,8 @@ subTyVar reason v lvl t = do
     -- Internal error cases
     (Just (Right TyVarSol {}), _) ->
       error $ "Type variable already solved: " <> prettyNameString v
+    (Just (Right TyVarParam {}), _) ->
+      error $ "Cannot substitute type parameter: " <> prettyNameString v
     (Just Left {}, _) ->
       error $ "Type variable already linked: " <> prettyNameString v
     (Nothing, _) ->
@@ -430,6 +447,8 @@ linkTyVar reason v t = do
     -- Internal error cases
     (TyVarSol {}, _) ->
       alreadySolved
+    (TyVarParam {}, _) ->
+      isParam
     (_, Right t'') ->
       error $ "linkTyVar: rhs " <> prettyNameString t <> " is solved as " <> prettyString t''
 
@@ -439,6 +458,7 @@ linkTyVar reason v t = do
     unknown = error $ "linkTyVar: Nothing v: " <> prettyNameString v
     alreadyLinked = error $ "Type variable already linked: " <> prettyNameString v
     alreadySolved = error $ "Type variable already solved: " <> prettyNameString v
+    isParam = error $ "Type name is a type parameter: " <> prettyNameString v
 
 -- Unify at the root, emitting new equalities that must hold.
 unify :: Type -> Type -> Maybe [(Type, Type)]
@@ -490,7 +510,8 @@ solveEq reason orig_t1 orig_t2 = do
       let flexible v = case M.lookup v tyvars of
             Just (Left v') -> flexible v'
             Just (Right (TyVarUnsol lvl _)) -> Just lvl
-            Just (Right (TyVarSol _ _)) -> Nothing
+            Just (Right TyVarSol {}) -> Nothing
+            Just (Right TyVarParam {}) -> Nothing
             Nothing -> Nothing
           sub t@(Scalar (TypeVar u (QualName [] v) [])) =
             case M.lookup v tyvars of
@@ -552,11 +573,11 @@ solveTyVar (tv, (_, TyVarSum loc cs1)) = do
 solveTyVar (_, _) =
   pure ()
 
-solve :: Constraints -> TyVars -> Either TypeError ([VName], Solution)
-solve constraints tyvars =
+solve :: Constraints -> TyParams -> TyVars -> Either TypeError ([VName], Solution)
+solve constraints typarams tyvars =
   second solution
     . runExcept
-    . flip execStateT (initialState tyvars)
+    . flip execStateT (initialState typarams tyvars)
     . runSolveM
     $ do
       mapM_ solveCt constraints

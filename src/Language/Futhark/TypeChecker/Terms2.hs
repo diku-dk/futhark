@@ -112,6 +112,7 @@ data TermEnv = TermEnv
 data TermState = TermState
   { termConstraints :: Constraints,
     termTyVars :: TyVars,
+    termTyParams :: TyParams,
     termCounter :: !Int,
     termWarnings :: Warnings,
     termNameSource :: VNameSource,
@@ -192,6 +193,7 @@ runTermM (TermM m) = do
         TermState
           { termConstraints = mempty,
             termTyVars = mempty,
+            termTyParams = mempty,
             termWarnings = mempty,
             termNameSource = src,
             termCounter = 0,
@@ -632,14 +634,25 @@ bindTypes tbinds = localScope extend
         }
 
 bindTypeParams :: [TypeParam] -> TermM a -> TermM a
-bindTypeParams tparams =
-  bind (mapMaybe typeParamIdent tparams)
-    . bindTypes (mapMaybe typeParamType tparams)
+bindTypeParams tparams m =
+  bind idents . bindTypes types $ do
+    lvl <- curLevel
+    modify $ \s ->
+      s
+        { termTyParams =
+            termTyParams s
+              <> M.fromList (mapMaybe (typeParam lvl) tparams)
+        }
+    m
   where
+    idents = mapMaybe typeParamIdent tparams
+    types = mapMaybe typeParamType tparams
     typeParamType (TypeParamType l v _) =
       Just (v, TypeAbbr l [] $ RetType [] $ Scalar (TypeVar mempty (qualName v) []))
     typeParamType TypeParamDim {} =
       Nothing
+    typeParam lvl (TypeParamType _ v loc) = Just (v, (lvl, locOf loc))
+    typeParam _ _ = Nothing
 
 bindParams ::
   [TypeParam] ->
@@ -1311,6 +1324,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
   cts <- gets termConstraints
   tyvars <- gets termTyVars
+  typarams <- gets termTyParams
   artificial <- gets termArtificial
 
   debugTraceM 3 $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
@@ -1327,15 +1341,15 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         unlines $ map (\(v, t) -> prettyNameString v <> " => " <> prettyString t) (M.toList artificial)
       ]
 
-  onRankSolution retdecl'
+  onRankSolution retdecl' typarams
     =<< rankAnalysis1 loc cts tyvars artificial params' body'
   where
-    onRankSolution retdecl' ((cts', artificial, tyvars'), params', body'') = do
+    onRankSolution retdecl' typarams ((cts', artificial, tyvars'), params', body'') = do
       solution <-
         bitraverse
           pure
           (fmap (second (onArtificial artificial)) . onTySolution params' body'')
-          $ solve cts' tyvars'
+          $ solve cts' typarams tyvars'
       debugTraceM 3 $
         unlines
           [ "## constraints:",
@@ -1367,10 +1381,11 @@ checkSingleExp e = runTermM $ do
   e' <- checkExp e
   cts <- gets termConstraints
   tyvars <- gets termTyVars
+  typarams <- gets termTyParams
   artificial <- gets termArtificial
   ((cts', _artificial', tyvars'), _, e'') <-
     rankAnalysis1 (srclocOf e') cts tyvars artificial [] e'
-  case solve cts' tyvars' of
+  case solve cts' typarams tyvars' of
     Left err -> pure (Left err, e'')
     Right (unconstrained, solution) -> do
       e_t <- expType e''
@@ -1386,13 +1401,14 @@ checkSizeExp e = runTermM $ do
   e' <- checkSizeExp' e
   cts <- gets termConstraints
   tyvars <- gets termTyVars
+  typarams <- gets termTyParams
   artificial <- gets termArtificial
 
   (cts_tyvars', _, es') <- unzip3 <$> rankAnalysis (srclocOf e) cts tyvars artificial [] e'
 
   solutions <-
     forM cts_tyvars' $ \(cts', _artificial', tyvars') ->
-      bitraverse pure (traverse (doDefaults mempty)) $ solve cts' tyvars'
+      bitraverse pure (traverse (doDefaults mempty)) $ solve cts' typarams tyvars'
 
   case (solutions, es') of
     ([solution], [e'']) ->
