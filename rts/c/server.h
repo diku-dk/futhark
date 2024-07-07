@@ -703,7 +703,7 @@ void cmd_new(struct server_state *s, const char *args[]) {
 
   if (num_args != r->num_fields) {
     failure();
-    printf("%d fields expected byt %d values provided.\n", num_args, r->num_fields);
+    printf("%d fields expected but %d values provided.\n", num_args, r->num_fields);
     return;
   }
 
