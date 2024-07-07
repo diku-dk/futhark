@@ -415,6 +415,7 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
         let f = file entry tr
         liftIO $ createDirectoryIfMissing True $ takeDirectory f
         cmdMaybe $ cmdStore server f outs
+        cmdMaybe $ cmdFree server outs
     either throwError (const (pure ())) (sequence_ res)
   where
     server_cfg = futharkServerCfg (dropExtension prog) []
