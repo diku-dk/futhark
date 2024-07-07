@@ -416,9 +416,9 @@ prepareBenchmarkProgram concurrency opts program cases = do
       pure $
         Left
           ( "Reference output generation for "
-              ++ program
-              ++ " failed:\n"
-              ++ unlines (map T.unpack err),
+              <> program
+              <> " failed:\n"
+              <> T.unpack err,
             Nothing
           )
     Right () -> do

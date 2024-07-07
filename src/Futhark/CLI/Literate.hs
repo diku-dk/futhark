@@ -1161,7 +1161,7 @@ prepareServer prog opts f = do
           unwords compile_options
 
     let onError err = do
-          mapM_ (T.hPutStrLn stderr) err
+          T.hPutStrLn stderr err
           exitFailure
 
     void $
