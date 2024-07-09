@@ -11,7 +11,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Parallel.Strategies
-import Data.Functor
+import Data.Functor (($>))
 import Data.List (partition)
 import Data.Map.Strict qualified as M
 import Data.Maybe
