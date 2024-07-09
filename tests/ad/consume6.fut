@@ -4,12 +4,12 @@ def test [n] (xs: [n]i32) =
        let foo = xs'' with [i] = 1
        let m = map (\x -> x) foo
        in foo with [i] =  m[i]
-					
+
 -- ==
 -- entry: prim
 -- compiled input { [1,2,3,4,5] } output { [1,1,1,1,1] }
 entry prim [n] (xs: [n]i32) = test xs
-		     
+
 -- ==
 -- entry: f_vjp
 -- compiled input { [1,2,3,4,5] } output { [0,0,0,0,0] }

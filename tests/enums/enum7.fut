@@ -2,7 +2,7 @@
 -- ==
 -- error:
 
-def g (x : #foo | #bar) : #foo = 
+def g (x : #foo | #bar) : #foo =
   match x
     case #foo -> #foo
     case #bar -> #bar

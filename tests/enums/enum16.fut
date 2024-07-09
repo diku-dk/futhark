@@ -1,7 +1,7 @@
 -- Enum in-place updates.
 -- ==
 -- input { }
--- output { [2, 2, 1, 1] } 
+-- output { [2, 2, 1, 1] }
 
 def swap_inplace (n : i64) : *[]#foo | #bar =
   let x = replicate n #foo ++ replicate n #bar
@@ -9,7 +9,7 @@ def swap_inplace (n : i64) : *[]#foo | #bar =
       x with [i] = match x[i]
                    case #foo -> #bar
                    case #bar -> #foo
-                    
+
 def f (x : #foo | #bar) : i32 =
   match x
     case #foo -> 1

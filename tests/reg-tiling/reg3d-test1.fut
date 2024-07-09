@@ -7,7 +7,7 @@
 --   [ [5.0f32, 8.0f32], [6.0f32, 7.0f32] ]
 --   [ [1.0f32, 1.0f32], [9.0f32, 1.0f32] ]
 -- }
--- output { 
+-- output {
 --   [ [ [23.0f32, 29.0f32], [34.0f32, 44.0f32] ]
 --   , [ [18.0f32, 21.0f32], [24.0f32, 28.0f32] ]
 --   ]
@@ -22,8 +22,8 @@ def dotprod_filt [n] (vct: [n]f32) (xs: [n]f32) (ys: [n]f32) : f32 =
 def matmul_filt [n][p][m] (xss: [n][p]f32) (yss: [p][m]f32) (vct: [p]f32) : [n][m]f32 =
   map (\xs -> map (dotprod_filt vct xs) (transpose yss)) xss
 
-def main [m][n][u]  (ass: [n][u]f32) 
-                    (bss: [u][n]f32) 
-                    (fss: [m][u]f32) : 
+def main [m][n][u]  (ass: [n][u]f32)
+                    (bss: [u][n]f32)
+                    (fss: [m][u]f32) :
                     [m][n][n]f32 =
     map (matmul_filt ass bss) fss

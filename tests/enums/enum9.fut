@@ -5,7 +5,7 @@
 
 type animal = #dog | #cat | #mouse | #bird
 
-def f (x : animal) : i32 = 
+def f (x : animal) : i32 =
   match x
     case #dog   -> 1
     case #cat   -> 2

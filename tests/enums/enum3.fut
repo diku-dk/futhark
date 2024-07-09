@@ -1,6 +1,6 @@
 -- Matches on nested tuples 3.
 -- ==
--- input { } 
+-- input { }
 -- output { 3 }
 
 type animal = #dog | #cat | #mouse | #bird

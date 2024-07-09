@@ -6,7 +6,7 @@
 def red_add [n][m] (is: [n]i64) (vs: [n]f32) (dst: [m]f32) =
   let dst2 = copy dst
   let a = map (**2) dst2
-  let b = reduce_by_index dst2 (+) 0 is vs 
+  let b = reduce_by_index dst2 (+) 0 is vs
   in map2 (+) a b
 
 entry rev [n][m] (dst: [m]f32) (is: [n]i64) (vs: [n]f32) =

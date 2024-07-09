@@ -11,12 +11,11 @@ let matmul_filt [n][p][m] (xss: [n][p]f32) (yss: [p][m]f32) (vct: [p]f32) : [n][
 --   the outer map is distributed directly
 entry main [m][N][k] (n: i64) (X: [k][N]f32) (images : [m][N]f32) (res_adj: [m][k][k]f32) =
   let Xt= copy (transpose X)
-  
+
   let Xh  =  (X[:,:n])
   let Xth =  (Xt[:n,:])
   let Yh  =  (images[:,:n])
-  
+
   let batchMMM (Z, Zt, Q) = map (matmul_filt Z Zt) Q
 
   in  vjp batchMMM (X, Xt, images) res_adj
-

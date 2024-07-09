@@ -9,7 +9,7 @@ def f (x : #foo | #bar) : #foo | #bar =
     case #bar -> #foo
 
 def g (x : #foo | #bar) : i32 =
-  match x 
+  match x
     case #foo -> 1
     case #bar -> 2
 

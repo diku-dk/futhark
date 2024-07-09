@@ -1,6 +1,6 @@
 -- Matches on nested tuples 1.
 -- ==
--- input { } 
+-- input { }
 -- output { 3 }
 
 def main : i32 =

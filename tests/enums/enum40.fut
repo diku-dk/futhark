@@ -1,4 +1,4 @@
--- Missing pattern warning 10. 
+-- Missing pattern warning 10.
 -- (Checks that warnings are still triggered with ambiguous types)
 -- ==
 -- error:

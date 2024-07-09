@@ -13,7 +13,7 @@ module enum_module : foobar_mod = {
   type foobar = #foo | #bar
   def f (x : foobar) : i32 =
     match x
-      case #foo -> 1 
+      case #foo -> 1
       case #bar -> 2
   def foo = #foo : foobar
 

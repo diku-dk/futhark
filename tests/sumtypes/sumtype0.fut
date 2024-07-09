@@ -1,6 +1,6 @@
 -- Basic sum type.
 -- ==
--- input { } 
+-- input { }
 -- output { 5 }
 
 type foobar = #foo i32 | #bar i16

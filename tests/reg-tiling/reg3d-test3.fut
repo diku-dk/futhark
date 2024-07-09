@@ -8,7 +8,7 @@
 --   [ [5.0f32, 8.0f32], [6.0f32, 7.0f32] ]
 --   [ [1.0f32, 1.0f32], [9.0f32, 1.0f32] ]
 -- }
--- output { 
+-- output {
 --   [[[18.0f32, 18.0f32], [26.0f32, 30.0f32]], [[-3.0f32, 10.0f32], [ 0.0f32, 14.0f32]]]
 --   [[[28.0f32, 40.0f32], [42.0f32, 58.0f32]], [[39.0f32, 32.0f32], [48.0f32, 42.0f32]]]
 -- }
@@ -28,8 +28,8 @@ def dotprod_filt [n] (vct: [n]f32) (xs: [n]f32) (ys: [n]f32) (k : i64) : (f32,f3
 def matmul_filt [n][p][m] (xss: [n][p]f32) (yss: [p][m]f32) (vct: [p]f32) : [n][m](f32,f32) =
   map (\xs -> map2 (dotprod_filt vct xs) (transpose yss) (iota m)) xss
 
-def main [m][n][u]  (ass: [n][u]f32) 
-                    (bss: [u][n]f32) 
+def main [m][n][u]  (ass: [n][u]f32)
+                    (bss: [u][n]f32)
                     (fss: [m][u]f32)
                     : ([m][n][n]f32,[m][n][n]f32) =
     map (matmul_filt ass bss) fss |> map (map unzip) |> map unzip |> unzip

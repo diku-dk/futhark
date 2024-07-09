@@ -8,7 +8,7 @@ type planet = #mercury | #venus | #earth | #mars
 
 def compose 'a 'b 'c (f : a -> b) (g : b -> c) : a -> c = \x -> g (f x)
 
-def f (x : animal) : planet = 
+def f (x : animal) : planet =
   match x
     case #dog   -> #mercury
     case #cat   -> #venus

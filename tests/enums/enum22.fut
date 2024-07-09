@@ -4,7 +4,7 @@
 
 type planet = #mercury | #venus | #earth | #mars
 
-def f (x : planet) : i32 = 
+def f (x : planet) : i32 =
  1 + match x
        case #mercury -> 1
        case #venus   -> 2

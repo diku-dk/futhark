@@ -1,5 +1,5 @@
 def pow y x = let (_, res) = loop (i, acc) = (0, 1) while i < y do
-	                  (i + 1, acc * x)
+                          (i + 1, acc * x)
               in res
 -- ==
 -- entry: prim
@@ -7,9 +7,9 @@ def pow y x = let (_, res) = loop (i, acc) = (0, 1) while i < y do
 -- compiled input { 9 3 } output { 19683 }
 
 entry prim y x = pow y x
-		     
+
 -- ==
--- entry: f_jvp 
+-- entry: f_jvp
 -- compiled input { 3 4 } output { 48 }
 -- compiled input { 9 3 } output { 59049 }
 
