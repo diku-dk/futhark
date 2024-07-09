@@ -144,7 +144,7 @@ directlyCalledInSOACs = flip execState mempty . mapM_ (onStm Nothing) . progStms
     usage VJP {} = InAD
     usage _ = InSOAC
     walker u =
-      identityWalker
+      (identityWalker :: Walker SOACS (State (M.Map Name Used)))
         { walkOnBody = const (onBody u),
           walkOnOp = onSOAC u
         }
