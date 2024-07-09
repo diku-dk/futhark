@@ -521,37 +521,49 @@ isMapWithOp pat e
 -- the data dependencies to see that the "dead" result is not
 -- actually used for computing one of the live ones.
 removeDeadReduction :: BottomUpRuleOp (Wise SOACS)
-removeDeadReduction (_, used) pat aux (Screma w arrs form)
-  | Just ([Reduce comm redlam nes], maplam) <- isRedomapSOAC form,
-    not $ all (`UT.used` used) $ patNames pat, -- Quick/cheap check
-    let (red_pes, map_pes) = splitAt (length nes) $ patElems pat,
-    let redlam_deps = dataDependencies $ lambdaBody redlam,
-    let redlam_res = bodyResult $ lambdaBody redlam,
-    let redlam_params = lambdaParams redlam,
-    let used_after =
-          map snd . filter ((`UT.used` used) . patElemName . fst) $
-            zip red_pes redlam_params,
-    let necessary =
-          findNecessaryForReturned
-            (`elem` used_after)
-            (zip redlam_params $ map resSubExp $ redlam_res <> redlam_res)
-            redlam_deps,
-    let alive_mask = map ((`nameIn` necessary) . paramName) redlam_params,
-    not $ and (take (length nes) alive_mask) = Simplify $ do
-      let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
-          dead_fix = zipWith fixDeadToNeutral alive_mask nes
-          (used_red_pes, _, used_nes) =
-            unzip3 . filter (\(_, x, _) -> paramName x `nameIn` necessary) $
-              zip3 red_pes redlam_params nes
+removeDeadReduction (_, used) pat aux (Screma w arrs form) =
+  case isRedomapSOAC form of
+    Just ([Reduce comm redlam rednes], maplam) ->
+      let mkOp lam nes' = redomapSOAC [Reduce comm lam nes']
+       in removeDeadReduction' redlam rednes maplam mkOp
+    _ ->
+      case isScanomapSOAC form of
+        Just ([Scan scanlam nes], maplam) ->
+          let mkOp lam nes' = scanomapSOAC [Scan lam nes']
+           in removeDeadReduction' scanlam nes maplam mkOp
+        _ -> Skip
+  where
+    removeDeadReduction' redlam nes maplam mkOp
+      | not $ all (`UT.used` used) $ patNames pat, -- Quick/cheap check
+        let (red_pes, map_pes) = splitAt (length nes) $ patElems pat,
+        let redlam_deps = dataDependencies $ lambdaBody redlam,
+        let redlam_res = bodyResult $ lambdaBody redlam,
+        let redlam_params = lambdaParams redlam,
+        let used_after =
+              map snd . filter ((`UT.used` used) . patElemName . fst) $
+                zip red_pes redlam_params,
+        let necessary =
+              findNecessaryForReturned
+                (`elem` used_after)
+                (zip redlam_params $ map resSubExp $ redlam_res <> redlam_res)
+                redlam_deps,
+        let alive_mask = map ((`nameIn` necessary) . paramName) redlam_params,
+        not $ and (take (length nes) alive_mask) = Simplify $ do
+          let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
+              dead_fix = zipWith fixDeadToNeutral alive_mask nes
+              (used_red_pes, _, used_nes) =
+                unzip3 . filter (\(_, x, _) -> paramName x `nameIn` necessary) $
+                  zip3 red_pes redlam_params nes
 
-      let maplam' = removeLambdaResults (take (length nes) alive_mask) maplam
-      redlam' <- removeLambdaResults (take (length nes) alive_mask) <$> fixLambdaParams redlam (dead_fix ++ dead_fix)
+          let maplam' = removeLambdaResults (take (length nes) alive_mask) maplam
+          redlam' <- removeLambdaResults (take (length nes) alive_mask) <$> fixLambdaParams redlam (dead_fix ++ dead_fix)
 
-      auxing aux $
-        letBind (Pat $ used_red_pes ++ map_pes) $
-          Op $
-            Screma w arrs $
-              redomapSOAC [Reduce comm redlam' used_nes] maplam'
+          auxing aux $
+            letBind (Pat $ used_red_pes ++ map_pes) $
+              Op $
+                Screma w arrs $
+                  mkOp redlam' used_nes maplam'
+    removeDeadReduction' _ _ _ _ = Skip
 removeDeadReduction _ _ _ _ = Skip
 
 -- | If we are writing to an array that is never used, get rid of it.
@@ -564,15 +576,14 @@ removeDeadWrite (_, used) pat aux (Scatter w arrs fun dests) =
         unzip6 $ filter isUsed $ zip6 (patElems pat) i_ses v_ses i_ts v_ts dests
       fun' =
         fun
-          { lambdaBody = (lambdaBody fun) {bodyResult = concat i_ses' ++ v_ses'},
+          { lambdaBody =
+              mkBody (bodyStms (lambdaBody fun)) (concat i_ses' ++ v_ses'),
             lambdaReturnType = concat i_ts' ++ v_ts'
           }
    in if pat /= Pat pat'
         then
-          Simplify . auxing aux $
-            letBind (Pat pat') $
-              Op $
-                Scatter w arrs fun' dests'
+          Simplify . auxing aux . letBind (Pat pat') $
+            Op (Scatter w arrs fun' dests')
         else Skip
 removeDeadWrite _ _ _ _ = Skip
 

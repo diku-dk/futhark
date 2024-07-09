@@ -14,13 +14,12 @@ module Futhark.CodeGen.Backends.GenericPython
     compileCode,
     compilePrimValue,
     compilePrimType,
-    compilePrimTypeExt,
     compilePrimToNp,
     compilePrimToExtNp,
     fromStorage,
     toStorage,
     Operations (..),
-    DoLMADCopy,
+    DoCopy,
     defaultOperations,
     unpackDim,
     CompilerM (..),
@@ -38,7 +37,6 @@ module Futhark.CodeGen.Backends.GenericPython
     collect',
     collect,
     simpleCall,
-    copyMemoryDefaultSpace,
   )
 where
 
@@ -104,10 +102,10 @@ type Copy op s =
   PrimType ->
   CompilerM op s ()
 
--- | Perform an 'Imp.LMADCopy'.  It is expected that these functions
+-- | Perform an 'Imp.Copy'.  It is expected that these functions
 -- are each specialised on which spaces they operate on, so that is
 -- not part of their arguments.
-type DoLMADCopy op s =
+type DoCopy op s =
   PrimType ->
   [Count Elements PyExp] ->
   PyExp ->
@@ -143,9 +141,8 @@ data Operations op s = Operations
   { opsWriteScalar :: WriteScalar op s,
     opsReadScalar :: ReadScalar op s,
     opsAllocate :: Allocate op s,
-    opsCopy :: Copy op s,
     -- | @(dst,src)@-space mapping to copy functions.
-    opsCopies :: M.Map (Space, Space) (DoLMADCopy op s),
+    opsCopies :: M.Map (Space, Space) (DoCopy op s),
     opsCompiler :: OpCompiler op s,
     opsEntryOutput :: EntryOutput op s,
     opsEntryInput :: EntryInput op s
@@ -160,7 +157,6 @@ defaultOperations =
     { opsWriteScalar = defWriteScalar,
       opsReadScalar = defReadScalar,
       opsAllocate = defAllocate,
-      opsCopy = defCopy,
       opsCopies = M.singleton (DefaultSpace, DefaultSpace) lmadcopyCPU,
       opsCompiler = defCompiler,
       opsEntryOutput = defEntryOutput,
@@ -173,8 +169,6 @@ defaultOperations =
       error "Cannot read from non-default memory space"
     defAllocate _ _ _ =
       error "Cannot allocate in non-default memory space"
-    defCopy _ _ _ _ _ _ _ _ =
-      error "Cannot copy to or from non-default memory space"
     defCompiler _ =
       error "The default compiler cannot compile extended operations"
     defEntryOutput _ _ _ _ =
@@ -582,9 +576,16 @@ entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ep
   pack_output <- asks envEntryOutput
   pack_output mem sid bt ept dims
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ bt ept dims)) = do
-  mem' <- Cast <$> compileVar mem <*> pure (compilePrimTypeExt bt ept)
+  mem' <- compileVar mem
   dims' <- mapM compileDim dims
-  pure $ simpleCall "createArray" [mem', Tuple dims', Var $ compilePrimToExtNp bt ept]
+  pure $
+    simpleCall
+      "np.reshape"
+      [ Index
+          (Call (Field mem' "view") [Arg $ Var $ compilePrimToExtNp bt ept])
+          (IdxRange (Integer 0) (foldl1 (BinOp "*") dims')),
+        Tuple dims'
+      ]
 
 badInput :: Int -> PyExp -> T.Text -> PyStmt
 badInput i e t =
@@ -853,24 +854,6 @@ prepareEntry (Imp.EntryPoint _ results args) (fname, Imp.Function _ outputs inpu
       zip (map snd results) res
     )
 
-copyMemoryDefaultSpace ::
-  PyExp ->
-  PyExp ->
-  PyExp ->
-  PyExp ->
-  PyExp ->
-  CompilerM op s ()
-copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes = do
-  let offset_call1 =
-        simpleCall
-          "addressOffset"
-          [destmem, destidx, Var "ct.c_byte"]
-  let offset_call2 =
-        simpleCall
-          "addressOffset"
-          [srcmem, srcidx, Var "ct.c_byte"]
-  stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, nbytes]
-
 data ReturnTiming = ReturnTiming | DoNotReturnTiming
 
 compileEntryFun ::
@@ -1043,24 +1026,6 @@ compilePrimType t =
     Imp.Bool -> "ct.c_bool"
     Unit -> "ct.c_bool"
 
--- | The ctypes type corresponding to a 'PrimType', taking sign into account.
-compilePrimTypeExt :: PrimType -> Imp.Signedness -> String
-compilePrimTypeExt t ept =
-  case (t, ept) of
-    (IntType Int8, Imp.Unsigned) -> "ct.c_uint8"
-    (IntType Int16, Imp.Unsigned) -> "ct.c_uint16"
-    (IntType Int32, Imp.Unsigned) -> "ct.c_uint32"
-    (IntType Int64, Imp.Unsigned) -> "ct.c_uint64"
-    (IntType Int8, _) -> "ct.c_int8"
-    (IntType Int16, _) -> "ct.c_int16"
-    (IntType Int32, _) -> "ct.c_int32"
-    (IntType Int64, _) -> "ct.c_int64"
-    (FloatType Float16, _) -> "ct.c_uint16"
-    (FloatType Float32, _) -> "ct.c_float"
-    (FloatType Float64, _) -> "ct.c_double"
-    (Imp.Bool, _) -> "ct.c_bool"
-    (Unit, _) -> "ct.c_byte"
-
 -- | The Numpy type corresponding to a 'PrimType'.
 compilePrimToNp :: Imp.PrimType -> String
 compilePrimToNp bt =
@@ -1116,21 +1081,21 @@ compilePrimValue (IntValue (Int64Value v)) =
   simpleCall "np.int64" [Integer $ toInteger v]
 compilePrimValue (FloatValue (Float16Value v))
   | isInfinite v =
-      if v > 0 then Var "np.inf" else Var "-np.inf"
+      if v > 0 then Var "np.float16(np.inf)" else Var "np.float16(-np.inf)"
   | isNaN v =
-      Var "np.nan"
+      Var "np.float16(np.nan)"
   | otherwise = simpleCall "np.float16" [Float $ fromRational $ toRational v]
 compilePrimValue (FloatValue (Float32Value v))
   | isInfinite v =
-      if v > 0 then Var "np.inf" else Var "-np.inf"
+      if v > 0 then Var "np.float32(np.inf)" else Var "np.float32(-np.inf)"
   | isNaN v =
-      Var "np.nan"
+      Var "np.float32(np.nan)"
   | otherwise = simpleCall "np.float32" [Float $ fromRational $ toRational v]
 compilePrimValue (FloatValue (Float64Value v))
   | isInfinite v =
       if v > 0 then Var "np.inf" else Var "-np.inf"
   | isNaN v =
-      Var "np.nan"
+      Var "np.float64(np.nan)"
   | otherwise = simpleCall "np.float64" [Float $ fromRational $ toRational v]
 compilePrimValue (BoolValue v) = Bool v
 compilePrimValue UnitValue = Var "np.byte(0)"
@@ -1222,12 +1187,12 @@ generateWrite _ _ _ ScalarSpace {} _ = do
 generateWrite dst iexp pt (Imp.Space space) elemexp = do
   writer <- asks envWriteScalar
   writer dst iexp pt space elemexp
-generateWrite dst iexp pt DefaultSpace elemexp =
-  stm $ Exp $ simpleCall "writeScalarArray" [dst, iexp, toStorage pt elemexp]
+generateWrite dst iexp _ DefaultSpace elemexp =
+  stm $ Exp $ simpleCall "writeScalarArray" [dst, iexp, elemexp]
 
--- | Compile an 'LMADCopy' using sequential nested loops, but
+-- | Compile an 'Copy' using sequential nested loops, but
 -- parameterised over how to do the reads and writes.
-compileLMADCopyWith ::
+compileCopyWith ::
   [Count Elements (TExp Int64)] ->
   (PyExp -> PyExp -> CompilerM op s ()) ->
   ( Count Elements (TExp Int64),
@@ -1238,7 +1203,7 @@ compileLMADCopyWith ::
     [Count Elements (TExp Int64)]
   ) ->
   CompilerM op s ()
-compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad = do
+compileCopyWith shape doWrite dst_lmad doRead src_lmad = do
   let (dstoffset, dststrides) = dst_lmad
       (srcoffset, srcstrides) = src_lmad
   shape' <- mapM (compileExp . untyped . unCount) shape
@@ -1260,10 +1225,10 @@ compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad = do
     loops ((i, n) : ins) body =
       [For (compileName i) (simpleCall "range" [n]) $ loops ins body]
 
--- | Compile an 'LMADCopy' using sequential nested loops and
+-- | Compile an 'Copy' using sequential nested loops and
 -- 'Imp.Read'/'Imp.Write' of individual scalars.  This always works,
 -- but can be pretty slow if those reads and writes are costly.
-compileLMADCopy ::
+compileCopy ::
   PrimType ->
   [Count Elements (TExp Int64)] ->
   (VName, Space) ->
@@ -1275,12 +1240,12 @@ compileLMADCopy ::
     [Count Elements (TExp Int64)]
   ) ->
   CompilerM op s ()
-compileLMADCopy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad = do
+compileCopy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad = do
   src' <- compileVar src
   dst' <- compileVar dst
   let doWrite dst_i = generateWrite dst' dst_i t dstspace
       doRead src_i = generateRead src' src_i t srcspace
-  compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad
+  compileCopyWith shape doWrite dst_lmad doRead src_lmad
 
 compileCode :: Imp.Code op -> CompilerM op s ()
 compileCode Imp.DebugPrint {} =
@@ -1386,11 +1351,11 @@ compileCode (Imp.Allocate name (Imp.Count (Imp.TPrimExp e)) _) = do
   stm =<< Assign <$> compileVar name <*> pure allocate'
 compileCode (Imp.Free name _) =
   stm =<< Assign <$> compileVar name <*> pure None
-compileCode (Imp.LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) = do
+compileCode (Imp.Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) = do
   cp <- asks $ M.lookup (dstspace, srcspace) . opsCopies . envOperations
   case cp of
     Nothing ->
-      compileLMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
+      compileCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
     Just cp' -> do
       shape' <- traverse (traverse (compileExp . untyped)) shape
       dst' <- compileVar dst
@@ -1412,7 +1377,7 @@ compileCode (Imp.Read x src (Imp.Count iexp) pt space _) = do
   stm . Assign x' =<< generateRead src' iexp' pt space
 compileCode Imp.Skip = pure ()
 
-lmadcopyCPU :: DoLMADCopy op s
+lmadcopyCPU :: DoCopy op s
 lmadcopyCPU t shape dst (dstoffset, dststride) src (srcoffset, srcstride) =
   stm . Exp . simpleCall "lmad_copy" $
     [ Var (compilePrimType t),

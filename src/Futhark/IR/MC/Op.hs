@@ -19,6 +19,7 @@ import Futhark.Analysis.Metrics
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, CanBeAliased (..))
+import Futhark.IR.Mem (OpReturns (..))
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
 import Futhark.IR.TypeCheck qualified as TC
@@ -71,18 +72,21 @@ instance (ASTRep rep, FreeIn (op rep)) => FreeIn (MCOp op rep) where
   freeIn' (ParOp par_op op) = freeIn' par_op <> freeIn' op
   freeIn' (OtherOp op) = freeIn' op
 
-instance (ASTRep rep, IsOp (op rep)) => IsOp (MCOp op rep) where
+instance (IsOp op) => IsOp (MCOp op) where
   safeOp (ParOp _ op) = safeOp op
   safeOp (OtherOp op) = safeOp op
 
   cheapOp (ParOp _ op) = cheapOp op
   cheapOp (OtherOp op) = cheapOp op
 
-instance (TypedOp (op rep)) => TypedOp (MCOp op rep) where
+  opDependencies (ParOp _ op) = opDependencies op
+  opDependencies (OtherOp op) = opDependencies op
+
+instance (TypedOp op) => TypedOp (MCOp op) where
   opType (ParOp _ op) = opType op
   opType (OtherOp op) = opType op
 
-instance (Aliased rep, AliasedOp (op rep)) => AliasedOp (MCOp op rep) where
+instance (AliasedOp op) => AliasedOp (MCOp op) where
   opAliases (ParOp _ op) = opAliases op
   opAliases (OtherOp op) = opAliases op
 
@@ -104,6 +108,10 @@ instance (CanBeWise op) => CanBeWise (MCOp op) where
 instance (ASTRep rep, ST.IndexOp (op rep)) => ST.IndexOp (MCOp op rep) where
   indexOp vtable k (ParOp _ op) is = ST.indexOp vtable k op is
   indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is
+
+instance OpReturns (MCOp NoOp) where
+  opReturns (ParOp _ op) = segOpReturns op
+  opReturns (OtherOp NoOp) = pure []
 
 instance (PrettyRep rep, Pretty (op rep)) => Pretty (MCOp op rep) where
   pretty (ParOp Nothing op) = pretty op

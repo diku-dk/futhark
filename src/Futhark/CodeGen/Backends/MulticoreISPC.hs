@@ -563,7 +563,7 @@ compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
         <$> compileExp (untyped iexp)
         <*> getMemType src restype
   GC.stm [C.cstm|$id:x = $exp:e;|]
-compileCode (LMADCopy t shape (dst, DefaultSpace) dst_lmad (src, DefaultSpace) src_lmad) = do
+compileCode (Copy t shape (dst, DefaultSpace) dst_lmad (src, DefaultSpace) src_lmad) = do
   dst' <- GC.rawMem dst
   src' <- GC.rawMem src
   let doWrite dst_i ve = do
@@ -575,7 +575,7 @@ compileCode (LMADCopy t shape (dst, DefaultSpace) dst_lmad (src, DefaultSpace) s
         GC.stm [C.cstm|$exp:deref = $exp:(toStorage t ve);|]
       doRead src_i =
         fromStorage t . GC.derefPointer src' src_i <$> getMemType src t
-  GC.compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad
+  GC.compileCopyWith shape doWrite dst_lmad doRead src_lmad
 compileCode (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
   unless cached $ unRefMem name space
@@ -776,20 +776,15 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
       Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
 
     -- Generate the nested segop function if available
-    fnpar_task <- case par_task of
+    case par_task of
       Just (ParallelTask nested_code) -> do
         let lexical_nested = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params nested_code
         fnpar_task <- MC.generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
         GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
-        pure $ zip [fnpar_task] [True]
-      Nothing -> do
+      Nothing ->
         GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
-        pure mempty
 
     GC.stm [C.cstm|return scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);|]
-
-    -- Add profile fields for -P option
-    mapM_ GC.profileReport $ MC.multiCoreReport $ (fpar_task, True) : fnpar_task
 
   schedn <- MC.multicoreDef "schedule_shim" $ \s ->
     pure

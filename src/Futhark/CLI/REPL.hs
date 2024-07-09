@@ -89,9 +89,7 @@ repl maybe_prog = do
                 toploop s'
           Right _ -> pure ()
 
-      finish s = do
-        quit <- if fancyTerminal then confirmQuit else pure True
-        if quit then pure () else toploop s
+      finish _s = pure ()
 
   maybe_init_state <- liftIO $ newFutharkiState 0 noLoadedProg maybe_prog
   s <- case maybe_init_state of
@@ -101,22 +99,13 @@ repl maybe_prog = do
         Left err ->
           error $ "Failed to initialise interpreter state: " <> T.unpack (docText err)
         Right s -> do
-          liftIO $ putDoc prog_err
+          liftIO $ putDocLn prog_err
           pure s {futharkiLoaded = maybe_prog}
     Right s ->
       pure s
   Haskeline.runInputT Haskeline.defaultSettings $ toploop s
 
   putStrLn "Leaving 'futhark repl'."
-
-confirmQuit :: Haskeline.InputT IO Bool
-confirmQuit = do
-  c <- Haskeline.getInputChar "Quit REPL? (y/n) "
-  case c of
-    Nothing -> pure True -- EOF
-    Just 'y' -> pure True
-    Just 'n' -> pure False
-    _ -> confirmQuit
 
 -- | Representation of breaking at a breakpoint, to allow for
 -- navigating through the stack frames and such.
@@ -227,7 +216,7 @@ readEvalPrint = do
         Right (Right e) -> do
           valOrErr <- onExp e
           case valOrErr of
-            Left err -> liftIO $ putDoc err
+            Left err -> liftIO $ putDocLn err
             Right val -> liftIO $ putDocLn $ I.prettyValue val
   modify $ \s -> s {futharkiCount = futharkiCount s + 1}
   where
@@ -377,7 +366,12 @@ runInterpreterNoBreak m = runF m (pure . Right) intOp
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ putDocLn $ pretty w <> ":" <+> align (unAnnotate v)
       c
-    intOp (I.ExtOpBreak _ _ _ c) = c
+    intOp (I.ExtOpBreak _ I.BreakNaN _ c) = c
+    intOp (I.ExtOpBreak w _ _ c) = do
+      liftIO $
+        T.putStrLn $
+          locText w <> ": " <> "ignoring breakpoint when computating constant."
+      c
 
 type Command = T.Text -> FutharkiM ()
 
@@ -411,7 +405,8 @@ typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
       then
         annotate italicized $
           "\n\nPolymorphic in"
-            <+> mconcat (intersperse " " $ map pretty ps) <> "."
+            <+> mconcat (intersperse " " $ map pretty ps)
+            <> "."
       else mempty
 
 mtypeCommand :: Command

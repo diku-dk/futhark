@@ -23,7 +23,7 @@ import Futhark.Internalise.Lambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
-import Futhark.Util (splitAt3)
+import Futhark.Util (lookupWithIndex, splitAt3)
 import Futhark.Util.Pretty (align, docText, pretty)
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.TypeChecker.Types qualified as E
@@ -57,6 +57,9 @@ internaliseValBind types fb@(E.ValBind entry fname _ (Info rettype) tparams para
       (rettype', retals) <-
         first zeroExts . unzip . internaliseReturnType (map (fmap paramDeclType) all_params) rettype
           <$> mapM subExpType body_res
+
+      when (null params') $
+        bindExtSizes (E.AppRes (E.toStruct $ E.retType rettype) (E.retDims rettype)) body_res
 
       body_res' <-
         ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
@@ -625,6 +628,9 @@ internaliseExp desc (E.RecordLit orig_fields _) =
           (baseName name)
           (E.Var (E.qualName name) t loc)
           loc
+internaliseExp desc (E.ArrayVal vs t _) =
+  fmap pure . letSubExp desc . I.BasicOp $
+    I.ArrayVal (map internalisePrimValue vs) (internalisePrimType t)
 internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
   -- If this is a multidimensional array literal of primitives, we
   -- treat it specially by flattening it out followed by a reshape.
@@ -796,7 +802,7 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) _) = do
   let noExt _ = pure $ intConst Int64 0
   ts' <- instantiateShapes noExt $ map fromDecl ts
 
-  case M.lookup c constr_map of
+  case lookupWithIndex c constr_map of
     Just (i, js) ->
       (intConst Int8 (toInteger i) :) <$> clauses 0 ts' (zip js es')
     Nothing ->
@@ -806,7 +812,17 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) _) = do
       | Just e <- j `lookup` js_to_es =
           (e :) <$> clauses (j + 1) ts js_to_es
       | otherwise = do
-          blank <- letSubExp "zero" =<< eBlank t
+          blank <-
+            -- Cannot use eBlank here for arrays, because when doing
+            -- equality comparisons on sum types, we end up looking at
+            -- the array elements. (#2081) This is a bit of an edge
+            -- case, but arrays in sum types are known to be
+            -- inefficient.
+            letSubExp "zero"
+              =<< case t of
+                I.Array {} ->
+                  pure $ BasicOp $ Replicate (I.arrayShape t) $ I.Constant $ blankPrimValue $ elemType t
+                _ -> eBlank t
           (blank :) <$> clauses (j + 1) ts js_to_es
     clauses _ [] _ =
       pure []
@@ -889,7 +905,7 @@ generateCond orig_p orig_ses = do
       pure ([Just $ internalisePatLit l t], [se], ses)
     compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) (_ : ses) = do
       (payload_ts, m) <- internaliseSumType $ M.map (map toStruct) fs
-      case M.lookup c m of
+      case lookupWithIndex c m of
         Just (tag, payload_is) -> do
           let (payload_ses, ses') = splitAt (length payload_ts) ses
           (cmps, pertinent, _) <-
@@ -1471,7 +1487,7 @@ findFuncall (E.Apply f args _)
   | E.Hole (Info _) loc <- f =
       (FunctionHole loc, map onArg $ NE.toList args)
   where
-    onArg (Info (_, argext), e) = (e, argext)
+    onArg (Info argext, e) = (e, argext)
 findFuncall e =
   error $ "Invalid function expression in application:\n" ++ prettyString e
 
@@ -1672,7 +1688,7 @@ isIntrinsicFunction qname args loc = do
       acc' <- head <$> internaliseExpToVars "acc" acc
       i' <- internaliseExp1 "acc_i" i
       vs <- internaliseExp "acc_v" v
-      fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
+      fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc Safe acc' [i'] vs
     handleAccs _ _ = Nothing
 
     handleAD [f, x, v] fname
@@ -1699,9 +1715,12 @@ isIntrinsicFunction qname args loc = do
       old_dim <- I.arraysSize 0 <$> mapM lookupType arrs
       dim_ok <-
         letSubExp "dim_ok" <=< toExp $
-          pe64 old_dim .==. pe64 n' * pe64 m'
-            .&&. pe64 n' .>=. 0
-            .&&. pe64 m' .>=. 0
+          pe64 old_dim .==. pe64 n'
+            * pe64 m'
+              .&&. pe64 n'
+              .>=. 0
+              .&&. pe64 m'
+              .>=. 0
       dim_ok_cert <-
         assert
           "dim_ok_cert"
@@ -1725,6 +1744,13 @@ isIntrinsicFunction qname args loc = do
               I.ReshapeArbitrary
               (reshapeOuter (I.Shape [n', m']) 1 $ I.arrayShape arr_t)
               arr'
+    handleRest [arr] "manifest" = Just $ \desc -> do
+      arrs <- internaliseExpToVars "flatten_arr" arr
+      forM arrs $ \arr' -> do
+        r <- I.arrayRank <$> lookupType arr'
+        if r == 0
+          then pure $ I.Var arr'
+          else letSubExp desc $ I.BasicOp $ I.Manifest [0 .. r - 1] arr'
     handleRest [arr] "flatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
       forM arrs $ \arr' -> do

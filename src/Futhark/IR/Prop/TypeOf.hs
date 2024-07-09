@@ -63,6 +63,10 @@ basicOpType (SubExp se) =
   pure <$> subExpType se
 basicOpType (Opaque _ se) =
   pure <$> subExpType se
+basicOpType (ArrayVal vs t) =
+  pure [arrayOf (Prim t) (Shape [n]) NoUniqueness]
+  where
+    n = intConst Int64 $ toInteger $ length vs
 basicOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
   where
@@ -117,12 +121,12 @@ basicOpType (Manifest _ v) =
   pure <$> lookupType v
 basicOpType Assert {} =
   pure [Prim Unit]
-basicOpType (UpdateAcc v _ _) =
+basicOpType (UpdateAcc _ v _ _) =
   pure <$> lookupType v
 
 -- | The type of an expression.
 expExtType ::
-  (HasScope rep m, TypedOp (Op rep)) =>
+  (HasScope rep m, TypedOp (OpC rep)) =>
   Exp rep ->
   m [ExtType]
 expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf . fst) rt
@@ -150,7 +154,7 @@ loopExtType params =
 -- | Any operation must define an instance of this class, which
 -- describes the type of the operation (at the value level).
 class TypedOp op where
-  opType :: (HasScope t m) => op -> m [ExtType]
+  opType :: (HasScope rep m) => op rep -> m [ExtType]
 
-instance TypedOp (NoOp rep) where
+instance TypedOp NoOp where
   opType NoOp = pure []

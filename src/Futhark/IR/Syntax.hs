@@ -328,6 +328,13 @@ data BasicOp
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the element type of the rows of the array.
     ArrayLit [SubExp] Type
+  | -- | A one-dimensional array literal that contains only constants.
+    -- This is a fast-path for representing very large array literals
+    -- that show up in some programs. The key rule for processing this
+    -- in compiler passes is that you should never need to look at the
+    -- individual elements. Has exactly the same semantics as an
+    -- 'ArrayLit'.
+    ArrayVal [PrimValue] PrimType
   | -- | Unary operation.
     UnOp UnOp SubExp
   | -- | Binary operation.
@@ -378,9 +385,11 @@ data BasicOp
     -- must be a permutation of @[0,n-1]@, where @n@ is the
     -- number of dimensions in the input array.
     Rearrange [Int] VName
-  | -- | Update an accumulator at the given index with the given value.
-    -- Consumes the accumulator and produces a new one.
-    UpdateAcc VName [SubExp] [SubExp]
+  | -- | Update an accumulator at the given index with the given
+    -- value. Consumes the accumulator and produces a new one. If
+    -- 'Safe', perform a run-time bounds check and ignore the write if
+    -- out of bounds (like @Scatter@).
+    UpdateAcc Safety VName [SubExp] [SubExp]
   deriving (Eq, Ord, Show)
 
 -- | The input to a 'WithAcc' construct.  Comprises the index space of
@@ -455,12 +464,12 @@ deriving instance (RepTypes rep) => Ord (Exp rep)
 -- | For-loop or while-loop?
 data LoopForm
   = ForLoop
+      -- | The loop iterator var
       VName
-      -- ^ The loop iterator var
+      -- | The type of the loop iterator var
       IntType
-      -- ^ The type of the loop iterator var
+      -- | The number of iterations.
       SubExp
-      -- ^ The number of iterations.
   | WhileLoop VName
   deriving (Eq, Ord, Show)
 

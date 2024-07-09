@@ -38,20 +38,20 @@ module Futhark.CodeGen.ImpGen
     hasFunction,
     collect,
     collect',
-    comment,
     VarEntry (..),
     ArrayEntry (..),
 
     -- * Lookups
     lookupVar,
     lookupArray,
+    lookupArraySpace,
     lookupMemory,
     lookupAcc,
     askAttrs,
 
     -- * Building Blocks
     TV,
-    mkTV,
+    MkTV (..),
     tvSize,
     tvExp,
     tvVar,
@@ -76,12 +76,15 @@ module Futhark.CodeGen.ImpGen
     caseMatch,
 
     -- * Constructing code.
+    newVName,
     dLParams,
     dFParams,
     addLoopVar,
     dScope,
     dArray,
     dPrim,
+    dPrimS,
+    dPrimSV,
     dPrimVol,
     dPrim_,
     dPrimV_,
@@ -140,7 +143,6 @@ import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.ImpCode qualified as Imp
 import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
@@ -391,13 +393,6 @@ collect' m = do
   modify $ \s -> s {stateCode = prev_code}
   pure (x, new_code)
 
--- | Execute a code generation action, wrapping the generated code
--- within a 'Imp.Comment' with the given description.
-comment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
-comment desc m = do
-  code <- collect m
-  emit $ Imp.Comment desc code
-
 -- | Emit some generated imperative code.
 emit :: Imp.Code op -> ImpM rep r op ()
 emit code = modify $ \s -> s {stateCode = stateCode s <> code}
@@ -408,7 +403,7 @@ warnings ws = modify $ \s -> s {stateWarnings = ws <> stateWarnings s}
 -- | Emit a warning about something the user should be aware of.
 warn :: (Located loc) => loc -> [loc] -> T.Text -> ImpM rep r op ()
 warn loc locs problem =
-  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) (pretty problem)
+  warnings $ singleWarning' (locOf loc) (map locOf locs) (pretty problem)
 
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM rep r op ()
@@ -493,6 +488,7 @@ entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> map valueTypeSign vts
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
+    OpaqueSum vts _ -> map valueTypeSign vts
 
 -- | How many value parameters are accepted by this entry point?  This
 -- is used to determine which of the function parameters correspond to
@@ -504,6 +500,7 @@ entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> length vts
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
+    OpaqueSum vts _ -> length vts
 
 compileInParam ::
   (Mem rep inner) =>
@@ -515,7 +512,7 @@ compileInParam fparam = case paramDec fparam of
   MemMem space ->
     pure $ Left $ Imp.MemParam name space
   MemArray bt shape _ (ArrayIn mem lmad) ->
-    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) $ IxFun.ixfunLMAD lmad
+    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) lmad
   MemAcc {} ->
     error "Functions may not have accumulator parameters."
   where
@@ -781,7 +778,10 @@ compileExp pat e = do
 caseMatch :: [SubExp] -> [Maybe PrimValue] -> Imp.TExp Bool
 caseMatch ses vs = foldl (.&&.) true (zipWith cmp ses vs)
   where
-    cmp se (Just v) = isBool $ toExp' (primValueType v) se ~==~ ValueExp v
+    cmp se (Just (BoolValue True)) =
+      isBool $ toExp' Bool se
+    cmp se (Just v) =
+      isBool $ toExp' (primValueType v) se ~==~ ValueExp v
     cmp _ Nothing = true
 
 defCompileExp ::
@@ -854,9 +854,9 @@ traceArray :: T.Text -> PrimType -> Shape -> SubExp -> ImpM rep r op ()
 traceArray s t shape se = do
   emit . Imp.TracePrint $ ErrorMsg [ErrorString (s <> ": ")]
   sLoopNest shape $ \is -> do
-    arr_elem <- dPrim "arr_elem" t
-    copyDWIMFix (tvVar arr_elem) [] se is
-    emit . Imp.TracePrint $ ErrorMsg [ErrorVal t (untyped (tvExp arr_elem)), " "]
+    arr_elem <- dPrimS "arr_elem" t
+    copyDWIMFix arr_elem [] se is
+    emit . Imp.TracePrint $ ErrorMsg [ErrorVal t (toExp' t arr_elem), " "]
   emit . Imp.TracePrint $ ErrorMsg ["\n"]
 
 defCompileBasicOp ::
@@ -870,7 +870,7 @@ defCompileBasicOp (Pat [pe]) (Opaque op se) = do
   copyDWIM (patElemName pe) [] se []
   case op of
     OpaqueNil -> pure ()
-    OpaqueTrace s -> comment ("Trace: " <> s) $ do
+    OpaqueTrace s -> sComment ("Trace: " <> s) $ do
       se_t <- subExpType se
       case se_t of
         Prim t -> tracePrim s t se
@@ -937,7 +937,7 @@ defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
       dPrimV "x" . TPrimExp $
         BinOpExp (Add it OverflowUndef) e' $
           BinOpExp (Mul it OverflowUndef) i' s'
-    copyDWIM (patElemName pe) [DimFix i] (Var (tvVar x)) []
+    copyDWIMFix (patElemName pe) [i] (Var (tvVar x)) []
 defCompileBasicOp (Pat [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
@@ -954,20 +954,22 @@ defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
         destslice = skip_slices ++ [DimSlice (tvExp offs_glb) rows 1]
     copyDWIM (patElemName pe) destslice (Var y) []
     offs_glb <-- tvExp offs_glb + rows
+defCompileBasicOp (Pat [pe]) (ArrayVal vs t) = do
+  dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
+  static_array <- newVNameForFun "static_array"
+  emit $ Imp.DeclareArray static_array t $ Imp.ArrayValues vs
+  let static_src =
+        MemLoc static_array [intConst Int64 $ fromIntegral $ length vs] $
+          LMAD.iota 0 [fromIntegral $ length vs]
+  addVar static_array $ MemVar Nothing $ MemEntry DefaultSpace
+  copy t dest_mem static_src
 defCompileBasicOp (Pat [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
-      dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
       let t = primValueType v
-      static_array <- newVNameForFun "static_array"
-      emit $ Imp.DeclareArray static_array t $ Imp.ArrayValues vs
-      let static_src =
-            MemLoc static_array [intConst Int64 $ fromIntegral $ length es] $
-              LMAD.iota 0 [fromIntegral $ length es]
-      addVar static_array $ MemVar Nothing $ MemEntry DefaultSpace
-      copy t dest_mem static_src
+      defCompileBasicOp (Pat [pe]) (ArrayVal vs t)
   | otherwise =
       forM_ (zip [0 ..] es) $ \(i, e) ->
-        copyDWIM (patElemName pe) [DimFix $ fromInteger i] e []
+        copyDWIMFix (patElemName pe) [fromInteger i] e []
   where
     isLiteral (Constant v) = Just v
     isLiteral _ = Nothing
@@ -975,7 +977,7 @@ defCompileBasicOp _ Rearrange {} =
   pure ()
 defCompileBasicOp _ Reshape {} =
   pure ()
-defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
+defCompileBasicOp _ (UpdateAcc safety acc is vs) = sComment "UpdateAcc" $ do
   -- We are abusing the comment mechanism to wrap the operator in
   -- braces when we end up generating code.  This is necessary because
   -- we might otherwise end up declaring lambda parameters (if any)
@@ -988,7 +990,11 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
   -- index parameters.
   (_, _, arrs, dims, op) <- lookupAcc acc is'
 
-  sWhen (inBounds (Slice (map DimFix is')) dims) $
+  let boundsCheck =
+        case safety of
+          Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
+          _ -> id
+  boundsCheck $
     case op of
       Nothing ->
         -- Scatter-like.
@@ -1071,14 +1077,27 @@ dPrim_ name t = do
   emit $ Imp.DeclareScalar name Imp.Nonvolatile t
   addVar name $ ScalarVar Nothing $ ScalarEntry t
 
--- | The return type is polymorphic, so there is no guarantee it
--- actually matches the 'PrimType', but at least we have to use it
--- consistently.
-dPrim :: String -> PrimType -> ImpM rep r op (TV t)
-dPrim name t = do
+-- | Create variable of some provided dynamic type. You'll need this
+-- when you are compiling program code of Haskell-level unknown type.
+-- For other things, use other functions.
+dPrimS :: String -> PrimType -> ImpM rep r op VName
+dPrimS name t = do
   name' <- newVName name
   dPrim_ name' t
-  pure $ TV name' t
+  pure name'
+
+-- | Create 'TV' of some provided dynamic type. No guarantee that the
+-- dynamic type matches the inferred type.
+dPrimSV :: String -> PrimType -> ImpM rep r op (TV t)
+dPrimSV name t = TV <$> dPrimS name t <*> pure t
+
+-- | Create 'TV' of some fixed type.
+dPrim :: (MkTV t) => String -> ImpM rep r op (TV t)
+dPrim name = do
+  name' <- newVName name
+  let tv = mkTV name'
+  dPrim_ name' $ tvType tv
+  pure tv
 
 dPrimV_ :: VName -> Imp.TExp t -> ImpM rep r op ()
 dPrimV_ name e = do
@@ -1089,15 +1108,21 @@ dPrimV_ name e = do
 
 dPrimV :: String -> Imp.TExp t -> ImpM rep r op (TV t)
 dPrimV name e = do
-  name' <- dPrim name $ primExpType $ untyped e
-  name' <-- e
-  pure name'
+  name' <- dPrimS name pt
+  let tv = TV name' pt
+  tv <-- e
+  pure tv
+  where
+    pt = primExpType $ untyped e
 
 dPrimVE :: String -> Imp.TExp t -> ImpM rep r op (Imp.TExp t)
 dPrimVE name e = do
-  name' <- dPrim name $ primExpType $ untyped e
-  name' <-- e
-  pure $ tvExp name'
+  name' <- dPrimS name pt
+  let tv = TV name' pt
+  tv <-- e
+  pure $ tvExp tv
+  where
+    pt = primExpType $ untyped e
 
 memBoundToVarEntry ::
   Maybe (Exp rep) ->
@@ -1110,7 +1135,7 @@ memBoundToVarEntry e (MemMem space) =
 memBoundToVarEntry e (MemAcc acc ispace ts _) =
   AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem lmad)) =
-  let location = MemLoc mem (shapeDims shape) $ IxFun.ixfunLMAD lmad
+  let location = MemLoc mem (shapeDims shape) lmad
    in ArrayVar
         e
         ArrayEntry
@@ -1179,12 +1204,46 @@ funcallTargets dests =
 -- It is still easy to cheat when you need to.
 data TV t = TV VName PrimType
 
--- | Create a typed variable from a name and a dynamic type.  Note
--- that there is no guarantee that the dynamic type corresponds to the
--- inferred static type, but the latter will at least have to be used
--- consistently.
-mkTV :: VName -> PrimType -> TV t
-mkTV = TV
+-- | A type class that helps ensuring that the type annotation in a
+-- 'TV' is correct.
+class MkTV t where
+  -- | Create a typed variable from a name and a dynamic type.
+  mkTV :: VName -> TV t
+
+  -- | Extract type from a 'TV'.
+  tvType :: TV t -> PrimType
+
+instance MkTV Bool where
+  mkTV v = TV v Bool
+  tvType _ = Bool
+
+instance MkTV Int8 where
+  mkTV v = TV v (IntType Int8)
+  tvType _ = IntType Int8
+
+instance MkTV Int16 where
+  mkTV v = TV v (IntType Int16)
+  tvType _ = IntType Int16
+
+instance MkTV Int32 where
+  mkTV v = TV v (IntType Int32)
+  tvType _ = IntType Int32
+
+instance MkTV Int64 where
+  mkTV v = TV v (IntType Int64)
+  tvType _ = IntType Int64
+
+instance MkTV Half where
+  mkTV v = TV v (FloatType Float16)
+  tvType _ = FloatType Float16
+
+instance MkTV Float where
+  mkTV v = TV v (FloatType Float32)
+  tvType _ = FloatType Float32
+
+instance MkTV Double where
+  mkTV v = TV v (FloatType Float64)
+  tvType _ = FloatType Float64
 
 -- | Convert a typed variable to a size (a SubExp).
 tvSize :: TV t -> Imp.DimSize
@@ -1218,6 +1277,10 @@ instance ToExp SubExp where
 
   toExp' _ (Constant v) = Imp.ValueExp v
   toExp' t (Var v) = Imp.var v t
+
+instance ToExp VName where
+  toExp = toExp . Var
+  toExp' t = toExp' t . Var
 
 instance ToExp (PrimExp VName) where
   toExp = pure
@@ -1308,6 +1371,7 @@ lookupMemory name = do
     MemVar _ entry -> pure entry
     _ -> error $ "Unknown memory block: " ++ prettyString name
 
+-- | In which memory space is this array allocated?
 lookupArraySpace :: VName -> ImpM rep r op Space
 lookupArraySpace =
   fmap entryMemSpace . lookupMemory
@@ -1412,7 +1476,7 @@ lmadCopy t dstloc srcloc = do
   srcspace <- entryMemSpace <$> lookupMemory srcmem
   dstspace <- entryMemSpace <$> lookupMemory dstmem
   emit $
-    Imp.LMADCopy
+    Imp.Copy
       t
       (elements <$> LMAD.shape dstlmad)
       (dstmem, dstspace)
@@ -1449,7 +1513,7 @@ copyArrayDWIM
           fullyIndexArray' srclocation srcis
         vol <- asks envVolatility
         collect $ do
-          tmp <- tvVar <$> dPrim "tmp" bt
+          tmp <- dPrimS "tmp" bt
           emit $ Imp.Read tmp srcmem srcoffset bt srcspace vol
           emit $ Imp.Write targetmem targetoffset bt destspace vol $ Imp.var tmp bt
     | otherwise = do
@@ -1589,8 +1653,8 @@ copyDWIM dest dest_slice src src_slice = do
         case dest_entry of
           ScalarVar _ _ ->
             ScalarDestination dest
-          ArrayVar _ (ArrayEntry (MemLoc mem shape ixfun) _) ->
-            ArrayDestination $ Just $ MemLoc mem shape ixfun
+          ArrayVar _ (ArrayEntry (MemLoc mem shape lmad) _) ->
+            ArrayDestination $ Just $ MemLoc mem shape lmad
           MemVar _ _ ->
             MemoryDestination dest
           AccVar {} ->
@@ -1665,6 +1729,8 @@ sWhile cond body = do
   body' <- collect body
   emit $ Imp.While cond body'
 
+-- | Execute a code generation action, wrapping the generated code
+-- within a 'Imp.Comment' with the given description.
 sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code
@@ -1713,9 +1779,9 @@ sAlloc name size space = do
   pure name'
 
 sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
-sArray name bt shape mem ixfun = do
+sArray name bt shape mem lmad = do
   name' <- newVName name
-  dArray name' bt shape mem ixfun
+  dArray name' bt shape mem lmad
   pure name'
 
 -- | Declare an array in row-major order in the given memory block.
@@ -1731,9 +1797,9 @@ sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> I
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
   mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
-  let iota_ixfun = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
+  let iota_lmad = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
-    LMAD.permute iota_ixfun $
+    LMAD.permute iota_lmad $
       rearrangeInverse perm
 
 -- | Uses linear/iota index function.

@@ -27,7 +27,6 @@ module Futhark.Test
 where
 
 import Codec.Compression.GZip
-import Codec.Compression.Zlib.Internal (DecompressError)
 import Control.Applicative
 import Control.Exception (catch)
 import Control.Exception.Base qualified as E
@@ -300,11 +299,11 @@ testRunReferenceOutput :: FilePath -> T.Text -> TestRun -> FilePath
 testRunReferenceOutput prog entry tr =
   "data"
     </> takeBaseName prog
-    <> ":"
-    <> T.unpack entry
-    <> "-"
-    <> map clean (T.unpack (runDescription tr))
-    <.> "out"
+      <> ":"
+      <> T.unpack entry
+      <> "-"
+      <> map clean (T.unpack (runDescription tr))
+        <.> "out"
   where
     clean '/' = '_' -- Would this ever happen?
     clean ' ' = '_'
@@ -418,24 +417,23 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
   unless (null missing) $ do
     void $ compileProgram [] futhark compiler prog
 
-    res <- liftIO $
-      flip (pmapIO concurrency) missing $ \(entry, tr) -> do
-        (code, stdout, stderr) <- runProgram futhark "" ["-b"] prog entry $ runInput tr
-        case code of
-          ExitFailure e ->
-            pure $
-              Left
-                [ T.pack $
-                    "Reference dataset generation failed with exit code "
-                      ++ show e
-                      ++ " and stderr:\n"
-                      ++ map (chr . fromIntegral) (SBS.unpack stderr)
-                ]
-          ExitSuccess -> do
-            let f = file (entry, tr)
-            liftIO $ createDirectoryIfMissing True $ takeDirectory f
-            SBS.writeFile f stdout
-            pure $ Right ()
+    res <- liftIO . flip (pmapIO concurrency) missing $ \(entry, tr) -> do
+      (code, stdout, stderr) <- runProgram futhark "" ["-b"] prog entry $ runInput tr
+      case code of
+        ExitFailure e ->
+          pure $
+            Left
+              [ T.pack $
+                  "Reference dataset generation failed with exit code "
+                    ++ show e
+                    ++ " and stderr:\n"
+                    ++ map (chr . fromIntegral) (SBS.unpack stderr)
+              ]
+        ExitSuccess -> do
+          let f = file (entry, tr)
+          liftIO $ createDirectoryIfMissing True $ takeDirectory f
+          SBS.writeFile f stdout
+          pure $ Right ()
 
     case sequence_ res of
       Left err -> throwError err

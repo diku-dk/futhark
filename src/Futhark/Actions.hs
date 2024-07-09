@@ -7,6 +7,7 @@ module Futhark.Actions
     printFusionGraph,
     printInterferenceGPU,
     printMemAliasGPU,
+    printMemoryAccessAnalysis,
     callGraphAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
@@ -33,6 +34,7 @@ import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
+import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.Alias
 import Futhark.Analysis.CallGraph (buildCallGraph)
 import Futhark.Analysis.Interference qualified as Interference
@@ -133,6 +135,15 @@ printMemAliasGPU =
       actionProcedure = liftIO . print . MemAlias.analyzeGPUMem
     }
 
+-- | Print result of array access analysis on the IR
+printMemoryAccessAnalysis :: (Analyse rep) => Action rep
+printMemoryAccessAnalysis =
+  Action
+    { actionName = "array-access-analysis",
+      actionDescription = "Prettyprint the array access analysis to standard output.",
+      actionProcedure = liftIO . putStrLn . prettyString . analyseDimAccesses
+    }
+
 -- | Print call graph to stdout.
 callGraphAction :: Action SOACS
 callGraphAction =
@@ -166,7 +177,7 @@ kernelImpCodeGenAction =
   Action
     { actionName = "Compile imperative kernels",
       actionDescription = "Translate program into imperative IL with kernels and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenGPU.compileProgOpenCL
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenGPU.compileProgHIP
     }
 
 -- | Convert the program to CPU multicore ImpCode and print it to stdout.

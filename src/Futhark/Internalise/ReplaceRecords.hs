@@ -117,18 +117,10 @@ transformExp (AppExp (LetPat sizes pat e body loc) res) = do
   (pat', rr) <- transformPat pat
   body' <- withRecordReplacements rr $ transformExp body
   pure $ AppExp (LetPat sizes pat' e' body' loc) res
-transformExp (AppExp (LetFun fname (tparams, params, retdecl, Info ret, funbody) letbody loc) res) = do
-  (params', rr) <- mapAndUnzipM transformPat params
-  funbody' <- withRecordReplacements (mconcat rr) $ transformExp funbody
-  letbody' <- transformExp letbody
-  pure $ AppExp (LetFun fname (tparams, params', retdecl, Info ret, funbody') letbody' loc) res
-transformExp (Lambda params e decl tp loc) = do
-  (params', rrs) <- mapAndUnzipM transformPat params
-  Lambda params'
-    <$> withRecordReplacements (mconcat rrs) (transformExp e)
-    <*> pure decl
-    <*> pure tp
-    <*> pure loc
+transformExp (AppExp (LetFun {}) _) = do
+  error "transformExp: LetFun is not supposed to occur"
+transformExp (Lambda {}) =
+  error "transformExp: Lambda is not supposed to occur"
 transformExp e = astMap m e
   where
     m = identityMapper {mapOnExp = transformExp}

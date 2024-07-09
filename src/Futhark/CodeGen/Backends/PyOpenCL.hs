@@ -5,6 +5,7 @@ module Futhark.CodeGen.Backends.PyOpenCL
 where
 
 import Control.Monad
+import Control.Monad.Identity
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericPython hiding (compileProg)
@@ -33,6 +34,7 @@ compileProg mode class_name prog = do
     Imp.Program
       opencl_code
       opencl_prelude
+      macros
       kernels
       types
       sizes
@@ -89,7 +91,7 @@ compileProg mode class_name prog = do
             "default_threshold=default_threshold",
             "sizes=sizes"
           ]
-          [Escape $ openClInit types assign sizes failures]
+          [Escape $ openClInit macros types assign sizes failures]
       options =
         [ Option
             { optionLongName = "platform",
@@ -190,7 +192,6 @@ compileProg mode class_name prog = do
           opsWriteScalar = writeOpenCLScalar,
           opsReadScalar = readOpenCLScalar,
           opsAllocate = allocateOpenCLBuffer,
-          opsCopy = copyOpenCLMemory,
           opsCopies =
             M.insert (Imp.Space "device", Imp.Space "device") copygpu2gpu $
               opsCopies defaultOperations,
@@ -203,37 +204,41 @@ compileProg mode class_name prog = do
 asLong :: PyExp -> PyExp
 asLong x = simpleCall "np.int64" [x]
 
+getParamByKey :: Name -> PyExp
+getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+
 kernelConstToExp :: Imp.KernelConst -> PyExp
-kernelConstToExp (Imp.SizeConst key) =
-  Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+kernelConstToExp (Imp.SizeConst key _) =
+  getParamByKey key
 kernelConstToExp (Imp.SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class
 
-compileGroupDim :: Imp.GroupDim -> CompilerM op s PyExp
-compileGroupDim (Left e) = asLong <$> compileExp e
-compileGroupDim (Right kc) = pure $ kernelConstToExp kc
+compileConstExp :: Imp.KernelConstExp -> PyExp
+compileConstExp e = runIdentity $ compilePrimExp (pure . kernelConstToExp) e
+
+compileBlockDim :: Imp.BlockDim -> CompilerM op s PyExp
+compileBlockDim (Left e) = asLong <$> compileExp e
+compileBlockDim (Right e) = pure $ compileConstExp e
 
 callKernel :: OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do
   v' <- compileVar v
-  stm $ Assign v' $ kernelConstToExp $ Imp.SizeConst key
+  stm $ Assign v' $ getParamByKey key
 callKernel (Imp.CmpSizeLe v key x) = do
   v' <- compileVar v
   x' <- compileExp x
-  stm $
-    Assign v' $
-      BinOp "<=" (kernelConstToExp (Imp.SizeConst key)) x'
+  stm $ Assign v' $ BinOp "<=" (getParamByKey key) x'
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- compileVar v
   stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class
-callKernel (Imp.LaunchKernel safety name local_memory args num_workgroups workgroup_size) = do
-  num_workgroups' <- mapM (fmap asLong . compileExp) num_workgroups
-  workgroup_size' <- mapM compileGroupDim workgroup_size
-  let kernel_size = zipWith mult_exp num_workgroups' workgroup_size'
+callKernel (Imp.LaunchKernel safety name shared_memory args num_threadblocks workgroup_size) = do
+  num_threadblocks' <- mapM (fmap asLong . compileExp) num_threadblocks
+  workgroup_size' <- mapM compileBlockDim workgroup_size
+  let kernel_size = zipWith mult_exp num_threadblocks' workgroup_size'
       total_elements = foldl mult_exp (Integer 1) kernel_size
       cond = BinOp "!=" total_elements (Integer 0)
-  local_memory' <- compileExp $ Imp.untyped $ Imp.unCount local_memory
-  body <- collect $ launchKernel name safety kernel_size workgroup_size' local_memory' args
+  shared_memory' <- compileExp $ Imp.untyped $ Imp.unCount shared_memory
+  body <- collect $ launchKernel name safety kernel_size workgroup_size' shared_memory' args
   stm $ If cond body []
 
   when (safety >= Imp.SafetyFull) $
@@ -251,9 +256,9 @@ launchKernel ::
   PyExp ->
   [Imp.KernelArg] ->
   CompilerM op s ()
-launchKernel kernel_name safety kernel_dims workgroup_dims local_memory args = do
+launchKernel kernel_name safety kernel_dims threadblock_dims shared_memory args = do
   let kernel_dims' = Tuple kernel_dims
-      workgroup_dims' = Tuple workgroup_dims
+      threadblock_dims' = Tuple threadblock_dims
       kernel_name' = "self." <> zEncodeText (nameToText kernel_name) <> "_var"
   args' <- mapM processKernelArg args
   let failure_args =
@@ -265,13 +270,13 @@ launchKernel kernel_name safety kernel_dims workgroup_dims local_memory args = d
           ]
   stm . Exp $
     simpleCall (T.unpack $ kernel_name' <> ".set_args") $
-      [simpleCall "cl.LocalMemory" [simpleCall "max" [local_memory, Integer 1]]]
+      [simpleCall "cl.LocalMemory" [simpleCall "max" [shared_memory, Integer 1]]]
         ++ failure_args
         ++ args'
   stm . Exp $
     simpleCall
       "cl.enqueue_nd_range_kernel"
-      [Var "self.queue", Var (T.unpack kernel_name'), kernel_dims', workgroup_dims']
+      [Var "self.queue", Var (T.unpack kernel_name'), kernel_dims', threadblock_dims']
   finishIfSynchronous
   where
     processKernelArg :: Imp.KernelArg -> CompilerM op s PyExp
@@ -331,55 +336,6 @@ allocateOpenCLBuffer mem size "device" =
 allocateOpenCLBuffer _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space"
 
-copyOpenCLMemory :: Copy Imp.OpenCL ()
-copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "device") nbytes bt = do
-  let divide = BinOp "//" nbytes (Integer $ Imp.primByteSize bt)
-      end = BinOp "+" destidx divide
-      dest = Index destmem (IdxRange destidx end)
-  stm $
-    ifNotZeroSize nbytes $
-      Exp $
-        Call
-          (Var "cl.enqueue_copy")
-          [ Arg $ Var "self.queue",
-            Arg dest,
-            Arg srcmem,
-            ArgKeyword "device_offset" $ asLong srcidx,
-            ArgKeyword "is_blocking" $ Var "synchronous"
-          ]
-copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes _ = do
-  let end = BinOp "+" srcidx nbytes
-      src = Index (simpleCall "createArray" [srcmem, List [nbytes], Var "np.byte"]) (IdxRange srcidx end)
-  stm $
-    ifNotZeroSize nbytes $
-      Exp $
-        Call
-          (Var "cl.enqueue_copy")
-          [ Arg $ Var "self.queue",
-            Arg destmem,
-            Arg src,
-            ArgKeyword "device_offset" $ asLong destidx,
-            ArgKeyword "is_blocking" $ Var "synchronous"
-          ]
-copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "device") nbytes _ = do
-  stm $
-    ifNotZeroSize nbytes $
-      Exp $
-        Call
-          (Var "cl.enqueue_copy")
-          [ Arg $ Var "self.queue",
-            Arg destmem,
-            Arg srcmem,
-            ArgKeyword "dst_offset" $ asLong destidx,
-            ArgKeyword "src_offset" $ asLong srcidx,
-            ArgKeyword "byte_count" $ asLong nbytes
-          ]
-  finishIfSynchronous
-copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx Imp.DefaultSpace nbytes _ =
-  copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
-copyOpenCLMemory _ _ destspace _ _ srcspace _ _ =
-  error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
-
 packArrayOutput :: EntryOutput Imp.OpenCL ()
 packArrayOutput mem "device" bt ept dims = do
   mem' <- compileVar mem
@@ -438,7 +394,7 @@ finishIfSynchronous :: CompilerM op s ()
 finishIfSynchronous =
   stm $ If (Var "synchronous") [Exp $ simpleCall "sync" [Var "self"]] []
 
-copygpu2gpu :: DoLMADCopy op s
+copygpu2gpu :: DoCopy op s
 copygpu2gpu t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   stm . Exp . simpleCall "lmad_copy_gpu2gpu" $
     [ Var "self",

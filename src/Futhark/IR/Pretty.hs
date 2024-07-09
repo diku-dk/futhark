@@ -196,7 +196,13 @@ instance Pretty BasicOp where
       Array {} -> brackets $ commastack $ map pretty es
       _ -> brackets $ commasep $ map pretty es
       <+> colon
-      <+> "[]" <> pretty rt
+      <+> "[]"
+      <> pretty rt
+  pretty (ArrayVal vs t) =
+    brackets (commasep $ map pretty vs)
+      <+> colon
+      <+> "[]"
+      <> pretty t
   pretty (BinOp bop x y) = pretty bop <> parens (pretty x <> comma <+> pretty y)
   pretty (CmpOp op x y) = pretty op <> parens (pretty x <> comma <+> pretty y)
   pretty (ConvOp conv x) =
@@ -233,13 +239,17 @@ instance Pretty BasicOp where
   pretty (Manifest perm e) = "manifest" <> apply [apply (map pretty perm), pretty e]
   pretty (Assert e msg (loc, _)) =
     "assert" <> apply [pretty e, pretty msg, pretty $ show $ locStr loc]
-  pretty (UpdateAcc acc is v) =
-    "update_acc"
+  pretty (UpdateAcc safety acc is v) =
+    update_acc_str
       <> apply
         [ pretty acc,
           ppTuple' $ map pretty is,
           ppTuple' $ map pretty v
         ]
+    where
+      update_acc_str = case safety of
+        Safe -> "update_acc"
+        Unsafe -> "update_acc_unsafe"
 
 instance (Pretty a) => Pretty (ErrorMsg a) where
   pretty (ErrorMsg parts) = braces $ align $ commasep $ map p parts
@@ -270,13 +280,13 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
   pretty (Match [c] [Case [Just (BoolValue True)] t] f (MatchDec ret ifsort)) =
     "if"
       <> info'
-      <+> pretty c
-      </> "then"
-      <+> maybeNest t
-      <+> "else"
-      <+> maybeNest f
-      </> colon
-      <+> ppTupleLines' (map pretty ret)
+        <+> pretty c
+        </> "then"
+        <+> maybeNest t
+        <+> "else"
+        <+> maybeNest f
+        </> colon
+        <+> ppTupleLines' (map pretty ret)
     where
       info' = case ifsort of
         MatchNormal -> mempty
@@ -300,8 +310,8 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
     applykw
       <+> pretty (nameToString fname)
       <> apply (map (align . prettyArg) args)
-      </> colon
-      <+> braces (commasep $ map prettyRet ret)
+        </> colon
+        <+> braces (commasep $ map prettyRet ret)
     where
       prettyArg (arg, Consume) = "*" <> pretty arg
       prettyArg (arg, _) = pretty arg
@@ -318,9 +328,11 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
               ForLoop i it bound ->
                 "for"
                   <+> align
-                    ( pretty i <> ":" <> pretty it
-                        <+> "<"
-                        <+> align (pretty bound)
+                    ( pretty i
+                        <> ":"
+                        <> pretty it
+                          <+> "<"
+                          <+> align (pretty bound)
                     )
               WhileLoop cond ->
                 "while" <+> pretty cond
@@ -335,12 +347,13 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
     where
       ppInput (shape, arrs, op) =
         parens
-          ( pretty shape <> comma
-              <+> ppTuple' (map pretty arrs)
-                <> case op of
-                  Nothing -> mempty
-                  Just (op', nes) ->
-                    comma </> parens (pretty op' <> comma </> ppTuple' (map pretty nes))
+          ( pretty shape
+              <> comma
+                <+> ppTuple' (map pretty arrs)
+              <> case op of
+                Nothing -> mempty
+                Just (op', nes) ->
+                  comma </> parens (pretty op' <> comma </> ppTuple' (map pretty nes))
           )
 
 instance (PrettyRep rep) => Pretty (Lambda rep) where
@@ -388,9 +401,9 @@ instance (PrettyRep rep) => Pretty (FunDef rep) where
                   <> pretty p_name
                   <> "\""
                   <> comma
-                  </> ppTupleLines' (map pretty p_entry)
+                    </> ppTupleLines' (map pretty p_entry)
                   <> comma
-                  </> ppTupleLines' (map pretty ret_entry)
+                    </> ppTupleLines' (map pretty ret_entry)
               )
 
 instance Pretty OpaqueType where
@@ -400,6 +413,10 @@ instance Pretty OpaqueType where
     "record" <+> nestedBlock "{" "}" (stack $ map p fs)
     where
       p (f, et) = pretty f <> ":" <+> pretty et
+  pretty (OpaqueSum ts cs) =
+    "sum" <+> nestedBlock "{" "}" (stack $ pretty ts : map p cs)
+    where
+      p (c, ets) = hsep $ "#" <> pretty c : map pretty ets
 
 instance Pretty OpaqueTypes where
   pretty (OpaqueTypes ts) = "types" <+> nestedBlock "{" "}" (stack $ map p ts)

@@ -123,6 +123,7 @@ expMetrics (Op op) =
 basicOpMetrics :: BasicOp -> MetricsM ()
 basicOpMetrics (SubExp _) = seen "SubExp"
 basicOpMetrics (Opaque _ _) = seen "Opaque"
+basicOpMetrics ArrayVal {} = seen "ArrayVal"
 basicOpMetrics ArrayLit {} = seen "ArrayLit"
 basicOpMetrics BinOp {} = seen "BinOp"
 basicOpMetrics UnOp {} = seen "UnOp"

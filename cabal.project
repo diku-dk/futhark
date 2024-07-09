@@ -1,5 +1,7 @@
 packages: futhark.cabal
-index-state: 2023-09-21T04:48:56Z
+index-state: 2024-05-22T04:42:44Z
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
+
+allow-newer: base, template-haskell

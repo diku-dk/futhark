@@ -357,7 +357,7 @@ def read_str_empty_array(f, type_name, rank):
         parse_specific_string(f, "[")
         dims += [int(parse_int(f))]
         parse_specific_string(f, "]")
-    if np.product(dims) != 0:
+    if np.prod(dims) != 0:
         raise ValueError
     parse_specific_string(f, type_name)
     parse_specific_char(f, b")")
@@ -672,7 +672,7 @@ def read_array(f, expected_type, rank):
     )
     arr.shape = shape
 
-    return arr
+    return arr.copy()  # To ensure it is writeable.
 
 
 if sys.version_info >= (3, 0):
@@ -758,7 +758,7 @@ def write_value_text(v, out=sys.stdout):
         else:
             out.write("%.6ff64" % v)
     elif type(v) == np.ndarray:
-        if np.product(v.shape) == 0:
+        if np.prod(v.shape) == 0:
             tname = numpy_type_to_type_name(v.dtype)
             out.write(
                 "empty({}{})".format(

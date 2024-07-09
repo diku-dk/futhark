@@ -22,8 +22,14 @@ module Futhark.Util.CMath
     cbrtf,
     hypot,
     hypotf,
+    ldexp,
+    ldexpf,
+    copysign,
+    copysignf,
   )
 where
+
+import Foreign.C.Types (CInt (..))
 
 foreign import ccall "nearbyint" c_nearbyint :: Double -> Double
 
@@ -146,3 +152,27 @@ cbrt = c_cbrt
 -- | The system-level @cbrtf@ function.
 cbrtf :: Float -> Float
 cbrtf = c_cbrtf
+
+foreign import ccall "ldexp" c_ldexp :: Double -> CInt -> Double
+
+foreign import ccall "ldexpf" c_ldexpf :: Float -> CInt -> Float
+
+-- | The system-level @ldexp@ function.
+ldexp :: Double -> CInt -> Double
+ldexp = c_ldexp
+
+-- | The system-level @ldexpf@ function.
+ldexpf :: Float -> CInt -> Float
+ldexpf = c_ldexpf
+
+foreign import ccall "copysign" c_copysign :: Double -> Double -> Double
+
+foreign import ccall "copysignf" c_copysignf :: Float -> Float -> Float
+
+-- | The system-level @copysign@ function.
+copysign :: Double -> Double -> Double
+copysign = c_copysign
+
+-- | The system-level @copysignf@ function.
+copysignf :: Float -> Float -> Float
+copysignf = c_copysignf

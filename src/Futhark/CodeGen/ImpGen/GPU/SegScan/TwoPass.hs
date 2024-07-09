@@ -6,7 +6,7 @@ module Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass (compileSegScan) where
 
 import Control.Monad
 import Control.Monad.State
-import Data.List (delete, find, foldl', zip4)
+import Data.List qualified as L
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
@@ -21,15 +21,15 @@ import Prelude hiding (quot, rem)
 -- Aggressively try to reuse memory for different SegBinOps, because
 -- we will run them sequentially after another.
 makeLocalArrays ::
-  Count GroupSize SubExp ->
+  Count BlockSize SubExp ->
   SubExp ->
   [SegBinOp GPUMem] ->
   InKernelGen [[VName]]
-makeLocalArrays (Count group_size) num_threads scans = do
+makeLocalArrays (Count tblock_size) num_threads scans = do
   (arrs, mems_and_sizes) <- runStateT (mapM onScan scans) mempty
-  let maxSize sizes = Imp.bytes $ foldl' sMax64 1 $ map Imp.unCount sizes
+  let maxSize sizes = Imp.bytes $ L.foldl' sMax64 1 $ map Imp.unCount sizes
   forM_ mems_and_sizes $ \(sizes, mem) ->
-    sAlloc_ mem (maxSize sizes) (Space "local")
+    sAlloc_ mem (maxSize sizes) (Space "shared")
   pure arrs
   where
     onScan (SegBinOp _ scan_op nes _) = do
@@ -46,7 +46,7 @@ makeLocalArrays (Count group_size) num_threads scans = do
               pure (arr, [])
             _ -> do
               let pt = elemType $ paramType p
-                  shape = Shape [group_size]
+                  shape = Shape [tblock_size]
               (sizes, mem') <- getMem pt shape
               arr <- lift $ sArrayInMem "scan_arr" pt shape mem'
               pure (arr, [(sizes, mem')])
@@ -56,15 +56,15 @@ makeLocalArrays (Count group_size) num_threads scans = do
     getMem pt shape = do
       let size = typeSize $ Array pt shape NoUniqueness
       mems <- get
-      case (find ((size `elem`) . fst) mems, mems) of
+      case (L.find ((size `elem`) . fst) mems, mems) of
         (Just mem, _) -> do
-          modify $ delete mem
+          modify $ L.delete mem
           pure mem
         (Nothing, (size', mem) : mems') -> do
           put mems'
           pure (size : size', mem)
         (Nothing, []) -> do
-          mem <- lift $ sDeclareMem "scan_arr_mem" $ Space "local"
+          mem <- lift $ sDeclareMem "scan_arr_mem" $ Space "shared"
           pure ([size], mem)
 
 type CrossesSegment = Maybe (Imp.TExp Int64 -> Imp.TExp Int64 -> Imp.TExp Bool)
@@ -143,25 +143,25 @@ readCarries chunk_id chunk_offset dims' vec_is pes scan
   | otherwise =
       pure ()
 
--- | Produce partially scanned intervals; one per workgroup.
+-- | Produce partially scanned intervals; one per threadblock.
 scanStage1 ::
   Pat LetDecMem ->
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
+  Count NumBlocks SubExp ->
+  Count BlockSize SubExp ->
   SegSpace ->
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen (TV Int32, Imp.TExp Int64, CrossesSegment)
-scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
-  let num_groups' = fmap pe64 num_groups
-      group_size' = fmap pe64 group_size
-  num_threads <- dPrimV "num_threads" $ sExt32 $ unCount num_groups' * unCount group_size'
+scanStage1 (Pat all_pes) num_tblocks tblock_size space scans kbody = do
+  let num_tblocks' = fmap pe64 num_tblocks
+      tblock_size' = fmap pe64 tblock_size
+  num_threads <- dPrimV "num_threads" $ sExt32 $ unCount num_tblocks' * unCount tblock_size'
 
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
   let num_elements = product dims'
       elems_per_thread = num_elements `divUp` sExt64 (tvExp num_threads)
-      elems_per_group = unCount group_size' * elems_per_thread
+      elems_per_group = unCount tblock_size' * elems_per_thread
 
   let crossesSegment =
         case reverse dims' of
@@ -169,9 +169,9 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
             (to - from) .>. (to `rem` segment_size)
           _ -> Nothing
 
-  sKernelThread "scan_stage1" (segFlat space) (defKernelAttrs num_groups group_size) $ do
+  sKernelThread "scan_stage1" (segFlat space) (defKernelAttrs num_tblocks tblock_size) $ do
     constants <- kernelConstants <$> askEnv
-    all_local_arrs <- makeLocalArrays group_size (tvSize num_threads) scans
+    all_local_arrs <- makeLocalArrays tblock_size (tvSize num_threads) scans
 
     -- The variables from scan_op will be used for the carry and such
     -- in the big chunking loop.
@@ -183,8 +183,8 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
     sFor "j" elems_per_thread $ \j -> do
       chunk_offset <-
         dPrimV "chunk_offset" $
-          sExt64 (kernelGroupSize constants) * j
-            + sExt64 (kernelGroupId constants) * elems_per_group
+          sExt64 (kernelBlockSize constants) * j
+            + sExt64 (kernelBlockId constants) * elems_per_group
       flat_idx <-
         dPrimV "flat_idx" $
           tvExp chunk_offset + sExt64 (kernelLocalThreadId constants)
@@ -242,7 +242,7 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
                       copyDWIMFix (paramName p) [] ne []
                   )
 
-              sComment "combine with carry and write to local memory" $
+              sComment "combine with carry and write to shared memory" $
                 compileStms mempty (bodyStms $ lambdaBody scan_op) $
                   forM_ (zip3 rets local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
                     \(t, arr, se) ->
@@ -259,10 +259,10 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
 
               -- We need to avoid parameter name clashes.
               scan_op_renamed <- renameLambda scan_op
-              groupScan
+              blockScan
                 crossesSegment'
                 (sExt64 $ tvExp num_threads)
-                (sExt64 $ kernelGroupSize constants)
+                (sExt64 $ kernelBlockSize constants)
                 scan_op_renamed
                 local_arrs
 
@@ -284,10 +284,10 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
                         []
                         (Var arr)
                         [ if primType $ paramType p
-                            then sExt64 (kernelGroupSize constants) - 1
+                            then sExt64 (kernelBlockSize constants) - 1
                             else
-                              (sExt64 (kernelGroupId constants) + 1)
-                                * sExt64 (kernelGroupSize constants)
+                              (sExt64 (kernelBlockId constants) + 1)
+                                * sExt64 (kernelBlockSize constants)
                                 - 1
                         ]
                   load_neutral =
@@ -301,11 +301,11 @@ scanStage1 (Pat all_pes) num_groups group_size space scans kbody = do
                     Just f ->
                       f
                         ( tvExp chunk_offset
-                            + sExt64 (kernelGroupSize constants)
+                            + sExt64 (kernelBlockSize constants)
                             - 1
                         )
                         ( tvExp chunk_offset
-                            + sExt64 (kernelGroupSize constants)
+                            + sExt64 (kernelBlockSize constants)
                         )
                 should_load_carry <-
                   dPrimVE "should_load_carry" $
@@ -322,17 +322,17 @@ scanStage2 ::
   Pat LetDecMem ->
   TV Int32 ->
   Imp.TExp Int64 ->
-  Count NumGroups SubExp ->
+  Count NumBlocks SubExp ->
   CrossesSegment ->
   SegSpace ->
   [SegBinOp GPUMem] ->
   CallKernelGen ()
-scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSegment space scans = do
+scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_tblocks crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
 
   -- Our group size is the number of groups for the stage 1 kernel.
-  let group_size = Count $ unCount num_groups
+  let tblock_size = Count $ unCount num_tblocks
 
   let crossesSegment' = do
         f <- crossesSegment
@@ -341,9 +341,9 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSe
             ((sExt64 from + 1) * elems_per_group - 1)
             ((sExt64 to + 1) * elems_per_group - 1)
 
-  sKernelThread "scan_stage2" (segFlat space) (defKernelAttrs (Count (intConst Int64 1)) group_size) $ do
+  sKernelThread "scan_stage2" (segFlat space) (defKernelAttrs (Count (intConst Int64 1)) tblock_size) $ do
     constants <- kernelConstants <$> askEnv
-    per_scan_local_arrs <- makeLocalArrays group_size (tvSize stage1_num_threads) scans
+    per_scan_local_arrs <- makeLocalArrays tblock_size (tvSize stage1_num_threads) scans
     let per_scan_rets = map (lambdaReturnType . segBinOpLambda) scans
         per_scan_pes = segBinOpChunks scans all_pes
 
@@ -353,7 +353,7 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSe
     -- Construct segment indices.
     zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ tvExp flat_idx
 
-    forM_ (zip4 scans per_scan_local_arrs per_scan_rets per_scan_pes) $
+    forM_ (L.zip4 scans per_scan_local_arrs per_scan_rets per_scan_pes) $
       \(SegBinOp _ scan_op nes vec_shape, local_arrs, rets, pes) ->
         sLoopNest vec_shape $ \vec_is -> do
           let glob_is = map Imp.le64 gtids ++ vec_is
@@ -378,10 +378,10 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSe
 
           barrier
 
-          groupScan
+          blockScan
             crossesSegment'
             (sExt64 $ tvExp stage1_num_threads)
-            (sExt64 $ kernelGroupSize constants)
+            (sExt64 $ kernelBlockSize constants)
             scan_op
             local_arrs
 
@@ -396,30 +396,30 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_groups crossesSe
 
 scanStage3 ::
   Pat LetDecMem ->
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
+  Count NumBlocks SubExp ->
+  Count BlockSize SubExp ->
   Imp.TExp Int64 ->
   CrossesSegment ->
   SegSpace ->
   [SegBinOp GPUMem] ->
   CallKernelGen ()
-scanStage3 (Pat all_pes) num_groups group_size elems_per_group crossesSegment space scans = do
-  let group_size' = fmap pe64 group_size
+scanStage3 (Pat all_pes) num_tblocks tblock_size elems_per_group crossesSegment space scans = do
+  let tblock_size' = fmap pe64 tblock_size
       (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
   required_groups <-
     dPrimVE "required_groups" $
       sExt32 $
-        product dims' `divUp` sExt64 (unCount group_size')
+        product dims' `divUp` sExt64 (unCount tblock_size')
 
-  sKernelThread "scan_stage3" (segFlat space) (defKernelAttrs num_groups group_size) $
-    virtualiseGroups SegVirt required_groups $ \virt_group_id -> do
+  sKernelThread "scan_stage3" (segFlat space) (defKernelAttrs num_tblocks tblock_size) $
+    virtualiseBlocks SegVirt required_groups $ \virt_tblock_id -> do
       constants <- kernelConstants <$> askEnv
 
       -- Compute our logical index.
       flat_idx <-
         dPrimVE "flat_idx" $
-          sExt64 virt_group_id * sExt64 (unCount group_size')
+          sExt64 virt_tblock_id * sExt64 (unCount tblock_size')
             + sExt64 (kernelLocalThreadId constants)
       zipWithM_ dPrimV_ gtids $ unflattenIndex dims' flat_idx
 
@@ -494,20 +494,20 @@ compileSegScan pat lvl space scans kbody = do
   -- Since stage 2 involves a group size equal to the number of groups
   -- used for stage 1, we have to cap this number to the maximum group
   -- size.
-  stage1_max_num_groups <- dPrim "stage1_max_num_groups" int64
-  sOp $ Imp.GetSizeMax (tvVar stage1_max_num_groups) SizeGroup
+  stage1_max_num_tblocks <- dPrim "stage1_max_num_tblocks"
+  sOp $ Imp.GetSizeMax (tvVar stage1_max_num_tblocks) SizeThreadBlock
 
-  stage1_num_groups <-
+  stage1_num_tblocks <-
     fmap (Imp.Count . tvSize) $
-      dPrimV "stage1_num_groups" $
-        sMin64 (tvExp stage1_max_num_groups) $
-          pe64 . Imp.unCount . kAttrNumGroups $
+      dPrimV "stage1_num_tblocks" $
+        sMin64 (tvExp stage1_max_num_tblocks) $
+          pe64 . Imp.unCount . kAttrNumBlocks $
             attrs
 
   (stage1_num_threads, elems_per_group, crossesSegment) <-
-    scanStage1 pat stage1_num_groups (kAttrGroupSize attrs) space scans kbody
+    scanStage1 pat stage1_num_tblocks (kAttrBlockSize attrs) space scans kbody
 
   emit $ Imp.DebugPrint "elems_per_group" $ Just $ untyped elems_per_group
 
-  scanStage2 pat stage1_num_threads elems_per_group stage1_num_groups crossesSegment space scans
-  scanStage3 pat (kAttrNumGroups attrs) (kAttrGroupSize attrs) elems_per_group crossesSegment space scans
+  scanStage2 pat stage1_num_threads elems_per_group stage1_num_tblocks crossesSegment space scans
+  scanStage3 pat (kAttrNumBlocks attrs) (kAttrBlockSize attrs) elems_per_group crossesSegment space scans

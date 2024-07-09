@@ -13,6 +13,8 @@ typedef ushort uint16_t;
 typedef uint uint32_t;
 typedef ulong uint64_t;
 
+#define get_tblock_id(d) get_group_id(d)
+#define get_num_tblocks(d) get_num_groups(d)
 
 // Clang-based OpenCL implementations need this for 'static' to work.
 #ifdef cl_clang_storage_class_specifiers
@@ -47,7 +49,7 @@ static inline void barrier_local() {
 }
 
 // Important for this to be int64_t so it has proper alignment for any type.
-#define LOCAL_MEM_PARAM __local uint64_t* local_mem,
+#define SHARED_MEM_PARAM __local uint64_t* shared_mem,
 #define FUTHARK_KERNEL __kernel
 #define FUTHARK_KERNEL_SIZED(a,b,c) __attribute__((reqd_work_group_size(a, b, c))) __kernel
 

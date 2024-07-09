@@ -8,9 +8,11 @@ import Futhark.IR.Mem.IxFunTests qualified
 import Futhark.IR.PropTests qualified
 import Futhark.IR.Syntax.CoreTests qualified
 import Futhark.Internalise.TypesValuesTests qualified
+import Futhark.Optimise.ArrayLayoutTests qualified
 import Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests qualified
 import Futhark.Pkg.SolveTests qualified
 import Language.Futhark.PrimitiveTests qualified
+import Language.Futhark.SemanticTests qualified
 import Language.Futhark.SyntaxTests qualified
 import Language.Futhark.TypeCheckerTests qualified
 import Test.Tasty
@@ -31,7 +33,9 @@ allTests =
       Language.Futhark.PrimitiveTests.tests,
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests.tests,
       Futhark.Analysis.AlgSimplifyTests.tests,
-      Language.Futhark.TypeCheckerTests.tests
+      Language.Futhark.TypeCheckerTests.tests,
+      Language.Futhark.SemanticTests.tests,
+      Futhark.Optimise.ArrayLayoutTests.tests
     ]
 
 main :: IO ()

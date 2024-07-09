@@ -9,14 +9,323 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* The various C API functions that accept strings now perform a copy,
-  meaning the caller does not have to keep the strings alive.
+* New prelude function: `rep`, an implicit form of `replicate`.
+
+* Improved handling of large monomorphic single-dimensional array
+  literals (#2160).
 
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* `futhark repl` no longer asks for confirmation on EOF.
+
+* Obscure oversight related to abstract size-lifted types (#2120).
+
+* Accidential exponential-time algorithm in layout optimisation for
+  multicore backends (#2151).
+
+## [0.25.17]
+
+* Faster device-to-device copies on CUDA.
+
+* "More correctly" detect L2 cache size for OpenCL backend on AMD GPUs.
+
+### Fixed
+
+* Handling of `..` in `import` paths (again).
+
+* Detection of impossible loop parameter sizes (#2144).
+
+* Rare case where GPU histograms would use slightly too much shared
+  memory and fail at run-time.
+
+* Rare crash in layout optimisation.
+
+## [0.25.16]
+
+### Added
+
+* ``futhark test``: `--no-terminal` now prints status messages even when
+  no failures occur.
+
+* ``futhark test`` no longer runs ``structure`` tests by default. Pass
+  ``-s`` to run them.
+
+* Rewritten array layout optimisation pass by Bjarke Pedersen and
+  Oscar Nelin. Minor speedup for some programs, but is more
+  importantly a principled foundation for further improvements.
+
+* Better error message when exceeding shared memory limits.
+
+* Better dead code removal for the GPU representation (minor impact on
+  some programs).
+
+### Fixed
+
+* Bugs related to deduplication of array payloads in sum types.
+  Unfortunately, fixed by just not deduplicating in those cases.
+
+* Frontend bug related to turning size expressions into variables
+  (#2136).
+
+* Another exotic monomorphisation bug.
+
+## [0.25.15]
+
+### Added
+
+* Incremental Flattening generates fewer redundant code versions.
+
+* Better simplification of slices. (#2125)
+
+### Fixed
+
+* Ignore type suffixes when unifying expressions (#2124).
+
+* In the C API, opaque types that correspond to an array of an opaque
+  type are now once again named `futhark_opaque_arr_...`.
+
+* `cuda` backend did not correctly profile CPU-to-GPU scalar copies.
+
+## [0.25.14]
+
+### Added
+
+* The prelude definition of `filter` is now more memory efficient,
+  particularly when the output is much smaller than the input. (#2109)
+
+* New configuration for GPU backends:
+  `futhark_context_config_set_unified_memory`, also available on
+  executables as ``--unified-memory``.
+
+* The "raw" API functions now do something potentially useful, but are
+  still considered experimental.
+
+* `futhark --version` now reports GHC version.
+
+### Fixed
+
+* Incorrect type checking of let-bound sizes occurring multiple times
+  in pattern. (#2103).
+
+* A concatenation simplification would sometimes mess up sizes.
+  (#2104)
+
+* Bug related to monomorphisation of polymorphic local functions
+  (#2106).
+
+* Rare crash in short circuiting.
+
+* Referencing an unbound type parameter could crash the type checker
+  (#2113, #2114).
+
+* Futhark now works with GHC 9.8 (#2105).
+
+## [0.25.13]
+
+### Added
+
+* Incremental flattening of `map`-`scan` compositions with nested
+  parallelism (similar to the logic for `map`-`reduce` compositions
+  that we have had for years).
+
+* `futhark script`, for running FutharkScript expressions from the
+  command line.
+
+* `futhark repl` now prints out a message when it ignores a breakpoint
+  during initialisation. (#2098)
+
+### Fixed
+
+* Flattening of `scatter` with multi-dimensional elements (#2089).
+
+* Some instances of not-actually-irregular allocations were mistakenly
+  interpreted as irregular. Fixing this was a dividend of the memory
+  representation simplifications of 0.25.12.
+
+* Obscure issue related to expansion of shared memory allocations (#2092).
+
+* A crash in alias checking under some rare circumstances (#2096).
+
+* Mishandling of existential sizes for top level constants. (#2099)
+
+* Compiler crash when generating code for copying nothing at all. (#2100)
+
+## [0.25.12]
+
+### Added
+
+* `f16.copysign`, `f32.copysign`, `f64.copysign`.
+
+* Trailing commas are now allowed for all syntactical elements that
+  involve comma-separation. (#2068)
+
+* The C API now allows destruction and construction of sum types (with
+  some caveats). (#2074)
+
+* An overall reduction in memory copies, through simplifying the
+  internal representation.
+
+### Fixed
+
+* C API would define distinct entry point types for Futhark types that
+  differed only in naming of sizes (#2080).
+
+* `==` and `!=` on sum types with array payloads. Constructing them is
+  now a bit slower, though. (#2081)
+
+* Somewhat obscure simplification error caused by neglecting to update
+  metadata when removing dead scatter outputs.
+
+* Compiler crash due to the type checker forgetting to respect the
+  explicitly ascribed non-consuming diet of loop parameters (#2067).
+
+* Size inference did incomplete level/scope checking, which could
+  result in circular sizes, which usually manifested as the type
+  checker going into an infinite loop (#2073).
+
+* The OpenCL backend now more gracefully handles lack of platform.
+
+## [0.25.11]
+
+### Added
+
+* New prelude function: `manifest`.  For doing subtle things to memory.
+
+* The GPU backends now handle up to 20 operators in a single fused
+  reduction.
+
+* CUDA/HIP terminology for GPU concepts (e.g. "thread block") is now
+  used in all public interfaces. The OpenCL names are still supported
+  for backwards compatibility.
+
+* More fusion across array slicing.
+
+### Fixed
+
+* Compatibility with CUDA versions prior than 12.
+
+## [0.25.10]
+
+### Added
+
+* Faster non-commutative reductions in the GPU backends. Work by
+  Anders Holst and Christian Påbøl Jacobsen.
+
+### Fixed
+
+* Interpreter crash for certain complicated size expressions involving
+  internal bindings (#2053).
+
+* Incorrect type checking of `let` binding with explicit size
+  quantification, where size appears in type of body (#2048).
+
+* GPU code generation for non-commutative non-segmented reductions
+  with array operands (#2051).
+
+* Histogram with non-vectorised reduction operators (#2056). (But it
+  is probably not a good idea to write such programs.)
+
+* Futhark's LSP server should work better with Eglot.
+
+* Incorrect copy removal inside histograms could cause compiler error
+  (#2058).
+
+* CUDA backend now correctly queries for available shared memory,
+  which affects performance (hopefully positively).
+
+* `futhark literate` now switches to the directory containing the
+  `.fut` file before executing its contents. This fixes accessing
+  files through relative paths.
+
+## [0.25.9]
+
+### Added
+
+* The `cuda` and `hip` backends now generate faster code for `scan`s
+  that have been fused with `map`s that internally produce arrays.
+  Work by Anders Holst and Christian Påbøl Jacobsen.
+
+* `f16.ldexp`, `f32.ldexp`, `f64.ldexp`, corresponding to the
+  functions in the C math library.
+
+### Fixed
+
+* Incorrect data dependency information for `scatter` and `vjp` could
+  cause invalid simplification.
+
+* Barrier divergence in certain complicated kernels that contain both
+  bounds checks and intragroup scans.
+
+## [0.25.8]
+
+### Added
+
+* FutharkScript now has a `$loadbytes` builtin function for reading
+  arbitrary bytes into Futhark programs.
+
+* `futhark profile` can now process reports produced by the C API
+  function `futhark_context_report()`.
+
+* `futhark profile` now also produces a timeline of events.
+
+### Fixed
+
+* `futhark literate` no longer fails if the final line is a directive
+  without a trailing newline.
+
+* Parser now allows arbitrary patterns in function parameters and
+  `let` bindings, although the type checker will reject any that are
+  refutable (#2017).
+
+* Avoid generating invalid code in cases where deduplicated sum types
+  are exposed through entry points (#1960).
+
+* A bug in data dependency analysis for histogram operations would
+  mistakenly classify some loop parameters as redundant, leaving to
+  code being removed.
+
+## [0.25.7]
+
+### Added
+
+* `futhark autotune` now supports `hip` backend.
+
+* Better parallelisation of `scatter` when the target is
+  multidimensional (#2035).
+
+### Fixed
+
+* Very large `iota`s now work.
+
+* Lambda lifting in `while` conditions (#2038).
+
+* Size expressions in local function parameters had an interesting
+  interaction with defunctionalisation (#2040).
+
+* The `store` command in server executables did not properly
+  synchronise when storing opaque values, which would lead to
+  use-after-free errors.
+
+## [0.25.6]
+
+### Added
+
+* The various C API functions that accept strings now perform a copy,
+  meaning the caller does not have to keep the strings alive.
+
+* Slightly better lexer error messages.
+
+* Fusion across slicing is now possible in some cases.
+
+* New tool: `futhark profile`.
+
+### Fixed
+
+* Inefficient locking for certain segmented histograms (#2024).
 
 ## [0.25.5]
 

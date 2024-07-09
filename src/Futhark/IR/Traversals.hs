@@ -89,6 +89,8 @@ mapExpM ::
   m (Exp trep)
 mapExpM tv (BasicOp (SubExp se)) =
   BasicOp <$> (SubExp <$> mapOnSubExp tv se)
+mapExpM _ (BasicOp (ArrayVal vs t)) =
+  pure $ BasicOp $ ArrayVal vs t
 mapExpM tv (BasicOp (ArrayLit els rowt)) =
   BasicOp
     <$> ( ArrayLit
@@ -166,9 +168,9 @@ mapExpM tv (BasicOp (Assert e msg loc)) =
   BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
 mapExpM tv (BasicOp (Opaque op e)) =
   BasicOp <$> (Opaque op <$> mapOnSubExp tv e)
-mapExpM tv (BasicOp (UpdateAcc v is ses)) =
+mapExpM tv (BasicOp (UpdateAcc safety v is ses)) =
   BasicOp
-    <$> ( UpdateAcc
+    <$> ( UpdateAcc safety
             <$> mapOnVName tv v
             <*> mapM (mapOnSubExp tv) is
             <*> mapM (mapOnSubExp tv) ses
@@ -279,6 +281,8 @@ walkOnLambda tv (Lambda params ret body) = do
 walkExpM :: (Monad m) => Walker rep m -> Exp rep -> m ()
 walkExpM tv (BasicOp (SubExp se)) =
   walkOnSubExp tv se
+walkExpM _ (BasicOp ArrayVal {}) =
+  pure ()
 walkExpM tv (BasicOp (ArrayLit els rowt)) =
   mapM_ (walkOnSubExp tv) els >> walkOnType tv rowt
 walkExpM tv (BasicOp (BinOp _ x y)) =
@@ -327,7 +331,7 @@ walkExpM tv (BasicOp (Assert e msg _)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
 walkExpM tv (BasicOp (Opaque _ e)) =
   walkOnSubExp tv e
-walkExpM tv (BasicOp (UpdateAcc v is ses)) = do
+walkExpM tv (BasicOp (UpdateAcc _ v is ses)) = do
   walkOnVName tv v
   mapM_ (walkOnSubExp tv) is
   mapM_ (walkOnSubExp tv) ses

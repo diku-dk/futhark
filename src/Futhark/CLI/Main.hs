@@ -26,11 +26,13 @@ import Futhark.CLI.MulticoreISPC qualified as MulticoreISPC
 import Futhark.CLI.MulticoreWASM qualified as MulticoreWASM
 import Futhark.CLI.OpenCL qualified as OpenCL
 import Futhark.CLI.Pkg qualified as Pkg
+import Futhark.CLI.Profile qualified as Profile
 import Futhark.CLI.PyOpenCL qualified as PyOpenCL
 import Futhark.CLI.Python qualified as Python
 import Futhark.CLI.Query qualified as Query
 import Futhark.CLI.REPL qualified as REPL
 import Futhark.CLI.Run qualified as Run
+import Futhark.CLI.Script qualified as Script
 import Futhark.CLI.Test qualified as Test
 import Futhark.CLI.WASM qualified as WASM
 import Futhark.Error
@@ -78,10 +80,12 @@ commands =
       ("defs", (Defs.main, "Show location and name of all definitions.")),
       ("query", (Query.main, "Query semantic information about program.")),
       ("literate", (Literate.main, "Process a literate Futhark program.")),
+      ("script", (Script.main, "Run FutharkScript expressions.")),
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
       ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
-      ("benchcmp", (Benchcmp.main, "Compare two benchmark results."))
+      ("benchcmp", (Benchcmp.main, "Compare two benchmark results.")),
+      ("profile", (Profile.main, "Analyse profiling data."))
     ]
 
 msg :: String

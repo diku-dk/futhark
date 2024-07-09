@@ -48,10 +48,9 @@ sumTypeTests =
               ]
           )
           @?= ( [Pure "i64"],
-                M.fromList
-                  [ ("foo", (1, [0])),
-                    ("bar", (0, [0]))
-                  ]
+                [ ("bar", [0]),
+                  ("foo", [0])
+                ]
               ),
       testCase "Dedup of array" $
         internaliseConstructors
@@ -60,11 +59,10 @@ sumTypeTests =
                 ("bar", [Pure "[?0]i64"])
               ]
           )
-          @?= ( [Pure "[?0]i64"],
-                M.fromList
-                  [ ("foo", (1, [0])),
-                    ("bar", (0, [0]))
-                  ]
+          @?= ( [Pure "[?0]i64", Pure "[?0]i64"],
+                [ ("bar", [0]),
+                  ("foo", [1])
+                ]
               ),
       testCase
         "Dedup of array of tuple"
@@ -75,10 +73,9 @@ sumTypeTests =
               ]
           )
           @?= ( [Pure "[?0]i64", Free [Pure "[?0]i64", Pure "[?0]i64"]],
-                M.fromList
-                  [ ("foo", (1, [1, 2])),
-                    ("bar", (0, [0]))
-                  ]
+                [ ("bar", [0]),
+                  ("foo", [1, 2])
+                ]
               )
     ]
 

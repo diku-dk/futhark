@@ -680,7 +680,9 @@ matchBlocker cond (MatchDec _ ifsort) = do
                  && loopInvariantStm vtable stm
                  -- Avoid hoisting out something that might change the
                  -- asymptotics of the program.
-                 && all primType (patTypes (stmPat stm))
+                 && ( all primType (patTypes (stmPat stm))
+                        || (ifsort == MatchEquiv && isManifest (stmExp stm))
+                    )
              )
           || ( ifsort /= MatchFallback
                  && any (`UT.isSize` usage) (patNames (stmPat stm))
@@ -703,6 +705,9 @@ matchBlocker cond (MatchDec _ ifsort) = do
       isNotHoistableBnd _ _ _ =
         -- Hoist aggressively out of versioning branches.
         ifsort /= MatchEquiv
+
+      isManifest (BasicOp Manifest {}) = True
+      isManifest _ = False
 
       block =
         branch_blocker
@@ -954,10 +959,12 @@ type SimplifiableRep rep =
     TraverseOpStms (Wise rep),
     CanBeWise (OpC rep),
     ST.IndexOp (Op (Wise rep)),
-    AliasedOp (Op (Wise rep)),
+    IsOp (OpC rep),
+    ASTConstraints (OpC rep (Wise rep)),
+    AliasedOp (OpC (Wise rep)),
     RephraseOp (OpC rep),
     BuilderOps (Wise rep),
-    IsOp (Op rep)
+    IsOp (OpC rep)
   )
 
 class Simplifiable e where

@@ -29,13 +29,15 @@ import NeatInterpolation (untrimming)
 
 mkBoilerplate ::
   T.Text ->
+  [(Name, KernelConstExp)] ->
   M.Map Name KernelSafety ->
   [PrimType] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-mkBoilerplate hip_program kernels types failures = do
+mkBoilerplate hip_program macros kernels types failures = do
   generateGPUBoilerplate
     hip_program
+    macros
     backendsHipH
     (M.keys kernels)
     types
@@ -45,11 +47,6 @@ mkBoilerplate hip_program kernels types failures = do
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_device(struct futhark_context_config *cfg, const char* s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|const char* futhark_context_config_get_program(struct futhark_context_config *cfg);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_program(struct futhark_context_config *cfg, const char* s);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
 
 cliOptions :: [Option]
 cliOptions =
@@ -82,15 +79,8 @@ cliOptions =
            { optionLongName = "build-option",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "OPT",
-             optionDescription = "Add an additional build option to the string passed to NVRTC.",
+             optionDescription = "Add an additional build option to the string passed to HIPRTC.",
              optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
-           },
-         Option
-           { optionLongName = "profile",
-             optionShortName = Just 'P',
-             optionArgument = NoArgument,
-             optionDescription = "Gather profiling data while executing and print out a summary at the end.",
-             optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
            }
        ]
 
@@ -102,7 +92,7 @@ hipMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' me
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
-    Program hip_code hip_prelude kernels types params failures prog'
+    Program hip_code hip_prelude macros kernels types params failures prog'
     ) <-
     ImpGen.compileProg prog
   (ws,)
@@ -111,7 +101,7 @@ compileProg version prog = do
       version
       params
       operations
-      (mkBoilerplate (hip_prelude <> hip_code) kernels types failures)
+      (mkBoilerplate (hip_prelude <> hip_code) macros kernels types failures)
       hip_includes
       (Space "device", [Space "device", DefaultSpace])
       cliOptions

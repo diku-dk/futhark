@@ -1,5 +1,14 @@
 -- | @futhark literate@
-module Futhark.CLI.Literate (main) where
+--
+-- Also contains various utility definitions used by "Futhark.CLI.Script".
+module Futhark.CLI.Literate
+  ( main,
+    Options (..),
+    initialOptions,
+    scriptCommandLineOptions,
+    prepareServer,
+  )
+where
 
 import Codec.BMP qualified as BMP
 import Control.Monad
@@ -10,9 +19,9 @@ import Data.Bits
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
-import Data.Functor
+import Data.Functor (($>))
 import Data.Int (Int64)
-import Data.List (foldl', transpose)
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -45,7 +54,9 @@ import System.Directory
   ( copyFile,
     createDirectoryIfMissing,
     doesFileExist,
+    getCurrentDirectory,
     removePathForcibly,
+    setCurrentDirectory,
   )
 import System.Environment (getExecutablePath)
 import System.Exit
@@ -329,7 +340,7 @@ atStartOfLine = do
   when (col /= pos1) empty
 
 afterExp :: Parser ()
-afterExp = choice [atStartOfLine, void eol]
+afterExp = choice [atStartOfLine, choice [void eol, eof]]
 
 withParsedSource :: Parser a -> (a -> T.Text -> b) -> Parser b
 withParsedSource p f = do
@@ -369,12 +380,12 @@ parseBlock =
             $> DirectiveImg
             <*> parseExp postlexeme
             <*> parseImgParams
-            <* eol,
+            <* choice [void eol, eof],
           directiveName "plot2d"
             $> DirectivePlot
             <*> parseExp postlexeme
             <*> parsePlotParams
-            <* eol,
+            <* choice [void eol, eof],
           directiveName "gnuplot"
             $> DirectiveGnuplot
             <*> parseExp postlexeme
@@ -388,7 +399,7 @@ parseBlock =
             $> DirectiveAudio
             <*> parseExp postlexeme
             <*> parseAudioParams
-            <* eol
+            <* choice [void eol, eof]
         ]
     directiveName s = try $ token (":" <> s)
 
@@ -526,7 +537,7 @@ system prog options input = do
     prog' = "'" <> T.pack prog <> "'"
 
 formatDataForGnuplot :: [Value] -> T.Text
-formatDataForGnuplot = T.unlines . map line . transpose . map valueElems
+formatDataForGnuplot = T.unlines . map line . L.transpose . map valueElems
   where
     line = T.unwords . map prettyText
 
@@ -649,6 +660,8 @@ literateBuiltin "loadaudio" vs =
 literateBuiltin f vs =
   scriptBuiltin "." f vs
 
+-- | Some of these only make sense for @futhark literate@, but enough
+-- are also sensible for @futhark script@ that we can share them.
 data Options = Options
   { scriptBackend :: String,
     scriptFuthark :: Maybe FilePath,
@@ -660,6 +673,7 @@ data Options = Options
     scriptStopOnError :: Bool
   }
 
+-- | The configuration before any user-provided options are processed.
 initialOptions :: Options
 initialOptions =
   Options
@@ -675,18 +689,15 @@ initialOptions =
 
 data Env = Env
   { envImgDir :: FilePath,
-    -- | Image dir relative to program.
-    envRelImgDir :: FilePath,
     envOpts :: Options,
     envServer :: ScriptServer,
     envHash :: T.Text
   }
 
-newFileWorker :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM (FilePath, FilePath)
-newFileWorker env (fname_desired, template) m = do
+newFile :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM FilePath
+newFile env (fname_desired, template) m = do
   let fname_base = fromMaybe (T.unpack (envHash env) <> "-" <> template) fname_desired
       fname = envImgDir env </> fname_base
-      fname_rel = envRelImgDir env </> fname_base
   exists <- liftIO $ doesFileExist fname
   liftIO $ createDirectoryIfMissing True $ envImgDir env
   when (exists && scriptVerbose (envOpts env) > 0) $
@@ -698,14 +709,11 @@ newFileWorker env (fname_desired, template) m = do
         "Generating new file: " <> T.pack fname
     m fname
   modify $ \s -> s {stateFiles = S.insert fname $ stateFiles s}
-  pure (fname, fname_rel)
-
-newFile :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM FilePath
-newFile env f m = snd <$> newFileWorker env f m
+  pure fname
 
 newFileContents :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM T.Text
 newFileContents env f m =
-  liftIO . T.readFile . fst =<< newFileWorker env f m
+  liftIO . T.readFile =<< newFile env f m
 
 processDirective :: Env -> Directive -> ScriptM T.Text
 processDirective env (DirectiveBrief d) =
@@ -808,7 +816,7 @@ processDirective env (DirectiveGnuplot e script) = do
       void $ system "gnuplot" [] script'
 --
 processDirective env (DirectiveVideo e params) = do
-  when (format `notElem` ["webm", "gif"]) $
+  unless (format `elem` ["webm", "gif"]) $
     throwError $
       "Unknown video format: " <> format
 
@@ -1063,10 +1071,11 @@ processScript env script = do
   (failures, outputs, files) <-
     unzip3 <$> mapM (processBlock env) script
   cleanupImgDir env $ mconcat files
-  pure (foldl' min Success failures, T.intercalate "\n" outputs)
+  pure (L.foldl' min Success failures, T.intercalate "\n" outputs)
 
-commandLineOptions :: [FunOptDescr Options]
-commandLineOptions =
+-- | Common command line options that transform 'Options'.
+scriptCommandLineOptions :: [FunOptDescr Options]
+scriptCommandLineOptions =
   [ Option
       []
       ["backend"]
@@ -1114,18 +1123,65 @@ commandLineOptions =
       "v"
       ["verbose"]
       (NoArg $ Right $ \config -> config {scriptVerbose = scriptVerbose config + 1})
-      "Enable logging. Pass multiple times for more.",
-    Option
-      "o"
-      ["output"]
-      (ReqArg (\opt -> Right $ \config -> config {scriptOutput = Just opt}) "FILE")
-      "Override output file. Image directory is set to basename appended with -img/.",
-    Option
-      []
-      ["stop-on-error"]
-      (NoArg $ Right $ \config -> config {scriptStopOnError = True})
-      "Stop and do not produce output file if any directive fails."
+      "Enable logging. Pass multiple times for more."
   ]
+
+commandLineOptions :: [FunOptDescr Options]
+commandLineOptions =
+  scriptCommandLineOptions
+    <> [ Option
+           "o"
+           ["output"]
+           (ReqArg (\opt -> Right $ \config -> config {scriptOutput = Just opt}) "FILE")
+           "Override output file. Image directory is set to basename appended with -img/.",
+         Option
+           []
+           ["stop-on-error"]
+           (NoArg $ Right $ \config -> config {scriptStopOnError = True})
+           "Stop and do not produce output file if any directive fails."
+       ]
+
+-- | Start up (and eventually shut down) a Futhark server
+-- corresponding to the provided program. If the program has a @.fut@
+-- extension, it will be compiled automatically.
+prepareServer :: FilePath -> Options -> (ScriptServer -> IO a) -> IO a
+prepareServer prog opts f = do
+  futhark <- maybe getExecutablePath pure $ scriptFuthark opts
+
+  let is_fut = takeExtension prog == ".fut"
+
+  unless (scriptSkipCompilation opts || not is_fut) $ do
+    let compile_options = "--server" : scriptCompilerOptions opts
+    when (scriptVerbose opts > 0) $
+      T.hPutStrLn stderr $
+        "Compiling " <> T.pack prog <> "..."
+    when (scriptVerbose opts > 1) $
+      T.hPutStrLn stderr $
+        T.pack $
+          unwords compile_options
+
+    let onError err = do
+          mapM_ (T.hPutStrLn stderr) err
+          exitFailure
+
+    void $
+      either onError pure <=< runExceptT $
+        compileProgram compile_options (FutharkExe futhark) (scriptBackend opts) prog
+
+  let run_options = scriptExtraOptions opts
+      onLine "call" l = T.putStrLn l
+      onLine "startup" l = T.putStrLn l
+      onLine _ _ = pure ()
+      prog' = if is_fut then dropExtension prog else prog
+      cfg =
+        (futharkServerCfg ("." </> prog') run_options)
+          { cfgOnLine =
+              if scriptVerbose opts > 0
+                then onLine
+                else const . const $ pure ()
+          }
+
+  withScriptServer cfg f
 
 -- | Run @futhark literate@.
 main :: String -> [String] -> IO ()
@@ -1133,61 +1189,39 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
   case args of
     [prog] -> Just $ do
       futhark <- maybe getExecutablePath pure $ scriptFuthark opts
-
-      script <- parseProgFile prog
-
-      unless (scriptSkipCompilation opts) $ do
-        let entryOpt v = "--entry-point=" ++ T.unpack v
-            compile_options =
-              "--server"
-                : map entryOpt (S.toList (varsInScripts script))
-                ++ scriptCompilerOptions opts
-        when (scriptVerbose opts > 0) $
-          T.hPutStrLn stderr $
-            "Compiling " <> T.pack prog <> "..."
-        when (scriptVerbose opts > 1) $
-          T.hPutStrLn stderr $
-            T.pack $
-              unwords compile_options
-
-        let onError err = do
-              mapM_ (T.hPutStrLn stderr) err
-              exitFailure
-        void $
-          either onError pure <=< runExceptT $
-            compileProgram compile_options (FutharkExe futhark) (scriptBackend opts) prog
-
       let onError err = do
             T.hPutStrLn stderr err
             exitFailure
       proghash <-
         either onError pure <=< runExceptT $
           system futhark ["hash", prog] mempty
+      script <- parseProgFile prog
 
-      let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
-          imgdir_rel = dropExtension (takeFileName mdfile) <> "-img"
-          imgdir = takeDirectory mdfile </> imgdir_rel
-          run_options = scriptExtraOptions opts
-          onLine "call" l = T.putStrLn l
-          onLine _ _ = pure ()
-          cfg =
-            (futharkServerCfg ("." </> dropExtension prog) run_options)
-              { cfgOnLine =
-                  if scriptVerbose opts > 0
-                    then onLine
-                    else const . const $ pure ()
+      orig_dir <- getCurrentDirectory
+      let entryOpt v = "--entry-point=" ++ T.unpack v
+          opts' =
+            opts
+              { scriptCompilerOptions =
+                  map entryOpt (S.toList (varsInScripts script))
+                    <> scriptCompilerOptions opts
               }
-
-      withScriptServer cfg $ \server -> do
-        let env =
+      prepareServer prog opts' $ \server -> do
+        let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
+            prog_dir = takeDirectory prog
+            imgdir = dropExtension (takeFileName mdfile) <> "-img"
+            env =
               Env
                 { envServer = server,
                   envOpts = opts,
                   envHash = proghash,
-                  envImgDir = imgdir,
-                  envRelImgDir = imgdir_rel
+                  envImgDir = imgdir
                 }
+
+        when (scriptVerbose opts > 0) $ do
+          T.hPutStrLn stderr $ "Executing from " <> T.pack prog_dir
+        setCurrentDirectory prog_dir
+
         (failure, md) <- processScript env script
-        T.writeFile mdfile md
+        T.writeFile (orig_dir </> mdfile) md
         when (failure == Failure) exitFailure
     _ -> Nothing

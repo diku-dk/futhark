@@ -10,6 +10,7 @@ import Data.Maybe
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Actions
+import Futhark.Analysis.AccessPattern (Analyse)
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI hiding (compilerMain)
@@ -24,18 +25,20 @@ import Futhark.IR.SOACS qualified as SOACS
 import Futhark.IR.Seq qualified as Seq
 import Futhark.IR.SeqMem qualified as SeqMem
 import Futhark.IR.TypeCheck (Checkable, checkProg)
+import Futhark.Internalise.ApplyTypeAbbrs as ApplyTypeAbbrs
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.FullNormalise as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.ReplaceRecords as ReplaceRecords
+import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
+import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
-import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
 import Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs)
@@ -51,7 +54,6 @@ import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
-import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
@@ -159,7 +161,8 @@ data UntypedAction
   | PolyAction
       ( forall (rep :: Data.Kind.Type).
         ( AliasableRep rep,
-          (OpMetrics (Op rep))
+          (OpMetrics (Op rep)),
+          Analyse rep
         ) =>
         Action rep
       )
@@ -204,41 +207,48 @@ kernelsMemProg _ (GPUMem prog) =
   pure prog
 kernelsMemProg name rep =
   externalErrorS $
-    "Pass "
-      ++ name
-      ++ " expects GPUMem representation, but got "
-      ++ representation rep
+    "Pass '"
+      <> name
+      <> "' expects GPUMem representation, but got "
+      <> representation rep
 
 soacsProg :: String -> UntypedPassState -> FutharkM (Prog SOACS.SOACS)
 soacsProg _ (SOACS prog) =
   pure prog
 soacsProg name rep =
   externalErrorS $
-    "Pass "
-      ++ name
-      ++ " expects SOACS representation, but got "
-      ++ representation rep
+    "Pass '"
+      <> name
+      <> "' expects SOACS representation, but got "
+      <> representation rep
 
 kernelsProg :: String -> UntypedPassState -> FutharkM (Prog GPU.GPU)
 kernelsProg _ (GPU prog) =
   pure prog
 kernelsProg name rep =
   externalErrorS $
-    "Pass " ++ name ++ " expects GPU representation, but got " ++ representation rep
+    "Pass '" <> name <> "' expects GPU representation, but got " <> representation rep
 
 seqMemProg :: String -> UntypedPassState -> FutharkM (Prog SeqMem.SeqMem)
 seqMemProg _ (SeqMem prog) =
   pure prog
 seqMemProg name rep =
   externalErrorS $
-    "Pass " ++ name ++ " expects SeqMem representation, but got " ++ representation rep
+    "Pass '" <> name <> "' expects SeqMem representation, but got " <> representation rep
+
+mcProg :: String -> UntypedPassState -> FutharkM (Prog MC.MC)
+mcProg _ (MC prog) =
+  pure prog
+mcProg name rep =
+  externalErrorS $
+    "Pass " ++ name ++ " expects MC representation, but got " ++ representation rep
 
 mcMemProg :: String -> UntypedPassState -> FutharkM (Prog MCMem.MCMem)
 mcMemProg _ (MCMem prog) =
   pure prog
 mcMemProg name rep =
   externalErrorS $
-    "Pass " ++ name ++ " expects MCMem representation, but got " ++ representation rep
+    "Pass '" <> name <> "' expects MCMem representation, but got " <> representation rep
 
 typedPassOption ::
   (Checkable torep) =>
@@ -266,6 +276,13 @@ kernelsPassOption ::
   FutharkOption
 kernelsPassOption =
   typedPassOption kernelsProg GPU
+
+mcPassOption ::
+  Pass MC.MC MC.MC ->
+  String ->
+  FutharkOption
+mcPassOption =
+  typedPassOption mcProg MC
 
 seqMemPassOption ::
   Pass SeqMem.SeqMem SeqMem.SeqMem ->
@@ -325,27 +342,10 @@ allocateOption short =
         <$> runPipeline (onePass MC.explicitAllocations) config prog
     perform s _ =
       externalErrorS $
-        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+        "Pass '" <> passDescription pass <> "' cannot operate on " <> representation s
 
     long = [passLongOption pass]
     pass = Seq.explicitAllocations
-
-iplOption :: String -> FutharkOption
-iplOption short =
-  passOption (passDescription pass) (UntypedPass perform) short long
-  where
-    perform (GPU prog) config =
-      GPU
-        <$> runPipeline (onePass inPlaceLoweringGPU) config prog
-    perform (Seq prog) config =
-      Seq
-        <$> runPipeline (onePass inPlaceLoweringSeq) config prog
-    perform s _ =
-      externalErrorS $
-        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
-
-    long = [passLongOption pass]
-    pass = inPlaceLoweringSeq
 
 cseOption :: String -> FutharkOption
 cseOption short =
@@ -368,6 +368,21 @@ cseOption short =
 
     long = [passLongOption pass]
     pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
+
+sinkOption :: String -> FutharkOption
+sinkOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where
+    perform (GPU prog) config =
+      GPU <$> runPipeline (onePass sinkGPU) config prog
+    perform (MC prog) config =
+      MC <$> runPipeline (onePass sinkMC) config prog
+    perform s _ =
+      externalErrorS $
+        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+
+    long = [passLongOption pass]
+    pass = sinkGPU
 
 pipelineOption ::
   (UntypedPassState -> Maybe (Prog fromrep)) ->
@@ -399,6 +414,23 @@ soacsPipelineOption ::
   [String] ->
   FutharkOption
 soacsPipelineOption = pipelineOption getSOACSProg "SOACS" SOACS
+
+unstreamOption :: String -> FutharkOption
+unstreamOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where
+    perform (GPU prog) config =
+      GPU
+        <$> runPipeline (onePass unstreamGPU) config prog
+    perform (MC prog) config =
+      MC
+        <$> runPipeline (onePass unstreamMC) config prog
+    perform s _ =
+      externalErrorS $
+        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+
+    long = [passLongOption pass]
+    pass = unstreamGPU
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
@@ -451,6 +483,7 @@ commandLineOptions =
                 "c" -> Right $ SeqMemAction compileCAction
                 "multicore" -> Right $ MCMemAction compileMulticoreAction
                 "opencl" -> Right $ GPUMemAction compileOpenCLAction
+                "hip" -> Right $ GPUMemAction compileHIPAction
                 "cuda" -> Right $ GPUMemAction compileCUDAAction
                 "wasm" -> Right $ SeqMemAction compileCtoWASMAction
                 "wasm-multicore" -> Right $ MCMemAction compileMulticoreToWASMAction
@@ -461,7 +494,7 @@ commandLineOptions =
 
               Right $ \opts -> opts {futharkAction = action}
           )
-          "c|multicore|opencl|cuda|python|pyopencl"
+          "c|multicore|opencl|cuda|hip|python|pyopencl"
       )
       "Run this compiler backend on pipeline result.",
     Option
@@ -527,6 +560,11 @@ commandLineOptions =
             opts {futharkAction = GPUMemAction $ \_ _ _ -> printMemAliasGPU}
       )
       "Print memory alias information.",
+    Option
+      "z"
+      ["memory-access-pattern"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printMemoryAccessAnalysis})
+      "Print the result of analysing memory access patterns. Currently only for --gpu --mc.",
     Option
       []
       ["call-graph"]
@@ -607,17 +645,19 @@ commandLineOptions =
     soacsPassOption removeDeadFunctions [],
     soacsPassOption applyAD [],
     soacsPassOption applyADInnermost [],
-    kernelsPassOption babysitKernels [],
+    kernelsPassOption optimiseArrayLayoutGPU [],
+    mcPassOption optimiseArrayLayoutMC [],
+    kernelsPassOption optimiseGenRed [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],
-    kernelsPassOption unstreamGPU [],
-    kernelsPassOption sinkGPU [],
+    unstreamOption [],
+    sinkOption [],
     kernelsPassOption reduceDeviceSyncs [],
     typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],
-    iplOption [],
     allocateOption "a",
     kernelsMemPassOption doubleBufferGPU [],
+    mcMemPassOption doubleBufferMC [],
     kernelsMemPassOption expandAllocations [],
     kernelsMemPassOption MemoryBlockMerging.optimise [],
     seqMemPassOption LiftAllocations.liftAllocationsSeqMem [],
@@ -740,42 +780,49 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   else prettyString $ fileProg fm
         Defunctorise -> do
           (_, imports, src) <- readProgram'
-          liftIO $ p $ evalState (Defunctorise.transformProg imports) src
+          liftIO $
+            p $
+              flip evalState src $
+                Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
         FullNormalise -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
-        Monomorphise -> do
-          (_, imports, src) <- readProgram'
-          liftIO $
-            p $
-              flip evalState src $
-                Defunctorise.transformProg imports
-                  >>= FullNormalise.transformProg
-                  >>= Monomorphise.transformProg
         LiftLambdas -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
-                  >>= Monomorphise.transformProg
-                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
+        Monomorphise -> do
+          (_, imports, src) <- readProgram'
+          liftIO $
+            p $
+              flip evalState src $
+                Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
+                  >>= FullNormalise.transformProg
+                  >>= LiftLambdas.transformProg
+                  >>= Monomorphise.transformProg
         Defunctionalise -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
+                  >>= LiftLambdas.transformProg
                   >>= Monomorphise.transformProg
                   >>= ReplaceRecords.transformProg
-                  >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} -> do
           let (base, ext) = splitExtension file

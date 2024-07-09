@@ -90,8 +90,6 @@ tokens :-
   "$"                      { tokenC DOLLAR }
   "???"                    { tokenC HOLE }
 
-  @declit                  { \s -> decToken (NATLIT (nameFromBS s)) s }
-
   @declit i8               { decToken I8LIT . BS.dropEnd 2 }
   @binlit i8               { binToken I8LIT . BS.drop 2 . BS.dropEnd 2 }
   @hexlit i8               { hexToken I8LIT . BS.drop 2 . BS.dropEnd 2 }
@@ -132,7 +130,7 @@ tokens :-
   @hexlit u64              { hexToken U64LIT . BS.drop 2 . BS.dropEnd 3 }
   @romlit u64              { romToken U64LIT . BS.drop 2 . BS.dropEnd 3 }
 
-  @declit                  { decToken INTLIT }
+  @declit                  { \s -> decToken (NATLIT (nameFromBS s)) s }
   @binlit                  { binToken INTLIT . BS.drop 2 }
   @hexlit                  { hexToken INTLIT . BS.drop 2 }
   @romlit                  { romToken INTLIT . BS.drop 2 }
@@ -179,6 +177,8 @@ tokens :-
 
   @binop                   { tokenS $ symbol [] . nameFromText }
   @qualbinop               { tokenS $ uncurry symbol . mkQualId }
+
+  .                        { tokenS ERROR }
 {
 
 nameFromBS :: BS.ByteString -> Name
@@ -196,20 +196,19 @@ getToken state@(pos,c,s,n) =
       let x = action (BS.take (n'-n) s)
       x `seq` Right (state', (pos, pos', x))
 
-scanTokens :: Pos -> BS.ByteString -> Either LexerError ([L Token], Pos)
-scanTokens pos str = loop $ initialLexerState pos str
+scanTokens :: Pos -> BS.ByteString -> Either LexerError [L Token]
+scanTokens pos str = fmap reverse $ loop [] $ initialLexerState pos str
   where
-   loop s = do
+   loop toks s = do
      (s', tok) <- getToken s
      case tok of
        (start, end, EOF) ->
-         pure ([], end)
-       (start, end, t) -> do
-         (rest, endpos) <- loop s'
-         pure (L (Loc start end) t : rest, endpos)
+         pure toks
+       (start, end, t) ->
+         loop (L (Loc start end) t:toks) s'
 
 -- | Given a starting position, produce tokens from the given text (or
 -- a lexer error).  Returns the final position.
-scanTokensText :: Pos -> T.Text -> Either LexerError ([L Token], Pos)
+scanTokensText :: Pos -> T.Text -> Either LexerError [L Token]
 scanTokensText pos = scanTokens pos . BS.fromStrict . T.encodeUtf8
 }

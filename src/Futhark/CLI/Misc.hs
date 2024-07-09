@@ -107,7 +107,9 @@ mainThanks = mainWithOptions () [] "" $ \args () ->
       [ "You're welcome!",
         "Tell all your friends about Futhark!",
         "Likewise!",
-        "And thank you in return for trying the language!"
+        "And thank you in return for trying the language!",
+        "It's our pleasure!",
+        "Have fun with Futhark!"
       ]
 
 -- | @futhark tokens@
@@ -126,7 +128,7 @@ mainTokens = mainWithOptions () [] "program" $ \args () ->
         Just (Right (Left e)) -> do
           hPrint stderr e
           exitWith $ ExitFailure 2
-        Just (Right (Right (tokens, _))) ->
+        Just (Right (Right tokens)) ->
           mapM_ printToken tokens
     _ -> Nothing
   where

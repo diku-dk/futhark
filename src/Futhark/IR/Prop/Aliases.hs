@@ -33,12 +33,12 @@ import Data.List (find, transpose)
 import Data.Map qualified as M
 import Futhark.IR.Prop (ASTRep, IsOp, NameInfo (..), Scope)
 import Futhark.IR.Prop.Names
-import Futhark.IR.Prop.Patterns
+import Futhark.IR.Prop.Pat
 import Futhark.IR.Prop.Types
 import Futhark.IR.Syntax
 
 -- | The class of representations that contain aliasing information.
-class (ASTRep rep, AliasedOp (Op rep), AliasesOf (LetDec rep)) => Aliased rep where
+class (ASTRep rep, AliasedOp (OpC rep), AliasesOf (LetDec rep)) => Aliased rep where
   -- | The aliases of the body results.  Note that this includes names
   -- bound in the body!
   bodyAliases :: Body rep -> [Names]
@@ -57,6 +57,7 @@ subExpAliases (Var v) = vnameAliases v
 basicOpAliases :: BasicOp -> [Names]
 basicOpAliases (SubExp se) = [subExpAliases se]
 basicOpAliases (Opaque _ se) = [subExpAliases se]
+basicOpAliases (ArrayVal _ _) = [mempty]
 basicOpAliases (ArrayLit _ _) = [mempty]
 basicOpAliases BinOp {} = [mempty]
 basicOpAliases ConvOp {} = [mempty]
@@ -180,7 +181,7 @@ consumedInExp (WithAcc inputs lam) =
     inputConsumed (_, arrs, _) = namesFromList arrs
 consumedInExp (BasicOp (Update _ src _ _)) = oneName src
 consumedInExp (BasicOp (FlatUpdate src _ _)) = oneName src
-consumedInExp (BasicOp (UpdateAcc acc _ _)) = oneName acc
+consumedInExp (BasicOp (UpdateAcc _ acc _ _)) = oneName acc
 consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op
 
@@ -222,10 +223,10 @@ lookupAliases root scope =
 -- | The class of operations that can produce aliasing and consumption
 -- information.
 class (IsOp op) => AliasedOp op where
-  opAliases :: op -> [Names]
-  consumedInOp :: op -> Names
+  opAliases :: (Aliased rep) => op rep -> [Names]
+  consumedInOp :: (Aliased rep) => op rep -> Names
 
-instance AliasedOp (NoOp rep) where
+instance AliasedOp NoOp where
   opAliases NoOp = []
   consumedInOp NoOp = mempty
 

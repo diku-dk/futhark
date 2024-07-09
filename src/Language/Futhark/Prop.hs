@@ -89,12 +89,12 @@ module Language.Futhark.Prop
     UncheckedSlice,
     UncheckedExp,
     UncheckedModExp,
-    UncheckedSigExp,
+    UncheckedModTypeExp,
     UncheckedTypeParam,
     UncheckedPat,
     UncheckedValBind,
     UncheckedTypeBind,
-    UncheckedSigBind,
+    UncheckedModTypeBind,
     UncheckedModBind,
     UncheckedDec,
     UncheckedSpec,
@@ -110,9 +110,9 @@ module Language.Futhark.Prop
     Pat,
     ModExp,
     ModParam,
-    SigExp,
+    ModTypeExp,
     ModBind,
-    SigBind,
+    ModTypeBind,
     ValBind,
     Dec,
     Spec,
@@ -153,7 +153,7 @@ defaultEntryPoint = nameFromString "main"
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
-arrayRank :: TypeBase dim as -> Int
+arrayRank :: TypeBase d u -> Int
 arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
@@ -310,7 +310,7 @@ arrayOf = arrayOfWithAliases mempty
 arrayOfWithAliases ::
   u ->
   Shape dim ->
-  TypeBase dim u ->
+  TypeBase dim u' ->
   TypeBase dim u
 arrayOfWithAliases u shape2 (Array _ shape1 et) =
   Array u (shape2 <> shape1) et
@@ -463,6 +463,8 @@ typeOf (RecordLit fs _) =
     record (RecordFieldExplicit name e _) = (name, typeOf e)
     record (RecordFieldImplicit name (Info t) _) = (baseName name, t)
 typeOf (ArrayLit _ (Info t) _) = t
+typeOf (ArrayVal vs t loc) =
+  Array mempty (Shape [sizeFromInteger (genericLength vs) loc]) (Prim t)
 typeOf (StringLit vs loc) =
   Array
     mempty
@@ -567,7 +569,7 @@ patternOrderZero :: Pat (TypeBase d u) -> Bool
 patternOrderZero = orderZero . patternType
 
 -- | The set of identifiers bound in a pattern.
-patIdents :: Pat t -> [Ident t]
+patIdents :: PatBase f vn t -> [IdentBase f vn t]
 patIdents (Id v t loc) = [Ident v t loc]
 patIdents (PatParens p _) = patIdents p
 patIdents (TuplePat pats _) = foldMap patIdents pats
@@ -698,7 +700,15 @@ intrinsics =
         ++ zipWith
           namify
           [intrinsicStart ..]
-          ( [ ( "flatten",
+          ( [ ( "manifest",
+                IntrinsicPolyFun
+                  [tp_a]
+                  [Scalar $ t_a mempty]
+                  $ RetType []
+                  $ Scalar
+                  $ t_a mempty
+              ),
+              ( "flatten",
                 IntrinsicPolyFun
                   [tp_a, sp_n, sp_m]
                   [Array Observe (shape [n, m]) $ t_a mempty]
@@ -1209,7 +1219,7 @@ progImports = concatMap decImports . progDecs
 decImports :: DecBase f vn -> [(String, Loc)]
 decImports (OpenDec x _) = modExpImports x
 decImports (ModDec md) = modExpImports $ modExp md
-decImports SigDec {} = []
+decImports ModTypeDec {} = []
 decImports TypeDec {} = []
 decImports ValDec {} = []
 decImports (LocalDec d _) = decImports d
@@ -1236,31 +1246,31 @@ progModuleTypes prog = foldMap reach mtypes_used
       where
         onDec OpenDec {} = mempty
         onDec ModDec {} = mempty
-        onDec (SigDec sb) =
-          M.singleton (sigName sb) (onSigExp (sigExp sb))
+        onDec (ModTypeDec sb) =
+          M.singleton (modTypeName sb) (onModTypeExp (modTypeExp sb))
         onDec TypeDec {} = mempty
         onDec ValDec {} = mempty
         onDec (LocalDec d _) = onDec d
         onDec ImportDec {} = mempty
 
-        onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
-        onSigExp (SigParens e _) = onSigExp e
-        onSigExp (SigSpecs ss _) = foldMap onSpec ss
-        onSigExp (SigWith e _ _) = onSigExp e
-        onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
+        onModTypeExp (ModTypeVar v _ _) = S.singleton $ qualLeaf v
+        onModTypeExp (ModTypeParens e _) = onModTypeExp e
+        onModTypeExp (ModTypeSpecs ss _) = foldMap onSpec ss
+        onModTypeExp (ModTypeWith e _ _) = onModTypeExp e
+        onModTypeExp (ModTypeArrow _ e1 e2 _) = onModTypeExp e1 <> onModTypeExp e2
 
         onSpec ValSpec {} = mempty
         onSpec TypeSpec {} = mempty
         onSpec TypeAbbrSpec {} = mempty
-        onSpec (ModSpec vn e _ _) = S.singleton vn <> onSigExp e
-        onSpec (IncludeSpec e _) = onSigExp e
+        onSpec (ModSpec vn e _ _) = S.singleton vn <> onModTypeExp e
+        onSpec (IncludeSpec e _) = onModTypeExp e
 
     mtypes_used = foldMap onDec $ progDecs prog
       where
         onDec (OpenDec x _) = onModExp x
         onDec (ModDec md) =
-          maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
-        onDec SigDec {} = mempty
+          maybe mempty (onModTypeExp . fst) (modType md) <> onModExp (modExp md)
+        onDec ModTypeDec {} = mempty
         onDec TypeDec {} = mempty
         onDec ValDec {} = mempty
         onDec LocalDec {} = mempty
@@ -1271,17 +1281,17 @@ progModuleTypes prog = foldMap reach mtypes_used
         onModExp ModImport {} = mempty
         onModExp (ModDecs ds _) = mconcat $ map onDec ds
         onModExp (ModApply me1 me2 _ _ _) = onModExp me1 <> onModExp me2
-        onModExp (ModAscript me se _ _) = onModExp me <> onSigExp se
+        onModExp (ModAscript me se _ _) = onModExp me <> onModTypeExp se
         onModExp (ModLambda p r me _) =
-          onModParam p <> maybe mempty (onSigExp . fst) r <> onModExp me
+          onModParam p <> maybe mempty (onModTypeExp . fst) r <> onModExp me
 
-        onModParam = onSigExp . modParamType
+        onModParam = onModTypeExp . modParamType
 
-        onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
-        onSigExp (SigParens e _) = onSigExp e
-        onSigExp SigSpecs {} = mempty
-        onSigExp (SigWith e _ _) = onSigExp e
-        onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
+        onModTypeExp (ModTypeVar v _ _) = S.singleton $ qualLeaf v
+        onModTypeExp (ModTypeParens e _) = onModTypeExp e
+        onModTypeExp ModTypeSpecs {} = mempty
+        onModTypeExp (ModTypeWith e _ _) = onModTypeExp e
+        onModTypeExp (ModTypeArrow _ e1 e2 _) = onModTypeExp e1 <> onModTypeExp e2
 
 -- | Extract a leading @((name, namespace, file), remainder)@ from a
 -- documentation comment string.  These are formatted as
@@ -1321,7 +1331,7 @@ progHoles = foldMap holesInDec . progDecs
     holesInDec (OpenDec me _) = holesInModExp me
     holesInDec (LocalDec d _) = holesInDec d
     holesInDec TypeDec {} = mempty
-    holesInDec SigDec {} = mempty
+    holesInDec ModTypeDec {} = mempty
     holesInDec ImportDec {} = mempty
 
     holesInModExp (ModDecs ds _) = foldMap holesInDec ds
@@ -1368,12 +1378,20 @@ similarSlices slice1 slice2
 
 -- | If these two expressions are structurally similar at top level as
 -- sizes, produce their subexpressions (which are not necessarily
--- similar, but you can check for that!).  This is the machinery
--- underlying expresssion unification.
+-- similar, but you can check for that!). This is the machinery
+-- underlying expresssion unification. We assume that the expressions
+-- have the same type.
 similarExps :: Exp -> Exp -> Maybe [(Exp, Exp)]
 similarExps e1 e2 | bareExp e1 == bareExp e2 = Just []
 similarExps e1 e2 | Just e1' <- stripExp e1 = similarExps e1' e2
 similarExps e1 e2 | Just e2' <- stripExp e2 = similarExps e1 e2'
+similarExps (IntLit x _ _) (Literal v _) =
+  case v of
+    SignedValue (Int8Value y) | x == toInteger y -> Just []
+    SignedValue (Int16Value y) | x == toInteger y -> Just []
+    SignedValue (Int32Value y) | x == toInteger y -> Just []
+    SignedValue (Int64Value y) | x == toInteger y -> Just []
+    _ -> Nothing
 similarExps
   (AppExp (BinOp (op1, _) _ (x1, _) (y1, _) _) _)
   (AppExp (BinOp (op2, _) _ (x2, _) (y2, _) _) _)
@@ -1455,7 +1473,7 @@ type TypeBind = TypeBindBase Info VName
 type ModBind = ModBindBase Info VName
 
 -- | A type-checked module type binding.
-type SigBind = SigBindBase Info VName
+type ModTypeBind = ModTypeBindBase Info VName
 
 -- | A type-checked module expression.
 type ModExp = ModExpBase Info VName
@@ -1464,7 +1482,7 @@ type ModExp = ModExpBase Info VName
 type ModParam = ModParamBase Info VName
 
 -- | A type-checked module type expression.
-type SigExp = SigExpBase Info VName
+type ModTypeExp = ModTypeExpBase Info VName
 
 -- | A type-checked declaration.
 type Dec = DecBase Info VName
@@ -1491,7 +1509,7 @@ type Case = CaseBase Info VName
 type UncheckedType = TypeBase (Shape Name) ()
 
 -- | An unchecked type expression.
-type UncheckedTypeExp = TypeExp NoInfo Name
+type UncheckedTypeExp = TypeExp UncheckedExp Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name
@@ -1509,7 +1527,7 @@ type UncheckedExp = ExpBase NoInfo Name
 type UncheckedModExp = ModExpBase NoInfo Name
 
 -- | A module type expression with no type annotations.
-type UncheckedSigExp = SigExpBase NoInfo Name
+type UncheckedModTypeExp = ModTypeExpBase NoInfo Name
 
 -- | A type parameter with no type annotations.
 type UncheckedTypeParam = TypeParamBase Name
@@ -1524,7 +1542,7 @@ type UncheckedValBind = ValBindBase NoInfo Name
 type UncheckedTypeBind = TypeBindBase NoInfo Name
 
 -- | A module type binding with no type annotations.
-type UncheckedSigBind = SigBindBase NoInfo Name
+type UncheckedModTypeBind = ModTypeBindBase NoInfo Name
 
 -- | A module binding with no type annotations.
 type UncheckedModBind = ModBindBase NoInfo Name

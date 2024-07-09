@@ -18,6 +18,7 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.SOACS (SOACS, usesAD)
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
+import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
@@ -25,7 +26,6 @@ import Futhark.Optimise.EntryPointMem
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
-import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
 import Futhark.Optimise.MergeGPUBodies
@@ -41,7 +41,6 @@ import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
-import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
@@ -80,7 +79,7 @@ adPipeline =
       simplifySOACS
     ]
 
--- | The pipeline used by the CUDA and OpenCL backends, but before
+-- | The pipeline used by the CUDA, HIP, and OpenCL backends, but before
 -- adding memory information.  Includes 'standardPipeline'.
 gpuPipeline :: Pipeline SOACS GPU
 gpuPipeline =
@@ -93,8 +92,6 @@ gpuPipeline =
         tileLoops,
         simplifyGPU,
         histAccsGPU,
-        babysitKernels,
-        simplifyGPU,
         unstreamGPU,
         performCSE True,
         simplifyGPU,
@@ -105,7 +102,11 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU
+        optimiseArrayLayoutGPU,
+        -- Important to simplify after coalescing in order to fix up
+        -- redundant manifests.
+        simplifyGPU,
+        performCSE True
       ]
 
 -- | The pipeline used by the sequential backends.  Turns all
@@ -115,8 +116,7 @@ seqPipeline =
   standardPipeline
     >>> onePass firstOrderTransform
     >>> passes
-      [ simplifySeq,
-        inPlaceLoweringSeq
+      [ simplifySeq
       ]
 
 -- | Run 'seqPipeline', then add memory information (and
@@ -181,7 +181,9 @@ mcPipeline =
         performCSE True,
         simplifyMC,
         sinkMC,
-        inPlaceLoweringMC
+        optimiseArrayLayoutMC,
+        simplifyMC,
+        performCSE True
       ]
 
 -- | Run 'mcPipeline' and then add memory information.

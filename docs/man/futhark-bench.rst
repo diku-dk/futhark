@@ -120,6 +120,13 @@ OPTIONS
 
   Pass an extra option to the compiler when compiling the programs.
 
+--profile
+
+  Enable profiling for the binary (by passing ``--profiling`` and
+  ``--logging``) and store the recorded information in the file
+  indicated by ``--json`` (which is required), along with the other
+  benchmarking results.
+
 --runner=program
 
   If set to a non-empty string, compiled programs are not run
@@ -136,7 +143,8 @@ OPTIONS
 --skip-compilation
 
   Do not run the compiler, and instead assume that each benchmark
-  program has already been compiled.  Use with caution.
+  program has already been compiled into a server-mode executable. Use
+  with caution.
 
 --spec-file=FILE
 
@@ -185,7 +193,7 @@ different sizes::
  -- output { 49995000i64 }
  -- compiled input { 1000000i64 }
  -- output { 499999500000i64 }
- 
+
  let main(n: i64): i64 =
    reduce (+) 0 (iota n)
 

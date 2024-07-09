@@ -54,6 +54,7 @@ def drop [n] 't (i: i64) (x: [n]t): [n-i]t = x[i:]
 -- | Statically change the size of an array.  Fail at runtime if the
 -- imposed size does not match the actual size.  Essentially syntactic
 -- sugar for a size coercion.
+#[inline]
 def sized [m] 't (n: i64) (xs: [m]t) : [n]t = xs :> [n]t
 
 -- | Split an array at a given position.
@@ -127,6 +128,16 @@ def rotate [n] 't (r: i64) (a: [n]t) =
 def replicate 't (n: i64) (x: t): *[n]t =
   map (const x) (iota n)
 
+-- | Construct an array of an inferred length containing the given
+-- value.
+--
+-- **Work:** O(n).
+--
+-- **Span:** O(1).
+#[inline]
+def rep 't [n] (x: t): *[n]t =
+  replicate n x
+
 -- | Copy a value.  The result will not alias anything.
 --
 -- **Work:** O(n).
@@ -135,6 +146,18 @@ def replicate 't (n: i64) (x: t): *[n]t =
 #[inline]
 def copy 't (a: t): *t =
   ([a])[0]
+
+-- | Copy a value. The result will not alias anything. Additionally,
+-- there is a guarantee that the result will be laid out in row-major
+-- order in memory. This can be used for locality optimisations in
+-- cases where the compiler does not otherwise do the right thing.
+--
+-- **Work:** O(n).
+--
+-- **Span:** O(1).
+#[inline]
+def manifest 't (a: t): *t =
+  intrinsics.manifest a
 
 -- | Combines the outer two dimensions of an array.
 --

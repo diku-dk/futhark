@@ -10,7 +10,7 @@ module Futhark.IR.Prop
     module Futhark.IR.Prop.Types,
     module Futhark.IR.Prop.Constants,
     module Futhark.IR.Prop.TypeOf,
-    module Futhark.IR.Prop.Patterns,
+    module Futhark.IR.Prop.Pat,
     module Futhark.IR.Prop.Names,
     module Futhark.IR.RetType,
     module Futhark.IR.Rephrase,
@@ -45,7 +45,7 @@ import Data.Set qualified as S
 import Futhark.IR.Pretty
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Names
-import Futhark.IR.Prop.Patterns
+import Futhark.IR.Prop.Pat
 import Futhark.IR.Prop.Rearrange
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Prop.TypeOf
@@ -76,7 +76,7 @@ asBasicOp _ = Nothing
 -- any required certificates have been checked) in any context.  For
 -- example, array indexing is not safe, as the index may be out of
 -- bounds.  On the other hand, adding two numbers cannot fail.
-safeExp :: (IsOp (Op rep)) => Exp rep -> Bool
+safeExp :: (ASTRep rep) => Exp rep -> Bool
 safeExp (BasicOp op) = safeBasicOp op
   where
     safeBasicOp (BinOp (SDiv _ Safe) _ _) = True
@@ -128,7 +128,7 @@ safeExp (Match _ cases def_case _) =
 safeExp WithAcc {} = True -- Although unlikely to matter.
 safeExp (Op op) = safeOp op
 
-safeBody :: (IsOp (Op rep)) => Body rep -> Bool
+safeBody :: (ASTRep rep) => Body rep -> Bool
 safeBody = all (safeExp . stmExp) . bodyStms
 
 -- | Return the variable names used in 'Var' subexpressions.  May contain
@@ -184,16 +184,20 @@ type ASTConstraints a =
   (Eq a, Ord a, Show a, Rename a, Substitute a, FreeIn a, Pretty a)
 
 -- | A type class for operations.
-class (ASTConstraints op, TypedOp op) => IsOp op where
+class (TypedOp op) => IsOp op where
   -- | Like 'safeExp', but for arbitrary ops.
-  safeOp :: op -> Bool
+  safeOp :: (ASTRep rep) => op rep -> Bool
 
   -- | Should we try to hoist this out of branches?
-  cheapOp :: op -> Bool
+  cheapOp :: (ASTRep rep) => op rep -> Bool
 
-instance IsOp (NoOp rep) where
+  -- | Compute the data dependencies of an operation.
+  opDependencies :: (ASTRep rep) => op rep -> [Names]
+
+instance IsOp NoOp where
   safeOp NoOp = True
   cheapOp NoOp = True
+  opDependencies NoOp = []
 
 -- | Representation-specific attributes; also means the rep supports
 -- some basic facilities.
@@ -209,7 +213,8 @@ class
     FreeIn (LParamInfo rep),
     FreeIn (RetType rep),
     FreeIn (BranchType rep),
-    IsOp (Op rep),
+    ASTConstraints (OpC rep rep),
+    IsOp (OpC rep),
     RephraseOp (OpC rep)
   ) =>
   ASTRep rep

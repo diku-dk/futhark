@@ -61,14 +61,13 @@ module Futhark.IR.Prop.Types
     DeclTyped (..),
     ExtTyped (..),
     DeclExtTyped (..),
-    SetType (..),
     FixExt (..),
   )
 where
 
 import Control.Monad
 import Control.Monad.State
-import Data.List (elemIndex, foldl')
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -103,7 +102,7 @@ modifyArrayShape ::
   TypeBase newshape u
 modifyArrayShape f (Array t ds u)
   | shapeRank ds' == 0 = Prim t
-  | otherwise = Array t (f ds) u
+  | otherwise = Array t ds' u
   where
     ds' = f ds
 modifyArrayShape _ (Prim t) = Prim t
@@ -503,7 +502,7 @@ existentialiseExtTypes inaccessible = map makeBoundShapesFree
     makeBoundShapesFree =
       modifyArrayShape $ fmap checkDim
     checkDim (Free (Var v))
-      | Just i <- v `elemIndex` inaccessible =
+      | Just i <- v `L.elemIndex` inaccessible =
           Ext i
     checkDim d = d
 
@@ -524,7 +523,7 @@ dimMapping ::
   [t2] ->
   res
 dimMapping getDims1 getDims2 f comb ts1 ts2 =
-  foldl' comb mempty $ concat $ zipWith (zipWith f) (map getDims1 ts1) (map getDims2 ts2)
+  L.foldl' comb mempty $ concat $ zipWith (zipWith f) (map getDims1 ts1) (map getDims2 ts2)
 
 -- | @IntType Int8@
 int8 :: PrimType
@@ -599,20 +598,6 @@ class (FixExt t) => DeclExtTyped t where
 instance DeclExtTyped DeclExtType where
   declExtTypeOf = id
 
--- | Typeclass for things whose type can be changed.
-class (Typed a) => SetType a where
-  setType :: a -> Type -> a
-
-instance SetType Type where
-  setType _ t = t
-
-instance (SetType b) => SetType (a, b) where
-  setType (a, b) t = (a, setType b t)
-
-instance (SetType dec) => SetType (PatElem dec) where
-  setType (PatElem name dec) t =
-    PatElem name $ setType dec t
-
 -- | Something with an existential context that can be (partially)
 -- fixed.
 class FixExt t where
@@ -620,14 +605,20 @@ class FixExt t where
   -- value.
   fixExt :: Int -> SubExp -> t -> t
 
+  -- | Map a function onto any existential.
+  mapExt :: (Int -> Int) -> t -> t
+
 instance (FixExt shape, ArrayShape shape) => FixExt (TypeBase shape u) where
   fixExt i se = modifyArrayShape $ fixExt i se
+  mapExt f = modifyArrayShape $ mapExt f
 
 instance (FixExt d) => FixExt (ShapeBase d) where
   fixExt i se = fmap $ fixExt i se
+  mapExt f = fmap $ mapExt f
 
 instance (FixExt a) => FixExt [a] where
   fixExt i se = fmap $ fixExt i se
+  mapExt f = fmap $ mapExt f
 
 instance FixExt ExtSize where
   fixExt i se (Ext j)
@@ -636,5 +627,9 @@ instance FixExt ExtSize where
     | otherwise = Ext j
   fixExt _ _ (Free x) = Free x
 
+  mapExt f (Ext i) = Ext $ f i
+  mapExt _ (Free x) = Free x
+
 instance FixExt () where
   fixExt _ _ () = ()
+  mapExt _ () = ()

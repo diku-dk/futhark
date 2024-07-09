@@ -102,16 +102,34 @@ wellTypedLoopArg src sparams pat arg = do
 
 -- | An un-checked loop.
 type UncheckedLoop =
-  (UncheckedPat ParamType, UncheckedExp, LoopFormBase NoInfo Name, UncheckedExp)
+  (PatBase NoInfo VName ParamType, ExpBase NoInfo VName, LoopFormBase NoInfo VName, ExpBase NoInfo VName)
 
 -- | A loop that has been type-checked.
 type CheckedLoop =
   ([VName], Pat ParamType, Exp, LoopFormBase Info VName, Exp)
 
+checkForImpossible :: Loc -> S.Set VName -> ParamType -> TermTypeM ()
+checkForImpossible loc known_before pat_t = do
+  cs <- getConstraints
+  let bad v = do
+        guard $ v `S.notMember` known_before
+        (_, UnknownSize v_loc _) <- M.lookup v cs
+        Just . typeError (srclocOf loc) mempty $
+          "Inferred type for loop parameter is"
+            </> indent 2 (pretty pat_t)
+            </> "but"
+            <+> dquotes (prettyName v)
+            <+> "is an existential size created inside the loop body at"
+            <+> pretty (locStrRel loc v_loc)
+            <> "."
+  case mapMaybe bad $ S.toList $ fvVars $ freeInType pat_t of
+    problem : _ -> problem
+    [] -> pure ()
+
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkLoop ::
-  (UncheckedExp -> TermTypeM Exp) ->
+  (ExpBase NoInfo VName -> TermTypeM Exp) ->
   UncheckedLoop ->
   SrcLoc ->
   TermTypeM (CheckedLoop, AppRes)
@@ -155,9 +173,12 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
   -- dim handling (2)
   let checkLoopReturnSize mergepat' loopbody' = do
         loopbody_t <- expTypeFully loopbody'
-        pat_t <-
-          someDimsFreshInType loc "loop" new_dims
-            =<< normTypeFully (patternType mergepat')
+        mergepat_t <- normTypeFully (patternType mergepat')
+
+        let ok_names = known_before <> S.fromList new_dims
+        checkForImpossible (locOf mergepat) ok_names mergepat_t
+
+        pat_t <- someDimsFreshInType loc "loop" new_dims mergepat_t
 
         -- We are ignoring the dimensions here, because any mismatches
         -- should be turned into fresh size variables.
@@ -225,16 +246,15 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
             =<< checkExp uboundexp
         bound_t <- expTypeFully uboundexp'
         bindingIdent i bound_t $ \i' ->
-          bindingPat [] mergepat merge_t $
-            \mergepat' -> incLevel $ do
-              loopbody' <- checkExp loopbody
-              (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-              pure
-                ( sparams,
-                  mergepat'',
-                  For i' uboundexp',
-                  loopbody'
-                )
+          bindingPat [] mergepat merge_t $ \mergepat' -> incLevel $ do
+            loopbody' <- checkExp loopbody
+            (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
+            pure
+              ( sparams,
+                mergepat'',
+                For i' uboundexp',
+                loopbody'
+              )
       ForIn xpat e -> do
         (arr_t, _) <- newArrayType (mkUsage' (srclocOf e)) "e" 1
         e' <- unifies "being iterated in a 'for-in' loop" arr_t =<< checkExp e
@@ -243,16 +263,15 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
           _
             | Just t' <- peelArray 1 t ->
                 bindingPat [] xpat t' $ \xpat' ->
-                  bindingPat [] mergepat merge_t $
-                    \mergepat' -> incLevel $ do
-                      loopbody' <- checkExp loopbody
-                      (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-                      pure
-                        ( sparams,
-                          mergepat'',
-                          ForIn (fmap toStruct xpat') e',
-                          loopbody'
-                        )
+                  bindingPat [] mergepat merge_t $ \mergepat' -> incLevel $ do
+                    loopbody' <- checkExp loopbody
+                    (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
+                    pure
+                      ( sparams,
+                        mergepat'',
+                        ForIn (fmap toStruct xpat') e',
+                        loopbody'
+                      )
             | otherwise ->
                 typeError (srclocOf e) mempty $
                   "Iteratee of a for-in loop must be an array, but expression has type"

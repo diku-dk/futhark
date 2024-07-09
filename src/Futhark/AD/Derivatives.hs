@@ -339,6 +339,21 @@ pdBuiltin "lerp64" [v0, v1, t] =
       untyped $ fMax64 0 (fMin64 1 (isF64 t)),
       untyped $ isF64 v1 - isF64 v0
     ]
+pdBuiltin "ldexp16" [x, y] =
+  Just
+    [ untyped $ 2 ** isF16 x,
+      untyped $ log 2 * (2 ** isF16 y) * isF16 x
+    ]
+pdBuiltin "ldexp32" [x, y] =
+  Just
+    [ untyped $ 2 ** isF32 x,
+      untyped $ log 2 * (2 ** isF32 y) * isF32 x
+    ]
+pdBuiltin "ldexp64" [x, y] =
+  Just
+    [ untyped $ 2 ** isF64 x,
+      untyped $ log 2 * (2 ** isF64 y) * isF64 x
+    ]
 pdBuiltin "erf16" [z] =
   Just [untyped $ (2 / sqrt pi) * exp (negate (isF16 z * isF16 z))]
 pdBuiltin "erf32" [z] =
@@ -351,6 +366,12 @@ pdBuiltin "erfc32" [z] =
   Just [untyped $ negate $ (2 / sqrt pi) * exp (negate (isF32 z * isF32 z))]
 pdBuiltin "erfc64" [z] =
   Just [untyped $ negate $ (2 / sqrt pi) * exp (negate (isF64 z * isF64 z))]
+pdBuiltin "copysign16" [_x, y] =
+  Just [untyped $ 1 * isF16 (UnOpExp (FSignum Float16) y), fConst Float16 0]
+pdBuiltin "copysign32" [_x, y] =
+  Just [untyped $ 1 * isF32 (UnOpExp (FSignum Float32) y), fConst Float32 0]
+pdBuiltin "copysign64" [_x, y] =
+  Just [untyped $ 1 * isF64 (UnOpExp (FSignum Float64) y), fConst Float64 0]
 -- More problematic derivatives follow below.
 pdBuiltin "umul_hi8" [x, y] = Just [y, x]
 pdBuiltin "umul_hi16" [x, y] = Just [y, x]

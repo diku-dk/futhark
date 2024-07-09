@@ -276,6 +276,32 @@ vFuseNodeT
             (TF.fsSOAC ker')
             (aux1 <> aux2)
       Nothing -> pure Nothing
+vFuseNodeT
+  _
+  infusible
+  (SoacNode ots1 pat1 (H.Screma w form inps) aux1, _, _)
+  (TransNode stm2_out (H.Index cs slice@(Slice (ds@(DimSlice _ w' _) : ds_rest))) _, _)
+    | null infusible,
+      w /= w',
+      ots1 == mempty,
+      Just _ <- isMapSOAC form,
+      [pe] <- patElems pat1 = do
+        let out_t = patElemType pe `setArrayShape` sliceShape slice
+            inps' = map sliceInput inps
+            -- Even if we move the slice of the outermost dimension, there
+            -- might still be some slicing of the inner ones.
+            ots1' = ots1 H.|> H.Index cs (Slice (sliceDim w' : ds_rest))
+        fusedSomething $
+          SoacNode
+            ots1'
+            (Pat [PatElem stm2_out out_t])
+            (H.Screma w' form inps')
+            aux1
+    where
+      sliceInput inp =
+        H.addTransform
+          (H.Index cs (fullSlice (H.inputType inp) [ds]))
+          inp
 vFuseNodeT _ _ _ _ = pure Nothing
 
 resFromLambda :: Lambda rep -> Result

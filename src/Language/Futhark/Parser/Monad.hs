@@ -17,6 +17,7 @@ module Language.Futhark.Parser.Monad
     mustBe,
     primNegate,
     applyExp,
+    arrayLitExp,
     patternExp,
     addDocSpec,
     addAttrSpec,
@@ -57,7 +58,7 @@ import Prelude hiding (mod)
 addDoc :: DocComment -> UncheckedDec -> UncheckedDec
 addDoc doc (ValDec val) = ValDec (val {valBindDoc = Just doc})
 addDoc doc (TypeDec tp) = TypeDec (tp {typeDoc = Just doc})
-addDoc doc (SigDec sig) = SigDec (sig {sigDoc = Just doc})
+addDoc doc (ModTypeDec sig) = ModTypeDec (sig {modTypeDoc = Just doc})
 addDoc doc (ModDec mod) = ModDec (mod {modDoc = Just doc})
 addDoc _ dec = dec
 
@@ -110,6 +111,17 @@ type ParserMonad = ExceptT SyntaxError (State ParserState)
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l - 1) l
+
+arrayLitExp :: [UncheckedExp] -> SrcLoc -> UncheckedExp
+arrayLitExp es loc
+  | Just (v : vs) <- mapM isLiteral es,
+    all ((primValueType v ==) . primValueType) vs =
+      ArrayVal (v : vs) (primValueType v) loc
+  | otherwise =
+      ArrayLit es NoInfo loc
+  where
+    isLiteral (Literal v _) = Just v
+    isLiteral _ = Nothing
 
 applyExp :: NE.NonEmpty UncheckedExp -> ParserMonad UncheckedExp
 applyExp all_es@((Constr n [] _ loc1) NE.:| es) =
@@ -194,6 +206,9 @@ parseError (L loc EOF, expected) =
 parseError (L loc DOC {}, _) =
   parseErrorAt (locOf loc) $
     Just "Documentation comments ('-- |') are only permitted when preceding declarations."
+parseError (L loc (ERROR "\""), _) =
+  parseErrorAt (locOf loc) $
+    Just "Unclosed string literal."
 parseError (L loc _, expected) = do
   input <- lift $ gets parserInput
   let ~(Loc (Pos _ _ _ beg) (Pos _ _ _ end)) = locOf loc

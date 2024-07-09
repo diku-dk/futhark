@@ -27,7 +27,7 @@ import Control.Exception (catch)
 import Control.Monad
 import Data.Char
 import Data.Functor
-import Data.List (foldl', (\\))
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Text qualified as T
@@ -180,7 +180,7 @@ inBraces sep = between (lexeme sep "{") (lexeme sep "}")
 
 parseNatural :: Parser () -> Parser Int
 parseNatural sep =
-  lexeme sep $ foldl' addDigit 0 . map num <$> some digitChar
+  lexeme sep $ L.foldl' addDigit 0 . map num <$> some digitChar
   where
     addDigit acc x = acc * 10 + x
     num c = ord c - ord '0'
@@ -412,7 +412,7 @@ validate path pt = do
     noDups xs =
       let xs' = nubOrd xs
        in -- Works because \\ only removes first instance.
-          case xs \\ xs' of
+          case xs L.\\ xs' of
             [] -> Right ()
             x : _ -> Left $ path <> ": multiple datasets with name " <> show (T.unpack x)
 

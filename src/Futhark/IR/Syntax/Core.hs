@@ -60,6 +60,7 @@ module Futhark.IR.Syntax.Core
     dimFix,
     sliceIndices,
     sliceDims,
+    sliceShape,
     unitSlice,
     fixSlice,
     sliceSlice,
@@ -389,6 +390,10 @@ sliceDims = mapMaybe dimSlice . unSlice
     dimSlice (DimSlice _ d _) = Just d
     dimSlice DimFix {} = Nothing
 
+-- | The shape of the array produced by this slice.
+sliceShape :: Slice d -> ShapeBase d
+sliceShape = Shape . sliceDims
+
 -- | A slice with a stride of one.
 unitSlice :: (Num d) => d -> d -> DimIndex d
 unitSlice offset n = DimSlice offset n 1
@@ -420,10 +425,10 @@ sliceSlice (Slice jslice) (Slice islice) = Slice $ sliceSlice' jslice islice
 -- | A dimension in a 'FlatSlice'.
 data FlatDimIndex d
   = FlatDimIndex
+      -- | Number of elements in dimension
       d
-      -- ^ Number of elements in dimension
+      -- | Stride of dimension
       d
-      -- ^ Stride of dimension
   deriving (Eq, Ord, Show)
 
 instance Traversable FlatDimIndex where
@@ -594,6 +599,15 @@ data OpaqueType
   | -- | Note that the field ordering here denote the actual
     -- representation - make sure it is preserved.
     OpaqueRecord [(Name, EntryPointType)]
+  | -- | Constructor ordering also denotes representation, in that the
+    -- index of the constructor is the identifying number.
+    --
+    -- The total values used to represent a sum values is the
+    -- 'ValueType' list. The 'Int's associated with each
+    -- 'EntryPointType' are the indexes of the values used to
+    -- represent that constructor payload. This is necessary because
+    -- we deduplicate payloads across constructors.
+    OpaqueSum [ValueType] [(Name, [(EntryPointType, [Int])])]
   deriving (Eq, Ord, Show)
 
 -- | Names of opaque types and their representation.

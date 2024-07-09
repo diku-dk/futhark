@@ -16,16 +16,13 @@ module Language.Futhark.Parser.Lexer.Tokens
     binToken,
     hexToken,
     romToken,
-    advance,
     readHexRealLit,
   )
 where
 
 import Data.ByteString.Lazy qualified as BS
-import Data.Char (ord)
 import Data.Either
 import Data.List (find)
-import Data.Loc (Pos (..))
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.Read qualified as T
@@ -129,6 +126,7 @@ data Token
   | DOC T.Text
   | EOF
   | HOLE
+  | ERROR T.Text
   deriving (Show, Eq, Ord)
 
 mkQualId :: T.Text -> ([Name], Name)
@@ -190,14 +188,6 @@ romToken f = tokenS $ f . fromRoman
 {-# INLINE tokenS #-}
 tokenS :: (T.Text -> a) -> BS.ByteString -> a
 tokenS f = f . T.decodeUtf8 . BS.toStrict
-
-advance :: Pos -> BS.ByteString -> Pos
-advance orig_pos = BS.foldl' advance' orig_pos . BS.init
-  where
-    advance' (Pos f !line !col !addr) c
-      | c == nl = Pos f (line + 1) 1 (addr + 1)
-      | otherwise = Pos f line (col + 1) (addr + 1)
-    nl = fromIntegral $ ord '\n'
 
 symbol :: [Name] -> Name -> Token
 symbol [] q

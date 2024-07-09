@@ -168,7 +168,8 @@ returnAliased :: Name -> SrcLoc -> CheckM ()
 returnAliased name loc =
   addError loc mempty . withIndexLink "return-aliased" $
     "Unique-typed return value is aliased to"
-      <+> dquotes (prettyName name) <> ", which is not consumable."
+      <+> dquotes (prettyName name)
+      <> ", which is not consumable."
 
 uniqueReturnAliased :: SrcLoc -> CheckM ()
 uniqueReturnAliased loc =
@@ -251,7 +252,7 @@ bindingPat p t = fmap (second (second (unscope (patNames p)))) . local bind
     bind env =
       env
         { envVtable =
-            foldr (uncurry M.insert) (envVtable env) (fmap f (matchPat p t))
+            foldr (uncurry M.insert . f) (envVtable env) (matchPat p t)
         }
       where
         f (v, (_, als)) = (v, Consumable $ second (S.insert (AliasBound v)) als)
@@ -264,7 +265,7 @@ bindingParam p m = do
     bind env =
       env
         { envVtable =
-            foldr (uncurry M.insert) (envVtable env) (fmap f (patternMap p))
+            foldr (uncurry M.insert . f) (envVtable env) (patternMap p)
         }
     f (v, t)
       | diet t == Consume = (v, Consumable $ t `setAliases` S.singleton (AliasBound v))
@@ -305,8 +306,10 @@ checkIfConsumed rloc als = do
     v' <- describeVar v
     addError rloc mempty . withIndexLink "use-after-consume" $
       "Using"
-        <+> v' <> ", but this was consumed at"
-        <+> pretty (locStrRel rloc wloc) <> ".  (Possibly through aliases.)"
+        <+> v'
+        <> ", but this was consumed at"
+          <+> pretty (locStrRel rloc wloc)
+        <> ".  (Possibly through aliases.)"
 
 consumed :: Consumed -> CheckM ()
 consumed vs = modify $ \s -> s {stateConsumed = stateConsumed s <> vs}
@@ -387,6 +390,8 @@ combineAliases (Array als1 et1 shape1) t2 =
   Array (als1 <> aliases t2) et1 shape1
 combineAliases (Scalar (TypeVar als1 tv1 targs1)) t2 =
   Scalar $ TypeVar (als1 <> aliases t2) tv1 targs1
+combineAliases t1 (Scalar (TypeVar als2 tv2 targs2)) =
+  Scalar $ TypeVar (als2 <> aliases t1) tv2 targs2
 combineAliases (Scalar (Record ts1)) (Scalar (Record ts2))
   | length ts1 == length ts2,
     L.sort (M.keys ts1) == L.sort (M.keys ts2) =
@@ -554,8 +559,9 @@ boundFreeInExp e = do
 -- functions.
 type Loop = (Pat ParamType, Exp, LoopFormBase Info VName, Exp)
 
--- | Mark bindings of consumed names as Consume.
-updateParamDiet :: Names -> Pat ParamType -> Pat ParamType
+-- | Mark bindings of consumed names as Consume, except those under a
+-- 'PatAscription', which are left unchanged.
+updateParamDiet :: (VName -> Bool) -> Pat ParamType -> Pat ParamType
 updateParamDiet cons = recurse
   where
     recurse (Wildcard (Info t) wloc) =
@@ -565,7 +571,7 @@ updateParamDiet cons = recurse
     recurse (PatAttr attr p ploc) =
       PatAttr attr (recurse p) ploc
     recurse (Id name (Info t) iloc)
-      | name `S.member` cons =
+      | cons name =
           let t' = t `setUniqueness` Consume
            in Id name (Info t') iloc
       | otherwise =
@@ -584,7 +590,7 @@ updateParamDiet cons = recurse
 convergeLoopParam :: Loc -> Pat ParamType -> Names -> TypeAliases -> CheckM (Pat ParamType)
 convergeLoopParam loop_loc param body_cons body_als = do
   let -- Make the pattern Consume where needed.
-      param' = updateParamDiet (S.filter (`elem` patNames param) body_cons) param
+      param' = updateParamDiet (`S.member` S.filter (`elem` patNames param) body_cons) param
 
   -- Check that the new values of consumed merge parameters do not
   -- alias something bound outside the loop, AND that anything
@@ -597,7 +603,8 @@ convergeLoopParam loop_loc param body_cons body_als = do
             "Return value for consuming loop parameter"
               <+> dquotes (prettyName pat_v)
               <+> "aliases"
-              <+> dquotes (prettyName v) <> "."
+              <+> dquotes (prettyName v)
+              <> "."
         (cons, obs) <- get
         unless (S.null $ aliases t `S.intersection` cons) $
           lift . addError loop_loc mempty $
@@ -649,7 +656,7 @@ checkLoop loop_loc (param, arg, form, body) = do
   -- use to infer the proper diet of the parameter.
   ((body', body_cons), body_als) <-
     noConsumable
-      . bindingParam (fmap (second (const Consume)) param)
+      . bindingParam (updateParamDiet (const True) param)
       . bindingLoopForm form'
       $ do
         ((body', body_als), body_cons) <- contain $ checkExp body
@@ -668,7 +675,7 @@ checkLoop loop_loc (param, arg, form, body) = do
       "Loop body uses"
         <+> v'
         <> " (or an alias),"
-        </> "but this is consumed by the initial loop argument."
+          </> "but this is consumed by the initial loop argument."
 
   v <- VName "internal_loop_result" <$> incCounter
   modify $ \s -> s {stateNames = M.insert v (NameLoopRes (srclocOf loop_loc)) $ stateNames s}
@@ -698,23 +705,25 @@ checkExp :: Exp -> CheckM (Exp, TypeAliases)
 
 --
 checkExp (AppExp (Apply f args loc) appres) = do
-  (args', args_als) <- NE.unzip <$> checkArgs args
   (f', f_als) <- checkExp f
+  (args', args_als) <- NE.unzip <$> checkArgs (toRes Nonunique f_als) args
   res_als <- checkFuncall loc (fname f) f_als args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
   where
     fname (Var v _ _) = Just v
     fname (AppExp (Apply e _ _) _) = fname e
     fname _ = Nothing
-    checkArg' prev (Info (d, p), e) = do
+    checkArg' prev d (Info p, e) = do
       (e', e_als) <- checkArg prev (second (const d) (typeOf e)) e
-      pure ((Info (d, p), e'), e_als)
+      pure ((Info p, e'), e_als)
 
-    checkArgs (x NE.:| args') = do
+    checkArgs (Scalar (Arrow _ _ d _ (RetType _ rt))) (x NE.:| args') = do
       -- Note Futhark uses right-to-left evaluation of applications.
-      args'' <- maybe (pure []) (fmap NE.toList . checkArgs) $ NE.nonEmpty args'
-      (x', x_als) <- checkArg' (map (first snd) args'') x
+      args'' <- maybe (pure []) (fmap NE.toList . checkArgs rt) $ NE.nonEmpty args'
+      (x', x_als) <- checkArg' (map (first snd) args'') d x
       pure $ (x', x_als) NE.:| args''
+    checkArgs t _ =
+      error $ "checkArgs: " <> prettyString t
 
 --
 checkExp (AppExp (Loop sparams pat args form body loc) appres) = do
@@ -945,6 +954,7 @@ checkExp e@IntLit {} = noAliases e
 checkExp e@FloatLit {} = noAliases e
 checkExp e@Literal {} = noAliases e
 checkExp e@StringLit {} = noAliases e
+checkExp e@ArrayVal {} = noAliases e
 checkExp e@ArrayLit {} = noAliases e
 checkExp e@Negate {} = noAliases e
 checkExp e@Not {} = noAliases e
@@ -959,14 +969,14 @@ checkGlobalAliases loc params body_t = do
       "Function result aliases the free variable "
         <> dquotes (prettyName v)
         <> "."
-        </> "Use"
-        <+> dquotes "copy"
-        <+> "to break the aliasing."
+          </> "Use"
+          <+> dquotes "copy"
+          <+> "to break the aliasing."
 
 -- | Type-check a value definition.  This also infers a new return
 -- type that may be more unique than previously.
 checkValDef ::
-  (VName, [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Info VName), SrcLoc) ->
+  (VName, [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Exp VName), SrcLoc) ->
   ((Exp, ResRetType), [TypeError])
 checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (locOf loc) $ do
   fmap fst . bindingParams params $ do

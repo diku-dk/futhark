@@ -12,3 +12,6 @@
 - error: {lhs: not (any (`nameIn` x) y), rhs: all (`notNameIn` x) y}
 - error: {lhs: Data.Text.pack (show x), rhs: Futhark.Util.showText x}
 - error: {lhs: Data.List.nub, rhs: Futhark.Util.nubOrd}
+- error: {lhs: "copyDWIM p [] y [DimFix i]", rhs: "copyDWIMFix p [] y [i]" }
+- error: {lhs: "copyDWIM x [DimFix i] y []", rhs: "copyDWIMFix x [i] y []" }
+- error: {lhs: "copyDWIM x [DimFix i] y [DimFix j]", rhs: "copyDWIMFix x [i] y [j]" }

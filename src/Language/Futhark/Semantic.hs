@@ -12,7 +12,7 @@ module Language.Futhark.Semantic
     Namespace (..),
     Env (..),
     TySet,
-    FunSig (..),
+    FunModType (..),
     NameMap,
     BoundV (..),
     Mod (..),
@@ -23,7 +23,7 @@ where
 
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
-import Futhark.Util (dropLast, fromPOSIX, toPOSIX)
+import Futhark.Util (fromPOSIX, toPOSIX)
 import Futhark.Util.Pretty
 import Language.Futhark
 import System.FilePath qualified as Native
@@ -41,15 +41,14 @@ mkInitialImport = ImportName . Posix.normalise . toPOSIX
 mkImportFrom :: ImportName -> String -> ImportName
 mkImportFrom (ImportName includer) includee
   | Posix.isAbsolute includee = ImportName includee
-  | otherwise = ImportName $ Posix.normalise $ Posix.joinPath $ includer' ++ includee'
+  | otherwise =
+      ImportName . Posix.normalise . Posix.joinPath . resolveDotDot [] $
+        init (Posix.splitPath includer) ++ Posix.splitPath includee
   where
-    (dotdots, includee') = span ("../" ==) $ Posix.splitPath includee
-    includer_parts = init $ Posix.splitPath includer
-    includer'
-      | length dotdots > length includer_parts =
-          replicate (length dotdots - length includer_parts) "../"
-      | otherwise =
-          dropLast (length dotdots) includer_parts
+    resolveDotDot parts [] = reverse parts
+    resolveDotDot parts@("../" : _) ("../" : todo) = resolveDotDot ("../" : parts) todo
+    resolveDotDot (_ : parts) ("../" : todo) = resolveDotDot parts todo
+    resolveDotDot parts (p : todo) = resolveDotDot (p : parts) todo
 
 -- | Create a @.fut@ file corresponding to an 'ImportName'.
 includeToFilePath :: ImportName -> Native.FilePath
@@ -96,15 +95,15 @@ type TySet = M.Map (QualName VName) Liftedness
 -- or a parametric module ("functor" in SML).
 data Mod
   = ModEnv Env
-  | ModFun FunSig
+  | ModFun FunModType
   deriving (Show)
 
 -- | A parametric functor consists of a set of abstract types, the
 -- environment of its parameter, and the resulting module type.
-data FunSig = FunSig
-  { funSigAbs :: TySet,
-    funSigMod :: Mod,
-    funSigMty :: MTy
+data FunModType = FunModType
+  { funModTypeAbs :: TySet,
+    funModTypeMod :: Mod,
+    funModTypeMty :: MTy
   }
   deriving (Show)
 
@@ -126,7 +125,10 @@ data TypeBinding = TypeAbbr Liftedness [TypeParam] StructRetType
 -- return type.  The type parameters are in scope in both parameter
 -- types and the return type.  Non-functional values have only a
 -- return type.
-data BoundV = BoundV [TypeParam] StructType
+data BoundV = BoundV
+  { boundValTParams :: [TypeParam],
+    boundValType :: StructType
+  }
   deriving (Show)
 
 -- | A mapping from names (which always exist in some namespace) to a
@@ -137,7 +139,7 @@ type NameMap = M.Map (Namespace, Name) (QualName VName)
 data Env = Env
   { envVtable :: M.Map VName BoundV,
     envTypeTable :: M.Map VName TypeBinding,
-    envSigTable :: M.Map VName MTy,
+    envModTypeTable :: M.Map VName MTy,
     envModTable :: M.Map VName Mod,
     envNameMap :: NameMap
   }
@@ -160,7 +162,7 @@ instance Pretty MTy where
 
 instance Pretty Mod where
   pretty (ModEnv e) = pretty e
-  pretty (ModFun (FunSig _ mod mty)) = pretty mod <+> "->" </> pretty mty
+  pretty (ModFun (FunModType _ mod mty)) = pretty mod <+> "->" </> pretty mty
 
 instance Pretty Env where
   pretty (Env vtable ttable sigtable modtable _) =
@@ -177,9 +179,9 @@ instance Pretty Env where
       renderTypeBind (name, TypeAbbr l tps tp) =
         p l
           <+> prettyName name
-            <> mconcat (map ((" " <>) . pretty) tps)
-            <> " ="
-          <+> pretty tp
+          <> mconcat (map ((" " <>) . pretty) tps)
+          <> " ="
+            <+> pretty tp
         where
           p Lifted = "type^"
           p SizeLifted = "type~"
@@ -187,9 +189,9 @@ instance Pretty Env where
       renderValBind (name, BoundV tps t) =
         "val"
           <+> prettyName name
-            <> mconcat (map ((" " <>) . pretty) tps)
-            <> " ="
-          <+> pretty t
+          <> mconcat (map ((" " <>) . pretty) tps)
+          <> " ="
+            <+> pretty t
       renderModType (name, _sig) =
         "module type" <+> prettyName name
       renderMod (name, mod) =

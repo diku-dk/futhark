@@ -18,6 +18,7 @@ import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
+import Data.Time.Clock.System (SystemTime (..), getSystemTime)
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
@@ -113,6 +114,8 @@ data TestMode
     Compiled
   | -- | Test interpreted code.
     Interpreted
+  | -- | Perform structure tests.
+    Structure
   deriving (Eq, Show)
 
 data TestCase = TestCase
@@ -249,7 +252,7 @@ runTestCase (TestCase mode program testcase progs) = do
           ]
   case testAction testcase of
     CompileTimeFailure expected_error ->
-      unless (mode == Internalise) . context checkctx $ do
+      unless (mode `elem` [Structure, Internalise]) . context checkctx $ do
         (code, _, err) <-
           liftIO $ readProcessWithExitCode futhark ["check", program] ""
         case code of
@@ -285,10 +288,12 @@ runTestCase (TestCase mode program testcase progs) = do
           -- so force just one data set at a time here.
           ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
 
+      when (mode == Structure) $
+        mapM_ (testMetrics progs program) structures
+
       when (mode `elem` [Compile, Compiled]) $
         context ("Compiling with --backend=" <> T.pack backend) $ do
           compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
-          mapM_ (testMetrics progs program) structures
           unless (mode == Compile) $ do
             (tuning_opts, _) <-
               liftIO $ determineTuning (configTuning progs) program
@@ -509,6 +514,26 @@ reportTable ts = do
     running = labelstr <> (T.unwords . reverse . map (T.pack . testCaseProgram) . testStatusRun) ts
     labelstr = "Now testing: "
 
+reportLine :: MVar SystemTime -> TestStatus -> IO ()
+reportLine time_mvar ts =
+  modifyMVar_ time_mvar $ \time -> do
+    time_now <- getSystemTime
+    if systemSeconds time_now - systemSeconds time >= period
+      then do
+        T.putStrLn $
+          "("
+            <> showText (testStatusFail ts)
+            <> " failed, "
+            <> showText (testStatusPass ts)
+            <> " passed, "
+            <> showText num_remain
+            <> " to go)."
+        pure time_now
+      else pure time
+  where
+    num_remain = length $ testStatusRemain ts
+    period = 60
+
 moveCursorToTableTop :: IO ()
 moveCursorToTableTop = cursorUpLine tableLines
 
@@ -531,11 +556,13 @@ runTests config paths = do
   let (excluded, included) = partition (excludedTest config) all_tests
   _ <- forkIO $ mapM_ (putMVar testmvar . excludeCases config) included
 
+  time_mvar <- newMVar $ MkSystemTime 0 0
+
   let fancy = not (configLineOutput config) && fancyTerminal
 
       report
         | fancy = reportTable
-        | otherwise = const (pure ())
+        | otherwise = reportLine time_mvar
       clear
         | fancy = clearFromCursorToScreenEnd
         | otherwise = pure ()
@@ -587,11 +614,10 @@ runTests config paths = do
                         { testStatusFail = testStatusFail ts' + 1,
                           testStatusRunPass =
                             testStatusRunPass ts'
-                              + numTestCases test
-                              - length s,
+                              + max 0 (numTestCases test - length s),
                           testStatusRunFail =
                             testStatusRunFail ts'
-                              + length s
+                              + min (numTestCases test) (length s)
                         }
 
   when fancy spaceTable
@@ -710,6 +736,11 @@ commandLineOptions =
       ["compile"]
       (NoArg $ Right $ \config -> config {configTestMode = Compile})
       "Only compile, do not run.",
+    Option
+      "s"
+      ["structure"]
+      (NoArg $ Right $ \config -> config {configTestMode = Structure})
+      "Perform structure tests.",
     Option
       "I"
       ["internalise"]

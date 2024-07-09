@@ -18,7 +18,7 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     Deallocate,
     CopyBarrier (..),
     Copy,
-    DoLMADCopy,
+    DoCopy,
 
     -- * Monadic compiler interface
     CompilerM,
@@ -40,7 +40,6 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     headerDecl,
     publicDef,
     publicDef_,
-    profileReport,
     onClear,
     HeaderSection (..),
     libDecl,
@@ -111,7 +110,6 @@ data CompilerState s = CompilerState
     compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition),
     compLibDecls :: DL.DList C.Definition,
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp, Maybe (C.Stm, C.Stm)),
-    compProfileItems :: DL.DList C.BlockItem,
     compClearItems :: DL.DList C.BlockItem,
     compDeclaredMem :: [(VName, Space)],
     compItems :: DL.DList C.BlockItem
@@ -127,7 +125,6 @@ newCompilerState src s =
       compHeaderDecls = mempty,
       compLibDecls = mempty,
       compCtxFields = mempty,
-      compProfileItems = mempty,
       compClearItems = mempty,
       compDeclaredMem = mempty,
       compItems = mempty
@@ -204,9 +201,9 @@ type Copy op s =
   C.Exp ->
   CompilerM op s ()
 
--- | Perform an 'LMADCopy'.  It is expected that these functions are
+-- | Perform an 'Copy'.  It is expected that these functions are
 -- each specialised on which spaces they operate on, so that is not part of their arguments.
-type DoLMADCopy op s =
+type DoCopy op s =
   CopyBarrier ->
   PrimType ->
   [Count Elements C.Exp] ->
@@ -234,7 +231,7 @@ data Operations op s = Operations
     opsError :: ErrorCompiler op s,
     opsCall :: CallCompiler op s,
     -- | @(dst,src)@-space mapping to copy functions.
-    opsCopies :: M.Map (Space, Space) (DoLMADCopy op s),
+    opsCopies :: M.Map (Space, Space) (DoCopy op s),
     -- | If true, use reference counting.  Otherwise, bare
     -- pointers.
     opsFatMemory :: Bool,
@@ -422,10 +419,6 @@ contextField name ty initial = modify $ \s ->
 contextFieldDyn :: C.Id -> C.Type -> C.Stm -> C.Stm -> CompilerM op s ()
 contextFieldDyn name ty create free = modify $ \s ->
   s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, Nothing, Just (create, free))}
-
-profileReport :: C.BlockItem -> CompilerM op s ()
-profileReport x = modify $ \s ->
-  s {compProfileItems = compProfileItems s <> DL.singleton x}
 
 onClear :: C.BlockItem -> CompilerM op s ()
 onClear x = modify $ \s ->

@@ -44,7 +44,7 @@ parallelCopy pt destloc srcloc = do
       is <- dIndexSpace' "i" (map pe64 srcshape) i
       (_, destspace, destidx) <- fullyIndexArray' destloc is
       (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
-      tmp <- tvVar <$> dPrim "tmp" pt
+      tmp <- dPrimS "tmp" pt
       emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
       emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
 
@@ -59,12 +59,16 @@ topLevelOps =
       opsCopyCompiler = parallelCopy
     }
 
-updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
-updateAcc acc is vs = sComment "UpdateAcc" $ do
+updateAcc :: Safety -> VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
+updateAcc safety acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map pe64 is
   (c, _space, arrs, dims, op) <- lookupAcc acc is'
-  sWhen (inBounds (Slice (map DimFix is')) dims) $
+  let boundsCheck =
+        case safety of
+          Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
+          _ -> id
+  boundsCheck $
     case op of
       Nothing ->
         forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
@@ -113,8 +117,8 @@ withAcc pat inputs lam = do
           locksForInputs atomics inputs'
 
 compileMCExp :: ExpCompiler MCMem HostEnv Imp.Multicore
-compileMCExp _ (BasicOp (UpdateAcc acc is vs)) =
-  updateAcc acc is vs
+compileMCExp _ (BasicOp (UpdateAcc safety acc is vs)) =
+  updateAcc safety acc is vs
 compileMCExp pat (WithAcc inputs lam) =
   withAcc pat inputs lam
 compileMCExp dest e =
@@ -130,7 +134,7 @@ compileMCOp pat (ParOp par_op op) = do
   dPrimV_ (segFlat space) (0 :: Imp.TExp Int64)
   iterations <- getIterationDomain op space
   seq_code <- collect $ localOps inThreadOps $ do
-    nsubtasks <- dPrim "nsubtasks" int32
+    nsubtasks <- dPrim "nsubtasks"
     sOp $ Imp.GetNumTasks $ tvVar nsubtasks
     emit =<< compileSegOp pat op nsubtasks
   retvals <- getReturnParams pat op
@@ -142,7 +146,7 @@ compileMCOp pat (ParOp par_op op) = do
       let space' = getSpace nested_op
       dPrimV_ (segFlat space') (0 :: Imp.TExp Int64)
       par_code <- collect $ do
-        nsubtasks <- dPrim "nsubtasks" int32
+        nsubtasks <- dPrim "nsubtasks"
         sOp $ Imp.GetNumTasks $ tvVar nsubtasks
         emit =<< compileSegOp pat nested_op nsubtasks
       pure $ Just $ Imp.ParallelTask par_code

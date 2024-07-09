@@ -31,6 +31,7 @@ from pygments.token import (
     Whitespace,
 )
 from sphinx.highlighting import lexers
+from typing import Dict, Any, List, Tuple
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -292,7 +293,7 @@ html_theme_path = ["_theme"]
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-html_theme_options = {}
+html_theme_options: Dict[Any, Any] = {}
 
 # Add any paths that contain custom themes here, relative to this directory.
 # html_theme_path = []
@@ -377,7 +378,7 @@ htmlhelp_basename = "Futharkdoc"
 
 # -- Options for LaTeX output ---------------------------------------------
 
-latex_elements = {
+latex_elements: Dict[str, str] = {
     # The paper size ('letterpaper' or 'a4paper').
     #'papersize': 'letterpaper',
     # The font size ('10pt', '11pt' or '12pt').
@@ -418,7 +419,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [
+man_pages: List[Tuple[str, str, str, List[Any], int]] = [
     ("man/futhark", "futhark", "a parallel functional array language", [], 1),
     (
         "man/futhark-autotune",
@@ -450,6 +451,7 @@ man_pages = [
         1,
     ),
     ("man/futhark-cuda", "futhark-cuda", "compile Futhark to CUDA", [], 1),
+    ("man/futhark-hip", "futhark-hip", "compile Futhark to HIP", [], 1),
     (
         "man/futhark-python",
         "futhark-python",
@@ -513,6 +515,20 @@ man_pages = [
         "man/futhark-literate",
         "futhark-literate",
         "execute literate Futhark program",
+        [],
+        1,
+    ),
+    (
+        "man/futhark-script",
+        "futhark-script",
+        "execute FutharkScript expression",
+        [],
+        1,
+    ),
+    (
+        "man/futhark-profile",
+        "futhark-profile",
+        "profile Futhark programs",
         [],
         1,
     ),

@@ -11,6 +11,7 @@ module Futhark.Util
     nubByOrd,
     mapAccumLM,
     maxinum,
+    mininum,
     chunk,
     chunks,
     chunkLike,
@@ -21,6 +22,7 @@ module Futhark.Util
     partitionMaybe,
     maybeNth,
     maybeHead,
+    lookupWithIndex,
     splitFromEnd,
     splitAt3,
     focusNth,
@@ -50,6 +52,7 @@ module Futhark.Util
     fixPoint,
     concatMapM,
     topologicalSort,
+    debugTraceM,
   )
 where
 
@@ -66,7 +69,7 @@ import Data.Either
 import Data.Foldable (fold, toList)
 import Data.Function ((&))
 import Data.IntMap qualified as IM
-import Data.List (findIndex, foldl', genericDrop, genericSplitAt, sortBy)
+import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
@@ -76,6 +79,7 @@ import Data.Text.Encoding qualified as T
 import Data.Text.Encoding.Error qualified as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
+import Debug.Trace
 import Numeric
 import System.Directory.Tree qualified as Dir
 import System.Environment
@@ -94,7 +98,7 @@ nubOrd = nubByOrd compare
 
 -- | Like @nubBy@, but without the quadratic runtime.
 nubByOrd :: (a -> a -> Ordering) -> [a] -> [a]
-nubByOrd cmp = map NE.head . NE.groupBy eq . sortBy cmp
+nubByOrd cmp = map NE.head . NE.groupBy eq . L.sortBy cmp
   where
     eq x y = cmp x y == EQ
 
@@ -142,7 +146,11 @@ chunkLike as = chunks (map length as)
 
 -- | Like 'maximum', but returns zero for an empty list.
 maxinum :: (Num a, Ord a, Foldable f) => f a -> a
-maxinum = foldl' max 0
+maxinum = L.foldl' max 0
+
+-- | Like 'minimum', but returns zero for an empty list.
+mininum :: (Num a, Ord a, Foldable f) => f a -> a
+mininum xs = L.foldl' min (maxinum xs) xs
 
 -- | @dropAt i n@ drops @n@ elements starting at element @i@.
 dropAt :: Int -> Int -> [a] -> [a]
@@ -160,7 +168,7 @@ dropLast n = reverse . drop n . reverse
 mapEither :: (a -> Either b c) -> [a] -> ([b], [c])
 mapEither f l = partitionEithers $ map f l
 
--- | A combination of 'partition' and 'mapMaybe'
+-- | A combination of 'Data.List.partition' and 'mapMaybe'
 partitionMaybe :: (a -> Maybe b) -> [a] -> ([b], [a])
 partitionMaybe f = helper ([], [])
   where
@@ -173,13 +181,18 @@ partitionMaybe f = helper ([], [])
 -- | Return the list element at the given index, if the index is valid.
 maybeNth :: (Integral int) => int -> [a] -> Maybe a
 maybeNth i l
-  | i >= 0, v : _ <- genericDrop i l = Just v
+  | i >= 0, v : _ <- L.genericDrop i l = Just v
   | otherwise = Nothing
 
 -- | Return the first element of the list, if it exists.
 maybeHead :: [a] -> Maybe a
 maybeHead [] = Nothing
 maybeHead (x : _) = Just x
+
+-- | Lookup a value, returning also the index at which it appears.
+lookupWithIndex :: (Eq a) => a -> [(a, b)] -> Maybe (Int, b)
+lookupWithIndex needle haystack =
+  lookup needle $ zip (map fst haystack) (zip [0 ..] (map snd haystack))
 
 -- | Like 'splitAt', but from the end.
 splitFromEnd :: Int -> [a] -> ([a], [a])
@@ -196,14 +209,14 @@ splitAt3 n m l =
 -- valid, along with the elements before and after.
 focusNth :: (Integral int) => int -> [a] -> Maybe ([a], a, [a])
 focusNth i xs
-  | (bef, x : aft) <- genericSplitAt i xs = Just (bef, x, aft)
+  | (bef, x : aft) <- L.genericSplitAt i xs = Just (bef, x, aft)
   | otherwise = Nothing
 
 -- | Return the first list element that satisifes a predicate, along with the
 -- elements before and after.
 focusMaybe :: (a -> Maybe b) -> [a] -> Maybe ([a], b, [a])
 focusMaybe f xs = do
-  idx <- findIndex (isJust . f) xs
+  idx <- L.findIndex (isJust . f) xs
   (before, focus, after) <- focusNth idx xs
   res <- f focus
   pure (before, res, after)
@@ -447,9 +460,10 @@ atMostChars n s
 -- constructing a set of corresponding values.
 invertMap :: (Ord v, Ord k) => M.Map k v -> M.Map v (S.Set k)
 invertMap m =
-  M.toList m
-    & fmap (swap . first S.singleton)
-    & foldr (uncurry $ M.insertWith (<>)) mempty
+  foldr
+    (uncurry (M.insertWith (<>)) . swap . first S.singleton)
+    mempty
+    (M.toList m)
 
 -- | Compute the cartesian product of two foldable collections, using the given
 -- combinator function.
@@ -468,13 +482,15 @@ fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'
 
+-- | Like 'concatMap', but monoidal and monadic.
 concatMapM :: (Monad m, Monoid b) => (a -> m b) -> [a] -> m b
 concatMapM f xs = mconcat <$> mapM f xs
 
--- | Topological sorting of an array with an adjancency function,
--- if there is a cycle, it cause an error
--- @a `dep` b@ means 'a -> b', and the returned array guarantee that for i < j,
--- @not ( (ret !! j) `dep` (ret !! i) )@.
+-- | Topological sorting of an array with an adjancency function, if
+-- there is a cycle, it causes an error. @dep a b@ means @a -> b@,
+-- and the returned array guarantee that for i < j:
+--
+-- @not ( dep (ret !! j) (ret !! i) )@.
 topologicalSort :: (a -> a -> Bool) -> [a] -> [a]
 topologicalSort dep nodes =
   fst $ execState (mapM_ (sorting . snd) nodes_idx) (mempty, mempty)
@@ -498,3 +514,10 @@ topologicalSort dep nodes =
         modify $ second $ IM.insert i True
         mapM_ sorting $ mapMaybe (depends_of node) nodes_idx
         modify $ bimap (node :) (IM.insert i False)
+
+-- | 'traceM', but only if @FUTHARK_COMPILER_DEBUGGING@ is set to to
+-- the appropriate level.
+debugTraceM :: (Monad m) => Int -> String -> m ()
+debugTraceM level
+  | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" level = traceM
+  | otherwise = const $ pure ()

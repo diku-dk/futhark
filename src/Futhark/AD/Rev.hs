@@ -107,6 +107,9 @@ diffBasicOp pat aux e m =
     Assert {} ->
       void $ commonBasicOp pat aux e m
     --
+    ArrayVal {} ->
+      void $ commonBasicOp pat aux e m
+    --
     ArrayLit elems _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       t <- lookupType pat_adj
@@ -212,7 +215,7 @@ diffBasicOp pat aux e m =
           updateAdj arr
             =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj slice zeroes)
     -- See Note [Adjoints of accumulators]
-    UpdateAcc _ is vs -> do
+    UpdateAcc _ _ is vs -> do
       addStm $ Let pat aux $ BasicOp e
       m
       pat_adjs <- mapM lookupAdjVal (patNames pat)

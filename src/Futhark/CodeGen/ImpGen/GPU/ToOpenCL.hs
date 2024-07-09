@@ -10,11 +10,11 @@ module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
 where
 
 import Control.Monad
-import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (second)
 import Data.Foldable (toList)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -31,7 +31,7 @@ import Futhark.CodeGen.RTS.CUDA (preludeCU)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
-import Futhark.Util (mapAccumLM, zEncodeText)
+import Futhark.Util (zEncodeText)
 import Futhark.Util.IntegralExp (rem)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -58,7 +58,7 @@ translateGPU ::
 translateGPU target prog =
   let env = envFromProg prog
       ( prog',
-        ToOpenCL kernels device_funs used_types sizes failures
+        ToOpenCL kernels device_funs used_types sizes failures constants
         ) =
           (`runState` initialOpenCL) . (`runReaderT` env) $ do
             let ImpGPU.Definitions
@@ -86,13 +86,15 @@ translateGPU target prog =
             T.unlines device_defs
           ]
    in ImpOpenCL.Program
-        opencl_code
-        opencl_prelude
-        kernels'
-        (S.toList used_types)
-        (findParamUsers env prog' (cleanSizes sizes))
-        failures
-        prog'
+        { openClProgram = opencl_code,
+          openClPrelude = opencl_prelude,
+          openClMacroDefs = constants,
+          openClKernelNames = kernels',
+          openClUsedTypes = S.toList used_types,
+          openClParams = findParamUsers env prog' (cleanSizes sizes),
+          openClFailures = failures,
+          hostDefinitions = prog'
+        }
   where
     genPrelude TargetOpenCL = genOpenClPrelude
     genPrelude TargetCUDA = const genCUDAPrelude
@@ -136,7 +138,7 @@ findParamUsers env defs = M.mapWithKey onParam
 
 pointerQuals :: String -> [C.TypeQual]
 pointerQuals "global" = [C.ctyquals|__global|]
-pointerQuals "local" = [C.ctyquals|__local|]
+pointerQuals "shared" = [C.ctyquals|__local|]
 pointerQuals "private" = [C.ctyquals|__private|]
 pointerQuals "constant" = [C.ctyquals|__constant|]
 pointerQuals "write_only" = [C.ctyquals|__write_only|]
@@ -148,11 +150,11 @@ pointerQuals "kernel" = [C.ctyquals|__kernel|]
 pointerQuals "device" = pointerQuals "global"
 pointerQuals s = error $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
--- In-kernel name and per-workgroup size in bytes.
-type LocalMemoryUse = (VName, Count Bytes (TExp Int64))
+-- In-kernel name and per-threadblock size in bytes.
+type SharedMemoryUse = (VName, Count Bytes (TExp Int64))
 
 data KernelState = KernelState
-  { kernelLocalMemory :: [LocalMemoryUse],
+  { kernelSharedMemory :: [SharedMemoryUse],
     kernelFailures :: [FailureMsg],
     kernelNextSync :: Int,
     -- | Has a potential failure occurred sine the last
@@ -172,11 +174,12 @@ data ToOpenCL = ToOpenCL
     clDevFuns :: M.Map Name (C.Definition, T.Text),
     clUsedTypes :: S.Set PrimType,
     clSizes :: M.Map Name SizeClass,
-    clFailures :: [FailureMsg]
+    clFailures :: [FailureMsg],
+    clConstants :: [(Name, KernelConstExp)]
   }
 
 initialOpenCL :: ToOpenCL
-initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
+initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty mempty
 
 data Env = Env
   { envFuns :: ImpGPU.Functions ImpGPU.HostOp,
@@ -328,13 +331,11 @@ ensureDeviceFuns code = do
     toDevice :: HostOp -> KernelOp
     toDevice _ = bad
 
-isConst :: GroupDim -> Maybe T.Text
+isConst :: BlockDim -> Maybe KernelConstExp
 isConst (Left (ValueExp (IntValue x))) =
-  Just $ prettyText $ intToInt64 x
-isConst (Right (SizeConst v)) =
-  Just $ zEncodeText $ nameToText v
-isConst (Right (SizeMaxConst size_class)) =
-  Just $ "max_" <> prettyText size_class
+  Just $ ValueExp (IntValue x)
+isConst (Right e) =
+  Just e
 isConst _ = Nothing
 
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
@@ -354,20 +355,19 @@ onKernel target kernel = do
           mapM_ GC.item body
       kstate = GC.compUserState cstate
 
-      (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses kernel
+      (kernel_consts, (const_defs, const_undefs)) =
+        second unzip $ unzip $ mapMaybe (constDef (kernelName kernel)) $ kernelUses kernel
 
-  let (local_memory_bytes, (local_memory_params, local_memory_args, local_memory_init)) =
-        second unzip3 $
-          evalState
-            (mapAccumLM prepareLocalMemory 0 (kernelLocalMemory kstate))
-            blankNameSource
+  let (_, shared_memory_init) =
+        L.mapAccumL prepareSharedMemory [C.cexp|0|] (kernelSharedMemory kstate)
+      shared_memory_bytes = sum $ map (padTo8 . snd) $ kernelSharedMemory kstate
 
   let (use_params, unpack_params) =
         unzip $ mapMaybe useAsParam $ kernelUses kernel
 
   -- The local_failure variable is an int despite only really storing
   -- a single bit of information, as some OpenCL implementations
-  -- (e.g. AMD) does not like byte-sized local memory (and the others
+  -- (e.g. AMD) does not like byte-sized shared memory (and the others
   -- likely pad to a whole word anyway).
   let (safety, error_init)
         -- We conservatively assume that any called function can fail.
@@ -414,30 +414,44 @@ onKernel target kernel = do
           [C.cparam|__global typename int64_t *global_failure_args|]
         ]
 
-      (local_memory_param, prepare_local_memory) =
+      (shared_memory_param, prepare_shared_memory) =
         case target of
           TargetOpenCL ->
-            ( [[C.cparam|__local typename uint64_t* local_mem_aligned|]],
-              [C.citems|__local unsigned char* local_mem = local_mem_aligned;|]
+            ( [[C.cparam|__local typename uint64_t* shared_mem_aligned|]],
+              [C.citems|__local unsigned char* shared_mem = (__local unsigned char*)shared_mem_aligned;|]
             )
           TargetCUDA -> (mempty, mempty)
           TargetHIP -> (mempty, mempty)
 
       params =
-        local_memory_param
+        shared_memory_param
           ++ take (numFailureParams safety) failure_params
-          ++ local_memory_params
           ++ use_params
 
-      attribute =
-        case mapM isConst $ kernelGroupSize kernel of
+      (attribute_consts, attribute) =
+        case mapM isConst $ kernelBlockSize kernel of
           Just [x, y, z] ->
-            "FUTHARK_KERNEL_SIZED" <> prettyText (x, y, z) <> "\n"
+            ( [(xv, x), (yv, y), (zv, z)],
+              "FUTHARK_KERNEL_SIZED" <> prettyText (xv, yv, zv) <> "\n"
+            )
+            where
+              xv = nameFromText $ zEncodeText $ nameToText name <> "_dim1"
+              yv = nameFromText $ zEncodeText $ nameToText name <> "_dim2"
+              zv = nameFromText $ zEncodeText $ nameToText name <> "_dim3"
           Just [x, y] ->
-            "FUTHARK_KERNEL_SIZED" <> prettyText (x, y, 1 :: Int) <> "\n"
+            ( [(xv, x), (yv, y)],
+              "FUTHARK_KERNEL_SIZED" <> prettyText (xv, yv, 1 :: Int) <> "\n"
+            )
+            where
+              xv = nameFromText $ zEncodeText $ nameToText name <> "_dim1"
+              yv = nameFromText $ zEncodeText $ nameToText name <> "_dim2"
           Just [x] ->
-            "FUTHARK_KERNEL_SIZED" <> prettyText (x, 1 :: Int, 1 :: Int) <> "\n"
-          _ -> "FUTHARK_KERNEL\n"
+            ( [(xv, x)],
+              "FUTHARK_KERNEL_SIZED" <> prettyText (xv, 1 :: Int, 1 :: Int) <> "\n"
+            )
+            where
+              xv = nameFromText $ zEncodeText $ nameToText name <> "_dim1"
+          _ -> (mempty, "FUTHARK_KERNEL\n")
 
       kernel_fun =
         attribute
@@ -445,8 +459,8 @@ onKernel target kernel = do
             [C.cfun|void $id:name ($params:params) {
                     $items:(mconcat unpack_params)
                     $items:const_defs
-                    $items:prepare_local_memory
-                    $items:local_memory_init
+                    $items:prepare_shared_memory
+                    $items:(mconcat shared_memory_init)
                     $items:error_init
                     $items:kernel_body
 
@@ -458,29 +472,28 @@ onKernel target kernel = do
     s
       { clGPU = M.insert name (safety, kernel_fun) $ clGPU s,
         clUsedTypes = typesInKernel kernel <> clUsedTypes s,
-        clFailures = kernelFailures kstate
+        clFailures = kernelFailures kstate,
+        clConstants = attribute_consts <> kernel_consts <> clConstants s
       }
 
   -- The error handling stuff is automatically added later.
-  let args = local_memory_args ++ kernelArgs kernel
+  let args = kernelArgs kernel
 
-  pure $ LaunchKernel safety name local_memory_bytes args num_groups group_size
+  pure $ LaunchKernel safety name shared_memory_bytes args num_tblocks tblock_size
   where
     name = kernelName kernel
-    num_groups = kernelNumGroups kernel
-    group_size = kernelGroupSize kernel
+    num_tblocks = kernelNumBlocks kernel
+    tblock_size = kernelBlockSize kernel
     padTo8 e = e + ((8 - (e `rem` 8)) `rem` 8)
 
-    prepareLocalMemory (Count offset) (mem, Count size) = do
-      param <- newVName $ baseString mem ++ "_offset"
-      let offset' = offset + padTo8 size
-      pure
-        ( bytes offset',
-          ( [C.cparam|typename int64_t $id:param|],
-            ValueKArg (untyped offset) $ IntType Int64,
-            [C.citem|volatile __local $ty:defaultMemBlockType $id:mem = &local_mem[$id:param];|]
+    prepareSharedMemory offset (mem, Count size) =
+      let offset_v = nameFromText $ prettyText mem <> "_offset"
+       in ( [C.cexp|$id:offset_v|],
+            [C.citems|
+             volatile __local $ty:defaultMemBlockType $id:mem = &shared_mem[$exp:offset];
+             const typename int64_t $id:offset_v = $exp:offset + $exp:(padTo8 size);
+             |]
           )
-        )
 
 useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
 useAsParam (ScalarUse name pt) = do
@@ -506,17 +519,19 @@ useAsParam ConstUse {} =
 -- Constants are #defined as macros.  Since a constant name in one
 -- kernel might potentially (although unlikely) also be used for
 -- something else in another kernel, we #undef them after the kernel.
-constDef :: KernelUse -> Maybe (C.BlockItem, C.BlockItem)
-constDef (ConstUse v e) =
+constDef :: Name -> KernelUse -> Maybe ((Name, KernelConstExp), (C.BlockItem, C.BlockItem))
+constDef kernel_name (ConstUse v e) =
   Just
-    ( [C.citem|$escstm:(T.unpack def)|],
-      [C.citem|$escstm:(T.unpack undef)|]
+    ( (nameFromText v', e),
+      ( [C.citem|$escstm:(T.unpack def)|],
+        [C.citem|$escstm:(T.unpack undef)|]
+      )
     )
   where
-    e' = compilePrimExp e
-    def = "#define " <> idText (C.toIdent v mempty) <> " (" <> expText e' <> ")"
+    v' = zEncodeText $ nameToText kernel_name <> "." <> prettyText v
+    def = "#define " <> idText (C.toIdent v mempty) <> " (" <> v' <> ")"
     undef = "#undef " <> idText (C.toIdent v mempty)
-constDef _ = Nothing
+constDef _ _ = Nothing
 
 commonPrelude :: T.Text
 commonPrelude =
@@ -549,14 +564,6 @@ genHIPPrelude =
   "#define FUTHARK_HIP\n"
     <> preludeCU
     <> commonPrelude
-
-compilePrimExp :: PrimExp KernelConst -> C.Exp
-compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
-  where
-    compileKernelConst (SizeConst key) =
-      pure [C.cexp|$id:(zEncodeText (prettyText key))|]
-    compileKernelConst (SizeMaxConst size_class) =
-      pure [C.cexp|$id:("max_" <> prettyString size_class)|]
 
 kernelArgs :: Kernel -> [KernelArg]
 kernelArgs = mapMaybe useToArg . kernelUses
@@ -616,8 +623,8 @@ inKernelOperations env mode body =
     fence FenceGlobal = [C.cexp|CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE|]
 
     kernelOps :: GC.OpCompiler KernelOp KernelState
-    kernelOps (GetGroupId v i) =
-      GC.stm [C.cstm|$id:v = get_group_id($int:i);|]
+    kernelOps (GetBlockId v i) =
+      GC.stm [C.cstm|$id:v = get_tblock_id($int:i);|]
     kernelOps (GetLocalId v i) =
       GC.stm [C.cstm|$id:v = get_local_id($int:i);|]
     kernelOps (GetLocalSize v i) =
@@ -631,10 +638,10 @@ inKernelOperations env mode body =
       GC.stm [C.cstm|mem_fence_local();|]
     kernelOps (MemFence FenceGlobal) =
       GC.stm [C.cstm|mem_fence_global();|]
-    kernelOps (LocalAlloc name size) = do
+    kernelOps (SharedAlloc name size) = do
       name' <- newVName $ prettyString name ++ "_backing"
       GC.modifyUserState $ \s ->
-        s {kernelLocalMemory = (name', size) : kernelLocalMemory s}
+        s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
@@ -727,6 +734,17 @@ inKernelOperations env mode body =
       doAtomicCmpXchg s t old arr ind cmp val [C.cty|int|]
     atomicOps s (AtomicXchg t old arr ind val) =
       doAtomicXchg s t old arr ind val [C.cty|int|]
+    atomicOps s (AtomicWrite t arr ind val) = do
+      ind' <- GC.compileExp $ untyped $ unCount ind
+      val' <- toStorage t <$> GC.compileExp val
+      let quals = case s of
+            Space sid -> pointerQuals sid
+            _ -> pointerQuals "global"
+      GC.stm [C.cstm|(($tyquals:quals $ty:(primStorageType t)*)$id:arr)[$exp:ind'] = $exp:val';|]
+      GC.stm $
+        case s of
+          Space "shared" -> [C.cstm|mem_fence_local();|]
+          _ -> [C.cstm|mem_fence_global();|]
 
     cannotAllocate :: GC.Allocate KernelOp KernelState
     cannotAllocate _ =
@@ -812,7 +830,7 @@ typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
-typesInCode (LMADCopy _ shape _ (Count (TPrimExp dstoffset), dststrides) _ (Count (TPrimExp srcoffset), srcstrides)) =
+typesInCode (Copy _ shape _ (Count (TPrimExp dstoffset), dststrides) _ (Count (TPrimExp srcoffset), srcstrides)) =
   foldMap (typesInExp . untyped . unCount) shape
     <> typesInExp dstoffset
     <> foldMap (typesInExp . untyped . unCount) dststrides
