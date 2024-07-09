@@ -444,7 +444,7 @@ compileProg r ops space (Prog types consts funs) =
      in ( ( stateWarnings s',
             Imp.Definitions
               types
-              (stateConstants s' <> foldMap stateConstants ss)
+              (foldMap stateConstants ss <> stateConstants s')
               (stateFunctions s')
           ),
           stateNameSource s'
