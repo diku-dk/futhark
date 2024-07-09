@@ -498,14 +498,7 @@ analyseBasicOp ctx expression pats =
     varInfoFromSubExp (Var v) =
       case M.lookup v (assignments ctx) of
         Just _ -> (varInfoFromNames ctx $ oneName v) {variableType = Variable}
-        Nothing ->
-          error $
-            "Failed to lookup variable \""
-              ++ prettyString v
-              ++ "\npat: "
-              ++ prettyString pats
-              ++ "\n\nContext\n"
-              ++ show ctx
+        Nothing -> (varInfoFromNames ctx mempty) {variableType = Variable} -- Means a global.
 
 analyseMatch :: (Analyse rep) => Context rep -> [VName] -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
 analyseMatch ctx pats body parents =
