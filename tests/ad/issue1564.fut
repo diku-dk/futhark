@@ -11,8 +11,8 @@ let costSparse [nnz][np1][cols][k]
   let cluster = cluster_centers[0]
   let foo =
       let j = 0
-      let correction = 0  
-      let (correction, _) = 
+      let correction = 0
+      let (correction, _) =
         loop (correction, j) while j < 2 do
             let column = colidxs[j]
             let cluster_value = cluster[column]
@@ -22,7 +22,7 @@ let costSparse [nnz][np1][cols][k]
 
 entry kmeansSpAD [nnz][np1]
         (k: i64)
-        (indices_data: [nnz]i64) 
+        (indices_data: [nnz]i64)
         (pointers: [np1]i64) =
 
  jvp2  (\x -> vjp (costSparse indices_data pointers) x 1)
