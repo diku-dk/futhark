@@ -2,7 +2,7 @@
 --
 -- ==
 -- entry: lt
--- input { [0i8, 1i8, -1i8, 1i8, -2i8 ] 
+-- input { [0i8, 1i8, -1i8, 1i8, -2i8 ]
 --         [0i8, 2i8, 1i8, -1i8, -1i8] }
 -- output { [false, true, true, false, true] }
 
@@ -15,7 +15,7 @@
 
 -- ==
 -- entry: lte
--- input { [0i8, 1i8, -1i8, 1i8, -2i8 ] 
+-- input { [0i8, 1i8, -1i8, 1i8, -2i8 ]
 --         [0i8, 2i8, 1i8, -1i8, -1i8] }
 -- output { [true, true, true, false, true] }
 
