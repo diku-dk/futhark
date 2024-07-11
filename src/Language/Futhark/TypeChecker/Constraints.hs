@@ -12,9 +12,6 @@ module Language.Futhark.TypeChecker.Constraints
     TyParams,
     Solution,
     solve,
-    -- To hide warnings
-    tyVarSolLevel,
-    scopeViolation,
   )
 where
 
@@ -135,16 +132,11 @@ type TyParams = M.Map TyVar (Level, Loc)
 data TyVarSol
   = -- | Has been substituted with this.
     TyVarSol Level Type
-  | -- | Is an explicit type parameter in the source program.
+  | -- | Is an explicit (rigid) type parameter in the source program.
     TyVarParam Level Loc
   | -- | Not substituted yet; has this constraint.
     TyVarUnsol Level TyVarInfo
   deriving (Show)
-
-tyVarSolLevel :: TyVarSol -> Level
-tyVarSolLevel (TyVarSol lvl _) = lvl
-tyVarSolLevel (TyVarParam lvl _) = lvl
-tyVarSolLevel (TyVarUnsol lvl _) = lvl
 
 newtype SolverState = SolverState
   { -- | Left means linked to this other type variable.
@@ -177,6 +169,12 @@ lookupTyVar orig = do
           pure (lvl, Right $ Scalar $ TypeVar mempty (qualName orig) [])
         Just (Right (TyVarUnsol lvl info)) -> pure (lvl, Left info)
   f orig
+
+setLink :: TyVar -> VName -> SolveM ()
+setLink v info = modify $ \s -> s {solverTyVars = M.insert v (Left info) $ solverTyVars s}
+
+setInfo :: TyVar -> TyVarSol -> SolveM ()
+setInfo v info = modify $ \s -> s {solverTyVars = M.insert v (Right info) $ solverTyVars s}
 
 -- | A solution maps a type variable to its substitution. This
 -- substitution is complete, in the sense there are no right-hand
@@ -243,23 +241,38 @@ unifySharedFields reason fs1 fs2 =
 mustSupportEql :: Reason -> Type -> SolveM ()
 mustSupportEql _reason _t = pure ()
 
-scopeViolation :: Reason -> VName -> Type -> SolveM a
-scopeViolation reason v tp =
+scopeViolation :: Reason -> VName -> Type -> VName -> SolveM a
+scopeViolation reason v1 ty v2 =
   throwError . TypeError (locOf reason) mempty $
     "Cannot unify type"
-      </> indent 2 (pretty tp)
+      </> indent 2 (pretty ty)
       </> "with"
-      <+> dquotes (prettyName v)
+      <+> dquotes (prettyName v1)
       <+> "(scope violation)."
       </> "This is because"
-      <+> dquotes (prettyName v)
+      <+> dquotes (prettyName v2)
       <+> "is rigidly bound in a deeper scope."
+
+scopeCheck :: Reason -> TyVar -> Int -> Type -> SolveM ()
+scopeCheck reason v v_lvl ty = do
+  mapM_ check $ typeVars ty
+  where
+    check ty_v = do
+      ty_v_info <- gets $ M.lookup ty_v . solverTyVars
+      case ty_v_info of
+        Just (Right (TyVarParam ty_v_lvl _))
+          | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
+        Just (Right (TyVarUnsol ty_v_lvl info))
+          | ty_v_lvl /= v_lvl ->
+              setInfo ty_v $ TyVarUnsol v_lvl info
+        _ -> pure ()
 
 -- Precondition: 'v' is currently flexible.
 subTyVar :: Reason -> VName -> Int -> Type -> SolveM ()
-subTyVar reason v lvl t = do
+subTyVar reason v v_lvl t = do
   occursCheck reason v t
   v_info <- gets $ M.lookup v . solverTyVars
+  scopeCheck reason v v_lvl t
   case (v_info, t) of
     (Just (Right (TyVarUnsol _ TyVarFree {})), _) ->
       pure ()
@@ -323,23 +336,15 @@ subTyVar reason v lvl t = do
     (Just Left {}, _) ->
       error $ "Type variable already linked: " <> prettyNameString v
     (Nothing, _) ->
-      error $ "linkTyVar: Nothing v: " <> prettyNameString v
+      error $ "subTyVar: Nothing v: " <> prettyNameString v
 
-  setInfo v (TyVarSol lvl t)
+  setInfo v (TyVarSol v_lvl t)
 
-setLink :: TyVar -> VName -> SolveM ()
-setLink v info = modify $ \s -> s {solverTyVars = M.insert v (Left info) $ solverTyVars s}
-
-setInfo :: TyVar -> TyVarSol -> SolveM ()
-setInfo v info = modify $ \s -> s {solverTyVars = M.insert v (Right info) $ solverTyVars s}
-
--- Precondition: 'v' is currently flexible and 't' has no solution.
-linkTyVar :: Reason -> VName -> VName -> SolveM ()
-linkTyVar reason v t = do
+-- Precondition: 'v' and 't' are both currently flexible.
+unionTyVars :: Reason -> VName -> VName -> SolveM ()
+unionTyVars reason v t = do
   v_info <- gets $ either alreadyLinked id . fromMaybe unknown . M.lookup v . solverTyVars
   (lvl, t') <- lookupTyVar t
-  let tp = Scalar $ TypeVar NoUniqueness (qualName t) []
-  occursCheck reason v tp
 
   case (v_info, t') of
     -- When either is completely unconstrained.
@@ -450,12 +455,12 @@ linkTyVar reason v t = do
     (TyVarParam {}, _) ->
       isParam
     (_, Right t'') ->
-      error $ "linkTyVar: rhs " <> prettyNameString t <> " is solved as " <> prettyString t''
+      error $ "unionTyVars: rhs " <> prettyNameString t <> " is solved as " <> prettyString t''
 
   -- Finally insert the actual link.
   setLink v t
   where
-    unknown = error $ "linkTyVar: Nothing v: " <> prettyNameString v
+    unknown = error $ "unionTyVars: Nothing v: " <> prettyNameString v
     alreadyLinked = error $ "Type variable already linked: " <> prettyNameString v
     alreadySolved = error $ "Type variable already solved: " <> prettyNameString v
     isParam = error $ "Type name is a type parameter: " <> prettyNameString v
@@ -530,8 +535,8 @@ solveEq reason orig_t1 orig_t2 = do
                   (Just lvl, Nothing) -> subTyVar reason v1 lvl t2'
                   (Nothing, Just lvl) -> subTyVar reason v2 lvl t1'
                   (Just lvl1, Just lvl2)
-                    | lvl1 <= lvl2 -> linkTyVar reason v1 v2
-                    | otherwise -> linkTyVar reason v2 v1
+                    | lvl1 <= lvl2 -> unionTyVars reason v1 v2
+                    | otherwise -> unionTyVars reason v2 v1
         (Scalar (TypeVar _ (QualName [] v1) []), t2')
           | Just lvl <- flexible v1 ->
               subTyVar reason v1 lvl t2'
