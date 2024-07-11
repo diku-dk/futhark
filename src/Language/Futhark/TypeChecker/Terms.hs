@@ -687,13 +687,13 @@ checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
 
       params'' <- mapM updateTypes params'
 
-      (rettype', rettype_st) <-
-        case rettype_checked of
-          Just (te, _, ext) ->
-            pure (Just te, RetType ext rt')
-          Nothing -> do
-            RetType ext ret <- inferReturnSizes params'' $ toRes Nonunique body_t
-            pure (Nothing, RetType ext ret)
+      (rettype', rettype_st) <- case rettype_checked of
+        Just (te, ret, ext) -> do
+          ret' <- normTypeFully ret
+          pure (Just te, RetType ext ret')
+        Nothing -> do
+          ret <- inferReturnSizes params'' $ toRes Nonunique body_t
+          pure (Nothing, ret)
 
       pure (params'', body', rettype', rettype_st)
 
