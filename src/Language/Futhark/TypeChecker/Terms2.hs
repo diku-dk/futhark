@@ -707,7 +707,11 @@ checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
       ]
   pure
     ( arrayOf (toShape (SVar m)) b,
-      AutoMap {autoRep = toShape r_var, autoMap = toShape m_var, autoFrame = toShape m_var <> fframe}
+      AutoMap
+        { autoRep = toShape r_var,
+          autoMap = toShape m_var,
+          autoFrame = toShape m_var <> fframe
+        }
     )
   where
     toSComp (Var (QualName [] x) _ _) = SVar x
