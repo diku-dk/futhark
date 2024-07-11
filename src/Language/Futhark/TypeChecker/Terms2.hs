@@ -673,23 +673,6 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
 
   incLevel $ descend [] orig_ps
 
-checkApply ::
-  SrcLoc ->
-  Maybe (QualName VName) ->
-  (Shape Size, Type) ->
-  NE.NonEmpty (Shape Size, Type) ->
-  TermM (Type, NE.NonEmpty AutoMap)
-checkApply loc fname (fframe, ftype) args = do
-  ((_, _, rt), argts) <- mapAccumLM onArg (0, fframe, ftype) args
-  pure (rt, argts)
-  where
-    onArg (i, f_f, f_t) (argframe, argtype) = do
-      (rt, am) <- checkApplyOne loc (fname, i) (f_f, f_t) (argframe, argtype)
-      pure
-        ( (i + 1, autoFrame am, rt),
-          am
-        )
-
 checkApplyOne :: SrcLoc -> (Maybe (QualName VName), Int) -> (Shape Size, Type) -> (Shape Size, Type) -> TermM (Type, AutoMap)
 checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
   (a, b) <- split ftype
@@ -740,6 +723,23 @@ checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
       b <- newType loc Lifted "res" Nonunique
       ctEq (Reason (locOf loc)) ftype' $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] b
       pure (a, b `setUniqueness` NoUniqueness)
+
+checkApply ::
+  SrcLoc ->
+  Maybe (QualName VName) ->
+  (Shape Size, Type) ->
+  NE.NonEmpty (Shape Size, Type) ->
+  TermM (Type, NE.NonEmpty AutoMap)
+checkApply loc fname (fframe, ftype) args = do
+  ((_, _, rt), argts) <- mapAccumLM onArg (0, fframe, ftype) args
+  pure (rt, argts)
+  where
+    onArg (i, f_f, f_t) (argframe, argtype) = do
+      (rt, am) <- checkApplyOne loc (fname, i) (f_f, f_t) (argframe, argtype)
+      pure
+        ( (i + 1, autoFrame am, rt),
+          am
+        )
 
 checkSlice :: SliceBase NoInfo VName -> TermM [DimIndex]
 checkSlice = mapM checkDimIndex
