@@ -452,6 +452,22 @@ updAM rank_map e =
        in AppExp (Apply f' args' loc) res
     AppExp (BinOp op t (x, Info (xv, xam)) (y, Info (yv, yam)) loc) res ->
       AppExp (BinOp op t (updAM rank_map x, Info (xv, upd xam)) (updAM rank_map y, Info (yv, upd yam)) loc) res
+    OpSectionRight name t arg (Info (pa, t1a), Info (pb, t1b, argext, am)) t2 loc ->
+      OpSectionRight
+        name
+        t
+        (updAM rank_map arg)
+        (Info (pa, t1a), Info (pb, t1b, argext, upd am))
+        t2
+        loc
+    OpSectionLeft name t arg (Info (pa, t1a, argext, am), Info (pb, t1b)) (ret, retext) loc ->
+      OpSectionLeft
+        name
+        t
+        (updAM rank_map arg)
+        (Info (pa, t1a, argext, upd am), Info (pb, t1b))
+        (ret, retext)
+        loc
     _ -> runIdentity $ astMap mapper e
   where
     dimToRank (Var (QualName [] x) _ _) =
