@@ -26,7 +26,7 @@ import Data.Maybe
 import Data.Set qualified as S
 import Futhark.Util.Pretty
 import Language.Futhark
-import Language.Futhark.TypeChecker.Monad (TypeError (..))
+import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..))
 import Language.Futhark.TypeChecker.Types (substTyVars)
 
 -- | The reason for a type constraint. Used to generate type error
@@ -201,11 +201,15 @@ solution s =
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except TypeError) a}
   deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError TypeError)
 
+typeError :: Loc -> Notes -> Doc () -> SolveM ()
+typeError loc notes msg =
+  throwError $ TypeError loc notes msg
+
 occursCheck :: Reason -> VName -> Type -> SolveM ()
 occursCheck reason v tp = do
   vars <- gets solverTyVars
   let tp' = substTyVars (substTyVar vars) tp
-  when (v `S.member` typeVars tp') . throwError . TypeError (locOf reason) mempty $
+  when (v `S.member` typeVars tp') . typeError (locOf reason) mempty $
     "Occurs check: cannot instantiate"
       <+> prettyName v
       <+> "with"
@@ -220,9 +224,9 @@ unifySharedConstructors ::
 unifySharedConstructors reason cs1 cs2 =
   forM_ (M.toList $ M.intersectionWith (,) cs1 cs2) $ \(c, (ts1, ts2)) ->
     if length ts1 == length ts2
-      then zipWithM (solveEq reason) ts1 ts2
+      then zipWithM_ (solveEq reason) ts1 ts2
       else
-        throwError . TypeError (locOf reason) mempty $
+        typeError (locOf reason) mempty $
           "Cannot unify type with constructor"
             </> indent 2 (pretty (Sum (M.singleton c ts1)))
             </> "with type of constructor"
@@ -241,9 +245,9 @@ unifySharedFields reason fs1 fs2 =
 mustSupportEql :: Reason -> Type -> SolveM ()
 mustSupportEql _reason _t = pure ()
 
-scopeViolation :: Reason -> VName -> Type -> VName -> SolveM a
+scopeViolation :: Reason -> VName -> Type -> VName -> SolveM ()
 scopeViolation reason v1 ty v2 =
-  throwError . TypeError (locOf reason) mempty $
+  typeError (locOf reason) mempty $
     "Cannot unify type"
       </> indent 2 (pretty ty)
       </> "with"
@@ -282,7 +286,7 @@ subTyVar reason v v_lvl t = do
         if t `elem` map (Scalar . Prim) v_pts
           then pure ()
           else
-            throwError . TypeError (locOf reason) mempty $
+            typeError (locOf reason) mempty $
               "Cannot unify type that must be one of"
                 </> indent 2 (pretty v_pts)
                 </> "with"
@@ -293,7 +297,7 @@ subTyVar reason v v_lvl t = do
         if all (`elem` M.keys cs2) (M.keys cs1)
           then unifySharedConstructors reason cs1 cs2
           else
-            throwError . TypeError (locOf reason) mempty $
+            typeError (locOf reason) mempty $
               "Cannot unify type with constructors"
                 </> indent 2 (pretty (Sum cs1))
                 </> "with type"
@@ -301,7 +305,7 @@ subTyVar reason v v_lvl t = do
     ( Just (Right (TyVarUnsol _ (TyVarSum _ cs1))),
       _
       ) ->
-        throwError . TypeError (locOf reason) mempty $
+        typeError (locOf reason) mempty $
           "Cannot unify type with constructors"
             </> indent 2 (pretty (Sum cs1))
             </> "with type"
@@ -312,7 +316,7 @@ subTyVar reason v v_lvl t = do
         if all (`elem` M.keys fs2) (M.keys fs1)
           then unifySharedFields reason fs1 fs2
           else
-            throwError . TypeError (locOf reason) mempty $
+            typeError (locOf reason) mempty $
               "Cannot unify record type with fields"
                 </> indent 2 (pretty (Record fs1))
                 </> "with record type"
@@ -320,7 +324,7 @@ subTyVar reason v v_lvl t = do
     ( Just (Right (TyVarUnsol _ (TyVarRecord _ fs1))),
       _
       ) ->
-        throwError . TypeError (locOf reason) mempty $
+        typeError (locOf reason) mempty $
           "Cannot unify record type with fields"
             </> indent 2 (pretty (Record fs1))
             </> "with type"
@@ -366,7 +370,7 @@ unionTyVars reason v t = do
         let pts = L.intersect v_pts t_pts
          in if null pts
               then
-                throwError . TypeError (locOf reason) mempty $
+                typeError (locOf reason) mempty $
                   "Cannot unify type that must be one of"
                     </> indent 2 (pretty v_pts)
                     </> "with type that must be one of"
@@ -375,14 +379,14 @@ unionTyVars reason v t = do
     ( TyVarUnsol _ (TyVarPrim _ v_pts),
       Left TyVarRecord {}
       ) ->
-        throwError . TypeError (locOf reason) mempty $
+        typeError (locOf reason) mempty $
           "Cannot unify type that must be one of"
             </> indent 2 (pretty v_pts)
             </> "with type that must be record."
     ( TyVarUnsol _ (TyVarPrim _ v_pts),
       Left TyVarSum {}
       ) ->
-        throwError . TypeError (locOf reason) mempty $
+        typeError (locOf reason) mempty $
           "Cannot unify type that must be one of"
             </> indent 2 (pretty v_pts)
             </> "with type that must be sum."
@@ -397,13 +401,13 @@ unionTyVars reason v t = do
     ( TyVarUnsol _ TyVarSum {},
       Left (TyVarPrim _ pts)
       ) ->
-        throwError . TypeError (locOf reason) mempty $
+        typeError (locOf reason) mempty $
           "A sum type cannot be one of"
             </> indent 2 (pretty pts)
     ( TyVarUnsol _ (TyVarSum _ cs1),
       Left (TyVarRecord _ fs)
       ) ->
-        throwError . TypeError (locOf reason) mempty $
+        typeError (locOf reason) mempty $
           "Cannot unify type with constructors"
             </> indent 2 (pretty (Sum cs1))
             </> "with type"
@@ -423,13 +427,13 @@ unionTyVars reason v t = do
     ( TyVarUnsol _ TyVarRecord {},
       Left (TyVarPrim _ pts)
       ) ->
-        throwError . TypeError (locOf reason) mempty $
+        typeError (locOf reason) mempty $
           "A record type cannot be one of"
             </> indent 2 (pretty pts)
     ( TyVarUnsol _ (TyVarRecord _ fs1),
       Left (TyVarSum _ cs)
       ) ->
-        throwError . TypeError (locOf reason) mempty $
+        typeError (locOf reason) mempty $
           "Cannot unify record type"
             </> indent 2 (pretty (Record fs1))
             </> "with type"
@@ -504,7 +508,7 @@ solveEq reason orig_t1 orig_t2 = do
   where
     cannotUnify = do
       tyvars <- gets solverTyVars
-      throwError . TypeError (locOf reason) mempty $
+      typeError (locOf reason) mempty $
         "Cannot unify"
           </> indent 2 (pretty (substTyVars (substTyVar tyvars) orig_t1))
           </> "with"
@@ -558,7 +562,7 @@ solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
   (_, tv_t) <- lookupTyVar tv
   case tv_t of
     Left _ ->
-      throwError . TypeError loc mempty $
+      typeError loc mempty $
         "Type"
           <+> prettyName tv
           <+> "is ambiguous."
@@ -570,7 +574,7 @@ solveTyVar (tv, (_, TyVarSum loc cs1)) = do
   (_, tv_t) <- lookupTyVar tv
   case tv_t of
     Left _ ->
-      throwError . TypeError loc mempty $
+      typeError loc mempty $
         "Type is ambiguous."
           </> "Must be a sum type with constructors"
           </> indent 2 (pretty (Scalar (Sum cs1)))
@@ -579,13 +583,13 @@ solveTyVar (tv, (_, TyVarEql loc)) = do
   (_, tv_t) <- lookupTyVar tv
   case tv_t of
     Left _ ->
-      throwError . TypeError loc mempty $
+      typeError loc mempty $
         "Type is ambiguous (must be equality type)"
           </> "Add a type annotation to disambiguate the type."
     Right ty
       | orderZero ty -> pure ()
       | otherwise ->
-          throwError . TypeError loc mempty $
+          typeError loc mempty $
             "Type"
               </> indent 2 (align (pretty ty))
               </> "does not support equality (may contain function)."
