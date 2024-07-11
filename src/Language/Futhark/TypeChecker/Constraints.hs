@@ -575,6 +575,17 @@ solveTyVar (tv, (_, TyVarSum loc cs1)) = do
           </> "Must be a sum type with constructors"
           </> indent 2 (pretty (Scalar (Sum cs1)))
     Right _ -> pure ()
+solveTyVar (tv, (_, TyVarEql loc)) = do
+  (_, tv_t) <- lookupTyVar tv
+  case tv_t of
+    Left _ -> pure ()
+    Right ty
+      | orderZero ty -> pure ()
+      | otherwise ->
+          throwError . TypeError loc mempty $
+            "Type"
+              </> indent 2 (align (pretty ty))
+              </> "does not support equality (may contain function)."
 solveTyVar (_, _) =
   pure ()
 
