@@ -582,10 +582,11 @@ solveTyVar (tv, (_, TyVarSum loc cs1)) = do
 solveTyVar (tv, (_, TyVarEql loc)) = do
   (_, tv_t) <- lookupTyVar tv
   case tv_t of
-    Left _ ->
+    Left TyVarEql {} ->
       typeError loc mempty $
         "Type is ambiguous (must be equality type)"
           </> "Add a type annotation to disambiguate the type."
+    Left _ -> pure ()
     Right ty
       | orderZero ty -> pure ()
       | otherwise ->
