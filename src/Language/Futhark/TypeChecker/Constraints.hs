@@ -11,6 +11,7 @@ module Language.Futhark.TypeChecker.Constraints
     TyVars,
     TyParams,
     Solution,
+    UnconTyVar,
     solve,
   )
 where
@@ -89,7 +90,7 @@ type Constraints = [Ct]
 -- that it is the type of.
 data TyVarInfo
   = -- | Can be substituted with anything.
-    TyVarFree Loc
+    TyVarFree Loc Liftedness
   | -- | Can only be substituted with these primitive types.
     TyVarPrim Loc [PrimType]
   | -- | Must be a record with these fields.
@@ -101,14 +102,14 @@ data TyVarInfo
   deriving (Show, Eq)
 
 instance Pretty TyVarInfo where
-  pretty (TyVarFree _) = "free"
+  pretty (TyVarFree _ l) = "free" <+> pretty l
   pretty (TyVarPrim _ pts) = "∈" <+> pretty pts
   pretty (TyVarRecord _ fs) = pretty $ Scalar $ Record fs
   pretty (TyVarSum _ cs) = pretty $ Scalar $ Sum cs
   pretty (TyVarEql _) = "equality"
 
 instance Located TyVarInfo where
-  locOf (TyVarFree loc) = loc
+  locOf (TyVarFree loc _) = loc
   locOf (TyVarPrim loc _) = loc
   locOf (TyVarRecord loc _) = loc
   locOf (TyVarSum loc _) = loc
@@ -158,7 +159,7 @@ substTyVar m v =
     Just (Right (TyVarUnsol {})) -> Nothing
     Nothing -> Nothing
 
-lookupTyVar :: TyVar -> SolveM (Int, Either TyVarInfo Type)
+lookupTyVar :: TyVar -> SolveM (Level, Either TyVarInfo Type)
 lookupTyVar orig = do
   tyvars <- gets solverTyVars
   let f v = case M.lookup v tyvars of
@@ -181,7 +182,11 @@ setInfo v info = modify $ \s -> s {solverTyVars = M.insert v (Right info) $ solv
 -- sides that contain a type variable.
 type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
 
-solution :: SolverState -> ([VName], Solution)
+-- | An unconstrained type variable comprises a name and (ironically)
+-- a constraint on how it can be instantiated.
+type UnconTyVar = (VName, Liftedness)
+
+solution :: SolverState -> ([UnconTyVar], Solution)
 solution s =
   ( mapMaybe unconstrained $ M.toList $ solverTyVars s,
     M.mapMaybe mkSubst $ solverTyVars s
@@ -195,7 +200,7 @@ solution s =
     mkSubst (Right (TyVarUnsol _ (TyVarPrim _ pts))) = Just $ Left pts
     mkSubst _ = Nothing
 
-    unconstrained (v, Right (TyVarUnsol _ (TyVarFree _))) = Just v
+    unconstrained (v, Right (TyVarUnsol _ (TyVarFree _ l))) = Just (v, l)
     unconstrained _ = Nothing
 
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except TypeError) a}
@@ -257,26 +262,11 @@ scopeViolation reason v1 ty v2 =
       <+> dquotes (prettyName v2)
       <+> "is rigidly bound in a deeper scope."
 
-scopeCheck :: Reason -> TyVar -> Int -> Type -> SolveM ()
-scopeCheck reason v v_lvl ty = do
-  mapM_ check $ typeVars ty
-  where
-    check ty_v = do
-      ty_v_info <- gets $ M.lookup ty_v . solverTyVars
-      case ty_v_info of
-        Just (Right (TyVarParam ty_v_lvl _))
-          | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
-        Just (Right (TyVarUnsol ty_v_lvl info))
-          | ty_v_lvl /= v_lvl ->
-              setInfo ty_v $ TyVarUnsol v_lvl info
-        _ -> pure ()
-
 -- Precondition: 'v' is currently flexible.
 subTyVar :: Reason -> VName -> Int -> Type -> SolveM ()
 subTyVar reason v v_lvl t = do
   occursCheck reason v t
   v_info <- gets $ M.lookup v . solverTyVars
-  scopeCheck reason v v_lvl t
   case (v_info, t) of
     (Just (Right (TyVarUnsol _ TyVarFree {})), _) ->
       pure ()
@@ -348,22 +338,27 @@ subTyVar reason v v_lvl t = do
 unionTyVars :: Reason -> VName -> VName -> SolveM ()
 unionTyVars reason v t = do
   v_info <- gets $ either alreadyLinked id . fromMaybe unknown . M.lookup v . solverTyVars
-  (lvl, t') <- lookupTyVar t
+  (t_lvl, t') <- lookupTyVar t
 
   case (v_info, t') of
+    ( TyVarUnsol _ (TyVarFree _ v_l),
+      Left (TyVarFree t_loc t_l)
+      )
+        | v_l /= t_l ->
+            setInfo t $ TyVarUnsol t_lvl $ TyVarFree t_loc (min v_l t_l)
     -- When either is completely unconstrained.
     (TyVarUnsol _ TyVarFree {}, _) ->
       pure ()
     ( TyVarUnsol _ info,
       Left (TyVarFree {})
       ) ->
-        setInfo t (TyVarUnsol lvl info)
+        setInfo t (TyVarUnsol t_lvl info)
     --
     -- TyVarPrim cases
     ( TyVarUnsol _ info@TyVarPrim {},
       Left TyVarEql {}
       ) ->
-        setInfo t (TyVarUnsol lvl info)
+        setInfo t (TyVarUnsol t_lvl info)
     ( TyVarUnsol _ (TyVarPrim _ v_pts),
       Left (TyVarPrim t_loc t_pts)
       ) ->
@@ -375,7 +370,7 @@ unionTyVars reason v t = do
                     </> indent 2 (pretty v_pts)
                     </> "with type that must be one of"
                     </> indent 2 (pretty t_pts)
-              else setInfo t (TyVarUnsol lvl (TyVarPrim t_loc pts))
+              else setInfo t (TyVarUnsol t_lvl (TyVarPrim t_loc pts))
     ( TyVarUnsol _ (TyVarPrim _ v_pts),
       Left TyVarRecord {}
       ) ->
@@ -397,7 +392,7 @@ unionTyVars reason v t = do
       ) -> do
         unifySharedConstructors reason cs1 cs2
         let cs3 = cs1 <> cs2
-        setInfo t (TyVarUnsol lvl (TyVarSum loc cs3))
+        setInfo t (TyVarUnsol t_lvl (TyVarSum loc cs3))
     ( TyVarUnsol _ TyVarSum {},
       Left (TyVarPrim _ pts)
       ) ->
@@ -423,7 +418,7 @@ unionTyVars reason v t = do
       ) -> do
         unifySharedFields reason fs1 fs2
         let fs3 = fs1 <> fs2
-        setInfo t (TyVarUnsol lvl (TyVarRecord loc fs3))
+        setInfo t (TyVarUnsol t_lvl (TyVarRecord loc fs3))
     ( TyVarUnsol _ TyVarRecord {},
       Left (TyVarPrim _ pts)
       ) ->
@@ -557,7 +552,18 @@ solveCt ct =
     CtEq reason t1 t2 -> solveEq reason t1 t2
     CtAM {} -> pure () -- Good vibes only.
 
-solveTyVar :: (VName, (Int, TyVarInfo)) -> SolveM ()
+scopeCheck :: Reason -> TyVar -> Int -> Type -> SolveM ()
+scopeCheck reason v v_lvl ty = do
+  mapM_ check $ typeVars ty
+  where
+    check ty_v = do
+      ty_v_info <- gets $ M.lookup ty_v . solverTyVars
+      case ty_v_info of
+        Just (Right (TyVarParam ty_v_lvl _))
+          | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
+        _ -> pure ()
+
+solveTyVar :: (VName, (Level, TyVarInfo)) -> SolveM ()
 solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
   (_, tv_t) <- lookupTyVar tv
   case tv_t of
@@ -594,10 +600,18 @@ solveTyVar (tv, (_, TyVarEql loc)) = do
             "Type"
               </> indent 2 (align (pretty ty))
               </> "does not support equality (may contain function)."
-solveTyVar (_, _) =
-  pure ()
+solveTyVar (tv, (lvl, _)) = do
+  (_, tv_t) <- lookupTyVar tv
+  case tv_t of
+    Right ty ->
+      scopeCheck (Reason mempty) tv lvl ty
+    _ -> pure ()
 
-solve :: Constraints -> TyParams -> TyVars -> Either TypeError ([VName], Solution)
+solve ::
+  Constraints ->
+  TyParams ->
+  TyVars ->
+  Either TypeError ([UnconTyVar], Solution)
 solve constraints typarams tyvars =
   second solution
     . runExcept

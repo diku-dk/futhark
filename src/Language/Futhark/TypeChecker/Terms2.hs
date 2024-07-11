@@ -231,11 +231,15 @@ newTyVarWith desc info = do
   modify $ \s -> s {termTyVars = M.insert v (lvl, info) $ termTyVars s}
   pure v
 
-newTyVar :: (Located loc) => loc -> Name -> TermM TyVar
-newTyVar loc desc = newTyVarWith desc $ TyVarFree $ locOf loc
+newTyVar :: (Located loc) => loc -> Liftedness -> Name -> TermM TyVar
+newTyVar loc l desc = newTyVarWith desc $ TyVarFree (locOf loc) l
 
-newType :: (Located loc) => loc -> Name -> u -> TermM (TypeBase dim u)
-newType loc desc u = tyVarType u <$> newTyVar loc desc
+newType :: (Located loc) => loc -> Liftedness -> Name -> u -> TermM (TypeBase dim u)
+newType loc l desc u = tyVarType u <$> newTyVar loc l desc
+
+-- | New type that must be allowed as an array element.
+newElemType :: (Located loc) => loc -> Name -> u -> TermM (TypeBase dim u)
+newElemType loc desc u = tyVarType u <$> newTyVar loc Unlifted desc
 
 newTypeWithField :: SrcLoc -> Name -> Name -> Type -> TermM Type
 newTypeWithField loc desc k t =
@@ -404,8 +408,8 @@ instTypeScheme _qn loc tparams t = do
   (names, substs) <- fmap (unzip . catMaybes) $
     forM tparams $ \tparam ->
       case tparam of
-        TypeParamType _ v _ -> do
-          v' <- newTyVar loc $ nameFromString $ takeWhile isAscii $ baseString v
+        TypeParamType l v _ -> do
+          v' <- newTyVar loc l $ nameFromString $ takeWhile isAscii $ baseString v
           pure $ Just (v, (typeParamName tparam, tyVarType NoUniqueness v'))
         TypeParamDim {} ->
           pure Nothing
@@ -490,13 +494,13 @@ checkPat' (Id name NoInfo loc) (Ascribed t) = do
   t' <- asStructType t
   pure $ Id name (Info t') loc
 checkPat' (Id name NoInfo loc) NoneInferred = do
-  t <- newType loc "t" Observe
+  t <- newType loc Lifted "t" Observe
   pure $ Id name (Info t) loc
 checkPat' (Wildcard _ loc) (Ascribed t) = do
   t' <- asStructType t
   pure $ Wildcard (Info t') loc
 checkPat' (Wildcard NoInfo loc) NoneInferred = do
-  t <- newType loc "t" Observe
+  t <- newType loc Lifted "t" Observe
   pure $ Wildcard (Info t) loc
 checkPat' (TuplePat ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t,
@@ -505,7 +509,7 @@ checkPat' (TuplePat ps loc) (Ascribed t)
         <$> zipWithM checkPat' ps (map Ascribed ts)
         <*> pure loc
   | otherwise = do
-      ps_tvs <- replicateM (length ps) (newTyVar loc "t")
+      ps_tvs <- replicateM (length ps) (newTyVar loc Lifted "t")
       ctEq (Reason (locOf loc)) (Scalar (tupleRecord $ map (tyVarType NoUniqueness) ps_tvs)) t
       TuplePat <$> zipWithM checkPat' ps (map (Ascribed . tyVarType Observe) ps_tvs) <*> pure loc
 checkPat' (TuplePat ps loc) NoneInferred =
@@ -525,7 +529,9 @@ checkPat' p@(RecordPat p_fs loc) (Ascribed t)
     L.sort (map fst p_fs) == L.sort (M.keys t_fs) =
       RecordPat . M.toList <$> check t_fs <*> pure loc
   | otherwise = do
-      p_fs' <- traverse (const $ newType loc "t" NoUniqueness) $ M.fromList p_fs
+      p_fs' <-
+        traverse (const $ newType loc Lifted "t" NoUniqueness) $
+          M.fromList p_fs
       ctEq (Reason (locOf loc)) (Scalar (Record p_fs')) t
       checkPat' p $ Ascribed $ Observe <$ Scalar (Record p_fs')
   where
@@ -578,7 +584,7 @@ checkPat' (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
       pure $ PatConstr n (Info (Scalar (Sum cs'))) ps' loc
 checkPat' (PatConstr n NoInfo ps loc) (Ascribed t) = do
   ps' <- forM ps $ \p -> do
-    p_t <- newType (srclocOf p) "t" Observe
+    p_t <- newType (srclocOf p) Lifted "t" Observe
     checkPat' p $ Ascribed p_t
   t' <- newTypeWithConstr loc "t" Observe n $ map (toType . patternType) ps'
   ctEq (Reason (locOf loc)) t' t
@@ -730,8 +736,8 @@ checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
       (a, b) <- split $ Scalar t
       pure (arrayOf s a, arrayOf s b)
     split ftype' = do
-      a <- newType loc "arg" NoUniqueness
-      b <- newType loc "res" Nonunique
+      a <- newType loc Lifted "arg" NoUniqueness
+      b <- newType loc Lifted "res" Nonunique
       ctEq (Reason (locOf loc)) ftype' $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] b
       pure (a, b `setUniqueness` NoUniqueness)
 
@@ -759,7 +765,7 @@ mustHaveFields loc t [f] ve_t = do
   rt :: Type <- newTypeWithField loc "ft" f ve_t
   ctEq (Reason (locOf loc)) t rt
 mustHaveFields loc t (f : fs) ve_t = do
-  ft <- newType loc "ft" NoUniqueness
+  ft <- newType loc Lifted "ft" NoUniqueness
   rt <- newTypeWithField loc "rt" f ft
   mustHaveFields loc ft fs ve_t
   ctEq (Reason (locOf loc)) t rt
@@ -844,7 +850,7 @@ checkExp (Not arg loc) = do
   arg' <- require "logical negation" (Bool : anyIntType) =<< checkExp arg
   pure $ Not arg' loc
 checkExp (Hole NoInfo loc) =
-  Hole <$> (Info <$> newType loc "hole" NoUniqueness) <*> pure loc
+  Hole <$> (Info <$> newType loc Lifted "hole" NoUniqueness) <*> pure loc
 checkExp (Parens e loc) =
   Parens <$> checkExp e <*> pure loc
 checkExp (TupLit es loc) =
@@ -878,7 +884,7 @@ checkExp (ArrayLit es _ loc) = do
   -- type variables for pathologically large arrays with
   -- type-unsuffixed integers. Add some special case that handles that
   -- more efficiently.
-  et <- newType loc "et" NoUniqueness
+  et <- newElemType loc "et" NoUniqueness
   es' <- forM es $ \e -> do
     e' <- checkExp e
     e_t <- expType e'
@@ -974,7 +980,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
   optype <- lookupVar loc op
   e' <- checkExp e
   e_t <- expType e'
-  t2 <- newType loc "t" NoUniqueness
+  t2 <- newType loc Lifted "t" NoUniqueness
   t2' <- asStructType t2
   let f1 = frameOf e'
   (rt, ams) <- checkApply loc (Just op) (mempty, optype) ((f1, e_t) NE.:| [(mempty, t2)])
@@ -997,7 +1003,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   optype <- lookupVar loc op
   e' <- checkExp e
   e_t <- expType e'
-  t1 <- newType loc "t" NoUniqueness
+  t1 <- newType loc Lifted "t" NoUniqueness
   t1' <- asStructType t1
   let f2 = frameOf e'
   (rt, ams) <- checkApply loc (Just op) (mempty, optype) ((mempty, t1) NE.:| [(f2, e_t)])
@@ -1019,8 +1025,8 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
       loc
 --
 checkExp (ProjectSection fields NoInfo loc) = do
-  a <- newType loc "a" NoUniqueness
-  b <- newType loc "b" NoUniqueness
+  a <- newType loc Lifted "a" NoUniqueness
+  b <- newType loc Lifted "b" NoUniqueness
   mustHaveFields loc a fields b
   ft <- asStructType $ Scalar $ Arrow mempty Unnamed Observe a $ RetType [] $ b `setUniqueness` Nonunique
   pure $ ProjectSection fields (Info ft) loc
@@ -1087,7 +1093,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
         pure e'
   maybe_step' <- traverse check maybe_step
   end' <- traverse check end
-  range_t <- newType loc "range" NoUniqueness
+  range_t <- newElemType loc "range" NoUniqueness
   range_t' <- asType range_t
   start_t <- expType start'
   ctEq (Reason (locOf start')) range_t' (arrayOfRank 1 start_t)
@@ -1095,7 +1101,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
 --
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
-  kt <- newType loc "kt" NoUniqueness
+  kt <- newType loc Lifted "kt" NoUniqueness
   t <- newTypeWithField loc "t" k kt
   e_t <- expType e'
   ctEq (Reason (locOf e')) e_t t
@@ -1113,9 +1119,9 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
 --
 checkExp (IndexSection slice NoInfo loc) = do
   slice' <- checkSlice slice
-  index_arg_t <- newType loc "index" NoUniqueness
-  index_elem_t <- newType loc "index_elem" NoUniqueness
-  index_res_t <- newType loc "index_res" NoUniqueness
+  index_arg_t <- newElemType loc "index" NoUniqueness
+  index_elem_t <- newElemType loc "index_elem" NoUniqueness
+  index_res_t <- newElemType loc "index_res" NoUniqueness
   let num_slices = length $ filter isSlice slice
   ctEq (Reason (locOf loc)) index_arg_t $ arrayOfRank num_slices index_elem_t
   ctEq (Reason (locOf loc)) index_res_t $ arrayOfRank (length slice) index_elem_t
@@ -1126,8 +1132,8 @@ checkExp (AppExp (Index e slice loc) _) = do
   e' <- checkExp e
   e_t <- expType e'
   slice' <- checkSlice slice
-  index_tv <- newTyVar loc "index"
-  index_elem_t <- newType loc "index_elem" NoUniqueness
+  index_tv <- newTyVar loc Unlifted "index"
+  index_elem_t <- newElemType loc "index_elem" NoUniqueness
   let num_slices = length $ filter isSlice slice
   ctEq (Reason (locOf loc)) (tyVarType NoUniqueness index_tv) $ arrayOfRank num_slices index_elem_t
   ctEq (Reason (locOf e')) e_t $ arrayOfRank (length slice) index_elem_t
@@ -1140,7 +1146,7 @@ checkExp (Update src slice ve loc) = do
   ve' <- checkExp ve
   ve_t <- expType ve'
   let num_slices = length $ filter isSlice slice
-  update_elem_t <- newType loc "update_elem" NoUniqueness
+  update_elem_t <- newElemType loc "update_elem" NoUniqueness
   ctEq (Reason (locOf src')) src_t $ arrayOfRank (length slice) update_elem_t
   ctEq (Reason (locOf ve')) ve_t $ arrayOfRank num_slices update_elem_t
   pure $ Update src' slice' ve' loc
@@ -1154,7 +1160,7 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
   ve' <- checkExp ve
   ve_t <- expType ve'
   let num_slices = length $ filter isSlice slice
-  update_elem_t <- newType loc "update_elem" NoUniqueness
+  update_elem_t <- newElemType loc "update_elem" NoUniqueness
   ctEq (Reason (locOf loc)) src_t $ arrayOfRank (length slice) update_elem_t
   ctEq (Reason (locOf ve')) ve_t $ arrayOfRank num_slices update_elem_t
   bind [dest'] $ do
@@ -1170,12 +1176,14 @@ checkExp (AppExp (If e1 e2 e3 loc) _) = do
   e2_t <- expType e2'
   e3' <- checkExp e3
   e3_t <- expType e3'
+  if_t <- newType loc SizeLifted "if_t" NoUniqueness
 
   ctEq (Reason (locOf e1')) e1_t (Scalar (Prim Bool))
-  ctEq (Reason (locOf loc)) e2_t e3_t
+  ctEq (Reason (locOf loc)) e2_t if_t
+  ctEq (Reason (locOf loc)) e3_t if_t
 
-  e2_t' <- asStructType e2_t
-  pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes e2_t' [])
+  if_t' <- asStructType if_t
+  pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes if_t' [])
 --
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
@@ -1205,7 +1213,7 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
           pure (While cond', body')
         ForIn elemp arr -> do
           arr' <- checkExp arr
-          elem_t <- newType elemp "elem" NoUniqueness
+          elem_t <- newElemType elemp "elem" NoUniqueness
           arr_t <- expType arr'
           elem_t' <- asType elem_t
           ctEq (Reason (locOf arr')) arr_t $ arrayOfRank 1 elem_t'
@@ -1270,13 +1278,16 @@ doDefaults tyvars_at_toplevel substs = do
   pure $ M.map (substTyVars (`M.lookup` substs')) substs'
 
 generalise ::
-  TypeBase () NoUniqueness -> [VName] -> Solution -> ([TypeParam], [VName])
+  TypeBase () NoUniqueness ->
+  [UnconTyVar] ->
+  Solution ->
+  ([TypeParam], [VName])
 generalise fun_t unconstrained solution =
   -- Candidates for let-generalisation are those type variables that
   -- are used in fun_t.
   let visible = foldMap expandTyVars $ typeVars fun_t
-      onTyVar v
-        | v `S.member` visible = Left $ TypeParamType Unlifted v mempty
+      onTyVar (v, l)
+        | v `S.member` visible = Left $ TypeParamType l v mempty
         | otherwise = Right v
    in partitionEithers $ map onTyVar unconstrained
   where
@@ -1286,7 +1297,7 @@ generalise fun_t unconstrained solution =
         _ -> S.singleton v
 
 generaliseAndDefaults ::
-  [VName] ->
+  [UnconTyVar] ->
   Solution ->
   TypeBase () NoUniqueness ->
   TermM ([TypeParam], M.Map VName (TypeBase () NoUniqueness))
@@ -1354,6 +1365,8 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         unlines
           [ "## constraints:",
             unlines $ map prettyString cts',
+            "## typarams:",
+            unlines (map (prettyString . bimap prettyNameString fst) (M.toList typarams)),
             "## tyvars':",
             unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
             "## solution:",
@@ -1396,7 +1409,7 @@ checkSingleExp e = runTermM $ do
 -- turn out to be polymorphic, in which case it is unified with i64.
 checkSizeExp ::
   ExpBase NoInfo VName ->
-  TypeM (Either TypeError ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
+  TypeM (Either TypeError ([UnconTyVar], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
 checkSizeExp e = runTermM $ do
   e' <- checkSizeExp' e
   cts <- gets termConstraints

@@ -160,7 +160,7 @@ addCt (CtAM _ r m f) = do
   addObj tr
 
 addTyVarInfo :: TyVar -> (Int, TyVarInfo) -> RankM ()
-addTyVarInfo _ (_, TyVarFree _) = pure ()
+addTyVarInfo _ (_, TyVarFree {}) = pure ()
 addTyVarInfo tv (_, TyVarPrim {}) =
   addConstraint $ rank tv ~==~ constant 0
 addTyVarInfo tv (_, TyVarRecord {}) =
@@ -392,8 +392,11 @@ addRankInfo t = do
       t' <- newTyVar t
       old_tyvars <- asks envTyVars
       let (level, tvinfo) = fromJust $ old_tyvars M.!? t
+          l = case tvinfo of
+            TyVarFree _ tvinfo_l -> tvinfo_l
+            _ -> Unlifted
       modify $ \s -> s {substTyVars = M.insert t' (level, tvinfo) $ substTyVars s}
-      modify $ \s -> s {substTyVars = M.insert t (level, TyVarFree $ locOf tvinfo) $ substTyVars s}
+      modify $ \s -> s {substTyVars = M.insert t (level, TyVarFree (locOf tvinfo) l) $ substTyVars s}
 
 class SubstRanks a where
   substRanks :: (MonadTypeChecker m) => a -> SubstT m a
