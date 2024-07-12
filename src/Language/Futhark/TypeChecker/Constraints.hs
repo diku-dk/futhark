@@ -171,6 +171,14 @@ lookupTyVar orig = do
         Just (Right (TyVarUnsol lvl info)) -> pure (lvl, Left info)
   f orig
 
+-- | Variable must be flexible.
+lookupTyVarInfo :: TyVar -> SolveM (Level, TyVarInfo)
+lookupTyVarInfo v = do
+  (lvl, r) <- lookupTyVar v
+  case r of
+    Left info -> pure (lvl, info)
+    Right _ -> error $ "Tyvar is nonflexible: " <> prettyNameString v
+
 setLink :: TyVar -> VName -> SolveM ()
 setLink v info = modify $ \s -> s {solverTyVars = M.insert v (Left info) $ solverTyVars s}
 
@@ -338,11 +346,15 @@ subTyVar reason v v_lvl t = do
 unionTyVars :: Reason -> VName -> VName -> SolveM ()
 unionTyVars reason v t = do
   v_info <- gets $ either alreadyLinked id . fromMaybe unknown . M.lookup v . solverTyVars
-  (t_lvl, t') <- lookupTyVar t
+  (t_lvl, t_info) <- lookupTyVarInfo t
 
-  case (v_info, t') of
+  -- Insert the link from v to t, and then update the info of t based
+  -- on the existing info of v and t.
+  setLink v t
+
+  case (v_info, t_info) of
     ( TyVarUnsol _ (TyVarFree _ v_l),
-      Left (TyVarFree t_loc t_l)
+      TyVarFree t_loc t_l
       )
         | v_l /= t_l ->
             setInfo t $ TyVarUnsol t_lvl $ TyVarFree t_loc (min v_l t_l)
@@ -350,17 +362,17 @@ unionTyVars reason v t = do
     (TyVarUnsol _ TyVarFree {}, _) ->
       pure ()
     ( TyVarUnsol _ info,
-      Left (TyVarFree {})
+      TyVarFree {}
       ) ->
         setInfo t (TyVarUnsol t_lvl info)
     --
     -- TyVarPrim cases
     ( TyVarUnsol _ info@TyVarPrim {},
-      Left TyVarEql {}
+      TyVarEql {}
       ) ->
         setInfo t (TyVarUnsol t_lvl info)
     ( TyVarUnsol _ (TyVarPrim _ v_pts),
-      Left (TyVarPrim t_loc t_pts)
+      TyVarPrim t_loc t_pts
       ) ->
         let pts = L.intersect v_pts t_pts
          in if null pts
@@ -372,14 +384,14 @@ unionTyVars reason v t = do
                     </> indent 2 (pretty t_pts)
               else setInfo t (TyVarUnsol t_lvl (TyVarPrim t_loc pts))
     ( TyVarUnsol _ (TyVarPrim _ v_pts),
-      Left TyVarRecord {}
+      TyVarRecord {}
       ) ->
         typeError (locOf reason) mempty $
           "Cannot unify type that must be one of"
             </> indent 2 (pretty v_pts)
             </> "with type that must be record."
     ( TyVarUnsol _ (TyVarPrim _ v_pts),
-      Left TyVarSum {}
+      TyVarSum {}
       ) ->
         typeError (locOf reason) mempty $
           "Cannot unify type that must be one of"
@@ -388,19 +400,19 @@ unionTyVars reason v t = do
     --
     -- TyVarSum cases
     ( TyVarUnsol _ (TyVarSum _ cs1),
-      Left (TyVarSum loc cs2)
+      TyVarSum loc cs2
       ) -> do
         unifySharedConstructors reason cs1 cs2
         let cs3 = cs1 <> cs2
         setInfo t (TyVarUnsol t_lvl (TyVarSum loc cs3))
     ( TyVarUnsol _ TyVarSum {},
-      Left (TyVarPrim _ pts)
+      TyVarPrim _ pts
       ) ->
         typeError (locOf reason) mempty $
           "A sum type cannot be one of"
             </> indent 2 (pretty pts)
     ( TyVarUnsol _ (TyVarSum _ cs1),
-      Left (TyVarRecord _ fs)
+      TyVarRecord _ fs
       ) ->
         typeError (locOf reason) mempty $
           "Cannot unify type with constructors"
@@ -408,25 +420,25 @@ unionTyVars reason v t = do
             </> "with type"
             </> indent 2 (pretty (Scalar (Record fs)))
     ( TyVarUnsol _ (TyVarSum _ cs1),
-      Left (TyVarEql _)
+      TyVarEql _
       ) ->
         mapM_ (mapM_ (mustSupportEql reason)) cs1
     --
     -- TyVarRecord cases
     ( TyVarUnsol _ (TyVarRecord _ fs1),
-      Left (TyVarRecord loc fs2)
+      TyVarRecord loc fs2
       ) -> do
         unifySharedFields reason fs1 fs2
         let fs3 = fs1 <> fs2
         setInfo t (TyVarUnsol t_lvl (TyVarRecord loc fs3))
     ( TyVarUnsol _ TyVarRecord {},
-      Left (TyVarPrim _ pts)
+      TyVarPrim _ pts
       ) ->
         typeError (locOf reason) mempty $
           "A record type cannot be one of"
             </> indent 2 (pretty pts)
     ( TyVarUnsol _ (TyVarRecord _ fs1),
-      Left (TyVarSum _ cs)
+      TyVarSum _ cs
       ) ->
         typeError (locOf reason) mempty $
           "Cannot unify record type"
@@ -434,18 +446,18 @@ unionTyVars reason v t = do
             </> "with type"
             </> indent 2 (pretty (Scalar (Sum cs)))
     ( TyVarUnsol _ (TyVarRecord _ fs1),
-      Left (TyVarEql _)
+      TyVarEql _
       ) ->
         mapM_ (mustSupportEql reason) fs1
     --
     -- TyVarEql cases
-    (TyVarUnsol _ (TyVarEql _), Left TyVarPrim {}) ->
+    (TyVarUnsol _ (TyVarEql _), TyVarPrim {}) ->
       pure ()
-    (TyVarUnsol _ (TyVarEql _), Left TyVarEql {}) ->
+    (TyVarUnsol _ (TyVarEql _), TyVarEql {}) ->
       pure ()
-    (TyVarUnsol _ (TyVarEql _), Left (TyVarRecord _ fs)) ->
+    (TyVarUnsol _ (TyVarEql _), TyVarRecord _ fs) ->
       mustSupportEql reason $ Scalar $ Record fs
-    (TyVarUnsol _ (TyVarEql _), Left (TyVarSum _ cs)) ->
+    (TyVarUnsol _ (TyVarEql _), TyVarSum _ cs) ->
       mustSupportEql reason $ Scalar $ Sum cs
     --
     -- Internal error cases
@@ -453,11 +465,6 @@ unionTyVars reason v t = do
       alreadySolved
     (TyVarParam {}, _) ->
       isParam
-    (_, Right t'') ->
-      error $ "unionTyVars: rhs " <> prettyNameString t <> " is solved as " <> prettyString t''
-
-  -- Finally insert the actual link.
-  setLink v t
   where
     unknown = error $ "unionTyVars: Nothing v: " <> prettyNameString v
     alreadyLinked = error $ "Type variable already linked: " <> prettyNameString v
