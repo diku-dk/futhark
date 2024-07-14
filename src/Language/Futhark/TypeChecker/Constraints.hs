@@ -128,13 +128,13 @@ type Level = Int
 type TyVars = M.Map TyVar (Level, TyVarInfo)
 
 -- | Explicit type parameters.
-type TyParams = M.Map TyVar (Level, Loc)
+type TyParams = M.Map TyVar (Level, Liftedness, Loc)
 
 data TyVarSol
   = -- | Has been substituted with this.
     TyVarSol Level Type
   | -- | Is an explicit (rigid) type parameter in the source program.
-    TyVarParam Level Loc
+    TyVarParam Level Liftedness Loc
   | -- | Not substituted yet; has this constraint.
     TyVarUnsol Level TyVarInfo
   deriving (Show)
@@ -148,7 +148,7 @@ initialState :: TyParams -> TyVars -> SolverState
 initialState typarams tyvars = SolverState $ M.map g typarams <> M.map f tyvars
   where
     f (lvl, info) = Right $ TyVarUnsol lvl info
-    g (lvl, loc) = Right $ TyVarParam lvl loc
+    g (lvl, l, loc) = Right $ TyVarParam lvl l loc
 
 substTyVar :: (Monoid u) => M.Map TyVar (Either VName TyVarSol) -> VName -> Maybe (TypeBase SComp u)
 substTyVar m v =
@@ -159,17 +159,23 @@ substTyVar m v =
     Just (Right (TyVarUnsol {})) -> Nothing
     Nothing -> Nothing
 
-lookupTyVar :: TyVar -> SolveM (Level, Either TyVarInfo Type)
-lookupTyVar orig = do
+maybeLookupTyVar :: TyVar -> SolveM (Maybe TyVarSol)
+maybeLookupTyVar orig = do
   tyvars <- gets solverTyVars
   let f v = case M.lookup v tyvars of
-        Nothing -> error $ "Unknown tyvar: " <> prettyNameString v
+        Nothing -> pure Nothing
         Just (Left v') -> f v'
-        Just (Right (TyVarSol lvl t)) -> pure (lvl, Right t)
-        Just (Right (TyVarParam lvl _)) ->
-          pure (lvl, Right $ Scalar $ TypeVar mempty (qualName orig) [])
-        Just (Right (TyVarUnsol lvl info)) -> pure (lvl, Left info)
+        Just (Right info) -> pure $ Just info
   f orig
+
+lookupTyVar :: TyVar -> SolveM (Level, Either TyVarInfo Type)
+lookupTyVar orig =
+  maybe bad unpack <$> maybeLookupTyVar orig
+  where
+    bad = error $ "Unknown tyvar: " <> prettyNameString orig
+    unpack (TyVarParam {}) = error $ "Is a type param: " <> prettyNameString orig
+    unpack (TyVarSol lvl t) = (lvl, Right t)
+    unpack (TyVarUnsol lvl info) = (lvl, Left info)
 
 -- | Variable must be flexible.
 lookupTyVarInfo :: TyVar -> SolveM (Level, TyVarInfo)
@@ -275,6 +281,11 @@ subTyVar :: Reason -> VName -> Int -> Type -> SolveM ()
 subTyVar reason v v_lvl t = do
   occursCheck reason v t
   v_info <- gets $ M.lookup v . solverTyVars
+
+  -- Set a solution for v, then update info for t in case v has any
+  -- odd constraints.
+  setInfo v (TyVarSol v_lvl t)
+
   case (v_info, t) of
     (Just (Right (TyVarUnsol _ TyVarFree {})), _) ->
       pure ()
@@ -339,8 +350,6 @@ subTyVar reason v v_lvl t = do
       error $ "Type variable already linked: " <> prettyNameString v
     (Nothing, _) ->
       error $ "subTyVar: Nothing v: " <> prettyNameString v
-
-  setInfo v (TyVarSol v_lvl t)
 
 -- Precondition: 'v' and 't' are both currently flexible.
 unionTyVars :: Reason -> VName -> VName -> SolveM ()
@@ -566,9 +575,36 @@ scopeCheck reason v v_lvl ty = do
     check ty_v = do
       ty_v_info <- gets $ M.lookup ty_v . solverTyVars
       case ty_v_info of
-        Just (Right (TyVarParam ty_v_lvl _))
+        Just (Right (TyVarParam ty_v_lvl _ _))
           | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
         _ -> pure ()
+
+-- If a type variable has a liftedness constraint, we propagate that
+-- constraint to its solution. The actual checking for correct usage
+-- is done later.
+liftednessCheck :: Reason -> TyVar -> Liftedness -> Type -> SolveM ()
+liftednessCheck reason v l (Scalar (TypeVar _ (QualName [] v2) _)) = do
+  v2_info <- maybeLookupTyVar v2
+  case v2_info of
+    Nothing ->
+      -- Is an opaque type.
+      pure ()
+    Just (TyVarSol _ v2_ty) ->
+      liftednessCheck reason v l v2_ty
+    Just TyVarParam {} -> pure ()
+    Just (TyVarUnsol lvl (TyVarFree loc v2_l))
+      | l /= v2_l ->
+          setInfo v2 $ TyVarUnsol lvl $ TyVarFree loc (min l v2_l)
+    Just TyVarUnsol {} -> pure ()
+liftednessCheck _ _ _ (Scalar Prim {}) = pure ()
+liftednessCheck _ _ Lifted _ = pure ()
+liftednessCheck _ _ _ Array {} = pure ()
+liftednessCheck _ _ _ (Scalar Arrow {}) = pure ()
+liftednessCheck reason v l (Scalar (Record fs)) =
+  mapM_ (liftednessCheck reason v l) fs
+liftednessCheck reason v l (Scalar (Sum cs)) =
+  mapM_ (mapM_ $ liftednessCheck reason v l) cs
+liftednessCheck _ _ _ (Scalar TypeVar {}) = pure ()
 
 solveTyVar :: (VName, (Level, TyVarInfo)) -> SolveM ()
 solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
@@ -607,11 +643,23 @@ solveTyVar (tv, (_, TyVarEql loc)) = do
             "Type"
               </> indent 2 (align (pretty ty))
               </> "does not support equality (may contain function)."
-solveTyVar (tv, (lvl, _)) = do
+solveTyVar (tv, (lvl, TyVarFree loc l)) = do
   (_, tv_t) <- lookupTyVar tv
   case tv_t of
-    Right ty ->
-      scopeCheck (Reason mempty) tv lvl ty
+    Right ty -> do
+      scopeCheck (Reason loc) tv lvl ty
+      liftednessCheck (Reason loc) tv l ty
+    _ -> pure ()
+solveTyVar (tv, (_, TyVarPrim loc pts)) = do
+  (_, tv_t) <- lookupTyVar tv
+  case tv_t of
+    Right ty
+      | ty `elem` map (Scalar . Prim) pts -> pure ()
+      | otherwise ->
+          typeError loc mempty $
+            "Numeric constant inferred to be of type"
+              </> indent 2 (align (pretty ty))
+              </> "which is not possible."
     _ -> pure ()
 
 solve ::

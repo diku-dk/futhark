@@ -655,9 +655,8 @@ bindTypeParams tparams m =
     types = mapMaybe typeParamType tparams
     typeParamType (TypeParamType l v _) =
       Just (v, TypeAbbr l [] $ RetType [] $ Scalar (TypeVar mempty (qualName v) []))
-    typeParamType TypeParamDim {} =
-      Nothing
-    typeParam lvl (TypeParamType _ v loc) = Just (v, (lvl, locOf loc))
+    typeParamType TypeParamDim {} = Nothing
+    typeParam lvl (TypeParamType l v loc) = Just (v, (lvl, l, locOf loc))
     typeParam _ _ = Nothing
 
 bindParams ::
@@ -1370,7 +1369,8 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
           [ "## constraints:",
             unlines $ map prettyString cts',
             "## typarams:",
-            unlines (map (prettyString . bimap prettyNameString fst) (M.toList typarams)),
+            let f (lvl, l, _) = (lvl, l)
+             in unlines (map (prettyString . bimap prettyNameString f) (M.toList typarams)),
             "## tyvars':",
             unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
             "## solution:",
