@@ -256,13 +256,19 @@ rankAnalysis1 ::
   M.Map TyVar Type ->
   [Pat ParamType] ->
   Exp ->
-  m (([Ct], M.Map TyVar Type, TyVars), [Pat ParamType], Exp)
-rankAnalysis1 loc cs tyVars artificial params body = do
-  solutions <- rankAnalysis loc cs tyVars artificial params body
+  Maybe (TypeExp Exp VName) ->
+  m
+    ( ([Ct], M.Map TyVar Type, TyVars),
+      [Pat ParamType],
+      Exp,
+      Maybe (TypeExp Exp VName)
+    )
+rankAnalysis1 loc cs tyVars artificial params body retdecl = do
+  solutions <- rankAnalysis loc cs tyVars artificial params body retdecl
   case solutions of
     [sol] -> pure sol
     sols -> do
-      let (_, _, bodies') = unzip3 sols
+      let (_, _, bodies', _) = L.unzip4 sols
       typeError loc mempty $
         stack $
           [ "Rank ILP is ambiguous.",
@@ -278,10 +284,17 @@ rankAnalysis ::
   M.Map TyVar Type ->
   [Pat ParamType] ->
   Exp ->
-  m [(([Ct], M.Map TyVar Type, TyVars), [Pat ParamType], Exp)]
-rankAnalysis _ [] tyVars artificial params body =
-  pure [(([], artificial, tyVars), params, body)]
-rankAnalysis loc cs tyVars artificial params body = do
+  Maybe (TypeExp Exp VName) ->
+  m
+    [ ( ([Ct], M.Map TyVar Type, TyVars),
+        [Pat ParamType],
+        Exp,
+        Maybe (TypeExp Exp VName)
+      )
+    ]
+rankAnalysis _ [] tyVars artificial params body retdecl =
+  pure [(([], artificial, tyVars), params, body, retdecl)]
+rankAnalysis loc cs tyVars artificial params body retdecl = do
   debugTraceM 3 $
     unlines
       [ "##rankAnalysis",
@@ -294,18 +307,21 @@ rankAnalysis loc cs tyVars artificial params body = do
   cts_tyvars' <- mapM (substRankInfo cs artificial tyVars) rank_maps
   let bodys = map (`updAM` body) rank_maps
       params' = map ((`map` params) . updAMPat) rank_maps
-  pure $ zip3 cts_tyvars' params' bodys
+      retdecls = map ((<$> retdecl) . updAMTypeExp) rank_maps
+  pure $ L.zip4 cts_tyvars' params' bodys retdecls
   where
     cs' =
       foldMap distribAndSplitCnstrs $
         foldMap distribAndSplitArrows cs
+
+type RankMap = M.Map VName Int
 
 substRankInfo ::
   (MonadTypeChecker m) =>
   [Ct] ->
   M.Map VName Type ->
   TyVars ->
-  Map VName Int ->
+  RankMap ->
   m ([Ct], M.Map VName Type, TyVars)
 substRankInfo cs artificial tyVars rankmap = do
   ((cs', artificial', tyVars'), new_cs, new_tyVars) <-
@@ -316,7 +332,7 @@ substRankInfo cs artificial tyVars rankmap = do
     isCtAM (CtAM {}) = True
     isCtAM _ = False
 
-runSubstT :: (MonadTypeChecker m) => TyVars -> Map VName Int -> SubstT m a -> m (a, [Ct], TyVars)
+runSubstT :: (MonadTypeChecker m) => TyVars -> RankMap -> SubstT m a -> m (a, [Ct], TyVars)
 runSubstT tyVars rankmap (SubstT m) = do
   let env =
         SubstEnv
@@ -344,7 +360,7 @@ newtype SubstT m a = SubstT (StateT SubstState (ReaderT SubstEnv m) a)
 
 data SubstEnv = SubstEnv
   { envTyVars :: TyVars,
-    envRanks :: Map VName Int
+    envRanks :: RankMap
   }
 
 data SubstState = SubstState
@@ -443,7 +459,7 @@ instance SubstRanks TyVarInfo where
 instance SubstRanks (Int, TyVarInfo) where
   substRanks (lvl, tv) = (lvl,) <$> substRanks tv
 
-updAM :: Map VName Int -> Exp -> Exp
+updAM :: RankMap -> Exp -> Exp
 updAM rank_map e =
   case e of
     AppExp (Apply f args loc) res ->
@@ -476,15 +492,17 @@ updAM rank_map e =
     shapeToRank = Shape . foldMap dimToRank
     upd (AutoMap r m f) =
       AutoMap (shapeToRank r) (shapeToRank m) (shapeToRank f)
-    mapper =
-      identityMapper
-        { mapOnExp = pure . updAM rank_map
-        }
+    mapper = identityMapper {mapOnExp = pure . updAM rank_map}
 
-updAMPat :: M.Map VName Int -> Pat ParamType -> Pat ParamType
+updAMPat :: RankMap -> Pat ParamType -> Pat ParamType
 updAMPat rank_map p = runIdentity $ astMap m p
   where
-    m =
-      identityMapper
-        { mapOnExp = pure . updAM rank_map
-        }
+    m = identityMapper {mapOnExp = pure . updAM rank_map}
+
+updAMTypeExp ::
+  RankMap ->
+  TypeExp Exp VName ->
+  TypeExp Exp VName
+updAMTypeExp rank_map te = runIdentity $ astMap m te
+  where
+    m = identityMapper {mapOnExp = pure . updAM rank_map}

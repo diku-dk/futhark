@@ -1356,10 +1356,10 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         unlines $ map (\(v, t) -> prettyNameString v <> " => " <> prettyString t) (M.toList artificial)
       ]
 
-  onRankSolution retdecl' typarams
-    =<< rankAnalysis1 loc cts tyvars artificial params' body'
+  onRankSolution typarams
+    =<< rankAnalysis1 loc cts tyvars artificial params' body' retdecl'
   where
-    onRankSolution retdecl' typarams ((cts', artificial, tyvars'), params', body'') = do
+    onRankSolution typarams ((cts', artificial, tyvars'), params', body'', retdecl') = do
       solution <-
         bitraverse
           pure
@@ -1400,8 +1400,8 @@ checkSingleExp e = runTermM $ do
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
   artificial <- gets termArtificial
-  ((cts', _artificial', tyvars'), _, e'') <-
-    rankAnalysis1 (srclocOf e') cts tyvars artificial [] e'
+  ((cts', _artificial', tyvars'), _, e'', _) <-
+    rankAnalysis1 (srclocOf e') cts tyvars artificial [] e' Nothing
   case solve cts' typarams tyvars' of
     Left err -> pure (Left err, e'')
     Right (unconstrained, solution) -> do
@@ -1421,7 +1421,8 @@ checkSizeExp e = runTermM $ do
   typarams <- gets termTyParams
   artificial <- gets termArtificial
 
-  (cts_tyvars', _, es') <- unzip3 <$> rankAnalysis (srclocOf e) cts tyvars artificial [] e'
+  (cts_tyvars', _, es', _) <-
+    L.unzip4 <$> rankAnalysis (srclocOf e) cts tyvars artificial [] e' Nothing
 
   solutions <-
     forM cts_tyvars' $ \(cts', _artificial', tyvars') ->
