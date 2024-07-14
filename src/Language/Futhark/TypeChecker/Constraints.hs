@@ -582,29 +582,29 @@ scopeCheck reason v v_lvl ty = do
 -- If a type variable has a liftedness constraint, we propagate that
 -- constraint to its solution. The actual checking for correct usage
 -- is done later.
-liftednessCheck :: Reason -> TyVar -> Liftedness -> Type -> SolveM ()
-liftednessCheck reason v l (Scalar (TypeVar _ (QualName [] v2) _)) = do
-  v2_info <- maybeLookupTyVar v2
-  case v2_info of
+liftednessCheck :: Liftedness -> Type -> SolveM ()
+liftednessCheck l (Scalar (TypeVar _ (QualName [] v) _)) = do
+  v_info <- maybeLookupTyVar v
+  case v_info of
     Nothing ->
       -- Is an opaque type.
       pure ()
-    Just (TyVarSol _ v2_ty) ->
-      liftednessCheck reason v l v2_ty
+    Just (TyVarSol _ v_ty) ->
+      liftednessCheck l v_ty
     Just TyVarParam {} -> pure ()
-    Just (TyVarUnsol lvl (TyVarFree loc v2_l))
-      | l /= v2_l ->
-          setInfo v2 $ TyVarUnsol lvl $ TyVarFree loc (min l v2_l)
+    Just (TyVarUnsol lvl (TyVarFree loc v_l))
+      | l /= v_l ->
+          setInfo v $ TyVarUnsol lvl $ TyVarFree loc (min l v_l)
     Just TyVarUnsol {} -> pure ()
-liftednessCheck _ _ _ (Scalar Prim {}) = pure ()
-liftednessCheck _ _ Lifted _ = pure ()
-liftednessCheck _ _ _ Array {} = pure ()
-liftednessCheck _ _ _ (Scalar Arrow {}) = pure ()
-liftednessCheck reason v l (Scalar (Record fs)) =
-  mapM_ (liftednessCheck reason v l) fs
-liftednessCheck reason v l (Scalar (Sum cs)) =
-  mapM_ (mapM_ $ liftednessCheck reason v l) cs
-liftednessCheck _ _ _ (Scalar TypeVar {}) = pure ()
+liftednessCheck _ (Scalar Prim {}) = pure ()
+liftednessCheck Lifted _ = pure ()
+liftednessCheck _ Array {} = pure ()
+liftednessCheck _ (Scalar Arrow {}) = pure ()
+liftednessCheck l (Scalar (Record fs)) =
+  mapM_ (liftednessCheck l) fs
+liftednessCheck l (Scalar (Sum cs)) =
+  mapM_ (mapM_ $ liftednessCheck l) cs
+liftednessCheck _ (Scalar TypeVar {}) = pure ()
 
 solveTyVar :: (VName, (Level, TyVarInfo)) -> SolveM ()
 solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
@@ -648,7 +648,7 @@ solveTyVar (tv, (lvl, TyVarFree loc l)) = do
   case tv_t of
     Right ty -> do
       scopeCheck (Reason loc) tv lvl ty
-      liftednessCheck (Reason loc) tv l ty
+      liftednessCheck l ty
     _ -> pure ()
 solveTyVar (tv, (_, TyVarPrim loc pts)) = do
   (_, tv_t) <- lookupTyVar tv
