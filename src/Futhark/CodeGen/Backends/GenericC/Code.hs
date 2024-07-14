@@ -59,12 +59,6 @@ compilePrimExp f (UnOpExp Complement {} x) = do
 compilePrimExp f (UnOpExp Not {} x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|!$exp:x'|]
-compilePrimExp f (UnOpExp (FAbs Float32) x) = do
-  x' <- compilePrimExp f x
-  pure [C.cexp|(float)fabs($exp:x')|]
-compilePrimExp f (UnOpExp (FAbs Float64) x) = do
-  x' <- compilePrimExp f x
-  pure [C.cexp|fabs($exp:x')|]
 compilePrimExp f (UnOpExp SSignum {} x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0)|]
