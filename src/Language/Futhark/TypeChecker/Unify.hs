@@ -807,10 +807,31 @@ unifyMostCommon ::
   StructType ->
   m (StructType, [VName])
 unifyMostCommon usage t1 t2 = do
-  -- We are ignoring the dimensions here, because any mismatches
-  -- should be turned into fresh size variables.
-  let allOK _ _ _ _ _ = pure ()
-  unifyWith allOK usage mempty noBreadCrumbs t1 t2
+  -- Like 'unifySizes', except we do not fail on mismatches - these
+  -- are instead turned into fresh existential sizes in
+  -- 'newDimOnMismatch'. The most annoying thing is that we have to
+  -- replicate scope checking, because we don't want to link if it
+  -- would fail.
+  constraints <- getConstraints
+
+  let varLevel v = fst <$> M.lookup v constraints
+      expLevel e =
+        L.foldl' max 0 $ mapMaybe varLevel $ S.toList $ fvVars $ freeInExp e
+
+      onDims bcs bound nonrigid e1 e2
+        | Just es <- similarExps e1 e2 =
+            mapM_ (uncurry $ onDims bcs bound nonrigid) es
+      onDims bcs _ nonrigid (Var v1 _ _) e2
+        | Just lvl1 <- nonrigid (qualLeaf v1),
+          expLevel e2 < lvl1 =
+            linkVarToDim usage bcs (qualLeaf v1) lvl1 e2
+      onDims bcs _ nonrigid e1 (Var v2 _ _)
+        | Just lvl2 <- nonrigid (qualLeaf v2),
+          expLevel e1 < lvl2 =
+            linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
+      onDims _ _ _ _ _ = pure ()
+
+  unifyWith onDims usage mempty noBreadCrumbs t1 t2
   t1' <- normTypeFully t1
   t2' <- normTypeFully t2
   newDimOnMismatch (locOf usage) t1' t2'
