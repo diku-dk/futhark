@@ -796,6 +796,13 @@ checkExp (AppExp (Loop _ mergepat mergeexp form loopbody loc) _) = do
 checkExp (Constr name es (Info t) loc) = do
   t' <- replaceTyVars loc t
   es' <- mapM checkExp es
+  case t' of
+    Scalar (Sum cs)
+      | Just name_ts <- M.lookup name cs ->
+          zipWithM_ (unify $ mkUsage loc "inferred variant") name_ts $
+            map typeOf es'
+    _ ->
+      error $ "checkExp Constr: " <> prettyString t'
   pure $ Constr name es' (Info t') loc
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
