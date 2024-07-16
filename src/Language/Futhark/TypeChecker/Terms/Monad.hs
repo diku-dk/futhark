@@ -29,6 +29,8 @@ module Language.Futhark.TypeChecker.Terms.Monad
     replaceTyVars,
     updateTypes,
     Names,
+    mustBeOrderZero,
+    mustBeUnlifted,
 
     -- * Primitive checking
     unifies,
@@ -617,6 +619,33 @@ updateTypes = astMap tv
           mapOnParamType = normTypeFully,
           mapOnResRetType = normTypeFully
         }
+
+mustBeOrderZero :: Loc -> StructType -> TermTypeM ()
+mustBeOrderZero loc t = do
+  constraints <- getConstraints
+  let liftedType v =
+        case M.lookup v constraints of
+          Just (_, ParamType Lifted _) -> True
+          _ -> False
+  when (not (orderZero t) || any liftedType (typeVars t)) $
+    typeError loc mempty $
+      textwrap "This expression may not be of function type, but is inferred to be of type"
+        </> indent 2 (align (pretty t))
+        </> "which may be a function."
+
+mustBeUnlifted :: Loc -> StructType -> TermTypeM ()
+mustBeUnlifted loc t = do
+  constraints <- getConstraints
+  let liftedType v =
+        case M.lookup v constraints of
+          Just (_, ParamType Lifted _) -> True
+          Just (_, ParamType SizeLifted _) -> True
+          _ -> False
+  when (not (orderZero t) || any liftedType (typeVars t)) $
+    typeError loc mempty $
+      textwrap "This expression must be of unlifted type, but is inferred to be of type"
+        </> indent 2 (align (pretty t))
+        </> "which may be a function or a value with hidden sizes."
 
 --- Basic checking
 

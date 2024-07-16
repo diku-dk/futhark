@@ -1191,10 +1191,13 @@ checkExp (AppExp (If e1 e2 e3 loc) _) = do
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
   e_t <- expType e'
-
   (cs', t) <- checkCases e_t cs
-  t' <- asStructType t
-  pure $ AppExp (Match e' cs' loc) (Info $ AppRes t' [])
+
+  match_t <- newType loc SizeLifted "match_t" NoUniqueness
+  ctEq (Reason (locOf loc)) match_t t
+
+  match_t' <- asStructType match_t
+  pure $ AppExp (Match e' cs' loc) (Info $ AppRes match_t' [])
 --
 checkExp (AppExp (Loop _ pat arg form body loc) _) = do
   arg' <- checkExp arg

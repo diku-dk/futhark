@@ -383,12 +383,14 @@ checkExp (ArrayLit all_es _ loc) =
     [] -> do
       et <- newTypeVar loc "t"
       t <- arrayOfM loc et (Shape [sizeFromInteger 0 mempty])
+      mustBeUnlifted (locOf loc) et
       pure $ ArrayLit [] (Info t) loc
     e : es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" et <=< checkExp) es
       t <- arrayOfM loc et (Shape [sizeFromInteger (genericLength all_es) mempty])
+      mustBeUnlifted (locOf loc) et
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- checkExp start
@@ -519,24 +521,6 @@ checkExp (Project k e _ loc) = do
       | Just kt <- M.lookup k fs ->
           pure $ Project k e' (Info kt) loc
     _ -> error $ "checkExp Project: " <> show t
-checkExp (AppExp (If e1 e2 e3 loc) _) = do
-  e1' <- checkExp e1
-  e2' <- checkExp e2
-  e3' <- checkExp e3
-
-  let bool = Scalar $ Prim Bool
-  e1_t <- expType e1'
-  onFailure (CheckingRequired [bool] e1_t) $
-    unify (mkUsage e1' "use as 'if' condition") bool e1_t
-
-  (brancht, retext) <- unifyBranches loc e2' e3'
-
-  zeroOrderType
-    (mkUsage loc "returning value of this type from 'if' expression")
-    "type returned from branch"
-    brancht
-
-  pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes brancht retext)
 checkExp (Parens e loc) =
   Parens <$> checkExp e <*> pure loc
 checkExp (QualParens (modname, modnameloc) e loc) = do
@@ -804,14 +788,28 @@ checkExp (Constr name es (Info t) loc) = do
     _ ->
       error $ "checkExp Constr: " <> prettyString t'
   pure $ Constr name es' (Info t') loc
+checkExp (AppExp (If e1 e2 e3 loc) _) = do
+  e1' <- checkExp e1
+  e2' <- checkExp e2
+  e3' <- checkExp e3
+
+  let bool = Scalar $ Prim Bool
+  e1_t <- expType e1'
+  onFailure (CheckingRequired [bool] e1_t) $
+    unify (mkUsage e1' "use as 'if' condition") bool e1_t
+
+  (t, retext) <- unifyBranches loc e2' e3'
+
+  mustBeOrderZero (locOf loc) t
+
+  pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes t retext)
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
   mt <- expType e'
   (cs', t, retext) <- checkCases mt cs
-  zeroOrderType
-    (mkUsage loc "being returned 'match'")
-    "type returned from pattern match"
-    t
+
+  mustBeOrderZero (locOf loc) t
+
   pure $ AppExp (Match e' cs' loc) (Info $ AppRes t retext)
 checkExp (Attr info e loc) =
   Attr <$> checkAttr info <*> checkExp e <*> pure loc

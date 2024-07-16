@@ -136,11 +136,7 @@ checkLoop ::
 checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
   mergeexp' <- checkExp mergeexp
   known_before <- M.keysSet <$> getConstraints
-  zeroOrderType
-    (mkUsage mergeexp "use as loop variable")
-    "type used as loop variable"
-    . toStruct
-    =<< expTypeFully mergeexp'
+  mustBeOrderZero (locOf mergeexp) =<< expTypeFully mergeexp'
 
   -- The handling of dimension sizes is a bit intricate, but very
   -- similar to checking a function, followed by checking a call to

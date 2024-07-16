@@ -14,7 +14,6 @@ module Language.Futhark.TypeChecker.Unify
     noBreadCrumbs,
     hasNoBreadCrumbs,
     dimNotes,
-    zeroOrderType,
     arrayElemType,
     normType,
     normTypeFully,
@@ -664,40 +663,6 @@ linkVarToDim usage bcs vn lvl e = do
                   <+> "is introduced."
             _ -> modifyConstraints $ M.insert dim' (lvl, c)
     checkVar _ _ = pure ()
-
-zeroOrderTypeWith ::
-  (MonadUnify m) =>
-  Usage ->
-  BreadCrumbs ->
-  StructType ->
-  m ()
-zeroOrderTypeWith usage bcs t = do
-  unless (orderZero t) $
-    unifyError usage mempty bcs $
-      "Type" </> indent 2 (pretty t) </> "found to be functional."
-  mapM_ mustBeZeroOrder . S.toList . typeVars =<< normType t
-  where
-    mustBeZeroOrder vn = do
-      constraints <- getConstraints
-      case M.lookup vn constraints of
-        Just (lvl, NoConstraint _ _) ->
-          modifyConstraints $ M.insert vn (lvl, NoConstraint Unlifted usage)
-        Just (_, ParamType Lifted ploc) ->
-          unifyError usage mempty bcs $
-            "Type parameter"
-              <+> dquotes (prettyName vn)
-              <+> "at"
-              <+> pretty (locStr ploc)
-              <+> "may be a function."
-        _ -> pure ()
-
--- | Assert that this type must be zero-order.
-zeroOrderType ::
-  (MonadUnify m) => Usage -> T.Text -> StructType -> m ()
-zeroOrderType usage desc =
-  zeroOrderTypeWith usage $ breadCrumb bc noBreadCrumbs
-  where
-    bc = Matching $ "When checking" <+> textwrap desc
 
 arrayElemTypeWith ::
   (MonadUnify m, Pretty (Shape dim), Pretty u) =>
