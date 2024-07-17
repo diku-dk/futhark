@@ -217,7 +217,7 @@ struct futhark_context_config {
   const char** tuning_param_vars;
   const char** tuning_param_classes;
   // Uniform fields above.
-  
+
   char *program;
 
   size_t default_block_size;
@@ -356,7 +356,7 @@ struct futhark_context {
   int num_overrides;
   char **override_names;
   double *override_values;
- 
+
   WGPUInstance instance;
   WGPUAdapter adapter;
   WGPUDevice device;
@@ -449,7 +449,7 @@ void wgpu_module_setup(struct futhark_context *ctx) {
     .nextInChain = &wgsl_desc.chain
   };
   ctx->module = wgpuDeviceCreateShaderModule(ctx->device, &desc);
- 
+
   wgpuShaderModuleGetCompilationInfo(ctx->module, wgpu_on_shader_compiled, NULL);
 }
 
@@ -564,7 +564,7 @@ void backend_context_teardown(struct futhark_context *ctx) {
 //
 //   size_t num_scalars;
 //   size_t scalars_binding;
-//   size_t scalars_size; 
+//   size_t scalars_size;
 //   size_t *scalar_offsets;
 //
 //   size_t num_bindings; // excluding the scalars binding
@@ -636,7 +636,7 @@ static void gpu_create_kernel(struct futhark_context *ctx,
     .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst
   };
   kernel->scalars_buffer = wgpuDeviceCreateBuffer(ctx->device, &scalars_desc);
-  
+
   // Create bind group layout.
   WGPUBindGroupLayoutEntry *bgl_entries
     = calloc(1 + kernel_info->num_bindings, sizeof(WGPUBindGroupLayoutEntry));
@@ -690,8 +690,8 @@ static void gpu_create_kernel(struct futhark_context *ctx,
     }
   }
 
-  kernel->static_pipeline = 
-    kernel_info->num_dynamic_block_dims == 0 
+  kernel->static_pipeline =
+    kernel_info->num_dynamic_block_dims == 0
     && kernel_info->num_shared_mem_overrides == 0;
   if (!kernel->static_pipeline) {
     kernel->const_entries = const_entries;
@@ -746,7 +746,7 @@ static int gpu_scalar_from_device(struct futhark_context *ctx,
   WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
 
-  WGPUBufferMapAsyncStatus status = 
+  WGPUBufferMapAsyncStatus status =
     wgpu_map_buffer_sync(ctx->instance, ctx->scalar_readback_buffer,
                          WGPUMapMode_Read, 0, size);
   if (status != WGPUBufferMapAsyncStatus_Success) {
@@ -854,7 +854,7 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
     .usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst,
   };
   WGPUBuffer readback = wgpuDeviceCreateBuffer(ctx->device, &desc);
-  
+
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
   wgpuCommandEncoderCopyBufferToBuffer(encoder,
     src, src_offset,
@@ -865,7 +865,7 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
 
   // TODO: Could we do an actual async mapping here if `sync` is false?
-  WGPUBufferMapAsyncStatus status = 
+  WGPUBufferMapAsyncStatus status =
     wgpu_map_buffer_sync(ctx->instance, readback, WGPUMapMode_Read, 0, buf_size);
   if (status != WGPUBufferMapAsyncStatus_Success) {
     futhark_panic(-1, "Failed to copy from device memory with error %d\n",
@@ -890,9 +890,9 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              size_t args_sizes[num_args]) {
   struct wgpu_kernel_info *kernel_info = kernel->info;
 
-  if (num_args != 
-      kernel_info->num_shared_mem_overrides 
-      + kernel_info->num_scalars 
+  if (num_args !=
+      kernel_info->num_shared_mem_overrides
+      + kernel_info->num_scalars
       + kernel_info->num_bindings
   ) {
     futhark_panic(-1, "Kernel %s called with num_args not maching its info\n",
