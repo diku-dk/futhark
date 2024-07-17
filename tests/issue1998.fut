@@ -11,7 +11,7 @@ module mk_bitset (I: integral) : bitset = {
   def nbs = i64.i32 I.num_bits
   type bitset [n] = [n]I.t
   def zero : I.t = I.i64 0
-  
+
   def empty (n : i64) : bitset[(n - 1) / nbs + 1] =
     replicate ((n - 1) / nbs + 1) zero
 
@@ -22,11 +22,11 @@ module mk_bitset (I: integral) : bitset = {
     in if l == 0
        then s
        else copy s with [l - 1] = s[l - 1] I.& to_keep
-  
+
   def complement [n] (s : bitset[(n - 1) / nbs + 1]) : bitset[(n - 1) / nbs + 1] =
     map I.not s
     |> set_front_bits_zero
-  
+
   def size [n] (s : bitset[(n - 1) / nbs + 1]) : i64 =
     map (i64.i32 <-< I.popc) s
     |> i64.sum

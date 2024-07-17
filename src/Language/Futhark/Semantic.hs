@@ -125,7 +125,10 @@ data TypeBinding = TypeAbbr Liftedness [TypeParam] StructRetType
 -- return type.  The type parameters are in scope in both parameter
 -- types and the return type.  Non-functional values have only a
 -- return type.
-data BoundV = BoundV [TypeParam] StructType
+data BoundV = BoundV
+  { boundValTParams :: [TypeParam],
+    boundValType :: StructType
+  }
   deriving (Show)
 
 -- | A mapping from names (which always exist in some namespace) to a

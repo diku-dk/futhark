@@ -22,6 +22,7 @@ import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
+import Futhark.CodeGen.Backends.GenericC.Pretty (expText, idText, typeText)
 import Futhark.CodeGen.ImpCode
 import Futhark.IR.Prop (isBuiltInFunction)
 import Futhark.MonadFreshNames
@@ -58,12 +59,6 @@ compilePrimExp f (UnOpExp Complement {} x) = do
 compilePrimExp f (UnOpExp Not {} x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|!$exp:x'|]
-compilePrimExp f (UnOpExp (FAbs Float32) x) = do
-  x' <- compilePrimExp f x
-  pure [C.cexp|(float)fabs($exp:x')|]
-compilePrimExp f (UnOpExp (FAbs Float64) x) = do
-  x' <- compilePrimExp f x
-  pure [C.cexp|fabs($exp:x')|]
 compilePrimExp f (UnOpExp SSignum {} x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0)|]
@@ -366,8 +361,19 @@ compileCode (DeclareArray name t vs) = do
   let ct = primTypeToCType t
   case vs of
     ArrayValues vs' -> do
-      let vs'' = [[C.cinit|$exp:v|] | v <- vs']
-      earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:(length vs')] = {$inits:vs''};|]
+      -- To handle very large literal arrays (which are inefficient
+      -- with language-c-quote, see #2160), we do our own formatting and inject it as a string.
+      let array_decl =
+            "static "
+              <> typeText ct
+              <> " "
+              <> idText (C.toIdent name_realtype mempty)
+              <> "["
+              <> prettyText (length vs')
+              <> "] = { "
+              <> T.intercalate "," (map (expText . flip C.toExp mempty) vs')
+              <> "};"
+      earlyDecl [C.cedecl|$esc:(T.unpack array_decl)|]
     ArrayZeros n ->
       earlyDecl [C.cedecl|static $ty:ct $id:name_realtype[$int:n];|]
   -- Fake a memory block.

@@ -89,6 +89,8 @@ mapExpM ::
   m (Exp trep)
 mapExpM tv (BasicOp (SubExp se)) =
   BasicOp <$> (SubExp <$> mapOnSubExp tv se)
+mapExpM _ (BasicOp (ArrayVal vs t)) =
+  pure $ BasicOp $ ArrayVal vs t
 mapExpM tv (BasicOp (ArrayLit els rowt)) =
   BasicOp
     <$> ( ArrayLit
@@ -279,6 +281,8 @@ walkOnLambda tv (Lambda params ret body) = do
 walkExpM :: (Monad m) => Walker rep m -> Exp rep -> m ()
 walkExpM tv (BasicOp (SubExp se)) =
   walkOnSubExp tv se
+walkExpM _ (BasicOp ArrayVal {}) =
+  pure ()
 walkExpM tv (BasicOp (ArrayLit els rowt)) =
   mapM_ (walkOnSubExp tv) els >> walkOnType tv rowt
 walkExpM tv (BasicOp (BinOp _ x y)) =

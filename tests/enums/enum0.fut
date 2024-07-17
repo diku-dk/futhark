@@ -1,6 +1,6 @@
 -- Basic enum types and matches.
 -- ==
--- input { } 
+-- input { }
 -- output { 5 }
 
 type animal = #dog | #cat | #mouse | #bird

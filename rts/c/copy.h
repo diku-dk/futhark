@@ -122,6 +122,10 @@ static bool lmad_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_out,
 
   *num_arrays_out = num_arrays;
 
+  if (r==map_r) {
+    return false;
+  }
+
   if (memcmp(&rowmajor_strides[map_r],
              &dst_strides[map_r],
              sizeof(int64_t)*(r-map_r)) == 0) {

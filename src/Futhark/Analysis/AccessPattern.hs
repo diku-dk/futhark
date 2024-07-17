@@ -465,6 +465,7 @@ analyseBasicOp ctx expression pats =
   let ctx_val = case expression of
         SubExp se -> varInfoFromSubExp se
         Opaque _ se -> varInfoFromSubExp se
+        ArrayVal _ _ -> (varInfoFromNames ctx mempty) {variableType = ConstType}
         ArrayLit ses _t -> concatVariableInfos mempty ses
         UnOp _ se -> varInfoFromSubExp se
         BinOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
@@ -497,14 +498,7 @@ analyseBasicOp ctx expression pats =
     varInfoFromSubExp (Var v) =
       case M.lookup v (assignments ctx) of
         Just _ -> (varInfoFromNames ctx $ oneName v) {variableType = Variable}
-        Nothing ->
-          error $
-            "Failed to lookup variable \""
-              ++ prettyString v
-              ++ "\npat: "
-              ++ prettyString pats
-              ++ "\n\nContext\n"
-              ++ show ctx
+        Nothing -> (varInfoFromNames ctx mempty) {variableType = Variable} -- Means a global.
 
 analyseMatch :: (Analyse rep) => Context rep -> [VName] -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
 analyseMatch ctx pats body parents =
@@ -628,8 +622,8 @@ instance Analyse MC where
     | ParOp Nothing seq_segop <- mc_op = analyseSegOp seq_segop
     | ParOp (Just segop) seq_segop <- mc_op = \ctx name -> do
         let (ctx', res') = analyseSegOp segop ctx name
-        let (ctx'', res'') = analyseSegOp seq_segop ctx name
-        (ctx' <> ctx'', unionIndexTables res' res'')
+        let (ctx'', res'') = analyseSegOp seq_segop ctx' name
+        (ctx'', unionIndexTables res' res'')
     | Futhark.IR.MC.OtherOp _ <- mc_op = analyseOtherOp
 
 -- Unfortunately we need these instances, even though they may never appear.

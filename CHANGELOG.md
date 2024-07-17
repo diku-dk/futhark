@@ -7,15 +7,31 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.26.0]
 
-* Faster device-to-device copies on CUDA.
-
-* "More correctly" detect L2 cache size for OpenCL backend on AMD GPUs.
-
 ### Added
+
+* New prelude function: `rep`, an implicit form of `replicate`.
+
+* Improved handling of large monomorphic single-dimensional array
+  literals (#2160).
 
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* `futhark repl` no longer asks for confirmation on EOF.
+
+* Obscure oversight related to abstract size-lifted types (#2120).
+
+* Accidential exponential-time algorithm in layout optimisation for
+  multicore backends (#2151).
+
+## [0.25.17]
+
+* Faster device-to-device copies on CUDA.
+
+* "More correctly" detect L2 cache size for OpenCL backend on AMD GPUs.
 
 ### Fixed
 
