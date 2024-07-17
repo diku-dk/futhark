@@ -197,11 +197,11 @@ static void log_copy(struct futhark_context* ctx,
     fprintf(ctx->log, "Shape: ");
     for (int i = 0; i < r; i++) { fprintf(ctx->log, "[%ld]", (long int)shape[i]); }
     fprintf(ctx->log, "\n");
-    fprintf(ctx->log, "Dst offset: %ld\n", dst_offset);
+    fprintf(ctx->log, "Dst offset: %ld\n", (long int)dst_offset);
     fprintf(ctx->log, "Dst strides:");
     for (int i = 0; i < r; i++) { fprintf(ctx->log, " %ld", (long int)dst_strides[i]); }
     fprintf(ctx->log, "\n");
-    fprintf(ctx->log, "Src offset: %ld\n", src_offset);
+    fprintf(ctx->log, "Src offset: %ld\n", (long int)src_offset);
     fprintf(ctx->log, "Src strides:");
     for (int i = 0; i < r; i++) { fprintf(ctx->log, " %ld", (long int)src_strides[i]); }
     fprintf(ctx->log, "\n");
