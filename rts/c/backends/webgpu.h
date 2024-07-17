@@ -816,12 +816,12 @@ static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
     }
   }
 
-  unsigned char *buf;
+  const unsigned char *buf;
   int64_t offset;
   if (copy_size > nbytes) {
     buf = malloc(copy_size);
     offset = 0;
-    memcpy(buf, src + src_offset, copy_size);
+    memcpy((unsigned char*)buf, src + src_offset, copy_size);
   }
   else {
     buf = src;
