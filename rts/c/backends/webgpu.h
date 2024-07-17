@@ -491,7 +491,7 @@ int backend_context_setup(struct futhark_context *ctx) {
 
   WGPUFeatureName required_features[] = { WGPUFeatureName_ShaderF16 };
   WGPUDeviceDescriptor device_desc = {
-    .requiredFeatureCount = 1,
+    .requiredFeaturesCount = 1,
     .requiredFeatures = required_features,
   };
   wgpu_request_device_result device_result
