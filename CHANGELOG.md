@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The compiler now does slightly less aggressive inlining. Use the
+  `#[inline]` attribute if you want to force inlining of some
+  function.
+
 ### Removed
 
 ### Changed
