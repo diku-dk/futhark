@@ -1,8 +1,8 @@
 -- Parallel blocked LU-decomposition.
 --
 -- ==
--- structure gpu-mem { Alloc 22 }
--- structure seq-mem { Alloc 20 }
+-- structure gpu-mem { Alloc 20 }
+-- structure seq-mem { Alloc 15 }
 
 def block_size: i64 = 32
 
