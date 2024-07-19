@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* The `opencl` backend now always passes
+  `-cl-fp32-correctly-rounded-divide-sqrt` to the kernel compiler, in
+  order to match CUDA and HIP behaviour.
+
 ## [0.25.18]
 
 ### Added
