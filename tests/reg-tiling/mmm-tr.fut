@@ -12,4 +12,3 @@ let dotproduct [n] (x: [n]f32) (y: [n]f32) =
 
 let main [m][n][q]  (A: [m][q]f32) (B: [n][q]f32) : [m][n]f32 =
     map (\ Arow -> map (\Brow -> dotproduct Arow Brow) B) A
-
