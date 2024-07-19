@@ -9,14 +9,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+* The `opencl` backend now always passes
+  `-cl-fp32-correctly-rounded-divide-sqrt` to the kernel compiler, in
+  order to match CUDA and HIP behaviour.
+
+## [0.25.18]
+
+### Added
+
 * New prelude function: `rep`, an implicit form of `replicate`.
 
 * Improved handling of large monomorphic single-dimensional array
   literals (#2160).
-
-### Removed
-
-### Changed
 
 ### Fixed
 
