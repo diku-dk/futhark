@@ -657,6 +657,12 @@ static char* mk_compile_opts(struct futhark_context *ctx,
     w += snprintf(compile_opts+w, compile_opts_size-w, "-DEMULATE_F16 ");
   }
 
+  // By default, OpenCL allows imprecise (but faster) division and
+  // square root operations. For equivalence with other backends, ask
+  // for correctly rounded ones here.
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-cl-fp32-correctly-rounded-divide-sqrt");
+
   free(macro_names);
   free(macro_vals);
 
