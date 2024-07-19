@@ -9,14 +9,83 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The compiler now does slightly less aggressive inlining. Use the
+  `#[inline]` attribute if you want to force inlining of some
+  function.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
 
+* The `opencl` backend now always passes
+  `-cl-fp32-correctly-rounded-divide-sqrt` to the kernel compiler, in
+  order to match CUDA and HIP behaviour.
+
+## [0.25.18]
+
+### Added
+
+* New prelude function: `rep`, an implicit form of `replicate`.
+
+* Improved handling of large monomorphic single-dimensional array
+  literals (#2160).
+
+### Fixed
+
+* `futhark repl` no longer asks for confirmation on EOF.
+
+* Obscure oversight related to abstract size-lifted types (#2120).
+
+* Accidential exponential-time algorithm in layout optimisation for
+  multicore backends (#2151).
+
+## [0.25.17]
+
+* Faster device-to-device copies on CUDA.
+
+* "More correctly" detect L2 cache size for OpenCL backend on AMD GPUs.
+
+### Fixed
+
+* Handling of `..` in `import` paths (again).
+
+* Detection of impossible loop parameter sizes (#2144).
+
+* Rare case where GPU histograms would use slightly too much shared
+  memory and fail at run-time.
+
+* Rare crash in layout optimisation.
+
+## [0.25.16]
+
+### Added
+
+* ``futhark test``: `--no-terminal` now prints status messages even when
+  no failures occur.
+
+* ``futhark test`` no longer runs ``structure`` tests by default. Pass
+  ``-s`` to run them.
+
+* Rewritten array layout optimisation pass by Bjarke Pedersen and
+  Oscar Nelin. Minor speedup for some programs, but is more
+  importantly a principled foundation for further improvements.
+
+* Better error message when exceeding shared memory limits.
+
+* Better dead code removal for the GPU representation (minor impact on
+  some programs).
+
+### Fixed
+
 * Bugs related to deduplication of array payloads in sum types.
   Unfortunately, fixed by just not deduplicating in those cases.
+
+* Frontend bug related to turning size expressions into variables
+  (#2136).
+
+* Another exotic monomorphisation bug.
 
 ## [0.25.15]
 

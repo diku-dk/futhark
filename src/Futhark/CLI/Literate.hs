@@ -21,7 +21,7 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.Char
 import Data.Functor (($>))
 import Data.Int (Int64)
-import Data.List (foldl', transpose)
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -537,7 +537,7 @@ system prog options input = do
     prog' = "'" <> T.pack prog <> "'"
 
 formatDataForGnuplot :: [Value] -> T.Text
-formatDataForGnuplot = T.unlines . map line . transpose . map valueElems
+formatDataForGnuplot = T.unlines . map line . L.transpose . map valueElems
   where
     line = T.unwords . map prettyText
 
@@ -1071,7 +1071,7 @@ processScript env script = do
   (failures, outputs, files) <-
     unzip3 <$> mapM (processBlock env) script
   cleanupImgDir env $ mconcat files
-  pure (foldl' min Success failures, T.intercalate "\n" outputs)
+  pure (L.foldl' min Success failures, T.intercalate "\n" outputs)
 
 -- | Common command line options that transform 'Options'.
 scriptCommandLineOptions :: [FunOptDescr Options]
@@ -1161,7 +1161,7 @@ prepareServer prog opts f = do
           unwords compile_options
 
     let onError err = do
-          mapM_ (T.hPutStrLn stderr) err
+          T.hPutStrLn stderr err
           exitFailure
 
     void $

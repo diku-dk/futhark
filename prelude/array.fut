@@ -128,6 +128,16 @@ def rotate [n] 't (r: i64) (a: [n]t) =
 def replicate 't (n: i64) (x: t): *[n]t =
   map (const x) (iota n)
 
+-- | Construct an array of an inferred length containing the given
+-- value.
+--
+-- **Work:** O(n).
+--
+-- **Span:** O(1).
+#[inline]
+def rep 't [n] (x: t): *[n]t =
+  replicate n x
+
 -- | Copy a value.  The result will not alias anything.
 --
 -- **Work:** O(n).

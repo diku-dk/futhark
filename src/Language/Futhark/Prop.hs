@@ -153,7 +153,7 @@ defaultEntryPoint = nameFromString "main"
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
-arrayRank :: TypeBase () u -> Int
+arrayRank :: TypeBase d u -> Int
 arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
@@ -463,6 +463,8 @@ typeOf (RecordLit fs _) =
     record (RecordFieldExplicit name e _) = (name, typeOf e)
     record (RecordFieldImplicit name (Info t) _) = (baseName name, t)
 typeOf (ArrayLit _ (Info t) _) = t
+typeOf (ArrayVal vs t loc) =
+  Array mempty (Shape [sizeFromInteger (genericLength vs) loc]) (Prim t)
 typeOf (StringLit vs loc) =
   Array
     mempty

@@ -353,6 +353,8 @@ prettyExp _ (RecordLit fs _)
   where
     fieldArray (RecordFieldExplicit _ e _) = hasArrayLit e
     fieldArray RecordFieldImplicit {} = False
+prettyExp _ (ArrayVal vs _ _) =
+  brackets (commasep $ map pretty vs)
 prettyExp _ (ArrayLit es t _) =
   brackets (commasep $ map pretty es) <> prettyInst t
 prettyExp _ (StringLit s _) =
@@ -631,4 +633,5 @@ prettyBinOp p bop x y =
     precedence Backtick = 9
     rprecedence Minus = 10
     rprecedence Divide = 10
-    rprecedence op = precedence op
+    rprecedence PipeLeft = -1
+    rprecedence op = precedence op + 1

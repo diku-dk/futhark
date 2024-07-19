@@ -89,9 +89,7 @@ repl maybe_prog = do
                 toploop s'
           Right _ -> pure ()
 
-      finish s = do
-        quit <- if fancyTerminal then confirmQuit else pure True
-        if quit then pure () else toploop s
+      finish _s = pure ()
 
   maybe_init_state <- liftIO $ newFutharkiState 0 noLoadedProg maybe_prog
   s <- case maybe_init_state of
@@ -101,22 +99,13 @@ repl maybe_prog = do
         Left err ->
           error $ "Failed to initialise interpreter state: " <> T.unpack (docText err)
         Right s -> do
-          liftIO $ putDoc prog_err
+          liftIO $ putDocLn prog_err
           pure s {futharkiLoaded = maybe_prog}
     Right s ->
       pure s
   Haskeline.runInputT Haskeline.defaultSettings $ toploop s
 
   putStrLn "Leaving 'futhark repl'."
-
-confirmQuit :: Haskeline.InputT IO Bool
-confirmQuit = do
-  c <- Haskeline.getInputChar "Quit REPL? (y/n) "
-  case c of
-    Nothing -> pure True -- EOF
-    Just 'y' -> pure True
-    Just 'n' -> pure False
-    _ -> confirmQuit
 
 -- | Representation of breaking at a breakpoint, to allow for
 -- navigating through the stack frames and such.

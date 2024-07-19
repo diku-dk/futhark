@@ -837,6 +837,9 @@ checkBasicOp (SubExp es) =
   void $ checkSubExp es
 checkBasicOp (Opaque _ es) =
   void $ checkSubExp es
+checkBasicOp ArrayVal {} =
+  -- We assume this is never changed, so no need to check it.
+  pure ()
 checkBasicOp (ArrayLit [] _) =
   pure ()
 checkBasicOp (ArrayLit (e : es') t) = do
