@@ -39,6 +39,14 @@ pkgs.stdenv.mkDerivation {
       python3Packages.sphinxcontrib-bibtex
       imagemagick # needed for literate tests
     ]
+      # The following are for WebGPU.
+    ++ [
+      emscripten
+      python3Packages.aiohttp
+      python3Packages.selenium
+      chromium
+      chromedriver
+    ]
     ++ lib.optionals (stdenv.isLinux)
       [ opencl-headers
         ocl-icd
