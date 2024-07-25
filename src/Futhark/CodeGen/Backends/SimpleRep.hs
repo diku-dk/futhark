@@ -24,6 +24,8 @@ module Futhark.CodeGen.Backends.SimpleRep
     fromStorage,
     cproduct,
     csum,
+    allEqual,
+    allTrue,
     scalarToPrim,
 
     -- * Primitive value operations
@@ -36,13 +38,17 @@ module Futhark.CodeGen.Backends.SimpleRep
   )
 where
 
+import Control.Monad (void)
 import Data.Char (isAlpha, isAlphaNum, isDigit)
 import Data.Text qualified as T
+import Data.Void (Void)
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (scalarF16H, scalarH)
 import Futhark.Util (hashText, showText, zEncodeText)
 import Language.C.Quote.C qualified as C
 import Language.C.Syntax qualified as C
+import Text.Megaparsec
+import Text.Megaparsec.Char (space)
 
 -- | The C type corresponding to a signed integer type.
 intTypeToCType :: IntType -> C.Type
@@ -132,28 +138,37 @@ valid s =
   where
     ok c = isAlphaNum c || c == '_'
 
-isArrayName :: T.Text -> (Int, T.Text)
-isArrayName s =
-  if "[]" `T.isPrefixOf` s
-    then
-      let (k, s') = isArrayName (T.drop 2 s)
-       in (k + 1, s')
-    else (0, s)
+-- | Find a nice C type name name for the Futhark type. This solely
+-- serves to make the generated header file easy to read, and we can
+-- always fall back on an ugly hash.
+findPrettyName :: T.Text -> Either String T.Text
+findPrettyName =
+  either (Left . errorBundlePretty) Right . parse (p <* eof) "type name"
+  where
+    p :: Parsec Void T.Text T.Text
+    p = choice [pArr, pTup, pAtom]
+    pArr = do
+      dims <- some "[]"
+      (("arr" <> showText (length dims) <> "d_") <>) <$> p
+    pTup = between "(" ")" $ do
+      ts <- p `sepBy` pComma
+      pure $ "tup" <> showText (length ts) <> "_" <> T.intercalate "_" ts
+    pAtom = T.pack <$> some (satisfy (`notElem` ("[]{}()," :: String)))
+    pComma = void $ "," <* space
 
 -- | The name of exposed opaque types.
 opaqueName :: Name -> T.Text
 opaqueName "()" = "opaque_unit" -- Hopefully this ad-hoc convenience won't bite us.
 opaqueName s
-  | (k, s'') <- isArrayName s',
-    k > 0,
-    valid s'' =
-      "opaque_arr_" <> s'' <> "_" <> showText k <> "d"
+  | Right v <- findPrettyName s',
+    valid v =
+      "opaque_" <> v
   | valid s' = "opaque_" <> s'
   where
     s' = nameToText s
 opaqueName s = "opaque_" <> hashText (nameToText s)
 
--- | The 'PrimType' (and sign) correspond to a human-readable scalar
+-- | The 'PrimType' (and sign) corresponding to a human-readable scalar
 -- type name (e.g. @f64@).  Beware: partial!
 scalarToPrim :: T.Text -> (Signedness, PrimType)
 scalarToPrim "bool" = (Signed, Bool)
@@ -185,6 +200,19 @@ csum [] = [C.cexp|0|]
 csum (e : es) = foldl mult e es
   where
     mult x y = [C.cexp|$exp:x + $exp:y|]
+
+-- | An expression that is true if these are also all true.
+allTrue :: [C.Exp] -> C.Exp
+allTrue [] = [C.cexp|true|]
+allTrue [x] = x
+allTrue (x : xs) = [C.cexp|$exp:x && $exp:(allTrue xs)|]
+
+-- | An expression that is true if these expressions are all equal by
+-- @==@.
+allEqual :: [C.Exp] -> C.Exp
+allEqual [x, y] = [C.cexp|$exp:x == $exp:y|]
+allEqual (x : y : xs) = [C.cexp|$exp:x == $exp:y && $exp:(allEqual(y:xs))|]
+allEqual _ = [C.cexp|true|]
 
 instance C.ToIdent Name where
   toIdent = C.toIdent . zEncodeText . nameToText

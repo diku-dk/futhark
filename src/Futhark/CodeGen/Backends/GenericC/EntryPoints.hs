@@ -23,11 +23,6 @@ valueDescToType (ScalarValue pt signed _) =
 valueDescToType (ArrayValue _ _ pt signed shape) =
   ValueType signed (Rank (length shape)) pt
 
-allTrue :: [C.Exp] -> C.Exp
-allTrue [] = [C.cexp|true|]
-allTrue [x] = x
-allTrue (x : xs) = [C.cexp|$exp:x && $exp:(allTrue xs)|]
-
 prepareEntryInputs ::
   [ExternalValue] ->
   CompilerM op s ([(C.Param, Maybe C.Exp)], [C.BlockItem])

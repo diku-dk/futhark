@@ -56,8 +56,9 @@ int main() {
 
   // Test that passing in garbage fails predictably.
   bytes1 = calloc(n0, 1);
-  whatever = futhark_restore_opaque_whatever(ctx, bytes0);
+  whatever = futhark_restore_opaque_whatever(ctx, bytes1);
   assert(whatever == NULL);
+  free(bytes1);
 
   futhark_context_free(ctx);
   futhark_context_config_free(cfg);

@@ -608,6 +608,11 @@ data OpaqueType
     -- represent that constructor payload. This is necessary because
     -- we deduplicate payloads across constructors.
     OpaqueSum [ValueType] [(Name, [(EntryPointType, [Int])])]
+  | -- | An array with this rank and named opaque element type.
+    OpaqueArray Int Name [ValueType]
+  | -- | An array with known rank and where the elements are this
+    -- record type.
+    OpaqueRecordArray Int Name [(Name, EntryPointType)]
   deriving (Eq, Ord, Show)
 
 -- | Names of opaque types and their representation.

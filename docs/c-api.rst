@@ -230,6 +230,11 @@ because C does not have a standard ``half`` type.  This integer
 contains the bitwise representation of the ``f16`` value in the IEEE
 754 binary16 format.
 
+.. _array-values:
+
+Arrays of Primitive Values
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 For each distinct array type of primitives (ignoring sizes), an opaque
 C struct is defined.  Arrays of ``f16`` are presented as containing
 ``uint16_t`` elements.  For types that do not map cleanly to C,
@@ -281,6 +286,14 @@ will not result in a double free.
    point to free memory, allocated by the caller, with sufficient
    space to store the full array.  Multi-dimensional arrays are
    written in row-major form.
+
+.. c:function:: int futhark_index_i32_1d(struct futhark_context *ctx, int32_t *out, struct futhark_i32_1d *arr, int64_t i0);
+
+   Asynchronously copy a single element from the array and store it in
+   ``*out``. Returns a nonzero value if the index is out of bounds.
+   **Note:** if you need to read many elements, it is much faster to
+   retrieve the entire array with the ``values`` function,
+   particularly when using a GPU backend.
 
 .. c:function:: const int64_t *futhark_shape_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
@@ -474,6 +487,55 @@ defined. The following assume ``t`` is defined as ``type t = #foo
    **Precondition:** ``t`` must be an instance of the ``foo`` variant,
    which can be determined with :c:func:`futhark_variant_opaque_t`.
 
+.. _arrays_of_opaques:
+
+Arrays of Non-Primitive Values
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An array that contains a non-primitive type is considered an opaque
+value. However, it also supports a subset of the API documented in
+:ref:`array-values`.
+
+For an opaque array type ``[]t``, the following functions are always
+generated (assuming the generated C type is ``arr_t``):
+
+.. c:function:: int futhark_index_opaque_arr_t(struct futhark_context *ctx, struct futhark_opaque_t **out, struct futhark_opaque_arr_t *arr, int64_t i0);
+
+   Asynchronously copy a single element from the array and store it in
+   ``*out``. Returns a nonzero value if the index is out of bounds.
+
+.. c:function:: const int64_t *futhark_shape_opaque_arr_t(struct futhark_context *ctx, struct futhark_opaque_arr_t *arr);
+
+   Return a pointer to the shape of the array, with one element per
+   dimension. The lifetime of the shape is the same as ``arr``, and
+   must *not* be manually freed. Assuming ``arr`` is a valid object,
+   this function cannot fail.
+
+Additionally, if the element type is a record (or equivalently a
+tuple), for example if the array type is ``[](f32,f32)``, the
+following functions are also available:
+
+.. c:function:: int futhark_zip_opaque_arr1d_tup2_f32_f32(struct futhark_context *ctx, struct futhark_opaque_arr1d_tup2_f32_f32 **out, const struct futhark_f32_1d *f_0, const struct futhark_f32_1d *f_1);
+
+   Construct an array of records from arrays of the component values.
+   This is analogous to ``zip`` in the source language. The provided
+   arrays must have compatible shapes, and the function returns
+   nonzero if they are not.
+
+   **Note:** This is a cheap operation, as it does not copy array
+   elements.
+
+   **Note:** The resulting array aliases the original arrays.
+
+.. c:function:: int futhark_project_opaque_arr1d_tup2_f32_f32_0(struct futhark_context *ctx, struct futhark_f32_1d **out, const struct futhark_opaque_arr1d_tup2_f32_f32 *obj);
+
+   Retrieve an array of all the ``.0`` fields of the array elements. A
+   similar function is provided for each field.
+
+   **Note:** This is a cheap operation, as it does not copy array
+   elements.
+
+   **Note:** The resulting array aliases the original array.
 
 Entry points
 ------------

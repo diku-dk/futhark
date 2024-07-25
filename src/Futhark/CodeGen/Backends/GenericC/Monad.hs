@@ -282,6 +282,7 @@ generateProgramStruct = do
   mapM_
     earlyDecl
     [C.cunit|struct program {
+               int dummy;
                $sdecls:fields
              };
              static void setup_program(struct futhark_context* ctx) {
