@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `#[inline]` attribute if you want to force inlining of some
   function.
 
+* Arrays of opaque types now support indexing through the C API.
+  Arrays of records can also be constructed. (#2082)
+
 ### Removed
 
 ### Changed
