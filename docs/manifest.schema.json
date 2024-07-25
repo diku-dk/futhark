@@ -101,6 +101,38 @@
                                   }
                               },
                               "additionalProperties": false
+                          },
+                          "record_array": {
+                              "type": "object",
+                              "properties": {
+                                  "rank": {"type": "integer"},
+                                  "elemtype": {"type": "string"},
+                                  "zip": {"type": "string"},
+                                  "index": {"type": "string"},
+                                  "shape": {"type": "string"},
+                                  "fields": {
+                                      "type": "array",
+                                      "items": {
+                                          "type": "object",
+                                          "properties": {
+                                              "name": {"type": "string"},
+                                              "type": {"type": "string"},
+                                              "project": {"type": "string"}
+                                          }
+                                      }
+                                  }
+                              },
+                              "additionalProperties": false
+                          },
+                          "opaque_array": {
+                              "type": "object",
+                              "properties": {
+                                  "rank": {"type": "integer"},
+                                  "elemtype": {"type": "string"},
+                                  "index": {"type": "string"},
+                                  "shape": {"type": "string"}
+                              },
+                              "additionalProperties": false
                           }
                       },
                       "required": [ "kind", "ctype", "ops" ]
@@ -125,7 +157,8 @@
                                   "values": {"type": "string"},
                                   "values_raw": {"type": "string"},
                                   "new": {"type": "string"},
-                                  "new_raw": {"type": "string"}
+                                  "new_raw": {"type": "string"},
+                                  "index": {"type": "string"}
                               },
                               "additionalProperties": false
                           }
