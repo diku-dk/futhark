@@ -64,7 +64,7 @@ Context creation is parameterised by a configuration object.  Any
 changes to the configuration must be made *before* calling
 :c:func:`futhark_context_new`.  A configuration object must not be
 freed before any context objects for which it is used.  The same
-configuration may *not* be used for multiple concurrent contexts.
+configuration must *not* be used for multiple concurrent contexts.
 Configuration objects are cheap to create and destroy.
 
 .. c:struct:: futhark_context_config
@@ -162,7 +162,7 @@ Context
    :c:func:`futhark_context_get_error`, which will return non-``NULL``
    if initialisation failed.  If initialisation has failed, then you
    still need to call :c:func:`futhark_context_free` to release
-   resources used for the context object, but you may not use the
+   resources used for the context object, but you must not use the
    context object for anything else.
 
 .. c:function:: void futhark_context_free(struct futhark_context *ctx)
@@ -277,7 +277,7 @@ will not result in a double free.
 .. c:function:: int futhark_free_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
    Free the value.  In practice, this merely decrements the reference
-   count by one.  The value (or at least this reference) may not be
+   count by one.  The value (or at least this reference) must not be
    used again after this function returns.
 
 .. c:function:: int futhark_values_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr, int32_t *data)
@@ -339,7 +339,7 @@ deserialisation, see :c:func:`futhark_restore_opaque_foo`).
 .. c:function:: int futhark_free_opaque_foo(struct futhark_context *ctx, struct futhark_opaque_foo *obj)
 
    Free the value.  In practice, this merely decrements the reference
-   count by one.  The value (or at least this reference) may not be
+   count by one.  The value (or at least this reference) must not be
    used again after this function returns.
 
 .. c:function:: int futhark_store_opaque_foo(struct futhark_context *ctx, const struct futhark_opaque_foo *obj, void **p, size_t *n)
@@ -520,7 +520,7 @@ following functions are also available:
    Construct an array of records from arrays of the component values.
    This is analogous to ``zip`` in the source language. The provided
    arrays must have compatible shapes, and the function returns
-   nonzero if they are not.
+   nonzero if they do not.
 
    **Note:** This is a cheap operation, as it does not copy array
    elements.
