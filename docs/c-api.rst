@@ -800,7 +800,7 @@ the compiled Futhark program. Specifically, the manifest contains:
     functions are as documented above.  The following operations are
     listed:
 
-    * For arrays: ``free``, ``shape``, ``values``, ``new``.
+    * For arrays: ``free``, ``shape``, ``values``, ``new``, ``index``.
 
     * For opaques: ``free``, ``store``, ``restore``.
 
