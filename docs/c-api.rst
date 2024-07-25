@@ -813,6 +813,23 @@ the compiled Futhark program. Specifically, the manifest contains:
     * The name of the C *new* function for creating a record from
       field values.
 
+   * For opaques that are actually arrays of records:
+
+     * The element type and rank.
+
+     * The operations ``index``, ``shape``, ``zip``.
+
+     * The fields, which will be the fields of the element type, but
+       with the dimensions preprended. These are the types of the
+       arrays that should be passed to the ``zip`` function.
+
+   * For other opaques that are actually arrays:
+
+     * The element type and rank.
+
+     * The operations ``index`` and ``shape``.
+
+
 Manifests are defined by the following JSON Schema:
 
 .. include:: manifest.schema.json
