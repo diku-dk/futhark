@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.26.0]
+## [0.25.19]
 
 ### Added
 
@@ -15,10 +15,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Arrays of opaque types now support indexing through the C API.
   Arrays of records can also be constructed. (#2082)
-
-### Removed
-
-### Changed
 
 ### Fixed
 
