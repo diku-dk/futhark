@@ -498,6 +498,12 @@ newtype ErrorMsg a = ErrorMsg [ErrorMsgPart a]
 instance IsString (ErrorMsg a) where
   fromString = ErrorMsg . pure . fromString
 
+instance Monoid (ErrorMsg a) where
+  mempty = ErrorMsg mempty
+
+instance Semigroup (ErrorMsg a) where
+  ErrorMsg x <> ErrorMsg y = ErrorMsg $ x <> y
+
 -- | A part of an error message.
 data ErrorMsgPart a
   = -- | A literal string.
