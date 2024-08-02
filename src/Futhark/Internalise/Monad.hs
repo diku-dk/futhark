@@ -196,10 +196,7 @@ assert ::
   InternaliseM Certs
 assert desc se msg loc = assertingOne $ do
   attrs <- asks $ attrsForAssert . envAttrs
-  attributing attrs $
-    letExp desc $
-      BasicOp $
-        Assert se msg (loc, mempty)
+  attributing attrs $ letExp desc $ BasicOp $ Assert se msg (loc, mempty)
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
