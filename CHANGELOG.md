@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Better error message when in-place updates fail at runtime due to a
+  shape mismatch.
+
 ### Removed
 
 ### Changed
