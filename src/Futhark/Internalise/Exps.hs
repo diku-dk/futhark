@@ -445,11 +445,19 @@ internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = 
   where
     sparams' = map (`TypeParamDim` mempty) sparams
 
+    -- Attributes that apply to loops.
+    loopAttrs = oneAttr "unroll"
+    -- Remove those attributes from the attribute set that apply to
+    -- the loop itself.
+    noLoopAttrs env = env {envAttrs = envAttrs env `withoutAttrs` loopAttrs}
+
+    loopBody = local noLoopAttrs $ internaliseExp "loopres" loopbody
+
     forLoop mergepat' shapepat mergeinit i loopvars form' =
       bodyFromStms . localScope (scopeOfLoopForm form') $ do
         forM_ loopvars $ \(p, arr) ->
           letBindNames [I.paramName p] =<< eIndex arr [eSubExp (I.Var i)]
-        ses <- internaliseExp "loopres" loopbody
+        ses <- loopBody
         sets <- mapM subExpType ses
         shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
         pure
@@ -520,7 +528,7 @@ internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = 
         addStms init_loop_cond_stms
 
         bodyFromStms $ do
-          ses <- internaliseExp "loopres" loopbody
+          ses <- loopBody
           sets <- mapM subExpType ses
           loop_while <- newParam "loop_while" $ I.Prim I.Bool
           shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
