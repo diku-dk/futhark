@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `#[unroll]` on an outer loop now no longer causes unrolling of all
+  loops nested inside the loop body.
+
 ## [0.25.19]
 
 ### Added
