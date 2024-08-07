@@ -584,19 +584,17 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate shape (Var stm_arr)))) acc
         -- Move the replicated dimensions back where they belong.
         letBind outerpat . BasicOp $
           Rearrange ([res_r - nest_r .. res_r - 1] ++ [0 .. res_r - nest_r - 1]) arr_tr_rep
-maybeDistributeStm (Let (Pat [pe]) aux (BasicOp (Replicate (Shape (d : ds)) v))) acc = do
-  tmp <- newVName "tmp"
-  let rowt = rowType $ patElemType pe
-      newstm = Let (Pat [pe]) aux $ Op $ Screma d [] $ mapSOAC lam
-      tmpstm =
-        Let (Pat [PatElem tmp rowt]) aux $ BasicOp $ Replicate (Shape ds) v
-      lam =
-        Lambda
-          { lambdaReturnType = [rowt],
-            lambdaParams = [],
-            lambdaBody = mkBody (oneStm tmpstm) [varRes tmp]
-          }
-  maybeDistributeStm newstm acc
+maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate shape v))) acc = do
+  distributeSingleStm acc stm >>= \case
+    Just (kernels, _, nest, acc') -> do
+      addPostStms kernels
+      let outerpat = loopNestingPat $ fst nest
+          nest_shape = Shape $ kernelNestWidths nest
+      localScope (typeEnvFromDistAcc acc') $ do
+        postStm <=< runBuilder_ . auxing aux . letBind outerpat $
+          BasicOp (Replicate (nest_shape <> shape) v)
+        pure acc'
+    _ -> addStmToAcc stm acc
 -- Opaques are applied to the full array, because otherwise they can
 -- drastically inhibit parallelisation in some cases.
 maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Opaque _ (Var stm_arr)))) acc

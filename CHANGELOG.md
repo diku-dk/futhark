@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `#[unroll]` on an outer loop now no longer causes unrolling of all
   loops nested inside the loop body.
 
+* Obscure issue related to replications of constants in complex
+  intrablock kernels.
+
 ## [0.25.19]
 
 ### Added
