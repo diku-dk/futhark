@@ -387,7 +387,7 @@ allocInLoopParams ::
   AllocM fromrep torep a
 allocInLoopParams merge m = do
   ((valparams, valargs, handle_loop_subexps), (mem_params, ctx_params)) <-
-    runWriterT $ unzip3 <$> mapM allocInMergeParam merge
+    runWriterT $ unzip3 <$> mapM allocInLoopParam merge
   let mergeparams' = mem_params <> ctx_params <> valparams
       summary = scopeOfFParams mergeparams'
 
@@ -417,7 +417,7 @@ allocInLoopParams merge m = do
       pure $ Var res'
     scalarRes _ _ _ se = pure se
 
-    allocInMergeParam ::
+    allocInLoopParam ::
       (Allocable fromrep torep inner) =>
       (Param DeclType, SubExp) ->
       WriterT
@@ -427,7 +427,7 @@ allocInLoopParams merge m = do
           SubExp,
           SubExp -> WriterT ([SubExp], [SubExp]) (AllocM fromrep torep) SubExp
         )
-    allocInMergeParam (mergeparam, Var v)
+    allocInLoopParam (mergeparam, Var v)
       | param_t@(Array pt shape u) <- paramDeclType mergeparam = do
           (v_mem, v_lmad) <- lift $ lookupArraySummary v
           v_mem_space <- lift $ lookupMemSpace v_mem
@@ -443,7 +443,7 @@ allocInLoopParams merge m = do
                   -- space, so copy them elsewhere and try again.
                   space <- lift askDefaultSpace
                   (_, v') <- lift $ allocLinearArray space (baseString v) v
-                  allocInMergeParam (mergeparam, Var v')
+                  allocInLoopParam (mergeparam, Var v')
                 else do
                   p <- newParam "mem_param" $ MemMem v_mem_space
                   tell ([p], [])
@@ -479,7 +479,7 @@ allocInLoopParams merge m = do
                   Var v',
                   ensureArrayIn v_mem_space'
                 )
-    allocInMergeParam (mergeparam, se) = doDefault mergeparam se =<< lift askDefaultSpace
+    allocInLoopParam (mergeparam, se) = doDefault mergeparam se =<< lift askDefaultSpace
 
     doDefault mergeparam se space = do
       mergeparam' <- allocInFParam mergeparam space
