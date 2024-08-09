@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Obscure issue related to replications of constants in complex
   intrablock kernels.
 
+* Interpreter no longer crashes on attributes in patterns.
+
 ## [0.25.19]
 
 ### Added
