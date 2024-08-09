@@ -431,6 +431,8 @@ matchPat env p v = do
     Just env' -> pure env'
 
 patternMatch :: Env -> Pat (TypeBase Size u) -> Value -> MaybeT EvalM Env
+patternMatch env (PatAttr _ p _) val =
+  patternMatch env p val
 patternMatch env (Id v (Info t) _) val =
   lift $
     pure $
