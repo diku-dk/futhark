@@ -375,6 +375,15 @@ library
       Futhark.Pkg.Types
       Futhark.Profile
       Futhark.Script
+      Futhark.SoP.Convert
+      Futhark.SoP.Expression
+      Futhark.SoP.Monad
+      Futhark.SoP.Refine
+      Futhark.SoP.RefineEquivs
+      Futhark.SoP.FourierMotzkin
+      Futhark.SoP.RefineRanges
+      Futhark.SoP.SoP
+      Futhark.SoP.Util
       Futhark.Test
       Futhark.Test.Spec
       Futhark.Test.Values
@@ -490,6 +499,7 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
+    , multiset
 
 executable futhark
   import: common
@@ -525,6 +535,10 @@ test-suite unit
       Futhark.Optimise.ArrayLayoutTests
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
+      Futhark.SoP.RefineTests
+      Futhark.SoP.FourierMotzkinTests
+      Futhark.SoP.Parse
+      Futhark.SoP.SoPTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SemanticTests
