@@ -12,6 +12,9 @@ module Language.Futhark.Interpreter.AD
 
     deriveVjp,
 
+    getConvOp,
+    opTypeMatch,
+    typeAsValue,
     valueAsType,
 
     addFor,
@@ -87,6 +90,7 @@ valueAsType v c = case v of
   FloatValue (Float16Value _) -> FloatValue $ Float16Value $ fromRational c
   FloatValue (Float32Value _) -> FloatValue $ Float32Value $ fromRational c
   FloatValue (Float64Value _) -> FloatValue $ Float64Value $ fromRational c
+  BoolValue _ -> BoolValue (c /= 0)
   _ -> error $ "No valid prim value for " ++ show v
 
 opTypeMatch :: Op -> [PrimValue] -> Bool
@@ -111,12 +115,14 @@ addFor :: Op -> Op
 addFor op = OpBin $ fromJust $ case opReturnType op of
   IntType t -> Just $ Add t OverflowUndef
   FloatType t -> Just $ FAdd t
+  Bool -> Just LogOr
   _ -> Nothing
 
 multiplyFor :: Op -> Op
 multiplyFor op = OpBin $ fromJust $ case opReturnType op of
   IntType t -> Just $ Mul t OverflowUndef
   FloatType t -> Just $ FMul t
+  Bool -> Just LogAnd
   _ -> Nothing
 
 typeAsValue :: PrimType -> Rational -> PrimValue
@@ -130,7 +136,23 @@ typeAsValue t c = case t of
     Float16 -> FloatValue $ Float16Value $ fromRational c
     Float32 -> FloatValue $ Float32Value $ fromRational c
     Float64 -> FloatValue $ Float64Value $ fromRational c
+  Bool -> BoolValue (c /= 0)
   _ -> error $ "No valid prim value for " ++ show t
+
+getConvOp :: PrimType -> PrimType -> ConvOp
+getConvOp a b = case (a, b) of
+  (IntType   t1, IntType   t2) -> ZExt   t1 t2
+  (IntType   t1, FloatType t2) -> SIToFP t1 t2
+  (FloatType t1, IntType   t2) -> FPToSI t1 t2
+  (FloatType t1, FloatType t2) -> FPConv t1 t2
+  
+  (IntType   t1, Bool)         -> IToB t1
+  (Bool,         IntType   t2) -> BToI t2
+  
+  (FloatType t1, Bool)         -> FToB t1
+  (Bool,         FloatType t2) -> BToF t2
+
+  _ -> error $ "No convOp found from " ++ show a ++ " to " ++ show b
 
 doOp :: Op -> [ADValue] -> Maybe ADValue
 doOp op p = do
@@ -144,14 +166,14 @@ doOp op p = do
       (OpFn   fn,  _)      -> do
         (_, _, f) <- M.lookup fn primFuns
         f p'
-      _ -> error "Not implemented"
+      _ -> error "Not implemented" -- Impossible
 
     case op of
       (OpBin _)  -> handleOp op p v
       (OpCmp _)  -> Just $ Primal v
       (OpUn _)   -> handleOp op p v
       (OpFn _)   -> handleOp op p v
-      (OpConv _) -> Nothing
+      (OpConv _) -> handleOp op p v
 
   else Nothing
 
@@ -213,7 +235,6 @@ runPrimExp (FunExp fn p _) m = do
   p' <- mapM (`runPrimExp` m) p
   doOp (OpFn fn) p'
 
-
 -- VJP
 
 data Tape
@@ -247,19 +268,21 @@ deriveVjp (TapeOp op p _) v = do
   let n = map (VName "d") [1..length p]
   let m = M.fromList $ zip n $ map tapeValue p
 
-  -- Derive the function using the parameters
-  op' <- deriveOp op $ map (`LeafExp` opReturnType op) n
-  v' <- mapM (`runPrimExp` m) op'
+  v'' <- case op of
+    OpConv op' -> do
+      v' <- doOp (OpConv $ flipConvOp op') [v]
+      Just [v']
+    _ -> do
+      -- Derive the function using the parameters
+      op' <- deriveOp op $ map (`LeafExp` opReturnType op) n
+      let mul x y = fromJust $ doOp (multiplyFor op) [x, y]
+      v' <- mapM (`runPrimExp` m) op'
+      Just $ map (mul v) v'
 
   -- Derive parameters and combine
-  pd <- zipWithM deriveVjp p v'
-  combineDerivatives pd v op
-
-combineDerivatives :: [M.Map Int ADValue] -> ADValue -> Op -> Maybe (M.Map Int ADValue)
-combineDerivatives d v op = do
-  let add x y = fromJust $ doOp (addFor      op) [x, y]
-  let mul x y = fromJust $ doOp (multiplyFor op) [x, y]
-  Just $ foldl (M.unionWith add) M.empty $ map (M.map $ mul v) d
+  pd <- zipWithM deriveVjp p v''
+  let add x y = fromJust $ doOp (addFor op) [x, y]
+  Just $ foldl (M.unionWith add) M.empty pd
 
 
 -- JVP
@@ -272,18 +295,23 @@ jvpHandleFn op p d av = do
         Left  v' -> (v', Primal $ valueAsType (value v') 0)
         _ -> error "And unknown error occured") p -- ?TODO: This is impossible
 
-  -- Create a unique name for each parameter
-  let n = map (VName "d") [1..length p]
-  let m = M.fromList $ zip n $ map fst p'
+  case op of
+    OpConv _ -> do
+      driv <- doOp op [snd $ head p']
+      Just $ Seed $ JvpSeed d av driv
+    _ -> do
+      -- Create a unique name for each parameter
+      let n = map (VName "d") [1..length p]
+      let m = M.fromList $ zip n $ map fst p'
 
-  -- Derive the function using the parameters
-  op' <- deriveOp op $ map (`LeafExp` opReturnType op) n
-  v' <- mapM (`runPrimExp` m) op'
+      -- Derive the function using the parameters
+      op' <- deriveOp op $ map (`LeafExp` opReturnType op) n
+      v' <- mapM (`runPrimExp` m) op'
 
-  -- Get derivatives
-  let mul a b = doOp (multiplyFor op) [a, b]
-  vs <- zipWithM (\d' (_, v'') -> mul d' v'') v' p'
+      -- Get derivatives
+      let mul a b = doOp (multiplyFor op) [a, b]
+      vs <- zipWithM (\d' (_, v'') -> mul d' v'') v' p'
 
-  -- Sum them up
-  let add a b = doOp (addFor op) [a, b]
-  Seed . JvpSeed d av <$> foldlM add (Primal $ typeAsValue (opReturnType op) 0) vs
+      -- Sum them up
+      let add a b = doOp (addFor op) [a, b]
+      Seed . JvpSeed d av <$> foldlM add (Primal $ typeAsValue (opReturnType op) 0) vs

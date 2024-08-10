@@ -262,7 +262,13 @@ checkShape _ shape2 =
 
 type Value = Language.Futhark.Interpreter.Values.Value EvalM
 
-asInteger :: Value -> Integer -- TODO: Seeds!
+putV (P.IntValue x) = SignedValue x
+putV (P.FloatValue x) = FloatValue x
+putV (P.BoolValue x) = BoolValue x
+putV P.UnitValue = BoolValue True
+
+asInteger :: Value -> Integer
+asInteger (ValueSeed s) = asInteger $ ValuePrim $ putV $ AD.value $ AD.primal s
 asInteger (ValuePrim (SignedValue v)) = P.valueIntegral v
 asInteger (ValuePrim (UnsignedValue v)) =
   toInteger (P.valueIntegral (P.doZExt v Int64) :: Word64)
@@ -271,14 +277,16 @@ asInteger v = error $ "Unexpectedly not an integer: " <> show v
 asInt :: Value -> Int
 asInt = fromIntegral . asInteger
 
-asSigned :: Value -> IntValue -- TODO: Seeds!
+asSigned :: Value -> IntValue
+asSigned (ValueSeed s) = asSigned $ ValuePrim $ putV $ AD.value $ AD.primal s
 asSigned (ValuePrim (SignedValue v)) = v
 asSigned v = error $ "Unexpected not a signed integer: " <> show v
 
 asInt64 :: Value -> Int64
 asInt64 = fromIntegral . asInteger
 
-asBool :: Value -> Bool -- TODO: Seeds!
+asBool :: Value -> Bool
+asBool (ValueSeed s) = asBool $ ValuePrim $ putV $ AD.value $ AD.primal s
 asBool (ValuePrim (BoolValue x)) = x
 asBool v = error $ "Unexpectedly not a boolean: " <> show v
 
@@ -1806,6 +1814,18 @@ initialCtx =
                   res <- op x v
                   pure $ ValueAcc shape op $ acc_arr // [(fromIntegral i', res)]
                 else pure acc
+          ( ValueAcc shape op acc_arr,
+            ValueSeed s
+            ) ->
+              case putV $ AD.value $ AD.Seed s of
+                SignedValue (Int64Value i') ->
+                  if i' >= 0 && i' < arrayLength acc_arr
+                    then do
+                      let x = acc_arr ! fromIntegral i'
+                      res <- op x v
+                      pure $ ValueAcc shape op $ acc_arr // [(fromIntegral i', res)]
+                    else pure acc
+                _ -> error $ "acc_write invalid arguments: " <> prettyString (show acc, show i, show v)
           _ ->
             error $ "acc_write invalid arguments: " <> prettyString (show acc, show i, show v)
     --
@@ -1993,39 +2013,70 @@ initialCtx =
               ValuePrim _ -> [valueToAD v]
               ValueSeed _ -> [valueToAD v]
               ValueRecord m -> foldl1 (++) (M.map getSeeds m)
+              ValueArray _ a -> foldl1 (++) (map getSeeds $ elems a)
               _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
         let s' = getSeeds s
 
-        -- Impregnate the values
+        -- Augment the values
         let addSeeds i v = case v of
-              ValuePrim v' -> (i + 1, ValueSeed $ AD.VjpSeed depth $ AD.TapeId i $ AD.Primal $ fromJust $ getV v')
-              ValueSeed v' -> (i + 1, ValueSeed $ AD.VjpSeed depth $ AD.TapeId i $ AD.Seed v')
+              ValuePrim v' -> (i ++ [P.primValueType $ fromJust $ getV v'], ValueSeed $ AD.VjpSeed depth $ AD.TapeId (length i) $ AD.Primal $ fromJust $ getV v')
+              ValueSeed v' -> (i ++ [P.primValueType $ AD.value $ AD.Seed v'], ValueSeed $ AD.VjpSeed depth $ AD.TapeId (length i) $ AD.Seed v')
               ValueRecord m -> second ValueRecord $ M.mapAccum addSeeds i m
+              ValueArray aa a -> do
+                let (i', out) = M.mapAccum addSeeds i $ M.fromList $ assocs a
+                (i', ValueArray aa (array (bounds a) (M.toList out)))
               _ -> error "Not implemented (gs3g3ss)" -- TODO: Arrays?
-        let v' = snd $ addSeeds 0 v
+        let (t', v') = addSeeds [] v
 
         -- Run the function
         out <- apply noLoc mempty f v'
 
+        let addFor p = case p of
+              FloatValue(Float16Value _) -> P.FAdd Float16
+              FloatValue(Float32Value _) -> P.FAdd Float32
+              FloatValue(Float64Value _) -> P.FAdd Float64
+              SignedValue(Int16Value _) -> P.Add Int16 P.OverflowWrap
+              SignedValue(Int32Value _) -> P.Add Int32 P.OverflowWrap
+              SignedValue(Int64Value _) -> P.Add Int64 P.OverflowWrap
+              UnsignedValue(Int16Value _) -> P.Add Int16 P.OverflowWrap
+              UnsignedValue(Int32Value _) -> P.Add Int32 P.OverflowWrap
+              UnsignedValue(Int64Value _) -> P.Add Int64 P.OverflowWrap
+              BoolValue _ -> P.LogOr
+              _ -> P.FAdd Float64
+        let addAny a b = do
+              let addop = addFor $ adToPrim a
+              fromJust $ adBinOp (AD.OpBin addop) a b
+
         -- Derive the seeds
-        let deriveSeeds j i v = case v of
-              ValuePrim v' -> (i + 1, primToAD v')
-              ValueSeed s@(AD.VjpSeed d tp) ->
-                if d == depth then
-                  case M.lookup j <$> AD.deriveVjp tp (s' !! i) of
-                    Just (Just v') -> (i + 1, v')
-                    _ -> (i + 1, AD.Primal $ AD.valueAsType (AD.value $ AD.primal s) 0)
-                else (i + 1, AD.Primal $ AD.valueAsType (AD.value $ AD.primal s) 0)
+        let deriveSeeds i v = case v of
+              ValueSeed s@(AD.VjpSeed d tp) -> if d == depth then (i + 1, case AD.deriveVjp tp (s' !! i) of
+                                                                              Just m -> m
+                                                                              _ -> M.empty)
+                                                             else (i + 1, M.empty)
               ValueRecord m -> do
-                let acc = M.mapAccum (deriveSeeds j) i m -- TODO: Fix types
-                (fst acc, foldl (\x y -> fromJust $ adBinOp (AD.OpBin $ P.FAdd Float64) x y) (AD.Primal $ P.FloatValue $ Float64Value 0) $ M.elems $ snd acc)
-              _ -> error "Not implemented (d19h782)" -- TODO: Arrays?
+                let (i', maps) = M.mapAccum deriveSeeds i m
+                let m' = M.unionsWith addAny $ M.elems maps
+                (i', m')
+              ValueArray _ a -> do
+                let (i', maps) = M.mapAccum deriveSeeds i $ M.fromList $ assocs a
+                let m' = M.unionsWith addAny $ M.elems maps
+                (i', m')
+              _ -> (i + 1, M.empty)
         
+        let out' = snd $ deriveSeeds 0 out
+
         let deriveFromV i v = case v of
-              ValuePrim _ -> (i + 1, adToValue $ snd $ deriveSeeds i 0 out)
-              ValueSeed _ -> (i + 1, adToValue $ snd $ deriveSeeds i 0 out)
+              ValuePrim _ -> (i + 1, adToValue $ case M.lookup i out' of
+                                                      Just d -> d
+                                                      _ -> AD.Primal $ AD.typeAsValue (t' !! i) 0)
+              ValueSeed _ -> (i + 1, adToValue $ case M.lookup i out' of
+                                                      Just d -> d
+                                                      _ -> AD.Primal $ AD.typeAsValue (t' !! i) 0)
               ValueRecord m -> second ValueRecord $ M.mapAccum deriveFromV i m
-              _ -> error "Not implemented (d19h782)" -- TODO: Arrays?
+              ValueArray aa a -> do
+                let (i', out'') = M.mapAccum deriveFromV i $ M.fromList $ assocs a
+                (i', ValueArray aa (array (bounds a) (M.toList out'')))
+              _ -> error "Not implemented (83u9ara9ru8)"
 
         -- Make sure to return a tuple
         let k = snd $ deriveFromV 0 v
@@ -2041,14 +2092,18 @@ initialCtx =
               ValuePrim _ -> [valueToAD v]
               ValueSeed _ -> [valueToAD v]
               ValueRecord m -> foldl1 (++) (M.map getSeeds m)
+              ValueArray _ a -> foldl1 (++) (map getSeeds $ elems a)
               _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
         let s' = getSeeds s
 
-        -- Impregnate the values
+        -- Augment the values
         let addSeeds i v = case v of
               ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Primal $ fromJust $ getV v') $ s' !! i)
               ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Seed se) $ s' !! i)
               ValueRecord m -> second ValueRecord $ M.mapAccum addSeeds i m
+              ValueArray aa a -> do
+                let (i', out) = M.mapAccum addSeeds i $ M.fromList $ assocs a
+                (i', ValueArray aa (array (bounds a) (M.toList out)))
               _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
         let v' = snd $ addSeeds 0 v
 
@@ -2059,10 +2114,11 @@ initialCtx =
         let deriveSeeds v = case v of
               ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
               ValueSeed s@(AD.JvpSeed d _ d') ->
-                if d == depth then -- TODO: Fix add op
+                if d == depth then
                   adToValue d'
                 else ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
               ValueRecord m -> ValueRecord $ M.map deriveSeeds m
+              ValueArray aa a -> ValueArray aa $ array (bounds a) $ M.toList $ M.map deriveSeeds $ M.fromList $ assocs a
               _ -> error "Not implemented (d19hasd782)" -- TODO: Arrays?
 
         -- Make sure to return a tuple

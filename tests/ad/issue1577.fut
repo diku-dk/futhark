@@ -1,6 +1,6 @@
 -- ==
 -- entry: main
--- compiled input { [1i64,1i64,3i64,3i64] [1,2,3,4] }
+-- input { [1i64,1i64,3i64,3i64] [1,2,3,4] }
 -- output { [0,3,0,7,0] }
 
 let red [n] (is: [n]i64) (vs: [n]i32) =                                    

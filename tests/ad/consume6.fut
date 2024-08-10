@@ -7,10 +7,10 @@ def test [n] (xs: [n]i32) =
 					
 -- ==
 -- entry: prim
--- compiled input { [1,2,3,4,5] } output { [1,1,1,1,1] }
+-- input { [1,2,3,4,5] } output { [1,1,1,1,1] }
 entry prim [n] (xs: [n]i32) = test xs
 		     
 -- ==
 -- entry: f_vjp
--- compiled input { [1,2,3,4,5] } output { [0,0,0,0,0] }
+-- input { [1,2,3,4,5] } output { [0,0,0,0,0] }
 entry f_vjp [n] (xs: [n]i32) = vjp test xs (replicate n 1)
