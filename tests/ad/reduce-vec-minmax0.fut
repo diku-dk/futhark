@@ -1,7 +1,7 @@
 -- ==
 -- entry: main
--- random input { [50][66]f32 } output { true }
--- random input { [23][45]f32} output { true }
+-- compiled random input { [50][66]f32 } output { true }
+-- compiled random input { [23][45]f32} output { true }
 
 let redmap [n][m] (arr: [m][n]f32) : [n]f32 =
   reduce (map2 f32.max) (replicate n f32.lowest) arr

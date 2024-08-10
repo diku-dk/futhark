@@ -2052,12 +2052,21 @@ initialCtx =
               let addop = addFor $ adToPrim a
               fromJust $ adBinOp (AD.OpBin addop) a b
 
+        let isNonzero v = case AD.value v of
+              P.FloatValue(Float16Value v') -> v' /= 0
+              P.FloatValue(Float32Value v') -> v' /= 0
+              P.FloatValue(Float64Value v') -> v' /= 0
+              P.IntValue(Int16Value v') -> v' /= 0
+              P.IntValue(Int32Value v') -> v' /= 0
+              P.IntValue(Int64Value v') -> v' /= 0
+              P.BoolValue v' -> v'
+              _ -> True
         -- Derive the seeds
         let deriveSeeds i v = case v of
-              ValueSeed s@(AD.VjpSeed d tp) -> if d == depth then (i + 1, case AD.deriveVjp tp (s' !! i) of
-                                                                              Just m -> m
-                                                                              _ -> M.empty)
-                                                             else (i + 1, M.empty)
+              ValueSeed s@(AD.VjpSeed d tp) -> if d == depth && isNonzero (s' !! i) then (i + 1, case AD.deriveVjp tp (s' !! i) of
+                                                                                                      Just m -> m
+                                                                                                      _ -> M.empty)
+                                                                                    else (i + 1, M.empty)
               ValueRecord m -> do
                 let (i', maps) = M.mapAccum deriveSeeds i m
                 let m' = M.unionsWith addAny $ M.elems maps
@@ -2101,10 +2110,20 @@ initialCtx =
               _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
         let s' = getSeeds s
 
+        let isNonzero v = case AD.value v of
+              P.FloatValue(Float16Value v') -> v' /= 0
+              P.FloatValue(Float32Value v') -> v' /= 0
+              P.FloatValue(Float64Value v') -> v' /= 0
+              P.IntValue(Int16Value v') -> v' /= 0
+              P.IntValue(Int32Value v') -> v' /= 0
+              P.IntValue(Int64Value v') -> v' /= 0
+              P.BoolValue v' -> v'
+              _ -> True
+
         -- Augment the values
         let addSeeds i v = case v of
-              ValuePrim v' -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Primal $ fromJust $ getV v') $ s' !! i)
-              ValueSeed se -> (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Seed se) $ s' !! i)
+              ValuePrim v' -> if isNonzero (s' !! i) then (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Primal $ fromJust $ getV v') $ s' !! i) else (i + 1, v)
+              ValueSeed se -> if isNonzero (s' !! i) then (i + 1, ValueSeed $ AD.JvpSeed depth (AD.Seed se) $ s' !! i) else (i + 1, v)
               ValueRecord m -> second ValueRecord $ M.mapAccum addSeeds i m
               ValueArray aa a -> do
                 let (i', out) = M.mapAccum addSeeds i $ M.fromList $ assocs a
@@ -2119,8 +2138,7 @@ initialCtx =
         let deriveSeeds v = case v of
               ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
               ValueSeed s@(AD.JvpSeed d _ d') ->
-                if d == depth then
-                  adToValue d'
+                if d == depth then adToValue d'
                 else ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
               ValueRecord m -> ValueRecord $ M.map deriveSeeds m
               ValueArray aa a -> ValueArray aa $ array (bounds a) $ M.toList $ M.map deriveSeeds $ M.fromList $ assocs a
