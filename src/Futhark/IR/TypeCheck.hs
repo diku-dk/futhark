@@ -560,6 +560,11 @@ checkOpaques (OpaqueTypes types) = descend [] types
       mapM_ (checkEntryPointType known . snd) fs
     check known (OpaqueSum _ cs) =
       mapM_ (mapM_ (checkEntryPointType known . fst) . snd) cs
+    check known (OpaqueArray _ v _) =
+      checkEntryPointType known (TypeOpaque v)
+    check known (OpaqueRecordArray _ v fs) = do
+      checkEntryPointType known (TypeOpaque v)
+      mapM_ (checkEntryPointType known . snd) fs
     check _ (OpaqueType _) =
       pure ()
     checkEntryPointType known (TypeOpaque s) =
@@ -837,6 +842,9 @@ checkBasicOp (SubExp es) =
   void $ checkSubExp es
 checkBasicOp (Opaque _ es) =
   void $ checkSubExp es
+checkBasicOp ArrayVal {} =
+  -- We assume this is never changed, so no need to check it.
+  pure ()
 checkBasicOp (ArrayLit [] _) =
   pure ()
 checkBasicOp (ArrayLit (e : es') t) = do

@@ -146,6 +146,8 @@ instance ASTMappable (ExpBase Info VName) where
     TupLit <$> mapM (mapOnExp tv) els <*> pure loc
   astMap tv (RecordLit fields loc) =
     RecordLit <$> astMap tv fields <*> pure loc
+  astMap _ (ArrayVal vs t loc) =
+    pure $ ArrayVal vs t loc
   astMap tv (ArrayLit els t loc) =
     ArrayLit <$> mapM (mapOnExp tv) els <*> traverse (mapOnStructType tv) t <*> pure loc
   astMap tv (Ascript e tdecl loc) =
@@ -456,6 +458,7 @@ bareExp (QualParens name e loc) = QualParens name (bareExp e) loc
 bareExp (TupLit els loc) = TupLit (map bareExp els) loc
 bareExp (StringLit vs loc) = StringLit vs loc
 bareExp (RecordLit fields loc) = RecordLit (map bareField fields) loc
+bareExp (ArrayVal vs t loc) = ArrayVal vs t loc
 bareExp (ArrayLit els _ loc) = ArrayLit (map bareExp els) NoInfo loc
 bareExp (Ascript e te loc) = Ascript (bareExp e) (bareTypeExp te) loc
 bareExp (Coerce e te _ loc) = Coerce (bareExp e) (bareTypeExp te) NoInfo loc

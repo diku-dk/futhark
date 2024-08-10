@@ -919,7 +919,7 @@ tiling1d dims_on_top gtid kdim w = do
   let tblock_size = tile_size
 
   (grid, space) <- do
-    -- How many groups we need to exhaust the innermost dimension.
+    -- How many blocks we need to exhaust the innermost dimension.
     ldim <-
       letSubExp "ldim" . BasicOp $
         BinOp (SDivUp Int64 Unsafe) kdim tblock_size

@@ -1,6 +1,11 @@
 -- ==
+<<<<<<< HEAD
 -- entry: rev 
 -- input { [1f32, 0f32, 3f32, 0f32] 3.0f32 } output { [0f32, 0f32, 0f32, 0f32] 0f32 }
+=======
+-- entry: rev
+-- compiled input { [1f32, 0f32, 3f32, 0f32] 3.0f32 } output { [0f32, 0f32, 0f32, 0f32] 0f32 }
+>>>>>>> master
 
 def red_mult [n] (xs: [n]f32, c: f32) : f32 =
   reduce (*) 1 xs * c

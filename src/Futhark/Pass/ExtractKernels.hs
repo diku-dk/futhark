@@ -289,8 +289,7 @@ unbalancedLambda orig_lam =
            )
     unbalancedStm _ (BasicOp _) =
       False
-    unbalancedStm _ (Apply fname _ _ _) =
-      not $ isBuiltInFunction fname
+    unbalancedStm _ Apply {} = False
 
 sequentialisedUnbalancedStm :: Stm SOACS -> DistribM (Maybe (Stms SOACS))
 sequentialisedUnbalancedStm (Let pat _ (Op soac@(Screma _ _ form)))

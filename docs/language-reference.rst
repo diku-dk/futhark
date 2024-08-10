@@ -743,6 +743,14 @@ This holds only if ``n`` is a variable or constant.
 Create an array containing the indicated elements.  Each element must
 have the same type and shape.
 
+**Large array optimisation**: as a special case, large one-dimensional
+array literal consisting *entirely* of monomorphic constants (i.e.,
+numbers must have a type suffix) are handled with specialised
+fast-path code by the compiler. To keep compile times manageable, make
+sure that all very large array literals (more than about ten thousand
+elements) are of this form. This is likely relevant only for generated
+code.
+
 .. _range:
 
 ``x..y...z``
@@ -1580,6 +1588,10 @@ type expression, verifies that the module implements the module type,
 then returns a module that exposes only the functionality described by
 the module type.  This is how internal details of a module can be
 hidden.
+
+As a slightly ad-hoc limitation, ascription is forbidden when a type
+substitution of size-lifted types occurs in a size appearing at the
+top level.
 
 ``\(p: mt1): mt2 -> e``
 .......................

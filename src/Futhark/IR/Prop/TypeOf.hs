@@ -63,6 +63,10 @@ basicOpType (SubExp se) =
   pure <$> subExpType se
 basicOpType (Opaque _ se) =
   pure <$> subExpType se
+basicOpType (ArrayVal vs t) =
+  pure [arrayOf (Prim t) (Shape [n]) NoUniqueness]
+  where
+    n = intConst Int64 $ toInteger $ length vs
 basicOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
   where

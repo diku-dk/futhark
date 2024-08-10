@@ -638,8 +638,8 @@ segBinOpSlug ltid tblock_id (op, interms, block_res_arrs) = do
     mkAcc p block_res_arr
       | Prim t <- paramType p,
         shapeRank (segBinOpShape op) == 0 = do
-          block_res_acc <- dPrim (baseString (paramName p) <> "_block_res_acc") t
-          pure (tvVar block_res_acc, [])
+          block_res_acc <- dPrimS (baseString (paramName p) <> "_block_res_acc") t
+          pure (block_res_acc, [])
       -- if this is a non-primitive reduction, the global mem result array will
       -- double as accumulator.
       | otherwise =
@@ -920,7 +920,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
       red_arrs = slugBlockRedArrs slug
       block_res_arrs = blockResArrs slug
 
-  old_counter <- dPrim "old_counter" int32
+  old_counter <- dPrim "old_counter"
   (counter_mem, _, counter_offset) <-
     fullyIndexArray
       counters
@@ -928,8 +928,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
   sComment "first thread in block saves block result to global memory" $
     sWhen (ltid32 .==. 0) $ do
       forM_ (take (length nes) $ zip block_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
-        copyDWIMFix v [0, sExt64 tblock_id] (Var acc) acc_is
-      sOp $ Imp.MemFence Imp.FenceGlobal
+        writeAtomic v [0, sExt64 tblock_id] (Var acc) acc_is
       -- Increment the counter, thus stating that our result is
       -- available.
       sOp
@@ -942,11 +941,11 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
         $ untyped (1 :: Imp.TExp Int32)
       -- Now check if we were the last block to write our result.  If
       -- so, it is our responsibility to produce the final result.
-      sWrite sync_arr [0] $ untyped $ tvExp old_counter .==. blocks_per_segment - 1
+      sWrite sync_arr [0] $ untyped $ tvExp old_counter .==. sExt32 (blocks_per_segment - 1)
 
   sOp $ Imp.Barrier Imp.FenceGlobal
 
-  is_last_block <- dPrim "is_last_block" Bool
+  is_last_block <- dPrim "is_last_block"
   copyDWIMFix (tvVar is_last_block) [] (Var sync_arr) [0]
   sWhen (tvExp is_last_block) $ do
     -- The final block has written its result (and it was
@@ -960,7 +959,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
         Imp.Atomic DefaultSpace $
           Imp.AtomicAdd Int32 (tvVar old_counter) counter_mem counter_offset $
             untyped $
-              negate blocks_per_segment
+              sExt32 (negate blocks_per_segment)
 
     sLoopNest (slugShape slug) $ \vec_is -> do
       unless (null $ slugShape slug) $

@@ -13,7 +13,7 @@ module Futhark.CodeGen.ImpGen.GPU
 where
 
 import Control.Monad
-import Data.List (foldl')
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
@@ -110,7 +110,7 @@ opCompiler (Pat [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
 opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblock_size))) = do
   fname <- askFunction
-  max_num_tblocks :: TV Int32 <- dPrim "max_num_tblocks" int32
+  max_num_tblocks :: TV Int64 <- dPrim "max_num_tblocks"
   sOp $
     Imp.GetSize (tvVar max_num_tblocks) (keyWithEntryPoint fname max_num_tblocks_key) $
       sizeClassWithEntryPoint fname SizeGrid
@@ -179,14 +179,14 @@ checkSharedMemoryReqs in_scope code = do
   if not $ all in_scope $ namesToList $ freeIn alloc_sizes
     then pure Nothing
     else do
-      shared_memory_capacity :: TV Int32 <- dPrim "shared_memory_capacity" int32
+      shared_memory_capacity :: TV Int64 <- dPrim "shared_memory_capacity"
       sOp $ Imp.GetSizeMax (tvVar shared_memory_capacity) SizeSharedMemory
 
       let shared_memory_capacity_64 =
             sExt64 $ tvExp shared_memory_capacity
           fits size =
             unCount size .<=. shared_memory_capacity_64
-      pure $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
+      pure $ Just $ L.foldl' (.&&.) true (map fits alloc_sizes)
   where
     getGPU = foldMap getKernel
     getKernel (Imp.CallKernel k) | Imp.kernelCheckSharedMemory k = [k]
