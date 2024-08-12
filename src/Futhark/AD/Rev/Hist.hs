@@ -36,7 +36,12 @@ withinBounds [] = TPrimExp $ ValueExp (BoolValue True)
 withinBounds [(q, i)] = (le64 i .<. pe64 q) .&&. (pe64 (intConst Int64 (-1)) .<. le64 i)
 withinBounds (qi : qis) = withinBounds [qi] .&&. withinBounds qis
 
-elseIf :: PrimType -> [(ADM (Exp SOACS), ADM (Exp SOACS))] -> [ADM (Body SOACS)] -> ADM (Exp SOACS)
+elseIf ::
+  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
+  PrimType ->
+  [(m (Exp (Rep m)), m (Exp (Rep m)))] ->
+  [m (Body (Rep m))] ->
+  m (Exp (Rep m))
 elseIf t [(c1, c2)] [bt, bf] =
   eIf
     (eCmpOp (CmpEq t) c1 c2)
@@ -51,7 +56,7 @@ elseIf t ((c1, c2) : cs) (bt : bs) =
     $ elseIf t cs bs
 elseIf _ _ _ = error "In elseIf, Hist.hs: input not supported"
 
-bindSubExpRes :: String -> [SubExpRes] -> ADM [VName]
+bindSubExpRes :: (MonadBuilder m) => String -> [SubExpRes] -> m [VName]
 bindSubExpRes s =
   traverse
     ( \(SubExpRes cs se) -> do
