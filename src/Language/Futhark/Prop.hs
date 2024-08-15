@@ -463,6 +463,8 @@ typeOf (RecordLit fs _) =
     record (RecordFieldExplicit name e _) = (name, typeOf e)
     record (RecordFieldImplicit name (Info t) _) = (baseName name, t)
 typeOf (ArrayLit _ (Info t) _) = t
+typeOf (ArrayVal vs t loc) =
+  Array mempty (Shape [sizeFromInteger (genericLength vs) loc]) (Prim t)
 typeOf (StringLit vs loc) =
   Array
     mempty

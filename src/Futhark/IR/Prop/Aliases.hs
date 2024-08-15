@@ -57,6 +57,7 @@ subExpAliases (Var v) = vnameAliases v
 basicOpAliases :: BasicOp -> [Names]
 basicOpAliases (SubExp se) = [subExpAliases se]
 basicOpAliases (Opaque _ se) = [subExpAliases se]
+basicOpAliases (ArrayVal _ _) = [mempty]
 basicOpAliases (ArrayLit _ _) = [mempty]
 basicOpAliases BinOp {} = [mempty]
 basicOpAliases ConvOp {} = [mempty]

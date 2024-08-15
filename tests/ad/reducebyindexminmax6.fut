@@ -7,7 +7,7 @@
 def red_max [n][m] (is: [n]i64) (vs: [n]f32) (dst: [m]f32) =
   let dst2 = copy dst
   let a = map (**2) dst2
-  let b = reduce_by_index dst2 f32.max f32.lowest is vs 
+  let b = reduce_by_index dst2 f32.max f32.lowest is vs
   in map2 (+) a b
 
 entry rev [n][m] (dst: [m]f32) (is: [n]i64) (vs: [n]f32) =

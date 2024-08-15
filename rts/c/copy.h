@@ -122,6 +122,10 @@ static bool lmad_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_out,
 
   *num_arrays_out = num_arrays;
 
+  if (r==map_r) {
+    return false;
+  }
+
   if (memcmp(&rowmajor_strides[map_r],
              &dst_strides[map_r],
              sizeof(int64_t)*(r-map_r)) == 0) {
@@ -193,11 +197,11 @@ static void log_copy(struct futhark_context* ctx,
     fprintf(ctx->log, "Shape: ");
     for (int i = 0; i < r; i++) { fprintf(ctx->log, "[%ld]", (long int)shape[i]); }
     fprintf(ctx->log, "\n");
-    fprintf(ctx->log, "Dst offset: %ld\n", dst_offset);
+    fprintf(ctx->log, "Dst offset: %ld\n", (long int)dst_offset);
     fprintf(ctx->log, "Dst strides:");
     for (int i = 0; i < r; i++) { fprintf(ctx->log, " %ld", (long int)dst_strides[i]); }
     fprintf(ctx->log, "\n");
-    fprintf(ctx->log, "Src offset: %ld\n", src_offset);
+    fprintf(ctx->log, "Src offset: %ld\n", (long int)src_offset);
     fprintf(ctx->log, "Src strides:");
     for (int i = 0; i < r; i++) { fprintf(ctx->log, " %ld", (long int)src_strides[i]); }
     fprintf(ctx->log, "\n");

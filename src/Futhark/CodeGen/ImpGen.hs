@@ -444,7 +444,7 @@ compileProg r ops space (Prog types consts funs) =
      in ( ( stateWarnings s',
             Imp.Definitions
               types
-              (stateConstants s' <> foldMap stateConstants ss)
+              (foldMap stateConstants ss <> stateConstants s')
               (stateFunctions s')
           ),
           stateNameSource s'
@@ -487,6 +487,8 @@ entryPointSignedness _ (TypeTransparent vt) = [valueTypeSign vt]
 entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> map valueTypeSign vts
+    OpaqueArray _ _ vts -> map valueTypeSign vts
+    OpaqueRecordArray _ _ fs -> foldMap (entryPointSignedness types . snd) fs
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
     OpaqueSum vts _ -> map valueTypeSign vts
 
@@ -499,6 +501,8 @@ entryPointSize _ (TypeTransparent _) = 1
 entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> length vts
+    OpaqueArray _ _ vts -> length vts
+    OpaqueRecordArray _ _ fs -> sum $ map (entryPointSize types . snd) fs
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
     OpaqueSum vts _ -> length vts
 
@@ -954,17 +958,19 @@ defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
         destslice = skip_slices ++ [DimSlice (tvExp offs_glb) rows 1]
     copyDWIM (patElemName pe) destslice (Var y) []
     offs_glb <-- tvExp offs_glb + rows
+defCompileBasicOp (Pat [pe]) (ArrayVal vs t) = do
+  dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
+  static_array <- newVNameForFun "static_array"
+  emit $ Imp.DeclareArray static_array t $ Imp.ArrayValues vs
+  let static_src =
+        MemLoc static_array [intConst Int64 $ fromIntegral $ length vs] $
+          LMAD.iota 0 [fromIntegral $ length vs]
+  addVar static_array $ MemVar Nothing $ MemEntry DefaultSpace
+  copy t dest_mem static_src
 defCompileBasicOp (Pat [pe]) (ArrayLit es _)
   | Just vs@(v : _) <- mapM isLiteral es = do
-      dest_mem <- entryArrayLoc <$> lookupArray (patElemName pe)
       let t = primValueType v
-      static_array <- newVNameForFun "static_array"
-      emit $ Imp.DeclareArray static_array t $ Imp.ArrayValues vs
-      let static_src =
-            MemLoc static_array [intConst Int64 $ fromIntegral $ length es] $
-              LMAD.iota 0 [fromIntegral $ length es]
-      addVar static_array $ MemVar Nothing $ MemEntry DefaultSpace
-      copy t dest_mem static_src
+      defCompileBasicOp (Pat [pe]) (ArrayVal vs t)
   | otherwise =
       forM_ (zip [0 ..] es) $ \(i, e) ->
         copyDWIMFix (patElemName pe) [fromInteger i] e []

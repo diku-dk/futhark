@@ -37,6 +37,10 @@ import Text.Regex.TDFA
 
 --- Test execution
 
+-- The use of [T.Text] here is somewhat kludgy. We use it to track how
+-- many errors have occurred during testing of a single program (which
+-- may have multiple entry points). This should really not be done at
+-- the monadic level - a test failing should be handled explicitly.
 type TestM = ExceptT [T.Text] IO
 
 -- Taken from transformers-0.5.5.0.
@@ -286,7 +290,8 @@ runTestCase (TestCase mode program testcase progs) = do
         context "Generating reference outputs" $
           -- We probably get the concurrency at the test program level,
           -- so force just one data set at a time here.
-          ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
+          withExceptT pure $
+            ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
 
       when (mode == Structure) $
         mapM_ (testMetrics progs program) structures
@@ -393,7 +398,9 @@ runResult _ (ExitFailure _) _ stderr_s =
 
 compileTestProgram :: [String] -> FutharkExe -> String -> FilePath -> [WarningTest] -> TestM ()
 compileTestProgram extra_options futhark backend program warnings = do
-  (_, futerr) <- compileProgram ("--server" : extra_options) futhark backend program
+  (_, futerr) <-
+    withExceptT pure $
+      compileProgram ("--server" : extra_options) futhark backend program
   testWarnings warnings futerr
 
 compareResult ::

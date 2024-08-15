@@ -7,15 +7,65 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.26.0]
 
-* Faster device-to-device copies on CUDA.
-
-* "More correctly" detect L2 cache size for OpenCL backend on AMD GPUs.
-
 ### Added
+
+* Better error message when in-place updates fail at runtime due to a
+  shape mismatch.
 
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* `#[unroll]` on an outer loop now no longer causes unrolling of all
+  loops nested inside the loop body.
+
+* Obscure issue related to replications of constants in complex
+  intrablock kernels.
+
+* Interpreter no longer crashes on attributes in patterns.
+
+## [0.25.19]
+
+### Added
+
+* The compiler now does slightly less aggressive inlining. Use the
+  `#[inline]` attribute if you want to force inlining of some
+  function.
+
+* Arrays of opaque types now support indexing through the C API.
+  Arrays of records can also be constructed. (#2082)
+
+### Fixed
+
+* The `opencl` backend now always passes
+  `-cl-fp32-correctly-rounded-divide-sqrt` to the kernel compiler, in
+  order to match CUDA and HIP behaviour.
+
+## [0.25.18]
+
+### Added
+
+* New prelude function: `rep`, an implicit form of `replicate`.
+
+* Improved handling of large monomorphic single-dimensional array
+  literals (#2160).
+
+### Fixed
+
+* `futhark repl` no longer asks for confirmation on EOF.
+
+* Obscure oversight related to abstract size-lifted types (#2120).
+
+* Accidential exponential-time algorithm in layout optimisation for
+  multicore backends (#2151).
+
+## [0.25.17]
+
+* Faster device-to-device copies on CUDA.
+
+* "More correctly" detect L2 cache size for OpenCL backend on AMD GPUs.
 
 ### Fixed
 
@@ -25,6 +75,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Rare case where GPU histograms would use slightly too much shared
   memory and fail at run-time.
+
+* Rare crash in layout optimisation.
 
 ## [0.25.16]
 

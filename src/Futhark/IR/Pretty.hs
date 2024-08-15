@@ -198,6 +198,11 @@ instance Pretty BasicOp where
       <+> colon
       <+> "[]"
       <> pretty rt
+  pretty (ArrayVal vs t) =
+    brackets (commasep $ map pretty vs)
+      <+> colon
+      <+> "[]"
+      <> pretty t
   pretty (BinOp bop x y) = pretty bop <> parens (pretty x <> comma <+> pretty y)
   pretty (CmpOp op x y) = pretty op <> parens (pretty x <> comma <+> pretty y)
   pretty (ConvOp conv x) =
@@ -412,6 +417,15 @@ instance Pretty OpaqueType where
     "sum" <+> nestedBlock "{" "}" (stack $ pretty ts : map p cs)
     where
       p (c, ets) = hsep $ "#" <> pretty c : map pretty ets
+  pretty (OpaqueArray r v ts) =
+    "array" <+> pretty r
+      <> "d"
+        <+> dquotes (pretty v)
+        <+> nestedBlock "{" "}" (stack $ map pretty ts)
+  pretty (OpaqueRecordArray r v fs) =
+    "record_array" <+> pretty r <> "d" <+> dquotes (pretty v) <+> nestedBlock "{" "}" (stack $ map p fs)
+    where
+      p (f, et) = pretty f <> ":" <+> pretty et
 
 instance Pretty OpaqueTypes where
   pretty (OpaqueTypes ts) = "types" <+> nestedBlock "{" "}" (stack $ map p ts)

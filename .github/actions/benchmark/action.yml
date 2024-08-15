@@ -25,7 +25,7 @@ runs:
           module load perl
           cd futhark-benchmarks
           ./get-data.sh external-data.txt
-        slurm-options: --time=10:00 -c 1
+        slurm-options: --time=30:00 -c 1
 
     - uses: ./.github/actions/futhark-slurm
       with:
