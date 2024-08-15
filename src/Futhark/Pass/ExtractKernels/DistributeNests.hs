@@ -586,14 +586,15 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate shape (Var stm_arr)))) acc
           Rearrange ([res_r - nest_r .. res_r - 1] ++ [0 .. res_r - nest_r - 1]) arr_tr_rep
 maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate shape v))) acc = do
   distributeSingleStm acc stm >>= \case
-    Just (kernels, _, nest, acc') -> do
-      addPostStms kernels
-      let outerpat = loopNestingPat $ fst nest
-          nest_shape = Shape $ kernelNestWidths nest
-      localScope (typeEnvFromDistAcc acc') $ do
-        postStm <=< runBuilder_ . auxing aux . letBind outerpat $
-          BasicOp (Replicate (nest_shape <> shape) v)
-        pure acc'
+    Just (kernels, _, nest, acc')
+      | boundInKernelNest nest == mempty -> do
+          addPostStms kernels
+          let outerpat = loopNestingPat $ fst nest
+              nest_shape = Shape $ kernelNestWidths nest
+          localScope (typeEnvFromDistAcc acc') $ do
+            postStm <=< runBuilder_ . auxing aux . letBind outerpat $
+              BasicOp (Replicate (nest_shape <> shape) v)
+            pure acc'
     _ -> addStmToAcc stm acc
 -- Opaques are applied to the full array, because otherwise they can
 -- drastically inhibit parallelisation in some cases.
