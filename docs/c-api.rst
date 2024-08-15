@@ -392,7 +392,7 @@ tuple is simply a record with numeric fields.
 
 The projection and construction functions are equivalent in
 functionality to writing entry points by hand, and so serve only to
-cut down on boilerplate.  Important things to be aware of:
+cut down on boilerplate. Important things to be aware of:
 
 1. The objects constructed though these functions have their own
    lifetime (like any objects returned from an entry point) and must
@@ -404,6 +404,8 @@ cut down on boilerplate.  Important things to be aware of:
    passing them to entry points that consume their arguments.  As
    always, you don't have to worry about this if you never write entry
    points that consume their arguments.
+
+3. You must synchronise before using any scalar results.
 
 The precise functions generated depend on the fields of the record.
 The following functions assume a record with Futhark-level type ``type
