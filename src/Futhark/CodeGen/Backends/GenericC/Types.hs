@@ -552,7 +552,7 @@ recordArrayIndexFunctions space _types desc rank elemtype vds = do
           -- variable.
           copy
             CopyNoBarrier
-            [C.cexp|&v->$id:(tupleField j)|]
+            [C.cexp|(unsigned char*)&v->$id:(tupleField j)|]
             [C.cexp|0|]
             DefaultSpace
             [C.cexp|arr->$id:(tupleField j)->mem.mem|]
@@ -571,7 +571,7 @@ recordArrayIndexFunctions space _types desc rank elemtype vds = do
             CopyNoBarrier
             [C.cexp|v->$id:(tupleField j)->mem.mem|]
             [C.cexp|0|]
-            DefaultSpace
+            space
             [C.cexp|arr->$id:(tupleField j)->mem.mem|]
             (indexExp pt r [C.cexp|arr->$id:(tupleField j)->shape|])
             space

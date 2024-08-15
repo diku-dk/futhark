@@ -50,6 +50,7 @@ void test1(struct futhark_context *ctx) {
 
     float out1_host[2];
     assert(futhark_values_f32_1d(ctx, out1, out1_host) == 0);
+    assert(futhark_context_sync(ctx) == 0);
     assert(memcmp(out1_host, b, sizeof(float)*2) == 0);
 
     assert(futhark_free_opaque_7e1a81531cc3c23bb9093ed822aec320(ctx, out) == 0);

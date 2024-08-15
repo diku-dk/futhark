@@ -40,21 +40,25 @@ void test1(struct futhark_context *ctx) {
   // Test indexing: in bounds.
   struct futhark_opaque_tup2_i32_tup2_f32_f32* trip_fut;
   assert(futhark_index_opaque_arr1d_tup2_i32_tup2_f32_f32(ctx, &trip_fut, a_b_b_fut, 1) == 0);
+  assert(futhark_context_sync(ctx) == 0); // XXX, would be nice if this was not required.
   struct futhark_opaque_tup2_f32_f32* pair_fut;
   assert(futhark_project_opaque_tup2_i32_tup2_f32_f32_1(ctx, &pair_fut, trip_fut) == 0);
   {
     int x;
     assert(futhark_project_opaque_tup2_i32_tup2_f32_f32_0(ctx, &x, trip_fut) == 0);
+    assert(futhark_context_sync(ctx) == 0);
     assert(x == a[1]);
   }
   {
     float x;
     assert(futhark_project_opaque_tup2_f32_f32_0(ctx, &x, pair_fut) == 0);
+    assert(futhark_context_sync(ctx) == 0);
     assert(x == b[1]);
   }
   {
     float x;
     assert(futhark_project_opaque_tup2_f32_f32_1(ctx, &x, pair_fut) == 0);
+    assert(futhark_context_sync(ctx) == 0);
     assert(x == b[1]);
   }
 

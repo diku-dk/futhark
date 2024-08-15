@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Interpreter no longer crashes on attributes in patterns.
 
+* Fixes to array indexing through C API when using GPU backends.
+
 ## [0.25.19]
 
 ### Added
