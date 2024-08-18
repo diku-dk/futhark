@@ -33,37 +33,37 @@ jobs:
         name: futhark-nightly-linux-x86_64.tar.xz
         path: result/futhark-nightly-linux-x86_64.tar.xz
 
-  # benchmark-MI100-opencl:
-  #   runs-on: MI100
-  #   needs: [build-linux-nix]
+  benchmark-MI100-opencl:
+    runs-on: MI100
+    needs: [build-linux-nix]
 
-  #   env:
-  #     TMPDIR: "/scratch"
-  #   steps:
-  #   - uses: actions/checkout@v3
-  #     with:
-  #       submodules: recursive
-  #       fetch-depth: 0
-  #   - uses: ./.github/actions/benchmark
-  #     with:
-  #       backend: opencl
-  #       system: MI100
+    env:
+      TMPDIR: "/scratch"
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: opencl
+        system: MI100
 
-  # benchmark-MI100-hip:
-  #   runs-on: MI100
-  #   needs: [build-linux-nix]
+  benchmark-MI100-hip:
+    runs-on: MI100
+    needs: [build-linux-nix]
 
-  #   env:
-  #     TMPDIR: "/scratch"
-  #   steps:
-  #   - uses: actions/checkout@v3
-  #     with:
-  #       submodules: recursive
-  #       fetch-depth: 0
-  #   - uses: ./.github/actions/benchmark
-  #     with:
-  #       backend: hip
-  #       system: MI100
+    env:
+      TMPDIR: "/scratch"
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: hip
+        system: MI100
 
   benchmark-A100:
     runs-on: hendrix
