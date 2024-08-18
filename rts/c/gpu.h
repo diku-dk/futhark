@@ -28,6 +28,25 @@ void gpu_create_kernel(struct futhark_context *ctx,
                        gpu_kernel* kernel,
                        const char* name);
 
+static void gpu_init_log(struct futhark_context *ctx) {
+  if (ctx->cfg->logging) {
+    fprintf(ctx->log, "Default block size: %ld\n", (long)ctx->cfg->default_block_size);
+    fprintf(ctx->log, "Default grid size: %ld\n", (long)ctx->cfg->default_grid_size);
+    fprintf(ctx->log, "Default tile size: %ld\n", (long)ctx->cfg->default_tile_size);
+    fprintf(ctx->log, "Default register tile size: %ld\n", (long)ctx->cfg->default_reg_tile_size);
+    fprintf(ctx->log, "Default threshold: %ld\n", (long)ctx->cfg->default_threshold);
+    fprintf(ctx->log, "Max thread block size: %ld\n", (long)ctx->max_thread_block_size);
+    fprintf(ctx->log, "Max grid size: %ld\n", (long)ctx->max_grid_size);
+    fprintf(ctx->log, "Max tile size: %ld\n", (long)ctx->max_tile_size);
+    fprintf(ctx->log, "Max threshold: %ld\n", (long)ctx->max_threshold);
+    fprintf(ctx->log, "Max shared memory: %ld\n", (long)ctx->max_shared_memory);
+    fprintf(ctx->log, "Max registers: %ld\n", (long)ctx->max_registers);
+    fprintf(ctx->log, "Max cache: %ld\n", (long)ctx->max_cache);
+    fprintf(ctx->log, "Lockstep width: %ld\n", (long)ctx->lockstep_width);
+  }
+}
+
+
 // Max number of thead blocks we allow along the second or third
 // dimension for transpositions.
 #define MAX_TR_THREAD_BLOCKS 65535

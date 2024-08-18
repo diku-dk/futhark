@@ -141,13 +141,13 @@ struct futhark_context_config {
   char* dump_binary_to;
   char* load_binary_from;
 
-  size_t default_group_size;
-  size_t default_num_groups;
+  size_t default_block_size;
+  size_t default_grid_size;
   size_t default_tile_size;
   size_t default_reg_tile_size;
   size_t default_threshold;
 
-  int default_group_size_changed;
+  int default_block_size_changed;
   int default_tile_size_changed;
   int num_build_opts;
   char* *build_opts;
@@ -173,13 +173,13 @@ static void backend_context_config_setup(struct futhark_context_config* cfg) {
   // The following are dummy sizes that mean the concrete defaults
   // will be set during initialisation via hardware-inspection-based
   // heuristics.
-  cfg->default_group_size = 0;
-  cfg->default_num_groups = 0;
+  cfg->default_block_size = 0;
+  cfg->default_grid_size = 0;
   cfg->default_tile_size = 0;
   cfg->default_reg_tile_size = 0;
   cfg->default_threshold = 0;
 
-  cfg->default_group_size_changed = 0;
+  cfg->default_block_size_changed = 0;
   cfg->default_tile_size_changed = 0;
 
   cfg->queue_set = 0;
@@ -441,8 +441,8 @@ void futhark_context_config_set_unified_memory(struct futhark_context_config* cf
 }
 
 void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_group_size = size;
-  cfg->default_group_size_changed = 1;
+  cfg->default_block_size = size;
+  cfg->default_block_size_changed = 1;
 }
 
 void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
@@ -450,7 +450,7 @@ void futhark_context_config_set_default_group_size(struct futhark_context_config
 }
 
 void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
-  cfg->default_num_groups = num;
+  cfg->default_grid_size = num;
 }
 
 void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
@@ -481,12 +481,12 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
   }
   if (strcmp(param_name, "default_thread_block_size") == 0 ||
       strcmp(param_name, "default_group_size") == 0) {
-    cfg->default_group_size = new_value;
+    cfg->default_block_size = new_value;
     return 0;
   }
   if (strcmp(param_name, "default_grid_size") == 0 ||
       strcmp(param_name, "default_num_groups") == 0) {
-    cfg->default_num_groups = new_value;
+    cfg->default_grid_size = new_value;
     return 0;
   }
   if (strcmp(param_name, "default_threshold") == 0) {
@@ -542,10 +542,11 @@ struct futhark_context {
   struct free_list gpu_free_list;
 
   size_t max_thread_block_size;
-  size_t max_num_groups;
+  size_t max_grid_size;
   size_t max_tile_size;
   size_t max_threshold;
   size_t max_shared_memory;
+  size_t max_bespoke;
   size_t max_registers;
   size_t max_cache;
 
@@ -822,12 +823,12 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
 
-  if (max_thread_block_size < ctx->cfg->default_group_size) {
-    if (ctx->cfg->default_group_size_changed) {
+  if (max_thread_block_size < ctx->cfg->default_block_size) {
+    if (ctx->cfg->default_block_size_changed) {
       fprintf(stderr, "Note: Device limits default group size to %zu (down from %zu).\n",
-              max_thread_block_size, ctx->cfg->default_group_size);
+              max_thread_block_size, ctx->cfg->default_block_size);
     }
-    ctx->cfg->default_group_size = max_thread_block_size;
+    ctx->cfg->default_block_size = max_thread_block_size;
   }
 
   if (max_tile_size < ctx->cfg->default_tile_size) {
@@ -873,7 +874,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
 
   ctx->max_thread_block_size = max_thread_block_size;
   ctx->max_tile_size = max_tile_size; // No limit.
-  ctx->max_threshold = ctx->max_num_groups = 0; // No limit.
+  ctx->max_threshold = ctx->max_grid_size = 1U<<31; // No limit.
   ctx->max_shared_memory = max_shared_memory;
 
   // Now we go through all the sizes, clamp them to the valid range,
@@ -886,10 +887,10 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
 
     if (strstr(size_class, "thread_block_size") == size_class) {
       max_value = max_thread_block_size;
-      default_value = ctx->cfg->default_group_size;
+      default_value = ctx->cfg->default_block_size;
     } else if (strstr(size_class, "grid_size") == size_class) {
       max_value = max_thread_block_size; // Futhark assumes this constraint.
-      default_value = ctx->cfg->default_num_groups;
+      default_value = ctx->cfg->default_grid_size;
       // XXX: as a quick and dirty hack, use twice as many threads for
       // histograms by default.  We really should just be smarter
       // about sizes somehow.
@@ -921,11 +922,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     ctx->lockstep_width = 1;
   }
 
-  if (ctx->cfg->logging) {
-    fprintf(stderr, "Lockstep width: %d\n", (int)ctx->lockstep_width);
-    fprintf(stderr, "Default thread block size: %d\n", (int)ctx->cfg->default_group_size);
-    fprintf(stderr, "Default number of thread blocks: %d\n", (int)ctx->cfg->default_num_groups);
-  }
+  gpu_init_log(ctx);
 
   char *compile_opts = mk_compile_opts(ctx, extra_build_opts, device_option);
 
