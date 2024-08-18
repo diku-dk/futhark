@@ -30,11 +30,13 @@ void gpu_create_kernel(struct futhark_context *ctx,
 
 static void gpu_init_log(struct futhark_context *ctx) {
   if (ctx->cfg->logging) {
-    fprintf(ctx->log, "Default block size: %ld\n", (long)ctx->cfg->default_block_size);
-    fprintf(ctx->log, "Default grid size: %ld\n", (long)ctx->cfg->default_grid_size);
-    fprintf(ctx->log, "Default tile size: %ld\n", (long)ctx->cfg->default_tile_size);
-    fprintf(ctx->log, "Default register tile size: %ld\n", (long)ctx->cfg->default_reg_tile_size);
-    fprintf(ctx->log, "Default threshold: %ld\n", (long)ctx->cfg->default_threshold);
+    fprintf(ctx->log, "Default block size: %ld\n", (long)ctx->cfg->gpu.default_block_size);
+    fprintf(ctx->log, "Default grid size: %ld\n", (long)ctx->cfg->gpu.default_grid_size);
+    fprintf(ctx->log, "Default tile size: %ld\n", (long)ctx->cfg->gpu.default_tile_size);
+    fprintf(ctx->log, "Default register tile size: %ld\n", (long)ctx->cfg->gpu.default_reg_tile_size);
+    fprintf(ctx->log, "Default cache: %ld\n", (long)ctx->cfg->gpu.default_cache);
+    fprintf(ctx->log, "Default registers: %ld\n", (long)ctx->cfg->gpu.default_registers);
+    fprintf(ctx->log, "Default threshold: %ld\n", (long)ctx->cfg->gpu.default_threshold);
     fprintf(ctx->log, "Max thread block size: %ld\n", (long)ctx->max_thread_block_size);
     fprintf(ctx->log, "Max grid size: %ld\n", (long)ctx->max_grid_size);
     fprintf(ctx->log, "Max tile size: %ld\n", (long)ctx->max_tile_size);
@@ -46,6 +48,82 @@ static void gpu_init_log(struct futhark_context *ctx) {
   }
 }
 
+// Generic GPU command line options.
+
+void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
+  cfg->gpu.default_block_size = size;
+  cfg->gpu.default_block_size_changed = 1;
+}
+
+void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
+  futhark_context_config_set_default_thread_block_size(cfg, size);
+}
+
+void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
+  cfg->gpu.default_grid_size = num;
+  cfg->gpu.default_grid_size_changed = 1;
+}
+
+void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
+  futhark_context_config_set_default_grid_size(cfg, num);
+}
+
+void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
+  cfg->gpu.default_tile_size = size;
+  cfg->gpu.default_tile_size_changed = 1;
+}
+
+void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size) {
+  cfg->gpu.default_reg_tile_size = size;
+}
+
+void futhark_context_config_set_default_cache(struct futhark_context_config *cfg, int size) {
+  cfg->gpu.default_cache = size;
+}
+
+void futhark_context_config_set_default_registers(struct futhark_context_config *cfg, int size) {
+  cfg->gpu.default_registers = size;
+}
+
+void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size) {
+  cfg->gpu.default_threshold = size;
+}
+
+int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
+                                            const char *param_name,
+                                            size_t new_value) {
+  for (int i = 0; i < cfg->num_tuning_params; i++) {
+    if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
+      cfg->tuning_params[i] = new_value;
+      return 0;
+    }
+  }
+  if (strcmp(param_name, "default_thread_block_size") == 0 ||
+      strcmp(param_name, "default_group_size") == 0) {
+    cfg->gpu.default_block_size = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_grid_size") == 0 ||
+      strcmp(param_name, "default_num_groups") == 0) {
+    cfg->gpu.default_grid_size = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_threshold") == 0) {
+    cfg->gpu.default_threshold = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_tile_size") == 0) {
+    cfg->gpu.default_tile_size = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_reg_tile_size") == 0) {
+    cfg->gpu.default_reg_tile_size = new_value;
+    return 0;
+  }
+  return 1;
+}
+
+// End of GPU command line optiopns.
 
 // Max number of thead blocks we allow along the second or third
 // dimension for transpositions.

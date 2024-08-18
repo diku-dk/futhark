@@ -354,15 +354,29 @@ gpuOptions =
       { optionLongName = "default-tile-size",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
-        optionDescription = "The default tile size used when performing two-dimensional tiling.",
+        optionDescription = "The default tile size for two-dimensional tiling.",
         optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-reg-tile-size",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
-        optionDescription = "The default register tile size used when performing two-dimensional tiling.",
+        optionDescription = "The default register tile size for two-dimensional tiling.",
         optionAction = [C.cstm|futhark_context_config_set_default_reg_tile_size(cfg, atoi(optarg));|]
+      },
+    Option
+      { optionLongName = "default-registers",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "The amount of register memory in bytes.",
+        optionAction = [C.cstm|futhark_context_config_set_default_registers(cfg, atoi(optarg));|]
+      },
+    Option
+      { optionLongName = "default-cache",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "The amount of register memory in bytes.",
+        optionAction = [C.cstm|futhark_context_config_set_default_cache(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-threshold",
@@ -468,5 +482,7 @@ generateGPUBoilerplate gpu_program macros backendH kernels types failures = do
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_registers(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_cache(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_unified_memory(struct futhark_context_config* cfg, int flag);|]

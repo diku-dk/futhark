@@ -12,8 +12,8 @@ static char* get_failure_msg(int failure_idx, int64_t args[]);
 #define HIPRTC_SUCCEED_FATAL(x) hiprtc_api_succeed_fatal(x, #x, __FILE__, __LINE__)
 #define HIPRTC_SUCCEED_NONFATAL(x) hiprtc_api_succeed_nonfatal(x, #x, __FILE__, __LINE__)
 // Take care not to override an existing error.
-#define HIP_SUCCEED_OR_RETURN(e) {             \
-    char *serror = HIP_SUCCEED_NONFATAL(e);    \
+#define HIP_SUCCEED_OR_RETURN(e) {              \
+    char *serror = HIP_SUCCEED_NONFATAL(e);     \
     if (serror) {                               \
       if (!ctx->error) {                        \
         ctx->error = serror;                    \
@@ -53,7 +53,7 @@ static char* hip_api_succeed_nonfatal(hipError_t res, const char *call,
 }
 
 static inline void hiprtc_api_succeed_fatal(hiprtcResult res, const char *call,
-                                           const char *file, int line) {
+                                            const char *file, int line) {
   if (res != HIPRTC_SUCCESS) {
     const char *err_str = hiprtcGetErrorString(res);
     futhark_panic(-1, "%s:%d: HIPRTC call\n  %s\nfailed with error code %d (%s)\n",
@@ -62,7 +62,7 @@ static inline void hiprtc_api_succeed_fatal(hiprtcResult res, const char *call,
 }
 
 static char* hiprtc_api_succeed_nonfatal(hiprtcResult res, const char *call,
-                                        const char *file, int line) {
+                                         const char *file, int line) {
   if (res != HIPRTC_SUCCESS) {
     const char *err_str = hiprtcGetErrorString(res);
     return msgprintf("%s:%d: HIPRTC call\n  %s\nfailed with error code %d (%s)\n",
@@ -94,15 +94,7 @@ struct futhark_context_config {
   char* preferred_device;
   int preferred_device_num;
 
-  size_t default_block_size;
-  size_t default_grid_size;
-  size_t default_tile_size;
-  size_t default_reg_tile_size;
-  size_t default_threshold;
-
-  int default_block_size_changed;
-  int default_grid_size_changed;
-  int default_tile_size_changed;
+  struct gpu_config gpu;
 };
 
 static void backend_context_config_setup(struct futhark_context_config *cfg) {
@@ -115,15 +107,7 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
 
   cfg->unified_memory = 0;
 
-  cfg->default_block_size = 256;
-  cfg->default_grid_size = 0; // Set properly later.
-  cfg->default_tile_size = 32;
-  cfg->default_reg_tile_size = 2;
-  cfg->default_threshold = 32*1024;
-
-  cfg->default_block_size_changed = 0;
-  cfg->default_grid_size_changed = 0;
-  cfg->default_tile_size_changed = 0;
+  cfg->gpu = gpu_config_zero;
 }
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
@@ -172,72 +156,6 @@ void futhark_context_config_set_program(struct futhark_context_config *cfg, cons
 
 void futhark_context_config_set_unified_memory(struct futhark_context_config* cfg, int flag) {
   cfg->unified_memory = flag;
-}
-
-void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_block_size = size;
-  cfg->default_block_size_changed = 1;
-}
-
-void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
-  cfg->default_grid_size = num;
-  cfg->default_grid_size_changed = 1;
-}
-
-void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int num) {
-  futhark_context_config_set_default_thread_block_size(cfg, num);
-}
-
-
-void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
-  futhark_context_config_set_default_grid_size(cfg, num);
-}
-
-void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_tile_size = size;
-  cfg->default_tile_size_changed = 1;
-}
-
-void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_reg_tile_size = size;
-}
-
-void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size) {
-  cfg->default_threshold = size;
-}
-
-int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
-                                            const char *param_name,
-                                            size_t new_value) {
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
-    if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
-      cfg->tuning_params[i] = new_value;
-      return 0;
-    }
-  }
-  if (strcmp(param_name, "default_thread_block_size") == 0 ||
-      strcmp(param_name, "default_group_size") == 0) {
-    cfg->default_block_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_grid_size") == 0 ||
-      strcmp(param_name, "default_num_groups") == 0) {
-    cfg->default_grid_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_threshold") == 0) {
-    cfg->default_threshold = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_tile_size") == 0) {
-    cfg->default_tile_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_reg_tile_size") == 0) {
-    cfg->default_reg_tile_size = new_value;
-    return 0;
-  }
-  return 1;
 }
 
 struct futhark_context {
@@ -362,36 +280,36 @@ static void hip_load_code_from_cache(struct futhark_context_config *cfg,
 
 static void hip_size_setup(struct futhark_context *ctx) {
   struct futhark_context_config *cfg = ctx->cfg;
-  if (cfg->default_block_size > ctx->max_thread_block_size) {
-    if (cfg->default_block_size_changed) {
+  if (cfg->gpu.default_block_size > ctx->max_thread_block_size) {
+    if (cfg->gpu.default_block_size_changed) {
       fprintf(stderr,
               "Note: Device limits default block size to %zu (down from %zu).\n",
-              ctx->max_thread_block_size, cfg->default_block_size);
+              ctx->max_thread_block_size, cfg->gpu.default_block_size);
     }
-    cfg->default_block_size = ctx->max_thread_block_size;
+    cfg->gpu.default_block_size = ctx->max_thread_block_size;
   }
-  if (cfg->default_grid_size > ctx->max_grid_size) {
-    if (cfg->default_grid_size_changed) {
+  if (cfg->gpu.default_grid_size > ctx->max_grid_size) {
+    if (cfg->gpu.default_grid_size_changed) {
       fprintf(stderr,
               "Note: Device limits default grid size to %zu (down from %zu).\n",
-              ctx->max_grid_size, cfg->default_grid_size);
+              ctx->max_grid_size, cfg->gpu.default_grid_size);
     }
-    cfg->default_grid_size = ctx->max_grid_size;
+    cfg->gpu.default_grid_size = ctx->max_grid_size;
   }
-  if (cfg->default_tile_size > ctx->max_tile_size) {
-    if (cfg->default_tile_size_changed) {
+  if (cfg->gpu.default_tile_size > ctx->max_tile_size) {
+    if (cfg->gpu.default_tile_size_changed) {
       fprintf(stderr,
               "Note: Device limits default tile size to %zu (down from %zu).\n",
-              ctx->max_tile_size, cfg->default_tile_size);
+              ctx->max_tile_size, cfg->gpu.default_tile_size);
     }
-    cfg->default_tile_size = ctx->max_tile_size;
+    cfg->gpu.default_tile_size = ctx->max_tile_size;
   }
 
-  if (!cfg->default_grid_size_changed) {
-    cfg->default_grid_size =
+  if (!cfg->gpu.default_grid_size_changed) {
+    cfg->gpu.default_grid_size =
       (device_query(ctx->dev, hipDeviceAttributePhysicalMultiProcessorCount) *
        device_query(ctx->dev, hipDeviceAttributeMaxThreadsPerMultiProcessor))
-      / cfg->default_block_size;
+      / cfg->gpu.default_block_size;
   }
 
   for (int i = 0; i < cfg->num_tuning_params; i++) {
@@ -402,10 +320,10 @@ static void hip_size_setup(struct futhark_context *ctx) {
 
     if (strstr(size_class, "thread_block_size") == size_class) {
       max_value = ctx->max_thread_block_size;
-      default_value = cfg->default_block_size;
+      default_value = cfg->gpu.default_block_size;
     } else if (strstr(size_class, "grid_size") == size_class) {
       max_value = ctx->max_grid_size;
-      default_value = cfg->default_grid_size;
+      default_value = cfg->gpu.default_grid_size;
       // XXX: as a quick and dirty hack, use twice as many threads for
       // histograms by default.  We really should just be smarter
       // about sizes somehow.
@@ -414,13 +332,13 @@ static void hip_size_setup(struct futhark_context *ctx) {
       }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = ctx->max_tile_size;
-      default_value = cfg->default_tile_size;
+      default_value = cfg->gpu.default_tile_size;
     } else if (strstr(size_class, "reg_tile_size") == size_class) {
       max_value = 0; // No limit.
-      default_value = cfg->default_reg_tile_size;
+      default_value = cfg->gpu.default_reg_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
-      default_value = cfg->default_threshold;
+      default_value = cfg->gpu.default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
     }
