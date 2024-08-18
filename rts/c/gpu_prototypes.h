@@ -23,7 +23,7 @@ struct gpu_config {
 // The following are dummy sizes that mean the concrete defaults
 // will be set during initialisation via hardware-inspection-based
 // heuristics.
-struct gpu_config gpu_config_zero = {
+struct gpu_config gpu_config_initial = {
   0
 };
 
