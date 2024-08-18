@@ -860,13 +860,16 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->max_thread_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
   ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
   ctx->max_tile_size = sqrt(ctx->max_thread_block_size);
-  ctx->max_threshold = 0;
+  ctx->max_threshold = 1U<<31; // No limit.
   ctx->max_bespoke = 0;
   ctx->max_registers = device_query(ctx->dev, MAX_REGISTERS_PER_BLOCK);
   ctx->max_cache = device_query(ctx->dev, L2_CACHE_SIZE);
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
   CUDA_SUCCEED_FATAL(cuStreamCreate(&ctx->stream, CU_STREAM_DEFAULT));
   cuda_size_setup(ctx);
+
+  gpu_init_log(ctx);
+
   ctx->error = cuda_module_setup(ctx,
                                  ctx->cfg->program,
                                  (const char**)ctx->cfg->nvrtc_opts,
