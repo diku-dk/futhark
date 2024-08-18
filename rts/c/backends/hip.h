@@ -111,7 +111,7 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->gpu.default_reg_tile_size = 2;
   cfg->gpu.default_threshold = 32*1024;
 
-  cfg->gpu = gpu_config_zero;
+  cfg->gpu = gpu_config_initial;
 }
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {

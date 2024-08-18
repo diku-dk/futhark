@@ -117,7 +117,7 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
 
   cfg->unified_memory = 2;
 
-  cfg->gpu = gpu_config_zero;
+  cfg->gpu = gpu_config_initial;
   cfg->gpu.default_block_size = 256;
   cfg->gpu.default_tile_size = 32;
   cfg->gpu.default_reg_tile_size = 2;
