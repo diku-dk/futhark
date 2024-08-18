@@ -710,7 +710,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->max_thread_block_size = device_query(ctx->dev, hipDeviceAttributeMaxThreadsPerBlock);
   ctx->max_grid_size = device_query(ctx->dev, hipDeviceAttributeMaxGridDimX);
   ctx->max_tile_size = sqrt(ctx->max_thread_block_size);
-  ctx->max_threshold = 0;
+  ctx->max_threshold = 1U<<31; // No limit.
   ctx->max_bespoke = 0;
   ctx->max_registers = device_query(ctx->dev, hipDeviceAttributeMaxRegistersPerBlock);
   ctx->max_cache = device_query(ctx->dev, hipDeviceAttributeL2CacheSize);
@@ -723,6 +723,9 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 32;
   HIP_SUCCEED_FATAL(hipStreamCreate(&ctx->stream));
   hip_size_setup(ctx);
+
+  gpu_init_log(ctx);
+
   ctx->error = hip_module_setup(ctx,
                                 ctx->cfg->program,
                                 (const char**)ctx->cfg->build_opts,
