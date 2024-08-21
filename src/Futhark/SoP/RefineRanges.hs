@@ -6,6 +6,7 @@ module Futhark.SoP.RefineRanges
   )
 where
 
+import Control.Monad (forM, filterM)
 import Control.Monad.State
 import Data.Map.Strict qualified as M
 import Data.MultiSet qualified as MS
