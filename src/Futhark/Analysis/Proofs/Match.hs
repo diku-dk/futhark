@@ -42,7 +42,7 @@ class Replaceable u v where
 class SubstitutionBuilder u v where
   addSub :: VName -> u -> Substitution v -> Substitution v
 
-class (MonadFreshNames m, MonadFail m, Renameable u, FreeVariables u) => Unify u v m where
+class (MonadFreshNames m, MonadFail m, Renameable u) => Unify u v m where
   -- `unify_ k eq` is the unification algorithm from Sieg and Kauffmann,
   -- Unification for quantified formulae, 1993.
   -- Check whether x is a bound variable by `x >= k`.
@@ -73,3 +73,12 @@ instance SubstitutionBuilder (SoP u) u where
 instance Unify u u m => Unify (SoP u) u m where
   unify_ _ (_sop1 := _sop2) = undefined
   -- Unify sop1 with k terms with all k-combinations of terms in sop2?
+
+instance Renameable VName where
+  rename_ tau x = pure $ M.findWithDefault x x tau
+
+instance FreeVariables VName where
+  fv = S.singleton
+
+instance (MonadFreshNames m, MonadFail m) => Unify VName u m where
+  unify_ _ _ = undefined

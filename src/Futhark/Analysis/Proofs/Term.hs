@@ -5,7 +5,7 @@ import Data.Set qualified as S
 import Data.Map.Strict qualified as M
 import Language.Futhark (VName (VName))
 import Futhark.Analysis.Proofs.Match (FreeVariables(fv), Renameable(rename_), Unify(..), Constraint(..), Nameable (..), SubstitutionBuilder (addSub), Replaceable (rep))
-import Futhark.SoP.SoP (SoP, sym2SoP, Substitute(..), justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
+import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
 
 data Term =
@@ -22,20 +22,17 @@ data Term =
   deriving (Show, Eq, Ord)
 
 instance FreeVariables Term where
-  fv (Var vn) = S.singleton vn
+  fv (Var vn) = fv vn
   fv (Sum i lb ub e) = fv lb <> fv ub <> fv e S.\\ S.singleton i
   fv (Idx xs i) = fv xs <> fv i
   fv Recurrence = mempty
-
-instance Substitute VName (SoP Term) Term where
-  substitute _ = undefined
 
 instance Nameable Term where
   mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
 
 instance Renameable Term where
   rename_ tau (Var x) =
-    pure $ Var $ M.findWithDefault x x tau
+    Var <$> rename_ tau x
   rename_ tau (Idx xs i) =
     Idx <$> rename_ tau xs <*> rename_ tau i
   rename_ tau (Sum xn lb ub e) = do
