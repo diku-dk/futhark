@@ -34,6 +34,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     isPrimParam,
     kernelConstToExp,
     getChunkSize,
+    getSize,
 
     -- * Host-level bulk operations
     sReplicate,
@@ -1165,6 +1166,8 @@ defKernelAttrs num_tblocks tblock_size =
       kAttrConstExps = mempty
     }
 
+-- | Retrieve a size of the given size class and put it in a variable
+-- with the given name.
 getSize :: String -> SizeClass -> CallKernelGen (TV Int64)
 getSize desc size_class = do
   v <- dPrim desc
