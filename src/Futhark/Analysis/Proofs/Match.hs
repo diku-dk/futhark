@@ -42,7 +42,6 @@ class Replaceable u v where
 class SubstitutionBuilder u v where
   addSub :: VName -> u -> Substitution v -> Substitution v
 
-
 class (MonadFreshNames m, MonadFail m, Renameable u, FreeVariables u) => Unify u v m where
   -- `unify_ k eq` is the unification algorithm from Sieg and Kauffmann,
   -- Unification for quantified formulae, 1993.

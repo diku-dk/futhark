@@ -89,18 +89,14 @@ instance (MonadFreshNames m, MonadFail m) => Unify Term Term m where
     where
       isVar (Var _) = True
       isVar _ = False
-  -- 2.a. Equation elimination.
-  unify_ _ (Var x := t) | Var x == t =
-      pure mempty
-  -- 2.b.
-  unify_ k (Var x := t) | Var x /= t && x >= k =
-    fail "2.b.i"
+  -- 2.
   unify_ k (Var x := t)
-    | Var x /= t =
-    case fv t of
-      fvs | x `S.member` fvs || any (>= k) fvs -> fail "2.b.ii"
-      -- 2.b.iii. Variable elimination. 
-      _ -> pure $ addSub x t mempty
+    | Var x == t = pure mempty -- 2.a. Equation (constraint) elimination.
+    | x >= k = fail "2.b.i"
+    | x `S.member` fvs || any (>= k) fvs = fail "2.b.ii"
+    | otherwise = pure $ addSub x t mempty -- 2.b.iii. Variable elimination.
+    where
+      fvs = fv t
   -- 3.b
   unify_ k (Sum _ a1 b1 e1 := Sum _ a2 b2 e2) = do
     s1 <- unify_ k (a1 := a2)
