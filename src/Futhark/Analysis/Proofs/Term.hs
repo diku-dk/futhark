@@ -42,7 +42,7 @@ instance Renameable Term where
   rename_ _ Recurrence =
     pure Recurrence
 
-instance SubstitutionBuilder Term Term where
+instance SubstitutionBuilder Term (SoP Term) where
   addSub vn e = M.insert vn (sym2SoP e)
 
 sop2Term :: Ord u => SoP u -> u
@@ -50,7 +50,7 @@ sop2Term sop
   | Just t <- justSym sop = t
   | otherwise = error "sop2Term on something that is not a symbol"
 
-instance Replaceable Term Term where
+instance Replaceable Term (SoP Term) where
   -- TODO flatten
   rep s (Var x) = M.findWithDefault (sym2SoP $ Var x) x s
   rep s (Idx xs i) =
@@ -79,7 +79,7 @@ instance Replaceable Term Term where
 -- Further, they keep (Var x := t) in the equations, but
 -- that's relegated to the substitution here.
 -- NOTE 3.a irrelevant here given that we are post type checking?
-instance (MonadFreshNames m, MonadFail m) => Unify Term Term m where
+instance (MonadFreshNames m, MonadFail m) => Unify Term (SoP Term) m where
   -- 1. Exchange.
   unify_ k (t := Var x) | not (isVar t) =
     unify_ k (Var x := t)

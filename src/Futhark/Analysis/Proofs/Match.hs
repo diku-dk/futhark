@@ -26,18 +26,14 @@ class Renameable u where
   rename :: MonadFreshNames m => u -> m u
   rename = rename_ mempty
 
-type Substitution u = M.Map VName (SoP u)
--- data Substitution u v = Substitution
---   { usub :: M.Map VName u,
---     vsub :: M.Map VName v
---   }
+type Substitution v = M.Map VName v
 
 data Constraint u = u := u
 infixr 4 :=
 
 class Replaceable u v where
   -- Implements the replacement operation from Sieg and Kaufmann.
-  rep :: Substitution v -> u -> SoP v
+  rep :: Substitution v -> u -> v
 
 class SubstitutionBuilder u v where
   addSub :: VName -> u -> Substitution v -> Substitution v
@@ -64,13 +60,13 @@ instance Ord u => FreeVariables (SoP u) where
 instance Renameable (SoP u) where
   rename_ _tau _u = undefined
 
-instance Replaceable (SoP u) u where
+instance Replaceable (SoP u) (SoP u) where
   rep _ _ = undefined
 
-instance SubstitutionBuilder (SoP u) u where
+instance SubstitutionBuilder (SoP u) (SoP u) where
   addSub = M.insert
 
-instance Unify u u m => Unify (SoP u) u m where
+instance Unify u u m => Unify (SoP u) (SoP u) m where
   unify_ _ (_sop1 := _sop2) = undefined
   -- Unify sop1 with k terms with all k-combinations of terms in sop2?
 
