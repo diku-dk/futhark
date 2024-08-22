@@ -831,6 +831,12 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     } else if (strstr(size_class, "reg_tile_size") == size_class) {
       max_value = 0; // No limit.
       default_value = ctx->cfg->gpu.default_reg_tile_size;
+    } else if (strstr(size_class, "shared_memory") == size_class) {
+      max_value = ctx->max_shared_memory;
+      default_value = ctx->max_shared_memory;
+    } else if (strstr(size_class, "cache") == size_class) {
+      max_value = ctx->max_cache;
+      default_value = ctx->max_cache;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
       default_value = ctx->cfg->gpu.default_threshold;
