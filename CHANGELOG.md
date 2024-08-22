@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Type names for element types of array indexing functions in C
+  interface are now often better - although there are still cases
+  where you end up with hashed names. (#2172)
+
 ## [0.25.20]
 
 ### Added
