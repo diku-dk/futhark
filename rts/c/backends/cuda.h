@@ -779,28 +779,36 @@ int backend_context_setup(struct futhark_context* ctx) {
     }
   }
 
-  // MAX_SHARED_MEMORY_PER_BLOCK gives bogus numbers (48KiB); probably
-  // for backwards compatibility.  Add _OPTIN and you seem to get the
-  // right number.
-  ctx->max_shared_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN);
-#if CUDART_VERSION >= 12000
-  ctx->max_shared_memory -= device_query(ctx->dev, RESERVED_SHARED_MEMORY_PER_BLOCK);
-#endif
   ctx->max_thread_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
   ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
   ctx->max_tile_size = sqrt(ctx->max_thread_block_size);
   ctx->max_threshold = 1U<<31; // No limit.
   ctx->max_bespoke = 1U<<31; // No limit.
+
   if (ctx->cfg->gpu.default_registers != 0) {
     ctx->max_registers = ctx->cfg->gpu.default_registers;
   } else {
     ctx->max_registers = device_query(ctx->dev, MAX_REGISTERS_PER_BLOCK);
   }
+
+  if (ctx->cfg->gpu.default_shared_memory != 0) {
+    ctx->max_shared_memory = ctx->cfg->gpu.default_shared_memory;
+  } else {
+    // MAX_SHARED_MEMORY_PER_BLOCK gives bogus numbers (48KiB); probably
+    // for backwards compatibility.  Add _OPTIN and you seem to get the
+    // right number.
+    ctx->max_shared_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN);
+#if CUDART_VERSION >= 12000
+    ctx->max_shared_memory -= device_query(ctx->dev, RESERVED_SHARED_MEMORY_PER_BLOCK);
+#endif
+  }
+
   if (ctx->cfg->gpu.default_cache != 0) {
     ctx->max_cache = ctx->cfg->gpu.default_cache;
   } else {
     ctx->max_cache = device_query(ctx->dev, L2_CACHE_SIZE);
   }
+
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
   CUDA_SUCCEED_FATAL(cuStreamCreate(&ctx->stream, CU_STREAM_DEFAULT));
   cuda_size_setup(ctx);

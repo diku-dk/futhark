@@ -12,6 +12,7 @@ struct gpu_config {
   size_t default_tile_size;
   size_t default_reg_tile_size;
   size_t default_cache;
+  size_t default_shared_memory;
   size_t default_registers;
   size_t default_threshold;
 
