@@ -634,14 +634,25 @@ int backend_context_setup(struct futhark_context* ctx) {
     }
   }
 
-  ctx->max_shared_memory = device_query(ctx->dev, hipDeviceAttributeMaxSharedMemoryPerBlock);
   ctx->max_thread_block_size = device_query(ctx->dev, hipDeviceAttributeMaxThreadsPerBlock);
   ctx->max_grid_size = device_query(ctx->dev, hipDeviceAttributeMaxGridDimX);
   ctx->max_tile_size = sqrt(ctx->max_thread_block_size);
   ctx->max_threshold = 1U<<31; // No limit.
   ctx->max_bespoke = 0;
   ctx->max_registers = device_query(ctx->dev, hipDeviceAttributeMaxRegistersPerBlock);
-  ctx->max_cache = device_query(ctx->dev, hipDeviceAttributeL2CacheSize);
+
+  if (ctx->cfg->gpu.default_shared_memory != 0) {
+    ctx->max_shared_memory = ctx->cfg->gpu.default_shared_memory;
+  } else {
+    ctx->max_shared_memory = device_query(ctx->dev, hipDeviceAttributeMaxSharedMemoryPerBlock);
+  }
+
+  if (ctx->cfg->gpu.default_cache != 0) {
+    ctx->max_cache = ctx->cfg->gpu.default_cache;
+  } else {
+      ctx->max_cache = device_query(ctx->dev, hipDeviceAttributeL2CacheSize);
+  }
+
   // FIXME: in principle we should query hipDeviceAttributeWarpSize
   // from the device, which will provide 64 on AMD GPUs.
   // Unfortunately, we currently do nasty implicit intra-warp

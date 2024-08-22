@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Logging now prints more GPU information on context initialisation.
 
-* GPU cache size can now be configured.
+* GPU cache size can now be configured (tuning param: `default_cache`).
+
+* GPU shared memory can now be configured (tuning param: `default_shared_memory`).
 
 * GPU register capacity can now be configured.
 
