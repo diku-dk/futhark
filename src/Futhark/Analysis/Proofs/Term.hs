@@ -4,8 +4,8 @@ where
 import Data.Set qualified as S
 import Data.Map.Strict qualified as M
 import Language.Futhark (VName (VName))
-import Futhark.Analysis.Proofs.Match (FreeVariables(fv), Renameable(rename_), Unify(..), Constraint(..), Nameable (..))
-import Futhark.SoP.SoP (SoP, sym2SoP, Substitute(..))
+import Futhark.Analysis.Proofs.Match (FreeVariables(fv), Renameable(rename_), Unify(..), Constraint(..), Nameable (..), SubstitutionBuilder (addSub), Replaceable (rep))
+import Futhark.SoP.SoP (SoP, sym2SoP, Substitute(..), justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
 
 data Term =
@@ -45,6 +45,36 @@ instance Renameable Term where
   rename_ _ Recurrence =
     pure Recurrence
 
+instance SubstitutionBuilder Term Term where
+  addSub vn e = M.insert vn (sym2SoP e)
+
+sop2Term :: Ord u => SoP u -> u
+sop2Term sop
+  | Just t <- justSym sop = t
+  | otherwise = error "sop2Term on something that is not a symbol"
+
+instance Replaceable Term Term where
+  -- TODO flatten
+  rep s (Var x) = M.findWithDefault (sym2SoP $ Var x) x s
+  rep s (Idx xs i) =
+    sym2SoP $ Idx (sop2Term $ rep s xs) (rep s i)
+  rep s (Sum i lb ub e) =
+    -- NOTE we can avoid this rewrite here if we change the Sum expression
+    -- from Term to SoP Term.
+    let s' = addSub i (Var i) s
+    in applySumRule i (rep s' lb) (rep s' ub) (rep s' e)
+    where
+      applySumRule j a b = foldl1 (.+.) . map (mkSum j a b) . sopToLists
+      mkSum _ _ _ ([], c) =
+        scaleSoP c (ub .-. lb .+. int2SoP 1)
+      mkSum j a b ([t], c) = -- ([Sum i lb ub e], c)
+        scaleSoP c (sym2SoP $ Sum j a b t)
+      mkSum _ _ _ _ = error "Sum is not a linear combination."
+  rep _ Recurrence = sym2SoP Recurrence
+
+-- instance Replaceable (SoP Term) where
+--   rep _ _ = undefined
+
 -- NOTE 2.b.iii says "if x occurs in some other equation",
 -- but we don't have access to other equations here.
 -- I reckon, we can always just do this substitution
@@ -70,17 +100,15 @@ instance (MonadFreshNames m, MonadFail m) => Unify Term Term m where
     case fv t of
       fvs | x `S.member` fvs || any (>= k) fvs -> fail "2.b.ii"
       -- 2.b.iii. Variable elimination. 
-      _ -> pure $ M.singleton x (sym2SoP t)
+      _ -> pure $ addSub x t mempty
   -- 3.b
   unify_ k (Sum _ a1 b1 e1 := Sum _ a2 b2 e2) = do
-    -- TODO unsure if substitute should just be replace?
     s1 <- unify_ k (a1 := a2)
-    s2 <- unify_ k (substitute s1 (b1 := b2))
-    s3 <- unify_ k (substitute (s1 <> s2) (e1 := e2))
-    pure $ mconcat [s1, s2, s3]
+    s2 <- unify_ k (rep s1 b1 := rep s1 b2)
+    s3 <- unify_ k (rep (s1 <> s2) e1 := rep (s1 <> s2) e2)
+    pure $ s1 <> s2 <> s3
   unify_ k (Idx xs i := Idx ys j) = do
-    s1 <- unify_ k (xs := ys)
-    s2 <- unify_ k (substitute s1 (i := j))
-    pure $ s1 <> s2
+    s <- unify_ k (xs := ys)
+    (s <>) <$> unify_ k (rep s i := rep s j)
   unify_ _ _ =
     pure mempty
