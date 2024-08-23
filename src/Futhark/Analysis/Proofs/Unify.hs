@@ -2,7 +2,7 @@
 -- This module lets us answer the question:
 --   Are two expressions syntactically identical
 --   up to the names of bound variables?
-module Futhark.Analysis.Proofs.Match
+module Futhark.Analysis.Proofs.Unify
 where
 
 import Data.Map.Strict qualified as M
