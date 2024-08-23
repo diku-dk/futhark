@@ -66,9 +66,10 @@ instance Replaceable (SoP u) (SoP u) where
 instance SubstitutionBuilder (SoP u) (SoP u) where
   addSub = M.insert
 
-instance Unify u u m => Unify (SoP u) (SoP u) m where
+instance (MonadFail m, MonadFreshNames m) => Unify (SoP u) (SoP u) m where
   unify_ _ (_sop1 := _sop2) = undefined
-  -- Unify sop1 with k terms with all k-combinations of terms in sop2?
+
+-- Unify sop1 with k terms with all k-combinations of terms in sop2?
 
 instance Renameable VName where
   rename_ tau x = pure $ M.findWithDefault x x tau
