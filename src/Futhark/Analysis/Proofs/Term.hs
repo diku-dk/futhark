@@ -4,13 +4,13 @@ where
 import Data.Set qualified as S
 import Data.Map.Strict qualified as M
 import Language.Futhark (VName (VName))
-import Futhark.Analysis.Proofs.Match (FreeVariables(fv), Renameable(rename_), Unify(..), Constraint(..), Nameable (..), SubstitutionBuilder (addSub), Replaceable (rep))
+import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), Nameable (..), SubstitutionBuilder (addSub), Replaceable (rep))
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
 
 data Term =
     Var VName
-  | Sum
+  | LinComb
       VName        -- binder
       (SoP Term)   -- lower bound
       (SoP Term)   -- upper bound
@@ -23,7 +23,7 @@ data Term =
 
 instance FreeVariables Term where
   fv (Var vn) = fv vn
-  fv (Sum i lb ub e) = fv lb <> fv ub <> fv e S.\\ S.singleton i
+  fv (LinComb i lb ub e) = fv lb <> fv ub <> fv e S.\\ S.singleton i
   fv (Idx xs i) = fv xs <> fv i
   fv Recurrence = mempty
 
@@ -35,10 +35,10 @@ instance Renameable Term where
     Var <$> rename_ tau x
   rename_ tau (Idx xs i) =
     Idx <$> rename_ tau xs <*> rename_ tau i
-  rename_ tau (Sum xn lb ub e) = do
+  rename_ tau (LinComb xn lb ub e) = do
     xm <- newNameFromString "i"
     let tau' = M.insert xn xm tau
-    Sum xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau e
+    LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau e
   rename_ _ Recurrence =
     pure Recurrence
 
@@ -55,18 +55,19 @@ instance Replaceable Term (SoP Term) where
   rep s (Var x) = M.findWithDefault (sym2SoP $ Var x) x s
   rep s (Idx xs i) =
     sym2SoP $ Idx (sop2Term $ rep s xs) (rep s i)
-  rep s (Sum i lb ub e) =
-    -- NOTE we can avoid this rewrite here if we change the Sum expression
+  rep s (LinComb i lb ub t) =
+    -- NOTE we can avoid this rewrite here if we change the LinComb expression
     -- from Term to SoP Term.
     let s' = addSub i (Var i) s
-    in applySumRule i (rep s' lb) (rep s' ub) (rep s' e)
+    in applyLinCombRule (rep s' lb) (rep s' ub) (rep s' t)
     where
-      applySumRule j a b = foldl1 (.+.) . map (mkSum j a b) . sopToLists
-      mkSum _ _ _ ([], c) =
+      applyLinCombRule a b = foldl1 (.+.) . map (mkLinComb a b) . sopToLists
+      mkLinComb _ _ ([], c) =
         scaleSoP c (ub .-. lb .+. int2SoP 1)
-      mkSum j a b ([t], c) = -- ([Sum i lb ub e], c)
-        scaleSoP c (sym2SoP $ Sum j a b t)
-      mkSum _ _ _ _ = error "Sum is not a linear combination."
+      mkLinComb a b ([u], c) =
+        scaleSoP c (sym2SoP $ LinComb i a b u)
+      mkLinComb _ _ _ =
+        error "Replacement is not a linear combination."
   rep _ Recurrence = sym2SoP Recurrence
 
 -- instance Replaceable (SoP Term) where
@@ -81,13 +82,13 @@ instance Replaceable Term (SoP Term) where
 -- NOTE 3.a irrelevant here given that we are post type checking?
 instance (MonadFreshNames m, MonadFail m) => Unify Term (SoP Term) m where
   -- 1. Exchange.
-  unify_ k (t := Var x) | not (isVar t) =
-    unify_ k (Var x := t)
+  unify_ k t (Var x) | not (isVar t) =
+    unify_ k (Var x) t
     where
       isVar (Var _) = True
       isVar _ = False
   -- 2.
-  unify_ k (Var x := t)
+  unify_ k (Var x) t
     | Var x == t = pure mempty -- 2.a. Equation (constraint) elimination.
     | x >= k = fail "2.b.i"
     | x `S.member` fvs || any (>= k) fvs = fail "2.b.ii"
@@ -95,13 +96,13 @@ instance (MonadFreshNames m, MonadFail m) => Unify Term (SoP Term) m where
     where
       fvs = fv t
   -- 3.b
-  unify_ k (Sum _ a1 b1 e1 := Sum _ a2 b2 e2) = do
-    s1 <- unify_ k (a1 := a2)
-    s2 <- unify_ k (rep s1 b1 := rep s1 b2)
-    s3 <- unify_ k (rep (s1 <> s2) e1 := rep (s1 <> s2) e2)
+  unify_ k (LinComb _ a1 b1 e1) (LinComb _ a2 b2 e2) = do
+    s1 <- unify_ k a1 a2
+    s2 <- unify_ k (rep s1 b1) (rep s1 b2)
+    s3 <- unify_ k (rep (s1 <> s2) e1) (rep (s1 <> s2) e2)
     pure $ s1 <> s2 <> s3
-  unify_ k (Idx xs i := Idx ys j) = do
-    s <- unify_ k (xs := ys)
-    (s <>) <$> unify_ k (rep s i := rep s j)
-  unify_ _ _ =
+  unify_ k (Idx xs i) (Idx ys j) = do
+    s <- unify_ k xs ys
+    (s <>) <$> unify_ k (rep s i) (rep s j)
+  unify_ _ _ _ =
     pure mempty

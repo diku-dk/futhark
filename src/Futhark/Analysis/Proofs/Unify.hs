@@ -28,9 +28,6 @@ class Renameable u where
 
 type Substitution v = M.Map VName v
 
-data Constraint u = u := u
-infixr 4 :=
-
 class Replaceable u v where
   -- Implements the replacement operation from Sieg and Kaufmann.
   rep :: Substitution v -> u -> v
@@ -42,7 +39,7 @@ class (MonadFreshNames m, MonadFail m, Renameable u) => Unify u v m where
   -- `unify_ k eq` is the unification algorithm from Sieg and Kauffmann,
   -- Unification for quantified formulae, 1993.
   -- Check whether x is a bound variable by `x >= k`.
-  unify_ :: VName -> Constraint u -> m (Substitution v)
+  unify_ :: VName -> u -> u -> m (Substitution v)
   unify :: u -> u -> m (Substitution v)
   unify e e' = do
     -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
@@ -52,7 +49,7 @@ class (MonadFreshNames m, MonadFail m, Renameable u) => Unify u v m where
     a <- rename e
     putNameSource c
     b <- rename e'
-    unify_ k (a := b)
+    unify_ k a b
 
 instance Ord u => FreeVariables (SoP u) where
   fv _ = undefined
@@ -67,7 +64,7 @@ instance SubstitutionBuilder (SoP u) (SoP u) where
   addSub = M.insert
 
 instance (MonadFail m, MonadFreshNames m) => Unify (SoP u) (SoP u) m where
-  unify_ _ (_sop1 := _sop2) = undefined
+  unify_ _ _sop1 _sop2 = undefined
 
 -- Unify sop1 with k terms with all k-combinations of terms in sop2?
 
