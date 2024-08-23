@@ -2,7 +2,7 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
-  pps = ps: with ps; [
+  python = pkgs.python311.withPackages (ps: with ps; [
     (
       buildPythonPackage rec {
         pname = "PuLP";
@@ -14,8 +14,16 @@ let
         doCheck = false;
       }
     )
-  ];
-  python = pkgs.python3.withPackages pps;
+    ps.mypy
+    black
+    numpy
+    pyopencl
+    matplotlib
+    jsonschema
+    sphinx
+    sphinxcontrib-bibtex
+  ]);
+  haskell = pkgs.haskell.packages.ghc96;
 in
 pkgs.stdenv.mkDerivation {
   name = "futhark";
@@ -28,10 +36,10 @@ pkgs.stdenv.mkDerivation {
       file
       git
       parallel
-      haskell.compiler.ghc94
+      haskell.ghc
       ormolu
-      haskell.packages.ghc94.weeder
-      #haskell.packages.ghc94.haskell-language-server
+      haskell.weeder
+      haskell.haskell-language-server
       haskellPackages.graphmod
       haskellPackages.apply-refact
       xdot
@@ -43,14 +51,7 @@ pkgs.stdenv.mkDerivation {
       ghcid
       niv
       ispc
-      python3Packages.mypy
-      python3Packages.black
-      python3Packages.numpy
-      python3Packages.pyopencl
-      python3Packages.matplotlib
-      python3Packages.jsonschema
-      python3Packages.sphinx
-      python3Packages.sphinxcontrib-bibtex
+      python
       imagemagick # needed for literate tests
       glpk
     ]

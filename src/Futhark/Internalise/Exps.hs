@@ -430,11 +430,19 @@ internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = 
   where
     sparams' = map (`TypeParamDim` mempty) sparams
 
+    -- Attributes that apply to loops.
+    loopAttrs = oneAttr "unroll"
+    -- Remove those attributes from the attribute set that apply to
+    -- the loop itself.
+    noLoopAttrs env = env {envAttrs = envAttrs env `withoutAttrs` loopAttrs}
+
+    loopBody = local noLoopAttrs $ internaliseExp "loopres" loopbody
+
     forLoop mergepat' shapepat mergeinit i loopvars form' =
       bodyFromStms . localScope (scopeOfLoopForm form') $ do
         forM_ loopvars $ \(p, arr) ->
           letBindNames [I.paramName p] =<< eIndex arr [eSubExp (I.Var i)]
-        ses <- internaliseExp "loopres" loopbody
+        ses <- loopBody
         sets <- mapM subExpType ses
         shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
         pure
@@ -505,7 +513,7 @@ internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = 
         addStms init_loop_cond_stms
 
         bodyFromStms $ do
-          ses <- internaliseExp "loopres" loopbody
+          ses <- loopBody
           sets <- mapM subExpType ses
           loop_while <- newParam "loop_while" $ I.Prim I.Bool
           shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
@@ -715,22 +723,28 @@ internaliseExp desc (E.Not e _) = do
 internaliseExp desc (E.Update src slice ve loc) = do
   ves <- internaliseExp "lw_val" ve
   srcs <- internaliseExpToVars "src" src
-  dims <- case srcs of
-    [] -> pure [] -- Will this happen?
-    v : _ -> I.arrayDims <$> lookupType v
-  (idxs', cs) <- internaliseSlice loc dims slice
+  (src_dims, ve_dims) <- case (srcs, ves) of
+    (src_v : _, ve_v : _) ->
+      (,)
+        <$> (I.arrayDims <$> lookupType src_v)
+        <*> (I.arrayDims <$> subExpType ve_v)
+    _ -> pure ([], []) -- Will this happen?
+  (idxs', cs) <- internaliseSlice loc src_dims slice
+  let src_dims' = sliceDims (Slice idxs')
+      rank = length src_dims'
+      errormsg =
+        "Shape "
+          <> errorShape src_dims'
+          <> " of slice does not match shape "
+          <> errorShape (take rank ve_dims)
+          <> " of value."
 
   let comb sname ve' = do
         sname_t <- lookupType sname
         let full_slice = fullSlice sname_t idxs'
             rowtype = sname_t `setArrayDims` sliceDims full_slice
         ve'' <-
-          ensureShape
-            "shape of value does not match shape of source array"
-            loc
-            rowtype
-            "lw_val_correct_shape"
-            ve'
+          ensureShape errormsg loc rowtype "lw_val_correct_shape" ve'
         letInPlace desc sname full_slice $ BasicOp $ SubExp ve''
   certifying cs $ map I.Var <$> zipWithM comb srcs ves
 internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
@@ -2232,3 +2246,9 @@ errorMsg = ErrorMsg . compact
     compact (ErrorString x : ErrorString y : parts) =
       compact (ErrorString (x <> y) : parts)
     compact (x : y) = x : compact y
+
+errorShape :: [a] -> ErrorMsg a
+errorShape dims =
+  "["
+    <> mconcat (intersperse "][" $ map (ErrorMsg . pure . ErrorVal int64) dims)
+    <> "]"

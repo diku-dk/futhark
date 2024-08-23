@@ -242,9 +242,8 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
           t64 $
             r64 hist_T / hist_C_max
 
-  hist_L2 :: TV Int32 <- dPrim "L2_size"
   -- Equivalent to F_L2*L2 in paper.
-  sOp $ Imp.GetSizeMax (tvVar hist_L2) Imp.SizeCache
+  hist_L2 <- getSize "hist_L2" Imp.SizeCache
 
   let hist_L2_ln_sz = 16 * 4 -- L2 cache line size approximation
   hist_RACE_exp <-
@@ -887,8 +886,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
       segment_dims = init space_sizes
       segmented = not $ null segment_dims
 
-  hist_L :: TV Int64 <- dPrim "hist_L"
-  sOp $ Imp.GetSizeMax (tvVar hist_L) Imp.SizeSharedMemory
+  hist_L <- getSize "hist_L" Imp.SizeSharedMemory
 
   max_tblock_size :: TV Int64 <- dPrim "max_tblock_size"
   sOp $ Imp.GetSizeMax (tvVar max_tblock_size) Imp.SizeThreadBlock
