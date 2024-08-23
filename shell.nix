@@ -13,6 +13,7 @@ pkgs.stdenv.mkDerivation {
       cabal-install
       cacert
       curl
+      check-jsonschema
       file
       git
       parallel
@@ -37,7 +38,6 @@ pkgs.stdenv.mkDerivation {
       python.numpy
       python.pyopencl
       python.matplotlib
-      python.jsonschema
       python.sphinx
       python.sphinxcontrib-bibtex
       imagemagick # needed for literate tests

@@ -28,7 +28,7 @@ endif
 test: $(patsubst %.fut, do_test_%, $(wildcard *.fut))
 
 do_test_%: test_%
-	./validatemanifest.py ../../docs/manifest.schema.json $*.json
+	check-jsonschema -q --schemafile ../../docs/manifest.schema.json $*.json
 	./test_$*
 
 test_%: test_%.c %.o
