@@ -7,12 +7,13 @@ where
 
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, int2SoP, mulSoPs, mapSymSoPM, sopToLists, mapSymSoP)
+import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, mapSymSoPM, sopToLists, mapSymSoP)
 import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark (VName)
 import Futhark.MonadFreshNames (VNameSource, MonadFreshNames (getNameSource), newNameFromString, putNameSource)
 import qualified Data.List as L
 import Control.Monad (foldM)
+import Debug.Trace (trace)
 
 class Ord a => FreeVariables a where
   fv :: a -> S.Set VName
@@ -75,18 +76,19 @@ instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP u) (SoP u) where
 instance SubstitutionBuilder (SoP u) (SoP u) where
   addSub = M.insert
 
-unifies :: ( MonadFreshNames m
-           , MonadFail m
-           , Replaceable u (SoP v)
+unifies :: ( Replaceable u (SoP v)
            , Replaceable v (SoP v)
-           , Renameable v
+           , Unify u (SoP v) m
+           , Unify v (SoP v) m
+           , Show v
            , Ord v) => VName -> [(u, u)] -> m (Substitution (SoP v))
 unifies _ [] = pure mempty
-unifies k us = do
+unifies k (u:us) = do
+  s0 <- uncurry (unify_ k) u
   foldM (\s (a, b) -> do
           s' :: Substitution (SoP v) <- unify_ k (rep s a) (rep s b)
           pure $ s <> s'
-        ) mempty us
+        ) s0 us
 
 instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP.Term u) (SoP u) where
   rep s = foldr1 mulSoPs . map (rep s) . termToList
@@ -96,12 +98,16 @@ instance (Renameable u, Ord u) => Renameable (SoP.Term u) where
 
 -- TODO recast permuted terms to SoP and remove this instance?
 instance ( MonadFail m
-          , MonadFreshNames m
-          , Renameable u
-          , Ord u
-          , Replaceable u (SoP u)
-          ) => Unify (SoP.Term u) (SoP u) m where
+         , MonadFreshNames m
+         , Renameable u
+         , Ord u
+         , Show u
+         , Unify u (SoP u) m
+         , Replaceable u (SoP u)
+         ) => Unify (SoP.Term u) (SoP u) m where
+  unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
   unify_ k x y
+    | length xs == 1, length ys == 1 = unify_ k (head xs) (head ys)
     | length xs == length ys =
         -- Unify on permutation of symbols in a term.
         unifies k $ concatMap (`zip` ys) (L.permutations xs)
@@ -114,12 +120,16 @@ instance ( MonadFail m
          , MonadFreshNames m
          , Replaceable u (SoP u)
          , Renameable u
+         , Show u
+         , Unify u (SoP u) m
          , Ord u) => Unify (SoP u) (SoP u) m where
+  unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
   unify_ k x y
     | length xs == length ys =
         -- Unify on permutations of terms.
         -- TODO will filtering on constants work out here? I'm thinking the
         -- substitutions wouldn't contain that information anyway.
+        -- unifies k [(term2SoP a ca, term2SoP b cb) | xs' <- L.permutations xs,
         unifies k [(a, b) | xs' <- L.permutations xs,
                             ((a, ca), (b, cb)) <- zip xs' ys,
                             ca == cb]

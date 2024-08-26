@@ -7,6 +7,7 @@ import Language.Futhark (VName (VName))
 import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), Nameable (..), SubstitutionBuilder (addSub), Replaceable (rep))
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
+import Debug.Trace (trace)
 
 data Term =
     Var VName
@@ -81,6 +82,7 @@ instance Replaceable Term (SoP Term) where
 -- that's relegated to the substitution here.
 -- NOTE 3.a irrelevant here given that we are post type checking?
 instance (MonadFreshNames m, MonadFail m) => Unify Term (SoP Term) m where
+  unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
   -- 1. Exchange.
   unify_ k t (Var x) | not (isVar t) =
     unify_ k (Var x) t
