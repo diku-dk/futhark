@@ -8,6 +8,8 @@ import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Un
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
 import Debug.Trace (trace)
+import Futhark.Util.Pretty (Pretty, pretty, parens, Doc, brackets, (<+>), prettyString)
+import Data.Maybe (fromJust)
 
 data Term =
     Var VName
@@ -21,6 +23,25 @@ data Term =
       (SoP Term)   -- index
   | Recurrence
   deriving (Show, Eq, Ord)
+
+prettyName :: VName -> Doc a
+prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
+  where
+    subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
+
+instance Pretty Term where
+  pretty Recurrence = "↺ "
+  pretty (Var x) = prettyName x
+  pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
+  pretty (Idx e i) = parens (pretty e) <> brackets (pretty i)
+  pretty (LinComb i lb ub e) =
+    "∑"
+      <> pretty i <> "∈"
+      <> parens (pretty lb <+> ".." <+> pretty ub)
+      <> autoParens e
+    where
+      autoParens x@(Var _) = pretty x
+      autoParens x = parens (pretty x)
 
 instance FreeVariables Term where
   fv (Var vn) = fv vn
@@ -53,7 +74,9 @@ sop2Term sop
 
 instance Replaceable Term (SoP Term) where
   -- TODO flatten
-  rep s (Var x) = M.findWithDefault (sym2SoP $ Var x) x s
+  rep s (Var x) =
+    let y = M.findWithDefault (sym2SoP $ Var x) x s
+    in trace (if x `M.member` s then "rep <" <> prettyString x <> "," <> prettyString y <> ">" else "") y
   rep s (Idx xs i) =
     sym2SoP $ Idx (sop2Term $ rep s xs) (rep s i)
   rep s (LinComb i lb ub t) =

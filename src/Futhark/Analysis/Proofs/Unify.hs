@@ -13,7 +13,8 @@ import Language.Futhark (VName)
 import Futhark.MonadFreshNames (VNameSource, MonadFreshNames (getNameSource), newNameFromString, putNameSource)
 import qualified Data.List as L
 import Control.Monad (foldM)
-import Debug.Trace (trace)
+import Debug.Trace (trace, traceM)
+import Futhark.Util.Pretty
 
 class Ord a => FreeVariables a where
   fv :: a -> S.Set VName
@@ -31,6 +32,9 @@ class Renameable u where
   rename = rename_ mempty
 
 type Substitution v = M.Map VName v
+
+instance Pretty v => Pretty (Substitution v) where
+  pretty = braces . commastack . map (\(k,v) -> pretty k <> " : " <> pretty v) . M.toList
 
 class Replaceable u v where
   -- Implements the replacement operation from Sieg and Kaufmann.
@@ -80,37 +84,44 @@ unifies :: ( Replaceable u (SoP v)
            , Replaceable v (SoP v)
            , Unify u (SoP v) m
            , Unify v (SoP v) m
+           , Pretty v
+           , Pretty u
            , Show v
            , Ord v) => VName -> [(u, u)] -> m (Substitution (SoP v))
+unifies _ us | trace ("\nunifies " <> prettyString us) False = undefined
 unifies _ [] = pure mempty
 unifies k (u:us) = do
   s0 <- uncurry (unify_ k) u
   foldM (\s (a, b) -> do
+          traceM ("# unifies SUB\n" <> prettyString s)
           s' :: Substitution (SoP v) <- unify_ k (rep s a) (rep s b)
           pure $ s <> s'
         ) s0 us
+  -- foldM (\s (a, b) -> (s <>) <$> unify_ k (rep s a) (rep s b)) s0 us
 
-instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP.Term u) (SoP u) where
-  rep s = foldr1 mulSoPs . map (rep s) . termToList
+instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP.Term u, Integer) (SoP u) where
+  rep s (x, c) = SoP.scaleSoP c $ foldr1 mulSoPs . map (rep s) . termToList $ x
 
-instance (Renameable u, Ord u) => Renameable (SoP.Term u) where
-  rename_ tau x = toTerm <$> mapM (rename_ tau) (termToList x)
+instance (Renameable u, Ord u) => Renameable (SoP.Term u, Integer) where
+  rename_ tau (x, c) = (, c) . toTerm <$> mapM (rename_ tau) (termToList x)
 
 -- TODO recast permuted terms to SoP and remove this instance?
 instance ( MonadFail m
          , MonadFreshNames m
          , Renameable u
-         , Ord u
-         , Show u
          , Unify u (SoP u) m
          , Replaceable u (SoP u)
-         ) => Unify (SoP.Term u) (SoP u) m where
+         , Show u
+         , Pretty u
+         , Ord u) => Unify (SoP.Term u, Integer) (SoP u) m where
   unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
-  unify_ k x y
-    | length xs == 1, length ys == 1 = unify_ k (head xs) (head ys)
-    | length xs == length ys =
+  unify_ k (x, cx) (y, cy)
+    | length xs == length ys,
+      cx == cy =
         -- Unify on permutation of symbols in a term.
-        unifies k $ concatMap (`zip` ys) (L.permutations xs)
+        -- unifies k $ concatMap (zip xs) (L.permutations ys)
+        head $
+          map (unifies k . zip xs) (L.permutations ys)
     | otherwise = pure mempty
     where
       xs = termToList x
@@ -120,19 +131,21 @@ instance ( MonadFail m
          , MonadFreshNames m
          , Replaceable u (SoP u)
          , Renameable u
-         , Show u
          , Unify u (SoP u) m
+         , Show u
+         , Pretty u
          , Ord u) => Unify (SoP u) (SoP u) m where
   unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
   unify_ k x y
-    | length xs == length ys =
+    | length xs == length ys = do
         -- Unify on permutations of terms.
         -- TODO will filtering on constants work out here? I'm thinking the
         -- substitutions wouldn't contain that information anyway.
         -- unifies k [(term2SoP a ca, term2SoP b cb) | xs' <- L.permutations xs,
-        unifies k [(a, b) | xs' <- L.permutations xs,
-                            ((a, ca), (b, cb)) <- zip xs' ys,
-                            ca == cb]
+        traceM ("xs" <> prettyString xs)
+        traceM ("ys" <> prettyString ys)
+        head $
+          map (unifies k . zip xs) (L.permutations ys)
     | otherwise = pure mempty
     where
       xs = sopToList x
