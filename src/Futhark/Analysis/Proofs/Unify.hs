@@ -12,7 +12,7 @@ import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark (VName)
 import Futhark.MonadFreshNames (VNameSource, MonadFreshNames (getNameSource), newNameFromString, putNameSource)
 import qualified Data.List as L
-import Control.Monad (foldM)
+import Control.Monad (foldM, msum)
 import Control.Monad.Trans.Maybe
 import Debug.Trace (trace, traceM)
 import Futhark.Util.Pretty
@@ -101,12 +101,7 @@ unifies k (u:us) = do
 
 -- Extract left-most non-fail action, if there is one.
 first :: Monad m => [MaybeT m a] -> MaybeT m a
-first [] = fail "No first."
-first (x:xs) = MaybeT $ do
-  v <- runMaybeT x
-  case v of
-    Nothing -> runMaybeT (first xs)
-    Just _ -> pure v
+first = msum
 
 unifyAnyPermutation :: ( Replaceable u (SoP v)
                        , Replaceable v (SoP v)
