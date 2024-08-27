@@ -13,6 +13,7 @@ import Language.Futhark (VName)
 import Futhark.MonadFreshNames (VNameSource, MonadFreshNames (getNameSource), newNameFromString, putNameSource)
 import qualified Data.List as L
 import Control.Monad (foldM)
+import Control.Monad.Trans.Maybe
 import Debug.Trace (trace, traceM)
 import Futhark.Util.Pretty
 
@@ -43,12 +44,12 @@ class Replaceable u v where
 class SubstitutionBuilder u v where
   addSub :: VName -> u -> Substitution v -> Substitution v
 
-class (MonadFreshNames m, MonadFail m, Renameable u) => Unify u v m where
+class (MonadFreshNames m, Renameable u) => Unify u v m where
   -- `unify_ k eq` is the unification algorithm from Sieg and Kauffmann,
   -- Unification for quantified formulae, 1993.
   -- Check whether x is a bound variable by `x >= k`.
-  unify_ :: VName -> u -> u -> m (Substitution v)
-  unify :: u -> u -> m (Substitution v)
+  unify_ :: VName -> u -> u -> MaybeT m (Substitution v)
+  unify :: u -> u -> MaybeT m (Substitution v)
   unify e e' = do
     -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
     --                  = {rename(e) ~= rename(e')}.
@@ -87,7 +88,7 @@ unifies :: ( Replaceable u (SoP v)
            , Pretty v
            , Pretty u
            , Show v
-           , Ord v) => VName -> [(u, u)] -> m (Substitution (SoP v))
+           , Ord v) => VName -> [(u, u)] -> MaybeT m (Substitution (SoP v))
 unifies _ us | trace ("\nunifies " <> prettyString us) False = undefined
 unifies _ [] = pure mempty
 unifies k (u:us) = do
@@ -97,7 +98,28 @@ unifies k (u:us) = do
           s' :: Substitution (SoP v) <- unify_ k (rep s a) (rep s b)
           pure $ s <> s'
         ) s0 us
-  -- foldM (\s (a, b) -> (s <>) <$> unify_ k (rep s a) (rep s b)) s0 us
+
+-- Extract left-most non-fail action, if there is one.
+first :: Monad m => [MaybeT m a] -> MaybeT m a
+first [] = fail "No first."
+first (x:xs) = MaybeT $ do
+  v <- runMaybeT x
+  case v of
+    Nothing -> runMaybeT (first xs)
+    Just _ -> pure v
+
+unifyAnyPermutation :: ( Replaceable u (SoP v)
+                       , Replaceable v (SoP v)
+                       , Unify u (SoP v) m
+                       , Unify v (SoP v) m
+                       , Pretty v
+                       , Pretty u
+                       , Show v
+                       , Ord v) => VName -> [u] -> [u] -> MaybeT m (Substitution (SoP v))
+unifyAnyPermutation k xs ys
+  | length xs == length ys =
+      first $ map (unifies k . zip xs) (L.permutations ys)
+  | otherwise = fail "unifyAnyPermutation unequal lengths"
 
 instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP.Term u, Integer) (SoP u) where
   rep s (x, c) = SoP.scaleSoP c $ foldr1 mulSoPs . map (rep s) . termToList $ x
@@ -105,9 +127,7 @@ instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP.Term u, Integer) (So
 instance (Renameable u, Ord u) => Renameable (SoP.Term u, Integer) where
   rename_ tau (x, c) = (, c) . toTerm <$> mapM (rename_ tau) (termToList x)
 
--- TODO recast permuted terms to SoP and remove this instance?
-instance ( MonadFail m
-         , MonadFreshNames m
+instance ( MonadFreshNames m
          , Renameable u
          , Unify u (SoP u) m
          , Replaceable u (SoP u)
@@ -115,20 +135,15 @@ instance ( MonadFail m
          , Pretty u
          , Ord u) => Unify (SoP.Term u, Integer) (SoP u) m where
   unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
-  unify_ k (x, cx) (y, cy)
-    | length xs == length ys,
-      cx == cy =
-        -- Unify on permutation of symbols in a term.
-        -- unifies k $ concatMap (zip xs) (L.permutations ys)
-        head $
-          map (unifies k . zip xs) (L.permutations ys)
-    | otherwise = pure mempty
+  unify_ k (x, a) (y, b)
+    | a == b =
+        unifyAnyPermutation k xs ys -- Unify on permutations of symbols in term.
+    | otherwise = fail "no unify: unequal constants" -- these dont unify
     where
       xs = termToList x
       ys = termToList y
 
-instance ( MonadFail m
-         , MonadFreshNames m
+instance ( MonadFreshNames m
          , Replaceable u (SoP u)
          , Renameable u
          , Unify u (SoP u) m
@@ -136,17 +151,7 @@ instance ( MonadFail m
          , Pretty u
          , Ord u) => Unify (SoP u) (SoP u) m where
   unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
-  unify_ k x y
-    | length xs == length ys = do
-        -- Unify on permutations of terms.
-        -- TODO will filtering on constants work out here? I'm thinking the
-        -- substitutions wouldn't contain that information anyway.
-        -- unifies k [(term2SoP a ca, term2SoP b cb) | xs' <- L.permutations xs,
-        traceM ("xs" <> prettyString xs)
-        traceM ("ys" <> prettyString ys)
-        head $
-          map (unifies k . zip xs) (L.permutations ys)
-    | otherwise = pure mempty
+  unify_ k x y = unifyAnyPermutation k xs ys -- Unify on permutations of terms.
     where
       xs = sopToList x
       ys = sopToList y
