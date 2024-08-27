@@ -99,10 +99,6 @@ unifies k (u:us) = do
           pure $ s <> s'
         ) s0 us
 
--- Extract left-most non-fail action, if there is one.
-first :: Monad m => [MaybeT m a] -> MaybeT m a
-first = msum
-
 unifyAnyPermutation :: ( Replaceable u (SoP v)
                        , Replaceable v (SoP v)
                        , Unify u (SoP v) m
@@ -115,6 +111,10 @@ unifyAnyPermutation k xs ys
   | length xs == length ys =
       first $ map (unifies k . zip xs) (L.permutations ys)
   | otherwise = fail "unifyAnyPermutation unequal lengths"
+  where
+    -- Extract left-most non-fail action, if there is one.
+    first :: Monad m => [MaybeT m a] -> MaybeT m a
+    first = msum
 
 instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP.Term u, Integer) (SoP u) where
   rep s (x, c) = SoP.scaleSoP c $ foldr1 mulSoPs . map (rep s) . termToList $ x
