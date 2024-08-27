@@ -85,7 +85,7 @@ pPrimValue =
     [ FloatValue <$> pFloatValue,
       IntValue <$> pIntValue,
       BoolValue <$> pBoolValue,
-      UnitValue <$ (lexeme "(" *> lexeme ")")
+      UnitValue <$ try (lexeme "(" *> lexeme ")")
     ]
     <?> "primitive value"
 
