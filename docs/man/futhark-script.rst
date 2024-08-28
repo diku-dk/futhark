@@ -32,6 +32,11 @@ OPTIONS
   The backend used when compiling Futhark programs (without leading
   ``futhark``, e.g. just ``opencl``).  Defaults to ``c``.
 
+-b, --binary
+
+  Produce output in the binary data format. Fails if the value is not
+  a primitive or array of primitives.
+
 -D, --debug
 
   Pass ``-D`` to the executable and show debug prints.
