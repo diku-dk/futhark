@@ -7,12 +7,13 @@
 module Futhark.CodeGen.ImpGen.GPU
   ( compileProgOpenCL,
     compileProgCUDA,
+    compileProgHIP,
     Warnings,
   )
 where
 
 import Control.Monad
-import Data.List (foldl')
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
@@ -23,19 +24,17 @@ import Futhark.CodeGen.ImpGen.GPU.SegHist
 import Futhark.CodeGen.ImpGen.GPU.SegMap
 import Futhark.CodeGen.ImpGen.GPU.SegRed
 import Futhark.CodeGen.ImpGen.GPU.SegScan
-import Futhark.CodeGen.ImpGen.GPU.Transpose
 import Futhark.Error
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
-import Futhark.Util.IntegralExp (IntegralExp, divUp, quot, rem)
+import Futhark.Util.IntegralExp (divUp, nextMul)
 import Prelude hiding (quot, rem)
 
 callKernelOperations :: Operations GPUMem HostEnv Imp.HostOp
 callKernelOperations =
   Operations
     { opsExpCompiler = expCompiler,
-      opsCopyCompiler = callKernelCopy,
+      opsCopyCompiler = lmadCopy,
       opsOpCompiler = opCompiler,
       opsStmsCompiler = defCompileStms,
       opsAllocCompilers = mempty
@@ -72,7 +71,7 @@ openclAtomics, cudaAtomics :: AtomicBinOp
            ]
 
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   HostEnv ->
   Prog GPUMem ->
   m (Warnings, Imp.Program)
@@ -84,10 +83,12 @@ compileProg env =
 -- | Compile a 'GPUMem' program to low-level parallel code, with
 -- either CUDA or OpenCL characteristics.
 compileProgOpenCL,
-  compileProgCUDA ::
-    MonadFreshNames m => Prog GPUMem -> m (Warnings, Imp.Program)
+  compileProgCUDA,
+  compileProgHIP ::
+    (MonadFreshNames m) => Prog GPUMem -> m (Warnings, Imp.Program)
 compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
 compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
+compileProgHIP = compileProg $ HostEnv cudaAtomics HIP mempty
 
 opCompiler ::
   Pat LetDecMem ->
@@ -107,24 +108,24 @@ opCompiler (Pat [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
     =<< toExp x
 opCompiler (Pat [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
-opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
+opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblock_size))) = do
   fname <- askFunction
-  max_num_groups :: TV Int32 <- dPrim "max_num_groups" int32
+  max_num_tblocks :: TV Int64 <- dPrim "max_num_tblocks"
   sOp $
-    Imp.GetSize (tvVar max_num_groups) (keyWithEntryPoint fname max_num_groups_key) $
-      sizeClassWithEntryPoint fname SizeNumGroups
+    Imp.GetSize (tvVar max_num_tblocks) (keyWithEntryPoint fname max_num_tblocks_key) $
+      sizeClassWithEntryPoint fname SizeGrid
 
-  -- If 'w' is small, we launch fewer groups than we normally would.
-  -- We don't want any idle groups.
+  -- If 'w' is small, we launch fewer blocks than we normally would.
+  -- We don't want any idle blocks.
   --
   -- The calculations are done with 64-bit integers to avoid overflow
   -- issues.
-  let num_groups_maybe_zero =
-        sMin64 (pe64 w64 `divUp` pe64 group_size) $
-          sExt64 (tvExp max_num_groups)
-  -- We also don't want zero groups.
-  let num_groups = sMax64 1 num_groups_maybe_zero
-  mkTV (patElemName pe) int32 <-- sExt32 num_groups
+  let num_tblocks_maybe_zero =
+        sMin64 (pe64 w64 `divUp` pe64 tblock_size) $
+          sExt64 (tvExp max_num_tblocks)
+  -- We also don't want zero blocks.
+  let num_tblocks = sMax64 1 num_tblocks_maybe_zero
+  mkTV (patElemName pe) <-- sExt32 num_tblocks
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
 opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
@@ -133,7 +134,7 @@ opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
   sKernelThread "gpuseq" tid (defKernelAttrs one one) $
     compileStms (freeIn res) stms $
       forM_ (zip pes res) $ \(pe, SubExpRes _ se) ->
-        copyDWIM (patElemName pe) [DimFix 0] se []
+        copyDWIMFix (patElemName pe) [0] se []
 opCompiler pat e =
   compilerBugS $
     "opCompiler: Invalid pattern\n  "
@@ -164,42 +165,41 @@ segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ prettyString (segLevel segop) ++ " for rhs of pattern " ++ prettyString pat
 
 -- Create boolean expression that checks whether all kernels in the
--- enclosed code do not use more local memory than we have available.
+-- enclosed code do not use more shared memory than we have available.
 -- We look at *all* the kernels here, even those that might be
 -- otherwise protected by their own multi-versioning branches deeper
 -- down.  Currently the compiler will not generate multi-versioning
 -- that makes this a problem, but it might in the future.
-checkLocalMemoryReqs :: Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
-checkLocalMemoryReqs code = do
-  scope <- askScope
+checkSharedMemoryReqs :: (VName -> Bool) -> Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
+checkSharedMemoryReqs in_scope code = do
   let alloc_sizes = map (sum . map alignedSize . localAllocSizes . Imp.kernelBody) $ getGPU code
 
   -- If any of the sizes involve a variable that is not known at this
   -- point, then we cannot check the requirements.
-  if any (`M.notMember` scope) (namesToList $ freeIn alloc_sizes)
+  if not $ all in_scope $ namesToList $ freeIn alloc_sizes
     then pure Nothing
     else do
-      local_memory_capacity :: TV Int32 <- dPrim "local_memory_capacity" int32
-      sOp $ Imp.GetSizeMax (tvVar local_memory_capacity) SizeLocalMemory
+      shared_memory_capacity :: TV Int64 <- dPrim "shared_memory_capacity"
+      sOp $ Imp.GetSizeMax (tvVar shared_memory_capacity) SizeSharedMemory
 
-      let local_memory_capacity_64 =
-            sExt64 $ tvExp local_memory_capacity
+      let shared_memory_capacity_64 =
+            sExt64 $ tvExp shared_memory_capacity
           fits size =
-            unCount size .<=. local_memory_capacity_64
-      pure $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
+            unCount size .<=. shared_memory_capacity_64
+      pure $ Just $ L.foldl' (.&&.) true (map fits alloc_sizes)
   where
     getGPU = foldMap getKernel
-    getKernel (Imp.CallKernel k) | Imp.kernelCheckLocalMemory k = [k]
+    getKernel (Imp.CallKernel k) | Imp.kernelCheckSharedMemory k = [k]
     getKernel _ = []
 
     localAllocSizes = foldMap localAllocSize
-    localAllocSize (Imp.LocalAlloc _ size) = [size]
+    localAllocSize (Imp.SharedAlloc _ size) = [size]
     localAllocSize _ = []
 
     -- These allocations will actually be padded to an 8-byte aligned
     -- size, so we should take that into account when checking whether
     -- they fit.
-    alignedSize x = x + ((8 - (x `rem` 8)) `rem` 8)
+    alignedSize x = nextMul x 8
 
 withAcc ::
   Pat LetDecMem ->
@@ -231,16 +231,14 @@ expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   s' <- toExp s
 
   sIota (patElemName pe) (pe64 n) x' s' et
-expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
+expCompiler (Pat [pe]) (BasicOp (Replicate shape se))
   | Acc {} <- patElemType pe = pure ()
   | otherwise =
-      sReplicate (patElemName pe) se
-expCompiler (Pat [pe]) (BasicOp (Rotate rs arr))
-  | Acc {} <- patElemType pe = pure ()
-  | otherwise =
-      sRotateKernel (patElemName pe) (map pe64 rs) arr
--- Allocation in the "local" space is just a placeholder.
-expCompiler _ (Op (Alloc _ (Space "local"))) =
+      if shapeRank shape == 0
+        then copyDWIM (patElemName pe) [] se []
+        else sReplicate (patElemName pe) se
+-- Allocation in the "shared" space is just a placeholder.
+expCompiler _ (Op (Alloc _ (Space "shared"))) =
   pure ()
 expCompiler pat (WithAcc inputs lam) =
   withAcc pat inputs lam
@@ -251,177 +249,13 @@ expCompiler pat (WithAcc inputs lam) =
 -- always be safe (and what would we do if none of the branches would
 -- work?).
 expCompiler dest (Match cond (first_case : cases) defbranch sort@(MatchDec _ MatchEquiv)) = do
+  scope <- askScope
   tcode <- collect $ compileBody dest $ caseBody first_case
   fcode <- collect $ expCompiler dest $ Match cond cases defbranch sort
-  check <- checkLocalMemoryReqs tcode
+  check <- checkSharedMemoryReqs (`M.member` scope) tcode
   let matches = caseMatch cond (casePat first_case)
   emit $ case check of
     Nothing -> fcode
     Just ok -> Imp.If (matches .&&. ok) tcode fcode
 expCompiler dest e =
   defCompileExp dest e
-
-callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem srcshape srcIxFun)
-  | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
-      isMapTransposeCopy bt destloc srcloc = do
-      fname <- mapTransposeForType bt
-      emit $
-        Imp.Call
-          []
-          fname
-          [ Imp.MemArg destmem,
-            Imp.ExpArg $ untyped destoffset,
-            Imp.MemArg srcmem,
-            Imp.ExpArg $ untyped srcoffset,
-            Imp.ExpArg $ untyped num_arrays,
-            Imp.ExpArg $ untyped size_x,
-            Imp.ExpArg $ untyped size_y
-          ]
-  | bt_size <- primByteSize bt,
-    Just destoffset <- IxFun.linearWithOffset destIxFun bt_size,
-    Just srcoffset <- IxFun.linearWithOffset srcIxFun bt_size = do
-      let num_elems = Imp.elements $ product $ map pe64 srcshape
-      srcspace <- entryMemSpace <$> lookupMemory srcmem
-      destspace <- entryMemSpace <$> lookupMemory destmem
-      sCopy
-        destmem
-        (sExt64 destoffset)
-        destspace
-        srcmem
-        (sExt64 srcoffset)
-        srcspace
-        num_elems
-        bt
-  | otherwise = sCopyKernel bt destloc srcloc
-
-mapTransposeForType :: PrimType -> CallKernelGen Name
-mapTransposeForType bt = do
-  let fname = nameFromString $ "builtin#" <> mapTransposeName bt
-
-  exists <- hasFunction fname
-  unless exists $ emitFunction fname $ mapTransposeFunction bt
-
-  pure fname
-
-mapTransposeName :: PrimType -> String
-mapTransposeName bt = "gpu_map_transpose_" ++ prettyString bt
-
-mapTransposeFunction :: PrimType -> Imp.Function Imp.HostOp
-mapTransposeFunction bt =
-  Imp.Function Nothing [] params transpose_code
-  where
-    params =
-      [ memparam destmem,
-        intparam destoffset,
-        memparam srcmem,
-        intparam srcoffset,
-        intparam num_arrays,
-        intparam x,
-        intparam y
-      ]
-
-    space = Space "device"
-    memparam v = Imp.MemParam v space
-    intparam v = Imp.ScalarParam v $ IntType Int32
-
-    [ destmem,
-      destoffset,
-      srcmem,
-      srcoffset,
-      num_arrays,
-      x,
-      y,
-      mulx,
-      muly,
-      block
-      ] =
-        zipWith
-          (VName . nameFromString)
-          [ "destmem",
-            "destoffset",
-            "srcmem",
-            "srcoffset",
-            "num_arrays",
-            "x_elems",
-            "y_elems",
-            -- The following is only used for low width/height
-            -- transpose kernels
-            "mulx",
-            "muly",
-            "block"
-          ]
-          [0 ..]
-
-    block_dim_int = 16
-
-    block_dim :: IntegralExp a => a
-    block_dim = 16
-
-    -- When an input array has either width==1 or height==1, performing a
-    -- transpose will be the same as performing a copy.
-    can_use_copy =
-      let onearr = Imp.le32 num_arrays .==. 1
-          height_is_one = Imp.le32 y .==. 1
-          width_is_one = Imp.le32 x .==. 1
-       in onearr .&&. (width_is_one .||. height_is_one)
-
-    transpose_code =
-      Imp.If input_is_empty mempty $
-        mconcat
-          [ Imp.DeclareScalar muly Imp.Nonvolatile (IntType Int32),
-            Imp.SetScalar muly $ untyped $ block_dim `quot` Imp.le32 x,
-            Imp.DeclareScalar mulx Imp.Nonvolatile (IntType Int32),
-            Imp.SetScalar mulx $ untyped $ block_dim `quot` Imp.le32 y,
-            Imp.If can_use_copy copy_code $
-              Imp.If should_use_lowwidth (callTransposeKernel TransposeLowWidth) $
-                Imp.If should_use_lowheight (callTransposeKernel TransposeLowHeight) $
-                  Imp.If should_use_small (callTransposeKernel TransposeSmall) $
-                    callTransposeKernel TransposeNormal
-          ]
-
-    input_is_empty =
-      Imp.le32 num_arrays .==. 0 .||. Imp.le32 x .==. 0 .||. Imp.le32 y .==. 0
-
-    should_use_small =
-      Imp.le32 x .<=. (block_dim `quot` 2)
-        .&&. Imp.le32 y .<=. (block_dim `quot` 2)
-
-    should_use_lowwidth =
-      Imp.le32 x .<=. (block_dim `quot` 2)
-        .&&. block_dim .<. Imp.le32 y
-
-    should_use_lowheight =
-      Imp.le32 y .<=. (block_dim `quot` 2)
-        .&&. block_dim .<. Imp.le32 x
-
-    copy_code =
-      let num_bytes = sExt64 $ Imp.le32 x * Imp.le32 y * primByteSize bt
-       in Imp.Copy
-            bt
-            destmem
-            (Imp.Count $ sExt64 $ Imp.le32 destoffset)
-            space
-            srcmem
-            (Imp.Count $ sExt64 $ Imp.le32 srcoffset)
-            space
-            (Imp.Count num_bytes)
-
-    callTransposeKernel =
-      Imp.Op
-        . Imp.CallKernel
-        . mapTransposeKernel
-          (mapTransposeName bt)
-          block_dim_int
-          ( destmem,
-            Imp.le32 destoffset,
-            srcmem,
-            Imp.le32 srcoffset,
-            Imp.le32 x,
-            Imp.le32 y,
-            Imp.le32 mulx,
-            Imp.le32 muly,
-            Imp.le32 num_arrays,
-            block
-          )
-          bt

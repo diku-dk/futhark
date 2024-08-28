@@ -25,7 +25,7 @@ import Prelude
 
 -- | A twist on the 'Integral' type class that is more friendly to
 -- symbolic representations.
-class Num e => IntegralExp e where
+class (Num e) => IntegralExp e where
   quot :: e -> e -> e
   rem :: e -> e -> e
   div :: e -> e -> e
@@ -39,12 +39,15 @@ class Num e => IntegralExp e where
   divUp x y =
     (x + y - 1) `Futhark.Util.IntegralExp.div` y
 
+  nextMul :: e -> e -> e
+  nextMul x y = x `divUp` y * y
+
 -- | This wrapper allows you to use a type that is an instance of the
 -- true class whenever the simile class is required.
 newtype Wrapped a = Wrapped {wrappedValue :: a}
   deriving (Eq, Ord, Show)
 
-instance Enum a => Enum (Wrapped a) where
+instance (Enum a) => Enum (Wrapped a) where
   toEnum a = Wrapped $ toEnum a
   fromEnum (Wrapped a) = fromEnum a
 
@@ -61,7 +64,7 @@ liftOp2 ::
   Wrapped a
 liftOp2 op (Wrapped x) (Wrapped y) = Wrapped $ x `op` y
 
-instance Num a => Num (Wrapped a) where
+instance (Num a) => Num (Wrapped a) where
   (+) = liftOp2 (Prelude.+)
   (-) = liftOp2 (Prelude.-)
   (*) = liftOp2 (Prelude.*)
@@ -70,7 +73,7 @@ instance Num a => Num (Wrapped a) where
   fromInteger = Wrapped . Prelude.fromInteger
   negate = liftOp Prelude.negate
 
-instance Integral a => IntegralExp (Wrapped a) where
+instance (Integral a) => IntegralExp (Wrapped a) where
   quot = liftOp2 Prelude.quot
   rem = liftOp2 Prelude.rem
   div = liftOp2 Prelude.div

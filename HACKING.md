@@ -2,7 +2,9 @@
 
 The Futhark compiler is a significant body of code with a not entirely
 straightforward design. The main source of documentation is the
-Haddock comments in the source code itself.
+Haddock comments in the source code itself, including [this general
+overview of the compiler
+architecture](https://hackage.haskell.org/package/futhark-0.24.3/docs/Futhark.html).
 
 To build the compiler, you need a recent version of
 [GHC](http://ghc.haskell.org/), which can be installed via
@@ -71,6 +73,35 @@ Note that GHCs code generator is sometimes slightly buggy in its
 handling of profiled code.  If you encounter a compiler crash with an
 error message like "PAP object entered", then this is a GHC bug.
 
+### Debugging compiler crashes
+
+By default, Haskell does not produce very good stack traces.  If you
+compile with `make configure-profile` as mentioned above, you can pass
+`+RTS -xc` to the Futhark compiler in order to get better stack
+traces.  You will see that you actually get *multiple* stack traces,
+as the Haskell runtime system will print a stack trace for every
+signal it receives, and several of these occur early, when the program
+is read from disk.  Also, the *final* stack trace is often some
+diagnostic artifact.  Usually the second-to-last stack trace is what
+you are looking for.
+
+## Testing
+
+### Only internal compilation
+
+This command tests compilation *without* compiling the generated C
+code, which speeds up testing for internal compiler errors:
+
+    futhark test -C tests --pass-compiler-option=--library
+
+### Running only a single unit test
+
+    cabal run unit -- -p '/reshape . fix . iota 3d/'
+
+The argument to `-p` is the name of the test that fails, as reported
+by `cabal test`.  You may have to scroll through the output a bit to
+find it.
+
 ## Debugging Internal Type Errors
 
 The Futhark compiler uses a typed core language, and the type checker
@@ -116,14 +147,21 @@ allows you to tailor your own compilation pipeline using command line
 options. It is also useful for seeing what the AST looks like after
 specific passes.
 
-You may wish to set the environment variable
-`FUTHARK_COMPILER_DEBUGGING=1`. This has the following effects:
+### `FUTHARK_COMPILER_DEBUGGING` environment variable
 
-- The frontend prints internal names. (This may affect code
-  generation in some cases, so turn it off when actually
-  generating code.)
-- Tools that talk to server-mode executables will print the messages
-  sent back and forth on the standard error stream.
+You can set the level of debug verbosity via the environment variable
+`FUTHARK_COMPILER_DEBUGGING`. It has the following effects:
+
+- `FUTHARK_COMPILER_DEBUGGING=1`:
+  + The frontend prints internal names. (This may affect code
+    generation in some cases, so turn it off when actually
+    generating code.)
+  + Tools that talk to server-mode executables will print the messages
+    sent back and forth on the standard error stream.
+
+- `FUTHARK_COMPILER_DEBUGGING=2`:
+  + All of the effects of `FUTHARK_COMPILER_DEBUGGING=1`.
+  + The frontend prints explicit type annotations.
 
 ## Running compiler pipelines
 
@@ -146,13 +184,13 @@ There are also various shorthands for running entire standard pipelines:
 By default, `futhark dev` will print the resulting IR. You can switch to
 a different *action* with one of the following options:
 
-- `--compile-imperative`: generate sequential ImpCode and print it.
-- `--compile-imperative-kernels`: generate GPU ImpCode and print it.
-- `--compile-imperative-multicore`: generate multicore ImpCode and
+- `--compile-imp-seq`: generate sequential ImpCode and print it.
+- `--compile-imp-gpu`: generate GPU ImpCode and print it.
+- `--compile-imp-multicore`: generate multicore ImpCode and
   print it.
 
 You must use the appropriate pipeline as well (e.g. `--gpu-mem` for
-`--compile-imperative-kernels`).
+`--compile-imp-gpu`).
 
 You can also use e.g. `--backend=c` to run the same code generation
 and compilation as `futhark c`.  This is useful for experimenting with
@@ -246,3 +284,34 @@ execute](https://github.com/jrprice/Oclgrind/issues/204).  To work
 around this, disable optimisations in the OpenCL compiler:
 
     futhark test foo.fut --backend=opencl --runner=tools/oclgrindrunner.sh --pass-option=--build-option=-O0
+
+## Using `futhark script`
+
+The `futhark script` command is a handy way to run (server-mode)
+executables with arbitrary input, while also seeing logging output in
+real time. This is particularly useful for programs whose benchmarking
+input are complicated FutharkScript expressions.
+
+If you have a program `infinite.fut` containing
+
+```Futhark
+entry main n = iterate 1000000000 (map (+1)) (iota n)
+```
+
+then you can run
+
+```
+$ futhark script -D infinite.fut 'main 10i64'
+```
+
+to run it with debug prints. You can also use `-L` instead of `-D` to
+just enable logging. The `main 10i64` can be an arbitrary FutharkScript
+expression.
+
+The above will compile `infinite.fut` using the `c` backend before
+running it. Pass a `--backend` option to `futhark script` to use a
+different backend, or pass an already compiled program instead of a
+`.fut` file (e.g., `infinite`).
+
+See the manpages for `futhark script` and `futhark literate` for more
+information.

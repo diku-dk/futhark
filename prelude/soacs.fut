@@ -162,16 +162,6 @@ def reduce_by_index_3d 'a [k] [n] [m] [l] (dest : *[k][m][l]a) (f : a -> a -> a)
 def scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
   intrinsics.scan op ne as
 
--- | Remove all those elements of `as` that do not satisfy the
--- predicate `p`.
---
--- **Work:** *O(n ✕ W(p))*
---
--- **Span:** *O(log(n) ✕ W(p))*
-def filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
-  let (as', is) = intrinsics.partition 1 (\x -> if p x then 0 else 1) as
-  in as'[:is[0]]
-
 -- | Split an array into those elements that satisfy the given
 -- predicate, and those that do not.
 --
@@ -181,8 +171,7 @@ def filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
 def partition [n] 'a (p: a -> bool) (as: [n]a): ?[k].([k]a, [n-k]a) =
   let p' x = if p x then 0 else 1
   let (as', is) = intrinsics.partition 2 p' as
-  let k = is[0]
-  in (as'[0:k], as'[k:n])
+  in (as'[0:is[0]], as'[is[0]:n])
 
 -- | Split an array by two predicates, producing three arrays.
 --
@@ -192,11 +181,9 @@ def partition [n] 'a (p: a -> bool) (as: [n]a): ?[k].([k]a, [n-k]a) =
 def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ?[k][l].([k]a, [l]a, [n-k-l]a) =
   let p' x = if p1 x then 0 else if p2 x then 1 else 2
   let (as', is) = intrinsics.partition 3 p' as
-  let k = is[0]
-  let l = is[1]
-  in (as'[0:k],
-      as'[k:k+l] :> [l]a,
-      as'[k+l:n] :> [n-k-l]a)
+  in (as'[0:is[0]],
+      as'[is[0]:is[0]+is[1]] :> [is[1]]a,
+      as'[is[0]+is[1]:n] :> [n-is[0]-is[1]]a)
 
 -- | Return `true` if the given function returns `true` for all
 -- elements in the array.
@@ -256,3 +243,17 @@ def scatter_2d 't [k] [n] [l] (dest: *[k][n]t) (is: [l](i64, i64)) (vs: [l]t): *
 -- **Span:** *O(1)*
 def scatter_3d 't [k] [n] [o] [l] (dest: *[k][n][o]t) (is: [l](i64, i64, i64)) (vs: [l]t): *[k][n][o]t =
   intrinsics.scatter_3d dest is vs
+
+-- | Remove all those elements of `as` that do not satisfy the
+-- predicate `p`.
+--
+-- **Work:** *O(n ✕ W(p))*
+--
+-- **Span:** *O(log(n) ✕ W(p))*
+def filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
+  let flags = map (\x -> if p x then 1 else 0) as
+  let offsets = scan (+) 0 flags
+  let m = if n == 0 then 0 else offsets[n-1]
+  in scatter (map (\x -> x) as[:m])
+             (map2 (\f o -> if f==1 then o-1 else -1) flags offsets)
+             as

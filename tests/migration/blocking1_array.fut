@@ -3,7 +3,7 @@
 -- ==
 -- structure gpu {
 --   /If/True/ArrayLit 1
---   /DoLoop/ArrayLit 2
+--   /Loop/ArrayLit 2
 -- }
 
 entry case_if (A: [5]i64) (x: i64) : i64 =

@@ -3,6 +3,9 @@
 
 module Futhark.CodeGen.ImpGen.GPU.Base
   ( KernelConstants (..),
+    kernelGlobalThreadId,
+    kernelLocalThreadId,
+    kernelBlockId,
     threadOperations,
     keyWithEntryPoint,
     CallKernelGen,
@@ -11,31 +14,31 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     HostEnv (..),
     Target (..),
     KernelEnv (..),
-    groupReduce,
-    groupScan,
-    groupLoop,
+    blockReduce,
+    blockScan,
+    blockLoop,
     isActive,
     sKernel,
     sKernelThread,
     KernelAttrs (..),
     defKernelAttrs,
-    sCopyKernel,
     lvlKernelAttrs,
     allocLocal,
-    kernelAlloc,
     compileThreadResult,
-    virtualiseGroups,
+    virtualiseBlocks,
     kernelLoop,
-    groupCoverSpace,
+    blockCoverSpace,
     fenceForArrays,
     updateAcc,
     genZeroes,
+    isPrimParam,
+    kernelConstToExp,
+    getChunkSize,
+    getSize,
 
     -- * Host-level bulk operations
     sReplicate,
     sIota,
-    sRotateKernel,
-    sCopy,
 
     -- * Atomics
     AtomicBinOp,
@@ -43,19 +46,19 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     Locking (..),
     AtomicUpdate (..),
     DoAtomicUpdate,
+    writeAtomic,
   )
 where
 
 import Control.Monad
-import Data.List (foldl')
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
-import Futhark.MonadFreshNames
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, nubOrd, splitFromEnd)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
@@ -65,7 +68,7 @@ import Prelude hiding (quot, rem)
 -- of the kernels code is the same, there are some cases where we
 -- generate special code based on the ultimate low-level API we are
 -- targeting.
-data Target = CUDA | OpenCL
+data Target = CUDA | OpenCL | HIP
 
 -- | Information about the locks available for accumulators.
 data Locks = Locks
@@ -90,16 +93,13 @@ type CallKernelGen = ImpM GPUMem HostEnv Imp.HostOp
 type InKernelGen = ImpM GPUMem KernelEnv Imp.KernelOp
 
 data KernelConstants = KernelConstants
-  { kernelGlobalThreadId :: Imp.TExp Int32,
-    kernelLocalThreadId :: Imp.TExp Int32,
-    kernelGroupId :: Imp.TExp Int32,
-    kernelGlobalThreadIdVar :: VName,
-    kernelLocalThreadIdVar :: VName,
-    kernelGroupIdVar :: VName,
-    kernelNumGroupsCount :: Count NumGroups SubExp,
-    kernelGroupSizeCount :: Count GroupSize SubExp,
-    kernelNumGroups :: Imp.TExp Int64,
-    kernelGroupSize :: Imp.TExp Int64,
+  { kernelGlobalThreadIdVar :: TV Int32,
+    kernelLocalThreadIdVar :: TV Int32,
+    kernelBlockIdVar :: TV Int32,
+    kernelNumBlocksCount :: Count NumBlocks SubExp,
+    kernelBlockSizeCount :: Count BlockSize SubExp,
+    kernelNumBlocks :: Imp.TExp Int64,
+    kernelBlockSize :: Imp.TExp Int64,
     kernelNumThreads :: Imp.TExp Int32,
     kernelWaveSize :: Imp.TExp Int32,
     -- | A mapping from dimensions of nested SegOps to already
@@ -110,36 +110,43 @@ data KernelConstants = KernelConstants
     kernelChunkItersMap :: M.Map [SubExp] (Imp.TExp Int32)
   }
 
+kernelGlobalThreadId, kernelLocalThreadId, kernelBlockId :: KernelConstants -> Imp.TExp Int32
+kernelGlobalThreadId = tvExp . kernelGlobalThreadIdVar
+kernelLocalThreadId = tvExp . kernelLocalThreadIdVar
+kernelBlockId = tvExp . kernelBlockIdVar
+
 keyWithEntryPoint :: Maybe Name -> Name -> Name
 keyWithEntryPoint fname key =
   nameFromString $ maybe "" ((++ ".") . nameToString) fname ++ nameToString key
 
 allocLocal :: AllocCompiler GPUMem r Imp.KernelOp
 allocLocal mem size =
-  sOp $ Imp.LocalAlloc mem size
+  sOp $ Imp.SharedAlloc mem size
 
-kernelAlloc ::
+threadAlloc ::
   Pat LetDecMem ->
   SubExp ->
   Space ->
   InKernelGen ()
-kernelAlloc (Pat [_]) _ ScalarSpace {} =
+threadAlloc (Pat [_]) _ ScalarSpace {} =
   -- Handled by the declaration of the memory block, which is then
   -- translated to an actual scalar variable during C code generation.
   pure ()
-kernelAlloc (Pat [mem]) size (Space "local") =
-  allocLocal (patElemName mem) $ Imp.bytes $ pe64 size
-kernelAlloc (Pat [mem]) _ _ =
-  compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel."
-kernelAlloc dest _ _ =
+threadAlloc (Pat [mem]) _ _ =
+  compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel thread."
+threadAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
 
-updateAcc :: VName -> [SubExp] -> [SubExp] -> InKernelGen ()
-updateAcc acc is vs = sComment "UpdateAcc" $ do
+updateAcc :: Safety -> VName -> [SubExp] -> [SubExp] -> InKernelGen ()
+updateAcc safety acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map pe64 is
   (c, space, arrs, dims, op) <- lookupAcc acc is'
-  sWhen (inBounds (Slice (map DimFix is')) dims) $
+  let boundsCheck =
+        case safety of
+          Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
+          _ -> id
+  boundsCheck $
     case op of
       Nothing ->
         forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
@@ -180,17 +187,17 @@ compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =
 compileThreadExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
-compileThreadExp _ (BasicOp (UpdateAcc acc is vs)) =
-  updateAcc acc is vs
+compileThreadExp _ (BasicOp (UpdateAcc safety acc is vs)) =
+  updateAcc safety acc is vs
 compileThreadExp dest e =
   defCompileExp dest e
 
 -- | Assign iterations of a for-loop to all threads in the kernel.
 -- The passed-in function is invoked with the (symbolic) iteration.
 -- The body must contain thread-level code.  For multidimensional
--- loops, use 'groupCoverSpace'.
+-- loops, use 'blockCoverSpace'.
 kernelLoop ::
-  IntExp t =>
+  (IntExp t) =>
   Imp.TExp t ->
   Imp.TExp t ->
   Imp.TExp t ->
@@ -206,52 +213,52 @@ kernelLoop tid num_threads n f =
           i <- dPrimVE "i" $ chunk_i * num_threads + tid
           sWhen (i .<. n) $ f i
 
--- | Assign iterations of a for-loop to threads in the workgroup.  The
+-- | Assign iterations of a for-loop to threads in the threadblock.  The
 -- passed-in function is invoked with the (symbolic) iteration.  For
--- multidimensional loops, use 'groupCoverSpace'.
-groupLoop ::
-  IntExp t =>
+-- multidimensional loops, use 'blockCoverSpace'.
+blockLoop ::
+  (IntExp t) =>
   Imp.TExp t ->
   (Imp.TExp t -> InKernelGen ()) ->
   InKernelGen ()
-groupLoop n f = do
+blockLoop n f = do
   constants <- kernelConstants <$> askEnv
   kernelLoop
     (kernelLocalThreadId constants `sExtAs` n)
-    (kernelGroupSize constants `sExtAs` n)
+    (kernelBlockSize constants `sExtAs` n)
     n
     f
 
 -- | Iterate collectively though a multidimensional space, such that
--- all threads in the group participate.  The passed-in function is
+-- all threads in the block participate.  The passed-in function is
 -- invoked with a (symbolic) point in the index space.
-groupCoverSpace ::
-  IntExp t =>
+blockCoverSpace ::
+  (IntExp t) =>
   [Imp.TExp t] ->
   ([Imp.TExp t] -> InKernelGen ()) ->
   InKernelGen ()
-groupCoverSpace ds f = do
+blockCoverSpace ds f = do
   constants <- kernelConstants <$> askEnv
-  let group_size = kernelGroupSize constants
+  let tblock_size = kernelBlockSize constants
   case splitFromEnd 1 ds of
     -- Optimise the case where the inner dimension of the space is
-    -- equal to the group size.
+    -- equal to the block size.
     (ds', [last_d])
-      | last_d == (group_size `sExtAs` last_d) -> do
+      | last_d == (tblock_size `sExtAs` last_d) -> do
           let ltid = kernelLocalThreadId constants `sExtAs` last_d
           sLoopSpace ds' $ \ds_is ->
             f $ ds_is ++ [ltid]
     _ ->
-      groupLoop (product ds) $ f . unflattenIndex ds
+      blockLoop (product ds) $ f . unflattenIndex ds
 
 -- Which fence do we need to protect shared access to this memory space?
 fenceForSpace :: Space -> Imp.Fence
-fenceForSpace (Space "local") = Imp.FenceLocal
+fenceForSpace (Space "shared") = Imp.FenceLocal
 fenceForSpace _ = Imp.FenceGlobal
 
 -- | If we are touching these arrays, which kind of fence do we need?
 fenceForArrays :: [VName] -> InKernelGen Imp.Fence
-fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
+fenceForArrays = fmap (L.foldl' max Imp.FenceLocal) . mapM need
   where
     need arr =
       fmap (fenceForSpace . entryMemSpace)
@@ -260,7 +267,45 @@ fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
         . entryArrayLoc
         =<< lookupArray arr
 
-inBlockScan ::
+isPrimParam :: (Typed p) => Param p -> Bool
+isPrimParam = primType . paramType
+
+kernelConstToExp :: Imp.KernelConstExp -> CallKernelGen Imp.Exp
+kernelConstToExp = traverse f
+  where
+    f (Imp.SizeMaxConst c) = do
+      v <- dPrimS (prettyString c) int64
+      sOp $ Imp.GetSizeMax v c
+      pure v
+    f (Imp.SizeConst k c) = do
+      v <- dPrimS (nameToString k) int64
+      sOp $ Imp.GetSize v k c
+      pure v
+
+-- | Given available register and a list of parameter types, compute
+-- the largest available chunk size given the parameters for which we
+-- want chunking and the available resources. Used in
+-- 'SegScan.SinglePass.compileSegScan', and 'SegRed.compileSegRed'
+-- (with primitive non-commutative operators only).
+getChunkSize :: [Type] -> Imp.KernelConstExp
+getChunkSize types = do
+  let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
+      max_block_mem = Imp.SizeMaxConst SizeSharedMemory
+      max_block_reg = Imp.SizeMaxConst SizeRegisters
+      k_mem = le64 max_block_mem `quot` le64 max_tblock_size
+      k_reg = le64 max_block_reg `quot` le64 max_tblock_size
+      types' = map elemType $ filter primType types
+      sizes = map primByteSize types'
+
+      sum_sizes = sum sizes
+      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
+      max_size = maximum sizes
+
+      mem_constraint = max k_mem sum_sizes `quot` max_size
+      reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
+  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+
+inChunkScan ::
   KernelConstants ->
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
   Imp.TExp Int64 ->
@@ -271,14 +316,14 @@ inBlockScan ::
   InKernelGen () ->
   Lambda GPUMem ->
   InKernelGen ()
-inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = everythingVolatile $ do
-  skip_threads <- dPrim "skip_threads" int32
+inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = everythingVolatile $ do
+  skip_threads <- dPrim "skip_threads"
   let actual_params = lambdaParams scan_lam
       (x_params, y_params) =
         splitAt (length actual_params `div` 2) actual_params
       y_to_x =
         forM_ (zip x_params y_params) $ \(x, y) ->
-          when (primType (paramType x)) $
+          when (isPrimParam x) $
             copyDWIM (paramName x) [] (Var (paramName y)) []
 
   -- Set initial y values
@@ -293,9 +338,10 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
 
   let op_to_x in_block_thread_active
         | Nothing <- seg_flag =
-            sWhen in_block_thread_active $
-              compileBody' x_params $
-                lambdaBody scan_lam
+            localOps threadOperations
+              . sWhen in_block_thread_active
+              $ compileBody' x_params
+              $ lambdaBody scan_lam
         | Just flag_true <- seg_flag = do
             inactive <-
               dPrimVE "inactive" $ flag_true (ltid32 - tvExp skip_threads) ltid32
@@ -305,9 +351,11 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
             -- The convoluted control flow is to ensure all threads
             -- hit this barrier (if applicable).
             when array_scan barrier
-            sWhen in_block_thread_active . sUnless inactive $
-              compileBody' x_params $
-                lambdaBody scan_lam
+            localOps threadOperations
+              . sWhen in_block_thread_active
+              . sUnless inactive
+              $ compileBody' x_params
+              $ lambdaBody scan_lam
 
       maybeBarrier =
         sWhen
@@ -342,32 +390,30 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
     array_scan = not $ all primType $ lambdaReturnType scan_lam
 
     readInitial p arr
-      | primType $ paramType p =
-          copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
+      | isPrimParam p =
+          copyDWIMFix (paramName p) [] (Var arr) [ltid]
       | otherwise =
-          copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
+          copyDWIMFix (paramName p) [] (Var arr) [gtid]
 
     readParam behind p arr
-      | primType $ paramType p =
-          copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
+      | isPrimParam p =
+          copyDWIMFix (paramName p) [] (Var arr) [ltid - behind]
       | otherwise =
-          copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
+          copyDWIMFix (paramName p) [] (Var arr) [gtid - behind + arrs_full_size]
 
-    writeResult x y arr
-      | primType $ paramType x = do
-          copyDWIM arr [DimFix ltid] (Var $ paramName x) []
-          copyDWIM (paramName y) [] (Var $ paramName x) []
-      | otherwise =
-          copyDWIM (paramName y) [] (Var $ paramName x) []
+    writeResult x y arr = do
+      when (isPrimParam x) $
+        copyDWIMFix arr [ltid] (Var $ paramName x) []
+      copyDWIM (paramName y) [] (Var $ paramName x) []
 
-groupScan ::
+blockScan ::
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
   Imp.TExp Int64 ->
   Imp.TExp Int64 ->
   Lambda GPUMem ->
   [VName] ->
   InKernelGen ()
-groupScan seg_flag arrs_full_size w lam arrs = do
+blockScan seg_flag arrs_full_size w lam arrs = do
   constants <- kernelConstants <$> askEnv
   renamed_lam <- renameLambda lam
 
@@ -381,27 +427,26 @@ groupScan seg_flag arrs_full_size w lam arrs = do
 
   fence <- fenceForArrays arrs
 
-  -- The scan works by splitting the group into blocks, which are
-  -- scanned separately.  Typically, these blocks are smaller than
-  -- the lockstep width, which enables barrier-free execution inside
-  -- them.
+  -- The scan works by splitting the block into chunks, which are
+  -- scanned separately. Typically, these chunks are at most the
+  -- lockstep width, which enables barrier-free execution inside them.
   --
-  -- We hardcode the block size here.  The only requirement is that
-  -- it should not be less than the square root of the group size.
-  -- With 32, we will work on groups of size 1024 or smaller, which
-  -- fits every device Troels has seen.  Still, it would be nicer if
-  -- it were a runtime parameter.  Some day.
-  let block_size = 32
+  -- We hardcode the chunk size here. The only requirement is that it
+  -- should not be less than the square root of the block size. With
+  -- 32, we will work on blocks of size 1024 or smaller, which fits
+  -- every device Troels has seen. Still, it would be nicer if it were
+  -- a runtime parameter. Some day.
+  let chunk_size = 32
       simd_width = kernelWaveSize constants
-      block_id = ltid32 `quot` block_size
-      in_block_id = ltid32 - block_id * block_size
-      doInBlockScan seg_flag' active =
-        inBlockScan
+      chunk_id = ltid32 `quot` chunk_size
+      in_chunk_id = ltid32 - chunk_id * chunk_size
+      doInChunkScan seg_flag' active =
+        inChunkScan
           constants
           seg_flag'
           arrs_full_size
           simd_width
-          block_size
+          chunk_size
           active
           arrs
           barrier
@@ -412,34 +457,40 @@ groupScan seg_flag arrs_full_size w lam arrs = do
         | otherwise =
             sOp $ Imp.Barrier fence
 
-      group_offset = sExt64 (kernelGroupId constants) * kernelGroupSize constants
+      errorsync
+        | array_scan =
+            sOp $ Imp.ErrorSync Imp.FenceGlobal
+        | otherwise =
+            sOp $ Imp.ErrorSync Imp.FenceLocal
+
+      block_offset = sExt64 (kernelBlockId constants) * kernelBlockSize constants
 
       writeBlockResult p arr
-        | primType $ paramType p =
-            copyDWIM arr [DimFix $ sExt64 block_id] (Var $ paramName p) []
+        | isPrimParam p =
+            copyDWIMFix arr [sExt64 chunk_id] (Var $ paramName p) []
         | otherwise =
-            copyDWIM arr [DimFix $ group_offset + sExt64 block_id] (Var $ paramName p) []
+            copyDWIMFix arr [block_offset + sExt64 chunk_id] (Var $ paramName p) []
 
       readPrevBlockResult p arr
-        | primType $ paramType p =
-            copyDWIM (paramName p) [] (Var arr) [DimFix $ sExt64 block_id - 1]
+        | isPrimParam p =
+            copyDWIMFix (paramName p) [] (Var arr) [sExt64 chunk_id - 1]
         | otherwise =
-            copyDWIM (paramName p) [] (Var arr) [DimFix $ group_offset + sExt64 block_id - 1]
+            copyDWIMFix (paramName p) [] (Var arr) [block_offset + sExt64 chunk_id - 1]
 
-  doInBlockScan seg_flag ltid_in_bounds lam
+  doInChunkScan seg_flag ltid_in_bounds lam
   barrier
 
-  let is_first_block = block_id .==. 0
+  let is_first_block = chunk_id .==. 0
   when array_scan $ do
     sComment "save correct values for first block" $
       sWhen is_first_block $
         forM_ (zip x_params arrs) $ \(x, arr) ->
-          unless (primType $ paramType x) $
-            copyDWIM arr [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid] (Var $ paramName x) []
+          unless (isPrimParam x) $
+            copyDWIMFix arr [arrs_full_size + block_offset + sExt64 chunk_size + ltid] (Var $ paramName x) []
 
     barrier
 
-  let last_in_block = in_block_id .==. block_size - 1
+  let last_in_block = in_chunk_id .==. chunk_size - 1
   sComment "last thread of block 'i' writes its result to offset 'i'" $
     sWhen (last_in_block .&&. ltid_in_bounds) $
       everythingVolatile $
@@ -450,23 +501,23 @@ groupScan seg_flag arrs_full_size w lam arrs = do
   let first_block_seg_flag = do
         flag_true <- seg_flag
         Just $ \from to ->
-          flag_true (from * block_size + block_size - 1) (to * block_size + block_size - 1)
-  comment
+          flag_true (from * chunk_size + chunk_size - 1) (to * chunk_size + chunk_size - 1)
+  sComment
     "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
-    $ doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
+    $ doInChunkScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
 
-  barrier
+  errorsync
 
   when array_scan $ do
     sComment "move correct values for first block back a block" $
       sWhen is_first_block $
         forM_ (zip x_params arrs) $ \(x, arr) ->
-          unless (primType $ paramType x) $
-            copyDWIM
+          unless (isPrimParam x) $
+            copyDWIMFix
               arr
-              [DimFix $ arrs_full_size + group_offset + ltid]
+              [arrs_full_size + block_offset + ltid]
               (Var arr)
-              [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid]
+              [arrs_full_size + block_offset + sExt64 chunk_size + ltid]
 
     barrier
 
@@ -482,7 +533,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
             sUnless no_carry_in $ compileBody' x_params $ lambdaBody lam
         | Just flag_true <- seg_flag = do
             inactive <-
-              dPrimVE "inactive" $ flag_true (block_id * block_size - 1) ltid32
+              dPrimVE "inactive" $ flag_true (chunk_id * chunk_size - 1) ltid32
             sUnless no_carry_in . sWhen inactive . forM_ (zip x_params y_params) $ \(x, y) ->
               copyDWIM (paramName x) [] (Var (paramName y)) []
             -- The convoluted control flow is to ensure all threads
@@ -492,90 +543,93 @@ groupScan seg_flag arrs_full_size w lam arrs = do
 
       write_final_result =
         forM_ (zip x_params arrs) $ \(p, arr) ->
-          when (primType $ paramType p) $
-            copyDWIM arr [DimFix ltid] (Var $ paramName p) []
+          when (isPrimParam p) $
+            copyDWIMFix arr [ltid] (Var $ paramName p) []
 
-  sComment "carry-in for every block except the first" $ do
-    sComment "read operands" read_carry_in
-    sComment "perform operation" op_to_x
-    sComment "write final result" $ sUnless no_carry_in write_final_result
+  sComment "carry-in for every block except the first" $
+    localOps threadOperations $ do
+      sComment "read operands" read_carry_in
+      sComment "perform operation" op_to_x
+      sComment "write final result" $ sUnless no_carry_in write_final_result
 
   barrier
 
   sComment "restore correct values for first block" $
     sWhen (is_first_block .&&. ltid_in_bounds) $
       forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
-        if primType (paramType y)
-          then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
-          else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
+        if isPrimParam y
+          then copyDWIMFix arr [ltid] (Var $ paramName y) []
+          else copyDWIMFix (paramName x) [] (Var arr) [arrs_full_size + block_offset + ltid]
 
   barrier
 
-groupReduce ::
+blockReduce ::
   Imp.TExp Int32 ->
   Lambda GPUMem ->
   [VName] ->
   InKernelGen ()
-groupReduce w lam arrs = do
-  offset <- dPrim "offset" int32
-  groupReduceWithOffset offset w lam arrs
+blockReduce w lam arrs = do
+  offset <- dPrim "offset"
+  blockReduceWithOffset offset w lam arrs
 
-groupReduceWithOffset ::
+blockReduceWithOffset ::
   TV Int32 ->
   Imp.TExp Int32 ->
   Lambda GPUMem ->
   [VName] ->
   InKernelGen ()
-groupReduceWithOffset offset w lam arrs = do
+blockReduceWithOffset offset w lam arrs = do
   constants <- kernelConstants <$> askEnv
 
   let local_tid = kernelLocalThreadId constants
-      global_tid = kernelGlobalThreadId constants
 
       barrier
         | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
         | otherwise = sOp $ Imp.Barrier Imp.FenceGlobal
 
-      readReduceArgument param arr
-        | Prim _ <- paramType param = do
-            let i = local_tid + tvExp offset
-            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
-        | otherwise = do
-            let i = global_tid + tvExp offset
-            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
+      errorsync
+        | all primType $ lambdaReturnType lam = sOp $ Imp.ErrorSync Imp.FenceLocal
+        | otherwise = sOp $ Imp.ErrorSync Imp.FenceGlobal
 
-      writeReduceOpResult param arr
-        | Prim _ <- paramType param =
-            copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
-        | otherwise =
-            pure ()
+      readReduceArgument param arr = do
+        let i = local_tid + tvExp offset
+        copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
 
-  let (reduce_acc_params, reduce_arr_params) = splitAt (length arrs) $ lambdaParams lam
+      writeReduceOpResult param arr =
+        when (isPrimParam param) $
+          copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
+
+      writeArrayOpResult param arr =
+        unless (isPrimParam param) $
+          copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
+
+  let (reduce_acc_params, reduce_arr_params) =
+        splitAt (length arrs) $ lambdaParams lam
 
   skip_waves <- dPrimV "skip_waves" (1 :: Imp.TExp Int32)
   dLParams $ lambdaParams lam
 
   offset <-- (0 :: Imp.TExp Int32)
 
-  comment "participating threads read initial accumulator" $
-    sWhen (local_tid .<. w) $
+  sComment "participating threads read initial accumulator" $
+    localOps threadOperations . sWhen (local_tid .<. w) $
       zipWithM_ readReduceArgument reduce_acc_params arrs
 
-  let do_reduce = do
-        comment "read array element" $
+  let do_reduce = localOps threadOperations $ do
+        sComment "read array element" $
           zipWithM_ readReduceArgument reduce_arr_params arrs
-        comment "apply reduction operation" $
+        sComment "apply reduction operation" $
           compileBody' reduce_acc_params $
             lambdaBody lam
-        comment "write result of operation" $
+        sComment "write result of operation" $
           zipWithM_ writeReduceOpResult reduce_acc_params arrs
       in_wave_reduce = everythingVolatile do_reduce
 
       wave_size = kernelWaveSize constants
-      group_size = kernelGroupSize constants
+      tblock_size = kernelBlockSize constants
       wave_id = local_tid `quot` wave_size
       in_wave_id = local_tid - wave_id * wave_size
-      num_waves = (sExt32 group_size + wave_size - 1) `quot` wave_size
+      num_waves = (sExt32 tblock_size + wave_size - 1) `quot` wave_size
       arg_in_bounds = local_tid + tvExp offset .<. w
 
       doing_in_wave_reductions =
@@ -602,19 +656,46 @@ groupReduceWithOffset offset w lam arrs = do
         sWhile doing_cross_wave_reductions $ do
           barrier
           offset <-- tvExp skip_waves * wave_size
-          sWhen
-            apply_in_cross_wave_iteration
-            do_reduce
+          sWhen apply_in_cross_wave_iteration do_reduce
           skip_waves <-- tvExp skip_waves * 2
 
   in_wave_reductions
   cross_wave_reductions
+  errorsync
+
+  unless (all isPrimParam reduce_acc_params) $
+    sComment "Copy array-typed operands to result array" $
+      sWhen (local_tid .==. 0) $
+        localOps threadOperations $
+          zipWithM_ writeArrayOpResult reduce_acc_params arrs
 
 compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
-  kernelAlloc pat size space
+  threadAlloc pat size space
 compileThreadOp pat _ =
   compilerBugS $ "compileThreadOp: cannot compile rhs of binding " ++ prettyString pat
+
+-- | Perform a scalar write followed by a fence.
+writeAtomic ::
+  VName ->
+  [Imp.TExp Int64] ->
+  SubExp ->
+  [Imp.TExp Int64] ->
+  InKernelGen ()
+writeAtomic dst dst_is src src_is = do
+  t <- stripArray (length dst_is) <$> lookupType dst
+  sLoopSpace (map pe64 (arrayDims t)) $ \is -> do
+    let pt = elemType t
+    (dst_mem, dst_space, dst_offset) <- fullyIndexArray dst (dst_is ++ is)
+    case src_is ++ is of
+      [] ->
+        sOp . Imp.Atomic dst_space $
+          Imp.AtomicWrite pt dst_mem dst_offset (toExp' pt src)
+      _ -> do
+        tmp <- dPrimSV "tmp" pt
+        copyDWIMFix (tvVar tmp) [] src (src_is ++ is)
+        sOp . Imp.Atomic dst_space $
+          Imp.AtomicWrite pt dst_mem dst_offset (untyped (tvExp tmp))
 
 -- | Locking strategy used for an atomic update.
 data Locking = Locking
@@ -669,14 +750,14 @@ atomicUpdateLocking atomicBinOp lam
         -- can be implemented by atomic compare-and-swap if 32/64 bits.
         forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
           -- Common variables.
-          old <- dPrim "old" t
+          old <- dPrimS "old" t
 
           (arr', _a_space, bucket_offset) <- fullyIndexArray a bucket
 
-          case opHasAtomicSupport space (tvVar old) arr' bucket_offset op of
+          case opHasAtomicSupport space old arr' bucket_offset op of
             Just f -> sOp $ f $ Imp.var y t
             Nothing ->
-              atomicUpdateCAS space t a (tvVar old) bucket x $
+              atomicUpdateCAS space t a old bucket x $
                 x <~~ Imp.BinOpExp op (Imp.var x t) (Imp.var y t)
   where
     opHasAtomicSupport space old arr' bucket' bop = do
@@ -696,12 +777,11 @@ atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
     primBitSize t `elem` [32, 64] = AtomicCAS $ \space [arr] bucket -> do
-      old <- dPrim "old" t
-      atomicUpdateCAS space t arr (tvVar old) bucket (paramName xp) $
-        compileBody' [xp] $
-          lambdaBody op
+      old <- dPrimS "old" t
+      atomicUpdateCAS space t arr old bucket (paramName xp) $
+        compileBody' [xp] (lambdaBody op)
 atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
-  old <- dPrim "old" int32
+  old <- dPrim "old"
   continue <- dPrimVol "continue" Bool true
 
   -- Correctly index into locks.
@@ -762,8 +842,6 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
             zipWithM_ (writeArray bucket) arrs $
               map (Var . paramName) acc_params
 
-      fence = sOp $ Imp.MemFence $ fenceForSpace space
-
   -- While-loop: Try to insert your value
   sWhile (tvExp continue) $ do
     try_acquire_lock
@@ -772,12 +850,10 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
       bind_acc_params
       op_body
       do_hist
-      fence
       release_lock
       break_loop
-    fence
   where
-    writeArray bucket arr val = copyDWIMFix arr bucket val []
+    writeArray bucket arr val = writeAtomic arr bucket val []
 
 atomicUpdateCAS ::
   Space ->
@@ -797,7 +873,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
   --   x = do_op(assumed, y);
   --   old = atomicCAS(&d_his[idx], assumed, tmp);
   -- } while(assumed != old);
-  assumed <- tvVar <$> dPrim "assumed" t
+  assumed <- dPrimS "assumed" t
   run_loop <- dPrimV "run_loop" true
 
   -- XXX: CUDA may generate really bad code if this is not a volatile
@@ -849,7 +925,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
     sWhen (isBool won) (run_loop <-- false)
 
 computeKernelUses ::
-  FreeIn a =>
+  (FreeIn a) =>
   a ->
   [VName] ->
   CallKernelGen [Imp.KernelUse]
@@ -867,7 +943,7 @@ readsFromSet = fmap catMaybes . mapM f . namesToList
       case t of
         Array {} -> pure Nothing
         Acc {} -> pure Nothing
-        Mem (Space "local") -> pure Nothing
+        Mem (Space "shared") -> pure Nothing
         Mem {} -> pure $ Just $ Imp.MemoryUse var
         Prim bt ->
           isConstExp vtable (Imp.var var bt) >>= \case
@@ -883,10 +959,10 @@ isConstExp vtable size = do
   let onLeaf name _ = lookupConstExp name
       lookupConstExp name =
         constExp =<< hasExp =<< M.lookup name vtable
-      constExp (Op (Inner (SizeOp (GetSize key _)))) =
-        Just $ LeafExp (Imp.SizeConst $ keyWithEntryPoint fname key) int32
-      constExp (Op (Inner (SizeOp (GetSizeMax size_class)))) =
-        Just $ LeafExp (Imp.SizeMaxConst size_class) int32
+      constExp (Op (Inner (SizeOp (GetSize key c)))) =
+        Just $ LeafExp (Imp.SizeConst (keyWithEntryPoint fname key) c) int32
+      constExp (Op (Inner (SizeOp (GetSizeMax c)))) =
+        Just $ LeafExp (Imp.SizeMaxConst c) int32
       constExp e = primExpFromExp lookupConstExp e
   pure $ replaceInPrimExpM onLeaf size
   where
@@ -896,30 +972,27 @@ isConstExp vtable size = do
     hasExp (MemVar e _) = e
 
 kernelInitialisationSimple ::
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
+  Count NumBlocks SubExp ->
+  Count BlockSize SubExp ->
   CallKernelGen (KernelConstants, InKernelGen ())
-kernelInitialisationSimple num_groups group_size = do
+kernelInitialisationSimple num_tblocks tblock_size = do
   global_tid <- newVName "global_tid"
   local_tid <- newVName "local_tid"
-  group_id <- newVName "group_tid"
+  tblock_id <- newVName "block_id"
   wave_size <- newVName "wave_size"
-  inner_group_size <- newVName "group_size"
-  let num_groups' = Imp.pe64 (unCount num_groups)
-      group_size' = Imp.pe64 (unCount group_size)
+  inner_tblock_size <- newVName "tblock_size"
+  let num_tblocks' = Imp.pe64 (unCount num_tblocks)
+      tblock_size' = Imp.pe64 (unCount tblock_size)
       constants =
         KernelConstants
-          { kernelGlobalThreadId = Imp.le32 global_tid,
-            kernelLocalThreadId = Imp.le32 local_tid,
-            kernelGroupId = Imp.le32 group_id,
-            kernelGlobalThreadIdVar = global_tid,
-            kernelLocalThreadIdVar = local_tid,
-            kernelNumGroupsCount = num_groups,
-            kernelGroupSizeCount = group_size,
-            kernelGroupIdVar = group_id,
-            kernelNumGroups = num_groups',
-            kernelGroupSize = group_size',
-            kernelNumThreads = sExt32 (group_size' * num_groups'),
+          { kernelGlobalThreadIdVar = mkTV global_tid,
+            kernelLocalThreadIdVar = mkTV local_tid,
+            kernelBlockIdVar = mkTV tblock_id,
+            kernelNumBlocksCount = num_tblocks,
+            kernelBlockSizeCount = tblock_size,
+            kernelNumBlocks = num_tblocks',
+            kernelBlockSize = tblock_size',
+            kernelNumThreads = sExt32 (tblock_size' * num_tblocks'),
             kernelWaveSize = Imp.le32 wave_size,
             kernelLocalIdMap = mempty,
             kernelChunkItersMap = mempty
@@ -927,15 +1000,15 @@ kernelInitialisationSimple num_groups group_size = do
 
   let set_constants = do
         dPrim_ local_tid int32
-        dPrim_ inner_group_size int64
+        dPrim_ inner_tblock_size int32
         dPrim_ wave_size int32
-        dPrim_ group_id int32
+        dPrim_ tblock_id int32
 
         sOp (Imp.GetLocalId local_tid 0)
-        sOp (Imp.GetLocalSize inner_group_size 0)
+        sOp (Imp.GetLocalSize inner_tblock_size 0)
         sOp (Imp.GetLockstepWidth wave_size)
-        sOp (Imp.GetGroupId group_id 0)
-        dPrimV_ global_tid $ le32 group_id * le32 inner_group_size + le32 local_tid
+        sOp (Imp.GetBlockId tblock_id 0)
+        dPrimV_ global_tid $ le32 tblock_id * le32 inner_tblock_size + le32 local_tid
 
   pure (constants, set_constants)
 
@@ -949,7 +1022,7 @@ isActive limit = case actives of
     active i = (Imp.le64 i .<.)
 
 -- | Change every memory block to be in the global address space,
--- except those who are in the local memory space.  This only affects
+-- except those who are in the shared memory space.  This only affects
 -- generated code - we still need to make sure that the memory is
 -- actually present on the device (and declared as variables in the
 -- kernel).
@@ -958,23 +1031,23 @@ makeAllMemoryGlobal =
   localDefaultSpace (Imp.Space "global") . localVTable (M.map globalMemory)
   where
     globalMemory (MemVar _ entry)
-      | entryMemSpace entry /= Space "local" =
+      | entryMemSpace entry /= Space "shared" =
           MemVar Nothing entry {entryMemSpace = Imp.Space "global"}
     globalMemory entry =
       entry
 
-simpleKernelGroups ::
+simpleKernelBlocks ::
   Imp.TExp Int64 ->
   Imp.TExp Int64 ->
-  CallKernelGen (Imp.TExp Int32, Count NumGroups SubExp, Count GroupSize SubExp)
-simpleKernelGroups max_num_groups kernel_size = do
-  group_size <- dPrim "group_size" int64
+  CallKernelGen (Imp.TExp Int32, Count NumBlocks SubExp, Count BlockSize SubExp)
+simpleKernelBlocks max_num_tblocks kernel_size = do
+  tblock_size <- dPrim "tblock_size"
   fname <- askFunction
-  let group_size_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar group_size
-  sOp $ Imp.GetSize (tvVar group_size) group_size_key Imp.SizeGroup
-  virt_num_groups <- dPrimVE "virt_num_groups" $ kernel_size `divUp` tvExp group_size
-  num_groups <- dPrimV "num_groups" $ virt_num_groups `sMin64` max_num_groups
-  pure (sExt32 virt_num_groups, Count $ tvSize num_groups, Count $ tvSize group_size)
+  let tblock_size_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar tblock_size
+  sOp $ Imp.GetSize (tvVar tblock_size) tblock_size_key Imp.SizeThreadBlock
+  virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ kernel_size `divUp` tvExp tblock_size
+  num_tblocks <- dPrimV "num_tblocks" $ virt_num_tblocks `sMin64` max_num_tblocks
+  pure (sExt32 virt_num_tblocks, Count $ tvSize num_tblocks, Count $ tvSize tblock_size)
 
 simpleKernelConstants ::
   Imp.TExp Int64 ->
@@ -986,32 +1059,29 @@ simpleKernelConstants ::
 simpleKernelConstants kernel_size desc = do
   -- For performance reasons, codegen assumes that the thread count is
   -- never more than will fit in an i32.  This means we need to cap
-  -- the number of groups here.  The cap is set much higher than any
+  -- the number of blocks here.  The cap is set much higher than any
   -- GPU will possibly need.  Feel free to come back and laugh at me
   -- in the future.
-  let max_num_groups = 1024 * 1024
+  let max_num_tblocks = 1024 * 1024
   thread_gtid <- newVName $ desc ++ "_gtid"
   thread_ltid <- newVName $ desc ++ "_ltid"
-  group_id <- newVName $ desc ++ "_gid"
-  inner_group_size <- newVName "group_size"
-  (virt_num_groups, num_groups, group_size) <-
-    simpleKernelGroups max_num_groups kernel_size
-  let group_size' = Imp.pe64 $ unCount group_size
-      num_groups' = Imp.pe64 $ unCount num_groups
+  tblock_id <- newVName $ desc ++ "_gid"
+  inner_tblock_size <- newVName "tblock_size"
+  (virt_num_tblocks, num_tblocks, tblock_size) <-
+    simpleKernelBlocks max_num_tblocks kernel_size
+  let tblock_size' = Imp.pe64 $ unCount tblock_size
+      num_tblocks' = Imp.pe64 $ unCount num_tblocks
 
       constants =
         KernelConstants
-          { kernelGlobalThreadId = Imp.le32 thread_gtid,
-            kernelLocalThreadId = Imp.le32 thread_ltid,
-            kernelGroupId = Imp.le32 group_id,
-            kernelGlobalThreadIdVar = thread_gtid,
-            kernelLocalThreadIdVar = thread_ltid,
-            kernelGroupIdVar = group_id,
-            kernelNumGroupsCount = num_groups,
-            kernelGroupSizeCount = group_size,
-            kernelNumGroups = num_groups',
-            kernelGroupSize = group_size',
-            kernelNumThreads = sExt32 (group_size' * num_groups'),
+          { kernelGlobalThreadIdVar = mkTV thread_gtid,
+            kernelLocalThreadIdVar = mkTV thread_ltid,
+            kernelBlockIdVar = mkTV tblock_id,
+            kernelNumBlocksCount = num_tblocks,
+            kernelBlockSizeCount = tblock_size,
+            kernelNumBlocks = num_tblocks',
+            kernelBlockSize = tblock_size',
+            kernelNumThreads = sExt32 (tblock_size' * num_tblocks'),
             kernelWaveSize = 0,
             kernelLocalIdMap = mempty,
             kernelChunkItersMap = mempty
@@ -1019,108 +1089,115 @@ simpleKernelConstants kernel_size desc = do
 
       wrapKernel m = do
         dPrim_ thread_ltid int32
-        dPrim_ inner_group_size int64
-        dPrim_ group_id int32
+        dPrim_ inner_tblock_size int32
+        dPrim_ tblock_id int32
         sOp (Imp.GetLocalId thread_ltid 0)
-        sOp (Imp.GetLocalSize inner_group_size 0)
-        sOp (Imp.GetGroupId group_id 0)
-        dPrimV_ thread_gtid $ le32 group_id * le32 inner_group_size + le32 thread_ltid
-        virtualiseGroups SegVirt virt_num_groups $ \virt_group_id -> do
+        sOp (Imp.GetLocalSize inner_tblock_size 0)
+        sOp (Imp.GetBlockId tblock_id 0)
+        dPrimV_ thread_gtid $ le32 tblock_id * le32 inner_tblock_size + le32 thread_ltid
+        virtualiseBlocks SegVirt virt_num_tblocks $ \virt_tblock_id -> do
           global_tid <-
             dPrimVE "global_tid" $
-              sExt64 virt_group_id * sExt64 (le32 inner_group_size)
+              sExt64 virt_tblock_id * sExt64 (le32 inner_tblock_size)
                 + sExt64 (kernelLocalThreadId constants)
           m global_tid
 
   pure (wrapKernel, constants)
 
--- | For many kernels, we may not have enough physical groups to cover
--- the logical iteration space.  Some groups thus have to perform
+-- | For many kernels, we may not have enough physical blocks to cover
+-- the logical iteration space.  Some blocks thus have to perform
 -- double duty; we put an outer loop to accomplish this.  The
 -- advantage over just launching a bazillion threads is that the cost
 -- of memory expansion should be proportional to the number of
 -- *physical* threads (hardware parallelism), not the amount of
 -- application parallelism.
-virtualiseGroups ::
+virtualiseBlocks ::
   SegVirt ->
   Imp.TExp Int32 ->
   (Imp.TExp Int32 -> InKernelGen ()) ->
   InKernelGen ()
-virtualiseGroups SegVirt required_groups m = do
+virtualiseBlocks SegVirt required_blocks m = do
   constants <- kernelConstants <$> askEnv
-  phys_group_id <- dPrim "phys_group_id" int32
-  sOp $ Imp.GetGroupId (tvVar phys_group_id) 0
+  phys_tblock_id <- dPrim "phys_tblock_id"
+  sOp $ Imp.GetBlockId (tvVar phys_tblock_id) 0
   iterations <-
     dPrimVE "iterations" $
-      (required_groups - tvExp phys_group_id) `divUp` sExt32 (kernelNumGroups constants)
+      (required_blocks - tvExp phys_tblock_id) `divUp` sExt32 (kernelNumBlocks constants)
 
   sFor "i" iterations $ \i -> do
     m . tvExp
       =<< dPrimV
-        "virt_group_id"
-        (tvExp phys_group_id + i * sExt32 (kernelNumGroups constants))
-    -- Make sure the virtual group is actually done before we let
-    -- another virtual group have its way with it.
+        "virt_tblock_id"
+        (tvExp phys_tblock_id + i * sExt32 (kernelNumBlocks constants))
+    -- Make sure the virtual block is actually done before we let
+    -- another virtual block have its way with it.
     sOp $ Imp.ErrorSync Imp.FenceGlobal
-virtualiseGroups _ _ m = do
-  gid <- kernelGroupIdVar . kernelConstants <$> askEnv
-  m $ Imp.le32 gid
+virtualiseBlocks _ _ m =
+  m . tvExp . kernelBlockIdVar . kernelConstants =<< askEnv
 
 -- | Various extra configuration of the kernel being generated.
 data KernelAttrs = KernelAttrs
   { -- | Can this kernel execute correctly even if previous kernels failed?
     kAttrFailureTolerant :: Bool,
-    -- | Does whatever launch this kernel check for local memory capacity itself?
-    kAttrCheckLocalMemory :: Bool,
-    -- | Number of groups.
-    kAttrNumGroups :: Count NumGroups SubExp,
-    -- | Group size.
-    kAttrGroupSize :: Count GroupSize SubExp
+    -- | Does whatever launch this kernel check for shared memory capacity itself?
+    kAttrCheckSharedMemory :: Bool,
+    -- | Number of blocks.
+    kAttrNumBlocks :: Count NumBlocks SubExp,
+    -- | Block size.
+    kAttrBlockSize :: Count BlockSize SubExp,
+    -- | Variables that are specially in scope inside the kernel.
+    -- Operationally, these will be available at kernel compile time
+    -- (which happens at run-time, with access to machine-specific
+    -- information).
+    kAttrConstExps :: M.Map VName Imp.KernelConstExp
   }
 
 -- | The default kernel attributes.
 defKernelAttrs ::
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
+  Count NumBlocks SubExp ->
+  Count BlockSize SubExp ->
   KernelAttrs
-defKernelAttrs num_groups group_size =
+defKernelAttrs num_tblocks tblock_size =
   KernelAttrs
     { kAttrFailureTolerant = False,
-      kAttrCheckLocalMemory = True,
-      kAttrNumGroups = num_groups,
-      kAttrGroupSize = group_size
+      kAttrCheckSharedMemory = True,
+      kAttrNumBlocks = num_tblocks,
+      kAttrBlockSize = tblock_size,
+      kAttrConstExps = mempty
     }
 
+-- | Retrieve a size of the given size class and put it in a variable
+-- with the given name.
 getSize :: String -> SizeClass -> CallKernelGen (TV Int64)
 getSize desc size_class = do
-  v <- dPrim desc int64
+  v <- dPrim desc
   fname <- askFunction
   let v_key = keyWithEntryPoint fname $ nameFromString $ prettyString $ tvVar v
   sOp $ Imp.GetSize (tvVar v) v_key size_class
   pure v
 
 -- | Compute kernel attributes from 'SegLevel'; including synthesising
--- group-size and thread count if no grid is provided.
+-- block-size and thread count if no grid is provided.
 lvlKernelAttrs :: SegLevel -> CallKernelGen KernelAttrs
 lvlKernelAttrs lvl =
   case lvl of
     SegThread _ Nothing -> mkGrid
-    SegThread _ (Just (KernelGrid num_groups group_size)) ->
-      pure $ defKernelAttrs num_groups group_size
-    SegGroup _ Nothing -> mkGrid
-    SegGroup _ (Just (KernelGrid num_groups group_size)) ->
-      pure $ defKernelAttrs num_groups group_size
-    SegThreadInGroup {} ->
-      error "lvlKernelAttrs: SegThreadInGroup"
+    SegThread _ (Just (KernelGrid num_tblocks tblock_size)) ->
+      pure $ defKernelAttrs num_tblocks tblock_size
+    SegBlock _ Nothing -> mkGrid
+    SegBlock _ (Just (KernelGrid num_tblocks tblock_size)) ->
+      pure $ defKernelAttrs num_tblocks tblock_size
+    SegThreadInBlock {} ->
+      error "lvlKernelAttrs: SegThreadInBlock"
   where
     mkGrid = do
-      group_size <- getSize "group_size" Imp.SizeGroup
-      num_groups <- getSize "num_groups" Imp.SizeNumGroups
-      pure $ defKernelAttrs (Count $ tvSize num_groups) (Count $ tvSize group_size)
+      tblock_size <- getSize "tblock_size" Imp.SizeThreadBlock
+      num_tblocks <- getSize "num_tblocks" Imp.SizeGrid
+      pure $ defKernelAttrs (Count $ tvSize num_tblocks) (Count $ tvSize tblock_size)
 
 sKernel ::
   Operations GPUMem KernelEnv Imp.KernelOp ->
-  (KernelConstants -> Imp.TExp Int32) ->
+  (KernelConstants -> Imp.TExp Int64) ->
   String ->
   VName ->
   KernelAttrs ->
@@ -1128,7 +1205,7 @@ sKernel ::
   CallKernelGen ()
 sKernel ops flatf name v attrs f = do
   (constants, set_constants) <-
-    kernelInitialisationSimple (kAttrNumGroups attrs) (kAttrGroupSize attrs)
+    kernelInitialisationSimple (kAttrNumBlocks attrs) (kAttrBlockSize attrs)
   name' <- nameForFun $ name ++ "_" ++ show (baseTag v)
   sKernelOp attrs constants ops name' $ do
     set_constants
@@ -1141,7 +1218,7 @@ sKernelThread ::
   KernelAttrs ->
   InKernelGen () ->
   CallKernelGen ()
-sKernelThread = sKernel threadOperations kernelGlobalThreadId
+sKernelThread = sKernel threadOperations $ sExt64 . kernelGlobalThreadId
 
 sKernelOp ::
   KernelAttrs ->
@@ -1153,28 +1230,30 @@ sKernelOp ::
 sKernelOp attrs constants ops name m = do
   HostEnv atomics _ locks <- askEnv
   body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
-  uses <- computeKernelUses body mempty
-  group_size <- onGroupSize $ kernelGroupSize constants
+  uses <- computeKernelUses body $ M.keys $ kAttrConstExps attrs
+  tblock_size <- onBlockSize $ kernelBlockSize constants
   emit . Imp.Op . Imp.CallKernel $
     Imp.Kernel
       { Imp.kernelBody = body,
-        Imp.kernelUses = uses,
-        Imp.kernelNumGroups = [untyped $ kernelNumGroups constants],
-        Imp.kernelGroupSize = [group_size],
+        Imp.kernelUses = uses <> map constToUse (M.toList (kAttrConstExps attrs)),
+        Imp.kernelNumBlocks = [untyped $ kernelNumBlocks constants],
+        Imp.kernelBlockSize = [tblock_size],
         Imp.kernelName = name,
         Imp.kernelFailureTolerant = kAttrFailureTolerant attrs,
-        Imp.kernelCheckLocalMemory = kAttrCheckLocalMemory attrs
+        Imp.kernelCheckSharedMemory = kAttrCheckSharedMemory attrs
       }
   where
     -- Figure out if this expression actually corresponds to a
     -- KernelConst.
-    onGroupSize e = do
+    onBlockSize e = do
       vtable <- getVTable
       x <- isConstExp vtable $ untyped e
       pure $
         case x of
-          Just (LeafExp kc _) -> Right kc
+          Just kc -> Right kc
           _ -> Left $ untyped e
+
+    constToUse (v, e) = Imp.ConstUse v e
 
 sKernelFailureTolerant ::
   Bool ->
@@ -1188,8 +1267,8 @@ sKernelFailureTolerant tol ops constants name m = do
   where
     attrs =
       ( defKernelAttrs
-          (kernelNumGroupsCount constants)
-          (kernelGroupSizeCount constants)
+          (kernelNumBlocksCount constants)
+          (kernelBlockSizeCount constants)
       )
         { kAttrFailureTolerant = tol
         }
@@ -1197,11 +1276,11 @@ sKernelFailureTolerant tol ops constants name m = do
 threadOperations :: Operations GPUMem KernelEnv Imp.KernelOp
 threadOperations =
   (defaultOperations compileThreadOp)
-    { opsCopyCompiler = copyElementWise,
+    { opsCopyCompiler = lmadCopy,
       opsExpCompiler = compileThreadExp,
       opsStmsCompiler = \_ -> defCompileStms mempty,
       opsAllocCompilers =
-        M.fromList [(Space "local", allocLocal)]
+        M.fromList [(Space "shared", allocLocal)]
     }
 
 -- | Perform a Replicate with a kernel.
@@ -1218,7 +1297,7 @@ sReplicateKernel arr se = do
   let name =
         keyWithEntryPoint fname $
           nameFromString $
-            "replicate_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
+            "replicate_" ++ show (baseTag $ tvVar $ kernelGlobalThreadIdVar constants)
 
   sKernelFailureTolerant True threadOperations constants name $
     virtualise $ \gtid -> do
@@ -1248,18 +1327,18 @@ replicateForType bt = do
         shape = Shape [Var num_elems]
     function fname [] params $ do
       arr <-
-        sArray "arr" bt shape mem $ IxFun.iota $ map pe64 $ shapeDims shape
+        sArray "arr" bt shape mem $ LMAD.iota 0 $ map pe64 $ shapeDims shape
       sReplicateKernel arr $ Var val
 
   pure fname
 
 replicateIsFill :: VName -> SubExp -> CallKernelGen (Maybe (CallKernelGen ()))
 replicateIsFill arr v = do
-  ArrayEntry (MemLoc arr_mem arr_shape arr_ixfun) _ <- lookupArray arr
+  ArrayEntry (MemLoc arr_mem arr_shape arr_lmad) _ <- lookupArray arr
   v_t <- subExpType v
   case v_t of
     Prim v_t'
-      | IxFun.isLinear arr_ixfun -> pure $
+      | LMAD.isDirect arr_lmad -> pure $
           Just $ do
             fname <- replicateForType v_t'
             emit $
@@ -1302,7 +1381,7 @@ sIotaKernel arr n x s et = do
             "iota_"
               ++ prettyString et
               ++ "_"
-              ++ show (baseTag $ kernelGlobalThreadIdVar constants)
+              ++ show (baseTag $ tvVar $ kernelGlobalThreadIdVar constants)
 
   sKernelFailureTolerant True threadOperations constants name $
     virtualise $ \gtid ->
@@ -1332,7 +1411,7 @@ iotaForType bt = do
 
     let params =
           [ Imp.MemParam mem (Space "device"),
-            Imp.ScalarParam n int32,
+            Imp.ScalarParam n int64,
             Imp.ScalarParam x $ IntType bt,
             Imp.ScalarParam s $ IntType bt
           ]
@@ -1344,10 +1423,8 @@ iotaForType bt = do
     function fname [] params $ do
       arr <-
         sArray "arr" (IntType bt) shape mem $
-          IxFun.iota $
-            map pe64 $
-              shapeDims shape
-      sIotaKernel arr (sExt64 n') x' s' bt
+          LMAD.iota 0 (map pe64 (shapeDims shape))
+      sIotaKernel arr n' x' s' bt
 
   pure fname
 
@@ -1360,8 +1437,8 @@ sIota ::
   IntType ->
   CallKernelGen ()
 sIota arr n x s et = do
-  ArrayEntry (MemLoc arr_mem _ arr_ixfun) _ <- lookupArray arr
-  if IxFun.isLinear arr_ixfun
+  ArrayEntry (MemLoc arr_mem _ arr_lmad) _ <- lookupArray arr
+  if LMAD.isDirect arr_lmad
     then do
       fname <- iotaForType et
       emit $
@@ -1370,55 +1447,6 @@ sIota arr n x s et = do
           fname
           [Imp.MemArg arr_mem, Imp.ExpArg $ untyped n, Imp.ExpArg x, Imp.ExpArg s]
     else sIotaKernel arr n x s et
-
-sCopyKernel :: CopyCompiler GPUMem HostEnv Imp.HostOp
-sCopyKernel pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
-  -- Note that the shape of the destination and the source are
-  -- necessarily the same.
-  let shape = map pe64 srcdims
-      kernel_size = product shape
-
-  (virtualise, constants) <- simpleKernelConstants kernel_size "copy"
-
-  fname <- askFunction
-  let name =
-        keyWithEntryPoint fname $
-          nameFromString $
-            "copy_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-
-  sKernelFailureTolerant True threadOperations constants name $
-    virtualise $ \gtid -> do
-      is <- dIndexSpace' "copy_i" shape gtid
-
-      (_, destspace, destidx) <- fullyIndexArray' destloc is
-      (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
-
-      sWhen (gtid .<. kernel_size) $ do
-        tmp <- tvVar <$> dPrim "tmp" pt
-        emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
-        emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
-
--- | Perform a Rotate with a kernel.
-sRotateKernel :: VName -> [Imp.TExp Int64] -> VName -> CallKernelGen ()
-sRotateKernel dest rs src = do
-  t <- lookupType src
-  let ds = map pe64 $ arrayDims t
-  n <- dPrimVE "rotate_n" $ product ds
-  (virtualise, constants) <- simpleKernelConstants n "rotate"
-
-  fname <- askFunction
-  let name =
-        keyWithEntryPoint fname $
-          nameFromString $
-            "rotate_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-
-  sKernelFailureTolerant True threadOperations constants name $
-    virtualise $ \gtid -> sWhen (gtid .<. n) $ do
-      is' <- dIndexSpace' "rep_i" ds gtid
-      is'' <- sequence $ zipWith3 rotate ds rs is'
-      copyDWIMFix dest is' (Var src) is''
-  where
-    rotate d r i = dPrimVE "rot_i" $ rotateIndex d r i
 
 compileThreadResult ::
   SegSpace ->
@@ -1430,8 +1458,9 @@ compileThreadResult _ _ RegTileReturns {} =
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ pe (WriteReturns _ (Shape rws) _arr dests) = do
-  let rws' = map pe64 rws
+compileThreadResult _ pe (WriteReturns _ arr dests) = do
+  arr_t <- lookupType arr
+  let rws' = map pe64 $ arrayDims arr_t
   forM_ dests $ \(slice, e) -> do
     let slice' = fmap pe64 slice
         write = inBounds slice' rws'

@@ -24,6 +24,8 @@ module Futhark.CodeGen.Backends.SimpleRep
     fromStorage,
     cproduct,
     csum,
+    allEqual,
+    allTrue,
     scalarToPrim,
 
     -- * Primitive value operations
@@ -36,15 +38,17 @@ module Futhark.CodeGen.Backends.SimpleRep
   )
 where
 
-import Data.Bits (shiftR, xor)
-import Data.Char (isAlpha, isAlphaNum, isDigit, ord)
+import Control.Monad (void)
+import Data.Char (isAlpha, isAlphaNum, isDigit)
 import Data.Text qualified as T
+import Data.Void (Void)
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (scalarF16H, scalarH)
-import Futhark.Util (zEncodeText)
+import Futhark.Util (hashText, showText, zEncodeText)
 import Language.C.Quote.C qualified as C
 import Language.C.Syntax qualified as C
-import Text.Printf
+import Text.Megaparsec
+import Text.Megaparsec.Char (space)
 
 -- | The C type corresponding to a signed integer type.
 intTypeToCType :: IntType -> C.Type
@@ -125,36 +129,46 @@ escapeName v
   | isValidCName v = v
   | otherwise = zEncodeText v
 
+-- | Valid C identifier name?
+valid :: T.Text -> Bool
+valid s =
+  T.head s /= '_'
+    && not (isDigit $ T.head s)
+    && T.all ok s
+  where
+    ok c = isAlphaNum c || c == '_'
+
+-- | Find a nice C type name name for the Futhark type. This solely
+-- serves to make the generated header file easy to read, and we can
+-- always fall back on an ugly hash.
+findPrettyName :: T.Text -> Either String T.Text
+findPrettyName =
+  either (Left . errorBundlePretty) Right . parse (p <* eof) "type name"
+  where
+    p :: Parsec Void T.Text T.Text
+    p = choice [pArr, pTup, pAtom]
+    pArr = do
+      dims <- some "[]"
+      (("arr" <> showText (length dims) <> "d_") <>) <$> p
+    pTup = between "(" ")" $ do
+      ts <- p `sepBy` pComma
+      pure $ "tup" <> showText (length ts) <> "_" <> T.intercalate "_" ts
+    pAtom = T.pack <$> some (satisfy (`notElem` ("[]{}()," :: String)))
+    pComma = void $ "," <* space
+
 -- | The name of exposed opaque types.
 opaqueName :: Name -> T.Text
 opaqueName "()" = "opaque_unit" -- Hopefully this ad-hoc convenience won't bite us.
 opaqueName s
-  | valid = "opaque_" <> s'
+  | Right v <- findPrettyName s',
+    valid v =
+      "opaque_" <> v
+  | valid s' = "opaque_" <> s'
   where
     s' = nameToText s
-    valid =
-      T.head s' /= '_'
-        && not (isDigit $ T.head s')
-        && T.all ok s'
-    ok c = isAlphaNum c || c == '_'
-opaqueName s = "opaque_" <> hash (zipWith xor [0 ..] $ map ord (nameToString s))
-  where
-    -- FIXME: a stupid hash algorithm; may have collisions.
-    hash =
-      T.pack
-        . printf "%x"
-        . foldl xor 0
-        . map
-          ( iter
-              . (* 0x45d9f3b)
-              . iter
-              . (* 0x45d9f3b)
-              . iter
-              . fromIntegral
-          )
-    iter x = ((x :: Word32) `shiftR` 16) `xor` x
+opaqueName s = "opaque_" <> hashText (nameToText s)
 
--- | The 'PrimType' (and sign) correspond to a human-readable scalar
+-- | The 'PrimType' (and sign) corresponding to a human-readable scalar
 -- type name (e.g. @f64@).  Beware: partial!
 scalarToPrim :: T.Text -> (Signedness, PrimType)
 scalarToPrim "bool" = (Signed, Bool)
@@ -187,6 +201,19 @@ csum (e : es) = foldl mult e es
   where
     mult x y = [C.cexp|$exp:x + $exp:y|]
 
+-- | An expression that is true if these are also all true.
+allTrue :: [C.Exp] -> C.Exp
+allTrue [] = [C.cexp|true|]
+allTrue [x] = x
+allTrue (x : xs) = [C.cexp|$exp:x && $exp:(allTrue xs)|]
+
+-- | An expression that is true if these expressions are all equal by
+-- @==@.
+allEqual :: [C.Exp] -> C.Exp
+allEqual [x, y] = [C.cexp|$exp:x == $exp:y|]
+allEqual (x : y : xs) = [C.cexp|$exp:x == $exp:y && $exp:(allEqual(y:xs))|]
+allEqual _ = [C.cexp|true|]
+
 instance C.ToIdent Name where
   toIdent = C.toIdent . zEncodeText . nameToText
 
@@ -209,11 +236,11 @@ instance C.ToExp IntValue where
 instance C.ToExp FloatValue where
   toExp (Float16Value x) _
     | isInfinite x =
-        if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+        if x > 0 then [C.cexp|(typename f16)INFINITY|] else [C.cexp|(typename f16)-INFINITY|]
     | isNaN x =
-        [C.cexp|NAN|]
+        [C.cexp|(typename f16)NAN|]
     | otherwise =
-        [C.cexp|$float:(fromRational (toRational x))|]
+        [C.cexp|(typename f16)$float:(fromRational (toRational x))|]
   toExp (Float32Value x) _
     | isInfinite x =
         if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
@@ -251,11 +278,10 @@ storageSize :: PrimType -> Int -> C.Exp -> C.Exp
 storageSize pt rank shape =
   [C.cexp|$int:header_size +
           $int:rank * sizeof(typename int64_t) +
-          $exp:(cproduct dims) * $int:pt_size|]
+          $exp:(cproduct dims) * sizeof($ty:(primStorageType pt))|]
   where
-    header_size, pt_size :: Int
+    header_size :: Int
     header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
-    pt_size = primByteSize pt
     dims = [[C.cexp|$exp:shape[$int:i]|] | i <- [0 .. rank - 1]]
 
 typeStr :: Signedness -> PrimType -> String

@@ -37,34 +37,34 @@ data KernelSize = KernelSize
   }
   deriving (Eq, Ord, Show)
 
-numberOfGroups ::
+numberOfBlocks ::
   (MonadBuilder m, Op (Rep m) ~ HostOp inner (Rep m)) =>
   String ->
   SubExp ->
   SubExp ->
   m (SubExp, SubExp)
-numberOfGroups desc w group_size = do
-  max_num_groups_key <- nameFromString . prettyString <$> newVName (desc ++ "_num_groups")
-  num_groups <-
-    letSubExp "num_groups" $
+numberOfBlocks desc w tblock_size = do
+  max_num_tblocks_key <- nameFromString . prettyString <$> newVName (desc ++ "_num_tblocks")
+  num_tblocks <-
+    letSubExp "num_tblocks" $
       Op $
         SizeOp $
-          CalcNumGroups w max_num_groups_key group_size
+          CalcNumBlocks w max_num_tblocks_key tblock_size
   num_threads <-
     letSubExp "num_threads" $
       BasicOp $
-        BinOp (Mul Int64 OverflowUndef) num_groups group_size
-  pure (num_groups, num_threads)
+        BinOp (Mul Int64 OverflowUndef) num_tblocks tblock_size
+  pure (num_tblocks, num_threads)
 
 -- | Like 'segThread', but cap the thread count to the input size.
 -- This is more efficient for small kernels, e.g. summing a small
 -- array.
-segThreadCapped :: MonadFreshNames m => MkSegLevel GPU m
+segThreadCapped :: (MonadFreshNames m) => MkSegLevel GPU m
 segThreadCapped ws desc r = do
   w <-
     letSubExp "nest_size"
       =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ws
-  group_size <- getSize (desc ++ "_group_size") SizeGroup
+  tblock_size <- getSize (desc ++ "_tblock_size") SizeThreadBlock
 
   case r of
     ManyThreads -> do
@@ -73,10 +73,10 @@ segThreadCapped ws desc r = do
           =<< eBinOp
             (SDivUp Int64 Unsafe)
             (eSubExp w)
-            (eSubExp =<< asIntS Int64 group_size)
-      let grid = KernelGrid (Count usable_groups) (Count group_size)
+            (eSubExp =<< asIntS Int64 tblock_size)
+      let grid = KernelGrid (Count usable_groups) (Count tblock_size)
       pure $ SegThread SegNoVirt (Just grid)
     NoRecommendation v -> do
-      (num_groups, _) <- numberOfGroups desc w group_size
-      let grid = KernelGrid (Count num_groups) (Count group_size)
+      (num_tblocks, _) <- numberOfBlocks desc w tblock_size
+      let grid = KernelGrid (Count num_tblocks) (Count tblock_size)
       pure $ SegThread v (Just grid)

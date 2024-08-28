@@ -25,6 +25,10 @@ pipeline is used.
 macOS).  If using ``--library``, you will need to do the same when
 linking the final binary.
 
+The GPU terminology used is derived from CUDA nomenclature (e.g.
+"thread block" instead of "workgroup"), but OpenCL nomenclature is
+also supported for compatibility.
+
 OPTIONS
 =======
 
@@ -57,10 +61,6 @@ data has been read from the buffers or the buffers have been released.
 
 The following additional options are accepted.
 
--h, --help
-
-  Print help text to standard output and exit.
-
 --build-option=OPT
 
   Add an additional build option to the string passed to
@@ -68,14 +68,14 @@ The following additional options are accepted.
   options are supported.  Be careful - some options can easily
   result in invalid results.
 
---default-group-size=INT
+--default-thread-block-size=INT, --default-group-size=INT
 
-  The default size of OpenCL workgroups that are launched.  Capped
-  to the hardware limit if necessary.
+  The default size of thread blocks that are launched. Capped to the
+  hardware limit if necessary.
 
---default-num-groups=INT
+--default-num-thread-blocks, --default-num-groups=INT
 
-  The default number of OpenCL workgroups that are launched.
+  The default number of thread blocks that are launched.
 
 --default-threshold=INT
 
@@ -117,36 +117,11 @@ The following additional options are accepted.
 
   Load an OpenCL binary from the indicated file.
 
--n, --no-print-result
-
-  Do not print the program result.
-
 -p, --platform=NAME
 
   Use the first OpenCL platform whose name contains the given string.
   The special string ``#k``, where ``k`` is an integer, can be used to
   pick the *k*-th platform, numbered from zero.
-
--P, --profile
-
-  Gather profiling data while executing and print out a summary at the
-  end.  When ``-r`` is used, only the last run will be profiled.
-  Implied by ``-D``.
-
---param=ASSIGNMENT
-
-  Set a tuning parameter to the given
-  value. ``ASSIGNMENT`` must be of the form ``NAME=INT`` Use
-  ``--print-params`` to see which names are available.
-
---print-params
-
-  Print all tuning parameters that can be set with ``--param`` or
-  ``--tuning``.
-
---tuning=FILE
-
-  Read size=value assignments from the given file.
 
 --list-devices
 

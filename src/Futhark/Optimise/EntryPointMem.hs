@@ -28,32 +28,32 @@ type Table rep = M.Map VName (Stm rep)
 mkTable :: Stms rep -> Table rep
 mkTable = foldMap f
   where
-    f stm = M.fromList $ zip (patNames (stmPat stm)) $ repeat stm
+    f stm = M.fromList $ map (,stm) (patNames (stmPat stm))
 
-varInfo :: Mem rep inner => VName -> Table rep -> Maybe (LetDecMem, Exp rep)
+varInfo :: (Mem rep inner) => VName -> Table rep -> Maybe (LetDecMem, Exp rep)
 varInfo v table = do
   Let pat _ e <- M.lookup v table
   PatElem _ info <- find ((== v) . patElemName) (patElems pat)
   Just (letDecMem info, e)
 
-optimiseFun :: Mem rep inner => Table rep -> FunDef rep -> FunDef rep
+optimiseFun :: (Mem rep inner) => Table rep -> FunDef rep -> FunDef rep
 optimiseFun consts_table fd =
   fd {funDefBody = onBody $ funDefBody fd}
   where
     table = consts_table <> mkTable (bodyStms (funDefBody fd))
     mkSubst (Var v0)
-      | Just (MemArray _ _ _ (ArrayIn mem0 ixfun0), BasicOp (Manifest _ v1)) <-
+      | Just (MemArray _ _ _ (ArrayIn mem0 lmad0), BasicOp (Manifest _ v1)) <-
           varInfo v0 table,
-        Just (MemArray _ _ _ (ArrayIn mem1 ixfun1), _) <-
+        Just (MemArray _ _ _ (ArrayIn mem1 lmad1), _) <-
           varInfo v1 table,
-        ixfun0 == ixfun1 =
+        lmad0 == lmad1 =
           M.fromList [(mem0, mem1), (v0, v1)]
     mkSubst _ = mempty
     onBody (Body dec stms res) =
       let substs = mconcat $ map (mkSubst . resSubExp) res
        in Body dec stms $ substituteNames substs res
 
-entryPointMem :: Mem rep inner => Pass rep rep
+entryPointMem :: (Mem rep inner) => Pass rep rep
 entryPointMem =
   Pass
     { passName = "Entry point memory optimisation",

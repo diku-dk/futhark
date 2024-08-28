@@ -43,7 +43,7 @@ import Futhark.Util (dropLast, splitAt3, takeLast)
 -- The result is the fused function, and a list of the array inputs
 -- expected by the SOAC containing the fused function.
 fuseMaps ::
-  Buildable rep =>
+  (Buildable rep) =>
   -- | The producer var names that still need to be returned
   Names ->
   -- | Function of SOAC to be fused.
@@ -91,7 +91,7 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', M.elems inputmap)
 -- (unfus_accpat, unfus_arrpat) = splitAt (length unfus_accs) unfus_pat
 
 fuseInputs ::
-  Buildable rep =>
+  (Buildable rep) =>
   Names ->
   Lambda rep ->
   [SOAC.Input] ->
@@ -168,7 +168,7 @@ filterOutParams out1 outins =
         _ -> (m, ra)
 
 removeDuplicateInputs ::
-  Buildable rep =>
+  (Buildable rep) =>
   M.Map Ident SOAC.Input ->
   (M.Map Ident SOAC.Input, Body rep -> Body rep)
 removeDuplicateInputs = fst . M.foldlWithKey' comb ((M.empty, id), M.empty)
@@ -187,7 +187,7 @@ removeDuplicateInputs = fst . M.foldlWithKey' comb ((M.empty, id), M.empty)
       mkLet [to] (BasicOp $ SubExp $ Var from) `insertStm` b
 
 fuseRedomap ::
-  Buildable rep =>
+  (Buildable rep) =>
   Names ->
   [VName] ->
   Lambda rep ->

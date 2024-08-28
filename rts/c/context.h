@@ -1,9 +1,5 @@
 // Start of context.h
 
-// Eventually it would be nice to move the context definition in here
-// instead of generating it in the compiler.  For now it defines
-// various helper functions that must be available.
-
 // Internal functions.
 
 static void set_error(struct futhark_context* ctx, char *error) {
@@ -72,6 +68,63 @@ static void host_free(struct futhark_context* ctx,
   }
 }
 
+static void add_event(struct futhark_context* ctx,
+                      const char* name,
+                      char* description,
+                      void* data,
+                      event_report_fn f) {
+  if (ctx->logging) {
+    fprintf(ctx->log, "Event: %s\n%s\n", name, description);
+  }
+  add_event_to_list(&ctx->event_list, name, description, data, f);
+}
+
+char *futhark_context_get_error(struct futhark_context *ctx) {
+  char *error = ctx->error;
+  ctx->error = NULL;
+  return error;
+}
+
+void futhark_context_config_set_debugging(struct futhark_context_config *cfg, int flag) {
+    cfg->profiling = cfg->logging = cfg->debugging = flag;
+}
+
+void futhark_context_config_set_profiling(struct futhark_context_config *cfg, int flag) {
+    cfg->profiling = flag;
+}
+
+void futhark_context_config_set_logging(struct futhark_context_config *cfg, int flag) {
+    cfg->logging = flag;
+}
+
+void futhark_context_config_set_cache_file(struct futhark_context_config *cfg, const char *f) {
+  cfg->cache_fname = strdup(f);
+}
+
+int futhark_get_tuning_param_count(void) {
+  return num_tuning_params;
+}
+
+const char *futhark_get_tuning_param_name(int i) {
+  return tuning_param_names[i];
+}
+
+const char *futhark_get_tuning_param_class(int i) {
+    return tuning_param_classes[i];
+}
+
+void futhark_context_set_logging_file(struct futhark_context *ctx, FILE *f){
+  ctx->log = f;
+}
+
+void futhark_context_pause_profiling(struct futhark_context *ctx) {
+  ctx->profiling_paused = 1;
+}
+
+void futhark_context_unpause_profiling(struct futhark_context *ctx) {
+  ctx->profiling_paused = 0;
+}
+
 struct futhark_context_config* futhark_context_config_new(void) {
   struct futhark_context_config* cfg = malloc(sizeof(struct futhark_context_config));
   if (cfg == NULL) {
@@ -96,6 +149,7 @@ struct futhark_context_config* futhark_context_config_new(void) {
 void futhark_context_config_free(struct futhark_context_config* cfg) {
   assert(!cfg->in_use);
   backend_context_config_teardown(cfg);
+  free(cfg->cache_fname);
   free(cfg->tuning_params);
   free(cfg);
 }
@@ -108,23 +162,26 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   assert(!cfg->in_use);
   ctx->cfg = cfg;
   ctx->cfg->in_use = 1;
+  ctx->program_initialised = false;
   create_lock(&ctx->error_lock);
   create_lock(&ctx->lock);
   free_list_init(&ctx->free_list);
+  event_list_init(&ctx->event_list);
   ctx->peak_mem_usage_default = 0;
   ctx->cur_mem_usage_default = 0;
   ctx->constants = malloc(sizeof(struct constants));
-  ctx->detail_memory = cfg->debugging;
   ctx->debugging = cfg->debugging;
   ctx->logging = cfg->logging;
+  ctx->detail_memory = cfg->logging;
   ctx->profiling = cfg->profiling;
   ctx->profiling_paused = 0;
   ctx->error = NULL;
   ctx->log = stderr;
+  set_tuning_params(ctx);
   if (backend_context_setup(ctx) == 0) {
-    set_tuning_params(ctx);
     setup_program(ctx);
     init_constants(ctx);
+    ctx->program_initialised = true;
     (void)futhark_context_clear_caches(ctx);
     (void)futhark_context_sync(ctx);
   }
@@ -132,12 +189,16 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
 }
 
 void futhark_context_free(struct futhark_context* ctx) {
-  free_constants(ctx);
-  teardown_program(ctx);
+  if (ctx->program_initialised) {
+    free_constants(ctx);
+    teardown_program(ctx);
+  }
   backend_context_teardown(ctx);
   free_all_in_free_list(ctx);
   free_list_destroy(&ctx->free_list);
+  event_list_free(&ctx->event_list);
   free(ctx->constants);
+  free(ctx->error);
   free_lock(&ctx->lock);
   free_lock(&ctx->error_lock);
   ctx->cfg->in_use = 0;

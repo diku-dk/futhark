@@ -91,9 +91,9 @@ if __name__ == "__main__":
     infile = sys.argv[1]
     outfile = sys.argv[2]
 
-    with open(infile, "wrb") as f:
-        width, height, img = read_image(f)
+    with open(infile, "rb") as f_in:
+        width, height, img = read_image(f_in)
 
-        with open(outfile, "wb") as f:
+        with open(outfile, "wb") as f_out:
             w = png.Writer(width=width, height=height, alpha=False)
-            w.write(f, img)
+            w.write(f_out, img)

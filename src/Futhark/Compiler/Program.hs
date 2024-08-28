@@ -96,7 +96,7 @@ newtype UncheckedImport = UncheckedImport
 type ReaderState = MVar (M.Map ImportName (Maybe (MVar UncheckedImport)))
 
 newState :: [ImportName] -> IO ReaderState
-newState known = newMVar $ M.fromList $ zip known $ repeat Nothing
+newState known = newMVar $ M.fromList $ map (,Nothing) known
 
 orderedImports ::
   [((ImportName, Loc), MVar UncheckedImport)] ->
@@ -155,7 +155,6 @@ readImportFile include loc vfs = do
   -- First we try to find a file of the given name in the search path,
   -- then we look at the builtin library if we have to.  For the
   -- builtins, we don't use the search path.
-  let filepath = includeToFilePath include
   r <- contentsAndModTime filepath vfs
   case (r, lookup prelude_str prelude) of
     (Just (Right (s, mod_time)), _) ->
@@ -167,6 +166,8 @@ readImportFile include loc vfs = do
     (Nothing, Nothing) ->
       pure $ Left $ ProgError loc $ pretty not_found
   where
+    filepath = includeToFilePath include
+
     prelude_str = "/" Posix.</> includeToString include Posix.<.> "fut"
 
     loaded path s mod_time =
@@ -178,7 +179,7 @@ readImportFile include loc vfs = do
         }
 
     not_found =
-      "Could not find import " <> E.quote (includeToText include) <> "."
+      "Could not read file " <> E.quote (T.pack filepath) <> "."
 
 handleFile :: ReaderState -> VFS -> LoadedFile T.Text -> IO UncheckedImport
 handleFile state_mvar vfs (LoadedFile file_name import_name file_contents mod_time) = do
@@ -299,7 +300,7 @@ typeCheckProg orig_imports orig_src =
               NE.:| map warningToError (listWarnings prog_ws)
         (prog_ws, Right (m, src')) ->
           let warnHole (loc, t) =
-                singleWarning (E.srclocOf loc) $ "Hole of type: " <> align (pretty t)
+                singleWarning (E.locOf loc) $ "Hole of type: " <> align (pretty t)
               prog_ws' = prog_ws <> foldMap warnHole (E.progHoles (fileProg m))
            in Right
                 ( imports ++ [LoadedFile path import_name (CheckedFile src prog_ws' m) mod_time],
@@ -364,7 +365,7 @@ lpFilePaths :: LoadedProg -> [FilePath]
 lpFilePaths = map lfPath . lpFiles
 
 unchangedImports ::
-  MonadIO m =>
+  (MonadIO m) =>
   VNameSource ->
   VFS ->
   [LoadedFile CheckedFile] ->
@@ -398,7 +399,7 @@ noLoadedProg =
 -- | Find out how many of the old imports can be used.  Here we are
 -- forced to be overly conservative, because our type checker
 -- enforces a linear ordering.
-usableLoadedProg :: MonadIO m => LoadedProg -> VFS -> [FilePath] -> m LoadedProg
+usableLoadedProg :: (MonadIO m) => LoadedProg -> VFS -> [FilePath] -> m LoadedProg
 usableLoadedProg (LoadedProg roots imports src) vfs new_roots
   | sort roots == sort new_roots = do
       (imports', src') <- unchangedImports src vfs imports

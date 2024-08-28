@@ -42,9 +42,9 @@ def onehot_2d n m x y =
 entry fwd_J [n] (input: [n][4]f32) : [n][4][n][4]f32 =
   let input = fromarrs input
   in tabulate (n*4) (\i -> jvp primal input (fromarrs (onehot_2d n 4 (i/4) (i%4))))
-     |> map toarrs |> transpose |> map transpose |> map (map (unflatten n 4))
+     |> map toarrs |> transpose |> map transpose |> map (map unflatten)
 
 entry rev_J [n] (input: [n][4]f32) : [n][4][n][4]f32 =
   let input = fromarrs input
   in tabulate (n*4) (\i -> vjp primal input (fromarrs (onehot_2d n 4 (i/4) (i%4))))
-     |> unflatten n 4 |> map (map toarrs)
+     |> unflatten |> map (map toarrs)

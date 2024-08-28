@@ -1,5 +1,5 @@
 -- ==
--- error: Consuming "xs"
+-- error: Consuming.*"xs"
 
 type t = {xs: [10]i32}
 

@@ -15,6 +15,7 @@ module Futhark.IR.Rephrase
   )
 where
 
+import Data.Bitraversable
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 
@@ -35,26 +36,26 @@ data Rephraser m from to = Rephraser
   }
 
 -- | Rephrase an entire program.
-rephraseProg :: Monad m => Rephraser m from to -> Prog from -> m (Prog to)
+rephraseProg :: (Monad m) => Rephraser m from to -> Prog from -> m (Prog to)
 rephraseProg rephraser prog = do
   consts <- mapM (rephraseStm rephraser) (progConsts prog)
   funs <- mapM (rephraseFunDef rephraser) (progFuns prog)
   pure $ prog {progConsts = consts, progFuns = funs}
 
 -- | Rephrase a function definition.
-rephraseFunDef :: Monad m => Rephraser m from to -> FunDef from -> m (FunDef to)
+rephraseFunDef :: (Monad m) => Rephraser m from to -> FunDef from -> m (FunDef to)
 rephraseFunDef rephraser fundec = do
   body' <- rephraseBody rephraser $ funDefBody fundec
   params' <- mapM (rephraseParam $ rephraseFParamDec rephraser) $ funDefParams fundec
-  rettype' <- mapM (rephraseRetType rephraser) $ funDefRetType fundec
+  rettype' <- mapM (bitraverse (rephraseRetType rephraser) pure) $ funDefRetType fundec
   pure fundec {funDefBody = body', funDefParams = params', funDefRetType = rettype'}
 
 -- | Rephrase an expression.
-rephraseExp :: Monad m => Rephraser m from to -> Exp from -> m (Exp to)
+rephraseExp :: (Monad m) => Rephraser m from to -> Exp from -> m (Exp to)
 rephraseExp = mapExpM . mapper
 
 -- | Rephrase a statement.
-rephraseStm :: Monad m => Rephraser m from to -> Stm from -> m (Stm to)
+rephraseStm :: (Monad m) => Rephraser m from to -> Stm from -> m (Stm to)
 rephraseStm rephraser (Let pat (StmAux cs attrs dec) e) =
   Let
     <$> rephrasePat (rephraseLetBoundDec rephraser) pat
@@ -63,24 +64,24 @@ rephraseStm rephraser (Let pat (StmAux cs attrs dec) e) =
 
 -- | Rephrase a pattern.
 rephrasePat ::
-  Monad m =>
+  (Monad m) =>
   (from -> m to) ->
   Pat from ->
   m (Pat to)
 rephrasePat = traverse
 
 -- | Rephrase a pattern element.
-rephrasePatElem :: Monad m => (from -> m to) -> PatElem from -> m (PatElem to)
+rephrasePatElem :: (Monad m) => (from -> m to) -> PatElem from -> m (PatElem to)
 rephrasePatElem rephraser (PatElem ident from) =
   PatElem ident <$> rephraser from
 
 -- | Rephrase a parameter.
-rephraseParam :: Monad m => (from -> m to) -> Param from -> m (Param to)
+rephraseParam :: (Monad m) => (from -> m to) -> Param from -> m (Param to)
 rephraseParam rephraser (Param attrs name from) =
   Param attrs name <$> rephraser from
 
 -- | Rephrase a body.
-rephraseBody :: Monad m => Rephraser m from to -> Body from -> m (Body to)
+rephraseBody :: (Monad m) => Rephraser m from to -> Body from -> m (Body to)
 rephraseBody rephraser (Body rep stms res) =
   Body
     <$> rephraseBodyDec rephraser rep
@@ -88,13 +89,13 @@ rephraseBody rephraser (Body rep stms res) =
     <*> pure res
 
 -- | Rephrase a lambda.
-rephraseLambda :: Monad m => Rephraser m from to -> Lambda from -> m (Lambda to)
+rephraseLambda :: (Monad m) => Rephraser m from to -> Lambda from -> m (Lambda to)
 rephraseLambda rephraser lam = do
   body' <- rephraseBody rephraser $ lambdaBody lam
   params' <- mapM (rephraseParam $ rephraseLParamDec rephraser) $ lambdaParams lam
   pure lam {lambdaBody = body', lambdaParams = params'}
 
-mapper :: Monad m => Rephraser m from to -> Mapper from to m
+mapper :: (Monad m) => Rephraser m from to -> Mapper from to m
 mapper rephraser =
   identityMapper
     { mapOnBody = const $ rephraseBody rephraser,
@@ -108,7 +109,7 @@ mapper rephraser =
 -- | Rephrasing any fragments inside an Op from one representation to
 -- another.
 class RephraseOp op where
-  rephraseInOp :: Monad m => Rephraser m from to -> op from -> m (op to)
+  rephraseInOp :: (Monad m) => Rephraser m from to -> op from -> m (op to)
 
 instance RephraseOp NoOp where
   rephraseInOp _ NoOp = pure NoOp

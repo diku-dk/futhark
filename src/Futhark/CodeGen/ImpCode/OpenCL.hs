@@ -16,8 +16,9 @@ module Futhark.CodeGen.ImpCode.OpenCL
     numFailureParams,
     KernelTarget (..),
     FailureMsg (..),
-    GroupDim,
+    BlockDim,
     KernelConst (..),
+    KernelConstExp,
     module Futhark.CodeGen.ImpCode,
     module Futhark.IR.GPU.Sizes,
   )
@@ -26,7 +27,7 @@ where
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.ImpCode.GPU (GroupDim, KernelConst (..))
+import Futhark.CodeGen.ImpCode.GPU (BlockDim, KernelConst (..), KernelConstExp)
 import Futhark.IR.GPU.Sizes
 import Futhark.Util.Pretty
 
@@ -35,6 +36,9 @@ data Program = Program
   { openClProgram :: T.Text,
     -- | Must be prepended to the program.
     openClPrelude :: T.Text,
+    -- | Definitions to be passed as macro definitions to the kernel
+    -- compiler.
+    openClMacroDefs :: [(Name, KernelConstExp)],
     openClKernelNames :: M.Map KernelName KernelSafety,
     -- | So we can detect whether the device is capable.
     openClUsedTypes :: [PrimType],
@@ -64,8 +68,6 @@ data KernelArg
     ValueKArg Exp PrimType
   | -- | Pass this pointer as argument.
     MemKArg VName
-  | -- | Create this much local memory per workgroup.
-    SharedMemoryKArg (Count Bytes Exp)
   deriving (Show)
 
 -- | Whether a kernel can potentially fail (because it contains bounds
@@ -95,7 +97,7 @@ numFailureParams SafetyFull = 3
 
 -- | Host-level OpenCL operation.
 data OpenCL
-  = LaunchKernel KernelSafety KernelName [KernelArg] [Exp] [GroupDim]
+  = LaunchKernel KernelSafety KernelName (Count Bytes (TExp Int64)) [KernelArg] [Exp] [BlockDim]
   | GetSize VName Name
   | CmpSizeLe VName Name Exp
   | GetSizeMax VName SizeClass
@@ -105,6 +107,7 @@ data OpenCL
 data KernelTarget
   = TargetOpenCL
   | TargetCUDA
+  | TargetHIP
   deriving (Eq)
 
 instance Pretty OpenCL where

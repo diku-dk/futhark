@@ -62,10 +62,10 @@ floating-point constants (always with type suffix) are also permitted.
 If ``input`` is preceded by ``script``, the text between the curly
 braces is interpreted as a FutharkScript expression (see
 :ref:`futhark-literate(1)`), which is executed to generate the input.
-It must use only functions explicitly declared as entry points.  If
-the expression produces an *n*-element tuple, it will be unpacked and
-its components passed as *n* distinct arguments to the test function.
-The only builtin function supported is ``$loaddata``.
+It must use only functions explicitly declared as entry points. If the
+expression produces an *n*-element tuple, it will be unpacked and its
+components passed as *n* distinct arguments to the test function. The
+only builtin functions supported are ``$loaddata`` and ``$loadbytes``.
 
 If ``input`` is followed by an ``@`` and a file name (which must not
 contain any whitespace) instead of curly braces, values will be read
@@ -157,8 +157,17 @@ OPTIONS
 -i
   Test with the interpreter.
 
+-I
+  Pass the program through the compiler frontend, but do not run them.
+  This is only useful for testing the Futhark compiler itself.
+
 -t
   Type-check the programs, but do not run them.
+
+-s
+
+  Run ``structure`` tests. These are not run by default. When this
+  option is passed, no other testing is done.
 
 --futhark=program
 
@@ -166,7 +175,9 @@ OPTIONS
   to the binary running ``futhark test`` itself.
 
 --no-terminal
-  Print each result on a line by itself, without line buffering.
+
+  Change the output format to be suitable for noninteractive
+  terminals. Prints a status message roughly every minute.
 
 --no-tuning
 

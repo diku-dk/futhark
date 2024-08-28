@@ -1,5 +1,5 @@
 -- ==
--- error: Using variable "xs", but this was consumed
+-- error: "f".*consumed
 
 def main [n] (xs: *[n]i32) =
   let f i = xs[i]

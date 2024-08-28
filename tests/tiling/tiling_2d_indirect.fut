@@ -1,9 +1,9 @@
 -- 2D tiling, but where the arrays are variant to an outermost third dimension.
 -- ==
 -- structure gpu { SegMap/SegMap 4
--- SegMap/DoLoop/SegMap 2
--- SegMap/SegMap 3
--- SegMap/DoLoop/DoLoop/SegMap/DoLoop 3 }
+-- SegMap/Loop/SegMap 3
+-- SegMap/SegMap 4
+-- SegMap/Loop/Loop/SegMap/Loop 0 }
 
 
 def main (is: []i32) (js: []i32) (xss: [][][]i32) (yss: [][][]i32) =

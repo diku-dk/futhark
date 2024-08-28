@@ -1,7 +1,7 @@
 type~ state = [][]f32
 
 entry init (m: i64): state =
-  unflatten m m (replicate (m * m) 1f32)
+  unflatten (replicate (m * m) 1f32)
 
 def step' [m] (cells: *[m][m]f32): *[m][m]f32 =
   let step_cell (cell: f32) ((y, x): (i64, i64)) =

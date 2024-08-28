@@ -5,7 +5,7 @@
 
 -- structure gpu {
 --   /GPUBody/If/True/Scratch 1
---   /GPUBody/DoLoop/Scratch 1
+--   /GPUBody/Loop/Scratch 1
 -- }
 
 -- These fail due to memory allocation errors.

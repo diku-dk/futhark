@@ -100,7 +100,9 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
   -- of the program.  In that case the asymptotics will not be
   -- (locally) preserved, but since ys must necessarily have been
   -- constructed somewhere close, they are probably globally OK.
-  ys_copy <- letExp (baseString ys <> "_copy") $ BasicOp $ Copy ys
+  ys_copy <-
+    letExp (baseString ys <> "_copy") . BasicOp $
+      Replicate mempty (Var ys)
   returnSweepCode $ do
     ys_adj <- lookupAdjVal ys
     -- computing vs_ctrbs and updating vs_adj

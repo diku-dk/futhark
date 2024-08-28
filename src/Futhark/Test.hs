@@ -13,7 +13,6 @@ module Futhark.Test
     testRunReferenceOutput,
     getExpectedResult,
     compileProgram,
-    runProgram,
     readResults,
     ensureReferenceOutput,
     determineTuning,
@@ -27,12 +26,11 @@ module Futhark.Test
 where
 
 import Codec.Compression.GZip
-import Codec.Compression.Zlib.Internal (DecompressError)
 import Control.Applicative
 import Control.Exception (catch)
 import Control.Exception.Base qualified as E
 import Control.Monad
-import Control.Monad.Except (MonadError (..))
+import Control.Monad.Except (MonadError (..), runExceptT)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Binary qualified as Bin
 import Data.ByteString qualified as SBS
@@ -94,8 +92,8 @@ readAndDecompress file = E.try $ do
   s <- BS.readFile file
   E.evaluate $ decompress s
 
--- | Extract a prettyString representation of some 'Values'.  In the IO
--- monad because this might involve reading from a file.  There is no
+-- | Extract a text representation of some 'Values'.  In the IO monad
+-- because this might involve reading from a file.  There is no
 -- guarantee that the resulting byte string yields a readable value.
 getValuesBS :: (MonadFail m, MonadIO m) => FutharkExe -> FilePath -> Values -> m BS.ByteString
 getValuesBS _ _ (Values vs) =
@@ -236,7 +234,7 @@ valuesAsVars server names_and_types futhark dir (ScriptFile f) = do
 -- approach here seems robust enough for now, but certainly it could
 -- be made even better.  The race condition that remains should mostly
 -- result in duplicate work, not crashes or data corruption.
-getGenFile :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m FilePath
+getGenFile :: (MonadIO m) => FutharkExe -> FilePath -> GenValue -> m FilePath
 getGenFile futhark dir gen = do
   liftIO $ createDirectoryIfMissing True $ dir </> "data"
   exists_and_proper_size <-
@@ -257,7 +255,7 @@ getGenFile futhark dir gen = do
   where
     file = "data" </> genFileName gen
 
-getGenBS :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m BS.ByteString
+getGenBS :: (MonadIO m) => FutharkExe -> FilePath -> GenValue -> m BS.ByteString
 getGenBS futhark dir gen = liftIO . BS.readFile . (dir </>) =<< getGenFile futhark dir gen
 
 genValues :: FutharkExe -> [GenValue] -> IO SBS.ByteString
@@ -345,7 +343,7 @@ binaryName = dropExtension
 -- returns stdout and stderr of the compiler.  Throws an IO exception
 -- containing stderr if compilation fails.
 compileProgram ::
-  (MonadIO m, MonadError [T.Text] m) =>
+  (MonadIO m, MonadError T.Text m) =>
   [String] ->
   FutharkExe ->
   String ->
@@ -354,43 +352,14 @@ compileProgram ::
 compileProgram extra_options (FutharkExe futhark) backend program = do
   (futcode, stdout, stderr) <- liftIO $ readProcessWithExitCode futhark (backend : options) ""
   case futcode of
-    ExitFailure 127 -> throwError [progNotFound $ T.pack futhark]
-    ExitFailure _ -> throwError [T.decodeUtf8 stderr]
+    ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+    ExitFailure _ -> throwError $ T.decodeUtf8 stderr
     ExitSuccess -> pure ()
   pure (stdout, stderr)
   where
     binOutputf = binaryName program
     options = [program, "-o", binOutputf] ++ extra_options
     progNotFound s = s <> ": command not found"
-
--- | @runProgram futhark runner extra_options prog entry input@ runs the
--- Futhark program @prog@ (which must have the @.fut@ suffix),
--- executing the @entry@ entry point and providing @input@ on stdin.
--- The program must have been compiled in advance with
--- 'compileProgram'.  If @runner@ is non-null, then it is used as
--- "interpreter" for the compiled program (e.g. @python@ when using
--- the Python backends).  The @extra_options@ are passed to the
--- program.
-runProgram ::
-  FutharkExe ->
-  FilePath ->
-  [String] ->
-  String ->
-  T.Text ->
-  Values ->
-  IO (ExitCode, SBS.ByteString, SBS.ByteString)
-runProgram futhark runner extra_options prog entry input = do
-  let progbin = binaryName prog
-      dir = takeDirectory prog
-      binpath = "." </> progbin
-      entry_options = ["-e", T.unpack entry]
-
-      (to_run, to_run_args)
-        | null runner = (binpath, entry_options ++ extra_options)
-        | otherwise = (runner, binpath : entry_options ++ extra_options)
-
-  input' <- getValuesBS futhark dir input
-  liftIO $ readProcessWithExitCode to_run to_run_args $ BS.toStrict input'
 
 -- | Read the given variables from a running server.
 readResults ::
@@ -401,11 +370,33 @@ readResults ::
 readResults server =
   mapM (either throwError pure <=< liftIO . getValue server)
 
+-- | Call an entry point. Returns server variables storing the result.
+callEntry ::
+  (MonadIO m, MonadError T.Text m) =>
+  FutharkExe ->
+  Server ->
+  FilePath ->
+  EntryName ->
+  Values ->
+  m [VarName]
+callEntry futhark server prog entry input = do
+  output_types <- cmdEither $ cmdOutputs server entry
+  input_types <- cmdEither $ cmdInputs server entry
+  let outs = ["out" <> showText i | i <- [0 .. length output_types - 1]]
+      ins = ["in" <> showText i | i <- [0 .. length input_types - 1]]
+      ins_and_types = zip ins (map inputType input_types)
+  valuesAsVars server ins_and_types futhark dir input
+  _ <- cmdEither $ cmdCall server entry outs ins
+  cmdMaybe $ cmdFree server ins
+  pure outs
+  where
+    dir = takeDirectory prog
+
 -- | Ensure that any reference output files exist, or create them (by
 -- compiling the program with the reference compiler and running it on
 -- the input) if necessary.
 ensureReferenceOutput ::
-  (MonadIO m, MonadError [T.Text] m) =>
+  (MonadIO m, MonadError T.Text m) =>
   Maybe Int ->
   FutharkExe ->
   String ->
@@ -416,32 +407,20 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
   missing <- filterM isReferenceMissing $ concatMap entryAndRuns ios
 
   unless (null missing) $ do
-    void $ compileProgram [] futhark compiler prog
+    void $ compileProgram ["--server"] futhark compiler prog
 
-    res <- liftIO $
-      flip (pmapIO concurrency) missing $ \(entry, tr) -> do
-        (code, stdout, stderr) <- runProgram futhark "" ["-b"] prog entry $ runInput tr
-        case code of
-          ExitFailure e ->
-            pure $
-              Left
-                [ T.pack $
-                    "Reference dataset generation failed with exit code "
-                      ++ show e
-                      ++ " and stderr:\n"
-                      ++ map (chr . fromIntegral) (SBS.unpack stderr)
-                ]
-          ExitSuccess -> do
-            let f = file (entry, tr)
-            liftIO $ createDirectoryIfMissing True $ takeDirectory f
-            SBS.writeFile f stdout
-            pure $ Right ()
-
-    case sequence_ res of
-      Left err -> throwError err
-      Right () -> pure ()
+    res <- liftIO . flip (pmapIO concurrency) missing $ \(entry, tr) ->
+      withServer server_cfg $ \server -> runExceptT $ do
+        outs <- callEntry futhark server prog entry $ runInput tr
+        let f = file entry tr
+        liftIO $ createDirectoryIfMissing True $ takeDirectory f
+        cmdMaybe $ cmdStore server f outs
+        cmdMaybe $ cmdFree server outs
+    either throwError (const (pure ())) (sequence_ res)
   where
-    file (entry, tr) =
+    server_cfg = futharkServerCfg (dropExtension prog) []
+
+    file entry tr =
       takeDirectory prog </> testRunReferenceOutput prog entry tr
 
     entryAndRuns (InputOutputs entry rts) = map (entry,) rts
@@ -449,7 +428,7 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
     isReferenceMissing (entry, tr)
       | Succeeds (Just SuccessGenerateValues) <- runExpectedResult tr =
           liftIO $
-            ((<) <$> getModificationTime (file (entry, tr)) <*> getModificationTime prog)
+            ((<) <$> getModificationTime (file entry tr) <*> getModificationTime prog)
               `catch` (\e -> if isDoesNotExistError e then pure True else E.throw e)
       | otherwise =
           pure False
@@ -457,7 +436,7 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
 -- | Determine the @--tuning@ options to pass to the program.  The first
 -- argument is the extension of the tuning file, or 'Nothing' if none
 -- should be used.
-determineTuning :: MonadIO m => Maybe FilePath -> FilePath -> m ([String], String)
+determineTuning :: (MonadIO m) => Maybe FilePath -> FilePath -> m ([String], String)
 determineTuning Nothing _ = pure ([], mempty)
 determineTuning (Just ext) program = do
   exists <- liftIO $ doesFileExist (program <.> ext)

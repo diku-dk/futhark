@@ -2,7 +2,7 @@
 --
 -- This is intended to avoid shape slices.
 -- ==
--- tags { no_opencl no_cuda no_pyopencl }
+-- tags { no_opencl no_cuda no_hip no_pyopencl }
 -- input {
 --   [[1,2,3],
 --    [4,5,6],

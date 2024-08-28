@@ -1,5 +1,5 @@
 -- ==
--- tags { no_opencl no_cuda no_pyopencl }
+-- tags { no_opencl no_cuda no_hip no_pyopencl }
 
 type index       = {x: i64, y: i64, z: i64}
 
@@ -50,15 +50,15 @@ def restrictCell (vals :[8][24]f64) :[24]f64 =
 def getDiagonalCellContribution [nelx][nely][nelz] (l :u8) (x :[nelx][nely][nelz]f32) (cellIndex, w) =
   let fineCells =
     loop vals = [(cellIndex,w)] for i < (i64.u8 l) do
-      vals |> map prolongateCell |> flatten_to (8**(i+1))
+      vals |> map prolongateCell |> flatten
   let fineValuesX = map (getFineValue x 0) fineCells
   let coarseValues =
     loop vx = fineValuesX for i < (i64.u8 l) do
       let ii = (i64.u8 l) - i - 1
-      let xx = (vx :> [(8**ii)*8][24]f64) |> unflatten (8**(ii)) 8 |> map restrictCell
+      let xx = (vx :> [(8**ii)*8][24]f64) |> unflatten |> map restrictCell
       in xx
-  let coarseX = flatten_to 24 coarseValues
-  in coarseX
+  let coarseX = flatten coarseValues
+  in sized 24 coarseX
 
 entry getNodeDiagonalValues [nelx][nely][nelz] (l :u8) (x :[nelx][nely][nelz]f32) input =
   map (getDiagonalCellContribution l x) input

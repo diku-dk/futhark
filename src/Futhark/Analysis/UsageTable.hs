@@ -30,7 +30,7 @@ where
 import Data.Bits
 import Data.Foldable qualified as Foldable
 import Data.IntMap.Strict qualified as IM
-import Data.List (foldl')
+import Data.List qualified as L
 import Futhark.IR
 import Futhark.IR.Prop.Aliases
 import Prelude hiding (lookup)
@@ -64,10 +64,10 @@ used = lookupPred $ const True
 
 -- | Expand the usage table based on aliasing information.
 expand :: (VName -> Names) -> UsageTable -> UsageTable
-expand look (UsageTable m) = UsageTable $ foldl' grow m $ IM.toList m
+expand look (UsageTable m) = UsageTable $ L.foldl' grow m $ IM.toList m
   where
     grow m' (k, v) =
-      foldl'
+      L.foldl'
         (grow'' $ v `withoutU` presentU)
         m'
         (namesIntMap $ look $ VName (nameFromString "") k)
@@ -148,12 +148,12 @@ matches (Usages x) (Usages y) = x == (x .&. y)
 withoutU :: Usages -> Usages -> Usages
 withoutU (Usages x) (Usages y) = Usages $ x .&. complement y
 
-usageInBody :: Aliased rep => Body rep -> UsageTable
+usageInBody :: (Aliased rep) => Body rep -> UsageTable
 usageInBody = foldMap consumedUsage . namesToList . consumedInBody
 
 -- | Produce a usage table reflecting the use of the free variables in
 -- a single statement.
-usageInStm :: Aliased rep => Stm rep -> UsageTable
+usageInStm :: (Aliased rep) => Stm rep -> UsageTable
 usageInStm (Let pat rep e) =
   mconcat
     [ usageInPat pat `without` patNames pat,
@@ -165,17 +165,13 @@ usageInStm (Let pat rep e) =
 -- | Usage table reflecting use in pattern.  In particular, free
 -- variables in the decorations are considered used as sizes, even if
 -- they are also bound in this pattern.
-usageInPat :: FreeIn t => Pat t -> UsageTable
+usageInPat :: (FreeIn t) => Pat t -> UsageTable
 usageInPat = sizeUsages . foldMap freeIn . patElems
 
-usageInExp :: Aliased rep => Exp rep -> UsageTable
+usageInExp :: (Aliased rep) => Exp rep -> UsageTable
 usageInExp (Apply _ args _ _) =
-  mconcat
-    [ mconcat $ map consumedUsage $ namesToList $ subExpAliases arg
-      | (arg, d) <- args,
-        d == Consume
-    ]
-usageInExp e@DoLoop {} =
+  mconcat [consumedUsage v | (Var v, Consume) <- args]
+usageInExp e@Loop {} =
   foldMap consumedUsage $ namesToList $ consumedInExp e
 usageInExp (Match _ cases defbody _) =
   foldMap (usageInBody . caseBody) cases <> usageInBody defbody

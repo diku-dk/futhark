@@ -1,12 +1,12 @@
 -- | Optimisation pipelines.
 module Futhark.Passes
   ( standardPipeline,
-    sequentialPipeline,
-    kernelsPipeline,
-    sequentialCpuPipeline,
+    seqPipeline,
     gpuPipeline,
+    seqmemPipeline,
+    gpumemPipeline,
     mcPipeline,
-    multicorePipeline,
+    mcmemPipeline,
   )
 where
 
@@ -18,6 +18,7 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.SOACS (SOACS, usesAD)
 import Futhark.IR.Seq (Seq)
 import Futhark.IR.SeqMem (SeqMem)
+import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
@@ -25,7 +26,6 @@ import Futhark.Optimise.EntryPointMem
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
-import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
 import Futhark.Optimise.MergeGPUBodies
@@ -41,7 +41,6 @@ import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
-import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
@@ -80,10 +79,10 @@ adPipeline =
       simplifySOACS
     ]
 
--- | The pipeline used by the CUDA and OpenCL backends, but before
+-- | The pipeline used by the CUDA, HIP, and OpenCL backends, but before
 -- adding memory information.  Includes 'standardPipeline'.
-kernelsPipeline :: Pipeline SOACS GPU
-kernelsPipeline =
+gpuPipeline :: Pipeline SOACS GPU
+gpuPipeline =
   standardPipeline
     >>> onePass extractKernels
     >>> passes
@@ -93,8 +92,6 @@ kernelsPipeline =
         tileLoops,
         simplifyGPU,
         histAccsGPU,
-        babysitKernels,
-        simplifyGPU,
         unstreamGPU,
         performCSE True,
         simplifyGPU,
@@ -105,25 +102,28 @@ kernelsPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU
+        optimiseArrayLayoutGPU,
+        -- Important to simplify after coalescing in order to fix up
+        -- redundant manifests.
+        simplifyGPU,
+        performCSE True
       ]
 
 -- | The pipeline used by the sequential backends.  Turns all
 -- parallelism into sequential loops.  Includes 'standardPipeline'.
-sequentialPipeline :: Pipeline SOACS Seq
-sequentialPipeline =
+seqPipeline :: Pipeline SOACS Seq
+seqPipeline =
   standardPipeline
     >>> onePass firstOrderTransform
     >>> passes
-      [ simplifySeq,
-        inPlaceLoweringSeq
+      [ simplifySeq
       ]
 
--- | Run 'sequentialPipeline', then add memory information (and
+-- | Run 'seqPipeline', then add memory information (and
 -- optimise it slightly).
-sequentialCpuPipeline :: Pipeline SOACS SeqMem
-sequentialCpuPipeline =
-  sequentialPipeline
+seqmemPipeline :: Pipeline SOACS SeqMem
+seqmemPipeline =
+  seqPipeline
     >>> onePass Seq.explicitAllocations
     >>> passes
       [ performCSE False,
@@ -140,11 +140,11 @@ sequentialCpuPipeline =
         simplifySeqMem
       ]
 
--- | Run 'kernelsPipeline', then add memory information (and optimise
+-- | Run 'gpuPipeline', then add memory information (and optimise
 -- it a lot).
-gpuPipeline :: Pipeline SOACS GPUMem
-gpuPipeline =
-  kernelsPipeline
+gpumemPipeline :: Pipeline SOACS GPUMem
+gpumemPipeline =
+  gpuPipeline
     >>> onePass GPU.explicitAllocations
     >>> passes
       [ simplifyGPUMem,
@@ -181,12 +181,14 @@ mcPipeline =
         performCSE True,
         simplifyMC,
         sinkMC,
-        inPlaceLoweringMC
+        optimiseArrayLayoutMC,
+        simplifyMC,
+        performCSE True
       ]
 
 -- | Run 'mcPipeline' and then add memory information.
-multicorePipeline :: Pipeline SOACS MCMem
-multicorePipeline =
+mcmemPipeline :: Pipeline SOACS MCMem
+mcmemPipeline =
   mcPipeline
     >>> onePass MC.explicitAllocations
     >>> passes

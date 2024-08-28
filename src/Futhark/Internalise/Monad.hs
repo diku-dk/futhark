@@ -12,7 +12,6 @@ module Futhark.Internalise.Monad
     addOpaques,
     addFunDef,
     lookupFunction,
-    lookupFunction',
     lookupConst,
     bindFunction,
     bindConstant,
@@ -27,6 +26,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.List (find)
 import Data.Map.Strict qualified as M
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -36,7 +36,7 @@ type FunInfo =
   ( [VName],
     [DeclType],
     [FParam SOACS],
-    [(SubExp, Type)] -> Maybe [DeclExtType]
+    [(SubExp, Type)] -> Maybe [(DeclExtType, RetAls)]
   )
 
 type FunTable = M.Map VName FunInfo
@@ -98,7 +98,7 @@ instance MonadBuilder InternaliseM where
   collectStms (InternaliseM m) = InternaliseM $ collectStms m
 
 runInternaliseM ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Bool ->
   InternaliseM () ->
   m (OpaqueTypes, Stms SOACS, [FunDef SOACS])
@@ -138,18 +138,21 @@ lookupSubst v = do
 -- | Add opaque types.  If the types are already known, they will not
 -- be added.
 addOpaques :: OpaqueTypes -> InternaliseM ()
-addOpaques ts = modify $ \s ->
-  s {stateTypes = stateTypes s <> ts}
+addOpaques ts@(OpaqueTypes ts') = modify $ \s ->
+  -- TODO: handle this better (#1960)
+  case find (knownButDifferent (stateTypes s)) ts' of
+    Just (x, _) -> error $ "addOpaques: multiple incompatible definitions of type " <> nameToString x
+    Nothing -> s {stateTypes = stateTypes s <> ts}
+  where
+    knownButDifferent (OpaqueTypes old_ts) (v, def) =
+      any (\(v_old, v_def) -> v == v_old && def /= v_def) old_ts
 
 -- | Add a function definition to the program being constructed.
 addFunDef :: FunDef SOACS -> InternaliseM ()
 addFunDef fd = modify $ \s -> s {stateFuns = fd : stateFuns s}
 
-lookupFunction' :: VName -> InternaliseM (Maybe FunInfo)
-lookupFunction' fname = gets $ M.lookup fname . stateFunTable
-
 lookupFunction :: VName -> InternaliseM FunInfo
-lookupFunction fname = maybe bad pure =<< lookupFunction' fname
+lookupFunction fname = maybe bad pure =<< gets (M.lookup fname . stateFunTable)
   where
     bad = error $ "Internalise.lookupFunction: Function '" ++ prettyString fname ++ "' not found."
 
@@ -176,7 +179,7 @@ bindConstant cname fd = do
       letBindNames [cname] $ BasicOp $ SubExp se
     ses -> do
       let substs =
-            drop (length (shapeContext (funDefRetType fd))) ses
+            drop (length (shapeContext (map fst (funDefRetType fd)))) ses
       modify $ \s ->
         s
           { stateConstSubsts = M.insert cname substs $ stateConstSubsts s
@@ -193,10 +196,7 @@ assert ::
   InternaliseM Certs
 assert desc se msg loc = assertingOne $ do
   attrs <- asks $ attrsForAssert . envAttrs
-  attributing attrs $
-    letExp desc $
-      BasicOp $
-        Assert se msg (loc, mempty)
+  attributing attrs $ letExp desc $ BasicOp $ Assert se msg (loc, mempty)
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

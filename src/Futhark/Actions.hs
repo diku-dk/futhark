@@ -7,6 +7,7 @@ module Futhark.Actions
     printFusionGraph,
     printInterferenceGPU,
     printMemAliasGPU,
+    printMemoryAccessAnalysis,
     callGraphAction,
     impCodeGenAction,
     kernelImpCodeGenAction,
@@ -16,6 +17,7 @@ module Futhark.Actions
     compileCtoWASMAction,
     compileOpenCLAction,
     compileCUDAAction,
+    compileHIPAction,
     compileMulticoreAction,
     compileMulticoreToISPCAction,
     compileMulticoreToWASMAction,
@@ -32,6 +34,7 @@ import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
+import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.Alias
 import Futhark.Analysis.CallGraph (buildCallGraph)
 import Futhark.Analysis.Interference qualified as Interference
@@ -40,6 +43,7 @@ import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.Analysis.Metrics
 import Futhark.CodeGen.Backends.CCUDA qualified as CCUDA
 import Futhark.CodeGen.Backends.COpenCL qualified as COpenCL
+import Futhark.CodeGen.Backends.HIP qualified as HIP
 import Futhark.CodeGen.Backends.MulticoreC qualified as MulticoreC
 import Futhark.CodeGen.Backends.MulticoreISPC qualified as MulticoreISPC
 import Futhark.CodeGen.Backends.MulticoreWASM qualified as MulticoreWASM
@@ -65,7 +69,7 @@ import System.FilePath
 import System.Info qualified
 
 -- | Print the result to stdout.
-printAction :: ASTRep rep => Action rep
+printAction :: (ASTRep rep) => Action rep
 printAction =
   Action
     { actionName = "Prettyprint",
@@ -74,7 +78,7 @@ printAction =
     }
 
 -- | Print the result to stdout, alias annotations.
-printAliasesAction :: AliasableRep rep => Action rep
+printAliasesAction :: (AliasableRep rep) => Action rep
 printAliasesAction =
   Action
     { actionName = "Prettyprint",
@@ -131,6 +135,15 @@ printMemAliasGPU =
       actionProcedure = liftIO . print . MemAlias.analyzeGPUMem
     }
 
+-- | Print result of array access analysis on the IR
+printMemoryAccessAnalysis :: (Analyse rep) => Action rep
+printMemoryAccessAnalysis =
+  Action
+    { actionName = "array-access-analysis",
+      actionDescription = "Prettyprint the array access analysis to standard output.",
+      actionProcedure = liftIO . putStrLn . prettyString . analyseDimAccesses
+    }
+
 -- | Print call graph to stdout.
 callGraphAction :: Action SOACS
 callGraphAction =
@@ -141,7 +154,7 @@ callGraphAction =
     }
 
 -- | Print metrics about AST node counts to stdout.
-metricsAction :: OpMetrics (Op rep) => Action rep
+metricsAction :: (OpMetrics (Op rep)) => Action rep
 metricsAction =
   Action
     { actionName = "Compute metrics",
@@ -164,7 +177,7 @@ kernelImpCodeGenAction =
   Action
     { actionName = "Compile imperative kernels",
       actionDescription = "Translate program into imperative IL with kernels and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenGPU.compileProgOpenCL
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenGPU.compileProgHIP
     }
 
 -- | Convert the program to CPU multicore ImpCode and print it to stdout.
@@ -365,6 +378,37 @@ compileCUDAAction fcfg mode outpath =
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CCUDA.asServer cprog
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+
+-- | The @futhark hip@ action.
+compileHIPAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
+compileHIPAction fcfg mode outpath =
+  Action
+    { actionName = "Compile to HIP",
+      actionDescription = "Compile to HIP",
+      actionProcedure = helper
+    }
+  where
+    helper prog = do
+      cprog <- handleWarnings fcfg $ HIP.compileProg versionString prog
+      let cpath = outpath `addExtension` "c"
+          hpath = outpath `addExtension` "h"
+          jsonpath = outpath `addExtension` "json"
+          extra_options =
+            [ "-lamdhip64",
+              "-lhiprtc"
+            ]
+      case mode of
+        ToLibrary -> do
+          let (header, impl, manifest) = HIP.asLibrary cprog
+          liftIO $ T.writeFile hpath $ cPrependHeader header
+          liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jsonpath manifest
+        ToExecutable -> do
+          liftIO $ T.writeFile cpath $ cPrependHeader $ HIP.asExecutable cprog
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+        ToServer -> do
+          liftIO $ T.writeFile cpath $ cPrependHeader $ HIP.asServer cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- | The @futhark multicore@ action.

@@ -34,13 +34,13 @@ type LastUsed = Names
 type Graph a = Set (a, a)
 
 -- | Insert an edge between two values into the graph.
-makeEdge :: Ord a => a -> a -> Graph a
+makeEdge :: (Ord a) => a -> a -> Graph a
 makeEdge v1 v2
   | v1 == v2 = mempty
   | otherwise = S.singleton (min v1 v2, max v1 v2)
 
 analyseStm ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   InUse ->
   Stm GPUMem ->
@@ -86,7 +86,7 @@ analyseStm lumap inuse0 stm =
             (namesToList $ inuse_outside <> inuse <> lus <> last_use_mems)
       )
 
--- We conservatively treat all memory arguments to a DoLoop to
+-- We conservatively treat all memory arguments to a Loop to
 -- interfere with each other, as well as anything used inside the
 -- loop.  This could potentially be improved by looking at the
 -- interference computed by the loop body wrt. the loop arguments, but
@@ -104,7 +104,7 @@ analyseLoopParams merge (inuse, lastused, graph) =
     isMemArg _ = Nothing
 
 analyseExp ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   InUse ->
   Exp GPUMem ->
@@ -115,7 +115,7 @@ analyseExp lumap inuse_outside expr =
       fmap mconcat $
         mapM (analyseBody lumap inuse_outside) $
           defbody : map caseBody cases
-    DoLoop merge _ body ->
+    Loop merge _ body ->
       analyseLoopParams merge <$> analyseBody lumap inuse_outside body
     Op (Inner (SegOp segop)) -> do
       analyseSegOp lumap inuse_outside segop
@@ -123,7 +123,7 @@ analyseExp lumap inuse_outside expr =
       pure mempty
 
 analyseKernelBody ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   InUse ->
   KernelBody GPUMem ->
@@ -131,7 +131,7 @@ analyseKernelBody ::
 analyseKernelBody lumap inuse body = analyseStms lumap inuse $ kernelBodyStms body
 
 analyseBody ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   InUse ->
   Body GPUMem ->
@@ -139,7 +139,7 @@ analyseBody ::
 analyseBody lumap inuse body = analyseStms lumap inuse $ bodyStms body
 
 analyseStms ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   InUse ->
   Stms GPUMem ->
@@ -152,7 +152,7 @@ analyseStms lumap inuse0 stms = do
       pure (inuse', lus' <> lus, graph' <> graph)
 
 analyseSegOp ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   InUse ->
   SegOp lvl GPUMem ->
@@ -169,7 +169,7 @@ analyseSegOp lumap inuse (SegHist _ _ histops _ body) = do
   pure (inuse'', lus' <> lus'', graph <> graph')
 
 segWithBinOps ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   InUse ->
   [SegBinOp GPUMem] ->
@@ -185,7 +185,7 @@ segWithBinOps lumap inuse binops body = do
   pure (inuse'', lus' <> lus'', graph <> graph')
 
 analyseSegBinOp ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   InUse ->
   SegBinOp GPUMem ->
@@ -194,22 +194,20 @@ analyseSegBinOp lumap inuse (SegBinOp _ lambda _ _) =
   analyseLambda lumap inuse lambda
 
 analyseHistOp ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   InUse ->
   HistOp GPUMem ->
   m (InUse, LastUsed, Graph VName)
-analyseHistOp lumap inuse histop =
-  analyseLambda lumap inuse (histOp histop)
+analyseHistOp lumap inuse = analyseLambda lumap inuse . histOp
 
 analyseLambda ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   InUse ->
   Lambda GPUMem ->
   m (InUse, LastUsed, Graph VName)
-analyseLambda lumap inuse (Lambda _ body _) =
-  analyseBody lumap inuse body
+analyseLambda lumap inuse = analyseBody lumap inuse . lambdaBody
 
 analyseProgGPU :: Prog GPUMem -> Graph VName
 analyseProgGPU prog = onConsts (progConsts prog) <> foldMap onFun (progFuns prog)
@@ -238,7 +236,7 @@ applyAliases aliases =
 -- triple of the names currently in use, names that hit their last use somewhere
 -- within, and the resulting graph.
 analyseGPU ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   Stms GPUMem ->
   m (Graph VName)
@@ -264,16 +262,16 @@ analyseGPU lumap stms = do
 
 -- | Return a mapping from memory blocks to their element sizes in the given
 -- statements.
-memSizes :: LocalScope GPUMem m => Stms GPUMem -> m (Map VName Int)
+memSizes :: (LocalScope GPUMem m) => Stms GPUMem -> m (Map VName Int)
 memSizes stms =
   inScopeOf stms $ fmap mconcat <$> mapM memSizesStm $ stmsToList stms
   where
-    memSizesStm :: LocalScope GPUMem m => Stm GPUMem -> m (Map VName Int)
+    memSizesStm :: (LocalScope GPUMem m) => Stm GPUMem -> m (Map VName Int)
     memSizesStm (Let pat _ e) = do
       arraySizes <- fmap mconcat <$> mapM memElemSize $ patNames pat
       arraySizes' <- memSizesExp e
       pure $ arraySizes <> arraySizes'
-    memSizesExp :: LocalScope GPUMem m => Exp GPUMem -> m (Map VName Int)
+    memSizesExp :: (LocalScope GPUMem m) => Exp GPUMem -> m (Map VName Int)
     memSizesExp (Op (Inner (SegOp segop))) =
       let body = segBody segop
        in inScopeOf (kernelBodyStms body)
@@ -283,12 +281,12 @@ memSizes stms =
             $ kernelBodyStms body
     memSizesExp (Match _ cases defbody _) = do
       mconcat <$> mapM (memSizes . bodyStms) (defbody : map caseBody cases)
-    memSizesExp (DoLoop _ _ body) =
+    memSizesExp (Loop _ _ body) =
       memSizes $ bodyStms body
     memSizesExp _ = pure mempty
 
 -- | Return a mapping from memory blocks to the space they are allocated in.
-memSpaces :: LocalScope GPUMem m => Stms GPUMem -> m (Map VName Space)
+memSpaces :: (LocalScope GPUMem m) => Stms GPUMem -> m (Map VName Space)
 memSpaces stms =
   pure $ foldMap getSpacesStm stms
   where
@@ -300,12 +298,12 @@ memSpaces stms =
       foldMap getSpacesStm $ kernelBodyStms $ segBody segop
     getSpacesStm (Let _ _ (Match _ cases defbody _)) =
       foldMap (foldMap getSpacesStm . bodyStms) $ defbody : map caseBody cases
-    getSpacesStm (Let _ _ (DoLoop _ _ body)) =
+    getSpacesStm (Let _ _ (Loop _ _ body)) =
       foldMap getSpacesStm (bodyStms body)
     getSpacesStm _ = mempty
 
 analyseGPU' ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   LUTabFun ->
   Stms GPUMem ->
   m (InUse, LastUsed, Graph VName)
@@ -313,7 +311,7 @@ analyseGPU' lumap stms =
   mconcat . toList <$> mapM helper stms
   where
     helper ::
-      LocalScope GPUMem m =>
+      (LocalScope GPUMem m) =>
       Stm GPUMem ->
       m (InUse, LastUsed, Graph VName)
     helper stm@Let {stmExp = Op (Inner (SegOp segop))} =
@@ -322,22 +320,14 @@ analyseGPU' lumap stms =
       inScopeOf stm $
         mconcat
           <$> mapM (analyseGPU' lumap . bodyStms) (defbody : map caseBody cases)
-    helper stm@Let {stmExp = DoLoop merge _ body} =
+    helper stm@Let {stmExp = Loop merge _ body} =
       fmap (analyseLoopParams merge) . inScopeOf stm $
         analyseGPU' lumap $
           bodyStms body
     helper stm =
       inScopeOf stm $ pure mempty
 
-nameInfoToMemInfo :: Mem rep inner => NameInfo rep -> MemBound NoUniqueness
-nameInfoToMemInfo info =
-  case info of
-    FParamName summary -> noUniquenessReturns summary
-    LParamName summary -> summary
-    LetName summary -> letDecMem summary
-    IndexName it -> MemPrim $ IntType it
-
-memInfo :: LocalScope GPUMem m => VName -> m (Maybe VName)
+memInfo :: (LocalScope GPUMem m) => VName -> m (Maybe VName)
 memInfo vname = do
   summary <- asksScope (fmap nameInfoToMemInfo . M.lookup vname)
   case summary of
@@ -349,7 +339,7 @@ memInfo vname = do
 -- | Returns a mapping from memory block to element size. The input is the
 -- `VName` of a variable (supposedly an array), and the result is a mapping from
 -- the memory block of that array to element size of the array.
-memElemSize :: LocalScope GPUMem m => VName -> m (Map VName Int)
+memElemSize :: (LocalScope GPUMem m) => VName -> m (Map VName Int)
 memElemSize vname = do
   summary <- asksScope (fmap nameInfoToMemInfo . M.lookup vname)
   case summary of

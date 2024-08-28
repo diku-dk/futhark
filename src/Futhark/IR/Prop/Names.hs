@@ -48,8 +48,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import Futhark.IR.Prop.Patterns
-import Futhark.IR.Prop.Scope
+import Futhark.IR.Prop.Pat
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Util.Pretty
@@ -192,7 +191,7 @@ class FreeIn a where
   freeIn' = fvNames . freeIn
 
 -- | The free variables of some syntactic construct.
-freeIn :: FreeIn a => a -> Names
+freeIn :: (FreeIn a) => a -> Names
 freeIn = unFV . freeIn'
 
 instance FreeIn FV where
@@ -216,10 +215,10 @@ instance (FreeIn a, FreeIn b, FreeIn c, FreeIn d) => FreeIn (a, b, c, d) where
 instance (FreeIn a, FreeIn b) => FreeIn (Either a b) where
   freeIn' = either freeIn' freeIn'
 
-instance FreeIn a => FreeIn [a] where
+instance (FreeIn a) => FreeIn [a] where
   freeIn' = foldMap freeIn'
 
-instance FreeIn a => FreeIn (S.Set a) where
+instance (FreeIn a) => FreeIn (S.Set a) where
   freeIn' = foldMap freeIn'
 
 instance FreeIn (NoOp rep) where
@@ -239,7 +238,7 @@ instance
   where
   freeIn' (FunDef _ _ _ rettype params body) =
     fvBind (namesFromList $ map paramName params) $
-      freeIn' rettype <> freeIn' params <> freeIn' body
+      foldMap (freeIn' . fst) rettype <> freeIn' params <> freeIn' body
 
 instance
   ( FreeDec (ExpDec rep),
@@ -284,10 +283,12 @@ instance
   ) =>
   FreeIn (Exp rep)
   where
-  freeIn' (DoLoop merge form loopbody) =
+  freeIn' (Loop merge form loopbody) =
     let (params, args) = unzip merge
         bound_here =
-          namesFromList $ M.keys $ scopeOf form <> scopeOfFParams params
+          case form of
+            WhileLoop {} -> namesFromList $ map paramName params
+            ForLoop i _ _ -> namesFromList $ i : map paramName params
      in fvBind bound_here $
           freeIn' args <> freeIn' form <> freeIn' params <> freeIn' loopbody
   freeIn' (WithAcc inputs lam) =
@@ -311,10 +312,10 @@ instance
       <> freeIn' attrs
       <> precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
 
-instance FreeIn (Stm rep) => FreeIn (Stms rep) where
+instance (FreeIn (Stm rep)) => FreeIn (Stms rep) where
   freeIn' = foldMap freeIn'
 
-instance FreeIn body => FreeIn (Case body) where
+instance (FreeIn body) => FreeIn (Case body) where
   freeIn' = freeIn' . caseBody
 
 instance FreeIn Names where
@@ -323,7 +324,7 @@ instance FreeIn Names where
 instance FreeIn Bool where
   freeIn' _ = mempty
 
-instance FreeIn a => FreeIn (Maybe a) where
+instance (FreeIn a) => FreeIn (Maybe a) where
   freeIn' = maybe mempty freeIn'
 
 instance FreeIn VName where
@@ -341,48 +342,48 @@ instance FreeIn Space where
   freeIn' DefaultSpace = mempty
   freeIn' (Space _) = mempty
 
-instance FreeIn d => FreeIn (ShapeBase d) where
+instance (FreeIn d) => FreeIn (ShapeBase d) where
   freeIn' = freeIn' . shapeDims
 
-instance FreeIn d => FreeIn (Ext d) where
+instance (FreeIn d) => FreeIn (Ext d) where
   freeIn' (Free x) = freeIn' x
   freeIn' (Ext _) = mempty
 
 instance FreeIn PrimType where
   freeIn' _ = mempty
 
-instance FreeIn shape => FreeIn (TypeBase shape u) where
+instance (FreeIn shape) => FreeIn (TypeBase shape u) where
   freeIn' (Array t shape _) = freeIn' t <> freeIn' shape
   freeIn' (Mem s) = freeIn' s
   freeIn' Prim {} = mempty
   freeIn' (Acc acc ispace ts _) = freeIn' (acc, ispace, ts)
 
-instance FreeIn dec => FreeIn (Param dec) where
+instance (FreeIn dec) => FreeIn (Param dec) where
   freeIn' (Param attrs _ dec) = freeIn' attrs <> freeIn' dec
 
-instance FreeIn dec => FreeIn (PatElem dec) where
+instance (FreeIn dec) => FreeIn (PatElem dec) where
   freeIn' (PatElem _ dec) = freeIn' dec
 
-instance FreeIn (LParamInfo rep) => FreeIn (LoopForm rep) where
-  freeIn' (ForLoop _ _ bound loop_vars) = freeIn' bound <> freeIn' loop_vars
+instance FreeIn LoopForm where
+  freeIn' (ForLoop _ _ bound) = freeIn' bound
   freeIn' (WhileLoop cond) = freeIn' cond
 
-instance FreeIn d => FreeIn (DimIndex d) where
+instance (FreeIn d) => FreeIn (DimIndex d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
-instance FreeIn d => FreeIn (Slice d) where
+instance (FreeIn d) => FreeIn (Slice d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
-instance FreeIn d => FreeIn (FlatDimIndex d) where
+instance (FreeIn d) => FreeIn (FlatDimIndex d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
-instance FreeIn d => FreeIn (FlatSlice d) where
+instance (FreeIn d) => FreeIn (FlatSlice d) where
   freeIn' = Data.Foldable.foldMap freeIn'
 
 instance FreeIn SubExpRes where
   freeIn' (SubExpRes cs se) = freeIn' cs <> freeIn' se
 
-instance FreeIn dec => FreeIn (Pat dec) where
+instance (FreeIn dec) => FreeIn (Pat dec) where
   freeIn' (Pat xs) =
     fvBind bound_here $ freeIn' xs
     where
@@ -394,16 +395,16 @@ instance FreeIn Certs where
 instance FreeIn Attrs where
   freeIn' (Attrs _) = mempty
 
-instance FreeIn dec => FreeIn (StmAux dec) where
+instance (FreeIn dec) => FreeIn (StmAux dec) where
   freeIn' (StmAux cs attrs dec) = freeIn' cs <> freeIn' attrs <> freeIn' dec
 
-instance FreeIn a => FreeIn (MatchDec a) where
+instance (FreeIn a) => FreeIn (MatchDec a) where
   freeIn' (MatchDec r _) = freeIn' r
 
 -- | Either return precomputed free names stored in the attribute, or
 -- the freshly computed names.  Relies on lazy evaluation to avoid the
 -- work.
-class FreeIn dec => FreeDec dec where
+class (FreeIn dec) => FreeDec dec where
   precomputed :: dec -> FV -> FV
   precomputed _ = id
 
@@ -412,11 +413,11 @@ instance FreeDec ()
 instance (FreeDec a, FreeIn b) => FreeDec (a, b) where
   precomputed (a, _) = precomputed a
 
-instance FreeDec a => FreeDec [a] where
+instance (FreeDec a) => FreeDec [a] where
   precomputed [] = id
   precomputed (a : _) = precomputed a
 
-instance FreeDec a => FreeDec (Maybe a) where
+instance (FreeDec a) => FreeDec (Maybe a) where
   precomputed Nothing = id
   precomputed (Just a) = precomputed a
 

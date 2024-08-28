@@ -34,14 +34,14 @@ import Futhark.Util (splitFromEnd)
 -- | An encoding of a sequential do-loop with no existential context,
 -- alongside its result pattern.
 data SeqLoop
-  = SeqLoop [Int] (Pat Type) [(FParam SOACS, SubExp)] (LoopForm SOACS) (Body SOACS)
+  = SeqLoop [Int] (Pat Type) [(FParam SOACS, SubExp)] LoopForm (Body SOACS)
 
 loopPerm :: SeqLoop -> [Int]
 loopPerm (SeqLoop perm _ _ _ _) = perm
 
 seqLoopStm :: SeqLoop -> Stm SOACS
 seqLoopStm (SeqLoop _ pat merge form body) =
-  Let pat (defAux ()) $ DoLoop merge form body
+  Let pat (defAux ()) $ Loop merge form body
 
 interchangeLoop ::
   (MonadBuilder m, Rep m ~ SOACS) =>
@@ -74,7 +74,7 @@ interchangeLoop
         localScope (scopeOfLParams new_params) $
           unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
-    let lam = Lambda (params' <> new_params) body rettype
+    let lam = Lambda (params' <> new_params) rettype body
         map_stm =
           Let loop_pat_expanded aux $
             Op $
@@ -131,7 +131,10 @@ maybeCopyInitial isMapInput (SeqLoop perm loop_pat merge form body) =
     f (p, Var arg)
       | isMapInput arg,
         Array {} <- paramType p =
-          (p,) <$> letSubExp (baseString (paramName p) <> "_inter_copy") (BasicOp $ Copy arg)
+          (p,)
+            <$> letSubExp
+              (baseString (paramName p) <> "_inter_copy")
+              (BasicOp $ Replicate mempty $ Var arg)
     f (p, arg) =
       pure (p, arg)
 
@@ -143,8 +146,8 @@ manifestMaps (n : ns) res stms =
       lam =
         Lambda
           params
-          (mkBody stms' $ varsRes res')
           (map rowType $ patTypes (loopNestingPat n))
+          (mkBody stms' $ varsRes res')
    in ( patNames $ loopNestingPat n,
         oneStm $
           Let (loopNestingPat n) (loopNestingAux n) $
@@ -211,7 +214,7 @@ interchangeBranch1
           Pat $ map (fmap (`arrayOfRow` w)) $ patElems branch_pat
 
         mkBranch branch = (renameBody =<<) $ do
-          let lam = Lambda params branch lam_ret
+          let lam = Lambda params lam_ret branch
               res = varsRes $ patNames branch_pat'
               map_stm = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
           pure $ mkBody (oneStm map_stm) res
@@ -259,7 +262,7 @@ interchangeWithAcc1
           Iota w (intConst Int64 0) (intConst Int64 1) Int64
       let (params, arrs) = unzip params_and_arrs
           maplam_ret = lambdaReturnType acc_lam
-          maplam = Lambda (iota_p : orig_acc_params ++ params) (lambdaBody acc_lam) maplam_ret
+          maplam = Lambda (iota_p : orig_acc_params ++ params) maplam_ret (lambdaBody acc_lam)
       auxing map_aux . fmap subExpsRes . letTupExp' "withacc_inter" $
         Op $
           Screma w (iota_w : map paramName acc_params ++ arrs) (mapSOAC maplam)
@@ -296,9 +299,9 @@ interchangeWithAcc1
       trParam :: Param (TypeBase shape u) -> Param (TypeBase shape u)
       trParam = fmap trType
 
-      trLam i (Lambda params body ret) =
+      trLam i (Lambda params ret body) =
         localScope (scopeOfLParams params) $
-          Lambda (map trParam params) <$> trBody i body <*> pure (map trType ret)
+          Lambda (map trParam params) (map trType ret) <$> trBody i body
 
       trBody i (Body dec stms res) =
         inScopeOf stms $ Body dec <$> traverse (trStm i) stms <*> pure res
@@ -313,14 +316,14 @@ interchangeWithAcc1
 
       trExp i (WithAcc acc_inputs lam) =
         WithAcc acc_inputs <$> trLam i lam
-      trExp i (BasicOp (UpdateAcc acc is ses)) = do
+      trExp i (BasicOp (UpdateAcc safety acc is ses)) = do
         acc_t <- lookupType acc
         pure $ case acc_t of
           Acc cert _ _ _
             | cert `elem` acc_certs ->
-                BasicOp $ UpdateAcc acc (i : is) ses
+                BasicOp $ UpdateAcc safety acc (i : is) ses
           _ ->
-            BasicOp $ UpdateAcc acc is ses
+            BasicOp $ UpdateAcc safety acc is ses
       trExp i e = mapExpM mapper e
         where
           mapper =

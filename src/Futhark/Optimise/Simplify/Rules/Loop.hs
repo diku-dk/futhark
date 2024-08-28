@@ -11,10 +11,8 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
-import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules.ClosedForm
-import Futhark.Optimise.Simplify.Rules.Index
 import Futhark.Transform.Rename
 
 -- This next one is tricky - it's easy enough to determine that some
@@ -24,8 +22,8 @@ import Futhark.Transform.Rename
 -- I do not claim that the current implementation of this rule is
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
-removeRedundantMergeVariables :: BuilderOps rep => BottomUpRuleDoLoop rep
-removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
+removeRedundantLoopParams :: (BuilderOps rep) => BottomUpRuleLoop rep
+removeRedundantLoopParams (_, used) pat aux (merge, form, body)
   | not $ all (usedAfterLoop . fst) merge =
       let necessaryForReturned =
             findNecessaryForReturned
@@ -63,7 +61,7 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
               body'' <- insertStmsM $ do
                 mapM_ (uncurry letBindNames) $ dummyStms discard_val
                 pure body'
-              auxing aux $ letBind pat' $ DoLoop merge' form body''
+              auxing aux $ letBind pat' $ Loop merge' form body''
   where
     pat_used = map (`UT.isUsedDirectly` used) $ patNames pat
     used_vals = map fst $ filter snd $ zip (map (paramName . fst) merge) pat_used
@@ -78,15 +76,15 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
     dummyStm ((p, e), _)
       | unique (paramDeclType p),
         Var v <- e =
-          ([paramName p], BasicOp $ Copy v)
+          ([paramName p], BasicOp $ Replicate mempty $ Var v)
       | otherwise = ([paramName p], BasicOp $ SubExp e)
-removeRedundantMergeVariables _ _ _ _ =
+removeRedundantLoopParams _ _ _ _ =
   Skip
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
-hoistLoopInvariantMergeVariables :: BuilderOps rep => TopDownRuleDoLoop rep
-hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
+hoistLoopInvariantLoopParams :: (BuilderOps rep) => TopDownRuleLoop rep
+hoistLoopInvariantLoopParams vtable pat aux (merge, form, loopbody) = do
   -- Figure out which of the elements of loopresult are
   -- loop-invariant, and hoist them out.
   let explpat = zip (patElems pat) $ map (paramName . fst) merge
@@ -101,11 +99,11 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
           explpat'' = map fst explpat'
       forM_ invariant $ \(v1, (v2, cs)) ->
         certifying cs $ letBindNames [identName v1] $ BasicOp $ SubExp v2
-      letBind (Pat explpat'') $ DoLoop merge' form loopbody'
+      letBind (Pat explpat'') $ Loop merge' form loopbody'
   where
     res = bodyResult loopbody
 
-    namesOfMergeParams = namesFromList $ map (paramName . fst) merge
+    namesOfLoopParams = namesFromList $ map (paramName . fst) merge
 
     removeFromResult cs (mergeParam, mergeInit) explpat' =
       case partition ((== paramName mergeParam) . snd) explpat' of
@@ -118,8 +116,6 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
       (pat_name, (mergeParam, mergeInit), resExp)
       (invariant, explpat', merge', resExps)
         | isInvariant,
-          -- Also do not remove the condition in a while-loop.
-          paramName mergeParam `notNameIn` freeIn form,
           -- Certificates must be available.
           all (`ST.elem` vtable) $ unCerts $ resCerts resExp =
             let (stm, explpat'') =
@@ -171,89 +167,22 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
         namesToList $
           freeIn mergeParam `namesSubtract` oneName (paramName mergeParam)
     invariantOrNotMergeParam namesOfInvariant name =
-      (name `notNameIn` namesOfMergeParams)
+      (name `notNameIn` namesOfLoopParams)
         || (name `nameIn` namesOfInvariant)
 
-simplifyClosedFormLoop :: BuilderOps rep => TopDownRuleDoLoop rep
-simplifyClosedFormLoop _ pat _ (val, ForLoop i it bound [], body) =
+simplifyClosedFormLoop :: (BuilderOps rep) => TopDownRuleLoop rep
+simplifyClosedFormLoop _ pat _ (val, ForLoop i it bound, body) =
   Simplify $ loopClosedForm pat val (oneName i) it bound body
 simplifyClosedFormLoop _ _ _ _ = Skip
 
-simplifyLoopVariables :: (BuilderOps rep, Aliased rep) => TopDownRuleDoLoop rep
-simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_vars), body)
-  | simplifiable <- map checkIfSimplifiable loop_vars,
-    not $ all isNothing simplifiable = Simplify $ do
-      -- Check if the simplifications throw away more information than
-      -- we are comfortable with at this stage.
-      (maybe_loop_vars, body_prefix_stms) <-
-        localScope (scopeOf form) $
-          unzip <$> zipWithM onLoopVar loop_vars simplifiable
-      if maybe_loop_vars == map Just loop_vars
-        then cannotSimplify
-        else do
-          body' <- buildBody_ $ do
-            addStms $ mconcat body_prefix_stms
-            bodyBind body
-          let form' = ForLoop i it num_iters $ catMaybes maybe_loop_vars
-          auxing aux $ letBind pat $ DoLoop merge form' body'
-  where
-    seType (Var v)
-      | v == i = Just $ Prim $ IntType it
-      | otherwise = ST.lookupType v vtable
-    seType (Constant v) = Just $ Prim $ primValueType v
-    consumed_in_body = consumedInBody body
-
-    vtable' = ST.fromScope (scopeOf form) <> vtable
-
-    checkIfSimplifiable (p, arr) =
-      simplifyIndexing
-        vtable'
-        seType
-        arr
-        (Slice (DimFix (Var i) : unSlice (fullSlice (paramType p) [])))
-        $ paramName p `nameIn` consumed_in_body
-
-    -- We only want this simplification if the result does not refer
-    -- to 'i' at all, or does not contain accesses.
-    onLoopVar (p, arr) Nothing =
-      pure (Just (p, arr), mempty)
-    onLoopVar (p, arr) (Just m) = do
-      (x, x_stms) <- collectStms m
-      case x of
-        IndexResult cs arr' (Slice slice)
-          | not $ any ((i `nameIn`) . freeIn) x_stms,
-            DimFix (Var j) : slice' <- slice,
-            j == i,
-            i `notNameIn` freeIn slice -> do
-              addStms x_stms
-              w <- arraySize 0 <$> lookupType arr'
-              for_in_partial <-
-                certifying cs $
-                  letExp "for_in_partial" . BasicOp . Index arr' . Slice $
-                    DimSlice (intConst Int64 0) w (intConst Int64 1) : slice'
-              pure (Just (p, for_in_partial), mempty)
-        SubExpResult cs se
-          | all (notIndex . stmExp) x_stms -> do
-              x_stms' <- collectStms_ $
-                certifying cs $ do
-                  addStms x_stms
-                  letBindNames [paramName p] $ BasicOp $ SubExp se
-              pure (Nothing, x_stms')
-        _ -> pure (Just (p, arr), mempty)
-
-    notIndex (BasicOp Index {}) = False
-    notIndex _ = True
-simplifyLoopVariables _ _ _ _ = Skip
-
 unroll ::
-  BuilderOps rep =>
+  (BuilderOps rep) =>
   Integer ->
   [(FParam rep, SubExpRes)] ->
   (VName, IntType, Integer) ->
-  [(LParam rep, VName)] ->
   Body rep ->
   RuleM rep [SubExpRes]
-unroll n merge (iv, it, i) loop_vars body
+unroll n merge (iv, it, i) body
   | i >= n =
       pure $ map snd merge
   | otherwise = do
@@ -263,10 +192,6 @@ unroll n merge (iv, it, i) loop_vars body
 
         letBindNames [iv] $ BasicOp $ SubExp $ intConst it i
 
-        forM_ loop_vars $ \(p, arr) ->
-          letBindNames [paramName p] . BasicOp . Index arr . Slice $
-            DimFix (intConst Int64 i) : unSlice (fullSlice (paramType p) [])
-
         -- Some of the sizes in the types here might be temporarily wrong
         -- until copy propagation fixes it up.
         pure body
@@ -275,31 +200,30 @@ unroll n merge (iv, it, i) loop_vars body
       addStms $ bodyStms iter_body'
 
       let merge' = zip (map fst merge) $ bodyResult iter_body'
-      unroll n merge' (iv, it, i + 1) loop_vars body
+      unroll n merge' (iv, it, i + 1) body
 
-simplifyKnownIterationLoop :: BuilderOps rep => TopDownRuleDoLoop rep
-simplifyKnownIterationLoop _ pat aux (merge, ForLoop i it (Constant iters) loop_vars, body)
+simplifyKnownIterationLoop :: (BuilderOps rep) => TopDownRuleLoop rep
+simplifyKnownIterationLoop _ pat aux (merge, ForLoop i it (Constant iters), body)
   | IntValue n <- iters,
     zeroIshInt n || oneIshInt n || "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
-      res <- unroll (valueIntegral n) (map (second subExpRes) merge) (i, it, 0) loop_vars body
+      res <- unroll (valueIntegral n) (map (second subExpRes) merge) (i, it, 0) body
       forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->
         certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 simplifyKnownIterationLoop _ _ _ _ =
   Skip
 
-topDownRules :: (BuilderOps rep, Aliased rep) => [TopDownRule rep]
+topDownRules :: (BuilderOps rep) => [TopDownRule rep]
 topDownRules =
-  [ RuleDoLoop hoistLoopInvariantMergeVariables,
-    RuleDoLoop simplifyClosedFormLoop,
-    RuleDoLoop simplifyKnownIterationLoop,
-    RuleDoLoop simplifyLoopVariables
+  [ RuleLoop hoistLoopInvariantLoopParams,
+    RuleLoop simplifyClosedFormLoop,
+    RuleLoop simplifyKnownIterationLoop
   ]
 
-bottomUpRules :: BuilderOps rep => [BottomUpRule rep]
+bottomUpRules :: (BuilderOps rep) => [BottomUpRule rep]
 bottomUpRules =
-  [ RuleDoLoop removeRedundantMergeVariables
+  [ RuleLoop removeRedundantLoopParams
   ]
 
 -- | Standard loop simplification rules.
-loopRules :: (BuilderOps rep, Aliased rep) => RuleBook rep
+loopRules :: (BuilderOps rep) => RuleBook rep
 loopRules = ruleBook topDownRules bottomUpRules

@@ -167,7 +167,7 @@ import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
-import Futhark.Pass.ExtractKernels.Intragroup
+import Futhark.Pass.ExtractKernels.Intrablock
 import Futhark.Pass.ExtractKernels.StreamKernel
 import Futhark.Pass.ExtractKernels.ToGPU
 import Futhark.Tools
@@ -279,7 +279,7 @@ unbalancedLambda orig_lam =
       w `subExpBound` bound
     unbalancedStm _ Op {} =
       False
-    unbalancedStm _ DoLoop {} = False
+    unbalancedStm _ Loop {} = False
     unbalancedStm bound (WithAcc _ lam) =
       unbalancedBody bound (lambdaBody lam)
     unbalancedStm bound (Match ses cases defbody _) =
@@ -289,8 +289,7 @@ unbalancedLambda orig_lam =
            )
     unbalancedStm _ (BasicOp _) =
       False
-    unbalancedStm _ (Apply fname _ _ _) =
-      not $ isBuiltInFunction fname
+    unbalancedStm _ Apply {} = False
 
 sequentialisedUnbalancedStm :: Stm SOACS -> DistribM (Maybe (Stms SOACS))
 sequentialisedUnbalancedStm (Let pat _ (Op soac@(Screma _ _ form)))
@@ -340,10 +339,32 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
     MatchDec (staticShapes (patTypes pat)) MatchEquiv
 
 transformLambda :: KernelPath -> Lambda SOACS -> DistribM (Lambda GPU)
-transformLambda path (Lambda params body ret) =
-  Lambda params
+transformLambda path (Lambda params ret body) =
+  Lambda params ret
     <$> localScope (scopeOfLParams params) (transformBody path body)
-    <*> pure ret
+
+versionScanRed ::
+  KernelPath ->
+  Pat Type ->
+  StmAux () ->
+  SubExp ->
+  Lambda SOACS ->
+  DistribM (Stms GPU) ->
+  DistribM (Body GPU) ->
+  ([(Name, Bool)] -> DistribM (Body GPU)) ->
+  DistribM (Stms GPU)
+versionScanRed path pat aux w map_lam paralleliseOuter outerParallelBody innerParallelBody =
+  if not (lambdaContainsParallelism map_lam)
+    || ("sequential_inner" `inAttrs` stmAuxAttrs aux)
+    then paralleliseOuter
+    else do
+      ((outer_suff, outer_suff_key), suff_stms) <-
+        sufficientParallelism "suff_outer_screma" [w] path Nothing
+
+      outer_stms <- outerParallelBody
+      inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
+
+      (suff_stms <>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
 
 transformStm :: KernelPath -> Stm SOACS -> DistribM GPUStms
 transformStm _ stm
@@ -363,34 +384,47 @@ transformStm path (Let pat aux (WithAcc inputs lam)) =
   where
     transformInput (shape, arrs, op) =
       (shape, arrs, fmap (first soacsLambdaToGPU) op)
-transformStm path (Let pat aux (DoLoop merge form body)) =
-  localScope (castScope (scopeOf form) <> scopeOfFParams params) $
-    oneStm . Let pat aux . DoLoop merge form' <$> transformBody path body
+transformStm path (Let pat aux (Loop merge form body)) =
+  localScope (scopeOfLoopForm form <> scopeOfFParams params) $
+    oneStm . Let pat aux . Loop merge form <$> transformBody path body
   where
     params = map fst merge
-    form' = case form of
-      WhileLoop cond ->
-        WhileLoop cond
-      ForLoop i it bound ps ->
-        ForLoop i it bound ps
 transformStm path (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form =
       onMap path $ MapLoop pat aux w lam arrs
-transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w arrs form)))
+transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
   | Just scans <- isScanSOAC form,
     Scan scan_lam nes <- singleScan scans,
-    Just do_iswim <- iswim res_pat w scan_lam $ zip nes arrs = do
+    Just do_iswim <- iswim pat w scan_lam $ zip nes arrs = do
       types <- asksScope scopeForSOACs
       transformStms path . stmsToList . snd =<< runBuilderT (certifying cs do_iswim) types
-  | Just (scans, map_lam) <- isScanomapSOAC form = runBuilder_ $ do
-      scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
-        (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
-        let scan_lam'' = soacsLambdaToGPU scan_lam'
-        pure $ SegBinOp Noncommutative scan_lam'' nes' shape
-      let map_lam_sequential = soacsLambdaToGPU map_lam
-      lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
-      addStms . fmap (certify cs)
-        =<< segScan lvl res_pat mempty w scan_ops map_lam_sequential arrs [] []
+  | Just (scans, map_lam) <- isScanomapSOAC form = do
+      let paralleliseOuter = runBuilder_ $ do
+            scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
+              (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
+              let scan_lam'' = soacsLambdaToGPU scan_lam'
+              pure $ SegBinOp Noncommutative scan_lam'' nes' shape
+            let map_lam_sequential = soacsLambdaToGPU map_lam
+            lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
+            addStms . fmap (certify cs)
+              =<< segScan lvl pat mempty w scan_ops map_lam_sequential arrs [] []
+
+          outerParallelBody =
+            renameBody
+              =<< (mkBody <$> paralleliseOuter <*> pure (varsRes (patNames pat)))
+
+          paralleliseInner path' = do
+            (mapstm, scanstm) <-
+              scanomapToMapAndScan pat (w, scans, map_lam, arrs)
+            types <- asksScope scopeForSOACs
+            transformStms path' . stmsToList <=< (`runBuilderT_` types) $
+              addStms =<< simplifyStms (stmsFromList [certify cs mapstm, certify cs scanstm])
+
+          innerParallelBody path' =
+            renameBody
+              =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
+
+      versionScanRed path pat aux w map_lam paralleliseOuter outerParallelBody innerParallelBody
 transformStm path (Let res_pat aux (Op (Screma w arrs form)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm'
@@ -430,18 +464,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
             renameBody
               =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
-      if not (lambdaContainsParallelism map_lam)
-        || "sequential_inner"
-        `inAttrs` stmAuxAttrs aux
-        then paralleliseOuter
-        else do
-          ((outer_suff, outer_suff_key), suff_stms) <-
-            sufficientParallelism "suff_outer_redomap" [w] path Nothing
-
-          outer_stms <- outerParallelBody
-          inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
-
-          (suff_stms <>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
+      versionScanRed path pat aux w map_lam paralleliseOuter outerParallelBody innerParallelBody
 transformStm path (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) = do
   -- This screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
@@ -454,19 +477,66 @@ transformStm path (Let pat _ (Op (Stream w arrs nes fold_fun))) = do
   types <- asksScope scopeForSOACs
   transformStms path . stmsToList . snd
     =<< runBuilderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
+--
+-- When we are scattering into a multidimensional array, we want to
+-- fully parallelise, such that we do not have threads writing
+-- potentially large rows. We do this by fissioning the scatter into a
+-- map part and a scatter part, where the former is flattened as
+-- usual, and the latter has a thread per primitive element to be
+-- written.
+--
+-- TODO: this could be slightly smarter. If we are dealing with a
+-- horizontally fused Scatter that targets both single- and
+-- multi-dimensional arrays, we could handle the former in the map
+-- stage. This would save us from having to store all the intermediate
+-- results to memory. Troels suspects such cases are very rare, but
+-- they may appear some day.
+transformStm path (Let pat aux (Op (Scatter w arrs lam as)))
+  | not $ all primType $ lambdaReturnType lam = do
+      -- Produce map stage.
+      map_pat <- fmap Pat $ forM (lambdaReturnType lam) $ \t ->
+        PatElem <$> newVName "scatter_tmp" <*> pure (t `arrayOfRow` w)
+      map_stms <- onMap path $ MapLoop map_pat aux w lam arrs
+
+      -- Now do the scatters.
+      runBuilder_ $ do
+        addStms map_stms
+        zipWithM_ doScatter (patElems pat) $ groupScatterResults as $ patNames map_pat
+  where
+    -- Generate code for a scatter where each thread writes only a scalar.
+    doScatter res_pe (scatter_space, arr, is_vs) = do
+      kernel_i <- newVName "write_i"
+      arr_t <- lookupType arr
+      val_t <- stripArray (shapeRank scatter_space) <$> lookupType arr
+      val_is <- replicateM (arrayRank val_t) (newVName "val_i")
+      (kret, kstms) <- collectStms $ do
+        is_vs' <- forM is_vs $ \(is, v) -> do
+          v' <- letSubExp (baseString v <> "_elem") $ BasicOp $ Index v $ Slice $ map (DimFix . Var) $ kernel_i : val_is
+          is' <- forM is $ \i' ->
+            letSubExp (baseString i' <> "_i") $ BasicOp $ Index i' $ Slice [DimFix $ Var kernel_i]
+          pure (Slice $ map DimFix $ is' <> map Var val_is, v')
+        pure $ WriteReturns mempty arr is_vs'
+      (kernel, stms) <-
+        mapKernel
+          segThreadCapped
+          ((kernel_i, w) : zip val_is (arrayDims val_t))
+          mempty
+          [arr_t]
+          (KernelBody () kstms [kret])
+      addStms stms
+      letBind (Pat [res_pe]) $ Op $ SegOp kernel
+--
 transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) = runBuilder_ $ do
   let lam' = soacsLambdaToGPU lam
   write_i <- newVName "write_i"
-  let (as_ws, _, _) = unzip3 as
-      kstms = bodyStms $ lambdaBody lam'
-      krets = do
-        (a_w, a, is_vs) <- groupScatterResults as $ bodyResult $ lambdaBody lam'
+  let krets = do
+        (_a_w, a, is_vs) <- groupScatterResults as $ bodyResult $ lambdaBody lam'
         let res_cs =
               foldMap (foldMap resCerts . fst) is_vs
                 <> foldMap (resCerts . snd) is_vs
             is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
-        pure $ WriteReturns res_cs a_w a is_vs'
-      body = KernelBody () kstms krets
+        pure $ WriteReturns res_cs a is_vs'
+      body = KernelBody () (bodyStms $ lambdaBody lam') krets
       inputs = do
         (p, p_a) <- zip (lambdaParams lam') ivs
         pure $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
@@ -475,7 +545,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) = runBuilde
       segThreadCapped
       [(write_i, w)]
       inputs
-      (zipWith (stripArray . length) as_ws $ patTypes pat)
+      (patTypes pat)
       body
   certifying cs $ do
     addStms stms
@@ -506,8 +576,8 @@ sufficientParallelism desc ws path def =
 -- | Intra-group parallelism is worthwhile if the lambda contains more
 -- than one instance of non-map nested parallelism, or any nested
 -- parallelism inside a loop.
-worthIntraGroup :: Lambda SOACS -> Bool
-worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
+worthIntrablock :: Lambda SOACS -> Bool
+worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
   where
     bodyInterest body =
       sum $ interest <$> bodyStms body
@@ -519,7 +589,7 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
           mapLike w lam'
       | Op (Scatter w _ lam' _) <- stmExp stm =
           mapLike w lam'
-      | DoLoop _ _ body <- stmExp stm =
+      | Loop _ _ body <- stmExp stm =
           bodyInterest body * 10
       | Match _ cases defbody _ <- stmExp stm =
           foldl
@@ -548,34 +618,34 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
 -- | A lambda is worth sequentialising if it contains enough nested
 -- parallelism of an interesting kind.
 worthSequentialising :: Lambda SOACS -> Bool
-worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
+worthSequentialising lam = bodyInterest (0 :: Int) (lambdaBody lam) > 1
   where
-    bodyInterest body =
-      sum $ interest <$> bodyStms body
-    interest stm
+    bodyInterest depth body =
+      sum $ interest depth <$> bodyStms body
+    interest depth stm
       | "sequential" `inAttrs` attrs =
           0 :: Int
       | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm,
         isJust $ isMapSOAC form =
           if sequential_inner
             then 0
-            else bodyInterest (lambdaBody lam')
+            else bodyInterest (depth + 1) (lambdaBody lam')
       | Op Scatter {} <- stmExp stm =
           0 -- Basically a map.
-      | DoLoop _ ForLoop {} body <- stmExp stm =
-          bodyInterest body * 10
+      | Loop _ ForLoop {} body <- stmExp stm =
+          bodyInterest (depth + 1) body * 10
       | WithAcc _ withacc_lam <- stmExp stm =
-          bodyInterest (lambdaBody withacc_lam)
+          bodyInterest (depth + 1) (lambdaBody withacc_lam)
       | Op (Screma _ _ form@(ScremaForm _ _ lam')) <- stmExp stm =
           1
-            + bodyInterest (lambdaBody lam')
+            + bodyInterest (depth + 1) (lambdaBody lam')
             +
-            -- Give this a bigger score if it's a redomap, as these
-            -- are often tileable and thus benefit more from
-            -- sequentialisation.
-            case isRedomapSOAC form of
-              Just _ -> 1
-              Nothing -> 0
+            -- Give this a bigger score if it's a redomap just inside
+            -- the the outer lambda, as these are often tileable and
+            -- thus benefit more from sequentialisation.
+            case (isRedomapSOAC form, depth) of
+              (Just _, 0) -> 1
+              _ -> 0
       | otherwise =
           0
       where
@@ -634,7 +704,7 @@ mayExploitOuter attrs =
     AttrComp "incremental_flattening" ["no_outer"]
       `inAttrs` attrs
       || AttrComp "incremental_flattening" ["only_inner"]
-      `inAttrs` attrs
+        `inAttrs` attrs
 
 mayExploitIntra :: Attrs -> Bool
 mayExploitIntra attrs =
@@ -642,7 +712,7 @@ mayExploitIntra attrs =
     AttrComp "incremental_flattening" ["no_intra"]
       `inAttrs` attrs
       || AttrComp "incremental_flattening" ["only_inner"]
-      `inAttrs` attrs
+        `inAttrs` attrs
 
 -- The minimum amount of inner parallelism we require (by default) in
 -- intra-group versions.  Less than this is usually pointless on a GPU
@@ -666,11 +736,11 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
   types <- askScope
 
   let only_intra = onlyExploitIntra (stmAuxAttrs aux)
-      may_intra = worthIntraGroup lam && mayExploitIntra attrs
+      may_intra = worthIntrablock lam && mayExploitIntra attrs
 
   intra <-
     if only_intra || may_intra
-      then flip runReaderT types $ intraGroupParallelise loopnest lam
+      then flip runReaderT types $ intrablockParallelise loopnest lam
       else pure Nothing
 
   case intra of
@@ -761,7 +831,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
 
     checkSuffIntraPar
       path'
-      ((_intra_min_par, intra_avail_par), group_size, _, intra_prelude, intra_stms) = do
+      ((_intra_min_par, intra_avail_par), tblock_size, _, intra_prelude, intra_stms) = do
         -- We must check that all intra-group parallelism fits in a group.
         ((intra_ok, intra_suff_key), intra_suff_stms) <- do
           ((intra_suff, suff_key), check_suff_stms) <-
@@ -774,12 +844,12 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
           runBuilder $ do
             addStms intra_prelude
 
-            max_group_size <-
-              letSubExp "max_group_size" $ Op $ SizeOp $ GetSizeMax SizeGroup
+            max_tblock_size <-
+              letSubExp "max_tblock_size" $ Op $ SizeOp $ GetSizeMax SizeThreadBlock
             fits <-
               letSubExp "fits" $
                 BasicOp $
-                  CmpOp (CmpSle Int64) group_size max_group_size
+                  CmpOp (CmpSle Int64) tblock_size max_tblock_size
 
             addStms check_suff_stms
 

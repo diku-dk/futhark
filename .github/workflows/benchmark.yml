@@ -2,6 +2,7 @@ name: Benchmark
 
 on:
   pull_request:
+    types: [ labeled, synchronize ]
 
   push:
     branches: [ master ]
@@ -10,15 +11,16 @@ on:
 
 jobs:
   build-linux-nix:
+    if: github.repository == 'diku-dk/futhark' && (!github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'run-benchmarks') || github.ref == 'refs/heads/master')
     runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v3
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v20
+      uses: cachix/install-nix-action@v27
 
-    - uses: cachix/cachix-action@v12
+    - uses: cachix/cachix-action@v15
       with:
         name: futhark
         signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
@@ -34,7 +36,7 @@ jobs:
   benchmark-MI100-opencl:
     runs-on: MI100
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+
     env:
       TMPDIR: "/scratch"
     steps:
@@ -47,10 +49,26 @@ jobs:
         backend: opencl
         system: MI100
 
+  benchmark-MI100-hip:
+    runs-on: MI100
+    needs: [build-linux-nix]
+
+    env:
+      TMPDIR: "/scratch"
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: hip
+        system: MI100
+
   benchmark-A100:
     runs-on: hendrix
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+
     steps:
     - uses: actions/checkout@v3
       with:
@@ -60,49 +78,49 @@ jobs:
       with:
         backend: opencl
         system: A100
-        slurm-options: -p gpu --gres=gpu:a100:1 --job-name=fut-opencl-A100
+        slurm-options: -p gpu --mem=16G  --gres=gpu:a100:1 --job-name=fut-opencl-A100 --exclude=hendrixgpu14fl
     - uses: ./.github/actions/benchmark
       with:
         backend: cuda
         system: A100
-        slurm-options: -p gpu --gres=gpu:a100:1 --job-name=fut-cuda-A100
+        slurm-options: -p gpu --mem=16G --gres=gpu:a100:1 --job-name=fut-cuda-A100 --exclude=hendrixgpu14fl
 
-  benchmark-titanx-cuda:
-    runs-on: hendrix
-    needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
-    steps:
-    - uses: actions/checkout@v3
-      with:
-        submodules: recursive
-        fetch-depth: 0
-    - uses: ./.github/actions/benchmark
-      with:
-        backend: cuda
-        system: titanx
-        slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-cuda-titanx --exclude=hendrixgpu05fl,hendrixgpu06fl
-        futhark-options: --exclude=mem_16gb
+  # benchmark-titanx-cuda:
+  #   runs-on: hendrix
+  #   needs: [build-linux-nix]
 
-  benchmark-titanx-opencl:
-    runs-on: hendrix
-    needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
-    steps:
-    - uses: actions/checkout@v3
-      with:
-        submodules: recursive
-        fetch-depth: 0
-    - uses: ./.github/actions/benchmark
-      with:
-        backend: opencl
-        system: titanx
-        slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-opencl-titanx --exclude=hendrixgpu05fl,hendrixgpu06fl
-        futhark-options: --exclude=mem_16gb
+  #   steps:
+  #   - uses: actions/checkout@v3
+  #     with:
+  #       submodules: recursive
+  #       fetch-depth: 0
+  #   - uses: ./.github/actions/benchmark
+  #     with:
+  #       backend: cuda
+  #       system: titanx
+  #       slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-cuda-titanx --exclude=hendrixgpu05fl,hendrixgpu06fl
+  #       futhark-options: --exclude=mem_16gb
+
+  # benchmark-titanx-opencl:
+  #   runs-on: hendrix
+  #   needs: [build-linux-nix]
+
+  #   steps:
+  #   - uses: actions/checkout@v3
+  #     with:
+  #       submodules: recursive
+  #       fetch-depth: 0
+  #   - uses: ./.github/actions/benchmark
+  #     with:
+  #       backend: opencl
+  #       system: titanx
+  #       slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-opencl-titanx --exclude=hendrixgpu05fl,hendrixgpu06fl
+  #       futhark-options: --exclude=mem_16gb
 
   benchmark-titanrtx-cuda:
     runs-on: hendrix
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+
     steps:
     - uses: actions/checkout@v3
       with:
@@ -112,12 +130,12 @@ jobs:
       with:
         backend: cuda
         system: titanrtx
-        slurm-options: -p gpu --gres=gpu:titanrtx:1 --job-name=fut-cuda-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --mem=16G --gres=gpu:titanrtx:1 --job-name=fut-cuda-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   benchmark-titanrtx-opencl:
     runs-on: hendrix
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+
     steps:
     - uses: actions/checkout@v3
       with:
@@ -127,11 +145,18 @@ jobs:
       with:
         backend: opencl
         system: titanrtx
-        slurm-options: -p gpu --gres=gpu:titanrtx:1 --job-name=fut-opencl-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --mem=16G --gres=gpu:titanrtx:1 --job-name=fut-opencl-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   benchmark-results:
     runs-on: ubuntu-22.04
-    needs: [benchmark-A100, benchmark-MI100-opencl, benchmark-titanx-cuda, benchmark-titanx-opencl, benchmark-titanrtx-cuda, benchmark-titanrtx-opencl]
+    needs:
+      - benchmark-A100
+#      - benchmark-MI100-opencl
+#      - benchmark-MI100-hip
+#     - benchmark-titanx-cuda
+#     - benchmark-titanx-opencl
+      - benchmark-titanrtx-cuda
+      - benchmark-titanrtx-opencl
     if: github.ref == 'refs/heads/master'
     steps:
     - name: Install SSH key

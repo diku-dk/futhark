@@ -36,6 +36,13 @@ genericOptions =
         optionAction = [C.cstm|futhark_context_config_set_logging(cfg, 1);|]
       },
     Option
+      { optionLongName = "profile",
+        optionShortName = Just 'P',
+        optionArgument = NoArgument,
+        optionDescription = "Enable the collection of profiling information.",
+        optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+      },
+    Option
       { optionLongName = "help",
         optionShortName = Just 'h',
         optionArgument = NoArgument,
@@ -149,10 +156,10 @@ typeBoilerplate _ (tname, TypeArray _ et rank ops) =
                 .aux = &$id:aux_name
               };|]
       )
-typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record) =
+typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
   let type_name = typeStructName tname
       aux_name = type_name <> "_aux"
-      (record_edecls, record_init) = recordDefs type_name record
+      (record_edecls, record_init) = recordDefs type_name extra_ops
    in ( [C.cedecl|const struct type $id:type_name;|],
         [C.cinit|&$id:type_name|],
         record_edecls
@@ -172,8 +179,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record) =
               };|]
       )
   where
-    recordDefs _ Nothing = ([], [C.cinit|NULL|])
-    recordDefs type_name (Just (RecordOps fields new)) =
+    recordDefs type_name (Just (OpaqueRecord (RecordOps fields new))) =
       let new_wrap = new <> "_wrap"
           record_name = type_name <> "_record"
           fields_name = type_name <> "_fields"
@@ -205,6 +211,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record) =
              };|],
             [C.cinit|&$id:record_name|]
           )
+    recordDefs _ _ = ([], [C.cinit|NULL|])
 
 entryTypeBoilerplate :: Manifest -> ([C.Definition], [C.Initializer], [C.Definition])
 entryTypeBoilerplate manifest =

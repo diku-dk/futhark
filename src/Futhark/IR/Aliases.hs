@@ -1,6 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
 -- | A representation where all patterns are annotated with aliasing
 -- information.  It also records consumption of variables in bodies.
@@ -132,22 +131,28 @@ withoutAliases m = do
 
 instance
   ( ASTRep rep,
-    AliasedOp (OpC rep (Aliases rep)),
-    IsOp (OpC rep (Aliases rep))
+    AliasedOp (OpC rep),
+    ASTConstraints (OpC rep (Aliases rep))
   ) =>
   ASTRep (Aliases rep)
   where
   expTypesFromPat =
     withoutAliases . expTypesFromPat . removePatAliases
 
-instance (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) => Aliased (Aliases rep) where
+instance
+  ( ASTRep rep,
+    AliasedOp (OpC rep),
+    ASTConstraints (OpC rep (Aliases rep))
+  ) =>
+  Aliased (Aliases rep)
+  where
   bodyAliases = map unAliases . fst . fst . bodyDec
   consumedInBody = unAliases . snd . fst . bodyDec
 
 instance
   ( ASTRep rep,
-    AliasedOp (OpC rep (Aliases rep)),
-    Pretty (OpC rep (Aliases rep))
+    AliasedOp (OpC rep),
+    ASTConstraints (OpC rep (Aliases rep))
   ) =>
   PrettyRep (Aliases rep)
   where
@@ -157,7 +162,7 @@ instance
     where
       merge_dec =
         case e of
-          DoLoop merge _ body ->
+          Loop merge _ body ->
             let mergeParamAliases fparam als
                   | primType (paramType fparam) =
                       Nothing
@@ -179,7 +184,7 @@ maybeComment :: [PP.Doc a] -> Maybe (PP.Doc a)
 maybeComment [] = Nothing
 maybeComment cs = Just $ PP.stack cs
 
-resultAliasComment :: PP.Pretty a => a -> Names -> Maybe (PP.Doc ann)
+resultAliasComment :: (PP.Pretty a) => a -> Names -> Maybe (PP.Doc ann)
 resultAliasComment name als =
   case namesToList als of
     [] -> Nothing
@@ -191,7 +196,7 @@ resultAliasComment name als =
             <> " aliases "
             <> PP.commasep (map PP.pretty als')
 
-removeAliases :: RephraseOp (OpC rep) => Rephraser Identity (Aliases rep) rep
+removeAliases :: (RephraseOp (OpC rep)) => Rephraser Identity (Aliases rep) rep
 removeAliases =
   Rephraser
     { rephraseExpDec = pure . snd,
@@ -215,42 +220,42 @@ removeScopeAliases = M.map unAlias
 
 -- | Remove alias information from a program.
 removeProgAliases ::
-  RephraseOp (OpC rep) =>
+  (RephraseOp (OpC rep)) =>
   Prog (Aliases rep) ->
   Prog rep
 removeProgAliases = runIdentity . rephraseProg removeAliases
 
 -- | Remove alias information from a function.
 removeFunDefAliases ::
-  RephraseOp (OpC rep) =>
+  (RephraseOp (OpC rep)) =>
   FunDef (Aliases rep) ->
   FunDef rep
 removeFunDefAliases = runIdentity . rephraseFunDef removeAliases
 
 -- | Remove alias information from an expression.
 removeExpAliases ::
-  RephraseOp (OpC rep) =>
+  (RephraseOp (OpC rep)) =>
   Exp (Aliases rep) ->
   Exp rep
 removeExpAliases = runIdentity . rephraseExp removeAliases
 
 -- | Remove alias information from statements.
 removeStmAliases ::
-  RephraseOp (OpC rep) =>
+  (RephraseOp (OpC rep)) =>
   Stm (Aliases rep) ->
   Stm rep
 removeStmAliases = runIdentity . rephraseStm removeAliases
 
 -- | Remove alias information from body.
 removeBodyAliases ::
-  RephraseOp (OpC rep) =>
+  (RephraseOp (OpC rep)) =>
   Body (Aliases rep) ->
   Body rep
 removeBodyAliases = runIdentity . rephraseBody removeAliases
 
 -- | Remove alias information from lambda.
 removeLambdaAliases ::
-  RephraseOp (OpC rep) =>
+  (RephraseOp (OpC rep)) =>
   Lambda (Aliases rep) ->
   Lambda rep
 removeLambdaAliases = runIdentity . rephraseLambda removeAliases
@@ -264,7 +269,7 @@ removePatAliases = runIdentity . rephrasePat (pure . snd)
 -- | Augment a body decoration with aliasing information provided by
 -- the statements and result of that body.
 mkAliasedBody ::
-  (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) =>
+  (ASTRep rep, AliasedOp (OpC rep), ASTConstraints (OpC rep (Aliases rep))) =>
   BodyDec rep ->
   Stms (Aliases rep) ->
   Result ->
@@ -296,7 +301,7 @@ mkAliasedPat (Pat pes) e =
 -- in scope outside of it.  Note that this does *not* include aliases
 -- of results that are not bound in the statements!
 mkBodyAliasing ::
-  Aliased rep =>
+  (Aliased rep) =>
   Stms rep ->
   Result ->
   BodyAliasing
@@ -313,7 +318,7 @@ mkBodyAliasing stms res =
 -- | The aliases of the result and everything consumed in the given
 -- statements.
 mkStmsAliases ::
-  Aliased rep =>
+  (Aliased rep) =>
   Stms rep ->
   Result ->
   ([Names], Names)
@@ -338,7 +343,7 @@ type AliasesAndConsumed =
   )
 
 -- | The variables consumed in these statements.
-consumedInStms :: Aliased rep => Stms rep -> Names
+consumedInStms :: (Aliased rep) => Stms rep -> Names
 consumedInStms = snd . flip mkStmsAliases []
 
 -- | A helper function for computing the aliases of a sequence of
@@ -348,7 +353,7 @@ consumedInStms = snd . flip mkStmsAliases []
 -- state.  The main thing this function provides is proper handling of
 -- transitivity and "reverse" aliases.
 trackAliases ::
-  Aliased rep =>
+  (Aliased rep) =>
   AliasesAndConsumed ->
   Stm rep ->
   AliasesAndConsumed
@@ -370,7 +375,7 @@ trackAliases (aliasmap, consumed) stm =
     look k = M.findWithDefault mempty k aliasmap
 
 mkAliasedStm ::
-  (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) =>
+  (ASTRep rep, AliasedOp (OpC rep), ASTConstraints (OpC rep (Aliases rep))) =>
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Aliases rep) ->
@@ -381,7 +386,13 @@ mkAliasedStm pat (StmAux cs attrs dec) e =
     (StmAux cs attrs (AliasDec $ consumedInExp e, dec))
     e
 
-instance (Buildable rep, AliasedOp (OpC rep (Aliases rep))) => Buildable (Aliases rep) where
+instance
+  ( Buildable rep,
+    AliasedOp (OpC rep),
+    ASTConstraints (OpC rep (Aliases rep))
+  ) =>
+  Buildable (Aliases rep)
+  where
   mkExpDec pat e =
     let dec = mkExpDec (removePatAliases pat) $ removeExpAliases e
      in (AliasDec $ consumedInExp e, dec)
@@ -401,7 +412,7 @@ instance (Buildable rep, AliasedOp (OpC rep (Aliases rep))) => Buildable (Aliase
 
 instance
   ( ASTRep rep,
-    AliasedOp (OpC rep (Aliases rep)),
+    AliasedOp (OpC rep),
     Buildable (Aliases rep)
   ) =>
   BuilderOps (Aliases rep)
@@ -411,7 +422,8 @@ type AliasableRep rep =
   ( ASTRep rep,
     RephraseOp (OpC rep),
     CanBeAliased (OpC rep),
-    AliasedOp (OpC rep (Aliases rep))
+    AliasedOp (OpC rep),
+    ASTConstraints (OpC rep (Aliases rep))
   )
 
 -- | The class of operations that can be given aliasing information.
@@ -420,7 +432,7 @@ type AliasableRep rep =
 class CanBeAliased op where
   -- | Add aliases to this op.
   addOpAliases ::
-    AliasableRep rep => AliasTable -> op rep -> op (Aliases rep)
+    (AliasableRep rep) => AliasTable -> op rep -> op (Aliases rep)
 
 instance CanBeAliased NoOp where
   addOpAliases _ NoOp = NoOp

@@ -26,6 +26,7 @@ module Futhark.IR.TypeCheck
     checkExp,
     checkStms,
     checkStm,
+    checkSlice,
     checkType,
     checkExtType,
     matchExtPat,
@@ -46,11 +47,11 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Parallel.Strategies
+import Data.Bifunctor (first)
 import Data.List (find, intercalate, isPrefixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.Analysis.Alias
 import Futhark.Analysis.PrimExp
@@ -79,7 +80,7 @@ data ErrorCase rep
   | NotAnArray VName Type
   | PermutationError [Int] Int (Maybe VName)
 
-instance Checkable rep => Show (ErrorCase rep) where
+instance (Checkable rep) => Show (ErrorCase rep) where
   show (TypeError msg) =
     "Type error:\n" ++ T.unpack msg
   show (UnexpectedType e _ []) =
@@ -102,7 +103,7 @@ instance Checkable rep => Show (ErrorCase rep) where
       ++ "\nBut body has type\n  "
       ++ T.unpack (prettyTuple bodytype)
   show (DupDefinitionError name) =
-    "Duplicate definition of function " ++ nameToString name ++ ""
+    "Duplicate definition of function " ++ nameToString name
   show (DupParamError funname paramname) =
     "Parameter "
       ++ prettyString paramname
@@ -181,7 +182,7 @@ instance Checkable rep => Show (ErrorCase rep) where
 -- | A type error.
 data TypeError rep = Error [T.Text] (ErrorCase rep)
 
-instance Checkable rep => Show (TypeError rep) where
+instance (Checkable rep) => Show (TypeError rep) where
   show (Error [] err) =
     show err
   show (Error msgs err) =
@@ -189,7 +190,7 @@ instance Checkable rep => Show (TypeError rep) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunBinding rep = ([RetType (Aliases rep)], [FParam (Aliases rep)])
+type FunBinding rep = ([(RetType (Aliases rep), RetAls)], [FParam (Aliases rep)])
 
 type VarBinding rep = NameInfo (Aliases rep)
 
@@ -297,7 +298,7 @@ newtype TypeM rep a
     )
 
 instance
-  Checkable rep =>
+  (Checkable rep) =>
   HasScope (Aliases rep) (TypeM rep)
   where
   lookupType = fmap typeOf . lookupVar
@@ -331,7 +332,7 @@ context ::
   TypeM rep a
 context s = local $ \env -> env {envContext = s : envContext env}
 
-message :: Pretty a => T.Text -> a -> T.Text
+message :: (Pretty a) => T.Text -> a -> T.Text
 message s x = docText $ pretty s <+> align (pretty x)
 
 -- | Mark a name as bound.  If the name has been bound previously in
@@ -349,7 +350,7 @@ occur = tell . Consumption . filter (not . nullOccurence)
 -- | Proclaim that we have made read-only use of the given variable.
 -- No-op unless the variable is array-typed.
 observe ::
-  Checkable rep =>
+  (Checkable rep) =>
   VName ->
   TypeM rep ()
 observe name = do
@@ -358,7 +359,7 @@ observe name = do
     occur [observation $ oneName name <> aliases dec]
 
 -- | Proclaim that we have written to the given variables.
-consume :: Checkable rep => Names -> TypeM rep ()
+consume :: (Checkable rep) => Names -> TypeM rep ()
 consume als = do
   scope <- askScope
   let isArray = maybe False (not . primType . typeOf) . (`M.lookup` scope)
@@ -433,24 +434,24 @@ expandAliases names env = names <> aliasesOfAliases
       _ -> mempty
 
 binding ::
-  Checkable rep =>
+  (Checkable rep) =>
   Scope (Aliases rep) ->
   TypeM rep a ->
   TypeM rep a
 binding stms = check . local (`bindVars` stms)
   where
-    bindVars = M.foldlWithKey' bindVar
+    bindVars orig_env = M.foldlWithKey' (bindVar orig_env) orig_env
     boundnames = M.keys stms
 
-    bindVar env name (LetName (AliasDec als, dec)) =
+    bindVar orig_env env name (LetName (AliasDec als, dec)) =
       let als'
             | primType (typeOf dec) = mempty
-            | otherwise = expandAliases als env
+            | otherwise = expandAliases als orig_env
        in env
             { envVtable =
                 M.insert name (LetName (AliasDec als', dec)) $ envVtable env
             }
-    bindVar env name dec =
+    bindVar _ env name dec =
       env {envVtable = M.insert name dec $ envVtable env}
 
     -- Check whether the bound variables have been used correctly
@@ -468,7 +469,7 @@ lookupVar name = do
     Nothing -> bad $ UnknownVariableError name
     Just dec -> pure dec
 
-lookupAliases :: Checkable rep => VName -> TypeM rep Names
+lookupAliases :: (Checkable rep) => VName -> TypeM rep Names
 lookupAliases name = do
   info <- lookupVar name
   pure $
@@ -480,26 +481,26 @@ aliases :: NameInfo (Aliases rep) -> Names
 aliases (LetName (als, _)) = unAliases als
 aliases _ = mempty
 
-subExpAliasesM :: Checkable rep => SubExp -> TypeM rep Names
+subExpAliasesM :: (Checkable rep) => SubExp -> TypeM rep Names
 subExpAliasesM Constant {} = pure mempty
 subExpAliasesM (Var v) = lookupAliases v
 
 lookupFun ::
-  Checkable rep =>
+  (Checkable rep) =>
   Name ->
   [SubExp] ->
-  TypeM rep ([RetType rep], [DeclType])
+  TypeM rep ([(RetType rep, RetAls)], [DeclType])
 lookupFun fname args = do
   stm <- asks $ M.lookup fname . envFtable
   case stm of
     Nothing -> bad $ UnknownFunctionError fname
     Just (ftype, params) -> do
       argts <- mapM subExpType args
-      case applyRetType ftype params $ zip args argts of
+      case applyRetType (map fst ftype) params $ zip args argts of
         Nothing ->
           bad $ ParameterMismatch (Just fname) (map paramType params) argts
         Just rt ->
-          pure (rt, map paramDeclType params)
+          pure (zip rt $ map snd ftype, map paramDeclType params)
 
 -- | @checkAnnotation loc s t1 t2@ checks if @t2@ is equal to
 -- @t1@.  If not, a 'BadAnnotation' is raised.
@@ -514,19 +515,17 @@ checkAnnotation desc t1 t2
 
 -- | @require ts se@ causes a '(TypeError vn)' if the type of @se@ is
 -- not a subtype of one of the types in @ts@.
-require :: Checkable rep => [Type] -> SubExp -> TypeM rep ()
+require :: (Checkable rep) => [Type] -> SubExp -> TypeM rep ()
 require ts se = do
   t <- checkSubExp se
-  unless (t `elem` ts) $
-    bad $
-      UnexpectedType (BasicOp $ SubExp se) t ts
+  unless (t `elem` ts) $ bad $ UnexpectedType (BasicOp $ SubExp se) t ts
 
 -- | Variant of 'require' working on variable names.
-requireI :: Checkable rep => [Type] -> VName -> TypeM rep ()
+requireI :: (Checkable rep) => [Type] -> VName -> TypeM rep ()
 requireI ts ident = require ts $ Var ident
 
 checkArrIdent ::
-  Checkable rep =>
+  (Checkable rep) =>
   VName ->
   TypeM rep (Shape, PrimType)
 checkArrIdent v = do
@@ -536,7 +535,7 @@ checkArrIdent v = do
     _ -> bad $ NotAnArray v t
 
 checkAccIdent ::
-  Checkable rep =>
+  (Checkable rep) =>
   VName ->
   TypeM rep (Shape, [Type])
 checkAccIdent v = do
@@ -559,10 +558,17 @@ checkOpaques (OpaqueTypes types) = descend [] types
       descend (name : known) ts
     check known (OpaqueRecord fs) =
       mapM_ (checkEntryPointType known . snd) fs
+    check known (OpaqueSum _ cs) =
+      mapM_ (mapM_ (checkEntryPointType known . fst) . snd) cs
+    check known (OpaqueArray _ v _) =
+      checkEntryPointType known (TypeOpaque v)
+    check known (OpaqueRecordArray _ v fs) = do
+      checkEntryPointType known (TypeOpaque v)
+      mapM_ (checkEntryPointType known . snd) fs
     check _ (OpaqueType _) =
       pure ()
     checkEntryPointType known (TypeOpaque s) =
-      when (s `notElem` known) $
+      unless (s `elem` known) $
         Left . Error [] . TypeError $
           "Opaque not defined before first use: " <> nameToText s
     checkEntryPointType _ (TypeTransparent _) = pure ()
@@ -571,7 +577,7 @@ checkOpaques (OpaqueTypes types) = descend [] types
 -- yielding either a type error or a program with complete type
 -- information.
 checkProg ::
-  Checkable rep =>
+  (Checkable rep) =>
   Prog (Aliases rep) ->
   Either (TypeError rep) ()
 checkProg (Prog opaques consts funs) = do
@@ -604,30 +610,30 @@ checkProg (Prog opaques consts funs) = do
           pure $ M.insert name (ret, params) ftable
 
 initialFtable ::
-  Checkable rep =>
+  (Checkable rep) =>
   TypeM rep (M.Map Name (FunBinding rep))
 initialFtable = fmap M.fromList $ mapM addBuiltin $ M.toList builtInFunctions
   where
     addBuiltin (fname, (t, ts)) = do
       ps <- mapM (primFParam name) ts
-      pure (fname, ([primRetType t], ps))
+      pure (fname, ([(primRetType t, RetAls mempty mempty)], ps))
     name = VName (nameFromString "x") 0
 
 checkFun ::
-  Checkable rep =>
+  (Checkable rep) =>
   FunDef (Aliases rep) ->
   TypeM rep ()
 checkFun (FunDef _ _ fname rettype params body) =
   context ("In function " <> nameToText fname)
     $ checkFun'
       ( fname,
-        map declExtTypeOf rettype,
+        map (first declExtTypeOf) rettype,
         funParamsToNameInfos params
       )
       (Just consumable)
     $ do
       checkFunParams params
-      checkRetType rettype
+      checkRetType $ map fst rettype
       context "When checking function body" $ checkFunBody rettype body
   where
     consumable =
@@ -647,91 +653,104 @@ funParamsToNameInfos = map nameTypeAndDec
       )
 
 checkFunParams ::
-  Checkable rep =>
+  (Checkable rep) =>
   [FParam rep] ->
   TypeM rep ()
 checkFunParams = mapM_ $ \param ->
-  context ("In function parameter " <> prettyText param) $
+  context ("In parameter " <> prettyText param) $
     checkFParamDec (paramName param) (paramDec param)
 
 checkLambdaParams ::
-  Checkable rep =>
+  (Checkable rep) =>
   [LParam rep] ->
   TypeM rep ()
 checkLambdaParams = mapM_ $ \param ->
-  context ("In lambda parameter " <> prettyText param) $
+  context ("In parameter " <> prettyText param) $
     checkLParamDec (paramName param) (paramDec param)
 
+checkNoDuplicateParams :: Name -> [VName] -> TypeM rep ()
+checkNoDuplicateParams fname = foldM_ expand []
+  where
+    expand seen pname
+      | Just _ <- find (== pname) seen =
+          bad $ DupParamError fname pname
+      | otherwise =
+          pure $ pname : seen
+
 checkFun' ::
-  Checkable rep =>
+  (Checkable rep) =>
   ( Name,
-    [DeclExtType],
+    [(DeclExtType, RetAls)],
     [(VName, NameInfo (Aliases rep))]
   ) ->
   Maybe [(VName, Names)] ->
   TypeM rep [Names] ->
   TypeM rep ()
 checkFun' (fname, rettype, params) consumable check = do
-  checkNoDuplicateParams
+  checkNoDuplicateParams fname param_names
   binding (M.fromList params) $
     maybe id consumeOnlyParams consumable $ do
       body_aliases <- check
-      scope <- askScope
-      let isArray = maybe False ((> 0) . arrayRank . typeOf) . (`M.lookup` scope)
       context
         ( "When checking the body aliases: "
             <> prettyText (map namesToList body_aliases)
         )
-        $ checkReturnAlias
-        $ map (namesFromList . filter isArray . namesToList) body_aliases
+        $ checkReturnAlias body_aliases
   where
     param_names = map fst params
 
-    checkNoDuplicateParams = foldM_ expand [] param_names
+    isParam = (`elem` param_names)
 
-    expand seen pname
-      | Just _ <- find (== pname) seen =
-          bad $ DupParamError fname pname
-      | otherwise =
-          pure $ pname : seen
-    checkReturnAlias =
-      foldM_ checkReturnAlias' mempty . returnAliasing rettype
+    unique_names = namesFromList $ do
+      (v, FParamName t) <- params
+      guard $ unique $ declTypeOf t
+      pure v
 
-    checkReturnAlias' seen (Unique, names)
-      | any (`S.member` S.map fst seen) $ namesToList names =
-          bad $ UniqueReturnAliased fname
-      | otherwise = do
-          consume names
-          pure $ seen <> tag Unique names
-    checkReturnAlias' seen (Nonunique, names)
-      | any (`S.member` seen) $ tag Unique names =
-          bad $ UniqueReturnAliased fname
-      | otherwise = pure $ seen <> tag Nonunique names
+    allowedArgAliases pals =
+      namesFromList (map (param_names !!) pals) <> unique_names
 
-    tag u = S.fromList . map (,u) . namesToList
+    checkReturnAlias retals = zipWithM_ checkRet (zip [(0 :: Int) ..] rettype) retals
+      where
+        comrades = zip3 [0 ..] retals $ map (otherAls . snd) rettype
 
-    returnAliasing expected got =
-      reverse $
-        zip (reverse (map uniqueness expected) ++ repeat Nonunique) $
-          reverse got
+        checkRet (i, (Array {}, RetAls pals rals)) als
+          | als'' <- filter isParam $ namesToList als',
+            not $ null als'' =
+              bad . TypeError . T.unlines $
+                [ T.unwords ["Result", prettyText i, "aliases", prettyText als''],
+                  T.unwords ["but is only allowed to alias arguments", prettyText allowed_args]
+                ]
+          | ((j, _, _) : _) <- filter (isProblem i als' rals) comrades =
+              bad . TypeError . T.unlines $
+                [ T.unwords ["Results", prettyText i, "and", prettyText j, "alias each other"],
+                  T.unwords ["but result", prettyText i, "only allowed to alias results", prettyText rals],
+                  prettyText retals
+                ]
+          where
+            allowed_args = allowedArgAliases pals
+            als' = als `namesSubtract` allowed_args
+        checkRet _ _ = pure ()
 
-checkSubExp :: Checkable rep => SubExp -> TypeM rep Type
+        isProblem i als rals (j, jals, j_rals) =
+          i /= j && j `notElem` rals && i `notElem` j_rals && namesIntersect als jals
+
+checkSubExp :: (Checkable rep) => SubExp -> TypeM rep Type
 checkSubExp (Constant val) =
   pure $ Prim $ primValueType val
 checkSubExp (Var ident) = context ("In subexp " <> prettyText ident) $ do
   observe ident
   lookupType ident
 
-checkCerts :: Checkable rep => Certs -> TypeM rep ()
+checkCerts :: (Checkable rep) => Certs -> TypeM rep ()
 checkCerts (Certs cs) = mapM_ (requireI [Prim Unit]) cs
 
-checkSubExpRes :: Checkable rep => SubExpRes -> TypeM rep Type
+checkSubExpRes :: (Checkable rep) => SubExpRes -> TypeM rep Type
 checkSubExpRes (SubExpRes cs se) = do
   checkCerts cs
   checkSubExp se
 
 checkStms ::
-  Checkable rep =>
+  (Checkable rep) =>
   Stms (Aliases rep) ->
   TypeM rep a ->
   TypeM rep a
@@ -746,14 +765,14 @@ checkStms origstms m = delve $ stmsToList origstms
       m
 
 checkResult ::
-  Checkable rep =>
+  (Checkable rep) =>
   Result ->
   TypeM rep ()
 checkResult = mapM_ checkSubExpRes
 
 checkFunBody ::
-  Checkable rep =>
-  [RetType rep] ->
+  (Checkable rep) =>
+  [(RetType rep, RetAls)] ->
   Body (Aliases rep) ->
   TypeM rep [Names]
 checkFunBody rt (Body (_, rep) stms res) = do
@@ -761,26 +780,20 @@ checkFunBody rt (Body (_, rep) stms res) = do
   checkStms stms $ do
     context "When checking body result" $ checkResult res
     context "When matching declared return type to result of body" $
-      matchReturnType rt res
-    map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
-  where
-    bound_here = namesFromList $ M.keys $ scopeOf stms
+      matchReturnType (map fst rt) res
+    mapM (subExpAliasesM . resSubExp) res
 
 checkLambdaBody ::
-  Checkable rep =>
+  (Checkable rep) =>
   [Type] ->
   Body (Aliases rep) ->
-  TypeM rep [Names]
+  TypeM rep ()
 checkLambdaBody ret (Body (_, rep) stms res) = do
   checkBodyDec rep
-  checkStms stms $ do
-    checkLambdaResult ret res
-    map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
-  where
-    bound_here = namesFromList $ M.keys $ scopeOf stms
+  checkStms stms $ checkLambdaResult ret res
 
 checkLambdaResult ::
-  Checkable rep =>
+  (Checkable rep) =>
   [Type] ->
   Result ->
   TypeM rep ()
@@ -806,7 +819,7 @@ checkLambdaResult ts es
           <> prettyText t
 
 checkBody ::
-  Checkable rep =>
+  (Checkable rep) =>
   Body (Aliases rep) ->
   TypeM rep [Names]
 checkBody (Body (_, rep) stms res) = do
@@ -817,11 +830,21 @@ checkBody (Body (_, rep) stms res) = do
   where
     bound_here = namesFromList $ M.keys $ scopeOf stms
 
-checkBasicOp :: Checkable rep => BasicOp -> TypeM rep ()
+-- | Check a slicing operation of an array of the provided type.
+checkSlice :: (Checkable rep) => Type -> Slice SubExp -> TypeM rep ()
+checkSlice vt (Slice idxes) = do
+  when (arrayRank vt /= length idxes) . bad $
+    SlicingError (arrayRank vt) (length idxes)
+  mapM_ (traverse $ require [Prim int64]) idxes
+
+checkBasicOp :: (Checkable rep) => BasicOp -> TypeM rep ()
 checkBasicOp (SubExp es) =
   void $ checkSubExp es
 checkBasicOp (Opaque _ es) =
   void $ checkSubExp es
+checkBasicOp ArrayVal {} =
+  -- We assume this is never changed, so no need to check it.
+  pure ()
 checkBasicOp (ArrayLit [] _) =
   pure ()
 checkBasicOp (ArrayLit (e : es') t) = do
@@ -842,26 +865,20 @@ checkBasicOp (UnOp op e) = require [Prim $ unOpType op] e
 checkBasicOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
 checkBasicOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 checkBasicOp (ConvOp op e) = require [Prim $ fst $ convOpType op] e
-checkBasicOp (Index ident (Slice idxes)) = do
+checkBasicOp (Index ident slice) = do
   vt <- lookupType ident
   observe ident
-  when (arrayRank vt /= length idxes) $
-    bad $
-      SlicingError (arrayRank vt) (length idxes)
-  mapM_ checkDimIndex idxes
-checkBasicOp (Update _ src (Slice idxes) se) = do
+  checkSlice vt slice
+checkBasicOp (Update _ src slice se) = do
   (src_shape, src_pt) <- checkArrIdent src
-  when (shapeRank src_shape /= length idxes) $
-    bad $
-      SlicingError (shapeRank src_shape) (length idxes)
 
   se_aliases <- subExpAliasesM se
   when (src `nameIn` se_aliases) $
     bad $
       TypeError "The target of an Update must not alias the value to be written."
 
-  mapM_ checkDimIndex idxes
-  require [arrayOf (Prim src_pt) (Shape (sliceDims (Slice idxes))) NoUniqueness] se
+  checkSlice (arrayOf (Prim src_pt) src_shape NoUniqueness) slice
+  require [arrayOf (Prim src_pt) (sliceShape slice) NoUniqueness] se
   consume =<< lookupAliases src
 checkBasicOp (FlatIndex ident slice) = do
   vt <- lookupType ident
@@ -909,18 +926,6 @@ checkBasicOp (Rearrange perm arr) = do
     bad $
       PermutationError perm rank $
         Just arr
-checkBasicOp (Rotate rots arr) = do
-  arrt <- lookupType arr
-  let rank = arrayRank arrt
-  mapM_ (require [Prim int64]) rots
-  when (length rots /= rank) $
-    bad $
-      TypeError $
-        "Cannot rotate "
-          <> prettyText (length rots)
-          <> " dimensions of "
-          <> prettyText rank
-          <> "-dimensional array."
 checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
   arr1_dims <- shapeDims . fst <$> checkArrIdent arr1exp
   arr2s_dims <- map (shapeDims . fst) <$> mapM checkArrIdent arr2exps
@@ -928,8 +933,6 @@ checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
     bad $
       TypeError "Types of arguments to concat do not match."
   require [Prim int64] ressize
-checkBasicOp (Copy e) =
-  void $ checkArrIdent e
 checkBasicOp (Manifest perm arr) =
   checkBasicOp $ Rearrange perm arr -- Basically same thing!
 checkBasicOp (Assert e (ErrorMsg parts) _) = do
@@ -938,7 +941,7 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
   where
     checkPart ErrorString {} = pure ()
     checkPart (ErrorVal t x) = require [Prim t] x
-checkBasicOp (UpdateAcc acc is ses) = do
+checkBasicOp (UpdateAcc _ acc is ses) = do
   (shape, ts) <- checkAccIdent acc
 
   unless (length ses == length ts) . bad . TypeError $
@@ -960,7 +963,7 @@ checkBasicOp (UpdateAcc acc is ses) = do
   consume =<< lookupAliases acc
 
 matchLoopResultExt ::
-  Checkable rep =>
+  (Checkable rep) =>
   [Param DeclType] ->
   Result ->
   TypeM rep ()
@@ -986,8 +989,12 @@ matchLoopResultExt merge loopres = do
           (staticShapes rettype')
           (staticShapes bodyt)
 
+allowAllAliases :: Int -> Int -> RetAls
+allowAllAliases n m =
+  RetAls [0 .. n - 1] [0 .. m - 1]
+
 checkExp ::
-  Checkable rep =>
+  (Checkable rep) =>
   Exp (Aliases rep) ->
   TypeM rep ()
 checkExp (BasicOp op) = checkBasicOp op
@@ -1016,17 +1023,17 @@ checkExp (Apply fname args rettype_annot _) = do
   when (rettype_derived /= rettype_annot) $
     bad . TypeError . docText $
       "Expected apply result type:"
-        </> indent 2 (pretty rettype_derived)
+        </> indent 2 (pretty $ map fst rettype_derived)
         </> "But annotation is:"
-        </> indent 2 (pretty rettype_annot)
+        </> indent 2 (pretty $ map fst rettype_annot)
   consumeArgs paramtypes argflows
-checkExp (DoLoop merge form loopbody) = do
+checkExp (Loop merge form loopbody) = do
   let (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
 
   checkLoopArgs
 
-  binding (scopeOf form) $ do
+  binding (scopeOfLoopForm form) $ do
     form_consumable <- checkForm mergeargs form
 
     let rettype = map paramDeclType mergepat
@@ -1040,7 +1047,7 @@ checkExp (DoLoop merge form loopbody) = do
     context "Inside the loop body"
       $ checkFun'
         ( nameFromString "<loop body>",
-          staticShapes rettype,
+          map (,allowAllAliases (length merge) (length merge)) (staticShapes rettype),
           funParamsToNameInfos mergepat
         )
         (Just consumable)
@@ -1062,38 +1069,15 @@ checkExp (DoLoop merge form loopbody) = do
           map (`namesSubtract` bound_here)
             <$> mapM (subExpAliasesM . resSubExp) (bodyResult loopbody)
   where
-    checkLoopVar (p, a) = do
-      a_t <- lookupType a
-      observe a
-      case peelArray 1 a_t of
-        Just a_t_r -> do
-          checkLParamDec (paramName p) $ paramDec p
-          unless (a_t_r `subtypeOf` typeOf (paramDec p)) $
-            bad . TypeError $
-              "Loop parameter "
-                <> prettyText p
-                <> " not valid for element of "
-                <> prettyText a
-                <> ", which has row type "
-                <> prettyText a_t_r
-          als <- lookupAliases a
-          pure (paramName p, als)
-        _ ->
-          bad . TypeError $
-            "Cannot loop over "
-              <> prettyText a
-              <> " of type "
-              <> prettyText a_t
-    checkForm mergeargs (ForLoop loopvar it boundexp loopvars) = do
+    checkForm mergeargs (ForLoop loopvar it boundexp) = do
       iparam <- primFParam loopvar $ IntType it
       let mergepat = map fst merge
           funparams = iparam : mergepat
           paramts = map paramDeclType funparams
 
-      consumable <- mapM checkLoopVar loopvars
       boundarg <- checkArg boundexp
       checkFuncall Nothing paramts $ boundarg : mergeargs
-      pure consumable
+      pure mempty
     checkForm mergeargs (WhileLoop cond) = do
       case find ((== cond) . paramName . fst) merge of
         Just (condparam, _) ->
@@ -1105,9 +1089,8 @@ checkExp (DoLoop merge form loopbody) = do
                 <> prettyText (paramType condparam)
                 <> "."
         Nothing ->
-          bad $
-            TypeError $
-              "Conditional '" <> prettyText cond <> "' of while-loop is not a merge variable."
+          -- Implies infinite loop, but that's OK.
+          pure ()
       let mergepat = map fst merge
           funparams = mergepat
           paramts = map paramDeclType funparams
@@ -1170,7 +1153,7 @@ checkExp (Op op) = do
   checker op
 
 checkSOACArrayArgs ::
-  Checkable rep =>
+  (Checkable rep) =>
   SubExp ->
   [VName] ->
   TypeM rep [Arg]
@@ -1195,7 +1178,7 @@ checkSOACArrayArgs width = mapM checkSOACArrayArg
             "SOAC argument " <> prettyText v <> " is not an array"
 
 checkType ::
-  Checkable rep =>
+  (Checkable rep) =>
   TypeBase Shape u ->
   TypeM rep ()
 checkType (Mem (ScalarSpace d _)) = mapM_ (require [Prim int64]) d
@@ -1206,7 +1189,7 @@ checkType (Acc cert shape ts _) = do
 checkType t = mapM_ checkSubExp $ arrayDims t
 
 checkExtType ::
-  Checkable rep =>
+  (Checkable rep) =>
   TypeBase ExtShape u ->
   TypeM rep ()
 checkExtType = mapM_ checkExtDim . shapeDims . arrayShape
@@ -1215,7 +1198,7 @@ checkExtType = mapM_ checkExtDim . shapeDims . arrayShape
     checkExtDim (Ext _) = pure ()
 
 checkCmpOp ::
-  Checkable rep =>
+  (Checkable rep) =>
   CmpOp ->
   SubExp ->
   SubExp ->
@@ -1233,7 +1216,7 @@ checkCmpOp CmpLlt x y = checkBinOpArgs Bool x y
 checkCmpOp CmpLle x y = checkBinOpArgs Bool x y
 
 checkBinOpArgs ::
-  Checkable rep =>
+  (Checkable rep) =>
   PrimType ->
   SubExp ->
   SubExp ->
@@ -1243,7 +1226,7 @@ checkBinOpArgs t e1 e2 = do
   require [Prim t] e2
 
 checkPatElem ::
-  Checkable rep =>
+  (Checkable rep) =>
   PatElem (LetDec rep) ->
   TypeM rep ()
 checkPatElem (PatElem name dec) =
@@ -1251,28 +1234,21 @@ checkPatElem (PatElem name dec) =
     checkLetBoundDec name dec
 
 checkFlatDimIndex ::
-  Checkable rep =>
+  (Checkable rep) =>
   FlatDimIndex SubExp ->
   TypeM rep ()
 checkFlatDimIndex (FlatDimIndex n s) = mapM_ (require [Prim int64]) [n, s]
 
 checkFlatSlice ::
-  Checkable rep =>
+  (Checkable rep) =>
   FlatSlice SubExp ->
   TypeM rep ()
 checkFlatSlice (FlatSlice offset idxs) = do
   require [Prim int64] offset
   mapM_ checkFlatDimIndex idxs
 
-checkDimIndex ::
-  Checkable rep =>
-  DimIndex SubExp ->
-  TypeM rep ()
-checkDimIndex (DimFix i) = require [Prim int64] i
-checkDimIndex (DimSlice i n s) = mapM_ (require [Prim int64]) [i, n, s]
-
 checkStm ::
-  Checkable rep =>
+  (Checkable rep) =>
   Stm (Aliases rep) ->
   TypeM rep a ->
   TypeM rep a
@@ -1281,26 +1257,12 @@ checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
   context "When checking expression annotation" $ checkExpDec dec
   context ("When matching\n" <> message "  " pat <> "\nwith\n" <> message "  " e) $
     matchPat pat e
-  binding (maybeWithoutAliases $ scopeOf stm) $ do
+  binding (scopeOf stm) $ do
     mapM_ checkPatElem (patElems $ removePatAliases pat)
     m
-  where
-    -- FIXME: this is wrong.  However, the core language type system
-    -- is not strong enough to fully capture the aliases we want (see
-    -- issue #803).  Since we eventually inline everything anyway, and
-    -- our intra-procedural alias analysis is much simpler and
-    -- correct, I could not justify spending time on improving the
-    -- inter-procedural alias analysis.  If we ever stop inlining
-    -- everything, probably we need to go back and refine this.
-    maybeWithoutAliases =
-      case stmExp stm of
-        Apply {} -> M.map withoutAliases
-        _ -> id
-    withoutAliases (LetName (_, ldec)) = LetName (mempty, ldec)
-    withoutAliases info = info
 
 matchExtPat ::
-  Checkable rep =>
+  (Checkable rep) =>
   Pat (LetDec (Aliases rep)) ->
   [ExtType] ->
   TypeM rep ()
@@ -1310,7 +1272,7 @@ matchExtPat pat ts =
       InvalidPatError pat ts Nothing
 
 matchExtReturnType ::
-  Checkable rep =>
+  (Checkable rep) =>
   [ExtType] ->
   Result ->
   TypeM rep ()
@@ -1319,7 +1281,7 @@ matchExtReturnType rettype res = do
   matchExtReturns rettype res ts
 
 matchExtBranchType ::
-  Checkable rep =>
+  (Checkable rep) =>
   [ExtType] ->
   Body (Aliases rep) ->
   TypeM rep ()
@@ -1352,7 +1314,7 @@ matchExtReturns rettype res ts = do
   unless (rettype' == ts) problem
 
 validApply ::
-  ArrayShape shape =>
+  (ArrayShape shape) =>
   [TypeBase shape Uniqueness] ->
   [TypeBase shape NoUniqueness] ->
   Bool
@@ -1378,7 +1340,7 @@ noArgAliases :: Arg -> Arg
 noArgAliases (t, _) = (t, mempty)
 
 checkArg ::
-  Checkable rep =>
+  (Checkable rep) =>
   SubExp ->
   TypeM rep Arg
 checkArg arg = do
@@ -1413,8 +1375,8 @@ consumeArgs paramts args =
 -- The boolean indicates whether we only allow consumption of
 -- parameters.
 checkAnyLambda ::
-  Checkable rep => Bool -> Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
-checkAnyLambda soac (Lambda params body rettype) args = do
+  (Checkable rep) => Bool -> Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
+checkAnyLambda soac (Lambda params rettype body) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
     then do
@@ -1429,10 +1391,9 @@ checkAnyLambda soac (Lambda params body rettype) args = do
               else Nothing
           params' =
             [(paramName param, LParamName $ paramDec param) | param <- params]
-      checkFun'
-        (fname, staticShapes $ map (`toDecl` Nonunique) rettype, params')
-        consumable
-        $ do
+      checkNoDuplicateParams fname $ map paramName params
+      binding (M.fromList params') $
+        maybe id consumeOnlyParams consumable $ do
           checkLambdaParams params
           mapM_ checkType rettype
           checkLambdaBody rettype body
@@ -1446,10 +1407,10 @@ checkAnyLambda soac (Lambda params body rettype) args = do
           <> prettyText (length args)
           <> " arguments."
 
-checkLambda :: Checkable rep => Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
+checkLambda :: (Checkable rep) => Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
 checkLambda = checkAnyLambda True
 
-checkPrimExp :: Checkable rep => PrimExp VName -> TypeM rep ()
+checkPrimExp :: (Checkable rep) => PrimExp VName -> TypeM rep ()
 checkPrimExp ValueExp {} = pure ()
 checkPrimExp (LeafExp v pt) = requireI [Prim pt] v
 checkPrimExp (BinOpExp op x y) = do
@@ -1479,14 +1440,14 @@ checkPrimExp (FunExp h args t) = do
       <> prettyText h_ret
   zipWithM_ requirePrimExp h_ts args
 
-requirePrimExp :: Checkable rep => PrimType -> PrimExp VName -> TypeM rep ()
+requirePrimExp :: (Checkable rep) => PrimType -> PrimExp VName -> TypeM rep ()
 requirePrimExp t e = context ("in PrimExp " <> prettyText e) $ do
   checkPrimExp e
   unless (primExpType e == t) . bad . TypeError $
     prettyText e <> " must have type " <> prettyText t
 
 -- | The class of representations that can be type-checked.
-class (AliasableRep rep, TypedOp (OpC rep (Aliases rep))) => Checkable rep where
+class (AliasableRep rep, TypedOp (OpC rep)) => Checkable rep where
   checkExpDec :: ExpDec rep -> TypeM rep ()
   checkBodyDec :: BodyDec rep -> TypeM rep ()
   checkFParamDec :: VName -> FParamInfo rep -> TypeM rep ()
@@ -1502,38 +1463,38 @@ class (AliasableRep rep, TypedOp (OpC rep (Aliases rep))) => Checkable rep where
   -- | Used at top level; can be locally changed with 'checkOpWith'.
   checkOp :: Op (Aliases rep) -> TypeM rep ()
 
-  default checkExpDec :: ExpDec rep ~ () => ExpDec rep -> TypeM rep ()
+  default checkExpDec :: (ExpDec rep ~ ()) => ExpDec rep -> TypeM rep ()
   checkExpDec = pure
 
-  default checkBodyDec :: BodyDec rep ~ () => BodyDec rep -> TypeM rep ()
+  default checkBodyDec :: (BodyDec rep ~ ()) => BodyDec rep -> TypeM rep ()
   checkBodyDec = pure
 
-  default checkFParamDec :: FParamInfo rep ~ DeclType => VName -> FParamInfo rep -> TypeM rep ()
+  default checkFParamDec :: (FParamInfo rep ~ DeclType) => VName -> FParamInfo rep -> TypeM rep ()
   checkFParamDec _ = checkType
 
-  default checkLParamDec :: LParamInfo rep ~ Type => VName -> LParamInfo rep -> TypeM rep ()
+  default checkLParamDec :: (LParamInfo rep ~ Type) => VName -> LParamInfo rep -> TypeM rep ()
   checkLParamDec _ = checkType
 
-  default checkLetBoundDec :: LetDec rep ~ Type => VName -> LetDec rep -> TypeM rep ()
+  default checkLetBoundDec :: (LetDec rep ~ Type) => VName -> LetDec rep -> TypeM rep ()
   checkLetBoundDec _ = checkType
 
-  default checkRetType :: RetType rep ~ DeclExtType => [RetType rep] -> TypeM rep ()
+  default checkRetType :: (RetType rep ~ DeclExtType) => [RetType rep] -> TypeM rep ()
   checkRetType = mapM_ $ checkExtType . declExtTypeOf
 
   default matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
   matchPat pat = matchExtPat pat <=< expExtType
 
-  default primFParam :: FParamInfo rep ~ DeclType => VName -> PrimType -> TypeM rep (FParam (Aliases rep))
+  default primFParam :: (FParamInfo rep ~ DeclType) => VName -> PrimType -> TypeM rep (FParam (Aliases rep))
   primFParam name t = pure $ Param mempty name (Prim t)
 
-  default matchReturnType :: RetType rep ~ DeclExtType => [RetType rep] -> Result -> TypeM rep ()
+  default matchReturnType :: (RetType rep ~ DeclExtType) => [RetType rep] -> Result -> TypeM rep ()
   matchReturnType = matchExtReturnType . map fromDecl
 
-  default matchBranchType :: BranchType rep ~ ExtType => [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
+  default matchBranchType :: (BranchType rep ~ ExtType) => [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
   matchBranchType = matchExtBranchType
 
   default matchLoopResult ::
-    FParamInfo rep ~ DeclType =>
+    (FParamInfo rep ~ DeclType) =>
     [FParam (Aliases rep)] ->
     Result ->
     TypeM rep ()

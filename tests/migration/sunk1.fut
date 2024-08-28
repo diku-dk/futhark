@@ -2,9 +2,9 @@
 -- ==
 -- structure gpu {
 --   GPUBody 1
---   /DoLoop/Index 0
---   /DoLoop/If/True/GPUBody 1
---   /DoLoop/If/True/Index 1
+--   /Loop/Index 0
+--   /Loop/If/True/GPUBody 1
+--   /Loop/If/True/Index 1
 -- }
 
 #[noinline]
@@ -19,4 +19,3 @@ def main (A: [5](i32, i32)) (x: i32) : (i32, i32) =
     if c == 3
        then (y+1, hostonly z) -- reads of y and z should be sunk here
        else (res, c+1)
-

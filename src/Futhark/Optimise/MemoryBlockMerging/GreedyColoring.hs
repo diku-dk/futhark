@@ -14,7 +14,7 @@ type Coloring a = M.Map a Int
 type Neighbors a = M.Map a (S.Set a)
 
 -- | Computes the neighbor map of a graph.
-neighbors :: Ord a => Interference.Graph a -> Neighbors a
+neighbors :: (Ord a) => Interference.Graph a -> Neighbors a
 neighbors =
   S.foldr
     ( \(x, y) acc ->
@@ -24,7 +24,7 @@ neighbors =
     )
     M.empty
 
-firstAvailable :: Eq space => M.Map Int space -> S.Set Int -> Int -> space -> (M.Map Int space, Int)
+firstAvailable :: (Eq space) => M.Map Int space -> S.Set Int -> Int -> space -> (M.Map Int space, Int)
 firstAvailable spaces xs i sp =
   case (i `S.member` xs, spaces M.!? i) of
     (False, Just sp') | sp' == sp -> (spaces, i)

@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:           futhark
-version:        0.25.0
+version:        0.26.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -14,7 +14,7 @@ description:    Futhark is a small programming language designed to be compiled 
                 .
                 For introductionary information about hacking on the
                 Futhark compiler, see
-                <https://futhark.readthedocs.io/en/latest/hacking.html the hacking guide>.
+                <https://github.com/diku-dk/futhark/blob/master/HACKING.md the hacking guide>.
                 Regarding the internal design of the compiler, the following modules make
                 good starting points:
                 .
@@ -41,12 +41,17 @@ extra-source-files:
     rts/c/context_prototypes.h
     rts/c/backends/c.h
     rts/c/backends/cuda.h
+    rts/c/backends/hip.h
     rts/c/backends/multicore.h
     rts/c/backends/opencl.h
     rts/c/lock.h
+    rts/c/copy.h
     rts/c/timing.h
     rts/c/errors.h
     rts/c/free_list.h
+    rts/c/event_list.h
+    rts/c/gpu.h
+    rts/c/gpu_prototypes.h
     rts/c/tuning.h
     rts/c/values.h
     rts/c/half.h
@@ -58,10 +63,14 @@ extra-source-files:
     rts/c/uniform.h
     rts/c/util.h
     rts/c/server.h
+    rts/cuda/prelude.cu
     rts/futhark-doc/style.css
     rts/javascript/server.js
     rts/javascript/values.js
     rts/javascript/wrapperclasses.js
+    rts/opencl/copy.cl
+    rts/opencl/prelude.cl
+    rts/opencl/transpose.cl
     rts/python/tuning.py
     rts/python/panic.py
     rts/python/memory.py
@@ -83,64 +92,18 @@ extra-source-files:
     docs/requirements.txt
 extra-doc-files:
   assets/*.png
+  CHANGELOG.md
+  README.md
 
 source-repository head
   type: git
   location: https://github.com/diku-dk/futhark
 
 common common
-  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
-  default-language: Haskell2010
+  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wno-x-partial -Wno-unrecognised-warning-flags  -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
+  default-language: GHC2021
   default-extensions:
     OverloadedStrings
-    -- The following extensions correspond to the GHC2021 language,
-    -- but we want to remain compatible with GHC 9.0, so we cannot use
-    -- it just yet.
-    BangPatterns
-    BinaryLiterals
-    ConstrainedClassMethods
-    ConstraintKinds
-    DeriveDataTypeable
-    DeriveFoldable
-    DeriveFunctor
-    DeriveGeneric
-    DeriveLift
-    DeriveTraversable
-    DoAndIfThenElse
-    EmptyCase
-    EmptyDataDecls
-    EmptyDataDeriving
-    ExistentialQuantification
-    ExplicitForAll
-    FlexibleContexts
-    FlexibleInstances
-    ForeignFunctionInterface
-    GADTSyntax
-    GeneralisedNewtypeDeriving
-    HexFloatLiterals
-    ImplicitPrelude
-    ImportQualifiedPost
-    InstanceSigs
-    KindSignatures
-    MonomorphismRestriction
-    MultiParamTypeClasses
-    NamedFieldPuns
-    NamedWildCards
-    NumericUnderscores
-    PatternGuards
-    PolyKinds
-    PostfixOperators
-    RankNTypes
-    RelaxedPolyRec
-    ScopedTypeVariables
-    StandaloneDeriving
-    StandaloneKindSignatures
-    StarIsType
-    TraditionalRecordSyntax
-    TupleSections
-    TypeApplications
-    TypeOperators
-    TypeSynonymInstances
 
 library
   import: common
@@ -159,6 +122,7 @@ library
       Futhark.AD.Rev.Scan
       Futhark.AD.Rev.Scatter
       Futhark.AD.Rev.SOAC
+      Futhark.Analysis.AccessPattern
       Futhark.Analysis.AlgSimplify
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
@@ -174,6 +138,7 @@ library
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
+      Futhark.Analysis.PrimExp.Table
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench
@@ -192,6 +157,7 @@ library
       Futhark.CLI.Doc
       Futhark.CLI.Eval
       Futhark.CLI.Fmt
+      Futhark.CLI.HIP
       Futhark.CLI.Literate
       Futhark.CLI.LSP
       Futhark.CLI.Main
@@ -201,17 +167,18 @@ library
       Futhark.CLI.MulticoreWASM
       Futhark.CLI.OpenCL
       Futhark.CLI.Pkg
+      Futhark.CLI.Profile
       Futhark.CLI.PyOpenCL
       Futhark.CLI.Python
       Futhark.CLI.Query
       Futhark.CLI.REPL
       Futhark.CLI.Run
+      Futhark.CLI.Script
       Futhark.CLI.Test
       Futhark.CLI.WASM
       Futhark.CodeGen.Backends.CCUDA
-      Futhark.CodeGen.Backends.CCUDA.Boilerplate
       Futhark.CodeGen.Backends.COpenCL
-      Futhark.CodeGen.Backends.COpenCL.Boilerplate
+      Futhark.CodeGen.Backends.HIP
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
       Futhark.CodeGen.Backends.GenericC.Code
@@ -226,6 +193,7 @@ library
       Futhark.CodeGen.Backends.GenericPython.AST
       Futhark.CodeGen.Backends.GenericPython.Options
       Futhark.CodeGen.Backends.GenericWASM
+      Futhark.CodeGen.Backends.GPU
       Futhark.CodeGen.Backends.MulticoreC
       Futhark.CodeGen.Backends.MulticoreC.Boilerplate
       Futhark.CodeGen.Backends.MulticoreISPC
@@ -238,6 +206,8 @@ library
       Futhark.CodeGen.Backends.SequentialWASM
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.RTS.C
+      Futhark.CodeGen.RTS.CUDA
+      Futhark.CodeGen.RTS.OpenCL
       Futhark.CodeGen.RTS.Python
       Futhark.CodeGen.RTS.JavaScript
       Futhark.CodeGen.ImpCode
@@ -249,7 +219,7 @@ library
       Futhark.CodeGen.ImpGen.CUDA
       Futhark.CodeGen.ImpGen.GPU
       Futhark.CodeGen.ImpGen.GPU.Base
-      Futhark.CodeGen.ImpGen.GPU.Group
+      Futhark.CodeGen.ImpGen.GPU.Block
       Futhark.CodeGen.ImpGen.GPU.SegHist
       Futhark.CodeGen.ImpGen.GPU.SegMap
       Futhark.CodeGen.ImpGen.GPU.SegRed
@@ -257,7 +227,7 @@ library
       Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass
       Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass
       Futhark.CodeGen.ImpGen.GPU.ToOpenCL
-      Futhark.CodeGen.ImpGen.GPU.Transpose
+      Futhark.CodeGen.ImpGen.HIP
       Futhark.CodeGen.ImpGen.Multicore
       Futhark.CodeGen.ImpGen.Multicore.Base
       Futhark.CodeGen.ImpGen.Multicore.SegHist
@@ -266,7 +236,6 @@ library
       Futhark.CodeGen.ImpGen.Multicore.SegScan
       Futhark.CodeGen.ImpGen.OpenCL
       Futhark.CodeGen.ImpGen.Sequential
-      Futhark.CodeGen.ImpGen.Transpose
       Futhark.CodeGen.OpenCL.Heuristics
       Futhark.Compiler
       Futhark.Compiler.CLI
@@ -276,6 +245,7 @@ library
       Futhark.Doc.Generator
       Futhark.Error
       Futhark.FreshNames
+      Futhark.Format
       Futhark.IR
       Futhark.IR.Aliases
       Futhark.IR.GPU
@@ -288,7 +258,7 @@ library
       Futhark.IR.MCMem
       Futhark.IR.Mem
       Futhark.IR.Mem.Interval
-      Futhark.IR.Mem.IxFun
+      Futhark.IR.Mem.LMAD
       Futhark.IR.Mem.Simplify
       Futhark.IR.Parse
       Futhark.IR.Pretty
@@ -296,7 +266,7 @@ library
       Futhark.IR.Prop.Aliases
       Futhark.IR.Prop.Constants
       Futhark.IR.Prop.Names
-      Futhark.IR.Prop.Patterns
+      Futhark.IR.Prop.Pat
       Futhark.IR.Prop.Rearrange
       Futhark.IR.Prop.Reshape
       Futhark.IR.Prop.Scope
@@ -317,6 +287,7 @@ library
       Futhark.IR.TypeCheck
       Futhark.Internalise
       Futhark.Internalise.AccurateSizes
+      Futhark.Internalise.ApplyTypeAbbrs
       Futhark.Internalise.Bindings
       Futhark.Internalise.Defunctionalise
       Futhark.Internalise.Defunctorise
@@ -327,6 +298,7 @@ library
       Futhark.Internalise.LiftLambdas
       Futhark.Internalise.Monad
       Futhark.Internalise.Monomorphise
+      Futhark.Internalise.ReplaceRecords
       Futhark.Internalise.TypesValues
       Futhark.LSP.Compile
       Futhark.LSP.Diagnostic
@@ -345,9 +317,6 @@ library
       Futhark.Optimise.Fusion.TryFusion
       Futhark.Optimise.GenRedOpt
       Futhark.Optimise.HistAccs
-      Futhark.Optimise.InPlaceLowering
-      Futhark.Optimise.InPlaceLowering.LowerIntoStm
-      Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
@@ -357,6 +326,9 @@ library
       Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
       Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
       Futhark.Optimise.MergeGPUBodies
+      Futhark.Optimise.ArrayLayout
+      Futhark.Optimise.ArrayLayout.Transform
+      Futhark.Optimise.ArrayLayout.Layout
       Futhark.Optimise.ReduceDeviceSyncs
       Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
       Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
@@ -389,12 +361,11 @@ library
       Futhark.Pass.ExtractKernels.Distribution
       Futhark.Pass.ExtractKernels.ISRWIM
       Futhark.Pass.ExtractKernels.Interchange
-      Futhark.Pass.ExtractKernels.Intragroup
+      Futhark.Pass.ExtractKernels.Intrablock
       Futhark.Pass.ExtractKernels.StreamKernel
       Futhark.Pass.ExtractKernels.ToGPU
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
-      Futhark.Pass.KernelBabysitting
       Futhark.Pass.LiftAllocations
       Futhark.Pass.LowerAllocations
       Futhark.Pass.Simplify
@@ -403,6 +374,7 @@ library
       Futhark.Pkg.Info
       Futhark.Pkg.Solve
       Futhark.Pkg.Types
+      Futhark.Profile
       Futhark.Script
       Futhark.Test
       Futhark.Test.Spec
@@ -442,11 +414,13 @@ library
       Language.Futhark.Traversals
       Language.Futhark.Tuple
       Language.Futhark.TypeChecker
+      Language.Futhark.TypeChecker.Consumption
+      Language.Futhark.TypeChecker.Names
       Language.Futhark.TypeChecker.Match
       Language.Futhark.TypeChecker.Modules
       Language.Futhark.TypeChecker.Monad
       Language.Futhark.TypeChecker.Terms
-      Language.Futhark.TypeChecker.Terms.DoLoop
+      Language.Futhark.TypeChecker.Terms.Loop
       Language.Futhark.TypeChecker.Terms.Monad
       Language.Futhark.TypeChecker.Terms.Pat
       Language.Futhark.TypeChecker.Types
@@ -469,7 +443,7 @@ library
     , base16-bytestring
     , binary >=0.8.3
     , blaze-html >=0.9.0.1
-    , bytestring >=0.10.8
+    , bytestring >=0.11.2
     , bytestring-to-vector >=0.3.0.1
     , bmp >=1.2.6.3
     , co-log-core
@@ -483,16 +457,17 @@ library
     , fgl-visualize
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
-    , free >=4.12.4
+    , free >=5.1.10
     , futhark-data >= 1.1.0.0
     , futhark-server >= 1.2.2.1
-    , futhark-manifest >= 1.2.0.1
+    , futhark-manifest >= 1.5.0.0
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
     , language-c-quote >= 0.12
     , lens
-    , lsp >= 1.5.0
+    , lsp >= 2.2.0.0
+    , lsp-types >= 2.0.1.0
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
     , megaparsec >=9.0.0
@@ -511,7 +486,7 @@ library
     , transformers >=0.3
     , vector >=0.12
     , versions >=6.0.0
-    , zlib >=0.6.1.2
+    , zlib >=0.7.0.0
     , statistics
     , mwc-random
     , prettyprinter >= 1.7
@@ -530,29 +505,40 @@ test-suite unit
   hs-source-dirs: unittests
   other-modules:
       Futhark.AD.DerivativesTests
-      Futhark.BenchTests
-      Futhark.Pkg.SolveTests
       Futhark.Analysis.AlgSimplifyTests
+      Futhark.Analysis.PrimExp.TableTests
+      Futhark.BenchTests
+      Futhark.IR.GPUTests
+      Futhark.IR.MCTests
+      Futhark.IR.Mem.IntervalTests
+      Futhark.IR.Mem.IxFun.Alg
+      Futhark.IR.Mem.IxFunTests
+      Futhark.IR.Mem.IxFunWrapper
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests
       Futhark.IR.Syntax.CoreTests
       Futhark.IR.SyntaxTests
-      Futhark.IR.Mem.IntervalTests
-      Futhark.IR.Mem.IxFun.Alg
-      Futhark.IR.Mem.IxFunTests
-      Futhark.IR.Mem.IxFunWrapper
+      Futhark.Internalise.TypesValuesTests
+      Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
+      Futhark.Optimise.ArrayLayout.AnalyseTests
+      Futhark.Optimise.ArrayLayout.LayoutTests
+      Futhark.Optimise.ArrayLayoutTests
+      Futhark.Pkg.SolveTests
+      Futhark.ProfileTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
+      Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
-      Language.Futhark.TypeCheckerTests
       Language.Futhark.TypeChecker.TypesTests
-      Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
+      Language.Futhark.TypeCheckerTests
       Paths_futhark
   build-depends:
       QuickCheck >=2.8
+      , mtl >=2.2.1
     , base
     , containers
+    , free
     , futhark
     , megaparsec
     , tasty

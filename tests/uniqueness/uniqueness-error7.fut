@@ -1,9 +1,8 @@
 -- ==
 -- error: "a".*consumed
 
-def main(): i32 =
-    let n = 10
+def main n =
     let a = iota(n)
     let b = iota(n)
     let i = 0 in
-    (let b=a in b[i]) + (let a[i]=b[i] in a[i]) -- Bad because of parallel consume-observe collision.
+    (let a[i]=b[i] in a[i]) + (let b=a in b[i])  -- Bad because of parallel consume-observe collision.

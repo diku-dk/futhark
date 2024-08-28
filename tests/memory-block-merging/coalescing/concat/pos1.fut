@@ -11,9 +11,9 @@
 -- structure gpu-mem { Alloc 1 }
 
 let main [n] (ns: [n]i32) (i: i64): [][]i32 =
-  let t3 = unflatten n (n * 3) (replicate (n * (n * 3)) 0)
+  let t3 = unflatten (replicate (n * (n+n+n)) 0)
   let t0 = map (+ 1) ns -- Will use the memory of t3.
   let t1 = map (* 2) ns -- Will use the memory of t3.
   let t2 = map (/ 3) ns -- Will use the memory of t3.
-  let t3[i] = concat_to (n * 3) (concat t0 t1) t2
+  let t3[i] = concat (concat t0 t1) t2
   in t3

@@ -24,7 +24,7 @@ import Futhark.Analysis.AlgSimplify
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.Mem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 import Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
@@ -40,7 +40,7 @@ import Futhark.Util
 -- table) until all vars appearing in the index function are defined in the
 -- current scope?"
 freeVarSubstitutions ::
-  FreeIn a =>
+  (FreeIn a) =>
   ScopeTab rep ->
   ScalarTab ->
   a ->
@@ -69,7 +69,7 @@ translateAccessSummary _ _ Undeterminable = Undeterminable
 translateAccessSummary scope0 scals0 (Set slmads)
   | Just subs <- freeVarSubstitutions scope0 scals0 slmads =
       slmads
-        & S.map (IxFun.substituteInLMAD subs)
+        & S.map (LMAD.substitute subs)
         & Set
 translateAccessSummary _ _ _ = Undeterminable
 
@@ -81,18 +81,21 @@ getUseSumFromStm ::
   Stm (Aliases rep) ->
   -- | A pair of written and written+read memory locations, along with their
   -- associated array and the index function used
-  Maybe ([(VName, VName, IxFun)], [(VName, VName, IxFun)])
+  Maybe ([(VName, VName, LMAD)], [(VName, VName, LMAD)])
 getUseSumFromStm td_env coal_tab (Let _ _ (BasicOp (Index arr (Slice slc))))
   | Just (MemBlock _ shp _ _) <- getScopeMemInfo arr (scope td_env),
     length slc == length (shapeDims shp) && all isFix slc = do
       (mem_b, mem_arr, ixfn_arr) <- getDirAliasedIxfn td_env coal_tab arr
-      let new_ixfn = IxFun.slice ixfn_arr $ Slice $ map (fmap pe64) slc
+      let new_ixfn = LMAD.slice ixfn_arr $ Slice $ map (fmap pe64) slc
       pure ([], [(mem_b, mem_arr, new_ixfn)])
   where
     isFix DimFix {} = True
     isFix _ = False
 getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Index {})) = Just ([], []) -- incomplete slices
 getUseSumFromStm _ _ (Let Pat {} _ (BasicOp FlatIndex {})) = Just ([], []) -- incomplete slices
+getUseSumFromStm td_env coal_tab (Let (Pat pes) _ (BasicOp ArrayVal {})) =
+  let wrts = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) pes
+   in Just (wrts, wrts)
 getUseSumFromStm td_env coal_tab (Let (Pat pes) _ (BasicOp (ArrayLit ses _))) =
   let rds = mapMaybe (getDirAliasedIxfn td_env coal_tab) $ mapMaybe seName ses
       wrts = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) pes
@@ -105,19 +108,20 @@ getUseSumFromStm td_env coal_tab (Let (Pat pes) _ (BasicOp (ArrayLit ses _))) =
 --   been added in the active coalesced table.
 getUseSumFromStm td_env coal_tab (Let (Pat [x']) _ (BasicOp (Update _ _x (Slice slc) a_se))) = do
   (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x')
-  let x_ixfn_slc = IxFun.slice x_ixfn $ Slice $ map (fmap pe64) slc
+  let x_ixfn_slc = LMAD.slice x_ixfn $ Slice $ map (fmap pe64) slc
       r1 = (m_b, m_x, x_ixfn_slc)
   case a_se of
     Constant _ -> Just ([r1], [r1])
     Var a -> case getDirAliasedIxfn td_env coal_tab a of
       Nothing -> Just ([r1], [r1])
       Just r2 -> Just ([r1], [r1, r2])
-getUseSumFromStm td_env coal_tab (Let (Pat [y]) _ (BasicOp (Copy x))) = do
+getUseSumFromStm td_env coal_tab (Let (Pat [y]) _ (BasicOp (Replicate (Shape []) (Var x)))) = do
   -- y = copy x
   wrt <- getDirAliasedIxfn td_env coal_tab $ patElemName y
   rd <- getDirAliasedIxfn td_env coal_tab x
   pure ([wrt], [wrt, rd])
-getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Copy {})) = error "Impossible"
+getUseSumFromStm _ _ (Let Pat {} _ (BasicOp (Replicate (Shape []) _))) =
+  error "Impossible"
 getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Concat _i (a :| bs) _ses))) =
   -- concat
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
@@ -133,12 +137,13 @@ getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Replicate _shp se))) 
         Constant _ -> Just (ws, ws)
         Var x -> Just (ws, ws ++ mapMaybe (getDirAliasedIxfn td_env coal_tab) [x])
 getUseSumFromStm td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSlice offset slc) v)))
-  | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x) =
-      let x_ixfn_slc = IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
-          r1 = (m_b, m_x, x_ixfn_slc)
-       in case getDirAliasedIxfn td_env coal_tab v of
-            Nothing -> Just ([r1], [r1])
-            Just r2 -> Just ([r1], [r1, r2])
+  | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x) = do
+      let x_ixfn_slc =
+            LMAD.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
+      let r1 = (m_b, m_x, x_ixfn_slc)
+      case getDirAliasedIxfn td_env coal_tab v of
+        Nothing -> Just ([r1], [r1])
+        Just r2 -> Just ([r1], [r1, r2])
 -- getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp bop)) =
 --   let wrt = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
 --    in trace ("getUseBla: " <> show bop) $ pure (wrt, wrt)
@@ -249,9 +254,8 @@ recordMemRefUses td_env bu_env stm =
         <> acc
         <> fromMaybe mempty (M.lookup m (m_alias td_env))
     mbLmad indfun
-      | Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
-        (IxFun.IxFun (lmad :| []) _ _) <- IxFun.substituteInIxFun subs indfun =
-          Just lmad
+      | Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun =
+          Just $ LMAD.substitute subs indfun
     mbLmad _ = Nothing
     addLmads wrts uses etry =
       etry {memrefs = MemRefs uses wrts <> memrefs etry}
@@ -272,9 +276,9 @@ noMemOverlap td_env (Set is0) (Set js0)
               ( \i ->
                   all
                     ( \j ->
-                        IxFun.disjoint less_thans (nonNegatives td_env) i j
-                          || IxFun.disjoint2 () () less_thans (nonNegatives td_env) i j
-                          || IxFun.disjoint3 (typeOf <$> scope td_env) asserts less_thans non_negs i j
+                        LMAD.disjoint less_thans (nonNegatives td_env) i j
+                          || LMAD.disjoint2 () () less_thans (nonNegatives td_env) i j
+                          || LMAD.disjoint3 (typeOf <$> scope td_env) asserts less_thans non_negs i j
                     )
                     js
               )
@@ -283,8 +287,8 @@ noMemOverlap td_env (Set is0) (Set js0)
   where
     less_thans = map (fmap $ fixPoint $ substituteInPrimExp $ scalarTable td_env) $ knownLessThan td_env
     asserts = map (fixPoint (substituteInPrimExp $ scalarTable td_env) . primExpFromSubExp Bool) $ td_asserts td_env
-    is = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList is0
-    js = map (fixPoint (IxFun.substituteInLMAD $ TPrimExp <$> scalarTable td_env)) $ S.toList js0
+    is = map (fixPoint (LMAD.substitute $ TPrimExp <$> scalarTable td_env)) $ S.toList is0
+    js = map (fixPoint (LMAD.substitute $ TPrimExp <$> scalarTable td_env)) $ S.toList js0
 noMemOverlap _ _ _ = False
 
 -- | Computes the total aggregated access summary for a loop by expanding the
@@ -297,7 +301,7 @@ noMemOverlap _ _ _ = False
 --   \bigcup_{j=0}^{j<n} Access_j
 -- \]
 aggSummaryLoopTotal ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   ScopeTab rep ->
   ScopeTab rep ->
   ScalarTab ->
@@ -320,7 +324,7 @@ aggSummaryLoopTotal scope_bef scope_loop scals_loop _ access
 aggSummaryLoopTotal _ _ scalars_loop (Just (iterator_var, (lower_bound, upper_bound))) (Set lmads) =
   concatMapM
     ( aggSummaryOne iterator_var lower_bound upper_bound
-        . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
+        . fixPoint (LMAD.substitute $ fmap TPrimExp scalars_loop)
     )
     (S.toList lmads)
 aggSummaryLoopTotal _ _ _ _ _ = pure Undeterminable
@@ -334,7 +338,7 @@ aggSummaryLoopTotal _ _ _ _ _ = pure Undeterminable
 --   \bigcup_{j=i+1}^{j<n} Access_j
 -- \]
 aggSummaryLoopPartial ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   ScalarTab ->
   Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
   AccessSummary ->
@@ -353,7 +357,7 @@ aggSummaryLoopPartial scalars_loop (Just (iterator_var, (_, upper_bound))) (Set 
         iterator_var
         (isInt64 (LeafExp iterator_var $ IntType Int64) + 1)
         (upper_bound - typedLeafExp iterator_var - 1)
-        . fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars_loop)
+        . fixPoint (LMAD.substitute $ fmap TPrimExp scalars_loop)
     )
     (S.toList lmads)
 
@@ -371,7 +375,7 @@ aggSummaryLoopPartial scalars_loop (Just (iterator_var, (_, upper_bound))) (Set 
 -- total aggregation of the inner dimensions. For outer dimensions, the equation
 -- is the same, the point accesses in $Access_j$ are replaced with the total
 -- aggregation of the inner dimensions.
-aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> LmadRef -> m AccessSummary
+aggSummaryMapPartial :: (MonadFreshNames m) => ScalarTab -> [(VName, SubExp)] -> LmadRef -> m AccessSummary
 aggSummaryMapPartial _ [] = const $ pure mempty
 aggSummaryMapPartial scalars dims =
   helper mempty (reverse dims) . Set . S.singleton -- Reverse dims so we work from the inside out
@@ -395,7 +399,7 @@ aggSummaryMapPartial scalars dims =
 -- \[
 --   \bigcup_{j=0}^{j<i} a_j \cup \bigcup_{j=i+1}^{j<n} a_j
 -- \]
-aggSummaryMapPartialOne :: MonadFreshNames m => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
+aggSummaryMapPartialOne :: (MonadFreshNames m) => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
 aggSummaryMapPartialOne _ _ Undeterminable = pure Undeterminable
 aggSummaryMapPartialOne _ (_, Constant n) (Set _) | oneIsh n = pure mempty
 aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
@@ -407,11 +411,11 @@ aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
       )
     ]
   where
-    lmads = map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $ S.toList lmads0
+    lmads = map (fixPoint (LMAD.substitute $ fmap TPrimExp scalars)) $ S.toList lmads0
     helper (x, y) = concatMapM (aggSummaryOne gtid x y) lmads
 
 -- | Computes to total access summary over a multi-dimensional map.
-aggSummaryMapTotal :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
+aggSummaryMapTotal :: (MonadFreshNames m) => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
 aggSummaryMapTotal _ [] _ = pure mempty
 aggSummaryMapTotal _ _ (Set lmads)
   | lmads == mempty = pure mempty
@@ -433,7 +437,7 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
   where
     lmads =
       S.fromList $
-        map (fixPoint (IxFun.substituteInLMAD $ fmap TPrimExp scalars)) $
+        map (fixPoint (LMAD.substitute $ fmap TPrimExp scalars)) $
           S.toList lmads0
 
 -- | Helper function that aggregates the accesses of single LMAD according to a
@@ -445,8 +449,8 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
 --
 -- The function returns 'Underterminable' if the iterator is free in the output
 -- LMAD or the dimensions of the input LMAD .
-aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
-aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
+aggSummaryOne :: (MonadFreshNames m) => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
+aggSummaryOne iterator_var lower_bound spn lmad@(LMAD.LMAD offset0 dims0)
   | iterator_var `nameIn` freeIn dims0 = pure Undeterminable
   | iterator_var `notNameIn` freeIn offset0 = pure $ Set $ S.singleton lmad
   | otherwise = do
@@ -456,13 +460,11 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
           new_stride = TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
           new_offset = replaceIteratorWith lower_bound offset0
           new_lmad =
-            IxFun.LMAD new_offset $
-              IxFun.LMADDim new_stride spn 0 IxFun.Inc : map incPerm dims0
+            LMAD.LMAD new_offset $ LMAD.LMADDim new_stride spn : dims0
       if new_var `nameIn` freeIn new_lmad
         then pure Undeterminable
         else pure $ Set $ S.singleton new_lmad
   where
-    incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
     replaceIteratorWith se = TPrimExp . substituteInPrimExp (M.singleton iterator_var $ untyped se) . untyped
 
 -- | Takes a 'VName' and converts it into a 'TPrimExp' with type 'Int64'.

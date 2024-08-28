@@ -64,7 +64,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
-import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Sequence qualified as SQ
 import Data.Set (Set, (\\))
 import Data.Set qualified as S
@@ -127,9 +127,9 @@ shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ Apply {}) mt =
   statusOf n mt /= StayOnHost
 shouldMoveStm (Let _ _ (Match cond _ _ _)) mt =
   all ((== MoveToDevice) . (`statusOf` mt)) $ subExpVars cond
-shouldMoveStm (Let _ _ (DoLoop _ (ForLoop _ _ (Var n) _) _)) mt =
+shouldMoveStm (Let _ _ (Loop _ (ForLoop _ _ (Var n)) _)) mt =
   statusOf n mt == MoveToDevice
-shouldMoveStm (Let _ _ (DoLoop _ (WhileLoop n) _)) mt =
+shouldMoveStm (Let _ _ (Loop _ (WhileLoop n) _)) mt =
   statusOf n mt == MoveToDevice
 -- BasicOp and Apply statements might not bind any variables (shouldn't happen).
 -- If statements might use a constant branch condition.
@@ -184,9 +184,9 @@ hostOnlyFunDefs funs =
 -- include user defined functions that could turn out to be host-only.
 checkFunDef :: FunDef GPU -> Maybe (Set Name)
 checkFunDef fun = do
-  checkFParams (funDefParams fun)
-  checkRetTypes (funDefRetType fun)
-  checkBody (funDefBody fun)
+  checkFParams $ funDefParams fun
+  checkRetTypes $ map fst $ funDefRetType fun
+  checkBody $ funDefBody fun
   where
     hostOnly = Nothing
     ok = Just ()
@@ -199,9 +199,6 @@ checkFunDef fun = do
     checkRetTypes = check isArrayType
 
     checkPats = check isArray
-
-    checkLoopForm (ForLoop _ _ _ (_ : _)) = hostOnly
-    checkLoopForm _ = ok
 
     checkBody = checkStms . bodyStms
 
@@ -216,9 +213,8 @@ checkFunDef fun = do
     checkExp (Apply fn _ _ _) = Just (S.singleton fn)
     checkExp (Match _ cases defbody _) =
       mconcat <$> mapM checkBody (defbody : map caseBody cases)
-    checkExp (DoLoop params lform body) = do
+    checkExp (Loop params _ body) = do
       checkLParams params
-      checkLoopForm lform
       checkBody body
     checkExp BasicOp {} = Just S.empty
 
@@ -249,7 +245,7 @@ analyseConsts hof funs consts =
 analyseFunDef :: HostOnlyFuns -> FunDef GPU -> MigrationTable
 analyseFunDef hof fd =
   let body = funDefBody fd
-      usage = foldl' f [] $ zip (bodyResult body) (funDefRetType fd)
+      usage = foldl' f [] $ zip (bodyResult body) (map fst $ funDefRetType fd)
       stms = bodyStms body
    in analyseStms hof usage stms
   where
@@ -296,7 +292,7 @@ analyseStms hof usage stms =
 --                                TYPE HELPERS                                --
 --------------------------------------------------------------------------------
 
-isScalar :: Typed t => t -> Bool
+isScalar :: (Typed t) => t -> Bool
 isScalar = isScalarType . typeOf
 
 isScalarType :: TypeBase shape u -> Bool
@@ -304,10 +300,10 @@ isScalarType (Prim Unit) = False
 isScalarType (Prim _) = True
 isScalarType _ = False
 
-isArray :: Typed t => t -> Bool
+isArray :: (Typed t) => t -> Bool
 isArray = isArrayType . typeOf
 
-isArrayType :: ArrayShape shape => TypeBase shape u -> Bool
+isArrayType :: (ArrayShape shape) => TypeBase shape u -> Bool
 isArrayType = (0 <) . arrayRank
 
 --------------------------------------------------------------------------------
@@ -473,15 +469,6 @@ graphStm stm = do
     BasicOp (Rearrange _ arr) -> do
       graphInefficientReturn [] e
       one bs `reuses` arr
-    BasicOp (Rotate _ arr) -> do
-      -- Migrating a Rotate leads to a memory allocation error.
-      --
-      -- TODO: Fix Rotate memory allocation error.
-      --
-      -- Can be replaced with 'graphHostOnly e' to disable migration.
-      -- A fix can be verified by enabling tests/migration/reuse7_rotate.fut
-      graphInefficientReturn [] e
-      one bs `reuses` arr
     -- Expressions with a cost linear to the size of their result arrays are
     -- inefficient to migrate into GPUBody kernels as such kernels are single-
     -- threaded. For sufficiently large arrays the cost may exceed what is saved
@@ -495,14 +482,14 @@ graphStm stm = do
       -- Whether the rows are primitive constants or arrays, without any scalar
       -- variable operands such ArrayLit cannot directly prevent a scalar read.
       graphHostOnly e
+    BasicOp ArrayVal {} ->
+      -- As above.
+      graphHostOnly e
     BasicOp Update {} ->
       graphHostOnly e
     BasicOp Concat {} ->
       -- Is unlikely to prevent a scalar read as the only SubExp operand in
       -- practice is a computation of host-only size variables.
-      graphHostOnly e
-    BasicOp Copy {} ->
-      -- Only takes an array operand, so cannot directly prevent a scalar read.
       graphHostOnly e
     BasicOp Manifest {} ->
       -- Takes no scalar operands so cannot directly prevent a scalar read.
@@ -519,7 +506,7 @@ graphStm stm = do
       graphApply fn bs e
     Match ses cases defbody _ ->
       graphMatch bs ses cases defbody
-    DoLoop params lform body ->
+    Loop params lform body ->
       graphLoop bs params lform body
     WithAcc inputs f ->
       graphWithAcc bs inputs f
@@ -687,7 +674,7 @@ type LoopValue = (Binding, Id, SubExp, SubExp)
 graphLoop ::
   [Binding] ->
   [(FParam GPU, SubExp)] ->
-  LoopForm GPU ->
+  LoopForm ->
   Body GPU ->
   Grapher ()
 graphLoop [] _ _ _ =
@@ -710,9 +697,9 @@ graphLoop (b : bs) params lform body = do
   -- as a whole or not. See 'shouldMoveStm'.
   let may_migrate = not (bodyHostOnly stats) && may_copy_results
   unless may_migrate $ case lform of
-    ForLoop _ _ (Var n) _ -> connectToSink (nameToId n)
+    ForLoop _ _ (Var n) -> connectToSink (nameToId n)
     WhileLoop n
-      | (_, p, _, res) <- loopValueFor n -> do
+      | Just (_, p, _, res) <- loopValueFor n -> do
           connectToSink p
           case res of
             Var v -> connectToSink (nameToId v)
@@ -750,11 +737,12 @@ graphLoop (b : bs) params lform body = do
   --
   -- For more details see the similar description for if statements.
   when may_migrate $ case lform of
-    ForLoop _ _ n _ ->
+    ForLoop _ _ n ->
       onlyGraphedScalarSubExp n >>= addEdges (ToNodes bindings Nothing)
     WhileLoop n
-      | (_, _, arg, _) <- loopValueFor n ->
+      | Just (_, _, arg, _) <- loopValueFor n ->
           onlyGraphedScalarSubExp arg >>= addEdges (ToNodes bindings Nothing)
+    _ -> pure ()
   where
     subgraphId :: Id
     subgraphId = fst b
@@ -771,9 +759,8 @@ graphLoop (b : bs) params lform body = do
     bindings :: IdSet
     bindings = IS.fromList $ map (\((i, _), _, _, _) -> i) loopValues
 
-    loopValueFor :: VName -> LoopValue
     loopValueFor n =
-      fromJust $ find (\(_, p, _, _) -> p == nameToId n) loopValues
+      find (\(_, p, _, _) -> p == nameToId n) loopValues
 
     graphTheLoop :: Grapher ()
     graphTheLoop = do
@@ -796,16 +783,11 @@ graphLoop (b : bs) params lform body = do
       -- TODO: Track memory reuse through merge parameters.
 
       case lform of
-        ForLoop _ _ n elems -> do
+        ForLoop _ _ n ->
           onlyGraphedScalarSubExp n >>= tellOperands
-          mapM_ graphForInElem elems
         WhileLoop _ -> pure ()
       graphBody body
       where
-        graphForInElem (p, arr) = do
-          when (isScalar p) $ addSource (nameToId $ paramName p, typeOf p)
-          when (isArray p) $ (nameToId (paramName p), typeOf p) `reuses` arr
-
         graphParam ((_, t), p, arg, _) =
           do
             -- It is unknown whether a read can be delayed via the parameter
@@ -961,7 +943,7 @@ graphAcc i types op delayed = do
   st <- get
 
   -- Collect statistics about the operator statements.
-  let lambda = fromMaybe (Lambda [] (Body () SQ.empty []) []) op
+  let lambda = fromMaybe (Lambda [] [] (Body () SQ.empty [])) op
   let m = graphBody (lambdaBody lambda)
   let stats = R.runReader (evalStateT (captureBodyStats m) st) env
   -- We treat GPUBody kernels as host-only to not bother rewriting them inside
@@ -1024,7 +1006,7 @@ graphedScalarOperands e =
       mapM_ collectSubExp ses
       mapM_ (collectBody . caseBody) cases
       collectBody defbody
-    collect (DoLoop params lform body) = do
+    collect (Loop params lform body) = do
       mapM_ (collectSubExp . snd) params
       collectLForm lform
       collectBody body
@@ -1062,7 +1044,7 @@ graphedScalarOperands e =
           captureAcc a >> collectBasic ua
     collectStm stm = collect (stmExp stm)
 
-    collectLForm (ForLoop _ _ b _) = collectSubExp b
+    collectLForm (ForLoop _ _ b) = collectSubExp b
     -- WhileLoop condition is declared as a loop parameter.
     collectLForm (WhileLoop _) = pure ()
 
@@ -1516,7 +1498,7 @@ outermostCopyableArray n = IM.lookup (nameToId n) <$> getCopyableMemory
 -- | Reduces the variables to just the 'Id's of those that are scalars and which
 -- have a vertex representation in the graph, excluding those that have been
 -- connected to sinks.
-onlyGraphedScalars :: Foldable t => t VName -> Grapher IdSet
+onlyGraphedScalars :: (Foldable t) => t VName -> Grapher IdSet
 onlyGraphedScalars vs = do
   let is = foldl' (\s n -> IS.insert (nameToId n) s) IS.empty vs
   IS.intersection is <$> getGraphedScalars

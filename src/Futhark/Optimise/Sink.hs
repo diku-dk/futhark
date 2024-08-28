@@ -47,12 +47,9 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List (foldl')
 import Data.Map qualified as M
-import Data.Sequence ((<|))
-import Data.Sequence qualified as SQ
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Builder.Class
-import Futhark.Construct (sliceDim)
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC
@@ -76,7 +73,7 @@ type Constraints rep =
 -- | Given a statement, compute how often each of its free variables
 -- are used.  Not accurate: what we care about are only 1, and greater
 -- than 1.
-multiplicity :: Constraints rep => Stm rep -> M.Map VName Int
+multiplicity :: (Constraints rep) => Stm rep -> M.Map VName Int
 multiplicity stm =
   case stmExp stm of
     Match cond cases defbody _ ->
@@ -85,14 +82,14 @@ multiplicity stm =
           : free 1 defbody
           : map (free 1 . caseBody) cases
     Op {} -> free 2 stm
-    DoLoop {} -> free 2 stm
+    Loop {} -> free 2 stm
     _ -> free 1 stm
   where
-    free k x = M.fromList $ zip (namesToList $ freeIn x) $ repeat k
+    free k x = M.fromList $ map (,k) $ namesToList $ freeIn x
     comb = M.unionWith (+)
 
 optimiseBranch ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep (Body rep)
 optimiseBranch onOp vtable sinking (Body dec stms res) =
@@ -111,40 +108,21 @@ optimiseBranch onOp vtable sinking (Body dec stms res) =
     sunk = namesFromList $ foldMap (patNames . stmPat) sunk_stms
 
 optimiseLoop ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
-  Sinker rep ([(FParam rep, SubExp)], LoopForm rep, Body rep)
-optimiseLoop onOp vtable sinking (merge, form, body0)
-  | WhileLoop {} <- form =
-      let (body1, sunk) = optimiseBody onOp vtable' sinking body0
-       in ((merge, form, body1), sunk)
-  | ForLoop i it bound loop_vars <- form =
-      let stms' = foldr (inline i) (bodyStms body0) loop_vars
-          body1 = body0 {bodyStms = stms'}
-          (body2, sunk) = optimiseBody onOp vtable' sinking body1
-          notSunk (x, _) = paramName x `notNameIn` sunk
-          loop_vars' = filter notSunk loop_vars
-          form' = ForLoop i it bound loop_vars'
-          body3 = body2 {bodyStms = SQ.drop (length loop_vars') (bodyStms body2)}
-       in ((merge, form', body3), sunk)
+  Sinker rep ([(FParam rep, SubExp)], LoopForm, Body rep)
+optimiseLoop onOp vtable sinking (merge, form, body0) =
+  let (body1, sunk) = optimiseBody onOp vtable' sinking body0
+   in ((merge, form, body1), sunk)
   where
     (params, _) = unzip merge
     scope = case form of
       WhileLoop {} -> scopeOfFParams params
-      ForLoop i it _ _ -> M.insert i (IndexName it) $ scopeOfFParams params
+      ForLoop i it _ -> M.insert i (IndexName it) $ scopeOfFParams params
     vtable' = ST.fromScope scope <> vtable
 
-    inline i (x, arr) stms =
-      let pt = typeOf x
-          slice = Slice $ DimFix (Var i) : map sliceDim (arrayDims pt)
-          e = BasicOp (Index arr slice)
-          pat = mkExpPat [Ident (paramName x) pt] e
-          aux = StmAux mempty mempty (mkExpDec pat e)
-          stm = Let pat aux e
-       in stm <| stms
-
 optimiseStms ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   SymbolTable rep ->
   Sinking rep ->
@@ -159,7 +137,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
     multiplicities =
       foldl'
         (M.unionWith (+))
-        (M.fromList (zip (namesToList free_in_res) (repeat 1)))
+        (M.fromList (map (,1) (namesToList free_in_res)))
         (map multiplicity $ stmsToList all_stms)
 
     optimiseStms' _ _ [] = ([], mempty)
@@ -183,13 +161,13 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
            in ( stm {stmExp = Match cond cases' defbody' ret} : stms',
                 mconcat cases_sunk <> defbody_sunk <> sunk
               )
-      | DoLoop merge lform body <- stmExp stm =
+      | Loop merge lform body <- stmExp stm =
           let comps = (merge, lform, body)
               (comps', loop_sunk) = optimiseLoop onOp vtable sinking comps
-              (merge', lform', body') = comps'
+              (merge', _, body') = comps'
 
               (stms', stms_sunk) = optimiseStms' vtable' sinking stms
-           in ( stm {stmExp = DoLoop merge' lform' body'} : stms',
+           in ( stm {stmExp = Loop merge' lform body'} : stms',
                 stms_sunk <> loop_sunk
               )
       | Op op <- stmExp stm =
@@ -220,7 +198,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
             }
 
 optimiseBody ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep (Body rep)
 optimiseBody onOp vtable sinking (Body attr stms res) =
@@ -228,7 +206,7 @@ optimiseBody onOp vtable sinking (Body attr stms res) =
    in (Body attr stms' res, sunk)
 
 optimiseKernelBody ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep (KernelBody rep)
 optimiseKernelBody onOp vtable sinking (KernelBody attr stms res) =
@@ -236,7 +214,7 @@ optimiseKernelBody onOp vtable sinking (KernelBody attr stms res) =
    in (KernelBody attr stms' res, sunk)
 
 optimiseSegOp ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep (SegOp lvl rep)
 optimiseSegOp onOp vtable sinking op =

@@ -20,6 +20,33 @@ static void host_alloc(struct futhark_context* ctx, size_t size, const char* tag
 // Allocate memory allocated with host_alloc().
 static void host_free(struct futhark_context* ctx, size_t size, const char* tag, void* mem);
 
+// Log that a copy has occurred.
+static void log_copy(struct futhark_context* ctx,
+                     const char *kind, int r,
+                     int64_t dst_offset, int64_t dst_strides[r],
+                     int64_t src_offset, int64_t src_strides[r],
+                     int64_t shape[r]);
+
+static void log_transpose(struct futhark_context* ctx,
+                          int64_t k, int64_t m, int64_t n);
+
+static bool lmad_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_out,
+                        int r,
+                        const int64_t dst_strides[r],
+                        const int64_t src_strides[r],
+                        const int64_t shape[r]);
+
+static bool lmad_contiguous(int r, int64_t strides[r], int64_t shape[r]);
+
+static bool lmad_memcpyable(int r,
+                            int64_t dst_strides[r], int64_t src_strides[r], int64_t shape[r]);
+
+static void add_event(struct futhark_context* ctx,
+                      const char* name,
+                      char* description,
+                      void* data,
+                      event_report_fn f);
+
 // Functions that must be defined by the backend.
 static void backend_context_config_setup(struct futhark_context_config* cfg);
 static void backend_context_config_teardown(struct futhark_context_config* cfg);

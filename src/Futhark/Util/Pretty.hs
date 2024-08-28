@@ -7,10 +7,12 @@ module Futhark.Util.Pretty
     prettyTuple,
     prettyTupleLines,
     prettyString,
+    prettyStringOneLine,
     prettyText,
     prettyTextOneLine,
     docText,
     docTextForHandle,
+    docString,
 
     -- * Rendering to terminal
     putDoc,
@@ -45,11 +47,11 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Numeric.Half
 import Prettyprinter
-import Prettyprinter.Render.Terminal (AnsiStyle, Color (..), bgColor, bgColorDull, bold, color, colorDull)
+import Prettyprinter.Render.Terminal (AnsiStyle, Color (..), bgColor, bgColorDull, bold, color, colorDull, italicized, underlined)
 import Prettyprinter.Render.Terminal qualified
 import Prettyprinter.Render.Text qualified
 import Prettyprinter.Symbols.Ascii
-import System.IO (Handle, hIsTerminalDevice, stdout)
+import System.IO (Handle, hIsTerminalDevice, hPutStrLn, stdout)
 
 -- | Print a doc with styling to the given file; stripping colors if
 -- the file does not seem to support such things.
@@ -67,7 +69,7 @@ hPutDoc h d = do
 hPutDocLn :: Handle -> Doc AnsiStyle -> IO ()
 hPutDocLn h d = do
   hPutDoc h d
-  putStrLn ""
+  hPutStrLn h ""
 
 -- | Like 'hPutDoc', but to stdout.
 putDoc :: Doc AnsiStyle -> IO ()
@@ -75,8 +77,8 @@ putDoc = hPutDoc stdout
 
 -- | Like 'putDoc', but with a final newline.
 putDocLn :: Doc AnsiStyle -> IO ()
-putDocLn h = do
-  putDoc h
+putDocLn d = do
+  putDoc d
   putStrLn ""
 
 -- | Produce text suitable for printing on the given handle.  This
@@ -92,14 +94,18 @@ docTextForHandle h d = do
       else Prettyprinter.Render.Text.renderStrict sds
 
 -- | Prettyprint a value to a 'String', appropriately wrapped.
-prettyString :: Pretty a => a -> String
+prettyString :: (Pretty a) => a -> String
 prettyString = T.unpack . prettyText
 
+-- | Prettyprint a value to a 'String' on a single line.
+prettyStringOneLine :: (Pretty a) => a -> String
+prettyStringOneLine = T.unpack . prettyTextOneLine
+
 -- | Prettyprint a value to a 'Text', appropriately wrapped.
-prettyText :: Pretty a => a -> Text
+prettyText :: (Pretty a) => a -> Text
 prettyText = docText . pretty
 
--- | Convert a 'Doc' to text.  Thsi ignores any annotations (i.e. it
+-- | Convert a 'Doc' to text.  This ignores any annotations (i.e. it
 -- will be non-coloured output).
 docText :: Doc a -> T.Text
 docText = Prettyprinter.Render.Text.renderStrict . layouter
@@ -107,8 +113,13 @@ docText = Prettyprinter.Render.Text.renderStrict . layouter
     layouter =
       layoutSmart defaultLayoutOptions {layoutPageWidth = Unbounded}
 
+-- | Convert a 'Doc' to a 'String', through 'docText'. Intended for
+-- debugging.
+docString :: Doc a -> String
+docString = T.unpack . docText
+
 -- | Prettyprint a value to a 'Text' on a single line.
-prettyTextOneLine :: Pretty a => a -> Text
+prettyTextOneLine :: (Pretty a) => a -> Text
 prettyTextOneLine = Prettyprinter.Render.Text.renderStrict . layoutSmart oneLineLayout . group . pretty
   where
     oneLineLayout = defaultLayoutOptions {layoutPageWidth = Unbounded}
@@ -120,11 +131,11 @@ ppTupleLines' :: [Doc a] -> Doc a
 ppTupleLines' ets = braces $ commastack $ map align ets
 
 -- | Prettyprint a list enclosed in curly braces.
-prettyTuple :: Pretty a => [a] -> Text
+prettyTuple :: (Pretty a) => [a] -> Text
 prettyTuple = docText . ppTuple' . map pretty
 
 -- | Like 'prettyTuple', but put a linebreak after every element.
-prettyTupleLines :: Pretty a => [a] -> Text
+prettyTupleLines :: (Pretty a) => [a] -> Text
 prettyTupleLines = docText . ppTupleLines' . map pretty
 
 -- | The document @'apply' ds@ separates @ds@ with commas and encloses them with

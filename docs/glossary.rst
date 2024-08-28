@@ -159,6 +159,12 @@ documentation and in compiler output.
 
      Not :term:`variant`.
 
+   Irrefutable pattern
+
+     A :term:`pattern` that will always match a value of its type. For
+     example, ``(x,y)`` is a pattern that will match any tuple. See
+     also :term:`refutable pattern`.
+
    Irregular
 
      Something that is not regular.  Usually used as shorthand for
@@ -269,6 +275,12 @@ documentation and in compiler output.
      :term:`polymorphic` functions for each type it is used with.
      Performed by the Futhark compiler.
 
+   Name
+
+     A lexical token consisting of alphanumeric characters and
+     underscores, for example ``map`` and ``do_it``.  Most variables
+     are names.  See also :term:`symbol`.
+
    Nested data parallelism
 
      Nested :term:`data parallelism` occurs when a parallel construct
@@ -284,10 +296,24 @@ documentation and in compiler output.
      fully exploit the parallelism of the program, although
      :term:`nested data parallelism` muddles the picture.
 
+   Pattern
+
+     A syntactical construct for decomposing a value into its
+     consituent parts. Patterns are used in function parameters,
+     ``let``-bindings, and ``match``. See :ref:`patterns`.
+
    Recursion
 
      A function that calls itself.  Currently not supported in
      Futhark.
+
+   Refutable pattern
+
+     A :term:`pattern` that does does not match all possible values.
+     For example, the pattern ``(1,x)`` matches only tuples where the
+     first element is ``1``. These may not be used in ``let``
+     expressions or in function parameters. See also
+     :term:`irrefutable pattern`.
 
    Regular nested data parallelism
 
@@ -346,6 +372,12 @@ documentation and in compiler output.
      Futhark: functions such as ``map``, ``reduce``, ``scan``, and so
      on.  They are *second order* because they accept a functional
      argument, and so permit :term:`nested data parallelism`.
+
+   Symbol
+
+     A lexical token that consts of symbolic (non-alphabetic
+     characters), and can be bound to a value.  Infix operators such
+     as ``+`` and ``/`` are symbols.  See also :term:`name`.
 
    Type
 

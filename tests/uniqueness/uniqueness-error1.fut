@@ -1,7 +1,7 @@
 -- Test whether multiple references within the same sequence are
 -- detected.
 -- ==
--- error: "b".*consumed
+-- error: "a".*consumed
 
 def main(): i32 =
     let n = 10

@@ -23,6 +23,7 @@ module Futhark.IR.Prop.Scope
     inScopeOf,
     scopeOfLParams,
     scopeOfFParams,
+    scopeOfLoopForm,
     scopeOfPat,
     scopeOfPatElem,
     SameScope,
@@ -51,9 +52,9 @@ data NameInfo rep
   | LParamName (LParamInfo rep)
   | IndexName IntType
 
-deriving instance RepTypes rep => Show (NameInfo rep)
+deriving instance (RepTypes rep) => Show (NameInfo rep)
 
-instance RepTypes rep => Typed (NameInfo rep) where
+instance (RepTypes rep) => Typed (NameInfo rep) where
   typeOf (LetName dec) = typeOf dec
   typeOf (FParamName dec) = typeOf dec
   typeOf (LParamName dec) = typeOf dec
@@ -156,7 +157,7 @@ class Scoped rep a | a -> rep where
 inScopeOf :: (Scoped rep a, LocalScope rep m) => a -> m b -> m b
 inScopeOf = localScope . scopeOf
 
-instance Scoped rep a => Scoped rep [a] where
+instance (Scoped rep a) => Scoped rep [a] where
   scopeOf = mconcat . map scopeOf
 
 instance Scoped rep (Stms rep) where
@@ -171,23 +172,23 @@ instance Scoped rep (FunDef rep) where
 instance Scoped rep (VName, NameInfo rep) where
   scopeOf = uncurry M.singleton
 
-instance Scoped rep (LoopForm rep) where
-  scopeOf (WhileLoop _) = mempty
-  scopeOf (ForLoop i it _ xs) =
-    M.insert i (IndexName it) $ scopeOfLParams (map fst xs)
+-- | The scope of a loop form.
+scopeOfLoopForm :: LoopForm -> Scope rep
+scopeOfLoopForm (WhileLoop _) = mempty
+scopeOfLoopForm (ForLoop i it _) = M.singleton i $ IndexName it
 
 -- | The scope of a pattern.
-scopeOfPat :: LetDec rep ~ dec => Pat dec -> Scope rep
+scopeOfPat :: (LetDec rep ~ dec) => Pat dec -> Scope rep
 scopeOfPat =
   mconcat . map scopeOfPatElem . patElems
 
 -- | The scope of a pattern element.
-scopeOfPatElem :: LetDec rep ~ dec => PatElem dec -> Scope rep
+scopeOfPatElem :: (LetDec rep ~ dec) => PatElem dec -> Scope rep
 scopeOfPatElem (PatElem name dec) = M.singleton name $ LetName dec
 
 -- | The scope of some lambda parameters.
 scopeOfLParams ::
-  LParamInfo rep ~ dec =>
+  (LParamInfo rep ~ dec) =>
   [Param dec] ->
   Scope rep
 scopeOfLParams = M.fromList . map f
@@ -196,7 +197,7 @@ scopeOfLParams = M.fromList . map f
 
 -- | The scope of some function or loop parameters.
 scopeOfFParams ::
-  FParamInfo rep ~ dec =>
+  (FParamInfo rep ~ dec) =>
   [Param dec] ->
   Scope rep
 scopeOfFParams = M.fromList . map f
@@ -217,13 +218,13 @@ type SameScope rep1 rep2 =
 -- | If two scopes are really the same, then you can convert one to
 -- the other.
 castScope ::
-  SameScope fromrep torep =>
+  (SameScope fromrep torep) =>
   Scope fromrep ->
   Scope torep
 castScope = M.map castNameInfo
 
 castNameInfo ::
-  SameScope fromrep torep =>
+  (SameScope fromrep torep) =>
   NameInfo fromrep ->
   NameInfo torep
 castNameInfo (LetName dec) = LetName dec

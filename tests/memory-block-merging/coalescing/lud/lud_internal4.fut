@@ -1,7 +1,7 @@
 -- ==
--- random input { [16][16][8][8]f32 }
+-- compiled random input { [16][16][8][8]f32 }
 -- auto output
--- structure gpu-mem { Alloc 3 }
+-- structure gpu-mem { Alloc 2 }
 
 let lud_internal [b][m] (top_per: [m][b][b]f32) (lft_per: [m][b][b]f32) (mat_slice: [m][m][b][b]f32): *[m][m][b][b]f32 =
   let top_slice = map transpose top_per in

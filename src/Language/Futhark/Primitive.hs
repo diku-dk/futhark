@@ -237,7 +237,7 @@ instance Pretty IntValue where
   pretty (Int64Value v) = pretty $ show v ++ "i64"
 
 -- | Create an t'IntValue' from a type and an 'Integer'.
-intValue :: Integral int => IntType -> int -> IntValue
+intValue :: (Integral int) => IntType -> int -> IntValue
 intValue Int8 = Int8Value . fromIntegral
 intValue Int16 = Int16Value . fromIntegral
 intValue Int32 = Int32Value . fromIntegral
@@ -251,7 +251,7 @@ intValueType Int32Value {} = Int32
 intValueType Int64Value {} = Int64
 
 -- | Convert an t'IntValue' to any 'Integral' type.
-valueIntegral :: Integral int => IntValue -> int
+valueIntegral :: (Integral int) => IntValue -> int
 valueIntegral (Int8Value v) = fromIntegral v
 valueIntegral (Int16Value v) = fromIntegral v
 valueIntegral (Int32Value v) = fromIntegral v
@@ -313,7 +313,7 @@ instance Pretty FloatValue where
     | otherwise = pretty $ show v ++ "f64"
 
 -- | Create a t'FloatValue' from a type and a 'Rational'.
-floatValue :: Real num => FloatType -> num -> FloatValue
+floatValue :: (Real num) => FloatType -> num -> FloatValue
 floatValue Float16 = Float16Value . fromRational . toRational
 floatValue Float32 = Float32Value . fromRational . toRational
 floatValue Float64 = Float64Value . fromRational . toRational
@@ -1271,6 +1271,34 @@ primFuns =
       f32_2 "nextafter32" nextafterf,
       f64_2 "nextafter64" nextafter,
       --
+      ( "ldexp16",
+        ( [FloatType Float16, IntType Int32],
+          FloatType Float16,
+          \case
+            [FloatValue (Float16Value x), IntValue (Int32Value y)] ->
+              Just $ FloatValue $ Float16Value $ x * (2 ** fromIntegral y)
+            _ -> Nothing
+        )
+      ),
+      ( "ldexp32",
+        ( [FloatType Float32, IntType Int32],
+          FloatType Float32,
+          \case
+            [FloatValue (Float32Value x), IntValue (Int32Value y)] ->
+              Just $ FloatValue $ Float32Value $ ldexpf x $ fromIntegral y
+            _ -> Nothing
+        )
+      ),
+      ( "ldexp64",
+        ( [FloatType Float64, IntType Int32],
+          FloatType Float64,
+          \case
+            [FloatValue (Float64Value x), IntValue (Int32Value y)] ->
+              Just $ FloatValue $ Float64Value $ ldexp x $ fromIntegral y
+            _ -> Nothing
+        )
+      ),
+      --
       f16 "gamma16" $ convFloat . tgammaf . convFloat,
       f32 "gamma32" tgammaf,
       f64 "gamma64" tgamma,
@@ -1287,6 +1315,10 @@ primFuns =
       f16 "erfc16" $ convFloat . erfcf . convFloat,
       f32 "erfc32" erfcf,
       f64 "erfc64" erfc,
+      --
+      f16_2 "copysign16" $ \x y -> convFloat (copysign (convFloat x) (convFloat y)),
+      f32_2 "copysign32" copysignf,
+      f64_2 "copysign64" copysign,
       --
       i8 "clz8" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
       i16 "clz16" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
@@ -1680,29 +1712,32 @@ negativeIshInt (Int16Value k) = k < 0
 negativeIshInt (Int32Value k) = k < 0
 negativeIshInt (Int64Value k) = k < 0
 
--- | The size of a value of a given primitive type in bits.
-primBitSize :: PrimType -> Int
-primBitSize = (* 8) . primByteSize
-
--- | The size of a value of a given primitive type in eight-bit bytes.
-primByteSize :: Num a => PrimType -> a
-primByteSize (IntType t) = intByteSize t
-primByteSize (FloatType t) = floatByteSize t
-primByteSize Bool = 1
-primByteSize Unit = 0
-
 -- | The size of a value of a given integer type in eight-bit bytes.
-intByteSize :: Num a => IntType -> a
+intByteSize :: (Num a) => IntType -> a
 intByteSize Int8 = 1
 intByteSize Int16 = 2
 intByteSize Int32 = 4
 intByteSize Int64 = 8
 
 -- | The size of a value of a given floating-point type in eight-bit bytes.
-floatByteSize :: Num a => FloatType -> a
+floatByteSize :: (Num a) => FloatType -> a
 floatByteSize Float16 = 2
 floatByteSize Float32 = 4
 floatByteSize Float64 = 8
+
+-- | The size of a value of a given primitive type in eight-bit bytes.
+--
+-- Warning: note that this is 0 for 'Unit', but a 'Unit' takes up a
+-- byte in the binary data format.
+primByteSize :: (Num a) => PrimType -> a
+primByteSize (IntType t) = intByteSize t
+primByteSize (FloatType t) = floatByteSize t
+primByteSize Bool = 1
+primByteSize Unit = 0
+
+-- | The size of a value of a given primitive type in bits.
+primBitSize :: PrimType -> Int
+primBitSize = (* 8) . primByteSize
 
 -- | True if the given binary operator is commutative.
 commutativeBinOp :: BinOp -> Bool

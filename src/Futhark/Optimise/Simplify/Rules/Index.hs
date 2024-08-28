@@ -7,6 +7,7 @@ module Futhark.Optimise.Simplify.Rules.Index
   )
 where
 
+import Control.Monad (guard)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
@@ -31,16 +32,25 @@ data IndexResult
   = IndexResult Certs VName (Slice SubExp)
   | SubExpResult Certs SubExp
 
+-- Fake expressions that we can recognise.
+fakeIndices :: [TPrimExp Int64 VName]
+fakeIndices = map f [0 :: Int ..]
+  where
+    f i = isInt64 $ LeafExp (VName v (negate i)) $ IntType Int64
+      where
+        v = nameFromText ("fake_" <> showText i)
+
 -- | Try to simplify an index operation.
 simplifyIndexing ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   ST.SymbolTable (Rep m) ->
   TypeLookup ->
   VName ->
   Slice SubExp ->
   Bool ->
+  (VName -> Bool) ->
   Maybe (m IndexResult)
-simplifyIndexing vtable seType idd (Slice inds) consuming =
+simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
   case defOf idd of
     _
       | Just t <- seType (Var idd),
@@ -59,6 +69,22 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
           Just $
             IndexResult cs arr . Slice . map DimFix
               <$> mapM (toSubExp "index_primexp") inds''
+      | Just (ST.IndexedArray cs arr inds'') <-
+          ST.index' idd (fixSlice (pe64 <$> Slice inds) (map fst matches)) vtable,
+        all (worthInlining . untyped) inds'',
+        arr `ST.available` vtable,
+        all (`ST.elem` vtable) (unCerts cs),
+        Just inds''' <- mapM okIdx inds'' -> do
+          Just $ IndexResult cs arr . Slice <$> sequence inds'''
+      where
+        matches = zip fakeIndices $ sliceDims $ Slice inds
+        okIdx i =
+          case lookup i matches of
+            Just w ->
+              Just $ pure $ DimSlice (constant (0 :: Int64)) w (constant (1 :: Int64))
+            Nothing -> do
+              guard $ not $ any ((`namesIntersect` freeIn i) . freeIn . fst) matches
+              Just $ DimFix <$> toSubExp "index_primexp" i
     Nothing -> Nothing
     Just (SubExp (Var v), cs) ->
       Just $ pure $ IndexResult cs v $ Slice inds
@@ -94,33 +120,17 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
               letSubExp "slice_iota" $
                 BasicOp $
                   Iota i_n i_offset'' i_stride'' to_it
-
-    -- A rotate cannot be simplified away if we are slicing a rotated dimension.
-    Just (Rotate offsets a, cs)
-      | not $ or $ zipWith rotateAndSlice offsets inds -> Just $ do
-          dims <- arrayDims <$> lookupType a
-          let adjustI i o d = do
-                i_p_o <- letSubExp "i_p_o" $ BasicOp $ BinOp (Add Int64 OverflowWrap) i o
-                letSubExp "rot_i" (BasicOp $ BinOp (SMod Int64 Unsafe) i_p_o d)
-              adjust (DimFix i, o, d) =
-                DimFix <$> adjustI i o d
-              adjust (DimSlice i n s, o, d) =
-                DimSlice <$> adjustI i o d <*> pure n <*> pure s
-          IndexResult cs a . Slice <$> mapM adjust (zip3 inds offsets dims)
-      where
-        rotateAndSlice r DimSlice {} = not $ isCt0 r
-        rotateAndSlice _ _ = False
     Just (Index aa ais, cs) ->
       Just $
         IndexResult cs aa
           <$> subExpSlice (sliceSlice (primExpSlice ais) (primExpSlice (Slice inds)))
     Just (Replicate (Shape [_]) (Var vv), cs)
       | [DimFix {}] <- inds,
-        not consuming,
         ST.available vv vtable ->
           Just $ pure $ SubExpResult cs $ Var vv
       | DimFix {} : is' <- inds,
         not consuming,
+        not $ consumed vv,
         ST.available vv vtable ->
           Just $ pure $ IndexResult cs vv $ Slice is'
     Just (Replicate (Shape [_]) val@(Constant _), cs)
@@ -128,7 +138,8 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
     Just (Replicate (Shape ds) v, cs)
       | (ds_inds, rest_inds) <- splitAt (length ds) inds,
         (ds', ds_inds') <- unzip $ mapMaybe index ds_inds,
-        ds' /= ds ->
+        ds' /= ds,
+        ST.subExpAvailable v vtable ->
           Just $ do
             arr <- letExp "smaller_replicate" $ BasicOp $ Replicate (Shape ds') v
             pure $ IndexResult cs arr $ Slice $ ds_inds' ++ rest_inds
@@ -142,9 +153,10 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
       where
         isIndex DimFix {} = True
         isIndex _ = False
-    Just (Copy src, cs)
+    Just (Replicate (Shape []) (Var src), cs)
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
+        not $ consumed src,
         -- It is generally not safe to simplify a slice of a copy,
         -- because the result may be used in an in-place update of the
         -- original.  But we know this can only happen if the original

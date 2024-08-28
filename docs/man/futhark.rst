@@ -27,15 +27,15 @@ COMMANDS
 futhark benchcmp FILE_A FILE_B
 ------------------------------
 
-Compares two Futhark benchmarks and reports changes in performance.
-The files must be formatted in the same manner as a JSON file returned
-from :ref:`futhark-bench(1)`.
+Compare two JSON files produced by the ``--json`` option of
+:ref:`futhark-bench(1)`.  The results show speedup of the latter file
+compared to the former.
 
-futhark check [-w] PROGRAM
---------------------------
+futhark check [-w] [-Werror] PROGRAM
+------------------------------------
 
-Check whether a Futhark program type checks.  With ``-w``, no warnings
-are printed.
+Check whether a Futhark program type checks. With ``-w``, no warnings
+are printed. With ``--Werror``, warnings are treated as errors.
 
 futhark check-syntax PROGRAM
 ----------------------------
@@ -76,7 +76,7 @@ programmers writing in Futhark.
 futhark eval [-f FILE] [-w] <exprs...>
 --------------------------------------
 
-Evaluates expressions given as command-line arguments. Optionally 
+Evaluates expressions given as command-line arguments. Optionally
 allows a file import using ``-f``.
 
 futhark hash PROGRAM

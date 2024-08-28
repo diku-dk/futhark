@@ -3,7 +3,7 @@
 -- structure gpu {
 --   GPUBody 2
 --   /GPUBody 1
---   /DoLoop/DoLoop/GPUBody/BinOp 1
+--   /Loop/Loop/GPUBody/BinOp 1
 -- }
 
 def main [n] (A: *[n]i64) (x: i64) : *[n]i64 =

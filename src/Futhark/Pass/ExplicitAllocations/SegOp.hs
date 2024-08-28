@@ -9,13 +9,13 @@ where
 
 import Control.Monad
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Pass.ExplicitAllocations
 
 instance SizeSubst (SegOp lvl rep)
 
 allocInKernelBody ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   KernelBody fromrep ->
   AllocM fromrep torep (KernelBody torep)
 allocInKernelBody (KernelBody () stms res) =
@@ -23,7 +23,7 @@ allocInKernelBody (KernelBody () stms res) =
     <$> collectStms (allocInStms stms (pure res))
 
 allocInLambda ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   [LParam torep] ->
   Body fromrep ->
   AllocM fromrep torep (Lambda torep)
@@ -33,7 +33,7 @@ allocInLambda params body =
       bodyResult body
 
 allocInBinOpParams ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   SubExp ->
   TPrimExp Int64 VName ->
   TPrimExp Int64 VName ->
@@ -45,26 +45,25 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
     alloc x y =
       case paramType x of
         Array pt shape u -> do
+          let name = maybe "num_threads" baseString (subExpVar num_threads)
           twice_num_threads <-
-            letSubExp "twice_num_threads" $
-              BasicOp $
-                BinOp (Mul Int64 OverflowUndef) num_threads $
-                  intConst Int64 2
+            letSubExp ("twice_" <> name) . BasicOp $
+              BinOp (Mul Int64 OverflowUndef) num_threads (intConst Int64 2)
           let t = paramType x `arrayOfRow` twice_num_threads
           mem <- allocForArray t =<< askDefaultSpace
-          -- XXX: this iota ixfun is a bit inefficient; leading to
+          -- XXX: this iota lmad is a bit inefficient; leading to
           -- uncoalesced access.
           let base_dims = map pe64 $ arrayDims t
-              ixfun_base = IxFun.iota base_dims
-              ixfun_x =
-                IxFun.slice ixfun_base $
+              lmad_base = LMAD.iota 0 base_dims
+              lmad_x =
+                LMAD.slice lmad_base $
                   fullSliceNum base_dims [DimFix my_id]
-              ixfun_y =
-                IxFun.slice ixfun_base $
+              lmad_y =
+                LMAD.slice lmad_base $
                   fullSliceNum base_dims [DimFix other_id]
           pure
-            ( x {paramDec = MemArray pt shape u $ ArrayIn mem ixfun_x},
-              y {paramDec = MemArray pt shape u $ ArrayIn mem ixfun_y}
+            ( x {paramDec = MemArray pt shape u $ ArrayIn mem lmad_x},
+              y {paramDec = MemArray pt shape u $ ArrayIn mem lmad_y}
             )
         Prim bt ->
           pure
@@ -84,7 +83,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
             )
 
 allocInBinOpLambda ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   SubExp ->
   SegSpace ->
   Lambda fromrep ->

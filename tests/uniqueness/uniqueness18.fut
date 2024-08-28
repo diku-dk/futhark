@@ -2,7 +2,7 @@
 -- result is consumed.
 --
 -- ==
--- structure { Map 0 Copy 1 }
+-- structure { Map 0 Replicate 1 }
 
 def main(as: []i32): *[]i32 =
   map (\x -> x) as

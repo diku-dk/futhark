@@ -38,7 +38,7 @@ extractUpdate ::
 extractUpdate accs v stms = do
   (stm, stms') <- stmsHead stms
   case stm of
-    Let (Pat [PatElem pe_v _]) _ (BasicOp (UpdateAcc acc is vs))
+    Let (Pat [PatElem pe_v _]) _ (BasicOp (UpdateAcc _ acc is vs))
       | pe_v == v -> do
           acc_input <- M.lookup acc accs
           Just ((acc_input, acc, is, vs), stms')
@@ -56,7 +56,7 @@ mkHistBody accs (KernelBody () stms [Returns rm cs (Var v)]) = do
     )
 mkHistBody _ _ = Nothing
 
-withAccLamToHistLam :: MonadFreshNames m => Shape -> Lambda GPU -> m (Lambda GPU)
+withAccLamToHistLam :: (MonadFreshNames m) => Shape -> Lambda GPU -> m (Lambda GPU)
 withAccLamToHistLam shape lam =
   renameLambda $ lam {lambdaParams = drop (shapeRank shape) (lambdaParams lam)}
 
@@ -82,14 +82,14 @@ addArrsToAcc lvl shape arrs acc = do
               map (DimFix . Var) gtids
     letExp (baseString acc <> "_upd") $
       BasicOp $
-        UpdateAcc acc (map Var gtids) vs
+        UpdateAcc Safe acc (map Var gtids) vs
 
   acc_t <- lookupType acc
   pure . Op . SegOp . SegMap lvl space [acc_t] $
     KernelBody () stms [Returns ResultMaySimplify mempty (Var acc')]
 
 flatKernelBody ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   SegSpace ->
   KernelBody (Rep m) ->
   m (SegSpace, KernelBody (Rep m))

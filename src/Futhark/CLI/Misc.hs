@@ -22,7 +22,7 @@ import Futhark.Test
 import Futhark.Util (hashText, interactWithFileSafely)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyTextOneLine)
-import Language.Futhark.Parser.Lexer (scanTokens)
+import Language.Futhark.Parser.Lexer (scanTokensText)
 import Language.Futhark.Prop (isBuiltin)
 import Language.Futhark.Semantic (includeToString)
 import System.Environment (getExecutablePath)
@@ -107,7 +107,9 @@ mainThanks = mainWithOptions () [] "" $ \args () ->
       [ "You're welcome!",
         "Tell all your friends about Futhark!",
         "Likewise!",
-        "And thank you in return for trying the language!"
+        "And thank you in return for trying the language!",
+        "It's our pleasure!",
+        "Have fun with Futhark!"
       ]
 
 -- | @futhark tokens@
@@ -115,7 +117,7 @@ mainTokens :: String -> [String] -> IO ()
 mainTokens = mainWithOptions () [] "program" $ \args () ->
   case args of
     [file] -> Just $ do
-      res <- interactWithFileSafely (scanTokens (startPos file) <$> BS.readFile file)
+      res <- interactWithFileSafely (scanTokensText (startPos file) <$> T.readFile file)
       case res of
         Nothing -> do
           hPutStrLn stderr $ file <> ": file not found."
@@ -126,7 +128,7 @@ mainTokens = mainWithOptions () [] "program" $ \args () ->
         Just (Right (Left e)) -> do
           hPrint stderr e
           exitWith $ ExitFailure 2
-        Just (Right (Right (tokens, _))) ->
+        Just (Right (Right tokens)) ->
           mapM_ printToken tokens
     _ -> Nothing
   where

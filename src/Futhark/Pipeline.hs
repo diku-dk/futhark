@@ -78,7 +78,7 @@ instance MonadLogger FutharkM where
         now <- liftIO getCurrentTime
         let delta :: Double
             delta = fromRational $ toRational (now `diffUTCTime` prev)
-            prefix = printf "[  +%.6f] " delta
+            prefix = printf "[  +%7.3f] " delta
         modify $ \s -> s {futharkPrevLog = now}
         when verb $ liftIO $ T.hPutStrLn stderr $ T.pack prefix <> msg
 
@@ -153,14 +153,14 @@ runPipeline p cfg prog = do
 
 -- | Construct a pipeline from a single compiler pass.
 onePass ::
-  Checkable torep =>
+  (Checkable torep) =>
   Pass fromrep torep ->
   Pipeline fromrep torep
 onePass pass = Pipeline perform
   where
     perform cfg prog = do
       when (pipelineVerbose cfg) . logMsg $
-        "Running pass " <> T.pack (passName pass)
+        "Running pass: " <> T.pack (passName pass)
       prog' <- runPass pass prog
       -- Spark validation in a separate task and speculatively execute
       -- next pass.  If the next pass throws an exception, we better
@@ -193,13 +193,13 @@ condPipeline cond (Pipeline f) =
 
 -- | Create a pipeline from a list of passes.
 passes ::
-  Checkable rep =>
+  (Checkable rep) =>
   [Pass rep rep] ->
   Pipeline rep rep
 passes = foldl (>>>) id . map onePass
 
 validationError ::
-  PrettyRep rep =>
+  (PrettyRep rep) =>
   Pass fromrep torep ->
   Prog rep ->
   String ->

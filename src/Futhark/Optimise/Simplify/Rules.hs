@@ -27,7 +27,6 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
-import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules.BasicOp
 import Futhark.Optimise.Simplify.Rules.Index
@@ -35,7 +34,7 @@ import Futhark.Optimise.Simplify.Rules.Loop
 import Futhark.Optimise.Simplify.Rules.Match
 import Futhark.Util
 
-topDownRules :: BuilderOps rep => [TopDownRule rep]
+topDownRules :: (BuilderOps rep) => [TopDownRule rep]
 topDownRules =
   [ RuleGeneric constantFoldPrimFun,
     RuleGeneric withAccTopDown,
@@ -51,7 +50,7 @@ bottomUpRules =
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
-standardRules :: (BuilderOps rep, TraverseOpStms rep, Aliased rep) => RuleBook rep
+standardRules :: (BuilderOps rep, TraverseOpStms rep) => RuleBook rep
 standardRules =
   ruleBook topDownRules bottomUpRules
     <> loopRules
@@ -62,8 +61,8 @@ standardRules =
 -- statement and it can be consumed.
 --
 -- This simplistic rule is only valid before we introduce memory.
-removeUnnecessaryCopy :: BuilderOps rep => BottomUpRuleBasicOp rep
-removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Copy v)
+removeUnnecessaryCopy :: (BuilderOps rep) => BottomUpRuleBasicOp rep
+removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Replicate (Shape []) (Var v))
   | not (v `UT.isConsumed` used),
     -- This two first clauses below are too conservative, but the
     -- problem is that 'v' might not look like it has been consumed if
@@ -71,8 +70,7 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Copy v)
     -- simplifier applies bottom-up rules in a kind of deepest-first
     -- order.
     not (patElemName d `UT.isInResult` used)
-      || patElemName d
-      `UT.isConsumed` used
+      || (patElemName d `UT.isConsumed` used)
       -- Always OK to remove the copy if 'v' has no aliases and is never
       -- used again.
       || (v_is_fresh && v_not_used_again),
@@ -96,7 +94,7 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Copy v)
       pure True
 removeUnnecessaryCopy _ _ _ _ = Skip
 
-constantFoldPrimFun :: BuilderOps rep => TopDownRuleGeneric rep
+constantFoldPrimFun :: (BuilderOps rep) => TopDownRuleGeneric rep
 constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
   | Just args' <- mapM (isConst . fst) args,
     Just (_, _, fun) <- M.lookup (nameToString fname) primFuns,
@@ -115,7 +113,7 @@ constantFoldPrimFun _ _ = Skip
 
 -- | If an expression produces an array with a constant zero anywhere
 -- in its shape, just turn that into a Scratch.
-emptyArrayToScratch :: BuilderOps rep => TopDownRuleGeneric rep
+emptyArrayToScratch :: (BuilderOps rep) => TopDownRuleGeneric rep
 emptyArrayToScratch _ (Let pat@(Pat [pe]) aux e)
   | Just (pt, shape) <- isEmptyArray $ patElemType pe,
     not $ isScratch e =
@@ -125,22 +123,24 @@ emptyArrayToScratch _ (Let pat@(Pat [pe]) aux e)
     isScratch _ = False
 emptyArrayToScratch _ _ = Skip
 
-simplifyIndex :: BuilderOps rep => BottomUpRuleBasicOp rep
+simplifyIndex :: (BuilderOps rep) => BottomUpRuleBasicOp rep
 simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
-  | Just m <- simplifyIndexing vtable seType idd inds consumed = Simplify $ do
-      res <- certifying cs m
-      attributing attrs $ case res of
-        SubExpResult cs' se ->
-          certifying cs' $ letBindNames (patNames pat) $ BasicOp $ SubExp se
-        IndexResult extra_cs idd' inds' ->
-          certifying extra_cs $ letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
+  | Just m <- simplifyIndexing vtable seType idd inds consumed consuming =
+      Simplify $ certifying cs $ do
+        res <- m
+        attributing attrs $ case res of
+          SubExpResult cs' se ->
+            certifying cs' $ letBindNames (patNames pat) $ BasicOp $ SubExp se
+          IndexResult extra_cs idd' inds' ->
+            certifying extra_cs $ letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
   where
-    consumed = patElemName pe `UT.isConsumed` used
+    consuming = (`UT.isConsumed` used)
+    consumed = consuming $ patElemName pe
     seType (Var v) = ST.lookupType v vtable
     seType (Constant v) = Just $ Prim $ primValueType v
 simplifyIndex _ _ _ _ = Skip
 
-withAccTopDown :: BuilderOps rep => TopDownRuleGeneric rep
+withAccTopDown :: (BuilderOps rep) => TopDownRuleGeneric rep
 -- A WithAcc with no accumulators is sent to Valhalla.
 withAccTopDown _ (Let pat aux (WithAcc [] lam)) = Simplify . auxing aux $ do
   lam_res <- bodyBind $ lambdaBody lam
@@ -210,7 +210,7 @@ elimUpdates get_rid_of = flip runState mempty . onBody
       stms' <- onStms $ bodyStms body
       pure body {bodyStms = stms'}
     onStms = traverse onStm
-    onStm (Let pat@(Pat [PatElem _ dec]) aux (BasicOp (UpdateAcc acc _ _)))
+    onStm (Let pat@(Pat [PatElem _ dec]) aux (BasicOp (UpdateAcc _ acc _ _)))
       | Acc c _ _ _ <- typeOf dec,
         c `elem` get_rid_of = do
           modify (insert c)
@@ -219,7 +219,7 @@ elimUpdates get_rid_of = flip runState mempty . onBody
     onExp = mapExpM mapper
       where
         mapper =
-          (identityMapper :: forall m. Monad m => Mapper rep rep m)
+          (identityMapper :: forall m. (Monad m) => Mapper rep rep m)
             { mapOnOp = traverseOpStms (\_ stms -> onStms stms),
               mapOnBody = \_ body -> onBody body
             }
@@ -307,4 +307,4 @@ withAccBottomUp _ _ = Skip
 -- That's it!  We then let ordinary dead code elimination eventually
 -- simplify the body enough that we have an "identity" WithAcc.  There
 -- is no _guarantee_ that this will happen, but our general dead code
--- elimination tends to be prettyString good.
+-- elimination tends to be pretty good.

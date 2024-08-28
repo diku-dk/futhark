@@ -38,7 +38,6 @@ data PyExp
   | Cond PyExp PyExp PyExp
   | Index PyExp PyIdx
   | Call PyExp [PyArg]
-  | Cast PyExp String
   | Tuple [PyExp]
   | List [PyExp]
   | Field PyExp String
@@ -112,12 +111,6 @@ instance Pretty PyExp where
   pretty (BinOp s e1 e2) = parens (pretty e1 <+> pretty s <+> pretty e2)
   pretty (UnOp s e) = pretty s <> parens (pretty e)
   pretty (Cond e1 e2 e3) = pretty e2 <+> "if" <+> pretty e1 <+> "else" <+> pretty e3
-  pretty (Cast src bt) =
-    "ct.cast"
-      <> parens
-        ( pretty src <> ","
-            <+> "ct.POINTER" <> parens (pretty bt)
-        )
   pretty (Index src idx) = pretty src <> brackets (pretty idx)
   pretty (Call fun exps) = pretty fun <> parens (commasep $ map pretty exps)
   pretty (Tuple [dim]) = parens (pretty dim <> ",")
@@ -132,42 +125,49 @@ instance Pretty PyExp where
 instance Pretty PyStmt where
   pretty (If cond [] []) =
     "if"
-      <+> pretty cond <> ":"
-      </> indent 2 "pass"
+      <+> pretty cond
+      <> ":"
+        </> indent 2 "pass"
   pretty (If cond [] fbranch) =
     "if"
-      <+> pretty cond <> ":"
-      </> indent 2 "pass"
-      </> "else:"
-      </> indent 2 (stack $ map pretty fbranch)
+      <+> pretty cond
+      <> ":"
+        </> indent 2 "pass"
+        </> "else:"
+        </> indent 2 (stack $ map pretty fbranch)
   pretty (If cond tbranch []) =
     "if"
-      <+> pretty cond <> ":"
-      </> indent 2 (stack $ map pretty tbranch)
+      <+> pretty cond
+      <> ":"
+        </> indent 2 (stack $ map pretty tbranch)
   pretty (If cond tbranch fbranch) =
     "if"
-      <+> pretty cond <> ":"
-      </> indent 2 (stack $ map pretty tbranch)
-      </> "else:"
-      </> indent 2 (stack $ map pretty fbranch)
+      <+> pretty cond
+      <> ":"
+        </> indent 2 (stack $ map pretty tbranch)
+        </> "else:"
+        </> indent 2 (stack $ map pretty fbranch)
   pretty (Try pystms pyexcepts) =
     "try:"
       </> indent 2 (stack $ map pretty pystms)
       </> stack (map pretty pyexcepts)
   pretty (While cond body) =
     "while"
-      <+> pretty cond <> ":"
-      </> indent 2 (stack $ map pretty body)
+      <+> pretty cond
+      <> ":"
+        </> indent 2 (stack $ map pretty body)
   pretty (For i what body) =
     "for"
       <+> pretty i
       <+> "in"
-      <+> pretty what <> ":"
-      </> indent 2 (stack $ map pretty body)
+      <+> pretty what
+      <> ":"
+        </> indent 2 (stack $ map pretty body)
   pretty (With what body) =
     "with"
-      <+> pretty what <> ":"
-      </> indent 2 (stack $ map pretty body)
+      <+> pretty what
+      <> ":"
+        </> indent 2 (stack $ map pretty body)
   pretty (Assign e1 e2) = pretty e1 <+> "=" <+> pretty e2
   pretty (AssignOp op e1 e2) = pretty e1 <+> pretty (op ++ "=") <+> pretty e2
   pretty (Comment s body) = "#" <> pretty s </> stack (map pretty body)
@@ -187,14 +187,17 @@ instance Pretty PyStmt where
 instance Pretty PyFunDef where
   pretty (Def fname params body) =
     "def"
-      <+> pretty fname <> parens (commasep $ map pretty params) <> ":"
-      </> indent 2 (stack (map pretty body))
+      <+> pretty fname
+      <> parens (commasep $ map pretty params)
+      <> ":"
+        </> indent 2 (stack (map pretty body))
 
 instance Pretty PyClassDef where
   pretty (Class cname body) =
     "class"
-      <+> pretty cname <> ":"
-      </> indent 2 (stack (map pretty body))
+      <+> pretty cname
+      <> ":"
+        </> indent 2 (stack (map pretty body))
 
 instance Pretty PyExcept where
   pretty (Catch pyexp stms) =

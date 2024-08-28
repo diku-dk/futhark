@@ -30,7 +30,7 @@ getAllocsStm (Let (Pat [PatElem name _]) _ (Op (Alloc se sp))) =
 getAllocsStm (Let _ _ (Op (Alloc _ _))) = error "impossible"
 getAllocsStm (Let _ _ (Match _ cases defbody _)) =
   foldMap (foldMap getAllocsStm . bodyStms) $ defbody : map caseBody cases
-getAllocsStm (Let _ _ (DoLoop _ _ body)) =
+getAllocsStm (Let _ _ (Loop _ _ body)) =
   foldMap getAllocsStm (bodyStms body)
 getAllocsStm _ = mempty
 
@@ -55,10 +55,10 @@ setAllocsStm m stm@(Let _ _ (Match cond cases defbody dec)) =
   stm {stmExp = Match cond (map (fmap onBody) cases) (onBody defbody) dec}
   where
     onBody (Body () stms res) = Body () (setAllocsStm m <$> stms) res
-setAllocsStm m stm@(Let _ _ (DoLoop merge form body)) =
+setAllocsStm m stm@(Let _ _ (Loop merge form body)) =
   stm
     { stmExp =
-        DoLoop merge form (body {bodyStms = setAllocsStm m <$> bodyStms body})
+        Loop merge form (body {bodyStms = setAllocsStm m <$> bodyStms body})
     }
 setAllocsStm _ stm = stm
 
@@ -79,7 +79,7 @@ setAllocsSegOp m (SegHist lvl sp segbinops tps body) =
   SegHist lvl sp segbinops tps $
     body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
 
-maxSubExp :: MonadBuilder m => Set SubExp -> m SubExp
+maxSubExp :: (MonadBuilder m) => Set SubExp -> m SubExp
 maxSubExp = helper . S.toList
   where
     helper (s1 : s2 : sexps) = do
@@ -98,7 +98,7 @@ isScalarSpace (_, ScalarSpace _ _) = True
 isScalarSpace _ = False
 
 onKernelBodyStms ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   SegOp lvl GPUMem ->
   (Stms GPUMem -> m (Stms GPUMem)) ->
   m (SegOp lvl GPUMem)
@@ -160,7 +160,7 @@ optimiseKernel graph segop0 = do
 
 -- | Helper function that modifies kernels found inside some statements.
 onKernels ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   (SegOp SegLevel GPUMem -> m (SegOp SegLevel GPUMem)) ->
   Stms GPUMem ->
   m (Stms GPUMem)
@@ -176,9 +176,9 @@ onKernels f orig_stms = inScopeOf orig_stms $ mapM helper orig_stms
       where
         onBody (Body () stms res) =
           Body () <$> f `onKernels` stms <*> pure res
-    helper stm@Let {stmExp = DoLoop merge form body} = do
+    helper stm@Let {stmExp = Loop merge form body} = do
       body_stms <- f `onKernels` bodyStms body
-      pure $ stm {stmExp = DoLoop merge form (body {bodyStms = body_stms})}
+      pure $ stm {stmExp = Loop merge form (body {bodyStms = body_stms})}
     helper stm = pure stm
 
 -- | Perform the reuse-allocations optimization.

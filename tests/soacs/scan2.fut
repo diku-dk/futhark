@@ -1,7 +1,7 @@
--- A scan of a two-dimensional array, which is presently not supported
--- in the OpenCL code generator.
+-- A segmented scan of a two-dimensional array.
 --
 -- ==
+-- random input { [20]bool [20][2]i32 } auto output
 -- compiled random input { [2000]bool [2000][10]i32 } auto output
 
 def segmented_scan [n] 't (op: t -> t -> t) (ne: t)

@@ -3,7 +3,7 @@
 -- ==
 -- structure gpu {
 --   /GPUBody 1
---   /DoLoop/GPUBody 1
+--   /Loop/GPUBody 1
 -- }
 
 #[noinline]
@@ -20,7 +20,3 @@ def main (A: [10]i64) : [10]i64 =
       let z = hostonly y
        in (A[i], map (+z) A)
    in A'
-
-
-
-

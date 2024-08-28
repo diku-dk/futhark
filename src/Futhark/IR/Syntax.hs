@@ -139,6 +139,7 @@ module Futhark.IR.Syntax
     MatchSort (..),
     Safety (..),
     Lambda (..),
+    RetAls (..),
 
     -- * Definitions
     Param (..),
@@ -204,7 +205,7 @@ data StmAux dec = StmAux
   }
   deriving (Ord, Show, Eq)
 
-instance Semigroup dec => Semigroup (StmAux dec) where
+instance (Semigroup dec) => Semigroup (StmAux dec) where
   StmAux cs1 attrs1 dec1 <> StmAux cs2 attrs2 dec2 =
     StmAux (cs1 <> cs2) (attrs1 <> attrs2) (dec1 <> dec2)
 
@@ -218,11 +219,11 @@ data Stm rep = Let
     stmExp :: Exp rep
   }
 
-deriving instance RepTypes rep => Ord (Stm rep)
+deriving instance (RepTypes rep) => Ord (Stm rep)
 
-deriving instance RepTypes rep => Show (Stm rep)
+deriving instance (RepTypes rep) => Show (Stm rep)
 
-deriving instance RepTypes rep => Eq (Stm rep)
+deriving instance (RepTypes rep) => Eq (Stm rep)
 
 -- | A sequence of statements.
 type Stms rep = Seq.Seq (Stm rep)
@@ -282,19 +283,19 @@ subExpResVName _ = Nothing
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExpRes]
 
--- | A body consists of a number of bindings, terminating in a result
--- (essentially a tuple literal).
+-- | A body consists of a sequence of statements, terminating in a
+-- list of result values.
 data Body rep = Body
   { bodyDec :: BodyDec rep,
     bodyStms :: Stms rep,
     bodyResult :: Result
   }
 
-deriving instance RepTypes rep => Ord (Body rep)
+deriving instance (RepTypes rep) => Ord (Body rep)
 
-deriving instance RepTypes rep => Show (Body rep)
+deriving instance (RepTypes rep) => Show (Body rep)
 
-deriving instance RepTypes rep => Eq (Body rep)
+deriving instance (RepTypes rep) => Eq (Body rep)
 
 -- | Apart from being Opaque, what else is going on here?
 data OpaqueOp
@@ -327,6 +328,13 @@ data BasicOp
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the element type of the rows of the array.
     ArrayLit [SubExp] Type
+  | -- | A one-dimensional array literal that contains only constants.
+    -- This is a fast-path for representing very large array literals
+    -- that show up in some programs. The key rule for processing this
+    -- in compiler passes is that you should never need to look at the
+    -- individual elements. Has exactly the same semantics as an
+    -- 'ArrayLit'.
+    ArrayVal [PrimValue] PrimType
   | -- | Unary operation.
     UnOp UnOp SubExp
   | -- | Binary operation.
@@ -355,8 +363,6 @@ data BasicOp
     --
     -- @concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]@
     Concat Int (NonEmpty VName) SubExp
-  | -- | Copy the given array.  The result will not alias anything.
-    Copy VName
   | -- | Manifest an array with dimensions represented in the given
     -- order.  The result will not alias anything.
     Manifest [Int] VName
@@ -367,7 +373,8 @@ data BasicOp
     -- The t'IntType' indicates the type of the array returned and the
     -- offset/stride arguments, but not the length argument.
     Iota SubExp SubExp SubExp IntType
-  | -- | @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@
+  | -- | @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@.  The result
+    -- has no aliases.  Copy a value by passing an empty shape.
     Replicate Shape SubExp
   | -- | Create array of given type and shape, with undefined elements.
     Scratch PrimType [SubExp]
@@ -378,13 +385,11 @@ data BasicOp
     -- must be a permutation of @[0,n-1]@, where @n@ is the
     -- number of dimensions in the input array.
     Rearrange [Int] VName
-  | -- | Rotate the dimensions of the input array.  The list of
-    -- subexpressions specify how much each dimension is rotated.  The
-    -- length of this list must be equal to the rank of the array.
-    Rotate [SubExp] VName
-  | -- | Update an accumulator at the given index with the given value.
-    -- Consumes the accumulator and produces a new one.
-    UpdateAcc VName [SubExp] [SubExp]
+  | -- | Update an accumulator at the given index with the given
+    -- value. Consumes the accumulator and produces a new one. If
+    -- 'Safe', perform a run-time bounds check and ignore the write if
+    -- out of bounds (like @Scatter@).
+    UpdateAcc Safety VName [SubExp] [SubExp]
   deriving (Eq, Ord, Show)
 
 -- | The input to a 'WithAcc' construct.  Comprises the index space of
@@ -409,20 +414,37 @@ instance Foldable Case where
 instance Traversable Case where
   traverse f (Case vs b) = Case vs <$> f b
 
+-- | Information about the possible aliases of a function result.
+data RetAls = RetAls
+  { -- | Which of the parameters may be aliased, numbered from zero.
+    paramAls :: [Int],
+    -- | Which of the other results may be aliased, numbered from
+    -- zero.  This must be a reflexive relation.
+    otherAls :: [Int]
+  }
+  deriving (Eq, Ord, Show)
+
+instance Monoid RetAls where
+  mempty = RetAls mempty mempty
+
+instance Semigroup RetAls where
+  RetAls pals1 rals1 <> RetAls pals2 rals2 =
+    RetAls (pals1 <> pals2) (rals1 <> rals2)
+
 -- | The root Futhark expression type.  The v'Op' constructor contains
 -- a rep-specific operation.  Do-loops, branches and function calls
 -- are special.  Everything else is a simple t'BasicOp'.
 data Exp rep
   = -- | A simple (non-recursive) operation.
     BasicOp BasicOp
-  | Apply Name [(SubExp, Diet)] [RetType rep] (Safety, SrcLoc, [SrcLoc])
+  | Apply Name [(SubExp, Diet)] [(RetType rep, RetAls)] (Safety, SrcLoc, [SrcLoc])
   | -- | A match statement picks a branch by comparing the given
     -- subexpressions (called the /scrutinee/) with the pattern in
     -- each of the cases.  If none of the cases match, the /default
     -- body/ is picked.
     Match [SubExp] [Case (Body rep)] (Body rep) (MatchDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.
-    DoLoop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
+    Loop [(FParam rep, SubExp)] LoopForm (Body rep)
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
@@ -433,29 +455,23 @@ data Exp rep
     WithAcc [WithAccInput rep] (Lambda rep)
   | Op (Op rep)
 
-deriving instance RepTypes rep => Eq (Exp rep)
+deriving instance (RepTypes rep) => Eq (Exp rep)
 
-deriving instance RepTypes rep => Show (Exp rep)
+deriving instance (RepTypes rep) => Show (Exp rep)
 
-deriving instance RepTypes rep => Ord (Exp rep)
+deriving instance (RepTypes rep) => Ord (Exp rep)
 
 -- | For-loop or while-loop?
-data LoopForm rep
+data LoopForm
   = ForLoop
+      -- | The loop iterator var
       VName
-      -- ^ The loop iterator var
+      -- | The type of the loop iterator var
       IntType
-      -- ^ The type of the loop iterator var
+      -- | The number of iterations.
       SubExp
-      -- ^ The number of iterations.
-      [(LParam rep, VName)]
   | WhileLoop VName
-
-deriving instance RepTypes rep => Eq (LoopForm rep)
-
-deriving instance RepTypes rep => Show (LoopForm rep)
-
-deriving instance RepTypes rep => Ord (LoopForm rep)
+  deriving (Eq, Ord, Show)
 
 -- | Data associated with a branch.
 data MatchDec rt = MatchDec
@@ -486,15 +502,15 @@ data MatchSort
 -- | Anonymous function for use in a SOAC.
 data Lambda rep = Lambda
   { lambdaParams :: [LParam rep],
-    lambdaBody :: Body rep,
-    lambdaReturnType :: [Type]
+    lambdaReturnType :: [Type],
+    lambdaBody :: Body rep
   }
 
-deriving instance RepTypes rep => Eq (Lambda rep)
+deriving instance (RepTypes rep) => Eq (Lambda rep)
 
-deriving instance RepTypes rep => Show (Lambda rep)
+deriving instance (RepTypes rep) => Show (Lambda rep)
 
-deriving instance RepTypes rep => Ord (Lambda rep)
+deriving instance (RepTypes rep) => Ord (Lambda rep)
 
 -- | A function and loop parameter.
 type FParam rep = Param (FParamInfo rep)
@@ -502,23 +518,23 @@ type FParam rep = Param (FParamInfo rep)
 -- | A lambda parameter.
 type LParam rep = Param (LParamInfo rep)
 
--- | Function Declarations
+-- | Function definitions.
 data FunDef rep = FunDef
   { -- | Contains a value if this function is
     -- an entry point.
     funDefEntryPoint :: Maybe EntryPoint,
     funDefAttrs :: Attrs,
     funDefName :: Name,
-    funDefRetType :: [RetType rep],
+    funDefRetType :: [(RetType rep, RetAls)],
     funDefParams :: [FParam rep],
     funDefBody :: Body rep
   }
 
-deriving instance RepTypes rep => Eq (FunDef rep)
+deriving instance (RepTypes rep) => Eq (FunDef rep)
 
-deriving instance RepTypes rep => Show (FunDef rep)
+deriving instance (RepTypes rep) => Show (FunDef rep)
 
-deriving instance RepTypes rep => Ord (FunDef rep)
+deriving instance (RepTypes rep) => Ord (FunDef rep)
 
 -- | An entry point parameter, comprising its name and original type.
 data EntryParam = EntryParam

@@ -40,15 +40,15 @@ import Futhark.IR.Syntax
 --    getNameSource = get
 --    putNameSource = put
 -- @
-class Monad m => MonadFreshNames m where
+class (Monad m) => MonadFreshNames m where
   getNameSource :: m VNameSource
   putNameSource :: VNameSource -> m ()
 
-instance Monad im => MonadFreshNames (Control.Monad.State.Lazy.StateT VNameSource im) where
+instance (Monad im) => MonadFreshNames (Control.Monad.State.Lazy.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Lazy.get
   putNameSource = Control.Monad.State.Lazy.put
 
-instance Monad im => MonadFreshNames (Control.Monad.State.Strict.StateT VNameSource im) where
+instance (Monad im) => MonadFreshNames (Control.Monad.State.Strict.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Strict.get
   putNameSource = Control.Monad.State.Strict.put
 
@@ -69,32 +69,32 @@ instance
 -- | Run a computation needing a fresh name source and returning a new
 -- one, using 'getNameSource' and 'putNameSource' before and after the
 -- computation.
-modifyNameSource :: MonadFreshNames m => (VNameSource -> (a, VNameSource)) -> m a
+modifyNameSource :: (MonadFreshNames m) => (VNameSource -> (a, VNameSource)) -> m a
 modifyNameSource m = do
   src <- getNameSource
   let (x, src') = m src
-  putNameSource src'
+  src' `seq` putNameSource src'
   pure x
 
 -- | Produce a fresh name, using the given name as a template.
-newName :: MonadFreshNames m => VName -> m VName
+newName :: (MonadFreshNames m) => VName -> m VName
 newName = modifyNameSource . flip FreshNames.newName
 
 -- | As @newName@, but takes a 'String' for the name template.
-newNameFromString :: MonadFreshNames m => String -> m VName
+newNameFromString :: (MonadFreshNames m) => String -> m VName
 newNameFromString s = newName $ VName (nameFromString s) 0
 
 -- | Produce a fresh 'VName', using the given base name as a template.
-newID :: MonadFreshNames m => Name -> m VName
+newID :: (MonadFreshNames m) => Name -> m VName
 newID s = newName $ VName s 0
 
 -- | Produce a fresh 'VName', using the given base name as a template.
-newVName :: MonadFreshNames m => String -> m VName
+newVName :: (MonadFreshNames m) => String -> m VName
 newVName = newID . nameFromString
 
 -- | Produce a fresh 'Ident', using the given name as a template.
 newIdent ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   String ->
   Type ->
   m Ident
@@ -105,7 +105,7 @@ newIdent s t = do
 -- | Produce a fresh 'Ident', using the given 'Ident' as a template,
 -- but possibly modifying the name.
 newIdent' ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   (String -> String) ->
   Ident ->
   m Ident
@@ -116,7 +116,7 @@ newIdent' f ident =
 
 -- | Produce a fresh 'Param', using the given name as a template.
 newParam ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   String ->
   dec ->
   m (Param dec)
@@ -127,7 +127,7 @@ newParam s t = do
 -- Utility instance defintions for MTL classes.  This requires
 -- UndecidableInstances, but saves on typing elsewhere.
 
-instance MonadFreshNames m => MonadFreshNames (ReaderT s m) where
+instance (MonadFreshNames m) => MonadFreshNames (ReaderT s m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
@@ -146,14 +146,14 @@ instance
   putNameSource = lift . putNameSource
 
 instance
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   MonadFreshNames (Control.Monad.Trans.Maybe.MaybeT m)
   where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
 instance
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   MonadFreshNames (ExceptT e m)
   where
   getNameSource = lift getNameSource

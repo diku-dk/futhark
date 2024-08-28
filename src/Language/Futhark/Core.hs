@@ -3,6 +3,7 @@
 -- representation.
 module Language.Futhark.Core
   ( Uniqueness (..),
+    NoUniqueness (..),
 
     -- * Location utilities
     SrcLoc,
@@ -71,6 +72,20 @@ instance Pretty Uniqueness where
   pretty Unique = "*"
   pretty Nonunique = mempty
 
+-- | A fancier name for @()@ - encodes no uniqueness information.
+-- Also has a different prettyprinting instance.
+data NoUniqueness = NoUniqueness
+  deriving (Eq, Ord, Show)
+
+instance Semigroup NoUniqueness where
+  NoUniqueness <> NoUniqueness = NoUniqueness
+
+instance Monoid NoUniqueness where
+  mempty = NoUniqueness
+
+instance Pretty NoUniqueness where
+  pretty _ = mempty
+
 -- | The abstract (not really) type representing names in the Futhark
 -- compiler.  'String's, being lists of characters, are very slow,
 -- while 'T.Text's are based on byte-arrays.
@@ -103,7 +118,7 @@ nameFromText = Name
 --
 -- This function assumes that both start and end position is in the
 -- same file (it is not clear what the alternative would even mean).
-locStr :: Located a => a -> String
+locStr :: (Located a) => a -> String
 locStr a =
   case locOf a of
     NoLoc -> "unknown location"
@@ -135,7 +150,7 @@ locStrRel a b =
     _ -> locStr b
 
 -- | 'locStr', but for text.
-locText :: Located a => a -> T.Text
+locText :: (Located a) => a -> T.Text
 locText = T.pack . locStr
 
 -- | 'locStrRel', but for text.

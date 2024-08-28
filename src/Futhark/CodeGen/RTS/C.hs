@@ -5,7 +5,11 @@ module Futhark.CodeGen.RTS.C
   ( atomicsH,
     contextH,
     contextPrototypesH,
+    copyH,
     freeListH,
+    eventListH,
+    gpuH,
+    gpuPrototypesH,
     halfH,
     lockH,
     scalarF16H,
@@ -22,6 +26,7 @@ module Futhark.CodeGen.RTS.C
     ispcUtilH,
     backendsOpenclH,
     backendsCudaH,
+    backendsHipH,
     backendsCH,
     backendsMulticoreH,
   )
@@ -47,6 +52,21 @@ uniformH = $(embedStringFile "rts/c/uniform.h")
 freeListH :: T.Text
 freeListH = $(embedStringFile "rts/c/free_list.h")
 {-# NOINLINE freeListH #-}
+
+-- | @rts/c/event_list.h@
+eventListH :: T.Text
+eventListH = $(embedStringFile "rts/c/event_list.h")
+{-# NOINLINE eventListH #-}
+
+-- | @rts/c/gpu.h@
+gpuH :: T.Text
+gpuH = $(embedStringFile "rts/c/gpu.h")
+{-# NOINLINE gpuH #-}
+
+-- | @rts/c/gpu_prototypes.h@
+gpuPrototypesH :: T.Text
+gpuPrototypesH = $(embedStringFile "rts/c/gpu_prototypes.h")
+{-# NOINLINE gpuPrototypesH #-}
 
 -- | @rts/c/half.h@
 halfH :: T.Text
@@ -133,6 +153,11 @@ backendsCudaH :: T.Text
 backendsCudaH = $(embedStringFile "rts/c/backends/cuda.h")
 {-# NOINLINE backendsCudaH #-}
 
+-- | @rts/c/backends/hip.h@
+backendsHipH :: T.Text
+backendsHipH = $(embedStringFile "rts/c/backends/hip.h")
+{-# NOINLINE backendsHipH #-}
+
 -- | @rts/c/backends/c.h@
 backendsCH :: T.Text
 backendsCH = $(embedStringFile "rts/c/backends/c.h")
@@ -142,3 +167,8 @@ backendsCH = $(embedStringFile "rts/c/backends/c.h")
 backendsMulticoreH :: T.Text
 backendsMulticoreH = $(embedStringFile "rts/c/backends/multicore.h")
 {-# NOINLINE backendsMulticoreH #-}
+
+-- | @rts/c/copy.h@
+copyH :: T.Text
+copyH = $(embedStringFile "rts/c/copy.h")
+{-# NOINLINE copyH #-}

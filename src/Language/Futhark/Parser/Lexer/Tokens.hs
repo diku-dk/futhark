@@ -5,28 +5,24 @@
 -- Also defines other useful building blocks for constructing tokens.
 module Language.Futhark.Parser.Lexer.Tokens
   ( Token (..),
-    Lexeme,
     fromRoman,
     symbol,
     mkQualId,
-    tokenPosM,
-    tokenM,
     tokenC,
-    keyword,
     tokenS,
-    indexing,
     suffZero,
     tryRead,
-    readIntegral,
+    decToken,
+    binToken,
+    hexToken,
+    romToken,
     readHexRealLit,
   )
 where
 
 import Data.ByteString.Lazy qualified as BS
-import Data.Char (digitToInt, ord)
 import Data.Either
-import Data.List (find, foldl')
-import Data.Loc (Loc (..), Pos (..))
+import Data.List (find)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.Read qualified as T
@@ -41,7 +37,6 @@ import Language.Futhark.Core
     Word64,
     Word8,
   )
-import Language.Futhark.Parser.Lexer.Wrapper
 import Language.Futhark.Prop (leadingOperator)
 import Language.Futhark.Syntax (BinOp, nameFromText, nameToText)
 import Numeric.Half
@@ -131,101 +126,68 @@ data Token
   | DOC T.Text
   | EOF
   | HOLE
+  | ERROR T.Text
   deriving (Show, Eq, Ord)
 
-keyword :: T.Text -> Token
-keyword s =
-  case s of
-    "true" -> TRUE
-    "false" -> FALSE
-    "if" -> IF
-    "then" -> THEN
-    "else" -> ELSE
-    "def" -> DEF
-    "let" -> LET
-    "loop" -> LOOP
-    "in" -> IN
-    "val" -> VAL
-    "for" -> FOR
-    "do" -> DO
-    "with" -> WITH
-    "local" -> LOCAL
-    "open" -> OPEN
-    "include" -> INCLUDE
-    "import" -> IMPORT
-    "type" -> TYPE
-    "entry" -> ENTRY
-    "module" -> MODULE
-    "while" -> WHILE
-    "assert" -> ASSERT
-    "match" -> MATCH
-    "case" -> CASE
-    _ -> ID $ nameFromText s
-
-indexing :: (Loc, T.Text) -> Alex Name
-indexing (loc, s) = case keyword s of
-  ID v -> pure v
-  _ -> alexError loc $ "Cannot index keyword '" <> s <> "'."
-
-mkQualId :: T.Text -> Alex ([Name], Name)
+mkQualId :: T.Text -> ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of
   [] -> error "mkQualId: no components"
-  k : qs -> pure (map nameFromText (reverse qs), nameFromText k)
+  k : qs -> (map nameFromText (reverse qs), nameFromText k)
 
 -- | Suffix a zero if the last character is dot.
 suffZero :: T.Text -> T.Text
 suffZero s = if T.last s == '.' then s <> "0" else s
 
-tryRead :: Read a => String -> T.Text -> Alex a
+tryRead :: (Read a) => String -> T.Text -> a
 tryRead desc s = case reads s' of
-  [(x, "")] -> pure x
+  [(x, "")] -> x
   _ -> error $ "Invalid " ++ desc ++ " literal: `" ++ T.unpack s ++ "'."
   where
     s' = T.unpack s
 
-readIntegral :: Integral a => T.Text -> a
-readIntegral s
-  | "0x" `T.isPrefixOf` s || "0X" `T.isPrefixOf` s = parseBase 16 (T.drop 2 s)
-  | "0b" `T.isPrefixOf` s || "0B" `T.isPrefixOf` s = parseBase 2 (T.drop 2 s)
-  | "0r" `T.isPrefixOf` s || "0R" `T.isPrefixOf` s = fromRoman (T.drop 2 s)
-  | otherwise = parseBase 10 s
+{-# INLINE tokenC #-}
+tokenC :: a -> BS.ByteString -> a
+tokenC v _ = v
+
+{-# INLINE decToken #-}
+decToken :: (Integral a) => (a -> Token) -> BS.ByteString -> Token
+decToken f = f . BS.foldl' digit 0
   where
-    parseBase base = T.foldl (\acc c -> acc * base + fromIntegral (digitToInt c)) 0
+    digit x c =
+      if c >= 48 && c <= 57
+        then x * 10 + fromIntegral (c - 48)
+        else x
 
-tokenC :: a -> (Pos, Char, BS.ByteString, Int64) -> Int64 -> Alex (Lexeme a)
-tokenC v = tokenS $ const v
-
-tokenS :: (T.Text -> a) -> (Pos, Char, BS.ByteString, Int64) -> Int64 -> Alex (Lexeme a)
-tokenS f = tokenM $ pure . f
-
-type Lexeme a = (Pos, Pos, a)
-
-tokenM ::
-  (T.Text -> Alex a) ->
-  (Pos, Char, BS.ByteString, Int64) ->
-  Int64 ->
-  Alex (Lexeme a)
-tokenM f = tokenPosM (f . snd)
-
-tokenPosM ::
-  ((Loc, T.Text) -> Alex a) ->
-  (Pos, Char, BS.ByteString, Int64) ->
-  Int64 ->
-  Alex (Lexeme a)
-tokenPosM f (pos, _, s, _) len = do
-  x <- f (Loc pos pos', T.decodeUtf8 $ BS.toStrict s')
-  pure (pos, pos', x)
+{-# INLINE binToken #-}
+binToken :: (Integral a) => (a -> Token) -> BS.ByteString -> Token
+binToken f = f . BS.foldl' digit 0
   where
-    pos' = advance pos s'
-    s' = BS.take len s
+    digit x c =
+      if c >= 48 && c <= 49
+        then x * 2 + fromIntegral (c - 48)
+        else x
 
-advance :: Pos -> BS.ByteString -> Pos
-advance orig_pos = foldl' advance' orig_pos . init . BS.unpack
+{-# INLINE hexToken #-}
+hexToken :: (Integral a) => (a -> Token) -> BS.ByteString -> Token
+hexToken f = f . BS.foldl' digit 0
   where
-    advance' (Pos f !line !col !addr) c
-      | c == nl = Pos f (line + 1) 1 (addr + 1)
-      | otherwise = Pos f line (col + 1) (addr + 1)
-    nl = fromIntegral $ ord '\n'
+    digit x c
+      | c >= 48 && c <= 57 =
+          x * 16 + fromIntegral (c - 48)
+      | c >= 65 && c <= 70 =
+          x * 16 + fromIntegral (10 + c - 65)
+      | c >= 97 && c <= 102 =
+          x * 16 + fromIntegral (10 + c - 97)
+      | otherwise =
+          x
+
+{-# INLINE romToken #-}
+romToken :: (Integral a) => (a -> Token) -> BS.ByteString -> Token
+romToken f = tokenS $ f . fromRoman
+
+{-# INLINE tokenS #-}
+tokenS :: (T.Text -> a) -> BS.ByteString -> a
+tokenS f = f . T.decodeUtf8 . BS.toStrict
 
 symbol :: [Name] -> Name -> Token
 symbol [] q
@@ -237,7 +199,7 @@ symbol [] q
   | otherwise = SYMBOL (leadingOperator q) [] q
 symbol qs q = SYMBOL (leadingOperator q) qs q
 
-romanNumerals :: Integral a => [(T.Text, a)]
+romanNumerals :: (Integral a) => [(T.Text, a)]
 romanNumerals =
   reverse
     [ ("I", 1),
@@ -255,13 +217,13 @@ romanNumerals =
       ("M", 1000)
     ]
 
-fromRoman :: Integral a => T.Text -> a
+fromRoman :: (Integral a) => T.Text -> a
 fromRoman s =
   case find ((`T.isPrefixOf` s) . fst) romanNumerals of
     Nothing -> 0
     Just (d, n) -> n + fromRoman (T.drop (T.length d) s)
 
-readHexRealLit :: RealFloat a => T.Text -> Alex a
+readHexRealLit :: (RealFloat a) => T.Text -> a
 readHexRealLit s =
   let num = T.drop 2 s
    in -- extract number into integer, fractional and (optional) exponent
@@ -276,5 +238,5 @@ readHexRealLit s =
                   fracLen = fromIntegral $ T.length f
                   fracVal = fracPart / (16.0 ** fracLen)
                   totalVal = (intPart + fracVal) * (2.0 ** exponent)
-               in pure totalVal
+               in totalVal
             _ -> error "bad hex real literal"

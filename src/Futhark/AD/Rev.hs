@@ -107,6 +107,9 @@ diffBasicOp pat aux e m =
     Assert {} ->
       void $ commonBasicOp pat aux e m
     --
+    ArrayVal {} ->
+      void $ commonBasicOp pat aux e m
+    --
     ArrayLit elems _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       t <- lookupType pat_adj
@@ -141,14 +144,9 @@ diffBasicOp pat aux e m =
           updateAdj arr <=< letExp "adj_rearrange" . BasicOp $
             Rearrange (rearrangeInverse perm) pat_adj
     --
-    Rotate rots arr -> do
+    Replicate (Shape []) (Var se) -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ do
-        let neg = BasicOp . BinOp (Sub Int64 OverflowWrap) (intConst Int64 0)
-        rots' <- mapM (letSubExp "rot_neg" . neg) rots
-        void $
-          updateAdj arr <=< letExp "adj_rotate" . BasicOp $
-            Rotate rots' pat_adj
+      returnSweepCode $ void $ updateAdj se pat_adj
     --
     Replicate (Shape ns) x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -184,10 +182,6 @@ diffBasicOp pat aux e m =
 
         zipWithM_ updateAdj (arr : arrs) slices
     --
-    Copy se -> do
-      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ void $ updateAdj se pat_adj
-    --
     Manifest _ se -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ void $ updateAdj se pat_adj
@@ -211,7 +205,9 @@ diffBasicOp pat aux e m =
         t <- lookupType v_adj
         v_adj_copy <-
           case t of
-            Array {} -> letExp "update_val_adj_copy" $ BasicOp $ Copy v_adj
+            Array {} ->
+              letExp "update_val_adj_copy" . BasicOp $
+                Replicate mempty (Var v_adj)
             _ -> pure v_adj
         updateSubExpAdj v v_adj_copy
         zeroes <- letSubExp "update_zero" . zeroExp =<< subExpType v
@@ -219,7 +215,7 @@ diffBasicOp pat aux e m =
           updateAdj arr
             =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj slice zeroes)
     -- See Note [Adjoints of accumulators]
-    UpdateAcc _ is vs -> do
+    UpdateAcc _ _ is vs -> do
       addStm $ Let pat aux $ BasicOp e
       m
       pat_adjs <- mapM lookupAdjVal (patNames pat)
@@ -285,7 +281,7 @@ diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
     zipWithM_ insAdj branches_free branches_free_adj
 diffStm (Let pat aux (Op soac)) m =
   vjpSOAC vjpOps pat aux soac m
-diffStm (Let pat aux loop@DoLoop {}) m =
+diffStm (Let pat aux loop@Loop {}) m =
   diffLoop diffStms pat aux loop m
 -- See Note [Adjoints of accumulators]
 diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
@@ -307,12 +303,12 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
       f' <- renameLambda f
       pure (shape, as, Just (f', nes))
     renameInputLambda input = pure input
-    diffLambda' res_adjs get_adjs_for (Lambda params body ts) =
+    diffLambda' res_adjs get_adjs_for (Lambda params ts body) =
       localScope (scopeOfLParams params) $ do
         Body () stms res <- diffBody res_adjs get_adjs_for body
         let body' = Body () stms $ take (length inputs) res <> takeLast (length get_adjs_for) res
         ts' <- mapM lookupType get_adjs_for
-        pure $ Lambda params body' $ take (length inputs) ts <> ts'
+        pure $ Lambda params (take (length inputs) ts <> ts') body'
 diffStm stm _ = error $ "diffStm unhandled:\n" ++ prettyString stm
 
 diffStms :: Stms SOACS -> ADM ()
@@ -343,15 +339,15 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
     pure $ Body () stms' $ res <> varsRes adjs
 
 diffLambda :: [Adj] -> [VName] -> Lambda SOACS -> ADM (Lambda SOACS)
-diffLambda res_adjs get_adjs_for (Lambda params body _) =
+diffLambda res_adjs get_adjs_for (Lambda params _ body) =
   localScope (scopeOfLParams params) $ do
     Body () stms res <- diffBody res_adjs get_adjs_for body
     let body' = Body () stms $ takeLast (length get_adjs_for) res
     ts' <- mapM lookupType get_adjs_for
-    pure $ Lambda params body' ts'
+    pure $ Lambda params ts' body'
 
-revVJP :: MonadFreshNames m => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
-revVJP scope (Lambda params body ts) =
+revVJP :: (MonadFreshNames m) => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
+revVJP scope (Lambda params ts body) =
   runADM . localScope (scope <> scopeOfLParams params) $ do
     params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->
       Param mempty <$> maybe (newVName "const_adj") adjVName (subExpVar se) <*> pure t
@@ -363,7 +359,7 @@ revVJP scope (Lambda params body ts) =
           (map paramName params)
           body
 
-    pure $ Lambda (params ++ params_adj) body' (ts <> map paramType params)
+    pure $ Lambda (params ++ params_adj) (ts <> map paramType params) body'
 
 -- Note [Adjoints of accumulators]
 --

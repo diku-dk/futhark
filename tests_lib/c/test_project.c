@@ -10,7 +10,7 @@ int main() {
 
   struct futhark_opaque_sum *sum;
 
-  err = futhark_entry_sum_const(ctx, &sum);
+  err = futhark_new_opaque_sum_foo(ctx, &sum, 42);
   assert(err == 0);
 
   uint32_t u32_data[3] = { 42, 1337, 420 };

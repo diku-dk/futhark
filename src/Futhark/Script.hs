@@ -35,6 +35,7 @@ import Control.Monad
 import Control.Monad.Except (MonadError (..))
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Bifunctor (bimap)
+import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
 import Data.Foldable (toList)
@@ -63,7 +64,7 @@ import Text.Megaparsec.Char.Lexer (charLiteral)
 
 type TypeMap = M.Map TypeName (Maybe [(Name, TypeName)])
 
-typeMap :: MonadIO m => Server -> m TypeMap
+typeMap :: (MonadIO m) => Server -> m TypeMap
 typeMap server = do
   liftIO $ either (pure mempty) onTypes =<< cmdTypes server
   where
@@ -88,7 +89,7 @@ data ScriptServer = ScriptServer
 
 -- | Run an action with a 'ScriptServer' produced by an existing
 -- 'Server', without shutting it down at the end.
-withScriptServer' :: MonadIO m => Server -> (ScriptServer -> m a) -> m a
+withScriptServer' :: (MonadIO m) => Server -> (ScriptServer -> m a) -> m a
 withScriptServer' server f = do
   counter <- liftIO $ newIORef 0
   types <- typeMap server
@@ -213,7 +214,7 @@ parseExp sep =
 -- | Parse a FutharkScript expression with normal whitespace handling.
 parseExpFromText :: FilePath -> T.Text -> Either T.Text Exp
 parseExpFromText f s =
-  either (Left . T.pack . errorBundlePretty) Right $ parse (parseExp space) f s
+  either (Left . T.pack . errorBundlePretty) Right $ parse (parseExp space <* eof) f s
 
 readVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> m V.Value
 readVar server v =
@@ -356,20 +357,33 @@ loadData datafile = do
     Just vs ->
       pure $ V.ValueTuple $ map V.ValueAtom vs
 
--- | Handles the following builtin functions: @loaddata@.  Fails for
--- everything else.  The 'FilePath' indicates the directory that files
--- should be read relative to.
-scriptBuiltin :: (MonadIO m, MonadError T.Text m) => FilePath -> EvalBuiltin m
-scriptBuiltin dir "loaddata" vs =
+pathArg ::
+  (MonadError T.Text f) =>
+  FilePath ->
+  T.Text ->
+  [V.Compound V.Value] ->
+  f FilePath
+pathArg dir cmd vs =
   case vs of
     [V.ValueAtom v]
-      | Just path <- V.getValue v -> do
-          let path' = map (chr . fromIntegral) (path :: [Word8])
-          loadData $ dir </> path'
+      | Just path <- V.getValue v ->
+          pure $ dir </> map (chr . fromIntegral) (path :: [Word8])
     _ ->
       throwError $
-        "$loaddata does not accept arguments of types: "
+        "$"
+          <> cmd
+          <> " does not accept arguments of types: "
           <> T.intercalate ", " (map (prettyText . fmap V.valueType) vs)
+
+-- | Handles the following builtin functions: @loaddata@, @loadbytes@.
+-- Fails for everything else. The 'FilePath' indicates the directory
+-- that files should be read relative to.
+scriptBuiltin :: (MonadIO m, MonadError T.Text m) => FilePath -> EvalBuiltin m
+scriptBuiltin dir "loaddata" vs = do
+  loadData =<< pathArg dir "loaddata" vs
+scriptBuiltin dir "loadbytes" vs = do
+  fmap (V.ValueAtom . V.putValue1) . liftIO . BS.readFile
+    =<< pathArg dir "loadbytes" vs
 scriptBuiltin _ f _ =
   throwError $ "Unknown builtin function $" <> prettyText f
 
@@ -500,25 +514,36 @@ evalExp builtin sserver top_level_e = do
               throwError $
                 "Function \""
                   <> name
-                  <> "\" expects arguments of types:\n"
-                  <> prettyText (V.mkCompound $ map V.ValueAtom in_types)
-                  <> "\nBut called with arguments of types:\n"
-                  <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
+                  <> "\" expects "
+                  <> prettyText (length in_types)
+                  <> " argument(s) of types:\n"
+                  <> T.intercalate "\n" (map prettyTextOneLine in_types)
+                  <> "\nBut applied to "
+                  <> prettyText (length es_types)
+                  <> " argument(s) of types:\n"
+                  <> T.intercalate "\n" (map prettyTextOneLine es_types)
+
+            tryApply args = do
+              arg_types <- zipWithM (interValToVar cannotApply) in_types args
+
+              if length in_types == length arg_types
+                then do
+                  outs <- replicateM (length out_types) $ newVar "out"
+                  void $ cmdEither $ cmdCall server name outs arg_types
+                  pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
+                else
+                  pure . V.ValueAtom . SFun name in_types out_types $
+                    zipWith SValue in_types $
+                      map VVar arg_types
 
         -- Careful to not require saturated application, but do still
         -- check for over-saturation.
         when (length es_types > length in_types) cannotApply
-        ins <- zipWithM (interValToVar cannotApply) in_types es'
 
-        if length in_types == length ins
-          then do
-            outs <- replicateM (length out_types) $ newVar "out"
-            void $ cmdEither $ cmdCall server name outs ins
-            pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
-          else
-            pure . V.ValueAtom . SFun name in_types out_types $
-              zipWith SValue in_types $
-                map VVar ins
+        -- Allow automatic uncurrying if applicable.
+        case es' of
+          [V.ValueTuple es''] | length es'' == length in_types -> tryApply es''
+          _ -> tryApply es'
       evalExp' _ (StringLit s) =
         case V.putValue s of
           Just s' ->

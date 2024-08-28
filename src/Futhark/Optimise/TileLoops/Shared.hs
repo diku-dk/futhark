@@ -23,7 +23,7 @@ import Control.Monad.State
 import Data.List (foldl', zip4)
 import Data.Map qualified as M
 import Futhark.IR.GPU
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SeqMem qualified as ExpMem
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -36,17 +36,13 @@ data TileKind = TilePartial | TileFull
 
 -- index an array with indices given in outer_indices; any inner
 -- dims of arr not indexed by outer_indices are sliced entirely
-index :: MonadBuilder m => String -> VName -> [VName] -> m VName
+index :: (MonadBuilder m) => String -> VName -> [VName] -> m VName
 index se_desc arr outer_indices = do
   arr_t <- lookupType arr
-  let shape = arrayShape arr_t
-      inner_dims = shapeDims $ stripDims (length outer_indices) shape
-      untouched d = DimSlice (intConst Int64 0) d (intConst Int64 1)
-      inner_slices = map untouched inner_dims
-      slice = Slice $ map (DimFix . Var) outer_indices ++ inner_slices
+  let slice = fullSlice arr_t $ map (DimFix . Var) outer_indices
   letExp se_desc $ BasicOp $ Index arr slice
 
-update :: MonadBuilder m => String -> VName -> [VName] -> SubExp -> m VName
+update :: (MonadBuilder m) => String -> VName -> [VName] -> SubExp -> m VName
 update se_desc arr indices new_elem =
   letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) indices) new_elem
 
@@ -60,18 +56,18 @@ forLoop' ::
   Builder GPU [VName]
 forLoop' i_bound merge body = do
   i <- newVName "i" -- could give this as arg to the function
-  let loop_form = ForLoop i Int64 i_bound []
+  let loop_form = ForLoop i Int64 i_bound
 
   merge_ts <- mapM lookupType merge
   loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Unique) merge_ts
 
   loop_body <-
-    runBodyBuilder . inScopeOf loop_form . localScope (scopeOfFParams loop_inits) $
+    runBodyBuilder . localScope (scopeOfLoopForm loop_form <> scopeOfFParams loop_inits) $
       body i $
         map paramName loop_inits
 
   letTupExp "loop" $
-    DoLoop (zip loop_inits $ map Var merge) loop_form loop_body
+    Loop (zip loop_inits $ map Var merge) loop_form loop_body
 
 forLoop ::
   SubExp ->
@@ -164,13 +160,12 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
 
 segScatter2D ::
   String ->
-  SubExp ->
   VName ->
   [SubExp] -> -- dims of sequential loop on top
   (SubExp, SubExp) -> -- (dim_y, dim_x)
   ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
   Builder GPU VName
-segScatter2D desc arr_size updt_arr seq_dims (dim_x, dim_y) f = do
+segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f = do
   ltid_flat <- newVName "ltid_flat"
   ltid_y <- newVName "ltid_y"
   ltid_x <- newVName "ltid_x"
@@ -180,20 +175,18 @@ segScatter2D desc arr_size updt_arr seq_dims (dim_x, dim_y) f = do
 
   let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_y, dim_y), (ltid_x, dim_x)]
       lvl =
-        SegThreadInGroup
+        SegThreadInBlock
           (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
 
-  ((t_v, res_v, res_i), stms) <- runBuilder $ do
-    (res_v, res_i) <-
-      localScope (scopeOfSegSpace segspace) $
-        f seq_is (ltid_y, ltid_x)
-    t_v <- subExpType res_v
-    pure (t_v, res_v, res_i)
+  ((res_v, res_i), stms) <-
+    runBuilder . localScope (scopeOfSegSpace segspace) $
+      f seq_is (ltid_y, ltid_x)
 
-  let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [(Slice [DimFix res_i], res_v)]
+  let ret = WriteReturns mempty updt_arr [(Slice [DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]
 
-  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
+  updt_arr_t <- lookupType updt_arr
+  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [updt_arr_t] body
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices
@@ -263,13 +256,13 @@ varianceInStms = foldl' varianceInStm
 ---- Helpers for building the environment that binds array variable names to their index functions
 ----------------
 
-type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
+type LMAD = LMAD.LMAD (TPrimExp Int64 VName)
 
 -- | Map from array variable names to their corresponding index functions.
 --   The info is not guaranteed to be exact, e.g., we assume ifs and loops
 --   return arrays layed out in normalized (row-major) form in memory.
 --   We only record aliasing statements, such as transposition, slice, etc.
-type IxFnEnv = M.Map VName IxFun
+type IxFnEnv = M.Map VName LMAD
 
 type WithEnv = M.Map VName (Lambda GPU, [SubExp])
 
@@ -295,35 +288,35 @@ changeWithEnv with_env (WithAcc accum_decs inner_lam) = do
        in (lam_op, ne)
 changeWithEnv with_env _ = pure with_env
 
-composeIxfuns :: IxFnEnv -> VName -> VName -> (IxFun -> IxFun) -> TileM IxFnEnv
+composeIxfuns :: IxFnEnv -> VName -> VName -> (LMAD -> Maybe LMAD) -> TileM IxFnEnv
 composeIxfuns env y x ixf_fun =
-  case M.lookup x env of
-    Just ixf -> pure $ M.insert y (ixf_fun ixf) env
+  case ixf_fun =<< M.lookup x env of
+    Just ixf -> pure $ M.insert y ixf env
     Nothing -> do
       tp <- lookupType x
-      case tp of
-        Array _ptp shp _u -> do
-          let shp' = map ExpMem.pe64 (shapeDims shp)
-          pure $ M.insert y (ixf_fun $ IxFun.iota shp') env
-        _ -> pure env
+      pure $ case tp of
+        Array _ptp shp _u
+          | Just ixf <- ixf_fun $ LMAD.iota 0 $ map ExpMem.pe64 (shapeDims shp) ->
+              M.insert y ixf env
+        _ -> env
 
 changeIxFnEnv :: IxFnEnv -> VName -> Exp GPU -> TileM IxFnEnv
 changeIxFnEnv env y (BasicOp (Reshape ReshapeArbitrary shp_chg x)) =
-  composeIxfuns env y x (`IxFun.reshape` fmap ExpMem.pe64 (shapeDims shp_chg))
+  composeIxfuns env y x (`LMAD.reshape` fmap ExpMem.pe64 (shapeDims shp_chg))
 changeIxFnEnv env y (BasicOp (Reshape ReshapeCoerce shp_chg x)) =
-  composeIxfuns env y x (`IxFun.coerce` fmap ExpMem.pe64 (shapeDims shp_chg))
+  composeIxfuns env y x (Just . (`LMAD.coerce` fmap ExpMem.pe64 (shapeDims shp_chg)))
 changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
   tp <- lookupType x
   case tp of
     Array _ptp shp _u -> do
       let shp' = map ExpMem.pe64 (shapeDims shp)
-      let ixfn = IxFun.permute (IxFun.iota shp') perm
+      let ixfn = LMAD.permute (LMAD.iota 0 shp') perm
       pure $ M.insert y ixfn env
     _ -> error "In TileLoops/Shared.hs, changeIxFnEnv: manifest applied to a non-array!"
 changeIxFnEnv env y (BasicOp (Rearrange perm x)) =
-  composeIxfuns env y x (`IxFun.permute` perm)
+  composeIxfuns env y x (Just . (`LMAD.permute` perm))
 changeIxFnEnv env y (BasicOp (Index x slc)) =
-  composeIxfuns env y x (`IxFun.slice` (Slice $ map (fmap ExpMem.pe64) $ unSlice slc))
+  composeIxfuns env y x (Just . (`LMAD.slice` Slice (map (fmap ExpMem.pe64) $ unSlice slc)))
 changeIxFnEnv env y (BasicOp (Opaque _ (Var x))) =
-  composeIxfuns env y x id
+  composeIxfuns env y x Just
 changeIxFnEnv env _ _ = pure env

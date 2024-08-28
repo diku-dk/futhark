@@ -12,7 +12,6 @@ module Futhark.IR.Syntax.Core
     -- * Types
     Commutativity (..),
     Uniqueness (..),
-    NoUniqueness (..),
     ShapeBase (..),
     Shape,
     stripDims,
@@ -61,6 +60,7 @@ module Futhark.IR.Syntax.Core
     dimFix,
     sliceIndices,
     sliceDims,
+    sliceShape,
     unitSlice,
     fixSlice,
     sliceSlice,
@@ -221,16 +221,6 @@ data Space
 -- | A string representing a specific non-default memory space.
 type SpaceId = String
 
--- | A fancier name for @()@ - encodes no uniqueness information.
-data NoUniqueness = NoUniqueness
-  deriving (Eq, Ord, Show)
-
-instance Semigroup NoUniqueness where
-  NoUniqueness <> NoUniqueness = NoUniqueness
-
-instance Monoid NoUniqueness where
-  mempty = NoUniqueness
-
 -- | The type of a value.  When comparing types for equality with
 -- '==', shapes must match.
 data TypeBase shape u
@@ -248,7 +238,13 @@ instance Bitraversable TypeBase where
   bitraverse _ _ (Mem s) = pure $ Mem s
 
 instance Functor (TypeBase shape) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (TypeBase shape) where
+  foldMap = foldMapDefault
+
+instance Traversable (TypeBase shape) where
+  traverse = bitraverse pure
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault
@@ -394,13 +390,17 @@ sliceDims = mapMaybe dimSlice . unSlice
     dimSlice (DimSlice _ d _) = Just d
     dimSlice DimFix {} = Nothing
 
+-- | The shape of the array produced by this slice.
+sliceShape :: Slice d -> ShapeBase d
+sliceShape = Shape . sliceDims
+
 -- | A slice with a stride of one.
-unitSlice :: Num d => d -> d -> DimIndex d
+unitSlice :: (Num d) => d -> d -> DimIndex d
 unitSlice offset n = DimSlice offset n 1
 
 -- | Fix the 'DimSlice's of a slice.  The number of indexes must equal
 -- the length of 'sliceDims' for the slice.
-fixSlice :: Num d => Slice d -> [d] -> [d]
+fixSlice :: (Num d) => Slice d -> [d] -> [d]
 fixSlice = fixSlice' . unSlice
   where
     fixSlice' (DimFix j : mis') is' =
@@ -411,7 +411,7 @@ fixSlice = fixSlice' . unSlice
 
 -- | Further slice the 'DimSlice's of a slice.  The number of slices
 -- must equal the length of 'sliceDims' for the slice.
-sliceSlice :: Num d => Slice d -> Slice d -> Slice d
+sliceSlice :: (Num d) => Slice d -> Slice d -> Slice d
 sliceSlice (Slice jslice) (Slice islice) = Slice $ sliceSlice' jslice islice
   where
     sliceSlice' (DimFix j : js') is' =
@@ -425,10 +425,10 @@ sliceSlice (Slice jslice) (Slice islice) = Slice $ sliceSlice' jslice islice
 -- | A dimension in a 'FlatSlice'.
 data FlatDimIndex d
   = FlatDimIndex
+      -- | Number of elements in dimension
       d
-      -- ^ Number of elements in dimension
+      -- | Stride of dimension
       d
-      -- ^ Stride of dimension
   deriving (Eq, Ord, Show)
 
 instance Traversable FlatDimIndex where
@@ -497,6 +497,12 @@ newtype ErrorMsg a = ErrorMsg [ErrorMsgPart a]
 
 instance IsString (ErrorMsg a) where
   fromString = ErrorMsg . pure . fromString
+
+instance Monoid (ErrorMsg a) where
+  mempty = ErrorMsg mempty
+
+instance Semigroup (ErrorMsg a) where
+  ErrorMsg x <> ErrorMsg y = ErrorMsg $ x <> y
 
 -- | A part of an error message.
 data ErrorMsgPart a
@@ -599,6 +605,20 @@ data OpaqueType
   | -- | Note that the field ordering here denote the actual
     -- representation - make sure it is preserved.
     OpaqueRecord [(Name, EntryPointType)]
+  | -- | Constructor ordering also denotes representation, in that the
+    -- index of the constructor is the identifying number.
+    --
+    -- The total values used to represent a sum values is the
+    -- 'ValueType' list. The 'Int's associated with each
+    -- 'EntryPointType' are the indexes of the values used to
+    -- represent that constructor payload. This is necessary because
+    -- we deduplicate payloads across constructors.
+    OpaqueSum [ValueType] [(Name, [(EntryPointType, [Int])])]
+  | -- | An array with this rank and named opaque element type.
+    OpaqueArray Int Name [ValueType]
+  | -- | An array with known rank and where the elements are this
+    -- record type.
+    OpaqueRecordArray Int Name [(Name, EntryPointType)]
   deriving (Eq, Ord, Show)
 
 -- | Names of opaque types and their representation.

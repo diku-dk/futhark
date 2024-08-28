@@ -19,15 +19,20 @@ runs:
   using: "composite"
   steps:
     - name: Download Benchmarks.
-      shell: bash
-      run: |
-        cd futhark-benchmarks
-        ./get-data.sh external-data.txt
+      uses: ./.github/actions/futhark-slurm
+      with:
+        script: |
+          module load perl
+          cd futhark-benchmarks
+          ./get-data.sh external-data.txt
+        slurm-options: --time=30:00 -c 1
 
     - uses: ./.github/actions/futhark-slurm
       with:
         script: |
           hostname
+          module unload cuda
+          module load cuda/11.8
           futhark bench futhark-benchmarks \
             --backend ${{inputs.backend}} \
             --exclude no_${{inputs.system}} \

@@ -22,6 +22,11 @@ non-zero value on error, as documented below.  Others return a
 ``NULL`` pointer.  Use :c:func:`futhark_context_get_error` to get a
 (possibly) more precise error message.
 
+Some functions take a C string (``const char*``) as argument.  Unless
+otherwise indicated, the string will be copied if necessary, meaning
+the argument string can always be modified (or freed) after the
+function returns.
+
 .. c:macro:: FUTHARK_BACKEND_foo
 
    A preprocessor macro identifying that the backend *foo* was used to
@@ -32,7 +37,7 @@ non-zero value on error, as documented below.  Others return a
 Error codes
 -----------
 
-Most errors are result in a not otherwise specified nonzero return
+Most errors result in a not otherwise specified nonzero return
 code, but a few classes of errors have distinct error codes.
 
 .. c:macro:: FUTHARK_SUCCESS
@@ -59,7 +64,8 @@ Context creation is parameterised by a configuration object.  Any
 changes to the configuration must be made *before* calling
 :c:func:`futhark_context_new`.  A configuration object must not be
 freed before any context objects for which it is used.  The same
-configuration may *not* be used for multiple concurrent contexts.
+configuration must *not* be used for multiple concurrent contexts.
+Configuration objects are cheap to create and destroy.
 
 .. c:struct:: futhark_context_config
 
@@ -135,9 +141,7 @@ configuration may *not* be used for multiple concurrent contexts.
    cache was hit succesfully, but you can enable logging to see what
    happens.
 
-   The lifespan of ``fname`` must exceed the lifespan of the
-   configuration object.  Pass ``NULL`` to disable caching (this is
-   the default).
+   Pass ``NULL`` to disable caching (this is the default).
 
 Context
 -------
@@ -158,7 +162,7 @@ Context
    :c:func:`futhark_context_get_error`, which will return non-``NULL``
    if initialisation failed.  If initialisation has failed, then you
    still need to call :c:func:`futhark_context_free` to release
-   resources used for the context object, but you may not use the
+   resources used for the context object, but you must not use the
    context object for anything else.
 
 .. c:function:: void futhark_context_free(struct futhark_context *ctx)
@@ -201,7 +205,7 @@ Context
 
 .. c:function:: char *futhark_context_report(struct futhark_context *ctx)
 
-   Produce a human-readable C string with debug and profiling
+   Produce a C string encoding a JSON object with debug and profiling
    information collected during program runtime.  It is the caller's
    responsibility to free the returned string.  It is likely to only
    contain interesting information if
@@ -225,6 +229,11 @@ corresponding C type.  The ``f16`` type is mapped to ``uint16_t``,
 because C does not have a standard ``half`` type.  This integer
 contains the bitwise representation of the ``f16`` value in the IEEE
 754 binary16 format.
+
+.. _array-values:
+
+Arrays of Primitive Values
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For each distinct array type of primitives (ignoring sizes), an opaque
 C struct is defined.  Arrays of ``f16`` are presented as containing
@@ -254,28 +263,37 @@ will not result in a double free.
    call :c:func:`futhark_free_i32_1d`.  Multi-dimensional arrays are
    assumed to be in row-major form.  Returns ``NULL`` on failure.
 
-.. c:function:: struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx, char *data, int64_t offset, int64_t dim0)
+.. c:function:: struct futhark_i32_1d *futhark_new_raw_i32_1d(struct futhark_context *ctx, char *data, int64_t dim0)
 
-   Create an array based on *raw* data, as well as an offset into it.
-   This differs little from :c:func:`futhark_i32_1d` when using the
-   ``c`` backend, but when using e.g. the ``opencl`` backend, the
-   ``data`` parameter will be a ``cl_mem``.  It is the caller's
-   responsibility to eventually call :c:func:`futhark_free_i32_1d`.
-   The ``data`` pointer must remain valid for the lifetime of the
-   array.  Unless you are very careful, this basically means for the
-   lifetime of the context.  Returns ``NULL`` on failure.
+   Create an array based on *raw* data, which is used for the
+   representation of the array. The ``data`` pointer must remain valid
+   for the lifetime of the array and will not be freed by Futhark.
+   Returns ``NULL`` on failure. The type of the ``data`` argument
+   depends on the backend, and is for example ``cl_mem`` when using
+   the OpenCL backend.
+
+   **This is an experimental and unstable interface.**
 
 .. c:function:: int futhark_free_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
    Free the value.  In practice, this merely decrements the reference
-   count by one.  The value (or at least this reference) may not be
+   count by one.  The value (or at least this reference) must not be
    used again after this function returns.
 
 .. c:function:: int futhark_values_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr, int32_t *data)
 
    Asynchronously copy data from the value into ``data``, which must
-   be of sufficient size.  Multi-dimensional arrays are written in
-   row-major form.
+   point to free memory, allocated by the caller, with sufficient
+   space to store the full array.  Multi-dimensional arrays are
+   written in row-major form.
+
+.. c:function:: int futhark_index_i32_1d(struct futhark_context *ctx, int32_t *out, struct futhark_i32_1d *arr, int64_t i0);
+
+   Asynchronously copy a single element from the array and store it in
+   ``*out``. Returns a nonzero value if the index is out of bounds.
+   **Note:** if you need to read many elements, it is much faster to
+   retrieve the entire array with the ``values`` function,
+   particularly when using a GPU backend.
 
 .. c:function:: const int64_t *futhark_shape_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
@@ -283,6 +301,16 @@ will not result in a double free.
    dimension.  The lifetime of the shape is the same as ``arr``, and
    must *not* be manually freed.  Assuming ``arr`` is a valid
    object, this function cannot fail.
+
+.. c:function:: char* futhark_values_raw_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
+
+   Return a pointer to the underlying storage of the array. The return
+   type depends on the backend, and is for example ``cl_mem`` when
+   using the OpenCL backend. If using unified memory with the ``hip``
+   or ``cuda`` backends, the pointer can be accessed directly from CPU
+   code.
+
+   **This is an experimental and unstable interface.**
 
 .. _opaques:
 
@@ -293,15 +321,16 @@ Each instance of a complex type in an entry point (records, nested
 tuples, etc) is represented by an opaque C struct named
 ``futhark_opaque_foo``.  In the general case, ``foo`` will be a hash
 of the internal representation.  However, if you insert an explicit
-type annotations in the entry point (and the type name contains only
+type annotation in the entry point (and the type name contains only
 characters valid in C identifiers), that name will be used.  Note that
 arrays contain brackets, which are not valid in identifiers.  Defining
 a type abbreviation is the best way around this.
 
 The API for opaque values is similar to that of arrays, and the same
-rules for memory management apply.  You cannot construct them from
-scratch, but must obtain them via entry points (or deserialisation,
-see :c:func:`futhark_restore_opaque_foo`).
+rules for memory management apply. You cannot construct them from
+scratch (unless they correspond to records or tuples, see
+:ref:`records`), but must obtain them via entry points (or
+deserialisation, see :c:func:`futhark_restore_opaque_foo`).
 
 .. c:struct:: futhark_opaque_foo
 
@@ -310,7 +339,7 @@ see :c:func:`futhark_restore_opaque_foo`).
 .. c:function:: int futhark_free_opaque_foo(struct futhark_context *ctx, struct futhark_opaque_foo *obj)
 
    Free the value.  In practice, this merely decrements the reference
-   count by one.  The value (or at least this reference) may not be
+   count by one.  The value (or at least this reference) must not be
    used again after this function returns.
 
 .. c:function:: int futhark_store_opaque_foo(struct futhark_context *ctx, const struct futhark_opaque_foo *obj, void **p, size_t *n)
@@ -350,17 +379,20 @@ see :c:func:`futhark_restore_opaque_foo`).
    Futhark program, and compiled with the same version of the Futhark
    compiler.
 
+.. _records:
+
 Records
 ~~~~~~~
 
 A record is an opaque type (see above) that supports additional
 functions to *project* individual fields (read their values) and to
-construct a value given values for the fields.  An opaque type is a
-record if its definition is a record at the Futhark level.
+construct a value given values for the fields. An opaque type is a
+record if its definition is a record at the Futhark level. Note that a
+tuple is simply a record with numeric fields.
 
 The projection and construction functions are equivalent in
 functionality to writing entry points by hand, and so serve only to
-cut down on boilerplate.  Important things to be aware of:
+cut down on boilerplate. Important things to be aware of:
 
 1. The objects constructed though these functions have their own
    lifetime (like any objects returned from an entry point) and must
@@ -373,6 +405,8 @@ cut down on boilerplate.  Important things to be aware of:
    always, you don't have to worry about this if you never write entry
    points that consume their arguments.
 
+3. You must synchronise before using any scalar results.
+
 The precise functions generated depend on the fields of the record.
 The following functions assume a record with Futhark-level type ``type
 t = {foo: t1, bar: t2}`` where ``t1`` and ``t2`` are also opaque
@@ -381,11 +415,13 @@ types.
 .. c:function:: int futhark_new_opaque_t(struct futhark_context *ctx, struct futhark_opaque_t **out, const struct futhark_opaque_t2 *bar, const struct futhark_opaque_t1 *foo);
 
    Construct a record in ``*out`` which has the given values for the
-   ``bar`` and ``foo`` fields.  The parameters are the
-   fields in alphabetic order.  Tuple fields are named ``vX`` where
-   ``X`` is an integer.  The resulting record *aliases* the values
-   provided for ``bar`` and ``foo``, but has its own lifetime, and all
-   values must be individually freed when they are no longer needed.
+   ``bar`` and ``foo`` fields. The parameters are the fields in
+   alphabetic order. As a special case, if the record is a tuple
+   (i.e., has numeric fields), the parameters are ordered numerically.
+   Tuple fields are named ``vX`` where ``X`` is an integer. The
+   resulting record *aliases* the values provided for ``bar`` and
+   ``foo``, but has its own lifetime, and all values must be
+   individually freed when they are no longer needed.
 
 .. c:function:: int futhark_project_opaque_t_bar(struct futhark_context *ctx, struct futhark_opaque_t2 **out, const struct futhark_opaque_t *obj);
 
@@ -398,6 +434,110 @@ types.
    Extract the value of the field ``bar`` from the provided record.
    The resulting value *aliases* the record, but has its own lifetime,
    and must eventually be freed.
+
+.. _sums:
+
+Sums
+~~~~
+
+A sum type is an opaque type (see above) that supports construction
+and destruction functions. An opaque type is a sum type if its
+definition is a sum type at the Futhark level.
+
+Similarly to records (see :ref:`Records`), this functionality is
+equivalent to writing entry points by hand, and have the same
+properties regarding lifetimes.
+
+A sum type consists of one or more variants. A value of this type is
+always an instance of one of these variants. In the C API, these
+variants are numbered from zero. The numbering is given by the order
+in which they are represented in the manifest (see :ref:`manifest`),
+which is also the order in which their associated functions are
+defined in the header file.
+
+For an opaque sum type ``t``, the following function is always
+generated.
+
+.. c:function:: int futhark_variant_opaque_t(struct futhark_context *ctx, const struct futhark_opaque_t *v);
+
+   Return the identifying number of the variant of which this sum type
+   is an instance (see above). Cannot fail.
+
+For each variant ``foo``, construction and destruction functions are
+defined. The following assume ``t`` is defined as ``type t = #foo
+([]i32) bool``.
+
+.. c:function:: int futhark_new_opaque_t_foo(struct futhark_context *ctx, struct futhark_opaque_contrived **out, const struct futhark_i32_1d *v0, const bool v1);
+
+   Construct a value of type ``t`` that is an instance of the variant
+   ``foo``. Arguments are provided in the same order as in the
+   Futhark-level ``foo`` constructr.
+
+   **Beware:** if ``t`` has size parameters that are only used for
+   *other* variants than the one that is being instantiated, those
+   size parameters will be set to 0. If this is a problem for your
+   application, define your own entry point for constructing a value
+   with the proper sizes.
+
+.. c:function:: int futhark_destruct_opaque_contrived_foo(struct futhark_context *ctx, struct futhark_i32_1d **v0, bool *v1, const struct futhark_opaque_contrived *obj);
+
+   Extract the payload of variant ``foo`` from the sum value. Despite
+   the name, "destruction" does not free the sum type value. The
+   extracted values alias the sum value, but has their own lifetime,
+   and must eventually be freed.
+
+   **Precondition:** ``t`` must be an instance of the ``foo`` variant,
+   which can be determined with :c:func:`futhark_variant_opaque_t`.
+
+.. _arrays_of_opaques:
+
+Arrays of Non-Primitive Values
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An array that contains a non-primitive type is considered an opaque
+value. However, it also supports a subset of the API documented in
+:ref:`array-values`.
+
+For an opaque array type ``[]t``, the following functions are always
+generated (assuming the generated C type is ``arr_t``):
+
+.. c:function:: int futhark_index_opaque_arr_t(struct futhark_context *ctx, struct futhark_opaque_t **out, struct futhark_opaque_arr_t *arr, int64_t i0);
+
+   Asynchronously copy a single element from the array and store it in
+   ``*out``. Returns a nonzero value if the index is out of bounds.
+
+.. c:function:: const int64_t *futhark_shape_opaque_arr_t(struct futhark_context *ctx, struct futhark_opaque_arr_t *arr);
+
+   Return a pointer to the shape of the array, with one element per
+   dimension. The lifetime of the shape is the same as ``arr``, and
+   must *not* be manually freed. Assuming ``arr`` is a valid object,
+   this function cannot fail.
+
+Additionally, if the element type is a record (or equivalently a
+tuple), for example if the array type is ``[](f32,f32)``, the
+following functions are also available:
+
+.. c:function:: int futhark_zip_opaque_arr1d_tup2_f32_f32(struct futhark_context *ctx, struct futhark_opaque_arr1d_tup2_f32_f32 **out, const struct futhark_f32_1d *f_0, const struct futhark_f32_1d *f_1);
+
+   Construct an array of records from arrays of the component values.
+   This is analogous to ``zip`` in the source language. The provided
+   arrays must have compatible shapes, and the function returns
+   nonzero if they do not.
+
+   **Note:** This is a cheap operation, as it does not copy array
+   elements.
+
+   **Note:** The resulting array aliases the original arrays.
+
+.. c:function:: int futhark_project_opaque_arr1d_tup2_f32_f32_0(struct futhark_context *ctx, struct futhark_f32_1d **out, const struct futhark_opaque_arr1d_tup2_f32_f32 *obj);
+
+   Retrieve an array of all the ``.0`` fields of the array elements. A
+   similar function is provided for each field.
+
+   **Note:** This is a cheap operation, as it does not copy array
+   elements.
+
+   **Note:** The resulting array aliases the original array.
 
 Entry points
 ------------
@@ -439,8 +579,8 @@ permitted on a consumed value.
 GPU
 ---
 
-The following API functions are available when using the ``opencl`` or
-``cuda`` backends.
+The following API functions are available when using the ``opencl``,
+``cuda``, or ``hip`` backends.
 
 .. c:function:: void futhark_context_config_set_device(struct futhark_context_config *cfg, const char *s)
 
@@ -450,34 +590,59 @@ The following API functions are available when using the ``opencl`` or
    with :c:func:`futhark_context_config_set_platform`, only the
    devices from matching platforms are considered.
 
+.. c:function:: void futhark_context_config_set_unified_memory(struct futhark_context_config* cfg, int flag);
+
+   Use "unified" memory for GPU arrays. This means arrays are located
+   in memory that is also accessible from the CPU. The details depends
+   on the backend and hardware in use. The following values are
+   supported:
+
+   * 0: never use unified memory (the default on ``hip``).
+
+   * 1: always use unified memory.
+
+   * 2: use managed memory if the device claims to support it (the
+     default on ``cuda``).
 
 Exotic
 ~~~~~~
 
 The following functions are not interesting to most users.
 
+.. c:function:: void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size)
+
+   Set the default number of work-items in a thread block.
+
 .. c:function:: void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size)
 
-   Set the default number of work-items in a work-group.
+   Identical to
+   :c:func:`futhark_context_config_set_default_thread_block_size`;
+   provided for backwards compatibility.
+
+.. c:function:: void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num)
+
+   Set the default number of thread blocks used for kernels.
 
 .. c:function:: void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num)
 
-   Set the default number of work-groups used for kernels.
+   Identical to
+   :c:func:`futhark_context_config_set_default_grid_size`;
+   provided for backwards compatibility.
 
 .. c:function:: void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int num)
 
    Set the default tile size used when executing kernels that have
    been block tiled.
 
-.. c:function:: void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path)
+.. c:function:: const char* futhark_context_config_get_program(struct futhark_context_config *cfg)
 
-   During :c:func:`futhark_context_new`, dump the OpenCL or CUDA
-   program source to the given file.
+   Retrieve the embedded GPU program.  The context configuration keeps
+   ownership, so don't free the string.
 
-.. c:function:: void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path)
+.. c:function:: void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *program)
 
-   During :c:func:`futhark_context_new`, read OpenCL or CUDA program
-   source from the given file instead of using the embedded program.
+   Instead of using the embedded GPU program, use the provided string,
+   which is copied by this function.
 
 OpenCL
 ------
@@ -520,10 +685,9 @@ advanced usage.
    Add a build option to the OpenCL kernel compiler.  See the OpenCL
    specification for `clBuildProgram` for available options.
 
-.. c:function:: void futhark_context_config_dump_binary_to(struct futhark_context_config *cfg, const char *path)
+.. c:function:: cl_program futhark_context_get_program(struct futhark_context_config *cfg)
 
-   During :c:func:`futhark_context_new`, dump the compiled OpenCL
-   binary to the given file.
+   Retrieve the compiled OpenCL program.
 
 .. c:function:: void futhark_context_config_load_binary_from(struct futhark_context_config *cfg, const char *path)
 
@@ -547,7 +711,7 @@ advanced usage.
    Add a build option to the NVRTC compiler.  See the CUDA
    documentation for ``nvrtcCompileProgram`` for available options.
 
-.. c:function:: void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char *path)
+.. c:function:: void futhark_context_dump_ptx_to(struct futhark_context_config *cfg, const char *path)
 
    During :c:func:`futhark_context_new`, dump the generated PTX code
    to the given file.
@@ -606,9 +770,9 @@ whose entry points do not have unique parameter types
 Manifest
 --------
 
-The C backends generate a machine-readable *manifest* in JSON format
-that describes the API of the compiled Futhark program.  Specifically,
-the manifest contains:
+When compiling with ``--library``, the C backends generate a
+machine-readable *manifest* in JSON format that describes the API of
+the compiled Futhark program. Specifically, the manifest contains:
 
 * A mapping from the name of each entry point to:
 
@@ -638,18 +802,35 @@ the manifest contains:
     functions are as documented above.  The following operations are
     listed:
 
-    * For arrays: ``free``, ``shape``, ``values``, ``new``.
+    * For arrays: ``free``, ``shape``, ``values``, ``new``, ``index``.
 
     * For opaques: ``free``, ``store``, ``restore``.
 
   * For opaques that are actually records (including tuples):
 
     * The list of fields, including their type and a projection
-      function.  The field ordering here is the one used expected by
+      function.  The field ordering here is the one expected by
       the *new* function.
 
     * The name of the C *new* function for creating a record from
       field values.
+
+   * For opaques that are actually arrays of records:
+
+     * The element type and rank.
+
+     * The operations ``index``, ``shape``, ``zip``.
+
+     * The fields, which will be the fields of the element type, but
+       with the dimensions preprended. These are the types of the
+       arrays that should be passed to the ``zip`` function.
+
+   * For other opaques that are actually arrays:
+
+     * The element type and rank.
+
+     * The operations ``index`` and ``shape``.
+
 
 Manifests are defined by the following JSON Schema:
 

@@ -17,7 +17,7 @@ import Futhark.Pass
 
 -- | Run copy propagation on an entire program.
 copyPropagateInProg ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   SimpleOps rep ->
   Prog rep ->
   PassM (Prog rep)

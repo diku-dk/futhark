@@ -8,12 +8,13 @@ module Futhark.IR.Mem.IxFunWrapper
     coerce,
     slice,
     flatSlice,
-    rebase,
+    expand,
   )
 where
 
-import Futhark.IR.Mem.IxFun qualified as I
+import Control.Monad (join)
 import Futhark.IR.Mem.IxFun.Alg qualified as IA
+import Futhark.IR.Mem.LMAD qualified as I
 import Futhark.IR.Syntax (FlatSlice, Slice)
 import Futhark.Util.IntegralExp
 
@@ -21,52 +22,51 @@ type Shape num = [num]
 
 type Permutation = [Int]
 
-type IxFun num = (I.IxFun num, IA.IxFun num)
+type IxFun num = (Maybe (I.LMAD num), IA.IxFun num)
 
 iota ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   Shape num ->
   IxFun num
-iota x = (I.iota x, IA.iota x)
+iota x = (Just $ I.iota 0 x, IA.iota x)
 
 permute ::
-  IntegralExp num =>
   IxFun num ->
   Permutation ->
   IxFun num
-permute (l, a) x = (I.permute l x, IA.permute a x)
+permute (l, a) x = (I.permute <$> l <*> pure x, IA.permute a x)
 
 reshape ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
   Shape num ->
   IxFun num
-reshape (l, a) x = (I.reshape l x, IA.reshape a x)
+reshape (l, a) x = (join (I.reshape <$> l <*> pure x), IA.reshape a x)
 
 coerce ::
-  (Eq num, IntegralExp num) =>
   IxFun num ->
   Shape num ->
   IxFun num
-coerce (l, a) x = (I.coerce l x, IA.coerce a x)
+coerce (l, a) x = (I.coerce <$> l <*> pure x, IA.coerce a x)
 
 slice ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
   Slice num ->
   IxFun num
-slice (l, a) x = (I.slice l x, IA.slice a x)
+slice (l, a) x = (I.slice <$> l <*> pure x, IA.slice a x)
 
 flatSlice ::
-  (Eq num, IntegralExp num) =>
+  (IntegralExp num) =>
   IxFun num ->
   FlatSlice num ->
   IxFun num
-flatSlice (l, a) x = (I.flatSlice l x, IA.flatSlice a x)
+flatSlice (l, a) x = (I.flatSlice <$> l <*> pure x, IA.flatSlice a x)
 
-rebase ::
-  (Eq num, IntegralExp num) =>
-  IxFun num ->
+expand ::
+  (IntegralExp num) =>
+  num ->
+  num ->
   IxFun num ->
   IxFun num
-rebase (l, a) (l1, a1) = (I.rebase l l1, IA.rebase a a1)
+expand o p (lf, af) = (Just . I.expand o p =<< lf, IA.expand o p af)

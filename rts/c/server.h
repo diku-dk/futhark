@@ -282,14 +282,14 @@ struct entry_point* get_entry_point(struct server_state *s, const char *name) {
 
 // Print the command-done marker, indicating that we are ready for
 // more input.
-void ok() {
+void ok(void) {
   printf("%%%%%% OK\n");
   fflush(stdout);
 }
 
 // Print the failure marker.  Output is now an error message until the
 // next ok().
-void failure() {
+void failure(void) {
   printf("%%%%%% FAILURE\n");
 }
 
@@ -553,7 +553,17 @@ void cmd_unpause_profiling(struct server_state *s, const char *args[]) {
 void cmd_report(struct server_state *s, const char *args[]) {
   (void)args;
   char *report = futhark_context_report(s->ctx);
-  puts(report);
+  if (report) {
+    puts(report);
+  } else {
+    failure();
+    report = futhark_context_get_error(s->ctx);
+    if (report) {
+      puts(report);
+    } else {
+      puts("Failed to produce profiling report.\n");
+    }
+  }
   free(report);
 }
 
@@ -693,7 +703,7 @@ void cmd_new(struct server_state *s, const char *args[]) {
 
   if (num_args != r->num_fields) {
     failure();
-    printf("%d fields expected byt %d values provided.\n", num_args, r->num_fields);
+    printf("%d fields expected but %d values provided.\n", num_args, r->num_fields);
     return;
   }
 
@@ -969,6 +979,7 @@ void store_opaque(const struct opaque_aux *aux, FILE *f,
   size_t obj_size;
   void *data = NULL;
   (void)aux->store(ctx, obj, &data, &obj_size);
+  assert(futhark_context_sync(ctx) == 0);
   fwrite(data, sizeof(char), obj_size, f);
   free(data);
 }

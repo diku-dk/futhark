@@ -51,7 +51,7 @@ newtype TryFusion a
     )
 
 tryFusion ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   TryFusion a ->
   Scope SOACS ->
   m (Maybe a)
@@ -571,7 +571,7 @@ iswim _ (SOAC.Screma w form arrs) ots
           scan_params = lambdaParams map_fun
           scan_body = lambdaBody map_fun
           scan_rettype = lambdaReturnType map_fun
-          scan_fun' = Lambda scan_params scan_body scan_rettype
+          scan_fun' = Lambda scan_params scan_rettype scan_body
           nes' = map Var $ take (length map_nes) $ map paramName map_params
           arrs' = drop (length map_nes) $ map paramName map_params
 
@@ -586,7 +586,7 @@ iswim _ (SOAC.Screma w form arrs) ots
               )
               $ varsRes
               $ patNames map_pat
-          map_fun' = Lambda map_params map_body map_rettype
+          map_fun' = Lambda map_params map_rettype map_body
           perm = case lambdaReturnType scan_fun of -- instead of map_fun
             [] -> []
             t : _ -> 1 : 0 : [2 .. arrayRank t]
@@ -668,6 +668,38 @@ pullRearrange soac ots = do
           inputs' `MapNest.setInputs` rearrangeReturnTypes nest perm
       pure (soac', ots')
     else fail "Cannot pull transpose"
+
+pullIndex ::
+  SOAC ->
+  SOAC.ArrayTransforms ->
+  TryFusion (SOAC, SOAC.ArrayTransforms)
+pullIndex (SOAC.Screma _ form inps) ots
+  | SOAC.Index cs slice@(Slice (ds@(DimSlice _ w' _) : inner_ds))
+      SOAC.:< ots' <-
+      SOAC.viewf ots,
+    Just lam <- isMapSOAC form = do
+      let sliceInput inp =
+            SOAC.addTransform
+              (SOAC.Index cs (fullSlice (SOAC.inputType inp) [ds]))
+              inp
+          sliceRes (SubExpRes rcs (Var v)) =
+            certifying rcs
+              . fmap subExpRes
+              . letSubExp (baseString v <> "_sliced")
+              $ BasicOp (Index v (Slice inner_ds))
+          sliceRes r = pure r
+          inner_changed =
+            any
+              ((/= stripDims 1 (sliceShape slice)) . arrayShape)
+              (lambdaReturnType lam)
+      lam' <-
+        if not inner_changed
+          then pure lam
+          else
+            runLambdaBuilder (lambdaParams lam) $
+              mapM sliceRes =<< bodyBind (lambdaBody lam)
+      pure (SOAC.Screma w' (mapSOAC lam') (map sliceInput inps), ots')
+pullIndex _ _ = fail "Cannot pull index"
 
 pushRearrange ::
   [VName] ->
@@ -790,6 +822,7 @@ exposeInputs ::
 exposeInputs inpIds ker =
   (exposeInputs' =<< pushRearrange')
     <|> (exposeInputs' =<< pullRearrange')
+    <|> (exposeInputs' =<< pullIndex')
     <|> exposeInputs' ker
   where
     ot = fsOutputTransform ker
@@ -812,6 +845,16 @@ exposeInputs inpIds ker =
             fsOutputTransform = SOAC.noTransforms
           }
 
+    pullIndex' = do
+      (soac', ot') <- pullIndex (fsSOAC ker) ot
+      unless (SOAC.nullTransforms ot') $
+        fail "pullIndex was not enough"
+      pure
+        ker
+          { fsSOAC = soac',
+            fsOutputTransform = SOAC.noTransforms
+          }
+
     exposeInputs' ker' =
       case commonTransforms inpIds $ inputs ker' of
         (ot', inps')
@@ -823,8 +866,12 @@ exposeInputs inpIds ker =
       | SOAC.nullTransforms ts = True
     exposed inp = SOAC.inputArray inp `notElem` inpIds
 
-outputTransformPullers :: [SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)]
-outputTransformPullers = [pullRearrange, pullReshape]
+outputTransformPullers ::
+  [ SOAC ->
+    SOAC.ArrayTransforms ->
+    TryFusion (SOAC, SOAC.ArrayTransforms)
+  ]
+outputTransformPullers = [pullRearrange, pullReshape, pullIndex]
 
 pullOutputTransforms ::
   SOAC ->

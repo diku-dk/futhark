@@ -11,8 +11,10 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Parallel.Strategies
+import Data.Functor (($>))
 import Data.List (partition)
 import Data.Map.Strict qualified as M
+import Data.Maybe
 import Data.Set qualified as S
 import Futhark.Analysis.CallGraph
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -32,7 +34,7 @@ import Futhark.Transform.CopyPropagate
   )
 import Futhark.Transform.Rename
 
-parMapM :: MonadFreshNames m => (a -> State VNameSource b) -> [a] -> m [b]
+parMapM :: (MonadFreshNames m) => (a -> State VNameSource b) -> [a] -> m [b]
 -- The special-casing of [] is quite important here!  If 'as' is
 -- empty, then we might otherwise create an empty name source below,
 -- which can wreak all kinds of havoc.
@@ -50,7 +52,7 @@ parMapM f as =
 -- simplification rates used have been determined heuristically and
 -- are probably not optimal for any given program.
 inlineFunctions ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Int ->
   CallGraph ->
   S.Set Name ->
@@ -83,7 +85,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
             if any (`calledByConsts` cg) to_inline_now
               then do
                 consts' <-
-                  simplifyConsts . performCSEOnStms True
+                  simplifyConsts . performCSEOnStms
                     =<< inlineInStms inlinemap consts
                 pure (ST.insertStms (informStms consts') mempty, consts')
               else pure (vtable, consts)
@@ -106,29 +108,97 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
             to_inline_later
 
 calledOnce :: CallGraph -> S.Set Name
-calledOnce = S.fromList . map fst . filter ((== 1) . snd) . M.toList . numOccurences
+calledOnce =
+  S.fromList . map fst . filter ((== 1) . snd) . M.toList . numOccurences
 
 inlineBecauseTiny :: Prog SOACS -> S.Set Name
 inlineBecauseTiny = foldMap onFunDef . progFuns
   where
     onFunDef fd
-      | (length (bodyStms (funDefBody fd)) < 2)
+      | (length (bodyStms (funDefBody fd)) <= k)
           || ("inline" `inAttrs` funDefAttrs fd) =
           S.singleton (funDefName fd)
       | otherwise = mempty
+      where
+        k = length (funDefRetType fd) + length (funDefParams fd)
+
+progStms :: Prog SOACS -> Stms SOACS
+progStms prog =
+  progConsts prog <> foldMap (bodyStms . funDefBody) (progFuns prog)
+
+data Used = InSOAC | InAD deriving (Eq, Ord, Show)
+
+directlyCalledInSOACs :: Prog SOACS -> M.Map Name Used
+directlyCalledInSOACs = flip execState mempty . mapM_ (onStm Nothing) . progStms
+  where
+    onBody :: Maybe Used -> Body SOACS -> State (M.Map Name Used) ()
+    onBody u = mapM_ (onStm u) . bodyStms
+    onStm u stm = onExp u (stmExp stm) $> stm
+    onExp (Just u) (Apply fname _ _ _) = modify $ M.insert fname u
+    onExp Nothing Apply {} = pure ()
+    onExp u e = walkExpM (walker u) e
+    onSOAC u soac = void $ traverseSOACStms (const (traverse (onStm u'))) soac
+      where
+        u' = max u $ Just $ usage soac
+    usage JVP {} = InAD
+    usage VJP {} = InAD
+    usage _ = InSOAC
+    walker u =
+      (identityWalker :: Walker SOACS (State (M.Map Name Used)))
+        { walkOnBody = const (onBody u),
+          walkOnOp = onSOAC u
+        }
+
+-- Expand set of function names with all reachable functions.
+withTransitiveCalls :: CallGraph -> M.Map Name Used -> M.Map Name Used
+withTransitiveCalls cg fs
+  | fs == fs' = fs
+  | otherwise = withTransitiveCalls cg fs'
+  where
+    look :: (Name, Used) -> M.Map Name Used
+    look (f, u) = M.fromList $ map (,u) (S.toList (allCalledBy f cg))
+    fs' = foldr (M.unionWith max . look) fs $ M.toList fs
+
+calledInSOACs :: CallGraph -> Prog SOACS -> M.Map Name Used
+calledInSOACs cg prog = withTransitiveCalls cg $ directlyCalledInSOACs prog
+
+-- Inline those functions that are used in SOACs, and which involve
+-- arrays of any kind, as well as any functions used in AD.
+inlineBecauseSOACs :: CallGraph -> Prog SOACS -> S.Set Name
+inlineBecauseSOACs cg prog =
+  S.fromList $ mapMaybe onFunDef (progFuns prog)
+  where
+    called = calledInSOACs cg prog
+    isArray = not . primType
+    inline _ InAD = True
+    inline fd InSOAC =
+      any (isArray . paramType) (funDefParams fd)
+        || any (isArray . fst) (funDefRetType fd)
+        || arrayInBody (funDefBody fd)
+    onFunDef fd = do
+      guard $ maybe False (inline fd) $ M.lookup (funDefName fd) called
+      Just $ funDefName fd
+    arrayInBody = any arrayInStm . bodyStms
+    arrayInStm stm =
+      any isArray (patTypes (stmPat stm)) || arrayInExp (stmExp stm)
+    arrayInExp (Match _ cases defbody _) =
+      any arrayInBody $ defbody : map caseBody cases
+    arrayInExp (Loop _ _ body) =
+      arrayInBody body
+    arrayInExp _ = False
 
 -- Conservative inlining of functions that are called just once, or
 -- have #[inline] on them.
-consInlineFunctions :: MonadFreshNames m => Prog SOACS -> m (Prog SOACS)
+consInlineFunctions :: (MonadFreshNames m) => Prog SOACS -> m (Prog SOACS)
 consInlineFunctions prog =
   inlineFunctions 4 cg (calledOnce cg <> inlineBecauseTiny prog) prog
   where
     cg = buildCallGraph prog
 
--- Inline everything that is not #[noinline].
-aggInlineFunctions :: MonadFreshNames m => Prog SOACS -> m (Prog SOACS)
+-- Inline aggressively; in particular most things called from a SOAC.
+aggInlineFunctions :: (MonadFreshNames m) => Prog SOACS -> m (Prog SOACS)
 aggInlineFunctions prog =
-  inlineFunctions 3 cg (S.fromList $ map funDefName $ progFuns prog) prog
+  inlineFunctions 3 cg (inlineBecauseTiny prog <> inlineBecauseSOACs cg prog) prog
   where
     cg = buildCallGraph prog
 
@@ -138,7 +208,7 @@ aggInlineFunctions prog =
 -- importantly, the functions in @fdmap@ do not call any other
 -- functions.
 inlineInFunDef ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   M.Map Name (FunDef SOACS) ->
   FunDef SOACS ->
   m (FunDef SOACS)
@@ -146,7 +216,7 @@ inlineInFunDef fdmap (FunDef entry attrs name rtp args body) =
   FunDef entry attrs name rtp args <$> inlineInBody fdmap body
 
 inlineFunction ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Pat Type ->
   StmAux dec ->
   [(SubExp, Diet)] ->
@@ -180,7 +250,7 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
     notmempty = (/= mempty) . locOf
 
 inlineInStms ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   M.Map Name (FunDef SOACS) ->
   Stms SOACS ->
   m (Stms SOACS)
@@ -188,7 +258,7 @@ inlineInStms fdmap stms =
   bodyStms <$> inlineInBody fdmap (mkBody stms [])
 
 inlineInBody ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   M.Map Name (FunDef SOACS) ->
   Body SOACS ->
   m (Body SOACS)
@@ -219,8 +289,8 @@ inlineInBody fdmap = onBody
     onSOAC =
       mapSOACM identitySOACMapper {mapOnSOACLambda = onLambda}
 
-    onLambda (Lambda params body ret) =
-      Lambda params <$> onBody body <*> pure ret
+    onLambda (Lambda params ret body) =
+      Lambda params ret <$> onBody body
 
 -- Propagate source locations and attributes to the inlined
 -- statements.  Attributes are propagated only when applicable (this

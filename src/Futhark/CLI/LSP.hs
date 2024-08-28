@@ -7,13 +7,13 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.IORef (newIORef)
 import Futhark.LSP.Handlers (handlers)
 import Futhark.LSP.State (emptyState)
-import Language.LSP.Server
-import Language.LSP.Types
+import Language.LSP.Protocol.Types
   ( SaveOptions (SaveOptions),
-    TextDocumentSyncKind (TdSyncIncremental),
+    TextDocumentSyncKind (TextDocumentSyncKind_Incremental),
     TextDocumentSyncOptions (..),
     type (|?) (InR),
   )
+import Language.LSP.Server
 
 -- | Run @futhark lsp@
 main :: String -> [String] -> IO ()
@@ -22,14 +22,16 @@ main _prog _args = do
   _ <-
     runServer $
       ServerDefinition
-        { onConfigurationChange = const $ const $ Right (),
+        { onConfigChange = const $ pure (),
+          configSection = "Futhark",
+          parseConfig = const . const $ Right (),
           defaultConfig = (),
           doInitialize = \env _req -> pure $ Right env,
           staticHandlers = handlers state_mvar,
           interpretHandler = \env -> Iso (runLspT env) liftIO,
           options =
             defaultOptions
-              { textDocumentSync = Just syncOptions
+              { optTextDocumentSync = Just syncOptions
               }
         }
   pure ()
@@ -37,8 +39,8 @@ main _prog _args = do
 syncOptions :: TextDocumentSyncOptions
 syncOptions =
   TextDocumentSyncOptions
-    { _openClose = Just True,
-      _change = Just TdSyncIncremental,
+    { _openClose = Just False,
+      _change = Just TextDocumentSyncKind_Incremental,
       _willSave = Just False,
       _willSaveWaitUntil = Just False,
       _save = Just $ InR $ SaveOptions $ Just False

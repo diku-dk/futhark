@@ -8,6 +8,7 @@ module Futhark.AD.Rev.Hist
   ( diffMinMaxHist,
     diffMulHist,
     diffAddHist,
+    diffVecHist,
     diffHist,
   )
 where
@@ -35,7 +36,12 @@ withinBounds [] = TPrimExp $ ValueExp (BoolValue True)
 withinBounds [(q, i)] = (le64 i .<. pe64 q) .&&. (pe64 (intConst Int64 (-1)) .<. le64 i)
 withinBounds (qi : qis) = withinBounds [qi] .&&. withinBounds qis
 
-elseIf :: PrimType -> [(ADM (Exp SOACS), ADM (Exp SOACS))] -> [ADM (Body SOACS)] -> ADM (Exp SOACS)
+elseIf ::
+  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
+  PrimType ->
+  [(m (Exp (Rep m)), m (Exp (Rep m)))] ->
+  [m (Body (Rep m))] ->
+  m (Exp (Rep m))
 elseIf t [(c1, c2)] [bt, bf] =
   eIf
     (eCmpOp (CmpEq t) c1 c2)
@@ -50,7 +56,7 @@ elseIf t ((c1, c2) : cs) (bt : bs) =
     $ elseIf t cs bs
 elseIf _ _ _ = error "In elseIf, Hist.hs: input not supported"
 
-bindSubExpRes :: String -> [SubExpRes] -> ADM [VName]
+bindSubExpRes :: (MonadBuilder m) => String -> [SubExpRes] -> m [VName]
 bindSubExpRes s =
   traverse
     ( \(SubExpRes cs se) -> do
@@ -183,7 +189,9 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
   dst_type <- lookupType dst
   let dst_dims = arrayDims dst_type
 
-  dst_cpy <- letExp (baseString dst <> "_copy") $ BasicOp $ Copy dst
+  dst_cpy <-
+    letExp (baseString dst <> "_copy") . BasicOp $
+      Replicate mempty (Var dst)
 
   acc_v_p <- newParam "acc_v" $ Prim t
   acc_i_p <- newParam "acc_i" $ Prim int64
@@ -492,7 +500,9 @@ diffAddHist ::
 diffAddHist _ops x aux n add ne is vs w rf dst m = do
   let t = paramDec $ head $ lambdaParams add
 
-  dst_cpy <- letExp (baseString dst <> "_copy") $ BasicOp $ Copy dst
+  dst_cpy <-
+    letExp (baseString dst <> "_copy") . BasicOp $
+      Replicate mempty (Var dst)
 
   f <- mkIdentityLambda [Prim int64, t]
   auxing aux . letBindNames [x] . Op $
@@ -517,6 +527,64 @@ diffAddHist _ops x aux n add ne is vs w rf dst m = do
 
   vs_bar <- letExp (baseString vs <> "_bar") $ Op $ Screma n [is] $ mapSOAC lam_vsbar
   updateAdj vs vs_bar
+
+-- Special case for vectorised combining operator. Rewrite
+--   reduce_by_index dst (map2 op) nes is vss
+-- to
+--   map3 (\dst_col vss_col ne ->
+--           reduce_by_index dst_col op ne is vss_col
+--        ) (transpose dst) (transpose vss) nes |> transpose
+-- before differentiating.
+diffVecHist ::
+  VjpOps ->
+  VName ->
+  StmAux () ->
+  SubExp ->
+  Lambda SOACS ->
+  VName ->
+  VName ->
+  VName ->
+  SubExp ->
+  SubExp ->
+  VName ->
+  ADM () ->
+  ADM ()
+diffVecHist ops x aux n op nes is vss w rf dst m = do
+  stms <- collectStms_ $ do
+    rank <- arrayRank <$> lookupType vss
+    let dims = [1, 0] ++ drop 2 [0 .. rank - 1]
+
+    dstT <- letExp "dstT" $ BasicOp $ Rearrange dims dst
+    vssT <- letExp "vssT" $ BasicOp $ Rearrange dims vss
+    t_dstT <- lookupType dstT
+    t_vssT <- lookupType vssT
+    t_nes <- lookupType nes
+
+    dst_col <- newParam "dst_col" $ rowType t_dstT
+    vss_col <- newParam "vss_col" $ rowType t_vssT
+    ne <- newParam "ne" $ rowType t_nes
+
+    f <- mkIdentityLambda (Prim int64 : lambdaReturnType op)
+    map_lam <-
+      mkLambda [dst_col, vss_col, ne] $ do
+        -- TODO Have to copy dst_col, but isn't it already unique?
+        dst_col_cpy <-
+          letExp "dst_col_cpy" . BasicOp $
+            Replicate mempty (Var $ paramName dst_col)
+        fmap (varsRes . pure) . letExp "col_res" $
+          Op $
+            Hist
+              n
+              [is, paramName vss_col]
+              [HistOp (Shape [w]) rf [dst_col_cpy] [Var $ paramName ne] op]
+              f
+    histT <-
+      letExp "histT" $
+        Op $
+          Screma (arraySize 0 t_dstT) [dstT, vssT, nes] $
+            mapSOAC map_lam
+    auxing aux . letBindNames [x] . BasicOp $ Rearrange dims histT
+  foldr (vjpStm ops) m stms
 
 --
 -- a step in the radix sort implementation
@@ -640,9 +708,9 @@ radixSort xs n w = do
       radixSortStep (map paramName params) types bit n w
 
   letTupExp "sorted" $
-    DoLoop
+    Loop
       (zip params $ map Var xs)
-      (ForLoop i Int64 iters [])
+      (ForLoop i Int64 iters)
       loopbody
   where
     log2 :: SubExp -> ADM SubExp
@@ -660,7 +728,7 @@ radixSort xs n w = do
 
       l <-
         letTupExp' "log2res" $
-          DoLoop
+          Loop
             (zip params [cond_init, m, Constant $ blankPrimValue int64])
             (WhileLoop $ paramName cond)
             body

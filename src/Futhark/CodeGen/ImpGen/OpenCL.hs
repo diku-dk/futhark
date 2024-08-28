@@ -13,5 +13,5 @@ import Futhark.IR.GPUMem
 import Futhark.MonadFreshNames
 
 -- | Compile the program to ImpCode with OpenCL kernels.
-compileProg :: MonadFreshNames m => Prog GPUMem -> m (Warnings, OpenCL.Program)
+compileProg :: (MonadFreshNames m) => Prog GPUMem -> m (Warnings, OpenCL.Program)
 compileProg prog = second kernelsToOpenCL <$> compileProgOpenCL prog

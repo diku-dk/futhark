@@ -22,12 +22,12 @@ psumTest =
   testCase "psumTest"
     $ assertEqual
       "Color simple 1-2-3 using two colors"
-      ( [(0, "local"), (1, "local")] :: [(Int, String)],
+      ( [(0, "shared"), (1, "shared")] :: [(Int, String)],
         [(1 :: Int, 0), (2, 1), (3, 0)]
       )
     $ (M.toList *** M.toList)
     $ GreedyColoring.colorGraph
-      (M.fromList [(1, "local"), (2, "local"), (3, "local")])
+      (M.fromList [(1, "shared"), (2, "shared"), (3, "shared")])
     $ S.fromList [(1, 2), (2, 3)]
 
 allIntersect :: TestTree
@@ -35,12 +35,12 @@ allIntersect =
   testCase "allIntersect"
     $ assertEqual
       "Color a graph where all values intersect"
-      ( [(0, "local"), (1, "local"), (2, "local")] :: [(Int, String)],
+      ( [(0, "shared"), (1, "shared"), (2, "shared")] :: [(Int, String)],
         [(1 :: Int, 2), (2, 1), (3, 0)]
       )
     $ (M.toList *** M.toList)
     $ GreedyColoring.colorGraph
-      (M.fromList [(1, "local"), (2, "local"), (3, "local")])
+      (M.fromList [(1, "shared"), (2, "shared"), (3, "shared")])
     $ S.fromList [(1, 2), (2, 3), (1, 3)]
 
 emptyGraph :: TestTree
@@ -56,12 +56,12 @@ emptyGraph =
 noIntersections :: TestTree
 noIntersections =
   GreedyColoring.colorGraph
-    (M.fromList [(1, "local"), (2, "local"), (3, "local")])
+    (M.fromList [(1, "shared"), (2, "shared"), (3, "shared")])
     (S.fromList [])
     & M.toList *** M.toList
     & assertEqual
       "Color nodes with no intersections"
-      ( [(0, "local")] :: [(Int, String)],
+      ( [(0, "shared")] :: [(Int, String)],
         [(1, 0), (2, 0), (3, 0)] :: [(Int, Int)]
       )
     & testCase "noIntersections"

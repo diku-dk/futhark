@@ -34,15 +34,15 @@ def gauss_jordan [m] [n] (A:[m][n]f32) =
                         else let f = f32.neg A[j,i]
                              in map2 (f32.fma f) irow A[j]) (iota m)
 
-def hStack [m][n][l] (A:[m][n]f32) (B:[m][l]f32) = map2 (concat_to (n+l)) A B
-def vStack [m][n][l] (A:[m][n]f32) (B:[l][n]f32) = concat_to (m+l) A B
+def hStack [m][n][l] (A:[m][n]f32) (B:[m][l]f32) = map2 concat A B
+def vStack [m][n][l] (A:[m][n]f32) (B:[l][n]f32) = concat A B
 
 def solveAB [m][n] (A:[m][m]f32) (B:[m][n]f32) : [m][n]f32 =
     let AB = hStack A B |> gauss_jordan
     in AB[0:m, m:(m+n)] :> [m][n]f32
 
 def solveAb [m] (A:[m][m]f32) (b:[m]f32) =
-  unflatten m 1 (b :> [m*1]f32) |> solveAB A |> flatten_to m
+  unflatten (b :> [m*1]f32) |> solveAB A |> flatten
 
 def main u_bs (points':[]v3) (forces:[](v3,v3)) =
     let C (x,y,z) =

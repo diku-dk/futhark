@@ -4,6 +4,9 @@
 # Configuration is mostly read from cabal.project.
 
 PREFIX?=$(HOME)/.local
+INSTALLBIN?=$(PREFIX)/bin/futhark
+
+UNAME:=$(shell uname)
 
 # Disable all implicit rules.
 .SUFFIXES:
@@ -23,7 +26,8 @@ build:
 	cabal build
 
 install: build
-	install -D "$$(cabal -v0 list-bin exe:futhark)" $(PREFIX)/bin/futhark
+	install -d $(shell dirname $(INSTALLBIN))
+	install "$$(cabal -v0 list-bin exe:futhark)" $(INSTALLBIN)
 
 docs:
 	cabal haddock \
@@ -39,6 +43,9 @@ check:
 
 check-commit:
 	tools/style-check.sh $$(git diff-index --cached --ignore-submodules=all --name-status HEAD | awk '$$1 != "D" { print $$2 }')
+
+unittest:
+	cabal run unit
 
 clean:
 	cabal clean

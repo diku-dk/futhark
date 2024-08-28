@@ -26,7 +26,7 @@ import Futhark.Pass
 import Futhark.Transform.FirstOrderTransform (FirstOrderRep, transformConsts, transformFunDef)
 
 -- | The first-order transformation pass.
-firstOrderTransform :: FirstOrderRep rep => Pass SOACS rep
+firstOrderTransform :: (FirstOrderRep rep) => Pass SOACS rep
 firstOrderTransform =
   Pass
     "first order transform"

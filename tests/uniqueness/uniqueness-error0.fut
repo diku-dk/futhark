@@ -1,6 +1,6 @@
 -- Type ascription should not hide aliases.
 -- ==
--- error: "b".*consumed
+-- error: "a".*consumed
 
 def main(): i64 =
   let a = iota(10)

@@ -17,7 +17,7 @@ type index = {x: i64, y: i64, z: i64}
 def indexIsInside (nelx :i64, nely :i64, nelz :i64) (idx :index) :bool =
   (idx.x >= 0 && idx.y >= 0 && idx.z >= 0 && idx.x < nelx && idx.y < nely && idx.z < nelz)
 
-def getLocalU [nx][ny][nz] (u :[nx][ny][nz][3]f64) (nodeIndex :index) :*[81]f64 =
+def getLocalU [nx][ny][nz] (u :[nx][ny][nz][3]f64) (nodeIndex :index) :*[27*3]f64 =
   let (nodeOffsetsX,nodeOffsetsY,nodeOffsetsZ) = uoffsets
   let ni = nodeIndex
   in (map3 (\i j k ->
@@ -25,12 +25,12 @@ def getLocalU [nx][ny][nz] (u :[nx][ny][nz][3]f64) (nodeIndex :index) :*[81]f64 
       #[unsafe] (u[ni.x+i,ni.y+j,ni.z+k])
     else
       [0,0,0]) nodeOffsetsX nodeOffsetsY nodeOffsetsZ)
-    |> flatten_to 81
+    |> flatten
 
 
 -- SOR SWEEP FILE
 def omega         :f64 = 0.6
-def sorNodeAssembled (mat :[3][81]f64) (uStencil :*[81]f64) (f :[3]f64) :*[3]f64 =
+def sorNodeAssembled (mat :[3][27*3]f64) (uStencil :*[27*3]f64) (f :[3]f64) :*[3]f64 =
   -- extract value of own node, and zero
   let ux_old = copy uStencil[39]
   let uy_old = copy uStencil[40]
@@ -53,7 +53,7 @@ def sorNodeAssembled (mat :[3][81]f64) (uStencil :*[81]f64) (f :[3]f64) :*[3]f64
   let unew = [ux_new, uy_new, uz_new]
   in map2 (\un uo -> omega*un + (1-omega)*uo) unew uold
 
-entry sorSweepAssembled [nx][ny][nz] (mat :[nx][ny][nz][3][81]f64) (f :[nx][ny][nz][3]f64) (u :[nx][ny][nz][3]f64) =
+entry sorSweepAssembled [nx][ny][nz] (mat :[nx][ny][nz][3][27*3]f64) (f :[nx][ny][nz][3]f64) (u :[nx][ny][nz][3]f64) =
   tabulate_3d nx ny nz (\i j k ->
     let uloc = getLocalU u {x=i,y=j,z=k}
     in #[unsafe] sorNodeAssembled mat[i,j,k] uloc f[i,j,k])

@@ -39,13 +39,13 @@ import Futhark.IR.RetType
 import Futhark.IR.Syntax
 
 -- | The type of a subexpression.
-subExpType :: HasScope t m => SubExp -> m Type
+subExpType :: (HasScope t m) => SubExp -> m Type
 subExpType (Constant val) = pure $ Prim $ primValueType val
 subExpType (Var name) = lookupType name
 
 -- | Type type of a 'SubExpRes' - not that this might refer to names
 -- bound in the body containing the result.
-subExpResType :: HasScope t m => SubExpRes -> m Type
+subExpResType :: (HasScope t m) => SubExpRes -> m Type
 subExpResType = subExpType . resSubExp
 
 -- | @mapType f arrts@ wraps each element in the return type of @f@ in
@@ -58,11 +58,15 @@ mapType outersize f =
   ]
 
 -- | The type of a primitive operation.
-basicOpType :: HasScope rep m => BasicOp -> m [Type]
+basicOpType :: (HasScope rep m) => BasicOp -> m [Type]
 basicOpType (SubExp se) =
   pure <$> subExpType se
 basicOpType (Opaque _ se) =
   pure <$> subExpType se
+basicOpType (ArrayVal vs t) =
+  pure [arrayOf (Prim t) (Shape [n]) NoUniqueness]
+  where
+    n = intConst Int64 $ toInteger $ length vs
 basicOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
   where
@@ -109,29 +113,25 @@ basicOpType (Rearrange perm e) =
   result <$> lookupType e
   where
     result t = [rearrangeType perm t]
-basicOpType (Rotate _ e) =
-  pure <$> lookupType e
 basicOpType (Concat i (x :| _) ressize) =
   result <$> lookupType x
   where
     result xt = [setDimSize i xt ressize]
-basicOpType (Copy v) =
-  pure <$> lookupType v
 basicOpType (Manifest _ v) =
   pure <$> lookupType v
 basicOpType Assert {} =
   pure [Prim Unit]
-basicOpType (UpdateAcc v _ _) =
+basicOpType (UpdateAcc _ v _ _) =
   pure <$> lookupType v
 
 -- | The type of an expression.
 expExtType ::
-  (HasScope rep m, TypedOp (Op rep)) =>
+  (HasScope rep m, TypedOp (OpC rep)) =>
   Exp rep ->
   m [ExtType]
-expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf) rt
+expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf . fst) rt
 expExtType (Match _ _ _ rt) = pure $ map extTypeOf $ matchReturns rt
-expExtType (DoLoop merge _ _) =
+expExtType (Loop merge _ _) =
   pure $ loopExtType $ map fst merge
 expExtType (BasicOp op) = staticShapes <$> basicOpType op
 expExtType (WithAcc inputs lam) =
@@ -145,7 +145,7 @@ expExtType (WithAcc inputs lam) =
 expExtType (Op op) = opType op
 
 -- | Given the parameters of a loop, produce the return type.
-loopExtType :: Typed dec => [Param dec] -> [ExtType]
+loopExtType :: (Typed dec) => [Param dec] -> [ExtType]
 loopExtType params =
   existentialiseExtTypes inaccessible $ staticShapes $ map typeOf params
   where
@@ -154,7 +154,7 @@ loopExtType params =
 -- | Any operation must define an instance of this class, which
 -- describes the type of the operation (at the value level).
 class TypedOp op where
-  opType :: HasScope t m => op -> m [ExtType]
+  opType :: (HasScope rep m) => op rep -> m [ExtType]
 
-instance TypedOp (NoOp rep) where
+instance TypedOp NoOp where
   opType NoOp = pure []

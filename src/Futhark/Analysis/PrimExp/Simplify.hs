@@ -9,7 +9,7 @@ import Futhark.Optimise.Simplify.Engine as Engine
 -- refers to a name that is a 'Constant', the node turns into a
 -- 'ValueExp'.
 simplifyPrimExp ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   PrimExp VName ->
   SimpleM rep (PrimExp VName)
 simplifyPrimExp = simplifyAnyPrimExp onLeaf
@@ -22,7 +22,7 @@ simplifyPrimExp = simplifyAnyPrimExp onLeaf
 
 -- | Like 'simplifyPrimExp', but where leaves may be 'Ext's.
 simplifyExtPrimExp ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   PrimExp (Ext VName) ->
   SimpleM rep (PrimExp (Ext VName))
 simplifyExtPrimExp = simplifyAnyPrimExp onLeaf
@@ -35,7 +35,7 @@ simplifyExtPrimExp = simplifyAnyPrimExp onLeaf
     onLeaf (Ext i) pt = pure $ LeafExp (Ext i) pt
 
 simplifyAnyPrimExp ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   (a -> PrimType -> SimpleM rep (PrimExp a)) ->
   PrimExp a ->
   SimpleM rep (PrimExp a)

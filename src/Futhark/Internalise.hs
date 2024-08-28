@@ -1,5 +1,3 @@
-{-# LANGUAGE Strict #-}
-
 -- |
 --
 -- This module implements a transformation from source to core
@@ -20,6 +18,15 @@
 --
 -- * The core IR has no modules.  These are removed in
 --   "Futhark.Internalise.Defunctorise".
+--
+-- * The core IR has no type abbreviations.  These are removed in
+--   "Futhark.Internalise.ApplyTypeAbbrs".
+--
+-- * The core IR has little syntactic niceties. A lot of syntactic
+--   sugar is removed in "Futhark.Internalise.FullNormalise".
+--
+-- * Lambda lifting is performed by "Futhark.Internalise.LiftLambdas",
+-- * mostly to make the job of later passes simpler.
 --
 -- * The core IR is monomorphic.  Polymorphic functions are monomorphised in
 --   "Futhark.Internalise.Monomorphise"
@@ -44,6 +51,7 @@ module Futhark.Internalise (internaliseProg) where
 import Data.Text qualified as T
 import Futhark.Compiler.Config
 import Futhark.IR.SOACS as I hiding (stmPat)
+import Futhark.Internalise.ApplyTypeAbbrs as ApplyTypeAbbrs
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.Entry (visibleTypes)
@@ -52,6 +60,7 @@ import Futhark.Internalise.FullNormalise qualified as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.Monomorphise as Monomorphise
+import Futhark.Internalise.ReplaceRecords as ReplaceRecords
 import Futhark.Util.Log
 import Language.Futhark.Semantic (Imports)
 
@@ -64,17 +73,19 @@ internaliseProg ::
   m (I.Prog SOACS)
 internaliseProg config prog = do
   maybeLog "Defunctorising"
-  prog_decs <- Defunctorise.transformProg prog
+  prog_decs0 <- ApplyTypeAbbrs.transformProg =<< Defunctorise.transformProg prog
   maybeLog "Full Normalising"
-  prog_decs' <- FullNormalise.transformProg prog_decs
-  maybeLog "Monomorphising"
-  prog_decs'' <- Monomorphise.transformProg prog_decs'
+  prog_decs1 <- FullNormalise.transformProg prog_decs0
   maybeLog "Lifting lambdas"
-  prog_decs''' <- LiftLambdas.transformProg prog_decs''
+  prog_decs2 <- LiftLambdas.transformProg prog_decs1
+  maybeLog "Monomorphising"
+  prog_decs3 <- Monomorphise.transformProg prog_decs2
+  maybeLog "Replacing records"
+  prog_decs4 <- ReplaceRecords.transformProg prog_decs3
   maybeLog "Defunctionalising"
-  prog_decs'''' <- Defunctionalise.transformProg prog_decs'''
+  prog_decs5 <- Defunctionalise.transformProg prog_decs4
   maybeLog "Converting to core IR"
-  Exps.transformProg (futharkSafe config) (visibleTypes prog) prog_decs''''
+  Exps.transformProg (futharkSafe config) (visibleTypes prog) prog_decs5
   where
     verbose = fst (futharkVerbose config) > NotVerbose
     maybeLog s

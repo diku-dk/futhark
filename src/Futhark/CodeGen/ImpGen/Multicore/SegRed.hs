@@ -32,7 +32,7 @@ compileSegRed pat space reds kbody nsubtasks =
         let map_arrs = drop (segBinOpResults reds) $ patElems pat
         zipWithM_ (compileThreadResult space) map_arrs map_res
 
-      red_cont $ segBinOpChunks reds $ zip (map kernelResultSubExp red_res) $ repeat []
+      red_cont $ segBinOpChunks reds $ map ((,[]) . kernelResultSubExp) red_res
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
@@ -140,7 +140,7 @@ genAccumulators slugs =
         case paramType p of
           Prim pt
             | shape == mempty ->
-                tvVar <$> dPrim "local_acc" pt
+                dPrimS "local_acc" pt
             | otherwise ->
                 sAllocArray "local_acc" pt shape DefaultSpace
           _ ->
@@ -360,7 +360,7 @@ reductionStage2 pat space nsubtasks slugs = do
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
   sFor "i" nsubtasks $ \i' -> do
-    mkTV (segFlat space) int64 <-- i'
+    mkTV (segFlat space) <-- i'
     sComment "Apply main thread reduction" $
       forM_ (zip slugs per_red_pes) $ \(slug, red_res) ->
         sLoopNest (slugShape slug) $ \vec_is -> do
@@ -422,7 +422,7 @@ compileSegRedBody pat space reds kbody = do
         sFor "i" inner_bound $ \i -> do
           zipWithM_
             (<--)
-            (map (`mkTV` int64) $ init is)
+            (map mkTV $ init is)
             (unflattenIndex (init ns_64) (sExt64 n_segments))
           dPrimV_ (last is) i
           kbody $ \red_res' -> do

@@ -19,7 +19,7 @@ module Language.Futhark.Syntax
     IntType (..),
     FloatType (..),
     PrimType (..),
-    Size (..),
+    Size,
     Shape (..),
     shapeRank,
     stripDims,
@@ -31,10 +31,11 @@ module Language.Futhark.Syntax
     PName (..),
     ScalarTypeBase (..),
     RetTypeBase (..),
-    PatType,
     StructType,
+    ParamType,
+    ResType,
     StructRetType,
-    PatRetType,
+    ResRetType,
     ValueType,
     Diet (..),
 
@@ -65,9 +66,9 @@ module Language.Futhark.Syntax
     -- * Module language
     ImportName (..),
     SpecBase (..),
-    SigExpBase (..),
+    ModTypeExpBase (..),
     TypeRefBase (..),
-    SigBindBase (..),
+    ModTypeBindBase (..),
     ModExpBase (..),
     ModBindBase (..),
     ModParamBase (..),
@@ -88,13 +89,9 @@ module Language.Futhark.Syntax
     -- * Miscellaneous
     NoInfo (..),
     Info (..),
-    Alias (..),
-    Aliasing,
     QualName (..),
     mkApply,
     mkApplyUT,
-    sizeVar,
-    sizeInteger,
     sizeFromName,
     sizeFromInteger,
   )
@@ -110,7 +107,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Monoid hiding (Sum)
 import Data.Ord
-import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Traversable
 import Futhark.Util.Loc
@@ -221,38 +217,16 @@ data AttrInfo vn
   | AttrComp Name [AttrInfo vn] SrcLoc
   deriving (Eq, Ord, Show)
 
--- | The elaborated size of a dimension.
-data Size
-  = -- | The size of the dimension is this expression
-    -- all non-trivial expression should have variable in scope.
-    -- In a return type, existential name don't appear in expression.
-    SizeExpr (ExpBase Info VName)
-  | -- | No known size.  If @Nothing@, then this is a name distinct
-    -- from any other.  The type checker should _never_ produce these
-    -- - they are a (hopefully temporary) thing introduced by
-    -- defunctorisation and monomorphisation.
-    AnySize (Maybe VName)
-  deriving (Show, Eq, Ord)
+-- | The elaborated size of a dimension is just an expression.
+type Size = ExpBase Info VName
 
-instance Located Size where
-  locOf (SizeExpr e) = locOf e
-  locOf AnySize {} = mempty
-
--- | Create a 'Var' expression of type @i64@.
-sizeVar :: QualName VName -> SrcLoc -> ExpBase Info VName
-sizeVar name = Var name (Info $ Scalar $ Prim $ Signed Int64)
-
--- | Create an 'IntLit' expression of type @i64@.
-sizeInteger :: Integer -> SrcLoc -> ExpBase Info VName
-sizeInteger x = IntLit x (Info <$> Scalar $ Prim $ Signed Int64)
-
--- | Create a 'Size' with 'sizeVar'.
+-- | Create a 'Size' from a name.
 sizeFromName :: QualName VName -> SrcLoc -> Size
-sizeFromName name loc = SizeExpr $ sizeVar name loc
+sizeFromName name = Var name (Info $ Scalar $ Prim $ Signed Int64)
 
--- | Create a 'Size' with 'sizeInt'.
+-- | Create a 'Size' from a constant integer.
 sizeFromInteger :: Integer -> SrcLoc -> Size
-sizeFromInteger x loc = SizeExpr $ sizeInteger x loc
+sizeFromInteger x = IntLit x (Info <$> Scalar $ Prim $ Signed Int64)
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
@@ -309,7 +283,13 @@ instance Bitraversable RetTypeBase where
   bitraverse f g (RetType dims t) = RetType dims <$> bitraverse f g t
 
 instance Functor (RetTypeBase dim) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (RetTypeBase dim) where
+  foldMap = foldMapDefault
+
+instance Traversable (RetTypeBase dim) where
+  traverse = bitraverse pure
 
 instance Bifunctor RetTypeBase where
   bimap = bimapDefault
@@ -320,27 +300,33 @@ instance Bifoldable RetTypeBase where
 -- | Types that can be elements of arrays.  This representation does
 -- allow arrays of records of functions, which is nonsensical, but it
 -- convolutes the code too much if we try to statically rule it out.
-data ScalarTypeBase dim as
+data ScalarTypeBase dim u
   = Prim PrimType
-  | TypeVar as Uniqueness (QualName VName) [TypeArg dim]
-  | Record (M.Map Name (TypeBase dim as))
-  | Sum (M.Map Name [TypeBase dim as])
+  | TypeVar u (QualName VName) [TypeArg dim]
+  | Record (M.Map Name (TypeBase dim u))
+  | Sum (M.Map Name [TypeBase dim u])
   | -- | The aliasing corresponds to the lexical
     -- closure of the function.
-    Arrow as PName Diet (TypeBase dim ()) (RetTypeBase dim as)
+    Arrow u PName Diet (TypeBase dim NoUniqueness) (RetTypeBase dim Uniqueness)
   deriving (Eq, Ord, Show)
 
 instance Bitraversable ScalarTypeBase where
   bitraverse _ _ (Prim t) = pure $ Prim t
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
-  bitraverse f g (TypeVar als u t args) =
-    TypeVar <$> g als <*> pure u <*> pure t <*> traverse (traverse f) args
-  bitraverse f g (Arrow als v d t1 t2) =
-    Arrow <$> g als <*> pure v <*> pure d <*> bitraverse f pure t1 <*> bitraverse f g t2
+  bitraverse f g (TypeVar als t args) =
+    TypeVar <$> g als <*> pure t <*> traverse (traverse f) args
+  bitraverse f g (Arrow u v d t1 t2) =
+    Arrow <$> g u <*> pure v <*> pure d <*> bitraverse f pure t1 <*> bitraverse f pure t2
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
 
 instance Functor (ScalarTypeBase dim) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (ScalarTypeBase dim) where
+  foldMap = foldMapDefault
+
+instance Traversable (ScalarTypeBase dim) where
+  traverse = bitraverse pure
 
 instance Bifunctor ScalarTypeBase where
   bimap = bimapDefault
@@ -353,18 +339,24 @@ instance Bifoldable ScalarTypeBase where
 -- function parameter names are ignored.  This representation permits
 -- some malformed types (arrays of functions), but importantly rules
 -- out arrays-of-arrays.
-data TypeBase dim as
-  = Scalar (ScalarTypeBase dim as)
-  | Array as Uniqueness (Shape dim) (ScalarTypeBase dim ())
+data TypeBase dim u
+  = Scalar (ScalarTypeBase dim u)
+  | Array u (Shape dim) (ScalarTypeBase dim NoUniqueness)
   deriving (Eq, Ord, Show)
 
 instance Bitraversable TypeBase where
   bitraverse f g (Scalar t) = Scalar <$> bitraverse f g t
-  bitraverse f g (Array a u shape t) =
-    Array <$> g a <*> pure u <*> traverse f shape <*> bitraverse f pure t
+  bitraverse f g (Array als shape t) =
+    Array <$> g als <*> traverse f shape <*> bitraverse f pure t
 
 instance Functor (TypeBase dim) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (TypeBase dim) where
+  foldMap = foldMapDefault
+
+instance Traversable (TypeBase dim) where
+  traverse = bitraverse pure
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault
@@ -375,7 +367,7 @@ instance Bifoldable TypeBase where
 -- | An argument passed to a type constructor.
 data TypeArg dim
   = TypeArgDim dim
-  | TypeArgType (TypeBase dim ())
+  | TypeArgType (TypeBase dim NoUniqueness)
   deriving (Eq, Ord, Show)
 
 instance Traversable TypeArg where
@@ -388,88 +380,132 @@ instance Functor TypeArg where
 instance Foldable TypeArg where
   foldMap = foldMapDefault
 
--- | A variable that is aliased.  Can be still in-scope, or have gone
--- out of scope and be free.  In the latter case, it behaves more like
--- an equivalence class.  See uniqueness-error18.fut for an example of
--- why this is necessary.
-data Alias
-  = AliasBound {aliasVar :: VName}
-  | AliasFree {aliasVar :: VName}
-  deriving (Eq, Ord, Show)
-
--- | Aliasing for a type, which is a set of the variables that are
--- aliased.
-type Aliasing = S.Set Alias
-
--- | A type with aliasing information and shape annotations, used for
--- describing the type patterns and expressions.
-type PatType = TypeBase Size Aliasing
-
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
-type StructType = TypeBase Size ()
+type StructType = TypeBase Size NoUniqueness
+
+-- | A type with consumption information, used for function parameters
+-- (but not in function types).
+type ParamType = TypeBase Size Diet
+
+-- | A type with uniqueness information, used for function return types
+type ResType = TypeBase Size Uniqueness
 
 -- | A value type contains full, manifest size information.
-type ValueType = TypeBase Int64 ()
+type ValueType = TypeBase Int64 NoUniqueness
 
--- | The return type version of 'StructType'.
-type StructRetType = RetTypeBase Size ()
+-- | The return type version of a 'ResType'.
+type StructRetType = RetTypeBase Size NoUniqueness
 
--- | The return type version of 'PatType'.
-type PatRetType = RetTypeBase Size Aliasing
+-- | The return type version of a 'StructType'.
+type ResRetType = RetTypeBase Size Uniqueness
 
 -- | A dimension declaration expression for use in a 'TypeExp'.
 -- Syntactically includes the brackets.
-data SizeExp f vn
-  = -- | The size of the dimension is this expression, all of which
-    -- free variables must be in scope.
-    SizeExp (ExpBase f vn) SrcLoc
+data SizeExp d
+  = -- | The size of the dimension is this expression (or whatever),
+    -- all of which free variables must be in scope.
+    SizeExp d SrcLoc
   | -- | No dimension declaration.
     SizeExpAny SrcLoc
+  deriving (Eq, Ord, Show)
 
-instance Located (SizeExp f vn) where
+instance Functor SizeExp where
+  fmap = fmapDefault
+
+instance Foldable SizeExp where
+  foldMap = foldMapDefault
+
+instance Traversable SizeExp where
+  traverse _ (SizeExpAny loc) = pure (SizeExpAny loc)
+  traverse f (SizeExp d loc) = SizeExp <$> f d <*> pure loc
+
+instance Located (SizeExp d) where
   locOf (SizeExp _ loc) = locOf loc
   locOf (SizeExpAny loc) = locOf loc
 
-deriving instance Show (SizeExp Info VName)
+-- | A type argument expression passed to a type constructor.
+data TypeArgExp d vn
+  = TypeArgExpSize (SizeExp d)
+  | TypeArgExpType (TypeExp d vn)
+  deriving (Eq, Ord, Show)
 
-deriving instance Show vn => Show (SizeExp NoInfo vn)
+instance Functor (TypeArgExp d) where
+  fmap = fmapDefault
 
-deriving instance Eq (SizeExp NoInfo VName)
+instance Foldable (TypeArgExp d) where
+  foldMap = foldMapDefault
 
-deriving instance Eq (SizeExp Info VName)
+instance Traversable (TypeArgExp d) where
+  traverse = bitraverse pure
 
-deriving instance Ord (SizeExp NoInfo VName)
+instance Bifunctor TypeArgExp where
+  bimap = bimapDefault
 
-deriving instance Ord (SizeExp Info VName)
+instance Bifoldable TypeArgExp where
+  bifoldMap = bifoldMapDefault
+
+instance Bitraversable TypeArgExp where
+  bitraverse f _ (TypeArgExpSize d) = TypeArgExpSize <$> traverse f d
+  bitraverse f g (TypeArgExpType te) = TypeArgExpType <$> bitraverse f g te
+
+instance Located (TypeArgExp f vn) where
+  locOf (TypeArgExpSize e) = locOf e
+  locOf (TypeArgExpType t) = locOf t
 
 -- | An unstructured syntactic type with type variables and possibly
 -- shape declarations - this is what the user types in the source
 -- program.  These are used to construct 'TypeBase's in the type
 -- checker.
-data TypeExp f vn
+data TypeExp d vn
   = TEVar (QualName vn) SrcLoc
-  | TEParens (TypeExp f vn) SrcLoc
-  | TETuple [TypeExp f vn] SrcLoc
-  | TERecord [(Name, TypeExp f vn)] SrcLoc
-  | TEArray (SizeExp f vn) (TypeExp f vn) SrcLoc
-  | TEUnique (TypeExp f vn) SrcLoc
-  | TEApply (TypeExp f vn) (TypeArgExp f vn) SrcLoc
-  | TEArrow (Maybe vn) (TypeExp f vn) (TypeExp f vn) SrcLoc
-  | TESum [(Name, [TypeExp f vn])] SrcLoc
-  | TEDim [vn] (TypeExp f vn) SrcLoc
+  | TEParens (TypeExp d vn) SrcLoc
+  | TETuple [TypeExp d vn] SrcLoc
+  | TERecord [(Name, TypeExp d vn)] SrcLoc
+  | TEArray (SizeExp d) (TypeExp d vn) SrcLoc
+  | TEUnique (TypeExp d vn) SrcLoc
+  | TEApply (TypeExp d vn) (TypeArgExp d vn) SrcLoc
+  | TEArrow (Maybe vn) (TypeExp d vn) (TypeExp d vn) SrcLoc
+  | TESum [(Name, [TypeExp d vn])] SrcLoc
+  | TEDim [vn] (TypeExp d vn) SrcLoc
+  deriving (Eq, Ord, Show)
 
-deriving instance Show (TypeExp Info VName)
+instance Bitraversable TypeExp where
+  bitraverse _ g (TEVar v loc) =
+    TEVar <$> traverse g v <*> pure loc
+  bitraverse f g (TEParens te loc) =
+    TEParens <$> bitraverse f g te <*> pure loc
+  bitraverse f g (TETuple tes loc) =
+    TETuple <$> traverse (bitraverse f g) tes <*> pure loc
+  bitraverse f g (TERecord fs loc) =
+    TERecord <$> traverse (traverse (bitraverse f g)) fs <*> pure loc
+  bitraverse f g (TESum cs loc) =
+    TESum <$> traverse (traverse (traverse (bitraverse f g))) cs <*> pure loc
+  bitraverse f g (TEArray d te loc) =
+    TEArray <$> traverse f d <*> bitraverse f g te <*> pure loc
+  bitraverse f g (TEUnique te loc) =
+    TEUnique <$> bitraverse f g te <*> pure loc
+  bitraverse f g (TEApply te arg loc) =
+    TEApply <$> bitraverse f g te <*> bitraverse f g arg <*> pure loc
+  bitraverse f g (TEArrow pn te1 te2 loc) =
+    TEArrow <$> traverse g pn <*> bitraverse f g te1 <*> bitraverse f g te2 <*> pure loc
+  bitraverse f g (TEDim dims te loc) =
+    TEDim <$> traverse g dims <*> bitraverse f g te <*> pure loc
 
-deriving instance Show vn => Show (TypeExp NoInfo vn)
+instance Functor (TypeExp d) where
+  fmap = fmapDefault
 
-deriving instance Eq (TypeExp NoInfo VName)
+instance Foldable (TypeExp dim) where
+  foldMap = foldMapDefault
 
-deriving instance Eq (TypeExp Info VName)
+instance Traversable (TypeExp dim) where
+  traverse = bitraverse pure
 
-deriving instance Ord (TypeExp NoInfo VName)
+instance Bifunctor TypeExp where
+  bimap = bimapDefault
 
-deriving instance Ord (TypeExp Info VName)
+instance Bifoldable TypeExp where
+  bifoldMap = bifoldMapDefault
 
 instance Located (TypeExp f vn) where
   locOf (TEArray _ _ loc) = locOf loc
@@ -483,27 +519,6 @@ instance Located (TypeExp f vn) where
   locOf (TESum _ loc) = locOf loc
   locOf (TEDim _ _ loc) = locOf loc
 
--- | A type argument expression passed to a type constructor.
-data TypeArgExp f vn
-  = TypeArgExpSize (SizeExp f vn)
-  | TypeArgExpType (TypeExp f vn)
-
-deriving instance Show (TypeArgExp Info VName)
-
-deriving instance Show vn => Show (TypeArgExp NoInfo vn)
-
-deriving instance Eq (TypeArgExp NoInfo VName)
-
-deriving instance Eq (TypeArgExp Info VName)
-
-deriving instance Ord (TypeArgExp NoInfo VName)
-
-deriving instance Ord (TypeArgExp Info VName)
-
-instance Located (TypeArgExp f vn) where
-  locOf (TypeArgExpSize e) = locOf e
-  locOf (TypeArgExpType t) = locOf t
-
 -- | Information about which parts of a parameter are consumed.  This
 -- can be considered kind of an effect on the function.
 data Diet
@@ -513,25 +528,31 @@ data Diet
     Consume
   deriving (Eq, Ord, Show)
 
+instance Semigroup Diet where
+  (<>) = max
+
+instance Monoid Diet where
+  mempty = Observe
+
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
-data IdentBase f vn = Ident
+data IdentBase f vn t = Ident
   { identName :: vn,
-    identType :: f PatType,
+    identType :: f t,
     identSrcLoc :: SrcLoc
   }
 
-deriving instance Show (IdentBase Info VName)
+deriving instance (Show (Info t)) => Show (IdentBase Info VName t)
 
-deriving instance Show vn => Show (IdentBase NoInfo vn)
+deriving instance (Show (Info t), Show vn) => Show (IdentBase NoInfo vn t)
 
-instance Eq vn => Eq (IdentBase ty vn) where
+instance (Eq vn) => Eq (IdentBase ty vn t) where
   x == y = identName x == identName y
 
-instance Ord vn => Ord (IdentBase ty vn) where
+instance (Ord vn) => Ord (IdentBase ty vn t) where
   compare = comparing identName
 
-instance Located (IdentBase ty vn) where
+instance Located (IdentBase ty vn t) where
   locOf = locOf . identSrcLoc
 
 -- | Default binary operators.
@@ -586,7 +607,7 @@ data Inclusiveness a
   | UpToExclusive a
   deriving (Eq, Ord, Show)
 
-instance Located a => Located (Inclusiveness a) where
+instance (Located a) => Located (Inclusiveness a) where
   locOf (DownToExclusive x) = locOf x
   locOf (ToInclusive x) = locOf x
   locOf (UpToExclusive x) = locOf x
@@ -612,7 +633,7 @@ data DimIndexBase f vn
 
 deriving instance Show (DimIndexBase Info VName)
 
-deriving instance Show vn => Show (DimIndexBase NoInfo vn)
+deriving instance (Show vn) => Show (DimIndexBase NoInfo vn)
 
 deriving instance Eq (DimIndexBase NoInfo VName)
 
@@ -632,16 +653,10 @@ data QualName vn = QualName
   }
   deriving (Show)
 
-instance Eq (QualName Name) where
-  QualName qs1 v1 == QualName qs2 v2 = qs1 == qs2 && v1 == v2
-
-instance Eq (QualName VName) where
+instance (Eq v) => Eq (QualName v) where
   QualName _ v1 == QualName _ v2 = v1 == v2
 
-instance Ord (QualName Name) where
-  QualName qs1 v1 `compare` QualName qs2 v2 = compare (qs1, v1) (qs2, v2)
-
-instance Ord (QualName VName) where
+instance (Ord v) => Ord (QualName v) where
   QualName _ v1 `compare` QualName _ v2 = compare v1 v2
 
 instance Functor QualName where
@@ -681,10 +696,8 @@ data AppExpBase f vn
     -- identical).
     Apply
       (ExpBase f vn)
-      (NE.NonEmpty (f (Diet, Maybe VName), ExpBase f vn))
+      (NE.NonEmpty (f (Maybe VName), ExpBase f vn))
       SrcLoc
-  | -- | Size coercion: @e :> t@.
-    Coerce (ExpBase f vn) (TypeExp f vn) SrcLoc
   | Range
       (ExpBase f vn)
       (Maybe (ExpBase f vn))
@@ -692,37 +705,37 @@ data AppExpBase f vn
       SrcLoc
   | LetPat
       [SizeBinder vn]
-      (PatBase f vn)
+      (PatBase f vn StructType)
       (ExpBase f vn)
       (ExpBase f vn)
       SrcLoc
   | LetFun
       vn
       ( [TypeParamBase vn],
-        [PatBase f vn],
-        Maybe (TypeExp f vn),
-        f StructRetType,
+        [PatBase f vn ParamType],
+        Maybe (TypeExp (ExpBase f vn) vn),
+        f ResRetType,
         ExpBase f vn
       )
       (ExpBase f vn)
       SrcLoc
   | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-  | DoLoop
+  | Loop
       [VName] -- Size parameters.
-      (PatBase f vn) -- Merge variable pattern.
+      (PatBase f vn ParamType) -- Merge variable pattern.
       (ExpBase f vn) -- Initial values of merge variables.
       (LoopFormBase f vn) -- Do or while loop.
       (ExpBase f vn) -- Loop body.
       SrcLoc
   | BinOp
       (QualName vn, SrcLoc)
-      (f PatType)
-      (ExpBase f vn, f (StructType, Maybe VName))
-      (ExpBase f vn, f (StructType, Maybe VName))
+      (f StructType)
+      (ExpBase f vn, f (Maybe VName))
+      (ExpBase f vn, f (Maybe VName))
       SrcLoc
   | LetWith
-      (IdentBase f vn)
-      (IdentBase f vn)
+      (IdentBase f vn StructType)
+      (IdentBase f vn StructType)
       (SliceBase f vn)
       (ExpBase f vn)
       (ExpBase f vn)
@@ -733,7 +746,7 @@ data AppExpBase f vn
 
 deriving instance Show (AppExpBase Info VName)
 
-deriving instance Show vn => Show (AppExpBase NoInfo vn)
+deriving instance (Show vn) => Show (AppExpBase NoInfo vn)
 
 deriving instance Eq (AppExpBase NoInfo VName)
 
@@ -747,13 +760,12 @@ instance Located (AppExpBase f vn) where
   locOf (Range _ _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ loc) = locOf loc
   locOf (If _ _ _ loc) = locOf loc
-  locOf (Coerce _ _ loc) = locOf loc
   locOf (Apply _ _ loc) = locOf loc
   locOf (LetPat _ _ _ _ loc) = locOf loc
   locOf (LetFun _ _ _ loc) = locOf loc
   locOf (LetWith _ _ _ _ _ loc) = locOf loc
   locOf (Index _ _ loc) = locOf loc
-  locOf (DoLoop _ _ _ _ _ loc) = locOf loc
+  locOf (Loop _ _ _ _ _ loc) = locOf loc
   locOf (Match _ _ loc) = locOf loc
 
 -- | An annotation inserted by the type checker on constructs that are
@@ -761,7 +773,7 @@ instance Located (AppExpBase f vn) where
 -- annotation encodes the result type, as well as any existential
 -- sizes that are generated here.
 data AppRes = AppRes
-  { appResType :: PatType,
+  { appResType :: StructType,
     appResExt :: [VName]
   }
   deriving (Eq, Ord, Show)
@@ -776,14 +788,14 @@ data AppRes = AppRes
 data ExpBase f vn
   = Literal PrimValue SrcLoc
   | -- | A polymorphic integral literal.
-    IntLit Integer (f PatType) SrcLoc
+    IntLit Integer (f StructType) SrcLoc
   | -- | A polymorphic decimal literal.
-    FloatLit Double (f PatType) SrcLoc
+    FloatLit Double (f StructType) SrcLoc
   | -- | A string literal is just a fancy syntax for an array
     -- of bytes.
     StringLit [Word8] SrcLoc
-  | Hole (f PatType) SrcLoc
-  | Var (QualName vn) (f PatType) SrcLoc
+  | Hole (f StructType) SrcLoc
+  | Var (QualName vn) (f StructType) SrcLoc
   | -- | A parenthesized expression.
     Parens (ExpBase f vn) SrcLoc
   | QualParens (QualName vn, SrcLoc) (ExpBase f vn) SrcLoc
@@ -793,10 +805,16 @@ data ExpBase f vn
     RecordLit [FieldBase f vn] SrcLoc
   | -- | Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
     -- Second arg is the row type of the rows of the array.
-    ArrayLit [ExpBase f vn] (f PatType) SrcLoc
+    ArrayLit [ExpBase f vn] (f StructType) SrcLoc
+  | -- | Array value constants, where the elements are known to be
+    -- constant primitives. This is a fast-path variant of 'ArrayLit'
+    -- that will never be constructed by the parser, but may result
+    -- from normalisation later on. Has exactly the same semantics as
+    -- an 'ArrayLit'.
+    ArrayVal [PrimValue] PrimType SrcLoc
   | -- | An attribute applied to the following expression.
     Attr (AttrInfo vn) (ExpBase f vn) SrcLoc
-  | Project Name (ExpBase f vn) (f PatType) SrcLoc
+  | Project Name (ExpBase f vn) (f StructType) SrcLoc
   | -- | Numeric negation (ugly special case; Haskell did it first).
     Negate (ExpBase f vn) SrcLoc
   | -- | Logical and bitwise negation.
@@ -806,44 +824,46 @@ data ExpBase f vn
     -- does.
     Assert (ExpBase f vn) (ExpBase f vn) (f T.Text) SrcLoc
   | -- | An n-ary value constructor.
-    Constr Name [ExpBase f vn] (f PatType) SrcLoc
+    Constr Name [ExpBase f vn] (f StructType) SrcLoc
   | Update (ExpBase f vn) (SliceBase f vn) (ExpBase f vn) SrcLoc
-  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatType) SrcLoc
+  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f StructType) SrcLoc
   | Lambda
-      [PatBase f vn]
+      [PatBase f vn ParamType]
       (ExpBase f vn)
-      (Maybe (TypeExp f vn))
-      (f (Aliasing, StructRetType))
+      (Maybe (TypeExp (ExpBase f vn) vn))
+      (f ResRetType)
       SrcLoc
   | -- | @+@; first two types are operands, third is result.
-    OpSection (QualName vn) (f PatType) SrcLoc
+    OpSection (QualName vn) (f StructType) SrcLoc
   | -- | @2+@; first type is operand, second is result.
     OpSectionLeft
       (QualName vn)
-      (f PatType)
+      (f StructType)
       (ExpBase f vn)
-      (f (PName, StructType, Maybe VName), f (PName, StructType))
-      (f PatRetType, f [VName])
+      (f (PName, ParamType, Maybe VName), f (PName, ParamType))
+      (f ResRetType, f [VName])
       SrcLoc
   | -- | @+2@; first type is operand, second is result.
     OpSectionRight
       (QualName vn)
-      (f PatType)
+      (f StructType)
       (ExpBase f vn)
-      (f (PName, StructType), f (PName, StructType, Maybe VName))
-      (f PatRetType)
+      (f (PName, ParamType), f (PName, ParamType, Maybe VName))
+      (f ResRetType)
       SrcLoc
   | -- | Field projection as a section: @(.x.y.z)@.
-    ProjectSection [Name] (f PatType) SrcLoc
+    ProjectSection [Name] (f StructType) SrcLoc
   | -- | Array indexing as a section: @(.[i,j])@.
-    IndexSection (SliceBase f vn) (f PatType) SrcLoc
+    IndexSection (SliceBase f vn) (f StructType) SrcLoc
   | -- | Type ascription: @e : t@.
-    Ascript (ExpBase f vn) (TypeExp f vn) SrcLoc
+    Ascript (ExpBase f vn) (TypeExp (ExpBase f vn) vn) SrcLoc
+  | -- | Size coercion: @e :> t@.
+    Coerce (ExpBase f vn) (TypeExp (ExpBase f vn) vn) (f StructType) SrcLoc
   | AppExp (AppExpBase f vn) (f AppRes)
 
 deriving instance Show (ExpBase Info VName)
 
-deriving instance Show vn => Show (ExpBase NoInfo vn)
+deriving instance (Show vn) => Show (ExpBase NoInfo vn)
 
 deriving instance Eq (ExpBase NoInfo VName)
 
@@ -863,9 +883,11 @@ instance Located (ExpBase f vn) where
   locOf (RecordLit _ pos) = locOf pos
   locOf (Project _ _ _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
+  locOf (ArrayVal _ _ loc) = locOf loc
   locOf (StringLit _ loc) = locOf loc
   locOf (Var _ _ loc) = locOf loc
   locOf (Ascript _ _ loc) = locOf loc
+  locOf (Coerce _ _ _ loc) = locOf loc
   locOf (Negate _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos
   locOf (Update _ _ _ pos) = locOf pos
@@ -885,11 +907,11 @@ instance Located (ExpBase f vn) where
 -- | An entry in a record literal.
 data FieldBase f vn
   = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
-  | RecordFieldImplicit vn (f PatType) SrcLoc
+  | RecordFieldImplicit vn (f StructType) SrcLoc
 
 deriving instance Show (FieldBase Info VName)
 
-deriving instance Show vn => Show (FieldBase NoInfo vn)
+deriving instance (Show vn) => Show (FieldBase NoInfo vn)
 
 deriving instance Eq (FieldBase NoInfo VName)
 
@@ -904,11 +926,11 @@ instance Located (FieldBase f vn) where
   locOf (RecordFieldImplicit _ _ loc) = locOf loc
 
 -- | A case in a match expression.
-data CaseBase f vn = CasePat (PatBase f vn) (ExpBase f vn) SrcLoc
+data CaseBase f vn = CasePat (PatBase f vn StructType) (ExpBase f vn) SrcLoc
 
 deriving instance Show (CaseBase Info VName)
 
-deriving instance Show vn => Show (CaseBase NoInfo vn)
+deriving instance (Show vn) => Show (CaseBase NoInfo vn)
 
 deriving instance Eq (CaseBase NoInfo VName)
 
@@ -923,13 +945,13 @@ instance Located (CaseBase f vn) where
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn
-  = For (IdentBase f vn) (ExpBase f vn)
-  | ForIn (PatBase f vn) (ExpBase f vn)
+  = For (IdentBase f vn StructType) (ExpBase f vn)
+  | ForIn (PatBase f vn StructType) (ExpBase f vn)
   | While (ExpBase f vn)
 
 deriving instance Show (LoopFormBase Info VName)
 
-deriving instance Show vn => Show (LoopFormBase NoInfo vn)
+deriving instance (Show vn) => Show (LoopFormBase NoInfo vn)
 
 deriving instance Eq (LoopFormBase NoInfo VName)
 
@@ -948,30 +970,30 @@ data PatLit
 
 -- | A pattern as used most places where variables are bound (function
 -- parameters, @let@ expressions, etc).
-data PatBase f vn
-  = TuplePat [PatBase f vn] SrcLoc
-  | RecordPat [(Name, PatBase f vn)] SrcLoc
-  | PatParens (PatBase f vn) SrcLoc
-  | Id vn (f PatType) SrcLoc
-  | Wildcard (f PatType) SrcLoc -- Nothing, i.e. underscore.
-  | PatAscription (PatBase f vn) (TypeExp f vn) SrcLoc
-  | PatLit PatLit (f PatType) SrcLoc
-  | PatConstr Name (f PatType) [PatBase f vn] SrcLoc
-  | PatAttr (AttrInfo vn) (PatBase f vn) SrcLoc
+data PatBase f vn t
+  = TuplePat [PatBase f vn t] SrcLoc
+  | RecordPat [(Name, PatBase f vn t)] SrcLoc
+  | PatParens (PatBase f vn t) SrcLoc
+  | Id vn (f t) SrcLoc
+  | Wildcard (f t) SrcLoc -- Nothing, i.e. underscore.
+  | PatAscription (PatBase f vn t) (TypeExp (ExpBase f vn) vn) SrcLoc
+  | PatLit PatLit (f t) SrcLoc
+  | PatConstr Name (f t) [PatBase f vn t] SrcLoc
+  | PatAttr (AttrInfo vn) (PatBase f vn t) SrcLoc
 
-deriving instance Show (PatBase Info VName)
+deriving instance (Show (Info t)) => Show (PatBase Info VName t)
 
-deriving instance Show vn => Show (PatBase NoInfo vn)
+deriving instance (Show (NoInfo t), Show vn) => Show (PatBase NoInfo vn t)
 
-deriving instance Eq (PatBase NoInfo VName)
+deriving instance (Eq (NoInfo t)) => Eq (PatBase NoInfo VName t)
 
-deriving instance Eq (PatBase Info VName)
+deriving instance (Eq (Info t)) => Eq (PatBase Info VName t)
 
-deriving instance Ord (PatBase NoInfo VName)
+deriving instance (Ord (NoInfo t)) => Ord (PatBase NoInfo VName t)
 
-deriving instance Ord (PatBase Info VName)
+deriving instance (Ord (Info t)) => Ord (PatBase Info VName t)
 
-instance Located (PatBase f vn) where
+instance Located (PatBase f vn t) where
   locOf (TuplePat _ loc) = locOf loc
   locOf (RecordPat _ loc) = locOf loc
   locOf (PatParens _ loc) = locOf loc
@@ -981,6 +1003,23 @@ instance Located (PatBase f vn) where
   locOf (PatLit _ _ loc) = locOf loc
   locOf (PatConstr _ _ _ loc) = locOf loc
   locOf (PatAttr _ _ loc) = locOf loc
+
+instance (Traversable f) => Functor (PatBase f vn) where
+  fmap = fmapDefault
+
+instance (Traversable f) => Foldable (PatBase f vn) where
+  foldMap = foldMapDefault
+
+instance (Traversable f) => Traversable (PatBase f vn) where
+  traverse f (Id v t loc) = Id v <$> traverse f t <*> pure loc
+  traverse f (TuplePat ps loc) = TuplePat <$> traverse (traverse f) ps <*> pure loc
+  traverse f (RecordPat ps loc) = RecordPat <$> traverse (traverse $ traverse f) ps <*> pure loc
+  traverse f (PatParens p loc) = PatParens <$> traverse f p <*> pure loc
+  traverse f (Wildcard t loc) = Wildcard <$> traverse f t <*> pure loc
+  traverse f (PatAscription p te loc) = PatAscription <$> traverse f p <*> pure te <*> pure loc
+  traverse f (PatLit l t loc) = PatLit l <$> traverse f t <*> pure loc
+  traverse f (PatConstr c t ps loc) = PatConstr c <$> traverse f t <*> traverse (traverse f) ps <*> pure loc
+  traverse f (PatAttr attr p loc) = PatAttr attr <$> traverse f p <*> pure loc
 
 -- | Documentation strings, including source location.  The string may
 -- contain newline characters, but it does not contain comment prefix
@@ -992,10 +1031,13 @@ instance Located DocComment where
   locOf (DocComment _ loc) = locOf loc
 
 -- | Part of the type of an entry point.  Has an actual type, and
--- maybe also an ascribed type expression.
+-- maybe also an ascribed type expression.  Note that although size
+-- expressions in the elaborated type can contain variables, they are
+-- no longer in scope, and are considered more like equivalence
+-- classes.
 data EntryType = EntryType
   { entryType :: StructType,
-    entryAscribed :: Maybe (TypeExp Info VName)
+    entryAscribed :: Maybe (TypeExp (ExpBase Info VName) VName)
   }
   deriving (Show)
 
@@ -1025,12 +1067,12 @@ data ValBindBase f vn = ValBind
     -- may refer to abstract types that are no longer in scope.
     valBindEntryPoint :: Maybe (f EntryPoint),
     valBindName :: vn,
-    valBindRetDecl :: Maybe (TypeExp f vn),
+    valBindRetDecl :: Maybe (TypeExp (ExpBase f vn) vn),
     -- | If 'valBindParams' is null, then the 'retDims' are brought
     -- into scope at this point.
-    valBindRetType :: f StructRetType,
+    valBindRetType :: f ResRetType,
     valBindTypeParams :: [TypeParamBase vn],
-    valBindParams :: [PatBase f vn],
+    valBindParams :: [PatBase f vn ParamType],
     valBindBody :: ExpBase f vn,
     valBindDoc :: Maybe DocComment,
     valBindAttrs :: [AttrInfo vn],
@@ -1049,7 +1091,7 @@ data TypeBindBase f vn = TypeBind
   { typeAlias :: vn,
     typeLiftedness :: Liftedness,
     typeParams :: [TypeParamBase vn],
-    typeExp :: TypeExp f vn,
+    typeExp :: TypeExp (ExpBase f vn) vn,
     typeElab :: f StructRetType,
     typeDoc :: Maybe DocComment,
     typeBindLocation :: SrcLoc
@@ -1107,7 +1149,7 @@ data SpecBase f vn
   = ValSpec
       { specName :: vn,
         specTypeParams :: [TypeParamBase vn],
-        specTypeExp :: TypeExp f vn,
+        specTypeExp :: TypeExp (ExpBase f vn) vn,
         specType :: f StructType,
         specDoc :: Maybe DocComment,
         specLocation :: SrcLoc
@@ -1115,8 +1157,8 @@ data SpecBase f vn
   | TypeAbbrSpec (TypeBindBase f vn)
   | -- | Abstract type.
     TypeSpec Liftedness vn [TypeParamBase vn] (Maybe DocComment) SrcLoc
-  | ModSpec vn (SigExpBase f vn) (Maybe DocComment) SrcLoc
-  | IncludeSpec (SigExpBase f vn) SrcLoc
+  | ModSpec vn (ModTypeExpBase f vn) (Maybe DocComment) SrcLoc
+  | IncludeSpec (ModTypeExpBase f vn) SrcLoc
 
 deriving instance Show (SpecBase Info VName)
 
@@ -1130,19 +1172,24 @@ instance Located (SpecBase f vn) where
   locOf (IncludeSpec _ loc) = locOf loc
 
 -- | A module type expression.
-data SigExpBase f vn
-  = SigVar (QualName vn) (f (M.Map VName VName)) SrcLoc
-  | SigParens (SigExpBase f vn) SrcLoc
-  | SigSpecs [SpecBase f vn] SrcLoc
-  | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
-  | SigArrow (Maybe vn) (SigExpBase f vn) (SigExpBase f vn) SrcLoc
+data ModTypeExpBase f vn
+  = ModTypeVar (QualName vn) (f (M.Map VName VName)) SrcLoc
+  | ModTypeParens (ModTypeExpBase f vn) SrcLoc
+  | ModTypeSpecs [SpecBase f vn] SrcLoc
+  | ModTypeWith (ModTypeExpBase f vn) (TypeRefBase f vn) SrcLoc
+  | ModTypeArrow (Maybe vn) (ModTypeExpBase f vn) (ModTypeExpBase f vn) SrcLoc
 
-deriving instance Show (SigExpBase Info VName)
+deriving instance Show (ModTypeExpBase Info VName)
 
-deriving instance Show (SigExpBase NoInfo Name)
+deriving instance Show (ModTypeExpBase NoInfo Name)
 
 -- | A type refinement.
-data TypeRefBase f vn = TypeRef (QualName vn) [TypeParamBase vn] (TypeExp f vn) SrcLoc
+data TypeRefBase f vn
+  = TypeRef
+      (QualName vn)
+      [TypeParamBase vn]
+      (TypeExp (ExpBase f vn) vn)
+      SrcLoc
 
 deriving instance Show (TypeRefBase Info VName)
 
@@ -1151,27 +1198,27 @@ deriving instance Show (TypeRefBase NoInfo Name)
 instance Located (TypeRefBase f vn) where
   locOf (TypeRef _ _ _ loc) = locOf loc
 
-instance Located (SigExpBase f vn) where
-  locOf (SigVar _ _ loc) = locOf loc
-  locOf (SigParens _ loc) = locOf loc
-  locOf (SigSpecs _ loc) = locOf loc
-  locOf (SigWith _ _ loc) = locOf loc
-  locOf (SigArrow _ _ _ loc) = locOf loc
+instance Located (ModTypeExpBase f vn) where
+  locOf (ModTypeVar _ _ loc) = locOf loc
+  locOf (ModTypeParens _ loc) = locOf loc
+  locOf (ModTypeSpecs _ loc) = locOf loc
+  locOf (ModTypeWith _ _ loc) = locOf loc
+  locOf (ModTypeArrow _ _ _ loc) = locOf loc
 
 -- | Module type binding.
-data SigBindBase f vn = SigBind
-  { sigName :: vn,
-    sigExp :: SigExpBase f vn,
-    sigDoc :: Maybe DocComment,
-    sigLoc :: SrcLoc
+data ModTypeBindBase f vn = ModTypeBind
+  { modTypeName :: vn,
+    modTypeExp :: ModTypeExpBase f vn,
+    modTypeDoc :: Maybe DocComment,
+    modTypeLoc :: SrcLoc
   }
 
-deriving instance Show (SigBindBase Info VName)
+deriving instance Show (ModTypeBindBase Info VName)
 
-deriving instance Show (SigBindBase NoInfo Name)
+deriving instance Show (ModTypeBindBase NoInfo Name)
 
-instance Located (SigBindBase f vn) where
-  locOf = locOf . sigLoc
+instance Located (ModTypeBindBase f vn) where
+  locOf = locOf . modTypeLoc
 
 -- | Canonical reference to a Futhark code file.  Does not include the
 -- @.fut@ extension.  This is most often a path relative to the
@@ -1197,10 +1244,10 @@ data ModExpBase f vn
       (f (M.Map VName VName))
       (f (M.Map VName VName))
       SrcLoc
-  | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (M.Map VName VName)) SrcLoc
+  | ModAscript (ModExpBase f vn) (ModTypeExpBase f vn) (f (M.Map VName VName)) SrcLoc
   | ModLambda
       (ModParamBase f vn)
-      (Maybe (SigExpBase f vn, f (M.Map VName VName)))
+      (Maybe (ModTypeExpBase f vn, f (M.Map VName VName)))
       (ModExpBase f vn)
       SrcLoc
 
@@ -1221,7 +1268,7 @@ instance Located (ModExpBase f vn) where
 data ModBindBase f vn = ModBind
   { modName :: vn,
     modParams :: [ModParamBase f vn],
-    modSignature :: Maybe (SigExpBase f vn, f (M.Map VName VName)),
+    modType :: Maybe (ModTypeExpBase f vn, f (M.Map VName VName)),
     modExp :: ModExpBase f vn,
     modDoc :: Maybe DocComment,
     modLocation :: SrcLoc
@@ -1237,7 +1284,7 @@ instance Located (ModBindBase f vn) where
 -- | A module parameter.
 data ModParamBase f vn = ModParam
   { modParamName :: vn,
-    modParamType :: SigExpBase f vn,
+    modParamType :: ModTypeExpBase f vn,
     modParamAbs :: f [VName],
     modParamLocation :: SrcLoc
   }
@@ -1253,7 +1300,7 @@ instance Located (ModParamBase f vn) where
 data DecBase f vn
   = ValDec (ValBindBase f vn)
   | TypeDec (TypeBindBase f vn)
-  | SigDec (SigBindBase f vn)
+  | ModTypeDec (ModTypeBindBase f vn)
   | ModDec (ModBindBase f vn)
   | OpenDec (ModExpBase f vn) SrcLoc
   | LocalDec (DecBase f vn) SrcLoc
@@ -1266,7 +1313,7 @@ deriving instance Show (DecBase NoInfo Name)
 instance Located (DecBase f vn) where
   locOf (ValDec d) = locOf d
   locOf (TypeDec d) = locOf d
-  locOf (SigDec d) = locOf d
+  locOf (ModTypeDec d) = locOf d
   locOf (ModDec d) = locOf d
   locOf (OpenDec _ loc) = locOf loc
   locOf (LocalDec _ loc) = locOf loc
@@ -1284,7 +1331,7 @@ deriving instance Show (ProgBase Info VName)
 deriving instance Show (ProgBase NoInfo Name)
 
 -- | Construct an 'Apply' node, with type information.
-mkApply :: ExpBase Info vn -> [(Diet, Maybe VName, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
+mkApply :: ExpBase Info vn -> [(Maybe VName, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
 mkApply f args (AppRes t ext)
   | Just args' <- NE.nonEmpty $ map onArg args =
       case f of
@@ -1296,7 +1343,7 @@ mkApply f args (AppRes t ext)
           AppExp (Apply f args' (srcspan f $ snd $ NE.last args')) (Info (AppRes t ext))
   | otherwise = f
   where
-    onArg (d, v, x) = (Info (d, v), x)
+    onArg (v, x) = (Info v, x)
 
 -- | Construct an 'Apply' node, without type information.
 mkApplyUT :: ExpBase NoInfo vn -> ExpBase NoInfo vn -> ExpBase NoInfo vn

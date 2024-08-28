@@ -1,8 +1,8 @@
 -- Parallel blocked LU-decomposition.
 --
 -- ==
--- structure gpu-mem { Alloc 32 }
--- structure seq-mem { Alloc 12 }
+-- structure gpu-mem { Alloc 20 }
+-- structure seq-mem { Alloc 15 }
 
 def block_size: i64 = 32
 
@@ -32,7 +32,7 @@ def lud_diagonal [b] (a: [b][b]f32): *[b][b]f32 =
             let mat[i+1] = row
 
             in mat
-      ) (unflatten (opaque 1) b (a :> [opaque 1*b][b]f32))
+      ) (unflatten (a :> [opaque 1*b][b]f32))
   |> head
 
 def lud_perimeter_upper [m][b] (diag: [b][b]f32) (a0s: [m][b][b]f32): *[m][b][b]f32 =

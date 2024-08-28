@@ -4,7 +4,7 @@
 -- ==
 -- structure gpu {
 --   /If/True/GPUBody/If/True/Reshape 1
---   /GPUBody/DoLoop/Reshape 2
+--   /GPUBody/Loop/Reshape 2
 -- }
 
 -- These programs are artificial.

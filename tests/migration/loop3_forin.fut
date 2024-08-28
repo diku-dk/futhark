@@ -1,8 +1,8 @@
 -- Reads introduced by a for-in loop can be delayed.
 -- ==
 -- structure gpu {
---   /DoLoop/Index 0
---   /DoLoop/GPUBody 1
+--   /Loop/Index 0
+--   /Loop/GPUBody 1
 --   /GPUBody 1
 --   /Index 1
 -- }

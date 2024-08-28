@@ -43,16 +43,13 @@ instance Pretty Commutativity where
   pretty Commutative = "commutative"
   pretty Noncommutative = "noncommutative"
 
-instance Pretty NoUniqueness where
-  pretty _ = mempty
-
 instance Pretty Shape where
   pretty = mconcat . map (brackets . pretty) . shapeDims
 
 instance Pretty Rank where
   pretty (Rank r) = mconcat $ replicate r "[]"
 
-instance Pretty a => Pretty (Ext a) where
+instance (Pretty a) => Pretty (Ext a) where
   pretty (Free e) = pretty e
   pretty (Ext x) = "?" <> pretty (show x)
 
@@ -64,7 +61,7 @@ instance Pretty Space where
   pretty (Space s) = "@" <> pretty s
   pretty (ScalarSpace d t) = "@" <> mconcat (map (brackets . pretty) d) <> pretty t
 
-instance Pretty u => Pretty (TypeBase Shape u) where
+instance (Pretty u) => Pretty (TypeBase Shape u) where
   pretty (Prim t) = pretty t
   pretty (Acc acc ispace ts u) =
     pretty u
@@ -78,7 +75,7 @@ instance Pretty u => Pretty (TypeBase Shape u) where
     pretty u <> mconcat (map (brackets . pretty) ds) <> pretty et
   pretty (Mem s) = "mem" <> pretty s
 
-instance Pretty u => Pretty (TypeBase ExtShape u) where
+instance (Pretty u) => Pretty (TypeBase ExtShape u) where
   pretty (Prim t) = pretty t
   pretty (Acc acc ispace ts u) =
     pretty u
@@ -92,7 +89,7 @@ instance Pretty u => Pretty (TypeBase ExtShape u) where
     pretty u <> mconcat (map (brackets . pretty) ds) <> pretty et
   pretty (Mem s) = "mem" <> pretty s
 
-instance Pretty u => Pretty (TypeBase Rank u) where
+instance (Pretty u) => Pretty (TypeBase Rank u) where
   pretty (Prim t) = pretty t
   pretty (Acc acc ispace ts u) =
     pretty u
@@ -117,13 +114,13 @@ instance Pretty Certs where
   pretty (Certs []) = mempty
   pretty (Certs cs) = "#" <> braces (commasep (map pretty cs))
 
-instance PrettyRep rep => Pretty (Stms rep) where
+instance (PrettyRep rep) => Pretty (Stms rep) where
   pretty = stack . map pretty . stmsToList
 
 instance Pretty SubExpRes where
   pretty (SubExpRes cs se) = hsep $ certAnnots cs ++ [pretty se]
 
-instance PrettyRep rep => Pretty (Body rep) where
+instance (PrettyRep rep) => Pretty (Body rep) where
   pretty (Body _ stms res)
     | null stms = braces (commasep $ map pretty res)
     | otherwise =
@@ -155,17 +152,17 @@ stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 instance Pretty Attrs where
   pretty = hsep . attrAnnots
 
-instance Pretty t => Pretty (Pat t) where
+instance (Pretty t) => Pretty (Pat t) where
   pretty (Pat xs) = braces $ commastack $ map pretty xs
 
-instance Pretty t => Pretty (PatElem t) where
+instance (Pretty t) => Pretty (PatElem t) where
   pretty (PatElem name t) = pretty name <+> colon <+> align (pretty t)
 
-instance Pretty t => Pretty (Param t) where
+instance (Pretty t) => Pretty (Param t) where
   pretty (Param attrs name t) =
     annot (attrAnnots attrs) $ pretty name <+> colon <+> align (pretty t)
 
-instance PrettyRep rep => Pretty (Stm rep) where
+instance (PrettyRep rep) => Pretty (Stm rep) where
   pretty stm@(Let pat aux e) =
     align . hang 2 $
       "let"
@@ -181,13 +178,13 @@ instance PrettyRep rep => Pretty (Stm rep) where
             stmCertAnnots stm
           ]
 
-instance Pretty a => Pretty (Slice a) where
+instance (Pretty a) => Pretty (Slice a) where
   pretty (Slice xs) = brackets (commasep (map pretty xs))
 
-instance Pretty d => Pretty (FlatDimIndex d) where
+instance (Pretty d) => Pretty (FlatDimIndex d) where
   pretty (FlatDimIndex n s) = pretty n <+> ":" <+> pretty s
 
-instance Pretty a => Pretty (FlatSlice a) where
+instance (Pretty a) => Pretty (FlatSlice a) where
   pretty (FlatSlice offset xs) = brackets (pretty offset <> ";" <+> commasep (map pretty xs))
 
 instance Pretty BasicOp where
@@ -199,7 +196,13 @@ instance Pretty BasicOp where
       Array {} -> brackets $ commastack $ map pretty es
       _ -> brackets $ commasep $ map pretty es
       <+> colon
-      <+> "[]" <> pretty rt
+      <+> "[]"
+      <> pretty rt
+  pretty (ArrayVal vs t) =
+    brackets (commasep $ map pretty vs)
+      <+> colon
+      <+> "[]"
+      <> pretty t
   pretty (BinOp bop x y) = pretty bop <> parens (pretty x <> comma <+> pretty y)
   pretty (CmpOp op x y) = pretty op <> parens (pretty x <> comma <+> pretty y)
   pretty (ConvOp conv x) =
@@ -220,6 +223,7 @@ instance Pretty BasicOp where
   pretty (Iota e x s et) = "iota" <> et' <> apply [pretty e, pretty x, pretty s]
     where
       et' = pretty $ show $ primBitSize $ IntType et
+  pretty (Replicate (Shape []) e) = "copy" <> parens (pretty e)
   pretty (Replicate ne ve) =
     "replicate" <> apply [pretty ne, align (pretty ve)]
   pretty (Scratch t shape) =
@@ -230,48 +234,59 @@ instance Pretty BasicOp where
     "coerce" <> apply [pretty shape, pretty e]
   pretty (Rearrange perm e) =
     "rearrange" <> apply [apply (map pretty perm), pretty e]
-  pretty (Rotate es e) =
-    "rotate" <> apply [apply (map pretty es), pretty e]
   pretty (Concat i (x :| xs) w) =
     "concat" <> "@" <> pretty i <> apply (pretty w : pretty x : map pretty xs)
-  pretty (Copy e) = "copy" <> parens (pretty e)
   pretty (Manifest perm e) = "manifest" <> apply [apply (map pretty perm), pretty e]
   pretty (Assert e msg (loc, _)) =
     "assert" <> apply [pretty e, pretty msg, pretty $ show $ locStr loc]
-  pretty (UpdateAcc acc is v) =
-    "update_acc"
+  pretty (UpdateAcc safety acc is v) =
+    update_acc_str
       <> apply
         [ pretty acc,
           ppTuple' $ map pretty is,
           ppTuple' $ map pretty v
         ]
+    where
+      update_acc_str = case safety of
+        Safe -> "update_acc"
+        Unsafe -> "update_acc_unsafe"
 
-instance Pretty a => Pretty (ErrorMsg a) where
+instance (Pretty a) => Pretty (ErrorMsg a) where
   pretty (ErrorMsg parts) = braces $ align $ commasep $ map p parts
     where
       p (ErrorString s) = pretty $ show s
       p (ErrorVal t x) = pretty x <+> colon <+> pretty t
 
-maybeNest :: PrettyRep rep => Body rep -> Doc a
+maybeNest :: (PrettyRep rep) => Body rep -> Doc a
 maybeNest b
   | null $ bodyStms b = pretty b
   | otherwise = nestedBlock "{" "}" $ pretty b
 
-instance PrettyRep rep => Pretty (Case (Body rep)) where
+instance (PrettyRep rep) => Pretty (Case (Body rep)) where
   pretty (Case vs b) =
     "case" <+> ppTuple' (map (maybe "_" pretty) vs) <+> "->" <+> maybeNest b
 
-instance PrettyRep rep => Pretty (Exp rep) where
+prettyRet :: (Pretty t) => (t, RetAls) -> Doc a
+prettyRet (t, RetAls pals rals)
+  | pals == mempty,
+    rals == mempty =
+      pretty t
+  | otherwise =
+      pretty t <> "#" <> parens (pl pals <> comma <+> pl rals)
+  where
+    pl = brackets . commasep . map pretty
+
+instance (PrettyRep rep) => Pretty (Exp rep) where
   pretty (Match [c] [Case [Just (BoolValue True)] t] f (MatchDec ret ifsort)) =
     "if"
       <> info'
-      <+> pretty c
-      </> "then"
-      <+> maybeNest t
-      <+> "else"
-      <+> maybeNest f
-      </> colon
-      <+> ppTupleLines' (map pretty ret)
+        <+> pretty c
+        </> "then"
+        <+> maybeNest t
+        <+> "else"
+        <+> maybeNest f
+        </> colon
+        <+> ppTupleLines' (map pretty ret)
     where
       info' = case ifsort of
         MatchNormal -> mempty
@@ -294,9 +309,9 @@ instance PrettyRep rep => Pretty (Exp rep) where
   pretty (Apply fname args ret (safety, _, _)) =
     applykw
       <+> pretty (nameToString fname)
-        <> apply (map (align . prettyArg) args)
-      </> colon
-      <+> braces (commasep $ map pretty ret)
+      <> apply (map (align . prettyArg) args)
+        </> colon
+        <+> braces (commasep $ map prettyRet ret)
     where
       prettyArg (arg, Consume) = "*" <> pretty arg
       prettyArg (arg, _) = pretty arg
@@ -304,26 +319,20 @@ instance PrettyRep rep => Pretty (Exp rep) where
         Unsafe -> "apply <unsafe>"
         Safe -> "apply"
   pretty (Op op) = pretty op
-  pretty (DoLoop merge form loopbody) =
+  pretty (Loop merge form loopbody) =
     "loop"
       <+> braces (commastack $ map pretty params)
       <+> equals
       <+> ppTuple' (map pretty args)
       </> ( case form of
-              ForLoop i it bound [] ->
+              ForLoop i it bound ->
                 "for"
                   <+> align
-                    ( pretty i <> ":" <> pretty it
-                        <+> "<"
-                        <+> align (pretty bound)
-                    )
-              ForLoop i it bound loop_vars ->
-                "for"
-                  <+> align
-                    ( pretty i <> ":" <> pretty it
-                        <+> "<"
-                        <+> align (pretty bound)
-                        </> stack (map prettyLoopVar loop_vars)
+                    ( pretty i
+                        <> ":"
+                        <> pretty it
+                          <+> "<"
+                          <+> align (pretty bound)
                     )
               WhileLoop cond ->
                 "while" <+> pretty cond
@@ -332,24 +341,24 @@ instance PrettyRep rep => Pretty (Exp rep) where
       <+> nestedBlock "{" "}" (pretty loopbody)
     where
       (params, args) = unzip merge
-      prettyLoopVar (p, a) = pretty p <+> "in" <+> pretty a
   pretty (WithAcc inputs lam) =
     "with_acc"
       <> parens (braces (commastack $ map ppInput inputs) <> comma </> pretty lam)
     where
       ppInput (shape, arrs, op) =
         parens
-          ( pretty shape <> comma
-              <+> ppTuple' (map pretty arrs)
-                <> case op of
-                  Nothing -> mempty
-                  Just (op', nes) ->
-                    comma </> parens (pretty op' <> comma </> ppTuple' (map pretty nes))
+          ( pretty shape
+              <> comma
+                <+> ppTuple' (map pretty arrs)
+              <> case op of
+                Nothing -> mempty
+                Just (op', nes) ->
+                  comma </> parens (pretty op' <> comma </> ppTuple' (map pretty nes))
           )
 
-instance PrettyRep rep => Pretty (Lambda rep) where
-  pretty (Lambda [] (Body _ stms []) []) | stms == mempty = "nilFn"
-  pretty (Lambda params body rettype) =
+instance (PrettyRep rep) => Pretty (Lambda rep) where
+  pretty (Lambda [] [] (Body _ stms [])) | stms == mempty = "nilFn"
+  pretty (Lambda params rettype body) =
     "\\"
       <+> braces (commastack $ map pretty params)
       </> indent 2 (colon <+> ppTupleLines' (map pretty rettype) <+> "->")
@@ -373,13 +382,13 @@ instance Pretty EntryParam where
 instance Pretty EntryResult where
   pretty (EntryResult u t) = pretty u <> pretty t
 
-instance PrettyRep rep => Pretty (FunDef rep) where
+instance (PrettyRep rep) => Pretty (FunDef rep) where
   pretty (FunDef entry attrs name rettype fparams body) =
     annot (attrAnnots attrs) $
       fun
         </> indent 2 (pretty (nameToString name))
         <+> parens (commastack $ map pretty fparams)
-        </> indent 2 (colon <+> align (ppTupleLines' $ map pretty rettype))
+        </> indent 2 (colon <+> align (ppTupleLines' $ map prettyRet rettype))
         <+> equals
         <+> nestedBlock "{" "}" (pretty body)
     where
@@ -388,9 +397,13 @@ instance PrettyRep rep => Pretty (FunDef rep) where
         Just (p_name, p_entry, ret_entry) ->
           "entry"
             <> (parens . align)
-              ( "\"" <> pretty p_name <> "\"" <> comma
-                  </> ppTupleLines' (map pretty p_entry) <> comma
-                  </> ppTupleLines' (map pretty ret_entry)
+              ( "\""
+                  <> pretty p_name
+                  <> "\""
+                  <> comma
+                    </> ppTupleLines' (map pretty p_entry)
+                  <> comma
+                    </> ppTupleLines' (map pretty ret_entry)
               )
 
 instance Pretty OpaqueType where
@@ -400,16 +413,29 @@ instance Pretty OpaqueType where
     "record" <+> nestedBlock "{" "}" (stack $ map p fs)
     where
       p (f, et) = pretty f <> ":" <+> pretty et
+  pretty (OpaqueSum ts cs) =
+    "sum" <+> nestedBlock "{" "}" (stack $ pretty ts : map p cs)
+    where
+      p (c, ets) = hsep $ "#" <> pretty c : map pretty ets
+  pretty (OpaqueArray r v ts) =
+    "array" <+> pretty r
+      <> "d"
+        <+> dquotes (pretty v)
+        <+> nestedBlock "{" "}" (stack $ map pretty ts)
+  pretty (OpaqueRecordArray r v fs) =
+    "record_array" <+> pretty r <> "d" <+> dquotes (pretty v) <+> nestedBlock "{" "}" (stack $ map p fs)
+    where
+      p (f, et) = pretty f <> ":" <+> pretty et
 
 instance Pretty OpaqueTypes where
   pretty (OpaqueTypes ts) = "types" <+> nestedBlock "{" "}" (stack $ map p ts)
     where
       p (name, t) = "type" <+> dquotes (pretty name) <+> equals <+> pretty t
 
-instance PrettyRep rep => Pretty (Prog rep) where
+instance (PrettyRep rep) => Pretty (Prog rep) where
   pretty (Prog types consts funs) =
     stack $ punctuate line $ pretty types : pretty consts : map pretty funs
 
-instance Pretty d => Pretty (DimIndex d) where
+instance (Pretty d) => Pretty (DimIndex d) where
   pretty (DimFix i) = pretty i
   pretty (DimSlice i n s) = pretty i <+> ":+" <+> pretty n <+> "*" <+> pretty s

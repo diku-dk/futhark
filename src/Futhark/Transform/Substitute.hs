@@ -31,10 +31,10 @@ class Substitute a where
   -- names in @e@ are unique, i.e. there is no shadowing.
   substituteNames :: M.Map VName VName -> a -> a
 
-instance Substitute a => Substitute [a] where
+instance (Substitute a) => Substitute [a] where
   substituteNames substs = map $ substituteNames substs
 
-instance Substitute (Stm rep) => Substitute (Stms rep) where
+instance (Substitute (Stm rep)) => Substitute (Stms rep) where
   substituteNames substs = fmap $ substituteNames substs
 
 instance (Substitute a, Substitute b) => Substitute (a, b) where
@@ -56,7 +56,7 @@ instance (Substitute a, Substitute b, Substitute c, Substitute d) => Substitute 
       substituteNames substs u
     )
 
-instance Substitute a => Substitute (Maybe a) where
+instance (Substitute a) => Substitute (Maybe a) where
   substituteNames substs = fmap $ substituteNames substs
 
 instance Substitute Bool where
@@ -69,24 +69,24 @@ instance Substitute SubExp where
   substituteNames substs (Var v) = Var $ substituteNames substs v
   substituteNames _ (Constant v) = Constant v
 
-instance Substitutable rep => Substitute (Exp rep) where
+instance (Substitutable rep) => Substitute (Exp rep) where
   substituteNames substs = mapExp $ replace substs
 
-instance Substitute dec => Substitute (PatElem dec) where
+instance (Substitute dec) => Substitute (PatElem dec) where
   substituteNames substs (PatElem ident dec) =
     PatElem (substituteNames substs ident) (substituteNames substs dec)
 
 instance Substitute Attrs where
   substituteNames _ attrs = attrs
 
-instance Substitute dec => Substitute (StmAux dec) where
+instance (Substitute dec) => Substitute (StmAux dec) where
   substituteNames substs (StmAux cs attrs dec) =
     StmAux
       (substituteNames substs cs)
       (substituteNames substs attrs)
       (substituteNames substs dec)
 
-instance Substitute dec => Substitute (Param dec) where
+instance (Substitute dec) => Substitute (Param dec) where
   substituteNames substs (Param attrs name dec) =
     Param
       (substituteNames substs attrs)
@@ -97,7 +97,7 @@ instance Substitute SubExpRes where
   substituteNames substs (SubExpRes cs se) =
     SubExpRes (substituteNames substs cs) (substituteNames substs se)
 
-instance Substitute dec => Substitute (Pat dec) where
+instance (Substitute dec) => Substitute (Pat dec) where
   substituteNames substs (Pat xs) =
     Pat (substituteNames substs xs)
 
@@ -105,21 +105,21 @@ instance Substitute Certs where
   substituteNames substs (Certs cs) =
     Certs $ substituteNames substs cs
 
-instance Substitutable rep => Substitute (Stm rep) where
+instance (Substitutable rep) => Substitute (Stm rep) where
   substituteNames substs (Let pat annot e) =
     Let
       (substituteNames substs pat)
       (substituteNames substs annot)
       (substituteNames substs e)
 
-instance Substitutable rep => Substitute (Body rep) where
+instance (Substitutable rep) => Substitute (Body rep) where
   substituteNames substs (Body dec stms res) =
     Body
       (substituteNames substs dec)
       (substituteNames substs stms)
       (substituteNames substs res)
 
-replace :: Substitutable rep => M.Map VName VName -> Mapper rep rep Identity
+replace :: (Substitutable rep) => M.Map VName VName -> Mapper rep rep Identity
 replace substs =
   Mapper
     { mapOnVName = pure . substituteNames substs,
@@ -141,11 +141,11 @@ instance Substitute () where
 instance Substitute (NoOp rep) where
   substituteNames _ = id
 
-instance Substitute d => Substitute (ShapeBase d) where
+instance (Substitute d) => Substitute (ShapeBase d) where
   substituteNames substs (Shape es) =
     Shape $ map (substituteNames substs) es
 
-instance Substitute d => Substitute (Ext d) where
+instance (Substitute d) => Substitute (Ext d) where
   substituteNames substs (Free x) = Free $ substituteNames substs x
   substituteNames _ (Ext x) = Ext x
 
@@ -155,7 +155,7 @@ instance Substitute Names where
 instance Substitute PrimType where
   substituteNames _ t = t
 
-instance Substitute shape => Substitute (TypeBase shape u) where
+instance (Substitute shape) => Substitute (TypeBase shape u) where
   substituteNames _ (Prim et) =
     Prim et
   substituteNames substs (Acc acc ispace ts u) =
@@ -169,12 +169,12 @@ instance Substitute shape => Substitute (TypeBase shape u) where
   substituteNames _ (Mem space) =
     Mem space
 
-instance Substitutable rep => Substitute (Lambda rep) where
-  substituteNames substs (Lambda params body rettype) =
+instance (Substitutable rep) => Substitute (Lambda rep) where
+  substituteNames substs (Lambda params rettype body) =
     Lambda
       (substituteNames substs params)
-      (substituteNames substs body)
       (map (substituteNames substs) rettype)
+      (substituteNames substs body)
 
 instance Substitute Ident where
   substituteNames substs v =
@@ -183,26 +183,26 @@ instance Substitute Ident where
         identType = substituteNames substs $ identType v
       }
 
-instance Substitute d => Substitute (DimIndex d) where
+instance (Substitute d) => Substitute (DimIndex d) where
   substituteNames substs = fmap $ substituteNames substs
 
-instance Substitute d => Substitute (Slice d) where
+instance (Substitute d) => Substitute (Slice d) where
   substituteNames substs = fmap $ substituteNames substs
 
-instance Substitute d => Substitute (FlatDimIndex d) where
+instance (Substitute d) => Substitute (FlatDimIndex d) where
   substituteNames substs = fmap $ substituteNames substs
 
-instance Substitute d => Substitute (FlatSlice d) where
+instance (Substitute d) => Substitute (FlatSlice d) where
   substituteNames substs = fmap $ substituteNames substs
 
-instance Substitute v => Substitute (PrimExp v) where
+instance (Substitute v) => Substitute (PrimExp v) where
   substituteNames substs = fmap $ substituteNames substs
 
-instance Substitute v => Substitute (TPrimExp t v) where
+instance (Substitute v) => Substitute (TPrimExp t v) where
   substituteNames substs =
     TPrimExp . fmap (substituteNames substs) . untyped
 
-instance Substitutable rep => Substitute (NameInfo rep) where
+instance (Substitutable rep) => Substitute (NameInfo rep) where
   substituteNames subst (LetName dec) =
     LetName $ substituteNames subst dec
   substituteNames subst (FParamName dec) =

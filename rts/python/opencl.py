@@ -10,6 +10,10 @@ if cl.version.VERSION < (2015, 2):
         % cl.version.VERSION_TEXT
     )
 
+TR_BLOCK_DIM = 16
+TR_TILE_DIM = TR_BLOCK_DIM * 2
+TR_ELEMS_PER_THREAD = 8
+
 
 def parse_preferred_device(s):
     pref_num = 0
@@ -98,6 +102,16 @@ def apply_size_heuristics(self, size_heuristics, sizes):
     return sizes
 
 
+def to_c_str_rep(x):
+    if type(x) is bool or type(x) is np.bool_:
+        if x:
+            return "true"
+        else:
+            return "false"
+    else:
+        return str(x)
+
+
 def initialise_opencl_object(
     self,
     program_src="",
@@ -115,6 +129,7 @@ def initialise_opencl_object(
     required_types=[],
     all_sizes={},
     user_sizes={},
+    constants=[],
 ):
     if command_queue is None:
         self.ctx = get_prefered_context(
@@ -134,21 +149,28 @@ def initialise_opencl_object(
     max_group_size = int(self.device.max_work_group_size)
     max_tile_size = int(np.sqrt(self.device.max_work_group_size))
 
-    self.max_group_size = max_group_size
+    self.max_thread_block_size = max_group_size
     self.max_tile_size = max_tile_size
     self.max_threshold = 0
-    self.max_num_groups = 0
+    self.max_grid_size = 0
 
-    self.max_local_memory = int(self.device.local_mem_size)
+    self.max_shared_memory = int(self.device.local_mem_size)
 
     # Futhark reserves 4 bytes of local memory for its own purposes.
-    self.max_local_memory -= 4
+    self.max_shared_memory -= 4
 
     # See comment in rts/c/opencl.h.
     if self.platform.name.find("NVIDIA CUDA") >= 0:
-        self.max_local_memory -= 12
+        self.max_shared_memory -= 12
     elif self.platform.name.find("AMD") >= 0:
-        self.max_local_memory -= 16
+        self.max_shared_memory -= 16
+
+    self.max_registers = int(2**16)  # Not sure how to query for this.
+
+    self.max_cache = self.device.get_info(cl.device_info.GLOBAL_MEM_CACHE_SIZE)
+
+    if self.max_cache == 0:
+        self.max_cache = 1024 * 1024
 
     self.free_list = {}
 
@@ -232,10 +254,10 @@ def initialise_opencl_object(
 
     self.sizes = {}
     for k, v in all_sizes.items():
-        if v["class"] == "group_size":
+        if v["class"] == "thread_block_size":
             max_value = max_group_size
             default_value = default_group_size
-        elif v["class"] == "num_groups":
+        elif v["class"] == "grid_size":
             max_value = max_group_size  # Intentional!
             default_value = default_num_groups
         elif v["class"] == "tile_size":
@@ -244,6 +266,12 @@ def initialise_opencl_object(
         elif v["class"] == "reg_tile_size":
             max_value = None
             default_value = default_reg_tile_size
+        elif v["class"].startswith("shared_memory"):
+            max_value = self.max_shared_memory
+            default_value = self.max_shared_memory
+        elif v["class"].startswith("cache"):
+            max_value = self.max_cache
+            default_value = self.max_cache
         elif v["class"].startswith("threshold"):
             max_value = None
             default_value = default_threshold
@@ -268,7 +296,9 @@ def initialise_opencl_object(
     if len(program_src) >= 0:
         build_options += ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
 
-        build_options += ["-D{}={}".format("max_group_size", max_group_size)]
+        build_options += [
+            "-D{}={}".format("max_thread_block_size", max_group_size)
+        ]
 
         build_options += [
             "-D{}={}".format(
@@ -281,10 +311,60 @@ def initialise_opencl_object(
             for (s, v) in self.sizes.items()
         ]
 
+        build_options += [
+            "-D{}={}".format(s, to_c_str_rep(f())) for (s, f) in constants
+        ]
+
         if self.platform.name == "Oclgrind":
             build_options += ["-DEMULATE_F16"]
 
-        return cl.Program(self.ctx, program_src).build(build_options)
+        build_options += [
+            f"-DTR_BLOCK_DIM={TR_BLOCK_DIM}",
+            f"-DTR_TILE_DIM={TR_TILE_DIM}",
+            f"-DTR_ELEMS_PER_THREAD={TR_ELEMS_PER_THREAD}",
+        ]
+
+        program = cl.Program(self.ctx, program_src).build(build_options)
+
+        self.transpose_kernels = {
+            1: {
+                "default": program.map_transpose_1b,
+                "low_height": program.map_transpose_1b_low_height,
+                "low_width": program.map_transpose_1b_low_width,
+                "small": program.map_transpose_1b_small,
+                "large": program.map_transpose_1b_large,
+            },
+            2: {
+                "default": program.map_transpose_2b,
+                "low_height": program.map_transpose_2b_low_height,
+                "low_width": program.map_transpose_2b_low_width,
+                "small": program.map_transpose_2b_small,
+                "large": program.map_transpose_2b_large,
+            },
+            4: {
+                "default": program.map_transpose_4b,
+                "low_height": program.map_transpose_4b_low_height,
+                "low_width": program.map_transpose_4b_low_width,
+                "small": program.map_transpose_4b_small,
+                "large": program.map_transpose_4b_large,
+            },
+            8: {
+                "default": program.map_transpose_8b,
+                "low_height": program.map_transpose_8b_low_height,
+                "low_width": program.map_transpose_8b_low_width,
+                "small": program.map_transpose_8b_small,
+                "large": program.map_transpose_8b_large,
+            },
+        }
+
+        self.copy_kernels = {
+            1: program.lmad_copy_1b,
+            2: program.lmad_copy_2b,
+            4: program.lmad_copy_4b,
+            8: program.lmad_copy_8b,
+        }
+
+        return program
 
 
 def opencl_alloc(self, min_size, tag):
@@ -323,3 +403,125 @@ def sync(self):
         )
 
         raise Exception(self.failure_msgs[failure[0]].format(*failure_args))
+
+
+def map_transpose_gpu2gpu(
+    self, elem_size, dst, dst_offset, src, src_offset, k, n, m
+):
+    kernels = self.transpose_kernels[elem_size]
+    kernel = kernels["default"]
+    mulx = TR_BLOCK_DIM / n
+    muly = TR_BLOCK_DIM / m
+
+    group_dims = (TR_TILE_DIM, TR_TILE_DIM // TR_ELEMS_PER_THREAD, 1)
+    dims = (
+        (m + TR_TILE_DIM - 1) // TR_TILE_DIM * group_dims[0],
+        (n + TR_TILE_DIM - 1) // TR_TILE_DIM * group_dims[1],
+        k,
+    )
+
+    k32 = np.int32(k)
+    n32 = np.int32(n)
+    m32 = np.int32(m)
+    mulx32 = np.int32(mulx)
+    muly32 = np.int32(muly)
+
+    kernel.set_args(
+        cl.LocalMemory(TR_TILE_DIM * (TR_TILE_DIM + 1) * elem_size),
+        dst,
+        dst_offset,
+        src,
+        src_offset,
+        k32,
+        m32,
+        n32,
+        mulx32,
+        muly32,
+        np.int32(0),
+        np.int32(0),
+    )
+    cl.enqueue_nd_range_kernel(self.queue, kernel, dims, group_dims)
+
+
+def copy_elements_gpu2gpu(
+    self,
+    elem_size,
+    dst,
+    dst_offset,
+    dst_strides,
+    src,
+    src_offset,
+    src_strides,
+    shape,
+):
+    r = len(shape)
+    if r > 8:
+        raise Exception(
+            "Futhark runtime limitation:\nCannot copy array of greater than rank 8.\n"
+        )
+
+    n = np.prod(shape)
+    zero = np.int64(0)
+    layout_args = [None] * (8 * 3)
+    for i in range(8):
+        if i < r:
+            layout_args[i * 3 + 0] = shape[i]
+            layout_args[i * 3 + 1] = dst_strides[i]
+            layout_args[i * 3 + 2] = src_strides[i]
+        else:
+            layout_args[i * 3 + 0] = zero
+            layout_args[i * 3 + 1] = zero
+            layout_args[i * 3 + 2] = zero
+
+    kernel = self.copy_kernels[elem_size]
+    kernel.set_args(
+        cl.LocalMemory(1),
+        dst,
+        dst_offset,
+        src,
+        src_offset,
+        n,
+        np.int32(r),
+        *layout_args,
+    )
+    w = 256
+    dims = ((n + w - 1) // w * w,)
+    group_dims = (w,)
+    cl.enqueue_nd_range_kernel(self.queue, kernel, dims, group_dims)
+
+
+def lmad_copy_gpu2gpu(
+    self, pt, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape
+):
+    elem_size = ct.sizeof(pt)
+    nbytes = np.prod(shape) * elem_size
+    if nbytes == 0:
+        return None
+    if lmad_memcpyable(dst_strides, src_strides, shape):
+        cl.enqueue_copy(
+            self.queue,
+            dst,
+            src,
+            dst_offset=dst_offset * elem_size,
+            src_offset=src_offset * elem_size,
+            byte_count=nbytes,
+        )
+    else:
+        tr = lmad_map_tr(dst_strides, src_strides, shape)
+        if tr is not None:
+            (k, n, m) = tr
+            map_transpose_gpu2gpu(
+                self, elem_size, dst, dst_offset, src, src_offset, k, m, n
+            )
+        else:
+            copy_elements_gpu2gpu(
+                self,
+                elem_size,
+                dst,
+                dst_offset,
+                dst_strides,
+                src,
+                src_offset,
+                src_strides,
+                shape,
+            )

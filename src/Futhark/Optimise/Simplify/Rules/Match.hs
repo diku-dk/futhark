@@ -28,7 +28,7 @@ caseNeverMatches ses = or . zipWith impossible ses . casePat
     impossible (Constant v1) (Just v2) = v1 /= v2
     impossible _ _ = False
 
-ruleMatch :: BuilderOps rep => TopDownRuleMatch rep
+ruleMatch :: (BuilderOps rep) => TopDownRuleMatch rep
 -- Remove impossible cases.
 ruleMatch _ pat _ (cond, cases, defbody, ifdec)
   | (impossible, cases') <- partition (caseNeverMatches cond) cases,
@@ -135,7 +135,7 @@ ruleMatch _ _ _ _ = Skip
 -- | Move out results of a conditional expression whose computation is
 -- either invariant to the branches (only done for results used for
 -- existentials), or the same in both branches.
-hoistBranchInvariant :: BuilderOps rep => TopDownRuleMatch rep
+hoistBranchInvariant :: (BuilderOps rep) => TopDownRuleMatch rep
 hoistBranchInvariant _ pat _ (cond, cases, defbody, MatchDec ret ifsort) =
   let case_reses = map (bodyResult . caseBody) cases
       defbody_res = bodyResult defbody
@@ -211,12 +211,10 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, MatchDec ret ifsort) =
 -- after a branch.  Standard dead code removal can remove the branch
 -- if *none* of the return values are used, but this rule is more
 -- precise.
-removeDeadBranchResult :: BuilderOps rep => BottomUpRuleMatch rep
+removeDeadBranchResult :: (BuilderOps rep) => BottomUpRuleMatch rep
 removeDeadBranchResult (_, used) pat _ (cond, cases, defbody, MatchDec rettype ifsort)
-  | -- Only if there is no existential binding...
-    all (`notNameIn` foldMap freeIn (patElems pat)) (patNames pat),
-    -- Figure out which of the names in 'pat' are used...
-    patused <- map (`UT.isUsedDirectly` used) $ patNames pat,
+  | -- Figure out which of the names in 'pat' are used...
+    patused <- map keep $ patNames pat,
     -- If they are not all used, then this rule applies.
     not (and patused) = do
       -- Remove the parts of the branch-results that correspond to dead
@@ -226,15 +224,26 @@ removeDeadBranchResult (_, used) pat _ (cond, cases, defbody, MatchDec rettype i
           pick = map snd . filter fst . zip patused
           pat' = pick $ patElems pat
           rettype' = pick rettype
+          -- We also need to adjust the existential references in the
+          -- branch type.
+          exts = scanl (+) 0 [if b then 1 else 0 | b <- patused]
+          adjust = mapExt (exts !!)
       Simplify $ do
         cases' <- mapM (traverse $ onBody pick) cases
         defbody' <- onBody pick defbody
-        letBind (Pat pat') $ Match cond cases' defbody' $ MatchDec rettype' ifsort
+        letBind (Pat pat') $ Match cond cases' defbody' $ MatchDec (map adjust rettype') ifsort
   | otherwise = Skip
   where
+    usedDirectly v = v `UT.isUsedDirectly` used
+    usedIndirectly v =
+      any
+        (\pe -> v `nameIn` freeIn pe && usedDirectly (patElemName pe))
+        (patElems pat)
+    keep v = usedDirectly v || usedIndirectly v
+
     onBody pick (Body _ stms res) = mkBodyM stms $ pick res
 
-topDownRules :: BuilderOps rep => [TopDownRule rep]
+topDownRules :: (BuilderOps rep) => [TopDownRule rep]
 topDownRules =
   [ RuleMatch ruleMatch,
     RuleMatch hoistBranchInvariant

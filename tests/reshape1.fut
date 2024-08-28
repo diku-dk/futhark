@@ -13,4 +13,4 @@ def intsqrt(x: i64): i64 =
     i64.f32(f32.sqrt(f32.i64(x)))
 
 def main [n] (a: [n]i64): [][]i64 =
-    unflatten (intsqrt n) (intsqrt n) (a :> [intsqrt n*intsqrt n]i64)
+    unflatten (a :> [intsqrt n*intsqrt n]i64)

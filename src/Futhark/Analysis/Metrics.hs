@@ -29,7 +29,7 @@ import Futhark.Util (showText)
 class OpMetrics op where
   opMetrics :: op -> MetricsM ()
 
-instance OpMetrics a => OpMetrics (Maybe a) where
+instance (OpMetrics a) => OpMetrics (Maybe a) where
   opMetrics Nothing = pure ()
   opMetrics (Just x) = opMetrics x
 
@@ -78,7 +78,7 @@ inside what m = seen what >> censor addWhat m
     addWhat' (ctx, k) = (what : ctx, k)
 
 -- | Compute the metrics for a program.
-progMetrics :: OpMetrics (Op rep) => Prog rep -> AstMetrics
+progMetrics :: (OpMetrics (Op rep)) => Prog rep -> AstMetrics
 progMetrics prog =
   actualMetrics $
     execWriter $
@@ -86,24 +86,24 @@ progMetrics prog =
         mapM_ funDefMetrics $ progFuns prog
         mapM_ stmMetrics $ progConsts prog
 
-funDefMetrics :: OpMetrics (Op rep) => FunDef rep -> MetricsM ()
+funDefMetrics :: (OpMetrics (Op rep)) => FunDef rep -> MetricsM ()
 funDefMetrics = bodyMetrics . funDefBody
 
 -- | Compute metrics for this body.
-bodyMetrics :: OpMetrics (Op rep) => Body rep -> MetricsM ()
+bodyMetrics :: (OpMetrics (Op rep)) => Body rep -> MetricsM ()
 bodyMetrics = mapM_ stmMetrics . bodyStms
 
 -- | Compute metrics for this statement.
-stmMetrics :: OpMetrics (Op rep) => Stm rep -> MetricsM ()
+stmMetrics :: (OpMetrics (Op rep)) => Stm rep -> MetricsM ()
 stmMetrics = expMetrics . stmExp
 
-expMetrics :: OpMetrics (Op rep) => Exp rep -> MetricsM ()
+expMetrics :: (OpMetrics (Op rep)) => Exp rep -> MetricsM ()
 expMetrics (BasicOp op) =
   seen "BasicOp" >> basicOpMetrics op
-expMetrics (DoLoop _ ForLoop {} body) =
-  inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
-expMetrics (DoLoop _ WhileLoop {} body) =
-  inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
+expMetrics (Loop _ ForLoop {} body) =
+  inside "Loop" $ seen "ForLoop" >> bodyMetrics body
+expMetrics (Loop _ WhileLoop {} body) =
+  inside "Loop" $ seen "WhileLoop" >> bodyMetrics body
 expMetrics (Match _ [Case [Just (BoolValue True)] tb] fb _) =
   inside "If" $ do
     inside "True" $ bodyMetrics tb
@@ -123,6 +123,7 @@ expMetrics (Op op) =
 basicOpMetrics :: BasicOp -> MetricsM ()
 basicOpMetrics (SubExp _) = seen "SubExp"
 basicOpMetrics (Opaque _ _) = seen "Opaque"
+basicOpMetrics ArrayVal {} = seen "ArrayVal"
 basicOpMetrics ArrayLit {} = seen "ArrayLit"
 basicOpMetrics BinOp {} = seen "BinOp"
 basicOpMetrics UnOp {} = seen "UnOp"
@@ -134,16 +135,14 @@ basicOpMetrics Update {} = seen "Update"
 basicOpMetrics FlatIndex {} = seen "FlatIndex"
 basicOpMetrics FlatUpdate {} = seen "FlatUpdate"
 basicOpMetrics Concat {} = seen "Concat"
-basicOpMetrics Copy {} = seen "Copy"
 basicOpMetrics Manifest {} = seen "Manifest"
 basicOpMetrics Iota {} = seen "Iota"
 basicOpMetrics Replicate {} = seen "Replicate"
 basicOpMetrics Scratch {} = seen "Scratch"
 basicOpMetrics Reshape {} = seen "Reshape"
 basicOpMetrics Rearrange {} = seen "Rearrange"
-basicOpMetrics Rotate {} = seen "Rotate"
 basicOpMetrics UpdateAcc {} = seen "UpdateAcc"
 
 -- | Compute metrics for this lambda.
-lambdaMetrics :: OpMetrics (Op rep) => Lambda rep -> MetricsM ()
+lambdaMetrics :: (OpMetrics (Op rep)) => Lambda rep -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody

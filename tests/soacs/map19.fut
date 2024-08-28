@@ -3,7 +3,7 @@
 -- ==
 -- input { [[1,2,3],[4,5,6]] }
 -- output { [[0, 2, 3], [0, 5, 6]] }
--- structure { Copy 0 }
+-- structure { Replicate 0 }
 
 def main (xss: *[][]i32) =
   map (\xs -> copy xs with [0] = 0) xss

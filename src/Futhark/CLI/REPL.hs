@@ -17,10 +17,11 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Version
 import Futhark.Compiler
+import Futhark.Format (parseFormatString)
 import Futhark.MonadFreshNames
-import Futhark.Util (fancyTerminal)
+import Futhark.Util (fancyTerminal, showText)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, align, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, oneLine, pretty, putDoc, putDocLn, unAnnotate, (<+>))
+import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, align, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, italicized, oneLine, pretty, putDoc, putDocLn, unAnnotate, (<+>))
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
@@ -88,9 +89,7 @@ repl maybe_prog = do
                 toploop s'
           Right _ -> pure ()
 
-      finish s = do
-        quit <- if fancyTerminal then confirmQuit else pure True
-        if quit then pure () else toploop s
+      finish _s = pure ()
 
   maybe_init_state <- liftIO $ newFutharkiState 0 noLoadedProg maybe_prog
   s <- case maybe_init_state of
@@ -100,22 +99,13 @@ repl maybe_prog = do
         Left err ->
           error $ "Failed to initialise interpreter state: " <> T.unpack (docText err)
         Right s -> do
-          liftIO $ putDoc prog_err
+          liftIO $ putDocLn prog_err
           pure s {futharkiLoaded = maybe_prog}
     Right s ->
       pure s
   Haskeline.runInputT Haskeline.defaultSettings $ toploop s
 
   putStrLn "Leaving 'futhark repl'."
-
-confirmQuit :: Haskeline.InputT IO Bool
-confirmQuit = do
-  c <- Haskeline.getInputChar "Quit REPL? (y/n) "
-  case c of
-    Nothing -> pure True -- EOF
-    Just 'y' -> pure True
-    Just 'n' -> pure False
-    _ -> confirmQuit
 
 -- | Representation of breaking at a breakpoint, to allow for
 -- navigating through the stack frames and such.
@@ -220,12 +210,14 @@ readEvalPrint = do
               <> mconcat (intersperse ", " (map fst matches))
     _ -> do
       -- Read a declaration or expression.
-      maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
-
-      case maybe_dec_or_e of
+      case parseDecOrExp prompt line of
         Left (SyntaxError _ err) -> liftIO $ T.putStrLn err
         Right (Left d) -> onDec d
-        Right (Right e) -> onExp e
+        Right (Right e) -> do
+          valOrErr <- onExp e
+          case valOrErr of
+            Left err -> liftIO $ putDocLn err
+            Right val -> liftIO $ putDocLn $ I.prettyValue val
   modify $ \s -> s {futharkiCount = futharkiCount s + 1}
   where
     inputLine prompt = do
@@ -276,22 +268,29 @@ onDec d = do
                   futharkiProg = prog {lpNameSource = src'}
                 }
 
-onExp :: UncheckedExp -> FutharkiM ()
+onExp :: UncheckedExp -> FutharkiM (Either (Doc AnsiStyle) I.Value)
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
   case T.checkExp imports src tenv e of
-    (_, Left err) -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc err
+    (_, Left err) -> pure $ Left $ T.prettyTypeErrorNoLoc err
     (_, Right (tparams, e'))
       | null tparams -> do
           r <- runInterpreter $ I.interpretExp ienv e'
           case r of
-            Left err -> liftIO $ print err
-            Right v -> liftIO $ putDoc $ I.prettyValue v <> hardline
-      | otherwise -> liftIO $ do
-          putDocLn $ "Inferred type of expression: " <> align (pretty (typeOf e'))
-          T.putStrLn $
-            "The following types are ambiguous: "
-              <> T.intercalate ", " (map (nameToText . toName . typeParamName) tparams)
+            Left err -> pure $ Left $ pretty $ showText err
+            Right v -> pure $ Right v
+      | otherwise ->
+          pure $
+            Left $
+              ("Inferred type of expression: " <> align (pretty (typeOf e')))
+                <> hardline
+                <> pretty
+                  ( "The following types are ambiguous: "
+                      <> T.intercalate
+                        ", "
+                        (map (nameToText . toName . typeParamName) tparams)
+                  )
+                <> hardline
 
 prettyBreaking :: Breaking -> T.Text
 prettyBreaking b =
@@ -360,14 +359,19 @@ runInterpreter m = runF m (pure . Right) intOp
 
       c
 
-runInterpreterNoBreak :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreterNoBreak :: (MonadIO m) => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ putDocLn $ pretty w <> ":" <+> align (unAnnotate v)
       c
-    intOp (I.ExtOpBreak _ _ _ c) = c
+    intOp (I.ExtOpBreak _ I.BreakNaN _ c) = c
+    intOp (I.ExtOpBreak w _ _ c) = do
+      liftIO $
+        T.putStrLn $
+          locText w <> ": " <> "ignoring breakpoint when computating constant."
+      c
 
 type Command = T.Text -> FutharkiM ()
 
@@ -396,13 +400,34 @@ genTypeCommand f g h e = do
 
 typeCommand :: Command
 typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
-  oneLine (pretty e)
-    <> foldMap ((" " <>) . pretty) ps
-    <> " : "
-    <> oneLine (pretty (typeOf e))
+  oneLine (pretty (typeOf e))
+    <> if not (null ps)
+      then
+        annotate italicized $
+          "\n\nPolymorphic in"
+            <+> mconcat (intersperse " " $ map pretty ps)
+            <> "."
+      else mempty
 
 mtypeCommand :: Command
 mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
+
+formatCommand :: Command
+formatCommand input = do
+  case parseFormatString input of
+    Left err -> liftIO $ T.putStrLn err
+    Right parts -> do
+      prompt <- getPrompt
+      case mapM (traverse $ parseExp prompt) parts of
+        Left (SyntaxError _ err) ->
+          liftIO $ T.putStr err
+        Right parts' -> do
+          parts'' <- mapM sequenceA <$> mapM (traverse onExp) parts'
+          case parts'' of
+            Left err -> liftIO $ putDoc err
+            Right parts''' ->
+              liftIO . T.putStrLn . mconcat $
+                map (either id (docText . I.prettyValue)) parts'''
 
 unbreakCommand :: Command
 unbreakCommand _ = do
@@ -482,6 +507,15 @@ Only one source file can be loaded at a time.  Using the :load command a
 second time will replace the previously loaded file.  It will also replace
 any declarations entered at the REPL.
 
+|]
+      )
+    ),
+    ( "format",
+      ( formatCommand,
+        [text|
+Use format strings to print arbitrary futhark expressions. Usage:
+
+  > :format The value of foo: {foo}. The value of 2+2={2+2}
 |]
       )
     ),

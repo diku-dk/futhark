@@ -22,13 +22,13 @@ module Futhark.Analysis.Alias
   )
 where
 
-import Data.List (foldl')
+import Data.List qualified as L
 import Data.Map qualified as M
 import Futhark.IR.Aliases
 
 -- | Perform alias analysis on a Futhark program.
 aliasAnalysis ::
-  AliasableRep rep =>
+  (AliasableRep rep) =>
   Prog rep ->
   Prog (Aliases rep)
 aliasAnalysis prog =
@@ -39,7 +39,7 @@ aliasAnalysis prog =
 
 -- | Perform alias analysis on function.
 analyseFun ::
-  AliasableRep rep =>
+  (AliasableRep rep) =>
   FunDef rep ->
   FunDef (Aliases rep)
 analyseFun (FunDef entry attrs fname restype params body) =
@@ -49,7 +49,7 @@ analyseFun (FunDef entry attrs fname restype params body) =
 
 -- | Perform alias analysis on Body.
 analyseBody ::
-  AliasableRep rep =>
+  (AliasableRep rep) =>
   AliasTable ->
   Body rep ->
   Body (Aliases rep)
@@ -59,12 +59,12 @@ analyseBody atable (Body rep stms result) =
 
 -- | Perform alias analysis on statements.
 analyseStms ::
-  AliasableRep rep =>
+  (AliasableRep rep) =>
   AliasTable ->
   Stms rep ->
   (Stms (Aliases rep), AliasesAndConsumed)
 analyseStms orig_aliases =
-  withoutBound . foldl' f (mempty, (orig_aliases, mempty)) . stmsToList
+  withoutBound . L.foldl' f (mempty, (orig_aliases, mempty)) . stmsToList
   where
     withoutBound (stms, (aliases, consumed)) =
       let bound = foldMap (namesFromList . patNames . stmPat) stms
@@ -78,7 +78,7 @@ analyseStms orig_aliases =
 
 -- | Perform alias analysis on statement.
 analyseStm ::
-  AliasableRep rep =>
+  (AliasableRep rep) =>
   AliasTable ->
   Stm rep ->
   Stm (Aliases rep)
@@ -90,7 +90,7 @@ analyseStm aliases (Let pat (StmAux cs attrs dec) e) =
 
 -- | Perform alias analysis on expression.
 analyseExp ::
-  AliasableRep rep =>
+  (AliasableRep rep) =>
   AliasTable ->
   Exp rep ->
   Exp (Aliases rep)
@@ -130,7 +130,7 @@ analyseExp aliases e = mapExp analyse e
 
 -- | Perform alias analysis on lambda.
 analyseLambda ::
-  AliasableRep rep =>
+  (AliasableRep rep) =>
   AliasTable ->
   Lambda rep ->
   Lambda (Aliases rep)

@@ -46,7 +46,7 @@ sizeDefs :: SizeBinder VName -> Defs
 sizeDefs (SizeBinder v loc) =
   M.singleton v $ DefBound $ BoundTerm (Scalar (Prim (Signed Int64))) (locOf loc)
 
-patternDefs :: Pat -> Defs
+patternDefs :: Pat (TypeBase Size u) -> Defs
 patternDefs (Id vn (Info t) loc) =
   M.singleton vn $ DefBound $ BoundTerm (toStruct t) (locOf loc)
 patternDefs (TuplePat pats _) =
@@ -88,13 +88,13 @@ expDefs e =
         Lambda params _ _ _ _ ->
           mconcat (map patternDefs params)
         AppExp (LetFun name (tparams, params, _, Info ret, _) _ loc) _ ->
-          let name_t = foldFunTypeFromParams params ret
+          let name_t = funType params ret
            in M.singleton name (DefBound $ BoundTerm name_t (locOf loc))
                 <> mconcat (map typeParamDefs tparams)
                 <> mconcat (map patternDefs params)
         AppExp (LetWith v _ _ _ _ _) _ ->
           identDefs v
-        AppExp (DoLoop _ merge _ form _ _) _ ->
+        AppExp (Loop _ merge _ form _ _) _ ->
           patternDefs merge
             <> case form of
               For i _ -> identDefs i
@@ -111,9 +111,7 @@ valBindDefs vbind =
       <> expDefs (valBindBody vbind)
   where
     vbind_t =
-      foldFunTypeFromParams (valBindParams vbind) $
-        unInfo $
-          valBindRetType vbind
+      funType (valBindParams vbind) $ unInfo $ valBindRetType vbind
 
 typeBindDefs :: TypeBind -> Defs
 typeBindDefs tbind =
@@ -122,7 +120,7 @@ typeBindDefs tbind =
 modParamDefs :: ModParam -> Defs
 modParamDefs (ModParam p se _ loc) =
   M.singleton p (DefBound $ BoundModule $ locOf loc)
-    <> sigExpDefs se
+    <> modTypeExpDefs se
 
 modExpDefs :: ModExp -> Defs
 modExpDefs ModVar {} =
@@ -145,7 +143,7 @@ modBindDefs mbind =
   M.singleton (modName mbind) (DefBound $ BoundModule $ locOf mbind)
     <> mconcat (map modParamDefs (modParams mbind))
     <> modExpDefs (modExp mbind)
-    <> case modSignature mbind of
+    <> case modType mbind of
       Nothing -> mempty
       Just (_, Info substs) ->
         M.map DefIndirect substs
@@ -161,28 +159,28 @@ specDefs spec =
       M.singleton v $ DefBound $ BoundType $ locOf loc
     ModSpec v se _ loc ->
       M.singleton v (DefBound $ BoundModuleType $ locOf loc)
-        <> sigExpDefs se
-    IncludeSpec se _ -> sigExpDefs se
+        <> modTypeExpDefs se
+    IncludeSpec se _ -> modTypeExpDefs se
 
-sigExpDefs :: SigExp -> Defs
-sigExpDefs se =
+modTypeExpDefs :: ModTypeExp -> Defs
+modTypeExpDefs se =
   case se of
-    SigVar _ (Info substs) _ -> M.map DefIndirect substs
-    SigParens e _ -> sigExpDefs e
-    SigSpecs specs _ -> mconcat $ map specDefs specs
-    SigWith e _ _ -> sigExpDefs e
-    SigArrow _ e1 e2 _ -> sigExpDefs e1 <> sigExpDefs e2
+    ModTypeVar _ (Info substs) _ -> M.map DefIndirect substs
+    ModTypeParens e _ -> modTypeExpDefs e
+    ModTypeSpecs specs _ -> mconcat $ map specDefs specs
+    ModTypeWith e _ _ -> modTypeExpDefs e
+    ModTypeArrow _ e1 e2 _ -> modTypeExpDefs e1 <> modTypeExpDefs e2
 
-sigBindDefs :: SigBind -> Defs
+sigBindDefs :: ModTypeBind -> Defs
 sigBindDefs sbind =
-  M.singleton (sigName sbind) (DefBound $ BoundModuleType $ locOf sbind)
-    <> sigExpDefs (sigExp sbind)
+  M.singleton (modTypeName sbind) (DefBound $ BoundModuleType $ locOf sbind)
+    <> modTypeExpDefs (modTypeExp sbind)
 
 decDefs :: Dec -> Defs
 decDefs (ValDec vbind) = valBindDefs vbind
 decDefs (TypeDec vbind) = typeBindDefs vbind
 decDefs (ModDec mbind) = modBindDefs mbind
-decDefs (SigDec mbind) = sigBindDefs mbind
+decDefs (ModTypeDec mbind) = sigBindDefs mbind
 decDefs (OpenDec me _) = modExpDefs me
 decDefs (LocalDec dec _) = decDefs dec
 decDefs ImportDec {} = mempty
@@ -200,13 +198,13 @@ allBindings imports = M.mapMaybe forward defs
 
 data RawAtPos = RawAtName (QualName VName) Loc
 
-contains :: Located a => a -> Pos -> Bool
+contains :: (Located a) => a -> Pos -> Bool
 contains a pos =
   case locOf a of
     Loc start end -> pos >= start && pos <= end
     NoLoc -> False
 
-atPosInTypeExp :: TypeExp Info VName -> Pos -> Maybe RawAtPos
+atPosInTypeExp :: TypeExp Exp VName -> Pos -> Maybe RawAtPos
 atPosInTypeExp te pos =
   case te of
     TEVar qn loc -> do
@@ -236,7 +234,7 @@ atPosInTypeExp te pos =
     inDim (SizeExp e _) = atPosInExp e pos
     inDim SizeExpAny {} = Nothing
 
-atPosInPat :: Pat -> Pos -> Maybe RawAtPos
+atPosInPat :: Pat (TypeBase Size u) -> Pos -> Maybe RawAtPos
 atPosInPat (Id vn _ loc) pos = do
   guard $ loc `contains` pos
   Just $ RawAtName (qualName vn) $ locOf loc
@@ -270,11 +268,11 @@ atPosInExp (AppExp (LetPat _ pat _ _ _) _) pos
 atPosInExp (AppExp (LetWith a b _ _ _ _) _) pos
   | a `contains` pos = Just $ RawAtName (qualName $ identName a) (locOf a)
   | b `contains` pos = Just $ RawAtName (qualName $ identName b) (locOf b)
-atPosInExp (AppExp (DoLoop _ merge _ _ _ _) _) pos
+atPosInExp (AppExp (Loop _ merge _ _ _ _) _) pos
   | merge `contains` pos = atPosInPat merge pos
 atPosInExp (Ascript _ te _) pos
   | te `contains` pos = atPosInTypeExp te pos
-atPosInExp (AppExp (Coerce _ te _) _) pos
+atPosInExp (Coerce _ te _ _) pos
   | te `contains` pos = atPosInTypeExp te pos
 atPosInExp e pos = do
   guard $ e `contains` pos
@@ -314,19 +312,19 @@ atPosInSpec spec pos =
     ValSpec _ _ te _ _ _ -> atPosInTypeExp te pos
     TypeAbbrSpec tbind -> atPosInTypeBind tbind pos
     TypeSpec {} -> Nothing
-    ModSpec _ se _ _ -> atPosInSigExp se pos
-    IncludeSpec se _ -> atPosInSigExp se pos
+    ModSpec _ se _ _ -> atPosInModTypeExp se pos
+    IncludeSpec se _ -> atPosInModTypeExp se pos
 
-atPosInSigExp :: SigExp -> Pos -> Maybe RawAtPos
-atPosInSigExp se pos =
+atPosInModTypeExp :: ModTypeExp -> Pos -> Maybe RawAtPos
+atPosInModTypeExp se pos =
   case se of
-    SigVar qn _ loc -> do
+    ModTypeVar qn _ loc -> do
       guard $ loc `contains` pos
       Just $ RawAtName qn $ locOf loc
-    SigParens e _ -> atPosInSigExp e pos
-    SigSpecs specs _ -> msum $ map (`atPosInSpec` pos) specs
-    SigWith e _ _ -> atPosInSigExp e pos
-    SigArrow _ e1 e2 _ -> atPosInSigExp e1 pos `mplus` atPosInSigExp e2 pos
+    ModTypeParens e _ -> atPosInModTypeExp e pos
+    ModTypeSpecs specs _ -> msum $ map (`atPosInSpec` pos) specs
+    ModTypeWith e _ _ -> atPosInModTypeExp e pos
+    ModTypeArrow _ e1 e2 _ -> atPosInModTypeExp e1 pos `mplus` atPosInModTypeExp e2 pos
 
 atPosInValBind :: ValBind -> Pos -> Maybe RawAtPos
 atPosInValBind vbind pos =
@@ -343,12 +341,12 @@ atPosInModBind (ModBind _ params sig e _ _) pos =
     `mplus` atPosInModExp e pos
     `mplus` case sig of
       Nothing -> Nothing
-      Just (se, _) -> atPosInSigExp se pos
+      Just (se, _) -> atPosInModTypeExp se pos
   where
-    inParam (ModParam _ se _ _) = atPosInSigExp se pos
+    inParam (ModParam _ se _ _) = atPosInModTypeExp se pos
 
-atPosInSigBind :: SigBind -> Pos -> Maybe RawAtPos
-atPosInSigBind = atPosInSigExp . sigExp
+atPosInModTypeBind :: ModTypeBind -> Pos -> Maybe RawAtPos
+atPosInModTypeBind = atPosInModTypeExp . modTypeExp
 
 atPosInDec :: Dec -> Pos -> Maybe RawAtPos
 atPosInDec dec pos = do
@@ -357,7 +355,7 @@ atPosInDec dec pos = do
     ValDec vbind -> atPosInValBind vbind pos
     TypeDec tbind -> atPosInTypeBind tbind pos
     ModDec mbind -> atPosInModBind mbind pos
-    SigDec sbind -> atPosInSigBind sbind pos
+    ModTypeDec sbind -> atPosInModTypeBind sbind pos
     OpenDec e _ -> atPosInModExp e pos
     LocalDec dec' _ -> atPosInDec dec' pos
     ImportDec {} -> Nothing

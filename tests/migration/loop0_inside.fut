@@ -1,9 +1,9 @@
 -- Reads can be delayed and reduced inside loops.
 -- ==
 -- structure gpu {
---   /DoLoop/GPUBody 1
---   /DoLoop/GPUBody/Apply 1
---   /DoLoop/Index 1
+--   /Loop/GPUBody 1
+--   /Loop/GPUBody/Apply 1
+--   /Loop/GPUBody/Index 1
 -- }
 
 def main [n] [m] (A: *[n][m]f32) : *[n][m]f32 =

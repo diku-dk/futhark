@@ -1,6 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This pass attempts to lower allocations as far towards the bottom of their
@@ -22,44 +19,31 @@ import Futhark.IR.MCMem
 import Futhark.IR.SeqMem
 import Futhark.Pass (Pass (..))
 
+lowerInProg ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  (inner rep -> LowerM (inner rep) (inner rep)) ->
+  Prog rep ->
+  Prog rep
+lowerInProg onOp prog =
+  prog {progFuns = fmap onFun (progFuns prog)}
+  where
+    onFun f = f {funDefBody = onBody (funDefBody f)}
+    onBody body = runReader (lowerAllocationsInBody body) (Env onOp)
+
 lowerAllocationsSeqMem :: Pass SeqMem SeqMem
 lowerAllocationsSeqMem =
-  Pass "lower allocations" "lower allocations" $ \prog@Prog {progFuns} ->
-    pure $
-      prog
-        { progFuns =
-            fmap
-              ( \f@FunDef {funDefBody} ->
-                  f {funDefBody = runReader (lowerAllocationsInBody funDefBody) (Env pure)}
-              )
-              progFuns
-        }
+  Pass "lower allocations" "lower allocations" $
+    pure . lowerInProg pure
 
 lowerAllocationsGPUMem :: Pass GPUMem GPUMem
 lowerAllocationsGPUMem =
-  Pass "lower allocations gpu" "lower allocations gpu" $ \prog@Prog {progFuns} ->
-    pure $
-      prog
-        { progFuns =
-            fmap
-              ( \f@FunDef {funDefBody} ->
-                  f {funDefBody = runReader (lowerAllocationsInBody funDefBody) (Env lowerAllocationsInHostOp)}
-              )
-              progFuns
-        }
+  Pass "lower allocations gpu" "lower allocations gpu" $
+    pure . lowerInProg lowerAllocationsInHostOp
 
 lowerAllocationsMCMem :: Pass MCMem MCMem
 lowerAllocationsMCMem =
-  Pass "lower allocations mc" "lower allocations mc" $ \prog@Prog {progFuns} ->
-    pure $
-      prog
-        { progFuns =
-            fmap
-              ( \f@FunDef {funDefBody} ->
-                  f {funDefBody = runReader (lowerAllocationsInBody funDefBody) (Env lowerAllocationsInMCOp)}
-              )
-              progFuns
-        }
+  Pass "lower allocations mc" "lower allocations mc" $
+    pure . lowerInProg lowerAllocationsInMCOp
 
 newtype Env inner = Env
   {onInner :: inner -> LowerM inner inner}
@@ -98,9 +82,9 @@ lowerAllocationsInStms (stm@(Let _ _ (Match cond_ses cases body dec)) :<| stms) 
   let stm' = stm {stmExp = Match cond_ses cases' body' dec}
       (alloc', acc') = insertLoweredAllocs (freeIn stm) alloc acc
   lowerAllocationsInStms stms alloc' (acc' :|> stm')
-lowerAllocationsInStms (stm@(Let _ _ (DoLoop params form body)) :<| stms) alloc acc = do
+lowerAllocationsInStms (stm@(Let _ _ (Loop params form body)) :<| stms) alloc acc = do
   body' <- lowerAllocationsInBody body
-  let stm' = stm {stmExp = DoLoop params form body'}
+  let stm' = stm {stmExp = Loop params form body'}
       (alloc', acc') = insertLoweredAllocs (freeIn stm) alloc acc
   lowerAllocationsInStms stms alloc' (acc' :|> stm')
 lowerAllocationsInStms (stm :<| stms) alloc acc = do

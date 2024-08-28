@@ -23,8 +23,7 @@ let createIdentity n =
 
 let matrix_inverse [n] (A: [n][n]f32): [n][n]f32 =
   let I  = createIdentity n
-  let n2 = 2*n
-  let AI = map2 (concat_to n2) A I
+  let AI = map2 concat A I
   let A1I= gaussian_elimination AI
   let A1 = A1I[:,n:] :> [n][n]f32
   in A1

@@ -49,14 +49,14 @@ pprMatch _ (MatchConstr (ConstrRecord fs) ps _) =
 instance Pretty (Match t) where
   pretty = pprMatch (-1)
 
-patternToMatch :: Pat -> Match StructType
-patternToMatch (Id _ (Info t) _) = MatchWild $ toStruct t
-patternToMatch (Wildcard (Info t) _) = MatchWild $ toStruct t
+patternToMatch :: Pat StructType -> Match StructType
+patternToMatch (Id _ (Info t) _) = MatchWild t
+patternToMatch (Wildcard (Info t) _) = MatchWild t
 patternToMatch (PatParens p _) = patternToMatch p
 patternToMatch (PatAttr _ p _) = patternToMatch p
 patternToMatch (PatAscription p _ _) = patternToMatch p
 patternToMatch (PatLit l (Info t) _) =
-  MatchConstr (ConstrLit l) [] $ toStruct t
+  MatchConstr (ConstrLit l) [] t
 patternToMatch p@(TuplePat ps _) =
   MatchConstr ConstrTuple (map patternToMatch ps) $
     patternStructType p
@@ -66,7 +66,7 @@ patternToMatch p@(RecordPat fs _) =
   where
     (fnames, ps) = unzip $ sortFields $ M.fromList fs
 patternToMatch (PatConstr c (Info t) args _) =
-  MatchConstr (Constr c) (map patternToMatch args) $ toStruct t
+  MatchConstr (Constr c) (map patternToMatch args) t
 
 isConstr :: Match t -> Maybe Name
 isConstr (MatchConstr (Constr c) _ _) = Just c
@@ -174,7 +174,7 @@ findUnmatched _ _ = []
 {-# NOINLINE unmatched #-}
 
 -- | Find the unmatched cases.
-unmatched :: [Pat] -> [Match ()]
+unmatched :: [Pat StructType] -> [Match ()]
 unmatched orig_ps =
   -- The algorithm may find duplicate example, which we filter away
   -- here.

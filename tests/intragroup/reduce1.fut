@@ -2,7 +2,7 @@
 -- ==
 -- random input { [1][256]i32 } auto output
 -- compiled random input { [100][256]i32 } auto output
--- structure gpu { SegMap/SegRed 1 }
+-- structure gpu { SegMap/SegRed 1 SegMap/SegRed/SegBinOp 2 }
 
 def main xs =
   #[incremental_flattening(only_intra)]

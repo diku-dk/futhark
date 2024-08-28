@@ -25,7 +25,7 @@ def map_3d f = map (map_2d f)
 def grad 'a (f: a -> real) (primal: a) = vjp f primal (real.i64 1)
 
 let jacfwd [n][m] (f: [n][m]vec3 -> real) (x: [n][m]vec3): [n][m]vec3 =
-  let v3 xs = unflatten_3d n m 3 xs |> map_2d to_vec3
+  let v3 xs = unflatten_3d xs |> map_2d to_vec3
   let tangent i = (replicate (n*m*3) 0 with [i] = 1) |> v3
   in tabulate (n*m*3) (\i -> jvp f x (tangent i)) |> v3
 

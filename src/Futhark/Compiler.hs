@@ -148,10 +148,10 @@ prettyProgErrors = stack . punctuate line . map onError . sortOn (rep . locOf) .
     onError (ProgWarning loc msg) =
       annotate (color Yellow) $ "Warning at " <> pretty (locText (srclocOf loc)) <> ":" </> unAnnotate msg
 
--- | Throw an exception formatted with 'pprProgErrors' if there's
+-- | Throw an exception formatted with 'prettyProgErrors' if there's
 -- an error.
 throwOnProgError ::
-  MonadError CompilerError m =>
+  (MonadError CompilerError m) =>
   Either (NE.NonEmpty ProgError) a ->
   m a
 throwOnProgError =
@@ -187,7 +187,7 @@ readUntypedProgram =
   fmap (map (first includeToString)) . throwOnProgError
     <=< liftIO . readUntypedLibrary . pure
 
-orDie :: MonadIO m => FutharkM a -> m a
+orDie :: (MonadIO m) => FutharkM a -> m a
 orDie m = liftIO $ do
   res <- runFutharkM m NotVerbose
   case res of
@@ -197,11 +197,11 @@ orDie m = liftIO $ do
     Right res' -> pure res'
 
 -- | Not verbose, and terminates process on error.
-readProgramOrDie :: MonadIO m => FilePath -> m (Warnings, Imports, VNameSource)
+readProgramOrDie :: (MonadIO m) => FilePath -> m (Warnings, Imports, VNameSource)
 readProgramOrDie file = orDie $ readProgramFile mempty file
 
 -- | Not verbose, and terminates process on error.
-readUntypedProgramOrDie :: MonadIO m => FilePath -> m [(String, E.UncheckedProg)]
+readUntypedProgramOrDie :: (MonadIO m) => FilePath -> m [(String, E.UncheckedProg)]
 readUntypedProgramOrDie file = orDie $ readUntypedProgram file
 
 -- | Run an operation that produces warnings, and handle them

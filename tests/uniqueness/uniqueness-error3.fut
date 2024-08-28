@@ -1,8 +1,7 @@
 -- ==
--- error: "b".*consumed
+-- error: "a".*consumed
 
-def main(): i32 =
-    let n = 10
+def main n =
     let a = iota(n)
     let b = a -- b and a alias each other.
     let (i,j) = (2,5) in

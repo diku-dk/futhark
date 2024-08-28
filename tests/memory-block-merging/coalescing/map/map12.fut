@@ -1,7 +1,7 @@
 -- ==
 -- input { [[1,2,3,4]] }
--- auto output
--- structure gpu-mem { Alloc 3 }
+-- output { [[11, 7, 4, 2]] }
+-- structure gpu-mem { Alloc 2 }
 
 def main [n][m] (xs: [n][m]i32) =
   #[incremental_flattening(only_intra)]

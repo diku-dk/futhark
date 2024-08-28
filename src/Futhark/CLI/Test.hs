@@ -18,12 +18,13 @@ import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
+import Data.Time.Clock.System (SystemTime (..), getSystemTime)
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
 import Futhark.Util (atMostChars, fancyTerminal, showText)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (annotate, bold, hardline, pretty, putDoc, vsep)
+import Futhark.Util.Pretty (annotate, bgColor, bold, hardline, pretty, putDoc, vsep)
 import Futhark.Util.Table
 import System.Console.ANSI (clearFromCursorToScreenEnd, clearLine, cursorUpLine)
 import System.Console.Terminal.Size qualified as Terminal
@@ -36,13 +37,17 @@ import Text.Regex.TDFA
 
 --- Test execution
 
+-- The use of [T.Text] here is somewhat kludgy. We use it to track how
+-- many errors have occurred during testing of a single program (which
+-- may have multiple entry points). This should really not be done at
+-- the monadic level - a test failing should be handled explicitly.
 type TestM = ExceptT [T.Text] IO
 
 -- Taken from transformers-0.5.5.0.
 eitherToErrors :: Either e a -> Errors e a
 eitherToErrors = either failure Pure
 
-throwError :: MonadError [e] m => e -> m a
+throwError :: (MonadError [e] m) => e -> m a
 throwError e = E.throwError [e]
 
 runTestM :: TestM () -> IO TestResult
@@ -57,7 +62,7 @@ context s = withExceptT $
     [] -> []
     (e : es') -> (s <> ":\n" <> e) : es'
 
-context1 :: Monad m => T.Text -> ExceptT T.Text m a -> ExceptT T.Text m a
+context1 :: (Monad m) => T.Text -> ExceptT T.Text m a -> ExceptT T.Text m a
 context1 s = withExceptT $ \e -> s <> ":\n" <> e
 
 accErrors :: [TestM a] -> TestM [a]
@@ -107,10 +112,14 @@ data TestMode
     TypeCheck
   | -- | Only compile (do not run).
     Compile
+  | -- | Only internalise (do not run).
+    Internalise
   | -- | Test compiled code.
     Compiled
   | -- | Test interpreted code.
     Interpreted
+  | -- | Perform structure tests.
+    Structure
   deriving (Eq, Show)
 
 data TestCase = TestCase
@@ -247,7 +256,7 @@ runTestCase (TestCase mode program testcase progs) = do
           ]
   case testAction testcase of
     CompileTimeFailure expected_error ->
-      context checkctx $ do
+      unless (mode `elem` [Structure, Internalise]) . context checkctx $ do
         (code, _, err) <-
           liftIO $ readProcessWithExitCode futhark ["check", program] ""
         case code of
@@ -255,15 +264,23 @@ runTestCase (TestCase mode program testcase progs) = do
           ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
           ExitFailure 1 -> throwError $ T.decodeUtf8 err
           ExitFailure _ -> liftExcept $ checkError expected_error $ T.decodeUtf8 err
-    RunCases {} | mode == TypeCheck -> do
-      let options = ["check", program] ++ configExtraCompilerOptions progs
-      context checkctx $ do
-        (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
-
-        case code of
-          ExitSuccess -> pure ()
-          ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
-          ExitFailure _ -> throwError $ T.decodeUtf8 err
+    RunCases {}
+      | mode == TypeCheck -> do
+          let options = ["check", program] ++ configExtraCompilerOptions progs
+          context checkctx $ do
+            (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
+            case code of
+              ExitSuccess -> pure ()
+              ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+              ExitFailure _ -> throwError $ T.decodeUtf8 err
+      | mode == Internalise -> do
+          let options = ["dev", program] ++ configExtraCompilerOptions progs
+          context checkctx $ do
+            (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
+            case code of
+              ExitSuccess -> pure ()
+              ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+              ExitFailure _ -> throwError $ T.decodeUtf8 err
     RunCases ios structures warnings -> do
       -- Compile up-front and reuse same executable for several entry points.
       let backend = configBackend progs
@@ -273,12 +290,15 @@ runTestCase (TestCase mode program testcase progs) = do
         context "Generating reference outputs" $
           -- We probably get the concurrency at the test program level,
           -- so force just one data set at a time here.
-          ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
+          withExceptT pure $
+            ensureReferenceOutput (Just 1) (FutharkExe futhark) "c" program ios
+
+      when (mode == Structure) $
+        mapM_ (testMetrics progs program) structures
 
       when (mode `elem` [Compile, Compiled]) $
         context ("Compiling with --backend=" <> T.pack backend) $ do
           compileTestProgram extra_compiler_options (FutharkExe futhark) backend program warnings
-          mapM_ (testMetrics progs program) structures
           unless (mode == Compile) $ do
             (tuning_opts, _) <-
               liftIO $ determineTuning (configTuning progs) program
@@ -348,7 +368,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
 
         compareResult entry index program expected res
 
-checkError :: MonadError T.Text m => ExpectedError -> T.Text -> m ()
+checkError :: (MonadError T.Text m) => ExpectedError -> T.Text -> m ()
 checkError (ThisError regex_s regex) err
   | not (match regex $ T.unpack err) =
       E.throwError $
@@ -378,7 +398,9 @@ runResult _ (ExitFailure _) _ stderr_s =
 
 compileTestProgram :: [String] -> FutharkExe -> String -> FilePath -> [WarningTest] -> TestM ()
 compileTestProgram extra_options futhark backend program warnings = do
-  (_, futerr) <- compileProgram ("--server" : extra_options) futhark backend program
+  (_, futerr) <-
+    withExceptT pure $
+      compileProgram ("--server" : extra_options) futhark backend program
   testWarnings warnings futerr
 
 compareResult ::
@@ -499,6 +521,26 @@ reportTable ts = do
     running = labelstr <> (T.unwords . reverse . map (T.pack . testCaseProgram) . testStatusRun) ts
     labelstr = "Now testing: "
 
+reportLine :: MVar SystemTime -> TestStatus -> IO ()
+reportLine time_mvar ts =
+  modifyMVar_ time_mvar $ \time -> do
+    time_now <- getSystemTime
+    if systemSeconds time_now - systemSeconds time >= period
+      then do
+        T.putStrLn $
+          "("
+            <> showText (testStatusFail ts)
+            <> " failed, "
+            <> showText (testStatusPass ts)
+            <> " passed, "
+            <> showText num_remain
+            <> " to go)."
+        pure time_now
+      else pure time
+  where
+    num_remain = length $ testStatusRemain ts
+    period = 60
+
 moveCursorToTableTop :: IO ()
 moveCursorToTableTop = cursorUpLine tableLines
 
@@ -521,11 +563,13 @@ runTests config paths = do
   let (excluded, included) = partition (excludedTest config) all_tests
   _ <- forkIO $ mapM_ (putMVar testmvar . excludeCases config) included
 
+  time_mvar <- newMVar $ MkSystemTime 0 0
+
   let fancy = not (configLineOutput config) && fancyTerminal
 
       report
         | fancy = reportTable
-        | otherwise = const (pure ())
+        | otherwise = reportLine time_mvar
       clear
         | fancy = clearFromCursorToScreenEnd
         | otherwise = pure ()
@@ -567,7 +611,7 @@ runTests config paths = do
                     when fancy moveCursorToTableTop
                     clear
                     putDoc $
-                      annotate bold (pretty (testCaseProgram test) <> ":")
+                      annotate (bold <> bgColor Red) (pretty (testCaseProgram test) <> ":")
                         <> hardline
                         <> vsep (map pretty s)
                         <> hardline
@@ -577,11 +621,10 @@ runTests config paths = do
                         { testStatusFail = testStatusFail ts' + 1,
                           testStatusRunPass =
                             testStatusRunPass ts'
-                              + numTestCases test
-                              - length s,
+                              + max 0 (numTestCases test - length s),
                           testStatusRunFail =
                             testStatusRunFail ts'
-                              + length s
+                              + min (numTestCases test) (length s)
                         }
 
   when fancy spaceTable
@@ -694,12 +737,22 @@ commandLineOptions =
       "c"
       ["compiled"]
       (NoArg $ Right $ \config -> config {configTestMode = Compiled})
-      "Only run compiled code",
+      "Only run compiled code (the default)",
     Option
       "C"
       ["compile"]
       (NoArg $ Right $ \config -> config {configTestMode = Compile})
       "Only compile, do not run.",
+    Option
+      "s"
+      ["structure"]
+      (NoArg $ Right $ \config -> config {configTestMode = Structure})
+      "Perform structure tests.",
+    Option
+      "I"
+      ["internalise"]
+      (NoArg $ Right $ \config -> config {configTestMode = Internalise})
+      "Only run the compiler frontend.",
     Option
       []
       ["no-terminal", "notty"]

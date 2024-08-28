@@ -27,11 +27,21 @@ import Futhark.Optimise.Simplify.Rep
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Pass
 
+funDefUsages :: (FreeIn a) => [a] -> UT.UsageTable
+funDefUsages funs =
+  -- XXX: treat every constant used in the functions as consumed,
+  -- because it is otherwise complicated to ensure we do not introduce
+  -- more aliasing than specified by the return types.  CSE has the
+  -- same problem.
+  let free_in_funs = foldMap freeIn funs
+   in UT.usages free_in_funs
+        <> foldMap UT.consumedUsage (namesToList free_in_funs)
+
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
 simplifyProg ::
-  Engine.SimplifiableRep rep =>
+  (Engine.SimplifiableRep rep) =>
   Engine.SimpleOps rep ->
   RuleBook (Engine.Wise rep) ->
   Engine.HoistBlockers rep ->
@@ -41,15 +51,13 @@ simplifyProg simpl rules blockers prog = do
   let consts = progConsts prog
       funs = progFuns prog
   (consts_vtable, consts') <-
-    simplifyConsts (UT.usages $ foldMap freeIn funs) (mempty, informStms consts)
+    simplifyConsts (funDefUsages funs) (mempty, informStms consts)
 
   -- We deepen the vtable so it will look like the constants are in an
   -- "outer loop"; this communicates useful information to some
   -- simplification rules (e.g. see issue #1302).
   funs' <- parPass (simplifyFun' (ST.deepen consts_vtable) . informFunDef) funs
-  let funs_uses = UT.usages $ foldMap freeIn funs'
-
-  (_, consts'') <- simplifyConsts funs_uses (mempty, consts')
+  (_, consts'') <- simplifyConsts (funDefUsages funs') (mempty, consts')
 
   pure $
     prog

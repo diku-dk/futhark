@@ -19,7 +19,6 @@ module Futhark.CodeGen.Backends.MulticoreC
     addTimingFields,
     functionTiming,
     functionIterations,
-    multiCoreReport,
     multicoreDef,
     multicoreName,
     DefSpecifier,
@@ -45,7 +44,7 @@ import Language.C.Syntax qualified as C
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
-  MonadFreshNames m => T.Text -> Prog MCMem -> m (ImpGen.Warnings, GC.CParts)
+  (MonadFreshNames m) => T.Text -> Prog MCMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version =
   traverse
     ( GC.compileProg
@@ -64,13 +63,6 @@ compileProg version =
 cliOptions :: [Option]
 cliOptions =
   [ Option
-      { optionLongName = "profile",
-        optionShortName = Just 'P',
-        optionArgument = NoArgument,
-        optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|],
-        optionDescription = "Gather profiling information."
-      },
-    Option
       { optionLongName = "num-threads",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
@@ -122,7 +114,7 @@ compileRetvalStructFields = zipWith field
       [C.csdecl|$ty:defaultMemBlockType $id:(closureRetvalStructField name);|]
 
 compileSetStructValues ::
-  C.ToIdent a =>
+  (C.ToIdent a) =>
   a ->
   [VName] ->
   [(C.Type, ValueType)] ->
@@ -137,7 +129,7 @@ compileSetStructValues struct = zipWith field
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
 
 compileSetRetvalStructValues ::
-  C.ToIdent a =>
+  (C.ToIdent a) =>
   a ->
   [VName] ->
   [(C.Type, ValueType)] ->
@@ -154,7 +146,7 @@ compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
     field name (_, RawMem) =
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
 
-compileGetRetvalStructVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
+compileGetRetvalStructVals :: (C.ToIdent a) => a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileGetRetvalStructVals struct = zipWith field
   where
     field name (ty, Prim pt) =
@@ -167,7 +159,7 @@ compileGetRetvalStructVals struct = zipWith field
                  .size = 0, .references = NULL};|]
 
 compileGetStructVals ::
-  C.ToIdent a =>
+  (C.ToIdent a) =>
   a ->
   [VName] ->
   [(C.Type, ValueType)] ->
@@ -183,7 +175,7 @@ compileGetStructVals struct = zipWith field
                   .mem = $id:struct->$id:(closureFreeStructField name),
                   .size = 0, .references = NULL};|]
 
-compileWriteBackResVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
+compileWriteBackResVals :: (C.ToIdent a) => a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
 compileWriteBackResVals struct = zipWith field
   where
     field name (_, Prim pt) =
@@ -208,113 +200,26 @@ mcMemToCType v space = do
         else RawMem
     )
 
-functionRuntime :: Name -> C.Id
-functionRuntime = (`C.toIdent` mempty) . (<> "_total_runtime")
-
-functionRuns :: Name -> C.Id
-functionRuns = (`C.toIdent` mempty) . (<> "_runs")
-
-functionIter :: Name -> C.Id
-functionIter = (`C.toIdent` mempty) . (<> "_iter")
-
-multiCoreReport :: [(Name, Bool)] -> [C.BlockItem]
-multiCoreReport names = report_kernels
-  where
-    report_kernels = concatMap reportKernel names
-    max_name_len_pad = 40
-    format_string name True =
-      let name_s = nameToString name
-          padding = replicate (max_name_len_pad - length name_s) ' '
-       in unwords ["tid %2d -", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %9.6f; iters %9ld; avg %ld\n"]
-    format_string name False =
-      let name_s = nameToString name
-          padding = replicate (max_name_len_pad - length name_s) ' '
-       in unwords ["        ", name_s ++ padding, "ran %10d times; avg: %10ldus; total: %10ldus; time pr. iter %9.6f; iters %9ld; avg %ld\n"]
-    reportKernel (name, is_array) =
-      let runs = functionRuns name
-          total_runtime = functionRuntime name
-          iters = functionIter name
-       in if is_array
-            then
-              [ [C.citem|
-                     for (int i = 0; i < ctx->scheduler.num_threads; i++) {
-                       fprintf(ctx->log,
-                         $string:(format_string name is_array),
-                         i,
-                         ctx->program->$id:runs[i],
-                         (long int) ctx->program->$id:total_runtime[i] / (ctx->program->$id:runs[i] != 0 ? ctx->program->$id:runs[i] : 1),
-                         (long int) ctx->program->$id:total_runtime[i],
-                         (double) ctx->program->$id:total_runtime[i] /  (ctx->program->$id:iters[i] == 0 ? 1 : (double)ctx->program->$id:iters[i]),
-                         (long int) (ctx->program->$id:iters[i]),
-                         (long int) (ctx->program->$id:iters[i]) / (ctx->program->$id:runs[i] != 0 ? ctx->program->$id:runs[i] : 1)
-                         );
-                     }
-                   |]
-              ]
-            else
-              [ [C.citem|
-                    fprintf(ctx->log,
-                       $string:(format_string name is_array),
-                       ctx->program->$id:runs,
-                       (long int) ctx->program->$id:total_runtime / (ctx->program->$id:runs != 0 ? ctx->program->$id:runs : 1),
-                       (long int) ctx->program->$id:total_runtime,
-                       (double) ctx->program->$id:total_runtime /  (ctx->program->$id:iters == 0 ? 1 : (double)ctx->program->$id:iters),
-                       (long int) (ctx->program->$id:iters),
-                       (long int) (ctx->program->$id:iters) / (ctx->program->$id:runs != 0 ? ctx->program->$id:runs : 1));
-                   |],
-                [C.citem|ctx->total_runtime += ctx->program->$id:total_runtime;|],
-                [C.citem|ctx->total_runs += ctx->program->$id:runs;|]
-              ]
-
-addBenchmarkFields :: Name -> Maybe C.Id -> GC.CompilerM op s ()
-addBenchmarkFields name (Just _) = do
-  GC.contextFieldDyn
-    (functionRuntime name)
-    [C.cty|typename int64_t*|]
-    [C.cstm|ctx->program->$id:(functionRuntime name) = calloc(sizeof(typename int64_t), ctx->scheduler.num_threads);|]
-    [C.cstm|free(ctx->program->$id:(functionRuntime name));|]
-  GC.contextFieldDyn
-    (functionRuns name)
-    [C.cty|int*|]
-    [C.cstm|ctx->program->$id:(functionRuns name) = calloc(sizeof(int), ctx->scheduler.num_threads);|]
-    [C.cstm|free(ctx->program->$id:(functionRuns name));|]
-  GC.contextFieldDyn
-    (functionIter name)
-    [C.cty|typename int64_t*|]
-    [C.cstm|ctx->program->$id:(functionIter name) = calloc(sizeof(sizeof(typename int64_t)), ctx->scheduler.num_threads);|]
-    [C.cstm|free(ctx->program->$id:(functionIter name));|]
-addBenchmarkFields name Nothing = do
-  GC.contextField (functionRuntime name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
-  GC.contextField (functionRuns name) [C.cty|int|] $ Just [C.cexp|0|]
-  GC.contextField (functionIter name) [C.cty|typename int64_t|] $ Just [C.cexp|0|]
-
-benchmarkCode :: Name -> Maybe C.Id -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
-benchmarkCode name tid code = do
-  addBenchmarkFields name tid
+benchmarkCode :: Name -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
+benchmarkCode name code = do
+  event <- newVName "event"
   pure
     [C.citems|
-     typename uint64_t $id:start = 0;
-     if (ctx->profiling && !ctx->profiling_paused) {
-       $id:start = get_wall_time();
+     struct mc_event* $id:event = mc_event_new(ctx);
+     if ($id:event != NULL) {
+       $id:event->bef = get_wall_time();
      }
      $items:code
-     if (ctx->profiling && !ctx->profiling_paused) {
-       typename uint64_t $id:end = get_wall_time();
-       typename uint64_t elapsed = $id:end - $id:start;
-       $items:(updateFields tid)
-     }
-     |]
-  where
-    start = name <> "_start"
-    end = name <> "_end"
-    updateFields Nothing =
-      [C.citems|__atomic_fetch_add(&ctx->program->$id:(functionRuns name), 1, __ATOMIC_RELAXED);
-                                            __atomic_fetch_add(&ctx->program->$id:(functionRuntime name), elapsed, __ATOMIC_RELAXED);
-                                            __atomic_fetch_add(&ctx->program->$id:(functionIter name), iterations, __ATOMIC_RELAXED);|]
-    updateFields (Just _tid') =
-      [C.citems|ctx->program->$id:(functionRuns name)[tid]++;
-                                            ctx->program->$id:(functionRuntime name)[tid] += elapsed;
-                                            ctx->program->$id:(functionIter name)[tid] += iterations;|]
+     if ($id:event != NULL) {
+       $id:event->aft = get_wall_time();
+       lock_lock(&ctx->event_list_lock);
+       add_event(ctx,
+                 $string:(nameToString name),
+                 strdup("nothing further"),
+                 $id:event,
+                 (typename event_report_fn)mc_event_report);
+       lock_unlock(&ctx->event_list_lock);
+     }|]
 
 functionTiming :: Name -> C.Id
 functionTiming = (`C.toIdent` mempty) . (<> "_total_time")
@@ -341,7 +246,7 @@ multicoreDef s f = do
   pure s'
 
 generateParLoopFn ::
-  C.ToIdent a =>
+  (C.ToIdent a) =>
   M.Map VName Space ->
   String ->
   MCCode ->
@@ -353,7 +258,7 @@ generateParLoopFn lexical basename code fstruct free retval = do
   let (fargs, fctypes) = unzip free
   let (retval_args, retval_ctypes) = unzip retval
   multicoreDef basename $ \s -> do
-    fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
+    fbody <- benchmarkCode s <=< GC.inNewFunction $
       GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
         mapM_ GC.item [C.citems|$decls:(compileGetStructVals fstruct fargs fctypes)|]
         mapM_ GC.item [C.citems|$decls:(compileGetRetvalStructVals fstruct retval_args retval_ctypes)|]
@@ -443,15 +348,13 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
 
   -- Generate the nested segop function if available
-  fnpar_task <- case par_task of
+  case par_task of
     Just (ParallelTask nested_code) -> do
       let lexical_nested = lexicalMemoryUsageMC TraverseKernels $ Function Nothing [] params nested_code
       fnpar_task <- generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
       GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
-      pure $ zip [fnpar_task] [True]
-    Nothing -> do
+    Nothing ->
       GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
-      pure mempty
 
   let ftask_err = fpar_task <> "_err"
       code =
@@ -462,9 +365,6 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                   }|]
 
   mapM_ GC.item code
-
-  -- Add profile fields for -P option
-  mapM_ GC.profileReport $ multiCoreReport $ (fpar_task, True) : fnpar_task
 compileOp (ParLoop s' body free) = do
   free_ctypes <- mapM paramToCType free
   let free_args = map paramName free
@@ -475,7 +375,7 @@ compileOp (ParLoop s' body free) = do
     prepareTaskStruct multicoreDef (s' ++ "_parloop_struct") free_args free_ctypes mempty mempty
 
   ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
-    fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
+    fbody <- benchmarkCode s <=< GC.inNewFunction $
       GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
         GC.items [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
 
@@ -495,6 +395,7 @@ compileOp (ParLoop s' body free) = do
                                  int subtask_id,
                                  int tid) {
                        (void)subtask_id;
+                       (void)tid;
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
@@ -515,7 +416,6 @@ compileOp (ParLoop s' body free) = do
   code' <-
     benchmarkCode
       ftask_total
-      Nothing
       [C.citems|int $id:ftask_err = scheduler_execute_task(&ctx->scheduler,
                                                            &$id:ftask_name);
                if ($id:ftask_err != 0) {
@@ -524,7 +424,6 @@ compileOp (ParLoop s' body free) = do
                }|]
 
   mapM_ GC.item code'
-  mapM_ GC.profileReport $ multiCoreReport $ zip [ftask, ftask_total] [True, False]
 compileOp (Atomic aop) =
   atomicOps aop (\ty _ -> pure [C.cty|$ty:ty*|])
 compileOp (ISPCKernel body _) =

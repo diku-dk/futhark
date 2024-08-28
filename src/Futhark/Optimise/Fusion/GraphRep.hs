@@ -8,11 +8,11 @@
 -- by the @fgl@ package ("Data.Graph.Inductive").  The graph provided
 -- by this package allows nodes and edges to have arbitrarily-typed
 -- "labels".  It is these labels ('EdgeT', 'NodeT') that we use to
--- contain Futhark-specific information.  An edge goes *from* uses of
--- variables to the node that produces that variable.  There are also
--- edges that do not represent normal data dependencies, but other
--- things.  This means that a node can have multiple edges for the
--- same name, indicating different kinds of dependencies.
+-- contain Futhark-specific information.  An edge goes *from*
+-- consumers to producers.  There are also edges that do not represent
+-- normal data dependencies, but other things.  This means that a node
+-- can have multiple edges for the same name, indicating different
+-- kinds of dependencies.
 module Futhark.Optimise.Fusion.GraphRep
   ( -- * Data structure
     EdgeT (..),
@@ -102,7 +102,7 @@ instance Show EdgeT where
 instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
   show (SoacNode _ pat _ _) = prettyString pat
-  show (TransNode _ tr _) = prettyString (show tr)
+  show (TransNode _ tr _) = prettyString tr
   show (ResNode name) = prettyString $ "Res: " ++ prettyString name
   show (FreeNode name) = prettyString $ "Input: " ++ prettyString name
   show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
@@ -162,7 +162,7 @@ type EdgeGenerator = NodeT -> [(VName, EdgeT)]
 -- it.
 type ProducerMapping = M.Map VName G.Node
 
-makeMapping :: Monad m => DepGraphAug m
+makeMapping :: (Monad m) => DepGraphAug m
 makeMapping dg@(DepGraph {dgGraph = g}) =
   pure dg {dgProducerMapping = M.fromList $ concatMap gen_dep_list (G.labNodes g)}
   where
@@ -170,11 +170,11 @@ makeMapping dg@(DepGraph {dgGraph = g}) =
     gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
 
 -- | Apply several graph augmentations in sequence.
-applyAugs :: Monad m => [DepGraphAug m] -> DepGraphAug m
+applyAugs :: (Monad m) => [DepGraphAug m] -> DepGraphAug m
 applyAugs augs g = foldlM (flip ($)) g augs
 
 -- | Creates deps for the given nodes on the graph using the 'EdgeGenerator'.
-genEdges :: Monad m => [DepNode] -> EdgeGenerator -> DepGraphAug m
+genEdges :: (Monad m) => [DepNode] -> EdgeGenerator -> DepGraphAug m
 genEdges l_stms edge_fun dg =
   depGraphInsertEdges (concatMap (genEdge (dgProducerMapping dg)) l_stms) dg
   where
@@ -185,11 +185,11 @@ genEdges l_stms edge_fun dg =
       Just to <- [M.lookup dep name_map]
       pure $ G.toLEdge (from, to) edgeT
 
-depGraphInsertEdges :: Monad m => [DepEdge] -> DepGraphAug m
+depGraphInsertEdges :: (Monad m) => [DepEdge] -> DepGraphAug m
 depGraphInsertEdges edgs dg = pure $ dg {dgGraph = G.insEdges edgs $ dgGraph dg}
 
 -- | Monadically modify every node of the graph.
-mapAcross :: Monad m => (DepContext -> m DepContext) -> DepGraphAug m
+mapAcross :: (Monad m) => (DepContext -> m DepContext) -> DepGraphAug m
 mapAcross f dg = do
   g' <- foldlM (flip helper) (dgGraph dg) (G.nodes (dgGraph dg))
   pure $ dg {dgGraph = g'}
@@ -221,10 +221,10 @@ reachable :: DepGraph -> G.Node -> G.Node -> Bool
 reachable dg source target = target `elem` Q.reachable source (dgGraph dg)
 
 -- Utility func for augs
-augWithFun :: Monad m => EdgeGenerator -> DepGraphAug m
+augWithFun :: (Monad m) => EdgeGenerator -> DepGraphAug m
 augWithFun f dg = genEdges (G.labNodes (dgGraph dg)) f dg
 
-addDeps :: Monad m => DepGraphAug m
+addDeps :: (Monad m) => DepGraphAug m
 addDeps = augWithFun toDep
   where
     toDep stmt =
@@ -237,7 +237,7 @@ addDeps = augWithFun toDep
           mkInfDep vname = (vname, InfDep vname)
        in map mkDep fusible <> map mkInfDep infusible
 
-addConsAndAliases :: Monad m => DepGraphAug m
+addConsAndAliases :: (Monad m) => DepGraphAug m
 addConsAndAliases = augWithFun edges
   where
     edges (StmNode s) = consEdges s' <> aliasEdges s'
@@ -257,7 +257,7 @@ addConsAndAliases = augWithFun edges
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
 -- nodes coming before it (now also adds fake edges to aliases - hope this
 -- fixes asymptotic complexity guarantees)
-addExtraCons :: Monad m => DepGraphAug m
+addExtraCons :: (Monad m) => DepGraphAug m
 addExtraCons dg =
   depGraphInsertEdges (concatMap makeEdge (G.labEdges g)) dg
   where
@@ -273,7 +273,7 @@ addExtraCons dg =
       pure $ G.toLEdge (from, to2) (Fake cname)
     makeEdge _ = []
 
-mapAcrossNodeTs :: Monad m => (NodeT -> m NodeT) -> DepGraphAug m
+mapAcrossNodeTs :: (Monad m) => (NodeT -> m NodeT) -> DepGraphAug m
 mapAcrossNodeTs f = mapAcross f'
   where
     f' (ins, n, nodeT, outs) = do
@@ -287,7 +287,7 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
     case maybeSoac of
       Right hsoac -> pure $ SoacNode mempty pat hsoac aux
       Left H.NotSOAC -> pure n
-  DoLoop {} ->
+  Loop {} ->
     pure $ DoNode s []
   Match {} ->
     pure $ MatchNode s []
@@ -317,7 +317,7 @@ getStmRes :: EdgeGenerator
 getStmRes (ResNode name) = [(name, Res name)]
 getStmRes _ = []
 
-addResEdges :: Monad m => DepGraphAug m
+addResEdges :: (Monad m) => DepGraphAug m
 addResEdges = augWithFun getStmRes
 
 -- | Make a dependency graph corresponding to a 'Body'.
@@ -340,7 +340,7 @@ mkDepGraphForFun f = runReader (mkDepGraph (funDefBody f)) scope
     scope = scopeOfFParams (funDefParams f) <> scopeOf (bodyStms (funDefBody f))
 
 -- | Merges two contexts.
-mergedContext :: Ord b => a -> G.Context a b -> G.Context a b -> G.Context a b
+mergedContext :: (Ord b) => a -> G.Context a b -> G.Context a b -> G.Context a b
 mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
   let new_inp = filter (\n -> snd n /= n1 && snd n /= n2) (nubOrd (inp1 <> inp2))
       new_out = filter (\n -> snd n /= n1 && snd n /= n2) (nubOrd (out1 <> out2))
@@ -349,7 +349,7 @@ mergedContext mergedlabel (inp1, n1, _, out1) (inp2, n2, _, out2) =
 -- | Remove the given node, and insert the 'DepContext' into the
 -- graph, replacing any existing information about the node contained
 -- in the 'DepContext'.
-contractEdge :: Monad m => G.Node -> DepContext -> DepGraphAug m
+contractEdge :: (Monad m) => G.Node -> DepContext -> DepGraphAug m
 contractEdge n2 ctx dg = do
   let n1 = G.node' ctx -- n1 remains
   pure $ dg {dgGraph = ctx G.& G.delNodes [n1, n2] (dgGraph dg)}
@@ -367,7 +367,7 @@ data Classification
 
 type Classifications = S.Set (VName, Classification)
 
-freeClassifications :: FreeIn a => a -> Classifications
+freeClassifications :: (FreeIn a) => a -> Classifications
 freeClassifications =
   S.fromList . (`zip` repeat Other) . namesToList . freeIn
 
@@ -383,7 +383,7 @@ expInputs (Match cond cases defbody attr) =
   foldMap (bodyInputs . caseBody) cases
     <> bodyInputs defbody
     <> freeClassifications (cond, attr)
-expInputs (DoLoop params form b1) =
+expInputs (Loop params form b1) =
   freeClassifications (params, form) <> bodyInputs b1
 expInputs (Op soac) = case soac of
   Futhark.Screma w is form -> inputs is <> freeClassifications (w, form)

@@ -31,7 +31,7 @@ def lud_diagonal [b] (a: [b][b]f32): *[b][b]f32 =
             let mat[i+1] = row
 
             in mat
-       ) (unflatten (opaque 1) b (a :> [opaque 1*b][b]f32))
+       ) (unflatten (a :> [opaque 1*b][b]f32))
        |> head
 
 def lud_perimeter_upper [m][b] (diag: [b][b]f32) (a0s: [m][b][b]f32): *[m][b][b]f32 =
@@ -130,4 +130,4 @@ entry lud [n] (block_size: i64) (mat: *[n]f32): [n]f32 =
 entry lud_2d [m] (mat: *[m][m]f32): [m][m]f32 =
   let mat = flatten mat
   let mat = lud 32 mat
-  in unflatten m m mat
+  in unflatten mat

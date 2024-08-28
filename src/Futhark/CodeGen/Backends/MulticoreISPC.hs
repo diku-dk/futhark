@@ -61,7 +61,7 @@ varying = C.EscTypeQual "varying" noLoc
 
 -- | Compile the program to C and ISPC code using multicore operations.
 compileProg ::
-  MonadFreshNames m => T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
+  (MonadFreshNames m) => T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
 compileProg version prog = do
   -- Dynamic scheduling seems completely broken currently, so we disable it.
   (ws, defs) <- ImpGen.compileProg prog
@@ -101,6 +101,7 @@ typedef unsigned int32 uint32_t;
 typedef unsigned int16 uint16_t;
 typedef unsigned int8 uint8_t;
 #define volatile
+#define SCALAR_FUN_ATTR static inline
 
 $errorsH
 
@@ -122,7 +123,9 @@ $ispc_decls|]
 operations :: GC.Operations Multicore ISPCState
 operations =
   MC.operations
-    { GC.opsCompiler = compileOp
+    { GC.opsCompiler = compileOp,
+      -- FIXME: the default codegen for LMAD copies does not work for ISPC.
+      GC.opsCopies = mempty
     }
 
 ispcDecl :: C.Definition -> ISPCCompilerM ()
@@ -147,26 +150,6 @@ sharedDef s f = do
   GC.earlyDecl =<< f s'
   pure s'
 
--- | Copy memory where one of the operands is using an AoS layout.
-copyMemoryAOS ::
-  PrimType ->
-  C.Exp ->
-  C.Exp ->
-  C.Exp ->
-  C.Exp ->
-  C.Exp ->
-  GC.CompilerM op s ()
-copyMemoryAOS pt destmem destidx srcmem srcidx nbytes =
-  GC.stm
-    [C.cstm|if ($exp:nbytes > 0) {
-              $id:overload($exp:destmem + $exp:destidx,
-                      $exp:srcmem + $exp:srcidx,
-                      extract($exp:nbytes, 0));
-            }|]
-  where
-    size = show (8 * primByteSize pt :: Integer)
-    overload = "memmove_" <> size
-
 -- | ISPC has no string literals, so this makes one in C and exposes it via an
 -- external function, returning the name.
 makeStringLiteral :: String -> ISPCCompilerM Name
@@ -189,7 +172,7 @@ setMem dest src space = do
                   }|]
 
 -- | Unref memory in ISPC
-unRefMem :: C.ToExp a => a -> Space -> ISPCCompilerM ()
+unRefMem :: (C.ToExp a) => a -> Space -> ISPCCompilerM ()
 unRefMem mem space = do
   cached <- isJust <$> GC.cacheMem mem
   let mem_s = T.unpack $ expText $ C.toExp mem noLoc
@@ -552,16 +535,20 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
       dest' <- GC.rawMem dest
       idxexp <- compileExp $ constFoldPrimExp $ untyped idx
       deref <-
-        GC.derefPointer dest' [C.cexp|($tyquals:([varying]) typename int64_t)$exp:idxexp|]
+        GC.derefPointer
+          dest'
+          [C.cexp|($tyquals:([varying]) typename int64_t)$exp:idxexp|]
           <$> getMemType dest elemtype
       elemexp' <- toStorage elemtype <$> compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = do
       dest' <- GC.rawMem dest
+      idxexp <- compileExp $ untyped idx
       deref <-
-        GC.derefPointer dest'
-          <$> compileExp (untyped idx)
-          <*> getMemType dest elemtype
+        GC.derefPointer
+          dest'
+          [C.cexp|($tyquals:([varying]) typename int64_t)$exp:idxexp|]
+          <$> getMemType dest elemtype
       elemexp' <- toStorage elemtype <$> compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   where
@@ -576,19 +563,19 @@ compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
         <$> compileExp (untyped iexp)
         <*> getMemType src restype
   GC.stm [C.cstm|$id:x = $exp:e;|]
-compileCode code@(Copy pt dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
-  dm <- isJust <$> GC.cacheMem dest
-  sm <- isJust <$> GC.cacheMem src
-  if dm || sm
-    then
-      join $
-        copyMemoryAOS pt
-          <$> GC.rawMem dest
-          <*> compileExp (untyped destoffset)
-          <*> GC.rawMem src
-          <*> compileExp (untyped srcoffset)
-          <*> compileExp (untyped size)
-    else GC.compileCode code
+compileCode (Copy t shape (dst, DefaultSpace) dst_lmad (src, DefaultSpace) src_lmad) = do
+  dst' <- GC.rawMem dst
+  src' <- GC.rawMem src
+  let doWrite dst_i ve = do
+        deref <-
+          GC.derefPointer
+            dst'
+            [C.cexp|($tyquals:([varying]) typename int64_t)$exp:dst_i|]
+            <$> getMemType dst t
+        GC.stm [C.cstm|$exp:deref = $exp:(toStorage t ve);|]
+      doRead src_i =
+        fromStorage t . GC.derefPointer src' src_i <$> getMemType src t
+  GC.compileCopyWith shape doWrite dst_lmad doRead src_lmad
 compileCode (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
   unless cached $ unRefMem name space
@@ -789,20 +776,15 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
       Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
 
     -- Generate the nested segop function if available
-    fnpar_task <- case par_task of
+    case par_task of
       Just (ParallelTask nested_code) -> do
         let lexical_nested = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params nested_code
         fnpar_task <- MC.generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
         GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
-        pure $ zip [fnpar_task] [True]
-      Nothing -> do
+      Nothing ->
         GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
-        pure mempty
 
     GC.stm [C.cstm|return scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);|]
-
-    -- Add profile fields for -P option
-    mapM_ GC.profileReport $ MC.multiCoreReport $ (fpar_task, True) : fnpar_task
 
   schedn <- MC.multicoreDef "schedule_shim" $ \s ->
     pure

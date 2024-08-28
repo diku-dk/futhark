@@ -125,7 +125,7 @@ instance Substitute Adj where
   substituteNames m (AdjVal (Var v)) = AdjVal $ Var $ substituteNames m v
   substituteNames _ adj = adj
 
-zeroArray :: MonadBuilder m => Shape -> Type -> m VName
+zeroArray :: (MonadBuilder m) => Shape -> Type -> m VName
 zeroArray shape t
   | shapeRank shape == 0 =
       letExp "zero" $ zeroExp t
@@ -217,7 +217,7 @@ instance MonadFreshNames (State RState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify (\env -> env {stateNameSource = src})
 
-runADM :: MonadFreshNames m => ADM a -> m a
+runADM :: (MonadFreshNames m) => ADM a -> m a
 runADM (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
@@ -254,7 +254,9 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
             v_t <- lookupType v
             case v_t of
               Array {} -> do
-                v' <- letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
+                v' <-
+                  letExp (baseString v <> "_ad_copy") . BasicOp $
+                    Replicate mempty (Var v)
                 addSubstitution v' v
                 pure [(v, v')]
               _ -> pure mempty
@@ -269,7 +271,11 @@ copyConsumedArrsInBody dontCopy b =
       v_t <- lookupType v
       case v_t of
         Acc {} -> error $ "copyConsumedArrsInBody: Acc " <> prettyString v
-        Array {} -> M.singleton v <$> letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
+        Array {} ->
+          M.singleton v
+            <$> letExp
+              (baseString v <> "_ad_copy")
+              (BasicOp $ Replicate mempty (Var v))
         _ -> pure mempty
 
 returnSweepCode :: ADM a -> ADM a
@@ -322,7 +328,7 @@ tabNest = tabNest' []
         res <- tabNest' (paramName iparam : is) (n - 1) (map paramName params) f
         ret <- mapM lookupType res
         pure (ret, varsRes res)
-      let lam = Lambda (iparam : params) (Body () stms res) ret
+      let lam = Lambda (iparam : params) ret (Body () stms res)
       letTupExp "tab" $ Op $ Screma w (iota : vs) (mapSOAC lam)
 
 -- | Construct a lambda for adding two values of the given type.
@@ -388,7 +394,7 @@ updateAdj v d = do
           ~[v_adj'] <-
             tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] ->
               letTupExp "acc" . BasicOp $
-                UpdateAcc v_adj' (map Var is) [Var d']
+                UpdateAcc Safe v_adj' (map Var is) [Var d']
           insAdj v v_adj'
         _ -> do
           v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
@@ -411,7 +417,7 @@ updateAdjSlice slice v d = do
               fixSlice (fmap pe64 slice) $
                 map le64 is
           letTupExp (baseString v_adj') . BasicOp $
-            UpdateAcc v_adj' slice' [Var d']
+            UpdateAcc Safe v_adj' slice' [Var d']
       pure v_adj'
     _ -> do
       v_adjslice <-
@@ -452,7 +458,7 @@ updateAdjIndex v (check, i) se = do
                 ~[v_adj'] <-
                   tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
                     letTupExp "acc" . BasicOp $
-                      UpdateAcc v_adj' (i : map Var is) [Var se_v']
+                      UpdateAcc Safe v_adj' (i : map Var is) [Var se_v']
                 pure v_adj'
           _ -> do
             let stms s = do

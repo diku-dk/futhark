@@ -484,11 +484,12 @@ function actually returns.  The ``length`` function has this type:
 Whenever ``length`` occurs (as in the composition above), the type
 checker must *instantiate* the ``[n]`` with the concrete symbolic size
 of its input array.  But in the composition, that size does not
-actually exist until ``filter`` has been run.  For that matter, the
-type checker does not know what ``>->`` does, and for all it knows it
-may actually apply ``filter`` many times to different arrays, yielding
-different sizes.  This makes it impossible to uniquely instantiate the
-type of ``length``, and therefore the program is rejected.
+actually exist until ``filter`` has been fully applied.  For that
+matter, the type checker does not know what ``>->`` does, and for all
+it knows it may actually apply ``filter`` many times to different
+arrays, yielding different sizes.  This makes it impossible to
+uniquely instantiate the type of ``length``, and therefore the program
+is rejected.
 
 The common workaround is to use *pipelining* instead of composition
 whenever we use functions with existential return types:
@@ -839,6 +840,31 @@ that it should never happen:
             case _ -> assert false false
 
 :ref:`See here <assert>` for details on how to use ``assert``.
+
+.. _refutable-pattern:
+
+"Refutable pattern not allowed here"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs when you try to use a :term:`refutable pattern` in a
+``let`` binding or function parameter. A refutable pattern is a
+pattern that is not guaranteed to match a well-typed value. For
+example, this expression tries to bind an arbitrary tuple value ``x``
+a pattern that requires the first element is ``2``:
+
+.. code-block:: futhark
+
+   let (2, y) = x in 0
+
+What should happen at run-time if ``x`` is not 2? Refutable patterns
+are only allowed in ``match`` expressions, where the failure to match
+can be handled.  For example:
+
+.. code-block:: futhark
+
+   match x
+   case (2, y) ->  0
+   case _ -> ... -- do something else
 
 .. _record-type-not-known:
 

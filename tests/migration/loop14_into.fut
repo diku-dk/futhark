@@ -3,7 +3,7 @@
 -- ==
 -- structure gpu {
 --   /Index 0
---   /DoLoop/GPUBody/BinOp 1
+--   /Loop/GPUBody/BinOp 1
 -- }
 
 def main (A: [10]i64) : [10]i64 =
@@ -13,7 +13,3 @@ def main (A: [10]i64) : [10]i64 =
       let z = x+y
        in (0, map (+z) A)
    in A'
-
-
-
-

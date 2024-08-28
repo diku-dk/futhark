@@ -36,14 +36,6 @@ instance RepTypes MCMem where
 instance ASTRep MCMem where
   expTypesFromPat = pure . map snd . bodyReturnsFromPat
 
-instance OpReturns (MCOp NoOp MCMem) where
-  opReturns (ParOp _ op) = segOpReturns op
-  opReturns (OtherOp NoOp) = pure []
-
-instance OpReturns (MCOp NoOp (Engine.Wise MCMem)) where
-  opReturns (ParOp _ op) = segOpReturns op
-  opReturns k = extReturns <$> opType k
-
 instance PrettyRep MCMem
 
 instance TC.Checkable MCMem where
@@ -77,7 +69,7 @@ instance TraverseOpStms (Engine.Wise MCMem) where
   traverseOpStms = traverseMemOpStms (traverseMCOpStms (const pure))
 
 simplifyProg :: Prog MCMem -> PassM (Prog MCMem)
-simplifyProg = simplifyProgGeneric simpleMCMem
+simplifyProg = simplifyProgGeneric memRuleBook simpleMCMem
 
 simpleMCMem :: Engine.SimpleOps MCMem
 simpleMCMem =

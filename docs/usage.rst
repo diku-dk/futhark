@@ -33,7 +33,7 @@ can be compiled to an executable program as follows::
 
 This makes use of the ``futhark c`` compiler, but any other will work
 as well.  The compiler will automatically invoke ``cc`` to produce an
-executable binary called ``prog``.  If we had used ``futhark py``
+executable binary called ``prog``.  If we had used ``futhark python``
 instead of ``futhark c``, the ``prog`` file would instead have
 contained Python code, along with a `shebang`_ for easy execution.  In
 general, when compiling file ``foo.fut``, the result will be written
@@ -158,7 +158,7 @@ GPU Options
 ~~~~~~~~~~~
 
 The following options are supported by executables generated with the
-GPU backends (``opencl``, ``pyopencl``, and ``cuda``).
+GPU backends (``opencl``, ``pyopencl``, ``hip``, and ``cuda``).
 
   ``-d/--device DEVICE``
 
@@ -166,12 +166,26 @@ GPU backends (``opencl``, ``pyopencl``, and ``cuda``).
     special string ``#k``, where ``k`` is an integer, can be used to
     pick the *k*-th device, numbered from zero.
 
+  ``--default-thread-block-size INT``
+
+    The default size of GPU thread blocks that are launched. Capped to
+    the hardware limit if necessary.
+
+  ``--default-num-thread-blocks INT``
+
+    The default number of GPU thread blocks that are launched.
+
   ``-P/--profile``
 
     Measure the time taken by various GPU operations (such as kernels)
     and print a summary at the end.  Unfortunately, it is currently
     nontrivial (and manual) to relate these operations back to source
     Futhark code.
+
+  ``--unified-memory INT``
+
+    Corresponds to
+    :c:func:`futhark_context_config_set_unified_memory`.
 
 OpenCL-specific Options
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -305,9 +319,7 @@ Compiling to Library
 While compiling a Futhark program to an executable is useful for
 testing, it is not suitable for production use.  Instead, a Futhark
 program should be compiled into a reusable library in some target
-language, enabling integration into a larger program.  Five of the
-Futhark compilers support this: ``futhark c``, ``futhark opencl``,
-``futhark cuda``, ``futhark py``, and ``futhark pyopencl``.
+language, enabling integration into a larger program.
 
 General Concerns
 ^^^^^^^^^^^^^^^^
@@ -321,7 +333,8 @@ below).  Extra parameters may be added to pass in context data, or
 *out*-parameters for writing the result, for target languages that do
 not support multiple return values from functions.
 
-The entry point should have a name that is also a valid C identifier.
+The entry point should have a name that is also a valid identifier in
+the target language (usually C).
 
 Not all Futhark types can be mapped cleanly to the target language.
 Arrays of tuples, for example, are a common issue.  In such cases,
@@ -482,9 +495,9 @@ against the OpenCL library when linking the final binary::
 When using the OpenCL backend, extra API functions are provided for
 directly accessing or providing the OpenCL objects used by Futhark.
 Take care when using these functions.  In particular, a Futhark
-context can now be provided with the command queue to use::
+context can now be configured with the command queue to use::
 
-  struct futhark_context *futhark_context_new_with_command_queue(struct futhark_context_config *cfg, cl_command_queue queue);
+  void futhark_context_config_set_command_queue(struct futhark_context_config *cfg, cl_command_queue queue);
 
 As a ``cl_command_queue`` specifies an OpenCL device, this is also how
 manual platform and device selection is possible.  A function is also
@@ -522,7 +535,7 @@ See also :ref:`futhark-opencl(1)`.
 Generating Python
 ^^^^^^^^^^^^^^^^^
 
-The ``futhark py`` and ``futhark pyopencl`` compilers both support
+The ``futhark python`` and ``futhark pyopencl`` compilers both support
 generating reusable Python code, although the latter of these
 generates code of sufficient performance to be worthwhile.  The
 following mentions options and parameters only available for

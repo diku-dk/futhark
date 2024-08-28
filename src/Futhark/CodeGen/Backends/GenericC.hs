@@ -22,6 +22,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (second)
 import Data.DList qualified as DL
+import Data.List qualified as L
 import Data.Loc
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -37,7 +38,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, freeListH, halfH, lockH, timingH, utilH)
+import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, copyH, errorsH, eventListH, freeListH, halfH, lockH, timingH, utilH)
 import Futhark.IR.GPU.Sizes
 import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
@@ -61,6 +62,29 @@ defError msg stacktrace = do
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
 
+lmadcopyCPU :: DoCopy op s
+lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
+  let fname :: String
+      (fname, ty) =
+        case primByteSize t :: Int of
+          1 -> ("lmad_copy_1b", [C.cty|typename uint8_t|])
+          2 -> ("lmad_copy_2b", [C.cty|typename uint16_t|])
+          4 -> ("lmad_copy_4b", [C.cty|typename uint32_t|])
+          8 -> ("lmad_copy_8b", [C.cty|typename uint64_t|])
+          k -> error $ "lmadcopyCPU: " <> show k
+      r = length shape
+      dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
+      srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
+      shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
+  stm
+    [C.cstm|
+         $id:fname(ctx, $int:r,
+                   ($ty:ty*) $exp:dst, $exp:(unCount dstoffset),
+                   (typename int64_t[]){ $inits:dststride_inits },
+                   ($ty:ty*) $exp:src, $exp:(unCount srcoffset),
+                   (typename int64_t[]){ $inits:srcstride_inits },
+                   (typename int64_t[]){ $inits:shape_inits });|]
+
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for
 -- memory management.
@@ -72,6 +96,7 @@ defaultOperations =
       opsAllocate = defAllocate,
       opsDeallocate = defDeallocate,
       opsCopy = defCopy,
+      opsCopies = M.singleton (DefaultSpace, DefaultSpace) lmadcopyCPU,
       opsMemoryType = defMemoryType,
       opsCompiler = defCompiler,
       opsFatMemory = True,
@@ -175,18 +200,10 @@ defineMemorySpace space = do
   }
 
   if (ctx->detail_memory) {
-    fprintf(ctx->log, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
+    fprintf(ctx->log, "Allocating %lld bytes for %s in %s (currently allocated: %lld bytes).\n",
             (long long) size,
             desc, $string:spacedesc,
-            (long long) ctx->$id:usagename + size);
-  }
-  if (ctx->$id:usagename > ctx->$id:peakname) {
-    ctx->$id:peakname = ctx->$id:usagename;
-    if (ctx->detail_memory) {
-      fprintf(ctx->log, " (new peak).\n");
-    }
-  } else if (ctx->detail_memory) {
-    fprintf(ctx->log, ".\n");
+            (long long) ctx->$id:usagename);
   }
 
   $items:alloc
@@ -196,7 +213,20 @@ defineMemorySpace space = do
     *(block->references) = 1;
     block->size = size;
     block->desc = desc;
-    ctx->$id:usagename += size;
+    long long new_usage = ctx->$id:usagename + size;
+    if (ctx->detail_memory) {
+      fprintf(ctx->log, "Received block of %lld bytes; now allocated: %lld bytes",
+              (long long)block->size, new_usage);
+    }
+    ctx->$id:usagename = new_usage;
+    if (new_usage > ctx->$id:peakname) {
+      ctx->$id:peakname = new_usage;
+      if (ctx->detail_memory) {
+        fprintf(ctx->log, " (new peak).\n");
+      }
+    } else if (ctx->detail_memory) {
+        fprintf(ctx->log, ".\n");
+    }
     return FUTHARK_SUCCESS;
   } else {
     // We are naively assuming that any memory allocation error is due to OOM.
@@ -232,15 +262,10 @@ defineMemorySpace space = do
 
   onClear [C.citem|ctx->$id:peakname = 0;|]
 
-  let peakmsg = "Peak memory usage for " ++ spacedesc ++ ": %lld bytes.\n"
+  let peakmsg = "\"" <> spacedesc <> "\": %lld"
   pure
     ( [unrefdef, allocdef, setdef],
-      -- Do not report memory usage for DefaultSpace (CPU memory),
-      -- because it would not be accurate anyway.  This whole
-      -- tracking probably needs to be rethought.
-      if space == DefaultSpace
-        then [C.citem|{}|]
-        else [C.citem|str_builder(&builder, $string:peakmsg, (long long) ctx->$id:peakname);|]
+      [C.citem|str_builder(&builder, $string:peakmsg, (long long) ctx->$id:peakname);|]
     )
   where
     mty = fatMemType space
@@ -297,11 +322,14 @@ disableWarnings =
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic ignored "-Wunused-const-variable"
 #pragma clang diagnostic ignored "-Wparentheses"
 #pragma clang diagnostic ignored "-Wunused-label"
+#pragma clang diagnostic ignored "-Wunused-but-set-variable"
 #elif __GNUC__
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-const-variable"
 #pragma GCC diagnostic ignored "-Wparentheses"
 #pragma GCC diagnostic ignored "-Wunused-label"
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
@@ -331,7 +359,7 @@ relevantParams fname m =
   map fst $ filter ((fname `S.member`) . snd . snd) $ M.toList m
 
 compileProg' ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   T.Text ->
   T.Text ->
   ParamMap ->
@@ -403,12 +431,14 @@ $errorsH
 #undef NDEBUG
 #include <assert.h>
 #include <stdarg.h>
+#define SCALAR_FUN_ATTR static inline
 $utilH
 $cacheH
 $halfH
 $timingH
 $lockH
 $freeListH
+$eventListH
 |]
 
   let early_decls = definitionsText $ DL.toList $ compEarlyDecls endstate
@@ -437,6 +467,10 @@ $contextPrototypesH
 $early_decls
 
 $contextH
+
+$copyH
+
+#define FUTHARK_FUN_ATTR static
 
 $prototypes
 
@@ -501,6 +535,19 @@ $entry_point_decls
 
       mapM_ earlyDecl $ concat memfuns
       type_funs <- generateAPITypes arr_space types
+
+      headerDecl InitDecl [C.cedecl|void futhark_context_config_set_debugging(struct futhark_context_config* cfg, int flag);|]
+      headerDecl InitDecl [C.cedecl|void futhark_context_config_set_profiling(struct futhark_context_config* cfg, int flag);|]
+      headerDecl InitDecl [C.cedecl|void futhark_context_config_set_logging(struct futhark_context_config* cfg, int flag);|]
+      headerDecl MiscDecl [C.cedecl|void futhark_context_config_set_cache_file(struct futhark_context_config* cfg, const char *f);|]
+      headerDecl InitDecl [C.cedecl|int futhark_get_tuning_param_count(void);|]
+      headerDecl InitDecl [C.cedecl|const char* futhark_get_tuning_param_name(int);|]
+      headerDecl InitDecl [C.cedecl|const char* futhark_get_tuning_param_class(int);|]
+      headerDecl MiscDecl [C.cedecl|char* futhark_context_get_error(struct futhark_context* ctx);|]
+      headerDecl MiscDecl [C.cedecl|void futhark_context_set_logging_file(struct futhark_context* ctx, typename FILE* f);|]
+      headerDecl MiscDecl [C.cedecl|void futhark_context_pause_profiling(struct futhark_context* ctx);|]
+      headerDecl MiscDecl [C.cedecl|void futhark_context_unpause_profiling(struct futhark_context* ctx);|]
+
       generateCommonLibFuns memreport
 
       pure
@@ -513,7 +560,7 @@ $entry_point_decls
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   T.Text ->
   T.Text ->
   ParamMap ->
@@ -539,7 +586,7 @@ generateTuningParams params = do
       size_default_inits = map (intinit . fromMaybe 0 . sizeDefault) param_classes
       size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) param_names
       num_params = length params
-  earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
+  earlyDecl [C.cedecl|struct tuning_params { int dummy; $sdecls:size_decls };|]
   earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_params;|]
   earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits, NULL };|]
   earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits, NULL };|]
@@ -549,60 +596,10 @@ generateTuningParams params = do
 generateCommonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 generateCommonLibFuns memreport = do
   ctx <- contextType
-  cfg <- configType
   ops <- asks envOperations
-  profilereport <- gets $ DL.toList . compProfileItems
-
-  publicDef_ "context_config_set_debugging" InitDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
-                         cfg->profiling = cfg->logging = cfg->debugging = flag;
-                       }|]
-    )
-
-  publicDef_ "context_config_set_profiling" InitDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
-                         cfg->profiling = flag;
-                       }|]
-    )
-
-  publicDef_ "context_config_set_logging" InitDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
-      [C.cedecl|void $id:s($ty:cfg* cfg, int flag) {
-                         cfg->logging = flag;
-                       }|]
-    )
-
-  publicDef_ "context_config_set_cache_file" MiscDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:cfg* cfg, const char *f);|],
-      [C.cedecl|void $id:s($ty:cfg* cfg, const char *f) {
-                 cfg->cache_fname = f;
-               }|]
-    )
-
-  publicDef_ "get_tuning_param_count" InitDecl $ \s ->
-    ( [C.cedecl|int $id:s(void);|],
-      [C.cedecl|int $id:s(void) {
-                return num_tuning_params;
-              }|]
-    )
-
-  publicDef_ "get_tuning_param_name" InitDecl $ \s ->
-    ( [C.cedecl|const char* $id:s(int);|],
-      [C.cedecl|const char* $id:s(int i) {
-                return tuning_param_names[i];
-              }|]
-    )
-
-  publicDef_ "get_tuning_param_class" InitDecl $ \s ->
-    ( [C.cedecl|const char* $id:s(int);|],
-      [C.cedecl|const char* $id:s(int i) {
-                return tuning_param_classes[i];
-              }|]
-    )
 
   sync <- publicName "context_sync"
+  let comma = [C.citem|str_builder_char(&builder, ',');|]
   publicDef_ "context_report" MiscDecl $ \s ->
     ( [C.cedecl|char* $id:s($ty:ctx *ctx);|],
       [C.cedecl|char* $id:s($ty:ctx *ctx) {
@@ -612,41 +609,17 @@ generateCommonLibFuns memreport = do
 
                  struct str_builder builder;
                  str_builder_init(&builder);
-                 $items:memreport
-                 if (ctx->profiling) {
-                   $items:profilereport
+                 str_builder_char(&builder, '{');
+                 str_builder_str(&builder, "\"memory\":{");
+                 $items:(L.intersperse comma memreport)
+                 str_builder_str(&builder, "},\"events\":[");
+                 if (report_events_in_list(&ctx->event_list, &builder) != 0) {
+                   free(builder.str);
+                   return NULL;
+                 } else {
+                   str_builder_str(&builder, "]}");
+                   return builder.str;
                  }
-                 return builder.str;
-               }|]
-    )
-
-  publicDef_ "context_get_error" MiscDecl $ \s ->
-    ( [C.cedecl|char* $id:s($ty:ctx* ctx);|],
-      [C.cedecl|char* $id:s($ty:ctx* ctx) {
-                         char* error = ctx->error;
-                         ctx->error = NULL;
-                         return error;
-                       }|]
-    )
-
-  publicDef_ "context_set_logging_file" MiscDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:ctx* ctx, typename FILE* f);|],
-      [C.cedecl|void $id:s($ty:ctx* ctx, typename FILE* f) {
-                  ctx->log = f;
-                }|]
-    )
-
-  publicDef_ "context_pause_profiling" MiscDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:ctx* ctx);|],
-      [C.cedecl|void $id:s($ty:ctx* ctx) {
-                 ctx->profiling_paused = 1;
-               }|]
-    )
-
-  publicDef_ "context_unpause_profiling" MiscDecl $ \s ->
-    ( [C.cedecl|void $id:s($ty:ctx* ctx);|],
-      [C.cedecl|void $id:s($ty:ctx* ctx) {
-                 ctx->profiling_paused = 0;
                }|]
     )
 

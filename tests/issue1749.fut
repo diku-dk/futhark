@@ -1,5 +1,5 @@
 -- ==
--- error: "consume".*"Test.empty"
+-- error: Consuming.*"empty"
 
 module Test = {
     let empty = []

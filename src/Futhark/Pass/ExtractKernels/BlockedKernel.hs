@@ -44,7 +44,7 @@ data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
 type MkSegLevel rep m =
   [SubExp] -> String -> ThreadRecommendation -> BuilderT rep m (SegOpLevel rep)
 
-mkSegSpace :: MonadFreshNames m => [(VName, SubExp)] -> m SegSpace
+mkSegSpace :: (MonadFreshNames m) => [(VName, SubExp)] -> m SegSpace
 mkSegSpace dims = SegSpace <$> newVName "phys_tid" <*> pure dims
 
 prepareRedOrScan ::
@@ -127,7 +127,7 @@ segMap lvl pat w map_lam arrs ispace inps = runBuilder_ $ do
         SegMap lvl kspace (lambdaReturnType map_lam) kbody
 
 dummyDim ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   Pat Type ->
   m (Pat Type, [(VName, SubExp)], m ())
 dummyDim pat = do

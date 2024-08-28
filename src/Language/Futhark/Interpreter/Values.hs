@@ -62,7 +62,7 @@ data Shape d
 -- | The shape of an array.
 type ValueShape = Shape Int64
 
-instance Pretty d => Pretty (Shape d) where
+instance (Pretty d) => Pretty (Shape d) where
   pretty ShapeLeaf = mempty
   pretty (ShapeDim d s) = brackets (pretty d) <> pretty s
   pretty (ShapeRecord m) = prettyRecord pretty m
@@ -76,8 +76,8 @@ emptyShape :: ValueShape -> Bool
 emptyShape (ShapeDim d s) = d == 0 || emptyShape s
 emptyShape _ = False
 
-typeShape :: TypeBase d () -> Shape d
-typeShape (Array _ _ shape et) =
+typeShape :: TypeBase d u -> Shape d
+typeShape (Array _ shape et) =
   foldr ShapeDim (typeShape (Scalar et)) $ shapeDims shape
 typeShape (Scalar (Record fs)) =
   ShapeRecord $ M.map typeShape fs
@@ -92,7 +92,7 @@ typeShape t
 structTypeShape :: StructType -> Shape (Maybe Int64)
 structTypeShape = fmap dim . typeShape
   where
-    dim (SizeExpr (IntLit x _ _)) = Just $ fromIntegral x
+    dim (IntLit x _ _) = Just $ fromIntegral x
     dim _ = Nothing
 
 -- | A fully evaluated Futhark value.
@@ -109,9 +109,9 @@ data Value m
 
 instance Show (Value m) where
   show (ValuePrim v) = "ValuePrim " <> show v <> ""
-  show (ValueArray shape vs) = unwords ["ValueArray", show shape, show vs]
-  show (ValueRecord fs) = "ValueRecord " <> show fs
-  show (ValueSum shape c vs) = unwords ["ValueSum", show shape, show c, show vs]
+  show (ValueArray shape vs) = unwords ["ValueArray", "(" <> show shape <> ")", "(" <> show vs <> ")"]
+  show (ValueRecord fs) = "ValueRecord " <> "(" <> show fs <> ")"
+  show (ValueSum shape c vs) = unwords ["ValueSum", "(" <> show shape <> ")", show c, "(" <> show vs <> ")"]
   show ValueFun {} = "ValueFun _"
   show ValueAcc {} = "ValueAcc _"
 
@@ -206,7 +206,7 @@ toArray' rowshape vs = ValueArray shape (listArray (0, length vs - 1) vs)
   where
     shape = ShapeDim (genericLength vs) rowshape
 
-arrayLength :: Integral int => Array Int (Value m) -> int
+arrayLength :: (Integral int) => Array Int (Value m) -> int
 arrayLength = fromIntegral . (+ 1) . snd . bounds
 
 toTuple :: [Value m] -> Value m
@@ -220,7 +220,7 @@ fromDataShape :: V.Vector Int -> ValueShape
 fromDataShape = foldr (ShapeDim . fromIntegral) ShapeLeaf . SVec.toList
 
 fromDataValueWith ::
-  SVec.Storable a =>
+  (SVec.Storable a) =>
   (a -> PrimValue) ->
   SVec.Vector Int ->
   SVec.Vector a ->

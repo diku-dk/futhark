@@ -23,7 +23,7 @@ module Futhark.Optimise.Simplify.Rule
     RuleGeneric,
     RuleBasicOp,
     RuleMatch,
-    RuleDoLoop,
+    RuleLoop,
 
     -- * Top-down rules
     TopDown,
@@ -31,7 +31,7 @@ module Futhark.Optimise.Simplify.Rule
     TopDownRuleGeneric,
     TopDownRuleBasicOp,
     TopDownRuleMatch,
-    TopDownRuleDoLoop,
+    TopDownRuleLoop,
     TopDownRuleOp,
 
     -- * Bottom-up rules
@@ -40,7 +40,7 @@ module Futhark.Optimise.Simplify.Rule
     BottomUpRuleGeneric,
     BottomUpRuleBasicOp,
     BottomUpRuleMatch,
-    BottomUpRuleDoLoop,
+    BottomUpRuleLoop,
     BottomUpRuleOp,
 
     -- * Assembling rules
@@ -125,12 +125,12 @@ type RuleMatch rep a =
   ) ->
   Rule rep
 
-type RuleDoLoop rep a =
+type RuleLoop rep a =
   a ->
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   ( [(FParam rep, SubExp)],
-    LoopForm rep,
+    LoopForm,
     Body rep
   ) ->
   Rule rep
@@ -148,7 +148,7 @@ data SimplificationRule rep a
   = RuleGeneric (RuleGeneric rep a)
   | RuleBasicOp (RuleBasicOp rep a)
   | RuleMatch (RuleMatch rep a)
-  | RuleDoLoop (RuleDoLoop rep a)
+  | RuleLoop (RuleLoop rep a)
   | RuleOp (RuleOp rep a)
 
 -- | A collection of rules grouped by which forms of statements they
@@ -157,7 +157,7 @@ data Rules rep a = Rules
   { rulesAny :: [SimplificationRule rep a],
     rulesBasicOp :: [SimplificationRule rep a],
     rulesMatch :: [SimplificationRule rep a],
-    rulesDoLoop :: [SimplificationRule rep a],
+    rulesLoop :: [SimplificationRule rep a],
     rulesOp :: [SimplificationRule rep a]
   }
 
@@ -178,7 +178,7 @@ type TopDownRuleBasicOp rep = RuleBasicOp rep (TopDown rep)
 
 type TopDownRuleMatch rep = RuleMatch rep (TopDown rep)
 
-type TopDownRuleDoLoop rep = RuleDoLoop rep (TopDown rep)
+type TopDownRuleLoop rep = RuleLoop rep (TopDown rep)
 
 type TopDownRuleOp rep = RuleOp rep (TopDown rep)
 
@@ -194,7 +194,7 @@ type BottomUpRuleBasicOp rep = RuleBasicOp rep (BottomUp rep)
 
 type BottomUpRuleMatch rep = RuleMatch rep (BottomUp rep)
 
-type BottomUpRuleDoLoop rep = RuleDoLoop rep (BottomUp rep)
+type BottomUpRuleLoop rep = RuleLoop rep (BottomUp rep)
 
 type BottomUpRuleOp rep = RuleOp rep (BottomUp rep)
 
@@ -232,7 +232,7 @@ ruleBook topdowns bottomups =
         { rulesAny = rs,
           rulesBasicOp = filter forBasicOp rs,
           rulesMatch = filter forMatch rs,
-          rulesDoLoop = filter forDoLoop rs,
+          rulesLoop = filter forLoop rs,
           rulesOp = filter forOp rs
         }
 
@@ -244,9 +244,9 @@ ruleBook topdowns bottomups =
     forMatch RuleGeneric {} = True
     forMatch _ = False
 
-    forDoLoop RuleDoLoop {} = True
-    forDoLoop RuleGeneric {} = True
-    forDoLoop _ = False
+    forLoop RuleLoop {} = True
+    forLoop RuleGeneric {} = True
+    forLoop _ = False
 
     forOp RuleOp {} = True
     forOp RuleGeneric {} = True
@@ -280,7 +280,7 @@ bottomUpSimplifyStm = applyRules . bookBottomUpRules
 rulesForStm :: Stm rep -> Rules rep a -> [SimplificationRule rep a]
 rulesForStm stm = case stmExp stm of
   BasicOp {} -> rulesBasicOp
-  DoLoop {} -> rulesDoLoop
+  Loop {} -> rulesLoop
   Op {} -> rulesOp
   Match {} -> rulesMatch
   _ -> rulesAny
@@ -288,7 +288,7 @@ rulesForStm stm = case stmExp stm of
 applyRule :: SimplificationRule rep a -> a -> Stm rep -> Rule rep
 applyRule (RuleGeneric f) a stm = f a stm
 applyRule (RuleBasicOp f) a (Let pat aux (BasicOp e)) = f a pat aux e
-applyRule (RuleDoLoop f) a (Let pat aux (DoLoop merge form body)) =
+applyRule (RuleLoop f) a (Let pat aux (Loop merge form body)) =
   f a pat aux (merge, form, body)
 applyRule (RuleMatch f) a (Let pat aux (Match cond cases defbody ifsort)) =
   f a pat aux (cond, cases, defbody, ifsort)

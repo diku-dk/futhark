@@ -1,6 +1,6 @@
 module Language.Futhark.TypeChecker.TypesTests (tests) where
 
-import Data.Bifunctor (first)
+import Data.Bifunctor
 import Data.List (isInfixOf)
 import Data.Map qualified as M
 import Data.Text qualified as T
@@ -11,15 +11,16 @@ import Language.Futhark.Semantic
 import Language.Futhark.SyntaxTests ()
 import Language.Futhark.TypeChecker (initialEnv)
 import Language.Futhark.TypeChecker.Monad
+import Language.Futhark.TypeChecker.Names (resolveTypeExp)
 import Language.Futhark.TypeChecker.Terms
 import Language.Futhark.TypeChecker.Types
 import Test.Tasty
 import Test.Tasty.HUnit
 
-evalTest :: TypeExp NoInfo Name -> Either String ([VName], StructRetType) -> TestTree
+evalTest :: TypeExp (ExpBase NoInfo Name) Name -> Either String ([VName], ResRetType) -> TestTree
 evalTest te expected =
   testCase (prettyString te) $
-    case (fmap (extract . fst) (run (checkTypeExp te)), expected) of
+    case (fmap (extract . fst) (run (checkTypeExp checkSizeExp =<< resolveTypeExp te)), expected) of
       (Left got_e, Left expected_e) ->
         let got_e_s = T.unpack $ docText $ prettyTypeError got_e
          in (expected_e `isInfixOf` got_e_s) @? got_e_s
@@ -32,9 +33,9 @@ evalTest te expected =
         assertFailure $ "Expected error, got: " <> show actual_t
   where
     extract (_, svars, t, _) = (svars, t)
-    run = snd . runTypeM env mempty (mkInitialImport "") blankNameSource checkSizeExp
+    run = snd . runTypeM env mempty (mkInitialImport "") (newNameSource 100)
     -- We hack up an environment with some predefined type
-    -- abbreviations for testing.  This is all prettyString sensitive to the
+    -- abbreviations for testing.  This is all pretty sensitive to the
     -- specific unique names, so we have to be careful!
     env =
       initialEnv
@@ -83,64 +84,64 @@ evalTests =
     mkNeg (x, y) = evalTest x (Left y)
     pos =
       [ ( "[]i32",
-          ([], "?[d_0].[d_0]i32")
+          ([], "?[d_100].[d_100]i32")
         ),
         ( "[][]i32",
-          ([], "?[d_0][d_1].[d_0][d_1]i32")
+          ([], "?[d_100][d_101].[d_100][d_101]i32")
         ),
         ( "bool -> []i32",
-          ([], "bool -> ?[d_0].[d_0]i32")
+          ([], "bool -> ?[d_100].[d_100]i32")
         ),
         ( "bool -> []f32 -> []i32",
-          (["d_0"], "bool -> [d_0]f32 -> ?[d_1].[d_1]i32")
+          (["d_100"], "bool -> [d_100]f32 -> ?[d_101].[d_101]i32")
         ),
         ( "([]i32,[]i32)",
-          ([], "?[d_0][d_1].([d_0]i32, [d_1]i32)")
+          ([], "?[d_100][d_101].([d_100]i32, [d_101]i32)")
         ),
         ( "{a:[]i32,b:[]i32}",
-          ([], "?[d_0][d_1].{a:[d_0]i32, b:[d_1]i32}")
+          ([], "?[d_100][d_101].{a:[d_100]i32, b:[d_101]i32}")
         ),
         ( "?[n].[n][n]bool",
-          ([], "?[n_0].[n_0][n_0]bool")
+          ([], "?[n_100].[n_100][n_100]bool")
         ),
         ( "([]i32 -> []i32) -> bool -> []i32",
-          (["d_0"], "([d_0]i32 -> ?[d_1].[d_1]i32) -> bool -> ?[d_2].[d_2]i32")
+          (["d_100"], "([d_100]i32 -> ?[d_101].[d_101]i32) -> bool -> ?[d_102].[d_102]i32")
         ),
         ( "((k: i64) -> [k]i32 -> [k]i32) -> []i32 -> bool",
-          (["d_1"], "((k_0: i64) -> [k_0]i32 -> [k_0]i32) -> [d_1]i32 -> bool")
+          (["d_101"], "((k_100: i64) -> [k_100]i32 -> [k_100]i32) -> [d_101]i32 -> bool")
         ),
         ( "square [10]",
           ([], "[10][10]i32")
         ),
         ( "square []",
-          ([], "?[d_0].[d_0][d_0]i32")
+          ([], "?[d_100].[d_100][d_100]i32")
         ),
         ( "bool -> square []",
-          ([], "bool -> ?[d_0].[d_0][d_0]i32")
+          ([], "bool -> ?[d_100].[d_100][d_100]i32")
         ),
         ( "(k: i64) -> square [k]",
-          ([], "(k_0: i64) -> [k_0][k_0]i32")
+          ([], "(k_100: i64) -> [k_100][k_100]i32")
         ),
         ( "fun i32 bool",
           ([], "i32 -> bool")
         ),
         ( "fun ([]i32) bool",
-          ([], "?[d_0].[d_0]i32 -> bool")
+          ([], "?[d_100].[d_100]i32 -> bool")
         ),
         ( "fun bool ([]i32)",
-          ([], "?[d_0].bool -> [d_0]i32")
+          ([], "?[d_100].bool -> [d_100]i32")
         ),
         ( "bool -> fun ([]i32) bool",
-          ([], "bool -> ?[d_0].[d_0]i32 -> bool")
+          ([], "bool -> ?[d_100].[d_100]i32 -> bool")
         ),
         ( "bool -> fun bool ([]i32)",
-          ([], "bool -> ?[d_0].bool -> [d_0]i32")
+          ([], "bool -> ?[d_100].bool -> [d_100]i32")
         ),
         ( "pair",
-          ([], "?[n_0][m_1].([n_0]i64, [m_1]i64)")
+          ([], "?[n_100][m_101].([n_100]i64, [m_101]i64)")
         ),
         ( "(pair,pair)",
-          ([], "?[n_0][m_1][n_2][m_3].(([n_0]i64, [m_1]i64), ([n_2]i64, [m_3]i64))")
+          ([], "?[n_100][m_101][n_102][m_103].(([n_100]i64, [m_101]i64), ([n_102]i64, [m_103]i64))")
         )
       ]
     neg =

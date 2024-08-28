@@ -18,6 +18,7 @@ import Futhark.CLI.Dev qualified as Dev
 import Futhark.CLI.Doc qualified as Doc
 import Futhark.CLI.Eval qualified as Eval
 import Futhark.CLI.Fmt qualified as Fmt
+import Futhark.CLI.HIP qualified as HIP
 import Futhark.CLI.LSP qualified as LSP
 import Futhark.CLI.Literate qualified as Literate
 import Futhark.CLI.Misc qualified as Misc
@@ -26,11 +27,13 @@ import Futhark.CLI.MulticoreISPC qualified as MulticoreISPC
 import Futhark.CLI.MulticoreWASM qualified as MulticoreWASM
 import Futhark.CLI.OpenCL qualified as OpenCL
 import Futhark.CLI.Pkg qualified as Pkg
+import Futhark.CLI.Profile qualified as Profile
 import Futhark.CLI.PyOpenCL qualified as PyOpenCL
 import Futhark.CLI.Python qualified as Python
 import Futhark.CLI.Query qualified as Query
 import Futhark.CLI.REPL qualified as REPL
 import Futhark.CLI.Run qualified as Run
+import Futhark.CLI.Script qualified as Script
 import Futhark.CLI.Test qualified as Test
 import Futhark.CLI.WASM qualified as WASM
 import Futhark.Error
@@ -56,6 +59,7 @@ commands =
       ("c", (C.main, "Compile to sequential C.")),
       ("opencl", (OpenCL.main, "Compile to C calling OpenCL.")),
       ("cuda", (CCUDA.main, "Compile to C calling CUDA.")),
+      ("hip", (HIP.main, "Compile to C calling HIP.")),
       ("multicore", (Multicore.main, "Compile to multicore C.")),
       ("python", (Python.main, "Compile to sequential Python.")),
       ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL.")),
@@ -77,11 +81,13 @@ commands =
       ("defs", (Defs.main, "Show location and name of all definitions.")),
       ("query", (Query.main, "Query semantic information about program.")),
       ("literate", (Literate.main, "Process a literate Futhark program.")),
+      ("script", (Script.main, "Run FutharkScript expressions.")),
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
       ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
       ("benchcmp", (Benchcmp.main, "Compare two Futhark benchmarks.")),
-      ("fmt", (Fmt.main, "Reformat Futhark source file."))
+      ("fmt", (Fmt.main, "Reformat Futhark source file.")),
+      ("profile", (Profile.main, "Analyse profiling data."))
     ]
 
 msg :: String

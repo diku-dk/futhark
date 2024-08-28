@@ -8,9 +8,12 @@ module Language.Futhark.TypeChecker.Monad
     atTopLevel,
     enteringModule,
     bindSpaced,
+    bindSpaced1,
+    bindIdents,
     qualifyTypeVars,
     lookupMTy,
     lookupImport,
+    lookupMod,
     localEnv,
     TypeError (..),
     prettyTypeError,
@@ -18,18 +21,22 @@ module Language.Futhark.TypeChecker.Monad
     withIndexLink,
     unappliedFunctor,
     unknownVariable,
-    unknownType,
     underscoreUse,
     Notes,
     aNote,
     MonadTypeChecker (..),
+    TypeState (stateNameSource),
+    usedName,
     checkName,
     checkAttr,
+    checkQualName,
+    checkValName,
     badOnLeft,
+    isKnownType,
     module Language.Futhark.Warnings,
     Env (..),
     TySet,
-    FunSig (..),
+    FunModType (..),
     ImportTable,
     NameMap,
     BoundV (..),
@@ -51,19 +58,22 @@ where
 
 import Control.Monad
 import Control.Monad.Except
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
-import Data.List (find, isPrefixOf)
+import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Version qualified as Version
 import Futhark.FreshNames hiding (newName)
 import Futhark.FreshNames qualified
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic
+import Language.Futhark.Traversals
 import Language.Futhark.Warnings
 import Paths_futhark qualified
 import Prelude hiding (mapM, mod)
@@ -120,13 +130,13 @@ withIndexLink href msg =
     ]
 
 -- | An unexpected functor appeared!
-unappliedFunctor :: MonadTypeChecker m => SrcLoc -> m a
+unappliedFunctor :: (MonadTypeChecker m) => SrcLoc -> m a
 unappliedFunctor loc =
   typeError loc mempty "Cannot have parametric module here."
 
 -- | An unknown variable was referenced.
 unknownVariable ::
-  MonadTypeChecker m =>
+  (MonadTypeChecker m) =>
   Namespace ->
   QualName Name ->
   SrcLoc ->
@@ -135,14 +145,9 @@ unknownVariable space name loc =
   typeError loc mempty $
     "Unknown" <+> pretty space <+> dquotes (pretty name)
 
--- | An unknown type was referenced.
-unknownType :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
-unknownType loc name =
-  typeError loc mempty $ "Unknown type" <+> pretty name <> "."
-
 -- | A name prefixed with an underscore was used.
 underscoreUse ::
-  MonadTypeChecker m =>
+  (MonadTypeChecker m) =>
   SrcLoc ->
   QualName Name ->
   m a
@@ -150,7 +155,7 @@ underscoreUse loc name =
   typeError loc mempty $
     "Use of"
       <+> dquotes (pretty name)
-        <> ": variables prefixed with underscore may not be accessed."
+      <> ": variables prefixed with underscore may not be accessed."
 
 -- | A mapping from import import names to 'Env's.  This is used to
 -- resolve @import@ declarations.
@@ -162,13 +167,14 @@ data Context = Context
     contextImportName :: ImportName,
     -- | Currently type-checking at the top level?  If false, we are
     -- inside a module.
-    contextAtTopLevel :: Bool,
-    contextCheckExp :: UncheckedExp -> TypeM Exp
+    contextAtTopLevel :: Bool
   }
 
 data TypeState = TypeState
   { stateNameSource :: VNameSource,
     stateWarnings :: Warnings,
+    -- | Which names have been used.
+    stateUsed :: S.Set VName,
     stateCounter :: Int
   }
 
@@ -206,15 +212,14 @@ runTypeM ::
   ImportTable ->
   ImportName ->
   VNameSource ->
-  (UncheckedExp -> TypeM Exp) ->
   TypeM a ->
   (Warnings, Either TypeError (a, VNameSource))
-runTypeM env imports fpath src checker (TypeM m) = do
-  let ctx = Context env imports fpath True checker
-      s = TypeState src mempty 0
+runTypeM env imports fpath src (TypeM m) = do
+  let ctx = Context env imports fpath True
+      s = TypeState src mempty mempty 0
   case runExcept $ runStateT (runReaderT m ctx) s of
     Left (ws, e) -> (ws, Left e)
-    Right (x, TypeState src' ws _) -> (ws, Right (x, src'))
+    Right (x, s') -> (stateWarnings s', Right (x, stateNameSource s'))
 
 -- | Retrieve the current 'Env'.
 askEnv :: TypeM Env
@@ -237,7 +242,7 @@ enteringModule = local $ \ctx -> ctx {contextAtTopLevel = False}
 lookupMTy :: SrcLoc -> QualName Name -> TypeM (QualName VName, MTy)
 lookupMTy loc qn = do
   (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Signature qn loc
-  (qn',) <$> maybe explode pure (M.lookup name $ envSigTable scope)
+  (qn',) <$> maybe explode pure (M.lookup name $ envModTypeTable scope)
   where
     explode = unknownVariable Signature qn loc
 
@@ -269,48 +274,77 @@ incCounter = do
   put s {stateCounter = stateCounter s + 1}
   pure $ stateCounter s
 
+bindNameMap :: NameMap -> TypeM a -> TypeM a
+bindNameMap m = local $ \ctx ->
+  let env = contextEnv ctx
+   in ctx {contextEnv = env {envNameMap = m <> envNameMap env}}
+
 -- | Monads that support type checking.  The reason we have this
 -- internal interface is because we use distinct monads for checking
 -- expressions and declarations.
-class Monad m => MonadTypeChecker m where
-  warn :: Located loc => loc -> Doc () -> m ()
+class (Monad m) => MonadTypeChecker m where
+  warn :: (Located loc) => loc -> Doc () -> m ()
+  warnings :: Warnings -> m ()
 
   newName :: VName -> m VName
   newID :: Name -> m VName
+  newID s = newName $ VName s 0
   newTypeName :: Name -> m VName
 
-  bindNameMap :: NameMap -> m a -> m a
   bindVal :: VName -> BoundV -> m a -> m a
 
-  checkQualName :: Namespace -> QualName Name -> SrcLoc -> m (QualName VName)
+  lookupType :: QualName VName -> m ([TypeParam], StructRetType, Liftedness)
 
-  lookupType :: SrcLoc -> QualName Name -> m (QualName VName, [TypeParam], StructRetType, Liftedness)
-  lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
-  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
+  typeError :: (Located loc) => loc -> Notes -> Doc () -> m a
 
-  checkExpForSize :: UncheckedExp -> m Exp
+warnIfUnused :: (Namespace, VName, SrcLoc) -> TypeM ()
+warnIfUnused (ns, name, loc) = do
+  used <- gets stateUsed
+  unless (name `S.member` used || "_" `T.isPrefixOf` nameToText (baseName name)) $
+    warn loc $
+      "Unused" <+> pretty ns <+> dquotes (prettyName name) <> "."
 
-  typeError :: Located loc => loc -> Notes -> Doc () -> m a
-
--- | Elaborate the given name in the given namespace at the given
--- location, producing the corresponding unique 'VName'.
-checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
-checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
-
--- | Map source-level names do fresh unique internal names, and
+-- | Map source-level names to fresh unique internal names, and
 -- evaluate a type checker context with the mapping active.
-bindSpaced :: MonadTypeChecker m => [(Namespace, Name)] -> m a -> m a
+bindSpaced :: [(Namespace, Name, SrcLoc)] -> ([VName] -> TypeM a) -> TypeM a
 bindSpaced names body = do
-  names' <- mapM (newID . snd) names
-  let mapping = M.fromList (zip names $ map qualName names')
-  bindNameMap mapping body
+  names' <- mapM (\(_, v, _) -> newID v) names
+  let mapping = M.fromList $ zip (map (\(ns, v, _) -> (ns, v)) names) $ map qualName names'
+  bindNameMap mapping (body names')
+    <* mapM_ warnIfUnused [(ns, v, loc) | ((ns, _, loc), v) <- zip names names']
+
+-- | Map single source-level name to fresh unique internal names, and
+-- evaluate a type checker context with the mapping active.
+bindSpaced1 :: Namespace -> Name -> SrcLoc -> (VName -> TypeM a) -> TypeM a
+bindSpaced1 ns name loc body = do
+  name' <- newID name
+  let mapping = M.singleton (ns, name) $ qualName name'
+  bindNameMap mapping (body name') <* warnIfUnused (ns, name', loc)
+
+-- | Bind these identifiers in the name map and also check whether
+-- they have been used.
+bindIdents :: [IdentBase NoInfo VName t] -> TypeM a -> TypeM a
+bindIdents idents body = do
+  let mapping =
+        M.fromList $
+          zip
+            (map ((Term,) . (baseName . identName)) idents)
+            (map (qualName . identName) idents)
+  bindNameMap mapping body <* mapM_ warnIfUnused [(Term, v, loc) | Ident v _ loc <- idents]
+
+-- | Indicate that this name has been used. This is usually done
+-- implicitly by other operations, but sometimes we want to make a
+-- "fake" use to avoid things like top level functions being
+-- considered unused.
+usedName :: VName -> TypeM ()
+usedName name = modify $ \s -> s {stateUsed = S.insert name $ stateUsed s}
 
 instance MonadTypeChecker TypeM where
+  warnings ws =
+    modify $ \s -> s {stateWarnings = stateWarnings s <> ws}
+
   warn loc problem =
-    modify $ \s ->
-      s
-        { stateWarnings = stateWarnings s <> singleWarning (srclocOf loc) problem
-        }
+    warnings $ singleWarning (locOf loc) problem
 
   newName v = do
     s <- get
@@ -318,15 +352,9 @@ instance MonadTypeChecker TypeM where
     put $ s {stateNameSource = src'}
     pure v'
 
-  newID s = newName $ VName s 0
-
   newTypeName name = do
     i <- incCounter
     newID $ mkTypeVarName name i
-
-  bindNameMap m = local $ \ctx ->
-    let env = contextEnv ctx
-     in ctx {contextEnv = env {envNameMap = m <> envNameMap env}}
 
   bindVal v t = local $ \ctx ->
     ctx
@@ -336,51 +364,27 @@ instance MonadTypeChecker TypeM where
             }
       }
 
-  checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
-
-  lookupType loc qn = do
+  lookupType qn = do
     outer_env <- askEnv
-    (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
-    case M.lookup name $ envTypeTable scope of
-      Nothing -> unknownType loc qn
+    scope <- lookupQualNameEnv qn
+    case M.lookup (qualLeaf qn) $ envTypeTable scope of
+      Nothing -> error $ "lookupType: " <> show qn
       Just (TypeAbbr l ps (RetType dims def)) ->
-        pure (qn', ps, RetType dims $ qualifyTypeVars outer_env mempty qs def, l)
-
-  lookupMod loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
-    case M.lookup name $ envModTable scope of
-      Nothing -> unknownVariable Term qn loc
-      Just m -> pure (qn', m)
-
-  lookupVar loc qn = do
-    outer_env <- askEnv
-    (env, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
-    case M.lookup name $ envVtable env of
-      Nothing -> unknownVariable Term qn loc
-      Just (BoundV _ t)
-        | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
-        | otherwise ->
-            case getType t of
-              Nothing ->
-                typeError loc mempty $
-                  "Attempt to use function" <+> prettyName name <+> "as value."
-              Just t' ->
-                pure
-                  ( qn',
-                    fromStruct $
-                      qualifyTypeVars outer_env mempty qs t'
-                  )
-
-  checkExpForSize e = do
-    checker <- asks contextCheckExp
-    checker e
+        pure (ps, RetType dims $ qualifyTypeVars outer_env mempty (qualQuals qn) def, l)
 
   typeError loc notes s = throwError $ TypeError (locOf loc) notes s
 
--- | Extract from a type a first-order type.
-getType :: TypeBase dim as -> Maybe (TypeBase dim as)
-getType (Scalar Arrow {}) = Nothing
-getType t = Just t
+lookupQualNameEnv :: QualName VName -> TypeM Env
+lookupQualNameEnv qn@(QualName quals _) = do
+  env <- askEnv
+  descend env quals
+  where
+    descend scope [] = pure scope
+    descend scope (q : qs)
+      | Just (ModEnv q_scope) <- M.lookup q $ envModTable scope =
+          descend q_scope qs
+      | otherwise =
+          error $ "lookupQualNameEnv: " ++ show qn
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TypeM (Env, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -388,13 +392,15 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
   descend env quals
   where
     descend scope []
-      | Just name' <- M.lookup (space, name) $ envNameMap scope =
+      | Just name' <- M.lookup (space, name) $ envNameMap scope = do
+          usedName $ qualLeaf name'
           pure (scope, name')
       | otherwise =
           unknownVariable space qn loc
     descend scope (q : qs)
       | Just (QualName _ q') <- M.lookup (Term, q) $ envNameMap scope,
-        Just res <- M.lookup q' $ envModTable scope =
+        Just res <- M.lookup q' $ envModTable scope = do
+          usedName q'
           case res of
             ModEnv q_scope -> do
               (scope', QualName qs' name') <- descend q_scope qs
@@ -402,6 +408,49 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
             ModFun {} -> unappliedFunctor loc
       | otherwise =
           unknownVariable space qn loc
+
+-- | Elaborate the given qualified name in the given namespace at the
+-- given location, producing the corresponding unique 'QualName'.
+-- Fails if the name is a module.
+checkValName :: QualName Name -> SrcLoc -> TypeM (QualName VName)
+checkValName name loc = do
+  (env, name') <- checkQualNameWithEnv Term name loc
+  case M.lookup (qualLeaf name') $ envModTable env of
+    Just _ -> unknownVariable Term name loc
+    Nothing -> pure name'
+
+-- | Elaborate the given qualified name in the given namespace at the
+-- given location, producing the corresponding unique 'QualName'.
+checkQualName :: Namespace -> QualName Name -> SrcLoc -> TypeM (QualName VName)
+checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
+
+-- | Elaborate the given name in the given namespace at the given
+-- location, producing the corresponding unique 'VName'.
+checkName :: Namespace -> Name -> SrcLoc -> TypeM VName
+checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
+
+-- | Does a type with this name already exist? This is used for
+-- warnings, so it is OK it's a little unprincipled.
+isKnownType :: QualName VName -> TypeM Bool
+isKnownType qn = do
+  env <- askEnv
+  descend env (qualQuals qn) (qualLeaf qn)
+  where
+    descend env [] v
+      | Just v' <- M.lookup (Type, baseName v) $ envNameMap env =
+          pure $ M.member (qualLeaf v') $ envTypeTable env
+    descend env (q : qs) v
+      | Just q' <- M.lookup (Term, baseName q) $ envNameMap env,
+        Just (ModEnv env') <- M.lookup (qualLeaf q') $ envModTable env =
+          descend env' qs v
+    descend _ _ _ = pure False
+
+lookupMod :: SrcLoc -> QualName Name -> TypeM (QualName VName, Mod)
+lookupMod loc qn = do
+  (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
+  case M.lookup name $ envModTable scope of
+    Nothing -> unknownVariable Term qn loc
+    Just m -> pure (qn', m)
 
 -- | Try to prepend qualifiers to the type names such that they
 -- represent how to access the type in some scope.
@@ -417,14 +466,14 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       S.Set VName ->
       TypeBase Size as ->
       TypeBase Size as
-    onType except (Array as u shape et) =
-      Array as u (fmap (onDim except) shape) (onScalar except et)
+    onType except (Array u shape et) =
+      Array u (fmap (onDim except) shape) (onScalar except et)
     onType except (Scalar t) =
       Scalar $ onScalar except t
 
     onScalar _ (Prim t) = Prim t
-    onScalar except (TypeVar as u qn targs) =
-      TypeVar as u (qual except qn) (map (onTypeArg except) targs)
+    onScalar except (TypeVar u qn targs) =
+      TypeVar u (qual except qn) (map (onTypeArg except) targs)
     onScalar except (Record m) =
       Record $ M.map (onType except) m
     onScalar except (Sum m) =
@@ -441,8 +490,9 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
     onTypeArg except (TypeArgType t) =
       TypeArgType $ onType except t
 
-    onDim except (SizeExpr (Var qn typ loc)) = SizeExpr $ Var (qual except qn) typ loc
-    onDim _ d = d
+    onDim except e = runIdentity $ onDimM except e
+    onDimM except (Var qn typ loc) = pure $ Var (qual except qn) typ loc
+    onDimM except e = astMap (identityMapper {mapOnExp = onDimM except}) e
 
     qual except (QualName orig_qs name)
       | name `elem` except || reachable orig_qs name outer_env =
@@ -460,7 +510,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       name `M.member` envVtable env
         || isJust (find matches $ M.elems (envTypeTable env))
       where
-        matches (TypeAbbr _ _ (RetType _ (Scalar (TypeVar _ _ (QualName x_qs name') _)))) =
+        matches (TypeAbbr _ _ (RetType _ (Scalar (TypeVar _ (QualName x_qs name') _)))) =
           null x_qs && name == name'
         matches _ = False
     reachable (q : qs') name env
@@ -519,7 +569,7 @@ topLevelNameMap = M.filterWithKey (\k _ -> available k) intrinsicsNameMap
             map
               (nameFromText . prettyText)
               [minBound .. (maxBound :: BinOp)]
-        fun_names = S.fromList $ map nameFromString ["shape"]
+        fun_names = S.fromList [nameFromString "shape"]
     available _ = False
 
 -- | Construct the name of a new type variable given a base
@@ -533,7 +583,7 @@ mkTypeVarName desc i =
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
 -- | Type-check an attribute.
-checkAttr :: MonadTypeChecker m => AttrInfo Name -> m (AttrInfo VName)
+checkAttr :: (MonadTypeChecker m) => AttrInfo VName -> m (AttrInfo VName)
 checkAttr (AttrComp f attrs loc) =
   AttrComp f <$> mapM checkAttr attrs <*> pure loc
 checkAttr (AttrAtom (AtomName v) loc) =

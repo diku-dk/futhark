@@ -72,7 +72,7 @@ instance MonadFreshNames (State RState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify (\env -> env {stateNameSource = src})
 
-runADM :: MonadFreshNames m => ADM a -> m a
+runADM :: (MonadFreshNames m) => ADM a -> m a
 runADM (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
@@ -91,7 +91,7 @@ class TanBuilder a where
   newTan :: a -> ADM a
   bundleNew :: a -> ADM [a]
 
-bundleNewList :: TanBuilder a => [a] -> ADM [a]
+bundleNewList :: (TanBuilder a) => [a] -> ADM [a]
 bundleNewList = fmap mconcat . mapM bundleNew
 
 instance TanBuilder (PatElem (TypeBase s u)) where
@@ -111,10 +111,10 @@ instance TanBuilder (PatElem (TypeBase s u)) where
       then pure [pe']
       else pure [pe, pe']
 
-newTanPat :: TanBuilder (PatElem t) => Pat t -> ADM (Pat t)
+newTanPat :: (TanBuilder (PatElem t)) => Pat t -> ADM (Pat t)
 newTanPat (Pat pes) = Pat <$> mapM newTan pes
 
-bundleNewPat :: TanBuilder (PatElem t) => Pat t -> ADM (Pat t)
+bundleNewPat :: (TanBuilder (PatElem t)) => Pat t -> ADM (Pat t)
 bundleNewPat (Pat pes) = Pat <$> bundleNewList pes
 
 instance TanBuilder (Param (TypeBase s u)) where
@@ -129,7 +129,7 @@ instance TanBuilder (Param (TypeBase s u)) where
       then pure [param']
       else pure [param, param']
 
-instance Tangent a => TanBuilder (Param (TypeBase s u), a) where
+instance (Tangent a) => TanBuilder (Param (TypeBase s u), a) where
   newTan (p, x) = (,) <$> newTan p <*> tangent x
   bundleNew (p, x) = do
     b <- bundleNew p
@@ -150,7 +150,7 @@ instance Tangent (TypeBase s u) where
         t' <- tangent t
         pure [t, t']
 
-bundleTangents :: Tangent a => [a] -> ADM [a]
+bundleTangents :: (Tangent a) => [a] -> ADM [a]
 bundleTangents = (mconcat <$>) . mapM bundleTan
 
 instance Tangent VName where
@@ -226,9 +226,6 @@ basicFwd pat aux op = do
       arr_tan <- tangent arr
       arrs_tans <- mapM tangent arrs
       addStm $ Let pat_tan aux $ BasicOp $ Concat d (arr_tan :| arrs_tans) w
-    Copy arr -> do
-      arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Copy arr_tan
     Manifest ds arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Manifest ds arr_tan
@@ -245,18 +242,15 @@ basicFwd pat aux op = do
     Rearrange perm arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Rearrange perm arr_tan
-    Rotate rots arr -> do
-      arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Rotate rots arr_tan
     _ -> error $ "basicFwd: Unsupported op " ++ prettyString op
 
 fwdLambda :: Lambda SOACS -> ADM (Lambda SOACS)
-fwdLambda l@(Lambda params body ret) =
-  Lambda <$> bundleNewList params <*> inScopeOf l (fwdBody body) <*> bundleTangents ret
+fwdLambda l@(Lambda params ret body) =
+  Lambda <$> bundleNewList params <*> bundleTangents ret <*> inScopeOf l (fwdBody body)
 
 fwdStreamLambda :: Lambda SOACS -> ADM (Lambda SOACS)
-fwdStreamLambda l@(Lambda params body ret) =
-  Lambda <$> ((take 1 params ++) <$> bundleNewList (drop 1 params)) <*> inScopeOf l (fwdBody body) <*> bundleTangents ret
+fwdStreamLambda l@(Lambda params ret body) =
+  Lambda <$> ((take 1 params ++) <$> bundleNewList (drop 1 params)) <*> bundleTangents ret <*> inScopeOf l (fwdBody body)
 
 interleave :: [a] -> [a] -> [a]
 interleave xs ys = concat $ transpose [xs, ys]
@@ -316,12 +310,12 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
       mapM_ fwdStm stms
       let (res_is, res_vs) = splitAt n_indices res
       (res_is ++) <$> bundleTangents res_vs
-    fwdHistBucket l@(Lambda params body ret) =
+    fwdHistBucket l@(Lambda params ret body) =
       let (r_is, r_vs) = splitAt n_indices ret
        in Lambda
             <$> bundleNewList params
-            <*> inScopeOf l (fwdBodyHist body)
             <*> ((r_is ++) <$> bundleTangents r_vs)
+            <*> inScopeOf l (fwdBodyHist body)
 
     fwdHist :: HistOp SOACS -> ADM (HistOp SOACS)
     fwdHist (HistOp shape rf dest nes op) = do
@@ -347,13 +341,13 @@ fwdSOAC (Pat pes) aux (Scatter w ivs lam as) = do
   addStm s
   where
     fwdScatterLambda :: Int -> Lambda SOACS -> ADM (Lambda SOACS)
-    fwdScatterLambda n_indices (Lambda params body ret) = do
+    fwdScatterLambda n_indices (Lambda params ret body) = do
       params' <- bundleNewList params
       ret_tan <- mapM tangent $ drop n_indices ret
       body' <- fwdBodyScatter n_indices body
       let indices = concat $ replicate 2 $ take n_indices ret
           ret' = indices ++ drop n_indices ret ++ ret_tan
-      pure $ Lambda params' body' ret'
+      pure $ Lambda params' ret' body'
     fwdBodyScatter :: Int -> Body SOACS -> ADM (Body SOACS)
     fwdBodyScatter n_indices (Body _ stms res) = do
       (res_tan, stms') <- collectStms $ do
@@ -368,11 +362,11 @@ fwdSOAC _ _ VJP {} =
   error "fwdSOAC: nested VJP not allowed."
 
 fwdStm :: Stm SOACS -> ADM ()
-fwdStm (Let pat aux (BasicOp (UpdateAcc acc i x))) = do
+fwdStm (Let pat aux (BasicOp (UpdateAcc safety acc i x))) = do
   pat' <- bundleNewPat pat
   x' <- bundleTangents x
   acc_tan <- tangent acc
-  addStm $ Let pat' aux $ BasicOp $ UpdateAcc acc_tan i x'
+  addStm $ Let pat' aux $ BasicOp $ UpdateAcc safety acc_tan i x'
 fwdStm stm@(Let pat aux (BasicOp e)) = do
   -- XXX: this has to be too naive.
   unless (any isAcc $ patTypes pat) $
@@ -408,21 +402,20 @@ fwdStm (Let pat aux (Match ses cases defbody (MatchDec ret ifsort))) = do
   pat' <- bundleNewPat pat
   ret' <- bundleTangents ret
   addStm $ Let pat' aux $ Match ses cases' defbody' $ MatchDec ret' ifsort
-fwdStm (Let pat aux (DoLoop val_pats loop@(WhileLoop v) body)) = do
+fwdStm (Let pat aux (Loop val_pats loop@(WhileLoop v) body)) = do
   val_pats' <- bundleNewList val_pats
   pat' <- bundleNewPat pat
   body' <-
-    localScope (scopeOfFParams (map fst val_pats) <> scopeOf loop) . slocal' $
+    localScope (scopeOfFParams (map fst val_pats) <> scopeOfLoopForm loop) . slocal' $
       fwdBody body
-  addStm $ Let pat' aux $ DoLoop val_pats' (WhileLoop v) body'
-fwdStm (Let pat aux (DoLoop val_pats loop@(ForLoop i it bound loop_vars) body)) = do
+  addStm $ Let pat' aux $ Loop val_pats' (WhileLoop v) body'
+fwdStm (Let pat aux (Loop val_pats loop@(ForLoop i it bound) body)) = do
   pat' <- bundleNewPat pat
   val_pats' <- bundleNewList val_pats
-  loop_vars' <- bundleNewList loop_vars
   body' <-
-    localScope (scopeOfFParams (map fst val_pats) <> scopeOf loop) . slocal' $
+    localScope (scopeOfFParams (map fst val_pats) <> scopeOfLoopForm loop) . slocal' $
       fwdBody body
-  addStm $ Let pat' aux $ DoLoop val_pats' (ForLoop i it bound loop_vars') body'
+  addStm $ Let pat' aux $ Loop val_pats' (ForLoop i it bound) body'
 fwdStm (Let pat aux (WithAcc inputs lam)) = do
   inputs' <- forM inputs $ \(shape, arrs, op) -> do
     arrs_tan <- mapM tangent arrs
@@ -432,8 +425,8 @@ fwdStm (Let pat aux (WithAcc inputs lam)) = do
         nes_tan <- mapM (fmap Var . zeroFromSubExp) nes
         op_lam' <- fwdLambda op_lam
         case op_lam' of
-          Lambda ps body ret -> do
-            let op_lam'' = Lambda (removeIndexTans (shapeRank shape) ps) body ret
+          Lambda ps ret body -> do
+            let op_lam'' = Lambda (removeIndexTans (shapeRank shape) ps) ret body
             pure $ Just (op_lam'', interleave nes nes_tan)
     pure (shape, arrs <> arrs_tan, op')
   pat' <- bundleNewPat pat
@@ -457,10 +450,10 @@ fwdBodyTansLast (Body _ stms res) = buildBody_ $ do
   mapM_ fwdStm stms
   (res <>) <$> mapM tangent res
 
-fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
-fwdJVP scope l@(Lambda params body ret) =
+fwdJVP :: (MonadFreshNames m) => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
+fwdJVP scope l@(Lambda params ret body) =
   runADM . localScope scope . inScopeOf l $ do
     params_tan <- mapM newTan params
     body_tan <- fwdBodyTansLast body
     ret_tan <- mapM tangent ret
-    pure $ Lambda (params ++ params_tan) body_tan (ret <> ret_tan)
+    pure $ Lambda (params ++ params_tan) (ret <> ret_tan) body_tan

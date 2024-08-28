@@ -2,6 +2,8 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
+  python = pkgs.python311Packages;
+  haskell = pkgs.haskell.packages.ghc96;
 in
 pkgs.stdenv.mkDerivation {
   name = "futhark";
@@ -14,35 +16,37 @@ pkgs.stdenv.mkDerivation {
       file
       git
       parallel
-      haskell.compiler.ghc926
-      haskell.packages.ghc926.ormolu
-      haskell.packages.ghc926.weeder
-      haskell.packages.ghc926.haskell-language-server
+      haskell.ghc
+      ormolu
+      haskell.weeder
+      haskell.haskell-language-server
       haskellPackages.graphmod
       haskellPackages.apply-refact
       xdot
       hlint
-      pkgconfig
+      pkg-config
       zlib
       zlib.out
       cabal2nix
       ghcid
       niv
       ispc
-      python3Packages.mypy
-      python3Packages.black
-      python3Packages.numpy
-      python3Packages.pyopencl
-      python3Packages.matplotlib
-      python3Packages.jsonschema
-      python3Packages.sphinx
-      python3Packages.sphinxcontrib-bibtex
+      python.python
+      python.mypy
+      python.black
+      python.numpy
+      python.pyopencl
+      python.matplotlib
+      python.jsonschema
+      python.sphinx
+      python.sphinxcontrib-bibtex
       imagemagick # needed for literate tests
     ]
     ++ lib.optionals (stdenv.isLinux)
       [ opencl-headers
         ocl-icd
         oclgrind
+        rocmPackages.clr
       ]
   ;
 }

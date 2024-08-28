@@ -1,3 +1,4 @@
+-- | @futhark eval@
 module Futhark.CLI.Eval (main) where
 
 import Control.Exception
@@ -14,6 +15,7 @@ import Futhark.MonadFreshNames
 import Futhark.Pipeline
 import Futhark.Util.Options
 import Futhark.Util.Pretty
+import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Parser
 import Language.Futhark.Semantic qualified as T
@@ -24,6 +26,7 @@ import System.FilePath
 import System.IO
 import Prelude
 
+-- | Run @futhark eval@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions interpreterConfig options "options... <exprs...>" run
   where
@@ -53,7 +56,13 @@ runExpr src env ctx str = do
     (_, Left terr) -> do
       hPutDoc stderr $ I.prettyTypeError terr
       exitWith $ ExitFailure 1
-    (_, Right (_, e)) -> pure e
+    (_, Right ([], e)) -> pure e
+    (_, Right (tparams, e)) -> do
+      putDocLn $ "Inferred type of expression: " <> align (pretty (typeOf e))
+      T.putStrLn $
+        "The following types are ambiguous: "
+          <> T.intercalate ", " (map (nameToText . toName . typeParamName) tparams)
+      exitWith $ ExitFailure 1
   pval <- runInterpreterNoBreak $ I.interpretExp ctx fexp
   case pval of
     Left err -> do
@@ -121,7 +130,7 @@ newFutharkiState cfg maybe_file = runExceptT $ do
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
-runInterpreterNoBreak :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreterNoBreak :: (MonadIO m) => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err

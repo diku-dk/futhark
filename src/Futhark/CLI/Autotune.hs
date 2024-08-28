@@ -70,13 +70,14 @@ runOptions timeout_s opts =
       runVerbose = optVerbose opts,
       runConvergencePhase = True,
       runConvergenceMaxTime = fromIntegral timeout_s,
-      runResultAction = const $ pure ()
+      runResultAction = const $ pure (),
+      runProfile = False
     }
 
 type Path = [(T.Text, Int)]
 
-regexGroups :: Regex -> T.Text -> Maybe [T.Text]
-regexGroups regex s = do
+regexBlocks :: Regex -> T.Text -> Maybe [T.Text]
+regexBlocks regex s = do
   (_, _, _, groups) <-
     matchM regex s :: Maybe (T.Text, T.Text, T.Text, [T.Text])
   Just groups
@@ -86,7 +87,7 @@ comparisons = mapMaybe isComparison . T.lines
   where
     regex = makeRegex ("Compared ([^ ]+) <= (-?[0-9]+)" :: String)
     isComparison l = do
-      [thresh, val] <- regexGroups regex l
+      [thresh, val] <- regexBlocks regex l
       val' <- readMaybe $ T.unpack val
       pure (thresh, val')
 
@@ -167,8 +168,7 @@ prepare opts futhark prog = do
       pure (dataset, do_run, iosEntryPoint ios)
   where
     run server entry_point trun expected timeout path = do
-      let bestRuntime :: ([RunResult], T.Text) -> ([(T.Text, Int)], Int)
-          bestRuntime (runres, errout) =
+      let bestRuntime (runres, errout, _) =
             ( comparisons errout,
               minimum $ map runMicroseconds runres
             )
@@ -246,7 +246,7 @@ thresholdForest server = do
 
     findThreshold :: (T.Text, T.Text) -> Maybe (T.Text, [(T.Text, Bool)])
     findThreshold (name, param_class) = do
-      [_, grp] <- regexGroups regex param_class
+      [_, grp] <- regexBlocks regex param_class
       pure
         ( name,
           filter (not . T.null . fst)
@@ -472,7 +472,7 @@ runAutotuner opts prog = do
   T.putStrLn $ "Result of autotuning:\n" <> tuning
 
 supportedBackends :: [String]
-supportedBackends = ["opencl", "cuda"]
+supportedBackends = ["opencl", "cuda", "hip"]
 
 commandLineOptions :: [FunOptDescr AutotuneOptions]
 commandLineOptions =

@@ -19,6 +19,7 @@ import Futhark.Analysis.Metrics
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, CanBeAliased (..))
+import Futhark.IR.Mem (OpReturns (..))
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SegOp
 import Futhark.IR.TypeCheck qualified as TC
@@ -50,7 +51,7 @@ data MCOp op rep
   deriving (Eq, Ord, Show)
 
 traverseMCOpStms ::
-  Monad m =>
+  (Monad m) =>
   OpStmsTraverser m (op rep) rep ->
   OpStmsTraverser m (MCOp op rep) rep
 traverseMCOpStms _ f (ParOp par_op op) =
@@ -71,31 +72,34 @@ instance (ASTRep rep, FreeIn (op rep)) => FreeIn (MCOp op rep) where
   freeIn' (ParOp par_op op) = freeIn' par_op <> freeIn' op
   freeIn' (OtherOp op) = freeIn' op
 
-instance (ASTRep rep, IsOp (op rep)) => IsOp (MCOp op rep) where
+instance (IsOp op) => IsOp (MCOp op) where
   safeOp (ParOp _ op) = safeOp op
   safeOp (OtherOp op) = safeOp op
 
   cheapOp (ParOp _ op) = cheapOp op
   cheapOp (OtherOp op) = cheapOp op
 
-instance TypedOp (op rep) => TypedOp (MCOp op rep) where
+  opDependencies (ParOp _ op) = opDependencies op
+  opDependencies (OtherOp op) = opDependencies op
+
+instance (TypedOp op) => TypedOp (MCOp op) where
   opType (ParOp _ op) = opType op
   opType (OtherOp op) = opType op
 
-instance (Aliased rep, AliasedOp (op rep)) => AliasedOp (MCOp op rep) where
+instance (AliasedOp op) => AliasedOp (MCOp op) where
   opAliases (ParOp _ op) = opAliases op
   opAliases (OtherOp op) = opAliases op
 
   consumedInOp (ParOp _ op) = consumedInOp op
   consumedInOp (OtherOp op) = consumedInOp op
 
-instance CanBeAliased op => CanBeAliased (MCOp op) where
+instance (CanBeAliased op) => CanBeAliased (MCOp op) where
   addOpAliases aliases (ParOp par_op op) =
     ParOp (addOpAliases aliases <$> par_op) (addOpAliases aliases op)
   addOpAliases aliases (OtherOp op) =
     OtherOp $ addOpAliases aliases op
 
-instance CanBeWise op => CanBeWise (MCOp op) where
+instance (CanBeWise op) => CanBeWise (MCOp op) where
   addOpWisdom (ParOp par_op op) =
     ParOp (addOpWisdom <$> par_op) (addOpWisdom op)
   addOpWisdom (OtherOp op) =
@@ -104,6 +108,10 @@ instance CanBeWise op => CanBeWise (MCOp op) where
 instance (ASTRep rep, ST.IndexOp (op rep)) => ST.IndexOp (MCOp op rep) where
   indexOp vtable k (ParOp _ op) is = ST.indexOp vtable k op is
   indexOp vtable k (OtherOp op) is = ST.indexOp vtable k op is
+
+instance OpReturns (MCOp NoOp) where
+  opReturns (ParOp _ op) = segOpReturns op
+  opReturns (OtherOp NoOp) = pure []
 
 instance (PrettyRep rep, Pretty (op rep)) => Pretty (MCOp op rep) where
   pretty (ParOp Nothing op) = pretty op
@@ -118,13 +126,13 @@ instance (OpMetrics (Op rep), OpMetrics (op rep)) => OpMetrics (MCOp op rep) whe
   opMetrics (ParOp par_op op) = opMetrics par_op >> opMetrics op
   opMetrics (OtherOp op) = opMetrics op
 
-instance RephraseOp op => RephraseOp (MCOp op) where
+instance (RephraseOp op) => RephraseOp (MCOp op) where
   rephraseInOp r (ParOp par_op op) =
     ParOp <$> traverse (rephraseInOp r) par_op <*> rephraseInOp r op
   rephraseInOp r (OtherOp op) = OtherOp <$> rephraseInOp r op
 
 typeCheckMCOp ::
-  TC.Checkable rep =>
+  (TC.Checkable rep) =>
   (op (Aliases rep) -> TC.TypeM rep ()) ->
   MCOp op (Aliases rep) ->
   TC.TypeM rep ()

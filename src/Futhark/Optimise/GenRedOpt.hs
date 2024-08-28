@@ -105,7 +105,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     -- some `code1`, followed by one accumulation, followed by some `code2`
     -- UpdateAcc VName [SubExp] [SubExp]
     (code1, Just accum_stmt, code2) <- matchCodeAccumCode kstms,
-    Let pat_accum _aux_acc (BasicOp (UpdateAcc acc_nm acc_inds acc_vals)) <- accum_stmt,
+    Let pat_accum _aux_acc (BasicOp (UpdateAcc safety acc_nm acc_inds acc_vals)) <- accum_stmt,
     [pat_acc_nm] <- patNames pat_accum,
     -- check that the `acc_inds` are invariant to at least one
     -- parallel kernel dimensions, and return the innermost such one:
@@ -146,14 +146,14 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
                 stmsToList code1
       (code1'', code1_tr_host) <- transposeFVs (freeIn kerstm) variance invar_gid code1'
       let map_lam_body = mkBody code1'' $ map (SubExpRes (Certs [])) acc_vals
-          map_lam0 = Lambda [Param mempty invar_gid (Prim int64)] map_lam_body el_tps
+          map_lam0 = Lambda [Param mempty invar_gid (Prim int64)] el_tps map_lam_body
       map_lam <- renameLambda map_lam0
       (k1_res, ker1_stms) <- runBuilderT' $ do
         iota <- letExp "iota" $ BasicOp $ Iota inv_dim_len (intConst Int64 0) (intConst Int64 1) Int64
         let op_exp = Op (OtherOp (Screma inv_dim_len [iota] (ScremaForm [] [red] map_lam)))
         res_redmap <- letTupExp "res_mapred" op_exp
         letSubExp (baseString pat_acc_nm ++ "_big_update") $
-          BasicOp (UpdateAcc acc_nm acc_inds $ map Var res_redmap)
+          BasicOp (UpdateAcc safety acc_nm acc_inds $ map Var res_redmap)
 
       -- 1.3. build the kernel expression and rename it!
       gid_flat_1 <- newVName "gid_flat"
@@ -403,7 +403,7 @@ costBody bdy =
 
 costRedundantStmt :: Stm GPU -> Cost
 costRedundantStmt (Let _ _ (Op _)) = Big
-costRedundantStmt (Let _ _ DoLoop {}) = Big
+costRedundantStmt (Let _ _ Loop {}) = Big
 costRedundantStmt (Let _ _ Apply {}) = Big
 costRedundantStmt (Let _ _ WithAcc {}) = Big
 costRedundantStmt (Let _ _ (Match _ cases defbody _)) =
@@ -419,7 +419,6 @@ costRedundantStmt (Let _ _ (BasicOp FlatIndex {})) = Small 0
 costRedundantStmt (Let _ _ (BasicOp Update {})) = Break
 costRedundantStmt (Let _ _ (BasicOp FlatUpdate {})) = Break
 costRedundantStmt (Let _ _ (BasicOp Concat {})) = Big
-costRedundantStmt (Let _ _ (BasicOp Copy {})) = Big
 costRedundantStmt (Let _ _ (BasicOp Manifest {})) = Big
 costRedundantStmt (Let _ _ (BasicOp Replicate {})) = Big
 costRedundantStmt (Let _ _ (BasicOp UpdateAcc {})) = Break

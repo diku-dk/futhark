@@ -3,6 +3,7 @@
 module Language.Futhark.SyntaxTests (tests) where
 
 import Control.Applicative hiding (many, some)
+import Data.Bifunctor
 import Data.Char (isAlpha)
 import Data.Functor
 import Data.Map qualified as M
@@ -53,7 +54,7 @@ instance IsString VName where
     let (s', '_' : tag) = span (/= '_') s
      in VName (fromString s') (read tag)
 
-instance IsString v => IsString (QualName v) where
+instance (IsString v) => IsString (QualName v) where
   fromString = QualName [] . fromString
 
 instance IsString UncheckedTypeExp where
@@ -119,63 +120,70 @@ pSize =
         flip sizeFromName mempty <$> pQualName
       ]
 
-pScalarNonFun :: Parser (ScalarTypeBase Size ())
+pScalarNonFun :: Parser (ScalarTypeBase Size Uniqueness)
 pScalarNonFun =
   choice
     [ Prim <$> pPrimType,
       pTypeVar,
-      tupleRecord <$> parens (pStructType `sepBy1` lexeme ","),
+      tupleRecord <$> parens (pType `sepBy` lexeme ","),
       Record . M.fromList <$> braces (pField `sepBy1` lexeme ",")
     ]
   where
-    pField = (,) <$> pName <* lexeme ":" <*> pStructType
-    pTypeVar = TypeVar () <$> pUniqueness <*> pQualName <*> many pTypeArg
+    pField = (,) <$> pName <* lexeme ":" <*> pType
+    pTypeVar = TypeVar <$> pUniqueness <*> pQualName <*> many pTypeArg
     pTypeArg =
       choice
         [ TypeArgDim <$> pSize,
-          TypeArgType <$> pTypeArgType
+          TypeArgType . second (const NoUniqueness) <$> pTypeArgType
         ]
     pTypeArgType =
       choice
         [ Scalar . Prim <$> pPrimType,
-          parens pStructType
+          parens pType
         ]
 
-pArrayType :: Parser StructType
+pArrayType :: Parser ResType
 pArrayType =
-  Array () <$> pUniqueness <*> (Shape <$> some pSize) <*> pScalarNonFun
+  Array
+    <$> pUniqueness
+    <*> (Shape <$> some pSize)
+    <*> (second (const NoUniqueness) <$> pScalarNonFun)
 
-pNonFunType :: Parser StructType
+pNonFunType :: Parser ResType
 pNonFunType =
-  choice [try pArrayType, try $ parens pStructType, Scalar <$> pScalarNonFun]
+  choice
+    [ try pArrayType,
+      try $ parens pType,
+      Scalar <$> pScalarNonFun
+    ]
 
-pScalarType :: Parser (ScalarTypeBase Size ())
+pScalarType :: Parser (ScalarTypeBase Size Uniqueness)
 pScalarType = choice [try pFun, pScalarNonFun]
   where
     pFun =
-      pParam <* lexeme "->" <*> pStructRetType
+      pParam <* lexeme "->" <*> pRetType
     pParam =
       choice
         [ try pNamedParam,
           do
             t <- pNonFunType
-            pure $ Arrow () Unnamed (diet t) t
+            pure $ Arrow Nonunique Unnamed (diet $ resToParam t) (toStruct t)
         ]
     pNamedParam = parens $ do
       v <- pVName <* lexeme ":"
-      t <- pStructType
-      pure $ Arrow () (Named v) (diet t) t
+      t <- pType
+      pure $ Arrow Nonunique (Named v) (diet $ resToParam t) (toStruct t)
 
-pStructRetType :: Parser StructRetType
-pStructRetType =
+pRetType :: Parser ResRetType
+pRetType =
   choice
-    [ lexeme "?" *> (RetType <$> some (brackets pVName) <* lexeme "." <*> pStructType),
-      RetType [] <$> pStructType
+    [ lexeme "?" *> (RetType <$> some (brackets pVName) <* lexeme "." <*> pType),
+      RetType [] <$> pType
     ]
 
-pStructType :: Parser StructType
-pStructType =
-  choice [try $ Scalar <$> pScalarType, pArrayType, parens pStructType]
+pType :: Parser ResType
+pType =
+  choice [try $ Scalar <$> pScalarType, pArrayType, parens pType]
 
 fromStringParse :: Parser a -> String -> String -> a
 fromStringParse p what s =
@@ -184,11 +192,17 @@ fromStringParse p what s =
     onError e =
       error $ "not a " <> what <> ": " <> s <> "\n" <> errorBundlePretty e
 
-instance IsString (ScalarTypeBase Size ()) where
-  fromString = fromStringParse pScalarType "ScalarType"
+instance IsString (ScalarTypeBase Size NoUniqueness) where
+  fromString =
+    fromStringParse (second (const NoUniqueness) <$> pScalarType) "ScalarType"
 
 instance IsString StructType where
-  fromString = fromStringParse pStructType "StructType"
+  fromString =
+    fromStringParse (second (const NoUniqueness) <$> pType) "StructType"
 
 instance IsString StructRetType where
-  fromString = fromStringParse pStructRetType "StructRetType"
+  fromString =
+    fromStringParse (second (pure NoUniqueness) <$> pRetType) "StructRetType"
+
+instance IsString ResRetType where
+  fromString = fromStringParse pRetType "ResRetType"
