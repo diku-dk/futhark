@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * GPU register capacity can now be configured.
 
+* `futhark script` now accepts a `-b` option for producing binary
+  output.
+
 ### Removed
 
 ### Changed

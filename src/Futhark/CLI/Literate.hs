@@ -670,7 +670,8 @@ data Options = Options
     scriptSkipCompilation :: Bool,
     scriptOutput :: Maybe FilePath,
     scriptVerbose :: Int,
-    scriptStopOnError :: Bool
+    scriptStopOnError :: Bool,
+    scriptBinary :: Bool
   }
 
 -- | The configuration before any user-provided options are processed.
@@ -684,7 +685,8 @@ initialOptions =
       scriptSkipCompilation = False,
       scriptOutput = Nothing,
       scriptVerbose = 0,
-      scriptStopOnError = False
+      scriptStopOnError = False,
+      scriptBinary = False
     }
 
 data Env = Env

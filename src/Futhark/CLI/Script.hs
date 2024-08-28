@@ -2,6 +2,8 @@
 module Futhark.CLI.Script (main) where
 
 import Control.Monad.Except
+import Data.Binary qualified as Bin
+import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.CLI.Literate
@@ -11,6 +13,7 @@ import Futhark.CLI.Literate
     scriptCommandLineOptions,
   )
 import Futhark.Script
+import Futhark.Test.Values (Compound (..))
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText)
 import System.Exit
@@ -38,7 +41,12 @@ commandLineOptions =
                    scriptVerbose = scriptVerbose config + 1
                  }
            )
-           "Enable logging."
+           "Enable logging.",
+         Option
+           "b"
+           ["binary"]
+           (NoArg $ Right $ \config -> config {scriptBinary = True})
+           "Produce binary output."
        ]
 
 -- | Run @futhark script@.
@@ -59,5 +67,12 @@ main = mainWithOptions initialOptions commandLineOptions "program script" $ \arg
             T.hPutStrLn stderr e
             exitFailure
           Right v ->
-            T.putStrLn $ prettyText v
+            if scriptBinary opts
+              then case v of
+                ValueAtom v' -> BS.putStr $ Bin.encode v'
+                _ ->
+                  T.hPutStrLn
+                    stderr
+                    "Result value cannot be represented in binary format."
+              else T.putStrLn $ prettyText v
     _ -> Nothing
