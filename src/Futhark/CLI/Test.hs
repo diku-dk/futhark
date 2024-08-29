@@ -596,8 +596,7 @@ runTests config paths = do
                         { testStatusRemain = test `delete` testStatusRemain ts,
                           testStatusRun = test `delete` testStatusRun ts,
                           testStatusRunsRemain =
-                            testStatusRunsRemain ts
-                              - numTestCases test
+                            testStatusRunsRemain ts - numTestCases test
                         }
                 case res of
                   Success -> do
