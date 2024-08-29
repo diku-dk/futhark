@@ -95,9 +95,6 @@ instance Replaceable Term (SoP Term) where
         error "Replacement is not a linear combination."
   rep _ Recurrence = sym2SoP Recurrence
 
--- instance Replaceable (SoP Term) where
---   rep _ _ = undefined
-
 -- NOTE 2.b.iii says "if x occurs in some other equation",
 -- but we don't have access to other equations here.
 -- I reckon, we can always just do this substitution
@@ -107,12 +104,16 @@ instance Replaceable Term (SoP Term) where
 -- NOTE 3.a irrelevant here given that we are post type checking?
 instance MonadFreshNames m => Unify Term (SoP Term) m where
   unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
+  -- TODO I don't think we want exchange since unify is used to check whether
+  --      the holes (FVs) in the first argument can be substituted to be
+  --      syntactically identical to the second argument---not the other way
+  --      around. (I.e., unify should not be commutative.)
   -- 1. Exchange.
-  unify_ k t (Var x) | not (isVar t) =
-    unify_ k (Var x) t
-    where
-      isVar (Var _) = True
-      isVar _ = False
+  -- unify_ k t (Var x) | not (isVar t) =
+  --   unify_ k (Var x) t
+  --   where
+  --     isVar (Var _) = True
+  --     isVar _ = False
   -- 2.
   unify_ k (Var x) t
     | Var x == t = pure mempty -- 2.a. Equation (constraint) elimination.
@@ -130,5 +131,9 @@ instance MonadFreshNames m => Unify Term (SoP Term) m where
   unify_ k (Idx xs i) (Idx ys j) = do
     s <- unify_ k xs ys
     (s <>) <$> unify_ k (rep s i) (rep s j)
+  unify_ _ (LinComb {}) _ =
+    fail "Incompatible"
+  unify_ _ (Idx {}) _ =
+    fail "Incompatible"
   unify_ _ _ _ =
     pure mempty
