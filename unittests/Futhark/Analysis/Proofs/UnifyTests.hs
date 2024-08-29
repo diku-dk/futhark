@@ -78,7 +78,7 @@ tests = testGroup "Proofs.UnifyTests"
       ) @?= Nothing
   , testCase "Unify (x + y + 2) (z + w + 2)" $
       run4 (\(x,y,z,w) ->
-        unify (name2SoP x .+. name2SoP y .+. int2SoP 2) (name2SoP x .+. name2SoP y .+. int2SoP 2)
+        unify (name2SoP x .+. name2SoP y .+. int2SoP 2) (name2SoP z .+. name2SoP w .+. int2SoP 2)
       ) @?= x2z_y2w
   ]
   where
