@@ -225,7 +225,7 @@ makeCopyStms vs = do
     makeNewName name = newVName $ baseString name <> "_copy"
 
 okToFuseProducer :: H.SOAC SOACS -> FusionM Bool
-okToFuseProducer (H.Screma _ form _) = do
+okToFuseProducer (H.Screma _ _ form) = do
   let is_scan = isJust $ Futhark.isScanomapSOAC form
   gets $ (not is_scan ||) . fuseScans
 okToFuseProducer _ = pure True
@@ -279,7 +279,7 @@ vFuseNodeT
 vFuseNodeT
   _
   infusible
-  (SoacNode ots1 pat1 (H.Screma w form inps) aux1, _, _)
+  (SoacNode ots1 pat1 (H.Screma w inps form) aux1, _, _)
   (TransNode stm2_out (H.Index cs slice@(Slice (ds@(DimSlice _ w' _) : ds_rest))) _, _)
     | null infusible,
       w /= w',
@@ -295,7 +295,7 @@ vFuseNodeT
           SoacNode
             ots1'
             (Pat [PatElem stm2_out out_t])
-            (H.Screma w' form inps')
+            (H.Screma w' inps' form)
             aux1
     where
       sliceInput inp =
@@ -335,7 +335,7 @@ hFuseNodeT _ _ = pure Nothing
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
 removeOutputsExcept toKeep s = case s of
-  SoacNode ots (Pat pats1) soac@(H.Screma _ (ScremaForm scans_1 red_1 lam_1) _) aux1 ->
+  SoacNode ots (Pat pats1) soac@(H.Screma _ _ (ScremaForm scans_1 red_1 lam_1)) aux1 ->
     SoacNode ots (Pat $ pats_unchanged <> pats_new) (H.setLambda lam_new soac) aux1
     where
       scan_output_size = Futhark.scanResults scans_1

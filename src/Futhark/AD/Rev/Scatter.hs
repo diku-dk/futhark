@@ -92,7 +92,7 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
   id_lam <-
     mkIdentityLambda $
       replicate (shapeRank shp) (Prim int64) ++ replicate (shapeRank shp) val_t
-  addStm $ Let (Pat [pys]) aux $ Op $ Scatter w ass id_lam [(shp, num_vals, xs)]
+  addStm $ Let (Pat [pys]) aux $ Op $ Scatter w ass [(shp, num_vals, xs)] id_lam
   m
   let ys = patElemName pys
   -- XXX: Since our restoration of xs will consume ys, we have to
@@ -117,12 +117,12 @@ vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m = do
     f <- mkIdentityLambda f_tps
     xs_adj <-
       letExp (baseString xs ++ "_adj") . Op $
-        Scatter w (all_inds ++ zeros) f [(shp, num_vals, ys_adj)]
+        Scatter w (all_inds ++ zeros) [(shp, num_vals, ys_adj)] f
     insAdj xs xs_adj -- reusing the ys_adj for xs_adj!
     f' <- mkIdentityLambda f_tps
     xs_rc <-
       auxing aux . letExp (baseString xs <> "_rc") . Op $
-        Scatter w (all_inds ++ xs_saves) f' [(shp, num_vals, ys)]
+        Scatter w (all_inds ++ xs_saves) [(shp, num_vals, ys)] f'
     addSubstitution xs xs_rc
     addSubstitution ys ys_copy
   where
@@ -178,7 +178,7 @@ vjpScatter ops (Pat pes) aux (w, ass, lam, written_info) m
         f <- mkIdentityLambda (replicate num_inds (Prim int64) ++ vtps)
         let stm =
               Let (Pat [pe]) aux . Op $
-                Scatter w (curr_inds ++ curr_vals) f [info]
+                Scatter w (curr_inds ++ curr_vals) [info] f
         stms_rest <- chunkScatterInps (other_inds, other_vals) rest
         pure $ stm : stms_rest
     diffScatters all_stms

@@ -142,9 +142,8 @@ multiScatter n dst is vs = do
         p2 <- traverse eParam scatter_params
         pure $ p1 <> p2
 
-  letTupExp "scatter_res" . Op $
-    Scatter n (is : vs) scatter_lam $
-      zipWith (\t -> (,,) (Shape $ pure $ arraySize 0 t) 1) tps dst
+  let spec = zipWith (\t -> (,,) (Shape $ pure $ arraySize 0 t) 1) tps dst
+  letTupExp "scatter_res" . Op $ Scatter n (is : vs) spec scatter_lam
 
 multiIndex :: [VName] -> [DimIndex SubExp] -> ADM [VName]
 multiIndex vs s = do
@@ -311,7 +310,7 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
   f'' <- mkIdentityLambda $ replicate nr_dims (Prim int64) ++ [Prim t]
   vs_bar' <-
     letExp (baseString vs <> "_bar") . Op $
-      Scatter q scatter_inps f'' [(Shape vs_dims, 1, vs_bar)]
+      Scatter q scatter_inps [(Shape vs_dims, 1, vs_bar)] f''
   insAdj vs vs_bar'
   where
     mk_indices :: [SubExp] -> [SubExp] -> ADM [VName]

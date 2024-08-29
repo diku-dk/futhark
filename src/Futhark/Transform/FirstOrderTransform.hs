@@ -281,7 +281,7 @@ transformSOAC pat (Stream w arrs nes lam) = do
       mkBodyM mempty $ subExpsRes $ res' ++ mapout_res'
 
   letBind pat $ Loop merge loop_form loop_body
-transformSOAC pat (Scatter len ivs lam as) = do
+transformSOAC pat (Scatter len ivs as lam) = do
   iter <- newVName "write_iter"
 
   let (as_ws, as_ns, as_vs) = unzip3 as
