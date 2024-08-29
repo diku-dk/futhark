@@ -7,7 +7,7 @@ import Language.Futhark (VName (VName))
 import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), Nameable (..), SubstitutionBuilder (addSub), Replaceable (rep))
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
-import Debug.Trace (trace)
+import Debug.Trace (trace, traceM)
 import Futhark.Util.Pretty (Pretty, pretty, parens, Doc, brackets, (<+>), prettyString)
 import Data.Maybe (fromJust)
 
@@ -59,6 +59,7 @@ instance Renameable Term where
     Idx <$> rename_ tau xs <*> rename_ tau i
   rename_ tau (LinComb xn lb ub e) = do
     xm <- newNameFromString "i"
+    traceM $ "RENAMING" <> prettyString xn <> " TO " <> prettyString xm
     let tau' = M.insert xn xm tau
     LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau e
   rename_ _ Recurrence =
