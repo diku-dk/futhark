@@ -2,6 +2,7 @@
 -- This module lets us answer the question:
 --   Are two expressions syntactically identical
 --   up to the names of bound variables?
+{-# OPTIONS_GHC -Wno-orphans #-}
 module Futhark.Analysis.Proofs.Unify
 where
 
@@ -130,13 +131,10 @@ instance ( MonadFreshNames m
          , Pretty u
          , Ord u) => Unify (SoP.Term u, Integer) (SoP u) m where
   unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
+   -- Unify on permutations of symbols in term.
   unify_ k (x, a) (y, b)
-    | a == b =
-        unifyAnyPermutation k xs ys -- Unify on permutations of symbols in term.
+    | a == b = unifyAnyPermutation k (termToList x) (termToList y)
     | otherwise = fail "no unify: unequal constants" -- these dont unify
-    where
-      xs = termToList x
-      ys = termToList y
 
 instance ( MonadFreshNames m
          , Replaceable u (SoP u)
@@ -146,7 +144,5 @@ instance ( MonadFreshNames m
          , Pretty u
          , Ord u) => Unify (SoP u) (SoP u) m where
   unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
-  unify_ k x y = unifyAnyPermutation k xs ys -- Unify on permutations of terms.
-    where
-      xs = sopToList x
-      ys = sopToList y
+  -- Unify on permutations of terms.
+  unify_ k x y = unifyAnyPermutation k (sopToList x) (sopToList y)
