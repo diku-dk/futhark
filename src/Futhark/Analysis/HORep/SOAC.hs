@@ -86,6 +86,7 @@ import Futhark.IR hiding
 import Futhark.IR qualified as Futhark
 import Futhark.IR.SOACS.SOAC
   ( HistOp (..),
+    ScatterSpec,
     ScremaForm (..),
     scremaType,
   )
@@ -403,7 +404,7 @@ transposeInput k n inp =
 -- | A definite representation of a SOAC expression.
 data SOAC rep
   = Stream SubExp (Lambda rep) [SubExp] [Input]
-  | Scatter SubExp (Lambda rep) [Input] [(Shape, Int, VName)]
+  | Scatter SubExp (Lambda rep) [Input] (ScatterSpec VName)
   | Screma SubExp (ScremaForm rep) [Input]
   | Hist SubExp [HistOp rep] (Lambda rep) [Input]
   deriving (Eq, Show)
