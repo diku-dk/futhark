@@ -36,11 +36,11 @@ evalTestM (TestM m) vns = fst $ evalRWS m () s
   where
     s = VEnv vns
 
-runTest :: MaybeT TestM Sub -> Maybe Sub
-runTest test = evalTestM (runMaybeT test) blankNameSource
+runTest :: TestM (Maybe Sub) -> Maybe Sub
+runTest test = evalTestM test blankNameSource
 
-getValue :: MaybeT TestM a -> a
-getValue test = fromJust $ evalTestM (runMaybeT test) blankNameSource
+getValue :: TestM a -> a
+getValue m = evalTestM m blankNameSource
 
 
 tests :: TestTree

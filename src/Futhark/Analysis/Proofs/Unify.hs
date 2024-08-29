@@ -50,8 +50,8 @@ class (MonadFreshNames m, Renameable u) => Unify u v m where
   -- Unification for quantified formulae, 1993.
   -- Check whether x is a bound variable by `x >= k`.
   unify_ :: VName -> u -> u -> MaybeT m (Substitution v)
-  unify :: u -> u -> MaybeT m (Substitution v)
-  unify e e' = do
+  unify :: u -> u -> m (Maybe (Substitution v))
+  unify e e' = runMaybeT $ do
     -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
     --                  = {rename(e) ~= rename(e')}.
     k <- newNameFromString "k"
