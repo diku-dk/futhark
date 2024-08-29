@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 module Futhark.Analysis.Proofs.UnifyTests (tests) where
 
 import Test.Tasty
@@ -43,43 +44,56 @@ getNames test = fromJust $ evalTestM (runMaybeT test) blankNameSource
 
 
 tests :: TestTree
-tests = testGroup "Proofs.UnifyTests"
-  [ testCase "Unify (x + y) (z + w)" $
-      run4 (\(x,y,z,w) ->
+tests = testGroup "Proofs.Unify"
+  [ testCase "Add" $
+      run_xyzw (\(x,y,z,w) ->
         unify (name2SoP x .+. name2SoP y) (name2SoP z .+. name2SoP w)
       ) @?= x2z_y2w
-  , testCase "Unify (2x + y) (z + w)" $
-      run4 (\(x,y,z,w) ->
-        unify (scaleSoP 2 (name2SoP x) .+. name2SoP y) (name2SoP z .+. name2SoP w)
-      ) @?= Nothing
-  , testCase "Unify (x + y) (z + 2w)" $
-      run4 (\(x,y,z,w) ->
-        unify (name2SoP x .+. name2SoP y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
-      ) @?= Nothing
-  , testCase "Unify (2x + y) (z + 2w)" $
-      run4 (\(x,y,z,w) ->
-        unify (scaleSoP 2 (name2SoP x) .+. name2SoP y) (scaleSoP 2 (name2SoP z) .+. name2SoP w)
-      ) @?= x2z_y2w
-  , testCase "Unify (2x + y) (z + 2w)" $
-      run4 (\(x,y,z,w) ->
-        unify (scaleSoP 2 (name2SoP x) .+. name2SoP y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
-      ) @?= x2w_y2z
-  , testCase "Unify (x * y) (z + w)" $
-      run4 (\(x,y,z,w) ->
-        unify (name2SoP x .*. name2SoP y) (name2SoP z .+. name2SoP w)
-      ) @?= Nothing
-  , testCase "Unify (x * y) (z * w)" $
-      run4 (\(x,y,z,w) ->
+  , testCase "Multiply" $
+      run_xyzw (\(x,y,z,w) ->
         unify (name2SoP x .*. name2SoP y) (name2SoP z .*. name2SoP w)
       ) @?= x2z_y2w
-  , testCase "Unify (x + y + 2) (z + w)" $
-      run4 (\(x,y,z,w) ->
+  , testCase "First is scaled" $
+      run_xyzw (\(x,y,z,w) ->
+        unify (scaleSoP 2 (name2SoP x) .+. name2SoP y) (name2SoP z .+. name2SoP w)
+      ) @?= Nothing
+  , testCase "Second is scaled" $
+      run_xyzw (\(x,y,z,w) ->
+        unify (name2SoP x .+. name2SoP y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
+      ) @?= Nothing
+  , testCase "Both scaled, but permuted" $
+      run_xyzw (\(x,y,z,w) ->
+        unify (scaleSoP 2 (name2SoP x) .+. name2SoP y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
+      ) @?= x2w_y2z
+  , testCase "Wrong operator" $
+      run_xyzw (\(x,y,_,_) ->
+        unify (name2SoP x .*. name2SoP y) (name2SoP x .+. name2SoP y)
+      ) @?= Nothing
+  , testCase "One has constant" $
+      run_xyzw (\(x,y,z,w) ->
         unify (name2SoP x .+. name2SoP y .+. int2SoP 2) (name2SoP z .+. name2SoP w)
       ) @?= Nothing
-  , testCase "Unify (x + y + 2) (z + w + 2)" $
-      run4 (\(x,y,z,w) ->
+  , testCase "Different constants" $
+      run_xyzw (\(x,y,z,w) ->
+        unify (name2SoP x .+. name2SoP y .+. int2SoP 1) (name2SoP z .+. name2SoP w .+. int2SoP 2)
+      ) @?= Nothing
+  , testCase "Same constant" $
+      run_xyzw (\(x,y,z,w) ->
         unify (name2SoP x .+. name2SoP y .+. int2SoP 2) (name2SoP z .+. name2SoP w .+. int2SoP 2)
       ) @?= x2z_y2w
+  , testCase "Substitute only some symbols" $
+      run_xyzw (\(x,y,z,_) ->
+        unify (name2SoP x .*. name2SoP y .*. name2SoP w) (name2SoP z .*. name2SoP w .*. name2SoP w)
+      ) @?= x2z_y2w
+  -- Empty substitutions (e.g., simply permuting symbols or terms).
+  , testCase "Permuted terms" $
+      run_xyzw (\(x,y,_,_) ->
+        unify (name2SoP x .+. name2SoP y) (name2SoP y .+. name2SoP x)
+      ) @?= Just mempty
+  , testCase "Permuted symbols" $
+      run_xyzw (\(x,y,z,_) ->
+        unify (name2SoP x .*. name2SoP y .*. name2SoP z) (name2SoP z .*. name2SoP y .*. name2SoP x)
+      ) @?= Just mempty
   ]
   where
     name2SoP = sym2SoP . Var
@@ -89,4 +103,4 @@ tests = testGroup "Proofs.UnifyTests"
     (x,y,z,w) = getNames xyzwM
     x2z_y2w = Just (s x (name2SoP z) <> s y (name2SoP w)) 
     x2w_y2z = Just (s x (name2SoP w) <> s y (name2SoP z)) 
-    run4 f = runTest (xyzwM >>= f)
+    run_xyzw f = runTest (xyzwM >>= f)
