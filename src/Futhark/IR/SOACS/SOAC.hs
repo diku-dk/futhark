@@ -119,7 +119,7 @@ data SOAC rep
     -- will correspond to the first two output values, and so on. For this
     -- example, <lambda> should return a total of 11 values, 8 index values and
     -- 3 output values.  See also 'splitScatterResults'.
-    Scatter SubExp [VName] (Lambda rep) (ScatterSpec VName)
+    Scatter SubExp [VName] (ScatterSpec VName) (Lambda rep)
   | -- | @Hist <length> <input arrays> <dest-arrays-and-ops> <bucket fun>@
     --
     -- The final lambda produces indexes and values for the 'HistOp's.
@@ -415,11 +415,10 @@ mapSOACM tv (Stream size arrs accs lam) =
     <*> mapM (mapOnSOACVName tv) arrs
     <*> mapM (mapOnSOACSubExp tv) accs
     <*> mapOnSOACLambda tv lam
-mapSOACM tv (Scatter w ivs lam as) =
+mapSOACM tv (Scatter w ivs as lam) =
   Scatter
     <$> mapOnSOACSubExp tv w
     <*> mapM (mapOnSOACVName tv) ivs
-    <*> mapOnSOACLambda tv lam
     <*> mapM
       ( \(aw, an, a) ->
           (,,)
@@ -428,6 +427,7 @@ mapSOACM tv (Scatter w ivs lam as) =
             <*> mapOnSOACVName tv a
       )
       as
+    <*> mapOnSOACLambda tv lam
 mapSOACM tv (Hist w arrs ops bucket_fun) =
   Hist
     <$> mapOnSOACSubExp tv w
@@ -526,7 +526,7 @@ soacType (Stream outersize _ accs lam) =
     nms = map paramName $ take (1 + length accs) params
     substs = M.fromList $ zip nms (outersize : accs)
     Lambda params rtp _ = lam
-soacType (Scatter _w _ivs lam dests) =
+soacType (Scatter _w _ivs dests lam) =
   zipWith arrayOfShape (map (snd . head) rets) shapes
   where
     (shapes, _, rets) =
@@ -559,8 +559,8 @@ instance AliasedOp SOAC where
       -- Drop the chunk parameter, which cannot alias anything.
       paramsToInput =
         zip (map paramName $ drop 1 $ lambdaParams lam) (accs ++ map Var arrs)
-  consumedInOp (Scatter _ _ _ as) =
-    namesFromList $ map (\(_, _, a) -> a) as
+  consumedInOp (Scatter _ _ spec _) =
+    namesFromList $ map (\(_, _, a) -> a) spec
   consumedInOp (Hist _ _ ops _) =
     namesFromList $ concatMap histDest ops
 
@@ -578,8 +578,8 @@ instance CanBeAliased SOAC where
     VJP (Alias.analyseLambda aliases lam) args vec
   addOpAliases aliases (Stream size arr accs lam) =
     Stream size arr accs $ Alias.analyseLambda aliases lam
-  addOpAliases aliases (Scatter len arrs lam dests) =
-    Scatter len arrs (Alias.analyseLambda aliases lam) dests
+  addOpAliases aliases (Scatter len arrs dests lam) =
+    Scatter len arrs dests (Alias.analyseLambda aliases lam)
   addOpAliases aliases (Hist w arrs ops bucket_fun) =
     Hist
       w
@@ -625,7 +625,7 @@ instance IsOp SOAC where
       concatIndicesToEachValue is vs =
         let is_flat = mconcat is
          in map (is_flat <>) vs
-  opDependencies (Scatter w arrs lam outputs) =
+  opDependencies (Scatter w arrs outputs lam) =
     let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
      in map flattenBlocks (groupScatterResults outputs deps)
     where
@@ -753,7 +753,7 @@ typeCheckSOAC (Stream size arrexps accexps lam) = do
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fake_lamarrs' = map asArg lamarrs'
   TC.checkLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
-typeCheckSOAC (Scatter w arrs lam as) = do
+typeCheckSOAC (Scatter w arrs as lam) = do
   -- Requirements:
   --
   --   0. @lambdaReturnType@ of @lam@ must be a list
@@ -899,8 +899,8 @@ instance RephraseOp SOAC where
     JVP <$> rephraseLambda r lam <*> pure args <*> pure vec
   rephraseInOp r (Stream w arrs acc lam) =
     Stream w arrs acc <$> rephraseLambda r lam
-  rephraseInOp r (Scatter w arrs lam dests) =
-    Scatter w arrs <$> rephraseLambda r lam <*> pure dests
+  rephraseInOp r (Scatter w arrs dests lam) =
+    Scatter w arrs dests <$> rephraseLambda r lam
   rephraseInOp r (Hist w arrs ops lam) =
     Hist w arrs <$> mapM onOp ops <*> rephraseLambda r lam
     where
@@ -924,7 +924,7 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
     inside "JVP" $ lambdaMetrics lam
   opMetrics (Stream _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
-  opMetrics (Scatter _len _ lam _) =
+  opMetrics (Scatter _len _ _ lam) =
     inside "Scatter" $ lambdaMetrics lam
   opMetrics (Hist _ _ ops bucket_fun) =
     inside "Hist" $ mapM_ (lambdaMetrics . histOp) ops >> lambdaMetrics bucket_fun
@@ -957,8 +957,8 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
         )
   pretty (Stream size arrs acc lam) =
     ppStream size arrs acc lam
-  pretty (Scatter w arrs lam dests) =
-    ppScatter w arrs lam dests
+  pretty (Scatter w arrs dests lam) =
+    ppScatter w arrs dests lam
   pretty (Hist w arrs ops bucket_fun) =
     ppHist w arrs ops bucket_fun
   pretty (Screma w arrs (ScremaForm scans reds map_lam))
@@ -1030,17 +1030,17 @@ ppStream size arrs acc lam =
 
 -- | Prettyprint the given Scatter.
 ppScatter ::
-  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> Lambda rep -> [(Shape, Int, VName)] -> Doc ann
-ppScatter w arrs lam dests =
+  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> [(Shape, Int, VName)] -> Lambda rep -> Doc ann
+ppScatter w arrs dests lam =
   "scatter"
     <> (parens . align)
       ( pretty w
           <> comma
             </> ppTuple' (map pretty arrs)
           <> comma
-            </> pretty lam
-          <> comma
             </> commasep (map pretty dests)
+          <> comma
+            </> pretty lam
       )
 
 instance (PrettyRep rep) => Pretty (Scan rep) where

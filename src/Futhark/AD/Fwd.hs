@@ -330,14 +330,14 @@ fwdSOAC pat aux (Hist w arrs ops bucket_fun) = do
             histNeutral = interleave nes nes_tan,
             histOp = op'
           }
-fwdSOAC (Pat pes) aux (Scatter w ivs lam as) = do
+fwdSOAC (Pat pes) aux (Scatter w ivs as lam) = do
   as_tan <- mapM (\(s, n, a) -> do a_tan <- tangent a; pure (s, n, a_tan)) as
   pes_tan <- mapM newTan pes
   ivs' <- bundleTangents ivs
   let (as_ws, as_ns, _as_vs) = unzip3 as
       n_indices = sum $ zipWith (*) as_ns $ map length as_ws
   lam' <- fwdScatterLambda n_indices lam
-  let s = Let (Pat (pes ++ pes_tan)) aux $ Op $ Scatter w ivs' lam' $ as ++ as_tan
+  let s = Let (Pat (pes ++ pes_tan)) aux $ Op $ Scatter w ivs' (as ++ as_tan) lam'
   addStm s
   where
     fwdScatterLambda :: Int -> Lambda SOACS -> ADM (Lambda SOACS)

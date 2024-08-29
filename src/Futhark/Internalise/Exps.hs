@@ -1912,7 +1912,8 @@ isIntrinsicFunction qname args loc = do
           sivs = si' <> svs'
 
       let sa_ws = map (I.Shape . take dim . arrayDims) sa_ts
-      letTupExp' desc $ I.Op $ I.Scatter si_w sivs lam $ zip3 sa_ws (repeat 1) sas
+          spec = zip3 sa_ws (repeat 1) sas
+      letTupExp' desc $ I.Op $ I.Scatter si_w sivs spec lam
 
 flatIndexHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
 flatIndexHelper desc loc arr offset slices = do
@@ -2157,10 +2158,10 @@ partitionWithSOACS k lam arrs = do
               replicate (length arr_ts) (subExpRes offset)
                 ++ I.varsRes (map I.paramName value_params)
         }
+  let spec = zip3 (repeat $ I.Shape [w]) (repeat 1) blanks
   results <-
     letTupExp "partition_res" . I.Op $
-      I.Scatter w (classes : all_offsets ++ arrs) write_lam $
-        zip3 (repeat $ I.Shape [w]) (repeat 1) blanks
+      I.Scatter w (classes : all_offsets ++ arrs) spec write_lam
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $

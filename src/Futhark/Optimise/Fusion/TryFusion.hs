@@ -262,8 +262,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       | unfus_set /= mempty,
         not (SOAC.nullTransforms $ fsOutputTransform ker) ->
           fail "Cannot perform diagonal fusion in the presence of output transforms."
-    ( SOAC.Screma _ (ScremaForm scans_c reds_c _) _,
-      SOAC.Screma _ (ScremaForm scans_p reds_p _) _,
+    ( SOAC.Screma _ _ (ScremaForm scans_c reds_c _),
+      SOAC.Screma _ _ (ScremaForm scans_p reds_p _),
       _
       )
         | scremaFusionOK (splitAt (Futhark.scanResults scans_p + Futhark.redResults reds_p) outVars) ker -> do
@@ -299,8 +299,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
               )
               $ SOAC.Screma
                 w
-                (ScremaForm (scans_p ++ scans_c) (reds_p ++ reds_c) res_lam')
                 new_inp
+                (ScremaForm (scans_p ++ scans_c) (reds_p ++ reds_c) res_lam')
 
     ------------------
     -- Scatter fusion --
@@ -311,8 +311,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
     -- The 'inplace' mechanism for kernels already takes care of
     -- checking that the Scatter is not writing to any array used in
     -- the Map.
-    ( SOAC.Scatter _len _lam _ivs dests,
-      SOAC.Screma _ form _,
+    ( SOAC.Scatter _len _ivs dests _lam,
+      SOAC.Screma _ _ form,
       _
       )
         | isJust $ isMapSOAC form,
@@ -323,15 +323,15 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
           mapWriteFusionOK outVars ker -> do
             let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
             success (fsOutNames ker ++ extra_nms) $
-              SOAC.Scatter w res_lam' new_inp dests
+              SOAC.Scatter w new_inp dests res_lam'
 
     -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
     -- checking that the Hist is not writing to any array used in
     -- the Map.
-    ( SOAC.Hist _ ops _ _,
-      SOAC.Screma _ form _,
+    ( SOAC.Hist _ _ ops _,
+      SOAC.Screma _ _ form,
       _
       )
         | isJust $ isMapSOAC form,
@@ -342,11 +342,11 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
           mapWriteFusionOK outVars ker -> do
             let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
             success (fsOutNames ker ++ extra_nms) $
-              SOAC.Hist w ops res_lam' new_inp
+              SOAC.Hist w new_inp ops res_lam'
 
     -- Hist-Hist fusion
-    ( SOAC.Hist _ ops_c _ _,
-      SOAC.Hist _ ops_p _ _,
+    ( SOAC.Hist _ _ ops_c _,
+      SOAC.Hist _ _ ops_p _,
       Horizontal
       ) -> do
         let p_num_buckets = length ops_p
@@ -372,15 +372,11 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                       ++ drop p_num_buckets (lambdaReturnType lam_p)
                 }
         success (fsOutNames ker ++ returned_outvars) $
-          SOAC.Hist w (ops_c <> ops_p) lam' (inp_c_arr <> inp_p_arr)
+          SOAC.Hist w (inp_c_arr <> inp_p_arr) (ops_c <> ops_p) lam'
 
     -- Scatter-write fusion.
-    ( SOAC.Scatter _len_c _lam_c ivs_c as_c,
-      SOAC.Scatter
-        _len_p
-        _lam_p
-        ivs_p
-        as_p,
+    ( SOAC.Scatter _w_c ivs_c as_c _lam_c,
+      SOAC.Scatter _w_p ivs_p as_p _lam_p,
       Horizontal
       ) -> do
         let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
@@ -401,7 +397,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                   lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
                 }
         success (fsOutNames ker ++ returned_outvars) $
-          SOAC.Scatter w lam' (ivs_c ++ ivs_p) (as_c ++ as_p)
+          SOAC.Scatter w (ivs_c ++ ivs_p) (as_c ++ as_p) lam'
     (SOAC.Scatter {}, _, _) ->
       fail "Cannot fuse a scatter with anything else than a scatter or a map"
     (_, SOAC.Scatter {}, _) ->
@@ -434,7 +430,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
         (map identName newacc_ids ++ outVars)
         soac_p'
         ker
-    (_, SOAC.Screma _ form _, _) | Just _ <- Futhark.isScanomapSOAC form -> do
+    (_, SOAC.Screma _ _ form, _) | Just _ <- Futhark.isScanomapSOAC form -> do
       -- A Scan soac can be currently only fused as a (sequential) stream,
       -- hence it is first translated to a (sequential) Stream and then
       -- fusion with a kernel is attempted.
@@ -483,8 +479,8 @@ fuseStreamHelper
   unfus_set
   outVars
   outPairs
-  (SOAC.Stream w2 lam2 nes2 inp2_arr)
-  (SOAC.Stream _ lam1 nes1 inp1_arr) = do
+  (SOAC.Stream w2 inp2_arr nes2 lam2)
+  (SOAC.Stream _ inp1_arr nes1 lam1) = do
     -- very similar to redomap o redomap composition, but need
     -- to remove first the `chunk' parameters of streams'
     -- lambdas and put them in the resulting stream lambda.
@@ -512,7 +508,7 @@ fuseStreamHelper
         unfus_arrs = filter (`notElem` unfus_accs) $ filter (`nameIn` unfus_set) outVars
     pure
       ( unfus_accs ++ out_kernms ++ unfus_arrs,
-        SOAC.Stream w2 res_lam'' (nes1 ++ nes2) new_inp
+        SOAC.Stream w2 new_inp (nes1 ++ nes2) res_lam''
       )
 fuseStreamHelper _ _ _ _ _ _ = fail "Cannot Fuse Streams!"
 
@@ -554,7 +550,7 @@ iswim ::
   SOAC ->
   SOAC.ArrayTransforms ->
   TryFusion (SOAC, SOAC.ArrayTransforms)
-iswim _ (SOAC.Screma w form arrs) ots
+iswim _ (SOAC.Screma w arrs form) ots
   | Just [Futhark.Scan scan_fun nes] <- Futhark.isScanSOAC form,
     Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun,
     Just nes_names <- mapM subExpVar nes = do
@@ -580,9 +576,8 @@ iswim _ (SOAC.Screma w form arrs) ots
       let map_body =
             mkBody
               ( oneStm $
-                  Let (setPatOuterDimTo w map_pat) (defAux ()) $
-                    Op $
-                      Futhark.Screma w arrs' scan_form
+                  Let (setPatOuterDimTo w map_pat) (defAux ()) . Op $
+                    Futhark.Screma w arrs' scan_form
               )
               $ varsRes
               $ patNames map_pat
@@ -592,7 +587,7 @@ iswim _ (SOAC.Screma w form arrs) ots
             t : _ -> 1 : 0 : [2 .. arrayRank t]
 
       pure
-        ( SOAC.Screma map_w (ScremaForm [] [] map_fun') map_arrs',
+        ( SOAC.Screma map_w map_arrs' (ScremaForm [] [] map_fun'),
           ots SOAC.|> SOAC.Rearrange map_cs perm
         )
 iswim _ _ _ =
@@ -673,7 +668,7 @@ pullIndex ::
   SOAC ->
   SOAC.ArrayTransforms ->
   TryFusion (SOAC, SOAC.ArrayTransforms)
-pullIndex (SOAC.Screma _ form inps) ots
+pullIndex (SOAC.Screma _ inps form) ots
   | SOAC.Index cs slice@(Slice (ds@(DimSlice _ w' _) : inner_ds))
       SOAC.:< ots' <-
       SOAC.viewf ots,
@@ -698,7 +693,7 @@ pullIndex (SOAC.Screma _ form inps) ots
           else
             runLambdaBuilder (lambdaParams lam) $
               mapM sliceRes =<< bodyBind (lambdaBody lam)
-      pure (SOAC.Screma w' (mapSOAC lam') (map sliceInput inps), ots')
+      pure (SOAC.Screma w' (map sliceInput inps) (mapSOAC lam'), ots')
 pullIndex _ _ = fail "Cannot pull index"
 
 pushRearrange ::
@@ -765,7 +760,7 @@ fixupInputs inpIds inps =
       | otherwise = Nothing
 
 pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
-pullReshape (SOAC.Screma _ form inps) ots
+pullReshape (SOAC.Screma _ inps form) ots
   | Just maplam <- Futhark.isMapSOAC form,
     SOAC.Reshape cs k shape SOAC.:< ots' <- SOAC.viewf ots,
     all primType $ lambdaReturnType maplam = do
@@ -801,10 +796,10 @@ pullReshape (SOAC.Screma _ form inps) ots
                       lambdaReturnType = retTypes,
                       lambdaBody = inner_body
                     }
-            pure $ SOAC.Screma w $ Futhark.mapSOAC inner_fun
+            pure $ flip (SOAC.Screma w) $ Futhark.mapSOAC inner_fun
 
       op' <-
-        foldM outersoac (SOAC.Screma mapw' $ Futhark.mapSOAC maplam) $
+        foldM outersoac (flip (SOAC.Screma mapw') $ Futhark.mapSOAC maplam) $
           zip (drop 1 $ reverse $ shapeDims shape) $
             drop 1 . reverse . drop 1 . tails $
               shapeDims shape
