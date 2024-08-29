@@ -129,9 +129,9 @@ tests = testGroup "Proofs.Unify"
       (,,,) <$> newVName "a" <*> newVName "b" <*> newVName "c" <*> newVName "d"
     (_,b,c,d) = getValue (xyzwM >> abcdM)
 
-    x2z_y2w = Just (s x (name2SoP z) <> s y (name2SoP w)) 
-    x2w_y2z = Just (s x (name2SoP w) <> s y (name2SoP z)) 
-    yzw2bcd = Just (s y (name2SoP b) <> s z (name2SoP c) <> s w (name2SoP d)) 
+    x2z_y2w = Just (s x (name2SoP z) <> s y (name2SoP w))
+    x2w_y2z = Just (s x (name2SoP w) <> s y (name2SoP z))
+    yzw2bcd = Just (s y (name2SoP b) <> s z (name2SoP c) <> s w (name2SoP d))
 
     renamed_lin_comb = getValue $ do
           _ <- xyzwM
