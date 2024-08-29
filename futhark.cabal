@@ -557,3 +557,4 @@ test-suite unit
     , tasty-hunit
     , tasty-quickcheck
     , text
+    , transformers
