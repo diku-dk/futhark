@@ -4,7 +4,7 @@ where
 import Futhark.Analysis.Proofs.Unify
 import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.))
 import Futhark.MonadFreshNames
-import Futhark.Analysis.Proofs.Term (Term(..))
+import Futhark.Analysis.Proofs.Symbol (Symbol(..))
 import Control.Monad (foldM)
 import Futhark.Util.Pretty
 import Debug.Trace (traceM)
@@ -25,8 +25,8 @@ class Unify u u m => Rewritable u m where
         -- traceM ("applyRule Substitution \n" <> prettyString s)
         pure $ maybe v (to rule) s
 
-instance MonadFreshNames m => Rewritable (SoP Term) m where
-  rules :: m [Rule (SoP Term) (SoP Term)]
+instance MonadFreshNames m => Rewritable (SoP Symbol) m where
+  rules :: m [Rule (SoP Symbol) (SoP Symbol)]
   rules = do
     i <- newVName "i"
     h1 <- newVName "h"

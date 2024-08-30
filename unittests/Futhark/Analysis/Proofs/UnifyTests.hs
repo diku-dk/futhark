@@ -5,7 +5,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Futhark.MonadFreshNames
 import qualified Futhark.SoP.SoP as SoP
-import Futhark.Analysis.Proofs.Term
+import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
 import Control.Monad.RWS.Strict
 import Control.Monad.Trans.Maybe
@@ -16,7 +16,7 @@ import Data.Maybe (fromJust)
 
 newtype VEnv = VEnv { vnamesource :: VNameSource }
 
-type Exp = SoP.SoP Term
+type Exp = SoP.SoP Symbol
 type Sub = Substitution Exp
 
 newtype TestM a = TestM (RWS () () VEnv a)

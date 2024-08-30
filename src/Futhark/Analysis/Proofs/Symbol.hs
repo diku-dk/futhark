@@ -1,4 +1,4 @@
-module Futhark.Analysis.Proofs.Term
+module Futhark.Analysis.Proofs.Symbol
 where
 
 import Data.Set qualified as S
@@ -11,16 +11,16 @@ import Debug.Trace (trace, traceM)
 import Futhark.Util.Pretty (Pretty, pretty, parens, Doc, brackets, (<+>), prettyString)
 import Data.Maybe (fromJust)
 
-data Term =
+data Symbol =
     Var VName
   | LinComb
       VName        -- binder
-      (SoP Term)   -- lower bound
-      (SoP Term)   -- upper bound
-      Term
+      (SoP Symbol)   -- lower bound
+      (SoP Symbol)   -- upper bound
+      Symbol
   | Idx
-      Term         -- array
-      (SoP Term)   -- index
+      Symbol         -- array
+      (SoP Symbol)   -- index
   | Recurrence
   deriving (Show, Eq, Ord)
 
@@ -29,7 +29,7 @@ prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show 
   where
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
-instance Pretty Term where
+instance Pretty Symbol where
   pretty Recurrence = "↺ "
   pretty (Var x) = prettyName x
   pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
@@ -43,16 +43,16 @@ instance Pretty Term where
       autoParens x@(Var _) = pretty x
       autoParens x = parens (pretty x)
 
-instance FreeVariables Term where
+instance FreeVariables Symbol where
   fv (Var vn) = fv vn
   fv (LinComb i lb ub e) = fv lb <> fv ub <> fv e S.\\ S.singleton i
   fv (Idx xs i) = fv xs <> fv i
   fv Recurrence = mempty
 
-instance Nameable Term where
+instance Nameable Symbol where
   mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
 
-instance Renameable Term where
+instance Renameable Symbol where
   rename_ tau (Var x) =
     Var <$> rename_ tau x
   rename_ tau (Idx xs i) =
@@ -65,24 +65,24 @@ instance Renameable Term where
   rename_ _ Recurrence =
     pure Recurrence
 
-instance SubstitutionBuilder Term (SoP Term) where
+instance SubstitutionBuilder Symbol (SoP Symbol) where
   addSub vn e = M.insert vn (sym2SoP e)
 
-sop2Term :: Ord u => SoP u -> u
-sop2Term sop
+sop2Symbol :: Ord u => SoP u -> u
+sop2Symbol sop
   | Just t <- justSym sop = t
-  | otherwise = error "sop2Term on something that is not a symbol"
+  | otherwise = error "sop2Symbol on something that is not a symbol"
 
-instance Replaceable Term (SoP Term) where
+instance Replaceable Symbol (SoP Symbol) where
   -- TODO flatten
   rep s (Var x) =
     let y = M.findWithDefault (sym2SoP $ Var x) x s
     in trace (if x `M.member` s then "rep <" <> prettyString x <> "," <> prettyString y <> ">" else "") y
   rep s (Idx xs i) =
-    sym2SoP $ Idx (sop2Term $ rep s xs) (rep s i)
+    sym2SoP $ Idx (sop2Symbol $ rep s xs) (rep s i)
   rep s (LinComb i lb ub t) =
     -- NOTE we can avoid this rewrite here if we change the LinComb expression
-    -- from Term to SoP Term.
+    -- from Symbol to SoP Symbol.
     let s' = addSub i (Var i) s
     in applyLinCombRule (rep s' lb) (rep s' ub) (rep s' t)
     where
@@ -102,7 +102,7 @@ instance Replaceable Term (SoP Term) where
 -- Further, they keep (Var x := t) in the equations, but
 -- that's relegated to the substitution here.
 -- NOTE 3.a irrelevant here given that we are post type checking?
-instance MonadFreshNames m => Unify Term (SoP Term) m where
+instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
   unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
   -- TODO I don't think we want exchange since unify is used to check whether
   --      the holes (FVs) in the first argument can be substituted to be
