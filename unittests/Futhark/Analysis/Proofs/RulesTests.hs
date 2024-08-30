@@ -108,6 +108,4 @@ tests = testGroup "Proofs.Rules"
     e @??= e' = renamed e @?= renamed e'
     renamed x = getValue $ do
           putNameSource (newNameSource (-10000))
-          l <- rename x
-          traceM (prettyString l)
-          pure l
+          rename x
