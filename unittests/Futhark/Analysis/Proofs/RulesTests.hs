@@ -47,30 +47,25 @@ getValue m = evalTestM m blankNameSource
 tests :: TestTree
 tests = testGroup "Proofs.Rules"
   [ testCase "Add" $
-      run_xyzw (\(x,y,z,w) ->
-        rewrite sopRules (name2SoP x .+. name2SoP y)
-      ) @?= (name2SoP x .+. name2SoP y)
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite (sop x .+. sop y)
+      ) @?= (sop x .+. sop y)
+  , testCase "Extend sum lower bound" $
+      run (\(x,y,z,w,_,_,_,_) ->
+        rewrite (Idx (Var x) (sop y) ~+~ LinComb w (sop y .+. int 1) (sop z) (Var x))
+      ) @?= (renamed $ LinComb w (sop y) (sop z) (Var x))
   ]
   where
-    name2SoP = sym2SoP . Var
-    s = M.singleton
+    int = int2SoP
+    sop = sym2SoP . Var
+    a ~+~ b = sym2SoP a .+. sym2SoP b
 
-    xyzwM =
-      (,,,) <$> newVName "x" <*> newVName "y" <*> newVName "z" <*> newVName "w"
-    (x,y,z,w) = getValue xyzwM
-    abcdM =
-      (,,,) <$> newVName "a" <*> newVName "b" <*> newVName "c" <*> newVName "d"
-    (_,b,c,d) = getValue (xyzwM >> abcdM)
+    varsM =
+      (,,,,,,,) <$> newVName "x" <*> newVName "y" <*> newVName "z" <*> newVName "w"
+                <*> newVName "a" <*> newVName "b" <*> newVName "c" <*> newVName "d"
+    (x,y,z,w,a,b,c,_) = getValue varsM
 
-    x2z_y2w = Just (s x (name2SoP z) <> s y (name2SoP w))
-    x2w_y2z = Just (s x (name2SoP w) <> s y (name2SoP z))
-    yzw2bcd = Just (s y (name2SoP b) <> s z (name2SoP c) <> s w (name2SoP d))
-
-    renamed_lin_comb = getValue $ do
-          _ <- xyzwM
-          (a,b,c,d) <- abcdM
-          _ <- newVName "k" -- Simulate "k" introduced by Unify.
-          rename $ sym2SoP (LinComb a (name2SoP b) (name2SoP c) (Var d))
-
-    run_xyzw f = runTest (xyzwM >>= f)
-    run_xyzw_abcd f = runTest ((,) <$> xyzwM <*> abcdM >>= f)
+    renamed x = getValue $ do
+          _ <- varsM
+          rename . sym2SoP $ x
+    run f = runTest (varsM >>= f)
