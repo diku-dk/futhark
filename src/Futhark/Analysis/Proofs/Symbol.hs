@@ -61,7 +61,7 @@ instance Renameable Symbol where
     xm <- newNameFromString "i"
     traceM $ "RENAMING" <> prettyString xn <> " TO " <> prettyString xm
     let tau' = M.insert xn xm tau
-    LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau e
+    LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau' e
   rename_ _ Recurrence =
     pure Recurrence
 
