@@ -11,7 +11,7 @@ import Data.Set qualified as S
 import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, mapSymSoPM, sopToLists, mapSymSoP)
 import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark (VName)
-import Futhark.MonadFreshNames (VNameSource, MonadFreshNames (getNameSource), newNameFromString, putNameSource)
+import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromString, putNameSource)
 import qualified Data.List as L
 import Control.Monad (foldM, msum)
 import Control.Monad.Trans.Maybe
@@ -20,9 +20,6 @@ import Futhark.Util.Pretty
 
 class Ord a => FreeVariables a where
   fv :: a -> S.Set VName
-
-class Nameable u where
-  mkName :: VNameSource -> (u, VNameSource)
 
 class Renameable u where
   -- Implements subC(id,tau,e) from Sieg and Kaufmann where
@@ -90,7 +87,7 @@ unifies :: ( Replaceable u (SoP v)
            , Pretty u
            , Show v
            , Ord v) => VName -> [(u, u)] -> MaybeT m (Substitution (SoP v))
-unifies _ us | trace ("\nunifies " <> prettyString us) False = undefined
+unifies _ us | trace ("unifies " <> prettyString us) False = undefined
 unifies _ [] = pure mempty
 unifies k (u:us) = do
   s0 <- uncurry (unify_ k) u
@@ -130,7 +127,7 @@ instance ( MonadFreshNames m
          , Show u
          , Pretty u
          , Ord u) => Unify (SoP.Term u, Integer) (SoP u) m where
-  unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
+  -- unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
    -- Unify on permutations of symbols in term.
   unify_ k (x, a) (y, b)
     | a == b = unifyAnyPermutation k (termToList x) (termToList y)
@@ -143,6 +140,6 @@ instance ( MonadFreshNames m
          , Show u
          , Pretty u
          , Ord u) => Unify (SoP u) (SoP u) m where
-  unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
+  -- unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
   -- Unify on permutations of terms.
   unify_ k x y = unifyAnyPermutation k (sopToList x) (sopToList y)

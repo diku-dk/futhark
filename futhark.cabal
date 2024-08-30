@@ -520,6 +520,7 @@ test-suite unit
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
       Futhark.Analysis.Proofs.UnifyTests
+      Futhark.Analysis.Proofs.RulesTests
       Futhark.BenchTests
       Futhark.IR.GPUTests
       Futhark.IR.MCTests

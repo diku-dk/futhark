@@ -4,7 +4,7 @@ where
 import Data.Set qualified as S
 import Data.Map.Strict qualified as M
 import Language.Futhark (VName (VName))
-import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), Nameable (..), SubstitutionBuilder (addSub), Replaceable (rep))
+import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep))
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
 import Debug.Trace (trace, traceM)
@@ -49,8 +49,8 @@ instance FreeVariables Symbol where
   fv (Idx xs i) = fv xs <> fv i
   fv Recurrence = mempty
 
-instance Nameable Symbol where
-  mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
+-- instance Nameable Symbol where
+--   mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
 
 instance Renameable Symbol where
   rename_ tau (Var x) =
@@ -103,7 +103,7 @@ instance Replaceable Symbol (SoP Symbol) where
 -- that's relegated to the substitution here.
 -- NOTE 3.a irrelevant here given that we are post type checking?
 instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
-  unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
+  -- unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
   -- TODO I don't think we want exchange since unify is used to check whether
   --      the holes (FVs) in the first argument can be substituted to be
   --      syntactically identical to the second argument---not the other way
