@@ -99,7 +99,7 @@ genericOptions =
                 char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
                                                           futhark_context_config_set_tuning_param);
                 if (ret != NULL) {
-                  futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                  futhark_panic(1, "When loading tuning file '%s': %s\n", optarg, ret);
                 }}|]
       },
     Option

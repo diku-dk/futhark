@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `auto output` didn't work if the `.fut` file did not have any path
   components.
 
+* Improved detection of malformed tuning files.
+
 ## [0.25.20]
 
 ### Added
