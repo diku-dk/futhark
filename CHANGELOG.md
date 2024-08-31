@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * In some cases, GPU failures would not be reported properly if a
   previous failure was pending.
 
+* `auto output` didn't work if the `.fut` file did not have any path
+  components.
+
 ## [0.25.20]
 
 ### Added
