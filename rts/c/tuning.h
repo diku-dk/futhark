@@ -31,7 +31,7 @@ static char* load_tuning_file(const char *fname,
       *eql = 0;
       char *endptr;
       int value = strtol(eql+1, &endptr, 10);
-      if (*endptr) {
+      if (*endptr && *endptr != '\n') {
         snprintf(line, max_line_len, "Invalid line %d (must be of form 'name=int').",
                  lineno);
         return line;
