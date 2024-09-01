@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * An error in tuning file validation.
 
+* Two-pass scans now use a constant number of threads for the second
+  stage.
+
 ## [0.25.21]
 
 ### Added

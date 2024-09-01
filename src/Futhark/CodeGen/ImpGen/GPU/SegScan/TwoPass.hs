@@ -327,12 +327,12 @@ scanStage2 ::
   SegSpace ->
   [SegBinOp GPUMem] ->
   CallKernelGen ()
-scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_tblocks crossesSegment space scans = do
+scanStage2 (Pat all_pes) stage1_num_threads elems_per_group max_num_tblocks crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
 
-  -- Our group size is the number of groups for the stage 1 kernel.
-  let tblock_size = Count $ unCount num_tblocks
+  -- Our group size is the max number of groups for the stage 1 kernel.
+  let tblock_size = Count $ unCount max_num_tblocks
 
   let crossesSegment' = do
         f <- crossesSegment
@@ -494,20 +494,43 @@ compileSegScan pat lvl space scans kbody = do
   -- Since stage 2 involves a group size equal to the number of groups
   -- used for stage 1, we have to cap this number to the maximum group
   -- size.
-  stage1_max_num_tblocks <- dPrim "stage1_max_num_tblocks"
-  sOp $ Imp.GetSizeMax (tvVar stage1_max_num_tblocks) SizeThreadBlock
+  --
+  -- This is generated in a rather odd way because we want to make it
+  -- recognisable as a constant, which requires association with a
+  -- Futhark expression.
+  stage1_max_num_tblocks <- newVName "stage1_max_num_tblocks"
+  let stm =
+        Let
+          (Pat [PatElem stage1_max_num_tblocks $ MemPrim int64])
+          (defAux ())
+          (Op . Inner . SizeOp $ GetSizeMax SizeThreadBlock)
 
-  stage1_num_tblocks <-
-    fmap (Imp.Count . tvSize) $
-      dPrimV "stage1_num_tblocks" $
-        sMin64 (tvExp stage1_max_num_tblocks) $
-          pe64 . Imp.unCount . kAttrNumBlocks $
-            attrs
+  compileStms mempty (oneStm stm) $ do
+    stage1_num_tblocks <-
+      fmap (Imp.Count . tvSize) $
+        dPrimV "stage1_num_tblocks" $
+          sMin64 (le64 stage1_max_num_tblocks) $
+            pe64 . Imp.unCount . kAttrNumBlocks $
+              attrs
 
-  (stage1_num_threads, elems_per_group, crossesSegment) <-
-    scanStage1 pat stage1_num_tblocks (kAttrBlockSize attrs) space scans kbody
+    (stage1_num_threads, elems_per_group, crossesSegment) <-
+      scanStage1 pat stage1_num_tblocks (kAttrBlockSize attrs) space scans kbody
 
-  emit $ Imp.DebugPrint "elems_per_group" $ Just $ untyped elems_per_group
+    emit $ Imp.DebugPrint "elems_per_group" $ Just $ untyped elems_per_group
 
-  scanStage2 pat stage1_num_threads elems_per_group stage1_num_tblocks crossesSegment space scans
-  scanStage3 pat (kAttrNumBlocks attrs) (kAttrBlockSize attrs) elems_per_group crossesSegment space scans
+    scanStage2
+      pat
+      stage1_num_threads
+      elems_per_group
+      (Imp.Count $ Var stage1_max_num_tblocks)
+      crossesSegment
+      space
+      scans
+    scanStage3
+      pat
+      (kAttrNumBlocks attrs)
+      (kAttrBlockSize attrs)
+      elems_per_group
+      crossesSegment
+      space
+      scans
