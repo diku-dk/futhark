@@ -10,7 +10,7 @@ module Futhark.Actions
     printMemoryAccessAnalysis,
     callGraphAction,
     impCodeGenAction,
-    kernelImpCodeGenAction,
+    impGenGPUAction,
     multicoreImpCodeGenAction,
     metricsAction,
     compileCAction,
@@ -172,12 +172,12 @@ impCodeGenAction =
     }
 
 -- | Convert the program to GPU ImpCode and print it to stdout.
-kernelImpCodeGenAction :: Action GPUMem
-kernelImpCodeGenAction =
+impGenGPUAction :: Action GPUMem
+impGenGPUAction =
   Action
     { actionName = "Compile imperative kernels",
       actionDescription = "Translate program into imperative IL with kernels and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenGPU.compileProgHIP
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenGPU.compileProgOpenCL
     }
 
 -- | Convert the program to CPU multicore ImpCode and print it to stdout.

@@ -510,7 +510,7 @@ commandLineOptions =
       ["compile-imp-gpu"]
       ( NoArg $
           Right $ \opts ->
-            opts {futharkAction = GPUMemAction $ \_ _ _ -> kernelImpCodeGenAction}
+            opts {futharkAction = GPUMemAction $ \_ _ _ -> impGenGPUAction}
       )
       "Translate pipeline result to ImpGPU and write it on stdout.",
     Option
