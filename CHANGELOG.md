@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* An error in tuning file validation.
+
 ## [0.25.21]
 
 ### Added
