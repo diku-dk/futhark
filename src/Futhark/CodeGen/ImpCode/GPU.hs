@@ -141,6 +141,7 @@ instance FreeIn Kernel where
 instance Pretty Kernel where
   pretty kernel =
     "kernel"
+      <+> dquotes (pretty (kernelName kernel))
       <+> brace
         ( "blocks"
             <+> brace (pretty $ kernelNumBlocks kernel)
