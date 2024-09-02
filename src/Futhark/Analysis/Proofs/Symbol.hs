@@ -4,23 +4,24 @@ where
 import Data.Set qualified as S
 import Data.Map.Strict qualified as M
 import Language.Futhark (VName (VName))
-import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep))
-import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
+import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), repRel)
+import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP, Rel (..))
 import Futhark.MonadFreshNames
-import Debug.Trace (trace, traceM)
-import Futhark.Util.Pretty (Pretty, pretty, parens, Doc, brackets, (<+>), prettyString)
+import Debug.Trace (trace)
+import Futhark.Util.Pretty (Pretty, pretty, parens, Doc, brackets, (<+>), prettyString, enclose)
 import Data.Maybe (fromJust)
 
 data Symbol =
     Var VName
-  | LinComb
-      VName        -- binder
-      (SoP Symbol)   -- lower bound
-      (SoP Symbol)   -- upper bound
-      Symbol
   | Idx
       Symbol         -- array
       (SoP Symbol)   -- index
+  | LinComb
+      VName          -- binder
+      (SoP Symbol)   -- lower bound
+      (SoP Symbol)   -- upper bound
+      Symbol
+  | Indicator (Rel Symbol)
   | Recurrence
   deriving (Show, Eq, Ord)
 
@@ -30,10 +31,9 @@ prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show 
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
 instance Pretty Symbol where
-  pretty Recurrence = "↺ "
   pretty (Var x) = prettyName x
   pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
-  pretty (Idx e i) = parens (pretty e) <> brackets (pretty i)
+  pretty (Idx x i) = parens (pretty x) <> brackets (pretty i)
   pretty (LinComb i lb ub e) =
     "∑"
       <> pretty i <> "∈"
@@ -42,28 +42,32 @@ instance Pretty Symbol where
     where
       autoParens x@(Var _) = pretty x
       autoParens x = parens (pretty x)
+  pretty (Indicator p) = iversonbrackets (pretty p)
+    where
+      iversonbrackets = enclose "⟦" "⟧"
+  pretty Recurrence = "↺ "
 
 instance FreeVariables Symbol where
-  fv (Var vn) = fv vn
-  fv (LinComb i lb ub e) = fv lb <> fv ub <> fv e S.\\ S.singleton i
-  fv (Idx xs i) = fv xs <> fv i
-  fv Recurrence = mempty
+  fv sym = case sym of
+    Var vn -> fv vn
+    Idx xs i -> fv xs <> fv i
+    LinComb i lb ub x -> fv lb <> fv ub <> fv x S.\\ S.singleton i
+    Indicator x -> fv x
+    Recurrence -> mempty
 
 -- instance Nameable Symbol where
 --   mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
 
 instance Renameable Symbol where
-  rename_ tau (Var x) =
-    Var <$> rename_ tau x
-  rename_ tau (Idx xs i) =
-    Idx <$> rename_ tau xs <*> rename_ tau i
-  rename_ tau (LinComb xn lb ub e) = do
-    xm <- newNameFromString "i"
-    traceM $ "RENAMING" <> prettyString xn <> " TO " <> prettyString xm
-    let tau' = M.insert xn xm tau
-    LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau' e
-  rename_ _ Recurrence =
-    pure Recurrence
+  rename_ tau sym = case sym of
+    Var x -> Var <$> rename_ tau x
+    Idx xs i -> Idx <$> rename_ tau xs <*> rename_ tau i
+    LinComb xn lb ub e -> do
+      xm <- newNameFromString "i"
+      let tau' = M.insert xn xm tau
+      LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau' e
+    Indicator x -> Indicator <$> rename_ tau x
+    Recurrence -> pure Recurrence
 
 instance SubstitutionBuilder Symbol (SoP Symbol) where
   addSub vn e = M.insert vn (sym2SoP e)
@@ -93,7 +97,9 @@ instance Replaceable Symbol (SoP Symbol) where
         scaleSoP c (sym2SoP $ LinComb i a b u)
       mkLinComb _ _ _ =
         error "Replacement is not a linear combination."
+  rep s (Indicator e) = sym2SoP $ Indicator (repRel s e)
   rep _ Recurrence = sym2SoP Recurrence
+
 
 -- NOTE 2.b.iii says "if x occurs in some other equation",
 -- but we don't have access to other equations here.
@@ -131,6 +137,7 @@ instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
   unify_ k (Idx xs i) (Idx ys j) = do
     s <- unify_ k xs ys
     (s <>) <$> unify_ k (rep s i) (rep s j)
+  unify_ k (Indicator x) (Indicator y) = unify_ k x y
   unify_ _ (LinComb {}) _ =
     fail "Incompatible"
   unify_ _ (Idx {}) _ =
