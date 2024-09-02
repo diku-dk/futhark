@@ -8,7 +8,7 @@ where
 
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, mapSymSoPM, sopToLists, mapSymSoP)
+import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, mapSymSoPM, sopToLists, mapSymSoP, Rel (..), sopFromList, Term, addSoPs, zeroSoP, int2SoP)
 import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark (VName)
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromString, putNameSource)
@@ -61,20 +61,26 @@ class (MonadFreshNames m, Renameable u) => Unify u v m where
 instance Renameable VName where
   rename_ tau x = pure $ M.findWithDefault x x tau
 
+instance (Renameable u, Ord u) => Renameable (Term u, Integer) where
+  rename_ tau (x, c) = (, c) . toTerm <$> mapM (rename_ tau) (termToList x)
+
+instance (Ord u, Renameable u) => Renameable (SoP u) where
+  rename_ tau = mapSymSoPM (rename_ tau)
+
 instance FreeVariables VName where
   fv = S.singleton
 
--- instance FreeVariables u => FreeVariables (SoP.Term u) where
+-- instance FreeVariables u => FreeVariables (Term u) where
 --   fv = S.unions . map fv . termToList
 
 instance FreeVariables u => FreeVariables (SoP u) where
   fv x = S.unions [fv t | (ts, _) <- sopToLists x, t <- ts]
 
-instance (Ord u, Renameable u) => Renameable (SoP u) where
-  rename_ tau = mapSymSoPM (rename_ tau)
+instance (Ord u, Replaceable u (SoP u)) => Replaceable (Term u, Integer) (SoP u) where
+  rep s (x, c) = SoP.scaleSoP c $ foldr (mulSoPs . rep s) (int2SoP 1) . termToList $ x
 
 instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP u) (SoP u) where
-  rep s = mapSymSoP (rep s)
+  rep s = foldr (addSoPs . rep s) zeroSoP . sopToList
 
 instance SubstitutionBuilder (SoP u) (SoP u) where
   addSub = M.insert
@@ -114,19 +120,13 @@ unifyAnyPermutation k xs ys
     first :: Monad m => [MaybeT m a] -> MaybeT m a
     first = msum
 
-instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP.Term u, Integer) (SoP u) where
-  rep s (x, c) = SoP.scaleSoP c $ foldr1 mulSoPs . map (rep s) . termToList $ x
-
-instance (Renameable u, Ord u) => Renameable (SoP.Term u, Integer) where
-  rename_ tau (x, c) = (, c) . toTerm <$> mapM (rename_ tau) (termToList x)
-
 instance ( MonadFreshNames m
          , Renameable u
          , Unify u (SoP u) m
          , Replaceable u (SoP u)
          , Show u
          , Pretty u
-         , Ord u) => Unify (SoP.Term u, Integer) (SoP u) m where
+         , Ord u) => Unify (Term u, Integer) (SoP u) m where
   -- unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
    -- Unify on permutations of symbols in term.
   unify_ k (x, a) (y, b)
