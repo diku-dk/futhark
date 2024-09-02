@@ -139,6 +139,8 @@ library
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
       Futhark.Analysis.PrimExp.Table
+      Futhark.Analysis.Proofs.IndexFn
+      Futhark.Analysis.Proofs.Refine
       Futhark.Analysis.Proofs.Rules
       Futhark.Analysis.Proofs.Symbol
       Futhark.Analysis.Proofs.Unify
