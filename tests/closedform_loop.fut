@@ -1,5 +1,5 @@
 -- ==
--- input { 100000i64 }
--- output { false }
+-- structure { Loop 1 }
+-- structure gpu { Loop 1 }
 
-entry main n = 1 == f64.sum (replicate n (1/f64.i64 n))
+entry main n = f64.sum (replicate n (1/f64.i64 n))
