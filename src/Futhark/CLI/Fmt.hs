@@ -16,6 +16,7 @@ import Language.Futhark.Parser
 import System.Exit
 import System.IO
 import Text.Printf (printf)
+import Control.Monad.State.Strict
 
 -- The formatter implemented here is very crude and incomplete.  The
 -- only syntactical construct it can currently handle is type
@@ -37,7 +38,8 @@ import Text.Printf (printf)
 -- TODO: refactor this entire thing so that the maintenance of the
 -- residual comments is encapsulated monadically.  Use a State monad
 -- to keep the list.  This will make the code much cleaner.
---
+
+
 -- TODO: ensure that doc comments (that start with "-- |" and are
 -- connected to definitions) are always separated from other comments
 -- with a single newline character.
@@ -54,12 +56,32 @@ type Line = T.Text
 -- sub-expression, to e.g. prepend indentation.
 type Fmt = [Line]
 
+-- State monad to keep track of comments 
+data Env = Env 
+  { comments :: [Comment]
+  , fmt      :: Fmt
+  } deriving (Show, Eq, Ord)
+
+type Smth = State Env   
+
+-- Example function to test our new monad
+doSomething :: Comment -> Smth ()
+doSomething c = modify (\s -> s { comments = [c]})
+
+-- Monad version
+monadComment :: Located a => a -> Smth () 
+monadComment a =
+  modify (\s ->
+    case s of
+      Env (c : cs) fmts | locOf a > locOf c -> s { comments = cs, fmt = fmts <> [commentText c] }
+      _ -> s
+  )
+
 comment :: Located a => [Comment] -> a -> ([Comment], Fmt)
 comment (c : cs) a
   | locOf a > locOf c =
       (cs, [commentText c])
 comment cs _ = (cs, [])
-
 -- | Documentation comments are always optional, so this takes a 'Maybe'.
 fmtDocComment :: [Comment] -> Maybe DocComment -> ([Comment], Fmt)
 fmtDocComment cs (Just (DocComment x loc)) =
@@ -69,6 +91,9 @@ fmtDocComment cs (Just (DocComment x loc)) =
     prefix [] = []
     prefix (l : ls) = ("-- | " <> l) : map ("-- " <>) ls
 fmtDocComment cs Nothing = (cs, [])
+
+--fmtMany :: (a -> Smth ()) -> [a] -> Smth ()
+--fmtMany f as = foldM f mempty as
 
 fmtMany :: ([Comment] -> a -> ([Comment], Fmt)) -> [Comment] -> [a] -> ([Comment], Fmt)
 fmtMany f cs ds = second concat $ L.mapAccumL f cs ds
@@ -81,6 +106,7 @@ fmtTupleTypeElems cs (t : ts) =
       (cs'', ts') = fmtTupleTypeElems cs' ts
    in (cs'', t' <> [","] <> ts')
 
+-- does comment works for multi-line comments?
 fmtTypeExp :: [Comment] -> UncheckedTypeExp -> ([Comment], Fmt)
 fmtTypeExp cs (TEVar v loc) =
   let (cs', c) = comment cs loc
