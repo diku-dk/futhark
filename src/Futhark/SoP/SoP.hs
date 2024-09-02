@@ -62,11 +62,8 @@ import Data.MultiSet (MultiSet)
 import Data.MultiSet qualified as MS
 import Data.Set (Set)
 import Data.Set qualified as S
-import Futhark.Analysis.PrimExp.Convert
 import Futhark.SoP.Util
 import Futhark.Util.Pretty
-import Language.Futhark.Core
-import Language.Futhark.Prop
 
 -- | A 'Term' is a product of symbols.
 newtype Term u = Term {getTerm :: MultiSet u}
@@ -78,7 +75,7 @@ newtype Term u = Term {getTerm :: MultiSet u}
 --   1. Lexicographically sorted.
 --   2. Contain no duplicated terms, i.e., @2*x*y + 3*x*y@ is
 --   illegal.
-data SoP u = SoP {getTerms :: Map (Term u) Integer}
+newtype SoP u = SoP {getTerms :: Map (Term u) Integer}
   deriving (Ord, Show)
 
 instance (Ord u, Eq u) => Eq (SoP u) where
@@ -492,6 +489,7 @@ data Rel u
   | (:/=:) (SoP u) (SoP u)
   | (:&&:) (Rel u) (Rel u)
   | (:||:) (Rel u) (Rel u)
+  | Bool Bool
   deriving (Eq, Ord, Show)
 
 infixr 4 :<:
@@ -527,5 +525,6 @@ instance (Pretty u) => Pretty (Rel u) where
       x :/=: y -> op "/=" x y
       x :&&: y -> op "&&" x y
       x :||: y -> op "||" x y
+      Bool x -> pretty x
     where
       op s x y = pretty x <+> s <+> pretty y

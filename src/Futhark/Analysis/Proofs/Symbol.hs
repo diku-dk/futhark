@@ -3,13 +3,12 @@ where
 
 import Data.Set qualified as S
 import Data.Map.Strict qualified as M
-import Language.Futhark (VName (VName))
+import Language.Futhark (VName)
 import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), repRel)
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP, Rel (..))
 import Futhark.MonadFreshNames
 import Debug.Trace (trace)
-import Futhark.Util.Pretty (Pretty, pretty, parens, Doc, brackets, (<+>), prettyString, enclose)
-import Data.Maybe (fromJust)
+import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), prettyString, enclose)
 
 data Symbol =
     Var VName
@@ -25,14 +24,9 @@ data Symbol =
   | Recurrence
   deriving (Show, Eq, Ord)
 
-prettyName :: VName -> Doc a
-prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
-  where
-    subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
-
 instance Pretty Symbol where
-  pretty (Var x) = prettyName x
-  pretty (Idx (Var x) i) = prettyName x <> brackets (pretty i)
+  pretty (Var x) = pretty x
+  pretty (Idx (Var x) i) = pretty x <> brackets (pretty i)
   pretty (Idx x i) = parens (pretty x) <> brackets (pretty i)
   pretty (LinComb i lb ub e) =
     "∑"

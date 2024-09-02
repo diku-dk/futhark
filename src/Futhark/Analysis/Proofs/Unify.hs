@@ -10,13 +10,14 @@ import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, mapSymSoPM, sopToLists, mapSymSoP, Rel (..), sopFromList, Term, addSoPs, zeroSoP, int2SoP)
 import Futhark.SoP.SoP qualified as SoP
-import Language.Futhark (VName)
+import Language.Futhark (VName (VName))
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromString, putNameSource)
 import qualified Data.List as L
 import Control.Monad (foldM, msum)
 import Control.Monad.Trans.Maybe
 import Debug.Trace (trace, traceM)
 import Futhark.Util.Pretty
+import Data.Maybe (fromJust)
 
 class Ord a => FreeVariables a where
   fv :: a -> S.Set VName
@@ -31,6 +32,11 @@ class Renameable u where
   rename = rename_ mempty
 
 type Substitution v = M.Map VName v
+
+instance Pretty VName where
+  pretty (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
+    where
+      subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
 instance Pretty v => Pretty (Substitution v) where
   pretty = braces . commastack . map (\(k,v) -> pretty k <> " : " <> pretty v) . M.toList
