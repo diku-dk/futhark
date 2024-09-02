@@ -489,7 +489,6 @@ data Rel u
   | (:/=:) (SoP u) (SoP u)
   | (:&&:) (Rel u) (Rel u)
   | (:||:) (Rel u) (Rel u)
-  | Bool Bool
   deriving (Eq, Ord, Show)
 
 infixr 4 :<:
@@ -525,6 +524,5 @@ instance (Pretty u) => Pretty (Rel u) where
       x :/=: y -> op "/=" x y
       x :&&: y -> op "&&" x y
       x :||: y -> op "||" x y
-      Bool x -> pretty x
     where
       op s x y = pretty x <+> s <+> pretty y

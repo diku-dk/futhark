@@ -4,8 +4,8 @@ where
 import Data.Set qualified as S
 import Data.Map.Strict qualified as M
 import Language.Futhark (VName)
-import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), repRel)
-import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP, Rel (..))
+import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), unifies)
+import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
 import Debug.Trace (trace)
 import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), prettyString, enclose)
@@ -20,26 +20,44 @@ data Symbol =
       (SoP Symbol)   -- lower bound
       (SoP Symbol)   -- upper bound
       Symbol
-  | Indicator (Rel Symbol)
+  | Indicator Symbol
+  | Bool Bool
+  | SoP Symbol :< SoP Symbol
+  | SoP Symbol :<= SoP Symbol
+  | SoP Symbol :> SoP Symbol
+  | SoP Symbol :>= SoP Symbol
+  | SoP Symbol :== SoP Symbol
+  | SoP Symbol :/= SoP Symbol
+  | Symbol :&& Symbol
+  | Symbol :|| Symbol
   | Recurrence
   deriving (Show, Eq, Ord)
 
 instance Pretty Symbol where
-  pretty (Var x) = pretty x
-  pretty (Idx (Var x) i) = pretty x <> brackets (pretty i)
-  pretty (Idx x i) = parens (pretty x) <> brackets (pretty i)
-  pretty (LinComb i lb ub e) =
-    "∑"
-      <> pretty i <> "∈"
-      <> parens (pretty lb <+> ".." <+> pretty ub)
-      <> autoParens e
+  pretty symbol = case symbol of
+    (Var x) -> pretty x
+    (Idx x i) -> autoParens x <> brackets (pretty i)
+    (LinComb i lb ub e) ->
+      "∑"
+        <> pretty i <> "∈"
+        <> parens (pretty lb <+> ".." <+> pretty ub)
+        <> autoParens e
+    Indicator p -> iversonbrackets (pretty p)
+    Bool x -> pretty x
+    x :< y -> prettyOp "<" x y
+    x :<= y -> prettyOp "<=" x y
+    x :> y -> prettyOp ">" x y
+    x :>= y -> prettyOp ">=" x y
+    x :== y -> prettyOp "==" x y
+    x :/= y -> prettyOp "/=" x y
+    x :&& y -> prettyOp "&&" x y
+    x :|| y -> prettyOp "||" x y
+    Recurrence -> "↺ "
     where
       autoParens x@(Var _) = pretty x
       autoParens x = parens (pretty x)
-  pretty (Indicator p) = iversonbrackets (pretty p)
-    where
       iversonbrackets = enclose "⟦" "⟧"
-  pretty Recurrence = "↺ "
+      prettyOp s x y = pretty x <+> s <+> pretty y
 
 instance FreeVariables Symbol where
   fv sym = case sym of
@@ -47,10 +65,16 @@ instance FreeVariables Symbol where
     Idx xs i -> fv xs <> fv i
     LinComb i lb ub x -> fv lb <> fv ub <> fv x S.\\ S.singleton i
     Indicator x -> fv x
+    Bool _ -> mempty
+    x :< y -> fv x <> fv y
+    x :<= y -> fv x <> fv y
+    x :> y -> fv x <> fv y
+    x :>= y -> fv x <> fv y
+    x :== y -> fv x <> fv y
+    x :/= y -> fv x <> fv y
+    x :&& y -> fv x <> fv y
+    x :|| y -> fv x <> fv y
     Recurrence -> mempty
-
--- instance Nameable Symbol where
---   mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
 
 instance Renameable Symbol where
   rename_ tau sym = case sym of
@@ -61,7 +85,18 @@ instance Renameable Symbol where
       let tau' = M.insert xn xm tau
       LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau' e
     Indicator x -> Indicator <$> rename_ tau x
+    Bool x -> pure $ Bool x
+    x :< y -> f (:<) x y
+    x :<= y -> f (:<=) x y
+    x :> y -> f (:>) x y
+    x :>= y -> f (:>=) x y
+    x :== y -> f (:==) x y
+    x :/= y -> f (:/=) x y
+    x :&& y -> f (:&&) x y
+    x :|| y -> f (:||) x y
     Recurrence -> pure Recurrence
+    where
+      f op x y = op <$> rename_ tau x <*> rename_ tau y
 
 instance SubstitutionBuilder Symbol (SoP Symbol) where
   addSub vn e = M.insert vn (sym2SoP e)
@@ -73,26 +108,39 @@ sop2Symbol sop
 
 instance Replaceable Symbol (SoP Symbol) where
   -- TODO flatten
-  rep s (Var x) =
-    let y = M.findWithDefault (sym2SoP $ Var x) x s
-    in trace (if x `M.member` s then "rep <" <> prettyString x <> "," <> prettyString y <> ">" else "") y
-  rep s (Idx xs i) =
-    sym2SoP $ Idx (sop2Symbol $ rep s xs) (rep s i)
-  rep s (LinComb i lb ub t) =
-    -- NOTE we can avoid this rewrite here if we change the LinComb expression
-    -- from Symbol to SoP Symbol.
-    let s' = addSub i (Var i) s
-    in applyLinCombRule (rep s' lb) (rep s' ub) (rep s' t)
+  rep s symbol = case symbol of
+    Var x ->
+      let y = M.findWithDefault (sym2SoP $ Var x) x s
+      in trace (if x `M.member` s then "rep <" <> prettyString x <> "," <> prettyString y <> ">" else "") y
+    Idx xs i ->
+      sym2SoP $ Idx (sop2Symbol $ rep s xs) (rep s i)
+    LinComb i lb ub t ->
+      -- NOTE we can avoid this rewrite here if we change the LinComb expression
+      -- from Symbol to SoP Symbol.
+      let s' = addSub i (Var i) s
+      in applyLinCombRule (rep s' lb) (rep s' ub) (rep s' t)
+      where
+        applyLinCombRule a b = foldl1 (.+.) . map (mkLinComb a b) . sopToLists
+        mkLinComb _ _ ([], c) =
+          scaleSoP c (ub .-. lb .+. int2SoP 1)
+        mkLinComb a b ([u], c) =
+          scaleSoP c (sym2SoP $ LinComb i a b u)
+        mkLinComb _ _ _ =
+          error "Replacement is not a linear combination."
+    Indicator e -> sym2SoP . Indicator . sop2Symbol $ rep s e
+    Bool x -> sym2SoP $ Bool x
+    x :< y -> f (:<) x y
+    x :<= y -> f (:<=) x y
+    x :> y -> f (:>) x y
+    x :>= y -> f (:>=) x y
+    x :== y -> f (:==) x y
+    x :/= y -> f (:/=) x y
+    x :&& y -> g (:&&) x y
+    x :|| y -> g (:||) x y
+    Recurrence -> sym2SoP Recurrence
     where
-      applyLinCombRule a b = foldl1 (.+.) . map (mkLinComb a b) . sopToLists
-      mkLinComb _ _ ([], c) =
-        scaleSoP c (ub .-. lb .+. int2SoP 1)
-      mkLinComb a b ([u], c) =
-        scaleSoP c (sym2SoP $ LinComb i a b u)
-      mkLinComb _ _ _ =
-        error "Replacement is not a linear combination."
-  rep s (Indicator e) = sym2SoP $ Indicator (repRel s e)
-  rep _ Recurrence = sym2SoP Recurrence
+      f op x y = sym2SoP $ rep s x `op` rep s y
+      g op x y = sym2SoP $ sop2Symbol (rep s x) `op` sop2Symbol (rep s y)
 
 
 -- NOTE 2.b.iii says "if x occurs in some other equation",
@@ -132,9 +180,15 @@ instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
     s <- unify_ k xs ys
     (s <>) <$> unify_ k (rep s i) (rep s j)
   unify_ k (Indicator x) (Indicator y) = unify_ k x y
-  unify_ _ (LinComb {}) _ =
-    fail "Incompatible"
-  unify_ _ (Idx {}) _ =
-    fail "Incompatible"
-  unify_ _ _ _ =
-    pure mempty
+  unify_ _ (Bool x) (Bool y) | x == y = pure mempty
+  unify_ _ Recurrence Recurrence = pure mempty
+  unify_ k a b = case (a, b) of
+    (x1 :< y1, x2 :< y2) -> unifies k [(x1, x2), (y1, y2)]
+    (x1 :<= y1, x2 :<= y2) -> unifies k [(x1, x2), (y1, y2)]
+    (x1 :> y1, x2 :> y2) -> unifies k [(x1, x2), (y1, y2)]
+    (x1 :>= y1, x2 :>= y2) -> unifies k [(x1, x2), (y1, y2)]
+    (x1 :== y1, x2 :== y2) -> unifies k [(x1, x2), (y1, y2)]
+    (x1 :/= y1, x2 :/= y2) -> unifies k [(x1, x2), (y1, y2)]
+    (x1 :&& y1, x2 :&& y2) -> unifies k [(x1, x2), (y1, y2)]
+    (x1 :|| y1, x2 :|| y2) -> unifies k [(x1, x2), (y1, y2)]
+    _ -> fail "Incompatible"

@@ -90,6 +90,38 @@ tests = testGroup "Proofs.Rules"
         addRange (Var b) (SoP.Range mempty 1 (S.singleton (sop c)))
         rewrite sopRules (LinComb w (sop a) (sop c) (Var x) ~-~ LinComb z (sop a) (sop b) (Var x))
       ) @??= sym2SoP (LinComb w (sop b .+. int 1) (sop c) (Var x))
+  , testCase "and (1)" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite sopRules (sym2SoP $ Bool True :&& (sop x :<= sop y))
+      ) @??= sym2SoP (sop x :<= sop y)
+  , testCase "and (2)" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite sopRules (sym2SoP $ (sop x :<= sop y) :&& Bool True)
+      ) @??= sym2SoP (sop x :<= sop y)
+  , testCase "and (3)" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite sopRules (sym2SoP $ Bool False :&& (sop x :<= sop y))
+      ) @??= sym2SoP (Bool False)
+  , testCase "and (4)" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite sopRules (sym2SoP $ (sop x :<= sop y) :&& Bool False)
+      ) @??= sym2SoP (Bool False)
+  , testCase "or (1)" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite sopRules (sym2SoP $ Bool True :|| (sop x :<= sop y))
+      ) @??= sym2SoP (Bool True)
+  , testCase "or (2)" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite sopRules (sym2SoP $ (sop x :<= sop y) :|| Bool True)
+      ) @??= sym2SoP (Bool True)
+  , testCase "or (3)" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite sopRules (sym2SoP $ Bool False :|| (sop x :<= sop y))
+      ) @??= sym2SoP (sop x :<= sop y)
+  , testCase "or (4)" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite sopRules (sym2SoP $ (sop x :<= sop y) :|| Bool False)
+      ) @??= sym2SoP (sop x :<= sop y)
   ]
   where
     int = int2SoP
