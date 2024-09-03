@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark script` now supports an `-f` option.
+
+* `futhark script` now supports the builtin procedure `$store`.
+
 ### Removed
 
 ### Changed

@@ -671,7 +671,8 @@ data Options = Options
     scriptOutput :: Maybe FilePath,
     scriptVerbose :: Int,
     scriptStopOnError :: Bool,
-    scriptBinary :: Bool
+    scriptBinary :: Bool,
+    scriptExps :: [Either FilePath T.Text]
   }
 
 -- | The configuration before any user-provided options are processed.
@@ -686,7 +687,8 @@ initialOptions =
       scriptOutput = Nothing,
       scriptVerbose = 0,
       scriptStopOnError = False,
-      scriptBinary = False
+      scriptBinary = False,
+      scriptExps = []
     }
 
 data Env = Env
