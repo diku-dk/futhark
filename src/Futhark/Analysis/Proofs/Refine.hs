@@ -6,7 +6,6 @@ import Futhark.Analysis.Proofs.Symbol (Symbol(..))
 import Futhark.SoP.Monad (substEquivs)
 import Futhark.SoP.FourierMotzkin (($==$), ($/=$), ($>=$), ($>$), ($<$), ($<=$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
-import Data.Foldable (foldrM)
 
 class Monad m => Refineable u v m where
   refine :: u -> m v
@@ -36,7 +35,9 @@ instance Refineable Symbol (SoP Symbol) IndexFnM where
   -- refine (x :|| y) = refineRelation (:||) x y
   refine x = pure . sym2SoP $ x
 
-refineRelation :: (SoP Symbol -> SoP Symbol -> Symbol) -> SoP Symbol -> SoP Symbol -> IndexFnM Symbol
+refineRelation :: (SoP Symbol -> SoP Symbol -> Symbol) ->
+                  SoP Symbol ->
+                  SoP Symbol -> IndexFnM Symbol
 refineRelation rel x y = do
   x' <- refine x
   y' <- refine y

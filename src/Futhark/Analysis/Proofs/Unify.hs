@@ -8,7 +8,7 @@ where
 
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, mapSymSoPM, sopToLists, mapSymSoP, Rel (..), sopFromList, Term, addSoPs, zeroSoP, int2SoP)
+import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, mapSymSoPM, sopToLists, Term, addSoPs, zeroSoP, int2SoP)
 import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark (VName (VName))
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromString, putNameSource)
@@ -109,18 +109,18 @@ unifies k (u:us) = do
           pure $ s <> s'
         ) s0 us
 
-unifyAnyPermutation :: ( Replaceable u (SoP v)
-                       , Replaceable v (SoP v)
-                       , Unify u (SoP v) m
-                       , Unify v (SoP v) m
-                       , Pretty v
-                       , Pretty u
-                       , Show v
-                       , Ord v) => VName -> [u] -> [u] -> MaybeT m (Substitution (SoP v))
-unifyAnyPermutation k xs ys
+unifyAnyPerm :: ( Replaceable u (SoP v)
+                , Replaceable v (SoP v)
+                , Unify u (SoP v) m
+                , Unify v (SoP v) m
+                , Pretty v
+                , Pretty u
+                , Show v
+                , Ord v) => VName -> [u] -> [u] -> MaybeT m (Substitution (SoP v))
+unifyAnyPerm k xs ys
   | length xs == length ys =
       first $ map (unifies k . zip xs) (L.permutations ys)
-  | otherwise = fail "unifyAnyPermutation unequal lengths"
+  | otherwise = fail "unifyAnyPerm unequal lengths"
   where
     -- Extract left-most non-fail action, if there is one.
     first :: Monad m => [MaybeT m a] -> MaybeT m a
@@ -136,7 +136,7 @@ instance ( MonadFreshNames m
   -- unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
    -- Unify on permutations of symbols in term.
   unify_ k (x, a) (y, b)
-    | a == b = unifyAnyPermutation k (termToList x) (termToList y)
+    | a == b = unifyAnyPerm k (termToList x) (termToList y)
     | otherwise = fail "no unify: unequal constants" -- these dont unify
 
 instance ( MonadFreshNames m
@@ -148,4 +148,4 @@ instance ( MonadFreshNames m
          , Ord u) => Unify (SoP u) (SoP u) m where
   -- unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
   -- Unify on permutations of terms.
-  unify_ k x y = unifyAnyPermutation k (sopToList x) (sopToList y)
+  unify_ k x y = unifyAnyPerm k (sopToList x) (sopToList y)
