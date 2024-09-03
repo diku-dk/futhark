@@ -7,41 +7,19 @@ import Futhark.MonadFreshNames
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
-import Control.Monad.RWS.Strict
-import Control.Monad.Trans.Maybe
 import Futhark.SoP.SoP (sym2SoP, (.+.), scaleSoP, (.*.), int2SoP)
 import qualified Data.Map as M
-import Data.Maybe (fromJust)
+import Futhark.Analysis.Proofs.IndexFn
 
-
-newtype VEnv = VEnv { vnamesource :: VNameSource }
 
 type Exp = SoP.SoP Symbol
 type Sub = Substitution Exp
 
-newtype TestM a = TestM (RWS () () VEnv a)
-  deriving
-    ( Applicative,
-      Functor,
-      Monad,
-      MonadFreshNames
-    )
+runTest :: IndexFnM (Maybe Sub) -> Maybe Sub
+runTest test = fst $ runIndexFnM test blankNameSource
 
-instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
-  getNameSource = gets vnamesource
-  putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
-
-evalTestM :: TestM a -> VNameSource -> a
-evalTestM (TestM m) vns = fst $ evalRWS m () s
-  where
-    s = VEnv vns
-
-runTest :: TestM (Maybe Sub) -> Maybe Sub
-runTest test = evalTestM test blankNameSource
-
-getValue :: TestM a -> a
-getValue m = evalTestM m blankNameSource
-
+getValue :: IndexFnM a -> a
+getValue test = fst $ runIndexFnM test blankNameSource
 
 tests :: TestTree
 tests = testGroup "Proofs.Unify"

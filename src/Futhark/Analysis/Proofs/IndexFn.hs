@@ -66,9 +66,10 @@ instance MonadSoP Symbol E.Exp IndexFnM where
   getEquivs = gets (equivs . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
 
-execIndexFnM :: IndexFnM a -> VNameSource -> M.Map VName IndexFn
-execIndexFnM (IndexFnM m) vns = indexfns . fst $ execRWS m () s
+runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
+runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
+    getRes (x, env, _) = (x, indexfns env)
     s = VEnv vns mempty mempty
 
 insertIndexFn :: E.VName -> IndexFn -> IndexFnM ()

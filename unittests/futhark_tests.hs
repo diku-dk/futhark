@@ -4,6 +4,7 @@ import Futhark.AD.DerivativesTests qualified
 import Futhark.Analysis.AlgSimplifyTests qualified
 import Futhark.Analysis.Proofs.UnifyTests qualified
 import Futhark.Analysis.Proofs.RulesTests qualified
+import Futhark.Analysis.Proofs.RefineTests qualified
 import Futhark.BenchTests qualified
 import Futhark.IR.Mem.IntervalTests qualified
 import Futhark.IR.Mem.IxFunTests qualified
@@ -27,6 +28,7 @@ allTests =
       Futhark.AD.DerivativesTests.tests,
       Futhark.Analysis.Proofs.UnifyTests.tests,
       Futhark.Analysis.Proofs.RulesTests.tests,
+      Futhark.Analysis.Proofs.RefineTests.tests,
       Futhark.BenchTests.tests,
       Futhark.IR.PropTests.tests,
       Futhark.IR.Syntax.CoreTests.tests,
