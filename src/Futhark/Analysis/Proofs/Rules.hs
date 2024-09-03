@@ -25,31 +25,26 @@ data CommutativeRule a b c m = CommutativeRule {
     commTo :: Substitution b -> m a
   }
 
-class RuleMatchable a b m where
-  match :: (Monad m) => Rule a b m -> a -> m a
-
-instance ( MonadFreshNames m
-         , Replaceable u (SoP u)
-         , Renameable u
+match :: ( Replaceable u (SoP u)
          , Unify u (SoP u) m
          , Show u
          , Pretty u
-         , Ord u) => RuleMatchable (SoP u) (SoP u) m where
-  match rule sop = do
-    subs :: [Maybe (Substitution (SoP u))] <- mapM (unify $ from rule) matchables
-    -- Get first valid substitution and context.
-    case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
-      Just (s, ctx) -> (.+. ctx) <$> to rule s
-      Nothing -> pure sop
-    where
-      -- Get all "sub-SoPs" of length k.
-      k = length (sopToList $ from rule)
-      -- combinations xs = [s | s <- subsequences xs, length s == k]
-      -- Get all (k-combination, remaining elements).
-      combinations xs = [(s, xs \\ s) | s <- subsequences xs, length s == k]
-      (subterms, otherTerms) = unzip . combinations . sopToList $ sop
-      matchables = map sopFromList subterms
-      contexts = map sopFromList otherTerms
+         , Ord u) => Rule (SoP u) (SoP u) m -> SoP u -> m (SoP u)
+match rule sop = do
+  subs :: [Maybe (Substitution (SoP u))] <- mapM (unify $ from rule) matchables
+  -- Get first valid substitution and context.
+  case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
+    Just (s, ctx) -> (.+. ctx) <$> to rule s
+    Nothing -> pure sop
+  where
+    -- Get all "sub-SoPs" of length k.
+    k = length (sopToList $ from rule)
+    -- combinations xs = [s | s <- subsequences xs, length s == k]
+    -- Get all (k-combination, remaining elements).
+    combinations xs = [(s, xs \\ s) | s <- subsequences xs, length s == k]
+    (subterms, otherTerms) = unzip . combinations . sopToList $ sop
+    matchables = map sopFromList subterms
+    contexts = map sopFromList otherTerms
 
 class Monad m => Rewritable u m where
   rewrite :: u -> m u
