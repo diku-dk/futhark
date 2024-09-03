@@ -1,7 +1,6 @@
 -- | @futhark fmt@
 module Futhark.CLI.Fmt (main) where
 
-import Data.Bifunctor (second)
 import Data.List qualified as L
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -17,6 +16,11 @@ import System.Exit
 import System.IO
 import Text.Printf (printf)
 import Control.Monad.State.Strict
+import Control.Monad
+import Debug.Trace
+
+debug :: Show a => a -> a
+debug a = traceShow a a
 
 -- The formatter implemented here is very crude and incomplete.  The
 -- only syntactical construct it can currently handle is type
@@ -35,18 +39,30 @@ import Control.Monad.State.Strict
 -- input), as well as the formatted representation of 'a' as a 'Fmt'
 -- value.
 --
--- TODO: refactor this entire thing so that the maintenance of the
+-- DONE: refactor this entire thing so that the maintenance of the
 -- residual comments is encapsulated monadically.  Use a State monad
 -- to keep the list.  This will make the code much cleaner.
 
+-- TODO: Name monad encapsulating comments something better than "Smth"
 
 -- TODO: ensure that doc comments (that start with "-- |" and are
 -- connected to definitions) are always separated from other comments
--- with a single newline character.
---
+-- with a single newline character. Question: Exactly what is meant by this?
+-- Question: 
+      -- Test
+
+      -- | This is a type
+
+      -- this is a type
+-- type test = (i32, i32)
+
+
+-- TODO: Fix formatting of several lines of comments 
 -- TODO: prettyprint in a nicer way than one line per terminal.
 --
 -- TODO: support all syntactical constructs.
+
+-- TODO (Question?): Change fmt to be a sequence of lines instead of a list of lines 
 
 -- | Invariant: Should not contain newline characters.
 type Line = T.Text
@@ -57,85 +73,73 @@ type Line = T.Text
 type Fmt = [Line]
 
 -- State monad to keep track of comments 
-data Env = Env 
+newtype Env = Env
   { comments :: [Comment]
-  , fmt      :: Fmt
   } deriving (Show, Eq, Ord)
 
-type Smth = State Env   
-
--- Example function to test our new monad
-doSomething :: Comment -> Smth ()
-doSomething c = modify (\s -> s { comments = [c]})
+type Smth a = State Env a 
 
 -- Monad version
-monadComment :: Located a => a -> Smth () 
-monadComment a =
-  modify (\s ->
-    case s of
-      Env (c : cs) fmts | locOf a > locOf c -> s { comments = cs, fmt = fmts <> [commentText c] }
-      _ -> s
-  )
+comment :: Located a => a -> Smth Fmt
+comment a = do
+  s <- get
+  case s of
+    Env (c : cs) | locOf a > locOf c -> do
+      put $ s { comments = cs }
+      pure [commentText c]
+    _ -> pure []
 
-comment :: Located a => [Comment] -> a -> ([Comment], Fmt)
-comment (c : cs) a
-  | locOf a > locOf c =
-      (cs, [commentText c])
-comment cs _ = (cs, [])
 -- | Documentation comments are always optional, so this takes a 'Maybe'.
-fmtDocComment :: [Comment] -> Maybe DocComment -> ([Comment], Fmt)
-fmtDocComment cs (Just (DocComment x loc)) =
-  let (cs', c) = comment cs loc
-   in (cs', c <> prefix (T.lines x))
+fmtDocComment :: Maybe DocComment -> Smth Fmt
+fmtDocComment (Just (DocComment x loc)) =
+  (<> prefix (T.lines x)) <$> comment loc
   where
     prefix [] = []
     prefix (l : ls) = ("-- | " <> l) : map ("-- " <>) ls
-fmtDocComment cs Nothing = (cs, [])
+fmtDocComment Nothing = pure []
 
---fmtMany :: (a -> Smth ()) -> [a] -> Smth ()
---fmtMany f as = foldM f mempty as
+fmtMany :: (a -> Smth Fmt) -> [a] -> Smth Fmt
+fmtMany f = foldM (\a b -> (a<>) <$> f b) []
 
-fmtMany :: ([Comment] -> a -> ([Comment], Fmt)) -> [Comment] -> [a] -> ([Comment], Fmt)
-fmtMany f cs ds = second concat $ L.mapAccumL f cs ds
+fmtTupleTypeElems :: [UncheckedTypeExp] -> Smth Fmt
+fmtTupleTypeElems [] = pure []
+fmtTupleTypeElems [t] = fmtTypeExp t
+fmtTupleTypeElems (t : ts) = do
+  t' <- fmtTypeExp t 
+  ts' <- fmtTupleTypeElems ts
+  pure $ t' <> [","] <> ts' 
 
-fmtTupleTypeElems :: [Comment] -> [UncheckedTypeExp] -> ([Comment], Fmt)
-fmtTupleTypeElems cs [] = (cs, [])
-fmtTupleTypeElems cs [t] = fmtTypeExp cs t
-fmtTupleTypeElems cs (t : ts) =
-  let (cs', t') = fmtTypeExp cs t
-      (cs'', ts') = fmtTupleTypeElems cs' ts
-   in (cs'', t' <> [","] <> ts')
+fmtTypeExp :: UncheckedTypeExp -> Smth Fmt
+fmtTypeExp (TEVar v loc) = do
+  c <- comment loc
+  pure $ c <> [prettyText v]
+fmtTypeExp (TETuple ts loc) = do
+  c <- comment loc
+  ts' <- fmtTupleTypeElems ts
+  pure $ c <> ["("] <> ts' <> [")"]
 
--- does comment works for multi-line comments?
-fmtTypeExp :: [Comment] -> UncheckedTypeExp -> ([Comment], Fmt)
-fmtTypeExp cs (TEVar v loc) =
-  let (cs', c) = comment cs loc
-   in (cs', c <> [prettyText v])
-fmtTypeExp cs (TETuple ts loc) =
-  let (cs', c) = comment cs loc
-      (cs'', ts') = fmtTupleTypeElems cs' ts
-   in (cs'', c <> ["("] <> ts' <> [")"])
-
-fmtTypeParam :: [Comment] -> UncheckedTypeParam -> ([Comment], Fmt)
+fmtTypeParam :: UncheckedTypeParam -> Smth Fmt
 fmtTypeParam = undefined
 
-fmtTypeBind :: [Comment] -> UncheckedTypeBind -> ([Comment], Fmt)
-fmtTypeBind cs (TypeBind name l ps e NoInfo dc _loc) =
-  let (cs', dc') = fmtDocComment cs dc
-      (cs'', ps') = fmtMany fmtTypeParam cs' ps
-      (cs''', e') = fmtTypeExp cs'' e
-   in (cs''', dc' <> ["type" <> prettyText l] <> [prettyText name] <> ps' <> e')
+fmtTypeBind :: UncheckedTypeBind -> Smth Fmt
+fmtTypeBind (TypeBind name l ps e NoInfo dc _loc) = do
+  dc' <- fmtDocComment dc
+  ps' <- fmtMany fmtTypeParam ps
+  e' <- fmtTypeExp e
+  pure $ dc' <> ["type" <> prettyText l] <> [prettyText name] <> ps' <> [" = "] <> e'
 
-fmtDec :: [Comment] -> UncheckedDec -> ([Comment], Fmt)
-fmtDec cs (TypeDec tb) = fmtTypeBind cs tb
+fmtDec :: UncheckedDec -> Smth Fmt
+fmtDec (TypeDec tb) = fmtTypeBind tb
 
 -- | Does not return residual comments, because these are simply
 -- inserted at the end.
-fmtProg :: [Comment] -> UncheckedProg -> Fmt
-fmtProg cs (Prog dc decs) =
-  let (cs', dc') = fmtDocComment cs dc
-      (cs'', decs') = fmtMany fmtDec cs' decs
-   in dc' <> decs' <> map commentText cs''
+fmtProg :: UncheckedProg -> Smth Fmt
+fmtProg (Prog dc decs) = do
+  dc' <- fmtDocComment dc
+  decs' <- fmtMany fmtDec decs
+  cs <- gets comments
+  put (Env [])
+  pure $ dc' <> decs' <> map commentText cs 
 
 -- | Run @futhark fmt@.
 main :: String -> [String] -> IO ()
@@ -149,5 +153,6 @@ main = mainWithOptions () [] "program" $ \args () ->
           exitFailure
         Right (prog, cs) -> do
           let number i l = T.pack $ printf "%4d %s" (i :: Int) l
-          T.hPutStr stdout $ T.unlines $ zipWith number [0 ..] $ fmtProg cs prog
+          let fmt = evalState (fmtProg prog) (Env { comments = cs })
+          T.hPutStr stdout $ T.unlines $ zipWith number [0 ..] fmt
     _ -> Nothing
