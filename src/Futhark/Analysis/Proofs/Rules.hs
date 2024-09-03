@@ -2,12 +2,14 @@ module Futhark.Analysis.Proofs.Rules
 where
 
 import Futhark.Analysis.Proofs.Unify
-import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.))
+import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.), sopToList, sopFromList)
 import Futhark.MonadFreshNames
-import Futhark.Analysis.Proofs.Symbol (Symbol(..), sop2Symbol, toNNF)
-import Control.Monad (foldM)
+import Futhark.Analysis.Proofs.Symbol (Symbol(..), sop2Symbol)
+import Control.Monad (foldM, msum)
 import Futhark.SoP.FourierMotzkin (($<=$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
+import Data.List (subsequences, (\\))
+import Futhark.Util.Pretty (Pretty)
 
 data Rule a b m = Rule {
     name :: String,
@@ -22,6 +24,32 @@ data CommutativeRule a b c m = CommutativeRule {
     commArg2 :: c,
     commTo :: Substitution b -> m a
   }
+
+class RuleMatchable a b m where
+  match :: (Monad m) => Rule a b m -> a -> m a
+
+instance ( MonadFreshNames m
+         , Replaceable u (SoP u)
+         , Renameable u
+         , Unify u (SoP u) m
+         , Show u
+         , Pretty u
+         , Ord u) => RuleMatchable (SoP u) (SoP u) m where
+  match rule sop = do
+    subs :: [Maybe (Substitution (SoP u))] <- mapM (unify $ from rule) matchables
+    -- Get first valid substitution and context.
+    case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
+      Just (s, ctx) -> (.+. ctx) <$> to rule s
+      Nothing -> pure sop
+    where
+      -- Get all "sub-SoPs" of length k.
+      k = length (sopToList $ from rule)
+      -- combinations xs = [s | s <- subsequences xs, length s == k]
+      -- Get all (k-combination, remaining elements).
+      combinations xs = [(s, xs \\ s) | s <- subsequences xs, length s == k]
+      (subterms, otherTerms) = unzip . combinations . sopToList $ sop
+      matchables = map sopFromList subterms
+      contexts = map sopFromList otherTerms
 
 class Monad m => Rewritable u m where
   rewrite :: u -> m u
@@ -103,6 +131,16 @@ instance Rewritable Symbol IndexFnM where
                   (:||) (Bool True) (Var h1)
                   (\_ -> pure $ Bool True )
               ]
+              -- ++ [
+              --   Rule {
+              --     name = "&& idempotence",
+              --     from = Var h1 :&& Var h2,
+              --     to = \s -> do
+              --       let x = sop2Symbol $ rep s (sym2SoP $ Var h1)
+              --       let y = sop2Symbol $ rep s (sym2SoP $ Var h2)
+              --       pure $ if x == y then x else x :&& y
+              --   }
+              -- ]
       commutative = concatMap comm2rules
       comm2rules (CommutativeRule n f x y t) =
         [Rule n (f x y) t, Rule n (f y x) t]
