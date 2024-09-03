@@ -22,6 +22,7 @@ data Symbol =
       Symbol
   | Indicator Symbol
   | Bool Bool
+  | Not Symbol
   | SoP Symbol :< SoP Symbol
   | SoP Symbol :<= SoP Symbol
   | SoP Symbol :> SoP Symbol
@@ -32,6 +33,20 @@ data Symbol =
   | Symbol :|| Symbol
   | Recurrence
   deriving (Show, Eq, Ord)
+
+toNNF :: Symbol -> Symbol
+toNNF (Not (Not x)) = x
+toNNF (Not (Bool True)) = Bool False
+toNNF (Not (Bool False)) = Bool True
+toNNF (Not (x :|| y)) = toNNF (Not x) :&& toNNF (Not y)
+toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
+toNNF (Not (x :== y)) = x :/= y
+toNNF (Not (x :< y)) = x :>= y
+toNNF (Not (x :> y)) = x :<= y
+toNNF (Not (x :/= y)) = x :== y
+toNNF (Not (x :>= y)) = x :< y
+toNNF (Not (x :<= y)) = x :> y
+toNNF x = x
 
 instance Pretty Symbol where
   pretty symbol = case symbol of
@@ -44,6 +59,7 @@ instance Pretty Symbol where
         <> autoParens e
     Indicator p -> iversonbrackets (pretty p)
     Bool x -> pretty x
+    Not x -> "¬" <> autoParens x
     x :< y -> prettyOp "<" x y
     x :<= y -> prettyOp "<=" x y
     x :> y -> prettyOp ">" x y
@@ -66,6 +82,7 @@ instance FreeVariables Symbol where
     LinComb i lb ub x -> fv lb <> fv ub <> fv x S.\\ S.singleton i
     Indicator x -> fv x
     Bool _ -> mempty
+    Not x -> fv x
     x :< y -> fv x <> fv y
     x :<= y -> fv x <> fv y
     x :> y -> fv x <> fv y
@@ -86,6 +103,7 @@ instance Renameable Symbol where
       LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau' e
     Indicator x -> Indicator <$> rename_ tau x
     Bool x -> pure $ Bool x
+    Not x -> Not <$> rename_ tau x
     x :< y -> f (:<) x y
     x :<= y -> f (:<=) x y
     x :> y -> f (:>) x y
@@ -129,6 +147,7 @@ instance Replaceable Symbol (SoP Symbol) where
           error "Replacement is not a linear combination."
     Indicator e -> sym2SoP . Indicator . sop2Symbol $ rep s e
     Bool x -> sym2SoP $ Bool x
+    Not x -> sym2SoP . Not . sop2Symbol $ rep s x
     x :< y -> f (:<) x y
     x :<= y -> f (:<=) x y
     x :> y -> f (:>) x y
@@ -181,6 +200,7 @@ instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
     (s <>) <$> unify_ k (rep s i) (rep s j)
   unify_ k (Indicator x) (Indicator y) = unify_ k x y
   unify_ _ (Bool x) (Bool y) | x == y = pure mempty
+  unify_ k (Not x) (Not y) = unify_ k x y
   unify_ _ Recurrence Recurrence = pure mempty
   unify_ k a b = case (a, b) of
     (x1 :< y1, x2 :< y2) -> unifies k [(x1, x2), (y1, y2)]

@@ -4,7 +4,7 @@ where
 import Futhark.Analysis.Proofs.Unify
 import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.))
 import Futhark.MonadFreshNames
-import Futhark.Analysis.Proofs.Symbol (Symbol(..), sop2Symbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol(..), sop2Symbol, toNNF)
 import Control.Monad (foldM)
 import Futhark.SoP.FourierMotzkin (($<=$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
@@ -74,9 +74,9 @@ instance Rewritable (SoP Symbol) IndexFnM where
       a ~-~ b = sym2SoP a .-. sym2SoP b
 
 instance Rewritable Symbol IndexFnM where
-  rewrite x = do
+  rewrite symbol = do
     rs <- rules
-    foldM applyRule x rs
+    foldM applyRule symbol rs
     where
       applyRule :: Symbol -> Rule Symbol (SoP Symbol) IndexFnM -> IndexFnM Symbol
       applyRule v rule = do
@@ -104,5 +104,5 @@ instance Rewritable Symbol IndexFnM where
                   (\_ -> pure $ Bool True )
               ]
       commutative = concatMap comm2rules
-      comm2rules (CommutativeRule n f a b t) =
-        [Rule n (f a b) t, Rule n (f b a) t]
+      comm2rules (CommutativeRule n f x y t) =
+        [Rule n (f x y) t, Rule n (f y x) t]
