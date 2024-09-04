@@ -481,49 +481,57 @@ unionTyVars reason v t = do
     isParam = error $ "Type name is a type parameter: " <> prettyNameString v
 
 -- Unify at the root, emitting new equalities that must hold.
-unify :: Type -> Type -> Maybe [(Type, Type)]
+unify :: Type -> Type -> Either (Doc a) [(Type, Type)]
 unify (Scalar (Prim pt1)) (Scalar (Prim pt2))
-  | pt1 == pt2 = Just []
+  | pt1 == pt2 = Right []
 unify
   (Scalar (TypeVar _ (QualName _ v1) targs1))
   (Scalar (TypeVar _ (QualName _ v2) targs2))
     | v1 == v2 =
-        Just $ mapMaybe f $ zip targs1 targs2
+        Right $ mapMaybe f $ zip targs1 targs2
     where
       f (TypeArgType t1, TypeArgType t2) = Just (t1, t2)
       f _ = Nothing
 unify (Scalar (Arrow _ _ _ t1a (RetType _ t1r))) (Scalar (Arrow _ _ _ t2a (RetType _ t2r))) =
-  Just [(t1a, t2a), (t1r', t2r')]
+  Right [(t1a, t2a), (t1r', t2r')]
   where
     t1r' = t1r `setUniqueness` NoUniqueness
     t2r' = t2r `setUniqueness` NoUniqueness
 unify (Scalar (Record fs1)) (Scalar (Record fs2))
   | M.keys fs1 == M.keys fs2 =
-      Just $ M.elems $ M.intersectionWith (,) fs1 fs2
+      Right $ M.elems $ M.intersectionWith (,) fs1 fs2
+  | otherwise =
+      let missing =
+            filter (`notElem` M.keys fs1) (M.keys fs2)
+              <> filter (`notElem` M.keys fs2) (M.keys fs1)
+       in Left $
+            "Unshared fields:" <+> commasep (map pretty missing) <> "."
 unify (Scalar (Sum cs1)) (Scalar (Sum cs2))
   | M.keys cs1 == M.keys cs2 =
       fmap concat . forM cs' $ \(ts1, ts2) -> do
-        guard $ length ts1 == length ts2
-        Just $ zip ts1 ts2
+        if length ts1 == length ts2
+          then Right $ zip ts1 ts2
+          else Left mempty
   where
     cs' = M.elems $ M.intersectionWith (,) cs1 cs2
 unify t1 t2
   | Just t1' <- peelArray 1 t1,
     Just t2' <- peelArray 1 t2 =
-      Just [(t1', t2')]
-unify _ _ = Nothing
+      Right [(t1', t2')]
+unify _ _ = Left mempty
 
 solveEq :: Reason -> Type -> Type -> SolveM ()
 solveEq reason orig_t1 orig_t2 = do
   solveCt' (orig_t1, orig_t2)
   where
-    cannotUnify = do
+    cannotUnify details = do
       tyvars <- gets solverTyVars
       typeError (locOf reason) mempty $
         "Cannot unify"
           </> indent 2 (pretty (substTyVars (substTyVar tyvars) orig_t1))
           </> "with"
           </> indent 2 (pretty (substTyVars (substTyVar tyvars) orig_t2))
+          <> details
 
     solveCt' (t1, t2) = do
       tyvars <- gets solverTyVars
@@ -546,7 +554,7 @@ solveEq reason orig_t1 orig_t2 = do
             | v1 == v2 -> pure ()
             | otherwise ->
                 case (flexible v1, flexible v2) of
-                  (False, False) -> cannotUnify
+                  (False, False) -> cannotUnify mempty
                   (True, False) -> subTyVar reason v1 t2'
                   (False, True) -> subTyVar reason v2 t1'
                   (True, True) -> unionTyVars reason v1 v2
@@ -555,8 +563,8 @@ solveEq reason orig_t1 orig_t2 = do
         (t1', Scalar (TypeVar _ (QualName [] v2) []))
           | flexible v2 -> subTyVar reason v2 t1'
         (t1', t2') -> case unify t1' t2' of
-          Nothing -> cannotUnify
-          Just eqs -> mapM_ solveCt' eqs
+          Left details -> cannotUnify details
+          Right eqs -> mapM_ solveCt' eqs
 
 solveCt :: Ct -> SolveM ()
 solveCt ct =
