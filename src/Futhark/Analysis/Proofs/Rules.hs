@@ -61,33 +61,46 @@ instance Rewritable (SoP Symbol) IndexFnM where
         h3 <- newVName "h"
         x1 <- newVName "x"
         y1 <- newVName "y"
-        pure [ Rule
-                  "Extend sum lower bound (1)"
-                  (LinComb i (sop h1 .+. int 1) (sop h2) (Var h3) ~+~ Idx (Var h3) (sop h1))
-                  (\s -> pure . rep s $ LinComb i (sop h1) (sop h2) (Var h3))
-             , Rule
-                 "Extend sum lower bound (2)"
-                 (LinComb i (sop h1) (sop h2) (Var h3) ~+~ Idx (Var h3) (sop h1 .-. int 1))
-                 (\s -> pure . rep s $ LinComb i (sop h1 .-. int 1) (sop h2) (Var h3))
-             , Rule
-                 "Extend sum upper bound (1)"
-                 (LinComb i (sop h1) (sop h2 .-. int 1) (Var h3) ~+~ Idx (Var h3) (sop h2))
-                 (\s -> pure . rep s $ LinComb i (sop h1) (sop h2) (Var h3))
-             , Rule
-                 "Extend sum upper bound (2)"
-                 (LinComb i (sop h1) (sop h2) (Var h3) ~+~ Idx (Var h3) (sop h2 .+. int 1))
-                 (\s -> pure . rep s $ LinComb i (sop h1) (sop h2 .+. int 1) (Var h3))
-             , let from = LinComb i (sop h1) (sop x1) (Var h2) ~-~ LinComb i (sop h1) (sop y1) (Var h2)
-               in Rule
-                 "Merge sum-subtractation"
-                 (LinComb i (sop h1) (sop x1) (Var h2) ~-~ LinComb i (sop h1) (sop y1) (Var h2))
-                 (\s -> do
-                    b <- rep s (sop y1) $<=$ rep s (sop x1)
-                    pure $
-                      if b
-                      then rep s $ LinComb i (sop y1 .+. int 1) (sop x1) (Var h2)
-                      else rep s from)
-             ]
+        pure
+          [ Rule
+              { name = "Extend sum lower bound (1)"
+              , from = LinComb i (sop h1 .+. int 1) (sop h2) (Var h3)
+                         ~+~ Idx (Var h3) (sop h1)
+              , to = \s -> pure . rep s $ LinComb i (sop h1) (sop h2) (Var h3)
+              }
+          , Rule
+              { name = "Extend sum lower bound (2)"
+              , from = LinComb i (sop h1) (sop h2) (Var h3)
+                         ~+~ Idx (Var h3) (sop h1 .-. int 1)
+              , to = \s -> pure . rep s $
+                        LinComb i (sop h1 .-. int 1) (sop h2) (Var h3)
+              }
+          , Rule
+              { name = "Extend sum upper bound (1)"
+              , from = LinComb i (sop h1) (sop h2 .-. int 1) (Var h3)
+                         ~+~ Idx (Var h3) (sop h2)
+              , to = \s -> pure . rep s $ LinComb i (sop h1) (sop h2) (Var h3)
+              }
+          , Rule
+              { name = "Extend sum upper bound (2)"
+              , from = LinComb i (sop h1) (sop h2) (Var h3)
+                         ~+~ Idx (Var h3) (sop h2 .+. int 1)
+              , to = \s -> pure . rep s $
+                        LinComb i (sop h1) (sop h2 .+. int 1) (Var h3)
+              }
+          , let e = LinComb i (sop h1) (sop x1) (Var h2)
+                      ~-~ LinComb i (sop h1) (sop y1) (Var h2)
+            in Rule
+              { name = "Merge sum-subtractation"
+              , from = e
+              , to = \s -> do
+                 b <- rep s (sop y1) $<=$ rep s (sop x1)
+                 pure $
+                   if b
+                   then rep s $ LinComb i (sop y1 .+. int 1) (sop x1) (Var h2)
+                   else rep s e
+              }
+          ]
       int = int2SoP
       sop = sym2SoP . Var
       a ~+~ b = sym2SoP a .+. sym2SoP b
@@ -101,29 +114,33 @@ instance Rewritable Symbol IndexFnM where
       rules :: IndexFnM [Rule Symbol (SoP Symbol) IndexFnM]
       rules = do
         h1 <- newVName "h"
-        pure [ Rule
-                 ":&& identity"
-                 (Bool True :&& Var h1)
-                 (\s -> pure . sop2Symbol . rep s $ Var h1)
-             , Rule
-                 ":&& annihilation"
-                 (Bool False :&& Var h1)
-                 (\_ -> pure $ Bool False)
-             , Rule
-                 ":|| identity"
-                 (Bool False :|| Var h1)
-                 (\s -> pure . sop2Symbol . rep s $ Var h1)
-             , Rule
-                 ":|| annihilation"
-                 (Bool True :|| Var h1)
-                 (\_ -> pure $ Bool True )
-             ]
-              --   Rule {
-              --     name = "&& idempotence",
-              --     from = Var h1 :&& Var h2,
-              --     to = \s -> do
-              --       let x = sop2Symbol $ rep s (sym2SoP $ Var h1)
-              --       let y = sop2Symbol $ rep s (sym2SoP $ Var h2)
-              --       pure $ if x == y then x else x :&& y
-              --   }
-              -- ]
+        pure
+          [ Rule
+              { name = ":&& identity"
+              , from = Bool True :&& Var h1
+              , to = \s -> pure . sop2Symbol . rep s $ Var h1
+              }
+          , Rule
+              { name = ":&& annihilation"
+              , from = Bool False :&& Var h1
+              , to = \_ -> pure $ Bool False
+              }
+          , Rule
+              { name = ":|| identity"
+              , from = Bool False :|| Var h1
+              , to = \s -> pure . sop2Symbol . rep s $ Var h1
+              }
+          , Rule
+              { name = ":|| annihilation"
+              , from = Bool True :|| Var h1
+              , to = \_ -> pure $ Bool True
+              }
+          ]
+          --   Rule {
+          --     name = "&& idempotence",
+          --     from = Var h1 :&& Var h2,
+          --     to = \s -> do
+          --       let x = sop2Symbol $ rep s (sym2SoP $ Var h1)
+          --       let y = sop2Symbol $ rep s (sym2SoP $ Var h2)
+          --       pure $ if x == y then x else x :&& y
+          --   }
