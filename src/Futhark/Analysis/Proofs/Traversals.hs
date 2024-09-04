@@ -4,15 +4,15 @@ where
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.SoP.SoP (SoP, (.+.), int2SoP, sopToLists, (.*.), sym2SoP)
 
-data ASTMapper m = ASTMapper
-  { mapOnSymbol :: Symbol -> m Symbol,
-    mapOnSoP :: SoP Symbol -> m (SoP Symbol)
+data ASTMapper a m = ASTMapper
+  { mapOnSymbol :: a -> m a,
+    mapOnSoP :: SoP a -> m (SoP a)
   }
 
-class ASTMappable a where
-  astMap :: (Monad m) => ASTMapper m -> a -> m a
+class ASTMappable a b where
+  astMap :: (Monad m) => ASTMapper a m -> b -> m b
 
-instance ASTMappable (SoP Symbol) where
+instance Ord a => ASTMappable a (SoP a) where
   astMap m sop = do
     mapOnSoP m . foldl (.+.) (int2SoP 0) =<< mapM g (sopToLists sop)
     where
@@ -20,7 +20,7 @@ instance ASTMappable (SoP Symbol) where
         ts' <- mapM (mapOnSymbol m) ts
         pure $ foldl (.*.) (int2SoP 1) (int2SoP c : map sym2SoP ts')
 
-instance ASTMappable Symbol where
+instance ASTMappable Symbol Symbol where
   astMap _ Recurrence = pure Recurrence
   astMap m (Var x) = mapOnSymbol m $ Var x
   astMap m (LinComb vn lb ub x) =
