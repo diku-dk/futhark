@@ -62,6 +62,14 @@ tests = testGroup "Proofs.Rules"
       run (\(x,y,z,_,_,_,_,_) ->
         rewrite (Indicator (Bool True :&& (sop x :<= sop y)) ~+~ Var z)
       ) @??= (Indicator (sop x :<= sop y) ~+~ Var z)
+  , testCase "Match SoPs in symbols in SoP" $
+      run (\(x,_,_,_,_,_,_,_) ->
+        rewrite (sym2SoP $ Idx (Var x) (sym2SoP $ Indicator (Not (Var x))))
+      ) @??= sym2SoP (Idx (Var x) (int 1 .-. sym2SoP (Indicator (Var x))))
+  , testCase "[[¬x]] => 1 - [[x]]" $
+      run (\(x,_,_,_,_,_,_,_) ->
+        rewrite (sym2SoP $ Indicator (Not (Var x)))
+      ) @??= (int 1 .-. sym2SoP (Indicator (Var x)))
   -- Symbol tests.
   , testCase ":&& identity (1)" $
       run (\(x,y,_,_,_,_,_,_) ->
@@ -96,9 +104,9 @@ tests = testGroup "Proofs.Rules"
         rewrite ((sop x :<= sop y) :|| Bool True)
       ) @??= Bool True
   , testCase "Match subsymbols" $
-      run (\(x,y,z,_,_,_,_,_) ->
-        rewrite (Var z :|| (Bool True :&& (sop x :<= sop y)))
-      ) @??= (Var z :|| (sop x :<= sop y))
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite (Indicator (Bool True :&& (sop x :<= sop y)))
+      ) @??= Indicator (sop x :<= sop y)
   ]
   where
     int = int2SoP

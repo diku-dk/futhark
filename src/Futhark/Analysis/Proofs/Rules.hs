@@ -10,6 +10,7 @@ import Futhark.SoP.FourierMotzkin (($<=$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 import Data.List (subsequences, (\\))
 import Futhark.SoP.Util (ifM)
+import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), astMap)
 
 data Rule a b m = Rule {
     name :: String,
@@ -20,11 +21,22 @@ data Rule a b m = Rule {
 class Monad m => Rewritable u m where
   rewrite :: u -> m u
 
+yoink :: SoP Symbol -> IndexFnM (SoP Symbol)
+yoink sop = rulesSoP >>= foldM (flip matchSoP) sop
+
 instance Rewritable (SoP Symbol) IndexFnM where
-  rewrite sop = rulesSoP >>= foldM (flip matchSoP) sop
+  rewrite = astMap m
+    where
+      m = ASTMapper { mapOnSymbol = rewrite,
+                      mapOnSoP = \sop -> rulesSoP >>= foldM (flip matchSoP) sop
+                    }
 
 instance Rewritable Symbol IndexFnM where
-  rewrite symbol = rulesSymbol >>= foldM (flip matchSymbol) symbol
+  rewrite = astMap m
+    where
+      m = ASTMapper { mapOnSymbol = \x -> rulesSymbol >>= foldM (flip matchSymbol) x,
+                      mapOnSoP = rewrite
+                    }
 
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
 -- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
@@ -103,6 +115,11 @@ rulesSoP = do
              (pure . rep s $ LinComb i (sop y1 .+. int 1) (sop x1) (Var h2))
              (pure $ rep s e)
         }
+      , Rule
+          { name = "[[¬x]] => 1 - [[x]]"
+          , from = sym2SoP $ Indicator (Not (Var h1))
+          , to = \s -> pure . rep s $ int 1 .-. sym2SoP (Indicator (Var h1))
+          }
     ]
   where
     int = int2SoP
@@ -110,6 +127,7 @@ rulesSoP = do
     a ~+~ b = sym2SoP a .+. sym2SoP b
     a ~-~ b = sym2SoP a .-. sym2SoP b
 
+-- TODO can all of these be handled by `normalize`? If so, remove.
 rulesSymbol :: IndexFnM [Rule Symbol (SoP Symbol) IndexFnM]
 rulesSymbol = do
   h1 <- newVName "h"

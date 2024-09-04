@@ -2,12 +2,11 @@ module Futhark.Analysis.Proofs.Refine
 where
 
 import Futhark.SoP.SoP (SoP, sym2SoP, scaleSoP, int2SoP, (.+.), (.*.), Term, termToList, sopToList)
-import Futhark.Analysis.Proofs.Symbol (Symbol(..), sop2Symbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol(..))
 import Futhark.SoP.Monad (substEquivs)
 import Futhark.SoP.FourierMotzkin (($==$), ($/=$), ($>=$), ($>$), ($<$), ($<=$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
-import Futhark.Util.Pretty (prettyString)
-import Debug.Trace (trace)
+import Futhark.Analysis.Proofs.Traversals (normalize)
 
 class Monad m => Refineable u v m where
   refine :: u -> m v
@@ -27,36 +26,36 @@ instance Refineable Symbol (SoP Symbol) IndexFnM where
   refine x = sym2SoP <$> refine x
 
 instance Refineable Symbol Symbol IndexFnM where
-  refine symbol
-    | trace ("refine " <> prettyString symbol) False = undefined
-  refine symbol = case symbol of
-    Not x -> Not <$> refine x
-    x :== y -> refineRelation (:==) x y
-    x :/= y -> refineRelation (:/=) x y
-    x :> y -> refineRelation (:>) x y
-    x :>= y -> refineRelation (:>=) x y
-    x :< y -> refineRelation (:<) x y
-    x :<= y -> refineRelation (:<=) x y
-    x :&& y -> refineRelation (:&&) x y
-    x :|| y -> refineRelation (:||) x y
-    x -> pure x
-    where
-      refineRelation rel x y = do
-        x' <- refine x
-        y' <- refine y
-        b <- solve (x' `rel` y')
-        pure $ if b then Bool True else x' `rel` y'
-        where
-          -- Use Fourier-Motzkin elimination to determine the truth value
-          -- of an expresion, if it can be determined in the given environment.
-          -- If the truth value cannot be determined, False is also returned.
-          solve (Bool True :&& Bool True) = pure True
-          solve (Bool True :|| _) = pure True
-          solve (_ :|| Bool True) = pure True
-          solve (a :== b) = a $==$ b
-          solve (a :/= b) = a $/=$ b
-          solve (a :> b)  = a $>$ b
-          solve (a :>= b) = a $>=$ b
-          solve (a :< b)  = a $<$ b
-          solve (a :<= b) = a $<=$ b
-          solve _ = pure False
+  refine symbol = do
+    symbol' <- normalize symbol
+    case symbol' of
+      Not x -> Not <$> refine x
+      x :== y -> refineRelation (:==) x y
+      x :/= y -> refineRelation (:/=) x y
+      x :> y -> refineRelation (:>) x y
+      x :>= y -> refineRelation (:>=) x y
+      x :< y -> refineRelation (:<) x y
+      x :<= y -> refineRelation (:<=) x y
+      x :&& y -> refineRelation (:&&) x y
+      x :|| y -> refineRelation (:||) x y
+      x -> pure x
+      where
+        refineRelation rel x y = do
+          x' <- refine x
+          y' <- refine y
+          b <- solve (x' `rel` y')
+          pure $ if b then Bool True else x' `rel` y'
+          where
+            -- Use Fourier-Motzkin elimination to determine the truth value
+            -- of an expresion, if it can be determined in the given environment.
+            -- If the truth value cannot be determined, False is also returned.
+            solve (Bool True :&& Bool True) = pure True
+            solve (Bool True :|| _) = pure True
+            solve (_ :|| Bool True) = pure True
+            solve (a :== b) = a $==$ b
+            solve (a :/= b) = a $/=$ b
+            solve (a :> b)  = a $>$ b
+            solve (a :>= b) = a $>=$ b
+            solve (a :< b)  = a $<$ b
+            solve (a :<= b) = a $<=$ b
+            solve _ = pure False

@@ -143,6 +143,7 @@ library
       Futhark.Analysis.Proofs.Refine
       Futhark.Analysis.Proofs.Rules
       Futhark.Analysis.Proofs.Symbol
+      Futhark.Analysis.Proofs.Traversals
       Futhark.Analysis.Proofs.Unify
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
