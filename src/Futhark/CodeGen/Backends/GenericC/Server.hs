@@ -99,7 +99,7 @@ genericOptions =
                 char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
                                                           futhark_context_config_set_tuning_param);
                 if (ret != NULL) {
-                  futhark_panic(1, "When loading tuning from '%s': %s\n", optarg, ret);
+                  futhark_panic(1, "When loading tuning file '%s': %s\n", optarg, ret);
                 }}|]
       },
     Option
@@ -119,7 +119,7 @@ cType :: Manifest -> TypeName -> C.Type
 cType manifest tname =
   case M.lookup tname $ manifestTypes manifest of
     Just (TypeArray ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
-    Just (TypeOpaque ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
+    Just (TypeOpaque ctype _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
     Nothing -> uncurry primAPIType $ scalarToPrim tname
 
 -- First component is forward declaration so we don't have to worry
@@ -156,10 +156,10 @@ typeBoilerplate _ (tname, TypeArray _ et rank ops) =
                 .aux = &$id:aux_name
               };|]
       )
-typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record _sumops) =
+typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
   let type_name = typeStructName tname
       aux_name = type_name <> "_aux"
-      (record_edecls, record_init) = recordDefs type_name record
+      (record_edecls, record_init) = recordDefs type_name extra_ops
    in ( [C.cedecl|const struct type $id:type_name;|],
         [C.cinit|&$id:type_name|],
         record_edecls
@@ -179,8 +179,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record _sumops) =
               };|]
       )
   where
-    recordDefs _ Nothing = ([], [C.cinit|NULL|])
-    recordDefs type_name (Just (RecordOps fields new)) =
+    recordDefs type_name (Just (OpaqueRecord (RecordOps fields new))) =
       let new_wrap = new <> "_wrap"
           record_name = type_name <> "_record"
           fields_name = type_name <> "_fields"
@@ -212,6 +211,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops record _sumops) =
              };|],
             [C.cinit|&$id:record_name|]
           )
+    recordDefs _ _ = ([], [C.cinit|NULL|])
 
 entryTypeBoilerplate :: Manifest -> ([C.Definition], [C.Initializer], [C.Definition])
 entryTypeBoilerplate manifest =

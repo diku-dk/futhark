@@ -36,7 +36,12 @@ withinBounds [] = TPrimExp $ ValueExp (BoolValue True)
 withinBounds [(q, i)] = (le64 i .<. pe64 q) .&&. (pe64 (intConst Int64 (-1)) .<. le64 i)
 withinBounds (qi : qis) = withinBounds [qi] .&&. withinBounds qis
 
-elseIf :: PrimType -> [(ADM (Exp SOACS), ADM (Exp SOACS))] -> [ADM (Body SOACS)] -> ADM (Exp SOACS)
+elseIf ::
+  (MonadBuilder m, BranchType (Rep m) ~ ExtType) =>
+  PrimType ->
+  [(m (Exp (Rep m)), m (Exp (Rep m)))] ->
+  [m (Body (Rep m))] ->
+  m (Exp (Rep m))
 elseIf t [(c1, c2)] [bt, bf] =
   eIf
     (eCmpOp (CmpEq t) c1 c2)
@@ -51,7 +56,7 @@ elseIf t ((c1, c2) : cs) (bt : bs) =
     $ elseIf t cs bs
 elseIf _ _ _ = error "In elseIf, Hist.hs: input not supported"
 
-bindSubExpRes :: String -> [SubExpRes] -> ADM [VName]
+bindSubExpRes :: (MonadBuilder m) => String -> [SubExpRes] -> m [VName]
 bindSubExpRes s =
   traverse
     ( \(SubExpRes cs se) -> do
@@ -137,9 +142,8 @@ multiScatter n dst is vs = do
         p2 <- traverse eParam scatter_params
         pure $ p1 <> p2
 
-  letTupExp "scatter_res" . Op $
-    Scatter n (is : vs) scatter_lam $
-      zipWith (\t -> (,,) (Shape $ pure $ arraySize 0 t) 1) tps dst
+  let spec = zipWith (\t -> (,,) (Shape $ pure $ arraySize 0 t) 1) tps dst
+  letTupExp "scatter_res" . Op $ Scatter n (is : vs) spec scatter_lam
 
 multiIndex :: [VName] -> [DimIndex SubExp] -> ADM [VName]
 multiIndex vs s = do
@@ -306,7 +310,7 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
   f'' <- mkIdentityLambda $ replicate nr_dims (Prim int64) ++ [Prim t]
   vs_bar' <-
     letExp (baseString vs <> "_bar") . Op $
-      Scatter q scatter_inps f'' [(Shape vs_dims, 1, vs_bar)]
+      Scatter q scatter_inps [(Shape vs_dims, 1, vs_bar)] f''
   insAdj vs vs_bar'
   where
     mk_indices :: [SubExp] -> [SubExp] -> ADM [VName]

@@ -289,8 +289,7 @@ unbalancedLambda orig_lam =
            )
     unbalancedStm _ (BasicOp _) =
       False
-    unbalancedStm _ (Apply fname _ _ _) =
-      not $ isBuiltInFunction fname
+    unbalancedStm _ Apply {} = False
 
 sequentialisedUnbalancedStm :: Stm SOACS -> DistribM (Maybe (Stms SOACS))
 sequentialisedUnbalancedStm (Let pat _ (Op soac@(Screma _ _ form)))
@@ -492,7 +491,7 @@ transformStm path (Let pat _ (Op (Stream w arrs nes fold_fun))) = do
 -- stage. This would save us from having to store all the intermediate
 -- results to memory. Troels suspects such cases are very rare, but
 -- they may appear some day.
-transformStm path (Let pat aux (Op (Scatter w arrs lam as)))
+transformStm path (Let pat aux (Op (Scatter w arrs as lam)))
   | not $ all primType $ lambdaReturnType lam = do
       -- Produce map stage.
       map_pat <- fmap Pat $ forM (lambdaReturnType lam) $ \t ->
@@ -527,7 +526,7 @@ transformStm path (Let pat aux (Op (Scatter w arrs lam as)))
       addStms stms
       letBind (Pat [res_pe]) $ Op $ SegOp kernel
 --
-transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) = runBuilder_ $ do
+transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs as lam))) = runBuilder_ $ do
   let lam' = soacsLambdaToGPU lam
   write_i <- newVName "write_i"
   let krets = do
@@ -588,7 +587,7 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
       | Op (Screma w _ form) <- stmExp stm,
         Just lam' <- isMapSOAC form =
           mapLike w lam'
-      | Op (Scatter w _ lam' _) <- stmExp stm =
+      | Op (Scatter w _ _ lam') <- stmExp stm =
           mapLike w lam'
       | Loop _ _ body <- stmExp stm =
           bodyInterest body * 10

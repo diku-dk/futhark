@@ -49,14 +49,15 @@ sizeHeuristicsTable :: [SizeHeuristic]
 sizeHeuristicsTable =
   [ SizeHeuristic "NVIDIA CUDA" DeviceGPU LockstepWidth 32,
     SizeHeuristic "AMD Accelerated Parallel Processing" DeviceGPU LockstepWidth 32,
+    SizeHeuristic "rusticl" DeviceGPU LockstepWidth 32,
     SizeHeuristic "" DeviceGPU LockstepWidth 1,
     -- We calculate the number of blocks to aim for 1024 threads per
     -- compute unit if we also use the default block size.  This seems
     -- to perform well in practice.
     SizeHeuristic "" DeviceGPU NumBlocks $ 4 * max_compute_units,
     SizeHeuristic "" DeviceGPU BlockSize 256,
-    SizeHeuristic "" DeviceGPU TileSize 16,
-    SizeHeuristic "" DeviceGPU RegTileSize 4,
+    SizeHeuristic "" DeviceGPU TileSize 32,
+    SizeHeuristic "" DeviceGPU RegTileSize 2,
     SizeHeuristic "" DeviceGPU Threshold $ 32 * 1024,
     --
     SizeHeuristic "" DeviceCPU LockstepWidth 1,

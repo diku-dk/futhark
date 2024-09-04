@@ -2,6 +2,8 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
+  python = pkgs.python311Packages;
+  haskell = pkgs.haskell.packages.ghc96;
 in
 pkgs.stdenv.mkDerivation {
   name = "futhark";
@@ -14,10 +16,10 @@ pkgs.stdenv.mkDerivation {
       file
       git
       parallel
-      haskell.compiler.ghc94
+      haskell.ghc
       ormolu
-      haskell.packages.ghc94.weeder
-      #haskell.packages.ghc94.haskell-language-server
+      haskell.weeder
+      haskell.haskell-language-server
       haskellPackages.graphmod
       haskellPackages.apply-refact
       xdot
@@ -29,14 +31,15 @@ pkgs.stdenv.mkDerivation {
       ghcid
       niv
       ispc
-      python3Packages.mypy
-      python3Packages.black
-      python3Packages.numpy
-      python3Packages.pyopencl
-      python3Packages.matplotlib
-      python3Packages.jsonschema
-      python3Packages.sphinx
-      python3Packages.sphinxcontrib-bibtex
+      python.python
+      python.mypy
+      python.black
+      python.numpy
+      python.pyopencl
+      python.matplotlib
+      python.jsonschema
+      python.sphinx
+      python.sphinxcontrib-bibtex
       imagemagick # needed for literate tests
     ]
       # The following are for WebGPU.

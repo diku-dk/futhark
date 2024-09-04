@@ -560,6 +560,11 @@ checkOpaques (OpaqueTypes types) = descend [] types
       mapM_ (checkEntryPointType known . snd) fs
     check known (OpaqueSum _ cs) =
       mapM_ (mapM_ (checkEntryPointType known . fst) . snd) cs
+    check known (OpaqueArray _ v _) =
+      checkEntryPointType known (TypeOpaque v)
+    check known (OpaqueRecordArray _ v fs) = do
+      checkEntryPointType known (TypeOpaque v)
+      mapM_ (checkEntryPointType known . snd) fs
     check _ (OpaqueType _) =
       pure ()
     checkEntryPointType known (TypeOpaque s) =

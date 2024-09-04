@@ -76,7 +76,7 @@ fromSOAC' ::
   [Ident] ->
   SOAC rep ->
   m (Maybe (MapNest rep))
-fromSOAC' bound (SOAC.Screma w (SOAC.ScremaForm [] [] lam) inps) = do
+fromSOAC' bound (SOAC.Screma w inps (SOAC.ScremaForm [] [] lam)) = do
   maybenest <- case ( stmsToList $ bodyStms $ lambdaBody lam,
                       bodyResult $ lambdaBody lam
                     ) of
@@ -146,7 +146,7 @@ toSOAC ::
   MapNest rep ->
   m (SOAC rep)
 toSOAC (MapNest w lam [] inps) =
-  pure $ SOAC.Screma w (Futhark.mapSOAC lam) inps
+  pure $ SOAC.Screma w inps (Futhark.mapSOAC lam)
 toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
   let nparams = zipWith (Param mempty) npnames $ map SOAC.inputRowType inps
   body <- runBodyBuilder $
@@ -161,7 +161,7 @@ toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
             lambdaBody = body,
             lambdaReturnType = nrettype
           }
-  pure $ SOAC.Screma w (Futhark.mapSOAC outerlam) inps
+  pure $ SOAC.Screma w inps (Futhark.mapSOAC outerlam)
 
 fixInputs ::
   (MonadFreshNames m) =>

@@ -9,14 +9,94 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* New prelude function: `rep`, an implicit form of `replicate`.
+* `futhark script` now supports an `-f` option.
 
-* Improved handling of large monomorphic single-dimensional array
-  literals (#2160).
+* `futhark script` now supports the builtin procedure `$store`.
 
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* An error in tuning file validation.
+
+* Constant folding for loops that produce floating point results could
+  result in different numerical behaviour.
+
+## [0.25.21]
+
+### Added
+
+* Logging now prints more GPU information on context initialisation.
+
+* GPU cache size can now be configured (tuning param: `default_cache`).
+
+* GPU shared memory can now be configured (tuning param: `default_shared_memory`).
+
+* GPU register capacity can now be configured.
+
+* `futhark script` now accepts a `-b` option for producing binary
+  output.
+
+### Fixed
+
+* Type names for element types of array indexing functions in C
+  interface are now often better - although there are still cases
+  where you end up with hashed names. (#2172)
+
+* In some cases, GPU failures would not be reported properly if a
+  previous failure was pending.
+
+* `auto output` didn't work if the `.fut` file did not have any path
+  components.
+
+* Improved detection of malformed tuning files.
+
+## [0.25.20]
+
+### Added
+
+* Better error message when in-place updates fail at runtime due to a
+  shape mismatch.
+
+### Fixed
+
+* `#[unroll]` on an outer loop now no longer causes unrolling of all
+  loops nested inside the loop body.
+
+* Obscure issue related to replications of constants in complex
+  intrablock kernels.
+
+* Interpreter no longer crashes on attributes in patterns.
+
+* Fixes to array indexing through C API when using GPU backends.
+
+## [0.25.19]
+
+### Added
+
+* The compiler now does slightly less aggressive inlining. Use the
+  `#[inline]` attribute if you want to force inlining of some
+  function.
+
+* Arrays of opaque types now support indexing through the C API.
+  Arrays of records can also be constructed. (#2082)
+
+### Fixed
+
+* The `opencl` backend now always passes
+  `-cl-fp32-correctly-rounded-divide-sqrt` to the kernel compiler, in
+  order to match CUDA and HIP behaviour.
+
+## [0.25.18]
+
+### Added
+
+* New prelude function: `rep`, an implicit form of `replicate`.
+
+* Improved handling of large monomorphic single-dimensional array
+  literals (#2160).
 
 ### Fixed
 
