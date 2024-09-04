@@ -91,6 +91,10 @@ tests = testGroup "Proofs.Rules"
       run (\(x,y,_,_,_,_,_,_) ->
         rewrite ((sop x :<= sop y) :|| Bool True)
       ) @??= Bool True
+  , testCase "Match subsymbols" $
+      run (\(x,y,z,_,_,_,_,_) ->
+        rewrite (Var z :|| (Bool True :&& (sop x :<= sop y)))
+      ) @??= (Var z :|| (sop x :<= sop y))
   ]
   where
     int = int2SoP
