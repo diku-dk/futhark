@@ -16,14 +16,6 @@ data Rule a b m = Rule {
     to :: Substitution b -> m a
   }
 
-data CommutativeRule a b c m = CommutativeRule {
-    commName :: String,
-    commFrom :: c -> c -> a,
-    commArg1 :: c,
-    commArg2 :: c,
-    commTo :: Substitution b -> m a
-  }
-
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
 -- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
 -- it matches `a + a` and `b + b` and returns `2a + 2b + c`.
@@ -43,6 +35,17 @@ matchSoP rule sop
     -- Get all (k-subterms, remaining subterms).
     k = numTerms (from rule)
     combinations xs = [(s, xs \\ s) | s <- subsequences xs, length s == k]
+
+matchSymbol :: Rule Symbol (SoP Symbol) IndexFnM -> Symbol -> IndexFnM Symbol
+matchSymbol rule symbol = do
+    s :: Maybe (Substitution (SoP Symbol)) <- case from rule of
+      x :&& y -> matchCommutativeRule (:&&) x y
+      x :|| y -> matchCommutativeRule (:||) x y
+      x -> unify x symbol
+    maybe (pure symbol) (to rule) s
+    where
+      matchCommutativeRule op x y =
+        msum <$> mapM (flip unify symbol) [x `op` y, y `op` x]
 
 class Monad m => Rewritable u m where
   rewrite :: u -> m u
@@ -93,34 +96,28 @@ instance Rewritable (SoP Symbol) IndexFnM where
 instance Rewritable Symbol IndexFnM where
   rewrite symbol = do
     rs <- rules
-    foldM applyRule symbol rs
+    foldM (flip matchSymbol) symbol rs
     where
-      applyRule :: Symbol -> Rule Symbol (SoP Symbol) IndexFnM -> IndexFnM Symbol
-      applyRule v rule = do
-        s <- unify (from rule) v
-        maybe (pure v) (to rule) s
       rules :: IndexFnM [Rule Symbol (SoP Symbol) IndexFnM]
       rules = do
         h1 <- newVName "h"
-        pure $ commutative
-              [ CommutativeRule
-                  ":&& identity"
-                  (:&&) (Bool True) (Var h1)
-                  (\s -> pure . sop2Symbol . rep s $ Var h1)
-              , CommutativeRule
-                  ":&& annihilation"
-                  (:&&) (Bool False) (Var h1)
-                  (\_ -> pure $ Bool False)
-              , CommutativeRule
-                  ":|| identity"
-                  (:||) (Bool False) (Var h1)
-                  (\s -> pure . sop2Symbol . rep s $ Var h1)
-              , CommutativeRule
-                  ":|| annihilation"
-                  (:||) (Bool True) (Var h1)
-                  (\_ -> pure $ Bool True )
-              ]
-              -- ++ [
+        pure [ Rule
+                 ":&& identity"
+                 (Bool True :&& Var h1)
+                 (\s -> pure . sop2Symbol . rep s $ Var h1)
+             , Rule
+                 ":&& annihilation"
+                 (Bool False :&& Var h1)
+                 (\_ -> pure $ Bool False)
+             , Rule
+                 ":|| identity"
+                 (Bool False :|| Var h1)
+                 (\s -> pure . sop2Symbol . rep s $ Var h1)
+             , Rule
+                 ":|| annihilation"
+                 (Bool True :|| Var h1)
+                 (\_ -> pure $ Bool True )
+             ]
               --   Rule {
               --     name = "&& idempotence",
               --     from = Var h1 :&& Var h2,
@@ -130,6 +127,3 @@ instance Rewritable Symbol IndexFnM where
               --       pure $ if x == y then x else x :&& y
               --   }
               -- ]
-      commutative = concatMap comm2rules
-      comm2rules (CommutativeRule n f x y t) =
-        [Rule n (f x y) t, Rule n (f y x) t]
