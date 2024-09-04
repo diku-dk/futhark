@@ -21,22 +21,21 @@ data Rule a b m = Rule {
 class Monad m => Rewritable u m where
   rewrite :: u -> m u
 
-yoink :: SoP Symbol -> IndexFnM (SoP Symbol)
-yoink sop = rulesSoP >>= foldM (flip matchSoP) sop
-
 instance Rewritable (SoP Symbol) IndexFnM where
   rewrite = astMap m
     where
-      m = ASTMapper { mapOnSymbol = rewrite,
-                      mapOnSoP = \sop -> rulesSoP >>= foldM (flip matchSoP) sop
-                    }
+      m = ASTMapper
+        { mapOnSymbol = rewrite,
+          mapOnSoP = \sop -> rulesSoP >>= foldM (flip matchSoP) sop
+        }
 
 instance Rewritable Symbol IndexFnM where
   rewrite = astMap m
     where
-      m = ASTMapper { mapOnSymbol = \x -> rulesSymbol >>= foldM (flip matchSymbol) x,
-                      mapOnSoP = rewrite
-                    }
+      m = ASTMapper
+        { mapOnSymbol = \x -> rulesSymbol >>= foldM (flip matchSymbol) x,
+          mapOnSoP = rewrite
+        }
 
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
 -- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
