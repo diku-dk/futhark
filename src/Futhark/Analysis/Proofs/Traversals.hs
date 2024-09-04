@@ -25,19 +25,19 @@ instance ASTMappable Symbol where
   astMap _ Recurrence = pure Recurrence
   astMap m (Var x) = mapOnSymbol m $ Var x
   astMap m (LinComb vn lb ub x) =
-    mapOnSymbol m =<< LinComb vn <$> astMap m lb <*> astMap m ub <*> mapOnSymbol m x
-  astMap m (Idx xs i) = mapOnSymbol m =<< Idx <$> mapOnSymbol m xs <*> astMap m i
-  astMap m (Indicator p) = mapOnSymbol m . Indicator =<< mapOnSymbol m p
+    mapOnSymbol m =<< LinComb vn <$> astMap m lb <*> astMap m ub <*> astMap m x
+  astMap m (Idx xs i) = mapOnSymbol m =<< Idx <$> astMap m xs <*> astMap m i
+  astMap m (Indicator p) = mapOnSymbol m . Indicator =<< astMap m p
   astMap _ x@(Bool {}) = pure x
-  astMap m (Not x) = mapOnSymbol m . Not =<< mapOnSymbol m x
+  astMap m (Not x) = mapOnSymbol m . Not =<< astMap m x
   astMap m (x :== y) = mapOnSymbol m =<< (:==) <$> astMap m x <*> astMap m y
   astMap m (x :< y) = mapOnSymbol m =<< (:<) <$> astMap m x <*> astMap m y
   astMap m (x :> y) = mapOnSymbol m =<< (:>) <$> astMap m x <*> astMap m y
   astMap m (x :/= y) = mapOnSymbol m =<< (:/=) <$> astMap m x <*> astMap m y
   astMap m (x :>= y) = mapOnSymbol m =<< (:>=) <$> astMap m x <*> astMap m y
   astMap m (x :<= y) = mapOnSymbol m =<< (:<=) <$> astMap m x <*> astMap m y
-  astMap m (x :&& y) = mapOnSymbol m =<< (:&&) <$> mapOnSymbol m x <*> mapOnSymbol m y
-  astMap m (x :|| y) = mapOnSymbol m =<< (:||) <$> mapOnSymbol m x <*> mapOnSymbol m y
+  astMap m (x :&& y) = mapOnSymbol m =<< (:&&) <$> astMap m x <*> astMap m y
+  astMap m (x :|| y) = mapOnSymbol m =<< (:||) <$> astMap m x <*> astMap m y
 
 normalize :: Symbol -> IndexFnM Symbol
 normalize = astMap m . toNNF
@@ -59,11 +59,8 @@ normalize = astMap m . toNNF
     m = ASTMapper { mapOnSymbol = norm, mapOnSoP = pure }
     norm symbol = case toNNF symbol of
         (Not x) -> do
-          -- x' <- normalize x
           pure $ toNNF (Not x)
         (x :&& y) -> do
-          -- x' <- normalize x
-          -- y' <- normalize y
           case (x, y) of
             (Bool True, b) -> pure b                         -- Identity.
             (a, Bool True) -> pure a
@@ -73,8 +70,6 @@ normalize = astMap m . toNNF
             (a, b) | a == toNNF (Not b) -> pure (Bool False) -- A contradiction.
             (a, b) -> pure $ a :&& b
         (x :|| y) -> do
-          -- x' <- normalize x
-          -- y' <- normalize y
           case (x, y) of
             (Bool False, b) -> pure b                       -- Identity.
             (a, Bool False) -> pure a
