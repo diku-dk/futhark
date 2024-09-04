@@ -1,13 +1,13 @@
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
-module Futhark.Analysis.Proofs.RulesTests (tests) where
+module Futhark.Analysis.Proofs.RewriteTests (tests) where
 
 import Test.Tasty
 import Test.Tasty.HUnit
 import Futhark.MonadFreshNames
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
-import Futhark.Analysis.Proofs.Rules
+import Futhark.Analysis.Proofs.Rewrite
 import Futhark.SoP.SoP (sym2SoP, (.+.), int2SoP, (.-.))
 import Futhark.SoP.Monad (addRange)
 import qualified Data.Set as S
@@ -20,7 +20,7 @@ runTest :: IndexFnM a -> a
 runTest test = fst $ runIndexFnM test blankNameSource
 
 tests :: TestTree
-tests = testGroup "Proofs.Rules"
+tests = testGroup "Proofs.Rewrite"
   [ testCase "Add" $
       run (\(x,y,_,_,_,_,_,_) ->
         rewrite (sop x .+. sop y)

@@ -1,4 +1,4 @@
-module Futhark.Analysis.Proofs.Rules
+module Futhark.Analysis.Proofs.Rewrite
 where
 
 import Futhark.Analysis.Proofs.Unify
