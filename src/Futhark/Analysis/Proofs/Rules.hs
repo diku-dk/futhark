@@ -152,11 +152,3 @@ rulesSymbol = do
         , to = \_ -> pure $ Bool True
         }
     ]
-    --   Rule {
-    --     name = "&& idempotence",
-    --     from = Var h1 :&& Var h2,
-    --     to = \s -> do
-    --       let x = sop2Symbol $ rep s (sym2SoP $ Var h1)
-    --       let y = sop2Symbol $ rep s (sym2SoP $ Var h2)
-    --       pure $ if x == y then x else x :&& y
-    --   }
