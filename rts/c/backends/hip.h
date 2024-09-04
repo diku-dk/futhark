@@ -17,10 +17,10 @@ static char* get_failure_msg(int failure_idx, int64_t args[]);
     if (serror) {                               \
       if (!ctx->error) {                        \
         ctx->error = serror;                    \
-        return bad;                             \
       } else {                                  \
         free(serror);                           \
       }                                         \
+      return bad;                               \
     }                                           \
   }
 

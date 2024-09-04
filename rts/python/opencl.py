@@ -266,6 +266,12 @@ def initialise_opencl_object(
         elif v["class"] == "reg_tile_size":
             max_value = None
             default_value = default_reg_tile_size
+        elif v["class"].startswith("shared_memory"):
+            max_value = self.max_shared_memory
+            default_value = self.max_shared_memory
+        elif v["class"].startswith("cache"):
+            max_value = self.max_cache
+            default_value = self.max_cache
         elif v["class"].startswith("threshold"):
             max_value = None
             default_value = default_threshold

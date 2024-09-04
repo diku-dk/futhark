@@ -98,12 +98,12 @@ simplifySOAC (Stream outerdim arr nes lam) = do
   arr' <- mapM Engine.simplify arr
   (lam', lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
   pure (Stream outerdim' arr' nes' lam', lam_hoisted)
-simplifySOAC (Scatter w ivs lam as) = do
+simplifySOAC (Scatter w ivs as lam) = do
   w' <- Engine.simplify w
   (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
   ivs' <- mapM Engine.simplify ivs
   as' <- mapM Engine.simplify as
-  pure (Scatter w' ivs' lam' as', hoisted)
+  pure (Scatter w' ivs' as' lam', hoisted)
 simplifySOAC (Hist w imgs ops bfun) = do
   w' <- Engine.simplify w
   (ops', hoisted) <- fmap unzip $
@@ -349,10 +349,10 @@ removeReplicateMapping _ _ _ _ = Skip
 
 -- | Like 'removeReplicateMapping', but for 'Scatter'.
 removeReplicateWrite :: TopDownRuleOp (Wise SOACS)
-removeReplicateWrite vtable pat aux (Scatter w ivs lam as)
+removeReplicateWrite vtable pat aux (Scatter w ivs as lam)
   | Just (stms, lam', ivs') <- removeReplicateInput vtable lam ivs = Simplify $ do
       forM_ stms $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
-      auxing aux $ letBind pat $ Op $ Scatter w ivs' lam' as
+      auxing aux $ letBind pat $ Op $ Scatter w ivs' as lam'
 removeReplicateWrite _ _ _ _ = Skip
 
 removeReplicateInput ::
@@ -403,10 +403,10 @@ removeUnusedSOACInput _ pat aux op
     Just (used_arrs, map_lam') <- remove map_lam arrs =
       Simplify . auxing aux . letBind pat . Op $
         soacOp (Screma w used_arrs (ScremaForm scan reduce map_lam'))
-  | Just (Scatter w arrs map_lam dests :: SOAC rep) <- asSOAC op,
+  | Just (Scatter w arrs dests map_lam :: SOAC rep) <- asSOAC op,
     Just (used_arrs, map_lam') <- remove map_lam arrs =
       Simplify . auxing aux . letBind pat . Op $
-        soacOp (Scatter w used_arrs map_lam' dests)
+        soacOp (Scatter w used_arrs dests map_lam')
   where
     used_in_body map_lam = freeIn $ lambdaBody map_lam
     usedInput map_lam (param, _) = paramName param `nameIn` used_in_body map_lam
@@ -568,7 +568,7 @@ removeDeadReduction _ _ _ _ = Skip
 
 -- | If we are writing to an array that is never used, get rid of it.
 removeDeadWrite :: BottomUpRuleOp (Wise SOACS)
-removeDeadWrite (_, used) pat aux (Scatter w arrs fun dests) =
+removeDeadWrite (_, used) pat aux (Scatter w arrs dests fun) =
   let (i_ses, v_ses) = unzip $ groupScatterResults' dests $ bodyResult $ lambdaBody fun
       (i_ts, v_ts) = unzip $ groupScatterResults' dests $ lambdaReturnType fun
       isUsed (bindee, _, _, _, _, _) = (`UT.used` used) $ patElemName bindee
@@ -583,13 +583,13 @@ removeDeadWrite (_, used) pat aux (Scatter w arrs fun dests) =
    in if pat /= Pat pat'
         then
           Simplify . auxing aux . letBind (Pat pat') $
-            Op (Scatter w arrs fun' dests')
+            Op (Scatter w arrs dests' fun')
         else Skip
 removeDeadWrite _ _ _ _ = Skip
 
 -- handles now concatenation of more than two arrays
 fuseConcatScatter :: TopDownRuleOp (Wise SOACS)
-fuseConcatScatter vtable pat _ (Scatter _ arrs fun dests)
+fuseConcatScatter vtable pat _ (Scatter _ arrs dests fun)
   | Just (ws@(w' : _), xss, css) <- unzip3 <$> mapM isConcat arrs,
     xivs <- transpose xss,
     all (w' ==) ws = Simplify $ do
@@ -608,8 +608,7 @@ fuseConcatScatter vtable pat _ (Scatter _ arrs fun dests)
                 lambdaReturnType = mix its <> mix vts
               }
       certifying (mconcat css) . letBind pat . Op $
-        Scatter w' (concat xivs) fun' $
-          map (incWrites r) dests
+        Scatter w' (concat xivs) (map (incWrites r) dests) fun'
   where
     sizeOf :: VName -> Maybe SubExp
     sizeOf x = arraySize 0 . typeOf <$> ST.lookup x vtable

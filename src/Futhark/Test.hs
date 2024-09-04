@@ -418,7 +418,7 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
         cmdMaybe $ cmdFree server outs
     either throwError (const (pure ())) (sequence_ res)
   where
-    server_cfg = futharkServerCfg (dropExtension prog) []
+    server_cfg = futharkServerCfg ("." </> dropExtension prog) []
 
     file entry tr =
       takeDirectory prog </> testRunReferenceOutput prog entry tr

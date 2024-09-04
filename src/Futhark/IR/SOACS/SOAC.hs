@@ -6,6 +6,7 @@
 module Futhark.IR.SOACS.SOAC
   ( SOAC (..),
     ScremaForm (..),
+    ScatterSpec,
     HistOp (..),
     Scan (..),
     scanResults,
@@ -74,10 +75,17 @@ import Futhark.Util.Pretty (Doc, align, comma, commasep, docText, parens, ppTupl
 import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
 
+-- | How the results of a scatter operation should be written. Each
+-- element of the list consists of a @v@ (often a `VName`) specifying
+-- which array to scatter to, a `Shape` describing the shape of that
+-- array, and an `Int` describing how many elements should be written
+-- to that array for each invocation of the scatter.
+type ScatterSpec v = [(Shape, Int, v)]
+
 -- | A second-order array combinator (SOAC).
 data SOAC rep
   = Stream SubExp [VName] [SubExp] (Lambda rep)
-  | -- | @Scatter <length> <inputs> <lambda> <outputs>@
+  | -- | @Scatter <length> <inputs> <lambda> <spec>@
     --
     -- Scatter maps values from a set of input arrays to indices and values of a
     -- set of output arrays. It is able to write multiple values to multiple
@@ -87,24 +95,21 @@ data SOAC rep
     -- which are applied to the <lambda> function. For instance, if there are
     -- two arrays, <lambda> will get two values as input, one from each array.
     --
-    -- <outputs> specifies the result of the <lambda> and which arrays to write
-    -- to. Each element of the list consists of a <VName> specifying which array
-    -- to scatter to, a <Shape> describing the shape of that array, and an <Int>
-    -- describing how many elements should be written to that array for each
-    -- invocation of the <lambda>.
+    -- <spec> specifies the result of the <lambda> and which arrays to
+    -- write to.
     --
-    -- <lambda> is a function that takes inputs from <inputs> and returns values
-    -- according to the output-specification in <outputs>. It returns values in
-    -- the following manner:
+    -- <lambda> is a function that takes inputs from <inputs> and
+    -- returns values according to <spec>. It returns values in the
+    -- following manner:
     --
     --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_m]
     --
-    -- For each output in <outputs>, <lambda> returns <i> * <j> index values and
-    -- <j> output values, where <i> is the number of dimensions (rank) of the
-    -- given output, and <j> is the number of output values written to the given
-    -- output.
+    -- For each output in <spec>, <lambda> returns <i> * <j> index
+    -- values and <j> output values, where <i> is the number of
+    -- dimensions (rank) of the given output, and <j> is the number of
+    -- output values written to the given output.
     --
-    -- For example, given the following output specification:
+    -- For example, given the following scatter specification:
     --
     --     [([x1, y1, z1], 2, arr1), ([x2, y2], 1, arr2)]
     --
@@ -114,7 +119,7 @@ data SOAC rep
     -- will correspond to the first two output values, and so on. For this
     -- example, <lambda> should return a total of 11 values, 8 index values and
     -- 3 output values.  See also 'splitScatterResults'.
-    Scatter SubExp [VName] (Lambda rep) [(Shape, Int, VName)]
+    Scatter SubExp [VName] (ScatterSpec VName) (Lambda rep)
   | -- | @Hist <length> <input arrays> <dest-arrays-and-ops> <bucket fun>@
     --
     -- The final lambda produces indexes and values for the 'HistOp's.
@@ -320,33 +325,24 @@ isMapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null reds
   pure map_lam
 
--- | @groupScatterResults <output specification> <results>@
+-- | @splitScatterResults <scatter specification> <results>@
 --
--- Blocks the index values and result values of <results> according to the
--- <output specification>.
+-- Splits the results array into indices and values according to the
+-- specification.
 --
--- This function is used for extracting and grouping the results of a
--- scatter. In the SOAC representation, the lambda inside a 'Scatter' returns
--- all indices and values as one big list. This function groups each value with
--- its corresponding indices (as determined by the t'Shape' of the output array).
---
--- The elements of the resulting list correspond to the shape and name of the
--- output parameters, in addition to a list of values written to that output
--- parameter, along with the array indices marking where to write them to.
---
--- See 'Scatter' for more information.
-groupScatterResults :: [(Shape, Int, array)] -> [a] -> [(Shape, array, [([a], a)])]
-groupScatterResults output_spec results =
-  let (shapes, ns, arrays) = unzip3 output_spec
-   in groupScatterResults' output_spec results
-        & chunks ns
-        & zip3 shapes arrays
+-- See 'groupScatterResults' for more information.
+splitScatterResults :: [(Shape, Int, array)] -> [a] -> ([a], [a])
+splitScatterResults output_spec results =
+  let (shapes, ns, _) = unzip3 output_spec
+      num_indices = sum $ zipWith (*) ns $ map length shapes
+   in splitAt num_indices results
 
--- | @groupScatterResults' <output specification> <results>@
+-- | @groupScatterResults' <scatter specification> <results>@
 --
--- Blocks the index values and result values of <results> according to the
--- output specification. This is the simpler version of @groupScatterResults@,
--- which doesn't return any information about shapes or output arrays.
+-- Blocks the index values and result values of <results> according to
+-- the specification. This is the simpler version of
+-- @groupScatterResults@, which doesn't return any information about
+-- shapes or output arrays.
 --
 -- See 'groupScatterResults' for more information,
 groupScatterResults' :: [(Shape, Int, array)] -> [a] -> [([a], a)]
@@ -357,17 +353,27 @@ groupScatterResults' output_spec results =
         concat $ zipWith (\shp n -> replicate n $ length shp) shapes ns
    in zip (chunks chunk_sizes indices) values
 
--- | @splitScatterResults <output specification> <results>@
+-- | @groupScatterResults <scatter specification> <results>@
 --
--- Splits the results array into indices and values according to the output
--- specification.
+-- Blocks the index values and result values of <results> according to the
+-- <scatter specification>.
 --
--- See 'groupScatterResults' for more information.
-splitScatterResults :: [(Shape, Int, array)] -> [a] -> ([a], [a])
-splitScatterResults output_spec results =
-  let (shapes, ns, _) = unzip3 output_spec
-      num_indices = sum $ zipWith (*) ns $ map length shapes
-   in splitAt num_indices results
+-- This function is used for extracting and grouping the results of a
+-- scatter. In the SOACS representation, the lambda inside a 'Scatter' returns
+-- all indices and values as one big list. This function groups each value with
+-- its corresponding indices (as determined by the t'Shape' of the output array).
+--
+-- The elements of the resulting list correspond to the shape and name of the
+-- output parameters, in addition to a list of values written to that output
+-- parameter, along with the array indices marking where to write them to.
+--
+-- See 'Scatter' for more information.
+groupScatterResults :: ScatterSpec array -> [a] -> [(Shape, array, [([a], a)])]
+groupScatterResults output_spec results =
+  let (shapes, ns, arrays) = unzip3 output_spec
+   in groupScatterResults' output_spec results
+        & chunks ns
+        & zip3 shapes arrays
 
 -- | Like 'Mapper', but just for 'SOAC's.
 data SOACMapper frep trep m = SOACMapper
@@ -409,11 +415,10 @@ mapSOACM tv (Stream size arrs accs lam) =
     <*> mapM (mapOnSOACVName tv) arrs
     <*> mapM (mapOnSOACSubExp tv) accs
     <*> mapOnSOACLambda tv lam
-mapSOACM tv (Scatter w ivs lam as) =
+mapSOACM tv (Scatter w ivs as lam) =
   Scatter
     <$> mapOnSOACSubExp tv w
     <*> mapM (mapOnSOACVName tv) ivs
-    <*> mapOnSOACLambda tv lam
     <*> mapM
       ( \(aw, an, a) ->
           (,,)
@@ -422,6 +427,7 @@ mapSOACM tv (Scatter w ivs lam as) =
             <*> mapOnSOACVName tv a
       )
       as
+    <*> mapOnSOACLambda tv lam
 mapSOACM tv (Hist w arrs ops bucket_fun) =
   Hist
     <$> mapOnSOACSubExp tv w
@@ -520,7 +526,7 @@ soacType (Stream outersize _ accs lam) =
     nms = map paramName $ take (1 + length accs) params
     substs = M.fromList $ zip nms (outersize : accs)
     Lambda params rtp _ = lam
-soacType (Scatter _w _ivs lam dests) =
+soacType (Scatter _w _ivs dests lam) =
   zipWith arrayOfShape (map (snd . head) rets) shapes
   where
     (shapes, _, rets) =
@@ -553,8 +559,8 @@ instance AliasedOp SOAC where
       -- Drop the chunk parameter, which cannot alias anything.
       paramsToInput =
         zip (map paramName $ drop 1 $ lambdaParams lam) (accs ++ map Var arrs)
-  consumedInOp (Scatter _ _ _ as) =
-    namesFromList $ map (\(_, _, a) -> a) as
+  consumedInOp (Scatter _ _ spec _) =
+    namesFromList $ map (\(_, _, a) -> a) spec
   consumedInOp (Hist _ _ ops _) =
     namesFromList $ concatMap histDest ops
 
@@ -572,8 +578,8 @@ instance CanBeAliased SOAC where
     VJP (Alias.analyseLambda aliases lam) args vec
   addOpAliases aliases (Stream size arr accs lam) =
     Stream size arr accs $ Alias.analyseLambda aliases lam
-  addOpAliases aliases (Scatter len arrs lam dests) =
-    Scatter len arrs (Alias.analyseLambda aliases lam) dests
+  addOpAliases aliases (Scatter len arrs dests lam) =
+    Scatter len arrs dests (Alias.analyseLambda aliases lam)
   addOpAliases aliases (Hist w arrs ops bucket_fun) =
     Hist
       w
@@ -619,7 +625,7 @@ instance IsOp SOAC where
       concatIndicesToEachValue is vs =
         let is_flat = mconcat is
          in map (is_flat <>) vs
-  opDependencies (Scatter w arrs lam outputs) =
+  opDependencies (Scatter w arrs outputs lam) =
     let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
      in map flattenBlocks (groupScatterResults outputs deps)
     where
@@ -747,7 +753,7 @@ typeCheckSOAC (Stream size arrexps accexps lam) = do
   -- arr, so we can later check that aliases of arr are not used inside lam.
   let fake_lamarrs' = map asArg lamarrs'
   TC.checkLambda lam $ asArg inttp : accargs ++ fake_lamarrs'
-typeCheckSOAC (Scatter w arrs lam as) = do
+typeCheckSOAC (Scatter w arrs as lam) = do
   -- Requirements:
   --
   --   0. @lambdaReturnType@ of @lam@ must be a list
@@ -893,8 +899,8 @@ instance RephraseOp SOAC where
     JVP <$> rephraseLambda r lam <*> pure args <*> pure vec
   rephraseInOp r (Stream w arrs acc lam) =
     Stream w arrs acc <$> rephraseLambda r lam
-  rephraseInOp r (Scatter w arrs lam dests) =
-    Scatter w arrs <$> rephraseLambda r lam <*> pure dests
+  rephraseInOp r (Scatter w arrs dests lam) =
+    Scatter w arrs dests <$> rephraseLambda r lam
   rephraseInOp r (Hist w arrs ops lam) =
     Hist w arrs <$> mapM onOp ops <*> rephraseLambda r lam
     where
@@ -918,7 +924,7 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
     inside "JVP" $ lambdaMetrics lam
   opMetrics (Stream _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
-  opMetrics (Scatter _len _ lam _) =
+  opMetrics (Scatter _len _ _ lam) =
     inside "Scatter" $ lambdaMetrics lam
   opMetrics (Hist _ _ ops bucket_fun) =
     inside "Hist" $ mapM_ (lambdaMetrics . histOp) ops >> lambdaMetrics bucket_fun
@@ -951,8 +957,8 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
         )
   pretty (Stream size arrs acc lam) =
     ppStream size arrs acc lam
-  pretty (Scatter w arrs lam dests) =
-    ppScatter w arrs lam dests
+  pretty (Scatter w arrs dests lam) =
+    ppScatter w arrs dests lam
   pretty (Hist w arrs ops bucket_fun) =
     ppHist w arrs ops bucket_fun
   pretty (Screma w arrs (ScremaForm scans reds map_lam))
@@ -1024,17 +1030,17 @@ ppStream size arrs acc lam =
 
 -- | Prettyprint the given Scatter.
 ppScatter ::
-  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> Lambda rep -> [(Shape, Int, VName)] -> Doc ann
-ppScatter w arrs lam dests =
+  (PrettyRep rep, Pretty inp) => SubExp -> [inp] -> [(Shape, Int, VName)] -> Lambda rep -> Doc ann
+ppScatter w arrs dests lam =
   "scatter"
     <> (parens . align)
       ( pretty w
           <> comma
             </> ppTuple' (map pretty arrs)
           <> comma
-            </> pretty lam
-          <> comma
             </> commasep (map pretty dests)
+          <> comma
+            </> pretty lam
       )
 
 instance (PrettyRep rep) => Pretty (Scan rep) where
