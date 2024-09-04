@@ -9,7 +9,6 @@ import Control.Monad (foldM, msum, (<=<))
 import Futhark.SoP.FourierMotzkin (($<=$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 import Data.List (subsequences, (\\))
-import Futhark.SoP.Util (ifM)
 import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), astMap)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
 import Futhark.SoP.Monad (substEquivs)
@@ -18,8 +17,12 @@ import Data.Functor ((<&>))
 data Rule a b m = Rule {
     name :: String,
     from :: a,
-    to :: Substitution b -> m a
+    to :: Substitution b -> m a,
+    sideCondition :: Substitution b -> m Bool
   }
+
+vacuous :: Monad m => b -> m Bool
+vacuous = const (pure True)
 
 class Monad m => Rewritable u m where
   rewrite :: u -> m u
@@ -83,6 +86,15 @@ instance Rewritable Symbol IndexFnM where
       toNNF (Not (x :<= y)) = x :> y
       toNNF x = x
 
+
+match_ :: Unify u v m => Rule u v m -> u -> m (Maybe (Substitution v))
+match_ rule x = unify (from rule) x >>= checkSideCondition
+  where
+    checkSideCondition Nothing = pure Nothing
+    checkSideCondition (Just s) = do
+      b <- sideCondition rule s
+      pure $ if b then Just s else Nothing
+
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
 -- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
 -- it matches `a + a` and `b + b` and returns `2a + 2b + c`.
@@ -93,7 +105,7 @@ matchSoP rule sop
   | numTerms (from rule) <= numTerms sop = do
     let (subterms, contexts) = unzip . combinations $ sopToList sop
     -- Get first valid subterm substitution. Recursively match context.
-    subs <- mapM (unify (from rule) . sopFromList) subterms
+    subs <- mapM (match_ rule . sopFromList) subterms
     case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
       Just (sub, ctx) -> (.+.) <$> matchSoP rule (sopFromList ctx) <*> to rule sub
       Nothing -> pure sop
@@ -108,11 +120,11 @@ matchSymbol rule symbol = do
     s :: Maybe (Substitution (SoP Symbol)) <- case from rule of
       x :&& y -> matchCommutativeRule (:&&) x y
       x :|| y -> matchCommutativeRule (:||) x y
-      x -> unify x symbol
+      _ -> match_ rule symbol
     maybe (pure symbol) (to rule) s
     where
       matchCommutativeRule op x y =
-        msum <$> mapM (flip unify symbol) [x `op` y, y `op` x]
+        msum <$> mapM (match_ rule) [x `op` y, y `op` x]
 
 rulesSoP :: IndexFnM [Rule (SoP Symbol) (SoP Symbol) IndexFnM]
 rulesSoP = do
@@ -128,6 +140,7 @@ rulesSoP = do
         , from = LinComb i (sop h1 .+. int 1) (sop h2) (Var h3)
                    ~+~ Idx (Var h3) (sop h1)
         , to = \s -> pure . rep s $ LinComb i (sop h1) (sop h2) (Var h3)
+        , sideCondition = vacuous
         }
     , Rule
         { name = "Extend sum lower bound (2)"
@@ -135,12 +148,14 @@ rulesSoP = do
                    ~+~ Idx (Var h3) (sop h1 .-. int 1)
         , to = \s -> pure . rep s $
                   LinComb i (sop h1 .-. int 1) (sop h2) (Var h3)
+        , sideCondition = vacuous
         }
     , Rule
         { name = "Extend sum upper bound (1)"
         , from = LinComb i (sop h1) (sop h2 .-. int 1) (Var h3)
                    ~+~ Idx (Var h3) (sop h2)
         , to = \s -> pure . rep s $ LinComb i (sop h1) (sop h2) (Var h3)
+        , sideCondition = vacuous
         }
     , Rule
         { name = "Extend sum upper bound (2)"
@@ -148,23 +163,23 @@ rulesSoP = do
                    ~+~ Idx (Var h3) (sop h2 .+. int 1)
         , to = \s -> pure . rep s $
                   LinComb i (sop h1) (sop h2 .+. int 1) (Var h3)
+        , sideCondition = vacuous
         }
-    , let e = LinComb i (sop h1) (sop x1) (Var h2)
-                ~-~ LinComb i (sop h1) (sop y1) (Var h2)
-      in Rule
+    , Rule
         { name = "Merge sum-subtractation"
-        , from = e
+        , from = LinComb i (sop h1) (sop x1) (Var h2)
+                   ~-~ LinComb i (sop h1) (sop y1) (Var h2)
         , to = \s ->
-           ifM
-             (rep s (sop y1) $<=$ rep s (sop x1))
-             (pure . rep s $ LinComb i (sop y1 .+. int 1) (sop x1) (Var h2))
-             (pure $ rep s e)
+           pure . rep s $ LinComb i (sop y1 .+. int 1) (sop x1) (Var h2)
+        , sideCondition = \s ->
+            rep s (sop y1) $<=$ rep s (sop x1)
         }
-      , Rule
-          { name = "[[¬x]] => 1 - [[x]]"
-          , from = sym2SoP $ Indicator (Not (Var h1))
-          , to = \s -> pure . rep s $ int 1 .-. sym2SoP (Indicator (Var h1))
-          }
+    , Rule
+        { name = "[[¬x]] => 1 - [[x]]"
+        , from = sym2SoP $ Indicator (Not (Var h1))
+        , to = \s -> pure . rep s $ int 1 .-. sym2SoP (Indicator (Var h1))
+        , sideCondition = vacuous
+        }
     ]
   where
     int = int2SoP
