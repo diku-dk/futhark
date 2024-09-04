@@ -73,21 +73,38 @@ type Line = T.Text
 type Fmt = [Line]
 
 -- State monad to keep track of comments 
-newtype Env = Env
-  { comments :: [Comment]
+data Env = Env
+  { comments :: ![Comment]
+  , indent :: !Int
   } deriving (Show, Eq, Ord)
 
 type Smth a = State Env a 
 
--- Monad version
+-- Functions for operating on Smth monad
 comment :: Located a => a -> Smth Fmt
 comment a = do
   s <- get
-  case s of
-    Env (c : cs) | locOf a > locOf c -> do
+  case comments s of
+    c : cs | locOf a > locOf c -> do
       put $ s { comments = cs }
       pure [commentText c]
     _ -> pure []
+
+incrIndent :: Smth () 
+incrIndent = modify (\s -> s {indent = indent s + 2})
+
+decrIndent :: Smth ()
+decrIndent = modify (\s -> s {indent = indent s - 2})
+
+-- Other Utility Functions
+isSingleLine :: Located a => a -> Bool
+isSingleLine a =
+  case locOf a of
+    Loc start end -> posLine start == posLine end
+    NoLoc -> undefined -- Huh????? spørg troels.
+
+
+-- Main format code
 
 -- | Documentation comments are always optional, so this takes a 'Maybe'.
 fmtDocComment :: Maybe DocComment -> Smth Fmt
@@ -101,32 +118,54 @@ fmtDocComment Nothing = pure []
 fmtMany :: (a -> Smth Fmt) -> [a] -> Smth Fmt
 fmtMany f = foldM (\a b -> (a<>) <$> f b) []
 
-fmtTupleTypeElems :: [UncheckedTypeExp] -> Smth Fmt
-fmtTupleTypeElems [] = pure []
-fmtTupleTypeElems [t] = fmtTypeExp t
-fmtTupleTypeElems (t : ts) = do
+-- Boolean indicates whether tuple is single line
+fmtTupleTypeElems :: [UncheckedTypeExp] -> Bool -> Smth Fmt
+fmtTupleTypeElems [] _ = pure []
+fmtTupleTypeElems [t] _ = fmtTypeExp t
+fmtTupleTypeElems (t : ts) isSingle = do
   t' <- fmtTypeExp t 
-  ts' <- fmtTupleTypeElems ts
-  pure $ t' <> [","] <> ts' 
+  ts' <- fmtTupleTypeElems ts isSingle
+  if isSingle then pure [T.concat $ t' <> [", "] <> ts'] 
+  else pure $ t' <> [", "] <> ts' -- TO DO: Make the comma not be on its own line  
 
 fmtTypeExp :: UncheckedTypeExp -> Smth Fmt
 fmtTypeExp (TEVar v loc) = do
   c <- comment loc
   pure $ c <> [prettyText v]
+fmtTypeExp (TETuple ts loc) | isSingleLine loc = do
+  c <- comment loc
+  ts' <- fmtTupleTypeElems ts True
+  pure $ c <> ["(" <> T.concat ts' <> ")"]
 fmtTypeExp (TETuple ts loc) = do
   c <- comment loc
-  ts' <- fmtTupleTypeElems ts
-  pure $ c <> ["("] <> ts' <> [")"]
+  ts' <- fmtTupleTypeElems ts False
+  pure $ c <> ["("] <>  ts' <> [")"]
 
 fmtTypeParam :: UncheckedTypeParam -> Smth Fmt
 fmtTypeParam = undefined
 
 fmtTypeBind :: UncheckedTypeBind -> Smth Fmt
-fmtTypeBind (TypeBind name l ps e NoInfo dc _loc) = do
+fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = do
   dc' <- fmtDocComment dc
   ps' <- fmtMany fmtTypeParam ps
-  e' <- fmtTypeExp e
-  pure $ dc' <> ["type" <> prettyText l] <> [prettyText name] <> ps' <> [" = "] <> e'
+  if isSingleLine loc then do
+    e' <- fmtTypeExp e
+    pure $ dc' <> ["type " <>
+                   prettyText l <>
+                   prettyText name <>
+                   T.intercalate " " ps' <>
+                   " = " <>
+                   T.concat e']
+  else do
+    -- incrIndent
+    e' <- fmtTypeExp e
+    -- decrIndent
+    pure $ dc' <> ["type " <>
+                  prettyText l <>
+                  prettyText name <>
+                  T.intercalate " " ps' <>
+                  " = "] <> e'
+fmtTypeBind _ = undefined
 
 fmtDec :: UncheckedDec -> Smth Fmt
 fmtDec (TypeDec tb) = fmtTypeBind tb
@@ -138,7 +177,7 @@ fmtProg (Prog dc decs) = do
   dc' <- fmtDocComment dc
   decs' <- fmtMany fmtDec decs
   cs <- gets comments
-  put (Env [])
+  modify (\s -> s {comments = []})
   pure $ dc' <> decs' <> map commentText cs 
 
 -- | Run @futhark fmt@.
@@ -153,6 +192,6 @@ main = mainWithOptions () [] "program" $ \args () ->
           exitFailure
         Right (prog, cs) -> do
           let number i l = T.pack $ printf "%4d %s" (i :: Int) l
-          let fmt = evalState (fmtProg prog) (Env { comments = cs })
+          let fmt = evalState (fmtProg prog) (Env { indent = 0, comments = cs })
           T.hPutStr stdout $ T.unlines $ zipWith number [0 ..] fmt
     _ -> Nothing
