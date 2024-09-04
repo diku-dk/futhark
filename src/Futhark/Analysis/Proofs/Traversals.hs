@@ -57,7 +57,6 @@ normalize = astMap m . toNNF
     toNNF x = x
 
     m = ASTMapper { mapOnSymbol = norm, mapOnSoP = pure }
-    -- TODO ^ astMap also on SoP?
     norm symbol = case toNNF symbol of
         (Not x) -> do
           -- x' <- normalize x
