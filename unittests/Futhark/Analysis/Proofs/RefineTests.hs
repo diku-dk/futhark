@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 module Futhark.Analysis.Proofs.RefineTests (tests) where
 
 import Test.Tasty
@@ -5,7 +6,7 @@ import Test.Tasty.HUnit
 import Futhark.MonadFreshNames
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
-import Futhark.SoP.SoP (sym2SoP, int2SoP, SoP)
+import Futhark.SoP.SoP (sym2SoP, int2SoP, SoP, (.+.))
 import Futhark.SoP.Monad (addEquiv)
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Refine
@@ -15,11 +16,16 @@ runTest test = fst $ runIndexFnM test blankNameSource
 
 tests :: TestTree
 tests = testGroup "Proofs.Refine"
-  [ testCase "Equivalence" $
+  [ testCase "Equivalence (1)" $
       run (\(x,_,_,_,_,_,_,_) -> do
         addEquiv (Var x) (int 1)
         refine (Var x) :: IndexFnM (SoP Symbol)
       ) @??= int 1
+  , testCase "Equivalence (2)" $
+      run (\(x,_,_,_,_,_,_,_) -> do
+        addEquiv (Var x) (int 1)
+        refine (sop x .+. int 1)
+      ) @??= int 2
   , testCase "Tautology" $
       run (\(_,_,_,_,_,_,_,_) ->
         refine (int 1 :<= int 2) :: IndexFnM Symbol
@@ -34,9 +40,9 @@ tests = testGroup "Proofs.Refine"
         refine (sop x :<= int 2) :: IndexFnM Symbol
       ) @??= Bool True
   , testCase "Match subsymbol" $
-      run (\(x,_,_,_,_,_,_,_) ->
-        refine (Var x :&& Not (int 1 :>= int 2)) :: IndexFnM Symbol
-      ) @??= Var x
+      run (\(x,y,_,_,_,_,_,_) ->
+        refine (Var x :&& (Var y :&& Not (int 1 :>= int 2))) :: IndexFnM Symbol
+      ) @??= (Var x :&& Var y)
   ]
   where
     int = int2SoP
@@ -45,7 +51,7 @@ tests = testGroup "Proofs.Refine"
     varsM =
       (,,,,,,,) <$> newVName "x" <*> newVName "y" <*> newVName "z" <*> newVName "w"
                 <*> newVName "a" <*> newVName "b" <*> newVName "c" <*> newVName "d"
-    (x,y,z,w,a,b,c,_) = runTest varsM
+    (x,y,_,_,_,_,_,_) = runTest varsM
 
     run f = runTest (varsM >>= f)
 
