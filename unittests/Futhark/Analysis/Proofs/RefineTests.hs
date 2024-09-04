@@ -33,6 +33,10 @@ tests = testGroup "Proofs.Refine"
         addEquiv (Var x) (int 1)
         refine (sop x :<= int 2) :: IndexFnM Symbol
       ) @??= Bool True
+  , testCase "Match subsymbol" $
+      run (\(x,_,_,_,_,_,_,_) ->
+        refine (Var x :&& Not (int 1 :>= int 2)) :: IndexFnM Symbol
+      ) @??= Var x
   ]
   where
     int = int2SoP
