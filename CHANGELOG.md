@@ -9,17 +9,49 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Logging now prints more GPU information on context initialisation.
+* `futhark script` now supports an `-f` option.
 
-* GPU cache size can now be configured.
-
-* GPU register capacity can now be configured.
+* `futhark script` now supports the builtin procedure `$store`.
 
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* An error in tuning file validation.
+
+* Constant folding for loops that produce floating point results could
+  result in different numerical behaviour.
+
+## [0.25.21]
+
+### Added
+
+* Logging now prints more GPU information on context initialisation.
+
+* GPU cache size can now be configured (tuning param: `default_cache`).
+
+* GPU shared memory can now be configured (tuning param: `default_shared_memory`).
+
+* GPU register capacity can now be configured.
+
+* `futhark script` now accepts a `-b` option for producing binary
+  output.
+
+### Fixed
+
+* Type names for element types of array indexing functions in C
+  interface are now often better - although there are still cases
+  where you end up with hashed names. (#2172)
+
+* In some cases, GPU failures would not be reported properly if a
+  previous failure was pending.
+
+* `auto output` didn't work if the `.fut` file did not have any path
+  components.
+
+* Improved detection of malformed tuning files.
 
 ## [0.25.20]
 

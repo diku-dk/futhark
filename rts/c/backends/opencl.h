@@ -30,10 +30,10 @@ static char* get_failure_msg(int failure_idx, int64_t args[]);
     if (serror) {                               \
       if (!ctx->error) {                        \
         ctx->error = serror;                    \
-        return bad;                             \
       } else {                                  \
         free(serror);                           \
       }                                         \
+      return bad;                               \
     }                                           \
   }
 
@@ -710,6 +710,9 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     }
   }
 
+  bool is_amd = strstr(device_option.platform_name, "AMD") != NULL;
+  bool is_nvidia = strstr(device_option.platform_name, "NVIDIA CUDA") != NULL;
+
   size_t max_thread_block_size;
   OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
                                        sizeof(size_t), &max_thread_block_size, NULL));
@@ -722,9 +725,6 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
 
   // Futhark reserves 4 bytes for bookkeeping information.
   max_shared_memory -= 4;
-
-  bool is_amd = strstr(device_option.platform_name, "AMD") != NULL;
-  bool is_nvidia = strstr(device_option.platform_name, "NVIDIA CUDA") != NULL;
 
   // The OpenCL implementation may reserve some local memory bytes for
   // various purposes.  In principle, we should use
@@ -792,7 +792,15 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     }
   }
 
-  ctx->max_cache = l2_cache_size;
+  ctx->max_thread_block_size = max_thread_block_size;
+  ctx->max_tile_size = max_tile_size; // No limit.
+  ctx->max_threshold = ctx->max_grid_size = 1U<<31; // No limit.
+
+  if (ctx->cfg->gpu.default_cache != 0) {
+    ctx->max_cache = ctx->cfg->gpu.default_cache;
+  } else {
+    ctx->max_cache = l2_cache_size;
+  }
 
   if (ctx->cfg->gpu.default_registers != 0) {
     ctx->max_registers = ctx->cfg->gpu.default_registers;
@@ -800,10 +808,11 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     ctx->max_registers = 1<<16; // I cannot find a way to query for this.
   }
 
-  ctx->max_thread_block_size = max_thread_block_size;
-  ctx->max_tile_size = max_tile_size; // No limit.
-  ctx->max_threshold = ctx->max_grid_size = 1U<<31; // No limit.
-  ctx->max_shared_memory = max_shared_memory;
+  if (ctx->cfg->gpu.default_shared_memory != 0) {
+    ctx->max_shared_memory = ctx->cfg->gpu.default_shared_memory;
+  } else {
+    ctx->max_shared_memory = max_shared_memory;
+  }
 
   // Now we go through all the sizes, clamp them to the valid range,
   // or set them to the default.
@@ -831,6 +840,12 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     } else if (strstr(size_class, "reg_tile_size") == size_class) {
       max_value = 0; // No limit.
       default_value = ctx->cfg->gpu.default_reg_tile_size;
+    } else if (strstr(size_class, "shared_memory") == size_class) {
+      max_value = ctx->max_shared_memory;
+      default_value = ctx->max_shared_memory;
+    } else if (strstr(size_class, "cache") == size_class) {
+      max_value = ctx->max_cache;
+      default_value = ctx->max_cache;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
       default_value = ctx->cfg->gpu.default_threshold;

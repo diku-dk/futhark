@@ -29,7 +29,13 @@ static char* load_tuning_file(const char *fname,
     char *eql = strstr(line, "=");
     if (eql) {
       *eql = 0;
-      int value = atoi(eql+1);
+      char *endptr;
+      int value = strtol(eql+1, &endptr, 10);
+      if (*endptr && *endptr != '\n') {
+        snprintf(line, max_line_len, "Invalid line %d (must be of form 'name=int').",
+                 lineno);
+        return line;
+      }
       if (set_tuning_param(cfg, line, (size_t)value) != 0) {
         char* err = (char*) malloc(max_line_len + 50);
         snprintf(err, max_line_len + 50, "Unknown name '%s' on line %d.", line, lineno);

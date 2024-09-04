@@ -12,6 +12,7 @@ struct gpu_config {
   size_t default_tile_size;
   size_t default_reg_tile_size;
   size_t default_cache;
+  size_t default_shared_memory;
   size_t default_registers;
   size_t default_threshold;
 
@@ -23,7 +24,7 @@ struct gpu_config {
 // The following are dummy sizes that mean the concrete defaults
 // will be set during initialisation via hardware-inspection-based
 // heuristics.
-struct gpu_config gpu_config_zero = {
+struct gpu_config gpu_config_initial = {
   0
 };
 

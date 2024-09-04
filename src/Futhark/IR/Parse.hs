@@ -147,7 +147,7 @@ pExtType :: Parser ExtType
 pExtType = pTypeBase pExtShape (pure NoUniqueness)
 
 pRank :: Parser Rank
-pRank = Rank . length <$> many "[]"
+pRank = Rank . length <$> many (lexeme "[" *> lexeme "]")
 
 pUniqueness :: Parser Uniqueness
 pUniqueness = choice [pAsterisk $> Unique, pure Nonunique]
@@ -753,8 +753,8 @@ pSOAC pr =
               <* pComma
               <*> braces (pVName `sepBy` pComma)
               <* pComma
+              <*> many (pDest <* pComma)
               <*> pLambda pr
-              <*> many (pComma *> pDest)
           )
       where
         pDest =

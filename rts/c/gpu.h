@@ -120,6 +120,15 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
     cfg->gpu.default_reg_tile_size = new_value;
     return 0;
   }
+  if (strcmp(param_name, "default_cache") == 0) {
+    cfg->gpu.default_cache = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_shared_memory") == 0) {
+    cfg->gpu.default_shared_memory = new_value;
+    return 0;
+  }
+
   return 1;
 }
 

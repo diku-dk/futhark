@@ -220,12 +220,18 @@ entryPointType types t ts
                   rank = E.shapeRank shape
                   ts' = map (strip rank) ts
                   record_t = E.Scalar (E.Record fs)
-              ept <- snd <$> entryPointType types (E.EntryType record_t Nothing) ts'
+                  record_te = case E.entryAscribed t of
+                    Just (E.TEArray _ te _) -> Just te
+                    _ -> Nothing
+              ept <- snd <$> entryPointType types (E.EntryType record_t record_te) ts'
               addType desc . I.OpaqueRecordArray rank (entryPointTypeName ept)
                 =<< opaqueRecordArray types rank fs' ts
         E.Array _ shape et -> do
           let ts' = map (strip (E.shapeRank shape)) ts
-          ept <- snd <$> entryPointType types (E.EntryType (E.Scalar et) Nothing) ts'
+              elem_te = case E.entryAscribed t of
+                Just (E.TEArray _ te _) -> Just te
+                _ -> Nothing
+          ept <- snd <$> entryPointType types (E.EntryType (E.Scalar et) elem_te) ts'
           addType desc . I.OpaqueArray (E.shapeRank shape) (entryPointTypeName ept) $
             map valueType ts
         _ -> addType desc $ I.OpaqueType $ map valueType ts
