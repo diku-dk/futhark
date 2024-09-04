@@ -9,6 +9,7 @@ import Control.Monad (foldM, msum)
 import Futhark.SoP.FourierMotzkin (($<=$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 import Data.List (subsequences, (\\))
+import Futhark.SoP.Util (ifM)
 
 data Rule a b m = Rule {
     name :: String,
@@ -93,12 +94,11 @@ instance Rewritable (SoP Symbol) IndexFnM where
             in Rule
               { name = "Merge sum-subtractation"
               , from = e
-              , to = \s -> do
-                 b <- rep s (sop y1) $<=$ rep s (sop x1)
-                 pure $
-                   if b
-                   then rep s $ LinComb i (sop y1 .+. int 1) (sop x1) (Var h2)
-                   else rep s e
+              , to = \s ->
+                 ifM
+                   (rep s (sop y1) $<=$ rep s (sop x1))
+                   (pure . rep s $ LinComb i (sop y1 .+. int 1) (sop x1) (Var h2))
+                   (pure $ rep s e)
               }
           ]
       int = int2SoP
