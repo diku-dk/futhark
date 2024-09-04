@@ -58,6 +58,10 @@ tests = testGroup "Proofs.Rules"
       run (\(x,y,z,w,a,b,c,d) ->
         rewrite (int 1 .+. Idx (Var x) (sop y) ~+~ LinComb w (sop y .+. int 1) (sop z) (Var x) .+. Idx (Var a) (sop b) ~+~ LinComb d (sop b .+. int 1) (sop c) (Var a))
       ) @??= (int 1 .+. sym2SoP (LinComb w (sop y) (sop z) (Var x)) .+. sym2SoP (LinComb d (sop b) (sop c) (Var a)))
+  , testCase "Match symbols in SoP" $
+      run (\(x,y,z,_,_,_,_,_) ->
+        rewrite (Indicator (Bool True :&& (sop x :<= sop y)) ~+~ Var z)
+      ) @??= (Indicator (sop x :<= sop y) ~+~ Var z)
   -- Symbol tests.
   , testCase ":&& identity (1)" $
       run (\(x,y,_,_,_,_,_,_) ->
