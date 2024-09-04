@@ -40,48 +40,57 @@ tests = testGroup "Proofs.Rules"
       run (\(x,y,z,w,_,_,_,_) ->
         rewrite (Idx (Var x) (sop z .+. int 1) ~+~ LinComb w (sop y) (sop z) (Var x))
       ) @??= sym2SoP (LinComb w (sop y) (sop z .+. int 1) (Var x))
-  , testCase "Merge sum-subtraction" $
+  , testCase "Merge sum-subtraction (no match)" $
       -- Should fail because we cannot show b <= c without bounds on these variables general.
       run (\(x,_,z,w,a,b,c,_) ->
         rewrite (LinComb w (sop a) (sop c) (Var x) ~-~ LinComb z (sop a) (sop b) (Var x))
       ) @??= (LinComb w (sop a) (sop c) (Var x) ~-~ LinComb z (sop a) (sop b) (Var x))
-  , testCase "Merge sum-subtraction" $
+  , testCase "Merge sum-subtraction (match)" $
       run (\(x,_,z,w,a,b,c,_) -> do
         addRange (Var b) (SoP.Range mempty 1 (S.singleton (sop c)))
         rewrite (LinComb w (sop a) (sop c) (Var x) ~-~ LinComb z (sop a) (sop b) (Var x))
       ) @??= sym2SoP (LinComb w (sop b .+. int 1) (sop c) (Var x))
-  , testCase "and (1)" $
+  , testCase "Rule matches on subterms" $
+      run (\(x,y,z,w,_,_,_,_) ->
+        rewrite (int 1 .+. Idx (Var x) (sop y) ~+~ LinComb w (sop y .+. int 1) (sop z) (Var x))
+      ) @??= (int 1 .+. sym2SoP (LinComb w (sop y) (sop z) (Var x)))
+  , testCase "Rule matches on all relevant subterms" $
+      run (\(x,y,z,w,a,b,c,d) ->
+        rewrite (int 1 .+. Idx (Var x) (sop y) ~+~ LinComb w (sop y .+. int 1) (sop z) (Var x) .+. Idx (Var a) (sop b) ~+~ LinComb d (sop b .+. int 1) (sop c) (Var a))
+      ) @??= (int 1 .+. sym2SoP (LinComb w (sop y) (sop z) (Var x)) .+. sym2SoP (LinComb d (sop b) (sop c) (Var a)))
+  -- Symbol tests.
+  , testCase ":&& identity (1)" $
       run (\(x,y,_,_,_,_,_,_) ->
         rewrite (Bool True :&& (sop x :<= sop y))
       ) @??= (sop x :<= sop y)
-  , testCase "and (2)" $
+  , testCase ":&& identity (2)" $
       run (\(x,y,_,_,_,_,_,_) ->
         rewrite ((sop x :<= sop y) :&& Bool True)
       ) @??= (sop x :<= sop y)
-  , testCase "and (3)" $
+  , testCase ":&& annhilation (1)" $
       run (\(x,y,_,_,_,_,_,_) ->
         rewrite (Bool False :&& (sop x :<= sop y))
       ) @??= Bool False
-  , testCase "and (4)" $
+  , testCase ":&& annhilation (2)" $
       run (\(x,y,_,_,_,_,_,_) ->
         rewrite ((sop x :<= sop y) :&& Bool False)
       ) @??= Bool False
-  , testCase "or (1)" $
-      run (\(x,y,_,_,_,_,_,_) ->
-        rewrite (Bool True :|| (sop x :<= sop y))
-      ) @??= Bool True
-  , testCase "or (2)" $
-      run (\(x,y,_,_,_,_,_,_) ->
-        rewrite ((sop x :<= sop y) :|| Bool True)
-      ) @??= Bool True
-  , testCase "or (3)" $
+  , testCase ":|| identity (1)" $
       run (\(x,y,_,_,_,_,_,_) ->
         rewrite (Bool False :|| (sop x :<= sop y))
       ) @??= (sop x :<= sop y)
-  , testCase "or (4)" $
+  , testCase ":|| identity (2)" $
       run (\(x,y,_,_,_,_,_,_) ->
         rewrite ((sop x :<= sop y) :|| Bool False)
       ) @??= (sop x :<= sop y)
+  , testCase ":|| annihilation (1)" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite (Bool True :|| (sop x :<= sop y))
+      ) @??= Bool True
+  , testCase ":|| annihilation (2)" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite ((sop x :<= sop y) :|| Bool True)
+      ) @??= Bool True
   ]
   where
     int = int2SoP
@@ -92,7 +101,7 @@ tests = testGroup "Proofs.Rules"
     varsM =
       (,,,,,,,) <$> newVName "x" <*> newVName "y" <*> newVName "z" <*> newVName "w"
                 <*> newVName "a" <*> newVName "b" <*> newVName "c" <*> newVName "d"
-    (x,y,z,w,a,b,c,_) = runTest varsM
+    (x,y,z,w,a,b,c,d) = runTest varsM
 
     run f = runTest (varsM >>= f)
 

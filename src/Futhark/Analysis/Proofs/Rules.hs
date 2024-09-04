@@ -2,14 +2,13 @@ module Futhark.Analysis.Proofs.Rules
 where
 
 import Futhark.Analysis.Proofs.Unify
-import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.), sopToList, sopFromList)
+import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.), sopToList, sopFromList, numTerms)
 import Futhark.MonadFreshNames
 import Futhark.Analysis.Proofs.Symbol (Symbol(..), sop2Symbol)
 import Control.Monad (foldM, msum)
 import Futhark.SoP.FourierMotzkin (($<=$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 import Data.List (subsequences, (\\))
-import Futhark.Util.Pretty (Pretty)
 
 data Rule a b m = Rule {
     name :: String,
@@ -25,37 +24,32 @@ data CommutativeRule a b c m = CommutativeRule {
     commTo :: Substitution b -> m a
   }
 
-match :: ( Replaceable u (SoP u)
-         , Unify u (SoP u) m
-         , Show u
-         , Pretty u
-         , Ord u) => Rule (SoP u) (SoP u) m -> SoP u -> m (SoP u)
-match rule sop = do
-  subs :: [Maybe (Substitution (SoP u))] <- mapM (unify $ from rule) matchables
-  -- Get first valid substitution and context.
-  case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
-    Just (s, ctx) -> (.+. ctx) <$> to rule s
-    Nothing -> pure sop
+-- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
+-- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
+-- it matches `a + a` and `b + b` and returns `2a + 2b + c`.
+matchSoP :: ( Replaceable u (SoP u)
+            , Unify u (SoP u) m
+            , Ord u) => Rule (SoP u) (SoP u) m -> SoP u -> m (SoP u)
+matchSoP rule sop
+  | numTerms (from rule) <= numTerms sop = do
+    let (subterms, contexts) = unzip . combinations $ sopToList sop
+    -- Get first valid subterm substitution. Recursively match context.
+    subs <- mapM (unify (from rule) . sopFromList) subterms
+    case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
+      Just (sub, ctx) -> (.+.) <$> matchSoP rule (sopFromList ctx) <*> to rule sub
+      Nothing -> pure sop
+  | otherwise = pure sop
   where
-    -- Get all "sub-SoPs" of length k.
-    k = length (sopToList $ from rule)
-    -- combinations xs = [s | s <- subsequences xs, length s == k]
-    -- Get all (k-combination, remaining elements).
+    -- Get all (k-subterms, remaining subterms).
+    k = numTerms (from rule)
     combinations xs = [(s, xs \\ s) | s <- subsequences xs, length s == k]
-    (subterms, otherTerms) = unzip . combinations . sopToList $ sop
-    matchables = map sopFromList subterms
-    contexts = map sopFromList otherTerms
 
 class Monad m => Rewritable u m where
   rewrite :: u -> m u
 
 instance Rewritable (SoP Symbol) IndexFnM where
-  rewrite x = rules >>= foldM applyRule x
+  rewrite x = rules >>= foldM (flip matchSoP) x
     where
-      applyRule :: SoP Symbol -> Rule (SoP Symbol) (SoP Symbol) IndexFnM -> IndexFnM (SoP Symbol)
-      applyRule v rule = do
-        s <- unify (from rule) v
-        maybe (pure v) (to rule) s
       rules :: IndexFnM [Rule (SoP Symbol) (SoP Symbol) IndexFnM]
       rules = do
         i <- newVName "i"
@@ -110,19 +104,19 @@ instance Rewritable Symbol IndexFnM where
         h1 <- newVName "h"
         pure $ commutative
               [ CommutativeRule
-                  "&& identity"
+                  ":&& identity"
                   (:&&) (Bool True) (Var h1)
                   (\s -> pure . sop2Symbol . rep s $ Var h1)
               , CommutativeRule
-                  "&& annihilation"
+                  ":&& annihilation"
                   (:&&) (Bool False) (Var h1)
                   (\_ -> pure $ Bool False)
               , CommutativeRule
-                  "|| identity"
+                  ":|| identity"
                   (:||) (Bool False) (Var h1)
                   (\s -> pure . sop2Symbol . rep s $ Var h1)
               , CommutativeRule
-                  "|| annihilation"
+                  ":|| annihilation"
                   (:||) (Bool True) (Var h1)
                   (\_ -> pure $ Bool True )
               ]
