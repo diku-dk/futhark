@@ -2,7 +2,6 @@ module Futhark.Analysis.Proofs.Traversals
 where
 
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 import Futhark.SoP.SoP (SoP, (.+.), int2SoP, sopToLists, (.*.), sym2SoP)
 
 data ASTMapper m = ASTMapper
@@ -38,44 +37,3 @@ instance ASTMappable Symbol where
   astMap m (x :<= y) = mapOnSymbol m =<< (:<=) <$> astMap m x <*> astMap m y
   astMap m (x :&& y) = mapOnSymbol m =<< (:&&) <$> astMap m x <*> astMap m y
   astMap m (x :|| y) = mapOnSymbol m =<< (:||) <$> astMap m x <*> astMap m y
-
-normalize :: Symbol -> IndexFnM Symbol
-normalize = astMap m . toNNF
-  where
-    toNNF :: Symbol -> Symbol
-    toNNF (Not (Not x)) = x
-    toNNF (Not (Bool True)) = Bool False
-    toNNF (Not (Bool False)) = Bool True
-    toNNF (Not (x :|| y)) = toNNF (Not x) :&& toNNF (Not y)
-    toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
-    toNNF (Not (x :== y)) = x :/= y
-    toNNF (Not (x :< y)) = x :>= y
-    toNNF (Not (x :> y)) = x :<= y
-    toNNF (Not (x :/= y)) = x :== y
-    toNNF (Not (x :>= y)) = x :< y
-    toNNF (Not (x :<= y)) = x :> y
-    toNNF x = x
-
-    m = ASTMapper { mapOnSymbol = norm, mapOnSoP = pure }
-    norm symbol = case toNNF symbol of
-        (Not x) -> do
-          pure $ toNNF (Not x)
-        (x :&& y) -> do
-          case (x, y) of
-            (Bool True, b) -> pure b                         -- Identity.
-            (a, Bool True) -> pure a
-            (Bool False, _) -> pure (Bool False)             -- Annihilation.
-            (_, Bool False) -> pure (Bool False)
-            (a, b) | a == b -> pure a                        -- Idempotence.
-            (a, b) | a == toNNF (Not b) -> pure (Bool False) -- A contradiction.
-            (a, b) -> pure $ a :&& b
-        (x :|| y) -> do
-          case (x, y) of
-            (Bool False, b) -> pure b                       -- Identity.
-            (a, Bool False) -> pure a
-            (Bool True, _) -> pure (Bool True)              -- Annihilation.
-            (_, Bool True) -> pure (Bool True)
-            (a, b) | a == b -> pure a                       -- Idempotence.
-            (a, b) | a == toNNF (Not b) -> pure (Bool True) -- A tautology.
-            (a, b) -> pure $ a :|| b
-        v -> pure v

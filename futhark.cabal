@@ -523,7 +523,6 @@ test-suite unit
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
       Futhark.Analysis.Proofs.UnifyTests
-      Futhark.Analysis.Proofs.RefineTests
       Futhark.Analysis.Proofs.RulesTests
       Futhark.BenchTests
       Futhark.IR.GPUTests
@@ -563,4 +562,3 @@ test-suite unit
     , tasty-hunit
     , tasty-quickcheck
     , text
-    , transformers

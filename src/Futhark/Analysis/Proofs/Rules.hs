@@ -4,13 +4,16 @@ where
 import Futhark.Analysis.Proofs.Unify
 import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.), sopToList, sopFromList, numTerms)
 import Futhark.MonadFreshNames
-import Futhark.Analysis.Proofs.Symbol (Symbol(..), sop2Symbol)
-import Control.Monad (foldM, msum)
+import Futhark.Analysis.Proofs.Symbol (Symbol(..))
+import Control.Monad (foldM, msum, (<=<))
 import Futhark.SoP.FourierMotzkin (($<=$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 import Data.List (subsequences, (\\))
 import Futhark.SoP.Util (ifM)
 import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), astMap)
+import Futhark.Analysis.Proofs.Refine (refineSymbol)
+import Futhark.SoP.Monad (substEquivs)
+import Data.Functor ((<&>))
 
 data Rule a b m = Rule {
     name :: String,
@@ -22,7 +25,7 @@ class Monad m => Rewritable u m where
   rewrite :: u -> m u
 
 instance Rewritable (SoP Symbol) IndexFnM where
-  rewrite = astMap m
+  rewrite = astMap m <=< substEquivs
     where
       m = ASTMapper
         { mapOnSymbol = rewrite,
@@ -33,9 +36,52 @@ instance Rewritable Symbol IndexFnM where
   rewrite = astMap m
     where
       m = ASTMapper
-        { mapOnSymbol = \x -> rulesSymbol >>= foldM (flip matchSymbol) x,
-          mapOnSoP = rewrite
+        { mapOnSoP = rewrite,
+          mapOnSymbol = \x -> do
+            rulesSymbol
+              >>= foldM (flip matchSymbol) (normalize x)
+              >>= refineSymbol . normalize
+              <&> normalize
         }
+
+      -- TODO Normalize only normalizes Boolean expressions.
+      --      Use a Boolean representation that is normalized by construction.
+      normalize :: Symbol -> Symbol
+      normalize symbol = case toNNF symbol of
+          (Not x) -> toNNF (Not x)
+          (x :&& y) ->
+            case (x, y) of
+              (Bool True, b) -> b                       -- Identity.
+              (a, Bool True) -> a
+              (Bool False, _) -> Bool False             -- Annihilation.
+              (_, Bool False) -> Bool False
+              (a, b) | a == b -> a                      -- Idempotence.
+              (a, b) | a == toNNF (Not b) -> Bool False -- A contradiction.
+              (a, b) -> a :&& b
+          (x :|| y) -> do
+            case (x, y) of
+              (Bool False, b) -> b                      -- Identity.
+              (a, Bool False) -> a
+              (Bool True, _) -> Bool True               -- Annihilation.
+              (_, Bool True) -> Bool True
+              (a, b) | a == b -> a                      -- Idempotence.
+              (a, b) | a == toNNF (Not b) -> Bool True  -- A tautology.
+              (a, b) -> a :|| b
+          v -> v
+
+      toNNF :: Symbol -> Symbol
+      toNNF (Not (Not x)) = x
+      toNNF (Not (Bool True)) = Bool False
+      toNNF (Not (Bool False)) = Bool True
+      toNNF (Not (x :|| y)) = toNNF (Not x) :&& toNNF (Not y)
+      toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
+      toNNF (Not (x :== y)) = x :/= y
+      toNNF (Not (x :< y)) = x :>= y
+      toNNF (Not (x :> y)) = x :<= y
+      toNNF (Not (x :/= y)) = x :== y
+      toNNF (Not (x :>= y)) = x :< y
+      toNNF (Not (x :<= y)) = x :> y
+      toNNF x = x
 
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
 -- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
@@ -129,26 +175,26 @@ rulesSoP = do
 -- TODO can all of these be handled by `normalize`? If so, remove.
 rulesSymbol :: IndexFnM [Rule Symbol (SoP Symbol) IndexFnM]
 rulesSymbol = do
-  h1 <- newVName "h"
   pure
-    [ Rule
-        { name = ":&& identity"
-        , from = Bool True :&& Var h1
-        , to = \s -> pure . sop2Symbol . rep s $ Var h1
-        }
-    , Rule
-        { name = ":&& annihilation"
-        , from = Bool False :&& Var h1
-        , to = \_ -> pure $ Bool False
-        }
-    , Rule
-        { name = ":|| identity"
-        , from = Bool False :|| Var h1
-        , to = \s -> pure . sop2Symbol . rep s $ Var h1
-        }
-    , Rule
-        { name = ":|| annihilation"
-        , from = Bool True :|| Var h1
-        , to = \_ -> pure $ Bool True
-        }
-    ]
+    []
+    -- [ Rule
+    --     { name = ":&& identity"
+    --     , from = Bool True :&& Var h1
+    --     , to = \s -> pure . sop2Symbol . rep s $ Var h1
+    --     }
+    -- , Rule
+    --     { name = ":&& annihilation"
+    --     , from = Bool False :&& Var h1
+    --     , to = \_ -> pure $ Bool False
+    --     }
+    -- , Rule
+    --     { name = ":|| identity"
+    --     , from = Bool False :|| Var h1
+    --     , to = \s -> pure . sop2Symbol . rep s $ Var h1
+    --     }
+    -- , Rule
+    --     { name = ":|| annihilation"
+    --     , from = Bool True :|| Var h1
+    --     , to = \_ -> pure $ Bool True
+    --     }
+    -- ]

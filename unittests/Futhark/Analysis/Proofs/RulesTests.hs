@@ -13,6 +13,7 @@ import Futhark.SoP.Monad (addRange)
 import qualified Data.Set as S
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.Analysis.Proofs.IndexFn
+import Futhark.SoP.Monad (addEquiv)
 
 
 runTest :: IndexFnM a -> a
@@ -107,6 +108,34 @@ tests = testGroup "Proofs.Rules"
       run (\(x,y,_,_,_,_,_,_) ->
         rewrite (Indicator (Bool True :&& (sop x :<= sop y)))
       ) @??= Indicator (sop x :<= sop y)
+  -- Refine tests.
+ -- , testCase "Equivalence (1)" $
+ --      run (\(x,_,_,_,_,_,_,_) -> do
+ --        addEquiv (Var x) (int 1)
+ --        rewrite (Var x)
+ --      ) @??= int 1
+  , testCase "Equivalence (2)" $
+      run (\(x,_,_,_,_,_,_,_) -> do
+        addEquiv (Var x) (int 1)
+        rewrite (sop x .+. int 1)
+      ) @??= int 2
+  , testCase "Tautology" $
+      run (\(_,_,_,_,_,_,_,_) ->
+        rewrite (int 1 :<= int 2)
+      ) @??= Bool True
+  , testCase "Tautology (negated contradiction)" $
+      run (\(_,_,_,_,_,_,_,_) ->
+        rewrite (Not $ int 1 :>= int 2)
+      ) @??= Bool True
+  , testCase "Tautology (variable)" $
+      run (\(x,_,_,_,_,_,_,_) -> do
+        addEquiv (Var x) (int 1)
+        rewrite (sop x :<= int 2)
+      ) @??= Bool True
+  , testCase "Match subsymbol" $
+      run (\(x,y,_,_,_,_,_,_) ->
+        rewrite (Var x :&& (Var y :&& Not (int 1 :>= int 2)))
+      ) @??= (Var x :&& Var y)
   ]
   where
     int = int2SoP
