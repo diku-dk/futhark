@@ -15,7 +15,6 @@ import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromStri
 import qualified Data.List as L
 import Control.Monad (foldM, msum)
 import Control.Monad.Trans.Maybe
-import Debug.Trace (trace, traceM)
 import Futhark.Util.Pretty
 import Data.Maybe (fromJust)
 
@@ -95,16 +94,11 @@ unifies :: ( Replaceable u (SoP v)
            , Replaceable v (SoP v)
            , Unify u (SoP v) m
            , Unify v (SoP v) m
-           , Pretty v
-           , Pretty u
-           , Show v
            , Ord v) => VName -> [(u, u)] -> MaybeT m (Substitution (SoP v))
-unifies _ us | trace ("unifies " <> prettyString us) False = undefined
 unifies _ [] = pure mempty
 unifies k (u:us) = do
   s0 <- uncurry (unify_ k) u
   foldM (\s (a, b) -> do
-          traceM ("# unifies SUB\n" <> prettyString s)
           s' :: Substitution (SoP v) <- unify_ k (rep s a) (rep s b)
           pure $ s <> s'
         ) s0 us
@@ -113,9 +107,6 @@ unifyAnyPerm :: ( Replaceable u (SoP v)
                 , Replaceable v (SoP v)
                 , Unify u (SoP v) m
                 , Unify v (SoP v) m
-                , Pretty v
-                , Pretty u
-                , Show v
                 , Ord v) => VName -> [u] -> [u] -> MaybeT m (Substitution (SoP v))
 unifyAnyPerm k xs ys
   | length xs == length ys =
@@ -130,11 +121,8 @@ instance ( MonadFreshNames m
          , Renameable u
          , Unify u (SoP u) m
          , Replaceable u (SoP u)
-         , Show u
-         , Pretty u
          , Ord u) => Unify (Term u, Integer) (SoP u) m where
-  -- unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
-   -- Unify on permutations of symbols in term.
+  -- Unify on permutations of symbols in term.
   unify_ k (x, a) (y, b)
     | a == b = unifyAnyPerm k (termToList x) (termToList y)
     | otherwise = fail "no unify: unequal constants" -- these dont unify
@@ -143,9 +131,6 @@ instance ( MonadFreshNames m
          , Replaceable u (SoP u)
          , Renameable u
          , Unify u (SoP u) m
-         , Show u
-         , Pretty u
          , Ord u) => Unify (SoP u) (SoP u) m where
-  -- unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
   -- Unify on permutations of terms.
   unify_ k x y = unifyAnyPerm k (sopToList x) (sopToList y)

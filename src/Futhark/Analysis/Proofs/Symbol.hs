@@ -7,8 +7,7 @@ import Language.Futhark (VName)
 import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), unifies)
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
-import Debug.Trace (trace)
-import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), prettyString, enclose)
+import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), enclose)
 
 data Symbol =
     Var VName
@@ -33,20 +32,6 @@ data Symbol =
   | Symbol :|| Symbol
   | Recurrence
   deriving (Show, Eq, Ord)
-
-toNNF :: Symbol -> Symbol
-toNNF (Not (Not x)) = x
-toNNF (Not (Bool True)) = Bool False
-toNNF (Not (Bool False)) = Bool True
-toNNF (Not (x :|| y)) = toNNF (Not x) :&& toNNF (Not y)
-toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
-toNNF (Not (x :== y)) = x :/= y
-toNNF (Not (x :< y)) = x :>= y
-toNNF (Not (x :> y)) = x :<= y
-toNNF (Not (x :/= y)) = x :== y
-toNNF (Not (x :>= y)) = x :< y
-toNNF (Not (x :<= y)) = x :> y
-toNNF x = x
 
 instance Pretty Symbol where
   pretty symbol = case symbol of
@@ -127,9 +112,7 @@ sop2Symbol sop
 instance Replaceable Symbol (SoP Symbol) where
   -- TODO flatten
   rep s symbol = case symbol of
-    Var x ->
-      let y = M.findWithDefault (sym2SoP $ Var x) x s
-      in trace (if x `M.member` s then "rep <" <> prettyString x <> "," <> prettyString y <> ">" else "") y
+    Var x -> M.findWithDefault (sym2SoP $ Var x) x s
     Idx xs i ->
       sym2SoP $ Idx (sop2Symbol $ rep s xs) (rep s i)
     LinComb i lb ub t ->
