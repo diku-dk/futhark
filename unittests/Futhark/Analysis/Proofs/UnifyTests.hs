@@ -85,11 +85,15 @@ tests = testGroup "Proofs.Unify"
   , testCase "Bound names are not substituted" $
       run (\(x,y,z,w,a,b,c,d) ->
         unify (LinComb x (name2SoP y) (name2SoP z) (Var w)) (LinComb a (name2SoP b) (name2SoP c) (Var d))
-      ) @?= yzw2bcd
+      ) @?= y2b_z2c_w2d
   , testCase "Bound names are renamed" $
       run (\(x,_,_,_,a,b,c,d) ->
         unify (Var x) (LinComb a (name2SoP b) (name2SoP c) (Var d))
-      ) @?= Just (s x renamed_lin_comb)
+      ) @?= let renamed_lin_comb = getValue $ do
+                  (_,_,_,_,a,b,c,d) <- varsM
+                  _ <- newVName "k" -- Simulate "k" introduced by Unify.
+                  rename $ sym2SoP (LinComb a (name2SoP b) (name2SoP c) (Var d))
+            in Just (M.singleton x renamed_lin_comb)
   -- TODO This test shouldn't be allowed since we assume VNames in first argument are holes?
   -- , testCase "Substitute only some symbols" $
   --     run_xyzw (\(x,y,z,_) ->
@@ -98,20 +102,16 @@ tests = testGroup "Proofs.Unify"
   ]
   where
     name2SoP = sym2SoP . Var
-    s = M.singleton
 
     varsM =
-      (,,,,,,,) <$> newVName "x" <*> newVName "y" <*> newVName "z" <*> newVName "w"
-                <*> newVName "a" <*> newVName "b" <*> newVName "c" <*> newVName "d"
+      (,,,,,,,)
+        <$> newVName "x" <*> newVName "y" <*> newVName "z" <*> newVName "w"
+        <*> newVName "a" <*> newVName "b" <*> newVName "c" <*> newVName "d"
     (x,y,z,w,_,b,c,d) = getValue varsM
 
-    x2z_y2w = Just (s x (name2SoP z) <> s y (name2SoP w))
-    x2w_y2z = Just (s x (name2SoP w) <> s y (name2SoP z))
-    yzw2bcd = Just (s y (name2SoP b) <> s z (name2SoP c) <> s w (name2SoP d))
+    x2z_y2w = Just $ M.fromList [(x, name2SoP z), (y, name2SoP w)]
+    x2w_y2z = Just $ M.fromList [(x, name2SoP w), (y, name2SoP z)]
+    y2b_z2c_w2d =
+      Just $ M.fromList [(y, name2SoP b), (z, name2SoP c), (w, name2SoP d)]
 
     run f = runTest (varsM >>= f)
-
-    renamed_lin_comb = getValue $ do
-          (_,_,_,_,a,b,c,d) <- varsM
-          _ <- newVName "k" -- Simulate "k" introduced by Unify.
-          rename $ sym2SoP (LinComb a (name2SoP b) (name2SoP c) (Var d))
