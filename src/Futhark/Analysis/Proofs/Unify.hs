@@ -92,9 +92,6 @@ instance (Ord u, Replaceable u (SoP u)) => Replaceable (Term u, Integer) (SoP u)
 instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP u) (SoP u) where
   rep s = foldr (addSoPs . rep s) zeroSoP . sopToList
 
-instance SubstitutionBuilder (SoP u) (SoP u) where
-  addSub = M.insert
-
 unifies :: ( Replaceable u (SoP v)
            , Replaceable v (SoP v)
            , Unify u (SoP v) m

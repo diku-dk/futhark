@@ -3,11 +3,12 @@ where
 
 import Data.Set qualified as S
 import Data.Map.Strict qualified as M
-import Language.Futhark (VName(VName), baseTag, baseName)
+import Language.Futhark (VName)
 import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), unifies)
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), enclose)
+import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), enclose, prettyString)
+import Debug.Trace (trace, traceM)
 
 data Symbol =
     Var VName
@@ -33,6 +34,49 @@ data Symbol =
   | Symbol :|| Symbol
   | Recurrence
   deriving (Show, Eq)
+
+sop2Symbol :: Ord u => SoP u -> u
+sop2Symbol sop
+  | Just t <- justSym sop = t
+  | otherwise = error "sop2Symbol on something that is not a symbol"
+
+-- TODO Normalize only normalizes Boolean expressions.
+--      Use a Boolean representation that is normalized by construction.
+normalizeSymbol :: Symbol -> Symbol
+normalizeSymbol symbol = case toNNF symbol of
+    (Not x) -> toNNF (Not x)
+    (x :&& y) ->
+      case (x, y) of
+        (Bool True, b) -> b                       -- Identity.
+        (a, Bool True) -> a
+        (Bool False, _) -> Bool False             -- Annihilation.
+        (_, Bool False) -> Bool False
+        (a, b) | a == b -> a                      -- Idempotence.
+        (a, b) | a == toNNF (Not b) -> Bool False -- A contradiction.
+        (a, b) -> a :&& b
+    (x :|| y) -> do
+      case (x, y) of
+        (Bool False, b) -> b                      -- Identity.
+        (a, Bool False) -> a
+        (Bool True, _) -> Bool True               -- Annihilation.
+        (_, Bool True) -> Bool True
+        (a, b) | a == b -> a                      -- Idempotence.
+        (a, b) | a == toNNF (Not b) -> Bool True  -- A tautology.
+        (a, b) -> a :|| b
+    v -> v
+  where
+    toNNF (Not (Not x)) = x
+    toNNF (Not (Bool True)) = Bool False
+    toNNF (Not (Bool False)) = Bool True
+    toNNF (Not (x :|| y)) = toNNF (Not x) :&& toNNF (Not y)
+    toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
+    toNNF (Not (x :== y)) = x :/= y
+    toNNF (Not (x :< y)) = x :>= y
+    toNNF (Not (x :> y)) = x :<= y
+    toNNF (Not (x :/= y)) = x :== y
+    toNNF (Not (x :>= y)) = x :< y
+    toNNF (Not (x :<= y)) = x :> y
+    toNNF x = x
 
 -- This is only defined manually to not compare on the indexing variable in
 -- LinComb, which is subject to renaming. SoP terms are sorted, so renaming
@@ -180,7 +224,7 @@ instance Ord Symbol where
 instance Pretty Symbol where
   pretty symbol = case symbol of
     (Var x) -> pretty x
-    (Hole x) -> pretty (VName "h" (baseTag x))
+    (Hole x) -> pretty x
     (Idx x i) -> autoParens x <> brackets (pretty i)
     (LinComb i lb ub e) ->
       "∑"
@@ -252,11 +296,6 @@ instance Renameable Symbol where
 instance SubstitutionBuilder Symbol (SoP Symbol) where
   addSub vn e = M.insert vn (sym2SoP e)
 
-sop2Symbol :: Ord u => SoP u -> u
-sop2Symbol sop
-  | Just t <- justSym sop = t
-  | otherwise = error "sop2Symbol on something that is not a symbol"
-
 instance Replaceable Symbol (SoP Symbol) where
   -- TODO flatten
   rep s symbol = case symbol of
@@ -302,7 +341,7 @@ instance Replaceable Symbol (SoP Symbol) where
 -- that's relegated to the substitution here.
 -- NOTE 3.a irrelevant here given that we are post type checking?
 instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
-  -- unify_ _ x y | trace ("\nunify_ " <> unwords (map show [x, y])) False = undefined
+  unify_ _ x y | trace ("\nunify_ " <> unwords (map prettyString [x, y])) False = undefined
   -- TODO I don't think we want exchange since unify is used to check whether
   --      the holes (FVs) in the first argument can be substituted to be
   --      syntactically identical to the second argument---not the other way
@@ -316,10 +355,12 @@ instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
   -- 2.
   unify_ _ (Var x) t | Var x == t = pure mempty
   unify_ k (Hole x) t
-    | Hole x == t = fail "Holes are not allowed in the second argument!"
+    | Hole x == t = error "Holes are not allowed in the second argument!"
     | x >= k = fail "2.b.i"
     | x `S.member` fvs || any (>= k) fvs = fail "2.b.ii"
-    | otherwise = pure $ addSub x t mempty -- 2.b.iii. Variable elimination.
+    | otherwise = do
+      traceM ("addSub " <> prettyString x <> " -> " <> prettyString t)
+      pure $ addSub x t mempty -- 2.b.iii. Variable elimination.
     where
       fvs = fv t
   -- 3.b

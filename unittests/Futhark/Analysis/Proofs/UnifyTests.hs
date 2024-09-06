@@ -12,8 +12,7 @@ import qualified Data.Map as M
 import Futhark.Analysis.Proofs.IndexFn
 
 
-type Exp = SoP.SoP Symbol
-type Sub = Substitution Exp
+type Sub = Substitution (SoP.SoP Symbol)
 
 runTest :: IndexFnM (Maybe Sub) -> Maybe Sub
 runTest test = fst $ runIndexFnM test blankNameSource
@@ -24,66 +23,66 @@ getValue test = fst $ runIndexFnM test blankNameSource
 tests :: TestTree
 tests = testGroup "Proofs.Unify"
   [ testCase "Add" $
-      run (\(x,y,z,w,_,_,_,_) ->
+      run (\(x,y,z,w,_,_,_,_,_) ->
         unify (hole x .+. hole y) (name2SoP z .+. name2SoP w)
       ) @?= x2z_y2w
   , testCase "Multiply" $
-      run (\(x,y,z,w,_,_,_,_) ->
+      run (\(x,y,z,w,_,_,_,_,_) ->
         unify (hole x .*. hole y) (name2SoP z .*. name2SoP w)
       ) @?= x2z_y2w
   , testCase "First is scaled" $
-      run (\(x,y,z,w,_,_,_,_) ->
+      run (\(x,y,z,w,_,_,_,_,_) ->
         unify (scaleSoP 2 (hole x) .+. hole y) (name2SoP z .+. name2SoP w)
       ) @?= Nothing
   , testCase "Second is scaled" $
-      run (\(x,y,z,w,_,_,_,_) ->
+      run (\(x,y,z,w,_,_,_,_,_) ->
         unify (hole x .+. hole y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
       ) @?= Nothing
   , testCase "Both scaled, but permuted" $
-      run (\(x,y,z,w,_,_,_,_) ->
+      run (\(x,y,z,w,_,_,_,_,_) ->
         unify (scaleSoP 2 (hole x) .+. hole y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
       ) @?= x2w_y2z
   , testCase "Wrong operator" $
-      run (\(x,y,_,_,_,_,_,_) ->
+      run (\(x,y,_,_,_,_,_,_,_) ->
         unify (hole x .*. hole y) (name2SoP x .+. name2SoP y)
       ) @?= Nothing
   , testCase "One has constant" $
-      run (\(x,y,z,w,_,_,_,_) ->
+      run (\(x,y,z,w,_,_,_,_,_) ->
         unify (hole x .+. hole y .+. int2SoP 2) (name2SoP z .+. name2SoP w)
       ) @?= Nothing
   , testCase "Different constants" $
-      run (\(x,y,z,w,_,_,_,_) ->
+      run (\(x,y,z,w,_,_,_,_,_) ->
         unify (hole x .+. hole y .+. int2SoP 1) (name2SoP z .+. name2SoP w .+. int2SoP 2)
       ) @?= Nothing
   , testCase "Same constant" $
-      run (\(x,y,z,w,_,_,_,_) ->
+      run (\(x,y,z,w,_,_,_,_,_) ->
         unify (hole x .+. hole y .+. int2SoP 2) (name2SoP z .+. name2SoP w .+. int2SoP 2)
       ) @?= x2z_y2w
   -- Indexing.
   , testCase "Indexing" $
-      run (\(x,y,z,w,_,_,_,_) ->
+      run (\(x,y,z,w,_,_,_,_,_) ->
         unify (Idx (Hole x) (hole y .+. int2SoP 1)) (Idx (Var z) (name2SoP w .+. int2SoP 1))
       ) @?= x2z_y2w
   , testCase "Indexing different constant" $
-      run (\(x,y,z,w,_,_,_,_) ->
+      run (\(x,y,z,w,_,_,_,_,_) ->
         unify (Idx (Hole x) (hole y .+. int2SoP 1)) (Idx (Var z) (name2SoP w .+. int2SoP 2))
       ) @?= Nothing
   -- Substituting with quantifiers.
   , testCase "Bound names are not substituted" $
-      run (\(x,y,z,w,a,b,c,d) ->
+      run (\(x,y,z,w,a,b,c,d,_) ->
         unify (LinComb x (hole y) (hole z) (Hole w)) (LinComb a (name2SoP b) (name2SoP c) (Var d))
       ) @?= y2b_z2c_w2d
   , testCase "Bound names are renamed" $
-      run (\(x,_,_,_,a,b,c,d) ->
+      run (\(x,_,_,_,a,b,c,d,_) ->
         unify (Hole x) (LinComb a (name2SoP b) (name2SoP c) (Var d))
       ) @?= let renamed_lin_comb = getValue $ do
-                  (_,_,_,_,a,b,c,d) <- varsM
+                  (_,_,_,_,a,b,c,d,_) <- varsM
                   _ <- newVName "k" -- Simulate "k" introduced by Unify.
                   rename $ sym2SoP (LinComb a (name2SoP b) (name2SoP c) (Var d))
             in Just (M.singleton x renamed_lin_comb)
   , testCase "These shouldn't unify because w is different from a!" $
       -- Pattern should require `Idx (Var c) (Var a)`.
-      run (\(x,y,z,w,a,b,c,d) ->
+      run (\(x,y,z,w,a,b,c,d,_) ->
         unify
           (Idx (Hole z) (hole x) ~+~ LinComb d (hole x) (hole y) (Hole z))
           (Idx (Var c) (name2SoP w) ~+~ LinComb d (name2SoP a) (name2SoP b) (Var c))
@@ -93,6 +92,22 @@ tests = testGroup "Proofs.Unify"
   --     run_xyzw (\(x,y,z,_) ->
   --       unify (name2SoP x .*. name2SoP y .*. name2SoP w) (name2SoP z .*. name2SoP w .*. name2SoP w)
   --     ) @?= x2z_y2w
+  -- Index functions.
+  , testCase "Iota index functions" $
+      -- Pattern should require `Idx (Var c) (Var a)`.
+      run (\(x,y,z,w,a,b,c,d,i) ->
+        unify
+          (IndexFn {
+            iterator = Forall x (Iota (hole y)),
+            body = cases [(name2SoP x :== int2SoP 0, hole z),
+                          (name2SoP x :/= int2SoP 0, hole w)]
+          })
+          (IndexFn {
+            iterator = Forall a (Iota (name2SoP b)),
+            body = cases [(name2SoP a :== int2SoP 0, name2SoP c),
+                          (name2SoP a :/= int2SoP 0, name2SoP d)]
+          })
+      ) @?= (M.singleton x (name2SoP a)  <>) <$> y2b_z2c_w2d
   ]
   where
     name2SoP = sym2SoP . Var
@@ -100,10 +115,11 @@ tests = testGroup "Proofs.Unify"
     a ~+~ b = sym2SoP a .+. sym2SoP b
 
     varsM =
-      (,,,,,,,)
-        <$> newVName "x" <*> newVName "y" <*> newVName "z" <*> newVName "w"
+      (,,,,,,,,)
+        <$> newVName "h" <*> newVName "h" <*> newVName "h" <*> newVName "h"
         <*> newVName "a" <*> newVName "b" <*> newVName "c" <*> newVName "d"
-    (x,y,z,w,_,b,c,d) = getValue varsM
+        <*> newVName "i"
+    (x,y,z,w,a,b,c,d,i) = getValue varsM
 
     x2z_y2w = Just $ M.fromList [(x, name2SoP z), (y, name2SoP w)]
     x2w_y2z = Just $ M.fromList [(x, name2SoP w), (y, name2SoP z)]

@@ -4,16 +4,17 @@ where
 import Futhark.Analysis.Proofs.Unify
 import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.), sopToList, sopFromList, numTerms)
 import Futhark.MonadFreshNames
-import Futhark.Analysis.Proofs.Symbol (Symbol(..))
+import Futhark.Analysis.Proofs.Symbol (Symbol(..), normalizeSymbol)
 import Control.Monad (foldM, msum, (<=<))
 import Futhark.SoP.FourierMotzkin (($<=$))
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..), repCases, subIndexFn, repIteratorInBody)
 import Data.List (subsequences, (\\))
 import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), astMap)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
 import Futhark.SoP.Monad (substEquivs)
 import Data.Functor ((<&>))
 import Language.Futhark (VName)
+import qualified Data.Map as M
 
 data Rule a b m = Rule {
     name :: String,
@@ -34,6 +35,14 @@ sVar = sym2SoP . Var
 hole :: VName -> SoP Symbol
 hole = sym2SoP . Hole
 
+match :: Unify u v m => Rule u v m -> u -> m (Maybe (Substitution v))
+match rule x = unify (from rule) x >>= checkSideCondition
+  where
+    checkSideCondition Nothing = pure Nothing
+    checkSideCondition (Just s) = do
+      b <- sideCondition rule s
+      pure $ if b then Just s else Nothing
+
 class Monad m => Rewritable u m where
   rewrite :: u -> m u
 
@@ -52,74 +61,25 @@ instance Rewritable Symbol IndexFnM where
         { mapOnSoP = rewrite,
           mapOnSymbol = \x -> do
             rulesSymbol
-              >>= foldM (flip matchSymbol) (normalize x)
-              >>= refineSymbol . normalize
-              <&> normalize
+              >>= foldM (flip match_) (normalizeSymbol x)
+              >>= refineSymbol . normalizeSymbol
+              <&> normalizeSymbol
         }
 
-      -- TODO Normalize only normalizes Boolean expressions.
-      --      Use a Boolean representation that is normalized by construction.
-      normalize :: Symbol -> Symbol
-      normalize symbol = case toNNF symbol of
-          (Not x) -> toNNF (Not x)
-          (x :&& y) ->
-            case (x, y) of
-              (Bool True, b) -> b                       -- Identity.
-              (a, Bool True) -> a
-              (Bool False, _) -> Bool False             -- Annihilation.
-              (_, Bool False) -> Bool False
-              (a, b) | a == b -> a                      -- Idempotence.
-              (a, b) | a == toNNF (Not b) -> Bool False -- A contradiction.
-              (a, b) -> a :&& b
-          (x :|| y) -> do
-            case (x, y) of
-              (Bool False, b) -> b                      -- Identity.
-              (a, Bool False) -> a
-              (Bool True, _) -> Bool True               -- Annihilation.
-              (_, Bool True) -> Bool True
-              (a, b) | a == b -> a                      -- Idempotence.
-              (a, b) | a == toNNF (Not b) -> Bool True  -- A tautology.
-              (a, b) -> a :|| b
-          v -> v
+      match_ rule symbol = do
+          s :: Maybe (Substitution (SoP Symbol)) <- case from rule of
+            x :&& y -> matchCommutativeRule (:&&) x y
+            x :|| y -> matchCommutativeRule (:||) x y
+            _ -> match rule symbol
+          maybe (pure symbol) (to rule) s
+          where
+            matchCommutativeRule op x y =
+              msum <$> mapM (match rule) [x `op` y, y `op` x]
 
-      toNNF :: Symbol -> Symbol
-      toNNF (Not (Not x)) = x
-      toNNF (Not (Bool True)) = Bool False
-      toNNF (Not (Bool False)) = Bool True
-      toNNF (Not (x :|| y)) = toNNF (Not x) :&& toNNF (Not y)
-      toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
-      toNNF (Not (x :== y)) = x :/= y
-      toNNF (Not (x :< y)) = x :>= y
-      toNNF (Not (x :> y)) = x :<= y
-      toNNF (Not (x :/= y)) = x :== y
-      toNNF (Not (x :>= y)) = x :< y
-      toNNF (Not (x :<= y)) = x :> y
-      toNNF x = x
-
-
-match_ :: Unify u v m => Rule u v m -> u -> m (Maybe (Substitution v))
-match_ rule x = unify (from rule) x >>= checkSideCondition
-  where
-    checkSideCondition Nothing = pure Nothing
-    checkSideCondition (Just s) = do
-      b <- sideCondition rule s
-      pure $ if b then Just s else Nothing
-
--- I use this for debugging.
--- matchTRACE :: (Pretty u, Unify u (SoP u) m, Replaceable u (SoP u), Ord u) => Rule (SoP u) (SoP u) m -> SoP u -> m (Maybe (Substitution (SoP u)))
--- matchLOL rule x = do
---   res <- unify (from rule) x >>= checkSideCondition
---   case res of
---     Just r -> do
---       traceM ("\nmatch_\n  " <> prettyString (from rule) <> "\n  " <> prettyString x)
---       traceM (prettyString r)
---       pure res
---     Nothing -> pure Nothing
---   where
---     checkSideCondition Nothing = pure Nothing
---     checkSideCondition (Just s) = do
---       b <- sideCondition rule s
---       pure $ if b then Just s else Nothing
+instance Rewritable IndexFn IndexFnM where
+  rewrite indexfn = rulesIndexFn >>= foldM (flip match_) indexfn
+    where
+      match_ rule fn = match rule fn >>= maybe (pure indexfn) (to rule)
 
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
 -- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
@@ -131,7 +91,7 @@ matchSoP rule sop
   | numTerms (from rule) <= numTerms sop = do
     let (subterms, contexts) = unzip . combinations $ sopToList sop
     -- Get first valid subterm substitution. Recursively match context.
-    subs <- mapM (match_ rule . sopFromList) subterms
+    subs <- mapM (match rule . sopFromList) subterms
     case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
       Just (s, ctx) -> (.+.) <$> matchSoP rule (sopFromList ctx) <*> to rule s
       Nothing -> pure sop
@@ -140,17 +100,6 @@ matchSoP rule sop
     -- Get all (k-subterms, remaining subterms).
     k = numTerms (from rule)
     combinations xs = [(s, xs \\ s) | s <- subsequences xs, length s == k]
-
-matchSymbol :: Rule Symbol (SoP Symbol) IndexFnM -> Symbol -> IndexFnM Symbol
-matchSymbol rule symbol = do
-    s :: Maybe (Substitution (SoP Symbol)) <- case from rule of
-      x :&& y -> matchCommutativeRule (:&&) x y
-      x :|| y -> matchCommutativeRule (:||) x y
-      _ -> match_ rule symbol
-    maybe (pure symbol) (to rule) s
-    where
-      matchCommutativeRule op x y =
-        msum <$> mapM (match_ rule) [x `op` y, y `op` x]
 
 rulesSoP :: IndexFnM [Rule (SoP Symbol) (SoP Symbol) IndexFnM]
 rulesSoP = do
@@ -239,3 +188,95 @@ rulesSymbol = do
     --     , to = \_ -> pure $ Bool True
     --     }
     -- ]
+
+rulesIndexFn :: IndexFnM [Rule IndexFn (SoP Symbol) IndexFnM]
+rulesIndexFn = do
+  i <- newVName "i"
+  k <- newVName "k"
+  n <- newVName "n"
+  m <- newVName "m"
+  b <- newVName "b"
+  h1 <- newVName "h"
+  pure
+    [ Rule
+        { name = "Rule 5 (carry)",
+          -- y = ∀i ∈ [0, 1, ..., n - 1] .
+          --    | i == b => e1
+          --    | i /= b => y[i-1]
+          -- _______________________________________________________________
+          -- y = ∀i ∈ [0, 1, ..., n - 1] . {i->b}e1
+          from =
+            IndexFn {
+              iterator = Forall i (Iota (hole n)),
+              body = cases [(hole i :== int 0, hole h1),
+                            (hole i :/= int 0, sym2SoP Recurrence)]
+            },
+          -- TODO add bound names (i) are not substituted test for Unify
+          -- on index fns
+          -- Indexing variable i replaced by 0 in e1.
+          to = \s -> repIteratorInBody (int 0) <$> (subIndexFn s $
+            IndexFn {
+              iterator = Forall i (Iota (hole n)),
+              body = cases [(Bool True, hole h1)]
+            }),
+          sideCondition = vacuous
+        }
+    -- , Rule
+    --     { name = "Rule 5 (carry)",
+    --       -- y = ∀i ∈ ⊎k=iota m [b, b+1, ..., b + n - 1] .
+    --       --    | i == b => e1
+    --       --    | i /= b => y[i-1]
+    --       -- _______________________________________________________________
+    --       -- y = ∀i ∈ ⊎k=iota m [b, b+1, ..., b + n - 1] . {i->b}e1
+    --       --
+    --       -- Note that b may depend on k.
+    --       from =
+    --         IndexFn {
+    --           iterator = Forall i (Cat k (hole m) (hole b)),
+    --           body = cases [(hole i :== int 0, hole h1),
+    --                         (hole i :/= int 0, sym2SoP Recurrence)]
+    --         },
+    --       -- Indexing variable i replaced by b in e1.
+    --       to = \s -> repIteratorInBody <$> sub s (hole b) <*> (subIndexFn s $
+    --         IndexFn {
+    --           iterator = Forall i (Cat k (hole m) (hole b)),
+    --           body = cases [(Bool True, hole h1)]
+    --         }),
+    --       sideCondition = vacuous
+    --     }
+    ]
+    -- rewriteCarry (IndexFn it@(Forall i'' dom) (Cases cases))
+    --   | (Var i :== b, c) :| [(Var i' :/= b', Recurrence)] <- cases,
+    --     i == i',
+    --     i == i'',
+    --     b == b',
+    --     b == domainSegStart dom,
+    --     i `notMember` freeIn c = do
+    --       tell ["Using carry rule"]
+    --       pure $ IndexFn it (toCases c)
+
+    -- TODO Simplify Rule 3 is maybe a good example of something
+    --      where exact matching is easier than unification
+    --      (that is, unification will match any index function here anyway).
+    -- [ Rule
+    --     { name = "Simplify rule 3",
+    --       from = IndexFn (Hole iter) (hole h1),
+    --       to = undefined
+    --     }
+    -- simplifyRule3 :: IndexFn -> IndexFnM IndexFn
+    -- simplifyRule3 v@(IndexFn _ (Cases ((Bool True, _) NE.:| []))) = pure v
+    -- simplifyRule3 (IndexFn it (Cases cases))
+    --   | Just sops <- mapM (justConstant . snd) cases = do
+    --     let preds = NE.map fst cases
+    --         sumOfIndicators =
+    --           SoP.normalize . foldl1 (.+.) . NE.toList $
+    --             NE.zipWith
+    --               (\p x -> sym2SoP (Indicator p) .*. int2SoP x)
+    --               preds
+    --               sops
+    --     tell ["Using simplification rule: integer-valued cases"]
+    --     pure $ IndexFn it $ Cases (NE.singleton (Bool True, SoP2 sumOfIndicators))
+    --   where
+    --     justConstant (SoP2 sop) = SoP.justConstant sop
+    --     justConstant _ = Nothing
+
