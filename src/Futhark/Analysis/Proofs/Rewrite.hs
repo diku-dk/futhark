@@ -78,7 +78,7 @@ instance Rewritable Symbol IndexFnM where
 instance Rewritable IndexFn IndexFnM where
   rewrite indexfn = rulesIndexFn >>= foldM (flip match_) indexfn
     where
-      match_ rule fn = match rule fn >>= maybe (pure indexfn) (to rule)
+      match_ rule fn = match rule fn >>= maybe (pure fn) (to rule)
 
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
 -- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
@@ -220,29 +220,29 @@ rulesIndexFn = do
             }),
           sideCondition = vacuous
         }
-    -- , Rule
-    --     { name = "Rule 5 (carry)",
-    --       -- y = ∀i ∈ ⊎k=iota m [b, b+1, ..., b + n - 1] .
-    --       --    | i == b => e1
-    --       --    | i /= b => y[i-1]
-    --       -- _______________________________________________________________
-    --       -- y = ∀i ∈ ⊎k=iota m [b, b+1, ..., b + n - 1] . {i->b}e1
-    --       --
-    --       -- Note that b may depend on k.
-    --       from =
-    --         IndexFn {
-    --           iterator = Forall i (Cat k (hole m) (hole b)),
-    --           body = cases [(hole i :== int 0, hole h1),
-    --                         (hole i :/= int 0, sym2SoP Recurrence)]
-    --         },
-    --       -- Indexing variable i replaced by b in e1.
-    --       to = \s -> repIteratorInBody <$> sub s (hole b) <*> (subIndexFn s $
-    --         IndexFn {
-    --           iterator = Forall i (Cat k (hole m) (hole b)),
-    --           body = cases [(Bool True, hole h1)]
-    --         }),
-    --       sideCondition = vacuous
-    --     }
+    , Rule
+        { name = "Rule 5 (carry)",
+          -- y = ∀i ∈ ⊎k=iota m [b, b+1, ..., b + n - 1] .
+          --    | i == b => e1
+          --    | i /= b => y[i-1]
+          -- _______________________________________________________________
+          -- y = ∀i ∈ ⊎k=iota m [b, b+1, ..., b + n - 1] . {i->b}e1
+          --
+          -- Note that b may depend on k.
+          from =
+            IndexFn {
+              iterator = Forall i (Cat k (hole m) (hole b)),
+              body = cases [(hole i :== int 0, hole h1),
+                            (hole i :/= int 0, sym2SoP Recurrence)]
+            },
+          -- Indexing variable i replaced by b in e1.
+          to = \s -> repIteratorInBody <$> sub s (hole b) <*> (subIndexFn s $
+            IndexFn {
+              iterator = Forall i (Cat k (hole m) (hole b)),
+              body = cases [(Bool True, hole h1)]
+            }),
+          sideCondition = vacuous
+        }
     ]
     -- rewriteCarry (IndexFn it@(Forall i'' dom) (Cases cases))
     --   | (Var i :== b, c) :| [(Var i' :/= b', Recurrence)] <- cases,
