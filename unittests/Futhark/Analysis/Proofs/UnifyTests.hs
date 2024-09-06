@@ -25,75 +25,69 @@ tests :: TestTree
 tests = testGroup "Proofs.Unify"
   [ testCase "Add" $
       run (\(x,y,z,w,_,_,_,_) ->
-        unify (name2SoP x .+. name2SoP y) (name2SoP z .+. name2SoP w)
+        unify (hole x .+. hole y) (name2SoP z .+. name2SoP w)
       ) @?= x2z_y2w
   , testCase "Multiply" $
       run (\(x,y,z,w,_,_,_,_) ->
-        unify (name2SoP x .*. name2SoP y) (name2SoP z .*. name2SoP w)
+        unify (hole x .*. hole y) (name2SoP z .*. name2SoP w)
       ) @?= x2z_y2w
   , testCase "First is scaled" $
       run (\(x,y,z,w,_,_,_,_) ->
-        unify (scaleSoP 2 (name2SoP x) .+. name2SoP y) (name2SoP z .+. name2SoP w)
+        unify (scaleSoP 2 (hole x) .+. hole y) (name2SoP z .+. name2SoP w)
       ) @?= Nothing
   , testCase "Second is scaled" $
       run (\(x,y,z,w,_,_,_,_) ->
-        unify (name2SoP x .+. name2SoP y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
+        unify (hole x .+. hole y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
       ) @?= Nothing
   , testCase "Both scaled, but permuted" $
       run (\(x,y,z,w,_,_,_,_) ->
-        unify (scaleSoP 2 (name2SoP x) .+. name2SoP y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
+        unify (scaleSoP 2 (hole x) .+. hole y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
       ) @?= x2w_y2z
   , testCase "Wrong operator" $
       run (\(x,y,_,_,_,_,_,_) ->
-        unify (name2SoP x .*. name2SoP y) (name2SoP x .+. name2SoP y)
+        unify (hole x .*. hole y) (name2SoP x .+. name2SoP y)
       ) @?= Nothing
   , testCase "One has constant" $
       run (\(x,y,z,w,_,_,_,_) ->
-        unify (name2SoP x .+. name2SoP y .+. int2SoP 2) (name2SoP z .+. name2SoP w)
+        unify (hole x .+. hole y .+. int2SoP 2) (name2SoP z .+. name2SoP w)
       ) @?= Nothing
   , testCase "Different constants" $
       run (\(x,y,z,w,_,_,_,_) ->
-        unify (name2SoP x .+. name2SoP y .+. int2SoP 1) (name2SoP z .+. name2SoP w .+. int2SoP 2)
+        unify (hole x .+. hole y .+. int2SoP 1) (name2SoP z .+. name2SoP w .+. int2SoP 2)
       ) @?= Nothing
   , testCase "Same constant" $
       run (\(x,y,z,w,_,_,_,_) ->
-        unify (name2SoP x .+. name2SoP y .+. int2SoP 2) (name2SoP z .+. name2SoP w .+. int2SoP 2)
+        unify (hole x .+. hole y .+. int2SoP 2) (name2SoP z .+. name2SoP w .+. int2SoP 2)
       ) @?= x2z_y2w
-  -- Empty substitutions (e.g., simply permuting symbols or terms).
-  , testCase "Permuted terms" $
-      run (\(x,y,_,_,_,_,_,_) ->
-        unify (name2SoP x .+. name2SoP y) (name2SoP y .+. name2SoP x)
-      ) @?= Just mempty
-  , testCase "Permuted symbols" $
-      run (\(x,y,z,_,_,_,_,_) ->
-        unify (name2SoP x .*. name2SoP y .*. name2SoP z) (name2SoP z .*. name2SoP y .*. name2SoP x)
-      ) @?= Just mempty
   -- Indexing.
   , testCase "Indexing" $
       run (\(x,y,z,w,_,_,_,_) ->
-        unify (Idx (Var x) (name2SoP y .+. int2SoP 1)) (Idx (Var z) (name2SoP w .+. int2SoP 1))
+        unify (Idx (Hole x) (hole y .+. int2SoP 1)) (Idx (Var z) (name2SoP w .+. int2SoP 1))
       ) @?= x2z_y2w
   , testCase "Indexing different constant" $
       run (\(x,y,z,w,_,_,_,_) ->
-        unify (Idx (Var x) (name2SoP y .+. int2SoP 1)) (Idx (Var z) (name2SoP w .+. int2SoP 2))
+        unify (Idx (Hole x) (hole y .+. int2SoP 1)) (Idx (Var z) (name2SoP w .+. int2SoP 2))
       ) @?= Nothing
   -- Substituting with quantifiers.
-  , testCase "LinComb empty" $
-      run (\(x,y,z,w,_,_,_,_) ->
-        unify (LinComb x (name2SoP y) (name2SoP z) (Var w)) (LinComb x (name2SoP y) (name2SoP z) (Var w))
-      ) @?= Just mempty
   , testCase "Bound names are not substituted" $
       run (\(x,y,z,w,a,b,c,d) ->
-        unify (LinComb x (name2SoP y) (name2SoP z) (Var w)) (LinComb a (name2SoP b) (name2SoP c) (Var d))
+        unify (LinComb x (hole y) (hole z) (Hole w)) (LinComb a (name2SoP b) (name2SoP c) (Var d))
       ) @?= y2b_z2c_w2d
   , testCase "Bound names are renamed" $
       run (\(x,_,_,_,a,b,c,d) ->
-        unify (Var x) (LinComb a (name2SoP b) (name2SoP c) (Var d))
+        unify (Hole x) (LinComb a (name2SoP b) (name2SoP c) (Var d))
       ) @?= let renamed_lin_comb = getValue $ do
                   (_,_,_,_,a,b,c,d) <- varsM
                   _ <- newVName "k" -- Simulate "k" introduced by Unify.
                   rename $ sym2SoP (LinComb a (name2SoP b) (name2SoP c) (Var d))
             in Just (M.singleton x renamed_lin_comb)
+  , testCase "These shouldn't unify because w is different from a!" $
+      -- Pattern should require `Idx (Var c) (Var a)`.
+      run (\(x,y,z,w,a,b,c,d) ->
+        unify
+          (Idx (Hole z) (hole x) ~+~ LinComb d (hole x) (hole y) (Hole z))
+          (Idx (Var c) (name2SoP w) ~+~ LinComb d (name2SoP a) (name2SoP b) (Var c))
+      ) @?= Nothing
   -- TODO This test shouldn't be allowed since we assume VNames in first argument are holes?
   -- , testCase "Substitute only some symbols" $
   --     run_xyzw (\(x,y,z,_) ->
@@ -102,6 +96,8 @@ tests = testGroup "Proofs.Unify"
   ]
   where
     name2SoP = sym2SoP . Var
+    hole = sym2SoP . Hole
+    a ~+~ b = sym2SoP a .+. sym2SoP b
 
     varsM =
       (,,,,,,,)

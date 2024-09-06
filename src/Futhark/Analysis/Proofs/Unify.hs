@@ -8,7 +8,7 @@ where
 
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, mapSymSoPM, sopToLists, Term, addSoPs, zeroSoP, int2SoP)
+import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, sopToLists, Term, addSoPs, zeroSoP, int2SoP, sopFromList)
 import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark (VName (VName))
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromString, putNameSource)
@@ -35,7 +35,7 @@ type Substitution v = M.Map VName v
 instance Pretty VName where
   pretty (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
     where
-      subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
+      subscript = flip lookup $ zip "-0123456789" "₋₀₁₂₃₄₅₆₇₈₉"
 
 instance Pretty v => Pretty (Substitution v) where
   pretty = braces . commastack . map (\(k,v) -> pretty k <> " : " <> pretty v) . M.toList
@@ -43,6 +43,11 @@ instance Pretty v => Pretty (Substitution v) where
 class Replaceable u v where
   -- Implements the replacement operation from Sieg and Kaufmann.
   rep :: Substitution v -> u -> v
+
+sub :: ( MonadFreshNames m
+       , Renameable u
+       , Replaceable u v) => Substitution v -> u -> m v
+sub s x = rep s <$> rename x
 
 class SubstitutionBuilder u v where
   addSub :: VName -> u -> Substitution v -> Substitution v
@@ -70,7 +75,7 @@ instance (Renameable u, Ord u) => Renameable (Term u, Integer) where
   rename_ tau (x, c) = (, c) . toTerm <$> mapM (rename_ tau) (termToList x)
 
 instance (Ord u, Renameable u) => Renameable (SoP u) where
-  rename_ tau = mapSymSoPM (rename_ tau)
+  rename_ tau = fmap sopFromList . mapM (rename_ tau) . sopToList
 
 instance FreeVariables VName where
   fv = S.singleton

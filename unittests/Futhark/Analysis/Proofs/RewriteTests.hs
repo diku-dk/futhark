@@ -9,11 +9,10 @@ import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
 import Futhark.Analysis.Proofs.Rewrite
 import Futhark.SoP.SoP (sym2SoP, (.+.), int2SoP, (.-.))
-import Futhark.SoP.Monad (addRange)
+import Futhark.SoP.Monad (addEquiv, addRange)
 import qualified Data.Set as S
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.SoP.Monad (addEquiv)
 
 
 runTest :: IndexFnM a -> a
@@ -57,8 +56,8 @@ tests = testGroup "Proofs.Rewrite"
       ) @??= (int 1 .+. sym2SoP (LinComb w (sop y) (sop z) (Var x)))
   , testCase "Rule matches on all relevant subterms" $
       run (\(x,y,z,w,a,b,c,d) ->
-        rewrite (int 1 .+. Idx (Var x) (sop y) ~+~ LinComb w (sop y .+. int 1) (sop z) (Var x) .+. Idx (Var a) (sop b) ~+~ LinComb d (sop b .+. int 1) (sop c) (Var a))
-      ) @??= (int 1 .+. sym2SoP (LinComb w (sop y) (sop z) (Var x)) .+. sym2SoP (LinComb d (sop b) (sop c) (Var a)))
+        rewrite (int 1 .+. Idx (Var x) (hole y) ~+~ LinComb w (hole y .+. int 1) (hole z) (Var x) .+. Idx (Var a) (hole b) ~+~ LinComb d (hole b .+. int 1) (hole c) (Var a))
+      ) @??= (int 1 .+. LinComb w (sop y) (sop z) (Var x) ~+~ LinComb d (sop b) (sop c) (Var a))
   , testCase "Match symbols in SoP" $
       run (\(x,y,z,_,_,_,_,_) ->
         rewrite (Indicator (Bool True :&& (sop x :<= sop y)) ~+~ Var z)
@@ -109,12 +108,7 @@ tests = testGroup "Proofs.Rewrite"
         rewrite (Indicator (Bool True :&& (sop x :<= sop y)))
       ) @??= Indicator (sop x :<= sop y)
   -- Refine tests.
- -- , testCase "Equivalence (1)" $
- --      run (\(x,_,_,_,_,_,_,_) -> do
- --        addEquiv (Var x) (int 1)
- --        rewrite (Var x)
- --      ) @??= int 1
-  , testCase "Equivalence (2)" $
+  , testCase "Equivalence (1)" $
       run (\(x,_,_,_,_,_,_,_) -> do
         addEquiv (Var x) (int 1)
         rewrite (sop x .+. int 1)
@@ -140,6 +134,7 @@ tests = testGroup "Proofs.Rewrite"
   where
     int = int2SoP
     sop = sym2SoP . Var
+    hole = sym2SoP . Var -- sym2SoP . Hole
     a ~+~ b = sym2SoP a .+. sym2SoP b
     a ~-~ b = sym2SoP a .-. sym2SoP b
 

@@ -13,6 +13,7 @@ import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), astMap)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
 import Futhark.SoP.Monad (substEquivs)
 import Data.Functor ((<&>))
+import Language.Futhark (VName)
 
 data Rule a b m = Rule {
     name :: String,
@@ -23,6 +24,15 @@ data Rule a b m = Rule {
 
 vacuous :: Monad m => b -> m Bool
 vacuous = const (pure True)
+
+int :: Integer -> SoP Symbol
+int = int2SoP
+
+sVar :: VName -> SoP Symbol
+sVar = sym2SoP . Var
+
+hole :: VName -> SoP Symbol
+hole = sym2SoP . Hole
 
 class Monad m => Rewritable u m where
   rewrite :: u -> m u
@@ -95,6 +105,22 @@ match_ rule x = unify (from rule) x >>= checkSideCondition
       b <- sideCondition rule s
       pure $ if b then Just s else Nothing
 
+-- I use this for debugging.
+-- matchTRACE :: (Pretty u, Unify u (SoP u) m, Replaceable u (SoP u), Ord u) => Rule (SoP u) (SoP u) m -> SoP u -> m (Maybe (Substitution (SoP u)))
+-- matchLOL rule x = do
+--   res <- unify (from rule) x >>= checkSideCondition
+--   case res of
+--     Just r -> do
+--       traceM ("\nmatch_\n  " <> prettyString (from rule) <> "\n  " <> prettyString x)
+--       traceM (prettyString r)
+--       pure res
+--     Nothing -> pure Nothing
+--   where
+--     checkSideCondition Nothing = pure Nothing
+--     checkSideCondition (Just s) = do
+--       b <- sideCondition rule s
+--       pure $ if b then Just s else Nothing
+
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
 -- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
 -- it matches `a + a` and `b + b` and returns `2a + 2b + c`.
@@ -107,7 +133,7 @@ matchSoP rule sop
     -- Get first valid subterm substitution. Recursively match context.
     subs <- mapM (match_ rule . sopFromList) subterms
     case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
-      Just (sub, ctx) -> (.+.) <$> matchSoP rule (sopFromList ctx) <*> to rule sub
+      Just (s, ctx) -> (.+.) <$> matchSoP rule (sopFromList ctx) <*> to rule s
       Nothing -> pure sop
   | otherwise = pure sop
   where
@@ -137,53 +163,53 @@ rulesSoP = do
   pure
     [ Rule
         { name = "Extend sum lower bound (1)"
-        , from = LinComb i (sop h1 .+. int 1) (sop h2) (Var h3)
-                   ~+~ Idx (Var h3) (sop h1)
-        , to = \s -> pure . rep s $ LinComb i (sop h1) (sop h2) (Var h3)
+        , from = LinComb i (hole h1 .+. int 1) (hole h2) (Hole h3)
+                   ~+~ Idx (Hole h3) (hole h1)
+        , to = \s -> sub s $ LinComb i (hole h1) (hole h2) (Hole h3)
         , sideCondition = vacuous
         }
     , Rule
         { name = "Extend sum lower bound (2)"
-        , from = LinComb i (sop h1) (sop h2) (Var h3)
-                   ~+~ Idx (Var h3) (sop h1 .-. int 1)
-        , to = \s -> pure . rep s $
-                  LinComb i (sop h1 .-. int 1) (sop h2) (Var h3)
+        , from = LinComb i (hole h1) (hole h2) (Hole h3)
+                   ~+~ Idx (Hole h3) (hole h1 .-. int 1)
+        , to = \s -> sub s $
+                  LinComb i (hole h1 .-. int 1) (hole h2) (Hole h3)
         , sideCondition = vacuous
         }
     , Rule
         { name = "Extend sum upper bound (1)"
-        , from = LinComb i (sop h1) (sop h2 .-. int 1) (Var h3)
-                   ~+~ Idx (Var h3) (sop h2)
-        , to = \s -> pure . rep s $ LinComb i (sop h1) (sop h2) (Var h3)
+        , from = LinComb i (hole h1) (hole h2 .-. int 1) (Hole h3)
+                   ~+~ Idx (Hole h3) (hole h2)
+        , to = \s -> sub s $ LinComb i (hole h1) (hole h2) (Hole h3)
         , sideCondition = vacuous
         }
     , Rule
         { name = "Extend sum upper bound (2)"
-        , from = LinComb i (sop h1) (sop h2) (Var h3)
-                   ~+~ Idx (Var h3) (sop h2 .+. int 1)
-        , to = \s -> pure . rep s $
-                  LinComb i (sop h1) (sop h2 .+. int 1) (Var h3)
+        , from = LinComb i (hole h1) (hole h2) (Hole h3)
+                   ~+~ Idx (Hole h3) (hole h2 .+. int 1)
+        , to = \s -> sub s $
+                  LinComb i (hole h1) (hole h2 .+. int 1) (Hole h3)
         , sideCondition = vacuous
         }
     , Rule
         { name = "Merge sum-subtractation"
-        , from = LinComb i (sop h1) (sop x1) (Var h2)
-                   ~-~ LinComb i (sop h1) (sop y1) (Var h2)
+        , from = LinComb i (hole h1) (hole x1) (Hole h2)
+                   ~-~ LinComb i (hole h1) (hole y1) (Hole h2)
         , to = \s ->
-           pure . rep s $ LinComb i (sop y1 .+. int 1) (sop x1) (Var h2)
-        , sideCondition = \s ->
-            rep s (sop y1) $<=$ rep s (sop x1)
+           sub s $ LinComb i (hole y1 .+. int 1) (hole x1) (Hole h2)
+        , sideCondition = \s -> do
+            y' <- sub s (Hole y1)
+            x' <- sub s (Hole x1)
+            rep s y' $<=$ rep s x'
         }
     , Rule
         { name = "[[¬x]] => 1 - [[x]]"
-        , from = sym2SoP $ Indicator (Not (Var h1))
-        , to = \s -> pure . rep s $ int 1 .-. sym2SoP (Indicator (Var h1))
+        , from = sym2SoP $ Indicator (Not (Hole h1))
+        , to = \s -> sub s $ int 1 .-. sym2SoP (Indicator (Hole h1))
         , sideCondition = vacuous
         }
     ]
   where
-    int = int2SoP
-    sop = sym2SoP . Var
     a ~+~ b = sym2SoP a .+. sym2SoP b
     a ~-~ b = sym2SoP a .-. sym2SoP b
 

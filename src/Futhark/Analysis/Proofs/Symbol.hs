@@ -3,7 +3,7 @@ where
 
 import Data.Set qualified as S
 import Data.Map.Strict qualified as M
-import Language.Futhark (VName)
+import Language.Futhark (VName(VName), baseTag, baseName)
 import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), unifies)
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
@@ -11,6 +11,7 @@ import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), enclose)
 
 data Symbol =
     Var VName
+  | Hole VName
   | Idx
       Symbol         -- array
       (SoP Symbol)   -- index
@@ -36,12 +37,13 @@ data Symbol =
 instance Pretty Symbol where
   pretty symbol = case symbol of
     (Var x) -> pretty x
+    (Hole x) -> pretty (VName "h" (baseTag x))
     (Idx x i) -> autoParens x <> brackets (pretty i)
     (LinComb i lb ub e) ->
       "∑"
         <> pretty i <> "∈"
         <> parens (pretty lb <+> ".." <+> pretty ub)
-        <> autoParens e
+        <> " " <> autoParens e
     Indicator p -> iversonbrackets (pretty p)
     Bool x -> pretty x
     Not x -> "¬" <> autoParens x
@@ -56,6 +58,7 @@ instance Pretty Symbol where
     Recurrence -> "↺ "
     where
       autoParens x@(Var _) = pretty x
+      autoParens x@(Hole _) = pretty x
       autoParens x = parens (pretty x)
       iversonbrackets = enclose "⟦" "⟧"
       prettyOp s x y = pretty x <+> s <+> pretty y
@@ -63,6 +66,7 @@ instance Pretty Symbol where
 instance FreeVariables Symbol where
   fv sym = case sym of
     Var vn -> fv vn
+    Hole vn -> fv vn
     Idx xs i -> fv xs <> fv i
     LinComb i lb ub x -> fv lb <> fv ub <> fv x S.\\ S.singleton i
     Indicator x -> fv x
@@ -81,6 +85,7 @@ instance FreeVariables Symbol where
 instance Renameable Symbol where
   rename_ tau sym = case sym of
     Var x -> Var <$> rename_ tau x
+    Hole x -> Hole <$> rename_ tau x -- The Hole might be a quantifier index.
     Idx xs i -> Idx <$> rename_ tau xs <*> rename_ tau i
     LinComb xn lb ub e -> do
       xm <- newNameFromString "i"
@@ -113,6 +118,7 @@ instance Replaceable Symbol (SoP Symbol) where
   -- TODO flatten
   rep s symbol = case symbol of
     Var x -> M.findWithDefault (sym2SoP $ Var x) x s
+    Hole x -> M.findWithDefault (sym2SoP $ Hole x) x s
     Idx xs i ->
       sym2SoP $ Idx (sop2Symbol $ rep s xs) (rep s i)
     LinComb i lb ub t ->
@@ -165,8 +171,9 @@ instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
   --     isVar (Var _) = True
   --     isVar _ = False
   -- 2.
-  unify_ k (Var x) t
-    | Var x == t = pure mempty -- 2.a. Equation (constraint) elimination.
+  unify_ _ (Var x) t | Var x == t = pure mempty
+  unify_ k (Hole x) t
+    | Hole x == t = fail "Holes are not allowed in the second argument!"
     | x >= k = fail "2.b.i"
     | x `S.member` fvs || any (>= k) fvs = fail "2.b.ii"
     | otherwise = pure $ addSub x t mempty -- 2.b.iii. Variable elimination.
