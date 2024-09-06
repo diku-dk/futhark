@@ -3,7 +3,7 @@ module Futhark.Analysis.Proofs.IndexFn
 where
 
 import qualified Data.Map as M
-import Language.Futhark (VName (VName), prettyString)
+import Language.Futhark (VName)
 import Language.Futhark qualified as E
 import qualified Data.List.NonEmpty as NE
 import Futhark.Analysis.Proofs.Symbol
@@ -11,19 +11,16 @@ import Futhark.SoP.SoP (SoP, int2SoP, (.-.), (.+.), sym2SoP)
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 import Futhark.MonadFreshNames
 import Control.Monad.RWS.Strict
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), SubstitutionBuilder (addSub), Substitution, Unify (..), unifies)
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution, Unify (..), unifies)
 import Debug.Trace (trace, traceM)
-import Futhark.Util.Pretty
-import Data.Maybe (fromJust)
--- import Futhark.SoP.SoP (SoP, int2SoP, (.-.))
--- import Futhark.Analysis.Proofs.Unify (Replaceable(..))
+import Futhark.Util.Pretty (Pretty (pretty), (<+>), commasep, parens, stack, indent, line, prettyString)
+import Futhark.Analysis.Proofs.Util (prettyName)
 
 data Domain = Iota (SoP Symbol) -- [0, ..., n-1]
             | Cat            -- Catenate_{k=1}^{m-1} [b_{k-1}, ..., b_k)
                 VName        -- k
                 (SoP Symbol) -- m
                 (SoP Symbol) -- b
-            -- | DHole VName
   deriving Show
 
 data Iterator = Forall VName Domain
@@ -232,8 +229,3 @@ instance Pretty Iterator where
 
 instance Pretty IndexFn where
   pretty (IndexFn iter e) = pretty iter <+> "." <+> pretty e
-  
-
-prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
-  where
-    subscript = flip lookup $ zip "-0123456789" "₋₀₁₂₃₄₅₆₇₈₉"

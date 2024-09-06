@@ -1,11 +1,10 @@
 module Futhark.Analysis.Proofs.Util
 where
 
-import Data.Set qualified as S
+import Language.Futhark (VName (VName))
+import Futhark.Util.Pretty (pretty)
+import Data.Maybe (fromJust)
 
-class Ord a => FreeIn a where
-  freeIn :: a -> S.Set VName
-
-class Renameable u where
-  -- Rename bound variables in u.
-  rename :: u -> u -- Implement subC(id,id,u) from Sieg and Kaufmann.
+prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
+  where
+    subscript = flip lookup $ zip "-0123456789" "₋₀₁₂₃₄₅₆₇₈₉"

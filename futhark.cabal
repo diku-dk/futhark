@@ -145,6 +145,7 @@ library
       Futhark.Analysis.Proofs.Symbol
       Futhark.Analysis.Proofs.Traversals
       Futhark.Analysis.Proofs.Unify
+      Futhark.Analysis.Proofs.Util
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench

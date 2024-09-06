@@ -9,6 +9,7 @@ import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), enclose, prettyString)
 import Debug.Trace (trace, traceM)
+import Futhark.Analysis.Proofs.Util (prettyName)
 
 data Symbol =
     Var VName
@@ -223,12 +224,12 @@ instance Ord Symbol where
 
 instance Pretty Symbol where
   pretty symbol = case symbol of
-    (Var x) -> pretty x
-    (Hole x) -> pretty x
+    (Var x) -> prettyName x
+    (Hole x) -> prettyName x
     (Idx x i) -> autoParens x <> brackets (pretty i)
     (LinComb i lb ub e) ->
       "∑"
-        <> pretty i <> "∈"
+        <> prettyName i <> "∈"
         <> parens (pretty lb <+> ".." <+> pretty ub)
         <> " " <> autoParens e
     Indicator p -> iversonbrackets (pretty p)
@@ -358,9 +359,7 @@ instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
     | Hole x == t = error "Holes are not allowed in the second argument!"
     | x >= k = fail "2.b.i"
     | x `S.member` fvs || any (>= k) fvs = fail "2.b.ii"
-    | otherwise = do
-      traceM ("addSub " <> prettyString x <> " -> " <> prettyString t)
-      pure $ addSub x t mempty -- 2.b.iii. Variable elimination.
+    | otherwise = pure $ addSub x t mempty -- 2.b.iii. Variable elimination.
     where
       fvs = fv t
   -- 3.b

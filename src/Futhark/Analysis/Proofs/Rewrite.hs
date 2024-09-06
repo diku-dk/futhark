@@ -7,14 +7,13 @@ import Futhark.MonadFreshNames
 import Futhark.Analysis.Proofs.Symbol (Symbol(..), normalizeSymbol)
 import Control.Monad (foldM, msum, (<=<))
 import Futhark.SoP.FourierMotzkin (($<=$))
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..), repCases, subIndexFn, repIteratorInBody)
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..), subIndexFn, repIteratorInBody)
 import Data.List (subsequences, (\\))
 import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), astMap)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
 import Futhark.SoP.Monad (substEquivs)
 import Data.Functor ((<&>))
 import Language.Futhark (VName)
-import qualified Data.Map as M
 
 data Rule a b m = Rule {
     name :: String,

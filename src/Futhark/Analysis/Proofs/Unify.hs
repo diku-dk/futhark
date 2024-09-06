@@ -10,13 +10,13 @@ import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, sopToLists, Term, addSoPs, zeroSoP, int2SoP, sopFromList)
 import Futhark.SoP.SoP qualified as SoP
-import Language.Futhark (VName (VName))
+import Language.Futhark (VName)
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromString, putNameSource)
 import qualified Data.List as L
 import Control.Monad (foldM, msum)
 import Control.Monad.Trans.Maybe
 import Futhark.Util.Pretty
-import Data.Maybe (fromJust)
+import Futhark.Analysis.Proofs.Util (prettyName)
 
 class Ord a => FreeVariables a where
   fv :: a -> S.Set VName
@@ -32,13 +32,8 @@ class Renameable u where
 
 type Substitution v = M.Map VName v
 
-instance Pretty VName where
-  pretty (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
-    where
-      subscript = flip lookup $ zip "-0123456789" "₋₀₁₂₃₄₅₆₇₈₉"
-
 instance Pretty v => Pretty (Substitution v) where
-  pretty = braces . commastack . map (\(k,v) -> pretty k <> " : " <> pretty v) . M.toList
+  pretty = braces . commastack . map (\(k,v) -> prettyName k <> " : " <> pretty v) . M.toList
 
 class Replaceable u v where
   -- Implements the replacement operation from Sieg and Kaufmann.
