@@ -65,6 +65,24 @@ def ker2Blk [n] (bit_beg: u32) (lgH: u32)
   let inds = map2 f xs' (iota n)
   in  (xs', inds)
 
+
+-- Simple test for fusing scatter-flatten with the preceding 
+-- map nest that produces its indices and values
+-- ==
+-- entry: main
+-- input { 3i64 8i64 0i64
+--         [ 12u32,11u32,10u32, 9u32, 4u32, 3u32, 2u32, 1u32
+--         , 8u32, 7u32, 6u32, 5u32,12u32,11u32,10u32, 9u32
+--         , 4u32, 3u32, 2u32, 1u32, 8u32, 7u32, 6u32, 5u32
+--         ]
+-- }
+--
+-- output { [ 1u32, 1u32,  2u32,  2u32,  3u32,  3u32,  4u32,  4u32
+--          , 5u32, 5u32,  6u32,  6u32,  7u32,  7u32,  8u32,  8u32
+--          , 9u32, 9u32, 10u32, 10u32, 11u32, 11u32, 12u32, 12u32
+--          ]
+-- }
+
 entry radixIt (m: i64) (bq: i64) 
               (bit_beg: u32) -- (lgH: u32)
               (xs: *[m*bq]u32) : *[m*bq]u32 =
