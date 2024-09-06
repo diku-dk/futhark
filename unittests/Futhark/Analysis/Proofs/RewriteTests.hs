@@ -165,17 +165,28 @@ tests = testGroup "Proofs.Rewrite"
             body = cases [(sVar b :== int 0, sVar b),
                           (sVar b :/= int 0, sym2SoP Recurrence)]
           })
-  -- , testCase "Rule 5 (carry) (match 3)" $
-  --     run (\(x,y,_,_,a,b,_,_) ->
-  --       rewrite (IndexFn {
-  --           iterator = Forall x (Cat y (sVar a) (sVar b)),
-  --           body = cases [(sVar x :== int 0, sVar y),
-  --                         (sVar x :/= int 0, sym2SoP Recurrence)]
-  --         })
-  --     ) @??= (IndexFn {
-  --           iterator = Forall x (Cat y (sVar a) (sVar b)),
-  --           body = cases [(Bool True, sVar y)]
-  --         })
+  , testCase "Rule 5 (carry) (match 3)" $
+      run (\(x,y,_,_,a,b,_,_) ->
+        rewrite (IndexFn {
+            iterator = Forall x (Cat y (sVar a) (sVar b)),
+            body = cases [(sVar x :== int 0, sVar y),
+                          (sVar x :/= int 0, sym2SoP Recurrence)]
+          })
+      ) @??= (IndexFn {
+            iterator = Forall x (Cat y (sVar a) (sVar b)),
+            body = cases [(Bool True, sVar y)]
+          })
+  , testCase "Rule 4 (prefix sum) (match 1)" $
+      run (\(x,_,_,_,a,b,c,_) ->
+        rewrite (IndexFn {
+            iterator = Forall x (Iota (sVar a)),
+            body = cases [(sVar x :== int 0, sVar b),
+                          (sVar x :/= int 0, Recurrence ~+~ Idx (Var b) (sVar x))]
+          })
+      ) @??= (IndexFn {
+            iterator = Forall x (Iota (sVar a)),
+            body = cases [(Bool True, Var b ~+~ LinComb c (int 0) (sVar x) (Idx (Var b) (sVar c)))]
+          })
   ]
   where
     int = int2SoP

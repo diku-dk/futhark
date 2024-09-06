@@ -8,7 +8,7 @@ import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Un
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), enclose, prettyString)
-import Debug.Trace (trace, traceM)
+import Debug.Trace (trace)
 import Futhark.Analysis.Proofs.Util (prettyName)
 
 data Symbol =
@@ -297,6 +297,17 @@ instance Renameable Symbol where
 instance SubstitutionBuilder Symbol (SoP Symbol) where
   addSub vn e = M.insert vn (sym2SoP e)
 
+applyLinCombRule :: VName -> SoP Symbol -> SoP Symbol -> SoP Symbol -> SoP Symbol
+applyLinCombRule i a b = foldl1 (.+.) . map (mkLinComb i a b) . sopToLists
+
+mkLinComb :: VName -> SoP Symbol -> SoP Symbol -> ([Symbol], Integer) -> SoP Symbol
+mkLinComb _ a b ([], c) =
+  scaleSoP c (a .-. b .+. int2SoP 1)
+mkLinComb i a b ([u], c) =
+  scaleSoP c (sym2SoP $ LinComb i a b u)
+mkLinComb _ _ _ _ =
+  error "Replacement is not a linear combination."
+
 instance Replaceable Symbol (SoP Symbol) where
   -- TODO flatten
   rep s symbol = case symbol of
@@ -308,15 +319,7 @@ instance Replaceable Symbol (SoP Symbol) where
       -- NOTE we can avoid this rewrite here if we change the LinComb expression
       -- from Symbol to SoP Symbol.
       let s' = addSub i (Var i) s
-      in applyLinCombRule (rep s' lb) (rep s' ub) (rep s' t)
-      where
-        applyLinCombRule a b = foldl1 (.+.) . map (mkLinComb a b) . sopToLists
-        mkLinComb _ _ ([], c) =
-          scaleSoP c (ub .-. lb .+. int2SoP 1)
-        mkLinComb a b ([u], c) =
-          scaleSoP c (sym2SoP $ LinComb i a b u)
-        mkLinComb _ _ _ =
-          error "Replacement is not a linear combination."
+      in applyLinCombRule i (rep s' lb) (rep s' ub) (rep s' t)
     Indicator e -> sym2SoP . Indicator . sop2Symbol $ rep s e
     Bool x -> sym2SoP $ Bool x
     Not x -> sym2SoP . Not . sop2Symbol $ rep s x
