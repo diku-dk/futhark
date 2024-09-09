@@ -157,6 +157,10 @@ library
       Futhark.CLI.Doc
       Futhark.CLI.Eval
       Futhark.CLI.Fmt
+      Futhark.CLI.Fmt.Declaration
+      Futhark.CLI.Fmt.Format
+      Futhark.CLI.Fmt.Program
+      Futhark.CLI.Fmt.Type
       Futhark.CLI.HIP
       Futhark.CLI.Literate
       Futhark.CLI.LSP
