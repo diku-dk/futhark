@@ -28,7 +28,7 @@ jobs:
     - name: Build Futhark
       run: nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $GITHUB_SHA
 
-    - uses: actions/upload-artifact@v1
+    - uses: actions/upload-artifact@v4
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
         path: result/futhark-nightly-linux-x86_64.tar.xz
@@ -164,7 +164,7 @@ jobs:
       with:
         key: ${{ secrets.SSHKEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS }}
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
     - run: |
         ls -R
     - name: Prepare package
