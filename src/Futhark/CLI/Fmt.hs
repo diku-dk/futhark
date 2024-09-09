@@ -115,7 +115,7 @@ fmtDocComment (Just (DocComment x loc)) =
     prefix (l : ls) = ("-- | " <> l) : map ("-- " <>) ls
 fmtDocComment Nothing = pure []
 
-fmtMany :: (a -> Smth Fmt) -> [a] -> Smth Fmt
+fmtMany :: (a -> Smth Fmt) -> [a] -> Smth Fmt 
 fmtMany f = foldM (\a b -> (a<>) <$> f b) []
 
 -- Boolean indicates whether tuple is single line
@@ -123,11 +123,15 @@ fmtTupleTypeElems :: [UncheckedTypeExp] -> Bool -> Smth Fmt
 fmtTupleTypeElems [] _ = pure []
 fmtTupleTypeElems [t] _ = fmtTypeExp t
 fmtTupleTypeElems (t : ts) isSingle = do
-  t' <- fmtTypeExp t 
+  t' <- fmtTypeExp t
   ts' <- fmtTupleTypeElems ts isSingle
   if isSingle then pure [T.concat $ t' <> [", "] <> ts'] 
-  else pure $ t' <> [", "] <> ts' -- TO DO: Make the comma not be on its own line  
+  else pure $ t' <> prependComma ts' -- TO DO: Make the comma not be on its own line  
+  where prependComma :: Fmt -> Fmt
+        prependComma [] = [] -- comma still on seperate linethat's probably pretty slow, better way to do this?
+        prependComma fmt = [T.concat $ [", "] <> fmt] 
 
+-- | Formatting of Futhark type expressions.
 fmtTypeExp :: UncheckedTypeExp -> Smth Fmt
 fmtTypeExp (TEVar v loc) = do
   c <- comment loc
@@ -140,9 +144,19 @@ fmtTypeExp (TETuple ts loc) = do
   c <- comment loc
   ts' <- fmtTupleTypeElems ts False
   pure $ c <> ["("] <>  ts' <> [")"]
+fmtTypeExp (TEParens type_exp loc) = undefined
+fmtTypeExp (TERecord ts loc) = undefined -- Records
+fmtTypeExp (TEArray size_exp type_exp loc) = undefined -- A array with an size expression
+fmtTypeExp (TEUnique type_exp loc) = undefined -- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
+fmtTypeExp (TEApply type_exp type_arg_exp loc) = undefined -- I am not sure I guess applying a higher kinded type to some type expression
+fmtTypeExp (TEArrow (Just name) type_exp type_exp' loc) = undefined -- is this "->"?
+fmtTypeExp (TEArrow Nothing type_exp type_exp' loc) = undefined -- is this "->"?
+fmtTypeExp (TESum type_exps loc) = undefined -- This should be "|"
+fmtTypeExp (TEDim names exp loc) = undefined -- This this probably [n][m]expression for array dimensions
 
 fmtTypeParam :: UncheckedTypeParam -> Smth Fmt
-fmtTypeParam = undefined
+fmtTypeParam (TypeParamDim name loc) = undefined 
+fmtTypeParam (TypeParamType l name loc) = undefined
 
 fmtTypeBind :: UncheckedTypeBind -> Smth Fmt
 fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = do
@@ -165,10 +179,16 @@ fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = do
                   prettyText name <>
                   T.intercalate " " ps' <>
                   " = "] <> e'
-fmtTypeBind _ = undefined
 
+-- | Formatting of Futhark declarations.
 fmtDec :: UncheckedDec -> Smth Fmt
-fmtDec (TypeDec tb) = fmtTypeBind tb
+fmtDec (ValDec t) = undefined -- A value declaration.
+fmtDec (TypeDec tb) = fmtTypeBind tb -- A type declaration.
+fmtDec (ModTypeDec tb) = undefined -- A module type declation.
+fmtDec (ModDec tb) = undefined -- A module declation.
+fmtDec (OpenDec tb loc) = undefined -- I have no clue.
+fmtDec (LocalDec tb loc) = undefined -- I have no clue, maybe this just adds the local keyword?
+fmtDec (ImportDec path tb loc) = undefined -- Import declarations.
 
 -- | Does not return residual comments, because these are simply
 -- inserted at the end.
