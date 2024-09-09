@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Constant folding for loops that produce floating point results could
   result in different numerical behaviour.
 
+* Compiler crash in memory short circuiting (#2176).
+
 ## [0.25.21]
 
 ### Added
