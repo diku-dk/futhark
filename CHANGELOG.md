@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [0.26.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
 ## [0.25.22]
 
 ### Added
@@ -12,10 +22,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark script` now supports an `-f` option.
 
 * `futhark script` now supports the builtin procedure `$store`.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
