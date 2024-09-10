@@ -30,7 +30,7 @@ debug a = traceShow a a
 --
 -- A *formatting function* is a function of type
 --
---  [Comment] -> a -> ([Comment], Fmt)
+--   a -> FmtM Fmt
 --
 -- where 'a' is some syntactical object, e.g. UncheckedTypeExp.  The
 -- [Comment] list is a sorted list of "residual comments" that have
@@ -90,12 +90,30 @@ comment a = do
       pure $ commentText c : cs'
     _ -> pure []
 
--- parses comments infront of a and converts a to fmt using f 
+trailingComment :: Located a => a -> FmtM Line
+trailingComment a = do
+  s <- get
+  case comments s of
+    c : cs | isSameLine a c -> do
+      put $ s { comments = cs }
+      pure $ commentText c
+    _ -> pure ""
+
+-- parses comments infront of a and converts a to fmt using formatting function f 
 buildFmt :: Located a => (a -> FmtM Fmt) -> a -> FmtM Fmt  
 buildFmt f a = do 
   c <- comment a
   a' <-  f a
-  pure $ c <> a' 
+  c' <- trailingComment a
+  pure $ c <> mapLast (<> " " <> c') a' 
+
+mapLast :: (a -> a) -> [a] -> [a]
+mapLast _ [] = []
+mapLast f as = i ++ [f l]
+  where
+    l = last as
+    i = init as
+
 
 -- Other Utility Functions
 
@@ -106,6 +124,11 @@ isSingleLine a =
     Loc start end -> posLine start == posLine end
     NoLoc -> undefined -- should throw an error
 
+isSameLine :: (Located a, Located b) => a -> b -> Bool
+isSameLine a b = 
+  case (locOf a, locOf b) of
+    (Loc _startA endA, Loc _startB endB) -> posLine endA == posLine endB
+    _ -> undefined -- should throw an error
 
 -- Main format code
 
