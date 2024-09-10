@@ -43,7 +43,7 @@ debug a = traceShow a a
 -- residual comments is encapsulated monadically.  Use a State monad
 -- to keep the list.  This will make the code much cleaner.
 
--- TODO: Name monad encapsulating comments something better than "Smth"
+-- DONE: Name monad encapsulating comments something better than "Smth"
 
 -- TODO: ensure that doc comments (that start with "-- |" and are
 -- connected to definitions) are always separated from other comments
@@ -54,7 +54,7 @@ debug a = traceShow a a
       -- | This is a type
 
       -- this is a type
--- type test = (i32, i32)
+-- type test = (i32, i32) (Not that interesting left for now)
 
 
 -- TODO: Fix formatting of several lines of comments 
@@ -73,41 +73,44 @@ type Line = T.Text
 type Fmt = [Line]
 
 -- State monad to keep track of comments 
-data Env = Env
+data FmtState = FmtState
   { comments :: ![Comment]
-  , indent :: !Int
   } deriving (Show, Eq, Ord)
 
-type Smth a = State Env a 
+type FmtM a = State FmtState a 
 
--- Functions for operating on Smth monad
-comment :: Located a => a -> Smth Fmt
+-- Functions for operating on FmtM monad
+comment :: Located a => a -> FmtM Fmt
 comment a = do
   s <- get
   case comments s of
     c : cs | locOf a > locOf c -> do
       put $ s { comments = cs }
-      pure [commentText c]
+      cs' <- comment a --fmts remaining comments 
+      pure $ commentText c : cs'
     _ -> pure []
 
-incrIndent :: Smth () 
-incrIndent = modify (\s -> s {indent = indent s + 2})
-
-decrIndent :: Smth ()
-decrIndent = modify (\s -> s {indent = indent s - 2})
+-- parses comments infront of a and converts a to fmt using f 
+buildFmt :: Located a => (a -> FmtM Fmt) -> a -> FmtM Fmt  
+buildFmt f a = do 
+  c <- comment a
+  a' <-  f a
+  pure $ c <> a' 
 
 -- Other Utility Functions
+
+-- Should probably be updated to return a special single/multi-line indicator type
 isSingleLine :: Located a => a -> Bool
 isSingleLine a =
   case locOf a of
     Loc start end -> posLine start == posLine end
-    NoLoc -> undefined -- Huh????? spørg troels.
+    NoLoc -> undefined -- should throw an error
 
 
 -- Main format code
 
 -- | Documentation comments are always optional, so this takes a 'Maybe'.
-fmtDocComment :: Maybe DocComment -> Smth Fmt
+fmtDocComment :: Maybe DocComment -> FmtM Fmt
 fmtDocComment (Just (DocComment x loc)) =
   (<> prefix (T.lines x)) <$> comment loc
   where
@@ -115,11 +118,11 @@ fmtDocComment (Just (DocComment x loc)) =
     prefix (l : ls) = ("-- | " <> l) : map ("-- " <>) ls
 fmtDocComment Nothing = pure []
 
-fmtMany :: (a -> Smth Fmt) -> [a] -> Smth Fmt 
+fmtMany :: (a -> FmtM Fmt) -> [a] -> FmtM Fmt 
 fmtMany f = foldM (\a b -> (a<>) <$> f b) []
 
 -- Boolean indicates whether tuple is single line
-fmtTupleTypeElems :: [UncheckedTypeExp] -> Bool -> Smth Fmt
+fmtTupleTypeElems :: [UncheckedTypeExp] -> Bool -> FmtM Fmt
 fmtTupleTypeElems [] _ = pure []
 fmtTupleTypeElems [t] _ = fmtTypeExp t
 fmtTupleTypeElems (t : ts) isSingle = do
@@ -132,10 +135,9 @@ fmtTupleTypeElems (t : ts) isSingle = do
         prependComma fmt = [T.concat $ [", "] <> fmt] 
 
 -- | Formatting of Futhark type expressions.
-fmtTypeExp :: UncheckedTypeExp -> Smth Fmt
-fmtTypeExp (TEVar v loc) = do
-  c <- comment loc
-  pure $ c <> [prettyText v]
+fmtTypeExp :: UncheckedTypeExp -> FmtM Fmt
+fmtTypeExp (TEVar v loc) = buildFmt (const (pure [prettyText v])) loc
+  --pure [prettyText v]
 fmtTypeExp (TETuple ts loc) | isSingleLine loc = do
   c <- comment loc
   ts' <- fmtTupleTypeElems ts True
@@ -154,11 +156,11 @@ fmtTypeExp (TEArrow Nothing type_exp type_exp' loc) = undefined -- is this "->"?
 fmtTypeExp (TESum type_exps loc) = undefined -- This should be "|"
 fmtTypeExp (TEDim names exp loc) = undefined -- This this probably [n][m]expression for array dimensions
 
-fmtTypeParam :: UncheckedTypeParam -> Smth Fmt
+fmtTypeParam :: UncheckedTypeParam -> FmtM Fmt
 fmtTypeParam (TypeParamDim name loc) = undefined 
 fmtTypeParam (TypeParamType l name loc) = undefined
 
-fmtTypeBind :: UncheckedTypeBind -> Smth Fmt
+fmtTypeBind :: UncheckedTypeBind -> FmtM Fmt
 fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = do
   dc' <- fmtDocComment dc
   ps' <- fmtMany fmtTypeParam ps
@@ -168,22 +170,45 @@ fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = do
                    prettyText l <>
                    prettyText name <>
                    T.intercalate " " ps' <>
-                   " = " <>
-                   T.concat e']
+                   " = " <> T.concat e'] 
   else do
-    -- incrIndent
     e' <- fmtTypeExp e
-    -- decrIndent
     pure $ dc' <> ["type " <>
                   prettyText l <>
                   prettyText name <>
                   T.intercalate " " ps' <>
                   " = "] <> e'
 
+fmtAttrAtom :: AttrAtom a -> FmtM Fmt
+fmtAttrAtom (AtomName name) = pure [prettyText name]
+fmtAttrAtom (AtomInt int) = pure [prettyText int]
+
+fmtAttrInfo :: AttrInfo a -> FmtM Fmt
+fmtAttrInfo (AttrAtom attr loc) = fmtAttrAtom attr
+fmtAttrInfo (AttrComp name attrs loc) = do
+  x <- mapM fmtAttrInfo attrs
+  pure $ [prettyText name] <> ["("] <> L.intercalate [","] x <> [")"]
+
+-- I've added smth to make the code parse
+fmtAttr :: AttrInfo a -> FmtM Fmt
+fmtAttr attr = do
+  attr_info <- fmtAttrInfo attr
+  pure $ ["#["] <> attr_info <> ["]"]
+
+fmtValBind :: UncheckedValBind -> FmtM Fmt
+fmtValBind (ValBind entry name retdecl rettype tparams args body doc attrs loc) = do
+  fmt_attrs <- concat <$> mapM fmtAttr attrs
+  pure $ fmt_attrs <> fun
+  where
+    fun =
+      case entry of
+        Just _ -> ["entry"]
+        _ -> ["def"]
+
 -- | Formatting of Futhark declarations.
-fmtDec :: UncheckedDec -> Smth Fmt
-fmtDec (ValDec t) = undefined -- A value declaration.
-fmtDec (TypeDec tb) = fmtTypeBind tb -- A type declaration.
+fmtDec :: UncheckedDec -> FmtM Fmt
+fmtDec (ValDec t) = fmtValBind t -- A value declaration.
+fmtDec (TypeDec tb) = buildFmt fmtTypeBind tb -- A type declaration.
 fmtDec (ModTypeDec tb) = undefined -- A module type declation.
 fmtDec (ModDec tb) = undefined -- A module declation.
 fmtDec (OpenDec tb loc) = undefined -- I have no clue.
@@ -192,7 +217,7 @@ fmtDec (ImportDec path tb loc) = undefined -- Import declarations.
 
 -- | Does not return residual comments, because these are simply
 -- inserted at the end.
-fmtProg :: UncheckedProg -> Smth Fmt
+fmtProg :: UncheckedProg -> FmtM Fmt
 fmtProg (Prog dc decs) = do
   dc' <- fmtDocComment dc
   decs' <- fmtMany fmtDec decs
@@ -212,6 +237,6 @@ main = mainWithOptions () [] "program" $ \args () ->
           exitFailure
         Right (prog, cs) -> do
           let number i l = T.pack $ printf "%4d %s" (i :: Int) l
-          let fmt = evalState (fmtProg prog) (Env { indent = 0, comments = cs })
+          let fmt = evalState (fmtProg prog) (FmtState { comments = cs })
           T.hPutStr stdout $ T.unlines $ zipWith number [0 ..] fmt
     _ -> Nothing
