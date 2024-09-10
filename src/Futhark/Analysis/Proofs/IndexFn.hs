@@ -30,8 +30,11 @@ data Iterator = Forall VName Domain
 newtype Cases a b = Cases (NE.NonEmpty (a, b))
   deriving (Show, Eq, Ord)
 
-cases :: [(a, b)] -> Cases a b
+cases :: [(a,b)] -> Cases a b
 cases = Cases . NE.fromList
+
+casesToList ::  Cases a b -> [(a, b)]
+casesToList (Cases cs) = NE.toList cs
 
 data IndexFn = IndexFn
   { iterator :: Iterator,
@@ -102,11 +105,11 @@ repDomain :: Substitution (SoP Symbol) -> Domain -> Domain
 repDomain s (Iota n) = Iota (rep s n)
 repDomain s (Cat k m b) = Cat k (rep s m) (rep s b)
 
-repIndex :: Substitution (SoP Symbol) -> VName -> VName
-repIndex s vn
+repVName :: Substitution (SoP Symbol) -> VName -> VName
+repVName s vn
   | Var i <- sop2Symbol $ rep s (Var vn) =
     i
-repIndex _ _ = error "Erroneous replace on index function index variable."
+repVName _ _ = error "repVName substitutes for non-VName."
 
 
 subIndexFn :: Substitution (SoP Symbol) -> IndexFn -> IndexFnM IndexFn
@@ -114,7 +117,7 @@ subIndexFn s indexfn = rip <$> rename indexfn
   where
   rip (IndexFn Empty body) = IndexFn Empty (repCases s body)
   rip (IndexFn (Forall i dom) body) =
-    IndexFn (Forall (repIndex s i) (repDomain s dom)) (repCases s body)
+    IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
 
 repIteratorInBody :: SoP Symbol -> IndexFn -> IndexFn
 repIteratorInBody x (IndexFn it@(Forall i _) body) =

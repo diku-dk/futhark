@@ -13,6 +13,8 @@ import Futhark.SoP.Monad (addEquiv, addRange)
 import qualified Data.Set as S
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.Analysis.Proofs.IndexFn
+import Debug.Trace (trace)
+import Futhark.Util.Pretty (prettyString)
 
 
 runTest :: IndexFnM a -> a
@@ -26,20 +28,24 @@ tests = testGroup "Proofs.Rewrite"
       ) @??= (sVar x .+. sVar y)
   , testCase "Extend sum lower bound (1)" $
       run (\(x,y,z,w,_,_,_,_) ->
-        rewrite (Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Var x))
-      ) @??= sym2SoP (LinComb w (sVar y) (sVar z) (Var x))
+        rewrite (Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w)))
+      ) @??= sym2SoP (LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)))
   , testCase "Extend sum lower bound (2)" $
       run (\(x,y,z,w,_,_,_,_) ->
-        rewrite (Idx (Var x) (sVar y .-. int 1) ~+~ LinComb w (sVar y) (sVar z) (Var x))
-      ) @??= sym2SoP (LinComb w (sVar y .-. int 1) (sVar z) (Var x))
+        rewrite (Idx (Var x) (sVar y .-. int 1) ~+~ LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)))
+      ) @??= sym2SoP (LinComb w (sVar y .-. int 1) (sVar z) (Idx (Var x) (sVar w)))
+  , testCase "Extend sum lower bound twice" $
+      run (\(x,y,z,w,_,_,_,_) ->
+        rewrite (Idx (Var x) (sVar y .-. int 1) ~+~ Idx (Var x) (sVar y) .+. sym2SoP (LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w))))
+      ) @??= sym2SoP (LinComb w (sVar y .-. int 1) (sVar z) (Idx (Var x) (sVar w)))
   , testCase "Extend sum upper bound (1)" $
       run (\(x,y,z,w,_,_,_,_) ->
-        rewrite (Idx (Var x) (sVar z) ~+~ LinComb w (sVar y) (sVar z .-. int 1) (Var x))
-      ) @??= sym2SoP (LinComb w (sVar y) (sVar z) (Var x))
+        rewrite (Idx (Var x) (sVar z) ~+~ LinComb w (sVar y) (sVar z .-. int 1) (Idx (Var x) (sVar w)))
+      ) @??= sym2SoP (LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)))
   , testCase "Extend sum upper bound (2)" $
       run (\(x,y,z,w,_,_,_,_) ->
-        rewrite (Idx (Var x) (sVar z .+. int 1) ~+~ LinComb w (sVar y) (sVar z) (Var x))
-      ) @??= sym2SoP (LinComb w (sVar y) (sVar z .+. int 1) (Var x))
+        rewrite (Idx (Var x) (sVar z .+. int 1) ~+~ LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)))
+      ) @??= sym2SoP (LinComb w (sVar y) (sVar z .+. int 1) (Idx (Var x) (sVar w)))
   , testCase "Merge sum-subtraction (no match)" $
       -- Should fail because we cannot show b <= c without bounds on these variables general.
       run (\(x,_,z,w,a,b,c,_) ->
@@ -52,12 +58,12 @@ tests = testGroup "Proofs.Rewrite"
       ) @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar c) (Var x))
   , testCase "Rule matches on subterms" $
       run (\(x,y,z,w,_,_,_,_) ->
-        rewrite (int 1 .+. Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Var x))
-      ) @??= (int 1 .+. sym2SoP (LinComb w (sVar y) (sVar z) (Var x)))
+        rewrite (int 1 .+. Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w)))
+      ) @??= (int 1 .+. sym2SoP (LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w))))
   , testCase "Rule matches on all relevant subterms" $
       run (\(x,y,z,w,a,b,c,d) ->
-        rewrite (int 1 .+. Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Var x) .+. Idx (Var a) (sVar b) ~+~ LinComb d (sVar b .+. int 1) (sVar c) (Var a))
-      ) @??= (int 1 .+. LinComb w (sVar y) (sVar z) (Var x) ~+~ LinComb d (sVar b) (sVar c) (Var a))
+        rewrite (int 1 .+. Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w)) .+. Idx (Var a) (sVar b) ~+~ LinComb d (sVar b .+. int 1) (sVar c) (Idx (Var a) (sVar d)))
+      ) @??= (int 1 .+. LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)) ~+~ LinComb d (sVar b) (sVar c) (Idx (Var a) (sVar d)))
   , testCase "Match symbols in SVar" $
       run (\(x,y,z,_,_,_,_,_) ->
         rewrite (Indicator (Bool True :&& (sVar x :<= sVar y)) ~+~ Var z)
@@ -177,15 +183,26 @@ tests = testGroup "Proofs.Rewrite"
             body = cases [(Bool True, sVar y)]
           })
   , testCase "Rule 4 (prefix sum) (match 1)" $
-      run (\(x,_,_,_,a,b,c,_) ->
+      run (\(x,y,_,_,a,b,c,_) ->
         rewrite (IndexFn {
-            iterator = Forall x (Iota (sVar a)),
-            body = cases [(sVar x :== int 0, sVar b),
+            iterator = Forall x (Iota (sVar y)),
+            body = cases [(sVar x :== int 0, sVar a),
                           (sVar x :/= int 0, Recurrence ~+~ Idx (Var b) (sVar x))]
           })
       ) @??= (IndexFn {
-            iterator = Forall x (Iota (sVar a)),
-            body = cases [(Bool True, Var b ~+~ LinComb c (int 0) (sVar x) (Idx (Var b) (sVar c)))]
+            iterator = Forall x (Iota (sVar y)),
+            body = cases [(Bool True, Var a ~+~ LinComb c (int 1) (sVar x) (Idx (Var b) (sVar c)))]
+          })
+  , testCase "Match scan" $
+      run (\(x,y,_,_,a,b,c,_) ->
+        rewrite (IndexFn {
+            iterator = Forall x (Iota (sVar y)),
+            body = cases [(sVar x :== int 0, sym2SoP $ Idx (Var b) (sVar x)),
+                          (sVar x :/= int 0, Recurrence ~+~ Idx (Var b) (sVar x))]
+          })
+      ) @??= (IndexFn {
+            iterator = Forall x (Iota (sVar y)),
+            body = cases [(Bool True, sym2SoP $ LinComb c (int 0) (sVar x) (Idx (Var b) (sVar c)))]
           })
   ]
   where
@@ -202,7 +219,13 @@ tests = testGroup "Proofs.Rewrite"
     run f = runTest (varsM >>= f)
 
     -- Less fragile renaming.
-    e @??= e' = renamed e @?= renamed e'
+    e @??= e' =
+      let actual = renamed e
+          expected = renamed e'
+      in assertEqual ("expected: " <> prettyString expected
+                       <> "\nbut got: " <> prettyString actual)
+                     expected
+                     actual
     renamed x = runTest $ do
           putNameSource (newNameSource (-10000))
           rename x

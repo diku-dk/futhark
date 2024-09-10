@@ -6,8 +6,8 @@ import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.), sopToList, sopFromL
 import Futhark.MonadFreshNames
 import Futhark.Analysis.Proofs.Symbol (Symbol(..), normalizeSymbol, applyLinCombRule)
 import Control.Monad (foldM, msum, (<=<))
-import Futhark.SoP.FourierMotzkin (($<=$))
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..), subIndexFn, repIteratorInBody)
+import Futhark.SoP.FourierMotzkin (($<=$), ($==$))
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..), subIndexFn, repIteratorInBody, repVName)
 import Data.List (subsequences, (\\))
 import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), astMap)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
@@ -16,6 +16,7 @@ import Data.Functor ((<&>))
 import Language.Futhark (VName)
 import qualified Data.Map as M
 import Debug.Trace (traceM)
+import Futhark.Util.Pretty (prettyString)
 
 data Rule a b m = Rule {
     name :: String,
@@ -42,6 +43,20 @@ a ~+~ b = sym2SoP a .+. sym2SoP b
 (~-~) :: Ord u => u -> u -> SoP u
 a ~-~ b = sym2SoP a .-. sym2SoP b
 
+-- converge :: Eq a => (a -> a) -> a -> a
+-- converge f = converge_ . iterate f
+--   where
+--   converge_ (x:y:ys)
+--       | x == y = y
+--       | otherwise = converge_ (y:ys)
+--   converge_ _ = undefined
+converge :: (Eq a, Monad m) => (a -> m a) -> a -> m a
+converge f x = do
+  y <- f x
+  y2 <- f y
+  if y == y2 then pure y
+  else converge f y
+
 match :: Unify u v m => Rule u v m -> u -> m (Maybe (Substitution v))
 match rule x = unify (from rule) x >>= checkSideCondition
   where
@@ -58,7 +73,7 @@ instance Rewritable (SoP Symbol) IndexFnM where
     where
       m = ASTMapper
         { mapOnSymbol = rewrite,
-          mapOnSoP = \sop -> rulesSoP >>= foldM (flip matchSoP) sop
+          mapOnSoP = converge $ \sop -> rulesSoP >>= foldM (flip matchSoP) sop
         }
 
 instance Rewritable Symbol IndexFnM where
@@ -66,7 +81,7 @@ instance Rewritable Symbol IndexFnM where
     where
       m = ASTMapper
         { mapOnSoP = rewrite,
-          mapOnSymbol = \x -> do
+          mapOnSymbol = converge $ \x -> do
             rulesSymbol
               >>= foldM (flip match_) (normalizeSymbol x)
               >>= refineSymbol . normalizeSymbol
@@ -84,8 +99,13 @@ instance Rewritable Symbol IndexFnM where
               msum <$> mapM (match rule) [x `op` y, y `op` x]
 
 instance Rewritable IndexFn IndexFnM where
-  rewrite indexfn = rulesIndexFn >>= foldM (flip match_) indexfn
+  rewrite = converge $ astMap m <=< \indexfn -> rulesIndexFn >>= foldM (flip match_) indexfn
     where
+      m :: ASTMapper Symbol IndexFnM = ASTMapper
+        { mapOnSoP = rewrite,
+          mapOnSymbol = rewrite
+        }
+
       match_ rule fn = match rule fn >>= maybe (pure fn) (to rule)
 
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
@@ -114,37 +134,43 @@ rulesSoP = do
   h1 <- newVName "h"
   h2 <- newVName "h"
   h3 <- newVName "h"
+  h4 <- newVName "h"
   x1 <- newVName "x"
   y1 <- newVName "y"
   pure
     [ Rule
         { name = "Extend sum lower bound (1)"
-        , from = LinComb i (hole h1 .+. int 1) (hole h2) (Hole h3)
-                   ~+~ Idx (Hole h3) (hole h1)
-        , to = \s -> sub s $ LinComb i (hole h1) (hole h2) (Hole h3)
-        , sideCondition = vacuous
+        , from = LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
+                   ~+~ Idx (Hole h3) (hole h4)
+        , to = \s -> sub s $ LinComb i (hole h4) (hole h2) (Idx (Hole h3) (sVar i))
+        , sideCondition = \s -> do
+            lb <- sub s (Hole h1)
+            ind <- sub s (Hole h4)
+            traceM ("##### lb " <> prettyString lb)
+            traceM ("##### ind " <> prettyString ind)
+            lb $==$ (ind .+. int 1)
         }
     , Rule
         { name = "Extend sum lower bound (2)"
-        , from = LinComb i (hole h1) (hole h2) (Hole h3)
+        , from = LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
                    ~+~ Idx (Hole h3) (hole h1 .-. int 1)
         , to = \s -> sub s $
-                  LinComb i (hole h1 .-. int 1) (hole h2) (Hole h3)
+                  LinComb i (hole h1 .-. int 1) (hole h2) (Idx (Hole h3) (sVar i))
         , sideCondition = vacuous
         }
     , Rule
         { name = "Extend sum upper bound (1)"
-        , from = LinComb i (hole h1) (hole h2 .-. int 1) (Hole h3)
+        , from = LinComb i (hole h1) (hole h2 .-. int 1) (Idx (Hole h3) (sVar i))
                    ~+~ Idx (Hole h3) (hole h2)
-        , to = \s -> sub s $ LinComb i (hole h1) (hole h2) (Hole h3)
+        , to = \s -> sub s $ LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
         , sideCondition = vacuous
         }
     , Rule
         { name = "Extend sum upper bound (2)"
-        , from = LinComb i (hole h1) (hole h2) (Hole h3)
+        , from = LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
                    ~+~ Idx (Hole h3) (hole h2 .+. int 1)
         , to = \s -> sub s $
-                  LinComb i (hole h1) (hole h2 .+. int 1) (Hole h3)
+                  LinComb i (hole h1) (hole h2 .+. int 1) (Idx (Hole h3) (sVar i))
         , sideCondition = vacuous
         }
     , Rule
@@ -156,7 +182,7 @@ rulesSoP = do
         , sideCondition = \s -> do
             y' <- sub s (Hole y1)
             x' <- sub s (Hole x1)
-            rep s y' $<=$ rep s x'
+            y' $<=$ x'
         }
     , Rule
         { name = "[[¬x]] => 1 - [[x]]"
@@ -197,7 +223,6 @@ rulesIndexFn :: IndexFnM [Rule IndexFn (SoP Symbol) IndexFnM]
 rulesIndexFn = do
   i <- newVName "i"
   k <- newVName "k"
-  j <- newVName "j"
   n <- newVName "n"
   m <- newVName "m"
   b <- newVName "b"
@@ -271,16 +296,19 @@ rulesIndexFn = do
           -- XXX asdf i think I can get e2 on the correct form by making a LinComb
           -- and replacing on it? Otherwise extract "mkLinComb" into a visible function.
         , to = \s -> do
-            traceM "\n ##### match prefix sum"
-            e2 :: SoP Symbol <- sub s (Hole h2)
-            e2_j <- sub (M.singleton i (sVar j)) e2
+            let i' = repVName s i
+            e1 <- sub s (Hole h1)
+            e1_b <- sub (M.singleton i' (int 0)) e1
+            e2 <- sub s (Hole h2)
+            j <- newVName "j"
+            e2_j <- sub (M.singleton i' (sVar j)) e2
             let e2_sum = applyLinCombRule j (int 1) (hole i) e2_j
-            fn <- subIndexFn s $
+            subIndexFn s $
               IndexFn {
                 iterator = Forall i (Iota (hole n)),
-                body = cases [(Bool True, hole h1 .+. e2_sum)]
+                body = cases [(Bool True, e1_b .+. e2_sum)]
               }
-            pure $ repIteratorInBody (int 0) fn 
+            -- pure $ repIteratorInBody (int 0) fn 
         , sideCondition = vacuous
         }
 

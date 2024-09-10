@@ -3,6 +3,8 @@ where
 
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.SoP.SoP (SoP, (.+.), int2SoP, sopToLists, (.*.), sym2SoP)
+import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), Domain (..), Iterator (..), Cases (..), casesToList, cases)
+import Debug.Trace (trace)
 
 data ASTMapper a m = ASTMapper
   { mapOnSymbol :: a -> m a,
@@ -38,3 +40,22 @@ instance ASTMappable Symbol Symbol where
   astMap m (x :<= y) = mapOnSymbol m =<< (:<=) <$> astMap m x <*> astMap m y
   astMap m (x :&& y) = mapOnSymbol m =<< (:&&) <$> astMap m x <*> astMap m y
   astMap m (x :|| y) = mapOnSymbol m =<< (:||) <$> astMap m x <*> astMap m y
+
+instance ASTMappable Symbol IndexFn where
+  astMap m (IndexFn dom body) = IndexFn <$> astMap m dom <*> astMap m body
+
+instance ASTMappable Symbol Iterator where
+  astMap m (Forall i dom) = Forall i <$> astMap m dom
+  astMap _ Empty = pure Empty
+
+instance ASTMappable Symbol Domain where
+  astMap m (Iota n) = Iota <$> astMap m n
+  astMap m (Cat k n b) = Cat k <$> astMap m n <*> astMap m b
+
+instance ASTMappable Symbol (Cases Symbol (SoP Symbol)) where
+  astMap _ cs | trace ("astMap " <> show cs) False = undefined
+  astMap m cs = do
+    let (ps, qs) = unzip $ casesToList cs
+    ps' <- mapM (astMap m) ps
+    qs' <- mapM (astMap m) qs
+    pure . cases $ zip ps' qs'

@@ -345,7 +345,7 @@ instance Replaceable Symbol (SoP Symbol) where
 -- that's relegated to the substitution here.
 -- NOTE 3.a irrelevant here given that we are post type checking?
 instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
-  unify_ _ x y | trace ("\nunify_ " <> unwords (map prettyString [x, y])) False = undefined
+  -- unify_ _ x y | trace ("\nunify_ " <> unwords (map prettyString [x, y])) False = undefined
   -- TODO I don't think we want exchange since unify is used to check whether
   --      the holes (FVs) in the first argument can be substituted to be
   --      syntactically identical to the second argument---not the other way
