@@ -64,8 +64,22 @@ debug a = traceShow a a
 
 -- TODO (Question?): Change fmt to be a sequence of lines instead of a list of lines 
 
+-- Some utility functions 
+commasep :: Fmt -> FmtM Fmt
+commasep [] = pure []
+commasep [x] = pure [x]
+commasep (x:xs) = do 
+  xs' <- commasep xs
+  pure $ (x <> ", ") : xs'
+
+{-
+commasepbetween :: Line -> Line -> Fmt -> FmtM Fmt
+commasepbetween o c xs = do
+  pure $ (zipWidth (<>) (o : repeat ",") xs) <> [c]
+-}
 -- | Invariant: Should not contain newline characters.
 type Line = T.Text
+
 
 -- | The result of formatting is a list of lines.  This is useful as
 -- we might want to modify every line of a prettyprinted
@@ -73,8 +87,8 @@ type Line = T.Text
 type Fmt = [Line]
 
 -- State monad to keep track of comments 
-data FmtState = FmtState
-  { comments :: ![Comment]
+newtype FmtState = FmtState
+  { comments :: [Comment]
   } deriving (Show, Eq, Ord)
 
 type FmtM a = State FmtState a 
@@ -157,31 +171,52 @@ fmtTupleTypeElems (t : ts) isSingle = do
         prependComma [] = [] -- comma still on seperate linethat's probably pretty slow, better way to do this?
         prependComma fmt = [T.concat $ [", "] <> fmt] 
 
+fmtRecordTypeFields :: [(Name, UncheckedTypeExp)] -> FmtM Fmt
+fmtRecordTypeFields [] = pure []
+fmtRecordTypeFields ((name, te):fs) = do
+  f' <- fmtTypeExp te
+  fs' <- concat <$> mapM fmtField fs
+  pure $  [prettyText name <> ": "] <> f' <> fs'  
+  where fmtField :: (Name, UncheckedTypeExp) -> FmtM Fmt 
+        fmtField (n, t) = do 
+          t' <- fmtTypeExp t
+          case t' of 
+            [] -> pure []
+            (l:ls) -> pure $ ", " : (prettyText n <> ": " <> l):ls
+
 -- | Formatting of Futhark type expressions.
 fmtTypeExp :: UncheckedTypeExp -> FmtM Fmt
 fmtTypeExp (TEVar v loc) = buildFmt (const (pure [prettyText v])) loc
   --pure [prettyText v]
-fmtTypeExp (TETuple ts loc) | isSingleLine loc = do
-  c <- comment loc
-  ts' <- fmtTupleTypeElems ts True
-  pure $ c <> ["(" <> T.concat ts' <> ")"]
-fmtTypeExp (TETuple ts loc) = do
-  c <- comment loc
-  ts' <- fmtTupleTypeElems ts False
-  pure $ c <> ["("] <>  ts' <> [")"]
-fmtTypeExp (TEParens type_exp loc) = undefined
-fmtTypeExp (TERecord ts loc) = undefined -- Records
-fmtTypeExp (TEArray size_exp type_exp loc) = undefined -- A array with an size expression
+fmtTypeExp (TETuple ts loc) | isSingleLine loc = 
+  buildFmt fmtFun loc
+  where fmtFun :: a -> FmtM Fmt
+        fmtFun _ = do
+          ts' <- fmtTupleTypeElems ts True
+          pure ["(" <> T.concat ts' <> ")"]
+fmtTypeExp (TETuple ts loc) = 
+  buildFmt fmtFun loc
+  where fmtFun :: a -> FmtM Fmt
+        fmtFun _ = do
+          ts' <- fmtTupleTypeElems ts False
+          pure $ ["("] <>  ts' <> [")"]
+fmtTypeExp (TEParens te loc) = buildFmt fmtFun loc
+  where fmtFun :: a -> FmtM Fmt
+        fmtFun _ = do 
+          te' <- fmtTypeExp te
+          pure $ ["("] <> te' <> [")"] 
+fmtTypeExp (TERecord fs loc) = buildFmt fmtFun loc -- Records
+  where fmtFun :: a -> FmtM Fmt
+        fmtFun _ = do
+          ts <- fmtRecordTypeFields fs
+          pure $ ["{"] <> ts <> ["}"]
+fmtTypeExp (TEArray size_exp type_exp loc) = undefined -- A array wicth an size expression
 fmtTypeExp (TEUnique type_exp loc) = undefined -- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
 fmtTypeExp (TEApply type_exp type_arg_exp loc) = undefined -- I am not sure I guess applying a higher kinded type to some type expression
 fmtTypeExp (TEArrow (Just name) type_exp type_exp' loc) = undefined -- is this "->"?
 fmtTypeExp (TEArrow Nothing type_exp type_exp' loc) = undefined -- is this "->"?
 fmtTypeExp (TESum type_exps loc) = undefined -- This should be "|"
 fmtTypeExp (TEDim names exp loc) = undefined -- This this probably [n][m]expression for array dimensions
-
-fmtTypeParam :: UncheckedTypeParam -> FmtM Fmt
-fmtTypeParam (TypeParamDim name loc) = undefined 
-fmtTypeParam (TypeParamType l name loc) = undefined
 
 fmtTypeBind :: UncheckedTypeBind -> FmtM Fmt
 fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = do
@@ -218,10 +253,61 @@ fmtAttr attr = do
   attr_info <- fmtAttrInfo attr
   pure $ ["#["] <> attr_info <> ["]"]
 
+fmtTypeParam :: UncheckedTypeParam -> FmtM Fmt
+fmtTypeParam (TypeParamDim name loc) = pure ["[" <> prettyText name <> "]"]
+fmtTypeParam (TypeParamType l name loc) =
+  pure $ ["'" <> fmtLiftedness l] <> [prettyText name]
+  where
+    fmtLiftedness Unlifted = ""
+    fmtLiftedness SizeLifted = "~"
+    fmtLiftedness Lifted = "^"
+
+fmtPat :: UncheckedPat t -> FmtM Fmt
+fmtPat (TuplePat pats loc) = do
+  fmt <- L.intercalate [", "] <$> mapM fmtPat pats
+  pure $ ["("] <> fmt <> [")"]
+fmtPat (RecordPat pats loc) = do
+  fmts <- L.intercalate [", "] <$> mapM fmtField pats
+  pure $ ["{"] <> fmts <> ["}"]
+  where
+    fmtField (name, t) = do
+      t' <- fmtPat t
+      pure $ [prettyText name] <> [" = "] <> t'
+fmtPat (PatParens pat loc) = do
+  fmt <- fmtPat pat
+  pure $ ["("] <> fmt <> [")"]
+fmtPat (Id name _ loc) = pure [prettyText name]
+fmtPat (Wildcard t loc) = pure ["_"]
+fmtPat (PatAscription pat t loc) = do
+  pat' <- fmtPat pat
+  t' <- fmtTypeExp t
+  pure $ pat' <> [":"] <> t'
+fmtPat (PatLit e _ loc) = pure [prettyText e]
+fmtPat (PatConstr n _ pats loc) = do
+  pats' <- concat <$> mapM fmtPat pats
+  pure $ ["#"] <> [prettyText n] <> pats' 
+fmtPat (PatAttr attr pat loc) = do
+  attr' <- fmtAttr attr
+  pat' <- fmtPat pat
+  pure $ attr' <> pat'
+
 fmtValBind :: UncheckedValBind -> FmtM Fmt
-fmtValBind (ValBind entry name retdecl rettype tparams args body doc attrs loc) = do
+fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc) = do
   fmt_attrs <- concat <$> mapM fmtAttr attrs
-  pure $ fmt_attrs <> fun
+  tparams' <- concat <$> mapM fmtTypeParam tparams
+  args' <- concat <$> mapM fmtPat args
+  retdecl' <-
+    case fmtTypeExp <$> retdecl of
+    Just a -> fmap ([":"] <>) a
+    Nothing -> pure []
+  -- exp <- fmtExp body
+  pure $ fmt_attrs <>
+         fun <>
+         [prettyText name] <>
+         tparams' <>
+         args' <>
+         retdecl' <>
+         ["="] -- <> exp
   where
     fun =
       case entry of
