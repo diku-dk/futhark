@@ -255,7 +255,7 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
       -- do we need to use `fusedSomething` ??
       new_node = G.node' new_withacc_ctx
       dg' = dg {dgGraph = new_withacc_ctx G.& G.delNodes [new_node] g}
-      
+{--      
   trace ("\nCOSMIN scatter:\n" ++ prettyString scat_soac ++
            "\n scat_out: " ++ prettyString scat_out ++ "\n" ++
            "\n scat inps: " ++ show scat_inp ++
@@ -276,7 +276,8 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
            "\nIota-Ctx: " ++ show ctxs_iots ++
            "\n\n\nNew-DG: " ++ pprg dg'
         ) $
-    pure $ Just dg'
+  --}
+  pure $ Just dg'
   where
     --
     getNodeTfromCtx (_, _, nT, _) = nT
@@ -334,7 +335,7 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
     checkShp _ _ = Nothing
 ruleMFScat _ _ = return Nothing
     
-{--
+{-- OLD GARBAGE:
     node_to_fuse_id <- nodeFromLNode node_to_fuse,
     (Just (dep_on_scat, scat_node, scat_lab, scat_dep_on), g') <- G.match node_to_fuse_id g,
     [(scat_v_e, scat_v_n), (_cons_e,_cons_n), (_dcons_e, _dcons_n), (_scat_i_e,_scat_i_n), (_asrt_e,_asrt_n), (_scat_l_e,_scat_len_n) ] <- scat_dep_on,

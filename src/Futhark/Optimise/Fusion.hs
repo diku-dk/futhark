@@ -328,11 +328,13 @@ vFuseNodeT
           pure $ bodyResult $ lambdaBody lam
     let lam' = lam { lambdaBody = bdy' }
     if safe
-    then trace ("WAcc is1: " ++ show is1 ++ " os1: " ++ show os1 ++ 
+    then {--
+          trace ("WAcc is1: " ++ show is1 ++ " os1: " ++ show os1 ++ 
            " os2: " ++ show os2 ++ "\n\tpat1: " ++ prettyString pat1 ++
            "\n\twacc_pat: " ++ prettyString pat2 ++
            "\n\tedges: " ++ show edges ++ 
            "\n\tinfusible: " ++ show infusible) $
+          --}
           fusedSomething $
             StmNode $ Let pat2 aux2 $ WithAcc w_inps lam'
     else pure $ Nothing
