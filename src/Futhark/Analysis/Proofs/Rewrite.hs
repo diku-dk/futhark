@@ -5,7 +5,7 @@ import Futhark.Analysis.Proofs.Unify
 import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.), sopToList, sopFromList, numTerms)
 import Futhark.MonadFreshNames
 import Futhark.Analysis.Proofs.Symbol (Symbol(..), normalizeSymbol, applyLinCombRule)
-import Control.Monad (foldM, msum, (<=<))
+import Control.Monad (foldM, msum, (<=<), guard)
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..), subIndexFn, repIteratorInBody, repVName)
 import Data.List (subsequences, (\\))
@@ -43,13 +43,6 @@ a ~+~ b = sym2SoP a .+. sym2SoP b
 (~-~) :: Ord u => u -> u -> SoP u
 a ~-~ b = sym2SoP a .-. sym2SoP b
 
--- converge :: Eq a => (a -> a) -> a -> a
--- converge f = converge_ . iterate f
---   where
---   converge_ (x:y:ys)
---       | x == y = y
---       | otherwise = converge_ (y:ys)
---   converge_ _ = undefined
 converge :: (Eq a, Monad m) => (a -> m a) -> a -> m a
 converge f x = do
   y <- f x
@@ -127,6 +120,33 @@ matchSoP rule sop
     -- Get all (k-subterms, remaining subterms).
     k = numTerms (from rule)
     combinations xs = [(s, xs \\ s) | s <- subsequences xs, length s == k]
+
+-- Generate all partitions of `xs` into `k` sublists.
+-- Includes sublists that are permutations of other sublists.
+-- For example, `combine 3 [1..4]` returns both `[[1],[2],[3,4]]`
+-- and `[[2], [1], [3,4]]`.
+partitions :: Eq a => Int -> [a] -> [[[a]]]
+partitions k xs
+  | k == 1 = [[xs]]
+  | 2 <= k && k <= length xs = do
+    s <- subsequences xs
+    guard (not (null s))
+    guard (length xs - length s >= k - 1)
+    x <- partitions (k-1) (xs \\ s)
+    [s : x]
+  | otherwise = []
+
+comb :: Ord u => Rule (SoP u) (SoP u) m -> SoP u -> [[(SoP u, SoP u)]]
+comb rule sop
+  | k <= numTerms sop = do
+    -- Pair each term in from rule with subterms in sop.
+    pairs <- map (zip xs) (partitions k ys)
+    undefined
+  | otherwise = []
+  where
+    k = numTerms (from rule)
+    xs = sopToList (from rule)
+    ys = sopToList sop
 
 rulesSoP :: IndexFnM [Rule (SoP Symbol) (SoP Symbol) IndexFnM]
 rulesSoP = do
