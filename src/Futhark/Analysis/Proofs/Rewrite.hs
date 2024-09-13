@@ -2,11 +2,11 @@ module Futhark.Analysis.Proofs.Rewrite
 where
 
 import Futhark.Analysis.Proofs.Unify
-import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.), sopToList, sopFromList, numTerms)
+import Futhark.SoP.SoP (SoP, sym2SoP, (.+.), int2SoP, (.-.), sopToList, sopFromList, numTerms, term2SoP)
 import Futhark.MonadFreshNames
 import Futhark.Analysis.Proofs.Symbol (Symbol(..), normalizeSymbol, applyLinCombRule)
-import Control.Monad (foldM, msum, (<=<), guard)
-import Futhark.SoP.FourierMotzkin (($<=$), ($==$))
+import Control.Monad (foldM, msum, (<=<))
+import Futhark.SoP.FourierMotzkin (($<=$))
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..), subIndexFn, repIteratorInBody, repVName)
 import Data.List (subsequences, (\\))
 import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), astMap)
@@ -15,8 +15,7 @@ import Futhark.SoP.Monad (substEquivs)
 import Data.Functor ((<&>))
 import Language.Futhark (VName)
 import qualified Data.Map as M
-import Debug.Trace (traceM)
-import Futhark.Util.Pretty (prettyString)
+import Futhark.Analysis.Proofs.Util (partitions)
 
 data Rule a b m = Rule {
     name :: String,
@@ -51,12 +50,13 @@ converge f x = do
   else converge f y
 
 match :: Unify u v m => Rule u v m -> u -> m (Maybe (Substitution v))
-match rule x = unify (from rule) x >>= checkSideCondition
-  where
-    checkSideCondition Nothing = pure Nothing
-    checkSideCondition (Just s) = do
-      b <- sideCondition rule s
-      pure $ if b then Just s else Nothing
+match rule x = unify (from rule) x >>= check (sideCondition rule)
+
+check :: Monad f => (a -> f Bool) -> Maybe a -> f (Maybe a)
+check _ Nothing = pure Nothing
+check cond (Just s) = do
+  b <- cond s
+  pure $ if b then Just s else Nothing
 
 class Monad m => Rewritable u m where
   rewrite :: u -> m u
@@ -106,12 +106,13 @@ instance Rewritable IndexFn IndexFnM where
 -- it matches `a + a` and `b + b` and returns `2a + 2b + c`.
 matchSoP :: ( Replaceable u (SoP u)
             , Unify u (SoP u) m
+            , Hole u
             , Ord u) => Rule (SoP u) (SoP u) m -> SoP u -> m (SoP u)
 matchSoP rule sop
   | numTerms (from rule) <= numTerms sop = do
-    let (subterms, contexts) = unzip . combinations $ sopToList sop
+    let (subterms, contexts) = unzip . splits $ sopToList sop
     -- Get first valid subterm substitution. Recursively match context.
-    subs <- mapM (match rule . sopFromList) subterms
+    subs <- mapM (matchP rule . sopFromList) subterms
     case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
       Just (s, ctx) -> (.+.) <$> matchSoP rule (sopFromList ctx) <*> to rule s
       Nothing -> pure sop
@@ -119,29 +120,24 @@ matchSoP rule sop
   where
     -- Get all (k-subterms, remaining subterms).
     k = numTerms (from rule)
-    combinations xs = [(s, xs \\ s) | s <- subsequences xs, length s == k]
+    splits xs = [(s, xs \\ s) | s <- subsequences xs, length s >= k]
 
--- Generate all partitions of `xs` into `k` sublists.
--- Includes sublists that are permutations of other sublists.
--- For example, `combine 3 [1..4]` returns both `[[1],[2],[3,4]]`
--- and `[[2], [1], [3,4]]`.
-partitions :: Eq a => Int -> [a] -> [[[a]]]
-partitions k xs
-  | k == 1 = [[xs]]
-  | 2 <= k && k <= length xs = do
-    s <- subsequences xs
-    guard (not (null s))
-    guard (length xs - length s >= k - 1)
-    x <- partitions (k-1) (xs \\ s)
-    [s : x]
-  | otherwise = []
+    -- Pick first partition that matches.
+    matchP rule sop =
+      msum <$> mapM (check (sideCondition rule) <=< unifies) (combine rule sop)
 
-comb :: Ord u => Rule (SoP u) (SoP u) m -> SoP u -> [[(SoP u, SoP u)]]
-comb rule sop
+combine :: Ord u => Rule (SoP u) (SoP u) m -> SoP u -> [[(SoP u, SoP u)]]
+combine rule sop
   | k <= numTerms sop = do
     -- Pair each term in from rule with subterms in sop.
-    pairs <- map (zip xs) (partitions k ys)
-    undefined
+    -- For example, h1 + h2 and x + y + z pairs as follows
+    -- [[(h1, x), (h2, y+z)],
+    --  [(h1, x+y), (h2, z)],
+    --  [(h1, x+z), (h2, y)],
+    --  ... permutations where h1 and h2 are switched
+    -- ]
+    partition <- partitions k ys
+    pure $ zipWith (\x ts -> (uncurry term2SoP x, sopFromList ts)) xs partition
   | otherwise = []
   where
     k = numTerms (from rule)
@@ -154,43 +150,28 @@ rulesSoP = do
   h1 <- newVName "h"
   h2 <- newVName "h"
   h3 <- newVName "h"
-  h4 <- newVName "h"
   x1 <- newVName "x"
   y1 <- newVName "y"
   pure
     [ Rule
-        { name = "Extend sum lower bound (1)"
-        , from = LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
-                   ~+~ Idx (Hole h3) (hole h4)
-        , to = \s -> sub s $ LinComb i (hole h4) (hole h2) (Idx (Hole h3) (sVar i))
-        , sideCondition = \s -> do
-            lb <- sub s (Hole h1)
-            ind <- sub s (Hole h4)
-            traceM ("##### lb " <> prettyString lb)
-            traceM ("##### ind " <> prettyString ind)
-            lb $==$ (ind .+. int 1)
-        }
-    , Rule
-        { name = "Extend sum lower bound (2)"
-        , from = LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
-                   ~+~ Idx (Hole h3) (hole h1 .-. int 1)
+        -- NOTE that this will also match, e.g.,
+        --    x[a - 1337] + LinComb i (a - 1336) b x[i]
+        -- since this unifies with
+        --    x[h1] + LinComb i (h1+1) b x[i]
+        -- by substituting h1 for a - 1337.
+        { name = "Extend sum lower bound"
+        , from = LinComb i (hole h1 .+. int 1) (hole h2) (Idx (Hole h3) (sVar i))
+                   ~+~ Idx (Hole h3) (hole h1)
         , to = \s -> sub s $
-                  LinComb i (hole h1 .-. int 1) (hole h2) (Idx (Hole h3) (sVar i))
+                  LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
         , sideCondition = vacuous
         }
     , Rule
-        { name = "Extend sum upper bound (1)"
+        -- NOTE This matches similarly to "Extend sum lower bound".
+        { name = "Extend sum upper bound"
         , from = LinComb i (hole h1) (hole h2 .-. int 1) (Idx (Hole h3) (sVar i))
                    ~+~ Idx (Hole h3) (hole h2)
         , to = \s -> sub s $ LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
-        , sideCondition = vacuous
-        }
-    , Rule
-        { name = "Extend sum upper bound (2)"
-        , from = LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
-                   ~+~ Idx (Hole h3) (hole h2 .+. int 1)
-        , to = \s -> sub s $
-                  LinComb i (hole h1) (hole h2 .+. int 1) (Idx (Hole h3) (sVar i))
         , sideCondition = vacuous
         }
     , Rule

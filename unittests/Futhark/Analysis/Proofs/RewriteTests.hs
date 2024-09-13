@@ -24,8 +24,8 @@ tests :: TestTree
 tests = testGroup "Proofs.Rewrite"
   [ testCase "Add" $
       run (\(x,y,_,_,_,_,_,_) ->
-        rewrite (sVar x .+. sVar y)
-      ) @??= (sVar x .+. sVar y)
+        rewrite (sVar x .+. sVar y .+. int 1)
+      ) @??= (sVar x .+. sVar y .+. int 1)
   , testCase "Extend sum lower bound (1)" $
       run (\(x,y,z,w,_,_,_,_) ->
         rewrite (Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w)))
@@ -34,6 +34,10 @@ tests = testGroup "Proofs.Rewrite"
       run (\(x,y,z,w,_,_,_,_) ->
         rewrite (Idx (Var x) (sVar y .-. int 1) ~+~ LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)))
       ) @??= sym2SoP (LinComb w (sVar y .-. int 1) (sVar z) (Idx (Var x) (sVar w)))
+  , testCase "Extend sum lower bound (3)" $
+      run (\(x,y,z,w,_,_,_,_) ->
+        rewrite (Idx (Var x) (sVar y .-. int 1337) ~+~ LinComb w (sVar y .-. int 1336) (sVar z) (Idx (Var x) (sVar w)))
+      ) @??= sym2SoP (LinComb w (sVar y .-. int 1337) (sVar z) (Idx (Var x) (sVar w)))
   , testCase "Extend sum lower bound twice" $
       run (\(x,y,z,w,_,_,_,_) ->
         rewrite (Idx (Var x) (sVar y .-. int 1) ~+~ Idx (Var x) (sVar y) .+. sym2SoP (LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w))))

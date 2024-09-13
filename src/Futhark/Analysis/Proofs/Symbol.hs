@@ -4,11 +4,10 @@ where
 import Data.Set qualified as S
 import Data.Map.Strict qualified as M
 import Language.Futhark (VName)
-import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), unifies)
+import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), Hole (justHole), unifies_)
 import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), enclose, prettyString)
-import Debug.Trace (trace)
+import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), enclose)
 import Futhark.Analysis.Proofs.Util (prettyName)
 
 data Symbol =
@@ -225,7 +224,7 @@ instance Ord Symbol where
 instance Pretty Symbol where
   pretty symbol = case symbol of
     (Var x) -> prettyName x
-    (Hole x) -> prettyName x
+    (Hole x) -> "•" <> prettyName x
     (Idx x i) -> autoParens x <> brackets (pretty i)
     (LinComb i lb ub e) ->
       "∑"
@@ -336,6 +335,9 @@ instance Replaceable Symbol (SoP Symbol) where
       f op x y = sym2SoP $ rep s x `op` rep s y
       g op x y = sym2SoP $ sop2Symbol (rep s x) `op` sop2Symbol (rep s y)
 
+instance Hole Symbol where
+  justHole (Hole x) = Just x
+  justHole _ = Nothing
 
 -- NOTE 2.b.iii says "if x occurs in some other equation",
 -- but we don't have access to other equations here.
@@ -358,6 +360,7 @@ instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
   --     isVar _ = False
   -- 2.
   unify_ _ (Var x) t | Var x == t = pure mempty
+  -- XXX Are the checks on bound vars redundant with holes?
   unify_ k (Hole x) t
     | Hole x == t = error "Holes are not allowed in the second argument!"
     | x >= k = fail "2.b.i"
@@ -379,12 +382,12 @@ instance MonadFreshNames m => Unify Symbol (SoP Symbol) m where
   unify_ k (Not x) (Not y) = unify_ k x y
   unify_ _ Recurrence Recurrence = pure mempty
   unify_ k a b = case (a, b) of
-    (x1 :< y1, x2 :< y2) -> unifies k [(x1, x2), (y1, y2)]
-    (x1 :<= y1, x2 :<= y2) -> unifies k [(x1, x2), (y1, y2)]
-    (x1 :> y1, x2 :> y2) -> unifies k [(x1, x2), (y1, y2)]
-    (x1 :>= y1, x2 :>= y2) -> unifies k [(x1, x2), (y1, y2)]
-    (x1 :== y1, x2 :== y2) -> unifies k [(x1, x2), (y1, y2)]
-    (x1 :/= y1, x2 :/= y2) -> unifies k [(x1, x2), (y1, y2)]
-    (x1 :&& y1, x2 :&& y2) -> unifies k [(x1, x2), (y1, y2)]
-    (x1 :|| y1, x2 :|| y2) -> unifies k [(x1, x2), (y1, y2)]
+    (x1 :< y1, x2 :< y2) -> unifies_ k [(x1, x2), (y1, y2)]
+    (x1 :<= y1, x2 :<= y2) -> unifies_ k [(x1, x2), (y1, y2)]
+    (x1 :> y1, x2 :> y2) -> unifies_ k [(x1, x2), (y1, y2)]
+    (x1 :>= y1, x2 :>= y2) -> unifies_ k [(x1, x2), (y1, y2)]
+    (x1 :== y1, x2 :== y2) -> unifies_ k [(x1, x2), (y1, y2)]
+    (x1 :/= y1, x2 :/= y2) -> unifies_ k [(x1, x2), (y1, y2)]
+    (x1 :&& y1, x2 :&& y2) -> unifies_ k [(x1, x2), (y1, y2)]
+    (x1 :|| y1, x2 :|| y2) -> unifies_ k [(x1, x2), (y1, y2)]
     _ -> fail "Incompatible"

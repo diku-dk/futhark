@@ -11,9 +11,8 @@ import Futhark.SoP.SoP (SoP, int2SoP, (.-.), (.+.), sym2SoP)
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 import Futhark.MonadFreshNames
 import Control.Monad.RWS.Strict
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution, Unify (..), unifies)
-import Debug.Trace (trace, traceM)
-import Futhark.Util.Pretty (Pretty (pretty), (<+>), commasep, parens, stack, indent, line, prettyString)
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution, Unify (..), unifies_)
+import Futhark.Util.Pretty (Pretty (pretty), (<+>), commasep, parens, stack, indent, line)
 import Futhark.Analysis.Proofs.Util (prettyName)
 
 data Domain = Iota (SoP Symbol) -- [0, ..., n-1]
@@ -93,13 +92,9 @@ insertIndexFn x v =
 -- clearAlgEnv =
 --   modify $ \env -> env {algenv = mempty}
 
-tracer :: Pretty a => a -> a
-tracer x = trace (prettyString x) x
-
 repCases :: Substitution (SoP Symbol) -> Cases Symbol (SoP Symbol) -> Cases Symbol (SoP Symbol)
-repCases s (Cases cs) | trace ("repCases " <> prettyString s <> " " <> prettyString cs) False = undefined
 repCases s (Cases cs) =
-  tracer $ Cases $ NE.map (\(p,q) -> (sop2Symbol (rep s p), rep s q)) cs
+  Cases $ NE.map (\(p,q) -> (sop2Symbol (rep s p), rep s q)) cs
 
 repDomain :: Substitution (SoP Symbol) -> Domain -> Domain
 repDomain s (Iota n) = Iota (rep s n)
@@ -155,11 +150,8 @@ instance MonadFreshNames m => Unify Domain (SoP Symbol) m where
 
 instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) (SoP Symbol) m where
   unify_ k (Cases cs1) (Cases cs2) = do
-    s <- unifies k (zip (map fst xs) (map fst ys))
-    traceM ("unify " <> prettyString (map fst xs) <> prettyString (map fst ys))
-    s2 <- unifies k (zip (map (rep s . snd) xs) (map (rep s . snd) ys))
-    traceM ("unify " <> prettyString (map snd xs) <> prettyString (map snd ys))
-    traceM ("unify " <> prettyString (map (rep s . snd) xs) <> prettyString (map (rep s . snd) ys))
+    s <- unifies_ k (zip (map fst xs) (map fst ys))
+    s2 <- unifies_ k (zip (map (rep s . snd) xs) (map (rep s . snd) ys))
     pure $ s <> s2
     where
       xs = NE.toList cs1
@@ -167,7 +159,6 @@ instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) (SoP Symbol) m w
 
 -- XXX we require that index function quantifiers (indexing variables) are unique!
 instance MonadFreshNames m => Unify IndexFn (SoP Symbol) m where
-  unify_ _ fn1 fn2 | trace ("\nunify\n  " <> prettyString fn1 <> "\n  " <> prettyString fn2) False = undefined
   unify_ k (IndexFn Empty body1) (IndexFn Empty body2) =
     unify_ k body1 body2
   unify_ k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j dom2) body2) = do
@@ -207,22 +198,18 @@ instance (Pretty a, Pretty b) => Pretty (Cases a b) where
 
 instance Pretty Domain where
   pretty (Iota n) = "iota" <+> parens (pretty n)
-  pretty dom@(Cat k m _) =
+  pretty (Cat k m b) =
     "⊎"
       <> prettyName k
       <> "="
       <> "iota" <+> pretty m
       <+> "[" <> commasep [
-            pretty (intervalStart dom),
+            pretty b,
             "...",
-            pretty (intervalEnd dom)
+            pretty intervalEnd
           ] <> ")"
     where
-      intervalStart (Cat _ _ b) = b
-      intervalStart (Iota _) = error "intervalStart on iota"
-
-      intervalEnd (Cat k _ b) = rep (M.singleton k (sym2SoP (Var k) .+. int2SoP 1)) b
-      intervalEnd (Iota _) = error "intervalEnd on iota"
+      intervalEnd = rep (M.singleton k (sym2SoP (Var k) .+. int2SoP 1)) b
 
 
 instance Pretty Iterator where
