@@ -317,8 +317,8 @@ vFuseNodeT
 --    for as long as it is returned by the withAcc. If `infusible` is empty
 --    then the extranous result will be simplified away.
 vFuseNodeT
-  _edges 
-  _infusible 
+  _edges
+  _infusible
   (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, is1, _os1)
   (StmNode (Let pat2 aux2 (WithAcc w_inps lam)), _os2)
     | ots1 == mempty,
