@@ -12,6 +12,7 @@ import Control.Monad.State
 import Data.Graph.Inductive.Graph qualified as G
 import Data.Graph.Inductive.Query.DFS qualified as Q
 import Data.List qualified as L
+import qualified Data.Set as S
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
@@ -23,9 +24,12 @@ import Futhark.IR.SOACS qualified as Futhark
 import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Optimise.Fusion.TryFusion qualified as TF
+import Futhark.Optimise.Fusion.SpecRules qualified as SF
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+
+--import Debug.Trace
 
 data FusionEnv = FusionEnv
   { vNameSource :: VNameSource,
@@ -302,6 +306,62 @@ vFuseNodeT
         H.addTransform
           (H.Index cs (fullSlice (H.inputType inp) [ds]))
           inp
+-- Case of fusing a screma with an WithAcc such as to (hopefully) perform
+--   more fusion within the WithAcc. This would allow the withAcc to move in
+--   the code (since up to now they mostly remain where they were introduced.)
+-- We conservatively allow the fusion to fire---i.e., to move the soac inside
+--   the withAcc---when the following are not part of withAcc's accumulators:
+--    1. the in-dependencies of the soac and
+--    2. the result of the soac
+--  Note that the soac result is allowed to be part of the `infusible`
+--    for as long as it is returned by the withAcc. If `infusible` is empty
+--    then the extranous result will be simplified away.
+vFuseNodeT
+  _edges 
+  _infusible 
+  (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, is1, _os1)
+  (StmNode (Let pat2 aux2 (WithAcc w_inps lam)), _os2)
+    | ots1 == mempty,
+      wacc_cons_nms  <- S.fromList $ concatMap (\(_,nms,_)->nms) w_inps,
+      soac_prod_nms  <- map patElemName $ patElems pat1,
+      soac_indep_nms <- map getName is1,
+      all (not . (`S.member` wacc_cons_nms)) (soac_indep_nms ++ soac_prod_nms)
+    = do
+    scope <- askScope
+    bdy' <-
+      runBodyBuilder $ do
+        buildBody_ . localScope (scope <> scopeOfLParams (lambdaParams lam)) $ do
+          soac' <- H.toExp soac
+          addStm $ Let pat1 aux1 soac'
+          mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam
+          let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms 
+          pure $ (bodyResult (lambdaBody lam)) ++ pat1_res
+    {--
+          trace ("WAcc is1: " ++ show is1 ++ " os1: " ++ show os1 ++ 
+           " os2: " ++ show os2 ++ "\n\tpat1: " ++ prettyString pat1 ++
+           "\n\twacc_pat: " ++ prettyString pat2 ++
+           "\n\tedges: " ++ show edges ++ 
+           "\n\tinfusible: " ++ show infusible) $
+    --}
+    let pat = Pat $ patElems pat2 ++ patElems pat1
+    -- `aux1` already appear in the moved SOAC stm; is there
+    -- any need to add it to the enclosing withAcc stm as well?
+    fusedSomething $ StmNode $ Let pat aux2 $
+                     WithAcc w_inps $ lam { lambdaBody = bdy' }
+-- the case of fusing two withaccs
+vFuseNodeT
+  _edges 
+  infusible
+  (StmNode stm1@(Let _ _ (WithAcc _ _)), is1, _os1)
+  (StmNode stm2@(Let _ _ (WithAcc w2_inps _)), _os2) = do
+    let wacc2_cons_nms  = S.fromList $ concatMap (\(_,nms,_)->nms) w2_inps
+        wacc1_indep_nms = map getName is1
+        safe = all (\ x -> not (S.member x wacc2_cons_nms)) wacc1_indep_nms
+    mstm <- SF.tryFuseWithAccs infusible stm1 stm2
+    case (safe, mstm) of
+      (True, Just stm) -> fusedSomething $ StmNode $ stm
+      _ -> pure Nothing
+--
 vFuseNodeT _ _ _ _ = pure Nothing
 
 resFromLambda :: Lambda rep -> Result
@@ -367,13 +427,19 @@ removeUnusedOutputs :: DepGraphAug FusionM
 removeUnusedOutputs = mapAcross removeUnusedOutputsFromContext
 
 tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
+tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g}
+  | not (G.gelem (nodeFromLNode node_to_fuse) g) = pure dg
+  -- ^ Node might have been fused away since.
 tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
-  if G.gelem node_to_fuse_id g -- Node might have been fused away since.
-    then applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
-    else pure dg
+  spec_rule_res <- SF.ruleMFScat node_to_fuse dg
+  -- ^ specialized fusion rules such as the one
+  --   enabling map-flatten-scatter fusion
+  case spec_rule_res of
+    Just dg'-> pure dg'
+    Nothing -> applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
   where
-    fuses_with = map fst $ filter (isDep . snd) $ G.lpre g (nodeFromLNode node_to_fuse)
     node_to_fuse_id = nodeFromLNode node_to_fuse
+    fuses_with = map fst $ filter (isDep . snd) $ G.lpre g node_to_fuse_id
 
 doVerticalFusion :: DepGraphAug FusionM
 doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relevant $ G.labNodes (dgGraph dg)) dg
