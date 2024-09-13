@@ -72,6 +72,8 @@ commasep (x:xs) = do
   xs' <- commasep xs
   pure $ (x <> ", ") : xs'
 
+brackets :: Fmt -> FmtM Fmt
+brackets fmt = pure $ ["["] <> fmt <> ["]"]
 {-
 commasepbetween :: Line -> Line -> Fmt -> FmtM Fmt
 commasepbetween o c xs = do
@@ -180,9 +182,7 @@ fmtRecordTypeFields ((name, te):fs) = do
   where fmtField :: (Name, UncheckedTypeExp) -> FmtM Fmt 
         fmtField (n, t) = do 
           t' <- fmtTypeExp t
-          case t' of 
-            [] -> pure []
-            (l:ls) -> pure $ ", " : (prettyText n <> ": " <> l):ls
+          pure $ mapLast (", " <>) t'
 
 -- | Formatting of Futhark type expressions.
 fmtTypeExp :: UncheckedTypeExp -> FmtM Fmt
@@ -210,9 +210,25 @@ fmtTypeExp (TERecord fs loc) = buildFmt fmtFun loc -- Records
         fmtFun _ = do
           ts <- fmtRecordTypeFields fs
           pure $ ["{"] <> ts <> ["}"]
-fmtTypeExp (TEArray size_exp type_exp loc) = undefined -- A array wicth an size expression
-fmtTypeExp (TEUnique type_exp loc) = undefined -- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
-fmtTypeExp (TEApply type_exp type_arg_exp loc) = undefined -- I am not sure I guess applying a higher kinded type to some type expression
+fmtTypeExp (TEArray se te loc) = buildFmt fmtFun loc -- A array with an size expression 
+  where fmtFun :: a -> FmtM Fmt 
+        fmtFun _ = do
+          se' <- fmtSizeExp se
+          te' <- fmtTypeExp te
+          pure $  se' <> te'
+-- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
+fmtTypeExp (TEUnique te loc) = buildFmt fmtFun loc 
+  where fmtFun :: a -> FmtM Fmt
+        fmtFun _ = do 
+          te' <- fmtTypeExp te 
+          pure $ ["*"] <> te' 
+-- I am not sure I guess applying a higher kinded type to some type expression
+-- NOT DONE missing arg formatting 
+fmtTypeExp (TEApply te tArgE loc) = buildFmt fmtFun loc 
+  where fmtFun :: a -> FmtM Fmt 
+        fmtFun _ = do 
+          te' <- fmtTypeExp te
+          pure $ te'-- undefined 
 fmtTypeExp (TEArrow (Just name) type_exp type_exp' loc) = undefined -- is this "->"?
 fmtTypeExp (TEArrow Nothing type_exp type_exp' loc) = undefined -- is this "->"?
 fmtTypeExp (TESum type_exps loc) = undefined -- This should be "|"
@@ -313,6 +329,10 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
       case entry of
         Just _ -> ["entry"]
         _ -> ["def"]
+
+fmtSizeExp :: SizeExp d -> FmtM Fmt
+fmtSizeExp (SizeExp d loc) = undefined -- cannot fiugre out how to format dimension d
+fmtSizeExp (SizeExpAny _loc) = brackets mempty
 
 -- | Formatting of Futhark declarations.
 fmtDec :: UncheckedDec -> FmtM Fmt
