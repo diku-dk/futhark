@@ -12,7 +12,6 @@ import Control.Monad.State
 import Data.Graph.Inductive.Graph qualified as G
 import Data.Graph.Inductive.Query.DFS qualified as Q
 import Data.List qualified as L
-import qualified Data.Set as S
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
@@ -322,10 +321,10 @@ vFuseNodeT
   (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, is1, _os1)
   (StmNode (Let pat2 aux2 (WithAcc w_inps lam)), _os2)
     | ots1 == mempty,
-      wacc_cons_nms  <- S.fromList $ concatMap (\(_,nms,_)->nms) w_inps,
+      wacc_cons_nms  <- namesFromList $ concatMap (\(_,nms,_)->nms) w_inps,
       soac_prod_nms  <- map patElemName $ patElems pat1,
       soac_indep_nms <- map getName is1,
-      all (not . (`S.member` wacc_cons_nms)) (soac_indep_nms ++ soac_prod_nms)
+      all (`notNameIn` wacc_cons_nms) (soac_indep_nms ++ soac_prod_nms)
     = do
     scope <- askScope
     bdy' <-
@@ -343,20 +342,53 @@ vFuseNodeT
            "\n\tedges: " ++ show edges ++ 
            "\n\tinfusible: " ++ show infusible) $
     --}
+    lam' <- renameLambda $ lam { lambdaBody = bdy' }
     let pat = Pat $ patElems pat2 ++ patElems pat1
     -- `aux1` already appear in the moved SOAC stm; is there
     -- any need to add it to the enclosing withAcc stm as well?
-    fusedSomething $ StmNode $ Let pat aux2 $
-                     WithAcc w_inps $ lam { lambdaBody = bdy' }
+    fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam'
+--
+-- The reverse of the case above, i.e., fusing a screma at the back of an
+--   WithAcc such as to (hopefully) enable more fusion there. 
+-- This should be safe as long as the SOAC does not uses any of the
+--   accumulator arrays produced by the withAcc.
+vFuseNodeT
+  edges
+  _infusible
+  (StmNode (Let pat1 aux1 (WithAcc w_inps wlam)), _is1, _os1)
+  (SoacNode ots2 pat2 soac@(H.Screma _w _form _s_inps) aux2, _os2)
+    | ots2 == mempty,
+      n <- length (lambdaParams wlam) `div` 2,
+      pat1_acc_nms <- namesFromList $ take n $ map patElemName $ patElems pat1,
+      -- not $ namesIntersect (freeIn soac) pat1_acc_nms
+      all (`notNameIn` pat1_acc_nms) (map getName edges) = do
+    scope <- askScope
+    bdy' <-
+      runBodyBuilder $ do
+        buildBody_ . localScope (scope <> scopeOfLParams (lambdaParams wlam)) $ do
+          -- adding stms of withacc's lambda
+          mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody wlam
+          -- add the soac stmt
+          soac' <- H.toExp soac
+          addStm $ Let pat2 aux2 soac'
+          -- build the body result
+          let pat2_res = map (SubExpRes (Certs []) . Var . patElemName) $ patElems pat2
+          pure $ (bodyResult (lambdaBody wlam)) ++ pat2_res
+    wlam' <- renameLambda $ wlam { lambdaBody = bdy' }
+    let pat = Pat $ patElems pat1 ++ patElems pat2
+    -- `aux1` already appear in the moved SOAC stm; is there
+    -- any need to add it to the enclosing withAcc stm as well?
+    fusedSomething $ StmNode $ Let pat aux1 $ WithAcc w_inps wlam'
 -- the case of fusing two withaccs
 vFuseNodeT
   _edges 
   infusible
   (StmNode stm1@(Let _ _ (WithAcc _ _)), is1, _os1)
   (StmNode stm2@(Let _ _ (WithAcc w2_inps _)), _os2) = do
-    let wacc2_cons_nms  = S.fromList $ concatMap (\(_,nms,_)->nms) w2_inps
+    let wacc2_cons_nms  = namesFromList $ concatMap (\(_,nms,_)->nms) w2_inps
         wacc1_indep_nms = map getName is1
-        safe = all (\ x -> not (S.member x wacc2_cons_nms)) wacc1_indep_nms
+        safe = all (`notNameIn` wacc2_cons_nms) wacc1_indep_nms
+        -- ^ the other safety checks are done inside `tryFuseWithAccs`
     mstm <- SF.tryFuseWithAccs infusible stm1 stm2
     case (safe, mstm) of
       (True, Just stm) -> fusedSomething $ StmNode $ stm

@@ -408,10 +408,11 @@ accTup5 (_,_,_,_,a) = a
 --        be the same.
 --   2. The `bs` that are also accumulated upon in lam2
 --        do NOT belong to the `infusible` set (they are destroyed)
+--   3. x1 ... xq do not overlap with c1 ... cn
 -- Fusion will create one withacc that accumulates on the
 --   union of `a1 ... am` and `c1 ... cn` and returns, in addition
 --   to the accumulator arrays the union of regular variables
---   `x1 ... xq` and `y1, ..., yp`.
+--   `x1 ... xq` and `y1, ..., yp`
 --
 tryFuseWithAccs :: (HasScope SOACS m, MonadFreshNames m) =>
                    [VName] -> Stm SOACS -> Stm SOACS ->
@@ -435,7 +436,11 @@ tryFuseWithAccs infusible
     -- safety 2:
     -- bs <- map patElemName $ concatMap accTup1 acc_tup1,
     bs <- map patElemName $ concatMap (accTup1 . fst) tup_common,
-    all (`notElem` infusible) bs = do
+    all (`notElem` infusible) bs,
+    -- safety 3:
+    cs <- namesFromList $ concatMap (\(_,xs,_)->xs) $ map accTup2 acc_tup2,
+    all (`notNameIn` cs) (map (patElemName . fst) other_pr1)
+    = do
     -- rest of implementation
     let getCertPairs (t1, t2) = (paramName (accTup3 t2), paramName (accTup3 t1))
         tab_certs = M.fromList $ map getCertPairs tup_common
