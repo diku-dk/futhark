@@ -23,7 +23,7 @@ import Futhark.IR.SOACS qualified as Futhark
 import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Optimise.Fusion.TryFusion qualified as TF
-import Futhark.Optimise.Fusion.SpecRules qualified as SF
+import Futhark.Optimise.Fusion.RulesWithAccs qualified as SF
 import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute

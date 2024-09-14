@@ -313,7 +313,7 @@ library
       Futhark.Optimise.Fusion
       Futhark.Optimise.Fusion.Composing
       Futhark.Optimise.Fusion.GraphRep
-      Futhark.Optimise.Fusion.SpecRules
+      Futhark.Optimise.Fusion.RulesWithAccs
       Futhark.Optimise.Fusion.TryFusion
       Futhark.Optimise.GenRedOpt
       Futhark.Optimise.HistAccs

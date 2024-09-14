@@ -7,7 +7,11 @@
 --          let res = scatter res0 finds fvals
 --   where inds & vals have higher rank than finds & fvals.
 --   
-module Futhark.Optimise.Fusion.SpecRules (ruleMFScat, tryFuseWithAccs, printNodeT) where
+module Futhark.Optimise.Fusion.RulesWithAccs
+  ( ruleMFScat, 
+    tryFuseWithAccs, 
+    printNodeT
+  ) where
 
 -- import Control.Applicative
 -- import Control.Monad
