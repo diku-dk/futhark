@@ -7,7 +7,7 @@
 --          let res = scatter res0 finds fvals
 --   where inds & vals have higher rank than finds & fvals.
 --   
-module Futhark.Optimise.Fusion.SpecRules (ruleMFScat, tryFuseWithAccs) where
+module Futhark.Optimise.Fusion.SpecRules (ruleMFScat, tryFuseWithAccs, printNodeT) where
 
 -- import Control.Applicative
 -- import Control.Monad
@@ -463,7 +463,7 @@ tryFuseWithAccs infusible
           -- add the copy stms for the common accumulator
           _ <- forM tup_common $ \ (tup1, tup2) -> do
                 let (lpar1, lpar2) = (accTup4 tup1, accTup4 tup2)
-                    (nm1, nm2, tp_acc) = (paramName lpar1, paramName lpar2, paramDec lpar1)
+                    ((nm1,_), nm2, tp_acc) = (accTup5 tup1, paramName lpar2, paramDec lpar1)
                 addStm $ Let (Pat [PatElem nm2 tp_acc]) empty_aux $ BasicOp $ SubExp $ Var $ nm1
           -- add copy stms to bring in scope x1 ... xq
           _ <- forM other_pr1 $ \ (pat_elm, bdy_res) -> do
@@ -600,7 +600,6 @@ allEq as bs =
   length as == length bs &&
   (all (\(a,b)-> a == b) (zip as bs))
 
-
 printNodeT :: NodeT -> String
 printNodeT (StmNode stm) = prettyString stm
 printNodeT (SoacNode trsf pat soac aux) =
@@ -608,8 +607,16 @@ printNodeT (SoacNode trsf pat soac aux) =
   prettyString soac ++ "\n"  ++
   "\n\t\tAux: " ++ show aux ++
   "\n\t\tTransforms: " ++ show trsf
-printNodeT _ = "Unimplemented Print NodeT"
-
+printNodeT (TransNode nm1 _trsf nm2) =
+  prettyString nm1 ++ " H.transform " ++ prettyString nm2
+printNodeT (ResNode nm) =
+  "Result " ++ prettyString nm
+printNodeT (FreeNode nm) =
+  "FreeNode " ++ prettyString nm
+printNodeT (MatchNode stm _) =
+  "MatchNode of stm: " ++ prettyString stm
+printNodeT (DoNode stm _) =
+  "DoNode of stm: " ++ prettyString stm
 
 ------------------------------
 ---  clones from Fusion.hs ---

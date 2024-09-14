@@ -28,7 +28,7 @@ import Futhark.Pass
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 
---import Debug.Trace
+import Debug.Trace
 
 data FusionEnv = FusionEnv
   { vNameSource :: VNameSource,
@@ -119,7 +119,7 @@ fusedSomething x = do
 
 vFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
 vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
-  not (any isInf (edgesBetween dg n1 n2))
+  ( isWithAccNodeId n2 dg || not (any isInf (edgesBetween dg n1 n2)) )
     && not (any (reachable dg n2) (filter (/= n2) (G.pre g n1)))
 
 hFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
@@ -335,14 +335,8 @@ vFuseNodeT
           mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam
           let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms 
           pure $ (bodyResult (lambdaBody lam)) ++ pat1_res
-    {--
-          trace ("WAcc is1: " ++ show is1 ++ " os1: " ++ show os1 ++ 
-           " os2: " ++ show os2 ++ "\n\tpat1: " ++ prettyString pat1 ++
-           "\n\twacc_pat: " ++ prettyString pat2 ++
-           "\n\tedges: " ++ show edges ++ 
-           "\n\tinfusible: " ++ show infusible) $
-    --}
-    lam' <- renameLambda $ lam { lambdaBody = bdy' }
+    let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
+    lam' <- renameLambda $ lam { lambdaBody = bdy', lambdaReturnType = lam_ret_tp }
     let pat = Pat $ patElems pat2 ++ patElems pat1
     -- `aux1` already appear in the moved SOAC stm; is there
     -- any need to add it to the enclosing withAcc stm as well?
@@ -471,12 +465,15 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
     Nothing -> applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
   where
     node_to_fuse_id = nodeFromLNode node_to_fuse
-    fuses_with = map fst $ filter (isDep . snd) $ G.lpre g node_to_fuse_id
+    relevant (n, InfDep _) = isWithAccNodeId n dg
+    relevant (_, e) = isDep e
+    fuses_with = map fst $ filter relevant $ G.lpre g node_to_fuse_id
+    -- fuses_with = map fst $ filter (isDep . snd) $ G.lpre g node_to_fuse_id
 
 doVerticalFusion :: DepGraphAug FusionM
 doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relevant $ G.labNodes (dgGraph dg)) dg
   where
-    relevant (_, StmNode {}) = False
+    relevant (_, n@(StmNode {})) = isWithAccNodeT n
     relevant (_, ResNode {}) = False
     relevant _ = True
 

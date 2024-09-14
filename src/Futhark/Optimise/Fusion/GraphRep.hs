@@ -41,6 +41,8 @@ module Futhark.Optimise.Fusion.GraphRep
     mkDepGraph,
     mkDepGraphForFun,
     pprg,
+    isWithAccNodeT,
+    isWithAccNodeId
   )
 where
 
@@ -431,3 +433,13 @@ isInf (_, _, e) = case e of
 isCons :: EdgeT -> Bool
 isCons (Cons _) = True
 isCons _ = False
+
+-- | Is this a withAcc?
+isWithAccNodeT :: NodeT -> Bool
+isWithAccNodeT (StmNode (Let _ _ (WithAcc _ _))) = True
+isWithAccNodeT _  = False
+
+isWithAccNodeId :: G.Node -> DepGraph -> Bool
+isWithAccNodeId node_id (DepGraph {dgGraph = g}) =
+  let (_,_,nT,_) = G.context g node_id
+  in  isWithAccNodeT nT
