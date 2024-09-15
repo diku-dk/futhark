@@ -1,4 +1,4 @@
-packages: futhark.cabal
+packages: futhark.cabal, language-wgsl
 index-state: 2024-08-15T12:45:42Z
 
 package futhark

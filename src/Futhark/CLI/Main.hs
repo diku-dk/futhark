@@ -35,6 +35,7 @@ import Futhark.CLI.Run qualified as Run
 import Futhark.CLI.Script qualified as Script
 import Futhark.CLI.Test qualified as Test
 import Futhark.CLI.WASM qualified as WASM
+import Futhark.CLI.WebGPU qualified as WebGPU
 import Futhark.Error
 import Futhark.Util (maxinum, showText)
 import Futhark.Util.Options
@@ -64,6 +65,7 @@ commands =
       ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL.")),
       ("wasm", (WASM.main, "Compile to WASM with sequential C")),
       ("wasm-multicore", (MulticoreWASM.main, "Compile to WASM with multicore C")),
+      ("webgpu", (WebGPU.main, "Compile to JS/WASM calling WebGPU.")),
       ("ispc", (MulticoreISPC.main, "Compile to multicore ISPC")),
       ("test", (Test.main, "Test Futhark programs.")),
       ("bench", (Bench.main, "Benchmark Futhark programs.")),
