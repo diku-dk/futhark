@@ -1,6 +1,7 @@
 -- | @futhark fmt@
 module Futhark.CLI.Fmt (main) where
 
+import Data.Foldable
 import Data.List qualified as L
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -451,9 +452,9 @@ fmtExp (Lambda params body rettype _ _) = do
   pure $ ["\\"] <> params' <> ascript <> [" -> "] <> body'
 fmtExp (OpSection binop _ loc) = pure $ [fmtQualName binop]
 fmtExp (OpSectionLeft binop _ x _ _ _) =
-  pure [mconcat $ parens [prettyText x <> ppBinOp binop]]
+  pure [mconcat $ parens [prettyText x <> fmtBinOp binop]]
 fmtExp (OpSectionRight binop _ x _ _ _) =
-  pure [mconcat $ parens [ppBinOp binop <> prettyText x]]
+  pure [mconcat $ parens [fmtBinOp binop <> prettyText x]]
 fmtExp (ProjectSection fields _ _) =
   pure [mconcat $ parens $ p <$> fields]
   where
@@ -468,14 +469,61 @@ fmtExp (Attr attr e _) = do
   attr' <- fmtAttr attr
   e' <- fmtExp e
   pure $ attr' <> e'
-fmtExp (AppExp e res) = undefined
+fmtExp (AppExp e res) = undefined -- fmtAppExp e
 
 fmtQualName :: QualName Name -> Line
 fmtQualName (QualName names name) =
   (<> ".") $ mconcat $ map prettyText names ++ [prettyText name]
 
-ppBinOp :: QualName Name -> Line
-ppBinOp bop =
+fmtCase :: UncheckedCase -> FmtM Fmt
+fmtCase (CasePat p e _) = do
+  p' <- fmtPat p
+  e' <- fmtExp e
+  pure $ ["case"] <> p' <> [" -> "] <> e'
+
+fmtAppExp :: AppExpBase NoInfo Name -> FmtM Fmt
+fmtAppExp (BinOp (bop, _) _ (x, _) (y, _) _) = do
+  x' <- fmtExp x
+  y' <- fmtExp y
+  pure $ x' <> [fmtBinOp bop] <> y' 
+fmtAppExp (Match e cs _) = do
+  e' <- fmtExp e
+  cs' <- mconcat <$> mapM fmtCase (toList cs)
+  pure $ ["match"] <> e' <> cs'
+fmtAppExp (Loop sizeparams pat initexp form loopbody _) = do
+  let sizeparams' = ("["<>) . (<>"]") . prettyText <$> sizeparams
+  pat' <- fmtPat pat
+  initexp' <- fmtExp initexp
+  form' <- fmtLoopForm form
+  loopbody' <- fmtExp loopbody
+  pure $
+    ["loop"] <>
+    sizeparams' <>
+    pat' <>
+    ["="] <>
+    initexp' <>
+    form' <>
+    ["do"] <>
+    loopbody'
+
+fmtIdent :: IdentBase NoInfo Name t -> FmtM Fmt
+fmtIdent = pure . L.singleton . prettyText . identName
+
+fmtLoopForm :: LoopFormBase NoInfo Name -> FmtM Fmt
+fmtLoopForm (For i ubound) = do
+  i' <- fmtIdent i
+  ubound' <- fmtExp ubound
+  pure $ ["for"] <> i' <> ["<"] <> ubound'
+fmtLoopForm (ForIn x e) = do
+  x' <- fmtPat x
+  e' <- fmtExp e
+  pure $ ["for"] <> x' <> ["in"] <> e'
+fmtLoopForm (While cond) = do
+  cond' <- fmtExp cond
+  pure $ ["while"] <> cond'
+  
+fmtBinOp :: QualName Name -> Line
+fmtBinOp bop =
   case leading of
     Backtick -> "`" <> fmtQualName bop <> "`"
     _ -> prettyText bop
