@@ -14,6 +14,13 @@ import Control.Monad.RWS.Strict
 import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution, Unify (..), unifies_)
 import Futhark.Util.Pretty (Pretty (pretty), (<+>), commasep, parens, stack, indent, line)
 import Futhark.Analysis.Proofs.Util (prettyName)
+import Debug.Trace (traceM)
+
+data IndexFn = IndexFn
+  { iterator :: Iterator,
+    body :: Cases Symbol (SoP Symbol)
+  }
+  deriving (Show, Eq)
 
 data Domain = Iota (SoP Symbol) -- [0, ..., n-1]
             | Cat            -- Catenate_{k=1}^{m-1} [b_{k-1}, ..., b_k)
@@ -29,18 +36,34 @@ data Iterator = Forall VName Domain
 newtype Cases a b = Cases (NE.NonEmpty (a, b))
   deriving (Show, Eq, Ord)
 
+instance Eq Domain where
+  -- Since the whole domain must be covered by an index function,
+  -- it is sufficient to check that starts and ends are equal.
+  u == v =
+    start u == start v && end u == end v
+    where
+      start :: Domain -> SoP Symbol
+      start (Iota _) = int2SoP 0
+      start (Cat k _ b) = rep (M.singleton k $ int2SoP 0) b
+
+      end (Iota n) = n .-. int2SoP 1
+      end (Cat k m b) = rep (M.singleton k m) b .-. int2SoP 1
+
+instance Eq Iterator where
+  (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
+  (Forall _ u) == (Forall _ v) = u == v
+  Empty == Empty = True
+  _ == _ = False
+
 cases :: [(a,b)] -> Cases a b
 cases = Cases . NE.fromList
 
 casesToList ::  Cases a b -> [(a, b)]
 casesToList (Cases cs) = NE.toList cs
 
-data IndexFn = IndexFn
-  { iterator :: Iterator,
-    body :: Cases Symbol (SoP Symbol)
-  }
-  deriving (Show, Eq)
-
+-------------------------------------------------------------------------------
+-- Monad.
+-------------------------------------------------------------------------------
 data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Symbol E.Exp,
@@ -48,8 +71,6 @@ data VEnv = VEnv
     -- toplevel :: M.Map E.VName ([E.Pat], IndexFn)
   }
 
-
--- The IndexFn monad keeps a source of fresh names and writes indexfns.
 newtype IndexFnM a = IndexFnM (RWS () () VEnv a)
   deriving
     ( Applicative,
@@ -92,104 +113,9 @@ clearAlgEnv :: IndexFnM ()
 clearAlgEnv =
   modify $ \env -> env {algenv = mempty}
 
-repCases :: Substitution (SoP Symbol) -> Cases Symbol (SoP Symbol) -> Cases Symbol (SoP Symbol)
-repCases s (Cases cs) =
-  Cases $ NE.map (\(p,q) -> (sop2Symbol (rep s p), rep s q)) cs
-
-repDomain :: Substitution (SoP Symbol) -> Domain -> Domain
-repDomain s (Iota n) = Iota (rep s n)
-repDomain s (Cat k m b) = Cat k (rep s m) (rep s b)
-
-repVName :: Substitution (SoP Symbol) -> VName -> VName
-repVName s vn
-  | Var i <- sop2Symbol $ rep s (Var vn) =
-    i
-repVName _ _ = error "repVName substitutes for non-VName."
-
-
-subIndexFn :: Substitution (SoP Symbol) -> IndexFn -> IndexFnM IndexFn
-subIndexFn s indexfn = rip <$> rename indexfn
-  where
-  rip (IndexFn Empty body) = IndexFn Empty (repCases s body)
-  rip (IndexFn (Forall i dom) body) =
-    IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
-
-repIteratorInBody :: SoP Symbol -> IndexFn -> IndexFn
-repIteratorInBody x (IndexFn it@(Forall i _) body) =
-  IndexFn it (repCases (M.singleton i x) body)
-repIteratorInBody _ indexfn = indexfn
-
-
-instance (Renameable a, Renameable b) => Renameable (Cases a b) where
-  rename_ tau (Cases cs) = Cases <$> mapM re cs
-    where
-      re (p,q) = (,) <$> rename_ tau p <*> rename_ tau q
-
-instance Renameable Domain where
-  rename_ tau (Cat k m b) = do
-    k' <- newNameFromString "k"
-    let tau' = M.insert k k' tau
-    Cat k' <$> rename_ tau' m <*> rename_ tau' b
-  rename_ tau (Iota n) = Iota <$> rename_ tau n
-
-instance Renameable IndexFn where
-  rename_ tau indexfn = case indexfn of
-    IndexFn Empty body -> IndexFn Empty <$> rename_ tau body
-    IndexFn (Forall i dom) body -> do
-      -- NOTE that i is not renamed.
-      dom' <- rename_ tau dom
-      IndexFn (Forall i dom') <$> rename_ tau body
-
-
-instance MonadFreshNames m => Unify Domain (SoP Symbol) m where
-  unify_ k (Iota n) (Iota m) = unify_ k n m
-  unify_ k (Cat _ m1 b1) (Cat _ m2 b2) = do
-    s <- unify_ k m1 m2
-    (s <>) <$> unify_ k (rep s b1) (rep s b2)
-  unify_ _ _ _ = fail "Incompatible domains"
-
-instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) (SoP Symbol) m where
-  unify_ k (Cases cs1) (Cases cs2) = do
-    s <- unifies_ k (zip (map fst xs) (map fst ys))
-    s2 <- unifies_ k (zip (map (rep s . snd) xs) (map (rep s . snd) ys))
-    pure $ s <> s2
-    where
-      xs = NE.toList cs1
-      ys = NE.toList cs2
-
--- XXX we require that index function quantifiers (indexing variables) are unique!
-instance MonadFreshNames m => Unify IndexFn (SoP Symbol) m where
-  unify_ k (IndexFn Empty body1) (IndexFn Empty body2) =
-    unify_ k body1 body2
-  unify_ k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j dom2) body2) = do
-    s <- unify_ k (Hole i) (Var j)
-    s' <- (s <>) <$> unify_ k (repDomain s dom1) (repDomain s dom2)
-    (s' <>) <$> unify_ k (repCases s' body1) (repCases s' body2)
-  unify_ _ _ _ = fail "Incompatible iterators"
-
-
--- NOTE don't think this should be re-implemented. Instead use
--- unification on index functions.
---
-instance Eq Domain where
-  -- Since the whole domain must be covered by an index function,
-  -- it is sufficient to check that starts and ends are equal.
-  u == v =
-    start u == start v && end u == end v
-    where
-      start :: Domain -> SoP Symbol
-      start (Iota _) = int2SoP 0
-      start (Cat k _ b) = rep (M.singleton k $ int2SoP 0) b
-
-      end (Iota n) = n .-. int2SoP 1
-      end (Cat k m b) = rep (M.singleton k m) b .-. int2SoP 1
-
-instance Eq Iterator where
-  (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
-  (Forall _ u) == (Forall _ v) = u == v
-  Empty == Empty = True
-  _ == _ = False
-
+-------------------------------------------------------------------------------
+-- Pretty.
+-------------------------------------------------------------------------------
 instance (Pretty a, Pretty b) => Pretty (Cases a b) where
   pretty (Cases cs) = -- stack (map prettyCase (NE.toList cases))
     line <> indent 4 (stack (map prettyCase (NE.toList cs)))
@@ -219,3 +145,90 @@ instance Pretty Iterator where
 
 instance Pretty IndexFn where
   pretty (IndexFn iter e) = pretty iter <+> "." <+> pretty e
+
+-------------------------------------------------------------------------------
+-- Unification.
+-------------------------------------------------------------------------------
+repCases :: Substitution (SoP Symbol) -> Cases Symbol (SoP Symbol) -> Cases Symbol (SoP Symbol)
+repCases s (Cases cs) =
+  Cases $ NE.map (\(p,q) -> (sop2Symbol (rep s p), rep s q)) cs
+
+repDomain :: Substitution (SoP Symbol) -> Domain -> Domain
+repDomain s (Iota n) = Iota (rep s n)
+repDomain s (Cat k m b) = Cat k (rep s m) (rep s b)
+
+repVName :: Substitution (SoP Symbol) -> VName -> VName
+repVName s vn
+  | Var i <- sop2Symbol $ rep s (Var vn) =
+    i
+repVName _ _ = error "repVName substitutes for non-VName."
+
+repIteratorInBody :: SoP Symbol -> IndexFn -> IndexFn
+repIteratorInBody x (IndexFn it@(Forall i _) body) =
+  IndexFn it (repCases (M.singleton i x) body)
+repIteratorInBody _ indexfn = indexfn
+
+subIndexFn :: Substitution (SoP Symbol) -> IndexFn -> IndexFnM IndexFn
+subIndexFn s indexfn = rip <$> rename indexfn
+  where
+  rip (IndexFn Empty body) = IndexFn Empty (repCases s body)
+  rip (IndexFn (Forall i dom) body) =
+    IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
+
+instance (Renameable a, Renameable b) => Renameable (Cases a b) where
+  rename_ tau (Cases cs) = Cases <$> mapM re cs
+    where
+      re (p,q) = (,) <$> rename_ tau p <*> rename_ tau q
+
+instance Renameable Domain where
+  rename_ tau (Cat k m b) = do
+    k' <- newNameFromString "k"
+    let tau' = M.insert k k' tau
+    Cat k' <$> rename_ tau' m <*> rename_ tau' b
+  rename_ tau (Iota n) = Iota <$> rename_ tau n
+
+instance Renameable IndexFn where
+  rename_ tau indexfn = case indexfn of
+    IndexFn Empty body -> IndexFn Empty <$> rename_ tau body
+    IndexFn (Forall i dom) body -> do
+      -- NOTE that i is not renamed.
+      dom' <- rename_ tau dom
+      IndexFn (Forall i dom') <$> rename_ tau body
+
+instance MonadFreshNames m => Unify Domain (SoP Symbol) m where
+  unify_ k (Iota n) (Iota m) = unify_ k n m
+  unify_ k (Cat _ m1 b1) (Cat _ m2 b2) = do
+    s <- unify_ k m1 m2
+    (s <>) <$> unify_ k (rep s b1) (rep s b2)
+  unify_ _ _ _ = fail "Incompatible domains"
+
+instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) (SoP Symbol) m where
+  unify_ k (Cases cs1) (Cases cs2) = do
+    s <- unifies_ k (zip (map fst xs) (map fst ys))
+    s2 <- unifies_ k (zip (map (rep s . snd) xs) (map (rep s . snd) ys))
+    pure $ s <> s2
+    where
+      xs = NE.toList cs1
+      ys = NE.toList cs2
+
+-- XXX we require that index function quantifiers (indexing variables) are unique!
+instance MonadFreshNames m => Unify IndexFn (SoP Symbol) m where
+  unify_ k (IndexFn Empty body1) (IndexFn Empty body2) =
+    unify_ k body1 body2
+  unify_ k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j dom2) body2) = do
+    s <- unify_ k (Hole i) (Var j)
+    s' <- (s <>) <$> unify_ k (repDomain s dom1) (repDomain s dom2)
+    (s' <>) <$> unify_ k (repCases s' body1) (repCases s' body2)
+  unify_ _ _ _ = fail "Incompatible iterators"
+
+-------------------------------------------------------------------------------
+-- Index function substitution.
+-------------------------------------------------------------------------------
+-- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
+-- sub :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
+-- sub x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
+--   i' <- newNameFromString "i"
+--   traceM ("🌪️🎭 sub " <> prettyString x <> " for " <> prettyString for <> "\n  in " <> prettyString into)
+--   traceM ("fresh name " <> prettyString i')
+--   sub' x (rename i i' for) (rename j i' into)
+-- sub x q r = sub' x q r
