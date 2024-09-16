@@ -12,7 +12,7 @@ import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 import Futhark.MonadFreshNames
 import Control.Monad.RWS.Strict
 import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution, Unify (..), unifies_)
-import Futhark.Util.Pretty (Pretty (pretty), (<+>), commasep, parens, stack, indent, line)
+import Futhark.Util.Pretty (Pretty (pretty), (<+>), commasep, parens, stack, indent, line, prettyString)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Debug.Trace (traceM)
 
@@ -149,7 +149,13 @@ instance Pretty IndexFn where
 -------------------------------------------------------------------------------
 -- Unification.
 -------------------------------------------------------------------------------
-repCases :: Substitution (SoP Symbol) -> Cases Symbol (SoP Symbol) -> Cases Symbol (SoP Symbol)
+repVName :: Substitution (SoP Symbol) -> VName -> VName
+repVName s vn
+  | Var i <- sop2Symbol $ rep s (Var vn) =
+    i
+repVName _ _ = error "repVName substitutes for non-VName."
+
+repCases :: (Ord a, Replaceable u1 (SoP a), Replaceable u2 (SoP a)) => Substitution (SoP a) -> Cases u1 u2 -> Cases a (SoP a)
 repCases s (Cases cs) =
   Cases $ NE.map (\(p,q) -> (sop2Symbol (rep s p), rep s q)) cs
 
@@ -157,23 +163,15 @@ repDomain :: Substitution (SoP Symbol) -> Domain -> Domain
 repDomain s (Iota n) = Iota (rep s n)
 repDomain s (Cat k m b) = Cat k (rep s m) (rep s b)
 
-repVName :: Substitution (SoP Symbol) -> VName -> VName
-repVName s vn
-  | Var i <- sop2Symbol $ rep s (Var vn) =
-    i
-repVName _ _ = error "repVName substitutes for non-VName."
-
-repIteratorInBody :: SoP Symbol -> IndexFn -> IndexFn
-repIteratorInBody x (IndexFn it@(Forall i _) body) =
-  IndexFn it (repCases (M.singleton i x) body)
-repIteratorInBody _ indexfn = indexfn
+repIndexFn :: Substitution (SoP Symbol) -> IndexFn -> IndexFn
+repIndexFn s = rip
+  where
+    rip (IndexFn Empty body) = IndexFn Empty (repCases s body)
+    rip (IndexFn (Forall i dom) body) =
+      IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
 
 subIndexFn :: Substitution (SoP Symbol) -> IndexFn -> IndexFnM IndexFn
-subIndexFn s indexfn = rip <$> rename indexfn
-  where
-  rip (IndexFn Empty body) = IndexFn Empty (repCases s body)
-  rip (IndexFn (Forall i dom) body) =
-    IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
+subIndexFn s indexfn = repIndexFn s <$> rename indexfn
 
 instance (Renameable a, Renameable b) => Renameable (Cases a b) where
   rename_ tau (Cases cs) = Cases <$> mapM re cs
@@ -230,5 +228,5 @@ instance MonadFreshNames m => Unify IndexFn (SoP Symbol) m where
 --   i' <- newNameFromString "i"
 --   traceM ("🌪️🎭 sub " <> prettyString x <> " for " <> prettyString for <> "\n  in " <> prettyString into)
 --   traceM ("fresh name " <> prettyString i')
---   sub' x (rename i i' for) (rename j i' into)
+--   sub' x (subIndexFn i i' for) (rename j i' into)
 -- sub x q r = sub' x q r

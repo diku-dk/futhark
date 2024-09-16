@@ -7,7 +7,7 @@ import Futhark.MonadFreshNames
 import Futhark.Analysis.Proofs.Symbol (Symbol(..), normalizeSymbol, applyLinCombRule)
 import Control.Monad (foldM, msum, (<=<))
 import Futhark.SoP.FourierMotzkin (($<=$))
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..), subIndexFn, repIteratorInBody, repVName)
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..), subIndexFn, repVName)
 import Data.List (subsequences, (\\))
 import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), astMap)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
@@ -246,11 +246,14 @@ rulesIndexFn = do
           -- TODO add bound names (i) are not substituted test for Unify
           -- on index fns
           -- Indexing variable i replaced by 0 in e1.
-        , to = \s -> repIteratorInBody (int 0) <$> (subIndexFn s $
-            IndexFn {
+        , to = \s -> subIndexFn s =<< do
+            let i' = repVName s i
+            e1 <- sub s (hole h1)
+            e1_b <- sub (M.singleton i' (int 0)) e1
+            pure $ IndexFn {
               iterator = Forall i (Iota (hole n)),
-              body = cases [(Bool True, hole h1)]
-            })
+              body = cases [(Bool True, e1_b)]
+            }
         , sideCondition = vacuous
         }
     , Rule
@@ -269,11 +272,15 @@ rulesIndexFn = do
                             (hole i :/= int 0, sym2SoP Recurrence)]
             }
           -- Indexing variable i replaced by b in e1.
-        , to = \s -> repIteratorInBody <$> sub s (hole b) <*> (subIndexFn s $
-            IndexFn {
+        , to = \s -> subIndexFn s =<< do
+            let i' = repVName s i
+            e1 <- sub s (hole h1)
+            b' <- sub s (hole b)
+            e1_b <- sub (M.singleton i' b') e1
+            pure $ IndexFn {
               iterator = Forall i (Cat k (hole m) (hole b)),
-              body = cases [(Bool True, hole h1)]
-            })
+              body = cases [(Bool True, e1_b)]
+            }
         , sideCondition = vacuous
         }
     , Rule
@@ -309,7 +316,6 @@ rulesIndexFn = do
                 iterator = Forall i (Iota (hole n)),
                 body = cases [(Bool True, e1_b .+. e2_sum)]
               }
-            -- pure $ repIteratorInBody (int 0) fn 
         , sideCondition = vacuous
         }
 
