@@ -18,6 +18,7 @@ import Text.Printf (printf)
 import Control.Monad.State.Strict
 import Control.Monad
 import Debug.Trace
+import Data.Char (chr)
 
 debug :: Show a => a -> a
 debug a = traceShow a a
@@ -72,8 +73,32 @@ commasep (x:xs) = do
   xs' <- commasep xs
   pure $ (x <> ", ") : xs'
 
-brackets :: Fmt -> FmtM Fmt
-brackets fmt = pure $ ["["] <> fmt <> ["]"]
+brackets :: Fmt -> Fmt
+brackets fmt = ["["] <> fmt <> ["]"]
+
+braces :: Fmt -> Fmt
+braces fmt = ["{"] <> fmt <> ["}"]
+
+parens :: Fmt -> Fmt
+parens fmt = ["("] <> fmt <> [")"]
+
+-- Should have similar functionality to align for docs
+align :: Fmt -> Fmt 
+align f = f
+
+-- Should have similar functionality to sep for docs
+sep :: [Fmt] -> Fmt
+sep fs = concat $ punctuate [softline] fs
+
+punctuate :: Semigroup a => a -> [a] -> [a] 
+punctuate _ [] = []
+punctuate _ [f] = [f]
+punctuate l (f:fs) = [l <> f] <> punctuate l fs  
+
+-- Should ahve similar functionality to softline for docs
+softline :: Line 
+softline = " "
+
 {-
 commasepbetween :: Line -> Line -> Fmt -> FmtM Fmt
 commasepbetween o c xs = do
@@ -184,6 +209,11 @@ fmtRecordTypeFields ((name, te):fs) = do
           t' <- fmtTypeExp t
           pure $ mapLast (", " <>) t'
 
+fmtSumTypeConstr :: (Name, [UncheckedTypeExp]) -> FmtM Fmt
+fmtSumTypeConstr (name, fs) = do
+  fs' <- mapM fmtTypeExp fs
+  pure $ ["#" <> prettyText name] <> sep fs'  
+
 -- | Formatting of Futhark type expressions.
 fmtTypeExp :: UncheckedTypeExp -> FmtM Fmt
 fmtTypeExp (TEVar v loc) = buildFmt (const (pure [prettyText v])) loc
@@ -223,16 +253,42 @@ fmtTypeExp (TEUnique te loc) = buildFmt fmtFun loc
           te' <- fmtTypeExp te 
           pure $ ["*"] <> te' 
 -- I am not sure I guess applying a higher kinded type to some type expression
--- NOT DONE missing arg formatting 
 fmtTypeExp (TEApply te tArgE loc) = buildFmt fmtFun loc 
   where fmtFun :: a -> FmtM Fmt 
-        fmtFun _ = do 
+        fmtFun _ = do
           te' <- fmtTypeExp te
-          pure $ te'-- undefined 
-fmtTypeExp (TEArrow (Just name) type_exp type_exp' loc) = undefined -- is this "->"?
-fmtTypeExp (TEArrow Nothing type_exp type_exp' loc) = undefined -- is this "->"?
-fmtTypeExp (TESum type_exps loc) = undefined -- This should be "|"
-fmtTypeExp (TEDim names exp loc) = undefined -- This this probably [n][m]expression for array dimensions
+          tArgE' <- fmtArgExp tArgE
+          pure $ te' <> [" "] <> tArgE'
+ -- this is "->"
+fmtTypeExp (TEArrow (Just name) te0 te1 loc) = buildFmt fmtFun loc
+  where fmtFun :: a -> FmtM Fmt
+        fmtFun _ = do 
+          te0' <- fmtTypeExp te0
+          te1' <- fmtTypeExp te1
+          pure $ parens (prettyText name : " : " : te0') <> [" -> "] <> te1'  
+ -- this is"->"
+fmtTypeExp (TEArrow Nothing te0 te1 loc) = buildFmt fmtFun loc
+  where fmtFun :: a -> FmtM Fmt
+        fmtFun _ = do 
+          te0' <- fmtTypeExp te0
+          te1' <- fmtTypeExp te1
+          pure $ te0' <> [" -> "] <> te1'
+-- This should be "|"
+fmtTypeExp (TESum tes loc) = buildFmt fmtFun loc
+  where fmtFun :: a -> FmtM Fmt
+        fmtFun _ = do
+          tes' <- mapM fmtSumTypeConstr tes
+          pure $ align $ concat $ punctuate [" |" <> softline] tes'
+fmtTypeExp (TEDim dims te loc) = buildFmt fmtFun loc 
+  where fmtFun :: a -> FmtM Fmt 
+        fmtFun _ = do
+          te' <- fmtTypeExp te
+          let dims' = mconcat (map (brackets . \t -> [prettyText t]) dims)
+          pure $ ["?"] <> dims' <> ["."] <> te'
+
+fmtArgExp :: TypeArgExp UncheckedExp Name -> FmtM Fmt 
+fmtArgExp (TypeArgExpSize se) = fmtSizeExp se
+fmtArgExp (TypeArgExpType te) = fmtTypeExp te
 
 fmtTypeBind :: UncheckedTypeBind -> FmtM Fmt
 fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = do
@@ -307,6 +363,125 @@ fmtPat (PatAttr attr pat loc) = do
   pat' <- fmtPat pat
   pure $ attr' <> pat'
 
+fmtField :: FieldBase NoInfo Name -> FmtM Fmt
+fmtField (RecordFieldExplicit name e loc) = do
+  e' <- fmtExp e
+  pure $ [prettyText name] <> ["="] <> e'
+fmtField (RecordFieldImplicit name _ loc) = pure [prettyText name]
+
+fmtPrimValue :: PrimValue -> FmtM Fmt
+fmtPrimValue (UnsignedValue (Int8Value v)) =
+  pure [prettyText (show (fromIntegral v :: Word8)) <> "u8"]
+fmtPrimValue (UnsignedValue (Int16Value v)) =
+  pure [prettyText (show (fromIntegral v :: Word16)) <> "u16"]
+fmtPrimValue (UnsignedValue (Int32Value v)) =
+  pure [prettyText (show (fromIntegral v :: Word32)) <> "u32"]
+fmtPrimValue (UnsignedValue (Int64Value v)) =
+  pure [prettyText (show (fromIntegral v :: Word64)) <> "u64"]
+fmtPrimValue (SignedValue v) = pure [prettyText v]
+fmtPrimValue (BoolValue True) = pure ["true"]
+fmtPrimValue (BoolValue False) = pure ["false"]
+fmtPrimValue (FloatValue v) = pure [prettyText v]
+
+fmtDimIndex :: UncheckedDimIndex -> FmtM Fmt
+fmtDimIndex (DimFix e) = fmtExp e
+fmtDimIndex (DimSlice i j (Just s)) = do
+  i' <- maybe (pure mempty) fmtExp i
+  j' <- maybe (pure mempty) fmtExp j
+  s' <- fmtExp s
+  pure $ i' <> [":"] <> j' <> [":"] <>  s'
+fmtDimIndex (DimSlice i (Just j) s) = do
+  i' <- maybe (pure mempty) fmtExp i
+  j' <- fmtExp j
+  s' <- maybe (pure mempty) (fmap ([":"] <>) . fmtExp) s
+  pure $ i' <> [":"] <> j' <> s'
+fmtDimIndex (DimSlice i Nothing Nothing) =
+  (<> [":"]) <$> maybe (pure mempty) fmtExp i
+
+fmtExp :: UncheckedExp -> FmtM Fmt
+fmtExp (Var name _ loc) = pure [prettyText name]
+fmtExp (Hole _ loc) = pure ["???"]
+fmtExp (Parens e loc) = parens <$> fmtExp e
+fmtExp (QualParens (v, loc) e loc') = do
+  fmt <- fmtExp e
+  pure $ [prettyText v] <> parens fmt
+fmtExp (Ascript e t loc) = do
+  e' <- fmtExp e
+  t' <- fmtTypeExp t
+  pure $ e' <> [":"] <> t'
+fmtExp (Coerce e t _ loc) = do
+  e' <- fmtExp e
+  t' <- fmtTypeExp t
+  pure $ e' <> [":>"] <> t'
+fmtExp (Literal v loc) = pure [prettyText v]
+fmtExp (IntLit v _ loc) = pure [prettyText v]
+fmtExp (FloatLit v _ loc) = pure [prettyText v]
+fmtExp (TupLit es loc) = parens . L.intercalate [", "] <$> mapM fmtExp es
+fmtExp (RecordLit fs loc) = parens . L.intercalate [", "] <$> mapM fmtField fs
+fmtExp (ArrayVal vs _ loc) = brackets . L.intercalate [", "] <$>  mapM fmtPrimValue vs
+fmtExp (ArrayLit es _ loc) = brackets . L.intercalate [", "] <$>  mapM fmtExp es
+fmtExp (StringLit s loc) = pure [prettyText $ show $ fmap (chr . fromIntegral) s]
+fmtExp (Project k e _ loc) = do
+  e' <- fmtExp e
+  pure [T.concat e' <> "." <> prettyText k]
+fmtExp (Negate e loc) = do
+  e' <- fmtExp e
+  pure ["-" <> T.concat e']
+fmtExp (Not e loc) = do
+  e' <- fmtExp e
+  pure ["-" <> T.concat e']
+fmtExp (Update src idxs ve loc) = do
+  src' <- fmtExp src
+  idxs' <- brackets . L.intercalate [", "] <$> mapM fmtDimIndex idxs
+  ve' <- fmtExp ve
+  pure $ src' <> ["with"] <> idxs' <> ["="] <> ve'
+fmtExp (RecordUpdate src fs ve _ loc) = do
+  src' <- fmtExp src
+  let fs' = L.intersperse "." $ prettyText <$> fs
+  ve' <- fmtExp ve
+  pure $ src' <> ["with"] <> fs' <> ["="] <> ve'
+fmtExp (Assert e1 e2 _ loc) = do
+  e1' <- fmtExp e1
+  e2' <- fmtExp e2
+  pure $ ["assert"] <> e1' <> e2'
+fmtExp (Lambda params body rettype _ _) = do
+  params' <- L.intercalate [" "] <$> mapM fmtPat params
+  body' <- fmtExp body
+  ascript <- maybe (pure mempty) (fmap ([":"] <>) . fmtTypeExp) rettype
+  pure $ ["\\"] <> params' <> ascript <> [" -> "] <> body'
+fmtExp (OpSection binop _ loc) = pure $ [fmtQualName binop]
+fmtExp (OpSectionLeft binop _ x _ _ _) =
+  pure [mconcat $ parens [prettyText x <> ppBinOp binop]]
+fmtExp (OpSectionRight binop _ x _ _ _) =
+  pure [mconcat $ parens [ppBinOp binop <> prettyText x]]
+fmtExp (ProjectSection fields _ _) =
+  pure [mconcat $ parens $ p <$> fields]
+  where
+    p name = "." <> prettyText name
+fmtExp (IndexSection idxs _ _) = do
+  idxs' <- mconcat . brackets . L.intercalate [", "] <$> fmtDimIndex idxs
+  pure ["." <> idxs']
+fmtExp (Constr n cs _ _) = do
+  cs' <- mconcat . L.intercalate [" "] <$> mapM fmtExp cs
+  pure ["#" <> prettyText n <> cs']
+fmtExp (Attr attr e _) = do
+  attr' <- fmtAttr attr
+  e' <- fmtExp e
+  pure $ attr' <> e'
+fmtExp (AppExp e res) = undefined
+
+fmtQualName :: QualName Name -> Line
+fmtQualName (QualName names name) =
+  (<> ".") $ mconcat $ map prettyText names ++ [prettyText name]
+
+ppBinOp :: QualName Name -> Line
+ppBinOp bop =
+  case leading of
+    Backtick -> "`" <> fmtQualName bop <> "`"
+    _ -> prettyText bop
+  where
+    leading = leadingOperator $ toName $ qualLeaf bop
+
 fmtValBind :: UncheckedValBind -> FmtM Fmt
 fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc) = do
   fmt_attrs <- concat <$> mapM fmtAttr attrs
@@ -316,29 +491,35 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
     case fmtTypeExp <$> retdecl of
     Just a -> fmap ([":"] <>) a
     Nothing -> pure []
-  -- exp <- fmtExp body
+  exp <- fmtExp body
   pure $ fmt_attrs <>
          fun <>
          [prettyText name] <>
          tparams' <>
          args' <>
          retdecl' <>
-         ["="] -- <> exp
+         ["="] <>
+         exp
   where
     fun =
       case entry of
         Just _ -> ["entry"]
         _ -> ["def"]
 
-fmtSizeExp :: SizeExp d -> FmtM Fmt
-fmtSizeExp (SizeExp d loc) = undefined -- cannot fiugre out how to format dimension d
-fmtSizeExp (SizeExpAny _loc) = brackets mempty
+fmtSizeExp :: SizeExp UncheckedExp -> FmtM Fmt
+fmtSizeExp (SizeExp d _loc) = do
+  d' <- fmtExp d
+  pure $ brackets d' 
+fmtSizeExp (SizeExpAny _loc) = pure $ brackets mempty
+
+fmtModBind :: TypeBindBase NoInfo Name -> FmtM Fmt
+fmtModBind = undefined 
 
 -- | Formatting of Futhark declarations.
 fmtDec :: UncheckedDec -> FmtM Fmt
-fmtDec (ValDec t) = fmtValBind t -- A value declaration.
+fmtDec (ValDec t) = buildFmt fmtValBind t -- A value declaration.
 fmtDec (TypeDec tb) = buildFmt fmtTypeBind tb -- A type declaration.
-fmtDec (ModTypeDec tb) = undefined -- A module type declation.
+fmtDec (ModTypeDec tb) = buildFmt fmtModBind tb -- A module type declation.
 fmtDec (ModDec tb) = undefined -- A module declation.
 fmtDec (OpenDec tb loc) = undefined -- I have no clue.
 fmtDec (LocalDec tb loc) = undefined -- I have no clue, maybe this just adds the local keyword?
