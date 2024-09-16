@@ -88,9 +88,9 @@ insertIndexFn x v =
 --   modify $
 --     \env -> env {toplevel = M.insert vn (args, ixfn) $ toplevel env}
 
--- clearAlgEnv :: IndexFnM ()
--- clearAlgEnv =
---   modify $ \env -> env {algenv = mempty}
+clearAlgEnv :: IndexFnM ()
+clearAlgEnv =
+  modify $ \env -> env {algenv = mempty}
 
 repCases :: Substitution (SoP Symbol) -> Cases Symbol (SoP Symbol) -> Cases Symbol (SoP Symbol)
 repCases s (Cases cs) =

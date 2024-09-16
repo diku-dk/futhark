@@ -139,6 +139,7 @@ library
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
       Futhark.Analysis.PrimExp.Table
+      Futhark.Analysis.Proofs.Convert
       Futhark.Analysis.Proofs.IndexFn
       Futhark.Analysis.Proofs.Refine
       Futhark.Analysis.Proofs.Rewrite
@@ -523,8 +524,9 @@ test-suite unit
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
-      Futhark.Analysis.Proofs.UnifyTests
+      Futhark.Analysis.Proofs.IndexFnTests
       Futhark.Analysis.Proofs.RewriteTests
+      Futhark.Analysis.Proofs.UnifyTests
       Futhark.BenchTests
       Futhark.IR.GPUTests
       Futhark.IR.MCTests
