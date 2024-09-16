@@ -164,13 +164,13 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
 --         (IndexFn iter1 (toCases . Tuple $ map Var vns))
 --         (zip vns xs)
 --     >>= rewrite
-forward (E.AppExp (E.Index xs' slice _) _)
-  | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
-      IndexFn iter_idx idx <- forward idx'
-      IndexFn iter_xs xs <- forward xs'
-      case iteratorName iter_xs of
-        Just j -> do
-          sub j (IndexFn iter_idx idx) (IndexFn iter_idx xs)
-        Nothing ->
-          error "indexing into a scalar"
+-- forward (E.AppExp (E.Index xs' slice _) _)
+--   | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
+--       IndexFn iter_idx idx <- forward idx'
+--       IndexFn iter_xs xs <- forward xs'
+--       case iteratorName iter_xs of
+--         Just j -> do
+--           sub j (IndexFn iter_idx idx) (IndexFn iter_idx xs)
+--         Nothing ->
+--           error "indexing into a scalar"
 forward e = error $ "forward on " <> show e

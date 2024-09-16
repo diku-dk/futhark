@@ -11,7 +11,7 @@ import Futhark.SoP.SoP (SoP, int2SoP, (.-.), (.+.), sym2SoP)
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 import Futhark.MonadFreshNames
 import Control.Monad.RWS.Strict
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution, Unify (..), unifies_)
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution, Unify (..), unifies_, sub)
 import Futhark.Util.Pretty (Pretty (pretty), (<+>), commasep, parens, stack, indent, line, prettyString)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Debug.Trace (traceM)
@@ -155,9 +155,12 @@ repVName s vn
     i
 repVName _ _ = error "repVName substitutes for non-VName."
 
+repCase :: (Ord a, Replaceable u1 (SoP a), Replaceable u2 (SoP a)) => Substitution (SoP a) -> (u1, u2) -> (a, SoP a)
+repCase s (a, b) = (sop2Symbol (rep s a), rep s b)
+
 repCases :: (Ord a, Replaceable u1 (SoP a), Replaceable u2 (SoP a)) => Substitution (SoP a) -> Cases u1 u2 -> Cases a (SoP a)
 repCases s (Cases cs) =
-  Cases $ NE.map (\(p,q) -> (sop2Symbol (rep s p), rep s q)) cs
+  Cases $ NE.map (repCase s) cs
 
 repDomain :: Substitution (SoP Symbol) -> Domain -> Domain
 repDomain s (Iota n) = Iota (rep s n)
@@ -223,10 +226,24 @@ instance MonadFreshNames m => Unify IndexFn (SoP Symbol) m where
 -- Index function substitution.
 -------------------------------------------------------------------------------
 -- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
--- sub :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
--- sub x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
---   i' <- newNameFromString "i"
---   traceM ("🌪️🎭 sub " <> prettyString x <> " for " <> prettyString for <> "\n  in " <> prettyString into)
---   traceM ("fresh name " <> prettyString i')
---   sub' x (subIndexFn i i' for) (rename j i' into)
--- sub x q r = sub' x q r
+subst :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
+subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
+  traceM ("🌪️🎭 sub " <> prettyString x <> " for " <> prettyString for <> "\n  in " <> prettyString into)
+  i' <- sym2SoP . Var <$> newNameFromString "i"
+  traceM ("fresh name " <> prettyString i')
+  for' <- rename for
+  into' <- rename into
+  subst' x (repIndexFn (M.singleton i i') for') (repIndexFn (M.singleton j i') into')
+subst x q r = subst' x q r
+
+subst' :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
+subst' x (IndexFn Empty xs) (IndexFn iter_y ys) =
+  -- No rule in document (substituting scalar into index function).
+  pure $
+    IndexFn
+      iter_y
+      (cases $ do
+        (xcond, xval) <- casesToList xs
+        (ycond, yval) <- casesToList ys
+        pure $ repCase (M.singleton x xval) (ycond :&& xcond, yval))
+subst' _ _ _ = undefined
