@@ -4,12 +4,15 @@ import qualified Language.Futhark as E
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP)
 import qualified Data.List.NonEmpty as NE
-import Futhark.Util.Pretty (prettyString)
+import Futhark.Util.Pretty (prettyString, Pretty)
 import Data.Maybe (fromMaybe)
 import Futhark.MonadFreshNames (VNameSource)
 import Language.Futhark.Semantic (Imports, ImportName, FileModule (fileProg))
-import Futhark.Analysis.Proofs.IndexFn (IndexFn, IndexFnM, runIndexFnM, clearAlgEnv)
+import Futhark.Analysis.Proofs.IndexFn (IndexFn, IndexFnM, runIndexFnM, clearAlgEnv, insertIndexFn, VEnv (..))
 import qualified Data.Map as M
+import Debug.Trace (traceM)
+import Control.Monad.RWS
+import Futhark.Analysis.Proofs.Rewrite (rewrite)
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -46,6 +49,15 @@ getArgs = map (stripExp . snd) . NE.toList
     stripExp x = fromMaybe x (E.stripExp x)
 
 --------------------------------------------------------------
+-- Utilities
+--------------------------------------------------------------
+debugM :: Applicative f => String -> f ()
+debugM x = traceM $ "🪲 " <> x
+
+tracePrettyM :: (Applicative f, Pretty a) => a -> f ()
+tracePrettyM = traceM . prettyString
+
+--------------------------------------------------------------
 -- Construct index function for source program
 --------------------------------------------------------------
 mkIndexFnProg :: VNameSource -> Imports -> M.Map E.VName IndexFn
@@ -63,3 +75,30 @@ mkIndexFnDecs (E.ValDec vb : rest) = do
   mkIndexFnValBind vb
   mkIndexFnDecs rest
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
+
+
+
+-- toplevel_indexfns
+mkIndexFnValBind :: E.ValBind -> IndexFnM ()
+mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
+  traceM ("\n====\nmkIndexFnValBind:\n\n" <> prettyString val)
+  indexfn <- forward body >>= refineAndBind vn
+  -- insertTopLevel vn (params, indexfn)
+  algenv <- gets algenv
+  debugM ("AlgEnv\n" <> prettyString algenv)
+  pure ()
+
+refineAndBind :: E.VName -> IndexFn -> IndexFnM IndexFn
+refineAndBind vn indexfn = do
+  indexfn' <- rewrite indexfn
+  insertIndexFn vn indexfn'
+  tracePrettyM indexfn'
+  traceM "\n"
+  -- tell ["resulting in", toLaTeX (vn, indexfn')]
+  pure indexfn'
+
+forward :: E.Exp -> IndexFnM IndexFn
+forward (E.Parens e _) = forward e
+forward (E.Attr _ e _) = forward e
+forward e = error $ "forward on " <> show e
+
