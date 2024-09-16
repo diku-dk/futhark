@@ -71,22 +71,21 @@ mkIndexFnImports = mapM_ (mkIndexFnDecs . E.progDecs . fileProg . snd)
 mkIndexFnDecs :: [E.Dec] -> IndexFnM ()
 mkIndexFnDecs [] = pure ()
 mkIndexFnDecs (E.ValDec vb : rest) = do
-  clearAlgEnv
-  mkIndexFnValBind vb
+  _ <- mkIndexFnValBind vb
   mkIndexFnDecs rest
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 
-
 -- toplevel_indexfns
-mkIndexFnValBind :: E.ValBind -> IndexFnM ()
+mkIndexFnValBind :: E.ValBind -> IndexFnM (Maybe IndexFn)
 mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
+  clearAlgEnv
   traceM ("\n====\nmkIndexFnValBind:\n\n" <> prettyString val)
   indexfn <- forward body >>= refineAndBind vn
   -- insertTopLevel vn (params, indexfn)
   algenv <- gets algenv
   debugM ("AlgEnv\n" <> prettyString algenv)
-  pure ()
+  pure (Just indexfn)
 
 refineAndBind :: E.VName -> IndexFn -> IndexFnM IndexFn
 refineAndBind vn indexfn = do
