@@ -346,6 +346,8 @@ vFuseNodeT
 --   WithAcc such as to (hopefully) enable more fusion there. 
 -- This should be safe as long as the SOAC does not uses any of the
 --   accumulator arrays produced by the withAcc.
+-- We could not provide a test for this case, due to the very restrictive
+--   way in which accumulators can be used at source level.
 vFuseNodeT
   edges
   _infusible
