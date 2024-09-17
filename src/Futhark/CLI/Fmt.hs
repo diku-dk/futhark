@@ -474,7 +474,7 @@ fmtExp (ProjectSection fields _ _) =
   where
     p name = "." <> prettyText name
 fmtExp (IndexSection idxs _ _) = do
-  idxs' <- mconcat . brackets . L.intercalate [", "] <$> fmtDimIndex idxs
+  idxs' <- mconcat . brackets . L.intercalate [", "] <$> mapM fmtDimIndex idxs
   pure ["." <> idxs']
 fmtExp (Constr n cs _ _) = do
   cs' <- mconcat . L.intercalate [" "] <$> mapM fmtExp cs
@@ -483,7 +483,7 @@ fmtExp (Attr attr e _) = do
   attr' <- fmtAttr attr
   e' <- fmtExp e
   pure $ attr' <> e'
-fmtExp (AppExp e res) = undefined -- fmtAppExp e
+fmtExp (AppExp e _) = fmtAppExp e
 
 fmtQualName :: QualName Name -> Line
 fmtQualName (QualName names name) =
@@ -505,7 +505,7 @@ fmtAppExp (Match e cs _) = do
   cs' <- mconcat <$> mapM fmtCase (toList cs)
   pure $ ["match"] <> e' <> cs'
 fmtAppExp (Loop sizeparams pat initexp form loopbody _) = do
-  let sizeparams' = ("["<>) . (<>"]") . prettyText <$> sizeparams
+  let sizeparams' = ("["<>) . (<>"]") . prettyText . toName <$> sizeparams
   pat' <- fmtPat pat
   initexp' <- fmtExp initexp
   form' <- fmtLoopForm form
@@ -519,7 +519,95 @@ fmtAppExp (Loop sizeparams pat initexp form loopbody _) = do
     form' <>
     ["do"] <>
     loopbody'
+fmtAppExp (Index e idxs _) = do
+  e' <- fmtExp e
+  idxs' <- L.intercalate [","] <$> mapM fmtDimIndex idxs
+  pure $ e' <> ["["] <> idxs' <> ["]"]
+fmtAppExp (LetPat sizes pat e body _) = do
+  let sizes' = mconcat $ fmtSizeBinder <$> sizes
+  pat' <- fmtPat pat
+  e' <- fmtExp e
+  body' <- letBody body
+  pure $ ["let"] <> sizes' <> pat' <> ["="] <> e' <> body'
+fmtAppExp (LetFun fname (tparams, params, retdecl, _, _) body _) = do
+  tparams' <- mconcat <$> mapM fmtTypeParam tparams
+  params' <- mconcat <$> mapM fmtPat params
+  retdecl' <-
+    case fmtTypeExp <$> retdecl of
+    Just a -> fmap ([":"] <>) a
+    Nothing -> pure []
+  body' <- letBody body
+  pure $
+    ["let"] <>
+    [prettyText fname] <>
+    tparams' <>
+    params' <>
+    retdecl' <>
+    ["="] <>
+    body'
+fmtAppExp (LetWith dest src idxs ve body _)
+  | dest == src = do
+      dest' <- fmtIdent dest
+      idxs' <- mconcat <$> mapM fmtDimIndex idxs
+      ve' <- fmtExp ve
+      body' <- letBody body
+      pure $
+        ["let"] <>
+        dest' <>
+        idxs' <>
+        ["="] <>
+        ve' <>
+        body'
+  | otherwise = do
+      dest' <- fmtIdent dest
+      src' <- fmtIdent src
+      idxs' <- mconcat <$> mapM fmtDimIndex idxs
+      ve' <- fmtExp ve
+      body' <- letBody body
+      pure $
+        ["let"] <>
+        dest' <>
+        ["="] <>
+        src' <>
+        ["with"] <>
+        idxs' <>
+        ve' <>
+        body'
+fmtAppExp (Range start maybe_step end _) = do
+  start' <- fmtExp start
+  maybe_step' <- maybe (pure mempty) (fmap ([".."] <>) . fmtExp) maybe_step
+  end' <-
+    case end of
+      DownToExclusive end' -> (["..>"] <>) <$> fmtExp end'
+      ToInclusive end' -> (["..."] <>) <$> fmtExp end'
+      UpToExclusive end' -> (["..<"] <>) <$> fmtExp end'
+  pure $ start' <> maybe_step' <> end'
+fmtAppExp (If c t f _) = do
+  c' <- fmtExp c
+  t' <- fmtExp t
+  f' <- fmtExp f
+  pure $
+    ["if"] <>
+    c' <>
+    ["then"] <>
+    t' <>
+    ["else"] <>
+    f'
+fmtAppExp (Apply f args _) = do
+  f' <- fmtExp f
+  args' <- mconcat <$> mapM (fmtExp . snd) (toList args)
+  pure $ f' <> args'
 
+letBody :: UncheckedExp -> FmtM Fmt
+letBody body@(AppExp LetPat {} _) = fmtExp body
+letBody body@(AppExp LetFun {} _) = fmtExp body
+letBody body = do
+  body' <- fmtExp body
+  pure $ ["in"] <> body'
+  
+fmtSizeBinder :: SizeBinder Name -> Fmt
+fmtSizeBinder (SizeBinder v _) = brackets [prettyText v]
+  
 fmtIdent :: IdentBase NoInfo Name t -> FmtM Fmt
 fmtIdent = pure . L.singleton . prettyText . identName
 
@@ -553,7 +641,7 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
     case fmtTypeExp <$> retdecl of
     Just a -> fmap ([":"] <>) a
     Nothing -> pure []
-  exp <- fmtExp body
+  body' <- fmtExp body
   pure $ fmt_attrs <>
          fun <>
          [prettyText name] <>
@@ -561,7 +649,7 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
          args' <>
          retdecl' <>
          ["="] <>
-         exp
+         body'
   where
     fun =
       case entry of
