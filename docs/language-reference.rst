@@ -880,7 +880,7 @@ Apply the function ``f`` to the argument ``x``.
 ``#c x y z``
 ............
 
-Apply the sum type constructor ``#x`` to the payload ``x``, ``y``, and
+Apply the sum type constructor ``#c`` to the payload ``x``, ``y``, and
 ``z``.  A constructor application is always assumed to be saturated,
 i.e. its entire payload provided.  This means that constructors may
 not be partially applied.
