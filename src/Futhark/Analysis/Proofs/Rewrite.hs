@@ -43,11 +43,13 @@ a ~+~ b = sym2SoP a .+. sym2SoP b
 a ~-~ b = sym2SoP a .-. sym2SoP b
 
 converge :: (Eq a, Monad m) => (a -> m a) -> a -> m a
-converge f x = do
-  y <- f x
-  y2 <- f y
-  if y == y2 then pure y
-  else converge f y
+converge f x = converge_ (f x)
+  where
+    converge_ fx = do
+      y <- fx
+      z <- f y
+      if y == z then pure y
+      else converge_ (pure z)
 
 match :: Unify u v m => Rule u v m -> u -> m (Maybe (Substitution v))
 match rule x = unify (from rule) x >>= check (sideCondition rule)
@@ -92,7 +94,9 @@ instance Rewritable Symbol IndexFnM where
               msum <$> mapM (match rule) [x `op` y, y `op` x]
 
 instance Rewritable IndexFn IndexFnM where
-  rewrite = converge $ astMap m <=< \indexfn -> rulesIndexFn >>= foldM (flip match_) indexfn
+  rewrite =
+    converge $
+      astMap m <=< \indexfn -> rulesIndexFn >>= foldM (flip match_) indexfn
     where
       m :: ASTMapper Symbol IndexFnM = ASTMapper
         { mapOnSoP = rewrite,
