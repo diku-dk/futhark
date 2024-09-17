@@ -20,6 +20,7 @@ import Control.Monad.State.Strict
 import Control.Monad
 import Debug.Trace
 import Data.Char (chr)
+import Data.Text.Prettyprint.Doc (Pretty(pretty))
 
 debug :: Show a => a -> a
 debug a = traceShow a a
@@ -91,14 +92,26 @@ align f = f
 sep :: [Fmt] -> Fmt
 sep fs = concat $ punctuate [softline] fs
 
+
+--  Should have similar functionality to hsep for docs
+hsep :: [Fmt] -> Fmt
+hsep fs = concat $ punctuate [line] fs
+
 punctuate :: Semigroup a => a -> [a] -> [a] 
 punctuate _ [] = []
 punctuate _ [f] = [f]
 punctuate l (f:fs) = [l <> f] <> punctuate l fs  
 
--- Should ahve similar functionality to softline for docs
+-- Should have similar functionality to softline for docs
 softline :: Line 
 softline = " "
+
+-- Should have similar functionality to line for docs
+line :: Line
+line = " "
+
+stack :: [Fmt] -> Fmt 
+stack = concat 
 
 {-
 commasepbetween :: Line -> Line -> Fmt -> FmtM Fmt
@@ -326,15 +339,16 @@ fmtAttr attr = do
   attr_info <- fmtAttrInfo attr
   pure $ ["#["] <> attr_info <> ["]"]
 
+fmtLiftedness :: Liftedness -> FmtM Line
+fmtLiftedness Unlifted = pure ""
+fmtLiftedness SizeLifted = pure "~"
+fmtLiftedness Lifted = pure "^"
+
 fmtTypeParam :: UncheckedTypeParam -> FmtM Fmt
 fmtTypeParam (TypeParamDim name loc) = pure ["[" <> prettyText name <> "]"]
-fmtTypeParam (TypeParamType l name loc) =
-  pure $ ["'" <> fmtLiftedness l] <> [prettyText name]
-  where
-    fmtLiftedness Unlifted = ""
-    fmtLiftedness SizeLifted = "~"
-    fmtLiftedness Lifted = "^"
-
+fmtTypeParam (TypeParamType l name loc) = do
+  l' <- fmtLiftedness l
+  pure $ ["'" <> l'] <> [prettyText name]
 fmtPat :: UncheckedPat t -> FmtM Fmt
 fmtPat (TuplePat pats loc) = do
   fmt <- L.intercalate [", "] <$> mapM fmtPat pats
@@ -560,18 +574,93 @@ fmtSizeExp (SizeExp d _loc) = do
   pure $ brackets d' 
 fmtSizeExp (SizeExpAny _loc) = pure $ brackets mempty
 
-fmtModBind :: TypeBindBase NoInfo Name -> FmtM Fmt
-fmtModBind = undefined 
+fmtSpecBase :: SpecBase NoInfo Name -> FmtM Fmt
+fmtSpecBase (TypeAbbrSpec tpsig) = fmtTypeBind tpsig
+fmtSpecBase (TypeSpec l name ps _doc _loc) = do
+  l' <- fmtLiftedness l
+  ps' <- mapM fmtTypeParam ps
+  pure $ ["type"<> l'] <> hsep ([prettyText name] : ps')
+fmtSpecBase (ValSpec name ps te _ _doc _loc) = do
+  ps' <- mapM fmtTypeParam ps
+  te' <- fmtTypeExp te
+  pure $ ["val "] <> hsep ([prettyText name] : ps') <> [": "] <> te'
+fmtSpecBase (ModSpec name mte _doc _loc) = do
+  mte' <- fmtModTypeExpBase mte
+  pure $ ["module " <> prettyText name <> ": "] <> mte'
+fmtSpecBase (IncludeSpec mte _loc) = do
+  mte' <- fmtModTypeExpBase mte
+  pure $ ["include "] <> mte'
+
+fmtModTypeExpBase :: ModTypeExpBase NoInfo Name -> FmtM Fmt
+fmtModTypeExpBase (ModTypeVar v _ _loc) = pure [prettyText v]
+fmtModTypeExpBase (ModTypeParens mte _loc) = do
+  mte' <- fmtModTypeExpBase mte
+  pure $ parens mte' 
+fmtModTypeExpBase (ModTypeSpecs sbs _loc) = do
+  sbs' <- mapM fmtSpecBase sbs 
+  pure $ brackets $ stack $ punctuate [line] sbs'
+fmtModTypeExpBase (ModTypeWith mte (TypeRef v ps td _) _loc) = do
+  mte' <- fmtModTypeExpBase mte
+  ps' <- mapM fmtTypeParam ps 
+  td' <- fmtTypeExp td
+  pure $ mte' <> [" with " <> prettyText v <> " "] <> hsep ps' <> [" = "] <> td' 
+fmtModTypeExpBase (ModTypeArrow (Just v) te0 te1 _loc) = do
+  te0' <- fmtModTypeExpBase te0
+  te1' <- fmtModTypeExpBase te1
+  pure $ parens [prettyText v <> ": "] <> te0' <> [ "->" ] <> te1' 
+fmtModTypeExpBase (ModTypeArrow Nothing te0 te1 _loc) = do
+  te0' <- fmtModTypeExpBase te0
+  te1' <- fmtModTypeExpBase te1
+  pure $ te0' <> [" -> "] <> te1' 
+
+fmtModTypeBind :: ModTypeBindBase NoInfo Name -> FmtM Fmt
+fmtModTypeBind (ModTypeBind pName pSig _ _) = do
+  pSig' <- fmtModTypeExpBase pSig
+  pure $ ["module type" <> prettyText pName <> " = "] <> pSig'
+
+fmtModParam :: ModParamBase NoInfo Name -> FmtM Fmt
+fmtModParam (ModParam pName pSig _f _loc) = do
+  pSig' <- fmtModTypeExpBase pSig
+  pure $ parens $ [prettyText pName <> ": " ] <> pSig' 
+
+fmtModBind :: ModBindBase NoInfo Name -> FmtM Fmt
+fmtModBind (ModBind name ps sig te _doc _loc) = do
+  ps' <- mapM fmtModParam ps
+  sig' <- fmtSig sig
+  te' <- fmtModExp te
+  pure $ ["module "] <> hsep ([prettyText name] : ps') <> sig' <> [" = "] <> te'
+  where 
+    fmtSig s = case s of
+      Nothing -> pure mempty
+      Just (s', _f) -> do
+        s'' <- fmtModTypeExpBase s'
+        pure $ [" : "] <> s'' <> [" "]
+
+fmtModExp :: ModExpBase NoInfo Name -> FmtM Fmt
+fmtModExp (ModVar v _loc) = undefined
+fmtModExp (ModParens f _loc) = undefined 
+fmtModExp (ModImport path _f _loc) = undefined
+fmtModExp (ModDecs decs _loc) = undefined 
+fmtModExp (ModApply me0 me1 _f0 _f1 _loc)  = undefined
+fmtModExp (ModAscript me mte _f _loc) = undefined 
+fmtModExp (ModLambda param sig body _loc) = undefined  
 
 -- | Formatting of Futhark declarations.
 fmtDec :: UncheckedDec -> FmtM Fmt
 fmtDec (ValDec t) = buildFmt fmtValBind t -- A value declaration.
 fmtDec (TypeDec tb) = buildFmt fmtTypeBind tb -- A type declaration.
-fmtDec (ModTypeDec tb) = buildFmt fmtModBind tb -- A module type declation.
-fmtDec (ModDec tb) = undefined -- A module declation.
-fmtDec (OpenDec tb loc) = undefined -- I have no clue.
-fmtDec (LocalDec tb loc) = undefined -- I have no clue, maybe this just adds the local keyword?
-fmtDec (ImportDec path tb loc) = undefined -- Import declarations.
+fmtDec (ModTypeDec tb) = buildFmt fmtModTypeBind tb -- A module type declation.
+fmtDec (ModDec tb) = buildFmt fmtModBind tb -- A module declation.
+fmtDec (OpenDec tb _loc) = do
+  tb' <- fmtModExp tb 
+  pure $ ["open "] <> tb' 
+-- Adds the local keyword
+fmtDec (LocalDec tb _loc) = do
+  tb' <- fmtDec tb
+  pure $ ["local "] <> tb'
+-- Import declarations.
+fmtDec (ImportDec path _tb _loc) = 
+  pure ["import " <> prettyText path] 
 
 -- | Does not return residual comments, because these are simply
 -- inserted at the end.
