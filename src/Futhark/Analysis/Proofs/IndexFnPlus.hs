@@ -5,14 +5,14 @@ where
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution, Unify (..), unifies_, SubstitutionBuilder (..))
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), Unify (..), unifies_, SubstitutionBuilder (..))
 import Futhark.SoP.SoP (SoP, sym2SoP, int2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), (<+>), parens, commasep, prettyString, line, indent, stack)
 import Language.Futhark (VName)
 import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString, newVName)
 import qualified Data.Map as M
 import qualified Data.List.NonEmpty as NE
-import Futhark.Analysis.Proofs.Util (prettyName)
+import Futhark.Analysis.Proofs.Util (prettyName, prettyHole)
 import Debug.Trace (traceM)
 
 instance Eq Domain where
@@ -45,7 +45,7 @@ instance (Pretty a, Pretty b) => Pretty (Cases a b) where
     line <> indent 4 (stack (map prettyCase (NE.toList cs)))
     where
       prettyCase (p, e) = "|" <+> pretty p <+> "⇒ " <+> pretty e
-  -- pretty (CHole vn) = prettyHole vn
+  pretty (CHole vn) = prettyHole vn
 
 instance Pretty Domain where
   pretty (Iota n) = "iota" <+> parens (pretty n)
@@ -85,7 +85,7 @@ repCase s (a, b) = (sop2Symbol (rep s a), rep s b)
 
 repCases :: (Ord a, Replaceable v1 a, Replaceable v2 a) => Substitution a -> Cases v1 v2 -> Cases a (SoP a)
 repCases s (Cases cs) = Cases $ NE.map (repCase s) cs
--- repCases s (CHole vn) = Cases $ NE.map (repCase s) cs
+repCases s (CHole vn) = M.findWithDefault (CHole vn) vn (subCases s)
 
 repDomain :: Substitution Symbol -> Domain -> Domain
 repDomain s (Iota n) = Iota (rep s n)
@@ -105,6 +105,7 @@ instance (Renameable a, Renameable b) => Renameable (Cases a b) where
   rename_ tau (Cases cs) = Cases <$> mapM re cs
     where
       re (p,q) = (,) <$> rename_ tau p <*> rename_ tau q
+  rename_ _ (CHole vn) = pure $ CHole vn
 
 instance Renameable Domain where
   rename_ tau (Cat k m b) = do
@@ -121,6 +122,9 @@ instance Renameable IndexFn where
       dom' <- rename_ tau dom
       IndexFn (Forall i dom') <$> rename_ tau body
 
+instance SubstitutionBuilder (Cases Symbol (SoP Symbol)) Symbol where
+  addSub vn x s = s { subCases = M.insert vn x $ subCases s, sop = sop s }
+
 instance MonadFreshNames m => Unify Domain Symbol m where
   unify_ k (Iota n) (Iota m) = unify_ k n m
   unify_ k (Cat _ m1 b1) (Cat _ m2 b2) = do
@@ -136,6 +140,8 @@ instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) Symbol m where
     where
       xs = NE.toList cs1
       ys = NE.toList cs2
+  unify_ _ (CHole vn) (Cases cs) = pure $ mkSub vn (Cases cs)
+  unify_ _ _ _ = fail "CHole in second argument not allowed!"
 
 -- XXX we require that index function quantifiers (indexing variables) are unique!
 instance MonadFreshNames m => Unify IndexFn Symbol m where
@@ -151,11 +157,11 @@ instance MonadFreshNames m => Unify IndexFn Symbol m where
 -- Index function substitution.
 -------------------------------------------------------------------------------
 data SubstitutionRule u m = SubstitutionRule {
-    handle :: String,
-    f :: IndexFn,
-    g :: IndexFn,
-    result :: Substitution u -> m IndexFn,
-    sidePremises :: Substitution u -> m Bool
+    name :: String,
+    fPremise :: IndexFn,
+    gPremise :: IndexFn,
+    to :: Substitution u -> m IndexFn,
+    sideCondition :: Substitution u -> m Bool
   }
 
 rules :: IndexFnM [SubstitutionRule Symbol IndexFnM]
@@ -169,12 +175,12 @@ rules = do
   h2 <- newVName "h"
   pure
     [ SubstitutionRule
-      { handle = "Substitute scalar f into index function g."
+      { name = "Substitute scalar f into index function g."
       -- , f = IndexFn Empty (Hole xs)
-      , f = undefined
-      , g = undefined
-      , result = undefined
-      , sidePremises = undefined
+      , fPremise = undefined
+      , gPremise = undefined
+      , to = undefined
+      , sideCondition = undefined
       }
     ]
 

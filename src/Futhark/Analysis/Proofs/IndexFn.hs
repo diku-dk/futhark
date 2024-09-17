@@ -29,8 +29,8 @@ data Iterator = Forall VName Domain
               | Empty
   deriving Show
 
-newtype Cases a b = Cases (NE.NonEmpty (a, b))
-               -- | CHole VName
+data Cases a b = Cases (NE.NonEmpty (a, b))
+               | CHole VName
   deriving (Show, Eq, Ord)
 
 cases :: [(a,b)] -> Cases a b
@@ -38,7 +38,7 @@ cases = Cases . NE.fromList
 
 casesToList ::  Cases a b -> [(a, b)]
 casesToList (Cases cs) = NE.toList cs
--- casesToList (CHole _) = error "casesToList on hole."
+casesToList (CHole _) = error "casesToList on hole."
 
 -------------------------------------------------------------------------------
 -- Monad.
