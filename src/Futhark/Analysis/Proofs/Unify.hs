@@ -17,6 +17,7 @@ import Control.Monad (foldM, msum)
 import Control.Monad.Trans.Maybe
 import Futhark.Util.Pretty
 import Futhark.Analysis.Proofs.Util (prettyName)
+import Futhark.Analysis.Proofs.IndexFn (Cases)
 
 class Ord a => FreeVariables a where
   fv :: a -> S.Set VName
@@ -30,9 +31,24 @@ class Renameable u where
   rename :: MonadFreshNames m => u -> m u
   rename = rename_ mempty
 
+-- type Substitution u = M.Map VName (SoP u)
+data Substitution u = Substitution {
+    sop :: M.Map VName (SoP u),
+    subCases :: M.Map VName (Cases u (SoP u))
+  }
+  deriving (Show, Eq)
+
+instance Semigroup (Substitution u) where
+  a <> b = Substitution { sop = sop a <> sop b, subCases = subCases a <> subCases b }
+
+instance Monoid (Substitution u) where
+  mempty = Substitution { sop = mempty, subCases = mempty }
+
+instance SubstitutionBuilder (SoP u) u where
+  addSub vn x s = s { sop = M.insert vn x $ sop s }
 
 instance Pretty v => Pretty (Substitution v) where
-  pretty = braces . commastack . map (\(k,v) -> prettyName k <> " : " <> pretty v) . M.toList
+  pretty = braces . commastack . map (\(k,v) -> prettyName k <> " : " <> pretty v) . M.toList . sop
 
 class Replaceable v u where
   -- Implements the replacement operation from Sieg and Kaufmann.
@@ -45,6 +61,8 @@ sub s x = rep s <$> rename x
 
 class SubstitutionBuilder v u where
   addSub :: VName -> v -> Substitution u -> Substitution u
+  mkSub :: VName -> v -> Substitution u
+  mkSub vn x = addSub vn x mempty
 
 class (MonadFreshNames m, Renameable v) => Unify v u m where
   -- `unify_ k eq` is the unification algorithm from Sieg and Kauffmann,
@@ -142,5 +160,5 @@ instance ( Replaceable u u
          , Hole u) => Unify (SoP u) u m where
   -- Unify on permutations of terms.
   unify_ k x y
-    | Just h <- justSym x >>= justHole = pure $ M.singleton h y
+    | Just h <- justSym x >>= justHole = pure $ addSub h y mempty
     | otherwise = unifyAnyPerm k (sopToList x) (sopToList y)

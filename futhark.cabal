@@ -141,9 +141,11 @@ library
       Futhark.Analysis.PrimExp.Table
       Futhark.Analysis.Proofs.Convert
       Futhark.Analysis.Proofs.IndexFn
+      Futhark.Analysis.Proofs.IndexFnPlus
       Futhark.Analysis.Proofs.Refine
       Futhark.Analysis.Proofs.Rewrite
       Futhark.Analysis.Proofs.Symbol
+      Futhark.Analysis.Proofs.SymbolPlus
       Futhark.Analysis.Proofs.Traversals
       Futhark.Analysis.Proofs.Unify
       Futhark.Analysis.Proofs.Util

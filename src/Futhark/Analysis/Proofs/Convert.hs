@@ -138,7 +138,7 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
   indexfns <- gets indexfns
   case M.lookup vn indexfns of
     Just indexfn -> do
-      traceM ("🌪️🎭 sub " <> prettyString vn <> " for " <> prettyString indexfn)
+      traceM ("using index function " <> prettyString vn <> " = " <> prettyString indexfn)
       pure indexfn
     _ -> do
       debugM ("creating index function for " <> prettyString vn)

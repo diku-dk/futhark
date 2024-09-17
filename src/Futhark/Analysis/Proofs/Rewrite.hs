@@ -7,7 +7,7 @@ import Futhark.MonadFreshNames
 import Futhark.Analysis.Proofs.Symbol (Symbol(..), normalizeSymbol, applyLinCombRule)
 import Control.Monad (foldM, msum, (<=<))
 import Futhark.SoP.FourierMotzkin (($<=$))
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..), subIndexFn, repVName)
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), cases, Iterator (..), Domain (..))
 import Data.List (subsequences, (\\))
 import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), astMap)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
@@ -16,6 +16,7 @@ import Data.Functor ((<&>))
 import Language.Futhark (VName)
 import qualified Data.Map as M
 import Futhark.Analysis.Proofs.Util (partitions)
+import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn, repVName)
 
 data Rule a b m = Rule {
     name :: String,
@@ -253,7 +254,7 @@ rulesIndexFn = do
         , to = \s -> subIndexFn s =<< do
             let i' = repVName s i
             e1 <- sub s (hole h1)
-            e1_b <- sub (M.singleton i' (int 0)) e1
+            e1_b <- sub (mkSub i' (int 0)) e1
             pure $ IndexFn {
               iterator = Forall i (Iota (hole n)),
               body = cases [(Bool True, e1_b)]
@@ -280,7 +281,7 @@ rulesIndexFn = do
             let i' = repVName s i
             e1 <- sub s (hole h1)
             b' <- sub s (hole b)
-            e1_b <- sub (M.singleton i' b') e1
+            e1_b <- sub (mkSub i' b') e1
             pure $ IndexFn {
               iterator = Forall i (Cat k (hole m) (hole b)),
               body = cases [(Bool True, e1_b)]
@@ -310,10 +311,10 @@ rulesIndexFn = do
         , to = \s -> do
             let i' = repVName s i
             e1 <- sub s (Hole h1)
-            e1_b <- sub (M.singleton i' (int 0)) e1
+            e1_b <- sub (mkSub i' (int 0)) e1
             e2 <- sub s (Hole h2)
             j <- newVName "j"
-            e2_j <- sub (M.singleton i' (sVar j)) e2
+            e2_j <- sub (mkSub i' (sVar j)) e2
             let e2_sum = applyLinCombRule j (int 1) (hole i) e2_j
             subIndexFn s $
               IndexFn {

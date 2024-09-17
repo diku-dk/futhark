@@ -5,10 +5,12 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Futhark.MonadFreshNames
 import Futhark.Analysis.Proofs.Symbol
+import Futhark.Analysis.Proofs.SymbolPlus ()
+import Futhark.Analysis.Proofs.IndexFn
+import Futhark.Analysis.Proofs.IndexFnPlus ()
 import Futhark.Analysis.Proofs.Unify
 import Futhark.SoP.SoP (sym2SoP, (.+.), scaleSoP, (.*.), int2SoP)
 import qualified Data.Map as M
-import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Util.Pretty (prettyString)
 
 
@@ -35,7 +37,7 @@ tests = testGroup "Proofs.Unify"
   , testCase "Second is scaled" $
       run (\(x,y,z,w,_,_,_,_,_) ->
         unify (hole x .+. hole y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
-      ) @??= M.adjust (scaleSoP 2) y <$> x2z_y2w
+      ) @??= (x2z_y2w >>= \s -> pure $ Substitution { sop = M.adjust (scaleSoP 2) y $ sop s, subCases = subCases s })
   , testCase "Both scaled, but permuted" $
       run (\(x,y,z,w,_,_,_,_,_) ->
         unify (scaleSoP 2 (hole x) .+. hole y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
@@ -77,7 +79,7 @@ tests = testGroup "Proofs.Unify"
                   (_,_,_,_,a,b,c,d,_) <- varsM
                   _ <- newVName "k" -- Simulate "k" introduced by Unify.
                   rename $ sym2SoP (LinComb a (name2SoP b) (name2SoP c) (Var d))
-            in Just (M.singleton x renamed_lin_comb)
+            in Just (mkSub x renamed_lin_comb)
   , testCase "These shouldn't unify because w is different from a!" $
       -- Pattern should require `Idx (Var c) (Var a)`.
       run (\(x,y,z,w,a,b,c,d,_) ->
@@ -93,7 +95,7 @@ tests = testGroup "Proofs.Unify"
   -- Index functions.
   , testCase "Iota index functions" $
       -- Pattern should require `Idx (Var c) (Var a)`.
-      run (\(x,y,z,w,a,b,c,d,i) ->
+      run (\(x,y,z,w,a,b,c,d,_) ->
         unify
           (IndexFn {
             iterator = Forall x (Iota (hole y)),
@@ -105,7 +107,7 @@ tests = testGroup "Proofs.Unify"
             body = cases [(name2SoP a :== int2SoP 0, name2SoP c),
                           (name2SoP a :/= int2SoP 0, name2SoP d)]
           })
-      ) @??= (M.singleton x (name2SoP a)  <>) <$> y2b_z2c_w2d
+      ) @??= (mkSub x (name2SoP a)  <>) <$> y2b_z2c_w2d
   ]
   where
     name2SoP = sym2SoP . Var
@@ -117,12 +119,12 @@ tests = testGroup "Proofs.Unify"
         <$> newVName "x" <*> newVName "y" <*> newVName "z" <*> newVName "w"
         <*> newVName "a" <*> newVName "b" <*> newVName "c" <*> newVName "d"
         <*> newVName "i"
-    (x,y,z,w,a,b,c,d,i) = getValue varsM
+    (x,y,z,w,a,b,c,d,_) = getValue varsM
 
-    x2z_y2w = Just $ M.fromList [(x, name2SoP z), (y, name2SoP w)]
-    x2w_y2z = Just $ M.fromList [(x, name2SoP w), (y, name2SoP z)]
+    x2z_y2w = Just $ addSub x (name2SoP z) $ mkSub y (name2SoP w)
+    x2w_y2z = Just $ addSub x (name2SoP w) $ mkSub y (name2SoP z)
     y2b_z2c_w2d =
-      Just $ M.fromList [(y, name2SoP b), (z, name2SoP c), (w, name2SoP d)]
+      Just $ addSub y (name2SoP b) $ addSub z (name2SoP c) $ mkSub w (name2SoP d)
 
     run f = runTest (varsM >>= f)
     actual @??= expected =
