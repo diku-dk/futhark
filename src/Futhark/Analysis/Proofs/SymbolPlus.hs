@@ -54,8 +54,7 @@ instance Renameable Symbol where
       f op x y = op <$> rename_ tau x <*> rename_ tau y
 
 instance SubstitutionBuilder Symbol Symbol where
-  addSub vn e s = Substitution { sop = M.insert vn (sym2SoP e) $ sop s
-                               , subCases = subCases s }
+  addSub vn e s = s { sop = M.insert vn (sym2SoP e) $ sop s }
 
 instance Replaceable Symbol Symbol where
   -- TODO flatten

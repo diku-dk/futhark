@@ -37,7 +37,7 @@ tests = testGroup "Proofs.Unify"
   , testCase "Second is scaled" $
       run (\(x,y,z,w,_,_,_,_,_) ->
         unify (hole x .+. hole y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
-      ) @??= (x2z_y2w >>= \s -> pure $ Substitution { sop = M.adjust (scaleSoP 2) y $ sop s, subCases = subCases s })
+      ) @??= (x2z_y2w >>= \s -> pure $ s { sop = M.adjust (scaleSoP 2) y $ sop s })
   , testCase "Both scaled, but permuted" $
       run (\(x,y,z,w,_,_,_,_,_) ->
         unify (scaleSoP 2 (hole x) .+. hole y) (name2SoP z .+. scaleSoP 2 (name2SoP w))

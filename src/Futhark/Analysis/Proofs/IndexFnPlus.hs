@@ -123,7 +123,7 @@ instance Renameable IndexFn where
       IndexFn (Forall i dom') <$> rename_ tau body
 
 instance SubstitutionBuilder (Cases Symbol (SoP Symbol)) Symbol where
-  addSub vn x s = s { subCases = M.insert vn x $ subCases s, sop = sop s }
+  addSub vn x s = s { subCases = M.insert vn x $ subCases s }
 
 instance MonadFreshNames m => Unify Domain Symbol m where
   unify_ k (Iota n) (Iota m) = unify_ k n m
