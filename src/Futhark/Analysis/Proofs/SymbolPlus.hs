@@ -4,8 +4,7 @@ where
 
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), Hole (justHole), unifies_, Substitution (..))
-import Language.Futhark (VName)
-import Futhark.SoP.SoP (SoP, sym2SoP, int2SoP, (.+.), (.-.), sopToLists, scaleSoP)
+import Futhark.SoP.SoP (sym2SoP)
 import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
 import Data.Set qualified as S
 import qualified Data.Map as M

@@ -44,9 +44,6 @@ instance Semigroup (Substitution u) where
 instance Monoid (Substitution u) where
   mempty = Substitution { sop = mempty, subCases = mempty }
 
-instance SubstitutionBuilder (SoP u) u where
-  addSub vn x s = s { sop = M.insert vn x $ sop s }
-
 instance Pretty v => Pretty (Substitution v) where
   pretty = braces . commastack . map (\(k,v) -> prettyName k <> " : " <> pretty v) . M.toList . sop
 
@@ -63,6 +60,9 @@ class SubstitutionBuilder v u where
   addSub :: VName -> v -> Substitution u -> Substitution u
   mkSub :: VName -> v -> Substitution u
   mkSub vn x = addSub vn x mempty
+
+class Hole u where
+  justHole :: u -> Maybe VName
 
 class (MonadFreshNames m, Renameable v) => Unify v u m where
   -- `unify_ k eq` is the unification algorithm from Sieg and Kauffmann,
@@ -103,6 +103,9 @@ instance (Ord u, Replaceable u u) => Replaceable (Term u, Integer) u where
 
 instance (Ord u, Replaceable u u) => Replaceable (SoP u) u where
   rep s = foldr (addSoPs . rep s) zeroSoP . sopToList
+
+instance SubstitutionBuilder (SoP u) u where
+  addSub vn x s = s { sop = M.insert vn x $ sop s }
 
 unifies_ :: ( Replaceable v u
             , Replaceable u u
@@ -150,9 +153,6 @@ instance ( Replaceable u u
   unify_ k (x, a) (y, b)
     | a == b = unifyAnyPerm k (termToList x) (termToList y)
     | otherwise = fail "unequal constants"
-
-class Hole u where
-  justHole :: u -> Maybe VName
 
 instance ( Replaceable u u
          , Unify u u m
