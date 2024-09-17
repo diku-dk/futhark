@@ -69,8 +69,8 @@ def ker2Blk [n] (bit_beg: u32) (lgH: u32)
 -- Simple test for fusing scatter-flatten with the preceding 
 -- map nest that produces its indices and values
 -- ==
--- entry: main
--- input { 3i64 8i64 0i64
+-- entry: radixIt
+-- input { 3i64 8i64 0u32
 --         [ 12u32,11u32,10u32, 9u32, 4u32, 3u32, 2u32, 1u32
 --         , 8u32, 7u32, 6u32, 5u32,12u32,11u32,10u32, 9u32
 --         , 4u32, 3u32, 2u32, 1u32, 8u32, 7u32, 6u32, 5u32

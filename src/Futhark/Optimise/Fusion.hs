@@ -81,10 +81,6 @@ dontFuseScans m = do
   modify (\s -> s {fuseScans = fs})
   pure r
 
-unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> Bool
-unreachableEitherDir g a b =
-  not (reachable g a b || reachable g b a)
-
 isNotVarInput :: [H.Input] -> [H.Input]
 isNotVarInput = filter (isNothing . H.isVarInput)
 
@@ -116,14 +112,6 @@ fusedSomething :: NodeT -> FusionM (Maybe NodeT)
 fusedSomething x = do
   modify $ \s -> s {fusionCount = 1 + fusionCount s}
   pure $ Just x
-
-vFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
-vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
-  ( isWithAccNodeId n2 dg || not (any isInf (edgesBetween dg n1 n2)) )
-    && not (any (reachable dg n2) (filter (/= n2) (G.pre g n1)))
-
-hFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
-hFusionFeasability = unreachableEitherDir
 
 vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionM
 -- find the neighbors -> verify that fusion causes no cycles -> fuse
@@ -319,13 +307,14 @@ vFuseNodeT
   _edges
   _infusible
   (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, is1, _os1)
-  (StmNode (Let pat2 aux2 (WithAcc w_inps lam)), _os2)
+  (StmNode wastm@(Let pat2 aux2 (WithAcc w_inps lam0)), _os2)
     | ots1 == mempty,
       wacc_cons_nms  <- namesFromList $ concatMap (\(_,nms,_)->nms) w_inps,
       soac_prod_nms  <- map patElemName $ patElems pat1,
       soac_indep_nms <- map getName is1,
       all (`notNameIn` wacc_cons_nms) (soac_indep_nms ++ soac_prod_nms)
     = do
+    lam <- fst <$> doFusionInLambda lam0
     scope <- askScope
     bdy' <-
       runBodyBuilder $ do
@@ -336,11 +325,26 @@ vFuseNodeT
           let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms 
           pure $ (bodyResult (lambdaBody lam)) ++ pat1_res
     let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
+        pat = Pat $ patElems pat2 ++ patElems pat1
     lam' <- renameLambda $ lam { lambdaBody = bdy', lambdaReturnType = lam_ret_tp }
-    let pat = Pat $ patElems pat2 ++ patElems pat1
-    -- `aux1` already appear in the moved SOAC stm; is there
-    -- any need to add it to the enclosing withAcc stm as well?
-    fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam'
+    -- see if bringing the map inside the scatter has actually benefitted fusion
+    (lam'', success) <- doFusionInLambda lam'
+    if not success
+      then return Nothing
+      else do
+        -- `aux1` already appear in the moved SOAC stm; is there
+        -- any need to add it to the enclosing withAcc stm as well?
+        trace ("\n\n!!!!!!!!!! Fusion-SOAC-WithAcc !!!!!!!!!!!!\n\n") $ 
+          fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
+{--
+    trace ( "\n\n!!!!!!!!!! Fusion-SOAC_WithAcc !!!!!!!!!!!!\n" ++
+            "screma:\n" ++ prettyString pat1 ++ " = " ++ prettyString soac ++
+            "\n" ++ "withacc:\n" ++ prettyString wastm ++ "\n" ++ 
+            "result:\n" ++ prettyString (Let pat aux2 $ WithAcc w_inps lam') ++
+            "\n\n\n"
+          ) $
+--}
+    
 --
 -- The reverse of the case above, i.e., fusing a screma at the back of an
 --   WithAcc such as to (hopefully) enable more fusion there. 
@@ -348,33 +352,50 @@ vFuseNodeT
 --   accumulator arrays produced by the withAcc.
 -- We could not provide a test for this case, due to the very restrictive
 --   way in which accumulators can be used at source level.
+--
+--
 vFuseNodeT
   edges
   _infusible
-  (StmNode (Let pat1 aux1 (WithAcc w_inps wlam)), _is1, _os1)
+  (StmNode wstm@(Let pat1 aux1 (WithAcc w_inps wlam0)), _is1, _os1)
   (SoacNode ots2 pat2 soac@(H.Screma _w _form _s_inps) aux2, _os2)
     | ots2 == mempty,
-      n <- length (lambdaParams wlam) `div` 2,
+      n <- length (lambdaParams wlam0) `div` 2,
       pat1_acc_nms <- namesFromList $ take n $ map patElemName $ patElems pat1,
       -- not $ namesIntersect (freeIn soac) pat1_acc_nms
       all (`notNameIn` pat1_acc_nms) (map getName edges) = do
+    let empty_aux = StmAux mempty mempty mempty
+    wlam <- fst <$> doFusionInLambda wlam0
     scope <- askScope
     bdy' <-
       runBodyBuilder $ do
         buildBody_ . localScope (scope <> scopeOfLParams (lambdaParams wlam)) $ do
           -- adding stms of withacc's lambda
           mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody wlam
+          -- add copies of the non-accumulator results of withacc
+          let other_pr1 = drop n $ zip (patElems pat1) (bodyResult (lambdaBody wlam))
+          _ <- forM other_pr1 $ \ (pat_elm, bdy_res) -> do
+                let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
+                    aux = empty_aux { stmAuxCerts = resCerts bdy_res }
+                addStm $ Let (Pat [PatElem nm tp]) aux $ BasicOp $ SubExp se
           -- add the soac stmt
           soac' <- H.toExp soac
           addStm $ Let pat2 aux2 soac'
           -- build the body result
           let pat2_res = map (SubExpRes (Certs []) . Var . patElemName) $ patElems pat2
           pure $ (bodyResult (lambdaBody wlam)) ++ pat2_res
-    wlam' <- renameLambda $ wlam { lambdaBody = bdy' }
-    let pat = Pat $ patElems pat1 ++ patElems pat2
-    -- `aux1` already appear in the moved SOAC stm; is there
-    -- any need to add it to the enclosing withAcc stm as well?
-    fusedSomething $ StmNode $ Let pat aux1 $ WithAcc w_inps wlam'
+    let lam_ret_tp = lambdaReturnType wlam ++ map patElemType (patElems pat2)
+        pat = Pat $ patElems pat1 ++ patElems pat2
+    wlam' <- renameLambda $ wlam { lambdaBody = bdy', lambdaReturnType = lam_ret_tp }
+    -- see if bringing the map inside the scatter has actually benefitted fusion
+    (wlam'', success) <- doFusionInLambda wlam'
+    if not success
+      then return Nothing
+      else 
+        -- `aux2` already appear in the enclosed SOAC stm; is there
+        -- any need to add it to the enclosing withAcc stm as well?
+        trace ( "\n\n!!!!!!!!!! Fusion-WithAcc-SOAC !!!!!!!!!!!!\n\n" ) $
+          fusedSomething $ StmNode $ Let pat aux1 $ WithAcc w_inps wlam''
 -- the case of fusing two withaccs
 vFuseNodeT
   _edges 
@@ -387,7 +408,9 @@ vFuseNodeT
         -- ^ the other safety checks are done inside `tryFuseWithAccs`
     mstm <- SF.tryFuseWithAccs infusible stm1 stm2
     case (safe, mstm) of
-      (True, Just stm) -> fusedSomething $ StmNode $ stm
+      (True, Just stm) -> 
+        trace ("\n\n!!!!!!!!!! Fusion-WithAcc-WithAcc !!!!!!!!!!!!\n\n") $
+          fusedSomething $ StmNode $ stm
       _ -> pure Nothing
 --
 vFuseNodeT _ _ _ _ = pure Nothing
@@ -533,21 +556,21 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     defbody' <- doFusionWithDelayed defbody to_fuse
     pure (incoming, node, MatchNode (Let pat aux (Match cond cases' defbody' dec)) [], outgoing)
   StmNode (Let pat aux (Op (Futhark.VJP lam args vec))) -> doFuseScans $ do
-    lam' <- doFusionLambda lam
+    lam' <- fst <$> doFusionInLambda lam
     pure (incoming, node, StmNode (Let pat aux (Op (Futhark.VJP lam' args vec))), outgoing)
   StmNode (Let pat aux (Op (Futhark.JVP lam args vec))) -> doFuseScans $ do
-    lam' <- doFusionLambda lam
+    lam' <- fst <$> doFusionInLambda lam
     pure (incoming, node, StmNode (Let pat aux (Op (Futhark.JVP lam' args vec))), outgoing)
   StmNode (Let pat aux (WithAcc inputs lam)) -> doFuseScans $ do
-    lam' <- doFusionLambda lam
+    lam' <- fst <$> doFusionInLambda lam
     pure (incoming, node, StmNode (Let pat aux (WithAcc inputs lam')), outgoing)
   SoacNode ots pat soac aux -> do
     let lam = H.lambda soac
     lam' <- localScope (scopeOf lam) $ case soac of
       H.Stream {} ->
-        dontFuseScans $ doFusionLambda lam
+        dontFuseScans $ fst <$> doFusionInLambda lam
       _ ->
-        doFuseScans $ doFusionLambda lam
+        doFuseScans $ fst <$> doFusionInLambda lam
     let nodeT' = SoacNode ots pat (H.setLambda lam' soac) aux
     pure (incoming, node, nodeT', outgoing)
   _ -> pure c
@@ -557,20 +580,24 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
       stm_node <- mapM (finalizeNode . fst) extraNodes
       stms' <- fuseGraph (mkBody (mconcat stm_node <> stms) res)
       pure $ Body () stms' res
+    
+doFusionInLambda :: Lambda SOACS -> FusionM (Lambda SOACS, Bool)
+doFusionInLambda lam = do
+  -- To clean up previous instances of fusion.
+  lam' <- simplifyLambda lam
+  prev_count <- gets fusionCount
+  newbody <- localScope (scopeOf lam') $ doFusionBody $ lambdaBody lam'
+  aft_count <- gets fusionCount
+  -- To clean up any inner fusion.
+  lam'' <-
+    (if prev_count /= aft_count then simplifyLambda else pure)
+      lam' {lambdaBody = newbody}
+  pure (lam'', prev_count /= aft_count)
+  where
     doFusionBody :: Body SOACS -> FusionM (Body SOACS)
     doFusionBody body = do
       stms' <- fuseGraph body
       pure $ body {bodyStms = stms'}
-    doFusionLambda :: Lambda SOACS -> FusionM (Lambda SOACS)
-    doFusionLambda lam = do
-      -- To clean up previous instances of fusion.
-      lam' <- simplifyLambda lam
-      prev_count <- gets fusionCount
-      newbody <- localScope (scopeOf lam') $ doFusionBody $ lambdaBody lam'
-      aft_count <- gets fusionCount
-      -- To clean up any inner fusion.
-      (if prev_count /= aft_count then simplifyLambda else pure)
-        lam' {lambdaBody = newbody}
 
 -- main fusion function.
 fuseGraph :: Body SOACS -> FusionM (Stms SOACS)
