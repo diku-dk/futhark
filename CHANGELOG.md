@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Some instances of invalid copy removal. (Again.)
+
 ## [0.25.22]
 
 ### Added

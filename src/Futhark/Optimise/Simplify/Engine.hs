@@ -892,8 +892,14 @@ simplifyExp usage _ (WithAcc inputs lam) = do
         pure (Just (op_lam', nes'), op_lam_stms)
     (,op_stms) <$> ((,,op') <$> simplify shape <*> simplify arrs)
   let noteAcc = ST.noteAccTokens (zip (map paramName (lambdaParams lam)) inputs')
-  (lam', lam_stms) <- simplifyLambdaWith noteAcc (isFalse True) usage lam
+  (lam', lam_stms) <-
+    consumeInput inputs' $
+      simplifyLambdaWith noteAcc (isFalse True) usage lam
   pure (WithAcc inputs' lam', mconcat inputs_stms <> lam_stms)
+  where
+    inputArrs (_, arrs, _) = arrs
+    consumeInput =
+      localVtable . flip (foldl' (flip ST.consume)) . concatMap inputArrs
 simplifyExp _ _ e = do
   e' <- simplifyExpBase e
   pure (e', mempty)
