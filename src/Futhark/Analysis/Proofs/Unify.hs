@@ -30,29 +30,28 @@ class Renameable u where
   rename :: MonadFreshNames m => u -> m u
   rename = rename_ mempty
 
-type Substitution v = M.Map VName v
 
 instance Pretty v => Pretty (Substitution v) where
   pretty = braces . commastack . map (\(k,v) -> prettyName k <> " : " <> pretty v) . M.toList
 
-class Replaceable u v where
+class Replaceable v u where
   -- Implements the replacement operation from Sieg and Kaufmann.
-  rep :: Substitution v -> u -> v
+  rep :: Substitution u -> v -> SoP u
 
 sub :: ( MonadFreshNames m
-       , Renameable u
-       , Replaceable u v) => Substitution v -> u -> m v
+       , Renameable v
+       , Replaceable v u) => Substitution u -> v -> m (SoP u)
 sub s x = rep s <$> rename x
 
-class SubstitutionBuilder u v where
-  addSub :: VName -> u -> Substitution v -> Substitution v
+class SubstitutionBuilder v u where
+  addSub :: VName -> v -> Substitution u -> Substitution u
 
-class (MonadFreshNames m, Renameable u) => Unify u v m where
+class (MonadFreshNames m, Renameable v) => Unify v u m where
   -- `unify_ k eq` is the unification algorithm from Sieg and Kauffmann,
   -- Unification for quantified formulae, 1993.
   -- Check whether x is a bound variable by `x >= k`.
-  unify_ :: VName -> u -> u -> MaybeT m (Substitution v)
-  unify :: u -> u -> m (Maybe (Substitution v))
+  unify_ :: VName -> v -> v -> MaybeT m (Substitution u)
+  unify :: v -> v -> m (Maybe (Substitution u))
   unify e e' = runMaybeT $ do
     -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
     --                  = {rename(e) ~= rename(e')}.
@@ -81,29 +80,29 @@ instance FreeVariables VName where
 instance FreeVariables u => FreeVariables (SoP u) where
   fv x = S.unions [fv t | (ts, _) <- sopToLists x, t <- ts]
 
-instance (Ord u, Replaceable u (SoP u)) => Replaceable (Term u, Integer) (SoP u) where
+instance (Ord u, Replaceable u u) => Replaceable (Term u, Integer) u where
   rep s (x, c) = SoP.scaleSoP c $ foldr (mulSoPs . rep s) (int2SoP 1) . termToList $ x
 
-instance (Ord u, Replaceable u (SoP u)) => Replaceable (SoP u) (SoP u) where
+instance (Ord u, Replaceable u u) => Replaceable (SoP u) u where
   rep s = foldr (addSoPs . rep s) zeroSoP . sopToList
 
-unifies_ :: ( Replaceable u (SoP v)
-           , Replaceable v (SoP v)
-           , Unify u (SoP v) m
-           , Unify v (SoP v) m
-           , Hole v
-           , Ord v) => VName -> [(u, u)] -> MaybeT m (Substitution (SoP v))
+unifies_ :: ( Replaceable v u
+            , Replaceable u u
+            , Unify v u m
+            , Unify u u m
+            , Ord u
+            , Hole u) => VName -> [(v, v)] -> MaybeT m (Substitution u)
 unifies_ _ [] = pure mempty
 unifies_ k (u:us) = do
   s0 <- uncurry (unify_ k) u
   foldM (\s (a, b) -> (s <>) <$> unify_ k (rep s a) (rep s b)) s0 us
 
-unifies :: ( Replaceable u (SoP v)
-           , Replaceable v (SoP v)
-           , Unify u (SoP v) m
-           , Unify v (SoP v) m
-           , Hole v
-           , Ord v) => [(u, u)] -> m (Maybe (Substitution (SoP v)))
+unifies :: ( Replaceable v u
+           , Replaceable u u
+           , Unify v u m
+           , Unify u u m
+           , Ord u
+           , Hole u) => [(v, v)] -> m (Maybe (Substitution u))
 unifies us = runMaybeT $ do
   let (as, bs) = unzip us
   k <- newNameFromString "k"
@@ -113,24 +112,22 @@ unifies us = runMaybeT $ do
   bs' <- mapM rename bs
   unifies_ k (zip as' bs')
 
-unifyAnyPerm :: ( Replaceable u (SoP v)
-                , Replaceable v (SoP v)
-                , Unify u (SoP v) m
-                , Unify v (SoP v) m
-                , Hole v
-                , Ord v) => VName -> [u] -> [u] -> MaybeT m (Substitution (SoP v))
+unifyAnyPerm :: ( Replaceable v u
+                , Replaceable u u
+                , Unify v u m
+                , Unify u u m
+                , Ord u
+                , Hole u) => VName -> [v] -> [v] -> MaybeT m (Substitution u)
 unifyAnyPerm k xs ys
   | length xs == length ys =
       -- Extract left-most non-fail action, if there is one.
       msum $ map (unifies_ k . zip xs) (L.permutations ys)
   | otherwise = fail "unifyAnyPerm unequal lengths"
 
-instance ( MonadFreshNames m
-         , Renameable u
-         , Unify u (SoP u) m
-         , Replaceable u (SoP u)
+instance ( Replaceable u u
+         , Unify u u m
          , Hole u
-         , Ord u) => Unify (Term u, Integer) (SoP u) m where
+         , Ord u) => Unify (Term u, Integer) u m where
   -- Unify on permutations of symbols in term.
   unify_ k (x, a) (y, b)
     | a == b = unifyAnyPerm k (termToList x) (termToList y)
@@ -139,12 +136,10 @@ instance ( MonadFreshNames m
 class Hole u where
   justHole :: u -> Maybe VName
 
-instance ( MonadFreshNames m
-         , Replaceable u (SoP u)
-         , Renameable u
-         , Unify u (SoP u) m
-         , Hole u
-         , Ord u) => Unify (SoP u) (SoP u) m where
+instance ( Replaceable u u
+         , Unify u u m
+         , Ord u
+         , Hole u) => Unify (SoP u) u m where
   -- Unify on permutations of terms.
   unify_ k x y
     | Just h <- justSym x >>= justHole = pure $ M.singleton h y

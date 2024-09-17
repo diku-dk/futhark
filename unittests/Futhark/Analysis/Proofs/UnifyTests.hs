@@ -4,7 +4,6 @@ module Futhark.Analysis.Proofs.UnifyTests (tests) where
 import Test.Tasty
 import Test.Tasty.HUnit
 import Futhark.MonadFreshNames
-import qualified Futhark.SoP.SoP as SoP
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
 import Futhark.SoP.SoP (sym2SoP, (.+.), scaleSoP, (.*.), int2SoP)
@@ -13,9 +12,7 @@ import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Util.Pretty (prettyString)
 
 
-type Sub = Substitution (SoP.SoP Symbol)
-
-runTest :: IndexFnM (Maybe Sub) -> Maybe Sub
+runTest :: IndexFnM (Maybe (Substitution Symbol)) -> Maybe (Substitution Symbol)
 runTest test = fst $ runIndexFnM test blankNameSource
 
 getValue :: IndexFnM a -> a

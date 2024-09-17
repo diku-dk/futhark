@@ -51,7 +51,7 @@ converge f x = converge_ (f x)
       if y == z then pure y
       else converge_ (pure z)
 
-match :: Unify u v m => Rule u v m -> u -> m (Maybe (Substitution v))
+match :: Unify v u m => Rule v u m -> v -> m (Maybe (Substitution u))
 match rule x = unify (from rule) x >>= check (sideCondition rule)
 
 check :: Monad f => (a -> f Bool) -> Maybe a -> f (Maybe a)
@@ -60,8 +60,8 @@ check cond (Just s) = do
   b <- cond s
   pure $ if b then Just s else Nothing
 
-class Monad m => Rewritable u m where
-  rewrite :: u -> m u
+class Monad m => Rewritable v m where
+  rewrite :: v -> m v
 
 instance Rewritable (SoP Symbol) IndexFnM where
   rewrite = astMap m <=< substEquivs
@@ -84,7 +84,7 @@ instance Rewritable Symbol IndexFnM where
         }
 
       match_ rule symbol = do
-          s :: Maybe (Substitution (SoP Symbol)) <- case from rule of
+          s :: Maybe (Substitution Symbol) <- case from rule of
             x :&& y -> matchCommutativeRule (:&&) x y
             x :|| y -> matchCommutativeRule (:||) x y
             _ -> match rule symbol
@@ -108,10 +108,10 @@ instance Rewritable IndexFn IndexFnM where
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
 -- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
 -- it matches `a + a` and `b + b` and returns `2a + 2b + c`.
-matchSoP :: ( Replaceable u (SoP u)
-            , Unify u (SoP u) m
-            , Hole u
-            , Ord u) => Rule (SoP u) (SoP u) m -> SoP u -> m (SoP u)
+matchSoP :: ( Ord u
+            , Replaceable u u
+            , Unify u u m
+            , Hole u) => Rule (SoP u) u m -> SoP u -> m (SoP u)
 matchSoP rule sop
   | numTerms (from rule) <= numTerms sop = do
     let (subterms, contexts) = unzip . splits $ sopToList sop
@@ -130,7 +130,7 @@ matchSoP rule sop
     matchP rule sop =
       msum <$> mapM (check (sideCondition rule) <=< unifies) (combine rule sop)
 
-combine :: Ord u => Rule (SoP u) (SoP u) m -> SoP u -> [[(SoP u, SoP u)]]
+combine :: Ord u => Rule (SoP u) u m -> SoP u -> [[(SoP u, SoP u)]]
 combine rule sop
   | k <= numTerms sop = do
     -- Pair each term in from rule with subterms in sop.
@@ -148,7 +148,7 @@ combine rule sop
     xs = sopToList (from rule)
     ys = sopToList sop
 
-rulesSoP :: IndexFnM [Rule (SoP Symbol) (SoP Symbol) IndexFnM]
+rulesSoP :: IndexFnM [Rule (SoP Symbol) Symbol IndexFnM]
 rulesSoP = do
   i <- newVName "i"
   h1 <- newVName "h"
@@ -198,7 +198,7 @@ rulesSoP = do
     ]
 
 -- TODO can all of these be handled by `normalize`? If so, remove.
-rulesSymbol :: IndexFnM [Rule Symbol (SoP Symbol) IndexFnM]
+rulesSymbol :: IndexFnM [Rule Symbol Symbol IndexFnM]
 rulesSymbol = do
   pure
     []
@@ -224,7 +224,7 @@ rulesSymbol = do
     --     }
     -- ]
 
-rulesIndexFn :: IndexFnM [Rule IndexFn (SoP Symbol) IndexFnM]
+rulesIndexFn :: IndexFnM [Rule IndexFn Symbol IndexFnM]
 rulesIndexFn = do
   i <- newVName "i"
   k <- newVName "k"

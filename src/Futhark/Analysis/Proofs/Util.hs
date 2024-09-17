@@ -2,15 +2,19 @@ module Futhark.Analysis.Proofs.Util
 where
 
 import Language.Futhark (VName (VName))
-import Futhark.Util.Pretty (pretty, Pretty, prettyString)
+import Futhark.Util.Pretty (pretty, Pretty, prettyString, Doc)
 import Data.Maybe (fromJust)
 import Debug.Trace (trace)
 import Data.List (subsequences, (\\))
 import Control.Monad (guard)
 
+prettyName :: VName -> Doc ann
 prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
   where
     subscript = flip lookup $ zip "-0123456789" "₋₀₁₂₃₄₅₆₇₈₉"
+
+prettyHole :: VName -> Doc ann
+prettyHole x = "•" <> prettyName x
 
 tracer :: Pretty a => a -> a
 tracer x = trace (prettyString x) x

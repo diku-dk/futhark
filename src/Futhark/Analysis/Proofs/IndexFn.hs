@@ -11,7 +11,7 @@ import Futhark.SoP.SoP (SoP, int2SoP, (.-.), (.+.), sym2SoP)
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 import Futhark.MonadFreshNames
 import Control.Monad.RWS.Strict
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution, Unify (..), unifies_, sub)
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution, Unify (..), unifies_)
 import Futhark.Util.Pretty (Pretty (pretty), (<+>), commasep, parens, stack, indent, line, prettyString)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Debug.Trace (traceM)
@@ -149,31 +149,31 @@ instance Pretty IndexFn where
 -------------------------------------------------------------------------------
 -- Unification.
 -------------------------------------------------------------------------------
-repVName :: Substitution (SoP Symbol) -> VName -> VName
+repVName :: Substitution Symbol -> VName -> VName
 repVName s vn
   | Var i <- sop2Symbol $ rep s (Var vn) =
     i
 repVName _ _ = error "repVName substitutes for non-VName."
 
-repCase :: (Ord a, Replaceable u1 (SoP a), Replaceable u2 (SoP a)) => Substitution (SoP a) -> (u1, u2) -> (a, SoP a)
+repCase :: (Ord u, Replaceable v1 u, Replaceable v2 u) => Substitution u -> (v1, v2) -> (u, SoP u)
 repCase s (a, b) = (sop2Symbol (rep s a), rep s b)
 
-repCases :: (Ord a, Replaceable u1 (SoP a), Replaceable u2 (SoP a)) => Substitution (SoP a) -> Cases u1 u2 -> Cases a (SoP a)
-repCases s (Cases cs) =
-  Cases $ NE.map (repCase s) cs
+repCases :: (Ord a, Replaceable v1 a, Replaceable v2 a) => Substitution a -> Cases v1 v2 -> Cases a (SoP a)
+repCases s (Cases cs) = Cases $ NE.map (repCase s) cs
+-- repCases s (CHole vn) = Cases $ NE.map (repCase s) cs
 
-repDomain :: Substitution (SoP Symbol) -> Domain -> Domain
+repDomain :: Substitution Symbol -> Domain -> Domain
 repDomain s (Iota n) = Iota (rep s n)
 repDomain s (Cat k m b) = Cat k (rep s m) (rep s b)
 
-repIndexFn :: Substitution (SoP Symbol) -> IndexFn -> IndexFn
+repIndexFn :: Substitution Symbol -> IndexFn -> IndexFn
 repIndexFn s = rip
   where
     rip (IndexFn Empty body) = IndexFn Empty (repCases s body)
     rip (IndexFn (Forall i dom) body) =
       IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
 
-subIndexFn :: Substitution (SoP Symbol) -> IndexFn -> IndexFnM IndexFn
+subIndexFn :: Substitution Symbol -> IndexFn -> IndexFnM IndexFn
 subIndexFn s indexfn = repIndexFn s <$> rename indexfn
 
 instance (Renameable a, Renameable b) => Renameable (Cases a b) where
@@ -196,14 +196,14 @@ instance Renameable IndexFn where
       dom' <- rename_ tau dom
       IndexFn (Forall i dom') <$> rename_ tau body
 
-instance MonadFreshNames m => Unify Domain (SoP Symbol) m where
+instance MonadFreshNames m => Unify Domain Symbol m where
   unify_ k (Iota n) (Iota m) = unify_ k n m
   unify_ k (Cat _ m1 b1) (Cat _ m2 b2) = do
     s <- unify_ k m1 m2
     (s <>) <$> unify_ k (rep s b1) (rep s b2)
   unify_ _ _ _ = fail "Incompatible domains"
 
-instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) (SoP Symbol) m where
+instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) Symbol m where
   unify_ k (Cases cs1) (Cases cs2) = do
     s <- unifies_ k (zip (map fst xs) (map fst ys))
     s2 <- unifies_ k (zip (map (rep s . snd) xs) (map (rep s . snd) ys))
@@ -213,7 +213,7 @@ instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) (SoP Symbol) m w
       ys = NE.toList cs2
 
 -- XXX we require that index function quantifiers (indexing variables) are unique!
-instance MonadFreshNames m => Unify IndexFn (SoP Symbol) m where
+instance MonadFreshNames m => Unify IndexFn Symbol m where
   unify_ k (IndexFn Empty body1) (IndexFn Empty body2) =
     unify_ k body1 body2
   unify_ k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j dom2) body2) = do
