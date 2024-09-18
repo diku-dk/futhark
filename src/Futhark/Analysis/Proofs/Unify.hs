@@ -17,7 +17,7 @@ import Control.Monad (foldM, msum)
 import Control.Monad.Trans.Maybe
 import Futhark.Util.Pretty
 import Futhark.Analysis.Proofs.Util (prettyName)
-import Futhark.Analysis.Proofs.IndexFn (Cases)
+import Futhark.Analysis.Proofs.IndexFn (Cases, Domain)
 
 class Ord a => FreeVariables a where
   fv :: a -> S.Set VName
@@ -34,15 +34,18 @@ class Renameable u where
 -- type Substitution u = M.Map VName (SoP u)
 data Substitution u = Substitution {
     sop :: M.Map VName (SoP u),
-    subCases :: M.Map VName (Cases u (SoP u))
+    subCases :: M.Map VName (Cases u (SoP u)),
+    subDomain :: M.Map VName Domain
   }
-  deriving (Show, Eq)
+  deriving (Show)
 
 instance Semigroup (Substitution u) where
-  a <> b = Substitution { sop = sop a <> sop b, subCases = subCases a <> subCases b }
+  a <> b = Substitution { sop = sop a <> sop b
+                        , subCases = subCases a <> subCases b
+                        , subDomain = subDomain a <> subDomain b }
 
 instance Monoid (Substitution u) where
-  mempty = Substitution { sop = mempty, subCases = mempty }
+  mempty = Substitution { sop = mempty, subCases = mempty, subDomain = mempty }
 
 instance Pretty v => Pretty (Substitution v) where
   pretty = braces . commastack . map (\(k,v) -> prettyName k <> " : " <> pretty v) . M.toList . sop

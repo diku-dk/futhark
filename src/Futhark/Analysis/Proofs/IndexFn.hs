@@ -23,6 +23,7 @@ data Domain = Iota (SoP Symbol) -- [0, ..., n-1]
                 VName        -- k
                 (SoP Symbol) -- m
                 (SoP Symbol) -- b
+            | DHole VName
   deriving Show
 
 data Iterator = Forall VName Domain

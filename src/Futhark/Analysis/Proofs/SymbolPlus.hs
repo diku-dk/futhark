@@ -3,7 +3,7 @@ module Futhark.Analysis.Proofs.SymbolPlus
 where
 
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (addSub), Replaceable (rep), Hole (justHole), unifies_, Substitution (..))
+import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (..), Replaceable (rep), Hole (justHole), unifies_, Substitution (..))
 import Futhark.SoP.SoP (sym2SoP)
 import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
 import Data.Set qualified as S

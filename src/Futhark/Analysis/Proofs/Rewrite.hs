@@ -16,7 +16,7 @@ import Data.Functor ((<&>))
 import Language.Futhark (VName)
 import qualified Data.Map as M
 import Futhark.Analysis.Proofs.Util (partitions)
-import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn, repVName)
+import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn, SelfReplaceable (..))
 
 data Rule a b m = Rule {
     name :: String,
@@ -252,7 +252,7 @@ rulesIndexFn = do
           -- on index fns
           -- Indexing variable i replaced by 0 in e1.
         , to = \s -> subIndexFn s =<< do
-            let i' = repVName s i
+            let i' = rip s i
             e1 <- sub s (hole h1)
             e1_b <- sub (mkSub i' (int 0)) e1
             pure $ IndexFn {
@@ -278,7 +278,7 @@ rulesIndexFn = do
             }
           -- Indexing variable i replaced by b in e1.
         , to = \s -> subIndexFn s =<< do
-            let i' = repVName s i
+            let i' = rip s i
             e1 <- sub s (hole h1)
             b' <- sub s (hole b)
             e1_b <- sub (mkSub i' b') e1
@@ -309,7 +309,7 @@ rulesIndexFn = do
           -- XXX asdf i think I can get e2 on the correct form by making a LinComb
           -- and replacing on it? Otherwise extract "mkLinComb" into a visible function.
         , to = \s -> do
-            let i' = repVName s i
+            let i' = rip s i
             e1 <- sub s (Hole h1)
             e1_b <- sub (mkSub i' (int 0)) e1
             e2 <- sub s (Hole h2)
