@@ -1,5 +1,6 @@
 module Futhark.Analysis.Proofs.Algebra where
 
+import Futhark.SoP.Util
 import Control.Monad.RWS.Strict
 import Data.Map (Map)
 import Data.Map qualified as M
@@ -17,7 +18,7 @@ data Symbol
   = Var VName
   | Hole VName
   | Idx Symbol (SoP Symbol)
-  | LinComb VName (SoP Symbol) (SoP Symbol) Symbol
+  | Sum VName (SoP Symbol) (SoP Symbol)
   | Pow2 (SoP Symbol)
   deriving (Show, Eq, Ord)
 
@@ -26,13 +27,10 @@ instance Pretty Symbol where
     (Var x) -> prettyName x
     (Hole x) -> prettyHole x
     (Idx x i) -> autoParens x <> brackets (pretty i)
-    (LinComb i lb ub e) ->
+    (Sum x lb ub) ->
       "∑"
-        <> prettyName i
-        <> "∈"
-        <> parens (pretty lb <+> ".." <+> pretty ub)
-        <> " "
-        <> autoParens e
+        <> prettyName x
+        <> brackets (pretty lb <+> ":" <+> pretty ub)
     (Pow2 x) -> parens (pretty x) <> "²"
     where
       autoParens x@(Var _) = pretty x
@@ -74,11 +72,19 @@ instance (Expression e, Ord e) => MonadSoP Symbol e Property (AlgM e) where
   getProperties = gets (properties . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
 
-runAlgM :: (Ord e) => AlgM e a -> VNameSource -> (a, VEnv e)
-runAlgM (AlgM m) vns = getRes $ runRWS m () s
+runAlgM :: (Ord e) => AlgM e a -> AlgEnv Symbol e Property -> VNameSource -> (a, VEnv e)
+runAlgM (AlgM m) env vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, env)
-    s = VEnv vns mempty
+    s = VEnv vns env
+
+f :: (SoP Symbol >= 0) -> AlgM e Bool
+f sop = do
+  modifyEnv $ undefined
+  undefined
+
+runF :: (SoP Symbol >= 0) -> AlgEnv Symbol e Property -> VNameSource -> (Bool, VEnv e)
+runF sop env vns= runAlgM (f sop) env vns 
 
 rules :: RuleBook (SoP Symbol) Symbol (AlgM e)
 rules = []
