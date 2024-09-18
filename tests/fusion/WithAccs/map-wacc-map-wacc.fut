@@ -44,7 +44,7 @@
 import "../../accs/intrinsics"
 
 -- Q = E * T*T * (R*R+1)
-def accUpdateO [Q] (T: i64) (R: i64) (k: i64) (Ok: [T*T][R*R+1]f32) (O: *[Q]f32) (A: [T*T]f32) : *[Q]f32 = #[unsafe]
+def accUpdateO [Q] (T: i64) (R: i64) (k: i64) (Ok: [T*T][R*R+1]f32) (O: *[Q]f32) (A: [T*T]f32) : *[Q]f32 =
   let inner = R*R+1
   let glb_offset = k * (T*T*inner)
   let f (Oacc: *acc ([Q]f32)) (tid,a) =
@@ -57,7 +57,7 @@ def accUpdateO [Q] (T: i64) (R: i64) (k: i64) (Ok: [T*T][R*R+1]f32) (O: *[Q]f32)
         in  write Oacc ind elm
   in scatter_stream O f (zip (iota (T*T)) A)
 
-def main (E: i64) (T: i64) (R: i64) (Ok: [E][T*T][R*R+1]f32) (O: *[E*(T*T)*(R*R+1)]f32) (A: [T*T]f32) : *[E*(T*T)*(R*R+1)]f32 = #[unsafe]
+def main (E: i64) (T: i64) (R: i64) (Ok: [E][T*T][R*R+1]f32) (O: *[E*(T*T)*(R*R+1)]f32) (A: [T*T]f32) : *[E*(T*T)*(R*R+1)]f32 =
   let e = f32.i64 E
   let (_,O) =
   loop (A,O) for k < E-1 do

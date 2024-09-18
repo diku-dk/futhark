@@ -56,12 +56,12 @@ def ker2Blk [n] (bit_beg: u32) (lgH: u32)
     for i < i32.u32 lgH do
       (partition2 0u32 (isBitUnset (bit_beg + u32.i32 i)) xs).1
 
-  let histo_scn = tabulate (i64.u32 (1u32 << lgH)) (\j -> if j==0 then 0u16 else #[unsafe]histo_loc[j-1])
+  let histo_scn = tabulate (i64.u32 (1u32 << lgH)) (\j -> if j==0 then 0u16 else histo_loc[j-1])
                |> scan (+) 0u16
   let histo = map3 (\ a b c -> a - i64.u16 (b + c)) histo_glb histo_loc histo_scn
   let f x i =
     let bin = getBits bit_beg lgH x
-    in  i + (#[unsafe] histo[i32.u32 bin])
+    in  i + (histo[i32.u32 bin])
   let inds = map2 f xs' (iota n)
   in  (xs', inds)
 
