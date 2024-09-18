@@ -234,6 +234,16 @@ forward (E.AppExp (E.Apply f args _) _)
       -- tell ["Using map rule ", toLaTeX y']
       foldM substParams y' (zip paramNames xss_flat)
         >>= rewrite
+  | Just "replicate" <- getFun f,
+    [n, x] <- getArgs args = do
+      n' <- forward n
+      x' <- forward x
+      i <- newNameFromString "i"
+      case (n', x') of
+        (IndexFn Empty (Cases ((Bool True, m) NE.:| [])),
+         IndexFn Empty body) -> -- XXX support only 1D arrays for now.
+              rewrite $ IndexFn (Forall i (Iota m)) body
+        _ -> undefined -- TODO See iota comment.
 forward e = error $ "forward on " <> show e
 
 substParams :: IndexFn -> (E.VName, IndexFn) -> IndexFnM IndexFn

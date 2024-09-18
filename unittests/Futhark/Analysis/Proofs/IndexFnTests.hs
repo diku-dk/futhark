@@ -42,6 +42,13 @@ tests = testGroup "Proofs.IndexFn"
           body = cases [(xs_i :> int2SoP 100, int2SoP 2 .*. xs_i),
                         (xs_i :<= int2SoP 100, xs_i)]
           })
+  , mkTest
+      "tests/indexfn/scalar.fut"
+      (pure $ \(i,_,x) ->
+        IndexFn {
+          iterator = Forall i (Iota (sHole x)),
+          body = cases [(Bool True, int2SoP 2 .*. sHole x)]
+          })
   ]
   where
     -- mkTest :: String -> IndexFn -> TestTree
