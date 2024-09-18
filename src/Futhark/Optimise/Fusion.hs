@@ -307,7 +307,7 @@ vFuseNodeT
   _edges
   _infusible
   (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, is1, _os1)
-  (StmNode wastm@(Let pat2 aux2 (WithAcc w_inps lam0)), _os2)
+  (StmNode (Let pat2 aux2 (WithAcc w_inps lam0)), _os2)
     | ots1 == mempty,
       wacc_cons_nms  <- namesFromList $ concatMap (\(_,nms,_)->nms) w_inps,
       soac_prod_nms  <- map patElemName $ patElems pat1,
@@ -336,15 +336,6 @@ vFuseNodeT
         -- any need to add it to the enclosing withAcc stm as well?
         trace ("\n\n!!!!!!!!!! Fusion-SOAC-WithAcc !!!!!!!!!!!!\n\n") $ 
           fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
-{--
-    trace ( "\n\n!!!!!!!!!! Fusion-SOAC_WithAcc !!!!!!!!!!!!\n" ++
-            "screma:\n" ++ prettyString pat1 ++ " = " ++ prettyString soac ++
-            "\n" ++ "withacc:\n" ++ prettyString wastm ++ "\n" ++ 
-            "result:\n" ++ prettyString (Let pat aux2 $ WithAcc w_inps lam') ++
-            "\n\n\n"
-          ) $
---}
-    
 --
 -- The reverse of the case above, i.e., fusing a screma at the back of an
 --   WithAcc such as to (hopefully) enable more fusion there. 
@@ -357,7 +348,7 @@ vFuseNodeT
 vFuseNodeT
   edges
   _infusible
-  (StmNode wstm@(Let pat1 aux1 (WithAcc w_inps wlam0)), _is1, _os1)
+  (StmNode (Let pat1 aux1 (WithAcc w_inps wlam0)), _is1, _os1)
   (SoacNode ots2 pat2 soac@(H.Screma _w _form _s_inps) aux2, _os2)
     | ots2 == mempty,
       n <- length (lambdaParams wlam0) `div` 2,
@@ -400,18 +391,24 @@ vFuseNodeT
 vFuseNodeT
   _edges 
   infusible
-  (StmNode stm1@(Let _ _ (WithAcc _ _)), is1, _os1)
-  (StmNode stm2@(Let _ _ (WithAcc w2_inps _)), _os2) = do
-    let wacc2_cons_nms  = namesFromList $ concatMap (\(_,nms,_)->nms) w2_inps
-        wacc1_indep_nms = map getName is1
-        safe = all (`notNameIn` wacc2_cons_nms) wacc1_indep_nms
+  (StmNode (Let pat1 aux1 (WithAcc w1_inps lam1)), is1, _os1)
+  (StmNode (Let pat2 aux2 (WithAcc w2_inps lam2)), _os2)
+    | wacc2_cons_nms  <- namesFromList $ concatMap (\(_,nms,_)->nms) w2_inps,
+      wacc1_indep_nms <- map getName is1,
+      all (`notNameIn` wacc2_cons_nms) wacc1_indep_nms = do
         -- ^ the other safety checks are done inside `tryFuseWithAccs`
+    lam1' <- fst <$> doFusionInLambda lam1
+    lam2' <- fst <$> doFusionInLambda lam2
+    let stm1 = Let pat1 aux1 (WithAcc w1_inps lam1')
+        stm2 = Let pat2 aux2 (WithAcc w2_inps lam2')
     mstm <- SF.tryFuseWithAccs infusible stm1 stm2
-    case (safe, mstm) of
-      (True, Just stm) -> 
+    case mstm of
+      Just (Let pat aux (WithAcc w_inps wlam)) -> do
+        (wlam', success) <- doFusionInLambda wlam
+        let new_stm = Let pat aux (WithAcc w_inps wlam')
         trace ("\n\n!!!!!!!!!! Fusion-WithAcc-WithAcc !!!!!!!!!!!!\n\n") $
-          fusedSomething $ StmNode $ stm
-      _ -> pure Nothing
+          if success then fusedSomething (StmNode new_stm) else pure Nothing 
+      _ -> error "Illegal result of tryFuseWithAccs called from vFuseNodeT."
 --
 vFuseNodeT _ _ _ _ = pure Nothing
 
