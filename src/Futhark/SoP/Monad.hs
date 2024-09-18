@@ -91,6 +91,7 @@ class
   getUntrans :: m (UntransEnv u e)
   getRanges :: m (RangeEnv u)
   getEquivs :: m (EquivEnv u)
+  getProperties :: m Properties
   modifyEnv :: (AlgEnv u e -> AlgEnv u e) -> m ()
 
 -- | The algebraic monad; consists of a an algebraic
@@ -173,6 +174,8 @@ instance
   getRanges = SoPMT $ gets ranges
 
   getEquivs = SoPMT $ gets equivs
+
+  getProperties = SoPMT $ gets properties
 
   modifyEnv f = SoPMT $ modify f
 
