@@ -9,13 +9,11 @@ import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substit
 import Futhark.SoP.SoP (SoP, sym2SoP, int2SoP, (.+.), (.-.), mapSymSoP)
 import Futhark.Util.Pretty (Pretty (pretty), (<+>), parens, commasep, prettyString, line, indent, stack)
 import Language.Futhark (VName)
-import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString, newVName)
+import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
 import qualified Data.Map as M
 import qualified Data.List.NonEmpty as NE
-import Futhark.Analysis.Proofs.Util (prettyName, prettyHole)
+import Futhark.Analysis.Proofs.Util (prettyName)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.Traversals (ASTMapper(..), ASTMappable (astMap))
-import Data.Functor.Identity (runIdentity)
 
 instance Eq Domain where
   -- Since the whole domain must be covered by an index function,
@@ -38,9 +36,6 @@ instance Eq Iterator where
 
 
 deriving instance Eq IndexFn
-
--- TODO Eww don't do that here.
-deriving instance Ord u => Eq (Substitution u)
 
 -------------------------------------------------------------------------------
 -- Pretty.
@@ -123,12 +118,6 @@ instance Renameable IndexFn where
       -- NOTE that i is not renamed.
       dom' <- rename_ tau dom
       IndexFn (Forall i dom') <$> rename_ tau body
-
-instance SubstitutionBuilder (Cases Symbol (SoP Symbol)) Symbol where
-  addSub vn x s = s { subCases = M.insert vn x $ subCases s }
-
-instance SubstitutionBuilder Domain Symbol where
-  addSub vn x s = s { subDomain = M.insert vn x $ subDomain s }
 
 instance MonadFreshNames m => Unify Domain Symbol m where
   unify_ k (Iota n) (Iota m) = unify_ k n m
