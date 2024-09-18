@@ -31,7 +31,7 @@ module Futhark.Optimise.Fusion.RulesWithAccs
   )
 where
 
-import Control.Monad.Reader
+import Control.Monad
 import Data.Graph.Inductive.Graph qualified as G
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -627,9 +627,7 @@ substInSEs vtab = map substInSE
     substInSE z = z
 
 allEq :: (Eq a) => [a] -> [a] -> Bool
-allEq as bs =
-  length as == length bs
-    && all (uncurry (==)) (zip as bs)
+allEq = (==)
 
 {--
 printNodeT :: NodeT -> String
