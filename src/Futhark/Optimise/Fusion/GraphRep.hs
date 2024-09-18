@@ -44,7 +44,7 @@ module Futhark.Optimise.Fusion.GraphRep
     isWithAccNodeT,
     isWithAccNodeId,
     vFusionFeasability,
-    hFusionFeasability
+    hFusionFeasability,
   )
 where
 
@@ -439,12 +439,12 @@ isCons _ = False
 -- | Is this a withAcc?
 isWithAccNodeT :: NodeT -> Bool
 isWithAccNodeT (StmNode (Let _ _ (WithAcc _ _))) = True
-isWithAccNodeT _  = False
+isWithAccNodeT _ = False
 
 isWithAccNodeId :: G.Node -> DepGraph -> Bool
 isWithAccNodeId node_id (DepGraph {dgGraph = g}) =
-  let (_,_,nT,_) = G.context g node_id
-  in  isWithAccNodeT nT
+  let (_, _, nT, _) = G.context g node_id
+   in isWithAccNodeT nT
 
 unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> Bool
 unreachableEitherDir g a b =
@@ -452,7 +452,7 @@ unreachableEitherDir g a b =
 
 vFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
 vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
-  ( isWithAccNodeId n2 dg || not (any isInf (edgesBetween dg n1 n2)) )
+  (isWithAccNodeId n2 dg || not (any isInf (edgesBetween dg n1 n2)))
     && not (any (reachable dg n2) (filter (/= n2) (G.pre g n1)))
 
 hFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
