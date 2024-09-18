@@ -1462,7 +1462,7 @@ instead::
   def consumes_first_arg (a: *[]i32) (b: []i32) = ...
 
 For bulk in-place updates with multiple values, use the ``scatter``
-function in the basis library.
+function from the prelude.
 
 Alias Analysis
 ~~~~~~~~~~~~~~
