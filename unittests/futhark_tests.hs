@@ -15,6 +15,7 @@ import Language.Futhark.PrimitiveTests qualified
 import Language.Futhark.SemanticTests qualified
 import Language.Futhark.SyntaxTests qualified
 import Language.Futhark.TypeCheckerTests qualified
+import Futhark.CLI.FmtTests qualified
 import Test.Tasty
 
 allTests :: TestTree
@@ -35,7 +36,8 @@ allTests =
       Futhark.Analysis.AlgSimplifyTests.tests,
       Language.Futhark.TypeCheckerTests.tests,
       Language.Futhark.SemanticTests.tests,
-      Futhark.Optimise.ArrayLayoutTests.tests
+      Futhark.Optimise.ArrayLayoutTests.tests,
+      Futhark.CLI.FmtTests.tests
     ]
 
 main :: IO ()

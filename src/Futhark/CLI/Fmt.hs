@@ -1,6 +1,7 @@
 -- | @futhark fmt@
-module Futhark.CLI.Fmt (main) where
+module Futhark.CLI.Fmt (main, fmtText) where
 
+import Data.Bifunctor
 import Data.Foldable
 import Data.List qualified as L
 import Data.Text qualified as T
@@ -18,12 +19,13 @@ import System.IO
 import Text.Printf (printf)
 import Control.Monad.State.Strict
 import Control.Monad
-import Debug.Trace
 import Data.Char (chr)
-import Data.Text.Prettyprint.Doc (Pretty(pretty))
 
+-- import Debug.Trace
+{-
 debug :: Show a => a -> a
 debug a = traceShow a a
+-}
 
 -- The formatter implemented here is very crude and incomplete.  The
 -- only syntactical construct it can currently handle is type
@@ -66,7 +68,7 @@ debug a = traceShow a a
 -- TODO: support all syntactical constructs.
 
 -- TODO (Question?): Change fmt to be a sequence of lines instead of a list of lines 
-
+{-
 -- Some utility functions 
 commasep :: Fmt -> FmtM Fmt
 commasep [] = pure []
@@ -74,12 +76,15 @@ commasep [x] = pure [x]
 commasep (x:xs) = do 
   xs' <- commasep xs
   pure $ (x <> ", ") : xs'
+-}
 
 brackets :: Fmt -> Fmt
 brackets fmt = ["["] <> fmt <> ["]"]
 
+{-
 braces :: Fmt -> Fmt
 braces fmt = ["{"] <> fmt <> ["}"]
+-}
 
 parens :: Fmt -> Fmt
 parens fmt = ["("] <> fmt <> [")"]
@@ -216,10 +221,10 @@ fmtRecordTypeFields :: [(Name, UncheckedTypeExp)] -> FmtM Fmt
 fmtRecordTypeFields [] = pure []
 fmtRecordTypeFields ((name, te):fs) = do
   f' <- fmtTypeExp te
-  fs' <- concat <$> mapM fmtField fs
-  pure $  [prettyText name <> ": "] <> f' <> fs'  
-  where fmtField :: (Name, UncheckedTypeExp) -> FmtM Fmt 
-        fmtField (n, t) = do 
+  fs' <- concat <$> mapM fmtFieldType fs
+  pure $  [prettyText name <> ": "] <> f' <> fs'
+  where fmtFieldType :: (Name, UncheckedTypeExp) -> FmtM Fmt 
+        fmtFieldType (_n, t) = do 
           t' <- fmtTypeExp t
           pure $ mapLast (", " <>) t'
 
@@ -328,8 +333,8 @@ fmtAttrAtom (AtomName name) = pure [prettyText name]
 fmtAttrAtom (AtomInt int) = pure [prettyText int]
 
 fmtAttrInfo :: AttrInfo a -> FmtM Fmt
-fmtAttrInfo (AttrAtom attr loc) = fmtAttrAtom attr
-fmtAttrInfo (AttrComp name attrs loc) = do
+fmtAttrInfo (AttrAtom attr _loc) = fmtAttrAtom attr
+fmtAttrInfo (AttrComp name attrs _loc) = do
   x <- mapM fmtAttrInfo attrs
   pure $ [prettyText name] <> ["("] <> L.intercalate [","] x <> [")"]
 
@@ -345,44 +350,44 @@ fmtLiftedness SizeLifted = pure "~"
 fmtLiftedness Lifted = pure "^"
 
 fmtTypeParam :: UncheckedTypeParam -> FmtM Fmt
-fmtTypeParam (TypeParamDim name loc) = pure ["[" <> prettyText name <> "]"]
-fmtTypeParam (TypeParamType l name loc) = do
+fmtTypeParam (TypeParamDim name _loc) = pure ["[" <> prettyText name <> "]"]
+fmtTypeParam (TypeParamType l name _loc) = do
   l' <- fmtLiftedness l
   pure $ ["'" <> l'] <> [prettyText name]
 fmtPat :: UncheckedPat t -> FmtM Fmt
-fmtPat (TuplePat pats loc) = do
+fmtPat (TuplePat pats _loc) = do
   fmt <- L.intercalate [", "] <$> mapM fmtPat pats
   pure $ ["("] <> fmt <> [")"]
-fmtPat (RecordPat pats loc) = do
-  fmts <- L.intercalate [", "] <$> mapM fmtField pats
+fmtPat (RecordPat pats _loc) = do
+  fmts <- L.intercalate [", "] <$> mapM fmtFieldPat pats
   pure $ ["{"] <> fmts <> ["}"]
   where
-    fmtField (name, t) = do
+    fmtFieldPat (name, t) = do
       t' <- fmtPat t
       pure $ [prettyText name] <> [" = "] <> t'
-fmtPat (PatParens pat loc) = do
+fmtPat (PatParens pat _loc) = do
   fmt <- fmtPat pat
   pure $ ["("] <> fmt <> [")"]
-fmtPat (Id name _ loc) = pure [prettyText name]
-fmtPat (Wildcard t loc) = pure ["_"]
-fmtPat (PatAscription pat t loc) = do
+fmtPat (Id name _ _loc) = pure [prettyText name]
+fmtPat (Wildcard _t _loc) = pure ["_"]
+fmtPat (PatAscription pat t _loc) = do
   pat' <- fmtPat pat
   t' <- fmtTypeExp t
   pure $ pat' <> [":"] <> t'
-fmtPat (PatLit e _ loc) = pure [prettyText e]
-fmtPat (PatConstr n _ pats loc) = do
+fmtPat (PatLit e _ _loc) = pure [prettyText e]
+fmtPat (PatConstr n _ pats _loc) = do
   pats' <- concat <$> mapM fmtPat pats
   pure $ ["#"] <> [prettyText n] <> pats' 
-fmtPat (PatAttr attr pat loc) = do
+fmtPat (PatAttr attr pat _loc) = do
   attr' <- fmtAttr attr
   pat' <- fmtPat pat
   pure $ attr' <> pat'
 
 fmtField :: FieldBase NoInfo Name -> FmtM Fmt
-fmtField (RecordFieldExplicit name e loc) = do
+fmtField (RecordFieldExplicit name e _loc) = do
   e' <- fmtExp e
   pure $ [prettyText name] <> ["="] <> e'
-fmtField (RecordFieldImplicit name _ loc) = pure [prettyText name]
+fmtField (RecordFieldImplicit name _ _loc) = pure [prettyText name]
 
 fmtPrimValue :: PrimValue -> FmtM Fmt
 fmtPrimValue (UnsignedValue (Int8Value v)) =
@@ -414,48 +419,48 @@ fmtDimIndex (DimSlice i Nothing Nothing) =
   (<> [":"]) <$> maybe (pure mempty) fmtExp i
 
 fmtExp :: UncheckedExp -> FmtM Fmt
-fmtExp (Var name _ loc) = pure [prettyText name]
-fmtExp (Hole _ loc) = pure ["???"]
-fmtExp (Parens e loc) = parens <$> fmtExp e
-fmtExp (QualParens (v, loc) e loc') = do
+fmtExp (Var name _ _loc) = pure [prettyText name]
+fmtExp (Hole _ _loc) = pure ["???"]
+fmtExp (Parens e _loc) = parens <$> fmtExp e
+fmtExp (QualParens (v, _loc) e _loc') = do
   fmt <- fmtExp e
   pure $ [prettyText v] <> parens fmt
-fmtExp (Ascript e t loc) = do
+fmtExp (Ascript e t _loc) = do
   e' <- fmtExp e
   t' <- fmtTypeExp t
   pure $ e' <> [":"] <> t'
-fmtExp (Coerce e t _ loc) = do
+fmtExp (Coerce e t _ _loc) = do
   e' <- fmtExp e
   t' <- fmtTypeExp t
   pure $ e' <> [":>"] <> t'
-fmtExp (Literal v loc) = pure [prettyText v]
-fmtExp (IntLit v _ loc) = pure [prettyText v]
-fmtExp (FloatLit v _ loc) = pure [prettyText v]
-fmtExp (TupLit es loc) = parens . L.intercalate [", "] <$> mapM fmtExp es
-fmtExp (RecordLit fs loc) = parens . L.intercalate [", "] <$> mapM fmtField fs
-fmtExp (ArrayVal vs _ loc) = brackets . L.intercalate [", "] <$>  mapM fmtPrimValue vs
-fmtExp (ArrayLit es _ loc) = brackets . L.intercalate [", "] <$>  mapM fmtExp es
-fmtExp (StringLit s loc) = pure [prettyText $ show $ fmap (chr . fromIntegral) s]
-fmtExp (Project k e _ loc) = do
+fmtExp (Literal v _loc) = pure [prettyText v]
+fmtExp (IntLit v _ _loc) = pure [prettyText v]
+fmtExp (FloatLit v _ _loc) = pure [prettyText v]
+fmtExp (TupLit es _loc) = parens . L.intercalate [", "] <$> mapM fmtExp es
+fmtExp (RecordLit fs _loc) = parens . L.intercalate [", "] <$> mapM fmtField fs
+fmtExp (ArrayVal vs _ _loc) = brackets . L.intercalate [", "] <$>  mapM fmtPrimValue vs
+fmtExp (ArrayLit es _ _loc) = brackets . L.intercalate [", "] <$>  mapM fmtExp es
+fmtExp (StringLit s _loc) = pure [prettyText $ show $ fmap (chr . fromIntegral) s]
+fmtExp (Project k e _ _loc) = do
   e' <- fmtExp e
   pure [T.concat e' <> "." <> prettyText k]
-fmtExp (Negate e loc) = do
+fmtExp (Negate e _loc) = do
   e' <- fmtExp e
   pure ["-" <> T.concat e']
-fmtExp (Not e loc) = do
+fmtExp (Not e _loc) = do
   e' <- fmtExp e
   pure ["-" <> T.concat e']
-fmtExp (Update src idxs ve loc) = do
+fmtExp (Update src idxs ve _loc) = do
   src' <- fmtExp src
   idxs' <- brackets . L.intercalate [", "] <$> mapM fmtDimIndex idxs
   ve' <- fmtExp ve
   pure $ src' <> ["with"] <> idxs' <> ["="] <> ve'
-fmtExp (RecordUpdate src fs ve _ loc) = do
+fmtExp (RecordUpdate src fs ve _ _loc) = do
   src' <- fmtExp src
   let fs' = L.intersperse "." $ prettyText <$> fs
   ve' <- fmtExp ve
   pure $ src' <> ["with"] <> fs' <> ["="] <> ve'
-fmtExp (Assert e1 e2 _ loc) = do
+fmtExp (Assert e1 e2 _ _loc) = do
   e1' <- fmtExp e1
   e2' <- fmtExp e2
   pure $ ["assert"] <> e1' <> e2'
@@ -464,7 +469,7 @@ fmtExp (Lambda params body rettype _ _) = do
   body' <- fmtExp body
   ascript <- maybe (pure mempty) (fmap ([":"] <>) . fmtTypeExp) rettype
   pure $ ["\\"] <> params' <> ascript <> [" -> "] <> body'
-fmtExp (OpSection binop _ loc) = pure $ [fmtQualName binop]
+fmtExp (OpSection binop _ _loc) = pure [fmtQualName binop]
 fmtExp (OpSectionLeft binop _ x _ _ _) =
   pure [mconcat $ parens [prettyText x <> fmtBinOp binop]]
 fmtExp (OpSectionRight binop _ x _ _ _) =
@@ -633,7 +638,7 @@ fmtBinOp bop =
     leading = leadingOperator $ toName $ qualLeaf bop
 
 fmtValBind :: UncheckedValBind -> FmtM Fmt
-fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc) = do
+fmtValBind (ValBind entry name retdecl _rettype tparams args body _doc attrs _loc) = do
   fmt_attrs <- concat <$> mapM fmtAttr attrs
   tparams' <- concat <$> mapM fmtTypeParam tparams
   args' <- concat <$> mapM fmtPat args
@@ -662,7 +667,7 @@ fmtSizeExp (SizeExp d _loc) = do
   pure $ brackets d' 
 fmtSizeExp (SizeExpAny _loc) = pure $ brackets mempty
 
-fmtSpecBase :: SpecBase NoInfo Name -> FmtM Fmt
+fmtSpecBase :: UncheckedSpec -> FmtM Fmt
 fmtSpecBase (TypeAbbrSpec tpsig) = fmtTypeBind tpsig
 fmtSpecBase (TypeSpec l name ps _doc _loc) = do
   l' <- fmtLiftedness l
@@ -673,45 +678,45 @@ fmtSpecBase (ValSpec name ps te _ _doc _loc) = do
   te' <- fmtTypeExp te
   pure $ ["val "] <> hsep ([prettyText name] : ps') <> [": "] <> te'
 fmtSpecBase (ModSpec name mte _doc _loc) = do
-  mte' <- fmtModTypeExpBase mte
+  mte' <- fmtModTypeExp mte
   pure $ ["module " <> prettyText name <> ": "] <> mte'
 fmtSpecBase (IncludeSpec mte _loc) = do
-  mte' <- fmtModTypeExpBase mte
+  mte' <- fmtModTypeExp mte
   pure $ ["include "] <> mte'
 
-fmtModTypeExpBase :: ModTypeExpBase NoInfo Name -> FmtM Fmt
-fmtModTypeExpBase (ModTypeVar v _ _loc) = pure [prettyText v]
-fmtModTypeExpBase (ModTypeParens mte _loc) = do
-  mte' <- fmtModTypeExpBase mte
+fmtModTypeExp :: UncheckedModTypeExp -> FmtM Fmt
+fmtModTypeExp (ModTypeVar v _ _loc) = pure [prettyText v]
+fmtModTypeExp (ModTypeParens mte _loc) = do
+  mte' <- fmtModTypeExp mte
   pure $ parens mte' 
-fmtModTypeExpBase (ModTypeSpecs sbs _loc) = do
+fmtModTypeExp (ModTypeSpecs sbs _loc) = do
   sbs' <- mapM fmtSpecBase sbs 
   pure $ brackets $ stack $ punctuate [line] sbs'
-fmtModTypeExpBase (ModTypeWith mte (TypeRef v ps td _) _loc) = do
-  mte' <- fmtModTypeExpBase mte
+fmtModTypeExp (ModTypeWith mte (TypeRef v ps td _) _loc) = do
+  mte' <- fmtModTypeExp mte
   ps' <- mapM fmtTypeParam ps 
   td' <- fmtTypeExp td
   pure $ mte' <> [" with " <> prettyText v <> " "] <> hsep ps' <> [" = "] <> td' 
-fmtModTypeExpBase (ModTypeArrow (Just v) te0 te1 _loc) = do
-  te0' <- fmtModTypeExpBase te0
-  te1' <- fmtModTypeExpBase te1
+fmtModTypeExp (ModTypeArrow (Just v) te0 te1 _loc) = do
+  te0' <- fmtModTypeExp te0
+  te1' <- fmtModTypeExp te1
   pure $ parens [prettyText v <> ": "] <> te0' <> [ "->" ] <> te1' 
-fmtModTypeExpBase (ModTypeArrow Nothing te0 te1 _loc) = do
-  te0' <- fmtModTypeExpBase te0
-  te1' <- fmtModTypeExpBase te1
+fmtModTypeExp (ModTypeArrow Nothing te0 te1 _loc) = do
+  te0' <- fmtModTypeExp te0
+  te1' <- fmtModTypeExp te1
   pure $ te0' <> [" -> "] <> te1' 
 
-fmtModTypeBind :: ModTypeBindBase NoInfo Name -> FmtM Fmt
+fmtModTypeBind :: UncheckedModTypeBind -> FmtM Fmt
 fmtModTypeBind (ModTypeBind pName pSig _ _) = do
-  pSig' <- fmtModTypeExpBase pSig
+  pSig' <- fmtModTypeExp pSig
   pure $ ["module type" <> prettyText pName <> " = "] <> pSig'
 
 fmtModParam :: ModParamBase NoInfo Name -> FmtM Fmt
 fmtModParam (ModParam pName pSig _f _loc) = do
-  pSig' <- fmtModTypeExpBase pSig
+  pSig' <- fmtModTypeExp pSig
   pure $ parens $ [prettyText pName <> ": " ] <> pSig' 
 
-fmtModBind :: ModBindBase NoInfo Name -> FmtM Fmt
+fmtModBind :: UncheckedModBind -> FmtM Fmt
 fmtModBind (ModBind name ps sig te _doc _loc) = do
   ps' <- mapM fmtModParam ps
   sig' <- fmtSig sig
@@ -721,17 +726,39 @@ fmtModBind (ModBind name ps sig te _doc _loc) = do
     fmtSig s = case s of
       Nothing -> pure mempty
       Just (s', _f) -> do
-        s'' <- fmtModTypeExpBase s'
+        s'' <- fmtModTypeExp s'
         pure $ [" : "] <> s'' <> [" "]
 
-fmtModExp :: ModExpBase NoInfo Name -> FmtM Fmt
-fmtModExp (ModVar v _loc) = undefined
-fmtModExp (ModParens f _loc) = undefined 
-fmtModExp (ModImport path _f _loc) = undefined
-fmtModExp (ModDecs decs _loc) = undefined 
-fmtModExp (ModApply me0 me1 _f0 _f1 _loc)  = undefined
-fmtModExp (ModAscript me mte _f _loc) = undefined 
-fmtModExp (ModLambda param sig body _loc) = undefined  
+-- All of these should probably be "extra" indented
+fmtModExp :: UncheckedModExp -> FmtM Fmt
+fmtModExp (ModVar v _loc) = pure [prettyText v] 
+fmtModExp (ModParens f _loc) = do
+  f' <- fmtModExp f 
+  pure $ align $ parens f'
+fmtModExp (ModImport path _f _loc) =
+  pure ["import " <> prettyText path]
+-- Should be put inside a nested block 
+fmtModExp (ModDecs decs _loc) = do
+  decs' <- mapM fmtDec decs
+  pure $ brackets $ stack $ punctuate [line] decs'
+-- should be put in parens if indentation is above some thresshold?
+-- (thresshold = 10)     
+fmtModExp (ModApply f a _f0 _f1 _loc) = do
+  f' <- fmtModExp f
+  a' <- fmtModExp a
+  pure $ f' <> [" "] <> a'
+fmtModExp (ModAscript me se _f _loc) = do
+  me' <- fmtModExp me
+  se' <- fmtModTypeExp se
+  pure $ me' <> [":"] <> se'
+fmtModExp (ModLambda param maybe_sig body _loc) = do
+  param' <- fmtModParam param
+  maybe_sig' <-
+    case maybe_sig of
+      Nothing -> pure mempty
+      Just (sig, _) -> ([":"]<>) <$> fmtModTypeExp sig
+  body' <- fmtModExp body
+  pure $ ["\\"] <> param' <> maybe_sig' <> ["->"] <> body'
 
 -- | Formatting of Futhark declarations.
 fmtDec :: UncheckedDec -> FmtM Fmt
@@ -775,3 +802,8 @@ main = mainWithOptions () [] "program" $ \args () ->
           let fmt = evalState (fmtProg prog) (FmtState { comments = cs })
           T.hPutStr stdout $ T.unlines $ zipWith number [0 ..] fmt
     _ -> Nothing
+
+fmtText :: String -> T.Text -> Either T.Text T.Text
+fmtText fName fContent = do 
+  (prog, cs) <- first syntaxErrorMsg $ parseFutharkWithComments fName fContent
+  pure $ T.unlines $ evalState (fmtProg prog) (FmtState { comments = cs })
