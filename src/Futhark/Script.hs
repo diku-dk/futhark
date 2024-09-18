@@ -182,9 +182,9 @@ parseExp sep =
 
     pAtom =
       choice
-        [ try $ inParens sep (mkTuple <$> (parseExp sep `sepBy` pComma)),
+        [ try $ inParens sep (mkTuple <$> (parseExp sep `sepEndBy` pComma)),
           inParens sep $ parseExp sep,
-          inBraces sep (Record <$> (pField `sepBy` pComma)),
+          inBraces sep (Record <$> (pField `sepEndBy` pComma)),
           StringLit . T.pack <$> lexeme sep ("\"" *> manyTill charLiteral "\""),
           Const <$> V.parseValue sep,
           Call <$> parseFunc <*> pure []
@@ -192,7 +192,7 @@ parseExp sep =
 
     pPat =
       choice
-        [ inParens sep $ pVarName `sepBy` pComma,
+        [ inParens sep $ pVarName `sepEndBy` pComma,
           pure <$> pVarName
         ]
 
