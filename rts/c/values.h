@@ -104,16 +104,16 @@ static int read_str_elem(char *buf, struct array_reader *reader) {
 static int read_str_array_elems(FILE *f,
                                 char *buf, int bufsize,
                                 struct array_reader *reader, int64_t dims) {
-  int ret;
-  int first = 1;
+  int ret = 1;
+  int expect_elem = 1;
   char *knows_dimsize = (char*) calloc((size_t)dims, sizeof(char));
   int cur_dim = (int)dims-1;
   int64_t *elems_read_in_dim = (int64_t*) calloc((size_t)dims, sizeof(int64_t));
 
   while (1) {
     next_token(f, buf, bufsize);
-
     if (strcmp(buf, "]") == 0) {
+      expect_elem = 0;
       if (knows_dimsize[cur_dim]) {
         if (reader->shape[cur_dim] != elems_read_in_dim[cur_dim]) {
           ret = 1;
@@ -130,14 +130,14 @@ static int read_str_array_elems(FILE *f,
         cur_dim--;
         elems_read_in_dim[cur_dim]++;
       }
-    } else if (strcmp(buf, ",") == 0) {
-      next_token(f, buf, bufsize);
+    } else if (!expect_elem && strcmp(buf, ",") == 0) {
+      expect_elem = 1;
+    } else if (expect_elem) {
       if (strcmp(buf, "[") == 0) {
         if (cur_dim == dims - 1) {
           ret = 1;
           break;
         }
-        first = 1;
         cur_dim++;
         elems_read_in_dim[cur_dim] = 0;
       } else if (cur_dim == dims - 1) {
@@ -145,30 +145,11 @@ static int read_str_array_elems(FILE *f,
         if (ret != 0) {
           break;
         }
+        expect_elem = 0;
         elems_read_in_dim[cur_dim]++;
       } else {
         ret = 1;
         break;
-      }
-    } else if (strlen(buf) == 0) {
-      // EOF
-      ret = 1;
-      break;
-    } else if (first) {
-      if (strcmp(buf, "[") == 0) {
-        if (cur_dim == dims - 1) {
-          ret = 1;
-          break;
-        }
-        cur_dim++;
-        elems_read_in_dim[cur_dim] = 0;
-      } else {
-        ret = read_str_elem(buf, reader);
-        if (ret != 0) {
-          break;
-        }
-        elems_read_in_dim[cur_dim]++;
-        first = 0;
       }
     } else {
       ret = 1;
