@@ -7,13 +7,12 @@ import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), Unify (..), unifies_, SubstitutionBuilder (..))
 import Futhark.SoP.SoP (SoP, sym2SoP, int2SoP, (.+.), (.-.), mapSymSoP)
-import Futhark.Util.Pretty (Pretty (pretty), (<+>), parens, commasep, prettyString, line, indent, stack)
+import Futhark.Util.Pretty (Pretty (pretty), (<+>), parens, commasep, prettyString, stack)
 import Language.Futhark (VName)
 import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
 import qualified Data.Map as M
 import qualified Data.List.NonEmpty as NE
-import Futhark.Analysis.Proofs.Util (prettyName)
-import Debug.Trace (traceM)
+import Futhark.Analysis.Proofs.Util (prettyName, prettyBinding)
 
 instance Eq Domain where
   -- Since the whole domain must be covered by an index function,
@@ -42,7 +41,7 @@ deriving instance Eq IndexFn
 -------------------------------------------------------------------------------
 instance (Pretty a, Pretty b) => Pretty (Cases a b) where
   pretty (Cases cs) =
-    line <> indent 4 (stack (map prettyCase (NE.toList cs)))
+    stack (map prettyCase (NE.toList cs))
     where
       prettyCase (p, e) = "|" <+> pretty p <+> "⇒ " <+> pretty e
 
@@ -151,9 +150,10 @@ instance MonadFreshNames m => Unify IndexFn Symbol m where
 -- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
 subst :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
 subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
-  traceM ("🎭 sub " <> prettyString x <> " for " <> prettyString for <> "\n  in " <> prettyString into)
+  debugM ("🎭 substitute\n"
+          <> prettyBinding x for
+          <> "\ninto\n" <> prettyString into)
   i' <- sym2SoP . Var <$> newNameFromString "i"
-  traceM ("fresh name " <> prettyString i')
   for' <- rename for
   into' <- rename into
   subst' x (repIndexFn (mkSub i i') for') (repIndexFn (mkSub j i') into')
@@ -188,7 +188,7 @@ apply i s symbol = case symbol of
   _ -> rep s symbol
 
 -- rimelig sikker på refactor var en fejl;
--- 1. ikke lav index fn sub som unification
--- 2. fjern subCases subDomain fra Substitution
--- 3. rul refactor tilbage som nødvendig (tror ikke nogen ændringer nødvendige)
--- 4. definer compatible domains? eller lav cases i subst'
+-- 1. [x] ikke lav index fn sub som unification
+-- 2. [x] fjern subCases subDomain fra Substitution
+-- 3. [x] rul refactor tilbage som nødvendig (tror ikke nogen ændringer nødvendige)
+-- 4. [ ] definer compatible domains? eller lav cases i subst'

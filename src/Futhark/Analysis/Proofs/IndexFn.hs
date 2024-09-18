@@ -11,6 +11,8 @@ import Futhark.SoP.SoP (SoP)
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 import Futhark.MonadFreshNames
 import Control.Monad.RWS.Strict
+import Debug.Trace (traceM)
+import Control.Monad (when)
 
 data IndexFn = IndexFn
   { iterator :: Iterator,
@@ -44,7 +46,8 @@ casesToList (Cases cs) = NE.toList cs
 data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Symbol E.Exp,
-    indexfns :: M.Map VName IndexFn
+    indexfns :: M.Map VName IndexFn,
+    debug :: Bool
     -- toplevel :: M.Map E.VName ([E.Pat], IndexFn)
   }
 
@@ -75,7 +78,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty
+    s = VEnv vns mempty mempty False
 
 insertIndexFn :: E.VName -> IndexFn -> IndexFnM ()
 insertIndexFn x v =
@@ -89,3 +92,16 @@ insertIndexFn x v =
 clearAlgEnv :: IndexFnM ()
 clearAlgEnv =
   modify $ \env -> env {algenv = mempty}
+
+--------------------------------------------------------------
+-- Utilities
+--------------------------------------------------------------
+debugM :: String -> IndexFnM ()
+debugM x = do
+  debug <- gets debug
+  when debug $ traceM $ "🪲 " <> x
+
+debugOn :: b -> IndexFnM b
+debugOn f = do
+  modify (\s -> s { debug = True })
+  pure f

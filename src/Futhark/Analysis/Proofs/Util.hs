@@ -2,7 +2,7 @@ module Futhark.Analysis.Proofs.Util
 where
 
 import Language.Futhark (VName (VName))
-import Futhark.Util.Pretty (pretty, Pretty, prettyString, Doc)
+import Futhark.Util.Pretty (pretty, Pretty, prettyString, Doc, docString, (<+>))
 import Data.Maybe (fromJust)
 import Debug.Trace (trace)
 import Data.List (subsequences, (\\))
@@ -15,6 +15,9 @@ prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show 
 
 prettyHole :: VName -> Doc ann
 prettyHole x = "•" <> prettyName x
+
+prettyBinding :: (Pretty a1, Pretty a2) => a1 -> a2 -> String
+prettyBinding a b = docString $ pretty a <+> "=" <+> pretty b
 
 tracer :: Pretty a => a -> a
 tracer x = trace (prettyString x) x

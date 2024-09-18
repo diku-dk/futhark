@@ -8,9 +8,11 @@ import Futhark.Analysis.Proofs.Convert
 import qualified Language.Futhark as E
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
-import Futhark.SoP.SoP (int2SoP)
-import Debug.Trace (traceM, trace)
-import Futhark.Util.Pretty (prettyString)
+import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.))
+import Futhark.Util.Pretty (prettyString, (<+>), docString, pretty, line)
+import Futhark.MonadFreshNames (newNameFromString)
+import Futhark.Analysis.Proofs.Unify (unify)
+import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn)
 
 -- Doubly last: get the last ValBind in the last import.
 getLastValBind :: Imports -> E.ValBind
@@ -26,13 +28,52 @@ tests :: TestTree
 tests = testGroup "Proofs.IndexFn"
   [ mkTest
       "tests/indexfn/map.fut"
-      (IndexFn Empty (cases [(Bool True, int2SoP 0)]))
+      (pure $ \(i,n,xs) ->
+        IndexFn {
+          iterator = Forall i (Iota (sHole n)),
+          body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Idx (Hole xs) (sHole i)))]
+          })
+  , mkTest
+      "tests/indexfn/map-if.fut"
+      (pure $ \(i,n,xs) ->
+        let xs_i = sym2SoP (Idx (Hole xs) (sHole i))
+        in IndexFn {
+          iterator = Forall i (Iota (sHole n)),
+          body = cases [(xs_i :> int2SoP 100, int2SoP 2 .*. xs_i),
+                        (xs_i :<= int2SoP 100, xs_i)]
+          })
   ]
   where
-    mkTest :: String -> IndexFn -> TestTree
-    mkTest programFile expected = testCase programFile $ do
+    -- mkTest :: String -> IndexFn -> TestTree
+    mkTest programFile expectedPat = testCase programFile $ do
       (_, imports, vns) <- readProgramOrDie programFile
       let vb = getLastValBind imports
-      -- traceM $ "valbind " <> prettyString vb
-      let indexfn = fst . flip runIndexFnM vns . mkIndexFnValBind $ vb
-      indexfn @?= Just expected
+      case runTest vns vb expectedPat of
+        Just (actual, expected) -> actual @??= expected
+        _ -> assertFailure $ "Failed to make index fn for " <> prettyString vb
+
+    -- We need to make the index function and run unification using
+    -- the same VNameSource, otherwise the variables in the index function
+    -- are likely to be considered bound quantifier variables.
+    runTest vns vb expectedPat = fst . flip runIndexFnM vns $ do
+      x <- newNameFromString "h"
+      y <- newNameFromString "h"
+      z <- newNameFromString "h"
+      -- Evaluate expectedPat first for any side effects like debug toggling.
+      pat <- expectedPat
+      let expected = pat (x,y,z)
+      indexfn <- mkIndexFnValBind vb
+      case indexfn of
+        Nothing -> pure Nothing
+        Just actual -> do
+          s <- unify expected actual
+          case s of
+            Nothing -> pure $ Just (actual, expected)
+            Just s' -> subIndexFn s' expected >>= \e -> pure $ Just (actual, e)
+      
+    sHole = sym2SoP . Hole
+
+    actual @??= expected =
+      let msg = docString $
+            "expected:" <+> pretty expected <> line <> "but got:" <+> pretty actual
+      in assertEqual msg expected actual
