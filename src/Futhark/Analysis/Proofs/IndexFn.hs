@@ -23,15 +23,13 @@ data Domain = Iota (SoP Symbol) -- [0, ..., n-1]
                 VName        -- k
                 (SoP Symbol) -- m
                 (SoP Symbol) -- b
-            | DHole VName
   deriving Show
 
 data Iterator = Forall VName Domain
               | Empty
   deriving Show
 
-data Cases a b = Cases (NE.NonEmpty (a, b))
-               | CHole VName
+newtype Cases a b = Cases (NE.NonEmpty (a, b))
   deriving (Show, Eq, Ord)
 
 cases :: [(a,b)] -> Cases a b
@@ -39,7 +37,6 @@ cases = Cases . NE.fromList
 
 casesToList ::  Cases a b -> [(a, b)]
 casesToList (Cases cs) = NE.toList cs
-casesToList (CHole _) = error "casesToList on hole."
 
 -------------------------------------------------------------------------------
 -- Monad.

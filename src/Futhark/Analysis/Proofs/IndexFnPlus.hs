@@ -26,11 +26,9 @@ instance Eq Domain where
       start :: Domain -> SoP Symbol
       start (Iota _) = int2SoP 0
       start (Cat k _ b) = rep (mkSub k (int2SoP 0 :: SoP Symbol)) b
-      start (DHole _) = error "start on DHole"
 
       end (Iota n) = n .-. int2SoP 1
       end (Cat k m b) = rep (mkSub k m) b .-. int2SoP 1
-      end (DHole _) = error "end on DHole"
 
 instance Eq Iterator where
   (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
@@ -52,7 +50,6 @@ instance (Pretty a, Pretty b) => Pretty (Cases a b) where
     line <> indent 4 (stack (map prettyCase (NE.toList cs)))
     where
       prettyCase (p, e) = "|" <+> pretty p <+> "⇒ " <+> pretty e
-  pretty (CHole vn) = prettyHole vn
 
 instance Pretty Domain where
   pretty (Iota n) = "iota" <+> parens (pretty n)
@@ -69,7 +66,6 @@ instance Pretty Domain where
     where
       intervalEnd :: SoP Symbol
       intervalEnd = rep (mkSub k (sym2SoP (Var k) .+. int2SoP 1)) b
-  pretty (DHole vn) = prettyHole vn
 
 instance Pretty Iterator where
   pretty (Forall i dom) =
@@ -82,42 +78,36 @@ instance Pretty IndexFn where
 -------------------------------------------------------------------------------
 -- Unification.
 -------------------------------------------------------------------------------
-class SelfReplaceable v where
-  -- A pendant to rep.
-  rip :: Substitution Symbol -> v -> v
+repVName :: Substitution Symbol -> VName -> VName
+repVName s vn
+  | Var i <- sop2Symbol $ rep s (Var vn) =
+    i
+repVName _ _ = error "repVName substitutes for non-VName."
 
-instance SelfReplaceable VName where
-  rip :: Substitution Symbol -> VName -> VName
-  rip s vn
-    | Var i <- sop2Symbol $ rep s (Var vn) =
-      i
-  rip _ _ = error "rip VName substitutes for non-VName."
+repCase :: (Ord u, Replaceable v1 u, Replaceable v2 u) => Substitution u -> (v1, v2) -> (u, SoP u)
+repCase s (a, b) = (sop2Symbol (rep s a), rep s b)
 
-instance SelfReplaceable (Symbol, SoP Symbol) where
-  rip s (a, b) = (sop2Symbol (rep s a), rep s b)
+repCases :: (Ord a, Replaceable v1 a, Replaceable v2 a) => Substitution a -> Cases v1 v2 -> Cases a (SoP a)
+repCases s (Cases cs) = Cases $ NE.map (repCase s) cs
 
-instance SelfReplaceable (Cases Symbol (SoP Symbol)) where
-  rip s (Cases cs) = Cases $ NE.map (rip s) cs
-  rip s (CHole vn) = M.findWithDefault (CHole vn) vn (subCases s)
+repDomain :: Substitution Symbol -> Domain -> Domain
+repDomain s (Iota n) = Iota (rep s n)
+repDomain s (Cat k m b) = Cat k (rep s m) (rep s b)
 
-instance SelfReplaceable Domain where
-  rip s (Iota n) = Iota (rep s n)
-  rip s (Cat k m b) = Cat k (rep s m) (rep s b)
-  rip s (DHole vn) = M.findWithDefault (DHole vn) vn (subDomain s)
-
-instance SelfReplaceable IndexFn where
-  rip s (IndexFn Empty body) = IndexFn Empty (rip s body)
-  rip s (IndexFn (Forall i dom) body) =
-    IndexFn (Forall (rip s i) (rip s dom)) (rip s body)
+repIndexFn :: Substitution Symbol -> IndexFn -> IndexFn
+repIndexFn s = rip
+  where
+    rip (IndexFn Empty body) = IndexFn Empty (repCases s body)
+    rip (IndexFn (Forall i dom) body) =
+      IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
 
 subIndexFn :: Substitution Symbol -> IndexFn -> IndexFnM IndexFn
-subIndexFn s indexfn = rip s <$> rename indexfn
+subIndexFn s indexfn = repIndexFn s <$> rename indexfn
 
 instance (Renameable a, Renameable b) => Renameable (Cases a b) where
   rename_ tau (Cases cs) = Cases <$> mapM re cs
     where
       re (p,q) = (,) <$> rename_ tau p <*> rename_ tau q
-  rename_ _ (CHole vn) = pure $ CHole vn
 
 instance Renameable Domain where
   rename_ tau (Cat k m b) = do
@@ -125,7 +115,6 @@ instance Renameable Domain where
     let tau' = M.insert k k' tau
     Cat k' <$> rename_ tau' m <*> rename_ tau' b
   rename_ tau (Iota n) = Iota <$> rename_ tau n
-  rename_ _ (DHole vn) = pure $ DHole vn
 
 instance Renameable IndexFn where
   rename_ tau indexfn = case indexfn of
@@ -146,8 +135,6 @@ instance MonadFreshNames m => Unify Domain Symbol m where
   unify_ k (Cat _ m1 b1) (Cat _ m2 b2) = do
     s <- unify_ k m1 m2
     (s <>) <$> unify_ k (rep s b1) (rep s b2)
-  unify_ _ _ (DHole _) = fail "DHole in second argument not allowed!"
-  unify_ _ (DHole vn) dom = pure $ mkSub vn dom
   unify_ _ _ _ = fail "Incompatible domains"
 
 instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) Symbol m where
@@ -158,8 +145,6 @@ instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) Symbol m where
     where
       xs = NE.toList cs1
       ys = NE.toList cs2
-  unify_ _ (CHole vn) (Cases cs) = pure $ mkSub vn (Cases cs)
-  unify_ _ _ _ = fail "CHole in second argument not allowed!"
 
 -- XXX we require that index function quantifiers (indexing variables) are unique!
 instance MonadFreshNames m => Unify IndexFn Symbol m where
@@ -167,49 +152,13 @@ instance MonadFreshNames m => Unify IndexFn Symbol m where
     unify_ k body1 body2
   unify_ k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j dom2) body2) = do
     s <- unify_ k (Hole i) (Var j)
-    s' <- (s <>) <$> unify_ k (rip s dom1) (rip s dom2)
-    (s' <>) <$> unify_ k (rip s' body1) (rip s' body2)
+    s' <- (s <>) <$> unify_ k (repDomain s dom1) (repDomain s dom2)
+    (s' <>) <$> unify_ k (repCases s' body1) (repCases s' body2)
   unify_ _ _ _ = fail "Incompatible iterators"
 
 -------------------------------------------------------------------------------
 -- Index function substitution.
 -------------------------------------------------------------------------------
-data SubstitutionRule = SubstitutionRule {
-    name :: String,
-    fPremise :: IndexFn,
-    gPremise :: IndexFn,
-    to :: (VName, Substitution Symbol) -> IndexFnM IndexFn,
-    sideCondition :: Substitution Symbol -> IndexFnM Bool
-  }
-
-rules :: IndexFnM [SubstitutionRule]
-rules = do
-  i <- newVName "i"
-  k <- newVName "k"
-  n <- newVName "n"
-  m <- newVName "m"
-  b <- newVName "b"
-  cases_f <- newVName "h"
-  cases_g <- newVName "h"
-  domain_g <- newVName "h"
-  pure
-    [ SubstitutionRule
-      { name = "Substitute scalar f into index function g."
-      , fPremise = IndexFn Empty (CHole cases_f)
-      , gPremise = IndexFn (Forall i (DHole domain_g)) (CHole cases_g)
-      , to = \(reference_f, s) ->
-          pure . rip s $
-            IndexFn {
-              iterator = Forall i (DHole domain_g),
-              body = cases $ do
-                (xcond, xval :: SoP Symbol) <- casesToList $ rip s (CHole cases_f)
-                (ycond, yval) <- casesToList $ rip s (CHole cases_g)
-                pure $ rip (addSub reference_f xval s) (ycond :&& xcond, yval)
-            }
-      , sideCondition = undefined
-      }
-    ]
-
 -- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
 subst :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
 subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
@@ -218,7 +167,7 @@ subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
   traceM ("fresh name " <> prettyString i')
   for' <- rename for
   into' <- rename into
-  subst' x (rip (mkSub i i') for') (rip (mkSub j i') into')
+  subst' x (repIndexFn (mkSub i i') for') (repIndexFn (mkSub j i') into')
 subst x q r = subst' x q r
 
 subst' :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
@@ -230,7 +179,7 @@ subst' x (IndexFn Empty xs) (IndexFn iter_y ys) =
       (cases $ do
         (xcond, xval) <- casesToList xs
         (ycond, yval) <- casesToList ys
-        pure $ rip (mkSub x xval) (ycond :&& xcond, yval))
+        pure $ repCase (mkSub x xval) (ycond :&& xcond, yval))
 subst' f (IndexFn (Forall _ (Iota n)) xs) (IndexFn (Forall i (Iota n')) ys)
   | n == n' =
     pure $
