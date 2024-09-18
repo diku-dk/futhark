@@ -48,19 +48,19 @@ import Futhark.Util.Pretty
 -- | Solves the inequation `sop < 0` by reducing it to
 --   `sop + 1 <= 0`, where `sop` denotes an expression
 --   in  sum-of-product form.
-fmSolveLTh0 :: MonadSoP u e m => SoP u -> m Bool
+fmSolveLTh0 :: (MonadSoP u e p m) => SoP u -> m Bool
 fmSolveLTh0 = fmSolveLEq0 . (.+. int2SoP 1)
 
 -- | Solves the inequation `sop > 0` by reducing it to
 --   `(-1)*sop < 0`, where `sop` denotes an expression
 --   in  sum-of-product form.
-fmSolveGTh0 :: MonadSoP u e m => SoP u -> m Bool
+fmSolveGTh0 :: (MonadSoP u e p m) => SoP u -> m Bool
 fmSolveGTh0 = fmSolveLTh0 . negSoP
 
 -- | Solves the inequation `sop >= 0` by reducing it to
 --   `(-1)*sop <= 0`, where `sop` denotes an expression
 --   in  sum-of-product form.
-fmSolveGEq0 :: MonadSoP u e m => SoP u -> m Bool
+fmSolveGEq0 :: (MonadSoP u e p m) => SoP u -> m Bool
 fmSolveGEq0 = fmSolveLEq0 . negSoP
 
 -- | Assuming `sop` an expression in sum-of-products (SoP) form,
@@ -78,7 +78,7 @@ fmSolveGEq0 = fmSolveLEq0 . negSoP
 --      (i)   `True`  if the inequality is found to always holds;
 --      (ii)  `False` if there is an `i` for which the inequality does
 --                    not hold or if the answer is unknown.
-fmSolveLEq0 :: MonadSoP u e m => SoP u -> m Bool
+fmSolveLEq0 :: (MonadSoP u e p m) => SoP u -> m Bool
 fmSolveLEq0 sop = do
   sop' <- substEquivs sop
   let syms = S.toList $ free sop'
@@ -113,20 +113,20 @@ fmSolveLEq0 sop = do
       pure (a_leq_0 && al_leq_0 || a_geq_0 && au_leq_0)
     _ -> pure False
 
-($<$) :: MonadSoP u e m => SoP u -> SoP u -> m Bool
+($<$) :: (MonadSoP u e p m) => SoP u -> SoP u -> m Bool
 x $<$ y = fmSolveLTh0 $ x .-. y
 
-($<=$) :: MonadSoP u e m => SoP u -> SoP u -> m Bool
+($<=$) :: (MonadSoP u e p m) => SoP u -> SoP u -> m Bool
 x $<=$ y = fmSolveLEq0 $ x .-. y
 
-($>$) :: MonadSoP u e m => SoP u -> SoP u -> m Bool
+($>$) :: (MonadSoP u e p m) => SoP u -> SoP u -> m Bool
 x $>$ y = fmSolveGTh0 $ x .-. y
 
-($>=$) :: MonadSoP u e m => SoP u -> SoP u -> m Bool
+($>=$) :: (MonadSoP u e p m) => SoP u -> SoP u -> m Bool
 x $>=$ y = fmSolveGEq0 $ x .-. y
 
-($==$) :: MonadSoP u e m => SoP u -> SoP u -> m Bool
+($==$) :: (MonadSoP u e p m) => SoP u -> SoP u -> m Bool
 x $==$ y = (&&) <$> (x $<=$ y) <*> (x $>=$ y)
 
-($/=$) :: MonadSoP u e m => SoP u -> SoP u -> m Bool
+($/=$) :: (MonadSoP u e p m) => SoP u -> SoP u -> m Bool
 x $/=$ y = (||) <$> (x $<$ y) <*> (x $>$ y)

@@ -1,16 +1,16 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
-module Futhark.Analysis.Proofs.IndexFn
-where
 
-import qualified Data.Map as M
+module Futhark.Analysis.Proofs.IndexFn where
+
+import Control.Monad.RWS.Strict
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
+import Futhark.Analysis.Proofs.Symbol
+import Futhark.MonadFreshNames
+import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
+import Futhark.SoP.SoP (SoP)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
-import qualified Data.List.NonEmpty as NE
-import Futhark.Analysis.Proofs.Symbol
-import Futhark.SoP.SoP (SoP)
-import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
-import Futhark.MonadFreshNames
-import Control.Monad.RWS.Strict
 
 data IndexFn = IndexFn
   { iterator :: Iterator,
@@ -18,25 +18,28 @@ data IndexFn = IndexFn
   }
   deriving (Show)
 
-data Domain = Iota (SoP Symbol) -- [0, ..., n-1]
-            | Cat            -- Catenate_{k=1}^{m-1} [b_{k-1}, ..., b_k)
-                VName        -- k
-                (SoP Symbol) -- m
-                (SoP Symbol) -- b
-  deriving Show
+data Domain
+  = Iota (SoP Symbol) -- [0, ..., n-1]
+  | Cat -- Catenate_{k=1}^{m-1} [b_{k-1}, ..., b_k)
+      VName -- k
+      (SoP Symbol) -- m
+      (SoP Symbol) -- b
+  deriving (Show)
 
-data Iterator = Forall VName Domain
-              | Empty
-  deriving Show
+data Iterator
+  = Forall VName Domain
+  | Empty
+  deriving (Show)
 
-data Cases a b = Cases (NE.NonEmpty (a, b))
-               | CHole VName
+data Cases a b
+  = Cases (NE.NonEmpty (a, b))
+  | CHole VName
   deriving (Show, Eq, Ord)
 
-cases :: [(a,b)] -> Cases a b
+cases :: [(a, b)] -> Cases a b
 cases = Cases . NE.fromList
 
-casesToList ::  Cases a b -> [(a, b)]
+casesToList :: Cases a b -> [(a, b)]
 casesToList (Cases cs) = NE.toList cs
 casesToList (CHole _) = error "casesToList on hole."
 
@@ -45,7 +48,7 @@ casesToList (CHole _) = error "casesToList on hole."
 -------------------------------------------------------------------------------
 data VEnv = VEnv
   { vnamesource :: VNameSource,
-    algenv :: AlgEnv Symbol E.Exp,
+    algenv :: AlgEnv Symbol E.Exp Property,
     indexfns :: M.Map VName IndexFn
     -- toplevel :: M.Map E.VName ([E.Pat], IndexFn)
   }
@@ -67,7 +70,7 @@ instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
 instance Nameable Symbol where
   mkName (VNameSource i) = (Var $ E.VName "x" i, VNameSource $ i + 1)
 
-instance MonadSoP Symbol E.Exp IndexFnM where
+instance MonadSoP Symbol E.Exp Property IndexFnM where
   getUntrans = gets (untrans . algenv)
   getRanges = gets (ranges . algenv)
   getEquivs = gets (equivs . algenv)
