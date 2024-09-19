@@ -103,7 +103,7 @@ pRange = do
               sepBy pSoP (pChar ',')
           ]
 
-parse' :: Show a => ReadP a -> String -> a
+parse' :: (Show a) => ReadP a -> String -> a
 parse' p s =
   case readP_to_S (tokenize p <* eof) s of
     [(e, "")] -> e
@@ -152,5 +152,5 @@ parsePrimExp s =
     Left bundle -> error $ show bundle
     Right pe -> pe
 
-parsePrimExpToSoP :: String -> SoPM String (PrimExp String) (Integer, SoP String)
+parsePrimExpToSoP :: String -> SoPM String (PrimExp String) p (Integer, SoP String)
 parsePrimExpToSoP = toSoPNum . parsePrimExp

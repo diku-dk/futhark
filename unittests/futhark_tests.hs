@@ -14,6 +14,9 @@ import Futhark.Internalise.TypesValuesTests qualified
 import Futhark.Optimise.ArrayLayoutTests qualified
 import Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests qualified
 import Futhark.Pkg.SolveTests qualified
+import Futhark.SoP.FourierMotzkinTests qualified
+import Futhark.SoP.RefineTests qualified
+import Futhark.SoP.SoPTests qualified
 import Language.Futhark.PrimitiveTests qualified
 import Language.Futhark.SemanticTests qualified
 import Language.Futhark.SyntaxTests qualified
@@ -41,7 +44,10 @@ allTests =
       Futhark.Analysis.AlgSimplifyTests.tests,
       Language.Futhark.TypeCheckerTests.tests,
       Language.Futhark.SemanticTests.tests,
-      Futhark.Optimise.ArrayLayoutTests.tests
+      Futhark.Optimise.ArrayLayoutTests.tests,
+      Futhark.SoP.SoPTests.tests,
+      Futhark.SoP.FourierMotzkinTests.tests,
+      Futhark.SoP.RefineTests.tests
     ]
 
 main :: IO ()

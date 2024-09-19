@@ -5,10 +5,12 @@ import Futhark.SoP.SoP
 import Test.Tasty
 import Test.Tasty.HUnit
 
+-- Run like this:
+-- cabal test --test-option="--pattern=SoP Arithmetic tests"
 tests :: TestTree
 tests =
   testGroup
-    "Arithmetic tests"
+    "SoP Arithmetic tests"
     $ let sop1 = parseSoP "x + y"
           sop2 = parseSoP "5 + x*x + 2*x + 3*y + y*y"
           sop3 = parseSoP "-3 + x + y"

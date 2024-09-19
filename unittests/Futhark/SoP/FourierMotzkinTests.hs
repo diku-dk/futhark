@@ -9,16 +9,16 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 fmSolveLTh0_ :: RangeEnv String -> SoP String -> Bool
-fmSolveLTh0_ rs = evalSoPM mempty {ranges = rs} . (fmSolveLTh0 :: SoP String -> SoPM String (PrimExp String) Bool)
+fmSolveLTh0_ rs = evalSoPM mempty {ranges = rs} . (fmSolveLTh0 :: SoP String -> SoPM String (PrimExp String) p Bool)
 
 fmSolveGTh0_ :: RangeEnv String -> SoP String -> Bool
-fmSolveGTh0_ rs = evalSoPM mempty {ranges = rs} . (fmSolveGTh0 :: SoP String -> SoPM String (PrimExp String) Bool)
+fmSolveGTh0_ rs = evalSoPM mempty {ranges = rs} . (fmSolveGTh0 :: SoP String -> SoPM String (PrimExp String) p Bool)
 
 fmSolveGEq0_ :: RangeEnv String -> SoP String -> Bool
-fmSolveGEq0_ rs = evalSoPM mempty {ranges = rs} . (fmSolveGEq0 :: SoP String -> SoPM String (PrimExp String) Bool)
+fmSolveGEq0_ rs = evalSoPM mempty {ranges = rs} . (fmSolveGEq0 :: SoP String -> SoPM String (PrimExp String) p Bool)
 
 fmSolveLEq0_ :: RangeEnv String -> SoP String -> Bool
-fmSolveLEq0_ rs = evalSoPM mempty {ranges = rs} . (fmSolveLEq0 :: SoP String -> SoPM String (PrimExp String) Bool)
+fmSolveLEq0_ rs = evalSoPM mempty {ranges = rs} . (fmSolveLEq0 :: SoP String -> SoPM String (PrimExp String) p Bool)
 
 tests :: TestTree
 tests =
