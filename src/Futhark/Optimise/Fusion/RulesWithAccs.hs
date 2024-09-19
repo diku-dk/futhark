@@ -338,7 +338,7 @@ mkWithAccBdy' static_arg [] dims_rev iot_par_nms rshp_ps cons_ps = do
         forM (zip cons_ps iv_ses) $ \(cons_p, (i_ses, v_se)) -> do
           -- i_ses is a list
           let f nm_in i_se =
-                letExp (baseString nm_in) $ BasicOp $ UpdateAcc Unsafe nm_in [resSubExp i_se] [resSubExp v_se]
+                letExp (baseString nm_in) $ BasicOp $ UpdateAcc Safe nm_in [resSubExp i_se] [resSubExp v_se]
           foldM f (paramName cons_p) i_ses
       let lam_certs = foldl (<>) mempty $ map resCerts $ bodyResult $ lambdaBody scat_lam
       pure $ map (SubExpRes lam_certs . Var) res_nms
