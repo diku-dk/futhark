@@ -2,17 +2,17 @@
 
 module Futhark.Analysis.Proofs.IndexFn where
 
+import Control.Monad (when)
 import Control.Monad.RWS.Strict
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
+import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 import Futhark.SoP.SoP (SoP)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
-import Control.Monad (when)
-import Debug.Trace (traceM)
 
 data IndexFn = IndexFn
   { iterator :: Iterator,
@@ -105,5 +105,5 @@ debugM x = do
 
 debugOn :: b -> IndexFnM b
 debugOn f = do
-  modify (\s -> s { debug = True })
+  modify (\s -> s {debug = True})
   pure f

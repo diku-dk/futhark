@@ -1,14 +1,13 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
-module Futhark.Analysis.Proofs.SymbolPlus
-where
 
-import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.Unify (FreeVariables(fv), Renameable(rename_), Unify(..), SubstitutionBuilder (..), Replaceable (rep), Hole (justHole), unifies_, Substitution (..))
-import Futhark.SoP.SoP (sym2SoP)
-import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
+module Futhark.Analysis.Proofs.SymbolPlus where
+
+import Data.Map qualified as M
 import Data.Set qualified as S
-import qualified Data.Map as M
-
+import Futhark.Analysis.Proofs.Symbol
+import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Substitution (..), SubstitutionBuilder (..), Unify (..), unifies_)
+import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
+import Futhark.SoP.SoP (sym2SoP)
 
 instance FreeVariables Symbol where
   fv sym = case sym of
@@ -54,7 +53,7 @@ instance Renameable Symbol where
       f op x y = op <$> rename_ tau x <*> rename_ tau y
 
 instance SubstitutionBuilder Symbol Symbol where
-  addSub vn e s = s { sop = M.insert vn (sym2SoP e) $ sop s }
+  addSub vn e s = s {sop = M.insert vn (sym2SoP e) $ sop s}
 
 instance Replaceable Symbol Symbol where
   -- TODO flatten
@@ -67,7 +66,7 @@ instance Replaceable Symbol Symbol where
       -- NOTE we can avoid this rewrite here if we change the LinComb expression
       -- from Symbol to SoP Symbol.
       let s' = addSub i (Var i) s
-      in applyLinCombRule i (rep s' lb) (rep s' ub) (rep s' t)
+       in applyLinCombRule i (rep s' lb) (rep s' ub) (rep s' t)
     Indicator e -> sym2SoP . Indicator . sop2Symbol $ rep s e
     Bool x -> sym2SoP $ Bool x
     Not x -> sym2SoP . Not . sop2Symbol $ rep s x
@@ -95,7 +94,7 @@ instance Hole Symbol where
 -- Further, they keep (Var x := t) in the equations, but
 -- that's relegated to the substitution here.
 -- NOTE 3.a irrelevant here given that we are post type checking?
-instance MonadFreshNames m => Unify Symbol Symbol m where
+instance (MonadFreshNames m) => Unify Symbol Symbol m where
   -- unify_ _ x y | trace ("\nunify_ " <> unwords (map prettyString [x, y])) False = undefined
   -- TODO I don't think we want exchange since unify is used to check whether
   --      the holes (FVs) in the first argument can be substituted to be

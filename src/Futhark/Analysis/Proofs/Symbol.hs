@@ -1,9 +1,6 @@
 module Futhark.Analysis.Proofs.Symbol where
 
-import Data.Map.Strict qualified as M
-import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
-import Futhark.MonadFreshNames
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName)

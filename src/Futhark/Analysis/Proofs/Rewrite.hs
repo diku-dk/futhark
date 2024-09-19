@@ -3,7 +3,6 @@ module Futhark.Analysis.Proofs.Rewrite where
 import Control.Monad (foldM, msum, (<=<))
 import Data.Functor ((<&>))
 import Data.List (subsequences, (\\))
-import Data.Map qualified as M
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases)
 import Futhark.Analysis.Proofs.IndexFnPlus (repVName, subIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)

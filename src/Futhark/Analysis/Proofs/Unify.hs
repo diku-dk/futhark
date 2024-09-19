@@ -3,55 +3,61 @@
 --   Are two expressions syntactically identical
 --   up to the names of bound variables?
 {-# OPTIONS_GHC -Wno-orphans #-}
-module Futhark.Analysis.Proofs.Unify
-where
 
-import Data.Map.Strict qualified as M
-import Data.Set qualified as S
-import Futhark.SoP.SoP (SoP, sopToList, termToList, toTerm, mulSoPs, sopToLists, Term, addSoPs, zeroSoP, int2SoP, sopFromList, justSym)
-import Futhark.SoP.SoP qualified as SoP
-import Language.Futhark (VName)
-import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromString, putNameSource)
-import qualified Data.List as L
+module Futhark.Analysis.Proofs.Unify where
+
 import Control.Monad (foldM, msum)
 import Control.Monad.Trans.Maybe
-import Futhark.Util.Pretty
+import Data.List qualified as L
+import Data.Map.Strict qualified as M
+import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
+import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromString, putNameSource)
+import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromList, sopToList, sopToLists, termToList, toTerm, zeroSoP)
+import Futhark.SoP.SoP qualified as SoP
+import Futhark.Util.Pretty
+import Language.Futhark (VName)
 
-class Ord a => FreeVariables a where
+class (Ord a) => FreeVariables a where
   fv :: a -> S.Set VName
 
 class Renameable u where
   -- Implements subC(id,tau,e) from Sieg and Kaufmann where
-  -- tau is a renaming of bound variables. The context C is given by 
+  -- tau is a renaming of bound variables. The context C is given by
   -- VNameSource in MonadFreshNames.
-  rename_ :: MonadFreshNames m => M.Map VName VName -> u -> m u
+  rename_ :: (MonadFreshNames m) => M.Map VName VName -> u -> m u
+
   -- Rename bound variables in u. Equivalent to subC(id,id,e).
-  rename :: MonadFreshNames m => u -> m u
+  rename :: (MonadFreshNames m) => u -> m u
   rename = rename_ mempty
 
 -- type Substitution u = M.Map VName (SoP u)
-newtype Substitution u = Substitution {
-    sop :: M.Map VName (SoP u)
+newtype Substitution u = Substitution
+  { sop :: M.Map VName (SoP u)
   }
   deriving (Show, Eq)
 
 instance Semigroup (Substitution u) where
-  a <> b = Substitution { sop = sop a <> sop b }
+  a <> b = Substitution {sop = sop a <> sop b}
 
 instance Monoid (Substitution u) where
-  mempty = Substitution { sop = mempty }
+  mempty = Substitution {sop = mempty}
 
-instance Pretty v => Pretty (Substitution v) where
-  pretty = braces . commastack . map (\(k,v) -> prettyName k <> " : " <> pretty v) . M.toList . sop
+instance (Pretty v) => Pretty (Substitution v) where
+  pretty = braces . commastack . map (\(k, v) -> prettyName k <> " : " <> pretty v) . M.toList . sop
 
 class Replaceable v u where
   -- Implements the replacement operation from Sieg and Kaufmann.
   rep :: Substitution u -> v -> SoP u
 
-sub :: ( MonadFreshNames m
-       , Renameable v
-       , Replaceable v u) => Substitution u -> v -> m (SoP u)
+sub ::
+  ( MonadFreshNames m,
+    Renameable v,
+    Replaceable v u
+  ) =>
+  Substitution u ->
+  v ->
+  m (SoP u)
 sub s x = rep s <$> rename x
 
 class SubstitutionBuilder v u where
@@ -82,7 +88,7 @@ instance Renameable VName where
   rename_ tau x = pure $ M.findWithDefault x x tau
 
 instance (Renameable u, Ord u) => Renameable (Term u, Integer) where
-  rename_ tau (x, c) = (, c) . toTerm <$> mapM (rename_ tau) (termToList x)
+  rename_ tau (x, c) = (,c) . toTerm <$> mapM (rename_ tau) (termToList x)
 
 instance (Ord u, Renameable u) => Renameable (SoP u) where
   rename_ tau = fmap sopFromList . mapM (rename_ tau) . sopToList
@@ -93,7 +99,7 @@ instance FreeVariables VName where
 -- instance FreeVariables u => FreeVariables (Term u) where
 --   fv = S.unions . map fv . termToList
 
-instance FreeVariables u => FreeVariables (SoP u) where
+instance (FreeVariables u) => FreeVariables (SoP u) where
   fv x = S.unions [fv t | (ts, _) <- sopToLists x, t <- ts]
 
 instance (Ord u, Replaceable u u) => Replaceable (Term u, Integer) u where
@@ -103,25 +109,34 @@ instance (Ord u, Replaceable u u) => Replaceable (SoP u) u where
   rep s = foldr (addSoPs . rep s) zeroSoP . sopToList
 
 instance SubstitutionBuilder (SoP u) u where
-  addSub vn x s = s { sop = M.insert vn x $ sop s }
+  addSub vn x s = s {sop = M.insert vn x $ sop s}
 
-unifies_ :: ( Replaceable v u
-            , Replaceable u u
-            , Unify v u m
-            , Unify u u m
-            , Ord u
-            , Hole u) => VName -> [(v, v)] -> MaybeT m (Substitution u)
+unifies_ ::
+  ( Replaceable v u,
+    Replaceable u u,
+    Unify v u m,
+    Unify u u m,
+    Ord u,
+    Hole u
+  ) =>
+  VName ->
+  [(v, v)] ->
+  MaybeT m (Substitution u)
 unifies_ _ [] = pure mempty
-unifies_ k (u:us) = do
+unifies_ k (u : us) = do
   s0 <- uncurry (unify_ k) u
   foldM (\s (a, b) -> (s <>) <$> unify_ k (rep s a) (rep s b)) s0 us
 
-unifies :: ( Replaceable v u
-           , Replaceable u u
-           , Unify v u m
-           , Unify u u m
-           , Ord u
-           , Hole u) => [(v, v)] -> m (Maybe (Substitution u))
+unifies ::
+  ( Replaceable v u,
+    Replaceable u u,
+    Unify v u m,
+    Unify u u m,
+    Ord u,
+    Hole u
+  ) =>
+  [(v, v)] ->
+  m (Maybe (Substitution u))
 unifies us = runMaybeT $ do
   let (as, bs) = unzip us
   k <- newNameFromString "k"
@@ -131,31 +146,45 @@ unifies us = runMaybeT $ do
   bs' <- mapM rename bs
   unifies_ k (zip as' bs')
 
-unifyAnyPerm :: ( Replaceable v u
-                , Replaceable u u
-                , Unify v u m
-                , Unify u u m
-                , Ord u
-                , Hole u) => VName -> [v] -> [v] -> MaybeT m (Substitution u)
+unifyAnyPerm ::
+  ( Replaceable v u,
+    Replaceable u u,
+    Unify v u m,
+    Unify u u m,
+    Ord u,
+    Hole u
+  ) =>
+  VName ->
+  [v] ->
+  [v] ->
+  MaybeT m (Substitution u)
 unifyAnyPerm k xs ys
   | length xs == length ys =
       -- Extract left-most non-fail action, if there is one.
       msum $ map (unifies_ k . zip xs) (L.permutations ys)
   | otherwise = fail "unifyAnyPerm unequal lengths"
 
-instance ( Replaceable u u
-         , Unify u u m
-         , Hole u
-         , Ord u) => Unify (Term u, Integer) u m where
+instance
+  ( Replaceable u u,
+    Unify u u m,
+    Hole u,
+    Ord u
+  ) =>
+  Unify (Term u, Integer) u m
+  where
   -- Unify on permutations of symbols in term.
   unify_ k (x, a) (y, b)
     | a == b = unifyAnyPerm k (termToList x) (termToList y)
     | otherwise = fail "unequal constants"
 
-instance ( Replaceable u u
-         , Unify u u m
-         , Ord u
-         , Hole u) => Unify (SoP u) u m where
+instance
+  ( Replaceable u u,
+    Unify u u m,
+    Ord u,
+    Hole u
+  ) =>
+  Unify (SoP u) u m
+  where
   -- Unify on permutations of terms.
   unify_ k x y
     | Just h <- justSym x >>= justHole = pure $ addSub h y mempty

@@ -1,9 +1,8 @@
-module Futhark.Analysis.Proofs.Traversals
-where
+module Futhark.Analysis.Proofs.Traversals where
 
+import Futhark.Analysis.Proofs.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.SoP.SoP (SoP, (.+.), int2SoP, sopToLists, (.*.), sym2SoP)
-import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), Domain (..), Iterator (..), Cases (..), casesToList, cases)
+import Futhark.SoP.SoP (SoP, int2SoP, sopToLists, sym2SoP, (.*.), (.+.))
 
 data ASTMapper a m = ASTMapper
   { mapOnSymbol :: a -> m a,
@@ -13,7 +12,7 @@ data ASTMapper a m = ASTMapper
 class ASTMappable a b where
   astMap :: (Monad m) => ASTMapper a m -> b -> m b
 
-instance Ord a => ASTMappable a (SoP a) where
+instance (Ord a) => ASTMappable a (SoP a) where
   astMap m sop = do
     mapOnSoP m . foldl (.+.) (int2SoP 0) =<< mapM g (sopToLists sop)
     where

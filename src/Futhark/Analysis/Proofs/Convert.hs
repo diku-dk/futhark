@@ -1,22 +1,22 @@
 module Futhark.Analysis.Proofs.Convert where
 
-import qualified Language.Futhark as E
-import Futhark.Analysis.Proofs.Symbol (Symbol (..))
-import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, negSoP, mapSymSoP_, (.-.), (.+.), (.*.))
-import qualified Data.List.NonEmpty as NE
-import Futhark.Util.Pretty (prettyString)
-import Data.Maybe (fromMaybe)
-import Futhark.MonadFreshNames (VNameSource, newNameFromString)
-import Language.Futhark.Semantic (Imports, ImportName, FileModule (fileProg))
-import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), IndexFnM, runIndexFnM, clearAlgEnv, insertIndexFn, VEnv (..), Iterator (..), cases, Domain (..), Cases (Cases), debugM)
-import qualified Data.Map as M
+import Control.Monad (foldM, unless)
 import Control.Monad.RWS
-import Futhark.Analysis.Proofs.Rewrite (rewrite)
-import Futhark.Analysis.Proofs.IndexFnPlus (subst)
 import Data.Bifunctor
-import qualified Data.List as L
-import Control.Monad (unless, foldM)
+import Data.List qualified as L
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
+import Data.Maybe (fromMaybe)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), IndexFnM, Iterator (..), VEnv (..), cases, clearAlgEnv, debugM, insertIndexFn, runIndexFnM)
+import Futhark.Analysis.Proofs.IndexFnPlus (subst)
+import Futhark.Analysis.Proofs.Rewrite (rewrite)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Util (prettyBinding)
+import Futhark.MonadFreshNames (VNameSource, newNameFromString)
+import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP_, negSoP, sym2SoP, (.*.), (.+.), (.-.))
+import Futhark.Util.Pretty (prettyString)
+import Language.Futhark qualified as E
+import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -35,8 +35,8 @@ sizeOfTypeBase :: E.TypeBase E.Exp as -> Maybe (SoP Symbol)
 --   -- TODO why are all refinements scalar?
 --   sizeOfTypeBase ty
 sizeOfTypeBase (E.Array _ shape _)
-  | dim:_ <- E.shapeDims shape =
-    Just $ convertSize dim
+  | dim : _ <- E.shapeDims shape =
+      Just $ convertSize dim
   where
     convertSize (E.Var (E.QualName _ x) _ _) = sym2SoP $ Var x
     convertSize (E.Parens e _) = convertSize e
@@ -44,7 +44,6 @@ sizeOfTypeBase (E.Array _ shape _)
     convertSize (E.IntLit x _ _) = int2SoP x
     convertSize e = error ("convertSize not implemented for: " <> show e)
 sizeOfTypeBase _ = Nothing
-
 
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
@@ -60,6 +59,7 @@ mkIndexFnProg vns prog = snd $ runIndexFnM (mkIndexFnImports prog) vns
 
 mkIndexFnImports :: [(ImportName, FileModule)] -> IndexFnM ()
 mkIndexFnImports = mapM_ (mkIndexFnDecs . E.progDecs . fileProg . snd)
+
 -- A program is a list of declarations (DecBase); functions are value bindings
 -- (ValBind). Everything is in an AppExp.
 
@@ -69,7 +69,6 @@ mkIndexFnDecs (E.ValDec vb : rest) = do
   _ <- mkIndexFnValBind vb
   mkIndexFnDecs rest
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
-
 
 -- toplevel_indexfns
 mkIndexFnValBind :: E.ValBind -> IndexFnM (Maybe IndexFn)
@@ -143,8 +142,9 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
           -- Canonical array representation.
           i <- newNameFromString "i"
           rewrite $
-            IndexFn (Forall i (Iota sz))
-                    (singleCase . sym2SoP $ Idx (Var vn) (sym2SoP $ Var i))
+            IndexFn
+              (Forall i (Iota sz))
+              (singleCase . sym2SoP $ Idx (Var vn) (sym2SoP $ Var i))
         Nothing ->
           -- Canonical scalar representation.
           rewrite $ IndexFn Empty (singleCase . sym2SoP $ Var vn)
@@ -159,7 +159,8 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
 --         (zip vns xs)
 --     >>= rewrite
 forward (E.AppExp (E.Index xs' slice _) _)
-  | [E.DimFix idx'] <- slice = do -- XXX support only simple indexing for now
+  | [E.DimFix idx'] <- slice = do
+      -- XXX support only simple indexing for now
       IndexFn iter_idx idx <- forward idx'
       IndexFn iter_xs xs <- forward xs'
       case iter_xs of
@@ -179,9 +180,10 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
       vy <- forward y'
       a <- newNameFromString "a"
       b <- newNameFromString "b"
-      let doOp op = subst a vx (IndexFn iter_x (singleCase $ op (Var a) (Var b)))
-                      >>= subst b vy
-                        >>= rewrite
+      let doOp op =
+            subst a vx (IndexFn iter_x (singleCase $ op (Var a) (Var b)))
+              >>= subst b vy
+              >>= rewrite
       case bop of
         E.Plus -> doOp (~+~)
         E.Times -> doOp (~*~)
@@ -202,12 +204,18 @@ forward (E.AppExp (E.If c t f _) _) = do
   cond <- newNameFromString "cond"
   t_branch <- newNameFromString "t_branch"
   f_branch <- newNameFromString "f_branch"
-  let y = IndexFn iter_c (cases [(Var cond, sym2SoP $ Var t_branch),
-                                 (Not $ Var cond, sym2SoP $ Var f_branch)])
+  let y =
+        IndexFn
+          iter_c
+          ( cases
+              [ (Var cond, sym2SoP $ Var t_branch),
+                (Not $ Var cond, sym2SoP $ Var f_branch)
+              ]
+          )
   subst cond (IndexFn iter_c c') y
     >>= subst t_branch vt
-      >>= subst f_branch vf
-        >>= rewrite
+    >>= subst f_branch vf
+    >>= rewrite
 -- forward e | trace ("forward\n  " ++ prettyString e) False =
 --   -- All calls after this case get traced.
 --   undefined
@@ -219,9 +227,13 @@ forward (E.AppExp (E.Apply f args _) _)
       let IndexFn iter_first_arg _ = head xss
       -- TODO use iter_body; likely needed for nested maps?
       IndexFn iter_body cases_body <- forward body
-      unless (iter_body == iter_first_arg || iter_body == Empty)
-             (error $ "map internal error: iter_body != iter_first_arg"
-                      <> show iter_body <> show iter_first_arg)
+      unless
+        (iter_body == iter_first_arg || iter_body == Empty)
+        ( error $
+            "map internal error: iter_body != iter_first_arg"
+              <> show iter_body
+              <> show iter_first_arg
+        )
       -- Make susbtitutions from function arguments to array names.
       -- TODO `map E.patNames params` is a [Set], I assume because we might have
       --   map (\(x, y) -> ...) xys
@@ -240,17 +252,17 @@ forward (E.AppExp (E.Apply f args _) _)
       x' <- forward x
       i <- newNameFromString "i"
       case (n', x') of
-        (IndexFn Empty (Cases ((Bool True, m) NE.:| [])),
-         IndexFn Empty body) -> -- XXX support only 1D arrays for now.
-              rewrite $ IndexFn (Forall i (Iota m)) body
+        ( IndexFn Empty (Cases ((Bool True, m) NE.:| [])),
+          IndexFn Empty body
+          ) ->
+            -- XXX support only 1D arrays for now.
+            rewrite $ IndexFn (Forall i (Iota m)) body
         _ -> undefined -- TODO See iota comment.
 forward e = error $ "forward on " <> show e
 
 substParams :: IndexFn -> (E.VName, IndexFn) -> IndexFnM IndexFn
 substParams y (paramName, paramIndexFn) =
   subst paramName paramIndexFn y >>= rewrite
-
-
 
 cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
 cmap f (Cases xs) = Cases (fmap f xs)

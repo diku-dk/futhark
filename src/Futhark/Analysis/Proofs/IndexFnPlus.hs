@@ -1,18 +1,18 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
-module Futhark.Analysis.Proofs.IndexFnPlus
-where
 
+module Futhark.Analysis.Proofs.IndexFnPlus where
+
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
+import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus ()
-import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), Unify (..), unifies_, SubstitutionBuilder (..))
-import Futhark.SoP.SoP (SoP, sym2SoP, int2SoP, (.+.), (.-.), mapSymSoP)
-import Futhark.Util.Pretty (Pretty (pretty), (<+>), parens, commasep, prettyString, stack)
-import Language.Futhark (VName)
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), SubstitutionBuilder (..), Unify (..), unifies_)
+import Futhark.Analysis.Proofs.Util (prettyBinding, prettyName)
 import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
-import qualified Data.Map as M
-import qualified Data.List.NonEmpty as NE
-import Futhark.Analysis.Proofs.Util (prettyName, prettyBinding)
+import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP, sym2SoP, (.+.), (.-.))
+import Futhark.Util.Pretty (Pretty (pretty), commasep, parens, prettyString, stack, (<+>))
+import Language.Futhark (VName)
 
 instance Eq Domain where
   -- Since the whole domain must be covered by an index function,
@@ -33,7 +33,6 @@ instance Eq Iterator where
   Empty == Empty = True
   _ == _ = False
 
-
 deriving instance Eq IndexFn
 
 -------------------------------------------------------------------------------
@@ -51,12 +50,15 @@ instance Pretty Domain where
     "⊎"
       <> prettyName k
       <> "="
-      <> "iota" <+> pretty m
-      <+> "[" <> commasep [
-            pretty b,
-            "...",
-            pretty intervalEnd
-          ] <> ")"
+      <> "iota"
+        <+> pretty m
+        <+> "["
+      <> commasep
+        [ pretty b,
+          "...",
+          pretty intervalEnd
+        ]
+      <> ")"
     where
       intervalEnd :: SoP Symbol
       intervalEnd = rep (mkSub k (sym2SoP (Var k) .+. int2SoP 1)) b
@@ -75,7 +77,7 @@ instance Pretty IndexFn where
 repVName :: Substitution Symbol -> VName -> VName
 repVName s vn
   | Var i <- sop2Symbol $ rep s (Var vn) =
-    i
+      i
 repVName _ _ = error "repVName substitutes for non-VName."
 
 repCase :: (Ord u, Replaceable v1 u, Replaceable v2 u) => Substitution u -> (v1, v2) -> (u, SoP u)
@@ -101,7 +103,7 @@ subIndexFn s indexfn = repIndexFn s <$> rename indexfn
 instance (Renameable a, Renameable b) => Renameable (Cases a b) where
   rename_ tau (Cases cs) = Cases <$> mapM re cs
     where
-      re (p,q) = (,) <$> rename_ tau p <*> rename_ tau q
+      re (p, q) = (,) <$> rename_ tau p <*> rename_ tau q
 
 instance Renameable Domain where
   rename_ tau (Cat k m b) = do
@@ -118,14 +120,14 @@ instance Renameable IndexFn where
       dom' <- rename_ tau dom
       IndexFn (Forall i dom') <$> rename_ tau body
 
-instance MonadFreshNames m => Unify Domain Symbol m where
+instance (MonadFreshNames m) => Unify Domain Symbol m where
   unify_ k (Iota n) (Iota m) = unify_ k n m
   unify_ k (Cat _ m1 b1) (Cat _ m2 b2) = do
     s <- unify_ k m1 m2
     (s <>) <$> unify_ k (rep s b1) (rep s b2)
   unify_ _ _ _ = fail "Incompatible domains"
 
-instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) Symbol m where
+instance (MonadFreshNames m) => Unify (Cases Symbol (SoP Symbol)) Symbol m where
   unify_ k (Cases cs1) (Cases cs2) = do
     s <- unifies_ k (zip (map fst xs) (map fst ys))
     s2 <- unifies_ k (zip (map (rep s . snd) xs) (map (rep s . snd) ys))
@@ -135,7 +137,7 @@ instance MonadFreshNames m => Unify (Cases Symbol (SoP Symbol)) Symbol m where
       ys = NE.toList cs2
 
 -- XXX we require that index function quantifiers (indexing variables) are unique!
-instance MonadFreshNames m => Unify IndexFn Symbol m where
+instance (MonadFreshNames m) => Unify IndexFn Symbol m where
   unify_ k (IndexFn Empty body1) (IndexFn Empty body2) =
     unify_ k body1 body2
   unify_ k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j dom2) body2) = do
@@ -150,9 +152,12 @@ instance MonadFreshNames m => Unify IndexFn Symbol m where
 -- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
 subst :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
 subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
-  debugM ("🎭 substitute\n"
-          <> prettyBinding x for
-          <> "\ninto\n" <> prettyString into)
+  debugM
+    ( "🎭 substitute\n"
+        <> prettyBinding x for
+        <> "\ninto\n"
+        <> prettyString into
+    )
   i' <- sym2SoP . Var <$> newNameFromString "i"
   for' <- rename for
   into' <- rename into
@@ -165,20 +170,22 @@ subst' x (IndexFn Empty xs) (IndexFn iter_y ys) =
   pure $
     IndexFn
       iter_y
-      (cases $ do
-        (xcond, xval) <- casesToList xs
-        (ycond, yval) <- casesToList ys
-        pure $ repCase (mkSub x xval) (ycond :&& xcond, yval))
-subst' f (IndexFn (Forall _ (Iota n)) xs) (IndexFn (Forall i (Iota n')) ys)
-  | n == n' =
-    pure $
-      IndexFn
-        (Forall i (Iota n))
-        (cases $ do
+      ( cases $ do
           (xcond, xval) <- casesToList xs
           (ycond, yval) <- casesToList ys
-          let app = apply i (mkSub f xval)
-          pure (sop2Symbol (app ycond) :&& sop2Symbol (app xcond), mapSymSoP app yval))
+          pure $ repCase (mkSub x xval) (ycond :&& xcond, yval)
+      )
+subst' f (IndexFn (Forall _ (Iota n)) xs) (IndexFn (Forall i (Iota n')) ys)
+  | n == n' =
+      pure $
+        IndexFn
+          (Forall i (Iota n))
+          ( cases $ do
+              (xcond, xval) <- casesToList xs
+              (ycond, yval) <- casesToList ys
+              let app = apply i (mkSub f xval)
+              pure (sop2Symbol (app ycond) :&& sop2Symbol (app xcond), mapSymSoP app yval)
+          )
 subst' _ _ _ = undefined
 
 apply :: VName -> Substitution Symbol -> Symbol -> SoP Symbol
@@ -186,9 +193,3 @@ apply i s symbol = case symbol of
   Hole _ -> error "Apply on Hole."
   Idx (Var vn) j -> rep (mkSub i j) $ rep s (Var vn)
   _ -> rep s symbol
-
--- rimelig sikker på refactor var en fejl;
--- 1. [x] ikke lav index fn sub som unification
--- 2. [x] fjern subCases subDomain fra Substitution
--- 3. [x] rul refactor tilbage som nødvendig (tror ikke nogen ændringer nødvendige)
--- 4. [ ] definer compatible domains? eller lav cases i subst'
