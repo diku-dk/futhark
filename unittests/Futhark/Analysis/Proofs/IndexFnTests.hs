@@ -5,7 +5,7 @@ import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
-import Futhark.Analysis.Proofs.Unify (unify)
+import Futhark.Analysis.Proofs.Unify (renameSame, unify)
 import Futhark.Compiler.CLI (Imports, fileProg, readProgramOrDie)
 import Futhark.MonadFreshNames (newNameFromString)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.))
@@ -66,7 +66,7 @@ tests =
                   cases
                     [ ( Bool True,
                         sym2SoP $
-                          LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole i)))
+                          LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j)))
                       )
                     ]
               }
@@ -99,6 +99,8 @@ tests =
       -- Evaluate expectedPat first for any side effects like debug toggling.
       pat <- expectedPat
       let expected = pat (x, y, z)
+      debugM (prettyString expected)
+      -- expected <- rename expected
       indexfn <- mkIndexFnValBind vb
       case indexfn of
         Nothing -> pure Nothing
@@ -106,12 +108,14 @@ tests =
           s <- unify expected actual
           case s of
             Nothing -> pure $ Just (actual, expected)
-            Just s' -> subIndexFn s' expected >>= \e -> pure $ Just (actual, e)
+            Just s' -> do
+              e <- subIndexFn s' expected
+              Just <$> renameSame actual e
 
     sHole = sym2SoP . Hole
 
     actual @??= expected =
       let msg =
             docString $
-              "expected:" <+> pretty expected <> line <> "but got:" <+> pretty actual
+              "expected:" <+> pretty expected <> line <> "but got: " <+> pretty actual
        in assertEqual msg expected actual

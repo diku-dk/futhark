@@ -31,7 +31,10 @@ instance FreeVariables Symbol where
 instance Renameable Symbol where
   rename_ tau sym = case sym of
     Var x -> Var <$> rename_ tau x
-    Hole x -> Hole <$> rename_ tau x -- The Hole might be a quantifier index.
+    Hole x -> do
+      x' <- rename_ tau x
+      -- The Hole might be a quantifier index.
+      pure $ if x' /= x then Var x' else Hole x'
     Idx xs i -> Idx <$> rename_ tau xs <*> rename_ tau i
     LinComb xn lb ub e -> do
       xm <- newNameFromString "i"

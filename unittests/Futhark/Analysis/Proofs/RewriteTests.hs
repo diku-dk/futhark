@@ -47,10 +47,16 @@ tests =
               rewrite (Idx (Var x) (sVar y .-. int 1337) ~+~ LinComb w (sVar y .-. int 1336) (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (sVar y .-. int 1337) (sVar z) (Idx (Var x) (sVar w))),
+      testCase "Extend sum lower bound (4)" $
+        run
+          ( \(x, _, z, w, _, _, _, _) ->
+              rewrite (Idx (Var x) (int 0) ~+~ LinComb w (int 1) (sVar z) (Idx (Var x) (sVar w)))
+          )
+          @??= sym2SoP (LinComb w (int 0) (sVar z) (Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound (indicator)" $
         run
           ( \(x, _, z, w, _, _, _, _) ->
-              rewrite =<< debugOn (Indicator (Idx (Var x) (int 0)) ~+~ LinComb w (int 1) (sVar z) (Indicator (Idx (Var x) (sVar w))))
+              rewrite =<< debugOn (Indicator (Idx (Var x) (int 0)) ~+~ LinComb w (int 1) (sVar z) (Indicator $ Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (int 0) (sVar z) (Indicator $ Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound twice" $
@@ -71,6 +77,12 @@ tests =
               rewrite (Idx (Var x) (sVar z .+. int 1) ~+~ LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (sVar y) (sVar z .+. int 1) (Idx (Var x) (sVar w))),
+      testCase "Extend upper lower bound (indicator)" $
+        run
+          ( \(x, _, z, w, _, _, _, _) ->
+              rewrite (Indicator (Idx (Var x) (sVar z .+. int 1)) ~+~ LinComb w (int 0) (sVar z) (Indicator $ Idx (Var x) (sVar w)))
+          )
+          @??= sym2SoP (LinComb w (int 0) (sVar z .+. int 1) (Indicator $ Idx (Var x) (sVar w))),
       testCase "Merge sum-subtraction (no match)" $
         -- Should fail because we cannot show b <= c without bounds on these variables general.
         run
@@ -345,8 +357,7 @@ tests =
 
     -- Less fragile renaming.
     e @??= e' =
-      let actual = renamed e
-          expected = renamed e'
+      let (actual, expected) = runTest $ renameSame e e'
        in assertEqual
             ( "expected: "
                 <> prettyString expected
@@ -355,6 +366,3 @@ tests =
             )
             expected
             actual
-    renamed x = runTest $ do
-      putNameSource (newNameSource (-10000))
-      rename x

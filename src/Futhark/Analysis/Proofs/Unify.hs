@@ -31,6 +31,16 @@ class Renameable u where
   rename :: (MonadFreshNames m) => u -> m u
   rename = rename_ mempty
 
+-- Rename bound variables to have identical names when `a` and `b`
+-- are syntactically equivalent.
+renameSame :: (MonadFreshNames m, Renameable a, Renameable b) => a -> b -> m (a, b)
+renameSame a b = do
+  vns <- getNameSource
+  a' <- rename a
+  putNameSource vns
+  b' <- rename b
+  pure (a', b')
+
 -- type Substitution u = M.Map VName (SoP u)
 newtype Substitution u = Substitution
   { sop :: M.Map VName (SoP u)
@@ -78,10 +88,7 @@ class (MonadFreshNames m, Renameable v) => Unify v u m where
     -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
     --                  = {rename(e) ~= rename(e')}.
     k <- newNameFromString "k"
-    c <- getNameSource
-    a <- rename e
-    putNameSource c
-    b <- rename e'
+    (a, b) <- renameSame e e'
     unify_ k a b
 
 instance Renameable VName where

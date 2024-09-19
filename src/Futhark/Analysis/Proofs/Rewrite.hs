@@ -8,10 +8,10 @@ import Futhark.Analysis.Proofs.Refine (refineSymbol)
 import Futhark.Analysis.Proofs.Rule (Rule (..))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), applyLinCombRule, normalizeSymbol)
 import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify (Hole, Replaceable, Substitution, SubstitutionBuilder (..), Unify (unify), sub, unifies)
+import Futhark.Analysis.Proofs.Unify (Hole, Replaceable, Substitution, SubstitutionBuilder (..), Unify (unify), rep, sub, unifies)
 import Futhark.Analysis.Proofs.Util (partitions)
 import Futhark.MonadFreshNames
-import Futhark.SoP.FourierMotzkin (($<=$))
+import Futhark.SoP.FourierMotzkin (($<=$), ($==$))
 import Futhark.SoP.Monad (substEquivs)
 import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sym2SoP, term2SoP, (.+.), (.-.))
 import Language.Futhark (VName)
@@ -154,50 +154,59 @@ rulesSoP = do
   h1 <- newVName "h"
   h2 <- newVName "h"
   h3 <- newVName "h"
+  h4 <- newVName "h"
   x1 <- newVName "x"
   y1 <- newVName "y"
   pure
     [ Rule
-        { -- NOTE that this will also match, e.g.,
-          --    x[a - 1337] + LinComb i (a - 1336) b x[i]
-          -- since this unifies with
-          --    x[h1] + LinComb i (h1+1) b x[i]
-          -- by substituting h1 for a - 1337.
-          name = "Extend sum lower bound",
+        { name = "Extend sum lower bound",
           from =
-            LinComb i (hole h1 .+. int 1) (hole h2) (Idx (Hole h3) (sVar i))
-              ~+~ Idx (Hole h3) (hole h1),
+            LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
+              ~+~ Idx (Hole h3) (hole h4),
           to = \s ->
             sub s $
-              LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)),
-          sideCondition = vacuous
+              LinComb i (hole h4) (hole h2) (Idx (Hole h3) (sVar i)),
+          sideCondition = \s -> do
+            let lb = rep s (hole h1)
+            let idx = rep s (hole h4)
+            lb $==$ (idx .+. int 1)
         },
       Rule
-        { -- NOTE This matches similarly to "Extend sum lower bound".
-          name = "Extend sum upper bound",
+        { name = "Extend sum upper bound",
           from =
-            LinComb i (hole h1) (hole h2 .-. int 1) (Idx (Hole h3) (sVar i))
-              ~+~ Idx (Hole h3) (hole h2),
-          to = \s -> sub s $ LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)),
-          sideCondition = vacuous
+            LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
+              ~+~ Idx (Hole h3) (hole h4),
+          to = \s -> sub s $ LinComb i (hole h1) (hole h4) (Idx (Hole h3) (sVar i)),
+          sideCondition = \s -> do
+            let ub = rep s (hole h2)
+            let idx = rep s (hole h4)
+            ub $==$ (idx .-. int 1)
         },
+      -- TODO Change indicator to be a property in order to not duplicate rules
+      -- or have to introduce context holes?
       Rule
         { name = "Extend sum lower bound (indicator)",
           from =
-            LinComb i (hole h1 .+. int 1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i))
-              ~+~ Indicator (Idx (Hole h3) (hole h1)),
+            LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i))
+              ~+~ Indicator (Idx (Hole h3) (hole h4)),
           to = \s ->
             sub s $
-              LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)),
-          sideCondition = vacuous
+              LinComb i (hole h4) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)),
+          sideCondition = \s -> do
+            let lb = rep s (hole h1)
+            let idx = rep s (hole h4)
+            lb $==$ (idx .+. int 1)
         },
       Rule
         { name = "Extend sum upper bound (indicator)",
           from =
-            LinComb i (hole h1) (hole h2 .-. int 1) (Indicator $ Idx (Hole h3) (sVar i))
-              ~+~ Indicator (Idx (Hole h3) (hole h2)),
-          to = \s -> sub s $ LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)),
-          sideCondition = vacuous
+            LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i))
+              ~+~ Indicator (Idx (Hole h3) (hole h4)),
+          to = \s -> sub s $ LinComb i (hole h1) (hole h4) (Indicator $ Idx (Hole h3) (sVar i)),
+          sideCondition = \s -> do
+            let ub = rep s (hole h2)
+            let idx = rep s (hole h4)
+            ub $==$ (idx .-. int 1)
         },
       Rule
         { name = "Merge sum-subtractation",
