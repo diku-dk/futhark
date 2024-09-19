@@ -1,15 +1,14 @@
 module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad (foldM, msum, (<=<))
-import Data.Functor ((<&>))
 import Data.List (subsequences, (\\))
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, normalizeIndexFn)
 import Futhark.Analysis.Proofs.IndexFnPlus (repVName, subIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
-import Futhark.Analysis.Proofs.Rule
+import Futhark.Analysis.Proofs.Rule (Rule (..))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), applyLinCombRule, normalizeSymbol)
 import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify
+import Futhark.Analysis.Proofs.Unify (Hole, Replaceable, Substitution, SubstitutionBuilder (..), Unify (unify), sub, unifies)
 import Futhark.Analysis.Proofs.Util (partitions)
 import Futhark.MonadFreshNames
 import Futhark.SoP.FourierMotzkin (($<=$))
@@ -76,7 +75,6 @@ instance Rewritable Symbol IndexFnM where
               rulesSymbol
                 >>= foldM (flip match_) (normalizeSymbol x)
                 >>= refineSymbol . normalizeSymbol
-                <&> normalizeSymbol
           }
 
       match_ rule symbol = do
@@ -92,7 +90,7 @@ instance Rewritable Symbol IndexFnM where
 instance Rewritable IndexFn IndexFnM where
   rewrite =
     converge $
-      astMap m <=< \indexfn -> rulesIndexFn >>= foldM (flip match_) indexfn
+      astMap m <=< \indexfn -> rulesIndexFn >>= foldM (flip match_) indexfn >>= normalizeIndexFn
     where
       m :: ASTMapper Symbol IndexFnM =
         ASTMapper
@@ -181,6 +179,24 @@ rulesSoP = do
             LinComb i (hole h1) (hole h2 .-. int 1) (Idx (Hole h3) (sVar i))
               ~+~ Idx (Hole h3) (hole h2),
           to = \s -> sub s $ LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)),
+          sideCondition = vacuous
+        },
+      Rule
+        { name = "Extend sum lower bound (indicator)",
+          from =
+            LinComb i (hole h1 .+. int 1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i))
+              ~+~ Indicator (Idx (Hole h3) (hole h1)),
+          to = \s ->
+            sub s $
+              LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)),
+          sideCondition = vacuous
+        },
+      Rule
+        { name = "Extend sum upper bound (indicator)",
+          from =
+            LinComb i (hole h1) (hole h2 .-. int 1) (Indicator $ Idx (Hole h3) (sVar i))
+              ~+~ Indicator (Idx (Hole h3) (hole h2)),
+          to = \s -> sub s $ LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)),
           sideCondition = vacuous
         },
       Rule

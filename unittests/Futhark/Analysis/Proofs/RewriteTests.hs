@@ -4,7 +4,6 @@
 module Futhark.Analysis.Proofs.RewriteTests (tests) where
 
 import Data.Set qualified as S
-import Debug.Trace (trace)
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Rewrite
 import Futhark.Analysis.Proofs.Symbol
@@ -48,6 +47,12 @@ tests =
               rewrite (Idx (Var x) (sVar y .-. int 1337) ~+~ LinComb w (sVar y .-. int 1336) (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (sVar y .-. int 1337) (sVar z) (Idx (Var x) (sVar w))),
+      testCase "Extend sum lower bound (indicator)" $
+        run
+          ( \(x, _, z, w, _, _, _, _) ->
+              rewrite =<< debugOn (Indicator (Idx (Var x) (int 0)) ~+~ LinComb w (int 1) (sVar z) (Indicator (Idx (Var x) (sVar w))))
+          )
+          @??= sym2SoP (LinComb w (int 0) (sVar z) (Indicator $ Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound twice" $
         run
           ( \(x, y, z, w, _, _, _, _) ->

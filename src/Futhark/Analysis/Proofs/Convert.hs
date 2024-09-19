@@ -258,6 +258,30 @@ forward (E.AppExp (E.Apply f args _) _)
             -- XXX support only 1D arrays for now.
             rewrite $ IndexFn (Forall i (Iota m)) body
         _ -> undefined -- TODO See iota comment.
+  -- Scan with basic operator.
+  | Just "scan" <- getFun f,
+    [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
+      IndexFn iter_xs xs <- forward xs'
+      let i = case iter_xs of
+            (Forall i' _) -> i'
+            Empty -> error "scan array is empty?"
+      -- TODO should verify that _ne matches op
+      op <-
+        case E.baseString vn of
+          "+" -> pure (~+~)
+          "-" -> pure (~-~)
+          "*" -> pure (~*~)
+          _ -> error ("scan not implemented for bin op: " <> show vn)
+      let base_case = sym2SoP (Var i) :== int2SoP 0
+      x <- newNameFromString "a"
+      let y = IndexFn
+                iter_xs
+                (cases
+                  [(base_case, sym2SoP (Var x)), (Not base_case, Recurrence `op` Var x)])
+      -- tell ["Using scan rule ", toLaTeX y]
+      subst x (IndexFn iter_xs xs) y
+        >>= rewrite
+
 forward e = error $ "forward on " <> show e
 
 substParams :: IndexFn -> (E.VName, IndexFn) -> IndexFnM IndexFn

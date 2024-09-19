@@ -56,6 +56,28 @@ tests =
               { iterator = Forall i (Iota (sHole x)),
                 body = cases [(Bool True, int2SoP 2 .*. sHole x)]
               }
+        ),
+      mkTest
+        "tests/indexfn/scan.fut"
+        ( newNameFromString "h" >>= \j -> pure $ \(i, n, xs) ->
+            IndexFn
+              { iterator = Forall i (Iota (sHole n)),
+                body =
+                  cases
+                    [ ( Bool True,
+                        sym2SoP $
+                          LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole i)))
+                      )
+                    ]
+              }
+        ),
+      mkTest
+        "tests/indexfn/part2indices.fut"
+        ( pure $ \(i, _, x) ->
+            IndexFn
+              { iterator = Forall i (Iota (sHole x)),
+                body = cases [(Bool True, int2SoP 2 .*. sHole x)]
+              }
         )
     ]
   where
