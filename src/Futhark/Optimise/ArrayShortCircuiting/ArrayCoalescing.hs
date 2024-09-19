@@ -147,9 +147,10 @@ mkCoalsTabProg ::
   ComputeScalarTableOnOp rep ->
   Prog (Aliases rep) ->
   m (M.Map Name CoalsTab)
-mkCoalsTabProg (_, lutab_prog) r computeScalarOnOp =
-  fmap M.fromList . mapM onFun . progFuns
+mkCoalsTabProg (_, lutab_prog) r computeScalarOnOp prog =
+  fmap M.fromList . mapM onFun . progFuns $ prog
   where
+    consts_scope = scopeOf (progConsts prog)
     onFun fun@(FunDef _ _ fname _ fpars body) = do
       -- First compute last-use information
       let unique_mems = getUniqueMemFParam fpars
@@ -157,13 +158,17 @@ mkCoalsTabProg (_, lutab_prog) r computeScalarOnOp =
           scalar_table =
             runReader
               ( concatMapM
-                  (computeScalarTable $ scopeOf fun <> scopeOf (bodyStms body))
+                  ( computeScalarTable $
+                      consts_scope
+                        <> scopeOf fun
+                        <> scopeOf (bodyStms body)
+                  )
                   (stmsToList $ bodyStms body)
               )
               computeScalarOnOp
           topenv =
             emptyTopdownEnv
-              { scope = scopeOfFParams fpars,
+              { scope = consts_scope <> scopeOfFParams fpars,
                 alloc = unique_mems,
                 scalarTable = scalar_table,
                 nonNegatives = foldMap paramSizes fpars

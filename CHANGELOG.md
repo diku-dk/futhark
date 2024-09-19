@@ -9,9 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* `futhark script` now supports an `-f` option.
-
-* `futhark script` now supports the builtin procedure `$store`.
+* Trailing commas are now allowed for arrays, records, and tuples in
+  the textual value format and in FutharkScript.
 
 ### Removed
 
@@ -19,10 +18,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Some instances of invalid copy removal. (Again.)
+
+## [0.25.22]
+
+### Added
+
+* `futhark script` now supports an `-f` option.
+
+* `futhark script` now supports the builtin procedure `$store`.
+
+### Fixed
+
 * An error in tuning file validation.
 
 * Constant folding for loops that produce floating point results could
   result in different numerical behaviour.
+
+* Compiler crash in memory short circuiting (#2176).
 
 ## [0.25.21]
 
