@@ -78,13 +78,13 @@ runAlgM (AlgM m) env vns = getRes $ runRWS m () s
     getRes (x, env, _) = (x, env)
     s = VEnv vns env
 
-f :: (SoP Symbol >= 0) -> AlgM e Bool
-f sop = do
-  modifyEnv $ undefined
-  undefined
+-- f :: (SoP Symbol >= 0) -> AlgM e Bool
+-- f sop = do
+--   modifyEnv $ undefined
+--   undefined
 
-runF :: (SoP Symbol >= 0) -> AlgEnv Symbol e Property -> VNameSource -> (Bool, VEnv e)
-runF sop env vns= runAlgM (f sop) env vns 
+-- runF :: (SoP Symbol >= 0) -> AlgEnv Symbol e Property -> VNameSource -> (Bool, VEnv e)
+-- runF sop env vns= runAlgM (f sop) env vns
 
 rules :: RuleBook (SoP Symbol) Symbol (AlgM e)
 rules = []
