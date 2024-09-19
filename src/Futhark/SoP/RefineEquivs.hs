@@ -23,14 +23,14 @@ import Futhark.SoP.SoP
 import Futhark.SoP.Util
 import Futhark.Util.Pretty
 
-addEq :: forall u e m. (ToSoP u e, MonadSoP u e m) => u -> SoP u -> m ()
+addEq :: forall u e p m. (ToSoP u e, MonadSoP u e p m) => u -> SoP u -> m ()
 addEq sym sop = do
   -- cands <- mkEquivCands (/= sym) $ sop .-. sym2SoP sym
   addLegalCands $ S.singleton $ EquivCand sym sop
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe = 0@
 --   for each 'PrimExp' in the set.
-addEqZeros :: forall u e m. (ToSoP u e, MonadSoP u e m) => Set (SoP u == 0) -> m (Set (SoP u >= 0))
+addEqZeros :: forall u e p m. (ToSoP u e, MonadSoP u e p m) => Set (SoP u == 0) -> m (Set (SoP u >= 0))
 addEqZeros sops = do
   -- Make equivalence candidates along with any extra constraints.
   (extra_inEqZs :: Set (SoP u >= 0), equiv_cands) <-
@@ -50,10 +50,10 @@ data EquivCand u = EquivCand
   }
   deriving (Eq, Show, Ord)
 
-instance Ord u => Free u (EquivCand u) where
+instance (Ord u) => Free u (EquivCand u) where
   free = free . equivCandSoP
 
-instance Ord u => Substitute u (SoP u) (EquivCand u) where
+instance (Ord u) => Substitute u (SoP u) (EquivCand u) where
   substitute subst (EquivCand sym sop) =
     EquivCand sym $ substitute subst sop
 
@@ -67,7 +67,7 @@ instance Ord u => Substitute u (SoP u) (EquivCand u) where
 --   ToDo: try to give common factor first, e.g.,
 --         nx - nbq - n = 0 => n*(x-bq-1) = 0 => x = bq+1,
 --         if we can prove that n != 0
-mkEquivCands :: MonadSoP u e m => (u -> Bool) -> SoP u -> m (Set (EquivCand u))
+mkEquivCands :: (MonadSoP u e p m) => (u -> Bool) -> SoP u -> m (Set (EquivCand u))
 mkEquivCands p sop =
   pure (getTerms sop)
     >>= M.foldrWithKey mkEquivCand (pure mempty)
@@ -110,7 +110,7 @@ mkEquivCands p sop =
 --        * Possibly add the constraints @0 <= sop <= pe2 - 1@.
 --
 --   2: TODO: try to give common factors and get simpler.
-refineEquivCand :: forall u e m. (ToSoP u e, MonadSoP u e m) => EquivCand u -> m (Set (SoP u >= 0), EquivCand u)
+refineEquivCand :: forall u e p m. (ToSoP u e, MonadSoP u e p m) => EquivCand u -> m (Set (SoP u >= 0), EquivCand u)
 -- refineEquivCand cand@(EquivCand sym sop)
 --  | justPositive sop = pure (S.singleton $ sym2SoP sym, cand)
 refineEquivCand cand@(EquivCand sym sop) = do
@@ -148,7 +148,7 @@ refineEquivCand cand@(EquivCand sym sop) = do
 --     creation/refinement of the mapping.
 --   * @cands@: set of equivalence candidates.
 addEquiv2CandSet ::
-  (ToSoP u e, MonadSoP u e m) =>
+  (ToSoP u e, MonadSoP u e p m) =>
   SoP u == 0 ->
   m (Set (SoP u >= 0), Set (EquivCand u))
 addEquiv2CandSet sop = do
@@ -157,7 +157,7 @@ addEquiv2CandSet sop = do
   pure (mconcat ineqss, S.fromList cands')
 
 -- | Add legal equivalence candidates to the environment.
-addLegalCands :: MonadSoP u e m => Set (EquivCand u) -> m ()
+addLegalCands :: (MonadSoP u e p m) => Set (EquivCand u) -> m ()
 addLegalCands cand_set
   | S.null cand_set = pure ()
 addLegalCands cand_set = do

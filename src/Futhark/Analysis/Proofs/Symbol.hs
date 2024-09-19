@@ -1,21 +1,23 @@
-module Futhark.Analysis.Proofs.Symbol
-where
+module Futhark.Analysis.Proofs.Symbol where
 
+import Data.Map.Strict qualified as M
+import Data.Set qualified as S
+import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
+import Futhark.MonadFreshNames
+import Futhark.SoP.SoP (SoP, int2SoP, justSym, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.))
+import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName)
-import Futhark.SoP.SoP (SoP, sym2SoP, justSym, sopToLists, scaleSoP, (.-.), (.+.), int2SoP)
-import Futhark.Util.Pretty (Pretty, pretty, parens, brackets, (<+>), enclose)
-import Futhark.Analysis.Proofs.Util (prettyName, prettyHole)
 
-data Symbol =
-    Var VName
+data Symbol
+  = Var VName
   | Hole VName
   | Idx
-      Symbol         -- array
-      (SoP Symbol)   -- index
+      Symbol -- array
+      (SoP Symbol) -- index
   | LinComb
-      VName          -- binder
-      (SoP Symbol)   -- lower bound
-      (SoP Symbol)   -- upper bound
+      VName -- binder
+      (SoP Symbol) -- lower bound
+      (SoP Symbol) -- upper bound
       Symbol
   | Indicator Symbol
   | Bool Bool
@@ -31,7 +33,10 @@ data Symbol =
   | Recurrence
   deriving (Show, Eq)
 
-sop2Symbol :: Ord u => SoP u -> u
+data Property
+  deriving (Show, Eq, Ord)
+
+sop2Symbol :: (Ord u) => SoP u -> u
 sop2Symbol sop
   | Just t <- justSym sop = t
   | otherwise = error "sop2Symbol on something that is not a symbol"
@@ -51,26 +56,26 @@ mkLinComb _ _ _ _ =
 --      Use a Boolean representation that is normalized by construction.
 normalizeSymbol :: Symbol -> Symbol
 normalizeSymbol symbol = case toNNF symbol of
-    (Not x) -> toNNF (Not x)
-    (x :&& y) ->
-      case (x, y) of
-        (Bool True, b) -> b                       -- Identity.
-        (a, Bool True) -> a
-        (Bool False, _) -> Bool False             -- Annihilation.
-        (_, Bool False) -> Bool False
-        (a, b) | a == b -> a                      -- Idempotence.
-        (a, b) | a == toNNF (Not b) -> Bool False -- A contradiction.
-        (a, b) -> a :&& b
-    (x :|| y) -> do
-      case (x, y) of
-        (Bool False, b) -> b                      -- Identity.
-        (a, Bool False) -> a
-        (Bool True, _) -> Bool True               -- Annihilation.
-        (_, Bool True) -> Bool True
-        (a, b) | a == b -> a                      -- Idempotence.
-        (a, b) | a == toNNF (Not b) -> Bool True  -- A tautology.
-        (a, b) -> a :|| b
-    v -> v
+  (Not x) -> toNNF (Not x)
+  (x :&& y) ->
+    case (x, y) of
+      (Bool True, b) -> b -- Identity.
+      (a, Bool True) -> a
+      (Bool False, _) -> Bool False -- Annihilation.
+      (_, Bool False) -> Bool False
+      (a, b) | a == b -> a -- Idempotence.
+      (a, b) | a == toNNF (Not b) -> Bool False -- A contradiction.
+      (a, b) -> a :&& b
+  (x :|| y) -> do
+    case (x, y) of
+      (Bool False, b) -> b -- Identity.
+      (a, Bool False) -> a
+      (Bool True, _) -> Bool True -- Annihilation.
+      (_, Bool True) -> Bool True
+      (a, b) | a == b -> a -- Idempotence.
+      (a, b) | a == toNNF (Not b) -> Bool True -- A tautology.
+      (a, b) -> a :|| b
+  v -> v
   where
     toNNF (Not (Not x)) = x
     toNNF (Not (Bool True)) = Bool False
@@ -235,9 +240,11 @@ instance Pretty Symbol where
     (Idx x i) -> autoParens x <> brackets (pretty i)
     (LinComb i lb ub e) ->
       "∑"
-        <> prettyName i <> "∈"
+        <> prettyName i
+        <> "∈"
         <> parens (pretty lb <+> ".." <+> pretty ub)
-        <> " " <> autoParens e
+        <> " "
+        <> autoParens e
     Indicator p -> iversonbrackets (pretty p)
     Bool x -> pretty x
     Not x -> "¬" <> autoParens x

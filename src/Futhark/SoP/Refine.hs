@@ -24,7 +24,7 @@ import Futhark.SoP.SoP
 import Futhark.SoP.Util
 import Futhark.Util.Pretty
 
-constraintToSoP :: (Ord u, MonadSoP u e m) => Rel u -> m (Set (SoP u == 0), Set (SoP u >= 0))
+constraintToSoP :: (Ord u, MonadSoP u e p m) => Rel u -> m (Set (SoP u == 0), Set (SoP u >= 0))
 constraintToSoP (x :<=: y) = pure (mempty, S.singleton $ y .-. x)
 constraintToSoP (x :<: y) = pure (mempty, S.singleton $ y .-. (x .+. int2SoP 1))
 constraintToSoP (x :>: y) = pure (mempty, S.singleton $ x .-. (y .+. int2SoP 1))
@@ -33,13 +33,13 @@ constraintToSoP (x :==: y) = pure (S.singleton $ x .-. y, mempty)
 constraintToSoP (x :&&: y) = (<>) <$> constraintToSoP x <*> constraintToSoP y
 constraintToSoP c = error $ "constraintToSoP: " <> prettyString c
 
-addRel :: (ToSoP u e, MonadSoP u e m) => Rel u -> m ()
+addRel :: (ToSoP u e, MonadSoP u e p m) => Rel u -> m ()
 addRel c = do
   (eqZs, ineqZs) <- constraintToSoP c
   extra_ineqZs <- addEqZeros eqZs
   addIneqZeros $ ineqZs <> extra_ineqZs
 
-addRels :: (FromSoP u e, ToSoP u e, MonadSoP u e m) => Set (Rel u) -> m ()
+addRels :: (FromSoP u e, ToSoP u e, MonadSoP u e p m) => Set (Rel u) -> m ()
 addRels cs = do
   -- Split candidates into equality and inequality sets.
   (eqZs, ineqZs) <- mconcat <$> mapM constraintToSoP (S.toList cs)
