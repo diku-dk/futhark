@@ -10,7 +10,7 @@ import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (addEquiv, addRange)
-import Futhark.SoP.SoP (int2SoP, sym2SoP, (.+.), (.-.))
+import Futhark.SoP.SoP (int2SoP, sym2SoP, (.+.), (.-.), (.*.))
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (prettyString)
 import Test.Tasty
@@ -56,7 +56,7 @@ tests =
       testCase "Extend sum lower bound (indicator)" $
         run
           ( \(x, _, z, w, _, _, _, _) ->
-              rewrite =<< debugOn (Indicator (Idx (Var x) (int 0)) ~+~ LinComb w (int 1) (sVar z) (Indicator $ Idx (Var x) (sVar w)))
+              rewrite (Indicator (Idx (Var x) (int 0)) ~+~ LinComb w (int 1) (sVar z) (Indicator $ Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (int 0) (sVar z) (Indicator $ Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound twice" $
@@ -315,9 +315,9 @@ tests =
                      body = cases [(Bool True, Var a ~+~ LinComb c (int 1) (sVar x) (Idx (Var b) (sVar c)))]
                    }
                ),
-      testCase "Match scan" $
+      testCase "Match scan (1)" $
         run
-          ( \(x, y, _, _, a, b, c, _) ->
+          ( \(x, y, _, _, _, b, _, _) ->
               rewrite
                 ( IndexFn
                     { iterator = Forall x (Iota (sVar y)),
@@ -332,6 +332,63 @@ tests =
           @??= ( IndexFn
                    { iterator = Forall x (Iota (sVar y)),
                      body = cases [(Bool True, sym2SoP $ LinComb c (int 0) (sVar x) (Idx (Var b) (sVar c)))]
+                   }
+               ),
+      testCase "Match scan (2)" $
+        run
+          ( \(x, y, _, _, _, b, _, _) ->
+              rewrite
+                ( IndexFn
+                    { iterator = Forall x (Iota (sVar y)),
+                      body =
+                        cases
+                          [ (sVar x :== int 0, int2SoP (-1) .*. sym2SoP (Idx (Var b) (sVar x))),
+                            (sVar x :/= int 0, Recurrence ~+~ Idx (Var b) (sVar x))
+                          ]
+                    }
+                )
+          )
+          @??= ( IndexFn
+                   { iterator = Forall x (Iota (sVar y)),
+                     body = cases [(Bool True, int2SoP (-1) .*. sym2SoP (Idx (Var b) (int 0)) .+. sym2SoP (LinComb c (int 1) (sVar x) (Idx (Var b) (sVar c))))]
+                   }
+               ),
+      testCase "Match scan (3)" $
+        run
+          ( \(x, y, _, _, _, b, _, _) ->
+              rewrite
+                ( IndexFn
+                    { iterator = Forall x (Iota (sVar y)),
+                      body =
+                        cases
+                          [ (sVar x :== int 0, int2SoP (-1) .*. sym2SoP (Idx (Var b) (sVar x))),
+                            (sVar x :/= int 0, sym2SoP Recurrence .+. int2SoP (-1) .*. sym2SoP (Idx (Var b) (sVar x)))
+                          ]
+                    }
+                )
+          )
+          @??= ( IndexFn
+                   { iterator = Forall x (Iota (sVar y)),
+                     body = cases [(Bool True, int2SoP (-1) .*. sym2SoP (LinComb c (int 0) (sVar x) (Idx (Var b) (sVar c))))]
+                   }
+               ),
+      testCase "Match scan (4)" $
+        run
+          ( \(x, y, _, _, _, b, _, _) ->
+              rewrite
+                ( IndexFn
+                    { iterator = Forall x (Iota (sVar y)),
+                      body =
+                        cases
+                          [ (sVar x :== int 0, sym2SoP $ Idx (Var b) (sVar x)),
+                            (sVar x :/= int 0, sym2SoP Recurrence .+. int2SoP (-1) .*. sym2SoP (Idx (Var b) (sVar x)))
+                          ]
+                    }
+                )
+          )
+          @??= ( IndexFn
+                   { iterator = Forall x (Iota (sVar y)),
+                     body = cases [(Bool True, sym2SoP (Idx (Var b) (int 0)) .+. int2SoP (-1) .*. sym2SoP (LinComb c (int 1) (sVar x) (Idx (Var b) (sVar c))))]
                    }
                )
     ]

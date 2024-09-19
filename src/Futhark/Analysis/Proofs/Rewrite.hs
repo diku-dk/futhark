@@ -13,7 +13,7 @@ import Futhark.Analysis.Proofs.Util (partitions)
 import Futhark.MonadFreshNames
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$))
 import Futhark.SoP.Monad (substEquivs)
-import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sym2SoP, term2SoP, (.+.), (.-.))
+import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sym2SoP, term2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
 
 vacuous :: (Monad m) => b -> m Bool
@@ -148,6 +148,9 @@ combine rule sop
     xs = sopToList (from rule)
     ys = sopToList sop
 
+scale :: VName -> Symbol -> SoP Symbol
+scale c symbol = hole c .*. sym2SoP symbol
+
 rulesSoP :: IndexFnM [Rule (SoP Symbol) Symbol IndexFnM]
 rulesSoP = do
   i <- newVName "i"
@@ -157,15 +160,17 @@ rulesSoP = do
   h4 <- newVName "h"
   x1 <- newVName "x"
   y1 <- newVName "y"
+  c <- newVName "h"
   pure
     [ Rule
         { name = "Extend sum lower bound",
           from =
-            LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
-              ~+~ Idx (Hole h3) (hole h4),
+            scale c (LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)))
+              .+. scale c (Idx (Hole h3) (hole h4)),
           to = \s ->
             sub s $
-              LinComb i (hole h4) (hole h2) (Idx (Hole h3) (sVar i)),
+              scale c $
+                LinComb i (hole h4) (hole h2) (Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
             let lb = rep s (hole h1)
             let idx = rep s (hole h4)
@@ -174,9 +179,12 @@ rulesSoP = do
       Rule
         { name = "Extend sum upper bound",
           from =
-            LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i))
-              ~+~ Idx (Hole h3) (hole h4),
-          to = \s -> sub s $ LinComb i (hole h1) (hole h4) (Idx (Hole h3) (sVar i)),
+            scale c (LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)))
+              .+. scale c (Idx (Hole h3) (hole h4)),
+          to = \s ->
+            sub s $
+              scale c $
+                LinComb i (hole h1) (hole h4) (Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
             let ub = rep s (hole h2)
             let idx = rep s (hole h4)
@@ -187,11 +195,12 @@ rulesSoP = do
       Rule
         { name = "Extend sum lower bound (indicator)",
           from =
-            LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i))
-              ~+~ Indicator (Idx (Hole h3) (hole h4)),
+            scale c (LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)))
+              .+. scale c (Indicator (Idx (Hole h3) (hole h4))),
           to = \s ->
             sub s $
-              LinComb i (hole h4) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)),
+              scale c $
+                LinComb i (hole h4) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
             let lb = rep s (hole h1)
             let idx = rep s (hole h4)
@@ -200,9 +209,12 @@ rulesSoP = do
       Rule
         { name = "Extend sum upper bound (indicator)",
           from =
-            LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i))
-              ~+~ Indicator (Idx (Hole h3) (hole h4)),
-          to = \s -> sub s $ LinComb i (hole h1) (hole h4) (Indicator $ Idx (Hole h3) (sVar i)),
+            scale c (LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)))
+              .+. scale c (Indicator (Idx (Hole h3) (hole h4))),
+          to = \s ->
+            sub s $
+              scale c $
+                LinComb i (hole h1) (hole h4) (Indicator $ Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
             let ub = rep s (hole h2)
             let idx = rep s (hole h4)
@@ -211,10 +223,12 @@ rulesSoP = do
       Rule
         { name = "Merge sum-subtractation",
           from =
-            LinComb i (hole h1) (hole x1) (Hole h2)
-              ~-~ LinComb i (hole h1) (hole y1) (Hole h2),
+            scale c (LinComb i (hole h1) (hole x1) (Hole h2))
+              .-. scale c (LinComb i (hole h1) (hole y1) (Hole h2)),
           to = \s ->
-            sub s $ LinComb i (hole y1 .+. int 1) (hole x1) (Hole h2),
+            sub s $
+              scale c $
+                LinComb i (hole y1 .+. int 1) (hole x1) (Hole h2),
           sideCondition = \s -> do
             y' <- sub s (Hole y1)
             x' <- sub s (Hole x1)
@@ -350,15 +364,11 @@ rulesIndexFn = do
                       (hole i :/= int 0, Recurrence ~+~ Hole h2)
                     ]
               },
-          -- XXX asdf i think I can get e2 on the correct form by making a LinComb
-          -- and replacing on it? Otherwise extract "mkLinComb" into a visible function.
           to = \s -> do
             let i' = repVName s i
-            e1 <- sub s (Hole h1)
-            e1_b <- sub (mkSub i' (int 0)) e1
-            e2 <- sub s (Hole h2)
             j <- newVName "j"
-            e2_j <- sub (mkSub i' (sVar j)) e2
+            e1_b <- sub s (Hole h1) >>= sub (mkSub i' (int 0))
+            e2_j <- sub s (Hole h2) >>= sub (mkSub i' (sVar j))
             let e2_sum = applyLinCombRule j (int 1) (hole i) e2_j
             subIndexFn s $
               IndexFn

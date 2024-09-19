@@ -8,7 +8,7 @@ import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (renameSame, unify)
 import Futhark.Compiler.CLI (Imports, fileProg, readProgramOrDie)
 import Futhark.MonadFreshNames (newNameFromString)
-import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.))
+import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.-.), (.+.))
 import Futhark.Util.Pretty (docString, line, pretty, prettyString, (<+>))
 import Language.Futhark qualified as E
 import Test.Tasty
@@ -72,13 +72,38 @@ tests =
               }
         ),
       mkTest
-        "tests/indexfn/part2indices.fut"
-        ( pure $ \(i, _, x) ->
+        "tests/indexfn/scan2.fut"
+        ( newNameFromString "h" >>= \j -> debugOn $ \(i, n, xs) ->
             IndexFn
-              { iterator = Forall i (Iota (sHole x)),
-                body = cases [(Bool True, int2SoP 2 .*. sHole x)]
+              { iterator = Forall i (Iota (sHole n)),
+                body =
+                  cases
+                    [ ( Bool True,
+                        int2SoP 1 .+. sHole i .-. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j))))
+                      )
+                    ]
               }
+      --   ),
+      -- mkTest
+      --   "tests/indexfn/part2indices.fut"
+      --   ( newNameFromString "h" >>= \j -> pure $ \(i, n, xs) ->
+      --       let xs_i = Idx (Hole xs) (sHole i)
+      --        in IndexFn
+      --             { iterator = Forall i (Iota (sHole n)),
+      --               body =
+      --                 cases
+      --                   [ ( xs_i,
+      --                       int2SoP (-1) .-. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j))))
+      --                     ),
+      --                     ( Not xs_i,
+      --                       sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (Idx (Hole xs) (sHole j))))
+      --                     )
+      --                   ]
+      --             }
         )
+        -- part2Indices_6168 = ∀i₆₂₀₁ ∈ iota n₆₀₆₈ .
+        --     | conds₆₀₇₀[i₆₂₀₁] ⇒  -1 + ∑⟦conds₆₀₇₀⟧[0 : i₆₂₀₁]
+        --     | ¬(conds₆₀₇₀[i₆₂₀₁]) ⇒  i₆₂₀₁ + ∑⟦conds₆₀₇₀⟧[1 + i₆₂₀₁ : -1 + n₆₀₆₈]
     ]
   where
     -- mkTest :: String -> IndexFn -> TestTree

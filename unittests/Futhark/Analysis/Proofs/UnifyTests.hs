@@ -36,6 +36,12 @@ tests =
               unify (hole x .*. hole y) (name2SoP z .*. name2SoP w)
           )
           @??= x2z_y2w,
+      testCase "Multiply constant" $
+        run
+          ( \(x, y, _, w, _, _, _, _, _) ->
+              unify (hole x .*. hole y) (int2SoP 2 .*. name2SoP w)
+          )
+          @??= (x2z_y2w >>= \s -> pure $ s {sop = M.adjust (const $ int2SoP 2) x $ sop s}),
       testCase "First is scaled" $
         run
           ( \(x, y, z, w, _, _, _, _, _) ->

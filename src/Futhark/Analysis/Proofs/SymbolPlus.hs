@@ -110,10 +110,10 @@ instance (MonadFreshNames m) => Unify Symbol Symbol m where
   --     isVar (Var _) = True
   --     isVar _ = False
   -- 2.
+  unify_ _ _ (Hole _) = error "Holes are not allowed in the second argument!"
   unify_ _ (Var x) t | Var x == t = pure mempty
   -- XXX Are the checks on bound vars redundant with holes?
   unify_ k (Hole x) t
-    | Hole x == t = error "Holes are not allowed in the second argument!"
     | x >= k = fail "2.b.i"
     | x `S.member` fvs || any (>= k) fvs = fail "2.b.ii"
     | otherwise = pure $ addSub x t mempty -- 2.b.iii. Variable elimination.

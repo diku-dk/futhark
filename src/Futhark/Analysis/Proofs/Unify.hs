@@ -10,10 +10,11 @@ import Control.Monad (foldM, msum)
 import Control.Monad.Trans.Maybe
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Data.Maybe (isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromString, putNameSource)
-import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromList, sopToList, sopToLists, termToList, toTerm, zeroSoP)
+import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromList, sopToList, sopToLists, term2SoP, termToList, toTerm, zeroSoP)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty
 import Language.Futhark (VName)
@@ -94,6 +95,9 @@ class (MonadFreshNames m, Renameable v) => Unify v u m where
 instance Renameable VName where
   rename_ tau x = pure $ M.findWithDefault x x tau
 
+-- instance (Renameable u, Ord u) => Renameable ([u], Integer) where
+--   rename_ tau (xs, c) = (,c) <$> mapM (rename_ tau) xs
+
 instance (Renameable u, Ord u) => Renameable (Term u, Integer) where
   rename_ tau (x, c) = (,c) . toTerm <$> mapM (rename_ tau) (termToList x)
 
@@ -115,7 +119,12 @@ instance (Ord u, Replaceable u u) => Replaceable (Term u, Integer) u where
 instance (Ord u, Replaceable u u) => Replaceable (SoP u) u where
   rep s = foldr (addSoPs . rep s) zeroSoP . sopToList
 
-instance SubstitutionBuilder (SoP u) u where
+instance (Ord u, Hole u) => SubstitutionBuilder (SoP u) u where
+  addSub _ x _
+    | hasHole =
+        error "Creating substitution for SoP with Hole. Are you trying to unify a Hole?"
+    where
+      hasHole = any (any (isJust . justHole) . fst) (sopToLists x)
   addSub vn x s = s {sop = M.insert vn x $ sop s}
 
 unifies_ ::
@@ -180,9 +189,23 @@ instance
   Unify (Term u, Integer) u m
   where
   -- Unify on permutations of symbols in term.
-  unify_ k (x, a) (y, b)
-    | a == b = unifyAnyPerm k (termToList x) (termToList y)
-    | otherwise = fail "unequal constants"
+  unify_ k (xs, a) (ys, b)
+    | Just h <- justSym (term2SoP xs a) >>= justHole =
+        pure $ addSub h (term2SoP ys b) mempty
+    -- Attempt to match hole to constant b, if necessary.
+    | a == 1,
+      x' : xs' <- termToList xs,
+      Just h <- justHole x' =
+        msum
+          [ unifyAnyPerm k (termToList xs) (termToList ys),
+            do
+              let s = addSub h (int2SoP b :: SoP u) mempty
+              let x = rep s (term2SoP xs' 1)
+              let y = rep s (term2SoP ys 1)
+              (s <>) <$> unify_ k x y
+          ]
+    | a == b = unifyAnyPerm k (termToList xs) (termToList ys)
+    | otherwise = fail "Unable to unify constants."
 
 instance
   ( Replaceable u u,
