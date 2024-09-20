@@ -107,7 +107,11 @@ debugM x = do
   debug <- gets debug
   when debug $ traceM $ "🪲 " <> x
 
-debugOn :: b -> IndexFnM b
-debugOn f = do
+withDebug :: b -> IndexFnM b
+withDebug f = do
   modify (\s -> s {debug = True})
   pure f
+
+debugOn :: IndexFnM ()
+debugOn = do
+  modify (\s -> s {debug = True})

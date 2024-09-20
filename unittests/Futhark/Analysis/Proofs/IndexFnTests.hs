@@ -86,7 +86,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/part2indices.fut"
-        ( newNameFromString "h" >>= \j -> pure $ \(i, n, xs) ->
+        ( newNameFromString "h" >>= \j -> withDebug $ \(i, n, xs) ->
             let xs_i = Idx (Hole xs) (sHole i)
              in IndexFn
                   { iterator = Forall i (Iota (sHole n)),

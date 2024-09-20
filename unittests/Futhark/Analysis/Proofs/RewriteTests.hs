@@ -215,6 +215,32 @@ tests =
               rewrite (Var x :&& (Var y :&& Not (int 1 :>= int 2)))
           )
           @??= (Var x :&& Var y),
+      testCase "Replace sum over one element sequence by element (1)" $
+        run
+          ( \(x, y, _, w, _, _, _, _) -> do
+              debugOn
+              rewrite (sym2SoP $ LinComb w (sVar y) (sVar y) (Idx (Var x) (sVar w)))
+          )
+          @??= sym2SoP (Idx (Var x) (sVar y)),
+      testCase "Replace sum over one element sequence by element (2)" $
+        run
+          ( \(x, _, _, w, _, _, _, _) -> do
+              debugOn
+              rewrite (sym2SoP $ LinComb w (int 0) (int 0) (Idx (Var x) (sVar w)))
+          )
+          @??= sym2SoP (Idx (Var x) (int 0)),
+      testCase "Replace sum over empty sequence by zero (1)" $
+        run
+          ( \(x, y, _, w, _, _, _, _) ->
+              rewrite (sym2SoP $ LinComb w (sVar y) (sVar y .-. int 1) (Idx (Var x) (sVar w)))
+          )
+          @??= int2SoP 0,
+      testCase "Replace sum over empty sequence by zero (2)" $
+        run
+          ( \(x, _, _, w, _, _, _, _) ->
+              rewrite (sym2SoP $ LinComb w (int 1) (int 0) (Idx (Var x) (sVar w)))
+          )
+          @??= int2SoP 0,
       -- Index functions.
       testCase "Rule 5 (carry) (match 1)" $
         run
@@ -256,7 +282,7 @@ tests =
                ),
       testCase "Rule 5 (carry) (don't match 1)" $
         run
-          ( \(x, y, _, _, _, _, _, _) ->
+          ( \(x, _, _, _, _, _, _, _) ->
               rewrite
                 ( IndexFn
                     { iterator = Forall x (Iota (sVar a)),
@@ -298,7 +324,7 @@ tests =
                ),
       testCase "Rule 4 (prefix sum) (match 1)" $
         run
-          ( \(x, y, _, _, a, b, c, _) ->
+          ( \(x, y, _, _, a, b, _, _) ->
               rewrite
                 ( IndexFn
                     { iterator = Forall x (Iota (sVar y)),

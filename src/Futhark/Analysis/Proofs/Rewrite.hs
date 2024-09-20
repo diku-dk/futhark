@@ -11,11 +11,12 @@ import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap)
 import Futhark.Analysis.Proofs.Unify (Hole, Replaceable, Substitution, SubstitutionBuilder (..), Unify (unify), rep, sub, unifies)
 import Futhark.Analysis.Proofs.Util (partitions)
 import Futhark.MonadFreshNames
-import Futhark.SoP.FourierMotzkin (($<=$), ($==$))
+import Futhark.SoP.FourierMotzkin (($<=$), ($==$), ($>$))
 import Futhark.SoP.Monad (substEquivs)
 import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sym2SoP, term2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
 import Futhark.Util.Pretty (prettyString, Pretty)
+import Debug.Trace (traceM)
 
 vacuous :: (Monad m) => b -> m Bool
 vacuous = const (pure True)
@@ -173,7 +174,7 @@ rulesSoP = do
             scale c (LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)))
               .+. scale c (Idx (Hole h3) (hole h4)),
           to = \s ->
-            sub s $
+            pure . rep s $
               scale c $
                 LinComb i (hole h4) (hole h2) (Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
@@ -187,7 +188,7 @@ rulesSoP = do
             scale c (LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)))
               .+. scale c (Idx (Hole h3) (hole h4)),
           to = \s ->
-            sub s $
+            pure . rep s $
               scale c $
                 LinComb i (hole h1) (hole h4) (Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
@@ -203,7 +204,7 @@ rulesSoP = do
             scale c (LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)))
               .+. scale c (Indicator (Idx (Hole h3) (hole h4))),
           to = \s ->
-            sub s $
+            pure . rep s $
               scale c $
                 LinComb i (hole h4) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
@@ -217,7 +218,7 @@ rulesSoP = do
             scale c (LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)))
               .+. scale c (Indicator (Idx (Hole h3) (hole h4))),
           to = \s ->
-            sub s $
+            pure . rep s $
               scale c $
                 LinComb i (hole h1) (hole h4) (Indicator $ Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
@@ -231,19 +232,51 @@ rulesSoP = do
             scale c (LinComb i (hole h1) (hole x1) (Hole h2))
               .-. scale c (LinComb i (hole h1) (hole y1) (Hole h2)),
           to = \s ->
-            sub s $
+            pure . rep s $
               scale c $
                 LinComb i (hole y1 .+. int 1) (hole x1) (Hole h2),
           sideCondition = \s -> do
-            y' <- sub s (Hole y1)
-            x' <- sub s (Hole x1)
+            let y' = rep s (Hole y1)
+            let x' = rep s (Hole x1)
             y' $<=$ x'
         },
       Rule
         { name = "[[¬x]] => 1 - [[x]]",
           from = sym2SoP $ Indicator (Not (Hole h1)),
-          to = \s -> sub s $ int 1 .-. sym2SoP (Indicator (Hole h1)),
+          to = \s -> pure . rep s $ int 1 .-. sym2SoP (Indicator (Hole h1)),
           sideCondition = vacuous
+        },
+      Rule
+        { name = "Replace sum over one element sequence by element",
+          from = sym2SoP $ LinComb i (hole h1) (hole h2) (Hole h3),
+          to = \s -> do
+            -- let j = repVName s i
+            let e = LinComb i (hole h1) (hole h2) (Hole h3)
+            debugM $ "e = " <> prettyString e
+            let e = rep s $ LinComb i (hole h1) (hole h2) (Hole h3)
+            debugM $ "e = " <> prettyString e
+            e <- sub s $ LinComb i (hole h1) (hole h2) (Hole h3)
+            debugM $ "e = " <> prettyString e
+            let idx = rep s (Hole h1)
+            let symb = rep s (Hole h3)
+            debugM $ "i = " <> prettyString i
+            debugM $ "symb = " <> prettyString symb
+            pure $ rep (mkSub i idx) $ rep s (Hole h3),
+          sideCondition = \s -> do
+            let start = rep s (Hole h1)
+            let end = rep s (Hole h2)
+            debugM $ prettyString start
+            debugM $ prettyString end
+            start $==$ end
+        },
+      Rule
+        { name = "Replace sum over empty sequence by zero",
+          from = sym2SoP $ LinComb i (hole h1) (hole h2) (Hole h3),
+          to = const . pure $ int2SoP 0,
+          sideCondition = \s -> do
+            let start = rep s (Hole h1)
+            let end = rep s (Hole h2)
+            start $>$ end
         }
     ]
 
