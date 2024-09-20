@@ -44,6 +44,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
+import Futhark.Optimise.IntraMMM
 import Futhark.Pipeline
 
 -- | A pipeline used by all current compilers.  Performs inlining,
@@ -79,36 +80,6 @@ adPipeline =
       simplifySOACS
     ]
 
-gpuPipelineTensorCores :: Pipeline SOACS GPU
-gpuPipelineTensorCores =
-  standardPipeline
-    >>> onePass extractKernels
-    >>> passes
-      [ simplifyGPU,
-        optimiseGenRed,
-        simplifyGPU,
-        tileLoops,
-        simplifyGPU,
-        histAccsGPU,
-        unstreamGPU,
-        performCSE True,
-        simplifyGPU,
-        sinkGPU, -- Sink reads before migrating them.
-        reduceDeviceSyncs,
-        simplifyGPU, -- Simplify and hoist storages.
-        performCSE True, -- Eliminate duplicate storages.
-        mergeGPUBodies,
-        simplifyGPU, -- Cleanup merged GPUBody kernels.
-        sinkGPU, -- Sink reads within GPUBody kernels.
-        optimiseArrayLayoutGPU,
-        -- Important to simplify after coalescing in order to fix up
-        -- redundant manifests.
-        simplifyGPU,
-        performCSE True
-      ]
-
-
-
 -- | The pipeline used by the CUDA, HIP, and OpenCL backends, but before
 -- adding memory information.  Includes 'standardPipeline'.
 gpuPipeline :: Pipeline SOACS GPU
@@ -117,6 +88,8 @@ gpuPipeline =
     >>> onePass extractKernels
     >>> passes
       [ simplifyGPU,
+        intraMMM,
+        simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
         tileLoops,
