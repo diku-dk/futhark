@@ -79,6 +79,36 @@ adPipeline =
       simplifySOACS
     ]
 
+gpuPipelineTensorCores :: Pipeline SOACS GPU
+gpuPipelineTensorCores =
+  standardPipeline
+    >>> onePass extractKernels
+    >>> passes
+      [ simplifyGPU,
+        optimiseGenRed,
+        simplifyGPU,
+        tileLoops,
+        simplifyGPU,
+        histAccsGPU,
+        unstreamGPU,
+        performCSE True,
+        simplifyGPU,
+        sinkGPU, -- Sink reads before migrating them.
+        reduceDeviceSyncs,
+        simplifyGPU, -- Simplify and hoist storages.
+        performCSE True, -- Eliminate duplicate storages.
+        mergeGPUBodies,
+        simplifyGPU, -- Cleanup merged GPUBody kernels.
+        sinkGPU, -- Sink reads within GPUBody kernels.
+        optimiseArrayLayoutGPU,
+        -- Important to simplify after coalescing in order to fix up
+        -- redundant manifests.
+        simplifyGPU,
+        performCSE True
+      ]
+
+
+
 -- | The pipeline used by the CUDA, HIP, and OpenCL backends, but before
 -- adding memory information.  Includes 'standardPipeline'.
 gpuPipeline :: Pipeline SOACS GPU
