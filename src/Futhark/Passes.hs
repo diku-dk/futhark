@@ -94,6 +94,9 @@ gpuPipeline =
         simplifyGPU,
         tileLoops,
         simplifyGPU,
+--        TODO: choose to add before or after tileLoops
+--        intraMMM,
+--        simplifyGPU,
         histAccsGPU,
         unstreamGPU,
         performCSE True,
