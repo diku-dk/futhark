@@ -49,6 +49,10 @@ mkLinComb i a b ([u], c) =
 mkLinComb _ _ _ _ =
   error "Replacement is not a linear combination."
 
+getLinCombBoundVar :: Symbol -> Maybe VName
+getLinCombBoundVar (LinComb i _ _ _) = Just i
+getLinCombBoundVar _ = Nothing
+
 -- TODO Normalize only normalizes Boolean expressions.
 --      Use a Boolean representation that is normalized by construction.
 normalizeSymbol :: Symbol -> Symbol

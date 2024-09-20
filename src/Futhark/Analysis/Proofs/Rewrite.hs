@@ -2,21 +2,21 @@ module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad (foldM, msum, (<=<))
 import Data.List (subsequences, (\\))
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, debugM)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases)
 import Futhark.Analysis.Proofs.IndexFnPlus (repVName, subIndexFn, normalizeIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
 import Futhark.Analysis.Proofs.Rule (Rule (..))
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), normalizeSymbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), normalizeSymbol, getLinCombBoundVar)
 import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify (Hole, Replaceable, Substitution, SubstitutionBuilder (..), Unify (unify), rep, sub, unifies)
+import Futhark.Analysis.Proofs.Unify (Hole, Replaceable, Substitution (vns), SubstitutionBuilder (..), Unify (unify), rep, sub, unifies, Renameable (renameWith))
 import Futhark.Analysis.Proofs.Util (partitions)
 import Futhark.MonadFreshNames
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$), ($>$))
 import Futhark.SoP.Monad (substEquivs)
 import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sym2SoP, term2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
-import Futhark.Util.Pretty (prettyString, Pretty)
-import Debug.Trace (traceM)
+import Futhark.Util.Pretty (Pretty)
+import Data.Maybe (fromJust)
 
 vacuous :: (Monad m) => b -> m Bool
 vacuous = const (pure True)
@@ -174,7 +174,7 @@ rulesSoP = do
             scale c (LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)))
               .+. scale c (Idx (Hole h3) (hole h4)),
           to = \s ->
-            pure . rep s $
+            sub s $
               scale c $
                 LinComb i (hole h4) (hole h2) (Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
@@ -188,7 +188,7 @@ rulesSoP = do
             scale c (LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)))
               .+. scale c (Idx (Hole h3) (hole h4)),
           to = \s ->
-            pure . rep s $
+            sub s $
               scale c $
                 LinComb i (hole h1) (hole h4) (Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
@@ -204,7 +204,7 @@ rulesSoP = do
             scale c (LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)))
               .+. scale c (Indicator (Idx (Hole h3) (hole h4))),
           to = \s ->
-            pure . rep s $
+            sub s $
               scale c $
                 LinComb i (hole h4) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
@@ -218,7 +218,7 @@ rulesSoP = do
             scale c (LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)))
               .+. scale c (Indicator (Idx (Hole h3) (hole h4))),
           to = \s ->
-            pure . rep s $
+            sub s $
               scale c $
                 LinComb i (hole h1) (hole h4) (Indicator $ Idx (Hole h3) (sVar i)),
           sideCondition = \s -> do
@@ -232,7 +232,7 @@ rulesSoP = do
             scale c (LinComb i (hole h1) (hole x1) (Hole h2))
               .-. scale c (LinComb i (hole h1) (hole y1) (Hole h2)),
           to = \s ->
-            pure . rep s $
+            sub s $
               scale c $
                 LinComb i (hole y1 .+. int 1) (hole x1) (Hole h2),
           sideCondition = \s -> do
@@ -243,30 +243,20 @@ rulesSoP = do
       Rule
         { name = "[[¬x]] => 1 - [[x]]",
           from = sym2SoP $ Indicator (Not (Hole h1)),
-          to = \s -> pure . rep s $ int 1 .-. sym2SoP (Indicator (Hole h1)),
+          to = \s -> sub s $ int 1 .-. sym2SoP (Indicator (Hole h1)),
           sideCondition = vacuous
         },
       Rule
         { name = "Replace sum over one element sequence by element",
           from = sym2SoP $ LinComb i (hole h1) (hole h2) (Hole h3),
           to = \s -> do
-            -- let j = repVName s i
-            let e = LinComb i (hole h1) (hole h2) (Hole h3)
-            debugM $ "e = " <> prettyString e
-            let e = rep s $ LinComb i (hole h1) (hole h2) (Hole h3)
-            debugM $ "e = " <> prettyString e
-            e <- sub s $ LinComb i (hole h1) (hole h2) (Hole h3)
-            debugM $ "e = " <> prettyString e
+            j <- fromJust . getLinCombBoundVar <$>
+               renameWith (vns s) (LinComb i (hole h1) (hole h2) (Hole h3))
             let idx = rep s (Hole h1)
-            let symb = rep s (Hole h3)
-            debugM $ "i = " <> prettyString i
-            debugM $ "symb = " <> prettyString symb
-            pure $ rep (mkSub i idx) $ rep s (Hole h3),
+            pure $ rep (mkSub j idx) $ rep s (Hole h3),
           sideCondition = \s -> do
             let start = rep s (Hole h1)
             let end = rep s (Hole h2)
-            debugM $ prettyString start
-            debugM $ prettyString end
             start $==$ end
         },
       Rule
@@ -286,28 +276,6 @@ rulesSymbol = do
   pure
     []
 
--- [ Rule
---     { name = ":&& identity"
---     , from = Bool True :&& Var h1
---     , to = \s -> pure . sop2Symbol . rep s $ Var h1
---     }
--- , Rule
---     { name = ":&& annihilation"
---     , from = Bool False :&& Var h1
---     , to = \_ -> pure $ Bool False
---     }
--- , Rule
---     { name = ":|| identity"
---     , from = Bool False :|| Var h1
---     , to = \s -> pure . sop2Symbol . rep s $ Var h1
---     }
--- , Rule
---     { name = ":|| annihilation"
---     , from = Bool True :|| Var h1
---     , to = \_ -> pure $ Bool True
---     }
--- ]
-
 rulesIndexFn :: IndexFnM [Rule IndexFn Symbol IndexFnM]
 rulesIndexFn = do
   i <- newVName "i"
@@ -316,7 +284,6 @@ rulesIndexFn = do
   m <- newVName "m"
   b <- newVName "b"
   h1 <- newVName "h"
-  h2 <- newVName "h"
   pure
     [ Rule
         { name = "Rule 5 (carry)",
@@ -381,40 +348,4 @@ rulesIndexFn = do
                   },
           sideCondition = vacuous
         }
-      -- Rule
-      --   { name = "Rule 4 (prefix sum)",
-      --     -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
-      --     --    | i == b => e1              (e1 may depend on i)
-      --     --    | i /= b => y[i-1] + e2     (e2 may depend on i)
-      --     --
-      --     -- e2 is a SoP with terms e2_0, ..., e2_l. Each term is a constant,
-      --     -- an indexing statement or an indicator of an indexing statement.
-      --     -- XXX is this condition necessary in the revised system? dont we just want to disallow additional Recurrences?
-      --     -- _______________________________________________________________
-      --     -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
-      --     --    e1{b/i} + (Σ_{j=b+1}^i e2_0{j/i}) + ... + (Σ_{j=b+1}^i e2_l{j/i})
-      --     from =
-      --       IndexFn
-      --         { iterator = Forall i (Iota (hole n)),
-      --           body =
-      --             cases
-      --               [ (hole i :== int 0, hole h1),
-      --                 (hole i :/= int 0, Recurrence ~+~ Hole h2)
-      --               ]
-      --         },
-      --     to = \s -> do
-      --       let i' = repVName s i
-      --       j <- newVName "j"
-      --       e1_b <- sub s (Hole h1) >>= sub (mkSub i' (int 0))
-      --       e2_j <- sub s (Hole h2) >>= sub (mkSub i' (sVar j))
-      --       let e2_sum = applyLinCombRule j (int 1) (hole i) e2_j
-      --       subIndexFn s $
-      --         IndexFn
-      --           { iterator = Forall i (Iota (hole n)),
-      --             body = cases [(Bool True, e1_b .+. e2_sum)]
-      --           },
-      --     sideCondition = vacuous
-      --   }
-        -- TODO this and "remove dead cases" would match anything and
-        --      are better implemented without unification?
     ]

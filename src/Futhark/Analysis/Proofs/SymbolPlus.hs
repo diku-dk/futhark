@@ -8,9 +8,6 @@ import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Substitution (..), SubstitutionBuilder (..), Unify (..), unifies_)
 import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
 import Futhark.SoP.SoP (sym2SoP)
-import Futhark.Util.Pretty (prettyString)
-import Futhark.Analysis.Proofs.IndexFn (debugM)
-import Debug.Trace (traceM)
 
 instance FreeVariables Symbol where
   fv sym = case sym of
@@ -41,7 +38,7 @@ instance Renameable Symbol where
     Idx xs i -> Idx <$> rename_ tau xs <*> rename_ tau i
     LinComb xn lb ub e -> do
       xm <- newNameFromString "i"
-      traceM $ "Renaming " <> prettyString xn <> " to " <> prettyString xm
+      -- traceM $ "Renaming " <> prettyString xn <> " to " <> prettyString xm
       let tau' = M.insert xn xm tau
       LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau' e
     Indicator x -> Indicator <$> rename_ tau x

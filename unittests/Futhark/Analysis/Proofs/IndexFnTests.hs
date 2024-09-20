@@ -135,7 +135,7 @@ tests =
             Nothing -> pure $ Just (actual, expected)
             Just s' -> do
               e <- subIndexFn s' expected
-              Just <$> renameSame actual e
+              Just . (\(_, a, b) -> (a,b)) <$> renameSame actual e
 
     sHole = sym2SoP . Hole
 
