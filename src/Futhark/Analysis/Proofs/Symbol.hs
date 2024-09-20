@@ -43,7 +43,7 @@ applyLinCombRule i a b = foldl1 (.+.) . map (mkLinComb i a b) . sopToLists
 
 mkLinComb :: VName -> SoP Symbol -> SoP Symbol -> ([Symbol], Integer) -> SoP Symbol
 mkLinComb _ a b ([], c) =
-  scaleSoP c (a .-. b .+. int2SoP 1)
+  scaleSoP c (b .-. a .+. int2SoP 1)
 mkLinComb i a b ([u], c) =
   scaleSoP c (sym2SoP $ LinComb i a b u)
 mkLinComb _ _ _ _ =

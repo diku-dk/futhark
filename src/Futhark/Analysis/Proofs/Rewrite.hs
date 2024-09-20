@@ -2,11 +2,11 @@ module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad (foldM, msum, (<=<))
 import Data.List (subsequences, (\\))
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, normalizeIndexFn)
-import Futhark.Analysis.Proofs.IndexFnPlus (repVName, subIndexFn)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, debugM)
+import Futhark.Analysis.Proofs.IndexFnPlus (repVName, subIndexFn, normalizeIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
 import Futhark.Analysis.Proofs.Rule (Rule (..))
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), applyLinCombRule, normalizeSymbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), normalizeSymbol)
 import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap)
 import Futhark.Analysis.Proofs.Unify (Hole, Replaceable, Substitution, SubstitutionBuilder (..), Unify (unify), rep, sub, unifies)
 import Futhark.Analysis.Proofs.Util (partitions)
@@ -15,6 +15,7 @@ import Futhark.SoP.FourierMotzkin (($<=$), ($==$))
 import Futhark.SoP.Monad (substEquivs)
 import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sym2SoP, term2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
+import Futhark.Util.Pretty (prettyString, Pretty)
 
 vacuous :: (Monad m) => b -> m Bool
 vacuous = const (pure True)
@@ -98,7 +99,9 @@ instance Rewritable IndexFn IndexFnM where
             mapOnSymbol = rewrite
           }
 
-      match_ rule fn = match rule fn >>= maybe (pure fn) (to rule)
+      match_ rule fn = do
+        -- debugM ("indexfn match " <> name rule <> ": " <> prettyString fn)
+        match rule fn >>= maybe (pure fn) (to rule)
 
 -- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
 -- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
@@ -106,16 +109,18 @@ instance Rewritable IndexFn IndexFnM where
 matchSoP ::
   ( Ord u,
     Replaceable u u,
-    Unify u u m,
+    Unify u u IndexFnM,
+    Pretty u,
     Hole u
   ) =>
-  Rule (SoP u) u m ->
+  Rule (SoP u) u IndexFnM ->
   SoP u ->
-  m (SoP u)
+  IndexFnM (SoP u)
 matchSoP rule sop
   | numTerms (from rule) <= numTerms sop = do
       let (subterms, contexts) = unzip . splits $ sopToList sop
       -- Get first valid subterm substitution. Recursively match context.
+      -- debugM ("matchSoP " <> name rule <> ": " <> prettyString sop)
       subs <- mapM (matchP rule . sopFromList) subterms
       case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
         Just (s, ctx) -> (.+.) <$> matchSoP rule (sopFromList ctx) <*> to rule s
@@ -342,67 +347,41 @@ rulesIndexFn = do
                     body = cases [(Bool True, e1_b)]
                   },
           sideCondition = vacuous
-        },
-      Rule
-        { name = "Rule 4 (prefix sum)",
-          -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
-          --    | i == b => e1              (e1 may depend on i)
-          --    | i /= b => y[i-1] + e2     (e2 may depend on i)
-          --
-          -- e2 is a SoP with terms e2_0, ..., e2_l. Each term is a constant,
-          -- an indexing statement or an indicator of an indexing statement.
-          -- XXX is this condition necessary in the revised system? dont we just want to disallow additional Recurrences?
-          -- _______________________________________________________________
-          -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
-          --    e1{b/i} + (Σ_{j=b+1}^i e2_0{j/i}) + ... + (Σ_{j=b+1}^i e2_l{j/i})
-          from =
-            IndexFn
-              { iterator = Forall i (Iota (hole n)),
-                body =
-                  cases
-                    [ (hole i :== int 0, hole h1),
-                      (hole i :/= int 0, Recurrence ~+~ Hole h2)
-                    ]
-              },
-          to = \s -> do
-            let i' = repVName s i
-            j <- newVName "j"
-            e1_b <- sub s (Hole h1) >>= sub (mkSub i' (int 0))
-            e2_j <- sub s (Hole h2) >>= sub (mkSub i' (sVar j))
-            let e2_sum = applyLinCombRule j (int 1) (hole i) e2_j
-            subIndexFn s $
-              IndexFn
-                { iterator = Forall i (Iota (hole n)),
-                  body = cases [(Bool True, e1_b .+. e2_sum)]
-                },
-          sideCondition = vacuous
         }
+      -- Rule
+      --   { name = "Rule 4 (prefix sum)",
+      --     -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
+      --     --    | i == b => e1              (e1 may depend on i)
+      --     --    | i /= b => y[i-1] + e2     (e2 may depend on i)
+      --     --
+      --     -- e2 is a SoP with terms e2_0, ..., e2_l. Each term is a constant,
+      --     -- an indexing statement or an indicator of an indexing statement.
+      --     -- XXX is this condition necessary in the revised system? dont we just want to disallow additional Recurrences?
+      --     -- _______________________________________________________________
+      --     -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
+      --     --    e1{b/i} + (Σ_{j=b+1}^i e2_0{j/i}) + ... + (Σ_{j=b+1}^i e2_l{j/i})
+      --     from =
+      --       IndexFn
+      --         { iterator = Forall i (Iota (hole n)),
+      --           body =
+      --             cases
+      --               [ (hole i :== int 0, hole h1),
+      --                 (hole i :/= int 0, Recurrence ~+~ Hole h2)
+      --               ]
+      --         },
+      --     to = \s -> do
+      --       let i' = repVName s i
+      --       j <- newVName "j"
+      --       e1_b <- sub s (Hole h1) >>= sub (mkSub i' (int 0))
+      --       e2_j <- sub s (Hole h2) >>= sub (mkSub i' (sVar j))
+      --       let e2_sum = applyLinCombRule j (int 1) (hole i) e2_j
+      --       subIndexFn s $
+      --         IndexFn
+      --           { iterator = Forall i (Iota (hole n)),
+      --             body = cases [(Bool True, e1_b .+. e2_sum)]
+      --           },
+      --     sideCondition = vacuous
+      --   }
         -- TODO this and "remove dead cases" would match anything and
         --      are better implemented without unification?
-        -- , Rule
-        --     { name = "Simplify rule 3 (all cases are constants)"
-        --     , from =
-        --         IndexFn {
-        --           iterator = Forall i (Iota (hole n)),
-        --           body = CHole h1
-        --         }
-        --     , to = undefined
-        --     , sideCondition = undefined
-        --     }
-        -- simplifyRule3 :: IndexFn -> IndexFnM IndexFn
-        -- simplifyRule3 v@(IndexFn _ (Cases ((Bool True, _) NE.:| []))) = pure v
-        -- simplifyRule3 (IndexFn it (Cases cases))
-        --   | Just sops <- mapM (justConstant . snd) cases = do
-        --     let preds = NE.map fst cases
-        --         sumOfIndicators =
-        --           SoP.normalize . foldl1 (.+.) . NE.toList $
-        --             NE.zipWith
-        --               (\p x -> sym2SoP (Indicator p) .*. int2SoP x)
-        --               preds
-        --               sops
-        --     tell ["Using simplification rule: integer-valued cases"]
-        --     pure $ IndexFn it $ Cases (NE.singleton (Bool True, SoP2 sumOfIndicators))
-        --   where
-        --     justConstant (SoP2 sop) = SoP.justConstant sop
-        --     justConstant _ = Nothing
     ]

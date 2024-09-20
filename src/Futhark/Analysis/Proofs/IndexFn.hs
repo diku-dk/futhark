@@ -10,8 +10,7 @@ import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
-import Futhark.SoP.SoP (SoP, int2SoP, justConstant, sym2SoP, (.*.), (.+.))
-import Futhark.SoP.SoP qualified as SoP
+import Futhark.SoP.SoP (SoP, int2SoP)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 
@@ -42,6 +41,10 @@ cases = Cases . NE.fromList
 
 casesToList :: Cases a b -> [(a, b)]
 casesToList (Cases cs) = NE.toList cs
+
+domainSegStart :: Domain -> SoP Symbol
+domainSegStart (Iota _) = int2SoP 0
+domainSegStart (Cat _ _ b) = b
 
 -------------------------------------------------------------------------------
 -- Monad.
@@ -108,28 +111,3 @@ debugOn :: b -> IndexFnM b
 debugOn f = do
   modify (\s -> s {debug = True})
   pure f
-
--------------------------------------------------------------------------------
--- Index function normalization.
--------------------------------------------------------------------------------
-allCasesAreConstants :: IndexFn -> IndexFnM IndexFn
-allCasesAreConstants v@(IndexFn _ (Cases ((Bool True, _) NE.:| []))) = pure v
-allCasesAreConstants (IndexFn it (Cases cs))
-  | Just sops <- mapM (justConstant . snd) cs = do
-      let preds = NE.map fst cs
-          sumOfIndicators =
-            SoP.normalize . foldl1 (.+.) . NE.toList $
-              NE.zipWith
-                (\p x -> sym2SoP (Indicator p) .*. int2SoP x)
-                preds
-                sops
-      -- tell ["Using simplification rule: integer-valued cases"]
-      pure $ IndexFn it $ Cases (NE.singleton (Bool True, sumOfIndicators))
-allCasesAreConstants v = pure v
-
--- where
---   justConstant (sop) = SoP.justConstant sop
---   justConstant _ = Nothing
-
-normalizeIndexFn :: IndexFn -> IndexFnM IndexFn
-normalizeIndexFn = allCasesAreConstants
