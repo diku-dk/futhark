@@ -324,27 +324,26 @@ mkWithAccBdy' static_arg [] dims_rev iot_par_nms rshp_ps cons_ps = do
               letExp (baseString nm_in) $ BasicOp $ UpdateAcc Safe nm_in [resSubExp i_se] [resSubExp v_se]
         foldM f (paramName cons_p) i_ses
     let lam_certs = foldMap resCerts $ bodyResult $ lambdaBody scat_lam
-    pure $ mkBody mempty $ map (SubExpRes lam_certs . Var) res_nms
+    pure $ map (SubExpRes lam_certs . Var) res_nms
 -- \| the recursive case builds a call to a map soac.
 mkWithAccBdy' static_arg (dim : dims) dims_rev iot_par_nms rshp_ps cons_ps = do
   scope <- askScope
-  runBodyBuilder $ do
-    buildBody_ . localScope (scope <> scopeOfLParams (rshp_ps ++ cons_ps)) $ do
-      iota_arr <- letExp "iota_arr" $ BasicOp $ Iota dim se0 se1 Int64
-      iota_p <- newParam "iota_arg" $ Prim $ IntType Int64
-      rshp_ps' <- forM (zip [0 .. length rshp_ps - 1] (map paramDec rshp_ps)) $
-        \(i, arr_tp) ->
-          newParam ("rshp_arg_" ++ show i) $ stripArray 1 arr_tp
-      cons_ps' <- forM (zip [0 .. length cons_ps - 1] (map paramDec cons_ps)) $
-        \(i, arr_tp) ->
-          newParam ("acc_arg_" ++ show i) arr_tp
-      map_lam_bdy <-
-        mkWithAccBdy' static_arg dims (dim : dims_rev) (iot_par_nms ++ [paramName iota_p]) rshp_ps' cons_ps'
-      let map_lam = Lambda (rshp_ps' ++ [iota_p] ++ cons_ps') (map paramDec cons_ps') map_lam_bdy
-          map_inps = map paramName rshp_ps ++ [iota_arr] ++ map paramName cons_ps
-          map_soac = F.Screma dim map_inps $ ScremaForm [] [] map_lam
-      res_nms <- letTupExp "acc_res" $ Op map_soac
-      pure $ map (subExpRes . Var) res_nms
+  runBodyBuilder $ localScope (scope <> scopeOfLParams (rshp_ps ++ cons_ps)) $ do
+    iota_arr <- letExp "iota_arr" $ BasicOp $ Iota dim se0 se1 Int64
+    iota_p <- newParam "iota_arg" $ Prim $ IntType Int64
+    rshp_ps' <- forM (zip [0 .. length rshp_ps - 1] (map paramDec rshp_ps)) $
+      \(i, arr_tp) ->
+        newParam ("rshp_arg_" ++ show i) $ stripArray 1 arr_tp
+    cons_ps' <- forM (zip [0 .. length cons_ps - 1] (map paramDec cons_ps)) $
+      \(i, arr_tp) ->
+        newParam ("acc_arg_" ++ show i) arr_tp
+    map_lam_bdy <-
+      mkWithAccBdy' static_arg dims (dim : dims_rev) (iot_par_nms ++ [paramName iota_p]) rshp_ps' cons_ps'
+    let map_lam = Lambda (rshp_ps' ++ [iota_p] ++ cons_ps') (map paramDec cons_ps') map_lam_bdy
+        map_inps = map paramName rshp_ps ++ [iota_arr] ++ map paramName cons_ps
+        map_soac = F.Screma dim map_inps $ ScremaForm [] [] map_lam
+    res_nms <- letTupExp "acc_res" $ Op map_soac
+    pure $ map (subExpRes . Var) res_nms
 
 ---------------------------------------------------
 --- II. WithAcc-WithAcc Fusion
@@ -441,7 +440,7 @@ tryFuseWithAccs
         scope <- askScope
         lam_bdy <-
           runBodyBuilder $ do
-            buildBody_ . localScope (scope <> scopeOfLParams (rcrt_params ++ racc_params)) $ do
+            localScope (scope <> scopeOfLParams (rcrt_params ++ racc_params)) $ do
               -- add the stms of lam1
               mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam1
               -- add the copy stms for the common accumulator

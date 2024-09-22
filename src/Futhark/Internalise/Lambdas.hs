@@ -80,4 +80,4 @@ internalisePartitionLambda internaliseLambda k lam args = do
     lambdaWithIncrement lam_body = runBodyBuilder $ do
       eq_class <-
         maybe (intConst Int64 0) resSubExp . listToMaybe <$> bodyBind lam_body
-      resultBody <$> mkResult eq_class 0
+      subExpsRes <$> mkResult eq_class 0

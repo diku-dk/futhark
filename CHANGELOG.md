@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Trailing commas are now allowed for arrays, records, and tuples in
+  the textual value format and in FutharkScript.
+
 ### Removed
 
 ### Changed

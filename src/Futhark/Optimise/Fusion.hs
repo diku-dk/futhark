@@ -313,15 +313,13 @@ vFuseNodeT
       all (`notNameIn` wacc_cons_nms) (soac_indep_nms ++ soac_prod_nms) =
         do
           lam <- fst <$> doFusionInLambda lam0
-          scope <- askScope
           bdy' <-
-            runBodyBuilder $ do
-              buildBody_ . localScope (scope <> scopeOfLParams (lambdaParams lam)) $ do
-                soac' <- H.toExp soac
-                addStm $ Let pat1 aux1 soac'
-                mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam
-                let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms
-                pure $ bodyResult (lambdaBody lam) ++ pat1_res
+            runBodyBuilder $ localScope (scopeOfLParams (lambdaParams lam)) $ do
+              soac' <- H.toExp soac
+              addStm $ Let pat1 aux1 soac'
+              mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam
+              let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms
+              pure $ bodyResult (lambdaBody lam) ++ pat1_res
           let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
               pat = Pat $ patElems pat2 ++ patElems pat1
           lam' <- renameLambda $ lam {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
@@ -354,24 +352,22 @@ vFuseNodeT
       all ((`notNameIn` pat1_acc_nms) . getName) edges = do
         let empty_aux = StmAux mempty mempty mempty
         wlam <- fst <$> doFusionInLambda wlam0
-        scope <- askScope
         bdy' <-
-          runBodyBuilder $ do
-            buildBody_ . localScope (scope <> scopeOfLParams (lambdaParams wlam)) $ do
-              -- adding stms of withacc's lambda
-              mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody wlam
-              -- add copies of the non-accumulator results of withacc
-              let other_pr1 = drop n $ zip (patElems pat1) (bodyResult (lambdaBody wlam))
-              forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
-                let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
-                    aux = empty_aux {stmAuxCerts = resCerts bdy_res}
-                addStm $ Let (Pat [PatElem nm tp]) aux $ BasicOp $ SubExp se
-              -- add the soac stmt
-              soac' <- H.toExp soac
-              addStm $ Let pat2 aux2 soac'
-              -- build the body result
-              let pat2_res = map (SubExpRes (Certs []) . Var . patElemName) $ patElems pat2
-              pure $ bodyResult (lambdaBody wlam) ++ pat2_res
+          runBodyBuilder $ localScope (scopeOf wlam) $ do
+            -- adding stms of withacc's lambda
+            mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody wlam
+            -- add copies of the non-accumulator results of withacc
+            let other_pr1 = drop n $ zip (patElems pat1) (bodyResult (lambdaBody wlam))
+            forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
+              let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
+                  aux = empty_aux {stmAuxCerts = resCerts bdy_res}
+              addStm $ Let (Pat [PatElem nm tp]) aux $ BasicOp $ SubExp se
+            -- add the soac stmt
+            soac' <- H.toExp soac
+            addStm $ Let pat2 aux2 soac'
+            -- build the body result
+            let pat2_res = map (SubExpRes (Certs []) . Var . patElemName) $ patElems pat2
+            pure $ bodyResult (lambdaBody wlam) ++ pat2_res
         let lam_ret_tp = lambdaReturnType wlam ++ map patElemType (patElems pat2)
             pat = Pat $ patElems pat1 ++ patElems pat2
         wlam' <- renameLambda $ wlam {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
