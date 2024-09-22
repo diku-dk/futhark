@@ -50,9 +50,6 @@ se0 = intConst Int64 0
 se1 :: SubExp
 se1 = intConst Int64 1
 
-emptyAux :: StmAux ()
-emptyAux = StmAux mempty mempty mempty
-
 -------------------------------------
 --- I. Map-Flatten-Scatter Fusion ---
 -------------------------------------
@@ -125,7 +122,7 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
       -- generate the withAcc statement
       let cons_patels_outs = zip (patElems scat_pat) scat_out
       wacc_stm <- mkWithAccStm rep_iotas rep_rshps cons_patels_outs scat_aux scat_lam
-      let all_cert_rshp = foldl (<>) mempty certs_rshps
+      let all_cert_rshp = mconcat certs_rshps
           aux = stmAux wacc_stm
           aux' = aux {stmAuxCerts = all_cert_rshp <> stmAuxCerts aux}
           wacc_stm' = wacc_stm {stmAux = aux'}
@@ -300,35 +297,34 @@ mkWithAccBdy' static_arg [] dims_rev iot_par_nms rshp_ps cons_ps = do
   let (iota_inps, rshp_inps, scat_res_info, scat_lam) = static_arg
       tp_int = Prim $ IntType Int64
   scope <- askScope
-  runBodyBuilder $ do
-    buildBody_ . localScope (scope <> scopeOfLParams (rshp_ps ++ cons_ps)) $ do
-      -- handle iota args
-      let strides_rev = scanl (*) (pe64 se1) $ map pe64 dims_rev
-          strides = tail $ reverse strides_rev
-          prods = zipWith (*) (map le64 iot_par_nms) strides
-          i_pe = foldl (+) (pe64 se0) prods
-      i_norm <- letExp "iota_norm_arg" =<< toExp i_pe
-      forM_ iota_inps $ \arg -> do
-        let ((_, i_par), (_, b, s, _)) = arg
-        i_new <- letExp "tmp" =<< toExp (pe64 b + le64 i_norm * pe64 s)
-        addStm $ Let (Pat [PatElem (paramName i_par) tp_int]) emptyAux $ BasicOp $ SubExp $ Var i_new
-      -- handle rshp args
-      let rshp_lam_args = map (snd . fst) rshp_inps
-      forM_ (zip rshp_lam_args rshp_ps) $ \(old_par, new_par) -> do
-        let pat = Pat [PatElem (paramName old_par) (paramDec old_par)]
-        addStm $ Let pat emptyAux $ BasicOp $ SubExp $ Var $ paramName new_par
-      -- add the body of the scatter's lambda
-      mapM_ addStm $ bodyStms $ lambdaBody scat_lam
-      -- add the withAcc update statements
-      let iv_ses = groupScatterResults' scat_res_info $ bodyResult $ lambdaBody scat_lam
-      res_nms <-
-        forM (zip cons_ps iv_ses) $ \(cons_p, (i_ses, v_se)) -> do
-          -- i_ses is a list
-          let f nm_in i_se =
-                letExp (baseString nm_in) $ BasicOp $ UpdateAcc Safe nm_in [resSubExp i_se] [resSubExp v_se]
-          foldM f (paramName cons_p) i_ses
-      let lam_certs = foldl (<>) mempty $ map resCerts $ bodyResult $ lambdaBody scat_lam
-      pure $ map (SubExpRes lam_certs . Var) res_nms
+  runBodyBuilder $ localScope (scope <> scopeOfLParams (rshp_ps ++ cons_ps)) $ do
+    -- handle iota args
+    let strides_rev = scanl (*) (pe64 se1) $ map pe64 dims_rev
+        strides = tail $ reverse strides_rev
+        prods = zipWith (*) (map le64 iot_par_nms) strides
+        i_pe = sum prods
+    i_norm <- letExp "iota_norm_arg" =<< toExp i_pe
+    forM_ iota_inps $ \arg -> do
+      let ((_, i_par), (_, b, s, _)) = arg
+      i_new <- letExp "tmp" =<< toExp (pe64 b + le64 i_norm * pe64 s)
+      letBind (Pat [PatElem (paramName i_par) tp_int]) $ BasicOp $ SubExp $ Var i_new
+    -- handle rshp args
+    let rshp_lam_args = map (snd . fst) rshp_inps
+    forM_ (zip rshp_lam_args rshp_ps) $ \(old_par, new_par) -> do
+      let pat = Pat [PatElem (paramName old_par) (paramDec old_par)]
+      letBind pat $ BasicOp $ SubExp $ Var $ paramName new_par
+    -- add the body of the scatter's lambda
+    mapM_ addStm $ bodyStms $ lambdaBody scat_lam
+    -- add the withAcc update statements
+    let iv_ses = groupScatterResults' scat_res_info $ bodyResult $ lambdaBody scat_lam
+    res_nms <-
+      forM (zip cons_ps iv_ses) $ \(cons_p, (i_ses, v_se)) -> do
+        -- i_ses is a list
+        let f nm_in i_se =
+              letExp (baseString nm_in) $ BasicOp $ UpdateAcc Safe nm_in [resSubExp i_se] [resSubExp v_se]
+        foldM f (paramName cons_p) i_ses
+    let lam_certs = foldMap resCerts $ bodyResult $ lambdaBody scat_lam
+    pure $ mkBody mempty $ map (SubExpRes lam_certs . Var) res_nms
 -- \| the recursive case builds a call to a map soac.
 mkWithAccBdy' static_arg (dim : dims) dims_rev iot_par_nms rshp_ps cons_ps = do
   scope <- askScope
@@ -452,12 +448,13 @@ tryFuseWithAccs
               forM_ tup_common $ \(tup1, tup2) -> do
                 let (lpar1, lpar2) = (accTup4 tup1, accTup4 tup2)
                     ((nm1, _), nm2, tp_acc) = (accTup5 tup1, paramName lpar2, paramDec lpar1)
-                addStm $ Let (Pat [PatElem nm2 tp_acc]) emptyAux $ BasicOp $ SubExp $ Var nm1
+                letBind (Pat [PatElem nm2 tp_acc]) $ BasicOp $ SubExp $ Var nm1
               -- add copy stms to bring in scope x1 ... xq
               forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
                 let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
-                    aux = emptyAux {stmAuxCerts = resCerts bdy_res}
-                addStm $ Let (Pat [PatElem nm tp]) aux $ BasicOp $ SubExp se
+                certifying (resCerts bdy_res) $
+                  letBind (Pat [PatElem nm tp]) $
+                    BasicOp (SubExp se)
               -- add the statements of lam2 (in which the acc-certificates have been substituted)
               mapM_ addStm $ stmsToList $ bodyStms lam2_bdy'
               -- build the result of body
