@@ -85,7 +85,6 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
     -- \^ get the scatter
     scat_trsfs <- map H.inputTransforms (H.inputs scat_soac),
     -- \^ get the transforms on the input
-    -- trace ("\n\n!!!!!!!!!! Fusion-Map-Flat-Scatter !!!!!!!!!!!!\n\n") $
     any (/= mempty) scat_trsfs,
     scat_ctx <- G.context g scat_node_id,
     (out_deps, _, _, inp_deps) <- scat_ctx,
@@ -117,36 +116,36 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
     all (\(_, (s1', s2', _)) -> s1 == s1' && s2 == s2') rep_rshps,
     -- \^ Check that all unflatten shape dimensions are the same,
     --   so that we can construct a map nest;
-    checkSafeAndProfitable dg scat_node_id ctxs_rshp cons_ctxs =
-      -- \^ check profitability, which is conservatively defined as
-      --   all the reshaped and consumer arrays are used solely
-      --   by the scatter AND all reshape dependencies originate
-      --   in the same map.
-      do
-        -- generate the withAcc statement
-        let cons_patels_outs = zip (patElems scat_pat) scat_out
-        wacc_stm <- mkWithAccStm rep_iotas rep_rshps cons_patels_outs scat_aux scat_lam
-        let all_cert_rshp = foldl (<>) mempty certs_rshps
-            aux = stmAux wacc_stm
-            aux' = aux {stmAuxCerts = all_cert_rshp <> stmAuxCerts aux}
-            wacc_stm' = wacc_stm {stmAux = aux'}
-            -- get the input deps of iotas
-            fiot acc (_, _, _, inp_deps_iot) =
-              acc <> inp_deps_iot
-            deps_of_iotas = foldl fiot mempty ctxs_iots
-            --
-            iota_nms = namesFromList $ map (fst . fst) rep_iotas
-            inp_deps_wo_iotas = filter ((`notNameIn` iota_nms) . getName . fst) inp_deps
-            -- generate a new node for the with-acc-stmt and its associated context:
-            --   add the inp-deps of iotas but remove the iota themselves from deps.
-            new_withacc_nT = StmNode wacc_stm'
-            inp_deps' = inp_deps_wo_iotas <> deps_of_iotas
-            new_withacc_ctx = (out_deps, scat_node_id, new_withacc_nT, inp_deps')
-            -- construct the new WithAcc node/graph; do we need to use `fusedSomething` ??
-            new_node = G.node' new_withacc_ctx
-            dg' = dg {dgGraph = new_withacc_ctx G.& G.delNodes [new_node] g}
-        -- result
-        pure $ Just dg'
+
+    -- check profitability, which is conservatively defined as all
+    -- the reshaped and consumer arrays are used solely by the
+    -- scatter AND all reshape dependencies originate in the same
+    -- map.
+    checkSafeAndProfitable dg scat_node_id ctxs_rshp cons_ctxs = do
+      -- generate the withAcc statement
+      let cons_patels_outs = zip (patElems scat_pat) scat_out
+      wacc_stm <- mkWithAccStm rep_iotas rep_rshps cons_patels_outs scat_aux scat_lam
+      let all_cert_rshp = foldl (<>) mempty certs_rshps
+          aux = stmAux wacc_stm
+          aux' = aux {stmAuxCerts = all_cert_rshp <> stmAuxCerts aux}
+          wacc_stm' = wacc_stm {stmAux = aux'}
+          -- get the input deps of iotas
+          fiot acc (_, _, _, inp_deps_iot) =
+            acc <> inp_deps_iot
+          deps_of_iotas = foldl fiot mempty ctxs_iots
+          --
+          iota_nms = namesFromList $ map (fst . fst) rep_iotas
+          inp_deps_wo_iotas = filter ((`notNameIn` iota_nms) . getName . fst) inp_deps
+          -- generate a new node for the with-acc-stmt and its associated context:
+          --   add the inp-deps of iotas but remove the iota themselves from deps.
+          new_withacc_nT = StmNode wacc_stm'
+          inp_deps' = inp_deps_wo_iotas <> deps_of_iotas
+          new_withacc_ctx = (out_deps, scat_node_id, new_withacc_nT, inp_deps')
+          -- construct the new WithAcc node/graph; do we need to use `fusedSomething` ??
+          new_node = G.node' new_withacc_ctx
+          dg' = dg {dgGraph = new_withacc_ctx G.& G.delNodes [new_node] g}
+      -- result
+      pure $ Just dg'
   where
     --
     getNodeTfromCtx (_, _, nT, _) = nT
@@ -430,58 +429,55 @@ tryFuseWithAccs
       all (`notElem` infusible) bs,
       -- safety 3:
       cs <- namesFromList $ concatMap ((\(_, xs, _) -> xs) . accTup2) acc_tup2,
-      all ((`notNameIn` cs) . patElemName . fst) other_pr1 =
-        do
-          -- rest of implementation
-          let getCertPairs (t1, t2) = (paramName (accTup3 t2), paramName (accTup3 t1))
-              tab_certs = M.fromList $ map getCertPairs tup_common
-              lam2_bdy' = substituteNames tab_certs (lambdaBody lam2)
-              rcrt_params = map (accTup3 . fst) tup_common ++ map accTup3 acc_tup1' ++ map accTup3 acc_tup2'
-              racc_params = map (accTup4 . fst) tup_common ++ map accTup4 acc_tup1' ++ map accTup4 acc_tup2'
-              (comm_res_nms, comm_res_certs2) = unzip $ map (accTup5 . snd) tup_common
-              (_, comm_res_certs1) = unzip $ map (accTup5 . fst) tup_common
-              com_res_certs = zipWith (\x y -> Certs (unCerts x ++ unCerts y)) comm_res_certs1 comm_res_certs2
-              bdyres_certs = com_res_certs ++ map (snd . accTup5) (acc_tup1' ++ acc_tup2')
-              bdyres_accse = map Var comm_res_nms ++ map (Var . fst . accTup5) (acc_tup1' ++ acc_tup2')
-              bdy_res_accs = zipWith SubExpRes bdyres_certs bdyres_accse
-              bdy_res_others = map snd $ other_pr1 ++ other_pr2
-          scope <- askScope
-          lam_bdy <-
-            runBodyBuilder $ do
-              buildBody_ . localScope (scope <> scopeOfLParams (rcrt_params ++ racc_params)) $ do
-                -- add the stms of lam1
-                mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam1
-                -- add the copy stms for the common accumulator
-                forM_ tup_common $ \(tup1, tup2) -> do
-                  let (lpar1, lpar2) = (accTup4 tup1, accTup4 tup2)
-                      ((nm1, _), nm2, tp_acc) = (accTup5 tup1, paramName lpar2, paramDec lpar1)
-                  addStm $ Let (Pat [PatElem nm2 tp_acc]) emptyAux $ BasicOp $ SubExp $ Var nm1
-                -- add copy stms to bring in scope x1 ... xq
-                forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
-                  let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
-                      aux = emptyAux {stmAuxCerts = resCerts bdy_res}
-                  addStm $ Let (Pat [PatElem nm tp]) aux $ BasicOp $ SubExp se
-                -- add the statements of lam2 (in which the acc-certificates have been substituted)
-                mapM_ addStm $ stmsToList $ bodyStms lam2_bdy'
-                -- build the result of body
-                pure $ bdy_res_accs ++ bdy_res_others
-          let tp_res_other = map (patElemType . fst) (other_pr1 ++ other_pr2)
-              res_lam =
-                Lambda
-                  { lambdaParams = rcrt_params ++ racc_params,
-                    lambdaBody = lam_bdy,
-                    lambdaReturnType = map paramDec racc_params ++ tp_res_other
-                  }
-          res_lam' <- renameLambda res_lam
-          let res_pat =
-                concatMap (accTup1 . snd) tup_common
-                  ++ concatMap accTup1 (acc_tup1' ++ acc_tup2')
-                  ++ map fst (other_pr1 ++ other_pr2)
-              res_w_inps = map (accTup2 . fst) tup_common ++ map accTup2 (acc_tup1' ++ acc_tup2')
-          res_w_inps' <- mapM renameLamInWAccInp res_w_inps
-          let stm_res = Let (Pat res_pat) (aux1 <> aux2) $ WithAcc res_w_inps' res_lam'
-          -- trace ("WithAcc-WithAcc: stm1:\n" ++ prettyString stm1 ++ "\nstm2:\n" ++ prettyString stm2 ++ "\nFusedRes:\n" ++ prettyString stm_res) $
-          pure $ Just stm_res
+      all ((`notNameIn` cs) . patElemName . fst) other_pr1 = do
+        let getCertPairs (t1, t2) = (paramName (accTup3 t2), paramName (accTup3 t1))
+            tab_certs = M.fromList $ map getCertPairs tup_common
+            lam2_bdy' = substituteNames tab_certs (lambdaBody lam2)
+            rcrt_params = map (accTup3 . fst) tup_common ++ map accTup3 acc_tup1' ++ map accTup3 acc_tup2'
+            racc_params = map (accTup4 . fst) tup_common ++ map accTup4 acc_tup1' ++ map accTup4 acc_tup2'
+            (comm_res_nms, comm_res_certs2) = unzip $ map (accTup5 . snd) tup_common
+            (_, comm_res_certs1) = unzip $ map (accTup5 . fst) tup_common
+            com_res_certs = zipWith (\x y -> Certs (unCerts x ++ unCerts y)) comm_res_certs1 comm_res_certs2
+            bdyres_certs = com_res_certs ++ map (snd . accTup5) (acc_tup1' ++ acc_tup2')
+            bdyres_accse = map Var comm_res_nms ++ map (Var . fst . accTup5) (acc_tup1' ++ acc_tup2')
+            bdy_res_accs = zipWith SubExpRes bdyres_certs bdyres_accse
+            bdy_res_others = map snd $ other_pr1 ++ other_pr2
+        scope <- askScope
+        lam_bdy <-
+          runBodyBuilder $ do
+            buildBody_ . localScope (scope <> scopeOfLParams (rcrt_params ++ racc_params)) $ do
+              -- add the stms of lam1
+              mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam1
+              -- add the copy stms for the common accumulator
+              forM_ tup_common $ \(tup1, tup2) -> do
+                let (lpar1, lpar2) = (accTup4 tup1, accTup4 tup2)
+                    ((nm1, _), nm2, tp_acc) = (accTup5 tup1, paramName lpar2, paramDec lpar1)
+                addStm $ Let (Pat [PatElem nm2 tp_acc]) emptyAux $ BasicOp $ SubExp $ Var nm1
+              -- add copy stms to bring in scope x1 ... xq
+              forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
+                let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
+                    aux = emptyAux {stmAuxCerts = resCerts bdy_res}
+                addStm $ Let (Pat [PatElem nm tp]) aux $ BasicOp $ SubExp se
+              -- add the statements of lam2 (in which the acc-certificates have been substituted)
+              mapM_ addStm $ stmsToList $ bodyStms lam2_bdy'
+              -- build the result of body
+              pure $ bdy_res_accs ++ bdy_res_others
+        let tp_res_other = map (patElemType . fst) (other_pr1 ++ other_pr2)
+            res_lam =
+              Lambda
+                { lambdaParams = rcrt_params ++ racc_params,
+                  lambdaBody = lam_bdy,
+                  lambdaReturnType = map paramDec racc_params ++ tp_res_other
+                }
+        res_lam' <- renameLambda res_lam
+        let res_pat =
+              concatMap (accTup1 . snd) tup_common
+                ++ concatMap accTup1 (acc_tup1' ++ acc_tup2')
+                ++ map fst (other_pr1 ++ other_pr2)
+            res_w_inps = map (accTup2 . fst) tup_common ++ map accTup2 (acc_tup1' ++ acc_tup2')
+        res_w_inps' <- mapM renameLamInWAccInp res_w_inps
+        let stm_res = Let (Pat res_pat) (aux1 <> aux2) $ WithAcc res_w_inps' res_lam'
+        pure $ Just stm_res
     where
       -- local helpers:
 
