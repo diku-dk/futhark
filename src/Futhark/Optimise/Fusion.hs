@@ -485,8 +485,6 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
     relevant (_, e) = isDep e
     fuses_with = map fst $ filter relevant $ G.lpre g node_to_fuse_id
 
--- fuses_with = map fst $ filter (isDep . snd) $ G.lpre g node_to_fuse_id
-
 doVerticalFusion :: DepGraphAug FusionM
 doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relevant $ G.labNodes (dgGraph dg)) dg
   where

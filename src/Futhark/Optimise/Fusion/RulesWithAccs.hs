@@ -148,18 +148,6 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
         -- result
         pure $ Just dg'
   where
-    {--
-      trace ("\nCOSMIN debug\n input scatter:\n" ++ prettyString scat_soac ++
-               "\n scat_out: " ++ prettyString scat_out ++ "\n" ++
-               "\n scat inps: " ++ show scat_inp ++
-               "\nInput-Transforms: " ++ show scat_trsfs ++
-               "\nScat-Out-Transforms: " ++ show node_out_trsfs ++
-               "\nPattern: " ++ prettyString scat_pat ++
-               "\nAux: " ++ show scat_aux ++
-               "\n\n\nResult WithAccStmt:\n" ++ prettyString wacc_stm'
-            ) $
-    --}
-
     --
     getNodeTfromCtx (_, _, nT, _) = nT
     findCtxOf ctxes nm
@@ -628,23 +616,3 @@ substInSEs vtab = map substInSE
 
 allEq :: (Eq a) => [a] -> [a] -> Bool
 allEq = (==)
-
-{--
-printNodeT :: NodeT -> String
-printNodeT (StmNode stm) = prettyString stm
-printNodeT (SoacNode trsf pat soac aux) =
-  prettyString pat  ++ " = " ++
-  prettyString soac ++ "\n"  ++
-  "\n\t\tAux: " ++ show aux ++
-  "\n\t\tTransforms: " ++ show trsf
-printNodeT (TransNode nm1 _trsf nm2) =
-  prettyString nm1 ++ " H.transform " ++ prettyString nm2
-printNodeT (ResNode nm) =
-  "Result " ++ prettyString nm
-printNodeT (FreeNode nm) =
-  "FreeNode " ++ prettyString nm
-printNodeT (MatchNode stm _) =
-  "MatchNode of stm: " ++ prettyString stm
-printNodeT (DoNode stm _) =
-  "DoNode of stm: " ++ prettyString stm
---}
