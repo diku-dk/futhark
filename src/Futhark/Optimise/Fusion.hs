@@ -314,12 +314,12 @@ vFuseNodeT
         do
           lam <- fst <$> doFusionInLambda lam0
           bdy' <-
-            runBodyBuilder $ localScope (scopeOfLParams (lambdaParams lam)) $ do
+            runBodyBuilder $ inScopeOf lam $ do
               soac' <- H.toExp soac
               addStm $ Let pat1 aux1 soac'
-              mapM_ addStm $ bodyStms $ lambdaBody lam
+              lam_res <- bodyBind $ lambdaBody lam
               let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms
-              pure $ bodyResult (lambdaBody lam) ++ pat1_res
+              pure $ lam_res ++ pat1_res
           let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
               pat = Pat $ patElems pat2 ++ patElems pat1
           lam' <- renameLambda $ lam {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
@@ -353,11 +353,11 @@ vFuseNodeT
         let empty_aux = StmAux mempty mempty mempty
         wlam <- fst <$> doFusionInLambda wlam0
         bdy' <-
-          runBodyBuilder $ localScope (scopeOf wlam) $ do
+          runBodyBuilder $ inScopeOf wlam $ do
             -- adding stms of withacc's lambda
-            mapM_ addStm $ bodyStms $ lambdaBody wlam
+            wlam_res <- bodyBind $ lambdaBody wlam
             -- add copies of the non-accumulator results of withacc
-            let other_pr1 = drop n $ zip (patElems pat1) (bodyResult (lambdaBody wlam))
+            let other_pr1 = drop n $ zip (patElems pat1) wlam_res
             forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
               let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
                   aux = empty_aux {stmAuxCerts = resCerts bdy_res}
@@ -367,7 +367,7 @@ vFuseNodeT
             addStm $ Let pat2 aux2 soac'
             -- build the body result
             let pat2_res = map (SubExpRes (Certs []) . Var . patElemName) $ patElems pat2
-            pure $ bodyResult (lambdaBody wlam) ++ pat2_res
+            pure $ wlam_res ++ pat2_res
         let lam_ret_tp = lambdaReturnType wlam ++ map patElemType (patElems pat2)
             pat = Pat $ patElems pat1 ++ patElems pat2
         wlam' <- renameLambda $ wlam {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
@@ -552,7 +552,7 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     pure (incoming, node, StmNode (Let pat aux (WithAcc inputs lam')), outgoing)
   SoacNode ots pat soac aux -> do
     let lam = H.lambda soac
-    lam' <- localScope (scopeOf lam) $ case soac of
+    lam' <- inScopeOf lam $ case soac of
       H.Stream {} ->
         dontFuseScans $ fst <$> doFusionInLambda lam
       _ ->
@@ -562,7 +562,7 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   _ -> pure c
   where
     doFusionWithDelayed :: Body SOACS -> [(NodeT, [EdgeT])] -> FusionM (Body SOACS)
-    doFusionWithDelayed (Body () stms res) extraNodes = localScope (scopeOf stms) $ do
+    doFusionWithDelayed (Body () stms res) extraNodes = inScopeOf stms $ do
       stm_node <- mapM (finalizeNode . fst) extraNodes
       stms' <- fuseGraph (mkBody (mconcat stm_node <> stms) res)
       pure $ Body () stms' res
@@ -572,7 +572,7 @@ doFusionInLambda lam = do
   -- To clean up previous instances of fusion.
   lam' <- simplifyLambda lam
   prev_count <- gets fusionCount
-  newbody <- localScope (scopeOf lam') $ doFusionBody $ lambdaBody lam'
+  newbody <- inScopeOf lam' $ doFusionBody $ lambdaBody lam'
   aft_count <- gets fusionCount
   -- To clean up any inner fusion.
   lam'' <-
@@ -587,7 +587,7 @@ doFusionInLambda lam = do
 
 -- main fusion function.
 fuseGraph :: Body SOACS -> FusionM (Stms SOACS)
-fuseGraph body = localScope (scopeOf (bodyStms body)) $ do
+fuseGraph body = inScopeOf (bodyStms body) $ do
   graph_not_fused <- mkDepGraph body
   graph_fused <- doAllFusion graph_not_fused
   linearizeGraph graph_fused
