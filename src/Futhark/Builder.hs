@@ -88,7 +88,7 @@ newtype BuilderT rep m a = BuilderT (StateT (Stms rep, Scope rep) m a)
 instance MonadTrans (BuilderT rep) where
   lift = BuilderT . lift
 
--- | The most commonly used binder monad.
+-- | The most commonly used builder monad.
 type Builder rep = BuilderT rep (State VNameSource)
 
 instance (MonadFreshNames m) => MonadFreshNames (BuilderT rep m) where
@@ -138,7 +138,7 @@ instance
     BuilderT $ put (old_stms, old_scope)
     pure (x, new_stms)
 
--- | Run a binder action given an initial scope, returning a value and
+-- | Run a builder action given an initial scope, returning a value and
 -- the statements added ('addStm') during the action.
 runBuilderT ::
   (MonadFreshNames m) =>
@@ -175,7 +175,7 @@ runBuilderT'_ ::
   m (Stms rep)
 runBuilderT'_ = fmap snd . runBuilderT'
 
--- | Run a binder action, returning a value and the statements added
+-- | Run a builder action, returning a value and the statements added
 -- ('addStm') during the action.  Assumes that the current monad
 -- provides initial scope and name source.
 runBuilder ::
