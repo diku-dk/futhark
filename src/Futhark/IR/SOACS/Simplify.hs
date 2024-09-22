@@ -154,7 +154,7 @@ fixLambdaParams lam fixes = do
   body <- runBodyBuilder $
     localScope (scopeOfLParams $ lambdaParams lam) $ do
       zipWithM_ maybeFix (lambdaParams lam) fixes'
-      pure $ lambdaBody lam
+      bodyBind $ lambdaBody lam
   pure
     lam
       { lambdaBody = body,

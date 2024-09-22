@@ -1591,7 +1591,7 @@ isOverloadedFunction qname desc loc = do
                     and_lam <- binOpLambda I.LogAnd I.Bool
                     reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
                     all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems [cmps] reduce
-                    pure $ resultBody [all_equal]
+                    pure $ subExpsRes [all_equal]
 
               letSubExp "arrays_equal"
                 =<< eIf (eSubExp shapes_match) compare_elems_body (resultBodyM [constant False])
@@ -2094,7 +2094,7 @@ partitionWithSOACS k lam arrs = do
     replicateM k $ newParam "y" (I.Prim int64)
   add_lam_body <- runBodyBuilder $
     localScope (scopeOfLParams $ add_lam_x_params ++ add_lam_y_params) $
-      fmap resultBody $
+      fmap subExpsRes $
         forM (zip add_lam_x_params add_lam_y_params) $ \(x, y) ->
           letSubExp "z" $
             I.BasicOp $
@@ -2118,7 +2118,7 @@ partitionWithSOACS k lam arrs = do
   -- just have to be careful in case the array is empty.
   last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int64 OverflowUndef) w $ constant (1 :: Int64)
   let nonempty_body = runBodyBuilder $
-        fmap resultBody $
+        fmap subExpsRes $
           forM all_offsets $ \offset_array ->
             letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ Slice [I.DimFix last_index]
       empty_body = resultBodyM $ replicate k $ constant (0 :: Int64)

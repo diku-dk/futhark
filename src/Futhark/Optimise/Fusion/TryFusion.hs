@@ -789,7 +789,8 @@ pullReshape (SOAC.Screma _ inps form) ots
 
             inner_body <-
               runBodyBuilder $
-                eBody [SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps]
+                varsRes . pure
+                  <$> (letExp "x" <=< SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps)
             let inner_fun =
                   Lambda
                     { lambdaParams = ps,

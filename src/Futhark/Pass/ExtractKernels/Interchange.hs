@@ -213,14 +213,13 @@ interchangeBranch1
         branch_pat' =
           Pat $ map (fmap (`arrayOfRow` w)) $ patElems branch_pat
 
-        mkBranch branch = (renameBody =<<) $ do
+        mkBranch branch = (renameBody =<<) $ runBodyBuilder $ do
           let lam = Lambda params lam_ret branch
-              res = varsRes $ patNames branch_pat'
-              map_stm = Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
-          pure $ mkBody (oneStm map_stm) res
+          addStm $ Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
+          pure $ varsRes $ patNames branch_pat'
 
-    cases' <- mapM (traverse $ runBodyBuilder . mkBranch) cases
-    defbody' <- runBodyBuilder $ mkBranch defbody
+    cases' <- mapM (traverse mkBranch) cases
+    defbody' <- mkBranch defbody
     pure . Branch [0 .. patSize pat - 1] pat' cond cases' defbody' $
       MatchDec ret' if_sort
 

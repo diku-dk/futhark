@@ -194,17 +194,19 @@ runBuilder_ ::
   m (Stms rep)
 runBuilder_ = fmap snd . runBuilder
 
--- | Run a binder that produces a t'Body', and prefix that t'Body' by
--- the statements produced during execution of the action.
+-- | Run a builder that produces a 'Result' and construct a body that
+-- contains that result alongside the statements produced during the
+-- builder.
 runBodyBuilder ::
   ( Buildable rep,
     MonadFreshNames m,
     HasScope somerep m,
     SameScope somerep rep
   ) =>
-  Builder rep (Body rep) ->
+  Builder rep Result ->
   m (Body rep)
-runBodyBuilder = fmap (uncurry $ flip insertStms) . runBuilder
+runBodyBuilder =
+  fmap (uncurry $ flip insertStms) . runBuilder . fmap (mkBody mempty)
 
 -- | Given lambda parameters, Run a builder action that produces the
 -- statements and returns the 'Result' of the lambda body.
