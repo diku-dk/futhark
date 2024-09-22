@@ -317,7 +317,7 @@ vFuseNodeT
             runBodyBuilder $ localScope (scopeOfLParams (lambdaParams lam)) $ do
               soac' <- H.toExp soac
               addStm $ Let pat1 aux1 soac'
-              mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody lam
+              mapM_ addStm $ bodyStms $ lambdaBody lam
               let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms
               pure $ bodyResult (lambdaBody lam) ++ pat1_res
           let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
@@ -355,7 +355,7 @@ vFuseNodeT
         bdy' <-
           runBodyBuilder $ localScope (scopeOf wlam) $ do
             -- adding stms of withacc's lambda
-            mapM_ addStm $ stmsToList $ bodyStms $ lambdaBody wlam
+            mapM_ addStm $ bodyStms $ lambdaBody wlam
             -- add copies of the non-accumulator results of withacc
             let other_pr1 = drop n $ zip (patElems pat1) (bodyResult (lambdaBody wlam))
             forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
