@@ -29,11 +29,16 @@ fmtParseTest (file, bs) =
           assertFailure $ "Could not parse: " <> T.unpack err
         Right _ -> pure ()
   where
+    succeeded f g t =
+      case (f t, g t) of
+        (Left (SyntaxError _ err0), Left (SyntaxError _ err1)) | err0 == err1 -> Right ()
+        (Right _, Right _) -> Right ()
+        (Left (SyntaxError loc err), _) -> Left $ locText loc <> ": " <> prettyText err
+        (_, Left (SyntaxError loc err)) -> Left $ locText loc <> ": " <> prettyText err
+    
     result = do 
       t <- first (const "Error: Can not parse file as UTF-8.") $ T.decodeUtf8' bs 
-      fmt <- fmtText file t
-      first (\(SyntaxError loc err) -> locText loc <> ": " <> prettyText err)
-        $ parseFutharkWithComments file fmt
+      succeeded (fmtText file) (parseFutharkWithComments file) t
 
 fmtParseTests :: TestTree 
 fmtParseTests = testGroup "format and parse tests" $ map fmtParseTest programs

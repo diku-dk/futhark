@@ -335,6 +335,11 @@ fmtTypeParam (TypeParamType l name _loc) = do
   l' <- fmtLiftedness l
   pure ["'" <> l' <> prettyText name]
 
+fmtName :: Name -> Line
+fmtName name
+  | operatorName name = "(" <> prettyText name <> ")"
+  | otherwise = prettyText name
+
 fmtPat :: UncheckedPat t -> FmtM Fmt
 fmtPat (TuplePat pats _loc) = do
   fmt <- L.intercalate [", "] <$> mapM fmtPat pats
@@ -349,7 +354,7 @@ fmtPat (RecordPat pats _loc) = do
 fmtPat (PatParens pat _loc) = do
   fmt <- fmtPat pat
   pure $ ["("] <> fmt <> [")"]
-fmtPat (Id name _ _loc) = pure [prettyText name] -- Need to add parenthesis around ++ in tests/uniqueness/uniqueness-error37.fut 
+fmtPat (Id name _ _loc) = pure [fmtName name] -- Need to add parenthesis around ++ in tests/uniqueness/uniqueness-error37.fut 
 fmtPat (Wildcard _t _loc) = pure ["_"]
 fmtPat (PatAscription pat t _loc) = do
   pat' <- fmtPat pat
@@ -399,6 +404,12 @@ fmtDimIndex (DimSlice i (Just j) s) = do
 fmtDimIndex (DimSlice i Nothing Nothing) =
   (<> [":"]) <$> maybe (pure mempty) fmtExp i
 
+operatorName :: Name -> Bool
+operatorName = (`elem` opchars) . T.head . nameToText
+  where
+    opchars :: String
+    opchars = "+-*/%=!><|&^."
+
 fmtExp :: UncheckedExp -> FmtM Fmt
 fmtExp (Var name _ _loc) = pure [prettyText name]
 fmtExp (Hole _ _loc) = pure ["???"]
@@ -430,7 +441,7 @@ fmtExp (Negate e _loc) = do
   pure $ mapFirst ("-"<>) e'
 fmtExp (Not e _loc) = do
   e' <- fmtExp e
-  pure $ mapFirst ("-"<>) e'
+  pure $ mapFirst ("not "<>) e'
 fmtExp (Update src idxs ve _loc) = do
   src' <- fmtExp src
   idxs' <- brackets . L.intercalate [", "] <$> mapM fmtDimIndex idxs
@@ -450,7 +461,7 @@ fmtExp (Lambda params body rettype _ _) = do
   body' <- fmtExp body
   ascript <- maybe (pure mempty) (fmap ([":"] <>) . fmtTypeExp) rettype
   pure $ ["\\"] <> params' <> ascript <> [" -> "] <> body'
-fmtExp (OpSection binop _ _loc) = pure [fmtQualName binop]
+fmtExp (OpSection binop _ _loc) = pure ["(" <> fmtQualName binop <> ")"]
 fmtExp (OpSectionLeft binop _ x _ _ _) =
   pure [mconcat $ parens [prettyText x <> fmtBinOp binop]]
 fmtExp (OpSectionRight binop _ x _ _ _) =
@@ -461,7 +472,7 @@ fmtExp (ProjectSection fields _ _) =
     p name = "." <> prettyText name
 fmtExp (IndexSection idxs _ _) = do
   idxs' <- mconcat . brackets . L.intercalate [", "] <$> mapM fmtDimIndex idxs
-  pure ["." <> idxs']
+  pure ["(" <> "." <> idxs' <> ")"]
 fmtExp (Constr n cs _ _) = do
   cs' <- mconcat . L.intercalate [" "] <$> mapM fmtExp cs
   pure ["#" <> prettyText n <> cs']
@@ -638,7 +649,7 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body _doc attrs _lo
   body' <- fmtExp body
   pure $ fmt_attrs <>
          fun <>
-         [prettyText name] <>
+         [fmtName name] <>
          tparams' <>
          args' <>
          retdecl' <>
@@ -698,7 +709,7 @@ fmtModTypeExp (ModTypeArrow Nothing te0 te1 _loc) = do
 fmtModTypeBind :: UncheckedModTypeBind -> FmtM Fmt
 fmtModTypeBind (ModTypeBind pName pSig _ _) = do
   pSig' <- fmtModTypeExp pSig
-  pure $ ["module type" <> prettyText pName <> " = "] <> pSig'
+  pure $ ["module type " <> prettyText pName <> " = "] <> pSig'
 
 fmtModParam :: ModParamBase NoInfo Name -> FmtM Fmt
 fmtModParam (ModParam pName pSig _f _loc) = do
@@ -725,7 +736,7 @@ fmtModExp (ModParens f _loc) = do
   f' <- fmtModExp f 
   pure $ parens f'
 fmtModExp (ModImport path _f _loc) =
-  pure ["import " <> prettyText path]
+  pure ["import \"" <> prettyText path <> "\""]
 -- Should be put inside a nested block 
 fmtModExp (ModDecs decs _loc) = do
   decs' <- mapM fmtDec decs
@@ -765,7 +776,7 @@ fmtDec (LocalDec tb _loc) = do
   pure $ ["local "] <> tb'
 -- Import declarations.
 fmtDec (ImportDec path _tb _loc) = 
-  pure ["import " <> prettyText path] 
+  pure ["import \"" <> prettyText path <> "\""] 
 
 -- | Does not return residual comments, because these are simply
 -- inserted at the end.
@@ -793,7 +804,7 @@ main = mainWithOptions () [] "program" $ \args () ->
           T.hPutStr stdout $ T.unlines fmt
     _ -> Nothing
 
-fmtText :: String -> T.Text -> Either T.Text T.Text
+fmtText :: String -> T.Text -> Either SyntaxError T.Text
 fmtText fName fContent = do 
-  (prog, cs) <- first syntaxErrorMsg $ parseFutharkWithComments fName fContent
+  (prog, cs) <- parseFutharkWithComments fName fContent
   pure $ T.unlines $ evalState (fmtProg prog) (FmtState { comments = cs })
