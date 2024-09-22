@@ -154,7 +154,7 @@ toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
       letBindNames nres
         =<< SOAC.toExp
         =<< toSOAC (MapNest nw lam ns $ map (SOAC.identInput . paramIdent) nparams)
-      pure $ resultBody $ map Var nres
+      pure $ varsRes nres
   let outerlam =
         Lambda
           { lambdaParams = nparams,
