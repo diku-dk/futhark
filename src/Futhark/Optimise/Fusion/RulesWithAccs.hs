@@ -557,9 +557,9 @@ equivLambda ::
 equivLambda stab lam1 lam2
   | (ps1, ps2) <- (lambdaParams lam1, lambdaParams lam2),
     (nms1, nms2) <- (map paramName ps1, map paramName ps2),
-    allEq (map paramDec ps1) (map paramDec ps2),
-    allEq (map paramAttrs ps1) (map paramAttrs ps2),
-    allEq (lambdaReturnType lam1) (lambdaReturnType lam2),
+    map paramDec ps1 == map paramDec ps2,
+    map paramAttrs ps1 == map paramAttrs ps2,
+    lambdaReturnType lam1 == lambdaReturnType lam2,
     (bdy1, bdy2) <- (lambdaBody lam1, lambdaBody lam2),
     bodyDec bdy1 == bodyDec bdy2 =
       let insert tab (x, k) = M.insert k x tab
@@ -571,7 +571,7 @@ equivLambda stab lam1 lam2
               zip (stmsToList (bodyStms bdy1)) $
                 stmsToList (bodyStms bdy2)
           sres2 = substInSEs stab'' $ map resSubExp $ bodyResult bdy2
-       in success && allEq (map resSubExp (bodyResult bdy1)) sres2
+       in success && map resSubExp (bodyResult bdy1) == sres2
 equivLambda _ _ _ =
   False
 
@@ -584,9 +584,9 @@ equivStm
   stab
   (Let pat1 aux1 (BasicOp (BinOp bop1 se11 se12)))
   (Let pat2 aux2 (BasicOp (BinOp bop2 se21 se22)))
-    | allEq [se11, se12] (substInSEs stab [se21, se22]),
+    | [se11, se12] == substInSEs stab [se21, se22],
       (pels1, pels2) <- (patElems pat1, patElems pat2),
-      allEq (map patElemDec pels1) (map patElemDec pels2),
+      map patElemDec pels1 == map patElemDec pels2,
       bop1 == bop2 && aux1 == aux2 =
         let stab_new =
               M.fromList $
@@ -599,8 +599,8 @@ matchingAccTup :: AccTup -> AccTup -> Bool
 matchingAccTup
   (pat_els1, (shp1, _winp_arrs1, mlam1), _, _, _)
   (_, (shp2, winp_arrs2, mlam2), _, _, _) =
-    allEq (shapeDims shp1) (shapeDims shp2)
-      && allEq (map patElemName pat_els1) winp_arrs2
+    shapeDims shp1 == shapeDims shp2
+      && map patElemName pat_els1 == winp_arrs2
       && case (mlam1, mlam2) of
         (Nothing, Nothing) -> True
         (Just (lam1, see1), Just (lam2, see2)) ->
@@ -613,6 +613,3 @@ substInSEs vtab = map substInSE
     substInSE (Var x)
       | Just y <- M.lookup x vtab = Var y
     substInSE z = z
-
-allEq :: (Eq a) => [a] -> [a] -> Bool
-allEq = (==)
