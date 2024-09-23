@@ -6,7 +6,7 @@ import Data.Map qualified as M
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Substitution (..), SubstitutionBuilder (..), Unify (..), unifies_)
-import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
+import Futhark.MonadFreshNames (MonadFreshNames, newName)
 import Futhark.SoP.SoP (sym2SoP)
 
 instance FreeVariables Symbol where
@@ -37,7 +37,7 @@ instance Renameable Symbol where
       pure $ if x' /= x then Var x' else Hole x'
     Idx xs i -> Idx <$> rename_ tau xs <*> rename_ tau i
     LinComb xn lb ub e -> do
-      xm <- newNameFromString "i"
+      xm <- newName xn
       -- traceM $ "Renaming " <> prettyString xn <> " to " <> prettyString xm
       let tau' = M.insert xn xm tau
       LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau' e
