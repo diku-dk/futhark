@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Trailing commas are now allowed for arrays, records, and tuples in
   the textual value format and in FutharkScript.
 
+* Faster floating-point atomics with OpenCL backend on AMD and NVIDIA
+  GPUs. This affects histogram workloads.
+
 ### Removed
 
 ### Changed
