@@ -16,6 +16,8 @@ import Language.Futhark (VName)
 import Control.Monad (guard)
 import qualified Data.List as L
 import qualified Futhark.SoP.SoP as SoP
+import Futhark.FreshNames (newName)
+import Futhark.FreshNames (VNameSource)
 
 instance Eq Domain where
   -- Since the whole domain must be covered by an index function,
@@ -116,24 +118,34 @@ subIndexFn :: Substitution Symbol -> IndexFn -> IndexFnM IndexFn
 subIndexFn s indexfn = repIndexFn s <$> rename indexfn
 
 instance (Renameable a, Renameable b) => Renameable (Cases a b) where
-  rename_ tau (Cases cs) = Cases <$> mapM re cs
+  rename_ vns tau (Cases cs) = Cases <$> mapM re cs
     where
-      re (p, q) = (,) <$> rename_ tau p <*> rename_ tau q
+      re (p, q) = (,) <$> rename_ vns tau p <*> rename_ vns tau q
 
 instance Renameable Domain where
-  rename_ tau (Cat k m b) = do
-    k' <- newNameFromString "k"
-    let tau' = M.insert k k' tau
-    Cat k' <$> rename_ tau' m <*> rename_ tau' b
-  rename_ tau (Iota n) = Iota <$> rename_ tau n
+  rename_ vns tau (Cat xn m b) = fst <$> renameCat_ vns tau xn m b
+  rename_ vns tau (Iota n) = Iota <$> rename_ vns tau n
+
+renameCat_ :: MonadFreshNames m => VNameSource -> M.Map VName VName -> VName -> SoP Symbol -> SoP Symbol -> m (Domain, (M.Map VName VName, VNameSource))
+renameCat_ vns tau xn m b = do
+  let (xm, vns') = newName vns xn
+  let tau' = M.insert xn xm tau
+  dom <- Cat xm <$> rename_ vns' tau' m <*> rename_ vns' tau' b
+  pure (dom, (tau', vns'))
 
 instance Renameable IndexFn where
-  rename_ tau indexfn = case indexfn of
-    IndexFn Empty body -> IndexFn Empty <$> rename_ tau body
+  rename_ vns tau indexfn = case indexfn of
+    IndexFn Empty body -> IndexFn Empty <$> rename_ vns tau body
+    -- NOTE that i is not renamed.
+    -- XXX that is probably wrong, with fixed renaming should be doable?
+    -- XXX have to replicate Renameable domain here bc body
+    -- is quantified by Cat xn and so we need tau'...
+    IndexFn (Forall i (Cat xn m b)) body -> do
+      (dom, (tau', vns')) <- renameCat_ vns tau xn m b
+      IndexFn (Forall i dom) <$> rename_ vns' tau' body
     IndexFn (Forall i dom) body -> do
-      -- NOTE that i is not renamed.
-      dom' <- rename_ tau dom
-      IndexFn (Forall i dom') <$> rename_ tau body
+      dom' <- rename_ vns tau dom
+      IndexFn (Forall i dom') <$> rename_ vns tau body
 
 instance (MonadFreshNames m) => Unify Domain Symbol m where
   unify_ k (Iota n) (Iota m) = unify_ k n m
@@ -190,7 +202,7 @@ subst' x (IndexFn Empty xs) (IndexFn iter_y ys) =
           (ycond, yval) <- casesToList ys
           pure $ repCase (mkSub x xval) (ycond :&& xcond, yval)
       )
-subst' f (IndexFn (Forall _ (Iota n)) xs) (IndexFn (Forall i (Iota n')) ys)
+subst' x (IndexFn (Forall _ (Iota n)) xs) (IndexFn (Forall i (Iota n')) ys)
   | n == n' =
       pure $
         IndexFn
@@ -198,15 +210,15 @@ subst' f (IndexFn (Forall _ (Iota n)) xs) (IndexFn (Forall i (Iota n')) ys)
           ( cases $ do
               (xcond, xval) <- casesToList xs
               (ycond, yval) <- casesToList ys
-              let app = apply i (mkSub f xval)
-              pure (sop2Symbol (app ycond) :&& sop2Symbol (app xcond), mapSymSoP app yval)
+              let app = apply i (mkSub x xval)
+              pure (sop2Symbol (app ycond) :&& xcond, mapSymSoP app yval)
           )
 subst' _ _ _ = undefined
 
 apply :: VName -> Substitution Symbol -> Symbol -> SoP Symbol
 apply i s symbol = case symbol of
   Hole _ -> error "Apply on Hole."
-  Idx (Var vn) j -> rep (mkSub i j) $ rep s (Var vn)
+  -- Idx (Var vn) j -> rep (mkSub i j) $ rep s (Var vn)
   _ -> rep s symbol
 
 

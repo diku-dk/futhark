@@ -7,7 +7,7 @@ import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), IndexFnM, Iterator (..), VEnv (..), cases, clearAlgEnv, debugM, insertIndexFn, runIndexFnM)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), IndexFnM, Iterator (..), VEnv (..), cases, clearAlgEnv, debugM, insertIndexFn, runIndexFnM, debugPrettyM)
 import Futhark.Analysis.Proofs.IndexFnPlus (subst)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
@@ -223,6 +223,7 @@ forward (E.AppExp (E.Apply f args _) _)
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
       xss <- mapM forward args'
+      debugPrettyM "map args:" xss
       let IndexFn iter_first_arg _ = head xss
       -- TODO use iter_body; likely needed for nested maps?
       IndexFn iter_body cases_body <- forward body
@@ -242,9 +243,13 @@ forward (E.AppExp (E.Apply f args _) _)
       -- let xss_flat :: [IndexFn] = mconcat $ map unzipT xss
       let xss_flat = xss
       let y' = IndexFn iter_first_arg cases_body
+      debugPrettyM "map template:" y'
       -- tell ["Using map rule ", toLaTeX y']
-      foldM substParams y' (zip paramNames xss_flat)
-        >>= rewrite
+      res <- foldM substParams y' (zip paramNames xss_flat)
+      debugPrettyM "map substituted:" res
+      rewrite res
+      -- foldM substParams y' (zip paramNames xss_flat)
+      --   >>= rewrite
   | Just "replicate" <- getFun f,
     [n, x] <- getArgs args = do
       n' <- forward n

@@ -138,13 +138,6 @@ rulesSoP = do
             let idx = rep s (hole h4)
             ub $==$ (idx .-. int 1)
         },
-      -- TODO figure out way to say that the LinComb terms must match, but that
-      -- the bound var does not have to match. (Also goes for rules above this.)
-      -- I think it's because renaming is actually wrong!
-      -- Renaming below should apply independently to the two LinCombs meaning
-      -- the renaming in the first LinComb should not increment the VName counter
-      -- in the renaming in the second LinComb! --- That is, they should not be
-      -- sequenced, but be independent.
       Rule
         { name = "Merge sum-subtractation",
           from =

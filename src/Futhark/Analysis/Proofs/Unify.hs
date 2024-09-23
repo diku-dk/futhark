@@ -26,7 +26,7 @@ class Renameable u where
   -- Implements subC(id,tau,e) from Sieg and Kaufmann where
   -- tau is a renaming of bound variables. The context C is given by
   -- VNameSource in MonadFreshNames.
-  rename_ :: (MonadFreshNames m) => M.Map VName VName -> u -> m u
+  rename_ :: (MonadFreshNames m) => VNameSource -> M.Map VName VName -> u -> m u
 
   renameWith :: (MonadFreshNames m) => VNameSource -> u -> m u
   renameWith vns a = do
@@ -38,7 +38,7 @@ class Renameable u where
 
   -- Rename bound variables in u. Equivalent to subC(id,id,e).
   rename :: (MonadFreshNames m) => u -> m u
-  rename = rename_ mempty
+  rename x = getNameSource >>= \vns -> rename_ vns mempty x
 
 -- Rename bound variables in `a` and `b`. Renamed variables are
 -- identical, if `a` and `b` are syntactically equivalent.
@@ -107,19 +107,19 @@ class (MonadFreshNames m, Renameable v) => Unify v u m where
     pure $ s { vns = vns }
 
 instance Renameable VName where
-  rename_ tau x = pure $ M.findWithDefault x x tau
+  rename_ _ tau x = pure $ M.findWithDefault x x tau
 
 instance Renameable u => Renameable [u] where
-  rename_ tau = mapM (rename_ tau)
+  rename_ vns tau = mapM (rename_ vns tau)
 
 -- instance (Renameable u, Ord u) => Renameable ([u], Integer) where
 --   rename_ tau (xs, c) = (,c) <$> mapM (rename_ tau) xs
 
 instance (Renameable u, Ord u) => Renameable (Term u, Integer) where
-  rename_ tau (x, c) = (,c) . toTerm <$> mapM (rename_ tau) (termToList x)
+  rename_ vns tau (x, c) = (,c) . toTerm <$> mapM (rename_ vns tau) (termToList x)
 
 instance (Ord u, Renameable u) => Renameable (SoP u) where
-  rename_ tau = fmap sopFromList . mapM (rename_ tau) . sopToList
+  rename_ vns tau = fmap sopFromList . mapM (rename_ vns tau) . sopToList
 
 instance FreeVariables VName where
   fv = S.singleton

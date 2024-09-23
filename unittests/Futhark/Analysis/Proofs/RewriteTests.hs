@@ -113,7 +113,7 @@ tests =
               rewrite (LinComb w (int 0) (sVar a) (Idx (Var x) (sVar w))
                        ~-~ LinComb z (int 0) (sVar b) (Idx (Var x) (sVar z)))
           )
-          @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar a) (Var x)),
+          @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar a) (Idx (Var x) (sVar w))),
       testCase "Rule matches on subterms" $
         run
           ( \(x, y, z, w, _, _, _, _) ->

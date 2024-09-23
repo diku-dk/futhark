@@ -6,8 +6,9 @@ import Data.Map qualified as M
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Substitution (..), SubstitutionBuilder (..), Unify (..), unifies_)
-import Futhark.MonadFreshNames (MonadFreshNames, newName)
+import Futhark.MonadFreshNames (MonadFreshNames)
 import Futhark.SoP.SoP (sym2SoP)
+import Futhark.FreshNames (newName)
 
 instance FreeVariables Symbol where
   fv sym = case sym of
@@ -29,21 +30,20 @@ instance FreeVariables Symbol where
     Recurrence -> mempty
 
 instance Renameable Symbol where
-  rename_ tau sym = case sym of
-    Var x -> Var <$> rename_ tau x
+  rename_ vns tau sym = case sym of
+    Var x -> Var <$> rename_ vns tau x
     Hole x -> do
-      x' <- rename_ tau x
+      x' <- rename_ vns tau x
       -- The Hole might be a quantifier index.
       pure $ if x' /= x then Var x' else Hole x'
-    Idx xs i -> Idx <$> rename_ tau xs <*> rename_ tau i
+    Idx xs i -> Idx <$> rename_ vns tau xs <*> rename_ vns tau i
     LinComb xn lb ub e -> do
-      xm <- newName xn
-      -- traceM $ "Renaming " <> prettyString xn <> " to " <> prettyString xm
+      let (xm, vns') = newName vns xn
       let tau' = M.insert xn xm tau
-      LinComb xm <$> rename_ tau' lb <*> rename_ tau' ub <*> rename_ tau' e
-    Indicator x -> Indicator <$> rename_ tau x
+      LinComb xm <$> rename_ vns' tau' lb <*> rename_ vns' tau' ub <*> rename_ vns' tau' e
+    Indicator x -> Indicator <$> rename_ vns tau x
     Bool x -> pure $ Bool x
-    Not x -> Not <$> rename_ tau x
+    Not x -> Not <$> rename_ vns tau x
     x :< y -> f (:<) x y
     x :<= y -> f (:<=) x y
     x :> y -> f (:>) x y
@@ -54,7 +54,7 @@ instance Renameable Symbol where
     x :|| y -> f (:||) x y
     Recurrence -> pure Recurrence
     where
-      f op x y = op <$> rename_ tau x <*> rename_ tau y
+      f op x y = op <$> rename_ vns tau x <*> rename_ vns tau y
 
 instance SubstitutionBuilder Symbol Symbol where
   addSub vn e s = s {sop = M.insert vn (sym2SoP e) $ sop s}

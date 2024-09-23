@@ -8,7 +8,7 @@ import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (renameSame, unify)
 import Futhark.Compiler.CLI (Imports, fileProg, readProgramOrDie)
 import Futhark.MonadFreshNames (newNameFromString)
-import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.-.), (.+.))
+import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (docString, line, pretty, prettyString, (<+>))
 import Language.Futhark qualified as E
 import Test.Tasty
@@ -107,17 +107,24 @@ tests =
                     body =
                       cases
                         [ ( xs_i,
-                            int2SoP (-1) .-. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j))))
+                            int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j))))
                           ),
                           ( Not xs_i,
                             sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (Idx (Hole xs) (sHole j))))
                           )
                         ]
                   }
+        ),
+      mkTest
+        "tests/indexfn/map2.fut"
+        ( withDebug $ \(i, n, xs) ->
+            IndexFn
+              { iterator = Forall i (Iota (sHole n)),
+                body =
+                  cases
+                    [(Bool True, sym2SoP $ Idx (Hole xs) (sHole i .-. int2SoP 1))]
+              }
         )
-        -- part2Indices_6168 = ∀i₆₂₀₁ ∈ iota n₆₀₆₈ .
-        --     | conds₆₀₇₀[i₆₂₀₁] ⇒  -1 + ∑⟦conds₆₀₇₀⟧[0 : i₆₂₀₁]
-        --     | ¬(conds₆₀₇₀[i₆₂₀₁]) ⇒  i₆₂₀₁ + ∑⟦conds₆₀₇₀⟧[1 + i₆₂₀₁ : -1 + n₆₀₆₈]
     ]
   where
     -- mkTest :: String -> IndexFn -> TestTree
@@ -149,7 +156,7 @@ tests =
             Nothing -> pure $ Just (actual, expected)
             Just s' -> do
               e <- subIndexFn s' expected
-              Just . (\(_, a, b) -> (a,b)) <$> renameSame actual e
+              Just . (\(_, a, b) -> (a, b)) <$> renameSame actual e
 
     sHole = sym2SoP . Hole
 
