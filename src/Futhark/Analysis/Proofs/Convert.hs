@@ -85,8 +85,7 @@ refineAndBind :: E.VName -> IndexFn -> IndexFnM IndexFn
 refineAndBind vn indexfn = do
   indexfn' <- rewrite indexfn
   insertIndexFn vn indexfn'
-  debugM ("\nresult:\n" <> prettyBinding vn indexfn')
-  debugM "\n"
+  debugM (prettyBinding vn indexfn')
   -- tell ["resulting in", toLaTeX (vn, indexfn')]
   pure indexfn'
 
@@ -101,7 +100,7 @@ forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 -- Let-bindings.
 forward (E.AppExp (E.LetPat _ p@(E.Id vn _ _) x body _) _) = do
-  debugM (prettyString p <> " = " <> prettyString x)
+  -- debugM (prettyString p <> " = " <> prettyString x)
   -- tell [textbf "Forward on " <> Math.math (toLaTeX vn) <> toLaTeX x]
   _ <- refineAndBind vn =<< forward x
   forward body
@@ -131,10 +130,10 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
   indexfns <- gets indexfns
   case M.lookup vn indexfns of
     Just indexfn -> do
-      debugM ("using index function " <> prettyString vn <> " = " <> prettyString indexfn)
+      -- debugM ("using index function " <> prettyString vn <> " = " <> prettyString indexfn)
       pure indexfn
     _ -> do
-      debugM ("creating index function for " <> prettyString vn)
+      -- debugM ("creating index function for " <> prettyString vn)
       -- TODO handle refinement types
       -- handleRefinementTypes e
       case getSize e of

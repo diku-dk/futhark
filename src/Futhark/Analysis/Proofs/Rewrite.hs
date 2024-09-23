@@ -2,9 +2,9 @@ module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad ((<=<))
 import Data.Maybe (fromJust)
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, debugPrettyM)
 import Futhark.Analysis.Proofs.IndexFnPlus (normalizeIndexFn, repVName, subIndexFn)
-import Futhark.Analysis.Proofs.Refine (refineSymbol)
+import Futhark.Analysis.Proofs.Refine (refineSymbol, refineIndexFn)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), getLinCombBoundVar, normalizeSymbol)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
@@ -64,7 +64,7 @@ instance Rewritable Symbol IndexFnM where
 instance Rewritable IndexFn IndexFnM where
   rewrite =
     converge $
-      rewriteGen <=< applyRuleBook rulesIndexFn <=< normalizeIndexFn
+      rewriteGen <=< applyRuleBook rulesIndexFn <=< normalizeIndexFn <=< refineIndexFn rewriteGen
 
 scale :: VName -> Symbol -> SoP Symbol
 scale c symbol = hole c .*. sym2SoP symbol
@@ -138,6 +138,13 @@ rulesSoP = do
             let idx = rep s (hole h4)
             ub $==$ (idx .-. int 1)
         },
+      -- TODO figure out way to say that the LinComb terms must match, but that
+      -- the bound var does not have to match. (Also goes for rules above this.)
+      -- I think it's because renaming is actually wrong!
+      -- Renaming below should apply independently to the two LinCombs meaning
+      -- the renaming in the first LinComb should not increment the VName counter
+      -- in the renaming in the second LinComb! --- That is, they should not be
+      -- sequenced, but be independent.
       Rule
         { name = "Merge sum-subtractation",
           from =
@@ -150,6 +157,7 @@ rulesSoP = do
           sideCondition = \s -> do
             let y' = rep s (Hole y1)
             let x' = rep s (Hole x1)
+            debugPrettyM "MATCHED merge sum-subtraction: " (y' :<= x')
             y' $<=$ x'
         },
       Rule

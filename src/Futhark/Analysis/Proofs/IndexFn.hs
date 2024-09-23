@@ -9,10 +9,12 @@ import Data.Map qualified as M
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
-import Futhark.SoP.SoP (SoP, int2SoP)
+import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName), lookupUntransPE)
+import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
+import Futhark.SoP.Convert (ToSoP (toSoPNum))
+import Futhark.Util.Pretty (Pretty, prettyString)
 
 data IndexFn = IndexFn
   { iterator :: Iterator,
@@ -80,6 +82,12 @@ instance MonadSoP Symbol E.Exp Property IndexFnM where
   getEquivs = gets (equivs . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
 
+-- This is required by SoP.Refine (addRel).
+instance ToSoP Symbol E.Exp where
+  toSoPNum e = do
+    x <- lookupUntransPE e
+    pure (1, sym2SoP x)
+
 runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
@@ -106,6 +114,11 @@ debugM :: String -> IndexFnM ()
 debugM x = do
   debug <- gets debug
   when debug $ traceM $ "🪲 " <> x
+
+debugPrettyM :: Pretty a => String -> a -> IndexFnM ()
+debugPrettyM msg x = do
+  debug <- gets debug
+  when debug $ traceM $ "🪲 " <> msg <> " " <> prettyString  x
 
 withDebug :: b -> IndexFnM b
 withDebug f = do

@@ -13,7 +13,7 @@ import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
 import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP, sym2SoP, (.+.), (.-.), sopToLists, sopFromList, justConstant, (.*.))
 import Futhark.Util.Pretty (Pretty (pretty), commasep, parens, prettyString, stack, (<+>))
 import Language.Futhark (VName)
-import Control.Monad (unless, guard)
+import Control.Monad (guard)
 import qualified Data.List as L
 import qualified Futhark.SoP.SoP as SoP
 
@@ -37,6 +37,18 @@ instance Eq Iterator where
   _ == _ = False
 
 deriving instance Eq IndexFn
+
+domainStart :: Domain -> SoP Symbol
+domainStart (Iota _) = int2SoP 0
+domainStart (Cat k _ b) = rep (mkSub k (int2SoP 0 :: SoP Symbol)) b
+
+domainEnd :: Domain -> SoP Symbol
+domainEnd (Iota n) = n .-. int2SoP 1
+domainEnd (Cat k m b) = rep (mkSub k m) b .-. int2SoP 1
+
+intervalEnd :: Domain -> SoP Symbol
+intervalEnd (Cat k _ b) = rep (mkSub k (sym2SoP (Var k) .+. int2SoP 1)) b
+intervalEnd (Iota _) = error "intervalEnd on iota"
 
 -------------------------------------------------------------------------------
 -- Pretty.
@@ -155,12 +167,12 @@ instance (MonadFreshNames m) => Unify IndexFn Symbol m where
 -- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
 subst :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
 subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
-  debugM
-    ( "🎭 substitute\n"
-        <> prettyBinding x for
-        <> "\ninto\n"
-        <> prettyString into
-    )
+  -- debugM
+  --   ( "🎭 substitute\n"
+  --       <> prettyBinding x for
+  --       <> "\ninto\n"
+  --       <> prettyString into
+  --   )
   i' <- sym2SoP . Var <$> newNameFromString "i"
   for' <- rename for
   into' <- rename into
@@ -243,7 +255,7 @@ rewritePrefixSum indexfn@(IndexFn (Forall i dom) (Cases cs))
     case s_c :: Maybe (Substitution Symbol) of
       Nothing -> pure indexfn
       Just _ -> do
-        debugM $ "MATCHED rewritePrefixSum\n" <> prettyString indexfn
+        -- debugM $ "MATCHED rewritePrefixSum\n" <> prettyString indexfn
         j <- newNameFromString "j"
         e1_b <- sub (mkSub i b) e1
         e2_j <- sub (mkSub i (sym2SoP $ Var j)) e2
@@ -253,7 +265,7 @@ rewritePrefixSum indexfn@(IndexFn (Forall i dom) (Cases cs))
                 { iterator = Forall i dom,
                   body = cases [(Bool True, e1_b .+. e2_sum)]
                 }
-        debugM $ "=> " <> prettyString res
+        -- debugM $ "=> " <> prettyString res
         pure res
     where
       -- Returns the argument SoP without its recurrence term, if it is

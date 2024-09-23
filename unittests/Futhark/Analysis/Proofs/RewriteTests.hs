@@ -97,6 +97,23 @@ tests =
               rewrite (LinComb w (sVar a) (sVar c) (Var x) ~-~ LinComb z (sVar a) (sVar b) (Var x))
           )
           @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar c) (Var x)),
+      testCase "Merge sum-subtraction (match 2)" $
+        run
+          ( \(x, _, z, w, a, b, _, _) -> do
+              addRange (Var b) (SoP.Range mempty 1 (S.singleton (sVar a .-. int 1)))
+              rewrite (LinComb w (int 0) (sVar a .-. int 1) (Var x) ~-~ LinComb z (int 0) (sVar b) (Var x))
+          )
+          @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar a .-. int 1) (Var x)),
+      testCase "Merge sum-subtraction (match 3)" $
+        run
+          ( \(x, _, z, w, a, b, _, _) -> do
+              debugOn
+              -- debugM (show (LinComb w (int 0) (sVar a) (Var x) ~-~ LinComb z (int 0) (sVar b) (Var x)))
+              addRange (Var b) (SoP.Range mempty 1 (S.singleton (sVar a)))
+              rewrite (LinComb w (int 0) (sVar a) (Idx (Var x) (sVar w))
+                       ~-~ LinComb z (int 0) (sVar b) (Idx (Var x) (sVar z)))
+          )
+          @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar a) (Var x)),
       testCase "Rule matches on subterms" $
         run
           ( \(x, y, z, w, _, _, _, _) ->
@@ -111,7 +128,7 @@ tests =
           @??= (int 1 .+. LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)) ~+~ LinComb d (sVar b) (sVar c) (Idx (Var a) (sVar d))),
       testCase "Match symbols in SVar" $
         run
-          ( \(x, y, z, _, _, _, _, _) ->
+          ( \(x, y, z, _, _, _, _, _) -> do
               rewrite (Indicator (Bool True :&& (sVar x :<= sVar y)) ~+~ Var z)
           )
           @??= (Indicator (sVar x :<= sVar y) ~+~ Var z),
@@ -217,15 +234,13 @@ tests =
           @??= (Var x :&& Var y),
       testCase "Replace sum over one element sequence by element (1)" $
         run
-          ( \(x, y, _, w, _, _, _, _) -> do
-              debugOn
+          ( \(x, y, _, w, _, _, _, _) ->
               rewrite (sym2SoP $ LinComb w (sVar y) (sVar y) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (Idx (Var x) (sVar y)),
       testCase "Replace sum over one element sequence by element (2)" $
         run
-          ( \(x, _, _, w, _, _, _, _) -> do
-              debugOn
+          ( \(x, _, _, w, _, _, _, _) ->
               rewrite (sym2SoP $ LinComb w (int 0) (int 0) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (Idx (Var x) (int 0)),
@@ -288,7 +303,7 @@ tests =
                     { iterator = Forall x (Iota (sVar a)),
                       body =
                         cases
-                          [ (sVar b :== int 0, sVar b),
+                          [ (sVar b :== int 0, int 0),
                             (sVar b :/= int 0, sym2SoP Recurrence)
                           ]
                     }
@@ -298,7 +313,7 @@ tests =
                    { iterator = Forall x (Iota (sVar a)),
                      body =
                        cases
-                         [ (sVar b :== int 0, sVar b),
+                         [ (sVar b :== int 0, int 0),
                            (sVar b :/= int 0, sym2SoP Recurrence)
                          ]
                    }

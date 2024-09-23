@@ -85,6 +85,20 @@ tests =
               }
         ),
       mkTest
+        "tests/indexfn/scalar2.fut"
+        ( newNameFromString "h" >>= \j -> pure $ \(_, n, xs) ->
+            IndexFn
+              { iterator = Empty,
+                body =
+                  cases
+                    [ ( Bool True,
+                        sym2SoP $
+                          LinComb j (int2SoP 0) (sHole n .-. int2SoP 1) (Indicator (Idx (Hole xs) (sHole j)))
+                      )
+                    ]
+              }
+        ),
+      mkTest
         "tests/indexfn/part2indices.fut"
         ( newNameFromString "h" >>= \j -> withDebug $ \(i, n, xs) ->
             let xs_i = Idx (Hole xs) (sHole i)
