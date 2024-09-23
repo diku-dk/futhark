@@ -3,7 +3,6 @@ module Futhark.CLI.Fmt (main, fmtText) where
 
 import Control.Monad
 import Control.Monad.State.Strict
-import Data.Bifunctor
 import Data.Char (chr)
 import Data.Foldable
 import Data.List qualified as L
@@ -19,8 +18,6 @@ import Language.Futhark.Parser
   )
 import System.Exit
 import System.IO
-import Text.Printf (printf)
-
 -- import Debug.Trace
 {-
 debug :: Show a => a -> a
@@ -86,9 +83,11 @@ braces fmt = ["{"] <> fmt <> ["}"]
 parens :: Fmt -> Fmt
 parens fmt = ["("] <> fmt <> [")"]
 
+{-
 mapFirst :: (a -> a) -> [a] -> [a]
 mapFirst _ [] = []
 mapFirst f (x : xs) = f x : xs
+-}
 
 {-
 commasepbetween :: Line -> Line -> Fmt -> FmtM Fmt
