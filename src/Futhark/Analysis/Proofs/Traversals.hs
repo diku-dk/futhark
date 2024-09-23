@@ -12,12 +12,12 @@ data ASTMapper a m = ASTMapper
 class ASTMappable a b where
   astMap :: (Monad m) => ASTMapper a m -> b -> m b
 
-instance (Ord a) => ASTMappable a (SoP a) where
+instance (Ord a, ASTMappable a a) => ASTMappable a (SoP a) where
   astMap m sop = do
     mapOnSoP m . foldl (.+.) (int2SoP 0) =<< mapM g (sopToLists sop)
     where
       g (ts, c) = do
-        ts' <- mapM (mapOnSymbol m) ts
+        ts' <- mapM (astMap m) ts
         pure $ foldl (.*.) (int2SoP 1) (int2SoP c : map sym2SoP ts')
 
 instance ASTMappable Symbol Symbol where
