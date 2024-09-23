@@ -1,22 +1,19 @@
 module Futhark.Analysis.Proofs.Rewrite where
 
-import Control.Monad (foldM, msum, (<=<))
-import Data.List (subsequences, (\\))
+import Control.Monad ((<=<))
+import Data.Maybe (fromJust)
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases)
-import Futhark.Analysis.Proofs.IndexFnPlus (repVName, subIndexFn, normalizeIndexFn)
+import Futhark.Analysis.Proofs.IndexFnPlus (normalizeIndexFn, repVName, subIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineSymbol)
-import Futhark.Analysis.Proofs.Rule (Rule (..))
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), normalizeSymbol, getLinCombBoundVar)
-import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify (Hole, Replaceable, Substitution (vns), SubstitutionBuilder (..), Unify (unify), rep, sub, unifies, Renameable (renameWith))
-import Futhark.Analysis.Proofs.Util (partitions)
+import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), getLinCombBoundVar, normalizeSymbol)
+import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
+import Futhark.Analysis.Proofs.Unify (Renameable (renameWith), Substitution (vns), SubstitutionBuilder (..), rep, sub)
 import Futhark.MonadFreshNames
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$), ($>$))
 import Futhark.SoP.Monad (substEquivs)
-import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sym2SoP, term2SoP, (.*.), (.+.), (.-.))
+import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
-import Futhark.Util.Pretty (Pretty)
-import Data.Maybe (fromJust)
 
 vacuous :: (Monad m) => b -> m Bool
 vacuous = const (pure True)
@@ -46,113 +43,28 @@ converge f x = converge_ (f x)
         then pure y
         else converge_ (pure z)
 
-match :: (Unify v u m) => Rule v u m -> v -> m (Maybe (Substitution u))
-match rule x = unify (from rule) x >>= check (sideCondition rule)
-
-check :: (Monad f) => (a -> f Bool) -> Maybe a -> f (Maybe a)
-check _ Nothing = pure Nothing
-check cond (Just s) = do
-  b <- cond s
-  pure $ if b then Just s else Nothing
+rewriteGen :: (ASTMappable Symbol a) => a -> IndexFnM a
+rewriteGen = astMap m
+  where
+    m :: ASTMapper Symbol IndexFnM =
+      ASTMapper
+        { mapOnSymbol = converge (refineSymbol . normalizeSymbol),
+          mapOnSoP = converge (applyRuleBook rulesSoP) <=< substEquivs
+        }
 
 class (Monad m) => Rewritable v m where
   rewrite :: v -> m v
 
 instance Rewritable (SoP Symbol) IndexFnM where
-  rewrite = astMap m <=< substEquivs
-    where
-      m =
-        ASTMapper
-          { mapOnSymbol = rewrite,
-            mapOnSoP = converge $ \sop -> rulesSoP >>= foldM (flip matchSoP) sop
-          }
+  rewrite = rewriteGen
 
 instance Rewritable Symbol IndexFnM where
-  rewrite = astMap m
-    where
-      m =
-        ASTMapper
-          { mapOnSoP = rewrite,
-            mapOnSymbol = converge $ \x -> do
-              rulesSymbol
-                >>= foldM (flip match_) (normalizeSymbol x)
-                >>= refineSymbol . normalizeSymbol
-          }
-
-      match_ rule symbol = do
-        s :: Maybe (Substitution Symbol) <- case from rule of
-          x :&& y -> matchCommutativeRule (:&&) x y
-          x :|| y -> matchCommutativeRule (:||) x y
-          _ -> match rule symbol
-        maybe (pure symbol) (to rule) s
-        where
-          matchCommutativeRule op x y =
-            msum <$> mapM (match rule) [x `op` y, y `op` x]
+  rewrite = rewriteGen
 
 instance Rewritable IndexFn IndexFnM where
   rewrite =
     converge $
-      astMap m <=< \indexfn -> rulesIndexFn >>= foldM (flip match_) indexfn >>= normalizeIndexFn
-    where
-      m :: ASTMapper Symbol IndexFnM =
-        ASTMapper
-          { mapOnSoP = rewrite,
-            mapOnSymbol = rewrite
-          }
-
-      match_ rule fn = do
-        -- debugM ("indexfn match " <> name rule <> ": " <> prettyString fn)
-        match rule fn >>= maybe (pure fn) (to rule)
-
--- Apply SoP-rule with k terms to all matching k-subterms in a SoP.
--- For example, given rule `x + x => 2x` and SoP `a + b + c + a + b`,
--- it matches `a + a` and `b + b` and returns `2a + 2b + c`.
-matchSoP ::
-  ( Ord u,
-    Replaceable u u,
-    Unify u u IndexFnM,
-    Pretty u,
-    Hole u
-  ) =>
-  Rule (SoP u) u IndexFnM ->
-  SoP u ->
-  IndexFnM (SoP u)
-matchSoP rule sop
-  | numTerms (from rule) <= numTerms sop = do
-      let (subterms, contexts) = unzip . splits $ sopToList sop
-      -- Get first valid subterm substitution. Recursively match context.
-      -- debugM ("matchSoP " <> name rule <> ": " <> prettyString sop)
-      subs <- mapM (matchP rule . sopFromList) subterms
-      case msum $ zipWith (\x y -> (,y) <$> x) subs contexts of
-        Just (s, ctx) -> (.+.) <$> matchSoP rule (sopFromList ctx) <*> to rule s
-        Nothing -> pure sop
-  | otherwise = pure sop
-  where
-    -- Get all (k-subterms, remaining subterms).
-    k = numTerms (from rule)
-    splits xs = [(s, xs \\ s) | s <- subsequences xs, length s >= k]
-
-    -- Pick first partition that matches.
-    matchP rule sop =
-      msum <$> mapM (check (sideCondition rule) <=< unifies) (combine rule sop)
-
-combine :: (Ord u) => Rule (SoP u) u m -> SoP u -> [[(SoP u, SoP u)]]
-combine rule sop
-  | k <= numTerms sop = do
-      -- Pair each term in from rule with subterms in sop.
-      -- For example, h1 + h2 and x + y + z pairs as follows
-      -- [[(h1, x), (h2, y+z)],
-      --  [(h1, x+y), (h2, z)],
-      --  [(h1, x+z), (h2, y)],
-      --  ... permutations where h1 and h2 are switched
-      -- ]
-      partition <- partitions k ys
-      pure $ zipWith (\x ts -> (uncurry term2SoP x, sopFromList ts)) xs partition
-  | otherwise = []
-  where
-    k = numTerms (from rule)
-    xs = sopToList (from rule)
-    ys = sopToList sop
+      rewriteGen <=< applyRuleBook rulesIndexFn <=< normalizeIndexFn
 
 scale :: VName -> Symbol -> SoP Symbol
 scale c symbol = hole c .*. sym2SoP symbol
@@ -250,8 +162,9 @@ rulesSoP = do
         { name = "Replace sum over one element sequence by element",
           from = sym2SoP $ LinComb i (hole h1) (hole h2) (Hole h3),
           to = \s -> do
-            j <- fromJust . getLinCombBoundVar <$>
-               renameWith (vns s) (LinComb i (hole h1) (hole h2) (Hole h3))
+            j <-
+              fromJust . getLinCombBoundVar
+                <$> renameWith (vns s) (LinComb i (hole h1) (hole h2) (Hole h3))
             let idx = rep s (Hole h1)
             pure $ rep (mkSub j idx) $ rep s (Hole h3),
           sideCondition = \s -> do
@@ -269,12 +182,6 @@ rulesSoP = do
             start $>$ end
         }
     ]
-
--- TODO can all of these be handled by `normalize`? If so, remove.
-rulesSymbol :: IndexFnM [Rule Symbol Symbol IndexFnM]
-rulesSymbol = do
-  pure
-    []
 
 rulesIndexFn :: IndexFnM [Rule IndexFn Symbol IndexFnM]
 rulesIndexFn = do
