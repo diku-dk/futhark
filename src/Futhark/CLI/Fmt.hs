@@ -18,6 +18,7 @@ import Language.Futhark.Parser
   )
 import System.Exit
 import System.IO
+
 -- import Debug.Trace
 {-
 debug :: Show a => a -> a
@@ -83,11 +84,9 @@ braces fmt = ["{"] <> fmt <> ["}"]
 parens :: Fmt -> Fmt
 parens fmt = ["("] <> fmt <> [")"]
 
-{-
 mapFirst :: (a -> a) -> [a] -> [a]
 mapFirst _ [] = []
 mapFirst f (x : xs) = f x : xs
--}
 
 {-
 commasepbetween :: Line -> Line -> Fmt -> FmtM Fmt
@@ -145,10 +144,6 @@ mapLast f as = i ++ [f l]
   where
     l = last as
     i = init as
-
-mapHead :: (a -> a) -> [a] -> [a]
-mapHead _ [] = []
-mapHead f (a : as) = f a : as
 
 -- Other Utility Functions
 
