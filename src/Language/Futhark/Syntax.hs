@@ -647,7 +647,6 @@ deriving instance Ord (DimIndexBase Info VName)
 type SliceBase f vn = [DimIndexBase f vn]
 
 -- | A name qualified with a breadcrumb of module accesses.
-
 data QualName vn = QualName
   { qualQuals :: ![vn],
     qualLeaf :: !vn

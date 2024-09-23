@@ -3,6 +3,7 @@ module Main (main) where
 import Futhark.AD.DerivativesTests qualified
 import Futhark.Analysis.AlgSimplifyTests qualified
 import Futhark.BenchTests qualified
+import Futhark.CLI.FmtTests qualified
 import Futhark.IR.Mem.IntervalTests qualified
 import Futhark.IR.Mem.IxFunTests qualified
 import Futhark.IR.PropTests qualified
@@ -15,7 +16,6 @@ import Language.Futhark.PrimitiveTests qualified
 import Language.Futhark.SemanticTests qualified
 import Language.Futhark.SyntaxTests qualified
 import Language.Futhark.TypeCheckerTests qualified
-import Futhark.CLI.FmtTests qualified
 import Test.Tasty
 
 allTests :: TestTree

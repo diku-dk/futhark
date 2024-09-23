@@ -1,7 +1,10 @@
 -- | @futhark fmt@
 module Futhark.CLI.Fmt (main, fmtText) where
 
+import Control.Monad
+import Control.Monad.State.Strict
 import Data.Bifunctor
+import Data.Char (chr)
 import Data.Foldable
 import Data.List qualified as L
 import Data.Text qualified as T
@@ -17,9 +20,6 @@ import Language.Futhark.Parser
 import System.Exit
 import System.IO
 import Text.Printf (printf)
-import Control.Monad.State.Strict
-import Control.Monad
-import Data.Char (chr)
 
 -- import Debug.Trace
 {-
@@ -53,27 +53,26 @@ debug a = traceShow a a
 -- TODO: ensure that doc comments (that start with "-- |" and are
 -- connected to definitions) are always separated from other comments
 -- with a single newline character. Question: Exactly what is meant by this?
--- Question: 
-      -- Test
+-- Question:
+-- Test
 
-      -- | This is a type
+-- \| This is a type
 
-      -- this is a type
+-- this is a type
 -- type test = (i32, i32) (Not that interesting left for now)
 
-
--- TODO: Fix formatting of several lines of comments 
+-- TODO: Fix formatting of several lines of comments
 -- TODO: prettyprint in a nicer way than one line per terminal.
 --
 -- TODO: support all syntactical constructs.
 
--- TODO (Question?): Change fmt to be a sequence of lines instead of a list of lines 
+-- TODO (Question?): Change fmt to be a sequence of lines instead of a list of lines
 {-
--- Some utility functions 
+-- Some utility functions
 commasep :: Fmt -> FmtM Fmt
 commasep [] = pure []
 commasep [x] = pure [x]
-commasep (x:xs) = do 
+commasep (x:xs) = do
   xs' <- commasep xs
   pure $ (x <> ", ") : xs'
 -}
@@ -89,56 +88,57 @@ parens fmt = ["("] <> fmt <> [")"]
 
 mapFirst :: (a -> a) -> [a] -> [a]
 mapFirst _ [] = []
-mapFirst f (x:xs) = f x : xs
+mapFirst f (x : xs) = f x : xs
 
 {-
 commasepbetween :: Line -> Line -> Fmt -> FmtM Fmt
 commasepbetween o c xs = do
   pure $ (zipWidth (<>) (o : repeat ",") xs) <> [c]
 -}
+
 -- | Invariant: Should not contain newline characters.
 type Line = T.Text
-
 
 -- | The result of formatting is a list of lines.  This is useful as
 -- we might want to modify every line of a prettyprinted
 -- sub-expression, to e.g. prepend indentation.
 type Fmt = [Line]
 
--- State monad to keep track of comments 
+-- State monad to keep track of comments
 newtype FmtState = FmtState
   { comments :: [Comment]
-  } deriving (Show, Eq, Ord)
+  }
+  deriving (Show, Eq, Ord)
 
-type FmtM a = State FmtState a 
+type FmtM a = State FmtState a
 
 -- Functions for operating on FmtM monad
-comment :: Located a => a -> FmtM Fmt
+comment :: (Located a) => a -> FmtM Fmt
 comment a = do
   s <- get
   case comments s of
     c : cs | locOf a > locOf c -> do
-      put $ s { comments = cs }
-      cs' <- comment a --fmts remaining comments 
+      put $ s {comments = cs}
+      cs' <- comment a -- fmts remaining comments
       pure $ commentText c : cs'
     _ -> pure []
 
-trailingComment :: Located a => a -> FmtM Line
+trailingComment :: (Located a) => a -> FmtM Line
 trailingComment a = do
   s <- get
   case comments s of
     c : cs | isSameLine a c -> do
-      put $ s { comments = cs }
+      put $ s {comments = cs}
       pure $ commentText c
     _ -> pure ""
 
--- parses comments infront of a and converts a to fmt using formatting function f 
-buildFmt :: Located a => (a -> FmtM Fmt) -> a -> FmtM Fmt  
-buildFmt f a = do 
+-- parses comments infront of a and converts a to fmt using formatting function f
+buildFmt :: (Located a) => (a -> FmtM Fmt) -> a -> FmtM Fmt
+buildFmt f a = do
   c <- comment a
-  a' <-  f a
+  a' <- f a
   c' <- trailingComment a
-  pure $ c <> mapLast (<> " " <> c') a' 
+  pure $ c <> mapLast (<> " " <> c') a'
 
 mapLast :: (a -> a) -> [a] -> [a]
 mapLast _ [] = []
@@ -149,19 +149,19 @@ mapLast f as = i ++ [f l]
 
 mapHead :: (a -> a) -> [a] -> [a]
 mapHead _ [] = []
-mapHead f (a:as) = f a : as
+mapHead f (a : as) = f a : as
 
 -- Other Utility Functions
 
 -- Should probably be updated to return a special single/multi-line indicator type
-isSingleLine :: Located a => a -> Bool
+isSingleLine :: (Located a) => a -> Bool
 isSingleLine a =
   case locOf a of
     Loc start end -> posLine start == posLine end
     NoLoc -> undefined -- should throw an error
 
 isSameLine :: (Located a, Located b) => a -> b -> Bool
-isSameLine a b = 
+isSameLine a b =
   case (locOf a, locOf b) of
     (Loc _startA endA, Loc _startB endB) -> posLine endA == posLine endB
     _ -> undefined -- should throw an error
@@ -177,8 +177,8 @@ fmtDocComment (Just (DocComment x loc)) =
     prefix (l : ls) = ("-- | " <> l) : map ("-- " <>) ls
 fmtDocComment Nothing = pure []
 
-fmtMany :: (a -> FmtM Fmt) -> [a] -> FmtM Fmt 
-fmtMany f = foldM (\a b -> (a<>) <$> f b) []
+fmtMany :: (a -> FmtM Fmt) -> [a] -> FmtM Fmt
+fmtMany f = foldM (\a b -> (a <>) <$> f b) []
 
 -- Boolean indicates whether tuple is single line
 fmtTupleTypeElems :: [UncheckedTypeExp] -> Bool -> FmtM Fmt
@@ -187,22 +187,25 @@ fmtTupleTypeElems [t] _ = fmtTypeExp t
 fmtTupleTypeElems (t : ts) isSingle = do
   t' <- fmtTypeExp t
   ts' <- fmtTupleTypeElems ts isSingle
-  if isSingle then pure [T.concat $ t' <> [", "] <> ts'] 
-  else pure $ t' <> prependComma ts' -- TO DO: Make the comma not be on its own line  
-  where prependComma :: Fmt -> Fmt
-        prependComma [] = [] -- comma still on seperate linethat's probably pretty slow, better way to do this?
-        prependComma fmt = [T.concat $ [", "] <> fmt] 
+  if isSingle
+    then pure [T.concat $ t' <> [", "] <> ts']
+    else pure $ t' <> prependComma ts' -- TO DO: Make the comma not be on its own line
+  where
+    prependComma :: Fmt -> Fmt
+    prependComma [] = [] -- comma still on seperate linethat's probably pretty slow, better way to do this?
+    prependComma fmt = [T.concat $ [", "] <> fmt]
 
 fmtRecordTypeFields :: [(Name, UncheckedTypeExp)] -> FmtM Fmt
 fmtRecordTypeFields [] = pure []
-fmtRecordTypeFields ((name, te):fs) = do
+fmtRecordTypeFields ((name, te) : fs) = do
   f' <- fmtTypeExp te
   fs' <- concat <$> mapM fmtFieldType fs
-  pure $  [prettyText name <> ": "] <> f' <> fs'
-  where fmtFieldType :: (Name, UncheckedTypeExp) -> FmtM Fmt 
-        fmtFieldType (name', t) = do 
-          t' <- fmtTypeExp t
-          pure $ ["," <> prettyText name' <> ": "] <> t'
+  pure $ [prettyText name <> ": "] <> f' <> fs'
+  where
+    fmtFieldType :: (Name, UncheckedTypeExp) -> FmtM Fmt
+    fmtFieldType (name', t) = do
+      t' <- fmtTypeExp t
+      pure $ ["," <> prettyText name' <> ": "] <> t'
 
 fmtSumTypeConstr :: (Name, [UncheckedTypeExp]) -> FmtM Fmt
 fmtSumTypeConstr (name, fs) = do
@@ -212,76 +215,88 @@ fmtSumTypeConstr (name, fs) = do
 -- | Formatting of Futhark type expressions.
 fmtTypeExp :: UncheckedTypeExp -> FmtM Fmt
 fmtTypeExp (TEVar v loc) = buildFmt (const (pure [prettyText v])) loc
-  --pure [prettyText v]
-fmtTypeExp (TETuple ts loc) | isSingleLine loc = 
+-- pure [prettyText v]
+fmtTypeExp (TETuple ts loc)
+  | isSingleLine loc =
+      buildFmt fmtFun loc
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      ts' <- fmtTupleTypeElems ts True
+      pure ["(" <> T.concat ts' <> ")"]
+fmtTypeExp (TETuple ts loc) =
   buildFmt fmtFun loc
-  where fmtFun :: a -> FmtM Fmt
-        fmtFun _ = do
-          ts' <- fmtTupleTypeElems ts True
-          pure ["(" <> T.concat ts' <> ")"]
-fmtTypeExp (TETuple ts loc) = 
-  buildFmt fmtFun loc
-  where fmtFun :: a -> FmtM Fmt
-        fmtFun _ = do
-          ts' <- fmtTupleTypeElems ts False
-          pure $ ["("] <>  ts' <> [")"]
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      ts' <- fmtTupleTypeElems ts False
+      pure $ ["("] <> ts' <> [")"]
 fmtTypeExp (TEParens te loc) = buildFmt fmtFun loc
-  where fmtFun :: a -> FmtM Fmt
-        fmtFun _ = do 
-          te' <- fmtTypeExp te
-          pure $ ["("] <> te' <> [")"] 
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      te' <- fmtTypeExp te
+      pure $ ["("] <> te' <> [")"]
 fmtTypeExp (TERecord fs loc) = buildFmt fmtFun loc -- Records
-  where fmtFun :: a -> FmtM Fmt
-        fmtFun _ = do
-          ts <- fmtRecordTypeFields fs
-          pure $ ["{"] <> ts <> ["}"]
-fmtTypeExp (TEArray se te loc) = buildFmt fmtFun loc -- A array with an size expression 
-  where fmtFun :: a -> FmtM Fmt 
-        fmtFun _ = do
-          se' <- fmtSizeExp se
-          te' <- fmtTypeExp te
-          pure $  se' <> te'
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      ts <- fmtRecordTypeFields fs
+      pure $ ["{"] <> ts <> ["}"]
+fmtTypeExp (TEArray se te loc) = buildFmt fmtFun loc -- A array with an size expression
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      se' <- fmtSizeExp se
+      te' <- fmtTypeExp te
+      pure $ se' <> te'
 -- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
-fmtTypeExp (TEUnique te loc) = buildFmt fmtFun loc 
-  where fmtFun :: a -> FmtM Fmt
-        fmtFun _ = do 
-          te' <- fmtTypeExp te 
-          pure $ ["*"] <> te' 
+fmtTypeExp (TEUnique te loc) = buildFmt fmtFun loc
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      te' <- fmtTypeExp te
+      pure $ ["*"] <> te'
 -- I am not sure I guess applying a higher kinded type to some type expression
-fmtTypeExp (TEApply te tArgE loc) = buildFmt fmtFun loc 
-  where fmtFun :: a -> FmtM Fmt 
-        fmtFun _ = do
-          te' <- fmtTypeExp te
-          tArgE' <- fmtArgExp tArgE
-          pure $ te' <> [" "] <> tArgE'
- -- this is "->"
+fmtTypeExp (TEApply te tArgE loc) = buildFmt fmtFun loc
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      te' <- fmtTypeExp te
+      tArgE' <- fmtArgExp tArgE
+      pure $ te' <> [" "] <> tArgE'
+-- this is "->"
 fmtTypeExp (TEArrow (Just name) te0 te1 loc) = buildFmt fmtFun loc
-  where fmtFun :: a -> FmtM Fmt
-        fmtFun _ = do 
-          te0' <- fmtTypeExp te0
-          te1' <- fmtTypeExp te1
-          pure $ parens (prettyText name : " : " : te0') <> [" -> "] <> te1'  
- -- this is"->"
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      te0' <- fmtTypeExp te0
+      te1' <- fmtTypeExp te1
+      pure $ parens (prettyText name : " : " : te0') <> [" -> "] <> te1'
+-- this is"->"
 fmtTypeExp (TEArrow Nothing te0 te1 loc) = buildFmt fmtFun loc
-  where fmtFun :: a -> FmtM Fmt
-        fmtFun _ = do 
-          te0' <- fmtTypeExp te0
-          te1' <- fmtTypeExp te1
-          pure $ te0' <> [" -> "] <> te1'
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      te0' <- fmtTypeExp te0
+      te1' <- fmtTypeExp te1
+      pure $ te0' <> [" -> "] <> te1'
 -- This should be "|"
 fmtTypeExp (TESum tes loc) = buildFmt fmtFun loc
-  where fmtFun :: a -> FmtM Fmt
-        fmtFun _ = do
-          tes' <- mapM fmtSumTypeConstr tes
-          pure $ L.intercalate ["|"] tes'
-fmtTypeExp (TEDim dims te loc) = buildFmt fmtFun loc 
-  where fmtFun :: a -> FmtM Fmt 
-        fmtFun _ = do
-          te' <- fmtTypeExp te
-          let dims' = mconcat (map (brackets . \t -> [prettyText t]) dims)
-          pure $ ["?"] <> dims' <> ["."] <> te'
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      tes' <- mapM fmtSumTypeConstr tes
+      pure $ L.intercalate ["|"] tes'
+fmtTypeExp (TEDim dims te loc) = buildFmt fmtFun loc
+  where
+    fmtFun :: a -> FmtM Fmt
+    fmtFun _ = do
+      te' <- fmtTypeExp te
+      let dims' = mconcat (map (brackets . \t -> [prettyText t]) dims)
+      pure $ ["?"] <> dims' <> ["."] <> te'
 
-fmtArgExp :: TypeArgExp UncheckedExp Name -> FmtM Fmt 
+fmtArgExp :: TypeArgExp UncheckedExp Name -> FmtM Fmt
 fmtArgExp (TypeArgExpSize se) = fmtSizeExp se
 fmtArgExp (TypeArgExpType te) = fmtTypeExp te
 
@@ -290,23 +305,32 @@ fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = do
   l' <- fmtLiftedness l
   dc' <- fmtDocComment dc
   ps' <- fmtMany fmtTypeParam ps
-  if isSingleLine loc then do
-    e' <- fmtTypeExp e
-    pure $ dc' <> ["type" <>
-                   l' <>
-                   " " <>
-                   prettyText name <>
-                   (if null ps then "" else " ") <>
-                   T.intercalate " " ps' <>
-                   " = " <> T.unlines e'] 
-  else do
-    e' <- fmtTypeExp e
-    pure $ dc' <> ["type" <>
-                  l' <>
-                  " " <>
-                  prettyText name <>
-                  T.intercalate " " ps' <>
-                  " = "] <> e'
+  if isSingleLine loc
+    then do
+      e' <- fmtTypeExp e
+      pure $
+        dc'
+          <> [ "type"
+                 <> l'
+                 <> " "
+                 <> prettyText name
+                 <> (if null ps then "" else " ")
+                 <> T.intercalate " " ps'
+                 <> " = "
+                 <> T.unlines e'
+             ]
+    else do
+      e' <- fmtTypeExp e
+      pure $
+        dc'
+          <> [ "type"
+                 <> l'
+                 <> " "
+                 <> prettyText name
+                 <> T.intercalate " " ps'
+                 <> " = "
+             ]
+          <> e'
 
 fmtAttrAtom :: AttrAtom a -> FmtM Fmt
 fmtAttrAtom (AtomName name) = pure [prettyText name]
@@ -354,7 +378,7 @@ fmtPat (RecordPat pats _loc) = do
 fmtPat (PatParens pat _loc) = do
   fmt <- fmtPat pat
   pure $ ["("] <> fmt <> [")"]
-fmtPat (Id name _ _loc) = pure [fmtName name] -- Need to add parenthesis around ++ in tests/uniqueness/uniqueness-error37.fut 
+fmtPat (Id name _ _loc) = pure [fmtName name] -- Need to add parenthesis around ++ in tests/uniqueness/uniqueness-error37.fut
 fmtPat (Wildcard _t _loc) = pure ["_"]
 fmtPat (PatAscription pat t _loc) = do
   pat' <- fmtPat pat
@@ -363,7 +387,7 @@ fmtPat (PatAscription pat t _loc) = do
 fmtPat (PatLit e _ _loc) = pure [prettyText e]
 fmtPat (PatConstr n _ pats _loc) = do
   pats' <- mconcat <$> mapM fmtPat pats
-  pure $ ["#" <> prettyText n] <> pats' 
+  pure $ ["#" <> prettyText n] <> pats'
 fmtPat (PatAttr attr pat _loc) = do
   attr' <- fmtAttr attr
   pat' <- fmtPat pat
@@ -395,7 +419,7 @@ fmtDimIndex (DimSlice i j (Just s)) = do
   i' <- maybe (pure mempty) fmtExp i
   j' <- maybe (pure mempty) fmtExp j
   s' <- fmtExp s
-  pure $ i' <> [":"] <> j' <> [":"] <>  s'
+  pure $ i' <> [":"] <> j' <> [":"] <> s'
 fmtDimIndex (DimSlice i (Just j) s) = do
   i' <- maybe (pure mempty) fmtExp i
   j' <- fmtExp j
@@ -430,18 +454,18 @@ fmtExp (IntLit v _ _loc) = pure [prettyText v]
 fmtExp (FloatLit v _ _loc) = pure [prettyText v]
 fmtExp (TupLit es _loc) = parens . L.intercalate [", "] <$> mapM fmtExp es
 fmtExp (RecordLit fs _loc) = braces . L.intercalate [", "] <$> mapM fmtField fs
-fmtExp (ArrayVal vs _ _loc) = brackets . L.intercalate [", "] <$>  mapM fmtPrimValue vs
-fmtExp (ArrayLit es _ _loc) = brackets . L.intercalate [", "] <$>  mapM fmtExp es
+fmtExp (ArrayVal vs _ _loc) = brackets . L.intercalate [", "] <$> mapM fmtPrimValue vs
+fmtExp (ArrayLit es _ _loc) = brackets . L.intercalate [", "] <$> mapM fmtExp es
 fmtExp (StringLit s _loc) = pure [prettyText $ show $ fmap (chr . fromIntegral) s]
 fmtExp (Project k e _ _loc) = do
   e' <- fmtExp e
   pure $ e' <> ["."] <> [prettyText k]
 fmtExp (Negate e _loc) = do
   e' <- fmtExp e
-  pure $ mapFirst ("-"<>) e'
+  pure $ mapFirst ("-" <>) e'
 fmtExp (Not e _loc) = do
   e' <- fmtExp e
-  pure $ mapFirst ("not "<>) e'
+  pure $ mapFirst ("not " <>) e'
 fmtExp (Update src idxs ve _loc) = do
   src' <- fmtExp src
   idxs' <- brackets . L.intercalate [", "] <$> mapM fmtDimIndex idxs
@@ -488,8 +512,8 @@ fmtQualName (QualName names name) =
   where
     pre =
       if null names
-      then ""
-      else T.intercalate "." (prettyText <$> names) <> "."
+        then ""
+        else T.intercalate "." (prettyText <$> names) <> "."
 
 fmtCase :: UncheckedCase -> FmtM Fmt
 fmtCase (CasePat p e _) = do
@@ -501,26 +525,26 @@ fmtAppExp :: AppExpBase NoInfo Name -> FmtM Fmt
 fmtAppExp (BinOp (bop, _) _ (x, _) (y, _) _) = do
   x' <- fmtExp x
   y' <- fmtExp y
-  pure $ x' <> [fmtBinOp bop] <> y' 
+  pure $ x' <> [fmtBinOp bop] <> y'
 fmtAppExp (Match e cs _) = do
   e' <- fmtExp e
   cs' <- mconcat <$> mapM fmtCase (toList cs)
   pure $ ["match"] <> e' <> cs'
 fmtAppExp (Loop sizeparams pat initexp form loopbody _) = do
-  let sizeparams' = ("["<>) . (<>"]") . prettyText . toName <$> sizeparams
+  let sizeparams' = ("[" <>) . (<> "]") . prettyText . toName <$> sizeparams
   pat' <- fmtPat pat
   initexp' <- fmtExp initexp
   form' <- fmtLoopForm form
   loopbody' <- fmtExp loopbody
   pure $
-    ["loop"] <>
-    sizeparams' <>
-    pat' <>
-    ["="] <>
-    initexp' <>
-    form' <>
-    ["do"] <>
-    loopbody'
+    ["loop"]
+      <> sizeparams'
+      <> pat'
+      <> ["="]
+      <> initexp'
+      <> form'
+      <> ["do"]
+      <> loopbody'
 fmtAppExp (Index e idxs _) = do
   e' <- fmtExp e
   idxs' <- L.intercalate [","] <$> mapM fmtDimIndex idxs
@@ -536,19 +560,19 @@ fmtAppExp (LetFun fname (tparams, params, retdecl, _, e) body _) = do
   params' <- mconcat <$> mapM fmtPat params
   retdecl' <-
     case fmtTypeExp <$> retdecl of
-    Just a -> fmap ([":"] <>) a
-    Nothing -> pure []
+      Just a -> fmap ([":"] <>) a
+      Nothing -> pure []
   e' <- fmtExp e
   body' <- letBody body
   pure $
-    ["let"] <>
-    [prettyText fname] <>
-    tparams' <>
-    params' <>
-    retdecl' <>
-    ["="] <>
-    e' <>
-    body'
+    ["let"]
+      <> [prettyText fname]
+      <> tparams'
+      <> params'
+      <> retdecl'
+      <> ["="]
+      <> e'
+      <> body'
 fmtAppExp (LetWith dest src idxs ve body _)
   | dest == src = do
       dest' <- fmtIdent dest
@@ -556,13 +580,13 @@ fmtAppExp (LetWith dest src idxs ve body _)
       ve' <- fmtExp ve
       body' <- letBody body
       pure $
-        ["let"] <>
-        [mconcat dest' <> "["] <> -- It is important that "[" is connected to its expression.
-        idxs' <>
-        ["]"] <>
-        ["="] <>
-        ve' <>
-        body'
+        ["let"]
+          <> [mconcat dest' <> "["]
+          <> idxs' -- It is important that "[" is connected to its expression.
+          <> ["]"]
+          <> ["="]
+          <> ve'
+          <> body'
   | otherwise = do
       dest' <- fmtIdent dest
       src' <- fmtIdent src
@@ -570,14 +594,14 @@ fmtAppExp (LetWith dest src idxs ve body _)
       ve' <- fmtExp ve
       body' <- letBody body
       pure $
-        ["let"] <>
-        dest' <>
-        ["="] <>
-        src' <>
-        ["with"] <>
-        idxs' <>
-        ve' <>
-        body'
+        ["let"]
+          <> dest'
+          <> ["="]
+          <> src'
+          <> ["with"]
+          <> idxs'
+          <> ve'
+          <> body'
 fmtAppExp (Range start maybe_step end _) = do
   start' <- fmtExp start
   maybe_step' <- maybe (pure mempty) (fmap ([".."] <>) . fmtExp) maybe_step
@@ -592,12 +616,12 @@ fmtAppExp (If c t f _) = do
   t' <- fmtExp t
   f' <- fmtExp f
   pure $
-    ["if"] <>
-    c' <>
-    ["then"] <>
-    t' <>
-    ["else"] <>
-    f'
+    ["if"]
+      <> c'
+      <> ["then"]
+      <> t'
+      <> ["else"]
+      <> f'
 fmtAppExp (Apply f args _) = do
   f' <- fmtExp f
   args' <- mconcat <$> mapM (fmtExp . snd) (toList args)
@@ -609,10 +633,10 @@ letBody body@(AppExp LetFun {} _) = fmtExp body
 letBody body = do
   body' <- fmtExp body
   pure $ ["in"] <> body'
-  
+
 fmtSizeBinder :: SizeBinder Name -> Fmt
 fmtSizeBinder (SizeBinder v _) = brackets [prettyText v]
-  
+
 fmtIdent :: IdentBase NoInfo Name t -> FmtM Fmt
 fmtIdent = pure . L.singleton . prettyText . identName
 
@@ -628,7 +652,7 @@ fmtLoopForm (ForIn x e) = do
 fmtLoopForm (While cond) = do
   cond' <- fmtExp cond
   pure $ ["while"] <> cond'
-  
+
 fmtBinOp :: QualName Name -> Line
 fmtBinOp bop =
   case leading of
@@ -644,17 +668,18 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body _doc attrs _lo
   args' <- concat <$> mapM fmtPat args
   retdecl' <-
     case fmtTypeExp <$> retdecl of
-    Just a -> fmap ([":"] <>) a
-    Nothing -> pure []
+      Just a -> fmap ([":"] <>) a
+      Nothing -> pure []
   body' <- fmtExp body
-  pure $ fmt_attrs <>
-         fun <>
-         [fmtName name] <>
-         tparams' <>
-         args' <>
-         retdecl' <>
-         ["="] <>
-         body'
+  pure $
+    fmt_attrs
+      <> fun
+      <> [fmtName name]
+      <> tparams'
+      <> args'
+      <> retdecl'
+      <> ["="]
+      <> body'
   where
     fun =
       case entry of
@@ -664,7 +689,7 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body _doc attrs _lo
 fmtSizeExp :: SizeExp UncheckedExp -> FmtM Fmt
 fmtSizeExp (SizeExp d _loc) = do
   d' <- fmtExp d
-  pure $ brackets d' 
+  pure $ brackets d'
 fmtSizeExp (SizeExpAny _loc) = pure $ brackets mempty
 
 fmtSpecBase :: UncheckedSpec -> FmtM Fmt
@@ -688,23 +713,23 @@ fmtModTypeExp :: UncheckedModTypeExp -> FmtM Fmt
 fmtModTypeExp (ModTypeVar v _ _loc) = pure [prettyText v]
 fmtModTypeExp (ModTypeParens mte _loc) = do
   mte' <- fmtModTypeExp mte
-  pure $ parens mte' 
+  pure $ parens mte'
 fmtModTypeExp (ModTypeSpecs sbs _loc) = do
-  sbs' <- mapM fmtSpecBase sbs 
+  sbs' <- mapM fmtSpecBase sbs
   pure $ braces $ mconcat sbs'
 fmtModTypeExp (ModTypeWith mte (TypeRef v ps td _) _loc) = do
   mte' <- fmtModTypeExp mte
-  ps' <- mapM fmtTypeParam ps 
+  ps' <- mapM fmtTypeParam ps
   td' <- fmtTypeExp td
-  pure $ mte' <> ["with " <> prettyText v <> " "] <> mconcat ps' <> ["="] <> td' 
+  pure $ mte' <> ["with " <> prettyText v <> " "] <> mconcat ps' <> ["="] <> td'
 fmtModTypeExp (ModTypeArrow (Just v) te0 te1 _loc) = do
   te0' <- fmtModTypeExp te0
   te1' <- fmtModTypeExp te1
-  pure $ parens [prettyText v <> ": "] <> te0' <> [ "->" ] <> te1' 
+  pure $ parens [prettyText v <> ": "] <> te0' <> ["->"] <> te1'
 fmtModTypeExp (ModTypeArrow Nothing te0 te1 _loc) = do
   te0' <- fmtModTypeExp te0
   te1' <- fmtModTypeExp te1
-  pure $ te0' <> [" -> "] <> te1' 
+  pure $ te0' <> [" -> "] <> te1'
 
 fmtModTypeBind :: UncheckedModTypeBind -> FmtM Fmt
 fmtModTypeBind (ModTypeBind pName pSig _ _) = do
@@ -714,7 +739,7 @@ fmtModTypeBind (ModTypeBind pName pSig _ _) = do
 fmtModParam :: ModParamBase NoInfo Name -> FmtM Fmt
 fmtModParam (ModParam pName pSig _f _loc) = do
   pSig' <- fmtModTypeExp pSig
-  pure $ parens $ [prettyText pName <> ": " ] <> pSig' 
+  pure $ parens $ [prettyText pName <> ": "] <> pSig'
 
 fmtModBind :: UncheckedModBind -> FmtM Fmt
 fmtModBind (ModBind name ps sig te _doc _loc) = do
@@ -722,7 +747,7 @@ fmtModBind (ModBind name ps sig te _doc _loc) = do
   sig' <- fmtSig sig
   te' <- fmtModExp te
   pure $ ["module "] <> mconcat ([prettyText name] : ps') <> sig' <> [" = "] <> te'
-  where 
+  where
     fmtSig s = case s of
       Nothing -> pure mempty
       Just (s', _f) -> do
@@ -731,13 +756,13 @@ fmtModBind (ModBind name ps sig te _doc _loc) = do
 
 -- All of these should probably be "extra" indented
 fmtModExp :: UncheckedModExp -> FmtM Fmt
-fmtModExp (ModVar v _loc) = pure [prettyText v] 
+fmtModExp (ModVar v _loc) = pure [prettyText v]
 fmtModExp (ModParens f _loc) = do
-  f' <- fmtModExp f 
+  f' <- fmtModExp f
   pure $ parens f'
 fmtModExp (ModImport path _f _loc) =
   pure ["import \"" <> prettyText path <> "\""]
--- Should be put inside a nested block 
+-- Should be put inside a nested block
 fmtModExp (ModDecs decs _loc) = do
   decs' <- mapM fmtDec decs
   pure $ braces $ mconcat decs'
@@ -757,7 +782,7 @@ fmtModExp (ModLambda param maybe_sig body _loc) = do
   maybe_sig' <-
     case maybe_sig of
       Nothing -> pure mempty
-      Just (sig, _) -> ([":"]<>) <$> fmtModTypeExp sig
+      Just (sig, _) -> ([":"] <>) <$> fmtModTypeExp sig
   body' <- fmtModExp body
   pure $ ["\\"] <> param' <> maybe_sig' <> ["->"] <> body'
 
@@ -768,15 +793,15 @@ fmtDec (TypeDec tb) = buildFmt fmtTypeBind tb -- A type declaration.
 fmtDec (ModTypeDec tb) = buildFmt fmtModTypeBind tb -- A module type declation.
 fmtDec (ModDec tb) = buildFmt fmtModBind tb -- A module declation.
 fmtDec (OpenDec tb _loc) = do
-  tb' <- fmtModExp tb 
-  pure $ ["open "] <> tb' 
+  tb' <- fmtModExp tb
+  pure $ ["open "] <> tb'
 -- Adds the local keyword
 fmtDec (LocalDec tb _loc) = do
   tb' <- fmtDec tb
   pure $ ["local "] <> tb'
 -- Import declarations.
-fmtDec (ImportDec path _tb _loc) = 
-  pure ["import \"" <> prettyText path <> "\""] 
+fmtDec (ImportDec path _tb _loc) =
+  pure ["import \"" <> prettyText path <> "\""]
 
 -- | Does not return residual comments, because these are simply
 -- inserted at the end.
@@ -786,7 +811,7 @@ fmtProg (Prog dc decs) = do
   decs' <- fmtMany fmtDec decs
   cs <- gets comments
   modify (\s -> s {comments = []})
-  pure $ dc' <> decs' <> map commentText cs 
+  pure $ dc' <> decs' <> map commentText cs
 
 -- | Run @futhark fmt@.
 main :: String -> [String] -> IO ()
@@ -800,11 +825,11 @@ main = mainWithOptions () [] "program" $ \args () ->
           exitFailure
         Right (prog, cs) -> do
           -- let number i l = T.pack $ printf "%4d %s" (i :: Int) l
-          let fmt = evalState (fmtProg prog) (FmtState { comments = cs })
+          let fmt = evalState (fmtProg prog) (FmtState {comments = cs})
           T.hPutStr stdout $ T.unlines fmt
     _ -> Nothing
 
 fmtText :: String -> T.Text -> Either SyntaxError T.Text
-fmtText fName fContent = do 
+fmtText fName fContent = do
   (prog, cs) <- parseFutharkWithComments fName fContent
-  pure $ T.unlines $ evalState (fmtProg prog) (FmtState { comments = cs })
+  pure $ T.unlines $ evalState (fmtProg prog) (FmtState {comments = cs})
