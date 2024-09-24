@@ -112,7 +112,8 @@ tests =
           @??= let renamed_lin_comb = getValue $ do
                      (_, _, _, _, a, b, c, d, _) <- varsM
                      _ <- newVName "k" -- Simulate "k" introduced by Unify.
-                     rename $ sym2SoP (LinComb a (name2SoP b) (name2SoP c) (Var d))
+                     vns <- getNameSource
+                     rename vns $ sym2SoP (LinComb a (name2SoP b) (name2SoP c) (Var d))
                 in Just (mkSub x renamed_lin_comb),
       testCase "These shouldn't unify because w is different from a!" $
         -- Pattern should require `Idx (Var c) (Var a)`.

@@ -8,7 +8,7 @@ import Futhark.Analysis.Proofs.Refine (refineSymbol, refineIndexFn)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), getLinCombBoundVar, normalizeSymbol)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify (Renameable (renameWith), Substitution (vns), SubstitutionBuilder (..), rep, sub)
+import Futhark.Analysis.Proofs.Unify (Substitution (vns), SubstitutionBuilder (..), rep, sub, rename_)
 import Futhark.MonadFreshNames
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$), ($>$))
 import Futhark.SoP.Monad (substEquivs)
@@ -165,7 +165,7 @@ rulesSoP = do
           to = \s -> do
             j <-
               fromJust . getLinCombBoundVar
-                <$> renameWith (vns s) (LinComb i (hole h1) (hole h2) (Hole h3))
+                <$> rename_ (vns s) mempty (LinComb i (hole h1) (hole h2) (Hole h3))
             let idx = rep s (Hole h1)
             pure $ rep (mkSub j idx) $ rep s (Hole h3),
           sideCondition = \s -> do

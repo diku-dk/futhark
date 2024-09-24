@@ -454,7 +454,7 @@ tests =
 
     -- Less fragile renaming.
     e @??= e' =
-      let (actual, expected) = runTest $ (\(_, a, b) -> (a,b)) <$> renameSame e e'
+      let (actual, expected) = runTest $ renameSame e e'
        in assertEqual
             ( "expected: "
                 <> prettyString expected

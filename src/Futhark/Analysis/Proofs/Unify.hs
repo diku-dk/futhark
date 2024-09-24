@@ -14,7 +14,7 @@ import Data.Maybe (isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames qualified as FreshNames
-import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), VNameSource, newNameFromString, putNameSource)
+import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), VNameSource, newNameFromString)
 import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromList, sopToList, sopToLists, term2SoP, termToList, toTerm, zeroSoP)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty
@@ -45,27 +45,18 @@ class Renameable u where
   -- VNameSource in MonadFreshNames.
   rename_ :: (MonadFreshNames m) => VNameSource -> M.Map VName VName -> u -> m u
 
-  renameWith :: (MonadFreshNames m) => VNameSource -> u -> m u
-  renameWith vns a = do
-    restore <- getNameSource
-    putNameSource vns
-    b <- rename a
-    putNameSource restore
-    pure b
-
   -- Rename bound variables in u. Equivalent to subC(id,id,e).
-  rename :: (MonadFreshNames m) => u -> m u
-  rename x = getNameSource >>= \vns -> rename_ vns mempty x
+  rename :: (MonadFreshNames m) => VNameSource -> u -> m u
+  rename vns = rename_ vns mempty
 
 -- Rename bound variables in `a` and `b`. Renamed variables are
 -- identical, if `a` and `b` are syntactically equivalent.
-renameSame :: (MonadFreshNames m, Renameable a, Renameable b) => a -> b -> m (VNameSource, a, b)
+renameSame :: (MonadFreshNames m, Renameable a, Renameable b) => a -> b -> m (a, b)
 renameSame a b = do
   vns <- getNameSource
-  a' <- rename a
-  putNameSource vns
-  b' <- rename b
-  pure (vns, a', b')
+  a' <- rename vns a
+  b' <- rename vns b
+  pure (a', b')
 
 data Substitution u = Substitution
   { sop :: M.Map VName (SoP u),
@@ -99,7 +90,7 @@ sub ::
   Substitution u ->
   v ->
   m (SoP u)
-sub s x = rep s <$> renameWith (vns s) x
+sub s x = rep s <$> rename_ (vns s) mempty x
 
 class SubstitutionBuilder v u where
   addSub :: VName -> v -> Substitution u -> Substitution u
@@ -119,7 +110,9 @@ class (MonadFreshNames m, Renameable v) => Unify v u m where
     -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
     --                  = {rename(e) ~= rename(e')}.
     k <- newNameFromString "k"
-    (vns, a, b) <- renameSame e e'
+    vns <- getNameSource
+    a <- rename vns e
+    b <- rename vns e'
     s <- unify_ k a b
     pure $ s {vns = vns}
 
@@ -128,9 +121,6 @@ instance Renameable VName where
 
 instance (Renameable u) => Renameable [u] where
   rename_ vns tau = mapM (rename_ vns tau)
-
--- instance (Renameable u, Ord u) => Renameable ([u], Integer) where
---   rename_ tau (xs, c) = (,c) <$> mapM (rename_ tau) xs
 
 instance (Renameable u, Ord u) => Renameable (Term u, Integer) where
   rename_ vns tau (x, c) = (,c) . toTerm <$> mapM (rename_ vns tau) (termToList x)
@@ -190,7 +180,9 @@ unifies ::
 unifies us = runMaybeT $ do
   let (as, bs) = unzip us
   k <- newNameFromString "k"
-  (vns, as', bs') <- renameSame as bs
+  vns <- getNameSource
+  as' <- rename vns as
+  bs' <- rename vns bs
   s <- unifies_ k (zip as' bs')
   pure $ s {vns = vns}
 

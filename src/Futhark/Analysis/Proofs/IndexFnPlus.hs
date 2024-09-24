@@ -13,7 +13,7 @@ import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), SubstitutionBuilder (..), Unify (..), freshName, sub, unifies_)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
-import Futhark.MonadFreshNames (MonadFreshNames, newName, newNameFromString)
+import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName, newNameFromString)
 import Futhark.SoP.SoP (SoP, int2SoP, justConstant, mapSymSoP, sopFromList, sopToLists, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (Pretty (pretty), commasep, parens, prettyString, stack, (<+>))
@@ -112,7 +112,7 @@ repIndexFn s = rip
       IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
 
 subIndexFn :: Substitution Symbol -> IndexFn -> IndexFnM IndexFn
-subIndexFn s indexfn = repIndexFn s <$> renameWith (vns s) indexfn
+subIndexFn s indexfn = repIndexFn s <$> rename_ (vns s) mempty indexfn
 
 instance (Renameable a, Renameable b) => Renameable (Cases a b) where
   rename_ vns tau (Cases cs) = Cases <$> mapM re cs
@@ -180,8 +180,9 @@ subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
   --       <> prettyString into
   --   )
   i' <- sym2SoP . Var <$> newName i
-  for' <- rename for
-  into' <- rename into
+  vns <- getNameSource
+  for' <- rename vns for
+  into' <- rename vns into
   subst' x (repIndexFn (mkSub i i') for') (repIndexFn (mkSub j i') into')
 subst x q r = subst' x q r
 

@@ -146,7 +146,6 @@ tests =
       pat <- expectedPat
       let expected = pat (x, y, z)
       debugM (prettyString expected)
-      -- expected <- rename expected
       indexfn <- mkIndexFnValBind vb
       case indexfn of
         Nothing -> pure Nothing
@@ -156,7 +155,7 @@ tests =
             Nothing -> pure $ Just (actual, expected)
             Just s' -> do
               e <- subIndexFn s' expected
-              Just . (\(_, a, b) -> (a, b)) <$> renameSame actual e
+              Just <$> renameSame actual e
 
     sHole = sym2SoP . Hole
 
