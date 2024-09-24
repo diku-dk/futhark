@@ -15,11 +15,12 @@ import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), VNameSource, newNameFromString)
-import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromList, sopToList, sopToLists, term2SoP, termToList, toTerm, zeroSoP)
+import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromList, sopToList, sopToLists, term2SoP, termToList, toTerm, zeroSoP, numTerms)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty
 import Language.Futhark (VName)
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM, debugPrettyM, debugM)
+import Control.Monad.Trans (lift)
 
 class (Ord a) => FreeVariables a where
   fv :: a -> S.Set VName
@@ -158,6 +159,7 @@ unifies_ ::
     Unify v u,
     Unify u u,
     Ord u,
+    Pretty u,
     Hole u
   ) =>
   VName ->
@@ -174,6 +176,7 @@ unifies ::
     Unify v u,
     Unify u u,
     Ord u,
+    Pretty u,
     Hole u
   ) =>
   [(v, v)] ->
@@ -193,6 +196,7 @@ unifyAnyPerm ::
     Unify v u,
     Unify u u,
     Ord u,
+    Pretty u,
     Hole u
   ) =>
   VName ->
@@ -209,6 +213,7 @@ instance
   ( Replaceable u u,
     Unify u u,
     Hole u,
+    Pretty u,
     Ord u
   ) =>
   Unify (Term u, Integer) u
@@ -224,6 +229,7 @@ instance
         msum
           [ unifyAnyPerm k (termToList xs) (termToList ys),
             do
+              -- lift $ debugM $ "unify x = " <> prettyString xs <> "   y =" <> prettyString ys
               let s = addSub h (int2SoP b :: SoP u) mempty
               let x = rep s (term2SoP xs' 1)
               let y = rep s (term2SoP ys 1)
@@ -236,6 +242,7 @@ instance
   ( Replaceable u u,
     Unify u u,
     Ord u,
+    Pretty u,
     Hole u
   ) =>
   Unify (SoP u) u

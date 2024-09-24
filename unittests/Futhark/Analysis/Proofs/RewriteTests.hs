@@ -12,9 +12,12 @@ import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (addEquiv, addRange)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.+.), (.-.), (.*.))
 import Futhark.SoP.SoP qualified as SoP
-import Futhark.Util.Pretty (prettyString)
+import Futhark.Util.Pretty (prettyString, (<+>), pretty)
 import Test.Tasty
 import Test.Tasty.HUnit
+import Control.Monad (unless)
+import Futhark.Util.Pretty (docString)
+import Futhark.Util.Pretty (line)
 
 runTest :: IndexFnM a -> a
 runTest test = fst $ runIndexFnM test blankNameSource
@@ -453,13 +456,10 @@ tests =
     run f = runTest (varsM >>= f)
 
     -- Less fragile renaming.
-    e @??= e' =
+    e @??= e' = do
       let (actual, expected) = runTest $ renameSame e e'
-       in assertEqual
-            ( "expected: "
-                <> prettyString expected
-                <> "\nbut got: "
-                <> prettyString actual
-            )
-            expected
-            actual
+      unless (actual == expected) (assertFailure $ msg actual expected)
+      where
+        msg actual expected =
+          docString $
+            "expected:" <+> pretty expected <> line <> "but got: " <+> pretty actual

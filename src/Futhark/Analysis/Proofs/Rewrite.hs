@@ -2,13 +2,14 @@ module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad ((<=<))
 import Data.Maybe (fromJust)
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, debugPrettyM, debugM)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, debugM, debugPrettyM)
 import Futhark.Analysis.Proofs.IndexFnPlus (normalizeIndexFn, repVName, subIndexFn)
-import Futhark.Analysis.Proofs.Refine (refineSymbol, refineIndexFn)
+import Futhark.Analysis.Proofs.Refine (refineIndexFn, refineSymbol)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), getLinCombBoundVar, normalizeSymbol)
+import Futhark.Analysis.Proofs.SymbolPlus (getRenamedLinCombBoundVar)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify (Substitution (vns), SubstitutionBuilder (..), rep, sub, rename_)
+import Futhark.Analysis.Proofs.Unify (Substitution (vns), SubstitutionBuilder (..), rename_, rep, sub)
 import Futhark.MonadFreshNames
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$), ($>$))
 import Futhark.SoP.Monad (substEquivs)
@@ -75,68 +76,46 @@ rulesSoP = do
   h1 <- newVName "h"
   h2 <- newVName "h"
   h3 <- newVName "h"
-  h4 <- newVName "h"
   x1 <- newVName "x"
   y1 <- newVName "y"
   c <- newVName "h"
+  -- Recognizable holes for debugging.
+  d1 <- newVName "d"
+  d2 <- newVName "d"
+  d3 <- newVName "d"
+  d4 <- newVName "d"
   pure
-    [ Rule
+    [ let lincomb = LinComb i (hole d1) (hole d2) (Hole d3)
+      in Rule
         { name = "Extend sum lower bound",
           from =
-            scale c (LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)))
-              .+. scale c (Idx (Hole h3) (hole h4)),
+            scale c lincomb .+. scale c (Hole d4),
           to = \s ->
             sub s $
               scale c $
-                LinComb i (hole h4) (hole h2) (Idx (Hole h3) (sVar i)),
+                LinComb i (hole d1 .-. int 1) (hole d2) (Hole d3),
           sideCondition = \s -> do
-            let lb = rep s (hole h1)
-            let idx = rep s (hole h4)
-            lb $==$ (idx .+. int 1)
+            let lb = rep s (Hole d1)
+            j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
+            x <- sub (mkSub j $ lb .-. int 1) $ rep s (Hole d3)
+            y <- sub s (Hole d4)
+            x $==$ y
         },
-      Rule
+      let lincomb = LinComb i (hole d1) (hole d2) (Hole d3)
+      in Rule
         { name = "Extend sum upper bound",
           from =
-            scale c (LinComb i (hole h1) (hole h2) (Idx (Hole h3) (sVar i)))
-              .+. scale c (Idx (Hole h3) (hole h4)),
+            scale c lincomb .+. scale c (Hole d4),
           to = \s ->
             sub s $
               scale c $
-                LinComb i (hole h1) (hole h4) (Idx (Hole h3) (sVar i)),
+                LinComb i (hole d1) (hole d2 .+. int 1) (Hole d3),
           sideCondition = \s -> do
-            let ub = rep s (hole h2)
-            let idx = rep s (hole h4)
-            ub $==$ (idx .-. int 1)
-        },
-      -- TODO Change indicator to be a property in order to not duplicate rules
-      -- or have to introduce context holes?
-      Rule
-        { name = "Extend sum lower bound (indicator)",
-          from =
-            scale c (LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)))
-              .+. scale c (Indicator (Idx (Hole h3) (hole h4))),
-          to = \s ->
-            sub s $
-              scale c $
-                LinComb i (hole h4) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)),
-          sideCondition = \s -> do
-            let lb = rep s (hole h1)
-            let idx = rep s (hole h4)
-            lb $==$ (idx .+. int 1)
-        },
-      Rule
-        { name = "Extend sum upper bound (indicator)",
-          from =
-            scale c (LinComb i (hole h1) (hole h2) (Indicator $ Idx (Hole h3) (sVar i)))
-              .+. scale c (Indicator (Idx (Hole h3) (hole h4))),
-          to = \s ->
-            sub s $
-              scale c $
-                LinComb i (hole h1) (hole h4) (Indicator $ Idx (Hole h3) (sVar i)),
-          sideCondition = \s -> do
-            let ub = rep s (hole h2)
-            let idx = rep s (hole h4)
-            ub $==$ (idx .-. int 1)
+            let ub = rep s (Hole d2)
+            j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
+            x <- sub (mkSub j $ ub .+. int 1) $ rep s (Hole d3)
+            y <- sub s (Hole d4)
+            x $==$ y
         },
       Rule
         { name = "Merge sum-subtractation",
@@ -158,20 +137,19 @@ rulesSoP = do
           to = \s -> sub s $ int 1 .-. sym2SoP (Indicator (Hole h1)),
           sideCondition = vacuous
         },
-      Rule
-        { name = "Replace sum over one element sequence by element",
-          from = sym2SoP $ LinComb i (hole h1) (hole h2) (Hole h3),
-          to = \s -> do
-            j <-
-              fromJust . getLinCombBoundVar
-                <$> rename_ (vns s) mempty (LinComb i (hole h1) (hole h2) (Hole h3))
-            let idx = rep s (Hole h1)
-            pure $ rep (mkSub j idx) $ rep s (Hole h3),
-          sideCondition = \s -> do
-            let start = rep s (Hole h1)
-            let end = rep s (Hole h2)
-            start $==$ end
-        },
+      let lincomb = LinComb i (hole h1) (hole h2) (Hole h3)
+       in Rule
+            { name = "Replace sum over one element sequence by element",
+              from = sym2SoP lincomb,
+              to = \s -> do
+                j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
+                let idx = rep s (Hole h1)
+                pure $ rep (mkSub j idx) $ rep s (Hole h3),
+              sideCondition = \s -> do
+                let start = rep s (Hole h1)
+                let end = rep s (Hole h2)
+                start $==$ end
+            },
       Rule
         { name = "Replace sum over empty sequence by zero",
           from = sym2SoP $ LinComb i (hole h1) (hole h2) (Hole h3),
