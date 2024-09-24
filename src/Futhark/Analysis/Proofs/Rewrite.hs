@@ -2,14 +2,14 @@ module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad ((<=<))
 import Data.Maybe (fromJust)
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, debugM, debugPrettyM)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases)
 import Futhark.Analysis.Proofs.IndexFnPlus (normalizeIndexFn, repVName, subIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineIndexFn, refineSymbol)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), getLinCombBoundVar, normalizeSymbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), normalizeSymbol)
 import Futhark.Analysis.Proofs.SymbolPlus (getRenamedLinCombBoundVar)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify (Substitution (vns), SubstitutionBuilder (..), rename_, rep, sub)
+import Futhark.Analysis.Proofs.Unify (SubstitutionBuilder (..), rep, sub)
 import Futhark.MonadFreshNames
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$), ($>$))
 import Futhark.SoP.Monad (substEquivs)
@@ -86,37 +86,37 @@ rulesSoP = do
   d4 <- newVName "d"
   pure
     [ let lincomb = LinComb i (hole d1) (hole d2) (Hole d3)
-      in Rule
-        { name = "Extend sum lower bound",
-          from =
-            scale c lincomb .+. scale c (Hole d4),
-          to = \s ->
-            sub s $
-              scale c $
-                LinComb i (hole d1 .-. int 1) (hole d2) (Hole d3),
-          sideCondition = \s -> do
-            let lb = rep s (Hole d1)
-            j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
-            x <- sub (mkSub j $ lb .-. int 1) $ rep s (Hole d3)
-            y <- sub s (Hole d4)
-            x $==$ y
-        },
+       in Rule
+            { name = "Extend sum lower bound",
+              from =
+                scale c lincomb .+. scale c (Hole d4),
+              to = \s ->
+                sub s $
+                  scale c $
+                    LinComb i (hole d1 .-. int 1) (hole d2) (Hole d3),
+              sideCondition = \s -> do
+                let lb = rep s (Hole d1)
+                j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
+                x <- sub (mkSub j $ lb .-. int 1) $ rep s (Hole d3)
+                y <- sub s (Hole d4)
+                x $==$ y
+            },
       let lincomb = LinComb i (hole d1) (hole d2) (Hole d3)
-      in Rule
-        { name = "Extend sum upper bound",
-          from =
-            scale c lincomb .+. scale c (Hole d4),
-          to = \s ->
-            sub s $
-              scale c $
-                LinComb i (hole d1) (hole d2 .+. int 1) (Hole d3),
-          sideCondition = \s -> do
-            let ub = rep s (Hole d2)
-            j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
-            x <- sub (mkSub j $ ub .+. int 1) $ rep s (Hole d3)
-            y <- sub s (Hole d4)
-            x $==$ y
-        },
+       in Rule
+            { name = "Extend sum upper bound",
+              from =
+                scale c lincomb .+. scale c (Hole d4),
+              to = \s ->
+                sub s $
+                  scale c $
+                    LinComb i (hole d1) (hole d2 .+. int 1) (Hole d3),
+              sideCondition = \s -> do
+                let ub = rep s (Hole d2)
+                j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
+                x <- sub (mkSub j $ ub .+. int 1) $ rep s (Hole d3)
+                y <- sub s (Hole d4)
+                x $==$ y
+            },
       Rule
         { name = "Merge sum-subtractation",
           from =
