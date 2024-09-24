@@ -68,7 +68,7 @@ check cond (Just s) = do
   b <- cond s
   pure $ if b then Just s else Nothing
 
-applyRuleDefault :: (Unify b u m) => Rule b u m -> b -> m b
+applyRuleDefault :: (Unify b u) => Rule b u IndexFnM -> b -> IndexFnM b
 applyRuleDefault rule x =
   unify (from rule) x
     >>= check (sideCondition rule)

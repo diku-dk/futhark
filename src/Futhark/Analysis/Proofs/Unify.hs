@@ -19,6 +19,7 @@ import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromLi
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty
 import Language.Futhark (VName)
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 
 class (Ord a) => FreeVariables a where
   fv :: a -> S.Set VName
@@ -100,12 +101,12 @@ class SubstitutionBuilder v u where
 class Hole u where
   justHole :: u -> Maybe VName
 
-class (MonadFreshNames m, Renameable v) => Unify v u m where
+class (Renameable v) => Unify v u where
   -- `unify_ k eq` is the unification algorithm from Sieg and Kauffmann,
   -- Unification for quantified formulae, 1993.
   -- Check whether x is a bound variable by `x >= k`.
-  unify_ :: VName -> v -> v -> MaybeT m (Substitution u)
-  unify :: v -> v -> m (Maybe (Substitution u))
+  unify_ :: VName -> v -> v -> MaybeT IndexFnM (Substitution u)
+  unify :: v -> v -> IndexFnM (Maybe (Substitution u))
   unify e e' = runMaybeT $ do
     -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
     --                  = {rename(e) ~= rename(e')}.
@@ -154,14 +155,14 @@ instance (Ord u, Hole u) => SubstitutionBuilder (SoP u) u where
 unifies_ ::
   ( Replaceable v u,
     Replaceable u u,
-    Unify v u m,
-    Unify u u m,
+    Unify v u,
+    Unify u u,
     Ord u,
     Hole u
   ) =>
   VName ->
   [(v, v)] ->
-  MaybeT m (Substitution u)
+  MaybeT IndexFnM (Substitution u)
 unifies_ _ [] = pure mempty
 unifies_ k (u : us) = do
   s0 <- uncurry (unify_ k) u
@@ -170,13 +171,13 @@ unifies_ k (u : us) = do
 unifies ::
   ( Replaceable v u,
     Replaceable u u,
-    Unify v u m,
-    Unify u u m,
+    Unify v u,
+    Unify u u,
     Ord u,
     Hole u
   ) =>
   [(v, v)] ->
-  m (Maybe (Substitution u))
+  IndexFnM (Maybe (Substitution u))
 unifies us = runMaybeT $ do
   let (as, bs) = unzip us
   k <- newNameFromString "k"
@@ -189,15 +190,15 @@ unifies us = runMaybeT $ do
 unifyAnyPerm ::
   ( Replaceable v u,
     Replaceable u u,
-    Unify v u m,
-    Unify u u m,
+    Unify v u,
+    Unify u u,
     Ord u,
     Hole u
   ) =>
   VName ->
   [v] ->
   [v] ->
-  MaybeT m (Substitution u)
+  MaybeT IndexFnM (Substitution u)
 unifyAnyPerm k xs ys
   | length xs == length ys =
       -- Extract left-most non-fail action, if there is one.
@@ -206,11 +207,11 @@ unifyAnyPerm k xs ys
 
 instance
   ( Replaceable u u,
-    Unify u u m,
+    Unify u u,
     Hole u,
     Ord u
   ) =>
-  Unify (Term u, Integer) u m
+  Unify (Term u, Integer) u
   where
   -- Unify on permutations of symbols in term.
   unify_ k (xs, a) (ys, b)
@@ -233,11 +234,11 @@ instance
 
 instance
   ( Replaceable u u,
-    Unify u u m,
+    Unify u u,
     Ord u,
     Hole u
   ) =>
-  Unify (SoP u) u m
+  Unify (SoP u) u
   where
   -- Unify on permutations of terms.
   unify_ k x y

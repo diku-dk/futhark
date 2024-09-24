@@ -141,14 +141,14 @@ instance Renameable IndexFn where
       dom' <- rename_ vns tau dom
       IndexFn (Forall i dom') <$> rename_ vns tau body
 
-instance (MonadFreshNames m) => Unify Domain Symbol m where
+instance Unify Domain Symbol where
   unify_ k (Iota n) (Iota m) = unify_ k n m
   unify_ k (Cat _ m1 b1) (Cat _ m2 b2) = do
     s <- unify_ k m1 m2
     (s <>) <$> unify_ k (rep s b1) (rep s b2)
   unify_ _ _ _ = fail "Incompatible domains"
 
-instance (MonadFreshNames m) => Unify (Cases Symbol (SoP Symbol)) Symbol m where
+instance Unify (Cases Symbol (SoP Symbol)) Symbol where
   unify_ k (Cases cs1) (Cases cs2) = do
     s <- unifies_ k (zip (map fst xs) (map fst ys))
     s2 <- unifies_ k (zip (map (rep s . snd) xs) (map (rep s . snd) ys))
@@ -158,7 +158,7 @@ instance (MonadFreshNames m) => Unify (Cases Symbol (SoP Symbol)) Symbol m where
       ys = NE.toList cs2
 
 -- XXX we require that index function quantifiers (indexing variables) are unique!
-instance (MonadFreshNames m) => Unify IndexFn Symbol m where
+instance Unify IndexFn Symbol where
   unify_ k (IndexFn Empty body1) (IndexFn Empty body2) =
     unify_ k body1 body2
   unify_ k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j dom2) body2) = do

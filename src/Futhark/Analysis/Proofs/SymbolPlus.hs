@@ -8,6 +8,10 @@ import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Substitution (..), SubstitutionBuilder (..), Unify (..), freshName, unifies_)
 import Futhark.MonadFreshNames (MonadFreshNames)
 import Futhark.SoP.SoP (sym2SoP)
+import Language.Futhark (VName)
+
+getRenamedLinCombBoundVar :: MonadFreshNames f => Substitution u -> Symbol -> f (Maybe VName)
+getRenamedLinCombBoundVar s x = getLinCombBoundVar <$> rename_ (vns s) mempty x
 
 instance FreeVariables Symbol where
   fv sym = case sym of
@@ -97,7 +101,7 @@ instance Hole Symbol where
 -- Further, they keep (Var x := t) in the equations, but
 -- that's relegated to the substitution here.
 -- NOTE 3.a irrelevant here given that we are post type checking?
-instance (MonadFreshNames m) => Unify Symbol Symbol m where
+instance Unify Symbol Symbol where
   -- unify_ _ x y | trace ("\nunify_ " <> unwords (map prettyString [x, y])) False = undefined
   -- TODO I don't think we want exchange since unify is used to check whether
   --      the holes (FVs) in the first argument can be substituted to be
