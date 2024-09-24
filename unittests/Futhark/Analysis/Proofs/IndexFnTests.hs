@@ -100,7 +100,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/part2indices.fut"
-        ( withDebug $ \(i, n, xs, j) ->
+        ( pure $ \(i, n, xs, j) ->
             let xs_i = Idx (Hole xs) (sHole i)
              in IndexFn
                   { iterator = Forall i (Iota (sHole n)),
@@ -117,7 +117,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/map2.fut"
-        ( withDebug $ \(i, n, h1, h2) ->
+        ( pure $ \(i, n, h1, h2) ->
             IndexFn
               { iterator = Forall i (Iota (sHole n)),
                 body =
