@@ -205,16 +205,9 @@ subst' x (IndexFn (Forall _ (Iota n)) xs) (IndexFn (Forall i (Iota n')) ys)
           ( cases $ do
               (xcond, xval) <- casesToList xs
               (ycond, yval) <- casesToList ys
-              let app = apply i (mkSub x xval)
-              pure (sop2Symbol (app ycond) :&& xcond, mapSymSoP app yval)
+              pure $ repCase (mkSub x xval) (ycond :&& xcond, yval)
           )
 subst' _ _ _ = undefined
-
-apply :: VName -> Substitution Symbol -> Symbol -> SoP Symbol
-apply i s symbol = case symbol of
-  Hole _ -> error "Apply on Hole."
-  -- Idx (Var vn) j -> rep (mkSub i j) $ rep s (Var vn)
-  _ -> rep s symbol
 
 -------------------------------------------------------------------------------
 -- Index function normalization.

@@ -30,7 +30,7 @@ tests =
     "Proofs.IndexFn"
     [ mkTest
         "tests/indexfn/map.fut"
-        ( pure $ \(i, n, xs) ->
+        ( pure $ \(i, n, xs, _) ->
             IndexFn
               { iterator = Forall i (Iota (sHole n)),
                 body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Idx (Hole xs) (sHole i)))]
@@ -38,7 +38,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/map-if.fut"
-        ( pure $ \(i, n, xs) ->
+        ( pure $ \(i, n, xs, _) ->
             let xs_i = sym2SoP (Idx (Hole xs) (sHole i))
              in IndexFn
                   { iterator = Forall i (Iota (sHole n)),
@@ -51,7 +51,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/scalar.fut"
-        ( pure $ \(i, _, x) ->
+        ( pure $ \(i, _, x, _) ->
             IndexFn
               { iterator = Forall i (Iota (sHole x)),
                 body = cases [(Bool True, int2SoP 2 .*. sHole x)]
@@ -59,7 +59,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/scan.fut"
-        ( newNameFromString "h" >>= \j -> pure $ \(i, n, xs) ->
+        ( pure $ \(i, n, xs, j) ->
             IndexFn
               { iterator = Forall i (Iota (sHole n)),
                 body =
@@ -73,7 +73,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/scan2.fut"
-        ( newNameFromString "h" >>= \j -> pure $ \(i, n, xs) ->
+        ( pure $ \(i, n, xs, j) ->
             IndexFn
               { iterator = Forall i (Iota (sHole n)),
                 body =
@@ -86,7 +86,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/scalar2.fut"
-        ( newNameFromString "h" >>= \j -> pure $ \(_, n, xs) ->
+        ( pure $ \(_, n, xs, j) ->
             IndexFn
               { iterator = Empty,
                 body =
@@ -100,7 +100,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/part2indices.fut"
-        ( newNameFromString "h" >>= \j -> withDebug $ \(i, n, xs) ->
+        ( withDebug $ \(i, n, xs, j) ->
             let xs_i = Idx (Hole xs) (sHole i)
              in IndexFn
                   { iterator = Forall i (Iota (sHole n)),
@@ -117,12 +117,12 @@ tests =
         ),
       mkTest
         "tests/indexfn/map2.fut"
-        ( withDebug $ \(i, n, xs) ->
+        ( withDebug $ \(i, n, h1, h2) ->
             IndexFn
               { iterator = Forall i (Iota (sHole n)),
                 body =
                   cases
-                    [(Bool True, sym2SoP $ Idx (Hole xs) (sHole i .-. int2SoP 1))]
+                    [(Bool True, sym2SoP $ Idx (Hole h1) (sHole h2 .-. int2SoP 1))]
               }
         )
     ]
@@ -139,12 +139,13 @@ tests =
     -- the same VNameSource, otherwise the variables in the index function
     -- are likely to be considered bound quantifier variables.
     runTest vns vb expectedPat = fst . flip runIndexFnM vns $ do
+      i <- newNameFromString "i"
       x <- newNameFromString "h"
       y <- newNameFromString "h"
       z <- newNameFromString "h"
       -- Evaluate expectedPat first for any side effects like debug toggling.
       pat <- expectedPat
-      let expected = pat (x, y, z)
+      let expected = pat (i, x, y, z)
       debugM (prettyString expected)
       indexfn <- mkIndexFnValBind vb
       case indexfn of
