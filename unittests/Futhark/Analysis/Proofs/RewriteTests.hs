@@ -107,8 +107,6 @@ tests =
       testCase "Merge sum-subtraction (match 3)" $
         run
           ( \(x, _, z, w, a, b, _, _) -> do
-              debugOn
-              -- debugM (show (LinComb w (int 0) (sVar a) (Var x) ~-~ LinComb z (int 0) (sVar b) (Var x)))
               addRange (Var b) (SoP.Range mempty 1 (S.singleton (sVar a)))
               rewrite (LinComb w (int 0) (sVar a) (Idx (Var x) (sVar w))
                        ~-~ LinComb z (int 0) (sVar b) (Idx (Var x) (sVar z)))
@@ -320,7 +318,8 @@ tests =
                ),
       testCase "Rule 5 (carry) (match 3)" $
         run
-          ( \(x, y, _, _, a, b, _, _) ->
+          ( \(x, y, _, _, a, b, _, _) -> do
+              debugOn
               rewrite
                 ( IndexFn
                     { iterator = Forall x (Cat y (sVar a) (sVar b)),

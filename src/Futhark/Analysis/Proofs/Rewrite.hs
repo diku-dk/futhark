@@ -2,7 +2,7 @@ module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad ((<=<))
 import Data.Maybe (fromJust)
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, debugPrettyM)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, debugPrettyM, debugM)
 import Futhark.Analysis.Proofs.IndexFnPlus (normalizeIndexFn, repVName, subIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineSymbol, refineIndexFn)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)

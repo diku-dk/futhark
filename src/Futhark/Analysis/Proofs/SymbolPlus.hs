@@ -5,10 +5,9 @@ module Futhark.Analysis.Proofs.SymbolPlus where
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Substitution (..), SubstitutionBuilder (..), Unify (..), unifies_)
+import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Substitution (..), SubstitutionBuilder (..), Unify (..), freshName, unifies_)
 import Futhark.MonadFreshNames (MonadFreshNames)
 import Futhark.SoP.SoP (sym2SoP)
-import Futhark.FreshNames (newName)
 
 instance FreeVariables Symbol where
   fv sym = case sym of
@@ -38,7 +37,7 @@ instance Renameable Symbol where
       pure $ if x' /= x then Var x' else Hole x'
     Idx xs i -> Idx <$> rename_ vns tau xs <*> rename_ vns tau i
     LinComb xn lb ub e -> do
-      let (xm, vns') = newName vns xn
+      (xm, vns') <- freshName vns
       let tau' = M.insert xn xm tau
       LinComb xm <$> rename_ vns' tau' lb <*> rename_ vns' tau' ub <*> rename_ vns' tau' e
     Indicator x -> Indicator <$> rename_ vns tau x

@@ -2,22 +2,22 @@
 
 module Futhark.Analysis.Proofs.IndexFnPlus where
 
+import Control.Monad (guard)
+import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
+import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus ()
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), SubstitutionBuilder (..), Unify (..), unifies_, sub)
-import Futhark.Analysis.Proofs.Util (prettyBinding, prettyName)
-import Futhark.MonadFreshNames (MonadFreshNames, newNameFromString)
-import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP, sym2SoP, (.+.), (.-.), sopToLists, sopFromList, justConstant, (.*.))
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), SubstitutionBuilder (..), Unify (..), freshName, sub, unifies_)
+import Futhark.Analysis.Proofs.Util (prettyName)
+import Futhark.FreshNames (VNameSource)
+import Futhark.MonadFreshNames (MonadFreshNames, newName, newNameFromString)
+import Futhark.SoP.SoP (SoP, int2SoP, justConstant, mapSymSoP, sopFromList, sopToLists, sym2SoP, (.*.), (.+.), (.-.))
+import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (Pretty (pretty), commasep, parens, prettyString, stack, (<+>))
 import Language.Futhark (VName)
-import Control.Monad (guard)
-import qualified Data.List as L
-import qualified Futhark.SoP.SoP as SoP
-import Futhark.FreshNames (newName)
-import Futhark.FreshNames (VNameSource)
 
 instance Eq Domain where
   -- Since the whole domain must be covered by an index function,
@@ -63,7 +63,7 @@ instance (Pretty a, Pretty b) => Pretty (Cases a b) where
 
 instance Pretty Domain where
   pretty (Iota n) = "iota" <+> parens (pretty n)
-  pretty (Cat k m b) =
+  pretty dom@(Cat k m b) =
     "⊎"
       <> prettyName k
       <> "="
@@ -73,12 +73,9 @@ instance Pretty Domain where
       <> commasep
         [ pretty b,
           "...",
-          pretty intervalEnd
+          pretty (intervalEnd dom)
         ]
       <> ")"
-    where
-      intervalEnd :: SoP Symbol
-      intervalEnd = rep (mkSub k (sym2SoP (Var k) .+. int2SoP 1)) b
 
 instance Pretty Iterator where
   pretty (Forall i dom) =
@@ -115,31 +112,28 @@ repIndexFn s = rip
       IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
 
 subIndexFn :: Substitution Symbol -> IndexFn -> IndexFnM IndexFn
-subIndexFn s indexfn = repIndexFn s <$> rename indexfn
+subIndexFn s indexfn = repIndexFn s <$> renameWith (vns s) indexfn
 
 instance (Renameable a, Renameable b) => Renameable (Cases a b) where
   rename_ vns tau (Cases cs) = Cases <$> mapM re cs
     where
       re (p, q) = (,) <$> rename_ vns tau p <*> rename_ vns tau q
 
-instance Renameable Domain where
-  rename_ vns tau (Cat xn m b) = fst <$> renameCat_ vns tau xn m b
-  rename_ vns tau (Iota n) = Iota <$> rename_ vns tau n
-
-renameCat_ :: MonadFreshNames m => VNameSource -> M.Map VName VName -> VName -> SoP Symbol -> SoP Symbol -> m (Domain, (M.Map VName VName, VNameSource))
+renameCat_ :: (MonadFreshNames m) => VNameSource -> M.Map VName VName -> VName -> SoP Symbol -> SoP Symbol -> m (Domain, (M.Map VName VName, VNameSource))
 renameCat_ vns tau xn m b = do
-  let (xm, vns') = newName vns xn
+  (xm, vns') <- freshName vns
   let tau' = M.insert xn xm tau
   dom <- Cat xm <$> rename_ vns' tau' m <*> rename_ vns' tau' b
   pure (dom, (tau', vns'))
+
+instance Renameable Domain where
+  rename_ vns tau (Cat xn m b) = fst <$> renameCat_ vns tau xn m b
+  rename_ vns tau (Iota n) = Iota <$> rename_ vns tau n
 
 instance Renameable IndexFn where
   rename_ vns tau indexfn = case indexfn of
     IndexFn Empty body -> IndexFn Empty <$> rename_ vns tau body
     -- NOTE that i is not renamed.
-    -- XXX that is probably wrong, with fixed renaming should be doable?
-    -- XXX have to replicate Renameable domain here bc body
-    -- is quantified by Cat xn and so we need tau'...
     IndexFn (Forall i (Cat xn m b)) body -> do
       (dom, (tau', vns')) <- renameCat_ vns tau xn m b
       IndexFn (Forall i dom) <$> rename_ vns' tau' body
@@ -185,7 +179,7 @@ subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
   --       <> "\ninto\n"
   --       <> prettyString into
   --   )
-  i' <- sym2SoP . Var <$> newNameFromString "i"
+  i' <- sym2SoP . Var <$> newName i
   for' <- rename for
   into' <- rename into
   subst' x (repIndexFn (mkSub i i') for') (repIndexFn (mkSub j i') into')
@@ -220,10 +214,6 @@ apply i s symbol = case symbol of
   Hole _ -> error "Apply on Hole."
   -- Idx (Var vn) j -> rep (mkSub i j) $ rep s (Var vn)
   _ -> rep s symbol
-
-
-
-
 
 -------------------------------------------------------------------------------
 -- Index function normalization.
@@ -260,35 +250,39 @@ rewritePrefixSum :: IndexFn -> IndexFnM IndexFn
 rewritePrefixSum indexfn@(IndexFn (Forall i dom) (Cases cs))
   | [(p1, e1), (p2, recur)] <- NE.toList cs,
     Just e2 <- justRecurrencePlusSoP recur = do
-    let b = domainSegStart dom
-    s_c <- unify (cases [(sym2SoP (Var i) :== b, e1),
-                         (sym2SoP (Var i) :/= b, e2)])
-                 (cases [(p1, e1), (p2, e2)])
-    case s_c :: Maybe (Substitution Symbol) of
-      Nothing -> pure indexfn
-      Just _ -> do
-        -- debugM $ "MATCHED rewritePrefixSum\n" <> prettyString indexfn
-        j <- newNameFromString "j"
-        e1_b <- sub (mkSub i b) e1
-        e2_j <- sub (mkSub i (sym2SoP $ Var j)) e2
-        let e2_sum = applyLinCombRule j (b .+. int2SoP 1) (sym2SoP $ Var i) e2_j
-        let res =
-              IndexFn
-                { iterator = Forall i dom,
-                  body = cases [(Bool True, e1_b .+. e2_sum)]
-                }
-        -- debugM $ "=> " <> prettyString res
-        pure res
-    where
-      -- Returns the argument SoP without its recurrence term, if it is
-      -- on the form `Recurrence + x` where x does not contain Recurrence
-      -- anywhere. Otherwise returns Nothing.
-      justRecurrencePlusSoP sop
-        | ([_rec], other_terms) <- L.partition (== ([Recurrence], 1)) xs = do
-            guard $ not (any ((Recurrence `elem`) . fst) other_terms)
-            Just . sopFromList $ other_terms
-        where
-          xs = sopToLists sop
-      justRecurrencePlusSoP _ = Nothing
+      let b = domainSegStart dom
+      s_c <-
+        unify
+          ( cases
+              [ (sym2SoP (Var i) :== b, e1),
+                (sym2SoP (Var i) :/= b, e2)
+              ]
+          )
+          (cases [(p1, e1), (p2, e2)])
+      case s_c :: Maybe (Substitution Symbol) of
+        Nothing -> pure indexfn
+        Just _ -> do
+          -- debugM $ "MATCHED rewritePrefixSum\n" <> prettyString indexfn
+          j <- newNameFromString "j"
+          e1_b <- sub (mkSub i b) e1
+          e2_j <- sub (mkSub i (sym2SoP $ Var j)) e2
+          let e2_sum = applyLinCombRule j (b .+. int2SoP 1) (sym2SoP $ Var i) e2_j
+          let res =
+                IndexFn
+                  { iterator = Forall i dom,
+                    body = cases [(Bool True, e1_b .+. e2_sum)]
+                  }
+          -- debugM $ "=> " <> prettyString res
+          pure res
+  where
+    -- Returns the argument SoP without its recurrence term, if it is
+    -- on the form `Recurrence + x` where x does not contain Recurrence
+    -- anywhere. Otherwise returns Nothing.
+    justRecurrencePlusSoP sop
+      | ([_rec], other_terms) <- L.partition (== ([Recurrence], 1)) xs = do
+          guard $ not (any ((Recurrence `elem`) . fst) other_terms)
+          Just . sopFromList $ other_terms
+      where
+        xs = sopToLists sop
+    justRecurrencePlusSoP _ = Nothing
 rewritePrefixSum indexfn = pure indexfn
-

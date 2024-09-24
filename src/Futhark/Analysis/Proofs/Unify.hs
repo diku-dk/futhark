@@ -13,7 +13,8 @@ import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
-import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newNameFromString, putNameSource, VNameSource)
+import Futhark.FreshNames qualified as FreshNames
+import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), VNameSource, newNameFromString, putNameSource)
 import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromList, sopToList, sopToLists, term2SoP, termToList, toTerm, zeroSoP)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty
@@ -21,6 +22,22 @@ import Language.Futhark (VName)
 
 class (Ord a) => FreeVariables a where
   fv :: a -> S.Set VName
+
+-- | Produce a fresh name, using the given name as a template.
+-- Like "FreshNames.newName", except it lets us reuse the same name
+-- source in multiple places while ensuring that the monadic name source
+-- continues to generate unique names afterwards.
+freshName :: (MonadFreshNames m) => VNameSource -> m (VName, VNameSource)
+freshName vns = do
+  -- All renamed names must have the same base name. Otherwise renaming two
+  -- expressions with differently named bound variables will not produce
+  -- identical renamings.
+  x <- newNameFromString "x"
+  -- Note that we are unnecessarily incrementing the monadic name source above.
+  -- The monadic name source needs only be updated to the maximum tag over all
+  -- places where freshName is used on successions of vns.
+  let (j, vns') = FreshNames.newName vns x
+  pure (j, vns')
 
 class Renameable u where
   -- Implements subC(id,tau,e) from Sieg and Kaufmann where
@@ -55,7 +72,7 @@ data Substitution u = Substitution
     vns :: VNameSource
   }
 
-instance Show u => Show (Substitution u) where
+instance (Show u) => Show (Substitution u) where
   show = show . sop
 
 instance (Eq u, Ord u) => Eq (Substitution u) where
@@ -104,12 +121,12 @@ class (MonadFreshNames m, Renameable v) => Unify v u m where
     k <- newNameFromString "k"
     (vns, a, b) <- renameSame e e'
     s <- unify_ k a b
-    pure $ s { vns = vns }
+    pure $ s {vns = vns}
 
 instance Renameable VName where
   rename_ _ tau x = pure $ M.findWithDefault x x tau
 
-instance Renameable u => Renameable [u] where
+instance (Renameable u) => Renameable [u] where
   rename_ vns tau = mapM (rename_ vns tau)
 
 -- instance (Renameable u, Ord u) => Renameable ([u], Integer) where
@@ -175,7 +192,7 @@ unifies us = runMaybeT $ do
   k <- newNameFromString "k"
   (vns, as', bs') <- renameSame as bs
   s <- unifies_ k (zip as' bs')
-  pure $ s { vns = vns }
+  pure $ s {vns = vns}
 
 unifyAnyPerm ::
   ( Replaceable v u,
