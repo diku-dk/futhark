@@ -1,5 +1,6 @@
 module Futhark.Analysis.Proofs.IndexFnTests (tests) where
 
+import Control.Monad (unless)
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
@@ -177,8 +178,9 @@ tests =
 
     sHole = sym2SoP . Hole
 
-    actual @??= expected =
-      let msg =
-            docString $
-              "expected:" <+> pretty expected <> line <> "but got: " <+> pretty actual
-       in assertEqual msg expected actual
+    actual @??= expected = do
+      unless (actual == expected) (assertFailure msg)
+      where
+        msg =
+          docString $
+            "expected:" <+> pretty expected <> line <> "but got: " <+> pretty actual
