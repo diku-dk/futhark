@@ -124,6 +124,23 @@ tests =
                   cases
                     [(Bool True, sym2SoP $ Idx (Hole h1) (sHole h2 .-. int2SoP 1))]
               }
+        ),
+      mkTest
+        "tests/indexfn/part2indices_numeric_conds.fut"
+        ( pure $ \(i, n, xs, j) ->
+            let xs_i = Idx (Hole xs) (sHole i)
+             in IndexFn
+                  { iterator = Forall i (Iota (sHole n)),
+                    body =
+                      cases
+                        [ ( xs_i,
+                            int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j))))
+                          ),
+                          ( Not xs_i,
+                            sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (Idx (Hole xs) (sHole j))))
+                          )
+                        ]
+                  }
         )
     ]
   where

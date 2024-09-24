@@ -150,7 +150,6 @@ rulesSoP = do
           sideCondition = \s -> do
             let y' = rep s (Hole y1)
             let x' = rep s (Hole x1)
-            debugPrettyM "MATCHED merge sum-subtraction: " (y' :<= x')
             y' $<=$ x'
         },
       Rule
