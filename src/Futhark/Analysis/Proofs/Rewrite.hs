@@ -73,48 +73,49 @@ scale c symbol = hole c .*. sym2SoP symbol
 rulesSoP :: IndexFnM [Rule (SoP Symbol) Symbol IndexFnM]
 rulesSoP = do
   i <- newVName "i"
+  -- TODO this hole meant for constants must come before other
+  -- holes in order to match in rules. This is because
+  -- only the first hole in a term is attempted to match against
+  -- constants and the first hole will be the one with the lowest tag.
+  -- Gotta fix that.
+  c <- newVName "h"
   h1 <- newVName "h"
   h2 <- newVName "h"
   h3 <- newVName "h"
+  h4 <- newVName "h"
   x1 <- newVName "x"
   y1 <- newVName "y"
-  c <- newVName "h"
-  -- Recognizable holes for debugging.
-  d1 <- newVName "d"
-  d2 <- newVName "d"
-  d3 <- newVName "d"
-  d4 <- newVName "d"
   pure
-    [ let lincomb = LinComb i (hole d1) (hole d2) (Hole d3)
+    [ let lincomb = LinComb i (hole h1) (hole h2) (Hole h3)
        in Rule
             { name = "Extend sum lower bound",
               from =
-                scale c lincomb .+. scale c (Hole d4),
+                scale c lincomb .+. scale c (Hole h4),
               to = \s ->
                 sub s $
                   scale c $
-                    LinComb i (hole d1 .-. int 1) (hole d2) (Hole d3),
+                    LinComb i (hole h1 .-. int 1) (hole h2) (Hole h3),
               sideCondition = \s -> do
-                let lb = rep s (Hole d1)
+                let lb = rep s (Hole h1)
                 j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
-                x <- sub (mkSub j $ lb .-. int 1) $ rep s (Hole d3)
-                y <- sub s (Hole d4)
+                x <- sub (mkSub j $ lb .-. int 1) $ rep s (Hole h3)
+                y <- sub s (Hole h4)
                 x $==$ y
             },
-      let lincomb = LinComb i (hole d1) (hole d2) (Hole d3)
+      let lincomb = LinComb i (hole h1) (hole h2) (Hole h3)
        in Rule
             { name = "Extend sum upper bound",
               from =
-                scale c lincomb .+. scale c (Hole d4),
+                scale c lincomb .+. scale c (Hole h4),
               to = \s ->
                 sub s $
                   scale c $
-                    LinComb i (hole d1) (hole d2 .+. int 1) (Hole d3),
+                    LinComb i (hole h1) (hole h2 .+. int 1) (Hole h3),
               sideCondition = \s -> do
-                let ub = rep s (Hole d2)
+                let ub = rep s (Hole h2)
                 j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
-                x <- sub (mkSub j $ ub .+. int 1) $ rep s (Hole d3)
-                y <- sub s (Hole d4)
+                x <- sub (mkSub j $ ub .+. int 1) $ rep s (Hole h3)
+                y <- sub s (Hole h4)
                 x $==$ y
             },
       Rule

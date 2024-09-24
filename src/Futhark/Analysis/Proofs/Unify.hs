@@ -222,10 +222,11 @@ instance
   unify_ k (xs, a) (ys, b)
     | Just h <- justSym (term2SoP xs a) >>= justHole =
         pure $ addSub h (term2SoP ys b) mempty
-    -- Attempt to match hole to constant b, if necessary.
+    -- Attempt to match hole to multiplicative constant b, if necessary.
     | a == 1,
       x' : xs' <- termToList xs,
-      Just h <- justHole x' =
+      Just h <- justHole x',
+      not (null ys) =
         msum
           [ unifyAnyPerm k (termToList xs) (termToList ys),
             do
