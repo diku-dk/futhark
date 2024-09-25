@@ -234,21 +234,14 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               <> show iter_first_arg
         )
       -- Make susbtitutions from function arguments to array names.
-      -- TODO `map E.patNames params` is a [Set], I assume because we might have
-      --   map (\(x, y) -> ...) xys
-      -- meaning x needs to be substituted by x[i].0
       let paramNames :: [E.VName] = concatMap E.patNames params
       -- TODO handle tupled values by splitting them into separate index functions
       -- let xss_flat :: [IndexFn] = mconcat $ map unzipT xss
       let xss_flat = xss
       let y' = IndexFn iter_first_arg cases_body
-      debugPrettyM "map template:" y'
       -- tell ["Using map rule ", toLaTeX y']
-      -- foldM substParams y' (zip paramNames xss_flat)
-      --   >>= rewrite
-      res <- foldM substParams y' (zip paramNames xss_flat)
-      debugPrettyM "map substituted:" res
-      rewrite res
+      foldM substParams y' (zip paramNames xss_flat)
+        >>= rewrite
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
@@ -268,6 +261,15 @@ forward expr@(E.AppExp (E.Apply f args _) _)
             -- XXX support only 1D arrays for now.
             rewrite $ IndexFn (Forall i (Iota m)) body
         _ -> undefined -- TODO See iota comment.
+  | Just "iota" <- getFun f,
+    [n] <- getArgs args = do
+      indexfn <- forward n
+      i <- newNameFromString "i"
+      case indexfn of
+        IndexFn Empty (Cases ((Bool True, m) NE.:| [])) ->
+              rewrite $ IndexFn (Forall i (Iota m)) (singleCase . sym2SoP $ Var i)
+        _ -> undefined -- TODO We've no way to express this yet.
+                       -- Have talked with Cosmin about an "outer if" before.
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       -- Scan with basic operator.

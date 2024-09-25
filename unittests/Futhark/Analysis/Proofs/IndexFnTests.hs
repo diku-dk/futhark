@@ -179,6 +179,15 @@ tests =
                           )
                         ]
                   }
+        ),
+      mkTest
+        "tests/indexfn/part3indices.fut"
+        ( withDebug $ \(i, n, _, _) ->
+            IndexFn
+              { iterator = Forall i (Iota (sHole n)),
+                body =
+                  cases [(Bool True, int2SoP 0)]
+              }
         )
     ]
   where
