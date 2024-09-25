@@ -7,7 +7,7 @@ import Futhark.Analysis.Proofs.IndexFnPlus (normalizeIndexFn, subIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineIndexFn, refineSymbol)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), normalizeSymbol)
-import Futhark.Analysis.Proofs.SymbolPlus (repVName, getRenamedLinCombBoundVar)
+import Futhark.Analysis.Proofs.SymbolPlus (getRenamedLinCombBoundVar, repVName)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
 import Futhark.Analysis.Proofs.Unify (SubstitutionBuilder (..), rep, sub)
 import Futhark.MonadFreshNames

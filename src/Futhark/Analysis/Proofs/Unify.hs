@@ -7,20 +7,20 @@
 module Futhark.Analysis.Proofs.Unify where
 
 import Control.Monad (foldM, msum)
+import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Set qualified as S
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM, debugM, debugPrettyM)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), VNameSource, newNameFromString)
-import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromList, sopToList, sopToLists, term2SoP, termToList, toTerm, zeroSoP, numTerms)
+import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, numTerms, sopFromList, sopToList, sopToLists, term2SoP, termToList, toTerm, zeroSoP)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty
 import Language.Futhark (VName)
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM, debugPrettyM, debugM)
-import Control.Monad.Trans (lift)
 
 class (Ord a) => FreeVariables a where
   fv :: a -> S.Set VName

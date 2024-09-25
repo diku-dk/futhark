@@ -2,7 +2,7 @@ module Futhark.Analysis.Proofs.Symbol where
 
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.))
-import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>), apply)
+import Futhark.Util.Pretty (Pretty, apply, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName)
 
 data Symbol

@@ -1,6 +1,5 @@
 module Futhark.Analysis.Proofs.Algebra where
 
-import Futhark.SoP.Util
 import Control.Monad.RWS.Strict
 import Data.Map (Map)
 import Data.Map qualified as M
@@ -10,6 +9,7 @@ import Futhark.MonadFreshNames
 import Futhark.SoP.Expression
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 import Futhark.SoP.SoP (SoP)
+import Futhark.SoP.Util
 import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName)
 import Language.Futhark qualified as E

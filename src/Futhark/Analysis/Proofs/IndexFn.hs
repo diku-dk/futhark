@@ -9,12 +9,12 @@ import Data.Map qualified as M
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
+import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName), lookupUntransPE)
 import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP)
+import Futhark.Util.Pretty (Doc, Pretty, docString, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
-import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Futhark.Util.Pretty (Pretty, prettyString, docString, pretty, Doc)
 
 data IndexFn = IndexFn
   { iterator :: Iterator,
@@ -119,11 +119,9 @@ debugM :: String -> IndexFnM ()
 debugM x = do
   whenDebug $ traceM $ "🪲 " <> x
 
-debugPrettyM :: Pretty a => String -> a -> IndexFnM ()
+debugPrettyM :: (Pretty a) => String -> a -> IndexFnM ()
 debugPrettyM msg x = do
-  whenDebug $
-    traceM $
-      docString $ "🪲 " <> pretty msg <> " " <> pretty x
+  whenDebug $ traceM $ docString $ "🪲 " <> pretty msg <> " " <> pretty x
 
 withDebug :: b -> IndexFnM b
 withDebug f = do
