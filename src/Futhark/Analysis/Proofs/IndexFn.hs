@@ -14,7 +14,7 @@ import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Futhark.Util.Pretty (Pretty, prettyString)
+import Futhark.Util.Pretty (Pretty, prettyString, docString, pretty, Doc)
 
 data IndexFn = IndexFn
   { iterator :: Iterator,
@@ -55,8 +55,8 @@ data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Symbol E.Exp Property,
     indexfns :: M.Map VName IndexFn,
+    toplevel :: M.Map VName ([VName], [Maybe VName], IndexFn),
     debug :: Bool
-    -- toplevel :: M.Map E.VName ([E.Pat], IndexFn)
   }
 
 newtype IndexFnM a = IndexFnM (RWS () () VEnv a)
@@ -92,7 +92,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty False
+    s = VEnv vns mempty mempty mempty False
 
 insertIndexFn :: E.VName -> IndexFn -> IndexFnM ()
 insertIndexFn x v =
@@ -110,15 +110,20 @@ clearAlgEnv =
 --------------------------------------------------------------
 -- Utilities
 --------------------------------------------------------------
+whenDebug :: IndexFnM () -> IndexFnM ()
+whenDebug x = do
+  debug <- gets debug
+  when debug x
+
 debugM :: String -> IndexFnM ()
 debugM x = do
-  debug <- gets debug
-  when debug $ traceM $ "🪲 " <> x
+  whenDebug $ traceM $ "🪲 " <> x
 
 debugPrettyM :: Pretty a => String -> a -> IndexFnM ()
 debugPrettyM msg x = do
-  debug <- gets debug
-  when debug $ traceM $ "🪲 " <> msg <> " " <> prettyString  x
+  whenDebug $
+    traceM $
+      docString $ "🪲 " <> pretty msg <> " " <> pretty x
 
 withDebug :: b -> IndexFnM b
 withDebug f = do

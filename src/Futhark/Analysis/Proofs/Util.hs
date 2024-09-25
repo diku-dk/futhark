@@ -16,7 +16,7 @@ prettyHole :: VName -> Doc ann
 prettyHole x = "•" <> prettyName x
 
 prettyBinding :: (Pretty a1, Pretty a2) => a1 -> a2 -> String
-prettyBinding a b = docString $ pretty a <+> "=" <+> pretty b
+prettyBinding a b = docString $ ">>>" <+> pretty a <+> "=" <+> pretty b
 
 tracer :: (Pretty a) => a -> a
 tracer x = trace (prettyString x) x

@@ -2,7 +2,7 @@ module Futhark.Analysis.Proofs.Symbol where
 
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.))
-import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
+import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>), apply)
 import Language.Futhark (VName)
 
 data Symbol
@@ -17,6 +17,7 @@ data Symbol
       (SoP Symbol) -- upper bound
       Symbol
   | Indicator Symbol
+  | Apply Symbol [SoP Symbol]
   | Bool Bool
   | Not Symbol
   | SoP Symbol :< SoP Symbol
@@ -104,6 +105,7 @@ instance Pretty Symbol where
         <> " "
         <> autoParens e
     Indicator p -> iversonbrackets (pretty p)
+    Apply f xs -> pretty f <> apply (map pretty xs)
     Bool x -> pretty x
     Not x -> "¬" <> autoParens x
     x :< y -> prettyOp "<" x y

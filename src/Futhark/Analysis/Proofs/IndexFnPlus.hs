@@ -6,17 +6,16 @@ import Control.Monad (guard)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.SymbolPlus ()
+import Futhark.Analysis.Proofs.SymbolPlus (repVName)
 import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), SubstitutionBuilder (..), Unify (..), freshName, sub, unifies_)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName, newNameFromString)
-import Futhark.SoP.SoP (SoP, int2SoP, justConstant, mapSymSoP, sopFromList, sopToLists, sym2SoP, (.*.), (.+.), (.-.))
+import Futhark.SoP.SoP (SoP, int2SoP, justConstant, sopFromList, sopToLists, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.SoP.SoP qualified as SoP
-import Futhark.Util.Pretty (Pretty (pretty), commasep, parens, prettyString, stack, (<+>))
+import Futhark.Util.Pretty (Pretty (pretty), commasep, parens, stack, (<+>))
 import Language.Futhark (VName)
 
 instance Eq Domain where
@@ -88,12 +87,6 @@ instance Pretty IndexFn where
 -------------------------------------------------------------------------------
 -- Unification.
 -------------------------------------------------------------------------------
-repVName :: Substitution Symbol -> VName -> VName
-repVName s vn
-  | Var i <- sop2Symbol $ rep s (Var vn) =
-      i
-repVName _ _ = error "repVName substitutes for non-VName."
-
 repCase :: (Ord u, Replaceable v1 u, Replaceable v2 u) => Substitution u -> (v1, v2) -> (u, SoP u)
 repCase s (a, b) = (sop2Symbol (rep s a), rep s b)
 

@@ -1,13 +1,14 @@
 module Futhark.Analysis.Proofs.Convert where
 
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, forM, unless)
 import Control.Monad.RWS
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), IndexFnM, Iterator (..), VEnv (..), cases, clearAlgEnv, debugM, insertIndexFn, runIndexFnM, debugPrettyM)
+import Debug.Trace (traceM)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), IndexFnM, Iterator (..), VEnv (..), cases, clearAlgEnv, debugPrettyM, insertIndexFn, runIndexFnM, whenDebug)
 import Futhark.Analysis.Proofs.IndexFnPlus (subst)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
@@ -34,6 +35,8 @@ sizeOfTypeBase :: E.TypeBase E.Exp as -> Maybe (SoP Symbol)
 -- sizeOfTypeBase (E.Scalar (E.Refinement ty _)) =
 --   -- TODO why are all refinements scalar?
 --   sizeOfTypeBase ty
+sizeOfTypeBase (E.Scalar (E.Arrow _ _ _ _ return_type)) =
+  sizeOfTypeBase (E.retType return_type)
 sizeOfTypeBase (E.Array _ shape _)
   | dim : _ <- E.shapeDims shape =
       Just $ convertSize dim
@@ -72,20 +75,20 @@ mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 -- toplevel_indexfns
 mkIndexFnValBind :: E.ValBind -> IndexFnM (Maybe IndexFn)
-mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
+mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ _params body _ _ _) = do
   clearAlgEnv
-  debugM ("\n====\nmkIndexFnValBind:\n\n" <> prettyString val)
+  debugPrettyM "\n====\nmkIndexFnValBind:\n\n" val
   indexfn <- forward body >>= refineAndBind vn
   -- insertTopLevel vn (params, indexfn)
   algenv <- gets algenv
-  debugM ("AlgEnv\n" <> prettyString algenv)
+  debugPrettyM "AlgEnv\n" algenv
   pure (Just indexfn)
 
 refineAndBind :: E.VName -> IndexFn -> IndexFnM IndexFn
 refineAndBind vn indexfn = do
   indexfn' <- rewrite indexfn
   insertIndexFn vn indexfn'
-  debugM (prettyBinding vn indexfn')
+  whenDebug (traceM $ prettyBinding vn indexfn')
   -- tell ["resulting in", toLaTeX (vn, indexfn')]
   pure indexfn'
 
@@ -99,14 +102,12 @@ forward :: E.Exp -> IndexFnM IndexFn
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 -- Let-bindings.
-forward (E.AppExp (E.LetPat _ p@(E.Id vn _ _) x body _) _) = do
-  -- debugM (prettyString p <> " = " <> prettyString x)
+forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x body _) _) = do
   -- tell [textbf "Forward on " <> Math.math (toLaTeX vn) <> toLaTeX x]
   _ <- refineAndBind vn =<< forward x
   forward body
 -- Tuples left unhandled for now.
 -- forward (E.AppExp (E.LetPat _ p@(E.TuplePat patterns _) x body _) _) = do
---     debugM (prettyString patterns <> " = " <> prettyString x)
 --     -- tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX x]
 --     xs <- unzipT <$> forward x
 --     forM_ (zip patterns xs) refineAndBind'
@@ -130,10 +131,8 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
   indexfns <- gets indexfns
   case M.lookup vn indexfns of
     Just indexfn -> do
-      -- debugM ("using index function " <> prettyString vn <> " = " <> prettyString indexfn)
       pure indexfn
     _ -> do
-      -- debugM ("creating index function for " <> prettyString vn)
       -- TODO handle refinement types
       -- handleRefinementTypes e
       case getSize e of
@@ -218,7 +217,7 @@ forward (E.AppExp (E.If c t f _) _) = do
 -- forward e | trace ("forward\n  " ++ prettyString e) False =
 --   -- All calls after this case get traced.
 --   undefined
-forward (E.AppExp (E.Apply f args _) _)
+forward expr@(E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
@@ -245,11 +244,18 @@ forward (E.AppExp (E.Apply f args _) _)
       let y' = IndexFn iter_first_arg cases_body
       debugPrettyM "map template:" y'
       -- tell ["Using map rule ", toLaTeX y']
+      -- foldM substParams y' (zip paramNames xss_flat)
+      --   >>= rewrite
       res <- foldM substParams y' (zip paramNames xss_flat)
       debugPrettyM "map substituted:" res
       rewrite res
-      -- foldM substParams y' (zip paramNames xss_flat)
-      --   >>= rewrite
+  | Just fname <- getFun f,
+    "map" `L.isPrefixOf` fname = do
+      -- No need to handle map non-lambda yet as program can just be rewritten.
+      error $
+        "forward on map with non-lambda function arg: "
+          <> prettyString expr
+          <> ". Eta-expand your program."
   | Just "replicate" <- getFun f,
     [n, x] <- getArgs args = do
       n' <- forward n
@@ -262,9 +268,9 @@ forward (E.AppExp (E.Apply f args _) _)
             -- XXX support only 1D arrays for now.
             rewrite $ IndexFn (Forall i (Iota m)) body
         _ -> undefined -- TODO See iota comment.
-  -- Scan with basic operator.
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
+      -- Scan with basic operator.
       IndexFn iter_xs xs <- forward xs'
       let i = case iter_xs of
             (Forall i' _) -> i'
@@ -278,14 +284,46 @@ forward (E.AppExp (E.Apply f args _) _)
           _ -> error ("scan not implemented for bin op: " <> show vn)
       let base_case = sym2SoP (Var i) :== int2SoP 0
       x <- newNameFromString "a"
-      let y = IndexFn
-                iter_xs
-                (cases
-                  [(base_case, sym2SoP (Var x)), (Not base_case, Recurrence `op` Var x)])
+      let y =
+            IndexFn
+              iter_xs
+              ( cases
+                  [(base_case, sym2SoP (Var x)), (Not base_case, Recurrence `op` Var x)]
+              )
       -- tell ["Using scan rule ", toLaTeX y]
       subst x (IndexFn iter_xs xs) y
         >>= rewrite
-
+  | (E.Var (E.QualName [] g) info _) <- f,
+    args' <- getArgs args,
+    E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
+      toplevel <- gets toplevel
+      case M.lookup g toplevel of
+        Just (_param_names, _param_sizes, _indexfn) ->
+          -- g is a previously analyzed user-defined top-level function.
+          error "use of top-level defs not implemented yet"
+        Nothing -> do
+          -- g is a free variable in this expression (probably a parameter
+          -- to the top-level function currently being analyzed).
+          params <- mapM forward args'
+          param_names <- forM params (const $ newNameFromString "x")
+          iter <-
+            case sizeOfTypeBase return_type of
+              Just sz -> do
+                -- Function returns an array.
+                i <- newNameFromString "i"
+                pure $ Forall i (Iota sz)
+              Nothing -> do
+                pure Empty
+          let g_fn =
+                IndexFn
+                  { iterator = iter,
+                    body =
+                      singleCase . sym2SoP $
+                        Apply (Var g) (map (sym2SoP . Var) param_names)
+                  }
+          debugPrettyM "g_fn:" g_fn
+          foldM substParams g_fn (zip param_names params)
+            >>= rewrite
 forward e = error $ "forward on " <> show e
 
 substParams :: IndexFn -> (E.VName, IndexFn) -> IndexFnM IndexFn

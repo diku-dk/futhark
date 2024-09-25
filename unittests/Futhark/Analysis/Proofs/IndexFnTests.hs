@@ -143,6 +143,42 @@ tests =
                           )
                         ]
                   }
+        ),
+      mkTest
+        "tests/indexfn/part2indices_predicatefn.fut"
+        ( newNameFromString "p" >>= \p -> pure $ \(i, n, xs, j) ->
+            let xs_i = Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole i)]
+                xs_j = Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole j)]
+             in IndexFn
+                  { iterator = Forall i (Iota (sHole n)),
+                    body =
+                      cases
+                        [ ( xs_i,
+                            int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator xs_j))
+                          ),
+                          ( Not xs_i,
+                            sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator xs_j))
+                          )
+                        ]
+                  }
+        ),
+      mkTest
+        "tests/indexfn/part2indices_predicatefn2.fut"
+        ( newNameFromString "p" >>= \p -> pure $ \(i, n, xs, j) ->
+            let xs_i = Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole i)]
+                xs_j = Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole j)]
+             in IndexFn
+                  { iterator = Forall i (Iota (sHole n)),
+                    body =
+                      cases
+                        [ ( xs_i,
+                            int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator xs_j))
+                          ),
+                          ( Not xs_i,
+                            sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator xs_j))
+                          )
+                        ]
+                  }
         )
     ]
   where
@@ -165,7 +201,6 @@ tests =
       -- Evaluate expectedPat first for any side effects like debug toggling.
       pat <- expectedPat
       let expected = pat (i, x, y, z)
-      debugM (prettyString expected)
       indexfn <- mkIndexFnValBind vb
       case indexfn of
         Nothing -> pure Nothing

@@ -28,6 +28,8 @@ instance ASTMappable Symbol Symbol where
     mapOnSymbol m =<< LinComb vn <$> astMap m lb <*> astMap m ub <*> astMap m x
   astMap m (Idx xs i) = mapOnSymbol m =<< Idx <$> astMap m xs <*> astMap m i
   astMap m (Indicator p) = mapOnSymbol m . Indicator =<< astMap m p
+  astMap m (Apply f xs) =
+    mapOnSymbol m =<< Apply <$> astMap m f <*> mapM (astMap m) xs
   astMap _ x@(Bool {}) = pure x
   astMap m (Not x) = mapOnSymbol m . Not =<< astMap m x
   astMap m (x :== y) = mapOnSymbol m =<< (:==) <$> astMap m x <*> astMap m y

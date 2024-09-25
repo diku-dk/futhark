@@ -10,7 +10,7 @@ import Futhark.MonadFreshNames (MonadFreshNames)
 import Futhark.SoP.SoP (sym2SoP)
 import Language.Futhark (VName)
 
-getRenamedLinCombBoundVar :: MonadFreshNames f => Substitution u -> Symbol -> f (Maybe VName)
+getRenamedLinCombBoundVar :: (MonadFreshNames f) => Substitution u -> Symbol -> f (Maybe VName)
 getRenamedLinCombBoundVar s x = getLinCombBoundVar <$> rename_ (vns s) mempty x
 
 instance FreeVariables Symbol where
@@ -20,6 +20,7 @@ instance FreeVariables Symbol where
     Idx xs i -> fv xs <> fv i
     LinComb i lb ub x -> fv lb <> fv ub <> fv x S.\\ S.singleton i
     Indicator x -> fv x
+    Apply f xs -> fv f <> mconcat (map fv xs)
     Bool _ -> mempty
     Not x -> fv x
     x :< y -> fv x <> fv y
@@ -45,22 +46,29 @@ instance Renameable Symbol where
       let tau' = M.insert xn xm tau
       LinComb xm <$> rename_ vns' tau' lb <*> rename_ vns' tau' ub <*> rename_ vns' tau' e
     Indicator x -> Indicator <$> rename_ vns tau x
+    Apply f xs -> Apply <$> rename_ vns tau f <*> rename_ vns tau xs
     Bool x -> pure $ Bool x
     Not x -> Not <$> rename_ vns tau x
-    x :< y -> f (:<) x y
-    x :<= y -> f (:<=) x y
-    x :> y -> f (:>) x y
-    x :>= y -> f (:>=) x y
-    x :== y -> f (:==) x y
-    x :/= y -> f (:/=) x y
-    x :&& y -> f (:&&) x y
-    x :|| y -> f (:||) x y
+    x :< y -> g (:<) x y
+    x :<= y -> g (:<=) x y
+    x :> y -> g (:>) x y
+    x :>= y -> g (:>=) x y
+    x :== y -> g (:==) x y
+    x :/= y -> g (:/=) x y
+    x :&& y -> g (:&&) x y
+    x :|| y -> g (:||) x y
     Recurrence -> pure Recurrence
     where
-      f op x y = op <$> rename_ vns tau x <*> rename_ vns tau y
+      g op x y = op <$> rename_ vns tau x <*> rename_ vns tau y
 
 instance SubstitutionBuilder Symbol Symbol where
   addSub vn e s = s {sop = M.insert vn (sym2SoP e) $ sop s}
+
+repVName :: Substitution Symbol -> VName -> VName
+repVName s vn
+  | Var i <- sop2Symbol $ rep s (Var vn) =
+      i
+repVName _ _ = error "repVName substitutes for non-VName."
 
 instance Replaceable Symbol Symbol where
   -- TODO flatten
@@ -75,20 +83,21 @@ instance Replaceable Symbol Symbol where
       let s' = addSub i (Var i) s
        in applyLinCombRule i (rep s' lb) (rep s' ub) (rep s' t)
     Indicator e -> sym2SoP . Indicator . sop2Symbol $ rep s e
+    Apply f xs -> sym2SoP $ Apply (sop2Symbol $ rep s f) (map (rep s) xs)
     Bool x -> sym2SoP $ Bool x
     Not x -> sym2SoP . Not . sop2Symbol $ rep s x
-    x :< y -> f (:<) x y
-    x :<= y -> f (:<=) x y
-    x :> y -> f (:>) x y
-    x :>= y -> f (:>=) x y
-    x :== y -> f (:==) x y
-    x :/= y -> f (:/=) x y
-    x :&& y -> g (:&&) x y
-    x :|| y -> g (:||) x y
+    x :< y -> binop (:<) x y
+    x :<= y -> binop (:<=) x y
+    x :> y -> binop (:>) x y
+    x :>= y -> binop (:>=) x y
+    x :== y -> binop (:==) x y
+    x :/= y -> binop (:/=) x y
+    x :&& y -> binopS (:&&) x y
+    x :|| y -> binopS (:||) x y
     Recurrence -> sym2SoP Recurrence
     where
-      f op x y = sym2SoP $ rep s x `op` rep s y
-      g op x y = sym2SoP $ sop2Symbol (rep s x) `op` sop2Symbol (rep s y)
+      binop op x y = sym2SoP $ rep s x `op` rep s y
+      binopS op x y = sym2SoP $ sop2Symbol (rep s x) `op` sop2Symbol (rep s y)
 
 instance Hole Symbol where
   justHole (Hole x) = Just x
@@ -133,6 +142,9 @@ instance Unify Symbol Symbol where
     s <- unify_ k xs ys
     (s <>) <$> unify_ k (rep s i) (rep s j)
   unify_ k (Indicator x) (Indicator y) = unify_ k x y
+  unify_ k (Apply f xs) (Apply g ys) = do
+    s <- unifies_ k (zip xs ys)
+    (s <>) <$> unify_ k (rep s f) (rep s g)
   unify_ _ (Bool x) (Bool y) | x == y = pure mempty
   unify_ k (Not x) (Not y) = unify_ k x y
   unify_ _ Recurrence Recurrence = pure mempty
