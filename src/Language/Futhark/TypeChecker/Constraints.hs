@@ -27,6 +27,7 @@ import Data.Maybe
 import Data.Set qualified as S
 import Futhark.Util.Pretty
 import Language.Futhark
+import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..))
 import Language.Futhark.TypeChecker.Types (substTyVars)
 
@@ -237,13 +238,14 @@ occursCheck reason v tp = do
 
 unifySharedConstructors ::
   Reason ->
+  BreadCrumbs ->
   M.Map Name [Type] ->
   M.Map Name [Type] ->
   SolveM ()
-unifySharedConstructors reason cs1 cs2 =
+unifySharedConstructors reason bcs cs1 cs2 =
   forM_ (M.toList $ M.intersectionWith (,) cs1 cs2) $ \(c, (ts1, ts2)) ->
     if length ts1 == length ts2
-      then zipWithM_ (solveEq reason) ts1 ts2
+      then zipWithM_ (solveEq reason bcs) ts1 ts2
       else
         typeError (locOf reason) mempty $
           "Cannot unify type with constructor"
@@ -254,12 +256,13 @@ unifySharedConstructors reason cs1 cs2 =
 
 unifySharedFields ::
   Reason ->
+  BreadCrumbs ->
   M.Map Name Type ->
   M.Map Name Type ->
   SolveM ()
-unifySharedFields reason fs1 fs2 =
+unifySharedFields reason bcs fs1 fs2 =
   forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(_f, (ts1, ts2)) ->
-    solveEq reason ts1 ts2
+    solveEq reason bcs ts1 ts2
 
 mustSupportEql :: Reason -> Type -> SolveM ()
 mustSupportEql _reason _t = pure ()
@@ -277,8 +280,8 @@ scopeViolation reason v1 ty v2 =
       <+> "is rigidly bound in a deeper scope."
 
 -- Precondition: 'v' is currently flexible.
-subTyVar :: Reason -> VName -> Type -> SolveM ()
-subTyVar reason v t = do
+subTyVar :: Reason -> BreadCrumbs -> VName -> Type -> SolveM ()
+subTyVar reason bcs v t = do
   occursCheck reason v t
   v_info <- gets $ M.lookup v . solverTyVars
 
@@ -304,7 +307,7 @@ subTyVar reason v t = do
       Scalar (Sum cs2)
       ) ->
         if all (`elem` M.keys cs2) (M.keys cs1)
-          then unifySharedConstructors reason cs1 cs2
+          then unifySharedConstructors reason bcs cs1 cs2
           else
             typeError (locOf reason) mempty $
               "Cannot unify type with constructors"
@@ -323,7 +326,7 @@ subTyVar reason v t = do
       Scalar (Record fs2)
       ) ->
         if all (`elem` M.keys fs2) (M.keys fs1)
-          then unifySharedFields reason fs1 fs2
+          then unifySharedFields reason bcs fs1 fs2
           else
             typeError (locOf reason) mempty $
               "Cannot unify record type with fields"
@@ -352,8 +355,8 @@ subTyVar reason v t = do
       error $ "subTyVar: Nothing v: " <> prettyNameString v
 
 -- Precondition: 'v' and 't' are both currently flexible.
-unionTyVars :: Reason -> VName -> VName -> SolveM ()
-unionTyVars reason v t = do
+unionTyVars :: Reason -> BreadCrumbs -> VName -> VName -> SolveM ()
+unionTyVars reason bcs v t = do
   v_info <- gets $ either alreadyLinked id . fromMaybe unknown . M.lookup v . solverTyVars
   t_info <- lookupTyVarInfo t
 
@@ -411,7 +414,7 @@ unionTyVars reason v t = do
     ( TyVarUnsol (TyVarSum _ cs1),
       TyVarSum loc cs2
       ) -> do
-        unifySharedConstructors reason cs1 cs2
+        unifySharedConstructors reason bcs cs1 cs2
         let cs3 = cs1 <> cs2
         setInfo t (TyVarUnsol (TyVarSum loc cs3))
     ( TyVarUnsol TyVarSum {},
@@ -437,7 +440,7 @@ unionTyVars reason v t = do
     ( TyVarUnsol (TyVarRecord _ fs1),
       TyVarRecord loc fs2
       ) -> do
-        unifySharedFields reason fs1 fs2
+        unifySharedFields reason bcs fs1 fs2
         let fs3 = fs1 <> fs2
         setInfo t (TyVarUnsol (TyVarRecord loc fs3))
     ( TyVarUnsol TyVarRecord {},
@@ -481,7 +484,7 @@ unionTyVars reason v t = do
     isParam = error $ "Type name is a type parameter: " <> prettyNameString v
 
 -- Unify at the root, emitting new equalities that must hold.
-unify :: Type -> Type -> Either (Doc a) [(Type, Type)]
+unify :: Type -> Type -> Either (Doc a) [(BreadCrumbs, (Type, Type))]
 unify (Scalar (Prim pt1)) (Scalar (Prim pt2))
   | pt1 == pt2 = Right []
 unify
@@ -490,16 +493,19 @@ unify
     | v1 == v2 =
         Right $ mapMaybe f $ zip targs1 targs2
     where
-      f (TypeArgType t1, TypeArgType t2) = Just (t1, t2)
+      f (TypeArgType t1, TypeArgType t2) = Just (mempty, (t1, t2))
       f _ = Nothing
 unify (Scalar (Arrow _ _ _ t1a (RetType _ t1r))) (Scalar (Arrow _ _ _ t2a (RetType _ t2r))) =
-  Right [(t1a, t2a), (t1r', t2r')]
+  Right [(mempty, (t1a, t2a)), (mempty, (t1r', t2r'))]
   where
     t1r' = t1r `setUniqueness` NoUniqueness
     t2r' = t2r `setUniqueness` NoUniqueness
 unify (Scalar (Record fs1)) (Scalar (Record fs2))
   | M.keys fs1 == M.keys fs2 =
-      Right $ M.elems $ M.intersectionWith (,) fs1 fs2
+      Right $
+        map (first matchingField) $
+          M.toList $
+            M.intersectionWith (,) fs1 fs2
   | otherwise =
       let missing =
             filter (`notElem` M.keys fs1) (M.keys fs2)
@@ -510,19 +516,19 @@ unify (Scalar (Sum cs1)) (Scalar (Sum cs2))
   | M.keys cs1 == M.keys cs2 =
       fmap concat . forM cs' $ \(ts1, ts2) -> do
         if length ts1 == length ts2
-          then Right $ zip ts1 ts2
+          then Right $ zipWith (curry (mempty,)) ts1 ts2
           else Left mempty
   where
     cs' = M.elems $ M.intersectionWith (,) cs1 cs2
 unify t1 t2
   | Just t1' <- peelArray 1 t1,
     Just t2' <- peelArray 1 t2 =
-      Right [(t1', t2')]
+      Right [(mempty, (t1', t2'))]
 unify _ _ = Left mempty
 
-solveEq :: Reason -> Type -> Type -> SolveM ()
-solveEq reason orig_t1 orig_t2 = do
-  solveCt' (orig_t1, orig_t2)
+solveEq :: Reason -> BreadCrumbs -> Type -> Type -> SolveM ()
+solveEq reason obcs orig_t1 orig_t2 = do
+  solveCt' (obcs, (orig_t1, orig_t2))
   where
     cannotUnify details = do
       tyvars <- gets solverTyVars
@@ -533,7 +539,7 @@ solveEq reason orig_t1 orig_t2 = do
           </> indent 2 (pretty (substTyVars (substTyVar tyvars) orig_t2))
           </> details
 
-    solveCt' (t1, t2) = do
+    solveCt' (bcs, (t1, t2)) = do
       tyvars <- gets solverTyVars
       let flexible v = case M.lookup v tyvars of
             Just (Left v') -> flexible v'
@@ -554,22 +560,22 @@ solveEq reason orig_t1 orig_t2 = do
             | v1 == v2 -> pure ()
             | otherwise ->
                 case (flexible v1, flexible v2) of
-                  (False, False) -> cannotUnify mempty
-                  (True, False) -> subTyVar reason v1 t2'
-                  (False, True) -> subTyVar reason v2 t1'
-                  (True, True) -> unionTyVars reason v1 v2
+                  (False, False) -> cannotUnify $ pretty bcs
+                  (True, False) -> subTyVar reason bcs v1 t2'
+                  (False, True) -> subTyVar reason bcs v2 t1'
+                  (True, True) -> unionTyVars reason bcs v1 v2
         (Scalar (TypeVar _ (QualName [] v1) []), t2')
-          | flexible v1 -> subTyVar reason v1 t2'
+          | flexible v1 -> subTyVar reason bcs v1 t2'
         (t1', Scalar (TypeVar _ (QualName [] v2) []))
-          | flexible v2 -> subTyVar reason v2 t1'
+          | flexible v2 -> subTyVar reason bcs v2 t1'
         (t1', t2') -> case unify t1' t2' of
-          Left details -> cannotUnify details
+          Left details -> cannotUnify $ pretty bcs </> details
           Right eqs -> mapM_ solveCt' eqs
 
 solveCt :: Ct -> SolveM ()
 solveCt ct =
   case ct of
-    CtEq reason t1 t2 -> solveEq reason t1 t2
+    CtEq reason t1 t2 -> solveEq reason mempty t1 t2
     CtAM {} -> pure () -- Good vibes only.
 
 scopeCheck :: Reason -> TyVar -> Int -> Type -> SolveM ()

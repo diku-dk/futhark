@@ -10,9 +10,6 @@ module Language.Futhark.TypeChecker.Unify
     MonadUnify (..),
     Rigidity (..),
     RigidSource (..),
-    BreadCrumbs,
-    noBreadCrumbs,
-    hasNoBreadCrumbs,
     dimNotes,
     arrayElemType,
     normType,
@@ -33,56 +30,9 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.Util.Pretty
 import Language.Futhark
+import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Types
-
--- | A piece of information that describes what process the type
--- checker currently performing.  This is used to give better error
--- messages for unification errors.
-data BreadCrumb
-  = MatchingTypes StructType StructType
-  | MatchingFields [Name]
-  | MatchingConstructor Name
-  | Matching (Doc ())
-
-instance Pretty BreadCrumb where
-  pretty (MatchingTypes t1 t2) =
-    "When matching type"
-      </> indent 2 (pretty t1)
-      </> "with"
-      </> indent 2 (pretty t2)
-  pretty (MatchingFields fields) =
-    "When matching types of record field"
-      <+> dquotes (mconcat $ punctuate "." $ map pretty fields)
-      <> dot
-  pretty (MatchingConstructor c) =
-    "When matching types of constructor" <+> dquotes (pretty c) <> dot
-  pretty (Matching s) =
-    unAnnotate s
-
--- | Unification failures can occur deep down inside complicated types
--- (consider nested records).  We leave breadcrumbs behind us so we
--- can report the path we took to find the mismatch.
-newtype BreadCrumbs = BreadCrumbs [BreadCrumb]
-
--- | An empty path.
-noBreadCrumbs :: BreadCrumbs
-noBreadCrumbs = BreadCrumbs []
-
--- | Is the path empty?
-hasNoBreadCrumbs :: BreadCrumbs -> Bool
-hasNoBreadCrumbs (BreadCrumbs xs) = null xs
-
--- | Drop a breadcrumb on the path behind you.
-breadCrumb :: BreadCrumb -> BreadCrumbs -> BreadCrumbs
-breadCrumb (MatchingFields xs) (BreadCrumbs (MatchingFields ys : bcs)) =
-  BreadCrumbs $ MatchingFields (ys ++ xs) : bcs
-breadCrumb bc (BreadCrumbs bcs) =
-  BreadCrumbs $ bc : bcs
-
-instance Pretty BreadCrumbs where
-  pretty (BreadCrumbs []) = mempty
-  pretty (BreadCrumbs bcs) = line <> stack (map pretty bcs)
 
 -- | A usage that caused a type constraint.
 data Usage = Usage (Maybe T.Text) Loc
@@ -387,7 +337,7 @@ unifyWith onDims usage = subunify False
           )
             | tn == arg_tn,
               length targs == length arg_targs -> do
-                let bcs' = breadCrumb (Matching "When matching type arguments.") bcs
+                let bcs' = matching "When matching type arguments." <> bcs
                 zipWithM_ (unifyTypeArg bcs') targs arg_targs
         ( Scalar (TypeVar _ (QualName [] v1) []),
           Scalar (TypeVar _ (QualName [] v2) [])
@@ -439,13 +389,13 @@ unifyWith onDims usage = subunify False
                 subunify
                   (not ord)
                   bound
-                  (breadCrumb (Matching "When matching parameter types.") bcs)
+                  (matching "When matching parameter types." <> bcs)
                   a1
                   a2
                 subunify
                   ord
                   bound'
-                  (breadCrumb (Matching "When matching return types.") bcs)
+                  (matching "When matching return types." <> bcs)
                   (toStruct b1')
                   (toStruct b2')
 
@@ -511,7 +461,7 @@ unifySizes usage bcs _ _ e1 e2 = do
 
 -- | Unifies two types.
 unify :: (MonadUnify m) => Usage -> StructType -> StructType -> m ()
-unify usage = unifyWith (unifySizes usage) usage mempty noBreadCrumbs
+unify usage = unifyWith (unifySizes usage) usage mempty mempty
 
 occursCheck ::
   (MonadUnify m) =>
@@ -597,14 +547,13 @@ linkVarToType usage bound bcs vn lvl tp_unnorm = do
                 <> " used as size(s) would go out of scope."
 
   let unliftedBcs unlifted_usage =
-        breadCrumb
-          ( Matching $
-              "When verifying that"
-                <+> dquotes (prettyName vn)
-                <+> textwrap "is not instantiated with a function type, due to"
-                <+> pretty unlifted_usage
+        matching
+          ( "When verifying that"
+              <+> dquotes (prettyName vn)
+              <+> textwrap "is not instantiated with a function type, due to"
+              <+> pretty unlifted_usage
           )
-          bcs
+          <> bcs
 
   case snd <$> M.lookup vn constraints of
     Just (NoConstraint Unlifted unlift_usage) -> do
@@ -699,9 +648,7 @@ arrayElemType ::
   TypeBase dim u ->
   m ()
 arrayElemType usage desc =
-  arrayElemTypeWith usage $ breadCrumb bc noBreadCrumbs
-  where
-    bc = Matching $ "When checking" <+> textwrap desc
+  arrayElemTypeWith usage $ matching $ "When checking" <+> textwrap desc
 
 unifySharedFields ::
   (MonadUnify m) =>
@@ -714,7 +661,7 @@ unifySharedFields ::
   m ()
 unifySharedFields onDims usage bound bcs fs1 fs2 =
   forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(f, (t1, t2)) ->
-    unifyWith onDims usage bound (breadCrumb (MatchingFields [f]) bcs) t1 t2
+    unifyWith onDims usage bound (matchingField f <> bcs) t1 t2
 
 unifySharedConstructors ::
   (MonadUnify m) =>
@@ -731,7 +678,7 @@ unifySharedConstructors onDims usage bound bcs cs1 cs2 =
   where
     unifyConstructor c f1 f2
       | length f1 == length f2 = do
-          let bcs' = breadCrumb (MatchingConstructor c) bcs
+          let bcs' = matchingConstructor c <> bcs
           zipWithM_ (unifyWith onDims usage bound bcs') f1 f2
       | otherwise =
           unifyError usage mempty bcs $
@@ -796,7 +743,7 @@ unifyMostCommon usage t1 t2 = do
             linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
       onDims _ _ _ _ _ = pure ()
 
-  unifyWith onDims usage mempty noBreadCrumbs t1 t2
+  unifyWith onDims usage mempty mempty t1 t2
   t1' <- normTypeFully t1
   t2' <- normTypeFully t2
   newDimOnMismatch (locOf usage) t1' t2'
