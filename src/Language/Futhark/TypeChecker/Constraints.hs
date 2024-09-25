@@ -261,8 +261,8 @@ unifySharedFields ::
   M.Map Name Type ->
   SolveM ()
 unifySharedFields reason bcs fs1 fs2 =
-  forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(_f, (ts1, ts2)) ->
-    solveEq reason bcs ts1 ts2
+  forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(f, (ts1, ts2)) ->
+    solveEq reason (matchingField f <> bcs) ts1 ts2
 
 mustSupportEql :: Reason -> Type -> SolveM ()
 mustSupportEql _reason _t = pure ()
@@ -355,6 +355,9 @@ subTyVar reason bcs v t = do
       error $ "subTyVar: Nothing v: " <> prettyNameString v
 
 -- Precondition: 'v' and 't' are both currently flexible.
+--
+-- The purpose of this function is to combine the partial knowledge we
+-- may have about these two type variables.
 unionTyVars :: Reason -> BreadCrumbs -> VName -> VName -> SolveM ()
 unionTyVars reason bcs v t = do
   v_info <- gets $ either alreadyLinked id . fromMaybe unknown . M.lookup v . solverTyVars
