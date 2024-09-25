@@ -531,7 +531,7 @@ solveEq reason orig_t1 orig_t2 = do
           </> indent 2 (pretty (substTyVars (substTyVar tyvars) orig_t1))
           </> "with"
           </> indent 2 (pretty (substTyVars (substTyVar tyvars) orig_t2))
-          <> details
+          </> details
 
     solveCt' (t1, t2) = do
       tyvars <- gets solverTyVars
