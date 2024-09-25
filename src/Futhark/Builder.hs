@@ -88,7 +88,7 @@ newtype BuilderT rep m a = BuilderT (StateT (Stms rep, Scope rep) m a)
 instance MonadTrans (BuilderT rep) where
   lift = BuilderT . lift
 
--- | The most commonly used binder monad.
+-- | The most commonly used builder monad.
 type Builder rep = BuilderT rep (State VNameSource)
 
 instance (MonadFreshNames m) => MonadFreshNames (BuilderT rep m) where
@@ -138,7 +138,7 @@ instance
     BuilderT $ put (old_stms, old_scope)
     pure (x, new_stms)
 
--- | Run a binder action given an initial scope, returning a value and
+-- | Run a builder action given an initial scope, returning a value and
 -- the statements added ('addStm') during the action.
 runBuilderT ::
   (MonadFreshNames m) =>
@@ -175,7 +175,7 @@ runBuilderT'_ ::
   m (Stms rep)
 runBuilderT'_ = fmap snd . runBuilderT'
 
--- | Run a binder action, returning a value and the statements added
+-- | Run a builder action, returning a value and the statements added
 -- ('addStm') during the action.  Assumes that the current monad
 -- provides initial scope and name source.
 runBuilder ::
@@ -194,17 +194,19 @@ runBuilder_ ::
   m (Stms rep)
 runBuilder_ = fmap snd . runBuilder
 
--- | Run a binder that produces a t'Body', and prefix that t'Body' by
--- the statements produced during execution of the action.
+-- | Run a builder that produces a 'Result' and construct a body that
+-- contains that result alongside the statements produced during the
+-- builder.
 runBodyBuilder ::
   ( Buildable rep,
     MonadFreshNames m,
     HasScope somerep m,
     SameScope somerep rep
   ) =>
-  Builder rep (Body rep) ->
+  Builder rep Result ->
   m (Body rep)
-runBodyBuilder = fmap (uncurry $ flip insertStms) . runBuilder
+runBodyBuilder =
+  fmap (uncurry $ flip insertStms) . runBuilder . fmap (mkBody mempty)
 
 -- | Given lambda parameters, Run a builder action that produces the
 -- statements and returns the 'Result' of the lambda body.

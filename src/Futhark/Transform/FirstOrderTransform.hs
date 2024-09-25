@@ -213,7 +213,7 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
           letwith (map paramName mapout_params) (Var i) $
             map resSubExp map_res
 
-      pure . mkBody mempty . concat $
+      pure . concat $
         [ scan_res',
           varsRes scan_outarrs,
           red_res',
@@ -278,7 +278,7 @@ transformSOAC pat (Stream w arrs nes lam) = do
         certifying cs . letSubExp "mapout_res" . BasicOp $
           Update Unsafe (paramName p) (fullSlice (paramType p) slice) se
 
-      mkBodyM mempty $ subExpsRes $ res' ++ mapout_res'
+      pure $ subExpsRes $ res' ++ mapout_res'
 
   letBind pat $ Loop merge loop_form loop_body
 transformSOAC pat (Scatter len ivs as lam) = do
@@ -307,7 +307,7 @@ transformSOAC pat (Scatter len ivs as lam) = do
                   Update Safe arr' (fullSlice arr_t $ map (DimFix . resSubExp) indexCur) valueCur
 
         foldM saveInArray arr indexes'
-      pure $ resultBody (map Var ress)
+      pure $ varsRes ress
   letBind pat $ Loop merge (ForLoop iter Int64 len) loopBody
 transformSOAC pat (Hist len imgs ops bucket_fun) = do
   iter <- newVName "iter"
@@ -361,7 +361,7 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
 
           pure $ varsRes hist'
 
-    pure $ resultBody $ map Var $ concat hists_out''
+    pure $ varsRes $ concat hists_out''
 
   -- Wrap up the above into a for-loop.
   letBind pat $ Loop merge (ForLoop iter Int64 len) loopBody
@@ -380,7 +380,7 @@ transformLambda ::
   m (AST.Lambda rep)
 transformLambda (Lambda params rettype body) = do
   body' <-
-    runBodyBuilder $
+    fmap fst . runBuilder $
       localScope (scopeOfLParams params) $
         transformBody body
   pure $ Lambda params rettype body'

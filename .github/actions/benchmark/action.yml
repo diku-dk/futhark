@@ -40,7 +40,7 @@ runs:
             --ignore-files /lib/ ${{inputs.futhark-options}}
         slurm-options: --time=0-02:00:00 ${{inputs.slurm-options}}
 
-    - uses: actions/upload-artifact@v1
+    - uses: actions/upload-artifact@v4
       with:
         name: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json
         path: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json

@@ -880,7 +880,7 @@ Apply the function ``f`` to the argument ``x``.
 ``#c x y z``
 ............
 
-Apply the sum type constructor ``#x`` to the payload ``x``, ``y``, and
+Apply the sum type constructor ``#c`` to the payload ``x``, ``y``, and
 ``z``.  A constructor application is always assumed to be saturated,
 i.e. its entire payload provided.  This means that constructors may
 not be partially applied.
@@ -1464,7 +1464,8 @@ instead::
   def consumes_first_arg (a: *[]i32) (b: []i32) = ...
 
 For bulk in-place updates with multiple values, use the ``scatter``
-function in the basis library.
+function from the `prelude
+<https://futhark-lang.org/docs/prelude/doc/prelude/soacs.html>`_.
 
 Alias Analysis
 ~~~~~~~~~~~~~~
