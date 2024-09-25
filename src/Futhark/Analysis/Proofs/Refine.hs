@@ -1,16 +1,16 @@
 -- Rewrite using algebraic solver.
 module Futhark.Analysis.Proofs.Refine where
 
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM, IndexFn (..), VEnv (..), Iterator (..), Domain (..), casesToList, cases)
+import Control.Monad.RWS (gets, modify)
+import Data.Set qualified as S
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), VEnv (..), cases, casesToList)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
-import Control.Monad.RWS (modify, gets)
-import Futhark.SoP.SoP (Range (Range), SoP, int2SoP, justAffine, (.-.), Rel (..))
 import Futhark.SoP.Monad (addRange)
-import qualified Data.Set as S
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import qualified Futhark.SoP.SoP as SoP
 import Futhark.SoP.Refine (addRel)
+import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, (.-.))
+import Futhark.SoP.SoP qualified as SoP
 
 refineSymbol :: Symbol -> IndexFnM Symbol
 refineSymbol symbol = case symbol of
@@ -44,15 +44,17 @@ rollbackAlgEnv :: IndexFnM a -> IndexFnM a
 rollbackAlgEnv computation = do
   alg <- gets algenv
   res <- computation
-  modify (\env -> env { algenv = alg })
+  modify (\env -> env {algenv = alg})
   pure res
 
 refineIndexFn :: (SoP Symbol -> IndexFnM (SoP Symbol)) -> IndexFn -> IndexFnM IndexFn
 refineIndexFn simplify (IndexFn it xs) = do
-  ys <- rollbackAlgEnv (
-    do
-      addIterator it
-      refineCases xs)
+  ys <-
+    rollbackAlgEnv
+      ( do
+          addIterator it
+          refineCases xs
+      )
   pure $ IndexFn it ys
   where
     refineCases cs = do
@@ -62,9 +64,10 @@ refineIndexFn simplify (IndexFn it xs) = do
       -- if the negated predicate is True.)
       -- TODO ^can we return Nothing when undecidable instead?
       neg_preds <- mapM (refineSymbol . Not) preds
-      let (_neg_ps, ps, vs) = unzip3 $
-                           filter (\(negp, _, _) -> negp /= Bool True) $
-                             zip3 neg_preds preds vals
+      let (_neg_ps, ps, vs) =
+            unzip3 $
+              filter (\(negp, _, _) -> negp /= Bool True) $
+                zip3 neg_preds preds vals
       -- Cases are considered sequentially, so negation of previous cases
       -- are part of current predicate.
       vs' <- mapM refineCase (zip ps vs)
@@ -73,24 +76,25 @@ refineIndexFn simplify (IndexFn it xs) = do
     refineCase :: (Symbol, SoP Symbol) -> IndexFnM (SoP Symbol)
     refineCase (p, v)
       | Just rel <- toRel p =
-        rollbackAlgEnv (
-          do
-            addRel rel
-            simplify v)
+          rollbackAlgEnv
+            ( do
+                addRel rel
+                simplify v
+            )
     refineCase (_, v) =
       simplify v
 
-      -- Attempt to merge cases that are equivalent given their predicates.
-      -- For example, in
-      --   | k > 0  => sum_{j=0}^{k-1} e_j
-      --   | k <= 0 => 0
-      -- the second case is covered by the first when k <= 0. So we want just:
-      --   | True  => sum_{j=0}^{k-1} e_j
-    mergeEquivCases cs@[(_p1,v1), (p2,v2)] = do
+    -- Attempt to merge cases that are equivalent given their predicates.
+    -- For example, in
+    --   | k > 0  => sum_{j=0}^{k-1} e_j
+    --   | k <= 0 => 0
+    -- the second case is covered by the first when k <= 0. So we want just:
+    --   | True  => sum_{j=0}^{k-1} e_j
+    mergeEquivCases cs@[(_p1, v1), (p2, v2)] = do
       v1' <- refineCase (p2, v1)
       if v1' == v2
-      then pure [(Bool True, v1)]
-      else pure cs
+        then pure [(Bool True, v1)]
+        else pure cs
     mergeEquivCases cs = pure cs
 
 mkRange :: SoP Symbol -> SoP Symbol -> Range Symbol
@@ -122,15 +126,15 @@ addIterator (Forall i dom) = case dom of
       case justAffine (SoP.normalize e) of
         Just (c, x, b) ->
           let ub = int2SoP $ toInteger (maxBound :: Int) - b
-          in addRange x (Range (S.singleton $ int 1) c (S.singleton ub))
+           in addRange x (Range (S.singleton $ int 1) c (S.singleton ub))
         Nothing -> pure ()
 addIterator _ = pure ()
 
 -- I assume exp is already in NNF.
 toRel :: Symbol -> Maybe (Rel Symbol)
 toRel (x :<= y) = Just $ x :<=: y
-toRel (x :< y)  = Just $ x :<: y
-toRel (x :> y)  = Just $ x :>: y
+toRel (x :< y) = Just $ x :<: y
+toRel (x :> y) = Just $ x :>: y
 toRel (x :>= y) = Just $ x :>=: y
 toRel (x :== y) = Just $ x :==: y
 -- toRel (x :/= y) = Just $ x :/=: y -- TODO
