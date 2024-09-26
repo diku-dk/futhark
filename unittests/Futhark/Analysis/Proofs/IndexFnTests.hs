@@ -5,7 +5,7 @@ import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..))
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
 import Futhark.Analysis.Proofs.Unify (renameSame, unify)
 import Futhark.Compiler.CLI (Imports, fileProg, readProgramOrDie)
 import Futhark.MonadFreshNames (newNameFromString)
@@ -110,7 +110,7 @@ tests =
                         [ ( xs_i,
                             int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j))))
                           ),
-                          ( Not xs_i,
+                          ( neg xs_i,
                             sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (Idx (Hole xs) (sHole j))))
                           )
                         ]
@@ -156,7 +156,7 @@ tests =
                         [ ( xs_i,
                             int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator xs_j))
                           ),
-                          ( Not xs_i,
+                          ( neg xs_i,
                             sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator xs_j))
                           )
                         ]
@@ -174,7 +174,7 @@ tests =
                         [ ( xs_i,
                             int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator xs_j))
                           ),
-                          ( Not xs_i,
+                          ( neg xs_i,
                             sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator xs_j))
                           )
                         ]

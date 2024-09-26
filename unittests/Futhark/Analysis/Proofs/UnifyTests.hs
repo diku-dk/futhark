@@ -158,7 +158,7 @@ tests =
           <$> y2b_z2c_w2d
     ]
   where
-    mkSub a b = Substitution {mapping = mkRep a b, vns = mempty }
+    mkSub a b = Substitution {mapping = mkRep a b, vns = mempty}
     name2SoP = sym2SoP . Var
     hole = sym2SoP . Hole
     a ~+~ b = sym2SoP a .+. sym2SoP b

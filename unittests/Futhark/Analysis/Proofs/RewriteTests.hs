@@ -3,6 +3,7 @@
 
 module Futhark.Analysis.Proofs.RewriteTests (tests) where
 
+import Control.Monad (unless)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Rewrite
@@ -10,14 +11,11 @@ import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (addEquiv, addRange)
-import Futhark.SoP.SoP (int2SoP, sym2SoP, (.+.), (.-.), (.*.))
+import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.SoP.SoP qualified as SoP
-import Futhark.Util.Pretty (prettyString, (<+>), pretty)
+import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Test.Tasty
 import Test.Tasty.HUnit
-import Control.Monad (unless)
-import Futhark.Util.Pretty (docString)
-import Futhark.Util.Pretty (line)
 
 runTest :: IndexFnM a -> a
 runTest test = fst $ runIndexFnM test blankNameSource
@@ -111,8 +109,10 @@ tests =
         run
           ( \(x, _, z, w, a, b, _, _) -> do
               addRange (Var b) (SoP.Range mempty 1 (S.singleton (sVar a)))
-              rewrite (LinComb w (int 0) (sVar a) (Idx (Var x) (sVar w))
-                       ~-~ LinComb z (int 0) (sVar b) (Idx (Var x) (sVar z)))
+              rewrite
+                ( LinComb w (int 0) (sVar a) (Idx (Var x) (sVar w))
+                    ~-~ LinComb z (int 0) (sVar b) (Idx (Var x) (sVar z))
+                )
           )
           @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar a) (Idx (Var x) (sVar w))),
       testCase "Rule matches on subterms" $
@@ -136,13 +136,13 @@ tests =
       testCase "Match SVars in symbols in SVar" $
         run
           ( \(x, _, _, _, _, _, _, _) ->
-              rewrite (sym2SoP $ Idx (Var x) (sym2SoP $ Indicator (Not (Var x))))
+              rewrite (sym2SoP $ Idx (Var x) (sym2SoP $ Indicator (neg (Var x))))
           )
           @??= sym2SoP (Idx (Var x) (int 1 .-. sym2SoP (Indicator (Var x)))),
       testCase "[[¬x]] => 1 - [[x]]" $
         run
           ( \(x, _, _, _, _, _, _, _) ->
-              rewrite (sym2SoP $ Indicator (Not (Var x)))
+              rewrite (sym2SoP $ Indicator (neg (Var x)))
           )
           @??= (int 1 .-. sym2SoP (Indicator (Var x))),
       -- Symbol tests.
@@ -217,7 +217,7 @@ tests =
       testCase "Tautology (negated contradiction)" $
         run
           ( \(_, _, _, _, _, _, _, _) ->
-              rewrite (Not $ int 1 :>= int 2)
+              rewrite (neg $ int 1 :>= int 2)
           )
           @??= Bool True,
       testCase "Tautology (variable)" $
@@ -230,7 +230,7 @@ tests =
       testCase "Match subsymbol" $
         run
           ( \(x, y, _, _, _, _, _, _) ->
-              rewrite (Var x :&& (Var y :&& Not (int 1 :>= int 2)))
+              rewrite (Var x :&& (Var y :&& neg (int 1 :>= int 2)))
           )
           @??= (Var x :&& Var y),
       testCase "Replace sum over one element sequence by element (1)" $

@@ -11,7 +11,7 @@ import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), IndexFnM, Iterator (..), VEnv (..), cases, clearAlgEnv, debugPrettyM, insertIndexFn, runIndexFnM, whenDebug)
 import Futhark.Analysis.Proofs.IndexFnPlus (subst)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..))
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
 import Futhark.Analysis.Proofs.Util (prettyBinding)
 import Futhark.MonadFreshNames (VNameSource, newNameFromString)
 import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP_, negSoP, sym2SoP, (.*.), (.+.), (.-.))
@@ -168,7 +168,7 @@ forward (E.AppExp (E.Index xs' slice _) _)
           error "indexing into a scalar"
 forward (E.Not e _) = do
   IndexFn it e' <- forward e
-  rewrite $ IndexFn it $ cmapValues (mapSymSoP_ Not) e'
+  rewrite $ IndexFn it $ cmapValues (mapSymSoP_ neg) e'
 forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op',
@@ -207,7 +207,7 @@ forward (E.AppExp (E.If c t f _) _) = do
           iter_c
           ( cases
               [ (Var cond, sym2SoP $ Var t_branch),
-                (Not $ Var cond, sym2SoP $ Var f_branch)
+                (neg $ Var cond, sym2SoP $ Var f_branch)
               ]
           )
   subst cond (IndexFn iter_c c') y
@@ -267,9 +267,9 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       i <- newNameFromString "i"
       case indexfn of
         IndexFn Empty (Cases ((Bool True, m) NE.:| [])) ->
-              rewrite $ IndexFn (Forall i (Iota m)) (singleCase . sym2SoP $ Var i)
+          rewrite $ IndexFn (Forall i (Iota m)) (singleCase . sym2SoP $ Var i)
         _ -> undefined -- TODO We've no way to express this yet.
-                       -- Have talked with Cosmin about an "outer if" before.
+        -- Have talked with Cosmin about an "outer if" before.
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       -- Scan with basic operator.
@@ -290,7 +290,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
             IndexFn
               iter_xs
               ( cases
-                  [(base_case, sym2SoP (Var x)), (Not base_case, Recurrence `op` Var x)]
+                  [(base_case, sym2SoP (Var x)), (neg base_case, Recurrence `op` Var x)]
               )
       -- tell ["Using scan rule ", toLaTeX y]
       subst x (IndexFn iter_xs xs) y
