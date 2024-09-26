@@ -5,13 +5,13 @@ module Futhark.Analysis.Proofs.SymbolPlus where
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Substitution (..), ReplacementBuilder (..), Unify (..), freshName, unifies_, Replacement)
+import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename, rename_), Replaceable (rep), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshName, unifies_)
 import Futhark.MonadFreshNames (MonadFreshNames)
 import Futhark.SoP.SoP (sym2SoP)
 import Language.Futhark (VName)
 
 getRenamedLinCombBoundVar :: (MonadFreshNames f) => Substitution u -> Symbol -> f (Maybe VName)
-getRenamedLinCombBoundVar s x = getLinCombBoundVar <$> rename_ (vns s) mempty x
+getRenamedLinCombBoundVar s x = getLinCombBoundVar <$> rename (vns s) x
 
 instance FreeVariables Symbol where
   fv sym = case sym of

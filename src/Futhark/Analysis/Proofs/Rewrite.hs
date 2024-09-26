@@ -9,7 +9,7 @@ import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), normalizeSymbol)
 import Futhark.Analysis.Proofs.SymbolPlus (getRenamedLinCombBoundVar, repVName)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify (rep, sub, mkRep, Substitution (mapping))
+import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, sub)
 import Futhark.MonadFreshNames
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$), ($>$))
 import Futhark.SoP.Monad (substEquivs)

@@ -9,7 +9,7 @@ import Data.Map qualified as M
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus (repVName)
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), ReplacementBuilder (..), Unify (..), freshName, sub, unifies_, Replacement)
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshName, unifies_)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName, newNameFromString)
@@ -105,7 +105,7 @@ repIndexFn s = rip
       IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
 
 subIndexFn :: Substitution Symbol -> IndexFn -> IndexFnM IndexFn
-subIndexFn s indexfn = repIndexFn (mapping s) <$> rename_ (vns s) mempty indexfn
+subIndexFn s indexfn = repIndexFn (mapping s) <$> rename (vns s) indexfn
 
 instance (Renameable a, Renameable b) => Renameable (Cases a b) where
   rename_ vns tau (Cases cs) = Cases <$> mapM re cs

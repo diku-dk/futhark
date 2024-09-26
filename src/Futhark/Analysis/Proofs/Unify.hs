@@ -95,7 +95,7 @@ sub ::
   Substitution u ->
   v ->
   m (SoP u)
-sub s x = rep (mapping s) <$> rename_ (vns s) mempty x
+sub s x = rep (mapping s) <$> rename (vns s) x
 
 class Hole u where
   justHole :: u -> Maybe VName
