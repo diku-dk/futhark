@@ -1,5 +1,12 @@
-module Futhark.Analysis.Proofs.Algebra where
+module Futhark.Analysis.Proofs.AlgebraPC.Algebra
+  ( Symbol(..),
+    Property(..),
+    AlgM(..),
+    runAlgM,
+  ) 
+where
 
+import Futhark.SoP.Util
 import Control.Monad.RWS.Strict hiding (Sum)
 import Data.Map (Map)
 import Data.Map qualified as M
@@ -9,29 +16,29 @@ import Futhark.MonadFreshNames
 import Futhark.SoP.Expression
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 import Futhark.SoP.SoP (SoP)
-import Futhark.SoP.Util
 import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
+import qualified Futhark.SoP.FourierMotzkin as FM
 
 data Symbol
   = Var VName
   | Hole VName
-  | Idx Symbol (SoP Symbol)
+  | Idx VName (SoP Symbol)
   | Sum VName (SoP Symbol) (SoP Symbol)
-  | Pow2 (SoP Symbol)
+  | Pow (Integer, SoP Symbol)
   deriving (Show, Eq, Ord)
 
 instance Pretty Symbol where
   pretty symbol = case symbol of
     (Var x) -> prettyName x
     (Hole x) -> prettyHole x
-    (Idx x i) -> autoParens x <> brackets (pretty i)
+    (Idx x i) -> (prettyName x) <> brackets (pretty i)
     (Sum x lb ub) ->
       "∑"
         <> prettyName x
         <> brackets (pretty lb <+> ":" <+> pretty ub)
-    (Pow2 x) -> parens (pretty x) <> "²"
+    (Pow (b,s)) -> parens $ (pretty b) <+> "^" <+> parens (pretty s)
     where
       autoParens x@(Var _) = pretty x
       autoParens x@(Hole _) = pretty x
@@ -41,6 +48,7 @@ instance Pretty Symbol where
 
 data Property
   = Monotonic
+  | Injective
   deriving (Show, Eq, Ord)
 
 data VEnv e = VEnv
@@ -88,3 +96,8 @@ runAlgM (AlgM m) env vns = getRes $ runRWS m () s
 
 rules :: RuleBook (SoP Symbol) Symbol (AlgM e)
 rules = []
+
+(&<) :: (Expression e, Ord e) => SoP Symbol -> SoP Symbol ->  AlgM e Bool
+sop1 &< sop2 = do
+ prop  <- getProperties
+ sop1 FM.$<$ sop2 -- fourier mo
