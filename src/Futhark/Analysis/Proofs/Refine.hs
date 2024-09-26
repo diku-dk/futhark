@@ -1,30 +1,31 @@
 -- Rewrite using algebraic solver.
 module Futhark.Analysis.Proofs.Refine where
 
+import Control.Monad (filterM, foldM, forM_)
 import Control.Monad.RWS (gets, modify)
+import Data.Maybe (mapMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), VEnv (..), cases, casesToList)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..))
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toDNF)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Monad (addRange)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, (.-.))
+import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, justSym, sym2SoP, (.-.))
 import Futhark.SoP.SoP qualified as SoP
 
+-- Note that this does not recurse.
 refineSymbol :: Symbol -> IndexFnM Symbol
 refineSymbol symbol = case symbol of
-  x :== y -> refineRelation (:==) x y
-  x :/= y -> refineRelation (:/=) x y
-  x :> y -> refineRelation (:>) x y
-  x :>= y -> refineRelation (:>=) x y
-  x :< y -> refineRelation (:<) x y
-  x :<= y -> refineRelation (:<=) x y
-  x :&& y -> refineRelation (:&&) x y
-  x :|| y -> refineRelation (:||) x y
+  x :== y -> refineComparison (:==) x y
+  x :/= y -> refineComparison (:/=) x y
+  x :> y -> refineComparison (:>) x y
+  x :>= y -> refineComparison (:>=) x y
+  x :< y -> refineComparison (:<) x y
+  x :<= y -> refineComparison (:<=) x y
   x -> pure x
   where
-    refineRelation rel x y = do
+    refineComparison rel x y = do
       b <- solve (x `rel` y)
       pure $ if b then Bool True else x `rel` y
 
@@ -47,6 +48,51 @@ rollbackAlgEnv computation = do
   modify (\env -> env {algenv = alg})
   pure res
 
+-- Returns true if the predicate can be shown to be false.
+isFalse :: (SoP Symbol -> IndexFnM (SoP Symbol)) -> Symbol -> IndexFnM Bool
+-- isFalse _ p | trace (show p) False = undefined
+isFalse simplify p = do
+  -- Our solver may return False when the query is undecidable,
+  -- so we instead check if the negation of p is true.
+  let neg_p_dnf = toDNF (neg p)
+  not_p <- refine neg_p_dnf
+  if not_p
+    then pure True
+    else do
+      -- If p is in CNF, a sufficient condition for p to be false
+      -- is that some clause q in p is false. Now we can assume
+      -- all other terms to be true and use that information when
+      -- checking q. This lets us easily falsify, for example,
+      -- x == 1 :&& x == 2.
+      let p_cnf = cnfToList $ neg neg_p_dnf -- toCNF p
+      foldM
+        ( \acc i ->
+            if acc
+              then pure acc
+              else refineUnderAssumptions (pickAndNegate i p_cnf)
+        )
+        False
+        [0 .. length p_cnf - 1]
+  where
+    cnfToList (a :&& b) = a : cnfToList b
+    cnfToList x = [x]
+
+    -- Pick the nth q out of qs and negate it.
+    pickAndNegate n qs =
+      let (as, bs) = splitAt n qs
+       in (neg $ head bs, as <> tail bs)
+
+    refine q = do
+      q' <- simplify (sym2SoP q)
+      case justSym q' of
+        Just (Bool True) -> pure True
+        _ -> pure False
+
+    -- Assuming qs, can we show q?
+    refineUnderAssumptions (q, qs) = rollbackAlgEnv $ do
+      forM_ (mapMaybe toRel qs) addRel
+      refine q
+
 refineIndexFn :: (SoP Symbol -> IndexFnM (SoP Symbol)) -> IndexFn -> IndexFnM IndexFn
 refineIndexFn simplify (IndexFn it xs) = do
   ys <-
@@ -58,21 +104,12 @@ refineIndexFn simplify (IndexFn it xs) = do
   pure $ IndexFn it ys
   where
     refineCases cs = do
-      let (preds, vals) = unzip $ casesToList cs
-      -- Eliminate cases for which the predicate is always False. (The solver
-      -- may return false when the query is undecidable, so we instead check
-      -- if the negated predicate is True.)
-      -- TODO ^can we return Nothing when undecidable instead?
-      neg_preds <- mapM (refineSymbol . Not) preds
-      let (_neg_ps, ps, vs) =
-            unzip3 $
-              filter (\(negp, _, _) -> negp /= Bool True) $
-                zip3 neg_preds preds vals
-      -- Cases are considered sequentially, so negation of previous cases
-      -- are part of current predicate.
+      (ps, vs) <- unzip <$> filterM (fmap not . isFalse simplify . fst) (casesToList cs)
       vs' <- mapM refineCase (zip ps vs)
       cases <$> mergeEquivCases (zip ps vs')
 
+    -- TODO make use of fact that cases are considered sequentially,
+    -- so can assume negation of previous cases?
     refineCase :: (Symbol, SoP Symbol) -> IndexFnM (SoP Symbol)
     refineCase (p, v)
       | Just rel <- toRel p =

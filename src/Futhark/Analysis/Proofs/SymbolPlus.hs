@@ -48,7 +48,7 @@ instance Renameable Symbol where
     Indicator x -> Indicator <$> rename_ vns tau x
     Apply f xs -> Apply <$> rename_ vns tau f <*> rename_ vns tau xs
     Bool x -> pure $ Bool x
-    Not x -> Not <$> rename_ vns tau x
+    Not x -> neg <$> rename_ vns tau x
     x :< y -> g (:<) x y
     x :<= y -> g (:<=) x y
     x :> y -> g (:>) x y
@@ -84,7 +84,7 @@ instance Replaceable Symbol Symbol where
     Indicator e -> sym2SoP . Indicator . sop2Symbol $ rep s e
     Apply f xs -> sym2SoP $ Apply (sop2Symbol $ rep s f) (map (rep s) xs)
     Bool x -> sym2SoP $ Bool x
-    Not x -> sym2SoP . Not . sop2Symbol $ rep s x
+    Not x -> sym2SoP . neg . sop2Symbol $ rep s x
     x :< y -> binop (:<) x y
     x :<= y -> binop (:<=) x y
     x :> y -> binop (:>) x y

@@ -31,7 +31,7 @@ instance ASTMappable Symbol Symbol where
   astMap m (Apply f xs) =
     mapOnSymbol m =<< Apply <$> astMap m f <*> mapM (astMap m) xs
   astMap _ x@(Bool {}) = pure x
-  astMap m (Not x) = mapOnSymbol m . Not =<< astMap m x
+  astMap m (Not x) = mapOnSymbol m . neg =<< astMap m x
   astMap m (x :== y) = mapOnSymbol m =<< (:==) <$> astMap m x <*> astMap m y
   astMap m (x :< y) = mapOnSymbol m =<< (:<) <$> astMap m x <*> astMap m y
   astMap m (x :> y) = mapOnSymbol m =<< (:>) <$> astMap m x <*> astMap m y

@@ -6,7 +6,7 @@ import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Ite
 import Futhark.Analysis.Proofs.IndexFnPlus (normalizeIndexFn, subIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineIndexFn, refineSymbol)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), normalizeSymbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, normalizeSymbol)
 import Futhark.Analysis.Proofs.SymbolPlus (getRenamedLinCombBoundVar, repVName)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, sub)
@@ -49,7 +49,7 @@ rewriteGen = astMap m
   where
     m :: ASTMapper Symbol IndexFnM =
       ASTMapper
-        { mapOnSymbol = converge (refineSymbol . normalizeSymbol),
+        { mapOnSymbol = converge (fmap normalizeSymbol . refineSymbol),
           mapOnSoP = converge (applyRuleBook rulesSoP) <=< substEquivs
         }
 
@@ -65,7 +65,7 @@ instance Rewritable Symbol IndexFnM where
 instance Rewritable IndexFn IndexFnM where
   rewrite =
     converge $
-      rewriteGen <=< applyRuleBook rulesIndexFn <=< normalizeIndexFn <=< refineIndexFn rewriteGen
+      refineIndexFn rewriteGen <=< normalizeIndexFn <=< applyRuleBook rulesIndexFn <=< rewriteGen
 
 scale :: VName -> Symbol -> SoP Symbol
 scale c symbol = hole c .*. sym2SoP symbol
@@ -134,7 +134,7 @@ rulesSoP = do
         },
       Rule
         { name = "[[¬x]] => 1 - [[x]]",
-          from = sym2SoP $ Indicator (Not (Hole h1)),
+          from = sym2SoP $ Indicator (neg (Hole h1)),
           to = \s -> sub s $ int 1 .-. sym2SoP (Indicator (Hole h1)),
           sideCondition = vacuous
         },

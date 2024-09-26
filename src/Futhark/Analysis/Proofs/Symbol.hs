@@ -54,11 +54,34 @@ getLinCombBoundVar :: Symbol -> Maybe VName
 getLinCombBoundVar (LinComb i _ _ _) = Just i
 getLinCombBoundVar _ = Nothing
 
+toDNF :: Symbol -> Symbol
+toDNF (a :&& (b :|| c)) = toDNF (a :&& b) :|| toDNF (a :&& c)
+toDNF ((a :|| b) :&& c) = toDNF (a :&& c) :|| toDNF (b :&& c)
+toDNF (a :|| b) = toDNF a :|| toDNF b
+toDNF p = p
+
+toCNF :: Symbol -> Symbol
+toCNF p = neg $ toDNF (neg p)
+
+neg :: Symbol -> Symbol
+neg (Not x) = x
+neg (x :|| y) = neg x :&& neg y
+neg (x :&& y) = neg x :|| neg y
+neg (Bool True) = Bool False
+neg (Bool False) = Bool True
+neg (x :== y) = x :/= y
+neg (x :< y) = x :>= y
+neg (x :> y) = x :<= y
+neg (x :/= y) = x :== y
+neg (x :>= y) = x :< y
+neg (x :<= y) = x :> y
+neg x = Not x
+
 -- TODO Normalize only normalizes Boolean expressions.
 --      Use a Boolean representation that is normalized by construction.
 normalizeSymbol :: Symbol -> Symbol
-normalizeSymbol symbol = case toNNF symbol of
-  (Not x) -> toNNF (Not x)
+normalizeSymbol symbol = case toCNF symbol of
+  (Not x) -> neg x
   (x :&& y) ->
     case (x, y) of
       (Bool True, b) -> b -- Identity.
@@ -66,7 +89,7 @@ normalizeSymbol symbol = case toNNF symbol of
       (Bool False, _) -> Bool False -- Annihilation.
       (_, Bool False) -> Bool False
       (a, b) | a == b -> a -- Idempotence.
-      (a, b) | a == toNNF (Not b) -> Bool False -- A contradiction.
+      (a, b) | a == neg b -> Bool False -- A contradiction.
       (a, b) -> a :&& b
   (x :|| y) -> do
     case (x, y) of
@@ -75,22 +98,9 @@ normalizeSymbol symbol = case toNNF symbol of
       (Bool True, _) -> Bool True -- Annihilation.
       (_, Bool True) -> Bool True
       (a, b) | a == b -> a -- Idempotence.
-      (a, b) | a == toNNF (Not b) -> Bool True -- A tautology.
+      (a, b) | a == neg b -> Bool True -- A tautology.
       (a, b) -> a :|| b
   v -> v
-  where
-    toNNF (Not (Not x)) = x
-    toNNF (Not (Bool True)) = Bool False
-    toNNF (Not (Bool False)) = Bool True
-    toNNF (Not (x :|| y)) = toNNF (Not x) :&& toNNF (Not y)
-    toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
-    toNNF (Not (x :== y)) = x :/= y
-    toNNF (Not (x :< y)) = x :>= y
-    toNNF (Not (x :> y)) = x :<= y
-    toNNF (Not (x :/= y)) = x :== y
-    toNNF (Not (x :>= y)) = x :< y
-    toNNF (Not (x :<= y)) = x :> y
-    toNNF x = x
 
 instance Pretty Symbol where
   pretty symbol = case symbol of
