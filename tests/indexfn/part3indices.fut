@@ -5,12 +5,12 @@ def part3indices [n] 't (conds: [n]i8) : [n]i64 =
 
   let indsL = scan (+) 0 tflags
   let indsE = scan (+) 0 eflags
-  
+
   let s1 = if n > 0 then indsL[n-1] else 0
   let s2 = if n > 0 then indsE[n-1] else 0
 
-  let inds  = map4 (\ c indL indE i -> 
-                        if c == 1 then indL - 1 
+  let inds  = map4 (\ c indL indE i ->
+                        if c == 1 then indL - 1
                         else if c == 2 then s1 + indE - 1
                         else s1 + s2 + i - indsL[i] - indsE[i]
                    ) conds indsL indsE (iota n)
