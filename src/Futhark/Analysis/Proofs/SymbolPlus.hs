@@ -71,7 +71,6 @@ repVName s vn
 repVName _ _ = error "repVName substitutes for non-VName."
 
 instance Replaceable Symbol Symbol where
-  -- TODO flatten
   rep s symbol = case symbol of
     Var x -> M.findWithDefault (sym2SoP $ Var x) x (sop s)
     Hole x -> M.findWithDefault (sym2SoP $ Hole x) x (sop s)

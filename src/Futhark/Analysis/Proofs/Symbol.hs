@@ -109,13 +109,13 @@ instance Pretty Symbol where
     Bool x -> pretty x
     Not x -> "¬" <> autoParens x
     x :< y -> prettyOp "<" x y
-    x :<= y -> prettyOp "<=" x y
+    x :<= y -> prettyOp "≤" x y
     x :> y -> prettyOp ">" x y
-    x :>= y -> prettyOp ">=" x y
-    x :== y -> prettyOp "==" x y
-    x :/= y -> prettyOp "/=" x y
-    x :&& y -> prettyOp "&&" x y
-    x :|| y -> prettyOp "||" x y
+    x :>= y -> prettyOp "≥" x y
+    x :== y -> prettyOp "=" x y
+    x :/= y -> prettyOp "≠" x y
+    x :&& y -> prettyOp "∧" x y
+    x :|| y -> prettyOp "∨" x y
     Recurrence -> "↺ "
     where
       autoParens x@(Var _) = pretty x
