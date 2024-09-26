@@ -5,7 +5,7 @@ module Futhark.Analysis.Proofs.SymbolPlus where
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Substitution (..), SubstitutionBuilder (..), Unify (..), freshName, unifies_)
+import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Substitution (..), ReplacementBuilder (..), Unify (..), freshName, unifies_, Replacement)
 import Futhark.MonadFreshNames (MonadFreshNames)
 import Futhark.SoP.SoP (sym2SoP)
 import Language.Futhark (VName)
@@ -61,10 +61,10 @@ instance Renameable Symbol where
     where
       g op x y = op <$> rename_ vns tau x <*> rename_ vns tau y
 
-instance SubstitutionBuilder Symbol Symbol where
-  addSub vn e s = s {sop = M.insert vn (sym2SoP e) $ sop s}
+instance ReplacementBuilder Symbol Symbol where
+  addRep vn e = M.insert vn (sym2SoP e)
 
-repVName :: Substitution Symbol -> VName -> VName
+repVName :: Replacement Symbol -> VName -> VName
 repVName s vn
   | Var i <- sop2Symbol $ rep s (Var vn) =
       i
@@ -72,14 +72,14 @@ repVName _ _ = error "repVName substitutes for non-VName."
 
 instance Replaceable Symbol Symbol where
   rep s symbol = case symbol of
-    Var x -> M.findWithDefault (sym2SoP $ Var x) x (sop s)
-    Hole x -> M.findWithDefault (sym2SoP $ Hole x) x (sop s)
+    Var x -> M.findWithDefault (sym2SoP $ Var x) x s
+    Hole x -> M.findWithDefault (sym2SoP $ Hole x) x s
     Idx xs i ->
       sym2SoP $ Idx (sop2Symbol $ rep s xs) (rep s i)
     LinComb i lb ub t ->
       -- NOTE we can avoid this rewrite here if we change the LinComb expression
       -- from Symbol to SoP Symbol.
-      let s' = addSub i (Var i) s
+      let s' = addRep i (Var i) s
        in applyLinCombRule i (rep s' lb) (rep s' ub) (rep s' t)
     Indicator e -> sym2SoP . Indicator . sop2Symbol $ rep s e
     Apply f xs -> sym2SoP $ Apply (sop2Symbol $ rep s f) (map (rep s) xs)
@@ -128,7 +128,7 @@ instance Unify Symbol Symbol where
   unify_ k (Hole x) t
     | x >= k = fail "2.b.i"
     | x `S.member` fvs || any (>= k) fvs = fail "2.b.ii"
-    | otherwise = pure $ addSub x t mempty -- 2.b.iii. Variable elimination.
+    | otherwise = pure $ addRep x t mempty -- 2.b.iii. Variable elimination.
     where
       fvs = fv t
   -- 3.b

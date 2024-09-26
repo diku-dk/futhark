@@ -9,7 +9,7 @@ import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), normalizeSymbol)
 import Futhark.Analysis.Proofs.SymbolPlus (getRenamedLinCombBoundVar, repVName)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify (SubstitutionBuilder (..), rep, sub)
+import Futhark.Analysis.Proofs.Unify (rep, sub, mkRep, Substitution (mapping))
 import Futhark.MonadFreshNames
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$), ($>$))
 import Futhark.SoP.Monad (substEquivs)
@@ -96,9 +96,9 @@ rulesSoP = do
                   scale c $
                     LinComb i (hole h1 .-. int 1) (hole h2) (Hole h3),
               sideCondition = \s -> do
-                let lb = rep s (Hole h1)
+                lb <- sub s (Hole h1)
                 j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
-                x <- sub (mkSub j $ lb .-. int 1) $ rep s (Hole h3)
+                x <- rep (mkRep j $ lb .-. int 1) <$> sub s (Hole h3)
                 y <- sub s (Hole h4)
                 x $==$ y
             },
@@ -112,9 +112,9 @@ rulesSoP = do
                   scale c $
                     LinComb i (hole h1) (hole h2 .+. int 1) (Hole h3),
               sideCondition = \s -> do
-                let ub = rep s (Hole h2)
+                ub <- sub s (Hole h2)
                 j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
-                x <- sub (mkSub j $ ub .+. int 1) $ rep s (Hole h3)
+                x <- rep (mkRep j $ ub .+. int 1) <$> sub s (Hole h3)
                 y <- sub s (Hole h4)
                 x $==$ y
             },
@@ -128,8 +128,8 @@ rulesSoP = do
               scale c $
                 LinComb i (hole y1 .+. int 1) (hole x1) (Hole h2),
           sideCondition = \s -> do
-            let y' = rep s (Hole y1)
-            let x' = rep s (Hole x1)
+            y' <- sub s (Hole y1)
+            x' <- sub s (Hole x1)
             y' $<=$ x'
         },
       Rule
@@ -144,11 +144,11 @@ rulesSoP = do
               from = sym2SoP lincomb,
               to = \s -> do
                 j <- fromJust <$> getRenamedLinCombBoundVar s lincomb
-                let idx = rep s (Hole h1)
-                pure $ rep (mkSub j idx) $ rep s (Hole h3),
+                idx <- sub s (Hole h1)
+                rep (mkRep j idx) <$> sub s (Hole h3),
               sideCondition = \s -> do
-                let start = rep s (Hole h1)
-                let end = rep s (Hole h2)
+                start <- sub s (Hole h1)
+                end <- sub s (Hole h2)
                 start $==$ end
             },
       Rule
@@ -156,8 +156,8 @@ rulesSoP = do
           from = sym2SoP $ LinComb i (hole h1) (hole h2) (Hole h3),
           to = const . pure $ int2SoP 0,
           sideCondition = \s -> do
-            let start = rep s (Hole h1)
-            let end = rep s (Hole h2)
+            start <- sub s (Hole h1)
+            end <- sub s (Hole h2)
             start $>$ end
         }
     ]
@@ -192,9 +192,9 @@ rulesIndexFn = do
           -- Indexing variable i replaced by 0 in e1.
           to = \s ->
             subIndexFn s =<< do
-              let i' = repVName s i
+              let i' = repVName (mapping s) i
               e1 <- sub s (hole h1)
-              e1_b <- sub (mkSub i' (int 0)) e1
+              let e1_b = rep (mkRep i' (int 0)) e1
               pure $
                 IndexFn
                   { iterator = Forall i (Iota (hole n)),
@@ -223,10 +223,10 @@ rulesIndexFn = do
           -- Indexing variable i replaced by b in e1.
           to = \s ->
             subIndexFn s =<< do
-              let i' = repVName s i
+              let i' = repVName (mapping s) i
               e1 <- sub s (hole h1)
               b' <- sub s (hole b)
-              e1_b <- sub (mkSub i' b') e1
+              let e1_b = rep (mkRep i' b') e1
               pure $
                 IndexFn
                   { iterator = Forall i (Cat k (hole m) (hole b)),

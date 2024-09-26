@@ -9,7 +9,7 @@ import Data.Map qualified as M
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus (repVName)
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), SubstitutionBuilder (..), Unify (..), freshName, sub, unifies_)
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Substitution (..), ReplacementBuilder (..), Unify (..), freshName, sub, unifies_, Replacement)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName, newNameFromString)
@@ -26,10 +26,10 @@ instance Eq Domain where
     where
       start :: Domain -> SoP Symbol
       start (Iota _) = int2SoP 0
-      start (Cat k _ b) = rep (mkSub k (int2SoP 0 :: SoP Symbol)) b
+      start (Cat k _ b) = rep (mkRep k (int2SoP 0 :: SoP Symbol)) b
 
       end (Iota n) = n .-. int2SoP 1
-      end (Cat k m b) = rep (mkSub k m) b .-. int2SoP 1
+      end (Cat k m b) = rep (mkRep k m) b .-. int2SoP 1
 
 instance Eq Iterator where
   (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
@@ -41,14 +41,14 @@ deriving instance Eq IndexFn
 
 domainStart :: Domain -> SoP Symbol
 domainStart (Iota _) = int2SoP 0
-domainStart (Cat k _ b) = rep (mkSub k (int2SoP 0 :: SoP Symbol)) b
+domainStart (Cat k _ b) = rep (mkRep k (int2SoP 0 :: SoP Symbol)) b
 
 domainEnd :: Domain -> SoP Symbol
 domainEnd (Iota n) = n .-. int2SoP 1
-domainEnd (Cat k m b) = rep (mkSub k m) b .-. int2SoP 1
+domainEnd (Cat k m b) = rep (mkRep k m) b .-. int2SoP 1
 
 intervalEnd :: Domain -> SoP Symbol
-intervalEnd (Cat k _ b) = rep (mkSub k (sym2SoP (Var k) .+. int2SoP 1)) b
+intervalEnd (Cat k _ b) = rep (mkRep k (sym2SoP (Var k) .+. int2SoP 1)) b
 intervalEnd (Iota _) = error "intervalEnd on iota"
 
 -------------------------------------------------------------------------------
@@ -87,17 +87,17 @@ instance Pretty IndexFn where
 -------------------------------------------------------------------------------
 -- Unification.
 -------------------------------------------------------------------------------
-repCase :: (Ord u, Replaceable v1 u, Replaceable v2 u) => Substitution u -> (v1, v2) -> (u, SoP u)
+repCase :: (Ord u, Replaceable v1 u, Replaceable v2 u) => Replacement u -> (v1, v2) -> (u, SoP u)
 repCase s (a, b) = (sop2Symbol (rep s a), rep s b)
 
-repCases :: (Ord a, Replaceable v1 a, Replaceable v2 a) => Substitution a -> Cases v1 v2 -> Cases a (SoP a)
+repCases :: (Ord a, Replaceable v1 a, Replaceable v2 a) => Replacement a -> Cases v1 v2 -> Cases a (SoP a)
 repCases s (Cases cs) = Cases $ NE.map (repCase s) cs
 
-repDomain :: Substitution Symbol -> Domain -> Domain
+repDomain :: Replacement Symbol -> Domain -> Domain
 repDomain s (Iota n) = Iota (rep s n)
 repDomain s (Cat k m b) = Cat k (rep s m) (rep s b)
 
-repIndexFn :: Substitution Symbol -> IndexFn -> IndexFn
+repIndexFn :: Replacement Symbol -> IndexFn -> IndexFn
 repIndexFn s = rip
   where
     rip (IndexFn Empty body) = IndexFn Empty (repCases s body)
@@ -105,7 +105,7 @@ repIndexFn s = rip
       IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
 
 subIndexFn :: Substitution Symbol -> IndexFn -> IndexFnM IndexFn
-subIndexFn s indexfn = repIndexFn s <$> rename_ (vns s) mempty indexfn
+subIndexFn s indexfn = repIndexFn (mapping s) <$> rename_ (vns s) mempty indexfn
 
 instance (Renameable a, Renameable b) => Renameable (Cases a b) where
   rename_ vns tau (Cases cs) = Cases <$> mapM re cs
@@ -176,7 +176,7 @@ subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
   vns <- getNameSource
   for' <- rename vns for
   into' <- rename vns into
-  subst' x (repIndexFn (mkSub i i') for') (repIndexFn (mkSub j i') into')
+  subst' x (repIndexFn (mkRep i i') for') (repIndexFn (mkRep j i') into')
 subst x q r = subst' x q r
 
 subst' :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
@@ -188,7 +188,7 @@ subst' x (IndexFn Empty xs) (IndexFn iter_y ys) =
       ( cases $ do
           (xcond, xval) <- casesToList xs
           (ycond, yval) <- casesToList ys
-          pure $ repCase (mkSub x xval) (ycond :&& xcond, yval)
+          pure $ repCase (mkRep x xval) (ycond :&& xcond, yval)
       )
 subst' x (IndexFn (Forall _ (Iota n)) xs) (IndexFn (Forall i (Iota n')) ys)
   | n == n' =
@@ -198,7 +198,7 @@ subst' x (IndexFn (Forall _ (Iota n)) xs) (IndexFn (Forall i (Iota n')) ys)
           ( cases $ do
               (xcond, xval) <- casesToList xs
               (ycond, yval) <- casesToList ys
-              pure $ repCase (mkSub x xval) (ycond :&& xcond, yval)
+              pure $ repCase (mkRep x xval) (ycond :&& xcond, yval)
           )
 subst' _ _ _ = undefined
 
@@ -251,8 +251,8 @@ rewritePrefixSum indexfn@(IndexFn (Forall i dom) (Cases cs))
         Just _ -> do
           -- debugM $ "MATCHED rewritePrefixSum\n" <> prettyString indexfn
           j <- newNameFromString "j"
-          e1_b <- sub (mkSub i b) e1
-          e2_j <- sub (mkSub i (sym2SoP $ Var j)) e2
+          let e1_b = rep (mkRep i b) e1
+          let e2_j = rep (mkRep i (sym2SoP $ Var j)) e2
           let e2_sum = applyLinCombRule j (b .+. int2SoP 1) (sym2SoP $ Var i) e2_j
           let res =
                 IndexFn

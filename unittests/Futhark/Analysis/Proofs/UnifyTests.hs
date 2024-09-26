@@ -41,7 +41,7 @@ tests =
           ( \(x, y, _, w, _, _, _, _, _) ->
               unify (hole x .*. hole y) (int2SoP 2 .*. name2SoP w)
           )
-          @??= (x2z_y2w >>= \s -> pure $ s {sop = M.adjust (const $ int2SoP 2) x $ sop s}),
+          @??= (x2z_y2w >>= \s -> pure $ s {mapping = M.adjust (const $ int2SoP 2) x $ mapping s}),
       testCase "First is scaled" $
         run
           ( \(x, y, z, w, _, _, _, _, _) ->
@@ -53,7 +53,7 @@ tests =
           ( \(x, y, z, w, _, _, _, _, _) ->
               unify (hole x .+. hole y) (name2SoP z .+. scaleSoP 2 (name2SoP w))
           )
-          @??= (x2z_y2w >>= \s -> pure $ s {sop = M.adjust (scaleSoP 2) y $ sop s}),
+          @??= (x2z_y2w >>= \s -> pure $ s {mapping = M.adjust (scaleSoP 2) y $ mapping s}),
       testCase "Both scaled, but permuted" $
         run
           ( \(x, y, z, w, _, _, _, _, _) ->
@@ -158,6 +158,7 @@ tests =
           <$> y2b_z2c_w2d
     ]
   where
+    mkSub a b = Substitution {mapping = mkRep a b, vns = mempty }
     name2SoP = sym2SoP . Var
     hole = sym2SoP . Hole
     a ~+~ b = sym2SoP a .+. sym2SoP b
@@ -175,10 +176,10 @@ tests =
         <*> newVName "i"
     (x, y, z, w, a, b, c, d, _) = getValue varsM
 
-    x2z_y2w = Just $ addSub x (name2SoP z) $ mkSub y (name2SoP w)
-    x2w_y2z = Just $ addSub x (name2SoP w) $ mkSub y (name2SoP z)
+    x2z_y2w = Just $ mkSub x (name2SoP z) <> mkSub y (name2SoP w)
+    x2w_y2z = Just $ mkSub x (name2SoP w) <> mkSub y (name2SoP z)
     y2b_z2c_w2d =
-      Just $ addSub y (name2SoP b) $ addSub z (name2SoP c) $ mkSub w (name2SoP d)
+      Just $ mkSub y (name2SoP b) <> mkSub z (name2SoP c) <> mkSub w (name2SoP d)
 
     run f = runTest (varsM >>= f)
     actual @??= expected =
