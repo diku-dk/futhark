@@ -1,5 +1,6 @@
 module Futhark.Analysis.Proofs.AlgebraPC.Algebra
   ( Symbol(..),
+    MonDir(..),
     Property(..),
     AlgM(..),
     runAlgM,
@@ -25,6 +26,9 @@ data Symbol
   = Var VName
   | Hole VName
   | Idx VName (SoP Symbol)
+  | Mdf MonDir VName (SoP Symbol) (SoP Symbol)
+  -- ^ `Mdf dir A i1 i2` means `A[i1] - A[i2]` where
+  -- `A` is known to be monotonic with direction `dir` 
   | Sum VName (SoP Symbol) (SoP Symbol)
   | Pow (Integer, SoP Symbol)
   deriving (Show, Eq, Ord)
@@ -34,6 +38,11 @@ instance Pretty Symbol where
     (Var x) -> prettyName x
     (Hole x) -> prettyHole x
     (Idx x i) -> (prettyName x) <> brackets (pretty i)
+    (Mdf _ x i1 i2) ->
+      parens $
+        ((prettyName x) <> (brackets (pretty i1)))
+        <+> "-" <+> 
+        ((prettyName x) <> (brackets (pretty i2)))
     (Sum x lb ub) ->
       "∑"
         <> prettyName x
@@ -46,8 +55,11 @@ instance Pretty Symbol where
       iversonbrackets = enclose "⟦" "⟧"
       prettyOp s x y = pretty x <+> s <+> pretty y
 
+data MonDir = Inc | IncS | Dec | DecS
+  deriving (Show, Eq, Ord)
+
 data Property
-  = Monotonic
+  = Monotonic MonDir
   | Injective
   deriving (Show, Eq, Ord)
 
@@ -83,7 +95,7 @@ instance (Expression e, Ord e) => MonadSoP Symbol e Property (AlgM e) where
 runAlgM :: (Ord e) => AlgM e a -> AlgEnv Symbol e Property -> VNameSource -> (a, VEnv e)
 runAlgM (AlgM m) env vns = getRes $ runRWS m () s
   where
-    getRes (x, env, _) = (x, env)
+    getRes (x, env1, _) = (x, env1)
     s = VEnv vns env
 
 -- f :: (SoP Symbol >= 0) -> AlgM e Bool
