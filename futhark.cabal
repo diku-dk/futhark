@@ -551,3 +551,5 @@ test-suite unit
     , bytestring
     , template-haskell
     , filepath
+    , silently
+    , directory

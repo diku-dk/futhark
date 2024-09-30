@@ -7,19 +7,23 @@ import Data.ByteString qualified as BS
 import Data.FileEmbed
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
-import Futhark.CLI.Fmt (fmtText)
+import Futhark.CLI.Fmt qualified as Fmt
+import Futhark.CLI.Misc(mainTokens)
 import Language.Futhark
 import Language.Futhark.Parser
 import System.FilePath.Posix (isExtensionOf)
 import Test.Tasty
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import System.IO.Silently(capture_)
+import System.Directory(createDirectoryIfMissing, removeDirectoryRecursive)
+import System.FilePath.Posix(takeDirectory)
 
 programs :: [(FilePath, BS.ByteString)]
 programs = filter ((".fut" `isExtensionOf`) . fst) $(embedDir "tests")
 
 tests :: TestTree
 tests =
-  testGroup "Futhark.CLI.Fmt" [fmtParseTests] -- , fmtIdempotenceTests]
+  testGroup "Futhark.CLI.Fmt" [fmtParseTests, fmtTokenTests]
 
 -- | Formats and compiles a file
 fmtParseTest :: (FilePath, BS.ByteString) -> TestTree
@@ -39,26 +43,38 @@ fmtParseTest (file, bs) =
 
     result = do
       t <- first (const "Error: Can not parse file as UTF-8.") $ T.decodeUtf8' bs
-      succeeded (fmtText file) (parseFutharkWithComments file) t
+      succeeded (Fmt.fmtText file) (parseFutharkWithComments file) t
 
 -- | Checks that the AST resulting from parsing a file is the same before and after
 --   formatting
-fmtIdempotenceTest :: (FilePath, BS.ByteString) -> TestTree
-fmtIdempotenceTest = undefined
+fmtTokenTest :: (FilePath, BS.ByteString) -> TestTree
+--fmtTokenTest = undefined
+fmtTokenTest (file, _) =
+  -- Problem: how to compare abstract syntax trees? 
+  -- Answer: either by using tokens or somehow finding a way to compile 
+  testCase ("Comparing Tokens of " ++ file) test 
+  where test = do
+          bfTokens <- capture_ $ mainTokens "program" ["tests/"++file]   
+          fmtContent <- capture_ $ Fmt.main "program" ["tests/"++file]
+          createAndWriteFile ("tests/fmtTemp/" ++ file) fmtContent 
+          fmtTokens <- capture_ $ mainTokens "Program" ["tests/fmtTemp/" ++ file]
+          removeComments fmtTokens @?= removeComments bfTokens
+          removeFmtDirectory
 
--- fmtIdempotenceTest (file, bs) =
---   -- Problem: how to compare abstract syntax trees? Also parsing does not give AST but CST
---   testCase ("Comparing AST of " ++ file) $ beforeAST @?= fmtAST
---   where beforeAST = do
---           t <- first (const "Error: Can not parse file as UTF-8.") $ T.decodeUtf8' bs
---           first (\(SyntaxError loc err) -> locText loc <> ": " <> prettyText err) $
---             parseFuthark file t
---         fmtAST = fmtParse file bs
+        removeComments tokens = unlines $ map unwords $ filter nonComment $ map words $ lines tokens
+        nonComment lst = "COMMENT" `notElem` lst
 
 fmtParseTests :: TestTree
 fmtParseTests = testGroup "format and parse tests" $ map fmtParseTest programs
 
-fmtIdempotenceTests :: TestTree
-fmtIdempotenceTests =
-  testGroup "Idempotence of formatter" $
-    map fmtIdempotenceTest programs
+fmtTokenTests :: TestTree
+fmtTokenTests =
+  testGroup "Compare tokens before and after formatter" $ map fmtTokenTest programs
+
+createAndWriteFile :: FilePath -> String -> IO ()
+createAndWriteFile path content = do
+  createDirectoryIfMissing True $ takeDirectory path
+  writeFile path content
+
+removeFmtDirectory :: IO ()
+removeFmtDirectory = removeDirectoryRecursive "tests/fmtTemp"

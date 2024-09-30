@@ -62,7 +62,7 @@ debug a = traceShow a a
 -- TODO: Fix formatting of several lines of comments
 -- TODO: prettyprint in a nicer way than one line per terminal.
 --
--- TODO: support all syntactical constructs.
+-- DONE: support all syntactical constructs.
 
 -- TODO (Question?): Change fmt to be a sequence of lines instead of a list of lines
 {-
@@ -515,6 +515,19 @@ fmtCase (CasePat p e _) = do
   e' <- fmtExp e
   pure $ ["case"] <> p' <> [" -> "] <> e'
 
+-- Should check if exp match pat
+matchPat :: UncheckedPat ParamType -> UncheckedExp -> Bool
+matchPat _ _ = False
+-- matchPat (TuplePat _pats _paramt) _exp = undefined 
+-- matchPat (RecordPat _namePats _loc) _exp = undefined 
+-- matchPat (PatParens _pats _loc) _exp = undefined 
+-- matchPat (Id _names _fs _loc) _exp = undefined
+-- matchPat (Wildcard _f _loc) _exp = False 
+-- matchPat (PatAscription _pats _tyype _loc) _exp = undefined  
+-- matchPat (PatLit _lit _f _loc) _exp = undefined 
+-- matchPat (PatConstr _name _f _pats _loc) _exp = undefined 
+-- matchPat (PatAttr _info _pat _loc) _exp = undefined 
+
 fmtAppExp :: AppExpBase NoInfo Name -> FmtM Fmt
 fmtAppExp (BinOp (bop, _) _ (x, _) (y, _) _) = do
   x' <- fmtExp x
@@ -524,6 +537,20 @@ fmtAppExp (Match e cs _) = do
   e' <- fmtExp e
   cs' <- mconcat <$> mapM fmtCase (toList cs)
   pure $ ["match"] <> e' <> cs'
+-- should omit the initial value expression 
+-- need some way to catch when the value expression match the pattern 
+fmtAppExp (Loop sizeparams pat initexp form loopbody _) | matchPat pat initexp = do
+  let sizeparams' = ("[" <>) . (<> "]") . prettyText . toName <$> sizeparams
+  pat' <- fmtPat pat
+  form' <- fmtLoopForm form
+  loopbody' <- fmtExp loopbody
+  pure $
+    ["loop"]
+      <> sizeparams'
+      <> pat'
+      <> form'
+      <> ["do"]
+      <> loopbody'
 fmtAppExp (Loop sizeparams pat initexp form loopbody _) = do
   let sizeparams' = ("[" <>) . (<> "]") . prettyText . toName <$> sizeparams
   pat' <- fmtPat pat
@@ -535,7 +562,7 @@ fmtAppExp (Loop sizeparams pat initexp form loopbody _) = do
       <> sizeparams'
       <> pat'
       <> ["="]
-      <> initexp'
+      <> initexp' 
       <> form'
       <> ["do"]
       <> loopbody'
@@ -624,6 +651,7 @@ fmtAppExp (Apply f args _) = do
 letBody :: UncheckedExp -> FmtM Fmt
 letBody body@(AppExp LetPat {} _) = fmtExp body
 letBody body@(AppExp LetFun {} _) = fmtExp body
+letBody body@(AppExp LetWith {} _) = fmtExp body 
 letBody body = do
   body' <- fmtExp body
   pure $ ["in"] <> body'
