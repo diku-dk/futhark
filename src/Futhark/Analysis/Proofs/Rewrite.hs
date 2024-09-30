@@ -239,9 +239,7 @@ rulesIndexFn = do
           --    | i == b => e1              (e1 may depend on i)
           --    | i /= b => y[i-1] + e2     (e2 may depend on i)
           --
-          -- e2 is a SoP with terms e2_0, ..., e2_l. Each term is a constant,
-          -- an indexing statement or an indicator of an indexing statement.
-          -- XXX Is this condition necessary in the revised system?
+          -- e2 is a SoP with terms e2_0, ..., e2_l.
           -- _______________________________________________________________
           -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
           --    e1{b/i} + (Σ_{j=b+1}^i e2_0{j/i}) + ... + (Σ_{j=b+1}^i e2_l{j/i})
