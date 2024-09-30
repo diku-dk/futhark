@@ -61,7 +61,7 @@ isFalse simplify p = do
     else do
       -- If p is in CNF, a sufficient condition for p to be false
       -- is that some clause q in p is false. Now we can assume
-      -- all other terms to be true and use that information when
+      -- all other clauses to be true and use that information when
       -- checking q. This lets us easily falsify, for example,
       -- x == 1 :&& x == 2.
       let p_cnf = cnfToList $ neg neg_p_dnf -- toCNF p
@@ -104,7 +104,9 @@ refineIndexFn simplify (IndexFn it xs) = do
   pure $ IndexFn it ys
   where
     refineCases cs = do
-      (ps, vs) <- unzip <$> filterM (fmap not . isFalse simplify . fst) (casesToList cs)
+      (ps, vs) <-
+        unzip
+          <$> filterM (fmap not . isFalse simplify . fst) (casesToList cs)
       vs' <- mapM refineCase (zip ps vs)
       cases <$> mergeEquivCases (zip ps vs')
 

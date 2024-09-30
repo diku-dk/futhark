@@ -2,13 +2,13 @@ module Futhark.Analysis.Proofs.Rule where
 
 import Control.Monad (foldM, msum, (<=<))
 import Data.List (subsequences, (\\))
-import Futhark.Analysis.Proofs.IndexFn (IndexFn, IndexFnM)
-import Futhark.Analysis.Proofs.IndexFnPlus ()
+import Futhark.Analysis.Proofs.IndexFn (IndexFn, IndexFnM, casesToList)
+import Futhark.Analysis.Proofs.IndexFnPlus (unifyIndexFnWith)
 import Futhark.Analysis.Proofs.Symbol (Symbol)
 import Futhark.Analysis.Proofs.SymbolPlus ()
-import Futhark.Analysis.Proofs.Unify (Substitution, Unify (unify), unifies)
-import Futhark.Analysis.Proofs.Util (partitions)
-import Futhark.SoP.SoP (SoP, numTerms, sopFromList, sopToList, term2SoP, (.+.))
+import Futhark.Analysis.Proofs.Unify (Substitution, Unify (unify), unifies, renameAnd, unifies_, Replaceable (rep))
+import Futhark.Analysis.Proofs.Util (allocateTerms)
+import Futhark.SoP.SoP (SoP, numTerms, sopFromList, sopToList, (.+.))
 
 data Rule a b m = Rule
   { name :: String,
@@ -38,29 +38,35 @@ instance ApplyRule (SoP Symbol) Symbol where
       splits xs = [(s, xs \\ s) | s <- subsequences xs, length s >= k]
 
       -- Pick first partition that matches.
+      -- Unify subterms in `x` with subterms in `y` in all possible ways.
       matchPartition s =
-        msum <$> mapM (check (sideCondition rule) <=< unifies) (combine s)
-
-      -- Pair each term in from rule with subterms in sop.
-      -- For example, h1 + h2 and x + y + z pairs as follows
-      -- [[(h1, x), (h2, y+z)],
-      --  [(h1, x+y), (h2, z)],
-      --  [(h1, x+z), (h2, y)],
-      --  ... permutations where h1 and h2 are switched
-      -- ]
-      combine s
-        | k <= numTerms s = do
-            let from_xs = sopToList (from rule)
-            partition <- partitions k (sopToList s)
-            pure $
-              zipWith (\x ts -> (uncurry term2SoP x, sopFromList ts)) from_xs partition
-        | otherwise = []
+        msum <$>
+          mapM (check (sideCondition rule) <=< unifies) (allocateTerms (from rule) s)
 
 instance ApplyRule Symbol Symbol where
   applyRule = applyRuleDefault
 
 instance ApplyRule IndexFn Symbol where
-  applyRule = applyRuleDefault
+  applyRule rule indexfn =
+    renameAnd (unifyIndexFnWith matchCases) (from rule) indexfn
+      >>= check (sideCondition rule)
+      >>= maybe (pure indexfn) (to rule)
+    where
+      -- Unify cases as if applying a SoP rule, except that partial matches are disallowed.
+      matchCases k cs1 cs2 = do
+        let (p_xs, v_xs) = unzip $ casesToList cs1
+        let (p_ys, v_ys) = unzip $ casesToList cs2
+        s1 <- unifies_ k (zip p_xs p_ys)
+        foldM
+          ( \s (x, y) ->
+              (s <>) <$> matchSoP k (rep s x) (rep s y)
+          )
+          s1
+          (zip v_xs v_ys)
+      -- TODO does msum here exclude potential matches?
+      -- (That is, rather than try every possible fold above,
+      -- we select the first valid always.)
+      matchSoP k x y = msum $ map (unifies_ k) (allocateTerms x y)
 
 check :: (Monad f) => (a -> f Bool) -> Maybe a -> f (Maybe a)
 check _ Nothing = pure Nothing

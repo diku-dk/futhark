@@ -6,14 +6,14 @@ import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Ite
 import Futhark.Analysis.Proofs.IndexFnPlus (normalizeIndexFn, subIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineIndexFn, refineSymbol)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, normalizeSymbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, normalizeSymbol, applyLinCombRule)
 import Futhark.Analysis.Proofs.SymbolPlus (getRenamedLinCombBoundVar, repVName)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, sub)
-import Futhark.MonadFreshNames
+import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$), ($>$))
 import Futhark.SoP.Monad (substEquivs)
-import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.*.), (.+.), (.-.))
+import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.*.), (.+.), (.-.), sopToLists)
 import Language.Futhark (VName)
 
 vacuous :: (Monad m) => b -> m Bool
@@ -170,6 +170,7 @@ rulesIndexFn = do
   m <- newVName "m"
   b <- newVName "b"
   h1 <- newVName "h"
+  h2 <- newVName "h"
   pure
     [ Rule
         { name = "Rule 5 (carry)",
@@ -187,8 +188,6 @@ rulesIndexFn = do
                       (hole i :/= int 0, sym2SoP Recurrence)
                     ]
               },
-          -- TODO add bound names (i) are not substituted test for Unify
-          -- on index fns
           -- Indexing variable i replaced by 0 in e1.
           to = \s ->
             subIndexFn s =<< do
@@ -233,5 +232,76 @@ rulesIndexFn = do
                     body = cases [(Bool True, e1_b)]
                   },
           sideCondition = vacuous
+        },
+      Rule
+        { name = "Prefix sum",
+          -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
+          --    | i == b => e1              (e1 may depend on i)
+          --    | i /= b => y[i-1] + e2     (e2 may depend on i)
+          --
+          -- e2 is a SoP with terms e2_0, ..., e2_l. Each term is a constant,
+          -- an indexing statement or an indicator of an indexing statement.
+          -- XXX Is this condition necessary in the revised system?
+          -- _______________________________________________________________
+          -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
+          --    e1{b/i} + (Σ_{j=b+1}^i e2_0{j/i}) + ... + (Σ_{j=b+1}^i e2_l{j/i})
+          from =
+            IndexFn
+              { iterator = Forall i (Iota (hole n)),
+                body =
+                  cases
+                    [ (hole i :== int 0, hole h1),
+                      (hole i :/= int 0, Recurrence ~+~ Hole h2)
+                    ]
+              },
+          to = \s ->
+            subIndexFn s =<< do
+              let b' = int 0
+              let iter = repVName (mapping s) i
+              j <- newVName "j"
+              e1 <- sub s (hole h1)
+              let e1_b = rep (mkRep iter b') e1
+              e2 <- sub s (hole h2)
+              let e2_j = rep (mkRep iter (sym2SoP $ Var j)) e2
+              let e2_sum = applyLinCombRule j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
+              pure $
+                IndexFn
+                  { iterator = Forall i (Iota (hole n)),
+                    body = cases [(Bool True, e1_b .+. e2_sum)]
+                  },
+          sideCondition = \s -> do
+            e2_symbols <- concatMap fst . sopToLists <$> sub s (Hole h2)
+            pure $ Recurrence `notElem` e2_symbols
+        },
+      -- TODO deduplicate Iota/Cat rules
+      Rule
+        { name = "Prefix sum",
+          from =
+            IndexFn
+              { iterator = Forall i (Cat k (hole m) (hole b)),
+                body =
+                  cases
+                    [ (hole i :== int 0, hole h1),
+                      (hole i :/= int 0, Recurrence ~+~ Hole h2)
+                    ]
+              },
+          to = \s ->
+            subIndexFn s =<< do
+              b' <- sub s (hole b)
+              let iter = repVName (mapping s) i
+              j <- newVName "j"
+              e1 <- sub s (hole h1)
+              let e1_b = rep (mkRep iter b') e1
+              e2 <- sub s (hole h2)
+              let e2_j = rep (mkRep iter (sym2SoP $ Var j)) e2
+              let e2_sum = applyLinCombRule j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
+              pure $
+                IndexFn
+                  { iterator = Forall i (Iota (hole n)),
+                    body = cases [(Bool True, e1_b .+. e2_sum)]
+                  },
+          sideCondition = \s -> do
+            e2_symbols <- concatMap fst . sopToLists <$> sub s (Hole h2)
+            pure $ Recurrence `notElem` e2_symbols
         }
     ]
