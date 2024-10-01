@@ -28,7 +28,7 @@ data Symbol
   | Idx VName (SoP Symbol)
   | Mdf MonDir VName (SoP Symbol) (SoP Symbol)
   -- ^ `Mdf dir A i1 i2` means `A[i1] - A[i2]` where
-  -- `A` is known to be monotonic with direction `dir` 
+  -- `A` is known to be monotonic with direction `dir`
   | Sum VName (SoP Symbol) (SoP Symbol)
   | Pow (Integer, SoP Symbol)
   deriving (Show, Eq, Ord)

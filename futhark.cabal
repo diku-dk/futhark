@@ -151,6 +151,8 @@ library
       Futhark.Analysis.Proofs.Traversals
       Futhark.Analysis.Proofs.Unify
       Futhark.Analysis.Proofs.Util
+      Futhark.Analysis.Proofs.AlgebraPC.Algebra
+      Futhark.Analysis.Proofs.AlgebraPC.Solve
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench
@@ -550,10 +552,6 @@ test-suite unit
       Futhark.Optimise.ArrayLayoutTests
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
-      Futhark.SoP.FourierMotzkinTests
-      Futhark.SoP.Parse
-      Futhark.SoP.RefineTests
-      Futhark.SoP.SoPTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SemanticTests
