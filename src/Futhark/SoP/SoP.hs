@@ -17,7 +17,6 @@ module Futhark.SoP.SoP
     int2SoP,
     scaleSoP,
     zeroSoP,
-    ctSoP,
     negSoP,
     addSoPs,
     (.+.),
@@ -289,9 +288,6 @@ powerSoP sop =
 
 zeroSoP :: (Ord u) => SoP u
 zeroSoP = SoP $ M.singleton (toTerm MS.empty) 0
-
-ctSoP :: (Ord u) => Integer -> SoP u
-ctSoP i = SoP $ M.singleton (toTerm MS.empty) i
 
 scaleSoP :: Integer -> SoP u -> SoP u
 scaleSoP k = mapSoP (* k)

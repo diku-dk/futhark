@@ -19,22 +19,25 @@ import Futhark.SoP.Monad
 -- import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 
 
-simplifyLevel :: (Expression e, Ord e) =>
-                SoP Symbol -> AlgM e (SoP Symbol)
+simplifyLevel :: (Expression e, Ord e) => SoP Symbol -> AlgM e (SoP Symbol)
 simplifyLevel sop0 = do
   let fvs = free sop0
-  sop1 <- ifM hasPow fvs simplifyPow sop0
-  (s2, sop2) <- ifSM hasIdxOrSum fvs simplifySumMonIdx sop1
-  -- now peel off known indices by looking in the equality & range tables.
-  -- run to a fix point (for as long as something simplifies)
-  if s2 then simplifyLevel sop2 else pure sop2
+  -- pow simplifications
+  sop1 <- ifM hasPow fvs simplifyPows sop0
+  -- index & sum-expansion & sum-sum simplifications
+  (s2, sop2) <- ifSM hasIdxOrSum fvs simplifySumMonIdxFP sop1
+  -- peel off known indices by looking in the equality table
+  equivs <- getEquivs
+  let (s3, sop3) = peelOffSumsFP equivs sop2
+  -- do we need to run to a fix point ??
+  if s2 || s3 then simplifyLevel sop3 else pure sop3
 
 -----------------------------------------
 --- 1. Simplifications related to Pow ---
 -----------------------------------------
 
-simplifyPow :: SoP Symbol -> AlgM e (SoP Symbol)
-simplifyPow sop = do
+simplifyPows :: SoP Symbol -> AlgM e (SoP Symbol)
+simplifyPows sop = do
   tmp <- mapM simplifyTerm $ M.toList $ getTerms sop
   pure (SoP (M.fromList tmp))
   where
@@ -50,15 +53,15 @@ simplifyPow sop = do
   --
   normalizePow :: ((Integer, SoP Symbol), Int) -> (Integer, SoP Symbol)
   normalizePow ((base, expnt), p) = 
-    (base, (ctSoP (fromIntegral p)) .*. expnt)
+    (base, (int2SoP (fromIntegral p)) .*. expnt)
 
 ---------------------------------------------------
 --- 2. Simplifications related to Sum of Slices ---
 ---------------------------------------------------
 
-simplifySumMonIdx :: (Expression e, Ord e) =>
+simplifySumMonIdxFP :: (Expression e, Ord e) =>
                      SoP Symbol -> AlgM e (Bool, SoP Symbol)
-simplifySumMonIdx sop = do
+simplifySumMonIdxFP sop = do
   let exp_terms =
         map expandSumIdxTerm $
         M.toList $ getTerms sop
@@ -68,8 +71,9 @@ simplifySumMonIdx sop = do
   case mr of
     Nothing -> pure (False, sop)
     Just (sop_new, sop_old) -> do
-      let sop' = (sop .-. sop_old) .+. sop_new
-      pure (True, sop') 
+      (_, sop') <- simplifySumMonIdxFP $ (sop .-. sop_old) .+. sop_new
+      -- ^ simplify to a fix point.
+      pure (True, sop')
   where
     matchLstQuad [] = pure Nothing
     matchLstQuad (el:els) = do
@@ -192,8 +196,8 @@ matchUniteSums (sym1, (ms1,k1)) (sym2, (ms2,k2))
     Idx bnm bidx <- sym2,
     anm == bnm && ms1 == ms2 && k1 == k2 = do
   -- ^ possible match for extending a sum with an index
-  let bidx_m_1 = bidx .-. (ctSoP 1)
-      bidx_p_1 = bidx .+. (ctSoP 1)
+  let bidx_m_1 = bidx .-. (int2SoP 1)
+      bidx_p_1 = bidx .+. (int2SoP 1)
   if bidx_m_1 == aidx_end
   then pure $ Just $ mkEquivSoPs (Sum anm aidx_beg bidx, sym1, sym2) (ms1, k1, k1)
   else if bidx_p_1 == aidx_beg
@@ -211,14 +215,14 @@ matchUniteSums (sym1, (ms1,k1)) (sym2, (ms2,k2))
   then -- case: a_beg <= b_beg <= a_end <= b_end
        -- results in Sum(A[a_beg:b_beg-1] - Sum(A[a_end+1:b_end])
        pure $ Just $
-              f (aidx_beg, bidx_beg .-. ctSoP 1) (aidx_end .+. ctSoP 1, bidx_end) (anm, k1, k2, k2)
+              f (aidx_beg, bidx_beg .-. int2SoP 1) (aidx_end .+. int2SoP 1, bidx_end) (anm, k1, k2, k2)
   else do
        succ_2_1 <- bidx_end FM.$<=$ aidx_end
        if succ_1_1 && succ_2_1
        then -- case: a_beg <= b_beg <= b_end <= a_end
             -- results in: Sum(A[a_beg:b_beg-1]) + Sum(A[b_beg+1,a_end])
             pure $ Just $
-              f (aidx_beg, bidx_beg .-. ctSoP 1) (bidx_end .+. ctSoP 1, aidx_end) (anm, k1, k1, k2)
+              f (aidx_beg, bidx_beg .-. int2SoP 1) (bidx_end .+. int2SoP 1, aidx_end) (anm, k1, k1, k2)
        else pure Nothing
   where
     f (beg1, end1) (beg2, end2) (anm, k11, k12, k22) = -- only k12 seems to be needed as parameter
@@ -251,6 +255,62 @@ mkEquivSoPs (new_sym, old_sym1, old_sym2) trm@(Term ms, k1, _) =
   , mkOrigTerms (old_sym1,old_sym2) trm
   )
 
+---------------------------------------------------------------
+--- 4. Peeling off first/last known elements of a slice-sum ---
+---------------------------------------------------------------
+
+peelOffSumsFP :: M.Map Symbol (SoP Symbol) -> SoP Symbol -> (Bool, SoP Symbol)
+peelOffSumsFP equivs sop
+  | hasPeelableSums sop =
+  case peelOffSums equivs sop of
+    (False, _)   -> (False, sop)
+    (True, sop') -> -- fix point
+      let (_, sop'') = peelOffSumsFP equivs sop'
+      in  (True, sop'')
+  where
+    hasPeelableSums = any hasPeelableSumSym . S.toList . free
+    hasPeelableSumSym (Sum nm beg end) =
+      isJust (M.lookup (Idx nm beg) equivs) ||
+      isJust (M.lookup (Idx nm end) equivs)
+    hasPeelableSumSym _ = False
+--
+peelOffSumsFP _ sop = (False, sop)
+
+
+peelOffSums :: M.Map Symbol (SoP Symbol) -> SoP Symbol -> (Bool, SoP Symbol)
+peelOffSums equivs sop = do
+  case foldl peelTerm Nothing (M.toList (getTerms sop)) of
+    Nothing -> (False, sop)
+    Just (old_term_sop, new_sop) ->
+      (True, (sop .-. old_term_sop) .+. new_sop)
+  where
+    peelTerm acc@(Just{}) _ = acc
+    peelTerm Nothing (t,k)  =
+      let mres = foldl peelSymb Nothing $ MS.toOccurList $ getTerm t
+      in  case mres of
+            Nothing -> Nothing
+            Just (sop_sym, sum_sym) ->
+              let ms'= MS.delete sum_sym $ getTerm t
+                  sop' = sop_sym .*. term2SoP (Term ms') k
+              in  Just (term2SoP t k, sop')
+    peelSymb acc@(Just{}) _ = acc
+    peelSymb Nothing (sym@(Sum nm beg end), 1) =
+    -- ^ ToDo: extend for any multiplicity >= 1
+      let mfst_el = M.lookup (Idx nm beg) equivs
+          mlst_el = M.lookup (Idx nm end) equivs
+      in case (mfst_el, mlst_el) of
+           (Just fst_el, Nothing) ->
+             let new_sum = Sum nm (beg .+. int2SoP 1) end
+             in  Just (fst_el .+. sym2SoP new_sum, sym)
+           (Nothing, Just lst_el) ->
+             let new_sum = Sum nm beg (end .-. int2SoP 1)
+             in  Just (lst_el .+. sym2SoP new_sum, sym)
+           (Just fst_el, Just lst_el) ->
+             let new_sum = Sum nm (beg .+. int2SoP 1) (end .-. int2SoP 1)
+             in  Just (fst_el .+. lst_el .+. sym2SoP new_sum, sym)
+           (Nothing, Nothing) -> Nothing
+    peelSymb Nothing _ = Nothing
+        
 ------------------------------------------
 --- Various Low-Level Helper Functions ---
 ------------------------------------------
@@ -275,11 +335,17 @@ hasPow :: Symbol -> Bool
 hasPow (Pow _) = True
 hasPow _ = False
 
+hasSum :: Symbol -> Bool
+hasSum (Sum{}) = True
+hasSum _ = False
+
+hasIdx :: Symbol -> Bool
+hasIdx (Idx {}) = True
+hasIdx (Mdf {}) = True
+hasIdx _ = False
+
 hasIdxOrSum :: Symbol -> Bool
-hasIdxOrSum (Sum {}) = True
-hasIdxOrSum (Idx {}) = True
-hasIdxOrSum (Mdf {}) = True
-hasIdxOrSum _ = False
+hasIdxOrSum x = hasIdx x || hasSum x
 
 hasMon :: S.Set Property -> Maybe MonDir
 hasMon props
@@ -298,7 +364,7 @@ combineSamePow (q,tab) (b, sop) =
         if (q `mod` b) /= 0
          then (q, sop)
          else let (non_pow_b, pow_b_of_q) = getPowOfFactor b q
-                  comb_sop = (ctSoP pow_b_of_q) .+. sop
+                  comb_sop = (int2SoP pow_b_of_q) .+. sop
               in  (non_pow_b, comb_sop)
       sop'' = maybe sop' (.+. sop') $ M.lookup b tab 
   in  (q', M.insert b sop'' tab)
@@ -315,9 +381,9 @@ getPowOfFactor q b =
 
 
 
----------------------------------------------
---- Some Thinking but the code is garbage ---
----------------------------------------------
+---------------------------------------------------
+--- Some Thinking but the code below is garbage ---
+---------------------------------------------------
 
 
 -- | this function is inteneded to do most of the work:
@@ -333,33 +399,13 @@ findSymbol sop
     (s:_) <- S.toList fvs = do
   let r = Range { lowerBound = S.singleton zeroSoP
                 , rangeMult = 1
-                , upperBound = S.singleton (ctSoP 1)
+                , upperBound = S.singleton (int2SoP 1)
                 }
   pure (sop, Just (s, r))
 -- the default case conservatively fails
 findSymbol sop =
   pure (sop, Nothing)
 
-
--- | Meaning of first integral argument:
---     0 -> treat pows and recurse with 1
---     1 -> tream precise simplifications of sum of slices, recurse with 2
---     2 -> treat precise simplifications of pealing, recurse with 3
---     3 -> refine ranges based on monotonicity, i.e.,
---				t1*a[ind_1] - t1*a[ind_2]
---     4 -> refine ranges based on sum of slices
---              t1 * Sum(a[slc1])
---     5 -> defer to the Fourier-Motzkin
-plan :: (Expression e, Ord e) => S.Set Symbol -> Integer -> SoP Symbol -> 
-              AlgM e (SoP Symbol)
-plan fvs 0 sop
-  | pows <- mapMaybe mpowAsTup (S.toList fvs),
-    not (null pows) =
-  simplifyPow sop
-plan fvs 0 sop = plan fvs 1 sop
--- default case: nothing to do.
-plan _ _ sop =
-  pure sop
 
 
 {--
