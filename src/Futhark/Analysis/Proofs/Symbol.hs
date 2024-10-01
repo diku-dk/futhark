@@ -31,6 +31,15 @@ data Symbol
   | Recurrence
   deriving (Show, Eq, Ord)
 
+infixr 4 :<
+infixr 4 :<=
+infixr 4 :>
+infixr 4 :>=
+infixr 4 :==
+infixr 4 :/=
+infixr 3 :&&
+infixr 2 :||
+
 data Property
   deriving (Show, Eq, Ord)
 
