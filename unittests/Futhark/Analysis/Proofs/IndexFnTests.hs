@@ -182,12 +182,28 @@ tests =
         ),
       mkTest
         "tests/indexfn/part3indices.fut"
-        ( withDebug $ \(i, n, _, _) ->
-            IndexFn
-              { iterator = Forall i (Iota (sHole n)),
-                body =
-                  cases [(Bool True, int2SoP 0)]
-              }
+        ( pure $ \(i, n, cs, j) ->
+            let cs_i = sym2SoP $ Idx (Hole cs) (sHole i)
+                cs_j = sym2SoP $ Idx (Hole cs) (sHole j)
+             in IndexFn
+                  { iterator = Forall i (Iota (sHole n)),
+                    body =
+                      cases
+                        [ ( (cs_i :/= int2SoP 1) :&& (cs_i :== int2SoP 2),
+                            int2SoP (-1)
+                              .+. sym2SoP (LinComb j (int2SoP 0) (sHole n .-. int2SoP 1) (Indicator (cs_j :== int2SoP 1)))
+                              .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (cs_j :== int2SoP 2)))
+                          ),
+                          ( (cs_i :== int2SoP 1) :&& (cs_i :/= int2SoP 2),
+                            int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (cs_j :== int2SoP 1)))
+                          ),
+                          ( (cs_i :/= int2SoP 1) :&& (cs_i :/= int2SoP 2),
+                            sHole i
+                              .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (cs_j :== int2SoP 1)))
+                              .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (cs_j :== int2SoP 2)))
+                          )
+                        ]
+                  }
         )
     ]
   where
@@ -216,7 +232,8 @@ tests =
         Just actual -> do
           s <- unify expected actual
           case s of
-            Nothing -> pure $ Just (actual, expected)
+            Nothing ->
+              Just <$> renameSame actual expected
             Just s' -> do
               e <- subIndexFn s' expected
               Just <$> renameSame actual e

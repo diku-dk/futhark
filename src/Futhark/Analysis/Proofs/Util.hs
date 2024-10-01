@@ -6,6 +6,7 @@ import Data.Maybe (fromJust)
 import Debug.Trace (trace)
 import Futhark.Util.Pretty (Doc, Pretty, docString, pretty, prettyString, (<+>))
 import Language.Futhark (VName (VName))
+import Futhark.SoP.SoP (SoP, numTerms, term2SoP, sopFromList, sopToList)
 
 prettyName :: VName -> Doc ann
 prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
@@ -35,3 +36,25 @@ partitions k xs
       x <- partitions (k - 1) (xs \\ s)
       [s : x]
   | otherwise = []
+
+-- Pair each term in `x` with subterms of `y`, in all possible ways such that
+-- all terms in `x` and all terms in `y` are paired.
+-- (Analogously, consider terms in `x` to be bins and terms in `y` to be balls.
+--  Generate all allocations of balls into bins such that no bin is empty.)
+-- For example, x = h1 + h2 and y = a + b + c pairs as follows
+-- [[(h1, a), (h2, b+c)],
+--  [(h1, a+b), (h2, c)],
+--  [(h1, a+c), (h2, b)],
+--  ... permutations where h1 and h2 are switched
+-- ]
+allocateTerms :: (Ord u) => SoP u -> SoP u -> [[(SoP u, SoP u)]]
+allocateTerms x y
+  | k <= numTerms y = do
+      partition <- partitions k ys
+      pure $
+        zipWith (\t ts -> (uncurry term2SoP t, sopFromList ts)) xs partition
+  | otherwise = mempty
+  where
+    k = numTerms x
+    xs = sopToList x
+    ys = sopToList y

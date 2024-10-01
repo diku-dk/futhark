@@ -105,16 +105,25 @@ class (Renameable v) => Unify v u where
   -- Unification for quantified formulae, 1993.
   -- Check whether x is a bound variable by `x >= k`.
   unify_ :: VName -> v -> v -> MaybeT IndexFnM (Replacement u)
+
+  -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
+  --                  = {rename(e) ~= rename(e')}.
   unify :: v -> v -> IndexFnM (Maybe (Substitution u))
-  unify e e' = runMaybeT $ do
-    -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
-    --                  = {rename(e) ~= rename(e')}.
-    k <- newNameFromString "k"
-    vns <- getNameSource
-    a <- rename vns e
-    b <- rename vns e'
-    s <- unify_ k a b
-    pure $ Substitution {mapping = s, vns = vns}
+  unify = renameAnd unify_
+
+renameAnd ::
+  (MonadFreshNames m, Renameable t1, Renameable t2) =>
+  (VName -> t1 -> t2 -> MaybeT m (Replacement u)) ->
+  t1 ->
+  t2 ->
+  m (Maybe (Substitution u))
+renameAnd unifier x y = runMaybeT $ do
+  k <- newNameFromString "k"
+  vns <- getNameSource
+  a <- rename vns x
+  b <- rename vns y
+  s <- unifier k a b
+  pure $ Substitution {mapping = s, vns = vns}
 
 instance Renameable VName where
   rename_ _ tau x = pure $ M.findWithDefault x x tau
@@ -154,7 +163,6 @@ unifies_ ::
     Unify v u,
     Unify u u,
     Ord u,
-    Pretty u,
     Hole u
   ) =>
   VName ->
@@ -171,19 +179,13 @@ unifies ::
     Unify v u,
     Unify u u,
     Ord u,
-    Pretty u,
     Hole u
   ) =>
   [(v, v)] ->
   IndexFnM (Maybe (Substitution u))
-unifies us = runMaybeT $ do
-  let (as, bs) = unzip us
-  k <- newNameFromString "k"
-  vns <- getNameSource
-  as' <- rename vns as
-  bs' <- rename vns bs
-  s <- unifies_ k (zip as' bs')
-  pure $ Substitution {mapping = s, vns = vns}
+unifies us =
+  let (xs, ys) = unzip us
+  in renameAnd (\k as bs -> unifies_ k (zip as bs)) xs ys
 
 unifyAnyPerm ::
   ( Replaceable v u,
@@ -191,7 +193,6 @@ unifyAnyPerm ::
     Unify v u,
     Unify u u,
     Ord u,
-    Pretty u,
     Hole u
   ) =>
   VName ->
@@ -208,7 +209,6 @@ instance
   ( Replaceable u u,
     Unify u u,
     Hole u,
-    Pretty u,
     Ord u
   ) =>
   Unify (Term u, Integer) u
@@ -238,7 +238,6 @@ instance
   ( Replaceable u u,
     Unify u u,
     Ord u,
-    Pretty u,
     Hole u
   ) =>
   Unify (SoP u) u

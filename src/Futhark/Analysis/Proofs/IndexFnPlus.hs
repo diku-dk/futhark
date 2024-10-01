@@ -2,15 +2,16 @@
 
 module Futhark.Analysis.Proofs.IndexFnPlus where
 
-import Control.Monad (guard)
+import Control.Monad (foldM, guard, msum)
+import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus (repVName)
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshName, unifies_)
-import Futhark.Analysis.Proofs.Util (prettyName)
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshName, unifies_, Hole)
+import Futhark.Analysis.Proofs.Util (allocateTerms, prettyName)
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName, newNameFromString)
 import Futhark.SoP.SoP (SoP, int2SoP, justConstant, sopFromList, sopToLists, sym2SoP, (.*.), (.+.), (.-.))
@@ -150,15 +151,22 @@ instance Unify (Cases Symbol (SoP Symbol)) Symbol where
       xs = NE.toList cs1
       ys = NE.toList cs2
 
--- XXX we require that index function quantifiers (indexing variables) are unique!
 instance Unify IndexFn Symbol where
-  unify_ k (IndexFn Empty body1) (IndexFn Empty body2) =
-    unify_ k body1 body2
-  unify_ k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j dom2) body2) = do
-    s <- unify_ k (Hole i) (Var j)
-    s' <- (s <>) <$> unify_ k (repDomain s dom1) (repDomain s dom2)
-    (s' <>) <$> unify_ k (repCases s' body1) (repCases s' body2)
-  unify_ _ _ _ = fail "Incompatible iterators"
+  unify_ = unifyIndexFnWith unify_
+
+unifyIndexFnWith ::
+  (VName -> Cases Symbol (SoP Symbol) -> Cases Symbol (SoP Symbol) -> MaybeT IndexFnM (Replacement Symbol)) ->
+  VName ->
+  IndexFn ->
+  IndexFn ->
+  MaybeT IndexFnM (Replacement Symbol)
+unifyIndexFnWith unifyBody k (IndexFn Empty body1) (IndexFn Empty body2) =
+  unifyBody k body1 body2
+unifyIndexFnWith unifyBody k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j dom2) body2) = do
+  s <- unify_ k (Hole i) (Var j)
+  s' <- (s <>) <$> unify_ k (repDomain s dom1) (repDomain s dom2)
+  (s' <>) <$> unifyBody k (repCases s' body1) (repCases s' body2)
+unifyIndexFnWith _ _ _ _ = fail "Incompatible iterators"
 
 -------------------------------------------------------------------------------
 -- Index function substitution.
@@ -206,7 +214,7 @@ subst' _ _ _ = undefined
 -- Index function normalization.
 -------------------------------------------------------------------------------
 normalizeIndexFn :: IndexFn -> IndexFnM IndexFn
-normalizeIndexFn fn = allCasesAreConstants fn >>= rewritePrefixSum
+normalizeIndexFn = allCasesAreConstants
 
 allCasesAreConstants :: IndexFn -> IndexFnM IndexFn
 allCasesAreConstants v@(IndexFn _ (Cases ((Bool True, _) NE.:| []))) = pure v
@@ -222,54 +230,3 @@ allCasesAreConstants (IndexFn it (Cases cs))
       -- tell ["Using simplification rule: integer-valued cases"]
       pure $ IndexFn it $ Cases (NE.singleton (Bool True, sumOfIndicators))
 allCasesAreConstants v = pure v
-
-rewritePrefixSum :: IndexFn -> IndexFnM IndexFn
--- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
---    | i == b => e1              (e1 may depend on i)
---    | i /= b => y[i-1] + e2     (e2 may depend on i)
---
--- e2 is a SoP with terms e2_0, ..., e2_l. Each term is a constant,
--- an indexing statement or an indicator of an indexing statement.
--- XXX Is this condition necessary in the revised system?
--- _______________________________________________________________
--- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
---    e1{b/i} + (Σ_{j=b+1}^i e2_0{j/i}) + ... + (Σ_{j=b+1}^i e2_l{j/i})
-rewritePrefixSum indexfn@(IndexFn (Forall i dom) (Cases cs))
-  | [(p1, e1), (p2, recur)] <- NE.toList cs,
-    Just e2 <- justRecurrencePlusSoP recur = do
-      let b = domainSegStart dom
-      s_c <-
-        unify
-          ( cases
-              [ (sym2SoP (Var i) :== b, e1),
-                (sym2SoP (Var i) :/= b, e2)
-              ]
-          )
-          (cases [(p1, e1), (p2, e2)])
-      case s_c :: Maybe (Substitution Symbol) of
-        Nothing -> pure indexfn
-        Just _ -> do
-          -- debugM $ "MATCHED rewritePrefixSum\n" <> prettyString indexfn
-          j <- newNameFromString "j"
-          let e1_b = rep (mkRep i b) e1
-          let e2_j = rep (mkRep i (sym2SoP $ Var j)) e2
-          let e2_sum = applyLinCombRule j (b .+. int2SoP 1) (sym2SoP $ Var i) e2_j
-          let res =
-                IndexFn
-                  { iterator = Forall i dom,
-                    body = cases [(Bool True, e1_b .+. e2_sum)]
-                  }
-          -- debugM $ "=> " <> prettyString res
-          pure res
-  where
-    -- Returns the argument SoP without its recurrence term, if it is
-    -- on the form `Recurrence + x` where x does not contain Recurrence
-    -- anywhere. Otherwise returns Nothing.
-    justRecurrencePlusSoP sop
-      | ([_rec], other_terms) <- L.partition (== ([Recurrence], 1)) xs = do
-          guard $ not (any ((Recurrence `elem`) . fst) other_terms)
-          Just . sopFromList $ other_terms
-      where
-        xs = sopToLists sop
-    justRecurrencePlusSoP _ = Nothing
-rewritePrefixSum indexfn = pure indexfn
