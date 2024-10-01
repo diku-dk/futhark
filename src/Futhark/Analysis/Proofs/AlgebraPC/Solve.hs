@@ -16,8 +16,18 @@ import Futhark.Analysis.Proofs.AlgebraPC.Algebra
 -- import Language.Futhark (VName)
 import qualified Futhark.SoP.FourierMotzkin as FM
 import Futhark.SoP.Monad
+import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap)
 -- import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 
+simplify :: (Expression e, Ord e) =>
+  SoP Symbol -> AlgM e (SoP Symbol)
+simplify = astMap m
+  where
+    m =
+      ASTMapper
+        { mapOnSymbol = pure,
+          mapOnSoP = simplifyLevel
+        }
 
 simplifyLevel :: (Expression e, Ord e) => SoP Symbol -> AlgM e (SoP Symbol)
 simplifyLevel sop0 = do

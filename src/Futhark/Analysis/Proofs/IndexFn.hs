@@ -12,7 +12,7 @@ import Futhark.MonadFreshNames
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName), lookupUntransPE)
 import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP)
-import Futhark.Util.Pretty (Doc, Pretty, docString, pretty, prettyString)
+import Futhark.Util.Pretty (Pretty, docString, pretty)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 
@@ -43,6 +43,9 @@ cases = Cases . NE.fromList
 
 casesToList :: Cases a b -> [(a, b)]
 casesToList (Cases cs) = NE.toList cs
+
+getCase :: Int -> Cases a b -> (a, b)
+getCase n (Cases cs) = NE.toList cs !! n
 
 domainSegStart :: Domain -> SoP Symbol
 domainSegStart (Iota _) = int2SoP 0

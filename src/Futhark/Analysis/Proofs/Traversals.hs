@@ -3,6 +3,7 @@ module Futhark.Analysis.Proofs.Traversals where
 import Futhark.Analysis.Proofs.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.SoP.SoP (SoP, int2SoP, sopToLists, sym2SoP, (.*.), (.+.))
+import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 
 data ASTMapper a m = ASTMapper
   { mapOnSymbol :: a -> m a,
@@ -58,3 +59,14 @@ instance ASTMappable Symbol (Cases Symbol (SoP Symbol)) where
     ps' <- mapM (astMap m) ps
     qs' <- mapM (astMap m) qs
     pure . cases $ zip ps' qs'
+
+instance ASTMappable Algebra.Symbol Algebra.Symbol where
+  astMap m (Algebra.Var x) = mapOnSymbol m $ Algebra.Var x
+  astMap m (Algebra.Idx vn i) = mapOnSymbol m . Algebra.Idx vn =<< astMap m i
+  astMap m (Algebra.Mdf dir vn lb ub) =
+    mapOnSymbol m =<< Algebra.Mdf dir vn <$> astMap m lb <*> astMap m ub
+  astMap m (Algebra.Sum vn lb ub) =
+    mapOnSymbol m =<< Algebra.Sum vn <$> astMap m lb <*> astMap m ub
+  astMap m (Algebra.Pow (c, x)) =
+    mapOnSymbol m . curry Algebra.Pow c =<< astMap m x
+  astMap _ (Algebra.Hole _) = undefined -- Cosmin said he would remove Hole so leaving undefined.

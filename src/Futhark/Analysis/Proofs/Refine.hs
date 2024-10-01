@@ -14,6 +14,9 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, justSym, sym2SoP, (.-.))
 import Futhark.SoP.SoP qualified as SoP
 
+
+querySolver indexfn query = undefined
+
 -- Note that this does not recurse.
 refineSymbol :: Symbol -> IndexFnM Symbol
 refineSymbol symbol = case symbol of
@@ -110,8 +113,6 @@ refineIndexFn simplify (IndexFn it xs) = do
       vs' <- mapM refineCase (zip ps vs)
       cases <$> mergeEquivCases (zip ps vs')
 
-    -- TODO make use of fact that cases are considered sequentially,
-    -- so can assume negation of previous cases?
     refineCase :: (Symbol, SoP Symbol) -> IndexFnM (SoP Symbol)
     refineCase (p, v)
       | Just rel <- toRel p =
