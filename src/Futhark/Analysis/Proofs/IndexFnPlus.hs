@@ -14,7 +14,7 @@ import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName)
 import Futhark.SoP.SoP (SoP, int2SoP, justConstant, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.SoP.SoP qualified as SoP
-import Futhark.Util.Pretty (Pretty (pretty), commasep, parens, stack, (<+>))
+import Futhark.Util.Pretty (Pretty (pretty), commasep, parens, prettyString, stack, (<+>))
 import Language.Futhark (VName)
 
 instance Eq Domain where
@@ -172,12 +172,12 @@ unifyIndexFnWith _ _ _ _ = fail "Incompatible iterators"
 -- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
 subst :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
 subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
-  -- debugM
-  --   ( "🎭 substitute\n"
-  --       <> prettyBinding x for
-  --       <> "\ninto\n"
-  --       <> prettyString into
-  --   )
+  debugM
+    ( "🎭 substitute " <> prettyString x <> " for\n"
+        <> prettyString for
+        <> "\ninto\n"
+        <> prettyString into
+    )
   i' <- sym2SoP . Var <$> newName i
   vns <- getNameSource
   for' <- rename vns for
