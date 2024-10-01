@@ -14,6 +14,9 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, justSym, sym2SoP, (.-.))
 import Futhark.SoP.SoP qualified as SoP
 
+
+querySolver indexfn query = undefined
+
 -- Note that this does not recurse.
 refineSymbol :: Symbol -> IndexFnM Symbol
 refineSymbol symbol = case symbol of

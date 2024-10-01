@@ -143,6 +143,7 @@ library
       Futhark.Analysis.Proofs.Convert
       Futhark.Analysis.Proofs.IndexFn
       Futhark.Analysis.Proofs.IndexFnPlus
+      Futhark.Analysis.Proofs.Query
       Futhark.Analysis.Proofs.Refine
       Futhark.Analysis.Proofs.Rewrite
       Futhark.Analysis.Proofs.Rule
