@@ -110,8 +110,6 @@ refineIndexFn simplify (IndexFn it xs) = do
       vs' <- mapM refineCase (zip ps vs)
       cases <$> mergeEquivCases (zip ps vs')
 
-    -- TODO make use of fact that cases are considered sequentially,
-    -- so can assume negation of previous cases?
     refineCase :: (Symbol, SoP Symbol) -> IndexFnM (SoP Symbol)
     refineCase (p, v)
       | Just rel <- toRel p =
