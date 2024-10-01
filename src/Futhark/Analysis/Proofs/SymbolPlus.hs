@@ -126,8 +126,8 @@ instance Unify Symbol Symbol where
   unify_ _ (Var x) t | Var x == t = pure mempty
   -- XXX Are the checks on bound vars redundant with holes?
   unify_ k (Hole x) t
-    | x >= k = fail "2.b.i"
-    | x `S.member` fvs || any (>= k) fvs = fail "2.b.ii"
+    | x >= k = error "2.b.i"
+    | x `S.member` fvs || any (>= k) fvs = error "2.b.ii"
     | otherwise = pure $ addRep x t mempty -- 2.b.iii. Variable elimination.
     where
       fvs = fv t
