@@ -10,6 +10,8 @@ import Futhark.SoP.Monad (addRange)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, justSym, (.-.))
 import Futhark.SoP.SoP qualified as SoP
+import Futhark.SoP.FourierMotzkin (($>$), ($<$))
+import Control.Monad (when)
 
 
 -- TODO implement FromSoP (AlgebraPC.Symbol) (SoP Symbol)
@@ -47,6 +49,14 @@ rollbackAlgEnv computation = do
   pure res
 
 addPred :: Symbol -> IndexFnM ()
+addPred (x :/= y) = do
+  -- Express not equal as one is greater than the other.
+  -- Figure out which one.
+  x_is_greater <- x $>$ y
+  if x_is_greater then addRel (x :>: y)
+  else do
+    y_is_greater <- x $<$ y
+    when y_is_greater $ addRel (x :<: y)
 addPred p | Just rel <- toRel p = addRel rel
 addPred _ = pure ()
 
@@ -85,7 +95,6 @@ toRel (x :< y) = Just $ x :<: y
 toRel (x :> y) = Just $ x :>: y
 toRel (x :>= y) = Just $ x :>=: y
 toRel (x :== y) = Just $ x :==: y
--- toRel (x :/= y) = Just $ x :/=: y -- TODO
 toRel (x :&& y) = (:&&:) <$> toRel x <*> toRel y
 toRel (x :|| y) = (:||:) <$> toRel x <*> toRel y
 toRel _ = Nothing
