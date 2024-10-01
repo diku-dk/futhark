@@ -8,6 +8,7 @@ import Data.FileEmbed
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Futhark.CLI.Fmt qualified as Fmt
+import Futhark.CLI.Fmt.Printer qualified as Printer
 import Futhark.CLI.Misc(mainTokens)
 import Language.Futhark
 import Language.Futhark.Parser
@@ -43,7 +44,7 @@ fmtParseTest (file, bs) =
 
     result = do
       t <- first (const "Error: Can not parse file as UTF-8.") $ T.decodeUtf8' bs
-      succeeded (Fmt.fmtText file) (parseFutharkWithComments file) t
+      succeeded (Printer.fmtText file) (parseFutharkWithComments file) t
 
 -- | Checks that the AST resulting from parsing a file is the same before and after
 --   formatting

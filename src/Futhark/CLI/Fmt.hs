@@ -1,3 +1,4 @@
+-- | @futhark fmt@
 module Futhark.CLI.Fmt (main) where
 
 import Futhark.CLI.Fmt.Printer

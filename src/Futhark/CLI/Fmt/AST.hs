@@ -1,5 +1,6 @@
 module Futhark.CLI.Fmt.AST (
-
+    Fmt,
+  
     -- functions for building fmt 
     nil, 
     nest, 
@@ -8,6 +9,13 @@ module Futhark.CLI.Fmt.AST (
     line,
     comment,
     group,
+    sep,
+    brackets,
+    braces,
+    parens,
+    (<+>),
+    (</>),
+    colon,
 
     -- functions for manipulating fmt
     flatten,
@@ -16,15 +24,20 @@ module Futhark.CLI.Fmt.AST (
     ) where 
 
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
-import qualified Data.Text.Lazy.Lens as T
 
-infixr 6 :<> 
+infixr 6 :<>
+infixr 6 <+> 
+infixr 6 </> 
 infixr 5 :<|>
 
+-- | Invariant: Should not contain newline characters.
 type Comment = T.Text
 type Line = T.Text
 
+-- | The result of formatting is a list of lines.  This is useful as
+-- we might want to modify every line of a prettyprinted
+-- sub-expression, to e.g. prepend indentation.
+-- Note: this is not applicable but I will keep this here for now.
 data Fmt = Nil
          | Fmt :<> Fmt
          | Nest Int Fmt
@@ -94,3 +107,31 @@ pretty = layout
           -- always choose the first format for now
           -- TO DO: Have a better way to choose layout
           layout (x :<|> _) = layout x
+
+
+brackets :: Fmt -> Fmt
+brackets fmt = code "[" <> fmt <> code "]"
+
+braces :: Fmt -> Fmt
+braces fmt = code "{" <> fmt <> code "}"
+
+parens :: Fmt -> Fmt
+parens fmt = code "(" <> fmt <> code ")"
+
+sep :: Fmt -> [Fmt] -> Fmt
+sep _s [] = nil
+sep _s [x] = x
+sep s (x:xs) = x <> s <> sep s xs 
+
+(<+>) :: Fmt -> Fmt -> Fmt
+Nil <+> y = y
+x <+> Nil = x
+x <+> y = x <> space <> y
+
+(</>) :: Fmt -> Fmt -> Fmt
+Nil </> y = y
+x </> Nil = x
+x </> y = x <> line <> y
+
+colon :: Fmt
+colon = code ":"
