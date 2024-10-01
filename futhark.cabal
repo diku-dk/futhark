@@ -158,6 +158,7 @@ library
       Futhark.CLI.Doc
       Futhark.CLI.Eval
       Futhark.CLI.Fmt
+      Futhark.CLI.Fmt.Printer
       Futhark.CLI.Fmt.AST
       Futhark.CLI.HIP
       Futhark.CLI.Literate

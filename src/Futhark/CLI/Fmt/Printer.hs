@@ -1,5 +1,5 @@
 -- | @futhark fmt@
-module Futhark.CLI.Fmt (main, fmtText) where
+module Futhark.CLI.Fmt.Printer (fmtText) where
 
 import Control.Monad
 import Control.Monad.State.Strict
@@ -7,17 +7,13 @@ import Data.Char (chr)
 import Data.Foldable
 import Data.List qualified as L
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
 import Futhark.Util.Loc
-import Futhark.Util.Options
 import Language.Futhark
 import Language.Futhark.Parser
   ( Comment (..),
     SyntaxError (..),
     parseFutharkWithComments,
   )
-import System.Exit
-import System.IO
 
 -- import Debug.Trace
 {-
@@ -834,22 +830,6 @@ fmtProg (Prog dc decs) = do
   cs <- gets comments
   modify (\s -> s {comments = []})
   pure $ dc' <> decs' <> map commentText cs
-
--- | Run @futhark fmt@.
-main :: String -> [String] -> IO ()
-main = mainWithOptions () [] "program" $ \args () ->
-  case args of
-    [file] -> Just $ do
-      pres <- parseFutharkWithComments file <$> T.readFile file
-      case pres of
-        Left (SyntaxError loc err) -> do
-          T.hPutStr stderr $ locText loc <> ":\n" <> prettyText err
-          exitFailure
-        Right (prog, cs) -> do
-          -- let number i l = T.pack $ printf "%4d %s" (i :: Int) l
-          let fmt = evalState (fmtProg prog) (FmtState {comments = cs})
-          T.hPutStr stdout $ T.unlines fmt
-    _ -> Nothing
 
 fmtText :: String -> T.Text -> Either SyntaxError T.Text
 fmtText fName fContent = do
