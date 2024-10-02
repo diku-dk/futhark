@@ -1,3 +1,0 @@
--- Basic/naive use of ascription.
--- ==
--- input {} output { 2 }

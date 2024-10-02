@@ -1,4 +1,0 @@
--- A dimension parameter using a name bound in the module type.
--- ==
--- input { 2i64 } output { [0i64,1i64] }
--- input { 1i64 } error:

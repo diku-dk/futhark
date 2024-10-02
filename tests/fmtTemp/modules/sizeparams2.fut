@@ -1,3 +1,0 @@
--- Size parameters in a parametric type.
--- ==
--- input { 1 2 } output { [[0,0]] }

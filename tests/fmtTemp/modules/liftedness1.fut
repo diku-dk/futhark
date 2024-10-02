@@ -1,3 +1,0 @@
--- Trying to sneak more constraints through a size-lifted type!
--- ==
--- error: val f

@@ -1,3 +1,0 @@
--- Multiple includes of the same thing is harmless, and should work.
--- ==
--- input { 1 } output { 2 3 }

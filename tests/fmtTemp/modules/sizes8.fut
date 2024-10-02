@@ -1,3 +1,0 @@
--- ==
--- entry: test
--- random input { } output { 6i64 }

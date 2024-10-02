@@ -1,3 +1,0 @@
--- Based on #1741
--- ==
--- error: type t = i64

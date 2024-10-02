@@ -1,1 +1,0 @@
--- Signature with abstract type.

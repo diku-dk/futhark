@@ -1,4 +1,0 @@
--- A functor with a signature containing an abstract type.
--- ==
--- input { [1,2,3] [4,5,6] [1f32,2f32,3f32] [4f32,5f32,6f32] }
--- output { 315 315f32 }

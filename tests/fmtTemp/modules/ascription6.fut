@@ -1,3 +1,0 @@
--- Multiple levels of ascription.
--- ==
--- input {} output { 4 2 }

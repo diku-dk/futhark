@@ -1,4 +1,0 @@
--- Can we overload the minus operator (might conflict with prefix
--- negation).
--- ==
--- input { 2 3 } output { 5 }

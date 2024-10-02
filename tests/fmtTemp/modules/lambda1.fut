@@ -1,3 +1,0 @@
--- More fancy use of module-level lambdas.
--- ==
--- input { 9 } output { 3 }

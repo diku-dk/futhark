@@ -1,6 +1,0 @@
--- Make sure a type from an opened module inside a functor is not
--- abstract.
---
--- ==
--- input { }
--- output { 2 }

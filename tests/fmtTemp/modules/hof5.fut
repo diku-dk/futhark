@@ -1,4 +1,0 @@
--- We require that some type is non-functional, but that type refers
--- to a lifted abstract type!
--- ==
--- error: non-lifted

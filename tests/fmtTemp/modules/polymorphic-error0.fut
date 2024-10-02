@@ -1,3 +1,0 @@
--- Insufficient polymorphism.
--- ==
--- error: pair

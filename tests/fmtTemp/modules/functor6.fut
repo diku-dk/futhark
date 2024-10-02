@@ -1,4 +1,0 @@
--- Applying a parametric module inside another parametric module.
--- ==
--- input { }
--- output { 2 }

@@ -1,9 +1,0 @@
--- M0.foo() changes meaning inside M1, after the previous declaration of M0
--- is overshadowed.
---
--- ==
--- input {
--- }
--- output {
---  1 1 10
--- }

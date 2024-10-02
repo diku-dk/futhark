@@ -1,3 +1,0 @@
--- Array of tuples polymorphism.
--- ==
--- input { 2i64 } output { [1i64,0i64] [1.0,0.0] [1i64,0i64] }

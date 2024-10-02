@@ -1,5 +1,0 @@
--- Even more Complicated nested modules in parametric modules ought to
--- work.
---
--- ==
--- input { [true,false] } output { [true,false] [0,0] }

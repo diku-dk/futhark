@@ -1,4 +1,0 @@
--- Test for shape declarations inside a parametric module.  (We used
--- to have a bug here.)
--- ==
--- input { } output { [1.0,2.0] [1] }

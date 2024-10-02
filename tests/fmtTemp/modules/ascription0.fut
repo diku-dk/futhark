@@ -1,4 +1,0 @@
--- Basic signature matching without abstract types.
--- ==
--- input { [1,2,3] [4,5,6] }
--- output { 6 15 }

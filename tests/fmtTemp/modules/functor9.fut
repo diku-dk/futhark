@@ -1,3 +1,0 @@
--- Instantiating a parametric module twice should go well.
--- ==
--- input { 2 true } output { 2 true }

@@ -1,3 +1,0 @@
--- Keeping track of when names have to be qualified.
--- ==
--- input { 1 } output { 3 }

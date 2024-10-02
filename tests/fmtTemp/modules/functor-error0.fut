@@ -1,3 +1,0 @@
--- Error when passing a struct of the wrong signature to a functor.
--- ==
--- error: x.*i32.*f32

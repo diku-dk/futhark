@@ -1,3 +1,0 @@
--- Test that something defined with local is not accessible outside the module.
--- ==
--- input {} output { 1 }

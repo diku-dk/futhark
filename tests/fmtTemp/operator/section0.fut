@@ -1,3 +1,0 @@
--- We can use operator sections anywhere, just like other functions.
--- ==
--- input { 5 3 } output { 2 2 -2 }

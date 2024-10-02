@@ -1,4 +1,0 @@
--- A functor with a closure
--- ==
--- input {}
--- output { 26 }

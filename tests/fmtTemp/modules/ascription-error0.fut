@@ -1,3 +1,0 @@
--- Abstract types must be abstract.
--- ==
--- error: Function body does not have

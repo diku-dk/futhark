@@ -1,4 +1,0 @@
--- Opening a module defining a type is not the same as defining a
--- type.  Confused the type checker at one point.
--- ==
--- input { 2 } output { 2 }

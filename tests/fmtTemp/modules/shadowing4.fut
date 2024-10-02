@@ -1,3 +1,0 @@
--- Shadowing of types should work as expected.
--- ==
--- input { } output { 2 }

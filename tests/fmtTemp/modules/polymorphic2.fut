@@ -1,4 +1,0 @@
--- Polymorphic function in module parameter.
--- ==
--- input { [1,2] [true,false] }
--- output { [1,2,1,2] [true,false,true,false] [2,1] [false,true] }

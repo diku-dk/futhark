@@ -1,3 +1,0 @@
--- Does local open work at all?
--- ==
--- input { 1 } output { 6 }

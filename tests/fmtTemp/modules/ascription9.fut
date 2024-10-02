@@ -1,1 +1,0 @@
--- Size annotations should not mess up module ascription.

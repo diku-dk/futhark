@@ -1,3 +1,0 @@
--- This test fails with a DuplicateDefinition error.
--- ==
--- error: .*Dup.*

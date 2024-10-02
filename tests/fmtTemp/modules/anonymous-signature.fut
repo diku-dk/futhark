@@ -1,3 +1,0 @@
--- Can we match a module with an unnamed signature?
--- ==
--- input { 5 } output { 7 }

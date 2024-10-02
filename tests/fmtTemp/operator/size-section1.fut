@@ -1,1 +1,0 @@
--- Check that sizes are well calculated in right section

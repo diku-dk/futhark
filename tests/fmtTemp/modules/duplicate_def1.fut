@@ -1,5 +1,0 @@
--- The module opens a new environment, which lets us use names again, which were used
--- in a previous scope.
--- ==
--- input { }
--- output { 1 2.0 }

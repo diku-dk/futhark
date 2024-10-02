@@ -1,3 +1,0 @@
--- Being more polymorphic is OK.
--- ==
--- input { 1 2 } output { 1 2 }

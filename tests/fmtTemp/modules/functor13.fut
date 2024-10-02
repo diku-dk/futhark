@@ -1,4 +1,0 @@
--- Complex multiple applications of a parametric module must work.
---
--- ==
--- input { 1 } output { 9 }

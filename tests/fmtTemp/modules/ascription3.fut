@@ -1,3 +1,0 @@
--- Ascription only needs a subtype.
--- ==
--- input { 2 } output { [0,0] }

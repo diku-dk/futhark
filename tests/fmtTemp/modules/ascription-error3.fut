@@ -1,3 +1,0 @@
--- Ascription must respect uniqueness.
--- ==
--- error: \*\[d\]i32

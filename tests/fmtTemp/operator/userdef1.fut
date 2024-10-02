@@ -1,3 +1,0 @@
--- Do user-defined operators have the right precedence?
--- ==
--- input { 2 3 4 } output { 14 }

@@ -1,3 +1,0 @@
--- Higher-order abstract types may not be array elements!
--- ==
--- error: Cannot create array

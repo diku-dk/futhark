@@ -1,3 +1,0 @@
--- A parametric module does not match a module spec.
--- ==
--- error: parametric

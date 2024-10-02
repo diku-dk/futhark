@@ -1,4 +1,0 @@
--- Not OK because the module defines a higher-order type but the
--- module type specifies a zero-order type.
--- ==
--- error: non-lifted

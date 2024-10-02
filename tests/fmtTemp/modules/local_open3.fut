@@ -1,2 +1,0 @@
--- Local open with nested modules, defined elsewhere.
--- ==

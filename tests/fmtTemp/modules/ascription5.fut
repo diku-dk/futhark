@@ -1,5 +1,0 @@
--- Multiple abstract types with the same unqualified name.  This will
--- not work if the type checker simply flattens out all abstract
--- types.
--- ==
--- input { } output { 2 }

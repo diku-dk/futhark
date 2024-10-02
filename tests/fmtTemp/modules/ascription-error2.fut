@@ -1,3 +1,0 @@
--- Opaque signature ascription must hide equality of type.
--- ==
--- error: type

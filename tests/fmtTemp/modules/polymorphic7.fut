@@ -1,3 +1,0 @@
--- Being more polymorphic inside a tuple is OK.
--- ==
--- input { 1 2 } output { 1 2 }

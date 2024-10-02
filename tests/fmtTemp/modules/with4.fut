@@ -1,3 +1,0 @@
--- Refinement of a parametric type.
--- ==
--- input { 2 } output { 2 }

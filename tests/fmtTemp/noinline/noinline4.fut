@@ -1,4 +1,0 @@
--- ==
--- input { 3 [1,2,3] } output { 1 }
--- compiled input { 0 [1,2,3] } error: division by zero
--- structure gpu { SegRed/Apply 1 /Apply 1 }

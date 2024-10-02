@@ -1,2 +1,0 @@
--- Uniqueness stuff.
--- ==

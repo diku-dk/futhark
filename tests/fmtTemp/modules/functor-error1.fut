@@ -1,4 +1,0 @@
--- Ascription of a functor result should be checked, even if the
--- functor is never instantiated.
--- ==
--- error: y

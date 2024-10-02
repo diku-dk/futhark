@@ -1,2 +1,0 @@
--- Local open that involves values of an abstract type.
--- ==

@@ -1,1 +1,0 @@
--- An abstract type that is realised by a nested module.

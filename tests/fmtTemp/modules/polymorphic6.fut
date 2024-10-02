@@ -1,3 +1,0 @@
--- Removing polymorphism with an ascription, but higher order!
--- ==
--- input { 2 } output { 2 }

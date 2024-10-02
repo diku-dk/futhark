@@ -1,3 +1,0 @@
--- A module with abstract types containing size parameters.
--- ==
--- input { 3 } output { 3 }

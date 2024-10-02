@@ -1,3 +1,0 @@
--- A simple polymorphic function in a module type.
--- ==
--- input { 1 false } output { false 1 }

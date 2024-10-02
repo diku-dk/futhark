@@ -1,3 +1,0 @@
--- Cannot refine a type twice.
--- ==
--- error: not an abstract type
