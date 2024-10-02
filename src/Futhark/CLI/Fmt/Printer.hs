@@ -182,7 +182,7 @@ fmtTypeExp (TEVar v loc) = buildFmt loc single multi
 fmtTypeExp (TETuple ts loc) = buildFmt loc single multi
   where
     single = parens . sepSpace (code ",") <$> mapM fmtTypeExp ts
-    multi = parens . sepLine (code ",") <$> mapM fmtTypeExo ts
+    multi = parens . sepLine (code ",") <$> mapM fmtTypeExp ts
 fmtTypeExp (TEParens te loc) = buildFmt loc single multi
   where
     single = parens <$> fmtTypeExp te
@@ -562,7 +562,7 @@ fmtExp (Attr attr e loc) = buildFmt loc single multi
       e' <- fmtExp e
       pure $ attr' <> e'
     multi = single
-fmtExp (AppExp e loc) = buildFmt loc single multi
+fmtExp (AppExp e _loc) = buildFmt e single multi
   where
     single = fmtAppExp e
     multi = single
@@ -585,7 +585,7 @@ fmtQualNameMulti (QualName names name) =
         else sepLine (code ".") (fmtName <$> names) <> code "." 
 
 fmtQualName :: QualName Name -> FmtM Fmt
-fmtQualName n = buildFmt n (pure $ fmtQualNameSingle n) (pure $ fmtQualNameMulti n)
+fmtQualName n = pure $ fmtQualNameSingle n
 
 fmtCase :: UncheckedCase -> FmtM Fmt
 fmtCase (CasePat p e loc) = buildFmt loc single multi
@@ -811,7 +811,7 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
     multi = do
       docs <- fmtDocComment doc
       fmt_attrs <- sep space <$> mapM fmtAttr attrs
-      tparams' <- sep space <$> mapM 
+      tparams' <- sep space <$> mapM fmtTypeParam tparams
       args' <- sep space <$> mapM fmtPat args
       retdecl' <-
         case fmtTypeExp <$> retdecl of
@@ -1043,15 +1043,12 @@ fmtDec (ImportDec path _tb loc) = buildFmt loc single multi
 -- | Does not return residual comments, because these are simply
 -- inserted at the end.
 fmtProg :: UncheckedProg -> FmtM Fmt
-fmtProg p@(Prog dc decs) = buildFmt p single multi
-  where
-    single = do
-      dc' <- fmtDocComment dc
-      decs' <- mconcat <$> mapM fmtDec decs
-      cs <- gets (mconcat . fmap (comment . commentText) . comments)
-      modify (\s -> s {comments = []})
-      pure $ dc' <> decs' <> cs
-    multi = single
+fmtProg (Prog dc decs) =  do
+  dc' <- fmtDocComment dc
+  decs' <- mconcat <$> mapM fmtDec decs
+  cs <- gets (mconcat . fmap (comment . commentText) . comments)
+  modify (\s -> s {comments = []})
+  pure $ dc' <> decs' <> cs
 
 fmtText :: String -> T.Text -> Either SyntaxError T.Text
 fmtText fName fContent = do
@@ -1059,4 +1056,4 @@ fmtText fName fContent = do
   let s = FmtState {comments = cs}
   let e = MultiLine
   let fmt = runIdentity $ evalStateT (runReaderT (fmtProg prog) e) s
-  pure $ pretty fmt
+  pure $ pretty 80 fmt -- The width does nothing currently.

@@ -50,6 +50,12 @@ data Fmt = Nil
          | Fmt :<|> Fmt
          deriving (Eq, Show)
 
+data FmtTxt = Empty
+            | T.Text `Txt` FmtTxt
+            | Int `NewLine` FmtTxt
+            deriving (Eq, Show)  
+                
+
 instance Semigroup Fmt where
     (<>) = (:<>)
 
@@ -99,6 +105,13 @@ flatten fmt =
           flatten' Space = ([], space)
           flatten' (x :<|> _) = flatten' x
 
+pretty :: Int -> Fmt -> T.Text
+pretty w a = layout (best w 0 a) 
+    where layout :: FmtTxt -> T.Text
+          layout Empty = ""
+          layout (t `Txt` res) = t <> layout res 
+          layout (i `NewLine` res) = "\n" <> T.replicate i " " <> layout res
+{-
 pretty :: Fmt -> Line
 pretty = layout 
     where layout :: Fmt -> T.Text
@@ -113,7 +126,29 @@ pretty = layout
           -- always choose the first format for now
           -- TO DO: Have a better way to choose layout
           layout (x :<|> _) = layout x
+-}
 
+best :: Int -> Int -> Fmt -> FmtTxt
+best w k x = be w k [(0,x)]
+
+be :: Int -> Int -> [(Int, Fmt)] -> FmtTxt
+be _w _k [] = Empty
+be w k ((_i,Nil):z) = be w k z
+be w k ((i,x :<> y):z) = be w k ((i,x):(i,y):z)
+be w k ((i,Nest j x):z) = be w k ((i+j,x):z)
+be w k ((_i,Code s):z) = s `Txt` be w (k + T.length s) z
+be w k ((_i,Space):z) = " " `Txt` be w (k + 1) z
+be w _k ((i,Line Nothing):z) = i `NewLine` be w i z
+be w _k ((i,Line (Just a)):z) = a `Txt` (i `NewLine` be w i z)
+be w k ((i,x :<|> y):z) = better w k (be w k ((i,x):z))
+                                     (be w k ((i,y):z))
+
+better :: Int -> Int -> FmtTxt -> FmtTxt -> FmtTxt
+better w k x y = if fits (w-k) x then x else y
+
+-- | Anything fits for now since we do not care.
+fits :: Int -> FmtTxt -> Bool
+fits _w _e = True
 
 brackets :: Fmt -> Fmt
 brackets fmt = code "[" <> fmt <> code "]"
@@ -133,10 +168,7 @@ sepSpace :: Fmt -> [Fmt] -> Fmt
 sepSpace s = sep (s <> space)
 
 sepLine :: Fmt -> [Fmt] -> Fmt
-sepLine s = sep (line <> stdNest s) 
-
-
-
+sepLine s = sep (line <> s)
 
 (<+>) :: Fmt -> Fmt -> Fmt
 Nil <+> y = y
