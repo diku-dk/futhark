@@ -1,14 +1,11 @@
 module Futhark.CLI.Fmt.Printer (fmtText) where
 
 import Futhark.CLI.Fmt.AST
-import Control.Monad
-import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Identity
 import Data.Char (chr)
 import Data.Foldable
-import Data.List qualified as L
 import Data.Text qualified as T
 import Futhark.Util.Loc
 import Language.Futhark
@@ -145,17 +142,6 @@ fmtDocComment (Just (DocComment x _loc)) =
     prefixes (l : ls) = comment ("-- | " <> l) : map (comment . ("-- " <>)) ls
 fmtDocComment Nothing = pure nil
 
-fmtTupleTypeElems :: [UncheckedTypeExp] -> FmtM Fmt
-fmtTupleTypeElems [] = pure nil
-fmtTupleTypeElems [t] = fmtTypeExp t
-fmtTupleTypeElems (t : ts) = buildFmt t single multi
-  where
-    single = do
-      t' <- fmtTypeExp t
-      ts' <- fmtTupleTypeElems ts
-      pure $ t' <> code ", " <> ts'
-    multi = single
-
 fmtRecordTypeFields :: [(Name, UncheckedTypeExp)] -> FmtM Fmt
 fmtRecordTypeFields [] = pure nil
 fmtRecordTypeFields ((name, te) : fs) = do
@@ -193,7 +179,7 @@ fmtTypeExp (TERecord fs loc) = buildFmt loc single multi
     multi = single
 fmtTypeExp (TEArray se te loc) = buildFmt loc single multi -- A array with an size expression
   where
-    single = (<+>) <$> fmtSizeExp se <*> fmtTypeExp te
+    single = (<>) <$> fmtSizeExp se <*> fmtTypeExp te
     multi = single
 -- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
 fmtTypeExp (TEUnique te loc) = buildFmt loc single multi
@@ -279,7 +265,7 @@ fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = buildFmt loc single multi
           <+> e'
 
 fmtAttrAtom :: AttrAtom a -> FmtM Fmt
-fmtAttrAtom a@(AtomName name) = pure $ fmtName name
+fmtAttrAtom (AtomName name) = pure $ fmtName name
 fmtAttrAtom (AtomInt int) = pure $ code $ prettyText int
 
 fmtAttrInfo :: AttrInfo a -> FmtM Fmt
@@ -640,7 +626,7 @@ fmtAppExp (Loop sizeparams pat initexp form loopbody loc) | matchPat pat initexp
           <+> pat'
           <+> form'
           <+> code "do"
-          <+> loopbody'
+          </> loopbody'
     multi = single
 fmtAppExp (Loop sizeparams pat initexp form loopbody loc) = buildFmt loc single multi
   where
@@ -658,24 +644,30 @@ fmtAppExp (Loop sizeparams pat initexp form loopbody loc) = buildFmt loc single 
           <+> initexp' 
           <+> form'
           <+> code "do"
-          <+> loopbody'
+          </> loopbody'
     multi = single
 fmtAppExp (Index e idxs loc) = buildFmt loc single multi
   where
     single = do
       e' <- fmtExp e
       idxs' <- sep (code ",") <$> mapM fmtDimIndex idxs
-      pure $ e' <+> brackets idxs' -- It is important that "[" is connected to its expression.
+      pure $ e' <> brackets idxs' -- It is important that "[" is connected to its expression.
     multi = single
 fmtAppExp (LetPat sizes pat e body loc) = buildFmt loc single multi
   where
-    single = do
+    common = do
       let sizes' = mconcat $ fmtSizeBinder <$> sizes
       pat' <- fmtPat pat
       e' <- fmtExp e
+      pure $ code "let" <+> sizes' <+> pat' <+> code "=" <+> e'
+    single = do
+      fmt <- common
       body' <- letBody body
-      pure $ code "let" <+> sizes' <+> pat' <+> code "=" <+> e' <+> body'
-    multi = single
+      pure $ fmt <+> body'
+    multi = do
+      fmt <- common
+      body' <- letBody body
+      pure $ fmt </> body'
 fmtAppExp (LetFun fname (tparams, params, retdecl, _, e) body loc) = buildFmt loc single multi
   where
     single = do
@@ -695,7 +687,7 @@ fmtAppExp (LetFun fname (tparams, params, retdecl, _, e) body loc) = buildFmt lo
           <+> retdecl'
           <+> code "="
           <+> e'
-          <+> body'
+          </> body'
     multi = single
 fmtAppExp (LetWith dest src idxs ve body loc)
   | dest == src = buildFmt loc singleSame multiSame
@@ -757,7 +749,17 @@ fmtAppExp (If c t f loc) = buildFmt loc single multi
           <+> t'
           <+> code "else"
           <+> f'
-    multi = single
+    multi = do
+      c' <- fmtExp c
+      t' <- fmtExp t
+      f' <- fmtExp f
+      pure $
+        code "if"
+          <+> c'
+          </> code "then"
+          <+> t'
+          </> code "else"
+          <+> f'
 fmtAppExp (Apply f args loc) = buildFmt loc single multi
   where
     single = do
@@ -807,8 +809,7 @@ fmtBinOp bop =
 fmtValBind :: UncheckedValBind -> FmtM Fmt
 fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc) = buildFmt loc single multi
   where
-    single = multi
-    multi = do
+    common = do
       docs <- fmtDocComment doc
       fmt_attrs <- sep space <$> mapM fmtAttr attrs
       tparams' <- sep space <$> mapM fmtTypeParam tparams
@@ -816,19 +817,31 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
       retdecl' <-
         case fmtTypeExp <$> retdecl of
           Just a -> fmap (code ":" <+>) a
-          Nothing -> pure mempty
-      body' <- fmtExp body
+          Nothing -> pure nil
+      let sub' =
+            if null tparams
+            then nil
+            else space <> tparams'
+      let sub =
+            if null args
+            then nil
+            else sub' <> space <> args'
       pure $
         docs
         <> fmt_attrs
         <+> fun
         <+> fmtName name
-        <+> tparams'
-        <+> args'
+        <> sub
         <> retdecl'
         <+> code "="
-        </> nest 2 body'
-        <> line
+    single = do
+      fmt <- common
+      body' <- fmtExp body
+      pure $ fmt <+> body' <> line <> line
+    multi = do
+      fmt <- common
+      body' <- fmtExp body
+      pure $ stdNest (fmt </> body') <> line <> line
     fun =
       case entry of
         Just _ -> code "entry"

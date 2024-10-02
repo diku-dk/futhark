@@ -111,6 +111,14 @@ pretty w a = layout (best w 0 a)
           layout Empty = ""
           layout (t `Txt` res) = t <> layout res 
           layout (i `NewLine` res) = "\n" <> T.replicate i " " <> layout res
+
+isEmpty :: Fmt -> Bool
+isEmpty (Code "") = True
+isEmpty Nil = True
+isEmpty (x :<|> _) = isEmpty x
+isEmpty (x :<> y) = isEmpty x && isEmpty y
+isEmpty _ = False
+
 {-
 pretty :: Fmt -> Line
 pretty = layout 
@@ -171,13 +179,9 @@ sepLine :: Fmt -> [Fmt] -> Fmt
 sepLine s = sep (line <> s)
 
 (<+>) :: Fmt -> Fmt -> Fmt
-Nil <+> y = y
-x <+> Nil = x
 x <+> y = x <> space <> y
 
 (</>) :: Fmt -> Fmt -> Fmt
-Nil </> y = y
-x </> Nil = x
 x </> y = x <> line <> y
 
 colon :: Fmt
