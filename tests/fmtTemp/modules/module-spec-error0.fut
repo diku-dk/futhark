@@ -1,0 +1,3 @@
+-- A mismatched module spec.
+-- ==
+-- error: QUUX

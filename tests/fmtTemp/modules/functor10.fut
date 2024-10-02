@@ -1,0 +1,3 @@
+-- Three nested functors with the same named module type parameter.
+-- ==
+-- input { true } output { true }

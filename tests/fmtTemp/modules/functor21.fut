@@ -1,0 +1,2 @@
+-- Will the abstract type defined in the argument to a parametric
+-- module also be accessible in the resulting module?

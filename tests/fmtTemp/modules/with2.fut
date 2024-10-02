@@ -1,0 +1,3 @@
+-- With of a type in an inner module.
+-- ==
+-- input {} output {2}

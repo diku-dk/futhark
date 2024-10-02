@@ -1,0 +1,3 @@
+-- A dimension parameter using a name bound in the module type.
+-- ==
+-- error: k_ints

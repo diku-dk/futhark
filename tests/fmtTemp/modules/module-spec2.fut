@@ -1,0 +1,3 @@
+-- Higher-order module spec.
+-- ==
+-- input { 3 } output { 12 }

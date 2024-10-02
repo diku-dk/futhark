@@ -1,0 +1,3 @@
+-- Another clever use of module lambdas, and keyword-like application.
+-- ==
+-- input { 9 } output { 3.0 }

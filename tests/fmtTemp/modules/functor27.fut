@@ -1,0 +1,2 @@
+-- Ensuring the right references to sizes even through tricky
+-- indirections.

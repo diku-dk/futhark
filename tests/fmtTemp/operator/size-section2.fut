@@ -1,0 +1,1 @@
+-- Check that sizes are well calculated in left section, even with bounded existential sizes

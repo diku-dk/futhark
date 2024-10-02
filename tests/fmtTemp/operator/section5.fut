@@ -1,0 +1,1 @@
+-- Test that parameter names are not lost in sections.

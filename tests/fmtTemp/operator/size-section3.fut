@@ -1,0 +1,2 @@
+-- Check that sizes are well calculated in left section, with complex sizes
+-- ==

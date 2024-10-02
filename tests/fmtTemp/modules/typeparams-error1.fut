@@ -1,0 +1,3 @@
+-- Erroneous use of a parametric type inside a module type.
+-- ==
+-- error: i32matrix

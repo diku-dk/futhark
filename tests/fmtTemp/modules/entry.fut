@@ -1,0 +1,2 @@
+-- OK to use module type in an entry point (although perhaps not
+-- useful).

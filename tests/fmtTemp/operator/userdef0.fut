@@ -1,0 +1,3 @@
+-- Can we define a user-defined operator at all?
+-- ==
+-- input { 2 3 } output { -1 }

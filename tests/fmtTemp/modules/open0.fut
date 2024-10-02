@@ -1,0 +1,3 @@
+-- Does the open declaration work at all?
+-- ==
+-- input { } output { 4 }

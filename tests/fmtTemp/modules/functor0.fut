@@ -1,0 +1,3 @@
+-- Basic test of simple functor.
+-- ==
+-- input { 5 } output { 8 }

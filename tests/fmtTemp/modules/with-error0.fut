@@ -1,0 +1,3 @@
+-- With of a type in an inner module.
+-- ==
+-- error: module type requires

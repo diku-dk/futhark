@@ -1,0 +1,4 @@
+-- Shadowing of ordinary names should work as expected.
+-- ==
+-- input { 3 } output { 5 }
+-- Should refer to the global one.

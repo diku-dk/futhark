@@ -1,0 +1,3 @@
+-- Operator section with interesting type to the left.
+-- ==
+-- input { [-1,1] } output { [1,3] }

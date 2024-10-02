@@ -1,0 +1,3 @@
+-- A module spec in a module type.
+-- ==
+-- input {} output { 2 }

@@ -1,0 +1,4 @@
+-- Refinement of a parametric type must not narrow it.  This rule may
+-- be too restrictive and we may loosen it in the future.
+-- ==
+-- error: Cannot refine a type

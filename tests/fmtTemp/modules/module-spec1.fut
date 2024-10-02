@@ -1,0 +1,4 @@
+-- A module spec in a module type, used for a parametric module, with
+-- some shadowing too.
+-- ==
+-- input { 10 } output { 10 }

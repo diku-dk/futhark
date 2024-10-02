@@ -1,0 +1,2 @@
+-- ==
+-- input { true } output { false }

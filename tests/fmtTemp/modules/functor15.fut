@@ -1,0 +1,3 @@
+-- Can we nest a parametric module?
+-- ==
+-- input { 3 } output { 6 }

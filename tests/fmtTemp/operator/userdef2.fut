@@ -1,0 +1,3 @@
+-- Do user-defined operators have the right associativity?
+-- ==
+-- input { 1 2 3 } output { true }

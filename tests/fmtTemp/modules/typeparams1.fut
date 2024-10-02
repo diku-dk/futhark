@@ -1,0 +1,4 @@
+-- Use of a parametric type inside a module type.
+-- ==
+-- input {} output {2}
+-- And now an inlined one.

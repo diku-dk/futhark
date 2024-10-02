@@ -1,0 +1,7 @@
+-- Can we nest a parametric module inside another parametric module?
+-- This is also a tricky test of shadowing, and we actually got it
+-- wrong at first.
+--
+-- ==
+--
+-- input { 3 } output { 18 }

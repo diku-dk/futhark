@@ -1,0 +1,3 @@
+-- Parametric module operating on a module with nested modules.
+-- ==
+-- input { 2 } output { 3 }

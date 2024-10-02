@@ -1,0 +1,3 @@
+-- Backticked operator sections work.
+-- ==
+-- input { 5 3 } output { 2 2 -2 }

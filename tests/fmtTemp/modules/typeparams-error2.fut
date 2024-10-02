@@ -1,0 +1,3 @@
+-- Type parameters may not be duplicated.
+-- ==
+-- error: previously

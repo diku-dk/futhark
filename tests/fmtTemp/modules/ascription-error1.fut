@@ -1,0 +1,3 @@
+-- We may not access structure members not part of the signature.
+-- ==
+-- error: Struct.g

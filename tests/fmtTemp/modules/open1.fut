@@ -1,0 +1,3 @@
+-- Does open shadow correctly?
+-- ==
+-- input { } output { 4 }

@@ -1,0 +1,4 @@
+-- Ascription of a module containing a parametric module whose
+-- parameter contains an abstract type.
+-- ==
+-- input {} output {0.0}

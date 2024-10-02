@@ -1,0 +1,3 @@
+-- Does 'with' work?
+-- ==
+-- input { 2 } output { 42 }

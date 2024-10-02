@@ -1,0 +1,3 @@
+-- Defining a structure via the name of some other structure.
+-- ==
+-- input { 2 } output { 3 }

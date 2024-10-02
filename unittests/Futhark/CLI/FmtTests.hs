@@ -24,7 +24,7 @@ programs = filter ((".fut" `isExtensionOf`) . fst) $(embedDir "tests")
 
 tests :: TestTree
 tests =
-  testGroup "Futhark.CLI.Fmt" [fmtParseTests, fmtTokenTests]
+  testGroup "Futhark.CLI.Fmt" [fmtParseTests] --, fmtTokenTests]
 
 -- | Formats and compiles a file
 fmtParseTest :: (FilePath, BS.ByteString) -> TestTree

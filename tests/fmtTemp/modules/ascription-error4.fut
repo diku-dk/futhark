@@ -1,0 +1,3 @@
+-- Check that value mismatches in nested modules use qualified names.
+-- ==
+-- error: bar.x

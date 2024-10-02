@@ -1,0 +1,3 @@
+-- Check that type mismatches in nested modules use qualified names.
+-- ==
+-- error: bar.t

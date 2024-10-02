@@ -1,0 +1,3 @@
+-- Just one test that actually computes something.
+-- ==
+-- input { 3 } output { 5 4 }

@@ -1,0 +1,4 @@
+-- Parallel maximum segment sum
+-- ==
+-- input { [1, -2, 3, 4, -1, 5, -6, 1] }
+-- output { 11 }

@@ -1,0 +1,3 @@
+-- A functor whose parameter is itself a functor.
+-- ==
+-- input { 1 } output { 3 4 7 }

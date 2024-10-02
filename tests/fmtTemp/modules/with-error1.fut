@@ -1,0 +1,3 @@
+-- Refinement of a non-parametric with a parametric type is not OK.
+-- ==
+-- error: Cannot refine a type

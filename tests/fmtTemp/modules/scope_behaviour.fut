@@ -1,0 +1,11 @@
+-- ==
+-- input {
+--   10 3.0
+-- }
+-- output {
+-- 1 2 3
+-- }
+-- type is defined at line 13
+-- is defined at line 12
+-- defined at line 24
+-- is defined at line 27

@@ -1,0 +1,7 @@
+-- Multiplicative inverse on 16-bit numbers.  Returned as a 32-bit
+-- number to print better (because we do not print unsigned types).
+-- At one point the compiler missimplified the convergence loop.
+--
+-- ==
+-- input { 2u16 } output { 32769u32 }
+-- input { 33799u16 } output { 28110u32 }

@@ -1,0 +1,10 @@
+-- This test verifies that a host-only usage can be found through all major
+-- scalar expression types, indicating that migration analysis covers all of
+-- them.
+-- ==
+-- structure gpu {
+--   GPUBody 0
+-- }
+-- This function can only be run on host and thus requires
+-- its argument to be made available there.
+-- 'SubExp' cannot be tested due to elimination by the simplifier.

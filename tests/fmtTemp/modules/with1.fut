@@ -1,0 +1,3 @@
+-- ==
+-- input { 2 } output { 2 }
+-- We can't create a value of this type, but let's just refer to it.

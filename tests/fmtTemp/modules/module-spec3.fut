@@ -1,0 +1,3 @@
+-- Higher-order module specs with abstract types.
+-- ==
+-- input { 1 } output { 4 }

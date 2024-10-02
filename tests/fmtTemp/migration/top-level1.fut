@@ -1,0 +1,8 @@
+-- Migration analysis is also done for top-level constants.
+--
+-- Only constants that are used by functions need to be read to host.
+-- ==
+-- structure gpu {
+--   GPUBody 0
+--   /Index 2
+-- }

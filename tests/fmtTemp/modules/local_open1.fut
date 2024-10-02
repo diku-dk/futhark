@@ -1,0 +1,3 @@
+-- Local open with a nested module.
+-- ==
+-- input { 1 } output { 6 }

@@ -675,7 +675,7 @@ fmtAppExp (LetPat sizes pat e body loc) = buildFmt loc single multi
       e' <- fmtExp e
       body' <- letBody body
       pure $ code "let" <+> sizes' <+> pat' <+> code "=" <+> e' <+> body'
-    multi = buildFmt loc single multi
+    multi = single
 fmtAppExp (LetFun fname (tparams, params, retdecl, _, e) body loc) = buildFmt loc single multi
   where
     single = do

@@ -1,0 +1,10 @@
+-- A statement that reuses memory can be migrated as part of a parent body
+-- if none but single elements of the reused memory (updated or aliased) are
+-- returned or if the memory source is migrated into the same kernel.
+-- ==
+-- structure gpu {
+--   /If/True/GPUBody/If/True/Reshape 1
+--   /GPUBody/Loop/Reshape 2
+-- }
+-- These programs are artificial.
+-- Most natural alternatives cannot be validated due to compiler limitations.

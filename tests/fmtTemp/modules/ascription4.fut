@@ -1,0 +1,3 @@
+-- Ascription can happen anywhere in a module expression.
+-- ==
+-- input { 2 } output { [0,0] }

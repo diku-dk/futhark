@@ -1,0 +1,3 @@
+-- Size parameters may not be duplicated.
+-- ==
+-- error: n

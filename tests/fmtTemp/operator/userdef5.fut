@@ -1,0 +1,4 @@
+-- Polymorphic infix operators ought to work.
+-- ==
+-- input { [1,2,3] [4,5,6] [true] [false] }
+-- output { [1,2,3,4,5,6] [true,false] }

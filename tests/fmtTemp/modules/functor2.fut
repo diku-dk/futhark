@@ -1,0 +1,3 @@
+-- Referring to a parameter-defined type in a functor return signature.
+-- ==
+-- input { 2 } output { 4 }
