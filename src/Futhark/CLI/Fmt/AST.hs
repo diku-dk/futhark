@@ -4,12 +4,15 @@ module Futhark.CLI.Fmt.AST (
     -- functions for building fmt 
     nil, 
     nest, 
+    stdNest,
     code,
     space,
     line,
     comment,
     group,
     sep,
+    sepSpace,
+    sepLine,
     brackets,
     braces,
     parens,
@@ -59,6 +62,9 @@ nil = Nil
 
 nest :: Int -> Fmt -> Fmt
 nest = Nest
+
+stdNest :: Fmt -> Fmt
+stdNest = Nest 2 
 
 code :: T.Text -> Fmt
 code = Code 
@@ -122,6 +128,15 @@ sep :: Fmt -> [Fmt] -> Fmt
 sep _s [] = nil
 sep _s [x] = x
 sep s (x:xs) = x <> s <> sep s xs 
+
+sepSpace :: Fmt -> [Fmt] -> Fmt
+sepSpace s = sep (s <> space)
+
+sepLine :: Fmt -> [Fmt] -> Fmt
+sepLine s = sep (line <> stdNest s) 
+
+
+
 
 (<+>) :: Fmt -> Fmt -> Fmt
 Nil <+> y = y
