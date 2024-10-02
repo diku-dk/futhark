@@ -6,14 +6,14 @@ import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Ite
 import Futhark.Analysis.Proofs.IndexFnPlus (normalizeIndexFn, subIndexFn)
 import Futhark.Analysis.Proofs.Refine (refineIndexFn, refineSymbol)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, normalizeSymbol, applyLinCombRule)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, normalizeSymbol, toSumOfLinComb)
 import Futhark.Analysis.Proofs.SymbolPlus (getRenamedLinCombBoundVar, repVName)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, sub)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.FourierMotzkin (($<=$), ($==$), ($>$))
 import Futhark.SoP.Monad (substEquivs)
-import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.*.), (.+.), (.-.), sopToLists)
+import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.*.), (.+.), (.-.), sopToLists, (~+~))
 import Language.Futhark (VName)
 
 vacuous :: (Monad m) => b -> m Bool
@@ -27,12 +27,6 @@ sVar = sym2SoP . Var
 
 hole :: VName -> SoP Symbol
 hole = sym2SoP . Hole
-
-(~+~) :: (Ord u) => u -> u -> SoP u
-a ~+~ b = sym2SoP a .+. sym2SoP b
-
-(~-~) :: (Ord u) => u -> u -> SoP u
-a ~-~ b = sym2SoP a .-. sym2SoP b
 
 converge :: (Eq a, Monad m) => (a -> m a) -> a -> m a
 converge f x = converge_ (f x)
@@ -261,7 +255,7 @@ rulesIndexFn = do
               let e1_b = rep (mkRep iter b') e1
               e2 <- sub s (hole h2)
               let e2_j = rep (mkRep iter (sym2SoP $ Var j)) e2
-              let e2_sum = applyLinCombRule j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
+              let e2_sum = toSumOfLinComb j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
               pure $
                 IndexFn
                   { iterator = Forall i (Iota (hole n)),
@@ -292,7 +286,7 @@ rulesIndexFn = do
               let e1_b = rep (mkRep iter b') e1
               e2 <- sub s (hole h2)
               let e2_j = rep (mkRep iter (sym2SoP $ Var j)) e2
-              let e2_sum = applyLinCombRule j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
+              let e2_sum = toSumOfLinComb j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
               pure $
                 IndexFn
                   { iterator = Forall i (Iota (hole n)),

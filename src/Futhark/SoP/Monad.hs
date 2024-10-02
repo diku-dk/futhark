@@ -210,7 +210,7 @@ lookupUntransPE pe = do
 
 -- \| Look-up the untranslatable 'PrimExp' bound to the given symbol.
 lookupUntransSym :: (MonadSoP u e p m) => u -> m (Maybe e)
-lookupUntransSym sym = ((M.!? sym) . dir) <$> getUntrans
+lookupUntransSym sym = (M.!? sym) . dir <$> getUntrans
 
 -- \| Look-up the range of a symbol. If no such range exists,
 --    return the empty range (and add it to the environment).

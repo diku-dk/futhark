@@ -63,8 +63,8 @@ instance ASTMappable Symbol (Cases Symbol (SoP Symbol)) where
 instance ASTMappable Algebra.Symbol Algebra.Symbol where
   astMap m (Algebra.Var x) = mapOnSymbol m $ Algebra.Var x
   astMap m (Algebra.Idx vn i) = mapOnSymbol m . Algebra.Idx vn =<< astMap m i
-  astMap m (Algebra.Mdf dir vn lb ub) =
-    mapOnSymbol m =<< Algebra.Mdf dir vn <$> astMap m lb <*> astMap m ub
+  astMap m (Algebra.Mdf dir vn i j) =
+    mapOnSymbol m =<< Algebra.Mdf dir vn <$> astMap m i <*> astMap m j
   astMap m (Algebra.Sum vn lb ub) =
     mapOnSymbol m =<< Algebra.Sum vn <$> astMap m lb <*> astMap m ub
   astMap m (Algebra.Pow (c, x)) =
