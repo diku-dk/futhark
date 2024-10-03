@@ -207,7 +207,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/mk_flag_array.fut"
-        ( withDebug $ \(i, n, _, _) ->
+        ( pure $ \(i, n, _, _) ->
             let dummy = int2SoP 0
              in IndexFn
                   { iterator = Forall i (Iota (sHole n)),

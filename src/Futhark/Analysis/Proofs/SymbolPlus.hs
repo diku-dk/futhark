@@ -80,7 +80,7 @@ instance Replaceable Symbol Symbol where
       -- NOTE we can avoid this rewrite here if we change the LinComb expression
       -- from Symbol to SoP Symbol.
       let s' = addRep i (Var i) s
-       in applyLinCombRule i (rep s' lb) (rep s' ub) (rep s' t)
+       in toSumOfLinComb i (rep s' lb) (rep s' ub) (rep s' t)
     Indicator e -> sym2SoP . Indicator . sop2Symbol $ rep s e
     Apply f xs -> sym2SoP $ Apply (sop2Symbol $ rep s f) (map (rep s) xs)
     Bool x -> sym2SoP $ Bool x

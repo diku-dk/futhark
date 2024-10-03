@@ -48,16 +48,17 @@ sop2Symbol sop
   | Just t <- justSym sop = t
   | otherwise = error "sop2Symbol on something that is not a symbol"
 
-applyLinCombRule :: VName -> SoP Symbol -> SoP Symbol -> SoP Symbol -> SoP Symbol
-applyLinCombRule i a b = foldl1 (.+.) . map (mkLinComb i a b) . sopToLists
-
-mkLinComb :: VName -> SoP Symbol -> SoP Symbol -> ([Symbol], Integer) -> SoP Symbol
-mkLinComb _ a b ([], c) =
-  scaleSoP c (b .-. a .+. int2SoP 1)
-mkLinComb i a b ([u], c) =
-  scaleSoP c (sym2SoP $ LinComb i a b u)
-mkLinComb _ _ _ _ =
-  error "Replacement is not a linear combination."
+-- Given iterator, lower bound, upper bound and a SoP, create
+-- a sum of linear combinations.
+toSumOfLinComb :: VName -> SoP Symbol -> SoP Symbol -> SoP Symbol -> SoP Symbol
+toSumOfLinComb i lb ub = foldl1 (.+.) . map (mkLinComb lb ub) . sopToLists
+  where
+    mkLinComb a b ([], c) =
+      scaleSoP c (b .-. a .+. int2SoP 1)
+    mkLinComb a b ([u], c) =
+      scaleSoP c (sym2SoP $ LinComb i a b u)
+    mkLinComb _ _ _ =
+      error "SoP is not a linear combination."
 
 getLinCombBoundVar :: Symbol -> Maybe VName
 getLinCombBoundVar (LinComb i _ _ _) = Just i

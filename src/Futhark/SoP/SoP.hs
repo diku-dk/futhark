@@ -27,6 +27,10 @@ module Futhark.SoP.SoP
     divSoPs,
     (./.),
     divSoPInt,
+    (~+~),
+    (~-~),
+    (~*~),
+    (~/~),
     signumSoP,
     factorSoP,
     sopFactors,
@@ -52,6 +56,8 @@ module Futhark.SoP.SoP
     andRel,
     normalize,
     padWithZero,
+    mapSymSoP2M_,
+    mapSymSoP2M,
   )
 where
 
@@ -230,14 +236,25 @@ mapSymSoP f =
   foldr
     ( \(ts, a) ->
         ( ( scaleSoP a $
-              foldr (.*.) (int2SoP 1) $
-                map f ts
+              foldr ((.*.) . f) (int2SoP 1) ts
           )
             .+.
         )
     )
     (int2SoP 0)
     . sopToLists
+
+mapSymSoP2M_ :: (Ord u, Ord v, Monad m) => (u -> m v) -> SoP u -> m (SoP v)
+mapSymSoP2M_ f = fmap sopFromList . mapM (\(ts, a) -> (,a) <$> mapM f ts) . sopToLists
+
+mapSymSoP2M :: (Ord u, Ord v, Monad m) => (u -> m (SoP v)) -> SoP u -> m (SoP v)
+mapSymSoP2M f x = do
+  xs <- mapM (\(ts, a) -> (,a) <$> mapM f ts) (sopToLists x)
+  pure $
+    foldr
+      (\(ts, a) acc -> foldr (.*.) (int2SoP a) ts .+. acc)
+      (int2SoP 0)
+      xs
 
 mapTermSoPM :: (Foldable t, Ord u, Ord (t u), Monad m) => ([u] -> Integer -> m (t u, Integer)) -> SoP u -> m (SoP u)
 mapTermSoPM f =
@@ -526,3 +543,23 @@ instance (Pretty u) => Pretty (Rel u) where
       x :||: y -> op "||" x y
     where
       op s x y = pretty x <+> s <+> pretty y
+
+(~+~) :: (Ord u) => u -> u -> SoP u
+a ~+~ b = sym2SoP a .+. sym2SoP b
+
+infixl 6 ~+~
+
+(~-~) :: (Ord u) => u -> u -> SoP u
+a ~-~ b = sym2SoP a .-. sym2SoP b
+
+infixl 6 ~-~
+
+(~*~) :: (Ord u) => u -> u -> SoP u
+x ~*~ y = sym2SoP x .*. sym2SoP y
+
+infixl 7 ~*~
+
+(~/~) :: (Ord u) => u -> u -> Maybe (SoP u)
+x ~/~ y = sym2SoP x ./. sym2SoP y
+
+infixl 7 ~/~

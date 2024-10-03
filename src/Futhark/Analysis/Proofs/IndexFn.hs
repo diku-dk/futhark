@@ -85,11 +85,9 @@ instance MonadSoP Symbol E.Exp Property IndexFnM where
   getEquivs = gets (equivs . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
 
--- This is required by SoP.Refine (addRel).
+-- This is required by SoP.Refine (addRel), but is never actually called.
 instance ToSoP Symbol E.Exp where
-  toSoPNum e = do
-    x <- lookupUntransPE e
-    pure (1, sym2SoP x)
+  toSoPNum _ = undefined
 
 runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s

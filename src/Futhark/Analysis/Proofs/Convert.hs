@@ -14,7 +14,7 @@ import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
 import Futhark.Analysis.Proofs.Util (prettyBinding)
 import Futhark.MonadFreshNames (VNameSource, newVName)
-import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP_, negSoP, sym2SoP, (.*.), (.+.), (.-.))
+import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP_, negSoP, sym2SoP, (.*.), (.+.), (.-.), (~+~), (~*~), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
@@ -400,15 +400,6 @@ cmap f (Cases xs) = Cases (fmap f xs)
 
 cmapValues :: (b -> c) -> Cases a b -> Cases a c
 cmapValues f = cmap (second f)
-
-(~-~) :: Symbol -> Symbol -> SoP Symbol
-x ~-~ y = sym2SoP x .-. sym2SoP y
-
-(~+~) :: Symbol -> Symbol -> SoP Symbol
-x ~+~ y = sym2SoP x .+. sym2SoP y
-
-(~*~) :: Symbol -> Symbol -> SoP Symbol
-x ~*~ y = sym2SoP x .*. sym2SoP y
 
 -- TODO eh bad
 (~==~) :: Symbol -> Symbol -> SoP Symbol
