@@ -1,5 +1,6 @@
 module Futhark.Analysis.Proofs.AlgebraPC.Solve
-  ( simplifyLevel,
+  ( simplify,
+    simplifyLevel,
   )
 where
 
@@ -39,31 +40,56 @@ simplifyLevel sop0 = do
   -- peel off known indices by looking in the equality table
   equivs <- getEquivs
   let (s3, sop3) = peelOffSumsFP equivs sop2
-  -- do we need to run to a fix point ??
+  -- do we need to run to a fix point ?
   if s2 || s3 then simplifyLevel sop3 else pure sop3
 
 -----------------------------------------
 --- 1. Simplifications related to Pow ---
 -----------------------------------------
 
-simplifyPows :: SoP Symbol -> AlgM e (SoP Symbol)
+simplifyPows :: (Expression e, Ord e) => SoP Symbol -> AlgM e (SoP Symbol)
 simplifyPows sop = do
-  tmp <- mapM simplifyTerm $ M.toList $ getTerms sop
-  pure (SoP (M.fromList tmp))
+  lst <- mapM simplifyTerm $ M.toList $ getTerms sop
+  pure $ SoP $ M.fromList lst
   where
-  simplifyTerm :: (Term Symbol, Integer) -> AlgM e (Term Symbol, Integer)
+  simplifyTerm :: (Expression e, Ord e) => (Term Symbol, Integer) -> AlgM e (Term Symbol, Integer)
   simplifyTerm (Term mset, k) = do
     let (mset_pows, mset_others) = MS.partition hasPow mset
         mset_tup_pows = MS.mapMaybe mpowAsTup mset_pows
         lst_pows = map normalizePow $ MS.toOccurList mset_tup_pows
         (k', map_pows') = foldl combineSamePow (k, M.empty) lst_pows
         -- ToDo: we might want to recursively simplify the obtained SoPs?
-        mset_pows'' =  MS.fromList $ map Pow $ M.toList map_pows'
-    pure $ (Term (mset_pows'' <> mset_others), k')
+    mset_pows'' <-
+      forM (M.toList map_pows') $ \(b, p_sop) -> do
+        p_sop' <- simplifyLevel p_sop
+        pure $ Pow (b, p_sop')
+        -- mset_pows'' =  MS.fromList $ map Pow $ M.toList map_pows'
+    pure $ (Term (MS.fromList mset_pows'' <> mset_others), k')
   --
   normalizePow :: ((Integer, SoP Symbol), Int) -> (Integer, SoP Symbol)
   normalizePow ((base, expnt), p) = 
     (base, (int2SoP (fromIntegral p)) .*. expnt)
+  mpowAsTup :: Symbol -> Maybe (Integer, SoP Symbol)
+  mpowAsTup (Pow (base, expnt)) = Just (base, expnt)
+  mpowAsTup _ = Nothing
+
+combineSamePow :: (Integer, M.Map Integer (SoP Symbol))
+               -> (Integer, SoP Symbol)
+               -> (Integer, M.Map Integer (SoP Symbol))
+combineSamePow (q,tab) (b, sop) =
+  let (q', sop') =
+        case getPowOfFactor q b of
+          (_, 0) -> (q, sop)
+          (r, p) -> (r, int2SoP p .+. sop)
+      sop'' = maybe sop' (.+. sop') $ M.lookup b tab
+  in  (q', M.insert b sop'' tab)
+  where
+    getPowOfFactor :: Integer -> Integer -> (Integer, Integer)
+    getPowOfFactor qq bb = getPowOfFactorTR qq bb 0 
+    getPowOfFactorTR qq bb pr
+      | qq `mod` bb /= 0 = (qq, pr)
+    getPowOfFactorTR qq bb pr =
+      getPowOfFactorTR (qq `div` bb) bb (pr+1)
 
 ---------------------------------------------------
 --- 2. Simplifications related to Sum of Slices ---
@@ -365,31 +391,6 @@ hasMon props
   where f (Monotonic _) = True
         f _ = False
 hasMon _ = Nothing
-
-combineSamePow :: (Integer, M.Map Integer (SoP Symbol))
-               -> (Integer, SoP Symbol)
-               -> (Integer, M.Map Integer (SoP Symbol))
-combineSamePow (q,tab) (b, sop) =
-  let (q', sop') =
-        if (q `mod` b) /= 0
-         then (q, sop)
-         else let (non_pow_b, pow_b_of_q) = getPowOfFactor b q
-                  comb_sop = (int2SoP pow_b_of_q) .+. sop
-              in  (non_pow_b, comb_sop)
-      sop'' = maybe sop' (.+. sop') $ M.lookup b tab 
-  in  (q', M.insert b sop'' tab)
-
-mpowAsTup :: Symbol -> Maybe (Integer, SoP Symbol)
-mpowAsTup (Pow (base, expnt)) = Just (base, expnt)
-mpowAsTup _ = Nothing
-
-getPowOfFactor :: Integer -> Integer -> (Integer, Integer)
-getPowOfFactor q b
-  | q `mod` b /= 0 = (q, 0)
-getPowOfFactor q b =
-  let (x,y) = getPowOfFactor (q `div` b) b in (x, y+1)
-
-
 
 ---------------------------------------------------
 --- Some Thinking but the code below is garbage ---
