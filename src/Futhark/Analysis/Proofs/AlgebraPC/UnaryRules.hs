@@ -31,12 +31,11 @@ simplifyPows simplifyLevel sop = do
         mset_tup_pows = MS.mapMaybe mpowAsTup mset_pows
         lst_pows = map normalizePow $ MS.toOccurList mset_tup_pows
         (k', map_pows') = foldl combineSamePow (k, M.empty) lst_pows
-        -- ToDo: we might want to recursively simplify the obtained SoPs?
     mset_pows'' <-
       forM (M.toList map_pows') $ \(b, p_sop) -> do
         p_sop' <- simplifyLevel p_sop
+        -- ^ we simplify the exponents
         pure $ Pow (b, p_sop')
-        -- mset_pows'' =  MS.fromList $ map Pow $ M.toList map_pows'
     pure $ (Term (MS.fromList mset_pows'' <> mset_others), k')
   --
   normalizePow :: ((Integer, SoP Symbol), Int) -> (Integer, SoP Symbol)

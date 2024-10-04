@@ -36,7 +36,7 @@ simplifyLevel sop0 = do
   let fvs = free sop0
   -- pow simplifications
   sop1 <-
-    if S.null $ S.filter hasIdxOrSum fvs
+    if S.null $ S.filter hasPow fvs
     then pure sop0
     else simplifyPows simplifyLevel sop0
   -- index & sum-expansion & sum-sum simplifications
