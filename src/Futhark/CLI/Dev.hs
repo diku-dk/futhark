@@ -45,6 +45,8 @@ import Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs)
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
+import Futhark.Optimise.EntryPointMem
+import Futhark.Optimise.IntraMMM
 import Futhark.Pass
 import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
@@ -57,6 +59,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
+import Futhark.Pass.InitNames
 import Futhark.Passes
 import Futhark.Util.Log
 import Futhark.Util.Options
@@ -369,6 +372,27 @@ cseOption short =
     long = [passLongOption pass]
     pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
 
+initNamesOption :: String -> FutharkOption
+initNamesOption short =
+--  TODO: fix types
+--  passOption (passDescription pass) (UntypedPass perform) short long
+  passOption "init-names" (UntypedPass perform) short ["Initialise name source to avoid name clashes"]
+  where
+    perform (SOACS prog) config =
+        SOACS <$> runPipeline (onePass initNamesPass) config prog
+    perform (GPU prog) config =
+        GPU <$> runPipeline (onePass initNamesPass) config prog
+    perform (MC prog) config =
+        MC <$> runPipeline (onePass initNamesPass) config prog
+    perform (Seq prog) config =
+        Seq <$> runPipeline (onePass initNamesPass) config prog
+    perform (SeqMem prog) config =
+        SeqMem <$> runPipeline (onePass initNamesPass) config prog
+    perform (GPUMem prog) config =
+        GPUMem <$> runPipeline (onePass initNamesPass) config prog
+    perform (MCMem prog) config =
+        MCMem <$> runPipeline (onePass initNamesPass) config prog
+
 sinkOption :: String -> FutharkOption
 sinkOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
@@ -656,6 +680,8 @@ commandLineOptions =
     typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],
     allocateOption "a",
+    kernelsMemPassOption entryPointMemGPU [],
+    kernelsMemPassOption intraMMMMemFixup [],
     kernelsMemPassOption doubleBufferGPU [],
     mcMemPassOption doubleBufferMC [],
     kernelsMemPassOption expandAllocations [],
@@ -668,6 +694,7 @@ commandLineOptions =
     mcMemPassOption ArrayShortCircuiting.optimiseMCMem [],
     kernelsMemPassOption ArrayShortCircuiting.optimiseGPUMem [],
     cseOption [],
+    initNamesOption "n",
     simplifyOption "e",
     soacsPipelineOption
       "Run the default optimised pipeline"
