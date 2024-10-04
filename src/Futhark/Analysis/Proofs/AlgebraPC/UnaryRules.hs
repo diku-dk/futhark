@@ -20,12 +20,12 @@ import Futhark.Analysis.Proofs.AlgebraPC.Algebra
 --- 1. Simplifications related to Pow ---
 -----------------------------------------
 
-simplifyPows :: (SoP Symbol -> AlgM e (SoP Symbol)) -> SoP Symbol -> AlgM e (SoP Symbol)
+simplifyPows :: forall e . (SoP Symbol -> AlgM e (SoP Symbol)) -> SoP Symbol -> AlgM e (SoP Symbol)
 simplifyPows simplifyLevel sop = do
   lst <- mapM simplifyTerm $ M.toList $ getTerms sop
   pure $ SoP $ M.fromList lst
   where
-  -- simplifyTerm :: (Term Symbol, Integer) -> AlgM e (Term Symbol, Integer)
+  simplifyTerm :: (Term Symbol, Integer) -> AlgM e (Term Symbol, Integer)
   simplifyTerm (Term mset, k) = do
     let (mset_pows, mset_others) = MS.partition hasPow mset
         mset_tup_pows = MS.mapMaybe mpowAsTup mset_pows
