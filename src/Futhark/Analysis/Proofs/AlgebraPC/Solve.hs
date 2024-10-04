@@ -35,34 +35,20 @@ simplifyLevel :: (Expression e, Ord e) => SoP Symbol -> AlgM e (SoP Symbol)
 simplifyLevel sop0 = do
   let fvs = free sop0
   -- pow simplifications
-  sop1 <- ifM hasPow fvs (simplifyPows simplifyLevel) sop0
+  sop1 <-
+    if S.null $ S.filter hasIdxOrSum fvs
+    then pure sop0
+    else simplifyPows simplifyLevel sop0
   -- index & sum-expansion & sum-sum simplifications
-  (s2, sop2) <- ifSM hasIdxOrSum fvs simplifyAll2All sop1
+  (s2, sop2) <-
+    if S.null $ S.filter hasIdxOrSum fvs
+    then pure (False, sop1)
+    else simplifyAll2All sop1
   -- peel off known indices by looking in the equality table
   equivs <- getEquivs
   let (s3, sop3) = peelOffSumsFP equivs sop2
   -- do we need to run to a fix point ?
   if s2 || s3 then simplifyLevel sop3 else pure sop3
-        
-------------------------------------------
---- Various Low-Level Helper Functions ---
-------------------------------------------
-
-ifM :: (Symbol -> Bool) -> S.Set Symbol ->
-       (a -> AlgM e a) -> a -> AlgM e a
-ifM hasSmth fvs f x =
-  if S.null (S.filter hasSmth fvs) then pure x else f x
-
-ifSM :: (Symbol -> Bool) -> S.Set Symbol ->
-        (a -> AlgM e (Bool,a)) -> a ->
-        AlgM e (Bool,a)
-ifSM hasSmth fvs f x =
-  if S.null (S.filter hasSmth fvs)
-  then pure (False, x)
-  else f x
-
--- impif :: Bool -> (a -> a) -> a -> a
--- impif b f x = if b then f x else x
 
 ---------------------------------------------------
 --- Some Thinking but the code below is garbage ---
