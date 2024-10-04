@@ -19,6 +19,8 @@ module Futhark.CLI.Fmt.AST (
     (<+>),
     (</>),
     colon,
+    sepNonEmpty,
+    isEmpty,
 
     -- functions for manipulating fmt
     flatten,
@@ -44,6 +46,7 @@ type Line = T.Text
 data Fmt = Nil
          | Fmt :<> Fmt
          | Nest Int Fmt
+         | Nesting Fmt
          | Code T.Text 
          | Line (Maybe Comment) 
          | Space
@@ -68,6 +71,9 @@ nil = Nil
 
 nest :: Int -> Fmt -> Fmt
 nest = Nest
+
+nesting :: Fmt -> Fmt
+nesting = Nesting
 
 stdNest :: Fmt -> Fmt
 stdNest = Nest 2 
@@ -99,6 +105,7 @@ flatten fmt =
                 (b, y') = flatten' y
             in (a ++ b, x' <> y')
           flatten' (Nest _i x) = flatten' x
+          flatten' (Nesting x) = flatten' x
           flatten' (Code x) = ([], code x)
           flatten' (Line Nothing) = ([], space)
           flatten' (Line (Just c)) = ([c], space)
@@ -110,7 +117,8 @@ pretty w a = layout (best w 0 a)
     where layout :: FmtTxt -> T.Text
           layout Empty = ""
           layout (t `Txt` res) = t <> layout res 
-          layout (i `NewLine` res) = "\n" <> T.replicate i " " <> layout res
+          layout (i `NewLine` res) =
+            "\n" <> T.replicate i " " <> layout res
 
 isEmpty :: Fmt -> Bool
 isEmpty (Code "") = True
@@ -118,6 +126,9 @@ isEmpty Nil = True
 isEmpty (x :<|> _) = isEmpty x
 isEmpty (x :<> y) = isEmpty x && isEmpty y
 isEmpty _ = False
+
+sepNonEmpty :: Fmt -> [Fmt] -> Fmt
+sepNonEmpty s = sep s . filter (not . isEmpty)
 
 {-
 pretty :: Fmt -> Line
@@ -144,6 +155,7 @@ be _w _k [] = Empty
 be w k ((_i,Nil):z) = be w k z
 be w k ((i,x :<> y):z) = be w k ((i,x):(i,y):z)
 be w k ((i,Nest j x):z) = be w k ((i+j,x):z)
+be w k ((i,Nesting x):z) = be w k ((i, Nest i x):z)
 be w k ((_i,Code s):z) = s `Txt` be w (k + T.length s) z
 be w k ((_i,Space):z) = " " `Txt` be w (k + 1) z
 be w _k ((i,Line Nothing):z) = i `NewLine` be w i z

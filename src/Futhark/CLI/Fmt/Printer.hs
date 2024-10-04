@@ -104,6 +104,11 @@ trailingComment a = do
     _ -> pure ""
 -}
 
+sepByLayout :: Located a => a -> Fmt -> Fmt -> Fmt
+sepByLayout loc a b =
+  case lineLayout loc of
+    MultiLine -> stdNest (a </> b)
+    SingleLine -> a <+> b
 
 fmtName :: Name -> Fmt
 fmtName name
@@ -115,21 +120,21 @@ fmtPretty = code . prettyText
 
 -- parses comments infront of a and converts a to fmt using formatting function f
 buildFmt :: (Located a) => a -> FmtM Fmt -> FmtM Fmt -> FmtM Fmt
-buildFmt a single multi = local (const lineLayout) $ do
+buildFmt a single multi = local (const $ lineLayout a) $ do
   c <- fmtComments a
   m <- ask
   a' <- if m == SingleLine then single else multi
   -- c' <- trailingComment a
   pure $ c <> a'
-  where
-    lineLayout =
-      case locOf a of
-        Loc start end ->
-          if posLine start == posLine end
-          then SingleLine
-          else MultiLine
-        NoLoc -> undefined -- should throw an error
--- Other Utility Functions
+
+lineLayout :: Located a => a -> Layout
+lineLayout a =
+  case locOf a of
+    Loc start end ->
+      if posLine start == posLine end
+      then SingleLine
+      else MultiLine
+    NoLoc -> undefined -- should throw an error
 
 -- | Documentation comments are always optional, so this takes a 'Maybe'.
 -- TODO: make special documentation comments in Fmt?
@@ -297,10 +302,8 @@ fmtTypeParam (TypeParamType l name loc) = buildFmt loc single multi
 fmtPat :: UncheckedPat t -> FmtM Fmt
 fmtPat (TuplePat pats loc) = buildFmt loc single multi
   where
-    single = do
-      fmt <- sep (code ", ") <$> mapM fmtPat pats
-      pure $ parens fmt
-    multi = single
+    single = parens . sepSpace (code ",") <$> mapM fmtPat pats
+    multi = parens . sepLine (code ",") <$> mapM fmtPat pats
 fmtPat (RecordPat pats loc) = buildFmt loc single multi
   where
     fmtFieldPat (name, t) = do
@@ -406,7 +409,9 @@ fmtExp (Hole _ loc) = buildFmt loc single multi
 fmtExp (Parens e loc) = buildFmt loc single multi
   where
     single = parens <$> fmtExp e
-    multi = single
+    multi = do
+      e' <- fmtExp e
+      pure $ stdNest (code "(" </> e') </> code ")"
 fmtExp (QualParens (v, _loc) e loc') = buildFmt loc' single multi
   where
     single = do
@@ -439,20 +444,20 @@ fmtExp (FloatLit v _ loc) = buildFmt loc single single
     single = pure $ fmtPretty v -- Not sure how this can be multiline.
 fmtExp (TupLit es loc) = buildFmt loc single multi
   where
-    single = parens . sep (code ", ") <$> mapM fmtExp es
-    multi = single
+    single = parens . sepSpace (code ",") <$> mapM fmtExp es
+    multi = parens . sepLine (code ",") <$> mapM fmtExp es
 fmtExp (RecordLit fs loc) = buildFmt loc single multi
   where
-    single = braces . sep (code ", ") <$> mapM fmtField fs
-    multi = single
+    single = braces . sepSpace (code ",") <$> mapM fmtField fs
+    multi = braces . sepLine (code ",") <$> mapM fmtField fs
 fmtExp (ArrayVal vs _ loc) = buildFmt loc single multi
   where
-    single = brackets . sep (code ", ") <$> mapM fmtPrimValue vs
-    multi = single
+    single = brackets . sepSpace (code ",") <$> mapM fmtPrimValue vs
+    multi = brackets . sepLine (code ",") <$> mapM fmtPrimValue vs
 fmtExp (ArrayLit es _ loc) = buildFmt loc single multi
   where
-    single = brackets . sep (code ", ") <$> mapM fmtExp es
-    multi = single
+    single = brackets . sepSpace (code ",") <$> mapM fmtExp es
+    multi = brackets . sepLine (code ",") <$> mapM fmtExp es
 fmtExp (StringLit s loc) = buildFmt loc single multi
   where
     single = pure $ fmtPretty $ show $ fmap (chr . fromIntegral) s
@@ -500,12 +505,12 @@ fmtExp (Assert e1 e2 _ loc) = buildFmt loc single multi
     multi = single
 fmtExp (Lambda params body rettype _ loc) = buildFmt loc single multi
   where
-    single = do
+    common = do
       params' <- sep space <$> mapM fmtPat params
-      body' <- fmtExp body
       ascript <- maybe (pure mempty) (fmap (code ": " <>) . fmtTypeExp) rettype
-      pure $ code "\\" <> params' <> ascript <+> code "->" <+> body'
-    multi = single
+      pure $ code "\\" <> params' <> ascript <+> code "->"
+    single = (<+>) <$> common <*> fmtExp body
+    multi = fmap stdNest $ (</>) <$> common <*> fmtExp body
 fmtExp (OpSection binop _ loc) = buildFmt loc single multi
   where 
     single = parens <$> fmtQualName binop
@@ -595,6 +600,7 @@ matchPat _ _ = False
 -- matchPat (PatConstr _name _f _pats _loc) _exp = undefined 
 -- matchPat (PatAttr _info _pat _loc) _exp = undefined 
 
+
 fmtAppExp :: AppExpBase NoInfo Name -> FmtM Fmt
 fmtAppExp (BinOp (bop, _) _ (x, _) (y, _) loc) = buildFmt loc single multi
   where
@@ -615,19 +621,18 @@ fmtAppExp (Match e cs loc) = buildFmt loc single multi
 -- need some way to catch when the value expression match the pattern 
 fmtAppExp (Loop sizeparams pat initexp form loopbody loc) | matchPat pat initexp = buildFmt loc single multi
   where
-    single = do
+    common = do
       let sizeparams' = mconcat $ brackets . fmtName . toName <$> sizeparams
       pat' <- fmtPat pat
       form' <- fmtLoopForm form
-      loopbody' <- fmtExp loopbody
       pure $
         code "loop"
           <+> sizeparams'
           <+> pat'
           <+> form'
           <+> code "do"
-          </> loopbody'
-    multi = single
+    single = (<+>) <$> common <*> fmtExp loopbody
+    multi = fmap stdNest $ (<+>) <$> common <*> fmtExp loopbody
 fmtAppExp (Loop sizeparams pat initexp form loopbody loc) = buildFmt loc single multi
   where
     single = do
@@ -644,86 +649,83 @@ fmtAppExp (Loop sizeparams pat initexp form loopbody loc) = buildFmt loc single 
           <+> initexp' 
           <+> form'
           <+> code "do"
-          </> loopbody'
+          <+> loopbody'
     multi = single
 fmtAppExp (Index e idxs loc) = buildFmt loc single multi
   where
-    single = do
-      e' <- fmtExp e
-      idxs' <- sep (code ",") <$> mapM fmtDimIndex idxs
-      pure $ e' <> brackets idxs' -- It is important that "[" is connected to its expression.
-    multi = single
+    idxsM = mapM fmtDimIndex idxs
+    aux f = brackets . f (code ",") <$> idxsM
+    single = (<>) <$> fmtExp e <*> aux sepSpace 
+    multi = (<>) <$> fmtExp e <*> aux sepLine
 fmtAppExp (LetPat sizes pat e body loc) = buildFmt loc single multi
   where
     common = do
       let sizes' = mconcat $ fmtSizeBinder <$> sizes
       pat' <- fmtPat pat
       e' <- fmtExp e
-      pure $ code "let" <+> sizes' <+> pat' <+> code "=" <+> e'
-    single = do
-      fmt <- common
-      body' <- letBody body
-      pure $ fmt <+> body'
-    multi = do
-      fmt <- common
-      body' <- letBody body
-      pure $ fmt </> body'
+      pure $
+        sepByLayout e (
+          code "let"
+          <+> sepNonEmpty space [sizes', pat']
+          <+> code "="
+        ) e'
+    single = (<+>) <$> common <*> letBody body 
+    multi = (</>) <$> common <*> letBody body
 fmtAppExp (LetFun fname (tparams, params, retdecl, _, e) body loc) = buildFmt loc single multi
   where
-    single = do
-      tparams' <- mconcat <$> mapM fmtTypeParam tparams
-      params' <- mconcat <$> mapM fmtPat params
+    common = do
+      tparams' <- sep space <$> mapM fmtTypeParam tparams
+      params' <- sep space <$> mapM fmtPat params
       retdecl' <-
         case fmtTypeExp <$> retdecl of
-          Just a -> fmap (code ":" <+>) a
-          Nothing -> pure mempty
+          Just a -> fmap (\b -> code ":" <+> b <> space) a
+          Nothing -> pure nil
+      let sub = sepNonEmpty space [tparams', params']
       e' <- fmtExp e
-      body' <- letBody body
       pure $
-        code "let"
+        sepByLayout e (
+          code "let"
           <+> fmtName fname
-          <+> tparams'
-          <+> params'
-          <+> retdecl'
-          <+> code "="
-          <+> e'
-          </> body'
-    multi = single
+          <> (if isEmpty sub then nil else space)
+          <> sub
+          <> retdecl'
+          <> code "="
+          ) e'
+    single = (<+>) <$> common <*> letBody body
+    multi = (</>) <$> common <*> letBody body
 fmtAppExp (LetWith dest src idxs ve body loc)
   | dest == src = buildFmt loc singleSame multiSame
   | otherwise = buildFmt loc singleDiff multiDiff
     where
-      singleSame = do
+      commonSame = do
         dest' <- fmtIdent dest
-        idxs' <- sep (code ", ") <$> mapM fmtDimIndex idxs
+        idxs' <- brackets . sep (code ", ") <$> mapM fmtDimIndex idxs
         ve' <- fmtExp ve
-        body' <- letBody body
         pure $
-          code "let"
-            <+> dest'
-            <> code "["
-            <> idxs' -- It is important that "[" is connected to its expression.
-            <> code "]"
-            <+> code "="
-            <+> ve'
-            <+> body'
-      multiSame = singleSame
-      singleDiff = do
+          sepByLayout ve (
+            code "let"
+              <+> dest'
+              <> idxs'
+              <+> code "="
+            ) ve'
+      singleSame = (<+>) <$> commonSame <*> letBody body
+      multiSame = (</>) <$> commonSame <*> letBody body
+      commonDiff = do
         dest' <- fmtIdent dest
         src' <- fmtIdent src
-        idxs' <- mconcat <$> mapM fmtDimIndex idxs
+        idxs' <- brackets . sep (code ",") <$> mapM fmtDimIndex idxs
         ve' <- fmtExp ve
-        body' <- letBody body
         pure $
-          code "let"
-            <+> dest'
-            <+> code "="
-            <+> src'
-            <+> code "with"
-            <+> idxs'
-            <+> ve'
-            <+> body'
-      multiDiff = singleDiff
+          sepByLayout ve (
+            code "let"
+              <+> dest'
+              <+> code "="
+              <+> src'
+              <+> code "with"
+              <+> idxs'
+            ) ve'
+      singleDiff = (<+>) <$> commonDiff <*> letBody body
+      multiDiff = (</>) <$> commonDiff <*> letBody body
 fmtAppExp (Range start maybe_step end loc) = buildFmt loc single multi
   where
     single = do
@@ -749,24 +751,22 @@ fmtAppExp (If c t f loc) = buildFmt loc single multi
           <+> t'
           <+> code "else"
           <+> f'
-    multi = do
+    multi = do -- This should handle chained if expressions better.
       c' <- fmtExp c
       t' <- fmtExp t
       f' <- fmtExp f
       pure $
         code "if"
           <+> c'
-          </> code "then"
-          <+> t'
+          <+> code "then"
+          </> stdNest t'
           </> code "else"
-          <+> f'
+          </> stdNest f'
 fmtAppExp (Apply f args loc) = buildFmt loc single multi
   where
-    single = do
-      f' <- fmtExp f
-      args' <- mconcat <$> mapM (fmtExp . snd) (toList args)
-      pure $ f' <+> args'
-    multi = single
+    mArgs = sep space <$> mapM (fmtExp . snd) (toList args)
+    single = (<+>) <$> fmtExp f <*> mArgs
+    multi = single -- This should format in a pretty way but I am not sure how.
 
 letBody :: UncheckedExp -> FmtM Fmt
 letBody body@(AppExp LetPat {} _) = fmtExp body
@@ -774,10 +774,8 @@ letBody body@(AppExp LetFun {} _) = fmtExp body
 letBody body@(AppExp LetWith {} _) = fmtExp body 
 letBody body = buildFmt body single multi
   where
-    single = do
-      body' <- fmtExp body
-      pure $ code "in" <+> body'
-    multi = single
+    single = (code "in" <+>) <$> fmtExp body
+    multi = (code "in" </>) <$> fmtExp body
 
 fmtSizeBinder :: SizeBinder Name -> Fmt
 fmtSizeBinder (SizeBinder v _) = brackets $ fmtName v
@@ -816,32 +814,21 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
       args' <- sep space <$> mapM fmtPat args
       retdecl' <-
         case fmtTypeExp <$> retdecl of
-          Just a -> fmap (code ":" <+>) a
+          Just a -> fmap (\b -> code ":" <+> b <> space) a
           Nothing -> pure nil
-      let sub' =
-            if null tparams
-            then nil
-            else space <> tparams'
-      let sub =
-            if null args
-            then nil
-            else sub' <> space <> args'
+      let sub = sepNonEmpty space [tparams', args']
       pure $
         docs
-        <> fmt_attrs
-        <+> fun
+        <> (if null attrs then nil else fmt_attrs <> space)
+        <> fun
         <+> fmtName name
+        <> (if isEmpty sub then nil else space)
         <> sub
         <> retdecl'
-        <+> code "="
-    single = do
-      fmt <- common
-      body' <- fmtExp body
-      pure $ fmt <+> body' <> line <> line
-    multi = do
-      fmt <- common
-      body' <- fmtExp body
-      pure $ stdNest (fmt </> body') <> line <> line
+        <> code "="
+    dLines = (<> (line <> line)) 
+    single = fmap dLines $ (<+>) <$> common <*> fmtExp body
+    multi = fmap (dLines . stdNest) $ (</>) <$> common <*> fmtExp body
     fun =
       case entry of
         Just _ -> code "entry"
@@ -850,9 +837,7 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
 fmtSizeExp :: SizeExp UncheckedExp -> FmtM Fmt
 fmtSizeExp (SizeExp d loc) = buildFmt loc single multi
   where
-    single = do
-      d' <- fmtExp d
-      pure $ brackets d'
+    single = brackets <$> fmtExp d
     multi = single
 fmtSizeExp (SizeExpAny loc) = buildFmt loc single multi
   where
