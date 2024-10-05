@@ -28,18 +28,8 @@ import Data.Set qualified as S
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Error
-import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..))
+import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
 import Language.Futhark.TypeChecker.Types (substTyVars)
-
--- | The reason for a type constraint. Used to generate type error
--- messages.
-newtype Reason = Reason
-  { reasonLoc :: Loc
-  }
-  deriving (Eq, Ord, Show)
-
-instance Located Reason where
-  locOf = reasonLoc
 
 type SVar = VName
 
@@ -67,6 +57,22 @@ type Type = TypeBase SComp NoUniqueness
 -- size: it will throw away information by converting them to SDim.
 toType :: TypeBase Size u -> TypeBase SComp u
 toType = first (const SDim)
+
+-- | The reason for a type constraint. Used to generate type error
+-- messages.
+data Reason
+  = -- | No particular reason.
+    Reason Loc
+  | -- | Arising from pattern match.
+    ReasonPatMatch Loc (PatBase NoInfo VName ParamType) Type
+  | -- | Arising from explicit ascription.
+    ReasonAscription Loc Type Type
+  deriving (Show)
+
+instance Located Reason where
+  locOf (Reason l) = l
+  locOf (ReasonPatMatch l _ _) = l
+  locOf (ReasonAscription l _ _) = l
 
 data Ct
   = CtEq Reason Type Type
@@ -542,14 +548,32 @@ solveEq :: Reason -> BreadCrumbs -> Type -> Type -> SolveM ()
 solveEq reason obcs orig_t1 orig_t2 = do
   solveCt' (obcs, (orig_t1, orig_t2))
   where
-    cannotUnify details = do
+    cannotUnify notes bcs t1 t2 = do
       tyvars <- gets solverTyVars
-      typeError (locOf reason) mempty $
-        "Cannot unify"
-          </> indent 2 (pretty (substTyVars (substTyVar tyvars) orig_t1))
-          </> "with"
-          </> indent 2 (pretty (substTyVars (substTyVar tyvars) orig_t2))
-          </> details
+      case reason of
+        ReasonPatMatch loc pat value_t ->
+          typeError loc notes . stack $
+            [ "Pattern",
+              indent 2 $ align $ pretty pat,
+              "cannot match value of type",
+              indent 2 $ align $ pretty value_t
+            ]
+              <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+        ReasonAscription loc expected actual ->
+          typeError loc notes . stack $
+            [ "Expression does not have expected type from type ascription.",
+              "Expected:" <+> align (pretty expected),
+              "Actual:  " <+> align (pretty actual)
+            ]
+              <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+        Reason loc ->
+          typeError loc notes . stack $
+            [ "Cannot unify",
+              indent 2 (pretty (substTyVars (substTyVar tyvars) t1)),
+              "with",
+              indent 2 (pretty (substTyVars (substTyVar tyvars) t2))
+            ]
+              <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
 
     solveCt' (bcs, (t1, t2)) = do
       tyvars <- gets solverTyVars
@@ -572,7 +596,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
             | v1 == v2 -> pure ()
             | otherwise ->
                 case (flexible v1, flexible v2) of
-                  (False, False) -> cannotUnify $ pretty bcs
+                  (False, False) -> cannotUnify mempty bcs t1 t2
                   (True, False) -> subTyVar reason bcs v1 t2'
                   (False, True) -> subTyVar reason bcs v2 t1'
                   (True, True) -> unionTyVars reason bcs v1 v2
@@ -581,7 +605,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
         (t1', Scalar (TypeVar _ (QualName [] v2) []))
           | flexible v2 -> subTyVar reason bcs v2 t1'
         (t1', t2') -> case unify t1' t2' of
-          Left details -> cannotUnify $ pretty bcs </> details
+          Left details -> cannotUnify (aNote details) bcs t1' t2'
           Right eqs -> mapM_ solveCt' eqs
 
 solveCt :: Ct -> SolveM ()

@@ -510,7 +510,10 @@ checkPat' (TuplePat ps loc) (Ascribed t)
         <*> pure loc
   | otherwise = do
       ps_tvs <- replicateM (length ps) (newTyVar loc Lifted "t")
-      ctEq (Reason (locOf loc)) (Scalar (tupleRecord $ map (tyVarType NoUniqueness) ps_tvs)) t
+      ctEq
+        (ReasonPatMatch (locOf loc) (TuplePat ps loc) (toStruct t))
+        (Scalar (tupleRecord $ map (tyVarType NoUniqueness) ps_tvs))
+        t
       TuplePat <$> zipWithM checkPat' ps (map (Ascribed . tyVarType Observe) ps_tvs) <*> pure loc
 checkPat' (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (`checkPat'` NoneInferred) ps <*> pure loc
@@ -551,7 +554,10 @@ checkPat' (PatAscription p t loc) maybe_outer_t = do
 
   case maybe_outer_t of
     Ascribed outer_t -> do
-      ctEq (Reason (locOf loc)) st' outer_t
+      ctEq
+        (ReasonAscription (locOf loc) (toStruct st') (toStruct outer_t))
+        st'
+        outer_t
       PatAscription
         <$> checkPat' p (Ascribed st')
         <*> pure t'
@@ -1238,7 +1244,7 @@ checkExp (Ascript e te loc) = do
   (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp' te
   e_t <- expType e'
   st' <- asType st
-  ctEq (Reason (locOf e')) e_t st'
+  ctEq (ReasonAscription (locOf e') (toStruct st') (toStruct e_t)) e_t st'
   pure $ Ascript e' te' loc
 checkExp (Coerce e te NoInfo loc) = do
   e' <- checkExp e
