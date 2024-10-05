@@ -509,6 +509,15 @@ unify (Scalar (Record fs1)) (Scalar (Record fs2))
         map (first matchingField) $
           M.toList $
             M.intersectionWith (,) fs1 fs2
+  | Just n1 <- length <$> areTupleFields fs1,
+    Just n2 <- length <$> areTupleFields fs2,
+    n1 /= n2 =
+      Left $
+        "Tuples have"
+          <+> pretty n1
+          <+> "and"
+          <+> pretty n2
+          <+> "elements respectively."
   | otherwise =
       let missing =
             filter (`notElem` M.keys fs1) (M.keys fs2)
