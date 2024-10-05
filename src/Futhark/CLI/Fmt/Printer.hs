@@ -319,7 +319,7 @@ fmtPat (PatParens pat loc) = buildFmt loc single multi
     multi = single
 fmtPat (Id name _ loc) = buildFmt loc single multi
   where
-    single = pure $ fmtName name -- Need to add parenthesis around ++ in tests/uniqueness/uniqueness-error37.fut
+    single = pure $ fmtName name
     multi = single
 fmtPat (Wildcard _t loc) = buildFmt loc single multi
   where
@@ -581,12 +581,13 @@ fmtQualName n = pure $ fmtQualNameSingle n
 fmtCase :: UncheckedCase -> FmtM Fmt
 fmtCase (CasePat p e loc) = buildFmt loc single multi
   where 
-    single = do
-      p' <- fmtPat p
-      e' <- fmtExp e
-      pure $ code "case" <+> p' <+> code "->" <+> e'
-    multi = single
-
+    preSpace t = fmap (code t <+>)
+    preLine t = fmap (stdNest . (code t <+>))
+    single =
+      (<+>) <$> preSpace "case" (fmtPat p) <*> preSpace "->" (fmtExp e)
+    multi =
+      (<+>) <$> preSpace "case" (fmtPat p) <*> preLine "->" (fmtExp e)
+      
 -- Should check if exp match pat
 matchPat :: UncheckedPat ParamType -> UncheckedExp -> Bool
 matchPat _ _ = False
@@ -604,53 +605,53 @@ matchPat _ _ = False
 fmtAppExp :: AppExpBase NoInfo Name -> FmtM Fmt
 fmtAppExp (BinOp (bop, _) _ (x, _) (y, _) loc) = buildFmt loc single multi
   where
-    single = do
-      x' <- fmtExp x
-      y' <- fmtExp y
-      op <- fmtBinOp bop 
-      pure $ x' <+> op <+> y'
-    multi = single
+    f a b c = a <+> b <+> c
+    g a b c= a <+> b </> c
+    single = f <$> fmtExp x <*> fmtBinOp bop <*> fmtExp y
+    multi = g <$> fmtExp x <*> fmtBinOp bop <*> fmtExp y 
 fmtAppExp (Match e cs loc) = buildFmt loc single multi
   where
-    single = do
-      e' <- fmtExp e
-      cs' <- sep line <$> mapM fmtCase (toList cs)
-      pure $ code "match" <+> e' <+> cs'
-    multi = single
+    match = (code "match" <+>) <$> fmtExp e
+    multiCases = sep line <$> mapM fmtCase (toList cs)
+    singleCases = sep space <$> mapM fmtCase (toList cs)
+    single = (<+>) <$> match <*> singleCases
+    multi = fmap stdNest $ (</>) <$> match <*> multiCases
 -- should omit the initial value expression 
 -- need some way to catch when the value expression match the pattern 
 fmtAppExp (Loop sizeparams pat initexp form loopbody loc) | matchPat pat initexp = buildFmt loc single multi
   where
+    op = if null sizeparams then (<>) else (<+>)
     common = do
       let sizeparams' = mconcat $ brackets . fmtName . toName <$> sizeparams
       pat' <- fmtPat pat
       form' <- fmtLoopForm form
       pure $
-        code "loop"
-          <+> sizeparams'
-          <+> pat'
-          <+> form'
-          <+> code "do"
+        sepByLayout pat (
+          code "loop" `op` sizeparams'
+        ) pat'
+        <+> form'
+        <+> code "do"
     single = (<+>) <$> common <*> fmtExp loopbody
-    multi = fmap stdNest $ (<+>) <$> common <*> fmtExp loopbody
+    multi = fmap stdNest $ (</>) <$> common <*> fmtExp loopbody
 fmtAppExp (Loop sizeparams pat initexp form loopbody loc) = buildFmt loc single multi
   where
-    single = do
+    op = if null sizeparams then (<>) else (<+>)
+    common = do
       let sizeparams' = mconcat $ brackets . fmtName . toName <$> sizeparams
       pat' <- fmtPat pat
       initexp' <- fmtExp initexp
       form' <- fmtLoopForm form
-      loopbody' <- fmtExp loopbody
       pure $
-        code "loop"
-          <+> sizeparams'
-          <+> pat'
+        sepByLayout initexp (
+          sepByLayout pat (
+            code "loop" `op` sizeparams'
+          ) pat'
           <+> code "="
-          <+> initexp' 
-          <+> form'
-          <+> code "do"
-          <+> loopbody'
-    multi = single
+        ) initexp' 
+        <+> form'
+        <+> code "do"
+    single = (<+>) <$> common <*> fmtExp loopbody
+    multi = fmap stdNest $ (</>) <$> common <*> fmtExp loopbody
 fmtAppExp (Index e idxs loc) = buildFmt loc single multi
   where
     idxsM = mapM fmtDimIndex idxs
@@ -766,7 +767,7 @@ fmtAppExp (Apply f args loc) = buildFmt loc single multi
   where
     mArgs = sep space <$> mapM (fmtExp . snd) (toList args)
     single = (<+>) <$> fmtExp f <*> mArgs
-    multi = single -- This should format in a pretty way but I am not sure how.
+    multi = fmap stdNest $ (</>) <$> fmtExp f <*> mArgs -- This should format in a pretty way but I am not sure how.
 
 letBody :: UncheckedExp -> FmtM Fmt
 letBody body@(AppExp LetPat {} _) = fmtExp body
@@ -775,7 +776,7 @@ letBody body@(AppExp LetWith {} _) = fmtExp body
 letBody body = buildFmt body single multi
   where
     single = (code "in" <+>) <$> fmtExp body
-    multi = (code "in" </>) <$> fmtExp body
+    multi = fmap stdNest $ (code "in" </>) <$> fmtExp body
 
 fmtSizeBinder :: SizeBinder Name -> Fmt
 fmtSizeBinder (SizeBinder v _) = brackets $ fmtName v
@@ -815,7 +816,7 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
       retdecl' <-
         case fmtTypeExp <$> retdecl of
           Just a -> fmap (\b -> code ":" <+> b <> space) a
-          Nothing -> pure nil
+          Nothing -> pure space
       let sub = sepNonEmpty space [tparams', args']
       pure $
         docs
