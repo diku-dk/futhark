@@ -116,23 +116,26 @@ fromAlgebra = mapSymSoP2M fromAlgebraSymbol
   where
     fromAlgebraSymbol :: (MonadSoP Algebra.Symbol Symbol p m) => Algebra.Symbol -> m (SoP Symbol)
     fromAlgebraSymbol (Algebra.Var x) = pure . sym2SoP $ Var x
-    fromAlgebraSymbol (Algebra.Idx vn i) = do
+    fromAlgebraSymbol (Algebra.Idx (Algebra.One vn) i) = do
       x <- lookupUntransSymUnsafe (Algebra.Var vn)
       sym2SoP . Idx x <$> fromAlgebra i
+    fromAlgebraSymbol (Algebra.Idx (Algebra.POR _) _) =
+      undefined
     fromAlgebraSymbol (Algebra.Mdf _dir vn i j) = do
       -- TODO add monotonicity property to environment?
       a <- fromAlgebra i
       b <- fromAlgebra j
       x <- lookupUntransSymUnsafe (Algebra.Var vn)
       pure $ Idx x a ~-~ Idx x b
-    fromAlgebraSymbol (Algebra.Sum vn lb ub) = do
+    fromAlgebraSymbol (Algebra.Sum (Algebra.One vn) lb ub) = do
       j <- newVName "j"
       a <- fromAlgebra lb
       b <- fromAlgebra ub
       x <- lookupUntransSymUnsafe (Algebra.Var vn)
       pure . sym2SoP $ LinComb j a b x
+    fromAlgebraSymbol (Algebra.Sum (Algebra.POR _) _ _) = undefined
     fromAlgebraSymbol (Algebra.Pow {}) = undefined
-    fromAlgebraSymbol (Algebra.Hole {}) = undefined
+    -- fromAlgebraSymbol (Algebra.Hole {}) = undefined
 
 toAlgebra :: (MonadSoP Algebra.Symbol Symbol p m) => SoP Symbol -> m (SoP Algebra.Symbol)
 toAlgebra = mapSymSoP2M_ toAlgebraSymbol
@@ -155,16 +158,16 @@ toAlgebra = mapSymSoP2M_ toAlgebraSymbol
         boundSymbol x = pure x
 
         toAlgebra_ (Var x) = pure $ Algebra.Var x
-        toAlgebra_ (Hole x) = pure $ Algebra.Hole x
+        -- toAlgebra_ (Hole x) = pure $ Algebra.Hole x
         toAlgebra_ (LinComb _ lb ub x) = do
           vn <- lookupUntrans x
           a <- mapSymSoP2M_ toAlgebra_ lb
           b <- mapSymSoP2M_ toAlgebra_ ub
-          pure $ Algebra.Sum vn a b
+          pure $ Algebra.Sum (Algebra.One vn) a b
         toAlgebra_ (Idx xs i) = do
           vn <- lookupUntrans xs
           j <- mapSymSoP2M_ toAlgebra_ i
-          pure $ Algebra.Idx vn j
+          pure $ Algebra.Idx (Algebra.One vn) j
         toAlgebra_ (Indicator p) = do
           vn <- lookupUntrans p
           pure $ Algebra.Var vn

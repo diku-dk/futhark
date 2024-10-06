@@ -49,8 +49,8 @@ matchMonIdxDif t1@(sym1, (ms1,k1)) t2@(sym2, (ms2,k2))
   | (k1 /= k2 && k1 /= 0-k2) || (ms1 /= ms2) =
   pure Nothing
   -- case 1:
-  | Idx anm aidx <- sym1,
-    Idx bnm bidx <- sym2,
+  | Idx (One anm) aidx <- sym1,
+    Idx (One bnm) bidx <- sym2,
     anm == bnm && k1 == 0-k2 = do
   tab_props  <- getProperties
   case hasMon (fromMaybe S.empty $ M.lookup (Var anm) tab_props) of
@@ -59,16 +59,16 @@ matchMonIdxDif t1@(sym1, (ms1,k1)) t2@(sym2, (ms2,k2))
                  mkEquivSoPs (Mdf dir anm aidx bidx, sym1, sym2) (ms1, k1, k2)
   -- case 2:
   | Mdf _ anm i1 i2 <- sym1,
-    Idx bnm i3 <- sym2,
+    Idx (One bnm) i3 <- sym2,
     anm == bnm && k1 == k2 && i3 == i2 =
   pure $ Just $
-    mkEquivSoPs (Idx anm i1, sym1, sym2) (ms1, k1, k2)
+    mkEquivSoPs (Idx (One anm) i1, sym1, sym2) (ms1, k1, k2)
   -- case 3:
   | Mdf _ anm i1 i2 <- sym1,
-    Idx bnm i3 <- sym2,
+    Idx (One bnm) i3 <- sym2,
     anm == bnm && k1 == 0 - k2 && i1 == i3 =
   pure $ Just $
-    mkEquivSoPs (Idx anm i2, sym2, sym1) (ms1, k2, k1)
+    mkEquivSoPs (Idx (One anm) i2, sym2, sym1) (ms1, k2, k1)
   -- reverse of cases 2 and 3:
   | (Idx{}, Mdf{}) <- (sym1, sym2) = matchMonIdxDif t2 t1
   -- case 4:

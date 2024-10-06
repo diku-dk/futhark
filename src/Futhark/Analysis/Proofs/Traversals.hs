@@ -69,4 +69,4 @@ instance ASTMappable Algebra.Symbol Algebra.Symbol where
     mapOnSymbol m =<< Algebra.Sum vn <$> astMap m lb <*> astMap m ub
   astMap m (Algebra.Pow (c, x)) =
     mapOnSymbol m . curry Algebra.Pow c =<< astMap m x
-  astMap _ (Algebra.Hole _) = undefined -- Cosmin said he would remove Hole so leaving undefined.
+--  astMap _ (Algebra.Hole _) = undefined -- Cosmin said he would remove Hole so leaving undefined.
