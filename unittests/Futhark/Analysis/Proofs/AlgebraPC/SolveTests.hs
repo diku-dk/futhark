@@ -35,13 +35,16 @@ tests =
     "Proofs.AlgebraPC.SolveTests"
     [ testCase "Pow Exact Norm" $
         run
-          ( do
+          ( forM [1..100000] $ \ kk -> do
               let xy_p_3x= sVar x .*. (sVar y .+. int 3)
                   pow_xy = int 2 .*. sVar i1 .*. sym2SoP (Pow(2, xy_p_3x)) 
                   pow_z  = int 8 .*. sVar i2 .*. sym2SoP (Pow (2, sVar z .*. int 2)) 
-              simplifyLevel $ pow_xy .*. pow_z
+              simplifyLevel $ pow_xy .*. pow_z .+. int kk
           )
-          @??= (sVar i1 .*. sVar i2 .*. sym2SoP (Pow(2, sVar x .*. sVar y .+. int 3 .*. sVar x .+. int 2 .*. sVar z .+. int 4))),
+          @??= map (\ kk ->
+                       let expo = sVar x .*. sVar y .+. int 3 .*. sVar x .+. int 2 .*. sVar z .+. int 4
+                       in  sVar i1 .*. sVar i2 .*. sym2SoP (Pow(2, expo)) .+. int kk
+                   ) [1..100000],
       testCase "Sum subtraction and Peel off (from partition2)" $
         run
           ( do
@@ -68,7 +71,7 @@ tests =
                ),
       testCase "Complex sum subtraction" $
         run
-          ( forM [1..10000] $ \i -> do
+          ( forM [1..1000] $ \i -> do
               let sum1 = sym2SoP $ Sum a (int 2 .*. sVar i2) $ int 3 .*. sVar i3
                   idx1 = sym2SoP $ Idx a $ int 3 .*. sVar i3 .+. int 1
                   sum2 = sym2SoP $ Sum a (int 2 .*. sVar i1) $ int 3 .*. sVar i3 .+. sVar n .-. int 1
@@ -79,7 +82,7 @@ tests =
                        let sum1 = sym2SoP $ Sum a (int 2 .*. sVar i2) $ int 2 .*. sVar i1 .-. int 1
                            sum2 = sym2SoP $ Sum a (int 3 .*. sVar i3 .+. int 2) $ int 3 .*. sVar i3 .+. sVar n
                        in  sum1 .-. sum2 .+. int i
-                     ) [1..10000]
+                     ) [1..1000]
                )
     ]
   where
