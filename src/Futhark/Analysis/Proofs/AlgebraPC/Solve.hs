@@ -63,6 +63,8 @@ findSymbolLEq0 sop = do
   sop''<- if S.null $ S.filter hasPow (free sop')
           then pure sop'
           else powEquiv sop'
+  -- find me a special symbol to eliminate; please refine the ranges for it
+  -- if none such symbol was found, default to `FM.findSymLEq0Def`
   pure (sop'', Nothing)
 
 powEquiv :: (Expression e, Ord e) => SoP Symbol -> AlgM e (SoP Symbol)
@@ -96,7 +98,7 @@ powEquiv sop
        if t_lt0
        then simplify $ e2 .-. e1
        else pure sop
--- need cases for two terms where only one is a constant.
+-- ToDo: need cases for two terms where only one is a constant.
 powEquiv sop = pure sop
     
 
