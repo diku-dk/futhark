@@ -37,6 +37,7 @@ import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 import Prelude hiding (rem)
+import Debug.Trace
 
 -- | Generate HIP host and device code.
 kernelsToHIP :: ImpGPU.Program -> ImpOpenCL.Program
@@ -275,6 +276,16 @@ generateDeviceFun fname device_func = do
                   genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $
                     GC.compileFun mempty params (fname, device_func)
              in (f, GC.compUserState cstate)
+          else if fname == "gemm_123456"
+            then              
+              let (f, cstate) = trace "GENERATING GEMM FUNCTION" $
+                    genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $ do
+                        -- TODO: We need to insert #define here to remove memorblock_shared
+                        -- We could probably create a new module for the CuTe stuff
+                        GC.stm [C.cstm|// Test
+                        {}|]
+                        GC.compileVoidFun mempty (fname, device_func)
+              in (f, GC.compUserState cstate)
           else
             let (f, cstate) =
                   genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $

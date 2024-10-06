@@ -110,8 +110,7 @@ gemmName = "gemm_123456"
 
 fixFuns :: Stms GPUMem -> FunDef GPUMem -> PassM (FunDef GPUMem)
 fixFuns consts fun
-  | funDefName fun == gemmName = let fun' = fixGemmFun fun in
-    trace (prettyString fun') $ pure fun'
+  | funDefName fun == gemmName = pure $ fixGemmFun fun
   | otherwise = do
       let initScope = scopeOf consts
       let body = funDefBody fun
@@ -147,8 +146,6 @@ defScalarSpace = ScalarSpace [Constant (IntValue (Int64Value 1))]
 fixStmtsWithScope :: Scope GPUMem -> Stms GPUMem -> PassM (Stms GPUMem)
 fixStmtsWithScope scope stms = do
   (res, _, _) <- runRWST (fixStmts stms) scope []
-  traceM "FINAL RES"
-  traceM (prettyString res)
   pure res
 
 fixStmts :: Stms GPUMem -> FixMonad (Stms GPUMem)

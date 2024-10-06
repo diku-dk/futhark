@@ -349,6 +349,7 @@ library
       Futhark.Optimise.Unstream
       Futhark.Pass
       Futhark.Pass.AD
+      Futhark.Pass.InitNames
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
       Futhark.Pass.ExplicitAllocations.GPU
