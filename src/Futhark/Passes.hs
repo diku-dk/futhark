@@ -172,6 +172,8 @@ gpumemPipeline =
         MemoryBlockMerging.optimise,
         simplifyGPUMem,
         expandAllocations,
+        simplifyGPUMem,
+        intraMMMMemFixup,
         simplifyGPUMem
       ]
 
