@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Some instances of invalid copy removal. (Again.)
 
+* An issue related to entry points with nontrivial sizes in their
+  arguments, where the entry points were also used as normal functions
+  elsewhere. (#2184)
+
 ## [0.25.22]
 
 ### Added
