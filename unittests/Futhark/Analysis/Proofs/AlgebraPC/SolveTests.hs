@@ -18,6 +18,11 @@ import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
 
+-------------------------------------
+-- Run with:
+--  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"
+-------------------------------------
+
 -- runTest :: IndexFnM a -> a
 -- runTest test = fst $ runIndexFnM test blankNameSource
 
@@ -100,8 +105,9 @@ tests =
         <*> newVName "n"
         <*> newVName "A"
         <*> newVName "B"
-    (x, y, z, i1, i2, i3, n, a, b) = runTest varsM env_empty
-
+    (x, y, z, i1, i2, i3, n, a0, b0) = runTest varsM env_empty
+    (a, b) = (One a0, One b0)
+    
     (n_rg, i1_rg, i2_rg, i3_rg) =
       ( Range (S.singleton (int 1)) 1 S.empty
       , Range (S.singleton (int 0)) 1 $ S.singleton $ sVar n  .-. int 1
