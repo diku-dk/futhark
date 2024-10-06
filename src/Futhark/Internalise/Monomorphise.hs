@@ -60,10 +60,10 @@ newtype PolyBinding
         SrcLoc
       )
 
--- | To deduplicate size expressions, we want a looser notation of
+-- | To deduplicate size expressions, we want a looser notion of
 -- equality than the strict syntactical equality provided by the Eq
--- instance on Exp.  This newtype wrapper provides such a looser
--- notion of equality.
+-- instance on Exp. This newtype wrapper provides such a looser notion
+-- of equality.
 newtype ReplacedExp = ReplacedExp {unReplaced :: Exp}
   deriving (Show)
 
