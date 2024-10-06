@@ -9,6 +9,7 @@ where
 -- import Data.Foldable
 -- import Control.Monad
 import qualified Data.Set as S
+import qualified Data.MultiSet as MS
 -- import Futhark.SoP.Monad
 import Futhark.SoP.Expression
 import Futhark.SoP.SoP
@@ -16,7 +17,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Algebra
 import Futhark.Analysis.Proofs.AlgebraPC.All2AllDriver
 import Futhark.Analysis.Proofs.AlgebraPC.UnaryRules
 -- import Language.Futhark (VName)
--- import qualified Futhark.SoP.FourierMotzkin as FM
+import qualified Futhark.SoP.FourierMotzkin as FM
 import Futhark.SoP.Monad
 import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap)
 -- import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
@@ -54,6 +55,50 @@ simplifyLevel sop0 = do
 --- Some Thinking but the code below is garbage ---
 ---------------------------------------------------
 
+-- | finds a symbol
+findSymbolLEq0 :: (Expression e, Ord e) =>
+    SoP Symbol -> AlgM e (SoP Symbol, Maybe (Symbol, Range Symbol))
+findSymbolLEq0 sop = do
+  sop' <- simplify sop
+  sop''<- if S.null $ S.filter hasPow (free sop')
+          then pure sop'
+          else powEquiv sop'
+  pure (sop'', Nothing)
+
+powEquiv :: (Expression e, Ord e) => SoP Symbol -> AlgM e (SoP Symbol)
+powEquiv sop
+  -- Single term: a sufficient condition for `t * 2^expo <= 0`
+  --              is `t <= 0`, since 2^expo is always >= 1
+  | Just (Term mset, k) <- justSingleTerm sop,
+    (mset_pows, mset_others) <- MS.partition hasPow mset,
+    length (MS.toOccurList mset_pows) >= 1 =
+  pure $ term2SoP (Term mset_others) k
+  -- Two terms involving same pow with different exponents.
+  -- Sufficient conditions for
+  --   `t * 2^e1 - t * 2^e2 <= 0`, which is equivalent with:
+  --   `t * 2^e1 <= t * 2^e2`
+  -- are: 
+  --    (t >= 0) && (e1 <= e2) || (t <= 0 && (e2 <= e1))  
+  | [(Term ms1, k1), (Term ms2, k2)] <- sopToList sop,
+    (mset1_pow, mset1_others) <- MS.partition hasPow ms1,
+    (mset2_pow, mset2_others) <- MS.partition hasPow ms2,
+    [(pow1, m1)] <- MS.toOccurList mset1_pow,
+    [(pow2, m2)] <- MS.toOccurList mset2_pow,
+    (Pow (b1,expo1), Pow (b2, expo2)) <- (pow1, pow2),
+    b1 == b2 && k1 == 0-k2 && m1 == m2 && mset1_others == mset2_others = do
+  let (e1, e2, k) = if k1 > 0 then (expo1, expo2, k1) else (expo2, expo1, k2)
+      t_sop = term2SoP (Term mset1_others) k
+  t_gt0 <- (int2SoP 0) FM.$<=$ t_sop
+  if t_gt0
+  then simplify $ e1 .-. e2
+  else do
+       t_lt0 <- (int2SoP 0) FM.$>=$ t_sop
+       if t_lt0
+       then simplify $ e2 .-. e1
+       else pure sop
+-- need cases for two terms where only one is a constant.
+powEquiv sop = pure sop
+    
 
 -- | this function is inteneded to do most of the work:
 --   1. it simplifies the input SoP based on high-level rules

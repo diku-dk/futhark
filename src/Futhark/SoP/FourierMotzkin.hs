@@ -18,7 +18,8 @@
 --   if negative it is equivalent to `max(e1 * sop, e2 * sop)`, where
 --   `e1 * sop` and `e2 * sop` are recursively translated.
 module Futhark.SoP.FourierMotzkin
-  ( fmSolveLTh0,
+  ( findSymLEq0Def,
+    fmSolveLTh0,
     fmSolveLEq0,
     fmSolveGTh0,
     fmSolveGEq0,
@@ -35,7 +36,25 @@ import Data.Set qualified as S
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
-import Futhark.Util.Pretty
+-- import Futhark.Util.Pretty
+
+-- | Finds the next symbol to eliminate by choosing the
+--     symbol with the most-dependent ranges. This is a
+--     default implementation that can be extended according
+--     to the particularities of the Symbol language.
+--   The result is:
+--     (equivalent-sop, Maybe(symbol-to-eliminate, its range))
+findSymLEq0Def :: (MonadSoP u e p m) => SoP u -> m (SoP u, Maybe (u, Range u))
+findSymLEq0Def sop = do
+  rs <- getRanges
+  let syms = S.toList $ free sop
+      is = map (\s -> (length $ transClosInRanges rs $ S.singleton s, s)) syms
+  case is of
+    [] -> pure (sop, Nothing)
+    _  -> do
+            let i = snd $ maximum $ is
+            rg <- lookupRange i
+            pure $ (sop, Just (i, rg))
 
 ---------------------------------------------
 --- Fourier-Motzkin elimination algorithm ---
@@ -81,6 +100,39 @@ fmSolveGEq0 = fmSolveLEq0 . negSoP
 fmSolveLEq0 :: (MonadSoP u e p m) => SoP u -> m Bool
 fmSolveLEq0 sop = do
   sop' <- substEquivs sop
+  case justConstant sop' of
+    Just v -> pure (v <= 0)
+    Nothing-> do
+      sym_w_range <- findSymLEq0Def sop'
+      case sym_w_range of
+        (_,Nothing) -> pure False
+        (sop'', Just (i, rg)) ->
+          divAndConqFM sop'' i rg
+  where
+    divAndConqFM sop1 i (Range lb k ub) = do
+      let (a, b) = factorSoP [i] sop1
+      a_leq_0 <- fmSolveLEq0 a
+      al_leq_0 <-
+        anyM
+          ( \l ->
+              fmSolveLEq0 $
+                a .*. l .+. int2SoP k .*. b
+          )
+          (S.toList lb)
+      a_geq_0 <- fmSolveLEq0 $ negSoP a
+      au_leq_0 <-
+        anyM
+          ( \u ->
+              fmSolveLEq0 $
+                a .*. u .+. int2SoP k .*. b
+          )
+          (S.toList ub)
+      pure (a_leq_0 && al_leq_0 || a_geq_0 && au_leq_0)
+
+{--
+fmSolveLEq0 :: (MonadSoP u e p m) => SoP u -> m Bool
+fmSolveLEq0 sop = do
+  sop' <- substEquivs sop
   let syms = S.toList $ free sop'
   case (justConstant sop', not (null syms)) of
     (Just v, _) -> pure (v <= 0)
@@ -112,6 +164,7 @@ fmSolveLEq0 sop = do
           (S.toList ub)
       pure (a_leq_0 && al_leq_0 || a_geq_0 && au_leq_0)
     _ -> pure False
+--}
 
 ($<$) :: (MonadSoP u e p m) => SoP u -> SoP u -> m Bool
 x $<$ y = fmSolveLTh0 $ x .-. y
