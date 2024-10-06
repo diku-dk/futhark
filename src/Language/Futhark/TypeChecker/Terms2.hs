@@ -840,9 +840,9 @@ checkRetDecl body Nothing = (,Nothing) <$> expType body
 checkRetDecl body (Just te) = do
   (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp' te
   body_t <- expType body
-  st' <- asType st
-  ctEq (Reason (locOf body)) body_t st'
-  pure (second (const NoUniqueness) st', Just te')
+  st' <- toStruct <$> asType st
+  ctEq (ReasonRetType (locOf body) st' body_t) st' body_t
+  pure (st', Just te')
 
 checkExp :: ExpBase NoInfo VName -> TermM (ExpBase Info VName)
 --
@@ -1372,7 +1372,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         bitraverse
           pure
           (fmap (second (onArtificial artificial)) . onTySolution params' body'')
-          $ solve cts' typarams tyvars'
+          $ solve (reverse cts') typarams tyvars'
       debugTraceM 3 $
         unlines
           [ "## constraints:",

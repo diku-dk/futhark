@@ -59,7 +59,7 @@ toType :: TypeBase Size u -> TypeBase SComp u
 toType = first (const SDim)
 
 -- | The reason for a type constraint. Used to generate type error
--- messages.
+-- messages. The expected type is always the first one.
 data Reason
   = -- | No particular reason.
     Reason Loc
@@ -67,12 +67,14 @@ data Reason
     ReasonPatMatch Loc (PatBase NoInfo VName ParamType) Type
   | -- | Arising from explicit ascription.
     ReasonAscription Loc Type Type
-  deriving (Show)
+  | ReasonRetType Loc Type Type
+  deriving (Eq, Show)
 
 instance Located Reason where
   locOf (Reason l) = l
   locOf (ReasonPatMatch l _ _) = l
   locOf (ReasonAscription l _ _) = l
+  locOf (ReasonRetType l _ _) = l
 
 data Ct
   = CtEq Reason Type Type
@@ -227,6 +229,12 @@ solution s =
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except TypeError) a}
   deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError TypeError)
 
+-- Try to substitute as much information as we have.
+enrichType :: Type -> SolveM Type
+enrichType t = do
+  s <- get
+  pure $ substTyVars (substTyVar (solverTyVars s)) t
+
 typeError :: Loc -> Notes -> Doc () -> SolveM ()
 typeError loc notes msg =
   throwError $ TypeError loc notes msg
@@ -284,6 +292,50 @@ scopeViolation reason v1 ty v2 =
       </> "This is because"
       <+> dquotes (prettyName v2)
       <+> "is rigidly bound in a deeper scope."
+
+cannotUnify ::
+  Reason ->
+  Notes ->
+  BreadCrumbs ->
+  Type ->
+  Type ->
+  SolveM ()
+cannotUnify reason notes bcs t1 t2 = do
+  t1' <- enrichType t1
+  t2' <- enrichType t2
+  case reason of
+    ReasonPatMatch loc pat value_t ->
+      typeError loc notes . stack $
+        [ "Pattern",
+          indent 2 $ align $ pretty pat,
+          "cannot match value of type",
+          indent 2 $ align $ pretty value_t
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    ReasonAscription loc expected actual ->
+      typeError loc notes . stack $
+        [ "Expression does not have expected type from type ascription.",
+          "Expected:" <+> align (pretty expected),
+          "Actual:  " <+> align (pretty actual)
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    ReasonRetType loc expected actual -> do
+      expected' <- enrichType expected
+      actual' <- enrichType actual
+      typeError loc notes . stack $
+        [ "Function body does not have expected type.",
+          "Expected:" <+> align (pretty expected'),
+          "Actual:  " <+> align (pretty actual')
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    Reason loc ->
+      typeError loc notes . stack $
+        [ "Cannot unify",
+          indent 2 (pretty t1'),
+          "with",
+          indent 2 (pretty t2')
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
 
 -- Precondition: 'v' is currently flexible.
 subTyVar :: Reason -> BreadCrumbs -> VName -> Type -> SolveM ()
@@ -548,33 +600,6 @@ solveEq :: Reason -> BreadCrumbs -> Type -> Type -> SolveM ()
 solveEq reason obcs orig_t1 orig_t2 = do
   solveCt' (obcs, (orig_t1, orig_t2))
   where
-    cannotUnify notes bcs t1 t2 = do
-      tyvars <- gets solverTyVars
-      case reason of
-        ReasonPatMatch loc pat value_t ->
-          typeError loc notes . stack $
-            [ "Pattern",
-              indent 2 $ align $ pretty pat,
-              "cannot match value of type",
-              indent 2 $ align $ pretty value_t
-            ]
-              <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
-        ReasonAscription loc expected actual ->
-          typeError loc notes . stack $
-            [ "Expression does not have expected type from type ascription.",
-              "Expected:" <+> align (pretty expected),
-              "Actual:  " <+> align (pretty actual)
-            ]
-              <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
-        Reason loc ->
-          typeError loc notes . stack $
-            [ "Cannot unify",
-              indent 2 (pretty (substTyVars (substTyVar tyvars) t1)),
-              "with",
-              indent 2 (pretty (substTyVars (substTyVar tyvars) t2))
-            ]
-              <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
-
     solveCt' (bcs, (t1, t2)) = do
       tyvars <- gets solverTyVars
       let flexible v = case M.lookup v tyvars of
@@ -596,7 +621,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
             | v1 == v2 -> pure ()
             | otherwise ->
                 case (flexible v1, flexible v2) of
-                  (False, False) -> cannotUnify mempty bcs t1 t2
+                  (False, False) -> cannotUnify reason mempty bcs t1 t2
                   (True, False) -> subTyVar reason bcs v1 t2'
                   (False, True) -> subTyVar reason bcs v2 t1'
                   (True, True) -> unionTyVars reason bcs v1 v2
@@ -605,7 +630,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
         (t1', Scalar (TypeVar _ (QualName [] v2) []))
           | flexible v2 -> subTyVar reason bcs v2 t1'
         (t1', t2') -> case unify t1' t2' of
-          Left details -> cannotUnify (aNote details) bcs t1' t2'
+          Left details -> cannotUnify reason (aNote details) bcs t1' t2'
           Right eqs -> mapM_ solveCt' eqs
 
 solveCt :: Ct -> SolveM ()
