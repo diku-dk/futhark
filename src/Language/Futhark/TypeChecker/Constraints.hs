@@ -251,7 +251,7 @@ unifySharedConstructors ::
 unifySharedConstructors reason bcs cs1 cs2 =
   forM_ (M.toList $ M.intersectionWith (,) cs1 cs2) $ \(c, (ts1, ts2)) ->
     if length ts1 == length ts2
-      then zipWithM_ (solveEq reason bcs) ts1 ts2
+      then zipWithM_ (solveEq reason $ matchingConstructor c <> bcs) ts1 ts2
       else
         typeError (locOf reason) mempty $
           "Cannot unify type with constructor"
@@ -532,12 +532,12 @@ unify (Scalar (Record fs1)) (Scalar (Record fs2))
             "Unshared fields:" <+> commasep (map pretty missing) <> "."
 unify (Scalar (Sum cs1)) (Scalar (Sum cs2))
   | M.keys cs1 == M.keys cs2 =
-      fmap concat . forM cs' $ \(ts1, ts2) -> do
+      fmap concat . forM cs' $ \(c, (ts1, ts2)) -> do
         if length ts1 == length ts2
-          then Right $ zipWith (curry (mempty,)) ts1 ts2
+          then Right $ zipWith (curry (matchingConstructor c,)) ts1 ts2
           else Left mempty
   where
-    cs' = M.elems $ M.intersectionWith (,) cs1 cs2
+    cs' = M.toList $ M.intersectionWith (,) cs1 cs2
 unify t1 t2
   | Just t1' <- peelArray 1 t1,
     Just t2' <- peelArray 1 t2 =
