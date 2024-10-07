@@ -30,6 +30,11 @@ import System.Exit
 import System.FilePath
 import System.IO
 import System.Random
+import Language.Futhark.Parser
+  ( Comment (..),
+    SyntaxError (..),
+    parseFutharkWithComments,
+  )
 
 -- | @futhark imports@
 mainImports :: String -> [String] -> IO ()
@@ -45,12 +50,18 @@ mainImports = mainWithOptions () [] "program" $ \args () ->
 mainHash :: String -> [String] -> IO ()
 mainHash = mainWithOptions () [] "program" $ \args () ->
   case args of
-    [file] -> Just $ do
-      prog <- filter (not . isBuiltin . fst) <$> readUntypedProgramOrDie file
+    [] -> Just $ onInput . parse "<stdin>" =<< T.getContents
+    [file] | not $ isBuiltin file -> Just $ onInput . parse file =<< T.readFile file
+    _any -> Nothing
+  where
+    parse a b =
+      case parseFutharkWithComments a b of
+        Left err -> error $ T.unpack $ syntaxErrorMsg err
+        Right (prog, _cs) -> prog
+    onInput prog = do
       -- The 'map snd' is an attempt to get rid of the file names so
       -- they won't affect the hashing.
-      liftIO $ T.putStrLn $ hashText $ prettyTextOneLine $ map snd prog
-    _ -> Nothing
+      liftIO $ T.putStrLn $ hashText $ prettyTextOneLine prog
 
 -- | @futhark dataget@
 mainDataget :: String -> [String] -> IO ()
