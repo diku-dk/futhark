@@ -2,7 +2,27 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
-  python = pkgs.python311Packages;
+  python = pkgs.python311.withPackages (ps: with ps; [
+    (
+      buildPythonPackage rec {
+        pname = "PuLP";
+        version = "2.7.0";
+        src = fetchPypi {
+          inherit pname version;
+          sha256 = "sha256-5z7msy1jnJuM9LSt7TNLoVi+X4MTVE4Fb3lqzgoQrmM=";
+        };
+        doCheck = false;
+      }
+    )
+    ps.mypy
+    black
+    numpy
+    pyopencl
+    matplotlib
+    jsonschema
+    sphinx
+    sphinxcontrib-bibtex
+  ]);
   haskell = pkgs.haskell.packages.ghc96;
 in
 pkgs.stdenv.mkDerivation {
@@ -31,16 +51,9 @@ pkgs.stdenv.mkDerivation {
       ghcid
       niv
       ispc
-      python.python
-      python.mypy
-      python.black
-      python.numpy
-      python.pyopencl
-      python.matplotlib
-      python.jsonschema
-      python.sphinx
-      python.sphinxcontrib-bibtex
+      python
       imagemagick # needed for literate tests
+      glpk
     ]
     ++ lib.optionals (stdenv.isLinux)
       [ opencl-headers
