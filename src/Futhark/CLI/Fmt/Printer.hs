@@ -327,10 +327,8 @@ fmtPat (Wildcard _t loc) = buildFmt loc single multi
     multi = single
 fmtPat (PatAscription pat t loc) = buildFmt loc single multi
   where
-    single = do
-      pat' <- fmtPat pat
-      t' <- fmtTypeExp t
-      pure $ pat' <> code ":" <+> t'
+    pat' = (<> code ":") <$> fmtPat pat
+    single = (<+>) <$> pat' <*> fmtTypeExp t
     multi = single
 fmtPat (PatLit e _ loc) = buildFmt loc single multi
   where
@@ -338,25 +336,21 @@ fmtPat (PatLit e _ loc) = buildFmt loc single multi
     multi = single
 fmtPat (PatConstr n _ pats loc) = buildFmt loc single multi
   where
-    single = do
-      pats' <- sep space <$> mapM fmtPat pats
-      pure $ code "#" <> fmtPretty n <+> pats'
-    multi = single
+    common s = sep s <$> mapM fmtPat pats
+    cons = pure $ code "#" <> fmtName n
+    single = (<+>) <$> cons <*> common space
+    multi = fmap stdNest $ (</>) <$> cons <*> common line
 fmtPat (PatAttr attr pat loc) = buildFmt loc single multi
   where
-    single = do
-      attr' <- fmtAttr attr
-      pat' <- fmtPat pat
-      pure $ attr' <+> pat'
+    single = (<+>) <$> fmtAttr attr <*> fmtPat pat
     multi = single
 
 fmtField :: FieldBase NoInfo Name -> FmtM Fmt
 fmtField (RecordFieldExplicit name e loc) = buildFmt loc single multi
   where
-    single = do
-      e' <- fmtExp e
-      pure $ fmtName name <+> code "=" <+> e'
-    multi = single
+    common = fmtName name <+> code "="
+    single = (common <+>) <$> fmtExp e
+    multi = (common </>) <$> fmtExp e
 fmtField (RecordFieldImplicit name _ loc) = buildFmt loc single multi
   where
     single = pure $ fmtName name
@@ -470,39 +464,32 @@ fmtExp (Project k e _ loc) = buildFmt loc single multi
     multi = single
 fmtExp (Negate e loc) = buildFmt loc single multi
   where
-    single = do
-      e' <- fmtExp e
-      pure $ code "-" <> e'
+    single = (code "-" <>) <$> fmtExp e
     multi = single
 fmtExp (Not e loc) = buildFmt loc single multi
   where
-    single = do
-      e' <- fmtExp e
-      pure $ code "not" <+> e'
+    single = (code "not" <>) <$> fmtExp e
     multi = single
 fmtExp (Update src idxs ve loc) = buildFmt loc single multi
   where
-    single = do
-      src' <- fmtExp src
-      idxs' <- brackets . sep (code ", ") <$> mapM fmtDimIndex idxs
-      ve' <- fmtExp ve
-      pure $ src' <+> code "with" <+> idxs' <+> code "=" <+> ve'
-    multi = single
+    common = do
+      src' <- fmtExp src -- This could account for multiline.
+      idxs' <- brackets . sep (code ", ") <$> mapM fmtDimIndex idxs -- This could account for multiline.
+      pure $ src' <+> code "with" <+> idxs' <+> code "="
+    single = (<+>) <$> common <*> fmtExp ve
+    multi = (</>) <$> common <*> fmtExp ve
 fmtExp (RecordUpdate src fs ve _ loc) = buildFmt loc single multi
   where
-    single = do
-      src' <- fmtExp src
-      let fs' = sep (code ".") $ fmtName <$> fs
-      ve' <- fmtExp ve
-      pure $ src' <+> code "with" <+> fs' <+> code "=" <+> ve'
-    multi = single
+    common = do
+      src' <- fmtExp src  -- This could account for multiline.
+      let fs' = sep (code ".") $ fmtName <$> fs -- This could account for multiline.
+      pure $ src' <+> code "with" <+> fs' <+> code "="
+    single = (<+>) <$> fmtExp ve <*> common
+    multi = (</>) <$> fmtExp ve <*> common
 fmtExp (Assert e1 e2 _ loc) = buildFmt loc single multi
   where
-    single = do
-      e1' <- fmtExp e1
-      e2' <- fmtExp e2
-      pure $ code "assert" <+> e1' <+> e2'
-    multi = single
+    single = (<+>) <$> ((code "assert" <+>) <$> fmtExp e1) <*> fmtExp e2
+    multi = fmap stdNest $ (</>) <$> ((code "assert" </>) <$> fmtExp e1) <*> fmtExp e2
 fmtExp (Lambda params body rettype _ loc) = buildFmt loc single multi
   where
     common = do
@@ -517,17 +504,11 @@ fmtExp (OpSection binop _ loc) = buildFmt loc single multi
     multi = single
 fmtExp (OpSectionLeft binop _ x _ _ loc) = buildFmt loc single multi
   where
-    single = do
-      x' <- fmtExp x
-      op <- fmtBinOp binop
-      pure $ parens (x' <+> op)
+    single = fmap parens $ (<+>) <$> fmtExp x <*> fmtBinOp binop
     multi = single
 fmtExp (OpSectionRight binop _ x _ _ loc) = buildFmt loc single multi
   where
-    single = do
-      x' <- fmtExp x
-      op <- fmtBinOp binop
-      pure $ parens (op <+> x')
+    single = fmap parens $ (<+>) <$> fmtBinOp binop <*> fmtExp x
     multi = single
 fmtExp (ProjectSection fields _ loc) = buildFmt loc single multi
   where
@@ -542,17 +523,14 @@ fmtExp (IndexSection idxs _ loc) = buildFmt loc single multi
     multi = single
 fmtExp (Constr n cs _ loc) = buildFmt loc single multi
   where
-    single = do
-      cs' <- sep space <$> mapM fmtExp cs
-      pure $ code "#" <> fmtName n <> cs'
-    multi = single
+    cons = pure $ code "#" <> fmtName n
+    common s = sep s <$> mapM fmtExp cs
+    single = (<+>) <$> cons <*> common space
+    multi = fmap stdNest $ (</>) <$> cons <*> common line
 fmtExp (Attr attr e loc) = buildFmt loc single multi
   where
-    single = do
-      attr' <- fmtAttr attr
-      e' <- fmtExp e
-      pure $ attr' <> e'
-    multi = single
+    single = (<+>) <$> fmtAttr attr <*> fmtExp e
+    multi = (</>) <$> fmtAttr attr <*> fmtExp e
 fmtExp (AppExp e _loc) = buildFmt e single multi
   where
     single = fmtAppExp e
@@ -606,7 +584,7 @@ fmtAppExp :: AppExpBase NoInfo Name -> FmtM Fmt
 fmtAppExp (BinOp (bop, _) _ (x, _) (y, _) loc) = buildFmt loc single multi
   where
     f a b c = a <+> b <+> c
-    g a b c= a <+> b </> c
+    g a b c= a </> b <+> c
     single = f <$> fmtExp x <*> fmtBinOp bop <*> fmtExp y
     multi = g <$> fmtExp x <*> fmtBinOp bop <*> fmtExp y 
 fmtAppExp (Match e cs loc) = buildFmt loc single multi
