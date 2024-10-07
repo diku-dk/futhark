@@ -241,7 +241,7 @@ fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = buildFmt loc single multi
       e' <- fmtTypeExp e
       pure $
         dc'
-        </> (code "type"
+        <> (code "type"
              <> l'
              <+> fmtName name
              <> code (if null ps then "" else " ")
@@ -253,7 +253,7 @@ fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = buildFmt loc single multi
       e' <- fmtTypeExp e
       pure $
         dc'
-          </> (code "type"
+          <> (code "type"
                <> l'
                <+> fmtName name
                <> sep space ps'
@@ -487,7 +487,7 @@ fmtExp (Lambda params body rettype _ loc) = buildFmt loc single multi
     multi = fmap stdNest $ (</>) <$> common <*> fmtExp body
 fmtExp (OpSection binop _ loc) = buildFmt loc single multi
   where
-    single = parens <$> fmtQualName binop
+    single = fmtQualName binop
     multi = single
 fmtExp (OpSectionLeft binop _ x _ _ loc) = buildFmt loc single multi
   where
@@ -793,7 +793,7 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
         <> retdecl'
         <> code "="
     single = (<+>) <$> common <*> fmtExp body
-    multi = fmap (stdNest) $ (</>) <$> common <*> fmtExp body
+    multi = fmap stdNest $ (</>) <$> common <*> fmtExp body
     fun =
       case entry of
         Just _ -> code "entry"
@@ -854,10 +854,9 @@ fmtModTypeExp (ModTypeParens mte loc) = buildFmt loc single multi
     multi = single
 fmtModTypeExp (ModTypeSpecs sbs loc) = buildFmt loc single multi
   where
-    single = do
-      sbs' <- mapM fmtSpecBase sbs
-      pure $ braces $ mconcat sbs'
-    multi = single
+    common s = sep s <$> mapM fmtSpecBase sbs
+    single = braces <$> common space
+    multi = (</> code "}") <$> (stdNest . (code "{" </>) <$> common line)
 fmtModTypeExp (ModTypeWith mte (TypeRef v ps td _) loc) = buildFmt loc single multi
   where
     single = do
@@ -945,8 +944,8 @@ fmtModExp (ModImport path _f loc) = buildFmt loc single multi
 fmtModExp (ModDecs decs loc) = buildFmt loc single multi
   where
     fmtDecs s = sep s <$> mapM fmtDec decs
-    single = braces <$> fmtDecs (line <> line)
-    multi = (</> code "}") <$> (stdNest . (code "{" </>) <$> fmtDecs line)
+    single = braces <$> fmtDecs space
+    multi = (</> code "}") <$> (stdNest . (code "{" </>) <$> fmtDecs (line <> line))
 fmtModExp (ModApply f a _f0 _f1 loc) = buildFmt loc single multi
   where
     single = (<+>) <$> fmtModExp f <*> fmtModExp a
