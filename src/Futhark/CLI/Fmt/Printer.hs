@@ -813,12 +813,18 @@ fmtSpecBase :: UncheckedSpec -> FmtM Fmt
 fmtSpecBase (TypeAbbrSpec tpsig) = fmtTypeBind tpsig
 fmtSpecBase (TypeSpec l name ps doc loc) = buildFmt loc single multi
   where
-    single = do
+    common = do
       doc' <- fmtDocComment doc
       l' <- fmtLiftedness l
+      pure $ doc' <> code "type" <> l'
+    single = do
+      fmt <- common
       ps' <- mapM fmtTypeParam ps
-      pure $ doc' <> code "type" <> l' <+> sep space (fmtName name : ps')
-    multi = single
+      pure $ fmt <+> sep space (fmtName name : ps')
+    multi = do
+      fmt <- common
+      ps' <- mapM fmtTypeParam ps
+      pure $ fmt <+> stdNest (sep line (fmtName name : ps'))
 fmtSpecBase (ValSpec name ps te _ doc loc) = buildFmt loc single multi
   where
     multi = single
@@ -859,12 +865,18 @@ fmtModTypeExp (ModTypeSpecs sbs loc) = buildFmt loc single multi
     multi = (</> code "}") <$> (stdNest . (code "{" </>) <$> common line)
 fmtModTypeExp (ModTypeWith mte (TypeRef v ps td _) loc) = buildFmt loc single multi
   where
-    single = do
+    common = do
       mte' <- fmtModTypeExp mte
       ps' <- mapM fmtTypeParam ps
+      pure $ mte' <> code "with" <+> fmtPretty v <+> sep space ps'
+    single = do
+      fmt <- common
       td' <- fmtTypeExp td
-      pure $ mte' <> code "with" <+> fmtPretty v <+> sep space ps' <+> code "=" <+> td'
-    multi = single
+      pure $ fmt <+> code "=" <+> td'
+    multi = do
+      fmt <- common
+      td' <- fmtTypeExp td
+      pure $ fmt <+> stdNest (code "=" <+> td')
 fmtModTypeExp (ModTypeArrow (Just v) te0 te1 loc) = buildFmt loc single multi
   where
     op a b = parens (fmtName v <> code ":") <+> a <+> code "->" <+> b
@@ -906,7 +918,7 @@ fmtModBind (ModBind name ps sig te doc loc) = buildFmt loc single multi
         <> code "module"
         <+> sep space (fmtName name : ps')
         <> sig'
-        <+> code "="
+        <> code "="
         <+> te'
     multi = do
       doc' <- fmtDocComment doc
@@ -918,10 +930,10 @@ fmtModBind (ModBind name ps sig te doc loc) = buildFmt loc single multi
         <> code "module"
         <+> stdNest (sep space (fmtName name : ps')) -- This could be better
         <> sig'
-        <+> code "="
+        <> code "="
         <+> te'
     fmtSig s = case s of
-      Nothing -> pure mempty
+      Nothing -> pure space
       Just (s', _f) -> do
         s'' <- fmtModTypeExp s'
         pure $ code ":" <+> s'' <> space
