@@ -35,9 +35,12 @@ import Futhark.Util (zEncodeText)
 import Futhark.Util.IntegralExp (rem)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
+import Text.PrettyPrint.Mainland (prettyCompact)
 import NeatInterpolation (untrimming)
 import Prelude hiding (rem)
 import Debug.Trace
+import Futhark.CodeGen.Backends.TensorCore (compileGemmFun)
+import Text.PrettyPrint.Mainland.Class (Pretty(ppr))
 
 -- | Generate HIP host and device code.
 kernelsToHIP :: ImpGPU.Program -> ImpOpenCL.Program
@@ -260,6 +263,7 @@ genGPUCode env mode body failures =
 -- host, but is invoked by (perhaps multiple) kernels.
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
 generateDeviceFun fname device_func = do
+  -- TODO: Also check it is not gemm_123456
   when (any memParam $ functionInput device_func) (pure ())
 
   env <- ask
@@ -277,14 +281,14 @@ generateDeviceFun fname device_func = do
                     GC.compileFun mempty params (fname, device_func)
              in (f, GC.compUserState cstate)
           else if fname == "gemm_123456"
-            then              
+            then
               let (f, cstate) = trace "GENERATING GEMM FUNCTION" $
-                    genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $ do
-                        -- TODO: We need to insert #define here to remove memorblock_shared
-                        -- We could probably create a new module for the CuTe stuff
-                        GC.stm [C.cstm|// Test
-                        {}|]
-                        GC.compileVoidFun mempty (fname, device_func)
+                    --genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $ do
+                    --genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $ do
+                    
+                    --genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $ do
+                    genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $
+                      compileGemmFun mempty device_func
               in (f, GC.compUserState cstate)
           else
             let (f, cstate) =
@@ -368,7 +372,6 @@ onKernel target kernel = do
 
       (kernel_consts, (const_defs, const_undefs)) =
         second unzip $ unzip $ mapMaybe (constDef (kernelName kernel)) $ kernelUses kernel
-
   let (_, shared_memory_init) =
         L.mapAccumL prepareSharedMemory [C.cexp|0|] (kernelSharedMemory kstate)
       shared_memory_bytes = sum $ map (padTo8 . snd) $ kernelSharedMemory kstate
