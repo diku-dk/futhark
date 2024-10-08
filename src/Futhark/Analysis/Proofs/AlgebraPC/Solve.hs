@@ -68,7 +68,7 @@ findSymbolLEq0 sop = do
   msymrg <- findSpecialSymbolToElim sop''
   case msymrg of
     Just{} -> pure (sop'', msymrg)
-    Nothing-> FM.findSymLEq0Def sop''
+    Nothing-> findSymLEq0Def sop''
   
 powEquiv :: (Expression e, Ord e) => SoP Symbol -> AlgM e (SoP Symbol)
 powEquiv sop

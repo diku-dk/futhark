@@ -18,8 +18,7 @@
 --   if negative it is equivalent to `max(e1 * sop, e2 * sop)`, where
 --   `e1 * sop` and `e2 * sop` are recursively translated.
 module Futhark.SoP.FourierMotzkin
-  ( findSymLEq0Def,
-    fmSolveLTh0,
+  ( fmSolveLTh0,
     fmSolveLEq0,
     fmSolveGTh0,
     fmSolveGEq0,
@@ -37,24 +36,6 @@ import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
 -- import Futhark.Util.Pretty
-
--- | Finds the next symbol to eliminate by choosing the
---     symbol with the most-dependent ranges. This is a
---     default implementation that can be extended according
---     to the particularities of the Symbol language.
---   The result is:
---     (equivalent-sop, Maybe(symbol-to-eliminate, its range))
-findSymLEq0Def :: (MonadSoP u e p m) => SoP u -> m (SoP u, Maybe (u, Range u))
-findSymLEq0Def sop = do
-  rs <- getRanges
-  let syms = S.toList $ free sop
-      is = map (\s -> (length $ transClosInRanges rs $ S.singleton s, s)) syms
-  case is of
-    [] -> pure (sop, Nothing)
-    _  -> do
-            let i = snd $ maximum $ is
-            rg <- lookupRange i
-            pure $ (sop, Just (i, rg))
 
 ---------------------------------------------
 --- Fourier-Motzkin elimination algorithm ---
@@ -100,7 +81,7 @@ fmSolveGEq0 = fmSolveLEq0 . negSoP
 fmSolveLEq0 :: (MonadSoP u e p m) => SoP u -> m Bool
 fmSolveLEq0 sop = do
   sop' <- substEquivs sop
-  (sop'', msymrg) <- findSymLEq0Def sop'
+  (sop'', msymrg) <- findSymLEq0 sop' -- findSymLEq0Def sop'
   case (justConstant sop'', msymrg) of
     (Just v, _) ->
       pure (v <= 0)

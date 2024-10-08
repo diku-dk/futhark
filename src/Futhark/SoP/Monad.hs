@@ -32,6 +32,7 @@ module Futhark.SoP.Monad
     substEquivs,
     addEquiv,
     delFromEnv,
+    findSymLEq0Def
   )
 where
 
@@ -94,6 +95,8 @@ class
   getEquivs :: m (EquivEnv u)
   getProperties :: m (Map u (Set p))
   modifyEnv :: (AlgEnv u e p -> AlgEnv u e p) -> m ()
+  findSymLEq0 :: SoP u -> m (SoP u, Maybe (u, Range u))
+  findSymLEq0 = findSymLEq0Def
 
 -- | The algebraic monad; consists of a an algebraic
 --   environment along with a fresh variable source.
@@ -158,6 +161,25 @@ evalSoPM env = fst . runSoPM env
 
 evalSoPM_ :: (Ord u, Ord e) => SoPM u e p a -> a
 evalSoPM_ = evalSoPM mempty
+
+-- | Finds the next symbol to eliminate by choosing the
+--     symbol with the most-dependent ranges. This is a
+--     default implementation that can be extended according
+--     to the particularities of the Symbol language.
+--   The result is:
+--     (equivalent-sop, Maybe(symbol-to-eliminate, its range))
+findSymLEq0Def :: (MonadSoP u e p m) => SoP u -> m (SoP u, Maybe (u, Range u))
+findSymLEq0Def sop = do
+  rs <- getRanges
+  let syms = S.toList $ free sop
+      is = map (\s -> (length $ transClosInRanges rs $ S.singleton s, s)) syms
+  case is of
+    [] -> pure (sop, Nothing)
+    _  -> do
+            let i = snd $ maximum $ is
+            rg <- lookupRange i
+            pure $ (sop, Just (i, rg))
+
 
 instance
   ( Ord u,

@@ -113,6 +113,7 @@ instance (Expression e, Ord e) => MonadSoP Symbol e Property (AlgM e) where
   getEquivs = gets (equivs . algenv)
   getProperties = gets (properties . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
+  -- findSymLEq0 = findSymbolLEq0
 
 runAlgM :: AlgM e a -> AlgEnv Symbol e Property -> VNameSource -> (a, VEnv e)
 runAlgM (AlgM m) env vns = getRes $ runRWS m () s
