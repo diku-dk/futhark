@@ -4,5 +4,5 @@ def f x =
 
 -- ==
 -- entry: f_jvp
--- compiled input { 5 } output { [1, 10, 75, 0, 0] }
+-- input { 5 } output { [1, 10, 75, 0, 0] }
 entry f_jvp x = jvp f x 1

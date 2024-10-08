@@ -1,6 +1,6 @@
 -- ==
 -- entry: fwd
--- compiled input { 1.0 }
+-- input { 1.0 }
 -- output { 1f32 }
 
 entry fwd x =
@@ -8,7 +8,7 @@ entry fwd x =
 
 -- ==
 -- entry: rev
--- compiled input { 1.0 }
+-- input { 1.0 }
 -- output { 1f64 }
 
 entry rev x =

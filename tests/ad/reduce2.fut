@@ -2,7 +2,7 @@
 -- ==
 -- tags { no_ispc }
 -- entry: fwd rev
--- compiled input { [3f64, 1f64, 5f64] } output { [-1.000000f64, -1.000000f64, -1.000000f64] }
+-- input { [3f64, 1f64, 5f64] } output { [-1.000000f64, -1.000000f64, -1.000000f64] }
 
 def sumBy 'a (f : a -> f64)  (xs : []a) : f64 = map f xs |> f64.sum
 

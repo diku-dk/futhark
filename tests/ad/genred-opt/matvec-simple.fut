@@ -4,7 +4,7 @@
 -- compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32} auto output
 -- compiled random input { [2048][1024]f32 [2048][1024]f32 [2048][2048]f32} auto output
 
--- compiled input
+-- input
 -- {
 -- [[1.0,2.0],[3.0,4.0]] [[5.0,6.0],[7.0,8.0]]
 -- }

@@ -1,6 +1,6 @@
 -- ==
 -- entry: rev
--- compiled input { [2f32,1f32,1f32,1f32,1f32] [0i64,0i64,0i64,0i64,0i64] [1f32,2f32,3f32,4f32,10f32] } output { [5f32,0f32,0f32,0f32,0f32] }
+-- input { [2f32,1f32,1f32,1f32,1f32] [0i64,0i64,0i64,0i64,0i64] [1f32,2f32,3f32,4f32,10f32] } output { [5f32,0f32,0f32,0f32,0f32] }
 
 -- checks original dst is used
 def red_add [n][m] (is: [n]i64) (vs: [n]f32) (dst: [m]f32) =

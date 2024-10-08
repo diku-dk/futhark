@@ -1,6 +1,6 @@
 -- ==
 -- entry: f_vjp
--- compiled input { [1, 2, 3] }
+-- input { [1, 2, 3] }
 -- output { [9, 9, 9] }
 
 def f [n] (xs: [n]i32) =

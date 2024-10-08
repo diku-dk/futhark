@@ -1,8 +1,8 @@
 -- ==
 -- entry: fwd
--- compiled input { 1.0 2.0 }
+-- input { 1.0 2.0 }
 -- output { false false }
--- compiled input { 1.0 1.0 }
+-- input { 1.0 1.0 }
 -- output { true true }
 
 entry fwd x y =
@@ -11,9 +11,9 @@ entry fwd x y =
 
 -- ==
 -- entry: rev
--- compiled input { 1.0 2.0 }
+-- input { 1.0 2.0 }
 -- output { 1.0 1.0 }
--- compiled input { 1.0 1.0 }
+-- input { 1.0 1.0 }
 -- output { 1.0 1.0 }
 
 entry rev x y =

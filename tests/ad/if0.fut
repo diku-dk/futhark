@@ -1,8 +1,8 @@
 -- ==
 -- entry: f_jvp
--- compiled input { true 5.0 7.0 }
+-- input { true 5.0 7.0 }
 -- output { 7.0 5.0 }
--- compiled input { false 5.0 7.0 }
+-- input { false 5.0 7.0 }
 -- output { 0.14285 -0.102041 }
 
 def f (b, x, y) : f64 =
@@ -14,9 +14,9 @@ entry f_jvp b x y =
 
 -- ==
 -- entry: f_vjp
--- compiled input { true 5.0 7.0 }
+-- input { true 5.0 7.0 }
 -- output { false 7.0 5.0 }
--- compiled input { false 5.0 7.0 }
+-- input { false 5.0 7.0 }
 -- output { false 0.14285 -0.102041 }
 
 entry f_vjp b x y =

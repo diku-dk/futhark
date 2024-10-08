@@ -2,7 +2,7 @@ def f (x, y) : [2]f64 = [x+y, x*y]
 
 -- ==
 -- entry: f_vjp f_jvp
--- compiled input { 5.0 7.0 }
+-- input { 5.0 7.0 }
 -- output { [1.0,7.0] [1.0, 5.0] }
 
 entry f_jvp x y =
