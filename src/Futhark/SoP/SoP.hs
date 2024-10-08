@@ -89,7 +89,7 @@ instance (Ord u, Eq u) => Eq (SoP u) where
 
 -- | A symbol @sym@ with range @'Range' lbs k ubs@ means @max{lbs} <=
 --   k*sym <= min{ubs}@.  'lbs' and 'ubs' are (potentially empty) sets
---   of 'SoP's.
+--   of 'SoP's.  `k` is assumed positive.
 data Range u = Range
   { lowerBound :: Set (SoP u),
     rangeMult :: Integer,

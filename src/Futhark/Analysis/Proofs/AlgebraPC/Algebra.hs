@@ -7,6 +7,8 @@ module Futhark.Analysis.Proofs.AlgebraPC.Algebra
     runAlgM,
     hasPow,
     hasSum,
+    hasIdx,
+    hasMdf,
     hasIdxOrSum,
     hasMon
   ) 
@@ -39,7 +41,7 @@ data Symbol
   -- `A` is known to be monotonic with direction `dir`
   | Sum IdxSym (SoP Symbol) (SoP Symbol)
   | Pow (Integer, SoP Symbol)
-  -- ^ assumes positive exponents (i.e., >= 0);
+  -- ^ assumes positive base (>1) and exponents (>= 0);
   --   should be verified before construction
   deriving (Show, Eq, Ord)
 
@@ -132,11 +134,14 @@ hasSum _ = False
 
 hasIdx :: Symbol -> Bool
 hasIdx (Idx {}) = True
-hasIdx (Mdf {}) = True
 hasIdx _ = False
 
+hasMdf :: Symbol -> Bool
+hasMdf (Mdf{}) = True
+hasMdf _ = False
+
 hasIdxOrSum :: Symbol -> Bool
-hasIdxOrSum x = hasIdx x || hasSum x
+hasIdxOrSum x = hasIdx x || hasMdf x || hasSum x
 
 hasMon :: S.Set Property -> Maybe MonDir
 hasMon props

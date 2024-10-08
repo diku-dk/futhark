@@ -100,14 +100,14 @@ fmSolveGEq0 = fmSolveLEq0 . negSoP
 fmSolveLEq0 :: (MonadSoP u e p m) => SoP u -> m Bool
 fmSolveLEq0 sop = do
   sop' <- substEquivs sop
-  case justConstant sop' of
-    Just v -> pure (v <= 0)
-    Nothing-> do
-      sym_w_range <- findSymLEq0Def sop'
-      case sym_w_range of
-        (_,Nothing) -> pure False
-        (sop'', Just (i, rg)) ->
-          divAndConqFM sop'' i rg
+  (sop'', msymrg) <- findSymLEq0Def sop'
+  case (justConstant sop'', msymrg) of
+    (Just v, _) ->
+      pure (v <= 0)
+    (Nothing, Just (i,rg)) ->
+      divAndConqFM sop'' i rg
+    (Nothing, Nothing) ->
+      pure False
   where
     divAndConqFM sop1 i (Range lb k ub) = do
       let (a, b) = factorSoP [i] sop1
