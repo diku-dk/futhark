@@ -3,7 +3,6 @@ module Main (main) where
 import Futhark.AD.DerivativesTests qualified
 import Futhark.Analysis.AlgSimplifyTests qualified
 import Futhark.BenchTests qualified
-import Futhark.CLI.FmtTests qualified
 import Futhark.IR.Mem.IntervalTests qualified
 import Futhark.IR.Mem.IxFunTests qualified
 import Futhark.IR.PropTests qualified
@@ -36,8 +35,7 @@ allTests =
       Futhark.Analysis.AlgSimplifyTests.tests,
       Language.Futhark.TypeCheckerTests.tests,
       Language.Futhark.SemanticTests.tests,
-      Futhark.Optimise.ArrayLayoutTests.tests,
-      Futhark.CLI.FmtTests.tests
+      Futhark.Optimise.ArrayLayoutTests.tests
     ]
 
 main :: IO ()

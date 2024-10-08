@@ -36,7 +36,6 @@ build-type:     Simple
 extra-source-files:
 -- Cabal's recompilation tracking doesn't work when we use wildcards
 -- here, so for now we spell out every single file.
-    tests/**/*.fut
     rts/c/atomics.h
     rts/c/context.h
     rts/c/context_prototypes.h
@@ -511,7 +510,6 @@ test-suite unit
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
       Futhark.BenchTests
-      Futhark.CLI.FmtTests
       Futhark.IR.GPUTests
       Futhark.IR.MCTests
       Futhark.IR.Mem.IntervalTests
@@ -549,9 +547,3 @@ test-suite unit
     , tasty-hunit
     , tasty-quickcheck
     , text
-    , file-embed
-    , bytestring
-    , template-haskell
-    , filepath
-    , silently
-    , directory

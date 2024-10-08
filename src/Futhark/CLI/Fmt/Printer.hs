@@ -824,7 +824,7 @@ fmtSpecBase (TypeSpec l name ps doc loc) = buildFmt loc single multi
     multi = do
       fmt <- common
       ps' <- mapM fmtTypeParam ps
-      pure $ fmt <+> stdNest (sep line (fmtName name : ps'))
+      pure $ fmt <+> stdNest (sep line (fmtName name : ps')) -- This could be prettier.
 fmtSpecBase (ValSpec name ps te _ doc loc) = buildFmt loc single multi
   where
     multi = single
