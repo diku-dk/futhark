@@ -35,12 +35,12 @@ import Futhark.Util (zEncodeText)
 import Futhark.Util.IntegralExp (rem)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
-import Text.PrettyPrint.Mainland (prettyCompact)
 import NeatInterpolation (untrimming)
 import Prelude hiding (rem)
 import Debug.Trace
+import Data.Monoid
 import Futhark.CodeGen.Backends.TensorCore (compileGemmFun)
-import Text.PrettyPrint.Mainland.Class (Pretty(ppr))
+import Data.Vector.Generic.Mutable (move)
 
 -- | Generate HIP host and device code.
 kernelsToHIP :: ImpGPU.Program -> ImpOpenCL.Program
@@ -262,9 +262,22 @@ genGPUCode env mode body failures =
 -- Compilation of a device function that is not not invoked from the
 -- host, but is invoked by (perhaps multiple) kernels.
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
+--generateDeviceFun fname@"gemm_123456" device_func = do
+--  env <- ask
+--  failures <- gets clFailures
+--
+---- TODO: set function contents here or in GenericC.Fun?
+--  (_, gemmS) <- pure $ genGPUCode env FunMode Skip failures $ compileGemmFun mempty device_func
+--
+--  modify $ \s ->
+--    s
+--      { GC.compEarlyDecls = GC.compEarlyDecls gemmS <> GC.compEarlyDecls s
+--      }
+--
+--  pure ()
 generateDeviceFun fname device_func = do
-  -- TODO: Also check it is not gemm_123456
-  when (any memParam $ functionInput device_func) (pure ())
+-- TODO: handle?
+--  when (any memParam $ functionInput device_func) bad
 
   env <- ask
   failures <- gets clFailures
@@ -280,16 +293,6 @@ generateDeviceFun fname device_func = do
                   genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $
                     GC.compileFun mempty params (fname, device_func)
              in (f, GC.compUserState cstate)
-          else if fname == "gemm_123456"
-            then
-              let (f, cstate) = trace "GENERATING GEMM FUNCTION" $
-                    --genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $ do
-                    --genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $ do
-                    
-                    --genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $ do
-                    genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $
-                      compileGemmFun mempty device_func
-              in (f, GC.compUserState cstate)
           else
             let (f, cstate) =
                   genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $
@@ -372,6 +375,7 @@ onKernel target kernel = do
 
       (kernel_consts, (const_defs, const_undefs)) =
         second unzip $ unzip $ mapMaybe (constDef (kernelName kernel)) $ kernelUses kernel
+
   let (_, shared_memory_init) =
         L.mapAccumL prepareSharedMemory [C.cexp|0|] (kernelSharedMemory kstate)
       shared_memory_bytes = sum $ map (padTo8 . snd) $ kernelSharedMemory kstate

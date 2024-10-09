@@ -167,25 +167,26 @@ fixStmt stm@(Let (Pat [PatElem resName (MemArray _ _ _ (ArrayIn resMem _))]) _ (
     --    TODO: match more cases
     LetName (MemArray _ _ _ (ArrayIn inputMem _)) -> do
       modify ([(resName, inputName), (resMem, inputMem)] <>)
+--      TODO: remove manifests?
       defaultFixStm stm
     _ -> defaultFixStm stm
 fixStmt stm = defaultFixStm stm
 
 defaultFixStm :: Stm GPUMem -> FixMonad (Stm GPUMem)
-defaultFixStm (Let (Pat patElems) aux (Apply "gemm_123456" args rets info)) = do  
+defaultFixStm (Let (Pat patElems) aux (Apply "gemm_123456" args rets info)) = do
   -- TODO: Should be based on the return value of the function
   -- For now they match because the return value is hard coded
   let rets' = map retInRegs rets
   let patElems' = map letInRegs patElems
-  args' <- mapM replaceArg args  
+  args' <- mapM replaceArg args
   pure $ Let (Pat patElems') aux $ Apply "gemm_123456" args' rets' info
   where
     -- Put the let bound results in registers
     letInRegs :: PatElem (LetDec GPUMem)-> PatElem (LetDec GPUMem)
-    letInRegs (PatElem name (MemMem (Space "device"))) = 
+    letInRegs (PatElem name (MemMem (Space "device"))) =
       PatElem name $ MemMem . defScalarSpace $ FloatType Float32
     letInRegs patElem = patElem
-     
+
 defaultFixStm (Let pat aux e) = Let pat aux <$> fixExp e
 
 -- TODO: add stuff to scope in other places

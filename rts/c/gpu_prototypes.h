@@ -1,5 +1,8 @@
 // Start of gpu_prototypes.h
 
+// TODO: move
+#define memblock_shared memblock_device
+
 // Constants used for transpositions.  In principle these should be configurable.
 #define TR_BLOCK_DIM 16
 #define TR_TILE_DIM (TR_BLOCK_DIM*2)

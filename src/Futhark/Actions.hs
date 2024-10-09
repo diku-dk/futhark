@@ -206,7 +206,8 @@ pyPrependHeader :: T.Text -> T.Text
 pyPrependHeader = (T.unlines pyHeaderLines <>)
 
 cmdCC :: String
-cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
+-- TODO: new action instead?
+cmdCC = fromMaybe "gcc" $ lookup "CC" unixEnvironment
 
 cmdCFLAGS :: [String] -> [String]
 cmdCFLAGS def = maybe def words $ lookup "CFLAGS" unixEnvironment
