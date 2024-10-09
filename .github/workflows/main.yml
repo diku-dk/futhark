@@ -630,7 +630,7 @@ jobs:
         cd tests_adhoc && sh test.sh
 
     - run: |
-        cd tests_fmt && sh test.sh
+        sh tests_fmt/test.sh tests
 
     - run: |
         futhark doc -o prelude-docs /dev/null
