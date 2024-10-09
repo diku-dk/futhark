@@ -111,7 +111,7 @@ sepByLayout loc a b =
 
 fmtName :: Name -> Fmt
 fmtName name
-  | operatorName name = parens $ fmtPretty name
+  -- | operatorName name = parens $ fmtPretty name (doesn't seem like this needs to always be parenthesized?)
   | otherwise = fmtPretty name
 
 fmtPretty :: (Pretty a) => a -> Fmt
@@ -158,7 +158,7 @@ fmtParamType Nothing te = fmtTypeExp te
 
 fmtSumTypeConstr :: (Name, [UncheckedTypeExp]) -> FmtM Fmt
 fmtSumTypeConstr (name, fs) =
-  ((code "#" <> fmtName name) <+>) . sep (code "") <$> mapM fmtTypeExp fs
+  ((code "#" <> fmtName name) <+>) . sep nil <$> mapM fmtTypeExp fs
 
 -- | Formatting of Futhark type expressions.
 fmtTypeExp :: UncheckedTypeExp -> FmtM Fmt
@@ -274,7 +274,7 @@ fmtAttr :: AttrInfo a -> FmtM Fmt
 fmtAttr attr = (code "#" <>) . brackets <$> fmtAttrInfo attr
 
 fmtLiftedness :: Liftedness -> FmtM Fmt
-fmtLiftedness Unlifted = pure $ code ""
+fmtLiftedness Unlifted = pure nil
 fmtLiftedness SizeLifted = pure $ code "~"
 fmtLiftedness Lifted = pure $ code "^"
 
@@ -455,13 +455,13 @@ fmtExp (Negate e loc) = buildFmt loc single multi
     multi = single
 fmtExp (Not e loc) = buildFmt loc single multi
   where
-    single = (code "not" <>) <$> fmtExp e
+    single = (code "!" <>) <$> fmtExp e
     multi = single
 fmtExp (Update src idxs ve loc) = buildFmt loc single multi
   where
     common = do
       src' <- fmtExp src -- This could account for multiline.
-      idxs' <- brackets . sep (code ", ") <$> mapM fmtDimIndex idxs -- This could account for multiline.
+      idxs' <- brackets . sepSpace (code ",") <$> mapM fmtDimIndex idxs -- This could account for multiline.
       pure $ src' <+> code "with" <+> idxs' <+> code "="
     single = (<+>) <$> common <*> fmtExp ve
     multi = (</>) <$> common <*> fmtExp ve
@@ -491,7 +491,7 @@ fmtExp (OpSection binop _ loc) = buildFmt loc single multi
     multi = single
 fmtExp (OpSectionLeft binop _ x _ _ loc) = buildFmt loc single multi
   where
-    single = fmap parens $ (<+>) <$> fmtExp x <*> fmtBinOp binop
+    single = fmap parens $ (<+>) <$> fmtExp x <*> fmtBinOp binop  
     multi = single
 fmtExp (OpSectionRight binop _ x _ _ loc) = buildFmt loc single multi
   where
@@ -501,11 +501,11 @@ fmtExp (ProjectSection fields _ loc) = buildFmt loc single multi
   where
     single = pure $ parens $ mconcat $ p <$> fields
     multi = single
-    p name = code "." <> fmtName name
+    p name = code "." <> fmtName name 
 fmtExp (IndexSection idxs _ loc) = buildFmt loc single multi
   where
     single = do
-      idxs' <- brackets . sep (code ", ") <$> mapM fmtDimIndex idxs
+      idxs' <- brackets . sepSpace (code ",") <$> mapM fmtDimIndex idxs
       pure $ parens (code "." <> idxs')
     multi = single
 fmtExp (Constr n cs _ loc) = buildFmt loc single multi
@@ -524,22 +524,24 @@ fmtExp (AppExp e _loc) = buildFmt e single multi
     multi = single
 
 fmtQualNameSingle :: QualName Name -> Fmt
-fmtQualNameSingle (QualName names name) =
-  pre <> fmtName name
-  where
-    pre =
-      if null names
-        then nil
-        else sep (code ".") (fmtName <$> names) <> code "."
+fmtQualNameSingle (QualName names name) 
+  | operatorName name = parens $ pre <> fmtName name 
+  | otherwise = pre <> fmtName name
+    where
+      pre =
+        if null names
+          then nil
+          else sep (code ".") (fmtName <$> names) <> code "."
 
 fmtQualNameMulti :: QualName Name -> Fmt
-fmtQualNameMulti (QualName names name) =
-  pre <> fmtName name
-  where
-    pre =
-      if null names
-        then nil
-        else sepLine (code ".") (fmtName <$> names) <> code "."
+fmtQualNameMulti (QualName names name) 
+  | operatorName name = parens $ pre <> fmtName name
+  | otherwise = pre <> fmtName name
+    where
+      pre =
+        if null names
+          then nil
+          else sepLine (code ".") (fmtName <$> names) <> code "."
 
 fmtQualName :: QualName Name -> FmtM Fmt
 fmtQualName n = pure $ fmtQualNameSingle n
@@ -809,7 +811,7 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
           <> retdecl'
           <> code "="
     single = (<+>) <$> common <*> fmtExp body
-    multi = fmap stdNest $ (</>) <$> common <*> fmtExp body
+    multi = fmap stdNest $ (</>) <$> common <*>  fmtExp body
     fun =
       case entry of
         Just _ -> code "entry"
@@ -872,7 +874,7 @@ fmtModTypeExp (ModTypeParens mte loc) = buildFmt loc single multi
   where
     single = do
       mte' <- fmtModTypeExp mte
-      pure $ parens mte'
+      pure $ parens mte' 
     multi = single
 fmtModTypeExp (ModTypeSpecs sbs loc) = buildFmt loc single multi
   where
@@ -1043,6 +1045,8 @@ fmtProg (Prog dc decs) = do
   cs <- gets (mconcat . fmap (comment . commentText) . comments)
   modify (\s -> s {comments = []})
   pure $ dc' <> decs' <> cs
+
+
 
 fmtText :: String -> T.Text -> Either SyntaxError T.Text
 fmtText fName fContent = do
