@@ -682,6 +682,7 @@ commandLineOptions =
     allocateOption "a",
     kernelsMemPassOption entryPointMemGPU [],
     kernelsMemPassOption intraMMMMemFixup [],
+    kernelsPassOption intraMMM [],
     kernelsMemPassOption doubleBufferGPU [],
     mcMemPassOption doubleBufferMC [],
     kernelsMemPassOption expandAllocations [],
