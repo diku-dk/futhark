@@ -95,7 +95,6 @@ data KernelBodyMatch = KernelBodyMatch
 -- TODO: use PassM below?
 transformStms :: Stms GPU -> IntraMMMMonad (Stms GPU)
 transformStms stms = do
---  traceShowM $ fmap stmToPat stms
   join <$> mapM transformStm stms
 
 transformStm :: Stm GPU -> IntraMMMMonad (Stms GPU)
@@ -107,7 +106,6 @@ transformStm stm@(Let pat aux e)
     let blockSize = 32
     tell [blockSize]
 --    TODO: build MMA
-    traceShowM pat
     lift $ runBuilderT_ (buildMMM blockSize match) mempty
   | otherwise = do
     e' <- transformExp e
