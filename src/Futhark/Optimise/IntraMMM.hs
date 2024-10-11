@@ -20,12 +20,12 @@ import Futhark.IR.GPU.Op
 import Futhark.IR.SegOp
 import Futhark.IR.GPU.Simplify (simplifyGPU)
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem
+--import Futhark.IR.Mem
 import Futhark.IR.Pretty
 import Futhark.IR.Prop.Scope (Scope)
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
-import Futhark.IR.Mem.LMAD as LMAD
+--import Futhark.IR.Mem.LMAD as LMAD
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Builder
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -42,6 +42,7 @@ import Futhark.Pass
     intraproceduralTransformation,
     intraproceduralTransformationWithConsts,
   )
+import Data.Loc (Loc(NoLoc), SrcLoc (SrcLoc))
 
 traceHelper :: (Show a) => a -> a
 traceHelper x = trace (show x ++ "\n") x
@@ -51,11 +52,43 @@ intraMMM =
   Pass
     "tensor-mma"
     "Extracts NVIDIA tensor core MMA operations"
-    $ intraproceduralTransformation onStmts
+    transformProg
 
-onStmts :: Scope GPU -> Stms GPU -> PassM (Stms GPU)
-onStmts scope stms =
-  fmap fst $ modifyNameSource $ runState $ runWriterT $ transformStms stms
+gemmName :: Name
+gemmName = "gemm_123456"
+
+
+-- TODO: emit in monad when needed?
+--gemmFun :: FunDef GPU
+-- TODO: make more flexible in sizes and types
+mkGemmFun :: FParamInfo GPU -> FParamInfo GPU -> FParamInfo GPU -> [(RetType GPU, RetAls)] -> PassM (FunDef GPU)
+mkGemmFun typeA typeB typeCin typeCout = do
+  aParam <- newParam "A" typeA
+  bParam <- newParam "B" typeB
+  cParam <- newParam "C" typeCin
+  pure $
+    FunDef Nothing mempty gemmName
+    typeCout
+    [aParam, bParam, cParam]
+    $ resultBody $ [Var $ paramName cParam]
+
+
+transformProg :: Prog GPU -> PassM (Prog GPU)
+transformProg (Prog opaqueTypes consts funs) = do
+  transformedFuns <- mapM transformFunDef funs
+
+  let typeA = Array (FloatType Float16) (Shape [mkInt64Const 16, mkInt64Const 16]) Nonunique
+  let typeB = Array (FloatType Float16) (Shape [mkInt64Const 16, mkInt64Const 16]) Nonunique
+  let typeCin = Array (FloatType Float16) (Shape [mkInt64Const 8]) Unique
+  let typeCout = [(Array (FloatType Float16) (Shape [Free $ mkInt64Const 8]) Unique, RetAls [] [])]
+
+  gemmFun <- mkGemmFun typeA typeB typeCin typeCout
+  pure $ Prog opaqueTypes consts (gemmFun : transformedFuns)
+
+transformFunDef :: FunDef GPU -> PassM (FunDef GPU)
+transformFunDef (FunDef entry attrs name retType params body) = do
+  newBody <- fmap fst $ modifyNameSource $ runState $ runWriterT $ transformBody body
+  pure $ FunDef entry attrs name retType params newBody
 
 --type IntraMMMMonad = WriterT [Int] (Builder GPU)
 --newtype IntraMMMMonad a = IntraMMMMonad (WriterT [Int] PassM a)
@@ -76,17 +109,17 @@ data MMAMatch = MMAMatch
 data KernelBodyMatch = KernelBodyMatch
   {
 --  TODO: add types
-    innerDims1 :: [VName],
-    innerDims2 :: [VName],
-    outerDims1 :: [VName],
-    outerDims2 :: [VName],
-    arr1 :: VName,
-    arr2 :: VName,
+    innerDimsA :: [VName],
+    innerDimsB :: [VName],
+    outerDimsA :: [VName],
+    outerDimsB :: [VName],
+    arrA :: VName,
+    arrB :: VName,
     m :: VName,
     n :: VName,
     k :: VName,
-    type1 :: PrimType,
-    type2 :: PrimType,
+    typeA :: PrimType,
+    typeB :: PrimType,
     typeC :: PrimType
   }
   deriving (Show, Eq, Ord)
@@ -99,18 +132,22 @@ transformStms stms = do
 
 transformStm :: Stm GPU -> IntraMMMMonad (Stms GPU)
 -- TODO: pass name of let to builder
-transformStm stm@(Let pat aux e)
+transformStm stm@(Let (Pat [PatElem vName _]) aux e)
 --    TODO: allow more sizes?
   | Just match@(MMAMatch kernelBodyMatch ne 16 16 16) <- expMatch e = do
 -- TODO: how to determine the block size?
     let blockSize = 32
     tell [blockSize]
 --    TODO: build MMA
-    lift $ runBuilderT_ (buildMMM blockSize match) mempty
-  | otherwise = do
-    e' <- transformExp e
-    pure $ oneStm $ Let pat aux e'
+    lift $ runBuilderT_ (buildMMM vName blockSize match) mempty
+  | otherwise = transformStmDefault stm
+transformStm stm = transformStmDefault stm
 
+
+transformStmDefault :: Stm GPU -> IntraMMMMonad (Stms GPU)
+transformStmDefault (Let pat aux e) = do
+  e' <- transformExp e
+  pure $ oneStm $ Let pat aux e'
 
 stmToPat :: Stm GPU -> Pat (LetDec GPU)
 stmToPat (Let pat _ _) = pat
@@ -118,21 +155,36 @@ stmToPat (Let pat _ _) = pat
 --type MMMBuilder a = BuilderT GPU (IntraMMMMonad) a
 
 
-buildMMM :: Int -> MMAMatch -> Builder GPU ()
-buildMMM blockSize (MMAMatch kernelBodyMatch ne sizeM sizeN sizeK) = do
+buildMMM :: VName -> Int -> MMAMatch -> Builder GPU ()
+buildMMM vName blockSize (MMAMatch kernelBodyMatch ne sizeM sizeN sizeK) = do
   let cValsPerThread = mkInt64Const $ sizeM * sizeN `div` blockSize
 --  TODO: get as input instead?
   let blockSizeSubExp = mkInt64Const blockSize
-  let cType = typeC kernelBodyMatch
+--  TODO: do we need to init regs when used only once?
 -- TODO: use SegNoVirtFull instead of loop and avoid setting the block size?
   cRegs_list <- segMap1D "cRegs" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \_ -> do
-    cInit <- letExp "cScratch" $ BasicOp $ Scratch cType [cValsPerThread]
-    cLoop <- forLoop cValsPerThread [cInit] $ \i [cScratch] -> do
-      cZeroed <- update "cZeroed" cScratch [i] ne
+    cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [cValsPerThread]
+    cLoop <- forLoop cValsPerThread [cScratch] $ \i [cMerge] -> do
+      cZeroed <- update "cZeroed" cMerge [i] ne
+--      TODO: use pure instead of resultBodyM?
       resultBodyM [Var cZeroed]
     pure [varRes cLoop]
   let [cRegs] = cRegs_list
-  pure ()
+--  TODO: check if need to transpose, ensure not hoisted out of block segmap
+  aScratch <- letExp "aScratch" $ BasicOp $ Scratch (typeA kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeK]
+  bScratch <- letExp "bScratch" $ BasicOp $ Scratch (typeB kernelBodyMatch) [mkInt64Const sizeK, mkInt64Const sizeN]
+--  TODO: copy to shared
+--  TODO: is ObservePrim correct?
+  blockMMAres_list <- segMap1D "blockMMAres" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \thread_idx -> do
+    threadCregs <- index "threadCregs" cRegs [thread_idx]
+    threadMMAres <- letExp "threadMMAres" $ Apply gemmName [(Var aScratch, ObservePrim), (Var bScratch, ObservePrim), (Var threadCregs, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free cValsPerThread]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+    pure [varRes threadMMAres]
+  let [blockMMAres] = blockMMAres_list
+  --  TODO: copy res to cScratch?
+--  cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeN]
+  cReshaped <- letExp "cReshaped" $ BasicOp $ Reshape ReshapeArbitrary (Shape [mkInt64Const sizeM, mkInt64Const sizeN]) blockMMAres
+  letBindNames [vName] $ BasicOp $ SubExp $ Var cReshaped
+--  letBindNames [vName] $
 
 
 expMatch :: Exp GPU -> Maybe MMAMatch
@@ -159,6 +211,7 @@ transformOp (SegOp sOp) = SegOp <$> transformSegOp sOp
 transformOp op = pure op
 
 transformSegOp :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
+-- TODO: avoid changing the block size, fix other seg inblock, or avoid transformation in these cases
 -- TODO: match others?
 transformSegOp s@(SegMap level@(SegBlock virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space ts body) = lift $ do
   (newBody, newBlockSizes) <- runWriterT $ transformKernelBody body
@@ -219,6 +272,7 @@ matchesKernelBody dimVars@[dimVar1, dimVar2, dimVar3] freeVars (KernelBody _ stm
 --    ([m], [n], [k], Array type1 _ _, Array type2 _ _, Prim typeRes) | k == dimVar3 && all (`nameIn` freeVars) (outerDims1<>outerDims2) ->
 --      Just KernelBodyMatch{innerDims1, innerDims2, outerDims1, outerDims2, arr1, arr2, m, n, k, type1, type2, typeRes}
   case (separateDims1, separateDims2, commonDims, resType) of
+--  TODO: check which is A and which is B?
     ([m], [n], [k], Prim resTypePrim) | k == dimVar3 && all (`nameIn` freeVars) (outerDims1<>outerDims2) ->
       Just (KernelBodyMatch innerDims1 innerDims2 outerDims1 outerDims2 arr1 arr2 m n k resTypePrim resTypePrim resTypePrim)
     _ -> Nothing
@@ -297,9 +351,6 @@ type FixState = [(VName, VName)]
 type FixMonad a = RWST FixEnv () FixState PassM a
 
 -- TODO: With LMAD we could do swizzle
-
-gemmName :: Name
-gemmName = "gemm_123456"
 
 fixFuns :: Stms GPUMem -> FunDef GPUMem -> PassM (FunDef GPUMem)
 fixFuns consts fun

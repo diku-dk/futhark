@@ -23,13 +23,13 @@ initNamesPass = Pass "init-names" "Initialise name source to avoid name clashes"
 
 initNames :: MaxNames rep => Prog rep -> PassM (Prog rep)
 initNames p = do
-    let maxName = getMax $ snd $ runWriter $ maxNameProg p
+    let maxName = (+1) $ getMax $ snd $ runWriter $ maxNameProg p
     putNameSource (newNameSource maxName)
     pure p
 
 maxNameProg :: MaxNames rep => Prog rep -> MaxMonad ()
 maxNameProg (Prog ts consts funs) = do
-  tell $ Max $ maxIntrinsicTag + 1
+  tell $ Max $ maxIntrinsicTag
   maxNameStms $ informStms consts
   mapM_ (maxNameFun . informFunDef) funs
 
