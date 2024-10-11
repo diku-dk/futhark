@@ -70,6 +70,8 @@ import System.Exit
 import System.FilePath
 import System.IO
 import Prelude hiding (id)
+import Futhark.Optimise.Simplify.Rep (Informing, Wise)
+import Futhark.IR.Traversals (TraverseOpStms)
 
 -- | What to do with the program after it has been read.
 data FutharkPipeline
@@ -374,9 +376,7 @@ cseOption short =
 
 initNamesOption :: String -> FutharkOption
 initNamesOption short =
---  TODO: fix types
---  passOption (passDescription pass) (UntypedPass perform) short long
-  passOption "init-names" (UntypedPass perform) short ["Initialise name source to avoid name clashes"]
+  passOption (passDescription pass) (UntypedPass perform) short long
   where
     perform (SOACS prog) config =
         SOACS <$> runPipeline (onePass initNamesPass) config prog
@@ -392,6 +392,9 @@ initNamesOption short =
         GPUMem <$> runPipeline (onePass initNamesPass) config prog
     perform (MCMem prog) config =
         MCMem <$> runPipeline (onePass initNamesPass) config prog
+
+    long = [passLongOption pass]
+    pass = initNamesPass :: Pass SOACS.SOACS SOACS.SOACS
 
 sinkOption :: String -> FutharkOption
 sinkOption short =

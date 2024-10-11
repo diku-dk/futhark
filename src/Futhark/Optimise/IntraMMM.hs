@@ -7,7 +7,7 @@ import Control.Monad (liftM, (>=>))
 import Control.Monad.Identity
 import Control.Monad.RWS
 import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Control.Monad.Trans.Maybe (MaybeT (runMaybeT))
 import Data.Foldable (find, fold, toList)
@@ -31,6 +31,10 @@ import Futhark.Builder
 import qualified Futhark.Analysis.SymbolTable as ST
 import Data.List (partition, elem, intersect, lookup)
 import Data.Set (fromList, member, intersection, difference)
+import Control.Monad
+import Futhark.Optimise.TileLoops.Shared
+import Futhark.Construct
+import Futhark.Builder.Class
 import Prelude hiding (lookup)
 import Futhark.Pass
   ( Pass (..),
@@ -47,23 +51,95 @@ intraMMM =
   Pass
     "tensor-mma"
     "Extracts NVIDIA tensor core MMA operations"
-    $ transformation >=> simplifyGPU
-  where
-    transformation = intraproceduralTransformation onStmts
+    $ intraproceduralTransformation onStmts
 
 onStmts :: Scope GPU -> Stms GPU -> PassM (Stms GPU)
-onStmts scope stms = pure $ fst $ runWriter $ transformStmts stms
+onStmts scope stms =
+  fmap fst $ modifyNameSource $ runState $ runWriterT $ transformStms stms
+
+--type IntraMMMMonad = WriterT [Int] (Builder GPU)
+--newtype IntraMMMMonad a = IntraMMMMonad (WriterT [Int] PassM a)
+--type IntraMMMMonad = WriterT [Int] PassM
+type IntraMMMMonad = WriterT [Int] (State VNameSource)
 
 
---type IntraMMMMonad a = WriterT [Int] (Builder GPU) a
-type IntraMMMMonad a = Writer [Int] a
+data MMAMatch = MMAMatch
+  {
+    kernelBodyMatch :: KernelBodyMatch,
+    ne :: SubExp,
+    sizeM :: Int,
+    sizeN :: Int,
+    sizeK :: Int
+  }
+  deriving (Show, Eq, Ord)
+
+data KernelBodyMatch = KernelBodyMatch
+  {
+--  TODO: add types
+    innerDims1 :: [VName],
+    innerDims2 :: [VName],
+    outerDims1 :: [VName],
+    outerDims2 :: [VName],
+    arr1 :: VName,
+    arr2 :: VName,
+    m :: VName,
+    n :: VName,
+    k :: VName,
+    type1 :: PrimType,
+    type2 :: PrimType,
+    typeC :: PrimType
+  }
+  deriving (Show, Eq, Ord)
+
 
 -- TODO: use PassM below?
-transformStmts :: Stms GPU -> IntraMMMMonad (Stms GPU)
-transformStmts = mapM transformStmt
+transformStms :: Stms GPU -> IntraMMMMonad (Stms GPU)
+transformStms stms = do
+--  traceShowM $ fmap stmToPat stms
+  join <$> mapM transformStm stms
 
-transformStmt :: Stm GPU -> IntraMMMMonad (Stm GPU)
-transformStmt (Let pat aux e) = Let pat aux <$> transformExp e
+transformStm :: Stm GPU -> IntraMMMMonad (Stms GPU)
+-- TODO: pass name of let to builder
+transformStm stm@(Let pat aux e)
+--    TODO: allow more sizes?
+  | Just match@(MMAMatch kernelBodyMatch ne 16 16 16) <- expMatch e = do
+-- TODO: how to determine the block size?
+    let blockSize = 32
+    tell [blockSize]
+--    TODO: build MMA
+    traceShowM pat
+    lift $ runBuilderT_ (buildMMM blockSize match) mempty
+  | otherwise = do
+    e' <- transformExp e
+    pure $ oneStm $ Let pat aux e'
+
+
+stmToPat :: Stm GPU -> Pat (LetDec GPU)
+stmToPat (Let pat _ _) = pat
+
+--type MMMBuilder a = BuilderT GPU (IntraMMMMonad) a
+
+
+buildMMM :: Int -> MMAMatch -> Builder GPU ()
+buildMMM blockSize (MMAMatch kernelBodyMatch ne sizeM sizeN sizeK) = do
+  let cValsPerThread = mkInt64Const $ sizeM * sizeN `div` blockSize
+--  TODO: get as input instead?
+  let blockSizeSubExp = mkInt64Const blockSize
+  let cType = typeC kernelBodyMatch
+-- TODO: use SegNoVirtFull instead of loop and avoid setting the block size?
+  cRegs_list <- segMap1D "cRegs" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \_ -> do
+    cInit <- letExp "cScratch" $ BasicOp $ Scratch cType [cValsPerThread]
+    cLoop <- forLoop cValsPerThread [cInit] $ \i [cScratch] -> do
+      cZeroed <- update "cZeroed" cScratch [i] ne
+      resultBodyM [Var cZeroed]
+    pure [varRes cLoop]
+  let [cRegs] = cRegs_list
+  pure ()
+
+
+expMatch :: Exp GPU -> Maybe MMAMatch
+expMatch (Op (SegOp sOp)) = segOpMatch sOp
+expMatch _ = Nothing
 
 transformExp :: Exp GPU -> IntraMMMMonad (Exp GPU)
 -- transformExp (BasicOp op) = BasicOp op
@@ -77,7 +153,7 @@ transformCase :: Case (Body GPU) -> IntraMMMMonad (Case (Body GPU))
 transformCase (Case pat body) = Case pat <$> transformBody body
 
 transformBody :: Body GPU -> IntraMMMMonad (Body GPU)
-transformBody (Body dec stms res) = Body dec <$> transformStmts stms <*> pure res
+transformBody (Body dec stms res) = Body dec <$> transformStms stms <*> pure res
 
 transformOp :: Op GPU -> IntraMMMMonad (Op GPU)
 transformOp (SegOp sOp) = SegOp <$> transformSegOp sOp
@@ -86,24 +162,20 @@ transformOp op = pure op
 
 transformSegOp :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
 -- TODO: match others?
-transformSegOp s@(SegMap (SegBlock virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space ts body) =
-  case runWriter $ transformKernelBody body of
+transformSegOp s@(SegMap level@(SegBlock virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space ts body) = lift $ do
+  (newBody, newBlockSizes) <- runWriterT $ transformKernelBody body
+  case newBlockSizes of
 --  TODO: handle more block sizes?
-    (newBody, [newBlockSize]) ->
-      pure $ SegMap (SegBlock virt (Just (KernelGrid (Count numBlocks) (Count $ Constant $ IntValue $ intValue Int64 newBlockSize)))) space ts newBody
-    _ -> transformSegOpDefault s
-transformSegOp s =
-  case segOpMatch s of
---    TODO: allow more sizes?
-    Just (kernelBodyMatch, 16, 16, 16) -> do
---      TODO: how to determine the block size?
-      tell [32]
-    --  TODO: do MMA transformation
-      transformSegOpDefault s
-    _ -> transformSegOpDefault s
+    [newBlockSize] ->
+      pure $ SegMap (SegBlock virt (Just (KernelGrid (Count numBlocks) (Count $ mkInt64Const newBlockSize)))) space ts newBody
+    _ -> pure $ SegMap level space ts newBody
+transformSegOp s = transformSegOpDefault s
 
-segOpMatch :: SegOp SegLevel GPU -> Maybe (KernelBodyMatch, Int, Int, Int)
-segOpMatch s@(SegRed (SegThreadInBlock virt) space segBinOps ts body) | segBinOpsMatch segBinOps = do
+mkInt64Const :: Int -> SubExp
+mkInt64Const = Constant . IntValue . intValue Int64
+
+segOpMatch :: SegOp SegLevel GPU -> Maybe MMAMatch
+segOpMatch s@(SegRed (SegThreadInBlock _) space segBinOps _ body) | Just ne <- segBinOpsMatch segBinOps = do
   let (dimVars, segDims) = unzip $ unSegSpace space
   let freeVars = freeIn s
   bodyMatch <- matchesKernelBody dimVars freeVars body
@@ -112,9 +184,8 @@ segOpMatch s@(SegRed (SegThreadInBlock virt) space segBinOps ts body) | segBinOp
 --  TODO: also match bodyMatch? allow more sizes?
     [16, 16, 16] ->
 --    TODO: pass ts? allow more segDims
-      Just (bodyMatch, 16, 16, 16)
+      Just (MMAMatch bodyMatch ne 16 16 16)
     _ -> Nothing
-
 -- TODO: extract A, B, types, shape, layout, lookup m, n, k shapes
 segOpMatch _ = Nothing
 
@@ -123,32 +194,21 @@ getConstantValue :: SubExp -> Maybe Int
 getConstantValue (Constant (IntValue v)) = Just $ valueIntegral v
 getConstantValue _ = Nothing
 
-
-data KernelBodyMatch = KernelBodyMatch
-  {
-    innerDims1 :: [VName],
-    innerDims2 :: [VName],
-    outerDims1 :: [VName],
-    outerDims2 :: [VName],
-    arr1 :: VName,
-    arr2 :: VName,
-    m :: VName,
-    n :: VName,
-    k :: VName
-  }
-  deriving (Show, Eq, Ord)
-
 -- TODO: return maybe something?
 matchesKernelBody :: [VName] -> Names -> KernelBody GPU -> Maybe KernelBodyMatch
 -- TODO: support more than 3 dimensions?
 matchesKernelBody dimVars@[dimVar1, dimVar2, dimVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) = do
   let sTable = ST.insertStms (informStms stms) mempty
+--  TODO: rename to use A, B, C?
   (resExp, _) <- ST.lookupExp res sTable
   (mulArg1, mulArg2) <- matchesMul $ removeExpWisdom resExp
   (mulArg1Exp, _) <- ST.lookupExp mulArg1 sTable
   (mulArg2Exp, _) <- ST.lookupExp mulArg2 sTable
   (arr1, slice1) <- matchesMulArg $ removeExpWisdom mulArg1Exp
   (arr2, slice2) <- matchesMulArg $ removeExpWisdom mulArg2Exp
+--  arr1Type <- ST.lookupType arr1 sTable
+--  arr2Type <- ST.lookupType arr2 sTable
+  resType <- ST.lookupType res sTable
   slice1' <- mapM getIndexVar $ unSlice slice1
   slice2' <- mapM getIndexVar $ unSlice slice2
 --  TODO: check that all outerDims are free variables?
@@ -157,9 +217,12 @@ matchesKernelBody dimVars@[dimVar1, dimVar2, dimVar3] freeVars (KernelBody _ stm
   let commonDims = innerDims1 `intersect` innerDims2
   let separateDims1 = toList $ fromList innerDims1 `difference` fromList innerDims2
   let separateDims2 = toList $ fromList innerDims2 `difference` fromList innerDims1
-  case (separateDims1, separateDims2, commonDims) of
-    ([m], [n], [k]) | k == dimVar3 && all (`nameIn` freeVars) (outerDims1<>outerDims2) ->
-      Just KernelBodyMatch{innerDims1, innerDims2, outerDims1, outerDims2, arr1, arr2, m, n, k}
+--  case (separateDims1, separateDims2, commonDims, arr1Type, arr2Type, resType) of
+--    ([m], [n], [k], Array type1 _ _, Array type2 _ _, Prim typeRes) | k == dimVar3 && all (`nameIn` freeVars) (outerDims1<>outerDims2) ->
+--      Just KernelBodyMatch{innerDims1, innerDims2, outerDims1, outerDims2, arr1, arr2, m, n, k, type1, type2, typeRes}
+  case (separateDims1, separateDims2, commonDims, resType) of
+    ([m], [n], [k], Prim resTypePrim) | k == dimVar3 && all (`nameIn` freeVars) (outerDims1<>outerDims2) ->
+      Just (KernelBodyMatch innerDims1 innerDims2 outerDims1 outerDims2 arr1 arr2 m n k resTypePrim resTypePrim resTypePrim)
     _ -> Nothing
 matchesKernelBody _ _ _ = Nothing
 
@@ -175,9 +238,10 @@ matchesMulArg :: Exp GPU -> Maybe (VName, Slice SubExp)
 matchesMulArg (BasicOp (Index v s)) = Just (v, s)
 matchesMulArg _ = Nothing
 
-segBinOpsMatch :: [SegBinOp GPU] -> Bool
-segBinOpsMatch [SegBinOp Commutative lambda nes s] = lambdaMatch lambda && nesMatch nes
-segBinOpsMatch _ = False
+-- TODO: also return binop?
+segBinOpsMatch :: [SegBinOp GPU] -> Maybe SubExp
+segBinOpsMatch [SegBinOp Commutative lambda nes s] | lambdaMatch lambda = nesMatch nes
+segBinOpsMatch _ = Nothing
 
 lambdaMatch :: Lambda GPU -> Bool
 lambdaMatch (Lambda [Param _ arg1 _, Param _ arg2 _] _ body) = lambdaBodyMatch arg1 arg2 body
@@ -194,9 +258,9 @@ lambdaStmMatch arg1 arg2 v (Let (Pat [PatElem v' _]) _ (BasicOp (BinOp (Add _ _)
   v == v' && arg1 == arg1' && arg2 == arg2'
 lambdaStmMatch _ _ _ _ = False
 
-nesMatch :: [SubExp] -> Bool
-nesMatch [Constant v] = zeroIsh v
-nesMatch _ = False
+nesMatch :: [SubExp] -> Maybe SubExp
+nesMatch [s@(Constant v)] | zeroIsh v = Just s
+nesMatch _ = Nothing
 
 transformSegOpDefault :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
 transformSegOpDefault (SegMap level space ts body) = SegMap level space ts <$> transformKernelBody body
@@ -205,7 +269,7 @@ transformSegOpDefault (SegScan level space ops ts body) = SegScan level space op
 transformSegOpDefault (SegHist level space ops hist body) = SegHist level space ops hist <$> transformKernelBody body
 
 transformKernelBody :: KernelBody GPU -> IntraMMMMonad (KernelBody GPU)
-transformKernelBody (KernelBody desc stms res) = KernelBody desc <$> transformStmts stms <*> pure res
+transformKernelBody (KernelBody desc stms res) = KernelBody desc <$> transformStms stms <*> pure res
 
 
 
@@ -284,7 +348,7 @@ fixRetType [(MemMem (Space "device"), als1), (MemArray t shp u (ReturnsNewBlock 
 fixRetType rets = rets
 
 extToSubExp :: ExtSize -> SubExp
-extToSubExp (Ext n) = Constant $ IntValue $ intValue Int64 n
+extToSubExp (Ext n) = mkInt64Const n
 extToSubExp (Free se) = se
 
 -- TODO: use scope, genearate scope?

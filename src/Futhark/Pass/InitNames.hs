@@ -5,43 +5,82 @@ where
 import Futhark.IR
 import Futhark.Pass
 import Futhark.MonadFreshNames
-import Futhark.Analysis.SymbolTable
-import Futhark.Analysis.UsageTable
-import Futhark.Analysis.Alias
-import Futhark.IR.TypeCheck
-import Futhark.IR.Prop.Aliases
-import Futhark.IR.Aliases
-import Futhark.Optimise.Simplify.Engine
-import Debug.Trace
-import Futhark.IR.Parse
-import Language.Futhark.Primitive.Parse
-import Text.Megaparsec
-import Text.Megaparsec.Char hiding (space)
-import Text.Megaparsec.Char.Lexer qualified as L
-import Data.Text qualified as T
+import Control.Monad.Writer
+import Data.Semigroup
+import Control.Monad
+import Futhark.IR.Traversals
+import Futhark.Optimise.Simplify.Rep
+import Language.Futhark (maxIntrinsicTag)
 
 
-initNamesPass :: RepTypes rep => Pass rep rep
+type MaxNames rep = (Informing rep, TraverseOpStms (Wise rep))
+
+type MaxMonad = Writer (Max Int)
+
+-- TODO: run by default in dev?
+initNamesPass :: MaxNames rep => Pass rep rep
 initNamesPass = Pass "init-names" "Initialise name source to avoid name clashes" initNames
 
-
--- TODO: use scope, maybe symboltable
-initNames :: RepTypes rep => Prog rep -> PassM (Prog rep)
+initNames :: MaxNames rep => Prog rep -> PassM (Prog rep)
 initNames p = do
-    let maxName = getMaxName p
+    let maxName = getMax $ snd $ runWriter $ maxNameProg p
     putNameSource (newNameSource maxName)
     pure p
 
+maxNameProg :: MaxNames rep => Prog rep -> MaxMonad ()
+maxNameProg (Prog ts consts funs) = do
+  tell $ Max $ maxIntrinsicTag + 1
+  maxNameStms $ informStms consts
+  mapM_ (maxNameFun . informFunDef) funs
 
--- TODO: should ideally read through program to find next available name
--- TODO: use traverlsals.hs
-getMaxName :: Prog rep -> Int
-getMaxName = const 12345678
+maxNameFun :: TraverseOpStms rep => FunDef rep -> MaxMonad ()
+maxNameFun (FunDef _entry _attrs _name _retType params body) =
+  mapM_ maxNameParam params >> maxNameBody body
+
+maxNameBody :: TraverseOpStms rep => Body rep -> MaxMonad ()
+maxNameBody (Body _ stms res) = maxNameStms stms >> mapM_ maxNameSubExpRes res
+
+maxNameStms :: TraverseOpStms rep => Stms rep -> MaxMonad ()
+maxNameStms = mapM_ maxNameStm
+
+maxNameStm :: TraverseOpStms rep => Stm rep -> MaxMonad ()
+maxNameStm (Let pat _ e) = maxNamePat pat >> maxNameExp e
+
+maxNameExp :: TraverseOpStms rep => Exp rep -> MaxMonad ()
+maxNameExp = walkExpM maxNameWalker
+
+maxNameWalker :: forall rep. TraverseOpStms rep => Walker rep MaxMonad
+maxNameWalker = (identityWalker @rep) {
+    walkOnSubExp = maxNameSubExp,
+    walkOnBody = const maxNameBody,
+    walkOnVName = maxNameVName,
+    walkOnFParam = maxNameParam,
+    walkOnLParam = maxNameParam,
+    walkOnOp = maxNameOp
+  }
+
+maxNameOp :: TraverseOpStms rep => Op rep -> MaxMonad ()
+maxNameOp op = void $ traverseOpStms (maxNameOpStms) op
+
+maxNameOpStms :: TraverseOpStms rep => Scope rep -> Stms rep -> MaxMonad (Stms rep)
+maxNameOpStms _ stms = maxNameStms stms >> pure stms
 
 
---getMaxName :: RepTypes rep => Prog rep -> Int
---getMaxName p =
---    let programString = show p in
---    --  TODO: just find _\d+ in the string?
---    let test = parse pVName "" (T.pack programString) in
---    trace (show test) 12345678
+maxNameSubExpRes :: SubExpRes -> MaxMonad ()
+maxNameSubExpRes (SubExpRes _ subExp) = maxNameSubExp subExp
+
+maxNamePat :: Pat dec -> MaxMonad ()
+maxNamePat (Pat patElems) = mapM_ maxNamePatElem patElems
+
+maxNameSubExp :: SubExp -> MaxMonad ()
+maxNameSubExp (Var vName) = maxNameVName vName
+maxNameSubExp _ = pure ()
+
+maxNamePatElem :: PatElem dec -> MaxMonad ()
+maxNamePatElem (PatElem vName _) = maxNameVName vName
+
+maxNameParam :: Param dec -> MaxMonad ()
+maxNameParam (Param _ vName _) = maxNameVName vName
+
+maxNameVName :: VName -> MaxMonad ()
+maxNameVName (VName _ i) = tell $ Max i
