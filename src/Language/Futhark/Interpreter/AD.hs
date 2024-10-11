@@ -6,7 +6,7 @@ module Language.Futhark.Interpreter.AD
     Op (..),
     Tape (..),
 
-    value,
+    primalValue,
     depth,
     primal,
 
@@ -14,8 +14,6 @@ module Language.Futhark.Interpreter.AD
 
     getConvOp,
     opTypeMatch,
-    typeAsValue,
-    valueAsType,
 
     addFor,
 
@@ -27,23 +25,28 @@ where
 import Language.Futhark.Primitive
 import Data.List
 import Data.Map qualified as M
-import Data.Set qualified as S
 
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp
 import Language.Futhark.Core
 
-import Debug.Trace qualified as DBG
 import Control.Monad (zipWithM)
 import Data.Maybe (fromJust)
 import Data.Foldable (foldlM)
 
+-- In automatic differentiation, a seed value is the initial value of the derivative.
+-- Every time its "primal" counterpart is modified, the seed value is multiplied by
+-- the derivative of the function, which was used to modify the primal
+
+-- In this implementation of AD, an "ADSeed" is simply a value which consists of both
+-- a primal, and information needed to derive it.
 data ADSeed
+  -- A VjpSeed contains a Tape - a tree structure of operations, as well as the primal values, which they were performed on
   = VjpSeed Int Tape
+  -- A JvpSeed contains a primitive value and its derivative
   | JvpSeed Int ADValue ADValue
 
 instance Show ADSeed where
-  show :: ADSeed -> String
   show (VjpSeed d v) = "VjpSeed d" <> show d <> " " <> show v
   show (JvpSeed d v dv) = "JvpSeed d" <> show d <> " " <> show v <> " " <> show dv
 
@@ -69,9 +72,9 @@ instance Show Op where
   show (OpFn   fn) = show fn
   show (OpConv op) = show op
 
-value :: ADValue -> PrimValue
-value (Primal v) = v
-value (Seed s) = value $ primal s
+primalValue :: ADValue -> PrimValue
+primalValue (Primal v) = v
+primalValue (Seed s) = primalValue $ primal s
 
 depth :: ADSeed -> Int
 depth (VjpSeed d _) = d
@@ -80,18 +83,6 @@ depth (JvpSeed d _ _) = d
 primal :: ADSeed -> ADValue
 primal (VjpSeed _ v) = tapeValue v
 primal (JvpSeed _ v _) = v
-
-valueAsType :: PrimValue -> Rational -> PrimValue
-valueAsType v c = case v of
-  IntValue (Int8Value _)      -> IntValue $ Int8Value  $ round c
-  IntValue (Int16Value _)     -> IntValue $ Int16Value $ round c
-  IntValue (Int32Value _)     -> IntValue $ Int32Value $ round c
-  IntValue (Int64Value _)     -> IntValue $ Int64Value $ round c
-  FloatValue (Float16Value _) -> FloatValue $ Float16Value $ fromRational c
-  FloatValue (Float32Value _) -> FloatValue $ Float32Value $ fromRational c
-  FloatValue (Float64Value _) -> FloatValue $ Float64Value $ fromRational c
-  BoolValue _ -> BoolValue (c /= 0)
-  _ -> error $ "No valid prim value for " ++ show v
 
 opTypeMatch :: Op -> [PrimValue] -> Bool
 opTypeMatch (OpBin  op) p = all (\x ->      binOpType  op  == primValueType x) p
@@ -112,32 +103,26 @@ opReturnType (OpFn   fn) = fromJust $ do
                             Just t
 
 addFor :: Op -> Op
-addFor op = OpBin $ fromJust $ case opReturnType op of
-  IntType t -> Just $ Add t OverflowUndef
-  FloatType t -> Just $ FAdd t
-  Bool -> Just LogOr
-  _ -> Nothing
+addFor op = OpBin $ case add of
+    Nothing -> error $ "No notion of addition exists for the return type of " ++ show op
+    Just op' -> op'
+  where
+    add = case opReturnType op of
+      IntType t -> Just $ Add t OverflowUndef
+      FloatType t -> Just $ FAdd t
+      Bool -> Just LogOr
+      _ -> Nothing
 
 multiplyFor :: Op -> Op
-multiplyFor op = OpBin $ fromJust $ case opReturnType op of
-  IntType t -> Just $ Mul t OverflowUndef
-  FloatType t -> Just $ FMul t
-  Bool -> Just LogAnd
-  _ -> Nothing
-
-typeAsValue :: PrimType -> Rational -> PrimValue
-typeAsValue t c = case t of
-  IntType t' -> case t' of
-    Int8  -> IntValue $ Int8Value  $ round c
-    Int16 -> IntValue $ Int16Value $ round c
-    Int32 -> IntValue $ Int32Value $ round c
-    Int64 -> IntValue $ Int64Value $ round c
-  FloatType t' -> case t' of
-    Float16 -> FloatValue $ Float16Value $ fromRational c
-    Float32 -> FloatValue $ Float32Value $ fromRational c
-    Float64 -> FloatValue $ Float64Value $ fromRational c
-  Bool -> BoolValue (c /= 0)
-  _ -> error $ "No valid prim value for " ++ show t
+multiplyFor op = OpBin $ case multiply of
+    Nothing -> error $ "No notion of multiplication exists for the return type of " ++ show op
+    Just op' -> op'
+  where
+    multiply = case opReturnType op of
+      IntType t -> Just $ Mul t OverflowUndef
+      FloatType t -> Just $ FMul t
+      Bool -> Just LogAnd
+      _ -> Nothing
 
 getConvOp :: PrimType -> PrimType -> ConvOp
 getConvOp a b = case (a, b) of
@@ -156,7 +141,7 @@ getConvOp a b = case (a, b) of
 
 doOp :: Op -> [ADValue] -> Maybe ADValue
 doOp op p = do
-  let p' = map value p
+  let p' = map primalValue p
   if opTypeMatch op p' then do
     v <- case (op, p') of
       (OpBin  op', [x, y]) -> doBinOp op' x y
@@ -238,6 +223,8 @@ runPrimExp (FunExp fn p _) m = do
 -- VJP
 
 data Tape
+  -- The Int is used to uniquely identify each of the variables
+  -- Without it, it is only possible to calculate a single partial derivative
   = TapeId Int ADValue
   | TapePrim ADValue
   | TapeOp Op [Tape] ADValue
@@ -292,7 +279,7 @@ jvpHandleFn op p d av = do
   -- Turn everything into jvp values
   let p' = map (\case
         Right (JvpSeed _ v' m) -> (v', m)
-        Left  v' -> (v', Primal $ valueAsType (value v') 0)
+        Left  v' -> (v', Primal $ blankPrimValue $ primValueType $ primalValue v')
         _ -> error "And unknown error occured") p -- ?TODO: This is impossible
 
   case op of
@@ -314,4 +301,4 @@ jvpHandleFn op p d av = do
 
       -- Sum them up
       let add a b = doOp (addFor op) [a, b]
-      Seed . JvpSeed d av <$> foldlM add (Primal $ typeAsValue (opReturnType op) 0) vs
+      Seed . JvpSeed d av <$> foldlM add (Primal $ blankPrimValue $ opReturnType op) vs

@@ -268,7 +268,7 @@ putV (P.BoolValue x) = BoolValue x
 putV P.UnitValue = BoolValue True
 
 asInteger :: Value -> Integer
-asInteger (ValueSeed s) = asInteger $ ValuePrim $ putV $ AD.value $ AD.primal s
+asInteger (ValueSeed s) = asInteger $ ValuePrim $ putV $ AD.primalValue $ AD.primal s
 asInteger (ValuePrim (SignedValue v)) = P.valueIntegral v
 asInteger (ValuePrim (UnsignedValue v)) =
   toInteger (P.valueIntegral (P.doZExt v Int64) :: Word64)
@@ -278,7 +278,7 @@ asInt :: Value -> Int
 asInt = fromIntegral . asInteger
 
 asSigned :: Value -> IntValue
-asSigned (ValueSeed s) = asSigned $ ValuePrim $ putV $ AD.value $ AD.primal s
+asSigned (ValueSeed s) = asSigned $ ValuePrim $ putV $ AD.primalValue $ AD.primal s
 asSigned (ValuePrim (SignedValue v)) = v
 asSigned v = error $ "Unexpected not a signed integer: " <> show v
 
@@ -286,7 +286,7 @@ asInt64 :: Value -> Int64
 asInt64 = fromIntegral . asInteger
 
 asBool :: Value -> Bool
-asBool (ValueSeed s) = asBool $ ValuePrim $ putV $ AD.value $ AD.primal s
+asBool (ValueSeed s) = asBool $ ValuePrim $ putV $ AD.primalValue $ AD.primal s
 asBool (ValuePrim (BoolValue x)) = x
 asBool v = error $ "Unexpectedly not a boolean: " <> show v
 
@@ -1355,17 +1355,16 @@ initialCtx =
     putB (P.BoolValue x) = Just $ BoolValue x
     putB _ = Nothing
 
-    adToValue v = case v of
-          AD.Seed s -> ValueSeed s
-          AD.Primal v -> ValuePrim $ putV v
-    valueToAD v = case v of
-          ValuePrim v' -> primToAD v'
-          ValueSeed x' -> AD.Seed x'
-          _ -> error "Invalid AD value"
-    adToPrim v = putV $ AD.value v
+    adToValue (AD.Seed s) = ValueSeed s
+    adToValue (AD.Primal v) = ValuePrim $ putV v
+    valueToAD (ValuePrim v) = primToAD v
+    valueToAD (ValueSeed v) = AD.Seed v
+    adToPrim v = putV $ AD.primalValue v
     primToAD v = AD.Primal $ fromJust $ getV v
     adBinOp op x y = AD.doOp op [x, y]
     adUnOp op x = AD.doOp op [x]
+    isValueSeed (ValueSeed _) = True
+    isValueSeed _ = False
 
     fun1 f =
       TermValue Nothing $ ValueFun $ \x -> f x
@@ -1444,7 +1443,7 @@ initialCtx =
           | Just z <- msum $ map (`bopDefDiff'` (AD.Seed x', primToAD y')) fs -> do
               breakOnNaN [adToPrim $ AD.primal x', y'] (adToPrim z)
               pure $ adToValue z
-        
+
         _ ->
           bad noLoc mempty . docText $
             "Cannot apply operator to arguments"
@@ -1496,7 +1495,7 @@ initialCtx =
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
             Nothing -> error $ "No derivative found for " ++ show op
-        
+
         Just [ValuePrim x', ValueSeed y'] -> do
           case AD.doOp op [AD.Primal $ fromJust $ getV x', AD.Seed y'] of
             Just (AD.Seed v'') -> pure $ ValueSeed v''
@@ -1508,7 +1507,7 @@ initialCtx =
             Just (AD.Seed v'') -> pure $ ValueSeed v''
             Just (AD.Primal v'') -> pure $ ValuePrim $ putV v''
             Nothing -> error $ "No derivative found for " ++ show op
-          
+
         _ ->
           bad noLoc mempty . docText $
             "Cannot apply operator to argument"
@@ -1618,9 +1617,7 @@ initialCtx =
             1 -> Just $ unopDef [(getV, Just . putV, f . pure, adUnOp $ AD.OpFn s)]
             _ -> Just $
               fun1 $ \x -> do
-                let primOnly = all (\x -> case x of
-                      ValueSeed _ -> False
-                      _ -> True) $ fromJust $ fromTuple x
+                let primOnly = not (any isValueSeed (fromJust $ fromTuple x))
                 if primOnly then do
                   let getV' (ValuePrim v) = Just v
                       getV' _ = Nothing
@@ -1822,7 +1819,7 @@ initialCtx =
           ( ValueAcc shape op acc_arr,
             ValueSeed s
             ) ->
-              case putV $ AD.value $ AD.Seed s of
+              case putV $ AD.primalValue $ AD.Seed s of
                 SignedValue (Int64Value i') ->
                   if i' >= 0 && i' < arrayLength acc_arr
                     then do
@@ -1985,6 +1982,19 @@ initialCtx =
           toArray (ShapeDim m (ShapeDim n shape)) $
             map (toArray (ShapeDim n shape)) $
               -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              -- Slight hack to work around empty dimensions.
+              
+              -- Slight hack to work around empty dimensions.
               genericTake m $
                 transpose (map (snd . fromArray) xs') ++ repeat []
     def "flatten" = Just $
@@ -2025,7 +2035,7 @@ initialCtx =
         -- Augment the values
         let addSeeds i v = case v of
               ValuePrim v' -> (i ++ [P.primValueType $ fromJust $ getV v'], ValueSeed $ AD.VjpSeed depth $ AD.TapeId (length i) $ AD.Primal $ fromJust $ getV v')
-              ValueSeed v' -> (i ++ [P.primValueType $ AD.value $ AD.Seed v'], ValueSeed $ AD.VjpSeed depth $ AD.TapeId (length i) $ AD.Seed v')
+              ValueSeed v' -> (i ++ [P.primValueType $ AD.primalValue $ AD.Seed v'], ValueSeed $ AD.VjpSeed depth $ AD.TapeId (length i) $ AD.Seed v')
               ValueRecord m -> second ValueRecord $ M.mapAccum addSeeds i m
               ValueArray aa a -> do
                 let (i', out) = M.mapAccum addSeeds i $ M.fromList $ assocs a
@@ -2052,7 +2062,7 @@ initialCtx =
               let addop = addFor $ adToPrim a
               fromJust $ adBinOp (AD.OpBin addop) a b
 
-        let isNonzero v = case AD.value v of
+        let isNonzero v = case AD.primalValue v of
               P.FloatValue(Float16Value v') -> v' /= 0
               P.FloatValue(Float32Value v') -> v' /= 0
               P.FloatValue(Float64Value v') -> v' /= 0
@@ -2076,16 +2086,16 @@ initialCtx =
                 let m' = M.unionsWith addAny $ M.elems maps
                 (i', m')
               _ -> (i + 1, M.empty)
-        
+
         let out' = snd $ deriveSeeds 0 out
 
         let deriveFromV i v = case v of
               ValuePrim _ -> (i + 1, adToValue $ case M.lookup i out' of
                                                       Just d -> d
-                                                      _ -> AD.Primal $ AD.typeAsValue (t' !! i) 0)
+                                                      _ -> AD.Primal $ P.blankPrimValue $ t' !! i)
               ValueSeed _ -> (i + 1, adToValue $ case M.lookup i out' of
                                                       Just d -> d
-                                                      _ -> AD.Primal $ AD.typeAsValue (t' !! i) 0)
+                                                      _ -> AD.Primal $ P.blankPrimValue $ t' !! i)
               ValueRecord m -> second ValueRecord $ M.mapAccum deriveFromV i m
               ValueArray aa a -> do
                 let (i', out'') = M.mapAccum deriveFromV i $ M.fromList $ assocs a
@@ -2110,7 +2120,7 @@ initialCtx =
               _ -> error "Not implemented (d19h45iu782)" -- TODO: Arrays?
         let s' = getSeeds s
 
-        let isNonzero v = case AD.value v of
+        let isNonzero v = case AD.primalValue v of
               P.FloatValue(Float16Value v') -> v' /= 0
               P.FloatValue(Float32Value v') -> v' /= 0
               P.FloatValue(Float64Value v') -> v' /= 0
@@ -2136,10 +2146,10 @@ initialCtx =
 
         -- Derive the seeds
         let deriveSeeds v = case v of
-              ValuePrim v' -> ValuePrim $ putV $ AD.valueAsType (fromJust $ getV v') 0
+              ValuePrim v' -> ValuePrim $ putV $ P.blankPrimValue (P.primValueType $ fromJust $ getV v')
               ValueSeed s@(AD.JvpSeed d _ d') ->
                 if d == depth then adToValue d'
-                else ValuePrim $ putV $ AD.valueAsType (AD.value $ AD.primal s) 0
+                else ValuePrim $ putV $ P.blankPrimValue (P.primValueType $ AD.primalValue $ AD.primal s)
               ValueRecord m -> ValueRecord $ M.map deriveSeeds m
               ValueArray aa a -> ValueArray aa $ array (bounds a) $ M.toList $ M.map deriveSeeds $ M.fromList $ assocs a
               _ -> error "Not implemented (d19hasd782)" -- TODO: Arrays?
