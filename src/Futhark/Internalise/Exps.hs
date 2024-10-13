@@ -695,9 +695,9 @@ internaliseExp desc (E.Coerce e _ (Info et) loc) = do
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
     let parts =
-          ["Value of (core language) shape ("]
-            ++ intersperse ", " (map (ErrorVal int64) dims)
-            ++ [") cannot match shape of type `"]
+          ["Value of (desugared) shape ["]
+            ++ intersperse "][" (map (ErrorVal int64) dims)
+            ++ ["] cannot match shape of type `"]
             ++ dt'
             ++ ["`."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'

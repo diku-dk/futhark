@@ -2,7 +2,7 @@
 
 
 int is_blank_line_or_comment(const char *s) {
-  size_t i = strspn(s, " \t");
+  size_t i = strspn(s, " \t\n");
   return s[i] == '\0' || // Line is blank.
          strncmp(s + i, "--", 2) == 0; // Line is comment.
 }
