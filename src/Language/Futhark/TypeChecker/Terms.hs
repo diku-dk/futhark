@@ -387,7 +387,7 @@ checkExp (RecordLit fs loc) =
               <+> dquotes (pretty f)
               <+> "previously defined at"
               <+> pretty (locStrRel rloc sloc)
-              <> "."
+                <> "."
         Nothing -> pure ()
 -- No need to type check this, as these are only produced by the
 -- parser if the elements are monomorphic and all match.
@@ -1025,15 +1025,15 @@ checkApply loc (fname, prev_applied) ftype argexp = do
         "Cannot apply"
           <+> fname'
           <+> "to argument #"
-          <> pretty (prev_applied + 1)
-            <+> dquotes (shorten $ group $ pretty argexp)
-          <> ","
-            </> "as"
-            <+> fname'
-            <+> "only takes"
-            <+> pretty prev_applied
-            <+> arguments
-          <> "."
+            <> pretty (prev_applied + 1)
+          <+> dquotes (shorten $ group $ pretty argexp)
+            <> ","
+          </> "as"
+          <+> fname'
+          <+> "only takes"
+          <+> pretty prev_applied
+          <+> arguments
+            <> "."
   where
     arguments
       | prev_applied == 1 = "argument"
@@ -1192,20 +1192,20 @@ causalityCheck binding_body = do
           <+> dquotes (prettyName d)
           <+> "needed for type of"
           <+> what
-          <> colon
-            </> indent 2 (pretty t)
-            </> "But"
-            <+> dquotes (prettyName d)
-            <+> "is computed at"
-            <+> pretty (locStrRel loc dloc)
-          <> "."
-            </> ""
-            </> "Hint:"
-            <+> align
-              ( textwrap "Bind the expression producing"
-                  <+> dquotes (prettyName d)
-                  <+> "with 'let' beforehand."
-              )
+            <> colon
+          </> indent 2 (pretty t)
+          </> "But"
+          <+> dquotes (prettyName d)
+          <+> "is computed at"
+          <+> pretty (locStrRel loc dloc)
+            <> "."
+          </> ""
+          </> "Hint:"
+          <+> align
+            ( textwrap "Bind the expression producing"
+                <+> dquotes (prettyName d)
+                <+> "with 'let' beforehand."
+            )
 
 mustBeIrrefutable :: (MonadTypeChecker f) => Pat StructType -> f ()
 mustBeIrrefutable p = do
@@ -1366,8 +1366,8 @@ fixOverloadedTypes tyvars_at_toplevel =
           typeError usage mempty . withIndexLink "ambiguous-type" $
             "Type is ambiguous (could be one of"
               <+> commasep (map pretty ots)
-              <> ")."
-                </> "Add a type annotation to disambiguate the type."
+                <> ")."
+              </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, NoConstraint _ usage) = do
       -- See #1552.
       unify usage (Scalar (TypeVar mempty (qualName v) [])) $
@@ -1389,8 +1389,8 @@ fixOverloadedTypes tyvars_at_toplevel =
       typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous (must be a sum type with constructors:"
           <+> pretty (Sum cs)
-          <> ")."
-            </> "Add a type annotation to disambiguate the type."
+            <> ")."
+          </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, Size Nothing (Usage Nothing loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
         "Ambiguous size" <+> dquotes (prettyName v) <> "."
@@ -1512,13 +1512,13 @@ verifyFunctionParams fname params =
               <+> dquotes (pretty p)
               </> "refers to size"
               <+> dquotes (prettyName d)
-              <> comma
-                </> textwrap "which will not be accessible to the caller"
-              <> comma
-                </> textwrap "possibly because it is nested in a tuple or record."
-                </> textwrap "Consider ascribing an explicit type that does not reference "
-              <> dquotes (prettyName d)
-              <> "."
+                <> comma
+              </> textwrap "which will not be accessible to the caller"
+                <> comma
+              </> textwrap "possibly because it is nested in a tuple or record."
+              </> textwrap "Consider ascribing an explicit type that does not reference "
+                <> dquotes (prettyName d)
+                <> "."
       | otherwise = verifyParams forbidden' ps
       where
         forbidden' =
@@ -1610,8 +1610,8 @@ closeOverTypes defname defloc tparams paramts ret substs = do
               <+> dquotes (prettyName k)
               <+> "in parameter of"
               <+> dquotes (prettyName defname)
-              <> ", which is inferred as:"
-                </> indent 2 (pretty t)
+                <> ", which is inferred as:"
+              </> indent 2 (pretty t)
       | k `S.member` produced_sizes =
           pure $ Just $ Right k
     closeOver (_, _) =

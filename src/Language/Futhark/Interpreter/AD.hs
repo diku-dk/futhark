@@ -1,69 +1,62 @@
 module Language.Futhark.Interpreter.AD
-  (
-    Op (..),
+  ( Op (..),
     ADVariable (..),
     ADValue (..),
     Tape (..),
     VJPValue (..),
     JVPValue (..),
-
     doOp,
     addFor,
-    
     primal,
     tapePrimal,
     primitive,
-
     deriveTape,
   )
 where
 
-import Control.Monad (zipWithM, foldM)
+import Control.Monad (foldM, zipWithM)
 import Data.Either (isRight)
 import Data.List (find)
 import Data.Map qualified as M
-
 -- These are needed to reuse the definitions of the derivatives
 -- used by the compiler
 import Futhark.AD.Derivatives
-import Futhark.Analysis.PrimExp (PrimExp(..))
-
+import Futhark.Analysis.PrimExp (PrimExp (..))
 import Language.Futhark.Core (VName (..), nameFromString)
-
 -- As the mathematical functions of Futhark are implemented
 -- for the primitive type used in the compiler, said type is
 -- used for AD for simplicity
 import Language.Futhark.Primitive
 
---Mathematical operations, and type checking--
+-- Mathematical operations, and type checking--
 -- A mathematical operation
 data Op
-  = OpBin  BinOp
-  | OpCmp  CmpOp
-  | OpUn   UnOp
-  | OpFn   String
+  = OpBin BinOp
+  | OpCmp CmpOp
+  | OpUn UnOp
+  | OpFn String
   | OpConv ConvOp
-  deriving Show
+  deriving (Show)
 
 -- Checks if an operation matches the types of its operands
 opTypeMatch :: Op -> [PrimType] -> Bool
-opTypeMatch (OpBin  op) p = all (\x ->      binOpType  op  == x) p
-opTypeMatch (OpCmp  op) p = all (\x ->      cmpOpType  op  == x) p
-opTypeMatch (OpUn   op) p = all (\x ->      unOpType   op  == x) p
+opTypeMatch (OpBin op) p = all (\x -> binOpType op == x) p
+opTypeMatch (OpCmp op) p = all (\x -> cmpOpType op == x) p
+opTypeMatch (OpUn op) p = all (\x -> unOpType op == x) p
 opTypeMatch (OpConv op) p = all (\x -> fst (convOpType op) == x) p
-opTypeMatch (OpFn   fn) p = case M.lookup fn primFuns of
-                              Just (t, _, _) -> and $ zipWith (==) t p
-                              Nothing -> error "TODO: IMPOSSIBLE" -- It is assumed that the function exists
+opTypeMatch (OpFn fn) p = case M.lookup fn primFuns of
+  Just (t, _, _) -> and $ zipWith (==) t p
+  Nothing -> error "TODO: IMPOSSIBLE" -- It is assumed that the function exists
 
 -- Gets the return type of an operation
 opReturnType :: Op -> PrimType
-opReturnType (OpBin  op) = binOpType op
-opReturnType (OpCmp  op) = cmpOpType op
-opReturnType (OpUn   op) = unOpType  op
+opReturnType (OpBin op) = binOpType op
+opReturnType (OpCmp op) = cmpOpType op
+opReturnType (OpUn op) = unOpType op
 opReturnType (OpConv op) = snd $ convOpType op
-opReturnType (OpFn   fn) = case M.lookup fn primFuns of
-                              Just (_, t, _) -> t
-                              Nothing -> error "TODO: IMPOSSIBLE" -- It is assumed that the function exists
+opReturnType (OpFn fn) = case M.lookup fn primFuns of
+  Just (_, t, _) -> t
+  Nothing -> error "TODO: IMPOSSIBLE" -- It is assumed that the function exists
 
 -- Returns the operation which performs addition (or an
 -- equivalent operation) on the given type
@@ -81,23 +74,23 @@ multiplyFor (FloatType t) = FMul t
 multiplyFor Bool = LogAnd
 multiplyFor t = error $ "No notion of multiplication exists for type `" ++ show t ++ "`"
 
---Types and utility functions--
+-- Types and utility functions--
 -- When taking the partial derivative of a function, we
 -- must differentiate between the values which are kept
 -- constant, and those which are not
 data ADValue
   = Variable Int ADVariable
   | Constant PrimValue
-  deriving Show
+  deriving (Show)
 
 -- When performing automatic differentiation, each derived
 -- variable must be augmented with additional data. This
 -- value holds the primitive value of the variable, as well
--- as its data 
+-- as its data
 data ADVariable
   = VJP VJPValue
   | JVP JVPValue
-  deriving Show
+  deriving (Show)
 
 depth :: ADValue -> Int
 depth (Variable d _) = d
@@ -112,7 +105,7 @@ primitive :: ADValue -> PrimValue
 primitive v@(Variable _ _) = primitive $ primal v
 primitive (Constant v) = v
 
---Code reuse from compiler AD--
+-- Code reuse from compiler AD--
 -- Evaluates a PrimExp using doOp
 evalPrimExp :: PrimExp VName -> M.Map VName ADValue -> Maybe ADValue
 evalPrimExp (LeafExp n _) m = M.lookup n m
@@ -141,71 +134,69 @@ lookupPDs :: Op -> [PrimExp VName] -> Maybe [PrimExp VName]
 lookupPDs (OpBin op) [x, y] = Just $ do
   let (a, b) = pdBinOp op x y
   [a, b]
-lookupPDs (OpUn  op) [x] = Just [pdUnOp op x]
-lookupPDs (OpFn  fn) p   = pdBuiltin (nameFromString fn) p
+lookupPDs (OpUn op) [x] = Just [pdUnOp op x]
+lookupPDs (OpFn fn) p = pdBuiltin (nameFromString fn) p
 lookupPDs _ _ = Nothing
 
---Shared AD logic--
+-- Shared AD logic--
 -- This function performs a mathematical operation on a
 -- list of operands, performing automatic differentiation
 -- if one or more operands is a Variable (of depth > 0)
 doOp :: Op -> [ADValue] -> Maybe ADValue
-doOp op o = 
+doOp op o =
   let dep = case op of
         OpCmp _ -> 0 -- AD is not well-defined for comparason operations
-                     -- There are no derivatives for those written in
-                     -- PrimExp (check lookupPDs)
+        -- There are no derivatives for those written in
+        -- PrimExp (check lookupPDs)
         _ -> maximum (map depth o)
-  
-  in if dep == 0 then
-    -- In this case, every value is a constant, and
-    -- the mathematical operation can be applied as
-    -- it would be otherwise
+   in if dep == 0
+        then -- In this case, every value is a constant, and
+        -- the mathematical operation can be applied as
+        -- it would be otherwise
 
-    -- First, we make sure that the types of the
-    -- operands match those of the operation
-    let o' = map primitive o
-    in if opTypeMatch op (map primValueType o') then do
-      -- If they do, we perform the operation, and
-      -- return a Constant
-      Constant <$> case (op, o') of
-        (OpBin  op', [x, y]) -> doBinOp op' x y
-        (OpCmp  op', [x, y]) -> BoolValue <$> doCmpOp op' x y
-        (OpUn   op', [x])    -> doUnOp op' x
-        (OpConv op', [x])    -> doConvOp op' x
-        (OpFn   fn,  _)      -> do
-          (_, _, f) <- M.lookup fn primFuns
-          f o'
-        _ -> error "TODO: IMPOSSIBLE" -- This is needed due to the fact that the function
-                                      -- takes an array, yet some of the operations have a
-                                      -- fixed number of operands
+        -- First, we make sure that the types of the
+        -- operands match those of the operation
 
-    -- If the types do not match, we return Nothing
-    else Nothing
+          let o' = map primitive o
+           in if opTypeMatch op (map primValueType o')
+                then do
+                  -- If they do, we perform the operation, and
+                  -- return a Constant
+                  Constant <$> case (op, o') of
+                    (OpBin op', [x, y]) -> doBinOp op' x y
+                    (OpCmp op', [x, y]) -> BoolValue <$> doCmpOp op' x y
+                    (OpUn op', [x]) -> doUnOp op' x
+                    (OpConv op', [x]) -> doConvOp op' x
+                    (OpFn fn, _) -> do
+                      (_, _, f) <- M.lookup fn primFuns
+                      f o'
+                    _ -> error "TODO: IMPOSSIBLE" -- This is needed due to the fact that the function
+                    -- takes an array, yet some of the operations have a
+                    -- fixed number of operands
+                else -- If the types do not match, we return Nothing
+                  Nothing
+        else do
+          -- In this case, some values are variables.
+          -- We therefore have to perform the necessary
+          -- steps for AD
 
-  else do
-    -- In this case, some values are variables.
-    -- We therefore have to perform the necessary
-    -- steps for AD
+          -- First, we calculate the value for the
+          -- previous depth
+          let oprev = map primal o
+          vprev <- doOp op oprev
 
-    -- First, we calculate the value for the
-    -- previous depth
-    let oprev = map primal o
-    vprev <- doOp op oprev
-
-    -- Then we separate the values of the maximum
-    -- depth from those of a lower depth
-    let o' = map (divideDepths dep) o
-    -- Then we find out what type of AD is being
-    -- performed
-    case find isRight o' of
-      -- Finally, we perform the necessary steps
-      -- for the given type of AD
-      Just (Right (VJP {})) -> Just . Variable dep . VJP . VJPValue $ vjpHandleOp op (map extractVJP o') vprev
-      Just (Right (JVP {})) -> Variable dep . JVP . JVPValue vprev <$> jvpHandleFn op (map extractJVP o')
-
-      _ -> error "TODO: IMPOSSIBLE" -- Since the maximum depth is non-zero, there must
-                                    -- be at least one variable of depth > 0
+          -- Then we separate the values of the maximum
+          -- depth from those of a lower depth
+          let o' = map (divideDepths dep) o
+          -- Then we find out what type of AD is being
+          -- performed
+          case find isRight o' of
+            -- Finally, we perform the necessary steps
+            -- for the given type of AD
+            Just (Right (VJP {})) -> Just . Variable dep . VJP . VJPValue $ vjpHandleOp op (map extractVJP o') vprev
+            Just (Right (JVP {})) -> Variable dep . JVP . JVPValue vprev <$> jvpHandleFn op (map extractJVP o')
+            _ -> error "TODO: IMPOSSIBLE" -- Since the maximum depth is non-zero, there must
+            -- be at least one variable of depth > 0
   where
     divideDepths :: Int -> ADValue -> Either ADValue ADVariable
     divideDepths _ v@(Constant {}) = Left v
@@ -228,7 +219,7 @@ doOp op o =
 calculatePDs :: Op -> [ADValue] -> Maybe [ADValue]
 calculatePDs op p = do
   -- Create a unique VName for each operand
-  let n = map (\i -> VName (nameFromString $ "x" ++ show i) i) [1..length p]
+  let n = map (\i -> VName (nameFromString $ "x" ++ show i) i) [1 .. length p]
   -- Put the operands in the environment
   let m = M.fromList $ zip n p
 
@@ -237,27 +228,27 @@ calculatePDs op p = do
   pde <- lookupPDs op $ map (`LeafExp` opReturnType op) n
   mapM (`evalPrimExp` m) pde
 
-
---VJP / Reverse mode automatic differentiation--
+-- VJP / Reverse mode automatic differentiation--
 -- In reverse mode AD, the entire computation
 -- leading up to a variable must be saved
 -- This is represented as a Tape
 newtype VJPValue = VJPValue Tape
-  deriving Show
+  deriving (Show)
+
 -- Represents a computation tree, as well as every
 -- intermediate value in its evaluation
 -- TODO: Consider making this a graph
 data Tape
-  -- This represents a variable. Each variable is given
-  -- a unique ID, and has an initial value
-  = TapeID Int ADValue
-  -- this represents a constant
-  | TapeConst ADValue
-  -- This represents the application of a mathematical
-  -- operation. Each parameter is given by its Tape, and
-  -- the return value of the operation is saved
-  | TapeOp Op [Tape] ADValue
-  deriving Show
+  = -- This represents a variable. Each variable is given
+    -- a unique ID, and has an initial value
+    TapeID Int ADValue
+  | -- this represents a constant
+    TapeConst ADValue
+  | -- This represents the application of a mathematical
+    -- operation. Each parameter is given by its Tape, and
+    -- the return value of the operation is saved
+    TapeOp Op [Tape] ADValue
+  deriving (Show)
 
 -- Returns the primal value of a Tape
 tapePrimal :: Tape -> ADValue
@@ -297,7 +288,6 @@ deriveTape (TapeOp op p _) s = do
   pd <- zipWithM deriveTape p s''
   -- Add up the results
   Just $ foldl (M.unionWith add) M.empty pd
-  
   where
     add x y = expectJust "TODO: Remove me" $ doOp (OpBin $ addFor $ opReturnType op) [x, y]
     mul x y = doOp (OpBin $ multiplyFor $ opReturnType op) [x, y]
@@ -309,13 +299,12 @@ deriveTape (TapeOp op p _) s = do
     expectJust _ (Just v) = v
     expectJust e Nothing = error e
 
-
---JVP / Forward mode automatic differentiation--
+-- JVP / Forward mode automatic differentiation--
 
 -- In JVP, the derivative of the variable must be saved.
 -- This is represented as a second value
 data JVPValue = JVPValue ADValue ADValue
-  deriving Show
+  deriving (Show)
 
 -- This calculates the derivative part of the JVPValue
 -- resulting from the application of a mathematical
@@ -333,7 +322,6 @@ jvpHandleFn op p = do
       pds <- calculatePDs op $ map primal' p
       vs <- zipWithM mul pds $ map derivative p
       foldM add (Constant $ blankPrimValue $ opReturnType op) vs
-  
   where
     primal' (Left v) = v
     primal' (Right (JVPValue v _)) = v

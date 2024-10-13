@@ -425,10 +425,10 @@ sliceSlice (Slice jslice) (Slice islice) = Slice $ sliceSlice' jslice islice
 -- | A dimension in a 'FlatSlice'.
 data FlatDimIndex d
   = FlatDimIndex
-      -- | Number of elements in dimension
       d
-      -- | Stride of dimension
+      -- ^ Number of elements in dimension
       d
+      -- ^ Stride of dimension
   deriving (Eq, Ord, Show)
 
 instance Traversable FlatDimIndex where

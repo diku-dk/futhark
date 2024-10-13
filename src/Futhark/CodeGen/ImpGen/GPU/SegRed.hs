@@ -434,8 +434,8 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
               .>. 0
               .&&. isActive (init $ zip gtids dims)
               .&&. ltid
-              .<. segment_size
-              * segments_per_block
+                .<. segment_size
+                  * segments_per_block
           )
           in_bounds
           out_of_bounds
@@ -460,8 +460,8 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
           ( sExt64 virttblock_id
               * segments_per_block
               + sExt64 ltid
-                .<. num_segments
-                .&&. ltid
+              .<. num_segments
+              .&&. ltid
                 .<. segments_per_block
           )
         $ forM2_ segred_pes (concat reds_arrs)

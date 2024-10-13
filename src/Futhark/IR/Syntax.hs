@@ -466,12 +466,12 @@ deriving instance (RepTypes rep) => Ord (Exp rep)
 -- | For-loop or while-loop?
 data LoopForm
   = ForLoop
-      -- | The loop iterator var
       VName
-      -- | The type of the loop iterator var
+      -- ^ The loop iterator var
       IntType
-      -- | The number of iterations.
+      -- ^ The type of the loop iterator var
       SubExp
+      -- ^ The number of iterations.
   | WhileLoop VName
   deriving (Eq, Ord, Show)
 

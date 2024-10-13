@@ -662,7 +662,8 @@ distributeSingleUnaryStm acc stm stm_arr f =
       | map resSubExp res == map Var (patNames $ stmPat stm),
         (outer, _) <- nest,
         [(_, arr)] <- loopNestingParamsAndArrs outer,
-        boundInKernelNest nest `namesIntersection` freeIn stm
+        boundInKernelNest nest
+          `namesIntersection` freeIn stm
           == oneName stm_arr,
         perfectlyMapped arr nest -> do
           addPostStms kernels

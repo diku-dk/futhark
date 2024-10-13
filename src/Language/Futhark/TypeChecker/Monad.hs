@@ -155,7 +155,7 @@ underscoreUse loc name =
   typeError loc mempty $
     "Use of"
       <+> dquotes (pretty name)
-      <> ": variables prefixed with underscore may not be accessed."
+        <> ": variables prefixed with underscore may not be accessed."
 
 -- | A mapping from import import names to 'Env's.  This is used to
 -- resolve @import@ declarations.

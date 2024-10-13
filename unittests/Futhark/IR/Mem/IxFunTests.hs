@@ -60,20 +60,20 @@ compareIxFuns (Just ixfunLMAD) ixfunAlg =
         T.unpack . docText $
           "lmad ixfun:  "
             <> pretty ixfunLMAD
-              </> "alg ixfun:   "
-            <> pretty ixfunAlg
-              </> "lmad shape:  "
-            <> pretty lmadShape
-              </> "alg shape:   "
-            <> pretty algShape
-              </> "lmad points length: "
-            <> pretty (length resLMAD)
-              </> "alg points length:  "
-            <> pretty (length resAlg)
-              </> "lmad points: "
-            <> pretty resLMAD
-              </> "alg points:  "
-            <> pretty resAlg
+            </> "alg ixfun:   "
+              <> pretty ixfunAlg
+            </> "lmad shape:  "
+              <> pretty lmadShape
+            </> "alg shape:   "
+              <> pretty algShape
+            </> "lmad points length: "
+              <> pretty (length resLMAD)
+            </> "alg points length:  "
+              <> pretty (length resAlg)
+            </> "lmad points: "
+              <> pretty resLMAD
+            </> "alg points:  "
+              <> pretty resAlg
    in (lmadShape == algShape && resLMAD == resAlg) @? errorMessage
 compareIxFuns Nothing ixfunAlg =
   assertFailure $
@@ -91,9 +91,9 @@ compareOpsFailure (Just ixfunLMAD, ixfunAlg) =
   assertFailure . T.unpack . docText $
     "Not supposed to be representable as LMAD."
       </> "lmad ixfun: "
-      <> pretty ixfunLMAD
-        </> "alg ixfun:  "
-      <> pretty ixfunAlg
+        <> pretty ixfunLMAD
+      </> "alg ixfun:  "
+        <> pretty ixfunAlg
 
 -- XXX: Clean this up.
 n :: Int

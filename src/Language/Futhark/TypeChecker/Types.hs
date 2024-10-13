@@ -254,7 +254,7 @@ evalTypeExp df ote@TEApply {} = do
           <+> pretty (length ps)
           <+> "arguments, but provided"
           <+> pretty (length targs)
-          <> "."
+            <> "."
     else do
       (targs', dims, substs) <- unzip3 <$> zipWithM checkArgApply ps targs
       pure
@@ -306,7 +306,7 @@ evalTypeExp df ote@TEApply {} = do
           <+> pretty a
           <+> "not valid for a type parameter"
           <+> pretty p
-          <> "."
+            <> "."
 
 -- | Check a type expression, producing:
 --

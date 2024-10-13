@@ -449,7 +449,7 @@ histKernelGlobalPass map_pes num_tblocks tblock_size space slugs kbody histogram
                         chk_beg
                           .<=. flat_bucket
                           .&&. flat_bucket
-                          .<. (chk_beg + hist_H_chk)
+                            .<. (chk_beg + hist_H_chk)
                           .&&. inBounds (Slice (map DimFix bucket')) dest_shape'
                       vs_params = takeLast (length vs') $ lambdaParams lam
 
@@ -748,9 +748,9 @@ histKernelLocalPass
                       bucket_in_bounds =
                         inBounds (Slice (map DimFix bucket')) dest_shape'
                           .&&. chk_beg
-                          .<=. flat_bucket
+                            .<=. flat_bucket
                           .&&. flat_bucket
-                          .<. (chk_beg + tvExp hist_H_chk)
+                            .<. (chk_beg + tvExp hist_H_chk)
                       bucket_is =
                         [sExt64 thread_local_subhisto_i, flat_bucket - chk_beg]
                       vs_params = takeLast (length vs') $ lambdaParams lam
@@ -1021,9 +1021,9 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
           .&&. (local_mem_needed .<=. tvExp hist_L)
           .&&. (hist_S .<=. max_S)
           .&&. hist_C
-          .<=. hist_B
+            .<=. hist_B
           .&&. tvExp hist_M
-          .>. 0
+            .>. 0
 
       run = do
         emit $ Imp.DebugPrint "## Using shared memory" Nothing

@@ -406,7 +406,7 @@ typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
         annotate italicized $
           "\n\nPolymorphic in"
             <+> mconcat (intersperse " " $ map pretty ps)
-            <> "."
+              <> "."
       else mempty
 
 mtypeCommand :: Command

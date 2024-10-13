@@ -59,7 +59,7 @@ instance Pretty BreadCrumb where
   pretty (MatchingFields fields) =
     "When matching types of record field"
       <+> dquotes (mconcat $ punctuate "." $ map pretty fields)
-      <> dot
+        <> dot
   pretty (MatchingConstructor c) =
     "When matching types of constructor" <+> dquotes (pretty c) <> dot
   pretty (Matching s) =
@@ -188,13 +188,13 @@ prettySource :: Loc -> Loc -> RigidSource -> Doc ()
 prettySource ctx loc (RigidRet Nothing) =
   "is unknown size returned by function at"
     <+> pretty (locStrRel ctx loc)
-    <> "."
+      <> "."
 prettySource ctx loc (RigidRet (Just fname)) =
   "is unknown size returned by"
     <+> dquotes (pretty fname)
     <+> "at"
     <+> pretty (locStrRel ctx loc)
-    <> "."
+      <> "."
 prettySource ctx loc (RigidArg fname arg) =
   "is value of argument"
     </> indent 2 (shorten (pretty arg))
@@ -202,16 +202,16 @@ prettySource ctx loc (RigidArg fname arg) =
     <+> fname'
     <+> "at"
     <+> pretty (locStrRel ctx loc)
-    <> "."
+      <> "."
   where
     fname' = maybe "function" (dquotes . pretty) fname
 prettySource ctx loc (RigidSlice d slice) =
   "is size produced by slice"
     </> indent 2 (shorten (pretty slice))
     </> d_desc
-    <> "at"
-      <+> pretty (locStrRel ctx loc)
-    <> "."
+      <> "at"
+    <+> pretty (locStrRel ctx loc)
+      <> "."
   where
     d_desc = case d of
       Just d' -> "of dimension of size " <> dquotes (pretty d') <> " "
@@ -226,19 +226,19 @@ prettySource ctx loc (RigidOutOfScope boundloc v) =
     <> " going out of scope at "
     <> pretty (locStrRel ctx loc)
     <> "."
-      </> "Originally bound at "
-    <> pretty (locStrRel ctx boundloc)
-    <> "."
+    </> "Originally bound at "
+      <> pretty (locStrRel ctx boundloc)
+      <> "."
 prettySource _ _ RigidUnify =
   "is an artificial size invented during unification of functions with anonymous sizes."
 prettySource ctx loc (RigidCond t1 t2) =
   "is unknown due to conditional expression at "
     <> pretty (locStrRel ctx loc)
     <> "."
-      </> "One branch returns array of type: "
-    <> align (pretty t1)
-      </> "The other an array of type:       "
-    <> align (pretty t2)
+    </> "One branch returns array of type: "
+      <> align (pretty t1)
+    </> "The other an array of type:       "
+      <> align (pretty t2)
 
 -- | Retrieve notes describing the purpose or origin of the given
 -- t'Size'.  The location is used as the *current* location, for the
@@ -578,7 +578,7 @@ occursCheck usage bcs vn tp =
         <+> prettyName vn
         <+> "with"
         <+> pretty tp
-        <> "."
+          <> "."
 
 scopeCheck ::
   (MonadUnify m) =>
@@ -692,7 +692,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
                   <+> commasep (map pretty ts)
                   </> "due to"
                   <+> pretty old_usage
-                  <> "."
+                    <> "."
     Just (HasFields l required_fields old_usage) -> do
       when (l == Unlifted) $ arrayElemTypeWith usage (unliftedBcs old_usage) tp
       case tp of
@@ -735,7 +735,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
               </> indent 2 (pretty (Record required_fields))
               </> "due to"
               <+> pretty old_usage
-              <> "."
+                <> "."
     -- See Note [Linking variables to sum types]
     Just (HasConstrs l required_cs old_usage) -> do
       when (l == Unlifted) $ arrayElemTypeWith usage (unliftedBcs old_usage) tp
@@ -853,8 +853,8 @@ mustBeOneOf ts usage t = do
         "Cannot unify type"
           <+> dquotes (pretty t)
           <+> "with any of "
-          <> commasep (map pretty ts)
-          <> "."
+            <> commasep (map pretty ts)
+            <> "."
 
 linkVarToTypes :: (MonadUnify m) => Usage -> VName -> [PrimType] -> m ()
 linkVarToTypes usage vn ts = do
@@ -870,22 +870,22 @@ linkVarToTypes usage vn ts = do
               <+> commasep (map pretty vn_ts)
               <+> "due to"
               <+> pretty vn_usage
-              <> "."
+                <> "."
         ts' -> modifyConstraints $ M.insert vn (lvl, Overloaded ts' usage)
     Just (_, HasConstrs _ _ vn_usage) ->
       unifyError usage mempty noBreadCrumbs $
         "Type constrained to one of"
           <+> commasep (map pretty ts)
-          <> ", but also inferred to be sum type due to"
-            <+> pretty vn_usage
-          <> "."
+            <> ", but also inferred to be sum type due to"
+          <+> pretty vn_usage
+            <> "."
     Just (_, HasFields _ _ vn_usage) ->
       unifyError usage mempty noBreadCrumbs $
         "Type constrained to one of"
           <+> commasep (map pretty ts)
-          <> ", but also inferred to be record due to"
-            <+> pretty vn_usage
-          <> "."
+            <> ", but also inferred to be record due to"
+          <+> pretty vn_usage
+            <> "."
     Just (lvl, _) -> modifyConstraints $ M.insert vn (lvl, Overloaded ts usage)
     Nothing ->
       unifyError usage mempty noBreadCrumbs $
@@ -1115,7 +1115,7 @@ mustHaveFieldWith onDims usage bound bcs l t = do
               <+> dquotes (pretty l)
               <+> " of value of type"
               <+> pretty (toStructural t)
-              <> "."
+                <> "."
     _ -> do
       unify usage t $ Scalar $ Record $ M.singleton l l_type
       pure l_type
