@@ -16,8 +16,9 @@ import Language.Futhark.Parser
   )
 import Prettyprinter.Internal (Pretty)
 
--- import Debug.Trace
 {-
+import Debug.Trace
+
 debug :: Show a => a -> a
 debug a = traceShow a a
 -}
@@ -110,8 +111,11 @@ sepByLayout loc a b =
     SingleLine -> a <+> b
 
 fmtName :: Name -> Fmt
-fmtName name
-  -- | operatorName name = parens $ fmtPretty name (doesn't seem like this needs to always be parenthesized?)
+fmtName name = fmtPretty name
+
+fmtNameParen :: Name -> Fmt
+fmtNameParen name
+  | operatorName name = parens $ fmtPretty name -- (doesn't seem like this needs to always be parenthesized?)
   | otherwise = fmtPretty name
 
 fmtPretty :: (Pretty a) => a -> Fmt
@@ -158,7 +162,7 @@ fmtParamType Nothing te = fmtTypeExp te
 
 fmtSumTypeConstr :: (Name, [UncheckedTypeExp]) -> FmtM Fmt
 fmtSumTypeConstr (name, fs) =
-  ((code "#" <> fmtName name) <+>) . sep nil <$> mapM fmtTypeExp fs
+  ((code "#" <> fmtName name) <+>) . sep space <$> mapM fmtTypeExp fs
 
 -- | Formatting of Futhark type expressions.
 fmtTypeExp :: UncheckedTypeExp -> FmtM Fmt
@@ -207,7 +211,7 @@ fmtTypeExp (TEArrow name te0 te1 loc) = buildFmt loc single multi
 fmtTypeExp (TESum tes loc) = buildFmt loc single multi
   where
     single = sepSpace (code " |") <$> mapM fmtSumTypeConstr tes
-    multi = sepLine (code "|") <$> mapM fmtSumTypeConstr tes
+    multi = sepLine (code "| ") <$> mapM fmtSumTypeConstr tes
 fmtTypeExp (TEDim dims te loc) = buildFmt loc single multi
   where
     single = do
@@ -229,6 +233,7 @@ fmtArgExp (TypeArgExpType te) = buildFmt te single multi
 fmtTypeBind :: UncheckedTypeBind -> FmtM Fmt
 fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = buildFmt loc single multi
   where
+    ps_op = if null ps then (<>) else (<+>)
     common = do
       l' <- fmtLiftedness l
       dc' <- fmtDocComment dc
@@ -239,26 +244,25 @@ fmtTypeBind (TypeBind name l ps e NoInfo dc loc) = buildFmt loc single multi
       e' <- fmtTypeExp e
       pure $
         dc'
-          <> ( code "type"
-                 <> l'
-                   <+> fmtName name
-                 <> code (if null ps then "" else " ")
-                 <> sep space ps'
-                   <+> code "="
-                   <+> e'
-             )
+        <> code "type"
+        <> l' 
+        <+> fmtName name
+        <> code (if null ps then "" else " ")
+        `ps_op` sep space ps'
+        <+> code "="
+        <+> e'
     multi = do
       (l', dc', ps') <- common
       e' <- fmtTypeExp e
       pure $
         dc'
-          <> ( code "type"
-                 <> l'
-                   <+> fmtName name
-                 <> sep space ps'
-                   <+> code "="
-             )
-            <+> e'
+        <> code "type"
+        <> l'
+        <+> fmtName name
+        `ps_op` sep space ps'
+        <+> stdNest (
+            code "="
+            </> e')
 
 fmtAttrAtom :: AttrAtom a -> FmtM Fmt
 fmtAttrAtom (AtomName name) = pure $ fmtName name
@@ -308,7 +312,7 @@ fmtPat (PatParens pat loc) = buildFmt loc single multi
     multi = (</> code ")") <$> (stdNest . (code "(" </>) <$> fmtPat pat)
 fmtPat (Id name _ loc) = buildFmt loc single multi
   where
-    single = pure $ fmtName name
+    single = pure $ fmtNameParen name
     multi = single
 fmtPat (Wildcard _t loc) = buildFmt loc single multi
   where
@@ -396,10 +400,13 @@ fmtExp (Parens e loc) = buildFmt loc single multi
 fmtExp (QualParens (v, _loc) e loc') = buildFmt loc' single multi
   where
     single = do
-      fmt <- fmtExp e
+      e' <- fmtExp e
       n <- fmtQualName v
-      pure $ n <> parens fmt
-    multi = single
+      pure $ n <> code "." <> parens e'
+    multi = do
+      e' <- fmtExp e
+      n <- fmtQualName v
+      pure $ n <> code "." <> stdNest (code "(" </> e') </> code ")"
 fmtExp (Ascript e t loc) = buildFmt loc single multi
   where
     single = do
@@ -471,8 +478,8 @@ fmtExp (RecordUpdate src fs ve _ loc) = buildFmt loc single multi
       src' <- fmtExp src -- This could account for multiline.
       let fs' = sep (code ".") $ fmtName <$> fs -- This could account for multiline.
       pure $ src' <+> code "with" <+> fs' <+> code "="
-    single = (<+>) <$> fmtExp ve <*> common
-    multi = (</>) <$> fmtExp ve <*> common
+    single = (<+>) <$> common <*> fmtExp ve
+    multi = (</>) <$> common <*> fmtExp ve
 fmtExp (Assert e1 e2 _ loc) = buildFmt loc single multi
   where
     single = (<+>) <$> ((code "assert" <+>) <$> fmtExp e1) <*> fmtExp e2
@@ -535,13 +542,13 @@ fmtQualNameSingle (QualName names name)
 
 fmtQualNameMulti :: QualName Name -> Fmt
 fmtQualNameMulti (QualName names name) 
-  | operatorName name = parens $ pre <> fmtName name
+  | operatorName name = parens $ pre <> fmtName name 
   | otherwise = pre <> fmtName name
     where
       pre =
         if null names
           then nil
-          else sepLine (code ".") (fmtName <$> names) <> code "."
+          else sep (code ".") (fmtName <$> names) <> code "."
 
 fmtQualName :: QualName Name -> FmtM Fmt
 fmtQualName n = pure $ fmtQualNameSingle n
@@ -550,7 +557,7 @@ fmtCase :: UncheckedCase -> FmtM Fmt
 fmtCase (CasePat p e loc) = buildFmt loc single multi
   where
     preSpace t = fmap (code t <+>)
-    preLine t = fmap (stdNest . (code t <+>))
+    preLine t = fmap (stdNest . (code t </>))
     single =
       (<+>) <$> preSpace "case" (fmtPat p) <*> preSpace "->" (fmtExp e)
     multi =
@@ -656,7 +663,7 @@ fmtAppExp (LetFun fname (tparams, params, retdecl, _, e) body loc) = buildFmt lo
       retdecl' <-
         case fmtTypeExp <$> retdecl of
           Just a -> fmap (\b -> code ":" <+> b <> space) a
-          Nothing -> pure nil
+          Nothing -> pure space
       let sub = sepNonEmpty space [tparams', params']
       e' <- fmtExp e
       pure $
@@ -684,9 +691,9 @@ fmtAppExp (LetWith dest src idxs ve body loc)
         sepByLayout
           ve
           ( code "let"
-              <+> dest'
-              <> idxs'
-                <+> code "="
+            <+> dest'
+            <> idxs'
+            <+> code "="
           )
           ve'
     singleSame = (<+>) <$> commonSame <*> letBody body
@@ -805,7 +812,7 @@ fmtValBind (ValBind entry name retdecl _rettype tparams args body doc attrs loc)
         docs
           <> (if null attrs then nil else fmt_attrs <> space)
           <> fun
-            <+> fmtName name
+          <+> fmtNameParen name
           <> (if isEmpty sub then nil else space)
           <> sub
           <> retdecl'
@@ -872,10 +879,9 @@ fmtModTypeExp (ModTypeVar v _ loc) = buildFmt loc single multi
     multi = single
 fmtModTypeExp (ModTypeParens mte loc) = buildFmt loc single multi
   where
-    single = do
-      mte' <- fmtModTypeExp mte
-      pure $ parens mte' 
-    multi = single
+    common = fmtModTypeExp mte
+    single = parens <$> fmtModTypeExp mte
+    multi = (</> code ")") <$> (stdNest . (code "(" </>) <$> common)
 fmtModTypeExp (ModTypeSpecs sbs loc) = buildFmt loc single multi
   where
     common s = sep s <$> mapM fmtSpecBase sbs
@@ -883,10 +889,11 @@ fmtModTypeExp (ModTypeSpecs sbs loc) = buildFmt loc single multi
     multi = (</> code "}") <$> (stdNest . (code "{" </>) <$> common line)
 fmtModTypeExp (ModTypeWith mte (TypeRef v ps td _) loc) = buildFmt loc single multi
   where
+    ps_op = if null ps then (<>) else (<+>)
     common = do
       mte' <- fmtModTypeExp mte
       ps' <- mapM fmtTypeParam ps
-      pure $ mte' <> code "with" <+> fmtPretty v <+> sep space ps'
+      pure $ mte' <+> code "with" <+> fmtPretty v `ps_op` sep space ps'
     single = do
       fmt <- common
       td' <- fmtTypeExp td
@@ -897,7 +904,7 @@ fmtModTypeExp (ModTypeWith mte (TypeRef v ps td _) loc) = buildFmt loc single mu
       pure $ fmt <+> stdNest (code "=" <+> td')
 fmtModTypeExp (ModTypeArrow (Just v) te0 te1 loc) = buildFmt loc single multi
   where
-    op a b = parens (fmtName v <> code ":") <+> a <+> code "->" <+> b
+    op a b = parens (fmtName v <> code ":" <+> a) <+> code "->" <+> b
     single = op <$> fmtModTypeExp te0 <*> fmtModTypeExp te1
     multi = single
 fmtModTypeExp (ModTypeArrow Nothing te0 te1 loc) = buildFmt loc single multi
@@ -909,11 +916,15 @@ fmtModTypeExp (ModTypeArrow Nothing te0 te1 loc) = buildFmt loc single multi
 fmtModTypeBind :: UncheckedModTypeBind -> FmtM Fmt
 fmtModTypeBind (ModTypeBind pName pSig doc loc) = buildFmt loc single multi
   where
+    isBracesOrParens (ModTypeSpecs _ _) = True
+    isBracesOrParens (ModTypeParens _ _) = True
+    isBracesOrParens _ = False
+    op = if isBracesOrParens pSig then (<+>) else (</>)
     common = do
       doc' <- fmtDocComment doc
       pure $ doc' <> code "module type" <+> fmtName pName <+> code "="
     single = (<+>) <$> common <*> fmtModTypeExp pSig
-    multi = (</>) <$> common <*> fmtModTypeExp pSig
+    multi = op <$> common <*> fmtModTypeExp pSig
 
 fmtModParam :: ModParamBase NoInfo Name -> FmtM Fmt
 fmtModParam (ModParam pName pSig _f loc) = buildFmt loc single multi
@@ -964,7 +975,7 @@ fmtModExp (ModVar v loc) = buildFmt loc single multi
     multi = single
 fmtModExp (ModParens f loc) = buildFmt loc single multi
   where
-    single = braces <$> fmtModExp f
+    single = parens <$> fmtModExp f
     multi = (</> code ")") <$> (stdNest . (code "()" </>) <$> fmtModExp f)
 fmtModExp (ModImport path _f loc) = buildFmt loc single multi
   where
