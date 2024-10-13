@@ -7,12 +7,12 @@ def square [n] (xs: [n]i32) =
 
 -- ==
 -- entry: prim
--- compiled input { [1,2,3,4,5] } output { [1,4,9,16,25] }
+-- input { [1,2,3,4,5] } output { [1,4,9,16,25] }
 entry prim [n] (xs: [n]i32) = square xs
 
 -- ==
 -- entry: f_jvp f_vjp
--- compiled input { [1,2,3,4,5] }
+-- input { [1,2,3,4,5] }
 -- output { [[2,0,0,0,0],
 --           [0,4,0,0,0],
 --           [0,0,6,0,0],

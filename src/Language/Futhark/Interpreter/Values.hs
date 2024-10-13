@@ -14,6 +14,8 @@ module Language.Futhark.Interpreter.Values
     valueShape,
     prettyValue,
     valueText,
+    valueAccum,
+    valueAccumLM,
     fromTuple,
     arrayLength,
     isEmptyArray,
@@ -28,6 +30,7 @@ module Language.Futhark.Interpreter.Values
 where
 
 import Data.Array
+import Data.Bifunctor (Bifunctor(second))
 import Data.List (genericLength)
 import Data.Map qualified as M
 import Data.Maybe
@@ -35,9 +38,10 @@ import Data.Monoid hiding (Sum)
 import Data.Text qualified as T
 import Data.Vector.Storable qualified as SVec
 import Futhark.Data qualified as V
-import Futhark.Util (chunk)
+import Futhark.Util (chunk, mapAccumLM)
 import Futhark.Util.Pretty
 import Language.Futhark hiding (Shape, matchDims)
+import Language.Futhark.Interpreter.AD qualified as AD
 import Language.Futhark.Primitive qualified as P
 import Prelude hiding (break, mod)
 
@@ -106,6 +110,8 @@ data Value m
     ValueSum ValueShape Name [Value m]
   | -- The shape, the update function, and the array.
     ValueAcc ValueShape (Value m -> Value m -> m (Value m)) !(Array Int (Value m))
+  | -- A primitive value with added information used in automatic differentiation
+    ValueAD Int AD.ADVariable
 
 instance Show (Value m) where
   show (ValuePrim v) = "ValuePrim " <> show v <> ""
@@ -114,6 +120,7 @@ instance Show (Value m) where
   show (ValueSum shape c vs) = unwords ["ValueSum", "(" <> show shape <> ")", show c, "(" <> show vs <> ")"]
   show ValueFun {} = "ValueFun _"
   show ValueAcc {} = "ValueAcc _"
+  show (ValueAD d v) = unwords ["ValueAD", show d, show v]
 
 instance Eq (Value m) where
   ValuePrim (SignedValue x) == ValuePrim (SignedValue y) =
@@ -145,6 +152,8 @@ prettyValueWith pprPrim = pprPrec 0
     pprPrec _ ValueAcc {} = "#<acc>"
     pprPrec p (ValueSum _ n vs) =
       parensIf (p > (0 :: Int)) $ "#" <> sep (pretty n : map (pprPrec 1) vs)
+      -- TODO: This could be prettier. Perhaps add pretty printing for ADVariable / ADValues
+    pprPrec _ (ValueAD d v) = pretty $ "d[" ++ show d ++ "]" ++ show v
     pprElem v@ValueArray {} = pprPrec 0 v
     pprElem v = group $ pprPrec 0 v
 
@@ -181,6 +190,40 @@ valueShape (ValueAcc shape _ _) = shape
 valueShape (ValueRecord fs) = ShapeRecord $ M.map valueShape fs
 valueShape (ValueSum shape _ _) = shape
 valueShape _ = ShapeLeaf
+
+-- TODO: Perhaps there is some clever way to reuse the code between
+-- valueAccum and valueAccumLM
+valueAccum :: (a -> Value m -> (a, Value m)) -> a -> Value m -> (a, Value m)
+valueAccum f i v@(ValuePrim {}) = f i v
+valueAccum f i v@(ValueAD {}) = f i v
+valueAccum f i (ValueRecord m) = second ValueRecord $ M.mapAccum (valueAccum f) i m
+valueAccum f i (ValueArray s a) = do
+  -- TODO: This could probably be better
+  -- Transform into a map
+  let m = M.fromList $ assocs a
+  -- Accumulate over the map
+  let (i', m') = M.mapAccum (valueAccum f) i m
+  -- Transform back into an array and return
+  let a' = array (bounds a) (M.toList m')
+  (i', ValueArray s a')
+valueAccum _ _ v = error $ "valueAccum not implemented for " ++ show v
+
+valueAccumLM :: Monad f => (a -> Value m -> f (a, Value m)) -> a -> Value m -> f (a, Value m)
+valueAccumLM f i v@(ValuePrim {}) = f i v
+valueAccumLM f i v@(ValueAD {}) = f i v
+valueAccumLM f i (ValueRecord m) = do
+  (a, b) <- mapAccumLM (valueAccumLM f) i m
+  pure (a, ValueRecord b)
+valueAccumLM f i (ValueArray s a) = do
+  -- TODO: This could probably be better
+  -- Transform into a map
+  let m = M.fromList $ assocs a
+  -- Accumulate over the map
+  (i', m') <- mapAccumLM (valueAccumLM f) i m
+  -- Transform back into an array and return
+  let a' = array (bounds a) (M.toList m')
+  pure (i', ValueArray s a')
+valueAccumLM _ _ v = error $ "valueAccum not implemented for " ++ show v
 
 -- | Does the value correspond to an empty array?
 isEmptyArray :: Value m -> Bool
