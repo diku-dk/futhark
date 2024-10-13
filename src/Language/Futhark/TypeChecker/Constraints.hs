@@ -68,6 +68,7 @@ data Reason
   | -- | Arising from explicit ascription.
     ReasonAscription Loc Type Type
   | ReasonRetType Loc Type Type
+  | ReasonApply Loc (Maybe (QualName VName)) Exp Type Type
   deriving (Eq, Show)
 
 instance Located Reason where
@@ -75,6 +76,7 @@ instance Located Reason where
   locOf (ReasonPatMatch l _ _) = l
   locOf (ReasonAscription l _ _) = l
   locOf (ReasonRetType l _ _) = l
+  locOf (ReasonApply l _ _ _ _) = l
 
 data Ct
   = CtEq Reason Type Type
@@ -304,6 +306,14 @@ cannotUnify reason notes bcs t1 t2 = do
   t1' <- enrichType t1
   t2' <- enrichType t2
   case reason of
+    Reason loc ->
+      typeError loc notes . stack $
+        [ "Cannot unify",
+          indent 2 (pretty t1'),
+          "with",
+          indent 2 (pretty t2')
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
     ReasonPatMatch loc pat value_t ->
       typeError loc notes . stack $
         [ "Pattern",
@@ -328,14 +338,27 @@ cannotUnify reason notes bcs t1 t2 = do
           "Actual:  " <+> align (pretty actual')
         ]
           <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
-    Reason loc ->
+    ReasonApply loc f e expected actual -> do
+      expected' <- enrichType expected
+      actual' <- enrichType actual
       typeError loc notes . stack $
-        [ "Cannot unify",
-          indent 2 (pretty t1'),
-          "with",
-          indent 2 (pretty t2')
+        [ header,
+          "Expected:" <+> align (pretty expected'),
+          "Actual:  " <+> align (pretty actual')
         ]
-          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+      where
+        header =
+          case f of
+            Nothing ->
+              "Cannot apply function to"
+                <+> dquotes (shorten $ group $ pretty e)
+                <> " (invalid type)."
+            Just fname ->
+              "Cannot apply"
+                <+> dquotes (pretty fname)
+                <+> "to"
+                <+> dquotes (align $ shorten $ group $ pretty e)
+                <> " (invalid type)."
 
 -- Precondition: 'v' is currently flexible.
 subTyVar :: Reason -> BreadCrumbs -> VName -> Type -> SolveM ()

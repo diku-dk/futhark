@@ -678,8 +678,13 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
 
   incLevel $ descend [] orig_ps
 
-checkApplyOne :: SrcLoc -> (Maybe (QualName VName), Int) -> (Shape Size, Type) -> (Shape Size, Type) -> TermM (Type, AutoMap)
-checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
+checkApplyOne ::
+  SrcLoc ->
+  (Maybe (QualName VName), Int) ->
+  (Shape Size, Type) ->
+  (Maybe Exp, Shape Size, Type) ->
+  TermM (Type, AutoMap)
+checkApplyOne loc fname (fframe, ftype) (arg, argframe, argtype) = do
   (a, b) <- split ftype
   r <- newSVar loc "R"
   m <- newSVar loc "M"
@@ -689,7 +694,11 @@ checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
       lhs = arrayOf (toShape (SVar r)) argtype
       rhs = arrayOf (toShape (SVar m)) a
   ctAM (Reason (locOf loc)) r m $ fmap toSComp (toShape m_var <> fframe)
-  ctEq (Reason (locOf loc)) lhs rhs
+  let reason = case arg of
+        Just arg' ->
+          ReasonApply (locOf loc) (fst fname) arg' lhs rhs
+        Nothing -> Reason (locOf loc)
+  ctEq reason lhs rhs
   debugTraceM 3 $
     unlines
       [ "## checkApplyOne",
@@ -737,14 +746,14 @@ checkApply ::
   SrcLoc ->
   Maybe (QualName VName) ->
   (Shape Size, Type) ->
-  NE.NonEmpty (Shape Size, Type) ->
+  NE.NonEmpty (Maybe Exp, Shape Size, Type) ->
   TermM (Type, NE.NonEmpty AutoMap)
 checkApply loc fname (fframe, ftype) args = do
   ((_, _, rt), argts) <- mapAccumLM onArg (0, fframe, ftype) args
   pure (rt, argts)
   where
-    onArg (i, f_f, f_t) (argframe, argtype) = do
-      (rt, am) <- checkApplyOne loc (fname, i) (f_f, f_t) (argframe, argtype)
+    onArg (i, f_f, f_t) arg = do
+      (rt, am) <- checkApplyOne loc (fname, i) (f_f, f_t) arg
       pure
         ( (i + 1, autoFrame am, rt),
           am
@@ -943,21 +952,17 @@ checkExp (Constr name es NoInfo loc) = do
 --
 checkExp (AppExp (Apply fe args loc) NoInfo) = do
   fe' <- checkExp fe
-  (args', argts') <-
-    NE.unzip
-      <$> forM
-        args
-        ( \(_, arg) -> do
-            arg' <- checkExp arg
-            arg_t <- expType arg'
-            pure (arg', (frameOf arg', arg_t))
-        )
+  (args', apply_args) <-
+    fmap NE.unzip . forM args $ \(_, arg) -> do
+      arg' <- checkExp arg
+      arg_t <- expType arg'
+      pure (arg', (Just arg', frameOf arg', arg_t))
   fe_t <- expType fe'
-  (rt, ams) <- checkApply loc fname (frameOf fe', fe_t) argts'
+  (rt, ams) <- checkApply loc fname (frameOf fe', fe_t) apply_args
   rt' <- asStructType rt
-  pure $
-    AppExp (Apply fe' (NE.zipWith (\am arg -> (Info (Nothing, am), arg)) ams args') loc) $
-      Info (AppRes rt' [])
+  let args'' =
+        NE.zipWith (\am arg -> (Info (Nothing, am), arg)) ams args'
+  pure $ AppExp (Apply fe' args'' loc) $ Info (AppRes rt' [])
   where
     fname =
       case fe of
@@ -975,7 +980,7 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
       loc
       (Just op)
       (mempty, ftype)
-      ((frameOf e1', e1_t) NE.:| [(frameOf e2', e2_t)])
+      ((Just e1', frameOf e1', e1_t) NE.:| [(Just e2', frameOf e2', e2_t)])
   rt' <- asStructType rt
   let (am1 NE.:| [am2]) = ams
 
@@ -992,7 +997,12 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
   t2 <- newType loc Lifted "t" NoUniqueness
   t2' <- asStructType t2
   let f1 = frameOf e'
-  (rt, ams) <- checkApply loc (Just op) (mempty, optype) ((f1, e_t) NE.:| [(mempty, t2)])
+  (rt, ams) <-
+    checkApply
+      loc
+      (Just op)
+      (mempty, optype)
+      ((Just e', f1, e_t) NE.:| [(Nothing, mempty, t2)])
   rt' <- asStructType rt
 
   let (am1 NE.:| _) = ams
@@ -1015,7 +1025,12 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   t1 <- newType loc Lifted "t" NoUniqueness
   t1' <- asStructType t1
   let f2 = frameOf e'
-  (rt, ams) <- checkApply loc (Just op) (mempty, optype) ((mempty, t1) NE.:| [(f2, e_t)])
+  (rt, ams) <-
+    checkApply
+      loc
+      (Just op)
+      (mempty, optype)
+      ((Nothing, mempty, t1) NE.:| [(Just e', f2, e_t)])
   rt' <- asStructType rt
   let (_ NE.:| [am2]) = ams
   t2 <- asStructType e_t
