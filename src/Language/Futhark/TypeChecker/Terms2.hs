@@ -810,7 +810,7 @@ checkCases mt rest_cs =
     (c, Just cs) -> do
       (c', c_t) <- checkCase mt c
       (cs', cs_t) <- checkCases mt cs
-      ctEq (Reason (locOf c)) c_t cs_t
+      ctEq (ReasonBranches (locOf c) c_t cs_t) c_t cs_t
       pure (NE.cons c' cs', c_t)
 
 -- | An unmatched pattern. Used in in the generation of
@@ -1203,8 +1203,8 @@ checkExp (AppExp (If e1 e2 e3 loc) _) = do
   if_t <- newType loc SizeLifted "if_t" NoUniqueness
 
   ctEq (Reason (locOf e1')) e1_t (Scalar (Prim Bool))
-  ctEq (Reason (locOf loc)) e2_t if_t
-  ctEq (Reason (locOf loc)) e3_t if_t
+  ctEq (ReasonBranches (locOf loc) e2_t e3_t) e2_t if_t
+  ctEq (ReasonBranches (locOf loc) e2_t e3_t) e3_t if_t
 
   if_t' <- asStructType if_t
   pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes if_t' [])

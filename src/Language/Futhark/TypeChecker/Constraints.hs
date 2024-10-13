@@ -69,6 +69,7 @@ data Reason
     ReasonAscription Loc Type Type
   | ReasonRetType Loc Type Type
   | ReasonApply Loc (Maybe (QualName VName)) Exp Type Type
+  | ReasonBranches Loc Type Type
   deriving (Eq, Show)
 
 instance Located Reason where
@@ -77,6 +78,7 @@ instance Located Reason where
   locOf (ReasonAscription l _ _) = l
   locOf (ReasonRetType l _ _) = l
   locOf (ReasonApply l _ _ _ _) = l
+  locOf (ReasonBranches l _ _) = l
 
 data Ct
   = CtEq Reason Type Type
@@ -359,6 +361,14 @@ cannotUnify reason notes bcs t1 t2 = do
                 <+> "to"
                 <+> dquotes (align $ shorten $ group $ pretty e)
                 <> " (invalid type)."
+    ReasonBranches loc former latter -> do
+      former' <- enrichType former
+      latter' <- enrichType latter
+      typeError loc notes . stack $
+        [ "Branches differ in type.",
+          "Former:" <+> pretty former',
+          "Latter:" <+> pretty latter'
+        ]
 
 -- Precondition: 'v' is currently flexible.
 subTyVar :: Reason -> BreadCrumbs -> VName -> Type -> SolveM ()
