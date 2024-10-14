@@ -16,69 +16,158 @@ module Futhark.CLI.Fmt.AST
     parens,
     (<+>),
     (</>),
+    (<:>),
     colon,
     sepNonEmpty,
     pretty,
-    isEmpty
+    isEmpty,
+    FmtM,
+    fmtComments,
+    buildFmt,
+    popComments,
+    sepByLayout,
+    runFormat,
+    Format (..)
   )
 where
 
 import Data.Text qualified as T
-import Prettyprinter qualified as P hiding (Doc(..))
-import Prettyprinter (Doc (..))
-import Data.Text.Prettyprint.Doc.Render.Text (renderStrict)
+import Prettyprinter qualified as P hiding (Doc)
+import Prettyprinter (Doc)
+import Prettyprinter.Render.Text (renderStrict)
+import Control.Monad.Identity
+import Control.Monad.Reader
+import Control.Monad.State
+import Control.Monad (liftM2)
+import Control.Applicative (liftA2)
+import Data.Function (on)
+import Data.Loc
+import Language.Futhark.Parser ( Comment (..) )
 
+infixr 6 <:>
+infixr 6 <+>
+infixr 6 </>
+  
 type Fmt = Doc ()
 
-nil :: Fmt
-nil = mempty
+newtype FmtState = FmtState
+  {comments :: [Comment]}
+  deriving (Show, Eq, Ord)
 
-nest :: Int -> Fmt -> Fmt
-nest = P.nest
+data Layout = MultiLine | SingleLine deriving (Show, Eq)
 
-space :: Fmt
-space = P.space
+-- State monad to keep track of comments and layout.
+type FmtM a = ReaderT Layout (StateT FmtState Identity) a
 
-line :: Fmt
-line = P.line
+class Format a where
+  fmt :: a -> FmtM Fmt
 
-sep :: Fmt -> [Fmt] -> Fmt
-sep s = P.concatWith (\a b -> a <> s <> b)
+instance Format (FmtM Fmt) where
+  fmt = id
 
-stdNest :: Fmt -> Fmt
+instance Format Comment where
+  fmt = comment . commentText
+
+-- Functions for operating on FmtM monad
+fmtComments :: (Located a) => a -> FmtM Fmt
+fmtComments a = do
+  s <- get
+  case comments s of
+    c : cs | locOf a > locOf c -> do
+      put $ s {comments = cs}
+      fmt c <:> fmtComments a -- fmts remaining comments
+    _ -> nil
+
+-- parses comments infront of a and converts a to fmt using formatting function f
+buildFmt :: (Located a) => a -> FmtM Fmt -> FmtM Fmt -> FmtM Fmt
+buildFmt a single multi = local (const $ lineLayout a) $ do
+  c <- fmtComments a
+  m <- ask
+  a' <- if m == SingleLine then single else multi
+  -- c' <- trailingComment a
+  pure $ c <> a'
+
+lineLayout :: (Located a) => a -> Layout
+lineLayout a =
+  case locOf a of
+    Loc start end ->
+      if posLine start == posLine end
+        then SingleLine
+        else MultiLine
+    NoLoc -> undefined -- should throw an error
+
+popComments :: FmtM Fmt
+popComments = do
+  cs <- gets comments
+  modify (\s -> s {comments = []})
+  sep nil cs
+
+sepByLayout :: (Located a, Format b, Format c) => a -> b -> c -> FmtM Fmt
+sepByLayout loc a b =
+  case lineLayout loc of
+    MultiLine -> stdNest (a </> b)
+    SingleLine -> a <+> b
+
+runFormat :: FmtM a -> [Comment] -> a
+runFormat format cs = runIdentity $ evalStateT (runReaderT format e) s
+  where
+    s = FmtState {comments = cs}
+    e = MultiLine
+
+nil :: FmtM Fmt
+nil = pure mempty
+
+nest :: (Format a) => Int -> a -> FmtM Fmt
+nest i = fmap (P.nest i) . fmt
+
+space :: FmtM Fmt
+space = pure P.space
+
+line :: FmtM Fmt
+line = pure P.line
+
+sep :: (Format a, Format b) => a -> [b] -> FmtM Fmt
+sep s xs = aux <$> fmt s <*> mapM fmt xs
+  where
+    aux z = P.concatWith (\a b -> a <> z <> b)
+
+stdNest :: (Format a) => a -> FmtM Fmt
 stdNest = nest 2
 
-code :: T.Text -> Fmt
-code = P.pretty
+code :: T.Text -> FmtM Fmt
+code = pure . P.pretty
 
-comment :: T.Text -> Fmt
-comment = (<> line) . code
+comment :: T.Text -> FmtM Fmt
+comment = (<:> line) . code
 
-brackets :: Fmt -> Fmt
-brackets = P.brackets
+brackets :: (Format a) => a -> FmtM Fmt
+brackets = fmap P.brackets . fmt
 
-braces :: Fmt -> Fmt
-braces = P.braces
+braces :: (Format a) => a -> FmtM Fmt
+braces = fmap P.braces . fmt
 
-parens :: Fmt -> Fmt
-parens = P.parens
+parens :: (Format a) => a -> FmtM Fmt
+parens = fmap P.parens . fmt
 
-sepSpace :: Fmt -> [Fmt] -> Fmt
-sepSpace s = sep (s <> space)
+sepSpace :: (Format a, Format b) => a -> [b] -> FmtM Fmt
+sepSpace s = sep (fmt s <:> space)
 
-sepLine :: Fmt -> [Fmt] -> Fmt
-sepLine s = sep (line <> s)
+sepLine :: (Format a, Format b) => a -> [b] -> FmtM Fmt
+sepLine s = sep (line <:> fmt s)
 
-(<+>) :: Fmt -> Fmt -> Fmt
-(<+>) = (P.<+>)
+(<:>) :: (Format a, Format b) => a -> b -> FmtM Fmt
+a <:> b = (P.<>) <$> fmt a <*> fmt b
 
-(</>) :: Fmt -> Fmt -> Fmt
-a </> b = a <> line <> b
+(<+>) :: (Format a, Format b) => a -> b -> FmtM Fmt
+a <+> b = a <:> space <:> b
 
-colon :: Fmt
-colon = P.colon
+(</>) :: (Format a, Format b) => a -> b -> FmtM Fmt
+a </> b = a <:> line <:> b
 
-sepNonEmpty :: Fmt -> [Fmt] -> Fmt
+colon :: FmtM Fmt
+colon = pure P.colon
+
+sepNonEmpty :: (Format a, Format b) => a -> [b] -> FmtM Fmt
 sepNonEmpty = sep
 
 layoutOpts :: P.LayoutOptions
