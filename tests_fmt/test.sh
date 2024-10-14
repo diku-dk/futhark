@@ -24,9 +24,15 @@ find "$TEST_DIR" -name '*.fut' | xargs -P $THREADS -I {} sh -c '
     fi
 
     name=${prog%.fut}
-    futhark fmt "$prog" 2> /dev/null > "$name.fmt.fut"
-    futhark fmt "$prog" 2> /dev/null > "$name.fmt.fmt.fut"
     futhark hash "$prog" 2> /dev/null > "$prog.expected"
+
+    if [ ! $? -eq 0 ]; then
+       rm "$prog" "$prog.expected"
+       exit 0
+    fi
+
+    futhark fmt "$prog" 2> /dev/null > "$name.fmt.fut"
+    futhark fmt "$name.fmt.fut" 2> /dev/null > "$name.fmt.fmt.fut"
     futhark hash "$name.fmt.fut" 2> /dev/null > "$prog.actual"
 
     tree_result=1

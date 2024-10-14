@@ -916,15 +916,17 @@ fmtModTypeExp (ModTypeArrow Nothing te0 te1 loc) = buildFmt loc single multi
 fmtModTypeBind :: UncheckedModTypeBind -> FmtM Fmt
 fmtModTypeBind (ModTypeBind pName pSig doc loc) = buildFmt loc single multi
   where
-    isBracesOrParens (ModTypeSpecs _ _) = True
-    isBracesOrParens (ModTypeParens _ _) = True
-    isBracesOrParens _ = False
     op = if isBracesOrParens pSig then (<+>) else (</>)
     common = do
       doc' <- fmtDocComment doc
       pure $ doc' <> code "module type" <+> fmtName pName <+> code "="
     single = (<+>) <$> common <*> fmtModTypeExp pSig
     multi = op <$> common <*> fmtModTypeExp pSig
+
+isBracesOrParens :: UncheckedModTypeExp -> Bool
+isBracesOrParens (ModTypeSpecs _ _) = True
+isBracesOrParens (ModTypeParens _ _) = True
+isBracesOrParens _ = False
 
 fmtModParam :: ModParamBase NoInfo Name -> FmtM Fmt
 fmtModParam (ModParam pName pSig _f loc) = buildFmt loc single multi
@@ -976,7 +978,7 @@ fmtModExp (ModVar v loc) = buildFmt loc single multi
 fmtModExp (ModParens f loc) = buildFmt loc single multi
   where
     single = parens <$> fmtModExp f
-    multi = (</> code ")") <$> (stdNest . (code "()" </>) <$> fmtModExp f)
+    multi = (</> code ")") <$> (stdNest . (code "(" </>) <$> fmtModExp f)
 fmtModExp (ModImport path _f loc) = buildFmt loc single multi
   where
     single = pure $ code "import \"" <> fmtPretty path <> code "\""
@@ -1005,10 +1007,10 @@ fmtModExp (ModLambda param maybe_sig body loc) = buildFmt loc single multi
       maybe_sig' <-
         case maybe_sig of
           Nothing -> pure mempty
-          Just (sig, _) -> (code ":" <+>) <$> fmtModTypeExp sig
+          Just (sig, _) -> (code ":" <+>) . parens <$> fmtModTypeExp sig
       pure $ code "\\" <> param' <> maybe_sig' <+> code "->"
     single = (<+>) <$> common <*> fmtModExp body
-    multi = (</>) <$> common <*> fmtModExp body
+    multi = (<+>) <$> common <*> fmtModExp body
 
 -- | Formatting of Futhark declarations.
 fmtDec :: UncheckedDec -> FmtM Fmt
