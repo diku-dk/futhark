@@ -1,6 +1,6 @@
 -- ==
 -- entry: f_jvp
--- compiled input { 2i64 3i64 2 }
+-- input { 2i64 3i64 2 }
 -- output { [[1,1,1],[1,1,1]] }
 
 entry f_jvp n m x : [][]i32 =
@@ -8,7 +8,7 @@ entry f_jvp n m x : [][]i32 =
 
 -- ==
 -- entry: f_vjp
--- compiled input { 2i64 3i64 2i64 }
+-- input { 2i64 3i64 2i64 }
 -- output { 6i64 }
 
 entry f_vjp n m x =

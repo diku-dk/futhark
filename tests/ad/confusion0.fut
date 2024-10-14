@@ -1,6 +1,6 @@
 -- ==
 -- entry: fwd rev
--- compiled input { 1 2 } output { 1 }
+-- input { 1 2 } output { 1 }
 
 def d f x =
   jvp f x 1

@@ -1,7 +1,7 @@
 -- An array is both a 'map' input and a free variable in the lambda.
 -- ==
 -- entry: fwd_J rev_J
--- compiled input { [1,2,3] }
+-- input { [1,2,3] }
 -- output {
 -- [[[2, 0, 0], [1, 1, 0], [1, 0, 1]], [[1, 1, 0], [0, 2, 0], [0, 1, 1]], [[1, 0, 1], [0, 1, 1], [0, 0, 2]]]
 -- }

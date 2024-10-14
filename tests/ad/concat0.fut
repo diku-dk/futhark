@@ -1,6 +1,6 @@
 -- ==
 -- entry: f_jvp
--- compiled input { [1,2,3] [4,5,6] }
+-- input { [1,2,3] [4,5,6] }
 -- output { [1,2,3,4,5,6] }
 
 entry f_jvp xs ys : []i32 =
@@ -8,7 +8,7 @@ entry f_jvp xs ys : []i32 =
 
 -- ==
 -- entry: f_vjp
--- compiled input { [1,2,3] [4,5,6] }
+-- input { [1,2,3] [4,5,6] }
 -- output { [1,2,3] [4,5,6] }
 
 entry f_vjp xs ys : ([]i32, []i32) =

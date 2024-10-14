@@ -1,6 +1,6 @@
 -- ==
 -- entry: fwd_J rev_J
--- compiled input
+-- input
 -- {
 -- [[1.0,2.0],[3.0,4.0]] [1i64, 0i64, 1i64, 1i64]
 -- }

@@ -1,6 +1,6 @@
 -- ==
 -- entry: fwd rev
--- compiled input { 1i32 [1i32,2i32,3i32] }
+-- input { 1i32 [1i32,2i32,3i32] }
 -- output { [1i32,2i32,3i32] }
 
 entry fwd [n] (x: i32) (xs: [n]i32) =

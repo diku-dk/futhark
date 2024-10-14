@@ -1,8 +1,8 @@
 -- ==
 -- entry: f_jvp
--- compiled input { [1.0,2.0,3.0] }
+-- input { [1.0,2.0,3.0] }
 -- output { [0.0, 3.0, 2.0] }
--- compiled input { [-1.0,2.0,3.0] }
+-- input { [-1.0,2.0,3.0] }
 -- output { [3.0, 0.0, -1.0] }
 -- structure { If/Replicate 0 }
 
@@ -18,9 +18,9 @@ entry f_jvp x =
 
 -- ==
 -- entry: f_vjp
--- compiled input { [1.0,2.0,3.0] }
+-- input { [1.0,2.0,3.0] }
 -- output { [0.0, 3.0, 2.0] }
--- compiled input { [-1.0,2.0,3.0] }
+-- input { [-1.0,2.0,3.0] }
 -- output { [3.0, 0.0, -1.0] }
 
 entry f_vjp x =

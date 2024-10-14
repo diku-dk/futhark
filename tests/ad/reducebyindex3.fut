@@ -1,6 +1,6 @@
 -- ==
 --  entry: rev
---  compiled input {
+--  input {
 --    [0i64,1i64,2i64,1i64,0i64,1i64,2i64]
 --    [1f64,2f64,3f64,4f64,5f64,6f64,7f64] }
 --  output {

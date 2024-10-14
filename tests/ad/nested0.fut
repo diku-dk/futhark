@@ -1,6 +1,6 @@
 -- ==
 -- entry: f_vjp
--- compiled input { [1,2,3] }
+-- input { [1,2,3] }
 -- output { [24,48,72] }
 def f [n] (xs: [n]i32) =
   map (\x -> x * x * x * x) xs
