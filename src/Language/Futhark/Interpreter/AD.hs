@@ -18,7 +18,7 @@ import Control.Monad (foldM, zipWithM)
 import Data.Either (isRight)
 import Data.List (find)
 import Data.Map qualified as M
-import Data.Maybe (fromJust)
+import Data.Maybe (fromMaybe)
 import Futhark.AD.Derivatives (pdBinOp, pdBuiltin, pdUnOp)
 import Futhark.Analysis.PrimExp (PrimExp (..))
 import Language.Futhark.Core (VName (..), nameFromString)
@@ -291,7 +291,7 @@ deriveTape (TapeOp op p _) s = do
   Just $ foldl (M.unionWith add) M.empty pd
   where
     add x y =
-      fromJust (error "deriveTape: addition failed") $
+      fromMaybe (error "deriveTape: addition failed") $
         doOp (OpBin $ addFor $ opReturnType op) [x, y]
     mul x y = doOp (OpBin $ multiplyFor $ opReturnType op) [x, y]
 
