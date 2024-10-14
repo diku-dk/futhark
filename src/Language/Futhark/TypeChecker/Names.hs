@@ -50,7 +50,7 @@ checkForDuplicateNamesInType = check mempty
           <+> dquotes (pretty v)
           <+> "also bound at"
           <+> pretty (locStr prev_loc)
-            <> "."
+          <> "."
 
     check seen (TEArrow (Just v) t1 t2 loc)
       | Just prev_loc <- M.lookup v seen =
@@ -110,7 +110,7 @@ checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
                 <+> dquotes (pretty v)
                 <+> "also bound at"
                 <+> pretty (locStr prev_loc)
-                  <> "."
+                <> "."
         Nothing ->
           modify $ M.insert (ns, v) loc
 
@@ -432,7 +432,7 @@ resolveTypeParams ps m =
                 <+> dquotes (pretty v)
                 <+> "previously defined at"
                 <+> pretty (locStr prev)
-                  <> "."
+                <> "."
         Nothing -> do
           modify $ M.insert (ns, v) loc
           lift $ checkName ns v loc

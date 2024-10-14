@@ -581,8 +581,8 @@ instance (Pretty op) => Pretty (Code op) where
       <> pretty space
       <> rangle
       <> brackets (pretty i)
-      <+> "<-"
-      <+> pretty val
+        <+> "<-"
+        <+> pretty val
     where
       vol' = case vol of
         Volatile -> "volatile "
@@ -591,12 +591,12 @@ instance (Pretty op) => Pretty (Code op) where
     pretty name
       <+> "<-"
       <+> pretty v
-        <> langle
-        <> vol'
-        <> pretty bt
-        <> pretty space
-        <> rangle
-        <> brackets (pretty is)
+      <> langle
+      <> vol'
+      <> pretty bt
+      <> pretty space
+      <> rangle
+      <> brackets (pretty is)
     where
       vol' = case vol of
         Volatile -> "volatile "
@@ -614,9 +614,9 @@ instance (Pretty op) => Pretty (Code op) where
       <> (parens . align)
         ( foldMap (brackets . pretty) shape
             <> ","
-            </> p dst dstspace dstoffset dststrides
-              <> ","
-            </> p src srcspace srcoffset srcstrides
+              </> p dst dstspace dstoffset dststrides
+            <> ","
+              </> p src srcspace srcoffset srcstrides
         )
     where
       p mem space offset strides =
@@ -624,7 +624,7 @@ instance (Pretty op) => Pretty (Code op) where
           <> pretty space
           <> "+"
           <> pretty offset
-          <+> foldMap (brackets . pretty) strides
+            <+> foldMap (brackets . pretty) strides
   pretty (If cond tbranch fbranch) =
     "if"
       <+> pretty cond
@@ -642,7 +642,7 @@ instance (Pretty op) => Pretty (Code op) where
       <+> commasep (map pretty dests)
       <+> "<-"
       <+> pretty fname
-        <> parens (commasep $ map pretty args)
+      <> parens (commasep $ map pretty args)
   pretty (Comment s code) =
     "--" <+> pretty s </> pretty code
   pretty (DebugPrint desc (Just e)) =

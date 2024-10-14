@@ -212,9 +212,9 @@ refineEnv loc tset env tname ps t
           typeError loc mempty $
             "Cannot refine a type having"
               <+> tpMsg ps
-                <> " with a type having "
-                <> tpMsg cur_ps
-                <> "."
+              <> " with a type having "
+              <> tpMsg cur_ps
+              <> "."
   | otherwise =
       typeError loc mempty $ dquotes (pretty tname) <+> "is not an abstract type in the module type."
   where
@@ -288,7 +288,7 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
           </> indent 2 (ppTypeAbbr abs name mod_t)
           </> "but module type requires"
           <+> what
-            <> "."
+          <> "."
       where
         what = case name_l of
           Unlifted -> "a non-lifted type"
@@ -381,14 +381,14 @@ ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar _ tn args)))
     map typeParamToArg ps == args =
       "type"
         <> pretty l
-        <+> pretty name
-        <+> hsep (map pretty ps)
+          <+> pretty name
+          <+> hsep (map pretty ps)
 ppTypeAbbr _ name (l, ps, t) =
   "type"
     <> pretty l
-    <+> hsep (pretty name : map pretty ps)
-    <+> equals
-    <+> nest 2 (align (pretty t))
+      <+> hsep (pretty name : map pretty ps)
+      <+> equals
+      <+> nest 2 (align (pretty t))
 
 -- | Return new renamed/abstracted env, as well as a mapping from
 -- names in the signature to names in the new env.  This is used for

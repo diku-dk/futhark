@@ -158,8 +158,8 @@ checkPat' _ (RecordPat p_fs _) _
       typeError fp mempty $
         "Underscore-prefixed fields are not allowed."
           </> "Did you mean"
-            <> dquotes (pretty (drop 1 (nameToString f)) <> "=_")
-            <> "?"
+          <> dquotes (pretty (drop 1 (nameToString f)) <> "=_")
+          <> "?"
 checkPat' sizes p@(RecordPat p_fs loc) (Ascribed t)
   | Scalar (Record t_fs) <- t,
     sort (map fst p_fs) == sort (M.keys t_fs) =
@@ -212,10 +212,10 @@ checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
           "Pattern #"
             <> pretty n
             <> " expects"
-            <+> pretty (length ps)
-            <+> "constructor arguments, but type provides"
-            <+> pretty (length ts)
-            <+> "arguments."
+              <+> pretty (length ps)
+              <+> "constructor arguments, but type provides"
+              <+> pretty (length ts)
+              <+> "arguments."
       ps' <- zipWithM (checkPat' sizes) ps $ map Ascribed ts
       pure $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
 checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed t) = do

@@ -30,7 +30,7 @@ module Language.Futhark.Interpreter.Values
 where
 
 import Data.Array
-import Data.Bifunctor (Bifunctor (second))
+import Data.Bifunctor (Bifunctor(second))
 import Data.List (genericLength)
 import Data.Map qualified as M
 import Data.Maybe
@@ -152,7 +152,7 @@ prettyValueWith pprPrim = pprPrec 0
     pprPrec _ ValueAcc {} = "#<acc>"
     pprPrec p (ValueSum _ n vs) =
       parensIf (p > (0 :: Int)) $ "#" <> sep (pretty n : map (pprPrec 1) vs)
-    -- TODO: This could be prettier. Perhaps add pretty printing for ADVariable / ADValues
+      -- TODO: This could be prettier. Perhaps add pretty printing for ADVariable / ADValues
     pprPrec _ (ValueAD d v) = pretty $ "d[" ++ show d ++ "]" ++ show v
     pprElem v@ValueArray {} = pprPrec 0 v
     pprElem v = group $ pprPrec 0 v

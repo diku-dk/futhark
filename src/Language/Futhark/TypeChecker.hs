@@ -165,10 +165,10 @@ dupDefinitionError space name loc1 loc2 =
     "Duplicate definition of"
       <+> pretty space
       <+> prettyName name
-        <> "."
-      </> "Previously defined at"
-      <+> pretty (locStr loc2)
-        <> "."
+      <> "."
+        </> "Previously defined at"
+        <+> pretty (locStr loc2)
+      <> "."
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
@@ -235,7 +235,7 @@ checkSpecs (ValSpec name tparams vtype NoInfo doc loc : specs) = do
           "All function parameters must have non-anonymous sizes."
             </> "Hint: add size parameters to"
             <+> dquotes (pretty name)
-              <> "."
+            <> "."
 
       pure (tparams', vtype', vtype_t)
 
@@ -597,7 +597,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
               "Non-lifted type abbreviations may not use existential sizes in their definition."
                 </> "Hint: use 'type~' or add size parameters to"
                 <+> dquotes (prettyName name)
-                  <> "."
+                <> "."
       _ -> pure ()
 
     bindSpaced1 Type name loc $ \name' -> do

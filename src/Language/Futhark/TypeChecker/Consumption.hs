@@ -169,7 +169,7 @@ returnAliased name loc =
   addError loc mempty . withIndexLink "return-aliased" $
     "Unique-typed return value is aliased to"
       <+> dquotes (prettyName name)
-        <> ", which is not consumable."
+      <> ", which is not consumable."
 
 uniqueReturnAliased :: SrcLoc -> CheckM ()
 uniqueReturnAliased loc =
@@ -307,9 +307,9 @@ checkIfConsumed rloc als = do
     addError rloc mempty . withIndexLink "use-after-consume" $
       "Using"
         <+> v'
-          <> ", but this was consumed at"
-        <+> pretty (locStrRel rloc wloc)
-          <> ".  (Possibly through aliases.)"
+        <> ", but this was consumed at"
+          <+> pretty (locStrRel rloc wloc)
+        <> ".  (Possibly through aliases.)"
 
 consumed :: Consumed -> CheckM ()
 consumed vs = modify $ \s -> s {stateConsumed = stateConsumed s <> vs}
@@ -509,7 +509,7 @@ checkArg prev p_t e = do
             </> indent 2 (pretty prev_arg)
             </> "at"
             <+> pretty (locTextRel (locOf e) (locOf prev_arg))
-              <> "."
+            <> "."
   pure (e', e_als)
   where
     prevAlias v =
@@ -604,7 +604,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
               <+> dquotes (prettyName pat_v)
               <+> "aliases"
               <+> dquotes (prettyName v)
-                <> "."
+              <> "."
         (cons, obs) <- get
         unless (S.null $ aliases t `S.intersection` cons) $
           lift . addError loop_loc mempty $
@@ -674,8 +674,8 @@ checkLoop loop_loc (param, arg, form, body) = do
     addError loop_loc mempty $
       "Loop body uses"
         <+> v'
-          <> " (or an alias),"
-        </> "but this is consumed by the initial loop argument."
+        <> " (or an alias),"
+          </> "but this is consumed by the initial loop argument."
 
   v <- VName "internal_loop_result" <$> incCounter
   modify $ \s -> s {stateNames = M.insert v (NameLoopRes (srclocOf loop_loc)) $ stateNames s}
@@ -969,9 +969,9 @@ checkGlobalAliases loc params body_t = do
       "Function result aliases the free variable "
         <> dquotes (prettyName v)
         <> "."
-        </> "Use"
-        <+> dquotes "copy"
-        <+> "to break the aliasing."
+          </> "Use"
+          <+> dquotes "copy"
+          <+> "to break the aliasing."
 
 -- | Type-check a value definition.  This also infers a new return
 -- type that may be more unique than previously.

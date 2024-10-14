@@ -262,10 +262,10 @@ prettyAppExp p (LetPat sizes pat e body _) =
 prettyAppExp _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
   "let"
     <+> hsep (prettyName fname : map pretty tparams ++ map pretty params)
-      <> retdecl'
-    <+> equals
-    </> indent 2 (pretty e)
-    </> letBody body
+    <> retdecl'
+      <+> equals
+      </> indent 2 (pretty e)
+      </> letBody body
   where
     retdecl' = case (pretty <$> unAnnot rettype) `mplus` (pretty <$> retdecl) of
       Just rettype' -> colon <+> align rettype'
@@ -274,10 +274,10 @@ prettyAppExp _ (LetWith dest src idxs ve body _)
   | dest == src =
       "let"
         <+> pretty dest
-          <> list (map pretty idxs)
-        <+> equals
-        <+> align (pretty ve)
-        </> letBody body
+        <> list (map pretty idxs)
+          <+> equals
+          <+> align (pretty ve)
+          </> letBody body
   | otherwise =
       "let"
         <+> pretty dest
@@ -381,8 +381,8 @@ prettyExp p (Lambda params body rettype _ _) =
     "\\"
       <> hsep (map pretty params)
       <> ppAscription rettype
-      <+> "->"
-      </> indent 2 (align (pretty body))
+        <+> "->"
+        </> indent 2 (align (pretty body))
 prettyExp _ (OpSection binop _ _) =
   parens $ pretty binop
 prettyExp _ (OpSectionLeft binop _ x _ _ _) =
@@ -406,7 +406,7 @@ prettyExp i (AppExp e res)
     not $ null ext =
       parens (prettyAppExp i e)
         </> "@"
-          <> parens (pretty t <> "," <+> brackets (commasep $ map prettyName ext))
+        <> parens (pretty t <> "," <+> brackets (commasep $ map prettyName ext))
   | otherwise = prettyAppExp i e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
@@ -491,8 +491,8 @@ prettyModExp p (ModLambda param maybe_sig body _) =
     "\\"
       <> pretty param
       <> maybe_sig'
-      <+> "->"
-      </> indent 2 (pretty body)
+        <+> "->"
+        </> indent 2 (pretty body)
   where
     maybe_sig' = case maybe_sig of
       Nothing -> mempty
@@ -510,9 +510,9 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (TypeBindBase f vn) where
   pretty (TypeBind name l params te rt _ _) =
     "type"
       <> pretty l
-      <+> hsep (prettyName name : map pretty params)
-      <+> equals
-      <+> maybe (pretty te) pretty (unAnnot rt)
+        <+> hsep (prettyName name : map pretty params)
+        <+> equals
+        <+> maybe (pretty te) pretty (unAnnot rt)
 
 instance (Eq vn, IsName vn) => Pretty (TypeParamBase vn) where
   pretty (TypeParamDim name _) = brackets $ prettyName name
@@ -522,16 +522,16 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ValBindBase f vn) where
   pretty (ValBind entry name retdecl rettype tparams args body _ attrs _) =
     mconcat (map ((<> line) . prettyAttr) attrs)
       <> fun
-      <+> align
-        ( sep
-            ( prettyName name
-                : map pretty tparams
-                ++ map pretty args
-                ++ retdecl'
-                ++ ["="]
-            )
-        )
-      </> indent 2 (pretty body)
+        <+> align
+          ( sep
+              ( prettyName name
+                  : map pretty tparams
+                  ++ map pretty args
+                  ++ retdecl'
+                  ++ ["="]
+              )
+          )
+        </> indent 2 (pretty body)
     where
       fun
         | isJust entry = "entry"

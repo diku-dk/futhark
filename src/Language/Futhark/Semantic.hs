@@ -179,9 +179,9 @@ instance Pretty Env where
       renderTypeBind (name, TypeAbbr l tps tp) =
         p l
           <+> prettyName name
-            <> mconcat (map ((" " <>) . pretty) tps)
-            <> " ="
-          <+> pretty tp
+          <> mconcat (map ((" " <>) . pretty) tps)
+          <> " ="
+            <+> pretty tp
         where
           p Lifted = "type^"
           p SizeLifted = "type~"
@@ -189,9 +189,9 @@ instance Pretty Env where
       renderValBind (name, BoundV tps t) =
         "val"
           <+> prettyName name
-            <> mconcat (map ((" " <>) . pretty) tps)
-            <> " ="
-          <+> pretty t
+          <> mconcat (map ((" " <>) . pretty) tps)
+          <> " ="
+            <+> pretty t
       renderModType (name, _sig) =
         "module type" <+> prettyName name
       renderMod (name, mod) =

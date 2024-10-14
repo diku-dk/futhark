@@ -147,12 +147,12 @@ kkLoopBody
                           + le64 i
                           + pe64 ry
                             * le64 ltid_y
-                          .<. pe64 height_A
-                          .&&. le64 jjj
-                            + le64 j
-                            + pe64 rx
-                              * le64 ltid_x
-                            .<. pe64 width_B
+                              .<. pe64 height_A
+                              .&&. le64 jjj
+                          + le64 j
+                          + pe64 rx
+                            * le64 ltid_x
+                              .<. pe64 width_B
                 )
                 ( do
                     a <- a_idx_fn ltid_y i
@@ -373,7 +373,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                     le64 full_tiles
                       .==. pe64 rk
                       .||. pe64 common_dim
-                        .==. (pe64 tk * le64 full_tiles + le64 ttt)
+                      .==. (pe64 tk * le64 full_tiles + le64 ttt)
                 )
                 (resultBodyM $ map Var prologue_res_list)
                 ( do
@@ -459,7 +459,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                         le64 gtid_y
                           .<. pe64 height_A
                           .&&. le64 gtid_x
-                            .<. pe64 width_B
+                          .<. pe64 width_B
                     )
                     ( do
                         addStms code2_subs
@@ -609,7 +609,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                               le64 gtid_y
                                 .<. pe64 height_A
                                 .&&. le64 gtid_x
-                                  .<. pe64 width_B
+                                .<. pe64 width_B
                           )
                           ( do
                               addStms code2'
@@ -1257,9 +1257,9 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                             le64 gtid_y
                               .<. pe64 d_Ky
                               .&&. le64 gtid_x
-                                .<. pe64 d_Kx
+                              .<. pe64 d_Kx
                               .&&. le64 gtid_z
-                                .<. pe64 d_M
+                              .<. pe64 d_M
                         )
                         ( do
                             addStms code2'

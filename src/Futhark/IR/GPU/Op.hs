@@ -114,8 +114,8 @@ instance PP.Pretty KernelGrid where
     "grid="
       <> pretty num_tblocks
       <> PP.semi
-      <+> "blocksize="
-        <> pretty tblock_size
+        <+> "blocksize="
+      <> pretty tblock_size
 
 instance PP.Pretty SegLevel where
   pretty (SegThread virt grid) =
@@ -210,8 +210,8 @@ instance PP.Pretty SizeOp where
   pretty (CmpSizeLe name size_class x) =
     "cmp_size"
       <> parens (commasep [pretty name, pretty size_class])
-      <+> "<="
-      <+> pretty x
+        <+> "<="
+        <+> pretty x
   pretty (CalcNumBlocks w max_num_tblocks tblock_size) =
     "calc_num_tblocks" <> parens (commasep [pretty w, pretty max_num_tblocks, pretty tblock_size])
 

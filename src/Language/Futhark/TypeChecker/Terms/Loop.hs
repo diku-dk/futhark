@@ -121,7 +121,7 @@ checkForImpossible loc known_before pat_t = do
             <+> dquotes (prettyName v)
             <+> "is an existential size created inside the loop body at"
             <+> pretty (locStrRel loc v_loc)
-              <> "."
+            <> "."
   case mapMaybe bad $ S.toList $ fvVars $ freeInType pat_t of
     problem : _ -> problem
     [] -> pure ()
