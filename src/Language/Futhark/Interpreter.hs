@@ -945,6 +945,12 @@ evalAppExp env (Match e cs _) = do
         Just v' -> pure v'
         Nothing -> match v cs'
 
+zeroOfType :: PrimType -> Value
+zeroOfType (Signed it) = ValuePrim $ SignedValue $ P.intValue it (0 :: Int)
+zeroOfType (Unsigned it) = ValuePrim $ UnsignedValue $ P.intValue it (0 :: Int)
+zeroOfType (FloatType ft) = ValuePrim $ FloatValue $ P.floatValue ft (0 :: Int)
+zeroOfType Bool = ValuePrim $ BoolValue False
+
 eval :: Env -> Exp -> EvalM Value
 eval _ (Literal v _) = pure $ ValuePrim v
 eval env (Hole (Info t) loc) =
@@ -1016,30 +1022,15 @@ eval _ (FloatLit v (Info t) _) =
     Scalar (Prim (FloatType ft)) ->
       pure $ ValuePrim $ FloatValue $ floatValue ft v
     _ -> error $ "eval: nonsensical type for float literal: " <> prettyString t
-eval env (Negate e _) = do
-  -- TODO: Implement this for ValueAD
-  -- Beware! There may be more special cases like this
-  ev <- eval env e
-  ValuePrim <$> case ev of
-    ValuePrim (SignedValue (Int8Value v)) -> pure $ SignedValue $ Int8Value (-v)
-    ValuePrim (SignedValue (Int16Value v)) -> pure $ SignedValue $ Int16Value (-v)
-    ValuePrim (SignedValue (Int32Value v)) -> pure $ SignedValue $ Int32Value (-v)
-    ValuePrim (SignedValue (Int64Value v)) -> pure $ SignedValue $ Int64Value (-v)
-    ValuePrim (UnsignedValue (Int8Value v)) -> pure $ UnsignedValue $ Int8Value (-v)
-    ValuePrim (UnsignedValue (Int16Value v)) -> pure $ UnsignedValue $ Int16Value (-v)
-    ValuePrim (UnsignedValue (Int32Value v)) -> pure $ UnsignedValue $ Int32Value (-v)
-    ValuePrim (UnsignedValue (Int64Value v)) -> pure $ UnsignedValue $ Int64Value (-v)
-    ValuePrim (FloatValue (Float16Value v)) -> pure $ FloatValue $ Float16Value (-v)
-    ValuePrim (FloatValue (Float32Value v)) -> pure $ FloatValue $ Float32Value (-v)
-    ValuePrim (FloatValue (Float64Value v)) -> pure $ FloatValue $ Float64Value (-v)
-    _ -> error $ "Cannot negate " <> show ev
-eval env (Not e _) = do
-  ev <- eval env e
-  ValuePrim <$> case ev of
-    ValuePrim (BoolValue b) -> pure $ BoolValue $ not b
-    ValuePrim (SignedValue iv) -> pure $ SignedValue $ P.doComplement iv
-    ValuePrim (UnsignedValue iv) -> pure $ UnsignedValue $ P.doComplement iv
-    _ -> error $ "Cannot logically negate " <> show ev
+eval env (Negate e loc) =
+  -- -x = 0-x
+  case typeOf e of
+    Scalar (Prim pt) -> do
+      ev <- eval env e
+      apply2 loc env intrinsicsMinus (zeroOfType pt) ev
+    t -> error $ "Cannot negate expression of type  " <> prettyString t
+eval env (Not e loc) =
+  apply loc env intrinsicsNot =<< eval env e
 eval env (Update src is v loc) =
   maybe oob pure
     =<< writeArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
@@ -2113,6 +2104,18 @@ initialCtx =
       let n = ValuePrim $ SignedValue $ Int64Value $ arrayLength xs
        in apply2 noLoc mempty f n arg
     stream _ arg = error $ "Cannot stream: " <> show arg
+
+intrinsicVal :: Name -> Value
+intrinsicVal name =
+  case M.lookup (intrinsicVar name) $ envTerm $ ctxEnv initialCtx of
+    Just (TermValue _ v) -> v
+    _ -> error $ "intrinsicVal: " <> prettyString name
+
+intrinsicsMinus :: Value
+intrinsicsMinus = intrinsicVal "-"
+
+intrinsicsNot :: Value
+intrinsicsNot = intrinsicVal "!"
 
 interpretExp :: Ctx -> Exp -> F ExtOp Value
 interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e
