@@ -260,36 +260,31 @@ checkShape _ shape2 =
 
 type Value = Language.Futhark.Interpreter.Values.Value EvalM
 
--- TODO: Could be better - perhaps convert to interpreter type first
 asInteger :: Value -> Integer
-asInteger (ValueAD d v) = case AD.primitive $ AD.primal $ AD.Variable d v of
-  P.IntValue v' -> P.valueIntegral v'
-  _ -> error $ "Unexpectedly not an integer: " <> show v
 asInteger (ValuePrim (SignedValue v)) = P.valueIntegral v
 asInteger (ValuePrim (UnsignedValue v)) =
   toInteger (P.valueIntegral (P.doZExt v Int64) :: Word64)
+asInteger (ValueAD d v)
+  | P.IntValue v' <- AD.primitive $ AD.primal $ AD.Variable d v =
+      P.valueIntegral v'
 asInteger v = error $ "Unexpectedly not an integer: " <> show v
 
 asInt :: Value -> Int
 asInt = fromIntegral . asInteger
 
--- TODO: Could be better - perhaps convert to interpreter type first
 asSigned :: Value -> IntValue
-asSigned (ValueAD d v) = case AD.primitive $ AD.primal $ AD.Variable d v of
-  P.IntValue v' -> v'
-  _ -> error $ "Unexpectedly not a signed integer: " <> show v
 asSigned (ValuePrim (SignedValue v)) = v
+asSigned (ValueAD d v)
+  | P.IntValue v' <- AD.primitive $ AD.primal $ AD.Variable d v = v'
 asSigned v = error $ "Unexpectedly not a signed integer: " <> show v
 
 asInt64 :: Value -> Int64
 asInt64 = fromIntegral . asInteger
 
--- TODO: Could be better - perhaps convert to interpreter type first
 asBool :: Value -> Bool
-asBool (ValueAD d v) = case AD.primitive $ AD.primal $ AD.Variable d v of
-  P.BoolValue v' -> v'
-  _ -> error $ "Unexpectedly not a boolean: " <> show v
 asBool (ValuePrim (BoolValue x)) = x
+asBool (ValueAD d v)
+  | P.BoolValue v' <- AD.primitive $ AD.primal $ AD.Variable d v = v'
 asBool v = error $ "Unexpectedly not a boolean: " <> show v
 
 lookupInEnv ::
