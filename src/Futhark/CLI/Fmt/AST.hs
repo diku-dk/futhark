@@ -35,18 +35,21 @@ import Data.Text qualified as T
 import Prettyprinter qualified as P hiding (Doc)
 import Prettyprinter (Doc)
 import Prettyprinter.Render.Text (renderStrict)
-import Control.Monad.Identity
+import Control.Monad.Identity ( Identity(..) )
 import Control.Monad.Reader
+    ( ReaderT(..), MonadReader(..) )
 import Control.Monad.State
-import Control.Monad (liftM2)
-import Control.Applicative (liftA2)
-import Data.Function (on)
-import Data.Loc
-import Language.Futhark.Parser ( Comment (..) )
+    ( StateT, gets, modify, MonadState(..), evalStateT )
+import Data.Loc ( Located(..), Loc(..), posLine )
+import Language.Futhark.Parser.Monad ( Comment(..) )
 
-infixr 6 <:>
-infixr 6 <+>
-infixr 6 </>
+-- These are left associative since we want to evaluate the monadic
+-- computation from left to right. Since the left most expression is
+-- printed first and our monad is checking if a comment should be
+-- printed.
+infixl 6 <:>
+infixl 6 <+>
+infixl 6 </>
   
 type Fmt = Doc ()
 
