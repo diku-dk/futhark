@@ -18,6 +18,7 @@ import Control.Monad (foldM, zipWithM)
 import Data.Either (isRight)
 import Data.List (find)
 import Data.Map qualified as M
+import Data.Maybe (fromJust)
 -- These are needed to reuse the definitions of the derivatives
 -- used by the compiler
 import Futhark.AD.Derivatives
@@ -212,14 +213,18 @@ doOp op o =
     extractVJP :: Either ADValue ADVariable -> Either ADValue VJPValue
     extractVJP (Right (VJP v)) = Right v
     extractVJP (Left v) = Left v
-    extractVJP _ = error "extractVJP" -- This will never be called when the maximum depth layer is JVP
+    extractVJP _ =
+      -- This will never be called when the maximum depth layer is JVP
+      error "extractVJP"
 
     -- TODO: There may be a more graceful way of
     -- doing this
     extractJVP :: Either ADValue ADVariable -> Either ADValue JVPValue
     extractJVP (Right (JVP v)) = Right v
     extractJVP (Left v) = Left v
-    extractJVP _ = error "extractJVP" -- This will never be called when the maximum depth layer is VJP
+    extractJVP _ =
+      -- This will never be called when the maximum depth layer is VJP
+      error "extractJVP"
 
 calculatePDs :: Op -> [ADValue] -> Maybe [ADValue]
 calculatePDs op p = do
@@ -294,15 +299,10 @@ deriveTape (TapeOp op p _) s = do
   -- Add up the results
   Just $ foldl (M.unionWith add) M.empty pd
   where
-    add x y = expectJust "TODO: Remove me" $ doOp (OpBin $ addFor $ opReturnType op) [x, y]
+    add x y =
+      fromJust (error "deriveTape: addition failed") $
+        doOp (OpBin $ addFor $ opReturnType op) [x, y]
     mul x y = doOp (OpBin $ multiplyFor $ opReturnType op) [x, y]
-
-    -- TODO: This should be removed if possible.
-    -- It is only here, as there is no monadic
-    -- version of unionWith :(
-    expectJust :: String -> Maybe a -> a
-    expectJust _ (Just v) = v
-    expectJust e Nothing = error e
 
 -- JVP / Forward mode automatic differentiation--
 
