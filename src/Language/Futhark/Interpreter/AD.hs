@@ -105,27 +105,26 @@ primitive :: ADValue -> PrimValue
 primitive v@(Variable _ _) = primitive $ primal v
 primitive (Constant v) = v
 
--- Code reuse from compiler AD--
 -- Evaluates a PrimExp using doOp
-evalPrimExp :: PrimExp VName -> M.Map VName ADValue -> Maybe ADValue
-evalPrimExp (LeafExp n _) m = M.lookup n m
-evalPrimExp (ValueExp pv) _ = Just $ Constant pv
-evalPrimExp (BinOpExp op x y) m = do
-  x' <- evalPrimExp x m
-  y' <- evalPrimExp y m
+evalPrimExp :: M.Map VName ADValue -> PrimExp VName -> Maybe ADValue
+evalPrimExp m (LeafExp n _) = M.lookup n m
+evalPrimExp _ (ValueExp pv) = Just $ Constant pv
+evalPrimExp m (BinOpExp op x y) = do
+  x' <- evalPrimExp m x
+  y' <- evalPrimExp m y
   doOp (OpBin op) [x', y']
-evalPrimExp (CmpOpExp op x y) m = do
-  x' <- evalPrimExp x m
-  y' <- evalPrimExp y m
+evalPrimExp m (CmpOpExp op x y) = do
+  x' <- evalPrimExp m x
+  y' <- evalPrimExp m y
   doOp (OpCmp op) [x', y']
-evalPrimExp (UnOpExp op x) m = do
-  x' <- evalPrimExp x m
+evalPrimExp m (UnOpExp op x) = do
+  x' <- evalPrimExp m x
   doOp (OpUn op) [x']
-evalPrimExp (ConvOpExp op x) m = do
-  x' <- evalPrimExp x m
+evalPrimExp m (ConvOpExp op x) = do
+  x' <- evalPrimExp m x
   doOp (OpConv op) [x']
-evalPrimExp (FunExp fn p _) m = do
-  p' <- mapM (`evalPrimExp` m) p
+evalPrimExp m (FunExp fn p _) = do
+  p' <- mapM (evalPrimExp m) p
   doOp (OpFn fn) p'
 
 -- Returns a list of PrimExps calculating the partial
@@ -232,7 +231,7 @@ calculatePDs op p = do
   -- Look up, and calculate the partial derivative
   -- of the operation with respect to each operand
   pde <- lookupPDs op $ map (`LeafExp` opReturnType op) n
-  mapM (`evalPrimExp` m) pde
+  mapM (evalPrimExp m) pde
 
 -- VJP / Reverse mode automatic differentiation--
 -- In reverse mode AD, the entire computation
