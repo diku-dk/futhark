@@ -63,11 +63,11 @@ addFor t = error $ "addFor: " ++ show t
 
 -- Returns the function which performs multiplication
 -- (or an equivalent operation) on the given type
-multiplyFor :: PrimType -> BinOp
-multiplyFor (IntType t) = Mul t OverflowWrap
-multiplyFor (FloatType t) = FMul t
-multiplyFor Bool = LogAnd
-multiplyFor t = error $ "multiplyFor: " ++ show t
+mulFor :: PrimType -> BinOp
+mulFor (IntType t) = Mul t OverflowWrap
+mulFor (FloatType t) = FMul t
+mulFor Bool = LogAnd
+mulFor t = error $ "mulFor: " ++ show t
 
 -- Types and utility functions--
 -- When taking the partial derivative of a function, we
@@ -293,7 +293,7 @@ deriveTape (TapeOp op p _) s = do
     add x y =
       fromMaybe (error "deriveTape: addition failed") $
         doOp (OpBin $ addFor $ opReturnType op) [x, y]
-    mul x y = doOp (OpBin $ multiplyFor $ opReturnType op) [x, y]
+    mul x y = doOp (OpBin $ mulFor $ opReturnType op) [x, y]
 
 -- JVP / Forward mode automatic differentiation--
 
@@ -325,4 +325,4 @@ jvpHandleFn op p = do
     derivative (Right (JVPValue _ d)) = d
 
     add x y = doOp (OpBin $ addFor $ opReturnType op) [x, y]
-    mul x y = doOp (OpBin $ multiplyFor $ opReturnType op) [x, y]
+    mul x y = doOp (OpBin $ mulFor $ opReturnType op) [x, y]
