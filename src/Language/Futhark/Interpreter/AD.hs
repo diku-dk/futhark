@@ -19,18 +19,12 @@ import Data.Either (isRight)
 import Data.List (find)
 import Data.Map qualified as M
 import Data.Maybe (fromJust)
--- These are needed to reuse the definitions of the derivatives
--- used by the compiler
-import Futhark.AD.Derivatives
+import Futhark.AD.Derivatives (pdBinOp, pdBuiltin, pdUnOp)
 import Futhark.Analysis.PrimExp (PrimExp (..))
 import Language.Futhark.Core (VName (..), nameFromString)
--- As the mathematical functions of Futhark are implemented
--- for the primitive type used in the compiler, said type is
--- used for AD for simplicity
 import Language.Futhark.Primitive
 
--- Mathematical operations, and type checking--
--- A mathematical operation
+-- Mathematical operations subject to AD.
 data Op
   = OpBin BinOp
   | OpCmp CmpOp
@@ -62,7 +56,7 @@ opReturnType (OpFn fn) = case M.lookup fn primFuns of
 -- Returns the operation which performs addition (or an
 -- equivalent operation) on the given type
 addFor :: PrimType -> BinOp
-addFor (IntType t) = Add t OverflowUndef -- TODO: Overflow?
+addFor (IntType t) = Add t OverflowWrap
 addFor (FloatType t) = FAdd t
 addFor Bool = LogOr
 addFor t = error $ "addFor: " ++ show t
@@ -70,7 +64,7 @@ addFor t = error $ "addFor: " ++ show t
 -- Returns the function which performs multiplication
 -- (or an equivalent operation) on the given type
 multiplyFor :: PrimType -> BinOp
-multiplyFor (IntType t) = Mul t OverflowUndef -- TODO: Overflow?
+multiplyFor (IntType t) = Mul t OverflowWrap
 multiplyFor (FloatType t) = FMul t
 multiplyFor Bool = LogAnd
 multiplyFor t = error $ "multiplyFor: " ++ show t
@@ -245,22 +239,21 @@ calculatePDs op p = do
 newtype VJPValue = VJPValue Tape
   deriving (Show)
 
--- Represents a computation tree, as well as every
--- intermediate value in its evaluation
--- TODO: Consider making this a graph
+-- | Represents a computation tree, as well as every intermediate
+-- value in its evaluation. TODO: make this a graph.
 data Tape
-  = -- This represents a variable. Each variable is given
-    -- a unique ID, and has an initial value
+  = -- | This represents a variable. Each variable is given a unique ID,
+    -- and has an initial value
     TapeID Int ADValue
-  | -- this represents a constant
+  | -- | This represents a constant.
     TapeConst ADValue
-  | -- This represents the application of a mathematical
-    -- operation. Each parameter is given by its Tape, and
-    -- the return value of the operation is saved
+  | -- | This represents the application of a mathematical operation.
+    -- Each parameter is given by its Tape, and the return value of
+    -- the operation is saved
     TapeOp Op [Tape] ADValue
   deriving (Show)
 
--- Returns the primal value of a Tape
+-- | Returns the primal value of a Tape.
 tapePrimal :: Tape -> ADValue
 tapePrimal (TapeID _ v) = v
 tapePrimal (TapeConst v) = v
@@ -275,10 +268,9 @@ vjpHandleOp op p v = do
     toTape (Left v') = TapeConst v'
     toTape (Right (VJPValue t)) = t
 
--- This calculates every partial derivative of a Tape
--- The result is a map of the partial derivatives, each
--- key corresponding to the ID of a free variable (see
--- TapeID)
+-- | This calculates every partial derivative of a 'Tape'. The result
+-- is a map of the partial derivatives, each key corresponding to the
+-- ID of a free variable (see TapeID).
 deriveTape :: Tape -> ADValue -> Maybe (M.Map Int ADValue)
 deriveTape (TapeID i _) s = Just $ M.fromList [(i, s)]
 deriveTape (TapeConst _) _ = Just M.empty
@@ -286,8 +278,7 @@ deriveTape (TapeOp op p _) s = do
   -- Calculate the new sensitivities
   s'' <- case op of
     OpConv op' -> do
-      -- In case of type conversion, simply convert
-      -- the sensitivity
+      -- In case of type conversion, simply convert the sensitivity
       s' <- doOp (OpConv $ flipConvOp op') [s]
       Just [s']
     _ -> do
@@ -306,14 +297,14 @@ deriveTape (TapeOp op p _) s = do
 
 -- JVP / Forward mode automatic differentiation--
 
--- In JVP, the derivative of the variable must be saved.
--- This is represented as a second value
+-- | In JVP, the derivative of the variable must be saved. This is
+-- represented as a second value.
 data JVPValue = JVPValue ADValue ADValue
   deriving (Show)
 
--- This calculates the derivative part of the JVPValue
--- resulting from the application of a mathematical
--- operation on one or more JVPValues
+-- | This calculates the derivative part of the JVPValue resulting
+-- from the application of a mathematical operation on one or more
+-- JVPValues.
 jvpHandleFn :: Op -> [Either ADValue JVPValue] -> Maybe ADValue
 jvpHandleFn op p = do
   case op of
