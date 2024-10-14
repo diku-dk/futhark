@@ -34,6 +34,7 @@ pkgs.stdenv.mkDerivation {
       python.python
       python.mypy
       python.black
+      python.cycler
       python.numpy
       python.pyopencl
       python.matplotlib
