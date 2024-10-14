@@ -71,6 +71,8 @@ do
         tree_fail=$((tree_fail + 1 - tree_result))
         idempotent_pass=$((idempotent_pass + idempotent_result))
         idempotent_fail=$((idempotent_fail + 1 - idempotent_result))
+
+        rm "$file"
     fi
 done
 
