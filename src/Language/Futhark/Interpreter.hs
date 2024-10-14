@@ -1773,25 +1773,22 @@ initialCtx =
           ( ValueAcc shape op acc_arr,
             ValuePrim (SignedValue (Int64Value i'))
             ) ->
-              if i' >= 0 && i' < arrayLength acc_arr
-                then do
-                  let x = acc_arr ! fromIntegral i'
-                  res <- op x v
-                  pure $ ValueAcc shape op $ acc_arr // [(fromIntegral i', res)]
-                else pure acc
-          -- TODO: The above code is identical. Share the code
+              write acc v shape op acc_arr i'
           ( ValueAcc shape op acc_arr,
             adv@(ValueAD {})
             )
               | Just (SignedValue (Int64Value i')) <- putV . AD.primitive <$> getAD adv ->
-                  if i' >= 0 && i' < arrayLength acc_arr
-                    then do
-                      let x = acc_arr ! fromIntegral i'
-                      res <- op x v
-                      pure $ ValueAcc shape op $ acc_arr // [(fromIntegral i', res)]
-                    else pure acc
+                  write acc v shape op acc_arr i'
           _ ->
             error $ "acc_write invalid arguments: " <> prettyString (show acc, show i, show v)
+      where
+        write acc v shape op acc_arr i' =
+          if i' >= 0 && i' < arrayLength acc_arr
+            then do
+              let x = acc_arr ! fromIntegral i'
+              res <- op x v
+              pure $ ValueAcc shape op $ acc_arr // [(fromIntegral i', res)]
+            else pure acc
     --
     def "flat_index_2d" = Just . fun6 $ \arr offset n1 s1 n2 s2 -> do
       let offset' = asInt64 offset
@@ -1977,11 +1974,11 @@ initialCtx =
 
         -- Augment the values
         let v' =
-              expectJust ("vjp: invalid values " ++ show v) $
+              fromMaybe (error $ "vjp: invalid values " ++ show v) $
                 modifyValueM (\i lv -> ValueAD depth . AD.VJP . AD.VJPValue . AD.TapeID i <$> getAD lv) v
         -- Turn the seeds into a list of ADValues
         let s' =
-              expectJust ("vjp: invalid seeds " ++ show s) $
+              fromMaybe (error $ "vjp: invalid seeds " ++ show s) $
                 mapM getAD $
                   fst $
                     valueAccum (\a b -> (b : a, b)) [] s
@@ -1992,7 +1989,7 @@ initialCtx =
 
         -- For each output..
         let m =
-              expectJust "vjp: differentiation failed" $
+              fromMaybe (error "vjp: differentiation failed") $
                 zipWithM
                   ( \on sn -> case on of
                       -- If it is a VJP variable of the correct depth, run deriveTape on it- and its corresponding seed
@@ -2009,7 +2006,7 @@ initialCtx =
         -- Extract the output values, and the partial derivatives
         let ov = modifyValue (\i _ -> fst $ m !! i) o
         let od =
-              expectJust "vjp: differentiation failed" $
+              fromMaybe (error "vjp: differentiation failed") $
                 modifyValueM (\i vo -> M.findWithDefault (ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD vo) i drvs) v
 
         -- Return a tuple of the output values, and partial derivatives
@@ -2026,12 +2023,11 @@ initialCtx =
               0
               v
 
-        expectJust _ (Just v) = v
-        expectJust s Nothing = error s
-
         -- TODO: Perhaps this could be fully abstracted by AD?
         -- Making addFor private would be nice..
-        add x y = expectJust "TODO" $ AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
+        add x y =
+          fromMaybe (error "jvp: illtyped add") $
+            AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
     def "jvp2" = Just $
       -- TODO: This could be much better. Currently, it is very inefficient
       -- Perhaps creating JVPValues could be abstracted into a function
