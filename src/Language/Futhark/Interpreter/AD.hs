@@ -137,67 +137,21 @@ lookupPDs _ _ = Nothing
 -- list of operands, performing automatic differentiation
 -- if one or more operands is a Variable (of depth > 0)
 doOp :: Op -> [ADValue] -> Maybe ADValue
-doOp op o =
-  let dep = case op of
-        OpCmp _ -> 0 -- AD is not well-defined for comparason operations
-        -- There are no derivatives for those written in
-        -- PrimExp (check lookupPDs)
-        _ -> maximum (map depth o)
-   in if dep == 0
-        then -- In this case, every value is a constant, and
-        -- the mathematical operation can be applied as
-        -- it would be otherwise
-
-        -- First, we make sure that the types of the
-        -- operands match those of the operation
-
-          let o' = map primitive o
-           in if opTypeMatch op (map primValueType o')
-                then do
-                  -- If they do, we perform the operation, and
-                  -- return a Constant
-                  Constant <$> case (op, o') of
-                    (OpBin op', [x, y]) -> doBinOp op' x y
-                    (OpCmp op', [x, y]) -> BoolValue <$> doCmpOp op' x y
-                    (OpUn op', [x]) -> doUnOp op' x
-                    (OpConv op', [x]) -> doConvOp op' x
-                    (OpFn fn, _) -> do
-                      (_, _, f) <- M.lookup fn primFuns
-                      f o'
-                    _ ->
-                      -- This is needed due to the fact that the function
-                      -- takes an array, yet some of the operations have a
-                      -- fixed number of operands
-                      error "doOp: opTypeMatch"
-                else -- If the types do not match, we return Nothing
-                  Nothing
-        else do
-          -- In this case, some values are variables.
-          -- We therefore have to perform the necessary
-          -- steps for AD
-
-          -- First, we calculate the value for the
-          -- previous depth
-          let oprev = map primal o
-          vprev <- doOp op oprev
-
-          -- Then we separate the values of the maximum
-          -- depth from those of a lower depth
-          let o' = map (divideDepths dep) o
-          -- Then we find out what type of AD is being
-          -- performed
-          case find isRight o' of
-            -- Finally, we perform the necessary steps
-            -- for the given type of AD
-            Just (Right (VJP {})) ->
-              Just . Variable dep . VJP . VJPValue $ vjpHandleOp op (map extractVJP o') vprev
-            Just (Right (JVP {})) ->
-              Variable dep . JVP . JVPValue vprev <$> jvpHandleFn op (map extractJVP o')
-            _ ->
-              -- Since the maximum depth is non-zero, there must
-              -- be at least one variable of depth > 0
-              error "find isRight"
+doOp op o
+  | not $ opTypeMatch op (map primValueType pv) =
+      -- This function may be called with arguments of invalid types,
+      -- because it is used as part of an overloaded operator.
+      Nothing
+  | otherwise = do
+      let dep = case op of
+            OpCmp _ -> 0 -- AD is not well-defined for comparason operations
+            -- There are no derivatives for those written in
+            -- PrimExp (check lookupPDs)
+            _ -> maximum (map depth o)
+      if dep == 0 then constCase else nonconstCase dep
   where
+    pv = map primitive o
+
     divideDepths :: Int -> ADValue -> Either ADValue ADVariable
     divideDepths _ v@(Constant {}) = Left v
     divideDepths d v@(Variable d' v') = if d' < d then Left v else Right v'
@@ -219,6 +173,44 @@ doOp op o =
     extractJVP _ =
       -- This will never be called when the maximum depth layer is VJP
       error "extractJVP"
+
+    -- In this case, every operand is a constant, and the
+    -- mathematical operation can be applied as it would be
+    -- otherwise
+    constCase =
+      Constant <$> case (op, pv) of
+        (OpBin op', [x, y]) -> doBinOp op' x y
+        (OpCmp op', [x, y]) -> BoolValue <$> doCmpOp op' x y
+        (OpUn op', [x]) -> doUnOp op' x
+        (OpConv op', [x]) -> doConvOp op' x
+        (OpFn fn, _) -> do
+          (_, _, f) <- M.lookup fn primFuns
+          f pv
+        _ -> error "doOp: opTypeMatch"
+
+    nonconstCase dep = do
+      -- In this case, some values are variables. We therefore
+      -- have to perform the necessary steps for AD
+
+      -- First, we calculate the value for the previous depth
+      let oprev = map primal o
+      vprev <- doOp op oprev
+
+      -- Then we separate the values of the maximum depth from
+      -- those of a lower depth
+      let o' = map (divideDepths dep) o
+      -- Then we find out what type of AD is being performed
+      case find isRight o' of
+        -- Finally, we perform the necessary steps for the given
+        -- type of AD
+        Just (Right (VJP {})) ->
+          Just . Variable dep . VJP . VJPValue $ vjpHandleOp op (map extractVJP o') vprev
+        Just (Right (JVP {})) ->
+          Variable dep . JVP . JVPValue vprev <$> jvpHandleFn op (map extractJVP o')
+        _ ->
+          -- Since the maximum depth is non-zero, there must be at
+          -- least one variable of depth > 0
+          error "find isRight"
 
 calculatePDs :: Op -> [ADValue] -> Maybe [ADValue]
 calculatePDs op p = do
