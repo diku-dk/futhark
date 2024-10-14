@@ -128,12 +128,10 @@ kkLoopBody
         let e = le64 i + le64 k * pe64 tr_par
         pure (i, k, e)
       --
-      --
       mkCompLoopRxRy fits_ij css_init (a_idx_fn, b_idx_fn) (ltid_y, ltid_x) = do
         css <- forLoop ry [css_init] $ \i [css_merge] -> do
           css <- forLoop rx [css_merge] $ \j [css_merge'] ->
-            resultBodyM
-              =<< letTupExp' "foo"
+            (resultBodyM <=< letTupExp' "foo")
               =<< eIf
                 ( toExp $
                     if fits_ij
@@ -143,16 +141,8 @@ kkLoopBody
                       -- is garbage anyways and should not be written.
                       -- so fits_ij should be always true!!!
 
-                        le64 iii
-                          + le64 i
-                          + pe64 ry
-                            * le64 ltid_y
-                              .<. pe64 height_A
-                              .&&. le64 jjj
-                          + le64 j
-                          + pe64 rx
-                            * le64 ltid_x
-                              .<. pe64 width_B
+                        (le64 iii + le64 i + pe64 ry * le64 ltid_y .<. pe64 height_A)
+                          .&&. (le64 jjj + le64 j + pe64 rx * le64 ltid_x .<. pe64 width_B)
                 )
                 ( do
                     a <- a_idx_fn ltid_y i
@@ -184,8 +174,7 @@ kkLoopBody
             css_init <- index "css_init" css_merge [ltid_y, ltid_x]
 
             css <- forLoop tk [css_init] $ \k [acc_merge] ->
-              resultBodyM
-                =<< letTupExp' "foo"
+              (resultBodyM <=< letTupExp' "foo")
                 =<< eIf
                   ( toExp $
                       if epilogue
