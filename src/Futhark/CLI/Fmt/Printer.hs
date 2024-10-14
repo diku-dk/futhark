@@ -1067,4 +1067,4 @@ fmtText fName fContent = do
   let s = FmtState {comments = cs}
   let e = MultiLine
   let fmt = runIdentity $ evalStateT (runReaderT (fmtProg prog) e) s
-  pure $ pretty 80 fmt -- The width does nothing currently.
+  pure $ pretty fmt
