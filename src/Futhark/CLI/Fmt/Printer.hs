@@ -133,7 +133,7 @@ instance Format UncheckedTypeExp where
       single =
         fmtParamType name te0 <+> code "->" <+> te1
       multi =
-        stdNest $ fmtParamType name te0 <+> code "->" </> te1 -- Not sure this is correct.
+        fmtParamType name te0 <+> code "->" </> stdIndent te1
         -- This should be "|"
   fmt (TESum tes loc) = buildFmt loc single multi
     where
@@ -174,7 +174,8 @@ instance Format UncheckedTypeBind where
         <:> l
         <+> fmtName name
         `ps_op` sep space ps
-        <+> stdNest (code "=" </> e)
+        <+> code "="
+        </> stdIndent e
 
 instance Format (AttrAtom a) where
   fmt (AtomName name) = fmtName name
@@ -215,7 +216,7 @@ instance Format (UncheckedPat t) where
   fmt (PatParens pat loc) = buildFmt loc single multi
     where
       single = parens pat
-      multi = stdNest (code "(" </> pat) </> code ")"
+      multi = align (code "(" <:> pat) </> code ")"
   fmt (Id name _ loc) = buildFmt loc single multi
     where
       single = fmtNameParen name
@@ -237,7 +238,7 @@ instance Format (UncheckedPat t) where
       common s = sep s pats
       cons = code "#" <:> fmtName n
       single = cons <+> common space
-      multi = stdNest $ cons </> common line
+      multi =  cons </> align (common line)
   fmt (PatAttr attr pat loc) = buildFmt loc single multi
     where
       single = attr <+> pat
@@ -247,7 +248,7 @@ instance Format (FieldBase NoInfo Name) where
   fmt (RecordFieldExplicit name e loc) = buildFmt loc single multi
     where
       single = fmtName name <+> code "=" <+> e
-      multi = fmtName name <+> stdNest (code "=" </> e)
+      multi = fmtName name <+> code "=" </> stdIndent e
   fmt (RecordFieldImplicit name _ loc) = buildFmt loc single multi
     where
       single = fmtName name
@@ -270,18 +271,18 @@ instance Format PrimValue where
 instance Format UncheckedDimIndex where
   fmt (DimFix e) = fmt e
   fmt (DimSlice i j (Just s)) = do
-    maybe (pure mempty) fmt i
+    maybe nil fmt i
     <:> code ":"
-    <:> maybe (pure mempty) fmt j
+    <:> maybe nil fmt j
     <:> code ":"
     <:> s
   fmt (DimSlice i (Just j) s) = do
-    maybe (pure mempty) fmt i
+    maybe nil fmt i
     <:> code ":"
     <:> fmt j
-    <:> maybe (pure mempty) (code ":" <:>) s
+    <:> maybe nil (code ":" <:>) s
   fmt (DimSlice i Nothing Nothing) =
-    maybe (pure mempty) fmt i <:> code ":"
+    maybe nil fmt i <:> code ":"
 
 operatorName :: Name -> Bool
 operatorName = (`elem` opchars) . T.head . nameToText
@@ -301,11 +302,11 @@ instance Format UncheckedExp where
   fmt (Parens e loc) = buildFmt loc single multi
     where
       single = parens e
-      multi = stdNest (code "(" </> e) </> code ")"
+      multi = align (code "(" <:> e) </> code ")"
   fmt (QualParens (v, _loc) e loc') = buildFmt loc' single multi
     where
       single = fmtQualNameSingle v <:> code "." <:> parens e
-      multi = fmtQualNameMulti v <:> code "." <:> stdNest (code "(" </> e) </> code ")"
+      multi = fmtQualNameMulti v <:> code "." <:> align (code "(" </> e) </> code ")"
   fmt (Ascript e t loc) = buildFmt loc single multi
     where
       single = e <:> code ":" <+> t
@@ -373,9 +374,8 @@ instance Format UncheckedExp where
       multi = single -- This needs to be multiline.
   fmt (Lambda params body rettype _ loc) = buildFmt loc single multi
     where
-      params' = sep space params
-      ascript = maybe (pure mempty) (code ": " <:>) rettype
-      common = code "\\" <:> params' <:> ascript
+      ascript = maybe nil (code ": " <:>) rettype
+      common = code "\\" <:> sep space params <:> ascript
       single = common <+> code "->" <+> body
       multi = common <+> stdNest (code "->" </> body)
   fmt (OpSection binop _ loc) = buildFmt loc single multi
@@ -472,11 +472,8 @@ instance Format (AppExpBase NoInfo Name) where
       op = if null sizeparams then (<:>) else (<+>)
       sizeparams' = sep nil $ brackets . fmtName . toName <$> sizeparams
       common =
-        sepByLayout
-        pat
-        ( code "loop" `op` sizeparams'
-        )
-        pat
+        ( code "loop" `op` sizeparams' )
+        <+/> pat
         <+> form
       single = common <+> code "do" <+> loopbody
       multi = common <+> stdNest (code "do" </> loopbody)
@@ -485,15 +482,11 @@ instance Format (AppExpBase NoInfo Name) where
       op = if null sizeparams then (<:>) else (<+>)
       sizeparams' = sep nil $ brackets . fmtName . toName <$> sizeparams
       common =
-        sepByLayout
-        initexp
-        ( sepByLayout
-          pat
-          ( code "loop" `op` sizeparams' )
-          pat
+        ( ( code "loop" `op` sizeparams' )
+          <+/> pat
           <+> code "="
         )
-        initexp
+        <+/> initexp
         <+> form
       single = common <+> code "do" <+> loopbody
       multi = common <+> stdNest (code "do" </> loopbody)
@@ -505,14 +498,12 @@ instance Format (AppExpBase NoInfo Name) where
   fmt (LetPat sizes pat e body loc) = buildFmt loc single multi
     where
       sizes' = sep nil sizes
-      common = 
-        sepByLayout
-        e
+      common =
         ( code "let"
           <+> sepNonEmpty space [sizes', fmt pat]
           <+> code "="
         )
-        e
+        <+/> e
       single = common <+> letBody body
       multi = common </> letBody body
   fmt (LetFun fname (tparams, params, retdecl, _, e) body loc) = buildFmt loc single multi
@@ -525,8 +516,6 @@ instance Format (AppExpBase NoInfo Name) where
           Nothing -> space
       sub = sepNonEmpty space [tparams', params']
       common =
-        sepByLayout
-        e
         ( code "let"
           <+> fmtName fname
           <:> (if null params && null tparams then nil else space)
@@ -534,7 +523,7 @@ instance Format (AppExpBase NoInfo Name) where
           <:> retdecl'
           <:> code "="
         )
-        e
+        <+/> e
       single = common <+> letBody body
       multi = common </> letBody body
   fmt (LetWith dest src idxs ve body loc)
@@ -543,19 +532,15 @@ instance Format (AppExpBase NoInfo Name) where
     where
       idxs' = brackets $ sep (code ", ") idxs
       commonSame =
-        sepByLayout
-        ve
         ( code "let"
           <+> dest
           <:> idxs'
           <+> code "="
         )
-        ve
+        <+/> ve
       singleSame = commonSame <+> letBody body
       multiSame = commonSame </> letBody body
       commonDiff =
-        sepByLayout
-        ve
         ( code "let"
           <+> dest
           <+> code "="
@@ -563,7 +548,7 @@ instance Format (AppExpBase NoInfo Name) where
           <+> code "with"
           <+> idxs'
         )
-        ve
+        <+/> ve
       singleDiff = commonDiff <+> letBody body
       multiDiff = commonDiff </> letBody body
   fmt (Range start maybe_step end loc) = buildFmt loc single multi
@@ -574,7 +559,7 @@ instance Format (AppExpBase NoInfo Name) where
           DownToExclusive e -> code "..>" <:> e
           ToInclusive e -> code "..." <:> e
           UpToExclusive e -> code "..<" <:> e
-      step = maybe (pure mempty) (code ".." <:>) maybe_step
+      step = maybe nil (code ".." <:>) maybe_step
       single = start <:> step <:> end'
       multi = single
   fmt (If c t f loc) = buildFmt loc single multi
@@ -596,9 +581,9 @@ instance Format (AppExpBase NoInfo Name) where
           </> f
   fmt (Apply f args loc) = buildFmt loc single multi
     where
-      mArgs = sep space $ map snd (toList args)
-      single = f <+> mArgs
-      multi = stdNest $ f </> mArgs -- This should format in a pretty way but I am not sure how.
+      mArgs s = sep s $ map snd (toList args)
+      single = f <+> mArgs space
+      multi = f <+> align (mArgs line)
 
 letBody :: UncheckedExp -> FmtM Fmt
 letBody body@(AppExp LetPat {} _) = fmt body
@@ -607,7 +592,7 @@ letBody body@(AppExp LetWith {} _) = fmt body
 letBody body = buildFmt body single multi
   where
     single = code "in" <+> body
-    multi = stdNest (code "in" </> body)
+    multi = code "in" </> stdIndent body
 
 instance Format (SizeBinder Name) where
   fmt (SizeBinder v _) = brackets $ fmtName v
@@ -651,7 +636,7 @@ instance Format UncheckedValBind where
         <:> sub
         <:> retdecl'
       single = common <+> code "=" <+> body
-      multi = common <+> stdNest (code "=" </> body)
+      multi = common <+> code "=" </> stdNest body
       fun =
         case entry of
           Just _ -> code "entry"
@@ -673,7 +658,7 @@ instance Format UncheckedSpec where
     where
       common = doc <:> code "type" <:> l
       single = common <+> sep space (fmtName name : map fmt ps)
-      multi = common <+> stdNest (sep line (fmtName name : map fmt ps)) -- This could be prettier.
+      multi = common <+> fmtName name <:> align (sep line ps) -- This could be prettier.
   fmt (ValSpec name ps te _ doc loc) = buildFmt loc single multi
     where
       doc' = doc
@@ -697,18 +682,18 @@ instance Format UncheckedModTypeExp where
     where
       common = fmt mte
       single = parens mte
-      multi = stdNest (code "(" </> common) </> code ")"
+      multi = align (code "(" <:> common) </> code ")"
   fmt (ModTypeSpecs sbs loc) = buildFmt loc single multi
     where
       common s = sep s sbs
       single = braces $ common space
-      multi = stdNest (code "{" </> common line) </> code "}"
+      multi = align (code "{" <:> common line) </> code "}"
   fmt (ModTypeWith mte (TypeRef v ps td _) loc) = buildFmt loc single multi
     where
       ps_op = if null ps then (<:>) else (<+>)
       common = mte <+> code "with" <+> fmtPretty v `ps_op` sep space ps
       single = common <+> code "=" <+> td
-      multi = common <+> stdNest (code "=" <+> td)
+      multi = common <+> code "=" <+> stdIndent td
   fmt (ModTypeArrow (Just v) te0 te1 loc) = buildFmt loc single multi
     where
       op a b = parens (fmtName v <:> code ":" <+> a) <+> code "->" <+> b
@@ -753,7 +738,8 @@ instance Format UncheckedModBind where
       multi = 
         doc
         <:> code "module"
-        <+> stdNest (sep space (fmtName name : map fmt ps)) -- This could be better
+        <+> fmtName name
+        <+> align (sep line ps) -- This could be better
         <:> sig'
         <:> code "="
         <+> te
@@ -769,7 +755,7 @@ instance Format UncheckedModExp where
   fmt (ModParens f loc) = buildFmt loc single multi
     where
       single = parens f
-      multi = stdNest (code "(" </> f) </> code ")"
+      multi = align (code "(" </> f) </> code ")"
   fmt (ModImport path _f loc) = buildFmt loc single multi
     where
       single = code "import \"" <:> fmtPretty path <:> code "\""
@@ -779,11 +765,11 @@ instance Format UncheckedModExp where
     where
       fmtDecs s = sep s decs
       single = braces $ fmtDecs space
-      multi = stdNest (code "{" </> fmtDecs (line <:> line)) </> code "}"
+      multi = code "{" </> stdIndent (fmtDecs (line <:> line)) </> code "}"
   fmt (ModApply f a _f0 _f1 loc) = buildFmt loc single multi
     where
       single = f <+> a
-      multi = stdNest $ f </> a
+      multi =  f </> stdIndent a
   fmt (ModAscript me se _f loc) = buildFmt loc single multi
     where
       single = me <:> code ":" <+> se
@@ -796,7 +782,7 @@ instance Format UncheckedModExp where
           Just (sig', _) -> code ":" <+> parens sig'
       common = code "\\" <:> param <:> sig
       single = common <+> code "->" <+> body
-      multi = common <+> stdNest (code "->" </> body)
+      multi = common <+> code "->" </> stdIndent body
 
 -- | Formatting of Futhark declarations.
 instance Format UncheckedDec where
