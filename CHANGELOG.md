@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Faster floating-point atomics with OpenCL backend on AMD and NVIDIA
   GPUs. This affects histogram workloads.
 
+* AD is now supported by the interpreter (thanks to Marcus Jensen).
+
 ### Removed
 
 ### Changed

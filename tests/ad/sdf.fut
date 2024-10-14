@@ -1,9 +1,9 @@
 -- Signed Distance Functions, as you would find in a ray marcher.
 -- ==
 -- entry: jvp_normal vjp_normal
--- compiled input { 0i32 0f64 1f64 0f64 } output { 1f64 0f64 0f64 }
--- compiled input { 1i32 0f64 1f64 0f64 } output { 0.412393f64 0.907265f64 -0.082479f64 }
--- compiled input { 2i32 0f64 1f64 0f64 } output { -0.375775f64 0.903687f64 -0.205287f64 }
+-- input { 0i32 0f64 1f64 0f64 } output { 1f64 0f64 0f64 }
+-- input { 1i32 0f64 1f64 0f64 } output { 0.412393f64 0.907265f64 -0.082479f64 }
+-- input { 2i32 0f64 1f64 0f64 } output { -0.375775f64 0.903687f64 -0.205287f64 }
 
 type Vec = {x:f64, y: f64, z: f64}
 
