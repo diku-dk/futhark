@@ -1065,12 +1065,20 @@ intrinsics =
             )
           ++
           -- This overrides the ! from Primitive.
-
-          -- This overrides the ! from Primitive.
           [ ( "!",
               IntrinsicOverloadedFun
                 ( map Signed [minBound .. maxBound]
                     ++ map Unsigned [minBound .. maxBound]
+                    ++ [Bool]
+                )
+                [Nothing]
+                Nothing
+            ),
+            ( "neg",
+              IntrinsicOverloadedFun
+                ( map Signed [minBound .. maxBound]
+                    ++ map Unsigned [minBound .. maxBound]
+                    ++ map FloatType [minBound .. maxBound]
                     ++ [Bool]
                 )
                 [Nothing]

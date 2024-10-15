@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Negation of floating-point positive zero now produces a negative
+  zero.
+
 ## [0.25.23]
 
 ### Added

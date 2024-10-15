@@ -87,7 +87,7 @@ reduceStrideAndOffset (BinOpExp oper a b) = case (a, b) of
           Sub _ _ -> Just (s, o - valueIntegral v)
           Mul _ _ -> Just (s * valueIntegral v, o * valueIntegral v)
           _ -> Nothing
-    reduce _ (UnOpExp Not _) = Nothing
+    reduce _ (UnOpExp (Neg Bool) _) = Nothing
     reduce _ (UnOpExp (Complement _) _) = Nothing
     reduce _ (UnOpExp (Abs _) _) = Nothing
     reduce _ (UnOpExp _ sub_op) = reduceStrideAndOffset sub_op
