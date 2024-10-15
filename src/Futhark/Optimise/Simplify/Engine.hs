@@ -297,7 +297,7 @@ protectIf _ _ taken (Let pat aux (Match [cond] [Case [Just (BoolValue True)] tak
     Match [cond'] [Case [Just (BoolValue True)] taken_body] untaken_body $
       MatchDec if_ts MatchFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
-  not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
+  not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp (Neg Bool) taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
   auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
 protectIf protect _ taken (Let pat aux (Op op))
@@ -380,7 +380,7 @@ matchingExactlyThis ses prior this = do
   letSubExp "matching_just_this"
     =<< eBinOp
       LogAnd
-      (eUnOp Not (eAny prior_matches))
+      (eUnOp (Neg Bool) (eAny prior_matches))
       (eSubExp =<< matching (zip ses this))
 
 -- | We are willing to hoist potentially unsafe statements out of

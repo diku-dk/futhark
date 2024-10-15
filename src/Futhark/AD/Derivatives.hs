@@ -26,7 +26,10 @@ untyped2 = bimap untyped untyped
 pdUnOp :: UnOp -> PrimExp VName -> PrimExp VName
 pdUnOp (Abs it) a = UnOpExp (SSignum it) a
 pdUnOp (FAbs ft) a = UnOpExp (FSignum ft) a
-pdUnOp Not x = x
+pdUnOp (Neg Bool) x = x
+pdUnOp (Neg Unit) x = x
+pdUnOp (Neg (IntType it)) _ = iConst it (-1)
+pdUnOp (Neg (FloatType ft)) _ = fConst ft (-1)
 pdUnOp (Complement it) x = UnOpExp (Complement it) x
 pdUnOp (SSignum it) _ = iConst it 0
 pdUnOp (USignum it) _ = iConst it 0

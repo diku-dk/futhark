@@ -80,7 +80,7 @@ ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, MatchDec ts _)
           (pure $ BasicOp $ BinOp LogAnd cond tres)
           ( eBinOp
               LogAnd
-              (pure $ BasicOp $ UnOp Not cond)
+              (pure $ BasicOp $ UnOp (Neg Bool) cond)
               (pure $ BasicOp $ SubExp fres)
           )
       certifying (tcs <> fcs) $ letBind pat e
@@ -102,7 +102,7 @@ ruleMatch _ pat _ ([cond], [Case [Just (BoolValue True)] tb], fb, _)
         else
           if zeroIshInt t && oneIshInt f
             then Simplify $ do
-              cond_neg <- letSubExp "cond_neg" $ BasicOp $ UnOp Not cond
+              cond_neg <- letSubExp "cond_neg" $ BasicOp $ UnOp (Neg Bool) cond
               letBind pat $ BasicOp $ ConvOp (BToI (intValueType t)) cond_neg
             else Skip
 -- Simplify

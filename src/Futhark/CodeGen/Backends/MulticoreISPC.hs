@@ -415,9 +415,12 @@ compileExp (LeafExp v _) =
 compileExp (UnOpExp Complement {} x) = do
   x' <- compileExp x
   pure [C.cexp|~$exp:x'|]
-compileExp (UnOpExp Not {} x) = do
+compileExp (UnOpExp (Neg Bool) x) = do
   x' <- compileExp x
   pure [C.cexp|!$exp:x'|]
+compileExp (UnOpExp Neg {} x) = do
+  x' <- compileExp x
+  pure [C.cexp|-$exp:x'|]
 compileExp (UnOpExp (FAbs Float32) x) = do
   x' <- compileExp x
   pure [C.cexp|(float)fabs($exp:x')|]

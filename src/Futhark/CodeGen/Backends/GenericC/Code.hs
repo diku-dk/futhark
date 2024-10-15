@@ -56,15 +56,18 @@ compilePrimExp f (LeafExp v _) =
 compilePrimExp f (UnOpExp Complement {} x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|~$exp:x'|]
-compilePrimExp f (UnOpExp Not {} x) = do
-  x' <- compilePrimExp f x
-  pure [C.cexp|!$exp:x'|]
 compilePrimExp f (UnOpExp SSignum {} x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0)|]
 compilePrimExp f (UnOpExp USignum {} x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|($exp:x' > 0 ? 1 : 0) - ($exp:x' < 0 ? 1 : 0) != 0|]
+compilePrimExp f (UnOpExp (Neg Bool) x) = do
+  x' <- compilePrimExp f x
+  pure [C.cexp|!$exp:x'|]
+compilePrimExp f (UnOpExp Neg {} x) = do
+  x' <- compilePrimExp f x
+  pure [C.cexp|-$exp:x'|]
 compilePrimExp f (UnOpExp op x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|$id:(prettyString op)($exp:x')|]

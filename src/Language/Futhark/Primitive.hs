@@ -378,8 +378,8 @@ onePrimValue Unit = UnitValue
 -- operator and what is a built-in function.  Perhaps these should all
 -- go away eventually.
 data UnOp
-  = -- | E.g., @! True == False@.
-    Not
+  = -- | Flip sign. Logical negation for booleans.
+    Neg PrimType
   | -- | E.g., @~(~1) = 1@.
     Complement IntType
   | -- | @abs(-2) = 2@.
@@ -580,8 +580,8 @@ data ConvOp
 -- | A list of all unary operators for all types.
 allUnOps :: [UnOp]
 allUnOps =
-  Not
-    : map Complement [minBound .. maxBound]
+  map Neg [minBound .. maxBound]
+    ++ map Complement [minBound .. maxBound]
     ++ map Abs [minBound .. maxBound]
     ++ map FAbs [minBound .. maxBound]
     ++ map SSignum [minBound .. maxBound]
@@ -659,7 +659,9 @@ allConvOps =
 -- | Apply an 'UnOp' to an operand.  Returns 'Nothing' if the
 -- application is mistyped.
 doUnOp :: UnOp -> PrimValue -> Maybe PrimValue
-doUnOp Not (BoolValue b) = Just $ BoolValue $ not b
+doUnOp (Neg _) (BoolValue b) = Just $ BoolValue $ not b
+doUnOp (Neg _) (FloatValue v) = Just $ FloatValue $ doFNeg v
+doUnOp (Neg _) (IntValue v) = Just $ IntValue $ doIntNeg v
 doUnOp Complement {} (IntValue v) = Just $ IntValue $ doComplement v
 doUnOp Abs {} (IntValue v) = Just $ IntValue $ doAbs v
 doUnOp FAbs {} (FloatValue v) = Just $ FloatValue $ doFAbs v
@@ -667,6 +669,17 @@ doUnOp SSignum {} (IntValue v) = Just $ IntValue $ doSSignum v
 doUnOp USignum {} (IntValue v) = Just $ IntValue $ doUSignum v
 doUnOp FSignum {} (FloatValue v) = Just $ FloatValue $ doFSignum v
 doUnOp _ _ = Nothing
+
+doFNeg :: FloatValue -> FloatValue
+doFNeg (Float16Value x) = Float16Value $ negate x
+doFNeg (Float32Value x) = Float32Value $ negate x
+doFNeg (Float64Value x) = Float64Value $ negate x
+
+doIntNeg :: IntValue -> IntValue
+doIntNeg (Int8Value x) = Int8Value $ -x
+doIntNeg (Int16Value x) = Int16Value $ -x
+doIntNeg (Int32Value x) = Int32Value $ -x
+doIntNeg (Int64Value x) = Int64Value $ -x
 
 -- | E.g., @~(~1) = 1@.
 doComplement :: IntValue -> IntValue
@@ -1130,7 +1143,7 @@ cmpOpType CmpLle = Bool
 unOpType :: UnOp -> PrimType
 unOpType (SSignum t) = IntType t
 unOpType (USignum t) = IntType t
-unOpType Not = Bool
+unOpType (Neg t) = t
 unOpType (Complement t) = IntType t
 unOpType (Abs t) = IntType t
 unOpType (FAbs t) = FloatType t
@@ -1839,7 +1852,7 @@ instance Pretty ConvOp where
       (from, to) = convOpType op
 
 instance Pretty UnOp where
-  pretty Not = "not"
+  pretty (Neg t) = "neg_" <> pretty t
   pretty (Abs t) = taggedI "abs" t
   pretty (FAbs t) = taggedF "fabs" t
   pretty (SSignum t) = taggedI "ssignum" t
