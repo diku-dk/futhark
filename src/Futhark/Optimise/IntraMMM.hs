@@ -182,8 +182,10 @@ buildMMM vName blockSize (MMAMatch kernelBodyMatch ne sizeM sizeN sizeK) = do
   let [blockMMAres] = blockMMAres_list
   --  TODO: copy res to cScratch?
 --  cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeN]
+-- TODO: ReshapeArbitrary or ReshapeCoerce?
   cReshaped <- letExp "cReshaped" $ BasicOp $ Reshape ReshapeArbitrary (Shape [mkInt64Const sizeM, mkInt64Const sizeN]) blockMMAres
   letBindNames [vName] $ BasicOp $ SubExp $ Var cReshaped
+--  TODO: avoid simple aliasing let-binding
 --  letBindNames [vName] $
 
 
@@ -213,8 +215,9 @@ transformOp op = pure op
 transformSegOp :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
 -- TODO: avoid changing the block size, fix other seg inblock, or avoid transformation in these cases
 -- TODO: match others?
-transformSegOp s@(SegMap level@(SegBlock virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space ts body) = lift $ do
-  (newBody, newBlockSizes) <- runWriterT $ transformKernelBody body
+transformSegOp s@(SegMap level@(SegBlock virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space ts body) = do
+-- TODO: assume perfectly nested and avoid writer?
+  (newBody, newBlockSizes) <- listen $ transformKernelBody body
   case newBlockSizes of
 --  TODO: handle more block sizes?
     [newBlockSize] ->
