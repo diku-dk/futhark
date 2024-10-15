@@ -230,7 +230,7 @@ constFoldPrimExp (BinOpExp LogOr x y)
   | zeroIshExp y = x
 constFoldPrimExp (UnOpExp Abs {} x)
   | not $ negativeIshExp x = x
-constFoldPrimExp (UnOpExp Not {} (ValueExp (BoolValue x))) =
+constFoldPrimExp (UnOpExp (Neg _) (ValueExp (BoolValue x))) =
   ValueExp $ BoolValue $ not x
 constFoldPrimExp (BinOpExp UMod {} x y)
   | sameIshExp x y,
@@ -642,7 +642,7 @@ fromBool b = if b then true else false
 
 -- | Boolean negation smart constructor.
 bNot :: TPrimExp Bool v -> TPrimExp Bool v
-bNot = TPrimExp . UnOpExp Not . untyped
+bNot = TPrimExp . UnOpExp (Neg Bool) . untyped
 
 -- | SMax on 32-bit integers.
 sMax32 :: TPrimExp Int32 v -> TPrimExp Int32 v -> TPrimExp Int32 v

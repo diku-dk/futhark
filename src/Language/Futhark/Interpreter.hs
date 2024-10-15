@@ -945,12 +945,6 @@ evalAppExp env (Match e cs _) = do
         Just v' -> pure v'
         Nothing -> match v cs'
 
-zeroOfType :: PrimType -> Value
-zeroOfType (Signed it) = ValuePrim $ SignedValue $ P.intValue it (0 :: Int)
-zeroOfType (Unsigned it) = ValuePrim $ UnsignedValue $ P.intValue it (0 :: Int)
-zeroOfType (FloatType ft) = ValuePrim $ FloatValue $ P.floatValue ft (0 :: Int)
-zeroOfType Bool = ValuePrim $ BoolValue False
-
 eval :: Env -> Exp -> EvalM Value
 eval _ (Literal v _) = pure $ ValuePrim v
 eval env (Hole (Info t) loc) =
@@ -1022,13 +1016,9 @@ eval _ (FloatLit v (Info t) _) =
     Scalar (Prim (FloatType ft)) ->
       pure $ ValuePrim $ FloatValue $ floatValue ft v
     _ -> error $ "eval: nonsensical type for float literal: " <> prettyString t
-eval env (Negate e loc) =
-  -- -x = 0-x
-  case typeOf e of
-    Scalar (Prim pt) -> do
-      ev <- eval env e
-      apply2 loc env intrinsicsMinus (zeroOfType pt) ev
-    t -> error $ "Cannot negate expression of type  " <> prettyString t
+eval env (Negate e loc) = do
+  ev <- eval env e
+  apply loc env intrinsicsNeg ev
 eval env (Not e loc) =
   apply loc env intrinsicsNot =<< eval env e
 eval env (Update src is v loc) =
@@ -1493,7 +1483,23 @@ initialCtx =
             (getU, putU, P.doUnOp $ P.Complement Int16, adUnOp $ AD.OpUn $ P.Complement Int16),
             (getU, putU, P.doUnOp $ P.Complement Int32, adUnOp $ AD.OpUn $ P.Complement Int32),
             (getU, putU, P.doUnOp $ P.Complement Int64, adUnOp $ AD.OpUn $ P.Complement Int64),
-            (getB, putB, P.doUnOp P.Not, adUnOp $ AD.OpUn P.Not)
+            (getB, putB, P.doUnOp $ P.Neg P.Bool, adUnOp $ AD.OpUn $ P.Neg P.Bool)
+          ]
+    def "neg" =
+      Just $
+        unopDef
+          [ (getS, putS, P.doUnOp $ P.Neg $ P.IntType Int8, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int8),
+            (getS, putS, P.doUnOp $ P.Neg $ P.IntType Int16, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int16),
+            (getS, putS, P.doUnOp $ P.Neg $ P.IntType Int32, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int32),
+            (getS, putS, P.doUnOp $ P.Neg $ P.IntType Int64, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int64),
+            (getU, putU, P.doUnOp $ P.Neg $ P.IntType Int8, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int8),
+            (getU, putU, P.doUnOp $ P.Neg $ P.IntType Int16, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int16),
+            (getU, putU, P.doUnOp $ P.Neg $ P.IntType Int32, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int32),
+            (getU, putU, P.doUnOp $ P.Neg $ P.IntType Int64, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int64),
+            (getF, putF, P.doUnOp $ P.Neg $ P.FloatType Float16, adUnOp $ AD.OpUn $ P.Neg $ P.FloatType Float16),
+            (getF, putF, P.doUnOp $ P.Neg $ P.FloatType Float32, adUnOp $ AD.OpUn $ P.Neg $ P.FloatType Float32),
+            (getF, putF, P.doUnOp $ P.Neg $ P.FloatType Float64, adUnOp $ AD.OpUn $ P.Neg $ P.FloatType Float64),
+            (getB, putB, P.doUnOp $ P.Neg P.Bool, adUnOp $ AD.OpUn $ P.Neg P.Bool)
           ]
     def "+" = arithOp (`P.Add` P.OverflowWrap) P.FAdd
     def "-" = arithOp (`P.Sub` P.OverflowWrap) P.FSub
@@ -2107,8 +2113,8 @@ intrinsicVal name =
     Just (TermValue _ v) -> v
     _ -> error $ "intrinsicVal: " <> prettyString name
 
-intrinsicsMinus :: Value
-intrinsicsMinus = intrinsicVal "-"
+intrinsicsNeg :: Value
+intrinsicsNeg = intrinsicVal "neg"
 
 intrinsicsNot :: Value
 intrinsicsNot = intrinsicVal "!"
