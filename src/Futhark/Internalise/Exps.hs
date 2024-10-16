@@ -316,7 +316,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
     letSubExp "range_invalid" $
       I.BasicOp $
         I.BinOp I.LogOr step_invalid bounds_invalid
-  valid <- letSubExp "valid" $ I.BasicOp $ I.UnOp I.Not invalid
+  valid <- letSubExp "valid" $ I.BasicOp $ I.UnOp (I.Neg I.Bool) invalid
   cs <- assert "range_valid_c" valid errmsg loc
 
   step_i64 <- asIntS Int64 step
@@ -705,11 +705,9 @@ internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
   case et of
-    I.Prim (I.IntType t) ->
-      letTupExp' desc $ I.BasicOp $ I.BinOp (I.Sub t I.OverflowWrap) (I.intConst t 0) e'
-    I.Prim (I.FloatType t) ->
-      letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
-    _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
+    I.Prim pt ->
+      letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg pt) e'
+    _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in Negate"
 internaliseExp desc (E.Not e _) = do
   e' <- internaliseExp1 "not_arg" e
   et <- subExpType e'
@@ -717,7 +715,7 @@ internaliseExp desc (E.Not e _) = do
     I.Prim (I.IntType t) ->
       letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
     I.Prim I.Bool ->
-      letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
+      letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg I.Bool) e'
     _ ->
       error "Futhark.Internalise.internaliseExp: non-int/bool type in Not"
 internaliseExp desc (E.Update src slice ve loc) = do
@@ -1068,7 +1066,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
 
   zero_stride <- letSubExp "zero_stride" $ I.BasicOp $ I.CmpOp (CmpEq int64) s_sign zero
-  nonzero_stride <- letSubExp "nonzero_stride" $ I.BasicOp $ I.UnOp I.Not zero_stride
+  nonzero_stride <- letSubExp "nonzero_stride" $ I.BasicOp $ I.UnOp (I.Neg I.Bool) zero_stride
 
   -- Bounds checks depend on whether we are slicing forwards or
   -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
@@ -1305,7 +1303,7 @@ certifyingNonzero loc t x m = do
     letSubExp "zero" $
       I.BasicOp $
         CmpOp (CmpEq (IntType t)) x (intConst t 0)
-  nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp I.Not zero
+  nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp (I.Neg I.Bool) zero
   c <- assert "nonzero_cert" nonzero "division by zero" loc
   certifying c m
 
@@ -1412,7 +1410,7 @@ internaliseBinOp _ desc E.Equal x y t _ =
   simpleCmpOp desc (I.CmpEq $ internalisePrimType t) x y
 internaliseBinOp _ desc E.NotEqual x y t _ = do
   eq <- letSubExp (desc ++ "true") $ I.BasicOp $ I.CmpOp (I.CmpEq $ internalisePrimType t) x y
-  fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
+  fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp (I.Neg I.Bool) eq
 internaliseBinOp _ desc E.Less x y (E.Signed t) _ =
   simpleCmpOp desc (I.CmpSlt t) x y
 internaliseBinOp _ desc E.Less x y (E.Unsigned t) _ =
@@ -1537,7 +1535,7 @@ isOverloadedFunction qname desc loc = do
           cmp_f =<< letSubExp "eq" =<< eAll rs
       where
         isEqlOp "!=" = Just $ \eq ->
-          letTupExp' desc $ I.BasicOp $ I.UnOp I.Not eq
+          letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg I.Bool) eq
         isEqlOp "==" = Just $ \eq ->
           pure [eq]
         isEqlOp _ = Nothing

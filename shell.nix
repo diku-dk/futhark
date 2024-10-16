@@ -16,6 +16,7 @@ let
     )
     ps.mypy
     black
+    cycler
     numpy
     pyopencl
     matplotlib
@@ -51,7 +52,6 @@ pkgs.stdenv.mkDerivation {
       ghcid
       niv
       ispc
-      python
       imagemagick # needed for literate tests
       glpk
     ]

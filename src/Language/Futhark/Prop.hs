@@ -1090,6 +1090,16 @@ intrinsics =
                 )
                 [Nothing]
                 Nothing
+            ),
+            ( "neg",
+              IntrinsicOverloadedFun
+                ( map Signed [minBound .. maxBound]
+                    ++ map Unsigned [minBound .. maxBound]
+                    ++ map FloatType [minBound .. maxBound]
+                    ++ [Bool]
+                )
+                [Nothing]
+                Nothing
             )
           ]
           ++

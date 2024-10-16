@@ -362,7 +362,7 @@ jobs:
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
-        futhark test tests -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
+        futhark test tests -c --no-terminal --backend=opencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
   test-pyoclgrind:
     runs-on: ubuntu-22.04
@@ -386,7 +386,7 @@ jobs:
         python -m venv virtualenv
         source virtualenv/bin/activate
         pip install 'numpy<2.0.0' pyopencl jsonschema
-        futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
+        futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
   test-opencl:
     runs-on: hendrix
