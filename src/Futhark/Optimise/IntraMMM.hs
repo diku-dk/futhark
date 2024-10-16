@@ -3,9 +3,8 @@ module Futhark.Optimise.IntraMMM (intraMMM, intraMMMMemFixup) where
 -- TODO: add specific imports, clean up
 
 import Control.Lens.Lens
-import Control.Monad (liftM, (>=>))
 import Control.Monad.Identity
-import Control.Monad.RWS
+import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Monad.Writer
@@ -34,6 +33,7 @@ import Data.Set (fromList, member, intersection, difference)
 import Control.Monad
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Construct
+import Futhark.Optimise.IntraMMM.Utils
 import Futhark.Builder.Class
 import Prelude hiding (lookup)
 import Futhark.Pass
@@ -47,16 +47,38 @@ import Data.Loc (Loc(NoLoc), SrcLoc (SrcLoc))
 traceHelper :: (Show a) => a -> a
 traceHelper x = trace (show x ++ "\n") x
 
+
+--type IntraMMMMonadEnv = Maybe (VName, SubExp)
+-- TODO: avoid blockinfo?
+data IntraMMMMonadEnv = IntraMMMMonadEnv {scope :: Scope GPU, blockInfo :: Maybe (VName, SubExp)}
+
+type IntraMMMMonad = RWS IntraMMMMonadEnv [Int] VNameSource
+
+-- TODO: use newtype above to fix warning
+instance
+  HasScope GPU IntraMMMMonad
+  where
+  askScope = asks scope
+
+
+askBlockInfo :: IntraMMMMonad (Maybe (VName, SubExp))
+askBlockInfo = asks blockInfo
+
+localBlockInfo :: (Maybe (VName, SubExp) -> Maybe (VName, SubExp)) -> IntraMMMMonad a -> IntraMMMMonad a
+localBlockInfo f = local $ \env -> env {blockInfo = f $ blockInfo env }
+
+
+runBuilderMMM_ :: Builder GPU () -> Scope GPU -> IntraMMMMonad (Stms GPU)
+runBuilderMMM_ m s =
+  modifyNameSource $ runState $ runBuilderT_ m s
+
+
 intraMMM :: Pass GPU GPU
 intraMMM =
   Pass
     "tensor-mma"
     "Extracts NVIDIA tensor core MMA operations"
     transformProg
-
-gemmName :: Name
-gemmName = "gemm_123456"
-
 
 -- TODO: emit in monad when needed?
 --gemmFun :: FunDef GPU
@@ -70,30 +92,59 @@ mkGemmFun typeA typeB typeCin typeCout = do
     FunDef Nothing mempty gemmName
     typeCout
     [aParam, bParam, cParam]
-    $ resultBody $ [Var $ paramName cParam]
+    $ resultBody [Var $ paramName cParam]
+
+
+-- TODO: make more flexible in sizes and types
+-- TODO: entire global as input or only slize, if entire add index
+mkCopyGlobalShared :: PassM (FunDef GPU)
+mkCopyGlobalShared = do
+  globalOuterDim <- newParam "globalOuterDim" $ Prim int64
+  globalParam <- newParam "global" $ Array (FloatType Float16) (Shape [Var $ paramName globalOuterDim, mkInt64Const 16, mkInt64Const 16]) Nonunique
+  sharedParam <- newParam "shared" $  Array (FloatType Float16) (Shape [mkInt64Const 16, mkInt64Const 16]) Unique
+  let sharedOut = [(Array (FloatType Float16) (Shape [Free $ mkInt64Const 16, Free $ mkInt64Const 16]) Unique, RetAls [] [])]
+  pure $
+    FunDef Nothing mempty copyGlobalSharedName
+        sharedOut
+--        TODO: this assumes only 1 globalOuterDim
+        [globalOuterDim, globalParam, sharedParam]
+        $ resultBody [Var $ paramName sharedParam]
+
+
+-- TODO: make more flexible in sizes and types
+-- TODO: entire global as input or only slize, if entire add index, maybe dont even take as input?
+-- TODO: copy to global instead of shared
+mkCopyRegistersGlobal :: PassM (FunDef GPU)
+mkCopyRegistersGlobal = do
+  registersParam <- newParam "registers" $  Array (FloatType Float16) (Shape [mkInt64Const 32, mkInt64Const 8]) Nonunique
+  globalParam <- newParam "global" $ Array (FloatType Float16) (Shape [mkInt64Const 16, mkInt64Const 16]) Unique
+  let globalOut = [(Array (FloatType Float16) (Shape [Free $ mkInt64Const 16, Free $ mkInt64Const 16]) Unique, RetAls [] [])]
+  pure $
+    FunDef Nothing mempty copyRegistersGlobalName
+        globalOut
+        [registersParam, globalParam]
+        $ resultBody [Var $ paramName globalParam]
 
 
 transformProg :: Prog GPU -> PassM (Prog GPU)
 transformProg (Prog opaqueTypes consts funs) = do
   transformedFuns <- mapM transformFunDef funs
 
+-- TODO: gen these as needed
   let typeA = Array (FloatType Float16) (Shape [mkInt64Const 16, mkInt64Const 16]) Nonunique
   let typeB = Array (FloatType Float16) (Shape [mkInt64Const 16, mkInt64Const 16]) Nonunique
   let typeCin = Array (FloatType Float16) (Shape [mkInt64Const 8]) Unique
   let typeCout = [(Array (FloatType Float16) (Shape [Free $ mkInt64Const 8]) Unique, RetAls [] [])]
 
   gemmFun <- mkGemmFun typeA typeB typeCin typeCout
-  pure $ Prog opaqueTypes consts (gemmFun : transformedFuns)
+  copyGlobalSharedFun <- mkCopyGlobalShared
+  copyRegistersGlobalFun <- mkCopyRegistersGlobal
+  pure $ Prog opaqueTypes consts (gemmFun : copyGlobalSharedFun : copyRegistersGlobalFun : transformedFuns)
 
 transformFunDef :: FunDef GPU -> PassM (FunDef GPU)
-transformFunDef (FunDef entry attrs name retType params body) = do
-  newBody <- fmap fst $ modifyNameSource $ runState $ runWriterT $ transformBody body
+transformFunDef funDef@(FunDef entry attrs name retType params body) = do
+  newBody <- modifyNameSource $ (\(a, b, c) -> (a, b)) . runRWS (transformBody body) (IntraMMMMonadEnv (scopeOf funDef) Nothing)
   pure $ FunDef entry attrs name retType params newBody
-
---type IntraMMMMonad = WriterT [Int] (Builder GPU)
---newtype IntraMMMMonad a = IntraMMMMonad (WriterT [Int] PassM a)
---type IntraMMMMonad = WriterT [Int] PassM
-type IntraMMMMonad = WriterT [Int] (State VNameSource)
 
 
 data MMAMatch = MMAMatch
@@ -109,10 +160,12 @@ data MMAMatch = MMAMatch
 data KernelBodyMatch = KernelBodyMatch
   {
 --  TODO: add types
-    innerDimsA :: [VName],
-    innerDimsB :: [VName],
-    outerDimsA :: [VName],
-    outerDimsB :: [VName],
+    innerIndecesA :: [VName],
+    innerIndecesB :: [VName],
+    outerIndecesA :: [VName],
+    outerIndecesB :: [VName],
+    outerDimsA :: [SubExp],
+    outerDimsB :: [SubExp],
     arrA :: VName,
     arrB :: VName,
     m :: VName,
@@ -125,22 +178,22 @@ data KernelBodyMatch = KernelBodyMatch
   deriving (Show, Eq, Ord)
 
 
--- TODO: use PassM below?
+-- TODO: maintain scope below?
 transformStms :: Stms GPU -> IntraMMMMonad (Stms GPU)
-transformStms stms = do
-  join <$> mapM transformStm stms
+transformStms stms = join <$> mapM transformStm stms
 
 transformStm :: Stm GPU -> IntraMMMMonad (Stms GPU)
 -- TODO: pass name of let to builder
-transformStm stm@(Let (Pat [PatElem vName _]) aux e)
---    TODO: allow more sizes?
-  | Just match@(MMAMatch kernelBodyMatch ne 16 16 16) <- expMatch e = do
--- TODO: how to determine the block size?
-    let blockSize = 32
-    tell [blockSize]
---    TODO: build MMA
-    lift $ runBuilderT_ (buildMMM vName blockSize match) mempty
-  | otherwise = transformStmDefault stm
+transformStm stm@(Let (Pat [PatElem resName _]) aux e) = do
+    scope <- askScope
+    maybeBlockInfo <- askBlockInfo
+    case maybeBlockInfo of
+    --    TODO: allow more sizes?
+      Just blockInfo | Just match@(MMAMatch kernelBodyMatch ne 16 16 16) <- expMatch e scope -> do
+        let blockSize = 32
+        tell [blockSize]
+        runBuilderMMM_ (buildMMM resName blockSize blockInfo match) mempty
+      _ -> transformStmDefault stm
 transformStm stm = transformStmDefault stm
 
 
@@ -152,11 +205,9 @@ transformStmDefault (Let pat aux e) = do
 stmToPat :: Stm GPU -> Pat (LetDec GPU)
 stmToPat (Let pat _ _) = pat
 
---type MMMBuilder a = BuilderT GPU (IntraMMMMonad) a
 
-
-buildMMM :: VName -> Int -> MMAMatch -> Builder GPU ()
-buildMMM vName blockSize (MMAMatch kernelBodyMatch ne sizeM sizeN sizeK) = do
+buildMMM :: VName -> Int -> (VName, SubExp) -> MMAMatch -> Builder GPU ()
+buildMMM resName blockSize (blockIdx, blockDim) (MMAMatch kernelBodyMatch ne sizeM sizeN sizeK) = do
   let cValsPerThread = mkInt64Const $ sizeM * sizeN `div` blockSize
 --  TODO: get as input instead?
   let blockSizeSubExp = mkInt64Const blockSize
@@ -173,25 +224,22 @@ buildMMM vName blockSize (MMAMatch kernelBodyMatch ne sizeM sizeN sizeK) = do
 --  TODO: check if need to transpose, ensure not hoisted out of block segmap
   aScratch <- letExp "aScratch" $ BasicOp $ Scratch (typeA kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeK]
   bScratch <- letExp "bScratch" $ BasicOp $ Scratch (typeB kernelBodyMatch) [mkInt64Const sizeK, mkInt64Const sizeN]
+  aCopied <- letExp "aCopied" $ Apply copyGlobalSharedName (fmap (,ObservePrim) (outerDimsA kernelBodyMatch) <> [(Var $ arrA kernelBodyMatch, ObservePrim), (Var aScratch, Consume)]) [(Array (typeA kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeK]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+  bCopied <- letExp "bCopied" $ Apply copyGlobalSharedName (fmap (,ObservePrim) (outerDimsB kernelBodyMatch) <> [(Var $ arrB kernelBodyMatch, ObservePrim), (Var bScratch, Consume)]) [(Array (typeB kernelBodyMatch) (Shape [Free $ mkInt64Const sizeK, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
 --  TODO: copy to shared
 --  TODO: is ObservePrim correct?
   blockMMAres_list <- segMap1D "blockMMAres" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \thread_idx -> do
     threadCregs <- index "threadCregs" cRegs [thread_idx]
-    threadMMAres <- letExp "threadMMAres" $ Apply gemmName [(Var aScratch, ObservePrim), (Var bScratch, ObservePrim), (Var threadCregs, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free cValsPerThread]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+    threadMMAres <- letExp "threadMMAres" $ Apply gemmName [(Var aCopied, ObservePrim), (Var bCopied, ObservePrim), (Var threadCregs, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free cValsPerThread]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
     pure [varRes threadMMAres]
   let [blockMMAres] = blockMMAres_list
-  --  TODO: copy res to cScratch?
---  cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeN]
--- TODO: ReshapeArbitrary or ReshapeCoerce?
-  cReshaped <- letExp "cReshaped" $ BasicOp $ Reshape ReshapeArbitrary (Shape [mkInt64Const sizeM, mkInt64Const sizeN]) blockMMAres
-  letBindNames [vName] $ BasicOp $ SubExp $ Var cReshaped
---  TODO: avoid simple aliasing let-binding
---  letBindNames [vName] $
+  cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeN]
+  letBindNames [resName] $ Apply copyRegistersGlobalName [(Var blockMMAres, ObservePrim), (Var cScratch, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
 
-
-expMatch :: Exp GPU -> Maybe MMAMatch
+-- TODO: use reader for scope?
+expMatch :: Exp GPU -> Scope GPU -> Maybe MMAMatch
 expMatch (Op (SegOp sOp)) = segOpMatch sOp
-expMatch _ = Nothing
+expMatch _ = const Nothing
 
 transformExp :: Exp GPU -> IntraMMMMonad (Exp GPU)
 -- transformExp (BasicOp op) = BasicOp op
@@ -215,9 +263,9 @@ transformOp op = pure op
 transformSegOp :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
 -- TODO: avoid changing the block size, fix other seg inblock, or avoid transformation in these cases
 -- TODO: match others?
-transformSegOp s@(SegMap level@(SegBlock virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space ts body) = do
--- TODO: assume perfectly nested and avoid writer?
-  (newBody, newBlockSizes) <- listen $ transformKernelBody body
+transformSegOp s@(SegMap level@(SegBlock virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space@(SegSpace _ [blockInfo]) ts body) = do
+-- TODO: call match functions her, assume perfectly nested and avoid writer
+  (newBody, newBlockSizes) <- listen $ localBlockInfo (const $ Just blockInfo) $ transformKernelBody body
   case newBlockSizes of
 --  TODO: handle more block sizes?
     [newBlockSize] ->
@@ -228,11 +276,11 @@ transformSegOp s = transformSegOpDefault s
 mkInt64Const :: Int -> SubExp
 mkInt64Const = Constant . IntValue . intValue Int64
 
-segOpMatch :: SegOp SegLevel GPU -> Maybe MMAMatch
-segOpMatch s@(SegRed (SegThreadInBlock _) space segBinOps _ body) | Just ne <- segBinOpsMatch segBinOps = do
+segOpMatch :: SegOp SegLevel GPU -> Scope GPU -> Maybe MMAMatch
+segOpMatch s@(SegRed (SegThreadInBlock _) space segBinOps _ body) scope | Just ne <- segBinOpsMatch segBinOps = do
   let (dimVars, segDims) = unzip $ unSegSpace space
   let freeVars = freeIn s
-  bodyMatch <- matchesKernelBody dimVars freeVars body
+  bodyMatch <- matchesKernelBody dimVars freeVars body scope
   constSegDims <- mapM getConstantValue segDims
   case constSegDims of
 --  TODO: also match bodyMatch? allow more sizes?
@@ -241,7 +289,7 @@ segOpMatch s@(SegRed (SegThreadInBlock _) space segBinOps _ body) | Just ne <- s
       Just (MMAMatch bodyMatch ne 16 16 16)
     _ -> Nothing
 -- TODO: extract A, B, types, shape, layout, lookup m, n, k shapes
-segOpMatch _ = Nothing
+segOpMatch _ _ = Nothing
 
 
 getConstantValue :: SubExp -> Maybe Int
@@ -249,10 +297,10 @@ getConstantValue (Constant (IntValue v)) = Just $ valueIntegral v
 getConstantValue _ = Nothing
 
 -- TODO: return maybe something?
-matchesKernelBody :: [VName] -> Names -> KernelBody GPU -> Maybe KernelBodyMatch
+matchesKernelBody :: [VName] -> Names -> KernelBody GPU -> Scope GPU -> Maybe KernelBodyMatch
 -- TODO: support more than 3 dimensions?
-matchesKernelBody dimVars@[dimVar1, dimVar2, dimVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) = do
-  let sTable = ST.insertStms (informStms stms) mempty
+matchesKernelBody indexVars@[indexVar1, indexVar2, indexVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) scope = do
+  let sTable = ST.insertStms (informStms stms) $ ST.fromScope $ addScopeWisdom scope
 --  TODO: rename to use A, B, C?
   (resExp, _) <- ST.lookupExp res sTable
   (mulArg1, mulArg2) <- matchesMul $ removeExpWisdom resExp
@@ -260,26 +308,24 @@ matchesKernelBody dimVars@[dimVar1, dimVar2, dimVar3] freeVars (KernelBody _ stm
   (mulArg2Exp, _) <- ST.lookupExp mulArg2 sTable
   (arr1, slice1) <- matchesMulArg $ removeExpWisdom mulArg1Exp
   (arr2, slice2) <- matchesMulArg $ removeExpWisdom mulArg2Exp
---  arr1Type <- ST.lookupType arr1 sTable
---  arr2Type <- ST.lookupType arr2 sTable
+  arr1Type <- ST.lookupType arr1 sTable
+  arr2Type <- ST.lookupType arr2 sTable
   resType <- ST.lookupType res sTable
   slice1' <- mapM getIndexVar $ unSlice slice1
   slice2' <- mapM getIndexVar $ unSlice slice2
---  TODO: check that all outerDims are free variables?
-  let (innerDims1, outerDims1) = partition (`elem` dimVars) slice1'
-  let (innerDims2, outerDims2) = partition (`elem` dimVars) slice2'
-  let commonDims = innerDims1 `intersect` innerDims2
-  let separateDims1 = toList $ fromList innerDims1 `difference` fromList innerDims2
-  let separateDims2 = toList $ fromList innerDims2 `difference` fromList innerDims1
---  case (separateDims1, separateDims2, commonDims, arr1Type, arr2Type, resType) of
---    ([m], [n], [k], Array type1 _ _, Array type2 _ _, Prim typeRes) | k == dimVar3 && all (`nameIn` freeVars) (outerDims1<>outerDims2) ->
---      Just KernelBodyMatch{innerDims1, innerDims2, outerDims1, outerDims2, arr1, arr2, m, n, k, type1, type2, typeRes}
-  case (separateDims1, separateDims2, commonDims, resType) of
+  let (innerIndeces1, outerIndeces1) = partition (`elem` indexVars) slice1'
+  let (innerIndeces2, outerIndeces2) = partition (`elem` indexVars) slice2'
+  let commonIndeces = innerIndeces1 `intersect` innerIndeces2
+  let separateIndeces1 = toList $ fromList innerIndeces1 `difference` fromList innerIndeces2
+  let separateIndeces2 = toList $ fromList innerIndeces2 `difference` fromList innerIndeces1
+  case (separateIndeces1, separateIndeces2, commonIndeces, arr1Type, arr2Type, resType) of
 --  TODO: check which is A and which is B?
-    ([m], [n], [k], Prim resTypePrim) | k == dimVar3 && all (`nameIn` freeVars) (outerDims1<>outerDims2) ->
-      Just (KernelBodyMatch innerDims1 innerDims2 outerDims1 outerDims2 arr1 arr2 m n k resTypePrim resTypePrim resTypePrim)
+    ([m], [n], [k], Array type1 (Shape arr1Dims) _, Array type2 (Shape arr2Dims) _, Prim resTypePrim) | k == indexVar3 && all (`nameIn` freeVars) (outerIndeces1<>outerIndeces2) ->
+      let arr1OuterDims = take (length arr1Dims - 2) arr1Dims in
+      let arr2OuterDims = take (length arr2Dims - 2) arr2Dims in
+      Just (KernelBodyMatch innerIndeces1 innerIndeces2 outerIndeces1 outerIndeces2 arr1OuterDims arr2OuterDims arr1 arr2 m n k type1 type2 resTypePrim)
     _ -> Nothing
-matchesKernelBody _ _ _ = Nothing
+matchesKernelBody _ _ _ _ = Nothing
 
 getIndexVar :: DimIndex SubExp -> Maybe VName
 getIndexVar (DimFix (Var v)) = Just v
@@ -347,7 +393,10 @@ intraMMMMemFixup =
 -- TODO: use PassM below?
 type FixEnv = Scope GPUMem
 
+data SpaceType = Device | Shared | Scalar
+
 -- TODO: use map?
+-- TODO: add mapping like ("gemm_123456", ["shared", "shared", "regs"]) to make general?
 type FixState = [(VName, VName)]
 
 -- type FixMonad a = RWST FixEnv () FixState PassM a
@@ -357,23 +406,60 @@ type FixMonad a = RWST FixEnv () FixState PassM a
 
 fixFuns :: Stms GPUMem -> FunDef GPUMem -> PassM (FunDef GPUMem)
 fixFuns consts fun
-  | funDefName fun == gemmName = pure $ fixGemmFun fun
+  | funDefName fun == gemmName = pure $ fun {
+                                              funDefParams = fixParamsGemmFun $ funDefParams fun,
+                                              funDefRetType = fixRetType Scalar $ funDefRetType fun
+                                            }
+  | funDefName fun == copyGlobalSharedName = pure $ fun {
+                                              funDefParams = fixParamsCopyGlobalShared $ funDefParams fun,
+                                              funDefRetType = fixRetType Shared $ funDefRetType fun
+                                            }
+  | funDefName fun == copyRegistersGlobalName = pure $ fun {
+                                                  funDefParams = fixParamsCopyRegistersGlobal $ funDefParams fun,
+                                                  funDefRetType = fixRetType Shared $ funDefRetType fun
+                                                }
   | otherwise = do
       let initScope = scopeOf consts
       let body = funDefBody fun
       stms' <- fixStmtsWithScope initScope . bodyStms $ body
       pure $ fun {funDefBody = body {bodyStms = stms'}}
 
-fixGemmFun :: FunDef GPUMem -> FunDef GPUMem
-fixGemmFun gemm =
-  gemm
-    {
-      funDefParams = fixParams $ funDefParams gemm,
-      funDefRetType = fixRetType $ funDefRetType gemm
-    }
 
-fixParams :: [FParam GPUMem] -> [FParam GPUMem]
-fixParams [
+fixParamsCopyGlobalShared :: [FParam GPUMem] -> [FParam GPUMem]
+fixParamsCopyGlobalShared [
+    Param attrs1 vName1 (MemMem (Space "device")),
+    Param attrs2 vName2 (MemMem (Space "device")),
+    p3,
+    p4,
+    p5
+  ] =
+  [
+    Param attrs1 vName1 (MemMem (Space "device")),
+    Param attrs2 vName2 (MemMem (Space "shared")),
+    p3,
+    p4,
+    p5
+  ]
+fixParamsCopyGlobalShared params = params
+
+fixParamsCopyRegistersGlobal :: [FParam GPUMem] -> [FParam GPUMem]
+fixParamsCopyRegistersGlobal [
+    Param attrs1 vName1 (MemMem (Space "device")),
+    Param attrs2 vName2 (MemMem (Space "device")),
+    Param attrs3 vName3 (MemArray t3 shp3 u3 (ArrayIn mName3 lmad3)),
+    Param attrs4 vName4 (MemArray t4 shp4 u4 (ArrayIn mName4 lmad4))
+  ] =
+  let space = ScalarSpace (drop 1 $ shapeDims shp3) t3 in
+  [
+    Param attrs1 vName1 (MemMem space),
+    Param attrs2 vName2 (MemMem (Space "shared")),
+    Param attrs3 vName3 (MemArray t3 shp3 u3 (ArrayIn mName3 lmad3)),
+    Param attrs4 vName4 (MemArray t4 shp4 u4 (ArrayIn mName4 lmad4))
+  ]
+fixParamsCopyRegistersGlobal params = params
+
+fixParamsGemmFun :: [FParam GPUMem] -> [FParam GPUMem]
+fixParamsGemmFun [
     Param attrs1 vName1 (MemMem (Space "device")),
     Param attrs2 vName2 (MemMem (Space "device")),
     Param attrs3 vName3 (MemMem (Space "device")),
@@ -390,14 +476,17 @@ fixParams [
       p5,
       Param attrs6 vName6 (MemArray t6 shp6 u6 (ArrayIn mName6 lmad6))
     ]
-fixParams params = params
+fixParamsGemmFun params = params
 
-fixRetType :: [(RetType GPUMem, RetAls)] -> [(RetType GPUMem, RetAls)]
-fixRetType [(MemMem (Space "device"), als1), (MemArray t shp u (ReturnsNewBlock (Space "device") n lmad), als2)] =
-  let space = ScalarSpace (fmap extToSubExp (shapeDims shp)) t in
---  TODO: check if ReturnsInBlock is preferred
-  [(MemMem space, als1), (MemArray t shp u (ReturnsNewBlock space n lmad), als2)]
-fixRetType rets = rets
+fixRetType :: SpaceType -> [(RetType GPUMem, RetAls)] -> [(RetType GPUMem, RetAls)]
+fixRetType spaceType [(MemMem (Space "device"), als1), (MemArray t shp u (ReturnsNewBlock (Space "device") n lmad), als2)] =
+  let space = case spaceType of
+              Device -> Space "device"
+              Shared -> Space "shared"
+              Scalar -> ScalarSpace (fmap extToSubExp (shapeDims shp)) t
+  --  TODO: check if ReturnsInBlock is preferred
+  in [(MemMem space, als1), (MemArray t shp u (ReturnsNewBlock space n lmad), als2)]
+fixRetType _ rets = rets
 
 extToSubExp :: ExtSize -> SubExp
 extToSubExp (Ext n) = mkInt64Const n
@@ -437,9 +526,9 @@ fixStmt (
     PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
   ])
   aux
-  (Apply "gemm_123456" args rets info)) = do
+  (Apply fName args rets info)) | fName == gemmName = do
   let space = ScalarSpace (shapeDims shp2) t2
-  let newRets = fixRetType rets
+  let newRets = fixRetType Scalar rets
   newArgs <- mapM replaceArg args
   pure $
     Let (Pat [
@@ -447,28 +536,59 @@ fixStmt (
       PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
     ])
     aux
-    (Apply "gemm_123456" newArgs newRets info)
-
-
-
---  defaultFixStm (Let (Pat patElems) aux (Apply "gemm_123456" args rets info)) = do
---    -- TODO: Should be based on the return value of the function
---    -- For now they match because the return value is hard coded
---    let rets' = map retInRegs rets
---    let patElems' = map letInRegs patElems
---    args' <- mapM replaceArg args
---    pure $ Let (Pat patElems') aux $ Apply "gemm_123456" args' rets' info
---    where
---      -- Put the let bound results in registers
---      letInRegs :: PatElem (LetDec GPUMem)-> PatElem (LetDec GPUMem)
---      letInRegs (PatElem name (MemMem (Space "device"))) =
---        PatElem name $ MemMem . defScalarSpace $ FloatType Float32
---      letInRegs patElem = patElem
-
+    (Apply fName newArgs newRets info)
+fixStmt (
+  Let (Pat [
+    PatElem vName1 (MemMem (Space "device")),
+    PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
+  ])
+  aux
+  (Apply fName args rets info)) | fName == copyGlobalSharedName = do
+  let space = Space "shared"
+--  TODO: check if need to handle uniqueness/consumption
+  let newRets = fixRetType Shared rets
+  newArgs <- mapM replaceArg args
+  pure $
+    Let (Pat [
+      PatElem vName1 (MemMem space),
+      PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
+    ])
+    aux
+    (Apply fName newArgs newRets info)
+-- TODO: check this
+fixStmt (
+  Let (Pat [
+    PatElem vName1 (MemMem (Space "device")),
+    PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
+  ])
+  aux
+  (Apply fName args rets info)) | fName == copyRegistersGlobalName = do
+  let space = Space "shared"
+  let newRets = fixRetType Shared rets
+  newArgs <- mapM replaceArg args
+  pure $
+    Let (Pat [
+      PatElem vName1 (MemMem space),
+      PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
+    ])
+    aux
+    (Apply fName newArgs newRets info)
 fixStmt stm = defaultFixStm stm
 
 defaultFixStm :: Stm GPUMem -> FixMonad (Stm GPUMem)
 defaultFixStm (Let pat aux e) = Let pat aux <$> fixExp e
+
+
+replaceArg :: (SubExp, Diet) -> FixMonad (SubExp, Diet)
+replaceArg (Var v, d) = do
+  manifestMap <- get
+  case lookup v manifestMap of
+    Just v' ->
+      pure (Var v', d)
+    Nothing ->
+      pure (Var v, d)
+replaceArg a = pure a
+
 
 -- TODO: add stuff to scope in other places
 fixExp :: Exp GPUMem -> FixMonad (Exp GPUMem)
@@ -483,16 +603,6 @@ fixExp (Op op) = Op <$> fixOp op
 -- fixExp (BasicOp op) = BasicOp op
 -- fixExp (Apply name args rets info) = Apply name args rets info
 fixExp e = pure e
-
-replaceArg :: (SubExp, Diet) -> FixMonad (SubExp, Diet)
-replaceArg (Var v, d) = do
-  manifestMap <- get
-  case lookup v manifestMap of
-    Just v' ->
-      pure (Var v', d)
-    Nothing ->
-      pure (Var v, d)
-replaceArg a = pure a
 
 fixCase :: Case (Body GPUMem) -> FixMonad (Case (Body GPUMem))
 fixCase (Case pat body) = Case pat <$> fixBody body

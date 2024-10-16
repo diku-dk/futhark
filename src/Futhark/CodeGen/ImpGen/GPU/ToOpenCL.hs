@@ -37,6 +37,7 @@ import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 import Prelude hiding (rem)
+import qualified Futhark.Optimise.IntraMMM.Utils as MMM
 import Debug.Trace
 import Data.Monoid
 import Futhark.CodeGen.Backends.TensorCore (compileGemmFun)
@@ -262,22 +263,10 @@ genGPUCode env mode body failures =
 -- Compilation of a device function that is not not invoked from the
 -- host, but is invoked by (perhaps multiple) kernels.
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
---generateDeviceFun fname@"gemm_123456" device_func = do
---  env <- ask
---  failures <- gets clFailures
---
----- TODO: set function contents here or in GenericC.Fun?
---  (_, gemmS) <- pure $ genGPUCode env FunMode Skip failures $ compileGemmFun mempty device_func
---
---  modify $ \s ->
---    s
---      { GC.compEarlyDecls = GC.compEarlyDecls gemmS <> GC.compEarlyDecls s
---      }
---
---  pure ()
+generateDeviceFun fname _ | fname `elem` MMM.funNames = pure ()
 generateDeviceFun fname device_func = do
 -- TODO: handle?
---  when (any memParam $ functionInput device_func) bad
+  when (any memParam $ functionInput device_func) bad
 
   env <- ask
   failures <- gets clFailures

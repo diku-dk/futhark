@@ -56,6 +56,9 @@ import Futhark.Optimise.Simplify.Rep (mkWiseBody)
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Util (maybeNth, splitAt3)
+import qualified Futhark.Optimise.IntraMMM.Utils as MMM
+import Debug.Trace
+
 
 type Allocable fromrep torep inner =
   ( PrettyRep fromrep,
@@ -567,14 +570,16 @@ allocLinearArray space s v = do
 
 funcallArgs ::
   (Allocable fromrep torep inner) =>
-  [(SubExp, Diet)] ->
+  [(SubExp, Diet)] -> Maybe Space ->
   AllocM fromrep torep [(SubExp, Diet)]
-funcallArgs args = do
+funcallArgs args forced_space = do
   (valargs, (ctx_args, mem_and_size_args)) <- runWriterT $
     forM args $ \(arg, d) -> do
       t <- lift $ subExpType arg
       space <- lift askDefaultSpace
-      arg' <- linearFuncallArg t space arg
+--      TODO: always use device as default in GPU function args?
+      let space' = fromMaybe space forced_space
+      arg' <- linearFuncallArg t space' arg
       pure (arg', d)
   pure $ map (,Observe) (ctx_args <> mem_and_size_args) <> valargs
 
@@ -913,14 +918,16 @@ allocInExp (Loop merge form (Body () bodystms bodyres)) =
           pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
       pure $ Loop merge' form body'
 allocInExp (Apply fname args rettype loc) = do
-  args' <- funcallArgs args
+  let forced_space = if fname `elem` MMM.funNames then Just $ Space "device" else Nothing
+  args' <- funcallArgs args forced_space
   space <- askDefaultSpace
+  let space' = fromMaybe space forced_space
   -- We assume that every array is going to be in its own memory.
   let num_extra_args = length args' - length args
       rettype' =
-        mems space
+        mems space'
           ++ zip
-            (memoryInDeclExtType space num_arrays (map fst rettype))
+            (memoryInDeclExtType space' num_arrays (map fst rettype))
             (map (shiftRetAls num_extra_args num_arrays . snd) rettype)
   pure $ Apply fname args' rettype' loc
   where

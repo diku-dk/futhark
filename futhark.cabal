@@ -319,6 +319,7 @@ library
       Futhark.Optimise.HistAccs
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.IntraMMM
+      Futhark.Optimise.IntraMMM.Utils
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
       Futhark.Optimise.ArrayShortCircuiting
