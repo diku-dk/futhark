@@ -10,6 +10,8 @@ import Data.Text.Internal as T
 import Futhark.CodeGen.ImpCode
 import NeatInterpolation (untrimming)
 
+
+-- TODO: remove or use
 gemmName :: T.Text
 gemmName = "gemm_123456"
 

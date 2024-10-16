@@ -1,17 +1,19 @@
 // start of prelude.cu
 
+#include <cute/tensor.hpp>
+
 #define SCALAR_FUN_ATTR __device__ static inline
 #define FUTHARK_FUN_ATTR __device__ static
 #define FUTHARK_F64_ENABLED
 
-typedef char int8_t;
-typedef short int16_t;
-typedef int int32_t;
-typedef long long int64_t;
-typedef unsigned char uint8_t;
-typedef unsigned short uint16_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
+// typedef char int8_t;
+// typedef short int16_t;
+// typedef int int32_t;
+// typedef long long int64_t;
+// typedef unsigned char uint8_t;
+// typedef unsigned short uint16_t;
+// typedef unsigned int uint32_t;
+// typedef unsigned long long uint64_t;
 
 #define __global
 #define __local
@@ -98,37 +100,6 @@ extern volatile __shared__ unsigned char shared_mem[];
 #define SHARED_MEM_PARAM
 #define FUTHARK_KERNEL extern "C" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)
 #define FUTHARK_KERNEL_SIZED(a,b,c) extern "C" __global__ __launch_bounds__(a*b*c)
-
-
-// TODO: change
-// Default implementation
-FUTHARK_FUN_ATTR void futrts_copyGlobalShared(__local unsigned char **mem_out_p_0, __global unsigned char *global_mem_6286, __local unsigned char *shared_mem_6287, int64_t globalOuterDim_6281);
-FUTHARK_FUN_ATTR void futrts_copyRegistersGlobal(__local unsigned char **mem_out_p_0, f16 registers_mem_6286[(int64_t) 8], __local unsigned char *global_mem_6287);
-FUTHARK_FUN_ATTR void futrts_gemm_123456(f16 (*mem_out_p_0)[(int64_t) 8], __local unsigned char *A_mem_6286, __local unsigned char *B_mem_6287, f16 C_mem_6288[(int64_t) 8]);
-
-FUTHARK_FUN_ATTR void futrts_copyGlobalShared(__local unsigned char **mem_out_p_0, __global unsigned char *global_mem_6286, __local unsigned char *shared_mem_6287, int64_t globalOuterDim_6281)
-{
-    __local unsigned char *mem_out_6333;
-
-    mem_out_6333 = shared_mem_6287;
-    *mem_out_p_0 = mem_out_6333;
-}
-FUTHARK_FUN_ATTR void futrts_copyRegistersGlobal(__local unsigned char **mem_out_p_0, f16 registers_mem_6286[(int64_t) 8], __local unsigned char *global_mem_6287)
-{
-    __local unsigned char *mem_out_6333;
-
-    mem_out_6333 = global_mem_6287;
-    *mem_out_p_0 = mem_out_6333;
-}
-FUTHARK_FUN_ATTR void futrts_gemm_123456(f16 (*mem_out_p_0)[(int64_t) 8], __local unsigned char *A_mem_6286, __local unsigned char *B_mem_6287, f16 C_mem_6288[(int64_t) 8])
-{
-    f16 mem_out_6333[(int64_t) 8];
-
-    for (int32_t i_1 = 0; i_1 < (int64_t) 8; i_1++)
-        mem_out_6333[i_1] = C_mem_6288[i_1];
-    for (int32_t i_2 = 0; i_2 < (int64_t) 8; i_2++)
-        (*mem_out_p_0)[i_2] = mem_out_6333[i_2];
-}
 
 
 // End of prelude.cu

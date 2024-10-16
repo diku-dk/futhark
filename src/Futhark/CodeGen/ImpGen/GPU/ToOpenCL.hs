@@ -27,7 +27,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
-import Futhark.CodeGen.RTS.CUDA (preludeCU)
+import Futhark.CodeGen.RTS.CUDA (preludeCU, preludeMMM)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
@@ -38,10 +38,6 @@ import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 import Prelude hiding (rem)
 import qualified Futhark.Optimise.IntraMMM.Utils as MMM
-import Debug.Trace
-import Data.Monoid
-import Futhark.CodeGen.Backends.TensorCore (compileGemmFun)
-import Data.Vector.Generic.Mutable (move)
 
 -- | Generate HIP host and device code.
 kernelsToHIP :: ImpGPU.Program -> ImpOpenCL.Program
@@ -565,6 +561,7 @@ genCUDAPrelude =
   "#define FUTHARK_CUDA\n"
     <> preludeCU
     <> commonPrelude
+    <> preludeMMM
 
 genHIPPrelude :: T.Text
 genHIPPrelude =
