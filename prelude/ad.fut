@@ -1,8 +1,4 @@
 -- | Definitions related to automatic differentiation.
---
--- **Warning:** This is an experimental feature.  It has several known
--- bugs.  Documentation is very sparse.  You probably don't want to
--- use this unless you have the soul of a hero.
 
 -- | Jacobian-Vector Product ("forward mode"), producing also the
 -- primal result as the first element of the result tuple.
