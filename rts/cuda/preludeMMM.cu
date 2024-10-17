@@ -11,13 +11,14 @@ using TiledMma = TiledMMA<
     Tile<_16, _16, _16>
 >;
 // TODO: get from TiledMma
-using RCLayout = Layout<Shape<Shape<_2, _2>, _1, _2>, Stride<Stride<_1, _2>, _1, _4>>;
+//using RCLayout = Layout<Shape<tuple<_2, _2>, _1, _2>, Stride<tuple<_1, _2>, _1, _4>>;
+//using RCLayout = Shape<tuple<_2, _2>, _1, _2>;
 //using RCLayout = Layout<Shape<_1, _4, _2>>;
 
 // TODO: use vectorized or async
-// using CopyOpGlobalShared = UniversalCopy<half_t>;
+ using CopyOpGlobalShared = UniversalCopy<half_t>;
 // using CopyOpGlobalShared = UniversalCopy<uint128_t>;
-using CopyOpGlobalShared = SM80_CP_ASYNC_CACHEGLOBAL<uint128_t>;
+//using CopyOpGlobalShared = SM80_CP_ASYNC_CACHEGLOBAL<uint128_t>;
 //using TiledCopy_ = TiledCopy<Copy_Atom<CopyOpGlobalShared, half_t>,
 //                            Layout<
 //                                Shape<_16,_2>,
@@ -74,16 +75,14 @@ FUTHARK_FUN_ATTR void futrts_copyRegistersGlobal(__local unsigned char **mem_out
 //    TODO: try tiledcopy instead?
     ASmemLayout g_layout;
     TiledMma tiled_mma;
-    RCLayout rC_layout;
 
     ThrMMA thr_mma = tiled_mma.get_slice(threadIdx.x);
 
-    Tensor g = make_tensor(make_gmem_ptr(reinterpret_cast<half_t *>(global_mem_6287)), g_layout);
+    auto rC_layout = partition_shape_C(thr_mma, g_layout.shape());
     Tensor tCrC = make_tensor(make_rmem_ptr(reinterpret_cast<half_t *>(registers_mem_6286)), rC_layout);
 
+    Tensor g = make_tensor(make_gmem_ptr(reinterpret_cast<half_t *>(global_mem_6287)), g_layout);
     Tensor tCgC = thr_mma.partition_C(g);
-//    TODO: use this?
-//    Tensor tCrC = thr_mma.make_fragment_C(tCgC);
 
 //  TODO: take as input
     auto alpha = _1{};
@@ -105,16 +104,13 @@ FUTHARK_FUN_ATTR void futrts_gemm_123456(f16 (*mem_out_p_0)[(int64_t) 8], __loca
 {
     ASmemLayout sA_layout;
     BSmemLayout sB_layout;
+    ASmemLayout sC_layout;
     TiledMma tiled_mma;
-    RCLayout rC_layout;
 
     ThrMMA thr_mma = tiled_mma.get_slice(threadIdx.x);
 
+    auto rC_layout = partition_shape_C(thr_mma, sC_layout.shape());
     Tensor tCrC = make_tensor(make_rmem_ptr(reinterpret_cast<half_t *>(C_mem_6288)), rC_layout);
-
-//    Tensor gC = make_tensor(make_rmem_ptr(reinterpret_cast<half_t *>(*mem_out_p_0)), rC_layout);
-//    Tensor tCrC = thr_mma.make_fragment_C(tCgC);
-//    Tensor tCrC = thr_mma.partition_C(gC);
 
     Tensor sA = make_tensor(make_smem_ptr(reinterpret_cast<half_t *>(A_mem_6286)), sA_layout);            // (BLK_M,BLK_K)
     Tensor sB = make_tensor(make_smem_ptr(reinterpret_cast<half_t *>(B_mem_6287)), sB_layout);
