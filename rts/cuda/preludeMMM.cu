@@ -36,28 +36,31 @@ FUTHARK_FUN_ATTR void futrts_gemm_123456(f16 (*mem_out_p_0)[(int64_t) 8], __loca
 FUTHARK_FUN_ATTR void futrts_copyGlobalShared(__local unsigned char **mem_out_p_0, __global unsigned char *global_mem_6286, __local unsigned char *shared_mem_6287, int64_t globalOuterDim_6281)
 {
 //    TODO: should be different for B?
-//    ASmemLayout s_layout;
-//    ASmemLayout g_layout;
-//    TiledCopy copy_global_shared = make_tiled_copy(Copy_Atom<CopyOpGlobalShared, half_t>{},
-//                           Layout<
-//                               Shape<_16,_2>,
-//                               Stride<_8,_1>
-//                           >{},
-//                           Layout<Shape<_1,_8>>{}
-//    );
-//
-//    Tensor s = make_tensor(make_smem_ptr(reinterpret_cast<half_t *>(shared_mem_6287)), s_layout);            // (BLK_M,BLK_K)
-//    Tensor g = make_tensor(make_gmem_ptr(&reinterpret_cast<half_t *>(global_mem_6286)[blockIdx.x * 16 * 16]), g_layout);
-//
-//    ThrCopy thr_copy_global_shared = copy_global_shared.get_slice(threadIdx.x);
-//    Tensor tAgA = thr_copy_global_shared.partition_S(g);                            // (CPY,CPY_M,CPY_K,k)
-//    Tensor tAsA = thr_copy_global_shared.partition_D(s);
+    ASmemLayout s_layout;
+    ASmemLayout g_layout;
+    TiledCopy copy_global_shared = make_tiled_copy(Copy_Atom<CopyOpGlobalShared, half_t>{},
+        Layout<
+           Shape<_16,_2>,
+           Stride<_8,_1>
+        >{},
+        Layout<Shape<_1,_8>>{}
+    );
+
+    Tensor s = make_tensor(make_smem_ptr(reinterpret_cast<half_t *>(shared_mem_6287)), s_layout);
+    Tensor g = make_tensor(make_gmem_ptr(&reinterpret_cast<half_t *>(global_mem_6286)[blockIdx.x * 16 * 16]), g_layout);
+
+    ThrCopy thr_copy_global_shared = copy_global_shared.get_slice(threadIdx.x);
+    Tensor tAgA = thr_copy_global_shared.partition_S(g);
+    Tensor tAsA = thr_copy_global_shared.partition_D(s);
+
+    copy(copy_global_shared, tAgA, tAsA);
 
     //    TODO: remove
-    for (int i = 0; i < 8; i++) {
-        reinterpret_cast<half_t *>(shared_mem_6287)[i * blockDim.x + threadIdx.x] = reinterpret_cast<half_t *>(global_mem_6286)[blockIdx.x * 16 * 16 + i * blockDim.x + threadIdx.x];
-    }
+//    for (int i = 0; i < 8; i++) {
+//        reinterpret_cast<half_t *>(shared_mem_6287)[i * blockDim.x + threadIdx.x] = reinterpret_cast<half_t *>(global_mem_6286)[blockIdx.x * 16 * 16 + i * blockDim.x + threadIdx.x];
+//    }
 
+// TODO: simplify
     __local unsigned char *mem_out_6333;
 
     mem_out_6333 = shared_mem_6287;
@@ -65,11 +68,31 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(__local unsigned char **mem_out_p_
 }
 FUTHARK_FUN_ATTR void futrts_copyRegistersGlobal(__local unsigned char **mem_out_p_0, f16 registers_mem_6286[(int64_t) 8], __local unsigned char *global_mem_6287)
 {
-    //    TODO: remove
-    for (int i = 0; i < 8; i++) {
-        reinterpret_cast<half_t *>(global_mem_6287)[i * blockDim.x + threadIdx.x] = reinterpret_cast<half_t *>(registers_mem_6286)[i];
-    }
+//    TODO: try tiledcopy instead?
+    ASmemLayout g_layout;
+    TiledMma tiled_mma;
+    RCLayout rC_layout;
 
+    ThrMMA thr_mma = tiled_mma.get_slice(threadIdx.x);
+
+    Tensor g = make_tensor(make_gmem_ptr(reinterpret_cast<half_t *>(global_mem_6287)), g_layout);
+    Tensor tCrC = make_tensor(make_rmem_ptr(reinterpret_cast<half_t *>(registers_mem_6286)), rC_layout);
+
+    Tensor tCgC = thr_mma.partition_C(g);
+//    TODO: use this?
+//    Tensor tCrC = thr_mma.make_fragment_C(tCgC);
+
+//  TODO: take as input
+    auto alpha = _1{};
+    auto beta = _0{};
+    axpby(alpha, tCrC, beta, tCgC);
+
+    //    TODO: remove
+//    for (int i = 0; i < 8; i++) {
+//        reinterpret_cast<half_t *>(global_mem_6287)[i * blockDim.x + threadIdx.x] = reinterpret_cast<half_t *>(registers_mem_6286)[i];
+//    }
+
+// TODO: simplify
     __local unsigned char *mem_out_6333;
 
     mem_out_6333 = global_mem_6287;
@@ -98,7 +121,7 @@ FUTHARK_FUN_ATTR void futrts_gemm_123456(f16 (*mem_out_p_0)[(int64_t) 8], __loca
 
     __syncthreads();
     // TODO: add tDrD?
-     gemm(tiled_mma, tCsA, tCsB, tCrC);
+    gemm(tiled_mma, tCsA, tCsB, tCrC);
 //     TODO: probably not needed since not reusing buffers
 //    __syncthreads();
 
@@ -118,14 +141,11 @@ FUTHARK_FUN_ATTR void futrts_gemm_123456(f16 (*mem_out_p_0)[(int64_t) 8], __loca
 //         reinterpret_cast<half_t *>(*mem_out_p_0)[i] = reinterpret_cast<half_t *>(B_mem_6287)[i * blockDim.x + threadIdx.x];
 //     }
 
+// TODO: simplify
+    f16 mem_out_6333[(int64_t) 8];
 
-//    f16 mem_out_6333[(int64_t) 8];
-//
-//    for (int32_t i_1 = 0; i_1 < (int64_t) 8; i_1++)
-//        mem_out_6333[i_1] = C_mem_6288[i_1];
-//    for (int32_t i_2 = 0; i_2 < (int64_t) 8; i_2++)
-//        (*mem_out_p_0)[i_2] = mem_out_6333[i_2];
-
+    for (int32_t i_1 = 0; i_1 < (int64_t) 8; i_1++)
+        mem_out_6333[i_1] = C_mem_6288[i_1];
     for (int32_t i_2 = 0; i_2 < (int64_t) 8; i_2++)
-        (*mem_out_p_0)[i_2] = C_mem_6288[i_2];
+        (*mem_out_p_0)[i_2] = mem_out_6333[i_2];
 }
