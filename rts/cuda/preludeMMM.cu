@@ -15,9 +15,9 @@ using RCLayout = Layout<Shape<Shape<_2, _2>, _1, _2>, Stride<Stride<_1, _2>, _1,
 //using RCLayout = Layout<Shape<_1, _4, _2>>;
 
 // TODO: use vectorized or async
-using CopyOpGlobalShared = UniversalCopy<half_t>;
-//using CopyOpGlobalShared = UniversalCopy<uint128_t>;
-//using CopyOpGlobalShared = SM80_CP_ASYNC_CACHEGLOBAL<uint128_t>;
+// using CopyOpGlobalShared = UniversalCopy<half_t>;
+// using CopyOpGlobalShared = UniversalCopy<uint128_t>;
+using CopyOpGlobalShared = SM80_CP_ASYNC_CACHEGLOBAL<uint128_t>;
 //using TiledCopy_ = TiledCopy<Copy_Atom<CopyOpGlobalShared, half_t>,
 //                            Layout<
 //                                Shape<_16,_2>,
@@ -40,8 +40,8 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(__local unsigned char **mem_out_p_
     ASmemLayout g_layout;
     TiledCopy copy_global_shared = make_tiled_copy(Copy_Atom<CopyOpGlobalShared, half_t>{},
         Layout<
-           Shape<_16,_2>,
-           Stride<_8,_1>
+            Shape<_16,_2>,
+            Stride<_2,_1>
         >{},
         Layout<Shape<_1,_8>>{}
     );
@@ -54,6 +54,9 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(__local unsigned char **mem_out_p_
     Tensor tAsA = thr_copy_global_shared.partition_D(s);
 
     copy(copy_global_shared, tAgA, tAsA);
+
+//     TODO: use async?
+    cp_async_fence();
 
     //    TODO: remove
 //    for (int i = 0; i < 8; i++) {
@@ -119,6 +122,8 @@ FUTHARK_FUN_ATTR void futrts_gemm_123456(f16 (*mem_out_p_0)[(int64_t) 8], __loca
     Tensor tCsA = thr_mma.partition_A(sA);
     Tensor tCsB = thr_mma.partition_B(sB);
 
+//     TODO: use async?
+    cp_async_wait<0>();
     __syncthreads();
     // TODO: add tDrD?
     gemm(tiled_mma, tCsA, tCsB, tCrC);

@@ -107,7 +107,8 @@ gpuPipeline =
         -- Important to simplify after coalescing in order to fix up
         -- redundant manifests.
         simplifyGPU,
-        performCSE True
+        performCSE True,
+        intraMMM
       ]
 
 -- | The pipeline used by the sequential backends.  Turns all
@@ -148,7 +149,9 @@ gpumemPipeline =
   gpuPipeline
     >>> onePass GPU.explicitAllocations
     >>> passes
-      [ simplifyGPUMem,
+      [
+        intraMMMMemFixup,
+        simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,
         entryPointMemGPU,
