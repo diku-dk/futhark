@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark doc` now produces better (and stable) anchor IDs.
+
 ### Removed
 
 ### Changed
