@@ -12,7 +12,7 @@
 -- purpose where you might need derivatives, such as for example
 -- computing surface normals for signed distance functions.
 --
--- # Jacobians
+-- ## Jacobians
 --
 -- For a differentiable function *f* whose input comprise *n* scalars
 -- and whose output comprises *m* scalars, the
