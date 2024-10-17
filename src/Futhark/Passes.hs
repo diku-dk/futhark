@@ -90,6 +90,8 @@ gpuPipeline =
       [ simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
+        intraMMM,
+        simplifyGPU,
         tileLoops,
         simplifyGPU,
         histAccsGPU,
@@ -107,8 +109,7 @@ gpuPipeline =
         -- Important to simplify after coalescing in order to fix up
         -- redundant manifests.
         simplifyGPU,
-        performCSE True,
-        intraMMM
+        performCSE True
       ]
 
 -- | The pipeline used by the sequential backends.  Turns all

@@ -34,6 +34,7 @@ import Control.Monad
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Construct
 import Futhark.Optimise.IntraMMM.Utils
+import Data.Map.Strict qualified as M
 import Futhark.Builder.Class
 import Prelude hiding (lookup)
 import Futhark.Pass
@@ -60,6 +61,11 @@ instance
   where
   askScope = asks scope
 
+instance
+  LocalScope GPU IntraMMMMonad
+  where
+  localScope extension = local $ \env -> env {scope = M.union extension $ scope env}
+
 
 askBlockInfo :: IntraMMMMonad (Maybe (VName, SubExp))
 askBlockInfo = asks blockInfo
@@ -71,6 +77,16 @@ localBlockInfo f = local $ \env -> env {blockInfo = f $ blockInfo env }
 runBuilderMMM_ :: Builder GPU () -> Scope GPU -> IntraMMMMonad (Stms GPU)
 runBuilderMMM_ m s =
   modifyNameSource $ runState $ runBuilderT_ m s
+
+
+mapStmsWithScope :: (Monoid a, LocalScope rep f) => (Stm rep -> f a) -> Stms rep -> f a
+mapStmsWithScope f stms =
+  case stmsHead stms of
+    Nothing -> pure mempty
+    Just (stm, stms') -> do
+      stm' <- f stm
+      stms'' <- inScopeOf stm $ mapStmsWithScope f stms'
+      pure $ stm' <> stms''
 
 
 intraMMM :: Pass GPU GPU
@@ -180,7 +196,8 @@ data KernelBodyMatch = KernelBodyMatch
 
 -- TODO: maintain scope below?
 transformStms :: Stms GPU -> IntraMMMMonad (Stms GPU)
-transformStms stms = join <$> mapM transformStm stms
+transformStms stms = mapStmsWithScope transformStm stms
+
 
 transformStm :: Stm GPU -> IntraMMMMonad (Stms GPU)
 -- TODO: pass name of let to builder
@@ -241,6 +258,7 @@ expMatch :: Exp GPU -> Scope GPU -> Maybe MMAMatch
 expMatch (Op (SegOp sOp)) = segOpMatch sOp
 expMatch _ = const Nothing
 
+-- TODO: scope for lambda and loops
 transformExp :: Exp GPU -> IntraMMMMonad (Exp GPU)
 -- transformExp (BasicOp op) = BasicOp op
 -- transformExp (Apply name args rets info) = Apply name args rets info
@@ -271,6 +289,15 @@ transformSegOp s@(SegMap level@(SegBlock virt (Just (KernelGrid (Count numBlocks
     [newBlockSize] ->
       pure $ SegMap (SegBlock virt (Just (KernelGrid (Count numBlocks) (Count $ mkInt64Const newBlockSize)))) space ts newBody
     _ -> pure $ SegMap level space ts newBody
+-- TODO: also match SegThread in similar way
+--transformSegOp s@(SegMap level@(SegThread virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space@(SegSpace _ [blockInfo]) ts body) = do
+---- TODO: call match functions her, assume perfectly nested and avoid writer
+--  (newBody, newBlockSizes) <- listen $ localBlockInfo (const $ Just blockInfo) $ transformKernelBody body
+--  case newBlockSizes of
+----  TODO: handle more block sizes?
+--    [newBlockSize] ->
+--      pure $ SegMap (SegBlock virt (Just (KernelGrid (Count numBlocks) (Count $ mkInt64Const newBlockSize)))) space ts newBody
+--    _ -> pure $ SegMap level space ts newBody
 transformSegOp s = transformSegOpDefault s
 
 mkInt64Const :: Int -> SubExp
@@ -419,7 +446,7 @@ fixFuns consts fun
                                                   funDefRetType = fixRetType Shared $ funDefRetType fun
                                                 }
   | otherwise = do
-      let initScope = scopeOf consts
+      let initScope = scopeOf consts <> scopeOfFParams (funDefParams fun)
       let body = funDefBody fun
       stms' <- fixStmtsWithScope initScope . bodyStms $ body
       pure $ fun {funDefBody = body {bodyStms = stms'}}
@@ -499,16 +526,8 @@ fixStmtsWithScope scope stms = do
   pure res
 
 fixStmts :: Stms GPUMem -> FixMonad (Stms GPUMem)
--- fixStmts stms =
---    mapM fixStmt stms
---    TODO: use fold?
 fixStmts stms =
-  case stmsHead stms of
-    Nothing -> pure mempty
-    Just (stm, stms') -> do
-      stm' <- fixStmt stm
-      stms'' <- inScopeOf stm $ fixStmts stms'
-      pure $ oneStm stm' <> stms''
+  mapStmsWithScope (fmap oneStm . fixStmt) stms
 
 fixStmt :: Stm GPUMem -> FixMonad (Stm GPUMem)
 fixStmt stm@(Let (Pat [PatElem resName (MemArray _ _ _ (ArrayIn resMem _))]) _ (BasicOp (Manifest _ inputName))) = do
