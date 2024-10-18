@@ -9,12 +9,13 @@ import Data.Map qualified as M
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
-import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName), lookupUntransPE)
-import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP)
+import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
+import Futhark.SoP.SoP (SoP, int2SoP)
 import Futhark.Util.Pretty (Pretty, docString, pretty)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
+import qualified Futhark.Analysis.Proofs.AlgebraPC.Symbol as Algebra
+import Futhark.SoP.Expression (Expression)
 
 data IndexFn = IndexFn
   { iterator :: Iterator,
@@ -54,9 +55,13 @@ domainSegStart (Cat _ _ b) = b
 -------------------------------------------------------------------------------
 -- Monad.
 -------------------------------------------------------------------------------
+data IndexFnProperty
+  = Blah
+  deriving (Show, Eq, Ord)
+
 data VEnv = VEnv
   { vnamesource :: VNameSource,
-    algenv :: AlgEnv Symbol E.Exp Property,
+    algenv :: AlgEnv Algebra.Symbol Symbol Algebra.Property,
     indexfns :: M.Map VName IndexFn,
     toplevel :: M.Map VName ([VName], [Maybe VName], IndexFn),
     debug :: Bool
@@ -75,19 +80,15 @@ instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
   putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
 
--- This is required by MonadSoP.
-instance Nameable Symbol where
-  mkName (VNameSource i) = (Var $ E.VName "x" i, VNameSource $ i + 1)
+instance Expression Symbol where
+  -- TODO Is this constraint on MonadSoP needed?
 
-instance MonadSoP Symbol E.Exp Property IndexFnM where
+instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
   getUntrans = gets (untrans . algenv)
   getRanges = gets (ranges . algenv)
   getEquivs = gets (equivs . algenv)
+  getProperties = gets (properties . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
-
--- This is required by SoP.Refine (addRel), but is never actually called.
-instance ToSoP Symbol E.Exp where
-  toSoPNum _ = undefined
 
 runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s

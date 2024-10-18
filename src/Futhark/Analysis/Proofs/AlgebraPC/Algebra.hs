@@ -18,13 +18,13 @@ import Futhark.SoP.SoP (SoP)
       autoParens x = parens (pretty x)
 --}
 
-instance (Expression e, Ord e) => MonadSoP Symbol e Property (AlgM e) where
-  getUntrans = gets (untrans . algenv)
-  getRanges = gets (ranges . algenv)
-  getEquivs = gets (equivs . algenv)
-  getProperties = gets (properties . algenv)
-  modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
-  findSymLEq0 = findSymbolLEq0
+-- instance (Expression e, Ord e) => MonadSoP Symbol e Property (AlgM e) where
+--   getUntrans = gets (untrans . algenv)
+--   getRanges = gets (ranges . algenv)
+--   getEquivs = gets (equivs . algenv)
+--   getProperties = gets (properties . algenv)
+--   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
+--   findSymLEq0 = findSymbolLEq0
 
 {--
 f :: (SoP Symbol >= 0) -> AlgM e Bool

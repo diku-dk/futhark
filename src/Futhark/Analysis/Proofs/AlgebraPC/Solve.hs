@@ -16,12 +16,13 @@ import Futhark.SoP.Expression
 import Futhark.SoP.FourierMotzkin qualified as FM
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
+import Control.Monad ((<=<))
 
 simplify ::
-  (MonadSoP Symbol e Property (AlgM e), Expression e, Ord e) =>
   SoP Symbol ->
-  AlgM e (SoP Symbol)
-simplify = astMap m
+  IndexFnM (SoP Symbol)
+simplify = astMap m <=< substEquivs
   where
     m =
       ASTMapper
@@ -30,9 +31,8 @@ simplify = astMap m
         }
 
 simplifyLevel ::
-  (MonadSoP Symbol e Property (AlgM e), Expression e, Ord e) =>
   SoP Symbol ->
-  AlgM e (SoP Symbol)
+  IndexFnM (SoP Symbol)
 simplifyLevel sop0 = do
   let fvs = free sop0
   -- pow simplifications
@@ -57,9 +57,8 @@ simplifyLevel sop0 = do
 
 -- | finds a symbol
 findSymbolLEq0 ::
-  (MonadSoP Symbol e Property (AlgM e), Expression e, Ord e) =>
   SoP Symbol ->
-  AlgM e (SoP Symbol, Maybe (Symbol, Range Symbol))
+  IndexFnM (SoP Symbol, Maybe (Symbol, Range Symbol))
 findSymbolLEq0 sop = do
   sop' <- simplify sop
   sop'' <-
@@ -74,9 +73,8 @@ findSymbolLEq0 sop = do
     Nothing -> findSymLEq0Def sop''
 
 powEquiv ::
-  (MonadSoP Symbol e Property (AlgM e), Expression e, Ord e) =>
   SoP Symbol ->
-  AlgM e (SoP Symbol)
+  IndexFnM (SoP Symbol)
 powEquiv sop
   -- Single term: a sufficient condition for `t * 2^expo <= 0`
   --              is `t <= 0`, since 2^expo is always >= 1
@@ -148,9 +146,8 @@ powEquiv sop
 powEquiv sop = pure sop
 
 findSpecialSymbolToElim ::
-  (MonadSoP Symbol e Property (AlgM e), Expression e, Ord e) =>
   SoP Symbol ->
-  AlgM e (Maybe (Symbol, Range Symbol))
+  IndexFnM (Maybe (Symbol, Range Symbol))
 findSpecialSymbolToElim sop
   | (special_syms, _) <- S.partition hasIdxOrSum $ free sop,
     not (S.null special_syms) = do
@@ -170,9 +167,8 @@ sop0s :: S.Set (SoP Symbol)
 sop0s = S.singleton (int2SoP 0)
 
 getSumRange ::
-  (MonadSoP Symbol e Property (AlgM e), Expression e, Ord e) =>
   Symbol ->
-  AlgM e (Maybe (Symbol, Range Symbol))
+  IndexFnM (Maybe (Symbol, Range Symbol))
 getSumRange sym@(Sum (POR {}) slc_beg slc_end) = do
   let ub = S.singleton $ slc_end .-. slc_beg .+. int2SoP 1
   pure $ Just (sym, Range sop0s 1 ub)
@@ -193,9 +189,8 @@ getSumRange sym@(Sum (One arr_nm) slc_beg slc_end) = do
 getSumRange _ = pure Nothing
 
 getMonRange ::
-  (MonadSoP Symbol e Property (AlgM e), Expression e, Ord e) =>
   Symbol ->
-  AlgM e (Maybe (Symbol, Range Symbol))
+  IndexFnM (Maybe (Symbol, Range Symbol))
 getMonRange sym@(Mdf dir arr_nm idx1 idx2) = do
   Range elm_lbs m elm_ubs <- lookupRange $ Var arr_nm
   is_1geq2 <- idx1 FM.$>=$ idx2
@@ -232,9 +227,8 @@ getMonRange sym@(Mdf dir arr_nm idx1 idx2) = do
 getMonRange _ = pure Nothing
 
 getIdxRange ::
-  (MonadSoP Symbol e Property (AlgM e), Expression e, Ord e) =>
   Symbol ->
-  AlgM e (Maybe (Symbol, Range Symbol))
+  IndexFnM (Maybe (Symbol, Range Symbol))
 getIdxRange sym@(Idx (POR {}) _) =
   pure $ Just (sym, Range sop0s 1 $ S.singleton $ int2SoP 1)
 getIdxRange sym@(Idx (One arr_nm) _) = do

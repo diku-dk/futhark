@@ -4,6 +4,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.SoP.SoP (SoP, int2SoP, sopToLists, sym2SoP, (.*.), (.+.))
+import Control.Monad (foldM)
 
 data ASTMapper a m = ASTMapper
   { mapOnSymbol :: a -> m a,
@@ -42,6 +43,16 @@ instance ASTMappable Symbol Symbol where
   astMap m (x :&& y) = mapOnSymbol m =<< (:&&) <$> astMap m x <*> astMap m y
   astMap m (x :|| y) = mapOnSymbol m =<< (:||) <$> astMap m x <*> astMap m y
 
+instance ASTMappable Algebra.Symbol Algebra.Symbol where
+  astMap m (Algebra.Var x) = mapOnSymbol m $ Algebra.Var x
+  astMap m (Algebra.Idx vn i) = mapOnSymbol m . Algebra.Idx vn =<< astMap m i
+  astMap m (Algebra.Mdf dir vn i j) =
+    mapOnSymbol m =<< Algebra.Mdf dir vn <$> astMap m i <*> astMap m j
+  astMap m (Algebra.Sum vn lb ub) =
+    mapOnSymbol m =<< Algebra.Sum vn <$> astMap m lb <*> astMap m ub
+  astMap m (Algebra.Pow (c, x)) =
+    mapOnSymbol m . curry Algebra.Pow c =<< astMap m x
+
 instance ASTMappable Symbol IndexFn where
   astMap m (IndexFn dom body) = IndexFn <$> astMap m dom <*> astMap m body
 
@@ -60,14 +71,61 @@ instance ASTMappable Symbol (Cases Symbol (SoP Symbol)) where
     qs' <- mapM (astMap m) qs
     pure . cases $ zip ps' qs'
 
-instance ASTMappable Algebra.Symbol Algebra.Symbol where
-  astMap m (Algebra.Var x) = mapOnSymbol m $ Algebra.Var x
-  astMap m (Algebra.Idx vn i) = mapOnSymbol m . Algebra.Idx vn =<< astMap m i
-  astMap m (Algebra.Mdf dir vn i j) =
-    mapOnSymbol m =<< Algebra.Mdf dir vn <$> astMap m i <*> astMap m j
-  astMap m (Algebra.Sum vn lb ub) =
-    mapOnSymbol m =<< Algebra.Sum vn <$> astMap m lb <*> astMap m ub
-  astMap m (Algebra.Pow (c, x)) =
-    mapOnSymbol m . curry Algebra.Pow c =<< astMap m x
+newtype ASTFolder a b m = ASTFolder
+  { foldOnSymbol :: b -> a -> m b }
 
---  astMap _ (Algebra.Hole _) = undefined -- Cosmin said he would remove Hole so leaving undefined.
+class ASTFoldable a c where
+  astFold :: (Monad m) => ASTFolder a b m -> b -> c -> m b
+  astFoldF :: (Monad m) => ASTFolder a b m -> c -> b -> m b
+  astFoldF m = flip (astFold m)
+
+instance ASTFoldable Symbol (SoP Symbol) where
+  astFold m acc =
+    foldM (astFold m) acc . concatMap fst . sopToLists
+
+instance ASTFoldable Symbol Symbol where
+  astFold m acc sym@(LinComb _ lb ub x) = do
+    foldOnSymbol m acc sym >>= astFoldF m lb >>= astFoldF m ub >>= astFoldF m x
+  astFold m acc sym@(Idx xs i) = do
+    foldOnSymbol m acc sym
+    >>= astFoldF m xs
+    >>= astFoldF m i
+  astFold m acc sym@(Indicator p) = do
+    foldOnSymbol m acc sym >>= astFoldF m p
+  astFold m acc sym@(Apply f xs) = do
+    foldOnSymbol m acc sym
+    >>= astFoldF m f
+    >>= \a -> foldM (astFold m) a xs
+  astFold m acc sym@(Not x) = do
+    foldOnSymbol m acc sym
+    >>= astFoldF m x
+  astFold m acc sym@(x :== y) = do
+    foldOnSymbol m acc sym
+    >>= astFoldF m x
+    >>= astFoldF m y
+  astFold m acc sym@(x :< y) = do
+    acc <- foldOnSymbol m acc sym
+    acc <- astFold m acc x
+    astFold m acc y
+  astFold m acc sym@(x :> y) = do
+    acc <- foldOnSymbol m acc sym
+    acc <- astFold m acc x
+    astFold m acc y
+  astFold m acc sym@(x :>= y) = do
+    acc <- foldOnSymbol m acc sym
+    acc <- astFold m acc x
+    astFold m acc y
+  astFold m acc sym@(x :<= y) = do
+    acc <- foldOnSymbol m acc sym
+    acc <- astFold m acc x
+    astFold m acc y
+  astFold m acc sym@(x :&& y) = do
+    acc <- foldOnSymbol m acc sym
+    acc <- astFold m acc x
+    astFold m acc y
+  astFold m acc sym@(x :|| y) = do
+    acc <- foldOnSymbol m acc sym
+    acc <- astFold m acc x
+    astFold m acc y
+  -- Recurr, Var, Hole
+  astFold m acc sym = foldOnSymbol m acc sym

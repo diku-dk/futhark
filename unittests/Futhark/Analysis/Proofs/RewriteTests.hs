@@ -4,15 +4,15 @@
 module Futhark.Analysis.Proofs.RewriteTests (tests) where
 
 import Control.Monad (unless)
-import Data.Set qualified as S
 import Futhark.Analysis.Proofs.IndexFn
+import Futhark.Analysis.Proofs.Query (addAlgRange)
+import Futhark.Analysis.Proofs.AlgebraBridge (toAlgebra)
 import Futhark.Analysis.Proofs.Rewrite
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (addEquiv, addRange)
+import Futhark.SoP.Monad (addEquiv)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.))
-import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -32,7 +32,7 @@ tests =
           @??= (sVar x .+. sVar y .+. int 1),
       testCase "Extend sum lower bound (1)" $
         run
-          ( \(x, y, z, w, _, _, _, _) ->
+          ( \(x, y, z, w, _, _, _, _) -> do
               rewrite (Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w))),
@@ -44,7 +44,7 @@ tests =
           @??= sym2SoP (LinComb w (sVar y .-. int 1) (sVar z) (Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound (3)" $
         run
-          ( \(x, y, z, w, _, _, _, _) ->
+          ( \(x, y, z, w, _, _, _, _) -> do
               rewrite (Idx (Var x) (sVar y .-. int 1337) ~+~ LinComb w (sVar y .-. int 1336) (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (sVar y .-. int 1337) (sVar z) (Idx (Var x) (sVar w))),
@@ -88,27 +88,37 @@ tests =
         -- Should fail because we cannot show b <= c without bounds on these variables general.
         run
           ( \(x, _, z, w, a, b, c, _) ->
-              rewrite (LinComb w (sVar a) (sVar c) (Var x) ~-~ LinComb z (sVar a) (sVar b) (Var x))
+              rewrite
+                ( LinComb w (sVar a) (sVar c) (Idx (Var x) (sVar w))
+                    ~-~ LinComb z (sVar a) (sVar b) (Idx (Var x) (sVar z))
+                )
           )
-          @??= (LinComb w (sVar a) (sVar c) (Var x) ~-~ LinComb z (sVar a) (sVar b) (Var x)),
+          @??= (LinComb w (sVar a) (sVar c) (Idx (Var x) (sVar w)) ~-~ LinComb z (sVar a) (sVar b) (Idx (Var x) (sVar z))),
       testCase "Merge sum-subtraction (match)" $
         run
           ( \(x, _, z, w, a, b, c, _) -> do
-              addRange (Var b) (SoP.Range mempty 1 (S.singleton (sVar c)))
-              rewrite (LinComb w (sVar a) (sVar c) (Var x) ~-~ LinComb z (sVar a) (sVar b) (Var x))
+              debugOn
+              addAlgRange b (sVar a) (sVar c)
+              rewrite
+                ( LinComb w (sVar a) (sVar c) (Idx (Var x) (sVar w))
+                    ~-~ LinComb z (sVar a) (sVar b) (Idx (Var x) (sVar z))
+                )
           )
-          @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar c) (Var x)),
+          @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar c) (Idx (Var x) (sVar w))),
       testCase "Merge sum-subtraction (match 2)" $
         run
           ( \(x, _, z, w, a, b, _, _) -> do
-              addRange (Var b) (SoP.Range mempty 1 (S.singleton (sVar a .-. int 1)))
-              rewrite (LinComb w (int 0) (sVar a .-. int 1) (Var x) ~-~ LinComb z (int 0) (sVar b) (Var x))
+              addAlgRange b (int2SoP 0) (sVar c)
+              rewrite
+                ( LinComb w (int 0) (sVar a .-. int 1) (Idx (Var x) (sVar w))
+                    ~-~ LinComb z (int 0) (sVar b) (Idx (Var x) (sVar z))
+                )
           )
           @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar a .-. int 1) (Var x)),
       testCase "Merge sum-subtraction (match 3)" $
         run
           ( \(x, _, z, w, a, b, _, _) -> do
-              addRange (Var b) (SoP.Range mempty 1 (S.singleton (sVar a)))
+              addAlgRange b (int2SoP 0) (sVar a)
               rewrite
                 ( LinComb w (int 0) (sVar a) (Idx (Var x) (sVar w))
                     ~-~ LinComb z (int 0) (sVar b) (Idx (Var x) (sVar z))
@@ -204,7 +214,8 @@ tests =
       testCase "Equivalence (1)" $
         run
           ( \(x, _, _, _, _, _, _, _) -> do
-              addEquiv (Var x) (int 1)
+              x' <- toAlgebra (Var x)
+              addEquiv x' (int2SoP 1)
               rewrite (sVar x .+. int 1)
           )
           @??= int 2,
@@ -223,7 +234,8 @@ tests =
       testCase "Tautology (variable)" $
         run
           ( \(x, _, _, _, _, _, _, _) -> do
-              addEquiv (Var x) (int 1)
+              x' <- toAlgebra (Var x)
+              addEquiv x' (int2SoP 1)
               rewrite (sVar x :<= int 2)
           )
           @??= Bool True,
@@ -321,8 +333,7 @@ tests =
                ),
       testCase "Rule 5 (carry) (match 3)" $
         run
-          ( \(x, y, _, _, a, b, _, _) -> do
-              debugOn
+          ( \(x, y, _, _, a, b, _, _) ->
               rewrite
                 ( IndexFn
                     { iterator = Forall x (Cat y (sVar a) (sVar b)),
@@ -341,7 +352,7 @@ tests =
                ),
       testCase "Rule 4 (prefix sum) (match 1)" $
         run
-          ( \(x, y, _, _, a, b, _, _) ->
+          ( \(x, y, _, _, a, b, _, _) -> do
               rewrite
                 ( IndexFn
                     { iterator = Forall x (Iota (sVar y)),
@@ -457,7 +468,7 @@ tests =
 
     -- Less fragile renaming.
     e @??= e' = do
-      let (actual, expected) = runTest $ renameSame e e'
+      let (actual, expected) = runTest $ varsM >> renameSame e e'
       unless (actual == expected) (assertFailure $ msg actual expected)
       where
         msg actual expected =

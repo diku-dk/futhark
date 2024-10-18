@@ -17,6 +17,8 @@ module Futhark.SoP.Monad
     lookupUntransSym,
     lookupRange,
     addRange,
+    addProperty,
+    askProperty,
     SoPMT,
     SoPM,
     lookupSoP,
@@ -32,7 +34,8 @@ module Futhark.SoP.Monad
     substEquivs,
     addEquiv,
     delFromEnv,
-    findSymLEq0Def
+    mkRange,
+    findSymLEq0Def,
   )
 where
 
@@ -175,11 +178,10 @@ findSymLEq0Def sop = do
       is = map (\s -> (length $ transClosInRanges rs $ S.singleton s, s)) syms
   case is of
     [] -> pure (sop, Nothing)
-    _  -> do
-            let i = snd $ maximum $ is
-            rg <- lookupRange i
-            pure $ (sop, Just (i, rg))
-
+    _ -> do
+      let i = snd $ maximum $ is
+      rg <- lookupRange i
+      pure $ (sop, Just (i, rg))
 
 instance
   ( Ord u,
@@ -255,6 +257,9 @@ addRange sym r =
   modifyEnv $ \env ->
     env {ranges = M.insertWith (<>) sym r (ranges env)}
 
+mkRange :: SoP u -> SoP u -> Range u
+mkRange lb ub = Range (S.singleton lb) 1 (S.singleton ub)
+
 -- \| Add equivalent information for a symbol; unsafe and
 -- should only be used for newly introduced variables.
 addEquiv :: (MonadSoP u e p m) => u -> SoP u -> m ()
@@ -262,6 +267,18 @@ addEquiv sym sop = do
   -- sop' <- substEquivs sop
   modifyEnv $ \env ->
     env {equivs = M.insert sym sop (equivs env)}
+
+addProperty :: (MonadSoP u e p m, Ord p) => u -> p -> m ()
+addProperty sym prop = do
+  modifyEnv $ \env ->
+    env {properties = M.insertWith (<>) sym (S.singleton prop) (properties env)}
+
+askProperty :: (MonadSoP u e p m, Ord p) => u -> p -> m Bool
+askProperty sym prop = do
+  mp <- (M.!? sym) <$> getProperties
+  case mp of
+    Nothing -> pure False
+    Just props -> pure $ prop `S.member` props
 
 --------------------------------------------------------------------------------
 -- Environment

@@ -12,7 +12,7 @@ import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM, debugPrettyM)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), VNameSource, newNameFromString)
@@ -20,6 +20,7 @@ import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromLi
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty
 import Language.Futhark (VName)
+import Control.Monad.Trans (lift)
 
 class (Ord a) => FreeVariables a where
   fv :: a -> S.Set VName
@@ -108,20 +109,19 @@ class (Renameable v) => Unify v u where
 
   -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
   --                  = {rename(e) ~= rename(e')}.
-  unify :: v -> v -> IndexFnM (Maybe (Substitution u))
+  unify :: Pretty v => v -> v -> IndexFnM (Maybe (Substitution u))
   unify = renameAnd unify_
 
-renameAnd ::
-  (MonadFreshNames m, Renameable t1, Renameable t2) =>
-  (VName -> t1 -> t2 -> MaybeT m (Replacement u)) ->
-  t1 ->
-  t2 ->
-  m (Maybe (Substitution u))
+renameAnd :: (Pretty t1, Pretty t2, Renameable t1, Renameable t2) => (VName -> t1 -> t2 -> MaybeT IndexFnM (Replacement u)) -> t1 -> t2 -> IndexFnM (Maybe (Substitution u))
 renameAnd unifier x y = runMaybeT $ do
   k <- newNameFromString "k"
   vns <- getNameSource
+  -- lift $ debugPrettyM "x " x
   a <- rename vns x
+  -- lift $ debugPrettyM "->" a
+  -- lift $ debugPrettyM "y " y
   b <- rename vns y
+  -- lift $ debugPrettyM "->" b
   s <- unifier k a b
   pure $ Substitution {mapping = s, vns = vns}
 
@@ -178,6 +178,7 @@ unifies ::
     Replaceable u u,
     Unify v u,
     Unify u u,
+    Pretty v,
     Ord u,
     Hole u
   ) =>

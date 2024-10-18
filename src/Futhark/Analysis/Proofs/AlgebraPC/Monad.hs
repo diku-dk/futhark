@@ -16,27 +16,19 @@ import Futhark.SoP.SoP (SoP)
 import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM (..), VEnv (vnamesource, VEnv))
+import Futhark.Analysis.Proofs.Symbol qualified as IxFn (Symbol)
 
-data VEnv e = VEnv
-  { vnamesource :: VNameSource,
-    algenv :: AlgEnv Symbol e Property
-  }
+-- data VEnv e = VEnv
+--   { vnamesource :: VNameSource,
+--     algenv :: AlgEnv Symbol e Property
+--   }
 
-instance (Monoid w) => MonadFreshNames (RWS r w (VEnv e)) where
-  getNameSource = gets vnamesource
-  putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
+type AlgM a = IndexFnM
 
-newtype AlgM e a = AlgM (RWS () () (VEnv e) a)
-  deriving
-    ( Applicative,
-      Functor,
-      Monad,
-      MonadFreshNames,
-      MonadState (VEnv e)
-    )
-
-runAlgM :: AlgM e a -> AlgEnv Symbol e Property -> VNameSource -> (a, VEnv e)
-runAlgM (AlgM m) env vns = getRes $ runRWS m () s
+-- runAlgM :: AlgM e a -> AlgEnv Symbol e Property -> VNameSource -> (a, VEnv e)
+runAlgM :: IndexFnM a -> AlgEnv Symbol IxFn.Symbol Property -> VNameSource -> (a, VEnv)
+runAlgM (IndexFnM m) env vns = getRes $ runRWS m () s
   where
     getRes (x, env1, _) = (x, env1)
-    s = VEnv vns env
+    s = VEnv vns env mempty mempty False

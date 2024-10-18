@@ -17,6 +17,8 @@ import Futhark.Analysis.Proofs.AlgebraPC.Algebra
 import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
+import qualified Futhark.Analysis.Proofs.Symbol as IxFn
 
 -------------------------------------
 -- Run with:
@@ -26,7 +28,7 @@ import Test.Tasty.HUnit
 -- runTest :: IndexFnM a -> a
 -- runTest test = fst $ runIndexFnM test blankNameSource
 
-runTest :: AlgM (PrimExp VName) a -> AlgEnv Symbol (PrimExp VName) Property -> a
+runTest :: IndexFnM a -> AlgEnv Symbol IxFn.Symbol Property -> a
 runTest test env = fst $ runAlgM test env blankNameSource
 
 tests :: TestTree

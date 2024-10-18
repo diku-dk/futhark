@@ -58,3 +58,12 @@ allocateTerms x y
     k = numTerms x
     xs = sopToList x
     ys = sopToList y
+
+-- | Iteratively apply `f` to `x` until a fixpoint is reached.
+converge :: (Monad m, Eq t) => (t -> m t) -> t -> m t
+converge f x = do
+  y <- f x
+  if x == y
+    then pure x
+    else do
+      converge f y

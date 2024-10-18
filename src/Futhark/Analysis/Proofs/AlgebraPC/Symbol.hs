@@ -80,6 +80,7 @@ data MonDir = Inc | IncS | Dec | DecS
 data Property
   = Monotonic MonDir
   | Injective
+  | Indicator
   deriving (Show, Eq, Ord)
 
 ---------------------------------

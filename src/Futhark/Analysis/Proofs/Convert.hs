@@ -82,7 +82,7 @@ mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ _params body _ _ _) = do
   indexfn <- forward body >>= refineAndBind vn
   -- insertTopLevel vn (params, indexfn)
   algenv <- gets algenv
-  debugPrettyM "AlgEnv\n" algenv
+  debugPrettyM "mkIndexFnValBind AlgEnv\n" algenv
   pure (Just indexfn)
 
 refineAndBind :: E.VName -> IndexFn -> IndexFnM IndexFn

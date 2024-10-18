@@ -9,6 +9,7 @@ import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Unify (Substitution, Unify (unify), unifies, renameAnd, unifies_, Replaceable (rep))
 import Futhark.Analysis.Proofs.Util (allocateTerms)
 import Futhark.SoP.SoP (SoP, numTerms, sopFromList, sopToList, (.+.))
+import Futhark.Util.Pretty (Pretty)
 
 data Rule a b m = Rule
   { name :: String,
@@ -74,7 +75,7 @@ check cond (Just s) = do
   b <- cond s
   pure $ if b then Just s else Nothing
 
-applyRuleDefault :: (Unify b u) => Rule b u IndexFnM -> b -> IndexFnM b
+applyRuleDefault :: (Unify b u, Pretty b) => Rule b u IndexFnM -> b -> IndexFnM b
 applyRuleDefault rule x =
   unify (from rule) x
     >>= check (sideCondition rule)

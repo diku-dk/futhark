@@ -40,9 +40,6 @@ infixr 4 :/=
 infixr 3 :&&
 infixr 2 :||
 
-data Property
-  deriving (Show, Eq, Ord)
-
 sop2Symbol :: (Ord u) => SoP u -> u
 sop2Symbol sop
   | Just t <- justSym sop = t

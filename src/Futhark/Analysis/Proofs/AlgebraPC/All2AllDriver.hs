@@ -16,11 +16,11 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.SoP.Expression
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 
 simplifyAll2All ::
-  (MonadSoP Symbol e Property (AlgM e), Expression e, Ord e) =>
   SoP Symbol ->
-  AlgM e (Bool, SoP Symbol)
+  IndexFnM (Bool, SoP Symbol)
 simplifyAll2All sop = do
   let exp_terms =
         map expandSumIdxTerm $
