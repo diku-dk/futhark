@@ -90,6 +90,7 @@ gpuPipeline =
       [ simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
+--        TODO: where to put in pipeline?
         intraMMM,
         simplifyGPU,
         tileLoops,

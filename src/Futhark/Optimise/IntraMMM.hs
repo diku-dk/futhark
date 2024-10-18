@@ -238,15 +238,13 @@ buildMMM resName blockSize (blockIdx, blockDim) (MMAMatch kernelBodyMatch ne siz
       resultBodyM [Var cZeroed]
     pure [varRes cLoop]
   let [cRegs] = cRegs_list
---  TODO: check if need to transpose, ensure not hoisted out of block segmap
   aScratch <- letExp "aScratch" $ BasicOp $ Scratch (typeA kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeK]
   bScratch <- letExp "bScratch" $ BasicOp $ Scratch (typeB kernelBodyMatch) [mkInt64Const sizeK, mkInt64Const sizeN]
   aCopied <- letExp "aCopied" $ Apply copyGlobalSharedName (fmap (,ObservePrim) (outerDimsA kernelBodyMatch) <> [(Var $ arrA kernelBodyMatch, ObservePrim), (Var aScratch, Consume)]) [(Array (typeA kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeK]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
   bCopied <- letExp "bCopied" $ Apply copyGlobalSharedName (fmap (,ObservePrim) (outerDimsB kernelBodyMatch) <> [(Var $ arrB kernelBodyMatch, ObservePrim), (Var bScratch, Consume)]) [(Array (typeB kernelBodyMatch) (Shape [Free $ mkInt64Const sizeK, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
---  TODO: copy to shared
---  TODO: is ObservePrim correct?
   blockMMAres_list <- segMap1D "blockMMAres" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \thread_idx -> do
     threadCregs <- index "threadCregs" cRegs [thread_idx]
+--  TODO: is ObservePrim correct?
     threadMMAres <- letExp "threadMMAres" $ Apply gemmName [(Var aCopied, ObservePrim), (Var bCopied, ObservePrim), (Var threadCregs, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free cValsPerThread]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
     pure [varRes threadMMAres]
   let [blockMMAres] = blockMMAres_list
@@ -282,7 +280,7 @@ transformSegOp :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
 -- TODO: avoid changing the block size, fix other seg inblock, or avoid transformation in these cases
 -- TODO: match others?
 transformSegOp s@(SegMap level@(SegBlock virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space@(SegSpace _ [blockInfo]) ts body) = do
--- TODO: call match functions her, assume perfectly nested and avoid writer
+-- TODO: call match functions here, assume perfectly nested and avoid writer
   (newBody, newBlockSizes) <- listen $ localBlockInfo (const $ Just blockInfo) $ transformKernelBody body
   case newBlockSizes of
 --  TODO: handle more block sizes?
