@@ -206,12 +206,12 @@ transformStmDefault (Let pat aux e) = do
   e' <- transformExp e
   pure $ oneStm $ Let pat aux e'
 
--- TODO: scope for lambda and loops
+-- TODO: match WithAcc?
 transformExp :: Exp GPU -> IntraMMMMonad (Exp GPU)
--- transformExp (BasicOp op) = BasicOp op
--- transformExp (Apply name args rets info) = Apply name args rets info
 transformExp (Match subExps cases body matchDec) = Match subExps <$> mapM transformCase cases <*> transformBody body <*> pure matchDec
-transformExp (Loop params form body) = Loop params form <$> transformBody body
+transformExp (Loop params form body) = localScope (scopeOfFParams (map fst params) <> scopeOfLoopForm form) $ do
+  newBody <- transformBody body
+  pure $ Loop params form newBody
 transformExp (Op op) = Op <$> transformOp op
 transformExp e = pure e
 
@@ -611,16 +611,11 @@ replaceArg a = pure a
 
 -- TODO: add stuff to scope in other places
 fixExp :: Exp GPUMem -> FixMonad (Exp GPUMem)
---fixExp (Apply "gemm_123456" args rets info) = do
---  let rets' = map retInRegs rets
---  newArgs <- mapM replaceArg args
---  pure $ Apply "gemm_123456" newArgs rets' info
 fixExp (Match subExps cases body matchDec) = Match subExps <$> mapM fixCase cases <*> fixBody body <*> pure matchDec
-fixExp (Loop params form body) = Loop params form <$> fixBody body
+fixExp (Loop params form body) = localScope (scopeOfFParams (map fst params) <> scopeOfLoopForm form) $ do
+  newBody <- fixBody body
+  pure $ Loop params form newBody
 fixExp (Op op) = Op <$> fixOp op
--- TODO: match more?
--- fixExp (BasicOp op) = BasicOp op
--- fixExp (Apply name args rets info) = Apply name args rets info
 fixExp e = pure e
 
 fixCase :: Case (Body GPUMem) -> FixMonad (Case (Body GPUMem))
