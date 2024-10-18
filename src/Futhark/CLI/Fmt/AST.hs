@@ -31,7 +31,8 @@ module Futhark.CLI.Fmt.AST
     runFormat,
     Format (..),
     align,
-    sepLoc
+    sepLoc,
+    fmtByLoc
   )
 where
 
@@ -44,13 +45,14 @@ import Control.Monad.Reader
     ( ReaderT(..), MonadReader(..) )
 import Control.Monad.State
     ( StateT, gets, modify, MonadState(..), evalStateT )
-import Data.Loc ( Located(..), Loc(..), posLine)
+import Data.Loc ( Located(..), Loc(..), posLine, posCoff)
 import Language.Futhark.Parser.Monad ( Comment(..) )
 
 -- These are left associative since we want to evaluate the monadic
 -- computation from left to right. Since the left most expression is
 -- printed first and our monad is checking if a comment should be
 -- printed.
+
 infixl 6 <:>
 infixl 6 <+>
 infixl 6 </>
@@ -58,8 +60,10 @@ infixl 7 <+/>
   
 newtype Fmt = Fmt (Doc ())
 
-newtype FmtState = FmtState
-  {comments :: [Comment]}
+
+data FmtState = FmtState
+  {comments :: [Comment], -- the comments
+   file :: T.Text} -- The original source file 
   deriving (Show, Eq, Ord)
 
 data Layout = MultiLine | SingleLine deriving (Show, Eq)
@@ -113,16 +117,27 @@ popComments = do
   modify (\s -> s {comments = []})
   sep nil cs
 
+fmtByLoc :: Located a => a -> FmtM Fmt 
+fmtByLoc a = do
+  f <- gets file
+  case locOf a of
+    Loc sPos ePos ->
+      let sOff = posCoff sPos
+          eOff = posCoff ePos
+      in code $ T.take (eOff-sOff) $ T.drop sOff f
+    NoLoc -> undefined
+
 (<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
 (<+/>) a b =
   case lineLayout b of
     MultiLine -> a </> stdIndent b
     SingleLine -> a <+> b
 
-runFormat :: FmtM a -> [Comment] -> a
-runFormat format cs = runIdentity $ evalStateT (runReaderT format e) s
+runFormat :: FmtM a -> [Comment] -> T.Text -> a
+runFormat format cs file = runIdentity $ evalStateT (runReaderT format e) s
   where
-    s = FmtState {comments = cs}
+    s = FmtState {comments = cs,
+                  file = file }
     e = MultiLine
 
 nil :: FmtM Fmt

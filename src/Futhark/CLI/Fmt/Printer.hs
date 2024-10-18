@@ -229,9 +229,9 @@ instance Format (UncheckedPat t) where
     where
       single = pat <:> code ":" <+> t
       multi = single
-  fmt (PatLit e _ loc) = buildFmt loc single multi
+  fmt (PatLit _e _ loc) = buildFmt loc single multi
     where
-      single = fmtPretty e
+      single = fmtByLoc loc --fmtPretty e
       multi = single
   fmt (PatConstr n _ pats loc) = buildFmt loc single multi
     where
@@ -244,6 +244,11 @@ instance Format (UncheckedPat t) where
       single = attr <+> pat
       multi = single
 
+(a
+,b
+,c)
+
+(a, b, c)
 instance Format (FieldBase NoInfo Name) where
   fmt (RecordFieldExplicit name e loc) = buildFmt loc single multi
     where
@@ -315,15 +320,15 @@ instance Format UncheckedExp where
     where
       single = e <+> code ":>" <+> t
       multi = single
-  fmt (Literal v loc) = buildFmt loc single single
+  fmt (Literal _v loc) = buildFmt loc single single
     where
-      single = fmtPretty v -- Not sure how this can be multiline.
-  fmt (IntLit v _ loc) = buildFmt loc single single
+      single = fmtByLoc loc -- fmt _v -- Not sure how this can be multiline.
+  fmt (IntLit _v _ loc) = buildFmt loc single single
     where
-      single = fmtPretty v -- Not sure how this can be multiline.
-  fmt (FloatLit v _ loc) = buildFmt loc single single
+      single = fmtByLoc loc  -- fmtPretty _v -- Not sure how this can be multiline.
+  fmt (FloatLit _v _ loc) = buildFmt loc single single
     where
-      single = fmtPretty v -- Not sure how this can be multiline.
+      single = fmtByLoc loc -- fmtPretty _v -- Not sure how this can be multiline.
   fmt (TupLit es loc) = buildFmt loc single multi
     where
       single = parens $ sepSpace (code ",") es
@@ -340,10 +345,10 @@ instance Format UncheckedExp where
     where
       single = brackets $ sepSpace (code ",") es
       multi = brackets $ sepLine (code ",") es
-  fmt (StringLit s loc) = buildFmt loc single multi
+  fmt (StringLit _s loc) = buildFmt loc single multi
     where
-      single = fmtPretty $ show $ fmap (chr . fromIntegral) s
-      multi = single
+      single = fmtByLoc loc --fmtPretty $ show $ fmap (chr . fromIntegral) s
+      multi = single -- TODO: Create multiline fmt of strings
   fmt (Project k e _ loc) = buildFmt loc single multi
     where
       single = e <:> code "." <:> fmtPretty k
@@ -827,4 +832,4 @@ fmtText :: String -> T.Text -> Either SyntaxError T.Text
 fmtText fName fContent = do
   (prog, cs) <- parseFutharkWithComments fName fContent
   let m = fmt prog
-  pure $ pretty $ runFormat m cs
+  pure $ pretty $ runFormat m cs fContent
