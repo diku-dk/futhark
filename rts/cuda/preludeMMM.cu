@@ -70,7 +70,7 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(__local unsigned char **mem_out_p_
     mem_out_6333 = shared_mem_6287;
     *mem_out_p_0 = mem_out_6333;
 }
-FUTHARK_FUN_ATTR void futrts_copyRegistersGlobal(__local unsigned char **mem_out_p_0, f16 registers_mem_6286[(int64_t) 8], __local unsigned char *global_mem_6287)
+FUTHARK_FUN_ATTR void futrts_copyRegistersShared(__local unsigned char **mem_out_p_0, f16 registers_mem_6286[(int64_t) 8], __local unsigned char *global_mem_6287)
 {
 //    TODO: try tiledcopy instead?
     ASmemLayout g_layout;
