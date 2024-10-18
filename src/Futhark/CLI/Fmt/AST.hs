@@ -1,5 +1,6 @@
 module Futhark.CLI.Fmt.AST
   ( Fmt,
+    FmtIR,
     -- functions for building fmt
     nil,
     nest,
@@ -7,13 +8,11 @@ module Futhark.CLI.Fmt.AST
     code,
     space,
     line,
-    comment,
     sep,
-    sepSpace,
-    sepLine,
     brackets,
     braces,
     parens,
+    (<|>),
     (<+>),
     (</>),
     (<:>),
@@ -31,8 +30,10 @@ module Futhark.CLI.Fmt.AST
     runFormat,
     Format (..),
     align,
-    sepLoc,
-    fmtByLoc
+    -- sepLoc,
+    fmtByLoc,
+    buildFmtByLoc,
+    comment
   )
 where
 
@@ -57,9 +58,74 @@ infixl 6 <:>
 infixl 6 <+>
 infixl 6 </>
 infixl 7 <+/>
+infixl 4 <|>
   
 newtype Fmt = Fmt (Doc ())
 
+fmtToIR :: Fmt -> FmtIR
+fmtToIR (Fmt a) = Lit a
+
+data FmtIR
+  = Nil
+  | Space
+  | Line
+  | Lit (Doc ())
+  | Align FmtIR
+  | Indent Int FmtIR
+  | Nest Int FmtIR
+  | Sep FmtIR [FmtIR]
+  | Union FmtIR FmtIR
+  | Con FmtIR FmtIR deriving Show
+
+flatten :: FmtIR -> FmtIR
+flatten Nil = Nil
+flatten Space = Space
+flatten Line = Space
+flatten (Lit a) = Lit a
+flatten (Align a) = flatten a
+flatten (Indent _ a) = flatten a
+flatten (Nest _ a) = flatten a
+flatten (Sep a as) = Sep (flatten a) (flatten <$> as)
+flatten (Union a _) = a
+flatten (Con a b) = Con (flatten a) (flatten b)
+
+compileToDoc :: FmtIR -> Doc () 
+compileToDoc Nil = mempty
+compileToDoc Space = P.space
+compileToDoc Line = P.line
+compileToDoc (Lit a) = a
+compileToDoc (Align a) = P.align $ compileToDoc a
+compileToDoc (Indent i a) = P.indent i $ compileToDoc a
+compileToDoc (Nest i a) = P.nest i $ compileToDoc a
+compileToDoc (Sep a as) =
+  P.concatWith (\x y -> x <> compileToDoc a <> y)
+  $ compileToDoc <$> as
+compileToDoc (Union _ a) = compileToDoc a
+compileToDoc (Con a b) = compileToDoc a <> compileToDoc b
+
+compile :: FmtIR -> Fmt
+compile = Fmt . compileToDoc
+
+compileM :: FmtM FmtIR -> FmtM Fmt
+compileM = fmap compile
+
+compileByLayout :: Layout -> FmtIR -> Fmt
+compileByLayout MultiLine = compile
+compileByLayout SingleLine = compile . flatten
+
+-- parses comments infront of a and converts a to fmt using formatting function f
+buildFmt :: (Located a, Format b) => a -> b -> b -> FmtM Fmt
+buildFmt a single multi = local (const $ lineLayout a) $ do
+  Fmt c <- fmtComments a
+  m <- ask
+  Fmt f <- compile <$> if m == SingleLine then fmtIR single else fmtIR multi
+  pure $ Fmt $ c <> f
+
+buildFmtByLoc :: (Located a, Format b) => a -> b -> FmtM Fmt
+buildFmtByLoc a fmt_ir = local (const $ lineLayout a) $ do
+  Fmt c <- fmtComments a
+  Fmt f <- compileByLayout <$> ask <*> fmtIR fmt_ir
+  pure $ Fmt $ c <> f
 
 data FmtState = FmtState
   {comments :: [Comment], -- the comments
@@ -72,16 +138,23 @@ data Layout = MultiLine | SingleLine deriving (Show, Eq)
 type FmtM a = ReaderT Layout (StateT FmtState Identity) a
 
 class Format a where
+  fmtIR :: a -> FmtM FmtIR
+  fmtIR = fmap fmtToIR . fmt
+  
   fmt :: a -> FmtM Fmt
+  fmt = compileM . fmtIR
 
+instance Format (FmtM FmtIR) where
+  fmtIR = id
+  
 instance Format (FmtM Fmt) where
-  fmt = id
-
-instance Format T.Text where
-  fmt = code
-
+  fmtIR = fmap fmtToIR
+  
 instance Format Comment where
-  fmt = comment . commentText
+  fmtIR = comment . commentText
+  
+prettyComment :: Comment -> Doc ()
+prettyComment = P.pretty . commentText
 
 -- Functions for operating on FmtM monad
 fmtComments :: (Located a) => a -> FmtM Fmt
@@ -90,17 +163,10 @@ fmtComments a = do
   case comments s of
     c : cs | locOf a > locOf c -> do
       put $ s {comments = cs}
-      fmt c <:> fmtComments a -- fmts remaining comments
-    _ -> nil
-
--- parses comments infront of a and converts a to fmt using formatting function f
-buildFmt :: (Located a) => a -> FmtM Fmt -> FmtM Fmt -> FmtM Fmt
-buildFmt a single multi = local (const $ lineLayout a) $ do
-  Fmt c <- fmtComments a
-  m <- ask
-  Fmt a' <- if m == SingleLine then single else multi
-  -- c' <- trailingComment a
-  pure $ toFmt $ c <> a'
+      Fmt f <- fmtComments a
+      Fmt c' <- fmt $ comment $ commentText c
+      pure $ Fmt $ c' <> f -- fmts remaining comments
+    _any -> pure $ Fmt mempty
 
 lineLayout :: (Located a) => a -> Layout
 lineLayout a =
@@ -115,9 +181,9 @@ popComments :: FmtM Fmt
 popComments = do
   cs <- gets comments
   modify (\s -> s {comments = []})
-  sep nil cs
+  pure $ Fmt $ mconcat $ prettyComment <$> cs
 
-fmtByLoc :: Located a => a -> FmtM Fmt 
+fmtByLoc :: Located a => a -> FmtM FmtIR 
 fmtByLoc a = do
   f <- gets file
   case locOf a of
@@ -127,7 +193,7 @@ fmtByLoc a = do
       in code $ T.take (eOff-sOff) $ T.drop sOff f
     NoLoc -> undefined
 
-(<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
+(<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM FmtIR
 (<+/>) a b =
   case lineLayout b of
     MultiLine -> a </> stdIndent b
@@ -140,42 +206,29 @@ runFormat format cs file = runIdentity $ evalStateT (runReaderT format e) s
                   file = file }
     e = MultiLine
 
-nil :: FmtM Fmt
-nil = pure $ toFmt mempty
+nil :: FmtM FmtIR
+nil = pure $ Lit mempty
 
-mapFmt :: (Doc () -> Doc ()) -> Fmt -> Fmt
-mapFmt f (Fmt a) = Fmt $ f a
+nest :: (Format a) => Int -> a -> FmtM FmtIR
+nest i = fmap (Nest i) . fmtIR
 
-mapFmtM :: (Doc () -> Doc ()) -> FmtM Fmt -> FmtM Fmt
-mapFmtM f = fmap (mapFmt f)
+space :: FmtM FmtIR
+space = pure Space
 
-unFmt :: Fmt -> Doc ()
-unFmt (Fmt a) = a
+line :: FmtM FmtIR
+line = pure Line
 
-unFmtM :: FmtM Fmt -> FmtM (Doc ())
-unFmtM = fmap unFmt
+(<|>) :: (Format a, Format b) => a -> b -> FmtM FmtIR
+a <|> b = Union <$> fmtIR a <*> fmtIR b
 
-toFmt :: Doc () -> Fmt
-toFmt = Fmt
+comment :: T.Text -> FmtM FmtIR
+comment c = pure (Lit $ P.pretty c <> P.line)
 
-toFmtM :: FmtM (Doc ()) -> FmtM Fmt
-toFmtM = fmap toFmt
-
-nest :: (Format a) => Int -> a -> FmtM Fmt
-nest i = mapFmtM (P.nest i) . fmt
-
-space :: FmtM Fmt
-space = pure $ Fmt P.space
-
-line :: FmtM Fmt
-line = pure $ Fmt P.line
-
-sep :: (Format a, Format b) => a -> [b] -> FmtM Fmt
-sep s xs = toFmtM $ aux <$> unFmtM (fmt s) <*> mapM (unFmtM . fmt) xs
-  where
-    aux z = P.concatWith (\a b -> a <> z <> b)
+sep :: (Format a, Format b) => a -> [b] -> FmtM FmtIR
+sep s as = Sep <$> fmtIR s <*> mapM fmtIR as
 
 -- I am not sure this fulfills idemppotence.
+{-
 sepLoc :: (Format a, Located a) => [a] -> FmtM Fmt
 sepLoc [] = nil
 sepLoc (y:ys) = fmt y <:> auxiliary Nothing nil ys
@@ -194,60 +247,52 @@ sepLoc (y:ys) = fmt y <:> auxiliary Nothing nil ys
               posLine s0 == posLine s1 &&
               posLine e0 == posLine e1
             _any -> True
+-}
 
-stdNest :: (Format a) => a -> FmtM Fmt
+stdNest :: (Format a) => a -> FmtM FmtIR
 stdNest = nest 2
 
-align :: (Format a) => a -> FmtM Fmt
-align = mapFmtM P.align . fmt
+align :: (Format a) => a -> FmtM FmtIR
+align = fmap Align . fmtIR
 
-indent :: (Format a) => Int -> a -> FmtM Fmt
-indent i = mapFmtM (P.indent i) . fmt
+indent :: (Format a) => Int -> a -> FmtM FmtIR
+indent i = fmap (Indent i) . fmtIR
 
-stdIndent :: Format a => a -> FmtM Fmt
+stdIndent :: Format a => a -> FmtM FmtIR
 stdIndent = indent 2
 
-code :: T.Text -> FmtM Fmt
-code = pure . toFmt . P.pretty
+code :: T.Text -> FmtM FmtIR
+code = pure . Lit . P.pretty
 
-comment :: T.Text -> FmtM Fmt
-comment = (<:> line) . code
+brackets :: (Format a) => a -> FmtM FmtIR
+brackets a = code "[" <:> fmtIR a <:> code "]" 
 
-brackets :: (Format a) => a -> FmtM Fmt
-brackets = mapFmtM P.brackets . fmt
+braces :: (Format a) => a -> FmtM FmtIR
+braces a = code "{" <:> fmtIR a <:> code "}"
 
-braces :: (Format a) => a -> FmtM Fmt
-braces = mapFmtM P.braces . fmt
+parens :: (Format a) => a -> FmtM FmtIR
+parens a = code "(" <:> fmtIR a <:> code ")"
 
-parens :: (Format a) => a -> FmtM Fmt
-parens = mapFmtM P.parens . fmt
+(<:>) :: (Format a, Format b) => a -> b -> FmtM FmtIR
+a <:> b = Con <$> fmtIR a <*> fmtIR b
 
-sepSpace :: (Format a, Format b) => a -> [b] -> FmtM Fmt
-sepSpace s = sep (fmt s <:> space)
-
-sepLine :: (Format a, Format b) => a -> [b] -> FmtM Fmt
-sepLine s = sep (line <:> fmt s)
-
-(<:>) :: (Format a, Format b) => a -> b -> FmtM Fmt
-a <:> b = toFmtM $ (P.<>) <$> unFmtM (fmt a) <*> unFmtM (fmt b)
-
-(<+>) :: (Format a, Format b) => a -> b -> FmtM Fmt
+(<+>) :: (Format a, Format b) => a -> b -> FmtM FmtIR
 a <+> b = a <:> space <:> b
 
-(</>) :: (Format a, Format b) => a -> b -> FmtM Fmt
+(</>) :: (Format a, Format b) => a -> b -> FmtM FmtIR
 a </> b = a <:> line <:> b
 
-colon :: FmtM Fmt
-colon = pure $ toFmt P.colon
+colon :: FmtM FmtIR
+colon = pure $ Lit P.colon
 
-sepNonEmpty :: (Format a, Format b) => a -> [b] -> FmtM Fmt
+sepNonEmpty :: (Format a, Format b) => a -> [b] -> FmtM FmtIR
 sepNonEmpty = sep
 
 layoutOpts :: P.LayoutOptions
 layoutOpts = P.LayoutOptions P.Unbounded
 
 pretty :: Fmt -> T.Text
-pretty = renderStrict . P.layoutPretty layoutOpts . unFmt
+pretty (Fmt a) = renderStrict $ P.layoutPretty layoutOpts a
 
-isEmpty :: Fmt -> Bool
+isEmpty :: FmtIR -> Bool
 isEmpty = const False

@@ -61,38 +61,38 @@ debug a = traceShow a a
 -- TODO (Question?): Change fmt to be a sequence of lines instead of a list of lines
 
 fmtName :: Name -> FmtM Fmt
-fmtName = code . nameToText
+fmtName = fmt . code . nameToText
 
 fmtNameParen :: Name -> FmtM Fmt
 fmtNameParen name
-  | operatorName name = parens $ fmtName name -- (doesn't seem like this needs to always be parenthesized?)
+  | operatorName name = fmt $ parens $ fmtName name -- (doesn't seem like this needs to always be parenthesized?)
   | otherwise = fmtName name
 
 fmtPretty :: (Pretty a) => a -> FmtM Fmt
-fmtPretty = code . prettyText
+fmtPretty = fmt . code . prettyText
 
 -- | Documentation comments are always optional, so this takes a 'Maybe'.
 -- TODO: make special documentation comments in Fmt?
 -- TODO: Add "--" and "-- |" in pretty printer
 instance Format (Maybe DocComment) where
   fmt (Just (DocComment x _loc)) =
-    sep nil $ prefixes (T.lines x)
+    fmt $ sep nil $ prefixes (T.lines x)
     where
       prefixes [] = []
       prefixes (l : ls) = comment ("-- | " <> l) : map (comment . ("-- " <>)) ls
-  fmt Nothing = nil
+  fmt Nothing = fmt nil
 
 fmtFieldType :: (Name, UncheckedTypeExp) -> FmtM Fmt
-fmtFieldType (name', t) = fmtName name' <:> code ":" <+> t
+fmtFieldType (name', t) = fmt $ fmtName name' <:> code ":" <+> t
 
 fmtParamType :: Maybe Name -> UncheckedTypeExp -> FmtM Fmt
 fmtParamType (Just n) te =
-  parens $ fmtName n <:> code ":" <+> te
+  fmt $ parens $ fmtName n <:> code ":" <+> te
 fmtParamType Nothing te = fmt te
 
 fmtSumTypeConstr :: (Name, [UncheckedTypeExp]) -> FmtM Fmt
 fmtSumTypeConstr (name, fs) =
-  code "#" <:> fmtName name <+> sep space fs
+  fmt $ code "#" <:> fmtName name <+> sep space fs
 
 -- | Formatting of Futhark type expressions.
 instance Format UncheckedTypeExp where
@@ -100,98 +100,67 @@ instance Format UncheckedTypeExp where
     where
       single = fmtQualNameSingle v
       multi = fmtQualNameMulti v
-  fmt (TETuple ts loc) = buildFmt loc single multi
-    where
-      single = parens $ sepSpace (code ",") ts
-      multi = parens $ sepLine (code ",") ts
+  fmt (TETuple ts loc) =
+    buildFmtByLoc loc $ parens $ sep (code "," <:> space <|> line <:> code ",") ts
   fmt (TEParens te loc) = buildFmt loc single multi
     where
       single = parens te
       multi = single -- not sure this is correct
-  fmt (TERecord fs loc) = buildFmt loc single multi
+  fmt (TERecord fs loc) =
+    buildFmtByLoc loc $ braces $ sep (code "," <:> space <|> line <:> code ",") fields
     where
       fields = fmtFieldType <$> fs
-      single = braces $ sepSpace (code ",") fields 
-      multi = braces $ sepLine (code ",") fields
-  fmt (TEArray se te loc) = buildFmt loc single multi -- A array with an size expression
-    where
-      single = se <:> te
-      multi = single -- not sure if this can be multi line
-      -- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
-  fmt (TEUnique te loc) = buildFmt loc single multi
-    where
-      single = code "*" <:> te
-      multi = single -- not sure if this can be multi line
-      -- I am not sure I guess applying a higher kinded type to some type expression
-  fmt (TEApply te tArgE loc) = buildFmt loc single multi
-    where
-      single = te <+> tArgE
-      multi = single -- not sure if this can be multi lin
-      -- this is "->"
-  fmt (TEArrow name te0 te1 loc) = buildFmt loc single multi
-    where
-      single =
-        fmtParamType name te0 <+> code "->" <+> te1
-      multi =
-        fmtParamType name te0 <+> code "->" </> stdIndent te1
-        -- This should be "|"
-  fmt (TESum tes loc) = buildFmt loc single multi
-    where
-      single = sepSpace (code " |") $ map fmtSumTypeConstr tes
-      multi = sepLine (code "| ") $ map fmtSumTypeConstr tes
-  fmt (TEDim dims te loc) = buildFmt loc single multi
+  fmt (TEArray se te _loc) = fmt $ se <:> te -- not sure if this can be multi line
+  -- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
+  fmt (TEUnique te _loc) = fmt $ code "*" <:> te  -- not sure if this can be multi line
+  -- I am not sure I guess applying a higher kinded type to some type expression
+  fmt (TEApply te tArgE _loc) = fmt $ te <+> tArgE -- not sure if this can be multi lin
+  -- this is "->"
+  fmt (TEArrow name te0 te1 loc) =
+    buildFmtByLoc loc $ fmtParamType name te0 <+> code "->" </> stdIndent te1
+  -- This should be "|"
+  fmt (TESum tes loc) =
+    buildFmtByLoc loc
+    $ sep (code " | " <|> line <:> code "| ")
+    $ map fmtSumTypeConstr tes
+  fmt (TEDim dims te _loc) =
+    fmt $ code "?" <:> dims' <:> code "." <:> te -- not sure how to format this as multiple lines
     where
       dims' = sep nil $ map (brackets . fmtName) dims
-      single = code "?" <:> dims' <:> code "." <:> te
-      multi = single -- not sure how to format this as multiple lines
 
 instance Format (TypeArgExp UncheckedExp Name) where
-  fmt (TypeArgExpSize se) = buildFmt se single multi
-    where
-      single = fmt se
-      multi = single
-  fmt (TypeArgExpType te) = buildFmt te single multi
-    where
-      single = fmt te
-      multi = single
+  fmt (TypeArgExpSize se) = fmt se
+  fmt (TypeArgExpType te) = fmt te
 
 instance Format UncheckedTypeBind where 
-  fmt (TypeBind name l ps e NoInfo dc loc) = buildFmt loc single multi
+  fmt (TypeBind name l ps e NoInfo dc loc) =
+    buildFmtByLoc loc $
+    dc
+    <:> code "type"
+    <:> l
+    <+> fmtName name
+    <:> code (if null ps then "" else " ")
+    `ps_op` sep space ps
+    <+> code "="
+    </> stdIndent e
     where
       ps_op = if null ps then (<:>) else (<+>)
-      single =
-        dc
-        <:> code "type"
-        <:> l
-        <+> fmtName name
-        <:> code (if null ps then "" else " ")
-        `ps_op` sep space ps
-        <+> code "="
-        <+> e
-      multi = do
-        dc
-        <:> code "type"
-        <:> l
-        <+> fmtName name
-        `ps_op` sep space ps
-        <+> code "="
-        </> stdIndent e
 
 instance Format (AttrAtom a) where
   fmt (AtomName name) = fmtName name
-  fmt (AtomInt int) = code $ prettyText int
+  fmt (AtomInt int) = fmt $ code $ prettyText int
 
 instance Format (AttrInfo a) where
-  fmt attr = code "#" <:> brackets (fmtAttrInfo attr)
+  fmt attr = fmt $ code "#" <:> brackets (fmtAttrInfo attr)
     where
       fmtAttrInfo (AttrAtom attr' _loc) = fmt attr'
       fmtAttrInfo (AttrComp name attrs _loc) =
-        fmtName name <:> parens (sep (code ",") $ map fmtAttrInfo attrs)
+        fmt $ fmtName name <:> parens (sep (code ",") $ map fmtAttrInfo attrs)
 
 instance Format Liftedness where
-  fmt Unlifted = nil
-  fmt SizeLifted = code "~"
-  fmt Lifted = code "^"
+  fmt Unlifted = fmt nil
+  fmt SizeLifted = fmt $ code "~"
+  fmt Lifted = fmt $ code "^"
 
 instance Format UncheckedTypeParam where
   fmt (TypeParamDim name loc) = buildFmt loc single multi
@@ -204,15 +173,16 @@ instance Format UncheckedTypeParam where
       multi = single  
 
 instance Format (UncheckedPat t) where
-  fmt (TuplePat pats loc) = buildFmt loc single multi
-    where
-      single = parens $ sepSpace (code ",") pats
-      multi = parens $ sepLine (code ",") pats
-  fmt (RecordPat pats loc) = buildFmt loc single multi
+  fmt (TuplePat pats loc) =
+    buildFmtByLoc loc
+    $ parens
+    $ sep (code "," <:> space <|> line <:> code ",") pats
+  fmt (RecordPat pats loc) =
+    buildFmtByLoc loc
+    $ braces
+    $ sep (code "," <:> space <|> line <:> code ",") $ map fmtFieldPat pats
     where
       fmtFieldPat (name, t) = fmtName name <+> code "=" <+> t -- Currently it allways adds the fields it seems. I think it has to do this.
-      single = braces $ sepSpace (code ",") $ map fmtFieldPat pats
-      multi = braces $ sepLine (code ",") $ map fmtFieldPat pats
   fmt (PatParens pat loc) = buildFmt loc single multi
     where
       single = parens pat
@@ -244,11 +214,6 @@ instance Format (UncheckedPat t) where
       single = attr <+> pat
       multi = single
 
-(a
-,b
-,c)
-
-(a, b, c)
 instance Format (FieldBase NoInfo Name) where
   fmt (RecordFieldExplicit name e loc) = buildFmt loc single multi
     where
@@ -261,33 +226,35 @@ instance Format (FieldBase NoInfo Name) where
 
 instance Format PrimValue where
   fmt (UnsignedValue (Int8Value v)) =
-    fmtPretty (show (fromIntegral v :: Word8)) <:> code "u8"
+    fmt $ fmtPretty (show (fromIntegral v :: Word8)) <:> code "u8"
   fmt (UnsignedValue (Int16Value v)) =
-    fmtPretty (show (fromIntegral v :: Word16)) <:> code "u16"
+    fmt $ fmtPretty (show (fromIntegral v :: Word16)) <:> code "u16"
   fmt (UnsignedValue (Int32Value v)) =
-    fmtPretty (show (fromIntegral v :: Word32)) <:> code "u32"
+    fmt $ fmtPretty (show (fromIntegral v :: Word32)) <:> code "u32"
   fmt (UnsignedValue (Int64Value v)) =
-    fmtPretty (show (fromIntegral v :: Word64)) <:> code "u64"
+    fmt $ fmtPretty (show (fromIntegral v :: Word64)) <:> code "u64"
   fmt (SignedValue v) = fmtPretty v
-  fmt (BoolValue True) = code "true"
-  fmt (BoolValue False) = code "false"
+  fmt (BoolValue True) = fmt $ code "true"
+  fmt (BoolValue False) = fmt $ code "false"
   fmt (FloatValue v) = fmtPretty v
 
 instance Format UncheckedDimIndex where
   fmt (DimFix e) = fmt e
-  fmt (DimSlice i j (Just s)) = do
-    maybe nil fmt i
+  fmt (DimSlice i j (Just s)) =
+    fmt $
+    maybe (fmt nil) fmt i
     <:> code ":"
-    <:> maybe nil fmt j
+    <:> maybe (fmt nil) fmt j
     <:> code ":"
-    <:> s
-  fmt (DimSlice i (Just j) s) = do
-    maybe nil fmt i
+    <:> fmt s
+  fmt (DimSlice i (Just j) s) =
+    fmt $
+    maybe (fmt nil) fmt i
     <:> code ":"
     <:> fmt j
-    <:> maybe nil (code ":" <:>) s
+    <:> maybe nil ((code ":" <:>) . fmt) s
   fmt (DimSlice i Nothing Nothing) =
-    maybe nil fmt i <:> code ":"
+    fmt $ maybe (fmt nil) fmt i <:> code ":"
 
 operatorName :: Name -> Bool
 operatorName = (`elem` opchars) . T.head . nameToText
@@ -329,22 +296,22 @@ instance Format UncheckedExp where
   fmt (FloatLit _v _ loc) = buildFmt loc single single
     where
       single = fmtByLoc loc -- fmtPretty _v -- Not sure how this can be multiline.
-  fmt (TupLit es loc) = buildFmt loc single multi
-    where
-      single = parens $ sepSpace (code ",") es
-      multi = parens $ sepLine (code ",") es
-  fmt (RecordLit fs loc) = buildFmt loc single multi
-    where
-      single = braces $ sepSpace (code ",") fs
-      multi = braces $ sepLine (code ",") fs
-  fmt (ArrayVal vs _ loc) = buildFmt loc single multi
-    where
-      single = brackets $ sepSpace (code ",") vs
-      multi = brackets $ sepLine (code ",") vs
-  fmt (ArrayLit es _ loc) = buildFmt loc single multi
-    where
-      single = brackets $ sepSpace (code ",") es
-      multi = brackets $ sepLine (code ",") es
+  fmt (TupLit es loc) =
+    buildFmtByLoc loc
+    $ parens
+    $ sep (code "," <:> space <|> line <:> code ",")  es
+  fmt (RecordLit fs loc) =
+    buildFmtByLoc loc
+    $ braces
+    $ sep (code "," <:> space <|> line <:> code ",")  fs
+  fmt (ArrayVal vs _ loc) =
+    buildFmtByLoc loc
+    $ brackets
+    $ sep (code "," <:> space <|> line <:> code ",")  vs
+  fmt (ArrayLit es _ loc) =
+    buildFmtByLoc loc
+    $ brackets
+    $ sep (code "," <:> space <|> line <:> code ",")  es
   fmt (StringLit _s loc) = buildFmt loc single multi
     where
       single = fmtByLoc loc --fmtPretty $ show $ fmap (chr . fromIntegral) s
@@ -363,7 +330,7 @@ instance Format UncheckedExp where
       multi = single
   fmt (Update src idxs ve loc) = buildFmt loc single multi
     where
-      idxs' = brackets $ sepSpace (code ",") idxs -- This could account for multiline.
+      idxs' = brackets $ sep (code "," <:> space) idxs -- This could account for multiline.
       common = src <+> code "with" <+> idxs'
       single = common <+> code "=" <+> ve
       multi = common <+> stdNest (code "=" </> ve)
@@ -401,7 +368,7 @@ instance Format UncheckedExp where
       multi = single
   fmt (IndexSection idxs _ loc) = buildFmt loc single multi
     where
-      idxs' = brackets $ sepSpace (code ",") idxs
+      idxs' = brackets $ sep (code "," <:> space) idxs
       single = parens (code "." <:> idxs')
       multi = single
   fmt (Constr n cs _ loc) = buildFmt loc single multi
@@ -421,8 +388,8 @@ instance Format UncheckedExp where
 
 fmtQualNameSingle :: QualName Name -> FmtM Fmt
 fmtQualNameSingle (QualName names name)
-  | operatorName name = parens $ pre <:> fmtName name 
-  | otherwise = pre <:> fmtName name
+  | operatorName name = fmt $ parens $ pre <:> fmtName name 
+  | otherwise = fmt $ pre <:> fmtName name
     where
       pre =
         if null names
@@ -431,8 +398,8 @@ fmtQualNameSingle (QualName names name)
 
 fmtQualNameMulti :: QualName Name -> FmtM Fmt
 fmtQualNameMulti (QualName names name)
-  | operatorName name = parens $ pre <:> fmtName name 
-  | otherwise = pre <:> fmtName name
+  | operatorName name = fmt $ parens $ pre <:> fmtName name 
+  | otherwise = fmt $ pre <:> fmtName name
     where
       pre =
         if null names
@@ -495,17 +462,17 @@ instance Format (AppExpBase NoInfo Name) where
         <+> form
       single = common <+> code "do" <+> loopbody
       multi = common <+> stdNest (code "do" </> loopbody)
-  fmt (Index e idxs loc) = buildFmt loc single multi
-    where
-      aux f = brackets $ f (code ",") idxs
-      single = e <:> aux sepSpace
-      multi = e <:> aux sepLine
+  fmt (Index e idxs loc) =
+    buildFmtByLoc loc
+    $ (e <:>)
+    $ brackets
+    $ sep (code "," <:> space <|> line <:> code ",") idxs
   fmt (LetPat sizes pat e body loc) = buildFmt loc single multi
     where
       sizes' = sep nil sizes
       common =
         ( code "let"
-          <+> sepNonEmpty space [sizes', fmt pat]
+          <+> sepNonEmpty space [sizes', fmtIR pat]
           <+> code "="
         )
         <+/> e
@@ -600,23 +567,23 @@ letBody body = buildFmt body single multi
     multi = code "in" </> stdIndent body
 
 instance Format (SizeBinder Name) where
-  fmt (SizeBinder v _) = brackets $ fmtName v
+  fmt (SizeBinder v _) = fmt $ brackets $ fmtName v
 
 instance Format (IdentBase NoInfo Name t) where
   fmt = fmtPretty . identName
 
 instance Format (LoopFormBase NoInfo Name) where
   fmt (For i ubound) =
-    code "for" <+> i <+> code "<" <+> ubound
+    fmt $ code "for" <+> i <+> code "<" <+> ubound
   fmt (ForIn x e) =
-    code "for" <+> x <+> code "in" <+> e
+    fmt $ code "for" <+> x <+> code "in" <+> e
   fmt (While cond) = do
-    code "while" <+> cond
+    fmt $ code "while" <+> cond
 
 fmtBinOp :: QualName Name -> FmtM Fmt
 fmtBinOp bop =
   case leading of
-    Backtick -> code "`" <:> fmtQualNameSingle bop <:> code "`"
+    Backtick -> fmt $ code "`" <:> fmtQualNameSingle bop <:> code "`"
     _any -> fmtPretty bop
   where
     leading = leadingOperator $ toName $ qualLeaf bop
@@ -641,7 +608,7 @@ instance Format UncheckedValBind where
         <:> sub
         <:> retdecl'
       single = common <+> code "=" <+> body
-      multi = common <+> code "=" </> stdNest body
+      multi = common <+> code "=" </> stdIndent body
       fun =
         case entry of
           Just _ -> code "entry"
@@ -826,7 +793,8 @@ instance Format UncheckedDec where
 -- inserted at the end.
 instance Format UncheckedProg where
   fmt (Prog dc decs) =
-    dc <:> sep (line <:> line) decs <:> popComments
+    fmt $ dc <:> sep (line <:> line) decs <:> popComments
+  
 
 fmtText :: String -> T.Text -> Either SyntaxError T.Text
 fmtText fName fContent = do
