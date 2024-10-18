@@ -1,6 +1,6 @@
 module Futhark.Optimise.IntraMMM (intraMMM, intraMMMMemFixup) where
 
--- TODO: add specific imports, clean up
+-- TODO: add specific imports, clean up, reorganize to multiple files
 
 import Control.Lens.Lens
 import Control.Monad.Identity
@@ -36,6 +36,7 @@ import Futhark.Construct
 import Futhark.Optimise.IntraMMM.Utils
 import Data.Map.Strict qualified as M
 import Futhark.Builder.Class
+import Data.Bits
 import Prelude hiding (lookup)
 import Futhark.Pass
   ( Pass (..),
@@ -49,29 +50,16 @@ traceHelper :: (Show a) => a -> a
 traceHelper x = trace (show x ++ "\n") x
 
 
---type IntraMMMMonadEnv = Maybe (VName, SubExp)
--- TODO: avoid blockinfo?
-data IntraMMMMonadEnv = IntraMMMMonadEnv {scope :: Scope GPU, blockInfo :: Maybe (VName, SubExp)}
-
-type IntraMMMMonad = RWS IntraMMMMonadEnv [Int] VNameSource
-
--- TODO: use newtype above to fix warning
-instance
-  HasScope GPU IntraMMMMonad
-  where
-  askScope = asks scope
-
-instance
-  LocalScope GPU IntraMMMMonad
-  where
-  localScope extension = local $ \env -> env {scope = M.union extension $ scope env}
+intraMMM :: Pass GPU GPU
+intraMMM =
+  Pass
+    "tensor-mma"
+    "Extracts NVIDIA tensor core MMA operations"
+    transformProg
 
 
-askBlockInfo :: IntraMMMMonad (Maybe (VName, SubExp))
-askBlockInfo = asks blockInfo
-
-localBlockInfo :: (Maybe (VName, SubExp) -> Maybe (VName, SubExp)) -> IntraMMMMonad a -> IntraMMMMonad a
-localBlockInfo f = local $ \env -> env {blockInfo = f $ blockInfo env }
+-- TODO: dont use RWS?
+type IntraMMMMonad = RWS (Scope GPU) () VNameSource
 
 
 runBuilderMMM_ :: Builder GPU () -> Scope GPU -> IntraMMMMonad (Stms GPU)
@@ -88,13 +76,12 @@ mapStmsWithScope f stms =
       stms'' <- inScopeOf stm $ mapStmsWithScope f stms'
       pure $ stm' <> stms''
 
+mkInt64Const :: Int -> SubExp
+mkInt64Const = Constant . IntValue . intValue Int64
 
-intraMMM :: Pass GPU GPU
-intraMMM =
-  Pass
-    "tensor-mma"
-    "Extracts NVIDIA tensor core MMA operations"
-    transformProg
+
+
+-- IR generation
 
 -- TODO: emit in monad when needed?
 --gemmFun :: FunDef GPU
@@ -130,17 +117,57 @@ mkCopyGlobalShared = do
 -- TODO: make more flexible in sizes and types
 -- TODO: entire global as input or only slize, if entire add index, maybe dont even take as input?
 -- TODO: copy to global instead of shared
-mkCopyRegistersGlobal :: PassM (FunDef GPU)
-mkCopyRegistersGlobal = do
+mkCopyRegistersShared :: PassM (FunDef GPU)
+mkCopyRegistersShared = do
   registersParam <- newParam "registers" $  Array (FloatType Float16) (Shape [mkInt64Const 32, mkInt64Const 8]) Nonunique
-  globalParam <- newParam "global" $ Array (FloatType Float16) (Shape [mkInt64Const 16, mkInt64Const 16]) Unique
-  let globalOut = [(Array (FloatType Float16) (Shape [Free $ mkInt64Const 16, Free $ mkInt64Const 16]) Unique, RetAls [] [])]
+  sharedParam <- newParam "shared" $ Array (FloatType Float16) (Shape [mkInt64Const 16, mkInt64Const 16]) Unique
+  let sharedOut = [(Array (FloatType Float16) (Shape [Free $ mkInt64Const 16, Free $ mkInt64Const 16]) Unique, RetAls [] [])]
   pure $
-    FunDef Nothing mempty copyRegistersGlobalName
-        globalOut
-        [registersParam, globalParam]
-        $ resultBody [Var $ paramName globalParam]
+    FunDef Nothing mempty copyRegistersSharedName
+        sharedOut
+        [registersParam, sharedParam]
+        $ resultBody [Var $ paramName sharedParam]
 
+buildMMM :: VName -> OuterMMAMatch -> Builder GPU ()
+-- TODO: fix args
+buildMMM resName outerMatch = do
+  let InnerMMAMatch kernelBodyMatch ne sizeM sizeN sizeK = innerMatch outerMatch
+  let blockSize = 32
+  let numBlocks = outerNumBlocks outerMatch
+  let cValsPerThread = mkInt64Const $ sizeM * sizeN `div` blockSize
+--  TODO: get as input instead?
+  let blockSizeSubExp = mkInt64Const blockSize
+--  TODO: do we need to init regs when used only once?
+-- TODO: use SegNoVirtFull instead of loop and avoid setting the block size?
+
+  blockMMAres_list <- segMap1D "blockMMAres" (SegBlock SegNoVirt $ Just $ KernelGrid (Count numBlocks) (Count $ mkInt64Const blockSize)) ResultMaySimplify numBlocks $ \blockIndex -> do
+    cRegs_list <- segMap1D "cRegs" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \_ -> do
+      cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [cValsPerThread]
+      cLoop <- forLoop cValsPerThread [cScratch] $ \i [cMerge] -> do
+        cZeroed <- update "cZeroed" cMerge [i] ne
+  --      TODO: use pure instead of resultBodyM?
+        resultBodyM [Var cZeroed]
+      pure [varRes cLoop]
+    let [cRegs] = cRegs_list
+    aScratch <- letExp "aScratch" $ BasicOp $ Scratch (typeA kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeK]
+    bScratch <- letExp "bScratch" $ BasicOp $ Scratch (typeB kernelBodyMatch) [mkInt64Const sizeK, mkInt64Const sizeN]
+    aCopied <- letExp "aCopied" $ Apply copyGlobalSharedName (fmap (,ObservePrim) (outerDimsA kernelBodyMatch) <> [(Var $ arrA kernelBodyMatch, ObservePrim), (Var aScratch, Consume)]) [(Array (typeA kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeK]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+    bCopied <- letExp "bCopied" $ Apply copyGlobalSharedName (fmap (,ObservePrim) (outerDimsB kernelBodyMatch) <> [(Var $ arrB kernelBodyMatch, ObservePrim), (Var bScratch, Consume)]) [(Array (typeB kernelBodyMatch) (Shape [Free $ mkInt64Const sizeK, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+    inBlockMMAres_list <- segMap1D "inBlockMMAres" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \thread_idx -> do
+      threadCregs <- index "threadCregs" cRegs [thread_idx]
+  --  TODO: is ObservePrim correct?
+      threadMMAres <- letExp "threadMMAres" $ Apply gemmName [(Var aCopied, ObservePrim), (Var bCopied, ObservePrim), (Var threadCregs, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free cValsPerThread]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+      pure [varRes threadMMAres]
+    let [inBlockMMAres] = inBlockMMAres_list
+    cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeN]
+    cCopied <- letExp "cCopied" $ Apply copyRegistersSharedName [(Var inBlockMMAres, ObservePrim), (Var cScratch, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+    pure [varRes cCopied]
+  let [blockMMAres] = blockMMAres_list
+  letBindNames [resName] $ BasicOp $ SubExp $ Var blockMMAres
+
+
+
+-- Traverse and transform
 
 transformProg :: Prog GPU -> PassM (Prog GPU)
 transformProg (Prog opaqueTypes consts funs) = do
@@ -154,16 +181,76 @@ transformProg (Prog opaqueTypes consts funs) = do
 
   gemmFun <- mkGemmFun typeA typeB typeCin typeCout
   copyGlobalSharedFun <- mkCopyGlobalShared
-  copyRegistersGlobalFun <- mkCopyRegistersGlobal
-  pure $ Prog opaqueTypes consts (gemmFun : copyGlobalSharedFun : copyRegistersGlobalFun : transformedFuns)
+  copyRegistersSharedFun <- mkCopyRegistersShared
+  pure $ Prog opaqueTypes consts (gemmFun : copyGlobalSharedFun : copyRegistersSharedFun : transformedFuns)
 
 transformFunDef :: FunDef GPU -> PassM (FunDef GPU)
 transformFunDef funDef@(FunDef entry attrs name retType params body) = do
-  newBody <- modifyNameSource $ (\(a, b, c) -> (a, b)) . runRWS (transformBody body) (IntraMMMMonadEnv (scopeOf funDef) Nothing)
+  newBody <- modifyNameSource $ (\(a, b, c) -> (a, b)) . runRWS (transformBody body) (scopeOf funDef)
   pure $ FunDef entry attrs name retType params newBody
 
+transformStms :: Stms GPU -> IntraMMMMonad (Stms GPU)
+transformStms stms = mapStmsWithScope transformStm stms
 
-data MMAMatch = MMAMatch
+transformStm :: Stm GPU -> IntraMMMMonad (Stms GPU)
+transformStm stm@(Let (Pat [PatElem resName _]) aux e) = do
+    scope <- askScope
+    case outerSegOpExpMatch scope e of
+      Just match ->
+        runBuilderMMM_ (buildMMM resName match) scope
+      _ -> transformStmDefault stm
+transformStm stm = transformStmDefault stm
+
+transformStmDefault :: Stm GPU -> IntraMMMMonad (Stms GPU)
+transformStmDefault (Let pat aux e) = do
+  e' <- transformExp e
+  pure $ oneStm $ Let pat aux e'
+
+-- TODO: scope for lambda and loops
+transformExp :: Exp GPU -> IntraMMMMonad (Exp GPU)
+-- transformExp (BasicOp op) = BasicOp op
+-- transformExp (Apply name args rets info) = Apply name args rets info
+transformExp (Match subExps cases body matchDec) = Match subExps <$> mapM transformCase cases <*> transformBody body <*> pure matchDec
+transformExp (Loop params form body) = Loop params form <$> transformBody body
+transformExp (Op op) = Op <$> transformOp op
+transformExp e = pure e
+
+transformCase :: Case (Body GPU) -> IntraMMMMonad (Case (Body GPU))
+transformCase (Case pat body) = Case pat <$> transformBody body
+
+transformBody :: Body GPU -> IntraMMMMonad (Body GPU)
+transformBody (Body dec stms res) = Body dec <$> transformStms stms <*> pure res
+
+transformOp :: Op GPU -> IntraMMMMonad (Op GPU)
+transformOp (SegOp sOp) = SegOp <$> transformSegOp sOp
+-- TODO: handle these separately?
+transformOp op = pure op
+
+transformSegOp :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
+transformSegOp (SegMap level space ts body) = SegMap level space ts <$> transformKernelBody body
+transformSegOp (SegRed level space ops ts body) = SegRed level space ops ts <$> transformKernelBody body
+transformSegOp (SegScan level space ops ts body) = SegScan level space ops ts <$> transformKernelBody body
+transformSegOp (SegHist level space ops hist body) = SegHist level space ops hist <$> transformKernelBody body
+
+transformKernelBody :: KernelBody GPU -> IntraMMMMonad (KernelBody GPU)
+transformKernelBody (KernelBody desc stms res) = KernelBody desc <$> transformStms stms <*> pure res
+
+
+-- Pattern matching
+
+data OuterMMAMatch = OuterMMAMatch
+  {
+    innerMatch :: InnerMMAMatch,
+    outerVirt :: SegVirt,
+    outerNumBlocks :: SubExp,
+    outerBlockSize :: SubExp,
+    outerFlatIndex :: VName,
+    outerBlockInfo :: (VName, SubExp),
+    outerTypes :: [Type]
+  }
+  deriving (Show, Eq, Ord)
+
+data InnerMMAMatch = InnerMMAMatch
   {
     kernelBodyMatch :: KernelBodyMatch,
     ne :: SubExp,
@@ -193,138 +280,64 @@ data KernelBodyMatch = KernelBodyMatch
   }
   deriving (Show, Eq, Ord)
 
-
--- TODO: maintain scope below?
-transformStms :: Stms GPU -> IntraMMMMonad (Stms GPU)
-transformStms stms = mapStmsWithScope transformStm stms
-
-
-transformStm :: Stm GPU -> IntraMMMMonad (Stms GPU)
--- TODO: pass name of let to builder
-transformStm stm@(Let (Pat [PatElem resName _]) aux e) = do
-    scope <- askScope
-    maybeBlockInfo <- askBlockInfo
-    case maybeBlockInfo of
-    --    TODO: allow more sizes?
-      Just blockInfo | Just match@(MMAMatch kernelBodyMatch ne 16 16 16) <- expMatch e scope -> do
-        let blockSize = 32
-        tell [blockSize]
-        runBuilderMMM_ (buildMMM resName blockSize blockInfo match) mempty
-      _ -> transformStmDefault stm
-transformStm stm = transformStmDefault stm
-
-
-transformStmDefault :: Stm GPU -> IntraMMMMonad (Stms GPU)
-transformStmDefault (Let pat aux e) = do
-  e' <- transformExp e
-  pure $ oneStm $ Let pat aux e'
-
-stmToPat :: Stm GPU -> Pat (LetDec GPU)
-stmToPat (Let pat _ _) = pat
-
-
-buildMMM :: VName -> Int -> (VName, SubExp) -> MMAMatch -> Builder GPU ()
-buildMMM resName blockSize (blockIdx, blockDim) (MMAMatch kernelBodyMatch ne sizeM sizeN sizeK) = do
-  let cValsPerThread = mkInt64Const $ sizeM * sizeN `div` blockSize
---  TODO: get as input instead?
-  let blockSizeSubExp = mkInt64Const blockSize
---  TODO: do we need to init regs when used only once?
--- TODO: use SegNoVirtFull instead of loop and avoid setting the block size?
-  cRegs_list <- segMap1D "cRegs" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \_ -> do
-    cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [cValsPerThread]
-    cLoop <- forLoop cValsPerThread [cScratch] $ \i [cMerge] -> do
-      cZeroed <- update "cZeroed" cMerge [i] ne
---      TODO: use pure instead of resultBodyM?
-      resultBodyM [Var cZeroed]
-    pure [varRes cLoop]
-  let [cRegs] = cRegs_list
-  aScratch <- letExp "aScratch" $ BasicOp $ Scratch (typeA kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeK]
-  bScratch <- letExp "bScratch" $ BasicOp $ Scratch (typeB kernelBodyMatch) [mkInt64Const sizeK, mkInt64Const sizeN]
-  aCopied <- letExp "aCopied" $ Apply copyGlobalSharedName (fmap (,ObservePrim) (outerDimsA kernelBodyMatch) <> [(Var $ arrA kernelBodyMatch, ObservePrim), (Var aScratch, Consume)]) [(Array (typeA kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeK]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
-  bCopied <- letExp "bCopied" $ Apply copyGlobalSharedName (fmap (,ObservePrim) (outerDimsB kernelBodyMatch) <> [(Var $ arrB kernelBodyMatch, ObservePrim), (Var bScratch, Consume)]) [(Array (typeB kernelBodyMatch) (Shape [Free $ mkInt64Const sizeK, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
-  blockMMAres_list <- segMap1D "blockMMAres" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \thread_idx -> do
-    threadCregs <- index "threadCregs" cRegs [thread_idx]
---  TODO: is ObservePrim correct?
-    threadMMAres <- letExp "threadMMAres" $ Apply gemmName [(Var aCopied, ObservePrim), (Var bCopied, ObservePrim), (Var threadCregs, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free cValsPerThread]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
-    pure [varRes threadMMAres]
-  let [blockMMAres] = blockMMAres_list
-  cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeN]
-  letBindNames [resName] $ Apply copyRegistersGlobalName [(Var blockMMAres, ObservePrim), (Var cScratch, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
-
--- TODO: use reader for scope?
-expMatch :: Exp GPU -> Scope GPU -> Maybe MMAMatch
-expMatch (Op (SegOp sOp)) = segOpMatch sOp
-expMatch _ = const Nothing
-
--- TODO: scope for lambda and loops
-transformExp :: Exp GPU -> IntraMMMMonad (Exp GPU)
--- transformExp (BasicOp op) = BasicOp op
--- transformExp (Apply name args rets info) = Apply name args rets info
-transformExp (Match subExps cases body matchDec) = Match subExps <$> mapM transformCase cases <*> transformBody body <*> pure matchDec
-transformExp (Loop params form body) = Loop params form <$> transformBody body
-transformExp (Op op) = Op <$> transformOp op
-transformExp e = pure e
-
-transformCase :: Case (Body GPU) -> IntraMMMMonad (Case (Body GPU))
-transformCase (Case pat body) = Case pat <$> transformBody body
-
-transformBody :: Body GPU -> IntraMMMMonad (Body GPU)
-transformBody (Body dec stms res) = Body dec <$> transformStms stms <*> pure res
-
-transformOp :: Op GPU -> IntraMMMMonad (Op GPU)
-transformOp (SegOp sOp) = SegOp <$> transformSegOp sOp
--- TODO: handle these separately?
-transformOp op = pure op
-
-transformSegOp :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
--- TODO: avoid changing the block size, fix other seg inblock, or avoid transformation in these cases
--- TODO: match others?
-transformSegOp s@(SegMap level@(SegBlock virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space@(SegSpace _ [blockInfo]) ts body) = do
--- TODO: call match functions here, assume perfectly nested and avoid writer
-  (newBody, newBlockSizes) <- listen $ localBlockInfo (const $ Just blockInfo) $ transformKernelBody body
-  case newBlockSizes of
---  TODO: handle more block sizes?
-    [newBlockSize] ->
-      pure $ SegMap (SegBlock virt (Just (KernelGrid (Count numBlocks) (Count $ mkInt64Const newBlockSize)))) space ts newBody
-    _ -> pure $ SegMap level space ts newBody
+-- TODO: use monad or scope? or monad in scope? maintain scope?
+outerSegOpExpMatch :: Scope GPU -> Exp GPU -> Maybe OuterMMAMatch
+outerSegOpExpMatch scope
+  (Op (SegOp (
+      SegMap
+        level@(SegBlock SegNoVirt (Just (KernelGrid (Count numBlocks) (Count blockSize))))
+        space@(SegSpace flatIndex [blockInfo])
+        ts
+        body
+  ))) = do
+  innerMatch <- blockKernelBodyMatch scope body
+  pure $ OuterMMAMatch innerMatch SegNoVirt numBlocks blockSize flatIndex blockInfo ts
 -- TODO: also match SegThread in similar way
---transformSegOp s@(SegMap level@(SegThread virt (Just (KernelGrid (Count numBlocks) (Count blockSize)))) space@(SegSpace _ [blockInfo]) ts body) = do
----- TODO: call match functions her, assume perfectly nested and avoid writer
---  (newBody, newBlockSizes) <- listen $ localBlockInfo (const $ Just blockInfo) $ transformKernelBody body
---  case newBlockSizes of
-----  TODO: handle more block sizes?
---    [newBlockSize] ->
---      pure $ SegMap (SegBlock virt (Just (KernelGrid (Count numBlocks) (Count $ mkInt64Const newBlockSize)))) space ts newBody
---    _ -> pure $ SegMap level space ts newBody
-transformSegOp s = transformSegOpDefault s
+outerSegOpExpMatch _ _ = Nothing
 
-mkInt64Const :: Int -> SubExp
-mkInt64Const = Constant . IntValue . intValue Int64
+-- TODO: allow stms before and after seg(inblock), allow multiple inner matches?
+blockKernelBodyMatch :: Scope GPU -> KernelBody GPU -> Maybe InnerMMAMatch
+blockKernelBodyMatch scope (KernelBody desc stms res) | [(Let p aux e)] <- stmsToList stms =
+  innerSegOpExpMatch scope e
+blockKernelBodyMatch _ _ = Nothing
 
-segOpMatch :: SegOp SegLevel GPU -> Scope GPU -> Maybe MMAMatch
-segOpMatch s@(SegRed (SegThreadInBlock _) space segBinOps _ body) scope | Just ne <- segBinOpsMatch segBinOps = do
+innerSegOpExpMatch :: Scope GPU -> Exp GPU -> Maybe InnerMMAMatch
+innerSegOpExpMatch scope
+  (Op (SegOp segRed@(
+      SegRed (SegThreadInBlock _) space segBinOps ts body
+  )))
+  | Just ne <- segBinOpsMatch segBinOps
+  = do
   let (dimVars, segDims) = unzip $ unSegSpace space
-  let freeVars = freeIn s
-  bodyMatch <- matchesKernelBody dimVars freeVars body scope
-  constSegDims <- mapM getConstantValue segDims
+--  TODO: check this, probably not correct when not maintaining scope
+  let freeVars = freeIn segRed
+  bodyMatch <- inBlockKernelBodyMatch dimVars freeVars body scope
+  constSegDims <- mapM constantValueMatch segDims
   case constSegDims of
 --  TODO: also match bodyMatch? allow more sizes?
-    [16, 16, 16] ->
+    [m, n, k] | all sizeMatches constSegDims ->
 --    TODO: pass ts? allow more segDims
-      Just (MMAMatch bodyMatch ne 16 16 16)
+      Just (InnerMMAMatch bodyMatch ne m n k)
     _ -> Nothing
 -- TODO: extract A, B, types, shape, layout, lookup m, n, k shapes
-segOpMatch _ _ = Nothing
+innerSegOpExpMatch _ _ = Nothing
 
+sizeMatches :: Int -> Bool
+sizeMatches x =
+  x `mod` 16 == 0
+  && 0 < x
+  && x <= 128
+--  Check if x is power of 2
+  && popCount x == 1
 
-getConstantValue :: SubExp -> Maybe Int
-getConstantValue (Constant (IntValue v)) = Just $ valueIntegral v
-getConstantValue _ = Nothing
+constantValueMatch :: SubExp -> Maybe Int
+constantValueMatch (Constant (IntValue v)) = Just $ valueIntegral v
+constantValueMatch _ = Nothing
 
 -- TODO: return maybe something?
-matchesKernelBody :: [VName] -> Names -> KernelBody GPU -> Scope GPU -> Maybe KernelBodyMatch
+inBlockKernelBodyMatch :: [VName] -> Names -> KernelBody GPU -> Scope GPU -> Maybe KernelBodyMatch
 -- TODO: support more than 3 dimensions?
-matchesKernelBody indexVars@[indexVar1, indexVar2, indexVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) scope = do
+inBlockKernelBodyMatch indexVars@[indexVar1, indexVar2, indexVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) scope = do
   let sTable = ST.insertStms (informStms stms) $ ST.fromScope $ addScopeWisdom scope
 --  TODO: rename to use A, B, C?
   (resExp, _) <- ST.lookupExp res sTable
@@ -350,7 +363,7 @@ matchesKernelBody indexVars@[indexVar1, indexVar2, indexVar3] freeVars (KernelBo
       let arr2OuterDims = take (length arr2Dims - 2) arr2Dims in
       Just (KernelBodyMatch innerIndeces1 innerIndeces2 outerIndeces1 outerIndeces2 arr1OuterDims arr2OuterDims arr1 arr2 m n k type1 type2 resTypePrim)
     _ -> Nothing
-matchesKernelBody _ _ _ _ = Nothing
+inBlockKernelBodyMatch _ _ _ _ = Nothing
 
 getIndexVar :: DimIndex SubExp -> Maybe VName
 getIndexVar (DimFix (Var v)) = Just v
@@ -388,20 +401,9 @@ nesMatch :: [SubExp] -> Maybe SubExp
 nesMatch [s@(Constant v)] | zeroIsh v = Just s
 nesMatch _ = Nothing
 
-transformSegOpDefault :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
-transformSegOpDefault (SegMap level space ts body) = SegMap level space ts <$> transformKernelBody body
-transformSegOpDefault (SegRed level space ops ts body) = SegRed level space ops ts <$> transformKernelBody body
-transformSegOpDefault (SegScan level space ops ts body) = SegScan level space ops ts <$> transformKernelBody body
-transformSegOpDefault (SegHist level space ops hist body) = SegHist level space ops hist <$> transformKernelBody body
-
-transformKernelBody :: KernelBody GPU -> IntraMMMMonad (KernelBody GPU)
-transformKernelBody (KernelBody desc stms res) = KernelBody desc <$> transformStms stms <*> pure res
 
 
-
-
-
-
+-- Memory fixup
 
 
 -- TODO: avoid code duplication with above?
@@ -439,8 +441,8 @@ fixFuns consts fun
                                               funDefParams = fixParamsCopyGlobalShared $ funDefParams fun,
                                               funDefRetType = fixRetType Shared $ funDefRetType fun
                                             }
-  | funDefName fun == copyRegistersGlobalName = pure $ fun {
-                                                  funDefParams = fixParamsCopyRegistersGlobal $ funDefParams fun,
+  | funDefName fun == copyRegistersSharedName = pure $ fun {
+                                                  funDefParams = fixParamsCopyRegistersShared $ funDefParams fun,
                                                   funDefRetType = fixRetType Shared $ funDefRetType fun
                                                 }
   | otherwise = do
@@ -467,8 +469,8 @@ fixParamsCopyGlobalShared [
   ]
 fixParamsCopyGlobalShared params = params
 
-fixParamsCopyRegistersGlobal :: [FParam GPUMem] -> [FParam GPUMem]
-fixParamsCopyRegistersGlobal [
+fixParamsCopyRegistersShared :: [FParam GPUMem] -> [FParam GPUMem]
+fixParamsCopyRegistersShared [
     Param attrs1 vName1 (MemMem (Space "device")),
     Param attrs2 vName2 (MemMem (Space "device")),
     Param attrs3 vName3 (MemArray t3 shp3 u3 (ArrayIn mName3 lmad3)),
@@ -481,7 +483,7 @@ fixParamsCopyRegistersGlobal [
     Param attrs3 vName3 (MemArray t3 shp3 u3 (ArrayIn mName3 lmad3)),
     Param attrs4 vName4 (MemArray t4 shp4 u4 (ArrayIn mName4 lmad4))
   ]
-fixParamsCopyRegistersGlobal params = params
+fixParamsCopyRegistersShared params = params
 
 fixParamsGemmFun :: [FParam GPUMem] -> [FParam GPUMem]
 fixParamsGemmFun [
@@ -579,7 +581,7 @@ fixStmt (
     PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
   ])
   aux
-  (Apply fName args rets info)) | fName == copyRegistersGlobalName = do
+  (Apply fName args rets info)) | fName == copyRegistersSharedName = do
   let space = Space "shared"
   let newRets = fixRetType Shared rets
   newArgs <- mapM replaceArg args

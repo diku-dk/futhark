@@ -8,8 +8,8 @@ gemmName = "gemm_123456"
 copyGlobalSharedName :: Name
 copyGlobalSharedName = "copyGlobalShared"
 
-copyRegistersGlobalName :: Name
-copyRegistersGlobalName = "copyRegistersGlobal"
+copyRegistersSharedName :: Name
+copyRegistersSharedName = "copyRegistersShared"
 
 funNames :: [Name]
-funNames = [gemmName, copyGlobalSharedName, copyRegistersGlobalName]
+funNames = [gemmName, copyGlobalSharedName, copyRegistersSharedName]
