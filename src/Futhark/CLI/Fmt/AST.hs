@@ -46,7 +46,7 @@ import Control.Monad.Reader
     ( ReaderT(..), MonadReader(..) )
 import Control.Monad.State
     ( StateT, gets, modify, MonadState(..), evalStateT )
-import Data.Loc ( Located(..), Loc(..), posLine, posCoff)
+import Data.Loc ( Located(..), Loc(..), posLine, posCoff, locStart)
 import Language.Futhark.Parser.Monad ( Comment(..) )
 
 -- These are left associative since we want to evaluate the monadic
@@ -69,13 +69,13 @@ data FmtIR
   = Nil
   | Space
   | Line
-  | Lit (Doc ())
-  | Align FmtIR
-  | Indent Int FmtIR
-  | Nest Int FmtIR
-  | Sep FmtIR [FmtIR]
+  | Lit !(Doc ())
+  | Align !FmtIR
+  | Indent !Int !FmtIR
+  | Nest !Int !FmtIR
+  | Sep !FmtIR ![FmtIR]
   | Union FmtIR FmtIR
-  | Con FmtIR FmtIR deriving Show
+  | Con !FmtIR !FmtIR deriving Show
 
 flatten :: FmtIR -> FmtIR
 flatten Nil = Nil
@@ -167,6 +167,19 @@ fmtComments a = do
       Fmt c' <- fmt $ comment $ commentText c
       pure $ Fmt $ c' <> f -- fmts remaining comments
     _any -> pure $ Fmt mempty
+
+fmtTrailingComment :: (Located a) => a -> FmtM Fmt
+fmtTrailingComment a = do
+  s <- get
+  case comments s of
+    c : cs | lineLayout a == SingleLine && aux a == aux c -> do
+      put $ s {comments = cs}
+      fmt $ comment $ commentText c
+    _any -> pure $ Fmt mempty
+  where
+    aux n = s
+      where
+        Loc s _ = locStart $ locOf n
 
 lineLayout :: (Located a) => a -> Layout
 lineLayout a =
