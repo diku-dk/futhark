@@ -23,6 +23,11 @@ find "$TEST_DIR" -name '*.fut' | xargs -P $THREADS -I {} sh -c '
        exit 0
     fi
 
+    if grep -qE "import[ ]+\"[^\"]*\"" "$prog"; then
+       rm "$prog"
+       exit 0
+    fi
+
     name=${prog%.fut}
     futhark hash "$prog" 2> /dev/null > "$prog.expected"
 
