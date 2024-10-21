@@ -53,12 +53,9 @@ import Prelude
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
 data ProgramTest = ProgramTest
-  { testDescription ::
-      T.Text,
-    testTags ::
-      [T.Text],
-    testAction ::
-      TestAction
+  { testDescription :: T.Text,
+    testTags :: [T.Text],
+    testAction :: TestAction
   }
   deriving (Show)
 
@@ -109,7 +106,7 @@ instance Show WarningTest where
 
 -- | A condition for execution, input, and expected result.
 data TestRun = TestRun
-  { runTags :: [String],
+  { runTags :: [T.Text],
     runInput :: Values,
     runExpectedResult :: ExpectedResult Success,
     runIndex :: Int,
@@ -235,11 +232,11 @@ parseEntryPoints sep =
     constituent c = not (isSpace c) && c /= '}'
     entry = lexeme' $ T.pack <$> some (satisfy constituent)
 
-parseRunTags :: Parser [String]
+parseRunTags :: Parser [T.Text]
 parseRunTags = many . try . lexeme' $ do
   s <- some $ satisfy tagConstituent
   guard $ s `notElem` ["input", "structure", "warning"]
-  pure s
+  pure $ T.pack s
 
 parseStringLiteral :: Parser () -> Parser T.Text
 parseStringLiteral sep =
