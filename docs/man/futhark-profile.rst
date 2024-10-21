@@ -9,7 +9,7 @@ futhark-profile
 SYNOPSIS
 ========
 
-futhark profile JSONFILE
+futhark profile JSONFILES
 
 DESCRIPTION
 ===========
@@ -39,6 +39,9 @@ information.  A set of files will be created for each benchmark
 dataset.  If the original invocation of ``futhark bench`` included
 multiple programs, then ``futhark profile`` will create subdirectories
 for each program (although all inside the same top level directory).
+
+You can pass multiple JSON files to ``futhark profile``. Each will
+produce a distinct top level directory.
 
 Files produced
 --------------

@@ -169,24 +169,26 @@ readFileSafely filepath =
   where
     couldNotRead e = pure $ Left $ show (e :: IOError)
 
+onFile :: FilePath -> IO ()
+onFile json_path = do
+  s <- readFileSafely json_path
+  case s of
+    Left a -> do
+      hPutStrLn stderr a
+      exitWith $ ExitFailure 2
+    Right s' ->
+      case decodeBenchResults s' of
+        Left _ ->
+          case decodeProfilingReport s' of
+            Nothing -> do
+              hPutStrLn stderr $
+                "Cannot recognise " <> json_path <> " as benchmark results or a profiling report."
+            Just pr ->
+              analyseProfilingReport json_path pr
+        Right br -> analyseBenchResults json_path br
+
 -- | Run @futhark profile@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions () [] "<file>" f
+main = mainWithOptions () [] "[files]" f
   where
-    f [json_path] () = Just $ do
-      s <- readFileSafely json_path
-      case s of
-        Left a -> do
-          hPutStrLn stderr a
-          exitWith $ ExitFailure 2
-        Right s' ->
-          case decodeBenchResults s' of
-            Left _ ->
-              case decodeProfilingReport s' of
-                Nothing -> do
-                  hPutStrLn stderr $
-                    "Cannot recognise " <> json_path <> " as benchmark results or a profiling report."
-                Just pr ->
-                  analyseProfilingReport json_path pr
-            Right br -> analyseBenchResults json_path br
-    f _ _ = Nothing
+    f files () = Just $ mapM_ onFile files
