@@ -237,7 +237,7 @@ parseEntryPoints sep =
   (lexeme' "entry:" *> many entry <* sep) <|> pure ["main"]
   where
     constituent c = not (isSpace c) && c /= '}'
-    entry = lexeme' $ T.pack <$> some (satisfy constituent)
+    entry = lexeme' $ takeWhile1P Nothing constituent
 
 parseRunTags :: Parser () -> Parser [T.Text]
 parseRunTags sep = many . try . lexeme' $ do
@@ -364,7 +364,7 @@ optimisePipeline sep =
 parseMetrics :: Parser () -> Parser AstMetrics
 parseMetrics sep =
   inBraces sep . fmap (AstMetrics . M.fromList) . many $
-    (,) <$> (T.pack <$> lexeme sep (some (satisfy constituent))) <*> parseNatural sep
+    (,) <$> lexeme sep (takeWhile1P Nothing constituent) <*> parseNatural sep
   where
     constituent c = isAlpha c || c == '/'
 
