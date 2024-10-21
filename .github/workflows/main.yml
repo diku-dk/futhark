@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install Nix
       uses: cachix/install-nix-action@v27
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Workaround runner image issue
       # https://github.com/actions/runner-images/issues/7061
@@ -43,7 +43,7 @@ jobs:
       with:
         ghc-version: '9.8.1'
 
-    - uses: actions/cache@v3
+    - uses: actions/cache@v4
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
@@ -64,7 +64,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -72,7 +72,7 @@ jobs:
         echo "/opt/homebrew/opt/sphinx-doc/bin" >> $GITHUB_PATH
         echo "/opt/homebrew/opt/ghc/bin" >> $GITHUB_PATH
 
-    - uses: actions/cache@v3
+    - uses: actions/cache@v4
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
@@ -106,14 +106,14 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - id: setup-haskell
       uses: haskell-actions/setup@v2
       with:
         ghc-version: '9.8.1'
 
-    - uses: actions/cache@v3
+    - uses: actions/cache@v4
       name: Cache cabal stuff
       with:
         path: |
@@ -142,12 +142,12 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install Nix
       uses: cachix/install-nix-action@v27
 
-    - uses: actions/cache@v3
+    - uses: actions/cache@v4
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
@@ -164,7 +164,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install Nix
       uses: cachix/install-nix-action@v27
@@ -181,12 +181,12 @@ jobs:
   #   runs-on: ubuntu-22.04
 
   #   steps:
-  #   - uses: actions/checkout@v3
+  #   - uses: actions/checkout@v4
 
   #   - name: Install Nix
   #     uses: cachix/install-nix-action@v18
 
-  #   - uses: actions/cache@v3
+  #   - uses: actions/cache@v4
   #     name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
   #     with:
   #       path: |
@@ -205,7 +205,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: actions/download-artifact@v4
       with:
@@ -224,7 +224,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: actions/download-artifact@v4
       with:
@@ -243,7 +243,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -268,7 +268,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -293,7 +293,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -323,7 +323,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install dependencies
       run: |
@@ -348,7 +348,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs: [build-linux-nix]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Install dependencies
       run: |
         sudo apt-get update
@@ -368,7 +368,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs: [build-linux-nix]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Install dependencies
       run: |
         sudo apt-get update
@@ -393,7 +393,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: ./.github/actions/futhark-slurm
       with:
@@ -415,7 +415,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: ./.github/actions/futhark-slurm
       with:
@@ -434,7 +434,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: ./.github/actions/futhark-slurm
       with:
@@ -458,7 +458,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - run: |
         python -m venv virtualenv
@@ -478,7 +478,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: mymindstorm/setup-emsdk@v12
       with:
@@ -515,7 +515,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: mymindstorm/setup-emsdk@v12
       with:
@@ -547,7 +547,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: mymindstorm/setup-emsdk@v12
       with:
@@ -577,7 +577,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: actions/download-artifact@v4
       with:
@@ -602,7 +602,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg oclgrind
 
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: actions/download-artifact@v4
       with:
