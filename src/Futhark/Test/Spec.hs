@@ -198,10 +198,17 @@ parseDescription sep =
     pDescLine = restOfLine <* sep
     pDescriptionSeparator = void $ "==" *> sep
 
+lTagName :: Parser () -> Parser T.Text
+lTagName sep =
+  lexeme sep $
+    takeWhile1P (Just "tag-constituent character") tagConstituent
+
 parseTags :: Parser () -> Parser [T.Text]
-parseTags sep = lexeme' "tags" *> inBraces sep (many parseTag) <|> pure []
-  where
-    parseTag = T.pack <$> lexeme sep (some $ satisfy tagConstituent)
+parseTags sep =
+  choice
+    [ lexeme' "tags" *> inBraces sep (many (lTagName sep)),
+      pure []
+    ]
 
 tagConstituent :: Char -> Bool
 tagConstituent c = isAlphaNum c || c == '_' || c == '-'
@@ -232,11 +239,11 @@ parseEntryPoints sep =
     constituent c = not (isSpace c) && c /= '}'
     entry = lexeme' $ T.pack <$> some (satisfy constituent)
 
-parseRunTags :: Parser [T.Text]
-parseRunTags = many . try . lexeme' $ do
-  s <- some $ satisfy tagConstituent
+parseRunTags :: Parser () -> Parser [T.Text]
+parseRunTags sep = many . try . lexeme' $ do
+  s <- lTagName sep
   guard $ s `notElem` ["input", "structure", "warning"]
-  pure $ T.pack s
+  pure s
 
 parseStringLiteral :: Parser () -> Parser T.Text
 parseStringLiteral sep =
@@ -250,7 +257,7 @@ parseRunCases sep = parseRunCases' (0 :: Int)
         <|> pure []
     parseRunCase i = do
       name <- optional $ parseStringLiteral sep
-      tags <- parseRunTags
+      tags <- parseRunTags sep
       void $ lexeme sep "input"
       input <-
         if "random" `elem` tags
