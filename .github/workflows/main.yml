@@ -127,7 +127,7 @@ jobs:
         cabal update
         try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
         try || try || try
-    - uses: papeloto/action-zip@v1.1
+    - uses: vimtor/action-zip@1.2
       with:
         files: futhark.exe
         dest: futhark-nightly-windows-x86_64.zip
