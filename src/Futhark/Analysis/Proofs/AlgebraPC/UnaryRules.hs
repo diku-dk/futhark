@@ -21,7 +21,6 @@ import Futhark.SoP.Monad (MonadSoP)
 --- 1. Simplifications related to Pow ---
 -----------------------------------------
 
--- simplifyPows :: forall e. (SoP Symbol -> AlgM e (SoP Symbol)) -> SoP Symbol -> AlgM e (SoP Symbol)
 simplifyPows ::
   (MonadSoP Symbol e p m) =>
   (SoP Symbol  -> m (SoP Symbol)) -> SoP Symbol -> m (SoP Symbol)
