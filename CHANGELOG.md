@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark doc` now produces better (and stable) anchor IDs.
 
+* `futhark profile` now supports multiple JSON files.
+
 ### Removed
 
 ### Changed
