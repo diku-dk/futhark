@@ -273,7 +273,10 @@ instance Format UncheckedExp where
     $ code "\\" <:> sep space params <:> ascript <+> stdNest (code "->" </> body)
     where
       ascript = maybe nil (code ": " <:>) rettype
-  fmt (OpSection binop _ loc) = prependComments loc $ fmtQualName binop
+  fmt (OpSection binop _ loc) = prependComments loc $
+    if operatorName (qualLeaf binop)
+    then fmtQualName binop
+    else parens $ code "`" <:> fmtQualName binop <:> code "`"
   fmt (OpSectionLeft binop _ x _ _ loc) =
     prependComments loc $ parens $ x <+> fmtBinOp binop
   fmt (OpSectionRight binop _ x _ _ loc) =
