@@ -139,7 +139,7 @@ tests =
           @??= (int 1 .+. LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)) ~+~ LinComb d (sVar b) (sVar c) (Idx (Var a) (sVar d))),
       testCase "Match symbols in SVar" $
         run
-          ( \(x, y, z, _, _, _, _, _) -> do
+          ( \(x, y, z, _, _, _, _, _) ->
               rewrite (Indicator (Bool True :&& (sVar x :<= sVar y)) ~+~ Var z)
           )
           @??= (Indicator (sVar x :<= sVar y) ~+~ Var z),

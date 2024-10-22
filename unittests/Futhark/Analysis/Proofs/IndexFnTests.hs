@@ -87,7 +87,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/scalar2.fut"
-        ( withDebug $ \(_, n, xs, j) ->
+        ( pure $ \(_, n, xs, j) ->
             IndexFn
               { iterator = Empty,
                 body =

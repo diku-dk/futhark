@@ -104,12 +104,12 @@ toAlgebra :: Symbol -> IndexFnM Algebra.Symbol
 toAlgebra = toAlgebra_ <=< mkUntrans
 
 mkUntrans :: ASTMappable Symbol b => b -> IndexFnM b
-mkUntrans symbol = astMap mUQ =<< astMap mQ symbol
+mkUntrans = astMap m
   where
     -- Add quantified symbols to the untranslatable environement
     -- with quantifiers replaced by holes. Uses unification on symbols
     -- to ensure deduplication.
-    mQ = ASTMapper {mapOnSymbol = handleQuantified, mapOnSoP = pure}
+    m = ASTMapper {mapOnSymbol = handleQuantified, mapOnSoP = pure}
     handleQuantified p@(LinComb j _ _ x) = do
       res <- search x
       case res of
@@ -121,17 +121,7 @@ mkUntrans symbol = astMap mUQ =<< astMap mQ symbol
           pure p
     handleQuantified x = pure x
 
-    -- Add untranslatable symbols to the untranslatable environement,
-    -- making sure to unify with previously translated quantified symbols.
-    mUQ = ASTMapper {mapOnSymbol = handleUnquantified, mapOnSoP = pure}
-    handleUnquantified sym@(Indicator {}) = do
-      (vn, _) <- lookupOrAdd sym
-      addRange (Algebra.Var vn) (mkRange (int2SoP 0) (int2SoP 1))
-      addProperty (Algebra.Var vn) Algebra.Indicator
-      pure sym
-    handleUnquantified x = pure x
-
-lookupOrAdd :: Symbol -> IndexFnM (VName, Maybe (Substitution Symbol))
+lookupOrAdd :: Symbol -> IndexFnM (VName, Maybe (VName, SoP Symbol))
 lookupOrAdd sym = do
   res <- search sym
   case res of
@@ -150,7 +140,7 @@ getVName :: Algebra.Symbol -> VName
 getVName (Algebra.Var vn) = vn
 getVName _ = undefined
 
-search :: Symbol -> IndexFnM (Maybe (VName, Maybe (Substitution Symbol)))
+search :: Symbol -> IndexFnM (Maybe (VName, Maybe (VName, SoP Symbol)))
 search x = do
   inv_map <- inv <$> getUntrans
   algenv <- gets algenv
@@ -166,10 +156,16 @@ search x = do
       matches <- catMaybes <$> mapM (\(sym, algsym) -> fmap (algsym,) <$> unify sym x) syms
       case matches of
         [] -> pure Nothing
-        [(algsym, sub)] -> pure $ Just (getVName algsym, Just sub)
+        [(algsym, sub)] | M.size (mapping sub) == 1 ->
+          pure $ Just (getVName algsym, Just . head $ M.toList (mapping sub))
         _ -> do
-          error $ "unifies with multiple things in untrans: " <> prettyString x <> "\n" <> prettyString algenv
+          error $ "unifies with multiple symbols in untrans: " <> prettyString x <> "\n" <> prettyString algenv
 
+-- Translate IndexFn.Symbol to Algebra.Symbol.
+-- Fresh names are created for untranslatable symbols such as indicators
+-- and quantified symbols in sums. Indexing is preserved on untranslatable
+-- symbols. For example, ⟦x[0] + 1⟧ + ∑j∈(1 .. b) ⟦x[j] + 1⟧ will be translated
+-- as y[0] + Sum y[1:b] with fresh name y mapped to ⟦x[hole] + 1⟧.
 toAlgebra_ :: Symbol -> IndexFnM Algebra.Symbol
 toAlgebra_ (Var x) = pure $ Algebra.Var x
 toAlgebra_ (Hole _) = undefined
@@ -187,10 +183,10 @@ toAlgebra_ sym@(Idx _ i) = do
   pure $ Algebra.Idx (Algebra.One vn) j
 toAlgebra_ sym@(Indicator _) = do
   (vn, sub) <- lookupOrAdd sym
+  addRange (Algebra.Var vn) (mkRange (int2SoP 0) (int2SoP 1))
+  addProperty (Algebra.Var vn) Algebra.Indicator
   case sub of
-    Just s -> do
-      unless (M.size (mapping s) == 1) $ error "gg"
-      let (_hole, idx) = head $ M.toList (mapping s)
+    Just (_hole, idx) -> do
       idx' <- mapSymSoP2M_ toAlgebra_ idx
       pure $ Algebra.Idx (Algebra.One vn) idx'
     Nothing -> pure $ Algebra.Var vn
