@@ -1,9 +1,9 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
-module Futhark.CLI.Fmt.Printer (fmtText) where
+module Futhark.Fmt.Printer (fmtText) where
 
 import Data.Foldable
 import Data.Text qualified as T
-import Futhark.CLI.Fmt.AST
+import Futhark.Fmt.AST
 import Language.Futhark
 import Language.Futhark.Parser
   ( SyntaxError (..),

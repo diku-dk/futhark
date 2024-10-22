@@ -2,7 +2,7 @@
 module Futhark.CLI.Fmt (main) where
 
 import Data.Text.IO qualified as T
-import Futhark.CLI.Fmt.Printer
+import Futhark.Fmt.Printer
 import Futhark.Util.Options
 import Language.Futhark
 import Language.Futhark.Parser (SyntaxError (..))

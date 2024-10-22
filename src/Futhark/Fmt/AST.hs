@@ -1,4 +1,4 @@
-module Futhark.CLI.Fmt.AST
+module Futhark.Fmt.AST
   ( Fmt,
     -- functions for building fmt
     nil,
@@ -38,6 +38,8 @@ module Futhark.CLI.Fmt.AST
 where
 
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as T 
+import Data.ByteString qualified as BS
 import Prettyprinter qualified as P
 import Prettyprinter.Render.Text (renderStrict)
 import Control.Monad.Identity ( Identity(..) )
@@ -47,7 +49,6 @@ import Control.Monad.State
     ( StateT, gets, modify, MonadState(..), evalStateT )
 import Data.Loc ( Located(..), Loc(..), posLine, posCoff, locStart)
 import Language.Futhark.Parser.Monad ( Comment(..) )
-import Data.Maybe (isJust)
 
 -- These are left associative since we want to evaluate the monadic
 -- computation from left to right. Since the left most expression is
@@ -124,7 +125,7 @@ simplifyByLocList a b = local (const $ lineLayoutList a) $ do
 
 data FmtState = FmtState
   {comments :: [Comment], -- the comments
-   file :: T.Text} -- The original source file 
+   file :: BS.ByteString} -- The original source file 
   deriving (Show, Eq, Ord)
 
 data Layout = MultiLine | SingleLine deriving (Show, Eq)
@@ -202,8 +203,10 @@ fmtCopyLoc a = do
     Loc sPos ePos ->
       let sOff = posCoff sPos
           eOff = posCoff ePos
-      in code $ T.take (eOff-sOff) $ T.drop sOff f
-    NoLoc -> undefined
+      in case T.decodeASCII' $ BS.take (eOff-sOff) $ BS.drop sOff f of 
+        Nothing -> undefined -- Should throw an error TODO
+        Just lit -> code lit
+    NoLoc -> undefined -- should throw an error TODO
 
 (<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
 (<+/>) a b =
@@ -215,7 +218,7 @@ runFormat :: FmtM a -> [Comment] -> T.Text -> a
 runFormat format cs file = runIdentity $ evalStateT (runReaderT format e) s
   where
     s = FmtState {comments = cs,
-                  file = file }
+                  file = T.encodeUtf8 file }
     e = MultiLine
 
 nil :: FmtM Fmt

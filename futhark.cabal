@@ -157,8 +157,6 @@ library
       Futhark.CLI.Doc
       Futhark.CLI.Eval
       Futhark.CLI.Fmt
-      Futhark.CLI.Fmt.Printer
-      Futhark.CLI.Fmt.AST
       Futhark.CLI.HIP
       Futhark.CLI.Literate
       Futhark.CLI.LSP
@@ -246,6 +244,8 @@ library
       Futhark.Construct
       Futhark.Doc.Generator
       Futhark.Error
+      Futhark.Fmt.Printer
+      Futhark.Fmt.AST
       Futhark.FreshNames
       Futhark.Format
       Futhark.IR
