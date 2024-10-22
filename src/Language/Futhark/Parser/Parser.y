@@ -855,7 +855,7 @@ PatLiteral :: { (PatLit, Loc) }
              : PatLiteralNoNeg
                { $1 }
              | '-' NumLit %prec bottom
-               { (PatLitPrim (primNegate (fst $2)), snd $2) }
+               { (PatLitPrim (primNegate (fst $2)), locOf (srcspan $1 (snd $2))) }
              | '-' intlit %prec bottom
                { let L loc (INTLIT x) = $2 in (PatLitInt (negate x), locOf (srcspan $1 $>)) }
              | '-' natlit %prec bottom
