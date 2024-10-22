@@ -168,11 +168,11 @@ transformExp (AppExp (Match e cases loc) appres) = do
         <$> bindingLetPat [] case_pat (transformExp case_e)
         <*> pure case_loc
 transformExp (AppExp (Loop sizes pat args form body loc) appres) = do
-  args' <- transformExp args
+  args' <- transformExp $ loopInitExp args
   bindingParams sizes [pat] $ do
     form' <- astMap transformSubExps form
     body' <- bindingForm form' $ transformExp body
-    pure $ AppExp (Loop sizes pat args' form' body' loc) appres
+    pure $ AppExp (Loop sizes pat (LoopInitExplicit args') form' body' loc) appres
 transformExp e@(Var v (Info t) _) =
   -- Note that function-typed variables can only occur in expressions,
   -- not in other places where VNames/QualNames can occur.

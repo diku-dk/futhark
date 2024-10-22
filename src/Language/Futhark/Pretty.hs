@@ -427,6 +427,10 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
 instance (Eq vn, IsName vn, Annot f) => Pretty (CaseBase f vn) where
   pretty (CasePat p e _) = "case" <+> pretty p <+> "->" </> indent 2 (pretty e)
 
+instance (Eq vn, IsName vn, Annot f) => Pretty (LoopInitBase f vn) where
+  pretty (LoopInitImplicit e) = maybe "_" pretty $ unAnnot e
+  pretty (LoopInitExplicit e) = pretty e
+
 instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
   pretty (For i ubound) =
     "for" <+> pretty i <+> "<" <+> align (pretty ubound)

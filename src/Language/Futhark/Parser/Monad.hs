@@ -18,7 +18,6 @@ module Language.Futhark.Parser.Monad
     primNegate,
     applyExp,
     arrayLitExp,
-    patternExp,
     addDocSpec,
     addAttrSpec,
     addDoc,
@@ -137,19 +136,6 @@ applyExp es =
       where
         index = AppExp (Index e (is ++ map DimFix xs) xloc) NoInfo
     op f x = pure $ mkApplyUT f x
-
-patternExp :: UncheckedPat t -> ParserMonad UncheckedExp
-patternExp (Id v _ loc) = pure $ Var (qualName v) NoInfo loc
-patternExp (TuplePat pats loc) = TupLit <$> mapM patternExp pats <*> pure loc
-patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
-patternExp (PatLit _ _ loc) = parseErrorAt loc $ Just "cannot have literal here."
-patternExp (PatConstr _ _ _ loc) = parseErrorAt loc $ Just "cannot have constructor here."
-patternExp (PatAttr _ p _) = patternExp p
-patternExp (PatAscription pat _ _) = patternExp pat
-patternExp (PatParens pat _) = patternExp pat
-patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
-  where
-    field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
 
 binOpName :: L Token -> (QualName Name, Loc)
 binOpName (L loc (SYMBOL _ qs op)) = (QualName qs op, loc)

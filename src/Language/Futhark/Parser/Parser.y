@@ -767,9 +767,9 @@ IfExp :: { UncheckedExp }
 
 LoopExp :: { UncheckedExp }
          : loop Pat LoopForm do Exp %prec ifprec
-           {% fmap (\t -> AppExp (Loop [] (fmap (toParam Observe) $2) t $3 $5 (srcspan $1 $>)) NoInfo) (patternExp $2) }
+           { AppExp (Loop [] (fmap (toParam Observe) $2) (LoopInitImplicit NoInfo) $3 $5 (srcspan $1 $>)) NoInfo }
          | loop Pat '=' Exp LoopForm do Exp %prec ifprec
-           { AppExp (Loop [] (fmap (toParam Observe) $2) $4 $5 $7 (srcspan $1 $>)) NoInfo }
+           { AppExp (Loop [] (fmap (toParam Observe) $2) (LoopInitExplicit $4) $5 $7 (srcspan $1 $>)) NoInfo }
 
 MatchExp :: { UncheckedExp }
           : match Exp Cases

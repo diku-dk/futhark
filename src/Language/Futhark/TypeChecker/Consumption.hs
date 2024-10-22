@@ -557,7 +557,7 @@ boundFreeInExp e = do
 -- Loops are tricky because we want to infer the uniqueness of their
 -- parameters.  This is pretty unusual: we do not do this for ordinary
 -- functions.
-type Loop = (Pat ParamType, Exp, LoopFormBase Info VName, Exp)
+type Loop = (Pat ParamType, LoopInitBase Info VName, LoopFormBase Info VName, Exp)
 
 -- | Mark bindings of consumed names as Consume, except those under a
 -- 'PatAscription', which are left unchanged.
@@ -664,7 +664,11 @@ checkLoop loop_loc (param, arg, form, body) = do
   param' <- convergeLoopParam loop_loc param (M.keysSet body_cons) body_als
 
   let param_t = patternType param'
-  ((arg', arg_als), arg_cons) <- contain $ checkArg [] param_t arg
+  ((arg', arg_als), arg_cons) <- case arg of
+    LoopInitImplicit (Info e) ->
+      contain $ first (LoopInitImplicit . Info) <$> checkArg [] param_t e
+    LoopInitExplicit e ->
+      contain $ first LoopInitExplicit <$> checkArg [] param_t e
   consumed arg_cons
   free_bound <- boundFreeInExp body
 
@@ -726,10 +730,11 @@ checkExp (AppExp (Apply f args loc) appres) = do
       error $ "checkArgs: " <> prettyString t
 
 --
-checkExp (AppExp (Loop sparams pat args form body loc) appres) = do
-  ((pat', args', form', body'), als) <- checkLoop (locOf loc) (pat, args, form, body)
+checkExp (AppExp (Loop sparams pat loopinit form body loc) appres) = do
+  ((pat', loopinit', form', body'), als) <-
+    checkLoop (locOf loc) (pat, loopinit, form, body)
   pure
-    ( AppExp (Loop sparams pat' args' form' body' loc) appres,
+    ( AppExp (Loop sparams pat' loopinit' form' body' loc) appres,
       als
     )
 

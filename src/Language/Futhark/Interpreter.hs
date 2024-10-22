@@ -882,8 +882,8 @@ evalAppExp env (LetWith dest src is v body loc) = do
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
     oob = bad loc env "Update out of bounds"
-evalAppExp env (Loop sparams pat init_e form body _) = do
-  init_v <- eval env init_e
+evalAppExp env (Loop sparams pat loopinit form body _) = do
+  init_v <- eval env $ loopInitExp loopinit
   case form of
     For iv bound -> do
       bound' <- asSigned <$> eval env bound
