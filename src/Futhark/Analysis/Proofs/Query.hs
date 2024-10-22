@@ -10,7 +10,8 @@ import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.AlgebraPC.Solve qualified as Solve
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), VEnv (..), getCase)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), getCase)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), toDNF, neg, normalizeSymbol)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))

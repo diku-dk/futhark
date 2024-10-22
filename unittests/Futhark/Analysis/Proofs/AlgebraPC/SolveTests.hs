@@ -12,7 +12,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Futhark.Analysis.Proofs.Symbol as IxFn
-import Futhark.Analysis.Proofs.IndexFn ( IndexFnM(..), VEnv(..))
+import Futhark.Analysis.Proofs.Monad (IndexFnM(..), VEnv(..))
 import Control.Monad.RWS.Strict
 
 -------------------------------------

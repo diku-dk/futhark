@@ -28,7 +28,7 @@ import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), VNameSource, newNameFromString)

@@ -1,7 +1,8 @@
 module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad (filterM, (<=<))
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), IndexFnM, Iterator (..), cases, casesToList, debugPrettyM)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
+import Futhark.Analysis.Proofs.Monad (IndexFnM)
 import Futhark.Analysis.Proofs.IndexFnPlus (normalizeIndexFn, subIndexFn)
 import Futhark.Analysis.Proofs.Query (addRelIterator, addRelSymbol, isFalse, isUnknown, rollbackAlgEnv, simplify)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook)

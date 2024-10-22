@@ -143,6 +143,7 @@ library
       Futhark.Analysis.Proofs.AlgebraBridge
       Futhark.Analysis.Proofs.Convert
       Futhark.Analysis.Proofs.IndexFn
+      Futhark.Analysis.Proofs.Monad
       Futhark.Analysis.Proofs.IndexFnPlus
       Futhark.Analysis.Proofs.Query
       Futhark.Analysis.Proofs.Rewrite

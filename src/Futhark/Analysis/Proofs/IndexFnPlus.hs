@@ -6,6 +6,7 @@ import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Futhark.Analysis.Proofs.IndexFn
+import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus (repVName)
 import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshName, unifies_)

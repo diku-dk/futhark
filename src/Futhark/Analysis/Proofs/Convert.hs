@@ -8,7 +8,8 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), IndexFnM, Iterator (..), VEnv (..), cases, clearAlgEnv, debugPrettyM, insertIndexFn, runIndexFnM, whenDebug, debugM)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases)
+import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.IndexFnPlus (subst)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)

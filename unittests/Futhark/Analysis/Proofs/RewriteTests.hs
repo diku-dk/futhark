@@ -5,6 +5,7 @@ module Futhark.Analysis.Proofs.RewriteTests (tests) where
 
 import Control.Monad (unless)
 import Futhark.Analysis.Proofs.IndexFn
+import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (addAlgRange)
 import Futhark.Analysis.Proofs.AlgebraBridge (toAlgebra)
 import Futhark.Analysis.Proofs.Rewrite

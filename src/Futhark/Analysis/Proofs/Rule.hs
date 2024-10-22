@@ -2,7 +2,8 @@ module Futhark.Analysis.Proofs.Rule where
 
 import Control.Monad (foldM, msum, (<=<))
 import Data.List (subsequences, (\\))
-import Futhark.Analysis.Proofs.IndexFn (IndexFn, IndexFnM, casesToList)
+import Futhark.Analysis.Proofs.IndexFn (IndexFn, casesToList)
+import Futhark.Analysis.Proofs.Monad (IndexFnM)
 import Futhark.Analysis.Proofs.IndexFnPlus (unifyIndexFnWith)
 import Futhark.Analysis.Proofs.Symbol (Symbol)
 import Futhark.Analysis.Proofs.SymbolPlus ()

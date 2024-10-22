@@ -4,6 +4,7 @@ module Futhark.Analysis.Proofs.UnifyTests (tests) where
 
 import Data.Map qualified as M
 import Futhark.Analysis.Proofs.IndexFn
+import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.IndexFnPlus ()
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus ()

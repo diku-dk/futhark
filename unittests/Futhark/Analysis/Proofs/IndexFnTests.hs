@@ -4,6 +4,7 @@ import Control.Monad (unless)
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
+import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
 import Futhark.Analysis.Proofs.Unify (renameSame, unify)
