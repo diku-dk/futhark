@@ -5,7 +5,7 @@ import Control.Monad (unless, void, (<=<))
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
+import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.SymbolPlus ()

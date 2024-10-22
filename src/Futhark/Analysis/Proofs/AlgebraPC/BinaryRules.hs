@@ -12,18 +12,16 @@ import Data.Maybe
 import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 -- import Futhark.Analysis.Proofs.AlgebraPC.Algebra
-import Futhark.Analysis.Proofs.AlgebraPC.Monad
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
-import Futhark.SoP.Expression
 import Futhark.SoP.FourierMotzkin qualified as FM
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 
 simplifyPair ::
+  (MonadSoP Symbol e Property m) =>
   (Symbol, (Term Symbol, Integer)) ->
   (Symbol, (Term Symbol, Integer)) ->
-  IndexFnM (Maybe (SoP Symbol, SoP Symbol))
+  m (Maybe (SoP Symbol, SoP Symbol))
 simplifyPair t1 t2 = do
   mr1 <- matchUniteSums t1 t2
   case mr1 of
@@ -44,9 +42,10 @@ simplifyPair t1 t2 = do
 --             t1 * MonDif A i_3 i_2
 -- This implements half of the functionality, i.e., call it twice.
 matchMonIdxDif ::
+  (MonadSoP Symbol e Property m) =>
   (Symbol, (Term Symbol, Integer)) ->
   (Symbol, (Term Symbol, Integer)) ->
-  IndexFnM (Maybe (SoP Symbol, SoP Symbol))
+  m (Maybe (SoP Symbol, SoP Symbol))
 matchMonIdxDif t1@(sym1, (ms1, k1)) t2@(sym2, (ms2, k2))
   -- quick fail:
   | (k1 /= k2 && k1 /= 0 - k2) || (ms1 /= ms2) =
@@ -100,9 +99,10 @@ matchMonIdxDif _ _ = pure Nothing
 --     2. a subtraction of two sums of slices of the same array
 --   Remember to call this twice: on the current and reversed pair.
 matchUniteSums ::
+  (MonadSoP Symbol e p m) =>
   (Symbol, (Term Symbol, Integer)) ->
   (Symbol, (Term Symbol, Integer)) ->
-  IndexFnM (Maybe (SoP Symbol, SoP Symbol))
+  m (Maybe (SoP Symbol, SoP Symbol))
 matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
   -- quick fail:
   | (k1 /= k2 && k1 /= 0 - k2) || (ms1 /= ms2) =

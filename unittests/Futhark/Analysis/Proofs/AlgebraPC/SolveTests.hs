@@ -3,30 +3,28 @@ module Futhark.Analysis.Proofs.AlgebraPC.SolveTests (tests) where
 import Control.Monad (unless, forM)
 import Data.Set qualified as S
 import Data.Map qualified as M
-import Language.Futhark (VName)
-import Futhark.Analysis.PrimExp hiding (Pow)
---import Futhark.Analysis.Proofs.IndexFn
---import Futhark.Analysis.Proofs.Rewrite
---import Futhark.Analysis.Proofs.Symbol
---import Futhark.Analysis.Proofs.Unify
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad -- (addEquiv, addRange)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..))
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
-import Futhark.Analysis.Proofs.AlgebraPC.Algebra
+import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 import qualified Futhark.Analysis.Proofs.Symbol as IxFn
+import Futhark.Analysis.Proofs.IndexFn ( IndexFnM(..), VEnv(..))
+import Control.Monad.RWS.Strict
 
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"
 -------------------------------------
 
--- runTest :: IndexFnM a -> a
--- runTest test = fst $ runIndexFnM test blankNameSource
+runAlgM :: IndexFnM a -> AlgEnv Symbol IxFn.Symbol Property -> VNameSource -> (a, VEnv)
+runAlgM (IndexFnM m) env vns = getRes $ runRWS m () s
+  where
+    getRes (x, env1, _) = (x, env1)
+    s = VEnv vns env mempty mempty False
 
 runTest :: IndexFnM a -> AlgEnv Symbol IxFn.Symbol Property -> a
 runTest test env = fst $ runAlgM test env blankNameSource
@@ -39,13 +37,13 @@ tests =
         run
           ( forM [1..100000] $ \ kk -> do
               let xy_p_3x= sVar x .*. (sVar y .+. int 3)
-                  pow_xy = int 2 .*. sVar i1 .*. sym2SoP (Pow(2, xy_p_3x)) 
-                  pow_z  = int 8 .*. sVar i2 .*. sym2SoP (Pow (2, sVar z .*. int 2)) 
+                  pow_xy = int 2 .*. sVar i1 .*. sym2SoP (Pow (2, xy_p_3x))
+                  pow_z  = int 8 .*. sVar i2 .*. sym2SoP (Pow (2, sVar z .*. int 2))
               simplifyLevel $ pow_xy .*. pow_z .+. int kk
           )
           @??= map (\ kk ->
                        let expo = sVar x .*. sVar y .+. int 3 .*. sVar x .+. int 2 .*. sVar z .+. int 4
-                       in  sVar i1 .*. sVar i2 .*. sym2SoP (Pow(2, expo)) .+. int kk
+                       in  sVar i1 .*. sVar i2 .*. sym2SoP (Pow (2, expo)) .+. int kk
                    ) [1..100000],
       testCase "Sum subtraction and Peel off (from partition2)" $
         run
@@ -98,7 +96,7 @@ tests =
                        , ranges  = M.empty
                        , properties = M.empty
                        }
-    
+
     varsM =
       (,,,,,,,,)
         <$> newVName "x"
@@ -112,7 +110,7 @@ tests =
         <*> newVName "B"
     (x, y, z, i1, i2, i3, n, a0, b0) = runTest varsM env_empty
     (a, b) = (One a0, One b0)
-    
+
     (n_rg, i1_rg, i2_rg, i3_rg) =
       ( Range (S.singleton (int 1)) 1 S.empty
       , Range (S.singleton (int 0)) 1 $ S.singleton $ sVar n  .-. int 1

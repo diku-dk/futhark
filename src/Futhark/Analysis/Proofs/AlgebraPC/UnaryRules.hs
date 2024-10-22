@@ -13,20 +13,23 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.MultiSet qualified as MS
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraPC.Monad
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.SoP.SoP
+import Futhark.SoP.Monad (MonadSoP)
 
 -----------------------------------------
 --- 1. Simplifications related to Pow ---
 -----------------------------------------
 
-simplifyPows :: forall e. (SoP Symbol -> AlgM e (SoP Symbol)) -> SoP Symbol -> AlgM e (SoP Symbol)
+-- simplifyPows :: forall e. (SoP Symbol -> AlgM e (SoP Symbol)) -> SoP Symbol -> AlgM e (SoP Symbol)
+simplifyPows ::
+  (MonadSoP Symbol e p m) =>
+  (SoP Symbol  -> m (SoP Symbol)) -> SoP Symbol -> m (SoP Symbol)
 simplifyPows simplifyLevel sop = do
   lst <- mapM simplifyTerm $ M.toList $ getTerms sop
   pure $ SoP $ M.fromList lst
   where
-    simplifyTerm :: (Term Symbol, Integer) -> AlgM e (Term Symbol, Integer)
+    -- simplifyTerm :: (Term Symbol, Integer) -> AlgM e (Term Symbol, Integer)
     simplifyTerm (Term mset, k) = do
       let (mset_pows, mset_others) = MS.partition hasPow mset
           mset_tup_pows = MS.mapMaybe mpowAsTup mset_pows

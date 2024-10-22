@@ -13,12 +13,10 @@ module Futhark.Analysis.Proofs.AlgebraPC.Symbol
   )
 where
 
-import Control.Monad.RWS.Strict hiding (Sum)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.MonadFreshNames
-import Futhark.SoP.Expression
-import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
+import Futhark.SoP.Monad (Nameable (mkName))
 import Futhark.SoP.SoP (SoP)
 import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName)

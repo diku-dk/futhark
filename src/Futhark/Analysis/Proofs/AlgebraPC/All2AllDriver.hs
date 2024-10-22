@@ -11,16 +11,14 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.MultiSet qualified as MS
 import Futhark.Analysis.Proofs.AlgebraPC.BinaryRules
-import Futhark.Analysis.Proofs.AlgebraPC.Monad
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
-import Futhark.SoP.Expression
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 
 simplifyAll2All ::
+  (MonadSoP Symbol e Property m) =>
   SoP Symbol ->
-  IndexFnM (Bool, SoP Symbol)
+  m (Bool, SoP Symbol)
 simplifyAll2All sop = do
   let exp_terms =
         map expandSumIdxTerm $
@@ -58,10 +56,11 @@ expandSumIdxTerm (Term ms, k) =
     f _ = Nothing
 
 matchAllWithAll ::
-  (a -> a -> AlgM e (Maybe b)) ->
+  (MonadSoP Symbol e p m) =>
+  (a -> a -> m (Maybe b)) ->
   [a] ->
   [a] ->
-  AlgM e (Maybe b)
+  m (Maybe b)
 matchAllWithAll fMatch els1 els2 =
   foldM (ff1 els2) Nothing els1
   where

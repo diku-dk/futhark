@@ -16,6 +16,7 @@ import Language.Futhark (VName)
 import Language.Futhark qualified as E
 import qualified Futhark.Analysis.Proofs.AlgebraPC.Symbol as Algebra
 import Futhark.SoP.Expression (Expression)
+-- import Futhark.Analysis.Proofs.AlgebraPC.Solve (findSymbolLEq0)
 
 data IndexFn = IndexFn
   { iterator :: Iterator,
@@ -89,6 +90,7 @@ instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
   getEquivs = gets (equivs . algenv)
   getProperties = gets (properties . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
+  -- findSymLEq0 = findSymbolLEq0
 
 runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
