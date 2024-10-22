@@ -52,9 +52,6 @@ fromAlgebra (Algebra.Sum (Algebra.One vn) lb ub) = do
   j <- newVName "j"
   xj <- repHoles x (sym2SoP $ Var j)
   pure . sym2SoP $ LinComb j a b xj
--- case justSym xj of
---   Just xj' ->
---   Nothing -> error "fromAlgebra: Inconsistent untranslatable environment"
 fromAlgebra (Algebra.Sum (Algebra.POR vns) lb ub) = do
   -- Sum (POR {x,y}) a b = Sum x a b + Sum y a b
   foldr1 (.+.)
