@@ -4,23 +4,38 @@
 --   up to the names of bound variables?
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Futhark.Analysis.Proofs.Unify where
+module Futhark.Analysis.Proofs.Unify
+  ( Unify (..),
+    Renameable (..),
+    Replacement,
+    ReplacementBuilder (..),
+    Replaceable (rep),
+    Substitution (..),
+    FreeVariables (..),
+    Hole (justHole),
+    freshName,
+    renameSame,
+    unifies_,
+    sub,
+    unifies,
+    renameAnd,
+  )
+where
 
 import Control.Monad (foldM, msum)
-import Control.Monad.Trans.Maybe
+import Control.Monad.Trans.Maybe (MaybeT (runMaybeT))
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.IndexFn (IndexFnM, debugPrettyM)
+import Futhark.Analysis.Proofs.IndexFn (IndexFnM)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), VNameSource, newNameFromString)
 import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromList, sopToList, sopToLists, term2SoP, termToList, toTerm, zeroSoP)
 import Futhark.SoP.SoP qualified as SoP
-import Futhark.Util.Pretty
+import Futhark.Util.Pretty (Pretty (pretty), braces, commastack)
 import Language.Futhark (VName)
-import Control.Monad.Trans (lift)
 
 class (Ord a) => FreeVariables a where
   fv :: a -> S.Set VName
@@ -83,10 +98,16 @@ instance (Eq u, Ord u) => Eq (Substitution u) where
   a == b = mapping a == mapping b
 
 instance Semigroup (Substitution u) where
-  a <> b = Substitution {mapping = mapping a <> mapping b, vns = vns a <> vns b}
+  a <> b =
+    Substitution
+      { mapping = mapping a <> mapping b,
+        vns = vns a <> vns b
+      }
 
 instance (Pretty v) => Pretty (Substitution v) where
-  pretty = braces . commastack . map (\(k, v) -> prettyName k <> " : " <> pretty v) . M.toList . mapping
+  pretty = braces . commastack . map prettyKV . M.toList . mapping
+    where
+      prettyKV (k, v) = prettyName k <> " : " <> pretty v
 
 sub ::
   ( MonadFreshNames m,
@@ -109,19 +130,20 @@ class (Renameable v) => Unify v u where
 
   -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
   --                  = {rename(e) ~= rename(e')}.
-  unify :: Pretty v => v -> v -> IndexFnM (Maybe (Substitution u))
+  unify :: (Pretty v) => v -> v -> IndexFnM (Maybe (Substitution u))
   unify = renameAnd unify_
 
-renameAnd :: (Pretty t1, Pretty t2, Renameable t1, Renameable t2) => (VName -> t1 -> t2 -> MaybeT IndexFnM (Replacement u)) -> t1 -> t2 -> IndexFnM (Maybe (Substitution u))
+renameAnd ::
+  (Renameable t1, Renameable t2) =>
+  (VName -> t1 -> t2 -> MaybeT IndexFnM (Replacement u)) ->
+  t1 ->
+  t2 ->
+  IndexFnM (Maybe (Substitution u))
 renameAnd unifier x y = runMaybeT $ do
   k <- newNameFromString "k"
   vns <- getNameSource
-  -- lift $ debugPrettyM "x " x
   a <- rename vns x
-  -- lift $ debugPrettyM "->" a
-  -- lift $ debugPrettyM "y " y
   b <- rename vns y
-  -- lift $ debugPrettyM "->" b
   s <- unifier k a b
   pure $ Substitution {mapping = s, vns = vns}
 
@@ -144,7 +166,8 @@ instance (FreeVariables u) => FreeVariables (SoP u) where
   fv x = S.unions [fv t | (ts, _) <- sopToLists x, t <- ts]
 
 instance (Ord u, Replaceable u u) => Replaceable (Term u, Integer) u where
-  rep s (x, c) = SoP.scaleSoP c $ foldr (mulSoPs . rep s) (int2SoP 1) . termToList $ x
+  rep s (x, c) =
+    SoP.scaleSoP c . foldr (mulSoPs . rep s) (int2SoP 1) . termToList $ x
 
 instance (Ord u, Replaceable u u) => Replaceable (SoP u) u where
   rep s = foldr (addSoPs . rep s) zeroSoP . sopToList
@@ -178,7 +201,6 @@ unifies ::
     Replaceable u u,
     Unify v u,
     Unify u u,
-    Pretty v,
     Ord u,
     Hole u
   ) =>
@@ -186,7 +208,7 @@ unifies ::
   IndexFnM (Maybe (Substitution u))
 unifies us =
   let (xs, ys) = unzip us
-  in renameAnd (\k as bs -> unifies_ k (zip as bs)) xs ys
+   in renameAnd (\k as bs -> unifies_ k (zip as bs)) xs ys
 
 unifyAnyPerm ::
   ( Replaceable v u,
