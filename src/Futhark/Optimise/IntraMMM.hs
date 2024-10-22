@@ -45,6 +45,7 @@ import Futhark.Pass
     intraproceduralTransformationWithConsts,
   )
 import Data.Loc (Loc(NoLoc), SrcLoc (SrcLoc))
+import Colog.Core (duplicate)
 
 traceHelper :: (Show a) => a -> a
 traceHelper x = trace (show x ++ "\n") x
@@ -58,16 +59,18 @@ intraMMM =
     transformProg
 
 
-type MMMFuns = [(MMMSignature, FunDef GPU)]
+type MMMFunDef = (MMMSignature, FunDef GPU)
+type MMMFuns = [MMMFunDef]
+-- TODO: implement Eq to ensure no duplicate defs
 
 
 -- TODO: dont use RWS?
 type IntraMMMMonad = RWS (Scope GPU) MMMFuns VNameSource
 
 
-runBuilderMMM_ :: Builder GPU () -> Scope GPU -> IntraMMMMonad (Stms GPU)
-runBuilderMMM_ m s =
-  modifyNameSource $ runState $ runBuilderT_ m s
+runBuilderMMM :: Builder GPU a -> Scope GPU -> IntraMMMMonad (a, Stms GPU)
+runBuilderMMM m s =
+  modifyNameSource $ runState $ runBuilderT m s
 
 
 mapStmsWithScope :: (Monoid a, LocalScope rep f) => (Stm rep -> f a) -> Stms rep -> f a
@@ -86,9 +89,9 @@ mkInt64Const = Constant . IntValue . intValue Int64
 
 -- IR generation
 
+-- TODO: need fresh names, emit in monad when needed
 -- TODO: pass sizes in args or encoded in name?
--- TODO: emit in monad when needed?
-mkGemmFun :: PrimType -> PrimType -> PrimType -> Int -> Int -> Int -> Int -> PassM (FunDef GPU)
+mkGemmFun :: (MonadFreshNames m) => PrimType -> PrimType -> PrimType -> Int -> Int -> Int -> Int -> m MMMFunDef
 -- TODO: use record?
 mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
   let typeA = Array elmTypeA (Shape [mkInt64Const sizeM, mkInt64Const sizeK]) Nonunique
@@ -100,57 +103,78 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
   aParam <- newParam "A" typeA
   bParam <- newParam "B" typeB
   cParam <- newParam "C" typeCin
-  pure $
-    FunDef Nothing mempty gemmName
-    typeCout
-    [aParam, bParam, cParam]
-    $ resultBody [Var $ paramName cParam]
+  fName <- fmap (nameFromString . show) $ newName $ VName gemmName 0
+  pure (GemmSignature elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs,
+      FunDef Nothing mempty fName
+      typeCout
+      [aParam, bParam, cParam]
+      $ resultBody [Var $ paramName cParam]
+    )
 
 -- TODO: entire global as input or only slize, if entire add index as argument
-mkCopyGlobalShared :: PrimType -> Int -> Int -> PassM (FunDef GPU)
+mkCopyGlobalShared :: (MonadFreshNames m) => PrimType -> Int -> Int -> m MMMFunDef
 mkCopyGlobalShared elmType sizeY sizeX = do
 -- TODO: take (number of) outer globalOuterDims as input
-  globalOuterDim <- newParam "globalOuterDim" $ Prim int64
-  globalParam <- newParam "global" $ Array elmType (Shape [Var $ paramName globalOuterDim, mkInt64Const sizeY, mkInt64Const sizeX]) Nonunique
+  globalOuterIndex <- newParam "globalOuterIndex" $ Prim int64
+  globalParam <- newParam "global" $ Array elmType (Shape [Var $ paramName globalOuterIndex, mkInt64Const sizeY, mkInt64Const sizeX]) Nonunique
   sharedParam <- newParam "shared" $  Array elmType (Shape [mkInt64Const sizeY, mkInt64Const sizeX]) Unique
+  fName <- fmap (nameFromString . show) $ newName $ VName copyGlobalSharedName 0
+
 --  TODO: use Free or Ext?
   let sharedOut = [(Array elmType (Shape [Free $ mkInt64Const sizeY, Free $ mkInt64Const sizeX]) Unique, RetAls [] [])]
-  pure $
-    FunDef Nothing mempty copyGlobalSharedName
-        sharedOut
-        [globalOuterDim, globalParam, sharedParam]
-        $ resultBody [Var $ paramName sharedParam]
+  pure (CopyGlobalSharedSignature elmType sizeY sizeX,
+      FunDef Nothing mempty fName
+          sharedOut
+          [globalOuterIndex, globalParam, sharedParam]
+          $ resultBody [Var $ paramName sharedParam]
+    )
 
 -- TODO: copy to global instead of shared?
-mkCopyRegistersShared :: PrimType -> Int -> Int -> Int -> Int -> PassM (FunDef GPU)
+mkCopyRegistersShared :: (MonadFreshNames m) => PrimType -> Int -> Int -> Int -> Int -> m MMMFunDef
 mkCopyRegistersShared elmType sizeM sizeN sizeRegs blockSize = do
   registersParam <- newParam "registers" $  Array elmType (Shape [mkInt64Const blockSize, mkInt64Const sizeRegs]) Nonunique
   sharedParam <- newParam "shared" $ Array elmType (Shape [mkInt64Const sizeM, mkInt64Const sizeN]) Unique
+  fName <- fmap (nameFromString . show) $ newName $ VName copyRegistersSharedName 0
+
 --  TODO: use Free or Ext?
   let sharedOut = [(Array (FloatType Float16) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])]
-  pure $
-    FunDef Nothing mempty copyRegistersSharedName
-        sharedOut
-        [registersParam, sharedParam]
-        $ resultBody [Var $ paramName sharedParam]
+  pure (CopyRegistersSharedSignature elmType sizeM sizeN sizeRegs blockSize,
+      FunDef Nothing mempty fName
+          sharedOut
+          [registersParam, sharedParam]
+          $ resultBody [Var $ paramName sharedParam]
+    )
 
-buildMMM :: VName -> OuterMMAMatch -> Builder GPU ()
+buildMMM :: VName -> OuterMMAMatch -> Builder GPU MMMFuns
 -- TODO: fix args
 buildMMM resName outerMatch = do
   let InnerMMAMatch kernelBodyMatch ne sizeM sizeN sizeK = innerMatch outerMatch
-  let blockSize = 32
+
+--  let cValsPerThread = min 64 (sizeM * sizeN `div` 32)
+--  let blockSize = sizeM * sizeN `div` cValsPerThread
+  let blockSize = max 32 (sizeM * sizeN `div` 64)
+  let cValsPerThread = sizeM * sizeN `div` blockSize
+
   let numBlocks = outerNumBlocks outerMatch
-  let cValsPerThread = mkInt64Const $ sizeM * sizeN `div` blockSize
 --  TODO: get as input instead?
   let blockSizeSubExp = mkInt64Const blockSize
---  TODO: do we need to init regs when used only once?
+-- TODO: do we need to init regs when used only once?
 -- TODO: use SegNoVirtFull instead of loop and avoid setting the block size?
+
+-- TODO: gen these as needed
+  let elmType = FloatType Float16
+  gemmFun <- mkGemmFun elmType elmType elmType sizeM sizeN sizeK cValsPerThread
+--  TODO: 2 different copies?
+  copyGlobalSharedFunA <- mkCopyGlobalShared elmType sizeM sizeK
+  copyGlobalSharedFunB <- mkCopyGlobalShared elmType sizeK sizeN
+  copyRegistersSharedFun <- mkCopyRegistersShared elmType sizeM sizeN cValsPerThread blockSize
+  let addedFuns = [gemmFun, copyGlobalSharedFunA, copyGlobalSharedFunB, copyRegistersSharedFun]
 
   blockMMAres_list <- segMap1D "blockMMAres" (SegBlock SegNoVirt $ Just $ KernelGrid (Count numBlocks) (Count $ mkInt64Const blockSize)) ResultMaySimplify numBlocks $ \blockIndex -> do
 -- TODO: make version without regs for dynamic arguments, gemm outputs shared mem no regs as input
     cRegs_list <- segMap1D "cRegs" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \_ -> do
-      cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [cValsPerThread]
-      cLoop <- forLoop cValsPerThread [cScratch] $ \i [cMerge] -> do
+      cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const cValsPerThread]
+      cLoop <- forLoop (mkInt64Const cValsPerThread) [cScratch] $ \i [cMerge] -> do
         cZeroed <- update "cZeroed" cMerge [i] ne
   --      TODO: use pure instead of resultBodyM?
         resultBodyM [Var cZeroed]
@@ -158,19 +182,29 @@ buildMMM resName outerMatch = do
     let [cRegs] = cRegs_list
     aScratch <- letExp "aScratch" $ BasicOp $ Scratch (typeA kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeK]
     bScratch <- letExp "bScratch" $ BasicOp $ Scratch (typeB kernelBodyMatch) [mkInt64Const sizeK, mkInt64Const sizeN]
-    aCopied <- letExp "aCopied" $ Apply copyGlobalSharedName (fmap (,ObservePrim) (outerDimsA kernelBodyMatch) <> [(Var $ arrA kernelBodyMatch, ObservePrim), (Var aScratch, Consume)]) [(Array (typeA kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeK]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
-    bCopied <- letExp "bCopied" $ Apply copyGlobalSharedName (fmap (,ObservePrim) (outerDimsB kernelBodyMatch) <> [(Var $ arrB kernelBodyMatch, ObservePrim), (Var bScratch, Consume)]) [(Array (typeB kernelBodyMatch) (Shape [Free $ mkInt64Const sizeK, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+
+--    TODO: check if should be outerDimsA?
+    let copyArgsA = fmap ((,ObservePrim) . Var) (outerIndecesA kernelBodyMatch) <> [(Var $ arrA kernelBodyMatch, ObservePrim), (Var aScratch, Consume)]
+    let copyRetsA = [(Array (typeA kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeK]) Unique, RetAls [] [])]
+    aCopied <- letExp "aCopied" $ Apply (funDefName $ snd copyGlobalSharedFunA) copyArgsA copyRetsA (Safe, SrcLoc NoLoc, [])
+    let copyArgsB = fmap ((,ObservePrim) . Var) (outerIndecesB kernelBodyMatch) <> [(Var $ arrB kernelBodyMatch, ObservePrim), (Var bScratch, Consume)]
+    let copyRetsB = [(Array (typeB kernelBodyMatch) (Shape [Free $ mkInt64Const sizeK, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])]
+    bCopied <- letExp "bCopied" $ Apply (funDefName $ snd copyGlobalSharedFunB) copyArgsB copyRetsB (Safe, SrcLoc NoLoc, [])
+
     inBlockMMAres_list <- segMap1D "inBlockMMAres" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \thread_idx -> do
       threadCregs <- index "threadCregs" cRegs [thread_idx]
   --  TODO: is ObservePrim correct?
-      threadMMAres <- letExp "threadMMAres" $ Apply gemmName [(Var aCopied, ObservePrim), (Var bCopied, ObservePrim), (Var threadCregs, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free cValsPerThread]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+      threadMMAres <- letExp "threadMMAres" $ Apply (funDefName $ snd gemmFun) [(Var aCopied, ObservePrim), (Var bCopied, ObservePrim), (Var threadCregs, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const cValsPerThread]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
       pure [varRes threadMMAres]
     let [inBlockMMAres] = inBlockMMAres_list
+
     cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeN]
-    cCopied <- letExp "cCopied" $ Apply copyRegistersSharedName [(Var inBlockMMAres, ObservePrim), (Var cScratch, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+    cCopied <- letExp "cCopied" $ Apply (funDefName $ snd copyRegistersSharedFun) [(Var inBlockMMAres, ObservePrim), (Var cScratch, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
     pure [varRes cCopied]
+
   let [blockMMAres] = blockMMAres_list
   letBindNames [resName] $ BasicOp $ SubExp $ Var blockMMAres
+  pure addedFuns
 
 
 
@@ -178,29 +212,25 @@ buildMMM resName outerMatch = do
 
 transformProg :: Prog GPU -> PassM (Prog GPU)
 transformProg (Prog opaqueTypes consts funs) = do
-  transformedFuns <- mapM transformFunDef funs
+  (transformedFuns, mmmFuns) <- modifyNameSource $ (\(a, s, w) -> ((a, w), s)) . runRWS (mapM transformFunDef funs) (scopeOf consts)
+  let (_, addedFuns) = unzip mmmFuns
+  pure $ Prog opaqueTypes consts (addedFuns <> transformedFuns)
 
--- TODO: gen these as needed
-  let elmType = FloatType Float16
-  gemmFun <- mkGemmFun elmType elmType elmType 16 16 16 8
-  copyGlobalSharedFun <- mkCopyGlobalShared elmType 16 16
-  copyRegistersSharedFun <- mkCopyRegistersShared elmType 16 16 8 32
-  pure $ Prog opaqueTypes consts (gemmFun : copyGlobalSharedFun : copyRegistersSharedFun : transformedFuns)
-
-transformFunDef :: FunDef GPU -> PassM (FunDef GPU)
-transformFunDef funDef@(FunDef entry attrs name retType params body) = do
-  newBody <- modifyNameSource $ (\(a, b, c) -> (a, b)) . runRWS (transformBody body) (scopeOf funDef)
-  pure $ FunDef entry attrs name retType params newBody
+transformFunDef :: FunDef GPU -> IntraMMMMonad (FunDef GPU)
+transformFunDef funDef@(FunDef entry attrs name retType params body) =
+  FunDef entry attrs name retType params <$> inScopeOf funDef (transformBody body)
 
 transformStms :: Stms GPU -> IntraMMMMonad (Stms GPU)
-transformStms stms = mapStmsWithScope transformStm stms
+transformStms = mapStmsWithScope transformStm
 
 transformStm :: Stm GPU -> IntraMMMMonad (Stms GPU)
 transformStm stm@(Let (Pat [PatElem resName _]) aux e) = do
     scope <- askScope
     case outerSegOpExpMatch scope e of
-      Just match ->
-        runBuilderMMM_ (buildMMM resName match) scope
+      Just match -> do
+        (mmmFuns, stms) <- runBuilderMMM (buildMMM resName match) scope
+        tell mmmFuns
+        pure stms
       _ -> transformStmDefault stm
 transformStm stm = transformStmDefault stm
 
@@ -300,12 +330,13 @@ outerSegOpExpMatch _ _ = Nothing
 
 -- TODO: allow stms before and after seg(inblock), allow multiple inner matches?
 blockKernelBodyMatch :: Scope GPU -> KernelBody GPU -> Maybe InnerMMAMatch
-blockKernelBodyMatch scope (KernelBody desc stms res) | [(Let p aux e)] <- stmsToList stms =
+blockKernelBodyMatch scope (KernelBody desc stms res) | [Let p aux e] <- stmsToList stms =
   innerSegOpExpMatch scope e
 blockKernelBodyMatch _ _ = Nothing
 
 innerSegOpExpMatch :: Scope GPU -> Exp GPU -> Maybe InnerMMAMatch
 innerSegOpExpMatch scope
+-- TODO: check if better to match segmap with inner reduction
   (Op (SegOp segRed@(
       SegRed (SegThreadInBlock _) space segBinOps ts body
   )))
@@ -529,8 +560,7 @@ fixStmtsWithScope scope stms = do
   pure res
 
 fixStmts :: Stms GPUMem -> FixMonad (Stms GPUMem)
-fixStmts stms =
-  mapStmsWithScope (fmap oneStm . fixStmt) stms
+fixStmts = mapStmsWithScope (fmap oneStm . fixStmt)
 
 fixStmt :: Stm GPUMem -> FixMonad (Stm GPUMem)
 fixStmt stm@(Let (Pat [PatElem resName (MemArray _ _ _ (ArrayIn resMem _))]) _ (BasicOp (Manifest _ inputName))) = do

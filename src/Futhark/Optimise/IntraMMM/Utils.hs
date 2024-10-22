@@ -27,6 +27,7 @@ data MMMSignature =
       sizeRegsCPRS :: Int,
       blockSizeCPRS :: Int
     }
+  deriving (Show, Eq, Ord)
 
 
 gemmName :: Name
