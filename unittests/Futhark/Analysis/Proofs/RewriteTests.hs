@@ -108,7 +108,7 @@ tests =
       testCase "Merge sum-subtraction (match 2)" $
         run
           ( \(x, _, z, w, a, b, _, _) -> do
-              addAlgRange b (int2SoP 0) (sVar c)
+              addAlgRange b (int2SoP 0) (sVar a .-. int 1)
               rewrite
                 ( LinComb w (int 0) (sVar a .-. int 1) (Idx (Var x) (sVar w))
                     ~-~ LinComb z (int 0) (sVar b) (Idx (Var x) (sVar z))
