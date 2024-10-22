@@ -1,7 +1,7 @@
 -- Utilities for using the Algebra layer from the IndexFn layer.
 module Futhark.Analysis.Proofs.AlgebraBridge where
 
-import Control.Monad (unless)
+import Control.Monad (unless, (<=<), void)
 import Control.Monad.RWS (gets)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust)
@@ -32,9 +32,11 @@ fromAlgebra (Algebra.Var vn) = do
     Just x' -> pure . sym2SoP $ x'
     Nothing -> pure . sym2SoP $ Var vn
 fromAlgebra (Algebra.Idx (Algebra.One vn) i) = do
-  x <- lookupUntransSymUnsafe vn
+  x <- lookupUntransSym (Algebra.Var vn)
   idx <- fromAlgebraSoP i
-  repExactlyOneHole x idx -- replace hole in x with idx; x is already on form `x[hole]`
+  case x of
+    Just x' -> repExactlyOneHole x' idx
+    Nothing -> pure . sym2SoP $ Idx (Var vn) idx
 fromAlgebra (Algebra.Idx (Algebra.POR {}) _) = undefined
 fromAlgebra (Algebra.Mdf _dir vn i j) = do
   -- TODO add monotonicity property to environment?
@@ -48,14 +50,11 @@ fromAlgebra (Algebra.Sum (Algebra.One vn) lb ub) = do
   a <- fromAlgebraSoP lb
   b <- fromAlgebraSoP ub
   x <- lookupUntransSymUnsafe vn
-  holes <- findHoles x
   j <- newVName "j"
-  -- TODO use repExactlyOneHole
-  let x_repped =
-        case holes of
-          [] -> x
-          h : _ -> fromJust . justSym $ rep (M.insert h (sym2SoP $ Var j) mempty) x
-  pure . sym2SoP $ LinComb j a b x_repped
+  xj <- repExactlyOneHole x (sym2SoP $ Var j)
+  case justSym xj of
+    Just xj' -> pure . sym2SoP $ LinComb j a b xj'
+    Nothing -> error "fromAlgebra: Inconsistent untranslatable environment"
 fromAlgebra (Algebra.Sum (Algebra.POR vns) lb ub) = do
   -- Sum (POR {x,y}) a b = Sum x a b + Sum y a b
   foldr1 (.+.)
@@ -69,29 +68,26 @@ lookupUntransSymUnsafe = fmap fromJust . lookupUntransSym . Algebra.Var
 
 repExactlyOneHole :: (Monad m) => Symbol -> SoP Symbol -> m (SoP Symbol)
 repExactlyOneHole x replacement = do
-  holes <- findHoles x
-  case holes of
-    [] -> pure . sym2SoP $ x
-    [h] -> pure $ rep (M.insert h replacement mempty) x
-    _ -> error "multiple holes to potentially replace"
+  hole <- findHole x
+  case hole of
+    Just h -> pure $ rep (M.insert h replacement mempty) x
+    Nothing -> pure . sym2SoP $ x
 
+-- TODO add the hole to the env as well like (hole, holed expression) to avoid this mockery
 findHole :: Monad m => Symbol -> m (Maybe VName)
 findHole sym = do
   holes <- findHoles sym
   case holes of
     [] -> pure Nothing
     [h] -> pure (Just h)
-    _ ->
-      error "findHole: Inconsistent untranslatable env. Symbol has multiple holes."
-
--- TODO privatize this above
--- TODO make this not stupid
-findHoles :: (Monad m) => Symbol -> m [VName]
-findHoles = astFold m []
+    _ -> error "findHole: Inconsistent untranslatable environment"
   where
-    m = ASTFolder { foldOnSymbol = getHole }
-    getHole acc (Hole vn) = pure $ vn : acc
-    getHole acc _ = pure acc
+    -- TODO make this not stupid
+    findHoles = astFold m []
+      where
+        m = ASTFolder { foldOnSymbol = getHole }
+        getHole acc (Hole vn) = pure $ vn : acc
+        getHole acc _ = pure acc
 
 instance ToSoP Algebra.Symbol Symbol where
   -- Convert from IndexFn Symbol to Algebra Symbol.
@@ -102,25 +98,17 @@ instance ToSoP Algebra.Symbol Symbol where
 -- Translation from IndexFn to Algebra layer.
 ------------------------------------------------------------------------------
 toAlgebraSoP :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
-toAlgebraSoP symbol = do
-  vns <- getNameSource
-  symbol' <- rename vns symbol
-  mapSymSoP2M_ toAlgebra_ =<< mkUntrans symbol'
+toAlgebraSoP = mapSymSoP2M_ toAlgebra_ <=< mkUntrans
 
---- TODO renaming here necessary? In particular, wanna remove it to define ToSoP instance.
 toAlgebra :: Symbol -> IndexFnM Algebra.Symbol
-toAlgebra symbol = do
-  vns <- getNameSource
-  symbol' <- rename vns symbol
-  toAlgebra_ =<< mkUntrans symbol'
+toAlgebra = toAlgebra_ <=< mkUntrans
 
 mkUntrans :: ASTMappable Symbol b => b -> IndexFnM b
 mkUntrans symbol = astMap mUQ =<< astMap mQ symbol
   where
-    -- Add untranslatable quantified symbols to the untranslatable environement.
-    -- Search for symbol x in the untranslatable environment, using unification
-    -- to check for equality. If no name is bound to x, bind a new one.
-    -- TODO this is really ugly
+    -- Add quantified symbols to the untranslatable environement
+    -- with quantifiers replaced by holes. Uses unification on symbols
+    -- to ensure deduplication.
     mQ = ASTMapper {mapOnSymbol = handleQuantified, mapOnSoP = pure}
     handleQuantified p@(LinComb j _ _ x) = do
       res <- search x
@@ -129,7 +117,7 @@ mkUntrans symbol = astMap mUQ =<< astMap mQ symbol
         Nothing -> do
           hole <- sym2SoP . Hole <$> newVName "h"
           let x_holed = fromJust . justSym $ rep (M.insert j hole mempty) x
-          _ <- lookupUntrans x_holed
+          addUntrans x_holed
           pure p
     handleQuantified x = pure x
 
@@ -151,6 +139,9 @@ lookupOrAdd sym = do
     Nothing -> do
       vn <- lookupUntrans sym
       pure (vn, Nothing)
+
+addUntrans :: (MonadSoP Algebra.Symbol e p f) => e -> f ()
+addUntrans = void . lookupUntransPE
 
 lookupUntrans :: (MonadSoP Algebra.Symbol e p f) => e -> f VName
 lookupUntrans x = getVName <$> lookupUntransPE x
