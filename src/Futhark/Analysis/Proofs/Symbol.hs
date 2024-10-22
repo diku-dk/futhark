@@ -43,7 +43,7 @@ infixr 2 :||
 sop2Symbol :: (Ord u) => SoP u -> u
 sop2Symbol sop
   | Just t <- justSym sop = t
-  | otherwise = error "sop2Symbol on something that is not a symbol"
+  | otherwise = error "sop2Symbol on non-symbol"
 
 -- Given iterator, lower bound, upper bound and a SoP, create
 -- a sum of linear combinations.

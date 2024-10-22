@@ -9,6 +9,7 @@ module Futhark.Analysis.Proofs.AlgebraPC.Symbol
     hasMdf,
     hasIdxOrSum,
     hasMon,
+    getVName,
   )
 where
 
@@ -115,3 +116,7 @@ hasMon props
     f (Monotonic _) = True
     f _ = False
 hasMon _ = Nothing
+
+getVName :: Symbol -> VName
+getVName (Var vn) = vn
+getVName x = error ("getVName: non-Var symbol " <> show x)
