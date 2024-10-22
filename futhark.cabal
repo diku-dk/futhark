@@ -245,7 +245,7 @@ library
       Futhark.Doc.Generator
       Futhark.Error
       Futhark.Fmt.Printer
-      Futhark.Fmt.AST
+      Futhark.Fmt.Monad
       Futhark.FreshNames
       Futhark.Format
       Futhark.IR
