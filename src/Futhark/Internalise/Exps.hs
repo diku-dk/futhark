@@ -394,8 +394,8 @@ internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
   error $ "Unexpected LetFun " ++ prettyString ofname
-internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = do
-  ses <- internaliseExp "loop_init" mergeexp
+internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody loc) = do
+  ses <- internaliseExp "loop_init" $ loopInitExp loopinit
   ((loopbody', (form', shapepat, mergepat', mergeinit')), initstms) <-
     collectStms $ handleForm ses form
 
