@@ -8,8 +8,7 @@ import Control.Monad.RWS (gets, modify)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.AlgebraPC.Solve qualified as Solve
+import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), getCase)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
@@ -106,7 +105,7 @@ simplify = astMap m
       -- debugPrettyM "simplify" y
       -- algenv <- gets algenv
       -- debugPrettyM "under" algenv
-      z <- Solve.simplify y
+      z <- Algebra.simplify y
       mapSymSoP2M fromAlgebra z
 
     -- Note that this does not recurse.

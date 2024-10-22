@@ -153,6 +153,7 @@ library
       Futhark.Analysis.Proofs.Traversals
       Futhark.Analysis.Proofs.Unify
       Futhark.Analysis.Proofs.Util
+      Futhark.Analysis.Proofs.AlgebraPC.Algebra
       Futhark.Analysis.Proofs.AlgebraPC.All2AllDriver
       Futhark.Analysis.Proofs.AlgebraPC.BinaryRules
       Futhark.Analysis.Proofs.AlgebraPC.Solve

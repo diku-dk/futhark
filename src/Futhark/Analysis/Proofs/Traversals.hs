@@ -4,7 +4,6 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.SoP.SoP (SoP, int2SoP, sopToLists, sym2SoP, (.*.), (.+.))
-import Control.Monad (foldM)
 
 data ASTMapper a m = ASTMapper
   { mapOnSymbol :: a -> m a,
