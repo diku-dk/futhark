@@ -57,7 +57,6 @@ import Futhark.Pass
 import Futhark.Tools
 import Futhark.Util (maybeNth, splitAt3)
 import qualified Futhark.Optimise.IntraMMM.Utils as MMM
-import Debug.Trace
 
 
 type Allocable fromrep torep inner =
@@ -918,7 +917,7 @@ allocInExp (Loop merge form (Body () bodystms bodyres)) =
           pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
       pure $ Loop merge' form body'
 allocInExp (Apply fname args rettype loc) = do
-  let forced_space = if fname `elem` MMM.funNames then Just $ Space "device" else Nothing
+  let forced_space = if MMM.isMMMName fname then Just $ Space "device" else Nothing
   args' <- funcallArgs args forced_space
   space <- askDefaultSpace
   let space' = fromMaybe space forced_space

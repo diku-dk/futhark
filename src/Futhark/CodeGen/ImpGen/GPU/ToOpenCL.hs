@@ -259,7 +259,7 @@ genGPUCode env mode body failures =
 -- Compilation of a device function that is not not invoked from the
 -- host, but is invoked by (perhaps multiple) kernels.
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
-generateDeviceFun fname _ | fname `elem` MMM.funNames = pure ()
+generateDeviceFun fname _ | MMM.isMMMName fname = pure ()
 generateDeviceFun fname device_func = do
 -- TODO: handle?
   when (any memParam $ functionInput device_func) bad
