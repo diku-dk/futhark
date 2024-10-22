@@ -36,6 +36,8 @@ tests =
     [ testCase "Pow Exact Norm" $
         run
           ( forM [1..100000] $ \ kk -> do
+              -- addRange d 0 1000
+              -- ($<=$)
               let xy_p_3x= sVar x .*. (sVar y .+. int 3)
                   pow_xy = int 2 .*. sVar i1 .*. sym2SoP (Pow (2, xy_p_3x))
                   pow_z  = int 8 .*. sVar i2 .*. sym2SoP (Pow (2, sVar z .*. int 2))
