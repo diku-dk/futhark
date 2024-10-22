@@ -2,7 +2,7 @@
 -- Vectorised special case + generic case
 -- ==
 -- entry: fwd_J rev_J
--- compiled input { [[1f32,1f32],[2f32,2f32],[3f32,3f32],[4f32,4f32],[5f32,5f32]] }
+-- input { [[1f32,1f32],[2f32,2f32],[3f32,3f32],[4f32,4f32],[5f32,5f32]] }
 -- output {
 -- [[[1f32, 1f32], [0f32, 0f32], [0f32, 0f32], [0f32, 0f32], [0f32, 0f32]],
 --   [[2f32, 2f32], [1f32, 1f32], [0f32, 0f32], [0f32, 0f32], [0f32, 0f32]],

@@ -87,7 +87,7 @@ freeInExp expr = case expr of
   IndexSection idxs _ _ -> foldMap freeInDimIndex idxs
   AppExp (Loop sparams pat e1 form e3 _) _ ->
     let (e2fv, e2ident) = formVars form
-     in freeInExp e1
+     in freeInExp (loopInitExp e1)
           <> ( (e2fv <> freeInExp e3)
                  `freeWithoutL` (sparams <> patNames pat <> e2ident)
              )

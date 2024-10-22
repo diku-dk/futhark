@@ -304,10 +304,6 @@ instance Format UncheckedCase where
   fmt (CasePat p e loc) =
     prependComments loc $ code "case" <+> p <+> code "->" </> stdIndent e
 
--- Should check if exp match pat
-matchPat :: UncheckedPat ParamType -> UncheckedExp -> Bool
-matchPat _ _ = False
-
 -- matchPat (TuplePat _pats _paramt) _exp = undefined
 -- matchPat (RecordPat _namePats _loc) _exp = undefined
 -- matchPat (PatParens _pats _loc) _exp = undefined
@@ -325,8 +321,18 @@ instance Format (AppExpBase NoInfo Name) where
     prependComments loc $ code "match" <+> e </> sep line (toList cs)
   -- should omit the initial value expression
   -- need some way to catch when the value expression match the pattern
-  fmt (Loop _sizeparams pat initexp _form _loopbody _loc) | matchPat pat initexp = undefined
-  fmt (Loop sizeparams pat initexp form loopbody loc) =
+  fmt (Loop sizeparams pat (LoopInitImplicit NoInfo) form loopbody loc) =
+    prependComments loc
+    $ ( ( code "loop" `op` sizeparams' )
+        <+/> pat
+      )
+    <+> form
+    <+> code "do"
+    </> stdIndent loopbody
+    where
+      op = if null sizeparams then (<:>) else (<+>)
+      sizeparams' = sep nil $ brackets . fmtName . toName <$> sizeparams
+  fmt (Loop sizeparams pat (LoopInitExplicit initexp) form loopbody loc) =
     prependComments loc
     $ ( ( code "loop" `op` sizeparams' )
         <+/> pat

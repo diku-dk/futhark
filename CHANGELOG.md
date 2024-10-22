@@ -9,6 +9,62 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark doc` now produces better (and stable) anchor IDs.
+
+* `futhark profile` now supports multiple JSON files.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* Negation of floating-point positive zero now produces a negative
+  zero.
+
+* Necessary inlining of functions used inside AD constructs.
+
+## [0.25.23]
+
+### Added
+
+* Trailing commas are now allowed for arrays, records, and tuples in
+  the textual value format and in FutharkScript.
+
+* Faster floating-point atomics with OpenCL backend on AMD and NVIDIA
+  GPUs. This affects histogram workloads.
+
+* AD is now supported by the interpreter (thanks to Marcus Jensen).
+
+### Fixed
+
+* Some instances of invalid copy removal. (Again.)
+
+* An issue related to entry points with nontrivial sizes in their
+  arguments, where the entry points were also used as normal functions
+  elsewhere. (#2184)
+
+## [0.25.22]
+
+### Added
+
+* `futhark script` now supports an `-f` option.
+
+* `futhark script` now supports the builtin procedure `$store`.
+
+### Fixed
+
+* An error in tuning file validation.
+
+* Constant folding for loops that produce floating point results could
+  result in different numerical behaviour.
+
+* Compiler crash in memory short circuiting (#2176).
+
+## [0.25.21]
+
+### Added
+
 * Logging now prints more GPU information on context initialisation.
 
 * GPU cache size can now be configured (tuning param: `default_cache`).
@@ -20,10 +76,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark script` now accepts a `-b` option for producing binary
   output.
 
-### Removed
-
-### Changed
-
 ### Fixed
 
 * Type names for element types of array indexing functions in C
@@ -32,6 +84,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * In some cases, GPU failures would not be reported properly if a
   previous failure was pending.
+
+* `auto output` didn't work if the `.fut` file did not have any path
+  components.
+
+* Improved detection of malformed tuning files.
 
 ## [0.25.20]
 

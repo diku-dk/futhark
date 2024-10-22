@@ -51,7 +51,7 @@ simplifyCmpOp look _ (CmpOp CmpEq {} (Constant (IntValue x)) (Var v))
   | Just (BasicOp (ConvOp BToI {} b), cs) <- look v =
       case valueIntegral x :: Int of
         1 -> Just (SubExp b, cs)
-        0 -> Just (UnOp Not b, cs)
+        0 -> Just (UnOp (Neg Bool) b, cs)
         _ -> Just (SubExp (Constant (BoolValue False)), cs)
 simplifyCmpOp _ _ _ = Nothing
 
@@ -176,11 +176,11 @@ simplifyBinOp defOf _ (BinOp LogAnd e1 e2)
   | isCt1 e1 = resIsSubExp e2
   | isCt1 e2 = resIsSubExp e1
   | Var v <- e1,
-    Just (BasicOp (UnOp Not e1'), v_cs) <- defOf v,
+    Just (BasicOp (UnOp (Neg Bool) e1'), v_cs) <- defOf v,
     e1' == e2 =
       Just (SubExp $ Constant $ BoolValue False, v_cs)
   | Var v <- e2,
-    Just (BasicOp (UnOp Not e2'), v_cs) <- defOf v,
+    Just (BasicOp (UnOp (Neg Bool) e2'), v_cs) <- defOf v,
     e2' == e1 =
       Just (SubExp $ Constant $ BoolValue False, v_cs)
 simplifyBinOp defOf _ (BinOp LogOr e1 e2)
@@ -189,11 +189,11 @@ simplifyBinOp defOf _ (BinOp LogOr e1 e2)
   | isCt1 e1 = constRes $ BoolValue True
   | isCt1 e2 = constRes $ BoolValue True
   | Var v <- e1,
-    Just (BasicOp (UnOp Not e1'), v_cs) <- defOf v,
+    Just (BasicOp (UnOp (Neg Bool) e1'), v_cs) <- defOf v,
     e1' == e2 =
       Just (SubExp $ Constant $ BoolValue True, v_cs)
   | Var v <- e2,
-    Just (BasicOp (UnOp Not e2'), v_cs) <- defOf v,
+    Just (BasicOp (UnOp (Neg Bool) e2'), v_cs) <- defOf v,
     e2' == e1 =
       Just (SubExp $ Constant $ BoolValue True, v_cs)
 simplifyBinOp defOf _ (BinOp (SMax it) e1 e2)
@@ -226,8 +226,8 @@ resIsSubExp = Just . (,mempty) . SubExp
 simplifyUnOp :: SimpleRule rep
 simplifyUnOp _ _ (UnOp op (Constant v)) =
   constRes =<< doUnOp op v
-simplifyUnOp defOf _ (UnOp Not (Var v))
-  | Just (BasicOp (UnOp Not v2), v_cs) <- defOf v =
+simplifyUnOp defOf _ (UnOp (Neg Bool) (Var v))
+  | Just (BasicOp (UnOp (Neg Bool) v2), v_cs) <- defOf v =
       Just (SubExp v2, v_cs)
 simplifyUnOp _ _ _ =
   Nothing
