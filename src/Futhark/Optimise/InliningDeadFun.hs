@@ -134,7 +134,7 @@ directlyCalledInSOACs = flip execState mempty . mapM_ (onStm Nothing) . progStms
     onBody :: Maybe Used -> Body SOACS -> State (M.Map Name Used) ()
     onBody u = mapM_ (onStm u) . bodyStms
     onStm u stm = onExp u (stmExp stm) $> stm
-    onExp (Just u) (Apply fname _ _ _) = modify $ M.insert fname u
+    onExp (Just u) (Apply fname _ _ _) = modify $ M.insertWith max fname u
     onExp Nothing Apply {} = pure ()
     onExp u e = walkExpM (walker u) e
     onSOAC u soac = void $ traverseSOACStms (const (traverse (onStm u'))) soac

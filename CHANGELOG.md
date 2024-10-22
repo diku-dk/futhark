@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Negation of floating-point positive zero now produces a negative
   zero.
 
+* Necessary inlining of functions used inside AD constructs.
+
 ## [0.25.23]
 
 ### Added
