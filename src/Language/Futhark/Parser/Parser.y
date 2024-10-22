@@ -852,11 +852,16 @@ PatLiteralNoNeg :: { (PatLit, Loc) }
              | floatlit { let L loc (FLOATLIT x) = $1 in (PatLitFloat x, loc) }
 
 PatLiteral :: { (PatLit, Loc) }
-             : PatLiteralNoNeg           { $1 }
-             | '-' NumLit %prec bottom   { (PatLitPrim (primNegate (fst $2)), snd $2) }
-             | '-' intlit %prec bottom   { let L loc (INTLIT x) = $2 in (PatLitInt (negate x), loc) }
-             | '-' natlit %prec bottom   { let L loc (NATLIT _ x) = $2 in (PatLitInt (negate x), loc) }
-             | '-' floatlit              { let L loc (FLOATLIT x) = $2 in (PatLitFloat (negate x), loc) }
+             : PatLiteralNoNeg
+               { $1 }
+             | '-' NumLit %prec bottom
+               { (PatLitPrim (primNegate (fst $2)), snd $2) }
+             | '-' intlit %prec bottom
+               { let L loc (INTLIT x) = $2 in (PatLitInt (negate x), locOf (srcspan $1 $>)) }
+             | '-' natlit %prec bottom
+               { let L loc (NATLIT _ x) = $2 in (PatLitInt (negate x), locOf (srcspan $1 $>)) }
+             | '-' floatlit
+               { let L loc (FLOATLIT x) = $2 in (PatLitFloat (negate x), locOf (srcspan $1 $>)) }
 
 LoopForm :: { LoopFormBase NoInfo Name }
 LoopForm : for VarId '<' Exp
