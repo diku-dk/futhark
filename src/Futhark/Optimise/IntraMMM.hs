@@ -145,10 +145,12 @@ mkCopyGlobalShared elmType sizeY sizeX = do
     )
 
 -- TODO: copy to global instead of shared?
-mkCopyRegistersShared :: (MonadFreshNames m) => PrimType -> Int -> Int -> Int -> Int -> m MMMFunDef
-mkCopyRegistersShared elmType sizeM sizeN sizeRegs blockSize = do
-  registersParam <- newParam "registers" $  Array elmType (Shape [mkInt64Const blockSize, mkInt64Const sizeRegs]) Nonunique
-  sharedParam <- newParam "shared" $ Array elmType (Shape [mkInt64Const sizeM, mkInt64Const sizeN]) Unique
+mkCopyRegistersShared :: (MonadFreshNames m) => PrimType -> PrimType -> PrimType -> Int -> Int -> Int -> Int -> m MMMFunDef
+mkCopyRegistersShared elmTypeA elmTypeB elmTypeC sizeM sizeN sizeRegs blockSize = do
+  registersParam <- newParam "registers" $  Array elmTypeC (Shape [mkInt64Const blockSize, mkInt64Const sizeRegs]) Nonunique
+  sharedParam <- newParam "shared" $ Array elmTypeC (Shape [mkInt64Const sizeM, mkInt64Const sizeN]) Unique
+  aElmTypeParam <- newParam "elmTypeA" $ Prim elmTypeA
+  bElmTypeParam <- newParam "elmTypeB" $ Prim elmTypeB
   mParam <- newParam "M" $ Prim int64
   nParam <- newParam "N" $ Prim int64
   blockSizeParam <- newParam "blockSize" $ Prim int64
@@ -157,10 +159,10 @@ mkCopyRegistersShared elmType sizeM sizeN sizeRegs blockSize = do
 
 --  TODO: use Free or Ext?
   let sharedOut = [(Array (FloatType Float16) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])]
-  pure (CopyRegistersSharedSignature elmType sizeM sizeN sizeRegs blockSize,
+  pure (CopyRegistersSharedSignature elmTypeC sizeM sizeN sizeRegs blockSize,
       FunDef Nothing mempty fName
           sharedOut
-          [registersParam, sharedParam, mParam, nParam, blockSizeParam]
+          [registersParam, sharedParam, aElmTypeParam, bElmTypeParam, mParam, nParam, blockSizeParam]
           $ resultBody [Var $ paramName sharedParam]
     )
 
@@ -193,7 +195,7 @@ buildMMM resName outerMatch = do
   gemmFun <- mkGemmFun (typeA kernelBodyMatch) (typeB kernelBodyMatch) (typeC kernelBodyMatch) sizeM sizeN sizeK cValsPerThread
   copyGlobalSharedFunA <- mkCopyGlobalShared (typeA kernelBodyMatch) sizeM sizeK
   copyGlobalSharedFunB <- mkCopyGlobalShared (typeB kernelBodyMatch) sizeK sizeN
-  copyRegistersSharedFun <- mkCopyRegistersShared (typeC kernelBodyMatch) sizeM sizeN cValsPerThread blockSize
+  copyRegistersSharedFun <- mkCopyRegistersShared (typeA kernelBodyMatch) (typeB kernelBodyMatch) (typeC kernelBodyMatch) sizeM sizeN cValsPerThread blockSize
   let addedFuns = [gemmFun, copyGlobalSharedFunA, copyGlobalSharedFunB, copyRegistersSharedFun]
 
   blockMMAres_list <- segMap1D "blockMMAres" (SegBlock SegNoVirt $ Just $ KernelGrid (Count numBlocks) (Count $ mkInt64Const blockSize)) ResultMaySimplify numBlocks $ \blockIndex -> do
@@ -227,7 +229,7 @@ buildMMM resName outerMatch = do
     let [inBlockMMAres] = inBlockMMAres_list
 
     cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeN]
-    let copyArgsC = [(Var inBlockMMAres, ObservePrim), (Var cScratch, Consume), (mkInt64Const sizeM, ObservePrim), (mkInt64Const sizeN, ObservePrim), (mkInt64Const blockSize, ObservePrim)]
+    let copyArgsC = [(Var inBlockMMAres, ObservePrim), (Var cScratch, Consume), (Constant $ blankPrimValue $ typeA kernelBodyMatch, ObservePrim), (Constant $ blankPrimValue $ typeB kernelBodyMatch, ObservePrim), (mkInt64Const sizeM, ObservePrim), (mkInt64Const sizeN, ObservePrim), (mkInt64Const blockSize, ObservePrim)]
     let copyRetsC = [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])]
     cCopied <- letExp "cCopied" $ Apply (funDefName $ snd copyRegistersSharedFun) copyArgsC copyRetsC (Safe, SrcLoc NoLoc, [])
     pure [varRes cCopied]
@@ -404,6 +406,7 @@ inBlockKernelBodyMatch :: [VName] -> Names -> KernelBody GPU -> Scope GPU -> May
 -- TODO: support more than 3 dimensions?
 inBlockKernelBodyMatch indexVars@[indexVar1, indexVar2, indexVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) scope = do
   let sTable = ST.insertStms (informStms stms) $ ST.fromScope $ addScopeWisdom scope
+--  TODO: allow typecasts for mixed precision
 --  TODO: rename to use A, B, C?
   (resExp, _) <- ST.lookupExp res sTable
   (mulArg1, mulArg2) <- matchesMul $ removeExpWisdom resExp
@@ -534,13 +537,13 @@ fixParamsCopyRegistersShared :: [FParam GPUMem] -> [FParam GPUMem]
 fixParamsCopyRegistersShared [
     Param attrs1 vName1 (MemMem (Space "device")),
     Param attrs2 vName2 (MemMem (Space "device")),
-    p3@(Param _ _ (MemArray t shp _ (ArrayIn _ _))), p4, p5, p6, p7
+    p3@(Param _ _ (MemArray t shp _ (ArrayIn _ _))), p4, p5, p6, p7, p8, p9
   ] =
   let space = ScalarSpace (drop 1 $ shapeDims shp) t in
   [
     Param attrs1 vName1 (MemMem space),
     Param attrs2 vName2 (MemMem (Space "shared")),
-    p3, p4, p5, p6, p7
+    p3, p4, p5, p6, p7, p8, p9
   ]
 fixParamsCopyRegistersShared params = params
 

@@ -10,11 +10,45 @@ struct convert_type<f16> {
     using TypeOut = half_t;
 };
 
-// template<class TypeIn>
-// struct get_mma_op {
-//     using TypeOut = TypeIn;
-// };
+template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class BlockSize>
+struct get_mma_config {};
 
+template<class SizeM, class SizeN, class BlockSize>
+struct get_mma_config<half_t, half_t, half_t, SizeM, SizeN, BlockSize> {
+    using WarpsM = Int<ceil_div(SizeM{}, 64)>;
+    using WarpsN = Int<ceil_div(SizeN{}, 64)>;
+
+// TODO: should depend on type and arch
+    using MMATraits = MMA_Traits<SM80_16x8x16_F16F16F16F16_TN>;
+    using MMATile = Tile<Int<16 * WarpsM{}>, Int<16 * WarpsN{}>, _16>;
+
+    using TiledMma = TiledMMA<
+    //    MMA_Atom<UniversalFMA<half_t>>,
+    //    Layout<Shape<_4,_8,_1>>,
+        MMA_Atom<MMATraits>,
+        Layout<Shape<WarpsM,WarpsN,_1>>,
+        MMATile
+    >;
+};
+
+
+template<class SizeM, class SizeN, class BlockSize>
+struct get_mma_config<half_t, half_t, float, SizeM, SizeN, BlockSize> {
+    using WarpsM = Int<ceil_div(SizeM{}, 64)>;
+    using WarpsN = Int<ceil_div(SizeN{}, 64)>;
+
+// TODO: should depend on type and arch
+    using MMATraits = MMA_Traits<SM80_16x8x16_F32F16F16F32_TN>;
+    using MMATile = Tile<Int<16 * WarpsM{}>, Int<16 * WarpsN{}>, _16>;
+
+    using TiledMma = TiledMMA<
+    //    MMA_Atom<UniversalFMA<half_t>>,
+    //    Layout<Shape<_4,_8,_1>>,
+        MMA_Atom<MMATraits>,
+        Layout<Shape<WarpsM,WarpsN,_1>>,
+        MMATile
+    >;
+};
 
 
 // TODO: forceinline?
@@ -66,38 +100,26 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigne
     *mem_out_p = mem_out;
 }
 
-template<class ElmTypeIn, class SizeM, class SizeN, class BlockSize, int numRegs>
-FUTHARK_FUN_ATTR void futrts_copyRegistersShared(unsigned char **mem_out_p, ElmTypeIn (&registers_mem)[numRegs], unsigned char *shared_mem, SizeM, SizeN, BlockSize)
+template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class BlockSize, int numRegs>
+FUTHARK_FUN_ATTR void futrts_copyRegistersShared(unsigned char **mem_out_p, ElmTypeCIn (&registers_mem)[numRegs], unsigned char *shared_mem, ElmTypeAIn, ElmTypeBIn, SizeM, SizeN, BlockSize)
 {
-    using ElmType = typename convert_type<ElmTypeIn>::TypeOut;
-//     using ElmType = decltype(*registers_mem);
+    using ElmTypeA = typename convert_type<ElmTypeAIn>::TypeOut;
+    using ElmTypeB = typename convert_type<ElmTypeBIn>::TypeOut;
+    using ElmTypeC = typename convert_type<ElmTypeCIn>::TypeOut;
 
-// TODO: extract magic struct
-    constexpr int warpsM = ceil_div(SizeM{}, 64);
-    constexpr int warpsN = ceil_div(SizeN{}, 64);
-
-// TODO: should depend on type and arch
-    using MMATraits = MMA_Traits<SM80_16x8x16_F16F16F16F16_TN>;
-    using MMATile = Tile<Int<16 * warpsM>, Int<16 * warpsN>, _16>;
-
-    using TiledMma = TiledMMA<
-    //    MMA_Atom<UniversalFMA<half_t>>,
-    //    Layout<Shape<_4,_8,_1>>,
-        MMA_Atom<MMATraits>,
-        Layout<Shape<Int<warpsM>,Int<warpsN>,_1>>,
-        MMATile
-    >;
+    using MMAConfig = get_mma_config<ElmTypeA, ElmTypeB, ElmTypeC, SizeM, SizeN, BlockSize>;
+    using TiledMMA_ = typename MMAConfig::TiledMma;
 
 //    TODO: try tiledcopy instead?
     auto s_layout = make_layout(Shape<SizeM, SizeN>{}, LayoutRight{});
-    TiledMma tiled_mma;
+    TiledMMA_ tiled_mma;
 
     ThrMMA thr_mma = tiled_mma.get_slice(threadIdx.x);
 
     auto rC_layout = partition_shape_C(thr_mma, s_layout.shape());
-    Tensor tCrC = make_tensor(make_rmem_ptr(reinterpret_cast<ElmType *>(registers_mem)), rC_layout);
+    Tensor tCrC = make_tensor(make_rmem_ptr(reinterpret_cast<ElmTypeC *>(registers_mem)), rC_layout);
 
-    Tensor s = make_tensor(make_gmem_ptr(reinterpret_cast<ElmType *>(shared_mem)), s_layout);
+    Tensor s = make_tensor(make_gmem_ptr(reinterpret_cast<ElmTypeC *>(shared_mem)), s_layout);
     Tensor tCgC = thr_mma.partition_C(s);
 
 //  TODO: take as input
@@ -124,29 +146,15 @@ FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigne
     using ElmTypeB = typename convert_type<ElmTypeBIn>::TypeOut;
     using ElmTypeC = typename convert_type<ElmTypeCIn>::TypeOut;
 
-//     using ElmTypeC = decltype(*C_mem);
-
-    constexpr int warpsM = ceil_div(SizeM{}, 64);
-    constexpr int warpsN = ceil_div(SizeN{}, 64);
-
-// TODO: should depend on type and arch
-    using MMATraits = MMA_Traits<SM80_16x8x16_F16F16F16F16_TN>;
-    using MMATile = Tile<Int<16 * warpsM>, Int<16 * warpsN>, _16>;
-
-    using TiledMma = TiledMMA<
-    //    MMA_Atom<UniversalFMA<half_t>>,
-    //    Layout<Shape<_4,_8,_1>>,
-        MMA_Atom<MMATraits>,
-        Layout<Shape<Int<warpsM>,Int<warpsN>,_1>>,
-        MMATile
-    >;
+    using MMAConfig = get_mma_config<ElmTypeA, ElmTypeB, ElmTypeC, SizeM, SizeN, BlockSize>;
+    using TiledMMA_ = typename MMAConfig::TiledMma;
 
     auto sA_layout = make_layout(Shape<SizeM, SizeK>{}, LayoutRight{});
 //     TODO: check this, may need K in outer dim
     auto sB_layout = make_layout(Shape<SizeN, SizeK>{}, LayoutLeft{});
     auto sC_layout = make_layout(Shape<SizeM, SizeN>{}, LayoutRight{});
 
-    TiledMma tiled_mma;
+    TiledMMA_ tiled_mma;
 
     ThrMMA thr_mma = tiled_mma.get_slice(threadIdx.x);
 
