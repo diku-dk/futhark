@@ -153,7 +153,7 @@ findSpecialSymbolToElim ::
 findSpecialSymbolToElim sop
   | (special_syms, _) <- S.partition hasIdxOrSum $ free sop,
     not (S.null special_syms) = do
-      let (sum_syms, others) = S.partition hasSum sum_syms
+      let (sum_syms, others) = S.partition hasSum special_syms
       if S.size sum_syms > 0
         then getSumRange $ S.elemAt 0 sum_syms
         else do
