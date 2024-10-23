@@ -218,7 +218,7 @@ getMonRange sym@(Mdf dir arr_nm idx1 idx2) = do
       -- Currently we only consider the case when there are exactly
       -- one lower and one upper bound.
       range =
-        if 1 /= S.size elm_lbs && 1 /= S.size elm_ubs
+        if 1 /= S.size elm_lbs || 1 /= S.size elm_ubs
           then Range lbm 1 ubm
           else
             let (elm_lb, elm_ub) = (S.elemAt 0 elm_lbs, S.elemAt 0 elm_ubs)

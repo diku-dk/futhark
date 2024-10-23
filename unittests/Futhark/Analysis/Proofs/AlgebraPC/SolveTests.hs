@@ -63,12 +63,12 @@ tests =
           ( do
               let sum1 = sym2SoP $ Sum b (sVar y .+. int 1) $ sVar z
                   idx1 = sym2SoP $ Idx b $ sVar y
-                  sum2 = sym2SoP $ Sum a (sVar i1 .+. int 1) $ sVar i2
-                  idx2 = sym2SoP $ Idx a $ sVar i2 .+. int 1
+                  sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar i1
+                  idx2 = sym2SoP $ Idx a $ sVar i1 .+. int 1
               simplifyLevel $ int 1 .+. idx1 .+. sum1 .+. sum2 .+. idx2
           )
           @??= ( let sum1 = sym2SoP $ Sum b (sVar y) $ sVar z
-                     sum2 = sym2SoP $ Sum a (sVar i1 .+. int 1) $ sVar i2 .+. int 1
+                     sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar i1 .+. int 1
                  in  int 1 .+. sum1 .+. sum2
                ),
       testCase "Complex sum subtraction" $
