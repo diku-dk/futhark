@@ -340,7 +340,7 @@ tests =
           ( \(x, y, _, _, a, b, _, _) ->
               rewrite
                 ( IndexFn
-                    { iterator = Forall x (Cat y (sVar a) (sVar b)),
+                    { iterator = Forall x (Cat y (sVar a) (sym2SoP $ Idx (Var b) $ sVar y)),
                       body =
                         cases
                           [ (sVar x :== int 0, sVar y),
@@ -350,7 +350,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { iterator = Forall x (Cat y (sVar a) (sVar b)),
+                   { iterator = Forall x (Cat y (sVar a) (sym2SoP $ Idx (Var b) $ sVar y)),
                      body = cases [(Bool True, sVar y)]
                    }
                ),

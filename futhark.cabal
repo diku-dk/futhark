@@ -141,6 +141,8 @@ library
       Futhark.Analysis.PrimExp.Table
       Futhark.Analysis.Proofs.Algebra
       Futhark.Analysis.Proofs.AlgebraBridge
+      Futhark.Analysis.Proofs.AlgebraBridge.Translate
+      Futhark.Analysis.Proofs.AlgebraBridge.Util
       Futhark.Analysis.Proofs.Convert
       Futhark.Analysis.Proofs.IndexFn
       Futhark.Analysis.Proofs.Monad

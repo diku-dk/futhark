@@ -15,7 +15,7 @@ data IndexFn = IndexFn
 
 data Domain
   = Iota (SoP Symbol) -- [0, ..., n-1]
-  | Cat -- Catenate_{k=1}^{m-1} [b_{k-1}, ..., b_k)
+  | Cat -- Catenate_{k=0}^{m-1} [b_k, ..., b_{k+1})
       VName -- k
       (SoP Symbol) -- m
       (SoP Symbol) -- b
