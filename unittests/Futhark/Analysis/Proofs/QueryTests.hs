@@ -78,6 +78,18 @@ tests =
                       }
               ask (CaseIsMonotonic Inc) fn 0
           )
+          @?= Yes,
+      testCase "Permutation of domain" $
+        run
+          ( \(i, _, _, n, _, _, _) -> do
+              let fn =
+                    IndexFn
+                      { iterator = Forall i (Iota (sVar n)),
+                        body =
+                          cases [(Bool True, sVar i)]
+                      }
+              prove (PermutationOfZeroTo $ sVar n) fn
+          )
           @?= Yes
     ]
   where
