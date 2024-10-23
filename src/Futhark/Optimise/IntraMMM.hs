@@ -36,6 +36,8 @@ import Futhark.Construct
 import Futhark.Optimise.IntraMMM.Utils
 import Data.Map.Strict qualified as M
 import Futhark.Builder.Class
+import Futhark.Error
+import Futhark.Util.Pretty (prettyString)
 import Data.Bits
 import Prelude hiding (lookup)
 import Futhark.Pass
@@ -100,48 +102,55 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
 --  TODO: use Free or Ext?
   let typeCout = [(Array elmTypeC (Shape [Free $ mkInt64Const sizeRegs]) Unique, RetAls [] [])]
 
+  mParam <- newParam "M" $ Prim int64
+  nParam <- newParam "N" $ Prim int64
+  kParam <- newParam "K" $ Prim int64
   aParam <- newParam "A" typeA
   bParam <- newParam "B" typeB
   cParam <- newParam "C" typeCin
-  fName <- fmap (nameFromString . show) $ newName $ VName gemmName 0
+  fName <- fmap (nameFromString . prettyString) $ newName $ VName gemmName 0
   pure (GemmSignature elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs,
       FunDef Nothing mempty fName
       typeCout
-      [aParam, bParam, cParam]
+      [mParam, nParam, kParam, aParam, bParam, cParam]
       $ resultBody [Var $ paramName cParam]
     )
 
 -- TODO: entire global as input or only slize, if entire add index as argument
 mkCopyGlobalShared :: (MonadFreshNames m) => PrimType -> Int -> Int -> m MMMFunDef
 mkCopyGlobalShared elmType sizeY sizeX = do
--- TODO: take (number of) outer globalOuterDims as input
-  globalOuterIndex <- newParam "globalOuterIndex" $ Prim int64
-  globalParam <- newParam "global" $ Array elmType (Shape [Var $ paramName globalOuterIndex, mkInt64Const sizeY, mkInt64Const sizeX]) Nonunique
+  yParam <- newParam "M" $ Prim int64
+  xParam <- newParam "N" $ Prim int64
+-- TODO: take (number of) outer globalOuterDims as input, also get outer indices?
+  globalOuterDim <- newParam "globalOuterDim" $ Prim int64
+  globalParam <- newParam "global" $ Array elmType (Shape [Var $ paramName globalOuterDim, mkInt64Const sizeY, mkInt64Const sizeX]) Nonunique
   sharedParam <- newParam "shared" $  Array elmType (Shape [mkInt64Const sizeY, mkInt64Const sizeX]) Unique
-  fName <- fmap (nameFromString . show) $ newName $ VName copyGlobalSharedName 0
+  fName <- fmap (nameFromString . prettyString) $ newName $ VName copyGlobalSharedName 0
 
 --  TODO: use Free or Ext?
   let sharedOut = [(Array elmType (Shape [Free $ mkInt64Const sizeY, Free $ mkInt64Const sizeX]) Unique, RetAls [] [])]
   pure (CopyGlobalSharedSignature elmType sizeY sizeX,
       FunDef Nothing mempty fName
           sharedOut
-          [globalOuterIndex, globalParam, sharedParam]
+          [yParam, xParam, globalOuterDim, globalParam, sharedParam]
           $ resultBody [Var $ paramName sharedParam]
     )
 
 -- TODO: copy to global instead of shared?
 mkCopyRegistersShared :: (MonadFreshNames m) => PrimType -> Int -> Int -> Int -> Int -> m MMMFunDef
 mkCopyRegistersShared elmType sizeM sizeN sizeRegs blockSize = do
+  mParam <- newParam "M" $ Prim int64
+  nParam <- newParam "N" $ Prim int64
   registersParam <- newParam "registers" $  Array elmType (Shape [mkInt64Const blockSize, mkInt64Const sizeRegs]) Nonunique
   sharedParam <- newParam "shared" $ Array elmType (Shape [mkInt64Const sizeM, mkInt64Const sizeN]) Unique
-  fName <- fmap (nameFromString . show) $ newName $ VName copyRegistersSharedName 0
+  fName <- fmap (nameFromString . prettyString) $ newName $ VName copyRegistersSharedName 0
 
 --  TODO: use Free or Ext?
   let sharedOut = [(Array (FloatType Float16) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])]
   pure (CopyRegistersSharedSignature elmType sizeM sizeN sizeRegs blockSize,
       FunDef Nothing mempty fName
           sharedOut
-          [registersParam, sharedParam]
+          [mParam, nParam, registersParam, sharedParam]
           $ resultBody [Var $ paramName sharedParam]
     )
 
@@ -149,6 +158,10 @@ buildMMM :: VName -> OuterMMAMatch -> Builder GPU MMMFuns
 -- TODO: fix args
 buildMMM resName outerMatch = do
   let InnerMMAMatch kernelBodyMatch ne sizeM sizeN sizeK = innerMatch outerMatch
+
+--  TODO: handle this?
+  unless ([fst $ outerBlockInfo outerMatch] == outerIndecesA kernelBodyMatch && outerIndecesA kernelBodyMatch == outerIndecesB kernelBodyMatch) $
+    compilerLimitationS "Not implemented"
 
 --  let cValsPerThread = min 64 (sizeM * sizeN `div` 32)
 --  let blockSize = sizeM * sizeN `div` cValsPerThread
@@ -184,22 +197,22 @@ buildMMM resName outerMatch = do
     bScratch <- letExp "bScratch" $ BasicOp $ Scratch (typeB kernelBodyMatch) [mkInt64Const sizeK, mkInt64Const sizeN]
 
 --    TODO: check if should be outerDimsA?
-    let copyArgsA = fmap ((,ObservePrim) . Var) (outerIndecesA kernelBodyMatch) <> [(Var $ arrA kernelBodyMatch, ObservePrim), (Var aScratch, Consume)]
+    let copyArgsA = [(mkInt64Const sizeM, ObservePrim), (mkInt64Const sizeK, ObservePrim), (numBlocks, ObservePrim), (Var $ arrA kernelBodyMatch, ObservePrim), (Var aScratch, Consume)]
     let copyRetsA = [(Array (typeA kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeK]) Unique, RetAls [] [])]
     aCopied <- letExp "aCopied" $ Apply (funDefName $ snd copyGlobalSharedFunA) copyArgsA copyRetsA (Safe, SrcLoc NoLoc, [])
-    let copyArgsB = fmap ((,ObservePrim) . Var) (outerIndecesB kernelBodyMatch) <> [(Var $ arrB kernelBodyMatch, ObservePrim), (Var bScratch, Consume)]
+    let copyArgsB = [(mkInt64Const sizeK, ObservePrim), (mkInt64Const sizeN, ObservePrim), (numBlocks, ObservePrim), (Var $ arrB kernelBodyMatch, ObservePrim), (Var bScratch, Consume)]
     let copyRetsB = [(Array (typeB kernelBodyMatch) (Shape [Free $ mkInt64Const sizeK, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])]
     bCopied <- letExp "bCopied" $ Apply (funDefName $ snd copyGlobalSharedFunB) copyArgsB copyRetsB (Safe, SrcLoc NoLoc, [])
 
     inBlockMMAres_list <- segMap1D "inBlockMMAres" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \thread_idx -> do
       threadCregs <- index "threadCregs" cRegs [thread_idx]
   --  TODO: is ObservePrim correct?
-      threadMMAres <- letExp "threadMMAres" $ Apply (funDefName $ snd gemmFun) [(Var aCopied, ObservePrim), (Var bCopied, ObservePrim), (Var threadCregs, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const cValsPerThread]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+      threadMMAres <- letExp "threadMMAres" $ Apply (funDefName $ snd gemmFun) [(mkInt64Const sizeM, ObservePrim), (mkInt64Const sizeN, ObservePrim), (mkInt64Const sizeK, ObservePrim), (Var aCopied, ObservePrim), (Var bCopied, ObservePrim), (Var threadCregs, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const cValsPerThread]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
       pure [varRes threadMMAres]
     let [inBlockMMAres] = inBlockMMAres_list
 
     cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeN]
-    cCopied <- letExp "cCopied" $ Apply (funDefName $ snd copyRegistersSharedFun) [(Var inBlockMMAres, ObservePrim), (Var cScratch, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
+    cCopied <- letExp "cCopied" $ Apply (funDefName $ snd copyRegistersSharedFun) [(mkInt64Const sizeM, ObservePrim), (mkInt64Const sizeN, ObservePrim), (Var inBlockMMAres, ObservePrim), (Var cScratch, Consume)] [(Array (typeC kernelBodyMatch) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])] (Safe, SrcLoc NoLoc, [])
     pure [varRes cCopied]
 
   let [blockMMAres] = blockMMAres_list
@@ -490,16 +503,12 @@ fixParamsCopyGlobalShared :: [FParam GPUMem] -> [FParam GPUMem]
 fixParamsCopyGlobalShared [
     Param attrs1 vName1 (MemMem (Space "device")),
     Param attrs2 vName2 (MemMem (Space "device")),
-    p3,
-    p4,
-    p5
+    p3, p4, p5, p6, p7
   ] =
   [
     Param attrs1 vName1 (MemMem (Space "device")),
     Param attrs2 vName2 (MemMem (Space "shared")),
-    p3,
-    p4,
-    p5
+    p3, p4, p5, p6, p7
   ]
 fixParamsCopyGlobalShared params = params
 
@@ -507,15 +516,13 @@ fixParamsCopyRegistersShared :: [FParam GPUMem] -> [FParam GPUMem]
 fixParamsCopyRegistersShared [
     Param attrs1 vName1 (MemMem (Space "device")),
     Param attrs2 vName2 (MemMem (Space "device")),
-    Param attrs3 vName3 (MemArray t3 shp3 u3 (ArrayIn mName3 lmad3)),
-    Param attrs4 vName4 (MemArray t4 shp4 u4 (ArrayIn mName4 lmad4))
+    p3, p4, p5@(Param attrs5 vName5 (MemArray t5 shp5 u5 (ArrayIn mName5 lmad5))), p6
   ] =
-  let space = ScalarSpace (drop 1 $ shapeDims shp3) t3 in
+  let space = ScalarSpace (drop 1 $ shapeDims shp5) t5 in
   [
     Param attrs1 vName1 (MemMem space),
     Param attrs2 vName2 (MemMem (Space "shared")),
-    Param attrs3 vName3 (MemArray t3 shp3 u3 (ArrayIn mName3 lmad3)),
-    Param attrs4 vName4 (MemArray t4 shp4 u4 (ArrayIn mName4 lmad4))
+    p3, p4, p5, p6
   ]
 fixParamsCopyRegistersShared params = params
 
@@ -524,18 +531,14 @@ fixParamsGemmFun [
     Param attrs1 vName1 (MemMem (Space "device")),
     Param attrs2 vName2 (MemMem (Space "device")),
     Param attrs3 vName3 (MemMem (Space "device")),
-    p4,
-    p5,
-    Param attrs6 vName6 (MemArray t6 shp6 u6 (ArrayIn mName6 lmad6))
+    p4, p5, p6, p7, p8, p9@(Param attrs9 vName9 (MemArray t9 shp9 u9 (ArrayIn mName9 lmad9)))
   ] =
-  let space = ScalarSpace (shapeDims shp6) t6 in
+  let space = ScalarSpace (shapeDims shp9) t9 in
   [
       Param attrs1 vName1 (MemMem (Space "shared")),
       Param attrs2 vName2 (MemMem (Space "shared")),
       Param attrs3 vName3 (MemMem space),
-      p4,
-      p5,
-      Param attrs6 vName6 (MemArray t6 shp6 u6 (ArrayIn mName6 lmad6))
+      p4, p5, p6, p7, p8, p9
     ]
 fixParamsGemmFun params = params
 
