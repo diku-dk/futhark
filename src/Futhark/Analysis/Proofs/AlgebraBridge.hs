@@ -1,5 +1,9 @@
 -- Utilities for using the Algebra layer from the IndexFn layer.
-module Futhark.Analysis.Proofs.AlgebraBridge where
+module Futhark.Analysis.Proofs.AlgebraBridge
+  ( toAlgebra,
+    fromAlgebra,
+  )
+where
 
 import Control.Monad (unless, void, (<=<))
 import Data.Map qualified as M
@@ -21,44 +25,44 @@ import Language.Futhark (VName)
 -----------------------------------------------------------------------------
 -- Translation from Algebra to IndexFn layer.
 ------------------------------------------------------------------------------
-fromAlgebraSoP :: SoP Algebra.Symbol -> IndexFnM (SoP Symbol)
-fromAlgebraSoP = mapSymSoP2M fromAlgebra
+fromAlgebra :: SoP Algebra.Symbol -> IndexFnM (SoP Symbol)
+fromAlgebra = mapSymSoP2M fromAlgebra_
 
-fromAlgebra :: Algebra.Symbol -> IndexFnM (SoP Symbol)
-fromAlgebra (Algebra.Var vn) = do
+fromAlgebra_ :: Algebra.Symbol -> IndexFnM (SoP Symbol)
+fromAlgebra_ (Algebra.Var vn) = do
   x <- lookupUntransSym (Algebra.Var vn)
   case x of
     Just x' -> pure . sym2SoP $ x'
     Nothing -> pure . sym2SoP $ Var vn
-fromAlgebra (Algebra.Idx (Algebra.One vn) i) = do
+fromAlgebra_ (Algebra.Idx (Algebra.One vn) i) = do
   x <- lookupUntransSym (Algebra.Var vn)
-  idx <- fromAlgebraSoP i
+  idx <- fromAlgebra i
   case x of
     Just x' -> sym2SoP <$> repHoles x' idx
     Nothing -> pure . sym2SoP $ Idx (Var vn) idx
-fromAlgebra (Algebra.Idx (Algebra.POR {}) _) = undefined
-fromAlgebra (Algebra.Mdf _dir vn i j) = do
+fromAlgebra_ (Algebra.Idx (Algebra.POR {}) _) = undefined
+fromAlgebra_ (Algebra.Mdf _dir vn i j) = do
   -- TODO add monotonicity property to environment?
-  a <- fromAlgebraSoP i
-  b <- fromAlgebraSoP j
+  a <- fromAlgebra i
+  b <- fromAlgebra j
   x <- lookupUntransSymUnsafe vn
   xa <- repHoles x a
   xb <- repHoles x b
   pure $ xa ~-~ xb
-fromAlgebra (Algebra.Sum (Algebra.One vn) lb ub) = do
-  a <- fromAlgebraSoP lb
-  b <- fromAlgebraSoP ub
+fromAlgebra_ (Algebra.Sum (Algebra.One vn) lb ub) = do
+  a <- fromAlgebra lb
+  b <- fromAlgebra ub
   x <- lookupUntransSymUnsafe vn
   j <- newVName "j"
   xj <- repHoles x (sym2SoP $ Var j)
   pure . sym2SoP $ LinComb j a b xj
-fromAlgebra (Algebra.Sum (Algebra.POR vns) lb ub) = do
+fromAlgebra_ (Algebra.Sum (Algebra.POR vns) lb ub) = do
   -- Sum (POR {x,y}) a b = Sum x a b + Sum y a b
   foldr1 (.+.)
     <$> mapM
-      (\vn -> fromAlgebra $ Algebra.Sum (Algebra.One vn) lb ub)
+      (\vn -> fromAlgebra_ $ Algebra.Sum (Algebra.One vn) lb ub)
       (S.toList vns)
-fromAlgebra (Algebra.Pow {}) = undefined
+fromAlgebra_ (Algebra.Pow {}) = undefined
 
 lookupUntransSymUnsafe :: VName -> IndexFnM Symbol
 lookupUntransSymUnsafe = fmap fromJust . lookupUntransSym . Algebra.Var
@@ -93,11 +97,8 @@ instance ToSoP Algebra.Symbol Symbol where
 -----------------------------------------------------------------------------
 -- Translation from IndexFn to Algebra layer.
 ------------------------------------------------------------------------------
-toAlgebraSoP :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
-toAlgebraSoP = mapSymSoP2M_ toAlgebra_ <=< handleQuantifiers
-
-toAlgebra :: Symbol -> IndexFnM Algebra.Symbol
-toAlgebra = toAlgebra_ <=< handleQuantifiers
+toAlgebra :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
+toAlgebra = mapSymSoP2M_ toAlgebra_ <=< handleQuantifiers
 
 -- Add quantified symbols to the untranslatable environement
 -- with quantifiers replaced by holes. Uses unification on symbols

@@ -3,25 +3,24 @@
 
 module Futhark.Analysis.Proofs.Query where
 
-import Control.Monad (when, foldM, forM_)
+import Control.Monad (foldM, forM_, when)
 import Control.Monad.RWS (gets, modify)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
+import Data.Maybe (catMaybes)
 import Data.Set qualified as S
+import Futhark.Analysis.Proofs.AlgebraBridge (fromAlgebra, toAlgebra)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), getCase)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (..))
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), toDNF, neg, normalizeSymbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, normalizeSymbol, toDNF)
+import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
+import Futhark.Analysis.Proofs.Util (converge)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Monad (addRange, mkRange)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, justSym, mapSymSoP2M, (.-.), sym2SoP)
+import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, justSym, sym2SoP)
 import Futhark.SoP.SoP qualified as SoP
-import Futhark.Analysis.Proofs.AlgebraBridge (toAlgebraSoP, fromAlgebra, toAlgebra)
-import Data.Maybe (catMaybes)
-import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), ASTMappable (..))
-import Futhark.Analysis.Proofs.Util (converge)
 
 data Query
   = CaseIsMonotonic
@@ -41,6 +40,7 @@ ask query (IndexFn it cs) case_idx = rollbackAlgEnv $ do
     _ -> undefined
 
 -- XXX TODO want to rewrite symbol, not just simplify it, before checking
+
 -- | Does this symbol simplify to true?
 isTrue :: SoP Symbol -> IndexFnM Answer
 isTrue sym = do
@@ -101,12 +101,12 @@ simplify = astMap m
 
     simplifySoP :: SoP Symbol -> IndexFnM (SoP Symbol)
     simplifySoP x = rollbackAlgEnv $ do
-      y <- toAlgebraSoP x
+      y <- toAlgebra x
       -- debugPrettyM "simplify" y
       -- algenv <- gets algenv
       -- debugPrettyM "under" algenv
       z <- Algebra.simplify y
-      mapSymSoP2M fromAlgebra z
+      fromAlgebra z
 
     -- Note that this does not recurse.
     simplifySymbol :: Symbol -> IndexFnM Symbol
@@ -153,8 +153,8 @@ rollbackAlgEnv computation = do
 addRelSymbol :: Symbol -> IndexFnM ()
 addRelSymbol (x :/= y) = do
   -- Can be expressed, if we know which symbol is greater than the other.
-  a <- toAlgebraSoP x
-  b <- toAlgebraSoP y
+  a <- toAlgebra x
+  b <- toAlgebra y
   x_is_greater <- a $>$ b
   if x_is_greater
     then addRel (a :>: b)
@@ -169,43 +169,32 @@ addRelSymbol p = do
 addRelIterator :: Iterator -> IndexFnM ()
 addRelIterator (Forall i dom) = case dom of
   Iota n -> do
-    addAlgRange i (domainStart dom) (domainEnd dom)
-    boundIndexValues n
-  Cat k m _ -> do
-    addAlgRange k (int 0) (m .-. int 1)
-    addAlgRange i (domainStart dom) (domainEnd dom)
-    addAlgRangeUB i (intervalEnd dom .-. int 1)
-    boundIndexValues m
+    n' <- toAlgebra n
+    addRange (Algebra.Var i) (mkRange (int2SoP 0) n')
+    boundIndexValues n'
+  Cat _k _m _ -> error "addRelIterator Cat TODO"
+  -- Something like the below, but have not test for it atm:
+  -- addAlgRange k (int 0) (m .-. int 1)
+  -- addAlgRange i (domainStart dom) (domainEnd dom)
+  -- addAlgRangeUB i (intervalEnd dom .-. int 1)
+  -- boundIndexValues m
   where
-    addAlgRangeUB vn x = do
-      a <- toAlgebraSoP x
-      addRange (Algebra.Var vn) (Range mempty 1 (S.singleton a))
-
-    int :: Int -> SoP Symbol
-    int n = int2SoP (toInteger n)
-
     boundIndexValues e = do
       -- The type of Range restricts us to bound affine n. Lower bound is 1
       -- since otherwise Iterator would be a single point (and hence Empty).
       case justAffine (SoP.normalize e) of
-        Just (c, x, b) -> do
-          let lb = int2SoP $ toInteger (1 :: Int)
-          let ub = int2SoP $ toInteger (maxBound :: Int) - b
-          a <- toAlgebra x
-          addRange a (Range (S.singleton lb) c (S.singleton ub))
-        Nothing -> pure ()
+        Just (c, x, b) | c > 0 -> do
+          -- Add bound 1 - b <= c*x <= infinity
+          let lb = int2SoP $ toInteger (1 :: Int) - b
+          addRange x (Range (S.singleton lb) c mempty)
+        _ -> pure ()
 addRelIterator _ = pure ()
-
-addAlgRange vn x y = do
-  a <- toAlgebraSoP x
-  b <- toAlgebraSoP y
-  addRange (Algebra.Var vn) (mkRange a b)
 
 toRel :: Symbol -> IndexFnM (Maybe (Rel Algebra.Symbol))
 toRel = runMaybeT . toRel_
   where
     liftOp op a b = pure $ a `op` b
-    convCmp op = convOp (lift . toAlgebraSoP) (liftOp op)
+    convCmp op = convOp (lift . toAlgebra) (liftOp op)
 
     toRel_ :: Symbol -> MaybeT IndexFnM (Rel Algebra.Symbol)
     toRel_ (x :< y) = convCmp (:<:) x y
@@ -225,22 +214,22 @@ convOp transf op x y = do
   a `op` b
 
 ($<) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($<) = convOp toAlgebraSoP ($<$)
+($<) = convOp toAlgebra ($<$)
 
 ($<=) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($<=) = convOp toAlgebraSoP ($<=$)
+($<=) = convOp toAlgebra ($<=$)
 
 ($>) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($>) = convOp toAlgebraSoP ($>$)
+($>) = convOp toAlgebra ($>$)
 
 ($>=) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($>=) = convOp toAlgebraSoP ($>=$)
+($>=) = convOp toAlgebra ($>=$)
 
 ($==) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($==) = convOp toAlgebraSoP ($==$)
+($==) = convOp toAlgebra ($==$)
 
 ($/=) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($/=) = convOp toAlgebraSoP ($/=$)
+($/=) = convOp toAlgebra ($/=$)
 
 infixr 4 $<
 
