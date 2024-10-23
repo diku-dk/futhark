@@ -14,7 +14,10 @@ import Test.Tasty.HUnit
 import qualified Futhark.Analysis.Proofs.Symbol as IxFn
 import Futhark.Analysis.Proofs.Monad (IndexFnM(..), VEnv(..))
 import Control.Monad.RWS.Strict hiding (Sum)
+import Futhark.SoP.FourierMotzkin qualified as FM
 
+import Futhark.Util.Pretty
+import Debug.Trace
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"
@@ -33,7 +36,8 @@ tests :: TestTree
 tests =
   testGroup
     "Proofs.AlgebraPC.SolveTests"
-    [ testCase "Pow Exact Norm" $
+    [
+      testCase "Pow Exact Normaliation" $
         run
           ( forM [1..100000] $ \ kk -> do
               -- addRange d 0 1000
@@ -63,12 +67,12 @@ tests =
           ( do
               let sum1 = sym2SoP $ Sum b (sVar y .+. int 1) $ sVar z
                   idx1 = sym2SoP $ Idx b $ sVar y
-                  sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar i1
-                  idx2 = sym2SoP $ Idx a $ sVar i1 .+. int 1
+                  sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar i1 .-. int 1
+                  idx2 = sym2SoP $ Idx a $ sVar i1
               simplifyLevel $ int 1 .+. idx1 .+. sum1 .+. sum2 .+. idx2
           )
           @??= ( let sum1 = sym2SoP $ Sum b (sVar y) $ sVar z
-                     sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar i1 .+. int 1
+                     sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar i1
                  in  int 1 .+. sum1 .+. sum2
                ),
       testCase "Complex sum subtraction" $
@@ -85,11 +89,36 @@ tests =
                            sum2 = sym2SoP $ Sum a (int 3 .*. sVar i3 .+. int 2) $ int 3 .*. sVar i3 .+. sVar n
                        in  sum1 .-. sum2 .+. int i
                      ) [1..1000]
-               )
+               ),
+      testCase "Pow2 precise simplification from FFT" $
+        run
+          ( do
+              let sop_tmp = (pow2 (sVar n .-. sVar q) .-. int 1)  .*. pow2 (sVar q) .+. pow2 (sVar q .-. int 1) .-. pow2 (sVar n)
+              simplify sop_tmp
+          )
+          @??= ( pow2 (sVar q .-. int 1) .-. pow2 (sVar q)
+               ),
+      testCase "FFT bounds-check queries" $
+        run
+          ( do
+              addRange (Var q) $ mkRange (int 1) (sVar n)
+              addRange (Var j) $ mkRange (int 0) (pow2 (sVar q .-. int  1) .-. int 1)
+              addRange (Var k) $ mkRange (int 0) (pow2 (sVar n .-. sVar q) .-. int 1)
+              let kLj = sVar k .*. pow2 (sVar q) .+. sVar j
+              succ_lb <- (int 0) FM.$<=$ (kLj)
+              succ_ub1 <- (kLj .+. pow2 (sVar q .-. int 1)) FM.$<$ pow2 (sVar n)
+              succ_ub2 <- kLj FM.$<$ pow2 (sVar n)            -- fails
+              let rj = sVar j .*. pow2 (sVar n .-. sVar q)
+              succ_rj_lb <- rj FM.$>=$ (int 0)
+              succ_rj_ub <- rj FM.$<$ pow2 (sVar n .-. int 1) -- fails
+              pure (succ_lb && succ_ub1 && succ_ub2 && succ_rj_lb && succ_rj_ub) -- pure (succ_lb, succ_ub1, succ_ub2, succ_rj_lb, succ_rj_ub)
+          )
+          @??= True --(True, True, True, True, True),
     ]
   where
     int = int2SoP
     sVar = sym2SoP . Var
+    pow2 some_sop = sym2SoP $ Pow (2, some_sop)
     -- a ~+~ b = sym2SoP a .+. sym2SoP b
     -- a ~-~ b = sym2SoP a .-. sym2SoP b
 
@@ -112,6 +141,13 @@ tests =
         <*> newVName "B"
     (x, y, z, i1, i2, i3, n, a0, b0) = runTest varsM env_empty
     (a, b) = (One a0, One b0)
+
+    varsFFT =
+      (,,)
+        <$> newVName "q"
+        <*> newVName "k"
+        <*> newVName "j"
+    (q,k,j) = runTest varsFFT env_empty
 
     (n_rg, i1_rg, i2_rg, i3_rg) =
       ( Range (S.singleton (int 1)) 1 S.empty

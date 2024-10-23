@@ -87,8 +87,10 @@ fmSolveLEq0 sop = do
   case (justConstant sop'', msymrg) of
     (Just v, _) ->
       pure (v <= 0)
-    (Nothing, Just (i,rg)) ->
-      divAndConqFM sop'' i rg
+    (Nothing, Just (i,rg)) -> do
+      res <- divAndConqFM sop'' i rg
+      -- trace ("\nFM.LEq0 "++prettyString sop''++" succeeds: "++show res++"\n") $
+      pure res
     (Nothing, Nothing) ->
       pure False
   where

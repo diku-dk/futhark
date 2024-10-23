@@ -18,6 +18,10 @@ import Futhark.SoP.SoP
 import Futhark.SoP.Monad (MonadSoP, getEquivs)
 import Futhark.SoP.FourierMotzkin qualified as FM
 
+
+-- import Futhark.Util.Pretty
+-- import Debug.Trace
+
 -----------------------------------------
 --- 1. Simplifications related to Pow ---
 -----------------------------------------
@@ -27,7 +31,8 @@ simplifyPows ::
   (SoP Symbol  -> m (SoP Symbol)) -> SoP Symbol -> m (SoP Symbol)
 simplifyPows simplifyLevel sop = do
   lst <- mapM simplifyTerm $ M.toList $ getTerms sop
-  pure $ SoP $ M.fromList lst
+  -- pure $ SoP $ M.fromList lst   -- BIG BUG!!!
+  pure $ foldl (.+.) (int2SoP 0) $ map (\ (t,i) -> term2SoP t i) lst
   where
     -- simplifyTerm :: (Term Symbol, Integer) -> AlgM e (Term Symbol, Integer)
     simplifyTerm (Term mset, k) = do
