@@ -1,7 +1,7 @@
 module Futhark.Optimise.IntraMMM.Utils where
 
 import Futhark.IR
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, find)
 
 
 -- TODO: encode sig in names
@@ -40,10 +40,13 @@ copyRegistersSharedName :: Name
 copyRegistersSharedName = "copyRegistersShared"
 
 isPrefixOfName :: Name -> Name -> Bool
-isPrefixOfName prefix name = show prefix `isPrefixOf` show name
+isPrefixOfName prefix name = nameToString prefix `isPrefixOf` nameToString name
 
 funNames :: [Name]
 funNames = [gemmName, copyGlobalSharedName, copyRegistersSharedName]
 
 isMMMName :: Name -> Bool
 isMMMName name = any (`isPrefixOfName` name) funNames
+
+getMMMName :: Name -> Maybe Name
+getMMMName name = find (`isPrefixOfName` name) funNames

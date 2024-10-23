@@ -38,6 +38,8 @@ import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 import Prelude hiding (rem)
 import qualified Futhark.Optimise.IntraMMM.Utils as MMM
+import Text.PrettyPrint.Mainland
+import Text.PrettyPrint.Mainland.Class
 
 -- | Generate HIP host and device code.
 kernelsToHIP :: ImpGPU.Program -> ImpOpenCL.Program
@@ -793,6 +795,13 @@ inKernelOperations env mode body =
 
           what_next <- whatNext
           GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
+      | Just mmmName <- MMM.getMMMName fname = do
+        let numStaticArgs = if mmmName == MMM.gemmName then 4 else 3
+        let (dynamicArgs, staticArgs) = splitAt (length args - numStaticArgs) args
+        let convertedArgs = dynamicArgs <> fmap templateStatic staticArgs
+        let out_args = [[C.cexp|&$id:d|] | d <- dests]
+            args' = out_args ++ convertedArgs
+        GC.item [C.citem|$id:(funName mmmName)($args:args');|]
       | otherwise = do
           let out_args = [[C.cexp|&$id:d|] | d <- dests]
               args' = out_args ++ args
@@ -818,6 +827,13 @@ inKernelOperations env mode body =
                                  { $stms:argstms; }
                                  $items:what_next
                                }|]
+
+
+templateStatic :: C.Exp -> C.Exp
+--templateConsts (C.Cast _ (C.Const (C.IntConst s _ _ _) _) _) = [C.cexp|$esc:("Int<" <> s <> ">{}")|]
+--templateConsts e = e
+templateStatic e = [C.cexp|$esc:("Int<" <> (prettyCompact $ ppr e) <> ">{}")|]
+
 
 --- Checking requirements
 
