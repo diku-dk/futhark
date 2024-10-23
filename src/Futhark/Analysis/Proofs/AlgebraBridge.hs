@@ -100,9 +100,15 @@ instance ToSoP Algebra.Symbol Symbol where
 toAlgebra :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
 toAlgebra = mapSymSoP2M_ toAlgebra_ <=< handleQuantifiers
 
+-- Replace bound variable `k` in `e` by Hole.
+removeQuantifier :: Symbol -> VName -> IndexFnM Symbol
+e `removeQuantifier` k = do
+  hole <- sym2SoP . Hole <$> newVName "h"
+  pure . fromJust . justSym $ rep (M.insert k hole mempty) e
+
 -- Add quantified symbols to the untranslatable environement
--- with quantifiers replaced by holes. Uses unification on symbols
--- to ensure deduplication.
+-- with quantifiers replaced by holes. Subsequent lookups
+-- must be done using `search`.
 handleQuantifiers :: (ASTMappable Symbol b) => b -> IndexFnM b
 handleQuantifiers = astMap m
   where
@@ -112,12 +118,8 @@ handleQuantifiers = astMap m
       case res of
         Just _ -> pure p
         Nothing -> do
-          hole <- sym2SoP . Hole <$> newVName "h"
-          let x_holed = fromJust . justSym $ rep (M.insert j hole mempty) x
-          addUntrans x_holed
+          _ <- addUntrans =<< x `removeQuantifier` j
           pure p
-      where
-        addUntrans = void . lookupUntransPE
     handleQuant x = pure x
 
 -- Search for hole-less symbol in untranslatable environment, matching
@@ -162,12 +164,18 @@ toAlgebra_ (LinComb _ lb ub x) = do
       b <- mapSymSoP2M_ toAlgebra_ ub
       pure $ Algebra.Sum (Algebra.One vn) a b
     Nothing -> error "mkUntrans hasn't been run on sum"
-toAlgebra_ sym@(Idx _ i) = do
+toAlgebra_ sym@(Idx xs i) = do
   j <- mapSymSoP2M_ toAlgebra_ i
-  (vn, _) <- lookupOrAdd sym
+  res <- search sym
+  vn <- case res of
+    Just (vn, _) -> pure vn
+    Nothing -> addUntrans xs
   pure $ Algebra.Idx (Algebra.One vn) j
 toAlgebra_ sym@(Indicator _) = do
-  (vn, sub) <- lookupOrAdd sym
+  res <- search sym
+  (vn, sub) <- case res of
+    Just (vn, sub) -> pure (vn, sub)
+    Nothing -> (,Nothing) <$> addUntrans sym
   addRange (Algebra.Var vn) (mkRange (int2SoP 0) (int2SoP 1))
   addProperty (Algebra.Var vn) Algebra.Indicator
   case sub of
@@ -177,13 +185,6 @@ toAlgebra_ sym@(Indicator _) = do
     Nothing -> pure $ Algebra.Var vn
 toAlgebra_ x = lookupUntransPE x
 
--- Like search, but adds symbol to the untranslatable environment,
--- if it does not exist.
-lookupOrAdd :: Symbol -> IndexFnM (VName, Maybe (VName, SoP Symbol))
-lookupOrAdd sym = do
-  res <- search sym
-  case res of
-    Just (vn, sub) -> pure (vn, sub)
-    Nothing -> do
-      vn <- Algebra.getVName <$> lookupUntransPE sym
-      pure (vn, Nothing)
+addUntrans :: Symbol -> IndexFnM VName
+addUntrans (Var vn) = pure vn
+addUntrans sym = Algebra.getVName <$> lookupUntransPE sym
