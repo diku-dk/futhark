@@ -539,6 +539,7 @@ test-suite unit
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
       Futhark.Analysis.Proofs.IndexFnTests
+      Futhark.Analysis.Proofs.QueryTests
       Futhark.Analysis.Proofs.RewriteTests
       Futhark.Analysis.Proofs.UnifyTests
       Futhark.Analysis.Proofs.AlgebraPC.SolveTests

@@ -1,25 +1,32 @@
 -- Answer queries on index functions using algebraic solver.
-{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Futhark.Analysis.Proofs.Query where
 
 import Control.Monad (foldM, forM_)
-import Data.Maybe (catMaybes)
-import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), getCase)
-import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Data.Maybe (catMaybes, fromJust)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, rollbackAlgEnv, simplify, toRel)
+import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
+import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), Iterator (..), getCase)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrintAlgEnv, debugPrettyM)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toDNF)
+import Futhark.Analysis.Proofs.Unify (mkRep, rep)
+import Futhark.MonadFreshNames (newVName)
+import Futhark.SoP.Monad (addRange, mkRange, mkRangeLB)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (SoP, justSym, sym2SoP)
-import Futhark.Analysis.Proofs.AlgebraBridge (rollbackAlgEnv, addRelIterator, addRelSymbol, simplify, toRel)
+import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.-.))
+
+data MonoDir = Inc | IncStrict | Dec | DecStrict
+  deriving (Show, Eq, Ord)
 
 data Query
-  = CaseIsMonotonic
+  = CaseIsMonotonic MonoDir
   | -- Apply transform to case value, then check whether it simplifies to true.
     CaseTransform (SoP Symbol -> SoP Symbol)
 
 data Answer = Yes | Unknown
+  deriving (Show, Eq)
 
--- Answers a query on an index function case.
+-- | Answers a query on an index function case.
 ask :: Query -> IndexFn -> Int -> IndexFnM Answer
 ask query (IndexFn it cs) case_idx = rollbackAlgEnv $ do
   let (p, q) = getCase case_idx cs
@@ -27,6 +34,25 @@ ask query (IndexFn it cs) case_idx = rollbackAlgEnv $ do
   addRelSymbol p
   case query of
     CaseTransform transf -> isTrue $ transf q
+    CaseIsMonotonic dir ->
+      case it of
+        Forall i _ -> do
+          -- Add j < i. Check p(j) ^ p(i) => q(j) `rel` q(i).
+          addRange (Algebra.Var i) (mkRangeLB $ int2SoP 1)
+          j <- newVName "j"
+          addRange (Algebra.Var j) (mkRange (int2SoP 0) (sym2SoP (Algebra.Var i) .-. int2SoP 1))
+          let p_j = fromJust . justSym $ rep (mkRep i (Var j)) p
+          let q_j = rep (mkRep i (Var j)) q
+          addRelSymbol p_j
+          let rel = case dir of
+                Inc -> (:<=)
+                IncStrict -> (:<)
+                Dec -> (:>=)
+                DecStrict -> (:>)
+          debugPrintAlgEnv
+          debugPrettyM "ask" (q_j `rel` q)
+          isTrue . sym2SoP $ q_j `rel` q
+        Empty -> undefined
     _ -> undefined
 
 -- | Does this symbol simplify to true?
