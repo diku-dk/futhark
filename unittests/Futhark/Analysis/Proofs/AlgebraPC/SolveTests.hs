@@ -13,7 +13,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Futhark.Analysis.Proofs.Symbol as IxFn
 import Futhark.Analysis.Proofs.Monad (IndexFnM(..), VEnv(..))
-import Control.Monad.RWS.Strict
+import Control.Monad.RWS.Strict hiding (Sum)
 
 -------------------------------------
 -- Run with:

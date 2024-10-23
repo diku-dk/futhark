@@ -35,7 +35,9 @@ import Data.Set qualified as S
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
+
 -- import Futhark.Util.Pretty
+-- import Debug.Trace
 
 ---------------------------------------------
 --- Fourier-Motzkin elimination algorithm ---

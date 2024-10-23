@@ -4,7 +4,7 @@
 --   or end of sum-of-slices.
 module Futhark.Analysis.Proofs.AlgebraPC.UnaryRules
   ( simplifyPows,
-    peelOffSumsFP,
+    simplifyOneSum,
   )
 where
 
@@ -15,7 +15,8 @@ import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.SoP.SoP
-import Futhark.SoP.Monad (MonadSoP)
+import Futhark.SoP.Monad (MonadSoP, getEquivs)
+import Futhark.SoP.FourierMotzkin qualified as FM
 
 -----------------------------------------
 --- 1. Simplifications related to Pow ---
@@ -68,8 +69,44 @@ combineSamePow (q, tab) (b, sop) =
       getPowOfFactorTR (qq `div` bb) bb (pr + 1)
 
 ---------------------------------------------------------------
---- 4. Peeling off first/last known elements of a slice-sum ---
+--- 2. Simplification of each (individual) slice sum:       ---
+---    2.1. sum x[lb .. ub] => 0     whenever lb  > ub      ---
+---    2.2. sum x[lb .. ub] => x[lb] whenever lb == ub      ---
+---    2.3. peeling off first/last known elements of a sum  ---
 ---------------------------------------------------------------
+
+simplifyOneSum ::
+  (MonadSoP Symbol e p m) => SoP Symbol -> m (Bool, SoP Symbol)
+simplifyOneSum sop = do
+  equivs <- getEquivs
+  sop' <- elimEmptySums sop
+  let (succ1, sop'') = transfSum2Idx sop'
+  let (succ2, sop''')= peelOffSumsFP equivs sop''
+  pure (succ1 || succ2, sop''')
+
+elimEmptySums :: 
+  (MonadSoP Symbol e p m) => SoP Symbol -> m (SoP Symbol)
+elimEmptySums sop = do
+  sopFromList <$> (filterM predTerm $ sopToList sop)
+  where
+    emptySumSym (Sum _ lb ub) = lb FM.$>$ ub
+    emptySumSym _ = pure False
+    predTerm (Term ms, _) = do
+      tmps <- mapM (emptySumSym . fst) $ MS.toOccurList ms
+      pure $ all not tmps
+
+transfSum2Idx :: SoP Symbol -> (Bool, SoP Symbol)
+transfSum2Idx sop
+  | tgt_sums <- filter isOneElmSum $ S.toList $ free sop,
+    not (null tgt_sums) =
+  let subs = M.fromList $ zip tgt_sums $ map sum2Idx tgt_sums
+  in  (True, substitute subs sop)
+  where
+    isOneElmSum (Sum _ lb ub) = lb == ub
+    isOneElmSum _ = False
+    sum2Idx (Sum idxsym lb _) = Idx idxsym lb
+    sum2Idx _ = error "Unreachable case reached in transfSum2Idx."
+transfSum2Idx sop = (False, sop)
 
 peelOffSumsFP :: M.Map Symbol (SoP Symbol) -> SoP Symbol -> (Bool, SoP Symbol)
 peelOffSumsFP equivs sop
@@ -79,7 +116,7 @@ peelOffSumsFP equivs sop
         (True, sop') ->
           -- fix point
           let (_, sop'') = peelOffSumsFP equivs sop'
-           in (True, sop'')
+          in  (True, sop'')
   where
     hasPeelableSums = any hasPeelableSumSym . S.toList . free
     hasPeelableSumSym (Sum nm beg end) =

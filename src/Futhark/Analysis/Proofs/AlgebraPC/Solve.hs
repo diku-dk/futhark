@@ -16,6 +16,9 @@ import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Control.Monad ((<=<))
 
+-- import Futhark.Util.Pretty
+-- import Debug.Trace
+
 simplify ::
   (MonadSoP Symbol e Property m) =>
   SoP Symbol ->
@@ -45,8 +48,7 @@ simplifyLevel sop0 = do
       then pure (False, sop1)
       else simplifyAll2All sop1
   -- peel off known indices by looking in the equality table
-  equivs <- getEquivs
-  let (s3, sop3) = peelOffSumsFP equivs sop2
+  (s3, sop3) <- simplifyOneSum sop2
   -- do we need to run to a fix point ?
   if s2 || s3 then simplifyLevel sop3 else pure sop3
 
@@ -153,7 +155,7 @@ findSpecialSymbolToElim ::
 findSpecialSymbolToElim sop
   | (special_syms, _) <- S.partition hasIdxOrSum $ free sop,
     not (S.null special_syms) = do
-      let (sum_syms, others) = S.partition hasSum sum_syms
+      let (sum_syms, others) = S.partition hasSum special_syms
       if S.size sum_syms > 0
         then getSumRange $ S.elemAt 0 sum_syms
         else do

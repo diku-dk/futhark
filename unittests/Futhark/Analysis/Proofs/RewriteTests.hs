@@ -115,7 +115,7 @@ tests =
                     ~-~ LinComb z (int 0) (sVar b) (Idx (Var x) (sVar z))
                 )
           )
-          @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar a .-. int 1) (Var x)),
+          @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar a .-. int 1) (Idx (Var x) (sVar w))),
       testCase "Merge sum-subtraction (match 3)" $
         run
           ( \(x, _, z, w, a, b, _, _) -> do
