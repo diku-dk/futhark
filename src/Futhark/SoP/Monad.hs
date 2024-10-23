@@ -36,6 +36,8 @@ module Futhark.SoP.Monad
     delFromEnv,
     mkRange,
     findSymLEq0Def,
+    mkRangeLB,
+    mkRangeUB,
   )
 where
 
@@ -259,6 +261,12 @@ addRange sym r =
 
 mkRange :: SoP u -> SoP u -> Range u
 mkRange lb ub = Range (S.singleton lb) 1 (S.singleton ub)
+
+mkRangeLB :: Ord u => SoP u -> Range u
+mkRangeLB n = Range (S.singleton n) 1 mempty
+
+mkRangeUB :: Ord u => SoP u -> Range u
+mkRangeUB n = Range mempty 1 (S.singleton n)
 
 -- \| Add equivalent information for a symbol; unsafe and
 -- should only be used for newly introduced variables.

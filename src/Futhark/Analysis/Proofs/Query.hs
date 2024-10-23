@@ -1,37 +1,35 @@
 -- Answer queries on index functions using algebraic solver.
-{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Futhark.Analysis.Proofs.Query where
 
-import Control.Monad (when, foldM, forM_)
-import Control.Monad.RWS (gets, modify)
-import Control.Monad.Trans (lift)
-import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
-import Data.Set qualified as S
+import Control.Monad (foldM, forM_, unless)
+import Data.Maybe (catMaybes, fromJust)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, rollbackAlgEnv, simplify, toRel)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.AlgebraPC.Solve qualified as Solve
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), getCase)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (..))
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), toDNF, neg, normalizeSymbol)
-import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
-import Futhark.SoP.Monad (addRange, mkRange)
+import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), Iterator (..), getCase, casesToList, Domain (Iota))
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrintAlgEnv, debugPrettyM)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toDNF)
+import Futhark.Analysis.Proofs.Unify (mkRep, rep)
+import Futhark.MonadFreshNames (newVName)
+import Futhark.SoP.Monad (addRange, mkRange, mkRangeLB)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, justSym, mapSymSoP2M, (.-.), sym2SoP)
-import Futhark.SoP.SoP qualified as SoP
-import Futhark.Analysis.Proofs.AlgebraBridge (toAlgebraSoP, fromAlgebra, toAlgebra)
-import Data.Maybe (catMaybes)
-import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), ASTMappable (..))
-import Futhark.Analysis.Proofs.Util (converge)
+import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.-.))
+import Language.Futhark (VName)
+import GHC.Base (assert)
+import Control.Monad (when)
+
+data MonoDir = Inc | IncStrict | Dec | DecStrict
+  deriving (Show, Eq, Ord)
 
 data Query
-  = CaseIsMonotonic
+  = CaseIsMonotonic MonoDir
   | -- Apply transform to case value, then check whether it simplifies to true.
     CaseTransform (SoP Symbol -> SoP Symbol)
 
 data Answer = Yes | Unknown
+  deriving (Show, Eq)
 
--- Answers a query on an index function case.
+-- | Answers a query on an index function case.
 ask :: Query -> IndexFn -> Int -> IndexFnM Answer
 ask query (IndexFn it cs) case_idx = rollbackAlgEnv $ do
   let (p, q) = getCase case_idx cs
@@ -39,9 +37,67 @@ ask query (IndexFn it cs) case_idx = rollbackAlgEnv $ do
   addRelSymbol p
   case query of
     CaseTransform transf -> isTrue $ transf q
-    _ -> undefined
+    CaseIsMonotonic dir ->
+      case it of
+        Forall i _ -> do
+          -- Add j < i. Check p(j) ^ p(i) => q(j) `rel` q(i).
+          addRange (Algebra.Var i) (mkRangeLB $ int2SoP 1)
+          j <- newVName "j"
+          addRange (Algebra.Var j) (mkRange (int2SoP 0) (sym2SoP (Algebra.Var i) .-. int2SoP 1))
+          let p_j = fromJust . justSym $ rep (mkRep i (Var j)) p
+          let q_j = rep (mkRep i (Var j)) q
+          addRelSymbol p_j
+          let rel = case dir of
+                Inc -> (:<=)
+                IncStrict -> (:<)
+                Dec -> (:>=)
+                DecStrict -> (:>)
+          debugPrintAlgEnv
+          debugPrettyM "ask" (q_j `rel` q)
+          isTrue . sym2SoP $ q_j `rel` q
+        Empty -> undefined
 
--- XXX TODO want to rewrite symbol, not just simplify it, before checking
+data Property
+  = PermutationOf VName
+  | PermutationOfZeroTo (SoP Symbol)
+
+prove :: Property -> IndexFn -> IndexFnM Answer
+prove (PermutationOf {}) _fn = undefined
+prove (PermutationOfZeroTo m) (IndexFn it@(Forall i (Iota n)) cs) = do
+  -- 1. Show that m = n.
+  ans <- isTrue . sym2SoP $ m :== n
+  case ans of
+    Unknown -> pure Unknown
+    Yes -> do
+      addRelIterator it
+      -- Hardcode two cases for now.
+      case casesToList cs of
+        [(p, x), (not_p, y)] -> do
+          unless (p == neg not_p) $ error "inconsistency"
+          -- 2. Prove no overlap in cases.
+          -- TODO considering x the "smaller" case here, also need to switch roles
+          -- Sufficient: case 1 < case 2.
+          -- Case: i1 > i2
+          -- [ ] fresh i1 i2
+          -- [ ] assume i1 > i2
+          -- [ ] substitute i1 and i2 appropriately
+          no_overlap1 <- isTrue . sym2SoP $ x :< y
+          -- Case: i1 < i2
+          let no_overlap2 = undefined
+          let no_overlap = no_overlap1 `also` no_overlap2
+          -- 3. Prove no duplicates in first case.
+          -- Make it a property? Whose proof could be done using `ask CaseIsMonotonic`?
+          -- 4. Prove no duplicates in second case.
+          -- 5. Prove both cases are bounded from below by 0.
+          -- x >= 0
+          -- y >= 0
+          -- 6. Prove both cases are bounded from above by m.
+          -- x <= m
+          -- y <= m
+          pure $ no_overlap `also` undefined
+        _ -> undefined
+prove (PermutationOfZeroTo {}) _ = pure Unknown
+
 -- | Does this symbol simplify to true?
 isTrue :: SoP Symbol -> IndexFnM Answer
 isTrue sym = do
@@ -60,12 +116,12 @@ isFalse p = do
   case not_p of
     Yes -> pure Yes
     Unknown -> do
-      let p_cnf = cnfToList $ neg neg_p_dnf -- Converts p to CNF.
-      -- Given p in CNF, a sufficient condition for p to be false
+      -- If we convert p to CNF, a sufficient condition for p to be false
       -- is that some clause q in p is false. Hence we can pick a clause q,
       -- assume all other clauses to be true, and use that information when
       -- checking q. This lets us easily falsify, for example,
       -- x == 1 :&& x == 2.
+      let p_cnf = cnfToList $ neg neg_p_dnf -- Converts p to CNF.
       foldM
         ( \acc i ->
             case acc of
@@ -90,167 +146,14 @@ isFalse p = do
       rels <- mapM toRel qs
       forM_ (catMaybes rels) addRel
 
--- | Simplify symbols using algebraic solver.
-simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
-simplify = astMap m
-  where
-    m :: ASTMapper Symbol IndexFnM =
-      ASTMapper
-        { mapOnSymbol = converge (fmap normalizeSymbol . simplifySymbol),
-          mapOnSoP = simplifySoP
-        }
-
-    simplifySoP :: SoP Symbol -> IndexFnM (SoP Symbol)
-    simplifySoP x = rollbackAlgEnv $ do
-      y <- toAlgebraSoP x
-      -- debugPrettyM "simplify" y
-      -- algenv <- gets algenv
-      -- debugPrettyM "under" algenv
-      z <- Solve.simplify y
-      mapSymSoP2M fromAlgebra z
-
-    -- Note that this does not recurse.
-    simplifySymbol :: Symbol -> IndexFnM Symbol
-    simplifySymbol symbol = case symbol of
-      x :== y -> refineCmp (:==) x y
-      x :/= y -> refineCmp (:/=) x y
-      x :> y -> refineCmp (:>) x y
-      x :>= y -> refineCmp (:>=) x y
-      x :< y -> refineCmp (:<) x y
-      x :<= y -> refineCmp (:<=) x y
-      x -> pure x
-      where
-        refineCmp rel x y = do
-          b <- solve (x `rel` y)
-          pure $ if b then Bool True else x `rel` y
-
-        -- Use Fourier-Motzkin elimination to determine the truth value
-        -- of an expresion, if it can be determined in the given environment.
-        -- If the truth value cannot be determined, False is also returned.
-        solve (Bool True) = pure True
-        solve (a :== b) = a $== b
-        solve (a :/= b) = a $/= b
-        solve (a :> b) = a $> b
-        solve (a :>= b) = a $>= b
-        solve (a :< b) = a $< b
-        solve (a :<= b) = a $<= b
-        solve _ = pure False
+isYes :: Answer -> Bool
+isYes Yes = True
+isYes _ = False
 
 isUnknown :: Answer -> Bool
 isUnknown Unknown = True
 isUnknown _ = False
 
---------------------------------------------------------------------------------
--- Utilities
---------------------------------------------------------------------------------
-rollbackAlgEnv :: IndexFnM a -> IndexFnM a
-rollbackAlgEnv computation = do
-  alg <- gets algenv
-  res <- computation
-  modify (\env -> env {algenv = alg})
-  pure res
-
--- | Adds a relation on symbols to the algebraic environment.
-addRelSymbol :: Symbol -> IndexFnM ()
-addRelSymbol (x :/= y) = do
-  -- Can be expressed, if we know which symbol is greater than the other.
-  a <- toAlgebraSoP x
-  b <- toAlgebraSoP y
-  x_is_greater <- a $>$ b
-  if x_is_greater
-    then addRel (a :>: b)
-    else do
-      y_is_greater <- a $<$ b
-      when y_is_greater $ addRel (a :<: b)
-addRelSymbol p = do
-  rel <- toRel p
-  maybe (pure ()) addRel rel
-
--- | Add relations derived from the iterator to the algebraic environment.
-addRelIterator :: Iterator -> IndexFnM ()
-addRelIterator (Forall i dom) = case dom of
-  Iota n -> do
-    addAlgRange i (domainStart dom) (domainEnd dom)
-    boundIndexValues n
-  Cat k m _ -> do
-    addAlgRange k (int 0) (m .-. int 1)
-    addAlgRange i (domainStart dom) (domainEnd dom)
-    addAlgRangeUB i (intervalEnd dom .-. int 1)
-    boundIndexValues m
-  where
-    addAlgRangeUB vn x = do
-      a <- toAlgebraSoP x
-      addRange (Algebra.Var vn) (Range mempty 1 (S.singleton a))
-
-    int :: Int -> SoP Symbol
-    int n = int2SoP (toInteger n)
-
-    boundIndexValues e = do
-      -- The type of Range restricts us to bound affine n. Lower bound is 1
-      -- since otherwise Iterator would be a single point (and hence Empty).
-      case justAffine (SoP.normalize e) of
-        Just (c, x, b) -> do
-          let lb = int2SoP $ toInteger (1 :: Int)
-          let ub = int2SoP $ toInteger (maxBound :: Int) - b
-          a <- toAlgebra x
-          addRange a (Range (S.singleton lb) c (S.singleton ub))
-        Nothing -> pure ()
-addRelIterator _ = pure ()
-
-addAlgRange vn x y = do
-  a <- toAlgebraSoP x
-  b <- toAlgebraSoP y
-  addRange (Algebra.Var vn) (mkRange a b)
-
-toRel :: Symbol -> IndexFnM (Maybe (Rel Algebra.Symbol))
-toRel = runMaybeT . toRel_
-  where
-    liftOp op a b = pure $ a `op` b
-    convCmp op = convOp (lift . toAlgebraSoP) (liftOp op)
-
-    toRel_ :: Symbol -> MaybeT IndexFnM (Rel Algebra.Symbol)
-    toRel_ (x :< y) = convCmp (:<:) x y
-    toRel_ (x :<= y) = convCmp (:<=:) x y
-    toRel_ (x :> y) = convCmp (:>:) x y
-    toRel_ (x :>= y) = convCmp (:>=:) x y
-    toRel_ (x :== y) = convCmp (:==:) x y
-    toRel_ (x :/= y) = convCmp (:/=:) x y
-    toRel_ (x :&& y) = convOp toRel_ (liftOp (:&&:)) x y
-    toRel_ (x :|| y) = convOp toRel_ (liftOp (:||:)) x y
-    toRel_ _ = fail ""
-
-convOp :: (Monad m) => (t1 -> m t2) -> (t2 -> t2 -> m b) -> t1 -> t1 -> m b
-convOp transf op x y = do
-  a <- transf x
-  b <- transf y
-  a `op` b
-
-($<) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($<) = convOp toAlgebraSoP ($<$)
-
-($<=) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($<=) = convOp toAlgebraSoP ($<=$)
-
-($>) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($>) = convOp toAlgebraSoP ($>$)
-
-($>=) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($>=) = convOp toAlgebraSoP ($>=$)
-
-($==) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($==) = convOp toAlgebraSoP ($==$)
-
-($/=) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($/=) = convOp toAlgebraSoP ($/=$)
-
-infixr 4 $<
-
-infixr 4 $<=
-
-infixr 4 $>
-
-infixr 4 $>=
-
-infixr 4 $==
-
-infixr 4 $/=
+also :: Answer -> Answer -> Answer
+also Yes Yes = Yes
+also _ _ = Unknown

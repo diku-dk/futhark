@@ -141,6 +141,8 @@ library
       Futhark.Analysis.PrimExp.Table
       Futhark.Analysis.Proofs.Algebra
       Futhark.Analysis.Proofs.AlgebraBridge
+      Futhark.Analysis.Proofs.AlgebraBridge.Translate
+      Futhark.Analysis.Proofs.AlgebraBridge.Util
       Futhark.Analysis.Proofs.Convert
       Futhark.Analysis.Proofs.IndexFn
       Futhark.Analysis.Proofs.Monad
@@ -153,6 +155,7 @@ library
       Futhark.Analysis.Proofs.Traversals
       Futhark.Analysis.Proofs.Unify
       Futhark.Analysis.Proofs.Util
+      Futhark.Analysis.Proofs.AlgebraPC.Algebra
       Futhark.Analysis.Proofs.AlgebraPC.All2AllDriver
       Futhark.Analysis.Proofs.AlgebraPC.BinaryRules
       Futhark.Analysis.Proofs.AlgebraPC.Solve
@@ -536,6 +539,7 @@ test-suite unit
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
       Futhark.Analysis.Proofs.IndexFnTests
+      Futhark.Analysis.Proofs.QueryTests
       Futhark.Analysis.Proofs.RewriteTests
       Futhark.Analysis.Proofs.UnifyTests
       Futhark.Analysis.Proofs.AlgebraPC.SolveTests

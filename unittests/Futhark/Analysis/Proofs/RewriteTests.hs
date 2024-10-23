@@ -4,15 +4,15 @@
 module Futhark.Analysis.Proofs.RewriteTests (tests) where
 
 import Control.Monad (unless)
+import Futhark.Analysis.Proofs.AlgebraBridge (toAlgebra)
+import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (addAlgRange)
-import Futhark.Analysis.Proofs.AlgebraBridge (toAlgebra)
 import Futhark.Analysis.Proofs.Rewrite
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (addEquiv)
+import Futhark.SoP.Monad (addEquiv, addRange, mkRange)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Test.Tasty
@@ -86,6 +86,9 @@ tests =
           )
           @??= sym2SoP (LinComb w (int 0) (sVar z .+. int 1) (Indicator $ Idx (Var x) (sVar w))),
       testCase "Merge sum-subtraction (no match)" $
+        -- Should fail because we cannot show b <= c without bounds on these variables general.
+        -- Should fail because we cannot show b <= c without bounds on these variables general.
+
         -- Should fail because we cannot show b <= c without bounds on these variables general.
         run
           ( \(x, _, z, w, a, b, c, _) ->
@@ -215,7 +218,7 @@ tests =
       testCase "Equivalence (1)" $
         run
           ( \(x, _, _, _, _, _, _, _) -> do
-              x' <- toAlgebra (Var x)
+              let x' = Algebra.Var x
               addEquiv x' (int2SoP 1)
               rewrite (sVar x .+. int 1)
           )
@@ -235,7 +238,7 @@ tests =
       testCase "Tautology (variable)" $
         run
           ( \(x, _, _, _, _, _, _, _) -> do
-              x' <- toAlgebra (Var x)
+              let x' = Algebra.Var x
               addEquiv x' (int2SoP 1)
               rewrite (sVar x :<= int 2)
           )
@@ -337,7 +340,7 @@ tests =
           ( \(x, y, _, _, a, b, _, _) ->
               rewrite
                 ( IndexFn
-                    { iterator = Forall x (Cat y (sVar a) (sVar b)),
+                    { iterator = Forall x (Cat y (sVar a) (sym2SoP $ Idx (Var b) $ sVar y)),
                       body =
                         cases
                           [ (sVar x :== int 0, sVar y),
@@ -347,7 +350,7 @@ tests =
                 )
           )
           @??= ( IndexFn
-                   { iterator = Forall x (Cat y (sVar a) (sVar b)),
+                   { iterator = Forall x (Cat y (sVar a) (sym2SoP $ Idx (Var b) $ sVar y)),
                      body = cases [(Bool True, sVar y)]
                    }
                ),
@@ -475,3 +478,8 @@ tests =
         msg actual expected =
           docString $
             "expected:" <+> pretty expected <> line <> "but got: " <+> pretty actual
+
+    addAlgRange vn x y = do
+      a <- toAlgebra x
+      b <- toAlgebra y
+      addRange (Algebra.Var vn) (mkRange a b)

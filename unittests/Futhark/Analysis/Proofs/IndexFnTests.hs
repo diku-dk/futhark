@@ -40,7 +40,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/map-if.fut"
-        ( withDebug $ \(i, n, xs, _) ->
+        ( pure $ \(i, n, xs, _) ->
             let xs_i = sym2SoP (Idx (Hole xs) (sHole i))
              in IndexFn
                   { iterator = Forall i (Iota (sHole n)),
@@ -49,6 +49,15 @@ tests =
                         [ (xs_i :> int2SoP 100, int2SoP 2 .*. xs_i),
                           (xs_i :<= int2SoP 100, xs_i)
                         ]
+                  }
+        ),
+      mkTest
+        "tests/indexfn/map-if-elim.fut"
+        ( pure $ \(i, n, xs, _) ->
+            let xs_i = sym2SoP (Idx (Hole xs) (sHole i))
+             in IndexFn
+                  { iterator = Forall i (Iota (sHole n)),
+                    body = cases [ (Bool True, int2SoP 2 .*. xs_i) ]
                   }
         ),
       mkTest

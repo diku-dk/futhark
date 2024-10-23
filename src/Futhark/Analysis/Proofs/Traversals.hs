@@ -1,10 +1,13 @@
-module Futhark.Analysis.Proofs.Traversals where
+module Futhark.Analysis.Proofs.Traversals
+  ( ASTMapper (..),
+    ASTMappable (..),
+  )
+where
 
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.SoP.SoP (SoP, int2SoP, sopToLists, sym2SoP, (.*.), (.+.))
-import Control.Monad (foldM)
 
 data ASTMapper a m = ASTMapper
   { mapOnSymbol :: a -> m a,
@@ -43,16 +46,6 @@ instance ASTMappable Symbol Symbol where
   astMap m (x :&& y) = mapOnSymbol m =<< (:&&) <$> astMap m x <*> astMap m y
   astMap m (x :|| y) = mapOnSymbol m =<< (:||) <$> astMap m x <*> astMap m y
 
-instance ASTMappable Algebra.Symbol Algebra.Symbol where
-  astMap m (Algebra.Var x) = mapOnSymbol m $ Algebra.Var x
-  astMap m (Algebra.Idx vn i) = mapOnSymbol m . Algebra.Idx vn =<< astMap m i
-  astMap m (Algebra.Mdf dir vn i j) =
-    mapOnSymbol m =<< Algebra.Mdf dir vn <$> astMap m i <*> astMap m j
-  astMap m (Algebra.Sum vn lb ub) =
-    mapOnSymbol m =<< Algebra.Sum vn <$> astMap m lb <*> astMap m ub
-  astMap m (Algebra.Pow (c, x)) =
-    mapOnSymbol m . curry Algebra.Pow c =<< astMap m x
-
 instance ASTMappable Symbol IndexFn where
   astMap m (IndexFn dom body) = IndexFn <$> astMap m dom <*> astMap m body
 
@@ -70,3 +63,13 @@ instance ASTMappable Symbol (Cases Symbol (SoP Symbol)) where
     ps' <- mapM (astMap m) ps
     qs' <- mapM (astMap m) qs
     pure . cases $ zip ps' qs'
+
+instance ASTMappable Algebra.Symbol Algebra.Symbol where
+  astMap m (Algebra.Var x) = mapOnSymbol m $ Algebra.Var x
+  astMap m (Algebra.Idx vn i) = mapOnSymbol m . Algebra.Idx vn =<< astMap m i
+  astMap m (Algebra.Mdf dir vn i j) =
+    mapOnSymbol m =<< Algebra.Mdf dir vn <$> astMap m i <*> astMap m j
+  astMap m (Algebra.Sum vn lb ub) =
+    mapOnSymbol m =<< Algebra.Sum vn <$> astMap m lb <*> astMap m ub
+  astMap m (Algebra.Pow (c, x)) =
+    mapOnSymbol m . curry Algebra.Pow c =<< astMap m x

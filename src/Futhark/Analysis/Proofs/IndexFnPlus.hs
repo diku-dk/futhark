@@ -48,7 +48,7 @@ domainEnd (Iota n) = n .-. int2SoP 1
 domainEnd (Cat k m b) = rep (mkRep k m) b .-. int2SoP 1
 
 intervalEnd :: Domain -> SoP Symbol
-intervalEnd (Cat k _ b) = rep (mkRep k (sym2SoP (Var k) .+. int2SoP 1)) b
+intervalEnd (Cat k _ b) = rep (mkRep k (sym2SoP (Var k) .+. int2SoP 1)) b .-. int2SoP 1
 intervalEnd (Iota _) = error "intervalEnd on iota"
 
 -------------------------------------------------------------------------------
@@ -74,7 +74,7 @@ instance Pretty Domain where
           "...",
           pretty (intervalEnd dom)
         ]
-      <> ")"
+      <> "]"
 
 instance Pretty Iterator where
   pretty (Forall i dom) =

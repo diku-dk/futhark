@@ -2,20 +2,17 @@ module Futhark.Analysis.Proofs.Monad where
 
 import Control.Monad (when)
 import Control.Monad.RWS.Strict
-import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
-import Futhark.SoP.SoP (SoP, int2SoP)
 import Futhark.Util.Pretty (Pretty, docString, pretty)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
-import qualified Futhark.Analysis.Proofs.AlgebraPC.Symbol as Algebra
 import Futhark.SoP.Expression (Expression)
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.AlgebraPC.Solve qualified as Solve
+import qualified Futhark.Analysis.Proofs.AlgebraPC.Algebra as Algebra
 
 data IndexFnProperty
   = Blah
@@ -51,7 +48,7 @@ instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
   getEquivs = gets (equivs . algenv)
   getProperties = gets (properties . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
-  findSymLEq0 = Solve.findSymbolLEq0
+  findSymLEq0 = Algebra.findSymbolLEq0
 
 runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
@@ -87,6 +84,11 @@ debugM x = do
 debugPrettyM :: (Pretty a) => String -> a -> IndexFnM ()
 debugPrettyM msg x = do
   whenDebug $ traceM $ docString $ "🪲 " <> pretty msg <> " " <> pretty x
+
+debugPrintAlgEnv :: IndexFnM ()
+debugPrintAlgEnv = do
+  algenv <- gets algenv
+  debugPrettyM "" algenv
 
 withDebug :: b -> IndexFnM b
 withDebug f = do
