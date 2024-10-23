@@ -52,12 +52,10 @@ debug a = traceShow a a
 -- this is a type
 -- type test = (i32, i32) (Not that interesting left for now)
 
--- TODO: Fix formatting of several lines of comments
--- TODO: prettyprint in a nicer way than one line per terminal.
+-- DONE: Fix formatting of several lines of comments
+-- DONE: prettyprint in a nicer way than one line per terminal.
 --
 -- DONE: support all syntactical constructs.
-
--- TODO (Question?): Change fmt to be a sequence of lines instead of a list of lines
 
 fmtName :: Name -> FmtM Fmt
 fmtName = code . nameToText
