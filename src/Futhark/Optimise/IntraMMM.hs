@@ -198,7 +198,7 @@ buildMMM resName outerMatch = do
   copyRegistersSharedFun <- mkCopyRegistersShared (typeA kernelBodyMatch) (typeB kernelBodyMatch) (typeC kernelBodyMatch) sizeM sizeN cValsPerThread blockSize
   let addedFuns = [gemmFun, copyGlobalSharedFunA, copyGlobalSharedFunB, copyRegistersSharedFun]
 
-  blockMMAres_list <- segMap1D "blockMMAres" (SegBlock SegNoVirt $ Just $ KernelGrid (Count numBlocks) (Count $ mkInt64Const (blockSize + 32))) ResultMaySimplify numBlocks $ \blockIndex -> do
+  blockMMAres_list <- segMap1D "blockMMAres" (SegBlock SegNoVirt $ Just $ KernelGrid (Count numBlocks) (Count $ mkInt64Const blockSize)) ResultMaySimplify numBlocks $ \blockIndex -> do
 -- TODO: make version without regs for dynamic arguments, gemm outputs shared mem no regs as input
     cRegs_list <- segMap1D "cRegs" (SegThreadInBlock SegNoVirt) ResultPrivate blockSizeSubExp $ \_ -> do
       cScratch <- letExp "cScratch" $ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const cValsPerThread]
