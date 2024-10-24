@@ -112,10 +112,11 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
     Idx bnm bidx <- sym2,
     anm == bnm && ms1 == ms2 && k1 == k2 = do
       -- \^ possible match for extending a sum with an index
-      nonempty_slice <- aidx_beg FM.$<=$ aidx_end
+      -- Allows x[lb-1] + Sum x[lb:lb-1] -> Sum x[lb-1:lb-1].
+      valid_slice <- aidx_beg FM.$<=$ (aidx_end .+. int2SoP 1)
       let bidx_m_1 = bidx .-. (int2SoP 1)
           bidx_p_1 = bidx .+. (int2SoP 1)
-      case (nonempty_slice, bidx_m_1 == aidx_end, bidx_p_1 == aidx_beg) of
+      case (valid_slice, bidx_m_1 == aidx_end, bidx_p_1 == aidx_beg) of
         (True, True, _) -> -- extends the upper bound
           pure $ Just $ mkEquivSoPs (Sum anm aidx_beg bidx, sym1, sym2) (ms1, k1, k1)
         (True, _, True) -> -- extends the lower bound
