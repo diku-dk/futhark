@@ -18,13 +18,6 @@ import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, (.-.)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 
-rollbackAlgEnv :: IndexFnM a -> IndexFnM a
-rollbackAlgEnv computation = do
-  alg <- gets algenv
-  res <- computation
-  modify (\env -> env {algenv = alg})
-  pure res
-
 -- | Adds a relation on symbols to the algebraic environment.
 addRelSymbol :: Symbol -> IndexFnM ()
 addRelSymbol (x :/= y) = do

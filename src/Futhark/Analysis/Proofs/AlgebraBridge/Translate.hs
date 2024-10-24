@@ -2,25 +2,63 @@
 module Futhark.Analysis.Proofs.AlgebraBridge.Translate
   ( toAlgebra,
     fromAlgebra,
+    rollbackAlgEnv,
+    algebraContext,
+    toAlgebraSymbol,
   )
 where
 
-import Control.Monad (unless, (<=<))
+import Control.Monad (unless, (<=<), when)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.Monad (IndexFnM)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..))
+import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv), debugPrettyM2)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), rep, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Futhark.SoP.Monad (addProperty, addRange, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
+import Futhark.SoP.Monad (addProperty, addRange, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange, askProperty)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
+import Control.Monad.RWS (gets, modify)
+
+rollbackAlgEnv :: IndexFnM a -> IndexFnM a
+rollbackAlgEnv computation = do
+  alg <- gets algenv
+  res <- computation
+  modify (\env -> env {algenv = alg})
+  pure res
+
+-- Do this action inside an Algebra "context" created for this AST, ensuring:
+-- (1) Modifications to the Algebra environment are ephemeral; they are
+-- rolled back once the action is done.
+-- (2) Translations of symbols in the AST are idempotent across environment
+-- rollbacks. For example, in
+-- ```
+--   do
+--     x <- rollbackAlgEnv $ toAlgebra (Sum xs[a:b])
+--     y <- rollbackAlgEnv $ toAlgebra (Sum xs[a:b])
+--     ...
+-- ```
+-- x and y may be different (e.g., sums over different fresh names). But in
+-- ```
+--   algebraContext (Sum xs[a:b]) $ do
+--     x <- rollbackAlgEnv $ toAlgebra (Sum xs[a:b])
+--     y <- rollbackAlgEnv $ toAlgebra (Sum xs[a:b])
+--     ...
+-- ```
+-- x and y are identical.
+-- TODO might be possible to make rollbackAlgEnv more lenient, so as not
+-- to roll back the untranslatable environment? Then this function
+-- can be removed.
+algebraContext :: ASTMappable Symbol a => a -> IndexFnM b -> IndexFnM b
+algebraContext x m = rollbackAlgEnv $ do
+  _ <- handleQuantifiers x
+  m
 
 -----------------------------------------------------------------------------
 -- Translation from Algebra to IndexFn layer.
@@ -40,7 +78,11 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) i) = do
   case x of
     Just x' -> sym2SoP <$> repHoles x' idx
     Nothing -> pure . sym2SoP $ Idx (Var vn) idx
-fromAlgebra_ (Algebra.Idx (Algebra.POR {}) _) = undefined
+fromAlgebra_ (Algebra.Idx (Algebra.POR vns) i) = do
+  foldr1 (.+.)
+    <$> mapM
+      (\vn -> fromAlgebra_ $ Algebra.Idx (Algebra.One vn) i)
+      (S.toList vns)
 fromAlgebra_ (Algebra.Mdf _dir vn i j) = do
   -- TODO add monotonicity property to environment?
   a <- fromAlgebra i
@@ -100,6 +142,9 @@ instance ToSoP Algebra.Symbol Symbol where
 toAlgebra :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
 toAlgebra = mapSymSoP2M_ toAlgebra_ <=< handleQuantifiers
 
+toAlgebraSymbol :: Symbol -> IndexFnM Algebra.Symbol
+toAlgebraSymbol = toAlgebra_ <=< handleQuantifiers
+
 -- Replace bound variable `k` in `e` by Hole.
 removeQuantifier :: Symbol -> VName -> IndexFnM Symbol
 e `removeQuantifier` k = do
@@ -113,13 +158,15 @@ handleQuantifiers :: (ASTMappable Symbol b) => b -> IndexFnM b
 handleQuantifiers = astMap m
   where
     m = ASTMapper {mapOnSymbol = handleQuant, mapOnSoP = pure}
-    handleQuant p@(Sum j _ _ x) = do
+    handleQuant sym@(Sum j _ _ x) = do
       res <- search x
       case res of
-        Just _ -> pure p
+        Just _ -> pure sym
         Nothing -> do
-          _ <- addUntrans =<< x `removeQuantifier` j
-          pure p
+          vn <- addUntrans =<< x `removeQuantifier` j
+          booltype <- isBooleanM x
+          when booltype $ addProperty (Algebra.Var vn) Algebra.Boolean
+          pure sym
     handleQuant x = pure x
 
 -- Search for hole-less symbol in untranslatable environment, matching
@@ -147,6 +194,19 @@ search x = do
             Just (Algebra.getVName algsym, Just . head $ M.toList (mapping sub))
         _ -> error "search: symbol unifies with multiple symbols"
 
+isBooleanM :: Symbol -> IndexFnM Bool
+isBooleanM (Var vn) = do
+  askProperty (Algebra.Var vn) Algebra.Boolean
+isBooleanM (Idx (Var vn) _) = do
+  askProperty (Algebra.Var vn) Algebra.Boolean
+isBooleanM (Apply (Var vn) _) = do
+  askProperty (Algebra.Var vn) Algebra.Boolean
+isBooleanM x = pure $ isBoolean x
+
+idxSym :: Bool -> VName -> Algebra.IdxSym
+idxSym True = Algebra.POR . S.singleton
+idxSym False = Algebra.One
+
 -- Translate IndexFn.Symbol to Algebra.Symbol.
 -- Fresh names are created for untranslatable symbols such as indicators
 -- and quantified symbols in sums. Indexing is preserved on untranslatable
@@ -162,28 +222,56 @@ toAlgebra_ (Sum _ lb ub x) = do
     Just (vn, _) -> do
       a <- mapSymSoP2M_ toAlgebra_ lb
       b <- mapSymSoP2M_ toAlgebra_ ub
-      pure $ Algebra.Sum (Algebra.One vn) a b
-    Nothing -> error "mkUntrans hasn't been run on sum"
+      booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
+      pure $ Algebra.Sum (idxSym booltype vn) a b
+    Nothing -> error "handleQuantifiers need to be run"
 toAlgebra_ sym@(Idx xs i) = do
   j <- mapSymSoP2M_ toAlgebra_ i
   res <- search sym
   vn <- case res of
     Just (vn, _) -> pure vn
     Nothing -> addUntrans xs
-  pure $ Algebra.Idx (Algebra.One vn) j
-toAlgebra_ sym@(Indicator _) = do
+  booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
+  pure $ Algebra.Idx (idxSym booltype vn) j
+-- toAlgebra_ (Indicator p) = handleBoolean p
+toAlgebra_ sym@(Apply (Var f) [x]) = do
+  -- TODO refactor
+  f_is_bool <- askProperty (Algebra.Var f) Algebra.Boolean
   res <- search sym
+  case res of
+    Nothing -> do
+      vn <- addUntrans sym
+      x' <- mapSymSoP2M_ toAlgebra_ x
+      when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
+      pure $ Algebra.Idx (idxSym f_is_bool vn) x'
+    Just (vn, Just (_hole, idx)) -> do
+      idx' <- mapSymSoP2M_ toAlgebra_ idx
+      when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
+      booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
+      pure $ Algebra.Idx (idxSym booltype vn) idx'
+    Just (vn, Nothing) -> do
+      x' <- mapSymSoP2M_ toAlgebra_ x
+      when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
+      booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
+      pure $ Algebra.Idx (idxSym booltype vn) x'
+toAlgebra_ (Apply {}) = undefined
+toAlgebra_ Recurrence = lookupUntransPE Recurrence
+-- The rest are boolean statements; handled like indicator.
+toAlgebra_ x = handleBoolean x
+
+handleBoolean :: Symbol -> IndexFnM Algebra.Symbol
+handleBoolean p = do
+  res <- search p
   (vn, sub) <- case res of
     Just (vn, sub) -> pure (vn, sub)
-    Nothing -> (,Nothing) <$> addUntrans sym
+    Nothing -> (,Nothing) <$> addUntrans p
   addRange (Algebra.Var vn) (mkRange (int2SoP 0) (int2SoP 1))
-  addProperty (Algebra.Var vn) Algebra.Indicator
+  addProperty (Algebra.Var vn) Algebra.Boolean
   case sub of
     Just (_hole, idx) -> do
       idx' <- mapSymSoP2M_ toAlgebra_ idx
-      pure $ Algebra.Idx (Algebra.One vn) idx'
+      pure $ Algebra.Idx (Algebra.POR (S.singleton vn)) idx'
     Nothing -> pure $ Algebra.Var vn
-toAlgebra_ x = lookupUntransPE x
 
 addUntrans :: Symbol -> IndexFnM VName
 addUntrans (Var vn) = pure vn

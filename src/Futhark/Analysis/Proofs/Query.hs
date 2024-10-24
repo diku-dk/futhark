@@ -4,7 +4,7 @@ module Futhark.Analysis.Proofs.Query where
 
 import Control.Monad (foldM, forM_, unless)
 import Data.Maybe (catMaybes, fromJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, rollbackAlgEnv, simplify, toRel)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, rollbackAlgEnv, simplify, toRel, algebraContext)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), Iterator (..), getCase, casesToList, Domain (Iota))
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrintAlgEnv, debugPrettyM)
@@ -31,7 +31,7 @@ data Answer = Yes | Unknown
 
 -- | Answers a query on an index function case.
 ask :: Query -> IndexFn -> Int -> IndexFnM Answer
-ask query (IndexFn it cs) case_idx = rollbackAlgEnv $ do
+ask query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
   let (p, q) = getCase case_idx cs
   addRelIterator it
   addRelSymbol p

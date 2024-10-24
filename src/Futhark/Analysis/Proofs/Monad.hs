@@ -85,6 +85,10 @@ debugPrettyM :: (Pretty a) => String -> a -> IndexFnM ()
 debugPrettyM msg x = do
   whenDebug $ traceM $ docString $ "🪲 " <> pretty msg <> " " <> pretty x
 
+debugPrettyM2 :: (Pretty a) => String -> a -> IndexFnM ()
+debugPrettyM2 msg x = do
+  whenDebug $ traceM $ docString $ "🐞 " <> pretty msg <> " " <> pretty x
+
 debugPrintAlgEnv :: IndexFnM ()
 debugPrintAlgEnv = do
   algenv <- gets algenv

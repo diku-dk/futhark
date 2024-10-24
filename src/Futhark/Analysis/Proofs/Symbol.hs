@@ -16,7 +16,6 @@ data Symbol
       (SoP Symbol) -- lower bound
       (SoP Symbol) -- upper bound
       Symbol
-  | Indicator Symbol
   | Apply Symbol [SoP Symbol]
   | Bool Bool
   | Not Symbol
@@ -39,6 +38,17 @@ infixr 4 :==
 infixr 4 :/=
 infixr 3 :&&
 infixr 2 :||
+
+isBoolean :: Symbol -> Bool
+isBoolean (Bool {}) = True
+isBoolean (Not {}) = True
+isBoolean (_ :< _) = True
+isBoolean (_ :<= _) = True
+isBoolean (_ :> _) = True
+isBoolean (_ :>= _) = True
+isBoolean (_ :== _) = True
+isBoolean (_ :/= _) = True
+isBoolean _ = False
 
 sop2Symbol :: (Ord u) => SoP u -> u
 sop2Symbol sop
@@ -109,7 +119,6 @@ instance Pretty Symbol where
         <> parens (pretty lb <+> ".." <+> pretty ub)
         <> " "
         <> autoParens e
-    Indicator p -> iversonbrackets (pretty p)
     Apply f xs -> pretty f <> apply (map pretty xs)
     Bool x -> pretty x
     Not x -> "¬" <> autoParens x

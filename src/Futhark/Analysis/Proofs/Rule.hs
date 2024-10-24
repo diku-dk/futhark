@@ -109,8 +109,8 @@ rulesSoP = do
   pure
     [ Rule
         { name = "⟦¬x⟧ => 1 - ⟦x⟧",
-          from = sym2SoP $ Indicator (neg (Hole h1)),
-          to = \s -> sub s $ int 1 .-. sym2SoP (Indicator (Hole h1)),
+          from = sym2SoP $ Not (Hole h1),
+          to = \s -> sub s $ int 1 .-. sym2SoP (Hole h1),
           sideCondition = vacuous
         }
     ]

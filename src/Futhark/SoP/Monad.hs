@@ -330,6 +330,9 @@ type RangeEnv u = Map u (Range u)
 instance (Pretty u) => Pretty (RangeEnv u) where
   pretty = pretty . M.toList
 
+instance (Pretty u, Pretty p) => Pretty (Map u (Set p)) where
+  pretty = pretty . M.toList
+
 -- | The main algebraic environment.
 data AlgEnv u e p = AlgEnv
   { -- | Binds untranslatable PrimExps to fresh symbols.

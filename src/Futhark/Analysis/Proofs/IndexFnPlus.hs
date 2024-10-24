@@ -17,6 +17,7 @@ import Futhark.SoP.SoP (SoP, int2SoP, justConstant, sym2SoP, (.*.), (.+.), (.-.)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (Pretty (pretty), commasep, parens, prettyString, stack, (<+>))
 import Language.Futhark (VName)
+import Futhark.SoP.Monad (addUntrans)
 
 instance Eq Domain where
   -- Since the whole domain must be covered by an index function,
@@ -212,20 +213,3 @@ subst' _ _ _ = undefined
 -------------------------------------------------------------------------------
 -- Index function normalization.
 -------------------------------------------------------------------------------
-normalizeIndexFn :: IndexFn -> IndexFnM IndexFn
-normalizeIndexFn = allCasesAreConstants
-
-allCasesAreConstants :: IndexFn -> IndexFnM IndexFn
-allCasesAreConstants v@(IndexFn _ (Cases ((Bool True, _) NE.:| []))) = pure v
-allCasesAreConstants (IndexFn it (Cases cs))
-  | Just sops <- mapM (justConstant . snd) cs = do
-      let preds = NE.map fst cs
-          sumOfIndicators =
-            SoP.normalize . foldl1 (.+.) . NE.toList $
-              NE.zipWith
-                (\p x -> sym2SoP (Indicator p) .*. int2SoP x)
-                preds
-                sops
-      -- tell ["Using simplification rule: integer-valued cases"]
-      pure $ IndexFn it $ Cases (NE.singleton (Bool True, sumOfIndicators))
-allCasesAreConstants v = pure v

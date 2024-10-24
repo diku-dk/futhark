@@ -18,7 +18,7 @@ import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (Nameable (mkName))
 import Futhark.SoP.SoP (SoP)
-import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
+import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>), viaShow)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 
@@ -53,8 +53,8 @@ instance Pretty IdxSym where
     where
       iversonbrackets = enclose "⟦" "⟧"
       mkPOR [] = error "Illegal!"
-      mkPOR [x] = pretty x
-      mkPOR (x : y : lst) = pretty x <+> "||" <+> mkPOR (y : lst)
+      mkPOR [x] = prettyName x
+      mkPOR (x : y : lst) = prettyName x <+> "||" <+> mkPOR (y : lst)
 
 instance Pretty Symbol where
   pretty symbol = case symbol of
@@ -83,8 +83,14 @@ data MonDir = Inc | IncS | Dec | DecS
 data Property
   = Monotonic MonDir
   | Injective
-  | Indicator
+  | Boolean
+  | -- These symbols are pairwise disjoint, meaning it is not possible
+    -- for more than one to be true at the same time.
+    PairwiseDisjoint (S.Set VName)
   deriving (Show, Eq, Ord)
+
+instance Pretty Property where
+  pretty = viaShow
 
 ---------------------------------
 --- Simple accessor functions ---

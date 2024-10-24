@@ -23,6 +23,9 @@ toSumOfSums i lb ub = foldl1 (.+.) . map (mkSum lb ub) . sopToLists
     mkSum a b ([u], c) | i `S.notMember` fv u =
       -- symbol doesn't depend on iterator.
       mkSum a b ([], c) .*. sym2SoP u
+    -- mkSum a b ([Var j], c) | j == i =
+    --   -- Closed form.
+    --   -- (b * (b-1))/2 - (a * (a -1))/2
     mkSum a b ([u], c) =
       scaleSoP c (sym2SoP $ Sum i a b u)
     mkSum _ _ _ =
@@ -34,7 +37,6 @@ instance FreeVariables Symbol where
     Hole vn -> fv vn
     Idx xs i -> fv xs <> fv i
     Sum i lb ub x -> fv lb <> fv ub <> fv x S.\\ S.singleton i
-    Indicator x -> fv x
     Apply f xs -> fv f <> mconcat (map fv xs)
     Bool _ -> mempty
     Not x -> fv x
@@ -60,7 +62,6 @@ instance Renameable Symbol where
       (xm, vns') <- freshName vns
       let tau' = M.insert xn xm tau
       Sum xm <$> rename_ vns' tau' lb <*> rename_ vns' tau' ub <*> rename_ vns' tau' e
-    Indicator x -> Indicator <$> rename_ vns tau x
     Apply f xs -> Apply <$> rename_ vns tau f <*> rename_ vns tau xs
     Bool x -> pure $ Bool x
     Not x -> neg <$> rename_ vns tau x
@@ -96,7 +97,6 @@ instance Replaceable Symbol Symbol where
       -- from Symbol to SoP Symbol.
       let s' = addRep i (Var i) s
        in toSumOfSums i (rep s' lb) (rep s' ub) (rep s' t)
-    Indicator e -> sym2SoP . Indicator . sop2Symbol $ rep s e
     Apply f xs -> sym2SoP $ Apply (sop2Symbol $ rep s f) (map (rep s) xs)
     Bool x -> sym2SoP $ Bool x
     Not x -> sym2SoP . neg . sop2Symbol $ rep s x
@@ -155,7 +155,6 @@ instance Unify Symbol Symbol where
   unify_ k (Idx xs i) (Idx ys j) = do
     s <- unify_ k xs ys
     (s <>) <$> unify_ k (rep s i) (rep s j)
-  unify_ k (Indicator x) (Indicator y) = unify_ k x y
   unify_ k (Apply f xs) (Apply g ys) = do
     s <- unifies_ k (zip xs ys)
     (s <>) <$> unify_ k (rep s f) (rep s g)

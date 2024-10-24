@@ -1,6 +1,6 @@
 module Futhark.Analysis.Proofs.Convert where
 
-import Control.Monad (foldM, forM, unless)
+import Control.Monad (foldM, forM, unless, when)
 import Control.Monad.RWS
 import Data.Bifunctor
 import Data.List qualified as L
@@ -15,11 +15,13 @@ import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
 import Futhark.Analysis.Proofs.Util (prettyBinding)
 import Futhark.MonadFreshNames (VNameSource, newVName)
-import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP_, negSoP, sym2SoP, (.*.), (.+.), (.-.), (~+~), (~*~), (~-~))
+import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP_, negSoP, sym2SoP, (~+~), (~*~), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 import Futhark.Analysis.Proofs.Unify (unify, Substitution)
+import Futhark.SoP.Monad (addProperty)
+import qualified Futhark.Analysis.Proofs.AlgebraPC.Symbol as Algebra
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -49,6 +51,12 @@ sizeOfTypeBase (E.Array _ shape _)
     convertSize (E.IntLit x _ _) = int2SoP x
     convertSize e = error ("convertSize not implemented for: " <> show e)
 sizeOfTypeBase _ = Nothing
+
+funPrimTypeIsBool :: E.TypeBase E.Exp as -> Bool
+funPrimTypeIsBool (E.Scalar (E.Arrow _ _ _ _ return_type)) =
+  funPrimTypeIsBool (E.retType return_type)
+funPrimTypeIsBool (E.Scalar (E.Prim E.Bool)) = True
+funPrimTypeIsBool _ = False
 
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
@@ -388,6 +396,9 @@ forward expr@(E.AppExp (E.Apply f args _) _)
                         Apply (Var g) (map (sym2SoP . Var) param_names)
                   }
           debugPrettyM "g_fn:" g_fn
+          debugPrettyM2 "g:" g
+          let booltype = funPrimTypeIsBool return_type
+          when booltype $ addProperty (Algebra.Var g) Algebra.Boolean
           foldM substParams g_fn (zip param_names params)
             >>= rewrite
 forward e = error $ "forward on " <> show e

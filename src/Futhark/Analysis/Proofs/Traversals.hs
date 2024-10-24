@@ -32,7 +32,6 @@ instance ASTMappable Symbol Symbol where
   astMap m (Sum vn lb ub x) =
     mapOnSymbol m =<< Sum vn <$> astMap m lb <*> astMap m ub <*> astMap m x
   astMap m (Idx xs i) = mapOnSymbol m =<< Idx <$> astMap m xs <*> astMap m i
-  astMap m (Indicator p) = mapOnSymbol m . Indicator =<< astMap m p
   astMap m (Apply f xs) =
     mapOnSymbol m =<< Apply <$> astMap m f <*> mapM (astMap m) xs
   astMap _ x@(Bool {}) = pure x

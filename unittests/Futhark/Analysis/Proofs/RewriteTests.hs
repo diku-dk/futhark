@@ -63,14 +63,6 @@ tests =
               rewrite (Idx (Var x) (int 0) ~+~ Sum w lb (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (Sum w (int 0) (sVar z) (Idx (Var x) (sVar w))),
-      testCase "Extend sum lower bound (indicator)" $
-        run
-          ( \(x, _, z, w, _, _, _, _) -> do
-              let lb = int 1
-              z `lowerBoundedBy` lb
-              rewrite (Indicator (Idx (Var x) (int 0)) ~+~ Sum w (int 1) (sVar z) (Indicator $ Idx (Var x) (sVar w)))
-          )
-          @??= sym2SoP (Sum w (int 0) (sVar z) (Indicator $ Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound twice" $
         run
           ( \(x, y, z, w, _, _, _, _) -> do
@@ -95,17 +87,7 @@ tests =
               rewrite (Idx (Var x) (sVar z .+. int 1) ~+~ Sum w (sVar y) (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (Sum w (sVar y) (sVar z .+. int 1) (Idx (Var x) (sVar w))),
-      testCase "Extend upper lower bound (indicator)" $
-        run
-          ( \(x, _, z, w, _, _, _, _) -> do
-              z `lowerBoundedBy` int 0
-              rewrite (Indicator (Idx (Var x) (sVar z .+. int 1)) ~+~ Sum w (int 0) (sVar z) (Indicator $ Idx (Var x) (sVar w)))
-          )
-          @??= sym2SoP (Sum w (int 0) (sVar z .+. int 1) (Indicator $ Idx (Var x) (sVar w))),
       testCase "Merge sum-subtraction (no match)" $
-        -- Should fail because we cannot show b <= c without bounds on these variables general.
-        -- Should fail because we cannot show b <= c without bounds on these variables general.
-
         -- Should fail because we cannot show b <= c without bounds on these variables general.
         run
           ( \(x, _, z, w, a, b, c, _) ->
@@ -118,7 +100,6 @@ tests =
       testCase "Merge sum-subtraction (match)" $
         run
           ( \(x, _, z, w, a, b, c, _) -> do
-              debugOn
               addAlgRange b (sVar a) (sVar c)
               rewrite
                 ( Sum w (sVar a) (sVar c) (Idx (Var x) (sVar w))
@@ -167,21 +148,21 @@ tests =
       testCase "Match symbols in SVar" $
         run
           ( \(x, y, z, _, _, _, _, _) ->
-              rewrite (Indicator (Bool True :&& (sVar x :<= sVar y)) ~+~ Var z)
+              rewrite ((Bool True :&& (sVar x :<= sVar y)) ~+~ Var z)
           )
-          @??= (Indicator (sVar x :<= sVar y) ~+~ Var z),
+          @??= ((sVar x :<= sVar y) ~+~ Var z),
       testCase "Match SVars in symbols in SVar" $
         run
           ( \(x, _, _, _, _, _, _, _) ->
-              rewrite (sym2SoP $ Idx (Var x) (sym2SoP $ Indicator (neg (Var x))))
+              rewrite (sym2SoP $ Idx (Var x) (sym2SoP $ (neg (Var x))))
           )
-          @??= sym2SoP (Idx (Var x) (int 1 .-. sym2SoP (Indicator (Var x)))),
+          @??= sym2SoP (Idx (Var x) (int 1 .-. sym2SoP ((Var x)))),
       testCase "[[¬x]] => 1 - [[x]]" $
         run
           ( \(x, _, _, _, _, _, _, _) ->
-              rewrite (sym2SoP $ Indicator (neg (Var x)))
+              rewrite (sym2SoP $ (neg (Var x)))
           )
-          @??= (int 1 .-. sym2SoP (Indicator (Var x))),
+          @??= (int 1 .-. sym2SoP ((Var x))),
       -- Symbol tests.
       testCase ":&& identity (1)" $
         run
@@ -234,9 +215,9 @@ tests =
       testCase "Match subsymbols" $
         run
           ( \(x, y, _, _, _, _, _, _) ->
-              rewrite (Indicator (Bool True :&& (sVar x :<= sVar y)))
+              rewrite ((Bool True :&& (sVar x :<= sVar y)))
           )
-          @??= Indicator (sVar x :<= sVar y),
+          @??= (sVar x :<= sVar y),
       -- Refine tests.
       testCase "Equivalence (1)" $
         run
