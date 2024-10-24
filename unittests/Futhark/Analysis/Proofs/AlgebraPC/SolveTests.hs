@@ -4,7 +4,7 @@ import Control.Monad (unless, forM)
 import Data.Set qualified as S
 import Data.Map qualified as M
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad -- (addEquiv, addRange)
+import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, AlgEnv (..), UntransEnv (..))
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..))
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
@@ -56,6 +56,31 @@ tests =
                        let expo = sVar x .*. sVar y .+. int 3 .*. sVar x .+. int 2 .*. sVar z .+. int 4
                        in  sVar i1 .*. sVar i2 .*. pow2 expo .+. int kk
                    ) [1..num_tests_pow],
+      testCase "Pow2 precise simplification from FFT" $
+        run
+          ( do
+              let sop_tmp = (pow2 (sVar n .-. sVar q) .-. int 1)  .*. pow2 (sVar q) .+. pow2 (sVar q .-. int 1) .-. pow2 (sVar n)
+              simplify sop_tmp
+          )
+          @??= ( pow2 (sVar q .-. int 1) .-. pow2 (sVar q)
+               ),
+      testCase "FFT bounds-check queries" $
+        run
+          ( do
+              addRange (Var q) $ mkRange (int 1) (sVar n)
+              addRange (Var j) $ mkRange (int 0) (pow2 (sVar q .-. int  1) .-. int 1)
+              addRange (Var k) $ mkRange (int 0) (pow2 (sVar n .-. sVar q) .-. int 1)
+              let kLj = sVar k .*. pow2 (sVar q) .+. sVar j
+              succ_lb <- (int 0) FM.$<=$ (kLj)
+              succ_ub1 <- (kLj .+. pow2 (sVar q .-. int 1)) FM.$<$ pow2 (sVar n)
+              succ_ub2 <- kLj FM.$<$ pow2 (sVar n)
+              let rj = sVar j .*. pow2 (sVar n .-. sVar q)
+              succ_rj_lb <- rj FM.$>=$ (int 0)
+              succ_rj_ub <- rj FM.$<$ pow2 (sVar n .-. int 1)
+              pure [succ_lb, succ_ub1, succ_ub2, succ_rj_lb, succ_rj_ub]
+          )
+          @??= [True, True, True, True, True],
+      --
       testCase "Sum subtraction and Peel off (from partition2)" $
         run
           ( do
@@ -108,46 +133,47 @@ tests =
                        in  sum1 .-. sum2 .+. int i
                      ) [1..num_tests_sum_sub]
                ),
-      testCase "Pow2 precise simplification from FFT" $
+
+      testCase "Parition2: I1 Intersect I2 = empty (querry 1)" $
         run
           ( do
-              let sop_tmp = (pow2 (sVar n .-. sVar q) .-. int 1)  .*. pow2 (sVar q) .+. pow2 (sVar q .-. int 1) .-. pow2 (sVar n)
-              simplify sop_tmp
+              addRange (Var  n) $ mkRangeLB (int 0)
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addEquiv (Idx c (sVar i1)) (int 1)
+              addEquiv (Idx c (sVar i2)) (int 0)
+              let sum1 = sym2SoP $ Sum c (sVar i2 .+. int 1) $ sVar n .-. int 1
+                  sum2 = sym2SoP $ Sum c (int 0) $ sVar i1
+              (sum2 .-. int 1) FM.$<$ (sVar i2 .+. sum1)
           )
-          @??= ( pow2 (sVar q .-. int 1) .-. pow2 (sVar q)
-               ),
-      testCase "FFT bounds-check queries" $
+          @??= True,
+      --
+      testCase "Parition2: I1 Intersect I2 = empty (querry 2)" $
         run
           ( do
-              addRange (Var q) $ mkRange (int 1) (sVar n)
-              addRange (Var j) $ mkRange (int 0) (pow2 (sVar q .-. int  1) .-. int 1)
-              addRange (Var k) $ mkRange (int 0) (pow2 (sVar n .-. sVar q) .-. int 1)
-              let kLj = sVar k .*. pow2 (sVar q) .+. sVar j
-              succ_lb <- (int 0) FM.$<=$ (kLj)
-              succ_ub1 <- (kLj .+. pow2 (sVar q .-. int 1)) FM.$<$ pow2 (sVar n)
-              succ_ub2 <- kLj FM.$<$ pow2 (sVar n)            -- fails
-              let rj = sVar j .*. pow2 (sVar n .-. sVar q)
-              succ_rj_lb <- rj FM.$>=$ (int 0)
-              succ_rj_ub <- rj FM.$<$ pow2 (sVar n .-. int 1) -- fails
-              pure [succ_lb, succ_ub1, succ_ub2, succ_rj_lb, succ_rj_ub]
+              addRange (Var  n) $ mkRangeLB (int 0)
+              addRange (Var i2) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i1) $ mkRange (int 0) (sVar i2 .-. int 1)
+              addEquiv (Idx c (sVar i1)) (int 1)
+              addEquiv (Idx c (sVar i2)) (int 0)
+              let sum1 = sym2SoP $ Sum c (sVar i2 .+. int 1) $ sVar n .-. int 1
+                  sum2 = sym2SoP $ Sum c (int 0) $ sVar i1
+              (sum2 .-. int 1) FM.$<$ (sVar i2 .+. sum1)
           )
-          @??= [True, True, True, True, True]
+          @??= True
     ]
   where
     int = int2SoP
     sVar = sym2SoP . Var
     pow2 some_sop = sym2SoP $ Pow (2, some_sop)
-    -- a ~+~ b = sym2SoP a .+. sym2SoP b
-    -- a ~-~ b = sym2SoP a .-. sym2SoP b
 
     env_empty = AlgEnv { untrans = Unknowns M.empty M.empty
                        , equivs  = M.empty
                        , ranges  = M.empty
                        , properties = M.empty
                        }
-
     varsM =
-      (,,,,,,,,)
+      (,,,,,,,,,)
         <$> newVName "x"
         <*> newVName "y"
         <*> newVName "z"
@@ -157,8 +183,9 @@ tests =
         <*> newVName "n"
         <*> newVName "A"
         <*> newVName "B"
-    (x, y, z, i1, i2, i3, n, a0, b0) = runTest varsM env_empty
-    (a, b) = (One a0, One b0)
+        <*> newVName "C"
+    (x, y, z, i1, i2, i3, n, a0, b0, c0) = runTest varsM env_empty
+    (a, b, c) = (One a0, One b0, POR (S.singleton c0))
 
     varsFFT =
       (,,)
