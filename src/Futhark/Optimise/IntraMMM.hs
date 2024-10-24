@@ -158,7 +158,7 @@ mkCopyRegistersShared elmTypeA elmTypeB elmTypeC sizeM sizeN sizeRegs blockSize 
   fName <- fmap (nameFromString . prettyString) $ newName $ VName copyRegistersSharedName 0
 
 --  TODO: use Free or Ext?
-  let sharedOut = [(Array (FloatType Float16) (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])]
+  let sharedOut = [(Array elmTypeC (Shape [Free $ mkInt64Const sizeM, Free $ mkInt64Const sizeN]) Unique, RetAls [] [])]
   pure (CopyRegistersSharedSignature elmTypeC sizeM sizeN sizeRegs blockSize,
       FunDef Nothing mempty fName
           sharedOut
@@ -401,15 +401,19 @@ constantValueMatch :: SubExp -> Maybe Int
 constantValueMatch (Constant (IntValue v)) = Just $ valueIntegral v
 constantValueMatch _ = Nothing
 
--- TODO: return maybe something?
 inBlockKernelBodyMatch :: [VName] -> Names -> KernelBody GPU -> Scope GPU -> Maybe KernelBodyMatch
 -- TODO: support more than 3 dimensions?
 inBlockKernelBodyMatch indexVars@[indexVar1, indexVar2, indexVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) scope = do
   let sTable = ST.insertStms (informStms stms) $ ST.fromScope $ addScopeWisdom scope
---  TODO: allow typecasts for mixed precision
 --  TODO: rename to use A, B, C?
   (resExp, _) <- ST.lookupExp res sTable
-  (mulArg1, mulArg2) <- matchesMul $ removeExpWisdom resExp
+  resWithoutConversion <- case resExp of
+                              BasicOp (ConvOp _ (Var converted)) -> do
+                                (convertedExp, _) <- ST.lookupExp converted sTable
+                                pure convertedExp
+                              notConvertedExp ->
+                                pure notConvertedExp
+  (mulArg1, mulArg2) <- matchesMul $ removeExpWisdom resWithoutConversion
   (mulArg1Exp, _) <- ST.lookupExp mulArg1 sTable
   (mulArg2Exp, _) <- ST.lookupExp mulArg2 sTable
   (arr1, slice1) <- matchesMulArg $ removeExpWisdom mulArg1Exp
