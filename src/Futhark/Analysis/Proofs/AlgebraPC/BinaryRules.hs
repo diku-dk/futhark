@@ -116,9 +116,9 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
       let bidx_m_1 = bidx .-. (int2SoP 1)
           bidx_p_1 = bidx .+. (int2SoP 1)
       case (valid_slice, bidx_m_1 == aidx_end, bidx_p_1 == aidx_beg) of
-        (_True, True, _) ->
+        (True, True, _) ->
           pure $ Just $ mkEquivSoPs (Sum anm aidx_beg bidx, sym1, sym2) (ms1, k1, k1)
-        (_True, _, True) ->
+        (True, _, True) ->
           pure $ Just $ mkEquivSoPs (Sum anm bidx aidx_end, sym1, sym2) (ms1, k1, k1)
         _ -> pure Nothing -- be conservative if slice is not provably non-empty
   -- case 2:
