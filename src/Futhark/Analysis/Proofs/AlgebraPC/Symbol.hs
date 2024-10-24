@@ -26,7 +26,7 @@ data IdxSym
   = -- | one regular name
     One VName
   | -- | represents an OR of index-fun-predicates;
-    --   implicit assumption: set's cardinal >= 2.
+    --   implicit assumption: set's cardinal >= 1.
     POR (S.Set VName)
   deriving (Show, Eq, Ord)
 
@@ -36,6 +36,10 @@ data Symbol
   | -- | `Mdf dir A i1 i2` means `A[i1] - A[i2]` where
     -- `A` is known to be monotonic with direction `dir`
     Mdf MonDir VName (SoP Symbol) (SoP Symbol)
+    -- | Sum(x[lb : ub])
+    --   Question: should it assume as pre-condition that
+    --     ub -lb >= -1, i.e., `x[i : i-1]` is a legal empty
+    --     slice but `x[i : i-2]` is *not*.
   | Sum IdxSym (SoP Symbol) (SoP Symbol)
   | -- | assumes positive base (>1) and exponents (>= 0);
     --   should be verified before construction

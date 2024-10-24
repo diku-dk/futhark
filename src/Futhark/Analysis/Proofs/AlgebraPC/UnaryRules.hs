@@ -31,9 +31,14 @@ simplifyPows ::
   (SoP Symbol  -> m (SoP Symbol)) -> SoP Symbol -> m (SoP Symbol)
 simplifyPows simplifyLevel sop = do
   lst <- mapM simplifyTerm $ M.toList $ getTerms sop
+  pure $ normalize $ SoP $ foldl ff M.empty lst
   -- pure $ SoP $ M.fromList lst   -- BIG BUG!!!
-  pure $ foldl (.+.) (int2SoP 0) $ map (\ (t,i) -> term2SoP t i) lst
+  -- pure $ foldl (.+.) (int2SoP 0) $ map (\ (t,i) -> term2SoP t i) lst
   where
+    ff acc (t,i) =
+      case M.lookup t acc of
+        Nothing -> M.insert t i acc
+        Just j  -> M.insert t (i+j) acc
     -- simplifyTerm :: (Term Symbol, Integer) -> AlgM e (Term Symbol, Integer)
     simplifyTerm (Term mset, k) = do
       let (mset_pows, mset_others) = MS.partition hasPow mset
