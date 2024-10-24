@@ -33,22 +33,29 @@ module Futhark.Fmt.Monad
     sepLoc,
     localLayout,
     localLayoutList,
-    prependComments
+    prependComments,
   )
 where
 
-import Data.Text qualified as T
-import Data.Text.Encoding qualified as T 
+import Control.Monad.Identity (Identity (..))
+import Control.Monad.Reader
+  ( MonadReader (..),
+    ReaderT (..),
+  )
+import Control.Monad.State
+  ( MonadState (..),
+    StateT,
+    evalStateT,
+    gets,
+    modify,
+  )
 import Data.ByteString qualified as BS
+import Data.Loc (Loc (..), Located (..), posCoff, posLine)
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
+import Language.Futhark.Parser.Monad (Comment (..))
 import Prettyprinter qualified as P
 import Prettyprinter.Render.Text (renderStrict)
-import Control.Monad.Identity ( Identity(..) )
-import Control.Monad.Reader
-    ( ReaderT(..), MonadReader(..) )
-import Control.Monad.State
-    ( StateT, gets, modify, MonadState(..), evalStateT )
-import Data.Loc ( Located(..), Loc(..), posLine, posCoff )
-import Language.Futhark.Parser.Monad ( Comment(..) )
 
 -- These are left associative since we want to evaluate the monadic
 -- computation from left to right. Since the left most expression is
@@ -56,10 +63,15 @@ import Language.Futhark.Parser.Monad ( Comment(..) )
 -- printed.
 
 infixl 6 <:>
+
 infixl 6 <+>
+
 infixl 6 </>
+
 infixl 7 <+/>
+
 infixl 4 <|>
+
 infixl 6 <:/>
 
 type Fmt = P.Doc ()
@@ -77,7 +89,7 @@ localLayoutList a m = do
   case lo of
     MultiLine -> local (const $ lineLayoutList a) m
     SingleLine -> m
-  
+
 -- parses comments infront of a and converts a to fmt using formatting function f
 prependComments :: (Located a, Format b) => a -> b -> FmtM Fmt
 prependComments a b = localLayout a $ do
@@ -86,8 +98,9 @@ prependComments a b = localLayout a $ do
   pure $ c <> f
 
 data FmtState = FmtState
-  {comments :: [Comment], -- the comments
-   file :: BS.ByteString} -- The original source file 
+  { comments :: [Comment], -- the comments
+    file :: BS.ByteString -- The original source file
+  }
   deriving (Show, Eq, Ord)
 
 data Layout = MultiLine | SingleLine deriving (Show, Eq)
@@ -100,7 +113,7 @@ class Format a where
 
 instance Format (FmtM Fmt) where
   fmt = id
-  
+
 instance Format Comment where
   fmt = comment . commentText
 
@@ -128,7 +141,7 @@ lineLayout a =
 lineLayoutList :: (Located a) => [a] -> Layout
 lineLayoutList as =
   case concatMap auxiliary as of
-    (t:ts) | any (/=t) ts -> MultiLine
+    (t : ts) | any (/= t) ts -> MultiLine
     _ -> SingleLine
   where
     auxiliary a =
@@ -142,16 +155,16 @@ popComments = do
   modify (\s -> s {comments = []})
   sep nil cs
 
-fmtCopyLoc :: Located a => a -> FmtM Fmt 
+fmtCopyLoc :: (Located a) => a -> FmtM Fmt
 fmtCopyLoc a = do
   f <- gets file
   case locOf a of
     Loc sPos ePos ->
       let sOff = posCoff sPos
           eOff = posCoff ePos
-      in case T.decodeASCII' $ BS.take (eOff-sOff) $ BS.drop sOff f of 
-        Nothing -> undefined -- Should throw an error TODO
-        Just lit -> code lit
+       in case T.decodeASCII' $ BS.take (eOff - sOff) $ BS.drop sOff f of
+            Nothing -> undefined -- Should throw an error TODO
+            Just lit -> code lit
     NoLoc -> undefined -- should throw an error TODO
 
 (<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
@@ -163,8 +176,11 @@ fmtCopyLoc a = do
 runFormat :: FmtM a -> [Comment] -> T.Text -> a
 runFormat format cs file = runIdentity $ evalStateT (runReaderT format e) s
   where
-    s = FmtState {comments = cs,
-                  file = T.encodeUtf8 file }
+    s =
+      FmtState
+        { comments = cs,
+          file = T.encodeUtf8 file
+        }
     e = MultiLine
 
 nil :: FmtM Fmt
@@ -198,15 +214,14 @@ sep s as = aux <$> fmt s <*> mapM fmt as
 sepLoc :: (Format a, Located a) => [a] -> FmtM Fmt
 sepLoc [] = nil
 sepLoc ls
-  | any ((==MultiLine) . lineLayout) ls =
+  | any ((== MultiLine) . lineLayout) ls =
       sep nil $ zipWith3 auxiliary [0 :: Int ..] los ls
   | otherwise = align $ sep line ls
-  where 
+  where
     auxiliary 0 _ x = fmt x
     auxiliary _ SingleLine x = space <:> x
     auxiliary _ MultiLine x = line <:> x
     los = drop (length ls - 1) $ cycle $ lineLayout <$> ls
-    
 
 stdNest :: (Format a) => a -> FmtM Fmt
 stdNest = nest 2
@@ -217,14 +232,14 @@ align a = fmt a <|> (P.align <$> fmt a)
 indent :: (Format a) => Int -> a -> FmtM Fmt
 indent i a = fmt a <|> (P.indent i <$> fmt a)
 
-stdIndent :: Format a => a -> FmtM Fmt
+stdIndent :: (Format a) => a -> FmtM Fmt
 stdIndent = indent 2
 
 code :: T.Text -> FmtM Fmt
 code = pure . P.pretty
 
 brackets :: (Format a) => a -> FmtM Fmt
-brackets a = code "[" <:> fmt a <:> code "]" 
+brackets a = code "[" <:> fmt a <:> code "]"
 
 braces :: (Format a) => a -> FmtM Fmt
 braces a = code "{" <:> fmt a <:> code "}"
@@ -249,10 +264,10 @@ colon = pure P.colon
 
 sepFilter :: (Format a, Format b) => [Bool] -> a -> [b] -> FmtM Fmt
 sepFilter bs s xs =
-  sep s
-  $ map snd
-  $ filter fst
-  $ zip bs xs
+  sep s $
+    map snd $
+      filter fst $
+        zip bs xs
 
 layoutOpts :: P.LayoutOptions
 layoutOpts = P.LayoutOptions P.Unbounded
