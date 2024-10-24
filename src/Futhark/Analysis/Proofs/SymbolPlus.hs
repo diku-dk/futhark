@@ -7,11 +7,26 @@ import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename, rename_), Replaceable (rep), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshName, unifies_)
 import Futhark.MonadFreshNames (MonadFreshNames)
-import Futhark.SoP.SoP (sym2SoP)
+import Futhark.SoP.SoP (SoP, int2SoP, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.), (.*.))
 import Language.Futhark (VName)
 
 getRenamedLinCombBoundVar :: (MonadFreshNames f) => Substitution u -> Symbol -> f (Maybe VName)
 getRenamedLinCombBoundVar s x = getLinCombBoundVar <$> rename (vns s) x
+
+-- Given iterator, lower bound, upper bound and a SoP, create
+-- a sum of linear combinations.
+toSumOfLinComb :: VName -> SoP Symbol -> SoP Symbol -> SoP Symbol -> SoP Symbol
+toSumOfLinComb i lb ub = foldl1 (.+.) . map (mkLinComb lb ub) . sopToLists
+  where
+    mkLinComb a b ([], c) =
+      scaleSoP c (b .-. a .+. int2SoP 1)
+    mkLinComb a b ([u], c) | i `S.notMember` fv u =
+      -- symbol doesn't depend on iterator.
+      mkLinComb a b ([], c) .*. sym2SoP u
+    mkLinComb a b ([u], c) =
+      scaleSoP c (sym2SoP $ LinComb i a b u)
+    mkLinComb _ _ _ =
+      error "SoP is not a linear combination."
 
 instance FreeVariables Symbol where
   fv sym = case sym of

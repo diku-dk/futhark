@@ -1,7 +1,7 @@
 module Futhark.Analysis.Proofs.Symbol where
 
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
-import Futhark.SoP.SoP (SoP, int2SoP, justSym, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.))
+import Futhark.SoP.SoP (SoP, justSym)
 import Futhark.Util.Pretty (Pretty, apply, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName)
 
@@ -44,18 +44,6 @@ sop2Symbol :: (Ord u) => SoP u -> u
 sop2Symbol sop
   | Just t <- justSym sop = t
   | otherwise = error "sop2Symbol on non-symbol"
-
--- Given iterator, lower bound, upper bound and a SoP, create
--- a sum of linear combinations.
-toSumOfLinComb :: VName -> SoP Symbol -> SoP Symbol -> SoP Symbol -> SoP Symbol
-toSumOfLinComb i lb ub = foldl1 (.+.) . map (mkLinComb lb ub) . sopToLists
-  where
-    mkLinComb a b ([], c) =
-      scaleSoP c (b .-. a .+. int2SoP 1)
-    mkLinComb a b ([u], c) =
-      scaleSoP c (sym2SoP $ LinComb i a b u)
-    mkLinComb _ _ _ =
-      error "SoP is not a linear combination."
 
 getLinCombBoundVar :: Symbol -> Maybe VName
 getLinCombBoundVar (LinComb i _ _ _) = Just i
