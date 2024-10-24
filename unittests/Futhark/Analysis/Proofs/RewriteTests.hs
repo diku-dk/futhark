@@ -12,7 +12,7 @@ import Futhark.Analysis.Proofs.Rewrite
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (addEquiv, addRange, mkRange)
+import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, mkRangeUB)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Test.Tasty
@@ -34,54 +34,71 @@ tests =
       testCase "Extend sum lower bound (1)" $
         run
           ( \(x, y, z, w, _, _, _, _) -> do
-              rewrite (Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w)))
+              let lb = sVar y .+. int 1
+              z `lowerBoundedBy` lb
+              rewrite (Idx (Var x) (sVar y) ~+~ LinComb w lb (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound (2)" $
         run
-          ( \(x, y, z, w, _, _, _, _) ->
-              rewrite (Idx (Var x) (sVar y .-. int 1) ~+~ LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)))
+          ( \(x, y, z, w, _, _, _, _) -> do
+              let lb = sVar y
+              z `lowerBoundedBy` lb
+              rewrite (Idx (Var x) (lb .-. int 1) ~+~ LinComb w lb (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (sVar y .-. int 1) (sVar z) (Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound (3)" $
         run
           ( \(x, y, z, w, _, _, _, _) -> do
-              rewrite (Idx (Var x) (sVar y .-. int 1337) ~+~ LinComb w (sVar y .-. int 1336) (sVar z) (Idx (Var x) (sVar w)))
+              let lb = sVar y .-. int 1336
+              z `lowerBoundedBy` lb
+              rewrite (Idx (Var x) (sVar y .-. int 1337) ~+~ LinComb w lb (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (sVar y .-. int 1337) (sVar z) (Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound (4)" $
         run
-          ( \(x, _, z, w, _, _, _, _) ->
-              rewrite (Idx (Var x) (int 0) ~+~ LinComb w (int 1) (sVar z) (Idx (Var x) (sVar w)))
+          ( \(x, _, z, w, _, _, _, _) -> do
+              let lb = int 1
+              z `lowerBoundedBy` lb
+              rewrite (Idx (Var x) (int 0) ~+~ LinComb w lb (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (int 0) (sVar z) (Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound (indicator)" $
         run
-          ( \(x, _, z, w, _, _, _, _) ->
+          ( \(x, _, z, w, _, _, _, _) -> do
+              let lb = int 1
+              z `lowerBoundedBy` lb
               rewrite (Indicator (Idx (Var x) (int 0)) ~+~ LinComb w (int 1) (sVar z) (Indicator $ Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (int 0) (sVar z) (Indicator $ Idx (Var x) (sVar w))),
       testCase "Extend sum lower bound twice" $
         run
-          ( \(x, y, z, w, _, _, _, _) ->
-              rewrite (Idx (Var x) (sVar y .-. int 1) ~+~ Idx (Var x) (sVar y) .+. sym2SoP (LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w))))
+          ( \(x, y, z, w, _, _, _, _) -> do
+              let lb = sVar y .+. int 1
+              z `lowerBoundedBy` lb
+              rewrite (Idx (Var x) (sVar y .-. int 1) ~+~ Idx (Var x) (sVar y) .+. sym2SoP (LinComb w lb (sVar z) (Idx (Var x) (sVar w))))
           )
           @??= sym2SoP (LinComb w (sVar y .-. int 1) (sVar z) (Idx (Var x) (sVar w))),
       testCase "Extend sum upper bound (1)" $
         run
-          ( \(x, y, z, w, _, _, _, _) ->
-              rewrite (Idx (Var x) (sVar z) ~+~ LinComb w (sVar y) (sVar z .-. int 1) (Idx (Var x) (sVar w)))
+          ( \(x, y, z, w, _, _, _, _) -> do
+              let ub = sVar z .-. int 1
+              y `upperBoundedBy` ub
+              rewrite (Idx (Var x) (sVar z) ~+~ LinComb w (sVar y) ub (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w))),
       testCase "Extend sum upper bound (2)" $
         run
-          ( \(x, y, z, w, _, _, _, _) ->
+          ( \(x, y, z, w, _, _, _, _) -> do
+              let ub = sVar z
+              y `upperBoundedBy` ub
               rewrite (Idx (Var x) (sVar z .+. int 1) ~+~ LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (sVar y) (sVar z .+. int 1) (Idx (Var x) (sVar w))),
       testCase "Extend upper lower bound (indicator)" $
         run
-          ( \(x, _, z, w, _, _, _, _) ->
+          ( \(x, _, z, w, _, _, _, _) -> do
+              z `lowerBoundedBy` int 0
               rewrite (Indicator (Idx (Var x) (sVar z .+. int 1)) ~+~ LinComb w (int 0) (sVar z) (Indicator $ Idx (Var x) (sVar w)))
           )
           @??= sym2SoP (LinComb w (int 0) (sVar z .+. int 1) (Indicator $ Idx (Var x) (sVar w))),
@@ -131,14 +148,20 @@ tests =
           @??= sym2SoP (LinComb w (sVar b .+. int 1) (sVar a) (Idx (Var x) (sVar w))),
       testCase "Rule matches on subterms" $
         run
-          ( \(x, y, z, w, _, _, _, _) ->
-              rewrite (int 1 .+. Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w)))
+          ( \(x, y, z, w, _, _, _, _) -> do
+              let lb = sVar y .+. int 1
+              z `lowerBoundedBy` lb
+              rewrite (int 1 .+. Idx (Var x) (sVar y) ~+~ LinComb w lb (sVar z) (Idx (Var x) (sVar w)))
           )
           @??= (int 1 .+. sym2SoP (LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)))),
       testCase "Rule matches on all relevant subterms" $
         run
-          ( \(x, y, z, w, a, b, c, d) ->
-              rewrite (int 1 .+. Idx (Var x) (sVar y) ~+~ LinComb w (sVar y .+. int 1) (sVar z) (Idx (Var x) (sVar w)) .+. Idx (Var a) (sVar b) ~+~ LinComb d (sVar b .+. int 1) (sVar c) (Idx (Var a) (sVar d)))
+          ( \(x, y, z, w, a, b, c, d) -> do
+              let lb = sVar y .+. int 1
+              z `lowerBoundedBy` lb
+              let lb2 = sVar b .+. int 1
+              c `lowerBoundedBy` lb2
+              rewrite (int 1 .+. Idx (Var x) (sVar y) ~+~ LinComb w lb (sVar z) (Idx (Var x) (sVar w)) .+. Idx (Var a) (sVar b) ~+~ LinComb d lb2 (sVar c) (Idx (Var a) (sVar d)))
           )
           @??= (int 1 .+. LinComb w (sVar y) (sVar z) (Idx (Var x) (sVar w)) ~+~ LinComb d (sVar b) (sVar c) (Idx (Var a) (sVar d))),
       testCase "Match symbols in SVar" $
@@ -478,6 +501,14 @@ tests =
         msg actual expected =
           docString $
             "expected:" <+> pretty expected <> line <> "but got: " <+> pretty actual
+
+    vn `lowerBoundedBy` x = do
+      a <- toAlgebra x
+      addRange (Algebra.Var vn) (mkRangeLB a)
+
+    vn `upperBoundedBy` x = do
+      a <- toAlgebra x
+      addRange (Algebra.Var vn) (mkRangeUB a)
 
     addAlgRange vn x y = do
       a <- toAlgebra x
