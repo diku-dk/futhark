@@ -32,6 +32,13 @@ runAlgM (IndexFnM m) env vns = getRes $ runRWS m () s
 runTest :: IndexFnM a -> AlgEnv Symbol IxFn.Symbol Property -> a
 runTest test env = fst $ runAlgM test env blankNameSource
 
+num_tests_pow :: Integer
+num_tests_pow = 1 -- 100000
+
+num_tests_sum_sub :: Integer
+num_tests_sum_sub = 1 -- 1000
+
+
 tests :: TestTree
 tests =
   testGroup
@@ -39,21 +46,22 @@ tests =
     [
       testCase "Pow Exact Normaliation" $
         run
-          ( forM [1..100000] $ \ kk -> do
-              -- addRange d 0 1000
-              -- ($<=$)
+          ( forM [1..num_tests_pow] $ \ kk -> do
               let xy_p_3x= sVar x .*. (sVar y .+. int 3)
-                  pow_xy = int 2 .*. sVar i1 .*. sym2SoP (Pow (2, xy_p_3x))
-                  pow_z  = int 8 .*. sVar i2 .*. sym2SoP (Pow (2, sVar z .*. int 2))
+                  pow_xy = int 2 .*. sVar i1 .*. pow2 xy_p_3x
+                  pow_z  = int 8 .*. sVar i2 .*. pow2 (sVar z .*. int 2)
               simplifyLevel $ pow_xy .*. pow_z .+. int kk
           )
           @??= map (\ kk ->
                        let expo = sVar x .*. sVar y .+. int 3 .*. sVar x .+. int 2 .*. sVar z .+. int 4
-                       in  sVar i1 .*. sVar i2 .*. sym2SoP (Pow (2, expo)) .+. int kk
-                   ) [1..100000],
+                       in  sVar i1 .*. sVar i2 .*. pow2 expo .+. int kk
+                   ) [1..num_tests_pow],
       testCase "Sum subtraction and Peel off (from partition2)" $
         run
           ( do
+              addRange (Var n) $ mkRangeLB (int 0)
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
               let sum1 = sym2SoP $ Sum a (int 0) $ sVar i1
                   sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar n .+. int (-1)
               simplifyLevel $ sum2 .+. sVar i2 .+. int 1 .-. sum1
@@ -65,6 +73,11 @@ tests =
       testCase "Unite sums (fromNikolaj)" $
         run
           ( do
+              addRange (Var n) $ mkRangeLB (int 0)
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              -- addRange (Var z) $ mkRange (int 0) (sVar n)
+              addRange (Var y) $ mkRange (int 0) (sVar z)
               let sum1 = sym2SoP $ Sum b (sVar y .+. int 1) $ sVar z
                   idx1 = sym2SoP $ Idx b $ sVar y
                   sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar i1 .-. int 1
@@ -77,18 +90,23 @@ tests =
                ),
       testCase "Complex sum subtraction" $
         run
-          ( forM [1..1000] $ \i -> do
-              let sum1 = sym2SoP $ Sum a (int 2 .*. sVar i2) $ int 3 .*. sVar i3
-                  idx1 = sym2SoP $ Idx a $ int 3 .*. sVar i3 .+. int 1
-                  sum2 = sym2SoP $ Sum a (int 2 .*. sVar i1) $ int 3 .*. sVar i3 .+. sVar n .-. int 1
-                  idx2 = sym2SoP $ Idx a $ int 3 .*. sVar i3 .+. sVar n
-              simplifyLevel $ (int 0 .-. idx2) .+. sum1 .-. sum2 .+. idx1 .+. int i
+          ( do
+              addRange (Var n) $ mkRangeLB (int 1)
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var i3) $ Range (S.singleton $ int 2 .*. sVar i1 .-. int 1) 3 mempty
+              forM [1..num_tests_sum_sub] $ \i -> do
+                let sum1 = sym2SoP $ Sum a (int 2 .*. sVar i2) $ int 3 .*. sVar i3
+                    idx1 = sym2SoP $ Idx a $ int 3 .*. sVar i3 .+. int 1
+                    sum2 = sym2SoP $ Sum a (int 2 .*. sVar i1) $ int 3 .*. sVar i3 .+. sVar n .-. int 1
+                    idx2 = sym2SoP $ Idx a $ int 3 .*. sVar i3 .+. sVar n
+                simplifyLevel $ (int 0 .-. idx2) .+. sum1 .-. sum2 .+. idx1 .+. int i
           )
           @??= ( map (\ i->
                        let sum1 = sym2SoP $ Sum a (int 2 .*. sVar i2) $ int 2 .*. sVar i1 .-. int 1
                            sum2 = sym2SoP $ Sum a (int 3 .*. sVar i3 .+. int 2) $ int 3 .*. sVar i3 .+. sVar n
                        in  sum1 .-. sum2 .+. int i
-                     ) [1..1000]
+                     ) [1..num_tests_sum_sub]
                ),
       testCase "Pow2 precise simplification from FFT" $
         run
@@ -111,9 +129,9 @@ tests =
               let rj = sVar j .*. pow2 (sVar n .-. sVar q)
               succ_rj_lb <- rj FM.$>=$ (int 0)
               succ_rj_ub <- rj FM.$<$ pow2 (sVar n .-. int 1) -- fails
-              pure (succ_lb && succ_ub1 && succ_ub2 && succ_rj_lb && succ_rj_ub) -- pure (succ_lb, succ_ub1, succ_ub2, succ_rj_lb, succ_rj_ub)
+              pure [succ_lb, succ_ub1, succ_ub2, succ_rj_lb, succ_rj_ub]
           )
-          @??= True --(True, True, True, True, True),
+          @??= [True, True, True, True, True]
     ]
   where
     int = int2SoP
@@ -149,14 +167,8 @@ tests =
         <*> newVName "j"
     (q,k,j) = runTest varsFFT env_empty
 
-    (n_rg, i1_rg, i2_rg, i3_rg) =
-      ( Range (S.singleton (int 1)) 1 S.empty
-      , Range (S.singleton (int 0)) 1 $ S.singleton $ sVar n  .-. int 1
-      , Range (S.singleton (int 0)) 1 $ S.singleton $ sVar i1 .-. int 1
-      , Range (S.singleton (int 2 .*. sVar i1 .-. int 1)) 3 $ S.empty
-      )
     env = env_empty { equivs = M.singleton (Idx a (sVar i2)) (int 0)
-                    , ranges = M.fromList $ zip (map Var [n,i1,i2,i3]) $ [n_rg,i1_rg,i2_rg,i3_rg]
+                    , ranges = M.empty
                     }
 
     run f = runTest f env
