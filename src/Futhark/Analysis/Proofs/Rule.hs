@@ -6,7 +6,7 @@ import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..)
 import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn, unifyIndexFnWith)
 import Futhark.Analysis.Proofs.Monad (IndexFnM)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
-import Futhark.Analysis.Proofs.SymbolPlus (repVName, toSumOfLinComb)
+import Futhark.Analysis.Proofs.SymbolPlus (repVName, toSumOfSums)
 import Futhark.Analysis.Proofs.Unify (Replaceable (rep), Substitution (mapping), Unify (unify), mkRep, renameAnd, sub, unifies, unifies_)
 import Futhark.Analysis.Proofs.Util (allocateTerms)
 import Futhark.MonadFreshNames (newVName)
@@ -214,7 +214,7 @@ rulesIndexFn = do
               let e1_b = rep (mkRep iter b') e1
               e2 <- sub s (hole h2)
               let e2_j = rep (mkRep iter (sym2SoP $ Var j)) e2
-              let e2_sum = toSumOfLinComb j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
+              let e2_sum = toSumOfSums j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
               pure $
                 IndexFn
                   { iterator = Forall i (Iota (hole n)),
@@ -245,7 +245,7 @@ rulesIndexFn = do
               let e1_b = rep (mkRep iter b') e1
               e2 <- sub s (hole h2)
               let e2_j = rep (mkRep iter (sym2SoP $ Var j)) e2
-              let e2_sum = toSumOfLinComb j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
+              let e2_sum = toSumOfSums j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
               pure $
                 IndexFn
                   { iterator = Forall i (Iota (hole n)),

@@ -55,7 +55,7 @@ fromAlgebra_ (Algebra.Sum (Algebra.One vn) lb ub) = do
   x <- lookupUntransSymUnsafe vn
   j <- newVName "j"
   xj <- repHoles x (sym2SoP $ Var j)
-  pure . sym2SoP $ LinComb j a b xj
+  pure . sym2SoP $ Sum j a b xj
 fromAlgebra_ (Algebra.Sum (Algebra.POR vns) lb ub) = do
   -- Sum (POR {x,y}) a b = Sum x a b + Sum y a b
   foldr1 (.+.)
@@ -113,7 +113,7 @@ handleQuantifiers :: (ASTMappable Symbol b) => b -> IndexFnM b
 handleQuantifiers = astMap m
   where
     m = ASTMapper {mapOnSymbol = handleQuant, mapOnSoP = pure}
-    handleQuant p@(LinComb j _ _ x) = do
+    handleQuant p@(Sum j _ _ x) = do
       res <- search x
       case res of
         Just _ -> pure p
@@ -156,7 +156,7 @@ search x = do
 toAlgebra_ :: Symbol -> IndexFnM Algebra.Symbol
 toAlgebra_ (Var x) = pure $ Algebra.Var x
 toAlgebra_ (Hole _) = undefined
-toAlgebra_ (LinComb _ lb ub x) = do
+toAlgebra_ (Sum _ lb ub x) = do
   res <- search x
   case res of
     Just (vn, _) -> do

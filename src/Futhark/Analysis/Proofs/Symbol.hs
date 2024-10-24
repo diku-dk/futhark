@@ -11,7 +11,7 @@ data Symbol
   | Idx
       Symbol -- array
       (SoP Symbol) -- index
-  | LinComb
+  | Sum
       VName -- binder
       (SoP Symbol) -- lower bound
       (SoP Symbol) -- upper bound
@@ -45,9 +45,9 @@ sop2Symbol sop
   | Just t <- justSym sop = t
   | otherwise = error "sop2Symbol on non-symbol"
 
-getLinCombBoundVar :: Symbol -> Maybe VName
-getLinCombBoundVar (LinComb i _ _ _) = Just i
-getLinCombBoundVar _ = Nothing
+getSumBoundVar :: Symbol -> Maybe VName
+getSumBoundVar (Sum i _ _ _) = Just i
+getSumBoundVar _ = Nothing
 
 toDNF :: Symbol -> Symbol
 toDNF (a :&& (b :|| c)) = toDNF (a :&& b) :|| toDNF (a :&& c)
@@ -102,7 +102,7 @@ instance Pretty Symbol where
     (Var x) -> prettyName x
     (Hole x) -> prettyHole x
     (Idx x i) -> autoParens x <> brackets (pretty i)
-    (LinComb i lb ub e) ->
+    (Sum i lb ub e) ->
       "∑"
         <> prettyName i
         <> "∈"

@@ -77,7 +77,7 @@ tests =
                   cases
                     [ ( Bool True,
                         sym2SoP $
-                          LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j)))
+                          Sum j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j)))
                       )
                     ]
               }
@@ -90,7 +90,7 @@ tests =
                 body =
                   cases
                     [ ( Bool True,
-                        int2SoP 1 .+. sHole i .-. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j))))
+                        int2SoP 1 .+. sHole i .-. sym2SoP (Sum j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j))))
                       )
                     ]
               }
@@ -104,7 +104,7 @@ tests =
                   cases
                     [ ( Bool True,
                         sym2SoP $
-                          LinComb j (int2SoP 0) (sHole n .-. int2SoP 1) (Indicator (Idx (Hole xs) (sHole j)))
+                          Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (Indicator (Idx (Hole xs) (sHole j)))
                       )
                     ]
               }
@@ -118,10 +118,10 @@ tests =
                     body =
                       cases
                         [ ( xs_i,
-                            int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j))))
+                            int2SoP (-1) .+. sym2SoP (Sum j (int2SoP 0) (sHole i) (Indicator (Idx (Hole xs) (sHole j))))
                           ),
                           ( neg xs_i,
-                            sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (Idx (Hole xs) (sHole j))))
+                            sHole i .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (Idx (Hole xs) (sHole j))))
                           )
                         ]
                   }
@@ -146,10 +146,10 @@ tests =
                     body =
                       cases
                         [ ( xs_i :== int2SoP 1,
-                            int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (xs_j :== int2SoP 1)))
+                            int2SoP (-1) .+. sym2SoP (Sum j (int2SoP 0) (sHole i) (Indicator (xs_j :== int2SoP 1)))
                           ),
                           ( xs_i :/= int2SoP 1,
-                            sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (xs_j :== int2SoP 1)))
+                            sHole i .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (xs_j :== int2SoP 1)))
                           )
                         ]
                   }
@@ -164,10 +164,10 @@ tests =
                     body =
                       cases
                         [ ( xs_i,
-                            int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator xs_j))
+                            int2SoP (-1) .+. sym2SoP (Sum j (int2SoP 0) (sHole i) (Indicator xs_j))
                           ),
                           ( neg xs_i,
-                            sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator xs_j))
+                            sHole i .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator xs_j))
                           )
                         ]
                   }
@@ -182,10 +182,10 @@ tests =
                     body =
                       cases
                         [ ( xs_i,
-                            int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator xs_j))
+                            int2SoP (-1) .+. sym2SoP (Sum j (int2SoP 0) (sHole i) (Indicator xs_j))
                           ),
                           ( neg xs_i,
-                            sHole i .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator xs_j))
+                            sHole i .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator xs_j))
                           )
                         ]
                   }
@@ -201,16 +201,16 @@ tests =
                       cases
                         [ ( (cs_i :/= int2SoP 1) :&& (cs_i :== int2SoP 2),
                             int2SoP (-1)
-                              .+. sym2SoP (LinComb j (int2SoP 0) (sHole n .-. int2SoP 1) (Indicator (cs_j :== int2SoP 1)))
-                              .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (cs_j :== int2SoP 2)))
+                              .+. sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (Indicator (cs_j :== int2SoP 1)))
+                              .+. sym2SoP (Sum j (int2SoP 0) (sHole i) (Indicator (cs_j :== int2SoP 2)))
                           ),
                           ( (cs_i :== int2SoP 1) :&& (cs_i :/= int2SoP 2),
-                            int2SoP (-1) .+. sym2SoP (LinComb j (int2SoP 0) (sHole i) (Indicator (cs_j :== int2SoP 1)))
+                            int2SoP (-1) .+. sym2SoP (Sum j (int2SoP 0) (sHole i) (Indicator (cs_j :== int2SoP 1)))
                           ),
                           ( (cs_i :/= int2SoP 1) :&& (cs_i :/= int2SoP 2),
                             sHole i
-                              .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (cs_j :== int2SoP 1)))
-                              .+. sym2SoP (LinComb j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (cs_j :== int2SoP 2)))
+                              .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (cs_j :== int2SoP 1)))
+                              .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Indicator (cs_j :== int2SoP 2)))
                           )
                         ]
                   }

@@ -29,8 +29,8 @@ instance ASTMappable Symbol Symbol where
   astMap _ Recurrence = pure Recurrence
   astMap m (Var x) = mapOnSymbol m $ Var x
   astMap m (Hole x) = mapOnSymbol m $ Hole x
-  astMap m (LinComb vn lb ub x) =
-    mapOnSymbol m =<< LinComb vn <$> astMap m lb <*> astMap m ub <*> astMap m x
+  astMap m (Sum vn lb ub x) =
+    mapOnSymbol m =<< Sum vn <$> astMap m lb <*> astMap m ub <*> astMap m x
   astMap m (Idx xs i) = mapOnSymbol m =<< Idx <$> astMap m xs <*> astMap m i
   astMap m (Indicator p) = mapOnSymbol m . Indicator =<< astMap m p
   astMap m (Apply f xs) =

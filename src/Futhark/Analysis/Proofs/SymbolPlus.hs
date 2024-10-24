@@ -10,22 +10,22 @@ import Futhark.MonadFreshNames (MonadFreshNames)
 import Futhark.SoP.SoP (SoP, int2SoP, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.), (.*.))
 import Language.Futhark (VName)
 
-getRenamedLinCombBoundVar :: (MonadFreshNames f) => Substitution u -> Symbol -> f (Maybe VName)
-getRenamedLinCombBoundVar s x = getLinCombBoundVar <$> rename (vns s) x
+getRenamedSumBoundVar :: (MonadFreshNames f) => Substitution u -> Symbol -> f (Maybe VName)
+getRenamedSumBoundVar s x = getSumBoundVar <$> rename (vns s) x
 
 -- Given iterator, lower bound, upper bound and a SoP, create
--- a sum of linear combinations.
-toSumOfLinComb :: VName -> SoP Symbol -> SoP Symbol -> SoP Symbol -> SoP Symbol
-toSumOfLinComb i lb ub = foldl1 (.+.) . map (mkLinComb lb ub) . sopToLists
+-- a linear combination of sums.
+toSumOfSums :: VName -> SoP Symbol -> SoP Symbol -> SoP Symbol -> SoP Symbol
+toSumOfSums i lb ub = foldl1 (.+.) . map (mkSum lb ub) . sopToLists
   where
-    mkLinComb a b ([], c) =
+    mkSum a b ([], c) =
       scaleSoP c (b .-. a .+. int2SoP 1)
-    mkLinComb a b ([u], c) | i `S.notMember` fv u =
+    mkSum a b ([u], c) | i `S.notMember` fv u =
       -- symbol doesn't depend on iterator.
-      mkLinComb a b ([], c) .*. sym2SoP u
-    mkLinComb a b ([u], c) =
-      scaleSoP c (sym2SoP $ LinComb i a b u)
-    mkLinComb _ _ _ =
+      mkSum a b ([], c) .*. sym2SoP u
+    mkSum a b ([u], c) =
+      scaleSoP c (sym2SoP $ Sum i a b u)
+    mkSum _ _ _ =
       error "SoP is not a linear combination."
 
 instance FreeVariables Symbol where
@@ -33,7 +33,7 @@ instance FreeVariables Symbol where
     Var vn -> fv vn
     Hole vn -> fv vn
     Idx xs i -> fv xs <> fv i
-    LinComb i lb ub x -> fv lb <> fv ub <> fv x S.\\ S.singleton i
+    Sum i lb ub x -> fv lb <> fv ub <> fv x S.\\ S.singleton i
     Indicator x -> fv x
     Apply f xs -> fv f <> mconcat (map fv xs)
     Bool _ -> mempty
@@ -56,10 +56,10 @@ instance Renameable Symbol where
       -- The Hole might be a quantifier index.
       pure $ if x' /= x then Var x' else Hole x'
     Idx xs i -> Idx <$> rename_ vns tau xs <*> rename_ vns tau i
-    LinComb xn lb ub e -> do
+    Sum xn lb ub e -> do
       (xm, vns') <- freshName vns
       let tau' = M.insert xn xm tau
-      LinComb xm <$> rename_ vns' tau' lb <*> rename_ vns' tau' ub <*> rename_ vns' tau' e
+      Sum xm <$> rename_ vns' tau' lb <*> rename_ vns' tau' ub <*> rename_ vns' tau' e
     Indicator x -> Indicator <$> rename_ vns tau x
     Apply f xs -> Apply <$> rename_ vns tau f <*> rename_ vns tau xs
     Bool x -> pure $ Bool x
@@ -91,11 +91,11 @@ instance Replaceable Symbol Symbol where
     Hole x -> M.findWithDefault (sym2SoP $ Hole x) x s
     Idx xs i ->
       sym2SoP $ Idx (sop2Symbol $ rep s xs) (rep s i)
-    LinComb i lb ub t ->
-      -- NOTE we can avoid this rewrite here if we change the LinComb expression
+    Sum i lb ub t ->
+      -- NOTE we can avoid this rewrite here if we change the Sum expression
       -- from Symbol to SoP Symbol.
       let s' = addRep i (Var i) s
-       in toSumOfLinComb i (rep s' lb) (rep s' ub) (rep s' t)
+       in toSumOfSums i (rep s' lb) (rep s' ub) (rep s' t)
     Indicator e -> sym2SoP . Indicator . sop2Symbol $ rep s e
     Apply f xs -> sym2SoP $ Apply (sop2Symbol $ rep s f) (map (rep s) xs)
     Bool x -> sym2SoP $ Bool x
@@ -147,7 +147,7 @@ instance Unify Symbol Symbol where
     where
       fvs = fv t
   -- 3.b
-  unify_ k (LinComb _ a1 b1 e1) (LinComb _ a2 b2 e2) = do
+  unify_ k (Sum _ a1 b1 e1) (Sum _ a2 b2 e2) = do
     s1 <- unify_ k a1 a2
     s2 <- unify_ k (rep s1 b1) (rep s1 b2)
     s3 <- unify_ k (rep (s1 <> s2) e1) (rep (s1 <> s2) e2)

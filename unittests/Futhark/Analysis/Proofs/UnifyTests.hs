@@ -102,27 +102,27 @@ tests =
       testCase "Bound names are not substituted" $
         run
           ( \(x, y, z, w, a, b, c, d, _) ->
-              unify (LinComb x (hole y) (hole z) (Hole w)) (LinComb a (name2SoP b) (name2SoP c) (Var d))
+              unify (Sum x (hole y) (hole z) (Hole w)) (Sum a (name2SoP b) (name2SoP c) (Var d))
           )
           @??= y2b_z2c_w2d,
       testCase "Bound names are renamed" $
         run
           ( \(x, _, _, _, a, b, c, d, _) ->
-              unify (Hole x) (LinComb a (name2SoP b) (name2SoP c) (Var d))
+              unify (Hole x) (Sum a (name2SoP b) (name2SoP c) (Var d))
           )
           @??= let renamed_lin_comb = getValue $ do
                      (_, _, _, _, a, b, c, d, _) <- varsM
                      _ <- newVName "k" -- Simulate "k" introduced by Unify.
                      vns <- getNameSource
-                     rename vns $ sym2SoP (LinComb a (name2SoP b) (name2SoP c) (Var d))
+                     rename vns $ sym2SoP (Sum a (name2SoP b) (name2SoP c) (Var d))
                 in Just (mkSub x renamed_lin_comb),
       testCase "These shouldn't unify because w is different from a!" $
         -- Pattern should require `Idx (Var c) (Var a)`.
         run
           ( \(x, y, z, w, a, b, c, d, _) ->
               unify
-                (Idx (Hole z) (hole x) ~+~ LinComb d (hole x) (hole y) (Hole z))
-                (Idx (Var c) (name2SoP w) ~+~ LinComb d (name2SoP a) (name2SoP b) (Var c))
+                (Idx (Hole z) (hole x) ~+~ Sum d (hole x) (hole y) (Hole z))
+                (Idx (Var c) (name2SoP w) ~+~ Sum d (name2SoP a) (name2SoP b) (Var c))
           )
           @??= Nothing,
       -- TODO This test shouldn't be allowed since we assume VNames in first argument are holes?
