@@ -96,10 +96,7 @@ instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = prependComments loc $ fmtQualName v
   fmt (TETuple ts loc) =
     prependComments loc $ parens $ sep (code "," <:> space <|> line <:> code ",") ts
-  fmt (TEParens te loc) = prependComments loc (single <|> multi)
-    where
-      single = parens te
-      multi = single -- not sure this is correct
+  fmt (TEParens te loc) = prependComments loc $ parens te -- not sure this is correct
   fmt (TERecord fs loc) =
     prependComments loc $ braces $ sep (code "," <:> space <|> line <:> code ",") fields
     where
@@ -111,7 +108,7 @@ instance Format UncheckedTypeExp where
   fmt (TEApply te tArgE loc) = prependComments loc  $ te <+> tArgE -- not sure if this can be multi lin
   -- this is "->"
   fmt (TEArrow name te0 te1 loc) =
-    prependComments loc $ fmtParamType name te0 <+> code "->" </> stdIndent te1
+    prependComments loc $ fmtParamType name te0 <+> code "->" <:+/> softStdIndent te1
   -- This should be "|"
   fmt (TESum tes loc) =
     prependComments loc
@@ -134,9 +131,9 @@ instance Format UncheckedTypeBind where
     <:> l
     <+> fmtName name
     <:> (if null ps then nil else space)
-    <:> localLayoutList ps (align $ sep line ps)
+    <:> localLayoutList ps (align $ sep softline ps)
     <+> code "="
-    </> stdIndent e
+    <:+/> softStdIndent e
 
 instance Format (AttrAtom a) where
   fmt (AtomName name) = fmtName name
@@ -177,12 +174,12 @@ instance Format (UncheckedPat t) where
   fmt (PatLit _e _ loc) = prependComments loc $ fmtCopyLoc loc
   fmt (PatConstr n _ pats loc) =
     prependComments loc
-    $ code "#" <:> fmtName n </> align (sep line pats)
+    $ code "#" <:> fmtName n <:+/> align (sep softline pats)
   fmt (PatAttr attr pat loc) = prependComments loc $ attr <+> pat
 
 instance Format (FieldBase NoInfo Name) where
   fmt (RecordFieldExplicit name e loc) =
-    prependComments loc $ fmtName name <+> code "=" </> stdIndent e
+    prependComments loc $ fmtName name <+> code "=" <:+/> softStdIndent e
   fmt (RecordFieldImplicit name _ loc) = prependComments loc $ fmtName name
 
 instance Format PrimValue where
@@ -256,19 +253,19 @@ instance Format UncheckedExp where
   fmt (Not e loc) = prependComments loc $ code "!" <:> e
   fmt (Update src idxs ve loc) =
     prependComments loc
-    $ src <+> code "with" <+> idxs' <+> stdNest (code "=" </> ve)
+    $ src <+> code "with" <+> idxs' <+> stdNest (code "=" <:+/> ve)
     where
       idxs' = brackets $ sep (code "," <:> space) idxs -- This could account for multiline.
   fmt (RecordUpdate src fs ve _ loc) =
     prependComments loc
-    $ src <+> code "with" <+> fs' <+> stdNest (code "=" </> ve)
+    $ src <+> code "with" <+> fs' <+> stdNest (code "=" <:+/> ve)
     where
       fs' = sep (code ".") $ fmtName <$> fs -- This could account for multiline.
   fmt (Assert e1 e2 _ loc) =
     prependComments loc $ code "assert" <+> e1 <+> e2
   fmt (Lambda params body rettype _ loc) =
     prependComments loc
-    $ code "\\" <:> sep space params <:> ascript <+> stdNest (code "->" </> body)
+    $ code "\\" <:> sep space params <:> ascript <+> stdNest (code "->" <:+/> body)
     where
       ascript = maybe nil (code ": " <:>) rettype
   fmt (OpSection binop _ loc) = prependComments loc $
@@ -286,8 +283,8 @@ instance Format UncheckedExp where
     where
       idxs' = brackets $ sep (code "," <:> space) idxs
   fmt (Constr n cs _ loc) =
-    prependComments loc $ code "#" <:> fmtName n <+> align (sep line cs)
-  fmt (Attr attr e loc) = prependComments loc $ align (attr </> e)
+    prependComments loc $ code "#" <:> fmtName n <+> align (sep softline cs)
+  fmt (Attr attr e loc) = prependComments loc $ align (attr <:+/> e)
   fmt (AppExp e _) = fmt e
 
 -- | This should always be simplified by location.
@@ -303,7 +300,7 @@ fmtQualName (QualName names name)
 
 instance Format UncheckedCase where
   fmt (CasePat p e loc) =
-    prependComments loc $ code "case" <+> p <+> code "->" </> stdIndent e
+    prependComments loc $ code "case" <+> p <+> code "->" <:+/> softStdIndent e
 
 -- matchPat (TuplePat _pats _paramt) _exp = undefined
 -- matchPat (RecordPat _namePats _loc) _exp = undefined
@@ -317,9 +314,9 @@ instance Format UncheckedCase where
 
 instance Format (AppExpBase NoInfo Name) where
   fmt (BinOp (bop, _) _ (x, _) (y, _) loc) =
-    prependComments loc $ x </> fmtBinOp bop <+> y
+    prependComments loc $ x <:+/> fmtBinOp bop <+> y
   fmt (Match e cs loc) =
-    prependComments loc $ code "match" <+> e </> sep line (toList cs)
+    prependComments loc $ code "match" <+> e <:+/> sep softline (toList cs)
   -- should omit the initial value expression
   -- need some way to catch when the value expression match the pattern
   fmt (Loop sizeparams pat (LoopInitImplicit NoInfo) form loopbody loc) =
@@ -329,7 +326,7 @@ instance Format (AppExpBase NoInfo Name) where
       )
     <+> form
     <+> code "do"
-    </> stdIndent loopbody
+    <:+/> softStdIndent loopbody
     where
       op = if null sizeparams then (<:>) else (<+>)
       sizeparams' = sep nil $ brackets . fmtName . toName <$> sizeparams
@@ -342,7 +339,7 @@ instance Format (AppExpBase NoInfo Name) where
     <+/> initexp
     <+> form
     <+> code "do"
-    </> stdIndent loopbody
+    <:+/> softStdIndent loopbody
     where
       op = if null sizeparams then (<:>) else (<+>)
       sizeparams' = sep nil $ brackets . fmtName . toName <$> sizeparams
@@ -358,7 +355,7 @@ instance Format (AppExpBase NoInfo Name) where
         <+> code "="
       )
     <+/> e
-    </> letBody body
+    <:+/> letBody body
     where
       sizes' = sep nil sizes
   fmt (LetFun fname (tparams, params, retdecl, _, e) body loc) =
@@ -371,7 +368,7 @@ instance Format (AppExpBase NoInfo Name) where
         <:> code "="
       )
     <+/> e
-    </> letBody body
+    <:+/> letBody body
     where
       tparams' = sep space tparams
       params' = sep space params
@@ -389,7 +386,7 @@ instance Format (AppExpBase NoInfo Name) where
           <+> code "="
         )
       <+/> ve
-      </> letBody body
+      <:+/> letBody body
     | otherwise =
       prependComments loc
       $ ( code "let"
@@ -400,7 +397,7 @@ instance Format (AppExpBase NoInfo Name) where
           <+> idxs'
         )
       <+/> ve
-      </> letBody body
+      <:+/> letBody body
     where
       idxs' = brackets $ sep (code ", ") idxs
   fmt (Range start maybe_step end loc) =
@@ -418,9 +415,9 @@ instance Format (AppExpBase NoInfo Name) where
     $ code "if"
     <+> c
     <+> code "then"
-    </> stdIndent t
-    </> code "else"
-    </> stdIndent f
+    <:+/> softStdIndent t
+    <:+/> code "else"
+    <:+/> softStdIndent f
   fmt (Apply f args loc) =
     prependComments loc
     $ f <+> align fmt_args
@@ -467,11 +464,11 @@ instance Format UncheckedValBind where
     <:> sub
     <:> retdecl'
     <:> code "="
-    </> stdIndent body
+    <:+/> softStdIndent body
     where
       attrs' = sep space attrs
-      tparams' = localLayoutList tparams $ align $ sep line tparams
-      args' = localLayoutList args $ align $ sep line args
+      tparams' = localLayoutList tparams $ align $ sep softline tparams
+      args' = localLayoutList args $ align $ sep softline args
       retdecl' =
         case retdecl of
           Just a -> code ":" <+> a <:> space
@@ -492,10 +489,10 @@ instance Format UncheckedSpec where
   fmt (TypeAbbrSpec tpsig) = fmt tpsig
   fmt (TypeSpec l name ps doc loc) =
     prependComments loc
-    $ doc <:> code "type" <+> l <:> fmtName name <+> align (sep line ps)
+    $ doc <:> code "type" <+> l <:> fmtName name <+> align (sep softline ps)
   fmt (ValSpec name ps te _ doc loc) =
     prependComments loc
-    $ doc <:> code "val" <+> fmtName name <+> align (sep line ps) <:> code ":" <+> te
+    $ doc <:> code "val" <+> fmtName name <+> align (sep softline ps) <:> code ":" <+> te
   fmt (ModSpec name mte doc loc) =
     prependComments loc $ doc <:> code "module" <+> fmtName name <:> code ":" <+> mte
   fmt (IncludeSpec mte loc) = prependComments loc $ code "include" <+> mte
@@ -505,7 +502,7 @@ instance Format UncheckedModTypeExp where
   fmt (ModTypeParens mte loc) =
     prependComments loc $ code "(" <:> align mte <:/> code ")"
   fmt (ModTypeSpecs sbs loc) =
-    prependComments loc $ code "{" <:/> stdIndent (sep line sbs) <:/> code "}"
+    prependComments loc $ code "{" <:/> softStdIndent (sep softline sbs) <:/> code "}"
   fmt (ModTypeWith mte (TypeRef v ps td _) loc) =
     prependComments loc
     $ mte <+> code "with" <+> fmtPretty v `ps_op` sep space ps <+> code "=" <+> td
@@ -544,24 +541,24 @@ instance Format UncheckedModBind where
       ps' =
         case ps of
           [] -> nil
-          _any -> space <:> localLayoutList ps (align $ sep line ps)
+          _any -> space <:> localLayoutList ps (align $ sep softline ps)
 
 -- All of these should probably be "extra" indented
 instance Format UncheckedModExp where
   fmt (ModVar v loc) = prependComments loc $ fmtQualName v
   fmt (ModParens f loc) =
-    prependComments loc $ code "(" <:/> stdIndent f <:/> code ")"
+    prependComments loc $ code "(" <:/> softStdIndent f <:/> code ")"
   fmt (ModImport path _f loc) =
     prependComments loc $ code "import \"" <:> fmtPretty path <:> code "\""
   -- Should be put inside a nested block
   fmt (ModDecs decs loc) =
     prependComments loc
-    $ code "{" </> stdIndent (sep (space <|> line <:> line) decs) </> code "}"
+    $ code "{" <:+/> softStdIndent (sep (softline <:> softline) decs) <:+/> code "}"
   fmt (ModApply f a _f0 _f1 loc) = prependComments loc $ f <+> a
   fmt (ModAscript me se _f loc) = prependComments loc $ me <:> code ":" <+> se
   fmt (ModLambda param maybe_sig body loc) =
     prependComments loc
-    $ code "\\" <:> param <:> sig <+> code "->" </> stdIndent body
+    $ code "\\" <:> param <:> sig <+> code "->" <:+/> softStdIndent body
     where
       sig =
         case maybe_sig of
@@ -584,7 +581,7 @@ instance Format UncheckedDec where
 -- inserted at the end.
 instance Format UncheckedProg where
   fmt (Prog dc decs) =
-    fmt $ dc <:> sep (line <:> line) decs </> popComments
+    fmt $ dc <:> sep (softline <:> softline) decs <:+/> popComments
   
 
 fmtText :: String -> T.Text -> Either SyntaxError T.Text

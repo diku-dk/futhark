@@ -7,6 +7,7 @@ module Futhark.Fmt.Monad
     code,
     space,
     line,
+    softline, 
     sep,
     brackets,
     braces,
@@ -17,8 +18,11 @@ module Futhark.Fmt.Monad
     (<:>),
     (<+/>),
     (<:/>),
+    (<:+/>),
     indent,
+    softIndent,
     stdIndent,
+    softStdIndent,
     colon,
     sepFilter,
     pretty,
@@ -55,12 +59,14 @@ import Language.Futhark.Parser.Monad ( Comment(..) )
 -- printed first and our monad is checking if a comment should be
 -- printed.
 
+infixl 7 <+/>
+infixl 6 <:+/>
+infixl 6 <:/>
 infixl 6 <:>
 infixl 6 <+>
 infixl 6 </>
-infixl 7 <+/>
 infixl 4 <|>
-infixl 6 <:/>
+
 
 type Fmt = P.Doc ()
 
@@ -83,7 +89,8 @@ prependComments :: (Located a, Format b) => a -> b -> FmtM Fmt
 prependComments a b = localLayout a $ do
   c <- fmtComments a
   f <- fmt b
-  pure $ c <> f
+  tc <- fmtTrailingComment a 
+  pure $ c <> f <> tc
 
 data FmtState = FmtState
   {comments :: [Comment], -- the comments
@@ -115,6 +122,18 @@ fmtComments a = do
       c' <- fmt c
       pure $ c' <> f -- fmts remaining comments
     _any -> pure mempty
+
+fmtTrailingComment :: (Located a) => a -> FmtM Fmt
+fmtTrailingComment a = do 
+  layout <- ask
+  if layout == MultiLine then do
+    s <- get
+    case comments s of
+      c : cs | locOf a == locOf c -> do 
+        put $ s {comments = cs} 
+        fmt c 
+      _any -> pure mempty 
+  else pure mempty 
 
 lineLayout :: (Located a) => a -> Layout
 lineLayout a =
@@ -177,7 +196,10 @@ space :: FmtM Fmt
 space = pure P.space
 
 line :: FmtM Fmt
-line = space <|> (pure P.line :: FmtM Fmt)
+line = pure P.line
+
+softline :: FmtM Fmt
+softline = space <|> line
 
 (<|>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a <|> b = do
@@ -200,7 +222,7 @@ sepLoc [] = nil
 sepLoc ls
   | any ((==MultiLine) . lineLayout) ls =
       sep nil $ zipWith3 auxiliary [0 :: Int ..] los ls
-  | otherwise = align $ sep line ls
+  | otherwise = align $ sep softline ls
   where 
     auxiliary 0 _ x = fmt x
     auxiliary _ SingleLine x = space <:> x
@@ -215,10 +237,16 @@ align :: (Format a) => a -> FmtM Fmt
 align a = fmt a <|> (P.align <$> fmt a)
 
 indent :: (Format a) => Int -> a -> FmtM Fmt
-indent i a = fmt a <|> (P.indent i <$> fmt a)
+indent i a = P.indent i <$> fmt a
+
+softIndent :: (Format a) => Int -> a -> FmtM Fmt
+softIndent i a = fmt a <|> indent i a
 
 stdIndent :: Format a => a -> FmtM Fmt
 stdIndent = indent 2
+
+softStdIndent :: Format a => a -> FmtM Fmt
+softStdIndent = softIndent 2
 
 code :: T.Text -> FmtM Fmt
 code = pure . P.pretty
@@ -243,6 +271,9 @@ a <+> b = a <:> space <:> b
 
 (</>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a </> b = a <:> line <:> b
+
+(<:+/>) :: (Format a, Format b) => a -> b -> FmtM Fmt
+a <:+/> b = a <:> softline <:> b
 
 colon :: FmtM Fmt
 colon = pure P.colon
