@@ -50,9 +50,6 @@ import Futhark.Pass
 import Data.Loc (Loc(NoLoc), SrcLoc (SrcLoc))
 import Colog.Core (duplicate)
 
-traceHelper :: (Show a) => a -> a
-traceHelper x = trace (show x ++ "\n") x
-
 divUp :: Int -> Int -> Int
 divUp x y = (x + y - 1) `div` y
 
@@ -63,40 +60,33 @@ intraMMM =
     "Extracts NVIDIA tensor core MMA operations"
     transformProg
 
-
 type MMMFunDef = (MMMSignature, FunDef GPU)
+
 type MMMFuns = [MMMFunDef]
+
 -- TODO: implement Eq to ensure no duplicate defs
 
 data IntraMMMMonadEnv = IntraMMMMonadEnv {envScope :: Scope GPU, envBlockSize :: Maybe Int}
 
 type IntraMMMMonad = RWS IntraMMMMonadEnv MMMFuns VNameSource
 
-
 -- TODO: use newtype above to fix warning
-instance
-  HasScope GPU IntraMMMMonad
-  where
+instance HasScope GPU IntraMMMMonad where
   askScope = asks envScope
 
-instance
-  LocalScope GPU IntraMMMMonad
-  where
+instance LocalScope GPU IntraMMMMonad where
   localScope extension = local $ \env -> env {envScope = M.union extension $ envScope env}
-
 
 askBlockSize :: IntraMMMMonad (Maybe Int)
 askBlockSize = asks envBlockSize
 
 localBlockSize :: (Maybe Int -> Maybe Int) -> IntraMMMMonad a -> IntraMMMMonad a
-localBlockSize f = local $ \env -> env {envBlockSize = f $ envBlockSize env }
-
+localBlockSize f = local $ \env -> env {envBlockSize = f $ envBlockSize env}
 
 
 runBuilderMMM :: Builder GPU a -> Scope GPU -> IntraMMMMonad (a, Stms GPU)
 runBuilderMMM m s =
   modifyNameSource $ runState $ runBuilderT m s
-
 
 mapStmsWithScope :: (Monoid a, LocalScope rep f) => (Stm rep -> f a) -> Stms rep -> f a
 mapStmsWithScope f stms =
@@ -111,19 +101,25 @@ mkInt64Const :: Int -> SubExp
 mkInt64Const = Constant . IntValue . intValue Int64
 
 
-
 -- IR generation
 
 -- TODO: pass sizes in args or encoded in name? todo also pass types in args?
-mkGemmFun
-  :: (MonadFreshNames m)
-  => PrimType -> PrimType -> PrimType -> Int -> Int -> Int -> Int -> m MMMFunDef
+mkGemmFun ::
+  (MonadFreshNames m) =>
+  PrimType ->
+  PrimType ->
+  PrimType ->
+  Int ->
+  Int ->
+  Int ->
+  Int ->
+  m MMMFunDef
 -- TODO: use record?
 mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
   let typeA = Array elmTypeA (Shape [mkInt64Const sizeM, mkInt64Const sizeK]) Nonunique
       typeB = Array elmTypeB (Shape [mkInt64Const sizeK, mkInt64Const sizeN]) Nonunique
       typeCin = Array elmTypeC (Shape [mkInt64Const sizeRegs]) Unique
-  --  TODO: use Free or Ext?
+      --  TODO: use Free or Ext?
       typeCout = [(Array elmTypeC (Shape [Free $ mkInt64Const sizeRegs]) Unique, RetAls [] [])]
 
   aParam <- newParam "A" typeA
@@ -137,36 +133,38 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
   blockSizeParam <- newParam "blockSize" $ Prim int64
 
   fName <- fmap (nameFromString . prettyString) $ newName $ VName gemmName 0
-  let funParams = [aParam,
-                   bParam,
-                   cParam,
-                   aElmTypeParam,
-                   bElmTypeParam,
-                   mParam,
-                   nParam,
-                   kParam,
-                   blockSizeParam
-                  ]
+  let funParams =
+        [ aParam,
+          bParam,
+          cParam,
+          aElmTypeParam,
+          bElmTypeParam,
+          mParam,
+          nParam,
+          kParam,
+          blockSizeParam
+        ]
   pure
     ( GemmSignature elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs,
       FunDef Nothing mempty fName typeCout funParams $
         resultBody [Var $ paramName cParam]
     )
-
 -- TODO: entire global as input or only slize, if entire add index as argument
 mkCopyGlobalShared :: (MonadFreshNames m) => PrimType -> Int -> Int -> m MMMFunDef
 mkCopyGlobalShared elmType sizeY sizeX = do
--- TODO: take (number of) outer globalOuterDims as input, also get outer indices?
+  -- TODO: take (number of) outer globalOuterDims as input, also get outer indices?
   globalOuterDim <- newParam "globalOuterDim" $ Prim int64
   globalOuterIndex <- newParam "globalOuterDim" $ Prim int64
-  let globalArrDims = [Var $ paramName globalOuterDim
-                      ,mkInt64Const sizeY
-                      ,mkInt64Const sizeX
-                      ]
-  let sharedArrDims = [mkInt64Const sizeY
-                      ,mkInt64Const sizeX
-                      ]
-  
+  let globalArrDims =
+        [ Var $ paramName globalOuterDim,
+          mkInt64Const sizeY,
+          mkInt64Const sizeX
+        ]
+  let sharedArrDims =
+        [ mkInt64Const sizeY,
+          mkInt64Const sizeX
+        ]
+
   globalParam <- newParam "global" $ Array elmType (Shape globalArrDims) Nonunique
   sharedParam <- newParam "shared" $ Array elmType (Shape sharedArrDims) Unique
   elmTypeParam <- newParam "elmTypeA" $ Prim elmType
@@ -177,22 +175,27 @@ mkCopyGlobalShared elmType sizeY sizeX = do
   fName <-
     fmap (nameFromString . prettyString) $ newName $ VName copyGlobalSharedName 0
 
---  TODO: use Free or Ext?
-  let sharedOut = [(Array elmType (Shape $ map Free sharedArrDims) Unique
-                   ,RetAls [] [])
-                  ]
-  let funParams = [globalOuterDim,
-                   globalOuterIndex,
-                   globalParam,
-                   sharedParam,
-                   elmTypeParam,
-                   yParam,
-                   xParam,
-                   blockSizeParam]
-  pure (CopyGlobalSharedSignature elmType sizeY sizeX,
-        FunDef Nothing mempty fName sharedOut funParams $
-         resultBody [Var $ paramName sharedParam]
-       )
+  --  TODO: use Free or Ext?
+  let sharedOut =
+        [ ( Array elmType (Shape $ map Free sharedArrDims) Unique,
+            RetAls [] []
+          )
+        ]
+  let funParams =
+        [ globalOuterDim,
+          globalOuterIndex,
+          globalParam,
+          sharedParam,
+          elmTypeParam,
+          yParam,
+          xParam,
+          blockSizeParam
+        ]
+  pure
+    ( CopyGlobalSharedSignature elmType sizeY sizeX,
+      FunDef Nothing mempty fName sharedOut funParams $
+        resultBody [Var $ paramName sharedParam]
+    )
 
 -- TODO: copy to global instead of shared?
 mkCopyRegistersShared ::
