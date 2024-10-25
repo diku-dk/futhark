@@ -95,10 +95,10 @@ fmtSumTypeConstr (name, fs) =
 instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = prependComments loc $ fmtQualName v
   fmt (TETuple ts loc) =
-    prependComments loc $ parens $ sep (code "," <:> space <|> line <:> code ",") ts
+    prependComments loc $ parens $ sepSoftline (code ",") ts
   fmt (TEParens te loc) = prependComments loc $ parens te -- not sure this is correct
   fmt (TERecord fs loc) =
-    prependComments loc $ braces $ sep (code "," <:> space <|> line <:> code ",") fields
+    prependComments loc $ braces $ sepSoftline (code ",") fields
     where
       fields = fmtFieldType <$> fs
   fmt (TEArray se te loc) = prependComments loc $ se <:> te -- not sure if this can be multi line
@@ -112,7 +112,7 @@ instance Format UncheckedTypeExp where
   -- This should be "|"
   fmt (TESum tes loc) =
     prependComments loc
-    $ sep (code " | " <|> line <:> code "| ")
+    $ sep (softline <:> code "|" <:> space)
     $ map fmtSumTypeConstr tes
   fmt (TEDim dims te loc) =
     prependComments loc $ code "?" <:> dims' <:> code "." <:> te -- not sure how to format this as multiple lines
@@ -159,11 +159,11 @@ instance Format (UncheckedPat t) where
   fmt (TuplePat pats loc) =
     prependComments loc
     $ parens
-    $ sep (code "," <:> space <|> line <:> code ",") pats
+    $ sepSoftline (code ",") pats
   fmt (RecordPat pats loc) =
     prependComments loc
     $ braces
-    $ sep (code "," <:> space <|> line <:> code ",") $ map fmtFieldPat pats
+    $ sepSoftline (code ",") $ map fmtFieldPat pats
     where
       fmtFieldPat (name, t) = fmtName name <+> code "=" <+> t -- Currently it allways adds the fields it seems. I think it has to do this.
   fmt (PatParens pat loc) =
@@ -234,19 +234,19 @@ instance Format UncheckedExp where
   fmt (TupLit es loc) =
     prependComments loc
     $ parens
-    $ sep (code "," <:> space <|> line <:> code ",") es
+    $ sepSoftline (code ",") es
   fmt (RecordLit fs loc) =
     prependComments loc
     $ braces
-    $ sep (code "," <:> space <|> line <:> code ",") fs
+    $ sepSoftline (code ",") fs
   fmt (ArrayVal vs _ loc) =
     prependComments loc
     $ brackets
-    $ sep (code "," <:> space <|> line <:> code ",") vs
+    $ sepSoftline (code ",") vs
   fmt (ArrayLit es _ loc) =
     prependComments loc
     $ brackets
-    $ sep (code "," <:> space <|> line <:> code ",") es
+    $ sepSoftline (code ",") es
   fmt (StringLit _s loc) = fmtCopyLoc loc
   fmt (Project k e _ loc) = prependComments loc $ e <:> code "." <:> fmtPretty k
   fmt (Negate e loc) = prependComments loc $ code "-" <:> e
@@ -347,7 +347,7 @@ instance Format (AppExpBase NoInfo Name) where
     prependComments loc
     $ (e <:>)
     $ brackets
-    $ sep (code "," <:> space <|> line <:> code ",") idxs
+    $ sepSoftline (code ",") idxs
   fmt (LetPat sizes pat e body loc) =
     prependComments loc
     $ ( code "let"

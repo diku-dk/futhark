@@ -9,6 +9,7 @@ module Futhark.Fmt.Monad
     line,
     softline, 
     sep,
+    sepSoftline,
     brackets,
     braces,
     parens,
@@ -215,6 +216,9 @@ sep :: (Format a, Format b) => a -> [b] -> FmtM Fmt
 sep s as = aux <$> fmt s <*> mapM fmt as
   where
     aux s' = P.concatWith (\a b -> a <> s' <> b)
+
+sepSoftline :: (Format a,  Format b) => a -> [b] -> FmtM Fmt
+sepSoftline s = sep (s <:> space <|> line <:> s) 
 
 -- I am not sure this fulfills idemppotence.
 sepLoc :: (Format a, Located a) => [a] -> FmtM Fmt
