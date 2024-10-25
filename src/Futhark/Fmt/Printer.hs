@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
+
 module Futhark.Fmt.Printer (fmtText) where
 
 import Data.Foldable
@@ -103,9 +104,9 @@ instance Format UncheckedTypeExp where
       fields = fmtFieldType <$> fs
   fmt (TEArray se te loc) = prependComments loc $ se <:> te -- not sure if this can be multi line
   -- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
-  fmt (TEUnique te loc) = prependComments loc $ code "*" <:> te  -- not sure if this can be multi line
+  fmt (TEUnique te loc) = prependComments loc $ code "*" <:> te -- not sure if this can be multi line
   -- I am not sure I guess applying a higher kinded type to some type expression
-  fmt (TEApply te tArgE loc) = prependComments loc  $ te <+> tArgE -- not sure if this can be multi lin
+  fmt (TEApply te tArgE loc) = prependComments loc $ te <+> tArgE -- not sure if this can be multi lin
   -- this is "->"
   fmt (TEArrow name te0 te1 loc) =
     prependComments loc $ fmtParamType name te0 <+> code "->" <:+/> softStdIndent te1
@@ -123,7 +124,7 @@ instance Format (TypeArgExp UncheckedExp Name) where
   fmt (TypeArgExpSize se) = fmt se
   fmt (TypeArgExpType te) = fmt te
 
-instance Format UncheckedTypeBind where 
+instance Format UncheckedTypeBind where
   fmt (TypeBind name l ps e NoInfo dc loc) =
     prependComments loc $
     dc
@@ -153,7 +154,7 @@ instance Format Liftedness where
 
 instance Format UncheckedTypeParam where
   fmt (TypeParamDim name loc) = prependComments loc $ brackets $ fmtName name
-  fmt (TypeParamType l name loc) = prependComments loc $ code "'" <:> l <:> fmtName name  
+  fmt (TypeParamType l name loc) = prependComments loc $ code "'" <:> l <:> fmtName name
 
 instance Format (UncheckedPat t) where
   fmt (TuplePat pats loc) =
@@ -200,15 +201,15 @@ instance Format UncheckedDimIndex where
   fmt (DimFix e) = fmt e
   fmt (DimSlice i j (Just s)) =
     maybe (fmt nil) fmt i
-    <:> code ":"
-    <:> maybe (fmt nil) fmt j
-    <:> code ":"
-    <:> fmt s
+      <:> code ":"
+      <:> maybe (fmt nil) fmt j
+      <:> code ":"
+      <:> fmt s
   fmt (DimSlice i (Just j) s) =
     maybe (fmt nil) fmt i
-    <:> code ":"
-    <:> fmt j
-    <:> maybe nil ((code ":" <:>) . fmt) s
+      <:> code ":"
+      <:> fmt j
+      <:> maybe nil ((code ":" <:>) . fmt) s
   fmt (DimSlice i Nothing Nothing) =
     maybe (fmt nil) fmt i <:> code ":"
 
@@ -224,8 +225,8 @@ instance Format UncheckedExp where
   fmt (Parens e loc) =
     prependComments loc $ code "(" <:> stdNest e <:/> code ")"
   fmt (QualParens (v, _loc) e loc) =
-    prependComments loc
-    $ fmtQualName v <:> code "." <:> code "(" <:>  align e <:/> code ")"
+    prependComments loc $
+      fmtQualName v <:> code "." <:> code "(" <:> align e <:/> code ")"
   fmt (Ascript e t loc) = prependComments loc $ e <:> code ":" <+> t
   fmt (Coerce e t _ loc) = prependComments loc $ e <+> code ":>" <+> t
   fmt (Literal _v loc) = prependComments loc $ fmtCopyLoc loc
@@ -268,10 +269,11 @@ instance Format UncheckedExp where
     $ code "\\" <:> sep space params <:> ascript <+> stdNest (code "->" <:+/> body)
     where
       ascript = maybe nil (code ": " <:>) rettype
-  fmt (OpSection binop _ loc) = prependComments loc $
-    if operatorName (qualLeaf binop)
-    then fmtQualName binop
-    else parens $ code "`" <:> fmtQualName binop <:> code "`"
+  fmt (OpSection binop _ loc) =
+    prependComments loc $
+      if operatorName (qualLeaf binop)
+        then fmtQualName binop
+        else parens $ code "`" <:> fmtQualName binop <:> code "`"
   fmt (OpSectionLeft binop _ x _ _ loc) =
     prependComments loc $ parens $ x <+> fmtBinOp binop
   fmt (OpSectionRight binop _ x _ _ loc) =
@@ -290,13 +292,13 @@ instance Format UncheckedExp where
 -- | This should always be simplified by location.
 fmtQualName :: QualName Name -> FmtM Fmt
 fmtQualName (QualName names name)
-  | operatorName name = parens $ pre <:> fmtName name 
+  | operatorName name = parens $ pre <:> fmtName name
   | otherwise = pre <:> fmtName name
-    where 
-      pre =
-        if null names
-          then nil
-          else sep (code ".") (map fmtName names) <:> code "."
+  where
+    pre =
+      if null names
+        then nil
+        else sep (code ".") (map fmtName names) <:> code "."
 
 instance Format UncheckedCase where
   fmt (CasePat p e loc) =
@@ -320,9 +322,9 @@ instance Format (AppExpBase NoInfo Name) where
   -- should omit the initial value expression
   -- need some way to catch when the value expression match the pattern
   fmt (Loop sizeparams pat (LoopInitImplicit NoInfo) form loopbody loc) =
-    prependComments loc
-    $ ( ( code "loop" `op` sizeparams' )
-        <+/> pat
+    prependComments loc $
+      ( (code "loop" `op` sizeparams')
+          <+/> pat
       )
     <+> form
     <+> code "do"
@@ -331,10 +333,10 @@ instance Format (AppExpBase NoInfo Name) where
       op = if null sizeparams then (<:>) else (<+>)
       sizeparams' = sep nil $ brackets . fmtName . toName <$> sizeparams
   fmt (Loop sizeparams pat (LoopInitExplicit initexp) form loopbody loc) =
-    prependComments loc
-    $ ( ( code "loop" `op` sizeparams' )
-        <+/> pat
-        <+> code "="
+    prependComments loc $
+      ( (code "loop" `op` sizeparams')
+          <+/> pat
+          <+> code "="
       )
     <+/> initexp
     <+> form
@@ -349,23 +351,23 @@ instance Format (AppExpBase NoInfo Name) where
     $ brackets
     $ sepSoftline (code ",") idxs
   fmt (LetPat sizes pat e body loc) =
-    prependComments loc
-    $ ( code "let"
-        <+> sepFilter [not $ null sizes, True] space [sizes', fmt pat]
-        <+> code "="
+    prependComments loc $
+      ( code "let"
+          <+> sepFilter [not $ null sizes, True] space [sizes', fmt pat]
+          <+> code "="
       )
     <+/> e
     <:+/> letBody body
     where
       sizes' = sep nil sizes
   fmt (LetFun fname (tparams, params, retdecl, _, e) body loc) =
-    prependComments loc
-    $ ( code "let"
-        <+> fmtName fname
-        <:> (if null params && null tparams then nil else space)
-        <:> sub
-        <:> retdecl'
-        <:> code "="
+    prependComments loc $
+      ( code "let"
+          <+> fmtName fname
+          <:> (if null params && null tparams then nil else space)
+          <:> sub
+          <:> retdecl'
+          <:> code "="
       )
     <+/> e
     <:+/> letBody body
@@ -376,7 +378,7 @@ instance Format (AppExpBase NoInfo Name) where
         case retdecl of
           Just a -> code ":" <+> a <:> space
           Nothing -> space
-      sub = sepFilter [not $ null tparams, not $ null params] space [tparams', params'] 
+      sub = sepFilter [not $ null tparams, not $ null params] space [tparams', params']
   fmt (LetWith dest src idxs ve body loc)
     | dest == src =
       prependComments loc
@@ -403,7 +405,6 @@ instance Format (AppExpBase NoInfo Name) where
   fmt (Range start maybe_step end loc) =
     prependComments loc $ start <:> step <:> end'
     where
-
       end' =
         case end of
           DownToExclusive e -> code "..>" <:> e
@@ -419,8 +420,8 @@ instance Format (AppExpBase NoInfo Name) where
     <:+/> code "else"
     <:+/> softStdIndent f
   fmt (Apply f args loc) =
-    prependComments loc
-    $ f <+> align fmt_args
+    prependComments loc $
+      f <+> align fmt_args
     where
       fmt_args = sepLoc $ map snd (toList args)
 
@@ -504,36 +505,36 @@ instance Format UncheckedModTypeExp where
   fmt (ModTypeSpecs sbs loc) =
     prependComments loc $ code "{" <:/> softStdIndent (sep softline sbs) <:/> code "}"
   fmt (ModTypeWith mte (TypeRef v ps td _) loc) =
-    prependComments loc
-    $ mte <+> code "with" <+> fmtPretty v `ps_op` sep space ps <+> code "=" <+> td
+    prependComments loc $
+      mte <+> code "with" <+> fmtPretty v `ps_op` sep space ps <+> code "=" <+> td
     where
       ps_op = if null ps then (<:>) else (<+>)
   fmt (ModTypeArrow (Just v) te0 te1 loc) =
-    prependComments loc
-    $ parens (fmtName v <:> code ":" <+> te0) <+> align (code "->" <:/> te1)
+    prependComments loc $
+      parens (fmtName v <:> code ":" <+> te0) <+> align (code "->" <:/> te1)
   fmt (ModTypeArrow Nothing te0 te1 loc) =
     prependComments loc $ te0 <+> code "->" <+> te1
 
 instance Format UncheckedModTypeBind where
   fmt (ModTypeBind pName pSig doc loc) =
-    prependComments loc
-    $ doc <:> code "module type" <+> fmtName pName <+> code "=" <+> pSig
+    prependComments loc $
+      doc <:> code "module type" <+> fmtName pName <+> code "=" <+> pSig
 
-instance Format (ModParamBase NoInfo Name) where 
+instance Format (ModParamBase NoInfo Name) where
   fmt :: ModParamBase NoInfo Name -> FmtM Fmt
   fmt (ModParam pName pSig _f loc) =
     prependComments loc $ parens $ fmtName pName <:> code ":" <+> pSig
 
 instance Format UncheckedModBind where
   fmt (ModBind name ps sig te doc loc) =
-    prependComments loc
-    $ doc
-    <:> code "module"
-    <+> fmtName name
-    <:> ps'
-    <:> sig'
-    <:> code "="
-    <+> te
+    prependComments loc $
+      doc
+        <:> code "module"
+        <+> fmtName name
+        <:> ps'
+        <:> sig'
+        <:> code "="
+        <+> te
     where
       sig' = fmtSig sig
       fmtSig Nothing = space
@@ -552,13 +553,13 @@ instance Format UncheckedModExp where
     prependComments loc $ code "import \"" <:> fmtPretty path <:> code "\""
   -- Should be put inside a nested block
   fmt (ModDecs decs loc) =
-    prependComments loc
-    $ code "{" <:+/> softStdIndent (sep (softline <:> softline) decs) <:+/> code "}"
+    prependComments loc $
+      code "{" </> stdIndent (sep (space <|> line <:> line) decs) </> code "}"
   fmt (ModApply f a _f0 _f1 loc) = prependComments loc $ f <+> a
   fmt (ModAscript me se _f loc) = prependComments loc $ me <:> code ":" <+> se
   fmt (ModLambda param maybe_sig body loc) =
-    prependComments loc
-    $ code "\\" <:> param <:> sig <+> code "->" <:+/> softStdIndent body
+    prependComments loc $
+      code "\\" <:> param <:> sig <+> code "->" </> stdIndent body
     where
       sig =
         case maybe_sig of
