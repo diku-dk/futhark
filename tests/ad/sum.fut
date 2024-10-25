@@ -1,7 +1,7 @@
 -- Simple reduce with summation.
 -- ==
 -- entry: rev fwd
--- compiled input { [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] }
+-- input { [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] }
 -- output { [1.0, 1.0, 1.0, 1.0, 1.0, 1.0] }
 
 def sum [n] (xs: [n]f64) =

@@ -62,9 +62,10 @@ forLoop' i_bound merge body = do
   loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Unique) merge_ts
 
   loop_body <-
-    runBodyBuilder . localScope (scopeOfLoopForm loop_form <> scopeOfFParams loop_inits) $
-      body i $
-        map paramName loop_inits
+    insertStmsM $
+      localScope (scopeOfLoopForm loop_form <> scopeOfFParams loop_inits) $
+        body i $
+          map paramName loop_inits
 
   letTupExp "loop" $
     Loop (zip loop_inits $ map Var merge) loop_form loop_body

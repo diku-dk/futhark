@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Trailing commas are now allowed for arrays, records, and tuples in
-  the textual value format and in FutharkScript.
+* `futhark doc` now produces better (and stable) anchor IDs.
+
+* `futhark profile` now supports multiple JSON files.
 
 ### Removed
 
@@ -18,7 +19,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Negation of floating-point positive zero now produces a negative
+  zero.
+
+* Necessary inlining of functions used inside AD constructs.
+
+## [0.25.23]
+
+### Added
+
+* Trailing commas are now allowed for arrays, records, and tuples in
+  the textual value format and in FutharkScript.
+
+* Faster floating-point atomics with OpenCL backend on AMD and NVIDIA
+  GPUs. This affects histogram workloads.
+
+* AD is now supported by the interpreter (thanks to Marcus Jensen).
+
+### Fixed
+
 * Some instances of invalid copy removal. (Again.)
+
+* An issue related to entry points with nontrivial sizes in their
+  arguments, where the entry points were also used as normal functions
+  elsewhere. (#2184)
 
 ## [0.25.22]
 

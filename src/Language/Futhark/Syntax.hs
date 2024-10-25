@@ -59,6 +59,7 @@ module Language.Futhark.Syntax
     ExpBase (..),
     FieldBase (..),
     CaseBase (..),
+    LoopInitBase (..),
     LoopFormBase (..),
     PatLit (..),
     PatBase (..),
@@ -94,6 +95,7 @@ module Language.Futhark.Syntax
     mkApplyUT,
     sizeFromName,
     sizeFromInteger,
+    loopInitExp,
   )
 where
 
@@ -722,8 +724,8 @@ data AppExpBase f vn
   | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
   | Loop
       [VName] -- Size parameters.
-      (PatBase f vn ParamType) -- Merge variable pattern.
-      (ExpBase f vn) -- Initial values of merge variables.
+      (PatBase f vn ParamType) -- Loop parameter pattern.
+      (LoopInitBase f vn) -- Possibly initial value.
       (LoopFormBase f vn) -- Do or while loop.
       (ExpBase f vn) -- Loop body.
       SrcLoc
@@ -942,6 +944,28 @@ deriving instance Ord (CaseBase Info VName)
 
 instance Located (CaseBase f vn) where
   locOf (CasePat _ _ loc) = locOf loc
+
+-- | Initial value for the loop. If none is provided, then an
+-- expression will be synthesised based on the parameter.
+data LoopInitBase f vn
+  = LoopInitExplicit (ExpBase f vn)
+  | LoopInitImplicit (f (ExpBase f vn))
+
+deriving instance Show (LoopInitBase Info VName)
+
+deriving instance (Show vn) => Show (LoopInitBase NoInfo vn)
+
+deriving instance Eq (LoopInitBase NoInfo VName)
+
+deriving instance Eq (LoopInitBase Info VName)
+
+deriving instance Ord (LoopInitBase NoInfo VName)
+
+deriving instance Ord (LoopInitBase Info VName)
+
+instance Located (LoopInitBase Info vn) where
+  locOf (LoopInitExplicit e) = locOf e
+  locOf (LoopInitImplicit (Info e)) = locOf e
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn
@@ -1351,6 +1375,10 @@ mkApplyUT (AppExp (Apply f args loc) _) x =
   AppExp (Apply f (args <> NE.singleton (NoInfo, x)) (srcspan loc x)) NoInfo
 mkApplyUT f x =
   AppExp (Apply f (NE.singleton (NoInfo, x)) (srcspan f x)) NoInfo
+
+loopInitExp :: LoopInitBase Info VName -> ExpBase Info VName
+loopInitExp (LoopInitExplicit e) = e
+loopInitExp (LoopInitImplicit (Info e)) = e
 
 --- Some prettyprinting definitions are here because we need them in
 --- the Attributes module.

@@ -4,12 +4,12 @@ def test [n] (xs: [n]i32) =
 
 -- ==
 -- entry: prim
--- compiled input { [2,2,3,4,5] } output { [2,4,16,256,65536] }
+-- input { [2,2,3,4,5] } output { [2,4,16,256,65536] }
 entry prim [n] (xs: [n]i32) = test xs
 
 -- ==
 -- entry: f_jvp f_vjp
--- compiled input { [1,2,3,4,5] }
+-- input { [1,2,3,4,5] }
 -- output { [[1,0,0,0,0],
 --           [2,0,0,0,0],
 --           [4,0,0,0,0],

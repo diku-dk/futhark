@@ -1,6 +1,6 @@
 -- ==
 -- entry: f_vjp
--- compiled input { [1,2,3] [0,1,2] }
+-- input { [1,2,3] [0,1,2] }
 -- output { [6,12,18] [0,0,0] }
 def f [n] (xsis: ([n]i32,  [n]i32)) =
   let (xs, is) = xsis

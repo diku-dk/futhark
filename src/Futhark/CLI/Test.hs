@@ -481,7 +481,7 @@ excludeCases config tcase =
     onAction action = action
     onIOs (InputOutputs entry runs) =
       InputOutputs entry $ filter (not . any excluded . runTags) runs
-    excluded = (`elem` configExclude config) . T.pack
+    excluded = (`elem` configExclude config)
 
 putStatusTable :: TestStatus -> IO ()
 putStatusTable ts = hPutTable stdout rows 1
