@@ -15,11 +15,11 @@ import Language.Futhark
 import Language.Futhark.Traversals
 
 -- Mapping from record names to the variable names that contain the
--- fields.  This is used because the monomorphiser also expands all
--- record patterns.
+-- fields, as well as an expression for the entire record. This is
+-- used because the monomorphiser also expands all, record patterns.
 type RecordReplacements = M.Map VName RecordReplacement
 
-type RecordReplacement = M.Map Name (VName, StructType)
+type RecordReplacement = (M.Map Name (VName, StructType), Exp)
 
 newtype Env = Env
   { envRecordReplacements :: RecordReplacements
@@ -105,8 +105,16 @@ transformPat _ (Id v (Info (Scalar (Record fs))) loc) = do
     ( RecordPat
         (zip (map fst fs') (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
         loc,
-      M.singleton v $ M.fromList $ zip (map fst fs') $ zip fs_ks $ map toStruct fs_ts
+      M.singleton
+        v
+        ( M.fromList $ zip (map fst fs') $ zip fs_ks $ map toStruct fs_ts,
+          RecordLit (zipWith3 toField (map fst fs') fs_ks fs_ts) loc
+        )
     )
+  where
+    toField f f_v f_t =
+      let f_v' = Var (qualName f_v) (Info $ toStruct f_t) loc
+       in RecordFieldExplicit f f_v' loc
 transformPat onType (Id v t loc) = do
   t' <- traverse onType t
   pure (Id v t' loc, mempty)
@@ -146,7 +154,7 @@ transformExp (Project n e t loc) = do
     Var qn _ _ -> lookupRecordReplacement (qualLeaf qn)
     _ -> pure Nothing
   case maybe_fs of
-    Just m
+    Just (m, _)
       | Just (v, _) <- M.lookup n m ->
           pure $ Var (qualName v) t loc
     _ -> do
@@ -155,11 +163,7 @@ transformExp (Project n e t loc) = do
 transformExp (Var fname t loc) = do
   maybe_fs <- lookupRecordReplacement $ qualLeaf fname
   case maybe_fs of
-    Just fs -> do
-      let toField (f, (f_v, f_t)) = do
-            let f_v' = Var (qualName f_v) (Info f_t) loc
-            pure $ RecordFieldExplicit f f_v' loc
-      RecordLit <$> mapM toField (M.toList fs) <*> pure loc
+    Just (_, e) -> pure e
     Nothing ->
       Var fname <$> traverse transformStructType t <*> pure loc
 transformExp (AppExp (LetPat sizes pat e body loc) res) = do
