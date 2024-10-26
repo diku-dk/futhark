@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Necessary inlining of functions used inside AD constructs.
 
+* A compile time regression for programs that used higher order
+  functions very aggressively.
+
 ## [0.25.23]
 
 ### Added
