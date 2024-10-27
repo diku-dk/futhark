@@ -39,6 +39,7 @@ module Futhark.Fmt.Monad
     localLayoutList,
     prependComments,
     sepDecs,
+    fmtByLayout,
   )
 where
 
@@ -80,6 +81,13 @@ infixl 6 </>
 infixl 4 <|>
 
 type Fmt = P.Doc ()
+
+fmtByLayout ::
+  (Located a, Format s, Format m) => a -> s -> m -> FmtM Fmt
+fmtByLayout a s m =
+  case lineLayout a of
+    SingleLine -> fmt s
+    MultiLine -> fmt m
 
 localLayout :: (Located a) => a -> FmtM b -> FmtM b
 localLayout a m = do
@@ -304,7 +312,7 @@ sepDecs ::
   [a] ->
   FmtM Fmt
 sepDecs [] = nil
-sepDecs (x : xs) = x <:> auxiliary x xs
+sepDecs as@(x : xs) = sep space as <|> (x <:> auxiliary x xs)
   where
     auxiliary _ [] = nil
     auxiliary prev (y : ys) = p <:> fmt y <:> auxiliary y ys

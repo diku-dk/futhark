@@ -492,10 +492,18 @@ instance Format UncheckedSpec where
   fmt (TypeAbbrSpec tpsig) = fmt tpsig
   fmt (TypeSpec l name ps doc loc) =
     prependComments loc $
-      doc <:> code "type" <+> l <:> fmtName name <+> align (sep softline ps)
+      doc <:> code "type" <+> l <:> sub
+    where
+      sub = sepFilter [True, not $ null ps] softline [fmtName name, align (sep softline ps)]
   fmt (ValSpec name ps te _ doc loc) =
     prependComments loc $
-      doc <:> code "val" <+> fmtName name <+> align (sep softline ps) <:> code ":" <+> te
+      doc
+        <:> code "val"
+        <+> sub
+        <:> code ":"
+        <+> te
+    where
+      sub = sepFilter [True, not $ null ps] softline [fmtName name, align (sep softline ps)]
   fmt (ModSpec name mte doc loc) =
     prependComments loc $ doc <:> code "module" <+> fmtName name <:> code ":" <+> mte
   fmt (IncludeSpec mte loc) = prependComments loc $ code "include" <+> mte
@@ -536,8 +544,9 @@ instance Format UncheckedModBind where
         <:> ps'
         <:> sig'
         <:> code "="
-        <+> te
+        <:> te'
     where
+      te' = fmtByLayout te (softline <:> softStdIndent te) (space <:> te)
       sig' = fmtSig sig
       fmtSig Nothing = space
       fmtSig (Just (s', _f)) = code ":" <+> s' <:> space
@@ -558,7 +567,7 @@ instance Format UncheckedModExp where
     prependComments loc $
       code "{" <:/> softStdIndent (sepDecs decs) <:/> code "}"
   fmt (ModApply f a _f0 _f1 loc) = prependComments loc $ f <+> a
-  fmt (ModAscript me se _f loc) = prependComments loc $ me <:> code ":" <+> se
+  fmt (ModAscript me se _f loc) = prependComments loc $ align (me <:> code ":" </> se)
   fmt (ModLambda param maybe_sig body loc) =
     prependComments loc $
       code "\\" <:> param <:> sig <+> code "->" </> softStdIndent body

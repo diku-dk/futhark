@@ -99,3 +99,9 @@ find "$TEST_DIR" -type d -empty -delete
 echo "Hash Tests Passed: $hash_pass/$((hash_pass + hash_fail))"
 echo "Idempotent Tests Passed: $idempotent_pass/$((idempotent_pass + idempotent_fail))"
 echo "Order of Comments Tests Passed: $comments_pass/$((comments_pass + comments_fail))"
+
+if [ $hash_fail -eq 0 ] && [ $idempotent_fail -eq 0 ] && [ $comments_fail -eq 0 ]; then
+    exit 0;
+else
+    exit 1;
+fi
