@@ -1,4 +1,7 @@
 def main =
-    let a = loop {a, b, c} for i < n do
-        let a[i] = b[i] in a
-    in 0
+  let a = 0
+  let b = 0
+  let c = 0
+  let _t = loop {a, b, c} for _i < 10 do
+          {a, b, c}
+  in 0i32

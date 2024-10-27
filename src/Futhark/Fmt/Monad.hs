@@ -7,7 +7,7 @@ module Futhark.Fmt.Monad
     code,
     space,
     line,
-    softline, 
+    softline,
     sep,
     sepSoftline,
     brackets,
@@ -19,7 +19,6 @@ module Futhark.Fmt.Monad
     (<:>),
     (<+/>),
     (<:/>),
-    (<:+/>),
     indent,
     softIndent,
     stdIndent,
@@ -35,10 +34,11 @@ module Futhark.Fmt.Monad
     align,
     fmtCopyLoc,
     comment,
-    sepLoc,
+    sepArgs,
     localLayout,
     localLayoutList,
     prependComments,
+    sepDecs,
   )
 where
 
@@ -68,13 +68,16 @@ import Prettyprinter.Render.Text (renderStrict)
 -- printed.
 
 infixl 7 <+/>
-infixl 6 <:+/>
-infixl 6 <:/>
-infixl 6 <:>
-infixl 6 <+>
-infixl 6 </>
-infixl 4 <|>
 
+infixl 6 <:/>
+
+infixl 6 <:>
+
+infixl 6 <+>
+
+infixl 6 </>
+
+infixl 4 <|>
 
 type Fmt = P.Doc ()
 
@@ -97,7 +100,7 @@ prependComments :: (Located a, Format b) => a -> b -> FmtM Fmt
 prependComments a b = localLayout a $ do
   c <- fmtComments a
   f <- fmt b
-  tc <- fmtTrailingComment a 
+  tc <- fmtTrailingComment a
   pure $ c <> f <> tc
 
 data FmtState = FmtState
@@ -133,16 +136,17 @@ fmtComments a = do
     _any -> pure mempty
 
 fmtTrailingComment :: (Located a) => a -> FmtM Fmt
-fmtTrailingComment a = do 
+fmtTrailingComment a = do
   layout <- ask
-  if layout == MultiLine then do
-    s <- get
-    case comments s of
-      c : cs | locOf a == locOf c -> do 
-        put $ s {comments = cs} 
-        fmt c 
-      _any -> pure mempty 
-  else pure mempty 
+  if layout == MultiLine
+    then do
+      s <- get
+      case comments s of
+        c : cs | locOf a == locOf c -> do
+          put $ s {comments = cs}
+          fmt c
+        _any -> pure mempty
+    else pure mempty
 
 lineLayout :: (Located a) => a -> Layout
 lineLayout a =
@@ -177,9 +181,9 @@ fmtCopyLoc a = do
     Loc sPos ePos ->
       let sOff = posCoff sPos
           eOff = posCoff ePos
-       in case T.decodeASCII' $ BS.take (eOff - sOff) $ BS.drop sOff f of
-            Nothing -> undefined -- Should throw an error TODO
-            Just lit -> code lit
+       in case T.decodeUtf8' $ BS.take (eOff - sOff) $ BS.drop sOff f of
+            Left err -> error $ show err
+            Right lit -> code lit
     NoLoc -> undefined -- should throw an error TODO
 
 (<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
@@ -228,21 +232,20 @@ sep s as = aux <$> fmt s <*> mapM fmt as
   where
     aux s' = P.concatWith (\a b -> a <> s' <> b)
 
-sepSoftline :: (Format a,  Format b) => a -> [b] -> FmtM Fmt
-sepSoftline s = sep (s <:> space <|> line <:> s) 
+sepSoftline :: (Format a, Format b) => a -> [b] -> FmtM Fmt
+sepSoftline s = sep (s <:> space <|> line <:> s)
 
--- I am not sure this fulfills idemppotence.
-sepLoc :: (Format a, Located a) => [a] -> FmtM Fmt
-sepLoc [] = nil
-sepLoc ls
+sepArgs :: (Format a, Located a) => [a] -> FmtM Fmt
+sepArgs [] = nil
+sepArgs ls
   | any ((== MultiLine) . lineLayout) ls =
       sep nil $ zipWith3 auxiliary [0 :: Int ..] los ls
   | otherwise = align $ sep softline ls
-  where 
+  where
     auxiliary 0 _ x = fmt x
     auxiliary _ SingleLine x = space <:> x
     auxiliary _ MultiLine x = line <:> x
-    los = drop (length ls - 1) $ cycle $ lineLayout <$> ls
+    los = lineLayout <$> ls
 
 stdNest :: (Format a) => a -> FmtM Fmt
 stdNest = nest 2
@@ -259,7 +262,7 @@ softIndent i a = fmt a <|> indent i a
 stdIndent :: (Format a) => a -> FmtM Fmt
 stdIndent = indent 2
 
-softStdIndent :: Format a => a -> FmtM Fmt
+softStdIndent :: (Format a) => a -> FmtM Fmt
 softStdIndent = softIndent 2
 
 code :: T.Text -> FmtM Fmt
@@ -284,10 +287,7 @@ a <:> b = (<>) <$> fmt a <*> fmt b
 a <+> b = a <:> space <:> b
 
 (</>) :: (Format a, Format b) => a -> b -> FmtM Fmt
-a </> b = a <:> line <:> b
-
-(<:+/>) :: (Format a, Format b) => a -> b -> FmtM Fmt
-a <:+/> b = a <:> softline <:> b
+a </> b = a <:> softline <:> b
 
 colon :: FmtM Fmt
 colon = pure P.colon
@@ -298,6 +298,21 @@ sepFilter bs s xs =
     map snd $
       filter fst $
         zip bs xs
+
+sepDecs ::
+  (Format a, Located a) =>
+  [a] ->
+  FmtM Fmt
+sepDecs [] = nil
+sepDecs (x : xs) = x <:> auxiliary x xs
+  where
+    auxiliary _ [] = nil
+    auxiliary prev (y : ys) = p <:> fmt y <:> auxiliary y ys
+      where
+        p =
+          case (lineLayout y, lineLayout prev) of
+            (SingleLine, SingleLine) -> softline
+            _any -> softline <:> softline
 
 layoutOpts :: P.LayoutOptions
 layoutOpts = P.LayoutOptions P.Unbounded
