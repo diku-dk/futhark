@@ -4,7 +4,7 @@ import Control.Monad (unless, forM)
 import Data.Set qualified as S
 import Data.Map qualified as M
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, AlgEnv (..), UntransEnv (..))
+import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, AlgEnv (..), UntransEnv (..), mkRangeUB)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..))
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
@@ -159,6 +159,16 @@ tests =
               let sum1 = sym2SoP $ Sum c (sVar i2 .+. int 1) $ sVar n .-. int 1
                   sum2 = sym2SoP $ Sum c (int 0) $ sVar i1
               (sum2 .-. int 1) FM.$<$ (sVar i2 .+. sum1)
+          )
+          @??= True,
+      testCase "FME1" $
+        run
+          ( do
+              let idx1 = Idx c (sVar i1)
+              let idx2 = Idx c (sVar i2)
+              addRange idx1 $ mkRangeUB (int2SoP (-1))
+              addRange idx2 $ mkRangeLB (int2SoP 0)
+              sym2SoP idx1 FM.$<$ sym2SoP idx2
           )
           @??= True
     ]
