@@ -312,12 +312,10 @@ instance (Ord u, Ord e) => Monoid (UntransEnv u e) where
 
 instance (Pretty u, Pretty e) => Pretty (UntransEnv u e) where
   pretty env =
-    "dir:"
-      <> line
+    "dir: "
       <> pretty (M.toList $ dir env)
       <> line
-      <> "inv:"
-      <> line
+      <> "inv: "
       <> pretty (M.toList $ inv env)
 
 -- | The equivalence environment binds a variable name to
@@ -353,19 +351,20 @@ instance (Ord u, Ord e) => Semigroup (AlgEnv u e p) where
 instance (Ord u, Ord e) => Monoid (AlgEnv u e p) where
   mempty = AlgEnv mempty mempty mempty mempty
 
-instance (Pretty u, Pretty e) => Pretty (AlgEnv u e p) where
-  pretty (env) =
+instance (Pretty u, Pretty e, Pretty p) => Pretty (AlgEnv u e p) where
+  pretty env =
     "Untranslatable environment:"
       <> line
       <> pretty (untrans env)
       <> line
-      <> "Equivalence environment:"
-      <> line
+      <> "Equivalences: "
       <> pretty (M.toList $ equivs env)
       <> line
-      <> "Ranges:"
-      <> line
+      <> "Ranges: "
       <> pretty (M.toList $ ranges env)
+      <> line
+      <> "Properties: "
+      <> pretty (M.toList $ properties env)
 
 transClosInRanges :: (Ord u) => RangeEnv u -> Set u -> Set u
 transClosInRanges rs syms =
