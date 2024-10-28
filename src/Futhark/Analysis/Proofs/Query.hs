@@ -1,22 +1,32 @@
 -- Answer queries on index functions using algebraic solver.
 
-module Futhark.Analysis.Proofs.Query where
+module Futhark.Analysis.Proofs.Query
+  ( Answer (..),
+    MonoDir (..),
+    Query (..),
+    Property (..),
+    ask,
+    prove,
+    isTrue,
+    isFalse,
+    isUnknown,
+  )
+where
 
 import Control.Monad (foldM, forM_, unless)
 import Data.Maybe (catMaybes, fromJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, rollbackAlgEnv, simplify, toRel, algebraContext)
+import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, addRelSymbol, algebraContext, assume, rollbackAlgEnv, simplify, toRel, ($<), ($<=), ($>))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), Iterator (..), getCase, casesToList, Domain (Iota))
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrintAlgEnv, debugPrettyM)
+import Futhark.Analysis.Proofs.IndexFn (Domain (Iota), IndexFn (..), Iterator (..), casesToList, getCase)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrettyM2, debugPrintAlgEnv, debugT)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toDNF)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
-import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.Monad (addRange, mkRange, mkRangeLB)
+import Futhark.MonadFreshNames (newNameFromString, newVName)
+import Futhark.SoP.Monad (MonadSoP, addEquiv, addRange, mkRange, mkRangeLB, mkRangeUB)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.-.))
 import Language.Futhark (VName)
-import GHC.Base (assert)
-import Control.Monad (when)
+import Prelude hiding (and, or)
 
 data MonoDir = Inc | IncStrict | Dec | DecStrict
   deriving (Show, Eq, Ord)
@@ -25,9 +35,6 @@ data Query
   = CaseIsMonotonic MonoDir
   | -- Apply transform to case value, then check whether it simplifies to true.
     CaseTransform (SoP Symbol -> SoP Symbol)
-
-data Answer = Yes | Unknown
-  deriving (Show, Eq)
 
 -- | Answers a query on an index function case.
 ask :: Query -> IndexFn -> Int -> IndexFnM Answer
@@ -44,8 +51,8 @@ ask query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
           addRange (Algebra.Var i) (mkRangeLB $ int2SoP 1)
           j <- newVName "j"
           addRange (Algebra.Var j) (mkRange (int2SoP 0) (sym2SoP (Algebra.Var i) .-. int2SoP 1))
-          let p_j = fromJust . justSym $ rep (mkRep i (Var j)) p
-          let q_j = rep (mkRep i (Var j)) q
+          let p_j = fromJust . justSym $ p @ Var j
+          let q_j = q @ Var j
           addRelSymbol p_j
           let rel = case dir of
                 Inc -> (:<=)
@@ -55,6 +62,8 @@ ask query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
           debugPrintAlgEnv
           debugPrettyM "ask" (q_j `rel` q)
           isTrue . sym2SoP $ q_j `rel` q
+          where
+            f @ x = rep (mkRep i x) f
         Empty -> undefined
 
 data Property
@@ -63,40 +72,68 @@ data Property
 
 prove :: Property -> IndexFn -> IndexFnM Answer
 prove (PermutationOf {}) _fn = undefined
-prove (PermutationOfZeroTo m) (IndexFn it@(Forall i (Iota n)) cs) = do
+prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraContext fn $ do
   -- 1. Show that m = n.
   ans <- isTrue . sym2SoP $ m :== n
   case ans of
     Unknown -> pure Unknown
     Yes -> do
-      addRelIterator it
       -- Hardcode two cases for now.
       case casesToList cs of
-        [(p, x), (not_p, y)] -> do
+        [(p, f), (not_p, g)] -> do
           unless (p == neg not_p) $ error "inconsistency"
+          i <- newNameFromString "i"
+          j <- newNameFromString "j"
+          addRange (Algebra.Var i) (mkRangeLB (int2SoP 0))
+          addRange (Algebra.Var j) (mkRangeLB (int2SoP 0))
+          assume (fromJust . justSym $ p @ Var i)
+          assume (fromJust . justSym $ not_p @ Var j)
           -- 2. Prove no overlap in cases.
-          -- TODO considering x the "smaller" case here, also need to switch roles
-          -- Sufficient: case 1 < case 2.
-          -- Case: i1 > i2
-          -- [ ] fresh i1 i2
-          -- [ ] assume i1 > i2
-          -- [ ] substitute i1 and i2 appropriately
-          no_overlap1 <- isTrue . sym2SoP $ x :< y
-          -- Case: i1 < i2
-          let no_overlap2 = undefined
-          let no_overlap = no_overlap1 `also` no_overlap2
-          -- 3. Prove no duplicates in first case.
-          -- Make it a property? Whose proof could be done using `ask CaseIsMonotonic`?
-          -- 4. Prove no duplicates in second case.
-          -- 5. Prove both cases are bounded from below by 0.
-          -- x >= 0
-          -- y >= 0
-          -- 6. Prove both cases are bounded from above by m.
-          -- x <= m
-          -- y <= m
-          pure $ no_overlap `also` undefined
+          -- It is sufficient to show one case is always smaller than the other.
+          -- Specifically, for two indices i and j where p(i) is true
+          -- and p(j) is false, we need to show:
+          --   {forall i /= j . f(i) < g(j)} OR {forall i /= j . f(i) > g(j)}
+          -- given constraints
+          --           0 <= i < n
+          --           0 <= j < n
+          --           1 <= n
+          --
+          -- We proceed case-by-case.
+          let f_rel_g rel = do
+                f_rel_g1 <- rollbackAlgEnv $ do
+                  -- Case i < j => f(i) `rel` g(j).
+                  addRelIterator (Forall j (Iota n))
+                  i +< j
+                  (f @ Var i) `rel` (g @ Var j)
+                let f_rel_g2 = rollbackAlgEnv $ do
+                      -- Case i > j => f(i) `rel` g(j):
+                      addRelIterator (Forall i (Iota n))
+                      j +< i
+                      (f @ Var i) `rel` (g @ Var j)
+                f_rel_g1 `andF` f_rel_g2
+          -- Case i /= j => f(i) < g(j):
+          let f_LT_g = debugT "f_LT_g" $ f_rel_g ($<)
+          -- Case i /= j => f(i) > g(j):
+          let f_GT_g = debugT "f_GT_g" $ f_rel_g ($>)
+          let no_overlap = debugT "no_overlap" $ f_LT_g `orM` f_GT_g
+          -- 3. Prove both cases are bounded from below by 0.
+          -- 4. Prove both cases are bounded from above by m.
+          addRelIterator (Forall i (Iota n))
+          addRelIterator (Forall j (Iota n))
+          -- Putting the most expensive test last to enjoy short-circuiting.
+          (int2SoP 0 $<= (f @ Var i))
+            `andM` (int2SoP 0 $<= (g @ Var j))
+            `andM` ((f @ Var i) $< n)
+            `andM` ((g @ Var j) $< n)
+            `andM` no_overlap
         _ -> undefined
+  where
+    f @ x = rep (mkRep iter x) f
 prove (PermutationOfZeroTo {}) _ = pure Unknown
+
+(+<) :: (MonadSoP Algebra.Symbol e p m) => VName -> VName -> m ()
+i +< j = do
+  addRange (Algebra.Var i) (mkRangeUB (sym2SoP (Algebra.Var j) .-. int2SoP 1))
 
 -- | Does this symbol simplify to true?
 isTrue :: SoP Symbol -> IndexFnM Answer
@@ -146,14 +183,32 @@ isFalse p = do
       rels <- mapM toRel qs
       forM_ (catMaybes rels) addRel
 
-isYes :: Answer -> Bool
-isYes Yes = True
-isYes _ = False
-
 isUnknown :: Answer -> Bool
 isUnknown Unknown = True
 isUnknown _ = False
 
-also :: Answer -> Answer -> Answer
-also Yes Yes = Yes
-also _ _ = Unknown
+and :: Answer -> Answer -> Answer
+and Yes Yes = Yes
+and _ _ = Unknown
+
+-- Short-circuit evaluation `and`.
+andF :: (Applicative f) => Answer -> f Answer -> f Answer
+andF Yes m = m
+andF Unknown _ = pure Unknown
+
+andM :: (Monad m) => m Answer -> m Answer -> m Answer
+andM m1 m2 = do
+  ans <- m1
+  ans `andF` m2
+
+or :: Answer -> Answer -> Answer
+or Yes _ = Yes
+or _ Yes = Yes
+or _ _ = Unknown
+
+-- To increase laziness when used with short-circuited `and`.
+orM :: (Monad m) => m Answer -> m Answer -> m Answer
+orM m1 m2 = do
+  a1 <- m1
+  a2 <- m2
+  pure $ a1 `or` a2

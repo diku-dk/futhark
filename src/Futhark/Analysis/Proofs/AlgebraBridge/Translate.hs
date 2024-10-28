@@ -5,6 +5,7 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
     rollbackAlgEnv,
     algebraContext,
     toAlgebraSymbol,
+    isBooleanM,
   )
 where
 
@@ -13,7 +14,7 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv), debugPrettyM2)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
@@ -25,6 +26,7 @@ import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2So
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 import Control.Monad.RWS (gets, modify)
+import Futhark.Analysis.Proofs.IndexFn (IndexFn, getPredicates)
 
 rollbackAlgEnv :: IndexFnM a -> IndexFnM a
 rollbackAlgEnv computation = do
@@ -60,10 +62,29 @@ rollbackAlgEnv computation = do
 -- environment. And then switch the use of algebraContext and rollbackAlgEnv.
 -- This way translations can be shared between branches and handleQuantifiers
 -- only called once; less work, I guess.
-algebraContext :: ASTMappable Symbol a => a -> IndexFnM b -> IndexFnM b
-algebraContext x m = rollbackAlgEnv $ do
-  _ <- handleQuantifiers x
+-- algebraContext :: ASTMappable Symbol a => a -> IndexFnM b -> IndexFnM b
+-- algebraContext x m = rollbackAlgEnv $ do
+--   _ <- handleQuantifiers x
+--   m
+algebraContext :: IndexFn -> IndexFnM b -> IndexFnM b
+algebraContext fn m = rollbackAlgEnv $ do
+  let ps = getPredicates fn
+  mapM_ trackBooleanNames ps
+  _ <- handleQuantifiers fn
   m
+
+-- Add boolean tag to IndexFn layer names where applicable.
+trackBooleanNames :: Symbol -> IndexFnM ()
+trackBooleanNames (Var vn) = do
+  addProperty (Algebra.Var vn) Algebra.Boolean
+trackBooleanNames (Idx (Var vn) _) = do
+  addProperty (Algebra.Var vn) Algebra.Boolean
+trackBooleanNames (Apply (Var vn) _) = do
+  addProperty (Algebra.Var vn) Algebra.Boolean
+trackBooleanNames (Not x) = trackBooleanNames x
+trackBooleanNames (x :&& y) = trackBooleanNames x >> trackBooleanNames y
+trackBooleanNames (x :|| y) = trackBooleanNames x >> trackBooleanNames y
+trackBooleanNames _ = pure ()
 
 -----------------------------------------------------------------------------
 -- Translation from Algebra to IndexFn layer.
@@ -252,7 +273,6 @@ toAlgebra_ sym@(Apply (Var f) [x]) = do
   booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
   idx' <- mapSymSoP2M_ toAlgebra_ idx
   pure $ Algebra.Idx (idxSym booltype vn) idx'
-
 toAlgebra_ (Apply {}) = undefined
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
 -- The rest are boolean statements; handled like indicator.

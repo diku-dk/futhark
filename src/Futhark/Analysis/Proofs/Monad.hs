@@ -79,7 +79,16 @@ whenDebug x = do
 
 debugM :: String -> IndexFnM ()
 debugM x = do
-  whenDebug $ traceM $ "🪲 " <> x
+  whenDebug $ traceM $ "🐝 " <> x
+
+debugT :: Show a => String -> IndexFnM a -> IndexFnM a
+debugT msg m = do
+  a <- m
+  debugM (msg <> ": " <> show a)
+  pure a
+
+debugLn :: IndexFnM ()
+debugLn = traceM "\n"
 
 debugPrettyM :: (Pretty a) => String -> a -> IndexFnM ()
 debugPrettyM msg x = do
@@ -94,11 +103,19 @@ debugPrintAlgEnv = do
   algenv <- gets algenv
   debugPrettyM "" algenv
 
-withDebug :: b -> IndexFnM b
-withDebug f = do
-  modify (\s -> s {debug = True})
-  pure f
-
 debugOn :: IndexFnM ()
 debugOn = do
   modify (\s -> s {debug = True})
+
+withDebug :: IndexFnM b -> IndexFnM b
+withDebug f = do
+  debugOn
+  f
+
+withoutDebug :: IndexFnM b -> IndexFnM b
+withoutDebug f = do
+  toggle <- gets debug
+  modify (\s -> s {debug = False})
+  x <- f
+  modify (\s -> s {debug = toggle})
+  pure x

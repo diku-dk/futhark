@@ -38,6 +38,9 @@ casesToList (Cases cs) = NE.toList cs
 getCase :: Int -> Cases a b -> (a, b)
 getCase n (Cases cs) = NE.toList cs !! n
 
+getPredicates :: IndexFn -> [Symbol]
+getPredicates (IndexFn _ cs) = map fst $ casesToList cs
+
 domainSegStart :: Domain -> SoP Symbol
 domainSegStart (Iota _) = int2SoP 0
 domainSegStart (Cat _ _ b) = b

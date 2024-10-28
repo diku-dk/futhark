@@ -6,13 +6,13 @@ import Control.Monad.RWS (gets, modify)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (toAlgebra)
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (toAlgebra, toAlgebraSymbol, isBooleanM)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
-import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (..))
+import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (..), debugPrettyM2)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
-import Futhark.SoP.Monad (addRange, mkRange)
+import Futhark.SoP.Monad (addRange, mkRange, askProperty, addEquiv, addProperty)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, (.-.))
 import Futhark.SoP.SoP qualified as SoP
@@ -33,6 +33,19 @@ addRelSymbol (x :/= y) = do
 addRelSymbol p = do
   rel <- toRel p
   maybe (pure ()) addRel rel
+
+-- WARNING: Assumes that Symbol is Boolean.
+assume :: Symbol -> IndexFnM ()
+assume (Not x) = do
+  booltype <- isBooleanM x
+  x' <- toAlgebraSymbol x
+  when booltype $ addEquiv x' (int2SoP 0)
+  -- No relation to add; relations are normalized to not have Not.
+assume x = do
+  booltype <- isBooleanM x
+  x' <- toAlgebraSymbol x
+  when booltype $ addEquiv x' (int2SoP 1)
+  addRelSymbol x -- No-op if x is not a relation.
 
 -- | Add relations derived from the iterator to the algebraic environment.
 addRelIterator :: Iterator -> IndexFnM ()
@@ -67,6 +80,11 @@ addRelIterator _ = pure ()
 toRel :: Symbol -> IndexFnM (Maybe (Rel Algebra.Symbol))
 toRel = runMaybeT . toRel_
   where
+    convOp transf op x y = do
+      a <- transf x
+      b <- transf y
+      a `op` b
+
     liftOp op a b = pure $ a `op` b
     convCmp op = convOp (lift . toAlgebra) (liftOp op)
 
@@ -87,23 +105,35 @@ convOp transf op x y = do
   b <- transf y
   a `op` b
 
-($<) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($<) = convOp toAlgebra ($<$)
+-- Fourer Motzkin Elimination solver may return True or False.
+-- True means the query holds. False means "I don't know".
+data Answer = Yes | Unknown
+  deriving (Show, Eq)
 
-($<=) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($<=) = convOp toAlgebra ($<=$)
+convFME :: (SoP Algebra.Symbol -> SoP Algebra.Symbol -> IndexFnM Bool) -> SoP Symbol -> SoP Symbol -> IndexFnM Answer
+convFME op x y = do
+  a <- toAlgebra x
+  b <- toAlgebra y
+  ans <- a `op` b
+  pure $ if ans then Yes else Unknown
 
-($>) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($>) = convOp toAlgebra ($>$)
+($<) :: SoP Symbol -> SoP Symbol -> IndexFnM Answer
+($<) = convFME ($<$)
 
-($>=) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($>=) = convOp toAlgebra ($>=$)
+($<=) :: SoP Symbol -> SoP Symbol -> IndexFnM Answer
+($<=) = convFME ($<=$)
 
-($==) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($==) = convOp toAlgebra ($==$)
+($>) :: SoP Symbol -> SoP Symbol -> IndexFnM Answer
+($>) = convFME ($>$)
 
-($/=) :: SoP Symbol -> SoP Symbol -> IndexFnM Bool
-($/=) = convOp toAlgebra ($/=$)
+($>=) :: SoP Symbol -> SoP Symbol -> IndexFnM Answer
+($>=) = convFME ($>=$)
+
+($==) :: SoP Symbol -> SoP Symbol -> IndexFnM Answer
+($==) = convFME ($==$)
+
+($/=) :: SoP Symbol -> SoP Symbol -> IndexFnM Answer
+($/=) = convFME ($/=$)
 
 infixr 4 $<
 

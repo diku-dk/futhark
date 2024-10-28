@@ -16,7 +16,7 @@ data Symbol
       (SoP Symbol) -- lower bound
       (SoP Symbol) -- upper bound
       Symbol
-  | Apply Symbol [SoP Symbol]
+  | Apply Symbol [SoP Symbol] -- First argument is Var or Hole.
   | Bool Bool
   | Not Symbol
   | SoP Symbol :< SoP Symbol
