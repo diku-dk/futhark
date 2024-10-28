@@ -54,7 +54,12 @@ rollbackAlgEnv computation = do
 -- x and y are identical.
 -- TODO might be possible to make rollbackAlgEnv more lenient, so as not
 -- to roll back the untranslatable environment? Then this function
--- can be removed.
+-- can be removed. On the other hand, since we are often doing a linear search
+-- in that env, it may be nice have it cleared.
+-- TODO make this the "soft" rollback, that leaves in place the untranslatable
+-- environment. And then switch the use of algebraContext and rollbackAlgEnv.
+-- This way translations can be shared between branches and handleQuantifiers
+-- only called once; less work, I guess.
 algebraContext :: ASTMappable Symbol a => a -> IndexFnM b -> IndexFnM b
 algebraContext x m = rollbackAlgEnv $ do
   _ <- handleQuantifiers x
@@ -235,25 +240,19 @@ toAlgebra_ sym@(Idx xs i) = do
   pure $ Algebra.Idx (idxSym booltype vn) j
 -- toAlgebra_ (Indicator p) = handleBoolean p
 toAlgebra_ sym@(Apply (Var f) [x]) = do
-  -- TODO refactor
-  f_is_bool <- askProperty (Algebra.Var f) Algebra.Boolean
   res <- search sym
-  case res of
-    Nothing -> do
-      vn <- addUntrans sym
-      x' <- mapSymSoP2M_ toAlgebra_ x
-      when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
-      pure $ Algebra.Idx (idxSym f_is_bool vn) x'
-    Just (vn, Just (_hole, idx)) -> do
-      idx' <- mapSymSoP2M_ toAlgebra_ idx
-      when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
-      booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
-      pure $ Algebra.Idx (idxSym booltype vn) idx'
-    Just (vn, Nothing) -> do
-      x' <- mapSymSoP2M_ toAlgebra_ x
-      when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
-      booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
-      pure $ Algebra.Idx (idxSym booltype vn) x'
+  vn <- case fst <$> res of
+    Nothing -> addUntrans sym
+    Just vn' -> pure vn'
+  let idx = case snd =<< res of
+        Nothing -> x
+        Just (_hole, x') -> x'
+  f_is_bool <- askProperty (Algebra.Var f) Algebra.Boolean
+  when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
+  booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
+  idx' <- mapSymSoP2M_ toAlgebra_ idx
+  pure $ Algebra.Idx (idxSym booltype vn) idx'
+
 toAlgebra_ (Apply {}) = undefined
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
 -- The rest are boolean statements; handled like indicator.
@@ -262,12 +261,12 @@ toAlgebra_ x = handleBoolean x
 handleBoolean :: Symbol -> IndexFnM Algebra.Symbol
 handleBoolean p = do
   res <- search p
-  (vn, sub) <- case res of
-    Just (vn, sub) -> pure (vn, sub)
-    Nothing -> (,Nothing) <$> addUntrans p
+  vn <- case fst <$> res of
+    Nothing -> addUntrans p
+    Just vn -> pure vn
   addRange (Algebra.Var vn) (mkRange (int2SoP 0) (int2SoP 1))
   addProperty (Algebra.Var vn) Algebra.Boolean
-  case sub of
+  case snd =<< res of
     Just (_hole, idx) -> do
       idx' <- mapSymSoP2M_ toAlgebra_ idx
       pure $ Algebra.Idx (Algebra.POR (S.singleton vn)) idx'
