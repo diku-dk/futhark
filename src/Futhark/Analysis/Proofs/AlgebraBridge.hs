@@ -5,17 +5,16 @@ module Futhark.Analysis.Proofs.AlgebraBridge
   )
 where
 
+import Control.Monad ((<=<))
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate
 import Futhark.Analysis.Proofs.AlgebraBridge.Util
-
-import Control.Monad ((<=<))
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrettyM2, debugPrintAlgEnv, debugLn)
+import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesSoP)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), normalizeSymbol)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Proofs.Util (converge)
 import Futhark.SoP.SoP (SoP)
-import Futhark.Analysis.Proofs.Rule (rulesSoP, applyRuleBook)
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -31,8 +30,8 @@ simplify = astMap m
     simplifyAlgebra x = rollbackAlgEnv $ do
       y <- toAlgebra x
       z <- Algebra.simplify y
-      debugPrettyM "simplify" x
-      debugPrettyM "========" y
+      -- debugPrettyM "simplify" x
+      -- debugPrettyM "========" y
       -- debugPrettyM "resultin" z
       -- debugPrintAlgEnv
       -- debugLn
@@ -49,7 +48,6 @@ simplify = astMap m
       x -> pure x
 
     refine relation = do
-      debugPrettyM2 "refine fme" relation
       b <- solve relation
       case b of
         Yes -> pure $ Bool True
