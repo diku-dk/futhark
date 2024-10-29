@@ -13,9 +13,9 @@ module Futhark.Analysis.Proofs.Query
   )
 where
 
-import Control.Monad (foldM, forM_, unless)
-import Data.Maybe (catMaybes, fromJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, addRelSymbol, algebraContext, assume, rollbackAlgEnv, simplify, toRel, ($<), ($<=), ($>))
+import Control.Monad (foldM, unless)
+import Data.Maybe (fromJust)
+import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, addRelSymbol, algebraContext, assume, rollbackAlgEnv, simplify, ($<), ($<=), ($>))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (Iota), IndexFn (..), Iterator (..), casesToList, getCase)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrintAlgEnv, debugT)
@@ -23,7 +23,6 @@ import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toDNF)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (MonadSoP, addRange, mkRange, mkRangeLB, mkRangeUB)
-import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.-.))
 import Language.Futhark (VName)
 
@@ -166,7 +165,7 @@ isFalse p = do
               Yes -> pure Yes
               Unknown -> rollbackAlgEnv $ do
                 let (q, qs) = pick i p_cnf
-                assumeTrue qs
+                mapM_ assume qs
                 isTrue (sym2SoP $ neg q)
         )
         Unknown
@@ -179,10 +178,6 @@ isFalse p = do
     pick n qs =
       let (as, bs) = splitAt n qs
        in (head bs, as <> tail bs)
-
-    assumeTrue qs = do
-      rels <- mapM toRel qs
-      forM_ (catMaybes rels) addRel
 
 isUnknown :: Answer -> Bool
 isUnknown Unknown = True

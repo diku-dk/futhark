@@ -18,22 +18,6 @@ import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, (.-.)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (Pretty (pretty), viaShow)
 
--- | Adds a relation on symbols to the algebraic environment.
-addRelSymbol :: Symbol -> IndexFnM ()
-addRelSymbol (x :/= y) = do
-  -- Can be expressed, if we know which symbol is greater than the other.
-  a <- toAlgebra x
-  b <- toAlgebra y
-  x_is_greater <- a $>$ b
-  if x_is_greater
-    then addRel (a :>: b)
-    else do
-      y_is_greater <- a $<$ b
-      when y_is_greater $ addRel (a :<: b)
-addRelSymbol p = do
-  rel <- toRel p
-  maybe (pure ()) addRel rel
-
 assume :: Symbol -> IndexFnM ()
 assume (Not x) = do
   -- No relation to add; relations are normalized to not have Not.
@@ -49,6 +33,33 @@ assume x = do
   not_x <- toAlgebraSymbol $ neg x
   when booltype $ addEquiv not_x (int2SoP 0)
   addRelSymbol x -- No-op if x is not a relation.
+
+-- | Adds a relation on symbols to the algebraic environment.
+addRelSymbol :: Symbol -> IndexFnM ()
+addRelSymbol p = do
+  rel <- toRel p
+  maybe (pure ()) addRel rel
+  where
+    toRel = runMaybeT . toRel_
+
+    convOp transf op x y = do
+      a <- transf x
+      b <- transf y
+      a `op` b
+
+    liftOp op a b = pure $ a `op` b
+    convCmp op = convOp (lift . toAlgebra) (liftOp op)
+
+    toRel_ :: Symbol -> MaybeT IndexFnM (Rel Algebra.Symbol)
+    toRel_ (x :< y) = convCmp (:<:) x y
+    toRel_ (x :<= y) = convCmp (:<=:) x y
+    toRel_ (x :> y) = convCmp (:>:) x y
+    toRel_ (x :>= y) = convCmp (:>=:) x y
+    toRel_ (x :== y) = convCmp (:==:) x y
+    toRel_ (x :&& y) = convOp toRel_ (liftOp (:&&:)) x y
+    toRel_ (x :|| y) = convOp toRel_ (liftOp (:||:)) x y
+    -- toRel_ (x :/= y) = convCmp (:/=:) x y -- This won't work with addRel.
+    toRel_ _ = fail ""
 
 -- | Add relations derived from the iterator to the algebraic environment.
 addRelIterator :: Iterator -> IndexFnM ()
@@ -79,34 +90,6 @@ addRelIterator (Forall i dom) = case dom of
           addRange x (Range (S.singleton lb) c mempty)
         _ -> pure ()
 addRelIterator _ = pure ()
-
-toRel :: Symbol -> IndexFnM (Maybe (Rel Algebra.Symbol))
-toRel = runMaybeT . toRel_
-  where
-    convOp transf op x y = do
-      a <- transf x
-      b <- transf y
-      a `op` b
-
-    liftOp op a b = pure $ a `op` b
-    convCmp op = convOp (lift . toAlgebra) (liftOp op)
-
-    toRel_ :: Symbol -> MaybeT IndexFnM (Rel Algebra.Symbol)
-    toRel_ (x :< y) = convCmp (:<:) x y
-    toRel_ (x :<= y) = convCmp (:<=:) x y
-    toRel_ (x :> y) = convCmp (:>:) x y
-    toRel_ (x :>= y) = convCmp (:>=:) x y
-    toRel_ (x :== y) = convCmp (:==:) x y
-    toRel_ (x :/= y) = convCmp (:/=:) x y
-    toRel_ (x :&& y) = convOp toRel_ (liftOp (:&&:)) x y
-    toRel_ (x :|| y) = convOp toRel_ (liftOp (:||:)) x y
-    toRel_ _ = fail ""
-
-convOp :: (Monad m) => (t1 -> m t2) -> (t2 -> t2 -> m b) -> t1 -> t1 -> m b
-convOp transf op x y = do
-  a <- transf x
-  b <- transf y
-  a `op` b
 
 -- Fourer Motzkin Elimination solver may return True or False.
 -- True means the query holds. False means "I don't know".

@@ -22,6 +22,7 @@ import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 import Futhark.Analysis.Proofs.Unify (unify, Substitution)
 import Futhark.SoP.Monad (addProperty)
 import qualified Futhark.Analysis.Proofs.AlgebraPC.Symbol as Algebra
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (algebraContext)
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -90,8 +91,9 @@ mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ _params body _ _ _) = do
   debugPrettyM "\n====\nmkIndexFnValBind:\n\n" val
   indexfn <- forward body >>= refineAndBind vn
   -- insertTopLevel vn (params, indexfn)
-  algenv <- gets algenv
-  debugPrettyM "mkIndexFnValBind AlgEnv\n" algenv
+  _ <- algebraContext indexfn $ do
+      alg <- gets algenv
+      debugPrettyM "Algebra context for indexfn:\n" alg
   pure indexfn
 
 refineAndBind :: E.VName -> IndexFn -> IndexFnM IndexFn
