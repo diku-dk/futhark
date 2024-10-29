@@ -17,6 +17,7 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, (.-.))
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
+import Futhark.Util.Pretty (Pretty (pretty), viaShow)
 
 -- | Adds a relation on symbols to the algebraic environment.
 addRelSymbol :: Symbol -> IndexFnM ()
@@ -109,6 +110,9 @@ convOp transf op x y = do
 -- True means the query holds. False means "I don't know".
 data Answer = Yes | Unknown
   deriving (Show, Eq)
+
+instance Pretty Answer where
+  pretty = viaShow
 
 convFME :: (SoP Algebra.Symbol -> SoP Algebra.Symbol -> IndexFnM Bool) -> SoP Symbol -> SoP Symbol -> IndexFnM Answer
 convFME op x y = do

@@ -540,6 +540,7 @@ test-suite unit
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
+      Futhark.Analysis.Proofs.EndToEndTests
       Futhark.Analysis.Proofs.IndexFnTests
       Futhark.Analysis.Proofs.QueryTests
       Futhark.Analysis.Proofs.RewriteTests
