@@ -79,7 +79,6 @@ tests =
       testCase "Permutation of domain" $
         run
           ( \(i, j, _, n, x, _, _) -> do
-              debugOn
               let xs_i = Idx (Var x) (sVar i)
               let xs_j = Idx (Var x) (sVar j)
               let fn = IndexFn

@@ -122,6 +122,9 @@ sub s x = rep (mapping s) <$> rename (vns s) x
 class Hole u where
   justHole :: u -> Maybe VName
 
+instance (Hole u, Ord u) => Hole (SoP u) where
+  justHole sop = justSym sop >>= justHole
+
 class (Renameable v) => Unify v u where
   -- `unify_ k eq` is the unification algorithm from Sieg and Kauffmann,
   -- Unification for quantified formulae, 1993.
@@ -267,5 +270,5 @@ instance
   where
   -- Unify on permutations of terms.
   unify_ k x y
-    | Just h <- justSym x >>= justHole = pure $ addRep h y mempty
+    | Just h <- justHole x = pure $ addRep h y mempty
     | otherwise = unifyAnyPerm k (sopToList x) (sopToList y)

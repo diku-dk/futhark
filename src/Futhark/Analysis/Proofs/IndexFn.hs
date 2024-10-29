@@ -41,6 +41,10 @@ getCase n (Cases cs) = NE.toList cs !! n
 getPredicates :: IndexFn -> [Symbol]
 getPredicates (IndexFn _ cs) = map fst $ casesToList cs
 
+getIterator :: IndexFn -> Maybe VName
+getIterator (IndexFn (Forall i _) _) = Just i
+getIterator _ = Nothing
+
 domainSegStart :: Domain -> SoP Symbol
 domainSegStart (Iota _) = int2SoP 0
 domainSegStart (Cat _ _ b) = b

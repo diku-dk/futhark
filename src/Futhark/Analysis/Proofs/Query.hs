@@ -98,6 +98,8 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
           --           1 <= n
           --
           -- We proceed case-by-case.
+          debugPrettyM "prove" fn
+          debugPrintAlgEnv
           let f_rel_g rel = do
                 f_rel_g1 <- rollbackAlgEnv $ do
                   -- Case i < j => f(i) `rel` g(j).

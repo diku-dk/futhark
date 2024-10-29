@@ -26,7 +26,7 @@ import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2So
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 import Control.Monad.RWS (gets, modify)
-import Futhark.Analysis.Proofs.IndexFn (IndexFn, getPredicates)
+import Futhark.Analysis.Proofs.IndexFn (IndexFn, getPredicates, getIterator)
 
 rollbackAlgEnv :: IndexFnM a -> IndexFnM a
 rollbackAlgEnv computation = do
@@ -35,7 +35,7 @@ rollbackAlgEnv computation = do
   modify (\env -> env {algenv = alg})
   pure res
 
--- Do this action inside an Algebra "context" created for this AST, ensuring:
+-- Do this action inside an Algebra "context" created for an IndexFn, ensuring:
 -- (1) Modifications to the Algebra environment are ephemeral; they are
 -- rolled back once the action is done.
 -- (2) Translations of symbols in the AST are idempotent across environment
@@ -54,37 +54,38 @@ rollbackAlgEnv computation = do
 --     ...
 -- ```
 -- x and y are identical.
--- TODO might be possible to make rollbackAlgEnv more lenient, so as not
--- to roll back the untranslatable environment? Then this function
--- can be removed. On the other hand, since we are often doing a linear search
--- in that env, it may be nice have it cleared.
--- TODO make this the "soft" rollback, that leaves in place the untranslatable
--- environment. And then switch the use of algebraContext and rollbackAlgEnv.
--- This way translations can be shared between branches and handleQuantifiers
--- only called once; less work, I guess.
--- algebraContext :: ASTMappable Symbol a => a -> IndexFnM b -> IndexFnM b
--- algebraContext x m = rollbackAlgEnv $ do
---   _ <- handleQuantifiers x
---   m
 algebraContext :: IndexFn -> IndexFnM b -> IndexFnM b
 algebraContext fn m = rollbackAlgEnv $ do
   let ps = getPredicates fn
   mapM_ trackBooleanNames ps
   _ <- handleQuantifiers fn
+  case getIterator fn of
+    Just i -> mapM_ (handlePreds i) ps
+    Nothing -> pure ()
   m
+  where
+    -- c[i] == y && d[i] => {c[i] == y: p[hole1], d[i]: q[hole2]}
+    handlePreds i (x :&& y) = handlePreds i x >> handlePreds i y
+    handlePreds i (x :|| y) = handlePreds i x >> handlePreds i y
+    handlePreds i x = do
+      res <- search x
+      case res of
+        Nothing -> do
+          vn <- addUntrans =<< x `removeQuantifier` i
+          addProperty (Algebra.Var vn) Algebra.Boolean
+        _ -> pure ()
 
--- Add boolean tag to IndexFn layer names where applicable.
-trackBooleanNames :: Symbol -> IndexFnM ()
-trackBooleanNames (Var vn) = do
-  addProperty (Algebra.Var vn) Algebra.Boolean
-trackBooleanNames (Idx (Var vn) _) = do
-  addProperty (Algebra.Var vn) Algebra.Boolean
-trackBooleanNames (Apply (Var vn) _) = do
-  addProperty (Algebra.Var vn) Algebra.Boolean
-trackBooleanNames (Not x) = trackBooleanNames x
-trackBooleanNames (x :&& y) = trackBooleanNames x >> trackBooleanNames y
-trackBooleanNames (x :|| y) = trackBooleanNames x >> trackBooleanNames y
-trackBooleanNames _ = pure ()
+    -- Add boolean tag to IndexFn layer names where applicable.
+    trackBooleanNames (Var vn) = do
+      addProperty (Algebra.Var vn) Algebra.Boolean
+    trackBooleanNames (Idx (Var vn) _) = do
+      addProperty (Algebra.Var vn) Algebra.Boolean
+    trackBooleanNames (Apply (Var vn) _) = do
+      addProperty (Algebra.Var vn) Algebra.Boolean
+    trackBooleanNames (Not x) = trackBooleanNames x
+    trackBooleanNames (x :&& y) = trackBooleanNames x >> trackBooleanNames y
+    trackBooleanNames (x :|| y) = trackBooleanNames x >> trackBooleanNames y
+    trackBooleanNames _ = pure ()
 
 -----------------------------------------------------------------------------
 -- Translation from Algebra to IndexFn layer.
