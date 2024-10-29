@@ -2,21 +2,20 @@
 module Futhark.Analysis.Proofs.AlgebraBridge.Util where
 
 import Control.Monad (when)
-import Control.Monad.RWS (gets, modify)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (toAlgebra, toAlgebraSymbol, isBooleanM)
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (isBooleanM, toAlgebra, toAlgebraSymbol)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
-import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (..), debugPrettyM2, debugPrettyM)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
+import Futhark.Analysis.Proofs.Monad (IndexFnM)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
-import Futhark.SoP.Monad (addRange, mkRange, askProperty, addEquiv, addProperty)
+import Futhark.SoP.Monad (addEquiv, addRange, mkRange)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, (.-.))
 import Futhark.SoP.SoP qualified as SoP
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 import Futhark.Util.Pretty (Pretty (pretty), viaShow)
 
 -- | Adds a relation on symbols to the algebraic environment.
@@ -37,12 +36,12 @@ addRelSymbol p = do
 
 assume :: Symbol -> IndexFnM ()
 assume (Not x) = do
+  -- No relation to add; relations are normalized to not have Not.
   booltype <- isBooleanM x
   x' <- toAlgebraSymbol x
   when booltype $ addEquiv x' (int2SoP 0)
   not_x <- toAlgebraSymbol $ neg x
   when booltype $ addEquiv not_x (int2SoP 1)
-  -- No relation to add; relations are normalized to not have Not.
 assume x = do
   booltype <- isBooleanM x
   x' <- toAlgebraSymbol x

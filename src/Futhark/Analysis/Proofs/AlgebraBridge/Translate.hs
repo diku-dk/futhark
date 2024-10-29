@@ -9,11 +9,13 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
   )
 where
 
-import Control.Monad (unless, (<=<), when)
+import Control.Monad (unless, when, (<=<))
+import Control.Monad.RWS (gets, modify)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
+import Futhark.Analysis.Proofs.IndexFn (IndexFn, getIterator, getPredicates)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
@@ -21,12 +23,10 @@ import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), rep, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Futhark.SoP.Monad (addProperty, addRange, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange, askProperty)
+import Futhark.SoP.Monad (addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
-import Control.Monad.RWS (gets, modify)
-import Futhark.Analysis.Proofs.IndexFn (IndexFn, getPredicates, getIterator)
 
 rollbackAlgEnv :: IndexFnM a -> IndexFnM a
 rollbackAlgEnv computation = do
