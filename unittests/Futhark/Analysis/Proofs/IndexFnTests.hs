@@ -228,7 +228,6 @@ tests =
         )
     ]
   where
-    -- mkTest :: String -> IndexFn -> TestTree
     mkTest programFile expectedPat = testCase programFile $ do
       (_, imports, vns) <- readProgramOrDie programFile
       let vb = getLastValBind imports
