@@ -4,7 +4,7 @@ module Futhark.Fmt.Monad
     nil,
     nest,
     stdNest,
-    code,
+    text,
     space,
     line,
     softline,
@@ -191,7 +191,7 @@ fmtCopyLoc a = do
           eOff = posCoff ePos
        in case T.decodeUtf8' $ BS.take (eOff - sOff) $ BS.drop sOff f of
             Left err -> error $ show err
-            Right lit -> code lit
+            Right lit -> text lit
     NoLoc -> error "Formatting term without location"
 
 runFormat :: FmtM a -> [Comment] -> T.Text -> a
@@ -260,20 +260,20 @@ stdIndent = indent 2
 softStdIndent :: (Format a) => a -> FmtM Fmt
 softStdIndent = softIndent 2
 
-code :: T.Text -> FmtM Fmt
-code = pure . P.pretty
+text :: T.Text -> FmtM Fmt
+text = pure . P.pretty
 
 colon :: FmtM Fmt
 colon = pure P.colon
 
 brackets :: (Format a) => a -> FmtM Fmt
-brackets a = code "[" <:> fmt a <:> code "]"
+brackets a = text "[" <:> fmt a <:> text "]"
 
 braces :: (Format a) => a -> FmtM Fmt
-braces a = code "{" <:> fmt a <:> code "}"
+braces a = text "{" <:> fmt a <:> text "}"
 
 parens :: (Format a) => a -> FmtM Fmt
-parens a = code "(" <:> fmt a <:> code ")"
+parens a = text "(" <:> fmt a <:> text ")"
 
 (<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
 (<+/>) a b =
