@@ -18,25 +18,28 @@ import Language.C.Syntax qualified as C
 import Text.PrettyPrint.Mainland qualified as MPP
 import Text.PrettyPrint.Mainland.Class qualified as MPP
 
+render :: MPP.Doc -> String
+render = MPP.pretty 8000
+
 -- | Prettyprint a C expression.
 expText :: C.Exp -> T.Text
-expText = T.pack . MPP.pretty 8000 . MPP.ppr
+expText = T.pack . render . MPP.ppr
 
 -- | Prettyprint a list of C definitions.
 definitionsText :: [C.Definition] -> T.Text
-definitionsText = T.unlines . map (T.pack . MPP.pretty 8000 . MPP.ppr)
+definitionsText = T.unlines . map (T.pack . render . MPP.ppr)
 
 -- | Prettyprint a single C type.
 typeText :: C.Type -> T.Text
-typeText = T.pack . MPP.pretty 8000 . MPP.ppr
+typeText = T.pack . render . MPP.ppr
 
 -- | Prettyprint a single identifier.
 idText :: C.Id -> T.Text
-idText = T.pack . MPP.pretty 8000 . MPP.ppr
+idText = T.pack . render . MPP.ppr
 
 -- | Prettyprint a single function.
 funcText :: C.Func -> T.Text
-funcText = T.pack . MPP.pretty 8000 . MPP.ppr
+funcText = T.pack . render . MPP.ppr
 
 -- | Prettyprint a list of functions.
 funcsText :: [C.Func] -> T.Text
