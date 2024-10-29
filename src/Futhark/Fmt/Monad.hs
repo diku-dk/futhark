@@ -163,7 +163,7 @@ lineLayout a =
       if posLine start == posLine end
         then SingleLine
         else MultiLine
-    NoLoc -> undefined -- should throw an error
+    NoLoc -> error "Formatting term without location"
 
 lineLayoutList :: (Located a) => [a] -> Layout
 lineLayoutList as =
@@ -174,7 +174,7 @@ lineLayoutList as =
     auxiliary a =
       case locOf a of
         Loc start end -> [posLine start, posLine end]
-        NoLoc -> undefined -- should throw an error
+        NoLoc -> error "Formatting term without location"
 
 popComments :: FmtM Fmt
 popComments = do
@@ -192,13 +192,7 @@ fmtCopyLoc a = do
        in case T.decodeUtf8' $ BS.take (eOff - sOff) $ BS.drop sOff f of
             Left err -> error $ show err
             Right lit -> code lit
-    NoLoc -> undefined -- should throw an error TODO
-
-(<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
-(<+/>) a b =
-  case lineLayout b of
-    MultiLine -> a </> stdIndent b
-    SingleLine -> a <+> b
+    NoLoc -> error "Formatting term without location"
 
 runFormat :: FmtM a -> [Comment] -> T.Text -> a
 runFormat format cs file = runIdentity $ evalStateT (runReaderT format e) s
@@ -224,13 +218,6 @@ line = pure P.line
 
 softline :: FmtM Fmt
 softline = space <|> line
-
-(<|>) :: (Format a, Format b) => a -> b -> FmtM Fmt
-a <|> b = do
-  lo <- ask
-  if lo == SingleLine
-    then fmt a
-    else fmt b
 
 comment :: T.Text -> FmtM Fmt
 comment c = pure $ P.pretty c <> P.line
@@ -276,6 +263,9 @@ softStdIndent = softIndent 2
 code :: T.Text -> FmtM Fmt
 code = pure . P.pretty
 
+colon :: FmtM Fmt
+colon = pure P.colon
+
 brackets :: (Format a) => a -> FmtM Fmt
 brackets a = code "[" <:> fmt a <:> code "]"
 
@@ -284,6 +274,12 @@ braces a = code "{" <:> fmt a <:> code "}"
 
 parens :: (Format a) => a -> FmtM Fmt
 parens a = code "(" <:> fmt a <:> code ")"
+
+(<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
+(<+/>) a b =
+  case lineLayout b of
+    MultiLine -> a </> stdIndent b
+    SingleLine -> a <+> b
 
 (<:/>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a <:/> b = a <:> (nil <|> line) <:> b
@@ -297,8 +293,12 @@ a <+> b = a <:> space <:> b
 (</>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a </> b = a <:> softline <:> b
 
-colon :: FmtM Fmt
-colon = pure P.colon
+(<|>) :: (Format a, Format b) => a -> b -> FmtM Fmt
+a <|> b = do
+  lo <- ask
+  if lo == SingleLine
+    then fmt a
+    else fmt b
 
 sepFilter :: (Format a, Format b) => [Bool] -> a -> [b] -> FmtM Fmt
 sepFilter bs s xs =

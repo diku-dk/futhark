@@ -11,67 +11,35 @@ import Language.Futhark.Parser
     parseFutharkWithComments,
   )
 import Prettyprinter.Internal (Pretty)
-
-{-
-import Debug.Trace
-
-debug :: Show a => a -> a
-debug a = traceShow a a
--}
-
--- The formatter implemented here is very crude and incomplete.  The
--- only syntactical construct it can currently handle is type
--- abbreviations without parameters, e.g:
---
---  type t = (bool, i32)
 --
 -- A *formatting function* is a function of type
 --
---   a -> FmtM Fmt
+--   Format a => a -> FmtM Fmt
 --
 -- where 'a' is some syntactical object, e.g. UncheckedTypeExp.  The
--- [Comment] list is a sorted list of "residual comments" that have
--- yet to be injected into the output.  A formatting function returns
--- a new list of comments (which may or may not be identical to the
--- input), as well as the formatted representation of 'a' as a 'Fmt'
--- value.
---
--- DONE: refactor this entire thing so that the maintenance of the
--- residual comments is encapsulated monadically.  Use a State monad
--- to keep the list.  This will make the code much cleaner.
-
--- DONE: Name monad encapsulating comments something better than "Smth"
+-- FmtM is state monad with state: [Comment], a list of sorted "residual 
+-- comments" that have yet to be injected into the output.  
+-- A formatting function returns the formatted representation of 'a'
+-- as a 'Fmt' value as well a the formatted representation of any comments
+-- before 'a', and updates the FmtM state by removing comments
+-- the printed comments.
 
 -- TODO: ensure that doc comments (that start with "-- |" and are
 -- connected to definitions) are always separated from other comments
 -- with a single newline character. Question: Exactly what is meant by this?
--- Question:
--- Test
-
--- \| This is a type
-
--- this is a type
--- type test = (i32, i32) (Not that interesting left for now)
-
--- DONE: Fix formatting of several lines of comments
--- DONE: prettyprint in a nicer way than one line per terminal.
---
--- DONE: support all syntactical constructs.
 
 fmtName :: Name -> FmtM Fmt
 fmtName = code . nameToText
 
 fmtNameParen :: Name -> FmtM Fmt
 fmtNameParen name
-  | operatorName name = parens $ fmtName name -- (doesn't seem like this needs to always be parenthesized?)
+  | operatorName name = parens $ fmtName name 
   | otherwise = fmtName name
 
 fmtPretty :: (Pretty a) => a -> FmtM Fmt
 fmtPretty = code . prettyText
 
 -- | Documentation comments are always optional, so this takes a 'Maybe'.
--- TODO: make special documentation comments in Fmt?
--- TODO: Add "--" and "-- |" in pretty printer
 instance Format (Maybe DocComment) where
   fmt (Just (DocComment x loc)) =
     prependComments loc $ sep nil $ prefixes (T.lines x)
@@ -97,16 +65,16 @@ instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = prependComments loc $ fmtQualName v
   fmt (TETuple ts loc) =
     prependComments loc $ parens $ sepSoftline (code ",") ts
-  fmt (TEParens te loc) = prependComments loc $ parens te -- not sure this is correct
+  fmt (TEParens te loc) = prependComments loc $ parens te 
   fmt (TERecord fs loc) =
     prependComments loc $ braces $ sepSoftline (code ",") fields
     where
       fields = fmtFieldType <$> fs
-  fmt (TEArray se te loc) = prependComments loc $ se <:> te -- not sure if this can be multi line
+  fmt (TEArray se te loc) = prependComments loc $ se <:> te 
   -- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
-  fmt (TEUnique te loc) = prependComments loc $ code "*" <:> te -- not sure if this can be multi line
+  fmt (TEUnique te loc) = prependComments loc $ code "*" <:> te 
   -- I am not sure I guess applying a higher kinded type to some type expression
-  fmt (TEApply te tArgE loc) = prependComments loc $ te <+> tArgE -- not sure if this can be multi lin
+  fmt (TEApply te tArgE loc) = prependComments loc $ te <+> tArgE 
   -- this is "->"
   fmt (TEArrow name te0 te1 loc) =
     prependComments loc $ fmtParamType name te0 <+> code "->" </> softStdIndent te1
@@ -116,7 +84,7 @@ instance Format UncheckedTypeExp where
       sep (softline <:> code "|" <:> space) $
         map fmtSumTypeConstr tes
   fmt (TEDim dims te loc) =
-    prependComments loc $ code "?" <:> dims' <:> code "." <:> te -- not sure how to format this as multiple lines
+    prependComments loc $ code "?" <:> dims' <:> code "." <:> te
     where
       dims' = sep nil $ map (brackets . fmtName) dims
 
@@ -167,7 +135,8 @@ instance Format (UncheckedPat t) where
         sepSoftline (code ",") $
           map fmtFieldPat pats
     where
-      fmtFieldPat (name, t) = fmtName name <+> code "=" <+> t -- Currently it allways adds the fields it seems. I think it has to do this.
+      -- Currently it always adds the fields it seems. I think it has to do this.
+      fmtFieldPat (name, t) = fmtName name <+> code "=" <+> t 
   fmt (PatParens pat loc) =
     prependComments loc $ code "(" <:> align pat <:/> code ")"
   fmt (Id name _ loc) = prependComments loc $ fmtNameParen name
@@ -232,7 +201,7 @@ instance Format UncheckedExp where
   fmt (Coerce e t _ loc) = prependComments loc $ e <+> code ":>" <+> t
   fmt (Literal _v loc) = prependComments loc $ fmtCopyLoc loc
   fmt (IntLit _v _ loc) = prependComments loc $ fmtCopyLoc loc
-  fmt (FloatLit _v _ loc) = prependComments loc $ fmtCopyLoc loc -- fmtPretty _v -- Not sure how this can be multiline.
+  fmt (FloatLit _v _ loc) = prependComments loc $ fmtCopyLoc loc 
   fmt (TupLit es loc) =
     prependComments loc $
       parens $
@@ -257,12 +226,12 @@ instance Format UncheckedExp where
     prependComments loc $
       src <+> code "with" <+> idxs' <+> stdNest (code "=" </> ve)
     where
-      idxs' = brackets $ sep (code "," <:> space) idxs -- This could account for multiline.
+      idxs' = brackets $ sep (code "," <:> space) idxs
   fmt (RecordUpdate src fs ve _ loc) =
     prependComments loc $
       src <+> code "with" <+> fs' <+> stdNest (code "=" </> ve)
     where
-      fs' = sep (code ".") $ fmtName <$> fs -- This could account for multiline.
+      fs' = sep (code ".") $ fmtName <$> fs 
   fmt (Assert e1 e2 _ loc) =
     prependComments loc $ code "assert" <+> e1 <+> e2
   fmt (Lambda params body rettype _ loc) =
@@ -305,23 +274,12 @@ instance Format UncheckedCase where
   fmt (CasePat p e loc) =
     prependComments loc $ code "case" <+> p <+> code "->" </> softStdIndent e
 
--- matchPat (TuplePat _pats _paramt) _exp = undefined
--- matchPat (RecordPat _namePats _loc) _exp = undefined
--- matchPat (PatParens _pats _loc) _exp = undefined
--- matchPat (Id _names _fs _loc) _exp = undefined
--- matchPat (Wildcard _f _loc) _exp = False
--- matchPat (PatAscription _pats _tyype _loc) _exp = undefined
--- matchPat (PatLit _lit _f _loc) _exp = undefined
--- matchPat (PatConstr _name _f _pats _loc) _exp = undefined
--- matchPat (PatAttr _info _pat _loc) _exp = undefined
-
 instance Format (AppExpBase NoInfo Name) where
   fmt (BinOp (bop, _) _ (x, _) (y, _) loc) =
     prependComments loc $ x </> fmtBinOp bop <+> y
   fmt (Match e cs loc) =
     prependComments loc $ code "match" <+> e </> sep softline (toList cs)
-  -- should omit the initial value expression
-  -- need some way to catch when the value expression match the pattern
+  -- need some way to omit the inital value expression, when this it's trivial
   fmt (Loop sizeparams pat (LoopInitImplicit NoInfo) form loopbody loc) =
     prependComments loc $
       ( (code "loop" `op` sizeparams')
@@ -413,7 +371,6 @@ instance Format (AppExpBase NoInfo Name) where
           UpToExclusive e -> code "..<" <:> e
       step = maybe nil (code ".." <:>) maybe_step
   fmt (If c t f loc) =
-    -- This could be prettier.
     prependComments loc $
       code "if"
         <+> c
@@ -583,7 +540,8 @@ instance Format UncheckedDec where
   fmt (TypeDec tb) = fmt tb -- A type declaration.
   fmt (ModTypeDec tb) = fmt tb -- A module type declation.
   fmt (ModDec tb) = fmt tb -- A module declation.
-  fmt (OpenDec tb loc) = prependComments loc $ code "open" <+> tb -- Adds the local keyword
+  fmt (OpenDec tb loc) = prependComments loc $ code "open" <+> tb 
+  -- Adds the local keyword
   fmt (LocalDec tb loc) = prependComments loc $ code "local" <+> tb
   -- Import declarations.
   fmt (ImportDec path _tb loc) =
