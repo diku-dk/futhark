@@ -64,10 +64,10 @@ fmtSumTypeConstr (name, fs) =
 instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = prependComments loc $ fmtQualName v
   fmt (TETuple ts loc) =
-    prependComments loc $ parens $ sepSoftline (text ",") ts
+    prependComments loc $ parens $ sepLine (text ",") ts
   fmt (TEParens te loc) = prependComments loc $ parens te 
   fmt (TERecord fs loc) =
-    prependComments loc $ braces $ sepSoftline (text ",") fields
+    prependComments loc $ braces $ sepLine (text ",") fields
     where
       fields = fmtFieldType <$> fs
   fmt (TEArray se te loc) = prependComments loc $ se <:> te 
@@ -81,7 +81,7 @@ instance Format UncheckedTypeExp where
   -- This should be "|"
   fmt (TESum tes loc) =
     prependComments loc $
-      sep (softline <:> text "|" <:> space) $
+      sep (line <:> text "|" <:> space) $
         map fmtSumTypeConstr tes
   fmt (TEDim dims te loc) =
     prependComments loc $ text "?" <:> dims' <:> text "." <:> te
@@ -100,7 +100,7 @@ instance Format UncheckedTypeBind where
         <:> l
         <+> fmtName name
         <:> (if null ps then nil else space)
-        <:> localLayoutList ps (align $ sep softline ps)
+        <:> localLayoutList ps (align $ sep line ps)
         <+> text "="
         </> softStdIndent e
 
@@ -128,11 +128,11 @@ instance Format (UncheckedPat t) where
   fmt (TuplePat pats loc) =
     prependComments loc $
       parens $
-        sepSoftline (text ",") pats
+        sepLine (text ",") pats
   fmt (RecordPat pats loc) =
     prependComments loc $
       braces $
-        sepSoftline (text ",") $
+        sepLine (text ",") $
           map fmtFieldPat pats
     where
       -- Currently it always adds the fields it seems. I think it has to do this.
@@ -145,7 +145,7 @@ instance Format (UncheckedPat t) where
   fmt (PatLit _e _ loc) = prependComments loc $ fmtCopyLoc loc
   fmt (PatConstr n _ pats loc) =
     prependComments loc $
-      text "#" <:> fmtName n </> align (sep softline pats)
+      text "#" <:> fmtName n </> align (sep line pats)
   fmt (PatAttr attr pat loc) = prependComments loc $ attr <+> pat
 
 instance Format (FieldBase NoInfo Name) where
@@ -205,19 +205,19 @@ instance Format UncheckedExp where
   fmt (TupLit es loc) =
     prependComments loc $
       parens $
-        sepSoftline (text ",") es
+        sepLine (text ",") es
   fmt (RecordLit fs loc) =
     prependComments loc $
       braces $
-        sepSoftline (text ",") fs
+        sepLine (text ",") fs
   fmt (ArrayVal vs _ loc) =
     prependComments loc $
       brackets $
-        sepSoftline (text ",") vs
+        sepLine (text ",") vs
   fmt (ArrayLit es _ loc) =
     prependComments loc $
       brackets $
-        sepSoftline (text ",") es
+        sepLine (text ",") es
   fmt (StringLit _s loc) = fmtCopyLoc loc
   fmt (Project k e _ loc) = prependComments loc $ e <:> text "." <:> fmtPretty k
   fmt (Negate e loc) = prependComments loc $ text "-" <:> e
@@ -255,7 +255,7 @@ instance Format UncheckedExp where
     where
       idxs' = brackets $ sep (text "," <:> space) idxs
   fmt (Constr n cs _ loc) =
-    prependComments loc $ text "#" <:> fmtName n <+> align (sep softline cs)
+    prependComments loc $ text "#" <:> fmtName n <+> align (sep line cs)
   fmt (Attr attr e loc) = prependComments loc $ align (attr </> e)
   fmt (AppExp e _) = fmt e
 
@@ -278,7 +278,7 @@ instance Format (AppExpBase NoInfo Name) where
   fmt (BinOp (bop, _) _ (x, _) (y, _) loc) =
     prependComments loc $ x </> fmtBinOp bop <+> y
   fmt (Match e cs loc) =
-    prependComments loc $ text "match" <+> e </> sep softline (toList cs)
+    prependComments loc $ text "match" <+> e </> sep line (toList cs)
   -- need some way to omit the inital value expression, when this it's trivial
   fmt (Loop sizeparams pat (LoopInitImplicit NoInfo) form loopbody loc) =
     prependComments loc $
@@ -308,7 +308,7 @@ instance Format (AppExpBase NoInfo Name) where
     prependComments loc $
       (e <:>) $
         brackets $
-          sepSoftline (text ",") idxs
+          sepLine (text ",") idxs
   fmt (LetPat sizes pat e body loc) =
     prependComments loc $
       ( text "let"
@@ -427,8 +427,8 @@ instance Format UncheckedValBind where
         </> softStdIndent body
     where
       attrs' = sep space attrs
-      tparams' = localLayoutList tparams $ align $ sep softline tparams
-      args' = localLayoutList args $ align $ sep softline args
+      tparams' = localLayoutList tparams $ align $ sep line tparams
+      args' = localLayoutList args $ align $ sep line args
       retdecl' =
         case retdecl of
           Just a -> text ":" <+> a <:> space
@@ -451,7 +451,7 @@ instance Format UncheckedSpec where
     prependComments loc $
       doc <:> text "type" <+> l <:> sub
     where
-      sub = sepFilter [True, not $ null ps] softline [fmtName name, align (sep softline ps)]
+      sub = sepFilter [True, not $ null ps] line [fmtName name, align (sep line ps)]
   fmt (ValSpec name ps te _ doc loc) =
     prependComments loc $
       doc
@@ -460,7 +460,7 @@ instance Format UncheckedSpec where
         <:> text ":"
         <+> te
     where
-      sub = sepFilter [True, not $ null ps] softline [fmtName name, align (sep softline ps)]
+      sub = sepFilter [True, not $ null ps] line [fmtName name, align (sep line ps)]
   fmt (ModSpec name mte doc loc) =
     prependComments loc $ doc <:> text "module" <+> fmtName name <:> text ":" <+> mte
   fmt (IncludeSpec mte loc) = prependComments loc $ text "include" <+> mte
@@ -470,7 +470,7 @@ instance Format UncheckedModTypeExp where
   fmt (ModTypeParens mte loc) =
     prependComments loc $ text "(" <:> align mte <:/> text ")"
   fmt (ModTypeSpecs sbs loc) =
-    prependComments loc $ text "{" <:/> softStdIndent (sep softline sbs) <:/> text "}"
+    prependComments loc $ text "{" <:/> softStdIndent (sep line sbs) <:/> text "}"
   fmt (ModTypeWith mte (TypeRef v ps td _) loc) =
     prependComments loc $
       mte <+> text "with" <+> fmtPretty v `ps_op` sep space ps <+> text "=" <+> td
@@ -503,14 +503,14 @@ instance Format UncheckedModBind where
         <:> text "="
         <:> te'
     where
-      te' = fmtByLayout te (softline <:> softStdIndent te) (space <:> te)
+      te' = fmtByLayout te (line <:> softStdIndent te) (space <:> te)
       sig' = fmtSig sig
       fmtSig Nothing = space
       fmtSig (Just (s', _f)) = text ":" <+> s' <:> space
       ps' =
         case ps of
           [] -> nil
-          _any -> space <:> localLayoutList ps (align $ sep softline ps)
+          _any -> space <:> localLayoutList ps (align $ sep line ps)
 
 -- All of these should probably be "extra" indented
 instance Format UncheckedModExp where

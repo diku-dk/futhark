@@ -6,10 +6,10 @@ module Futhark.Fmt.Monad
     stdNest,
     text,
     space,
+    hardline,
     line,
-    softline,
     sep,
-    sepSoftline,
+    sepLine,
     brackets,
     braces,
     parens,
@@ -213,11 +213,11 @@ nest i a = fmt a <|> (P.nest i <$> fmt a)
 space :: FmtM Fmt
 space = pure P.space
 
-line :: FmtM Fmt
-line = pure P.line
+hardline :: FmtM Fmt
+hardline = pure P.line
 
-softline :: FmtM Fmt
-softline = space <|> line
+line :: FmtM Fmt
+line = space <|> hardline
 
 comment :: T.Text -> FmtM Fmt
 comment c = pure $ P.pretty c <> P.line
@@ -227,19 +227,19 @@ sep s as = aux <$> fmt s <*> mapM fmt as
   where
     aux s' = P.concatWith (\a b -> a <> s' <> b)
 
-sepSoftline :: (Format a, Format b) => a -> [b] -> FmtM Fmt
-sepSoftline s = sep (s <:> space <|> line <:> s)
+sepLine :: (Format a, Format b) => a -> [b] -> FmtM Fmt
+sepLine s = sep (s <:> space <|> hardline <:> s)
 
 sepArgs :: (Format a, Located a) => [a] -> FmtM Fmt
 sepArgs [] = nil
 sepArgs ls
   | any ((== MultiLine) . lineLayout) ls =
       sep nil $ zipWith3 auxiliary [0 :: Int ..] los ls
-  | otherwise = align $ sep softline ls
+  | otherwise = align $ sep line ls
   where
     auxiliary 0 _ x = fmt x
     auxiliary _ SingleLine x = space <:> x
-    auxiliary _ MultiLine x = line <:> x
+    auxiliary _ MultiLine x = hardline <:> x
     los = lineLayout <$> ls
 
 stdNest :: (Format a) => a -> FmtM Fmt
@@ -282,7 +282,7 @@ parens a = text "(" <:> fmt a <:> text ")"
     SingleLine -> a <+> b
 
 (<:/>) :: (Format a, Format b) => a -> b -> FmtM Fmt
-a <:/> b = a <:> (nil <|> line) <:> b
+a <:/> b = a <:> (nil <|> hardline) <:> b
 
 (<:>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a <:> b = (<>) <$> fmt a <*> fmt b
@@ -291,7 +291,7 @@ a <:> b = (<>) <$> fmt a <*> fmt b
 a <+> b = a <:> space <:> b
 
 (</>) :: (Format a, Format b) => a -> b -> FmtM Fmt
-a </> b = a <:> softline <:> b
+a </> b = a <:> line <:> b
 
 (<|>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a <|> b = do
@@ -319,8 +319,8 @@ sepDecs as@(x : xs) = sep space as <|> (x <:> auxiliary x xs)
       where
         p =
           case (lineLayout y, lineLayout prev) of
-            (SingleLine, SingleLine) -> softline
-            _any -> softline <:> softline
+            (SingleLine, SingleLine) -> line
+            _any -> line <:> line
 
 layoutOpts :: P.LayoutOptions
 layoutOpts = P.LayoutOptions P.Unbounded
