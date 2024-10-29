@@ -31,6 +31,24 @@ tests =
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
             prove (PermutationOfZeroTo n) fn
         )
+        Yes,
+      mkTest
+        "tests/indexfn/part2indices_numeric_conds.fut"
+        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+            prove (PermutationOfZeroTo n) fn
+        )
+        Yes,
+      mkTest
+        "tests/indexfn/part2indices_predicatefn.fut"
+        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+            prove (PermutationOfZeroTo n) fn
+        )
+        Yes,
+      mkTest
+        "tests/indexfn/part2indices_predicatefn2.fut"
+        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+            prove (PermutationOfZeroTo n) fn
+        )
         Yes
     ]
   where
