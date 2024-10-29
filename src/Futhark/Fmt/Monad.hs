@@ -113,7 +113,12 @@ localLayoutList a m = do
     MultiLine -> local (const $ lineLayoutList a) m
     SingleLine -> m
 
--- | parses comments infront of a and converts a to fmt using formatting function f
+-- | This function uses the location of @a@ and prepends comments if the
+-- comments location is less than the location of @a@. It format @b@ in
+-- accordance with if @a@ is singline or multiline using 'localLayout'. At last
+-- it internally sets the state of the 'FmtM' monad to consider trailing
+-- comments if they exists. This function should be always used when possible to
+-- warp expression around.
 prependComments :: (Located a, Format b) => a -> b -> FmtM Fmt
 prependComments a b = localLayout a $ do
   c <- fmtComments a
@@ -121,25 +126,32 @@ prependComments a b = localLayout a $ do
   setTrailingComment a
   pure $ c <> f
 
+-- | The internal state of the formatter monad 'FmtM'.
 data FmtState = FmtState
-  { -- | The list comments
+  { -- | The list comments that will be inserted, ordered by smallest location to larges.
     comments :: [Comment], 
-    -- The original source file
+    -- The original source file that is being formatted.
     file :: BS.ByteString,
-    -- pending comment to be inserted before next newline (reverse order)
-    pendingComments :: !(Maybe Comment),
-    -- keeps track of what type the last output was
+    -- Pending comment to be inserted before next newline (reverse order).
+    pendingComments :: ![Comment],
+    -- Keeps track of what type the last output was.
     lastOutput :: !(Maybe LastOutput)
   }
   deriving (Show, Eq, Ord)
 
+-- | A data type to describe the last output used during formatting.
 data LastOutput = Line | Space | Text deriving (Show, Eq, Ord)
 
+-- | A data type to describe the layout the formatter is using currently.
 data Layout = MultiLine | SingleLine deriving (Show, Eq)
 
--- State monad to keep track of comments and layout.
+-- | The format monad used to keep track of comments and layout. It is a a
+-- combincation of a reader and state monad. The comments and reading from the
+-- input file are the state monads job to deal with. While the reader monad
+-- deals with the propagating the current layout. 
 type FmtM a = ReaderT Layout (StateT FmtState Identity) a
 
+-- | A typeclass that defines how an type can be formatted.
 class Format a where
   fmt :: a -> FmtM Fmt
 
@@ -155,19 +167,23 @@ fmtComments a = do
   s <- get
   case comments s of
     c : cs | locOf a > locOf c -> do
-      put $ s {comments = cs}
-      pre <- fmtPre 
-      f <- fmtComments a -- fmts remaining comments
-      c' <- fmt c
-      pure $ pre <> c' <> f 
+      -- check if we are in the middle of line
+      case lastOutput s of 
+        Nothing -> do
+          put $ s {comments = cs}
+          f <- fmtComments a -- fmts remaining comments
+          c' <- fmt c
+          pure $ c' <> f 
+        Just Line -> do
+          put $ s {comments = cs}
+          f <- fmtComments a -- fmts remaining comments
+          c' <- fmt c
+          pure $ c' <> f 
+        Just _ -> do 
+          put $ s {comments = cs, 
+                   pendingComments = c : pendingComments s}
+          pure mempty 
     _any -> pure mempty
-    where
-      fmtPre = do
-        lastO <- gets lastOutput
-        case lastO of 
-          Nothing -> nil
-          Just Line -> nil
-          Just _ -> modify (\s -> s{lastOutput = Just Line}) >> hardline
                     
 setTrailingComment :: (Located a) => a -> FmtM ()
 setTrailingComment a = do 
@@ -177,10 +193,12 @@ setTrailingComment a = do
       -- comment on same line as term a
       (Loc _sALoc eALoc, Loc _sCLoc eCLoc) | posLine eALoc == posLine eCLoc -> do
           put $ s {comments = cs,
-                   pendingComments = Just c} 
+                   pendingComments = c : pendingComments s} 
       _any -> pure ()
     _ -> pure ()
 
+-- | Determines the layout of @a@ by checking if it spans a single line or two
+-- or more lines.
 lineLayout :: (Located a) => a -> Layout
 lineLayout a =
   case locOf a of
@@ -188,8 +206,10 @@ lineLayout a =
       if posLine start == posLine end
         then SingleLine
         else MultiLine
-    NoLoc -> error "Formatting term without location"
+    NoLoc -> error "Formatting term without location."
 
+-- | Determines the layout of @[a]@ by checking if it spans a single line or two
+-- or more lines.
 lineLayoutList :: (Located a) => [a] -> Layout
 lineLayoutList as =
   case concatMap auxiliary as of
@@ -201,12 +221,14 @@ lineLayoutList as =
         Loc start end -> [posLine start, posLine end]
         NoLoc -> error "Formatting term without location"
 
+-- | Retrieves the last comments from the monad and concatenates them together.
 popComments :: FmtM Fmt
 popComments = do
   cs <- gets comments
   modify (\s -> s {comments = []})
   sep nil cs
 
+-- | Using the location of @a@ get the segment to create a @FmtM Fmt@.
 fmtCopyLoc :: (Located a) => a -> FmtM Fmt
 fmtCopyLoc a = do
   f <- gets file
@@ -226,7 +248,7 @@ runFormat format cs file = runIdentity $ evalStateT (runReaderT format e) s
       FmtState
         { comments = cs,
           file = T.encodeUtf8 file,
-          pendingComments = Nothing,
+          pendingComments = [],
           lastOutput = Nothing
         }
     e = MultiLine
@@ -243,18 +265,26 @@ space = modify (\s -> s{lastOutput = Just Space}) >> pure P.space
 hardline :: FmtM Fmt
 hardline = do 
   pc <- gets pendingComments
-  case pc of
-    Just c -> do 
-      modify $ \s -> s{pendingComments = Nothing,
-                       lastOutput = Just Line}
-      (P.space <>) <$> fmt c
-    Nothing -> pure P.line
+  case pc of 
+    -- if there are no pending comments insert line
+    [] -> do 
+      modify $ \s -> s{lastOutput = Just Line}
+      pure P.line
+
+    -- otherwise printing the comments will insert line
+    _ -> do
+      modify $ \s -> s{pendingComments = [],
+              lastOutput = Just Line}
+      pc' <- sep nil $ reverse pc
+      pure $ P.space <> pc'
 
 line :: FmtM Fmt
 line = space <|> hardline
 
 comment :: T.Text -> FmtM Fmt
-comment c = pure $ P.pretty c <> P.line
+comment c = do 
+  modify (\s -> s{lastOutput = Just Line})
+  pure $ P.pretty c <> P.line
 
 -- in order to handle trailing comments its VERY important to
 -- evaluate the seperator after each element in the list
@@ -268,7 +298,6 @@ sep s (a:as) = do
       s' <- fmt s -- MUST be formatted before next
       next' <- fmt next
       pure $ acc <> s' <> next'
-
 
 sepLine :: (Format a, Format b) => a -> [b] -> FmtM Fmt
 sepLine s = sep (s <:> space <|> hardline <:> s)
