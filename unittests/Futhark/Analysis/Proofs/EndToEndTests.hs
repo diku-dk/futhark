@@ -7,7 +7,7 @@ import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query
 import Futhark.Compiler.CLI (Imports, fileProg, readProgramOrDie)
-import Futhark.Util.Pretty (docString, line, pretty, prettyString, (<+>))
+import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Language.Futhark qualified as E
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -57,14 +57,8 @@ tests =
       let vb = getLastValBind imports
       let actual = fst . flip runIndexFnM vns $ do
             indexfn <- mkIndexFnValBind vb
-            case indexfn of
-              Nothing -> pure Nothing
-              Just indexfn' -> Just <$> action indexfn'
-      case actual of
-        Nothing ->
-          assertFailure $ "Failed to make index fn for " <> prettyString vb
-        Just actual' ->
-          actual' @??= expected
+            action indexfn
+      actual @??= expected
 
     actual @??= expected = unless (actual == expected) (assertFailure msg)
       where

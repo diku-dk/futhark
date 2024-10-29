@@ -231,9 +231,8 @@ tests =
     mkTest programFile expectedPat = testCase programFile $ do
       (_, imports, vns) <- readProgramOrDie programFile
       let vb = getLastValBind imports
-      case runTest vns vb expectedPat of
-        Just (actual, expected) -> actual @??= expected
-        _ -> assertFailure $ "Failed to make index fn for " <> prettyString vb
+      let (actual, expected) = runTest vns vb expectedPat
+      actual @??= expected
 
     -- We need to make the index function and run unification using
     -- the same VNameSource, otherwise the variables in the index function
@@ -246,17 +245,14 @@ tests =
       -- Evaluate expectedPat first for any side effects like debug toggling.
       pat <- expectedPat
       let expected = pat (i, x, y, z)
-      indexfn <- mkIndexFnValBind vb
-      case indexfn of
-        Nothing -> pure Nothing
-        Just actual -> do
-          s <- unify expected actual
-          case s of
-            Nothing ->
-              Just <$> renameSame actual expected
-            Just s' -> do
-              e <- subIndexFn s' expected
-              Just <$> renameSame actual e
+      actual <- mkIndexFnValBind vb
+      s <- unify expected actual
+      case s of
+        Nothing ->
+          renameSame actual expected
+        Just s' -> do
+          e <- subIndexFn s' expected
+          renameSame actual e
 
     sHole = sym2SoP . Hole
 

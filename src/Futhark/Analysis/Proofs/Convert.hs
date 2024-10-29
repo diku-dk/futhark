@@ -84,7 +84,7 @@ mkIndexFnDecs (E.ValDec vb : rest) = do
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 -- toplevel_indexfns
-mkIndexFnValBind :: E.ValBind -> IndexFnM (Maybe IndexFn)
+mkIndexFnValBind :: E.ValBind -> IndexFnM IndexFn
 mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ _params body _ _ _) = do
   clearAlgEnv
   debugPrettyM "\n====\nmkIndexFnValBind:\n\n" val
@@ -92,7 +92,7 @@ mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ _params body _ _ _) = do
   -- insertTopLevel vn (params, indexfn)
   algenv <- gets algenv
   debugPrettyM "mkIndexFnValBind AlgEnv\n" algenv
-  pure (Just indexfn)
+  pure indexfn
 
 refineAndBind :: E.VName -> IndexFn -> IndexFnM IndexFn
 refineAndBind vn indexfn = do
