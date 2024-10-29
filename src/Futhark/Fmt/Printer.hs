@@ -194,7 +194,7 @@ instance Format UncheckedExp where
   fmt (Hole _ loc) = prependComments loc $ text "???"
   fmt (Parens e loc) =
     prependComments loc $ text "(" <:> stdNest e <:/> text ")"
-  fmt (QualParens (v, _loc) e loc) =
+  fmt (QualParens (v, _qLoc) e loc) =
     prependComments loc $
       fmtQualName v <:> text "." <:> text "(" <:> align e <:/> text ")"
   fmt (Ascript e t loc) = prependComments loc $ e <:> text ":" <+> t
@@ -218,7 +218,7 @@ instance Format UncheckedExp where
     prependComments loc $
       brackets $
         sepLine (text ",") es
-  fmt (StringLit _s loc) = fmtCopyLoc loc
+  fmt (StringLit _s loc) = prependComments loc $ fmtCopyLoc loc
   fmt (Project k e _ loc) = prependComments loc $ e <:> text "." <:> fmtPretty k
   fmt (Negate e loc) = prependComments loc $ text "-" <:> e
   fmt (Not e loc) = prependComments loc $ text "!" <:> e
