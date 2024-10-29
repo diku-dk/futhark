@@ -20,22 +20,24 @@ import Futhark.Util.Pretty (Pretty (pretty), viaShow)
 
 assume :: Symbol -> IndexFnM ()
 assume (Not x) = do
-  -- No relation to add; relations are normalized to not have Not.
   booltype <- isBooleanM x
   x' <- toAlgebraSymbol x
   when booltype $ addEquiv x' (int2SoP 0)
   not_x <- toAlgebraSymbol $ neg x
   when booltype $ addEquiv not_x (int2SoP 1)
+  addRelSymbol (neg x)
 assume x = do
   booltype <- isBooleanM x
   x' <- toAlgebraSymbol x
   when booltype $ addEquiv x' (int2SoP 1)
   not_x <- toAlgebraSymbol $ neg x
   when booltype $ addEquiv not_x (int2SoP 0)
-  addRelSymbol x -- No-op if x is not a relation.
+  addRelSymbol x
 
 -- | Adds a relation on symbols to the algebraic environment.
+-- No-op if `p` is not a relation.
 addRelSymbol :: Symbol -> IndexFnM ()
+addRelSymbol (Not {}) = pure () -- Relations are normalised to not have Not.
 addRelSymbol p = do
   rel <- toRel p
   maybe (pure ()) addRel rel
