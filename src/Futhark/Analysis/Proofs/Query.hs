@@ -155,19 +155,19 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
           let (p_f, f) `cmp` (p_g, g) = do
                 assume (fromJust . justSym $ p_f @ i)
                 assume (fromJust . justSym $ p_g @ j)
-                let f_rel_g rel = do
+                let f_rel_g rel =
                       -- Try to show: forall i /= j . f(i) `rel` g(j)
-                      f_rel_g1 <- rollbackAlgEnv $ do
-                        -- Case i < j => f(i) `rel` g(j).
-                        addRelIterator (Forall j (Iota n))
-                        i +< j
-                        (f @ i) `rel` (g @ j)
-                      let f_rel_g2 = rollbackAlgEnv $ do
+                      let f_rel_g1 = rollbackAlgEnv $ do
+                            -- Case i < j => f(i) `rel` g(j).
+                            addRelIterator (Forall j (Iota n))
+                            i +< j
+                            (f @ i) `rel` (g @ j)
+                          f_rel_g2 = rollbackAlgEnv $ do
                             -- Case i > j => f(i) `rel` g(j):
                             addRelIterator (Forall i (Iota n))
                             j +< i
                             (f @ i) `rel` (g @ j)
-                      f_rel_g1 `andF` f_rel_g2
+                      in f_rel_g1 `andM` f_rel_g2
                 f_LT_g <- f_rel_g ($<)
                 debugPrettyM "cmp" ((p_f, f), (p_g, g))
                 debugT "===" $
