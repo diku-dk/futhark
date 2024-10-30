@@ -578,9 +578,7 @@ topLevelNameMap = M.filterWithKey (\k _ -> available k) intrinsicsNameMap
 -- consumption but the machine does not care).
 mkTypeVarName :: Name -> Int -> Name
 mkTypeVarName desc i =
-  desc <> nameFromString (mapMaybe subscript (show i))
-  where
-    subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
+  desc <> nameFromString ("_" ++ show i)
 
 -- | Type-check an attribute.
 checkAttr :: (MonadTypeChecker m) => AttrInfo VName -> m (AttrInfo VName)
