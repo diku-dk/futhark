@@ -59,8 +59,8 @@ internalisePartitionLambda internaliseLambda k lam args = do
     rettype = replicate (k + 2) $ I.Prim int64
     result i =
       map constant $
-        fromIntegral i :
-        (replicate i 0 ++ [1 :: Int64] ++ replicate (k - i) 0)
+        fromIntegral i
+          : (replicate i 0 ++ [1 :: Int64] ++ replicate (k - i) 0)
 
     mkResult _ i | i >= k = pure $ result i
     mkResult eq_class i = do

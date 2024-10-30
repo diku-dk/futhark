@@ -90,13 +90,13 @@ interchangeLoop
 
       copyOrRemoveParam (param, arr)
         | paramName param `notNameIn` free_in_body =
-          pure Nothing
+            pure Nothing
         | otherwise =
-          pure $ Just (param, arr)
+            pure $ Just (param, arr)
 
       expandedInit _ (Var v)
         | Just arr <- isMapParameter v =
-          pure $ Var arr
+            pure $ Var arr
       expandedInit param_name se =
         letSubExp (param_name <> "_expanded_init") $
           BasicOp $
@@ -131,10 +131,10 @@ maybeCopyInitial isMapInput (SeqLoop perm loop_pat merge form body) =
     f (p, Var arg)
       | isMapInput arg,
         Array {} <- paramType p =
-        (p,)
-          <$> letSubExp
-            (baseString (paramName p) <> "_inter_copy")
-            (BasicOp $ Replicate mempty $ Var arg)
+          (p,)
+            <$> letSubExp
+              (baseString (paramName p) <> "_inter_copy")
+              (BasicOp $ Replicate mempty $ Var arg)
     f (p, arg) =
       pure (p, arg)
 
@@ -168,24 +168,24 @@ interchangeLoops full_nest = recurse (kernelNestLoops full_nest)
   where
     recurse nest loop
       | (ns, [n]) <- splitFromEnd 1 nest = do
-        let isMapParameter v =
-              snd <$> find ((== v) . paramName . fst) (loopNestingParamsAndArrs n)
-            isMapInput v =
-              v `elem` map snd (loopNestingParamsAndArrs n)
-        (loop', stms) <-
-          runBuilder . localScope (scopeOfKernelNest full_nest) $
-            maybeCopyInitial isMapInput
-              =<< interchangeLoop isMapParameter loop n
+          let isMapParameter v =
+                snd <$> find ((== v) . paramName . fst) (loopNestingParamsAndArrs n)
+              isMapInput v =
+                v `elem` map snd (loopNestingParamsAndArrs n)
+          (loop', stms) <-
+            runBuilder . localScope (scopeOfKernelNest full_nest) $
+              maybeCopyInitial isMapInput
+                =<< interchangeLoop isMapParameter loop n
 
-        -- Only safe to continue interchanging if we didn't need to add
-        -- any new statements; otherwise we manifest the remaining nests
-        -- as Maps and hand them back to the flattener.
-        if null stms
-          then recurse ns loop'
-          else
-            let loop_stm = seqLoopStm loop'
-                names = rearrangeShape (loopPerm loop') (patNames (stmPat loop_stm))
-             in pure $ snd $ manifestMaps ns names $ stms <> oneStm loop_stm
+          -- Only safe to continue interchanging if we didn't need to add
+          -- any new statements; otherwise we manifest the remaining nests
+          -- as Maps and hand them back to the flattener.
+          if null stms
+            then recurse ns loop'
+            else
+              let loop_stm = seqLoopStm loop'
+                  names = rearrangeShape (loopPerm loop') (patNames (stmPat loop_stm))
+               in pure $ snd $ manifestMaps ns names $ stms <> oneStm loop_stm
       | otherwise = pure $ oneStm $ seqLoopStm loop
 
 -- | An encoding of a branch with alongside its result pattern.
@@ -213,11 +213,10 @@ interchangeBranch1
         branch_pat' =
           Pat $ map (fmap (`arrayOfRow` w)) $ patElems branch_pat
 
-        mkBranch branch = (renameBody =<<) $
-          runBodyBuilder $ do
-            let lam = Lambda params lam_ret branch
-            addStm $ Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
-            pure $ varsRes $ patNames branch_pat'
+        mkBranch branch = (renameBody =<<) $ runBodyBuilder $ do
+          let lam = Lambda params lam_ret branch
+          addStm $ Let branch_pat' aux $ Op $ Screma w arrs $ mapSOAC lam
+          pure $ varsRes $ patNames branch_pat'
 
     cases' <- mapM (traverse mkBranch) cases
     defbody' <- mkBranch defbody
@@ -293,7 +292,7 @@ interchangeWithAcc1
       trType :: TypeBase shape u -> TypeBase shape u
       trType (Acc acc ispace ts u)
         | acc `elem` acc_certs =
-          Acc acc (Shape [w] <> ispace) ts u
+            Acc acc (Shape [w] <> ispace) ts u
       trType t = t
 
       trParam :: Param (TypeBase shape u) -> Param (TypeBase shape u)
@@ -321,7 +320,7 @@ interchangeWithAcc1
         pure $ case acc_t of
           Acc cert _ _ _
             | cert `elem` acc_certs ->
-              BasicOp $ UpdateAcc safety acc (i : is) ses
+                BasicOp $ UpdateAcc safety acc (i : is) ses
           _ ->
             BasicOp $ UpdateAcc safety acc is ses
       trExp i e = mapExpM mapper e

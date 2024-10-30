@@ -124,9 +124,9 @@ instance (PrettyRep rep) => Pretty (Body rep) where
   pretty (Body _ stms res)
     | null stms = braces (commasep $ map pretty res)
     | otherwise =
-      stack (map pretty $ stmsToList stms)
-        </> "in"
-        <+> braces (commasep $ map pretty res)
+        stack (map pretty $ stmsToList stms)
+          </> "in"
+          <+> braces (commasep $ map pretty res)
 
 instance Pretty Attr where
   pretty (AttrName v) = pretty v
@@ -270,9 +270,9 @@ prettyRet :: (Pretty t) => (t, RetAls) -> Doc a
 prettyRet (t, RetAls pals rals)
   | pals == mempty,
     rals == mempty =
-    pretty t
+      pretty t
   | otherwise =
-    pretty t <> "#" <> parens (pl pals <> comma <+> pl rals)
+      pretty t <> "#" <> parens (pl pals <> comma <+> pl rals)
   where
     pl = brackets . commasep . map pretty
 
