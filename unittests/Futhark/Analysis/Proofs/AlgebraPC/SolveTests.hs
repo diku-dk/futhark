@@ -4,8 +4,8 @@ import Control.Monad (unless, forM)
 import Data.Set qualified as S
 import Data.Map qualified as M
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, AlgEnv (..), UntransEnv (..), mkRangeUB)
-import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..))
+import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, AlgEnv (..), UntransEnv (..), mkRangeUB, addProperty)
+import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..), (~+~))
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.Analysis.Proofs.AlgebraPC.Solve
@@ -174,6 +174,22 @@ tests =
               sum2 FM.$<$ (sVar i2 .+. sum1)
           )
           @??= True,
+      testCase "Partition3 within bounds: case < n" $
+        run
+          ( do
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              let pc = POR $ S.singleton c0 -- conds[i] == 1
+              let pd = POR $ S.singleton d0 -- conds[i] == 2
+              -- We are in the case for conds[i] == 2.
+              addEquiv (Idx pd (sVar i1)) (int 1)
+              -- Add: idx1 <=> not idx2
+              addProperty (Var c0) (PairwiseDisjoint (S.singleton d0))
+              addProperty (Var d0) (PairwiseDisjoint (S.singleton c0))
+              let sum1 = Sum pc (int 0) (sVar n .-. int 1)
+                  sum2 = Sum pd (int 0) (sVar i1 .-. int 1)
+              (sum1 ~+~ sum2) FM.$<$ sVar n
+          )
+          @??= True,
       --
       testCase "FME1" $
         run
@@ -197,7 +213,7 @@ tests =
                        , properties = M.empty
                        }
     varsM =
-      (,,,,,,,,,)
+      (,,,,,,,,,,)
         <$> newVName "x"
         <*> newVName "y"
         <*> newVName "z"
@@ -208,8 +224,9 @@ tests =
         <*> newVName "A"
         <*> newVName "B"
         <*> newVName "C"
-    (x, y, z, i1, i2, i3, n, a0, b0, c0) = runTest varsM env_empty
-    (a, b, c) = (One a0, One b0, POR (S.singleton c0))
+        <*> newVName "D"
+    (x, y, z, i1, i2, i3, n, a0, b0, c0, d0) = runTest varsM env_empty
+    (a, b, c, d) = (One a0, One b0, POR (S.singleton c0), POR (S.singleton d0))
 
     varsFFT =
       (,,)
