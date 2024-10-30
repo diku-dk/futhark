@@ -47,6 +47,7 @@ import Futhark.Pass
     intraproceduralTransformation,
     intraproceduralTransformationWithConsts,
   )
+import Futhark.Pass.Simplify
 import Data.Loc (Loc(NoLoc), SrcLoc (SrcLoc))
 import Colog.Core (duplicate)
 
@@ -726,8 +727,10 @@ intraMMMMemFixup =
   -- TODO: don't use intraproceduralTransformation
   Pass
     "mma-fixup"
-    "Extracts NVIDIA tensor core MMA operations"
-    $ intraproceduralTransformationWithConsts pure fixFuns
+    "Extracts NVIDIA tensor core MMA operations" $ 
+    intraproceduralTransformationWithConsts pure fixFuns
+    >=> simplifyProg
+
 
 -- \$ intraproceduralTransformation fixStmtsWithScope
 
