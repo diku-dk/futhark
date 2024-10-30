@@ -19,10 +19,10 @@ module Futhark.Fmt.Monad
     (<:>),
     (<+/>),
     (<:/>),
+    hardIndent,
     indent,
-    softIndent,
+    hardStdIndent,
     stdIndent,
-    softStdIndent,
     sepFilter,
     pretty,
     FmtM,
@@ -36,7 +36,7 @@ module Futhark.Fmt.Monad
     sepArgs,
     localLayout,
     localLayoutList,
-    prependComments,
+    addComments,
     sepDecs,
     fmtByLayout,
   )
@@ -83,7 +83,7 @@ infixl 4 <|>
 type Fmt = P.Doc ()
 
 -- | This function allows to inspect the layout of an expression @a@ and if it
--- is singline line then use format @s@ and if it is multiline format @m@.
+-- is singleline line then use format @s@ and if it is multiline format @m@.
 fmtByLayout ::
   (Located a, Format s, Format m) => a -> s -> m -> FmtM Fmt
 fmtByLayout a s m =
@@ -91,8 +91,8 @@ fmtByLayout a s m =
     SingleLine -> fmt s
     MultiLine -> fmt m
 
--- | This function determines the Layout of @a@ and if it is singline then it
--- updates the monads enviroment to format singline style otherwise format using
+-- | This function determines the Layout of @a@ and if it is singleline then it
+-- updates the monads enviroment to format singleline style otherwise format using
 -- multiline style. It determines this by checking if the location of @a@ spans
 -- over two or more lines.
 localLayout :: (Located a) => a -> FmtM b -> FmtM b
@@ -102,8 +102,8 @@ localLayout a m = do
     MultiLine -> local (const $ lineLayout a) m
     SingleLine -> m
 
--- | This function determines the Layout of @[a]@ and if it is singline then it
--- updates the monads enviroment to format singline style otherwise format using
+-- | This function determines the Layout of @[a]@ and if it is singleline then it
+-- updates the monads enviroment to format singleline style otherwise format using
 -- multiline style. It determines this by checking if the locations of @[a]@
 -- start and end at any different line number.
 localLayoutList :: (Located a) => [a] -> FmtM b -> FmtM b
@@ -115,12 +115,13 @@ localLayoutList a m = do
 
 -- | This function uses the location of @a@ and prepends comments if the
 -- comments location is less than the location of @a@. It format @b@ in
--- accordance with if @a@ is singline or multiline using 'localLayout'. At last
+-- accordance with if @a@ is singleline or multiline using 'localLayout'. At last
 -- it internally sets the state of the 'FmtM' monad to consider trailing
 -- comments if they exists. This function should be always used when possible to
--- warp expression around.
-prependComments :: (Located a, Format b) => a -> b -> FmtM Fmt
-prependComments a b = localLayout a $ do
+-- wrap FmtM Fmt around. It currently does not handle trailing comment perfectly.
+-- See tests/fmt/traillingComments1.fut or the other test.
+addComments :: (Located a, Format b) => a -> b -> FmtM Fmt
+addComments a b = localLayout a $ do
   c <- fmtComments a
   f <- fmt b
   setTrailingComment a
@@ -128,7 +129,7 @@ prependComments a b = localLayout a $ do
 
 -- | The internal state of the formatter monad 'FmtM'.
 data FmtState = FmtState
-  { -- | The list comments that will be inserted, ordered by smallest location to larges.
+  { -- | The comments that will be inserted, ordered by increasing order in regards to location.
     comments :: [Comment],
     -- The original source file that is being formatted.
     file :: BS.ByteString,
@@ -161,6 +162,7 @@ instance Format (FmtM Fmt) where
 instance Format Comment where
   fmt = comment . commentText
 
+-- | Prepends comments.
 fmtComments :: (Located a) => a -> FmtM Fmt
 fmtComments a = do
   s <- get
@@ -177,6 +179,8 @@ fmtComments a = do
         Just Line -> nil
         Just _ -> modify (\s -> s {lastOutput = Just Line}) >> hardline
 
+-- | If the next comment is a trailing comment then it is added to be a pending
+-- comment that is added at next line.
 setTrailingComment :: (Located a) => a -> FmtM ()
 setTrailingComment a = do
   s <- get
@@ -256,7 +260,7 @@ runFormat format cs file = runIdentity $ evalStateT (runReaderT format e) s
 nil :: FmtM Fmt
 nil = pure mempty
 
--- | Indents everything after a line occurs if in multiline and if in singline
+-- | Indents everything after a line occurs if in multiline and if in singleline
 -- then indent.
 nest :: (Format a) => Int -> a -> FmtM Fmt
 nest i a = fmt a <|> (P.nest i <$> fmt a)
@@ -311,7 +315,7 @@ sepLine :: (Format a, Format b) => a -> [b] -> FmtM Fmt
 sepLine s = sep (s <:> space <|> hardline <:> s)
 
 -- | This is used for function arguments. It seperates multiline arguments by
--- lines and singline arguments by spaces.
+-- lines and singleline arguments by spaces.
 sepArgs :: (Format a, Located a) => [a] -> FmtM Fmt
 sepArgs [] = nil
 sepArgs ls
@@ -332,18 +336,21 @@ stdNest = nest 2
 align :: (Format a) => a -> FmtM Fmt
 align a = P.align <$> fmt a
 
--- | Indents everything by @i@.
+-- | Indents everything by @i@, should never be used.
+hardIndent :: (Format a) => Int -> a -> FmtM Fmt
+hardIndent i a = P.indent i <$> fmt a
+
+-- | Indents if in multiline by @i@ if in singleline it does not indent.
 indent :: (Format a) => Int -> a -> FmtM Fmt
-indent i a = P.indent i <$> fmt a
+indent i a = fmt a <|> hardIndent i a
 
-softIndent :: (Format a) => Int -> a -> FmtM Fmt
-softIndent i a = fmt a <|> indent i a
+-- | Hard indents with the standard size of two.
+hardStdIndent :: (Format a) => a -> FmtM Fmt
+hardStdIndent = hardIndent 2
 
+-- | Idents with the standard size of two.
 stdIndent :: (Format a) => a -> FmtM Fmt
 stdIndent = indent 2
-
-softStdIndent :: (Format a) => a -> FmtM Fmt
-softStdIndent = softIndent 2
 
 -- | Creates a piece of text, it should not contain any new lines.
 text :: T.Text -> FmtM Fmt
@@ -368,7 +375,7 @@ parens a = text "(" <:> fmt a <:> text ")"
 (<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
 (<+/>) a b =
   case lineLayout b of
-    MultiLine -> a </> stdIndent b
+    MultiLine -> a </> hardStdIndent b
     SingleLine -> a <+> b
 
 -- | If in a singleline layout then concatenate with 'nil' and in multiline
