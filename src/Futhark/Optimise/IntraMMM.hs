@@ -152,21 +152,14 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
 -- TODO: entire global as input or only slize, if entire add index as argument
 mkCopyGlobalShared :: (MonadFreshNames m) => PrimType -> Int -> Int -> m MMMFunDef
 mkCopyGlobalShared elmType sizeY sizeX = do
-  -- TODO: take (number of) outer globalOuterDims as input, also get outer indices?
-  globalOuterDim <- newParam "globalOuterDim" $ Prim int64
-  globalOuterIndex <- newParam "globalOuterDim" $ Prim int64
-  let globalArrDims =
-        [ Var $ paramName globalOuterDim,
-          mkInt64Const sizeY,
-          mkInt64Const sizeX
-        ]
-  let sharedArrDims =
+  let arrShape = Shape $
         [ mkInt64Const sizeY,
           mkInt64Const sizeX
         ]
 
-  globalParam <- newParam "global" $ Array elmType (Shape globalArrDims) Nonunique
-  sharedParam <- newParam "shared" $ Array elmType (Shape sharedArrDims) Unique
+  globalParam <- newParam "global" $ Array elmType arrShape Nonunique
+  sharedParam <- newParam "shared" $ Array elmType arrShape Unique
+  offsetParam <- newParam "offset" $ Prim int64
   elmTypeParam <- newParam "elmTypeA" $ Prim elmType
   yParam <- newParam "Y" $ Prim int64
   xParam <- newParam "X" $ Prim int64
@@ -177,15 +170,14 @@ mkCopyGlobalShared elmType sizeY sizeX = do
 
   --  TODO: use Free or Ext?
   let sharedOut =
-        [ ( Array elmType (Shape $ map Free sharedArrDims) Unique,
+        [ ( Array elmType (fmap Free arrShape) Unique,
             RetAls [] []
           )
         ]
   let funParams =
-        [ globalOuterDim,
-          globalOuterIndex,
-          globalParam,
+        [ globalParam,
           sharedParam,
+          offsetParam,
           elmTypeParam,
           yParam,
           xParam,
@@ -268,6 +260,8 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
   let blockSize = getOptimalBlockSize match
   let cValsPerThread = sizeM * sizeN `div` blockSize
 
+--  TODO: would be better to check if copy global shared is needed here?
+
   -- TODO: do we need to init regs when used only once?
   -- TODO: use SegNoVirtFull instead of loop and avoid setting the block size?
 
@@ -300,7 +294,6 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
   -- TODO: make version without regs for dynamic arguments, gemm outputs shared mem no regs as input
   cRegs_list <-
     segMap1D "cRegs" thrdInBlock ResultPrivate (mkInt64Const blockSize) $ \_ -> do
-      -- \$ BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const cValsPerThread]
       cScratch <- letExp "cScratch" $ scratchMem elmTypeC [cValsPerThread]
       cLoop <- forLoop (mkInt64Const cValsPerThread) [cScratch] $ \i [cMerge] -> do
         cZeroed <- update "cZeroed" cMerge [i] ne
@@ -308,40 +301,27 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
         resultBodyM [Var cZeroed]
       pure [varRes cLoop]
   let [cRegs] = cRegs_list
-  -- \$ BasicOp $ Scratch elmTypeA [mkInt64Const sizeM, mkInt64Const sizeK]
-  -- BasicOp $ Scratch elmTypeB [mkInt64Const sizeK, mkInt64Const sizeN]
   aScratch <- letExp "aScratch" $ scratchMem elmTypeA [sizeM, sizeK]
   bScratch <- letExp "bScratch" $ scratchMem elmTypeB [sizeK, sizeN]
 
-  -- TODO: flatten outerdims to ensure constant number of args?
-  flatOuterDimsAExp <-
-    foldBinOp (Mul Int64 OverflowUndef) (mkInt64Const 1) (outerDimsA kernelBodyMatch)
-  flatOuterDimsA <- letExp "flatOuterDimsA" flatOuterDimsAExp
-  flatOuterDimsBExp <-
-    foldBinOp (Mul Int64 OverflowUndef) (mkInt64Const 1) (outerDimsB kernelBodyMatch)
-  flatOuterDimsB <- letExp "flatOuterDimsB" flatOuterDimsBExp
+  slicedA <- letExp "slicedA" $ BasicOp $ Index (arrA kernelBodyMatch) $ Slice $ fmap (DimFix . Var) (outerIndecesA kernelBodyMatch) <> [DimSlice (mkInt64Const 0) (mkInt64Const sizeM) (mkInt64Const 1), DimSlice (mkInt64Const 0) (mkInt64Const sizeK) (mkInt64Const 1)]
+  slicedB <- letExp "slicedB" $ BasicOp $ Index (arrB kernelBodyMatch) $ Slice $ fmap (DimFix . Var) (outerIndecesB kernelBodyMatch) <> [DimSlice (mkInt64Const 0) (mkInt64Const sizeK) (mkInt64Const 1), DimSlice (mkInt64Const 0) (mkInt64Const sizeN) (mkInt64Const 1)]
 
-  let pe64OuterDimsA = map pe64 $ outerDimsA kernelBodyMatch
-      pe64OuterIndiciesA = map (pe64 . Var) $ outerIndecesA kernelBodyMatch
-      pe64OuterDimsB = map pe64 $ outerDimsB kernelBodyMatch
-      pe64OuterIndiciesB = map (pe64 . Var) $ outerIndecesB kernelBodyMatch
+--  Need to pass this explicitly as LMAD info is lost on function call
+  let pe64DimsA = fmap pe64 $ outerDimsA kernelBodyMatch <> [mkInt64Const sizeM, mkInt64Const sizeK]
+      pe64IndiciesA = fmap pe64 $ fmap Var (outerIndecesA kernelBodyMatch) <> [mkInt64Const 0, mkInt64Const 0]
+      pe64DimsB = fmap pe64 $ outerDimsB kernelBodyMatch <> [mkInt64Const sizeK, mkInt64Const sizeN]
+      pe64IndiciesB = fmap pe64 $ fmap Var (outerIndecesB kernelBodyMatch) <> [mkInt64Const 0, mkInt64Const 0]
 
-  flatOuterIndicesAExp <- toExp $ flattenIndex pe64OuterDimsA pe64OuterIndiciesA
-  flatOuterIndicesA <- letExp "flatOuterIndecesA" flatOuterIndicesAExp
-  flatOuterIndicesBExp <- toExp $ flattenIndex pe64OuterDimsB pe64OuterIndiciesB
-  flatOuterIndicesB <- letExp "flatOuterIndecesB" flatOuterIndicesBExp
-
-  let newShapeA = [Var flatOuterDimsA, mkInt64Const sizeM, mkInt64Const sizeK]
-      newShapeB = [Var flatOuterDimsB, mkInt64Const sizeK, mkInt64Const sizeN]
-
-  reshapedA <- letExp "reshapedA" $ shapeCoerce newShapeA (arrA kernelBodyMatch)
-  reshapedB <- letExp "reshapedB" $ shapeCoerce newShapeB (arrB kernelBodyMatch)
+  flatIndexAExp <- toExp $ flattenIndex pe64DimsA pe64IndiciesA
+  offsetA <- letExp "offsetA" flatIndexAExp
+  flatIndexBExp <- toExp $ flattenIndex pe64DimsB pe64IndiciesB
+  offsetB <- letExp "offsetB" flatIndexBExp
 
   let copyArgsA =
-        [ (Var flatOuterDimsA, ObservePrim),
-          (Var flatOuterIndicesA, ObservePrim),
-          (Var reshapedA, ObservePrim),
+        [ (Var slicedA, ObservePrim),
           (Var aScratch, Consume),
+          (Var offsetA, ObservePrim),
           (Constant $ blankPrimValue $ typeA kernelBodyMatch, ObservePrim),
           (mkInt64Const sizeM, ObservePrim),
           (mkInt64Const sizeK, ObservePrim),
@@ -357,10 +337,9 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
         ]
 
       copyArgsB =
-        [ (Var flatOuterDimsB, ObservePrim),
-          (Var flatOuterIndicesB, ObservePrim),
-          (Var reshapedB, ObservePrim),
+        [ (Var slicedB, ObservePrim),
           (Var bScratch, Consume),
+          (Var offsetB, ObservePrim),
           (Constant $ blankPrimValue $ typeB kernelBodyMatch, ObservePrim),
           (mkInt64Const sizeK, ObservePrim),
           (mkInt64Const sizeN, ObservePrim),
@@ -849,18 +828,17 @@ fixStmtsWithScope scope stms = do
   pure res
 
 fixStmts :: Stms GPUMem -> FixMonad (Stms GPUMem)
-fixStmts = mapStmsWithScope (fmap oneStm . fixStmt)
+fixStmts = mapStmsWithScope fixStmt
 
 
 -- TODO: pass layout info here?
-fixStmt :: Stm GPUMem -> FixMonad (Stm GPUMem)
+fixStmt :: Stm GPUMem -> FixMonad (Stms GPUMem)
 fixStmt stm@(Let (Pat [PatElem resName (MemArray _ _ _ (ArrayIn resMem _))]) _ (BasicOp (Manifest _ inputName))) = do
   info <- lookupInfo inputName
   case info of
     --    TODO: match more cases
     LetName (MemArray _ _ _ (ArrayIn inputMem _)) -> do
       modify ([(resName, inputName), (resMem, inputMem)] <>)
---      TODO: remove manifests?
       defaultFixStm stm
     _ -> defaultFixStm stm
 fixStmt (
@@ -873,7 +851,7 @@ fixStmt (
   let space = ScalarSpace (shapeDims shp2) t2
   let newRets = fixRetType Scalar rets
   newArgs <- mapM replaceArg args
-  pure $
+  pure $ oneStm $
     Let (Pat [
       PatElem vName1 (MemMem space),
       PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
@@ -894,18 +872,29 @@ fixStmt (
 --  TODO: check this, maybe use case instead
   let ((Var srcMemMem, _) : _ : (Var srcArray, _) : restArgs) = newArgs
   srcMemInfo <- lookupInfo srcMemMem
-  let newExp = case srcMemInfo of
-                  LetName (MemMem srcMemSpace) | srcMemSpace == space ->
-                    BasicOp $ SubExp $ Var srcArray
-                  _ ->
-                    Apply fName newArgs newRets info
-  pure $
-    Let (Pat [
-      PatElem vName1 (MemMem space),
-      PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
-    ])
-    aux
-    newExp
+  case srcMemInfo of
+    LetName (MemMem srcMemSpace) | srcMemSpace == space ->
+      pure $ stmsFromList
+        [
+          Let (Pat [
+                PatElem vName1 (MemMem space)
+              ])
+              aux
+              $ BasicOp $ SubExp $ Var srcMemMem,
+          Let (Pat [
+                PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
+              ])
+              aux
+              $ BasicOp $ SubExp $ Var srcArray
+        ]
+    _ ->
+      pure $ oneStm $
+        Let (Pat [
+          PatElem vName1 (MemMem space),
+          PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
+        ])
+        aux
+        $ Apply fName newArgs newRets info
 -- TODO: check this
 fixStmt (
   Let (Pat [
@@ -917,7 +906,7 @@ fixStmt (
   let space = Space "shared"
   let newRets = fixRetType Shared rets
   newArgs <- mapM replaceArg args
-  pure $
+  pure $ oneStm $
     Let (Pat [
       PatElem vName1 (MemMem space),
       PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
@@ -926,8 +915,10 @@ fixStmt (
     (Apply fName newArgs newRets info)
 fixStmt stm = defaultFixStm stm
 
-defaultFixStm :: Stm GPUMem -> FixMonad (Stm GPUMem)
-defaultFixStm (Let pat aux e) = Let pat aux <$> fixExp e
+defaultFixStm :: Stm GPUMem -> FixMonad (Stms GPUMem)
+defaultFixStm (Let pat aux e) = do
+  e' <- fixExp e
+  pure $ oneStm $ Let pat aux e'
 
 
 -- TODO: this may be too aggressive

@@ -55,7 +55,7 @@ struct get_mma_config<half_t, half_t, float, SizeM, SizeN, BlockSize> {
 
 // TODO: forceinline?
 template<class ElmTypeIn, class SizeY, class SizeX, class BlockSize>
-FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigned char *global_mem, unsigned char *shared_mem, int64_t globalOuterDim, int64_t globalOuterIndex, ElmTypeIn, SizeY, SizeX, BlockSize)
+FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigned char *global_mem, unsigned char *shared_mem, int64_t offset, ElmTypeIn, SizeY, SizeX, BlockSize)
 {
     *mem_out_p = shared_mem;
 
@@ -84,7 +84,7 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigne
 
       Tensor s = make_tensor(make_smem_ptr(reinterpret_cast<ElmType *>(shared_mem)), s_layout);
   //     TODO: blockIdx.x should be arg
-      Tensor g = make_tensor(make_gmem_ptr(&reinterpret_cast<ElmType *>(global_mem)[globalOuterIndex]), g_layout);
+      Tensor g = make_tensor(make_gmem_ptr(&reinterpret_cast<ElmType *>(global_mem)[offset]), g_layout);
 
       ThrCopy thr_copy_global_shared = copy_global_shared.get_slice(flatThreadIdx);
       Tensor tAgA = thr_copy_global_shared.partition_S(g);
