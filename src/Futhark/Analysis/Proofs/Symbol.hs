@@ -48,6 +48,8 @@ isBoolean (_ :> _) = True
 isBoolean (_ :>= _) = True
 isBoolean (_ :== _) = True
 isBoolean (_ :/= _) = True
+isBoolean (_ :&& _) = True
+isBoolean (_ :|| _) = True
 isBoolean _ = False
 
 sop2Symbol :: (Ord u) => SoP u -> u
@@ -81,31 +83,6 @@ neg (x :/= y) = x :== y
 neg (x :>= y) = x :< y
 neg (x :<= y) = x :> y
 neg x = Not x
-
--- TODO Normalize only normalizes Boolean expressions.
---      Use a Boolean representation that is normalized by construction.
-normalizeSymbol :: Symbol -> Symbol
-normalizeSymbol symbol = case toCNF symbol of
-  (Not x) -> neg x
-  (x :&& y) ->
-    case (x, y) of
-      (Bool True, b) -> b -- Identity.
-      (a, Bool True) -> a
-      (Bool False, _) -> Bool False -- Annihilation.
-      (_, Bool False) -> Bool False
-      (a, b) | a == b -> a -- Idempotence.
-      (a, b) | a == neg b -> Bool False -- A contradiction.
-      (a, b) -> a :&& b
-  (x :|| y) -> do
-    case (x, y) of
-      (Bool False, b) -> b -- Identity.
-      (a, Bool False) -> a
-      (Bool True, _) -> Bool True -- Annihilation.
-      (_, Bool True) -> Bool True
-      (a, b) | a == b -> a -- Idempotence.
-      (a, b) | a == neg b -> Bool True -- A tautology.
-      (a, b) -> a :|| b
-  v -> v
 
 instance Pretty Symbol where
   pretty symbol = case symbol of

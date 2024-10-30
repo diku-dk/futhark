@@ -9,7 +9,7 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
   )
 where
 
-import Control.Monad (unless, when, (<=<))
+import Control.Monad (foldM, forM_, unless, when, (<=<))
 import Control.Monad.RWS (gets, modify)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe)
@@ -62,6 +62,7 @@ algebraContext fn m = rollbackAlgEnv $ do
   case getIterator fn of
     Just i -> mapM_ (handlePreds i) ps
     Nothing -> pure ()
+  addDisjointedness ps
   m
   where
     -- c[i] == y && d[i] => {c[i] == y: p[hole1], d[i]: q[hole2]}
@@ -74,6 +75,23 @@ algebraContext fn m = rollbackAlgEnv $ do
           vn <- addUntrans =<< x `removeQuantifier` i
           addProperty (Algebra.Var vn) Algebra.Boolean
         _ -> pure ()
+
+    addDisjointedness ps | length ps < 2 = pure ()
+    addDisjointedness ps = do
+      vns <-
+        foldM
+          ( \acc p -> do
+              res <- search p
+              case fst <$> res of
+                Nothing -> pure acc
+                Just vn -> pure $ vn : acc
+          )
+          []
+          ps
+      let addProp vn =
+            addProperty (Algebra.Var vn) $
+              Algebra.PairwiseDisjoint (S.fromList vns S.\\ S.singleton vn)
+      forM_ vns addProp
 
     -- Add boolean tag to IndexFn layer names where applicable.
     trackBooleanNames (Var vn) = do

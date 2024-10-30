@@ -118,7 +118,7 @@ tests =
                     body =
                       cases
                         [ ( xs_i,
-                            int2SoP (-1) .+. sym2SoP (Sum j (int2SoP 0) (sHole i) (Idx (Hole xs) (sHole j)))
+                            sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (Idx (Hole xs) (sHole j)))
                           ),
                           ( neg xs_i,
                             sHole i .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Idx (Hole xs) (sHole j)))
@@ -146,7 +146,7 @@ tests =
                     body =
                       cases
                         [ ( xs_i :== int2SoP 1,
-                            int2SoP (-1) .+. sym2SoP (Sum j (int2SoP 0) (sHole i) (xs_j :== int2SoP 1))
+                            sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (xs_j :== int2SoP 1))
                           ),
                           ( xs_i :/= int2SoP 1,
                             sHole i .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (xs_j :== int2SoP 1))
@@ -164,7 +164,7 @@ tests =
                     body =
                       cases
                         [ ( xs_i,
-                            int2SoP (-1) .+. sym2SoP (Sum j (int2SoP 0) (sHole i) xs_j)
+                            sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) xs_j)
                           ),
                           ( neg xs_i,
                             sHole i .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) xs_j)
@@ -182,7 +182,7 @@ tests =
                     body =
                       cases
                         [ ( xs_i,
-                            int2SoP (-1) .+. sym2SoP (Sum j (int2SoP 0) (sHole i) xs_j)
+                            sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) xs_j)
                           ),
                           ( neg xs_i,
                             sHole i .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) xs_j)
@@ -199,13 +199,12 @@ tests =
                   { iterator = Forall i (Iota (sHole n)),
                     body =
                       cases
-                        [ ( (cs_i :/= int2SoP 1) :&& (cs_i :== int2SoP 2),
-                            int2SoP (-1)
-                              .+. sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 1))
-                              .+. sym2SoP (Sum j (int2SoP 0) (sHole i) (cs_j :== int2SoP 2))
+                        [ ( cs_i :== int2SoP 2,
+                            sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 1))
+                              .+. sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (cs_j :== int2SoP 2))
                           ),
-                          ( (cs_i :== int2SoP 1) :&& (cs_i :/= int2SoP 2),
-                            int2SoP (-1) .+. sym2SoP (Sum j (int2SoP 0) (sHole i) (cs_j :== int2SoP 1))
+                          ( cs_i :== int2SoP 1,
+                            sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (cs_j :== int2SoP 1))
                           ),
                           ( (cs_i :/= int2SoP 1) :&& (cs_i :/= int2SoP 2),
                             sHole i

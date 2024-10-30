@@ -9,7 +9,7 @@ import Futhark.Analysis.Proofs.AlgebraBridge.Translate (isBooleanM, toAlgebra, t
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Monad (addEquiv, addRange, mkRange)
@@ -20,14 +20,20 @@ import Futhark.Util.Pretty (Pretty (pretty), viaShow)
 
 assume :: Symbol -> IndexFnM ()
 assume (Not x) = do
+  -- If x is boolean, it will be in NNF, so x can only be
+  -- Var, Idx, or Apply.
   booltype <- isBooleanM x
   x' <- toAlgebraSymbol x
   when booltype $ addEquiv x' (int2SoP 0)
   not_x <- toAlgebraSymbol $ neg x
   when booltype $ addEquiv not_x (int2SoP 1)
   addRelSymbol (neg x)
+assume (x :&& y) =
+  assume x >> assume y
 assume x = do
   booltype <- isBooleanM x
+  debugPrettyM "assume" x
+  debugPrettyM "bool??" booltype
   x' <- toAlgebraSymbol x
   when booltype $ addEquiv x' (int2SoP 1)
   not_x <- toAlgebraSymbol $ neg x
@@ -37,7 +43,6 @@ assume x = do
 -- | Adds a relation on symbols to the algebraic environment.
 -- No-op if `p` is not a relation.
 addRelSymbol :: Symbol -> IndexFnM ()
-addRelSymbol (Not {}) = pure () -- Relations are normalised to not have Not.
 addRelSymbol p = do
   rel <- toRel p
   maybe (pure ()) addRel rel
@@ -97,6 +102,10 @@ addRelIterator _ = pure ()
 -- True means the query holds. False means "I don't know".
 data Answer = Yes | Unknown
   deriving (Show, Eq)
+
+answerFromBool :: Bool -> Answer
+answerFromBool True = Yes
+answerFromBool False = Unknown
 
 instance Pretty Answer where
   pretty = viaShow

@@ -18,7 +18,7 @@ import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (Nameable (mkName))
 import Futhark.SoP.SoP (SoP)
-import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>), viaShow)
+import Futhark.Util.Pretty (Pretty, brackets, commasep, enclose, parens, pretty, viaShow, (<+>))
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 
@@ -90,7 +90,9 @@ data Property
   deriving (Show, Eq, Ord)
 
 instance Pretty Property where
-  pretty = viaShow
+  pretty (PairwiseDisjoint s) =
+    "PairwiseDisjoint" <+> parens (commasep $ map prettyName $ S.toList s)
+  pretty p = viaShow p
 
 ---------------------------------
 --- Simple accessor functions ---
