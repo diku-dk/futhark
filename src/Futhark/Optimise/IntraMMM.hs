@@ -40,6 +40,7 @@ import Futhark.Error
 import Futhark.Util.Pretty (prettyString)
 import Data.Bits
 import Data.Semigroup
+import Futhark.Pass.Simplify
 import Prelude hiding (lookup)
 import Futhark.Pass
   ( Pass (..),
@@ -47,7 +48,6 @@ import Futhark.Pass
     intraproceduralTransformation,
     intraproceduralTransformationWithConsts,
   )
-import Futhark.Pass.Simplify
 import Data.Loc (Loc(NoLoc), SrcLoc (SrcLoc))
 import Colog.Core (duplicate)
 
@@ -150,6 +150,7 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
       FunDef Nothing mempty fName typeCout funParams $
         resultBody [Var $ paramName cParam]
     )
+
 -- TODO: entire global as input or only slize, if entire add index as argument
 mkCopyGlobalShared :: (MonadFreshNames m) => PrimType -> Int -> Int -> m MMMFunDef
 mkCopyGlobalShared elmType sizeY sizeX = do
@@ -727,10 +728,9 @@ intraMMMMemFixup =
   -- TODO: don't use intraproceduralTransformation
   Pass
     "mma-fixup"
-    "Extracts NVIDIA tensor core MMA operations" $ 
+    "Extracts NVIDIA tensor core MMA operations" $
     intraproceduralTransformationWithConsts pure fixFuns
-    >=> simplifyProg
-
+    >=> passFunction simplifyGPUMem
 
 -- \$ intraproceduralTransformation fixStmtsWithScope
 
@@ -834,6 +834,7 @@ fixStmts :: Stms GPUMem -> FixMonad (Stms GPUMem)
 fixStmts = mapStmsWithScope fixStmt
 
 
+-- TODO: fix rets without breaking subsequent code, maybe do in explicit allocations pass instead
 -- TODO: pass layout info here?
 fixStmt :: Stm GPUMem -> FixMonad (Stms GPUMem)
 fixStmt stm@(Let (Pat [PatElem resName (MemArray _ _ _ (ArrayIn resMem _))]) _ (BasicOp (Manifest _ inputName))) = do
