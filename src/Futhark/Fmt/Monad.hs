@@ -133,7 +133,7 @@ data FmtState = FmtState
     -- The original source file that is being formatted.
     file :: BS.ByteString,
     -- Pending comment to be inserted before next newline (reverse order).
-    pendingComments :: ![Comment],
+    pendingComments :: !(Maybe Comment),
     -- Keeps track of what type the last output was.
     lastOutput :: !(Maybe LastOutput)
   }
@@ -161,29 +161,21 @@ instance Format (FmtM Fmt) where
 instance Format Comment where
   fmt = comment . commentText
 
--- Functions for operating on FmtM monad
 fmtComments :: (Located a) => a -> FmtM Fmt
 fmtComments a = do
   s <- get
   case comments s of
     c : cs | locOf a > locOf c -> do
-      -- check if we are in the middle of line
-      case lastOutput s of 
-        Nothing -> do
-          put $ s {comments = cs}
-          f <- fmtComments a -- fmts remaining comments
-          c' <- fmt c
-          pure $ c' <> f 
-        Just Line -> do
-          put $ s {comments = cs}
-          f <- fmtComments a -- fmts remaining comments
-          c' <- fmt c
-          pure $ c' <> f 
-        Just _ -> do 
-          put $ s {comments = cs, 
-                   pendingComments = c : pendingComments s}
-          pure mempty 
+      put $ s {comments = cs}
+      pre <:> fmtComments a <:> fmt c 
     _any -> pure mempty
+    where
+      pre = do
+        lastO <- gets lastOutput
+        case lastO of 
+          Nothing -> nil
+          Just Line -> nil
+          Just _ -> modify (\s -> s{lastOutput = Just Line}) >> hardline
                     
 setTrailingComment :: (Located a) => a -> FmtM ()
 setTrailingComment a = do 
@@ -193,7 +185,7 @@ setTrailingComment a = do
       -- comment on same line as term a
       (Loc _sALoc eALoc, Loc _sCLoc eCLoc) | posLine eALoc == posLine eCLoc -> do
           put $ s {comments = cs,
-                   pendingComments = c : pendingComments s} 
+                   pendingComments = Just c} 
       _any -> pure ()
     _ -> pure ()
 
@@ -228,7 +220,8 @@ popComments = do
   modify (\s -> s {comments = []})
   sep nil cs
 
--- | Using the location of @a@ get the segment to create a @FmtM Fmt@.
+-- | Using the location of @a@ get the segment of text in the original file to
+-- create a @FmtM Fmt@.
 fmtCopyLoc :: (Located a) => a -> FmtM Fmt
 fmtCopyLoc a = do
   f <- gets file
@@ -241,6 +234,9 @@ fmtCopyLoc a = do
             Right lit -> text lit
     NoLoc -> error "Formatting term without location"
 
+-- | Given a formatter @FmtM a@, a sequence of comments ordered in increasing
+-- order by location, and the original text files content. Run the formatter and
+-- create @a@.
 runFormat :: FmtM a -> [Comment] -> T.Text -> a
 runFormat format cs file = runIdentity $ evalStateT (runReaderT format e) s
   where
@@ -248,46 +244,51 @@ runFormat format cs file = runIdentity $ evalStateT (runReaderT format e) s
       FmtState
         { comments = cs,
           file = T.encodeUtf8 file,
-          pendingComments = [],
+          pendingComments = Nothing,
           lastOutput = Nothing
         }
     e = MultiLine
 
+-- | An empty input.
 nil :: FmtM Fmt
 nil = pure mempty
 
+-- | Indents everything after a line occurs if in multiline and if in singline
+-- then indent.
 nest :: (Format a) => Int -> a -> FmtM Fmt
 nest i a = fmt a <|> (P.nest i <$> fmt a)
 
+-- | A space.
 space :: FmtM Fmt
-space = modify (\s -> s{lastOutput = Just Space}) >> pure P.space
+space = modify (\s -> s {lastOutput = Just Space}) >> pure P.space
 
+-- | Forces a line to be used regardless of layout, this should ideally not be
+-- used.
 hardline :: FmtM Fmt
 hardline = do 
   pc <- gets pendingComments
-  case pc of 
-    -- if there are no pending comments insert line
-    [] -> do 
+  case pc of
+    Just c -> do 
+      modify $ \s -> s{pendingComments = Nothing,
+                       lastOutput = Just Line}
+      space <:> fmt c
+    Nothing -> do
       modify $ \s -> s{lastOutput = Just Line}
       pure P.line
 
-    -- otherwise printing the comments will insert line
-    _ -> do
-      modify $ \s -> s{pendingComments = [],
-              lastOutput = Just Line}
-      pc' <- sep nil $ reverse pc
-      pure $ P.space <> pc'
-
+-- | A line or a space depending on layout.
 line :: FmtM Fmt
 line = space <|> hardline
 
+
+-- | A comment.
 comment :: T.Text -> FmtM Fmt
 comment c = do 
   modify (\s -> s{lastOutput = Just Line})
   pure $ P.pretty c <> P.line
 
 -- in order to handle trailing comments its VERY important to
--- evaluate the seperator after each element in the list
+-- evaluate the seperator after each element in the list.
 sep :: (Format a, Format b) => a -> [b] -> FmtM Fmt
 sep _ [] = nil
 sep s (a:as) = do 
@@ -297,11 +298,15 @@ sep s (a:as) = do
     aux acc next = do
       s' <- fmt s -- MUST be formatted before next
       next' <- fmt next
-      pure $ acc <> s' <> next'
+      pure$  acc <> s' <> next'
 
+-- | Seperates element by a @s@ followed by a space in singleline layout and
+-- seperates by a line followed by a @s@ in multine layout.
 sepLine :: (Format a, Format b) => a -> [b] -> FmtM Fmt
 sepLine s = sep (s <:> space <|> hardline <:> s)
 
+-- | This is used for function arguments. It seperates multiline arguments by
+-- lines and singline arguments by spaces.
 sepArgs :: (Format a, Located a) => [a] -> FmtM Fmt
 sepArgs [] = nil
 sepArgs ls
@@ -314,12 +319,15 @@ sepArgs ls
     auxiliary _ MultiLine x = hardline <:> x
     los = lineLayout <$> ls
 
+-- | Nest but with the standard value of two spaces.
 stdNest :: (Format a) => a -> FmtM Fmt
 stdNest = nest 2
 
+-- | Aligns line by line.
 align :: (Format a) => a -> FmtM Fmt
-align a = fmt a <|> (P.align <$> fmt a)
+align a = P.align <$> fmt a
 
+-- | Indents everything by @i@.
 indent :: (Format a) => Int -> a -> FmtM Fmt
 indent i a = P.indent i <$> fmt a
 
@@ -332,38 +340,52 @@ stdIndent = indent 2
 softStdIndent :: (Format a) => a -> FmtM Fmt
 softStdIndent = softIndent 2
 
+-- | Creates a piece of text, it should not contain any new lines.
 text :: T.Text -> FmtM Fmt
 text t = do 
   modify (\s -> s{lastOutput = Just Text})
   pure $ P.pretty t
 
+-- | Adds brackets.
 brackets :: (Format a) => a -> FmtM Fmt
 brackets a = text "[" <:> fmt a <:> text "]"
 
+-- | Adds braces.
 braces :: (Format a) => a -> FmtM Fmt
 braces a = text "{" <:> fmt a <:> text "}"
 
+-- | Add parenthesis.
 parens :: (Format a) => a -> FmtM Fmt
 parens a = text "(" <:> fmt a <:> text ")"
 
+-- | Depending on if @b@ is multiline then add a line between them and an indent
+-- to @b@. If singleline then just seperate by a single space.
 (<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
 (<+/>) a b =
   case lineLayout b of
     MultiLine -> a </> stdIndent b
     SingleLine -> a <+> b
 
+-- | If in a singleline layout then concatenate with 'nil' and in multiline
+-- concatenate by a line.
 (<:/>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a <:/> b = a <:> (nil <|> hardline) <:> b
 
+-- | Concatenates @a@ and @b@.
 (<:>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a <:> b = (<>) <$> fmt a <*> fmt b
 
+-- | Concatenate with a space between.
 (<+>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a <+> b = a <:> space <:> b
 
+-- | Concatenate with a space if in singleline layout and concatenate by a
+-- line in multiline.
 (</>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a </> b = a <:> line <:> b
 
+-- | If in a singleline layout then choose @a@, if in a multiline layout choose
+-- @b@.
 (<|>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 a <|> b = do
   lo <- ask
@@ -371,6 +393,7 @@ a <|> b = do
     then fmt a
     else fmt b
 
+-- | First filter off all element and them only format the remaining onces.
 sepFilter :: (Format a, Format b) => [Bool] -> a -> [b] -> FmtM Fmt
 sepFilter bs s xs =
   sep s $
@@ -378,6 +401,9 @@ sepFilter bs s xs =
       filter fst $
         zip bs xs
 
+-- | If in singleline layout seperate by spaces. In a multiline layout seperate
+-- by a single line if two neighbouring elements are singleline. Otherwise
+-- sepereate by two lines.
 sepDecs ::
   (Format a, Located a) =>
   [a] ->
