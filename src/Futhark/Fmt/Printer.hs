@@ -11,14 +11,15 @@ import Language.Futhark.Parser
     parseFutharkWithComments,
   )
 import Prettyprinter.Internal (Pretty)
+
 --
 -- A *formatting function* is a function of type
 --
 --   Format a => a -> FmtM Fmt
 --
 -- where 'a' is some syntactical object, e.g. UncheckedTypeExp.  The
--- FmtM is state monad with state: [Comment], a list of sorted "residual 
--- comments" that have yet to be injected into the output.  
+-- FmtM is state monad with state: [Comment], a list of sorted "residual
+-- comments" that have yet to be injected into the output.
 -- A formatting function returns the formatted representation of 'a'
 -- as a 'Fmt' value as well a the formatted representation of any comments
 -- before 'a', and updates the FmtM state by removing comments
@@ -33,7 +34,7 @@ fmtName = text . nameToText
 
 fmtNameParen :: Name -> FmtM Fmt
 fmtNameParen name
-  | operatorName name = parens $ fmtName name 
+  | operatorName name = parens $ fmtName name
   | otherwise = fmtName name
 
 fmtPretty :: (Pretty a) => a -> FmtM Fmt
@@ -65,16 +66,16 @@ instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = prependComments loc $ fmtQualName v
   fmt (TETuple ts loc) =
     prependComments loc $ parens $ sepLine (text ",") ts
-  fmt (TEParens te loc) = prependComments loc $ parens te 
+  fmt (TEParens te loc) = prependComments loc $ parens te
   fmt (TERecord fs loc) =
     prependComments loc $ braces $ sepLine (text ",") fields
     where
       fields = fmtFieldType <$> fs
-  fmt (TEArray se te loc) = prependComments loc $ se <:> te 
+  fmt (TEArray se te loc) = prependComments loc $ se <:> te
   -- This "*" https://futhark-lang.org/blog/2022-06-13-uniqueness-types.html
-  fmt (TEUnique te loc) = prependComments loc $ text "*" <:> te 
+  fmt (TEUnique te loc) = prependComments loc $ text "*" <:> te
   -- I am not sure I guess applying a higher kinded type to some type expression
-  fmt (TEApply te tArgE loc) = prependComments loc $ te <+> tArgE 
+  fmt (TEApply te tArgE loc) = prependComments loc $ te <+> tArgE
   -- this is "->"
   fmt (TEArrow name te0 te1 loc) =
     prependComments loc $ fmtParamType name te0 <+> text "->" </> softStdIndent te1
@@ -136,7 +137,7 @@ instance Format (UncheckedPat t) where
           map fmtFieldPat pats
     where
       -- Currently it always adds the fields it seems. I think it has to do this.
-      fmtFieldPat (name, t) = fmtName name <+> text "=" <+> t 
+      fmtFieldPat (name, t) = fmtName name <+> text "=" <+> t
   fmt (PatParens pat loc) =
     prependComments loc $ text "(" <:> align pat <:/> text ")"
   fmt (Id name _ loc) = prependComments loc $ fmtNameParen name
@@ -201,7 +202,7 @@ instance Format UncheckedExp where
   fmt (Coerce e t _ loc) = prependComments loc $ e <+> text ":>" <+> t
   fmt (Literal _v loc) = prependComments loc $ fmtCopyLoc loc
   fmt (IntLit _v _ loc) = prependComments loc $ fmtCopyLoc loc
-  fmt (FloatLit _v _ loc) = prependComments loc $ fmtCopyLoc loc 
+  fmt (FloatLit _v _ loc) = prependComments loc $ fmtCopyLoc loc
   fmt (TupLit es loc) =
     prependComments loc $
       parens $
@@ -231,7 +232,7 @@ instance Format UncheckedExp where
     prependComments loc $
       src <+> text "with" <+> fs' <+> stdNest (text "=" </> ve)
     where
-      fs' = sep (text ".") $ fmtName <$> fs 
+      fs' = sep (text ".") $ fmtName <$> fs
   fmt (Assert e1 e2 _ loc) =
     prependComments loc $ text "assert" <+> e1 <+> e2
   fmt (Lambda params body rettype _ loc) =
@@ -540,7 +541,7 @@ instance Format UncheckedDec where
   fmt (TypeDec tb) = fmt tb -- A type declaration.
   fmt (ModTypeDec tb) = fmt tb -- A module type declation.
   fmt (ModDec tb) = fmt tb -- A module declation.
-  fmt (OpenDec tb loc) = prependComments loc $ text "open" <+> tb 
+  fmt (OpenDec tb loc) = prependComments loc $ text "open" <+> tb
   -- Adds the local keyword
   fmt (LocalDec tb loc) = prependComments loc $ text "local" <+> tb
   -- Import declarations.

@@ -42,7 +42,7 @@ module Futhark.Fmt.Monad
   )
 where
 
-import Control.Monad(foldM)
+import Control.Monad (foldM)
 import Control.Monad.Identity (Identity (..))
 import Control.Monad.Reader
   ( MonadReader (..),
@@ -129,7 +129,7 @@ prependComments a b = localLayout a $ do
 -- | The internal state of the formatter monad 'FmtM'.
 data FmtState = FmtState
   { -- | The list comments that will be inserted, ordered by smallest location to larges.
-    comments :: [Comment], 
+    comments :: [Comment],
     -- The original source file that is being formatted.
     file :: BS.ByteString,
     -- Pending comment to be inserted before next newline (reverse order).
@@ -148,7 +148,7 @@ data Layout = MultiLine | SingleLine deriving (Show, Eq)
 -- | The format monad used to keep track of comments and layout. It is a a
 -- combincation of a reader and state monad. The comments and reading from the
 -- input file are the state monads job to deal with. While the reader monad
--- deals with the propagating the current layout. 
+-- deals with the propagating the current layout.
 type FmtM a = ReaderT Layout (StateT FmtState Identity) a
 
 -- | A typeclass that defines how an type can be formatted.
@@ -167,25 +167,28 @@ fmtComments a = do
   case comments s of
     c : cs | locOf a > locOf c -> do
       put $ s {comments = cs}
-      pre <:> fmtComments a <:> fmt c 
+      pre <:> fmt c <:> fmtComments a
     _any -> pure mempty
-    where
-      pre = do
-        lastO <- gets lastOutput
-        case lastO of 
-          Nothing -> nil
-          Just Line -> nil
-          Just _ -> modify (\s -> s{lastOutput = Just Line}) >> hardline
-                    
+  where
+    pre = do
+      lastO <- gets lastOutput
+      case lastO of
+        Nothing -> nil
+        Just Line -> nil
+        Just _ -> modify (\s -> s {lastOutput = Just Line}) >> hardline
+
 setTrailingComment :: (Located a) => a -> FmtM ()
-setTrailingComment a = do 
+setTrailingComment a = do
   s <- get
-  case comments s of 
-    c : cs  -> case (locOf a, locOf c) of 
+  case comments s of
+    c : cs -> case (locOf a, locOf c) of
       -- comment on same line as term a
       (Loc _sALoc eALoc, Loc _sCLoc eCLoc) | posLine eALoc == posLine eCLoc -> do
-          put $ s {comments = cs,
-                   pendingComments = Just c} 
+        put $
+          s
+            { comments = cs,
+              pendingComments = Just c
+            }
       _any -> pure ()
     _ -> pure ()
 
@@ -265,40 +268,42 @@ space = modify (\s -> s {lastOutput = Just Space}) >> pure P.space
 -- | Forces a line to be used regardless of layout, this should ideally not be
 -- used.
 hardline :: FmtM Fmt
-hardline = do 
+hardline = do
   pc <- gets pendingComments
   case pc of
-    Just c -> do 
-      modify $ \s -> s{pendingComments = Nothing,
-                       lastOutput = Just Line}
+    Just c -> do
+      modify $ \s ->
+        s
+          { pendingComments = Nothing,
+            lastOutput = Just Line
+          }
       space <:> fmt c
     Nothing -> do
-      modify $ \s -> s{lastOutput = Just Line}
+      modify $ \s -> s {lastOutput = Just Line}
       pure P.line
 
 -- | A line or a space depending on layout.
 line :: FmtM Fmt
 line = space <|> hardline
 
-
 -- | A comment.
 comment :: T.Text -> FmtM Fmt
-comment c = do 
-  modify (\s -> s{lastOutput = Just Line})
+comment c = do
+  modify (\s -> s {lastOutput = Just Line})
   pure $ P.pretty c <> P.line
 
 -- in order to handle trailing comments its VERY important to
 -- evaluate the seperator after each element in the list.
 sep :: (Format a, Format b) => a -> [b] -> FmtM Fmt
 sep _ [] = nil
-sep s (a:as) = do 
+sep s (a : as) = do
   a' <- fmt a
   foldM aux a' as
-  where 
+  where
     aux acc next = do
       s' <- fmt s -- MUST be formatted before next
       next' <- fmt next
-      pure$  acc <> s' <> next'
+      pure $ acc <> s' <> next'
 
 -- | Seperates element by a @s@ followed by a space in singleline layout and
 -- seperates by a line followed by a @s@ in multine layout.
@@ -342,8 +347,8 @@ softStdIndent = softIndent 2
 
 -- | Creates a piece of text, it should not contain any new lines.
 text :: T.Text -> FmtM Fmt
-text t = do 
-  modify (\s -> s{lastOutput = Just Text})
+text t = do
+  modify (\s -> s {lastOutput = Just Text})
   pure $ P.pretty t
 
 -- | Adds brackets.
