@@ -161,6 +161,20 @@ tests =
               (sum2 .-. int 1) FM.$<$ (sVar i2 .+. sum1)
           )
           @??= True,
+      testCase "Partition2 variant" $
+        run
+          ( do
+              addRange (Var  n) $ mkRangeLB (int 0)
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addEquiv (Idx c (sVar i1)) (int 1)
+              addEquiv (Idx c (sVar i2)) (int 0)
+              let sum1 = sym2SoP $ Sum c (sVar i2 .+. int 1) $ sVar n .-. int 1
+                  sum2 = sym2SoP $ Sum c (int 0) $ sVar i1 .-. int 1
+              sum2 FM.$<$ (sVar i2 .+. sum1)
+          )
+          @??= True,
+      --
       testCase "FME1" $
         run
           ( do
