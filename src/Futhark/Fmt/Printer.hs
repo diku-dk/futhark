@@ -296,8 +296,9 @@ instance Format (AppExpBase NoInfo Name) where
         </> letBody body
     where
       sizes' = sep nil sizes
-      sub | null sizes = fmt pat
-          | otherwise  = sizes' <+> fmt pat 
+      sub
+        | null sizes = fmt pat
+        | otherwise = sizes' <+> fmt pat
   fmt (LetFun fname (tparams, params, retdecl, _, e) body loc) =
     addComments loc $
       ( text "let"
@@ -315,10 +316,11 @@ instance Format (AppExpBase NoInfo Name) where
         case retdecl of
           Just a -> text ":" <+> a <:> space
           Nothing -> space
-      sub | null tparams && null params = nil
-          | null tparams = space <:> params'
-          | null params = space <:> tparams'
-          | otherwise = space <:> tparams' <+> params'
+      sub
+        | null tparams && null params = nil
+        | null tparams = space <:> params'
+        | null params = space <:> tparams'
+        | otherwise = space <:> tparams' <+> params'
   fmt (LetWith dest src idxs ve body loc)
     | dest == src =
         addComments loc $
@@ -413,10 +415,11 @@ instance Format UncheckedValBind where
         case retdecl of
           Just a -> text ":" <+> a <:> space
           Nothing -> space
-      sub | null tparams && null args = nil
-          | null tparams = space <:> args'
-          | null args = space <:> tparams'
-          | otherwise = space <:> tparams' <+> args'
+      sub
+        | null tparams && null args = nil
+        | null tparams = space <:> args'
+        | null args = space <:> tparams'
+        | otherwise = space <:> tparams' <+> args'
       fun =
         case entry of
           Just _ -> text "entry"
@@ -432,8 +435,9 @@ instance Format UncheckedSpec where
     addComments loc $
       doc <:> text "type" <+> l <:> sub
     where
-      sub | null ps   = fmtName name
-          | otherwise = fmtName name </> align (sep line ps)
+      sub
+        | null ps = fmtName name
+        | otherwise = fmtName name </> align (sep line ps)
   fmt (ValSpec name ps te _ doc loc) =
     addComments loc $
       doc
@@ -442,8 +446,9 @@ instance Format UncheckedSpec where
         <:> text ":"
         <+> te
     where
-      sub | null ps   = fmtName name
-          | otherwise = fmtName name </> align (sep line ps)
+      sub
+        | null ps = fmtName name
+        | otherwise = fmtName name </> align (sep line ps)
   fmt (ModSpec name mte doc loc) =
     addComments loc $ doc <:> text "module" <+> fmtName name <:> text ":" <+> mte
   fmt (IncludeSpec mte loc) = addComments loc $ text "include" <+> mte
