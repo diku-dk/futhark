@@ -104,11 +104,11 @@ mkScanFusedMapLam ops w scn_lam xs ys ys_adj s d = do
     case_jac :: Int -> SpecialCase -> [[a]] -> [[a]]
     case_jac _ Generic jac = jac
     case_jac k ZeroQuadrant jac =
-      concat
-        $ zipWith
+      concat $
+        zipWith
           (\i -> map (take k . drop (i * k)))
           [0 .. d `div` k]
-        $ chunk k jac
+          $ chunk k jac
     case_jac k MatrixMul jac =
       take k <$> take k jac
 
@@ -221,10 +221,10 @@ subMats d mat zero =
 cases :: Int -> Type -> [[Exp SOACS]] -> Special
 cases d t mat
   | Just k <- subMats d mat $ zeroExp t =
-      let nonZeros = zipWith (\i -> map (take k . drop (i * k))) [0 .. d `div` k] $ chunk k mat
-       in if all (== head nonZeros) $ tail nonZeros
-            then Special (d, k) (d, k * k) 1 k MatrixMul
-            else Special (k, k) (k, k * k) (d `div` k) k ZeroQuadrant
+    let nonZeros = zipWith (\i -> map (take k . drop (i * k))) [0 .. d `div` k] $ chunk k mat
+     in if all (== head nonZeros) $ tail nonZeros
+          then Special (d, k) (d, k * k) 1 k MatrixMul
+          else Special (k, k) (k, k * k) (d `div` k) k ZeroQuadrant
 cases d _ _ = Special (d, d) (d, d * d) 1 d Generic
 
 identifyCase :: VjpOps -> Lambda SOACS -> ADM Special

@@ -51,9 +51,9 @@ elseIf t ((c1, c2) : cs) (bt : bs) =
   eIf
     (eCmpOp (CmpEq t) c1 c2)
     bt
-    $ eBody
-    $ pure
-    $ elseIf t cs bs
+    $ eBody $
+      pure $
+        elseIf t cs bs
 elseIf _ _ _ = error "In elseIf, Hist.hs: input not supported"
 
 bindSubExpRes :: (MonadBuilder m) => String -> [SubExpRes] -> m [VName]

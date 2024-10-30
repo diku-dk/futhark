@@ -152,14 +152,14 @@ vjpScatter ops (Pat pes) aux (w, ass, lam, written_info) m
   | isIdentityLambda lam,
     [(shp, num_vals, xs)] <- written_info,
     [pys] <- pes =
-      vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m
+    vjpScatter1 pys aux (w, ass, (shp, num_vals, xs)) m
   | isIdentityLambda lam = do
-      let sind = splitInd written_info
-          (inds, vals) = splitAt sind ass
-      lst_stms <- chunkScatterInps (inds, vals) (zip pes written_info)
-      diffScatters (stmsFromList lst_stms)
+    let sind = splitInd written_info
+        (inds, vals) = splitAt sind ass
+    lst_stms <- chunkScatterInps (inds, vals) (zip pes written_info)
+    diffScatters (stmsFromList lst_stms)
   | otherwise =
-      error "vjpScatter: cannot handle"
+    error "vjpScatter: cannot handle"
   where
     splitInd [] = 0
     splitInd ((shp, num_res, _) : rest) =
@@ -183,5 +183,5 @@ vjpScatter ops (Pat pes) aux (w, ass, lam, written_info) m
         pure $ stm : stms_rest
     diffScatters all_stms
       | Just (stm, stms) <- stmsHead all_stms =
-          vjpStm ops stm $ diffScatters stms
+        vjpStm ops stm $ diffScatters stms
       | otherwise = m

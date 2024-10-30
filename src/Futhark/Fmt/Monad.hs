@@ -23,7 +23,6 @@ module Futhark.Fmt.Monad
     indent,
     hardStdIndent,
     stdIndent,
-    sepFilter,
     pretty,
     FmtM,
     fmtComments,
@@ -43,15 +42,14 @@ module Futhark.Fmt.Monad
 where
 
 import Control.Monad (foldM)
-import Control.Monad.Identity (Identity (..))
 import Control.Monad.Reader
   ( MonadReader (..),
     ReaderT (..),
   )
 import Control.Monad.State
   ( MonadState (..),
-    StateT,
-    evalStateT,
+    State,
+    evalState,
     gets,
     modify,
   )
@@ -150,7 +148,7 @@ data Layout = MultiLine | SingleLine deriving (Show, Eq)
 -- combincation of a reader and state monad. The comments and reading from the
 -- input file are the state monads job to deal with. While the reader monad
 -- deals with the propagating the current layout.
-type FmtM a = ReaderT Layout (StateT FmtState Identity) a
+type FmtM a = ReaderT Layout (State FmtState) a
 
 -- | A typeclass that defines how an type can be formatted.
 class Format a where
@@ -245,7 +243,7 @@ fmtCopyLoc a = do
 -- order by location, and the original text files content. Run the formatter and
 -- create @a@.
 runFormat :: FmtM a -> [Comment] -> T.Text -> a
-runFormat format cs file = runIdentity $ evalStateT (runReaderT format e) s
+runFormat format cs file = evalState (runReaderT format e) s
   where
     s =
       FmtState
@@ -404,14 +402,6 @@ a <|> b = do
   if lo == SingleLine
     then fmt a
     else fmt b
-
--- | First filter off all element and them only format the remaining onces.
-sepFilter :: (Format a, Format b) => [Bool] -> a -> [b] -> FmtM Fmt
-sepFilter bs s xs =
-  sep s $
-    map snd $
-      filter fst $
-        zip bs xs
 
 -- | If in singleline layout seperate by spaces. In a multiline layout seperate
 -- by a single line if two neighbouring elements are singleline. Otherwise

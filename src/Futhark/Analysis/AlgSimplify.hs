@@ -178,17 +178,17 @@ maybeDivide dividend divisor
     Prod divisor_b divisor_factors <- divisor,
     quotient <- dividend_factors \\ divisor_factors,
     sort (quotient <> divisor_factors) == sort dividend_factors =
-      Just $ Prod (dividend_b `xor` divisor_b) quotient
+    Just $ Prod (dividend_b `xor` divisor_b) quotient
   | (dividend_scale, dividend_rest) <- prodToScale dividend,
     (divisor_scale, divisor_rest) <- prodToScale divisor,
     dividend_scale `mod` divisor_scale == 0,
     null $ divisor_rest \\ dividend_rest =
-      Just $
-        Prod
-          (signum (dividend_scale `div` divisor_scale) < 0)
-          ( ValueExp (IntValue $ Int64Value $ dividend_scale `div` divisor_scale)
-              : (dividend_rest \\ divisor_rest)
-          )
+    Just $
+      Prod
+        (signum (dividend_scale `div` divisor_scale) < 0)
+        ( ValueExp (IntValue $ Int64Value $ dividend_scale `div` divisor_scale) :
+          (dividend_rest \\ divisor_rest)
+        )
   | otherwise = Nothing
 
 -- | Given a list of 'Names' that we know are non-negative (>= 0), determine
@@ -234,8 +234,8 @@ removeLessThans =
     ( \sofp (i, bound) ->
         let to_remove =
               simplifySofP $
-                Prod True [primExpFromSubExp (IntType Int64) i]
-                  : simplify0 bound
+                Prod True [primExpFromSubExp (IntType Int64) i] :
+                simplify0 bound
          in case to_remove `intersect` sofp of
               to_remove' | to_remove' == to_remove -> sofp \\ to_remove
               _ -> sofp

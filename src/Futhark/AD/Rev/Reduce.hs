@@ -77,12 +77,12 @@ diffReduce :: VjpOps -> [VName] -> SubExp -> [VName] -> Reduce SOACS -> ADM ()
 diffReduce _ops [adj] w [a] red
   | Just [(op, _, _, _)] <- lamIsBinOp $ redLambda red,
     isAdd op = do
-      adj_rep <-
-        letExp (baseString adj <> "_rep") $
-          BasicOp $
-            Replicate (Shape [w]) $
-              Var adj
-      void $ updateAdj a adj_rep
+    adj_rep <-
+      letExp (baseString adj <> "_rep") $
+        BasicOp $
+          Replicate (Shape [w]) $
+            Var adj
+    void $ updateAdj a adj_rep
   where
     isAdd FAdd {} = True
     isAdd Add {} = True

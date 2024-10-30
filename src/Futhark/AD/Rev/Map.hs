@@ -80,75 +80,75 @@ withAcc inputs m = do
 vjpMap :: VjpOps -> [Adj] -> StmAux () -> SubExp -> Lambda SOACS -> [VName] -> ADM ()
 vjpMap ops res_adjs _ w map_lam as
   | Just res_ivs <- mapM isSparse res_adjs = returnSweepCode $ do
-      -- Since at most only a constant number of adjoint are nonzero
-      -- (length res_ivs), there is no need for the return sweep code to
-      -- contain a Map at all.
+    -- Since at most only a constant number of adjoint are nonzero
+    -- (length res_ivs), there is no need for the return sweep code to
+    -- contain a Map at all.
 
-      free <- filterM isActive $ namesToList $ freeIn map_lam `namesSubtract` namesFromList as
-      free_ts <- mapM lookupType free
-      let adjs_for = map paramName (lambdaParams map_lam) ++ free
-          adjs_ts = map paramType (lambdaParams map_lam) ++ free_ts
+    free <- filterM isActive $ namesToList $ freeIn map_lam `namesSubtract` namesFromList as
+    free_ts <- mapM lookupType free
+    let adjs_for = map paramName (lambdaParams map_lam) ++ free
+        adjs_ts = map paramType (lambdaParams map_lam) ++ free_ts
 
-      let oneHot res_i adj_v = zipWith f [0 :: Int ..] $ lambdaReturnType map_lam
-            where
-              f j t
-                | res_i == j = adj_v
-                | otherwise = AdjZero (arrayShape t) (elemType t)
-          -- Values for the out-of-bounds case does not matter, as we will
-          -- be writing to an out-of-bounds index anyway, which is ignored.
-          ooBounds adj_i = subAD . buildRenamedBody $ do
-            forM_ (zip as adjs_ts) $ \(a, t) -> do
-              scratch <- letSubExp "oo_scratch" =<< eBlank t
-              updateAdjIndex a (OutOfBounds, adj_i) scratch
-            -- We must make sure that all free variables have the same
-            -- representation in the oo-branch as in the ib-branch.
-            -- In practice we do this by manifesting the adjoint.
-            -- This is probably efficient, since the adjoint of a free
-            -- variable is probably either a scalar or an accumulator.
-            forM_ free $ \v -> insAdj v =<< adjVal =<< lookupAdj v
-            first subExpsRes . adjsReps <$> mapM lookupAdj (as <> free)
-          inBounds res_i adj_i adj_v = subAD . buildRenamedBody $ do
-            forM_ (zip (lambdaParams map_lam) as) $ \(p, a) -> do
-              a_t <- lookupType a
-              letBindNames [paramName p] . BasicOp . Index a $
-                fullSlice a_t [DimFix adj_i]
-            adj_elems <-
-              fmap (map resSubExp) . bodyBind . lambdaBody
-                =<< vjpLambda ops (oneHot res_i (AdjVal adj_v)) adjs_for map_lam
-            let (as_adj_elems, free_adj_elems) = splitAt (length as) adj_elems
-            forM_ (zip as as_adj_elems) $ \(a, a_adj_elem) ->
-              updateAdjIndex a (AssumeBounds, adj_i) a_adj_elem
-            forM_ (zip free free_adj_elems) $ \(v, adj_se) -> do
-              adj_se_v <- letExp "adj_v" (BasicOp $ SubExp adj_se)
-              insAdj v adj_se_v
-            first subExpsRes . adjsReps <$> mapM lookupAdj (as <> free)
+    let oneHot res_i adj_v = zipWith f [0 :: Int ..] $ lambdaReturnType map_lam
+          where
+            f j t
+              | res_i == j = adj_v
+              | otherwise = AdjZero (arrayShape t) (elemType t)
+        -- Values for the out-of-bounds case does not matter, as we will
+        -- be writing to an out-of-bounds index anyway, which is ignored.
+        ooBounds adj_i = subAD . buildRenamedBody $ do
+          forM_ (zip as adjs_ts) $ \(a, t) -> do
+            scratch <- letSubExp "oo_scratch" =<< eBlank t
+            updateAdjIndex a (OutOfBounds, adj_i) scratch
+          -- We must make sure that all free variables have the same
+          -- representation in the oo-branch as in the ib-branch.
+          -- In practice we do this by manifesting the adjoint.
+          -- This is probably efficient, since the adjoint of a free
+          -- variable is probably either a scalar or an accumulator.
+          forM_ free $ \v -> insAdj v =<< adjVal =<< lookupAdj v
+          first subExpsRes . adjsReps <$> mapM lookupAdj (as <> free)
+        inBounds res_i adj_i adj_v = subAD . buildRenamedBody $ do
+          forM_ (zip (lambdaParams map_lam) as) $ \(p, a) -> do
+            a_t <- lookupType a
+            letBindNames [paramName p] . BasicOp . Index a $
+              fullSlice a_t [DimFix adj_i]
+          adj_elems <-
+            fmap (map resSubExp) . bodyBind . lambdaBody
+              =<< vjpLambda ops (oneHot res_i (AdjVal adj_v)) adjs_for map_lam
+          let (as_adj_elems, free_adj_elems) = splitAt (length as) adj_elems
+          forM_ (zip as as_adj_elems) $ \(a, a_adj_elem) ->
+            updateAdjIndex a (AssumeBounds, adj_i) a_adj_elem
+          forM_ (zip free free_adj_elems) $ \(v, adj_se) -> do
+            adj_se_v <- letExp "adj_v" (BasicOp $ SubExp adj_se)
+            insAdj v adj_se_v
+          first subExpsRes . adjsReps <$> mapM lookupAdj (as <> free)
 
-          -- Generate an iteration of the map function for every
-          -- position.  This is a bit inefficient - probably we could do
-          -- some deduplication.
-          forPos res_i (check, adj_i, adj_v) = do
-            adjs <-
-              case check of
-                CheckBounds b -> do
-                  (obbranch, mkadjs) <- ooBounds adj_i
-                  (ibbranch, _) <- inBounds res_i adj_i adj_v
-                  fmap mkadjs . letTupExp' "map_adj_elem"
-                    =<< eIf
-                      (maybe (eDimInBounds (eSubExp w) (eSubExp adj_i)) eSubExp b)
-                      (pure ibbranch)
-                      (pure obbranch)
-                AssumeBounds -> do
-                  (body, mkadjs) <- inBounds res_i adj_i adj_v
-                  mkadjs . map resSubExp <$> bodyBind body
-                OutOfBounds ->
-                  mapM lookupAdj as
+        -- Generate an iteration of the map function for every
+        -- position.  This is a bit inefficient - probably we could do
+        -- some deduplication.
+        forPos res_i (check, adj_i, adj_v) = do
+          adjs <-
+            case check of
+              CheckBounds b -> do
+                (obbranch, mkadjs) <- ooBounds adj_i
+                (ibbranch, _) <- inBounds res_i adj_i adj_v
+                fmap mkadjs . letTupExp' "map_adj_elem"
+                  =<< eIf
+                    (maybe (eDimInBounds (eSubExp w) (eSubExp adj_i)) eSubExp b)
+                    (pure ibbranch)
+                    (pure obbranch)
+              AssumeBounds -> do
+                (body, mkadjs) <- inBounds res_i adj_i adj_v
+                mkadjs . map resSubExp <$> bodyBind body
+              OutOfBounds ->
+                mapM lookupAdj as
 
-            zipWithM setAdj (as <> free) adjs
+          zipWithM setAdj (as <> free) adjs
 
-          -- Generate an iteration of the map function for every result.
-          forRes res_i = mapM_ (forPos res_i)
+        -- Generate an iteration of the map function for every result.
+        forRes res_i = mapM_ (forPos res_i)
 
-      zipWithM_ forRes [0 ..] res_ivs
+    zipWithM_ forRes [0 ..] res_ivs
   where
     isSparse (AdjSparse (Sparse shape _ ivs)) = do
       guard $ shapeDims shape == [w]

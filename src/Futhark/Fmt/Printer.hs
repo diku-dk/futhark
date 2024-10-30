@@ -289,18 +289,19 @@ instance Format (AppExpBase NoInfo Name) where
   fmt (LetPat sizes pat e body loc) =
     addComments loc $
       ( text "let"
-          <+> sepFilter [not $ null sizes, True] space [sizes', fmt pat]
+          <+> sub
           <+> text "="
       )
         <+/> e
         </> letBody body
     where
       sizes' = sep nil sizes
+      sub | null sizes = fmt pat
+          | otherwise  = sizes' <+> fmt pat 
   fmt (LetFun fname (tparams, params, retdecl, _, e) body loc) =
     addComments loc $
       ( text "let"
           <+> fmtName fname
-          <:> (if null params && null tparams then nil else space)
           <:> sub
           <:> retdecl'
           <:> text "="
@@ -314,7 +315,10 @@ instance Format (AppExpBase NoInfo Name) where
         case retdecl of
           Just a -> text ":" <+> a <:> space
           Nothing -> space
-      sub = sepFilter [not $ null tparams, not $ null params] space [tparams', params']
+      sub | null tparams && null params = nil
+          | null tparams = space <:> params'
+          | null params = space <:> tparams'
+          | otherwise = space <:> tparams' <+> params'
   fmt (LetWith dest src idxs ve body loc)
     | dest == src =
         addComments loc $
@@ -397,7 +401,6 @@ instance Format UncheckedValBind where
         <:> (if null attrs then nil else attrs' <:> space)
         <:> fun
         <+> fmtNameParen name
-        <:> (if null tparams && null args then nil else space)
         <:> sub
         <:> retdecl'
         <:> text "="
@@ -410,9 +413,10 @@ instance Format UncheckedValBind where
         case retdecl of
           Just a -> text ":" <+> a <:> space
           Nothing -> space
-      flags = [not $ null tparams, not $ null args]
-      sub =
-        sepFilter flags space [tparams', args']
+      sub | null tparams && null args = nil
+          | null tparams = space <:> args'
+          | null args = space <:> tparams'
+          | otherwise = space <:> tparams' <+> args'
       fun =
         case entry of
           Just _ -> text "entry"
@@ -428,7 +432,8 @@ instance Format UncheckedSpec where
     addComments loc $
       doc <:> text "type" <+> l <:> sub
     where
-      sub = sepFilter [True, not $ null ps] line [fmtName name, align (sep line ps)]
+      sub | null ps   = fmtName name
+          | otherwise = fmtName name </> align (sep line ps)
   fmt (ValSpec name ps te _ doc loc) =
     addComments loc $
       doc
@@ -437,7 +442,8 @@ instance Format UncheckedSpec where
         <:> text ":"
         <+> te
     where
-      sub = sepFilter [True, not $ null ps] line [fmtName name, align (sep line ps)]
+      sub | null ps   = fmtName name
+          | otherwise = fmtName name </> align (sep line ps)
   fmt (ModSpec name mte doc loc) =
     addComments loc $ doc <:> text "module" <+> fmtName name <:> text ":" <+> mte
   fmt (IncludeSpec mte loc) = addComments loc $ text "include" <+> mte
@@ -465,7 +471,6 @@ instance Format UncheckedModTypeBind where
       doc <:> text "module type" <+> fmtName pName <+> text "=" <+> pSig
 
 instance Format (ModParamBase NoInfo Name) where
-  fmt :: ModParamBase NoInfo Name -> FmtM Fmt
   fmt (ModParam pName pSig _f loc) =
     addComments loc $ parens $ fmtName pName <:> text ":" <+> pSig
 
