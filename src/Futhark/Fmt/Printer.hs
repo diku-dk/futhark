@@ -3,6 +3,7 @@
 module Futhark.Fmt.Printer (fmtText) where
 
 import Data.Foldable
+import Data.Loc (Loc (..))
 import Data.Text qualified as T
 import Futhark.Fmt.Monad
 import Language.Futhark
@@ -82,9 +83,17 @@ instance Format UncheckedTypeBind where
         <+> text "="
         </> stdIndent e
 
+instance Located (AttrAtom a) where
+  locOf _ = NoLoc
+
 instance Format (AttrAtom a) where
   fmt (AtomName name) = fmtName name
   fmt (AtomInt int) = text $ prettyText int
+
+-- Not sure this is correct.
+instance Located (AttrInfo a) where
+  locOf (AttrAtom _ loc) = locOf loc
+  locOf (AttrComp _ _ loc) = locOf loc
 
 instance Format (AttrInfo a) where
   fmt attr = text "#" <:> brackets (fmtAttrInfo attr)
@@ -92,6 +101,9 @@ instance Format (AttrInfo a) where
       fmtAttrInfo (AttrAtom attr' loc) = addComments loc $ fmt attr'
       fmtAttrInfo (AttrComp name attrs loc) =
         addComments loc $ fmtName name <:> parens (sep (text ",") $ map fmtAttrInfo attrs)
+
+instance Located Liftedness where
+  locOf _ = NoLoc
 
 instance Format Liftedness where
   fmt Unlifted = nil
@@ -131,6 +143,9 @@ instance Format (FieldBase NoInfo Name) where
     addComments loc $ fmtName name <+> text "=" </> stdIndent e
   fmt (RecordFieldImplicit name _ loc) = addComments loc $ fmtName name
 
+instance Located PrimValue where
+  locOf _ = NoLoc
+
 instance Format PrimValue where
   fmt (UnsignedValue (Int8Value v)) =
     fmt $ fmtPretty (show (fromIntegral v :: Word8)) <:> text "u8"
@@ -144,6 +159,9 @@ instance Format PrimValue where
   fmt (BoolValue True) = fmt $ text "true"
   fmt (BoolValue False) = fmt $ text "false"
   fmt (FloatValue v) = fmtPretty v
+
+instance Located UncheckedDimIndex where
+  locOf _ = NoLoc
 
 instance Format UncheckedDimIndex where
   fmt (DimFix e) = fmt e
@@ -379,6 +397,9 @@ instance Format (SizeBinder Name) where
 instance Format (IdentBase NoInfo Name t) where
   fmt = fmtPretty . identName
 
+instance Located (LoopFormBase NoInfo Name) where
+  locOf _ = NoLoc
+
 instance Format (LoopFormBase NoInfo Name) where
   fmt (For i ubound) =
     text "for" <+> i <+> text "<" <+> ubound
@@ -529,6 +550,9 @@ instance Format UncheckedDec where
   fmt (LocalDec tb loc) = addComments loc $ text "local" <+> tb
   fmt (ImportDec path _tb loc) =
     addComments loc $ text "import \"" <:> fmtPretty path <:> text "\""
+
+instance Located UncheckedProg where
+  locOf _ = NoLoc
 
 instance Format UncheckedProg where
   fmt (Prog dc decs) =

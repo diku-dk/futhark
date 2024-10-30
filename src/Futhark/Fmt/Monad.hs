@@ -35,13 +35,12 @@ module Futhark.Fmt.Monad
     sepArgs,
     localLayout,
     localLayoutList,
-    addComments,
     sepDecs,
     fmtByLayout,
+    addComments,
   )
 where
 
-import Control.Monad (foldM)
 import Control.Monad.Reader
   ( MonadReader (..),
     ReaderT (..),
@@ -55,28 +54,29 @@ import Control.Monad.State
   )
 import Data.ByteString qualified as BS
 import Data.Loc (Loc (..), Located (..), posCoff, posLine)
+import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Language.Futhark.Parser.Monad (Comment (..))
 import Prettyprinter qualified as P
 import Prettyprinter.Render.Text (renderStrict)
 
--- These are left associative since we want to evaluate the monadic
+-- These are right associative since we want to evaluate the monadic
 -- computation from left to right. Since the left most expression is
 -- printed first and our monad is checking if a comment should be
 -- printed.
 
-infixl 7 <+/>
+infixr 7 <+/>
 
-infixl 6 <:/>
+infixr 6 <:/>
 
-infixl 6 <:>
+infixr 6 <:>
 
-infixl 6 <+>
+infixr 6 <+>
 
-infixl 6 </>
+infixr 6 </>
 
-infixl 4 <|>
+infixr 4 <|>
 
 type Fmt = P.Doc ()
 
@@ -85,9 +85,11 @@ type Fmt = P.Doc ()
 fmtByLayout ::
   (Located a, Format s, Format m) => a -> s -> m -> FmtM Fmt
 fmtByLayout a s m =
-  case lineLayout a of
-    SingleLine -> fmt s
-    MultiLine -> fmt m
+  s
+    <|> ( case lineLayout a of
+            Just SingleLine -> fmt s
+            _any -> fmt m
+        )
 
 -- | This function determines the Layout of @a@ and if it is singleline then it
 -- updates the monads enviroment to format singleline style otherwise format using
@@ -97,7 +99,7 @@ localLayout :: (Located a) => a -> FmtM b -> FmtM b
 localLayout a m = do
   lo <- ask
   case lo of
-    MultiLine -> local (const $ lineLayout a) m
+    MultiLine -> local (const $ fromMaybe lo $ lineLayout a) m
     SingleLine -> m
 
 -- | This function determines the Layout of @[a]@ and if it is singleline then it
@@ -108,7 +110,7 @@ localLayoutList :: (Located a) => [a] -> FmtM b -> FmtM b
 localLayoutList a m = do
   lo <- ask
   case lo of
-    MultiLine -> local (const $ lineLayoutList a) m
+    MultiLine -> local (const $ fromMaybe lo $ lineLayoutList a) m
     SingleLine -> m
 
 -- | This function uses the location of @a@ and prepends comments if the
@@ -125,21 +127,44 @@ addComments a b = localLayout a $ do
   setTrailingComment a
   pure $ c <> f
 
+prependSepComments :: (Located a, Format b) => a -> b -> FmtM Fmt
+prependSepComments a b = do
+  fmcs <- fcs
+  b' <- fmt b
+  pure $ fromMaybe mempty fmcs <> b'
+  where
+    fcs = do
+      s <- get
+      case comments s of
+        c : cs | locOf a /= NoLoc && locOf a > locOf c -> do
+          put $ s {comments = cs}
+          mcs <- fcs
+          pre' <- pre
+          pure $ Just $ pre' <> fmtComment c <> maybe mempty (P.line <>) mcs
+        _any -> pure Nothing
+    fmtComment = P.pretty . commentText
+    pre = do
+      lastO <- gets lastOutput
+      case lastO of
+        Nothing -> nil
+        Just Line -> nil
+        Just _ -> modify (\s -> s {lastOutput = Just Line}) >> hardline
+
 -- | The internal state of the formatter monad 'FmtM'.
 data FmtState = FmtState
   { -- | The comments that will be inserted, ordered by increasing order in regards to location.
     comments :: [Comment],
-    -- The original source file that is being formatted.
+    -- | The original source file that is being formatted.
     file :: BS.ByteString,
-    -- Pending comment to be inserted before next newline (reverse order).
+    -- | Pending comment to be inserted before next newline (reverse order).
     pendingComments :: !(Maybe Comment),
-    -- Keeps track of what type the last output was.
+    -- | Keeps track of what type the last output was.
     lastOutput :: !(Maybe LastOutput)
   }
   deriving (Show, Eq, Ord)
 
 -- | A data type to describe the last output used during formatting.
-data LastOutput = Line | Space | Text deriving (Show, Eq, Ord)
+data LastOutput = Line | Space | Text | Comm deriving (Show, Eq, Ord)
 
 -- | A data type to describe the layout the formatter is using currently.
 data Layout = MultiLine | SingleLine deriving (Show, Eq)
@@ -151,8 +176,11 @@ data Layout = MultiLine | SingleLine deriving (Show, Eq)
 type FmtM a = ReaderT Layout (State FmtState) a
 
 -- | A typeclass that defines how an type can be formatted.
-class Format a where
+class (Located a) => Format a where
   fmt :: a -> FmtM Fmt
+
+instance Located (FmtM Fmt) where
+  locOf _ = NoLoc
 
 instance Format (FmtM Fmt) where
   fmt = id
@@ -165,7 +193,7 @@ fmtComments :: (Located a) => a -> FmtM Fmt
 fmtComments a = do
   s <- get
   case comments s of
-    c : cs | locOf a > locOf c -> do
+    c : cs | locOf a /= NoLoc && locOf a > locOf c -> do
       put $ s {comments = cs}
       pre <:> fmt c <:> fmtComments a
     _any -> pure mempty
@@ -183,7 +211,7 @@ setTrailingComment :: (Located a) => a -> FmtM ()
 setTrailingComment a = do
   s <- get
   case comments s of
-    c : cs -> case (locOf a, locOf c) of
+    c : cs | locOf a /= NoLoc -> case (locOf a, locOf c) of
       -- comment on same line as term a
       (Loc _sALoc eALoc, Loc _sCLoc eCLoc) | posLine eALoc == posLine eCLoc -> do
         put $
@@ -196,27 +224,28 @@ setTrailingComment a = do
 
 -- | Determines the layout of @a@ by checking if it spans a single line or two
 -- or more lines.
-lineLayout :: (Located a) => a -> Layout
+lineLayout :: (Located a) => a -> Maybe Layout
 lineLayout a =
   case locOf a of
     Loc start end ->
       if posLine start == posLine end
-        then SingleLine
-        else MultiLine
-    NoLoc -> error "Formatting term without location."
+        then Just SingleLine
+        else Just MultiLine
+    NoLoc -> Nothing -- error "Formatting term without location."
 
 -- | Determines the layout of @[a]@ by checking if it spans a single line or two
 -- or more lines.
-lineLayoutList :: (Located a) => [a] -> Layout
+lineLayoutList :: (Located a) => [a] -> Maybe Layout
 lineLayoutList as =
   case concatMap auxiliary as of
-    (t : ts) | any (/= t) ts -> MultiLine
-    _ -> SingleLine
+    [] -> Nothing
+    (t : ts) | any (/= t) ts -> Just MultiLine
+    _ -> Just SingleLine
   where
     auxiliary a =
       case locOf a of
         Loc start end -> [posLine start, posLine end]
-        NoLoc -> error "Formatting term without location"
+        NoLoc -> [] -- error "Formatting term without location"
 
 -- | Retrieves the last comments from the monad and concatenates them together.
 popComments :: FmtM Fmt
@@ -298,14 +327,11 @@ comment c = do
 -- evaluate the seperator after each element in the list.
 sep :: (Format a, Format b) => a -> [b] -> FmtM Fmt
 sep _ [] = nil
-sep s (a : as) = do
-  a' <- fmt a
-  foldM aux a' as
+sep s (a : as) = auxiliary (fmt a) as
   where
-    aux acc next = do
-      s' <- fmt s -- MUST be formatted before next
-      next' <- fmt next
-      pure $ acc <> s' <> next'
+    auxiliary acc [] = acc
+    auxiliary acc (x : xs) =
+      auxiliary (acc <:> prependSepComments s (prependSepComments x (s <:> x))) xs
 
 -- | Seperates element by a @s@ followed by a space in singleline layout and
 -- seperates by a line followed by a @s@ in multine layout.
@@ -314,16 +340,16 @@ sepLine s = sep (s <:> space <|> hardline <:> s)
 
 -- | This is used for function arguments. It seperates multiline arguments by
 -- lines and singleline arguments by spaces.
-sepArgs :: (Format a, Located a) => [a] -> FmtM Fmt
+sepArgs :: (Format a) => [a] -> FmtM Fmt
 sepArgs [] = nil
 sepArgs ls
-  | any ((== MultiLine) . lineLayout) ls =
+  | any ((== Just MultiLine) . lineLayout) ls =
       sep nil $ zipWith3 auxiliary [0 :: Int ..] los ls
   | otherwise = align $ sep line ls
   where
     auxiliary 0 _ x = fmt x
-    auxiliary _ SingleLine x = space <:> x
-    auxiliary _ MultiLine x = hardline <:> x
+    auxiliary _ (Just SingleLine) x = space <:> x
+    auxiliary _ _ x = hardline <:> x
     los = lineLayout <$> ls
 
 -- | Nest but with the standard value of two spaces.
@@ -370,11 +396,16 @@ parens a = text "(" <:> fmt a <:> text ")"
 
 -- | Depending on if @b@ is multiline then add a line between them and an indent
 -- to @b@. If singleline then just seperate by a single space.
-(<+/>) :: (Format a, Format b, Located b) => a -> b -> FmtM Fmt
+(<+/>) :: (Format a, Format b) => a -> b -> FmtM Fmt
 (<+/>) a b =
   case lineLayout b of
-    MultiLine -> a </> hardStdIndent b
-    SingleLine -> a <+> b
+    Just MultiLine -> a </> hardStdIndent b
+    Just SingleLine -> a <+> b
+    Nothing -> do
+      lo <- ask
+      case lo of
+        MultiLine -> a </> hardStdIndent b
+        SingleLine -> a <+> b
 
 -- | If in a singleline layout then concatenate with 'nil' and in multiline
 -- concatenate by a line.
@@ -383,7 +414,12 @@ a <:/> b = a <:> (nil <|> hardline) <:> b
 
 -- | Concatenates @a@ and @b@.
 (<:>) :: (Format a, Format b) => a -> b -> FmtM Fmt
-a <:> b = (<>) <$> fmt a <*> fmt b
+a <:> b = do
+  c <- fmtComments a
+  a' <- fmt a
+  setTrailingComment a
+  b' <- fmt b
+  pure $ c <> a' <> b'
 
 -- | Concatenate with a space between.
 (<+>) :: (Format a, Format b) => a -> b -> FmtM Fmt
@@ -407,7 +443,7 @@ a <|> b = do
 -- by a single line if two neighbouring elements are singleline. Otherwise
 -- sepereate by two lines.
 sepDecs ::
-  (Format a, Located a) =>
+  (Format a) =>
   [a] ->
   FmtM Fmt
 sepDecs [] = nil
@@ -418,8 +454,8 @@ sepDecs as@(x : xs) = sep space as <|> (x <:> auxiliary x xs)
       where
         p =
           case (lineLayout y, lineLayout prev) of
-            (SingleLine, SingleLine) -> line
-            _any -> line <:> line
+            (Just SingleLine, Just SingleLine) -> hardline
+            _any -> hardline <:> hardline
 
 layoutOpts :: P.LayoutOptions
 layoutOpts = P.LayoutOptions P.Unbounded
