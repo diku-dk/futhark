@@ -12,7 +12,7 @@ where
 import Control.Monad (unless, when, (<=<))
 import Control.Monad.RWS (gets, modify)
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromJust)
+import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn, getIterator, getPredicates)
@@ -199,8 +199,8 @@ handleQuantifiers = astMap m
 -- Search for hole-less symbol in untranslatable environment, matching
 -- any symbol in the environment that is syntactically identical up to one hole.
 -- For example, `search x[0]` in environment `{y : x[hole]}`,
--- returns `(y, (hole, 0)`.
-search :: Symbol -> IndexFnM (Maybe (VName, Maybe (VName, SoP Symbol)))
+-- returns `(y, 0)`, implying hole maps to 0.
+search :: Symbol -> IndexFnM (Maybe (VName, Maybe (SoP Symbol)))
 search x = do
   inv_map <- inv <$> getUntrans
   case inv_map M.!? x of
@@ -218,7 +218,7 @@ search x = do
         [(algsym, sub)] -> do
           unless (M.size (mapping sub) == 1) $ error "search: multiple holes"
           pure $
-            Just (Algebra.getVName algsym, Just . head $ M.toList (mapping sub))
+            Just (Algebra.getVName algsym, Just . head $ M.elems (mapping sub))
         _ -> error "search: symbol unifies with multiple symbols"
 
 isBooleanM :: Symbol -> IndexFnM Bool
@@ -266,9 +266,7 @@ toAlgebra_ sym@(Apply (Var f) [x]) = do
   vn <- case fst <$> res of
     Nothing -> addUntrans sym
     Just vn' -> pure vn'
-  let idx = case snd =<< res of
-        Nothing -> x
-        Just (_hole, x') -> x'
+  let idx = fromMaybe x (snd =<< res)
   f_is_bool <- askProperty (Algebra.Var f) Algebra.Boolean
   when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
   booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
@@ -288,7 +286,7 @@ handleBoolean p = do
   addRange (Algebra.Var vn) (mkRange (int2SoP 0) (int2SoP 1))
   addProperty (Algebra.Var vn) Algebra.Boolean
   case snd =<< res of
-    Just (_hole, idx) -> do
+    Just idx -> do
       idx' <- mapSymSoP2M_ toAlgebra_ idx
       pure $ Algebra.Idx (Algebra.POR (S.singleton vn)) idx'
     Nothing -> pure $ Algebra.Var vn
