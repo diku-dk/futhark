@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark profile` now supports multiple JSON files.
 
+* `futhark fmt`, by William Due and Therese Lyngby.
+
 ### Removed
 
 ### Changed
