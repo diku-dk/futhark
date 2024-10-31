@@ -31,8 +31,8 @@ find "$TEST_DIR" -name '*.fut' | xargs -P $THREADS -I {} sh -c '
        exit 0
     fi
 
-    futhark fmt "$prog" 2> /dev/null > "$name.fmt.fut"
-    futhark fmt "$name.fmt.fut" 2> /dev/null > "$name.fmt.fmt.fut"
+    futhark fmt < "$prog" 2> /dev/null > "$name.fmt.fut"
+    futhark fmt < "$name.fmt.fut" 2> /dev/null > "$name.fmt.fmt.fut"
     futhark hash "$name.fmt.fut" 2> /dev/null > "$prog.actual"
     futhark tokens "$prog" 2> /dev/null | grep '^COMMENT' > "$name.comments"
     futhark tokens "$name.fmt.fut" 2> /dev/null | grep '^COMMENT' > "$name.fmt.comments"
@@ -59,7 +59,7 @@ find "$TEST_DIR" -name '*.fut' | xargs -P $THREADS -I {} sh -c '
     then
         comments_result=0
         echo "Failed Order of Comments Test" >> "$name.log"
-    fi 
+    fi
     printf "$comments_result" >> "$name.result"
 '
 
