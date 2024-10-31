@@ -79,6 +79,12 @@ futhark eval [-f FILE] [-w] <exprs...>
 Evaluates expressions given as command-line arguments. Optionally
 allows a file import using ``-f``.
 
+futhark fmt [FILE]
+------------------
+
+Reformat the given Futhark program. If no file is provided, read
+Futhark program on stdin and produce formatted output on stdout.
+
 futhark hash PROGRAM
 --------------------
 
