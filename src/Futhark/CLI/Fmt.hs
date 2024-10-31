@@ -13,8 +13,8 @@ import System.IO
 main :: String -> [String] -> IO ()
 main = mainWithOptions () [] "program" $ \args () ->
   case args of
-    [] -> Just $ onInput =<< T.getContents
-    [file] -> Just $ onInput =<< T.readFile file
+    [] -> Just $ T.hPutStr stdout =<< onInput =<< T.getContents
+    [file] -> Just $ T.writeFile file =<< onInput =<< T.readFile file
     _any -> Nothing
   where
     onInput s = do
@@ -22,4 +22,4 @@ main = mainWithOptions () [] "program" $ \args () ->
         Left (SyntaxError loc err) -> do
           T.hPutStr stderr $ locText loc <> ":\n" <> prettyText err
           exitFailure
-        Right fmt -> T.hPutStr stdout fmt
+        Right fmt -> pure fmt
