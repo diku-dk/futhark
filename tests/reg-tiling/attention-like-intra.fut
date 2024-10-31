@@ -34,6 +34,10 @@ def seq_acc2 (acc: *[m][n]f32) (C: *[m][n]f32) =
 let seq_acc3 (acc: *[m][n]f32) (C: *[m][n]f32) =
   loop acc': *[m][n]f32 = (acc : *[m][n]f32) for i < m do    
       acc' with [i, :] = map2 (+) C[i] acc'[i]
+
+let seq_acc4 (acc: *[m][n]f32) (C: *[m][n]f32) =
+  loop acc': *[m][n]f32 = (acc : *[m][n]f32) for i < m do    
+      acc' with [i, :] = map2 (+) C[i] acc'[i]
     
 
 def attention_like [q] (A: [m][k]f16) (B: [q][k][n]f16) : [m][n]f32 =
@@ -46,7 +50,7 @@ def attention_like [q] (A: [m][k]f16) (B: [q][k][n]f16) : [m][n]f32 =
   loop (acc : *[m][n]f32) = (acc_init: *[m][n]f32) for i < q do
     let B' = B[i]
     let C : *[m][n]f32 = matmul A' B' in
-    seq_acc3 acc C
+    seq_acc2 acc C
     -- seq_acc acc C
     -- if true then C else acc
     -- map2 (map2 (+)) acc C
