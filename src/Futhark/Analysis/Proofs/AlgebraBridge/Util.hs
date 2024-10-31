@@ -32,8 +32,6 @@ assume (x :&& y) =
   assume x >> assume y
 assume x = do
   booltype <- isBooleanM x
-  debugPrettyM "assume" x
-  debugPrettyM "bool??" booltype
   x' <- toAlgebraSymbol x
   when booltype $ addEquiv x' (int2SoP 1)
   not_x <- toAlgebraSymbol $ neg x

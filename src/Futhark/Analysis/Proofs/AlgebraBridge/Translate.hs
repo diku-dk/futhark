@@ -271,24 +271,25 @@ toAlgebra_ (Sum _ lb ub x) = do
       pure $ Algebra.Sum (idxSym booltype vn) a b
     Nothing -> error "handleQuantifiers need to be run"
 toAlgebra_ sym@(Idx xs i) = do
-  j <- mapSymSoP2M_ toAlgebra_ i
   res <- search sym
-  vn <- case res of
-    Just (vn, _) -> pure vn
+  vn <- case fst <$> res of
+    Just vn -> pure vn
     Nothing -> addUntrans xs
+  let idx = fromMaybe i (snd =<< res)
+  idx' <- mapSymSoP2M_ toAlgebra_ idx
   booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
-  pure $ Algebra.Idx (idxSym booltype vn) j
+  pure $ Algebra.Idx (idxSym booltype vn) idx'
 -- toAlgebra_ (Indicator p) = handleBoolean p
 toAlgebra_ sym@(Apply (Var f) [x]) = do
   res <- search sym
   vn <- case fst <$> res of
+    Just vn -> pure vn
     Nothing -> addUntrans sym
-    Just vn' -> pure vn'
   let idx = fromMaybe x (snd =<< res)
+  idx' <- mapSymSoP2M_ toAlgebra_ idx
   f_is_bool <- askProperty (Algebra.Var f) Algebra.Boolean
   when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
   booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
-  idx' <- mapSymSoP2M_ toAlgebra_ idx
   pure $ Algebra.Idx (idxSym booltype vn) idx'
 toAlgebra_ (Apply {}) = undefined
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
