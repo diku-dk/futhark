@@ -190,6 +190,37 @@ tests =
               (sum1 ~+~ sum2) FM.$<$ sVar n
           )
           @??= True,
+      testCase "Partition3 branch comparison" $
+        run
+          ( do
+              -- 0 <= i2 < i1 < n
+              addRange (Var  n) $ mkRangeLB (int 1)
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              -- Assume predicates.
+              let pc = POR $ S.singleton c0 -- conds[i1] == 1
+              let pd = POR $ S.singleton d0 -- conds[i2] == 2
+              addEquiv (Idx pc (sVar i1)) (int 1)
+              addEquiv (Idx pd (sVar i2)) (int 1)
+              -- Predicates are disjoint.
+              addProperty (Var c0) (PairwiseDisjoint (S.singleton d0))
+              addProperty (Var d0) (PairwiseDisjoint (S.singleton c0))
+              let sum1 = Sum pc (int 0)
+                  sum2 = Sum pd (int 0) (sVar i2 .-. int 1)
+              sym2SoP (sum1 (sVar i1 .-. int 1)) FM.$<$ (sum1 (sVar n .-. int 1) ~+~ sum2)
+          )
+          @??= True,
+      testCase "Sum c[0:i-1] < Sum c[0:n-1]  where  c is POR (boolean)" $
+        run
+          ( do
+              -- 0 <= i2 < i1 < n
+              addRange (Var  n) $ mkRangeLB (int 1)
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              let pc = POR $ S.singleton c0
+              let sum1 = sym2SoP . Sum pc (int 0)
+              sum1 (sVar i1 .-. int 1) FM.$<$ sum1 (sVar n .-. int 1)
+          )
+          @??= True,
       --
       testCase "FME1" $
         run
