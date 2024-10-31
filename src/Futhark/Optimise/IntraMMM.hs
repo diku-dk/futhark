@@ -847,7 +847,7 @@ fixStmt stm@(Let (Pat [PatElem resName (MemArray _ _ _ (ArrayIn resMem _))]) _ (
     _ -> defaultFixStm stm
 fixStmt (
   Let (Pat [
-    PatElem vName1 (MemMem (Space "device")),
+    PatElem vName1 _,
     PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
   ])
   aux
@@ -864,7 +864,7 @@ fixStmt (
     (Apply fName newArgs newRets info)
 fixStmt (
   Let (Pat [
-    PatElem vName1 (MemMem (Space "device")),
+    PatElem vName1 _,
     PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
   ])
   aux
@@ -902,7 +902,7 @@ fixStmt (
 -- TODO: check this
 fixStmt (
   Let (Pat [
-    PatElem vName1 (MemMem (Space "device")),
+    PatElem vName1 _,
     PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
   ])
   aux

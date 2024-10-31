@@ -169,8 +169,7 @@ allocForArray ::
   Type ->
   Space ->
   AllocM fromrep torep VName
-allocForArray t space = do
-  allocForArray' t space
+allocForArray t space = allocForArray' t space
 
 -- | Repair an expression that cannot be assigned an index function.
 -- There is a simple remedy for this: normalise the input arrays and
@@ -569,11 +568,11 @@ allocLinearArray space s v = do
 
 funcallArgs ::
   (Allocable fromrep torep inner) =>
-  [(SubExp, Diet)] -> Maybe Space ->
+  [(SubExp, Diet)] -> [Maybe Space] ->
   AllocM fromrep torep [(SubExp, Diet)]
-funcallArgs args forced_space = do
+funcallArgs args forced_spaces = do
   (valargs, (ctx_args, mem_and_size_args)) <- runWriterT $
-    forM args $ \(arg, d) -> do
+    forM (zip args forced_spaces) $ \((arg, d), forced_space) -> do
       t <- lift $ subExpType arg
       space <- lift askDefaultSpace
 --      TODO: always use device as default in GPU function args?
@@ -613,16 +612,30 @@ explicitAllocationsGeneric space handleOp hints =
       runAllocM space handleOp hints $ collectStms_ $ allocInStms stms $ pure ()
 
     allocInFun consts (FunDef entry attrs fname rettype params fbody) =
+      let (paramSpaces, bodySpace, retSpace) =
+              if MMM.gemmName `MMM.isPrefixOfName` fname then
+                let _ : _ : (Param _ _ (Array t shp _)) : _ = params in
+                let regsSpace = ScalarSpace (shapeDims shp) t in
+                ([Space "shared", Space "shared", regsSpace] <> replicate (length params - 3) space, regsSpace, regsSpace)
+              else if MMM.copyRegistersSharedName `MMM.isPrefixOfName` fname then
+                let (Param _ _ (Array t shp _)) : _ = params in
+                let regsSpace = ScalarSpace (drop 1 $ shapeDims shp) t in
+                ([regsSpace, Space "shared"] <> replicate (length params - 2) space, Space "shared", Space "shared")
+              else if MMM.copyGlobalSharedName `MMM.isPrefixOfName` fname then
+                ([Space "device", Space "shared"] <> replicate (length params - 2) space, Space "shared", Space "shared")
+              else
+                (replicate (length params) space, space, space)
+      in
       runAllocM space handleOp hints . inScopeOf consts $
-        allocInFParams (map (,space) params) $ \params' -> do
+        allocInFParams (zip params paramSpaces) $ \params' -> do
           (fbody', mem_rets) <-
-            allocInFunBody (map (const $ Just space) rettype) fbody
+            allocInFunBody (map (const $ Just bodySpace) rettype) fbody
           let num_extra_params = length params' - length params
               num_extra_rets = length mem_rets
               rettype' =
                 map (,RetAls mempty mempty) mem_rets
                   ++ zip
-                    (memoryInDeclExtType space (length mem_rets) (map fst rettype))
+                    (memoryInDeclExtType retSpace (length mem_rets) (map fst rettype))
                     (map (shiftRetAls num_extra_params num_extra_rets . snd) rettype)
           pure $ FunDef entry attrs fname rettype' params' fbody'
 
@@ -909,24 +922,50 @@ allocInExp ::
   Exp fromrep ->
   AllocM fromrep torep (Exp torep)
 allocInExp (Loop merge form (Body () bodystms bodyres)) =
-  allocInLoopParams merge $ \merge' mk_loop_val -> do
-    localScope (scopeOfLoopForm form) $ do
-      body' <-
-        buildBody_ . allocInStms bodystms $ do
-          (valctx, valres') <- mk_loop_val $ map resSubExp bodyres
-          pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
-      pure $ Loop merge' form body'
+  allocInLoopParams merge $ \merge' mk_loop_val -> localScope (scopeOfLoopForm form) $ do
+  body' <-
+    buildBody_ . allocInStms bodystms $ do
+      (valctx, valres') <- mk_loop_val $ map resSubExp bodyres
+      pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
+  pure $ Loop merge' form body'
 allocInExp (Apply fname args rettype loc) = do
-  let forced_space = if MMM.isMMMName fname then Just $ Space "device" else Nothing
-  args' <- funcallArgs args forced_space
   space <- askDefaultSpace
-  let space' = fromMaybe space forced_space
+  (forced_arg_spaces, retSpace) <-
+      if MMM.gemmName `MMM.isPrefixOfName` fname then do
+        let _ : _ : (Var regsVar, _) : _ = args
+        info <- lookupInfo regsVar
+        case info of
+          LetName (MemArray t shp _ _) ->
+            let regsSpace = ScalarSpace (shapeDims shp) t in
+            pure (
+              [Just $ Space "shared", Just $ Space "shared", Just regsSpace]
+                <> replicate (length args - 3) Nothing,
+              regsSpace
+            )
+          _ -> pure (replicate (length args) Nothing, space)
+      else if MMM.copyRegistersSharedName `MMM.isPrefixOfName` fname then do
+        let (Var regsVar, _) : _ = args
+        info <- lookupInfo regsVar
+        case info of
+          LetName (MemArray t shp _ _) ->
+            let regsSpace = ScalarSpace (drop 1 $ shapeDims shp) t in
+            pure (
+              [Just regsSpace, Just $ Space "shared"]
+                <> replicate (length args - 2) Nothing,
+              Space "shared"
+            )
+          _ -> pure (replicate (length args) Nothing, space)
+      else if MMM.copyGlobalSharedName `MMM.isPrefixOfName` fname then
+        pure ([Just $ Space "device", Just $ Space "shared"] <> replicate (length args - 2) Nothing, Space "shared")
+      else
+        pure (replicate (length args) Nothing, space)
+  args' <- funcallArgs args forced_arg_spaces
   -- We assume that every array is going to be in its own memory.
   let num_extra_args = length args' - length args
       rettype' =
-        mems space'
+        mems retSpace
           ++ zip
-            (memoryInDeclExtType space' num_arrays (map fst rettype))
+            (memoryInDeclExtType retSpace num_arrays (map fst rettype))
             (map (shiftRetAls num_extra_args num_arrays . snd) rettype)
   pure $ Apply fname args' rettype' loc
   where
