@@ -42,6 +42,7 @@ module Futhark.Fmt.Monad
   )
 where
 
+import Control.Monad (liftM2)
 import Control.Monad.Reader
   ( MonadReader (..),
     ReaderT (..),
@@ -78,6 +79,12 @@ infixr 6 </>
 infixr 4 <|>
 
 type Fmt = FmtM (P.Doc ())
+
+instance Semigroup Fmt where
+  (<>) = liftM2 (<>)
+
+instance Monoid Fmt where
+  mempty = nil
 
 -- | This function allows to inspect the layout of an expression @a@ and if it
 -- is singleline line then use format @s@ and if it is multiline format @m@.
