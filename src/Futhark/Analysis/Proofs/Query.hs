@@ -169,7 +169,8 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
                             (f @ i) `rel` (g @ j)
                       in f_rel_g1 `andM` f_rel_g2
                 f_LT_g <- f_rel_g ($<)
-                debugPrettyM "cmp" ((p_f, f), (p_g, g))
+                debugPrettyM "cmp f:" (f @ i :: SoP Symbol)
+                debugPrettyM "    g:" (g @ j :: SoP Symbol)
                 debugT "===" $
                   case f_LT_g of
                       Yes -> pure LT
