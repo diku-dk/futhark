@@ -1,9 +1,6 @@
-{-# OPTIONS_GHC -Wno-orphans #-}
-
 module Futhark.Fmt.Printer (fmtText) where
 
 import Data.Foldable
-import Data.Loc (Loc (..))
 import Data.Text qualified as T
 import Futhark.Fmt.Monad
 import Language.Futhark
@@ -12,6 +9,9 @@ import Language.Futhark.Parser
     parseFutharkWithComments,
   )
 import Prettyprinter.Internal (Pretty)
+
+lineIndent :: (Located a) => a -> Fmt -> Fmt -> Fmt
+lineIndent l a b = fmtByLayout l (a <+> b) (a </> hardStdIndent b)
 
 fmtName :: Name -> Fmt
 fmtName = text . nameToText
@@ -23,6 +23,9 @@ fmtNameParen name
 
 fmtPretty :: (Pretty a) => a -> Fmt
 fmtPretty = text . prettyText
+
+class Format a where
+  fmt :: a -> Fmt
 
 instance Format (Maybe DocComment) where
   fmt (Just (DocComment x loc)) =
@@ -47,12 +50,14 @@ fmtSumTypeConstr (name, fs) =
 instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = addComments loc $ fmtQualName v
   fmt (TETuple ts loc) =
-    addComments loc $ parens $ sepLine (text ",") $ map fmt ts
+    addComments loc $
+      parens $
+        sepLineComments locOf fmt (text ",") ts
   fmt (TEParens te loc) = addComments loc $ parens $ fmt te
   fmt (TERecord fs loc) =
-    addComments loc $ braces $ sepLine (text ",") fields
-    where
-      fields = fmtFieldType <$> fs
+    addComments loc $
+      braces $
+        sepLineComments (locOf . snd) fmtFieldType (text ",") fs
   fmt (TEArray se te loc) = addComments loc $ fmt se <:> fmt te
   fmt (TEUnique te loc) = addComments loc $ text "*" <:> fmt te
   fmt (TEApply te tArgE loc) = addComments loc $ fmt te <+> fmt tArgE
@@ -61,7 +66,7 @@ instance Format UncheckedTypeExp where
   fmt (TESum tes loc) =
     addComments loc $
       sep (line <:> text "|" <:> space) $
-        map fmtSumTypeConstr tes
+        map fmtSumTypeConstr tes -- Comments can not be inserted correctly here because names do not have a location.
   fmt (TEDim dims te loc) =
     addComments loc $ text "?" <:> dims' <:> text "." <:> fmt te
     where
@@ -83,27 +88,18 @@ instance Format UncheckedTypeBind where
         <+> text "="
         </> stdIndent (fmt e)
 
-instance Located (AttrAtom a) where
-  locOf _ = NoLoc
-
 instance Format (AttrAtom a) where
   fmt (AtomName name) = fmtName name
   fmt (AtomInt int) = text $ prettyText int
-
--- Not sure this is correct.
-instance Located (AttrInfo a) where
-  locOf (AttrAtom _ loc) = locOf loc
-  locOf (AttrComp _ _ loc) = locOf loc
 
 instance Format (AttrInfo a) where
   fmt attr = text "#" <:> brackets (fmtAttrInfo attr)
     where
       fmtAttrInfo (AttrAtom attr' loc) = addComments loc $ fmt attr'
       fmtAttrInfo (AttrComp name attrs loc) =
-        addComments loc $ fmtName name <:> parens (sep (text ",") $ map fmtAttrInfo attrs)
-
-instance Located Liftedness where
-  locOf _ = NoLoc
+        addComments loc $
+          fmtName name
+            <:> parens (sep (text ",") $ map fmtAttrInfo attrs)
 
 instance Format Liftedness where
   fmt Unlifted = nil
@@ -118,9 +114,13 @@ instance Format UncheckedTypeParam where
 
 instance Format (UncheckedPat t) where
   fmt (TuplePat pats loc) =
-    addComments loc $ parens $ sepLine (text ",") $ map fmt pats
+    addComments loc $
+      parens $
+        sepLineComments locOf fmt (text ",") pats
   fmt (RecordPat pats loc) =
-    addComments loc $ braces $ sepLine (text ",") $ map fmtFieldPat pats
+    addComments loc $
+      braces $
+        sepLineComments (locOf . snd) fmtFieldPat (text ",") pats
     where
       -- Currently it always adds the fields it seems.
       fmtFieldPat (name, t) = fmtName name <+> text "=" <+> fmt t
@@ -140,9 +140,6 @@ instance Format (FieldBase NoInfo Name) where
     addComments loc $ fmtName name <+> text "=" </> stdIndent (fmt e)
   fmt (RecordFieldImplicit name _ loc) = addComments loc $ fmtName name
 
-instance Located PrimValue where
-  locOf _ = NoLoc
-
 instance Format PrimValue where
   fmt (UnsignedValue (Int8Value v)) =
     fmtPretty (show (fromIntegral v :: Word8)) <:> text "u8"
@@ -156,9 +153,6 @@ instance Format PrimValue where
   fmt (BoolValue True) = text "true"
   fmt (BoolValue False) = text "false"
   fmt (FloatValue v) = fmtPretty v
-
-instance Located UncheckedDimIndex where
-  locOf _ = NoLoc
 
 instance Format UncheckedDimIndex where
   fmt (DimFix e) = fmt e
@@ -196,13 +190,13 @@ instance Format UncheckedExp where
   fmt (IntLit _v _ loc) = addComments loc $ fmtCopyLoc loc
   fmt (FloatLit _v _ loc) = addComments loc $ fmtCopyLoc loc
   fmt (TupLit es loc) =
-    addComments loc $ parens $ sepLine (text ",") $ map fmt es
+    addComments loc $ parens $ sepLineComments locOf fmt (text ",") es
   fmt (RecordLit fs loc) =
-    addComments loc $ braces $ sepLine (text ",") $ map fmt fs
+    addComments loc $ braces $ sepLineComments locOf fmt (text ",") fs
   fmt (ArrayVal vs _ loc) =
     addComments loc $ brackets $ sepLine (text ",") $ map fmt vs
   fmt (ArrayLit es _ loc) =
-    addComments loc $ brackets $ sepLine (text ",") $ map fmt es
+    addComments loc $ brackets $ sepLineComments locOf fmt (text ",") es
   fmt (StringLit _s loc) = addComments loc $ fmtCopyLoc loc
   fmt (Project k e _ loc) = addComments loc $ fmt e <:> text "." <:> fmtPretty k
   fmt (Negate e loc) = addComments loc $ text "-" <:> fmt e
@@ -266,9 +260,7 @@ instance Format (AppExpBase NoInfo Name) where
   -- need some way to omit the inital value expression, when this it's trivial
   fmt (Loop sizeparams pat (LoopInitImplicit NoInfo) form loopbody loc) =
     addComments loc $
-      ( (text "loop" `op` sizeparams')
-          <+/> pat
-      )
+      lineIndent pat (text "loop" `op` sizeparams') (fmt pat)
         <+> fmt form
         <+> text "do"
         </> stdIndent (fmt loopbody)
@@ -277,11 +269,12 @@ instance Format (AppExpBase NoInfo Name) where
       sizeparams' = sep nil $ brackets . fmtName . toName <$> sizeparams
   fmt (Loop sizeparams pat (LoopInitExplicit initexp) form loopbody loc) =
     addComments loc $
-      ( (text "loop" `op` sizeparams')
-          <+/> pat
-          <+> text "="
-      )
-        <+/> initexp
+      lineIndent
+        initexp
+        ( lineIndent pat (text "loop" `op` sizeparams') (fmt pat)
+            <+> text "="
+        )
+        (fmt initexp)
         <+> fmt form
         <+> text "do"
         </> stdIndent (fmt loopbody)
@@ -292,11 +285,7 @@ instance Format (AppExpBase NoInfo Name) where
     addComments loc $ (fmt e <:>) $ brackets $ sepLine (text ",") $ map fmt idxs
   fmt (LetPat sizes pat e body loc) =
     addComments loc $
-      ( text "let"
-          <+> sub
-          <+> text "="
-      )
-        <+/> e
+      lineIndent e (text "let" <+> sub <+> text "=") (fmt e)
         </> letBody body
     where
       sizes' = sep nil $ map fmt sizes
@@ -305,13 +294,15 @@ instance Format (AppExpBase NoInfo Name) where
         | otherwise = sizes' <+> fmt pat
   fmt (LetFun fname (tparams, params, retdecl, _, e) body loc) =
     addComments loc $
-      ( text "let"
-          <+> fmtName fname
-          <:> sub
-          <:> retdecl'
-          <:> text "="
-      )
-        <+/> e
+      lineIndent
+        e
+        ( text "let"
+            <+> fmtName fname
+            <:> sub
+            <:> retdecl'
+            <:> text "="
+        )
+        (fmt e)
         </> letBody body
     where
       tparams' = sep space $ map fmt tparams
@@ -328,23 +319,27 @@ instance Format (AppExpBase NoInfo Name) where
   fmt (LetWith dest src idxs ve body loc)
     | dest == src =
         addComments loc $
-          ( text "let"
-              <+> fmt dest
-              <:> idxs'
-              <+> text "="
-          )
-            <+/> ve
+          lineIndent
+            ve
+            ( text "let"
+                <+> fmt dest
+                <:> idxs'
+                <+> text "="
+            )
+            (fmt ve)
             </> letBody body
     | otherwise =
         addComments loc $
-          ( text "let"
-              <+> fmt dest
-              <+> text "="
-              <+> fmt src
-              <+> text "with"
-              <+> idxs'
-          )
-            <+/> ve
+          lineIndent
+            ve
+            ( text "let"
+                <+> fmt dest
+                <+> text "="
+                <+> fmt src
+                <+> text "with"
+                <+> idxs'
+            )
+            (fmt ve)
             </> letBody body
     where
       idxs' = brackets $ sep (text ", ") $ map fmt idxs
@@ -368,7 +363,7 @@ instance Format (AppExpBase NoInfo Name) where
   fmt (Apply f args loc) =
     addComments loc $ fmt f <+> align fmt_args
     where
-      fmt_args = sepArgs $ map (fmt . snd) (toList args)
+      fmt_args = sepArgs fmt $ map snd $ toList args
 
 letBody :: UncheckedExp -> Fmt
 letBody body@(AppExp LetPat {} _) = fmt body
@@ -381,9 +376,6 @@ instance Format (SizeBinder Name) where
 
 instance Format (IdentBase NoInfo Name t) where
   fmt = fmtPretty . identName
-
-instance Located (LoopFormBase NoInfo Name) where
-  locOf _ = NoLoc
 
 instance Format (LoopFormBase NoInfo Name) where
   fmt (For i ubound) = text "for" <+> fmt i <+> text "<" <+> fmt ubound
@@ -516,7 +508,7 @@ instance Format UncheckedModExp where
     addComments loc $ text "import \"" <:> fmtPretty path <:> text "\""
   fmt (ModDecs decs loc) =
     addComments loc $
-      text "{" <:/> stdIndent (sepDecs $ map fmt decs) <:/> text "}"
+      text "{" <:/> stdIndent (sepDecs fmt decs) <:/> text "}"
   fmt (ModApply f a _f0 _f1 loc) = addComments loc $ fmt f <+> fmt a
   fmt (ModAscript me se _f loc) = addComments loc $ align (fmt me <:> text ":" </> fmt se)
   fmt (ModLambda param maybe_sig body loc) =
@@ -538,12 +530,9 @@ instance Format UncheckedDec where
   fmt (ImportDec path _tb loc) =
     addComments loc $ text "import \"" <:> fmtPretty path <:> text "\""
 
-instance Located UncheckedProg where
-  locOf _ = NoLoc
-
 instance Format UncheckedProg where
   fmt (Prog dc decs) =
-    fmt dc <:> sepDecs (map fmt decs) </> popComments
+    fmt dc <:> sepDecs fmt decs </> popComments
 
 -- | Given a filename and a futhark program, formats the program.
 fmtText :: String -> T.Text -> Either SyntaxError T.Text
