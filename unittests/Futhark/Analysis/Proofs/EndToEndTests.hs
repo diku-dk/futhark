@@ -29,7 +29,6 @@ tests =
     [ mkTest
         "tests/indexfn/part2indices.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
-            debugOn
             prove (PermutationOfZeroTo n) fn
         )
         Yes,
@@ -54,7 +53,6 @@ tests =
       mkTest
         "tests/indexfn/part3indices.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
-            debugOn
             prove (PermutationOfZeroTo n) fn
         )
         Yes
