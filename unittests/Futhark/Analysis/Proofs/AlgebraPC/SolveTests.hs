@@ -218,7 +218,7 @@ tests =
               addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
               let pc = POR $ S.singleton c0
               let sum1 = sym2SoP . Sum pc (int 0)
-              sum1 (sVar i1 .-. int 1) FM.$<$ sum1 (sVar n .-. int 1)
+              sum1 (sVar i1 .-. int 1) FM.$<=$ sum1 (sVar n .-. int 1)
           )
           @??= True,
       --
