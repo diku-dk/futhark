@@ -57,6 +57,7 @@ import Control.Monad.State
 import Data.ByteString qualified as BS
 import Data.Loc (Loc (..), Located (..), posCoff, posLine)
 import Data.Maybe (fromMaybe)
+import Data.String
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Language.Futhark.Parser.Monad (Comment (..))
@@ -85,6 +86,9 @@ instance Semigroup Fmt where
 
 instance Monoid Fmt where
   mempty = nil
+
+instance IsString Fmt where
+  fromString = text . fromString
 
 -- | This function allows to inspect the layout of an expression @a@ and if it
 -- is singleline line then use format @s@ and if it is multiline format @m@.
@@ -389,15 +393,15 @@ text t = do
 
 -- | Adds brackets.
 brackets :: Fmt -> Fmt
-brackets a = text "[" <:> a <:> text "]"
+brackets a = "[" <:> a <:> "]"
 
 -- | Adds braces.
 braces :: Fmt -> Fmt
-braces a = text "{" <:> a <:> text "}"
+braces a = "{" <:> a <:> "}"
 
 -- | Add parenthesis.
 parens :: Fmt -> Fmt
-parens a = text "(" <:> a <:> text ")"
+parens a = "(" <:> a <:> ")"
 
 -- | If in a singleline layout then concatenate with 'nil' and in multiline
 -- concatenate by a line.
