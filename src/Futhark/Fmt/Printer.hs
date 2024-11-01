@@ -1,20 +1,29 @@
-module Futhark.Fmt.Printer (fmtText) where
+module Futhark.Fmt.Printer
+  ( fmtToText,
+    fmtToDoc,
+  )
+where
 
 import Data.Foldable
 import Data.Text qualified as T
 import Futhark.Fmt.Monad
+import Futhark.Util.Pretty
+  ( AnsiStyle,
+    Doc,
+    Pretty,
+    docText,
+  )
 import Language.Futhark
 import Language.Futhark.Parser
   ( SyntaxError (..),
     parseFutharkWithComments,
   )
-import Prettyprinter.Internal (Pretty)
 
 lineIndent :: (Located a) => a -> Fmt -> Fmt -> Fmt
 lineIndent l a b = fmtByLayout l (a <+> b) (a </> hardStdIndent b)
 
 fmtName :: Name -> Fmt
-fmtName = text . nameToText
+fmtName = text mempty . nameToText
 
 fmtNameParen :: Name -> Fmt
 fmtNameParen name
@@ -22,7 +31,7 @@ fmtNameParen name
   | otherwise = fmtName name
 
 fmtPretty :: (Pretty a) => a -> Fmt
-fmtPretty = text . prettyText
+fmtPretty = text mempty . prettyText
 
 class Format a where
   fmt :: a -> Fmt
@@ -90,7 +99,7 @@ instance Format UncheckedTypeBind where
 
 instance Format (AttrAtom a) where
   fmt (AtomName name) = fmtName name
-  fmt (AtomInt int) = text $ prettyText int
+  fmt (AtomInt int) = text constantStyle $ prettyText int
 
 instance Format (AttrInfo a) where
   fmt attr = "#" <> brackets (fmtAttrInfo attr)
@@ -129,7 +138,7 @@ instance Format (UncheckedPat t) where
   fmt (Id name _ loc) = addComments loc $ fmtNameParen name
   fmt (Wildcard _t loc) = addComments loc "_"
   fmt (PatAscription pat t loc) = addComments loc $ fmt pat <> ":" <+> fmt t
-  fmt (PatLit _e _ loc) = addComments loc $ fmtCopyLoc loc
+  fmt (PatLit _e _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (PatConstr n _ pats loc) =
     addComments loc $
       "#" <> fmtName n </> align (sep line (map fmt pats))
@@ -139,20 +148,6 @@ instance Format (FieldBase NoInfo Name) where
   fmt (RecordFieldExplicit name e loc) =
     addComments loc $ fmtName name <+> "=" </> stdIndent (fmt e)
   fmt (RecordFieldImplicit name _ loc) = addComments loc $ fmtName name
-
-instance Format PrimValue where
-  fmt (UnsignedValue (Int8Value v)) =
-    fmtPretty (show (fromIntegral v :: Word8)) <> "u8"
-  fmt (UnsignedValue (Int16Value v)) =
-    fmtPretty (show (fromIntegral v :: Word16)) <> "u16"
-  fmt (UnsignedValue (Int32Value v)) =
-    fmtPretty (show (fromIntegral v :: Word32)) <> "u32"
-  fmt (UnsignedValue (Int64Value v)) =
-    fmtPretty (show (fromIntegral v :: Word64)) <> "u64"
-  fmt (SignedValue v) = fmtPretty v
-  fmt (BoolValue True) = "true"
-  fmt (BoolValue False) = "false"
-  fmt (FloatValue v) = fmtPretty v
 
 instance Format UncheckedDimIndex where
   fmt (DimFix e) = fmt e
@@ -186,19 +181,17 @@ instance Format UncheckedExp where
       fmtQualName v <> "." <> "(" <> align (fmt e) <:/> ")"
   fmt (Ascript e t loc) = addComments loc $ fmt e <> ":" <+> fmt t
   fmt (Coerce e t _ loc) = addComments loc $ fmt e <+> ":>" <+> fmt t
-  fmt (Literal _v loc) = addComments loc $ fmtCopyLoc loc
-  fmt (IntLit _v _ loc) = addComments loc $ fmtCopyLoc loc
-  fmt (FloatLit _v _ loc) = addComments loc $ fmtCopyLoc loc
+  fmt (Literal _v loc) = addComments loc $ fmtCopyLoc constantStyle loc
+  fmt (IntLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
+  fmt (FloatLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (TupLit es loc) =
     addComments loc $ parens $ sepLineComments locOf fmt "," es
   fmt (RecordLit fs loc) =
     addComments loc $ braces $ sepLineComments locOf fmt "," fs
-  fmt (ArrayVal vs _ loc) =
-    addComments loc $ brackets $ sepLine "," $ map fmt vs
   fmt (ArrayLit es _ loc) =
     addComments loc $ brackets $ sepLineComments locOf fmt "," es
-  fmt (StringLit _s loc) = addComments loc $ fmtCopyLoc loc
-  fmt (Project k e _ loc) = addComments loc $ fmt e <> "." <> fmtPretty k
+  fmt (StringLit _s loc) = addComments loc $ fmtCopyLoc constantStyle loc
+  fmt (Project k e _ loc) = addComments loc $ fmt e <> "." <> fmtName k
   fmt (Negate e loc) = addComments loc $ "-" <> fmt e
   fmt (Not e loc) = addComments loc $ "!" <> fmt e
   fmt (Update src idxs ve loc) =
@@ -237,6 +230,8 @@ instance Format UncheckedExp where
     addComments loc $ "#" <> fmtName n <+> align (sep line $ map fmt cs)
   fmt (Attr attr e loc) = addComments loc $ align $ fmt attr </> fmt e
   fmt (AppExp e _) = fmt e
+  fmt ArrayVal {} =
+    error "fmt: Unexpected ArrayVal" -- Never produced by parser.
 
 fmtQualName :: QualName Name -> Fmt
 fmtQualName (QualName names name)
@@ -375,7 +370,7 @@ instance Format (SizeBinder Name) where
   fmt (SizeBinder v loc) = addComments loc $ brackets $ fmtName v
 
 instance Format (IdentBase NoInfo Name t) where
-  fmt = fmtPretty . identName
+  fmt = fmtName . identName
 
 instance Format (LoopFormBase NoInfo Name) where
   fmt (For i ubound) = "for" <+> fmt i <+> "<" <+> fmt ubound
@@ -473,7 +468,7 @@ instance Format UncheckedModTypeExp where
 instance Format UncheckedModTypeBind where
   fmt (ModTypeBind pName pSig doc loc) =
     addComments loc $
-      fmt doc <> "module type" <+> fmtName pName <+> "=" <+> fmt pSig
+      fmt doc <> "module" <+> "type" <+> fmtName pName <+> "=" <+> fmt pSig
 
 instance Format (ModParamBase NoInfo Name) where
   fmt (ModParam pName pSig _f loc) =
@@ -505,7 +500,7 @@ instance Format UncheckedModExp where
   fmt (ModParens f loc) =
     addComments loc $ "(" <:/> stdIndent (fmt f) <:/> ")"
   fmt (ModImport path _f loc) =
-    addComments loc $ "import \"" <> fmtPretty path <> "\""
+    addComments loc $ "import" <+> "\"" <> fmtPretty path <> "\""
   fmt (ModDecs decs loc) =
     addComments loc $
       "{" <:/> stdIndent (sepDecs fmt decs) <:/> "}"
@@ -528,15 +523,19 @@ instance Format UncheckedDec where
   fmt (OpenDec tb loc) = addComments loc $ "open" <+> fmt tb
   fmt (LocalDec tb loc) = addComments loc $ "local" <+> fmt tb
   fmt (ImportDec path _tb loc) =
-    addComments loc $ "import \"" <> fmtPretty path <> "\""
+    addComments loc $ "import" <+> "\"" <> fmtPretty path <> "\""
 
 instance Format UncheckedProg where
   fmt (Prog dc decs) =
     fmt dc <> sepDecs fmt decs </> popComments
 
 -- | Given a filename and a futhark program, formats the program.
-fmtText :: String -> T.Text -> Either SyntaxError T.Text
-fmtText fName fContent = do
-  (prog, cs) <- parseFutharkWithComments fName fContent
-  let m = fmt prog
-  pure $ pretty $ runFormat m cs fContent
+fmtToDoc :: String -> T.Text -> Either SyntaxError (Doc AnsiStyle)
+fmtToDoc fname fcontent = do
+  (prog, cs) <- parseFutharkWithComments fname fcontent
+  pure $ runFormat (fmt prog) cs fcontent
+
+-- | Given a filename and a futhark program, formats the program as
+-- text.
+fmtToText :: String -> T.Text -> Either SyntaxError T.Text
+fmtToText fname fcontent = docText <$> fmtToDoc fname fcontent

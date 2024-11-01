@@ -20,7 +20,6 @@ module Futhark.Fmt.Monad
     indent,
     hardStdIndent,
     stdIndent,
-    pretty,
     FmtM,
     fmtComments,
     popComments,
@@ -38,6 +37,9 @@ module Futhark.Fmt.Monad
     sepComments,
     sepLineComments,
     sepLine,
+    commentStyle,
+    constantStyle,
+    keywordStyle,
   )
 where
 
@@ -61,7 +63,13 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Language.Futhark.Parser.Monad (Comment (..))
 import Prettyprinter qualified as P
-import Prettyprinter.Render.Text (renderStrict)
+import Prettyprinter.Render.Terminal
+  ( AnsiStyle,
+    Color (..),
+    bold,
+    color,
+    italicized,
+  )
 
 -- These are right associative since we want to evaluate the monadic
 -- computation from left to right. Since the left most expression is
@@ -76,7 +84,7 @@ infixr 6 </>
 
 infixr 4 <|>
 
-type Fmt = FmtM (P.Doc ())
+type Fmt = FmtM (P.Doc AnsiStyle)
 
 instance Semigroup Fmt where
   (<>) = liftM2 (<>)
@@ -85,7 +93,44 @@ instance Monoid Fmt where
   mempty = nil
 
 instance IsString Fmt where
-  fromString = text . fromString
+  fromString s = text style s'
+    where
+      s' = fromString s
+      style =
+        if s' `elem` keywords
+          then keywordStyle
+          else mempty
+      keywords =
+        [ "true",
+          "false",
+          "if",
+          "then",
+          "else",
+          "def",
+          "let",
+          "loop",
+          "in",
+          "val",
+          "for",
+          "do",
+          "with",
+          "local",
+          "open",
+          "include",
+          "import",
+          "type",
+          "entry",
+          "module",
+          "while",
+          "assert",
+          "match",
+          "case"
+        ]
+
+commentStyle, keywordStyle, constantStyle :: AnsiStyle
+commentStyle = italicized
+keywordStyle = color Magenta <> bold
+constantStyle = color Green
 
 -- | This function allows to inspect the layout of an expression @a@ and if it
 -- is singleline line then use format @s@ and if it is multiline format @m@.
@@ -253,8 +298,8 @@ popComments = do
 
 -- | Using the location of @a@ get the segment of text in the original file to
 -- create a @Fmt@.
-fmtCopyLoc :: (Located a) => a -> Fmt
-fmtCopyLoc a = do
+fmtCopyLoc :: (Located a) => AnsiStyle -> a -> Fmt
+fmtCopyLoc style a = do
   f <- gets file
   case locOf a of
     Loc sPos ePos ->
@@ -262,7 +307,7 @@ fmtCopyLoc a = do
           eOff = posCoff ePos
        in case T.decodeUtf8' $ BS.take (eOff - sOff) $ BS.drop sOff f of
             Left err -> error $ show err
-            Right lit -> text lit
+            Right lit -> text style lit
     NoLoc -> error "Formatting term without location"
 
 -- | Given a formatter @FmtM a@, a sequence of comments ordered in increasing
@@ -323,7 +368,7 @@ sepLine s = sep (s <> space <|> hardline <> s)
 comment :: T.Text -> Fmt
 comment c = do
   modify (\s -> s {lastOutput = Just Line})
-  pure $ P.pretty c <> P.line
+  pure $ P.annotate commentStyle (P.pretty c) <> P.line
 
 -- In order to handle trailing comments its VERY important to
 -- evaluate the seperator after each element in the list.
@@ -383,10 +428,10 @@ stdIndent :: Fmt -> Fmt
 stdIndent = indent 2
 
 -- | Creates a piece of text, it should not contain any new lines.
-text :: T.Text -> Fmt
-text t = do
+text :: AnsiStyle -> T.Text -> Fmt
+text style t = do
   modify (\s -> s {lastOutput = Just Text})
-  pure $ P.pretty t
+  pure $ P.annotate style $ P.pretty t
 
 -- | Adds brackets.
 brackets :: Fmt -> Fmt
@@ -438,9 +483,3 @@ sepDecs fmt as@(x : xs) =
           case (lineLayout y, lineLayout prev) of
             (Just SingleLine, Just SingleLine) -> hardline
             _any -> hardline <> hardline
-
-layoutOpts :: P.LayoutOptions
-layoutOpts = P.LayoutOptions P.Unbounded
-
-pretty :: P.Doc () -> T.Text
-pretty = renderStrict . P.layoutPretty layoutOpts
