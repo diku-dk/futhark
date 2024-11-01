@@ -270,15 +270,16 @@ toAlgebra_ (Sum _ lb ub x) = do
       booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
       pure $ Algebra.Sum (idxSym booltype vn) a b
     Nothing -> error "handleQuantifiers need to be run"
-toAlgebra_ sym@(Idx xs i) = do
+toAlgebra_ sym@(Idx (Var xs) i) = do
   res <- search sym
   vn <- case fst <$> res of
     Just vn -> pure vn
-    Nothing -> addUntrans xs
+    Nothing -> addUntrans (Var xs)
   let idx = fromMaybe i (snd =<< res)
   idx' <- mapSymSoP2M_ toAlgebra_ idx
   booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
   pure $ Algebra.Idx (idxSym booltype vn) idx'
+toAlgebra_ (Idx {}) = undefined
 -- toAlgebra_ (Indicator p) = handleBoolean p
 toAlgebra_ sym@(Apply (Var f) [x]) = do
   res <- search sym
