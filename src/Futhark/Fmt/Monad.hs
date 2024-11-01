@@ -15,7 +15,6 @@ module Futhark.Fmt.Monad
     (<|>),
     (<+>),
     (</>),
-    (<:>),
     (<:/>),
     hardIndent,
     indent,
@@ -70,8 +69,6 @@ import Prettyprinter.Render.Text (renderStrict)
 -- printed.
 
 infixr 6 <:/>
-
-infixr 6 <:>
 
 infixr 6 <+>
 
@@ -195,7 +192,7 @@ fmtComments a = do
   case comments s of
     c : cs | locOf a /= NoLoc && locOf a > locOf c -> do
       put $ s {comments = cs}
-      pre <:> fmtComment c <:> fmtComments a
+      pre <> fmtComment c <> fmtComments a
     _any -> pure mempty
   where
     pre = do
@@ -308,7 +305,7 @@ hardline = do
           { pendingComments = Nothing,
             lastOutput = Just Line
           }
-      space <:> fmtComment c
+      space <> fmtComment c
     Nothing -> do
       modify $ \s -> s {lastOutput = Just Line}
       pure P.line
@@ -320,7 +317,7 @@ line = space <|> hardline
 -- | Seperates element by a @s@ followed by a space in singleline layout and
 -- seperates by a line followed by a @s@ in multine layout.
 sepLine :: Fmt -> [Fmt] -> Fmt
-sepLine s = sep (s <:> space <|> hardline <:> s)
+sepLine s = sep (s <> space <|> hardline <> s)
 
 -- | A comment.
 comment :: T.Text -> Fmt
@@ -335,7 +332,7 @@ sep _ [] = nil
 sep s (a : as) = auxiliary a as
   where
     auxiliary acc [] = acc
-    auxiliary acc (x : xs) = auxiliary (acc <:> s <:> x) xs
+    auxiliary acc (x : xs) = auxiliary (acc <> s <> x) xs
 
 sepComments :: (a -> Loc) -> (a -> Fmt) -> Fmt -> [a] -> Fmt
 sepComments _ _ _ [] = nil
@@ -343,11 +340,11 @@ sepComments floc fmt s (a : as) = auxiliary (fmt a) as
   where
     auxiliary acc [] = acc
     auxiliary acc (x : xs) =
-      auxiliary (acc <:> prependComments floc (\y -> s <:> fmt y) x) xs
+      auxiliary (acc <> prependComments floc (\y -> s <> fmt y) x) xs
 
 sepLineComments :: (a -> Loc) -> (a -> Fmt) -> Fmt -> [a] -> Fmt
 sepLineComments floc fmt s =
-  sepComments floc fmt (s <:> space <|> hardline <:> s)
+  sepComments floc fmt (s <> space <|> hardline <> s)
 
 -- | This is used for function arguments. It seperates multiline arguments by
 -- lines and singleline arguments by spaces.
@@ -359,7 +356,7 @@ sepArgs fmt ls
   | otherwise = align $ sep line $ map fmt ls
   where
     auxiliary 0 x = fmt x
-    auxiliary _ x = localLayout x (line <:> fmt x)
+    auxiliary _ x = localLayout x (line <> fmt x)
 
 -- | Nest but with the standard value of two spaces.
 stdNest :: Fmt -> Fmt
@@ -393,33 +390,29 @@ text t = do
 
 -- | Adds brackets.
 brackets :: Fmt -> Fmt
-brackets a = "[" <:> a <:> "]"
+brackets a = "[" <> a <> "]"
 
 -- | Adds braces.
 braces :: Fmt -> Fmt
-braces a = "{" <:> a <:> "}"
+braces a = "{" <> a <> "}"
 
 -- | Add parenthesis.
 parens :: Fmt -> Fmt
-parens a = "(" <:> a <:> ")"
+parens a = "(" <> a <> ")"
 
 -- | If in a singleline layout then concatenate with 'nil' and in multiline
 -- concatenate by a line.
 (<:/>) :: Fmt -> Fmt -> Fmt
-a <:/> b = a <:> (nil <|> hardline) <:> b
-
--- | Concatenates @a@ and @b@.
-(<:>) :: Fmt -> Fmt -> Fmt
-a <:> b = (<>) <$> a <*> b
+a <:/> b = a <> (nil <|> hardline) <> b
 
 -- | Concatenate with a space between.
 (<+>) :: Fmt -> Fmt -> Fmt
-a <+> b = a <:> space <:> b
+a <+> b = a <> space <> b
 
 -- | Concatenate with a space if in singleline layout and concatenate by a
 -- line in multiline.
 (</>) :: Fmt -> Fmt -> Fmt
-a </> b = a <:> line <:> b
+a </> b = a <> line <> b
 
 -- | If in a singleline layout then choose @a@, if in a multiline layout choose
 -- @b@.
@@ -436,15 +429,15 @@ a <|> b = do
 sepDecs :: (Located a) => (a -> Fmt) -> [a] -> Fmt
 sepDecs _ [] = nil
 sepDecs fmt as@(x : xs) =
-  sep space (map fmt as) <|> (fmt x <:> auxiliary x xs)
+  sep space (map fmt as) <|> (fmt x <> auxiliary x xs)
   where
     auxiliary _ [] = nil
-    auxiliary prev (y : ys) = p <:> fmt y <:> auxiliary y ys
+    auxiliary prev (y : ys) = p <> fmt y <> auxiliary y ys
       where
         p =
           case (lineLayout y, lineLayout prev) of
             (Just SingleLine, Just SingleLine) -> hardline
-            _any -> hardline <:> hardline
+            _any -> hardline <> hardline
 
 layoutOpts :: P.LayoutOptions
 layoutOpts = P.LayoutOptions P.Unbounded
