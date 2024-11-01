@@ -216,13 +216,13 @@ tests =
         ),
       mkTest
         "tests/indexfn/mk_flag_array.fut"
-        ( pure $ \(i, n, _, _) ->
-            let dummy = int2SoP 0
+        ( withDebug $ newNameFromString "k" >>= \k -> newNameFromString "j" >>= \j -> newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
+            let sum_k = sym2SoP $ Sum j (int2SoP 1) (sVar k) (Idx (Hole shape) (sVar j .-. int2SoP 1))
+                shape_k = sym2SoP (Idx (Hole shape) (sVar k))
              in IndexFn
-                  { iterator = Forall i (Iota (sHole n)),
-                    body =
-                      cases
-                        [(Bool True, dummy)]
+                  { iterator = Forall i (Cat k (sHole m) sum_k),
+                    body = cases [(shape_k :> int2SoP 0, sym2SoP $ Idx (Hole xs) (sVar k)),
+                                  (shape_k :<= int2SoP 0, sHole zero)]
                   }
         )
     ]

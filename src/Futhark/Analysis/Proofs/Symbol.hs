@@ -4,6 +4,7 @@ import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, justSym)
 import Futhark.Util.Pretty (Pretty, apply, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName)
+import Futhark.Util.Pretty (prettyString)
 
 data Symbol
   = Var VName
@@ -52,10 +53,10 @@ isBoolean (_ :&& _) = True
 isBoolean (_ :|| _) = True
 isBoolean _ = False
 
-sop2Symbol :: (Ord u) => SoP u -> u
+sop2Symbol :: (Ord u, Pretty u) => SoP u -> u
 sop2Symbol sop
   | Just t <- justSym sop = t
-  | otherwise = error "sop2Symbol on non-symbol"
+  | otherwise = error $ "sop2Symbol on non-symbol: " <> prettyString sop
 
 getSumBoundVar :: Symbol -> Maybe VName
 getSumBoundVar (Sum i _ _ _) = Just i

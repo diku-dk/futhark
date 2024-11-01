@@ -14,6 +14,7 @@ module Futhark.Analysis.Proofs.Unify
     FreeVariables (..),
     Hole (justHole),
     freshName,
+    freshNameFromString,
     renameSame,
     unifies_,
     sub,
@@ -40,16 +41,20 @@ import Language.Futhark (VName)
 class (Ord a) => FreeVariables a where
   fv :: a -> S.Set VName
 
--- | Produce a fresh name, using the given name as a template.
+-- | Produce a fresh name.
 -- Like "FreshNames.newName", except it lets us reuse the same name
 -- source in multiple places while ensuring that the monadic name source
 -- continues to generate unique names afterwards.
 freshName :: (MonadFreshNames m) => VNameSource -> m (VName, VNameSource)
-freshName vns = do
+freshName vns =
   -- All renamed names must have the same base name. Otherwise renaming two
   -- expressions with differently named bound variables will not produce
   -- identical renamings.
-  x <- newNameFromString "x"
+  freshNameFromString vns "j"
+
+freshNameFromString :: MonadFreshNames m => VNameSource -> String -> m (VName, VNameSource)
+freshNameFromString vns s = do
+  x <- newNameFromString s
   -- Note that we are unnecessarily incrementing the monadic name source above.
   -- The monadic name source needs only be updated to the maximum tag over all
   -- places where freshName is used on successions of vns.

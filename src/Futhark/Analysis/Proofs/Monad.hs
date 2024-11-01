@@ -7,7 +7,7 @@ import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
-import Futhark.Util.Pretty (Pretty, docString, pretty)
+import Futhark.Util.Pretty (Pretty, docString, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 import Futhark.SoP.Expression (Expression)
@@ -85,6 +85,12 @@ debugT :: Show a => String -> IndexFnM a -> IndexFnM a
 debugT msg m = do
   a <- m
   debugM (msg <> ": " <> show a)
+  pure a
+
+debugT' :: Pretty a => String -> IndexFnM a -> IndexFnM a
+debugT' msg m = do
+  a <- m
+  debugM (msg <> ": " <> prettyString a)
   pure a
 
 debugLn :: IndexFnM ()

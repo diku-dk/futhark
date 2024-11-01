@@ -1,28 +1,30 @@
 module Futhark.Analysis.Proofs.Convert where
 
 import Control.Monad (foldM, forM, unless, when)
-import Control.Monad.RWS
+import Control.Monad.RWS (gets)
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, fromJust)
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.IndexFnPlus (subst)
+import Futhark.Analysis.Proofs.IndexFnPlus (subst, domainEnd)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Util (prettyBinding)
 import Futhark.MonadFreshNames (VNameSource, newVName)
-import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP_, negSoP, sym2SoP, (~+~), (~*~), (~-~))
+import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP_, negSoP, sym2SoP, (~+~), (~*~), (~-~), justSym, (.-.))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
-import Futhark.Analysis.Proofs.Unify (unify, Substitution)
+import Futhark.Analysis.Proofs.Unify (unify, Substitution (mapping), mkRep, rep)
 import Futhark.SoP.Monad (addProperty)
 import qualified Futhark.Analysis.Proofs.AlgebraPC.Symbol as Algebra
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate (algebraContext)
+import Futhark.Analysis.Proofs.Query (Query(..), askQ, Answer (..), isUnknown, MonoDir (..))
+import Futhark.Analysis.Proofs.AlgebraBridge (($==))
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -263,11 +265,8 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           <> ". Eta-expand your program."
   | Just "replicate" <- getFun f,
     [n, x] <- getArgs args = do
-      debugM "replicate n x"
       n' <- forward n
-      debugPrettyM "n" n'
       x' <- forward x
-      debugPrettyM "x" x'
       i <- newVName "i"
       case (n', x') of
         ( IndexFn Empty (Cases ((Bool True, m) NE.:| [])),
@@ -305,7 +304,8 @@ forward expr@(E.AppExp (E.Apply f args _) _)
             IndexFn
               iter_xs
               ( cases
-                  [(base_case, sym2SoP (Var x)), (neg base_case, Recurrence `op` Var x)]
+                  [(base_case, sym2SoP (Idx (Var x) (sVar i))),
+                   (neg base_case, Recurrence `op` Idx (Var x) (sVar i))]
               )
       -- tell ["Using scan rule ", toLaTeX y]
       subst x (IndexFn iter_xs xs) y
@@ -317,57 +317,95 @@ forward expr@(E.AppExp (E.Apply f args _) _)
     -- y = scatter dest inds vals
     -- where
     --   inds = ∀k ∈ [0, ..., m-1] .
-    --       | c(k)  => e1(k)
-    --       | ¬c(k) => OOB
-    --   xs is an array of size at least m
-    --   e1(k-1) <= e1(k) for all k
-    --   dest has size e1(m-1)         (to ensure conclusion covers all of dest)
-    --   e1(0) is 0
-    --   OOB < 0 or OOB >= e1(m-1)
+    --       | p(k)  => seg(k)
+    --       | ¬p(k) => OOB
+    --   seg(0) is 0
+    --   seg(k) is monotonically increasing
+    --   dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
+    --   OOB < 0 or OOB >= seg(m) - 1
     -- ___________________________________________________
-    -- y = ∀i ∈ ⊎k=iota m [e1(k), ..., e1(k+1)] .
+    -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
     --     | i == inds[k] => vals[k]
     --     | i /= inds[k] => dest[i]
     --
-    -- Note that case predicates c and ¬c from inds are not propagated by y.
-    -- Leaving them out is safe, because i == inds[k] only if inds[k] == xs[k],
-    -- which in turn implies c. Similarly for ¬c.
+    -- equivalent to
+    --
+    -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+    --     | p(k) => vals[k]
+    --     | ¬p(k) => dest[i]
     --
     -- From type checking, we have:
     -- scatter : (dest : [n]t) -> (inds : [m]i64) -> (vals : [m]t) : [n]t
     -- * inds and vals are same size
     -- * dest and result are same size
+    debugM "scatter"
     dest <- forward dest_arg
     inds <- forward inds_arg
     vals <- forward vals_arg
+    debugPrettyM "dest" dest
+    debugPrettyM "inds" inds
+    debugPrettyM "vals" vals
     -- 1. Check that inds is on the right form.
-    --    1.i. Extract m from inds.
-    --    1.ii. Extract (xs, OOB) from inds.
-    --          This requires determining which is which.
-    --    All of this should be doable with unification?
-    tmp_k <- newVName "k"
-    tmp_m <- newVName "m"
-    tmp_e1 <- newVName "e1"
-    tmp_OOB <- newVName "OOB"
-    tmp_c <- newVName "OOB"
-    tmp_negc <- newVName "OOB"
+    vn_k <- newVName "k"
+    vn_m <- newVName "m"
+    vn_p0 <- newVName "p0"
+    vn_f0 <- newVName "f0"
+    vn_p1 <- newVName "p1"
+    vn_f1 <- newVName "f1"
     let inds_template =
           IndexFn {
-            iterator = Forall tmp_k (Iota $ sym2SoP $ Hole tmp_m),
-            body = cases [(Hole tmp_c, sym2SoP $ Hole tmp_e1),
-                          (Hole tmp_negc, sym2SoP $ Hole tmp_OOB)]
+            iterator = Forall vn_k (Iota $ sym2SoP $ Hole vn_m),
+            body = cases [(Hole vn_p0, sym2SoP $ Hole vn_f0),
+                          (Hole vn_p1, sym2SoP $ Hole vn_f1)]
             }
-    debugPrettyM "inds" inds
-    s :: Maybe (Substitution Symbol) <- unify inds_template inds
-    unless (isJust s) (error "unhandled scatter")
-    -- 3. Check that xs has size at least m. (Why?)
-    -- 4. Check that xs[0] = 0.
-    -- 5. Check that xs is monotonically increasing for k in [0, ..., m-1].
-    --    Use query to solver, so decide on interface. Decide on translation
-    --    to solver-Symbol. Decide on how "monotonically increasing" translates
-    --    to a query.
-    -- 6. Check that OOB < 0 or OOB >= xs[m-1].
-    error "scatter not implemented yet"
+    s <- fromMaybe (error "unhandled scatter") <$> unify inds_template inds
+    debugPrettyM "s" s
+    -- Safe to do this now:
+    let IndexFn (Forall k (Iota m)) _ = inds
+    -- Determine which is OOB and which is e1.
+    let isOOB ub = CaseTransform (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
+    (case_idx_seg, p_seg, f_seg) <- do
+      case0_is_OOB <- askQ (isOOB vn_f1) inds 0
+      case case0_is_OOB of
+        Yes -> pure (1, vn_p1, vn_f1)
+        Unknown -> do
+          case1_is_OOB <- askQ (isOOB vn_f0) inds 1
+          case case1_is_OOB of
+            Yes -> pure (0, vn_p0, vn_f0)
+            Unknown -> error "scatter: unable to determine OOB branch"
+    -- Check that seg(0) = 0 and that seg is monotonically increasing.
+    let x `at_k` i = rep (mkRep k i) x
+    let zero :: SoP Symbol = int2SoP 0
+    eq0 <- askQ (CaseTransform (\seg -> seg `at_k` zero :== int2SoP 0)) inds case_idx_seg
+    when (isUnknown eq0) $ error "scatter: unable to determine segment start"
+    debugPrettyM "seg(0) = 0" eq0
+    -- Check that seg is monotonically increasing.
+    mono <- askQ (CaseIsMonotonic Inc) inds case_idx_seg
+    debugPrettyM "mono" mono
+    when (isUnknown mono) $ error "scatter: unable to show segment monotonicity"
+    -- ^ TODO need to put pre-requisite on shape that shape >= 0 for mk_flag to go through here.
+    -- Check that the proposed end of segments seg(m) - 1 equals the size of dest.
+    -- (Note that has to hold outside the context of inds, so we cannot assume p_seg.)
+    let IndexFn (Forall _ dom_dest) _ = dest
+    let dest_size = domainEnd dom_dest
+    let seg = mapping s M.! f_seg
+    domain_covered <- seg `at_k` m .-. int2SoP 1 $== dest_size
+    debugPrettyM "domain_covered" domain_covered
+    -- y = ∀i ∈ (⊎k=[0,...,m-1] [seg(k), ..., seg(k+1) - 1]) .
+    --     | p(k) => vals[k]
+    --     | ¬p(k) => dest[i]
+    i <- newVName "i"
+    dest_vn <- newVName "dest_vn"
+    vals_vn <- newVName "vals_vn"
+    let p = sop2Symbol $ mapping s M.! p_seg
+    let fn = IndexFn {
+      iterator = Forall i (Cat k m seg),
+      body = cases [(p, sym2SoP $ Apply (Var vals_vn) [sVar k]),
+                    (neg p, sym2SoP $ Apply (Var dest_vn) [sVar i])]
+    }
+    subst vals_vn vals fn
+      >>= subst dest_vn dest
+      >>= rewrite
   -- Applying other functions, for instance, user-defined ones.
   | (E.Var (E.QualName [] g) info _) <- f,
     args' <- getArgs args,
@@ -414,6 +452,9 @@ cmap f (Cases xs) = Cases (fmap f xs)
 
 cmapValues :: (b -> c) -> Cases a b -> Cases a c
 cmapValues f = cmap (second f)
+
+sVar :: E.VName -> SoP Symbol
+sVar = sym2SoP . Var
 
 -- TODO eh bad
 (~==~) :: Symbol -> Symbol -> SoP Symbol

@@ -5,7 +5,7 @@ module Futhark.Analysis.Proofs.Query
     MonoDir (..),
     Query (..),
     Property (..),
-    ask,
+    askQ,
     prove,
     isUnknown,
   )
@@ -36,8 +36,8 @@ data Query
     CaseTransform (SoP Symbol -> Symbol)
 
 -- | Answers a query on an index function case.
-ask :: Query -> IndexFn -> Int -> IndexFnM Answer
-ask query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
+askQ :: Query -> IndexFn -> Int -> IndexFnM Answer
+askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
   let (p, q) = getCase case_idx cs
   addRelIterator it
   assume p

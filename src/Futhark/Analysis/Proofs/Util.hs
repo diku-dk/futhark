@@ -4,7 +4,7 @@ import Control.Monad (guard)
 import Data.List (subsequences, (\\))
 import Data.Maybe (fromJust)
 import Debug.Trace (trace)
-import Futhark.Util.Pretty (Doc, Pretty, docString, pretty, prettyString, (<+>))
+import Futhark.Util.Pretty (Doc, Pretty, docString, pretty, prettyString, (<+>), line, align)
 import Language.Futhark (VName (VName))
 import Futhark.SoP.SoP (SoP, numTerms, term2SoP, sopFromList, sopToList)
 
@@ -17,7 +17,7 @@ prettyHole :: VName -> Doc ann
 prettyHole x = "•" <> prettyName x
 
 prettyBinding :: (Pretty a1, Pretty a2) => a1 -> a2 -> String
-prettyBinding a b = docString $ ">>>" <+> pretty a <+> "=" <+> pretty b
+prettyBinding a b = docString $ ">>>" <+> pretty a <+> "=" <> line <> "    " <> align (pretty b)
 
 tracer :: (Pretty a) => a -> a
 tracer x = trace (prettyString x) x
