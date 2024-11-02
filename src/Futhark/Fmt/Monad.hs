@@ -473,6 +473,11 @@ a <|> b = do
     then a
     else b
 
+-- | Are these locations on consecutive lines?
+consecutive :: Loc -> Loc -> Bool
+consecutive (Loc _ end) (Loc beg _) = posLine end + 1 == posLine beg
+consecutive _ _ = False
+
 -- | If in singleline layout seperate by spaces. In a multiline layout seperate
 -- by a single line if two neighbouring elements are singleline. Otherwise
 -- sepereate by two lines.
@@ -486,5 +491,6 @@ sepDecs fmt as@(x : xs) =
       where
         p =
           case (lineLayout y, lineLayout prev) of
-            (Just SingleLine, Just SingleLine) -> hardline
+            (Just SingleLine, Just SingleLine)
+              | consecutive (locOf prev) (locOf y) -> hardline
             _any -> hardline <> hardline
