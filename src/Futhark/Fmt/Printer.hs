@@ -441,7 +441,9 @@ instance Format UncheckedValBind where
         | null tparams && null args = nil
         | null tparams = space <> args'
         | null args = space <> tparams'
-        | otherwise = space <> tparams' <+> args'
+        | otherwise =
+            localLayout [locOf tparams, locOf args] $
+              space <> align (tparams' </> args')
       fun =
         case entry of
           Just _ -> "entry"
