@@ -37,9 +37,12 @@ module Futhark.Fmt.Monad
     sepComments,
     sepLineComments,
     sepLine,
+
+    -- * Formatting styles
     commentStyle,
     constantStyle,
     keywordStyle,
+    bindingStyle,
   )
 where
 
@@ -68,6 +71,7 @@ import Prettyprinter.Render.Terminal
     Color (..),
     bold,
     color,
+    colorDull,
     italicized,
   )
 
@@ -127,10 +131,11 @@ instance IsString Fmt where
           "case"
         ]
 
-commentStyle, keywordStyle, constantStyle :: AnsiStyle
+commentStyle, keywordStyle, constantStyle, bindingStyle :: AnsiStyle
 commentStyle = italicized
 keywordStyle = color Magenta <> bold
 constantStyle = color Green
+bindingStyle = colorDull Blue
 
 -- | This function allows to inspect the layout of an expression @a@ and if it
 -- is singleline line then use format @s@ and if it is multiline format @m@.
