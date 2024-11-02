@@ -37,13 +37,15 @@ fmtPretty = text mempty . prettyText
 class Format a where
   fmt :: a -> Fmt
 
-instance Format (Maybe DocComment) where
-  fmt (Just (DocComment x loc)) =
+instance Format DocComment where
+  fmt (DocComment x loc) =
     addComments loc $ sep nil $ prefixes (T.lines x)
     where
       prefixes [] = []
       prefixes (l : ls) = comment ("-- | " <> l) : map (comment . ("-- " <>)) ls
-  fmt Nothing = nil
+
+instance Format (Maybe DocComment) where
+  fmt = maybe nil fmt
 
 fmtParamType :: Maybe Name -> UncheckedTypeExp -> Fmt
 fmtParamType (Just n) te =
@@ -549,8 +551,8 @@ instance Format UncheckedDec where
     addComments loc $ "import" <+> "\"" <> fmtPretty path <> "\""
 
 instance Format UncheckedProg where
-  fmt (Prog dc decs) =
-    fmt dc <> sepDecs fmt decs </> popComments
+  fmt (Prog Nothing decs) = sepDecs fmt decs </> popComments
+  fmt (Prog (Just dc) decs) = fmt dc </> sepDecs fmt decs </> popComments
 
 -- | Given a filename and a futhark program, formats the program.
 fmtToDoc :: String -> T.Text -> Either SyntaxError (Doc AnsiStyle)
