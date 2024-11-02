@@ -60,10 +60,11 @@ hPutDoc h d = do
   colours <- hIsTerminalDevice h
   if colours
     then Prettyprinter.Render.Terminal.renderIO h (layouter d)
-    else Prettyprinter.Render.Text.hPutDoc h d
+    else Prettyprinter.Render.Text.renderIO h (layouter d)
   where
     layouter =
-      layoutSmart defaultLayoutOptions {layoutPageWidth = Unbounded}
+      removeTrailingWhitespace
+        . layoutSmart defaultLayoutOptions {layoutPageWidth = Unbounded}
 
 -- | Like 'hPutDoc', but with a final newline.
 hPutDocLn :: Handle -> Doc AnsiStyle -> IO ()
@@ -87,7 +88,7 @@ putDocLn d = do
 docTextForHandle :: Handle -> Doc AnsiStyle -> IO T.Text
 docTextForHandle h d = do
   colours <- hIsTerminalDevice h
-  let sds = layoutSmart defaultLayoutOptions d
+  let sds = removeTrailingWhitespace $ layoutSmart defaultLayoutOptions d
   pure $
     if colours
       then Prettyprinter.Render.Terminal.renderStrict sds
@@ -111,7 +112,8 @@ docText :: Doc a -> T.Text
 docText = Prettyprinter.Render.Text.renderStrict . layouter
   where
     layouter =
-      layoutSmart defaultLayoutOptions {layoutPageWidth = Unbounded}
+      removeTrailingWhitespace
+        . layoutSmart defaultLayoutOptions {layoutPageWidth = Unbounded}
 
 -- | Convert a 'Doc' to a 'String', through 'docText'. Intended for
 -- debugging.
