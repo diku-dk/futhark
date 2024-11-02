@@ -312,7 +312,7 @@ instance Format (AppExpBase NoInfo Name) where
     addComments loc $ (fmt e <>) $ brackets $ sepLine "," $ map fmt idxs
   fmt (LetPat sizes pat e body loc) =
     addComments loc $
-      lineIndent e ("let" <+> sub <+> "=") (fmt e)
+      lineIndent [locOf pat, locOf e] ("let" <+> sub <+> "=") (fmt e)
         </> letBody body
     where
       sizes' = sep nil $ map fmt sizes
