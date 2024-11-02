@@ -42,6 +42,7 @@ module Futhark.Fmt.Monad
     constantStyle,
     keywordStyle,
     bindingStyle,
+    infixStyle,
   )
 where
 
@@ -130,11 +131,12 @@ instance IsString Fmt where
           "case"
         ]
 
-commentStyle, keywordStyle, constantStyle, bindingStyle :: AnsiStyle
+commentStyle, keywordStyle, constantStyle, bindingStyle, infixStyle :: AnsiStyle
 commentStyle = italicized
 keywordStyle = color Magenta <> bold
 constantStyle = color Green
 bindingStyle = colorDull Blue
+infixStyle = colorDull Cyan
 
 -- | This function allows to inspect the layout of an expression @a@ and if it
 -- is singleline line then use format @s@ and if it is multiline format @m@.

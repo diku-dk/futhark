@@ -415,7 +415,7 @@ fmtBinOp :: QualName Name -> Fmt
 fmtBinOp bop =
   case leading of
     Backtick -> "`" <> fmtQualName bop <> "`"
-    _any -> fmtPretty bop
+    _ -> text infixStyle (prettyText bop)
   where
     leading = leadingOperator $ toName $ qualLeaf bop
 
