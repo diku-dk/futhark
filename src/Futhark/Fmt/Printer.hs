@@ -59,14 +59,16 @@ fmtSumTypeConstr (name, fs) =
 instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = addComments loc $ fmtQualName v
   fmt (TETuple ts loc) =
-    addComments loc $
-      parens $
-        sepLineComments locOf fmt "," ts
+    addComments loc $ fmtByLayout loc singleLine multiLine
+    where
+      singleLine = parens $ sep ", " (map fmt ts)
+      multiLine = align $ "(" <+> sep (line <> ", ") (map fmt ts) </> ")"
   fmt (TEParens te loc) = addComments loc $ parens $ fmt te
   fmt (TERecord fs loc) =
-    addComments loc $
-      braces $
-        sepLineComments (locOf . snd) fmtFieldType "," fs
+    addComments loc $ fmtByLayout loc singleLine multiLine
+    where
+      singleLine = braces $ sep ", " (map fmtFieldType fs)
+      multiLine = align $ "{" <+> sep (line <> ", ") (map fmtFieldType fs) </> "}"
   fmt (TEArray se te loc) = addComments loc $ fmt se <> fmt te
   fmt (TEUnique te loc) = addComments loc $ "*" <> fmt te
   fmt (TEApply te tArgE loc) = addComments loc $ fmt te <+> fmt tArgE
