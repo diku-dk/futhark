@@ -610,7 +610,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        tools/testformatter.sh tests
+        tools/testfmt.sh tests
 
   test-tools:
     runs-on: ubuntu-22.04
