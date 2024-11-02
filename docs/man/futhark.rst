@@ -83,7 +83,8 @@ futhark fmt [FILE]
 ------------------
 
 Reformat the given Futhark program. If no file is provided, read
-Futhark program on stdin and produce formatted output on stdout.
+Futhark program on stdin and produce formatted output on stdout. If
+stdout is a terminal, the output will be syntax highlighted.
 
 futhark hash PROGRAM
 --------------------
