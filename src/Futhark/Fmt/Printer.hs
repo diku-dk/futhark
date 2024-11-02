@@ -44,9 +44,6 @@ instance Format (Maybe DocComment) where
       prefixes (l : ls) = comment ("-- | " <> l) : map (comment . ("-- " <>)) ls
   fmt Nothing = nil
 
-fmtFieldType :: (Name, UncheckedTypeExp) -> Fmt
-fmtFieldType (name', t) = fmtName mempty name' <> ":" <+> fmt t
-
 fmtParamType :: Maybe Name -> UncheckedTypeExp -> Fmt
 fmtParamType (Just n) te =
   parens $ fmtName mempty n <> ":" <+> fmt te
@@ -59,19 +56,29 @@ fmtSumTypeConstr (name, fs) =
 instance Format Name where
   fmt = fmtName mempty
 
+-- Format a tuple-like thing (expression, pattern, type).
+fmtTuple :: (Located a) => [Fmt] -> a -> Fmt
+fmtTuple xs loc =
+  addComments loc $ fmtByLayout loc singleLine multiLine
+  where
+    singleLine = parens $ sep ", " xs
+    multiLine = align $ "(" <+> sep (line <> "," <> space) xs </> ")"
+
+-- Format a record-like thing (expression, pattern, type).
+fmtRecord :: (Located a) => [Fmt] -> a -> Fmt
+fmtRecord xs loc =
+  addComments loc $ fmtByLayout loc singleLine multiLine
+  where
+    singleLine = braces $ sep ", " xs
+    multiLine = align $ "{" <+> sep (line <> "," <> space) xs </> "}"
+
 instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = addComments loc $ fmtQualName v
-  fmt (TETuple ts loc) =
-    addComments loc $ fmtByLayout loc singleLine multiLine
-    where
-      singleLine = parens $ sep ", " (map fmt ts)
-      multiLine = align $ "(" <+> sep (line <> ", ") (map fmt ts) </> ")"
+  fmt (TETuple ts loc) = fmtTuple (map fmt ts) loc
   fmt (TEParens te loc) = addComments loc $ parens $ fmt te
-  fmt (TERecord fs loc) =
-    addComments loc $ fmtByLayout loc singleLine multiLine
+  fmt (TERecord fs loc) = fmtRecord (map fmtFieldType fs) loc
     where
-      singleLine = braces $ sep ", " (map fmtFieldType fs)
-      multiLine = align $ "{" <+> sep (line <> ", ") (map fmtFieldType fs) </> "}"
+      fmtFieldType (name', t) = fmtName mempty name' <> ":" <+> fmt t
   fmt (TEArray se te loc) = addComments loc $ fmt se <> fmt te
   fmt (TEUnique te loc) = addComments loc $ "*" <> fmt te
   fmt (TEApply te tArgE loc) = addComments loc $ fmt te <+> fmt tArgE
@@ -128,15 +135,10 @@ instance Format UncheckedTypeParam where
 
 instance Format (UncheckedPat t) where
   fmt (TuplePat pats loc) =
-    addComments loc $
-      parens $
-        sepLineComments locOf fmt "," pats
+    fmtTuple (map fmt pats) loc
   fmt (RecordPat pats loc) =
-    addComments loc $
-      braces $
-        sepLineComments (locOf . snd) fmtFieldPat "," pats
+    fmtRecord (map fmtFieldPat pats) loc
     where
-      -- Currently it always adds the fields it seems.
       fmtFieldPat (name, t) = fmt name <+> "=" <+> fmt t
   fmt (PatParens pat loc) =
     addComments loc $ "(" <> align (fmt pat) <:/> ")"
@@ -189,8 +191,7 @@ instance Format UncheckedExp where
   fmt (Literal _v loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (IntLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (FloatLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
-  fmt (TupLit es loc) =
-    addComments loc $ parens $ sepLineComments locOf fmt "," es
+  fmt (TupLit es loc) = fmtTuple (map fmt es) loc
   fmt (RecordLit fs loc) =
     addComments loc $ braces $ sepLineComments locOf fmt "," fs
   fmt (ArrayLit es _ loc) =
