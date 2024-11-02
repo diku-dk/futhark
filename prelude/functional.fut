@@ -23,7 +23,6 @@ def (|>) '^a '^b (x: a) (f: a -> b): b = f x
 -- ```
 -- filter (>0) [-1,0,1] |> length
 -- ```
-
 def (<|) '^a '^b (f: a -> b) (x: a) = f x
 
 -- | Function composition, with values flowing from left to right.
@@ -76,7 +75,7 @@ def iterate 'a (n: i32) (f: a -> a) (x: a) =
 -- | Keep applying `f` until `p` returns true for the input value.
 -- May apply zero times.  *Note*: may not terminate.
 def iterate_until 'a (p: a -> bool) (f: a -> a) (x: a) =
-  loop x while ! (p x) do f x
+  loop x while !(p x) do f x
 
 -- | Keep applying `f` while `p` returns true for the input value.
 -- May apply zero times.  *Note*: may not terminate.
