@@ -220,8 +220,7 @@ instance Format UncheckedExp where
   fmt (IntLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (FloatLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (TupLit es loc) = fmtTuple (map fmt es) loc
-  fmt (RecordLit fs loc) =
-    addComments loc $ braces $ sepLineComments locOf fmt "," fs
+  fmt (RecordLit fs loc) = fmtRecord (map fmt fs) loc
   fmt (ArrayLit es _ loc) = fmtArray (map fmt es) loc
   fmt (StringLit _s loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (Project k e _ loc) = addComments loc $ fmt e <> "." <> fmt k
