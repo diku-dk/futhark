@@ -810,9 +810,9 @@ data ExpBase f vn
     ArrayLit [ExpBase f vn] (f StructType) SrcLoc
   | -- | Array value constants, where the elements are known to be
     -- constant primitives. This is a fast-path variant of 'ArrayLit'
-    -- that will never be constructed by the parser, but may result
-    -- from normalisation later on. Has exactly the same semantics as
-    -- an 'ArrayLit'.
+    -- that will in some cases be constructed by the parser, and also
+    -- result from normalisation later on. Has exactly the same
+    -- semantics as an 'ArrayLit'.
     ArrayVal [PrimValue] PrimType SrcLoc
   | -- | An attribute applied to the following expression.
     Attr (AttrInfo vn) (ExpBase f vn) SrcLoc

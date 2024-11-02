@@ -7,6 +7,7 @@ where
 import Data.Foldable
 import Data.Text qualified as T
 import Futhark.Fmt.Monad
+import Futhark.Util (showText)
 import Futhark.Util.Pretty
   ( AnsiStyle,
     Doc,
@@ -178,6 +179,22 @@ operatorName = (`elem` opchars) . T.head . nameToText
     opchars :: String
     opchars = "+-*/%=!><|&^."
 
+instance Format PrimValue where
+  fmt pv =
+    text constantStyle $ case pv of
+      UnsignedValue (Int8Value v) ->
+        showText (fromIntegral v :: Word8) <> "u8"
+      UnsignedValue (Int16Value v) ->
+        showText (fromIntegral v :: Word16) <> "u16"
+      UnsignedValue (Int32Value v) ->
+        showText (fromIntegral v :: Word32) <> "u32"
+      UnsignedValue (Int64Value v) ->
+        showText (fromIntegral v :: Word64) <> "u64"
+      SignedValue v -> prettyText v
+      BoolValue True -> "true"
+      BoolValue False -> "false"
+      FloatValue v -> prettyText v
+
 instance Format UncheckedExp where
   fmt (Var name _ loc) = addComments loc $ fmtQualName name
   fmt (Hole _ loc) = addComments loc "???"
@@ -236,8 +253,8 @@ instance Format UncheckedExp where
     addComments loc $ "#" <> fmt n <+> align (sep line $ map fmt cs)
   fmt (Attr attr e loc) = addComments loc $ align $ fmt attr </> fmt e
   fmt (AppExp e _) = fmt e
-  fmt ArrayVal {} =
-    error "fmt: Unexpected ArrayVal" -- Never produced by parser.
+  fmt (ArrayVal vs _ loc) =
+    addComments loc $ brackets $ sepLine "," $ map fmt vs
 
 fmtQualName :: QualName Name -> Fmt
 fmtQualName (QualName names name)
