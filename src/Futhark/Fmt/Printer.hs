@@ -4,6 +4,7 @@ module Futhark.Fmt.Printer
   )
 where
 
+import Data.Bifunctor (second)
 import Data.Foldable
 import Data.Text qualified as T
 import Futhark.Fmt.Monad
@@ -476,22 +477,33 @@ instance Format UncheckedSpec where
     addComments loc $ fmt doc <> "module" <+> fmtName bindingStyle name <> ":" <+> fmt mte
   fmt (IncludeSpec mte loc) = addComments loc $ "include" <+> fmt mte
 
+typeWiths ::
+  UncheckedModTypeExp ->
+  (UncheckedModTypeExp, [TypeRefBase NoInfo Name])
+typeWiths (ModTypeWith mte tr _) = second (tr :) $ typeWiths mte
+typeWiths mte = (mte, [])
+
 instance Format UncheckedModTypeExp where
   fmt (ModTypeVar v _ loc) = addComments loc $ fmtPretty v
   fmt (ModTypeParens mte loc) =
     addComments loc $ "(" <> align (fmt mte) <:/> ")"
   fmt (ModTypeSpecs sbs loc) =
     addComments loc $ "{" <:/> stdIndent (sepDecs fmt sbs) <:/> "}"
-  fmt (ModTypeWith mte (TypeRef v ps td _) loc) =
-    addComments loc $
-      fmt mte
-        <+> "with"
-        <+> fmtPretty v
-        `ps_op` sep space (map fmt ps)
-        <+> "="
-        <+> fmt td
+  fmt (ModTypeWith mte tr loc) =
+    -- Special case multiple chained ModTypeWiths.
+    let (root, withs) = typeWiths mte
+     in addComments loc . localLayout loc $
+          fmt root
+            </> sep line (map fmtWith (withs ++ [tr]))
     where
-      ps_op = if null ps then (<>) else (<+>)
+      fmtWith (TypeRef v ps td _) =
+        "with"
+          <+> fmtPretty v
+          `ps_op` sep space (map fmt ps)
+          <+> "="
+          <+> fmt td
+        where
+          ps_op = if null ps then (<>) else (<+>)
   fmt (ModTypeArrow (Just v) te0 te1 loc) =
     addComments loc $
       parens (fmtName bindingStyle v <> ":" <+> fmt te0) <+> align ("->" </> fmt te1)
@@ -501,7 +513,14 @@ instance Format UncheckedModTypeExp where
 instance Format UncheckedModTypeBind where
   fmt (ModTypeBind pName pSig doc loc) =
     addComments loc $
-      fmt doc <> "module" <+> "type" <+> fmtName bindingStyle pName <+> "=" <+> fmt pSig
+      fmt doc
+        <> "module"
+          <+> "type"
+          <+> fmtName bindingStyle pName
+          <+> "="
+        <> case pSig of
+          ModTypeSpecs {} -> space <> fmt pSig
+          _ -> line <> stdIndent (fmt pSig)
 
 instance Format (ModParamBase NoInfo Name) where
   fmt (ModParam pName pSig _f loc) =
@@ -513,15 +532,16 @@ instance Format UncheckedModBind where
       fmt doc
         <> "module"
           <+> fmtName bindingStyle name
-        <> ps'
-        <> sig'
+        <> align ps'
+        <> fmtSig sig
         <> "="
         <> te'
     where
       te' = fmtByLayout te (line <> stdIndent (fmt te)) (space <> fmt te)
-      sig' = fmtSig sig
       fmtSig Nothing = space
-      fmtSig (Just (s', _f)) = ":" <+> fmt s' <> space
+      fmtSig (Just (s', _f)) =
+        localLayout (map locOf ps ++ [locOf s']) $
+          line <> stdIndent (":" <+> align (fmt s') <> space)
       ps' =
         case ps of
           [] -> nil
