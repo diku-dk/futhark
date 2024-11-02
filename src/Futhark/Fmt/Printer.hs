@@ -479,7 +479,7 @@ instance Format UncheckedModTypeExp where
   fmt (ModTypeParens mte loc) =
     addComments loc $ "(" <> align (fmt mte) <:/> ")"
   fmt (ModTypeSpecs sbs loc) =
-    addComments loc $ "{" <:/> stdIndent (sep line $ map fmt sbs) <:/> "}"
+    addComments loc $ "{" <:/> stdIndent (sepDecs fmt sbs) <:/> "}"
   fmt (ModTypeWith mte (TypeRef v ps td _) loc) =
     addComments loc $
       fmt mte
