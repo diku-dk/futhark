@@ -21,7 +21,6 @@ module Futhark.Fmt.Monad
     hardStdIndent,
     stdIndent,
     FmtM,
-    fmtComments,
     popComments,
     runFormat,
     align,
@@ -238,13 +237,16 @@ fmtComment = comment . commentText
 -- | Prepends comments.
 fmtComments :: (Located a) => a -> Fmt
 fmtComments a = do
-  s <- get
-  case comments s of
-    c : cs | locOf a /= NoLoc && locOf a > locOf c -> do
-      put $ s {comments = cs}
-      pre <> fmtComment c <> fmtComments a
-    _any -> pure mempty
+  (here, later) <- gets $ span relevant . comments
+  if null here
+    then pure mempty
+    else do
+      modify $ \s -> s {comments = later}
+      pre
+        <> mconcat (map fmtComment here)
+        <> (if consecutive (locOf here) (locOf a) then nil else hardline)
   where
+    relevant c = locOf a /= NoLoc && locOf a > locOf c
     pre = do
       lastO <- gets lastOutput
       case lastO of
