@@ -42,7 +42,8 @@ instance Format DocComment where
     addComments loc $ sep nil $ prefixes (T.lines x)
     where
       prefixes [] = []
-      prefixes (l : ls) = comment ("-- | " <> l) : map (comment . ("-- " <>)) ls
+      prefixes (l : ls) = comment (prefix "-- |" l) : map (comment . prefix "--") ls
+      prefix p s = if T.null s then p else p <> " " <> s -- Avoid trailing whitespace.
 
 instance Format (Maybe DocComment) where
   fmt = maybe nil fmt
