@@ -423,15 +423,14 @@ instance Format UncheckedValBind where
   fmt (ValBind entry name retdecl _rettype tparams args body docs attrs loc) =
     addComments loc $
       fmt docs
-        <> (if null attrs then nil else attrs' <> space)
-        <> fun
-          <+> fmtBoundName name
+        <> attrs'
+        <> (fun <+> fmtBoundName name)
         <> sub
         <> retdecl'
         <> "="
           </> stdIndent (fmt body)
     where
-      attrs' = sep space $ map fmt attrs
+      attrs' = if null attrs then nil else sep space (map fmt attrs) <> hardline
       tparams' = localLayoutList tparams $ align $ sep line $ map fmt tparams
       args' = localLayoutList args $ align $ sep line $ map fmt args
       retdecl' =
