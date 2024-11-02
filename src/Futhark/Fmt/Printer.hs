@@ -76,6 +76,14 @@ fmtRecord xs loc =
     singleLine = braces $ sep ", " xs
     multiLine = align $ "{" <+> sep (line <> "," <> space) xs </> "}"
 
+-- Format an array-like thing.
+fmtArray :: (Located a) => [Fmt] -> a -> Fmt
+fmtArray xs loc =
+  addComments loc $ fmtByLayout loc singleLine multiLine
+  where
+    singleLine = brackets $ sep ", " xs
+    multiLine = align $ "[" <+> sep (line <> "," <> space) xs </> "]"
+
 instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = addComments loc $ fmtQualName v
   fmt (TETuple ts loc) = fmtTuple (map fmt ts) loc
@@ -214,8 +222,7 @@ instance Format UncheckedExp where
   fmt (TupLit es loc) = fmtTuple (map fmt es) loc
   fmt (RecordLit fs loc) =
     addComments loc $ braces $ sepLineComments locOf fmt "," fs
-  fmt (ArrayLit es _ loc) =
-    addComments loc $ brackets $ sepLineComments locOf fmt "," es
+  fmt (ArrayLit es _ loc) = fmtArray (map fmt es) loc
   fmt (StringLit _s loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (Project k e _ loc) = addComments loc $ fmt e <> "." <> fmt k
   fmt (Negate e loc) = addComments loc $ "-" <> fmt e
@@ -256,8 +263,7 @@ instance Format UncheckedExp where
     addComments loc $ "#" <> fmt n <+> align (sep line $ map fmt cs)
   fmt (Attr attr e loc) = addComments loc $ align $ fmt attr </> fmt e
   fmt (AppExp e _) = fmt e
-  fmt (ArrayVal vs _ loc) =
-    addComments loc $ brackets $ sepLine "," $ map fmt vs
+  fmt (ArrayVal vs _ loc) = addComments loc $ fmtArray (map fmt vs) loc
 
 fmtQualName :: QualName Name -> Fmt
 fmtQualName (QualName names name)
