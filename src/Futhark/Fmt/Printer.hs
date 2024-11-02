@@ -240,9 +240,10 @@ instance Format UncheckedExp where
     addComments loc $ "assert" <+> fmt e1 <+> fmt e2
   fmt (Lambda params body rettype _ loc) =
     addComments loc $
-      "\\" <> sep space (map fmt params) <> ascript <+> stdNest ("->" </> fmt body)
-    where
-      ascript = maybe nil ((": " <>) . fmt) rettype
+      "\\"
+        <> sep space (map fmt params)
+        <> maybe nil (((space <> ":") <+>) . fmt) rettype
+          <+> stdNest ("->" </> fmt body)
   fmt (OpSection binop _ loc) =
     addComments loc $
       if operatorName (qualLeaf binop)
@@ -435,7 +436,7 @@ instance Format UncheckedValBind where
       args' = localLayoutList args $ align $ sep line $ map fmt args
       retdecl' =
         case retdecl of
-          Just a -> ":" <+> fmt a <> space
+          Just a -> space <> ":" <+> fmt a <> space
           Nothing -> space
       sub
         | null tparams && null args = nil
