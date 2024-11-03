@@ -60,7 +60,7 @@ lookupRecordReplacement v = asks $ M.lookup v . envRecordReplacements
 
 wildcard :: TypeBase Size u -> SrcLoc -> Pat (TypeBase Size u)
 wildcard (Scalar (Record fs)) loc =
-  RecordPat (zip (M.keys fs) $ map ((`Wildcard` loc) . Info) $ M.elems fs) loc
+  RecordPat (zip (map (L noLoc) (M.keys fs)) $ map ((`Wildcard` loc) . Info) $ M.elems fs) loc
 wildcard t loc =
   Wildcard (Info t) loc
 
@@ -103,7 +103,7 @@ transformPat _ (Id v (Info (Scalar (Record fs))) loc) = do
       (,) <$> newVName (nameToString f) <*> pure ft
   pure
     ( RecordPat
-        (zip (map fst fs') (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
+        (zip (map (L noLoc . fst) fs') (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
         loc,
       M.singleton
         v
@@ -114,7 +114,7 @@ transformPat _ (Id v (Info (Scalar (Record fs))) loc) = do
   where
     toField f f_v f_t =
       let f_v' = Var (qualName f_v) (Info $ toStruct f_t) loc
-       in RecordFieldExplicit f f_v' loc
+       in RecordFieldExplicit (L noLoc f) f_v' loc
 transformPat onType (Id v t loc) = do
   t' <- traverse onType t
   pure (Id v t' loc, mempty)

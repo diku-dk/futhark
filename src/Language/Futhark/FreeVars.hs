@@ -53,7 +53,7 @@ freeInExp expr = case expr of
   RecordLit fs _ -> foldMap freeInExpField fs
     where
       freeInExpField (RecordFieldExplicit _ e _) = freeInExp e
-      freeInExpField (RecordFieldImplicit vn t _) = ident $ Ident vn t mempty
+      freeInExpField (RecordFieldImplicit (L _ vn) t _) = ident $ Ident vn t mempty
   ArrayVal {} -> mempty
   ArrayLit es t _ ->
     foldMap freeInExp es <> freeInType (unInfo t)

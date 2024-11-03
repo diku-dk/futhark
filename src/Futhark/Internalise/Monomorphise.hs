@@ -633,11 +633,11 @@ transformExp (RecordLit fs loc) =
   where
     transformField (RecordFieldExplicit name e loc') =
       RecordFieldExplicit name <$> transformExp e <*> pure loc'
-    transformField (RecordFieldImplicit v t _) = do
+    transformField (RecordFieldImplicit (L vloc v) t _) = do
       t' <- traverse transformType t
       transformField $
         RecordFieldExplicit
-          (baseName v)
+          (L vloc (baseName v))
           (Var (qualName v) t' loc)
           loc
 transformExp (ArrayVal vs t loc) =

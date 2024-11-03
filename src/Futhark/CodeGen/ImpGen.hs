@@ -147,7 +147,6 @@ import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
 import Futhark.Util.IntegralExp
-import Futhark.Util.Loc (noLoc)
 import Futhark.Util.Pretty hiding (nest, space)
 import Language.Futhark.Warnings
 import Prelude hiding (mod, quot)

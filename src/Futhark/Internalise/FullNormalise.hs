@@ -170,8 +170,8 @@ getOrdering _ (RecordLit fs loc) = do
     f (RecordFieldExplicit n e floc) = do
       e' <- getOrdering False e
       pure $ RecordFieldExplicit n e' floc
-    f (RecordFieldImplicit v t _) =
-      f $ RecordFieldExplicit (baseName v) (Var (qualName v) t loc) loc
+    f (RecordFieldImplicit (L vloc v) t _) =
+      f $ RecordFieldExplicit (L vloc (baseName v)) (Var (qualName v) t loc) loc
 getOrdering _ (ArrayVal vs t loc) =
   pure $ ArrayVal vs t loc
 getOrdering _ (ArrayLit es ty loc)
