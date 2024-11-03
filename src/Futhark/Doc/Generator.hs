@@ -609,7 +609,7 @@ typeExpHtml e = case e of
   TETuple ts _ -> parens . commas <$> mapM typeExpHtml ts
   TERecord fs _ -> braces . commas <$> mapM ppField fs
     where
-      ppField (name, t) = do
+      ppField (L _ name, t) = do
         t' <- typeExpHtml t
         pure $ toHtml (nameToString name) <> ": " <> t'
   TEVar name _ -> qualNameHtml name

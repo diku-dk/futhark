@@ -508,10 +508,10 @@ TypeArg :: { TypeArgExp UncheckedExp Name }
          | TypeExpAtom
            { TypeArgExpType $1 }
 
-FieldType :: { (Name, UncheckedTypeExp) }
-FieldType : FieldId ':' TypeExp { (fst $1, $3) }
+FieldType :: { (L Name, UncheckedTypeExp) }
+FieldType : FieldId ':' TypeExp { ($1, $3) }
 
-FieldTypes :: { [(Name, UncheckedTypeExp)] }
+FieldTypes :: { [(L Name, UncheckedTypeExp)] }
 FieldTypes :                          { [] }
            | FieldType                { [$1] }
            | FieldType ',' FieldTypes { $1 : $3 }
@@ -578,7 +578,7 @@ Exp2 :: { UncheckedExp }
        { Update $1 $4 $7 (srcspan $1 $>) }
 
      | Exp2 with FieldAccesses_ '=' Exp2
-       { RecordUpdate $1 (map fst $3) $5 NoInfo (srcspan $1 $>) }
+       { RecordUpdate $1 (map unLoc $3) $5 NoInfo (srcspan $1 $>) }
 
      | '\\' FunParams1 maybeAscription(TypeExpTerm) '->' Exp %prec letprec
        { Lambda (fst $2 : snd $2) $5 $3 NoInfo (srcspan $1 $>) }
@@ -662,16 +662,16 @@ Exps1_ :: { [UncheckedExp] }
         | Exps1_ ','     { $1 }
         | Exp            { [$1] }
 
-FieldAccesses :: { [(Name, Loc)] }
+FieldAccesses :: { [L Name] }
                : '.' FieldId FieldAccesses { $2 : $3 }
                |                           { [] }
 
-FieldAccesses_ :: { [(Name, Loc)] }
-               : FieldId FieldAccesses { (fst $1, snd $1) : $2 }
+FieldAccesses_ :: { [L Name] }
+               : FieldId FieldAccesses { $1 : $2 }
 
 Field :: { FieldBase NoInfo Name }
-       : FieldId '=' Exp { RecordFieldExplicit (fst $1) $3 (srcspan (snd $1) $>) }
-       | id              { let L loc (ID s) = $1 in RecordFieldImplicit s NoInfo (srclocOf loc) }
+       : FieldId '=' Exp { RecordFieldExplicit $1 $3 (srcspan $1 $>) }
+       | id              { let L loc (ID s) = $1 in RecordFieldImplicit (L loc s) NoInfo (srclocOf loc) }
 
 Fields :: { [FieldBase NoInfo Name] }
        : Field ',' Fields { $1 : $3 }
@@ -748,7 +748,7 @@ SectionExp :: { UncheckedExp }
     { OpSection (fst $2) NoInfo (srcspan $1 $>) }
 
   | '(' '.' FieldAccesses_ ')'
-    { ProjectSection (map fst $3) NoInfo (srcspan $1 $>) }
+    { ProjectSection (map unLoc $3) NoInfo (srcspan $1 $>) }
 
   | '(' '.' '[' DimIndices ']' ')'
     { IndexSection $4 NoInfo (srcspan $1 $>) }
@@ -826,19 +826,19 @@ ConstrFields :: { [PatBase NoInfo Name StructType] }
               : InnerPat                { [$1] }
               | ConstrFields InnerPat   { $1 ++ [$2] }
 
-CFieldPat :: { (Name, PatBase NoInfo Name StructType) }
+CFieldPat :: { (L Name, PatBase NoInfo Name StructType) }
                : FieldId '=' Pat
-               { (fst $1, $3) }
+               { ($1, $3) }
                | FieldId ':' TypeExp
-               { (fst $1, PatAscription (Id (fst $1) NoInfo (srclocOf (snd $1))) $3 (srcspan (snd $1) $>)) }
+               { ($1, PatAscription (Id (unLoc $1) NoInfo (srclocOf $1)) $3 (srcspan $1 $>)) }
                | FieldId
-               { (fst $1, Id (fst $1) NoInfo (srclocOf (snd $1))) }
+               { ($1, Id (unLoc $1) NoInfo (srclocOf $1)) }
 
-CFieldPats :: { [(Name, PatBase NoInfo Name StructType)] }
+CFieldPats :: { [(L Name, PatBase NoInfo Name StructType)] }
                 : CFieldPats1 { $1 }
                 |             { [] }
 
-CFieldPats1 :: { [(Name, PatBase NoInfo Name StructType)] }
+CFieldPats1 :: { [(L Name, PatBase NoInfo Name StructType)] }
                  : CFieldPat ',' CFieldPats1 { $1 : $3 }
                  | CFieldPat ','             { [$1] }
                  | CFieldPat                 { [$1] }
@@ -890,9 +890,9 @@ DimIndices :: { [UncheckedDimIndex] }
 VarId :: { IdentBase NoInfo Name StructType }
 VarId : id { let L loc (ID name) = $1 in Ident name NoInfo (srclocOf loc) }
 
-FieldId :: { (Name, Loc) }
-         : id     { let L loc (ID name) = $1 in (name, loc) }
-         | natlit { let L loc (NATLIT x _) = $1 in (x, loc) }
+FieldId :: { L Name }
+         : id     { let L loc (ID name) = $1 in L loc name }
+         | natlit { let L loc (NATLIT x _) = $1 in L loc x }
 
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }

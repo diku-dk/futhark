@@ -628,12 +628,12 @@ internaliseExp desc (E.TupLit es _) = concat <$> mapM (internaliseExp desc) es
 internaliseExp desc (E.RecordLit orig_fields _) =
   concatMap snd . sortFields . M.unions <$> mapM internaliseField orig_fields
   where
-    internaliseField (E.RecordFieldExplicit name e _) =
+    internaliseField (E.RecordFieldExplicit (L _ name) e _) =
       M.singleton name <$> internaliseExp desc e
-    internaliseField (E.RecordFieldImplicit name t loc) =
+    internaliseField (E.RecordFieldImplicit (L _ name) t loc) =
       internaliseField $
         E.RecordFieldExplicit
-          (baseName name)
+          (L noLoc (baseName name))
           (E.Var (E.qualName name) t loc)
           loc
 internaliseExp desc (E.ArrayVal vs t _) =
@@ -952,7 +952,7 @@ generateCond orig_p orig_ses = do
     compares (E.TuplePat pats _) ses =
       comparesMany pats ses
     compares (E.RecordPat fs _) ses =
-      comparesMany (map snd $ E.sortFields $ M.fromList fs) ses
+      comparesMany (map snd $ E.sortFields $ M.fromList $ map (first unLoc) fs) ses
     compares (E.PatAscription pat _ _) ses =
       compares pat ses
     compares pat [] =

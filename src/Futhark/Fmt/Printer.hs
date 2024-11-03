@@ -91,7 +91,7 @@ instance Format UncheckedTypeExp where
   fmt (TEParens te loc) = addComments loc $ parens $ fmt te
   fmt (TERecord fs loc) = fmtRecord (map fmtFieldType fs) loc
     where
-      fmtFieldType (name', t) = fmtName mempty name' <> ":" <+> fmt t
+      fmtFieldType (L _ name', t) = fmtName mempty name' <> ":" <+> fmt t
   fmt (TEArray se te loc) = addComments loc $ fmt se <> fmt te
   fmt (TEUnique te loc) = addComments loc $ "*" <> fmt te
   fmt (TEApply te tArgE loc) = addComments loc $ fmt te <+> fmt tArgE
@@ -152,7 +152,7 @@ instance Format (UncheckedPat t) where
   fmt (RecordPat pats loc) =
     fmtRecord (map fmtFieldPat pats) loc
     where
-      fmtFieldPat (name, t) = fmt name <+> "=" <+> fmt t
+      fmtFieldPat (L nameloc name, t) = lineIndent [nameloc, locOf t] (fmt name <+> "=") (fmt t)
   fmt (PatParens pat loc) =
     addComments loc $ "(" <> align (fmt pat) <:/> ")"
   fmt (Id name _ loc) = addComments loc $ fmtBoundName name
@@ -165,9 +165,10 @@ instance Format (UncheckedPat t) where
   fmt (PatAttr attr pat loc) = addComments loc $ fmt attr <+> fmt pat
 
 instance Format (FieldBase NoInfo Name) where
-  fmt (RecordFieldExplicit name e loc) =
-    addComments loc $ fmt name <+> "=" </> stdIndent (fmt e)
-  fmt (RecordFieldImplicit name _ loc) = addComments loc $ fmt name
+  fmt (RecordFieldExplicit (L nameloc name) e loc) =
+    addComments loc $
+      lineIndent [nameloc, locOf e] (fmt name <+> "=") (stdIndent (fmt e))
+  fmt (RecordFieldImplicit (L _ name) _ loc) = addComments loc $ fmt name
 
 instance Format UncheckedDimIndex where
   fmt (DimFix e) = fmt e

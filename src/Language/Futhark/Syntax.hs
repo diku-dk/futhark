@@ -88,6 +88,7 @@ module Language.Futhark.Syntax
     DecBase (..),
 
     -- * Miscellaneous
+    L (..),
     NoInfo (..),
     Info (..),
     QualName (..),
@@ -463,7 +464,7 @@ data TypeExp d vn
   = TEVar (QualName vn) SrcLoc
   | TEParens (TypeExp d vn) SrcLoc
   | TETuple [TypeExp d vn] SrcLoc
-  | TERecord [(Name, TypeExp d vn)] SrcLoc
+  | TERecord [(L Name, TypeExp d vn)] SrcLoc
   | TEArray (SizeExp d) (TypeExp d vn) SrcLoc
   | TEUnique (TypeExp d vn) SrcLoc
   | TEApply (TypeExp d vn) (TypeArgExp d vn) SrcLoc
@@ -908,8 +909,8 @@ instance Located (ExpBase f vn) where
 
 -- | An entry in a record literal.
 data FieldBase f vn
-  = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
-  | RecordFieldImplicit vn (f StructType) SrcLoc
+  = RecordFieldExplicit (L Name) (ExpBase f vn) SrcLoc
+  | RecordFieldImplicit (L vn) (f StructType) SrcLoc
 
 deriving instance Show (FieldBase Info VName)
 
@@ -996,7 +997,7 @@ data PatLit
 -- parameters, @let@ expressions, etc).
 data PatBase f vn t
   = TuplePat [PatBase f vn t] SrcLoc
-  | RecordPat [(Name, PatBase f vn t)] SrcLoc
+  | RecordPat [(L Name, PatBase f vn t)] SrcLoc
   | PatParens (PatBase f vn t) SrcLoc
   | Id vn (f t) SrcLoc
   | Wildcard (f t) SrcLoc -- Nothing, i.e. underscore.

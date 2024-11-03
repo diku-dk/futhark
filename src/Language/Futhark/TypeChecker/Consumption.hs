@@ -229,7 +229,7 @@ matchPat (RecordPat fs1 _) (Scalar (Record fs2)) =
   mconcat $
     zipWith
       matchPat
-      (map snd (sortFields (M.fromList fs1)))
+      (map snd (sortFields (M.fromList (map (first unLoc) fs1))))
       (map snd (sortFields fs2))
 matchPat (Id v (Info t) _) als = DL.singleton (v, (t, als))
 matchPat (PatAscription p _ _) t = matchPat p t
@@ -631,9 +631,12 @@ convergeLoopParam loop_loc param body_cons body_als = do
       checkMergeReturn (PatAscription p _ _) t =
         checkMergeReturn p t
       checkMergeReturn (RecordPat pfs patloc) (Scalar (Record tfs)) =
-        RecordPat . M.toList <$> sequence pfs' <*> pure patloc
+        RecordPat . map unshuffle . M.toList <$> sequence pfs' <*> pure patloc
         where
-          pfs' = M.intersectionWith checkMergeReturn (M.fromList pfs) tfs
+          pfs' = M.intersectionWith check (M.fromList (map shuffle pfs)) tfs
+          check (loc, x) y = (loc,) <$> checkMergeReturn x y
+          shuffle (L loc v, t) = (v, (loc, t))
+          unshuffle (v, (loc, t)) = (L loc v, t)
       checkMergeReturn (TuplePat pats patloc) t
         | Just ts <- isTupleRecord t =
             TuplePat <$> zipWithM checkMergeReturn pats ts <*> pure patloc
@@ -948,10 +951,10 @@ checkExp (RecordLit fs loc) = do
   where
     checkField (RecordFieldExplicit name e floc) = do
       (e', e_als) <- checkExp e
-      pure (RecordFieldExplicit name e' floc, (name, e_als))
+      pure (RecordFieldExplicit name e' floc, (unLoc name, e_als))
     checkField (RecordFieldImplicit name t floc) = do
-      name_als <- observeVar (locOf floc) name $ unInfo t
-      pure (RecordFieldImplicit name t floc, (baseName name, name_als))
+      name_als <- observeVar (locOf floc) (unLoc name) $ unInfo t
+      pure (RecordFieldImplicit name t floc, (baseName (unLoc name), name_als))
 
 -- Cases that create alias-free values.
 checkExp e@(AppExp Range {} _) = noAliases e

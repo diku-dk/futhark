@@ -260,8 +260,11 @@ resolveExp (RecordLit fs loc) =
   where
     resolveField (RecordFieldExplicit k e floc) =
       RecordFieldExplicit k <$> resolveExp e <*> pure floc
-    resolveField (RecordFieldImplicit vn NoInfo floc) =
-      RecordFieldImplicit <$> resolveName vn floc <*> pure NoInfo <*> pure floc
+    resolveField (RecordFieldImplicit (L vnloc vn) NoInfo floc) =
+      RecordFieldImplicit
+        <$> (L vnloc <$> resolveName vn floc)
+        <*> pure NoInfo
+        <*> pure floc
 resolveExp (Project k e NoInfo loc) =
   Project k <$> resolveExp e <*> pure NoInfo <*> pure loc
 resolveExp (Constr k es NoInfo loc) =
@@ -314,7 +317,8 @@ patternExp (PatAscription pat _ _) = patternExp pat
 patternExp (PatParens pat _) = patternExp pat
 patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
   where
-    field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
+    field (L nameloc name, pat) =
+      RecordFieldExplicit (L nameloc name) <$> patternExp pat <*> pure (srclocOf loc)
 
 resolveAppExp :: AppExpBase NoInfo Name -> TypeM (AppExpBase NoInfo VName)
 resolveAppExp (Apply f args loc) =
