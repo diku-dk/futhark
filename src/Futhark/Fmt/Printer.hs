@@ -212,10 +212,10 @@ instance Format UncheckedExp where
   fmt (Var name _ loc) = addComments loc $ fmtQualName name
   fmt (Hole _ loc) = addComments loc "???"
   fmt (Parens e loc) =
-    addComments loc $ "(" <> stdNest (fmt e) <:/> ")"
+    addComments loc $ "(" <> stdNest (fmt e) <> ")"
   fmt (QualParens (v, _qLoc) e loc) =
     addComments loc $
-      fmtQualName v <> "." <> "(" <> align (fmt e) <:/> ")"
+      fmtQualName v <> "." <> "(" <> align (fmt e) <> ")"
   fmt (Ascript e t loc) = addComments loc $ fmt e <> ":" <+> fmt t
   fmt (Coerce e t _ loc) = addComments loc $ fmt e <+> ":>" <+> fmt t
   fmt (Literal _v loc) = addComments loc $ fmtCopyLoc constantStyle loc
@@ -482,7 +482,7 @@ typeWiths mte = (mte, [])
 instance Format UncheckedModTypeExp where
   fmt (ModTypeVar v _ loc) = addComments loc $ fmtPretty v
   fmt (ModTypeParens mte loc) =
-    addComments loc $ "(" <> align (fmt mte) <:/> ")"
+    addComments loc $ "(" <> align (fmt mte) <> ")"
   fmt (ModTypeSpecs sbs loc) =
     addComments loc $ "{" <:/> stdIndent (sepDecs fmt sbs) <:/> "}"
   fmt (ModTypeWith mte tr loc) =
@@ -547,7 +547,7 @@ instance Format UncheckedModBind where
 instance Format UncheckedModExp where
   fmt (ModVar v loc) = addComments loc $ fmtQualName v
   fmt (ModParens f loc) =
-    addComments loc $ "(" <:/> stdIndent (fmt f) <:/> ")"
+    addComments loc $ "(" <:/> stdIndent (fmt f) <> ")"
   fmt (ModImport path _f loc) =
     addComments loc $ "import" <+> "\"" <> fmtPretty path <> "\""
   fmt (ModDecs decs loc) =
