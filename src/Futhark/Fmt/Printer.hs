@@ -457,7 +457,7 @@ instance Format (SizeExp UncheckedExp) where
 instance Format UncheckedSpec where
   fmt (TypeAbbrSpec tpsig) = fmt tpsig
   fmt (TypeSpec l name ps doc loc) =
-    addComments loc $ fmt doc <> "type" <+> fmt l <> sub
+    addComments loc $ fmt doc <> "type" <> fmt l <+> sub
     where
       sub
         | null ps = fmtName bindingStyle name
