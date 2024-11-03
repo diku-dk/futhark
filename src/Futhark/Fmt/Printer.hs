@@ -464,12 +464,7 @@ instance Format UncheckedSpec where
         | null ps = fmtName bindingStyle name
         | otherwise = fmtName bindingStyle name </> align (sep line $ map fmt ps)
   fmt (ValSpec name ps te _ doc loc) =
-    addComments loc $
-      fmt doc
-        <> "val"
-          <+> sub
-        <> ":"
-          <+> fmt te
+    addComments loc $ fmt doc <> "val" <+> sub <+> ":" <+> fmt te
     where
       sub
         | null ps = fmtName bindingStyle name
