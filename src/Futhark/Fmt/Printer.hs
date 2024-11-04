@@ -385,10 +385,12 @@ instance Format (AppExpBase NoInfo Name) where
     addComments loc $
       "if"
         <+> fmt c
-        <+> "then"
-        </> stdIndent (fmt t)
+        </> "then"
+        <+> align (fmt t)
         </> "else"
-        </> stdIndent (fmt f)
+        <> case f of
+          AppExp If {} _ -> space <> fmt f
+          _ -> space <> align (fmt f)
   fmt (Apply f args loc) =
     addComments loc $ fmt f <+> align fmt_args
     where
