@@ -443,6 +443,7 @@ library
       aeson >=2.0.0.0
     , ansi-terminal >=0.6.3.1
     , array >=0.4
+    , async >=2.0
     , base >=4.15 && <5
     , base16-bytestring
     , binary >=0.8.3

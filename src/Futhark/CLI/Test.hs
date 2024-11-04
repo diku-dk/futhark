@@ -5,6 +5,7 @@ module Futhark.CLI.Test (main) where
 
 import Control.Applicative.Lift (Errors, Lift (..), failure, runErrors)
 import Control.Concurrent
+import Control.Concurrent.Async
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except (ExceptT (..), MonadError, runExceptT, withExceptT)
@@ -105,7 +106,14 @@ withProgramServer program runner extra_options f = do
   context prog_ctx $
     pureTestResults $
       liftIO $
-        withServer (futharkServerCfg to_run to_run_args) f
+        withServer (futharkServerCfg to_run to_run_args) $ \server ->
+          race (threadDelay $ 5 * 60 * 1000000) (f server) >>= \case
+            Left _ -> do
+              abortServer server
+              -- This value won't be used since abortServer will
+              -- already cause a non-zero status for wait.
+              pure undefined
+            Right r -> pure r
 
 data TestMode
   = -- | Only type check.
