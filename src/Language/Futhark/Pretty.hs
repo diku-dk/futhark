@@ -147,6 +147,8 @@ prettyScalarType p (Sum cs) =
   where
     ppConstr (name, fs) = sep $ ("#" <> pretty name) : map (prettyType 2) fs
     cs' = map ppConstr $ M.toList cs
+prettyScalarType _ (Refinement ty p) =
+  "{" <> pretty ty <> "| " <> pretty p <> "}"
 
 instance (Pretty (Shape dim), Pretty u) => Pretty (ScalarTypeBase dim u) where
   pretty = prettyScalarType 0
@@ -187,6 +189,7 @@ instance (IsName vn, Pretty d) => Pretty (TypeExp d vn) where
       ppConstr (name, fs) = "#" <> pretty name <+> sep (map pretty fs)
   pretty (TEDim dims te _) =
     "?" <> mconcat (map (brackets . prettyName) dims) <> "." <> pretty te
+  pretty (TERefine ty p _) = "{" <> pretty ty <> "| " <> pretty p <> "}"
 
 instance (Pretty d, IsName vn) => Pretty (TypeArgExp d vn) where
   pretty (TypeArgExpSize d) = pretty d

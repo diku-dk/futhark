@@ -143,6 +143,8 @@ freeInType t =
         unFV (freeInType t1 <> freeInType t2)
     Scalar (TypeVar _ _ targs) ->
       foldMap typeArgDims targs
+    Scalar (Refinement ty e) ->
+      freeInType ty <> freeInExp e
   where
     typeArgDims (TypeArgDim d) = freeInExp d
     typeArgDims (TypeArgType at) = freeInType at

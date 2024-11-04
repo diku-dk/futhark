@@ -469,6 +469,7 @@ TypeExpTerm :: { UncheckedTypeExp }
          | TypeExpApply %prec typeprec { $1 }
          | SumClauses %prec sumprec
            { let (cs, loc) = $1 in TESum cs (srclocOf loc) }
+         | '{' TypeExp '|' Exp '}' { TERefine $2 $4 (srcspan $1 $>) }
 
 SumClauses :: { ([(Name, [UncheckedTypeExp])], Loc) }
             : SumClauses '|' SumClause %prec sumprec

@@ -85,9 +85,10 @@ renameRetType (RetType dims st)
 evalTypeExp ::
   (MonadTypeChecker m, Pretty df) =>
   (df -> m Exp) ->
+  (TypeBase Size NoUniqueness -> df -> m Exp) ->
   TypeExp df VName ->
   m (TypeExp Exp VName, [VName], ResRetType, Liftedness)
-evalTypeExp _ (TEVar name loc) = do
+evalTypeExp _ _ (TEVar name loc) = do
   (ps, t, l) <- lookupType name
   t' <- renameRetType $ toResRet Nonunique t
   case ps of
@@ -98,12 +99,12 @@ evalTypeExp _ (TEVar name loc) = do
           <+> dquotes (hsep (pretty name : map pretty ps))
           <+> "used without any arguments."
 --
-evalTypeExp df (TEParens te loc) = do
-  (te', svars, ts, ls) <- evalTypeExp df te
+evalTypeExp df dg (TEParens te loc) = do
+  (te', svars, ts, ls) <- evalTypeExp df dg te
   pure (TEParens te' loc, svars, ts, ls)
 --
-evalTypeExp df (TETuple ts loc) = do
-  (ts', svars, ts_s, ls) <- L.unzip4 <$> mapM (evalTypeExp df) ts
+evalTypeExp df dg (TETuple ts loc) = do
+  (ts', svars, ts_s, ls) <- L.unzip4 <$> mapM (evalTypeExp df dg) ts
   pure
     ( TETuple ts' loc,
       mconcat svars,
@@ -111,14 +112,14 @@ evalTypeExp df (TETuple ts loc) = do
       L.foldl' max Unlifted ls
     )
 --
-evalTypeExp df t@(TERecord fs loc) = do
+evalTypeExp df dg t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
   unless (L.sort field_names == L.sort (nubOrd field_names)) $
     typeError loc mempty $
       "Duplicate record fields in" <+> pretty t <> "."
 
-  checked <- traverse (evalTypeExp df) $ M.fromList fs
+  checked <- traverse (evalTypeExp df dg) $ M.fromList fs
   let fs' = fmap (\(x, _, _, _) -> x) checked
       fs_svars = foldMap (\(_, y, _, _) -> y) checked
       ts_s = fmap (\(_, _, z, _) -> z) checked
@@ -130,9 +131,9 @@ evalTypeExp df t@(TERecord fs loc) = do
       L.foldl' max Unlifted ls
     )
 --
-evalTypeExp df (TEArray d t loc) = do
+evalTypeExp df dg (TEArray d t loc) = do
   (d_svars, d', d'') <- checkSizeExp d
-  (t', svars, RetType dims st, l) <- evalTypeExp df t
+  (t', svars, RetType dims st, l) <- evalTypeExp df dg t
   case (l, arrayOfWithAliases Nonunique (Shape [d'']) st) of
     (Unlifted, st') ->
       pure
@@ -159,8 +160,8 @@ evalTypeExp df (TEArray d t loc) = do
       e' <- df e
       pure ([], SizeExp e' dloc, e')
 --
-evalTypeExp df (TEUnique t loc) = do
-  (t', svars, RetType dims st, l) <- evalTypeExp df t
+evalTypeExp df dg (TEUnique t loc) = do
+  (t', svars, RetType dims st, l) <- evalTypeExp df dg t
   unless (mayContainArray st) $
     warn loc $
       "Declaring" <+> dquotes (pretty st) <+> "as unique has no effect."
@@ -172,11 +173,12 @@ evalTypeExp df (TEUnique t loc) = do
     mayContainArray (Scalar TypeVar {}) = True
     mayContainArray (Scalar Arrow {}) = False
     mayContainArray (Scalar (Sum cs)) = (any . any) mayContainArray cs
+    mayContainArray (Scalar (Refinement ty _)) = mayContainArray ty
 --
-evalTypeExp df (TEArrow (Just v) t1 t2 loc) = do
-  (t1', svars1, RetType dims1 st1, _) <- evalTypeExp df t1
+evalTypeExp df dg (TEArrow (Just v) t1 t2 loc) = do
+  (t1', svars1, RetType dims1 st1, _) <- evalTypeExp df dg t1
   bindVal v (BoundV [] $ toStruct st1) $ do
-    (t2', svars2, RetType dims2 st2, _) <- evalTypeExp df t2
+    (t2', svars2, RetType dims2 st2, _) <- evalTypeExp df dg t2
     pure
       ( TEArrow (Just v) t1' t2' loc,
         svars1 ++ dims1 ++ svars2,
@@ -184,9 +186,9 @@ evalTypeExp df (TEArrow (Just v) t1 t2 loc) = do
         Lifted
       )
 --
-evalTypeExp df (TEArrow Nothing t1 t2 loc) = do
-  (t1', svars1, RetType dims1 st1, _) <- evalTypeExp df t1
-  (t2', svars2, RetType dims2 st2, _) <- evalTypeExp df t2
+evalTypeExp df dg (TEArrow Nothing t1 t2 loc) = do
+  (t1', svars1, RetType dims1 st1, _) <- evalTypeExp df dg t1
+  (t2', svars2, RetType dims2 st2, _) <- evalTypeExp df dg t2
   pure
     ( TEArrow Nothing t1' t2' loc,
       svars1 ++ dims1 ++ svars2,
@@ -196,9 +198,9 @@ evalTypeExp df (TEArrow Nothing t1 t2 loc) = do
       Lifted
     )
 --
-evalTypeExp df (TEDim dims t loc) = do
+evalTypeExp df dg (TEDim dims t loc) = do
   bindDims dims $ do
-    (t', svars, RetType t_dims st, l) <- evalTypeExp df t
+    (t', svars, RetType t_dims st, l) <- evalTypeExp df dg t
     let (witnessed, _) = determineSizeWitnesses $ toStruct st
     case L.find (`S.notMember` witnessed) dims of
       Just d ->
@@ -218,7 +220,7 @@ evalTypeExp df (TEDim dims t loc) = do
     bindDims (d : ds) m =
       bindVal d (BoundV [] $ Scalar $ Prim $ Signed Int64) $ bindDims ds m
 --
-evalTypeExp df t@(TESum cs loc) = do
+evalTypeExp df dg t@(TESum cs loc) = do
   let constructors = map fst cs
   unless (L.sort constructors == L.sort (nubOrd constructors)) $
     typeError loc mempty $
@@ -227,7 +229,7 @@ evalTypeExp df t@(TESum cs loc) = do
   unless (length constructors < 256) $
     typeError loc mempty "Sum types must have less than 256 constructors."
 
-  checked <- (traverse . traverse) (evalTypeExp df) $ M.fromList cs
+  checked <- (traverse . traverse) (evalTypeExp df dg) $ M.fromList cs
   let cs' = (fmap . fmap) (\(x, _, _, _) -> x) checked
       cs_svars = (foldMap . foldMap) (\(_, y, _, _) -> y) checked
       ts_s = (fmap . fmap) (\(_, _, z, _) -> z) checked
@@ -241,7 +243,7 @@ evalTypeExp df t@(TESum cs loc) = do
             M.map (map retType) ts_s,
       L.foldl' max Unlifted ls
     )
-evalTypeExp df ote@TEApply {} = do
+evalTypeExp df dg ote@TEApply {} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
   (ps, tname_t, l) <- lookupType tname
   RetType t_dims t <- renameRetType $ toResRet Nonunique tname_t
@@ -294,7 +296,7 @@ evalTypeExp df ote@TEApply {} = do
       (d', svars, subst) <- checkSizeExp d
       pure (d', svars, M.singleton pv subst)
     checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
-      (te', svars, RetType dims st, _) <- evalTypeExp df te
+      (te', svars, RetType dims st, _) <- evalTypeExp df dg te
       pure
         ( TypeArgExpType te',
           svars ++ dims,
@@ -307,6 +309,10 @@ evalTypeExp df ote@TEApply {} = do
           <+> "not valid for a type parameter"
           <+> pretty p
           <> "."
+evalTypeExp df dg (TERefine te e loc) = do
+  (te', svars, RetType dims ty, ls) <- evalTypeExp df dg te
+  e' <- dg (toStruct ty) e
+  pure (TERefine te' e' loc, svars, RetType dims (Scalar $ Refinement ty e'), ls)
 
 -- | Check a type expression, producing:
 --
@@ -317,6 +323,7 @@ evalTypeExp df ote@TEApply {} = do
 checkTypeExp ::
   (MonadTypeChecker m, Pretty df) =>
   (df -> m Exp) ->
+  (TypeBase Size NoUniqueness -> df -> m Exp) ->
   TypeExp df VName ->
   m (TypeExp Exp VName, [VName], ResRetType, Liftedness)
 checkTypeExp = evalTypeExp
@@ -491,6 +498,8 @@ substTypesRet lookupSubst ot =
       Scalar <$> (Arrow u v d <$> onType t1 <*> onRetType t2)
     onType (Scalar (Sum ts)) =
       Scalar . Sum <$> traverse (traverse onType) ts
+    onType (Scalar (Refinement ty e)) =
+      Scalar . (`Refinement` applySubst lookupSubst' e) <$> onType ty
 
     onRetType (RetType dims t) = do
       ext <- get

@@ -541,6 +541,8 @@ returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Observe arg =
   Scalar $ Arrow (appres <> aliases arg) v pd t1 $ RetType dims t2
 returnType appres (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
+returnType appres (Scalar (Refinement ty e)) d arg =
+  Scalar $ Refinement (returnType appres ty d arg) e
 
 applyArg :: TypeAliases -> TypeAliases -> TypeAliases
 applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =

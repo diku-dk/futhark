@@ -158,7 +158,8 @@ arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
 arrayShape :: TypeBase dim as -> Shape dim
-arrayShape (Array _ ds _) = ds
+arrayShape (Array _ ds scal) = ds <> arrayShape (Scalar scal)
+arrayShape (Scalar (Refinement t _)) = arrayShape t
 arrayShape _ = mempty
 
 -- | Change the shape of a type to be just the rank.
@@ -212,6 +213,8 @@ traverseDims f = go mempty PosImmediate
             <> case p of
               Named p' -> S.insert p' bound
               Unnamed -> bound
+    go bound b t@(Scalar Refinement {}) =
+      bitraverse (f bound b) pure t
 
     onTypeArg _ bound b (TypeArgDim d) =
       TypeArgDim <$> f bound b d
@@ -246,6 +249,7 @@ diet (Scalar (Arrow {})) = Observe
 diet (Array d _ _) = d
 diet (Scalar (TypeVar d _ _)) = d
 diet (Scalar (Sum cs)) = foldl max Observe $ foldMap (map diet) cs
+diet (Scalar (Refinement t _)) = diet t
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
@@ -547,6 +551,7 @@ typeVars t =
     Scalar (Arrow _ _ _ t1 (RetType _ t2)) -> typeVars t1 <> typeVars t2
     Scalar (Record fields) -> foldMap typeVars fields
     Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeVars cs
+    Scalar (Refinement ty _) -> typeVars ty
     Array _ _ rt -> typeVars $ Scalar rt
   where
     typeArgFree (TypeArgType ta) = typeVars ta
@@ -562,6 +567,7 @@ orderZero (Scalar (Record fs)) = all orderZero $ M.elems fs
 orderZero (Scalar TypeVar {}) = True
 orderZero (Scalar Arrow {}) = False
 orderZero (Scalar (Sum cs)) = all (all orderZero) cs
+orderZero (Scalar (Refinement t _)) = orderZero t
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.

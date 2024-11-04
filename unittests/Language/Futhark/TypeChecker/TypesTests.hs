@@ -20,7 +20,7 @@ import Test.Tasty.HUnit
 evalTest :: TypeExp (ExpBase NoInfo Name) Name -> Either String ([VName], ResRetType) -> TestTree
 evalTest te expected =
   testCase (prettyString te) $
-    case (fmap (extract . fst) (run (checkTypeExp checkSizeExp =<< resolveTypeExp te)), expected) of
+    case (fmap (extract . fst) (run (checkTypeExp checkSizeExp checkPredExp =<< resolveTypeExp te)), expected) of
       (Left got_e, Left expected_e) ->
         let got_e_s = T.unpack $ docText $ prettyTypeError got_e
          in (expected_e `isInfixOf` got_e_s) @? got_e_s

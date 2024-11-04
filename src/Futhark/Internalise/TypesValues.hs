@@ -270,6 +270,8 @@ internaliseTypeM exts orig_t =
       error $ "internaliseTypeM: cannot handle type variable: " ++ prettyString orig_t
     E.Scalar E.Arrow {} ->
       error $ "internaliseTypeM: cannot handle function type: " ++ prettyString orig_t
+    E.Scalar E.Refinement {} ->
+      error $ "internaliseTypeM: cannot handle function type: " ++ prettyString orig_t
     E.Scalar (E.Sum cs) -> do
       (ts, _) <-
         internaliseConstructors

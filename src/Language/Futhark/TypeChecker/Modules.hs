@@ -154,6 +154,8 @@ newNamesForMTy orig_mty = do
           Sum $ (fmap . fmap) substituteInType ts
         substituteInScalarType (Arrow als v d1 t1 (RetType dims t2)) =
           Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
+        substituteInScalarType (Refinement t e) =
+          Refinement (substituteInType t) e
 
         substituteInType :: TypeBase Size u -> TypeBase Size u
         substituteInType (Scalar t) = Scalar $ substituteInScalarType t

@@ -273,6 +273,7 @@ arraySizes (Array _ shape t) =
     dimName :: Size -> S.Set VName
     dimName (Var qn _ _) = S.singleton $ qualLeaf qn
     dimName _ = mempty
+arraySizes (Scalar (Refinement t _)) = arraySizes t
 
 patternArraySizes :: Pat ParamType -> S.Set VName
 patternArraySizes = arraySizes . patternStructType
@@ -679,6 +680,7 @@ defuncExp (Constr name es (Info sum_t@(Scalar (Sum all_fs))) loc) = do
     defuncScalar (Sum fs) = Sum $ M.map (map defuncType) fs
     defuncScalar (Prim t) = Prim t
     defuncScalar (TypeVar u tn targs) = TypeVar u tn targs
+    defuncScalar (Refinement t e) = Refinement (defuncType t) e
 defuncExp (Constr name _ (Info t) loc) =
   error $
     "Constructor "

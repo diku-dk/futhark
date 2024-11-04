@@ -10,6 +10,7 @@ module Language.Futhark.TypeChecker.Terms
   ( checkOneExp,
     checkSizeExp,
     checkFunDef,
+    checkPredExp,
   )
 where
 
@@ -176,6 +177,7 @@ sliceShape r slice t@(Array u (Shape orig_dims) et) =
         $ AppRes i64 []
     i64 = Scalar $ Prim $ Signed Int64
     sizeBinOpInfo = Info $ foldFunType [i64, i64] $ RetType [] i64
+sliceShape r slice (Scalar (Refinement t _)) = sliceShape r slice t
 sliceShape _ _ t = pure (t, [])
 
 --- Main checkers
@@ -307,6 +309,8 @@ sizeFree tloc expKiller orig_t = do
         onTypeArg (TypeArgDim d) = TypeArgDim <$> replacing d
         onTypeArg (TypeArgType ty) = TypeArgType <$> onType ty
     onScalar (Prim pt) = pure $ Prim pt
+    onScalar (Refinement t e) =
+      Refinement <$> onType t <*> pure e
 
     onType ::
       TypeBase Size u ->
@@ -939,6 +943,7 @@ boundInsideType (Scalar (Arrow _ pn _ t1 (RetType dims t2))) =
     pn' = case pn of
       Unnamed -> mempty
       Named v -> S.singleton v
+boundInsideType (Scalar (Refinement t _)) = boundInsideType t
 
 -- Returns the sizes of the immediate type produced,
 -- the sizes of parameter types, and the sizes of return types.
@@ -1065,6 +1070,11 @@ checkSizeExp e = runTermTypeM checkExp $ do
       "Size expression with binding is forbidden."
   unify (mkUsage e' "Size expression") t (Scalar (Prim (Signed Int64)))
   normTypeFully e'
+
+-- | Type-check a single predicate expression in isolation.  This expression may
+-- turn out to be polymorphic, in which case it is unified with t -> bool.
+checkPredExp :: TypeBase Size NoUniqueness -> ExpBase NoInfo VName -> TypeM Exp
+checkPredExp _ty _e = undefined
 
 -- Verify that all sum type constructors and empty array literals have
 -- a size that is known (rigid or a type parameter).  This is to
@@ -1553,6 +1563,8 @@ injectExt ext ret = RetType ext_here $ deeper ret
       Scalar $ Arrow als p d1 t1 $ injectExt (nubOrd (ext_there <> t2_ext)) t2
     deeper (Scalar (TypeVar u tn targs)) =
       Scalar $ TypeVar u tn $ map deeperArg targs
+    deeper (Scalar (Refinement t e)) =
+      Scalar $ Refinement (deeper t) e
     deeper t@Array {} = t
 
     deeperArg (TypeArgType t) = TypeArgType $ deeper t

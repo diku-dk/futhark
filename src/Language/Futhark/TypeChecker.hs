@@ -214,7 +214,7 @@ checkTypeDecl ::
   UncheckedTypeExp ->
   TypeM ([VName], TypeExp Exp VName, StructType, Liftedness)
 checkTypeDecl te = do
-  (te', svars, RetType dims st, l) <- checkTypeExp checkSizeExp =<< resolveTypeExp te
+  (te', svars, RetType dims st, l) <- checkTypeExp checkSizeExp checkPredExp =<< resolveTypeExp te
   pure (svars ++ dims, te', toStruct st, l)
 
 -- In this function, after the recursion, we add the Env of the
@@ -560,7 +560,7 @@ checkTypeBind ::
 checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
   resolveTypeParams tps $ \tps' -> do
     (te', svars, RetType dims t, l') <-
-      bindingTypeParams tps' $ checkTypeExp checkSizeExp =<< resolveTypeExp te
+      bindingTypeParams tps' $ checkTypeExp checkSizeExp checkPredExp =<< resolveTypeExp te
 
     let (witnessed, _) = determineSizeWitnesses $ toStruct t
     case L.find (`S.notMember` witnessed) svars of

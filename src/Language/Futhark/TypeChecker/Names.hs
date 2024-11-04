@@ -79,6 +79,7 @@ checkForDuplicateNamesInType = check mempty
     check _ TEArray {} = pure ()
     check _ TEVar {} = pure ()
     check seen (TEParens te _) = check seen te
+    check seen (TERefine te _ _) = check seen te
 
 -- | Check for duplication of names inside a binding group.
 checkForDuplicateNames ::
@@ -177,6 +178,8 @@ resolveTypeExp orig = checkForDuplicateNamesInType orig >> f orig
         TEDim vs' <$> f te <*> pure loc
     f (TEArray size te loc) =
       TEArray <$> resolveSizeExp size <*> f te <*> pure loc
+    f (TERefine te e loc) =
+      TERefine <$> f te <*> resolveExp e <*> pure loc
 
 -- | Resolve names in a single expression.
 resolveExp :: ExpBase NoInfo Name -> TypeM (ExpBase NoInfo VName)

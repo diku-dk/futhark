@@ -576,11 +576,21 @@ checkExpForSize e = do
   unify (mkUsage (locOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
   updateTypes e'
 
+checkExpForPred :: TypeBase Size NoUniqueness -> ExpBase NoInfo VName -> TermTypeM Exp
+checkExpForPred ty e = do
+  checker <- asks termChecker
+  e' <- checker e
+  let t = toStruct $ typeOf e'
+  let p = Arrow mempty Unnamed Observe ty (RetType [] $ Scalar $ Prim Bool)
+  -- XXX NoUniqueness?
+  unify (mkUsage (locOf e') "Refinement predicate expression") t (Scalar p)
+  updateTypes e'
+
 checkTypeExpNonrigid ::
   TypeExp (ExpBase NoInfo VName) VName ->
   TermTypeM (TypeExp Exp VName, ResType, [VName])
 checkTypeExpNonrigid te = do
-  (te', svars, rettype, _l) <- checkTypeExp checkExpForSize te
+  (te', svars, rettype, _l) <- checkTypeExp checkExpForSize checkExpForPred te
 
   -- No guarantee that the locally bound sizes in rettype are globally
   -- unique, but we want to turn them into size variables, so let's

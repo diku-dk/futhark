@@ -310,6 +310,7 @@ data ScalarTypeBase dim u
   | -- | The aliasing corresponds to the lexical
     -- closure of the function.
     Arrow u PName Diet (TypeBase dim NoUniqueness) (RetTypeBase dim Uniqueness)
+  | Refinement (TypeBase dim u) (ExpBase Info VName)
   deriving (Eq, Ord, Show)
 
 instance Bitraversable ScalarTypeBase where
@@ -320,6 +321,9 @@ instance Bitraversable ScalarTypeBase where
   bitraverse f g (Arrow u v d t1 t2) =
     Arrow <$> g u <*> pure v <*> pure d <*> bitraverse f pure t1 <*> bitraverse f pure t2
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
+  bitraverse f g (Refinement t predicate) =
+    Refinement <$> bitraverse f g t <*> pure predicate
+
 
 instance Functor (ScalarTypeBase dim) where
   fmap = fmapDefault
@@ -470,6 +474,7 @@ data TypeExp d vn
   | TEArrow (Maybe vn) (TypeExp d vn) (TypeExp d vn) SrcLoc
   | TESum [(Name, [TypeExp d vn])] SrcLoc
   | TEDim [vn] (TypeExp d vn) SrcLoc
+  | TERefine (TypeExp d vn) d SrcLoc -- d is ExpBase Info VName
   deriving (Eq, Ord, Show)
 
 instance Bitraversable TypeExp where
@@ -493,6 +498,8 @@ instance Bitraversable TypeExp where
     TEArrow <$> traverse g pn <*> bitraverse f g te1 <*> bitraverse f g te2 <*> pure loc
   bitraverse f g (TEDim dims te loc) =
     TEDim <$> traverse g dims <*> bitraverse f g te <*> pure loc
+  bitraverse f g (TERefine te d loc) =
+    TERefine <$> bitraverse f g te <*> f d <*> pure loc
 
 instance Functor (TypeExp d) where
   fmap = fmapDefault
@@ -520,6 +527,7 @@ instance Located (TypeExp f vn) where
   locOf (TEArrow _ _ _ loc) = locOf loc
   locOf (TESum _ loc) = locOf loc
   locOf (TEDim _ _ loc) = locOf loc
+  locOf (TERefine _ _ loc) = locOf loc
 
 -- | Information about which parts of a parameter are consumed.  This
 -- can be considered kind of an effect on the function.

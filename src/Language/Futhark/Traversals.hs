@@ -255,6 +255,8 @@ instance ASTMappable (TypeExp (ExpBase Info VName) VName) where
     TESum <$> traverse (traverse $ astMap tv) cs <*> pure loc
   astMap tv (TEDim dims t loc) =
     TEDim dims <$> astMap tv t <*> pure loc
+  astMap tv (TERefine t e loc) =
+    TERefine <$> astMap tv t <*> astMap tv e <*> pure loc
 
 instance ASTMappable (TypeArgExp (ExpBase Info VName) VName) where
   astMap tv (TypeArgExpSize dim) = TypeArgExpSize <$> astMap tv dim
@@ -299,6 +301,8 @@ traverseScalarType f g h (Arrow als v u t1 (RetType dims t2)) =
     <*> (RetType dims <$> traverseType f g pure t2)
 traverseScalarType f g h (Sum cs) =
   Sum <$> (traverse . traverse) (traverseType f g h) cs
+traverseScalarType f g h (Refinement t e) =
+  Refinement <$> traverseType f g h t <*> pure e
 
 traverseType :: (Applicative f) => TypeTraverser f TypeBase dim1 als1 dims als2
 traverseType f g h (Array als shape et) =
@@ -454,6 +458,7 @@ bareTypeExp (TEApply ty ta loc) = TEApply (bareTypeExp ty) (bareTypeArgExp ta) l
 bareTypeExp (TEArrow arg tya tyr loc) = TEArrow arg (bareTypeExp tya) (bareTypeExp tyr) loc
 bareTypeExp (TESum cs loc) = TESum (map (second $ map bareTypeExp) cs) loc
 bareTypeExp (TEDim names ty loc) = TEDim names (bareTypeExp ty) loc
+bareTypeExp (TERefine t p loc) = TERefine (bareTypeExp t) (bareExp p) loc
 
 -- | Remove all annotations from an expression, but retain the
 -- name/scope information.

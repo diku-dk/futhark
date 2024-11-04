@@ -2230,6 +2230,8 @@ typeExpForError (E.Scalar (E.Sum cs)) = do
       ts' <- mapM typeExpForError ts
       pure $ ErrorString ("#" <> prettyText c <> " ") : intercalate [" "] ts'
 typeExpForError (E.Scalar Arrow {}) = pure ["#<fun>"]
+typeExpForError (E.Scalar Refinement {}) =
+  error "typeExpForError not implemented for Refinement"
 
 -- A smart constructor that compacts neighbouring literals for easier
 -- reading in the IR.

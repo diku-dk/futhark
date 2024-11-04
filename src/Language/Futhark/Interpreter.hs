@@ -649,6 +649,7 @@ expandType env (Scalar (TypeVar u tn args)) =
     expandArg (TypeArgDim s) = TypeArgDim s
     expandArg (TypeArgType t) = TypeArgType $ expandType env t
 expandType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (expandType env) cs
+expandType _ (Scalar Refinement {}) = error "expandType not implemented for Refinement"
 
 evalWithExts :: Env -> EvalM Eval
 evalWithExts env = do
