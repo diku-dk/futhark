@@ -178,7 +178,7 @@ instance (IsName vn, Pretty d) => Pretty (TypeExp d vn) where
   pretty (TETuple ts _) = parens $ commasep $ map pretty ts
   pretty (TERecord fs _) = braces $ commasep $ map ppField fs
     where
-      ppField (name, t) = pretty (nameToString name) <> colon <+> pretty t
+      ppField (L _ name, t) = prettyName name <> colon <+> pretty t
   pretty (TEVar name _) = pretty name
   pretty (TEParens te _) = parens $ pretty te
   pretty (TEApply t arg _) = pretty t <+> pretty arg
@@ -382,7 +382,7 @@ prettyExp _ (StringLit s _) =
   pretty $ show $ map (chr . fromIntegral) s
 prettyExp _ (Project k e _ _) = pretty e <> "." <> pretty k
 prettyExp _ (Negate e _) = "-" <> pretty e
-prettyExp _ (Not e _) = "-" <> pretty e
+prettyExp _ (Not e _) = "!" <> pretty e
 prettyExp _ (Update src idxs ve _) =
   pretty src
     <+> "with"
@@ -442,11 +442,15 @@ instance (IsName vn) => Pretty (AttrInfo vn) where
   pretty (AttrComp f attrs _) = pretty f <> parens (commasep $ map pretty attrs)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (FieldBase f vn) where
-  pretty (RecordFieldExplicit name e _) = pretty name <> equals <> pretty e
-  pretty (RecordFieldImplicit name _ _) = prettyName name
+  pretty (RecordFieldExplicit (L _ name) e _) = pretty name <> equals <> pretty e
+  pretty (RecordFieldImplicit (L _ name) _ _) = prettyName name
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (CaseBase f vn) where
   pretty (CasePat p e _) = "case" <+> pretty p <+> "->" </> indent 2 (pretty e)
+
+instance (Eq vn, IsName vn, Annot f) => Pretty (LoopInitBase f vn) where
+  pretty (LoopInitImplicit e) = maybe "_" pretty $ unAnnot e
+  pretty (LoopInitExplicit e) = pretty e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (LoopFormBase f vn) where
   pretty (For i ubound) =
@@ -470,7 +474,7 @@ instance (Eq vn, IsName vn, Annot f, Pretty t) => Pretty (PatBase f vn t) where
   pretty (TuplePat pats _) = parens $ commasep $ map pretty pats
   pretty (RecordPat fs _) = braces $ commasep $ map ppField fs
     where
-      ppField (name, t) = pretty (nameToString name) <> equals <> pretty t
+      ppField (L _ name, t) = prettyName name <> equals <> pretty t
   pretty (Wildcard t _) = case unAnnot t of
     Just t' -> parens $ "_" <> colon <+> pretty t'
     Nothing -> "_"

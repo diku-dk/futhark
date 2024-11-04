@@ -63,6 +63,7 @@ module Language.Futhark.Syntax
     ExpBase (..),
     FieldBase (..),
     CaseBase (..),
+    LoopInitBase (..),
     LoopFormBase (..),
     PatLit (..),
     PatBase (..),
@@ -91,6 +92,7 @@ module Language.Futhark.Syntax
     DecBase (..),
 
     -- * Miscellaneous
+    L (..),
     NoInfo (..),
     Info (..),
     QualName (..),
@@ -98,6 +100,7 @@ module Language.Futhark.Syntax
     mkApplyUT,
     sizeFromName,
     sizeFromInteger,
+    loopInitExp,
   )
 where
 
@@ -487,7 +490,7 @@ data TypeExp d vn
   = TEVar (QualName vn) SrcLoc
   | TEParens (TypeExp d vn) SrcLoc
   | TETuple [TypeExp d vn] SrcLoc
-  | TERecord [(Name, TypeExp d vn)] SrcLoc
+  | TERecord [(L Name, TypeExp d vn)] SrcLoc
   | TEArray (SizeExp d) (TypeExp d vn) SrcLoc
   | TEUnique (TypeExp d vn) SrcLoc
   | TEApply (TypeExp d vn) (TypeArgExp d vn) SrcLoc
@@ -748,8 +751,8 @@ data AppExpBase f vn
   | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
   | Loop
       [VName] -- Size parameters.
-      (PatBase f vn ParamType) -- Merge variable pattern.
-      (ExpBase f vn) -- Initial values of merge variables.
+      (PatBase f vn ParamType) -- Loop parameter pattern.
+      (LoopInitBase f vn) -- Possibly initial value.
       (LoopFormBase f vn) -- Do or while loop.
       (ExpBase f vn) -- Loop body.
       SrcLoc
@@ -834,9 +837,9 @@ data ExpBase f vn
     ArrayLit [ExpBase f vn] (f StructType) SrcLoc
   | -- | Array value constants, where the elements are known to be
     -- constant primitives. This is a fast-path variant of 'ArrayLit'
-    -- that will never be constructed by the parser, but may result
-    -- from normalisation later on. Has exactly the same semantics as
-    -- an 'ArrayLit'.
+    -- that will in some cases be constructed by the parser, and also
+    -- result from normalisation later on. Has exactly the same
+    -- semantics as an 'ArrayLit'.
     ArrayVal [PrimValue] PrimType SrcLoc
   | -- | An attribute applied to the following expression.
     Attr (AttrInfo vn) (ExpBase f vn) SrcLoc
@@ -932,8 +935,8 @@ instance Located (ExpBase f vn) where
 
 -- | An entry in a record literal.
 data FieldBase f vn
-  = RecordFieldExplicit Name (ExpBase f vn) SrcLoc
-  | RecordFieldImplicit vn (f StructType) SrcLoc
+  = RecordFieldExplicit (L Name) (ExpBase f vn) SrcLoc
+  | RecordFieldImplicit (L vn) (f StructType) SrcLoc
 
 deriving instance Show (FieldBase Info VName)
 
@@ -969,6 +972,28 @@ deriving instance Ord (CaseBase Info VName)
 instance Located (CaseBase f vn) where
   locOf (CasePat _ _ loc) = locOf loc
 
+-- | Initial value for the loop. If none is provided, then an
+-- expression will be synthesised based on the parameter.
+data LoopInitBase f vn
+  = LoopInitExplicit (ExpBase f vn)
+  | LoopInitImplicit (f (ExpBase f vn))
+
+deriving instance Show (LoopInitBase Info VName)
+
+deriving instance (Show vn) => Show (LoopInitBase NoInfo vn)
+
+deriving instance Eq (LoopInitBase NoInfo VName)
+
+deriving instance Eq (LoopInitBase Info VName)
+
+deriving instance Ord (LoopInitBase NoInfo VName)
+
+deriving instance Ord (LoopInitBase Info VName)
+
+instance Located (LoopInitBase Info vn) where
+  locOf (LoopInitExplicit e) = locOf e
+  locOf (LoopInitImplicit (Info e)) = locOf e
+
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn
   = For (IdentBase f vn StructType) (ExpBase f vn)
@@ -998,7 +1023,7 @@ data PatLit
 -- parameters, @let@ expressions, etc).
 data PatBase f vn t
   = TuplePat [PatBase f vn t] SrcLoc
-  | RecordPat [(Name, PatBase f vn t)] SrcLoc
+  | RecordPat [(L Name, PatBase f vn t)] SrcLoc
   | PatParens (PatBase f vn t) SrcLoc
   | Id vn (f t) SrcLoc
   | Wildcard (f t) SrcLoc -- Nothing, i.e. underscore.
@@ -1377,6 +1402,10 @@ mkApplyUT (AppExp (Apply f args loc) _) x =
   AppExp (Apply f (args <> NE.singleton (NoInfo, x)) (srcspan loc x)) NoInfo
 mkApplyUT f x =
   AppExp (Apply f (NE.singleton (NoInfo, x)) (srcspan f x)) NoInfo
+
+loopInitExp :: LoopInitBase Info VName -> ExpBase Info VName
+loopInitExp (LoopInitExplicit e) = e
+loopInitExp (LoopInitImplicit (Info e)) = e
 
 --- Some prettyprinting definitions are here because we need them in
 --- the Attributes module.

@@ -175,8 +175,8 @@ getOrdering _ (RecordLit fs loc) = do
     f (RecordFieldExplicit n e floc) = do
       e' <- getOrdering False e
       pure $ RecordFieldExplicit n e' floc
-    f (RecordFieldImplicit v t _) =
-      f $ RecordFieldExplicit (baseName v) (Var (qualName v) t loc) loc
+    f (RecordFieldImplicit (L vloc v) t _) =
+      f $ RecordFieldExplicit (L vloc (baseName v)) (Var (qualName v) t loc) loc
 getOrdering _ (ArrayVal vs t loc) =
   pure $ ArrayVal vs t loc
 getOrdering _ (ArrayLit es ty loc)
@@ -305,13 +305,13 @@ getOrdering final (AppExp (If cond et ef loc) resT) = do
   ef' <- transformBody ef
   nameExp final $ AppExp (If cond' et' ef' loc) resT
 getOrdering final (AppExp (Loop sizes pat einit form body loc) resT) = do
-  einit' <- getOrdering False einit
+  einit' <- getOrdering False $ loopInitExp einit
   form' <- case form of
     For ident e -> For ident <$> getOrdering True e
     ForIn fpat e -> ForIn fpat <$> getOrdering True e
     While e -> While <$> transformBody e
   body' <- transformBody body
-  nameExp final $ AppExp (Loop sizes pat einit' form' body' loc) resT
+  nameExp final $ AppExp (Loop sizes pat (LoopInitExplicit einit') form' body' loc) resT
 getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (elp, _)) (er, Info (erp, _)) loc) (Info resT)) = do
   -- Rewrite short-circuiting boolean operators on scalars to explicit
   -- if-then-else. Automapped cases are turned into applications of

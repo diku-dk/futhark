@@ -379,8 +379,8 @@ internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
   error $ "Unexpected LetFun " ++ prettyString ofname
-internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = do
-  ses <- internaliseExp "loop_init" mergeexp
+internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody loc) = do
+  ses <- internaliseExp "loop_init" $ loopInitExp loopinit
   ((loopbody', (form', shapepat, mergepat', mergeinit')), initstms) <-
     collectStms $ handleForm ses form
 
@@ -613,12 +613,12 @@ internaliseExp desc (E.TupLit es _) = concat <$> mapM (internaliseExp desc) es
 internaliseExp desc (E.RecordLit orig_fields _) =
   concatMap snd . sortFields . M.unions <$> mapM internaliseField orig_fields
   where
-    internaliseField (E.RecordFieldExplicit name e _) =
+    internaliseField (E.RecordFieldExplicit (L _ name) e _) =
       M.singleton name <$> internaliseExp desc e
-    internaliseField (E.RecordFieldImplicit name t loc) =
+    internaliseField (E.RecordFieldImplicit (L _ name) t loc) =
       internaliseField $
         E.RecordFieldExplicit
-          (baseName name)
+          (L noLoc (baseName name))
           (E.Var (E.qualName name) t loc)
           loc
 internaliseExp desc (E.ArrayVal vs t _) =
@@ -937,7 +937,7 @@ generateCond orig_p orig_ses = do
     compares (E.TuplePat pats _) ses =
       comparesMany pats ses
     compares (E.RecordPat fs _) ses =
-      comparesMany (map snd $ E.sortFields $ M.fromList fs) ses
+      comparesMany (map snd $ E.sortFields $ M.fromList $ map (first unLoc) fs) ses
     compares (E.PatAscription pat _ _) ses =
       compares pat ses
     compares pat [] =
@@ -2036,21 +2036,18 @@ funcall desc (QualName _ fname) args loc = do
   argts' <- mapM subExpType args'
   case rettype_fun $ zip args' argts' of
     Nothing ->
-      error $
-        concat
-          [ "Cannot apply ",
-            prettyString fname,
-            " to ",
-            show (length args'),
-            " arguments\n ",
-            prettyString args',
-            "\nof types\n ",
-            prettyString argts',
-            "\nFunction has ",
-            show (length fun_params),
-            " parameters\n ",
-            prettyString fun_params
-          ]
+      error . unlines $
+        [ "Cannot apply "
+            <> prettyString fname
+            <> " to "
+            <> show (length args')
+            <> " arguments",
+          " " <> prettyString args',
+          "of types",
+          " " <> prettyString argts',
+          "Function has " <> show (length fun_params) <> " parameters",
+          " " <> prettyString fun_params
+        ]
     Just ts -> do
       safety <- askSafety
       attrs <- asks envAttrs

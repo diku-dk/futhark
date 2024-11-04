@@ -102,11 +102,11 @@ wellTypedLoopArg src sparams pat arg = do
 
 -- | An un-checked loop.
 type UncheckedLoop =
-  (Pat ParamType, Exp, LoopFormBase Info VName, Exp)
+  (Pat ParamType, LoopInitBase Info VName, LoopFormBase Info VName, Exp)
 
 -- | A loop that has been type-checked.
 type CheckedLoop =
-  ([VName], Pat ParamType, Exp, LoopFormBase Info VName, Exp)
+  ([VName], Pat ParamType, LoopInitBase Info VName, LoopFormBase Info VName, Exp)
 
 checkForImpossible :: Loc -> S.Set VName -> ParamType -> TermTypeM ()
 checkForImpossible loc known_before pat_t = do
@@ -133,10 +133,10 @@ checkLoop ::
   UncheckedLoop ->
   SrcLoc ->
   TermTypeM (CheckedLoop, AppRes)
-checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
-  mergeexp' <- checkExp mergeexp
+checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
+  loopinit' <- checkExp $ loopInitExp loopinit
   known_before <- M.keysSet <$> getConstraints
-  mustBeOrderZero (locOf mergeexp) =<< expTypeFully mergeexp'
+  mustBeOrderZero (locOf loopinit') =<< expTypeFully loopinit'
 
   -- The handling of dimension sizes is a bit intricate, but very
   -- similar to checking a function, followed by checking a call to
@@ -162,7 +162,7 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
   (merge_t, new_dims_map) <-
     -- dim handling (1)
     allDimsFreshInType (mkUsage loc "loop parameter type inference") Nonrigid "loop_d"
-      =<< expTypeFully mergeexp'
+      =<< expTypeFully loopinit'
   let new_dims_to_initial_dim = M.toList new_dims_map
       new_dims = map fst new_dims_to_initial_dim
 
@@ -286,7 +286,7 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
               )
 
   -- dim handling (4)
-  wellTypedLoopArg Initial sparams mergepat' mergeexp'
+  wellTypedLoopArg Initial sparams mergepat' loopinit'
 
   (loopt, retext) <-
     freshDimsInType
@@ -296,6 +296,6 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
       sparams
       (patternType mergepat')
   pure
-    ( (sparams, mergepat', mergeexp', form', loopbody'),
+    ( (sparams, mergepat', LoopInitExplicit loopinit', form', loopbody'),
       AppRes (toStruct loopt) retext
     )

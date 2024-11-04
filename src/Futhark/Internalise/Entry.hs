@@ -8,6 +8,7 @@ where
 
 import Control.Monad
 import Control.Monad.State.Strict
+import Data.Bifunctor (first)
 import Data.List (find, intersperse)
 import Data.Map qualified as M
 import Futhark.IR qualified as I
@@ -15,7 +16,7 @@ import Futhark.Internalise.TypesValues (internaliseSumTypeRep, internalisedTypeS
 import Futhark.Util (chunks)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.Futhark qualified as E hiding (TypeArg)
-import Language.Futhark.Core (Name, Uniqueness (..), VName, nameFromText)
+import Language.Futhark.Core (L (..), Name, Uniqueness (..), VName, nameFromText, unLoc)
 import Language.Futhark.Semantic qualified as E
 
 -- | The types that are visible to the outside world.
@@ -66,7 +67,7 @@ typeExpOpaqueName = nameFromText . f
     g (E.TERecord tes _) =
       "{" <> mconcat (intersperse ", " (map onField tes)) <> "}"
       where
-        onField (k, te) = E.nameToText k <> ":" <> f te
+        onField (L _ k, te) = E.nameToText k <> ":" <> f te
     g (E.TESum cs _) =
       mconcat (intersperse " | " (map onConstr cs))
       where
@@ -96,7 +97,7 @@ isRecord ::
   VisibleTypes ->
   E.TypeExp E.Exp VName ->
   Maybe (M.Map Name (E.TypeExp E.Exp VName))
-isRecord _ (E.TERecord fs _) = Just $ M.fromList fs
+isRecord _ (E.TERecord fs _) = Just $ M.fromList $ map (first unLoc) fs
 isRecord _ (E.TETuple fs _) = Just $ E.tupleFields fs
 isRecord types (E.TEVar v _) = isRecord types =<< findType (E.qualLeaf v) types
 isRecord _ _ = Nothing

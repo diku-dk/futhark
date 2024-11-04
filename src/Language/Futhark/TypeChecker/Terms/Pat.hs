@@ -12,9 +12,10 @@ where
 import Control.Monad
 import Data.Bifunctor
 import Data.Either
-import Data.List (find, isPrefixOf, sort)
+import Data.List (find, isPrefixOf, sortBy)
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Data.Ord (comparing)
 import Data.Set qualified as S
 import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
@@ -137,24 +138,24 @@ checkPat' sizes p@(TuplePat ps loc) (Ascribed t)
 checkPat' sizes (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (\p -> checkPat' sizes p NoneInferred) ps <*> pure loc
 checkPat' _ (RecordPat p_fs _) _
-  | Just (f, fp) <- find (("_" `isPrefixOf`) . nameToString . fst) p_fs =
-      typeError fp mempty $
+  | Just (L loc f, _) <- find (("_" `isPrefixOf`) . nameToString . unLoc . fst) p_fs =
+      typeError loc mempty $
         "Underscore-prefixed fields are not allowed."
           </> "Did you mean"
           <> dquotes (pretty (drop 1 (nameToString f)) <> "=_")
           <> "?"
 checkPat' sizes p@(RecordPat p_fs loc) (Ascribed t)
   | Scalar (Record t_fs) <- t,
-    sort (map fst p_fs) == sort (M.keys t_fs) =
-      RecordPat . M.toList <$> check t_fs <*> pure loc
+    p_fs' <- sortBy (comparing fst) p_fs,
+    t_fs' <- sortBy (comparing fst) (M.toList t_fs),
+    map fst t_fs' == map (unLoc . fst) p_fs' =
+      RecordPat <$> zipWithM check p_fs' t_fs' <*> pure loc
   | otherwise = do
-      p_fs' <- traverse (const $ newTypeVar loc "t") $ M.fromList p_fs
+      p_fs' <- traverse (const $ newTypeVar loc "t") $ M.fromList $ map (first unLoc) p_fs
       unify (mkUsage loc "matching a record pattern") (Scalar (Record p_fs')) (toStruct t)
       checkPat' sizes p $ Ascribed $ toParam Observe $ Scalar (Record p_fs')
   where
-    check t_fs =
-      traverse (uncurry (checkPat' sizes)) $
-        M.intersectionWith (,) (M.fromList p_fs) (fmap Ascribed t_fs)
+    check (L f_loc f, p_f) (_, t_f) = (L f_loc f,) <$> checkPat' sizes p_f (Ascribed t_f)
 checkPat' sizes (RecordPat fs loc) NoneInferred =
   RecordPat . M.toList
     <$> traverse (\p -> checkPat' sizes p NoneInferred) (M.fromList fs)

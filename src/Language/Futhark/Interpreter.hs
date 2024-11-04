@@ -486,7 +486,7 @@ patternMatch env (TuplePat ps _) (ValueRecord vs) =
     zip ps (map snd $ sortFields vs)
 patternMatch env (RecordPat ps _) (ValueRecord vs) =
   foldM (\env' (p, v) -> patternMatch env' p v) env $
-    M.intersectionWith (,) (M.fromList ps) vs
+    M.intersectionWith (,) (M.fromList $ map (first unLoc) ps) vs
 patternMatch env (PatParens p _) v = patternMatch env p v
 patternMatch env (PatAscription p _ _) v =
   patternMatch env p v
@@ -929,8 +929,8 @@ evalAppExp env (LetWith dest src is v body loc) = do
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
     oob = bad loc env "Update out of bounds"
-evalAppExp env (Loop sparams pat init_e form body _) = do
-  init_v <- eval env init_e
+evalAppExp env (Loop sparams pat loopinit form body _) = do
+  init_v <- eval env $ loopInitExp loopinit
   case form of
     For iv bound -> do
       bound' <- asSigned <$> eval env bound
@@ -1006,10 +1006,10 @@ eval env (TupLit vs _) = toTuple <$> mapM (eval env) vs
 eval env (RecordLit fields _) =
   ValueRecord . M.fromList <$> mapM evalField fields
   where
-    evalField (RecordFieldExplicit k e _) = do
+    evalField (RecordFieldExplicit (L _ k) e _) = do
       v <- eval env e
       pure (k, v)
-    evalField (RecordFieldImplicit k t loc) = do
+    evalField (RecordFieldImplicit (L _ k) t loc) = do
       v <- eval env $ Var (qualName k) t loc
       pure (baseName k, v)
 eval _ (StringLit vs _) =

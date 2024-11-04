@@ -122,10 +122,10 @@ instance ASTMappable (AppExpBase Info VName) where
     where
       onArg (e, Info (ext, am)) =
         (,) <$> mapOnExp tv e <*> (Info . (ext,) <$> mapOnAutoMap tv am)
-  astMap tv (Loop sparams mergepat mergeexp form loopbody loc) =
+  astMap tv (Loop sparams mergepat loopinit form loopbody loc) =
     Loop sparams
       <$> astMap tv mergepat
-      <*> mapOnExp tv mergeexp
+      <*> astMap tv loopinit
       <*> astMap tv form
       <*> mapOnExp tv loopbody
       <*> pure loc
@@ -235,6 +235,12 @@ instance ASTMappable (ExpBase Info VName) where
     Attr attr <$> mapOnExp tv e <*> pure loc
   astMap tv (AppExp e res) =
     AppExp <$> astMap tv e <*> astMap tv res
+
+instance ASTMappable (LoopInitBase Info VName) where
+  astMap tv (LoopInitExplicit e) =
+    LoopInitExplicit <$> mapOnExp tv e
+  astMap tv (LoopInitImplicit (Info e)) =
+    LoopInitImplicit . Info <$> mapOnExp tv e
 
 instance ASTMappable (LoopFormBase Info VName) where
   astMap tv (For i bound) = For <$> astMap tv i <*> mapOnExp tv bound
@@ -374,9 +380,9 @@ instance ASTMappable (PatBase Info VName ParamType) where
 instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldExplicit name e loc) =
     RecordFieldExplicit name <$> mapOnExp tv e <*> pure loc
-  astMap tv (RecordFieldImplicit name t loc) =
+  astMap tv (RecordFieldImplicit (L nameloc name) t loc) =
     RecordFieldImplicit
-      <$> (qualLeaf <$> mapOnName tv (QualName [] name))
+      <$> (L nameloc <$> (qualLeaf <$> mapOnName tv (QualName [] name)))
       <*> traverse (mapOnStructType tv) t
       <*> pure loc
 
@@ -428,6 +434,10 @@ bareDimIndex (DimFix e) =
   DimFix $ bareExp e
 bareDimIndex (DimSlice x y z) =
   DimSlice (bareExp <$> x) (bareExp <$> y) (bareExp <$> z)
+
+bareLoopInit :: LoopInitBase Info VName -> LoopInitBase NoInfo VName
+bareLoopInit (LoopInitExplicit e) = LoopInitExplicit $ bareExp e
+bareLoopInit (LoopInitImplicit _) = LoopInitImplicit NoInfo
 
 bareLoopForm :: LoopFormBase Info VName -> LoopFormBase NoInfo VName
 bareLoopForm (For (Ident i _ loc) e) = For (Ident i NoInfo loc) (bareExp e)
@@ -503,11 +513,11 @@ bareExp (AppExp appexp _) =
       case appexp of
         Match e cases loc ->
           Match (bareExp e) (fmap bareCase cases) loc
-        Loop _ mergepat mergeexp form loopbody loc ->
+        Loop _ mergepat loopinit form loopbody loc ->
           Loop
             []
             (barePat mergepat)
-            (bareExp mergeexp)
+            (bareLoopInit loopinit)
             (bareLoopForm form)
             (bareExp loopbody)
             loc

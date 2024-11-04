@@ -450,14 +450,14 @@ defuncFun tparams pats e0 ret loc = do
   where
     closureFromDynamicFun (vn, Binding _ (DynamicFun (clsr_env, sv) _)) =
       let name = nameFromString $ prettyString vn
-       in ( RecordFieldExplicit name clsr_env mempty,
+       in ( RecordFieldExplicit (L noLoc name) clsr_env mempty,
             (vn, Binding Nothing sv)
           )
     closureFromDynamicFun (vn, Binding _ sv) =
       let name = nameFromString $ prettyString vn
           tp' = structTypeFromSV sv
        in ( RecordFieldExplicit
-              name
+              (L noLoc name)
               (Var (qualName vn) (Info tp') mempty)
               mempty,
             (vn, Binding Nothing sv)
@@ -489,8 +489,8 @@ defuncExp (RecordLit fs loc) = do
   where
     defuncField (RecordFieldExplicit vn e loc') = do
       (e', sv) <- defuncExp e
-      pure (RecordFieldExplicit vn e' loc', (vn, sv))
-    defuncField (RecordFieldImplicit vn (Info t) loc') = do
+      pure (RecordFieldExplicit vn e' loc', (unLoc vn, sv))
+    defuncField (RecordFieldImplicit (L _ vn) (Info t) loc') = do
       sv <- lookupVar (toStruct t) vn
       case sv of
         -- If the implicit field refers to a dynamic function, we
@@ -499,14 +499,17 @@ defuncExp (RecordLit fs loc) = do
         DynamicFun (e, sv') _ ->
           let vn' = baseName vn
            in pure
-                ( RecordFieldExplicit vn' e loc',
+                ( RecordFieldExplicit (L noLoc vn') e loc',
                   (vn', sv')
                 )
         -- The field may refer to a functional expression, so we get the
         -- type from the static value and not the one from the AST.
         _ ->
           let tp = Info $ structTypeFromSV sv
-           in pure (RecordFieldImplicit vn tp loc', (baseName vn, sv))
+           in pure
+                ( RecordFieldImplicit (L noLoc vn) tp loc',
+                  (baseName vn, sv)
+                )
 defuncExp e@(ArrayVal vs t loc) =
   pure (ArrayVal vs t loc, Dynamic $ toParam Observe $ typeOf e)
 defuncExp (ArrayLit es t@(Info t') loc) = do
@@ -585,8 +588,8 @@ defuncExp OpSectionLeft {} = error "defuncExp: unexpected operator section."
 defuncExp OpSectionRight {} = error "defuncExp: unexpected operator section."
 defuncExp ProjectSection {} = error "defuncExp: unexpected projection section."
 defuncExp IndexSection {} = error "defuncExp: unexpected projection section."
-defuncExp (AppExp (Loop sparams pat e1 form e3 loc) res) = do
-  (e1', sv1) <- defuncExp e1
+defuncExp (AppExp (Loop sparams pat loopinit form e3 loc) res) = do
+  (e1', sv1) <- defuncExp $ loopInitExp loopinit
   let env1 = alwaysMatchPatSV pat sv1
   (form', env2) <- case form of
     For v e2 -> do
@@ -599,7 +602,7 @@ defuncExp (AppExp (Loop sparams pat e1 form e3 loc) res) = do
       e2' <- localEnv env1 $ defuncExp' e2
       pure (While e2', mempty)
   (e3', sv) <- localEnv (env1 <> env2) $ defuncExp e3
-  pure (AppExp (Loop sparams pat e1' form' e3' loc) res, sv)
+  pure (AppExp (Loop sparams pat (LoopInitExplicit e1') form' e3' loc) res, sv)
   where
     envFromIdent (Ident vn (Info tp) _) =
       M.singleton vn $ Binding Nothing $ Dynamic $ toParam Observe tp
@@ -1065,7 +1068,7 @@ buildEnvPat :: [VName] -> Env -> Pat ParamType
 buildEnvPat sizes env = RecordPat (map buildField $ M.toList env) mempty
   where
     buildField (vn, Binding _ sv) =
-      ( nameFromString (prettyString vn),
+      ( L noLoc $ nameFromText (prettyText vn),
         if vn `elem` sizes
           then Wildcard (Info $ paramTypeFromSV sv) mempty
           else Id vn (Info $ paramTypeFromSV sv) mempty
@@ -1119,7 +1122,7 @@ matchPatSV :: Pat ParamType -> StaticVal -> Maybe Env
 matchPatSV (TuplePat ps _) (RecordSV ls) =
   mconcat <$> zipWithM (\p (_, sv) -> matchPatSV p sv) ps ls
 matchPatSV (RecordPat ps _) (RecordSV ls)
-  | ps' <- sortOn fst ps,
+  | ps' <- sortOn fst $ map (first unLoc) ps,
     ls' <- sortOn fst ls,
     map fst ps' == map fst ls' =
       mconcat <$> zipWithM (\(_, p) (_, sv) -> matchPatSV p sv) ps' ls'

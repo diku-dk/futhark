@@ -56,6 +56,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Loc (Loc (NoLoc))
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Ord (comparing)
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.FreshNames qualified as FreshNames
@@ -518,8 +519,8 @@ checkPat' (TuplePat ps loc) (Ascribed t)
 checkPat' (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (`checkPat'` NoneInferred) ps <*> pure loc
 checkPat' p@(RecordPat p_fs loc) _
-  | Just (f, fp) <- L.find (("_" `T.isPrefixOf`) . nameToText . fst) p_fs =
-      typeError fp mempty $
+  | Just (L floc f, _) <- L.find (("_" `T.isPrefixOf`) . nameToText . unLoc . fst) p_fs =
+      typeError floc mempty $
         "Underscore-prefixed fields are not allowed."
           </> "Did you mean"
           <> dquotes (pretty (T.drop 1 (nameToText f)) <> "=_")
@@ -529,18 +530,20 @@ checkPat' p@(RecordPat p_fs loc) _
         "Duplicate fields in record pattern" <+> pretty p <> "."
 checkPat' p@(RecordPat p_fs loc) (Ascribed t)
   | Scalar (Record t_fs) <- t,
-    L.sort (map fst p_fs) == L.sort (M.keys t_fs) =
-      RecordPat . M.toList <$> check t_fs <*> pure loc
+    p_fs' <- L.sortBy (comparing fst) p_fs,
+    t_fs' <- L.sortBy (comparing fst) (M.toList t_fs),
+    map fst t_fs' == map (unLoc . fst) p_fs' =
+      RecordPat <$> zipWithM check p_fs' t_fs' <*> pure loc
   | otherwise = do
       p_fs' <-
         traverse (const $ newType loc Lifted "t" NoUniqueness) $
-          M.fromList p_fs
+          M.fromList $
+            map (first unLoc) p_fs
       ctEq (Reason (locOf loc)) (Scalar (Record p_fs')) t
       checkPat' p $ Ascribed $ Observe <$ Scalar (Record p_fs')
   where
-    check t_fs =
-      traverse (uncurry checkPat') $
-        M.intersectionWith (,) (M.fromList p_fs) (fmap Ascribed t_fs)
+    check (L f_loc f, p_f) (_, t_f) =
+      (L f_loc f,) <$> checkPat' p_f (Ascribed t_f)
 checkPat' (RecordPat fs loc) NoneInferred =
   RecordPat . M.toList
     <$> traverse (`checkPat'` NoneInferred) (M.fromList fs)
@@ -836,7 +839,7 @@ instance Pretty (Unmatched (Pat StructType)) where
       pretty' (TuplePat pats _) = parens $ commasep $ map pretty' pats
       pretty' (RecordPat fs _) = braces $ commasep $ map ppField fs
         where
-          ppField (name, t) = pretty (nameToString name) <> equals <> pretty' t
+          ppField (name, t) = prettyName (unLoc name) <> equals <> pretty' t
       pretty' Wildcard {} = "_"
       pretty' (PatLit e _ _) = pretty e
       pretty' (PatConstr n _ ps _) = "#" <> pretty n <+> sep (map pretty' ps)
@@ -915,13 +918,13 @@ checkExp (RecordLit fs loc) =
   RecordLit <$> evalStateT (mapM checkField fs) mempty <*> pure loc
   where
     checkField (RecordFieldExplicit f e rloc) = do
-      errIfAlreadySet f rloc
-      modify $ M.insert f rloc
+      errIfAlreadySet (unLoc f) rloc
+      modify $ M.insert (unLoc f) rloc
       RecordFieldExplicit f <$> lift (checkExp e) <*> pure rloc
     checkField (RecordFieldImplicit name NoInfo rloc) = do
-      errIfAlreadySet (baseName name) rloc
-      t <- lift $ asStructType =<< lookupVar rloc (qualName name)
-      modify $ M.insert (baseName name) rloc
+      errIfAlreadySet (baseName (unLoc name)) rloc
+      t <- lift $ asStructType =<< lookupVar rloc (qualName (unLoc name))
+      modify $ M.insert (baseName (unLoc name)) rloc
       pure $ RecordFieldImplicit name (Info t) rloc
 
     errIfAlreadySet f rloc = do
@@ -1221,7 +1224,11 @@ checkExp (AppExp (Match e cs loc) _) = do
   pure $ AppExp (Match e' cs' loc) (Info $ AppRes match_t' [])
 --
 checkExp (AppExp (Loop _ pat arg form body loc) _) = do
-  arg' <- checkExp arg
+  arg' <- checkExp $ case arg of
+    LoopInitExplicit e -> e
+    LoopInitImplicit _ ->
+      -- Should have been filled out in Names
+      error "Unspected LoopInitImplicit"
   arg_t <- expType arg'
   bindLetPat pat arg_t $ \pat' -> do
     (form', body') <-
@@ -1251,7 +1258,7 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
     ctEq (Reason (locOf loc)) arg_t body_t
     pure $
       AppExp
-        (Loop [] pat' arg' form' body' loc)
+        (Loop [] pat' (LoopInitExplicit arg') form' body' loc)
         (Info (AppRes (patternStructType pat') []))
 --
 checkExp (Ascript e te loc) = do

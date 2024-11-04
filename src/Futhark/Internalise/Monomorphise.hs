@@ -513,8 +513,8 @@ transformAppExp (Apply fe args _) res =
     <*> transformAppRes res
   where
     onArg (Info (ext, am), e) = (ext,am,) <$> transformExp e
-transformAppExp (Loop sparams pat e1 form body loc) res = do
-  e1' <- transformExp e1
+transformAppExp (Loop sparams pat loopinit form body loc) res = do
+  e1' <- transformExp $ loopInitExp loopinit
 
   let dimArgs = S.fromList sparams
   pat' <- withArgs dimArgs $ transformPat pat
@@ -540,7 +540,7 @@ transformAppExp (Loop sparams pat e1 form body loc) res = do
   -- sizes for them.
   (pat_sizes, pat'') <- sizesForPat pat'
   res' <- transformAppRes res
-  pure $ AppExp (Loop (sparams' ++ pat_sizes) pat'' e1' form' body' loc) (Info res')
+  pure $ AppExp (Loop (sparams' ++ pat_sizes) pat'' (LoopInitExplicit e1') form' body' loc) (Info res')
 transformAppExp (BinOp (fname, _) (Info t) (e1, Info (d1, _)) (e2, Info (d2, _)) loc) res = do
   (AppRes ret ext) <- transformAppRes res
   fname' <- transformFName loc fname (toStruct t)
@@ -633,11 +633,11 @@ transformExp (RecordLit fs loc) =
   where
     transformField (RecordFieldExplicit name e loc') =
       RecordFieldExplicit name <$> transformExp e <*> pure loc'
-    transformField (RecordFieldImplicit v t _) = do
+    transformField (RecordFieldImplicit (L vloc v) t _) = do
       t' <- traverse transformType t
       transformField $
         RecordFieldExplicit
-          (baseName v)
+          (L vloc (baseName v))
           (Var (qualName v) t' loc)
           loc
 transformExp (ArrayVal vs t loc) =

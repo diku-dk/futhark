@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark doc` now produces better (and stable) anchor IDs.
+
+* `futhark profile` now supports multiple JSON files.
+
+* `futhark fmt`, by William Due and Therese Lyngby.
+
 ### Removed
 
 ### Changed
@@ -17,6 +23,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Negation of floating-point positive zero now produces a negative
   zero.
+
+* Necessary inlining of functions used inside AD constructs.
+
+* A compile time regression for programs that used higher order
+  functions very aggressively.
 
 ## [0.25.23]
 

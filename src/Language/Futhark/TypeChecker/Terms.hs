@@ -367,7 +367,7 @@ checkExp (RecordLit fs loc) =
     checkField (RecordFieldExplicit f e rloc) =
       RecordFieldExplicit f <$> checkExp e <*> pure rloc
     checkField (RecordFieldImplicit name (Info t) rloc) = do
-      t' <- lookupVar rloc (qualName name) t
+      t' <- lookupVar rloc (qualName (unLoc name)) t
       pure $ RecordFieldImplicit name (Info t') rloc
 -- No need to type check this, as these are only produced by the
 -- parser if the elements are monomorphic and all match.
@@ -770,12 +770,12 @@ checkExp (IndexSection slice _ loc) = do
   (t', retext) <- sliceShape Nothing slice' t
   let ft = Scalar $ Arrow mempty Unnamed Observe t $ RetType retext $ toRes Nonunique t'
   pure $ IndexSection slice' (Info ft) loc
-checkExp (AppExp (Loop _ mergepat mergeexp form loopbody loc) _) = do
-  ((sparams, mergepat', mergeexp', form', loopbody'), appres) <-
-    checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc
+checkExp (AppExp (Loop _ mergepat loopinit form loopbody loc) _) = do
+  ((sparams, mergepat', loopinit', form', loopbody'), appres) <-
+    checkLoop checkExp (mergepat, loopinit, form, loopbody) loc
   pure $
     AppExp
-      (Loop sparams mergepat' mergeexp' form' loopbody' loc)
+      (Loop sparams mergepat' loopinit' form' loopbody' loc)
       (Info appres)
 checkExp (Constr name es (Info t) loc) = do
   t' <- replaceTyVars loc t
@@ -863,7 +863,7 @@ instance Pretty (Unmatched (Pat StructType)) where
       pretty' (TuplePat pats _) = parens $ commasep $ map pretty' pats
       pretty' (RecordPat fs _) = braces $ commasep $ map ppField fs
         where
-          ppField (name, t) = pretty (nameToString name) <> equals <> pretty' t
+          ppField (L _ name, t) = pretty (nameToString name) <> equals <> pretty' t
       pretty' Wildcard {} = "_"
       pretty' (PatLit e _ _) = pretty e
       pretty' (PatConstr n _ ps _) = "#" <> pretty n <+> sep (map pretty' ps)

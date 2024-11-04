@@ -260,8 +260,11 @@ resolveExp (RecordLit fs loc) =
   where
     resolveField (RecordFieldExplicit k e floc) =
       RecordFieldExplicit k <$> resolveExp e <*> pure floc
-    resolveField (RecordFieldImplicit vn NoInfo floc) =
-      RecordFieldImplicit <$> resolveName vn floc <*> pure NoInfo <*> pure floc
+    resolveField (RecordFieldImplicit (L vnloc vn) NoInfo floc) =
+      RecordFieldImplicit
+        <$> (L vnloc <$> resolveName vn floc)
+        <*> pure NoInfo
+        <*> pure floc
 resolveExp (Project k e NoInfo loc) =
   Project k <$> resolveExp e <*> pure NoInfo <*> pure loc
 resolveExp (Constr k es NoInfo loc) =
@@ -301,6 +304,21 @@ resolveExp (AppExp e NoInfo) =
 
 sizeBinderToParam :: SizeBinder Name -> UncheckedTypeParam
 sizeBinderToParam (SizeBinder v loc) = TypeParamDim v loc
+
+patternExp :: UncheckedPat t -> TypeM (ExpBase NoInfo VName)
+patternExp (Id v _ loc) =
+  Var <$> resolveQualName (qualName v) loc <*> pure NoInfo <*> pure loc
+patternExp (TuplePat pats loc) = TupLit <$> mapM patternExp pats <*> pure loc
+patternExp (Wildcard _ loc) = typeError loc mempty "Cannot have wildcard here."
+patternExp (PatLit _ _ loc) = typeError loc mempty "Cannot have literal here."
+patternExp (PatConstr _ _ _ loc) = typeError loc mempty "Cannot have constructor here."
+patternExp (PatAttr _ p _) = patternExp p
+patternExp (PatAscription pat _ _) = patternExp pat
+patternExp (PatParens pat _) = patternExp pat
+patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
+  where
+    field (L nameloc name, pat) =
+      RecordFieldExplicit (L nameloc name) <$> patternExp pat <*> pure (srclocOf loc)
 
 resolveAppExp :: AppExpBase NoInfo Name -> TypeM (AppExpBase NoInfo VName)
 resolveAppExp (Apply f args loc) =
@@ -351,8 +369,10 @@ resolveAppExp (BinOp (f, floc) finfo (e1, info1) (e2, info2) loc) = do
   pure $ BinOp (f', floc) finfo (e1', info1) (e2', info2) loc
 resolveAppExp (Index e1 slice loc) =
   Index <$> resolveExp e1 <*> resolveSlice slice <*> pure loc
-resolveAppExp (Loop sizes pat e form body loc) = do
-  e' <- resolveExp e
+resolveAppExp (Loop sizes pat loopinit form body loc) = do
+  e' <- case loopinit of
+    LoopInitExplicit e -> LoopInitExplicit <$> resolveExp e
+    LoopInitImplicit NoInfo -> LoopInitExplicit <$> patternExp pat
   case form of
     For (Ident i _ iloc) bound -> do
       bound' <- resolveExp bound
