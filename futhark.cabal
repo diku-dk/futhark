@@ -463,7 +463,7 @@ library
     , filepath >=1.4.1.1
     , free >=5.1.10
     , futhark-data >= 1.1.1.0
-    , futhark-server >= 1.2.2.1
+    , futhark-server >= 1.2.3.0
     , futhark-manifest >= 1.5.0.0
     , githash >=0.1.6.1
     , half >= 0.3
