@@ -392,7 +392,7 @@ instance Format (AppExpBase NoInfo Name) where
   fmt (Apply f args loc) =
     addComments loc $ fmt f <+> align fmt_args
     where
-      fmt_args = sepArgs fmt $ map snd $ toList args
+      fmt_args = sepArgs fmt $ fmap snd args
 
 letBody :: UncheckedExp -> Fmt
 letBody body@(AppExp LetPat {} _) = fmt body
