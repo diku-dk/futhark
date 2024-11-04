@@ -59,6 +59,7 @@ import Control.Monad.State
     modify,
   )
 import Data.ByteString qualified as BS
+import Data.List.NonEmpty qualified as NE
 import Data.Loc (Loc (..), Located (..), posCoff, posLine)
 import Data.Maybe (fromMaybe)
 import Data.String
@@ -402,15 +403,10 @@ sepLineComments floc fmt s =
 
 -- | This is used for function arguments. It seperates multiline arguments by
 -- lines and singleline arguments by spaces.
-sepArgs :: (Located a) => (a -> Fmt) -> [a] -> Fmt
-sepArgs _ [] = nil
-sepArgs fmt ls
-  | any ((== Just MultiLine) . lineLayout) ls =
-      sep nil $ zipWith auxiliary [0 :: Int ..] ls
-  | otherwise = align $ sep line $ map fmt ls
+sepArgs :: (Located a) => (a -> Fmt) -> NE.NonEmpty a -> Fmt
+sepArgs fmt ls = localLayout ls' $ align $ sep line $ map fmt ls'
   where
-    auxiliary 0 x = fmt x
-    auxiliary _ x = localLayout x (line <> fmt x)
+    ls' = NE.toList ls
 
 -- | Nest but with the standard value of two spaces.
 stdNest :: Fmt -> Fmt
