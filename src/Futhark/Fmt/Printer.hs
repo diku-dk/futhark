@@ -216,8 +216,8 @@ instance Format UncheckedExp where
   fmt (QualParens (v, _qLoc) e loc) =
     addComments loc $
       fmtQualName v <> "." <> "(" <> align (fmt e) <> ")"
-  fmt (Ascript e t loc) = addComments loc $ fmt e <> ":" <+> fmt t
-  fmt (Coerce e t _ loc) = addComments loc $ fmt e <+> ":>" <+> fmt t
+  fmt (Ascript e t loc) = addComments loc $ fmt e </> ":" <+> align (fmt t)
+  fmt (Coerce e t _ loc) = addComments loc $ fmt e </> ":>" <+> align (fmt t)
   fmt (Literal _v loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (IntLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (FloatLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
