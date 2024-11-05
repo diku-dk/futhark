@@ -16,11 +16,11 @@ import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn, getIterator, getPredicates)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv))
+import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv), debugPrettyM, debugPrintAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify (Substitution (mapping), rep, unify)
+import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.Monad (addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
@@ -237,7 +237,8 @@ search x = do
           unless (M.size (mapping sub) == 1) $ error "search: multiple holes"
           pure $
             Just (Algebra.getVName algsym, Just . head $ M.elems (mapping sub))
-        _ -> error "search: symbol unifies with multiple symbols"
+        _ ->
+          error $ "search: " <> prettyString x <> " unifies with multiple symbols"
 
 isBooleanM :: Symbol -> IndexFnM Bool
 isBooleanM (Var vn) = do
@@ -261,12 +262,14 @@ idxSym False = Algebra.One
 toAlgebra_ :: Symbol -> IndexFnM Algebra.Symbol
 toAlgebra_ (Var x) = pure $ Algebra.Var x
 toAlgebra_ (Hole _) = undefined
-toAlgebra_ (Sum _ lb ub x) = do
+toAlgebra_ (Sum j lb ub x) = do
   res <- search x
   case res of
-    Just (vn, _) -> do
-      a <- mapSymSoP2M_ toAlgebra_ lb
-      b <- mapSymSoP2M_ toAlgebra_ ub
+    Just (vn, match) -> do
+      let idx = fromMaybe (sym2SoP $ Var j) match
+      a <- mapSymSoP2M_ toAlgebra_ (rep (mkRep j lb) idx)
+      b <- mapSymSoP2M_ toAlgebra_ (rep (mkRep j ub) idx)
+      -- debugPrettyM "toAlgebraSum res:" res
       booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
       pure $ Algebra.Sum (idxSym booltype vn) a b
     Nothing -> error "handleQuantifiers need to be run"

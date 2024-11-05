@@ -216,8 +216,8 @@ tests =
         ),
       mkTest
         "tests/indexfn/mk_flag_array.fut"
-        ( withDebug $ newNameFromString "k" >>= \k -> newNameFromString "j" >>= \j -> newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
-            let sum_k = sym2SoP $ Sum j (int2SoP 1) (sVar k) (Idx (Hole shape) (sVar j .-. int2SoP 1))
+        ( newNameFromString "k" >>= \k -> newNameFromString "j" >>= \j -> newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
+            let sum_k = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Idx (Hole shape) (sVar j))
                 shape_k = sym2SoP (Idx (Hole shape) (sVar k))
              in IndexFn
                   { iterator = Forall i (Cat k (sHole m) sum_k),

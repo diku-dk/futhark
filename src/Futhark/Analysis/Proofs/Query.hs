@@ -50,16 +50,13 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
           addRange (Algebra.Var i) (mkRangeLB $ int2SoP 1)
           j <- newVName "j"
           addRange (Algebra.Var j) (mkRange (int2SoP 0) (sym2SoP (Algebra.Var i) .-. int2SoP 1))
-          let p_j = fromJust . justSym $ p @ Var j
-          let q_j = q @ Var j
-          assume p_j
+          assume (fromJust . justSym $ p @ Var j)
           let rel = case dir of
                 Inc -> ($<=)
                 IncStrict -> ($<)
                 Dec -> ($>=)
                 DecStrict -> ($>)
-          debugPrintAlgEnv
-          debugT "ask" $ q_j `rel` q
+          debugT "ask" $ (q @ Var j) `rel` q
           where
             f @ x = rep (mkRep i x) f
         Empty -> undefined

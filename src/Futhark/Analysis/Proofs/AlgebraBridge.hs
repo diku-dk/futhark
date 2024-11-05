@@ -7,16 +7,17 @@ module Futhark.Analysis.Proofs.AlgebraBridge
   )
 where
 
-import Control.Monad ((<=<), foldM)
+import Control.Monad ((<=<), foldM, unless)
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate
 import Futhark.Analysis.Proofs.AlgebraBridge.Util
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrintAlgEnv, debugLn)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesSoP)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toDNF, toCNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Proofs.Util (converge)
-import Futhark.SoP.SoP (SoP, justSym, sym2SoP)
+import Futhark.SoP.SoP (SoP, justSym, sym2SoP, justConstant)
+import Data.Maybe (isJust)
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -32,11 +33,12 @@ simplify = astMap m
     simplifyAlgebra x = rollbackAlgEnv $ do
       y <- toAlgebra x
       z <- Algebra.simplify y
-      -- debugPrettyM "simplify" x
-      -- debugPrettyM "========" y
-      -- debugPrettyM "resultin" z
-      -- debugPrintAlgEnv
-      -- debugLn
+      -- let boring = isJust (justSym x) || isJust (justConstant x)
+      -- unless boring $ debugPrettyM "simplify" x
+      -- unless boring $ debugPrettyM "========" y
+      -- unless boring $ debugPrettyM "resultin" z
+      -- unless boring debugPrintAlgEnv
+      -- unless boring debugLn
       fromAlgebra z
 
     simplifySymbol :: Symbol -> IndexFnM Symbol
