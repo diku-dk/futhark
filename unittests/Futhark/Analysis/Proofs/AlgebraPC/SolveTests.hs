@@ -5,14 +5,14 @@ import Data.Set qualified as S
 import Data.Map qualified as M
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, AlgEnv (..), UntransEnv (..), mkRangeUB, addProperty)
-import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..), (~+~))
+import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..), (~+~), negSoP)
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Futhark.Analysis.Proofs.Symbol as IxFn
-import Futhark.Analysis.Proofs.Monad (IndexFnM(..), VEnv(..))
+import Futhark.Analysis.Proofs.Monad (IndexFnM(..), VEnv(..), debugPrintAlgEnv, debugOn, debugPrettyM)
 import Control.Monad.RWS.Strict hiding (Sum)
 import Futhark.SoP.FourierMotzkin qualified as FM
 
@@ -213,7 +213,7 @@ tests =
       testCase "Sum c[0:i-1] < Sum c[0:n-1]  where  c is POR (boolean)" $
         run
           ( do
-              -- 0 <= i2 < i1 < n
+              -- 0 <= i1 < n
               addRange (Var  n) $ mkRangeLB (int 1)
               addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
               let pc = POR $ S.singleton c0
@@ -221,6 +221,43 @@ tests =
               sum1 (sVar i1 .-. int 1) FM.$<=$ sum1 (sVar n .-. int 1)
           )
           @??= True,
+      testCase "Monotonicity" $
+        run
+          ( do
+              -- 0 <= i2 < i1 < n
+              addRange (Var  n) $ mkRangeLB (int 1)
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var c0) $ mkRangeLB (int 0)
+              let sum0to = sym2SoP . Sum (One c0) (int 0)
+              debugPrettyM "" (sum0to (sVar i2 .-. int 1), sum0to (sVar i1 .-. int 1))
+              sum0to (sVar i2 .-. int 1) FM.$<=$ sum0to (sVar i1 .-. int 1)
+          )
+          @??= True,
+      testCase "Sum a[0:i2] - Sum a[0:i1] = -1 * Sum a[i2+1:i1] where 0 <= i2 < i1 < n and a >= 0" $
+        run
+          ( do
+              -- 0 <= i2 < i1 < n
+              addRange (Var  n) $ mkRangeLB (int 1)
+              addRange (Var i1) $ mkRange (int 1) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var c0) $ mkRangeLB (int 0)
+              let sum0to = sym2SoP . Sum (One c0) (int 0)
+              simplify $ sum0to (sVar i2) .-. sum0to (sVar i1)
+          )
+          @??= negSoP (sym2SoP (Sum (One c0) (sVar i2 .+. int2SoP 1) (sVar i1))),
+      testCase "Sum a[0:i2-1] - Sum a[0:i1-1] = -1 * Sum a[i2:i1-1] where 0 <= i2 < i1 < n and a >= 0" $
+        run
+          ( do
+              -- 0 <= i2 < i1 < n
+              addRange (Var  n) $ mkRangeLB (int 1)
+              addRange (Var i1) $ mkRange (int 1) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var c0) $ mkRangeLB (int 0)
+              let sum0to = sym2SoP . Sum (One c0) (int 0)
+              simplify $ sum0to (sVar i2 .-. int 1) .-. sum0to (sVar i1 .-. int 1)
+          )
+          @??= negSoP (sym2SoP (Sum (One c0) (sVar i2) (sVar i1 .-. int 1))),
       --
       testCase "FME1" $
         run
