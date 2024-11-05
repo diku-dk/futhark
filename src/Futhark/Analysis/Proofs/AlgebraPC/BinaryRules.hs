@@ -140,10 +140,10 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
               f (aidx_beg, bidx_beg .-. int2SoP 1) (aidx_end .+. int2SoP 1, bidx_end) (anm, k1, k2, k2)
         else do
           succ_2_1 <- bidx_end FM.$<=$ aidx_end
-          succ_2_2 <- bidx_beg FM.$<=$ bidx_end
+          succ_2_2 <- bidx_beg FM.$<=$ (bidx_end .+. int2SoP 1)
           if succ_1_1 && succ_2_1 && succ_2_2
             then -- case: a_beg <= b_beg <= b_end <= a_end
-            -- results in: Sum(A[a_beg:b_beg-1]) + Sum(A[b_beg+1,a_end])
+            -- results in: Sum(A[a_beg:b_beg-1]) + Sum(A[b_end+1,a_end])
 
               pure $
                 Just $
