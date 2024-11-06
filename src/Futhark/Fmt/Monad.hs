@@ -237,6 +237,15 @@ type FmtM a = ReaderT Layout (State FmtState) a
 fmtComment :: Comment -> Fmt
 fmtComment = comment . commentText
 
+fmtCommentList :: [Comment] -> Fmt
+fmtCommentList [] = nil
+fmtCommentList (c : cs) = fst $ foldl f (fmtComment c, locOf c) cs
+  where
+    f (acc, loc) c' =
+      if consecutive loc (locOf c')
+        then (acc <> fmtComment c', locOf c')
+        else (acc <> hardline <> fmtComment c', locOf c')
+
 -- | Prepends comments.
 fmtComments :: (Located a) => a -> Fmt
 fmtComments a = do
@@ -246,7 +255,7 @@ fmtComments a = do
     else do
       modify $ \s -> s {comments = later}
       pre
-        <> mconcat (map fmtComment here)
+        <> fmtCommentList here
         <> if consecutive (locOf here) (locOf a) then nil else hardline
   where
     relevant c = locOf a /= NoLoc && locOf a > locOf c
@@ -304,7 +313,13 @@ popComments :: Fmt
 popComments = do
   cs <- gets comments
   modify (\s -> s {comments = []})
-  sep nil $ map fmtComment cs
+  lastO <- gets lastOutput
+  case lastO of
+    Nothing ->
+      fmtCommentList cs -- Happens when file has only comments.
+    _
+      | not $ null cs -> hardline <> fmtCommentList cs
+      | otherwise -> nil
 
 -- | Using the location of @a@ get the segment of text in the original file to
 -- create a @Fmt@.
