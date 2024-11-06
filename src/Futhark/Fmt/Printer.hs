@@ -152,7 +152,11 @@ instance Format (UncheckedPat t) where
   fmt (RecordPat pats loc) =
     fmtRecord (map fmtFieldPat pats) loc
     where
-      fmtFieldPat (L nameloc name, t) = lineIndent [nameloc, locOf t] (fmt name <+> "=") (fmt t)
+      -- We detect the implicit form by whether the name and the 't'
+      -- has the same location.
+      fmtFieldPat (L nameloc name, t)
+        | locOf nameloc == locOf t = fmt name
+        | otherwise = lineIndent [nameloc, locOf t] (fmt name <+> "=") (fmt t)
   fmt (PatParens pat loc) =
     addComments loc $ "(" <> align (fmt pat) <:/> ")"
   fmt (Id name _ loc) = addComments loc $ fmtBoundName name
