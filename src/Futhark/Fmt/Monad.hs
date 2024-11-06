@@ -247,7 +247,7 @@ fmtComments a = do
       modify $ \s -> s {comments = later}
       pre
         <> mconcat (map fmtComment here)
-        <> (if consecutive (locOf here) (locOf a) then nil else hardline)
+        <> if consecutive (locOf here) (locOf a) then nil else hardline
   where
     relevant c = locOf a /= NoLoc && locOf a > locOf c
     pre = do
@@ -414,7 +414,9 @@ stdNest = nest 2
 
 -- | Aligns line by line.
 align :: Fmt -> Fmt
-align a = P.align <$> a
+align a = do
+  modify (\s -> s {lastOutput = Nothing}) -- XXX?
+  P.align <$> a
 
 -- | Indents everything by @i@, should never be used.
 hardIndent :: Int -> Fmt -> Fmt
