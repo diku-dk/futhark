@@ -8,8 +8,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (($==))
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (algebraContext)
+import Futhark.Analysis.Proofs.AlgebraBridge (($==), toAlgebra, algebraContext)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, unzipT)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, repIndexFn, subst)
@@ -521,7 +520,7 @@ handleRefinement' :: E.VName -> E.VName -> E.Exp -> IndexFnM ()
 handleRefinement' name x (E.AppExp (E.Apply f args _) _)
   | Just "forall" <- getFun f,
     [ E.Var (E.QualName _ x') _ _,
-      E.OpSectionRight (E.QualName [] opvn) _ operand _ _ _
+      E.OpSectionRight (E.QualName [] opvn) _ y _ _ _
       ] <-
       getArgs args,
     x == x' = do
@@ -531,28 +530,29 @@ handleRefinement' name x (E.AppExp (E.Apply f args _) _)
           hole <- sym2SoP . Hole <$> newVName "h"
           vn <- newVName "x"
           addUntrans (Algebra.Var vn) (Idx (Var name) hole)
-          addRange (Algebra.Var vn) (mkRangeLB $ fromExp operand)
+          addRange (Algebra.Var vn) . mkRangeLB =<< fromExp y
         _ -> undefined
-handleRefinement' name x (E.AppExp (E.BinOp (op', _) _ (E.Var (E.QualName _ x') _ _, _) (y', _) _) _)
+handleRefinement' name x (E.AppExp (E.BinOp (op', _) _ (E.Var (E.QualName _ x') _ _, _) (y, _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
     fn <- E.baseString $ E.qualLeaf op',
     Just bop <- L.find ((fn ==) . prettyString) [minBound .. maxBound :: E.BinOp],
     x == x' =
       case bop of
         E.Equal ->
-          addEquiv (Algebra.Var name) (fromExp y')
+          addEquiv (Algebra.Var name) =<< fromExp y
         _ -> undefined
 handleRefinement' _ _ _ = pure ()
 
-fromExp :: E.Exp -> SoP Algebra.Symbol
+fromExp :: E.ExpBase E.Info E.VName -> IndexFnM (SoP Algebra.Symbol)
 fromExp (E.IntLit c _ _) =
-  int2SoP c
--- fromExp (E.AppExp (E.Apply f args _) _)
---   | Just "sum" <- getFun f,
---     [arg@(E.Var (E.QualName _ x) _ _)] <- getArgs args =
---       case getSize arg of
---         Just n ->
---           termToSoP $
---             SumSlice (Var x) (int2SoP 0) (sym2SoP n .-. int2SoP 1)
---         Nothing -> undefined
+  pure $ int2SoP c
+fromExp (E.AppExp (E.Apply f args _) _)
+  | Just "sum" <- getFun f,
+    [arg@(E.Var (E.QualName _ x) _ _)] <- getArgs args =
+      case getSize arg of
+        Just n -> do
+          j <- newVName "j"
+          toAlgebra . sym2SoP $
+            Sum j (int2SoP 0) (n .-. int2SoP 1) (Idx (Var x) $ sym2SoP (Var j))
+        Nothing -> undefined
 fromExp _ = undefined
