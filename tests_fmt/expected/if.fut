@@ -4,6 +4,7 @@ def b =
   if true
   then 1
        + 3
+       + 5
   else 2
 
 def c =
@@ -12,3 +13,10 @@ def c =
   else if true
   then 2
   else 3
+
+def d =
+  if true
+  then -- foo
+       true
+  else -- bar
+       true
