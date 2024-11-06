@@ -16,7 +16,7 @@ import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn, getIterator, getPredicates)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv), debugPrettyM, debugPrintAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
@@ -254,7 +254,7 @@ idxSym True = Algebra.POR . S.singleton
 idxSym False = Algebra.One
 
 -- Translate IndexFn.Symbol to Algebra.Symbol.
--- Fresh names are created for untranslatable symbols such as indicators
+-- Fresh names are created for untranslatable symbols such as boolean expressions
 -- and quantified symbols in sums. Indexing is preserved on untranslatable
 -- symbols. For example, ⟦x[0] + 1⟧ + ∑j∈(1 .. b) ⟦x[j] + 1⟧ will be translated
 -- as y[0] + Sum y[1:b] with fresh name y mapped to ⟦x[hole] + 1⟧.
@@ -269,7 +269,6 @@ toAlgebra_ (Sum j lb ub x) = do
       let idx = fromMaybe (sym2SoP $ Var j) match
       a <- mapSymSoP2M_ toAlgebra_ (rep (mkRep j lb) idx)
       b <- mapSymSoP2M_ toAlgebra_ (rep (mkRep j ub) idx)
-      -- debugPrettyM "toAlgebraSum res:" res
       booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
       pure $ Algebra.Sum (idxSym booltype vn) a b
     Nothing -> error "handleQuantifiers need to be run"
@@ -283,7 +282,6 @@ toAlgebra_ sym@(Idx (Var xs) i) = do
   booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
   pure $ Algebra.Idx (idxSym booltype vn) idx'
 toAlgebra_ (Idx {}) = undefined
--- toAlgebra_ (Indicator p) = handleBoolean p
 toAlgebra_ sym@(Apply (Var f) [x]) = do
   res <- search sym
   vn <- case fst <$> res of
@@ -295,9 +293,11 @@ toAlgebra_ sym@(Apply (Var f) [x]) = do
   when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
   booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
   pure $ Algebra.Idx (idxSym booltype vn) idx'
-toAlgebra_ (Apply {}) = undefined
+toAlgebra_ x@(Apply {}) = lookupUntransPE x
+toAlgebra_ x@(Tuple {}) =
+  error $ "toAlgebra_: " <> prettyString x -- XXX unzip before getting here!
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
--- The rest are boolean statements; handled like indicator.
+-- The rest are boolean statements.
 toAlgebra_ x = handleBoolean x
 
 handleBoolean :: Symbol -> IndexFnM Algebra.Symbol

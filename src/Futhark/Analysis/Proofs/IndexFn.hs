@@ -2,9 +2,11 @@
 
 module Futhark.Analysis.Proofs.IndexFn where
 
+import Control.Monad ((<=<))
+import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.SoP.SoP (SoP, int2SoP)
+import Futhark.SoP.SoP (SoP, int2SoP, justSym)
 import Language.Futhark (VName)
 
 data IndexFn = IndexFn
@@ -48,3 +50,16 @@ getIterator _ = Nothing
 domainSegStart :: Domain -> SoP Symbol
 domainSegStart (Iota _) = int2SoP 0
 domainSegStart (Cat _ _ b) = b
+
+unzipT :: IndexFn -> [IndexFn]
+unzipT (IndexFn iter (Cases cs))
+  | Just vss <- mapM (getTuple <=< justSym . snd) (NE.toList cs),
+    n <- length (head vss),
+    all ((==) n . length) vss -- All branches are n-tuples.
+    =
+      let ps = map fst (NE.toList cs)
+       in map (\vs -> IndexFn iter (cases $ zip ps vs)) (L.transpose vss)
+  where
+    getTuple (Tuple vs) = Just vs
+    getTuple _ = Nothing
+unzipT indexfn = [indexfn]

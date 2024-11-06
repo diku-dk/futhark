@@ -217,12 +217,32 @@ tests =
       mkTest
         "tests/indexfn/mk_flag_array.fut"
         ( newNameFromString "k" >>= \k -> newNameFromString "j" >>= \j -> newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
-            let sum_k = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Idx (Hole shape) (sVar j))
+            let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Idx (Hole shape) (sVar j))
                 shape_k = sym2SoP (Idx (Hole shape) (sVar k))
              in IndexFn
-                  { iterator = Forall i (Cat k (sHole m) sum_k),
+                  { iterator = Forall i (Cat k (sHole m) sum_km1),
                     body = cases [(shape_k :> int2SoP 0, sym2SoP $ Idx (Hole xs) (sVar k)),
                                   (shape_k :<= int2SoP 0, sHole zero)]
+                  }
+        ),
+      mkTest
+        "tests/indexfn/map_tuple.fut"
+        ( withDebug . pure $ \(i, n, xs, ys) ->
+            let xs_i = sym2SoP $ Idx (Hole xs) (sHole i)
+                ys_i = sym2SoP $ Idx (Hole ys) (sHole i)
+             in IndexFn
+                  { iterator = Forall i (Iota (sHole n)),
+                    body = cases [(Bool True, sym2SoP $ Tuple [xs_i .*. ys_i, xs_i .+. ys_i])]
+                  }
+        ),
+      mkTest
+        "tests/indexfn/sgm_sum.fut"
+        ( pure $ \(i, n, xs, flags) ->
+            let xs_i = sym2SoP $ Idx (Hole xs) (sHole i)
+                flags_i = Idx (Hole flags) (sHole i)
+             in IndexFn
+                  { iterator = Forall i (Iota (sHole n)),
+                    body = cases [(flags_i, xs_i), (Not flags_i, xs_i .+. sym2SoP Recurrence)]
                   }
         )
     ]

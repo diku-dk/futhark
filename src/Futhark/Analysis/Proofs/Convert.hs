@@ -1,18 +1,18 @@
 module Futhark.Analysis.Proofs.Convert where
 
-import Control.Monad (foldM, forM, unless, when)
+import Control.Monad (foldM, forM, forM_, unless, void, when)
 import Control.Monad.RWS (gets)
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (fromJust, fromMaybe, isJust)
-import Debug.Trace (trace, traceM)
+import Data.Maybe (fromMaybe)
+import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (($==))
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate (algebraContext)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, subst)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, unzipT)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, repIndexFn, subst)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), askQ, isUnknown)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
@@ -21,7 +21,7 @@ import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding)
 import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, addRange, addUntrans, mkRangeLB)
-import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP_, negSoP, sym2SoP, (.-.), (~*~), (~+~), (~-~))
+import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP_, negSoP, sym2SoP, (.-.), (~*~), (~+~), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
@@ -92,20 +92,19 @@ mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
   mapM_ handleRefinementTypes params
   debugPrintAlgEnv
   debugPrettyM "\n====\nmkIndexFnValBind:\n\n" val
-  indexfn <- forward body >>= refineAndBind vn
+  indexfn <- forward body >>= bindfn vn
   -- insertTopLevel vn (params, indexfn)
   _ <- algebraContext indexfn $ do
     alg <- gets algenv
     debugPrettyM "Algebra context for indexfn:\n" alg
   pure indexfn
 
-refineAndBind :: E.VName -> IndexFn -> IndexFnM IndexFn
-refineAndBind vn indexfn = do
-  indexfn' <- rewrite indexfn
-  insertIndexFn vn indexfn'
-  whenDebug (traceM $ prettyBinding vn indexfn')
+bindfn :: E.VName -> IndexFn -> IndexFnM IndexFn
+bindfn vn indexfn = do
+  insertIndexFn vn indexfn
+  whenDebug (traceM $ prettyBinding vn indexfn)
   -- tell ["resulting in", toLaTeX (vn, indexfn')]
-  pure indexfn'
+  pure indexfn
 
 singleCase :: a -> Cases Symbol a
 singleCase e = cases [(Bool True, e)]
@@ -116,24 +115,18 @@ fromScalar e = IndexFn Empty (singleCase e)
 forward :: E.Exp -> IndexFnM IndexFn
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
--- Let-bindings.
-forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x body _) _) = do
+forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
   -- tell [textbf "Forward on " <> Math.math (toLaTeX vn) <> toLaTeX x]
-  _ <- refineAndBind vn =<< forward x
+  (bindfn vn =<< forward x) >> forward in_body
+forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
+  -- tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX x]
+  xs <- unzipT <$> forward x
+  forM_ (zip patterns xs) bindfnOrDiscard
   forward body
--- Tuples left unhandled for now.
--- forward (E.AppExp (E.LetPat _ p@(E.TuplePat patterns _) x body _) _) = do
---     -- tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX x]
---     xs <- unzipT <$> forward x
---     forM_ (zip patterns xs) refineAndBind'
---     forward body
---     where
---       -- Wrap refineAndBind to discard results otherwise bound to wildcards.
---       refineAndBind' (E.Wildcard {}, _) = pure ()
---       refineAndBind' (E.Id vn _ _, indexfn) =
---         void (refineAndBind vn indexfn)
---       refineAndBind' e = error ("not implemented for " <> show e)
--- Leaves.
+  where
+    bindfnOrDiscard (E.Wildcard {}, _) = pure ()
+    bindfnOrDiscard (E.Id vn _ _, indexfn) = void (bindfn vn indexfn)
+    bindfnOrDiscard e = error ("not implemented for " <> show e)
 forward (E.Literal (E.BoolValue x) _) =
   pure . fromScalar . sym2SoP $ Bool x
 forward (E.Literal (E.SignedValue (E.Int64Value x)) _) =
@@ -148,7 +141,6 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
     Just indexfn -> do
       pure indexfn
     _ -> do
-      -- handleRefinementTypes e
       case getSize e of
         Just sz -> do
           -- Canonical array representation.
@@ -160,16 +152,13 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
         Nothing ->
           -- Canonical scalar representation.
           rewrite $ IndexFn Empty (singleCase . sym2SoP $ Var vn)
--- Nodes.
--- TODO handle tuples later.
--- forward (E.TupLit es _) = do
---   xs <- mapM forward es
---   vns <- mapM (\_ -> newVName "xs") xs
---   let IndexFn iter1 _ = head xs
---   foldM (\acc (vn, x) -> sub vn x acc)
---         (IndexFn iter1 (toCases . Tuple $ map Var vns))
---         (zip vns xs)
---     >>= rewrite
+forward (E.TupLit xs _) = do
+  fns <- mapM forward xs
+  vns <- forM fns (\_ -> newVName "f")
+  let IndexFn it1 _ = head fns -- TODO probably want to grab most complex iterator here.
+  let y = IndexFn it1 (cases [(Bool True, sym2SoP . Tuple $ map (sym2SoP . Var) vns)])
+  foldM substParams y (zip vns fns)
+    >>= rewrite
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do
       -- XXX support only simple indexing for now
@@ -228,13 +217,11 @@ forward (E.AppExp (E.If c t f _) _) = do
     >>= subst t_branch vt
     >>= subst f_branch vf
     >>= rewrite
--- forward e | trace ("forward\n  " ++ prettyString e) False =
---   -- All calls after this case get traced.
---   undefined
 forward expr@(E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
+      -- tell ["Using map rule ", toLaTeX y']
       xss <- mapM forward args'
       debugPrettyM "map args:" xss
       let IndexFn iter_first_arg _ = head xss
@@ -249,12 +236,8 @@ forward expr@(E.AppExp (E.Apply f args _) _)
         )
       -- Make susbtitutions from function arguments to array names.
       let paramNames :: [E.VName] = concatMap E.patNames params
-      -- TODO handle tupled values by splitting them into separate index functions
-      -- let xss_flat :: [IndexFn] = mconcat $ map unzipT xss
-      let xss_flat = xss
-      let y' = IndexFn iter_first_arg cases_body
-      -- tell ["Using map rule ", toLaTeX y']
-      foldM substParams y' (zip paramNames xss_flat)
+      let xs :: [IndexFn] = mconcat $ map unzipT xss
+      foldM substParams (IndexFn iter_first_arg cases_body) (zip paramNames xs)
         >>= rewrite
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
@@ -284,6 +267,19 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           rewrite $ IndexFn (Forall i (Iota m)) (singleCase . sym2SoP $ Var i)
         _ -> undefined -- TODO We've no way to express this yet.
         -- Have talked with Cosmin about an "outer if" before.
+  | Just fname <- getFun f,
+    "zip" `L.isPrefixOf` fname = do
+      xss <- mapM forward (getArgs args)
+      vns <- mapM (\_ -> newVName "xs") xss
+      let IndexFn it1 _ = head xss -- TODO probably want to grab most complex iterator here.
+      let y = IndexFn it1 (cases [(Bool True, sym2SoP . Tuple $ map (sym2SoP . Var) vns)])
+      foldM substParams y (zip vns xss)
+        >>= rewrite
+  | Just fname <- getFun f,
+    "unzip" `L.isPrefixOf` fname,
+    [xs'] <- getArgs args =
+      -- XXX unzip is a no-op.
+      forward xs'
   | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       -- Scan with basic operator.
@@ -291,7 +287,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       let i = case iter_xs of
             (Forall i' _) -> i'
             Empty -> error "scan array is empty?"
-      -- TODO should verify that _ne matches op
+      -- TODO should we verify that _ne matches op?
       op <-
         case E.baseString vn of
           "+" -> pure (~+~)
@@ -310,6 +306,19 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               )
       -- tell ["Using scan rule ", toLaTeX y]
       subst x (IndexFn iter_xs xs) y
+        >>= rewrite
+  | Just "scan" <- getFun f,
+    [E.Lambda params lam_body _ _ _, _ne, lam_xs] <- getArgs args,
+    [paramNames_acc, paramNames_x] <- map E.patNames params = do
+      -- We pick the first argument of the lambda to be the accumulator
+      -- and the second argument to be an element of the input array.
+      -- (The lambda is associative, so we are free to pick.)
+      xs@(IndexFn iter_xs _) <- forward lam_xs
+      let acc_sub = M.fromList (map (,sym2SoP Recurrence) paramNames_acc)
+      body <- repIndexFn acc_sub <$> forward lam_body
+      h <- newVName "body_hole"
+      y <- subst h body (IndexFn iter_xs (cases [(Bool True, sym2SoP $ Var h)]))
+      foldM substParams y (zip paramNames_x (unzipT xs))
         >>= rewrite
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
@@ -448,7 +457,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           when booltype $ addProperty (Algebra.Var g) Algebra.Boolean
           foldM substParams g_fn (zip param_names params)
             >>= rewrite
-forward e = error $ "forward on " <> show e
+forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
 
 substParams :: IndexFn -> (E.VName, IndexFn) -> IndexFnM IndexFn
 substParams y (paramName, paramIndexFn) =

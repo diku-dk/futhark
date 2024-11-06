@@ -34,6 +34,7 @@ instance ASTMappable Symbol Symbol where
   astMap m (Idx xs i) = mapOnSymbol m =<< Idx <$> astMap m xs <*> astMap m i
   astMap m (Apply f xs) =
     mapOnSymbol m =<< Apply <$> astMap m f <*> mapM (astMap m) xs
+  astMap m (Tuple xs) = Tuple <$> mapM (astMap m) xs
   astMap _ x@(Bool {}) = pure x
   astMap m (Not x) = mapOnSymbol m . neg =<< astMap m x
   astMap m (x :== y) = mapOnSymbol m =<< (:==) <$> astMap m x <*> astMap m y

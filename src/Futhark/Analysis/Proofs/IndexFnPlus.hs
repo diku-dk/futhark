@@ -2,25 +2,22 @@
 
 module Futhark.Analysis.Proofs.IndexFnPlus where
 
+import Control.Monad (unless)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
+import Data.Maybe (isJust)
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus (repVName, toSumOfSums)
-import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap)
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshName, unifies_, freshNameFromString)
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName)
-import Futhark.SoP.Monad (addUntrans)
-import Futhark.SoP.SoP (SoP, int2SoP, justConstant, mapSymSoP, sym2SoP, (.*.), (.+.), (.-.))
-import Futhark.SoP.SoP qualified as SoP
-import Futhark.Util.Pretty (Pretty (pretty), commasep, commastack, line, parens, prettyString, stack, (<+>))
+import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP, sym2SoP, (.+.), (.-.))
+import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, prettyString, stack, (<+>))
 import Language.Futhark (VName)
-import Data.Maybe (isJust)
-import Control.Monad (unless)
 
 instance Eq Domain where
   -- Since the whole domain must be covered by an index function,
@@ -78,17 +75,20 @@ instance Pretty Domain where
 instance Pretty Iterator where
   pretty (Forall i (Iota n)) =
     prettyName i <+> ":: 0 .." <+> pretty n
-    <> line
-    <> "forall " <> prettyName i <+> "."
+      <> line
+      <> "forall "
+      <> prettyName i <+> "."
   pretty (Forall i dom@(Cat k m seg)) =
     prettyName k <+> ":: 0 .." <+> pretty m
-    <> line
-    <> prettyName i <+> "::" <+> "⊎" <> prettyName k
-      <+> "["
+      <> line
+      <> prettyName i <+> "::" <+> "⊎"
+      <> prettyName k
+        <+> "["
       <> commastack [pretty seg, "...", pretty (intervalEnd dom)]
       <> "]"
-    <> line
-    <> "forall " <> prettyName i <+> "."
+      <> line
+      <> "forall "
+      <> prettyName i <+> "."
   pretty Empty = ""
 
 instance Pretty IndexFn where
@@ -108,10 +108,10 @@ repDomain s (Iota n) = Iota (rep s n)
 repDomain s (Cat k m b) = Cat k (rep s m) (rep s b)
 
 repIndexFn :: Replacement Symbol -> IndexFn -> IndexFn
-repIndexFn s = rip
+repIndexFn s = rep'
   where
-    rip (IndexFn Empty body) = IndexFn Empty (repCases s body)
-    rip (IndexFn (Forall i dom) body) =
+    rep' (IndexFn Empty body) = IndexFn Empty (repCases s body)
+    rep' (IndexFn (Forall i dom) body) =
       IndexFn (Forall (repVName s i) (repDomain s dom)) (repCases s body)
 
 subIndexFn :: Substitution Symbol -> IndexFn -> IndexFnM IndexFn
@@ -222,18 +222,18 @@ subst' x_fn (IndexFn (Forall i (Iota n)) xs) (IndexFn (Forall _ (Iota n')) ys)
               pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
           )
 subst' x_fn (IndexFn (Forall i dom_x@(Iota _)) xs) (IndexFn (Forall _ dom_y@(Cat k m seg)) ys) = do
-    eqEnd1 :: Maybe (Substitution Symbol) <- unify (domainEnd dom_x) (domainEnd dom_y)
-    eqEnd2 :: Maybe (Substitution Symbol) <- unify (domainEnd dom_x) (domainEnd (Iota m))
-    unless (isJust eqEnd1 || isJust eqEnd2) $ error "subst' iota cat: Incompatible domains."
-    pure $
-      IndexFn
-        (Forall i (Cat k m seg))
-        ( cases $ do
-            (x_cond, x_val) <- casesToList xs
-            (y_cond, y_val) <- casesToList ys
-            let rip_x = rip x_fn i x_val
-            pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-        )
+  eqEnd1 :: Maybe (Substitution Symbol) <- unify (domainEnd dom_x) (domainEnd dom_y)
+  eqEnd2 :: Maybe (Substitution Symbol) <- unify (domainEnd dom_x) (domainEnd (Iota m))
+  unless (isJust eqEnd1 || isJust eqEnd2) $ error "subst' iota cat: Incompatible domains."
+  pure $
+    IndexFn
+      (Forall i (Cat k m seg))
+      ( cases $ do
+          (x_cond, x_val) <- casesToList xs
+          (y_cond, y_val) <- casesToList ys
+          let rip_x = rip x_fn i x_val
+          pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
+      )
 subst' _ _ _ = undefined
 
 -- TODO Sad that we basically have to copy rep here;
@@ -253,7 +253,7 @@ rip fnName fnArg fnVal = apply mempty
           rep (M.insert fnArg idx s) fnVal
     apply s (Var f)
       | f == fnName =
-        rep s fnVal
+          rep s fnVal
     apply _ x@(Var _) = sym2SoP x
     apply _ x@(Hole _) = sym2SoP x
     apply s (Idx x idx) =
@@ -263,6 +263,8 @@ rip fnName fnArg fnVal = apply mempty
        in toSumOfSums j (applySoP s' lb) (applySoP s' ub) (apply s' x)
     apply s (Apply f xs) =
       sym2SoP $ Apply (sop2Symbol $ apply s f) (map (applySoP s) xs)
+    apply s (Tuple xs) =
+      sym2SoP $ Tuple (map (applySoP s) xs)
     apply _ x@(Bool _) = sym2SoP x
     apply _ Recurrence = sym2SoP Recurrence
     apply s sym = case sym of
@@ -278,7 +280,3 @@ rip fnName fnArg fnVal = apply mempty
       where
         binop op x y = sym2SoP $ applySoP s x `op` applySoP s y
         binopS op x y = sym2SoP $ sop2Symbol (apply s x) `op` sop2Symbol (apply s y)
-
--------------------------------------------------------------------------------
--- Index function normalization.
--------------------------------------------------------------------------------
