@@ -4,14 +4,14 @@ import Control.Monad (unless)
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn)
+import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
 import Futhark.Analysis.Proofs.Unify (renameSame, unify)
 import Futhark.Compiler.CLI (Imports, fileProg, readProgramOrDie)
 import Futhark.MonadFreshNames (newNameFromString)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.))
-import Futhark.Util.Pretty (docString, line, pretty, prettyString, (<+>))
+import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Language.Futhark qualified as E
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -57,7 +57,7 @@ tests =
             let xs_i = sym2SoP (Idx (Hole xs) (sHole i))
              in IndexFn
                   { iterator = Forall i (Iota (sHole n)),
-                    body = cases [ (Bool True, int2SoP 2 .*. xs_i) ]
+                    body = cases [(Bool True, int2SoP 2 .*. xs_i)]
                   }
         ),
       mkTest
@@ -216,18 +216,23 @@ tests =
         ),
       mkTest
         "tests/indexfn/mk_flag_array.fut"
-        ( newNameFromString "k" >>= \k -> newNameFromString "j" >>= \j -> newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
-            let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Idx (Hole shape) (sVar j))
-                shape_k = sym2SoP (Idx (Hole shape) (sVar k))
-             in IndexFn
-                  { iterator = Forall i (Cat k (sHole m) sum_km1),
-                    body = cases [(shape_k :> int2SoP 0, sym2SoP $ Idx (Hole xs) (sVar k)),
-                                  (shape_k :<= int2SoP 0, sHole zero)]
-                  }
+        ( newNameFromString "k" >>= \k ->
+            newNameFromString "j" >>= \j ->
+              newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
+                let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Idx (Hole shape) (sVar j))
+                    shape_k = sym2SoP (Idx (Hole shape) (sVar k))
+                 in IndexFn
+                      { iterator = Forall i (Cat k (sHole m) sum_km1),
+                        body =
+                          cases
+                            [ (shape_k :> int2SoP 0, sym2SoP $ Idx (Hole xs) (sVar k)),
+                              (shape_k :<= int2SoP 0, sHole zero)
+                            ]
+                      }
         ),
       mkTest
         "tests/indexfn/map_tuple.fut"
-        ( withDebug . pure $ \(i, n, xs, ys) ->
+        ( pure $ \(i, n, xs, ys) ->
             let xs_i = sym2SoP $ Idx (Hole xs) (sHole i)
                 ys_i = sym2SoP $ Idx (Hole ys) (sHole i)
              in IndexFn
@@ -236,7 +241,7 @@ tests =
                   }
         ),
       mkTest
-        "tests/indexfn/sgm_sum.fut"
+        "tests/indexfn/segment_sum.fut"
         ( pure $ \(i, n, xs, flags) ->
             let xs_i = sym2SoP $ Idx (Hole xs) (sHole i)
                 flags_i = Idx (Hole flags) (sHole i)

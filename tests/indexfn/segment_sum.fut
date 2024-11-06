@@ -1,4 +1,4 @@
-def sgm_sum [n] 't
+def segment_sum [n] 't
       (flags: [n]bool)
       (xs: [n]i64): [n]i64 =
   let zipped = zip flags xs
