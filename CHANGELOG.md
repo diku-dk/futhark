@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A compile time regression for programs that used higher order
   functions very aggressively.
 
+* Uniqueness bug related to slice simplification.
+
 ## [0.25.23]
 
 ### Added
