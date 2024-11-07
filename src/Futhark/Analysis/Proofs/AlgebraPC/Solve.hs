@@ -42,15 +42,17 @@ simplifyLevel sop0 = do
     if S.null $ S.filter hasPow fvs
       then pure sop0
       else simplifyPows simplifyLevel sop0
+  -- unite sums with known indices from the equivalence table
+  (_s2, sop2) <- simplifyOneSumBef sop1
   -- index & sum-expansion & sum-sum simplifications
-  (s2, sop2) <-
+  (_s3, sop3) <- -- trace ("Before All-To-All" ++ prettyString sop2) $
     if S.null $ S.filter hasIdxOrSum fvs
-      then pure (False, sop1)
-      else simplifyAll2All sop1
-  -- peel off known indices by looking in the equality table
-  (s3, sop3) <- simplifyOneSum sop2
-  -- do we need to run to a fix point ?
-  if s2 || s3 then simplifyLevel sop3 else pure sop3
+      then pure (False, sop2)
+      else simplifyAll2All sop2
+  -- peel off known end indices of sum via equivalence table
+  (_s4, sop4) <- simplifyOneSumAft sop3
+  -- do we need to run to a fix point?
+  if sop4 == sop0 then pure sop4 else simplifyLevel sop4
 
 ---------------------------------------------------
 --- Some Thinking but the code below is garbage ---

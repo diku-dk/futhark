@@ -17,6 +17,9 @@ import Futhark.SoP.FourierMotzkin qualified as FM
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 
+sop_one :: SoP Symbol
+sop_one = int2SoP 1
+
 simplifyPair ::
   (MonadSoP Symbol e Property m) =>
   (Symbol, (Term Symbol, Integer)) ->
@@ -96,10 +99,11 @@ matchMonIdxDif _ _ = pure Nothing
 
 -- | This identifies a Sum-of-slice simplification, either
 --     1. a sum of a slice that can be extended with an index, or
---     2. a subtraction of two sums of slices of the same array
+--     2. an overlapping addition of two sums of boolean slices, or
+--     3. a subtraction of two sums of slices of the same array
 --   Remember to call this twice: on the current and reversed pair.
 matchUniteSums ::
-  (MonadSoP Symbol e p m) =>
+  (MonadSoP Symbol e Property m) =>
   (Symbol, (Term Symbol, Integer)) ->
   (Symbol, (Term Symbol, Integer)) ->
   m (Maybe (SoP Symbol, SoP Symbol))
@@ -123,11 +127,42 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
           pure $ Just $ mkEquivSoPs (Sum anm bidx aidx_end, sym1, sym2) (ms1, k1, k1)
         _ -> pure Nothing -- be conservative if slice is not provably non-empty
   -- case 2:
+  | Sum (POR anms) aidx_beg aidx_end <- sym1,
+    Sum (POR bnms) bidx_beg bidx_end <- sym2,
+    S.size anms > 0 && S.size bnms > 0,
+    S.disjoint anms bnms,
+    anm <- S.elemAt 0 anms,
+    ms1 == ms2 && k1 == k2 = do
+  tab_props <- getProperties
+  case hasDisjoint (fromMaybe S.empty $ M.lookup (Var anm) tab_props) of
+    Nothing -> pure Nothing
+    Just nms_disjoint_with_a -> do
+      let abnms = S.union anms bnms
+      if S.null $ S.difference bnms nms_disjoint_with_a
+      then
+        do -- \^ possible match for simplifying: Sum(A[b1:e1]) + Sum(B[b2:e2])
+          success <- checkOverlappingSums (aidx_beg, aidx_end) (bidx_beg, bidx_end)
+          case success of
+            (True, False) -> -- case 1: a_beg <= b_beg <= a_end <= b_end
+              pure $ Just $ fPOR (anms, abnms, bnms) aidx_beg bidx_beg aidx_end bidx_end
+            (False, True) -> -- case 2: a_beg <= b_beg <= b_end <= a_end
+              pure $ Just $ fPOR (anms, abnms, anms) aidx_beg bidx_beg bidx_end aidx_end
+            _ -> pure Nothing
+      else pure Nothing  
+  -- case 3:
   | Sum anm aidx_beg aidx_end <- sym1,
     Sum bnm bidx_beg bidx_end <- sym2,
     anm == bnm && ms1 == ms2 && k1 == 0 - k2 = do
       -- \^ possible match for simplifying: Sum(A[b1:e1]) - Sum(A[b2:e2])
       --   assumes both begin and end index are inclusive
+  success <- checkOverlappingSums (aidx_beg, aidx_end) (bidx_beg, bidx_end)
+  case success of
+    (True, False) -> -- case 1: a_beg <= b_beg <= a_end <= b_end
+      pure $ Just $ f (anm, k2) aidx_beg bidx_beg aidx_end bidx_end
+    (False, True) -> -- case 2: a_beg <= b_beg <= b_end <= a_end
+      pure $ Just $ f (anm, k1) aidx_beg bidx_beg bidx_end aidx_end
+    _ -> pure Nothing
+{--
       succ_1_1 <- aidx_beg FM.$<=$ bidx_beg
       succ_1_2 <- bidx_beg FM.$<=$ aidx_end
       succ_1_3 <- aidx_end FM.$<=$ bidx_end
@@ -140,23 +175,50 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
               f (aidx_beg, bidx_beg .-. int2SoP 1) (aidx_end .+. int2SoP 1, bidx_end) (anm, k1, k2, k2)
         else do
           succ_2_1 <- bidx_end FM.$<=$ aidx_end
-          succ_2_2 <- bidx_beg FM.$<=$ bidx_end
+          succ_2_2 <- bidx_beg FM.$<=$ (bidx_end .+. int2SoP 1)
           if succ_1_1 && succ_2_1 && succ_2_2
             then -- case: a_beg <= b_beg <= b_end <= a_end
-            -- results in: Sum(A[a_beg:b_beg-1]) + Sum(A[b_beg+1,a_end])
+            -- results in: Sum(A[a_beg:b_beg-1]) + Sum(A[b_end+1,a_end])
 
               pure $
                 Just $
                   f (aidx_beg, bidx_beg .-. int2SoP 1) (bidx_end .+. int2SoP 1, aidx_end) (anm, k1, k1, k2)
             else pure Nothing
+--}
+--
   where
-    f (beg1, end1) (beg2, end2) (anm, k11, k12, k22) =
-      -- only k12 seems to be needed as parameter
-      let trm1 = Term $ MS.insert (Sum anm beg1 end1) $ getTerm ms1
-          trm2 = Term $ MS.insert (Sum anm beg2 end2) $ getTerm ms1
-          sop_new = SoP $ M.insert trm1 k11 $ M.singleton trm2 k12 -- the first is always k1
-          sop_old = mkOrigTerms (sym1, sym2) (ms1, k11, k22) -- this is always k1, k2
+    checkOverlappingSums (aidx_beg, aidx_end) (bidx_beg, bidx_end) = do
+      succ_1_1 <- aidx_beg FM.$<=$ bidx_beg
+      succ_1_2 <- bidx_beg FM.$<=$ aidx_end
+      succ_1_3 <- aidx_end FM.$<=$ bidx_end
+      if succ_1_1 && succ_1_2 && succ_1_3
+        then -- overlap case: a_beg <= b_beg <= a_end <= b_end
+             pure (True, False)
+        else do
+          succ_2_1 <- bidx_end FM.$<=$ aidx_end
+          succ_2_2 <- bidx_beg FM.$<=$ (bidx_end .+. int2SoP 1)
+          pure (False, succ_1_1 && succ_2_1 && succ_2_2)
+          -- \^ overlap case: a_beg <= b_beg <= b_end <= a_end
+    --
+    fPOR (nm1, nm2, nm3) a_0 a_1 a_2 a_3 =
+    -- \^ assumes a0 <= a1 <= a2 <= a3 and constructs a three-sum new sop
+      let sum1 = Sum (POR nm1) a_0 (a_1 .-. sop_one)
+          sum2 = Sum (POR nm2) a_1 a_2
+          sum3 = Sum (POR nm3) (a_2 .+. sop_one) a_3
+          trms = map insertInTerm [sum1, sum2, sum3]
+          sop_new = SoP $ foldl (\acc trm -> M.insert trm k1 acc) M.empty trms
+          sop_old = mkOrigTerms (sym1, sym2) (ms1, k1, k2)
+      in  (sop_new, sop_old)
+    --
+    f (anm, k12) a_0 a_1 a_2 a_3 =
+      let sum1 = Sum anm a_0 (a_1 .-. sop_one)
+          sum2 = Sum anm (a_2 .+. sop_one) a_3
+          (trm1, trm2) = (insertInTerm sum1, insertInTerm sum2)
+          sop_new = SoP $ M.insert trm1 k1 $ M.singleton trm2 k12
+          sop_old = mkOrigTerms (sym1, sym2) (ms1, k1, k2)
        in (sop_new, sop_old)
+    --
+    insertInTerm sym = Term $ MS.insert sym $ getTerm ms1
 --
 matchUniteSums _ _ = pure Nothing
 

@@ -4,7 +4,8 @@
 --   or end of sum-of-slices.
 module Futhark.Analysis.Proofs.AlgebraPC.UnaryRules
   ( simplifyPows,
-    simplifyOneSum,
+    simplifyOneSumBef,
+    simplifyOneSumAft
   )
 where
 
@@ -15,7 +16,7 @@ import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.SoP.SoP
-import Futhark.SoP.Monad (MonadSoP, getEquivs)
+import Futhark.SoP.Monad (MonadSoP, getEquivs)  -- lookupRange
 import Futhark.SoP.FourierMotzkin qualified as FM
 
 
@@ -33,7 +34,7 @@ simplifyPows simplifyLevel sop = do
   lst <- mapM simplifyTerm $ M.toList $ getTerms sop
   pure $ normalize $ SoP $ foldl ff M.empty lst
   -- pure $ SoP $ M.fromList lst   -- BIG BUG!!!
-  -- pure $ foldl (.+.) (int2SoP 0) $ map (\ (t,i) -> term2SoP t i) lst
+  -- pure $ foldl (.+.) sop_zero $ map (\ (t,i) -> term2SoP t i) lst
   where
     ff acc (t,i) =
       case M.lookup t acc of
@@ -79,31 +80,112 @@ combineSamePow (q, tab) (b, sop) =
       getPowOfFactorTR (qq `div` bb) bb (pr + 1)
 
 ---------------------------------------------------------------
---- 2. Simplification of each (individual) slice sum:       ---
+--- 2. Pre Simplification of each (individual) slice sum:   ---
+---      i.e., before applying binary simplifications       ---
+---    2.1. sum x[lb .. ub] => 0     whenever lb  > ub      ---
+---    2.2. uniting a "potentially nicely-empty slice" with ---
+---           a first/last known element. This requires FM  ---
+---           to check nicety:  ub - lb + 1 >= 0            ---
+---------------------------------------------------------------
+
+sop_one :: SoP Symbol
+sop_one = int2SoP 1
+
+type FoldFunTp m =
+      Maybe (SoP Symbol, Symbol) ->
+      (Symbol, Int) ->
+      m (Maybe (SoP Symbol, Symbol))
+
+simplifyOneSumBef ::
+  (MonadSoP Symbol e p m) => SoP Symbol -> m (Bool, SoP Symbol)
+simplifyOneSumBef sop = do
+  equivs <- getEquivs
+  sop'   <- elimEmptySums sop
+  (success, sop'') <- unaryOpOnSumFP (hasUnitingSums equivs) uniteSumSym sop'
+  pure (success, sop'')
+
+hasUnitingSums :: M.Map Symbol (SoP Symbol) -> (SoP Symbol) -> Bool
+hasUnitingSums equivs =
+  any hasUnitingSumSym . S.toList . free
+  where
+    hasUnitingSumSym (Sum (POR nms) beg end)
+      | S.size nms > 1 =
+      any hasUnitingSumSym $
+        map (\nm -> Sum (POR (S.singleton nm)) beg end) $
+        S.toList nms
+    hasUnitingSumSym (Sum nm beg end) =
+      isJust (M.lookup (Idx nm (beg .-. sop_one)) equivs)
+        || isJust (M.lookup (Idx nm (end .+. sop_one)) equivs)
+    hasUnitingSumSym _ = False
+
+uniteSumSym :: (MonadSoP Symbol e p m) => FoldFunTp m
+uniteSumSym acc@(Just {}) _ = pure acc
+uniteSumSym Nothing (sym@(Sum nm beg end), 1) = do
+  -- \^ ToDo: extend for any multiplicity >= 1
+  equivs <- getEquivs
+  valid_slice <- beg FM.$<=$ (end .+. sop_one)
+  let beg_m_1 = beg .-. sop_one
+      end_p_1 = end .+. sop_one
+      -- \^ do we need to further simplify these?
+  mfst_el <- getEquivSoP equivs $ Idx nm beg_m_1
+  mlst_el <- getEquivSoP equivs $ Idx nm end_p_1
+  case (valid_slice, mfst_el, mlst_el) of
+    (False, _, _) ->
+      pure Nothing
+    (True, Just fst_el, Nothing) -> do
+      let new_sum = Sum nm beg_m_1 end
+      pure $ Just (sym2SoP new_sum .-. fst_el, sym)
+    (True, Nothing, Just lst_el) -> do
+      let new_sum = Sum nm beg end_p_1
+      pure $ Just (sym2SoP new_sum .-. lst_el, sym)
+    (True, Just fst_el, Just lst_el) -> do
+      let new_sum = Sum nm beg_m_1 end_p_1
+      pure $ Just (sym2SoP new_sum .-. (fst_el .+. lst_el), sym)
+    (True, Nothing, Nothing) -> pure Nothing
+  where 
+    nm2PORsym ind arr_nm = Idx (POR (S.singleton arr_nm)) ind
+    getEquivSoP equivs (Idx (POR nms) ind_sop)
+      | syms  <- map (nm2PORsym ind_sop) $ S.toList nms,
+        eq_vs <- mapMaybe (`M.lookup` equivs) syms,
+        not (null eq_vs),
+        eq_v <- head eq_vs =
+        -- (k > 0 && eq_v == sop_one) || (k < 0 && eq_v == sop_zero) =
+      pure $ Just eq_v
+    getEquivSoP equivs symb@Idx{} =
+      pure $ M.lookup symb equivs
+{--
+      | Just eq_v <- M.lookup symb equivs = do
+      Range elm_lb m elm_ub <- lookupRange $ Var arr_nm
+      let elm_bds = if k > 0 then elm_ub else elm_lb
+          eq_v_m = if m == 1 then eq_v else eq_v .*. int2SoP m
+      if any (== eq_v_m) $ S.toList elm_bds
+      -- \^ ToDo: here we should check by means of Fourier-Motzking
+      --      (1) In k*t > 0 case: any (eq_v FM.$>=$ ub) elm_ub 
+      --      (2) In k*t < 0 case: any (eq_v FM.$<=$ lb) elm_lb
+      then pure $ Just eq_v
+      else pure Nothing
+--}
+    getEquivSoP _ _ =
+      pure Nothing
+uniteSumSym Nothing _ = pure Nothing
+
+---------------------------------------------------------------
+--- 2. Post Simplification of each (individual) slice sum:  ---
 ---    2.1. sum x[lb .. ub] => 0     whenever lb  > ub      ---
 ---    2.2. sum x[lb .. ub] => x[lb] whenever lb == ub      ---
 ---    2.3. peeling off first/last known elements of a sum  ---
+---         ToDo: this case requires checking that slice is ---
+---               not empty by FM.                          ---
 ---------------------------------------------------------------
 
-simplifyOneSum ::
+simplifyOneSumAft ::
   (MonadSoP Symbol e p m) => SoP Symbol -> m (Bool, SoP Symbol)
-simplifyOneSum sop = do
+simplifyOneSumAft sop = do
   equivs <- getEquivs
   sop' <- elimEmptySums sop
   let (succ1, sop'') = transfSum2Idx sop'
-  let (succ2, sop''')= peelOffSumsFP equivs sop''
+  (succ2, sop''') <- unaryOpOnSumFP (hasPeelableSums equivs) peelSumSymb sop''
   pure (succ1 || succ2, sop''')
-
-elimEmptySums :: 
-  (MonadSoP Symbol e p m) => SoP Symbol -> m (SoP Symbol)
-elimEmptySums sop = do
-  sopFromList <$> (filterM predTerm $ sopToList sop)
-  where
-    emptySumSym (Sum _ lb ub) = lb FM.$>$ ub
-    emptySumSym _ = pure False
-    predTerm (Term ms, _) = do
-      tmps <- mapM (emptySumSym . fst) $ MS.toOccurList ms
-      pure $ all not tmps
 
 transfSum2Idx :: SoP Symbol -> (Bool, SoP Symbol)
 transfSum2Idx sop
@@ -118,54 +200,83 @@ transfSum2Idx sop
     sum2Idx _ = error "Unreachable case reached in transfSum2Idx."
 transfSum2Idx sop = (False, sop)
 
-peelOffSumsFP :: M.Map Symbol (SoP Symbol) -> SoP Symbol -> (Bool, SoP Symbol)
-peelOffSumsFP equivs sop
-  | hasPeelableSums sop =
-      case peelOffSums equivs sop of
-        (False, _) -> (False, sop)
-        (True, sop') ->
-          -- fix point
-          let (_, sop'') = peelOffSumsFP equivs sop'
-          in  (True, sop'')
+hasPeelableSums :: M.Map Symbol (SoP Symbol) -> (SoP Symbol) -> Bool
+hasPeelableSums equivs =
+  any hasPeelableSumSym . S.toList . free
   where
-    hasPeelableSums = any hasPeelableSumSym . S.toList . free
     hasPeelableSumSym (Sum nm beg end) =
       isJust (M.lookup (Idx nm beg) equivs)
         || isJust (M.lookup (Idx nm end) equivs)
     hasPeelableSumSym _ = False
---
-peelOffSumsFP _ sop = (False, sop)
 
-peelOffSums :: M.Map Symbol (SoP Symbol) -> SoP Symbol -> (Bool, SoP Symbol)
-peelOffSums equivs sop = do
-  case foldl peelTerm Nothing (M.toList (getTerms sop)) of
-    Nothing -> (False, sop)
-    Just (old_term_sop, new_sop) ->
-      (True, (sop .-. old_term_sop) .+. new_sop)
+peelSumSymb :: (MonadSoP Symbol e p m) => FoldFunTp m
+peelSumSymb acc@(Just {}) _ = pure acc
+peelSumSymb Nothing (sym@(Sum nm beg end), 1) = do
+  -- \^ ToDo: extend for any multiplicity >= 1
+  equivs <- getEquivs
+  non_empty_slice <- beg FM.$<=$ end
+  let mfst_el = M.lookup (Idx nm beg) equivs
+      mlst_el = M.lookup (Idx nm end) equivs
+  case (non_empty_slice, mfst_el, mlst_el) of
+    (False, _, _) ->
+      pure Nothing
+    (True, Just fst_el, Nothing) -> do
+      let new_sum = Sum nm (beg .+. sop_one) end
+      pure $ Just (fst_el .+. sym2SoP new_sum, sym)
+    (True, Nothing, Just lst_el) -> do
+      let new_sum = Sum nm beg (end .-. sop_one)
+      pure $ Just (lst_el .+. sym2SoP new_sum, sym)
+    (True, Just fst_el, Just lst_el) -> do
+      let new_sum = Sum nm (beg .+. sop_one) (end .-. sop_one)
+      pure $ Just (fst_el .+. lst_el .+. sym2SoP new_sum, sym)
+    (True, Nothing, Nothing) -> pure Nothing
+peelSumSymb Nothing _ = pure Nothing
+
+----------------------------------------
+--- Common Infrastructure for Unary  ---
+--- Simplifications of Sum of Slice  ---
+----------------------------------------
+
+elimEmptySums :: 
+  (MonadSoP Symbol e p m) => SoP Symbol -> m (SoP Symbol)
+elimEmptySums sop = do
+  sopFromList <$> (filterM predTerm $ sopToList sop)
   where
-    peelTerm acc@(Just {}) _ = acc
-    peelTerm Nothing (t, k) =
-      let mres = foldl peelSymb Nothing $ MS.toOccurList $ getTerm t
-       in case mres of
-            Nothing -> Nothing
-            Just (sop_sym, sum_sym) ->
-              let ms' = MS.delete sum_sym $ getTerm t
-                  sop' = sop_sym .*. term2SoP (Term ms') k
-               in Just (term2SoP t k, sop')
-    peelSymb acc@(Just {}) _ = acc
-    peelSymb Nothing (sym@(Sum nm beg end), 1) =
-      -- \^ ToDo: extend for any multiplicity >= 1
-      let mfst_el = M.lookup (Idx nm beg) equivs
-          mlst_el = M.lookup (Idx nm end) equivs
-       in case (mfst_el, mlst_el) of
-            (Just fst_el, Nothing) ->
-              let new_sum = Sum nm (beg .+. int2SoP 1) end
-               in Just (fst_el .+. sym2SoP new_sum, sym)
-            (Nothing, Just lst_el) ->
-              let new_sum = Sum nm beg (end .-. int2SoP 1)
-               in Just (lst_el .+. sym2SoP new_sum, sym)
-            (Just fst_el, Just lst_el) ->
-              let new_sum = Sum nm (beg .+. int2SoP 1) (end .-. int2SoP 1)
-               in Just (fst_el .+. lst_el .+. sym2SoP new_sum, sym)
-            (Nothing, Nothing) -> Nothing
-    peelSymb Nothing _ = Nothing
+    emptySumSym (Sum _ lb ub) = lb FM.$>$ ub
+    emptySumSym _ = pure False
+    predTerm (Term ms, _) = do
+      tmps <- mapM (emptySumSym . fst) $ MS.toOccurList ms
+      pure $ all not tmps
+
+unaryOpOnSumFP :: (MonadSoP Symbol e p m) =>
+  (SoP Symbol -> Bool) -> FoldFunTp m -> SoP Symbol -> m (Bool, SoP Symbol)
+unaryOpOnSumFP hasOpOnSym opOnSym sop
+  | hasOpOnSym sop = do
+  res <- unaryOpOnSum opOnSym sop
+  case res of
+    (False, _) -> pure (False, sop)
+    (True, sop') -> do -- fix point
+      (_, sop'') <- unaryOpOnSumFP hasOpOnSym opOnSym sop'
+      pure (True, sop'')
+  where
+unaryOpOnSumFP _ _ sop = pure (False, sop)
+
+unaryOpOnSum :: (MonadSoP Symbol e p m) => FoldFunTp m -> SoP Symbol -> m (Bool, SoP Symbol)
+unaryOpOnSum opOnSym sop = do
+  res <- foldM opOnTerm Nothing (M.toList (getTerms sop))
+  case res of
+    Nothing -> pure (False, sop)
+    Just (old_term_sop, new_sop) ->
+      pure (True, (sop .-. old_term_sop) .+. new_sop)
+  where
+    opOnTerm acc@(Just {}) _ = pure acc
+    opOnTerm Nothing (t, k) = do
+      mres <- foldM opOnSym Nothing $ MS.toOccurList $ getTerm t
+      case mres of
+        Nothing -> pure Nothing
+        Just (sop_sym, sum_sym) -> do
+          let ms' = MS.delete sum_sym $ getTerm t
+              sop' = sop_sym .*. term2SoP (Term ms') k
+          pure $ Just (term2SoP t k, sop')
+
+

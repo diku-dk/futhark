@@ -7,6 +7,7 @@ module Futhark.Analysis.Proofs.AlgebraPC.Symbol
     hasSum,
     hasIdx,
     hasMdf,
+    hasDisjoint,
     hasIdxOrSum,
     hasMon,
     getVName,
@@ -126,6 +127,16 @@ hasMon props
     f (Monotonic _) = True
     f _ = False
 hasMon _ = Nothing
+
+hasDisjoint :: S.Set Property -> Maybe (S.Set VName)
+hasDisjoint props
+  | S.null props = Nothing
+  | PairwiseDisjoint nms : _ <- filter f (S.toList props) =
+    Just nms
+  where
+    f (PairwiseDisjoint{}) = True
+    f _ = False
+hasDisjoint _ = Nothing
 
 getVName :: Symbol -> VName
 getVName (Var vn) = vn
