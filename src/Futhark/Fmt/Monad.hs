@@ -60,7 +60,7 @@ import Control.Monad.State
   )
 import Data.ByteString qualified as BS
 import Data.List.NonEmpty qualified as NE
-import Data.Loc (Loc (..), Located (..), posCoff, posLine)
+import Data.Loc (Loc (..), Located (..), locStart, posCoff, posLine)
 import Data.Maybe (fromMaybe)
 import Data.String
 import Data.Text qualified as T
@@ -150,16 +150,11 @@ fmtByLayout a s m =
             _any -> m
         )
 
--- | This function determines the Layout of @a@ and if it is singleline then it
--- updates the monads enviroment to format singleline style otherwise format using
--- multiline style. It determines this by checking if the location of @a@ spans
--- over two or more lines.
+-- | This function determines the Layout of @a@ and updates the monads
+-- environment to format in the appropriate style. It determines this
+-- by checking if the location of @a@ spans over two or more lines.
 localLayout :: (Located a) => a -> FmtM b -> FmtM b
-localLayout a m = do
-  lo <- ask
-  case lo of
-    MultiLine -> local (const $ fromMaybe lo $ lineLayout a) m
-    SingleLine -> m
+localLayout a = local (\lo -> fromMaybe lo $ lineLayout a)
 
 -- | This function determines the Layout of @[a]@ and if it is singleline then it
 -- updates the monads enviroment to format singleline style otherwise format using
@@ -416,11 +411,19 @@ sepLineComments :: (a -> Loc) -> (a -> Fmt) -> Fmt -> [a] -> Fmt
 sepLineComments floc fmt s =
   sepComments floc fmt (s <> space <|> hardline <> s)
 
--- | This is used for function arguments. It seperates multiline arguments by
--- lines and singleline arguments by spaces.
+-- | This is used for function arguments. It seperates multiline
+-- arguments by lines and singleline arguments by spaces. We specially
+-- handle the case where all the arguments are on a single line except
+-- for the last one, which may continue to the next line.
 sepArgs :: (Located a) => (a -> Fmt) -> NE.NonEmpty a -> Fmt
-sepArgs fmt ls = localLayout ls' $ align $ sep line $ map fmt ls'
+sepArgs fmt ls =
+  localLayout locs $ align' $ sep line $ map fmtArg ls'
   where
+    locs = map (locStart . locOf) ls'
+    align' = case lineLayout locs of
+      Just SingleLine -> id
+      _ -> align
+    fmtArg x = localLayout x $ fmt x
     ls' = NE.toList ls
 
 -- | Nest but with the standard value of two spaces.

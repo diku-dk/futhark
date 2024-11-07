@@ -580,16 +580,20 @@ Exp2 :: { UncheckedExp }
      | Exp2 with FieldAccesses_ '=' Exp2
        { RecordUpdate $1 (map unLoc $3) $5 NoInfo (srcspan $1 $>) }
 
-     | '\\' FunParams1 maybeAscription(TypeExpTerm) '->' Exp %prec letprec
-       { Lambda (fst $2 : snd $2) $5 $3 NoInfo (srcspan $1 $>) }
-
      | ApplyList {% applyExp $1 }
 
 ApplyList :: { NE.NonEmpty UncheckedExp }
           : Atom ApplyList %prec juxtprec
             { NE.cons $1 $2 }
-          | Atom %prec juxtprec
+          | LastArg
             { NE.singleton $1 }
+
+LastArg :: { UncheckedExp }
+        : '\\' FunParams1 maybeAscription(TypeExpTerm) '->' Exp %prec letprec
+          { Lambda (fst $2 : snd $2) $5 $3 NoInfo (srcspan $1 $>) }
+        | Atom %prec juxtprec
+          { $1 }
+
 
 Atom :: { UncheckedExp }
 Atom : PrimLit        { Literal (fst $1) (srclocOf (snd $1)) }

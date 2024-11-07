@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark fmt`, by William Due and Therese Lyngby.
 
+* Lambdas can now be passed as the last argument to a function application.
+
 ### Removed
 
 ### Changed

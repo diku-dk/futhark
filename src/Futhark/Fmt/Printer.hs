@@ -396,7 +396,7 @@ instance Format (AppExpBase NoInfo Name) where
           AppExp If {} _ -> space <> fmt f
           _ -> space <> align (fmt f)
   fmt (Apply f args loc) =
-    addComments loc $ fmt f <+> align fmt_args
+    addComments loc $ fmt f <+> fmt_args
     where
       fmt_args = sepArgs fmt $ fmap snd args
 
