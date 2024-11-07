@@ -1,6 +1,8 @@
+let sum_i64 [n] (xs: [n]i64) = (scan (+) 0 xs)[n-1]
+
 let mk_flag_array 't 'a [m]
-        (shape: {[m]i64 | \shp -> forall shp (>= 0)})
-        (n: {i64 | \n' -> n' == sum shape})
+        (shape: {[m]i64 | elementwise (>= 0)})
+        (n: {i64 | equals (sum_i64 shape)})
         (zero: t)
         (xs: [m]t) : [n]t =
   let shp_rot = map (\ i -> if i==0 then 0 else shape[i-1]) (iota m)
@@ -30,8 +32,8 @@ def sgm_sum [n] 't
 
 -- Expands a shape array to a flat array of segment ids.
 let segment_ids [m]
-      (shape: {[m]i64 | \shp -> forall shp (>= 0)})
-      (n: {i64 | \n' -> n' == sum shape})
+      (shape: {[m]i64 | elementwise (>= 0)})
+      (n: {i64 | equals (sum_i64 shape)})
       : []i64 =
   let flags1 = map (\i -> i + 1) (iota m)
   let flags = mk_flag_array shape n 0i64 flags1

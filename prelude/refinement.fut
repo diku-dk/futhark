@@ -1,3 +1,3 @@
-def forall 'a '^b 'c (_ : a) (_ : b) : c = ???
+def elementwise '^a 'b [n] (_ : a) (_ : [n]b) : bool = ???
 
-def sum 'a [n] (_: [n]a) : a = ???
+def equals 'a 'b (_: a) (_ : b) : bool = ???

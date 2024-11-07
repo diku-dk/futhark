@@ -12,12 +12,13 @@ import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus (repVName, toSumOfSums)
 import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
-import Futhark.Analysis.Proofs.Util (prettyName)
+import Futhark.Analysis.Proofs.Util (prettyName, prettyBinding')
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName)
 import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, prettyString, stack, (<+>))
 import Language.Futhark (VName)
+import Debug.Trace (traceM)
 
 instance Eq Domain where
   -- Since the whole domain must be covered by an index function,
@@ -183,19 +184,21 @@ unifyIndexFnWith _ _ _ _ = fail "Incompatible iterators"
 -- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
 subst :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
 subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
-  debugM
-    ( "🎭 substitute "
-        <> prettyString x
-        <> " for\n"
-        <> prettyString for
-        <> "\ninto\n"
-        <> prettyString into
-    )
+  whenDebug $ traceM $
+      "🎭 substitute\n    "
+        <> prettyBinding' x for
+        <> prettyBinding' ("\n    into _" :: String) into
   i' <- sym2SoP . Var <$> newName i
   vns <- getNameSource
   for' <- rename vns for
   into' <- rename vns into
   subst' x (repIndexFn (mkRep i i') for') (repIndexFn (mkRep j i') into')
+subst x for@(IndexFn (Forall _ _) _) into = do
+  whenDebug $ traceM $
+      "🎭 substitute\n    "
+        <> prettyBinding' x for
+        <> prettyBinding' ("\n    into _" :: String) into
+  subst' x for into
 subst x q r = subst' x q r
 
 -- Assumes that Forall-variables (i) of non-Empty iterators are equal.
@@ -209,6 +212,18 @@ subst' x (IndexFn Empty xs) (IndexFn iter_y ys) =
           (x_cond, x_val) <- casesToList xs
           (y_cond, y_val) <- casesToList ys
           pure $ repCase (mkRep x x_val) (y_cond :&& x_cond, y_val)
+      )
+subst' x_fn (IndexFn (Forall i (Iota _)) xs) (IndexFn Empty ys) =
+  -- Substitute array `x` into scalar `y` (type-checker ensures that this is valid,
+  -- e.g., y is a sum).
+  pure $
+    IndexFn
+      Empty
+      ( cases $ do
+          (x_cond, x_val) <- casesToList xs
+          (y_cond, y_val) <- casesToList ys
+          let rip_x = rip x_fn i x_val
+          pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
       )
 subst' x_fn (IndexFn (Forall i (Iota n)) xs) (IndexFn (Forall _ (Iota n')) ys)
   | n == n' =
@@ -234,7 +249,7 @@ subst' x_fn (IndexFn (Forall i dom_x@(Iota _)) xs) (IndexFn (Forall _ dom_y@(Cat
           let rip_x = rip x_fn i x_val
           pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
       )
-subst' _ _ _ = undefined
+subst' _ x y = error $ "subst': not implemented for " <> prettyString x <> prettyString y
 
 -- TODO Sad that we basically have to copy rep here;
 --      everything but the actual substitutions could be delegated to

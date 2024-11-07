@@ -1,6 +1,6 @@
 let mk_flag_array 't [m]
         (zero: t)
-        (shape: { [m]i64 | \shp -> forall shp (>= 0) })
+        (shape: { [m]i64 | elementwise (>= 0) })
         (xs: [m]t) : []t =
   let shp_rot = map (\ i -> if i==0 then 0 else shape[i-1]) (iota m)
   let shp_scn = scan (+) 0i64 shp_rot

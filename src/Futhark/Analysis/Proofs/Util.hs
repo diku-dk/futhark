@@ -19,6 +19,9 @@ prettyHole x = "•" <> prettyName x
 prettyBinding :: (Pretty a1, Pretty a2) => a1 -> a2 -> String
 prettyBinding a b = docString $ ">>>" <+> pretty a <+> "=" <> line <> "    " <> align (pretty b)
 
+prettyBinding' :: (Pretty a1, Pretty a2) => a1 -> a2 -> String
+prettyBinding' a b = docString $ pretty a <+> "=" <+> align (pretty b)
+
 tracer :: (Pretty a) => a -> a
 tracer x = trace (prettyString x) x
 

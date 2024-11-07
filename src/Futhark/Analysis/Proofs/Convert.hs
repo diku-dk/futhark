@@ -1,26 +1,26 @@
 module Futhark.Analysis.Proofs.Convert where
 
-import Control.Monad (foldM, forM, forM_, unless, void, when)
+import Control.Monad (foldM, forM, forM_, unless, void, when, (<=<))
 import Control.Monad.RWS (gets)
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (($==), toAlgebra, algebraContext)
+import Futhark.Analysis.Proofs.AlgebraBridge (algebraContext, isTrue, toAlgebra, ($<), ($<=), ($==))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, unzipT)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, repIndexFn, subst)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, unzipT)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repIndexFn, subst)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), askQ, isUnknown)
+import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes, orM)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
-import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, unify)
-import Futhark.Analysis.Proofs.Util (prettyBinding)
+import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, rep, unify)
+import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, addRange, addUntrans, mkRangeLB)
-import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP_, negSoP, sym2SoP, (.-.), (~*~), (~+~), (~-~))
+import Futhark.SoP.SoP (SoP, int2SoP, justConstant, justSym, mapSymSoP_, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
@@ -88,11 +88,11 @@ mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 mkIndexFnValBind :: E.ValBind -> IndexFnM IndexFn
 mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
   clearAlgEnv
-  mapM_ handleRefinementTypes params
+  forM_ params addTypeRefinement
   debugPrintAlgEnv
   debugPrettyM "\n====\nmkIndexFnValBind:\n\n" val
   indexfn <- forward body >>= bindfn vn
-  -- insertTopLevel vn (params, indexfn)
+  insertTopLevel vn (params, indexfn)
   _ <- algebraContext indexfn $ do
     alg <- gets algenv
     debugPrettyM "Algebra context for indexfn:\n" alg
@@ -156,7 +156,7 @@ forward (E.TupLit xs _) = do
   vns <- forM fns (\_ -> newVName "f")
   let IndexFn it1 _ = head fns -- TODO probably want to grab most complex iterator here.
   let y = IndexFn it1 (cases [(Bool True, sym2SoP . Tuple $ map (sym2SoP . Var) vns)])
-  foldM substParams y (zip vns fns)
+  substParams y (zip vns fns)
     >>= rewrite
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do
@@ -166,6 +166,7 @@ forward (E.AppExp (E.Index xs' slice _) _)
       case iter_xs of
         Forall j _ -> do
           subst j (IndexFn iter_idx idx) (IndexFn iter_idx xs)
+            >>= rewrite
         _ ->
           error "indexing into a scalar"
 forward (E.Not e _) = do
@@ -222,7 +223,6 @@ forward expr@(E.AppExp (E.Apply f args _) _)
     E.Lambda params body _ _ _ : args' <- getArgs args = do
       -- tell ["Using map rule ", toLaTeX y']
       xss <- mapM forward args'
-      debugPrettyM "map args:" xss
       let IndexFn iter_first_arg _ = head xss
       -- TODO use iter_body; likely needed for nested maps?
       IndexFn iter_body cases_body <- forward body
@@ -236,7 +236,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- Make susbtitutions from function arguments to array names.
       let paramNames :: [E.VName] = concatMap E.patNames params
       let xs :: [IndexFn] = mconcat $ map unzipT xss
-      foldM substParams (IndexFn iter_first_arg cases_body) (zip paramNames xs)
+      substParams (IndexFn iter_first_arg cases_body) (zip paramNames xs)
         >>= rewrite
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
@@ -272,7 +272,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       vns <- mapM (\_ -> newVName "xs") xss
       let IndexFn it1 _ = head xss -- TODO probably want to grab most complex iterator here.
       let y = IndexFn it1 (cases [(Bool True, sym2SoP . Tuple $ map (sym2SoP . Var) vns)])
-      foldM substParams y (zip vns xss)
+      substParams y (zip vns xss)
         >>= rewrite
   | Just fname <- getFun f,
     "unzip" `L.isPrefixOf` fname,
@@ -317,7 +317,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       body <- repIndexFn acc_sub <$> forward lam_body
       h <- newVName "body_hole"
       y <- subst h body (IndexFn iter_xs (cases [(Bool True, sym2SoP $ Var h)]))
-      foldM substParams y (zip paramNames_x (unzipT xs))
+      substParams y (zip paramNames_x (unzipT xs))
         >>= rewrite
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
@@ -374,7 +374,8 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- Safe to do this now:
       let IndexFn (Forall k (Iota m)) _ = inds
       -- Determine which is OOB and which is e1.
-      let isOOB ub = CaseTransform (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
+      let isOOB ub = CaseCheck (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
+      -- let isOOB ub = CaseCheck (\c -> (c $< int2SoP 0) `orM` ((mapping s M.! ub) $<= c))
       (case_idx_seg, p_seg, f_seg) <- do
         case0_is_OOB <- askQ (isOOB vn_f1) inds 0
         case case0_is_OOB of
@@ -388,7 +389,8 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- Check that seg(0) = 0 and that seg is monotonically increasing.
       let x `at_k` i = rep (mkRep k i) x
       let zero :: SoP Symbol = int2SoP 0
-      eq0 <- askQ (CaseTransform (\seg -> seg `at_k` zero :== int2SoP 0)) inds case_idx_seg
+      eq0 <- askQ (CaseCheck (\seg -> seg `at_k` zero :== int2SoP 0)) inds case_idx_seg
+      -- eq0 <- askQ (CaseCheck (\seg -> seg `at_k` zero $== int2SoP 0)) inds case_idx_seg
       when (isUnknown eq0) $ error "scatter: unable to determine segment start"
       debugPrettyM "seg(0) = 0" eq0
       -- Check that seg is monotonically increasing.
@@ -427,14 +429,47 @@ forward expr@(E.AppExp (E.Apply f args _) _)
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
       toplevel <- gets toplevel
       case M.lookup g toplevel of
-        Just (_param_names, _param_sizes, _indexfn) ->
-          -- g is a previously analyzed user-defined top-level function.
-          error "use of top-level defs not implemented yet"
+        Just (pats, indexfn) -> do
+          -- g is a previously analyzed top-level function definiton.
+          whenDebug . traceM $ "✨ Using index fn " <> prettyBinding' g indexfn
+          let param_names = mconcat . map E.patNames $ pats
+          let param_sizes = map (getVName <=< sizeOfTypeBase . E.patternType) pats
+          -- The arguments that the parameters are to be replaced for.
+          arg_fns <- mapM forward args'
+          let arg_sizes = map (getVName <=< sizeOfDomain) arg_fns
+          when (length param_names /= length arg_fns) (error "must be fully applied")
+          -- Size paramters must be replaced as well.
+          unless (map isJust param_sizes == map isJust arg_sizes) (error "sizes don't align")
+          let size_rep =
+                M.fromList $
+                  catMaybes $
+                    zipMaybes param_sizes (fmap (sym2SoP . Var) <$> arg_sizes)
+          -- Check that preconditions are satisfied.
+          preconditions <- mapM getPrecondition pats
+          unless (null preconditions) $
+            debugPrettyM "Checking preconditions!" param_names
+          forM_ (zip3 pats preconditions arg_fns) $ \(pat, pre, fn) -> do
+            ans <- case pre of
+              Nothing -> pure Yes
+              Just check -> check (size_rep, zip param_names arg_fns)
+            unless (isYes ans) . error $
+              "Precondition on " <> prettyString pat <> " not satisfied for " <> prettyString fn
+          -- Construct indexfn.
+          substParams (repIndexFn size_rep indexfn) (zip param_names arg_fns)
+          where
+            getVName x | Just (Var vn) <- justSym x = Just vn
+            getVName _ = Nothing
+
+            sizeOfDomain (IndexFn Empty _) = Nothing
+            sizeOfDomain (IndexFn (Forall _ d) _) =
+              Just $ domainEnd d .-. domainStart d .+. int2SoP 1
+
+            zipMaybes = zipWith (liftA2 (,))
         Nothing -> do
           -- g is a free variable in this expression (probably a parameter
           -- to the top-level function currently being analyzed).
-          params <- mapM forward args'
-          param_names <- forM params (const $ newVName "x")
+          arg_fns <- mapM forward args'
+          arg_names <- forM arg_fns (const $ newVName "x")
           iter <-
             case sizeOfTypeBase return_type of
               Just sz -> do
@@ -448,19 +483,21 @@ forward expr@(E.AppExp (E.Apply f args _) _)
                   { iterator = iter,
                     body =
                       singleCase . sym2SoP $
-                        Apply (Var g) (map (sym2SoP . Var) param_names)
+                        Apply (Var g) (map (sym2SoP . Var) arg_names)
                   }
           debugPrettyM "g_fn:" g_fn
           debugPrettyM2 "g:" g
           let booltype = funPrimTypeIsBool return_type
           when booltype $ addProperty (Algebra.Var g) Algebra.Boolean
-          foldM substParams g_fn (zip param_names params)
+          substParams g_fn (zip arg_names arg_fns)
             >>= rewrite
 forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
 
-substParams :: IndexFn -> (E.VName, IndexFn) -> IndexFnM IndexFn
-substParams y (paramName, paramIndexFn) =
-  subst paramName paramIndexFn y >>= rewrite
+substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
+substParams = foldM substParam
+  where
+    substParam fn (paramName, paramIndexFn) =
+      subst paramName paramIndexFn fn >>= rewrite
 
 cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
 cmap f (Cases xs) = Cases (fmap f xs)
@@ -491,68 +528,70 @@ x ~&&~ y = sym2SoP $ x :&& y
 x ~||~ y = sym2SoP $ x :|| y
 
 --------------------------------------------------------------
--- Vile code.
+-- Handling refinement types.
 --------------------------------------------------------------
--- This function handles type refinements. Type refinements are on the
--- form (arg: {t | \x -> f x}) where arg is applied to \x -> f x.
-handleRefinementTypes ::
-  E.PatBase E.Info E.VName (E.TypeBase dim u) ->
-  IndexFnM (E.PatBase E.Info E.VName (E.TypeBase dim u))
-handleRefinementTypes (E.PatParens pat _) = handleRefinementTypes pat
-handleRefinementTypes (E.PatAscription pat _ _) = handleRefinementTypes pat
-handleRefinementTypes x@(E.Id vn (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) _) = do
-  handleRefinement ref vn
-  pure x
-handleRefinementTypes x = pure x
+type CheckContext = (Replacement Symbol, [(E.VName, IndexFn)])
 
--- This function takes a type refinement \x -> f x and returns a function
--- that handles this refinement when applied to a name (i.e., arg
--- for (arg: {t | \x -> f x})).
---   For example, the refinement \x -> forall x (>= 0) will return
--- a function that takes a name and adds a range with that name
--- lower bounded by 0 to the environment.
-handleRefinement :: E.Exp -> (E.VName -> IndexFnM ())
-handleRefinement (E.Lambda [E.Id x _ _] e _ _ _) =
-  \name -> handleRefinement' name x e
-handleRefinement _ = undefined
+type Check = CheckContext -> IndexFnM Answer
 
-handleRefinement' :: E.VName -> E.VName -> E.Exp -> IndexFnM ()
-handleRefinement' name x (E.AppExp (E.Apply f args _) _)
-  | Just "forall" <- getFun f,
-    [ E.Var (E.QualName _ x') _ _,
-      E.OpSectionRight (E.QualName [] opvn) _ y _ _ _
-      ] <-
-      getArgs args,
-    x == x' = do
-      -- Make sure that lambda arg is applied to forall.
-      case E.baseString opvn of
-        ">=" -> do
-          hole <- sym2SoP . Hole <$> newVName "h"
-          vn <- newVName "x"
-          addUntrans (Algebra.Var vn) (Idx (Var name) hole)
-          addRange (Algebra.Var vn) . mkRangeLB =<< fromExp y
-        _ -> undefined
-handleRefinement' name x (E.AppExp (E.BinOp (op', _) _ (E.Var (E.QualName _ x') _ _, _) (y, _) _) _)
-  | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
-    fn <- E.baseString $ E.qualLeaf op',
-    Just bop <- L.find ((fn ==) . prettyString) [minBound .. maxBound :: E.BinOp],
-    x == x' =
-      case bop of
-        E.Equal ->
-          addEquiv (Algebra.Var name) =<< fromExp y
-        _ -> undefined
-handleRefinement' _ _ _ = pure ()
+type Effect = IndexFnM ()
 
-fromExp :: E.ExpBase E.Info E.VName -> IndexFnM (SoP Algebra.Symbol)
-fromExp (E.IntLit c _ _) =
-  pure $ int2SoP c
-fromExp (E.AppExp (E.Apply f args _) _)
-  | Just "sum" <- getFun f,
-    [arg@(E.Var (E.QualName _ x) _ _)] <- getArgs args =
-      case getSize arg of
-        Just n -> do
-          j <- newVName "j"
-          toAlgebra . sym2SoP $
-            Sum j (int2SoP 0) (n .-. int2SoP 1) (Idx (Var x) $ sym2SoP (Var j))
-        Nothing -> undefined
-fromExp _ = undefined
+getPrecondition :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe Check)
+getPrecondition = fmap (fmap fst) . getRefinement
+
+getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe (Check, Effect))
+getRefinement (E.PatParens pat _) = getRefinement pat
+getRefinement (E.PatAscription pat _ _) = getRefinement pat
+getRefinement (E.Id param (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) _) = do
+  Just <$> mkRef ref
+  where
+    mkRef ((E.AppExp (E.Apply f args _) _))
+      | Just "elementwise" <- getFun f,
+        [E.OpSectionRight (E.QualName [] vn_op) _ y _ _ _] <- getArgs args = do
+          let op = case E.baseString vn_op of
+                ">=" -> (:>=)
+                _ -> undefined
+          y' <- getScalar <$> forward y
+          let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `op` y'
+          let effect = do
+                hole <- sym2SoP . Hole <$> newVName "h"
+                alg_vn <- newVName "x"
+                addUntrans (Algebra.Var alg_vn) (Idx (Var param) hole)
+                addRange (Algebra.Var alg_vn) . mkRangeLB =<< toAlgebra y'
+          pure (check, effect)
+      | Just "equals" <- getFun f,
+        [y] <- getArgs args = do
+          y' <- getScalar <$> forward y
+          let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) :== y'
+          let effect = addEquiv (Algebra.Var param) =<< toAlgebra y'
+          pure (check, effect)
+    mkRef x = error $ "Unhandled refinement predicate " <> show x
+getRefinement _ = pure Nothing
+
+mkCheck :: IndexFn -> CheckContext -> IndexFnM Answer
+mkCheck check_fn (size_rep, param_subst) = do
+  check <- repIndexFn size_rep <$> substParams check_fn param_subst
+  allCases (askQ (CaseCheck sop2Symbol')) check
+  where
+    -- XXX Index functions are integer-valued so known truths get substituted for 1...
+    -- TODO fix this
+    sop2Symbol' sop | Just 1 <- justConstant sop = Bool True
+    sop2Symbol' sop = sop2Symbol sop
+
+toScalarFn :: SoP Symbol -> IndexFn
+toScalarFn x = IndexFn Empty (cases [(Bool True, x)])
+
+getScalar :: IndexFn -> SoP Symbol
+getScalar (IndexFn Empty cs) | [(Bool True, x)] <- casesToList cs = x
+getScalar _ = error "invalid indexfn"
+
+-- This function adds the effects of type refinements to the environment
+-- without checking that they hold.
+-- Use this function on the parameters of top-level definitions, where
+-- refinements are pre-requisites assumed to be true.
+addTypeRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM ()
+addTypeRefinement pat = do
+  ref <- getRefinement pat
+  case ref of
+    Just (_, effect) -> effect
+    _ -> pure ()
