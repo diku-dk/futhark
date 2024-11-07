@@ -19,4 +19,8 @@ def main =
   let x = {a, b, c}
   let {a,b,c} = x
   let {a=a,b=b,c=c} = x
+  let x = {a = a
+          , b =
+              b,
+          c}
   in x
