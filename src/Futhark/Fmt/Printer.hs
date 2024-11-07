@@ -306,8 +306,9 @@ instance Format (AppExpBase NoInfo Name) where
   -- need some way to omit the inital value expression, when this it's trivial
   fmt (Loop sizeparams pat (LoopInitImplicit NoInfo) form loopbody loc) =
     addComments loc $
-      lineIndent pat ("loop" `op` sizeparams') (fmt pat)
-        <+> fmt form
+      ("loop" `op` sizeparams')
+        <+> fmt pat
+        </> fmt form
         <+> "do"
         </> stdIndent (fmt loopbody)
     where
@@ -315,13 +316,14 @@ instance Format (AppExpBase NoInfo Name) where
       sizeparams' = sep nil $ brackets . fmtName bindingStyle . toName <$> sizeparams
   fmt (Loop sizeparams pat (LoopInitExplicit initexp) form loopbody loc) =
     addComments loc $
-      lineIndent
-        initexp
-        ( lineIndent pat ("loop" `op` sizeparams') (fmt pat)
-            <+> "="
-        )
-        (fmt initexp)
-        <+> fmt form
+      ("loop" `op` sizeparams')
+        <+> align
+          ( lineIndent
+              [locOf pat, locOf initexp]
+              (fmt pat <+> "=")
+              (align $ fmt initexp)
+          )
+        </> fmt form
         <+> "do"
         </> stdIndent (fmt loopbody)
     where
