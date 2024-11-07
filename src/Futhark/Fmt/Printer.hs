@@ -227,7 +227,7 @@ instance Format UncheckedExp where
   fmt (Var name _ loc) = addComments loc $ fmtQualName name
   fmt (Hole _ loc) = addComments loc "???"
   fmt (Parens e loc) =
-    addComments loc $ "(" <> stdNest (fmt e) <> ")"
+    addComments loc $ "(" <> align (fmt e) <> ")"
   fmt (QualParens (v, _qLoc) e loc) =
     addComments loc $
       fmtQualName v <> "." <> "(" <> align (fmt e) <> ")"

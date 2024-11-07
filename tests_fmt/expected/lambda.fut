@@ -1,6 +1,6 @@
 def f =
   (\x ->
-      x + 2)
+     x + 2)
 
 def r =
   { x =
@@ -9,7 +9,7 @@ def r =
 
 def h =
   map3 (\x y z ->
-           x + y + z)
+          x + y + z)
        (iota 10)
        (iota 10)
        (iota 10)
