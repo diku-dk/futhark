@@ -55,6 +55,8 @@ fmtParamType (Just n) te =
 fmtParamType Nothing te = fmt te
 
 fmtSumTypeConstr :: (Name, [UncheckedTypeExp]) -> Fmt
+fmtSumTypeConstr (name, []) =
+  "#" <> fmtName mempty name
 fmtSumTypeConstr (name, fs) =
   "#" <> fmtName mempty name <+> sep space (map fmt fs)
 
@@ -98,9 +100,14 @@ instance Format UncheckedTypeExp where
   fmt (TEArrow name te0 te1 loc) =
     addComments loc $ fmtParamType name te0 <+> "->" </> stdIndent (fmt te1)
   fmt (TESum tes loc) =
-    addComments loc $
-      sep (line <> "|" <> space) $
-        map fmtSumTypeConstr tes -- Comments can not be inserted correctly here because names do not have a location.
+    -- Comments can not be inserted correctly here because names do not
+    -- have a location.
+    addComments loc $ fmtByLayout loc singleLine multiLine
+    where
+      singleLine = sep " | " $ map fmtSumTypeConstr tes
+      multiLine = sep line $ zipWith prefix [0 :: Int ..] tes
+      prefix 0 te = "  " <> fmtSumTypeConstr te
+      prefix _ te = "| " <> fmtSumTypeConstr te
   fmt (TEDim dims te loc) =
     addComments loc $ "?" <> dims' <> "." <> fmt te
     where
