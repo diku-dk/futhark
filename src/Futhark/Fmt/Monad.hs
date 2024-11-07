@@ -393,7 +393,7 @@ sepLine s = sep (s <> space <|> hardline <> s)
 comment :: T.Text -> Fmt
 comment c = do
   modify (\s -> s {lastOutput = Just Line})
-  pure $ P.annotate commentStyle (P.pretty c) <> P.line
+  pure $ P.annotate commentStyle (P.pretty (T.stripEnd c)) <> P.line
 
 -- In order to handle trailing comments its VERY important to
 -- evaluate the seperator after each element in the list.
