@@ -32,7 +32,6 @@ module Futhark.Fmt.Monad
     sepDecs,
     fmtByLayout,
     addComments,
-    prependComments,
     sepComments,
     sepLineComments,
     sepLine,
