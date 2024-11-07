@@ -88,6 +88,10 @@ pureTestResults m = do
     collectErrors Success errs = errs
     collectErrors (Failure err) errs = err : errs
 
+-- | The longest we are willing to wait for a test, in microseconds.
+timeout :: Int
+timeout = 5 * 60 * 1000000
+
 withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO [TestResult]) -> TestM ()
 withProgramServer program runner extra_options f = do
   -- Explicitly prefixing the current directory is necessary for
@@ -103,17 +107,13 @@ withProgramServer program runner extra_options f = do
       prog_ctx =
         "Running " <> T.pack (unwords $ binpath : extra_options)
 
-  context prog_ctx $
-    pureTestResults $
-      liftIO $
-        withServer (futharkServerCfg to_run to_run_args) $ \server ->
-          race (threadDelay $ 5 * 60 * 1000000) (f server) >>= \case
-            Left _ -> do
-              abortServer server
-              -- This value won't be used since abortServer will
-              -- already cause a non-zero status for wait.
-              pure undefined
-            Right r -> pure r
+  context prog_ctx . pureTestResults . liftIO $
+    withServer (futharkServerCfg to_run to_run_args) $ \server ->
+      race (threadDelay timeout) (f server) >>= \case
+        Left _ -> do
+          abortServer server
+          fail $ "test timeout after " <> show timeout <> " microseconds"
+        Right r -> pure r
 
 data TestMode
   = -- | Only type check.
