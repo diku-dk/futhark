@@ -111,8 +111,7 @@ repl maybe_prog = do
 -- navigating through the stack frames and such.
 data Breaking = Breaking
   { breakingStack :: NE.NonEmpty I.StackFrame,
-    -- | Index of the current breakpoint (with
-    -- 0 being the outermost).
+    -- | Index of the current breakpoint (with 0 being the outermost).
     breakingAt :: Int
   }
 
