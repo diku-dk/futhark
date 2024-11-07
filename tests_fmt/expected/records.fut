@@ -8,8 +8,9 @@ type b = {a: i32, b: i32}
 type c =
   { a: i32
   , b: i32
-  , c: ( bool -- comment here
-       , bool
+  , c: ( bool
+       , -- comment here
+         bool
        , bool
        )
   }
@@ -21,4 +22,10 @@ def main =
   let x = {a, b, c}
   let {a, b, c} = x
   let {a = a, b = b, c = c} = x
+  let x =
+    { a = a
+    , b =
+        b
+    , c
+    }
   in x

@@ -22,7 +22,7 @@ import Language.Futhark.Parser
   )
 
 lineIndent :: (Located a) => a -> Fmt -> Fmt -> Fmt
-lineIndent l a b = fmtByLayout l (a <+> b) (a </> hardStdIndent b)
+lineIndent l a b = fmtByLayout l (a <+> b) (a </> hardStdIndent (align b))
 
 fmtName :: AnsiStyle -> Name -> Fmt
 fmtName style = text style . nameToText
@@ -85,15 +85,16 @@ fmtArray xs loc =
   addComments loc $ fmtByLayout loc singleLine multiLine
   where
     singleLine = brackets $ sep ", " xs
-    multiLine = align $ "[" <+> sep (line <> "," <> space) xs </> "]"
+    multiLine =
+      align $ "[" <+> sep (line <> "," <> space) xs </> "]"
 
 instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = addComments loc $ fmtQualName v
-  fmt (TETuple ts loc) = fmtTuple (map fmt ts) loc
+  fmt (TETuple ts loc) = fmtTuple (map (align . fmt) ts) loc
   fmt (TEParens te loc) = addComments loc $ parens $ fmt te
   fmt (TERecord fs loc) = fmtRecord (map fmtFieldType fs) loc
     where
-      fmtFieldType (L _ name', t) = fmtName mempty name' <> ":" <+> fmt t
+      fmtFieldType (L _ name', t) = fmtName mempty name' <> ":" <+> align (fmt t)
   fmt (TEArray se te loc) = addComments loc $ fmt se <> fmt te
   fmt (TEUnique te loc) = addComments loc $ "*" <> fmt te
   fmt (TEApply te tArgE loc) = addComments loc $ fmt te <+> fmt tArgE
@@ -166,7 +167,8 @@ instance Format (UncheckedPat t) where
       -- has the same location.
       fmtFieldPat (L nameloc name, t)
         | locOf nameloc == locOf t = fmt name
-        | otherwise = lineIndent [nameloc, locOf t] (fmt name <+> "=") (fmt t)
+        | otherwise =
+            lineIndent [nameloc, locOf t] (fmt name <+> "=") (fmt t)
   fmt (PatParens pat loc) =
     addComments loc $ "(" <> align (fmt pat) <:/> ")"
   fmt (Id name _ loc) = addComments loc $ fmtBoundName name
@@ -236,9 +238,9 @@ instance Format UncheckedExp where
   fmt (Literal _v loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (IntLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (FloatLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
-  fmt (TupLit es loc) = fmtTuple (map fmt es) loc
+  fmt (TupLit es loc) = fmtTuple (map (align . fmt) es) loc
   fmt (RecordLit fs loc) = fmtRecord (map fmt fs) loc
-  fmt (ArrayLit es _ loc) = fmtArray (map fmt es) loc
+  fmt (ArrayLit es _ loc) = fmtArray (map (align . fmt) es) loc
   fmt (StringLit _s loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (Project k e _ loc) = addComments loc $ fmt e <> "." <> fmt k
   fmt (Negate e loc) = addComments loc $ "-" <> fmt e

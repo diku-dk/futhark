@@ -3,6 +3,8 @@
 
 -- another comment
 
-def f x = x + 2
+def f x =
+  (--comment in paren
+   x + 2)
 
 -- and a final one
