@@ -38,6 +38,7 @@ instance FreeVariables Symbol where
     Idx xs i -> fv xs <> fv i
     Sum i lb ub x -> fv lb <> fv ub <> fv x S.\\ S.singleton i
     Apply f xs -> fv f <> mconcat (map fv xs)
+    Tuple xs -> S.unions $ map fv xs
     Bool _ -> mempty
     Not x -> fv x
     x :< y -> fv x <> fv y
@@ -63,6 +64,7 @@ instance Renameable Symbol where
       let tau' = M.insert xn xm tau
       Sum xm <$> rename_ vns' tau' lb <*> rename_ vns' tau' ub <*> rename_ vns' tau' e
     Apply f xs -> Apply <$> rename_ vns tau f <*> rename_ vns tau xs
+    Tuple xs -> Tuple <$> rename_ vns tau xs
     Bool x -> pure $ Bool x
     Not x -> neg <$> rename_ vns tau x
     x :< y -> g (:<) x y
@@ -98,6 +100,7 @@ instance Replaceable Symbol Symbol where
       let s' = addRep i (Var i) s
        in toSumOfSums i (rep s' lb) (rep s' ub) (rep s' t)
     Apply f xs -> sym2SoP $ Apply (sop2Symbol $ rep s f) (map (rep s) xs)
+    Tuple xs -> sym2SoP $ Tuple (map (rep s) xs)
     Bool x -> sym2SoP $ Bool x
     Not x -> sym2SoP . neg . sop2Symbol $ rep s x
     x :< y -> binop (:<) x y
@@ -158,6 +161,8 @@ instance Unify Symbol Symbol where
   unify_ k (Apply f xs) (Apply g ys) = do
     s <- unifies_ k (zip xs ys)
     (s <>) <$> unify_ k (rep s f) (rep s g)
+  unify_ k (Tuple xs) (Tuple ys) =
+    unifies_ k (zip xs ys)
   unify_ _ (Bool x) (Bool y) | x == y = pure mempty
   unify_ k (Not x) (Not y) = unify_ k x y
   unify_ _ Recurrence Recurrence = pure mempty

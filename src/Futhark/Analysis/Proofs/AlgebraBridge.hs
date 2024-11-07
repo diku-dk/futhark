@@ -30,6 +30,9 @@ simplify = astMap m
         }
 
     simplifyAlgebra :: SoP Symbol -> IndexFnM (SoP Symbol)
+    simplifyAlgebra x | Just (Tuple xs) <- justSym x = do
+      ys <- mapM simplifyAlgebra xs
+      pure . sym2SoP $ Tuple ys
     simplifyAlgebra x = rollbackAlgEnv $ do
       y <- toAlgebra x
       z <- Algebra.simplify y

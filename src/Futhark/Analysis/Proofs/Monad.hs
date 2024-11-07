@@ -22,7 +22,7 @@ data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Algebra.Symbol Symbol Algebra.Property,
     indexfns :: M.Map VName IndexFn,
-    toplevel :: M.Map VName ([VName], [Maybe VName], IndexFn),
+    toplevel :: M.Map VName ([E.Pat E.ParamType], IndexFn),
     debug :: Bool
   }
 
@@ -60,10 +60,10 @@ insertIndexFn :: E.VName -> IndexFn -> IndexFnM ()
 insertIndexFn x v =
   modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
 
--- insertTopLevel :: E.VName -> ([E.Pat], IndexFn) -> IndexFnM ()
--- insertTopLevel vn (args, ixfn) =
---   modify $
---     \env -> env {toplevel = M.insert vn (args, ixfn) $ toplevel env}
+insertTopLevel :: E.VName -> ([E.Pat E.ParamType], IndexFn) -> IndexFnM ()
+insertTopLevel vn (args, ixfn) =
+  modify $
+    \env -> env {toplevel = M.insert vn (args, ixfn) $ toplevel env}
 
 clearAlgEnv :: IndexFnM ()
 clearAlgEnv =

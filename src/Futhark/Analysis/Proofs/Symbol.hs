@@ -2,9 +2,8 @@ module Futhark.Analysis.Proofs.Symbol where
 
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, justSym)
-import Futhark.Util.Pretty (Pretty, apply, brackets, enclose, parens, pretty, (<+>))
+import Futhark.Util.Pretty (Pretty, apply, brackets, enclose, parens, pretty, (<+>), prettyString, commasep)
 import Language.Futhark (VName)
-import Futhark.Util.Pretty (prettyString)
 
 data Symbol
   = Var VName
@@ -18,6 +17,7 @@ data Symbol
       (SoP Symbol) -- upper bound
       Symbol
   | Apply Symbol [SoP Symbol] -- First argument is Var or Hole.
+  | Tuple [SoP Symbol]
   | Bool Bool
   | Not Symbol
   | SoP Symbol :< SoP Symbol
@@ -98,6 +98,7 @@ instance Pretty Symbol where
         <> " "
         <> autoParens e
     Apply f xs -> pretty f <> apply (map pretty xs)
+    Tuple xs -> parens (commasep $ map pretty xs)
     Bool x -> pretty x
     Not x -> "¬" <> autoParens x
     x :< y -> prettyOp "<" x y
@@ -106,12 +107,11 @@ instance Pretty Symbol where
     x :>= y -> prettyOp "≥" x y
     x :== y -> prettyOp "=" x y
     x :/= y -> prettyOp "≠" x y
-    x :&& y -> prettyOp "∧" x y
+    x :&& y -> autoParens x <+> "^" <+> autoParens y
     x :|| y -> prettyOp "∨" x y
     Recurrence -> "↺ "
     where
       autoParens x@(Var _) = pretty x
       autoParens x@(Hole _) = pretty x
       autoParens x = parens (pretty x)
-      iversonbrackets = enclose "⟦" "⟧"
       prettyOp s x y = pretty x <+> s <+> pretty y

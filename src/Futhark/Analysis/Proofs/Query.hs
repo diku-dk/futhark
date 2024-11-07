@@ -7,7 +7,10 @@ module Futhark.Analysis.Proofs.Query
     Property (..),
     askQ,
     prove,
+    isYes,
     isUnknown,
+    orM,
+    allCases,
   )
 where
 
@@ -15,7 +18,7 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, addRelSymbol, assume, rollbackAlgEnv, ($<), ($<=), ($>), isTrue, simplify, ($>=))
+import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, addRelSymbol, assume, rollbackAlgEnv, ($<), ($<=), ($>), isTrue, simplify, ($>=), ($==), ($/=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (Iota), IndexFn (..), Iterator (..), casesToList, getCase)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrintAlgEnv, debugT, debugM)
@@ -33,7 +36,22 @@ data MonoDir = Inc | IncStrict | Dec | DecStrict
 data Query
   = CaseIsMonotonic MonoDir
   | -- Apply transform to case value, then check whether it simplifies to true.
-    CaseTransform (SoP Symbol -> Symbol)
+    CaseCheck (SoP Symbol -> Symbol)
+
+check :: Symbol -> IndexFnM Answer
+check (a :&& b) = check a `andM` check b
+check (a :|| b) = check a `orM` check b
+check (a :== b) = a $== b
+check (a :/= b) = a $/= b
+check (a :> b) = a $> b
+check (a :>= b) = a $>= b
+check (a :< b) = a $< b
+check (a :<= b) = a $<= b
+check a = isTrue a
+
+allCases :: (IndexFn -> Int -> IndexFnM Answer) -> IndexFn -> IndexFnM Answer
+allCases query fn@(IndexFn _ cs) =
+  allM $ zipWith (\_ i -> query fn i) (casesToList cs) [0..]
 
 -- | Answers a query on an index function case.
 askQ :: Query -> IndexFn -> Int -> IndexFnM Answer
@@ -42,7 +60,7 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
   addRelIterator it
   assume p
   case query of
-    CaseTransform transf -> isTrue $ transf q
+    CaseCheck transf -> check (transf q)
     CaseIsMonotonic dir ->
       case it of
         Forall i _ -> do
@@ -189,7 +207,7 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
                       bug1 (int2SoP 0 $<= f @ i) `andM` bug2 (f @ i $< n)
                   )
                   branches
-          foldl1 andM within_bounds `andM` no_overlap
+          allM within_bounds `andM` no_overlap
   where
     f @ x = rep (mkRep iter (Var x)) f
 prove (PermutationOfZeroTo {}) _ = pure Unknown
@@ -216,6 +234,10 @@ sorted cmp wat = runMaybeT $ quicksort wat
 i +< j = do
   addRange (Algebra.Var i) (mkRangeUB (sym2SoP (Algebra.Var j) .-. int2SoP 1))
 
+isYes :: Answer -> Bool
+isYes Yes = True
+isYes _ = False
+
 isUnknown :: Answer -> Bool
 isUnknown Unknown = True
 isUnknown _ = False
@@ -236,3 +258,6 @@ orM m1 m2 = do
   case a1 of
     Yes -> pure Yes
     Unknown -> m2
+
+allM :: [IndexFnM Answer] -> IndexFnM Answer
+allM = foldl1 andM

@@ -1,0 +1,22 @@
+-- A transformation unzipping bindings of tuple results that
+-- are not direct applications of zip. For example,
+--  let flags_ys =
+--    scan (\(x_flag,x) (y_flag,y) ->
+--           (x_flag || y_flag,
+--            if y_flag then y else x + y))
+--         (false, 0i64)
+--         zipped
+-- Becomes
+--  let flags_ys0 =
+--    (scan (\(x_flag,x) (y_flag,y) ->
+--           (x_flag || y_flag,
+--            if y_flag then y else x + y))
+--          (false, 0i64)
+--          zipped).0
+--  let flags_ys1 =
+--    (scan (\(x_flag,x) (y_flag,y) ->
+--           (x_flag || y_flag,
+--            if y_flag then y else x + y))
+--          (false, 0i64)
+--          zipped).1
+-- let flags_ys = zip flags_ys0 flags_ys1
