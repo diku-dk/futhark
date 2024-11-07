@@ -98,7 +98,10 @@ instance Format UncheckedTypeExp where
   fmt (TEUnique te loc) = addComments loc $ "*" <> fmt te
   fmt (TEApply te tArgE loc) = addComments loc $ fmt te <+> fmt tArgE
   fmt (TEArrow name te0 te1 loc) =
-    addComments loc $ fmtParamType name te0 <+> "->" </> stdIndent (fmt te1)
+    addComments loc $
+      fmtParamType name te0 </> "->" <+> case te1 of
+        TEArrow {} -> fmt te1
+        _ -> align (fmt te1)
   fmt (TESum tes loc) =
     -- Comments can not be inserted correctly here because names do not
     -- have a location.
@@ -170,9 +173,10 @@ instance Format (UncheckedPat t) where
   fmt (Wildcard _t loc) = addComments loc "_"
   fmt (PatAscription pat t loc) = addComments loc $ fmt pat <> ":" <+> fmt t
   fmt (PatLit _e _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
+  fmt (PatConstr n _ [] loc) =
+    addComments loc $ "#" <> fmt n
   fmt (PatConstr n _ pats loc) =
-    addComments loc $
-      "#" <> fmt n </> align (sep line (map fmt pats))
+    addComments loc $ "#" <> fmt n </> align (sep line (map fmt pats))
   fmt (PatAttr attr pat loc) = addComments loc $ fmt attr <+> fmt pat
 
 instance Format (FieldBase NoInfo Name) where
@@ -272,6 +276,8 @@ instance Format UncheckedExp where
     addComments loc $ parens ("." <> idxs')
     where
       idxs' = brackets $ sep ("," <> space) $ map fmt idxs
+  fmt (Constr n [] _ loc) =
+    addComments loc $ "#" <> fmt n
   fmt (Constr n cs _ loc) =
     addComments loc $ "#" <> fmt n <+> align (sep line $ map fmt cs)
   fmt (Attr attr e loc) = addComments loc $ align $ fmt attr </> fmt e
@@ -477,11 +483,11 @@ instance Format UncheckedSpec where
         | null ps = fmtName bindingStyle name
         | otherwise = fmtName bindingStyle name </> align (sep line $ map fmt ps)
   fmt (ValSpec name ps te _ doc loc) =
-    addComments loc $ fmt doc <> "val" <+> sub <+> ":" <+> fmt te
+    addComments loc $ fmt doc <> "val" <+> sub <+> ":" </> stdIndent (fmt te)
     where
       sub
         | null ps = fmtName bindingStyle name
-        | otherwise = fmtName bindingStyle name </> align (sep line $ map fmt ps)
+        | otherwise = fmtName bindingStyle name <+> align (sep line $ map fmt ps)
   fmt (ModSpec name mte doc loc) =
     addComments loc $ fmt doc <> "module" <+> fmtName bindingStyle name <> ":" <+> fmt mte
   fmt (IncludeSpec mte loc) = addComments loc $ "include" <+> fmt mte
