@@ -8,6 +8,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
+import Control.Applicative (liftA2)
 import Futhark.Analysis.Proofs.AlgebraBridge (algebraContext, isTrue, toAlgebra, ($<), ($<=), ($==))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, unzipT)
