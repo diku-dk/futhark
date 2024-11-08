@@ -168,8 +168,8 @@ rulesIndexFn = do
               { iterator = Forall i (Cat k (hole m) (hole b)),
                 body =
                   cases
-                    [ (hole i :== int 0, hole h1),
-                      (hole i :/= int 0, sym2SoP Recurrence)
+                    [ (hole i :== hole b, hole h1),
+                      (hole i :/= hole b, sym2SoP Recurrence)
                     ]
               },
           -- Indexing variable i replaced by b in e1.
