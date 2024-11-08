@@ -8,11 +8,12 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Control.Applicative (liftA2)
+import Control.Applicative (liftA2) --- XXX Comin's version of GHC needs this.
 import Futhark.Analysis.Proofs.AlgebraBridge (algebraContext, isTrue, toAlgebra, ($<), ($<=), ($==))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, unzipT)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repIndexFn, subst)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repIndexFn)
+import Futhark.Analysis.Proofs.Substitute (($$))
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes, orM)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
@@ -166,7 +167,7 @@ forward (E.AppExp (E.Index xs' slice _) _)
       IndexFn iter_xs xs <- forward xs'
       case iter_xs of
         Forall j _ -> do
-          subst j (IndexFn iter_idx idx) (IndexFn iter_idx xs)
+          IndexFn iter_idx xs $$ (j, IndexFn iter_idx idx)
             >>= rewrite
         _ ->
           error "indexing into a scalar"
@@ -183,8 +184,8 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
       a <- newVName "a"
       b <- newVName "b"
       let doOp op =
-            subst a vx (IndexFn iter_x (singleCase $ op (Var a) (Var b)))
-              >>= subst b vy
+            IndexFn iter_x (singleCase $ op (Var a) (Var b)) $$ (a, vx)
+              >>= ($$ (b, vy))
               >>= rewrite
       case bop of
         E.Plus -> doOp (~+~)
@@ -214,9 +215,9 @@ forward (E.AppExp (E.If c t f _) _) = do
                 (neg $ Var cond, sym2SoP $ Var f_branch)
               ]
           )
-  subst cond (IndexFn iter_c c') y
-    >>= subst t_branch vt
-    >>= subst f_branch vf
+  y $$ (cond, IndexFn iter_c c')
+    >>= ($$ (t_branch, vt))
+    >>= ($$ (f_branch, vf))
     >>= rewrite
 forward expr@(E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
@@ -305,7 +306,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
                   ]
               )
       -- tell ["Using scan rule ", toLaTeX y]
-      subst x (IndexFn iter_xs xs) y
+      y $$ (x, IndexFn iter_xs xs)
         >>= rewrite
   | Just "scan" <- getFun f,
     [E.Lambda params lam_body _ _ _, _ne, lam_xs] <- getArgs args,
@@ -317,7 +318,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       let acc_sub = M.fromList (map (,sym2SoP Recurrence) paramNames_acc)
       body <- repIndexFn acc_sub <$> forward lam_body
       h <- newVName "body_hole"
-      y <- subst h body (IndexFn iter_xs (cases [(Bool True, sym2SoP $ Var h)]))
+      y <- IndexFn iter_xs (cases [(Bool True, sym2SoP $ Var h)]) $$ (h, body)
       substParams y (zip paramNames_x (unzipT xs))
         >>= rewrite
   | Just "scatter" <- getFun f,
@@ -421,8 +422,8 @@ forward expr@(E.AppExp (E.Apply f args _) _)
                       (neg p, sym2SoP $ Apply (Var dest_hole) [sVar i])
                     ]
               }
-      subst vals_hole vals fn
-        >>= subst dest_hole dest
+      fn $$ (vals_hole, vals)
+        >>= ($$ (dest_hole, dest))
         >>= rewrite
   -- Applying other functions, for instance, user-defined ones.
   | (E.Var (E.QualName [] g) info _) <- f,
@@ -498,7 +499,7 @@ substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM Index
 substParams = foldM substParam
   where
     substParam fn (paramName, paramIndexFn) =
-      subst paramName paramIndexFn fn >>= rewrite
+      (fn $$ (paramName, paramIndexFn)) >>= rewrite
 
 cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
 cmap f (Cases xs) = Cases (fmap f xs)

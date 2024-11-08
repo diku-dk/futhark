@@ -150,6 +150,7 @@ library
       Futhark.Analysis.Proofs.Query
       Futhark.Analysis.Proofs.Rewrite
       Futhark.Analysis.Proofs.Rule
+      Futhark.Analysis.Proofs.Substitute
       Futhark.Analysis.Proofs.Symbol
       Futhark.Analysis.Proofs.SymbolPlus
       Futhark.Analysis.Proofs.Traversals
