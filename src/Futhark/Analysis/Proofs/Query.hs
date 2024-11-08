@@ -148,7 +148,7 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
               ( \(p, f) -> rollbackAlgEnv $ do
                   addRelIterator (Forall i (Iota n))
                   assume (fromJust . justSym $ p @ i)
-                  debugPrettyM "within bounds" (p @ i :: SoP Symbol)
+                  debugPrettyM "within bounds for case:" (p @ i :: SoP Symbol)
                   debugPrintAlgEnv
                   let bug1 = debugT ("0 <= " <> prettyString (f @ i :: SoP Symbol))
                   let bug2 = debugT ("n >  " <> prettyString (f @ i :: SoP Symbol))

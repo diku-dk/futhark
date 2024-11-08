@@ -9,7 +9,7 @@ import Futhark.Analysis.Proofs.AlgebraBridge.Translate (isBooleanM, toAlgebra, t
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrettyM2)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Monad (addEquiv, addRange, mkRange)
@@ -112,7 +112,7 @@ convFME :: (SoP Algebra.Symbol -> SoP Algebra.Symbol -> IndexFnM Bool) -> SoP Sy
 convFME op x y = do
   a <- toAlgebra x
   b <- toAlgebra y
-  -- debugPrettyM "FME" (a, b)
+  -- debugPrettyM2 "FME" (a, b)
   ans <- a `op` b
   pure $ if ans then Yes else Unknown
 
