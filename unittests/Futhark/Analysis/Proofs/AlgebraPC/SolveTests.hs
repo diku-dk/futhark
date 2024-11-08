@@ -190,6 +190,22 @@ tests =
               (sum1 ~+~ sum2) FM.$<$ sVar n
           )
           @??= True,
+      testCase "Partition3 within bounds: case >= 0" $
+        run
+          ( do
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              let pc = POR $ S.singleton c0 -- conds[i] == 1
+              let pd = POR $ S.singleton d0 -- conds[i] == 2
+              -- We are in the case for conds[i] == 2.
+              addEquiv (Idx pd (sVar i1)) (int 1)
+              -- Add: idx1 <=> not idx2
+              addProperty (Var c0) (PairwiseDisjoint (S.singleton d0))
+              addProperty (Var d0) (PairwiseDisjoint (S.singleton c0))
+              let sum1 = Sum pc (int 0) (sVar n .-. int 1)
+                  sum2 = Sum pd (int 0) (sVar i1 .-. int 1)
+              int 0 FM.$<=$ (sum1 ~+~ sum2)
+          )
+          @??= True,
       testCase "Partition3 branch comparison" $
         run
           ( do
