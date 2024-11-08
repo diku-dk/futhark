@@ -31,3 +31,6 @@ module type mt4 = {
 
 
 }
+
+module pm1 (P: {}) : {} = {
+}
