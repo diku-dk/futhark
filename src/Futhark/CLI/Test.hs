@@ -536,13 +536,12 @@ reportLine time_mvar ts =
     if systemSeconds time_now - systemSeconds time >= period
       then do
         T.putStrLn $
-          "("
-            <> showText (testStatusFail ts)
+          showText (testStatusFail ts)
             <> " failed, "
             <> showText (testStatusPass ts)
             <> " passed, "
             <> showText num_remain
-            <> " to go)."
+            <> " to go."
         pure time_now
       else pure time
   where
