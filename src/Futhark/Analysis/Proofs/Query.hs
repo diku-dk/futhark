@@ -90,124 +90,72 @@ prove :: Property -> IndexFn -> IndexFnM Answer
 prove (PermutationOf {}) _fn = undefined
 prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraContext fn $ do
   -- 1. Show that m = n.
-  ans <- isTrue (m :== n)
-  case ans of
+  -- 2. Prove no overlap between case values.
+  --  It is sufficient to show that the case values can be sorted
+  --  in a strictly increasing order. That is, given a list of branches
+  --  on the form (p_f => f) and two indices i /= j in [0,...,n-1],
+  --  we want to show
+  --    forall (p_f => f) /= (p_g => g) in our list of branches .
+  --      p_f(i) ^ p_g(j) ==> f(i) < g(j) OR f(i) > g(j).
+  --
+  --  We define a comparison operator that returns the appropriate
+  --  relation above, if it exists, and use a sorting algorithm
+  --  to reduce the number of tests needed, but the only thing
+  --  that matters is that this sorting exists.
+  -- 3. Prove that all branches are within bounds.
+  debugM "prove permutation"
+  debugPrettyM "\n" fn
+  debugPrintAlgEnv
+  m_eq_n <- m $== n
+  case m_eq_n of
     Unknown -> pure Unknown
     Yes -> do
-      -- Hardcode two cases for now.
-      case casesToList cs of
-        [(p1, q1), (p2, q2)] | False -> do
-          let p i = p1 @ i
-          let f i = q1 @ i
-          let not_p i = p2 @ i
-          let g i = q2 @ i
-          i <- newNameFromString "i"
-          j <- newNameFromString "j"
-          addRange (Algebra.Var i) (mkRangeLB (int2SoP 0))
-          addRange (Algebra.Var j) (mkRangeLB (int2SoP 0))
-          assume (fromJust . justSym $ p i)
-          assume (fromJust . justSym $ not_p j)
-          -- 2. Prove no overlap between case values.
-          -- It is sufficient to show one case always maps to smaller values
-          -- than the other. Specifically, for two indices i and j
-          -- where p(i) is true and p(j) is false, we need to show:
-          --   {forall i /= j . f(i) < g(j)} OR {forall i /= j . f(i) > g(j)}
-          -- given constraints
-          --           0 <= i < n
-          --           0 <= j < n
-          --           1 <= n
-          --
-          -- We proceed case-by-case.
-          debugPrettyM "prove" fn
-          debugPrintAlgEnv
-          let f_rel_g rel = do
-                f_rel_g1 <- rollbackAlgEnv $ do
-                  -- Case i < j => f(i) `rel` g(j).
-                  addRelIterator (Forall j (Iota n))
-                  i +< j
-                  f i `rel` g j
-                let f_rel_g2 = rollbackAlgEnv $ do
-                      -- Case i > j => f(i) `rel` g(j):
-                      addRelIterator (Forall i (Iota n))
-                      j +< i
-                      f i `rel` g j
-                f_rel_g1 `andF` f_rel_g2
-          -- Case i /= j => f(i) < g(j):
-          let f_LT_g = debugT "f_LT_g" $ f_rel_g ($<)
-          -- Case i /= j => f(i) > g(j):
-          let f_GT_g = debugT "f_GT_g" $ f_rel_g ($>)
-          let no_overlap = debugT "no_overlap" $ f_LT_g `orM` f_GT_g
-          -- 3. Prove both cases are bounded from below by 0 and above by m.
-          -- Order matters here for short-circuiting lazy actions.
-          let within_bounds = rollbackAlgEnv $ do
-                addRelIterator (Forall i (Iota n))
-                addRelIterator (Forall j (Iota n))
-                (int2SoP 0 $<= f i)
-                  `andM` (int2SoP 0 $<= g j)
-                  `andM` (f i $< n)
-                  `andM` (g j $< n)
-          within_bounds `andM` no_overlap
-        branches -> do
-          debugM "prove"
-          debugPrettyM "\n" fn
-          debugPrintAlgEnv
-          i <- newNameFromString "i"
-          j <- newNameFromString "j"
-          addRange (Algebra.Var i) (mkRangeLB (int2SoP 0))
-          addRange (Algebra.Var j) (mkRangeLB (int2SoP 0))
-          -- 2. Prove no overlap between case values.
-          -- It is sufficient to show that the case values can be sorted
-          -- in a strictly increasing order. That is, given a list of branches
-          -- on the form (p_f => f) and two indices i /= j in [0,...,n-1],
-          -- we want to show
-          --   forall (p_f => f) /= (p_g => g) in our list of branches .
-          --     p_f(i) ^ p_g(j) ==> f(i) < g(j) OR f(i) > g(j).
-          --
-          -- We define a comparison operator that returns the appropriate
-          -- relation above, if it exists, and use a sorting algorithm
-          -- to reduce the number of tests needed, but the only thing
-          -- that matters is that this sorting exists.
-          let (p_f, f) `cmp` (p_g, g) = do
-                assume (fromJust . justSym $ p_f @ i)
-                assume (fromJust . justSym $ p_g @ j)
-                let f_rel_g rel =
-                      -- Try to show: forall i /= j . f(i) `rel` g(j)
-                      let f_rel_g1 = rollbackAlgEnv $ do
-                            -- Case i < j => f(i) `rel` g(j).
-                            addRelIterator (Forall j (Iota n))
-                            i +< j
-                            (f @ i) `rel` (g @ j)
-                          f_rel_g2 = rollbackAlgEnv $ do
-                            -- Case i > j => f(i) `rel` g(j):
-                            addRelIterator (Forall i (Iota n))
-                            j +< i
-                            (f @ i) `rel` (g @ j)
-                      in f_rel_g1 `andM` f_rel_g2
-                f_LT_g <- f_rel_g ($<)
-                debugPrettyM "cmp f:" (f @ i :: SoP Symbol)
-                debugPrettyM "    g:" (g @ j :: SoP Symbol)
-                debugT "===" $
-                  case f_LT_g of
-                      Yes -> pure LT
-                      Unknown -> do
-                        f_GT_g <- f_rel_g ($>)
-                        case f_GT_g of
-                          Yes -> pure GT
-                          Unknown -> pure Undefined
-          let no_overlap = answerFromBool . isJust <$> sorted cmp branches
-          let within_bounds =
-                map
-                  ( \(p, f) -> rollbackAlgEnv $ do
-                      addRelIterator (Forall i (Iota n))
-                      assume (fromJust . justSym $ p @ i)
-                      debugPrettyM "within bounds" (p @ i :: SoP Symbol)
-                      debugPrintAlgEnv
-                      let bug1 = debugT ("0 <= " <> prettyString (f @ i :: SoP Symbol))
-                      let bug2 = debugT ("n >  " <> prettyString (f @ i :: SoP Symbol))
-                      bug1 (int2SoP 0 $<= f @ i) `andM` bug2 (f @ i $< n)
-                  )
-                  branches
-          allM within_bounds `andM` no_overlap
+      let branches = casesToList cs
+      i <- newNameFromString "i"
+      j <- newNameFromString "j"
+      addRange (Algebra.Var i) (mkRangeLB (int2SoP 0))
+      addRange (Algebra.Var j) (mkRangeLB (int2SoP 0))
+      let (p_f, f) `cmp` (p_g, g) = do
+            assume (fromJust . justSym $ p_f @ i)
+            assume (fromJust . justSym $ p_g @ j)
+            let f_rel_g rel =
+                  -- Try to show: forall i /= j . f(i) `rel` g(j)
+                  let case_i_lt_j = rollbackAlgEnv $ do
+                        -- Case i < j => f(i) `rel` g(j).
+                        addRelIterator (Forall j (Iota n))
+                        i +< j
+                        (f @ i) `rel` (g @ j)
+                      case_i_gt_j = rollbackAlgEnv $ do
+                        -- Case i > j => f(i) `rel` g(j):
+                        addRelIterator (Forall i (Iota n))
+                        j +< i
+                        (f @ i) `rel` (g @ j)
+                  in case_i_lt_j `andM` case_i_gt_j
+            f_LT_g <- f_rel_g ($<)
+            debugPrettyM "cmp f:" (f @ i :: SoP Symbol)
+            debugPrettyM "    g:" (g @ j :: SoP Symbol)
+            debugT "===" $
+              case f_LT_g of
+                  Yes -> pure LT
+                  Unknown -> do
+                    f_GT_g <- f_rel_g ($>)
+                    case f_GT_g of
+                      Yes -> pure GT
+                      Unknown -> pure Undefined
+      let no_overlap = answerFromBool . isJust <$> sorted cmp branches
+      let within_bounds =
+            map
+              ( \(p, f) -> rollbackAlgEnv $ do
+                  addRelIterator (Forall i (Iota n))
+                  assume (fromJust . justSym $ p @ i)
+                  debugPrettyM "within bounds" (p @ i :: SoP Symbol)
+                  debugPrintAlgEnv
+                  let bug1 = debugT ("0 <= " <> prettyString (f @ i :: SoP Symbol))
+                  let bug2 = debugT ("n >  " <> prettyString (f @ i :: SoP Symbol))
+                  bug1 (int2SoP 0 $<= f @ i) `andM` bug2 (f @ i $< n)
+              )
+              branches
+      allM within_bounds `andM` no_overlap
   where
     f @ x = rep (mkRep iter (Var x)) f
 prove (PermutationOfZeroTo {}) _ = pure Unknown
