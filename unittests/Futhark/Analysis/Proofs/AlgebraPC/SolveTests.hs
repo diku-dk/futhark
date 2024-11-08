@@ -258,6 +258,33 @@ tests =
               simplify $ sum0to (sVar i2 .-. int 1) .-. sum0to (sVar i1 .-. int 1)
           )
           @??= negSoP (sym2SoP (Sum (One c0) (sVar i2) (sVar i1 .-. int 1))),
+      testCase "Merge split-sum" $
+        run
+          ( do
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              let c_sum1 = sym2SoP $ Sum (One c0) (int 0) (sVar i1)
+              let c_sum2 = sym2SoP $ Sum (One c0) (sVar i1 .+. int 1) (sVar n .-. int 1)
+              simplify $ c_sum1 .+. c_sum2
+          )
+          @??= sym2SoP (Sum (One c0) (int 0) (sVar n .-. int 1)),
+      testCase "Sum no-op" $
+        run
+          ( do
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              let c_sum = sym2SoP $ Sum (One c0) (int 0) (sVar n .-. int 1)
+              simplify c_sum
+          )
+          @??= sym2SoP (Sum (One c0) (int 0) (sVar n .-. int 1)),
+      testCase "Peel off one" $
+        run
+          ( do
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              let pd = POR $ S.singleton d0
+              addEquiv (Idx pd $ sVar i1) (int 1)
+              let d_sum = sym2SoP $ Sum pd (int 0) (sVar i1)
+              simplify $ d_sum .-. int 1
+          )
+          @??= sym2SoP (Sum (POR $ S.singleton d0) (int 0) (sVar i1 .-. int 1)),
       --
       testCase "FME1" $
         run
