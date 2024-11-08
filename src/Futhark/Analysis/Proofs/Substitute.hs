@@ -4,8 +4,11 @@ module Futhark.Analysis.Proofs.Substitute (($$)) where
 import Control.Monad (unless)
 import Data.Map qualified as M
 import Data.Maybe (isJust)
+import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.IndexFn
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCase, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
+import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus (toSumOfSums)
 import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..))
@@ -14,37 +17,43 @@ import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName)
 import Futhark.SoP.SoP (SoP, mapSymSoP, sym2SoP)
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
-import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.IndexFnPlus (repIndexFn, repCase, domainEnd, domainStart)
-import Futhark.Analysis.Proofs.Rewrite (rewrite)
 
 -- We use an operator so as not to confuse it with substitution from Unify.
--- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
+-- 'f $$ (x, g)' substitutes name 'x' for indexfn 'g' in indexfn 'f'.
 ($$) :: IndexFn -> (VName, IndexFn) -> IndexFnM IndexFn
-f@(IndexFn (Forall j _) _) $$ (vn, g@(IndexFn (Forall i _) _)) = do -- subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
-  whenDebug $ traceM $
+f@(IndexFn (Forall j _) _) $$ (vn, g@(IndexFn (Forall i _) _)) = do
+  whenDebug $
+    traceM $
       "🎭 substitute\n    "
         <> prettyBinding' vn g
         <> prettyBinding' ("\n    into _" :: String) f
   i' <- sym2SoP . Var <$> newName i
   vns <- getNameSource
-  for' <- rename vns g
-  into' <- rename vns f
-  substitute vn (repIndexFn (mkRep i i') for') (repIndexFn (mkRep j i') into')
-f $$ (vn, g@(IndexFn (Forall {}) _)) = do -- subst x for@(IndexFn (Forall _ _) _) into = do
-  whenDebug $ traceM $
+  g' <- rename vns g
+  f' <- rename vns f
+  substitute vn (repIndexFn (mkRep i i') g') (repIndexFn (mkRep j i') f')
+f $$ (vn, g@(IndexFn (Forall {}) _)) = do
+  whenDebug $
+    traceM $
       "🎭 substitute\n    "
         <> prettyBinding' vn g
         <> prettyBinding' ("\n    into _" :: String) f
   substitute vn g f
 f $$ (vn, g) = substitute vn g f
 
-sameRange dom_x dom_y = do
-  start_x <- rewrite (domainStart dom_x)
-  start_y <- rewrite (domainStart dom_y)
-  end_x <- rewrite (domainEnd dom_x)
-  end_y <- rewrite (domainEnd dom_y)
-  pure $ start_x == start_y && end_x == end_y
+sameRange :: Domain -> Domain -> IndexFnM Bool
+sameRange dom_f dom_g = do
+  start_f <- rewrite (domainStart dom_f)
+  start_g <- rewrite (domainStart dom_g)
+  end_f <- rewrite (domainEnd dom_f)
+  end_g <- rewrite (domainEnd dom_g)
+  eq_start :: Maybe (Substitution Symbol) <- unify start_f start_g
+  eq_end :: Maybe (Substitution Symbol) <- unify end_f end_g
+  pure $ isJust eq_start && isJust eq_end
+
+assertSameRange :: Domain -> Domain -> IndexFnM ()
+assertSameRange dom_f dom_g =
+  sameRange dom_f dom_g >>= flip unless (error "checkSameRange: inequal ranges")
 
 -- Assumes that Forall-variables (i) of non-Empty iterators are equal.
 substitute :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
@@ -70,56 +79,28 @@ substitute x_fn (IndexFn (Forall i (Iota _)) xs) (IndexFn Empty ys) =
           let rip_x = rip x_fn i x_val
           pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
       )
-substitute x_fn (IndexFn (Forall i (Iota n)) xs) (IndexFn (Forall _ (Iota n')) ys)
-  | n == n' =
-      pure $
-        IndexFn
-          (Forall i (Iota n))
-          ( cases $ do
-              (x_cond, x_val) <- casesToList xs
-              (y_cond, y_val) <- casesToList ys
-              let rip_x = rip x_fn i x_val
-              pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-          )
-substitute x_fn (IndexFn (Forall i dom_x@(Iota _)) xs) (IndexFn (Forall _ dom_y@(Cat _ m _)) ys) = do
-  eqEnd1 :: Maybe (Substitution Symbol) <- unify (domainEnd dom_x) (domainEnd dom_y)
-  eqEnd2 :: Maybe (Substitution Symbol) <- unify (domainEnd dom_x) (domainEnd (Iota m))
-  unless (isJust eqEnd1 || isJust eqEnd2) $ error "substitute iota cat: Incompatible domains."
-  pure $
-    IndexFn
-      (Forall i dom_y)
-      ( cases $ do
-          (x_cond, x_val) <- casesToList xs
-          (y_cond, y_val) <- casesToList ys
-          let rip_x = rip x_fn i x_val
-          pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-      )
-substitute x_fn (IndexFn (Forall i dom_x@(Cat {})) xs) (IndexFn (Forall _ dom_y@(Iota _)) ys) = do
-  -- | domainStart dom_x == domainStart dom_y,
-  --   domainEnd dom_x == domainEnd dom_y = do
-  debugPrettyM "starts" (domainStart dom_x, domainStart dom_y)
-  debugPrettyM "ends" (domainEnd dom_x, domainEnd dom_y)
-  error "lol"
-  pure $
-    IndexFn
-      (Forall i dom_x)
-      ( cases $ do
-          (x_cond, x_val) <- casesToList xs
-          (y_cond, y_val) <- casesToList ys
-          let rip_x = rip x_fn i x_val
-          pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-      )
-substitute x_fn (IndexFn (Forall i dom_x@(Cat {})) xs) (IndexFn (Forall _ dom_y@(Cat {})) ys)
-  | dom_x == dom_y =
-      pure $
-        IndexFn
-          (Forall i dom_y)
-          ( cases $ do
-              (x_cond, x_val) <- casesToList xs
-              (y_cond, y_val) <- casesToList ys
-              let rip_x = rip x_fn i x_val
-              pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-          )
+substitute x_fn (IndexFn (Forall i dom_x) xs) (IndexFn (Forall _ dom_y) ys) =
+  case (dom_x, dom_y) of
+    (Iota {}, Iota {}) -> do
+      assertSameRange dom_x dom_y
+      pure $ IndexFn (Forall i dom_y) zs
+    (Cat {}, Cat {}) -> do
+      assertSameRange dom_x dom_y
+      pure $ IndexFn (Forall i dom_y) zs
+    (Cat {}, Iota {}) -> do
+      assertSameRange dom_x dom_y
+      pure $ IndexFn (Forall i dom_x) zs
+    (Iota {}, Cat _ m _) -> do
+      test1 <- sameRange dom_x dom_y
+      test2 <- sameRange dom_x (Iota m)
+      unless (test1 || test2) $ error "substitute iota cat: Incompatible domains."
+      pure $ IndexFn (Forall i dom_y) zs
+  where
+    zs = cases $ do
+      (x_cond, x_val) <- casesToList xs
+      (y_cond, y_val) <- casesToList ys
+      let rip_x = rip x_fn i x_val
+      pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
 substitute _ x y = error $ "substitute: not implemented for " <> prettyString x <> prettyString y
 
 -- TODO Sad that we basically have to copy rep here;
