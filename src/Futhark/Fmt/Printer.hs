@@ -6,6 +6,7 @@ where
 
 import Data.Bifunctor (second)
 import Data.Foldable
+import Data.Loc (locStart)
 import Data.Text qualified as T
 import Futhark.Fmt.Monad
 import Futhark.Util (showText)
@@ -546,17 +547,18 @@ instance Format (ModParamBase NoInfo Name) where
     addComments loc $ parens $ fmtName bindingStyle pName <> ":" <+> fmt pSig
 
 instance Format UncheckedModBind where
-  fmt (ModBind name ps sig te doc loc) =
+  fmt (ModBind name ps sig me doc loc) =
     addComments loc $
       fmt doc
         <> "module"
-          <+> fmtName bindingStyle name
-        <> align ps'
+          <+> localLayout
+            [locStart (locOf loc), locOf ps]
+            (fmtName bindingStyle name <> ps')
         <> fmtSig sig
         <> "="
-        <> te'
+        <> me'
     where
-      te' = fmtByLayout te (line <> stdIndent (fmt te)) (space <> fmt te)
+      me' = fmtByLayout me (line <> stdIndent (fmt me)) (space <> fmt me)
       fmtSig Nothing = space
       fmtSig (Just (s', _f)) =
         localLayout (map locOf ps ++ [locOf s']) $
@@ -564,7 +566,7 @@ instance Format UncheckedModBind where
       ps' =
         case ps of
           [] -> nil
-          _any -> space <> localLayoutList ps (align $ sep line $ map fmt ps)
+          _any -> line <> stdIndent (localLayoutList ps (align $ sep line $ map fmt ps))
 
 -- All of these should probably be "extra" indented
 instance Format UncheckedModExp where

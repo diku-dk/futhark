@@ -35,3 +35,7 @@ module type mt4 = {
     [n]i32
     -> [n]i32
 }
+
+module pm1 (P: {}) : {} = {
+
+}
