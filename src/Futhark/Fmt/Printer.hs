@@ -310,11 +310,15 @@ instance Format (AppExpBase NoInfo Name) where
   fmt (Loop sizeparams pat (LoopInitImplicit NoInfo) form loopbody loc) =
     addComments loc $
       ("loop" `op` sizeparams')
-        <+> fmt pat
-        </> fmt form
-        <+> "do"
+        <+> localLayout
+          [locOf pat, formloc]
+          (fmt pat </> fmt form <+> "do")
         </> stdIndent (fmt loopbody)
     where
+      formloc = case form of
+        For i _ -> locOf i
+        ForIn fpat _ -> locOf fpat
+        While e -> locOf e
       op = if null sizeparams then (<>) else (<+>)
       sizeparams' = sep nil $ brackets . fmtName bindingStyle . toName <$> sizeparams
   fmt (Loop sizeparams pat (LoopInitExplicit initexp) form loopbody loc) =

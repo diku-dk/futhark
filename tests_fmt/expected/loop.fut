@@ -1,8 +1,7 @@
 def l1 x = loop x for i < 10 do x + i
 
 def l2 x =
-  loop x
-  for i < 10 do
+  loop x for i < 10 do
     x + i
 
 def l3 x =
