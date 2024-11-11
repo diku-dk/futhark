@@ -537,7 +537,6 @@ test-suite unit
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
       Language.Futhark.TypeCheckerTests
-      Paths_futhark
   build-depends:
       QuickCheck >=2.8
       , mtl >=2.2.1
