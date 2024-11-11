@@ -55,11 +55,9 @@ sizeOfTypeBase (E.Array _ shape _)
     convertSize e = error ("convertSize not implemented for: " <> show e)
 sizeOfTypeBase _ = Nothing
 
-funPrimTypeIsBool :: E.TypeBase E.Exp as -> Bool
-funPrimTypeIsBool (E.Scalar (E.Arrow _ _ _ _ return_type)) =
-  funPrimTypeIsBool (E.retType return_type)
-funPrimTypeIsBool (E.Scalar (E.Prim E.Bool)) = True
-funPrimTypeIsBool _ = False
+typeIsBool :: E.TypeBase E.Exp as -> Bool
+typeIsBool (E.Scalar (E.Prim E.Bool)) = True
+typeIsBool _ = False
 
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
@@ -520,8 +518,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
                   }
           debugPrettyM "g_fn:" g_fn
           debugPrettyM2 "g:" g
-          let booltype = funPrimTypeIsBool return_type
-          when booltype $ addProperty (Algebra.Var g) Algebra.Boolean
+          when (typeIsBool return_type) $ addProperty (Algebra.Var g) Algebra.Boolean
           substParams g_fn (zip arg_names arg_fns)
 forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
 
