@@ -277,6 +277,7 @@ tests =
       testCase "Merge split-sum" $
         run
           ( do
+              -- addRange (Var  n) $ mkRangeLB (int 0)
               addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
               let c_sum1 = sym2SoP $ Sum (One c0) (int 0) (sVar i1)
               let c_sum2 = sym2SoP $ Sum (One c0) (sVar i1 .+. int 1) (sVar n .-. int 1)

@@ -17,6 +17,9 @@ import Futhark.SoP.FourierMotzkin qualified as FM
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 
+import Futhark.Util.Pretty
+import Debug.Trace
+
 sop_one :: SoP Symbol
 sop_one = int2SoP 1
 
@@ -99,6 +102,8 @@ matchMonIdxDif _ _ = pure Nothing
 
 -- | This identifies a Sum-of-slice simplification, either
 --     1. a sum of a slice that can be extended with an index, or
+--     2. two sum of slices that come in continuation of each other:
+--            Sum(X[lb: mb]) + Sum(X[mb+1:ub]) => Sum(X[lb:ub])
 --     2. an overlapping addition of two sums of boolean slices, or
 --     3. a subtraction of two sums of slices of the same array
 --   Remember to call this twice: on the current and reversed pair.
@@ -117,9 +122,9 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
     anm == bnm && ms1 == ms2 && k1 == k2 = do
       -- \^ possible match for extending a sum with an index
       -- Allows x[lb-1] + Sum x[lb:lb-1] -> Sum x[lb-1:lb-1].
-      valid_slice <- aidx_beg FM.$<=$ (aidx_end .+. int2SoP 1)
-      let bidx_m_1 = bidx .-. (int2SoP 1)
-          bidx_p_1 = bidx .+. (int2SoP 1)
+      valid_slice <- aidx_beg FM.$<=$ (aidx_end .+. sop_one)
+      let bidx_m_1 = bidx .-. (sop_one)
+          bidx_p_1 = bidx .+. (sop_one)
       case (valid_slice, bidx_m_1 == aidx_end, bidx_p_1 == aidx_beg) of
         (True, True, _) -> -- extends the upper bound
           pure $ Just $ mkEquivSoPs (Sum anm aidx_beg bidx, sym1, sym2) (ms1, k1, k1)
@@ -127,6 +132,16 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
           pure $ Just $ mkEquivSoPs (Sum anm bidx aidx_end, sym1, sym2) (ms1, k1, k1)
         _ -> pure Nothing -- be conservative if slice is not provably non-empty
   -- case 2:
+  | Sum anm aidx_beg aidx_end <- sym1,
+    Sum bnm bidx_beg bidx_end <- sym2,
+    anm == bnm && ms1 == ms2 && k1 == k2,
+    aidx_end .+. sop_one == bidx_beg = do
+      valid_1 <- aidx_beg FM.$<=$ (aidx_end .+. sop_one)
+      valid_2 <- bidx_beg FM.$<=$ (bidx_end .+. sop_one)
+      if valid_1 && valid_2
+      then pure $ Just $ mkEquivSoPs (Sum anm aidx_beg bidx_end, sym1, sym2) (ms1, k1, k1)
+      else pure Nothing       
+  -- case 3:
   | Sum (POR anms) aidx_beg aidx_end <- sym1,
     Sum (POR bnms) bidx_beg bidx_end <- sym2,
     S.size anms > 0 && S.size bnms > 0,
@@ -149,7 +164,7 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
               pure $ Just $ fPOR (anms, abnms, anms) aidx_beg bidx_beg bidx_end aidx_end
             _ -> pure Nothing
       else pure Nothing  
-  -- case 3:
+  -- case 4:
   | Sum anm aidx_beg aidx_end <- sym1,
     Sum bnm bidx_beg bidx_end <- sym2,
     anm == bnm && ms1 == ms2 && k1 == 0 - k2 = do
@@ -172,17 +187,17 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
 
           pure $
             Just $
-              f (aidx_beg, bidx_beg .-. int2SoP 1) (aidx_end .+. int2SoP 1, bidx_end) (anm, k1, k2, k2)
+              f (aidx_beg, bidx_beg .-. sop_one) (aidx_end .+. sop_one, bidx_end) (anm, k1, k2, k2)
         else do
           succ_2_1 <- bidx_end FM.$<=$ aidx_end
-          succ_2_2 <- bidx_beg FM.$<=$ (bidx_end .+. int2SoP 1)
+          succ_2_2 <- bidx_beg FM.$<=$ (bidx_end .+. sop_one)
           if succ_1_1 && succ_2_1 && succ_2_2
             then -- case: a_beg <= b_beg <= b_end <= a_end
             -- results in: Sum(A[a_beg:b_beg-1]) + Sum(A[b_end+1,a_end])
 
               pure $
                 Just $
-                  f (aidx_beg, bidx_beg .-. int2SoP 1) (bidx_end .+. int2SoP 1, aidx_end) (anm, k1, k1, k2)
+                  f (aidx_beg, bidx_beg .-. sop_one) (bidx_end .+. sop_one, aidx_end) (anm, k1, k1, k2)
             else pure Nothing
 --}
 --
@@ -196,7 +211,7 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
              pure (True, False)
         else do
           succ_2_1 <- bidx_end FM.$<=$ aidx_end
-          succ_2_2 <- bidx_beg FM.$<=$ (bidx_end .+. int2SoP 1)
+          succ_2_2 <- bidx_beg FM.$<=$ (bidx_end .+. sop_one)
           pure (False, succ_1_1 && succ_2_1 && succ_2_2)
           -- \^ overlap case: a_beg <= b_beg <= b_end <= a_end
     --

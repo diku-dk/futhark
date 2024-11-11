@@ -20,8 +20,8 @@ import Futhark.SoP.Monad (MonadSoP, getEquivs)  -- lookupRange
 import Futhark.SoP.FourierMotzkin qualified as FM
 
 
--- import Futhark.Util.Pretty
--- import Debug.Trace
+import Futhark.Util.Pretty
+import Debug.Trace
 
 -----------------------------------------
 --- 1. Simplifications related to Pow ---
@@ -142,16 +142,23 @@ uniteSumSym Nothing (sym@(Sum nm beg end), 1) = do
       let new_sum = Sum nm beg_m_1 end_p_1
       pure $ Just (sym2SoP new_sum .-. (fst_el .+. lst_el), sym)
     (True, Nothing, Nothing) -> pure Nothing
-  where 
+uniteSumSym Nothing _ = pure Nothing
+
+getEquivSoP :: (MonadSoP Symbol e p m) => 
+  M.Map Symbol (SoP Symbol) -> Symbol -> m (Maybe (SoP Symbol))
+getEquivSoP equivs (Idx (POR nms) ind_sop)
+  | S.size nms > 1,
+    syms  <- map (nm2PORsym ind_sop) $ S.toList nms,
+    eq_vs0<- mapMaybe (`M.lookup` equivs) syms,
+    eq_vs <- filter (== sop_one) eq_vs0,
+    not (null eq_vs) =
+      pure $ Just sop_one
+-- \^ On POR nodes of size > 1, it can only substitute
+--    if the value is 1; if the value is 0, the OR
+--    semantics is not necessarily reached.
+  where
     nm2PORsym ind arr_nm = Idx (POR (S.singleton arr_nm)) ind
-    getEquivSoP equivs (Idx (POR nms) ind_sop)
-      | syms  <- map (nm2PORsym ind_sop) $ S.toList nms,
-        eq_vs <- mapMaybe (`M.lookup` equivs) syms,
-        not (null eq_vs),
-        eq_v <- head eq_vs =
-        -- (k > 0 && eq_v == sop_one) || (k < 0 && eq_v == sop_zero) =
-      pure $ Just eq_v
-    getEquivSoP equivs symb@Idx{} =
+getEquivSoP equivs symb@Idx{} =
       pure $ M.lookup symb equivs
 {--
       | Just eq_v <- M.lookup symb equivs = do
@@ -165,9 +172,8 @@ uniteSumSym Nothing (sym@(Sum nm beg end), 1) = do
       then pure $ Just eq_v
       else pure Nothing
 --}
-    getEquivSoP _ _ =
-      pure Nothing
-uniteSumSym Nothing _ = pure Nothing
+getEquivSoP _ _ =
+  pure Nothing
 
 ---------------------------------------------------------------
 --- 2. Post Simplification of each (individual) slice sum:  ---
@@ -201,8 +207,9 @@ transfSum2Idx sop
 transfSum2Idx sop = (False, sop)
 
 hasPeelableSums :: M.Map Symbol (SoP Symbol) -> (SoP Symbol) -> Bool
-hasPeelableSums equivs =
-  any hasPeelableSumSym . S.toList . free
+hasPeelableSums equivs = (\ _ -> True)
+  -- any hasPeelableSumSym . S.toList . free
+  -- \^ has to make it look inside POR nodes
   where
     hasPeelableSumSym (Sum nm beg end) =
       isJust (M.lookup (Idx nm beg) equivs)
@@ -215,8 +222,10 @@ peelSumSymb Nothing (sym@(Sum nm beg end), 1) = do
   -- \^ ToDo: extend for any multiplicity >= 1
   equivs <- getEquivs
   non_empty_slice <- beg FM.$<=$ end
-  let mfst_el = M.lookup (Idx nm beg) equivs
-      mlst_el = M.lookup (Idx nm end) equivs
+  mfst_el <- getEquivSoP equivs $ Idx nm beg
+  mlst_el <- getEquivSoP equivs $ Idx nm end
+  --  mfst_el = M.lookup (Idx nm beg) equivs
+  --  mlst_el = M.lookup (Idx nm end) equivs
   case (non_empty_slice, mfst_el, mlst_el) of
     (False, _, _) ->
       pure Nothing
@@ -231,6 +240,10 @@ peelSumSymb Nothing (sym@(Sum nm beg end), 1) = do
       pure $ Just (fst_el .+. lst_el .+. sym2SoP new_sum, sym)
     (True, Nothing, Nothing) -> pure Nothing
 peelSumSymb Nothing _ = pure Nothing
+
+-- ToDo: add an extra rule for:
+-- assume x DISJOINT (y,z) and
+-- Sum(x||y||z)[lb,ub] ==> ub - lb + 1 in case ub - lb + 1 >= 0
 
 ----------------------------------------
 --- Common Infrastructure for Unary  ---
