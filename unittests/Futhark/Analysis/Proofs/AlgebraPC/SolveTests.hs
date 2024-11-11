@@ -174,7 +174,7 @@ tests =
               sum2 FM.$<$ (sVar i2 .+. sum1)
           )
           @??= True,
-      testCase "Partition3 within bounds: case < n" $
+      testCase "Partition3 within bounds: case2 < n" $
         run
           ( do
               addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
@@ -188,6 +188,23 @@ tests =
               let sum1 = Sum pc (int 0) (sVar n .-. int 1)
                   sum2 = Sum pd (int 0) (sVar i1 .-. int 1)
               (sum1 ~+~ sum2) FM.$<$ sVar n
+          )
+          @??= True,
+      testCase "Partition3 within bounds: case3 < n" $
+        run
+          ( do
+              -- n >  i₁₈₀₉₀ + ∑j₁₈₀₀₂∈(i₁₈₀₉₀ .. -1 + n₄₅₄₃) (conds₄₅₄₅[j₁₈₀₀₂] = 1) + ∑j₁₈₀₀₂∈(i₁₈₀₉₀ .. -1 + n₄₅₄₃) (conds₄₅₄₅[j₁₈₀₀₂] = 2)
+              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              let pc = POR $ S.singleton c0 -- conds[i] == 1
+              let pd = POR $ S.singleton d0 -- conds[i] == 2
+              -- We are in the case for conds[i] /= 1 ^ conds[i] /= 2.
+              addEquiv (Idx pd (sVar i1)) (int 0)
+              addEquiv (Idx pc (sVar i1)) (int 0)
+              addProperty (Var c0) (PairwiseDisjoint (S.singleton d0))
+              addProperty (Var d0) (PairwiseDisjoint (S.singleton c0))
+              let sum1 = Sum pc (sVar i1) (sVar n .-. int 1)
+                  sum2 = Sum pd (sVar i1) (sVar n .-. int 1)
+              (sVar i1 .+. (sum1 ~+~ sum2)) FM.$<$ sVar n
           )
           @??= True,
       testCase "Partition3 within bounds: case >= 0" $
