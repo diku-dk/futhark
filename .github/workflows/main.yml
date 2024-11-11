@@ -52,6 +52,9 @@ jobs:
           dist-newstyle
         key: ${{ runner.os }}-cabal-${{ hashFiles('futhark.cabal', 'cabal.project') }}
 
+    - name: cabal check
+      run: cabal check
+
     - name: Build Futhark
       run: |
         cabal --version
