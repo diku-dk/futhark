@@ -9,10 +9,10 @@ import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus (repVName)
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_, FreeVariables (..))
+import Futhark.Analysis.Proofs.Unify (FreeVariables (..), Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
-import Futhark.MonadFreshNames (MonadFreshNames (getNameSource))
+import Futhark.MonadFreshNames (MonadFreshNames)
 import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, stack, (<+>))
 import Language.Futhark (VName)

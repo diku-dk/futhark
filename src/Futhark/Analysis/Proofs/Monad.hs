@@ -4,15 +4,15 @@ import Control.Monad (when)
 import Control.Monad.RWS.Strict
 import Data.Map qualified as M
 import Debug.Trace (traceM)
+import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
+import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
+import Futhark.SoP.Expression (Expression)
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
 import Futhark.Util.Pretty (Pretty, docString, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
-import Futhark.SoP.Expression (Expression)
-import Futhark.Analysis.Proofs.IndexFn
-import qualified Futhark.Analysis.Proofs.AlgebraPC.Algebra as Algebra
 
 data IndexFnProperty
   = Blah
@@ -39,8 +39,9 @@ instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
   putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
 
-instance Expression Symbol where
-  -- TODO Is this constraint on MonadSoP needed?
+instance Expression Symbol
+
+-- TODO Is this constraint on MonadSoP needed?
 
 instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
   getUntrans = gets (untrans . algenv)
@@ -81,13 +82,13 @@ debugM :: String -> IndexFnM ()
 debugM x = do
   whenDebug $ traceM $ "🐝 " <> x
 
-debugT :: Show a => String -> IndexFnM a -> IndexFnM a
+debugT :: (Show a) => String -> IndexFnM a -> IndexFnM a
 debugT msg m = do
   a <- m
   debugM (msg <> ": " <> show a)
   pure a
 
-debugT' :: Pretty a => String -> IndexFnM a -> IndexFnM a
+debugT' :: (Pretty a) => String -> IndexFnM a -> IndexFnM a
 debugT' msg m = do
   a <- m
   debugM (msg <> ": " <> prettyString a)

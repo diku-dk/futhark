@@ -1,5 +1,6 @@
 module Futhark.Analysis.Proofs.Convert where
 
+import Control.Applicative (liftA2) --- XXX Comin's version of GHC needs this.
 import Control.Monad (foldM, forM, forM_, unless, void, when, (<=<))
 import Control.Monad.RWS (gets)
 import Data.Bifunctor
@@ -8,21 +9,20 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Control.Applicative (liftA2) --- XXX Comin's version of GHC needs this.
-import Futhark.Analysis.Proofs.AlgebraBridge (algebraContext, isTrue, toAlgebra, ($<), ($<=), ($==), ($>), addRelIterator)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, unzipT, getIterator)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, unzipT)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repIndexFn)
-import Futhark.Analysis.Proofs.Substitute (($$))
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes, orM)
+import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol, sop2BoolSymbol)
+import Futhark.Analysis.Proofs.Substitute (($$))
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2BoolSymbol, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, addRange, addUntrans, mkRangeLB)
-import Futhark.SoP.SoP (SoP, int2SoP, justConstant, justSym, mapSymSoP_, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
+import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP_, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
@@ -432,11 +432,11 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       debugPrettyM "seg case:" case_idx_seg
       -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
       algebraContext inds $ do
-          addRelIterator inds_iter
-          seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
-          p_desired_form :: Maybe (Substitution Symbol) <- unify p_seg (seg_delta :> int2SoP 0)
-          debugPrettyM "p(k) unifies with: seg(k+1) - seg(k) > 0" $ isJust p_desired_form
-          unless (isJust p_desired_form) $ error "p is not on desired form"
+        addRelIterator inds_iter
+        seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
+        p_desired_form :: Maybe (Substitution Symbol) <- unify p_seg (seg_delta :> int2SoP 0)
+        debugPrettyM "p(k) unifies with: seg(k+1) - seg(k) > 0" $ isJust p_desired_form
+        unless (isJust p_desired_form) $ error "p is not on desired form"
       -- Check that seg(0) = 0 and that seg is monotonically increasing.
       let x `at_k` i = rep (mkRep k i) x
       let zero :: SoP Symbol = int2SoP 0

@@ -7,18 +7,18 @@ module Futhark.Analysis.Proofs.AlgebraBridge
   )
 where
 
-import Control.Monad ((<=<), foldM, unless)
+import Control.Monad (foldM, (<=<))
+import Data.Maybe (isJust)
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate
 import Futhark.Analysis.Proofs.AlgebraBridge.Util
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrintAlgEnv, debugLn)
+import Futhark.Analysis.Proofs.Monad (IndexFnM)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesSoP)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toDNF, toCNF)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF, toDNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
+import Futhark.Analysis.Proofs.Unify (Substitution, unify)
 import Futhark.Analysis.Proofs.Util (converge)
-import Futhark.SoP.SoP (SoP, justSym, sym2SoP, justConstant)
-import Data.Maybe (isJust)
-import Futhark.Analysis.Proofs.Unify (unify, Substitution)
+import Futhark.SoP.SoP (SoP, justSym, sym2SoP)
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -74,8 +74,9 @@ simplify = astMap m
             let q_implies_p = rollbackAlgEnv $ do
                   assume q
                   isTrue p
-            if p_equiv_q then pure p
-            else do
+            if p_equiv_q
+              then pure p
+              else do
                 p_implies_q' <- p_implies_q
                 case p_implies_q' of
                   Yes -> pure p
@@ -153,7 +154,6 @@ isFalse p = do
     pick n qs =
       let (as, bs) = splitAt n qs
        in (head bs, as <> tail bs)
-
 
 cnfToList :: Symbol -> [Symbol]
 cnfToList (a :&& b) = a : cnfToList b

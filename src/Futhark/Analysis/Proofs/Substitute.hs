@@ -6,7 +6,7 @@ import Data.Map qualified as M
 import Data.Maybe (isJust)
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCase, repIndexFn, repDomain)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCase, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
@@ -59,14 +59,14 @@ subIterator :: VName -> Cases Symbol (SoP Symbol) -> Iterator -> Iterator
 subIterator _ _ Empty = Empty
 subIterator x_fn xs iter@(Forall i dom) =
   if x_fn `elem` fv dom
-  then case casesToList xs of
-    [(Bool True, x_val)] ->
-      Forall i $
-        case dom of
-          Iota n -> Iota $ mapSymSoP (rip x_fn i x_val) n
-          Cat k m b -> Cat k (mapSymSoP (rip x_fn i x_val) m) (mapSymSoP (rip x_fn i x_val) b)
-    _ -> error "substitute: substituting into domain using non-scalar index fn"
-  else iter
+    then case casesToList xs of
+      [(Bool True, x_val)] ->
+        Forall i $
+          case dom of
+            Iota n -> Iota $ mapSymSoP (rip x_fn i x_val) n
+            Cat k m b -> Cat k (mapSymSoP (rip x_fn i x_val) m) (mapSymSoP (rip x_fn i x_val) b)
+      _ -> error "substitute: substituting into domain using non-scalar index fn"
+    else iter
 
 -- Assumes that Forall-variables (i) of non-Empty iterators are equal.
 substitute :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
@@ -112,14 +112,14 @@ substitute x_fn (IndexFn (Forall i dom_x) xs) (IndexFn (Forall _ dom_y) ys) = do
   where
     mkfn dom =
       pure $
-        IndexFn {
-          iterator = subIterator x_fn xs $ Forall i dom,
-          body = cases $ do
-            (x_cond, x_val) <- casesToList xs
-            (y_cond, y_val) <- casesToList ys
-            let rip_x = rip x_fn i x_val
-            pure (sop2BoolSymbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-        }
+        IndexFn
+          { iterator = subIterator x_fn xs $ Forall i dom,
+            body = cases $ do
+              (x_cond, x_val) <- casesToList xs
+              (y_cond, y_val) <- casesToList ys
+              let rip_x = rip x_fn i x_val
+              pure (sop2BoolSymbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
+          }
 substitute _ x y = error $ "substitute: not implemented for " <> prettyString x <> prettyString y
 
 -- TODO Sad that we basically have to copy rep here;

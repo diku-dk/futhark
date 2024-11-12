@@ -1,8 +1,8 @@
 module Futhark.Analysis.Proofs.Symbol where
 
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
-import Futhark.SoP.SoP (SoP, justSym, justConstant)
-import Futhark.Util.Pretty (Pretty, apply, brackets, enclose, parens, pretty, (<+>), prettyString, commasep)
+import Futhark.SoP.SoP (SoP, justConstant, justSym)
+import Futhark.Util.Pretty (Pretty, apply, brackets, commasep, parens, pretty, prettyString, (<+>))
 import Language.Futhark (VName)
 
 data Symbol
@@ -32,12 +32,19 @@ data Symbol
   deriving (Show, Eq, Ord)
 
 infixr 4 :<
+
 infixr 4 :<=
+
 infixr 4 :>
+
 infixr 4 :>=
+
 infixr 4 :==
+
 infixr 4 :/=
+
 infixr 3 :&&
+
 infixr 2 :||
 
 isBoolean :: Symbol -> Bool

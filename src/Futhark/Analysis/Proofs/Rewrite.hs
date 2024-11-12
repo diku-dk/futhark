@@ -1,16 +1,16 @@
 module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad (filterM, (<=<))
-import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), cases, casesToList, Cases (..))
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM)
+import Data.List.NonEmpty qualified as NE
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, rollbackAlgEnv, simplify)
+import Futhark.Analysis.Proofs.IndexFn (Cases (..), IndexFn (..), cases, casesToList)
+import Futhark.Analysis.Proofs.Monad (IndexFnM)
 import Futhark.Analysis.Proofs.Query (isUnknown)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, rollbackAlgEnv, simplify, algebraContext, assume, isFalse)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (renameSame)
-import Futhark.SoP.SoP (SoP, justConstant, (.+.), (.*.), int2SoP, sym2SoP)
-import qualified Data.List.NonEmpty as NE
-import qualified Futhark.SoP.SoP as SoP
+import Futhark.SoP.SoP (SoP, int2SoP, justConstant, sym2SoP, (.*.), (.+.))
+import Futhark.SoP.SoP qualified as SoP
 
 normalizeIndexFn :: IndexFn -> IndexFnM IndexFn
 normalizeIndexFn = allCasesAreConstants
