@@ -17,8 +17,8 @@ import Futhark.SoP.FourierMotzkin qualified as FM
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 
-import Futhark.Util.Pretty
-import Debug.Trace
+-- import Futhark.Util.Pretty
+-- import Debug.Trace
 
 sop_one :: SoP Symbol
 sop_one = int2SoP 1
@@ -177,30 +177,6 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
     (False, True) -> -- case 2: a_beg <= b_beg <= b_end <= a_end
       pure $ Just $ f (anm, k1) aidx_beg bidx_beg bidx_end aidx_end
     _ -> pure Nothing
-{--
-      succ_1_1 <- aidx_beg FM.$<=$ bidx_beg
-      succ_1_2 <- bidx_beg FM.$<=$ aidx_end
-      succ_1_3 <- aidx_end FM.$<=$ bidx_end
-      if succ_1_1 && succ_1_2 && succ_1_3
-        then -- case: a_beg <= b_beg <= a_end <= b_end
-        -- results in Sum(A[a_beg:b_beg-1] - Sum(A[a_end+1:b_end])
-
-          pure $
-            Just $
-              f (aidx_beg, bidx_beg .-. sop_one) (aidx_end .+. sop_one, bidx_end) (anm, k1, k2, k2)
-        else do
-          succ_2_1 <- bidx_end FM.$<=$ aidx_end
-          succ_2_2 <- bidx_beg FM.$<=$ (bidx_end .+. sop_one)
-          if succ_1_1 && succ_2_1 && succ_2_2
-            then -- case: a_beg <= b_beg <= b_end <= a_end
-            -- results in: Sum(A[a_beg:b_beg-1]) + Sum(A[b_end+1,a_end])
-
-              pure $
-                Just $
-                  f (aidx_beg, bidx_beg .-. sop_one) (bidx_end .+. sop_one, aidx_end) (anm, k1, k1, k2)
-            else pure Nothing
---}
---
   where
     checkOverlappingSums (aidx_beg, aidx_end) (bidx_beg, bidx_end) = do
       succ_1_1 <- aidx_beg FM.$<=$ bidx_beg

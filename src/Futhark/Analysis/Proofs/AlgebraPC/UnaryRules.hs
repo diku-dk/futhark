@@ -20,9 +20,8 @@ import Futhark.SoP.Monad (MonadSoP, getEquivs, getProperties)  -- lookupRange
 import Futhark.SoP.FourierMotzkin qualified as FM
 import Language.Futhark (VName)
 
-
-import Futhark.Util.Pretty
-import Debug.Trace
+-- import Futhark.Util.Pretty
+-- import Debug.Trace
 
 -----------------------------------------
 --- 1. Simplifications related to Pow ---
@@ -168,18 +167,6 @@ getEquivSoP equivs symb@(Idx (POR nms) ind_sop)
     nm2PORsym ind arr_nm = Idx (POR (S.singleton arr_nm)) ind
 getEquivSoP equivs symb@Idx{} =
   pure $ M.lookup symb equivs
-{--
-      | Just eq_v <- M.lookup symb equivs = do
-      Range elm_lb m elm_ub <- lookupRange $ Var arr_nm
-      let elm_bds = if k > 0 then elm_ub else elm_lb
-          eq_v_m = if m == 1 then eq_v else eq_v .*. int2SoP m
-      if any (== eq_v_m) $ S.toList elm_bds
-      -- \^ ToDo: here we should check by means of Fourier-Motzking
-      --      (1) In k*t > 0 case: any (eq_v FM.$>=$ ub) elm_ub 
-      --      (2) In k*t < 0 case: any (eq_v FM.$<=$ lb) elm_lb
-      then pure $ Just eq_v
-      else pure Nothing
---}
 getEquivSoP _ _ =
   pure Nothing
 
@@ -295,34 +282,7 @@ peelSumSymb Nothing (sym, 1) = do
   -- \^ ToDo: extend for any multiplicity >= 1
   tab_props <- getProperties
   peelSumSymbHelper tab_props sym
-{--
-peelSumSymb Nothing (sym@(Sum arr beg end), 1) = do
-  -- \^ ToDo: extend for any multiplicity >= 1
-  equivs <- getEquivs
-  non_empty_slice <- beg FM.$<=$ end
-  mfst_el <- getEquivSoP equivs $ Idx arr beg
-  mlst_el <- getEquivSoP equivs $ Idx arr end
-  --  mfst_el = M.lookup (Idx arr beg) equivs
-  --  mlst_el = M.lookup (Idx arr end) equivs
-  case (non_empty_slice, mfst_el, mlst_el) of
-    (False, _, _) ->
-      pure Nothing
-    (True, Just fst_el, Nothing) -> do
-      let new_sum = Sum arr (beg .+. sop_one) end
-      pure $ Just (fst_el .+. sym2SoP new_sum, sym)
-    (True, Nothing, Just lst_el) -> do
-      let new_sum = Sum arr beg (end .-. sop_one)
-      pure $ Just (lst_el .+. sym2SoP new_sum, sym)
-    (True, Just fst_el, Just lst_el) -> do
-      let new_sum = Sum arr (beg .+. sop_one) (end .-. sop_one)
-      pure $ Just (fst_el .+. lst_el .+. sym2SoP new_sum, sym)
-    (True, Nothing, Nothing) -> pure Nothing
---}
 peelSumSymb Nothing _ = pure Nothing
-
--- ToDo: add an extra rule for:
--- assume x DISJOINT (y,z) and
--- Sum(x||y||z)[lb,ub] ==> ub - lb + 1 in case ub - lb + 1 >= 0
 
 ----------------------------------------
 --- Common Infrastructure for Unary  ---

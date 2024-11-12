@@ -131,8 +131,6 @@ powEquiv sop
             then pure $ int2SoP 1 -- False
             else simplify $ expo .-. int2SoP q
   where
-    --
-
     -- \| when called with q==0, it finds the smallest
     --     int q such that k <= acc*b^q
     --   assumes k > 0 && b > 1 && acc > 0
@@ -246,47 +244,8 @@ getIdxRange sym@(Idx (One arr_nm) _) = do
 getIdxRange _ = pure Nothing
 
 {--
-PLAN:
-
-1. find `syms` the symbols appearing in SoP
-2. investigate the opportunities for applying the simplification
-   rules that do not lose precision:
-     -- normalizing sums of slices
-     -- pealing the first/last symbol (of known range) from a sum slice
-3. invesitgate the opportunities for creating new ranges from properties
-     such as sum-slices or monotonicity.
-   3.1 For example, if we have a symbol such as `Sum(a[ind_1: ind_2])` then
-   	    this can be replaced with a new VName symbol `SA_slc` with bounds:
-   	        (a) In case one can prove `ind_1 > ind_2`:
-		 		{ LB = 0, UB = 0 }
-		 	(b) In case one can prove `ind_1 <= ind_2
-		 		{ LB = (ind_2 - ind_1) * lowerBound(a)
-		 		, UB = (ind_2 - ind_1) * upperBound(a)
-		 		}
-   3.2 For example, if `a` is known to be strictly increasing monotonically,
-   	    and `ind_1 > ind_2` is provable, then SoP:
-     		`t1 * a[ind_1] - t1 * a[ind_2] + r`
-     	can be transformed to:
-     		`t1 * a_diff + r`
-     	where the range of `a_diff` is:
-        	{ LB = ind_1 - ind_2, UB = upperBound(a) - lowerBound(a) }
-4. choose the most-dependent variable to eliminate according to the range table,
+ToDo:
+   choose the most-dependent variable to eliminate according to the range table,
    i.e., here it should be safe to use the generic functionality of SoP
    (`transClosInRanges`)
 --}
-
--- f :: (SoP Symbol >= 0) -> AlgM e Bool
--- f sop = do
---   modifyEnv $ undefined
---   undefined
-
--- runF :: (SoP Symbol >= 0) -> AlgEnv Symbol e Property -> VNameSource -> (Bool, VEnv e)
--- runF sop env vns= runAlgM (f sop) env vns
-
--- rules :: RuleBook (SoP Symbol) Symbol (AlgM e)
--- rules = []
-
--- (&<) ::  SoP Symbol -> SoP Symbol ->  AlgM e Bool
--- sop1 &< sop2 = do
---  prop  <- getProperties
---  sop1 F.$<$ sop2 -- fourier mo
