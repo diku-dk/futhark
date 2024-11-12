@@ -39,5 +39,4 @@ let segment_ids [m]
   let flags = mk_flag_array shape n 0i64 flags1
   let flags_sgmind = map (\f -> if f == 0 then 0 else f-1) flags
   let flags_bool = map (\f -> f > 0) flags
-  let outinds = sgm_sum flags_bool flags_sgmind
-  in outinds
+  in sgm_sum flags_bool flags_sgmind

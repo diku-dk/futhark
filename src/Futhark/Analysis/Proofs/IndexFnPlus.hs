@@ -2,36 +2,20 @@
 
 module Futhark.Analysis.Proofs.IndexFnPlus where
 
-import Control.Monad (unless)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (isJust)
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.SymbolPlus (repVName, toSumOfSums)
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
-import Futhark.Analysis.Proofs.Util (prettyName, prettyBinding')
+import Futhark.Analysis.Proofs.SymbolPlus (repVName)
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_, FreeVariables (..))
+import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
-import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName)
-import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP, sym2SoP, (.+.), (.-.))
-import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, prettyString, stack, (<+>))
+import Futhark.MonadFreshNames (MonadFreshNames (getNameSource))
+import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.), (.-.))
+import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, stack, (<+>))
 import Language.Futhark (VName)
-import Debug.Trace (traceM)
-
-instance Eq Domain where
-  -- Since the whole domain must be covered by an index function,
-  -- it is sufficient to check that starts and ends are equal.
-  u == v =
-    start u == start v && end u == end v
-    where
-      start :: Domain -> SoP Symbol
-      start (Iota _) = int2SoP 0
-      start (Cat k _ b) = rep (mkRep k (int2SoP 0 :: SoP Symbol)) b
-
-      end (Iota n) = n .-. int2SoP 1
-      end (Cat k m b) = rep (mkRep k m) b .-. int2SoP 1
 
 instance Eq Iterator where
   (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
@@ -94,6 +78,10 @@ instance Pretty Iterator where
 
 instance Pretty IndexFn where
   pretty (IndexFn iter e) = pretty iter <+> pretty e
+
+instance FreeVariables Domain where
+  fv (Iota n) = fv n
+  fv (Cat _ m b) = fv m <> fv b
 
 -------------------------------------------------------------------------------
 -- Unification.

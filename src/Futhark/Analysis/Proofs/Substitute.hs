@@ -1,17 +1,17 @@
 -- Index function substitution.
 module Futhark.Analysis.Proofs.Substitute (($$)) where
 
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Data.Map qualified as M
 import Data.Maybe (isJust)
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCase, repIndexFn)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCase, repIndexFn, repDomain)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.SymbolPlus (toSumOfSums)
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..))
+import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv)
 import Futhark.Analysis.Proofs.Util (prettyBinding')
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName)
 import Futhark.SoP.SoP (SoP, mapSymSoP, sym2SoP)
@@ -55,17 +55,30 @@ assertSameRange :: Domain -> Domain -> IndexFnM ()
 assertSameRange dom_f dom_g =
   sameRange dom_f dom_g >>= flip unless (error "checkSameRange: inequal ranges")
 
+subIterator :: VName -> Cases Symbol (SoP Symbol) -> Iterator -> Iterator
+subIterator _ _ Empty = Empty
+subIterator x_fn xs iter@(Forall i dom) =
+  if x_fn `elem` fv dom
+  then case casesToList xs of
+    [(Bool True, x_val)] ->
+      Forall i $
+        case dom of
+          Iota n -> Iota $ mapSymSoP (rip x_fn i x_val) n
+          Cat k m b -> Cat k (mapSymSoP (rip x_fn i x_val) m) (mapSymSoP (rip x_fn i x_val) b)
+    _ -> error "substitute: substituting into domain using non-scalar index fn"
+  else iter
+
 -- Assumes that Forall-variables (i) of non-Empty iterators are equal.
 substitute :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
-substitute x (IndexFn Empty xs) (IndexFn iter_y ys) =
+substitute x_fn (IndexFn Empty xs) (IndexFn iter_y ys) =
   -- Substitute scalar `x` into index function `y`.
   pure $
     IndexFn
-      iter_y
+      (subIterator x_fn xs iter_y)
       ( cases $ do
           (x_cond, x_val) <- casesToList xs
           (y_cond, y_val) <- casesToList ys
-          pure $ repCase (mkRep x x_val) (y_cond :&& x_cond, y_val)
+          pure $ repCase (mkRep x_fn x_val) (y_cond :&& x_cond, y_val)
       )
 substitute x_fn (IndexFn (Forall i (Iota _)) xs) (IndexFn Empty ys) =
   -- Substitute array `x` into scalar `y` (type-checker ensures that this is valid,
@@ -77,30 +90,36 @@ substitute x_fn (IndexFn (Forall i (Iota _)) xs) (IndexFn Empty ys) =
           (x_cond, x_val) <- casesToList xs
           (y_cond, y_val) <- casesToList ys
           let rip_x = rip x_fn i x_val
-          pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
+          pure (sop2BoolSymbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
       )
-substitute x_fn (IndexFn (Forall i dom_x) xs) (IndexFn (Forall _ dom_y) ys) =
+substitute x_fn (IndexFn (Forall i dom_x) xs) (IndexFn (Forall _ dom_y) ys) = do
+  when (x_fn `elem` fv dom_y) $ debugPrettyM "jeeez" (Var x_fn)
   case (dom_x, dom_y) of
     (Iota {}, Iota {}) -> do
       assertSameRange dom_x dom_y
-      pure $ IndexFn (Forall i dom_y) zs
+      mkfn dom_y
     (Cat {}, Cat {}) -> do
       assertSameRange dom_x dom_y
-      pure $ IndexFn (Forall i dom_y) zs
+      mkfn dom_y
     (Cat {}, Iota {}) -> do
       assertSameRange dom_x dom_y
-      pure $ IndexFn (Forall i dom_x) zs
+      mkfn dom_x
     (Iota {}, Cat _ m _) -> do
       test1 <- sameRange dom_x dom_y
       test2 <- sameRange dom_x (Iota m)
       unless (test1 || test2) $ error "substitute iota cat: Incompatible domains."
-      pure $ IndexFn (Forall i dom_y) zs
+      mkfn dom_y
   where
-    zs = cases $ do
-      (x_cond, x_val) <- casesToList xs
-      (y_cond, y_val) <- casesToList ys
-      let rip_x = rip x_fn i x_val
-      pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
+    mkfn dom =
+      pure $
+        IndexFn {
+          iterator = subIterator x_fn xs $ Forall i dom,
+          body = cases $ do
+            (x_cond, x_val) <- casesToList xs
+            (y_cond, y_val) <- casesToList ys
+            let rip_x = rip x_fn i x_val
+            pure (sop2BoolSymbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
+        }
 substitute _ x y = error $ "substitute: not implemented for " <> prettyString x <> prettyString y
 
 -- TODO Sad that we basically have to copy rep here;
@@ -135,7 +154,7 @@ rip fnName fnArg fnVal = apply mempty
     apply _ x@(Bool _) = sym2SoP x
     apply _ Recurrence = sym2SoP Recurrence
     apply s sym = case sym of
-      Not x -> sym2SoP . neg . sop2Symbol $ apply s x
+      Not x -> sym2SoP . neg . sop2BoolSymbol $ apply s x
       x :< y -> binop (:<) x y
       x :<= y -> binop (:<=) x y
       x :> y -> binop (:>) x y
@@ -146,4 +165,4 @@ rip fnName fnArg fnVal = apply mempty
       x :|| y -> binopS (:||) x y
       where
         binop op x y = sym2SoP $ applySoP s x `op` applySoP s y
-        binopS op x y = sym2SoP $ sop2Symbol (apply s x) `op` sop2Symbol (apply s y)
+        binopS op x y = sym2SoP $ sop2BoolSymbol (apply s x) `op` sop2BoolSymbol (apply s y)

@@ -172,12 +172,12 @@ rulesIndexFn = do
                       (hole i :/= hole b, sym2SoP Recurrence)
                     ]
               },
-          -- Indexing variable i replaced by b in e1.
           to = \s ->
             subIndexFn s =<< do
               let i' = repVName (mapping s) i
               e1 <- sub s (hole h1)
               b' <- sub s (hole b)
+              -- Use that i = b to remove any dependence on i.
               let e1_b = rep (mkRep i' b') e1
               pure $
                 IndexFn

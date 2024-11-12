@@ -2,7 +2,7 @@ module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad (filterM, (<=<))
 import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), cases, casesToList, Cases (..))
-import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM)
 import Futhark.Analysis.Proofs.Query (isUnknown)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, rollbackAlgEnv, simplify, algebraContext, assume, isFalse)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesIndexFn)

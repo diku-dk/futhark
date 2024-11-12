@@ -9,15 +9,15 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
 import Control.Applicative (liftA2) --- XXX Comin's version of GHC needs this.
-import Futhark.Analysis.Proofs.AlgebraBridge (algebraContext, isTrue, toAlgebra, ($<), ($<=), ($==))
+import Futhark.Analysis.Proofs.AlgebraBridge (algebraContext, isTrue, toAlgebra, ($<), ($<=), ($==), ($>), addRelIterator)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, unzipT)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, unzipT, getIterator)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repIndexFn)
 import Futhark.Analysis.Proofs.Substitute (($$))
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes, orM)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol, sop2BoolSymbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
@@ -159,7 +159,6 @@ forward (E.TupLit xs _) = do
   let IndexFn it1 _ = head fns -- TODO probably want to grab most complex iterator here.
   let y = IndexFn it1 (cases [(Bool True, sym2SoP . Tuple $ map (sym2SoP . Var) vns)])
   substParams y (zip vns fns)
-    >>= rewrite
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do
       -- XXX support only simple indexing for now
@@ -239,7 +238,6 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       let paramNames :: [E.VName] = concatMap E.patNames params
       let xs :: [IndexFn] = mconcat $ map unzipT xss
       substParams (IndexFn iter_first_arg cases_body) (zip paramNames xs)
-        >>= rewrite
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
@@ -275,7 +273,6 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       let IndexFn it1 _ = head xss -- TODO probably want to grab most complex iterator here.
       let y = IndexFn it1 (cases [(Bool True, sym2SoP . Tuple $ map (sym2SoP . Var) vns)])
       substParams y (zip vns xss)
-        >>= rewrite
   | Just fname <- getFun f,
     "unzip" `L.isPrefixOf` fname,
     [xs'] <- getArgs args =
@@ -320,7 +317,6 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       h <- newVName "body_hole"
       y <- IndexFn iter_xs (cases [(Bool True, sym2SoP $ Var h)]) $$ (h, body)
       substParams y (zip paramNames_x (unzipT xs))
-        >>= rewrite
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
       -- Scatter in-bounds-monotonic indices.
@@ -328,8 +324,8 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- y = scatter dest inds vals
       -- where
       --   inds = ∀k ∈ [0, ..., m-1] .
-      --       | p(k)  => seg(k)
-      --       | ¬p(k) => OOB
+      --       | seg(k+1) - seg(k) > 0  => seg(k)
+      --       | seg(k+1) - seg(k) <= 0 => OOB
       --   seg(0) is 0
       --   seg(k) is monotonically increasing
       --   dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
@@ -339,16 +335,61 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       --     | i == inds[k] => vals[k]
       --     | i /= inds[k] => dest[i]
       --
-      -- equivalent to
-      --
+      -- by the semantics of scatter, equivalent to
       -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --     | p(k) => vals[k]
-      --     | ¬p(k) => dest[i]
+      --     | i == seg(k) => vals[k]
+      --     | i /= seg(k) => dest[i]
+      --
+      -- (i == seg(k) implies seg(k+1) - seg(k) > 0, since otherwise
+      --  the interval [seg(k), ..., seg(k+1) - 1] is empty and i could
+      --  not be equal to seg(k).)
+      -- TODO find a nicer way to express this index function.
+      --
       --
       -- From type checking, we have:
       -- scatter : (dest : [n]t) -> (inds : [m]i64) -> (vals : [m]t) : [n]t
       -- \* inds and vals are same size
       -- \* dest and result are same size
+
+      ----------------------------
+      -- WIP More general rule:
+      --
+      --   inds = ∀k ∈ [0, ..., m-1] .
+      --       | p(k) => seg(k)
+      --       | p(k) => OOB
+      --   seg(0) is 0
+      --   seg(k) is monotonically increasing
+      --   dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
+      --   OOB < 0 or OOB >= seg(m) - 1
+      -- ___________________________________________________
+      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --     | i == inds[k] => vals[k]
+      --     | i /= inds[k] => dest[i]
+      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --     | i == seg(k) ^ p(k) => vals[k]
+      --     | i == OOB ^ not p(k) => vals[k]
+      --     | i /= seg(k) ^ p(k) => dest[i]
+      --     | i /= OOB ^ not p(k) => dest[i]
+      --
+      -- by OOB < 0, we know that i == OOB is false and i /= OOB is true:
+      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --     | i == seg(k) ^ p(k) => vals[k]
+      --     | False ^ not p(k) => vals[k]
+      --     | i /= seg(k) ^ p(k) => dest[i]
+      --     | True ^ not p(k) => dest[i]
+      --
+      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --     | i == seg(k) ^ p(k) => vals[k]
+      --     | i /= seg(k) ^ p(k) => dest[i]
+      --     | not p(k) => dest[i]
+      --
+      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --     | i == seg(k) ^ p(k) => vals[k]
+      --     | i /= seg(k) ^ p(k) || True ^ not p(k) => dest[i]
+      --
+      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --     | i == seg(k) ^ p(k) => vals[k]
+      --     | i /= seg(k) => dest[i]
       debugM "scatter"
       dest <- forward dest_arg
       inds <- forward inds_arg
@@ -374,11 +415,10 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               }
       s <- fromMaybe (error "unhandled scatter") <$> unify inds_template inds
       -- Safe to do this now:
-      let IndexFn (Forall k (Iota m)) _ = inds
+      let IndexFn inds_iter@(Forall k (Iota m)) _ = inds
       -- Determine which is OOB and which is e1.
       let isOOB ub = CaseCheck (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
-      -- let isOOB ub = CaseCheck (\c -> (c $< int2SoP 0) `orM` ((mapping s M.! ub) $<= c))
-      (case_idx_seg, p_seg, f_seg) <- do
+      (case_idx_seg, vn_p_seg, vn_f_seg) <- do
         case0_is_OOB <- askQ (isOOB vn_f1) inds 0
         case case0_is_OOB of
           Yes -> pure (1, vn_p1, vn_f1)
@@ -387,12 +427,20 @@ forward expr@(E.AppExp (E.Apply f args _) _)
             case case1_is_OOB of
               Yes -> pure (0, vn_p0, vn_f0)
               Unknown -> error "scatter: unable to determine OOB branch"
+      let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
+      let f_seg = mapping s M.! vn_f_seg
       debugPrettyM "seg case:" case_idx_seg
+      -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
+      algebraContext inds $ do
+          addRelIterator inds_iter
+          seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
+          p_desired_form :: Maybe (Substitution Symbol) <- unify p_seg (seg_delta :> int2SoP 0)
+          debugPrettyM "p(k) unifies with: seg(k+1) - seg(k) > 0" $ isJust p_desired_form
+          unless (isJust p_desired_form) $ error "p is not on desired form"
       -- Check that seg(0) = 0 and that seg is monotonically increasing.
       let x `at_k` i = rep (mkRep k i) x
       let zero :: SoP Symbol = int2SoP 0
       eq0 <- askQ (CaseCheck (\seg -> seg `at_k` zero :== int2SoP 0)) inds case_idx_seg
-      -- eq0 <- askQ (CaseCheck (\seg -> seg `at_k` zero $== int2SoP 0)) inds case_idx_seg
       when (isUnknown eq0) $ error "scatter: unable to determine segment start"
       debugPrettyM "seg(0) = 0" eq0
       -- Check that seg is monotonically increasing.
@@ -403,19 +451,19 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- (Note that has to hold outside the context of inds, so we cannot assume p_seg.)
       let IndexFn (Forall _ dom_dest) _ = dest
       let dest_size = domainEnd dom_dest
-      let seg = mapping s M.! f_seg
-      domain_covered <- seg `at_k` m .-. int2SoP 1 $== dest_size
+      domain_covered <- f_seg `at_k` m .-. int2SoP 1 $== dest_size
       debugPrettyM "domain_covered" domain_covered
-      -- y = ∀i ∈ (⊎k=[0,...,m-1] [seg(k), ..., seg(k+1) - 1]) .
-      --     | p(k) => vals[k]
-      --     | ¬p(k) => dest[i]
+      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --     | i == seg(k) ^ p(k) => vals[k]
+      --     | i /= seg(k) || not p(k) => dest[i]
       i <- newVName "i"
       dest_hole <- newVName "dest_hole"
       vals_hole <- newVName "vals_hole"
-      let p = sop2Symbol $ mapping s M.! p_seg
+      -- let p = sop2Symbol $ mapping s M.! p_seg
+      let p = sVar i :== f_seg
       let fn =
             IndexFn
-              { iterator = Forall i (Cat k m seg),
+              { iterator = Forall i (Cat k m f_seg),
                 body =
                   cases
                     [ (p, sym2SoP $ Apply (Var vals_hole) [sVar k]),
@@ -438,14 +486,13 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           let param_sizes = map (getVName <=< sizeOfTypeBase . E.patternType) pats
           -- The arguments that the parameters are to be replaced for.
           arg_fns <- mapM forward args'
-          let arg_sizes = map (getVName <=< sizeOfDomain) arg_fns
+          arg_sizes <- mapM sizeOfDomain arg_fns
           when (length param_names /= length arg_fns) (error "must be fully applied")
           -- Size paramters must be replaced as well.
+          debugPrettyM "param_sizes" param_sizes
+          debugPrettyM "arg_sizes" arg_sizes
           unless (map isJust param_sizes == map isJust arg_sizes) (error "sizes don't align")
-          let size_rep =
-                M.fromList $
-                  catMaybes $
-                    zipMaybes param_sizes (fmap (sym2SoP . Var) <$> arg_sizes)
+          let size_rep = M.fromList $ catMaybes $ zipMaybes param_sizes arg_sizes
           -- Check that preconditions are satisfied.
           preconditions <- mapM getPrecondition pats
           unless (null preconditions) $
@@ -456,15 +503,17 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               Just check -> check (size_rep, zip param_names arg_fns)
             unless (isYes ans) . error $
               "Precondition on " <> prettyString pat <> " not satisfied for " <> prettyString fn
+          unless (null preconditions) $
+            debugPrettyM "Checking preconditions passed!" param_names
           -- Construct indexfn.
           substParams (repIndexFn size_rep indexfn) (zip param_names arg_fns)
           where
             getVName x | Just (Var vn) <- justSym x = Just vn
             getVName _ = Nothing
 
-            sizeOfDomain (IndexFn Empty _) = Nothing
+            sizeOfDomain (IndexFn Empty _) = pure Nothing
             sizeOfDomain (IndexFn (Forall _ d) _) =
-              Just $ domainEnd d .-. domainStart d .+. int2SoP 1
+              Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
 
             zipMaybes = zipWith (liftA2 (,))
         Nothing -> do
@@ -492,7 +541,6 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           let booltype = funPrimTypeIsBool return_type
           when booltype $ addProperty (Algebra.Var g) Algebra.Boolean
           substParams g_fn (zip arg_names arg_fns)
-            >>= rewrite
 forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
 
 substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
@@ -573,19 +621,14 @@ getRefinement _ = pure Nothing
 mkCheck :: IndexFn -> CheckContext -> IndexFnM Answer
 mkCheck check_fn (size_rep, param_subst) = do
   check <- repIndexFn size_rep <$> substParams check_fn param_subst
-  allCases (askQ (CaseCheck sop2Symbol')) check
-  where
-    -- XXX Index functions are integer-valued so known truths get substituted for 1...
-    -- TODO fix this
-    sop2Symbol' sop | Just 1 <- justConstant sop = Bool True
-    sop2Symbol' sop = sop2Symbol sop
+  allCases (askQ (CaseCheck sop2BoolSymbol)) check
 
 toScalarFn :: SoP Symbol -> IndexFn
 toScalarFn x = IndexFn Empty (cases [(Bool True, x)])
 
 getScalar :: IndexFn -> SoP Symbol
 getScalar (IndexFn Empty cs) | [(Bool True, x)] <- casesToList cs = x
-getScalar _ = error "invalid indexfn"
+getScalar _ = error "getScalar on non-scalar index function"
 
 -- This function adds the effects of type refinements to the environment
 -- without checking that they hold.

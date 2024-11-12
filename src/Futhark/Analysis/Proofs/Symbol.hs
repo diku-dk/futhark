@@ -1,7 +1,7 @@
 module Futhark.Analysis.Proofs.Symbol where
 
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
-import Futhark.SoP.SoP (SoP, justSym)
+import Futhark.SoP.SoP (SoP, justSym, justConstant)
 import Futhark.Util.Pretty (Pretty, apply, brackets, enclose, parens, pretty, (<+>), prettyString, commasep)
 import Language.Futhark (VName)
 
@@ -57,6 +57,10 @@ sop2Symbol :: (Ord u, Pretty u) => SoP u -> u
 sop2Symbol sop
   | Just t <- justSym sop = t
   | otherwise = error $ "sop2Symbol on non-symbol: " <> prettyString sop
+
+sop2BoolSymbol :: SoP Symbol -> Symbol
+sop2BoolSymbol sop | Just 1 <- justConstant sop = Bool True
+sop2BoolSymbol sop = sop2Symbol sop
 
 getSumBoundVar :: Symbol -> Maybe VName
 getSumBoundVar (Sum i _ _ _) = Just i
