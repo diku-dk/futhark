@@ -16,8 +16,9 @@ import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.SoP.SoP
-import Futhark.SoP.Monad (MonadSoP, getEquivs)  -- lookupRange
+import Futhark.SoP.Monad (MonadSoP, getEquivs, getProperties)  -- lookupRange
 import Futhark.SoP.FourierMotzkin qualified as FM
+import Language.Futhark (VName)
 
 
 import Futhark.Util.Pretty
@@ -91,6 +92,9 @@ combineSamePow (q, tab) (b, sop) =
 sop_one :: SoP Symbol
 sop_one = int2SoP 1
 
+sop_zero :: SoP Symbol
+sop_zero = int2SoP 0
+
 type FoldFunTp m =
       Maybe (SoP Symbol, Symbol) ->
       (Symbol, Int) ->
@@ -144,22 +148,26 @@ uniteSumSym Nothing (sym@(Sum nm beg end), 1) = do
     (True, Nothing, Nothing) -> pure Nothing
 uniteSumSym Nothing _ = pure Nothing
 
+-- | Transforms a "known" array index to its value,
+--   by looking it up in the table of equivalences.
 getEquivSoP :: (MonadSoP Symbol e p m) => 
   M.Map Symbol (SoP Symbol) -> Symbol -> m (Maybe (SoP Symbol))
-getEquivSoP equivs (Idx (POR nms) ind_sop)
+getEquivSoP equivs symb@(Idx (POR nms) ind_sop)
   | S.size nms > 1,
     syms  <- map (nm2PORsym ind_sop) $ S.toList nms,
-    eq_vs0<- mapMaybe (`M.lookup` equivs) syms,
-    eq_vs <- filter (== sop_one) eq_vs0,
-    not (null eq_vs) =
-      pure $ Just sop_one
--- \^ On POR nodes of size > 1, it can only substitute
---    if the value is 1; if the value is 0, the OR
---    semantics is not necessarily reached.
+    eq_vs <- mapMaybe (`M.lookup` equivs) syms =
+  if not $ null $ filter (== sop_one) eq_vs
+  then pure $ Just sop_one
+  -- \^ we found a True term in an OR node => True
+  else if length eq_vs == length syms &&
+          all (== sop_zero) eq_vs
+       then pure $ Just sop_zero
+       -- \^ all are zero
+       else pure $ M.lookup symb equivs
   where
     nm2PORsym ind arr_nm = Idx (POR (S.singleton arr_nm)) ind
 getEquivSoP equivs symb@Idx{} =
-      pure $ M.lookup symb equivs
+  pure $ M.lookup symb equivs
 {--
       | Just eq_v <- M.lookup symb equivs = do
       Range elm_lb m elm_ub <- lookupRange $ Var arr_nm
@@ -185,7 +193,7 @@ getEquivSoP _ _ =
 ---------------------------------------------------------------
 
 simplifyOneSumAft ::
-  (MonadSoP Symbol e p m) => SoP Symbol -> m (Bool, SoP Symbol)
+  (MonadSoP Symbol e Property m) => SoP Symbol -> m (Bool, SoP Symbol)
 simplifyOneSumAft sop = do
   equivs <- getEquivs
   sop' <- elimEmptySums sop
@@ -216,29 +224,100 @@ hasPeelableSums equivs = (\ _ -> True)
         || isJust (M.lookup (Idx nm end) equivs)
     hasPeelableSumSym _ = False
 
-peelSumSymb :: (MonadSoP Symbol e p m) => FoldFunTp m
-peelSumSymb acc@(Just {}) _ = pure acc
-peelSumSymb Nothing (sym@(Sum nm beg end), 1) = do
-  -- \^ ToDo: extend for any multiplicity >= 1
+disjointAllTheWay :: M.Map Symbol (S.Set Property) -> S.Set VName -> Bool
+disjointAllTheWay tab_props nms
+  | S.size nms > 1,
+    nm <- S.elemAt 0 nms,
+    mtmp <- M.lookup (Var nm) tab_props,
+    Just nms_disjoint <- hasDisjoint (fromMaybe S.empty mtmp) =
+  nms == S.insert nm nms_disjoint
+disjointAllTheWay _ _ =
+  False
+
+-- | Several cases:
+--   Case 1 (SUM): 
+--     If x DISJOINT (y,z) holds and also
+--        ub - lb + 1 >= 0 holds
+--     then Sum(x||y||z)[lb,ub] == ub - lb + 1
+--   Case 2 (IDX): similar with Case 1 but for an index.
+--   Case 3 (SUM): 
+--     peeling off first/last known elements of a sum
+--     (requires non-empty slice)
+--   Case 4 (IDX): similar to Case 2 but for index.
+peelSumSymbHelper :: (MonadSoP Symbol e Property m) =>
+  M.Map Symbol (S.Set Property) -> Symbol -> m (Maybe (SoP Symbol, Symbol))
+peelSumSymbHelper tab_props sym@(Idx (POR nms) _idx)
+  | disjointAllTheWay tab_props nms = do -- Case 2
+  pure $ Just (sop_one, sym)
+--
+peelSumSymbHelper tab_props sym@(Sum (POR nms) beg end)
+  | disjointAllTheWay tab_props nms = do -- Case 1
+  let end_p_1 = end .+. sop_one
+  valid_slice <- beg FM.$<=$ end_p_1
+  if valid_slice
+  then pure $ Just $ (end_p_1 .-. beg, sym)
+  else pure Nothing
+--
+peelSumSymbHelper _ sym@(Sum arr beg end) = do -- Case 3
   equivs <- getEquivs
   non_empty_slice <- beg FM.$<=$ end
-  mfst_el <- getEquivSoP equivs $ Idx nm beg
-  mlst_el <- getEquivSoP equivs $ Idx nm end
-  --  mfst_el = M.lookup (Idx nm beg) equivs
-  --  mlst_el = M.lookup (Idx nm end) equivs
+  mfst_el <- getEquivSoP equivs $ Idx arr beg
+  mlst_el <- getEquivSoP equivs $ Idx arr end
+  --  mfst_el = M.lookup (Idx arr beg) equivs
+  --  mlst_el = M.lookup (Idx arr end) equivs
   case (non_empty_slice, mfst_el, mlst_el) of
     (False, _, _) ->
       pure Nothing
     (True, Just fst_el, Nothing) -> do
-      let new_sum = Sum nm (beg .+. sop_one) end
+      let new_sum = Sum arr (beg .+. sop_one) end
       pure $ Just (fst_el .+. sym2SoP new_sum, sym)
     (True, Nothing, Just lst_el) -> do
-      let new_sum = Sum nm beg (end .-. sop_one)
+      let new_sum = Sum arr beg (end .-. sop_one)
       pure $ Just (lst_el .+. sym2SoP new_sum, sym)
     (True, Just fst_el, Just lst_el) -> do
-      let new_sum = Sum nm (beg .+. sop_one) (end .-. sop_one)
+      let new_sum = Sum arr (beg .+. sop_one) (end .-. sop_one)
       pure $ Just (fst_el .+. lst_el .+. sym2SoP new_sum, sym)
     (True, Nothing, Nothing) -> pure Nothing
+--
+peelSumSymbHelper _ sym@(Idx arr idx) = do -- Case 4
+  equivs <- getEquivs
+  m_el   <- getEquivSoP equivs $ Idx arr idx
+  case m_el of
+    Nothing -> pure Nothing
+    Just el -> pure $ Just (el, sym)
+--
+peelSumSymbHelper _ _ =
+  pure Nothing
+  
+peelSumSymb :: (MonadSoP Symbol e Property m) => FoldFunTp m
+peelSumSymb acc@(Just {}) _ = pure acc
+peelSumSymb Nothing (sym, 1) = do
+  -- \^ ToDo: extend for any multiplicity >= 1
+  tab_props <- getProperties
+  peelSumSymbHelper tab_props sym
+{--
+peelSumSymb Nothing (sym@(Sum arr beg end), 1) = do
+  -- \^ ToDo: extend for any multiplicity >= 1
+  equivs <- getEquivs
+  non_empty_slice <- beg FM.$<=$ end
+  mfst_el <- getEquivSoP equivs $ Idx arr beg
+  mlst_el <- getEquivSoP equivs $ Idx arr end
+  --  mfst_el = M.lookup (Idx arr beg) equivs
+  --  mlst_el = M.lookup (Idx arr end) equivs
+  case (non_empty_slice, mfst_el, mlst_el) of
+    (False, _, _) ->
+      pure Nothing
+    (True, Just fst_el, Nothing) -> do
+      let new_sum = Sum arr (beg .+. sop_one) end
+      pure $ Just (fst_el .+. sym2SoP new_sum, sym)
+    (True, Nothing, Just lst_el) -> do
+      let new_sum = Sum arr beg (end .-. sop_one)
+      pure $ Just (lst_el .+. sym2SoP new_sum, sym)
+    (True, Just fst_el, Just lst_el) -> do
+      let new_sum = Sum arr (beg .+. sop_one) (end .-. sop_one)
+      pure $ Just (fst_el .+. lst_el .+. sym2SoP new_sum, sym)
+    (True, Nothing, Nothing) -> pure Nothing
+--}
 peelSumSymb Nothing _ = pure Nothing
 
 -- ToDo: add an extra rule for:
