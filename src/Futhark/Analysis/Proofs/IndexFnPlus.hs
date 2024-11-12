@@ -2,36 +2,20 @@
 
 module Futhark.Analysis.Proofs.IndexFnPlus where
 
-import Control.Monad (unless)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (isJust)
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.SymbolPlus (repVName, toSumOfSums)
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
-import Futhark.Analysis.Proofs.Util (prettyName, prettyBinding')
+import Futhark.Analysis.Proofs.SymbolPlus (repVName)
+import Futhark.Analysis.Proofs.Unify (FreeVariables (..), Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
+import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
-import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName)
-import Futhark.SoP.SoP (SoP, int2SoP, mapSymSoP, sym2SoP, (.+.), (.-.))
-import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, prettyString, stack, (<+>))
+import Futhark.MonadFreshNames (MonadFreshNames)
+import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.), (.-.))
+import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, stack, (<+>))
 import Language.Futhark (VName)
-import Debug.Trace (traceM)
-
-instance Eq Domain where
-  -- Since the whole domain must be covered by an index function,
-  -- it is sufficient to check that starts and ends are equal.
-  u == v =
-    start u == start v && end u == end v
-    where
-      start :: Domain -> SoP Symbol
-      start (Iota _) = int2SoP 0
-      start (Cat k _ b) = rep (mkRep k (int2SoP 0 :: SoP Symbol)) b
-
-      end (Iota n) = n .-. int2SoP 1
-      end (Cat k m b) = rep (mkRep k m) b .-. int2SoP 1
 
 instance Eq Iterator where
   (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
@@ -94,6 +78,10 @@ instance Pretty Iterator where
 
 instance Pretty IndexFn where
   pretty (IndexFn iter e) = pretty iter <+> pretty e
+
+instance FreeVariables Domain where
+  fv (Iota n) = fv n
+  fv (Cat _ m b) = fv m <> fv b
 
 -------------------------------------------------------------------------------
 -- Unification.
@@ -177,121 +165,3 @@ unifyIndexFnWith unifyBody k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j 
   s' <- (s <>) <$> unify_ k (repDomain s dom1) (repDomain s dom2)
   (s' <>) <$> unifyBody k (repCases s' body1) (repCases s' body2)
 unifyIndexFnWith _ _ _ _ = fail "Incompatible iterators"
-
--------------------------------------------------------------------------------
--- Index function substitution.
--------------------------------------------------------------------------------
--- 'sub vn x y' substitutes name 'vn' for indexfn 'x' in indexfn 'y'.
-subst :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
-subst x for@(IndexFn (Forall i _) _) into@(IndexFn (Forall j _) _) = do
-  whenDebug $ traceM $
-      "🎭 substitute\n    "
-        <> prettyBinding' x for
-        <> prettyBinding' ("\n    into _" :: String) into
-  i' <- sym2SoP . Var <$> newName i
-  vns <- getNameSource
-  for' <- rename vns for
-  into' <- rename vns into
-  subst' x (repIndexFn (mkRep i i') for') (repIndexFn (mkRep j i') into')
-subst x for@(IndexFn (Forall _ _) _) into = do
-  whenDebug $ traceM $
-      "🎭 substitute\n    "
-        <> prettyBinding' x for
-        <> prettyBinding' ("\n    into _" :: String) into
-  subst' x for into
-subst x q r = subst' x q r
-
--- Assumes that Forall-variables (i) of non-Empty iterators are equal.
-subst' :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
-subst' x (IndexFn Empty xs) (IndexFn iter_y ys) =
-  -- Substitute scalar `x` into index function `y`.
-  pure $
-    IndexFn
-      iter_y
-      ( cases $ do
-          (x_cond, x_val) <- casesToList xs
-          (y_cond, y_val) <- casesToList ys
-          pure $ repCase (mkRep x x_val) (y_cond :&& x_cond, y_val)
-      )
-subst' x_fn (IndexFn (Forall i (Iota _)) xs) (IndexFn Empty ys) =
-  -- Substitute array `x` into scalar `y` (type-checker ensures that this is valid,
-  -- e.g., y is a sum).
-  pure $
-    IndexFn
-      Empty
-      ( cases $ do
-          (x_cond, x_val) <- casesToList xs
-          (y_cond, y_val) <- casesToList ys
-          let rip_x = rip x_fn i x_val
-          pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-      )
-subst' x_fn (IndexFn (Forall i (Iota n)) xs) (IndexFn (Forall _ (Iota n')) ys)
-  | n == n' =
-      pure $
-        IndexFn
-          (Forall i (Iota n))
-          ( cases $ do
-              (x_cond, x_val) <- casesToList xs
-              (y_cond, y_val) <- casesToList ys
-              let rip_x = rip x_fn i x_val
-              pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-          )
-subst' x_fn (IndexFn (Forall i dom_x@(Iota _)) xs) (IndexFn (Forall _ dom_y@(Cat k m seg)) ys) = do
-  eqEnd1 :: Maybe (Substitution Symbol) <- unify (domainEnd dom_x) (domainEnd dom_y)
-  eqEnd2 :: Maybe (Substitution Symbol) <- unify (domainEnd dom_x) (domainEnd (Iota m))
-  unless (isJust eqEnd1 || isJust eqEnd2) $ error "subst' iota cat: Incompatible domains."
-  pure $
-    IndexFn
-      (Forall i (Cat k m seg))
-      ( cases $ do
-          (x_cond, x_val) <- casesToList xs
-          (y_cond, y_val) <- casesToList ys
-          let rip_x = rip x_fn i x_val
-          pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-      )
-subst' _ x y = error $ "subst': not implemented for " <> prettyString x <> prettyString y
-
--- TODO Sad that we basically have to copy rep here;
---      everything but the actual substitutions could be delegated to
---      a helper function that takes a replacement as argument?
-rip :: VName -> VName -> SoP Symbol -> Symbol -> SoP Symbol
-rip fnName fnArg fnVal = apply mempty
-  where
-    applySoP = mapSymSoP . apply
-
-    apply :: Replacement Symbol -> Symbol -> SoP Symbol
-    apply s (Apply (Var f) [idx])
-      | f == fnName =
-          rep (M.insert fnArg idx s) fnVal
-    apply s (Idx (Var f) idx)
-      | f == fnName =
-          rep (M.insert fnArg idx s) fnVal
-    apply s (Var f)
-      | f == fnName =
-          rep s fnVal
-    apply _ x@(Var _) = sym2SoP x
-    apply _ x@(Hole _) = sym2SoP x
-    apply s (Idx x idx) =
-      sym2SoP $ Idx (sop2Symbol $ apply s x) (applySoP s idx)
-    apply s (Sum j lb ub x) =
-      let s' = addRep j (Var j) s
-       in toSumOfSums j (applySoP s' lb) (applySoP s' ub) (apply s' x)
-    apply s (Apply f xs) =
-      sym2SoP $ Apply (sop2Symbol $ apply s f) (map (applySoP s) xs)
-    apply s (Tuple xs) =
-      sym2SoP $ Tuple (map (applySoP s) xs)
-    apply _ x@(Bool _) = sym2SoP x
-    apply _ Recurrence = sym2SoP Recurrence
-    apply s sym = case sym of
-      Not x -> sym2SoP . neg . sop2Symbol $ apply s x
-      x :< y -> binop (:<) x y
-      x :<= y -> binop (:<=) x y
-      x :> y -> binop (:>) x y
-      x :>= y -> binop (:>=) x y
-      x :== y -> binop (:==) x y
-      x :/= y -> binop (:/=) x y
-      x :&& y -> binopS (:&&) x y
-      x :|| y -> binopS (:||) x y
-      where
-        binop op x y = sym2SoP $ applySoP s x `op` applySoP s y
-        binopS op x y = sym2SoP $ sop2Symbol (apply s x) `op` sop2Symbol (apply s y)

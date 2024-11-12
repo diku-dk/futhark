@@ -52,7 +52,7 @@ freshName vns =
   -- identical renamings.
   freshNameFromString vns "j"
 
-freshNameFromString :: MonadFreshNames m => VNameSource -> String -> m (VName, VNameSource)
+freshNameFromString :: (MonadFreshNames m) => VNameSource -> String -> m (VName, VNameSource)
 freshNameFromString vns s = do
   x <- newNameFromString s
   -- Note that we are unnecessarily incrementing the monadic name source above.

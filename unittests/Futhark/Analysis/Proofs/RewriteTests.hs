@@ -347,8 +347,8 @@ tests =
                     { iterator = Forall x (Cat y (sVar a) (sym2SoP $ Idx (Var b) $ sVar y)),
                       body =
                         cases
-                          [ (sVar x :== int 0, sVar y),
-                            (sVar x :/= int 0, sym2SoP Recurrence)
+                          [ (sVar x :== sym2SoP (Idx (Var b) $ sVar y), sVar y),
+                            (sVar x :/= sym2SoP (Idx (Var b) $ sVar y), sym2SoP Recurrence)
                           ]
                     }
                 )

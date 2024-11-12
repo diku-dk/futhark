@@ -150,6 +150,7 @@ library
       Futhark.Analysis.Proofs.Query
       Futhark.Analysis.Proofs.Rewrite
       Futhark.Analysis.Proofs.Rule
+      Futhark.Analysis.Proofs.Substitute
       Futhark.Analysis.Proofs.Symbol
       Futhark.Analysis.Proofs.SymbolPlus
       Futhark.Analysis.Proofs.Traversals
@@ -178,6 +179,7 @@ library
       Futhark.CLI.Dev
       Futhark.CLI.Doc
       Futhark.CLI.Eval
+      Futhark.CLI.Fmt
       Futhark.CLI.HIP
       Futhark.CLI.Literate
       Futhark.CLI.LSP
@@ -265,6 +267,8 @@ library
       Futhark.Construct
       Futhark.Doc.Generator
       Futhark.Error
+      Futhark.Fmt.Printer
+      Futhark.Fmt.Monad
       Futhark.FreshNames
       Futhark.Format
       Futhark.IR
@@ -471,6 +475,7 @@ library
       aeson >=2.0.0.0
     , ansi-terminal >=0.6.3.1
     , array >=0.4
+    , async >=2.0
     , base >=4.15 && <5
     , base16-bytestring
     , binary >=0.8.3
@@ -491,7 +496,7 @@ library
     , filepath >=1.4.1.1
     , free >=5.1.10
     , futhark-data >= 1.1.1.0
-    , futhark-server >= 1.2.2.1
+    , futhark-server >= 1.2.3.0
     , futhark-manifest >= 1.5.0.0
     , githash >=0.1.6.1
     , half >= 0.3
@@ -571,7 +576,6 @@ test-suite unit
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
       Language.Futhark.TypeCheckerTests
-      Paths_futhark
   build-depends:
       QuickCheck >=2.8
       , mtl >=2.2.1

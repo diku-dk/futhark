@@ -190,16 +190,20 @@ tests =
                     body =
                       cases
                         [ ( cs_i :== int2SoP 2,
-                            sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 1))
+                            -- Mind the gap in the sums due to the above predicate simplifying a -1 away.
+                            sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 1))
+                              .+. sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (cs_j :== int2SoP 1))
                               .+. sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (cs_j :== int2SoP 2))
                           ),
                           ( cs_i :== int2SoP 1,
                             sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (cs_j :== int2SoP 1))
                           ),
                           ( (cs_i :/= int2SoP 1) :&& (cs_i :/= int2SoP 2),
+                            -- Note that the sums are extended from Sum_{j=i+1}^{n-1} to Sum_{j=i}^{n-1}
+                            -- as the predicate above allows this (the added terms are false, hence zero).
                             sHole i
-                              .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 1))
-                              .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 2))
+                              .+. sym2SoP (Sum j (sHole i) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 1))
+                              .+. sym2SoP (Sum j (sHole i) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 2))
                           )
                         ]
                   }
@@ -215,8 +219,8 @@ tests =
                       { iterator = Forall i (Cat k (sHole m) sum_km1),
                         body =
                           cases
-                            [ (shape_k :> int2SoP 0, sym2SoP $ Idx (Hole xs) (sVar k)),
-                              (shape_k :<= int2SoP 0, sHole zero)
+                            [ (sVar i :== sum_km1, sym2SoP $ Idx (Hole xs) (sVar k)),
+                              (sVar i :/= sum_km1, sHole zero)
                             ]
                       }
         ),
@@ -242,13 +246,11 @@ tests =
         ),
       mkTest
         "tests/indexfn/segment_ids.fut"
-        ( withDebug . pure $ \(i, n, xs, flags) ->
-            let xs_i = sym2SoP $ Idx (Hole xs) (sHole i)
-                flags_i = Idx (Hole flags) (sHole i)
-             in IndexFn
-                  { iterator = Forall i (Iota (sHole n)),
-                    body = cases [(flags_i, xs_i), (Not flags_i, xs_i)]
-                  }
+        ( pure $ \(i, m, k, b) ->
+            IndexFn
+              { iterator = Forall i (Cat k (sHole m) (sHole b)),
+                body = cases [(Bool True, sHole k)]
+              }
         )
     ]
   where

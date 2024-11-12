@@ -23,7 +23,7 @@ simplify ::
   (MonadSoP Symbol e Property m) =>
   SoP Symbol ->
   m (SoP Symbol)
-simplify = astMap m <=< substEquivs
+simplify = substEquivs <=< astMap m <=< substEquivs
   where
     m =
       ASTMapper

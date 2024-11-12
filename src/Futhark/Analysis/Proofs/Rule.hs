@@ -5,7 +5,7 @@ import Data.List (subsequences, (\\))
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn, unifyIndexFnWith)
 import Futhark.Analysis.Proofs.Monad (IndexFnM)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.SymbolPlus (repVName, toSumOfSums)
 import Futhark.Analysis.Proofs.Unify (Replaceable (rep), Substitution (mapping), Unify (unify), mkRep, renameAnd, sub, unifies, unifies_)
 import Futhark.Analysis.Proofs.Util (allocateTerms)
@@ -168,16 +168,16 @@ rulesIndexFn = do
               { iterator = Forall i (Cat k (hole m) (hole b)),
                 body =
                   cases
-                    [ (hole i :== int 0, hole h1),
-                      (hole i :/= int 0, sym2SoP Recurrence)
+                    [ (hole i :== hole b, hole h1),
+                      (hole i :/= hole b, sym2SoP Recurrence)
                     ]
               },
-          -- Indexing variable i replaced by b in e1.
           to = \s ->
             subIndexFn s =<< do
               let i' = repVName (mapping s) i
               e1 <- sub s (hole h1)
               b' <- sub s (hole b)
+              -- Use that i = b to remove any dependence on i.
               let e1_b = rep (mkRep i' b') e1
               pure $
                 IndexFn

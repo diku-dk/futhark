@@ -9,7 +9,7 @@ import Control.Monad.Except
 import Control.Monad.Free.Church
 import Control.Monad.State
 import Data.Char
-import Data.List (intersperse)
+import Data.List (intersperse, isPrefixOf)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
@@ -54,6 +54,10 @@ main = mainWithOptions () [] "options... [program.fut]" run
     run _ _ = Nothing
 
 data StopReason = EOF | Stop | Exit | Load FilePath | Interrupt
+
+replSettings :: Haskeline.Settings IO
+replSettings =
+  Haskeline.setComplete replComplete Haskeline.defaultSettings
 
 repl :: Maybe FilePath -> IO ()
 repl maybe_prog = do
@@ -103,7 +107,7 @@ repl maybe_prog = do
           pure s {futharkiLoaded = maybe_prog}
     Right s ->
       pure s
-  Haskeline.runInputT Haskeline.defaultSettings $ toploop s
+  Haskeline.runInputT replSettings $ toploop s
 
   putStrLn "Leaving 'futhark repl'."
 
@@ -111,8 +115,7 @@ repl maybe_prog = do
 -- navigating through the stack frames and such.
 data Breaking = Breaking
   { breakingStack :: NE.NonEmpty I.StackFrame,
-    -- | Index of the current breakpoint (with
-    -- 0 being the outermost).
+    -- | Index of the current breakpoint (with 0 being the outermost).
     breakingAt :: Int
   }
 
@@ -372,6 +375,15 @@ runInterpreterNoBreak m = runF m (pure . Right) intOp
         T.putStrLn $
           locText w <> ": " <> "ignoring breakpoint when computating constant."
       c
+
+replComplete :: Haskeline.CompletionFunc IO
+replComplete = loadComplete
+  where
+    loadComplete (prev, aft)
+      | ":load " `isPrefixOf` reverse prev =
+          Haskeline.completeFilename (prev, aft)
+      | otherwise =
+          Haskeline.noCompletion (prev, aft)
 
 type Command = T.Text -> FutharkiM ()
 

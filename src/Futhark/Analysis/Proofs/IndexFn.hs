@@ -21,7 +21,7 @@ data Domain
       VName -- k
       (SoP Symbol) -- m
       (SoP Symbol) -- b
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data Iterator
   = Forall VName Domain
@@ -43,8 +43,8 @@ getCase n (Cases cs) = NE.toList cs !! n
 getPredicates :: IndexFn -> [Symbol]
 getPredicates (IndexFn _ cs) = map fst $ casesToList cs
 
-getIterator :: IndexFn -> Maybe VName
-getIterator (IndexFn (Forall i _) _) = Just i
+getIterator :: IndexFn -> Maybe Iterator
+getIterator (IndexFn iter@(Forall _ _) _) = Just iter
 getIterator _ = Nothing
 
 domainSegStart :: Domain -> SoP Symbol

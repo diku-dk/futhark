@@ -15,7 +15,7 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (IndexFn, getIterator, getPredicates)
+import Futhark.Analysis.Proofs.IndexFn (IndexFn, Iterator (Forall), getIterator, getPredicates)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
@@ -23,7 +23,7 @@ import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Futhark.SoP.Monad (addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
+import Futhark.SoP.Monad (addEquiv, addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange, substEquivs)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
@@ -60,8 +60,8 @@ algebraContext fn m = rollbackAlgEnv $ do
   mapM_ trackBooleanNames ps
   _ <- handleQuantifiers fn
   case getIterator fn of
-    Just i -> mapM_ (handlePreds i) ps
-    Nothing -> pure ()
+    Just (Forall i _) -> mapM_ (handlePreds i) ps
+    _ -> pure ()
   addDisjointedness ps
   m
   where
@@ -301,6 +301,13 @@ toAlgebra_ Recurrence = lookupUntransPE Recurrence
 toAlgebra_ x = handleBoolean x
 
 handleBoolean :: Symbol -> IndexFnM Algebra.Symbol
+handleBoolean (Bool p) = do
+  x <- lookupUntransPE (Bool p)
+  addEquiv x (int2SoP $ boolToInt p)
+  pure x
+  where
+    boolToInt True = 1
+    boolToInt False = 0
 handleBoolean p = do
   res <- search p
   vn <- case fst <$> res of

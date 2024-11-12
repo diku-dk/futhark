@@ -371,9 +371,9 @@ instance ASTMappable (PatBase Info VName ParamType) where
 instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldExplicit name e loc) =
     RecordFieldExplicit name <$> mapOnExp tv e <*> pure loc
-  astMap tv (RecordFieldImplicit name t loc) =
+  astMap tv (RecordFieldImplicit (L nameloc name) t loc) =
     RecordFieldImplicit
-      <$> (qualLeaf <$> mapOnName tv (QualName [] name))
+      <$> (L nameloc <$> (qualLeaf <$> mapOnName tv (QualName [] name)))
       <*> traverse (mapOnStructType tv) t
       <*> pure loc
 

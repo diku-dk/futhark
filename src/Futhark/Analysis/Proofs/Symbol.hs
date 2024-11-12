@@ -1,8 +1,8 @@
 module Futhark.Analysis.Proofs.Symbol where
 
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
-import Futhark.SoP.SoP (SoP, justSym)
-import Futhark.Util.Pretty (Pretty, apply, brackets, enclose, parens, pretty, (<+>), prettyString, commasep)
+import Futhark.SoP.SoP (SoP, justConstant, justSym)
+import Futhark.Util.Pretty (Pretty, apply, brackets, commasep, parens, pretty, prettyString, (<+>))
 import Language.Futhark (VName)
 
 data Symbol
@@ -32,12 +32,19 @@ data Symbol
   deriving (Show, Eq, Ord)
 
 infixr 4 :<
+
 infixr 4 :<=
+
 infixr 4 :>
+
 infixr 4 :>=
+
 infixr 4 :==
+
 infixr 4 :/=
+
 infixr 3 :&&
+
 infixr 2 :||
 
 isBoolean :: Symbol -> Bool
@@ -57,6 +64,10 @@ sop2Symbol :: (Ord u, Pretty u) => SoP u -> u
 sop2Symbol sop
   | Just t <- justSym sop = t
   | otherwise = error $ "sop2Symbol on non-symbol: " <> prettyString sop
+
+sop2BoolSymbol :: SoP Symbol -> Symbol
+sop2BoolSymbol sop | Just 1 <- justConstant sop = Bool True
+sop2BoolSymbol sop = sop2Symbol sop
 
 getSumBoundVar :: Symbol -> Maybe VName
 getSumBoundVar (Sum i _ _ _) = Just i
