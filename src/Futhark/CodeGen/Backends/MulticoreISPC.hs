@@ -20,7 +20,6 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.DList qualified as DL
 import Data.List (unzip4)
-import Data.Loc (noLoc)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T

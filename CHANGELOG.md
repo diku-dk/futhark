@@ -9,13 +9,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Fixed
+
+### Changed
+
+## [0.25.24]
+
+### Added
+
 * `futhark doc` now produces better (and stable) anchor IDs.
 
 * `futhark profile` now supports multiple JSON files.
 
-### Removed
+* `futhark fmt`, by William Due and Therese Lyngby.
 
-### Changed
+* Lambdas can now be passed as the last argument to a function application.
 
 ### Fixed
 
@@ -23,6 +33,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   zero.
 
 * Necessary inlining of functions used inside AD constructs.
+
+* A compile time regression for programs that used higher order
+  functions very aggressively.
+
+* Uniqueness bug related to slice simplification.
 
 ## [0.25.23]
 

@@ -74,6 +74,8 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         all (worthInlining . untyped) inds'',
         arr `ST.available` vtable,
         all (`ST.elem` vtable) (unCerts cs),
+        not consuming,
+        not $ consumed arr,
         Just inds''' <- mapM okIdx inds'' -> do
           Just $ IndexResult cs arr . Slice <$> sequence inds'''
       where

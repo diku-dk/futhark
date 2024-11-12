@@ -373,13 +373,13 @@ checkExp (RecordLit fs loc) =
   RecordLit <$> evalStateT (mapM checkField fs) mempty <*> pure loc
   where
     checkField (RecordFieldExplicit f e rloc) = do
-      errIfAlreadySet f rloc
-      modify $ M.insert f rloc
+      errIfAlreadySet (unLoc f) rloc
+      modify $ M.insert (unLoc f) rloc
       RecordFieldExplicit f <$> lift (checkExp e) <*> pure rloc
     checkField (RecordFieldImplicit name NoInfo rloc) = do
-      errIfAlreadySet (baseName name) rloc
-      t <- lift $ lookupVar rloc $ qualName name
-      modify $ M.insert (baseName name) rloc
+      errIfAlreadySet (baseName (unLoc name)) rloc
+      t <- lift $ lookupVar rloc $ qualName $ unLoc name
+      modify $ M.insert (baseName (unLoc name)) rloc
       pure $ RecordFieldImplicit name (Info t) rloc
 
     errIfAlreadySet f rloc = do
@@ -802,12 +802,12 @@ checkExp (IndexSection slice NoInfo loc) = do
   (t', retext) <- sliceShape Nothing slice' t
   let ft = Scalar $ Arrow mempty Unnamed Observe t $ RetType retext $ toRes Nonunique t'
   pure $ IndexSection slice' (Info ft) loc
-checkExp (AppExp (Loop _ mergepat mergeexp form loopbody loc) _) = do
-  ((sparams, mergepat', mergeexp', form', loopbody'), appres) <-
-    checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc
+checkExp (AppExp (Loop _ mergepat loopinit form loopbody loc) _) = do
+  ((sparams, mergepat', loopinit', form', loopbody'), appres) <-
+    checkLoop checkExp (mergepat, loopinit, form, loopbody) loc
   pure $
     AppExp
-      (Loop sparams mergepat' mergeexp' form' loopbody' loc)
+      (Loop sparams mergepat' loopinit' form' loopbody' loc)
       (Info appres)
 checkExp (Constr name es NoInfo loc) = do
   t <- newTypeVar loc "t"
@@ -876,7 +876,7 @@ instance Pretty (Unmatched (Pat StructType)) where
       pretty' (TuplePat pats _) = parens $ commasep $ map pretty' pats
       pretty' (RecordPat fs _) = braces $ commasep $ map ppField fs
         where
-          ppField (name, t) = pretty (nameToString name) <> equals <> pretty' t
+          ppField (L _ name, t) = pretty (nameToString name) <> equals <> pretty' t
       pretty' Wildcard {} = "_"
       pretty' (PatLit e _ _) = pretty e
       pretty' (PatConstr n _ ps _) = "#" <> pretty n <+> sep (map pretty' ps)

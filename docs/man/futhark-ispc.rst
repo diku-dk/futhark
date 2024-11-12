@@ -54,7 +54,7 @@ LIBRARY USAGE
 
 When compiling a program ``foo.fut`` with ``futhark ispc --library``,
 a ``foo.kernels.ispc`` file is produced that must be compiled with
-:ref:`ispc(1)` and linked with the final program. For example::
+``ispc`` and linked with the final program. For example::
 
   $ ispc -o foo.kernels.o foo.kernels.ispc --addressing=64 --pic --woff -O3
 

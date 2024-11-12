@@ -127,7 +127,9 @@ evalTypeExp df dg t@(TERecord fs loc) = do
   pure
     ( TERecord (M.toList fs') loc,
       fs_svars,
-      RetType (foldMap retDims ts_s) $ Scalar $ Record $ M.map retType ts_s,
+      RetType (foldMap retDims ts_s) . Scalar . Record $
+        M.mapKeys unLoc $
+          M.map retType ts_s,
       L.foldl' max Unlifted ls
     )
 --

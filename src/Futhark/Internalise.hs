@@ -76,12 +76,12 @@ internaliseProg config prog = do
   prog_decs0 <- ApplyTypeAbbrs.transformProg =<< Defunctorise.transformProg prog
   maybeLog "Full Normalising"
   prog_decs1 <- FullNormalise.transformProg prog_decs0
-  maybeLog "Lifting lambdas"
-  prog_decs2 <- LiftLambdas.transformProg prog_decs1
-  maybeLog "Monomorphising"
-  prog_decs3 <- Monomorphise.transformProg prog_decs2
   maybeLog "Replacing records"
-  prog_decs4 <- ReplaceRecords.transformProg prog_decs3
+  prog_decs2 <- ReplaceRecords.transformProg prog_decs1
+  maybeLog "Lifting lambdas"
+  prog_decs3 <- LiftLambdas.transformProg prog_decs2
+  maybeLog "Monomorphising"
+  prog_decs4 <- Monomorphise.transformProg prog_decs3
   maybeLog "Defunctionalising"
   prog_decs5 <- Defunctionalise.transformProg prog_decs4
   maybeLog "Converting to core IR"
