@@ -248,6 +248,14 @@ tests =
               { iterator = Forall i (Cat k (sHole m) (sHole b)),
                 body = cases [(Bool True, sHole k)]
               }
+        ),
+      mkTest
+        "tests/indexfn/part2indicesL.fut"
+        ( pure $ \(i, n, dummy, _) ->
+            IndexFn
+              { iterator = Forall i (Iota $ sVar n),
+                body = cases [(Bool True, sHole dummy)]
+              }
         )
     ]
   where
