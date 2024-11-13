@@ -212,7 +212,6 @@ tests =
             newNameFromString "j" >>= \j ->
               newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
                 let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Idx (Hole shape) (sVar j))
-                    shape_k = sym2SoP (Idx (Hole shape) (sVar k))
                  in IndexFn
                       { iterator = Forall i (Cat k (sHole m) sum_km1),
                         body =
