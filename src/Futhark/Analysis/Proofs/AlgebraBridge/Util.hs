@@ -23,21 +23,16 @@ assume (p :&& q) = assume p >> assume q
 assume x = do
   booltype <- isBooleanM x
   unless booltype (error $ "assume on non-boolean: " <> prettyString x)
+  -- Symbol is in NNF, so x is _not_ on the form Not (p && q).
   case x of
     Not p -> do
       addRelSymbol (neg p)
-      -- If x is boolean, it will be in NNF, so x can only be
-      -- Var, Idx, or Apply.
-      p' <- toAlgebraSymbol p
-      addEquiv p' (int2SoP 0)
-      not_p <- toAlgebraSymbol $ neg p
-      addEquiv not_p (int2SoP 1)
+      flip addEquiv (int2SoP 0) =<< toAlgebraSymbol p
+      flip addEquiv (int2SoP 1) =<< toAlgebraSymbol (neg p)
     p -> do
       addRelSymbol p
-      p' <- toAlgebraSymbol p
-      addEquiv p' (int2SoP 1)
-      not_p <- toAlgebraSymbol $ neg p
-      addEquiv not_p (int2SoP 0)
+      flip addEquiv (int2SoP 1) =<< toAlgebraSymbol p
+      flip addEquiv (int2SoP 0) =<< toAlgebraSymbol (neg p)
       -- Add that pairwise disjoint symbols are false.
       qs <- getPairwiseDisjoint p
       forM_ qs (flip addEquiv (int2SoP 0) <=< toAlgebraSymbol)
