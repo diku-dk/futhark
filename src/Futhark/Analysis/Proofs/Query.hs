@@ -131,10 +131,10 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
                         j +< i
                         (f @ i) `rel` (g @ j)
                   in case_i_lt_j `andM` case_i_gt_j
+            debugPrettyM "f:" (f @ i :: SoP Symbol)
+            debugPrettyM "g:" (g @ j :: SoP Symbol)
             f_LT_g <- f_rel_g ($<)
-            debugPrettyM "cmp f:" (f @ i :: SoP Symbol)
-            debugPrettyM "    g:" (g @ j :: SoP Symbol)
-            debugT "===" $
+            debugT "  f `cmp` g" $
               case f_LT_g of
                   Yes -> pure LT
                   Unknown -> do
@@ -148,10 +148,9 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
               ( \(p, f) -> rollbackAlgEnv $ do
                   addRelIterator (Forall i (Iota n))
                   assume (fromJust . justSym $ p @ i)
-                  debugPrettyM "within bounds for case:" (p @ i :: SoP Symbol)
-                  debugPrintAlgEnv
-                  let bug1 = debugT ("0 <= " <> prettyString (f @ i :: SoP Symbol))
-                  let bug2 = debugT ("n >  " <> prettyString (f @ i :: SoP Symbol))
+                  debugPrettyM "CASE:" (p @ i :: SoP Symbol)
+                  let bug1 = debugT ("  0 <= " <> prettyString (f @ i :: SoP Symbol))
+                  let bug2 = debugT ("  n >  " <> prettyString (f @ i :: SoP Symbol))
                   bug1 (int2SoP 0 $<= f @ i) `andM` bug2 (f @ i $< n)
               )
               branches
