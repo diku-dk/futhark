@@ -9,14 +9,14 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
   )
 where
 
-import Control.Monad (foldM, forM_, unless, when, (<=<))
+import Control.Monad (foldM, forM_, unless, void, when, (<=<))
 import Control.Monad.RWS (gets, modify)
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromJust, fromMaybe)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isNothing)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn, Iterator (Forall), getIterator, getPredicates)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv))
+import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv), debugPrettyM)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
@@ -60,38 +60,37 @@ algebraContext fn m = rollbackAlgEnv $ do
   mapM_ trackBooleanNames ps
   _ <- handleQuantifiers fn
   case getIterator fn of
-    Just (Forall i _) -> mapM_ (handlePreds i) ps
+    Just (Forall i _) -> do
+      mapM_ (handlePreds i) ps
+      addDisjointedness i ps
     _ -> pure ()
-  addDisjointedness ps
   m
   where
+    lookupUntransBool i x = do
+      res <- search x
+      vn <- case fst <$> res of
+        Nothing -> addUntrans =<< x `removeQuantifier` i
+        Just vn -> pure vn
+      addRange (Algebra.Var vn) (mkRange (int2SoP 0) (int2SoP 1))
+      addProperty (Algebra.Var vn) Algebra.Boolean
+      pure vn
+
     -- c[i] == y && d[i] => {c[i] == y: p[hole1], d[i]: q[hole2]}
     handlePreds i (x :&& y) = handlePreds i x >> handlePreds i y
     handlePreds i (x :|| y) = handlePreds i x >> handlePreds i y
-    handlePreds i x = do
-      res <- search x
-      case res of
-        Nothing -> do
-          vn <- addUntrans =<< x `removeQuantifier` i
-          addProperty (Algebra.Var vn) Algebra.Boolean
-        _ -> pure ()
+    handlePreds i x = lookupUntransBool i x
 
-    addDisjointedness ps | length ps < 2 = pure ()
-    addDisjointedness ps = do
-      vns <-
-        foldM
-          ( \acc p -> do
-              res <- search p
-              case fst <$> res of
-                Nothing -> pure acc
-                Just vn -> pure $ vn : acc
-          )
-          []
-          ps
-      let addProp vn =
-            addProperty (Algebra.Var vn) $
-              Algebra.PairwiseDisjoint (S.fromList vns S.\\ S.singleton vn)
-      forM_ vns addProp
+    addDisjointedness _ ps | length ps < 2 = pure ()
+    addDisjointedness i ps = do
+      -- If p is on the form p && q, then p and q probably already
+      -- have untranslatable names, but p && q does not. The PairwiseDisjoint
+      -- set, however, needs to be complete in the sense that OR'ing every
+      -- element in the set is a tautology. So we need to create a
+      -- name for the predicate with connectives.
+      vns <- mapM (lookupUntransBool i) ps
+      forM_ vns $ \vn ->
+        addProperty (Algebra.Var vn) $
+          Algebra.PairwiseDisjoint (S.fromList vns S.\\ S.singleton vn)
 
     -- Add boolean tag to IndexFn layer names where applicable.
     trackBooleanNames (Var vn) = do

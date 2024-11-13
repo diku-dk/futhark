@@ -199,11 +199,9 @@ tests =
                             sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (cs_j :== int2SoP 1))
                           ),
                           ( (cs_i :/= int2SoP 1) :&& (cs_i :/= int2SoP 2),
-                            -- Note that the sums are extended from Sum_{j=i+1}^{n-1} to Sum_{j=i}^{n-1}
-                            -- as the predicate above allows this (the added terms are false, hence zero).
                             sHole i
-                              .+. sym2SoP (Sum j (sHole i) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 1))
-                              .+. sym2SoP (Sum j (sHole i) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 2))
+                              .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 1))
+                              .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 2))
                           )
                         ]
                   }
