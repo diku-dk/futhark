@@ -1,7 +1,7 @@
 -- Utilities for using the Algebra layer from the IndexFn layer.
 module Futhark.Analysis.Proofs.AlgebraBridge.Util where
 
-import Control.Monad (unless, forM_, (<=<))
+import Control.Monad (unless, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
@@ -24,11 +24,12 @@ assume p = do
   booltype <- isBooleanM p
   unless booltype (error $ "assume on non-boolean: " <> prettyString p)
   addRelSymbol p
-  flip addEquiv (int2SoP 1) =<< toAlgebraSymbol p
-  flip addEquiv (int2SoP 0) =<< toAlgebraSymbol (neg p)
+  addEq 1 p
+  addEq 0 (neg p)
   -- Add that pairwise disjoint symbols are false.
-  qs <- getPairwiseDisjoint p
-  forM_ qs (flip addEquiv (int2SoP 0) <=< toAlgebraSymbol)
+  mapM_ (addEq 0) =<< getPairwiseDisjoint p
+  where
+    addEq i = flip addEquiv (int2SoP i) <=< toAlgebraSymbol
 
 -- | Adds a relation on symbols to the algebraic environment.
 -- No-op if `p` is not a relation.
