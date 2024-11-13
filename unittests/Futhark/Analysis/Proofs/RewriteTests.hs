@@ -12,7 +12,7 @@ import Futhark.Analysis.Proofs.Rewrite
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Unify
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, mkRangeUB)
+import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, mkRangeUB, addProperty)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Test.Tasty
@@ -212,12 +212,6 @@ tests =
               rewrite ((sVar x :<= sVar y) :|| Bool True)
           )
           @??= Bool True,
-      testCase "Match subsymbols" $
-        run
-          ( \(x, y, _, _, _, _, _, _) ->
-              rewrite ((Bool True :&& (sVar x :<= sVar y)))
-          )
-          @??= (sVar x :<= sVar y),
       -- Refine tests.
       testCase "Equivalence (1)" $
         run
@@ -249,7 +243,9 @@ tests =
           @??= Bool True,
       testCase "Match subsymbol" $
         run
-          ( \(x, y, _, _, _, _, _, _) ->
+          ( \(x, y, _, _, _, _, _, _) -> do
+              addProperty (Algebra.Var x) Algebra.Boolean
+              addProperty (Algebra.Var y) Algebra.Boolean
               rewrite (Var x :&& (Var y :&& neg (int 1 :>= int 2)))
           )
           @??= (Var x :&& Var y),

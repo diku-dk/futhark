@@ -60,8 +60,8 @@ matchMonIdxDif t1@(sym1, (ms1, k1)) t2@(sym2, (ms2, k2))
   | Idx (One anm) aidx <- sym1,
     Idx (One bnm) bidx <- sym2,
     anm == bnm && k1 == 0 - k2 = do
-      tab_props <- getProperties
-      case hasMon (fromMaybe S.empty $ M.lookup (Var anm) tab_props) of
+      mono <- askMonotonic (Var anm)
+      case mono of
         Nothing -> pure Nothing
         Just dir ->
           pure $
@@ -148,8 +148,8 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
     S.disjoint anms bnms,
     anm <- S.elemAt 0 anms,
     ms1 == ms2 && k1 == k2 = do
-  tab_props <- getProperties
-  case hasDisjoint (fromMaybe S.empty $ M.lookup (Var anm) tab_props) of
+  disjoint <- askPairwiseDisjoint (Var anm)
+  case disjoint of
     Nothing -> pure Nothing
     Just nms_disjoint_with_a -> do
       let abnms = S.union anms bnms

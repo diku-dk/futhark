@@ -10,6 +10,8 @@ module Futhark.Analysis.Proofs.AlgebraPC.Symbol
     hasDisjoint,
     hasIdxOrSum,
     hasMon,
+    askMonotonic,
+    askPairwiseDisjoint,
     getVName,
   )
 where
@@ -17,11 +19,13 @@ where
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (Nameable (mkName))
+import Futhark.SoP.Monad (Nameable (mkName), getProperties, MonadSoP, askPropertyWith)
 import Futhark.SoP.SoP (SoP)
 import Futhark.Util.Pretty (Pretty, brackets, commasep, enclose, parens, pretty, viaShow, (<+>))
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
+import qualified Data.Map as M
+import Control.Monad (unless)
 
 data IdxSym
   = -- | one regular name
@@ -118,11 +122,21 @@ hasMdf _ = False
 hasIdxOrSum :: Symbol -> Bool
 hasIdxOrSum x = hasIdx x || hasMdf x || hasSum x
 
+-- tab_props <- getProperties
+-- case hasMon (fromMaybe S.empty $ M.lookup (Var anm) tab_props) of
+
+askMonotonic :: MonadSoP u e Property m => u -> m (Maybe MonDir)
+askMonotonic sym = askPropertyWith sym hasMon
+
+askPairwiseDisjoint :: MonadSoP u e Property m => u -> m (Maybe (S.Set VName))
+askPairwiseDisjoint sym = askPropertyWith sym hasDisjoint
+
 hasMon :: S.Set Property -> Maybe MonDir
 hasMon props
   | S.null props = Nothing
-  | Monotonic dir : _ <- filter f (S.toList props) =
-      Just dir
+  | Monotonic dir : rest <- filter f (S.toList props) = do
+    unless (null rest) $ error "hasMon multiple Monotonic"
+    Just dir
   where
     f (Monotonic _) = True
     f _ = False
@@ -131,7 +145,8 @@ hasMon _ = Nothing
 hasDisjoint :: S.Set Property -> Maybe (S.Set VName)
 hasDisjoint props
   | S.null props = Nothing
-  | PairwiseDisjoint nms : _ <- filter f (S.toList props) =
+  | PairwiseDisjoint nms : rest <- filter f (S.toList props) = do
+    unless (null rest) $ error "hasDisjoint multiple PairwiseDisjoint"
     Just nms
   where
     f (PairwiseDisjoint{}) = True

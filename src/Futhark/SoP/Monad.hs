@@ -38,6 +38,7 @@ module Futhark.SoP.Monad
     findSymLEq0Def,
     mkRangeLB,
     mkRangeUB,
+    askPropertyWith,
   )
 where
 
@@ -287,6 +288,13 @@ askProperty sym prop = do
   case mp of
     Nothing -> pure False
     Just props -> pure $ prop `S.member` props
+
+askPropertyWith :: MonadSoP u e p m => u -> (Set p -> Maybe a) -> m (Maybe a)
+askPropertyWith sym getter = do
+  mp <- (M.!? sym) <$> getProperties
+  case mp of
+    Nothing -> pure Nothing
+    Just props -> pure $ getter props
 
 --------------------------------------------------------------------------------
 -- Environment

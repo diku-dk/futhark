@@ -1,7 +1,7 @@
 -- Utilities for using the Algebra layer from the IndexFn layer.
 module Futhark.Analysis.Proofs.AlgebraBridge.Util where
 
-import Control.Monad (when)
+import Control.Monad (unless, forM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
@@ -16,27 +16,34 @@ import Futhark.SoP.Monad (addEquiv, addRange, mkRange)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, (.-.))
 import Futhark.SoP.SoP qualified as SoP
-import Futhark.Util.Pretty (Pretty (pretty), viaShow)
+import Futhark.Util.Pretty (Pretty (pretty), viaShow, prettyString)
 
 assume :: Symbol -> IndexFnM ()
-assume (Not x) = do
-  -- If x is boolean, it will be in NNF, so x can only be
-  -- Var, Idx, or Apply.
-  booltype <- isBooleanM x
-  x' <- toAlgebraSymbol x
-  when booltype $ addEquiv x' (int2SoP 0)
-  not_x <- toAlgebraSymbol $ neg x
-  when booltype $ addEquiv not_x (int2SoP 1)
-  addRelSymbol (neg x)
-assume (x :&& y) =
-  assume x >> assume y
+assume (p :&& q) = assume p >> assume q
 assume x = do
   booltype <- isBooleanM x
-  x' <- toAlgebraSymbol x
-  when booltype $ addEquiv x' (int2SoP 1)
-  not_x <- toAlgebraSymbol $ neg x
-  when booltype $ addEquiv not_x (int2SoP 0)
-  addRelSymbol x
+  unless booltype (error $ "assume on non-boolean: " <> prettyString x)
+  case x of
+    Not p -> do
+      addRelSymbol (neg p)
+      -- If x is boolean, it will be in NNF, so x can only be
+      -- Var, Idx, or Apply.
+      p' <- toAlgebraSymbol p
+      addEquiv p' (int2SoP 0)
+      not_p <- toAlgebraSymbol $ neg p
+      addEquiv not_p (int2SoP 1)
+    p -> do
+      addRelSymbol p
+      p' <- toAlgebraSymbol p
+      addEquiv p' (int2SoP 1)
+      not_p <- toAlgebraSymbol $ neg p
+      addEquiv not_p (int2SoP 0)
+      -- Pairwise disjoint symbols are false.
+      disjoint <- Algebra.askPairwiseDisjoint p'
+      case disjoint of
+        Nothing -> pure ()
+        Just vns -> do
+          forM_ vns $ flip addEquiv (int2SoP 0) . Algebra.Var
 
 -- | Adds a relation on symbols to the algebraic environment.
 -- No-op if `p` is not a relation.
