@@ -183,8 +183,8 @@ tests =
               -- We are in the case for conds[i] == 2.
               addEquiv (Idx pd (sVar i1)) (int 1)
               -- Add: idx1 <=> not idx2
-              addProperty (Var c0) (PairwiseDisjoint set_de)
-              addProperty (Var d0) (PairwiseDisjoint set_ce)
+              addProperty (Var c0) (Disjoint set_de)
+              addProperty (Var d0) (Disjoint set_ce)
               let sum1 = Sum pc (int 0) (sVar n .-. int 1)
                   sum2 = Sum pd (int 0) (sVar i1 .-. int 1)
               (sum1 ~+~ sum2) FM.$<$ sVar n
@@ -200,8 +200,8 @@ tests =
               -- We are in the case for conds[i] /= 1 ^ conds[i] /= 2.
               addEquiv (Idx pd (sVar i1)) (int 0)
               addEquiv (Idx pc (sVar i1)) (int 0)
-              addProperty (Var c0) (PairwiseDisjoint set_de)
-              addProperty (Var d0) (PairwiseDisjoint set_ce)
+              addProperty (Var c0) (Disjoint set_de)
+              addProperty (Var d0) (Disjoint set_ce)
               let sum1 = Sum pc (sVar i1) (sVar n .-. int 1)
                   sum2 = Sum pd (sVar i1) (sVar n .-. int 1)
               (sVar i1 .+. (sum1 ~+~ sum2)) FM.$<$ sVar n
@@ -216,8 +216,8 @@ tests =
               -- We are in the case for conds[i] == 2.
               addEquiv (Idx pd (sVar i1)) (int 1)
               -- Add: idx1 <=> not idx2
-              addProperty (Var c0) (PairwiseDisjoint set_de)
-              addProperty (Var d0) (PairwiseDisjoint set_ce)
+              addProperty (Var c0) (Disjoint set_de)
+              addProperty (Var d0) (Disjoint set_ce)
               let sum1 = Sum pc (int 0) (sVar n .-. int 1)
                   sum2 = Sum pd (int 0) (sVar i1 .-. int 1)
               int 0 FM.$<=$ (sum1 ~+~ sum2)
@@ -236,8 +236,8 @@ tests =
               addEquiv (Idx pc (sVar i1)) (int 1)
               addEquiv (Idx pd (sVar i2)) (int 1)
               -- Predicates are disjoint.
-              addProperty (Var c0) (PairwiseDisjoint set_de)
-              addProperty (Var d0) (PairwiseDisjoint set_ce)
+              addProperty (Var c0) (Disjoint set_de)
+              addProperty (Var d0) (Disjoint set_ce)
               let sum1 = Sum pc (int 0)
                   sum2 = Sum pd (int 0) (sVar i2 .-. int 1)
               sym2SoP (sum1 (sVar i1 .-. int 1)) FM.$<$ (sum1 (sVar n .-. int 1) ~+~ sum2)
@@ -260,8 +260,8 @@ tests =
               addEquiv (Idx pc (sVar i2)) (int 0)
               addEquiv (Idx pd (sVar i1)) (int 0)
               -- Predicates are disjoint.
-              addProperty (Var c0) (PairwiseDisjoint set_de)
-              addProperty (Var d0) (PairwiseDisjoint set_ce)
+              addProperty (Var c0) (Disjoint set_de)
+              addProperty (Var d0) (Disjoint set_ce)
               let sum1_to = Sum pc (int 0)
                   sum1_from from = Sum pc from (sVar n .-. int 1)
                   sum2 = Sum pd (int 0) (sVar i2 .-. int 1)

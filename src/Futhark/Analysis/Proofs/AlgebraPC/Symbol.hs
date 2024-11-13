@@ -11,7 +11,7 @@ module Futhark.Analysis.Proofs.AlgebraPC.Symbol
     hasIdxOrSum,
     hasMon,
     askMonotonic,
-    askPairwiseDisjoint,
+    askDisjoint,
     getVName,
   )
 where
@@ -19,12 +19,11 @@ where
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (Nameable (mkName), getProperties, MonadSoP, askPropertyWith)
+import Futhark.SoP.Monad (Nameable (mkName), MonadSoP, askPropertyWith)
 import Futhark.SoP.SoP (SoP)
 import Futhark.Util.Pretty (Pretty, brackets, commasep, enclose, parens, pretty, viaShow, (<+>))
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
-import qualified Data.Map as M
 import Control.Monad (unless)
 
 data IdxSym
@@ -89,14 +88,13 @@ data Property
   = Monotonic MonDir
   | Injective
   | Boolean
-  | -- These symbols are pairwise disjoint, meaning it is not possible
-    -- for more than one to be true at the same time.
-    PairwiseDisjoint (S.Set VName)
+  | -- These predicates are pairwise disjoint and collectively exhaustive.
+    Disjoint (S.Set VName)
   deriving (Show, Eq, Ord)
 
 instance Pretty Property where
-  pretty (PairwiseDisjoint s) =
-    "PairwiseDisjoint" <+> parens (commasep $ map prettyName $ S.toList s)
+  pretty (Disjoint s) =
+    "Disjoint" <+> parens (commasep $ map prettyName $ S.toList s)
   pretty p = viaShow p
 
 ---------------------------------
@@ -128,8 +126,8 @@ hasIdxOrSum x = hasIdx x || hasMdf x || hasSum x
 askMonotonic :: MonadSoP u e Property m => u -> m (Maybe MonDir)
 askMonotonic sym = askPropertyWith sym hasMon
 
-askPairwiseDisjoint :: MonadSoP u e Property m => u -> m (Maybe (S.Set VName))
-askPairwiseDisjoint sym = askPropertyWith sym hasDisjoint
+askDisjoint :: MonadSoP u e Property m => u -> m (Maybe (S.Set VName))
+askDisjoint sym = askPropertyWith sym hasDisjoint
 
 hasMon :: S.Set Property -> Maybe MonDir
 hasMon props
@@ -145,11 +143,11 @@ hasMon _ = Nothing
 hasDisjoint :: S.Set Property -> Maybe (S.Set VName)
 hasDisjoint props
   | S.null props = Nothing
-  | PairwiseDisjoint nms : rest <- filter f (S.toList props) = do
-    unless (null rest) $ error "hasDisjoint multiple PairwiseDisjoint"
+  | Disjoint nms : rest <- filter f (S.toList props) = do
+    unless (null rest) $ error "hasDisjoint multiple Disjoint"
     Just nms
   where
-    f (PairwiseDisjoint{}) = True
+    f (Disjoint{}) = True
     f _ = False
 hasDisjoint _ = Nothing
 

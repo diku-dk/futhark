@@ -5,7 +5,7 @@ import Control.Monad (unless, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (isBooleanM, toAlgebra, toAlgebraSymbol, getPairwiseDisjoint)
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (isBooleanM, toAlgebra, toAlgebraSymbol, getDisjoint)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
@@ -27,7 +27,7 @@ assume p = do
   addEq 1 p
   addEq 0 (neg p)
   -- Add that pairwise disjoint symbols are false.
-  mapM_ (addEq 0) =<< getPairwiseDisjoint p
+  mapM_ (addEq 0) =<< getDisjoint p
   where
     addEq i = flip addEquiv (int2SoP i) <=< toAlgebraSymbol
 

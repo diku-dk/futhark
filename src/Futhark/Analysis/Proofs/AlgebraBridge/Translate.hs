@@ -6,25 +6,25 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
     algebraContext,
     toAlgebraSymbol,
     isBooleanM,
-    getPairwiseDisjoint,
+    getDisjoint,
   )
 where
 
-import Control.Monad (foldM, forM_, unless, void, when, (<=<))
+import Control.Monad (forM_, unless, when, (<=<))
 import Control.Monad.RWS (gets, modify)
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromJust, fromMaybe, isNothing)
+import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn, Iterator (Forall), getIterator, getPredicates)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv), debugPrettyM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Futhark.SoP.Monad (addEquiv, addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange, substEquivs)
+import Futhark.SoP.Monad (addEquiv, addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
@@ -84,14 +84,11 @@ algebraContext fn m = rollbackAlgEnv $ do
     addDisjointedness _ ps | length ps < 2 = pure ()
     addDisjointedness i ps = do
       -- If p is on the form p && q, then p and q probably already
-      -- have untranslatable names, but p && q does not. The PairwiseDisjoint
-      -- set, however, needs to be complete in the sense that OR'ing every
-      -- element in the set is a tautology. So we need to create a
-      -- name for the predicate with connectives.
+      -- have untranslatable names, but p && q does not.
       vns <- mapM (lookupUntransBool i) ps
       forM_ vns $ \vn ->
         addProperty (Algebra.Var vn) $
-          Algebra.PairwiseDisjoint (S.fromList vns S.\\ S.singleton vn)
+          Algebra.Disjoint (S.fromList vns S.\\ S.singleton vn)
 
     -- Add boolean tag to IndexFn layer names where applicable.
     trackBooleanNames (Var vn) = do
@@ -249,13 +246,13 @@ isBooleanM (Apply (Var vn) _) = do
   askProperty (Algebra.Var vn) Algebra.Boolean
 isBooleanM x = pure $ isBoolean x
 
-getPairwiseDisjoint :: Symbol -> IndexFnM [Symbol]
-getPairwiseDisjoint x = do
+getDisjoint :: Symbol -> IndexFnM [Symbol]
+getDisjoint x = do
   res <- search x
   case res of
     Nothing -> pure []
     Just (vn, idx) -> do
-      disjoint_vns <- fromMaybe mempty <$> Algebra.askPairwiseDisjoint (Algebra.Var vn)
+      disjoint_vns <- fromMaybe mempty <$> Algebra.askDisjoint (Algebra.Var vn)
       xs <- mapM lookupUntransSymUnsafe (S.toList disjoint_vns)
       case idx of
         Just j -> mapM (`repHoles` j) xs
