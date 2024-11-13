@@ -1,11 +1,11 @@
 -- Utilities for using the Algebra layer from the IndexFn layer.
 module Futhark.Analysis.Proofs.AlgebraBridge.Util where
 
-import Control.Monad (unless, forM_)
+import Control.Monad (unless, forM_, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (isBooleanM, toAlgebra, toAlgebraSymbol)
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (isBooleanM, toAlgebra, toAlgebraSymbol, getPairwiseDisjoint)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
@@ -38,12 +38,9 @@ assume x = do
       addEquiv p' (int2SoP 1)
       not_p <- toAlgebraSymbol $ neg p
       addEquiv not_p (int2SoP 0)
-      -- Pairwise disjoint symbols are false.
-      disjoint <- Algebra.askPairwiseDisjoint p'
-      case disjoint of
-        Nothing -> pure ()
-        Just vns -> do
-          forM_ vns $ flip addEquiv (int2SoP 0) . Algebra.Var
+      -- Add that pairwise disjoint symbols are false.
+      qs <- getPairwiseDisjoint p
+      forM_ qs (flip addEquiv (int2SoP 0) <=< toAlgebraSymbol)
 
 -- | Adds a relation on symbols to the algebraic environment.
 -- No-op if `p` is not a relation.

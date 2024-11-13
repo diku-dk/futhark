@@ -141,7 +141,7 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
                     f_GT_g <- f_rel_g ($>)
                     case f_GT_g of
                       Yes -> pure GT
-                      Unknown -> pure Undefined
+                      Unknown -> debugPrintAlgEnv >> pure Undefined
       let no_overlap = answerFromBool . isJust <$> sorted cmp branches
       let within_bounds =
             map

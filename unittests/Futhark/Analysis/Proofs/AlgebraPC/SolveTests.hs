@@ -256,10 +256,12 @@ tests =
               let pd = POR $ S.singleton d0 -- conds[i2] == 2
               addEquiv (Idx pc (sVar i1)) (int 1)
               addEquiv (Idx pd (sVar i2)) (int 1)
+              -- Due to pairwise disjointedness, we also know:
+              addEquiv (Idx pc (sVar i2)) (int 0)
+              addEquiv (Idx pd (sVar i1)) (int 0)
               -- Predicates are disjoint.
               addProperty (Var c0) (PairwiseDisjoint set_de)
               addProperty (Var d0) (PairwiseDisjoint set_ce)
-              debugPrintAlgEnv
               let sum1_to = Sum pc (int 0)
                   sum1_from from = Sum pc from (sVar n .-. int 1)
                   sum2 = Sum pd (int 0) (sVar i2 .-. int 1)

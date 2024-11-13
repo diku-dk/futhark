@@ -6,6 +6,7 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
     algebraContext,
     toAlgebraSymbol,
     isBooleanM,
+    getPairwiseDisjoint,
   )
 where
 
@@ -247,6 +248,18 @@ isBooleanM (Idx (Var vn) _) = do
 isBooleanM (Apply (Var vn) _) = do
   askProperty (Algebra.Var vn) Algebra.Boolean
 isBooleanM x = pure $ isBoolean x
+
+getPairwiseDisjoint :: Symbol -> IndexFnM [Symbol]
+getPairwiseDisjoint x = do
+  res <- search x
+  case res of
+    Nothing -> pure []
+    Just (vn, idx) -> do
+      disjoint_vns <- fromMaybe mempty <$> Algebra.askPairwiseDisjoint (Algebra.Var vn)
+      xs <- mapM lookupUntransSymUnsafe (S.toList disjoint_vns)
+      case idx of
+        Just j -> mapM (`repHoles` j) xs
+        Nothing -> pure xs
 
 idxSym :: Bool -> VName -> Algebra.IdxSym
 idxSym True = Algebra.POR . S.singleton
