@@ -100,7 +100,11 @@ simplify = astMap m
       b <- solve relation
       case b of
         Yes -> pure $ Bool True
-        Unknown -> pure relation
+        Unknown -> do
+          not_b <- solve (neg relation)
+          case not_b of
+            Yes -> pure $ Bool False
+            Unknown -> pure relation
 
     -- Use Fourier-Motzkin elimination to determine the truth value
     -- of an expresion, if it can be determined in the given environment.
