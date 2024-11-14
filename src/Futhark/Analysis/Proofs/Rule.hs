@@ -4,7 +4,7 @@ import Control.Monad (foldM, msum, (<=<))
 import Data.List (subsequences, (\\))
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn, unifyIndexFnWith)
-import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugT')
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.SymbolPlus (repVName, toSumOfSums)
 import Futhark.Analysis.Proofs.Unify (Replaceable (rep), Substitution (mapping), Unify (unify), mkRep, renameAnd, sub, unifies, unifies_)
@@ -205,21 +205,20 @@ rulesIndexFn = do
                       (hole i :/= int 0, Recurrence ~+~ Hole h2)
                     ]
               },
-          to = \s ->
-            subIndexFn s =<< do
-              let b' = int 0
-              let iter = repVName (mapping s) i
-              j <- newVName "j"
-              e1 <- sub s (hole h1)
-              let e1_b = rep (mkRep iter b') e1
-              e2 <- sub s (hole h2)
-              let e2_j = rep (mkRep iter (sym2SoP $ Var j)) e2
-              let e2_sum = toSumOfSums j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
-              pure $
-                IndexFn
-                  { iterator = Forall i (Iota (hole n)),
-                    body = cases [(Bool True, e1_b .+. e2_sum)]
-                  },
+          to = \s -> do
+            let b' = int 0
+            let iter = repVName (mapping s) i
+            e1 <- sub s (hole h1)
+            let e1_b = rep (mkRep iter b') e1
+            e2 <- sub s (hole h2)
+            j <- newVName "j"
+            let e2_j = rep (mkRep iter (sym2SoP $ Var j)) e2
+            let e2_sum = toSumOfSums j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
+            subIndexFn s $
+              IndexFn
+                { iterator = Forall i (Iota (hole n)),
+                  body = cases [(Bool True, e1_b .+. e2_sum)]
+                },
           sideCondition = \s -> do
             e2_symbols <- concatMap fst . sopToLists <$> sub s (Hole h2)
             pure $ Recurrence `notElem` e2_symbols
@@ -232,25 +231,27 @@ rulesIndexFn = do
               { iterator = Forall i (Cat k (hole m) (hole b)),
                 body =
                   cases
-                    [ (hole i :== int 0, hole h1),
-                      (hole i :/= int 0, Recurrence ~+~ Hole h2)
+                    [ (hole i :== hole b, hole h1),
+                      (hole i :/= hole b, Recurrence ~+~ Hole h2)
                     ]
               },
-          to = \s ->
-            subIndexFn s =<< do
-              b' <- sub s (hole b)
-              let iter = repVName (mapping s) i
-              j <- newVName "j"
-              e1 <- sub s (hole h1)
-              let e1_b = rep (mkRep iter b') e1
-              e2 <- sub s (hole h2)
-              let e2_j = rep (mkRep iter (sym2SoP $ Var j)) e2
-              let e2_sum = toSumOfSums j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
-              pure $
-                IndexFn
-                  { iterator = Forall i (Iota (hole n)),
-                    body = cases [(Bool True, e1_b .+. e2_sum)]
-                  },
+          to = \s -> debugT' "prefix sum cat" $ do
+            let i' = repVName (mapping s) i
+            b' <- sub s (hole b)
+            e1_b <- rep (mkRep i' b') <$> sub s (hole h1)
+            debugPrettyM "e1_b" e1_b
+            e2 <- sub s (hole h2)
+            j <- newVName "j"
+            let e2_j = rep (mkRep i' (sym2SoP $ Var j)) e2
+            let e2_sum = toSumOfSums j (b' .+. int2SoP 1) (sym2SoP $ Var i') e2_j
+            debugPrettyM "e2" e2
+            debugPrettyM "e2_j" e2_j
+            debugPrettyM "e2_sum" e2_sum
+            subIndexFn s $
+              IndexFn
+                { iterator = Forall i (Cat k (hole m) (hole b)),
+                  body = cases [(Bool True, e1_b .+. e2_sum)]
+                },
           sideCondition = \s -> do
             e2_symbols <- concatMap fst . sopToLists <$> sub s (Hole h2)
             pure $ Recurrence `notElem` e2_symbols

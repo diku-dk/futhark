@@ -270,7 +270,7 @@ idxSym False = Algebra.One
 -- This is done so because the algebra layer needs to know about indexing.
 toAlgebra_ :: Symbol -> IndexFnM Algebra.Symbol
 toAlgebra_ (Var x) = pure $ Algebra.Var x
-toAlgebra_ (Hole _) = undefined
+toAlgebra_ (Hole _) = error "toAlgebra_ on Hole"
 toAlgebra_ (Sum j lb ub x) = do
   res <- search x
   case res of

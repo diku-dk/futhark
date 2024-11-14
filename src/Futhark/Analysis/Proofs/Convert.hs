@@ -101,7 +101,7 @@ mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
 bindfn :: E.VName -> IndexFn -> IndexFnM IndexFn
 bindfn vn indexfn = do
   insertIndexFn vn indexfn
-  whenDebug (traceM $ prettyBinding vn indexfn)
+  whenDebug (traceM $ prettyBinding vn indexfn <> "\n")
   -- tell ["resulting in", toLaTeX (vn, indexfn')]
   pure indexfn
 
