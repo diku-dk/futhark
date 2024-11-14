@@ -24,7 +24,7 @@ import Language.Futhark (VName)
 f@(IndexFn (Forall j _) _) $$ (vn, g@(IndexFn (Forall i _) _)) = do
   whenDebug $
     traceM $
-      "🎭 substitute\n    "
+      "🎭  "
         <> prettyBinding' vn g
         <> prettyBinding' ("\n    into _" :: String) f
   i' <- sym2SoP . Var <$> newName i
@@ -35,7 +35,7 @@ f@(IndexFn (Forall j _) _) $$ (vn, g@(IndexFn (Forall i _) _)) = do
 f $$ (vn, g@(IndexFn (Forall {}) _)) = do
   whenDebug $
     traceM $
-      "🎭 substitute\n    "
+      "🎭  "
         <> prettyBinding' vn g
         <> prettyBinding' ("\n    into _" :: String) f
   substitute vn g f
@@ -93,7 +93,6 @@ substitute x_fn (IndexFn (Forall i (Iota _)) xs) (IndexFn Empty ys) =
           pure (sop2BoolSymbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
       )
 substitute x_fn (IndexFn (Forall i dom_x) xs) (IndexFn (Forall _ dom_y) ys) = do
-  when (x_fn `elem` fv dom_y) $ debugPrettyM "jeeez" (Var x_fn)
   case (dom_x, dom_y) of
     (Iota {}, Iota {}) -> do
       assertSameRange dom_x dom_y

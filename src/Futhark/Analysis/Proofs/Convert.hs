@@ -1,7 +1,7 @@
 module Futhark.Analysis.Proofs.Convert where
 
 import Control.Applicative (liftA2) --- XXX Comin's version of GHC needs this.
-import Control.Monad (foldM, forM, forM_, unless, void, when, (<=<))
+import Control.Monad (foldM, forM, forM_, msum, unless, void, when, (<=<))
 import Control.Monad.RWS (gets)
 import Data.Bifunctor
 import Data.List qualified as L
@@ -90,14 +90,13 @@ mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 mkIndexFnValBind :: E.ValBind -> IndexFnM IndexFn
 mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
   clearAlgEnv
+  whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
   forM_ params addTypeRefinement
-  debugPrintAlgEnv
-  debugPrettyM "\n====\nmkIndexFnValBind:\n\n" val
   indexfn <- forward body >>= bindfn vn
   insertTopLevel vn (params, indexfn)
   _ <- algebraContext indexfn $ do
     alg <- gets algenv
-    debugPrettyM "Algebra context for indexfn:\n" alg
+    whenDebug . traceM $ "Algebra context for indexfn:\n" <> prettyString alg
   pure indexfn
 
 bindfn :: E.VName -> IndexFn -> IndexFnM IndexFn
@@ -390,13 +389,9 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
       --     | i == seg(k) ^ p(k) => vals[k]
       --     | i /= seg(k) => dest[i]
-      debugM "scatter"
       dest <- forward dest_arg
       inds <- forward inds_arg
       vals <- forward vals_arg
-      debugPrettyM "dest" dest
-      debugPrettyM "vals" vals
-      debugPrettyM "inds" inds
       -- 1. Check that inds is on the right form.
       vn_k <- newVName "k"
       vn_m <- newVName "m"
@@ -429,37 +424,33 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               Unknown -> error "scatter: unable to determine OOB branch"
       let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
       let f_seg = mapping s M.! vn_f_seg
-      debugPrettyM "seg case:" case_idx_seg
       -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
       algebraContext inds $ do
         addRelIterator inds_iter
         seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
         p_desired_form :: Maybe (Substitution Symbol) <- unify p_seg (seg_delta :> int2SoP 0)
-        debugPrettyM "p(k) unifies with: seg(k+1) - seg(k) > 0" $ isJust p_desired_form
         unless (isJust p_desired_form) $ error "p is not on desired form"
       -- Check that seg(0) = 0 and that seg is monotonically increasing.
       let x `at_k` i = rep (mkRep k i) x
       let zero :: SoP Symbol = int2SoP 0
       eq0 <- askQ (CaseCheck (\seg -> seg `at_k` zero :== int2SoP 0)) inds case_idx_seg
       when (isUnknown eq0) $ error "scatter: unable to determine segment start"
-      debugPrettyM "seg(0) = 0" eq0
       -- Check that seg is monotonically increasing.
       mono <- askQ (CaseIsMonotonic Inc) inds case_idx_seg
-      debugPrettyM "mono" mono
       when (isUnknown mono) $ error "scatter: unable to show segment monotonicity"
       -- Check that the proposed end of segments seg(m) - 1 equals the size of dest.
       -- (Note that has to hold outside the context of inds, so we cannot assume p_seg.)
       let IndexFn (Forall _ dom_dest) _ = dest
       let dest_size = domainEnd dom_dest
       domain_covered <- f_seg `at_k` m .-. int2SoP 1 $== dest_size
-      debugPrettyM "domain_covered" domain_covered
+      when (isUnknown domain_covered) $
+        error "scatter: segments do not cover iterator domain"
       -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
       --     | i == seg(k) ^ p(k) => vals[k]
       --     | i /= seg(k) || not p(k) => dest[i]
       i <- newVName "i"
       dest_hole <- newVName "dest_hole"
       vals_hole <- newVName "vals_hole"
-      -- let p = sop2Symbol $ mapping s M.! p_seg
       let p = sVar i :== f_seg
       let fn =
             IndexFn
@@ -489,13 +480,11 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           arg_sizes <- mapM sizeOfDomain arg_fns
           when (length param_names /= length arg_fns) (error "must be fully applied")
           -- Size paramters must be replaced as well.
-          debugPrettyM "param_sizes" param_sizes
-          debugPrettyM "arg_sizes" arg_sizes
           unless (map isJust param_sizes == map isJust arg_sizes) (error "sizes don't align")
           let size_rep = M.fromList $ catMaybes $ zipMaybes param_sizes arg_sizes
           -- Check that preconditions are satisfied.
           preconditions <- mapM getPrecondition pats
-          unless (null preconditions) $
+          when (isJust $ msum preconditions) $
             debugPrettyM "Checking preconditions!" param_names
           forM_ (zip3 pats preconditions arg_fns) $ \(pat, pre, fn) -> do
             ans <- case pre of
@@ -503,8 +492,6 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               Just check -> check (size_rep, zip param_names arg_fns)
             unless (isYes ans) . error $
               "Precondition on " <> prettyString pat <> " not satisfied for " <> prettyString fn
-          unless (null preconditions) $
-            debugPrettyM "Checking preconditions passed!" param_names
           -- Construct indexfn.
           substParams (repIndexFn size_rep indexfn) (zip param_names arg_fns)
           where
@@ -593,6 +580,7 @@ getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe 
 getRefinement (E.PatParens pat _) = getRefinement pat
 getRefinement (E.PatAscription pat _ _) = getRefinement pat
 getRefinement (E.Id param (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) _) = do
+  whenDebug . traceM $ "Getting type refinement" <> prettyString (param, ref)
   Just <$> mkRef ref
   where
     mkRef ((E.AppExp (E.Apply f args _) _))
@@ -634,7 +622,7 @@ getScalar _ = error "getScalar on non-scalar index function"
 -- without checking that they hold.
 -- Use this function on the parameters of top-level definitions, where
 -- refinements are pre-requisites assumed to be true.
-addTypeRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM ()
+addTypeRefinement :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
 addTypeRefinement pat = do
   ref <- getRefinement pat
   case ref of
