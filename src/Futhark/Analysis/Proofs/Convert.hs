@@ -1,6 +1,5 @@
 module Futhark.Analysis.Proofs.Convert where
 
-import Control.Applicative (liftA2) --- XXX Comin's version of GHC needs this.
 import Control.Monad (foldM, forM, forM_, msum, unless, void, when, (<=<))
 import Control.Monad.RWS (gets)
 import Data.Bifunctor
