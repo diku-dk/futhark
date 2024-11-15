@@ -47,6 +47,16 @@ getIterator :: IndexFn -> Maybe Iterator
 getIterator (IndexFn iter@(Forall _ _) _) = Just iter
 getIterator _ = Nothing
 
+getCases :: IndexFn -> Cases Symbol (SoP Symbol)
+getCases (IndexFn _ cs) = cs
+
+hasSingleCase :: IndexFn -> Bool
+hasSingleCase (IndexFn _ cs) = length (casesToList cs) == 1
+
+getCatIteratorVariable :: IndexFn -> Maybe VName
+getCatIteratorVariable (IndexFn (Forall _ (Cat k _ _)) _) = Just k
+getCatIteratorVariable _ = Nothing
+
 domainSegStart :: Domain -> SoP Symbol
 domainSegStart (Iota _) = int2SoP 0
 domainSegStart (Cat _ _ b) = b

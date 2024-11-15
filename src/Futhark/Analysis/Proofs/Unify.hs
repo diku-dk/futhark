@@ -20,6 +20,7 @@ module Futhark.Analysis.Proofs.Unify
     sub,
     unifies,
     renameAnd,
+    renameM,
   )
 where
 
@@ -70,6 +71,9 @@ class Renameable u where
   -- Rename bound variables in u. Equivalent to subC(id,id,e).
   rename :: (MonadFreshNames m) => VNameSource -> u -> m u
   rename vns = rename_ vns mempty
+
+renameM :: (MonadFreshNames m, Renameable u) => u -> m u
+renameM x = getNameSource >>= flip rename x
 
 -- Rename bound variables in `a` and `b`. Renamed variables are
 -- identical, if `a` and `b` are syntactically equivalent.

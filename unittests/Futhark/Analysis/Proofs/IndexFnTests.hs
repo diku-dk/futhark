@@ -253,7 +253,7 @@ tests =
         "tests/indexfn/part2indicesL.fut"
         ( pure $ \(i, n, dummy, _) ->
             IndexFn
-              { iterator = Forall i (Iota $ sVar n),
+              { iterator = Forall i (Iota (sHole n)),
                 body = cases [(Bool True, sHole dummy)]
               }
         )
