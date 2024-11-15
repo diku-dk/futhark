@@ -20,7 +20,7 @@ import Futhark.Analysis.Proofs.IndexFn (IndexFn, Iterator (Forall), getIterator,
 import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
-import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
+import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap, identityMapper)
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
@@ -159,16 +159,14 @@ repHoles x replacement =
     -- Change how we are replacing depending on if replacement is really a SoP.
     mapper
       | Just replacement' <- justSym replacement =
-          ASTMapper
+          identityMapper
             { mapOnSymbol = \sym -> case sym of
                 Hole _ -> pure replacement'
-                _ -> pure sym,
-              mapOnSoP = pure
+                _ -> pure sym
             }
       | otherwise =
-          ASTMapper
-            { mapOnSymbol = pure,
-              mapOnSoP = \sop -> case justSym sop of
+          identityMapper
+            { mapOnSoP = \sop -> case justSym sop of
                 Just (Hole _) -> pure replacement
                 _ -> pure sop
             }

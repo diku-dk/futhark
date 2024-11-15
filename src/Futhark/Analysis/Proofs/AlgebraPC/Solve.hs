@@ -10,7 +10,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.All2AllDriver
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.Analysis.Proofs.AlgebraPC.UnaryRules
-import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap)
+import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap, identityMapper)
 import Futhark.SoP.FourierMotzkin qualified as FM
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
@@ -25,11 +25,7 @@ simplify ::
   m (SoP Symbol)
 simplify = substEquivs <=< astMap m <=< substEquivs
   where
-    m =
-      ASTMapper
-        { mapOnSymbol = pure,
-          mapOnSoP = simplifyLevel
-        }
+    m = identityMapper { mapOnSoP = simplifyLevel }
 
 simplifyLevel ::
   (MonadSoP Symbol e Property m) =>
