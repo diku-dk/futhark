@@ -20,12 +20,6 @@ toSumOfSums i lb ub = foldl1 (.+.) . map (mkSum lb ub) . sopToLists
   where
     mkSum a b ([], c) =
       scaleSoP c (b .-. a .+. int2SoP 1)
-    mkSum a b ([u], c) | i `S.notMember` fv u =
-      -- symbol doesn't depend on iterator.
-      mkSum a b ([], c) .*. sym2SoP u
-    -- mkSum a b ([Var j], c) | j == i =
-    --   -- Closed form.
-    --   -- (b * (b-1))/2 - (a * (a -1))/2
     mkSum a b ([u], c) =
       scaleSoP c (sym2SoP $ Sum i a b u)
     mkSum _ _ _ =
