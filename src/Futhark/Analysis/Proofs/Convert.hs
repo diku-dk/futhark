@@ -8,7 +8,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==))
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==), simplify)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, unzipT)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repIndexFn)
@@ -16,7 +16,7 @@ import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Substitute (($$))
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2BoolSymbol, sop2Symbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
@@ -91,7 +91,7 @@ mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
   clearAlgEnv
   whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
   forM_ params addTypeRefinement
-  indexfn <- forward body >>= bindfn vn
+  indexfn <- forward body >>= rewrite >>= bindfn vn
   insertTopLevel vn (params, indexfn)
   _ <- algebraContext indexfn $ do
     alg <- gets algenv
@@ -388,9 +388,9 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
       --     | i == seg(k) ^ p(k) => vals[k]
       --     | i /= seg(k) => dest[i]
-      dest <- forward dest_arg
-      inds <- forward inds_arg
-      vals <- forward vals_arg
+      dest <- forward dest_arg >>= rewrite
+      inds <- forward inds_arg >>= rewrite
+      vals <- forward vals_arg >>= rewrite
       -- 1. Check that inds is on the right form.
       vn_k <- newVName "k"
       vn_m <- newVName "m"
@@ -532,8 +532,10 @@ forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
 substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
 substParams = foldM substParam
   where
+    -- We use simplify, not rewrite here to avoid rewriting recurrences
+    -- during paramter-substitution.
     substParam fn (paramName, paramIndexFn) =
-      (fn $$ (paramName, paramIndexFn)) >>= rewrite
+      (fn $$ (paramName, paramIndexFn)) >>= simplify
 
 cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
 cmap f (Cases xs) = Cases (fmap f xs)
@@ -588,7 +590,7 @@ getRefinement (E.Id param (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) 
           let op = case E.baseString vn_op of
                 ">=" -> (:>=)
                 _ -> undefined
-          y' <- getScalar <$> forward y
+          y' <- getScalar <$> (forward y >>= rewrite)
           let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `op` y'
           let effect = do
                 hole <- sym2SoP . Hole <$> newVName "h"
@@ -598,7 +600,7 @@ getRefinement (E.Id param (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) 
           pure (check, effect)
       | Just "equals" <- getFun f,
         [y] <- getArgs args = do
-          y' <- getScalar <$> forward y
+          y' <- getScalar <$> (forward y >>= rewrite)
           let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) :== y'
           let effect = addEquiv (Algebra.Var param) =<< toAlgebra y'
           pure (check, effect)
@@ -608,7 +610,7 @@ getRefinement _ = pure Nothing
 mkCheck :: IndexFn -> CheckContext -> IndexFnM Answer
 mkCheck check_fn (size_rep, param_subst) = do
   check <- repIndexFn size_rep <$> substParams check_fn param_subst
-  allCases (askQ (CaseCheck sop2BoolSymbol)) check
+  allCases (askQ (CaseCheck sop2Symbol)) check
 
 toScalarFn :: SoP Symbol -> IndexFn
 toScalarFn x = IndexFn Empty (cases [(Bool True, x)])

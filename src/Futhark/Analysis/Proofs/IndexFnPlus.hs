@@ -86,11 +86,10 @@ instance FreeVariables Domain where
 -------------------------------------------------------------------------------
 -- Unification.
 -------------------------------------------------------------------------------
-repCase :: (Ord u, Replaceable v1 u, Replaceable v2 u, Pretty u) => Replacement u -> (v1, v2) -> (u, SoP u)
-repCase s (a, b) = (sop2Symbol (rep s a), rep s b)
-
-repCases :: (Ord a, Replaceable v1 a, Replaceable v2 a, Pretty a) => Replacement a -> Cases v1 v2 -> Cases a (SoP a)
-repCases s (Cases cs) = Cases $ NE.map (repCase s) cs
+repCases :: Replacement Symbol -> Cases Symbol (SoP Symbol) -> Cases Symbol (SoP Symbol)
+repCases s (Cases cs) = Cases $ NE.map repCase cs
+  where
+    repCase (a, b) = (sop2Symbol (rep s a), rep s b)
 
 repDomain :: Replacement Symbol -> Domain -> Domain
 repDomain s (Iota n) = Iota (rep s n)

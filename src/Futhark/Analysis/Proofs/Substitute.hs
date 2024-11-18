@@ -1,15 +1,17 @@
 -- Index function substitution.
 module Futhark.Analysis.Proofs.Substitute (($$)) where
 
-import Control.Monad (unless)
-import Data.Bifunctor (first)
+import Control.Monad (forM_, unless)
+import Data.Bifunctor (first, second)
 import Data.Map qualified as M
-import Data.Maybe (isJust, fromMaybe)
-import Debug.Trace (traceM)
+import Data.Maybe (fromMaybe, isJust)
+import Data.Set qualified as S
+import Debug.Trace (trace, traceM)
+import Futhark.Analysis.Proofs.AlgebraBridge (simplify)
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate (rollbackAlgEnv)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCase, repIndexFn)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
@@ -82,7 +84,8 @@ substitute x_fn (IndexFn Empty xs) (IndexFn iter_y ys) =
       ( cases $ do
           (x_cond, x_val) <- casesToList xs
           (y_cond, y_val) <- casesToList ys
-          pure $ repCase (mkRep x_fn x_val) (y_cond :&& x_cond, y_val)
+          let s = mkRep x_fn x_val
+          pure (sop2Symbol . rep s $ y_cond :&& x_cond, rep s y_val)
       )
 substitute x_fn (IndexFn (Forall i (Iota _)) xs) (IndexFn Empty ys) =
   -- Substitute array `x` into scalar `y` (type-checker ensures that this is valid,
@@ -94,7 +97,7 @@ substitute x_fn (IndexFn (Forall i (Iota _)) xs) (IndexFn Empty ys) =
           (x_cond, x_val) <- casesToList xs
           (y_cond, y_val) <- casesToList ys
           let rip_x = rip x_fn i x_val
-          pure (sop2BoolSymbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
+          pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
       )
 substitute x_fn (IndexFn (Forall i dom_x) xs) (IndexFn (Forall _ dom_y) ys) = do
   case (dom_x, dom_y) of
@@ -121,7 +124,7 @@ substitute x_fn (IndexFn (Forall i dom_x) xs) (IndexFn (Forall _ dom_y) ys) = do
               (x_cond, x_val) <- casesToList xs
               (y_cond, y_val) <- casesToList ys
               let rip_x = rip x_fn i x_val
-              pure (sop2BoolSymbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
+              pure (sop2Symbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
           }
 substitute _ x y = error $ "substitute: not implemented for " <> prettyString x <> prettyString y
 
@@ -157,7 +160,7 @@ rip f_name f_arg f_val = apply mempty
     apply _ x@(Bool _) = sym2SoP x
     apply _ Recurrence = sym2SoP Recurrence
     apply s sym = case sym of
-      Not x -> sym2SoP . neg . sop2BoolSymbol $ apply s x
+      Not x -> sym2SoP . neg . sop2Symbol $ apply s x
       x :< y -> binop (:<) x y
       x :<= y -> binop (:<=) x y
       x :> y -> binop (:>) x y
@@ -168,7 +171,7 @@ rip f_name f_arg f_val = apply mempty
       x :|| y -> binopS (:||) x y
       where
         binop op x y = sym2SoP $ applySoP s x `op` applySoP s y
-        binopS op x y = sym2SoP $ sop2BoolSymbol (apply s x) `op` sop2BoolSymbol (apply s y)
+        binopS op x y = sym2SoP $ sop2Symbol (apply s x) `op` sop2Symbol (apply s y)
 
 -- XXX sub f into g
 -- 1. find applications:
@@ -181,10 +184,11 @@ rip f_name f_arg f_val = apply mempty
 -- 2. for each application (vn_f_app, e(i)) in applications:
 --      for each case (x_cond, x_val) in g:
 --        for each case (y_cond, y_val) in f:
---          z_val = y_val{ vn_f_app |-> x_val{i |-> e(i)} }
---          z_cond = y_cond{ vn_f_app |-> x_val{i |-> e(i)} }
+--          (x_cond', x_val') = ...{i-> e(i)}
+--          z_val = y_val{ vn_f_app |-> x_val' }
+--          z_cond = y_cond{ vn_f_app |-> x_val' }
 --          changed = y_cond /= z_cond || y_val /= z_val
---          z_cond' = if changed then x_cond{i |-> e(i)} :&& z_cond else z_cond
+--          z_cond' = if changed then x_cond' :&& z_cond else z_cond
 --          in (z_cond', z_val)
 --      if vn_f_app in domain of g:
 --         substitute here also, fail if f has more than one case (don't support "outer-ifs" atm).
@@ -207,23 +211,29 @@ rip f_name f_arg f_val = apply mempty
 --
 -- XXX could we rewrite recurrences in terms of the index fn being substituted into?
 
-inline :: (VName, IndexFn) -> IndexFn -> IndexFnM IndexFn
-inline (f_name, f) g = do
+-- Given functions (f = \i -> ...) and g, returns g with each application f(x)
+-- replaced by a (fresh) variable unique to the argument x. Also returns a list
+-- associating the names of those variables to replacements for the
+-- corresponding arguments: [(vn_f_x, {i |-> x}), ...].
+handleApplications :: (VName, IndexFn) -> IndexFn -> IndexFnM (IndexFn, [(VName, SoP Symbol)])
+handleApplications (f_name, f) g = do
   k <- newVName "variables after this are quantifiers"
-  g' <- renameM g
   let notQuantifier = (< k)
-  let legalName v = notQuantifier v || Just v == getCatIteratorVariable g' || hasSingleCase f
-  -- 1. Collect applications
-  -- TODO Reusing algenv for collecting here; should probably make another entry in VEnv instead.
-  (h, apps) <- rollbackAlgEnv $ do
+  g' <- renameM g
+  let legalName v =
+        notQuantifier v
+          || Just v == getCatIteratorVariable g'
+          || hasSingleCase f
+  -- TODO Using algenv for unintended purposes here; add new field to VEnv?
+  rollbackAlgEnv $ do
     clearAlgEnv
     g'' <- astMap (identityMapper {mapOnSymbol = repAppByName legalName}) g'
-    as <- map (first Algebra.getVName) . M.assocs . dir <$> getUntrans
-    pure (g'', (f_name, Var f_name) : as)
-  debugPrettyM "inline h:" h
-  debugPrettyM "inline apps:" apps
-  pure h
+    assocs <- map strip . M.assocs . dir <$> getUntrans
+    pure (g'', assocs)
   where
+    strip (Algebra.Var vn, Idx _ idx) = (vn, idx)
+    strip _ = error "Impossible"
+
     -- Replace applications of f by (fresh) names.
     -- We disallow substituting f into sums, if f has more than one case
     -- (it would be unclear what case value to substitute). This is enforced
@@ -238,9 +248,9 @@ inline (f_name, f) g = do
       Idx (Var x) idx
         | x == f_name,
           legalIdx idx ->
-          do
-            debugPrettyM "repByName idx" idx
-            debugPrettyM "repByName fv idx" (fv idx)
+            -- do
+            --   debugPrettyM "repByName idx" idx
+            --   debugPrettyM "repByName fv idx" (fv idx)
             repByName (Idx (Var x) idx)
       Apply (Var x) [_]
         | x == f_name -> error "Capturing variables"
@@ -253,3 +263,77 @@ inline (f_name, f) g = do
     repByName app = do
       f_at_idx <- Algebra.getVName <$> lookupUntransPE app
       pure (Var f_at_idx)
+
+inline :: (VName, IndexFn) -> IndexFn -> IndexFnM IndexFn
+inline (f_name, f) g = do
+  (h, apps) <- handleApplications (f_name, f) =<< rename_i g
+  -- Convert indices to iterator substitutions.
+  let app_subs = flip map apps $ second $ \idx -> case iterator f of
+        Forall i _ -> mkRep i idx :: Replacement Symbol
+        Empty -> error "Indexing into a scalar function"
+  -- Direct variable substitution (e.g., used to inline scalar functions).
+  let var_sub = case (iterator f, iterator h) of
+        (Forall i _, Forall j _) -> mkRep i (Var j) :: Replacement Symbol
+        _ -> mempty
+  let subs = (f_name, var_sub) : app_subs
+  forM_ subs $ \(app_name, idx_sub) -> do
+    debugM $ "inline " <> prettyString app_name <> " " <> prettyString idx_sub
+  cs <- inlineCases subs h
+  let iter = inlineDomain h subs
+  iter <- handleIterator (iterator f) iter
+  for_printing <- rewrite (IndexFn iter cs)
+  debugM $ "inline" <> prettyString for_printing
+  pure (IndexFn iter cs)
+  where
+    rename_i fn@(IndexFn (Forall i _) _) = do
+      j <- sym2SoP . Var <$> newName i
+      pure $ repIndexFn (mkRep i j) fn
+    rename_i fn = pure fn
+
+    inlineCases apps h =
+      simplify . cases $ do
+        (f_cond, f_val) <- casesToList (body f)
+        (g_cond, g_val) <- casesToList (body h)
+        pure $
+          foldl
+            ( \(c, v) (app_name, idx_sub) ->
+                let f_cond' = sop2Symbol $ rep idx_sub f_cond
+                    s = mkRep app_name (rep idx_sub f_val)
+                 in (sop2Symbol (rep s c) :&& f_cond', rep s v)
+            )
+            (g_cond, g_val)
+            apps
+
+    inlineDomain (IndexFn iter@(Forall _ dg) _) apps
+      | all ((`notElem` fv dg) . fst) apps =
+          iter
+    inlineDomain (IndexFn (Forall j dg) _) apps
+      | [(Bool True, f_val)] <- casesToList $ body f =
+          Forall j $
+            foldl
+              ( \dom (app_name, idx_sub) ->
+                  repDomain (mkRep app_name (rep idx_sub f_val)) dom
+              )
+              dg
+              apps
+    inlineDomain _ _ =
+      error "Only scalar index functions may substitute into domain"
+
+    handleIterator Empty g_iter = pure g_iter
+    handleIterator f_iter Empty = pure f_iter
+    handleIterator (Forall i df) (Forall j dg) =
+      case (df, dg) of
+        (Iota {}, Iota {}) -> do
+          assertSameRange df dg
+          pure (Forall j dg)
+        (Cat {}, Cat {}) -> do
+          assertSameRange df dg
+          pure (Forall j dg)
+        (Cat {}, Iota {}) -> do
+          assertSameRange df dg
+          pure (Forall j $ repDomain (mkRep i $ Var j) df)
+        (Iota {}, Cat _ m _) -> do
+          test1 <- sameRange df dg
+          test2 <- sameRange df (Iota m)
+          unless (test1 || test2) $ error "substitute iota cat: Incompatible domains."
+          pure (Forall j dg)

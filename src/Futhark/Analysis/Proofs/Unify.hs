@@ -113,10 +113,13 @@ instance Semigroup (Substitution u) where
         vns = vns a <> vns b
       }
 
-instance (Pretty v) => Pretty (Substitution v) where
-  pretty = braces . commastack . map prettyKV . M.toList . mapping
+instance (Pretty v) => Pretty (Replacement v) where
+  pretty = braces . commastack . map prettyKV . M.toList
     where
       prettyKV (k, v) = prettyName k <> " : " <> pretty v
+
+instance (Pretty v) => Pretty (Substitution v) where
+  pretty = pretty . mapping
 
 sub ::
   ( MonadFreshNames m,

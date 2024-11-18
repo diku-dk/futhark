@@ -43,9 +43,9 @@ getCase n (Cases cs) = NE.toList cs !! n
 getPredicates :: IndexFn -> [Symbol]
 getPredicates (IndexFn _ cs) = map fst $ casesToList cs
 
-getIterator :: IndexFn -> Maybe Iterator
-getIterator (IndexFn iter@(Forall _ _) _) = Just iter
-getIterator _ = Nothing
+getIteratorVariable :: IndexFn -> Maybe VName
+getIteratorVariable (IndexFn (Forall i _) _) = Just i
+getIteratorVariable _ = Nothing
 
 getCases :: IndexFn -> Cases Symbol (SoP Symbol)
 getCases (IndexFn _ cs) = cs
