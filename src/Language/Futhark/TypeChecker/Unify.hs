@@ -706,20 +706,24 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
   occursCheck usage bcs vn tp
   scopeCheck usage bcs vn lvl tp
 
-  constraints <- getConstraints
   let link = do
         let (witnessed, not_witnessed) = determineSizeWitnesses tp
             used v = v `S.member` witnessed || v `S.member` not_witnessed
-            ext = filter used bound
-        case filter (`notElem` witnessed) ext of
-          [] ->
-            modifyConstraints $
-              M.insert vn (lvl, Constraint (RetType ext tp) usage)
-          problems ->
-            unifyError usage mempty bcs . withIndexLink "unify-param-existential" $
-              "Parameter(s) "
-                <> commasep (map (dquotes . prettyName) problems)
-                <> " used as size(s) would go out of scope."
+            (ext_witnessed, ext_not_witnessed) =
+              L.partition (`elem` witnessed) $ filter used bound
+
+            -- Any size that uses an ext_not_witnessed variable must
+            -- be replaced with a fresh existential.
+            problematic e =
+              L.find (`elem` ext_not_witnessed) $
+                S.toList $
+                  fvVars $
+                    freeInExp e
+
+        (tp', ext_new) <- sizeFree (srclocOf usage) problematic tp
+
+        modifyConstraints $
+          M.insert vn (lvl, Constraint (RetType (ext_new <> ext_witnessed) tp') usage)
 
   let unliftedBcs unlifted_usage =
         breadCrumb
@@ -731,6 +735,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
           )
           bcs
 
+  constraints <- getConstraints
   case snd <$> M.lookup vn constraints of
     Just (NoConstraint Unlifted unlift_usage) -> do
       link
