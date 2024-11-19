@@ -236,20 +236,8 @@ calculateDims :: Exp -> ExpReplacements -> MonoM Exp
 calculateDims body repl =
   foldCalc top_repl $ expReplace top_repl body
   where
-    -- list of strict sub-expressions of e
-    subExps e
-      | Just e' <- stripExp e = subExps e'
-      | otherwise = astMap mapper e `execState` mempty
-      where
-        mapOnExp e'
-          | Just e'' <- stripExp e' = mapOnExp e''
-          | otherwise = do
-              modify (ReplacedExp e' :)
-              astMap mapper e'
-        mapper = identityMapper {mapOnExp}
-    depends (a, _) (b, _) = b `elem` subExps (unReplaced a)
-    top_repl =
-      topologicalSort depends repl
+    depends (a, _) (b, _) = unReplaced b `elem` subExps (unReplaced a)
+    top_repl = topologicalSort depends repl
 
     ---- Calculus insertion
     foldCalc [] body' = pure body'
