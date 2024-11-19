@@ -15,7 +15,6 @@ where
 
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor
@@ -27,7 +26,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Futhark.Util (mapAccumLM, nubOrd, topologicalSort)
+import Futhark.Util (mapAccumLM, nubOrd)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
@@ -229,92 +228,6 @@ checkCoerce loc te e = do
               loc
               "a size coercion where the underlying expression size cannot be determined"
           pure $ sizeFromName (qualName v) (srclocOf d)
-
-sameExp :: Exp -> Exp -> Bool
-sameExp e1 e2
-  | Just es <- similarExps e1 e2 =
-      all (uncurry sameExp) es
-  | otherwise = False
-
--- All non-trivial subexpressions (as by stripExp) of some expression,
--- not including the expression itself.
-subExps :: Exp -> [Exp]
-subExps e
-  | Just e' <- stripExp e = subExps e'
-  | otherwise = astMap mapper e `execState` mempty
-  where
-    mapOnExp e'
-      | Just e'' <- stripExp e' = mapOnExp e''
-      | otherwise = do
-          modify (e' :)
-          astMap mapper e'
-    mapper = identityMapper {mapOnExp}
-
--- Expressions witnessed by type, topologically sorted.
-topWit :: TypeBase Exp u -> [Exp]
-topWit = topologicalSort depends . witnessedExps
-  where
-    witnessedExps t = execState (traverseDims onDim t) mempty
-      where
-        onDim _ PosImmediate e = modify (e :)
-        onDim _ _ _ = pure ()
-    depends a b = any (sameExp b) $ subExps a
-
-sizeFree ::
-  SrcLoc ->
-  (Exp -> Maybe VName) ->
-  TypeBase Size u ->
-  TermTypeM (TypeBase Size u, [VName])
-sizeFree tloc expKiller orig_t = do
-  runReaderT (toBeReplaced orig_t $ onType orig_t) mempty `runStateT` mempty
-  where
-    lookReplacement e repl = snd <$> find (sameExp e . fst) repl
-    expReplace mapping e
-      | Just e' <- lookReplacement e mapping = e'
-      | otherwise = runIdentity $ astMap mapper e
-      where
-        mapper = identityMapper {mapOnExp = pure . expReplace mapping}
-
-    replacing e = do
-      e' <- asks (`expReplace` e)
-      case expKiller e' of
-        Nothing -> pure e'
-        Just cause -> do
-          vn <- lift $ lift $ newRigidDim tloc (RigidOutOfScope (locOf e) cause) "d"
-          modify (vn :)
-          pure $ sizeFromName (qualName vn) (srclocOf e)
-
-    toBeReplaced t m' = foldl f m' $ topWit t
-      where
-        f m e = do
-          e' <- replacing e
-          local ((e, e') :) m
-
-    onScalar (Record fs) =
-      Record <$> traverse onType fs
-    onScalar (Sum cs) =
-      Sum <$> (traverse . traverse) onType cs
-    onScalar (Arrow as pn d argT (RetType dims retT)) = do
-      argT' <- onType argT
-      old_bound <- get
-      retT' <- toBeReplaced retT $ onType retT
-      rl <- state $ partition (`notElem` old_bound)
-      let dims' = dims <> rl
-      pure $ Arrow as pn d argT' (RetType dims' retT')
-    onScalar (TypeVar u v args) =
-      TypeVar u v <$> mapM onTypeArg args
-      where
-        onTypeArg (TypeArgDim d) = TypeArgDim <$> replacing d
-        onTypeArg (TypeArgType ty) = TypeArgType <$> onType ty
-    onScalar (Prim pt) = pure $ Prim pt
-
-    onType ::
-      TypeBase Size u ->
-      ReaderT [(Exp, Exp)] (StateT [VName] TermTypeM) (TypeBase Size u)
-    onType (Array u shape scalar) =
-      Array u <$> traverse replacing shape <*> onScalar scalar
-    onType (Scalar ty) =
-      Scalar <$> onScalar ty
 
 -- Used to remove unknown sizes from function body types before we
 -- perform let-generalisation.  This is because if a function is
