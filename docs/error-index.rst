@@ -566,69 +566,6 @@ Such an abbreviation is actually shorthand for
 which is erroneous, but with workarounds, as explained in
 :ref:`unused-existential`.
 
-.. _unify-param-existential:
-
-"Parameter *x* used as size would go out of scope."
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-This error tends to happen when higher-order functions are used in a
-way that causes a size requirement to become impossible to express.
-Real programs that encounter this issue tend to be complicated, but to
-illustrate the problem, consider the following contrived function:
-
-.. code-block:: futhark
-
-  def f (n: i64) (m: i64) (b: [n][m]bool) = b[0,0]
-
-We have the following type:
-
-.. code-block:: futhark
-
-  val f : (n: i64) -> (m: i64) -> (b: [n][m]bool) -> bool
-
-Now suppose we say:
-
-.. code-block:: futhark
-
-  def g = uncurry f
-
-What should be the type of ``g``?  Intuitively, something like this:
-
-.. code-block:: futhark
-
-  val g : (n: i64, m: i64) -> (b: [n][m]bool) -> bool
-
-But this is *not* expressible in the Futhark type system - and even if
-it were, it would not be easy to infer this in general, as it depends
-on exactly what ``uncurry`` does, which the type checker does not
-know.
-
-As a workaround, we can use explicit type annotation and size
-coercions to give ``g`` an acceptable type:
-
-.. code-block:: futhark
-
-  def g [a][b] (n,m) (b: [a][b]bool) = f n m (b :> [n][m]bool)
-
-Another workaround, which is often the right one in cases not as
-contrived as above, is to modify ``f`` itself to produce a *witness*
-of the constraint, in the form of an array of shape ``[n][m]``:
-
-.. code-block:: futhark
-
-  def f (n: i64) (m: i64) : ([n][m](), [n][m]bool -> bool) =
-    (replicate n (replicate m ()), \b -> b[0,0])
-
-Then ``uncurry f`` works just fine and has the following type:
-
-.. code-block:: futhark
-
-  (i64, i64) -> ?[n][m].([n][m](), [n][m]bool -> bool)
-
-Programming with such *explicit size witnesses* is a fairly advanced
-technique, but often necessary when writing advanced size-dependent
-code.
-
 .. _unify-consuming-param:
 
 "Parameter types *x* and *y* are incompatible regarding consuming their arguments
