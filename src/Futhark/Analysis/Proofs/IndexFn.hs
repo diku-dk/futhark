@@ -50,8 +50,12 @@ getIteratorVariable _ = Nothing
 getCases :: IndexFn -> Cases Symbol (SoP Symbol)
 getCases (IndexFn _ cs) = cs
 
-hasSingleCase :: IndexFn -> Bool
-hasSingleCase (IndexFn _ cs) = length (casesToList cs) == 1
+justSingleCase :: IndexFn -> Maybe (SoP Symbol)
+justSingleCase f
+  | [(Bool True, f_val)] <- casesToList $ body f =
+    Just f_val
+  | otherwise =
+    Nothing
 
 getCatIteratorVariable :: IndexFn -> Maybe VName
 getCatIteratorVariable (IndexFn (Forall _ (Cat k _ _)) _) = Just k

@@ -243,7 +243,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/segment_ids.fut"
-        ( withDebug . pure $ \(i, m, k, b) ->
+        ( pure $ \(i, m, k, b) ->
             IndexFn
               { iterator = Forall i (Cat k (sHole m) (sHole b)),
                 body = cases [(Bool True, sHole k)]
@@ -251,7 +251,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/part2indicesL.fut"
-        ( pure $ \(i, n, dummy, _) ->
+        ( withDebug . pure $ \(i, n, dummy, _) ->
             IndexFn
               { iterator = Forall i (Iota (sHole n)),
                 body = cases [(Bool True, sHole dummy)]

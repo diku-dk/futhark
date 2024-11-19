@@ -10,7 +10,7 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
   )
 where
 
-import Control.Monad (forM_, unless, when, (<=<))
+import Control.Monad (forM_, when, (<=<))
 import Control.Monad.RWS (gets, modify)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe)
@@ -228,12 +228,17 @@ search x = do
       matches <- catMaybes <$> mapM (\(sym, algsym) -> fmap (algsym,) <$> unify sym x) syms
       case matches of
         [] -> pure Nothing
-        [(algsym, sub)] -> do
-          unless (M.size (mapping sub) == 1) $ error "search: multiple holes"
+        [(algsym, sub)] | null (mapping sub) -> do
+          pure $ Just (Algebra.getVName algsym, Nothing)
+        [(algsym, sub)] | [s] <- M.elems (mapping sub) -> do
           pure $
-            Just (Algebra.getVName algsym, Just . head $ M.elems (mapping sub))
-        _ ->
-          error $ "search: " <> prettyString x <> " unifies with multiple symbols"
+            Just (Algebra.getVName algsym, Just s)
+        [y] ->
+          error $
+            "search: " <> prettyString x <> " multiple holes: " <> prettyString y
+        ys ->
+          error $
+            "search: " <> prettyString x <> " unifies with multiple symbols: " <> prettyString ys
 
 isBooleanM :: Symbol -> IndexFnM Bool
 isBooleanM (Var vn) = do

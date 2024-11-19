@@ -8,13 +8,13 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==), simplify)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, unzipT)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes)
-import Futhark.Analysis.Proofs.Rewrite (rewrite)
+import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute (($$))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, rep, unify)
@@ -491,8 +491,10 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               Just check -> check (size_rep, zip param_names arg_fns)
             unless (isYes ans) . error $
               "Precondition on " <> prettyString pat <> " not satisfied for " <> prettyString fn
-          -- Construct indexfn.
+          -- The resulting index fn will be fully applied, so we can rewrite recurrences here.
+          -- (Which speeds up things by eliminating cases.)
           substParams (repIndexFn size_rep indexfn) (zip param_names arg_fns)
+            >>= rewrite
           where
             getVName x | Just (Var vn) <- justSym x = Just vn
             getVName _ = Nothing
@@ -532,10 +534,10 @@ forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
 substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
 substParams = foldM substParam
   where
-    -- We use simplify, not rewrite here to avoid rewriting recurrences
-    -- during paramter-substitution.
+    -- We want to simplify, but avoid rewriting recurrences during
+    -- paramter-substitution.
     substParam fn (paramName, paramIndexFn) =
-      (fn $$ (paramName, paramIndexFn)) >>= simplify
+      (fn $$ (paramName, paramIndexFn)) >>= rewriteWithoutRules
 
 cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
 cmap f (Cases xs) = Cases (fmap f xs)
