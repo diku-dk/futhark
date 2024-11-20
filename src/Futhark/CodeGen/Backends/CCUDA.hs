@@ -106,6 +106,8 @@ cudaMemoryType :: GC.MemoryType OpenCL ()
 cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
 cudaMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
 
+-- TODO: Could we have another function that compiles to imp with
+-- our modifications
 -- | Compile the program to C with calls to CUDA.
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do

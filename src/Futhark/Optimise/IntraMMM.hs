@@ -750,18 +750,24 @@ type FixMonad a = RWST FixEnv () FixState PassM a
 
 fixFuns :: Stms GPUMem -> FunDef GPUMem -> PassM (FunDef GPUMem)
 fixFuns consts fun
-  | gemmName `isPrefixOfName` funDefName fun = pure $ fun {
-                                              funDefParams = fixParamsGemmFun $ funDefParams fun,
-                                              funDefRetType = fixRetType Scalar $ funDefRetType fun
-                                            }
-  | copyGlobalSharedName `isPrefixOfName` funDefName fun = pure $ fun {
-                                              funDefParams = fixParamsCopyGlobalShared $ funDefParams fun,
-                                              funDefRetType = fixRetType Shared $ funDefRetType fun
-                                            }
-  | copyRegistersSharedName `isPrefixOfName` funDefName fun = pure $ fun {
-                                                  funDefParams = fixParamsCopyRegistersShared $ funDefParams fun,
-                                                  funDefRetType = fixRetType Shared $ funDefRetType fun
-                                                }
+  | gemmName `isPrefixOfName` funDefName fun =
+      pure $
+        fun
+          { funDefParams = fixParamsGemmFun $ funDefParams fun,
+            funDefRetType = fixRetType Scalar $ funDefRetType fun
+          }
+  | copyGlobalSharedName `isPrefixOfName` funDefName fun =
+      pure $
+        fun
+          { funDefParams = fixParamsCopyGlobalShared $ funDefParams fun,
+            funDefRetType = fixRetType Shared $ funDefRetType fun
+          }
+  | copyRegistersSharedName `isPrefixOfName` funDefName fun =
+      pure $
+        fun
+          { funDefParams = fixParamsCopyRegistersShared $ funDefParams fun,
+            funDefRetType = fixRetType Shared $ funDefRetType fun
+          }
   | otherwise = do
       let initScope = scopeOf consts <> scopeOfFParams (funDefParams fun)
       let body = funDefBody fun

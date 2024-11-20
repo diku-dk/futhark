@@ -10,6 +10,7 @@ import Futhark.CLI.Bench qualified as Bench
 import Futhark.CLI.Benchcmp qualified as Benchcmp
 import Futhark.CLI.C qualified as C
 import Futhark.CLI.CUDA qualified as CCUDA
+import Futhark.CLI.CUDATC qualified as CCUDATC
 import Futhark.CLI.Check qualified as Check
 import Futhark.CLI.Datacmp qualified as Datacmp
 import Futhark.CLI.Dataset qualified as Dataset
@@ -58,6 +59,7 @@ commands =
       ("c", (C.main, "Compile to sequential C.")),
       ("opencl", (OpenCL.main, "Compile to C calling OpenCL.")),
       ("cuda", (CCUDA.main, "Compile to C calling CUDA.")),
+      ("cudatc", (CCUDATC.main, "Compile to C Calling CUDA using tensor cores")),
       ("hip", (HIP.main, "Compile to C calling HIP.")),
       ("multicore", (Multicore.main, "Compile to multicore C.")),
       ("python", (Python.main, "Compile to sequential Python.")),

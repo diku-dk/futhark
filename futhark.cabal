@@ -148,6 +148,7 @@ library
       Futhark.CLI.Bench
       Futhark.CLI.C
       Futhark.CLI.CUDA
+      Futhark.CLI.CUDATC
       Futhark.CLI.Check
       Futhark.CLI.Benchcmp
       Futhark.CLI.Datacmp
