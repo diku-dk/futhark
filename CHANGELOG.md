@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Sizes that go out of scope due to use of higher order functions will
   now work in more cases by adding existentials. (#2193)
 
+* Tracing inside AD operators with the interpreter now prints values
+  properly.
+
 ### Changed
 
 ## [0.25.24]

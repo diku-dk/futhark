@@ -7,9 +7,9 @@ module Language.Futhark.Interpreter.AD
     JVPValue (..),
     doOp,
     addFor,
-    primal,
     tapePrimal,
     primitive,
+    varPrimal,
     deriveTape,
   )
 where
@@ -97,8 +97,12 @@ primal (Variable _ (JVP (JVPValue v _))) = primal v
 primal (Constant v) = Constant v
 
 primitive :: ADValue -> PrimValue
-primitive v@(Variable _ _) = primitive $ primal v
+primitive (Variable _ v) = varPrimal v
 primitive (Constant v) = v
+
+varPrimal :: ADVariable -> PrimValue
+varPrimal (VJP (VJPValue t)) = primitive $ tapePrimal t
+varPrimal (JVP (JVPValue v _)) = primitive $ primal v
 
 -- Evaluates a PrimExp using doOp
 evalPrimExp :: M.Map VName ADValue -> PrimExp VName -> Maybe ADValue
