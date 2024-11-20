@@ -92,7 +92,6 @@ gputcPipeline =
       [ simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
---        TODO: where to put in pipeline?
         intraMMM,
         simplifyGPU,
         tileLoops,
@@ -208,7 +207,6 @@ gpumemtcPipeline =
         expandAllocations,
         simplifyGPUMem
       ]
-
 -- | Run 'gpuPipeline', then add memory information (and optimise
 -- it a lot).
 gpumemPipeline :: Pipeline SOACS GPUMem
@@ -216,7 +214,7 @@ gpumemPipeline =
   gpuPipeline
     >>> onePass GPU.explicitAllocations
     >>> passes
-      [        
+      [
         simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,
