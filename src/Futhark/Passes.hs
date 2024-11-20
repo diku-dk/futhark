@@ -182,10 +182,11 @@ seqmemPipeline =
 -- it a lot).
 gpumemtcPipeline :: Pipeline SOACS GPUMem
 gpumemtcPipeline =
-  gpuPipeline
+  gputcPipeline
     >>> onePass GPU.explicitAllocations
     >>> passes
       [
+        intraMMMMemFixup,
         simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,
@@ -215,8 +216,7 @@ gpumemPipeline =
   gpuPipeline
     >>> onePass GPU.explicitAllocations
     >>> passes
-      [
-        intraMMMMemFixup,
+      [        
         simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,

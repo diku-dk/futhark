@@ -207,7 +207,6 @@ pyPrependHeader :: T.Text -> T.Text
 pyPrependHeader = (T.unlines pyHeaderLines <>)
 
 cmdCC :: String
--- TODO: new action instead?
 cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
 
 cmdCFLAGS :: [String] -> [String]
@@ -350,8 +349,14 @@ compileOpenCLAction fcfg mode outpath =
           liftIO $ T.writeFile cpath $ cPrependHeader $ COpenCL.asServer cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
-compileCUDATCAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
-compileCUDATCAction fcfg mode outpath =
+-- TODO: Add include directory to action
+compileCUDATCAction ::
+  FutharkConfig ->
+  CompilerMode ->
+  FilePath ->
+  FilePath ->
+  Action GPUMem
+compileCUDATCAction fcfg mode cuteincludepath outpath =
   Action
     { actionName = "Compile to CUDA with tensor cores",
       actionDescription = "Compile to CUDA using tensor cores where possible",
@@ -368,7 +373,7 @@ compileCUDATCAction fcfg mode outpath =
               "-lcudart",
               "-lnvrtc"
             ]
-      case mode of
+      case mode of     
         ToLibrary -> do
           let (header, impl, manifest) = CCUDA.asLibrary cprog
           liftIO $ T.writeFile hpath $ cPrependHeader header
@@ -376,12 +381,11 @@ compileCUDATCAction fcfg mode outpath =
           liftIO $ T.writeFile jsonpath manifest
         ToExecutable -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CCUDA.asExecutable cprog
-          runCC cpath outpath ["-DUSE_TENSOR_CORES", "-O", "-std=c99"]
-            ("-lm" : extra_options)
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ CCUDA.asServer cprog
-          runCC cpath outpath ["USE_TENSOR_CORES", "-O", "-std=c99"]
-            ("-lm" : extra_options)
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+
 
 -- | The @futhark cuda@ action.
 compileCUDAAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
@@ -400,7 +404,7 @@ compileCUDAAction fcfg mode outpath =
           extra_options =
             [ "-lcuda",
               "-lcudart",
-              "-lnvrtc"
+              "-lnvrtc"              
             ]
       case mode of
         ToLibrary -> do
