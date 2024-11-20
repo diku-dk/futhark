@@ -163,9 +163,11 @@ forward (E.AppExp (E.Index xs' slice _) _)
       IndexFn iter_idx idx <- forward idx'
       IndexFn iter_xs xs <- forward xs'
       case iter_xs of
-        Forall j _ -> do
+        Forall j (Iota {}) -> do
           IndexFn iter_idx xs $$ (j, IndexFn iter_idx idx)
             >>= rewrite
+        Forall _ (Cat {}) -> do
+          error "indexing would capture k"
         _ ->
           error "indexing into a scalar"
 forward (E.Not e _) = do
