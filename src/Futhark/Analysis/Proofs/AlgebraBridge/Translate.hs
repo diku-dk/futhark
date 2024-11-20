@@ -129,14 +129,14 @@ fromAlgebra_ (Algebra.Mdf _dir vn i j) = do
   -- TODO add monotonicity property to environment?
   a <- fromAlgebra i
   b <- fromAlgebra j
-  x <- lookupUntransSymUnsafe vn
+  x <- lookupSym vn
   xa <- repHoles x a
   xb <- repHoles x b
   pure $ xa ~-~ xb
 fromAlgebra_ (Algebra.Sum (Algebra.One vn) lb ub) = do
   a <- fromAlgebra lb
   b <- fromAlgebra ub
-  x <- lookupUntransSymUnsafe vn
+  x <- lookupSym vn
   j <- newVName "j"
   xj <- repHoles x (sym2SoP $ Var j)
   pure . sym2SoP $ Sum j a b xj
@@ -148,8 +148,11 @@ fromAlgebra_ (Algebra.Sum (Algebra.POR vns) lb ub) = do
       (S.toList vns)
 fromAlgebra_ (Algebra.Pow {}) = undefined
 
-lookupUntransSymUnsafe :: VName -> IndexFnM Symbol
-lookupUntransSymUnsafe = fmap fromJust . lookupUntransSym . Algebra.Var
+-- Like lookupUntransSym, but if the name is not in the untranslatable
+-- environment, assume that it is a variable with the same name
+-- in both IndexFn and Algebra layers.
+lookupSym :: VName -> IndexFnM Symbol
+lookupSym vn = fromMaybe (Var vn) <$> lookupUntransSym (Algebra.Var vn)
 
 -- Replace holes in `x` by `replacement`.
 repHoles :: (Monad m) => Symbol -> SoP Symbol -> m Symbol
@@ -256,7 +259,7 @@ getDisjoint x = do
     Nothing -> pure []
     Just (vn, idx) -> do
       disjoint_vns <- fromMaybe mempty <$> Algebra.askDisjoint (Algebra.Var vn)
-      xs <- mapM lookupUntransSymUnsafe (S.toList disjoint_vns)
+      xs <- mapM lookupSym (S.toList disjoint_vns)
       case idx of
         Just j -> mapM (`repHoles` j) xs
         Nothing -> pure xs

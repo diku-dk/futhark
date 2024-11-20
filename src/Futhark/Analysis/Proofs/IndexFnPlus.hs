@@ -17,14 +17,6 @@ import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, stack, (<+>))
 import Language.Futhark (VName)
 
-instance Eq Iterator where
-  (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
-  (Forall _ u) == (Forall _ v) = u == v
-  Empty == Empty = True
-  _ == _ = False
-
-deriving instance Eq IndexFn
-
 domainStart :: Domain -> SoP Symbol
 domainStart (Iota _) = int2SoP 0
 domainStart (Cat k _ b) = rep (mkRep k (int2SoP 0 :: SoP Symbol)) b

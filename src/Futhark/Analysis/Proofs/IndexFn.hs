@@ -13,7 +13,7 @@ data IndexFn = IndexFn
   { iterator :: Iterator,
     body :: Cases Symbol (SoP Symbol)
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Domain
   = Iota (SoP Symbol) -- [0, ..., n-1]
@@ -27,6 +27,12 @@ data Iterator
   = Forall VName Domain
   | Empty
   deriving (Show)
+
+instance Eq Iterator where
+  (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
+  (Forall _ u) == (Forall _ v) = u == v
+  Empty == Empty = True
+  _ == _ = False
 
 newtype Cases a b = Cases (NE.NonEmpty (a, b))
   deriving (Show, Eq, Ord)

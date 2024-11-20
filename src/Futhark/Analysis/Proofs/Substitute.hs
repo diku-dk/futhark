@@ -79,37 +79,41 @@ mergeIterators Empty g_iter = pure g_iter
 mergeIterators (Forall _ df) Empty =
   case df of
     Iota {} -> pure Empty
-    Cat {} -> undefined -- Might capture k?
-mergeIterators (Forall i df) (Forall j dg) =
+    Cat {} -> error "Might capture k?"
+mergeIterators (Forall i df) (Forall j dg) = do
+  assertEquivDomains df dg
   case (df, dg) of
     (Iota {}, Iota {}) -> do
-      assertSameRange df dg
       pure (Forall j dg)
     (Cat {}, Cat {}) -> do
-      assertSameRange df dg
       pure (Forall j dg)
     (Cat {}, Iota {}) -> do
-      assertSameRange df dg
       pure (Forall j $ repDomain (mkRep i $ Var j) df)
-    (Iota {}, Cat _ m _) -> do
-      test1 <- sameRange df dg
-      test2 <- sameRange df (Iota m)
-      unless (test1 || test2) $ error "substitute iota cat: Incompatible domains."
+    (Iota {}, Cat {}) -> do
       pure (Forall j dg)
 
+equivDomains :: Domain -> Domain -> IndexFnM Bool
+equivDomains df@(Cat {}) dg@(Cat {}) = do
+  isJust <$> (unify df dg :: IndexFnM (Maybe (Substitution Symbol)))
+equivDomains df@(Iota {}) dg@(Cat _ m _) = do
+  aligns_with_whole <- sameRange df dg
+  aligns_with_k <- sameRange df (Iota m)
+  pure $ aligns_with_whole || aligns_with_k
+equivDomains df dg = sameRange df dg
+
 sameRange :: Domain -> Domain -> IndexFnM Bool
-sameRange dom_f dom_g = do
-  start_f <- rewrite (domainStart dom_f)
-  start_g <- rewrite (domainStart dom_g)
-  end_f <- rewrite (domainEnd dom_f)
-  end_g <- rewrite (domainEnd dom_g)
+sameRange df dg = do
+  start_f <- rewrite (domainStart df)
+  start_g <- rewrite (domainStart dg)
+  end_f <- rewrite (domainEnd df)
+  end_g <- rewrite (domainEnd dg)
   eq_start :: Maybe (Substitution Symbol) <- unify start_f start_g
   eq_end :: Maybe (Substitution Symbol) <- unify end_f end_g
   pure $ isJust eq_start && isJust eq_end
 
-assertSameRange :: Domain -> Domain -> IndexFnM ()
-assertSameRange dom_f dom_g =
-  sameRange dom_f dom_g >>= flip unless (error "checkSameRange: inequal ranges")
+assertEquivDomains :: Domain -> Domain -> IndexFnM ()
+assertEquivDomains dom_f dom_g =
+  equivDomains dom_f dom_g >>= flip unless (error "assertSameRange: inequal ranges")
 
 -- Given functions (f = \i -> ...) and (g = \j -> ...), returns:
 -- 1. renamed f
