@@ -245,7 +245,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
   bounds_invalid_downwards <-
     letSubExp "bounds_invalid_downwards" $
       I.BasicOp $
-        I.CmpOp le_op start' end'
+        I.CmpOp lt_op start' end'
   bounds_invalid_upwards <-
     letSubExp "bounds_invalid_upwards" $
       I.BasicOp $
