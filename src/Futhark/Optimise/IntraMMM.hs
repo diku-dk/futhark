@@ -2,54 +2,36 @@ module Futhark.Optimise.IntraMMM (intraMMM, intraMMMMemFixup) where
 
 -- TODO: add specific imports, clean up, reorganize to multiple files
 
-import Control.Lens.Lens
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Monad.Writer
-import Control.Monad.Trans.Maybe (MaybeT (runMaybeT))
-import Data.Foldable (find, fold, toList)
-import Data.Maybe (catMaybes)
-import Debug.Trace
-import Futhark.CodeGen.Backends.GenericC (funName)
+import Data.Foldable (toList)
 import Futhark.IR.GPU
-import Futhark.IR.Syntax.Core
-import Futhark.IR.GPU.Op
-import Futhark.IR.SegOp
-import Futhark.IR.GPU.Simplify (simplifyGPU)
+
 import Futhark.IR.GPUMem
 --import Futhark.IR.Mem
-import Futhark.IR.Pretty
-import Futhark.IR.Prop.Scope (Scope)
-import Futhark.IR.Syntax
-import Futhark.IR.Traversals
 --import Futhark.IR.Mem.LMAD as LMAD
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Builder
 import qualified Futhark.Analysis.SymbolTable as ST
-import Data.List (partition, elem, intersect, lookup)
-import Data.Set (fromList, member, intersection, difference)
-import Control.Monad
+import Data.List (partition, intersect, lookup)
+import Data.Set (fromList, difference)
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Construct
 import Futhark.Optimise.IntraMMM.Utils
 import Data.Map.Strict qualified as M
-import Futhark.Builder.Class
-import Futhark.Error
-import Futhark.Util.Pretty (prettyString)
 import Data.Bits
 import Data.Semigroup
 import Futhark.Pass.Simplify
 import Prelude hiding (lookup)
 import Futhark.Pass
   ( Pass (..),
-    PassM,
-    intraproceduralTransformation,
+    PassM,    
     intraproceduralTransformationWithConsts,
   )
 import Data.Loc (Loc(NoLoc), SrcLoc (SrcLoc))
-import Colog.Core (duplicate)
 
 divUp :: Int -> Int -> Int
 divUp x y = (x + y - 1) `div` y
@@ -154,7 +136,7 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
 -- TODO: entire global as input or only slize, if entire add index as argument
 mkCopyGlobalShared :: (MonadFreshNames m) => PrimType -> Int -> Int -> m MMMFunDef
 mkCopyGlobalShared elmType sizeY sizeX = do
-  let arrShape = Shape $
+  let arrShape = Shape
         [ mkInt64Const sizeY,
           mkInt64Const sizeX
         ]
@@ -452,7 +434,7 @@ transformStms :: Stms GPU -> IntraMMMMonad (Stms GPU)
 transformStms = mapStmsWithScope transformStm
 
 transformStm :: Stm GPU -> IntraMMMMonad (Stms GPU)
-transformStm stm@(Let (Pat [PatElem resName _]) aux e) = do
+transformStm stm@(Let (Pat [PatElem resName _]) _ e) = do
     scope <- askScope
     maybeBlockSize <- askBlockSize
     case (innerSegOpExpMatch scope e, maybeBlockSize) of
@@ -490,10 +472,10 @@ transformOp op = pure op
 
 transformSegOp :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
 transformSegOp sOp@(SegMap
-    level@(SegBlock SegNoVirt (Just (KernelGrid (Count numBlocks) (Count blockSize))))
-    space@(SegSpace flatIndex [blockInfo])
+    (SegBlock SegNoVirt (Just (KernelGrid (Count numBlocks) (Count _blockSize))))
+    space@(SegSpace _ [_blockInfo])
     ts
-    body@(KernelBody desc stms res)
+    body@(KernelBody _ stms _)
   ) = do
   scope <- askScope
   case execWriter $ runReaderT (maxBlockSizeStms stms) scope of
@@ -566,7 +548,7 @@ prodKnownSegDim _ _ = Unknown
 
 
 getOptimalBlockSize :: InnerMMAMatch -> Int
-getOptimalBlockSize (InnerMMAMatch _ _ sizeM sizeN sizeK) =
+getOptimalBlockSize (InnerMMAMatch _ _ sizeM sizeN _sizeK) =
 --  TODO: Should also depend on types
     let warpsM = sizeM `divUp` 64 in
     let warpsN = sizeN `divUp` 64 in
@@ -614,7 +596,7 @@ innerOpMatch :: Scope GPU -> Op GPU -> Maybe InnerMMAMatch
 innerOpMatch scope
 -- TODO: check if better to match segmap with inner reduction
   (SegOp segRed@(
-      SegRed (SegThreadInBlock _) space segBinOps ts body
+      SegRed (SegThreadInBlock _) space segBinOps _ts body
   ))
   | Just ne <- segBinOpsMatch segBinOps
   = do
@@ -647,7 +629,7 @@ constantValueMatch _ = Nothing
 
 inBlockKernelBodyMatch :: [VName] -> Names -> KernelBody GPU -> Scope GPU -> Maybe KernelBodyMatch
 -- TODO: support more than 3 dimensions?
-inBlockKernelBodyMatch indexVars@[indexVar1, indexVar2, indexVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) scope = do
+inBlockKernelBodyMatch indexVars@[_indexVar1, _indexVar2, indexVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) scope = do
   let sTable = ST.insertStms (informStms stms) $ ST.fromScope $ addScopeWisdom scope
 --  TODO: rename to use A, B, C?
   (resExp, _) <- ST.lookupExp res sTable
@@ -695,7 +677,7 @@ matchesMulArg _ = Nothing
 
 -- TODO: also return binop?
 segBinOpsMatch :: [SegBinOp GPU] -> Maybe SubExp
-segBinOpsMatch [SegBinOp Commutative lambda nes s] | lambdaMatch lambda = nesMatch nes
+segBinOpsMatch [SegBinOp Commutative lambda nes _] | lambdaMatch lambda = nesMatch nes
 segBinOpsMatch _ = Nothing
 
 lambdaMatch :: Lambda GPU -> Bool
@@ -880,7 +862,7 @@ fixStmt (
   let newRets = fixRetType Shared rets
   newArgs <- mapM replaceArg args
 --  TODO: check this, maybe use case instead
-  let ((Var srcMemMem, _) : _ : (Var srcArray, _) : restArgs) = newArgs
+  let ((Var srcMemMem, _) : _ : (Var srcArray, _) : _restArgs) = newArgs
   srcMemInfo <- lookupInfo srcMemMem
   case srcMemInfo of
     LetName (MemMem srcMemSpace) | srcMemSpace == space ->
