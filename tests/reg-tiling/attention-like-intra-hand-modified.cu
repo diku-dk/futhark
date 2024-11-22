@@ -5534,7 +5534,10 @@ void mainzisegmap_intrablock_7349(__global int *global_failure, int failure_is_a
             mem_7485[i_0] = ext_mem_7478[i_0];
         }
         barrier(CLK_LOCAL_MEM_FENCE);
-        // TODO: fix this guy
+        // NOTE: No copy back to shared at each iterations since the result is not used either way.
+        // Instead we do it after the loop to still get the correct result.
+        // This simulates that we could accumulate the result in registers. I.e. if we add up result
+        // using (+) in registers. We could for instance modify tensor core call to do this.
         // futrts_copyRegistersShared(&ext_mem_7489, mem_7485, color_7499, (f16) 0.0F, (f16) 0.0F, Int<(int64_t) 64>{}, Int<(int64_t) 64>{}, Int<(int64_t) 32>{});
         mem_param_tmp_7544 = ext_mem_7489;
         mem_param_7455 = mem_param_tmp_7544;
