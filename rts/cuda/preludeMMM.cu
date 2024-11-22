@@ -10,15 +10,11 @@ struct convert_type<f16> {
     using TypeOut = half_t;
 };
 
-template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class BlockSize>
+template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class WarpsM, class WarpsN>
 struct get_mma_config {};
 
-template<class SizeM, class SizeN, class BlockSize>
-struct get_mma_config<half_t, half_t, half_t, SizeM, SizeN, BlockSize> {
-//     This is how BlockSize was calculated, no need to check
-    using WarpsM = Int<ceil_div(SizeM{}, 64)>;
-    using WarpsN = Int<ceil_div(SizeN{}, 64)>;
-
+template<class SizeM, class SizeN, class WarpsM, class WarpsN>
+struct get_mma_config<half_t, half_t, half_t, SizeM, SizeN, WarpsM, WarpsN> {
 // TODO: should depend on type and arch
     using MMATraits = MMA_Traits<SM80_16x8x16_F16F16F16F16_TN>;
     using MMATile = Tile<Int<16 * WarpsM{}>, Int<16 * WarpsN{}>, _16>;
@@ -33,19 +29,13 @@ struct get_mma_config<half_t, half_t, half_t, SizeM, SizeN, BlockSize> {
 };
 
 
-template<class SizeM, class SizeN, class BlockSize>
-struct get_mma_config<half_t, half_t, float, SizeM, SizeN, BlockSize> {
-//     This is how BlockSize was calculated, no need to check
-    using WarpsM = Int<ceil_div(SizeM{}, 64)>;
-    using WarpsN = Int<ceil_div(SizeN{}, 64)>;
-
+template<class SizeM, class SizeN, class WarpsM, class WarpsN>
+struct get_mma_config<half_t, half_t, float, SizeM, SizeN, WarpsM, WarpsN>{
 // TODO: should depend on type and arch
     using MMATraits = MMA_Traits<SM80_16x8x16_F32F16F16F32_TN>;
     using MMATile = Tile<Int<16 * WarpsM{}>, Int<16 * WarpsN{}>, _16>;
 
     using TiledMma = TiledMMA<
-    //    MMA_Atom<UniversalFMA<half_t>>,
-    //    Layout<Shape<_4,_8,_1>>,
         MMA_Atom<MMATraits>,
         Layout<Shape<WarpsM,WarpsN,_1>>,
         MMATile
@@ -54,14 +44,14 @@ struct get_mma_config<half_t, half_t, float, SizeM, SizeN, BlockSize> {
 
 
 // TODO: forceinline?
-template<class ElmTypeIn, class SizeY, class SizeX, class BlockSize>
-FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigned char *global_mem, unsigned char *shared_mem, int64_t offset, ElmTypeIn, SizeY, SizeX, BlockSize)
+template<class ElmTypeIn, class SizeY, class SizeX, class WarpsM, class WarpsN>
+FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigned char *global_mem, unsigned char *shared_mem, int64_t offset, ElmTypeIn, SizeY, SizeX, WarpsM, WarpsN)
 {
     *mem_out_p = shared_mem;
 
     int flatThreadIdx = threadIdx.z * blockDim.y * blockDim.x + threadIdx.y * blockDim.x + threadIdx.x;
 
-    if (flatThreadIdx < BlockSize{}) {
+    if (flatThreadIdx < WarpsM{} * WarpsN{} * 32) {
       using ElmType = typename convert_type<ElmTypeIn>::TypeOut;
 
   // TODO: check compute capability, check if transposed?
@@ -71,7 +61,7 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigne
 
       constexpr int elmsPerLoad = 16 / sizeof(ElmType);
       constexpr int threadsX = SizeX{} / elmsPerLoad;
-      constexpr int threadsY = BlockSize{} / threadsX;
+      constexpr int threadsY = (WarpsM{} * WarpsN{} * 32) / threadsX;
 
       auto s_layout = make_layout(Shape<SizeY, SizeX>{}, LayoutRight{});
       //     TODO: change if swizzling
@@ -101,21 +91,21 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigne
     __syncthreads();
 }
 
-template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class BlockSize, int numRegs>
-FUTHARK_FUN_ATTR void futrts_copyRegistersShared(unsigned char **mem_out_p, ElmTypeCIn (&registers_mem)[numRegs], unsigned char *shared_mem, ElmTypeAIn, ElmTypeBIn, SizeM, SizeN, BlockSize)
+template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class WarpsM, class WarpsN, int numRegs>
+FUTHARK_FUN_ATTR void futrts_copyRegistersShared(unsigned char **mem_out_p, ElmTypeCIn (&registers_mem)[numRegs], unsigned char *shared_mem, ElmTypeAIn, ElmTypeBIn, SizeM, SizeN, WarpsM, WarpsN)
 {
     *mem_out_p = shared_mem;
 
     int flatThreadIdx = threadIdx.z * blockDim.y * blockDim.x + threadIdx.y * blockDim.x + threadIdx.x;
 
 // TODO: handle non flat indices
-    if (flatThreadIdx < BlockSize{}) {
+    if (flatThreadIdx < WarpsM{} * WarpsN{} * 32) {
 
         using ElmTypeA = typename convert_type<ElmTypeAIn>::TypeOut;
         using ElmTypeB = typename convert_type<ElmTypeBIn>::TypeOut;
         using ElmTypeC = typename convert_type<ElmTypeCIn>::TypeOut;
 
-        using MMAConfig = get_mma_config<ElmTypeA, ElmTypeB, ElmTypeC, SizeM, SizeN, BlockSize>;
+        using MMAConfig = get_mma_config<ElmTypeA, ElmTypeB, ElmTypeC, SizeM, SizeN, WarpsM, WarpsN>;
         using TiledMMA_ = typename MMAConfig::TiledMma;
 
     //    TODO: try tiledcopy instead?
@@ -138,8 +128,8 @@ FUTHARK_FUN_ATTR void futrts_copyRegistersShared(unsigned char **mem_out_p, ElmT
     __syncthreads();
 }
 
-template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class SizeK, class BlockSize, int numRegs>
-FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigned char *A_mem, unsigned char *B_mem, ElmTypeCIn (&C_mem)[numRegs], ElmTypeAIn, ElmTypeBIn, SizeM, SizeN, SizeK, BlockSize)
+template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class SizeK, class WarpsM, class WarpsN, int numRegs>
+FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigned char *A_mem, unsigned char *B_mem, ElmTypeCIn (&C_mem)[numRegs], ElmTypeAIn, ElmTypeBIn, SizeM, SizeN, SizeK, WarpsM, WarpsN)
 {
     int flatThreadIdx = threadIdx.z * blockDim.y * blockDim.x + threadIdx.y * blockDim.x + threadIdx.x;
 
@@ -147,7 +137,7 @@ FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigne
     using ElmTypeB = typename convert_type<ElmTypeBIn>::TypeOut;
     using ElmTypeC = typename convert_type<ElmTypeCIn>::TypeOut;
 
-    using MMAConfig = get_mma_config<ElmTypeA, ElmTypeB, ElmTypeC, SizeM, SizeN, BlockSize>;
+    using MMAConfig = get_mma_config<ElmTypeA, ElmTypeB, ElmTypeC, SizeM, SizeN, WarpsM, WarpsN>;
     using TiledMMA_ = typename MMAConfig::TiledMma;
 
     auto sA_layout = make_layout(Shape<SizeM, SizeK>{}, LayoutRight{});

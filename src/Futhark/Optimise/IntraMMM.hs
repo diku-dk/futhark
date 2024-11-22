@@ -131,7 +131,8 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
   mParam <- newParam "M" $ Prim int64
   nParam <- newParam "N" $ Prim int64
   kParam <- newParam "K" $ Prim int64
-  blockSizeParam <- newParam "blockSize" $ Prim int64
+  mWarpsParam <- newParam "mWarps" $ Prim int64
+  nWarpsParam <- newParam "nWarps" $ Prim int64
 
   fName <- fmap (nameFromString . prettyString) $ newName $ VName gemmName 0
   let funParams =
@@ -143,7 +144,8 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
           mParam,
           nParam,
           kParam,
-          blockSizeParam
+          mWarpsParam,
+          nWarpsParam
         ]
   pure
     ( GemmSignature elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs,
@@ -165,7 +167,8 @@ mkCopyGlobalShared elmType sizeY sizeX = do
   elmTypeParam <- newParam "elmTypeA" $ Prim elmType
   yParam <- newParam "Y" $ Prim int64
   xParam <- newParam "X" $ Prim int64
-  blockSizeParam <- newParam "blockSize" $ Prim int64
+  mWarpsParam <- newParam "mWarps" $ Prim int64
+  nWarpsParam <- newParam "nWarps" $ Prim int64
 
   fName <-
     fmap (nameFromString . prettyString) $ newName $ VName copyGlobalSharedName 0
@@ -183,7 +186,8 @@ mkCopyGlobalShared elmType sizeY sizeX = do
           elmTypeParam,
           yParam,
           xParam,
-          blockSizeParam
+          mWarpsParam,
+          nWarpsParam
         ]
   pure
     ( CopyGlobalSharedSignature elmType sizeY sizeX,
@@ -219,7 +223,8 @@ mkCopyRegistersShared elmTypeA elmTypeB elmTypeC sizeM sizeN sizeRegs blockSize 
   bElmTypeParam <- newParam "elmTypeB" $ Prim elmTypeB
   mParam <- newParam "M" $ Prim int64
   nParam <- newParam "N" $ Prim int64
-  blockSizeParam <- newParam "blockSize" $ Prim int64
+  mWarpsParam <- newParam "mWarps" $ Prim int64
+  nWarpsParam <- newParam "nWarps" $ Prim int64
 
   fName <- fmap (nameFromString . prettyString) $ newName $ VName copyRegistersSharedName 0
 
@@ -239,7 +244,8 @@ mkCopyRegistersShared elmTypeA elmTypeB elmTypeC sizeM sizeN sizeRegs blockSize 
           bElmTypeParam,
           mParam,
           nParam,
-          blockSizeParam
+          mWarpsParam,
+          nWarpsParam
         ]
   pure
     ( CopyRegistersSharedSignature elmTypeC sizeM sizeN sizeRegs blockSize,
@@ -258,9 +264,19 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
   --  unless ([fst $ outerBlockInfo outerMatch] == outerIndecesA kernelBodyMatch && outerIndecesA kernelBodyMatch == outerIndecesB kernelBodyMatch) $
   --    compilerLimitationS "Not implemented"
 
-  --  TODO: use actual block size instead, this is just lower bound, make sure to change CUDA accordingly
-  let blockSize = getOptimalBlockSize match
+--    TODO: remove?
+--    let optimalWarpTileM = 64 in
+--    let optimalWarpTileN = 64 in
+--    let (warpsM, warpsN) = (sizeM `divUp` optimalWarpTileM, sizeN `divUp` optimalWarpTileN)
+
+  let (warpsM, warpsN) = getOptimalWarps actualBlockSize match
+  let blockSize = warpsM * warpsN * 32
   let cValsPerThread = sizeM * sizeN `div` blockSize
+
+--  traceM $ "blockSize: " ++ show blockSize
+--  traceM $ "actualBlockSize: " ++ show actualBlockSize
+--  traceM $ "warpsM: " ++ show warpsM
+--  traceM $ "warpsN: " ++ show warpsN
 
 --  TODO: would be better to check if copy global shared is needed here?
 
@@ -327,7 +343,8 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
           (Constant $ blankPrimValue $ typeA kernelBodyMatch, ObservePrim),
           (mkInt64Const sizeM, ObservePrim),
           (mkInt64Const sizeK, ObservePrim),
-          (mkInt64Const blockSize, ObservePrim)
+          (mkInt64Const warpsM, ObservePrim),
+          (mkInt64Const warpsM, ObservePrim)
         ]
       copyRetsA =
         [ ( Array
@@ -345,7 +362,8 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
           (Constant $ blankPrimValue $ typeB kernelBodyMatch, ObservePrim),
           (mkInt64Const sizeK, ObservePrim),
           (mkInt64Const sizeN, ObservePrim),
-          (mkInt64Const blockSize, ObservePrim)
+          (mkInt64Const warpsM, ObservePrim),
+          (mkInt64Const warpsM, ObservePrim)
         ]
       copyRetsB =
         [ ( Array
@@ -385,7 +403,8 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
               (mkInt64Const sizeM, ObservePrim),
               (mkInt64Const sizeN, ObservePrim),
               (mkInt64Const sizeK, ObservePrim),
-              (mkInt64Const blockSize, ObservePrim)
+              (mkInt64Const warpsM, ObservePrim),
+              (mkInt64Const warpsM, ObservePrim)
             ]
       let mmmRets =
             [ ( Array
@@ -413,7 +432,8 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
           (Constant $ blankPrimValue $ typeB kernelBodyMatch, ObservePrim),
           (mkInt64Const sizeM, ObservePrim),
           (mkInt64Const sizeN, ObservePrim),
-          (mkInt64Const blockSize, ObservePrim)
+          (mkInt64Const warpsM, ObservePrim),
+          (mkInt64Const warpsM, ObservePrim)
         ]
   let copyRetsC =
         [ ( Array
@@ -551,6 +571,7 @@ maxBlockSizeOp op = do
   scope <- askScope
   case (innerOpMatch scope op, op) of
     (Just match, _) -> do
+--    TODO: should this even influence, if so is this the right way?
       tell $ Known $ Max $ getOptimalBlockSize match
     (_, SegOp sOp) | (SegThreadInBlock _) <- segLevel sOp ->
       tell $ foldl prodKnownSegDim (Known 1) $ unSegSpace $ segSpace sOp
@@ -564,12 +585,36 @@ prodKnownSegDim (Known (Max acc)) (_, Constant (IntValue n)) = Known $ Max $ acc
 -- TODO: should lookup?
 prodKnownSegDim _ _ = Unknown
 
+getFactorPairs :: Int -> [(Int, Int)]
+getFactorPairs n = [(x, n `div` x) | x <- [1 .. n], n `mod` x == 0]
+
+getRatio :: Int -> Int -> Float
+getRatio m n = fromIntegral m / fromIntegral n
+
+getOptimalWarps :: Int -> InnerMMAMatch -> (Int, Int)
+getOptimalWarps blockSize (InnerMMAMatch _ _ sizeM sizeN _) =
+-- TODO: should depend on type
+-- Minimum values per thread used for f16 MMA Atom
+    let minValsPerThread = 8 in
+    let maxBlockSize = (sizeM * sizeN) `div` minValsPerThread in
+    let usedBlockSize = min blockSize maxBlockSize in
+    let numWarps = usedBlockSize `divUp` 32 in
+    let targetRatio = getRatio sizeM sizeN in
+    let factorPairs = getFactorPairs numWarps in
+--    TODO: which to use?
+--   warp tiles will be as close to square as possible, which should maximize register reuse
+    let Arg _ (warpsM, warpsN) = minimum $ map (\(x, y) -> Arg (abs $ targetRatio - getRatio x y) (x, y)) factorPairs in
+--   warp tiles grid for thread block will be as close to square as possible
+--    let Arg _ (warpsM, warpsN) = minimum $ map (\(x, y) -> Arg (abs $ x - y) (x, y)) factorPairs in
+    (warpsM, warpsN)
 
 getOptimalBlockSize :: InnerMMAMatch -> Int
 getOptimalBlockSize (InnerMMAMatch _ _ sizeM sizeN sizeK) =
---  TODO: Should also depend on types
-    let warpsM = sizeM `divUp` 64 in
-    let warpsN = sizeN `divUp` 64 in
+--  TODO: Should also depend on types, check if this is actually always optimal
+    let optimalWarpTileM = 64 in
+    let optimalWarpTileN = 64 in
+    let warpsM = sizeM `divUp` optimalWarpTileM in
+    let warpsN = sizeN `divUp` optimalWarpTileN in
     warpsM * warpsN * 32
 
 
