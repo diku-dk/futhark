@@ -30,6 +30,7 @@ import Futhark.Pass
     intraproceduralTransformationWithConsts,
   )
 import Data.Loc (Loc(NoLoc), SrcLoc (SrcLoc))
+import Debug.Trace
 
 divUp :: Int -> Int -> Int
 divUp x y = (x + y - 1) `div` y
@@ -253,10 +254,10 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
   let blockSize = warpsM * warpsN * 32
   let cValsPerThread = sizeM * sizeN `div` blockSize
 
---  traceM $ "blockSize: " ++ show blockSize
---  traceM $ "actualBlockSize: " ++ show actualBlockSize
---  traceM $ "warpsM: " ++ show warpsM
---  traceM $ "warpsN: " ++ show warpsN
+  traceM $ "blockSize: " ++ show blockSize
+  traceM $ "actualBlockSize: " ++ show actualBlockSize
+  traceM $ "warpsM: " ++ show warpsM
+  traceM $ "warpsN: " ++ show warpsN
 
 --  TODO: would be better to check if copy global shared is needed here?
 
@@ -577,15 +578,22 @@ getOptimalWarps blockSize (InnerMMAMatch _ _ sizeM sizeN _) =
     let minValsPerThread = 8 in
     let maxBlockSize = (sizeM * sizeN) `div` minValsPerThread in
     let usedBlockSize = min blockSize maxBlockSize in
-    let numWarps = usedBlockSize `divUp` 32 in
     let targetRatio = getRatio sizeM sizeN in
-    let factorPairs = getFactorPairs numWarps in
---    TODO: which to use?
+    let usedfactorPairs = helper $ usedBlockSize `divUp` 32 in
 --   warp tiles will be as close to square as possible, which should maximize register reuse
-    let Arg _ (warpsM, warpsN) = minimum $ map (\(x, y) -> Arg (abs $ targetRatio - getRatio x y) (x, y)) factorPairs in
---   warp tiles grid for thread block will be as close to square as possible
---    let Arg _ (warpsM, warpsN) = minimum $ map (\(x, y) -> Arg (abs $ x - y) (x, y)) factorPairs in
+    let Arg _ (warpsM, warpsN) = minimum $ map (\(x, y) -> Arg (abs $ targetRatio - getRatio x y) (x, y)) usedfactorPairs in
     (warpsM, warpsN)
+
+    where
+      helper numWarps =
+        if numWarps == 0 then
+            error "Could not find appropriate number of warps"
+        else
+          let factorPairs = getFactorPairs numWarps in
+          if not $ any (\(x, y) -> (sizeM `div` 16) `mod` x == 0 && (sizeN `div` 16) `mod` y == 0) factorPairs then
+              helper $ numWarps - 1
+          else
+              factorPairs
 
 getOptimalBlockSize :: InnerMMAMatch -> Int
 getOptimalBlockSize (InnerMMAMatch _ _ sizeM sizeN _sizeK) =
