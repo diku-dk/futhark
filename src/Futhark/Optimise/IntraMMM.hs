@@ -2,6 +2,7 @@ module Futhark.Optimise.IntraMMM (intraMMM, intraMMMMemFixup) where
 
 -- TODO: add specific imports, clean up, reorganize to multiple files
 
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
@@ -9,10 +10,7 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Data.Foldable (toList)
 import Futhark.IR.GPU
-
 import Futhark.IR.GPUMem
---import Futhark.IR.Mem
---import Futhark.IR.Mem.LMAD as LMAD
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Builder
 import qualified Futhark.Analysis.SymbolTable as ST
