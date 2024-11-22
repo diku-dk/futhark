@@ -17,6 +17,7 @@ module Futhark.Actions
     compileCtoWASMAction,
     compileOpenCLAction,
     compileCUDAAction,
+    compileCUDATCAction,
     compileHIPAction,
     compileMulticoreAction,
     compileMulticoreToISPCAction,
@@ -206,7 +207,6 @@ pyPrependHeader :: T.Text -> T.Text
 pyPrependHeader = (T.unlines pyHeaderLines <>)
 
 cmdCC :: String
--- TODO: new action instead?
 cmdCC = fromMaybe "cc" $ lookup "CC" unixEnvironment
 
 cmdCFLAGS :: [String] -> [String]
@@ -349,6 +349,20 @@ compileOpenCLAction fcfg mode outpath =
           liftIO $ T.writeFile cpath $ cPrependHeader $ COpenCL.asServer cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
+-- TODO: Add include directory to action
+compileCUDATCAction ::
+  FutharkConfig ->
+  CompilerMode ->
+  FilePath ->
+  FilePath ->
+  Action GPUMem
+compileCUDATCAction fcfg mode cuteincludepath outpath =
+  Action
+    { actionName = "Compile to CUDA with tensor cores",
+      actionDescription = "Compile to CUDA using tensor cores where possible",
+      actionProcedure = actionProcedure (compileCUDAAction fcfg mode outpath)
+    }
+
 -- | The @futhark cuda@ action.
 compileCUDAAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
 compileCUDAAction fcfg mode outpath =
@@ -366,7 +380,7 @@ compileCUDAAction fcfg mode outpath =
           extra_options =
             [ "-lcuda",
               "-lcudart",
-              "-lnvrtc"
+              "-lnvrtc"              
             ]
       case mode of
         ToLibrary -> do

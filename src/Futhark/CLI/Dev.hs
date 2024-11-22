@@ -717,12 +717,28 @@ commandLineOptions =
       ["gpu"],
     pipelineOption
       getSOACSProg
+      "GPU"
+      GPU
+      "Run the default optimised kernels pipeline with tensor cores"
+      gputcPipeline
+      []
+      ["gputc"],
+    pipelineOption
+      getSOACSProg
       "GPUMem"
       GPUMem
       "Run the full GPU compilation pipeline"
       gpumemPipeline
       []
       ["gpu-mem"],
+    pipelineOption
+      getSOACSProg
+      "GPUMem"
+      GPUMem
+      "Run the full GPU with tensor cores compilation pipeline"
+      gpumemtcPipeline
+      []
+      ["gputc-mem"],
     pipelineOption
       getSOACSProg
       "Seq"

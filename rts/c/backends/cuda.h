@@ -451,6 +451,7 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
   *opts_out = opts;
 }
 
+/* TODO: use our header library */
 static char* cuda_nvrtc_build(const char *src, const char *opts[], size_t n_opts,
                               char **ptx) {
   nvrtcProgram prog;

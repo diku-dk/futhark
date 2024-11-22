@@ -443,6 +443,7 @@ $eventListH
 
   let early_decls = definitionsText $ DL.toList $ compEarlyDecls endstate
       lib_decls = definitionsText $ DL.toList $ compLibDecls endstate
+                  -- TODO: This is the main function being generated
       clidefs = cliDefs options manifest
       serverdefs = serverDefs options manifest
       libdefs =
