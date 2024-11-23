@@ -316,7 +316,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
     letSubExp "range_invalid" $
       I.BasicOp $
         I.BinOp I.LogOr step_invalid bounds_invalid
-  valid <- letSubExp "valid" $ I.BasicOp $ I.UnOp I.Not invalid
+  valid <- letSubExp "valid" $ I.BasicOp $ I.UnOp (I.Neg I.Bool) invalid
   cs <- assert "range_valid_c" valid errmsg loc
 
   step_i64 <- asIntS Int64 step
@@ -394,8 +394,8 @@ internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
   error $ "Unexpected LetFun " ++ prettyString ofname
-internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = do
-  ses <- internaliseExp "loop_init" mergeexp
+internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody loc) = do
+  ses <- internaliseExp "loop_init" $ loopInitExp loopinit
   ((loopbody', (form', shapepat, mergepat', mergeinit')), initstms) <-
     collectStms $ handleForm ses form
 
@@ -445,11 +445,19 @@ internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = 
   where
     sparams' = map (`TypeParamDim` mempty) sparams
 
+    -- Attributes that apply to loops.
+    loopAttrs = oneAttr "unroll"
+    -- Remove those attributes from the attribute set that apply to
+    -- the loop itself.
+    noLoopAttrs env = env {envAttrs = envAttrs env `withoutAttrs` loopAttrs}
+
+    loopBody = local noLoopAttrs $ internaliseExp "loopres" loopbody
+
     forLoop mergepat' shapepat mergeinit i loopvars form' =
       bodyFromStms . localScope (scopeOfLoopForm form') $ do
         forM_ loopvars $ \(p, arr) ->
           letBindNames [I.paramName p] =<< eIndex arr [eSubExp (I.Var i)]
-        ses <- internaliseExp "loopres" loopbody
+        ses <- loopBody
         sets <- mapM subExpType ses
         shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
         pure
@@ -520,7 +528,7 @@ internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = 
         addStms init_loop_cond_stms
 
         bodyFromStms $ do
-          ses <- internaliseExp "loopres" loopbody
+          ses <- loopBody
           sets <- mapM subExpType ses
           loop_while <- newParam "loop_while" $ I.Prim I.Bool
           shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
@@ -620,12 +628,12 @@ internaliseExp desc (E.TupLit es _) = concat <$> mapM (internaliseExp desc) es
 internaliseExp desc (E.RecordLit orig_fields _) =
   concatMap snd . sortFields . M.unions <$> mapM internaliseField orig_fields
   where
-    internaliseField (E.RecordFieldExplicit name e _) =
+    internaliseField (E.RecordFieldExplicit (L _ name) e _) =
       M.singleton name <$> internaliseExp desc e
-    internaliseField (E.RecordFieldImplicit name t loc) =
+    internaliseField (E.RecordFieldImplicit (L _ name) t loc) =
       internaliseField $
         E.RecordFieldExplicit
-          (baseName name)
+          (L noLoc (baseName name))
           (E.Var (E.qualName name) t loc)
           loc
 internaliseExp desc (E.ArrayVal vs t _) =
@@ -702,9 +710,9 @@ internaliseExp desc (E.Coerce e _ (Info et) loc) = do
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
     let parts =
-          ["Value of (core language) shape ("]
-            ++ intersperse ", " (map (ErrorVal int64) dims)
-            ++ [") cannot match shape of type `"]
+          ["Value of (desugared) shape ["]
+            ++ intersperse "][" (map (ErrorVal int64) dims)
+            ++ ["] cannot match shape of type `"]
             ++ dt'
             ++ ["`."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
@@ -712,11 +720,9 @@ internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
   case et of
-    I.Prim (I.IntType t) ->
-      letTupExp' desc $ I.BasicOp $ I.BinOp (I.Sub t I.OverflowWrap) (I.intConst t 0) e'
-    I.Prim (I.FloatType t) ->
-      letTupExp' desc $ I.BasicOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
-    _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
+    I.Prim pt ->
+      letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg pt) e'
+    _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in Negate"
 internaliseExp desc (E.Not e _) = do
   e' <- internaliseExp1 "not_arg" e
   et <- subExpType e'
@@ -724,28 +730,34 @@ internaliseExp desc (E.Not e _) = do
     I.Prim (I.IntType t) ->
       letTupExp' desc $ I.BasicOp $ I.UnOp (I.Complement t) e'
     I.Prim I.Bool ->
-      letTupExp' desc $ I.BasicOp $ I.UnOp I.Not e'
+      letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg I.Bool) e'
     _ ->
       error "Futhark.Internalise.internaliseExp: non-int/bool type in Not"
 internaliseExp desc (E.Update src slice ve loc) = do
   ves <- internaliseExp "lw_val" ve
   srcs <- internaliseExpToVars "src" src
-  dims <- case srcs of
-    [] -> pure [] -- Will this happen?
-    v : _ -> I.arrayDims <$> lookupType v
-  (idxs', cs) <- internaliseSlice loc dims slice
+  (src_dims, ve_dims) <- case (srcs, ves) of
+    (src_v : _, ve_v : _) ->
+      (,)
+        <$> (I.arrayDims <$> lookupType src_v)
+        <*> (I.arrayDims <$> subExpType ve_v)
+    _ -> pure ([], []) -- Will this happen?
+  (idxs', cs) <- internaliseSlice loc src_dims slice
+  let src_dims' = sliceDims (Slice idxs')
+      rank = length src_dims'
+      errormsg =
+        "Shape "
+          <> errorShape src_dims'
+          <> " of slice does not match shape "
+          <> errorShape (take rank ve_dims)
+          <> " of value."
 
   let comb sname ve' = do
         sname_t <- lookupType sname
         let full_slice = fullSlice sname_t idxs'
             rowtype = sname_t `setArrayDims` sliceDims full_slice
         ve'' <-
-          ensureShape
-            "shape of value does not match shape of source array"
-            loc
-            rowtype
-            "lw_val_correct_shape"
-            ve'
+          ensureShape errormsg loc rowtype "lw_val_correct_shape" ve'
         letInPlace desc sname full_slice $ BasicOp $ SubExp ve''
   certifying cs $ map I.Var <$> zipWithM comb srcs ves
 internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
@@ -940,7 +952,7 @@ generateCond orig_p orig_ses = do
     compares (E.TuplePat pats _) ses =
       comparesMany pats ses
     compares (E.RecordPat fs _) ses =
-      comparesMany (map snd $ E.sortFields $ M.fromList fs) ses
+      comparesMany (map snd $ E.sortFields $ M.fromList $ map (first unLoc) fs) ses
     compares (E.PatAscription pat _ _) ses =
       compares pat ses
     compares pat [] =
@@ -1069,7 +1081,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
 
   zero_stride <- letSubExp "zero_stride" $ I.BasicOp $ I.CmpOp (CmpEq int64) s_sign zero
-  nonzero_stride <- letSubExp "nonzero_stride" $ I.BasicOp $ I.UnOp I.Not zero_stride
+  nonzero_stride <- letSubExp "nonzero_stride" $ I.BasicOp $ I.UnOp (I.Neg I.Bool) zero_stride
 
   -- Bounds checks depend on whether we are slicing forwards or
   -- backwards.  If forwards, we must check '0 <= i && i <= j'.  If
@@ -1306,7 +1318,7 @@ certifyingNonzero loc t x m = do
     letSubExp "zero" $
       I.BasicOp $
         CmpOp (CmpEq (IntType t)) x (intConst t 0)
-  nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp I.Not zero
+  nonzero <- letSubExp "nonzero" $ I.BasicOp $ UnOp (I.Neg I.Bool) zero
   c <- assert "nonzero_cert" nonzero "division by zero" loc
   certifying c m
 
@@ -1413,7 +1425,7 @@ internaliseBinOp _ desc E.Equal x y t _ =
   simpleCmpOp desc (I.CmpEq $ internalisePrimType t) x y
 internaliseBinOp _ desc E.NotEqual x y t _ = do
   eq <- letSubExp (desc ++ "true") $ I.BasicOp $ I.CmpOp (I.CmpEq $ internalisePrimType t) x y
-  fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp I.Not eq
+  fmap pure $ letSubExp desc $ I.BasicOp $ I.UnOp (I.Neg I.Bool) eq
 internaliseBinOp _ desc E.Less x y (E.Signed t) _ =
   simpleCmpOp desc (I.CmpSlt t) x y
 internaliseBinOp _ desc E.Less x y (E.Unsigned t) _ =
@@ -1538,7 +1550,7 @@ isOverloadedFunction qname desc loc = do
           cmp_f =<< letSubExp "eq" =<< eAll rs
       where
         isEqlOp "!=" = Just $ \eq ->
-          letTupExp' desc $ I.BasicOp $ I.UnOp I.Not eq
+          letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg I.Bool) eq
         isEqlOp "==" = Just $ \eq ->
           pure [eq]
         isEqlOp _ = Nothing
@@ -1577,7 +1589,7 @@ isOverloadedFunction qname desc loc = do
                     and_lam <- binOpLambda I.LogAnd I.Bool
                     reduce <- I.reduceSOAC [Reduce Commutative and_lam [constant True]]
                     all_equal <- letSubExp "all_equal" $ I.Op $ I.Screma x_num_elems [cmps] reduce
-                    pure $ resultBody [all_equal]
+                    pure $ subExpsRes [all_equal]
 
               letSubExp "arrays_equal"
                 =<< eIf (eSubExp shapes_match) compare_elems_body (resultBodyM [constant False])
@@ -1898,7 +1910,8 @@ isIntrinsicFunction qname args loc = do
           sivs = si' <> svs'
 
       let sa_ws = map (I.Shape . take dim . arrayDims) sa_ts
-      letTupExp' desc $ I.Op $ I.Scatter si_w sivs lam $ zip3 sa_ws (repeat 1) sas
+          spec = zip3 sa_ws (repeat 1) sas
+      letTupExp' desc $ I.Op $ I.Scatter si_w sivs spec lam
 
 flatIndexHelper :: String -> SrcLoc -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
 flatIndexHelper desc loc arr offset slices = do
@@ -2018,21 +2031,18 @@ funcall desc (QualName _ fname) args loc = do
   argts' <- mapM subExpType args'
   case rettype_fun $ zip args' argts' of
     Nothing ->
-      error $
-        concat
-          [ "Cannot apply ",
-            prettyString fname,
-            " to ",
-            show (length args'),
-            " arguments\n ",
-            prettyString args',
-            "\nof types\n ",
-            prettyString argts',
-            "\nFunction has ",
-            show (length fun_params),
-            " parameters\n ",
-            prettyString fun_params
-          ]
+      error . unlines $
+        [ "Cannot apply "
+            <> prettyString fname
+            <> " to "
+            <> show (length args')
+            <> " arguments",
+          " " <> prettyString args',
+          "of types",
+          " " <> prettyString argts',
+          "Function has " <> show (length fun_params) <> " parameters",
+          " " <> prettyString fun_params
+        ]
     Just ts -> do
       safety <- askSafety
       attrs <- asks envAttrs
@@ -2079,7 +2089,7 @@ partitionWithSOACS k lam arrs = do
     replicateM k $ newParam "y" (I.Prim int64)
   add_lam_body <- runBodyBuilder $
     localScope (scopeOfLParams $ add_lam_x_params ++ add_lam_y_params) $
-      fmap resultBody $
+      fmap subExpsRes $
         forM (zip add_lam_x_params add_lam_y_params) $ \(x, y) ->
           letSubExp "z" $
             I.BasicOp $
@@ -2103,7 +2113,7 @@ partitionWithSOACS k lam arrs = do
   -- just have to be careful in case the array is empty.
   last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int64 OverflowUndef) w $ constant (1 :: Int64)
   let nonempty_body = runBodyBuilder $
-        fmap resultBody $
+        fmap subExpsRes $
           forM all_offsets $ \offset_array ->
             letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ Slice [I.DimFix last_index]
       empty_body = resultBodyM $ replicate k $ constant (0 :: Int64)
@@ -2143,10 +2153,10 @@ partitionWithSOACS k lam arrs = do
               replicate (length arr_ts) (subExpRes offset)
                 ++ I.varsRes (map I.paramName value_params)
         }
+  let spec = zip3 (repeat $ I.Shape [w]) (repeat 1) blanks
   results <-
     letTupExp "partition_res" . I.Op $
-      I.Scatter w (classes : all_offsets ++ arrs) write_lam $
-        zip3 (repeat $ I.Shape [w]) (repeat 1) blanks
+      I.Scatter w (classes : all_offsets ++ arrs) spec write_lam
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $
@@ -2227,3 +2237,9 @@ errorMsg = ErrorMsg . compact
     compact (ErrorString x : ErrorString y : parts) =
       compact (ErrorString (x <> y) : parts)
     compact (x : y) = x : compact y
+
+errorShape :: [a] -> ErrorMsg a
+errorShape dims =
+  "["
+    <> mconcat (intersperse "][" $ map (ErrorMsg . pure . ErrorVal int64) dims)
+    <> "]"

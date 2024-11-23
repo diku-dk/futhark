@@ -30,10 +30,10 @@ static char* get_failure_msg(int failure_idx, int64_t args[]);
     if (serror) {                               \
       if (!ctx->error) {                        \
         ctx->error = serror;                    \
-        return bad;                             \
       } else {                                  \
         free(serror);                           \
       }                                         \
+      return bad;                               \
     }                                           \
   }
 
@@ -141,19 +141,13 @@ struct futhark_context_config {
   char* dump_binary_to;
   char* load_binary_from;
 
-  size_t default_group_size;
-  size_t default_num_groups;
-  size_t default_tile_size;
-  size_t default_reg_tile_size;
-  size_t default_threshold;
-
-  int default_group_size_changed;
-  int default_tile_size_changed;
   int num_build_opts;
   char* *build_opts;
 
   cl_command_queue queue;
   int queue_set;
+
+  struct gpu_config gpu;
 };
 
 static void backend_context_config_setup(struct futhark_context_config* cfg) {
@@ -170,17 +164,7 @@ static void backend_context_config_setup(struct futhark_context_config* cfg) {
 
   cfg->unified_memory = 2;
 
-  // The following are dummy sizes that mean the concrete defaults
-  // will be set during initialisation via hardware-inspection-based
-  // heuristics.
-  cfg->default_group_size = 0;
-  cfg->default_num_groups = 0;
-  cfg->default_tile_size = 0;
-  cfg->default_reg_tile_size = 0;
-  cfg->default_threshold = 0;
-
-  cfg->default_group_size_changed = 0;
-  cfg->default_tile_size_changed = 0;
+  cfg->gpu = gpu_config_initial;
 
   cfg->queue_set = 0;
 }
@@ -440,70 +424,6 @@ void futhark_context_config_set_unified_memory(struct futhark_context_config* cf
   cfg->unified_memory = flag;
 }
 
-void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_group_size = size;
-  cfg->default_group_size_changed = 1;
-}
-
-void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
-  futhark_context_config_set_default_thread_block_size(cfg, size);
-}
-
-void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
-  cfg->default_num_groups = num;
-}
-
-void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
-  futhark_context_config_set_default_grid_size(cfg, num);
-}
-
-void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_tile_size = size;
-  cfg->default_tile_size_changed = 1;
-}
-
-void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_reg_tile_size = size;
-}
-
-void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size) {
-  cfg->default_threshold = size;
-}
-
-int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
-                                            const char *param_name,
-                                            size_t new_value) {
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
-    if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
-      cfg->tuning_params[i] = new_value;
-      return 0;
-    }
-  }
-  if (strcmp(param_name, "default_thread_block_size") == 0 ||
-      strcmp(param_name, "default_group_size") == 0) {
-    cfg->default_group_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_grid_size") == 0 ||
-      strcmp(param_name, "default_num_groups") == 0) {
-    cfg->default_num_groups = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_threshold") == 0) {
-    cfg->default_threshold = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_tile_size") == 0) {
-    cfg->default_tile_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_reg_tile_size") == 0) {
-    cfg->default_reg_tile_size = new_value;
-    return 0;
-  }
-  return 1;
-}
-
 struct futhark_context {
   struct futhark_context_config* cfg;
   int detail_memory;
@@ -542,10 +462,11 @@ struct futhark_context {
   struct free_list gpu_free_list;
 
   size_t max_thread_block_size;
-  size_t max_num_groups;
+  size_t max_grid_size;
   size_t max_tile_size;
   size_t max_threshold;
   size_t max_shared_memory;
+  size_t max_bespoke;
   size_t max_registers;
   size_t max_cache;
 
@@ -789,6 +710,9 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     }
   }
 
+  bool is_amd = strstr(device_option.platform_name, "AMD") != NULL;
+  bool is_nvidia = strstr(device_option.platform_name, "NVIDIA CUDA") != NULL;
+
   size_t max_thread_block_size;
   OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
                                        sizeof(size_t), &max_thread_block_size, NULL));
@@ -801,9 +725,6 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
 
   // Futhark reserves 4 bytes for bookkeeping information.
   max_shared_memory -= 4;
-
-  bool is_amd = strstr(device_option.platform_name, "AMD") != NULL;
-  bool is_nvidia = strstr(device_option.platform_name, "NVIDIA CUDA") != NULL;
 
   // The OpenCL implementation may reserve some local memory bytes for
   // various purposes.  In principle, we should use
@@ -822,20 +743,20 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
 
-  if (max_thread_block_size < ctx->cfg->default_group_size) {
-    if (ctx->cfg->default_group_size_changed) {
+  if (max_thread_block_size < ctx->cfg->gpu.default_block_size) {
+    if (ctx->cfg->gpu.default_block_size_changed) {
       fprintf(stderr, "Note: Device limits default group size to %zu (down from %zu).\n",
-              max_thread_block_size, ctx->cfg->default_group_size);
+              max_thread_block_size, ctx->cfg->gpu.default_block_size);
     }
-    ctx->cfg->default_group_size = max_thread_block_size;
+    ctx->cfg->gpu.default_block_size = max_thread_block_size;
   }
 
-  if (max_tile_size < ctx->cfg->default_tile_size) {
-    if (ctx->cfg->default_tile_size_changed) {
+  if (max_tile_size < ctx->cfg->gpu.default_tile_size) {
+    if (ctx->cfg->gpu.default_tile_size_changed) {
       fprintf(stderr, "Note: Device limits default tile size to %zu (down from %zu).\n",
-              max_tile_size, ctx->cfg->default_tile_size);
+              max_tile_size, ctx->cfg->gpu.default_tile_size);
     }
-    ctx->cfg->default_tile_size = max_tile_size;
+    ctx->cfg->gpu.default_tile_size = max_tile_size;
   }
 
   // Some of the code generated by Futhark will use the L2 cache size
@@ -846,35 +767,52 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   // the L2 size). That means it is time to hack.
 
   cl_ulong l2_cache_size;
-  cl_ulong opencl_cache_size;
-  OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE,
-                                       sizeof(opencl_cache_size), &opencl_cache_size, NULL));
-
-  if (is_amd) {
-    // We multiply the L1 cache size with the number of compute units
-    // times 4 (number of SIMD units with GCN). Empirically this
-    // doesn't get us the right result, but it gets us fairly close.
-    cl_ulong compute_units;
-    OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_MAX_COMPUTE_UNITS,
-                                         sizeof(compute_units), &compute_units, NULL));
-    l2_cache_size = opencl_cache_size * compute_units * 4;
+  if (ctx->cfg->gpu.default_cache != 0) {
+    l2_cache_size = ctx->cfg->gpu.default_cache;
   } else {
-    l2_cache_size = opencl_cache_size;
+    cl_ulong opencl_cache_size;
+    OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE,
+                                         sizeof(opencl_cache_size), &opencl_cache_size, NULL));
+
+    if (is_amd) {
+      // We multiply the L1 cache size with the number of compute units
+      // times 4 (number of SIMD units with GCN). Empirically this
+      // doesn't get us the right result, but it gets us fairly close.
+      cl_ulong compute_units;
+      OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_MAX_COMPUTE_UNITS,
+                                           sizeof(compute_units), &compute_units, NULL));
+      l2_cache_size = opencl_cache_size * compute_units * 4;
+    } else {
+      l2_cache_size = opencl_cache_size;
+    }
+
+    if (l2_cache_size == 0) {
+      // Some code assumes nonzero cache.
+      l2_cache_size = 1024*1024;
+    }
   }
-
-  if (l2_cache_size == 0) {
-    // Some code assumes nonzero cache.
-    l2_cache_size = 1024*1024;
-  }
-
-  ctx->max_cache = l2_cache_size;
-
-  ctx->max_registers = 1<<16; // I cannot find a way to query for this.
 
   ctx->max_thread_block_size = max_thread_block_size;
   ctx->max_tile_size = max_tile_size; // No limit.
-  ctx->max_threshold = ctx->max_num_groups = 0; // No limit.
-  ctx->max_shared_memory = max_shared_memory;
+  ctx->max_threshold = ctx->max_grid_size = 1U<<31; // No limit.
+
+  if (ctx->cfg->gpu.default_cache != 0) {
+    ctx->max_cache = ctx->cfg->gpu.default_cache;
+  } else {
+    ctx->max_cache = l2_cache_size;
+  }
+
+  if (ctx->cfg->gpu.default_registers != 0) {
+    ctx->max_registers = ctx->cfg->gpu.default_registers;
+  } else {
+    ctx->max_registers = 1<<16; // I cannot find a way to query for this.
+  }
+
+  if (ctx->cfg->gpu.default_shared_memory != 0) {
+    ctx->max_shared_memory = ctx->cfg->gpu.default_shared_memory;
+  } else {
+    ctx->max_shared_memory = max_shared_memory;
+  }
 
   // Now we go through all the sizes, clamp them to the valid range,
   // or set them to the default.
@@ -886,10 +824,10 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
 
     if (strstr(size_class, "thread_block_size") == size_class) {
       max_value = max_thread_block_size;
-      default_value = ctx->cfg->default_group_size;
+      default_value = ctx->cfg->gpu.default_block_size;
     } else if (strstr(size_class, "grid_size") == size_class) {
       max_value = max_thread_block_size; // Futhark assumes this constraint.
-      default_value = ctx->cfg->default_num_groups;
+      default_value = ctx->cfg->gpu.default_grid_size;
       // XXX: as a quick and dirty hack, use twice as many threads for
       // histograms by default.  We really should just be smarter
       // about sizes somehow.
@@ -898,13 +836,19 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
       }
     } else if (strstr(size_class, "tile_size") == size_class) {
       max_value = sqrt(max_thread_block_size);
-      default_value = ctx->cfg->default_tile_size;
+      default_value = ctx->cfg->gpu.default_tile_size;
     } else if (strstr(size_class, "reg_tile_size") == size_class) {
       max_value = 0; // No limit.
-      default_value = ctx->cfg->default_reg_tile_size;
+      default_value = ctx->cfg->gpu.default_reg_tile_size;
+    } else if (strstr(size_class, "shared_memory") == size_class) {
+      max_value = ctx->max_shared_memory;
+      default_value = ctx->max_shared_memory;
+    } else if (strstr(size_class, "cache") == size_class) {
+      max_value = ctx->max_cache;
+      default_value = ctx->max_cache;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
-      default_value = ctx->cfg->default_threshold;
+      default_value = ctx->cfg->gpu.default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
     }
@@ -921,11 +865,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     ctx->lockstep_width = 1;
   }
 
-  if (ctx->cfg->logging) {
-    fprintf(stderr, "Lockstep width: %d\n", (int)ctx->lockstep_width);
-    fprintf(stderr, "Default thread block size: %d\n", (int)ctx->cfg->default_group_size);
-    fprintf(stderr, "Default number of thread blocks: %d\n", (int)ctx->cfg->default_num_groups);
-  }
+  gpu_init_log(ctx);
 
   char *compile_opts = mk_compile_opts(ctx, extra_build_opts, device_option);
 

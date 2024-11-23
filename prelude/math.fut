@@ -71,6 +71,7 @@ module type numeric = {
 
   -- | Returns `lowest` on empty input.
   val maximum [n]: [n]t -> t
+
   -- | Returns `highest` on empty input.
   val minimum [n]: [n]t -> t
 }
@@ -83,14 +84,17 @@ module type integral = {
   -- | Like `/`@term, but rounds towards zero.  This only matters when
   -- one of the operands is negative.  May be more efficient.
   val //: t -> t -> t
+
   -- | Like `%`@term, but rounds towards zero.  This only matters when
   -- one of the operands is negative.  May be more efficient.
   val %%: t -> t -> t
 
   -- | Bitwise and.
   val &: t -> t -> t
+
   -- | Bitwise or.
   val |: t -> t -> t
+
   -- | Bitwise xor.
   val ^: t -> t -> t
 
@@ -99,8 +103,10 @@ module type integral = {
 
   -- | Left shift; inserting zeroes.
   val <<: t -> t -> t
+
   -- | Arithmetic right shift, using sign extension for the leftmost bits.
   val >>: t -> t -> t
+
   -- | Logical right shift, inserting zeroes for the leftmost bits.
   val >>>: t -> t -> t
 
@@ -143,6 +149,7 @@ module type real = {
 
   -- | Square root.
   val sqrt: t -> t
+
   -- | Cube root.
   val cbrt: t -> t
   val exp: t -> t
@@ -175,13 +182,15 @@ module type real = {
 
   -- | The true Gamma function.
   val gamma: t -> t
+
   -- | The natural logarithm of the absolute value of `gamma`@term.
   val lgamma: t -> t
 
   -- | The error function.
-  val erf : t -> t
+  val erf: t -> t
+
   -- | The complementary error function.
-  val erfc : t -> t
+  val erfc: t -> t
 
   -- | Linear interpolation.  The third argument must be in the range
   -- `[0,1]` or the results are unspecified.
@@ -189,33 +198,39 @@ module type real = {
 
   -- | Natural logarithm.
   val log: t -> t
+
   -- | Base-2 logarithm.
   val log2: t -> t
+
   -- | Base-10 logarithm.
   val log10: t -> t
+
   -- | Compute `log (1 + x)` accurately even when `x` is very small.
   val log1p: t -> t
 
   -- | Round towards infinity.
-  val ceil : t -> t
+  val ceil: t -> t
+
   -- | Round towards negative infinity.
-  val floor : t -> t
+  val floor: t -> t
+
   -- | Round towards zero.
-  val trunc : t -> t
+  val trunc: t -> t
+
   -- | Round to the nearest integer, with halfway cases rounded to the
   -- nearest even integer.  Note that this differs from `round()` in
   -- C, but matches more modern languages.
-  val round : t -> t
+  val round: t -> t
 
   -- | Computes `a*b+c`.  Depending on the compiler backend, this may
   -- be fused into a single operation that is faster but less
   -- accurate.  Do not confuse it with `fma`@term.
-  val mad : (a: t) -> (b: t) -> (c: t) -> t
+  val mad: (a: t) -> (b: t) -> (c: t) -> t
 
   -- | Computes `a*b+c`, with `a*b` being rounded with infinite
   -- precision.  Rounding of intermediate products shall not
   -- occur. Edge case behavior is per the IEEE 754-2008 standard.
-  val fma : (a: t) -> (b: t) -> (c: t) -> t
+  val fma: (a: t) -> (b: t) -> (c: t) -> t
 
   val isinf: t -> bool
   val isnan: t -> bool
@@ -253,13 +268,13 @@ module type float = {
 
   -- | Produces the next representable number from `x` in the
   -- direction of `y`.
-  val nextafter : (x: t) -> (y: t) -> t
+  val nextafter: (x: t) -> (y: t) -> t
 
   -- | Multiplies floating-point value by 2 raised to an integer power.
-  val ldexp : t -> i32 -> t
+  val ldexp: t -> i32 -> t
 
   -- | Compose a floating-point value with the magnitude of `x` and the sign of `y`.
-  val copysign : (x: t) -> (y: t) -> t
+  val copysign: (x: t) -> (y: t) -> t
 }
 
 -- | Boolean numbers.  When converting from a number to `bool`, 0 is
@@ -267,12 +282,12 @@ module type float = {
 module bool: from_prim with t = bool = {
   type t = bool
 
-  def i8  = intrinsics.itob_i8_bool
+  def i8 = intrinsics.itob_i8_bool
   def i16 = intrinsics.itob_i16_bool
   def i32 = intrinsics.itob_i32_bool
   def i64 = intrinsics.itob_i64_bool
 
-  def u8  (x: u8)  = intrinsics.itob_i8_bool (intrinsics.sign_i8 x)
+  def u8 (x: u8) = intrinsics.itob_i8_bool (intrinsics.sign_i8 x)
   def u16 (x: u16) = intrinsics.itob_i16_bool (intrinsics.sign_i16 x)
   def u32 (x: u32) = intrinsics.itob_i32_bool (intrinsics.sign_i32 x)
   def u64 (x: u64) = intrinsics.itob_i64_bool (intrinsics.sign_i64 x)
@@ -287,30 +302,30 @@ module bool: from_prim with t = bool = {
 module i8: (integral with t = i8) = {
   type t = i8
 
-  def (x: i8) + (y: i8) = intrinsics.add8 (x, y)
-  def (x: i8) - (y: i8) = intrinsics.sub8 (x, y)
-  def (x: i8) * (y: i8) = intrinsics.mul8 (x, y)
-  def (x: i8) / (y: i8) = intrinsics.sdiv8 (x, y)
-  def (x: i8) ** (y: i8) = intrinsics.pow8 (x, y)
-  def (x: i8) % (y: i8) = intrinsics.smod8 (x, y)
-  def (x: i8) // (y: i8) = intrinsics.squot8 (x, y)
-  def (x: i8) %% (y: i8) = intrinsics.srem8 (x, y)
+  def (+) (x: i8) (y: i8) = intrinsics.add8 (x, y)
+  def (-) (x: i8) (y: i8) = intrinsics.sub8 (x, y)
+  def (*) (x: i8) (y: i8) = intrinsics.mul8 (x, y)
+  def (/) (x: i8) (y: i8) = intrinsics.sdiv8 (x, y)
+  def (**) (x: i8) (y: i8) = intrinsics.pow8 (x, y)
+  def (%) (x: i8) (y: i8) = intrinsics.smod8 (x, y)
+  def (//) (x: i8) (y: i8) = intrinsics.squot8 (x, y)
+  def (%%) (x: i8) (y: i8) = intrinsics.srem8 (x, y)
 
-  def (x: i8) & (y: i8) = intrinsics.and8 (x, y)
-  def (x: i8) | (y: i8) = intrinsics.or8 (x, y)
-  def (x: i8) ^ (y: i8) = intrinsics.xor8 (x, y)
+  def (&) (x: i8) (y: i8) = intrinsics.and8 (x, y)
+  def (|) (x: i8) (y: i8) = intrinsics.or8 (x, y)
+  def (^) (x: i8) (y: i8) = intrinsics.xor8 (x, y)
   def not (x: i8) = intrinsics.complement8 x
 
-  def (x: i8) << (y: i8) = intrinsics.shl8 (x, y)
-  def (x: i8) >> (y: i8) = intrinsics.ashr8 (x, y)
-  def (x: i8) >>> (y: i8) = intrinsics.lshr8 (x, y)
+  def (<<) (x: i8) (y: i8) = intrinsics.shl8 (x, y)
+  def (>>) (x: i8) (y: i8) = intrinsics.ashr8 (x, y)
+  def (>>>) (x: i8) (y: i8) = intrinsics.lshr8 (x, y)
 
-  def i8  (x: i8)  = intrinsics.sext_i8_i8 x
+  def i8 (x: i8) = intrinsics.sext_i8_i8 x
   def i16 (x: i16) = intrinsics.sext_i16_i8 x
   def i32 (x: i32) = intrinsics.sext_i32_i8 x
   def i64 (x: i64) = intrinsics.sext_i64_i8 x
 
-  def u8  (x: u8)  = intrinsics.zext_i8_i8 (intrinsics.sign_i8 x)
+  def u8 (x: u8) = intrinsics.zext_i8_i8 (intrinsics.sign_i8 x)
   def u16 (x: u16) = intrinsics.zext_i16_i8 (intrinsics.sign_i16 x)
   def u32 (x: u32) = intrinsics.zext_i32_i8 (intrinsics.sign_i32 x)
   def u64 (x: u64) = intrinsics.zext_i64_i8 (intrinsics.sign_i64 x)
@@ -321,15 +336,15 @@ module i8: (integral with t = i8) = {
 
   def bool = intrinsics.btoi_bool_i8
 
-  def to_i32(x: i8) = intrinsics.sext_i8_i32 x
-  def to_i64(x: i8) = intrinsics.sext_i8_i64 x
+  def to_i32 (x: i8) = intrinsics.sext_i8_i32 x
+  def to_i64 (x: i8) = intrinsics.sext_i8_i64 x
 
-  def (x: i8) == (y: i8) = intrinsics.eq_i8 (x, y)
-  def (x: i8) < (y: i8) = intrinsics.slt8 (x, y)
-  def (x: i8) > (y: i8) = intrinsics.slt8 (y, x)
-  def (x: i8) <= (y: i8) = intrinsics.sle8 (x, y)
-  def (x: i8) >= (y: i8) = intrinsics.sle8 (y, x)
-  def (x: i8) != (y: i8) = !(x == y)
+  def (==) (x: i8) (y: i8) = intrinsics.eq_i8 (x, y)
+  def (<) (x: i8) (y: i8) = intrinsics.slt8 (x, y)
+  def (>) (x: i8) (y: i8) = intrinsics.slt8 (y, x)
+  def (<=) (x: i8) (y: i8) = intrinsics.sle8 (x, y)
+  def (>=) (x: i8) (y: i8) = intrinsics.sle8 (y, x)
+  def (!=) (x: i8) (y: i8) = !(x == y)
 
   def sgn (x: i8) = intrinsics.ssignum8 x
   def abs (x: i8) = intrinsics.abs8 x
@@ -343,8 +358,10 @@ module i8: (integral with t = i8) = {
 
   def num_bits = 8i32
   def get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
+
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+
   def popc = intrinsics.popc8
   def mul_hi a b = intrinsics.smul_hi8 (i8 a, i8 b)
   def mad_hi a b c = intrinsics.smad_hi8 (i8 a, i8 b, i8 c)
@@ -360,30 +377,30 @@ module i8: (integral with t = i8) = {
 module i16: (integral with t = i16) = {
   type t = i16
 
-  def (x: i16) + (y: i16) = intrinsics.add16 (x, y)
-  def (x: i16) - (y: i16) = intrinsics.sub16 (x, y)
-  def (x: i16) * (y: i16) = intrinsics.mul16 (x, y)
-  def (x: i16) / (y: i16) = intrinsics.sdiv16 (x, y)
-  def (x: i16) ** (y: i16) = intrinsics.pow16 (x, y)
-  def (x: i16) % (y: i16) = intrinsics.smod16 (x, y)
-  def (x: i16) // (y: i16) = intrinsics.squot16 (x, y)
-  def (x: i16) %% (y: i16) = intrinsics.srem16 (x, y)
+  def (+) (x: i16) (y: i16) = intrinsics.add16 (x, y)
+  def (-) (x: i16) (y: i16) = intrinsics.sub16 (x, y)
+  def (*) (x: i16) (y: i16) = intrinsics.mul16 (x, y)
+  def (/) (x: i16) (y: i16) = intrinsics.sdiv16 (x, y)
+  def (**) (x: i16) (y: i16) = intrinsics.pow16 (x, y)
+  def (%) (x: i16) (y: i16) = intrinsics.smod16 (x, y)
+  def (//) (x: i16) (y: i16) = intrinsics.squot16 (x, y)
+  def (%%) (x: i16) (y: i16) = intrinsics.srem16 (x, y)
 
-  def (x: i16) & (y: i16) = intrinsics.and16 (x, y)
-  def (x: i16) | (y: i16) = intrinsics.or16 (x, y)
-  def (x: i16) ^ (y: i16) = intrinsics.xor16 (x, y)
+  def (&) (x: i16) (y: i16) = intrinsics.and16 (x, y)
+  def (|) (x: i16) (y: i16) = intrinsics.or16 (x, y)
+  def (^) (x: i16) (y: i16) = intrinsics.xor16 (x, y)
   def not (x: i16) = intrinsics.complement16 x
 
-  def (x: i16) << (y: i16) = intrinsics.shl16 (x, y)
-  def (x: i16) >> (y: i16) = intrinsics.ashr16 (x, y)
-  def (x: i16) >>> (y: i16) = intrinsics.lshr16 (x, y)
+  def (<<) (x: i16) (y: i16) = intrinsics.shl16 (x, y)
+  def (>>) (x: i16) (y: i16) = intrinsics.ashr16 (x, y)
+  def (>>>) (x: i16) (y: i16) = intrinsics.lshr16 (x, y)
 
-  def i8  (x: i8)  = intrinsics.sext_i8_i16 x
+  def i8 (x: i8) = intrinsics.sext_i8_i16 x
   def i16 (x: i16) = intrinsics.sext_i16_i16 x
   def i32 (x: i32) = intrinsics.sext_i32_i16 x
   def i64 (x: i64) = intrinsics.sext_i64_i16 x
 
-  def u8  (x: u8)  = intrinsics.zext_i8_i16 (intrinsics.sign_i8 x)
+  def u8 (x: u8) = intrinsics.zext_i8_i16 (intrinsics.sign_i8 x)
   def u16 (x: u16) = intrinsics.zext_i16_i16 (intrinsics.sign_i16 x)
   def u32 (x: u32) = intrinsics.zext_i32_i16 (intrinsics.sign_i32 x)
   def u64 (x: u64) = intrinsics.zext_i64_i16 (intrinsics.sign_i64 x)
@@ -394,15 +411,15 @@ module i16: (integral with t = i16) = {
 
   def bool = intrinsics.btoi_bool_i16
 
-  def to_i32(x: i16) = intrinsics.sext_i16_i32 x
-  def to_i64(x: i16) = intrinsics.sext_i16_i64 x
+  def to_i32 (x: i16) = intrinsics.sext_i16_i32 x
+  def to_i64 (x: i16) = intrinsics.sext_i16_i64 x
 
-  def (x: i16) == (y: i16) = intrinsics.eq_i16 (x, y)
-  def (x: i16) < (y: i16) = intrinsics.slt16 (x, y)
-  def (x: i16) > (y: i16) = intrinsics.slt16 (y, x)
-  def (x: i16) <= (y: i16) = intrinsics.sle16 (x, y)
-  def (x: i16) >= (y: i16) = intrinsics.sle16 (y, x)
-  def (x: i16) != (y: i16) = !(x == y)
+  def (==) (x: i16) (y: i16) = intrinsics.eq_i16 (x, y)
+  def (<) (x: i16) (y: i16) = intrinsics.slt16 (x, y)
+  def (>) (x: i16) (y: i16) = intrinsics.slt16 (y, x)
+  def (<=) (x: i16) (y: i16) = intrinsics.sle16 (x, y)
+  def (>=) (x: i16) (y: i16) = intrinsics.sle16 (y, x)
+  def (!=) (x: i16) (y: i16) = !(x == y)
 
   def sgn (x: i16) = intrinsics.ssignum16 x
   def abs (x: i16) = intrinsics.abs16 x
@@ -416,8 +433,10 @@ module i16: (integral with t = i16) = {
 
   def num_bits = 16i32
   def get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
+
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+
   def popc = intrinsics.popc16
   def mul_hi a b = intrinsics.smul_hi16 (i16 a, i16 b)
   def mad_hi a b c = intrinsics.smad_hi16 (i16 a, i16 b, i16 c)
@@ -436,30 +455,30 @@ module i32: (integral with t = i32) = {
   def sign (x: u32) = intrinsics.sign_i32 x
   def unsign (x: i32) = intrinsics.unsign_i32 x
 
-  def (x: i32) + (y: i32) = intrinsics.add32 (x, y)
-  def (x: i32) - (y: i32) = intrinsics.sub32 (x, y)
-  def (x: i32) * (y: i32) = intrinsics.mul32 (x, y)
-  def (x: i32) / (y: i32) = intrinsics.sdiv32 (x, y)
-  def (x: i32) ** (y: i32) = intrinsics.pow32 (x, y)
-  def (x: i32) % (y: i32) = intrinsics.smod32 (x, y)
-  def (x: i32) // (y: i32) = intrinsics.squot32 (x, y)
-  def (x: i32) %% (y: i32) = intrinsics.srem32 (x, y)
+  def (+) (x: i32) (y: i32) = intrinsics.add32 (x, y)
+  def (-) (x: i32) (y: i32) = intrinsics.sub32 (x, y)
+  def (*) (x: i32) (y: i32) = intrinsics.mul32 (x, y)
+  def (/) (x: i32) (y: i32) = intrinsics.sdiv32 (x, y)
+  def (**) (x: i32) (y: i32) = intrinsics.pow32 (x, y)
+  def (%) (x: i32) (y: i32) = intrinsics.smod32 (x, y)
+  def (//) (x: i32) (y: i32) = intrinsics.squot32 (x, y)
+  def (%%) (x: i32) (y: i32) = intrinsics.srem32 (x, y)
 
-  def (x: i32) & (y: i32) = intrinsics.and32 (x, y)
-  def (x: i32) | (y: i32) = intrinsics.or32 (x, y)
-  def (x: i32) ^ (y: i32) = intrinsics.xor32 (x, y)
+  def (&) (x: i32) (y: i32) = intrinsics.and32 (x, y)
+  def (|) (x: i32) (y: i32) = intrinsics.or32 (x, y)
+  def (^) (x: i32) (y: i32) = intrinsics.xor32 (x, y)
   def not (x: i32) = intrinsics.complement32 x
 
-  def (x: i32) << (y: i32) = intrinsics.shl32 (x, y)
-  def (x: i32) >> (y: i32) = intrinsics.ashr32 (x, y)
-  def (x: i32) >>> (y: i32) = intrinsics.lshr32 (x, y)
+  def (<<) (x: i32) (y: i32) = intrinsics.shl32 (x, y)
+  def (>>) (x: i32) (y: i32) = intrinsics.ashr32 (x, y)
+  def (>>>) (x: i32) (y: i32) = intrinsics.lshr32 (x, y)
 
-  def i8  (x: i8)  = intrinsics.sext_i8_i32 x
+  def i8 (x: i8) = intrinsics.sext_i8_i32 x
   def i16 (x: i16) = intrinsics.sext_i16_i32 x
   def i32 (x: i32) = intrinsics.sext_i32_i32 x
   def i64 (x: i64) = intrinsics.sext_i64_i32 x
 
-  def u8  (x: u8)  = intrinsics.zext_i8_i32 (intrinsics.sign_i8 x)
+  def u8 (x: u8) = intrinsics.zext_i8_i32 (intrinsics.sign_i8 x)
   def u16 (x: u16) = intrinsics.zext_i16_i32 (intrinsics.sign_i16 x)
   def u32 (x: u32) = intrinsics.zext_i32_i32 (intrinsics.sign_i32 x)
   def u64 (x: u64) = intrinsics.zext_i64_i32 (intrinsics.sign_i64 x)
@@ -470,15 +489,15 @@ module i32: (integral with t = i32) = {
 
   def bool = intrinsics.btoi_bool_i32
 
-  def to_i32(x: i32) = intrinsics.sext_i32_i32 x
-  def to_i64(x: i32) = intrinsics.sext_i32_i64 x
+  def to_i32 (x: i32) = intrinsics.sext_i32_i32 x
+  def to_i64 (x: i32) = intrinsics.sext_i32_i64 x
 
-  def (x: i32) == (y: i32) = intrinsics.eq_i32 (x, y)
-  def (x: i32) < (y: i32) = intrinsics.slt32 (x, y)
-  def (x: i32) > (y: i32) = intrinsics.slt32 (y, x)
-  def (x: i32) <= (y: i32) = intrinsics.sle32 (x, y)
-  def (x: i32) >= (y: i32) = intrinsics.sle32 (y, x)
-  def (x: i32) != (y: i32) = !(x == y)
+  def (==) (x: i32) (y: i32) = intrinsics.eq_i32 (x, y)
+  def (<) (x: i32) (y: i32) = intrinsics.slt32 (x, y)
+  def (>) (x: i32) (y: i32) = intrinsics.slt32 (y, x)
+  def (<=) (x: i32) (y: i32) = intrinsics.sle32 (x, y)
+  def (>=) (x: i32) (y: i32) = intrinsics.sle32 (y, x)
+  def (!=) (x: i32) (y: i32) = !(x == y)
 
   def sgn (x: i32) = intrinsics.ssignum32 x
   def abs (x: i32) = intrinsics.abs32 x
@@ -492,8 +511,10 @@ module i32: (integral with t = i32) = {
 
   def num_bits = 32i32
   def get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
+
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+
   def popc = intrinsics.popc32
   def mul_hi a b = intrinsics.smul_hi32 (i32 a, i32 b)
   def mad_hi a b c = intrinsics.smad_hi32 (i32 a, i32 b, i32 c)
@@ -512,30 +533,30 @@ module i64: (integral with t = i64) = {
   def sign (x: u64) = intrinsics.sign_i64 x
   def unsign (x: i64) = intrinsics.unsign_i64 x
 
-  def (x: i64) + (y: i64) = intrinsics.add64 (x, y)
-  def (x: i64) - (y: i64) = intrinsics.sub64 (x, y)
-  def (x: i64) * (y: i64) = intrinsics.mul64 (x, y)
-  def (x: i64) / (y: i64) = intrinsics.sdiv64 (x, y)
-  def (x: i64) ** (y: i64) = intrinsics.pow64 (x, y)
-  def (x: i64) % (y: i64) = intrinsics.smod64 (x, y)
-  def (x: i64) // (y: i64) = intrinsics.squot64 (x, y)
-  def (x: i64) %% (y: i64) = intrinsics.srem64 (x, y)
+  def (+) (x: i64) (y: i64) = intrinsics.add64 (x, y)
+  def (-) (x: i64) (y: i64) = intrinsics.sub64 (x, y)
+  def (*) (x: i64) (y: i64) = intrinsics.mul64 (x, y)
+  def (/) (x: i64) (y: i64) = intrinsics.sdiv64 (x, y)
+  def (**) (x: i64) (y: i64) = intrinsics.pow64 (x, y)
+  def (%) (x: i64) (y: i64) = intrinsics.smod64 (x, y)
+  def (//) (x: i64) (y: i64) = intrinsics.squot64 (x, y)
+  def (%%) (x: i64) (y: i64) = intrinsics.srem64 (x, y)
 
-  def (x: i64) & (y: i64) = intrinsics.and64 (x, y)
-  def (x: i64) | (y: i64) = intrinsics.or64 (x, y)
-  def (x: i64) ^ (y: i64) = intrinsics.xor64 (x, y)
+  def (&) (x: i64) (y: i64) = intrinsics.and64 (x, y)
+  def (|) (x: i64) (y: i64) = intrinsics.or64 (x, y)
+  def (^) (x: i64) (y: i64) = intrinsics.xor64 (x, y)
   def not (x: i64) = intrinsics.complement64 x
 
-  def (x: i64) << (y: i64) = intrinsics.shl64 (x, y)
-  def (x: i64) >> (y: i64) = intrinsics.ashr64 (x, y)
-  def (x: i64) >>> (y: i64) = intrinsics.lshr64 (x, y)
+  def (<<) (x: i64) (y: i64) = intrinsics.shl64 (x, y)
+  def (>>) (x: i64) (y: i64) = intrinsics.ashr64 (x, y)
+  def (>>>) (x: i64) (y: i64) = intrinsics.lshr64 (x, y)
 
-  def i8  (x: i8)  = intrinsics.sext_i8_i64 x
+  def i8 (x: i8) = intrinsics.sext_i8_i64 x
   def i16 (x: i16) = intrinsics.sext_i16_i64 x
   def i32 (x: i32) = intrinsics.sext_i32_i64 x
   def i64 (x: i64) = intrinsics.sext_i64_i64 x
 
-  def u8  (x: u8)  = intrinsics.zext_i8_i64 (intrinsics.sign_i8 x)
+  def u8 (x: u8) = intrinsics.zext_i8_i64 (intrinsics.sign_i8 x)
   def u16 (x: u16) = intrinsics.zext_i16_i64 (intrinsics.sign_i16 x)
   def u32 (x: u32) = intrinsics.zext_i32_i64 (intrinsics.sign_i32 x)
   def u64 (x: u64) = intrinsics.zext_i64_i64 (intrinsics.sign_i64 x)
@@ -546,15 +567,15 @@ module i64: (integral with t = i64) = {
 
   def bool = intrinsics.btoi_bool_i64
 
-  def to_i32(x: i64) = intrinsics.sext_i64_i32 x
-  def to_i64(x: i64) = intrinsics.sext_i64_i64 x
+  def to_i32 (x: i64) = intrinsics.sext_i64_i32 x
+  def to_i64 (x: i64) = intrinsics.sext_i64_i64 x
 
-  def (x: i64) == (y: i64) = intrinsics.eq_i64 (x, y)
-  def (x: i64) < (y: i64) = intrinsics.slt64 (x, y)
-  def (x: i64) > (y: i64) = intrinsics.slt64 (y, x)
-  def (x: i64) <= (y: i64) = intrinsics.sle64 (x, y)
-  def (x: i64) >= (y: i64) = intrinsics.sle64 (y, x)
-  def (x: i64) != (y: i64) = !(x == y)
+  def (==) (x: i64) (y: i64) = intrinsics.eq_i64 (x, y)
+  def (<) (x: i64) (y: i64) = intrinsics.slt64 (x, y)
+  def (>) (x: i64) (y: i64) = intrinsics.slt64 (y, x)
+  def (<=) (x: i64) (y: i64) = intrinsics.sle64 (x, y)
+  def (>=) (x: i64) (y: i64) = intrinsics.sle64 (y, x)
+  def (!=) (x: i64) (y: i64) = !(x == y)
 
   def sgn (x: i64) = intrinsics.ssignum64 x
   def abs (x: i64) = intrinsics.abs64 x
@@ -568,8 +589,10 @@ module i64: (integral with t = i64) = {
 
   def num_bits = 64i32
   def get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
+
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | intrinsics.zext_i32_i64 (b intrinsics.<< bit))
+
   def popc = intrinsics.popc64
   def mul_hi a b = intrinsics.smul_hi64 (i64 a, i64 b)
   def mad_hi a b c = intrinsics.smad_hi64 (i64 a, i64 b, i64 c)
@@ -588,30 +611,30 @@ module u8: (integral with t = u8) = {
   def sign (x: u8) = intrinsics.sign_i8 x
   def unsign (x: i8) = intrinsics.unsign_i8 x
 
-  def (x: u8) + (y: u8) = unsign (intrinsics.add8 (sign x, sign y))
-  def (x: u8) - (y: u8) = unsign (intrinsics.sub8 (sign x, sign y))
-  def (x: u8) * (y: u8) = unsign (intrinsics.mul8 (sign x, sign y))
-  def (x: u8) / (y: u8) = unsign (intrinsics.udiv8 (sign x, sign y))
-  def (x: u8) ** (y: u8) = unsign (intrinsics.pow8 (sign x, sign y))
-  def (x: u8) % (y: u8) = unsign (intrinsics.umod8 (sign x, sign y))
-  def (x: u8) // (y: u8) = unsign (intrinsics.udiv8 (sign x, sign y))
-  def (x: u8) %% (y: u8) = unsign (intrinsics.umod8 (sign x, sign y))
+  def (+) (x: u8) (y: u8) = unsign (intrinsics.add8 (sign x, sign y))
+  def (-) (x: u8) (y: u8) = unsign (intrinsics.sub8 (sign x, sign y))
+  def (*) (x: u8) (y: u8) = unsign (intrinsics.mul8 (sign x, sign y))
+  def (/) (x: u8) (y: u8) = unsign (intrinsics.udiv8 (sign x, sign y))
+  def (**) (x: u8) (y: u8) = unsign (intrinsics.pow8 (sign x, sign y))
+  def (%) (x: u8) (y: u8) = unsign (intrinsics.umod8 (sign x, sign y))
+  def (//) (x: u8) (y: u8) = unsign (intrinsics.udiv8 (sign x, sign y))
+  def (%%) (x: u8) (y: u8) = unsign (intrinsics.umod8 (sign x, sign y))
 
-  def (x: u8) & (y: u8) = unsign (intrinsics.and8 (sign x, sign y))
-  def (x: u8) | (y: u8) = unsign (intrinsics.or8 (sign x, sign y))
-  def (x: u8) ^ (y: u8) = unsign (intrinsics.xor8 (sign x, sign y))
+  def (&) (x: u8) (y: u8) = unsign (intrinsics.and8 (sign x, sign y))
+  def (|) (x: u8) (y: u8) = unsign (intrinsics.or8 (sign x, sign y))
+  def (^) (x: u8) (y: u8) = unsign (intrinsics.xor8 (sign x, sign y))
   def not (x: u8) = unsign (intrinsics.complement8 (sign x))
 
-  def (x: u8) << (y: u8) = unsign (intrinsics.shl8 (sign x, sign y))
-  def (x: u8) >> (y: u8) = unsign (intrinsics.ashr8 (sign x, sign y))
-  def (x: u8) >>> (y: u8) = unsign (intrinsics.lshr8 (sign x, sign y))
+  def (<<) (x: u8) (y: u8) = unsign (intrinsics.shl8 (sign x, sign y))
+  def (>>) (x: u8) (y: u8) = unsign (intrinsics.ashr8 (sign x, sign y))
+  def (>>>) (x: u8) (y: u8) = unsign (intrinsics.lshr8 (sign x, sign y))
 
-  def u8  (x: u8)  = unsign (i8.u8 x)
+  def u8 (x: u8) = unsign (i8.u8 x)
   def u16 (x: u16) = unsign (i8.u16 x)
   def u32 (x: u32) = unsign (i8.u32 x)
   def u64 (x: u64) = unsign (i8.u64 x)
 
-  def i8  (x: i8)  = unsign (intrinsics.zext_i8_i8 x)
+  def i8 (x: i8) = unsign (intrinsics.zext_i8_i8 x)
   def i16 (x: i16) = unsign (intrinsics.zext_i16_i8 x)
   def i32 (x: i32) = unsign (intrinsics.zext_i32_i8 x)
   def i64 (x: i64) = unsign (intrinsics.zext_i64_i8 x)
@@ -622,15 +645,15 @@ module u8: (integral with t = u8) = {
 
   def bool x = unsign (intrinsics.btoi_bool_i8 x)
 
-  def to_i32(x: u8) = intrinsics.zext_i8_i32 (sign x)
-  def to_i64(x: u8) = intrinsics.zext_i8_i64 (sign x)
+  def to_i32 (x: u8) = intrinsics.zext_i8_i32 (sign x)
+  def to_i64 (x: u8) = intrinsics.zext_i8_i64 (sign x)
 
-  def (x: u8) == (y: u8) = intrinsics.eq_i8 (sign x, sign y)
-  def (x: u8) < (y: u8) = intrinsics.ult8 (sign x, sign y)
-  def (x: u8) > (y: u8) = intrinsics.ult8 (sign y, sign x)
-  def (x: u8) <= (y: u8) = intrinsics.ule8 (sign x, sign y)
-  def (x: u8) >= (y: u8) = intrinsics.ule8 (sign y, sign x)
-  def (x: u8) != (y: u8) = !(x == y)
+  def (==) (x: u8) (y: u8) = intrinsics.eq_i8 (sign x, sign y)
+  def (<) (x: u8) (y: u8) = intrinsics.ult8 (sign x, sign y)
+  def (>) (x: u8) (y: u8) = intrinsics.ult8 (sign y, sign x)
+  def (<=) (x: u8) (y: u8) = intrinsics.ule8 (sign x, sign y)
+  def (>=) (x: u8) (y: u8) = intrinsics.ule8 (sign y, sign x)
+  def (!=) (x: u8) (y: u8) = !(x == y)
 
   def sgn (x: u8) = unsign (intrinsics.usignum8 (sign x))
   def abs (x: u8) = x
@@ -644,8 +667,10 @@ module u8: (integral with t = u8) = {
 
   def num_bits = 8i32
   def get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
+
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+
   def popc x = intrinsics.popc8 (sign x)
   def mul_hi a b = unsign (intrinsics.umul_hi8 (sign a, sign b))
   def mad_hi a b c = unsign (intrinsics.umad_hi8 (sign a, sign b, sign c))
@@ -664,30 +689,30 @@ module u16: (integral with t = u16) = {
   def sign (x: u16) = intrinsics.sign_i16 x
   def unsign (x: i16) = intrinsics.unsign_i16 x
 
-  def (x: u16) + (y: u16) = unsign (intrinsics.add16 (sign x, sign y))
-  def (x: u16) - (y: u16) = unsign (intrinsics.sub16 (sign x, sign y))
-  def (x: u16) * (y: u16) = unsign (intrinsics.mul16 (sign x, sign y))
-  def (x: u16) / (y: u16) = unsign (intrinsics.udiv16 (sign x, sign y))
-  def (x: u16) ** (y: u16) = unsign (intrinsics.pow16 (sign x, sign y))
-  def (x: u16) % (y: u16) = unsign (intrinsics.umod16 (sign x, sign y))
-  def (x: u16) // (y: u16) = unsign (intrinsics.udiv16 (sign x, sign y))
-  def (x: u16) %% (y: u16) = unsign (intrinsics.umod16 (sign x, sign y))
+  def (+) (x: u16) (y: u16) = unsign (intrinsics.add16 (sign x, sign y))
+  def (-) (x: u16) (y: u16) = unsign (intrinsics.sub16 (sign x, sign y))
+  def (*) (x: u16) (y: u16) = unsign (intrinsics.mul16 (sign x, sign y))
+  def (/) (x: u16) (y: u16) = unsign (intrinsics.udiv16 (sign x, sign y))
+  def (**) (x: u16) (y: u16) = unsign (intrinsics.pow16 (sign x, sign y))
+  def (%) (x: u16) (y: u16) = unsign (intrinsics.umod16 (sign x, sign y))
+  def (//) (x: u16) (y: u16) = unsign (intrinsics.udiv16 (sign x, sign y))
+  def (%%) (x: u16) (y: u16) = unsign (intrinsics.umod16 (sign x, sign y))
 
-  def (x: u16) & (y: u16) = unsign (intrinsics.and16 (sign x, sign y))
-  def (x: u16) | (y: u16) = unsign (intrinsics.or16 (sign x, sign y))
-  def (x: u16) ^ (y: u16) = unsign (intrinsics.xor16 (sign x, sign y))
+  def (&) (x: u16) (y: u16) = unsign (intrinsics.and16 (sign x, sign y))
+  def (|) (x: u16) (y: u16) = unsign (intrinsics.or16 (sign x, sign y))
+  def (^) (x: u16) (y: u16) = unsign (intrinsics.xor16 (sign x, sign y))
   def not (x: u16) = unsign (intrinsics.complement16 (sign x))
 
-  def (x: u16) << (y: u16) = unsign (intrinsics.shl16 (sign x, sign y))
-  def (x: u16) >> (y: u16) = unsign (intrinsics.ashr16 (sign x, sign y))
-  def (x: u16) >>> (y: u16) = unsign (intrinsics.lshr16 (sign x, sign y))
+  def (<<) (x: u16) (y: u16) = unsign (intrinsics.shl16 (sign x, sign y))
+  def (>>) (x: u16) (y: u16) = unsign (intrinsics.ashr16 (sign x, sign y))
+  def (>>>) (x: u16) (y: u16) = unsign (intrinsics.lshr16 (sign x, sign y))
 
-  def u8  (x: u8)  = unsign (i16.u8 x)
+  def u8 (x: u8) = unsign (i16.u8 x)
   def u16 (x: u16) = unsign (i16.u16 x)
   def u32 (x: u32) = unsign (i16.u32 x)
   def u64 (x: u64) = unsign (i16.u64 x)
 
-  def i8  (x: i8)  = unsign (intrinsics.zext_i8_i16 x)
+  def i8 (x: i8) = unsign (intrinsics.zext_i8_i16 x)
   def i16 (x: i16) = unsign (intrinsics.zext_i16_i16 x)
   def i32 (x: i32) = unsign (intrinsics.zext_i32_i16 x)
   def i64 (x: i64) = unsign (intrinsics.zext_i64_i16 x)
@@ -698,15 +723,15 @@ module u16: (integral with t = u16) = {
 
   def bool x = unsign (intrinsics.btoi_bool_i16 x)
 
-  def to_i32(x: u16) = intrinsics.zext_i16_i32 (sign x)
-  def to_i64(x: u16) = intrinsics.zext_i16_i64 (sign x)
+  def to_i32 (x: u16) = intrinsics.zext_i16_i32 (sign x)
+  def to_i64 (x: u16) = intrinsics.zext_i16_i64 (sign x)
 
-  def (x: u16) == (y: u16) = intrinsics.eq_i16 (sign x, sign y)
-  def (x: u16) < (y: u16) = intrinsics.ult16 (sign x, sign y)
-  def (x: u16) > (y: u16) = intrinsics.ult16 (sign y, sign x)
-  def (x: u16) <= (y: u16) = intrinsics.ule16 (sign x, sign y)
-  def (x: u16) >= (y: u16) = intrinsics.ule16 (sign y, sign x)
-  def (x: u16) != (y: u16) = !(x == y)
+  def (==) (x: u16) (y: u16) = intrinsics.eq_i16 (sign x, sign y)
+  def (<) (x: u16) (y: u16) = intrinsics.ult16 (sign x, sign y)
+  def (>) (x: u16) (y: u16) = intrinsics.ult16 (sign y, sign x)
+  def (<=) (x: u16) (y: u16) = intrinsics.ule16 (sign x, sign y)
+  def (>=) (x: u16) (y: u16) = intrinsics.ule16 (sign y, sign x)
+  def (!=) (x: u16) (y: u16) = !(x == y)
 
   def sgn (x: u16) = unsign (intrinsics.usignum16 (sign x))
   def abs (x: u16) = x
@@ -720,8 +745,10 @@ module u16: (integral with t = u16) = {
 
   def num_bits = 16i32
   def get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
+
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+
   def popc x = intrinsics.popc16 (sign x)
   def mul_hi a b = unsign (intrinsics.umul_hi16 (sign a, sign b))
   def mad_hi a b c = unsign (intrinsics.umad_hi16 (sign a, sign b, sign c))
@@ -740,30 +767,30 @@ module u32: (integral with t = u32) = {
   def sign (x: u32) = intrinsics.sign_i32 x
   def unsign (x: i32) = intrinsics.unsign_i32 x
 
-  def (x: u32) + (y: u32) = unsign (intrinsics.add32 (sign x, sign y))
-  def (x: u32) - (y: u32) = unsign (intrinsics.sub32 (sign x, sign y))
-  def (x: u32) * (y: u32) = unsign (intrinsics.mul32 (sign x, sign y))
-  def (x: u32) / (y: u32) = unsign (intrinsics.udiv32 (sign x, sign y))
-  def (x: u32) ** (y: u32) = unsign (intrinsics.pow32 (sign x, sign y))
-  def (x: u32) % (y: u32) = unsign (intrinsics.umod32 (sign x, sign y))
-  def (x: u32) // (y: u32) = unsign (intrinsics.udiv32 (sign x, sign y))
-  def (x: u32) %% (y: u32) = unsign (intrinsics.umod32 (sign x, sign y))
+  def (+) (x: u32) (y: u32) = unsign (intrinsics.add32 (sign x, sign y))
+  def (-) (x: u32) (y: u32) = unsign (intrinsics.sub32 (sign x, sign y))
+  def (*) (x: u32) (y: u32) = unsign (intrinsics.mul32 (sign x, sign y))
+  def (/) (x: u32) (y: u32) = unsign (intrinsics.udiv32 (sign x, sign y))
+  def (**) (x: u32) (y: u32) = unsign (intrinsics.pow32 (sign x, sign y))
+  def (%) (x: u32) (y: u32) = unsign (intrinsics.umod32 (sign x, sign y))
+  def (//) (x: u32) (y: u32) = unsign (intrinsics.udiv32 (sign x, sign y))
+  def (%%) (x: u32) (y: u32) = unsign (intrinsics.umod32 (sign x, sign y))
 
-  def (x: u32) & (y: u32) = unsign (intrinsics.and32 (sign x, sign y))
-  def (x: u32) | (y: u32) = unsign (intrinsics.or32 (sign x, sign y))
-  def (x: u32) ^ (y: u32) = unsign (intrinsics.xor32 (sign x, sign y))
+  def (&) (x: u32) (y: u32) = unsign (intrinsics.and32 (sign x, sign y))
+  def (|) (x: u32) (y: u32) = unsign (intrinsics.or32 (sign x, sign y))
+  def (^) (x: u32) (y: u32) = unsign (intrinsics.xor32 (sign x, sign y))
   def not (x: u32) = unsign (intrinsics.complement32 (sign x))
 
-  def (x: u32) << (y: u32) = unsign (intrinsics.shl32 (sign x, sign y))
-  def (x: u32) >> (y: u32) = unsign (intrinsics.ashr32 (sign x, sign y))
-  def (x: u32) >>> (y: u32) = unsign (intrinsics.lshr32 (sign x, sign y))
+  def (<<) (x: u32) (y: u32) = unsign (intrinsics.shl32 (sign x, sign y))
+  def (>>) (x: u32) (y: u32) = unsign (intrinsics.ashr32 (sign x, sign y))
+  def (>>>) (x: u32) (y: u32) = unsign (intrinsics.lshr32 (sign x, sign y))
 
-  def u8  (x: u8)  = unsign (i32.u8 x)
+  def u8 (x: u8) = unsign (i32.u8 x)
   def u16 (x: u16) = unsign (i32.u16 x)
   def u32 (x: u32) = unsign (i32.u32 x)
   def u64 (x: u64) = unsign (i32.u64 x)
 
-  def i8  (x: i8)  = unsign (intrinsics.zext_i8_i32 x)
+  def i8 (x: i8) = unsign (intrinsics.zext_i8_i32 x)
   def i16 (x: i16) = unsign (intrinsics.zext_i16_i32 x)
   def i32 (x: i32) = unsign (intrinsics.zext_i32_i32 x)
   def i64 (x: i64) = unsign (intrinsics.zext_i64_i32 x)
@@ -774,15 +801,15 @@ module u32: (integral with t = u32) = {
 
   def bool x = unsign (intrinsics.btoi_bool_i32 x)
 
-  def to_i32(x: u32) = intrinsics.zext_i32_i32 (sign x)
-  def to_i64(x: u32) = intrinsics.zext_i32_i64 (sign x)
+  def to_i32 (x: u32) = intrinsics.zext_i32_i32 (sign x)
+  def to_i64 (x: u32) = intrinsics.zext_i32_i64 (sign x)
 
-  def (x: u32) == (y: u32) = intrinsics.eq_i32 (sign x, sign y)
-  def (x: u32) < (y: u32) = intrinsics.ult32 (sign x, sign y)
-  def (x: u32) > (y: u32) = intrinsics.ult32 (sign y, sign x)
-  def (x: u32) <= (y: u32) = intrinsics.ule32 (sign x, sign y)
-  def (x: u32) >= (y: u32) = intrinsics.ule32 (sign y, sign x)
-  def (x: u32) != (y: u32) = !(x == y)
+  def (==) (x: u32) (y: u32) = intrinsics.eq_i32 (sign x, sign y)
+  def (<) (x: u32) (y: u32) = intrinsics.ult32 (sign x, sign y)
+  def (>) (x: u32) (y: u32) = intrinsics.ult32 (sign y, sign x)
+  def (<=) (x: u32) (y: u32) = intrinsics.ule32 (sign x, sign y)
+  def (>=) (x: u32) (y: u32) = intrinsics.ule32 (sign y, sign x)
+  def (!=) (x: u32) (y: u32) = !(x == y)
 
   def sgn (x: u32) = unsign (intrinsics.usignum32 (sign x))
   def abs (x: u32) = x
@@ -796,8 +823,10 @@ module u32: (integral with t = u32) = {
 
   def num_bits = 32i32
   def get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
+
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+
   def popc x = intrinsics.popc32 (sign x)
   def mul_hi a b = unsign (intrinsics.umul_hi32 (sign a, sign b))
   def mad_hi a b c = unsign (intrinsics.umad_hi32 (sign a, sign b, sign c))
@@ -816,30 +845,30 @@ module u64: (integral with t = u64) = {
   def sign (x: u64) = intrinsics.sign_i64 x
   def unsign (x: i64) = intrinsics.unsign_i64 x
 
-  def (x: u64) + (y: u64) = unsign (intrinsics.add64 (sign x, sign y))
-  def (x: u64) - (y: u64) = unsign (intrinsics.sub64 (sign x, sign y))
-  def (x: u64) * (y: u64) = unsign (intrinsics.mul64 (sign x, sign y))
-  def (x: u64) / (y: u64) = unsign (intrinsics.udiv64 (sign x, sign y))
-  def (x: u64) ** (y: u64) = unsign (intrinsics.pow64 (sign x, sign y))
-  def (x: u64) % (y: u64) = unsign (intrinsics.umod64 (sign x, sign y))
-  def (x: u64) // (y: u64) = unsign (intrinsics.udiv64 (sign x, sign y))
-  def (x: u64) %% (y: u64) = unsign (intrinsics.umod64 (sign x, sign y))
+  def (+) (x: u64) (y: u64) = unsign (intrinsics.add64 (sign x, sign y))
+  def (-) (x: u64) (y: u64) = unsign (intrinsics.sub64 (sign x, sign y))
+  def (*) (x: u64) (y: u64) = unsign (intrinsics.mul64 (sign x, sign y))
+  def (/) (x: u64) (y: u64) = unsign (intrinsics.udiv64 (sign x, sign y))
+  def (**) (x: u64) (y: u64) = unsign (intrinsics.pow64 (sign x, sign y))
+  def (%) (x: u64) (y: u64) = unsign (intrinsics.umod64 (sign x, sign y))
+  def (//) (x: u64) (y: u64) = unsign (intrinsics.udiv64 (sign x, sign y))
+  def (%%) (x: u64) (y: u64) = unsign (intrinsics.umod64 (sign x, sign y))
 
-  def (x: u64) & (y: u64) = unsign (intrinsics.and64 (sign x, sign y))
-  def (x: u64) | (y: u64) = unsign (intrinsics.or64 (sign x, sign y))
-  def (x: u64) ^ (y: u64) = unsign (intrinsics.xor64 (sign x, sign y))
+  def (&) (x: u64) (y: u64) = unsign (intrinsics.and64 (sign x, sign y))
+  def (|) (x: u64) (y: u64) = unsign (intrinsics.or64 (sign x, sign y))
+  def (^) (x: u64) (y: u64) = unsign (intrinsics.xor64 (sign x, sign y))
   def not (x: u64) = unsign (intrinsics.complement64 (sign x))
 
-  def (x: u64) << (y: u64) = unsign (intrinsics.shl64 (sign x, sign y))
-  def (x: u64) >> (y: u64) = unsign (intrinsics.ashr64 (sign x, sign y))
-  def (x: u64) >>> (y: u64) = unsign (intrinsics.lshr64 (sign x, sign y))
+  def (<<) (x: u64) (y: u64) = unsign (intrinsics.shl64 (sign x, sign y))
+  def (>>) (x: u64) (y: u64) = unsign (intrinsics.ashr64 (sign x, sign y))
+  def (>>>) (x: u64) (y: u64) = unsign (intrinsics.lshr64 (sign x, sign y))
 
-  def u8  (x: u8)  = unsign (i64.u8 x)
+  def u8 (x: u8) = unsign (i64.u8 x)
   def u16 (x: u16) = unsign (i64.u16 x)
   def u32 (x: u32) = unsign (i64.u32 x)
   def u64 (x: u64) = unsign (i64.u64 x)
 
-  def i8 (x: i8)   = unsign (intrinsics.zext_i8_i64 x)
+  def i8 (x: i8) = unsign (intrinsics.zext_i8_i64 x)
   def i16 (x: i16) = unsign (intrinsics.zext_i16_i64 x)
   def i32 (x: i32) = unsign (intrinsics.zext_i32_i64 x)
   def i64 (x: i64) = unsign (intrinsics.zext_i64_i64 x)
@@ -850,15 +879,15 @@ module u64: (integral with t = u64) = {
 
   def bool x = unsign (intrinsics.btoi_bool_i64 x)
 
-  def to_i32(x: u64) = intrinsics.zext_i64_i32 (sign x)
-  def to_i64(x: u64) = intrinsics.zext_i64_i64 (sign x)
+  def to_i32 (x: u64) = intrinsics.zext_i64_i32 (sign x)
+  def to_i64 (x: u64) = intrinsics.zext_i64_i64 (sign x)
 
-  def (x: u64) == (y: u64) = intrinsics.eq_i64 (sign x, sign y)
-  def (x: u64) < (y: u64) = intrinsics.ult64 (sign x, sign y)
-  def (x: u64) > (y: u64) = intrinsics.ult64 (sign y, sign x)
-  def (x: u64) <= (y: u64) = intrinsics.ule64 (sign x, sign y)
-  def (x: u64) >= (y: u64) = intrinsics.ule64 (sign y, sign x)
-  def (x: u64) != (y: u64) = !(x == y)
+  def (==) (x: u64) (y: u64) = intrinsics.eq_i64 (sign x, sign y)
+  def (<) (x: u64) (y: u64) = intrinsics.ult64 (sign x, sign y)
+  def (>) (x: u64) (y: u64) = intrinsics.ult64 (sign y, sign x)
+  def (<=) (x: u64) (y: u64) = intrinsics.ule64 (sign x, sign y)
+  def (>=) (x: u64) (y: u64) = intrinsics.ule64 (sign y, sign x)
+  def (!=) (x: u64) (y: u64) = !(x == y)
 
   def sgn (x: u64) = unsign (intrinsics.usignum64 (sign x))
   def abs (x: u64) = x
@@ -872,8 +901,10 @@ module u64: (integral with t = u64) = {
 
   def num_bits = 64i32
   def get_bit (bit: i32) (x: t) = to_i32 ((x >> i32 bit) & i32 1)
+
   def set_bit (bit: i32) (x: t) (b: i32) =
     ((x & i32 (!(1 intrinsics.<< bit))) | i32 (b intrinsics.<< bit))
+
   def popc x = intrinsics.popc64 (sign x)
   def mul_hi a b = unsign (intrinsics.umul_hi64 (sign a, sign b))
   def mad_hi a b c = unsign (intrinsics.umad_hi64 (sign a, sign b, sign c))
@@ -893,14 +924,14 @@ module f64: (float with t = f64 with int_t = u64) = {
   module i64m = i64
   module u64m = u64
 
-  def (x: f64) + (y: f64) = intrinsics.fadd64 (x, y)
-  def (x: f64) - (y: f64) = intrinsics.fsub64 (x, y)
-  def (x: f64) * (y: f64) = intrinsics.fmul64 (x, y)
-  def (x: f64) / (y: f64) = intrinsics.fdiv64 (x, y)
-  def (x: f64) % (y: f64) = intrinsics.fmod64 (x, y)
-  def (x: f64) ** (y: f64) = intrinsics.fpow64 (x, y)
+  def (+) (x: f64) (y: f64) = intrinsics.fadd64 (x, y)
+  def (-) (x: f64) (y: f64) = intrinsics.fsub64 (x, y)
+  def (*) (x: f64) (y: f64) = intrinsics.fmul64 (x, y)
+  def (/) (x: f64) (y: f64) = intrinsics.fdiv64 (x, y)
+  def (%) (x: f64) (y: f64) = intrinsics.fmod64 (x, y)
+  def (**) (x: f64) (y: f64) = intrinsics.fpow64 (x, y)
 
-  def u8  (x: u8)  = intrinsics.uitofp_i8_f64  (i8.u8 x)
+  def u8 (x: u8) = intrinsics.uitofp_i8_f64 (i8.u8 x)
   def u16 (x: u16) = intrinsics.uitofp_i16_f64 (i16.u16 x)
   def u32 (x: u32) = intrinsics.uitofp_i32_f64 (i32.u32 x)
   def u64 (x: u64) = intrinsics.uitofp_i64_f64 (i64.u64 x)
@@ -920,15 +951,15 @@ module f64: (float with t = f64 with int_t = u64) = {
   def to_i64 (x: f64) = intrinsics.fptosi_f64_i64 x
   def to_f64 (x: f64) = x
 
-  def (x: f64) == (y: f64) = intrinsics.eq_f64 (x, y)
-  def (x: f64) < (y: f64) = intrinsics.lt64 (x, y)
-  def (x: f64) > (y: f64) = intrinsics.lt64 (y, x)
-  def (x: f64) <= (y: f64) = intrinsics.le64 (x, y)
-  def (x: f64) >= (y: f64) = intrinsics.le64 (y, x)
-  def (x: f64) != (y: f64) = !(x == y)
+  def (==) (x: f64) (y: f64) = intrinsics.eq_f64 (x, y)
+  def (<) (x: f64) (y: f64) = intrinsics.lt64 (x, y)
+  def (>) (x: f64) (y: f64) = intrinsics.lt64 (y, x)
+  def (<=) (x: f64) (y: f64) = intrinsics.le64 (x, y)
+  def (>=) (x: f64) (y: f64) = intrinsics.le64 (y, x)
+  def (!=) (x: f64) (y: f64) = !(x == y)
 
   def neg (x: t) = -x
-  def recip (x: t) = 1/x
+  def recip (x: t) = 1 / x
   def max (x: t) (y: t) = intrinsics.fmax64 (x, y)
   def min (x: t) (y: t) = intrinsics.fmin64 (x, y)
 
@@ -962,19 +993,19 @@ module f64: (float with t = f64 with int_t = u64) = {
   def erf = intrinsics.erf64
   def erfc = intrinsics.erfc64
 
-  def lerp v0 v1 t = intrinsics.lerp64 (v0,v1,t)
-  def fma a b c = intrinsics.fma64 (a,b,c)
-  def mad a b c = intrinsics.mad64 (a,b,c)
+  def lerp v0 v1 t = intrinsics.lerp64 (v0, v1, t)
+  def fma a b c = intrinsics.fma64 (a, b, c)
+  def mad a b c = intrinsics.mad64 (a, b, c)
 
   def ceil = intrinsics.ceil64
   def floor = intrinsics.floor64
-  def trunc (x: f64) : f64 = i64 (i64m.f64 x)
+  def trunc (x: f64): f64 = i64 (i64m.f64 x)
 
   def round = intrinsics.round64
 
-  def nextafter x y = intrinsics.nextafter64 (x,y)
-  def ldexp x y = intrinsics.ldexp64 (x,y)
-  def copysign x y = intrinsics.copysign64 (x,y)
+  def nextafter x y = intrinsics.nextafter64 (x, y)
+  def ldexp x y = intrinsics.ldexp64 (x, y)
+  def copysign x y = intrinsics.copysign64 (x, y)
 
   def to_bits (x: f64): u64 = u64m.i64 (intrinsics.to_bits64 x)
   def from_bits (x: u64): f64 = intrinsics.from_bits64 (intrinsics.sign_i64 x)
@@ -1010,14 +1041,14 @@ module f32: (float with t = f32 with int_t = u32) = {
   module u32m = u32
   module f64m = f64
 
-  def (x: f32) + (y: f32) = intrinsics.fadd32 (x, y)
-  def (x: f32) - (y: f32) = intrinsics.fsub32 (x, y)
-  def (x: f32) * (y: f32) = intrinsics.fmul32 (x, y)
-  def (x: f32) / (y: f32) = intrinsics.fdiv32 (x, y)
-  def (x: f32) % (y: f32) = intrinsics.fmod32 (x, y)
-  def (x: f32) ** (y: f32) = intrinsics.fpow32 (x, y)
+  def (+) (x: f32) (y: f32) = intrinsics.fadd32 (x, y)
+  def (-) (x: f32) (y: f32) = intrinsics.fsub32 (x, y)
+  def (*) (x: f32) (y: f32) = intrinsics.fmul32 (x, y)
+  def (/) (x: f32) (y: f32) = intrinsics.fdiv32 (x, y)
+  def (%) (x: f32) (y: f32) = intrinsics.fmod32 (x, y)
+  def (**) (x: f32) (y: f32) = intrinsics.fpow32 (x, y)
 
-  def u8  (x: u8)  = intrinsics.uitofp_i8_f32  (i8.u8 x)
+  def u8 (x: u8) = intrinsics.uitofp_i8_f32 (i8.u8 x)
   def u16 (x: u16) = intrinsics.uitofp_i16_f32 (i16.u16 x)
   def u32 (x: u32) = intrinsics.uitofp_i32_f32 (i32.u32 x)
   def u64 (x: u64) = intrinsics.uitofp_i64_f32 (i64.u64 x)
@@ -1037,15 +1068,15 @@ module f32: (float with t = f32 with int_t = u32) = {
   def to_i64 (x: f32) = intrinsics.fptosi_f32_i64 x
   def to_f64 (x: f32) = intrinsics.fpconv_f32_f64 x
 
-  def (x: f32) == (y: f32) = intrinsics.eq_f32 (x, y)
-  def (x: f32) < (y: f32) = intrinsics.lt32 (x, y)
-  def (x: f32) > (y: f32) = intrinsics.lt32 (y, x)
-  def (x: f32) <= (y: f32) = intrinsics.le32 (x, y)
-  def (x: f32) >= (y: f32) = intrinsics.le32 (y, x)
-  def (x: f32) != (y: f32) = !(x == y)
+  def (==) (x: f32) (y: f32) = intrinsics.eq_f32 (x, y)
+  def (<) (x: f32) (y: f32) = intrinsics.lt32 (x, y)
+  def (>) (x: f32) (y: f32) = intrinsics.lt32 (y, x)
+  def (<=) (x: f32) (y: f32) = intrinsics.le32 (x, y)
+  def (>=) (x: f32) (y: f32) = intrinsics.le32 (y, x)
+  def (!=) (x: f32) (y: f32) = !(x == y)
 
   def neg (x: t) = -x
-  def recip (x: t) = 1/x
+  def recip (x: t) = 1 / x
   def max (x: t) (y: t) = intrinsics.fmax32 (x, y)
   def min (x: t) (y: t) = intrinsics.fmin32 (x, y)
 
@@ -1079,19 +1110,19 @@ module f32: (float with t = f32 with int_t = u32) = {
   def erf = intrinsics.erf32
   def erfc = intrinsics.erfc32
 
-  def lerp v0 v1 t = intrinsics.lerp32 (v0,v1,t)
-  def fma a b c = intrinsics.fma32 (a,b,c)
-  def mad a b c = intrinsics.mad32 (a,b,c)
+  def lerp v0 v1 t = intrinsics.lerp32 (v0, v1, t)
+  def fma a b c = intrinsics.fma32 (a, b, c)
+  def mad a b c = intrinsics.mad32 (a, b, c)
 
   def ceil = intrinsics.ceil32
   def floor = intrinsics.floor32
-  def trunc (x: f32) : f32 = i32 (i32m.f32 x)
+  def trunc (x: f32): f32 = i32 (i32m.f32 x)
 
   def round = intrinsics.round32
 
-  def nextafter x y = intrinsics.nextafter32 (x,y)
-  def ldexp x y = intrinsics.ldexp32 (x,y)
-  def copysign x y = intrinsics.copysign32 (x,y)
+  def nextafter x y = intrinsics.nextafter32 (x, y)
+  def ldexp x y = intrinsics.ldexp32 (x, y)
+  def copysign x y = intrinsics.copysign32 (x, y)
 
   def to_bits (x: f32): u32 = u32m.i32 (intrinsics.to_bits32 x)
   def from_bits (x: u32): f32 = intrinsics.from_bits32 (intrinsics.sign_i32 x)
@@ -1131,14 +1162,14 @@ module f16: (float with t = f16 with int_t = u16) = {
   module u16m = u16
   module f64m = f64
 
-  def (x: f16) + (y: f16) = intrinsics.fadd16 (x, y)
-  def (x: f16) - (y: f16) = intrinsics.fsub16 (x, y)
-  def (x: f16) * (y: f16) = intrinsics.fmul16 (x, y)
-  def (x: f16) / (y: f16) = intrinsics.fdiv16 (x, y)
-  def (x: f16) % (y: f16) = intrinsics.fmod16 (x, y)
-  def (x: f16) ** (y: f16) = intrinsics.fpow16 (x, y)
+  def (+) (x: f16) (y: f16) = intrinsics.fadd16 (x, y)
+  def (-) (x: f16) (y: f16) = intrinsics.fsub16 (x, y)
+  def (*) (x: f16) (y: f16) = intrinsics.fmul16 (x, y)
+  def (/) (x: f16) (y: f16) = intrinsics.fdiv16 (x, y)
+  def (%) (x: f16) (y: f16) = intrinsics.fmod16 (x, y)
+  def (**) (x: f16) (y: f16) = intrinsics.fpow16 (x, y)
 
-  def u8  (x: u8)  = intrinsics.uitofp_i8_f16  (i8.u8 x)
+  def u8 (x: u8) = intrinsics.uitofp_i8_f16 (i8.u8 x)
   def u16 (x: u16) = intrinsics.uitofp_i16_f16 (i16.u16 x)
   def u32 (x: u32) = intrinsics.uitofp_i32_f16 (i32.u32 x)
   def u64 (x: u64) = intrinsics.uitofp_i64_f16 (i64.u64 x)
@@ -1158,15 +1189,15 @@ module f16: (float with t = f16 with int_t = u16) = {
   def to_i64 (x: f16) = intrinsics.fptosi_f16_i64 x
   def to_f64 (x: f16) = intrinsics.fpconv_f16_f64 x
 
-  def (x: f16) == (y: f16) = intrinsics.eq_f16 (x, y)
-  def (x: f16) < (y: f16) = intrinsics.lt16 (x, y)
-  def (x: f16) > (y: f16) = intrinsics.lt16 (y, x)
-  def (x: f16) <= (y: f16) = intrinsics.le16 (x, y)
-  def (x: f16) >= (y: f16) = intrinsics.le16 (y, x)
-  def (x: f16) != (y: f16) = !(x == y)
+  def (==) (x: f16) (y: f16) = intrinsics.eq_f16 (x, y)
+  def (<) (x: f16) (y: f16) = intrinsics.lt16 (x, y)
+  def (>) (x: f16) (y: f16) = intrinsics.lt16 (y, x)
+  def (<=) (x: f16) (y: f16) = intrinsics.le16 (x, y)
+  def (>=) (x: f16) (y: f16) = intrinsics.le16 (y, x)
+  def (!=) (x: f16) (y: f16) = !(x == y)
 
   def neg (x: t) = -x
-  def recip (x: t) = 1/x
+  def recip (x: t) = 1 / x
   def max (x: t) (y: t) = intrinsics.fmax16 (x, y)
   def min (x: t) (y: t) = intrinsics.fmin16 (x, y)
 
@@ -1200,19 +1231,19 @@ module f16: (float with t = f16 with int_t = u16) = {
   def erf = intrinsics.erf16
   def erfc = intrinsics.erfc16
 
-  def lerp v0 v1 t = intrinsics.lerp16 (v0,v1,t)
-  def fma a b c = intrinsics.fma16 (a,b,c)
-  def mad a b c = intrinsics.mad16 (a,b,c)
+  def lerp v0 v1 t = intrinsics.lerp16 (v0, v1, t)
+  def fma a b c = intrinsics.fma16 (a, b, c)
+  def mad a b c = intrinsics.mad16 (a, b, c)
 
   def ceil = intrinsics.ceil16
   def floor = intrinsics.floor16
-  def trunc (x: f16) : f16 = i16 (i16m.f16 x)
+  def trunc (x: f16): f16 = i16 (i16m.f16 x)
 
   def round = intrinsics.round16
 
-  def nextafter x y = intrinsics.nextafter16 (x,y)
-  def ldexp x y = intrinsics.ldexp16 (x,y)
-  def copysign x y = intrinsics.copysign16 (x,y)
+  def nextafter x y = intrinsics.nextafter16 (x, y)
+  def ldexp x y = intrinsics.ldexp16 (x, y)
+  def copysign x y = intrinsics.copysign16 (x, y)
 
   def to_bits (x: f16): u16 = u16m.i16 (intrinsics.to_bits16 x)
   def from_bits (x: u16): f16 = intrinsics.from_bits16 (intrinsics.sign_i16 x)

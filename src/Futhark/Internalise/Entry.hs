@@ -7,7 +7,8 @@ module Futhark.Internalise.Entry
 where
 
 import Control.Monad
-import Control.Monad.State
+import Control.Monad.State.Strict
+import Data.Bifunctor (first)
 import Data.List (find, intersperse)
 import Data.Map qualified as M
 import Futhark.IR qualified as I
@@ -15,7 +16,7 @@ import Futhark.Internalise.TypesValues (internaliseSumTypeRep, internalisedTypeS
 import Futhark.Util (chunks)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.Futhark qualified as E hiding (TypeArg)
-import Language.Futhark.Core (Name, Uniqueness (..), VName, nameFromText)
+import Language.Futhark.Core (L (..), Name, Uniqueness (..), VName, nameFromText, unLoc)
 import Language.Futhark.Semantic qualified as E
 
 -- | The types that are visible to the outside world.
@@ -66,7 +67,7 @@ typeExpOpaqueName = nameFromText . f
     g (E.TERecord tes _) =
       "{" <> mconcat (intersperse ", " (map onField tes)) <> "}"
       where
-        onField (k, te) = E.nameToText k <> ":" <> f te
+        onField (L _ k, te) = E.nameToText k <> ":" <> f te
     g (E.TESum cs _) =
       mconcat (intersperse " | " (map onConstr cs))
       where
@@ -85,14 +86,18 @@ addType name t = modify $ \(I.OpaqueTypes ts) ->
   case find ((== name) . fst) ts of
     Just (_, t')
       | t /= t' ->
-          error $ "Duplicate definition of entry point type " <> E.prettyString name
+          error . unlines $
+            [ "Duplicate definition of entry point type " <> E.prettyString name,
+              show t,
+              show t'
+            ]
     _ -> I.OpaqueTypes ts <> I.OpaqueTypes [(name, t)]
 
 isRecord ::
   VisibleTypes ->
   E.TypeExp E.Exp VName ->
   Maybe (M.Map Name (E.TypeExp E.Exp VName))
-isRecord _ (E.TERecord fs _) = Just $ M.fromList fs
+isRecord _ (E.TERecord fs _) = Just $ M.fromList $ map (first unLoc) fs
 isRecord _ (E.TETuple fs _) = Just $ E.tupleFields fs
 isRecord types (E.TEVar v _) = isRecord types =<< findType (E.qualLeaf v) types
 isRecord _ _ = Nothing
@@ -123,6 +128,23 @@ opaqueRecord types ((f, t) : fs) ts = do
   ((f, f') :) <$> opaqueRecord types fs ts'
   where
     opaqueField e_t i_ts = snd <$> entryPointType types e_t i_ts
+
+opaqueRecordArray ::
+  VisibleTypes ->
+  Int ->
+  [(Name, E.EntryType)] ->
+  [I.TypeBase I.Rank Uniqueness] ->
+  GenOpaque [(Name, I.EntryPointType)]
+opaqueRecordArray _ _ [] _ = pure []
+opaqueRecordArray types rank ((f, t) : fs) ts = do
+  let (f_ts, ts') = splitAt (internalisedTypeSize $ E.entryType t) ts
+  f' <- opaqueField t f_ts
+  ((f, f') :) <$> opaqueRecordArray types rank fs ts'
+  where
+    opaqueField (E.EntryType e_t _) i_ts =
+      snd <$> entryPointType types (E.EntryType e_t' Nothing) i_ts
+      where
+        e_t' = E.arrayOf (E.Shape (replicate rank E.anySize)) e_t
 
 isSum ::
   VisibleTypes ->
@@ -159,6 +181,10 @@ opaqueSum types cs ts = mapM (traverse f) cs
       ets' <- map snd <$> zipWithM (entryPointType types) ets (map (map (ts !!)) is')
       pure $ zip ets' $ map (map (+ 1)) is' -- Adjust for tag.
 
+entryPointTypeName :: I.EntryPointType -> Name
+entryPointTypeName (I.TypeOpaque v) = v
+entryPointTypeName (I.TypeTransparent {}) = error "entryPointTypeName: TypeTransparent"
+
 entryPointType ::
   VisibleTypes ->
   E.EntryType ->
@@ -180,16 +206,37 @@ entryPointType types t ts
   | otherwise = do
       case E.entryType t of
         E.Scalar (E.Record fs)
-          | not $ null fs ->
+          | not $ null fs -> do
               let fs' = recordFields types fs $ E.entryAscribed t
-               in addType desc . I.OpaqueRecord =<< opaqueRecord types fs' ts
+              addType desc . I.OpaqueRecord =<< opaqueRecord types fs' ts
         E.Scalar (E.Sum cs) -> do
           let (_, places) = internaliseSumTypeRep cs
               cs' = sumConstrs types cs $ E.entryAscribed t
               cs'' = zip (map fst cs') (zip (map snd cs') (map snd places))
           addType desc . I.OpaqueSum (map valueType ts)
             =<< opaqueSum types cs'' (drop 1 ts)
+        E.Array _ shape (E.Record fs)
+          | not $ null fs -> do
+              let fs' = recordFields types fs $ E.entryAscribed t
+                  rank = E.shapeRank shape
+                  ts' = map (strip rank) ts
+                  record_t = E.Scalar (E.Record fs)
+                  record_te = case E.entryAscribed t of
+                    Just (E.TEArray _ te _) -> Just te
+                    _ -> Nothing
+              ept <- snd <$> entryPointType types (E.EntryType record_t record_te) ts'
+              addType desc . I.OpaqueRecordArray rank (entryPointTypeName ept)
+                =<< opaqueRecordArray types rank fs' ts
+        E.Array _ shape et -> do
+          let ts' = map (strip (E.shapeRank shape)) ts
+              elem_te = case E.entryAscribed t of
+                Just (E.TEArray _ te _) -> Just te
+                _ -> Nothing
+          ept <- snd <$> entryPointType types (E.EntryType (E.Scalar et) elem_te) ts'
+          addType desc . I.OpaqueArray (E.shapeRank shape) (entryPointTypeName ept) $
+            map valueType ts
         _ -> addType desc $ I.OpaqueType $ map valueType ts
+
       pure (u, I.TypeOpaque desc)
   where
     u = foldl max Nonunique $ map I.uniqueness ts
@@ -197,6 +244,9 @@ entryPointType types t ts
       maybe (nameFromText $ prettyTextOneLine t') typeExpOpaqueName $
         E.entryAscribed t
     t' = E.noSizes (E.entryType t) `E.setUniqueness` Nonunique
+    strip k (I.Array pt (I.Rank r) t_u) =
+      I.arrayOf (I.Prim pt) (I.Rank (r - k)) t_u
+    strip _ ts_t = ts_t
 
 entryPoint ::
   VisibleTypes ->

@@ -803,6 +803,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                   >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
+                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
         Monomorphise -> do
           (_, imports, src) <- readProgram'
@@ -812,6 +813,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                   >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
+                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
                   >>= Monomorphise.transformProg
         Defunctionalise -> do
@@ -822,9 +824,9 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                   >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
+                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
                   >>= Monomorphise.transformProg
-                  >>= ReplaceRecords.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} -> do
           let (base, ext) = splitExtension file

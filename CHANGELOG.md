@@ -9,13 +9,137 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Fixed
+
+* Sizes that go out of scope due to use of higher order functions will
+  now work in more cases by adding existentials. (#2193)
+
+* Tracing inside AD operators with the interpreter now prints values
+  properly.
+
+### Changed
+
+## [0.25.24]
+
+### Added
+
+* `futhark doc` now produces better (and stable) anchor IDs.
+
+* `futhark profile` now supports multiple JSON files.
+
+* `futhark fmt`, by William Due and Therese Lyngby.
+
+* Lambdas can now be passed as the last argument to a function application.
+
+### Fixed
+
+* Negation of floating-point positive zero now produces a negative
+  zero.
+
+* Necessary inlining of functions used inside AD constructs.
+
+* A compile time regression for programs that used higher order
+  functions very aggressively.
+
+* Uniqueness bug related to slice simplification.
+
+## [0.25.23]
+
+### Added
+
+* Trailing commas are now allowed for arrays, records, and tuples in
+  the textual value format and in FutharkScript.
+
+* Faster floating-point atomics with OpenCL backend on AMD and NVIDIA
+  GPUs. This affects histogram workloads.
+
+* AD is now supported by the interpreter (thanks to Marcus Jensen).
+
+### Fixed
+
+* Some instances of invalid copy removal. (Again.)
+
+* An issue related to entry points with nontrivial sizes in their
+  arguments, where the entry points were also used as normal functions
+  elsewhere. (#2184)
+
+## [0.25.22]
+
+### Added
+
+* `futhark script` now supports an `-f` option.
+
+* `futhark script` now supports the builtin procedure `$store`.
+
+### Fixed
+
+* An error in tuning file validation.
+
+* Constant folding for loops that produce floating point results could
+  result in different numerical behaviour.
+
+* Compiler crash in memory short circuiting (#2176).
+
+## [0.25.21]
+
+### Added
+
+* Logging now prints more GPU information on context initialisation.
+
+* GPU cache size can now be configured (tuning param: `default_cache`).
+
+* GPU shared memory can now be configured (tuning param: `default_shared_memory`).
+
+* GPU register capacity can now be configured.
+
+* `futhark script` now accepts a `-b` option for producing binary
+  output.
+
+### Fixed
+
+* Type names for element types of array indexing functions in C
+  interface are now often better - although there are still cases
+  where you end up with hashed names. (#2172)
+
+* In some cases, GPU failures would not be reported properly if a
+  previous failure was pending.
+
+* `auto output` didn't work if the `.fut` file did not have any path
+  components.
+
+* Improved detection of malformed tuning files.
+
+## [0.25.20]
+
+### Added
+
+* Better error message when in-place updates fail at runtime due to a
+  shape mismatch.
+
+### Fixed
+
+* `#[unroll]` on an outer loop now no longer causes unrolling of all
+  loops nested inside the loop body.
+
+* Obscure issue related to replications of constants in complex
+  intrablock kernels.
+
+* Interpreter no longer crashes on attributes in patterns.
+
+* Fixes to array indexing through C API when using GPU backends.
+
+## [0.25.19]
+
+### Added
+
 * The compiler now does slightly less aggressive inlining. Use the
   `#[inline]` attribute if you want to force inlining of some
   function.
 
-### Removed
-
-### Changed
+* Arrays of opaque types now support indexing through the C API.
+  Arrays of records can also be constructed. (#2082)
 
 ### Fixed
 

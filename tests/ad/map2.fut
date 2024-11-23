@@ -1,7 +1,7 @@
 -- Map with free variable.
 -- ==
 -- entry: fwd_J rev_J
--- compiled input { 2.0 [1.0,2.0,3.0] }
+-- input { 2.0 [1.0,2.0,3.0] }
 -- output { [1.0,2.0,3.0] }
 
 def onehot n i : [n]f64 =

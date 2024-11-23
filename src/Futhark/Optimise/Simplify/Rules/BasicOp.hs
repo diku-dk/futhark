@@ -224,7 +224,7 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
           p_and_eq_x_y <-
             letSubExp "p_and_eq_x_y" $ BasicOp $ BinOp LogAnd p eq_x_y
           not_p <-
-            letSubExp "not_p" $ BasicOp $ UnOp Not p
+            letSubExp "not_p" $ BasicOp $ UnOp (Neg Bool) p
           not_p_and_eq_x_z <-
             letSubExp "p_and_eq_x_y" $ BasicOp $ BinOp LogAnd not_p eq_x_z
           letBind pat $

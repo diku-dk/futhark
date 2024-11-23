@@ -34,6 +34,7 @@ import Data.Foldable
 import Data.List (partition)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
+import Data.Maybe (isJust, isNothing)
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
@@ -51,7 +52,8 @@ i64 = Scalar $ Prim $ Signed Int64
 -- parameters.
 newtype PolyBinding
   = PolyBinding
-      ( VName,
+      ( Maybe EntryPoint,
+        VName,
         [TypeParam],
         [Pat ParamType],
         ResRetType,
@@ -60,10 +62,10 @@ newtype PolyBinding
         SrcLoc
       )
 
--- | To deduplicate size expressions, we want a looser notation of
+-- | To deduplicate size expressions, we want a looser notion of
 -- equality than the strict syntactical equality provided by the Eq
--- instance on Exp.  This newtype wrapper provides such a looser
--- notion of equality.
+-- instance on Exp. This newtype wrapper provides such a looser notion
+-- of equality.
 newtype ReplacedExp = ReplacedExp {unReplaced :: Exp}
   deriving (Show)
 
@@ -234,20 +236,8 @@ calculateDims :: Exp -> ExpReplacements -> MonoM Exp
 calculateDims body repl =
   foldCalc top_repl $ expReplace top_repl body
   where
-    -- list of strict sub-expressions of e
-    subExps e
-      | Just e' <- stripExp e = subExps e'
-      | otherwise = astMap mapper e `execState` mempty
-      where
-        mapOnExp e'
-          | Just e'' <- stripExp e' = mapOnExp e''
-          | otherwise = do
-              modify (ReplacedExp e' :)
-              astMap mapper e'
-        mapper = identityMapper {mapOnExp}
-    depends (a, _) (b, _) = b `elem` subExps (unReplaced a)
-    top_repl =
-      topologicalSort depends repl
+    depends (a, _) (b, _) = unReplaced b `elem` subExps (unReplaced a)
+    top_repl = topologicalSort depends repl
 
     ---- Calculus insertion
     foldCalc [] body' = pure body'
@@ -397,7 +387,7 @@ transformFName loc fname ft = do
         (Nothing, Nothing) -> pure $ var fname t'
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
-          (fname', infer, funbind') <- monomorphiseBinding False funbind mono_t
+          (fname', infer, funbind') <- monomorphiseBinding funbind mono_t
           tell $ Seq.singleton (qualLeaf fname, funbind')
           addLifted (qualLeaf fname) mono_t (fname', infer)
           applySizeArgs fname' (toRes Nonunique t') <$> infer t'
@@ -511,8 +501,8 @@ transformAppExp (Apply fe args _) res =
     <*> transformAppRes res
   where
     onArg (Info ext, e) = (ext,) <$> transformExp e
-transformAppExp (Loop sparams pat e1 form body loc) res = do
-  e1' <- transformExp e1
+transformAppExp (Loop sparams pat loopinit form body loc) res = do
+  e1' <- transformExp $ loopInitExp loopinit
 
   let dimArgs = S.fromList sparams
   pat' <- withArgs dimArgs $ transformPat pat
@@ -538,7 +528,7 @@ transformAppExp (Loop sparams pat e1 form body loc) res = do
   -- sizes for them.
   (pat_sizes, pat'') <- sizesForPat pat'
   res' <- transformAppRes res
-  pure $ AppExp (Loop (sparams' ++ pat_sizes) pat'' e1' form' body' loc) (Info res')
+  pure $ AppExp (Loop (sparams' ++ pat_sizes) pat'' (LoopInitExplicit e1') form' body' loc) (Info res')
 transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
   (AppRes ret ext) <- transformAppRes res
   fname' <- transformFName loc fname (toStruct t)
@@ -631,11 +621,11 @@ transformExp (RecordLit fs loc) =
   where
     transformField (RecordFieldExplicit name e loc') =
       RecordFieldExplicit name <$> transformExp e <*> pure loc'
-    transformField (RecordFieldImplicit v t _) = do
+    transformField (RecordFieldImplicit (L vloc v) t _) = do
       t' <- traverse transformType t
       transformField $
         RecordFieldExplicit
-          (baseName v)
+          (L vloc (baseName v))
           (Var (qualName v) t' loc)
           loc
 transformExp (ArrayVal vs t loc) =
@@ -982,11 +972,10 @@ arrowArg scope argset args_params rety =
 -- list. Monomorphises the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
 monomorphiseBinding ::
-  Bool ->
   PolyBinding ->
   MonoType ->
   MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
+monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
   let bind_t = funType params rettype
   (substs, t_shape_params) <-
     typeSubstsM loc bind_t $ noNamedParams inst_t
@@ -1028,14 +1017,18 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
 
   seen_before <- elem name . map (fst . fst) <$> getLifts
   name' <-
-    if null tparams && not entry && not seen_before
+    if null tparams && isNothing entry && not seen_before
       then pure name
       else newName name
 
   pure
     ( name',
-      inferSizeArgs shape_params_explicit bind_t'' bind_r,
-      if entry
+      -- If the function is an entry point, then it cannot possibly
+      -- need any explicit size arguments (checked by type checker).
+      if isJust entry
+        then const $ pure []
+        else inferSizeArgs shape_params_explicit bind_t'' bind_r,
+      if isJust entry
         then
           toValBinding
             name'
@@ -1082,7 +1075,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
 
     toValBinding name' tparams' params'' rettype' body'' =
       ValBind
-        { valBindEntryPoint = Nothing,
+        { valBindEntryPoint = Info <$> entry,
           valBindName = name',
           valBindRetType = Info rettype',
           valBindRetDecl = Nothing,
@@ -1174,23 +1167,21 @@ substPat f pat = case pat of
   PatConstr n (Info tp) ps loc -> PatConstr n (Info $ f tp) ps loc
 
 toPolyBinding :: ValBind -> PolyBinding
-toPolyBinding (ValBind _ name _ (Info rettype) tparams params body _ attrs loc) =
-  PolyBinding (name, tparams, params, rettype, body, attrs, loc)
+toPolyBinding (ValBind entry name _ (Info rettype) tparams params body _ attrs loc) =
+  PolyBinding (unInfo <$> entry, name, tparams, params, rettype, body, attrs, loc)
 
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
   let valbind' = toPolyBinding valbind
 
-  case valBindEntryPoint valbind of
-    Nothing -> pure ()
-    Just entry -> do
-      let t =
-            funType (valBindParams valbind) $
-              unInfo $
-                valBindRetType valbind
-      (name, infer, valbind'') <- monomorphiseBinding True valbind' $ monoType t
-      tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = Just entry})
-      addLifted (valBindName valbind) (monoType t) (name, infer)
+  when (isJust $ valBindEntryPoint valbind) $ do
+    let t =
+          funType (valBindParams valbind) $
+            unInfo $
+              valBindRetType valbind
+    (name, infer, valbind'') <- monomorphiseBinding valbind' $ monoType t
+    tell $ Seq.singleton (name, valbind'')
+    addLifted (valBindName valbind) (monoType t) (name, infer)
 
   pure
     mempty

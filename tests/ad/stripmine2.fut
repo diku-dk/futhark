@@ -5,12 +5,12 @@ def pow_list [n] y (xs :[n]i32) =
 
 -- ==
 -- entry: prim
--- compiled input { 3 [1,2,3] } output { [1,8,27] }
+-- input { 3 [1,2,3] } output { [1,8,27] }
 entry prim y xs = pow_list y xs
 
 -- ==
 -- entry: f_vjp f_jvp
--- compiled input { 3 [1,2,3] }
+-- input { 3 [1,2,3] }
 -- output { [[3,0,0],
 --           [0,12,0],
 --           [0,0,27]]

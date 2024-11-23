@@ -147,7 +147,7 @@ pExtType :: Parser ExtType
 pExtType = pTypeBase pExtShape (pure NoUniqueness)
 
 pRank :: Parser Rank
-pRank = Rank . length <$> many "[]"
+pRank = Rank . length <$> many (lexeme "[" *> lexeme "]")
 
 pUniqueness :: Parser Uniqueness
 pUniqueness = choice [pAsterisk $> Unique, pure Nonunique]
@@ -654,7 +654,7 @@ pOpaqueType :: Parser (Name, OpaqueType)
 pOpaqueType =
   (,)
     <$> (keyword "type" *> (nameFromText <$> pStringLiteral) <* pEqual)
-    <*> choice [pRecord, pSum, pOpaque]
+    <*> choice [pRecord, pSum, pOpaque, pRecordArray, pOpaqueArray]
   where
     pFieldName = choice [pName, nameFromString . show <$> pInt]
     pField = (,) <$> pFieldName <* pColon <*> pEntryPointType
@@ -676,6 +676,20 @@ pOpaqueType =
           )
 
     pOpaque = keyword "opaque" $> OpaqueType <*> braces (many pValueType)
+
+    pRecordArray =
+      keyword "record_array"
+        $> OpaqueRecordArray
+        <*> (pInt <* lexeme "d")
+        <*> (nameFromText <$> pStringLiteral)
+        <*> braces (many pField)
+
+    pOpaqueArray =
+      keyword "array"
+        $> OpaqueArray
+        <*> (pInt <* lexeme "d")
+        <*> (nameFromText <$> pStringLiteral)
+        <*> braces (many pValueType)
 
 pOpaqueTypes :: Parser OpaqueTypes
 pOpaqueTypes = keyword "types" $> OpaqueTypes <*> braces (many pOpaqueType)
@@ -739,8 +753,8 @@ pSOAC pr =
               <* pComma
               <*> braces (pVName `sepBy` pComma)
               <* pComma
+              <*> many (pDest <* pComma)
               <*> pLambda pr
-              <*> many (pComma *> pDest)
           )
       where
         pDest =

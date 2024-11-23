@@ -56,6 +56,7 @@ import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
 import Language.Futhark qualified as F
+import Language.Futhark.Interpreter.AD qualified as AD
 import Language.Futhark.Interpreter.Values hiding (Value)
 import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
@@ -263,6 +264,9 @@ asInteger :: Value -> Integer
 asInteger (ValuePrim (SignedValue v)) = P.valueIntegral v
 asInteger (ValuePrim (UnsignedValue v)) =
   toInteger (P.valueIntegral (P.doZExt v Int64) :: Word64)
+asInteger (ValueAD _ v)
+  | P.IntValue v' <- AD.varPrimal v =
+      P.valueIntegral v'
 asInteger v = error $ "Unexpectedly not an integer: " <> show v
 
 asInt :: Value -> Int
@@ -270,13 +274,17 @@ asInt = fromIntegral . asInteger
 
 asSigned :: Value -> IntValue
 asSigned (ValuePrim (SignedValue v)) = v
-asSigned v = error $ "Unexpected not a signed integer: " <> show v
+asSigned (ValueAD _ v)
+  | P.IntValue v' <- AD.varPrimal v = v'
+asSigned v = error $ "Unexpectedly not a signed integer: " <> show v
 
 asInt64 :: Value -> Int64
 asInt64 = fromIntegral . asInteger
 
 asBool :: Value -> Bool
 asBool (ValuePrim (BoolValue x)) = x
+asBool (ValueAD _ v)
+  | P.BoolValue v' <- AD.varPrimal v = v'
 asBool v = error $ "Unexpectedly not a boolean: " <> show v
 
 lookupInEnv ::
@@ -431,6 +439,8 @@ matchPat env p v = do
     Just env' -> pure env'
 
 patternMatch :: Env -> Pat (TypeBase Size u) -> Value -> MaybeT EvalM Env
+patternMatch env (PatAttr _ p _) val =
+  patternMatch env p val
 patternMatch env (Id v (Info t) _) val =
   lift $
     pure $
@@ -442,7 +452,7 @@ patternMatch env (TuplePat ps _) (ValueRecord vs) =
     zip ps (map snd $ sortFields vs)
 patternMatch env (RecordPat ps _) (ValueRecord vs) =
   foldM (\env' (p, v) -> patternMatch env' p v) env $
-    M.intersectionWith (,) (M.fromList ps) vs
+    M.intersectionWith (,) (M.fromList $ map (first unLoc) ps) vs
 patternMatch env (PatParens p _) v = patternMatch env p v
 patternMatch env (PatAscription p _ _) v =
   patternMatch env p v
@@ -872,8 +882,8 @@ evalAppExp env (LetWith dest src is v body loc) = do
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
     oob = bad loc env "Update out of bounds"
-evalAppExp env (Loop sparams pat init_e form body _) = do
-  init_v <- eval env init_e
+evalAppExp env (Loop sparams pat loopinit form body _) = do
+  init_v <- eval env $ loopInitExp loopinit
   case form of
     For iv bound -> do
       bound' <- asSigned <$> eval env bound
@@ -949,10 +959,10 @@ eval env (TupLit vs _) = toTuple <$> mapM (eval env) vs
 eval env (RecordLit fields _) =
   ValueRecord . M.fromList <$> mapM evalField fields
   where
-    evalField (RecordFieldExplicit k e _) = do
+    evalField (RecordFieldExplicit (L _ k) e _) = do
       v <- eval env e
       pure (k, v)
-    evalField (RecordFieldImplicit k t loc) = do
+    evalField (RecordFieldImplicit (L _ k) t loc) = do
       v <- eval env $ Var (qualName k) t loc
       pure (baseName k, v)
 eval _ (StringLit vs _) =
@@ -1006,28 +1016,11 @@ eval _ (FloatLit v (Info t) _) =
     Scalar (Prim (FloatType ft)) ->
       pure $ ValuePrim $ FloatValue $ floatValue ft v
     _ -> error $ "eval: nonsensical type for float literal: " <> prettyString t
-eval env (Negate e _) = do
+eval env (Negate e loc) = do
   ev <- eval env e
-  ValuePrim <$> case ev of
-    ValuePrim (SignedValue (Int8Value v)) -> pure $ SignedValue $ Int8Value (-v)
-    ValuePrim (SignedValue (Int16Value v)) -> pure $ SignedValue $ Int16Value (-v)
-    ValuePrim (SignedValue (Int32Value v)) -> pure $ SignedValue $ Int32Value (-v)
-    ValuePrim (SignedValue (Int64Value v)) -> pure $ SignedValue $ Int64Value (-v)
-    ValuePrim (UnsignedValue (Int8Value v)) -> pure $ UnsignedValue $ Int8Value (-v)
-    ValuePrim (UnsignedValue (Int16Value v)) -> pure $ UnsignedValue $ Int16Value (-v)
-    ValuePrim (UnsignedValue (Int32Value v)) -> pure $ UnsignedValue $ Int32Value (-v)
-    ValuePrim (UnsignedValue (Int64Value v)) -> pure $ UnsignedValue $ Int64Value (-v)
-    ValuePrim (FloatValue (Float16Value v)) -> pure $ FloatValue $ Float16Value (-v)
-    ValuePrim (FloatValue (Float32Value v)) -> pure $ FloatValue $ Float32Value (-v)
-    ValuePrim (FloatValue (Float64Value v)) -> pure $ FloatValue $ Float64Value (-v)
-    _ -> error $ "Cannot negate " <> show ev
-eval env (Not e _) = do
-  ev <- eval env e
-  ValuePrim <$> case ev of
-    ValuePrim (BoolValue b) -> pure $ BoolValue $ not b
-    ValuePrim (SignedValue iv) -> pure $ SignedValue $ P.doComplement iv
-    ValuePrim (UnsignedValue iv) -> pure $ UnsignedValue $ P.doComplement iv
-    _ -> error $ "Cannot logically negate " <> show ev
+  apply loc env intrinsicsNeg ev
+eval env (Not e loc) =
+  apply loc env intrinsicsNot =<< eval env e
 eval env (Update src is v loc) =
   maybe oob pure
     =<< writeArray <$> mapM (evalDimIndex env) is <*> eval env src <*> eval env v
@@ -1274,44 +1267,44 @@ initialCtx =
     types = M.mapMaybeWithKey (const . tdef . baseString) intrinsics
 
     sintOp f =
-      [ (getS, putS, P.doBinOp (f Int8)),
-        (getS, putS, P.doBinOp (f Int16)),
-        (getS, putS, P.doBinOp (f Int32)),
-        (getS, putS, P.doBinOp (f Int64))
+      [ (getS, putS, P.doBinOp (f Int8), adBinOp $ AD.OpBin (f Int8)),
+        (getS, putS, P.doBinOp (f Int16), adBinOp $ AD.OpBin (f Int16)),
+        (getS, putS, P.doBinOp (f Int32), adBinOp $ AD.OpBin (f Int32)),
+        (getS, putS, P.doBinOp (f Int64), adBinOp $ AD.OpBin (f Int64))
       ]
     uintOp f =
-      [ (getU, putU, P.doBinOp (f Int8)),
-        (getU, putU, P.doBinOp (f Int16)),
-        (getU, putU, P.doBinOp (f Int32)),
-        (getU, putU, P.doBinOp (f Int64))
+      [ (getU, putU, P.doBinOp (f Int8), adBinOp $ AD.OpBin (f Int8)),
+        (getU, putU, P.doBinOp (f Int16), adBinOp $ AD.OpBin (f Int16)),
+        (getU, putU, P.doBinOp (f Int32), adBinOp $ AD.OpBin (f Int32)),
+        (getU, putU, P.doBinOp (f Int64), adBinOp $ AD.OpBin (f Int64))
       ]
     intOp f = sintOp f ++ uintOp f
     floatOp f =
-      [ (getF, putF, P.doBinOp (f Float16)),
-        (getF, putF, P.doBinOp (f Float32)),
-        (getF, putF, P.doBinOp (f Float64))
+      [ (getF, putF, P.doBinOp (f Float16), adBinOp $ AD.OpBin (f Float16)),
+        (getF, putF, P.doBinOp (f Float32), adBinOp $ AD.OpBin (f Float32)),
+        (getF, putF, P.doBinOp (f Float64), adBinOp $ AD.OpBin (f Float64))
       ]
     arithOp f g = Just $ bopDef $ intOp f ++ floatOp g
 
-    flipCmps = map (\(f, g, h) -> (f, g, flip h))
+    flipCmps = map (\(f, g, h, o) -> (f, g, flip h, flip o))
     sintCmp f =
-      [ (getS, Just . BoolValue, P.doCmpOp (f Int8)),
-        (getS, Just . BoolValue, P.doCmpOp (f Int16)),
-        (getS, Just . BoolValue, P.doCmpOp (f Int32)),
-        (getS, Just . BoolValue, P.doCmpOp (f Int64))
+      [ (getS, Just . BoolValue, P.doCmpOp (f Int8), adBinOp $ AD.OpCmp (f Int8)),
+        (getS, Just . BoolValue, P.doCmpOp (f Int16), adBinOp $ AD.OpCmp (f Int16)),
+        (getS, Just . BoolValue, P.doCmpOp (f Int32), adBinOp $ AD.OpCmp (f Int32)),
+        (getS, Just . BoolValue, P.doCmpOp (f Int64), adBinOp $ AD.OpCmp (f Int64))
       ]
     uintCmp f =
-      [ (getU, Just . BoolValue, P.doCmpOp (f Int8)),
-        (getU, Just . BoolValue, P.doCmpOp (f Int16)),
-        (getU, Just . BoolValue, P.doCmpOp (f Int32)),
-        (getU, Just . BoolValue, P.doCmpOp (f Int64))
+      [ (getU, Just . BoolValue, P.doCmpOp (f Int8), adBinOp $ AD.OpCmp (f Int8)),
+        (getU, Just . BoolValue, P.doCmpOp (f Int16), adBinOp $ AD.OpCmp (f Int16)),
+        (getU, Just . BoolValue, P.doCmpOp (f Int32), adBinOp $ AD.OpCmp (f Int32)),
+        (getU, Just . BoolValue, P.doCmpOp (f Int64), adBinOp $ AD.OpCmp (f Int64))
       ]
     floatCmp f =
-      [ (getF, Just . BoolValue, P.doCmpOp (f Float16)),
-        (getF, Just . BoolValue, P.doCmpOp (f Float32)),
-        (getF, Just . BoolValue, P.doCmpOp (f Float64))
+      [ (getF, Just . BoolValue, P.doCmpOp (f Float16), adBinOp $ AD.OpCmp (f Float16)),
+        (getF, Just . BoolValue, P.doCmpOp (f Float32), adBinOp $ AD.OpCmp (f Float32)),
+        (getF, Just . BoolValue, P.doCmpOp (f Float64), adBinOp $ AD.OpCmp (f Float64))
       ]
-    boolCmp f = [(getB, Just . BoolValue, P.doCmpOp f)]
+    boolCmp f = [(getB, Just . BoolValue, P.doCmpOp f, adBinOp $ AD.OpCmp f)]
 
     getV (SignedValue x) = Just $ P.IntValue x
     getV (UnsignedValue x) = Just $ P.IntValue x
@@ -1341,6 +1334,17 @@ initialCtx =
     getB _ = Nothing
     putB (P.BoolValue x) = Just $ BoolValue x
     putB _ = Nothing
+
+    getAD (ValuePrim v) = AD.Constant <$> getV v
+    getAD (ValueAD d v) = Just $ AD.Variable d v
+    getAD _ = Nothing
+    putAD (AD.Variable d s) = ValueAD d s
+    putAD (AD.Constant v) = ValuePrim $ putV v
+
+    adToPrim v = putV $ AD.primitive v
+
+    adBinOp op x y = AD.doOp op [x, y]
+    adUnOp op x = AD.doOp op [x]
 
     fun1 f =
       TermValue Nothing $ ValueFun $ \x -> f x
@@ -1406,6 +1410,12 @@ initialCtx =
           | Just z <- msum $ map (`bopDef'` (x', y')) fs -> do
               breakOnNaN [x', y'] z
               pure $ ValuePrim z
+        _
+          | Just x' <- getAD x,
+            Just y' <- getAD y,
+            Just z <- msum $ map (`bopDefAD'` (x', y')) fs -> do
+              breakOnNaN [adToPrim x', adToPrim y'] $ adToPrim z
+              pure $ putAD z
         _ ->
           bad noLoc mempty . docText $
             "Cannot apply operator to arguments"
@@ -1414,10 +1424,11 @@ initialCtx =
               <+> dquotes (prettyValue y)
               <> "."
       where
-        bopDef' (valf, retf, op) (x, y) = do
+        bopDef' (valf, retf, op, _) (x, y) = do
           x' <- valf x
           y' <- valf y
           retf =<< op x' y'
+        bopDefAD' (_, _, _, dop) (x, y) = dop x y
 
     unopDef fs = fun1 $ \x ->
       case x of
@@ -1425,17 +1436,23 @@ initialCtx =
           | Just r <- msum $ map (`unopDef'` x') fs -> do
               breakOnNaN [x'] r
               pure $ ValuePrim r
+        _
+          | Just x' <- getAD x,
+            Just r <- msum $ map (`unopDefAD'` x') fs -> do
+              breakOnNaN [adToPrim x'] $ adToPrim r
+              pure $ putAD r
         _ ->
           bad noLoc mempty . docText $
             "Cannot apply function to argument"
               <+> dquotes (prettyValue x)
               <> "."
       where
-        unopDef' (valf, retf, op) x = do
+        unopDef' (valf, retf, op, _) x = do
           x' <- valf x
           retf =<< op x'
+        unopDefAD' (_, _, _, dop) = dop
 
-    tbopDef f = fun1 $ \v ->
+    tbopDef op f = fun1 $ \v ->
       case fromTuple v of
         Just [ValuePrim x, ValuePrim y]
           | Just x' <- getV x,
@@ -1443,6 +1460,12 @@ initialCtx =
             Just z <- putV <$> f x' y' -> do
               breakOnNaN [x, y] z
               pure $ ValuePrim z
+        Just [x, y]
+          | Just x' <- getAD x,
+            Just y' <- getAD y,
+            Just z <- AD.doOp op [x', y'] -> do
+              breakOnNaN [adToPrim x', adToPrim y'] $ adToPrim z
+              pure $ putAD z
         _ ->
           bad noLoc mempty . docText $
             "Cannot apply operator to argument"
@@ -1452,15 +1475,31 @@ initialCtx =
     def "!" =
       Just $
         unopDef
-          [ (getS, putS, P.doUnOp $ P.Complement Int8),
-            (getS, putS, P.doUnOp $ P.Complement Int16),
-            (getS, putS, P.doUnOp $ P.Complement Int32),
-            (getS, putS, P.doUnOp $ P.Complement Int64),
-            (getU, putU, P.doUnOp $ P.Complement Int8),
-            (getU, putU, P.doUnOp $ P.Complement Int16),
-            (getU, putU, P.doUnOp $ P.Complement Int32),
-            (getU, putU, P.doUnOp $ P.Complement Int64),
-            (getB, putB, P.doUnOp P.Not)
+          [ (getS, putS, P.doUnOp $ P.Complement Int8, adUnOp $ AD.OpUn $ P.Complement Int8),
+            (getS, putS, P.doUnOp $ P.Complement Int16, adUnOp $ AD.OpUn $ P.Complement Int16),
+            (getS, putS, P.doUnOp $ P.Complement Int32, adUnOp $ AD.OpUn $ P.Complement Int32),
+            (getS, putS, P.doUnOp $ P.Complement Int64, adUnOp $ AD.OpUn $ P.Complement Int64),
+            (getU, putU, P.doUnOp $ P.Complement Int8, adUnOp $ AD.OpUn $ P.Complement Int8),
+            (getU, putU, P.doUnOp $ P.Complement Int16, adUnOp $ AD.OpUn $ P.Complement Int16),
+            (getU, putU, P.doUnOp $ P.Complement Int32, adUnOp $ AD.OpUn $ P.Complement Int32),
+            (getU, putU, P.doUnOp $ P.Complement Int64, adUnOp $ AD.OpUn $ P.Complement Int64),
+            (getB, putB, P.doUnOp $ P.Neg P.Bool, adUnOp $ AD.OpUn $ P.Neg P.Bool)
+          ]
+    def "neg" =
+      Just $
+        unopDef
+          [ (getS, putS, P.doUnOp $ P.Neg $ P.IntType Int8, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int8),
+            (getS, putS, P.doUnOp $ P.Neg $ P.IntType Int16, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int16),
+            (getS, putS, P.doUnOp $ P.Neg $ P.IntType Int32, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int32),
+            (getS, putS, P.doUnOp $ P.Neg $ P.IntType Int64, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int64),
+            (getU, putU, P.doUnOp $ P.Neg $ P.IntType Int8, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int8),
+            (getU, putU, P.doUnOp $ P.Neg $ P.IntType Int16, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int16),
+            (getU, putU, P.doUnOp $ P.Neg $ P.IntType Int32, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int32),
+            (getU, putU, P.doUnOp $ P.Neg $ P.IntType Int64, adUnOp $ AD.OpUn $ P.Neg $ P.IntType Int64),
+            (getF, putF, P.doUnOp $ P.Neg $ P.FloatType Float16, adUnOp $ AD.OpUn $ P.Neg $ P.FloatType Float16),
+            (getF, putF, P.doUnOp $ P.Neg $ P.FloatType Float32, adUnOp $ AD.OpUn $ P.Neg $ P.FloatType Float32),
+            (getF, putF, P.doUnOp $ P.Neg $ P.FloatType Float64, adUnOp $ AD.OpUn $ P.Neg $ P.FloatType Float64),
+            (getB, putB, P.doUnOp $ P.Neg P.Bool, adUnOp $ AD.OpUn $ P.Neg P.Bool)
           ]
     def "+" = arithOp (`P.Add` P.OverflowWrap) P.FAdd
     def "-" = arithOp (`P.Sub` P.OverflowWrap) P.FSub
@@ -1540,16 +1579,16 @@ initialCtx =
               ++ boolCmp P.CmpLle
     def s
       | Just bop <- find ((s ==) . prettyString) P.allBinOps =
-          Just $ tbopDef $ P.doBinOp bop
+          Just $ tbopDef (AD.OpBin bop) $ P.doBinOp bop
       | Just unop <- find ((s ==) . prettyString) P.allCmpOps =
-          Just $ tbopDef $ \x y -> P.BoolValue <$> P.doCmpOp unop x y
+          Just $ tbopDef (AD.OpCmp unop) $ \x y -> P.BoolValue <$> P.doCmpOp unop x y
       | Just cop <- find ((s ==) . prettyString) P.allConvOps =
-          Just $ unopDef [(getV, Just . putV, P.doConvOp cop)]
+          Just $ unopDef [(getV, Just . putV, P.doConvOp cop, adUnOp $ AD.OpConv cop)]
       | Just unop <- find ((s ==) . prettyString) P.allUnOps =
-          Just $ unopDef [(getV, Just . putV, P.doUnOp unop)]
+          Just $ unopDef [(getV, Just . putV, P.doUnOp unop, adUnOp $ AD.OpUn unop)]
       | Just (pts, _, f) <- M.lookup s P.primFuns =
           case length pts of
-            1 -> Just $ unopDef [(getV, Just . putV, f . pure)]
+            1 -> Just $ unopDef [(getV, Just . putV, f . pure, adUnOp $ AD.OpFn s)]
             _ -> Just $
               fun1 $ \x -> do
                 let getV' (ValuePrim v) = Just v
@@ -1740,14 +1779,22 @@ initialCtx =
           ( ValueAcc shape op acc_arr,
             ValuePrim (SignedValue (Int64Value i'))
             ) ->
-              if i' >= 0 && i' < arrayLength acc_arr
-                then do
-                  let x = acc_arr ! fromIntegral i'
-                  res <- op x v
-                  pure $ ValueAcc shape op $ acc_arr // [(fromIntegral i', res)]
-                else pure acc
+              write acc v shape op acc_arr i'
+          ( ValueAcc shape op acc_arr,
+            adv@(ValueAD {})
+            )
+              | Just (SignedValue (Int64Value i')) <- putV . AD.primitive <$> getAD adv ->
+                  write acc v shape op acc_arr i'
           _ ->
             error $ "acc_write invalid arguments: " <> prettyString (show acc, show i, show v)
+      where
+        write acc v shape op acc_arr i' =
+          if i' >= 0 && i' < arrayLength acc_arr
+            then do
+              let x = acc_arr ! fromIntegral i'
+              res <- op x v
+              pure $ ValueAcc shape op $ acc_arr // [(fromIntegral i', res)]
+            else pure acc
     --
     def "flat_index_2d" = Just . fun6 $ \arr offset n1 s1 n2 s2 -> do
       let offset' = asInt64 offset
@@ -1924,11 +1971,129 @@ initialCtx =
           else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "manifest" = Just $ fun1 pure
     def "vjp2" = Just $
-      fun3 $
-        \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
+      -- TODO: This could be much better. Currently, it is very inefficient
+      -- Perhaps creating VJPValues could be abstracted into a function
+      -- exposed by the AD module?
+      fun3 $ \f v s -> do
+        -- Get the depth
+        depth <- length <$> stacktrace
+
+        -- Augment the values
+        let v' =
+              fromMaybe (error $ "vjp: invalid values " ++ show v) $
+                modifyValueM (\i lv -> ValueAD depth . AD.VJP . AD.VJPValue . AD.TapeID i <$> getAD lv) v
+        -- Turn the seeds into a list of ADValues
+        let s' =
+              fromMaybe (error $ "vjp: invalid seeds " ++ show s) $
+                mapM getAD $
+                  fst $
+                    valueAccum (\a b -> (b : a, b)) [] s
+
+        -- Run the function, and turn its outputs into a list of Values
+        o <- apply noLoc mempty f v'
+        let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
+
+        -- For each output..
+        let m =
+              fromMaybe (error "vjp: differentiation failed") $
+                zipWithM
+                  ( \on sn -> case on of
+                      -- If it is a VJP variable of the correct depth, run deriveTape on it- and its corresponding seed
+                      (ValueAD d (AD.VJP (AD.VJPValue t))) | d == depth -> (putAD $ AD.tapePrimal t,) <$> AD.deriveTape t sn
+                      -- Otherwise, its partial derivatives are all 0
+                      _ -> Just (on, M.empty)
+                  )
+                  o'
+                  s'
+
+        -- Add together every derivative
+        let drvs = M.map (Just . putAD) $ M.unionsWith add $ map snd m
+
+        -- Extract the output values, and the partial derivatives
+        let ov = modifyValue (\i _ -> fst $ m !! i) o
+        let od =
+              fromMaybe (error "vjp: differentiation failed") $
+                modifyValueM (\i vo -> M.findWithDefault (ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD vo) i drvs) v
+
+        -- Return a tuple of the output values, and partial derivatives
+        pure $ toTuple [ov, od]
+      where
+        modifyValue f v = snd $ valueAccum (\a b -> (a + 1, f a b)) 0 v
+        modifyValueM f v =
+          snd
+            <$> valueAccumLM
+              ( \a b -> do
+                  b' <- f a b
+                  pure (a + 1, b')
+              )
+              0
+              v
+
+        -- TODO: Perhaps this could be fully abstracted by AD?
+        -- Making addFor private would be nice..
+        add x y =
+          fromMaybe (error "jvp: illtyped add") $
+            AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
     def "jvp2" = Just $
-      fun3 $
-        \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
+      -- TODO: This could be much better. Currently, it is very inefficient
+      -- Perhaps creating JVPValues could be abstracted into a function
+      -- exposed by the AD module?
+      fun3 $ \f v s -> do
+        -- Get the depth
+        depth <- length <$> stacktrace
+
+        -- Turn the seeds into a list of ADValues
+        let s' =
+              expectJust ("jvp: invalid seeds " ++ show s) $
+                mapM getAD $
+                  fst $
+                    valueAccum (\a b -> (b : a, b)) [] s
+        -- Augment the values
+        let v' =
+              expectJust ("jvp: invalid values " ++ show v) $
+                modifyValueM
+                  ( \i lv -> do
+                      lv' <- getAD lv
+                      pure $ ValueAD depth . AD.JVP . AD.JVPValue lv' $ s' !! (length s' - 1 - i)
+                  )
+                  v
+
+        -- Run the function, and turn its outputs into a list of Values
+        o <- apply noLoc mempty f v'
+        let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
+
+        -- For each output..
+        let m =
+              expectJust "jvp: differentiation failed" $
+                mapM
+                  ( \on -> case on of
+                      -- If it is a JVP variable of the correct depth, return its primal and derivative
+                      (ValueAD d (AD.JVP (AD.JVPValue pv dv))) | d == depth -> Just (putAD pv, putAD dv)
+                      -- Otherwise, its partial derivatives are all 0
+                      _ -> (on,) . ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD on
+                  )
+                  o'
+
+        -- Extract the output values, and the partial derivatives
+        let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
+            od = modifyValue (\i _ -> snd $ m !! (length m - 1 - i)) o
+
+        -- Return a tuple of the output values, and partial derivatives
+        pure $ toTuple [ov, od]
+      where
+        modifyValue f v = snd $ valueAccum (\a b -> (a + 1, f a b)) 0 v
+        modifyValueM f v =
+          snd
+            <$> valueAccumLM
+              ( \a b -> do
+                  b' <- f a b
+                  pure (a + 1, b')
+              )
+              0
+              v
+
+        expectJust _ (Just v) = v
+        expectJust s Nothing = error s
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s
@@ -1941,6 +2106,18 @@ initialCtx =
       let n = ValuePrim $ SignedValue $ Int64Value $ arrayLength xs
        in apply2 noLoc mempty f n arg
     stream _ arg = error $ "Cannot stream: " <> show arg
+
+intrinsicVal :: Name -> Value
+intrinsicVal name =
+  case M.lookup (intrinsicVar name) $ envTerm $ ctxEnv initialCtx of
+    Just (TermValue _ v) -> v
+    _ -> error $ "intrinsicVal: " <> prettyString name
+
+intrinsicsNeg :: Value
+intrinsicsNeg = intrinsicVal "neg"
+
+intrinsicsNot :: Value
+intrinsicsNot = intrinsicVal "!"
 
 interpretExp :: Ctx -> Exp -> F ExtOp Value
 interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e

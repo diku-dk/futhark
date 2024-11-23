@@ -295,7 +295,7 @@ intrablockStm stm@(Let pat aux e) = do
               replaceSets (IntraAcc x y log) =
                 IntraAcc (S.map (map replace) x) (S.map (map replace) y) log
           censor replaceSets $ intrablockStms stream_stms
-    Op (Scatter w ivs lam dests) -> do
+    Op (Scatter w ivs dests lam) -> do
       write_i <- newVName "write_i"
       space <- mkSegSpace [(write_i, w)]
 

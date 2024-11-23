@@ -139,14 +139,14 @@ vjpSOAC ops pat _aux (Screma w as form) m
       vjpStm ops mapstm $ vjpStm ops scanstm m
 
 -- Differentiating Scatter
-vjpSOAC ops pat aux (Scatter w ass lam written_info) m
+vjpSOAC ops pat aux (Scatter w ass written_info lam) m
   | isIdentityLambda lam =
       vjpScatter ops pat aux (w, ass, lam, written_info) m
   | otherwise = do
       map_idents <- mapM (\t -> newIdent "map_res" (arrayOfRow t w)) $ lambdaReturnType lam
       let map_stm = mkLet map_idents $ Op $ Screma w ass $ mapSOAC lam
       lam_id <- mkIdentityLambda $ lambdaReturnType lam
-      let scatter_stm = Let pat aux $ Op $ Scatter w (map identName map_idents) lam_id written_info
+      let scatter_stm = Let pat aux $ Op $ Scatter w (map identName map_idents) written_info lam_id
       vjpStm ops map_stm $ vjpStm ops scatter_stm m
 
 -- Differentiating Histograms

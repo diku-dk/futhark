@@ -252,7 +252,7 @@ transformSOAC pat _ (Screma w arrs form)
       -- anything, so split it up and try again.
       scope <- castScope <$> askScope
       transformStms =<< runBuilderT_ (dissectScrema pat w form arrs) scope
-transformSOAC pat _ (Scatter w ivs lam dests) = do
+transformSOAC pat _ (Scatter w ivs dests lam) = do
   (gtid, space) <- mkSegSpace w
 
   Body () kstms res <- mapLambdaToBody transformBody gtid lam ivs

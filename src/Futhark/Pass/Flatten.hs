@@ -11,6 +11,7 @@
 -- scalar code.
 module Futhark.Pass.Flatten (flattenSOACs) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (bimap, first, second)

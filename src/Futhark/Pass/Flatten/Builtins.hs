@@ -15,7 +15,7 @@ module Futhark.Pass.Flatten.Builtins
   )
 where
 
-import Control.Monad.Reader
+import Control.Monad (forM, (<=<))
 import Control.Monad.State.Strict
 import Data.Foldable (toList)
 import Data.Maybe (fromMaybe)

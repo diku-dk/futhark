@@ -147,7 +147,6 @@ import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
 import Futhark.Util.IntegralExp
-import Futhark.Util.Loc (noLoc)
 import Futhark.Util.Pretty hiding (nest, space)
 import Language.Futhark.Warnings
 import Prelude hiding (mod, quot)
@@ -487,6 +486,8 @@ entryPointSignedness _ (TypeTransparent vt) = [valueTypeSign vt]
 entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> map valueTypeSign vts
+    OpaqueArray _ _ vts -> map valueTypeSign vts
+    OpaqueRecordArray _ _ fs -> foldMap (entryPointSignedness types . snd) fs
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
     OpaqueSum vts _ -> map valueTypeSign vts
 
@@ -499,6 +500,8 @@ entryPointSize _ (TypeTransparent _) = 1
 entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> length vts
+    OpaqueArray _ _ vts -> length vts
+    OpaqueRecordArray _ _ fs -> sum $ map (entryPointSize types . snd) fs
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
     OpaqueSum vts _ -> length vts
 

@@ -45,6 +45,7 @@ openclAtomics, cudaAtomics :: AtomicBinOp
   where
     opencl64 =
       [ (Add Int64 OverflowUndef, Imp.AtomicAdd Int64),
+        (FAdd Float64, Imp.AtomicFAdd Float64),
         (SMax Int64, Imp.AtomicSMax Int64),
         (SMin Int64, Imp.AtomicSMin Int64),
         (UMax Int64, Imp.AtomicUMax Int64),
@@ -55,6 +56,7 @@ openclAtomics, cudaAtomics :: AtomicBinOp
       ]
     opencl32 =
       [ (Add Int32 OverflowUndef, Imp.AtomicAdd Int32),
+        (FAdd Float32, Imp.AtomicFAdd Float32),
         (SMax Int32, Imp.AtomicSMax Int32),
         (SMin Int32, Imp.AtomicSMin Int32),
         (UMax Int32, Imp.AtomicUMax Int32),
@@ -64,11 +66,7 @@ openclAtomics, cudaAtomics :: AtomicBinOp
         (Xor Int32, Imp.AtomicXor Int32)
       ]
     opencl = opencl32 ++ opencl64
-    cuda =
-      opencl
-        ++ [ (FAdd Float32, Imp.AtomicFAdd Float32),
-             (FAdd Float64, Imp.AtomicFAdd Float64)
-           ]
+    cuda = opencl
 
 compileProg ::
   (MonadFreshNames m) =>

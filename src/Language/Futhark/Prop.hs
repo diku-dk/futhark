@@ -31,7 +31,9 @@ module Language.Futhark.Prop
     valBindBound,
     funType,
     stripExp,
+    subExps,
     similarExps,
+    sameExp,
 
     -- * Queries on patterns and params
     patIdents,
@@ -460,8 +462,8 @@ typeOf (TupLit es _) = Scalar $ tupleRecord $ map typeOf es
 typeOf (RecordLit fs _) =
   Scalar $ Record $ M.fromList $ map record fs
   where
-    record (RecordFieldExplicit name e _) = (name, typeOf e)
-    record (RecordFieldImplicit name (Info t) _) = (baseName name, t)
+    record (RecordFieldExplicit (L _ name) e _) = (name, typeOf e)
+    record (RecordFieldImplicit (L _ name) (Info t) _) = (baseName name, t)
 typeOf (ArrayLit _ (Info t) _) = t
 typeOf (ArrayVal vs t loc) =
   Array mempty (Shape [sizeFromInteger (genericLength vs) loc]) (Prim t)
@@ -596,7 +598,8 @@ patternType (Wildcard (Info t) _) = t
 patternType (PatParens p _) = patternType p
 patternType (Id _ (Info t) _) = t
 patternType (TuplePat pats _) = Scalar $ tupleRecord $ map patternType pats
-patternType (RecordPat fs _) = Scalar $ Record $ patternType <$> M.fromList fs
+patternType (RecordPat fs _) =
+  Scalar $ Record $ patternType <$> M.fromList (map (first unLoc) fs)
 patternType (PatAscription p _ _) = patternType p
 patternType (PatLit _ (Info t) _) = t
 patternType (PatConstr _ (Info t) _ _) = t
@@ -1065,12 +1068,20 @@ intrinsics =
             )
           ++
           -- This overrides the ! from Primitive.
-
-          -- This overrides the ! from Primitive.
           [ ( "!",
               IntrinsicOverloadedFun
                 ( map Signed [minBound .. maxBound]
                     ++ map Unsigned [minBound .. maxBound]
+                    ++ [Bool]
+                )
+                [Nothing]
+                Nothing
+            ),
+            ( "neg",
+              IntrinsicOverloadedFun
+                ( map Signed [minBound .. maxBound]
+                    ++ map Unsigned [minBound .. maxBound]
+                    ++ map FloatType [minBound .. maxBound]
                     ++ [Bool]
                 )
                 [Nothing]
@@ -1362,6 +1373,20 @@ stripExp (Attr _ e _) = stripExp e `mplus` Just e
 stripExp (Ascript e _ _) = stripExp e `mplus` Just e
 stripExp _ = Nothing
 
+-- | All non-trivial subexpressions (as by stripExp) of some
+-- expression, not including the expression itself.
+subExps :: Exp -> [Exp]
+subExps e
+  | Just e' <- stripExp e = subExps e'
+  | otherwise = astMap mapper e `execState` mempty
+  where
+    mapOnExp e'
+      | Just e'' <- stripExp e' = mapOnExp e''
+      | otherwise = do
+          modify (e' :)
+          astMap mapper e'
+    mapper = identityMapper {mapOnExp}
+
 similarSlices :: Slice -> Slice -> Maybe [(Exp, Exp)]
 similarSlices slice1 slice2
   | length slice1 == length slice2 = do
@@ -1409,9 +1434,9 @@ similarExps (RecordLit fs1 _) (RecordLit fs2 _)
   | length fs1 == length fs2 =
       zipWithM onFields fs1 fs2
   where
-    onFields (RecordFieldExplicit n1 fe1 _) (RecordFieldExplicit n2 fe2 _)
+    onFields (RecordFieldExplicit (L _ n1) fe1 _) (RecordFieldExplicit (L _ n2) fe2 _)
       | n1 == n2 = Just (fe1, fe2)
-    onFields (RecordFieldImplicit vn1 ty1 _) (RecordFieldImplicit vn2 ty2 _) =
+    onFields (RecordFieldImplicit (L _ vn1) ty1 _) (RecordFieldImplicit (L _ vn2) ty2 _) =
       Just (Var (qualName vn1) ty1 mempty, Var (qualName vn2) ty2 mempty)
     onFields _ _ = Nothing
 similarExps (ArrayLit es1 _ _) (ArrayLit es2 _ _)
@@ -1444,6 +1469,14 @@ similarExps (ProjectSection names1 _ _) (ProjectSection names2 _ _)
 similarExps (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
   similarSlices slice1 slice2
 similarExps _ _ = Nothing
+
+-- | Are these the same expression as per recursively invoking
+-- 'similarExps'?
+sameExp :: Exp -> Exp -> Bool
+sameExp e1 e2
+  | Just es <- similarExps e1 e2 =
+      all (uncurry sameExp) es
+  | otherwise = False
 
 -- | An identifier with type- and aliasing information.
 type Ident = IdentBase Info VName
