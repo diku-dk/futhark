@@ -24,3 +24,18 @@ module m
   def x = 123
   def y = 321
 }
+
+module type mt4 = {
+  val f [n] : [n]i32 -> [n]i32
+
+  val g [n] :
+    [n]i32 -> [n]i32
+
+  val g [n] :
+    [n]i32
+    -> [n]i32
+}
+
+module pm1 (P: {}) : {} = {
+
+}

@@ -31,7 +31,9 @@ module Language.Futhark.Prop
     valBindBound,
     funType,
     stripExp,
+    subExps,
     similarExps,
+    sameExp,
     frameOf,
     shapePrefix,
     typeShapePrefix,
@@ -1388,6 +1390,20 @@ stripExp (Attr _ e _) = stripExp e `mplus` Just e
 stripExp (Ascript e _ _) = stripExp e `mplus` Just e
 stripExp _ = Nothing
 
+-- | All non-trivial subexpressions (as by stripExp) of some
+-- expression, not including the expression itself.
+subExps :: Exp -> [Exp]
+subExps e
+  | Just e' <- stripExp e = subExps e'
+  | otherwise = astMap mapper e `execState` mempty
+  where
+    mapOnExp e'
+      | Just e'' <- stripExp e' = mapOnExp e''
+      | otherwise = do
+          modify (e' :)
+          astMap mapper e'
+    mapper = identityMapper {mapOnExp}
+
 similarSlices :: Slice -> Slice -> Maybe [(Exp, Exp)]
 similarSlices slice1 slice2
   | length slice1 == length slice2 = do
@@ -1470,6 +1486,14 @@ similarExps (ProjectSection names1 _ _) (ProjectSection names2 _ _)
 similarExps (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
   similarSlices slice1 slice2
 similarExps _ _ = Nothing
+
+-- | Are these the same expression as per recursively invoking
+-- 'similarExps'?
+sameExp :: Exp -> Exp -> Bool
+sameExp e1 e2
+  | Just es <- similarExps e1 e2 =
+      all (uncurry sameExp) es
+  | otherwise = False
 
 frameOf :: Exp -> Shape Size
 frameOf (AppExp (Apply _ args _) _) =

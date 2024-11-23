@@ -43,6 +43,7 @@ pkgs.stdenv.mkDerivation {
       haskell.haskell-language-server
       haskellPackages.graphmod
       haskellPackages.apply-refact
+      python
       xdot
       hlint
       pkg-config

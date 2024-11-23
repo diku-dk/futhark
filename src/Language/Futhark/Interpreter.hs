@@ -264,8 +264,8 @@ asInteger :: Value -> Integer
 asInteger (ValuePrim (SignedValue v)) = P.valueIntegral v
 asInteger (ValuePrim (UnsignedValue v)) =
   toInteger (P.valueIntegral (P.doZExt v Int64) :: Word64)
-asInteger (ValueAD d v)
-  | P.IntValue v' <- AD.primitive $ AD.primal $ AD.Variable d v =
+asInteger (ValueAD _ v)
+  | P.IntValue v' <- AD.varPrimal v =
       P.valueIntegral v'
 asInteger v = error $ "Unexpectedly not an integer: " <> show v
 
@@ -274,8 +274,8 @@ asInt = fromIntegral . asInteger
 
 asSigned :: Value -> IntValue
 asSigned (ValuePrim (SignedValue v)) = v
-asSigned (ValueAD d v)
-  | P.IntValue v' <- AD.primitive $ AD.primal $ AD.Variable d v = v'
+asSigned (ValueAD _ v)
+  | P.IntValue v' <- AD.varPrimal v = v'
 asSigned v = error $ "Unexpectedly not a signed integer: " <> show v
 
 asInt64 :: Value -> Int64
@@ -283,8 +283,8 @@ asInt64 = fromIntegral . asInteger
 
 asBool :: Value -> Bool
 asBool (ValuePrim (BoolValue x)) = x
-asBool (ValueAD d v)
-  | P.BoolValue v' <- AD.primitive $ AD.primal $ AD.Variable d v = v'
+asBool (ValueAD _ v)
+  | P.BoolValue v' <- AD.varPrimal v = v'
 asBool v = error $ "Unexpectedly not a boolean: " <> show v
 
 lookupInEnv ::

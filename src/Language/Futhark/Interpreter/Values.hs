@@ -156,10 +156,14 @@ prettyValueWith pprPrim = pprPrec 0
     pprPrec _ ValueAcc {} = "#<acc>"
     pprPrec p (ValueSum _ n vs) =
       parensIf (p > (0 :: Int)) $ "#" <> sep (pretty n : map (pprPrec 1) vs)
-    -- TODO: This could be prettier. Perhaps add pretty printing for ADVariable / ADValues
-    pprPrec _ (ValueAD d v) = pretty $ "d[" ++ show d ++ "]" ++ show v
+    pprPrec _ (ValueAD _ v) = pprPrim $ putV $ AD.varPrimal v
     pprElem v@ValueArray {} = pprPrec 0 v
     pprElem v = group $ pprPrec 0 v
+
+    putV (P.IntValue x) = SignedValue x
+    putV (P.FloatValue x) = FloatValue x
+    putV (P.BoolValue x) = BoolValue x
+    putV P.UnitValue = BoolValue True
 
 -- | Prettyprint value.
 prettyValue :: Value m -> Doc a

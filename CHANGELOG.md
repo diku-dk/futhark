@@ -9,15 +9,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Fixed
+
+* Sizes that go out of scope due to use of higher order functions will
+  now work in more cases by adding existentials. (#2193)
+
+* Tracing inside AD operators with the interpreter now prints values
+  properly.
+
+### Changed
+
+## [0.25.24]
+
+### Added
+
 * `futhark doc` now produces better (and stable) anchor IDs.
 
 * `futhark profile` now supports multiple JSON files.
 
 * `futhark fmt`, by William Due and Therese Lyngby.
 
-### Removed
-
-### Changed
+* Lambdas can now be passed as the last argument to a function application.
 
 ### Fixed
 
@@ -28,6 +42,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A compile time regression for programs that used higher order
   functions very aggressively.
+
+* Uniqueness bug related to slice simplification.
 
 ## [0.25.23]
 

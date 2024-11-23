@@ -32,7 +32,6 @@ module Futhark.Fmt.Monad
     sepDecs,
     fmtByLayout,
     addComments,
-    prependComments,
     sepComments,
     sepLineComments,
     sepLine,
@@ -59,7 +58,8 @@ import Control.Monad.State
     modify,
   )
 import Data.ByteString qualified as BS
-import Data.Loc (Loc (..), Located (..), posCoff, posLine)
+import Data.List.NonEmpty qualified as NE
+import Data.Loc (Loc (..), Located (..), locStart, posCoff, posLine)
 import Data.Maybe (fromMaybe)
 import Data.String
 import Data.Text qualified as T
@@ -149,16 +149,11 @@ fmtByLayout a s m =
             _any -> m
         )
 
--- | This function determines the Layout of @a@ and if it is singleline then it
--- updates the monads enviroment to format singleline style otherwise format using
--- multiline style. It determines this by checking if the location of @a@ spans
--- over two or more lines.
+-- | This function determines the Layout of @a@ and updates the monads
+-- environment to format in the appropriate style. It determines this
+-- by checking if the location of @a@ spans over two or more lines.
 localLayout :: (Located a) => a -> FmtM b -> FmtM b
-localLayout a m = do
-  lo <- ask
-  case lo of
-    MultiLine -> local (const $ fromMaybe lo $ lineLayout a) m
-    SingleLine -> m
+localLayout a = local (\lo -> fromMaybe lo $ lineLayout a)
 
 -- | This function determines the Layout of @[a]@ and if it is singleline then it
 -- updates the monads enviroment to format singleline style otherwise format using
@@ -171,18 +166,15 @@ localLayoutList a m = do
     MultiLine -> local (const $ fromMaybe lo $ lineLayoutList a) m
     SingleLine -> m
 
--- | This function uses the location of @a@ and prepends comments if the
--- comments location is less than the location of @a@. It format @b@ in
--- accordance with if @a@ is singleline or multiline using 'localLayout'. At last
--- it internally sets the state of the 'FmtM' monad to consider trailing
--- comments if they exists. This function should be always used when possible to
--- wrap Fmt around. It currently does not handle trailing comment perfectly.
--- See tests/fmt/traillingComments1.fut or the other test.
+-- | This function uses the location of @a@ and prepends comments if
+-- the comments location is less than the location of @a@. It format
+-- @b@ in accordance with if @a@ is singleline or multiline using
+-- 'localLayout'. It currently does not handle trailing comment
+-- perfectly. See tests/fmt/traillingComments*.fut.
 addComments :: (Located a) => a -> Fmt -> Fmt
 addComments a b = localLayout a $ do
   c <- fmtComments a
   f <- b
-  setTrailingComment a
   pure $ c <> f
 
 prependComments :: (a -> Loc) -> (a -> Fmt) -> a -> Fmt
@@ -214,8 +206,6 @@ data FmtState = FmtState
     comments :: [Comment],
     -- | The original source file that is being formatted.
     file :: BS.ByteString,
-    -- | Pending comment to be inserted before next newline (reverse order).
-    pendingComments :: !(Maybe Comment),
     -- | Keeps track of what type the last output was.
     lastOutput :: !(Maybe LastOutput)
   }
@@ -234,7 +224,23 @@ data Layout = MultiLine | SingleLine deriving (Show, Eq)
 type FmtM a = ReaderT Layout (State FmtState) a
 
 fmtComment :: Comment -> Fmt
-fmtComment = comment . commentText
+fmtComment c = comment $ commentText c
+
+fmtCommentList :: [Comment] -> Fmt
+fmtCommentList [] = nil
+fmtCommentList (c : cs) =
+  fst $ foldl f (fmtComment c, locOf c) cs
+  where
+    f (acc, loc) c' =
+      if consecutive loc (locOf c')
+        then (acc <> fmtComment c', locOf c')
+        else (acc <> hardline <> fmtComment c', locOf c')
+
+hasComment :: (Located a) => a -> FmtM Bool
+hasComment a =
+  gets $ not . null . takeWhile relevant . comments
+  where
+    relevant c = locOf a /= NoLoc && locOf a > locOf c
 
 -- | Prepends comments.
 fmtComments :: (Located a) => a -> Fmt
@@ -244,34 +250,10 @@ fmtComments a = do
     then pure mempty
     else do
       modify $ \s -> s {comments = later}
-      pre
-        <> mconcat (map fmtComment here)
-        <> (if consecutive (locOf here) (locOf a) then nil else hardline)
+      fmtCommentList here
+        <> if consecutive (locOf here) (locOf a) then nil else hardline
   where
     relevant c = locOf a /= NoLoc && locOf a > locOf c
-    pre = do
-      lastO <- gets lastOutput
-      case lastO of
-        Nothing -> nil
-        Just Line -> nil
-        Just _ -> modify (\s -> s {lastOutput = Just Line}) >> hardline
-
--- | If the next comment is a trailing comment then it is added to be a pending
--- comment that is added at next line.
-setTrailingComment :: (Located a) => a -> FmtM ()
-setTrailingComment a = do
-  s <- get
-  case comments s of
-    c : cs | locOf a /= NoLoc -> case (locOf a, locOf c) of
-      -- comment on same line as term a
-      (Loc _sALoc eALoc, Loc _sCLoc eCLoc) | posLine eALoc == posLine eCLoc -> do
-        put $
-          s
-            { comments = cs,
-              pendingComments = Just c
-            }
-      _any -> pure ()
-    _ -> pure ()
 
 -- | Determines the layout of @a@ by checking if it spans a single line or two
 -- or more lines.
@@ -303,7 +285,13 @@ popComments :: Fmt
 popComments = do
   cs <- gets comments
   modify (\s -> s {comments = []})
-  sep nil $ map fmtComment cs
+  lastO <- gets lastOutput
+  case lastO of
+    Nothing ->
+      fmtCommentList cs -- Happens when file has only comments.
+    _
+      | not $ null cs -> hardline <> fmtCommentList cs
+      | otherwise -> nil
 
 -- | Using the location of @a@ get the segment of text in the original file to
 -- create a @Fmt@.
@@ -329,7 +317,6 @@ runFormat format cs file = evalState (runReaderT format e) s
       FmtState
         { comments = cs,
           file = T.encodeUtf8 file,
-          pendingComments = Nothing,
           lastOutput = Nothing
         }
     e = MultiLine
@@ -347,22 +334,12 @@ nest i a = a <|> (P.nest i <$> a)
 space :: Fmt
 space = modify (\s -> s {lastOutput = Just Space}) >> pure P.space
 
--- | Forces a line to be used regardless of layout, this should ideally not be
--- used.
+-- | Forces a line to be used regardless of layout, this should
+-- ideally not be used.
 hardline :: Fmt
 hardline = do
-  pc <- gets pendingComments
-  case pc of
-    Just c -> do
-      modify $ \s ->
-        s
-          { pendingComments = Nothing,
-            lastOutput = Just Line
-          }
-      space <> fmtComment c
-    Nothing -> do
-      modify $ \s -> s {lastOutput = Just Line}
-      pure P.line
+  modify $ \s -> s {lastOutput = Just Line}
+  pure P.line
 
 -- | A line or a space depending on layout.
 line :: Fmt
@@ -377,10 +354,8 @@ sepLine s = sep (s <> space <|> hardline <> s)
 comment :: T.Text -> Fmt
 comment c = do
   modify (\s -> s {lastOutput = Just Line})
-  pure $ P.annotate commentStyle (P.pretty c) <> P.line
+  pure $ P.annotate commentStyle (P.pretty (T.stripEnd c)) <> P.line
 
--- In order to handle trailing comments its VERY important to
--- evaluate the seperator after each element in the list.
 sep :: Fmt -> [Fmt] -> Fmt
 sep _ [] = nil
 sep s (a : as) = auxiliary a as
@@ -400,17 +375,20 @@ sepLineComments :: (a -> Loc) -> (a -> Fmt) -> Fmt -> [a] -> Fmt
 sepLineComments floc fmt s =
   sepComments floc fmt (s <> space <|> hardline <> s)
 
--- | This is used for function arguments. It seperates multiline arguments by
--- lines and singleline arguments by spaces.
-sepArgs :: (Located a) => (a -> Fmt) -> [a] -> Fmt
-sepArgs _ [] = nil
-sepArgs fmt ls
-  | any ((== Just MultiLine) . lineLayout) ls =
-      sep nil $ zipWith auxiliary [0 :: Int ..] ls
-  | otherwise = align $ sep line $ map fmt ls
+-- | This is used for function arguments. It seperates multiline
+-- arguments by lines and singleline arguments by spaces. We specially
+-- handle the case where all the arguments are on a single line except
+-- for the last one, which may continue to the next line.
+sepArgs :: (Located a) => (a -> Fmt) -> NE.NonEmpty a -> Fmt
+sepArgs fmt ls =
+  localLayout locs $ align' $ sep line $ map fmtArg ls'
   where
-    auxiliary 0 x = fmt x
-    auxiliary _ x = localLayout x (line <> fmt x)
+    locs = map (locStart . locOf) ls'
+    align' = case lineLayout locs of
+      Just SingleLine -> id
+      _ -> align
+    fmtArg x = localLayout x $ fmt x
+    ls' = NE.toList ls
 
 -- | Nest but with the standard value of two spaces.
 stdNest :: Fmt -> Fmt
@@ -418,7 +396,9 @@ stdNest = nest 2
 
 -- | Aligns line by line.
 align :: Fmt -> Fmt
-align a = P.align <$> a
+align a = do
+  modify (\s -> s {lastOutput = Just Line}) -- XXX?
+  P.align <$> a
 
 -- | Indents everything by @i@, should never be used.
 hardIndent :: Int -> Fmt -> Fmt
@@ -487,14 +467,15 @@ consecutive _ _ = False
 -- sepereate by two lines.
 sepDecs :: (Located a) => (a -> Fmt) -> [a] -> Fmt
 sepDecs _ [] = nil
-sepDecs fmt as@(x : xs) =
-  sep space (map fmt as) <|> (fmt x <> auxiliary x xs)
+sepDecs fmt decs@(x : xs) =
+  sep space (map fmt decs) <|> (fmt x <> auxiliary x xs)
   where
     auxiliary _ [] = nil
     auxiliary prev (y : ys) = p <> fmt y <> auxiliary y ys
       where
-        p =
-          case (lineLayout y, lineLayout prev) of
-            (Just SingleLine, Just SingleLine)
+        p = do
+          commented <- hasComment y
+          case (commented, lineLayout y, lineLayout prev) of
+            (False, Just SingleLine, Just SingleLine)
               | consecutive (locOf prev) (locOf y) -> hardline
             _any -> hardline <> hardline

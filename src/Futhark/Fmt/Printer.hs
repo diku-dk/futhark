@@ -6,6 +6,7 @@ where
 
 import Data.Bifunctor (second)
 import Data.Foldable
+import Data.Loc (locStart)
 import Data.Text qualified as T
 import Futhark.Fmt.Monad
 import Futhark.Util (showText)
@@ -22,7 +23,7 @@ import Language.Futhark.Parser
   )
 
 lineIndent :: (Located a) => a -> Fmt -> Fmt -> Fmt
-lineIndent l a b = fmtByLayout l (a <+> b) (a </> hardStdIndent b)
+lineIndent l a b = fmtByLayout l (a <+> b) (a </> hardStdIndent (align b))
 
 fmtName :: AnsiStyle -> Name -> Fmt
 fmtName style = text style . nameToText
@@ -55,6 +56,8 @@ fmtParamType (Just n) te =
 fmtParamType Nothing te = fmt te
 
 fmtSumTypeConstr :: (Name, [UncheckedTypeExp]) -> Fmt
+fmtSumTypeConstr (name, []) =
+  "#" <> fmtName mempty name
 fmtSumTypeConstr (name, fs) =
   "#" <> fmtName mempty name <+> sep space (map fmt fs)
 
@@ -83,24 +86,33 @@ fmtArray xs loc =
   addComments loc $ fmtByLayout loc singleLine multiLine
   where
     singleLine = brackets $ sep ", " xs
-    multiLine = align $ "[" <+> sep (line <> "," <> space) xs </> "]"
+    multiLine =
+      align $ "[" <+> sep (line <> "," <> space) xs </> "]"
 
 instance Format UncheckedTypeExp where
   fmt (TEVar v loc) = addComments loc $ fmtQualName v
-  fmt (TETuple ts loc) = fmtTuple (map fmt ts) loc
+  fmt (TETuple ts loc) = fmtTuple (map (align . fmt) ts) loc
   fmt (TEParens te loc) = addComments loc $ parens $ fmt te
   fmt (TERecord fs loc) = fmtRecord (map fmtFieldType fs) loc
     where
-      fmtFieldType (L _ name', t) = fmtName mempty name' <> ":" <+> fmt t
+      fmtFieldType (L _ name', t) = fmtName mempty name' <> ":" <+> align (fmt t)
   fmt (TEArray se te loc) = addComments loc $ fmt se <> fmt te
   fmt (TEUnique te loc) = addComments loc $ "*" <> fmt te
   fmt (TEApply te tArgE loc) = addComments loc $ fmt te <+> fmt tArgE
   fmt (TEArrow name te0 te1 loc) =
-    addComments loc $ fmtParamType name te0 <+> "->" </> stdIndent (fmt te1)
-  fmt (TESum tes loc) =
     addComments loc $
-      sep (line <> "|" <> space) $
-        map fmtSumTypeConstr tes -- Comments can not be inserted correctly here because names do not have a location.
+      fmtParamType name te0 </> "->" <+> case te1 of
+        TEArrow {} -> fmt te1
+        _ -> align (fmt te1)
+  fmt (TESum tes loc) =
+    -- Comments can not be inserted correctly here because names do not
+    -- have a location.
+    addComments loc $ fmtByLayout loc singleLine multiLine
+    where
+      singleLine = sep " | " $ map fmtSumTypeConstr tes
+      multiLine = sep line $ zipWith prefix [0 :: Int ..] tes
+      prefix 0 te = "  " <> fmtSumTypeConstr te
+      prefix _ te = "| " <> fmtSumTypeConstr te
   fmt (TEDim dims te loc) =
     addComments loc $ "?" <> dims' <> "." <> fmt te
     where
@@ -152,16 +164,22 @@ instance Format (UncheckedPat t) where
   fmt (RecordPat pats loc) =
     fmtRecord (map fmtFieldPat pats) loc
     where
-      fmtFieldPat (L nameloc name, t) = lineIndent [nameloc, locOf t] (fmt name <+> "=") (fmt t)
+      -- We detect the implicit form by whether the name and the 't'
+      -- has the same location.
+      fmtFieldPat (L nameloc name, t)
+        | locOf nameloc == locOf t = fmt name
+        | otherwise =
+            lineIndent [nameloc, locOf t] (fmt name <+> "=") (fmt t)
   fmt (PatParens pat loc) =
     addComments loc $ "(" <> align (fmt pat) <:/> ")"
   fmt (Id name _ loc) = addComments loc $ fmtBoundName name
   fmt (Wildcard _t loc) = addComments loc "_"
   fmt (PatAscription pat t loc) = addComments loc $ fmt pat <> ":" <+> fmt t
   fmt (PatLit _e _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
+  fmt (PatConstr n _ [] loc) =
+    addComments loc $ "#" <> fmt n
   fmt (PatConstr n _ pats loc) =
-    addComments loc $
-      "#" <> fmt n </> align (sep line (map fmt pats))
+    addComments loc $ "#" <> fmt n </> align (sep line (map fmt pats))
   fmt (PatAttr attr pat loc) = addComments loc $ fmt attr <+> fmt pat
 
 instance Format (FieldBase NoInfo Name) where
@@ -212,18 +230,18 @@ instance Format UncheckedExp where
   fmt (Var name _ loc) = addComments loc $ fmtQualName name
   fmt (Hole _ loc) = addComments loc "???"
   fmt (Parens e loc) =
-    addComments loc $ "(" <> stdNest (fmt e) <> ")"
+    addComments loc $ "(" <> align (fmt e) <> ")"
   fmt (QualParens (v, _qLoc) e loc) =
     addComments loc $
       fmtQualName v <> "." <> "(" <> align (fmt e) <> ")"
-  fmt (Ascript e t loc) = addComments loc $ fmt e <> ":" <+> fmt t
-  fmt (Coerce e t _ loc) = addComments loc $ fmt e <+> ":>" <+> fmt t
+  fmt (Ascript e t loc) = addComments loc $ fmt e </> ":" <+> align (fmt t)
+  fmt (Coerce e t _ loc) = addComments loc $ fmt e </> ":>" <+> align (fmt t)
   fmt (Literal _v loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (IntLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (FloatLit _v _ loc) = addComments loc $ fmtCopyLoc constantStyle loc
-  fmt (TupLit es loc) = fmtTuple (map fmt es) loc
+  fmt (TupLit es loc) = fmtTuple (map (align . fmt) es) loc
   fmt (RecordLit fs loc) = fmtRecord (map fmt fs) loc
-  fmt (ArrayLit es _ loc) = fmtArray (map fmt es) loc
+  fmt (ArrayLit es _ loc) = fmtArray (map (align . fmt) es) loc
   fmt (StringLit _s loc) = addComments loc $ fmtCopyLoc constantStyle loc
   fmt (Project k e _ loc) = addComments loc $ fmt e <> "." <> fmt k
   fmt (Negate e loc) = addComments loc $ "-" <> fmt e
@@ -261,6 +279,8 @@ instance Format UncheckedExp where
     addComments loc $ parens ("." <> idxs')
     where
       idxs' = brackets $ sep ("," <> space) $ map fmt idxs
+  fmt (Constr n [] _ loc) =
+    addComments loc $ "#" <> fmt n
   fmt (Constr n cs _ loc) =
     addComments loc $ "#" <> fmt n <+> align (sep line $ map fmt cs)
   fmt (Attr attr e loc) = addComments loc $ align $ fmt attr </> fmt e
@@ -289,22 +309,28 @@ instance Format (AppExpBase NoInfo Name) where
   -- need some way to omit the inital value expression, when this it's trivial
   fmt (Loop sizeparams pat (LoopInitImplicit NoInfo) form loopbody loc) =
     addComments loc $
-      lineIndent pat ("loop" `op` sizeparams') (fmt pat)
-        <+> fmt form
-        <+> "do"
+      ("loop" `op` sizeparams')
+        <+> localLayout
+          [locOf pat, formloc]
+          (fmt pat </> fmt form <+> "do")
         </> stdIndent (fmt loopbody)
     where
+      formloc = case form of
+        For i _ -> locOf i
+        ForIn fpat _ -> locOf fpat
+        While e -> locOf e
       op = if null sizeparams then (<>) else (<+>)
       sizeparams' = sep nil $ brackets . fmtName bindingStyle . toName <$> sizeparams
   fmt (Loop sizeparams pat (LoopInitExplicit initexp) form loopbody loc) =
     addComments loc $
-      lineIndent
-        initexp
-        ( lineIndent pat ("loop" `op` sizeparams') (fmt pat)
-            <+> "="
-        )
-        (fmt initexp)
-        <+> fmt form
+      ("loop" `op` sizeparams')
+        <+> align
+          ( lineIndent
+              [locOf pat, locOf initexp]
+              (fmt pat <+> "=")
+              (align $ fmt initexp)
+          )
+        </> fmt form
         <+> "do"
         </> stdIndent (fmt loopbody)
     where
@@ -385,14 +411,16 @@ instance Format (AppExpBase NoInfo Name) where
     addComments loc $
       "if"
         <+> fmt c
-        <+> "then"
-        </> stdIndent (fmt t)
+        </> "then"
+        <+> align (fmt t)
         </> "else"
-        </> stdIndent (fmt f)
+        <> case f of
+          AppExp If {} _ -> space <> fmt f
+          _ -> space <> align (fmt f)
   fmt (Apply f args loc) =
-    addComments loc $ fmt f <+> align fmt_args
+    addComments loc $ fmt f <+> fmt_args
     where
-      fmt_args = sepArgs fmt $ map snd $ toList args
+      fmt_args = sepArgs fmt $ fmap snd args
 
 letBody :: UncheckedExp -> Fmt
 letBody body@(AppExp LetPat {} _) = fmt body
@@ -464,11 +492,11 @@ instance Format UncheckedSpec where
         | null ps = fmtName bindingStyle name
         | otherwise = fmtName bindingStyle name </> align (sep line $ map fmt ps)
   fmt (ValSpec name ps te _ doc loc) =
-    addComments loc $ fmt doc <> "val" <+> sub <+> ":" <+> fmt te
+    addComments loc $ fmt doc <> "val" <+> sub <+> ":" </> stdIndent (fmt te)
     where
       sub
         | null ps = fmtName bindingStyle name
-        | otherwise = fmtName bindingStyle name </> align (sep line $ map fmt ps)
+        | otherwise = fmtName bindingStyle name <+> align (sep line $ map fmt ps)
   fmt (ModSpec name mte doc loc) =
     addComments loc $ fmt doc <> "module" <+> fmtName bindingStyle name <> ":" <+> fmt mte
   fmt (IncludeSpec mte loc) = addComments loc $ "include" <+> fmt mte
@@ -523,17 +551,18 @@ instance Format (ModParamBase NoInfo Name) where
     addComments loc $ parens $ fmtName bindingStyle pName <> ":" <+> fmt pSig
 
 instance Format UncheckedModBind where
-  fmt (ModBind name ps sig te doc loc) =
+  fmt (ModBind name ps sig me doc loc) =
     addComments loc $
       fmt doc
         <> "module"
-          <+> fmtName bindingStyle name
-        <> align ps'
+          <+> localLayout
+            [locStart (locOf loc), locOf ps]
+            (fmtName bindingStyle name <> ps')
         <> fmtSig sig
         <> "="
-        <> te'
+        <> me'
     where
-      te' = fmtByLayout te (line <> stdIndent (fmt te)) (space <> fmt te)
+      me' = fmtByLayout me (line <> stdIndent (fmt me)) (space <> fmt me)
       fmtSig Nothing = space
       fmtSig (Just (s', _f)) =
         localLayout (map locOf ps ++ [locOf s']) $
@@ -541,7 +570,7 @@ instance Format UncheckedModBind where
       ps' =
         case ps of
           [] -> nil
-          _any -> space <> localLayoutList ps (align $ sep line $ map fmt ps)
+          _any -> line <> stdIndent (localLayoutList ps (align $ sep line $ map fmt ps))
 
 -- All of these should probably be "extra" indented
 instance Format UncheckedModExp where
