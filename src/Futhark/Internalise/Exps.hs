@@ -184,9 +184,9 @@ internaliseAppExp desc _ (E.Index e idxs loc) = do
         v_t <- lookupType v
         pure $ I.BasicOp $ I.Index v $ fullSlice v_t idxs'
   certifying cs $ mapM (letSubExp desc <=< index) vs
-internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
+internaliseAppExp desc _ (E.Range start maybe_second inclusiveness loc) = do
   start' <- internaliseExp1 "range_start" start
-  end' <- internaliseExp1 "range_end" $ case end of
+  end' <- internaliseExp1 "range_end" $ case inclusiveness of
     DownToExclusive e -> e
     ToInclusive e -> e
     UpToExclusive e -> e
@@ -208,7 +208,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
                    Nothing -> []
                    Just second_i64 -> ["..", ErrorVal int64 second_i64]
                )
-            ++ ( case end of
+            ++ ( case inclusiveness of
                    DownToExclusive {} -> ["..>"]
                    ToInclusive {} -> ["..."]
                    UpToExclusive {} -> ["..<"]
@@ -223,7 +223,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
 
   let one = intConst it 1
       negone = intConst it (-1)
-      default_step = case end of
+      default_step = case inclusiveness of
         DownToExclusive {} -> negone
         ToInclusive {} -> one
         UpToExclusive {} -> one
@@ -253,7 +253,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
                 I.BasicOp $
                   I.UnOp (Abs it) difference
             )
-    case end of
+    case inclusiveness of
       ToInclusive {} ->
         letSubExp "distance_inclusive" $
           I.BasicOp $
@@ -268,7 +268,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
       I.BasicOp $
         I.CmpOp (I.CmpEq $ IntType it) step_sign negone
 
-  step_wrong_dir <- case end of
+  step_wrong_dir <- case inclusiveness of
     DownToExclusive {} -> letSubExp "upwards" $ I.BasicOp $ I.UnOp (I.Neg I.Bool) downwards
     UpToExclusive {} -> pure downwards
     ToInclusive {} -> pure $ constant False
@@ -281,7 +281,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
     letSubExp "bounds_invalid_upwards" $
       I.BasicOp $
         I.CmpOp lt_op end' start'
-  bounds_invalid <- case end of
+  bounds_invalid <- case inclusiveness of
     DownToExclusive {} -> pure bounds_invalid_downwards
     UpToExclusive {} -> pure bounds_invalid_upwards
     ToInclusive {} ->
