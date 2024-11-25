@@ -16,7 +16,7 @@ import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCases, re
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
-import Futhark.Analysis.Proofs.Substitute (($$))
+import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), fv, mkRep, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
@@ -164,6 +164,8 @@ forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do
       idx@(IndexFn iter _) <- forward idx'
       xs <- forward xs'
+      debugPrettyM "idx" idx
+      debugPrettyM "xs" xs
       i <- newVName "i"
       x <- newVName "x"
       substParams
@@ -293,7 +295,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
                   ]
               )
       -- tell ["Using scan rule ", toLaTeX y]
-      y $$ (x, IndexFn iter_xs xs)
+      y @ (x, IndexFn iter_xs xs)
         >>= rewrite
   | Just "scan" <- getFun f,
     [E.Lambda params lam_body _ _ _, _ne, lam_xs] <- getArgs args,
@@ -529,7 +531,7 @@ substParams = foldM substParam
     -- We want to simplify, but avoid rewriting recurrences during
     -- paramter-substitution.
     substParam fn (paramName, paramIndexFn) =
-      (fn $$ (paramName, paramIndexFn)) >>= rewriteWithoutRules
+      (fn @ (paramName, paramIndexFn)) >>= rewriteWithoutRules
 
 cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
 cmap f (Cases xs) = Cases (fmap f xs)

@@ -1,5 +1,5 @@
 -- Index function substitution.
-module Futhark.Analysis.Proofs.Substitute (($$)) where
+module Futhark.Analysis.Proofs.Substitute ((@)) where
 
 import Control.Monad (unless)
 import Data.Map qualified as M
@@ -33,9 +33,9 @@ tracer (vn, f@(IndexFn (Forall {}) _)) g@(IndexFn (Forall {}) _) res = do
 tracer _ _ res = pure res
 
 -- Inline applications of f in g.
--- 'g $$ (f_name, f)' substitutes name 'f_name' for indexfn 'f' in indexfn 'g'.
-($$) :: IndexFn -> (VName, IndexFn) -> IndexFnM IndexFn
-g $$ (vn, f) = tracer (vn, f) g =<< inline (vn, f) g
+-- 'g @ (f_name, f)' substitutes name 'f_name' for indexfn 'f' in indexfn 'g'.
+(@) :: IndexFn -> (VName, IndexFn) -> IndexFnM IndexFn
+g @ (vn, f) = tracer (vn, f) g =<< inline (vn, f) g
 
 inline :: (VName, IndexFn) -> IndexFn -> IndexFnM IndexFn
 inline (f_name, f) g = do
