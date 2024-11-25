@@ -221,26 +221,22 @@ internaliseAppExp desc _ (E.Range start maybe_second inclusiveness loc) = do
       E.Scalar (E.Prim (E.Unsigned it)) -> pure (it, CmpUlt it)
       start_t -> error $ "Start value in range has type " ++ prettyString start_t
 
-  let one = intConst it 1
-      negone = intConst it (-1)
-      default_step = case inclusiveness of
-        DownToExclusive {} -> negone
-        ToInclusive {} -> one
-        UpToExclusive {} -> one
+  let zero = intConst it 0
 
-  (step, step_zero) <- case maybe_second' of
-    Just second' -> do
-      subtracted_step <-
-        letSubExp "subtracted_step" $
-          I.BasicOp $
-            I.BinOp (I.Sub it I.OverflowWrap) second' start'
-      step_zero <- letSubExp "step_zero" $ I.BasicOp $ I.CmpOp (I.CmpEq $ IntType it) start' second'
-      pure (subtracted_step, step_zero)
-    Nothing ->
-      pure (default_step, constant False)
+  step <- case maybe_second' of
+    Just second' ->
+      letSubExp "subtracted_step" $
+        I.BasicOp $
+          I.BinOp (I.Sub it I.OverflowWrap) second' start'
+    Nothing -> pure $ intConst it $ -- use default step of 1 or -1.
+      case inclusiveness of
+        DownToExclusive {} -> -1
+        _ -> 1
 
-  step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
-  step_sign_i64 <- asIntS Int64 step_sign
+  step_zero <-
+    letSubExp "step_zero" $
+      I.BasicOp $
+        I.CmpOp (I.CmpEq $ IntType it) step zero
 
   distance <- do
     difference <-
@@ -266,8 +262,7 @@ internaliseAppExp desc _ (E.Range start maybe_second inclusiveness loc) = do
   downwards <-
     letSubExp "downwards" $
       I.BasicOp $
-        I.CmpOp (I.CmpEq $ IntType it) step_sign negone
-
+        I.CmpOp (CmpSlt it) step zero
   step_wrong_dir <- case inclusiveness of
     DownToExclusive {} -> letSubExp "upwards" $ I.BasicOp $ I.UnOp (I.Neg I.Bool) downwards
     UpToExclusive {} -> pure downwards
@@ -307,7 +302,7 @@ internaliseAppExp desc _ (E.Range start maybe_second inclusiveness loc) = do
   pos_step <-
     letSubExp "pos_step" $
       I.BasicOp $
-        I.BinOp (Mul Int64 I.OverflowWrap) step_i64 step_sign_i64
+        I.UnOp (Abs Int64) step_i64
 
   num_elems <-
     certifying cs $
