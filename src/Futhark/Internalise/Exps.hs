@@ -242,6 +242,37 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
   step_sign <- letSubExp "s_sign" $ BasicOp $ I.UnOp (I.SSignum it) step
   step_sign_i64 <- asIntS Int64 step_sign
 
+  distance <- do
+    difference <-
+      letSubExp "difference" $
+        I.BasicOp $
+          I.BinOp (Sub it I.OverflowWrap) end' start'
+    distance_exclusive_i64 <-
+      asIntS Int64
+        =<< ( letSubExp "distance_exclusive" $
+                I.BasicOp $
+                  I.UnOp (Abs it) difference
+            )
+    case end of
+      ToInclusive {} ->
+        letSubExp "distance_inclusive" $
+          I.BasicOp $
+            I.BinOp
+              (Add Int64 I.OverflowWrap)
+              distance_exclusive_i64
+              (intConst Int64 1)
+      _ -> pure distance_exclusive_i64
+
+  downwards <-
+    letSubExp "downwards" $
+      I.BasicOp $
+        I.CmpOp (I.CmpEq $ IntType it) step_sign negone
+
+  step_wrong_dir <- case end of
+    DownToExclusive {} -> letSubExp "upwards" $ I.BasicOp $ I.UnOp (I.Neg I.Bool) downwards
+    UpToExclusive {} -> pure downwards
+    ToInclusive {} -> pure $ constant False
+
   bounds_invalid_downwards <-
     letSubExp "bounds_invalid_downwards" $
       I.BasicOp $
@@ -250,62 +281,15 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
     letSubExp "bounds_invalid_upwards" $
       I.BasicOp $
         I.CmpOp lt_op end' start'
-
-  (distance, step_wrong_dir, bounds_invalid) <- case end of
-    DownToExclusive {} -> do
-      step_wrong_dir <-
-        letSubExp "step_wrong_dir" $
-          I.BasicOp $
-            I.CmpOp (I.CmpEq $ IntType it) step_sign one
-      distance <-
-        letSubExp "distance" $
-          I.BasicOp $
-            I.BinOp (Sub it I.OverflowWrap) start' end'
-      distance_i64 <- asIntS Int64 distance
-      pure (distance_i64, step_wrong_dir, bounds_invalid_downwards)
-    UpToExclusive {} -> do
-      step_wrong_dir <-
-        letSubExp "step_wrong_dir" $
-          I.BasicOp $
-            I.CmpOp (I.CmpEq $ IntType it) step_sign negone
-      distance <- letSubExp "distance" $ I.BasicOp $ I.BinOp (Sub it I.OverflowWrap) end' start'
-      distance_i64 <- asIntS Int64 distance
-      pure (distance_i64, step_wrong_dir, bounds_invalid_upwards)
-    ToInclusive {} -> do
-      downwards <-
-        letSubExp "downwards" $
-          I.BasicOp $
-            I.CmpOp (I.CmpEq $ IntType it) step_sign negone
-      distance_downwards_exclusive <-
-        letSubExp "distance_downwards_exclusive" $
-          I.BasicOp $
-            I.BinOp (Sub it I.OverflowWrap) start' end'
-      distance_upwards_exclusive <-
-        letSubExp "distance_upwards_exclusive" $
-          I.BasicOp $
-            I.BinOp (Sub it I.OverflowWrap) end' start'
-
-      bounds_invalid <-
-        letSubExp "bounds_invalid"
-          =<< eIf
-            (eSubExp downwards)
-            (resultBodyM [bounds_invalid_downwards])
-            (resultBodyM [bounds_invalid_upwards])
-      distance_exclusive <-
-        letSubExp "distance_exclusive"
-          =<< eIf
-            (eSubExp downwards)
-            (resultBodyM [distance_downwards_exclusive])
-            (resultBodyM [distance_upwards_exclusive])
-      distance_exclusive_i64 <- asIntS Int64 distance_exclusive
-      distance <-
-        letSubExp "distance" $
-          I.BasicOp $
-            I.BinOp
-              (Add Int64 I.OverflowWrap)
-              distance_exclusive_i64
-              (intConst Int64 1)
-      pure (distance, constant False, bounds_invalid)
+  bounds_invalid <- case end of
+    DownToExclusive {} -> pure bounds_invalid_downwards
+    UpToExclusive {} -> pure bounds_invalid_upwards
+    ToInclusive {} ->
+      letSubExp "bounds_invalid"
+        =<< eIf
+          (eSubExp downwards)
+          (resultBodyM [bounds_invalid_downwards])
+          (resultBodyM [bounds_invalid_upwards])
 
   step_invalid <-
     letSubExp "step_invalid" $
