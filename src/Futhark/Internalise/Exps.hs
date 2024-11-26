@@ -213,8 +213,8 @@ internaliseAppExp desc _ (E.Range start maybe_second inclusiveness loc) = do
             ++ [ErrorVal int64 end'_i64, " is invalid."]
 
   let it = case E.typeOf start of
-             E.Scalar (E.Prim (E.Signed start_t)) -> start_t
-             start_t -> error $ "Start value in range has type " ++ prettyString start_t
+        E.Scalar (E.Prim (E.Signed start_t)) -> start_t
+        start_t -> error $ "Start value in range has type " ++ prettyString start_t
   let lt_op = CmpSlt it
 
   let zero = intConst it 0
@@ -224,10 +224,11 @@ internaliseAppExp desc _ (E.Range start maybe_second inclusiveness loc) = do
       letSubExp "subtracted_step" $
         I.BasicOp $
           I.BinOp (I.Sub it I.OverflowWrap) second' start'
-    Nothing -> pure $ intConst it $ -- use default step of 1 or -1.
-      case inclusiveness of
-        DownToExclusive {} -> -1
-        _ -> 1
+    Nothing -> pure $
+      intConst it $ -- use default step of 1 or -1.
+        case inclusiveness of
+          DownToExclusive {} -> -1
+          _ -> 1
 
   step_zero <-
     letSubExp "step_zero" $
@@ -241,10 +242,10 @@ internaliseAppExp desc _ (E.Range start maybe_second inclusiveness loc) = do
           I.BinOp (Sub it I.OverflowWrap) end' start'
     distance_exclusive_i64 <-
       asIntS Int64
-        =<< ( letSubExp "distance_exclusive" $
-                I.BasicOp $
-                  I.UnOp (Abs it) difference
-            )
+        =<< letSubExp
+          "distance_exclusive"
+          (I.BasicOp $ I.UnOp (Abs it) difference)
+
     case inclusiveness of
       ToInclusive {} ->
         letSubExp "distance_inclusive" $
