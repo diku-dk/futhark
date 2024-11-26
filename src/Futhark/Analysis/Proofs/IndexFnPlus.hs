@@ -102,27 +102,27 @@ instance (Renameable a, Renameable b) => Renameable (Cases a b) where
     where
       re (p, q) = (,) <$> rename_ vns tau p <*> rename_ vns tau q
 
-renameCat_ :: (MonadFreshNames m) => VNameSource -> M.Map VName VName -> VName -> SoP Symbol -> SoP Symbol -> m (Domain, (M.Map VName VName, VNameSource))
-renameCat_ vns tau xn m b = do
+instance Renameable Domain where
+  rename_ vns tau (Cat xn m b) = Cat xn <$> rename_ vns tau m <*> rename_ vns tau b
+  rename_ vns tau (Iota n) = Iota <$> rename_ vns tau n
+
+instance Renameable Iterator where
+  -- NOTE that i is not renamed.
+  rename_ vns tau (Forall i dom) = Forall i <$> rename_ vns tau dom
+  rename_ _ _ Empty = pure Empty
+
+renameIndexFn :: (MonadFreshNames f) => Bool -> VNameSource -> M.Map VName VName -> IndexFn -> f IndexFn
+renameIndexFn True vns tau (IndexFn (Forall i (Cat xn m b)) body) = do
+  -- Renames Cat iterator variable k.
   (xm, vns') <- freshNameFromString vns "k"
   let tau' = M.insert xn xm tau
   dom <- Cat xm <$> rename_ vns' tau' m <*> rename_ vns' tau' b
-  pure (dom, (tau', vns'))
-
-instance Renameable Domain where
-  rename_ vns tau (Cat xn m b) = fst <$> renameCat_ vns tau xn m b
-  rename_ vns tau (Iota n) = Iota <$> rename_ vns tau n
+  IndexFn (Forall i dom) <$> rename_ vns' tau' body
+renameIndexFn _ vns tau (IndexFn iter body) = do
+  IndexFn <$> rename_ vns tau iter <*> rename_ vns tau body
 
 instance Renameable IndexFn where
-  rename_ vns tau indexfn = case indexfn of
-    IndexFn Empty body -> IndexFn Empty <$> rename_ vns tau body
-    -- NOTE that i is not renamed.
-    IndexFn (Forall i (Cat xn m b)) body -> do
-      (dom, (tau', vns')) <- renameCat_ vns tau xn m b
-      IndexFn (Forall i dom) <$> rename_ vns' tau' body
-    IndexFn (Forall i dom) body -> do
-      dom' <- rename_ vns tau dom
-      IndexFn (Forall i dom') <$> rename_ vns tau body
+  rename_ = renameIndexFn True
 
 instance Unify Domain Symbol where
   unify_ k (Iota n) (Iota m) = unify_ k n m
