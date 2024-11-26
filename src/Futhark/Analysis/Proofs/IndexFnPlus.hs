@@ -75,6 +75,9 @@ instance FreeVariables Domain where
   fv (Iota n) = fv n
   fv (Cat _ m b) = fv m <> fv b
 
+instance FreeVariables (Cases Symbol (SoP Symbol)) where
+  fv cs = mconcat $ map (\(c,v) -> fv c <> fv v) $ casesToList cs
+
 -------------------------------------------------------------------------------
 -- Unification.
 -------------------------------------------------------------------------------

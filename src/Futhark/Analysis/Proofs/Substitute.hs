@@ -19,6 +19,7 @@ import Futhark.Analysis.Proofs.Util (prettyBinding')
 import Futhark.MonadFreshNames (newName, newVName)
 import Futhark.SoP.Monad (UntransEnv (dir), getUntrans, lookupUntransPE)
 import Futhark.SoP.SoP (sym2SoP)
+import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 
 tracer :: (VName, IndexFn) -> IndexFn -> IndexFn -> IndexFnM IndexFn
@@ -39,8 +40,8 @@ g @ (vn, f) = tracer (vn, f) g =<< inline (vn, f) g
 
 inline :: (VName, IndexFn) -> IndexFn -> IndexFnM IndexFn
 inline (f_name, f) g = do
-  (f', g', app_reps) <- mkApplicationReps (f_name, f) g --  =<< renameIter g
-  iter <- mergeIterators (iterator f') $ inlineIterator app_reps g'
+  (f', g', app_reps) <- mkApplicationReps (f_name, f) g
+  iter <- mergeIterators f' $ inlineIterator app_reps g'
   cs <- inlineCases app_reps f' g'
   pure (IndexFn iter cs)
   where
@@ -74,23 +75,26 @@ inline (f_name, f) g = do
     inlineIterator _ _ =
       error "Only single-case index functions may substitute into domain"
 
-mergeIterators :: Iterator -> Iterator -> IndexFnM Iterator
-mergeIterators Empty g_iter = pure g_iter
-mergeIterators (Forall _ df) Empty =
-  case df of
-    Iota {} -> pure Empty
-    Cat {} -> error "Might capture k?"
-mergeIterators (Forall i df) (Forall j dg) = do
-  assertEquivDomains df dg
-  case (df, dg) of
-    (Iota {}, Iota {}) -> do
-      pure (Forall j dg)
-    (Cat {}, Cat {}) -> do
-      pure (Forall j dg)
-    (Cat {}, Iota {}) -> do
-      pure (Forall j $ repDomain (mkRep i $ Var j) df)
-    (Iota {}, Cat {}) -> do
-      pure (Forall j dg)
+    mergeIterators (IndexFn Empty _) g_iter = pure g_iter
+    mergeIterators (IndexFn (Forall _ df) cs) Empty =
+      case df of
+        Iota {} -> pure Empty
+        Cat k _ _
+          | k `elem` fv cs ->
+              error $ "Might capture " <> prettyString k
+          | otherwise ->
+              pure Empty
+    mergeIterators (IndexFn (Forall i df) _) (Forall j dg) = do
+      assertEquivDomains df dg
+      case (df, dg) of
+        (Iota {}, Iota {}) -> do
+          pure (Forall j dg)
+        (Cat {}, Cat {}) -> do
+          pure (Forall j dg)
+        (Cat {}, Iota {}) -> do
+          pure (Forall j $ repDomain (mkRep i $ Var j) df)
+        (Iota {}, Cat {}) -> do
+          pure (Forall j dg)
 
 equivDomains :: Domain -> Domain -> IndexFnM Bool
 equivDomains df@(Cat {}) dg@(Cat {}) = do
@@ -126,25 +130,28 @@ assertEquivDomains dom_f dom_g =
 mkApplicationReps :: (VName, IndexFn) -> IndexFn -> IndexFnM (IndexFn, IndexFn, [(VName, Replacement Symbol)])
 mkApplicationReps (f_name, f) g = do
   k <- newVName "variables after this are quantifiers"
-  let notQuantifier = (< k)
+  let isFreeVariable = (< k)
   (f', g') <- renameSame f g
   let legalName v =
-        notQuantifier v
+        isFreeVariable v
           || Just v == getCatIteratorVariable g'
           || hasSingleCase f'
-  -- NOTE g can reference f in its domain, hence it is not enough to simply
-  -- analyse the cases.
-  -- Handle references `Var f` without argument.
-  let var_rep = case (iterator f', iterator g') of
-        (Forall i _, Forall j _) -> mkRep i (Var j) :: Replacement Symbol
-        _ -> mempty
-  -- Applications f(e(j)).
+  -- Collect and replace applications f(e(j)) in g by fresh variables.
+  -- NOTE the domain of g is also traversed.
   -- TODO Using algenv for unintended purposes here; add new field to VEnv?
-  rollbackAlgEnv $ do
+  (g'', apps) <- rollbackAlgEnv $ do
     clearAlgEnv
-    g'' <- astMap (identityMapper {mapOnSymbol = repAppByName legalName}) g'
-    assocs <- map strip . M.assocs . dir <$> getUntrans
-    pure (f', g'', (f_name, var_rep) : assocs)
+    g'' <- astMap (identityMapper {mapOnSymbol = repAppByFreshName legalName}) g'
+    (g'',) . map strip . M.assocs . dir <$> getUntrans
+  -- If there are no f(e(j)), handle direct references to f without any args.
+  let reps = case apps of
+        [] ->
+          let i_rep = case (iterator f', iterator g') of
+                (Forall i _, Forall j _) -> mkRep i (Var j)
+                _ -> mempty
+           in [(f_name, i_rep)]
+        _ -> apps
+  pure (f', g'', reps)
   where
     hasSingleCase = isJust . justSingleCase
 
@@ -152,7 +159,7 @@ mkApplicationReps (f_name, f) g = do
     strip _ = error "Impossible"
 
     toRep idx = case iterator f of
-      Forall i _ -> mkRep i idx :: Replacement Symbol
+      Forall i _ -> mkRep i idx
       Empty -> error "Indexing into a scalar function"
 
     -- Replace applications of f by (fresh) names.
@@ -161,7 +168,7 @@ mkApplicationReps (f_name, f) g = do
     -- by checking for captured quantifiers in the function argument,
     -- for example, Sum_j (f[i] + j) is allowed, but Sum_j (f[j]) is not.
     -- (Unless f only has one case.)
-    repAppByName legalName sym = case sym of
+    repAppByFreshName legalName sym = case sym of
       Apply (Var x) [idx]
         | x == f_name,
           legalIdx idx ->
@@ -181,11 +188,6 @@ mkApplicationReps (f_name, f) g = do
     repByName app = do
       f_at_idx <- Algebra.getVName <$> lookupUntransPE app
       pure (Var f_at_idx)
-
-renameIter fn@(IndexFn (Forall i _) _) = do
-  j <- sym2SoP . Var <$> newName i
-  pure $ repIndexFn (mkRep i j) fn
-renameIter fn = pure fn
 
 -- XXX when to rewrite recurrences as sums?
 -- When substitituting a recurrent index fn into some other index fn.

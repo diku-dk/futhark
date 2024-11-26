@@ -1,5 +1,6 @@
 module Futhark.Analysis.Proofs.Convert where
 
+import Control.Applicative ((<|>))
 import Control.Monad (foldM, forM, forM_, msum, unless, void, when, (<=<))
 import Control.Monad.RWS (gets)
 import Data.Bifunctor
@@ -7,18 +8,17 @@ import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, isJust)
-import Data.Set qualified as S
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, unzipT)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, getCatIteratorVariable, justSingleCase, unzipT)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
-import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), fv, mkRep, rep, unify)
+import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, addRange, addUntrans, mkRangeLB)
@@ -90,6 +90,7 @@ mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
   clearAlgEnv
   whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
   forM_ params addTypeRefinement
+  forM_ params addBooleanNames
   indexfn <- forward body >>= rewrite >>= bindfn vn
   insertTopLevel vn (params, indexfn)
   _ <- algebraContext indexfn $ do
@@ -160,15 +161,37 @@ forward (E.TupLit xs _) = do
   substParams y (zip vns fns)
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do
-      idx@(IndexFn iter _) <- forward idx'
+      idx@(IndexFn idx_iter _) <- forward idx'
       xs <- forward xs'
       debugPrettyM "idx" idx
       debugPrettyM "xs" xs
+      -- If xs has a Cat iterator, this indexing can only be done
+      -- if we can express k in terms of i.
+      capture_avoiding_rep <-
+        case (xs, justSingleCase idx) of
+          (IndexFn (Forall _ (Cat k m b)) _, Just idx1) -> do
+            s1 <- solve_for k b idx1
+            s2 <- solve_for k (intervalEnd $ Cat k m b) idx1
+            pure $ maybe mempty (mkRep k) (s1 <|> s2)
+          _ ->
+            pure mempty
+      unless (null capture_avoiding_rep) $
+        debugPrettyM "capture_avoiding_rep" capture_avoiding_rep
+      let ys = repIndexFn capture_avoiding_rep xs
+      unless (null capture_avoiding_rep) $ debugPrettyM "xs repped" ys
       i <- newVName "i"
       x <- newVName "x"
-      substParams
-        (IndexFn iter (singleCase . sym2SoP $ Idx (Var x) (sym2SoP $ Var i)))
-        [(i, idx), (x, xs)]
+      debugT' "idx res" $
+        substParams
+          (IndexFn idx_iter (singleCase . sym2SoP $ Idx (Var x) (sym2SoP $ Var i)))
+          [(i, idx), (x, ys)]
+  where
+    -- Solve for k in x(k) = y.
+    solve_for k x y = do
+      k_hole <- newVName "k_hole"
+      let x_holed = rep (M.singleton k $ sym2SoP (Hole k_hole)) x
+      s :: Maybe (Replacement Symbol) <- fmap mapping <$> unify x_holed y
+      pure $ s >>= (M.!? k_hole)
 forward (E.Not e _) = do
   IndexFn it e' <- forward e
   rewrite $ IndexFn it $ cmapValues (mapSymSoP_ neg) e'
@@ -221,12 +244,38 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       xss <- mapM forward args'
       let paramNames :: [E.VName] = concatMap E.patNames params
       let xs :: [IndexFn] = mconcat $ map unzipT xss
-      let IndexFn iter_first_arg _ = head xss
+      -- Make sure all Cat k's are identical, then grab k.
+      xs' <- renamesM xs
+      let cat_fn =
+            msum $
+              map
+                ( \fn -> case fn of
+                    IndexFn (Forall _ (Cat {})) _ -> Just fn
+                    _ -> Nothing
+                )
+                xs'
+      let k = getCatIteratorVariable =<< cat_fn
+      let IndexFn iter@(Forall i _) _ = fromMaybe (head xs') cat_fn
+      debugPrettyM "forward" expr
+      -- Transform map (\x -> ...) xs into map (\i -> xs[i]) (indices xs).
+      forM_ (zip paramNames xs') $ \(paramName, x) -> do
+        debugPrettyM (prettyString paramName) x
+        vn_x <- newVName "tmp_x"
+        y <-
+          IndexFn iter (singleCase . sym2SoP $ Idx (Var vn_x) (sVar i))
+            @ (vn_x, x)
+        -- Renaming k back to k. (Safe because k is a free variable at this point.)
+        let k_rep =
+              fromMaybe mempty $
+                mkRep <$> getCatIteratorVariable y <*> fmap sVar k
+        unless (null k_rep) $ debugPrettyM2 "k_rep" k_rep
+        let IndexFn _ cs = y
+        unless (null k_rep) $ debugPrettyM2 "y repped" (repIndexFn k_rep $ IndexFn Empty cs)
+        insertIndexFn paramName (repIndexFn k_rep $ IndexFn Empty cs)
       body_fn <- forward body
-      body_hole <- newVName "body"
-      substParams
-        (IndexFn iter_first_arg (singleCase . sym2SoP . Var $ body_hole))
-        ((body_hole, body_fn) : zip paramNames xs)
+      let IndexFn Empty body_cases = body_fn
+      debugPrettyM "body_fn" body_fn
+      rewrite $ IndexFn iter body_cases
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
@@ -516,7 +565,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
                         Apply (Var g) (map (sym2SoP . Var) arg_names)
                   }
           debugPrettyM "g_fn:" g_fn
-          debugPrettyM2 "g:" g
+          debugPrettyM "g:" g
           when (typeIsBool return_type) $ addProperty (Algebra.Var g) Algebra.Boolean
           substParams g_fn (zip arg_names arg_fns)
 forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
@@ -597,19 +646,16 @@ getRefinement (E.Id param (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) 
           let effect = addEquiv (Algebra.Var param) =<< toAlgebra y'
           pure (check, effect)
     mkRef x = error $ "Unhandled refinement predicate " <> show x
+
+    mkCheck check_fn (size_rep, param_subst) = do
+      check <- repIndexFn size_rep <$> substParams check_fn param_subst
+      allCases (askQ (CaseCheck sop2Symbol)) check
+
+    getScalar (IndexFn Empty cs) | [(Bool True, x)] <- casesToList cs = x
+    getScalar _ = error "getScalar on non-scalar index function"
+
+    toScalarFn x = IndexFn Empty (cases [(Bool True, x)])
 getRefinement _ = pure Nothing
-
-mkCheck :: IndexFn -> CheckContext -> IndexFnM Answer
-mkCheck check_fn (size_rep, param_subst) = do
-  check <- repIndexFn size_rep <$> substParams check_fn param_subst
-  allCases (askQ (CaseCheck sop2Symbol)) check
-
-toScalarFn :: SoP Symbol -> IndexFn
-toScalarFn x = IndexFn Empty (cases [(Bool True, x)])
-
-getScalar :: IndexFn -> SoP Symbol
-getScalar (IndexFn Empty cs) | [(Bool True, x)] <- casesToList cs = x
-getScalar _ = error "getScalar on non-scalar index function"
 
 -- This function adds the effects of type refinements to the environment
 -- without checking that they hold.
@@ -621,3 +667,12 @@ addTypeRefinement pat = do
   case ref of
     Just (_, effect) -> effect
     _ -> pure ()
+
+addBooleanNames :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
+addBooleanNames (E.PatParens pat _) = addBooleanNames pat
+addBooleanNames (E.PatAscription pat _ _) = addBooleanNames pat
+addBooleanNames (E.Id param (E.Info {E.unInfo = E.Array _ _ t}) _) = do
+  when (typeIsBool $ E.Scalar t) $ addProperty (Algebra.Var param) Algebra.Boolean
+addBooleanNames (E.Id param (E.Info {E.unInfo = t}) _) = do
+  when (typeIsBool t) $ addProperty (Algebra.Var param) Algebra.Boolean
+addBooleanNames _ = pure ()

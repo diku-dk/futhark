@@ -21,6 +21,7 @@ module Futhark.Analysis.Proofs.Unify
     unifies,
     renameAnd,
     renameM,
+    renamesM,
   )
 where
 
@@ -74,6 +75,10 @@ class Renameable u where
 
 renameM :: (MonadFreshNames m, Renameable u) => u -> m u
 renameM x = getNameSource >>= flip rename x
+
+-- Renames any number of renameables using the same name source for each.
+renamesM :: (MonadFreshNames m, Traversable t, Renameable b) => t b -> m (t b)
+renamesM xs = getNameSource >>= \vns -> mapM (rename vns) xs
 
 -- Rename bound variables in `a` and `b`. Renamed variables are
 -- identical, if `a` and `b` are syntactically equivalent.
@@ -145,6 +150,8 @@ class (Renameable v) => Unify v u where
 
   -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
   --                  = {rename(e) ~= rename(e')}.
+  --
+  -- Only the first argument may contain holes.
   unify :: (Pretty v) => v -> v -> IndexFnM (Maybe (Substitution u))
   unify = renameAnd unify_
 

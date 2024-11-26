@@ -49,23 +49,23 @@ let part2indicesL 't [m]
                 : [n]i64 =
   let (seg_ids, flags) = segment_ids shape n
 
-  let tflgsL = map (\c -> if c then 1i64 else 0i64) csL
-  let fflgsL = map (\b -> 1 - b) tflgsL
+  let tflgs = map (\c -> if c then 1i64 else 0i64) csL
+  let fflgs = map (\b -> 1 - b) tflgs
 
-  let indsTL = sgm_sum flags tflgsL
-  let tmpL   = sgm_sum flags fflgsL
+  let indsT = sgm_sum flags tflgs
+  let tmp   = sgm_sum flags fflgs
   let begs  = scan (+) 0 shape
 
-  -- -- let lst = indsT[n-1]
-  let lstL   = map2 (\s b -> if s==0 then -1 else #[unsafe] indsTL[b-1]
-                    ) shape begs
+  -- let lst = indsT[n-1]
+  let lst   = map2 (\s b -> if s==0 then -1 else #[unsafe] indsT[b-1]
+                   ) shape begs
 
   -- -- let indsF = map (+lst) tmp
-  let indsFL = map2 (\t sgmind-> t + #[unsafe] lstL[sgmind]) tmpL seg_ids
+  let indsF = map2 (\t sgmind-> t + #[unsafe] lst[sgmind]) tmp seg_ids
 
-  let offsL= map (\segi -> if segi > 0 then begs[segi-1] else 0i64) seg_ids
-  let indsL = map4(\c indT indF offset ->
+  let offs = map (\segi -> if segi > 0 then begs[segi-1] else 0i64) seg_ids
+  let inds = map4(\c indT indF offset ->
                       if c then offset + indT - 1
                            else offset + indF - 1
-                  ) csL indsTL indsFL offsL
-  in indsL
+                  ) csL indsT indsF offs
+  in inds

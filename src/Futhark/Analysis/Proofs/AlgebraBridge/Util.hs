@@ -22,7 +22,8 @@ assume :: Symbol -> IndexFnM ()
 assume (p :&& q) = assume p >> assume q
 assume p = do
   booltype <- isBooleanM p
-  unless booltype (error $ "assume on non-boolean: " <> prettyString p)
+  -- This is could just be a no-op, if not boolean, but I'd like to know why.
+  unless booltype (error $ "Assume on non-boolean: " <> prettyString p)
   addRelSymbol p
   addEq 1 p
   addEq 0 (neg p)
@@ -65,17 +66,17 @@ addRelIterator (Forall i dom) = case dom of
   Iota n -> do
     n' <- toAlgebra n
     boundIndexValues n'
-    dom_end <- toAlgebra $ domainEnd dom
+    dom_end <- Algebra.simplify =<< toAlgebra (domainEnd dom)
     addRange (Algebra.Var i) (mkRange (int2SoP 0) dom_end)
   Cat k m b -> do
     m' <- toAlgebra m
     boundIndexValues m'
     addRange (Algebra.Var k) (mkRange (int2SoP 0) (m' .-. int2SoP 1))
-    dom_start <- toAlgebra $ domainStart dom
-    dom_end <- toAlgebra $ domainEnd dom
+    dom_start <- Algebra.simplify =<< toAlgebra (domainStart dom)
+    dom_end <- Algebra.simplify =<< toAlgebra (domainEnd dom)
     addRange (Algebra.Var i) (mkRange dom_start dom_end)
-    interval_start <- toAlgebra b
-    interval_end <- toAlgebra $ intervalEnd dom
+    interval_start <- Algebra.simplify =<< toAlgebra b
+    interval_end <- Algebra.simplify =<< toAlgebra (intervalEnd dom)
     addRange (Algebra.Var i) (mkRange interval_start interval_end)
   where
     boundIndexValues e = do

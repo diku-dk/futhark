@@ -12,7 +12,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Futhark.Analysis.Proofs.Symbol as IxFn
-import Futhark.Analysis.Proofs.Monad (IndexFnM(..), VEnv(..), debugPrintAlgEnv, debugOn, debugPrettyM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM(..), VEnv(..), debugPrintAlgEnv, debugOn, debugPrettyM, clearAlgEnv)
 import Control.Monad.RWS.Strict hiding (Sum)
 import Futhark.SoP.FourierMotzkin qualified as FM
 
@@ -344,6 +344,22 @@ tests =
               simplify $ d_sum .-. int 1
           )
           @??= sym2SoP (Sum (POR $ S.singleton d0) (int 0) (sVar i1 .-. int 1)),
+      testCase "Unite sums spicy (part2indicesL)" $
+        -- y₃₈₃₂₇[∑x₃₃₃₂₉[0 : -1 + k₃₈₂₇₉]] + ∑y₃₈₃₂₇[1 + ∑x₃₃₃₂₉[0 : -1 + k₃₈₂₇₉] : i₈₇₄₃]
+        let a_sum = sym2SoP $ Sum a (int 0) (sVar i1 .-. int 1) -- a = x₃₃₃₂₉, i1 = k₃₈₂₇₉
+        in run
+          ( do
+              clearAlgEnv
+              let b_sum = sym2SoP $ Sum b (int 1 .+. a_sum) (sVar i2) -- i2 = i₈₇₄₃
+              addRange (Var a0) $ mkRangeLB (int2SoP 0) -- k₃₈₂₇₉
+              -- max{0} <= i₈₇₄₃
+              addRange (Var i1) $ mkRangeLB (int2SoP 0)
+              -- max{0, ∑x₃₃₃₂₉[0 : -1 + k₃₈₂₇₉]} <= i₈₇₄₃
+              addRange (Var i2) $ mkRangeLB (int2SoP 0)
+              addRange (Var i2) $ mkRangeLB a_sum
+              simplify $ sym2SoP (Idx b a_sum) .+. b_sum
+          )
+          @??= sym2SoP (Sum b a_sum (sVar i2)),
       --
       testCase "FME1" $
         run
