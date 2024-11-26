@@ -194,12 +194,9 @@ internaliseAppExp desc _ (E.Range start maybe_second inclusiveness loc) = do
     traverse (internaliseExp1 "range_second") maybe_second
 
   -- Construct an error message in case the range is invalid.
-  let conv = case E.typeOf start of
-        E.Scalar (E.Prim (E.Unsigned _)) -> asIntZ Int64
-        _ -> asIntS Int64
-  start'_i64 <- conv start'
-  end'_i64 <- conv end'
-  maybe_second'_i64 <- traverse conv maybe_second'
+  start'_i64 <- asIntS Int64 start'
+  end'_i64 <- asIntS Int64 end'
+  maybe_second'_i64 <- traverse (asIntS Int64) maybe_second'
   let errmsg =
         errorMsg $
           ["Range "]
@@ -215,11 +212,10 @@ internaliseAppExp desc _ (E.Range start maybe_second inclusiveness loc) = do
                )
             ++ [ErrorVal int64 end'_i64, " is invalid."]
 
-  (it, lt_op) <-
-    case E.typeOf start of
-      E.Scalar (E.Prim (E.Signed it)) -> pure (it, CmpSlt it)
-      E.Scalar (E.Prim (E.Unsigned it)) -> pure (it, CmpUlt it)
-      start_t -> error $ "Start value in range has type " ++ prettyString start_t
+  let it = case E.typeOf start of
+             E.Scalar (E.Prim (E.Signed start_t)) -> start_t
+             start_t -> error $ "Start value in range has type " ++ prettyString start_t
+  let lt_op = CmpSlt it
 
   let zero = intConst it 0
 
@@ -262,7 +258,7 @@ internaliseAppExp desc _ (E.Range start maybe_second inclusiveness loc) = do
   downwards <-
     letSubExp "downwards" $
       I.BasicOp $
-        I.CmpOp (CmpSlt it) step zero
+        I.CmpOp lt_op step zero
   step_wrong_dir <- case inclusiveness of
     DownToExclusive {} -> letSubExp "upwards" $ I.BasicOp $ I.UnOp (I.Neg I.Bool) downwards
     UpToExclusive {} -> pure downwards
