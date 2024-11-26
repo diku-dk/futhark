@@ -758,17 +758,21 @@ code.
 
 Construct a signed integer array whose first element is ``x`` and
 which proceeds with a stride of ``y-x`` until reaching ``z``
-(inclusive).  The ``..y`` part can be elided in which case a stride of
-1 is used.  A run-time error occurs if ``z`` is less than ``x`` or
-``y``, or if ``x`` and ``y`` are the same value.
+(inclusive). The ``..y`` part can be elided in which case a stride of
+``1`` is used. All components must be of an unsigned integer type.
+
+A run-time error occurs if ``z`` is less than ``x`` or ``y``, or if
+``x`` and ``y`` are the same value.
 
 In the general case, the size of the array produced by a range is
 unknown (see `Size types`_).  In a few cases, the size is known
 statically:
 
-  * ``1..2...n`` has size ``n``
+  * ``0..<n`` has size ``n``.
 
-This holds only if ``n`` is a variable or constant.
+  * ``0..1..<n`` has size ``n``.
+
+  * ``1..2...n`` has size ``n``
 
 .. _range_upto:
 
