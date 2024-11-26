@@ -177,13 +177,12 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
     name <- E.baseString $ E.qualLeaf op',
     Just bop <- L.find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
       vx <- forward x'
-      let IndexFn iter_x _ = vx
       vy <- forward y'
       a <- newVName "a"
       b <- newVName "b"
       let doOp op =
             substParams
-              (IndexFn iter_x (singleCase $ op (Var a) (Var b)))
+              (IndexFn Empty (singleCase $ op (Var a) (Var b)))
               [(a, vx), (b, vy)]
       case bop of
         E.Plus -> doOp (~+~)
