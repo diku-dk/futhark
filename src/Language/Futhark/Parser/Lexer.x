@@ -48,7 +48,7 @@ $opchar = [\+\-\*\/\%\=\!\>\<\|\&\^\.]
 @qualbinop = (@identifier ".")+ @binop
 
 @space = [\ \t\f\v]
-@doc = "-- |".*(\n@space*"--".*)*
+@doc = "-- |"[^>].*(\n@space*"--".*)*
 
 tokens :-
 
