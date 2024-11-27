@@ -715,7 +715,6 @@ inBlockKernelBodyMatch indexVars@[_indexVar1, _indexVar2, indexVar3] freeVars (K
   -- It would just require us to "not" transpose B in CuTe
   -- In the meantime, this checks where in the indexing slice k appears.
   -- For B it must be [n, k] and for A it must be [k, n]
-  traceShowM innerIndeces2
   elemIndex k innerIndeces1 >>= guard . (==1) -- [m, k] matrix
   elemIndex k innerIndeces2 >>= guard . (==0) -- [k, n] matrix
   
