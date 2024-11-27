@@ -14,7 +14,7 @@ import Futhark.IR.GPUMem
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Builder
 import qualified Futhark.Analysis.SymbolTable as ST
-import Data.List (partition, intersect, lookup)
+import Data.List (partition, intersect, lookup, elemIndex)
 import Data.Set (fromList, difference)
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Construct
@@ -677,18 +677,23 @@ constantValueMatch :: SubExp -> Maybe Int
 constantValueMatch (Constant (IntValue v)) = Just $ valueIntegral v
 constantValueMatch _ = Nothing
 
+-- Does the list of indexing variables only have a single dimension?
+singleDim :: [VName] -> Maybe VName
+singleDim [v] = Just v
+singleDim _ = Nothing
+
 inBlockKernelBodyMatch :: [VName] -> Names -> KernelBody GPU -> Scope GPU -> Maybe KernelBodyMatch
 -- TODO: support more than 3 dimensions?
 inBlockKernelBodyMatch indexVars@[_indexVar1, _indexVar2, indexVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) scope = do
   let sTable = ST.insertStms (informStms stms) $ ST.fromScope $ addScopeWisdom scope
---  TODO: rename to use A, B, C?
+  --  TODO: rename to use A, B, C?
   (resExp, _) <- ST.lookupExp res sTable
   resWithoutConversion <- case resExp of
-                              BasicOp (ConvOp _ (Var converted)) -> do
-                                (convertedExp, _) <- ST.lookupExp converted sTable
-                                pure convertedExp
-                              notConvertedExp ->
-                                pure notConvertedExp
+    BasicOp (ConvOp _ (Var converted)) -> do
+      (convertedExp, _) <- ST.lookupExp converted sTable
+      pure convertedExp
+    notConvertedExp ->
+      pure notConvertedExp
   (mulArg1, mulArg2) <- matchesMul $ removeExpWisdom resWithoutConversion
   (mulArg1Exp, _) <- ST.lookupExp mulArg1 sTable
   (mulArg2Exp, _) <- ST.lookupExp mulArg2 sTable
@@ -701,15 +706,40 @@ inBlockKernelBodyMatch indexVars@[_indexVar1, _indexVar2, indexVar3] freeVars (K
   slice2' <- mapM getIndexVar $ unSlice slice2
   let (innerIndeces1, outerIndeces1) = partition (`elem` indexVars) slice1'
   let (innerIndeces2, outerIndeces2) = partition (`elem` indexVars) slice2'
-  let commonIndeces = innerIndeces1 `intersect` innerIndeces2
-  let separateIndeces1 = toList $ fromList innerIndeces1 `difference` fromList innerIndeces2
-  let separateIndeces2 = toList $ fromList innerIndeces2 `difference` fromList innerIndeces1
-  case (separateIndeces1, separateIndeces2, commonIndeces, arr1Type, arr2Type, resType) of
---  TODO: check which is A and which is B?
-    ([m], [n], [k], Array type1 (Shape arr1Dims) _, Array type2 (Shape arr2Dims) _, Prim resTypePrim) | k == indexVar3 && all (`nameIn` freeVars) (outerIndeces1<>outerIndeces2) ->
-      let arr1OuterDims = take (length arr1Dims - 2) arr1Dims in
-      let arr2OuterDims = take (length arr2Dims - 2) arr2Dims in
-      Just (KernelBodyMatch innerIndeces1 innerIndeces2 outerIndeces1 outerIndeces2 arr1OuterDims arr2OuterDims arr1 arr2 m n k type1 type2 resTypePrim)
+  -- Check that each array has one unique (n or m) and one commen (k) dimension
+  -- as the inner dimensions of the intragroup kernel
+  k <- singleDim $ innerIndeces1 `intersect` innerIndeces2
+  n <- singleDim $ toList $ fromList innerIndeces1 `difference` fromList innerIndeces2
+  m <- singleDim $ toList $ fromList innerIndeces2 `difference` fromList innerIndeces1
+  -- TODO: Do we maybe want to allow something that is not matrix multiplication?
+  -- It would just require us to "not" transpose B in CuTe
+  -- The inner indices into A must be [m,k] and into B it must be [k, n]
+  elemIndex k innerIndeces1 >>= guard . (==1) -- [m, k] matrix
+  elemIndex k innerIndeces2 >>= guard . (==0) -- [k, n] matrix
+  
+  case (arr1Type, arr2Type, resType) of
+    --  TODO: check which is A and which is B?
+    (Array type1 (Shape arr1Dims) _, Array type2 (Shape arr2Dims) _, Prim resTypePrim)
+      | k == indexVar3 && all (`nameIn` freeVars) (outerIndeces1 <> outerIndeces2) ->
+          let arr1OuterDims = take (length arr1Dims - 2) arr1Dims
+           in let arr2OuterDims = take (length arr2Dims - 2) arr2Dims
+               in Just
+                    ( KernelBodyMatch
+                        innerIndeces1
+                        innerIndeces2
+                        outerIndeces1
+                        outerIndeces2
+                        arr1OuterDims
+                        arr2OuterDims
+                        arr1
+                        arr2
+                        m
+                        n
+                        k
+                        type1
+                        type2
+                        resTypePrim
+                    )
     _ -> Nothing
 inBlockKernelBodyMatch _ _ _ _ = Nothing
 
