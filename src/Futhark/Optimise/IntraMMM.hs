@@ -713,7 +713,9 @@ inBlockKernelBodyMatch indexVars@[_indexVar1, _indexVar2, indexVar3] freeVars (K
   m <- singleDim $ toList $ fromList innerIndeces2 `difference` fromList innerIndeces1
   -- TODO: Do we maybe want to allow something that is not matrix multiplication?
   -- It would just require us to "not" transpose B in CuTe
-  -- The inner indices into A must be [m,k] and into B it must be [k, n]
+  -- In the meantime, this checks where in the indexing slice k appears.
+  -- For B it must be [n, k] and for A it must be [k, n]
+  traceShowM innerIndeces2
   elemIndex k innerIndeces1 >>= guard . (==1) -- [m, k] matrix
   elemIndex k innerIndeces2 >>= guard . (==0) -- [k, n] matrix
   
