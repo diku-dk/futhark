@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+### Changed
+
 ### Fixed
 
 * Sizes that go out of scope due to use of higher order functions will
@@ -19,7 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Tracing inside AD operators with the interpreter now prints values
   properly.
 
-### Changed
+* Compiled and interpreted code now have same treatment of inclusive
+  ranges with start==end and negative step size, e.g. `1..0...1`
+  produces `[1]` rather than an invalid range error.
 
 ## [0.25.24]
 
