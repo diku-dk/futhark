@@ -759,7 +759,8 @@ code.
 Construct a signed integer array whose first element is ``x`` and
 which proceeds with a stride of ``y-x`` until reaching ``z``
 (inclusive). The ``..y`` part can be elided in which case a stride of
-``1`` is used. All components must be of an unsigned integer type.
+``1`` is used. All components must be of the same unsigned integer
+type.
 
 A run-time error occurs if ``z`` is less than ``x`` or ``y``, or if
 ``x`` and ``y`` are the same value.
