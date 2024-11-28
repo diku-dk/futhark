@@ -16,7 +16,8 @@ def attention_like [q] (A: [m][k]f16) (B: [q][k][n]f16) : [m][n]f32 =
   loop (acc : *[m][n]f32) = (acc_init: *[m][n]f32) for i < q do
   let B' = B[i]
   let C : *[m][n]f32 = matmul A' B' in  
-  map2 (map2 (+)) acc C
+  C
+  -- map2 (map2 (+)) acc C
   
                             
 def main [q][p] (A: [p][m][k]f16) (B: [p][q][k][n]f16) =

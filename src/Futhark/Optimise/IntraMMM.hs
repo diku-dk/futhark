@@ -325,7 +325,7 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
           (mkInt64Const sizeM, ObservePrim),
           (mkInt64Const sizeK, ObservePrim),
           (mkInt64Const warpsM, ObservePrim),
-          (mkInt64Const warpsM, ObservePrim)
+          (mkInt64Const warpsN, ObservePrim)
         ]
       copyRetsA =
         [ ( Array
@@ -344,7 +344,7 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
           (mkInt64Const sizeK, ObservePrim),
           (mkInt64Const sizeN, ObservePrim),
           (mkInt64Const warpsM, ObservePrim),
-          (mkInt64Const warpsM, ObservePrim)
+          (mkInt64Const warpsN, ObservePrim)
         ]
       copyRetsB =
         [ ( Array
@@ -385,7 +385,7 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
               (mkInt64Const sizeN, ObservePrim),
               (mkInt64Const sizeK, ObservePrim),
               (mkInt64Const warpsM, ObservePrim),
-              (mkInt64Const warpsM, ObservePrim)
+              (mkInt64Const warpsN, ObservePrim)
             ]
       let mmmRets =
             [ ( Array
@@ -414,7 +414,7 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
           (mkInt64Const sizeM, ObservePrim),
           (mkInt64Const sizeN, ObservePrim),
           (mkInt64Const warpsM, ObservePrim),
-          (mkInt64Const warpsM, ObservePrim)
+          (mkInt64Const warpsN, ObservePrim)
         ]
   let copyRetsC =
         [ ( Array
@@ -598,12 +598,10 @@ getOptimalWarps blockSize (InnerMMAMatch _ _ sizeM sizeN _) =
 getOptimalBlockSize :: InnerMMAMatch -> Int
 getOptimalBlockSize (InnerMMAMatch _ _ sizeM sizeN _sizeK) =
 --  TODO: Should also depend on types, check if this is actually always optimal
-    let optimalWarpTileM = 64 in
-    let optimalWarpTileN = 64 in
-    let warpsM = sizeM `divUp` optimalWarpTileM in
-    let warpsN = sizeN `divUp` optimalWarpTileN in
-    warpsM * warpsN * 32
-
+    let optimalElmsPerWarp = 2048 in
+--    TODO: change back
+--    ((sizeM * sizeN) `divUp` optimalElmsPerWarp) * 32
+    128
 
 
 -- Pattern matching
@@ -717,7 +715,7 @@ inBlockKernelBodyMatch indexVars@[_indexVar1, _indexVar2, indexVar3] freeVars (K
   -- For B it must be [n, k] and for A it must be [k, n]
   elemIndex k innerIndeces1 >>= guard . (==1) -- [m, k] matrix
   elemIndex k innerIndeces2 >>= guard . (==0) -- [k, n] matrix
-  
+
   case (arr1Type, arr2Type, resType) of
     --  TODO: check which is A and which is B?
     (Array type1 (Shape arr1Dims) _, Array type2 (Shape arr2Dims) _, Prim resTypePrim)
