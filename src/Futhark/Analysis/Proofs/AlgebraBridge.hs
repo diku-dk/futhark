@@ -7,18 +7,18 @@ module Futhark.Analysis.Proofs.AlgebraBridge
   )
 where
 
-import Control.Monad (foldM, (<=<))
+import Control.Monad (foldM, (<=<), unless)
 import Data.Maybe (isJust)
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate
 import Futhark.Analysis.Proofs.AlgebraBridge.Util
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrintAlgEnv, debugLn)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesSoP)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF, toDNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Proofs.Unify (Substitution, unify)
 import Futhark.Analysis.Proofs.Util (converge)
-import Futhark.SoP.SoP (SoP, justSym, sym2SoP)
+import Futhark.SoP.SoP (SoP, justSym, sym2SoP, justConstant)
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -100,7 +100,11 @@ simplify = astMap m
       b <- solve relation
       case b of
         Yes -> pure $ Bool True
-        Unknown -> pure relation
+        Unknown -> do
+          not_b <- solve (neg relation)
+          case not_b of
+            Yes -> pure $ Bool False
+            Unknown -> pure relation
 
     -- Use Fourier-Motzkin elimination to determine the truth value
     -- of an expresion, if it can be determined in the given environment.

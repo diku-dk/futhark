@@ -1,6 +1,7 @@
 module Futhark.Analysis.Proofs.Traversals
   ( ASTMapper (..),
     ASTMappable (..),
+    identityMapper,
   )
 where
 
@@ -13,6 +14,13 @@ data ASTMapper a m = ASTMapper
   { mapOnSymbol :: a -> m a,
     mapOnSoP :: SoP a -> m (SoP a)
   }
+
+identityMapper :: (Monad m) => ASTMapper a m
+identityMapper =
+  ASTMapper
+    { mapOnSymbol = pure,
+      mapOnSoP = pure
+    }
 
 class ASTMappable a b where
   astMap :: (Monad m) => ASTMapper a m -> b -> m b

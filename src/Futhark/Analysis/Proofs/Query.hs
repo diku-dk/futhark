@@ -18,7 +18,7 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, addRelSymbol, assume, rollbackAlgEnv, ($<), ($<=), ($>), isTrue, simplify, ($>=), ($==), ($/=))
+import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, rollbackAlgEnv, ($<), ($<=), ($>), isTrue, ($>=), ($==), ($/=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (Iota), IndexFn (..), Iterator (..), casesToList, getCase)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrintAlgEnv, debugT, debugM)
@@ -74,7 +74,7 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
                 IncStrict -> ($<)
                 Dec -> ($>=)
                 DecStrict -> ($>)
-          debugT "ask" $ (q @ Var j) `rel` q
+          (q @ Var j) `rel` q
           where
             f @ x = rep (mkRep i x) f
         Empty -> undefined
@@ -141,7 +141,7 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
                     f_GT_g <- f_rel_g ($>)
                     case f_GT_g of
                       Yes -> pure GT
-                      Unknown -> pure Undefined
+                      Unknown -> debugPrintAlgEnv >> pure Undefined
       let no_overlap = answerFromBool . isJust <$> sorted cmp branches
       let within_bounds =
             map

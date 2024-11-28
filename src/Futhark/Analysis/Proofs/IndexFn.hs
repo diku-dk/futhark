@@ -13,7 +13,7 @@ data IndexFn = IndexFn
   { iterator :: Iterator,
     body :: Cases Symbol (SoP Symbol)
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Domain
   = Iota (SoP Symbol) -- [0, ..., n-1]
@@ -27,6 +27,17 @@ data Iterator
   = Forall VName Domain
   | Empty
   deriving (Show)
+
+instance Eq Iterator where
+  (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
+  (Forall _ u) == (Forall _ v) = u == v
+  Empty == Empty = True
+  _ == _ = False
+
+instance Ord Iterator where
+  (<=) :: Iterator -> Iterator -> Bool
+  _ <= Empty = False
+  _ <= Forall {} = True
 
 newtype Cases a b = Cases (NE.NonEmpty (a, b))
   deriving (Show, Eq, Ord)
@@ -43,9 +54,23 @@ getCase n (Cases cs) = NE.toList cs !! n
 getPredicates :: IndexFn -> [Symbol]
 getPredicates (IndexFn _ cs) = map fst $ casesToList cs
 
-getIterator :: IndexFn -> Maybe Iterator
-getIterator (IndexFn iter@(Forall _ _) _) = Just iter
-getIterator _ = Nothing
+getIteratorVariable :: IndexFn -> Maybe VName
+getIteratorVariable (IndexFn (Forall i _) _) = Just i
+getIteratorVariable _ = Nothing
+
+getCases :: IndexFn -> Cases Symbol (SoP Symbol)
+getCases (IndexFn _ cs) = cs
+
+justSingleCase :: IndexFn -> Maybe (SoP Symbol)
+justSingleCase f
+  | [(Bool True, f_val)] <- casesToList $ body f =
+    Just f_val
+  | otherwise =
+    Nothing
+
+catVar :: Iterator -> Maybe VName
+catVar (Forall _ (Cat k _ _)) = Just k
+catVar _ = Nothing
 
 domainSegStart :: Domain -> SoP Symbol
 domainSegStart (Iota _) = int2SoP 0

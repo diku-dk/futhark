@@ -12,7 +12,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Futhark.Analysis.Proofs.Symbol as IxFn
-import Futhark.Analysis.Proofs.Monad (IndexFnM(..), VEnv(..), debugPrintAlgEnv, debugOn, debugPrettyM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM(..), VEnv(..), debugPrintAlgEnv, debugOn, debugPrettyM, clearAlgEnv)
 import Control.Monad.RWS.Strict hiding (Sum)
 import Futhark.SoP.FourierMotzkin qualified as FM
 
@@ -183,8 +183,8 @@ tests =
               -- We are in the case for conds[i] == 2.
               addEquiv (Idx pd (sVar i1)) (int 1)
               -- Add: idx1 <=> not idx2
-              addProperty (Var c0) (PairwiseDisjoint set_de)
-              addProperty (Var d0) (PairwiseDisjoint set_ce)
+              addProperty (Var c0) (Disjoint set_de)
+              addProperty (Var d0) (Disjoint set_ce)
               let sum1 = Sum pc (int 0) (sVar n .-. int 1)
                   sum2 = Sum pd (int 0) (sVar i1 .-. int 1)
               (sum1 ~+~ sum2) FM.$<$ sVar n
@@ -200,8 +200,8 @@ tests =
               -- We are in the case for conds[i] /= 1 ^ conds[i] /= 2.
               addEquiv (Idx pd (sVar i1)) (int 0)
               addEquiv (Idx pc (sVar i1)) (int 0)
-              addProperty (Var c0) (PairwiseDisjoint set_de)
-              addProperty (Var d0) (PairwiseDisjoint set_ce)
+              addProperty (Var c0) (Disjoint set_de)
+              addProperty (Var d0) (Disjoint set_ce)
               let sum1 = Sum pc (sVar i1) (sVar n .-. int 1)
                   sum2 = Sum pd (sVar i1) (sVar n .-. int 1)
               (sVar i1 .+. (sum1 ~+~ sum2)) FM.$<$ sVar n
@@ -216,8 +216,8 @@ tests =
               -- We are in the case for conds[i] == 2.
               addEquiv (Idx pd (sVar i1)) (int 1)
               -- Add: idx1 <=> not idx2
-              addProperty (Var c0) (PairwiseDisjoint set_de)
-              addProperty (Var d0) (PairwiseDisjoint set_ce)
+              addProperty (Var c0) (Disjoint set_de)
+              addProperty (Var d0) (Disjoint set_ce)
               let sum1 = Sum pc (int 0) (sVar n .-. int 1)
                   sum2 = Sum pd (int 0) (sVar i1 .-. int 1)
               int 0 FM.$<=$ (sum1 ~+~ sum2)
@@ -236,8 +236,8 @@ tests =
               addEquiv (Idx pc (sVar i1)) (int 1)
               addEquiv (Idx pd (sVar i2)) (int 1)
               -- Predicates are disjoint.
-              addProperty (Var c0) (PairwiseDisjoint set_de)
-              addProperty (Var d0) (PairwiseDisjoint set_ce)
+              addProperty (Var c0) (Disjoint set_de)
+              addProperty (Var d0) (Disjoint set_ce)
               let sum1 = Sum pc (int 0)
                   sum2 = Sum pd (int 0) (sVar i2 .-. int 1)
               sym2SoP (sum1 (sVar i1 .-. int 1)) FM.$<$ (sum1 (sVar n .-. int 1) ~+~ sum2)
@@ -255,13 +255,13 @@ tests =
               let pc = POR $ S.singleton c0 -- conds[i1] == 1
               let pd = POR $ S.singleton d0 -- conds[i2] == 2
               addEquiv (Idx pc (sVar i1)) (int 1)
-              addEquiv (Idx pc (sVar i2)) (int 0)
               addEquiv (Idx pd (sVar i2)) (int 1)
+              -- Due to pairwise disjointedness, we also know:
+              addEquiv (Idx pc (sVar i2)) (int 0)
               addEquiv (Idx pd (sVar i1)) (int 0)
               -- Predicates are disjoint.
-              addProperty (Var c0) (PairwiseDisjoint set_de)
-              addProperty (Var d0) (PairwiseDisjoint set_ce)
-              debugPrintAlgEnv
+              addProperty (Var c0) (Disjoint set_de)
+              addProperty (Var d0) (Disjoint set_ce)
               let sum1_to = Sum pc (int 0)
                   sum1_from from = Sum pc from (sVar n .-. int 1)
                   sum2 = Sum pd (int 0) (sVar i2 .-. int 1)
@@ -344,6 +344,22 @@ tests =
               simplify $ d_sum .-. int 1
           )
           @??= sym2SoP (Sum (POR $ S.singleton d0) (int 0) (sVar i1 .-. int 1)),
+      testCase "Unite sums spicy (part2indicesL)" $
+        -- y₃₈₃₂₇[∑x₃₃₃₂₉[0 : -1 + k₃₈₂₇₉]] + ∑y₃₈₃₂₇[1 + ∑x₃₃₃₂₉[0 : -1 + k₃₈₂₇₉] : i₈₇₄₃]
+        let a_sum = sym2SoP $ Sum a (int 0) (sVar i1 .-. int 1) -- a = x₃₃₃₂₉, i1 = k₃₈₂₇₉
+        in run
+          ( do
+              clearAlgEnv
+              let b_sum = sym2SoP $ Sum b (int 1 .+. a_sum) (sVar i2) -- i2 = i₈₇₄₃
+              addRange (Var a0) $ mkRangeLB (int2SoP 0) -- k₃₈₂₇₉
+              -- max{0} <= i₈₇₄₃
+              addRange (Var i1) $ mkRangeLB (int2SoP 0)
+              -- max{0, ∑x₃₃₃₂₉[0 : -1 + k₃₈₂₇₉]} <= i₈₇₄₃
+              addRange (Var i2) $ mkRangeLB (int2SoP 0)
+              addRange (Var i2) $ mkRangeLB a_sum
+              simplify $ sym2SoP (Idx b a_sum) .+. b_sum
+          )
+          @??= sym2SoP (Sum b a_sum (sVar i2)),
       --
       testCase "FME1" $
         run

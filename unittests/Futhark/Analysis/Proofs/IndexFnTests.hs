@@ -248,6 +248,65 @@ tests =
               { iterator = Forall i (Cat k (sHole m) (sHole b)),
                 body = cases [(Bool True, sHole k)]
               }
+        ),
+      mkTest
+        "tests/indexfn/part2indicesL.fut"
+        --   k₅₂₇₀₁ :: 0 .. m₄₆₇₈
+        --   i₈₈₄₀ :: ⊎k₅₂₇₀₁ [∑j₅₂₇₀₂∈(0 .. -1 + k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₂]),
+        --                     ...,
+        --                     -1 + ∑j₅₂₇₀₂∈(0 .. k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₂])]
+        --   forall i₈₈₄₀ .
+        -- \| (csL₄₆₈₁[i₄₄₆₂₁]) ^ (shape₄₆₇₉[k₄₄₆₂₂] = 0) ⇒
+        --     -1 + csL₄₆₈₁[∑j₅₂₇₀₂∈(0 .. -1 + k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₂])]
+        --     + ∑j₅₂₇₀₂∈(0 .. -1 + k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₂])
+        --     + ∑j₅₂₇₀₂∈(1 + ∑j₅₂₇₀₃∈(0 .. -1 + k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₃]) .. i₈₈₄₀) (csL₄₆₈₁[j₅₂₇₀₂])
+        -- \| (¬(csL₄₆₈₁[i₄₄₆₂₁])) ^ (shape₄₆₇₉[k₄₄₆₂₂] = 0) ⇒
+        --     -1 + i₈₈₄₀ + -1*∑j₅₂₇₀₂∈(∑j₅₂₇₀₃∈(0 .. -1 + k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₃]) .. i₈₈₄₀) (csL₄₆₈₁[j₅₂₇₀₂])
+
+        -- \| (csL₄₆₈₁[i₄₄₆₂₁]) ^ (shape₄₆₇₉[k₄₄₆₂₂] ≠ 0) ⇒
+        --      -1 + ∑j₅₂₇₀₂∈(0 .. -1 + k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₂])
+        --      + ∑j₅₂₇₀₂∈(∑j₅₂₇₀₃∈(0 .. -1 + k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₃]) .. i₈₈₄₀) (csL₄₆₈₁[j₅₂₇₀₂])
+
+        -- \| (¬(csL₄₆₈₁[i₄₄₆₂₁])) ^ (shape₄₆₇₉[k₄₄₆₂₂] ≠ 0) ⇒
+        --      i₈₈₄₀
+        --      + ∑j₅₂₇₀₂∈(1 + ∑j₅₂₇₀₃∈(0 .. -1 + k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₃]) .. -1 + ∑j₅₂₇₀₃∈(0 .. k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₃])) (csL₄₆₈₁[j₅₂₇₀₂])
+        --      + -1*∑j₅₂₇₀₂∈(1 + ∑j₅₂₇₀₃∈(0 .. -1 + k₅₂₇₀₁) (shape₄₆₇₉[j₅₂₇₀₃]) .. i₈₈₄₀) (csL₄₆₈₁[j₅₂₇₀₂])
+        ( newNameFromString "csL" >>= \csL ->
+            newNameFromString "shape" >>= \shape ->
+              newNameFromString "dont_care" >>= \dont_care ->
+                newNameFromString "j" >>= \j -> pure $ \(i, m, k, b) ->
+                  let int = int2SoP
+                      csL_i = Idx (Hole csL) (sHole i)
+                      shape_k = sym2SoP $ Idx (Hole shape) (sHole k)
+                      seg_k_start = sym2SoP $ Sum j (int 0) (sHole k .-. int 1) (Idx (Hole shape) (sHole j))
+                      seg_k_end = int (-1) .+. sym2SoP (Sum j (int 0) (sHole k) (Idx (Hole shape) (sHole j)))
+                   in IndexFn
+                        { iterator = Forall i (Cat k (sHole m) (sHole b)),
+                          body =
+                            cases
+                              [ (csL_i :&& shape_k :== int 0, sHole dont_care),
+                                (neg csL_i :&& shape_k :== int 0, sHole dont_care),
+                                ( csL_i :&& shape_k :/= int 0,
+                                  -- offset at segment k
+                                  seg_k_start
+                                    -- number of trues in this segment up to and including current index
+                                    .+. sym2SoP (Sum j seg_k_start (sHole i) (Idx (Hole csL) (sHole j)))
+                                    -- minus 1 (remember that current index csL[i] is true)
+                                    .-. int 1
+                                ),
+                                -- TODO we could simplify the above to sum exclusive current index and then
+                                -- do away with the (-1).
+                                ( neg csL_i :&& shape_k :/= int 0,
+                                  -- global index
+                                  sHole i
+                                    -- plus number of trues in this segment (disregarding the first??)
+                                    .+. sym2SoP (Sum j (int 1 .+. seg_k_start) seg_k_end (Idx (Hole csL) (sHole j)))
+                                    -- minus number of trues before index in this segment (disregarding the first??)
+                                    -- === global index + number of trues that come after this index in the current segment
+                                    .+. sym2SoP (Sum j (int 1 .+. seg_k_start) (sHole i) (Idx (Hole csL) (sHole j)))
+                                )
+                              ]
+                        }
         )
     ]
   where

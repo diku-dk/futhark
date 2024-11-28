@@ -148,7 +148,7 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
     S.disjoint anms bnms,
     anm <- S.elemAt 0 anms,
     ms1 == ms2 && k1 == k2 = do
-  disjoint <- askPairwiseDisjoint (Var anm)
+  disjoint <- askDisjoint (Var anm)
   case disjoint of
     Nothing -> pure Nothing
     Just nms_disjoint_with_a -> do

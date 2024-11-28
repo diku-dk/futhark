@@ -6,24 +6,25 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
     algebraContext,
     toAlgebraSymbol,
     isBooleanM,
+    getDisjoint,
   )
 where
 
-import Control.Monad (foldM, forM_, unless, void, when, (<=<))
+import Control.Monad (forM_, when, (<=<))
 import Control.Monad.RWS (gets, modify)
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromJust, fromMaybe, isNothing)
+import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (IndexFn, Iterator (Forall), getIterator, getPredicates)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv), debugPrettyM)
+import Futhark.Analysis.Proofs.IndexFn (IndexFn (iterator), Iterator (..), getPredicates)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
-import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap)
+import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap, identityMapper)
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Futhark.SoP.Monad (addEquiv, addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange, substEquivs)
+import Futhark.SoP.Monad (addEquiv, addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
@@ -59,11 +60,11 @@ algebraContext fn m = rollbackAlgEnv $ do
   let ps = getPredicates fn
   mapM_ trackBooleanNames ps
   _ <- handleQuantifiers fn
-  case getIterator fn of
-    Just (Forall i _) -> do
+  case iterator fn of
+    Forall i _ -> do
       mapM_ (handlePreds i) ps
       addDisjointedness i ps
-    _ -> pure ()
+    Empty -> pure ()
   m
   where
     lookupUntransBool i x = do
@@ -83,14 +84,11 @@ algebraContext fn m = rollbackAlgEnv $ do
     addDisjointedness _ ps | length ps < 2 = pure ()
     addDisjointedness i ps = do
       -- If p is on the form p && q, then p and q probably already
-      -- have untranslatable names, but p && q does not. The PairwiseDisjoint
-      -- set, however, needs to be complete in the sense that OR'ing every
-      -- element in the set is a tautology. So we need to create a
-      -- name for the predicate with connectives.
+      -- have untranslatable names, but p && q does not.
       vns <- mapM (lookupUntransBool i) ps
       forM_ vns $ \vn ->
         addProperty (Algebra.Var vn) $
-          Algebra.PairwiseDisjoint (S.fromList vns S.\\ S.singleton vn)
+          Algebra.Disjoint (S.fromList vns S.\\ S.singleton vn)
 
     -- Add boolean tag to IndexFn layer names where applicable.
     trackBooleanNames (Var vn) = do
@@ -131,14 +129,14 @@ fromAlgebra_ (Algebra.Mdf _dir vn i j) = do
   -- TODO add monotonicity property to environment?
   a <- fromAlgebra i
   b <- fromAlgebra j
-  x <- lookupUntransSymUnsafe vn
+  x <- lookupSym vn
   xa <- repHoles x a
   xb <- repHoles x b
   pure $ xa ~-~ xb
 fromAlgebra_ (Algebra.Sum (Algebra.One vn) lb ub) = do
   a <- fromAlgebra lb
   b <- fromAlgebra ub
-  x <- lookupUntransSymUnsafe vn
+  x <- lookupSym vn
   j <- newVName "j"
   xj <- repHoles x (sym2SoP $ Var j)
   pure . sym2SoP $ Sum j a b xj
@@ -150,8 +148,11 @@ fromAlgebra_ (Algebra.Sum (Algebra.POR vns) lb ub) = do
       (S.toList vns)
 fromAlgebra_ (Algebra.Pow {}) = undefined
 
-lookupUntransSymUnsafe :: VName -> IndexFnM Symbol
-lookupUntransSymUnsafe = fmap fromJust . lookupUntransSym . Algebra.Var
+-- Like lookupUntransSym, but if the name is not in the untranslatable
+-- environment, assume that it is a variable with the same name
+-- in both IndexFn and Algebra layers.
+lookupSym :: VName -> IndexFnM Symbol
+lookupSym vn = fromMaybe (Var vn) <$> lookupUntransSym (Algebra.Var vn)
 
 -- Replace holes in `x` by `replacement`.
 repHoles :: (Monad m) => Symbol -> SoP Symbol -> m Symbol
@@ -161,16 +162,14 @@ repHoles x replacement =
     -- Change how we are replacing depending on if replacement is really a SoP.
     mapper
       | Just replacement' <- justSym replacement =
-          ASTMapper
+          identityMapper
             { mapOnSymbol = \sym -> case sym of
                 Hole _ -> pure replacement'
-                _ -> pure sym,
-              mapOnSoP = pure
+                _ -> pure sym
             }
       | otherwise =
-          ASTMapper
-            { mapOnSymbol = pure,
-              mapOnSoP = \sop -> case justSym sop of
+          identityMapper
+            { mapOnSoP = \sop -> case justSym sop of
                 Just (Hole _) -> pure replacement
                 _ -> pure sop
             }
@@ -232,12 +231,17 @@ search x = do
       matches <- catMaybes <$> mapM (\(sym, algsym) -> fmap (algsym,) <$> unify sym x) syms
       case matches of
         [] -> pure Nothing
-        [(algsym, sub)] -> do
-          unless (M.size (mapping sub) == 1) $ error "search: multiple holes"
+        [(algsym, sub)] | null (mapping sub) -> do
+          pure $ Just (Algebra.getVName algsym, Nothing)
+        [(algsym, sub)] | [s] <- M.elems (mapping sub) -> do
           pure $
-            Just (Algebra.getVName algsym, Just . head $ M.elems (mapping sub))
-        _ ->
-          error $ "search: " <> prettyString x <> " unifies with multiple symbols"
+            Just (Algebra.getVName algsym, Just s)
+        [y] ->
+          error $
+            "search: " <> prettyString x <> " multiple holes: " <> prettyString y
+        ys ->
+          error $
+            "search: " <> prettyString x <> " unifies with multiple symbols: " <> prettyString ys
 
 isBooleanM :: Symbol -> IndexFnM Bool
 isBooleanM (Var vn) = do
@@ -247,6 +251,18 @@ isBooleanM (Idx (Var vn) _) = do
 isBooleanM (Apply (Var vn) _) = do
   askProperty (Algebra.Var vn) Algebra.Boolean
 isBooleanM x = pure $ isBoolean x
+
+getDisjoint :: Symbol -> IndexFnM [Symbol]
+getDisjoint x = do
+  res <- search x
+  case res of
+    Nothing -> pure []
+    Just (vn, idx) -> do
+      disjoint_vns <- fromMaybe mempty <$> Algebra.askDisjoint (Algebra.Var vn)
+      xs <- mapM lookupSym (S.toList disjoint_vns)
+      case idx of
+        Just j -> mapM (`repHoles` j) xs
+        Nothing -> pure xs
 
 idxSym :: Bool -> VName -> Algebra.IdxSym
 idxSym True = Algebra.POR . S.singleton
@@ -260,7 +276,7 @@ idxSym False = Algebra.One
 -- This is done so because the algebra layer needs to know about indexing.
 toAlgebra_ :: Symbol -> IndexFnM Algebra.Symbol
 toAlgebra_ (Var x) = pure $ Algebra.Var x
-toAlgebra_ (Hole _) = undefined
+toAlgebra_ (Hole _) = error "toAlgebra_ on Hole"
 toAlgebra_ (Sum j lb ub x) = do
   res <- search x
   case res of

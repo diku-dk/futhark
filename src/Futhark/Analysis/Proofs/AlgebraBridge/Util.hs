@@ -1,11 +1,11 @@
 -- Utilities for using the Algebra layer from the IndexFn layer.
 module Futhark.Analysis.Proofs.AlgebraBridge.Util where
 
-import Control.Monad (unless, forM_)
+import Control.Monad (unless, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (isBooleanM, toAlgebra, toAlgebraSymbol)
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (isBooleanM, toAlgebra, toAlgebraSymbol, getDisjoint)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
@@ -20,30 +20,17 @@ import Futhark.Util.Pretty (Pretty (pretty), viaShow, prettyString)
 
 assume :: Symbol -> IndexFnM ()
 assume (p :&& q) = assume p >> assume q
-assume x = do
-  booltype <- isBooleanM x
-  unless booltype (error $ "assume on non-boolean: " <> prettyString x)
-  case x of
-    Not p -> do
-      addRelSymbol (neg p)
-      -- If x is boolean, it will be in NNF, so x can only be
-      -- Var, Idx, or Apply.
-      p' <- toAlgebraSymbol p
-      addEquiv p' (int2SoP 0)
-      not_p <- toAlgebraSymbol $ neg p
-      addEquiv not_p (int2SoP 1)
-    p -> do
-      addRelSymbol p
-      p' <- toAlgebraSymbol p
-      addEquiv p' (int2SoP 1)
-      not_p <- toAlgebraSymbol $ neg p
-      addEquiv not_p (int2SoP 0)
-      -- Pairwise disjoint symbols are false.
-      disjoint <- Algebra.askPairwiseDisjoint p'
-      case disjoint of
-        Nothing -> pure ()
-        Just vns -> do
-          forM_ vns $ flip addEquiv (int2SoP 0) . Algebra.Var
+assume p = do
+  booltype <- isBooleanM p
+  -- This is could just be a no-op, if not boolean, but I'd like to know why.
+  unless booltype (error $ "Assume on non-boolean: " <> prettyString p)
+  addRelSymbol p
+  addEq 1 p
+  addEq 0 (neg p)
+  -- Add that pairwise disjoint symbols are false.
+  mapM_ (addEq 0) =<< getDisjoint p
+  where
+    addEq i = flip addEquiv (int2SoP i) <=< toAlgebraSymbol
 
 -- | Adds a relation on symbols to the algebraic environment.
 -- No-op if `p` is not a relation.
@@ -79,17 +66,17 @@ addRelIterator (Forall i dom) = case dom of
   Iota n -> do
     n' <- toAlgebra n
     boundIndexValues n'
-    dom_end <- toAlgebra $ domainEnd dom
+    dom_end <- Algebra.simplify =<< toAlgebra (domainEnd dom)
     addRange (Algebra.Var i) (mkRange (int2SoP 0) dom_end)
   Cat k m b -> do
     m' <- toAlgebra m
     boundIndexValues m'
     addRange (Algebra.Var k) (mkRange (int2SoP 0) (m' .-. int2SoP 1))
-    dom_start <- toAlgebra $ domainStart dom
-    dom_end <- toAlgebra $ domainEnd dom
+    dom_start <- Algebra.simplify =<< toAlgebra (domainStart dom)
+    dom_end <- Algebra.simplify =<< toAlgebra (domainEnd dom)
     addRange (Algebra.Var i) (mkRange dom_start dom_end)
-    interval_start <- toAlgebra b
-    interval_end <- toAlgebra $ intervalEnd dom
+    interval_start <- Algebra.simplify =<< toAlgebra b
+    interval_end <- Algebra.simplify =<< toAlgebra (intervalEnd dom)
     addRange (Algebra.Var i) (mkRange interval_start interval_end)
   where
     boundIndexValues e = do

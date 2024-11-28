@@ -20,6 +20,8 @@ module Futhark.Analysis.Proofs.Unify
     sub,
     unifies,
     renameAnd,
+    renameM,
+    renamesM,
   )
 where
 
@@ -71,6 +73,13 @@ class Renameable u where
   rename :: (MonadFreshNames m) => VNameSource -> u -> m u
   rename vns = rename_ vns mempty
 
+renameM :: (MonadFreshNames m, Renameable u) => u -> m u
+renameM x = getNameSource >>= flip rename x
+
+-- Renames any number of renameables using the same name source for each.
+renamesM :: (MonadFreshNames m, Traversable t, Renameable b) => t b -> m (t b)
+renamesM xs = getNameSource >>= \vns -> mapM (rename vns) xs
+
 -- Rename bound variables in `a` and `b`. Renamed variables are
 -- identical, if `a` and `b` are syntactically equivalent.
 renameSame :: (MonadFreshNames m, Renameable a, Renameable b) => a -> b -> m (a, b)
@@ -109,10 +118,13 @@ instance Semigroup (Substitution u) where
         vns = vns a <> vns b
       }
 
-instance (Pretty v) => Pretty (Substitution v) where
-  pretty = braces . commastack . map prettyKV . M.toList . mapping
+instance (Pretty v) => Pretty (Replacement v) where
+  pretty = braces . commastack . map prettyKV . M.toList
     where
       prettyKV (k, v) = prettyName k <> " : " <> pretty v
+
+instance (Pretty v) => Pretty (Substitution v) where
+  pretty = pretty . mapping
 
 sub ::
   ( MonadFreshNames m,
@@ -138,6 +150,8 @@ class (Renameable v) => Unify v u where
 
   -- Unification on {subC(id,id,e) ~= subC(id,id,e')}
   --                  = {rename(e) ~= rename(e')}.
+  --
+  -- Only the first argument may contain holes.
   unify :: (Pretty v) => v -> v -> IndexFnM (Maybe (Substitution u))
   unify = renameAnd unify_
 

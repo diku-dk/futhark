@@ -1,168 +1,196 @@
 -- Index function substitution.
-module Futhark.Analysis.Proofs.Substitute (($$)) where
+module Futhark.Analysis.Proofs.Substitute ((@)) where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless)
 import Data.Map qualified as M
 import Data.Maybe (isJust)
 import Debug.Trace (traceM)
+import Futhark.Analysis.Proofs.AlgebraBridge (simplify)
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (rollbackAlgEnv)
+import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCase, repIndexFn)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repDomain)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.SymbolPlus (toSumOfSums)
-import Futhark.Analysis.Proofs.Unify (Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv)
+import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap, identityMapper)
+import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameSame)
 import Futhark.Analysis.Proofs.Util (prettyBinding')
-import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), newName)
-import Futhark.SoP.SoP (SoP, mapSymSoP, sym2SoP)
+import Futhark.MonadFreshNames (newVName)
+import Futhark.SoP.Monad (UntransEnv (dir), getUntrans, lookupUntransPE)
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 
--- We use an operator so as not to confuse it with substitution from Unify.
--- 'f $$ (x, g)' substitutes name 'x' for indexfn 'g' in indexfn 'f'.
-($$) :: IndexFn -> (VName, IndexFn) -> IndexFnM IndexFn
-f@(IndexFn (Forall j _) _) $$ (vn, g@(IndexFn (Forall i _) _)) = do
+tracer :: (VName, IndexFn) -> IndexFn -> IndexFn -> IndexFnM IndexFn
+tracer (vn, f@(IndexFn (Forall {}) _)) g@(IndexFn (Forall {}) _) res = do
   whenDebug $
     traceM $
-      "🎭 substitute\n    "
-        <> prettyBinding' vn g
-        <> prettyBinding' ("\n    into _" :: String) f
-  i' <- sym2SoP . Var <$> newName i
-  vns <- getNameSource
-  g' <- rename vns g
-  f' <- rename vns f
-  substitute vn (repIndexFn (mkRep i i') g') (repIndexFn (mkRep j i') f')
-f $$ (vn, g@(IndexFn (Forall {}) _)) = do
-  whenDebug $
-    traceM $
-      "🎭 substitute\n    "
-        <> prettyBinding' vn g
-        <> prettyBinding' ("\n    into _" :: String) f
-  substitute vn g f
-f $$ (vn, g) = substitute vn g f
+      "🎭  "
+        <> prettyBinding' vn f
+        <> prettyBinding' ("\n    into _" :: String) g
+        <> prettyBinding' ("\n          " :: String) res
+  pure res
+tracer _ _ res = pure res
+
+-- Inline applications of f in g.
+-- 'g @ (f_name, f)' substitutes name 'f_name' for indexfn 'f' in indexfn 'g'.
+(@) :: IndexFn -> (VName, IndexFn) -> IndexFnM IndexFn
+g @ (vn, f) = tracer (vn, f) g =<< inline (vn, f) g
+
+inline :: (VName, IndexFn) -> IndexFn -> IndexFnM IndexFn
+inline (f_name, f) g = do
+  (f', g', app_reps) <- mkApplicationReps (f_name, f) g
+  iter <- mergeIterators f' $ inlineIterator app_reps g'
+  cs <- inlineCases app_reps f' g'
+  pure (IndexFn iter cs)
+  where
+    inlineCases reps f' g' =
+      simplify . cases $ do
+        (f_cond, f_val) <- casesToList (body f')
+        (g_cond, g_val) <- casesToList (body g')
+        pure $
+          foldl
+            ( \(c, v) (app_name, arg) ->
+                let f_cond' = sop2Symbol $ rep arg f_cond
+                    s = mkRep app_name (rep arg f_val)
+                 in (sop2Symbol (rep s c) :&& f_cond', rep s v)
+            )
+            (g_cond, g_val)
+            reps
+
+    inlineIterator _ (IndexFn Empty _) = Empty
+    inlineIterator reps (IndexFn (Forall j dg) _)
+      | all ((`notElem` fv dg) . fst) reps =
+          Forall j dg
+    inlineIterator reps (IndexFn (Forall j dg) _)
+      | Just f_val <- justSingleCase f =
+          Forall j $
+            foldl
+              ( \dom (app_name, arg) ->
+                  repDomain (mkRep app_name (rep arg f_val)) dom
+              )
+              dg
+              reps
+    inlineIterator _ _ =
+      error "Only single-case index functions may substitute into domain"
+
+    mergeIterators (IndexFn Empty _) g_iter = pure g_iter
+    mergeIterators (IndexFn (Forall _ df) cs) Empty =
+      case df of
+        Iota {} -> pure Empty
+        Cat k _ _
+          | k `elem` fv cs ->
+              error $ "Might capture " <> prettyString k
+          | otherwise ->
+              pure Empty
+    mergeIterators (IndexFn (Forall i df) _) (Forall j dg) = do
+      assertEquivDomains df dg
+      case (df, dg) of
+        (Iota {}, Iota {}) -> do
+          pure (Forall j dg)
+        (Cat {}, Cat {}) -> do
+          pure (Forall j dg)
+        (Cat {}, Iota {}) -> do
+          pure (Forall j $ repDomain (mkRep i $ Var j) df)
+        (Iota {}, Cat {}) -> do
+          pure (Forall j dg)
+
+equivDomains :: Domain -> Domain -> IndexFnM Bool
+equivDomains df@(Cat {}) dg@(Cat {}) = do
+  isJust <$> (unify df dg :: IndexFnM (Maybe (Substitution Symbol)))
+equivDomains df@(Iota {}) dg@(Cat _ m _) = do
+  aligns_with_whole <- sameRange df dg
+  aligns_with_k <- sameRange df (Iota m)
+  pure $ aligns_with_whole || aligns_with_k
+equivDomains df dg = sameRange df dg
 
 sameRange :: Domain -> Domain -> IndexFnM Bool
-sameRange dom_f dom_g = do
-  start_f <- rewrite (domainStart dom_f)
-  start_g <- rewrite (domainStart dom_g)
-  end_f <- rewrite (domainEnd dom_f)
-  end_g <- rewrite (domainEnd dom_g)
+sameRange df dg = do
+  start_f <- rewrite (domainStart df)
+  start_g <- rewrite (domainStart dg)
+  end_f <- rewrite (domainEnd df)
+  end_g <- rewrite (domainEnd dg)
   eq_start :: Maybe (Substitution Symbol) <- unify start_f start_g
   eq_end :: Maybe (Substitution Symbol) <- unify end_f end_g
   pure $ isJust eq_start && isJust eq_end
 
-assertSameRange :: Domain -> Domain -> IndexFnM ()
-assertSameRange dom_f dom_g =
-  sameRange dom_f dom_g >>= flip unless (error "checkSameRange: inequal ranges")
+assertEquivDomains :: Domain -> Domain -> IndexFnM ()
+assertEquivDomains dom_f dom_g =
+  equivDomains dom_f dom_g >>= flip unless (error "assertSameRange: inequal ranges")
 
-subIterator :: VName -> Cases Symbol (SoP Symbol) -> Iterator -> Iterator
-subIterator _ _ Empty = Empty
-subIterator x_fn xs iter@(Forall i dom) =
-  if x_fn `elem` fv dom
-    then case casesToList xs of
-      [(Bool True, x_val)] ->
-        Forall i $
-          case dom of
-            Iota n -> Iota $ mapSymSoP (rip x_fn i x_val) n
-            Cat k m b -> Cat k (mapSymSoP (rip x_fn i x_val) m) (mapSymSoP (rip x_fn i x_val) b)
-      _ -> error "substitute: substituting into domain using non-scalar index fn"
-    else iter
-
--- Assumes that Forall-variables (i) of non-Empty iterators are equal.
-substitute :: VName -> IndexFn -> IndexFn -> IndexFnM IndexFn
-substitute x_fn (IndexFn Empty xs) (IndexFn iter_y ys) =
-  -- Substitute scalar `x` into index function `y`.
-  pure $
-    IndexFn
-      (subIterator x_fn xs iter_y)
-      ( cases $ do
-          (x_cond, x_val) <- casesToList xs
-          (y_cond, y_val) <- casesToList ys
-          pure $ repCase (mkRep x_fn x_val) (y_cond :&& x_cond, y_val)
-      )
-substitute x_fn (IndexFn (Forall i (Iota _)) xs) (IndexFn Empty ys) =
-  -- Substitute array `x` into scalar `y` (type-checker ensures that this is valid,
-  -- e.g., y is a sum).
-  pure $
-    IndexFn
-      Empty
-      ( cases $ do
-          (x_cond, x_val) <- casesToList xs
-          (y_cond, y_val) <- casesToList ys
-          let rip_x = rip x_fn i x_val
-          pure (sop2BoolSymbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-      )
-substitute x_fn (IndexFn (Forall i dom_x) xs) (IndexFn (Forall _ dom_y) ys) = do
-  when (x_fn `elem` fv dom_y) $ debugPrettyM "jeeez" (Var x_fn)
-  case (dom_x, dom_y) of
-    (Iota {}, Iota {}) -> do
-      assertSameRange dom_x dom_y
-      mkfn dom_y
-    (Cat {}, Cat {}) -> do
-      assertSameRange dom_x dom_y
-      mkfn dom_y
-    (Cat {}, Iota {}) -> do
-      assertSameRange dom_x dom_y
-      mkfn dom_x
-    (Iota {}, Cat _ m _) -> do
-      test1 <- sameRange dom_x dom_y
-      test2 <- sameRange dom_x (Iota m)
-      unless (test1 || test2) $ error "substitute iota cat: Incompatible domains."
-      mkfn dom_y
+-- Given functions (f = \i -> ...) and (g = \j -> ...), returns:
+-- 1. renamed f
+-- 2. renamed g with each application f(e(j)) replaced by a (fresh) variable
+--    unique to the argument e(j), and
+-- 3. a list associating the names of those variables to their arguments:
+--      [(f, {}), (f_1, {i |-> e_1(j)}), (f_2, {i |-> e_2(j)}), ...]
+--    where the first element handles the case where f is used without
+--    any argument, for instance, when f is a scalar.
+mkApplicationReps :: (VName, IndexFn) -> IndexFn -> IndexFnM (IndexFn, IndexFn, [(VName, Replacement Symbol)])
+mkApplicationReps (f_name, f) g = do
+  k <- newVName "variables after this are quantifiers"
+  let isFreeVariable = (< k)
+  (f', g') <- renameSame f g
+  let legalName v =
+        isFreeVariable v
+          || Just v == catVar (iterator g')
+          || hasSingleCase f'
+  -- Collect and replace applications f(e(j)) in g by fresh variables.
+  -- NOTE the domain of g is also traversed.
+  -- TODO Using algenv for unintended purposes here; add new field to VEnv?
+  (g'', apps) <- rollbackAlgEnv $ do
+    clearAlgEnv
+    g'' <- astMap (identityMapper {mapOnSymbol = repAppByFreshName legalName}) g'
+    (g'',) . map strip . M.assocs . dir <$> getUntrans
+  -- If there are no f(e(j)), handle direct references to f without any args.
+  let reps = case apps of
+        [] ->
+          let i_rep = case (iterator f', iterator g') of
+                (Forall i _, Forall j _) -> mkRep i (Var j)
+                _ -> mempty
+           in [(f_name, i_rep)]
+        _ -> apps
+  pure (f', g'', reps)
   where
-    mkfn dom =
-      pure $
-        IndexFn
-          { iterator = subIterator x_fn xs $ Forall i dom,
-            body = cases $ do
-              (x_cond, x_val) <- casesToList xs
-              (y_cond, y_val) <- casesToList ys
-              let rip_x = rip x_fn i x_val
-              pure (sop2BoolSymbol . rip_x $ y_cond :&& x_cond, mapSymSoP rip_x y_val)
-          }
-substitute _ x y = error $ "substitute: not implemented for " <> prettyString x <> prettyString y
+    hasSingleCase = isJust . justSingleCase
 
--- TODO Sad that we basically have to copy rep here;
---      everything but the actual substitutions could be delegated to
---      a helper function that takes a replacement as argument?
-rip :: VName -> VName -> SoP Symbol -> Symbol -> SoP Symbol
-rip fnName fnArg fnVal = apply mempty
-  where
-    applySoP = mapSymSoP . apply
+    strip (Algebra.Var vn, Idx _ idx) = (vn, toRep idx)
+    strip _ = error "Impossible"
 
-    apply :: Replacement Symbol -> Symbol -> SoP Symbol
-    apply s (Apply (Var f) [idx])
-      | f == fnName =
-          rep (M.insert fnArg idx s) fnVal
-    apply s (Idx (Var f) idx)
-      | f == fnName =
-          rep (M.insert fnArg idx s) fnVal
-    apply s (Var f)
-      | f == fnName =
-          rep s fnVal
-    apply _ x@(Var _) = sym2SoP x
-    apply _ x@(Hole _) = sym2SoP x
-    apply s (Idx x idx) =
-      sym2SoP $ Idx (sop2Symbol $ apply s x) (applySoP s idx)
-    apply s (Sum j lb ub x) =
-      let s' = addRep j (Var j) s
-       in toSumOfSums j (applySoP s' lb) (applySoP s' ub) (apply s' x)
-    apply s (Apply f xs) =
-      sym2SoP $ Apply (sop2Symbol $ apply s f) (map (applySoP s) xs)
-    apply s (Tuple xs) =
-      sym2SoP $ Tuple (map (applySoP s) xs)
-    apply _ x@(Bool _) = sym2SoP x
-    apply _ Recurrence = sym2SoP Recurrence
-    apply s sym = case sym of
-      Not x -> sym2SoP . neg . sop2BoolSymbol $ apply s x
-      x :< y -> binop (:<) x y
-      x :<= y -> binop (:<=) x y
-      x :> y -> binop (:>) x y
-      x :>= y -> binop (:>=) x y
-      x :== y -> binop (:==) x y
-      x :/= y -> binop (:/=) x y
-      x :&& y -> binopS (:&&) x y
-      x :|| y -> binopS (:||) x y
+    toRep idx = case iterator f of
+      Forall i _ -> mkRep i idx
+      Empty -> error "Indexing into a scalar function"
+
+    -- Replace applications of f by (fresh) names.
+    -- We disallow substituting f into sums, if f has more than one case
+    -- (it would be unclear what case value to substitute). This is enforced
+    -- by checking for captured quantifiers in the function argument,
+    -- for example, Sum_j (f[i] + j) is allowed, but Sum_j (f[j]) is not.
+    -- (Unless f only has one case.)
+    repAppByFreshName legalName sym = case sym of
+      Apply (Var x) [idx]
+        | x == f_name,
+          legalIdx idx ->
+            repByName (Idx (Var x) idx)
+      Idx (Var x) idx
+        | x == f_name,
+          legalIdx idx ->
+            repByName (Idx (Var x) idx)
+      Apply (Var x) [_]
+        | x == f_name -> error "Capturing variables"
+      Idx (Var x) _
+        | x == f_name -> error "Capturing variables"
+      _ -> pure sym
       where
-        binop op x y = sym2SoP $ applySoP s x `op` applySoP s y
-        binopS op x y = sym2SoP $ sop2BoolSymbol (apply s x) `op` sop2BoolSymbol (apply s y)
+        legalIdx = all legalName . fv
+
+    repByName app = do
+      f_at_idx <- Algebra.getVName <$> lookupUntransPE app
+      pure (Var f_at_idx)
+
+-- XXX when to rewrite recurrences as sums?
+-- When substitituting a recurrent index fn into some other index fn.
+-- When querying the solver about an index fn (won't actually alter the representation of it).
+-- ==> That is, NOT unless we have to.
+--
+-- XXX could we rewrite recurrences in terms of the index fn being substituted into?
