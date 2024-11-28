@@ -9,16 +9,15 @@ import Futhark.Analysis.Proofs.AlgebraBridge (simplify)
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate (rollbackAlgEnv)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repDomain, repIndexFn)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repDomain)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap, identityMapper)
 import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameSame)
 import Futhark.Analysis.Proofs.Util (prettyBinding')
-import Futhark.MonadFreshNames (newName, newVName)
+import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Monad (UntransEnv (dir), getUntrans, lookupUntransPE)
-import Futhark.SoP.SoP (sym2SoP)
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 
@@ -134,7 +133,7 @@ mkApplicationReps (f_name, f) g = do
   (f', g') <- renameSame f g
   let legalName v =
         isFreeVariable v
-          || Just v == getCatIteratorVariable g'
+          || Just v == catVar (iterator g')
           || hasSingleCase f'
   -- Collect and replace applications f(e(j)) in g by fresh variables.
   -- NOTE the domain of g is also traversed.

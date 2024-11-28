@@ -34,6 +34,11 @@ instance Eq Iterator where
   Empty == Empty = True
   _ == _ = False
 
+instance Ord Iterator where
+  (<=) :: Iterator -> Iterator -> Bool
+  _ <= Empty = False
+  _ <= Forall {} = True
+
 newtype Cases a b = Cases (NE.NonEmpty (a, b))
   deriving (Show, Eq, Ord)
 
@@ -63,9 +68,9 @@ justSingleCase f
   | otherwise =
     Nothing
 
-getCatIteratorVariable :: IndexFn -> Maybe VName
-getCatIteratorVariable (IndexFn (Forall _ (Cat k _ _)) _) = Just k
-getCatIteratorVariable _ = Nothing
+catVar :: Iterator -> Maybe VName
+catVar (Forall _ (Cat k _ _)) = Just k
+catVar _ = Nothing
 
 domainSegStart :: Domain -> SoP Symbol
 domainSegStart (Iota _) = int2SoP 0

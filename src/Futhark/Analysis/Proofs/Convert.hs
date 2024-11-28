@@ -11,7 +11,7 @@ import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, getCatIteratorVariable, justSingleCase, unzipT)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, justSingleCase, unzipT, catVar)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes)
@@ -241,41 +241,12 @@ forward expr@(E.AppExp (E.Apply f args _) _)
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
       -- tell ["Using map rule ", toLaTeX y']
-      xss <- mapM forward args'
-      let paramNames :: [E.VName] = concatMap E.patNames params
-      let xs :: [IndexFn] = mconcat $ map unzipT xss
-      -- Make sure all Cat k's are identical, then grab k.
-      xs' <- renamesM xs
-      let cat_fn =
-            msum $
-              map
-                ( \fn -> case fn of
-                    IndexFn (Forall _ (Cat {})) _ -> Just fn
-                    _ -> Nothing
-                )
-                xs'
-      let k = getCatIteratorVariable =<< cat_fn
-      let IndexFn iter@(Forall i _) _ = fromMaybe (head xs') cat_fn
-      debugPrettyM "forward" expr
-      -- Transform map (\x -> ...) xs into map (\i -> xs[i]) (indices xs).
-      forM_ (zip paramNames xs') $ \(paramName, x) -> do
-        debugPrettyM (prettyString paramName) x
-        vn_x <- newVName "tmp_x"
-        y <-
-          IndexFn iter (singleCase . sym2SoP $ Idx (Var vn_x) (sVar i))
-            @ (vn_x, x)
-        -- Renaming k back to k. (Safe because k is a free variable at this point.)
-        let k_rep =
-              fromMaybe mempty $
-                mkRep <$> getCatIteratorVariable y <*> fmap sVar k
-        unless (null k_rep) $ debugPrettyM2 "k_rep" k_rep
-        let IndexFn _ cs = y
-        unless (null k_rep) $ debugPrettyM2 "y repped" (repIndexFn k_rep $ IndexFn Empty cs)
-        insertIndexFn paramName (repIndexFn k_rep $ IndexFn Empty cs)
+      arrs <- concatMap unzipT <$> mapM forward args'
+      iter <- bindLambdaBodyParams (zip (concatMap E.patNames params) arrs)
       body_fn <- forward body
-      let IndexFn Empty body_cases = body_fn
-      debugPrettyM "body_fn" body_fn
-      rewrite $ IndexFn iter body_cases
+      case body_fn of
+        IndexFn Empty body_cases -> rewrite $ IndexFn iter body_cases
+        _ -> error "Non-scalar body."
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
@@ -349,13 +320,12 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- We pick the first argument of the lambda to be the accumulator
       -- and the second argument to be an element of the input array.
       -- (The lambda is associative, so we are free to pick.)
-      xs@(IndexFn iter_xs _) <- forward lam_xs
-      let acc_rep = M.fromList (map (,sym2SoP Recurrence) paramNames_acc)
-      body_fn <- repIndexFn acc_rep <$> forward lam_body
-      body_hole <- newVName "body"
-      substParams
-        (IndexFn iter_xs (singleCase . sym2SoP . Var $ body_hole))
-        ((body_hole, body_fn) : zip paramNames_x (unzipT xs))
+      iter <- bindLambdaBodyParams . zip paramNames_x . unzipT =<< forward lam_xs
+      let accToRecurrence = M.fromList (map (,sym2SoP Recurrence) paramNames_acc)
+      body_fn <- repIndexFn accToRecurrence <$> forward lam_body
+      case body_fn of
+        IndexFn Empty body_cases -> rewrite $ IndexFn iter body_cases
+        _ -> error "Non-scalar body."
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
       -- Scatter in-bounds-monotonic indices.
@@ -676,3 +646,28 @@ addBooleanNames (E.Id param (E.Info {E.unInfo = E.Array _ _ t}) _) = do
 addBooleanNames (E.Id param (E.Info {E.unInfo = t}) _) = do
   when (typeIsBool t) $ addProperty (Algebra.Var param) Algebra.Boolean
 addBooleanNames _ = pure ()
+
+-- Binds names of scalar parameters to scalar values of corresponding
+-- index functions. Assumes that domains are equivalent across index
+-- functions. Returns the most "complex" iterator over these domains.
+-- For example, this would transform the lambda body of the following
+--   map (\x y z -> x + y + z) xs ys zs
+-- into
+--   map (\i -> xs[i] + ys[i] + zs[i]) (indices xs)
+-- where xs is the index function with the most "complex" iterator.
+bindLambdaBodyParams :: [(E.VName, IndexFn)] -> IndexFnM Iterator
+bindLambdaBodyParams params = do
+  -- Make sure all Cat k bound in iterators are identical by renaming.
+  fns <- renamesM (map snd params)
+  let iter@(Forall i _) = maximum (map iterator fns)
+  forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
+    debugPrettyM (prettyString paramName) fn
+    vn <- newVName "tmp_fn"
+    IndexFn tmp_iter cs <-
+      IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
+    -- Renaming k bound in `tmp_iter` to k bound in `iter`.
+    let k_rep =
+          fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
+    unless (null k_rep) $ debugPrettyM2 "k_rep" k_rep
+    insertIndexFn paramName (repIndexFn k_rep $ IndexFn Empty cs)
+  pure iter
