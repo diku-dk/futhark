@@ -255,7 +255,9 @@ tests =
               let pc = POR $ S.singleton c0 -- conds[i1] == 1
               let pd = POR $ S.singleton d0 -- conds[i2] == 2
               addEquiv (Idx pc (sVar i1)) (int 1)
+              addEquiv (Idx pc (sVar i2)) (int 0)
               addEquiv (Idx pd (sVar i2)) (int 1)
+              addEquiv (Idx pd (sVar i1)) (int 0)
               -- Predicates are disjoint.
               addProperty (Var c0) (PairwiseDisjoint set_de)
               addProperty (Var d0) (PairwiseDisjoint set_ce)
