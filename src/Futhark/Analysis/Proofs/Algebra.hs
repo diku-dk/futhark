@@ -1,16 +1,13 @@
 module Futhark.Analysis.Proofs.Algebra where
 
-import Control.Monad.RWS.Strict hiding (Sum)
-import Data.Map (Map)
-import Data.Map qualified as M
+import Control.Monad.RWS.Strict
 import Futhark.Analysis.Proofs.Rule
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
 import Futhark.MonadFreshNames
 import Futhark.SoP.Expression
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..), Nameable (mkName))
 import Futhark.SoP.SoP (SoP)
-import Futhark.SoP.Util
-import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
+import Futhark.Util.Pretty (Pretty, brackets, parens, pretty, (<+>))
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 
@@ -36,8 +33,6 @@ instance Pretty Symbol where
       autoParens x@(Var _) = pretty x
       autoParens x@(Hole _) = pretty x
       autoParens x = parens (pretty x)
-      iversonbrackets = enclose "⟦" "⟧"
-      prettyOp s x y = pretty x <+> s <+> pretty y
 
 data Property
   = Monotonic
@@ -72,10 +67,10 @@ instance (Expression e, Ord e) => MonadSoP Symbol e Property (AlgM e) where
   getProperties = gets (properties . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
 
-runAlgM :: (Ord e) => AlgM e a -> AlgEnv Symbol e Property -> VNameSource -> (a, VEnv e)
+runAlgM :: AlgM e a -> AlgEnv Symbol e Property -> VNameSource -> (a, VEnv e)
 runAlgM (AlgM m) env vns = getRes $ runRWS m () s
   where
-    getRes (x, env, _) = (x, env)
+    getRes (x, e, _) = (x, e)
     s = VEnv vns env
 
 -- f :: (SoP Symbol >= 0) -> AlgM e Bool
