@@ -7,18 +7,18 @@ module Futhark.Analysis.Proofs.AlgebraBridge
   )
 where
 
-import Control.Monad (foldM, (<=<), unless)
+import Control.Monad ((<=<))
 import Data.Maybe (isJust)
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate
 import Futhark.Analysis.Proofs.AlgebraBridge.Util
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrintAlgEnv, debugLn)
+import Futhark.Analysis.Proofs.Monad (IndexFnM)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesSoP)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF, toDNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Proofs.Unify (Substitution, unify)
 import Futhark.Analysis.Proofs.Util (converge)
-import Futhark.SoP.SoP (SoP, justSym, sym2SoP, justConstant)
+import Futhark.SoP.SoP (SoP, justSym, sym2SoP)
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -142,22 +142,16 @@ isFalse p = do
       -- checking q. This lets us easily falsify, for example,
       -- x == 1 :&& x == 2.
       let p_cnf = cnfToList $ neg neg_p_dnf -- Converts p to CNF.
-      foldM
-        ( \acc i ->
-            case acc of
-              Yes -> pure Yes
-              Unknown -> rollbackAlgEnv $ do
-                let (q, qs) = pick i p_cnf
-                mapM_ assume qs
-                isTrue (neg q)
-        )
-        Unknown
-        [0 .. length p_cnf - 1]
+      falsify p_cnf []
   where
-    -- Returns the ith element of qs and qs without the ith element.
-    pick n qs =
-      let (as, bs) = splitAt n qs
-       in (head bs, as <> tail bs)
+    falsify [] _ = pure Unknown
+    falsify (q : left) right = do
+      ans <- rollbackAlgEnv $ do
+        mapM_ assume (left <> right)
+        isTrue (neg q)
+      case ans of
+        Yes -> pure Yes
+        Unknown -> falsify left (q : right)
 
 cnfToList :: Symbol -> [Symbol]
 cnfToList (a :&& b) = a : cnfToList b
