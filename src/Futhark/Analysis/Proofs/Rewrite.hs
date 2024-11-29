@@ -2,10 +2,11 @@ module Futhark.Analysis.Proofs.Rewrite where
 
 import Control.Monad (filterM, (<=<))
 import Data.List.NonEmpty qualified as NE
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, rollbackAlgEnv, simplify)
-import Futhark.Analysis.Proofs.IndexFn (Cases (..), IndexFn (..), cases, casesToList)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, rollbackAlgEnv, simplify, ($>))
+import Futhark.Analysis.Proofs.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
+import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd)
 import Futhark.Analysis.Proofs.Monad (IndexFnM)
-import Futhark.Analysis.Proofs.Query (isUnknown)
+import Futhark.Analysis.Proofs.Query (isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (Renameable, renameSame)
@@ -50,9 +51,9 @@ convergeRename f x = do
       convergeRename f y'
 
 rewrite_ :: IndexFn -> IndexFnM IndexFn
-rewrite_ = normalizeIndexFn <=< simplifyIndexFn
+rewrite_ fn@(IndexFn it xs) = normalizeIndexFn =<< simplifyIndexFn
   where
-    simplifyIndexFn fn@(IndexFn it xs) = algebraContext fn $ do
+    simplifyIndexFn = algebraContext fn $ do
       addRelIterator it
       ys <- simplifyCases xs
       pure $ IndexFn it ys
@@ -60,10 +61,12 @@ rewrite_ = normalizeIndexFn <=< simplifyIndexFn
     simplifyCases cs = do
       let (ps, vs) = unzip $ casesToList cs
       ps_simplified <- mapM rewrite ps
-      -- Remove impossible cases.
-      cs' <- filterM (fmap isUnknown . isFalse . fst) (zip ps_simplified vs)
-      cs'' <- mapM simplifyCase cs'
-      cases <$> mergeCases cs'' []
+      cs' <-
+        eliminateFalsifiableCases (zip ps_simplified vs)
+          >>= eliminateUnreachableCases
+          >>= mapM simplifyCase
+          >>= mergeCases
+      pure $ cases cs'
 
     -- Simplify x under the assumption that p is true.
     simplifyCase (p, x) = rollbackAlgEnv $ do
@@ -84,16 +87,47 @@ rewrite_ = normalizeIndexFn <=< simplifyIndexFn
     -- Given [(p_a, v_a), (p_b, v_b), ...], it attempts to merge the second case
     -- with the first by checking if v_b is equal to v_a assuming p_a, but it doesn't
     -- perform the analogous check assuming p_b.
-    mergeCases [] acc = pure $ reverse acc
-    mergeCases (a : as) [] = mergeCases as [a]
-    mergeCases (a@(p_a, v_a) : as) (b@(p_b, v_b) : bs) = do
-      (_, v_b') <- simplifyCase (p_a, v_b)
-      if v_b' == v_a
-        then do
-          p <- rewrite $ p_b :|| p_a
-          mergeCases as ((p, v_b) : bs)
-        else mergeCases as (a : b : bs)
+    mergeCases cs = merge cs []
+      where
+        merge [] acc = pure $ reverse acc
+        merge (a : as) [] = merge as [a]
+        merge (a@(p_a, v_a) : as) (b@(p_b, v_b) : bs) = do
+          (_, v_b') <- simplifyCase (p_a, v_b)
+          if v_b' == v_a
+            then do
+              p <- rewrite $ p_b :|| p_a
+              merge as ((p, v_b) : bs)
+            else merge as (a : b : bs)
+
+    -- Remove cases for which the predicate can be shown False.
+    eliminateFalsifiableCases = filterM (fmap isUnknown . isFalse . fst)
+
+    -- Remove cases for which the predicate causes the current interval to be
+    -- empty; hence unreachable.
+    eliminateUnreachableCases cs = do
+      case it of
+        (Forall _ dom@(Cat _ _ b)) -> do
+          (unreachables, reachables) <-
+            partitionM
+              ( \(p, _) -> rollbackAlgEnv $ do
+                  assume p
+                  isYes <$> (b $> intervalEnd dom)
+              )
+              cs
+          -- Make sure that cases predicates still partition the domain (disjunction is a tautology).
+          let q = foldl (:||) (Bool False) $ map fst unreachables
+          mapM (\(p, v) -> (,v) <$> rewrite (p :|| q)) reachables
+        -- XXX simplify the expected part2L test; e.g., sum i+1 ... interval end . csL; removal of two first cases
+        _ -> pure cs
 
 rewriteWithoutRules :: IndexFn -> IndexFnM IndexFn
 rewriteWithoutRules =
   convergeRename rewrite_
+
+-- https://hackage.haskell.org/package/extra-1.8/docs/src/Control.Monad.Extra.html#partitionM
+partitionM :: (Monad m) => (a -> m Bool) -> [a] -> m ([a], [a])
+partitionM _ [] = pure ([], [])
+partitionM f (x : xs) = do
+  res <- f x
+  (as, bs) <- partitionM f xs
+  pure ([x | res] ++ as, [x | not res] ++ bs)
