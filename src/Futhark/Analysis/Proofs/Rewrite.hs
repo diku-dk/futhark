@@ -8,7 +8,7 @@ import Futhark.Analysis.Proofs.Monad (IndexFnM)
 import Futhark.Analysis.Proofs.Query (isUnknown)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
-import Futhark.Analysis.Proofs.Unify (renameSame, Renameable)
+import Futhark.Analysis.Proofs.Unify (Renameable, renameSame)
 import Futhark.SoP.SoP (SoP, int2SoP, justConstant, sym2SoP, (.*.), (.+.))
 import Futhark.SoP.SoP qualified as SoP
 
@@ -63,7 +63,7 @@ rewrite_ = normalizeIndexFn <=< simplifyIndexFn
       -- Remove impossible cases.
       cs' <- filterM (fmap isUnknown . isFalse . fst) (zip ps_simplified vs)
       cs'' <- mapM simplifyCase cs'
-      cases <$> mergeEquivCases cs''
+      cases <$> mergeCases cs'' []
 
     -- Simplify x under the assumption that p is true.
     simplifyCase (p, x) = rollbackAlgEnv $ do
@@ -79,12 +79,20 @@ rewrite_ = normalizeIndexFn <=< simplifyIndexFn
     --   | k <= 0 => 0
     -- the second case is covered by the first when k <= 0. So we want just:
     --   | True  => sum_{j=0}^{k-1} e_j
-    mergeEquivCases cs@[(_p1, v1), (p2, v2)] = do
-      (_, v1') <- simplifyCase (p2, v1)
-      if v1' == v2
-        then pure [(Bool True, v1)]
-        else pure cs
-    mergeEquivCases cs = pure cs
+    --
+    -- NOTE This does not attempt all possible ways to merge.
+    -- Given [(p_a, v_a), (p_b, v_b), ...], it attempts to merge the second case
+    -- with the first by checking if v_b is equal to v_a assuming p_a, but it doesn't
+    -- perform the analogous check assuming p_b.
+    mergeCases [] acc = pure $ reverse acc
+    mergeCases (a : as) [] = mergeCases as [a]
+    mergeCases (a@(p_a, v_a) : as) (b@(p_b, v_b) : bs) = do
+      (_, v_b') <- simplifyCase (p_a, v_b)
+      if v_b' == v_a
+        then do
+          p <- rewrite $ p_b :|| p_a
+          mergeCases as ((p, v_b) : bs)
+        else mergeCases as (a : b : bs)
 
 rewriteWithoutRules :: IndexFn -> IndexFnM IndexFn
 rewriteWithoutRules =
