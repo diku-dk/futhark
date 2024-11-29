@@ -245,10 +245,10 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
   --  unless ([fst $ outerBlockInfo outerMatch] == outerIndecesA kernelBodyMatch && outerIndecesA kernelBodyMatch == outerIndecesB kernelBodyMatch) $
   --    compilerLimitationS "Not implemented"
 
---    TODO: remove?
---    let optimalWarpTileM = 64 in
---    let optimalWarpTileN = 64 in
---    let (warpsM, warpsN) = (sizeM `divUp` optimalWarpTileM, sizeN `divUp` optimalWarpTileN)
+  --    TODO: remove?
+  --    let optimalWarpTileM = 64 in
+  --    let optimalWarpTileN = 64 in
+  --    let (warpsM, warpsN) = (sizeM `divUp` optimalWarpTileM, sizeN `divUp` optimalWarpTileN)
 
   let (warpsM, warpsN) = getOptimalWarps actualBlockSize match
   let blockSize = warpsM * warpsN * 32
@@ -259,7 +259,7 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
   traceM $ "warpsM: " ++ show warpsM
   traceM $ "warpsN: " ++ show warpsN
 
---  TODO: would be better to check if copy global shared is needed here?
+  --  TODO: would be better to check if copy global shared is needed here?
 
   -- TODO: do we need to init regs when used only once?
   -- TODO: use SegNoVirtFull instead of loop and avoid setting the block size?
@@ -303,14 +303,32 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
   aScratch <- letExp "aScratch" $ scratchMem elmTypeA [sizeM, sizeK]
   bScratch <- letExp "bScratch" $ scratchMem elmTypeB [sizeK, sizeN]
 
-  slicedA <- letExp "slicedA" $ BasicOp $ Index (arrA kernelBodyMatch) $ Slice $ fmap (DimFix . Var) (outerIndecesA kernelBodyMatch) <> [DimSlice (mkInt64Const 0) (mkInt64Const sizeM) (mkInt64Const 1), DimSlice (mkInt64Const 0) (mkInt64Const sizeK) (mkInt64Const 1)]
-  slicedB <- letExp "slicedB" $ BasicOp $ Index (arrB kernelBodyMatch) $ Slice $ fmap (DimFix . Var) (outerIndecesB kernelBodyMatch) <> [DimSlice (mkInt64Const 0) (mkInt64Const sizeK) (mkInt64Const 1), DimSlice (mkInt64Const 0) (mkInt64Const sizeN) (mkInt64Const 1)]
+  let innerIndecesASlice =
+        [ DimSlice (mkInt64Const 0) (mkInt64Const sizeM) (mkInt64Const 1),
+          DimSlice (mkInt64Const 0) (mkInt64Const sizeK) (mkInt64Const 1)
+        ]
+      innerIndecesBSlice =
+        [ DimSlice (mkInt64Const 0) (mkInt64Const sizeK) (mkInt64Const 1),
+          DimSlice (mkInt64Const 0) (mkInt64Const sizeN) (mkInt64Const 1)
+        ]
+  slicedA <-
+    letExp "slicedA" $
+      BasicOp $
+        Index (arrA kernelBodyMatch) $
+          Slice $
+            fmap DimFix (outerIndecesA kernelBodyMatch) <> innerIndecesASlice
+  slicedB <- letExp "slicedB" $
+    BasicOp $
+      Index (arrB kernelBodyMatch) $
+        Slice $
+          fmap DimFix (outerIndecesB kernelBodyMatch) <> innerIndecesBSlice
 
---  Need to pass this explicitly as LMAD info is lost on function call
+
+  --  Need to pass this explicitly as LMAD info is lost on function call
   let pe64DimsA = fmap pe64 $ outerDimsA kernelBodyMatch <> [mkInt64Const sizeM, mkInt64Const sizeK]
-      pe64IndiciesA = fmap pe64 $ fmap Var (outerIndecesA kernelBodyMatch) <> [mkInt64Const 0, mkInt64Const 0]
+      pe64IndiciesA = fmap pe64 $ outerIndecesA kernelBodyMatch <> [mkInt64Const 0, mkInt64Const 0]
       pe64DimsB = fmap pe64 $ outerDimsB kernelBodyMatch <> [mkInt64Const sizeK, mkInt64Const sizeN]
-      pe64IndiciesB = fmap pe64 $ fmap Var (outerIndecesB kernelBodyMatch) <> [mkInt64Const 0, mkInt64Const 0]
+      pe64IndiciesB = fmap pe64 $ outerIndecesB kernelBodyMatch <> [mkInt64Const 0, mkInt64Const 0]
 
   flatIndexAExp <- toExp $ flattenIndex pe64DimsA pe64IndiciesA
   offsetA <- letExp "offsetA" flatIndexAExp
@@ -623,8 +641,8 @@ data KernelBodyMatch = KernelBodyMatch
 --  TODO: add types
     innerIndecesA :: [VName],
     innerIndecesB :: [VName],
-    outerIndecesA :: [VName],
-    outerIndecesB :: [VName],
+    outerIndecesA :: [SubExp],
+    outerIndecesB :: [SubExp],
     outerDimsA :: [SubExp],
     outerDimsB :: [SubExp],
     arrA :: VName,
@@ -678,13 +696,14 @@ constantValueMatch (Constant (IntValue v)) = Just $ valueIntegral v
 constantValueMatch _ = Nothing
 
 -- Does the list of indexing variables only have a single dimension?
-singleDim :: [VName] -> Maybe VName
+singleDim :: [d] -> Maybe d
 singleDim [v] = Just v
 singleDim _ = Nothing
 
-inBlockKernelBodyMatch :: [VName] -> Names -> KernelBody GPU -> Scope GPU -> Maybe KernelBodyMatch
 -- TODO: support more than 3 dimensions?
-inBlockKernelBodyMatch indexVars@[_indexVar1, _indexVar2, indexVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) scope = do
+-- The indexVars corresponds to the variables from the SegSpace              
+inBlockKernelBodyMatch :: [VName] -> Names -> KernelBody GPU -> Scope GPU -> Maybe KernelBodyMatch
+inBlockKernelBodyMatch indexVars@[_, _, indexVar3] freeVars (KernelBody _ stms [Returns _ _ (Var res)]) scope = do
   let sTable = ST.insertStms (informStms stms) $ ST.fromScope $ addScopeWisdom scope
   --  TODO: rename to use A, B, C?
   (resExp, _) <- ST.lookupExp res sTable
@@ -702,10 +721,14 @@ inBlockKernelBodyMatch indexVars@[_indexVar1, _indexVar2, indexVar3] freeVars (K
   arr1Type <- ST.lookupType arr1 sTable
   arr2Type <- ST.lookupType arr2 sTable
   resType <- ST.lookupType res sTable
-  slice1' <- mapM getIndexVar $ unSlice slice1
-  slice2' <- mapM getIndexVar $ unSlice slice2
-  let (innerIndeces1, outerIndeces1) = partition (`elem` indexVars) slice1'
-  let (innerIndeces2, outerIndeces2) = partition (`elem` indexVars) slice2'
+  slice1' <- mapM dimFix $ unSlice slice1
+  slice2' <- mapM dimFix $ unSlice slice2
+  let seIndexVars = map Var indexVars
+  let (seInnerIndeces1, outerIndeces1) = partition (`elem` seIndexVars) slice1'
+  let (seInnerIndeces2, outerIndeces2) = partition (`elem` seIndexVars) slice2'
+  let outerIndeces = outerIndeces1 <> outerIndeces2
+  innerIndeces1 <- mapM getIndexVar seInnerIndeces1
+  innerIndeces2 <- mapM getIndexVar seInnerIndeces2
   -- Check that each array has one unique (n or m) and one commen (k) dimension
   -- as the inner dimensions of the intragroup kernel
   k <- singleDim $ innerIndeces1 `intersect` innerIndeces2
@@ -715,13 +738,12 @@ inBlockKernelBodyMatch indexVars@[_indexVar1, _indexVar2, indexVar3] freeVars (K
   -- It would just require us to "not" transpose B in CuTe
   -- In the meantime, this checks where in the indexing slice k appears.
   -- For B it must be [n, k] and for A it must be [k, n]
-  elemIndex k innerIndeces1 >>= guard . (==1) -- [m, k] matrix
-  elemIndex k innerIndeces2 >>= guard . (==0) -- [k, n] matrix
-  
+  elemIndex k innerIndeces1 >>= guard . (== 1) -- [m, k] matrix
+  elemIndex k innerIndeces2 >>= guard . (== 0) -- [k, n] matrix
   case (arr1Type, arr2Type, resType) of
     --  TODO: check which is A and which is B?
     (Array type1 (Shape arr1Dims) _, Array type2 (Shape arr2Dims) _, Prim resTypePrim)
-      | k == indexVar3 && all (`nameIn` freeVars) (outerIndeces1 <> outerIndeces2) ->
+      | k == indexVar3 && all (`subExpFreeIn` freeVars) outerIndeces ->
           let arr1OuterDims = take (length arr1Dims - 2) arr1Dims
            in let arr2OuterDims = take (length arr2Dims - 2) arr2Dims
                in Just
@@ -744,9 +766,15 @@ inBlockKernelBodyMatch indexVars@[_indexVar1, _indexVar2, indexVar3] freeVars (K
     _ -> Nothing
 inBlockKernelBodyMatch _ _ _ _ = Nothing
 
-getIndexVar :: DimIndex SubExp -> Maybe VName
-getIndexVar (DimFix (Var v)) = Just v
+-- TODO: Should maybe return SubExp, such that the indexing also can be constants
+getIndexVar :: SubExp -> Maybe VName
+getIndexVar (Var v) = Just v
 getIndexVar _ = Nothing
+
+-- A bit weird, but we also count constants as free                
+subExpFreeIn :: SubExp -> Names -> Bool
+subExpFreeIn (Constant _ ) _ = True
+subExpFreeIn (Var v) names = v `nameIn` names
 
 matchesMul :: Exp GPU -> Maybe (VName, VName)
 matchesMul (BasicOp (BinOp (FMul _) (Var arg1) (Var arg2))) = Just (arg1, arg2)
