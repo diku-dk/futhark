@@ -27,7 +27,7 @@ tracer x = trace (prettyString x) x
 
 -- Generate all partitions of `xs` into `k` sublists.
 -- Includes sublists that are permutations of other sublists.
--- For example, `combine 3 [1..4]` returns both `[[1],[2],[3,4]]`
+-- For example, `partitions 3 [1..4]` returns both `[[1],[2],[3,4]]`
 -- and `[[2], [1], [3,4]]`.
 partitions :: (Eq a) => Int -> [a] -> [[[a]]]
 partitions k xs
