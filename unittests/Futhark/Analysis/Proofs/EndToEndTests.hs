@@ -1,6 +1,6 @@
 module Futhark.Analysis.Proofs.EndToEndTests (tests) where
 
-import Control.Monad (unless)
+import Control.Monad (unless, forM_)
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
@@ -35,6 +35,18 @@ tests =
         )
         Yes,
       mkTest
+        "tests/indexfn/dummyindices.fut"
+        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+            prove (PermutationOfZeroTo n) fn
+        )
+        Unknown,
+      mkTest
+        "tests/indexfn/dummyindices2.fut"
+        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+            prove (PermutationOfZeroTo n) fn
+        )
+        Unknown,
+      mkTest
         "tests/indexfn/part2indices_numeric_conds.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
             prove (PermutationOfZeroTo n) fn
@@ -57,16 +69,33 @@ tests =
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
             prove (PermutationOfZeroTo n) fn
         )
+        Yes,
+      mkTest
+        "tests/indexfn/part2indicesL.fut"
+        ( \fn@(IndexFn (Forall _ dom@(Cat k _ start)) _) -> do
+            debugOn
+            end <- rewrite $ intervalEnd dom
+            prove (ForallSegments k $ PermutationOfRange start end) fn
+        )
         Yes
     ]
   where
     mkTest programFile action expected = testCase programFile $ do
       (_, imports, vns) <- readProgramOrDie programFile
-      let vb = getLastValBind imports
+      let last_import = case reverse imports of
+            [] -> error "No imports"
+            x : _ -> x
+      let vbs = getValBinds last_import
       let actual = fst . flip runIndexFnM vns $ do
-            indexfn <- mkIndexFnValBind vb
+            forM_ (init vbs) mkIndexFnValBind
+            indexfn <- mkIndexFnValBind (last vbs)
             action indexfn
       actual @??= expected
+
+    getValBinds = mapMaybe getValBind . E.progDecs . fileProg . snd
+
+    getValBind (E.ValDec vb) = Just vb
+    getValBind _ = Nothing
 
     actual @??= expected = unless (actual == expected) (assertFailure msg)
       where

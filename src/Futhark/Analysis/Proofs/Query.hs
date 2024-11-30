@@ -18,10 +18,10 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, rollbackAlgEnv, ($<), ($<=), ($>), isTrue, ($>=), ($==), ($/=))
+import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, isTrue, rollbackAlgEnv, ($/=), ($<), ($<=), ($==), ($>), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (Iota), IndexFn (..), Iterator (..), casesToList, getCase)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrintAlgEnv, debugT, debugM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, debugT')
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
@@ -51,7 +51,7 @@ check a = isTrue a
 
 allCases :: (IndexFn -> Int -> IndexFnM Answer) -> IndexFn -> IndexFnM Answer
 allCases query fn@(IndexFn _ cs) =
-  allM $ zipWith (\_ i -> query fn i) (casesToList cs) [0..]
+  allM $ zipWith (\_ i -> query fn i) (casesToList cs) [0 ..]
 
 -- | Answers a query on an index function case.
 askQ :: Query -> IndexFn -> Int -> IndexFnM Answer
@@ -82,9 +82,16 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
 data Property
   = PermutationOf VName
   | PermutationOfZeroTo (SoP Symbol)
+  | -- | InRange (SoP Symbol) (SoP Symbol) -- TODO seperate out proof embedded in PermutationOfZeroTo.
+    PermutationOfRange (SoP Symbol) (SoP Symbol)
+  | ForallSegments VName Property
 
-data Order = LT | GT | Undefined
+data Order = LT | GT | LTE | GTE | Undefined
   deriving (Eq, Show)
+
+isUndefined :: Order -> Bool
+isUndefined Undefined = True
+isUndefined _ = False
 
 prove :: Property -> IndexFn -> IndexFnM Answer
 prove (PermutationOf {}) _fn = undefined
@@ -115,6 +122,20 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
       j <- newNameFromString "j"
       addRange (Algebra.Var i) (mkRangeLB (int2SoP 0))
       addRange (Algebra.Var j) (mkRangeLB (int2SoP 0))
+      let monotonic (p_f, f) = do
+            assume (fromJust . justSym $ p_f @ i)
+            assume (fromJust . justSym $ p_f @ j)
+            -- Try to show: forall i < j . f(i) `rel` g(j)
+            let f_rel_g rel = rollbackAlgEnv $ do
+                  debugPrettyM "f:" (f @ i :: SoP Symbol)
+                  debugPrettyM "g:" (f @ j :: SoP Symbol)
+                  -- Case i < j => f(i) `rel` g(j).
+                  addRelIterator (Forall j (Iota n))
+                  i +< j
+                  (f @ i) `rel` (f @ j)
+            debugT "  monotonic f" $
+              f_rel_g ($<) `orM` f_rel_g ($>)
+
       let (p_f, f) `cmp` (p_g, g) = do
             assume (fromJust . justSym $ p_f @ i)
             assume (fromJust . justSym $ p_g @ j)
@@ -130,18 +151,20 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
                         addRelIterator (Forall i (Iota n))
                         j +< i
                         (f @ i) `rel` (g @ j)
-                  in case_i_lt_j `andM` case_i_gt_j
+                   in case_i_lt_j `andM` case_i_gt_j
             debugPrettyM "f:" (f @ i :: SoP Symbol)
             debugPrettyM "g:" (g @ j :: SoP Symbol)
             f_LT_g <- f_rel_g ($<)
             debugT "  f `cmp` g" $
               case f_LT_g of
-                  Yes -> pure LT
-                  Unknown -> do
-                    f_GT_g <- f_rel_g ($>)
-                    case f_GT_g of
-                      Yes -> pure GT
-                      Unknown -> debugPrintAlgEnv >> pure Undefined
+                Yes -> pure LT
+                Unknown -> do
+                  f_GT_g <- f_rel_g ($>)
+                  case f_GT_g of
+                    Yes -> pure GT
+                    Unknown -> debugPrintAlgEnv >> pure Undefined
+
+      let strictlyMonotonic = map monotonic branches
       let no_overlap = answerFromBool . isJust <$> sorted cmp branches
       let within_bounds =
             map
@@ -154,10 +177,13 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
                   bug1 (int2SoP 0 $<= f @ i) `andM` bug2 (f @ i $< n)
               )
               branches
-      allM within_bounds `andM` no_overlap
+      allM strictlyMonotonic `andM` allM within_bounds `andM` no_overlap
   where
     f @ x = rep (mkRep iter (Var x)) f
 prove (PermutationOfZeroTo {}) _ = pure Unknown
+prove (PermutationOfRange start end) fn =
+  pure Unknown
+prove _ _ = error "Not implemented yet."
 
 -- Strict sorting.
 sorted :: (t -> t -> IndexFnM Order) -> [t] -> IndexFnM (Maybe [t])
@@ -194,7 +220,7 @@ andF :: (Applicative f) => Answer -> f Answer -> f Answer
 andF Yes m = m
 andF Unknown _ = pure Unknown
 
-andM :: Monad m => m Answer -> m Answer -> m Answer
+andM :: (Monad m) => m Answer -> m Answer -> m Answer
 andM m1 m2 = do
   ans <- m1
   ans `andF` m2
