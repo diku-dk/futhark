@@ -13,8 +13,8 @@ import Futhark.Analysis.Proofs.Unify (FreeVariables (..), Renameable (..), Repla
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames)
-import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.), (.-.))
-import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, stack, (<+>))
+import Futhark.SoP.SoP (SoP (SoP), int2SoP, sym2SoP, (.+.), (.-.), isConstTerm)
+import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, stack, (<+>), softline, punctuate, indent, vsep, align, comma, sep, hang)
 import Language.Futhark (VName)
 
 domainStart :: Domain -> SoP Symbol
@@ -32,11 +32,25 @@ intervalEnd (Iota _) = error "intervalEnd on iota"
 -------------------------------------------------------------------------------
 -- Pretty.
 -------------------------------------------------------------------------------
-instance (Pretty a, Pretty b) => Pretty (Cases a b) where
+instance (Pretty a, Pretty b) => Pretty (Cases a (SoP b)) where
   pretty (Cases cs) =
     stack (map prettyCase (NE.toList cs))
     where
-      prettyCase (p, e) = "|" <+> pretty p <+> "⇒ " <+> pretty e
+      prettyCase (p, e) = "|" <+> pretty p <+> "⇒ " <> softline <> indent 2 (hang 2 $ prettySoP e)
+      -- Like pretty instance for SoP, but inserts soft linebreaks between top-level +.
+      prettySoP (SoP ts)
+        | M.null ts = "0"
+        | otherwise =
+            mconcat $
+              punctuate (softline <> "+ ") $
+                map (uncurry pTerm) $
+                  M.toList ts
+        where
+          pTerm term n
+            | isConstTerm term = pretty n
+            | n == 1 = pretty term
+            | otherwise = pretty n <> "*" <> pretty term
+
 
 instance Pretty Domain where
   pretty (Iota n) = parens $ "0 .." <+> parens (pretty n)
@@ -46,7 +60,7 @@ instance Pretty Domain where
       <> "="
       <> parens ("0 .." <+> pretty (m .-. int2SoP 1))
         <+> "["
-      <> commastack [pretty b, "...", pretty (intervalEnd dom)]
+      <> align (sep $ punctuate comma [pretty b, "...", pretty (intervalEnd dom)])
       <> "]"
 
 instance Pretty Iterator where

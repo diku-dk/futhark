@@ -4,10 +4,12 @@ import Control.Monad (unless)
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
+import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query
+import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Compiler.CLI (Imports, fileProg, readProgramOrDie)
-import Futhark.Util.Pretty (docString, line, pretty, (<+>))
+import Futhark.Util.Pretty (docStringW, line, pretty, (<+>))
 import Language.Futhark qualified as E
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -69,5 +71,5 @@ tests =
     actual @??= expected = unless (actual == expected) (assertFailure msg)
       where
         msg =
-          docString $
+          docStringW 120 $
             "expected:" <+> pretty expected <> line <> "but got: " <+> pretty actual

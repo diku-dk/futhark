@@ -13,6 +13,7 @@ module Futhark.Util.Pretty
     docText,
     docTextForHandle,
     docString,
+    docStringW,
 
     -- * Rendering to terminal
     putDoc,
@@ -52,6 +53,7 @@ import Prettyprinter.Render.Terminal qualified
 import Prettyprinter.Render.Text qualified
 import Prettyprinter.Symbols.Ascii
 import System.IO (Handle, hIsTerminalDevice, hPutStrLn, stdout)
+import Prettyprinter.Util (reflow)
 
 -- | Print a doc with styling to the given file; stripping colors if
 -- the file does not seem to support such things.
@@ -115,10 +117,20 @@ docText = Prettyprinter.Render.Text.renderStrict . layouter
       removeTrailingWhitespace
         . layoutSmart defaultLayoutOptions {layoutPageWidth = Unbounded}
 
+docTextW :: Int -> Doc a -> T.Text
+docTextW w = Prettyprinter.Render.Text.renderStrict . layouter
+  where
+    layouter =
+      removeTrailingWhitespace
+        . layoutSmart defaultLayoutOptions {layoutPageWidth = AvailablePerLine w 1}
+
 -- | Convert a 'Doc' to a 'String', through 'docText'. Intended for
 -- debugging.
 docString :: Doc a -> String
 docString = T.unpack . docText
+
+docStringW :: Int -> Doc a -> String
+docStringW w = T.unpack . docTextW w
 
 -- | Prettyprint a value to a 'Text' on a single line.
 prettyTextOneLine :: (Pretty a) => a -> Text

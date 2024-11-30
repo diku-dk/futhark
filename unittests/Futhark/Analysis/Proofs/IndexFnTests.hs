@@ -11,7 +11,7 @@ import Futhark.Analysis.Proofs.Unify (renameSame, unify)
 import Futhark.Compiler.CLI (fileProg, readProgramOrDie)
 import Futhark.MonadFreshNames (newNameFromString)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.))
-import Futhark.Util.Pretty (docString, line, pretty, (<+>))
+import Futhark.Util.Pretty (docStringW, line, pretty, (<+>))
 import Language.Futhark qualified as E
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -253,33 +253,33 @@ tests =
         "tests/indexfn/part2indicesL.fut"
         ( newNameFromString "csL" >>= \csL ->
             newNameFromString "shape" >>= \shape ->
-                newNameFromString "j" >>= \j -> pure $ \(i, m, k, b) ->
-                  let int = int2SoP
-                      csL_i = Idx (Hole csL) (sHole i)
-                      seg_k_start = sym2SoP $ Sum j (int 0) (sHole k .-. int 1) (Idx (Hole shape) (sHole j))
-                      seg_k_end = int (-1) .+. sym2SoP (Sum j (int 0) (sHole k) (Idx (Hole shape) (sHole j)))
-                   in IndexFn
-                        { iterator = Forall i (Cat k (sHole m) (sHole b)),
-                          body =
-                            cases
-                              [ ( csL_i,
-                                  -- offset at segment k
-                                  seg_k_start
-                                    -- number of trues in this segment up to and including current index
-                                    .+. sym2SoP (Sum j seg_k_start (sHole i) (Idx (Hole csL) (sHole j)))
-                                    -- minus 1 (remember that current index csL[i] is true)
-                                    .-. int 1
-                                ),
-                                -- TODO we could simplify the above to sum exclusive current index and then
-                                -- do away with the (-1).
-                                ( neg csL_i,
-                                  -- global index
-                                  sHole i
-                                    -- plus number of trues that come after this index in the current segment
-                                    .+. sym2SoP (Sum j (sHole i .+. int 1) seg_k_end (Idx (Hole csL) (sHole j)))
-                                )
-                              ]
-                        }
+              newNameFromString "j" >>= \j -> pure $ \(i, m, k, b) ->
+                let int = int2SoP
+                    csL_i = Idx (Hole csL) (sHole i)
+                    seg_k_start = sym2SoP $ Sum j (int 0) (sHole k .-. int 1) (Idx (Hole shape) (sHole j))
+                    seg_k_end = int (-1) .+. sym2SoP (Sum j (int 0) (sHole k) (Idx (Hole shape) (sHole j)))
+                 in IndexFn
+                      { iterator = Forall i (Cat k (sHole m) (sHole b)),
+                        body =
+                          cases
+                            [ ( csL_i,
+                                -- offset at segment k
+                                seg_k_start
+                                  -- number of trues in this segment up to and including current index
+                                  .+. sym2SoP (Sum j seg_k_start (sHole i) (Idx (Hole csL) (sHole j)))
+                                  -- minus 1 (remember that current index csL[i] is true)
+                                  .-. int 1
+                              ),
+                              -- TODO we could simplify the above to sum exclusive current index and then
+                              -- do away with the (-1).
+                              ( neg csL_i,
+                                -- global index
+                                sHole i
+                                  -- plus number of trues that come after this index in the current segment
+                                  .+. sym2SoP (Sum j (sHole i .+. int 1) seg_k_end (Idx (Hole csL) (sHole j)))
+                              )
+                            ]
+                      }
         )
     ]
   where
@@ -337,6 +337,6 @@ tests =
 
     actual @??= expected = unless (actual == expected) (assertFailure msg)
       where
-        msg =
-          docString $
+        msg = do
+          docStringW 120 $
             "expected:" <+> pretty expected <> line <> "but got: " <+> pretty actual
