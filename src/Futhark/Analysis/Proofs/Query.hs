@@ -21,7 +21,7 @@ import Data.Maybe (fromJust, isJust)
 import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, isTrue, rollbackAlgEnv, ($/=), ($<), ($<=), ($==), ($>), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (Iota), IndexFn (..), Iterator (..), casesToList, getCase)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, debugT')
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
@@ -37,21 +37,6 @@ data Query
   = CaseIsMonotonic MonoDir
   | -- Apply transform to case value, then check whether it simplifies to true.
     CaseCheck (SoP Symbol -> Symbol)
-
-check :: Symbol -> IndexFnM Answer
-check (a :&& b) = check a `andM` check b
-check (a :|| b) = check a `orM` check b
-check (a :== b) = a $== b
-check (a :/= b) = a $/= b
-check (a :> b) = a $> b
-check (a :>= b) = a $>= b
-check (a :< b) = a $< b
-check (a :<= b) = a $<= b
-check a = isTrue a
-
-allCases :: (IndexFn -> Int -> IndexFnM Answer) -> IndexFn -> IndexFnM Answer
-allCases query fn@(IndexFn _ cs) =
-  allM $ zipWith (\_ i -> query fn i) (casesToList cs) [0 ..]
 
 -- | Answers a query on an index function case.
 askQ :: Query -> IndexFn -> Int -> IndexFnM Answer
@@ -79,6 +64,21 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
             f @ x = rep (mkRep i x) f
         Empty -> undefined
 
+check :: Symbol -> IndexFnM Answer
+check (a :&& b) = check a `andM` check b
+check (a :|| b) = check a `orM` check b
+check (a :== b) = a $== b
+check (a :/= b) = a $/= b
+check (a :> b) = a $> b
+check (a :>= b) = a $>= b
+check (a :< b) = a $< b
+check (a :<= b) = a $<= b
+check a = isTrue a
+
+allCases :: (IndexFn -> Int -> IndexFnM Answer) -> IndexFn -> IndexFnM Answer
+allCases query fn@(IndexFn _ cs) =
+  allM $ zipWith (\_ i -> query fn i) (casesToList cs) [0 ..]
+
 data Property
   = PermutationOf VName
   | PermutationOfZeroTo (SoP Symbol)
@@ -88,10 +88,6 @@ data Property
 
 data Order = LT | GT | LTE | GTE | Undefined
   deriving (Eq, Show)
-
-isUndefined :: Order -> Bool
-isUndefined Undefined = True
-isUndefined _ = False
 
 prove :: Property -> IndexFn -> IndexFnM Answer
 prove (PermutationOf {}) _fn = undefined
@@ -122,19 +118,10 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
       j <- newNameFromString "j"
       addRange (Algebra.Var i) (mkRangeLB (int2SoP 0))
       addRange (Algebra.Var j) (mkRangeLB (int2SoP 0))
-      let monotonic (p_f, f) = do
-            assume (fromJust . justSym $ p_f @ i)
-            assume (fromJust . justSym $ p_f @ j)
-            -- Try to show: forall i < j . f(i) `rel` g(j)
-            let f_rel_g rel = rollbackAlgEnv $ do
-                  debugPrettyM "f:" (f @ i :: SoP Symbol)
-                  debugPrettyM "g:" (f @ j :: SoP Symbol)
-                  -- Case i < j => f(i) `rel` g(j).
-                  addRelIterator (Forall j (Iota n))
-                  i +< j
-                  (f @ i) `rel` (f @ j)
-            debugT "  monotonic f" $
-              f_rel_g ($<) `orM` f_rel_g ($>)
+
+      let monotonic c =
+            askQ (CaseIsMonotonic IncStrict) fn c
+              `orM` askQ (CaseIsMonotonic DecStrict) fn c
 
       let (p_f, f) `cmp` (p_g, g) = do
             assume (fromJust . justSym $ p_f @ i)
@@ -164,7 +151,7 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
                     Yes -> pure GT
                     Unknown -> debugPrintAlgEnv >> pure Undefined
 
-      let strictlyMonotonic = map monotonic branches
+      let strictlyMonotonic = zipWith (curry (monotonic . snd)) branches [0 ..]
       let no_overlap = answerFromBool . isJust <$> sorted cmp branches
       let within_bounds =
             map
