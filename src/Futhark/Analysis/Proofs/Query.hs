@@ -21,17 +21,15 @@ import Data.Maybe (fromJust, isJust)
 import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, isTrue, rollbackAlgEnv, ($/=), ($<), ($<=), ($==), ($>), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, whenDebug)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (MonadSoP, addRange, mkRange, mkRangeLB, mkRangeUB)
-import Futhark.SoP.SoP (SoP, int2SoP, justAffine, justSym, sym2SoP, (.-.))
+import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.-.))
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
 import Futhark.Analysis.Proofs.IndexFnPlus (repDomain)
-import Control.Monad (void)
-import Debug.Trace (traceM)
 
 data MonoDir = Inc | IncStrict | Dec | DecStrict
   deriving (Show, Eq, Ord)
@@ -63,6 +61,9 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
                   IncStrict -> ($<)
                   Dec -> ($>=)
                   DecStrict -> ($>)
+            debugPrettyM "q @ i" q
+            debugPrettyM "q @ j" (q @ Var j :: SoP Symbol)
+            debugPrintAlgEnv
             (q @ Var j) `rel` q
             where
               f @ x = rep (mkRep i x) f
@@ -213,7 +214,7 @@ isUnknown _ = False
 -- Short-circuit evaluation `and`. (Unless debugging is on.)
 andF :: Answer -> IndexFnM Answer -> IndexFnM Answer
 andF Yes m = m
-andF Unknown m = whenDebug (void m) >> pure Unknown
+andF Unknown _ = pure Unknown
 
 andM :: IndexFnM Answer -> IndexFnM Answer -> IndexFnM Answer
 andM m1 m2 = do
