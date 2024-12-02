@@ -391,6 +391,9 @@ tests =
               addProperty (Var c0) (Disjoint $ S.singleton d0)
               addProperty (Var c0) Boolean
               addRange (Var c0) $ mkRange (int 0) (int 1)
+              -- Add equivalences.
+              addEquiv (Idx c (sVar i)) (int 1)
+              addEquiv (Idx c (sVar j)) (int 1)
               -- \s -> ∑⟦cª₄₉₈₉₅⟧[∑shpª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈] : s]
               let c_sum s = sym2SoP $ Sum c (shp_sum k) (sVar s)
               c_sum i FM.$>$ c_sum j
