@@ -5,7 +5,7 @@ import Control.Monad (unless, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (isBooleanM, toAlgebra, toAlgebraSymbol, getDisjoint)
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, isBooleanM, rollbackAlgEnv, toAlgebra, toAlgebraSymbol)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
@@ -16,7 +16,7 @@ import Futhark.SoP.Monad (addEquiv, addRange, mkRange)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, (.-.))
 import Futhark.SoP.SoP qualified as SoP
-import Futhark.Util.Pretty (Pretty (pretty), viaShow, prettyString)
+import Futhark.Util.Pretty (Pretty (pretty), prettyString, viaShow)
 
 assume :: Symbol -> IndexFnM ()
 assume (p :&& q) = assume p >> assume q
@@ -103,7 +103,7 @@ instance Pretty Answer where
   pretty = viaShow
 
 convFME :: (SoP Algebra.Symbol -> SoP Algebra.Symbol -> IndexFnM Bool) -> SoP Symbol -> SoP Symbol -> IndexFnM Answer
-convFME op x y = do
+convFME op x y = rollbackAlgEnv $ do
   a <- toAlgebra x
   b <- toAlgebra y
   -- debugPrettyM2 "FME" (a, b)
