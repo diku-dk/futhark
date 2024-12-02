@@ -13,6 +13,7 @@ module Futhark.Analysis.Proofs.AlgebraPC.Symbol
     askMonotonic,
     askDisjoint,
     getVName,
+    fv,
   )
 where
 
@@ -20,7 +21,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (Nameable (mkName), MonadSoP, askPropertyWith)
-import Futhark.SoP.SoP (SoP)
+import Futhark.SoP.SoP (SoP, sopToLists)
 import Futhark.Util.Pretty (Pretty, brackets, commasep, enclose, parens, pretty, viaShow, (<+>))
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
@@ -80,6 +81,19 @@ instance Pretty Symbol where
 -- This is required by MonadSoP.
 instance Nameable Symbol where
   mkName (VNameSource i) = (Var $ E.VName "x" i, VNameSource $ i + 1)
+
+-- Returns the set of free variable names in a SoP Symbol.
+fv :: SoP Symbol -> S.Set VName
+fv sop = S.unions [fvSymbol t | (ts, _) <- sopToLists sop, t <- ts]
+  where
+    fvIdxSym (One vn) = S.singleton vn
+    fvIdxSym (POR vns) = vns
+
+    fvSymbol (Var vn) = S.singleton vn
+    fvSymbol (Idx xs i) = fvIdxSym xs <> fv i
+    fvSymbol (Mdf _ vn i1 i2) = S.singleton vn <> fv i1 <> fv i2
+    fvSymbol (Sum xs lb ub) = fvIdxSym xs <> fv lb <> fv ub
+    fvSymbol (Pow (_, x)) = fv x
 
 data MonDir = Inc | IncS | Dec | DecS
   deriving (Show, Eq, Ord)
