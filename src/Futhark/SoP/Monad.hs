@@ -319,7 +319,7 @@ instance (Ord u, Ord e) => Monoid (UntransEnv u e) where
   mempty = Unknowns mempty mempty
 
 instance (Pretty u, Pretty e) => Pretty (UntransEnv u e) where
-  pretty env = pretty (M.toList $ inv env)
+  pretty env = pretty (M.toList $ dir env)
 
 -- | The equivalence environment binds a variable name to
 --   its equivalent 'SoP' representation.
@@ -356,14 +356,15 @@ instance (Ord u, Ord e) => Monoid (AlgEnv u e p) where
 
 instance (Pretty u, Pretty e, Pretty p) => Pretty (AlgEnv u e p) where
   pretty env =
-    "Untranslatable: "
+     hang 4 $ line
+      <> "Untranslatable: "
       <> pretty (untrans env)
       <> line
       <> "Equivalences: "
       <> pretty (M.toList $ equivs env)
       <> line
       <> "Ranges: "
-      <> pretty (M.toList $ ranges env)
+      <> commastack (map pretty (M.toList $ ranges env))
       <> line
       <> "Properties: "
       <> pretty (M.toList $ properties env)
