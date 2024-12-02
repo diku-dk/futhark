@@ -162,7 +162,7 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
                   f_GT_g <- f_rel_g ($>)
                   case f_GT_g of
                     Yes -> pure GT
-                    Unknown -> debugPrintAlgEnv >> pure Undefined
+                    Unknown -> pure Undefined
 
       let monotonic = do
             debugM "1.  MONOTONICITY"
