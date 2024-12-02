@@ -37,6 +37,7 @@ instance (Pretty a, Pretty b) => Pretty (Cases a (SoP b)) where
     stack (map prettyCase (NE.toList cs))
     where
       prettyCase (p, e) = "|" <+> pretty p <+> "⇒ " <> softline <> indent 2 (hang 2 $ prettySoP e)
+
       -- Like pretty instance for SoP, but inserts soft linebreaks between top-level +.
       prettySoP (SoP ts)
         | M.null ts = "0"
@@ -45,12 +46,11 @@ instance (Pretty a, Pretty b) => Pretty (Cases a (SoP b)) where
               punctuate (softline <> "+ ") $
                 map (uncurry pTerm) $
                   M.toList ts
-        where
-          pTerm term n
-            | isConstTerm term = pretty n
-            | n == 1 = pretty term
-            | otherwise = pretty n <> "*" <> pretty term
 
+      pTerm term n
+        | isConstTerm term = pretty n
+        | n == 1 = pretty term
+        | otherwise = pretty n <> "*" <> pretty term
 
 instance Pretty Domain where
   pretty (Iota n) = parens $ "0 .." <+> parens (pretty n)

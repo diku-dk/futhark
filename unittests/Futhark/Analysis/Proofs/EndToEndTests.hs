@@ -72,10 +72,10 @@ tests =
         Yes,
       mkTest
         "tests/indexfn/part2indicesL.fut"
-        ( \fn@(IndexFn (Forall _ dom@(Cat k _ start)) _) -> do
+        ( \fn@(IndexFn (Forall _ dom@(Cat _ _ start)) _) -> do
             debugOn
             end <- rewrite $ intervalEnd dom
-            prove (ForallSegments k $ PermutationOfRange start end) fn
+            prove (ForallSegments $ \_ -> PermutationOfRange start end) fn
         )
         Yes
     ]

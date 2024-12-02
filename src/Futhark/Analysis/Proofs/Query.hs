@@ -20,15 +20,18 @@ import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
 import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, isTrue, rollbackAlgEnv, ($/=), ($<), ($<=), ($==), ($>), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Domain (Iota), IndexFn (..), Iterator (..), casesToList, getCase)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, whenDebug)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (MonadSoP, addRange, mkRange, mkRangeLB, mkRangeUB)
-import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.-.))
+import Futhark.SoP.SoP (SoP, int2SoP, justAffine, justSym, sym2SoP, (.-.))
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
+import Futhark.Analysis.Proofs.IndexFnPlus (repDomain)
+import Control.Monad (void)
+import Debug.Trace (traceM)
 
 data MonoDir = Inc | IncStrict | Dec | DecStrict
   deriving (Show, Eq, Ord)
@@ -47,22 +50,23 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
   case query of
     CaseCheck transf -> check (transf q)
     CaseIsMonotonic dir ->
-      case it of
-        Forall i _ -> do
-          -- Add j < i. Check p(j) ^ p(i) => q(j) `rel` q(i).
-          addRange (Algebra.Var i) (mkRangeLB $ int2SoP 1)
-          j <- newVName "j"
-          addRange (Algebra.Var j) (mkRange (int2SoP 0) (sym2SoP (Algebra.Var i) .-. int2SoP 1))
-          assume (fromJust . justSym $ p @ Var j)
-          let rel = case dir of
-                Inc -> ($<=)
-                IncStrict -> ($<)
-                Dec -> ($>=)
-                DecStrict -> ($>)
-          (q @ Var j) `rel` q
-          where
-            f @ x = rep (mkRep i x) f
-        Empty -> undefined
+      debugT (prettyString p <> " is monotonic " <> show dir <> ": ") $
+        case it of
+          Forall i _ -> do
+            -- Add j < i. Check p(j) ^ p(i) => q(j) `rel` q(i).
+            addRange (Algebra.Var i) (mkRangeLB $ int2SoP 1)
+            j <- newVName "j"
+            addRange (Algebra.Var j) (mkRange (int2SoP 0) (sym2SoP (Algebra.Var i) .-. int2SoP 1))
+            assume (fromJust . justSym $ p @ Var j)
+            let rel = case dir of
+                  Inc -> ($<=)
+                  IncStrict -> ($<)
+                  Dec -> ($>=)
+                  DecStrict -> ($>)
+            (q @ Var j) `rel` q
+            where
+              f @ x = rep (mkRep i x) f
+          Empty -> undefined
 
 check :: Symbol -> IndexFnM Answer
 check (a :&& b) = check a `andM` check b
@@ -84,44 +88,53 @@ data Property
   | PermutationOfZeroTo (SoP Symbol)
   | -- | InRange (SoP Symbol) (SoP Symbol) -- TODO seperate out proof embedded in PermutationOfZeroTo.
     PermutationOfRange (SoP Symbol) (SoP Symbol)
-  | ForallSegments VName Property
+  | -- For all k in Cat k _ _, prove property f(k).
+    ForallSegments (VName -> Property)
 
 data Order = LT | GT | LTE | GTE | Undefined
   deriving (Eq, Show)
 
 prove :: Property -> IndexFn -> IndexFnM Answer
 prove (PermutationOf {}) _fn = undefined
-prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraContext fn $ do
-  -- 1. Show that m = n.
-  -- 2. Prove no overlap between case values.
-  --  It is sufficient to show that the case values can be sorted
-  --  in a strictly increasing order. That is, given a list of branches
-  --  on the form (p_f => f) and two indices i /= j in [0,...,n-1],
-  --  we want to show
-  --    forall (p_f => f) /= (p_g => g) in our list of branches .
-  --      p_f(i) ^ p_g(j) ==> f(i) < g(j) OR f(i) > g(j).
-  --
-  --  We define a comparison operator that returns the appropriate
-  --  relation above, if it exists, and use a sorting algorithm
-  --  to reduce the number of tests needed, but the only thing
-  --  that matters is that this sorting exists.
-  -- 3. Prove that all branches are within bounds.
-  debugM "prove permutation"
-  debugPrettyM "\n" fn
-  debugPrintAlgEnv
-  m_eq_n <- m $== n
-  case m_eq_n of
-    Unknown -> pure Unknown
-    Yes -> do
+prove (PermutationOfZeroTo m) fn = prove (PermutationOfRange (int2SoP 0) m) fn
+prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
+      -- 1. Prove that each case is strictly monotonic.
+      -- 2. Prove that all branches are within bounds (start, end - 1).
+      -- 3. Prove no overlap between case values.
+      --  It is sufficient to show that the case values can be sorted
+      --  in a strictly increasing order. That is, given a list of branches
+      --  on the form (p_f => f) and two indices i /= j in [0,...,n-1],
+      --  we want to show
+      --    forall (p_f => f) /= (p_g => g) in our list of branches .
+      --      p_f(i) ^ p_g(j) ==> f(i) < g(j) OR f(i) > g(j).
+      --
+      --  We define a comparison operator that returns the appropriate
+      --  relation above, if it exists, and use a sorting algorithm
+      --  to reduce the number of tests needed, but the only thing
+      --  that matters is that this sorting exists.
+      debugM $
+       "prove permutation of " <> prettyString start <> " .. " <> prettyString end
+      debugPrettyM "\n" fn
+
       let branches = casesToList cs
       i <- newNameFromString "i"
       j <- newNameFromString "j"
       addRange (Algebra.Var i) (mkRangeLB (int2SoP 0))
       addRange (Algebra.Var j) (mkRangeLB (int2SoP 0))
+      let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
+      let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
-      let monotonic c =
+      let case_monotonic c =
             askQ (CaseIsMonotonic IncStrict) fn c
               `orM` askQ (CaseIsMonotonic DecStrict) fn c
+
+      let case_in_bounds (p, f) = do
+            addRelIterator iter_i
+            assume (fromJust . justSym $ p @ i)
+            debugPrettyM "    Case:" (p @ i :: SoP Symbol)
+            let bug1 = debugT ("  0 <= " <> prettyString (f @ i :: SoP Symbol))
+            let bug2 = debugT ("  n >  " <> prettyString (f @ i :: SoP Symbol))
+            bug1 (start $<= f @ i) `andM` bug2 (f @ i $< end)
 
       let (p_f, f) `cmp` (p_g, g) = do
             assume (fromJust . justSym $ p_f @ i)
@@ -130,12 +143,12 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
                   -- Try to show: forall i /= j . f(i) `rel` g(j)
                   let case_i_lt_j = rollbackAlgEnv $ do
                         -- Case i < j => f(i) `rel` g(j).
-                        addRelIterator (Forall j (Iota n))
+                        addRelIterator iter_j
                         i +< j
                         (f @ i) `rel` (g @ j)
                       case_i_gt_j = rollbackAlgEnv $ do
                         -- Case i > j => f(i) `rel` g(j):
-                        addRelIterator (Forall i (Iota n))
+                        addRelIterator iter_i
                         j +< i
                         (f @ i) `rel` (g @ j)
                    in case_i_lt_j `andM` case_i_gt_j
@@ -151,25 +164,20 @@ prove (PermutationOfZeroTo m) fn@(IndexFn (Forall iter (Iota n)) cs) = algebraCo
                     Yes -> pure GT
                     Unknown -> debugPrintAlgEnv >> pure Undefined
 
-      let strictlyMonotonic = zipWith (curry (monotonic . snd)) branches [0 ..]
-      let no_overlap = answerFromBool . isJust <$> sorted cmp branches
-      let within_bounds =
-            map
-              ( \(p, f) -> rollbackAlgEnv $ do
-                  addRelIterator (Forall i (Iota n))
-                  assume (fromJust . justSym $ p @ i)
-                  debugPrettyM "CASE:" (p @ i :: SoP Symbol)
-                  let bug1 = debugT ("  0 <= " <> prettyString (f @ i :: SoP Symbol))
-                  let bug2 = debugT ("  n >  " <> prettyString (f @ i :: SoP Symbol))
-                  bug1 (int2SoP 0 $<= f @ i) `andM` bug2 (f @ i $< n)
-              )
-              branches
-      allM strictlyMonotonic `andM` allM within_bounds `andM` no_overlap
+      let monotonic = do
+            debugM "1.  MONOTONICITY"
+            allM $ zipWith (curry (case_monotonic . snd)) branches [0 ..]
+      let within_bounds = do
+            debugM "2.  WITHIN BOUNDS"
+            allM $ map case_in_bounds branches
+      let no_overlap = do
+            debugM "3.  NO OVERLAP"
+            answerFromBool . isJust <$> sorted cmp branches
+      monotonic `andM` within_bounds `andM` no_overlap
   where
-    f @ x = rep (mkRep iter (Var x)) f
-prove (PermutationOfZeroTo {}) _ = pure Unknown
-prove (PermutationOfRange start end) fn =
-  pure Unknown
+    f @ x = rep (mkRep i0 (Var x)) f
+prove (ForallSegments fprop) fn@(IndexFn (Forall _ (Cat k _ _)) _) =
+  prove (fprop k) fn
 prove _ _ = error "Not implemented yet."
 
 -- Strict sorting.
@@ -202,12 +210,12 @@ isUnknown :: Answer -> Bool
 isUnknown Unknown = True
 isUnknown _ = False
 
--- Short-circuit evaluation `and`.
-andF :: (Applicative f) => Answer -> f Answer -> f Answer
+-- Short-circuit evaluation `and`. (Unless debugging is on.)
+andF :: Answer -> IndexFnM Answer -> IndexFnM Answer
 andF Yes m = m
-andF Unknown _ = pure Unknown
+andF Unknown m = whenDebug (void m) >> pure Unknown
 
-andM :: (Monad m) => m Answer -> m Answer -> m Answer
+andM :: IndexFnM Answer -> IndexFnM Answer -> IndexFnM Answer
 andM m1 m2 = do
   ans <- m1
   ans `andF` m2
