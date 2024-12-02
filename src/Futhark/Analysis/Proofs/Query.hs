@@ -18,7 +18,7 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, isTrue, rollbackAlgEnv, ($/=), ($<), ($<=), ($==), ($>), ($>=))
+import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, isTrue, rollbackAlgEnv, ($/=), ($<), ($<=), ($==), ($>), ($>=), algDebugPrettyM)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT)
@@ -61,8 +61,8 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
                   IncStrict -> ($<)
                   Dec -> ($>=)
                   DecStrict -> ($>)
-            debugPrettyM "q @ i" q
-            debugPrettyM "q @ j" (q @ Var j :: SoP Symbol)
+            algDebugPrettyM "q @ i:" q
+            algDebugPrettyM "q @ j:" (q @ Var j :: SoP Symbol)
             debugPrintAlgEnv
             (q @ Var j) `rel` q
             where
