@@ -605,7 +605,7 @@ getRefinement (E.Id param (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) 
           let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `op` y'
           let effect = do
                 hole <- sym2SoP . Hole <$> newVName "h"
-                alg_vn <- newVName "x"
+                alg_vn <- newVName (E.baseString param <> "ª")
                 addUntrans (Algebra.Var alg_vn) (Idx (Var param) hole)
                 addRange (Algebra.Var alg_vn) . mkRangeLB =<< toAlgebra y'
           pure (check, effect)

@@ -23,7 +23,7 @@ import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (Nameable (mkName), MonadSoP, askPropertyWith)
 import Futhark.SoP.SoP (SoP, sopToLists)
 import Futhark.Util.Pretty (Pretty, brackets, commasep, enclose, parens, pretty, viaShow, (<+>))
-import Language.Futhark (VName)
+import Language.Futhark (VName, nameFromString)
 import Language.Futhark qualified as E
 import Control.Monad (unless)
 
@@ -78,9 +78,10 @@ instance Pretty Symbol where
     where
       prettyOp s x y = pretty x <+> s <+> pretty y
 
--- This is required by MonadSoP.
 instance Nameable Symbol where
-  mkName (VNameSource i) = (Var $ E.VName "x" i, VNameSource $ i + 1)
+  mkName (VNameSource i) = (Var $ E.VName (name i) i, VNameSource $ i + 1)
+    where
+      name j = nameFromString [cycle ['a' .. 'z'] !! j, 'ª']
 
 -- Returns the set of free variable names in a SoP Symbol.
 fv :: SoP Symbol -> S.Set VName
