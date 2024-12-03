@@ -46,14 +46,12 @@ def attention_like [q] (A: [m][k]f16) (B: [q][k][n]f16) : [m][n]f32 =
            then copy A
            else replicate (m * k) 0.0f16 |> unflatten
                                             
-  let acc_init : *[m][n]f32 = replicate (m * n) 0.0f32 |> unflatten in  
-  loop (acc : *[m][n]f32) = (acc_init: *[m][n]f32) for i < q do
-    let B' = B[i]
-    let C : *[m][n]f32 = matmul A' B' in
-    seq_acc2 acc C
-    -- seq_acc acc C
-    -- if true then C else acc
-    -- map2 (map2 (+)) acc C
-                          
+  let acc_init : *[m][n]f32 = replicate (m * n) 0.0f32 |> unflatten in
+  --let acc_init : *[m][k]f32 = replicate (m * k) 0.0f32 |> unflatten in
+  loop _ = (acc_init: *[m][n]f32) for i < q do
+    let B' = B[0] 
+    let C : *[m][n]f32 = matmul A' B'    
+    in seq_acc3 acc C
+                              
 def main [q][p] (A: [p][m][k]f16) (B: [p][q][k][n]f16) =
   #[incremental_flattening(only_intra)]map2 attention_like A B

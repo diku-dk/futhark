@@ -1,20 +1,28 @@
 -- ==
+-- entry: mmm_intra16
 -- compiled random input {[128][16][16]f16 [128][16][16]f16}
 
+-- ==
+-- entry: mmm_intra32
+-- compiled random input {[128][32][32]f16 [128][32][32]f16}
 
-let dotproduct (x: [16]f16) (y: [16]f16) =
-  map2 (*) x y
-  |> map f32.f16
-  |> reduce (+) 0
+-- ==
+-- entry: mmm_intra64
+-- compiled random input {[128][64][64]f16 [128][64][64]f16}
+import "mmm-intra-helpers"
 
-let matmul16 (A: [16][16]f16) (B: [16][16]f16) : [16][16]f32 =
-    map (\ Arow -> 
-        map (\Bcol -> 
-            dotproduct Arow Bcol) 
-        (transpose B)
-    ) A     
+def mmm_intra [q] [d] (A: [q][d][d]f16) (B: [q][d][d]f16) : [q][d][d]f32 =
+  #[incremental_flattening(only_intra)]map2 matmul A B
 
-entry main [q] (A: [q][16][16]f16) (B: [q][16][16]f16) : [q][16][16]f32 =    
-  #[incremental_flattening(only_intra)]map2 matmul16 A B
+entry mmm_intra16 [q] (A: [q][16][16]f16) (B: [q][16][16]f16) =
+  mmm_intra A B
+
+entry mmm_intra32 [q] (A: [q][32][32]f16) (B: [q][32][32]f16) =
+  mmm_intra A B
+
+entry mmm_intra64 [q] (A: [q][64][64]f16) (B: [q][64][64]f16) =
+  mmm_intra A B
+
+                                                            
 
 

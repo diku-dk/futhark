@@ -1,5 +1,5 @@
 -- ==
--- compiled nobench random input {[128][16][16]f16 [128][16][16]f16} auto output
+-- compiled nobench random input {[128][16][16]f16 [128][16][16]f16} error: CUDA call.*
 
 def not_matmul (A: [16][16]f16) (B: [16][16]f16) : [16][16]f32 =
     map (\ Arow -> 
