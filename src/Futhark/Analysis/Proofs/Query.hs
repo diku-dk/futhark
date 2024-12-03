@@ -21,7 +21,7 @@ import Data.Maybe (fromJust, isJust)
 import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, isTrue, rollbackAlgEnv, ($/=), ($<), ($<=), ($==), ($>), ($>=), algDebugPrettyM)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, whenDebug)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
@@ -30,6 +30,8 @@ import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.-.))
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
 import Futhark.Analysis.Proofs.IndexFnPlus (repDomain)
+import Control.Monad (void)
+import Futhark.Util.Pretty (prettyStringW, docStringW, pretty, indent, hang)
 
 data MonoDir = Inc | IncStrict | Dec | DecStrict
   deriving (Show, Eq, Ord)
@@ -63,7 +65,6 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
                   DecStrict -> ($>)
             algDebugPrettyM "q @ i:" q
             algDebugPrettyM "q @ j:" (q @ Var j :: SoP Symbol)
-            debugPrintAlgEnv
             (q @ Var j) `rel` q
             where
               f @ x = rep (mkRep i x) f
@@ -132,9 +133,10 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
       let case_in_bounds (p, f) = do
             addRelIterator iter_i
             assume (fromJust . justSym $ p @ i)
-            debugPrettyM "    Case:" (p @ i :: SoP Symbol)
-            let bug1 = debugT ("  0 <= " <> prettyString (f @ i :: SoP Symbol))
-            let bug2 = debugT ("  n >  " <> prettyString (f @ i :: SoP Symbol))
+            debugPrettyM "Case:" (p @ i :: SoP Symbol)
+            let bug1 = debugT (docStringW 110 (hang 4 $ pretty $ start :<= (f @ i)))
+            let bug2 = debugT (docStringW 110 (hang 4 $ pretty $ end :> (f @ i)))
+            debugPrintAlgEnv
             bug1 (start $<= f @ i) `andM` bug2 (f @ i $< end)
 
       let (p_f, f) `cmp` (p_g, g) = do
@@ -214,7 +216,7 @@ isUnknown _ = False
 -- Short-circuit evaluation `and`. (Unless debugging is on.)
 andF :: Answer -> IndexFnM Answer -> IndexFnM Answer
 andF Yes m = m
-andF Unknown _ = pure Unknown
+andF Unknown m = whenDebug (void m) >> pure Unknown
 
 andM :: IndexFnM Answer -> IndexFnM Answer -> IndexFnM Answer
 andM m1 m2 = do

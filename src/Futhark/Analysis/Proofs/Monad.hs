@@ -10,7 +10,7 @@ import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
 import Futhark.SoP.Expression (Expression)
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
-import Futhark.Util.Pretty (Pretty, docString, pretty, prettyString)
+import Futhark.Util.Pretty (Pretty, docString, pretty, prettyString, docStringW)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 
@@ -99,11 +99,11 @@ debugLn = traceM "\n"
 
 debugPrettyM :: (Pretty a) => String -> a -> IndexFnM ()
 debugPrettyM msg x = do
-  whenDebug $ traceM $ docString $ "🪲 " <> pretty msg <> " " <> pretty x
+  whenDebug $ traceM $ docStringW 110 $ "🪲 " <> pretty msg <> " " <> pretty x
 
 debugPrettyM2 :: (Pretty a) => String -> a -> IndexFnM ()
 debugPrettyM2 msg x = do
-  whenDebug $ traceM $ docString $ "🐞 " <> pretty msg <> " " <> pretty x
+  whenDebug $ traceM $ docStringW 110 $ "🐞 " <> pretty msg <> " " <> pretty x
 
 debugPrintAlgEnv :: IndexFnM ()
 debugPrintAlgEnv = do
