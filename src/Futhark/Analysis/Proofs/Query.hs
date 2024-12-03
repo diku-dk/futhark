@@ -130,7 +130,7 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
             askQ (CaseIsMonotonic IncStrict) fn c
               `orM` askQ (CaseIsMonotonic DecStrict) fn c
 
-      let case_in_bounds (p, f) = do
+      let case_in_bounds (p, f) = rollbackAlgEnv $ do
             addRelIterator iter_i
             assume (fromJust . justSym $ p @ i)
             debugPrettyM "Case:" (p @ i :: SoP Symbol)
