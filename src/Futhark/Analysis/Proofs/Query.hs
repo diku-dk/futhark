@@ -134,9 +134,9 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
             addRelIterator iter_i
             assume (fromJust . justSym $ p @ i)
             debugPrettyM "Case:" (p @ i :: SoP Symbol)
-            let bug1 = debugT (docStringW 110 (hang 4 $ pretty $ start :<= (f @ i)))
-            let bug2 = debugT (docStringW 110 (hang 4 $ pretty $ end :> (f @ i)))
-            debugPrintAlgEnv
+            debugPrettyM "       =>" (f @ i :: SoP Symbol)
+            let bug1 = debugT ("    >= " <> prettyStringW 110 start)
+            let bug2 = debugT ("    < " <> prettyStringW 110 end)
             bug1 (start $<= f @ i) `andM` bug2 (f @ i $< end)
 
       let (p_f, f) `cmp` (p_g, g) = do
@@ -148,6 +148,7 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
                         -- Case i < j => f(i) `rel` g(j).
                         addRelIterator iter_j
                         i +< j
+                        debugPrintAlgEnv
                         (f @ i) `rel` (g @ j)
                       case_i_gt_j = rollbackAlgEnv $ do
                         -- Case i > j => f(i) `rel` g(j):
@@ -155,8 +156,8 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
                         j +< i
                         (f @ i) `rel` (g @ j)
                    in case_i_lt_j `andM` case_i_gt_j
-            debugPrettyM "f:" (f @ i :: SoP Symbol)
-            debugPrettyM "g:" (g @ j :: SoP Symbol)
+            algDebugPrettyM "f:" (f @ i :: SoP Symbol)
+            algDebugPrettyM "g:" (g @ j :: SoP Symbol)
             f_LT_g <- f_rel_g ($<)
             debugT "  f `cmp` g" $
               case f_LT_g of

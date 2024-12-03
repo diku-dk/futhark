@@ -80,7 +80,7 @@ whenDebug x = do
 
 debugM :: String -> IndexFnM ()
 debugM x = do
-  whenDebug $ traceM $ "🐝 " <> x
+  whenDebug $ traceM x
 
 debugT :: (Show a) => String -> IndexFnM a -> IndexFnM a
 debugT msg m = do
