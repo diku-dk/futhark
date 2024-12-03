@@ -343,7 +343,7 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
           (mkInt64Const sizeM, ObservePrim),
           (mkInt64Const sizeK, ObservePrim),
           (mkInt64Const warpsM, ObservePrim),
-          (mkInt64Const warpsM, ObservePrim)
+          (mkInt64Const warpsN, ObservePrim)
         ]
       copyRetsA =
         [ ( Array
@@ -362,7 +362,7 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
           (mkInt64Const sizeK, ObservePrim),
           (mkInt64Const sizeN, ObservePrim),
           (mkInt64Const warpsM, ObservePrim),
-          (mkInt64Const warpsM, ObservePrim)
+          (mkInt64Const warpsN, ObservePrim)
         ]
       copyRetsB =
         [ ( Array
@@ -403,7 +403,7 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
               (mkInt64Const sizeN, ObservePrim),
               (mkInt64Const sizeK, ObservePrim),
               (mkInt64Const warpsM, ObservePrim),
-              (mkInt64Const warpsM, ObservePrim)
+              (mkInt64Const warpsN, ObservePrim)
             ]
       let mmmRets =
             [ ( Array
@@ -432,7 +432,7 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
           (mkInt64Const sizeM, ObservePrim),
           (mkInt64Const sizeN, ObservePrim),
           (mkInt64Const warpsM, ObservePrim),
-          (mkInt64Const warpsM, ObservePrim)
+          (mkInt64Const warpsN, ObservePrim)
         ]
   let copyRetsC =
         [ ( Array
