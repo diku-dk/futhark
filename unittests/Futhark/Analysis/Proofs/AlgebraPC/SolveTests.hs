@@ -399,6 +399,60 @@ tests =
               c_sum i FM.$>$ c_sum j
           )
           @??= True,
+      testCase "Monotonicity 2 (from part2indicesL)" $
+        -- j < i, shp >= 0, c[i] = 0, c[j] = 0
+        -- =>  i₉₆₆₄ + ∑⟦cª₄₉₈₉₅⟧[1 + i₉₆₆₄ : -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]]
+        --       > j₅₀₂₈₂ + ∑⟦cª₄₉₈₉₅⟧[1 + j₅₀₂₈₂ : -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]]
+        --
+        --   Proof:
+        --     i₉₆₆₄
+        --       + ∑⟦cª₄₉₈₉₅⟧[1 + i₉₆₆₄ : -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]]
+        --       - ∑⟦cª₄₉₈₉₅⟧[1 + j₅₀₂₈₂ : -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]]
+        --       > j₅₀₂₈₂
+        --
+        --   Both sums satisfy "empty by atmost -1" given ranges on i₉₆₆₄ and j₅₀₂₈₂.
+        --     i₉₆₆₄ - ∑⟦cª₄₉₈₉₅⟧[1 + j₅₀₂₈₂ : i₉₆₆₄]
+        --       > j₅₀₂₈₂
+        --
+        --   Replace sum by its upper bound to minimize LHS:
+        --     i₉₆₆₄ - (i₉₆₆₄ - 1 + j₅₀₂₈₂) > j₅₀₂₈₂
+        --
+        --     1 + j₅₀₂₈₂ > j₅₀₂₈₂
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              k <- newNameFromString "k"
+              j <- newNameFromString "j"
+              m <- newNameFromString "m"
+              vn_shp <- newNameFromString "shp"
+              let shp = One vn_shp
+              -- \s -> ∑shpª₃₃₇₈₀[0 : -1 + s]
+              let shp_sum' s = sym2SoP $ Sum shp (int 0) (s .-. int 1)
+              let shp_sum = shp_sum' . sVar
+              -- max{0} <= shapeª₃₃₇₈₀ <= min{}
+              addRange (Var vn_shp) $ mkRangeLB (int 0)
+              -- max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈}
+              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
+              -- max{0, 1, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
+              --   <= i₉₆₆₄
+              --   <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
+              addRange (Var i) $ mkRange (int 1) (shp_sum m .-. int 1)
+              addRange (Var i) $ mkRange (shp_sum k) (shp_sum' (sVar k .+. int 1) .-. int 1)
+              -- max{0} <= j₅₀₁₃₁ <= min{-1 + i₉₆₆₄}
+              addRange (Var j) $ mkRange (int 0) (sVar i .-. int 1)
+              -- c is disjoint with some other predicate d.
+              addProperty (Var c0) (Disjoint $ S.singleton d0)
+              addProperty (Var c0) Boolean
+              addRange (Var c0) $ mkRange (int 0) (int 1)
+              -- Add equivalences.
+              addEquiv (Idx c (sVar i)) (int 0)
+              addEquiv (Idx c (sVar j)) (int 0)
+              -- \idx -> ∑⟦cª₄₉₈₉₅⟧[1 + idx : ∑shpª₃₃₇₈₀[0 : k₄₉₈₄₈] - 1]
+              let c_sum s = sym2SoP $ Sum c (sVar s .+. int 1) (shp_sum' (sVar k .+. int 1) .-. int 1)
+              (sVar i .+. c_sum i) FM.$>$ (sVar j .+. c_sum j)
+          )
+          @??= True,
       --
       testCase "FME1" $
         run
