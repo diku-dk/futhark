@@ -1710,8 +1710,8 @@ isIntrinsicFunction qname args loc = do
           lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
           fmap (map I.Var) . letTupExp desc . Op $
             case fname of
-              "jvp2" -> JVP lam x' v'
-              _ -> VJP lam x' v'
+              "jvp2" -> JVP x' v' lam
+              _ -> VJP x' v' lam
     handleAD _ _ = Nothing
 
     handleRest [a, si, v] "scatter" = Just $ scatterF 1 a si v
