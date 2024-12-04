@@ -76,7 +76,7 @@ fromSOAC' ::
   [Ident] ->
   SOAC rep ->
   m (Maybe (MapNest rep))
-fromSOAC' bound (SOAC.Screma w inps (SOAC.ScremaForm [] [] lam)) = do
+fromSOAC' bound (SOAC.Screma w inps (SOAC.ScremaForm lam [] [])) = do
   maybenest <- case ( stmsToList $ bodyStms $ lambdaBody lam,
                       bodyResult $ lambdaBody lam
                     ) of

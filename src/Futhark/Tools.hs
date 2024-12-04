@@ -106,18 +106,16 @@ dissectScrema ::
   ScremaForm (Rep m) ->
   [VName] ->
   m ()
-dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
+dissectScrema pat w (ScremaForm map_lam scans reds) arrs = do
   let num_reds = redResults reds
       num_scans = scanResults scans
-      (scan_res, red_res, map_res) =
-        splitAt3 num_scans num_reds $ patNames pat
+      (scan_res, red_res, map_res) = splitAt3 num_scans num_reds $ patNames pat
 
   to_red <- replicateM num_reds $ newVName "to_red"
 
   let scanomap = scanomapSOAC scans map_lam
   letBindNames (scan_res <> to_red <> map_res) $
-    Op $
-      Screma w arrs scanomap
+    Op (Screma w arrs scanomap)
 
   reduce <- reduceSOAC reds
   letBindNames red_res $ Op $ Screma w to_red reduce

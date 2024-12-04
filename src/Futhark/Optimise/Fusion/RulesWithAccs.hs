@@ -210,7 +210,7 @@ checkSafeAndProfitable dg scat_node_id ctxs_rshp@(_ : _) ctxs_cons =
     isMap nT
       | SoacNode out_trsfs _pat soac _ <- nT,
         H.Screma _ _ form <- soac,
-        ScremaForm [] [] _ <- form =
+        ScremaForm _ [] [] <- form =
           H.nullTransforms out_trsfs
     isMap _ = False
 checkSafeAndProfitable _ _ _ _ = False
@@ -341,7 +341,7 @@ mkWithAccBdy' static_arg (dim : dims) dims_rev iot_par_nms rshp_ps cons_ps = do
       mkWithAccBdy' static_arg dims (dim : dims_rev) (iot_par_nms ++ [paramName iota_p]) rshp_ps' cons_ps'
     let map_lam = Lambda (rshp_ps' ++ [iota_p] ++ cons_ps') (map paramDec cons_ps') map_lam_bdy
         map_inps = map paramName rshp_ps ++ [iota_arr] ++ map paramName cons_ps
-        map_soac = F.Screma dim map_inps $ ScremaForm [] [] map_lam
+        map_soac = F.Screma dim map_inps $ ScremaForm map_lam [] []
     res_nms <- letTupExp "acc_res" $ Op map_soac
     pure $ map (subExpRes . Var) res_nms
 

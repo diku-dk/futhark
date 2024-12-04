@@ -435,7 +435,7 @@ newWidth (inp : _) _ = arraySize 0 $ inputType inp
 lambda :: SOAC rep -> Lambda rep
 lambda (Stream _ _ _ lam) = lam
 lambda (Scatter _len _ivs _spec lam) = lam
-lambda (Screma _ _ (ScremaForm _ _ lam)) = lam
+lambda (Screma _ _ (ScremaForm lam _ _)) = lam
 lambda (Hist _ _ _ lam) = lam
 
 -- | Set the lambda used in the SOAC.
@@ -444,8 +444,8 @@ setLambda lam (Stream w arrs nes _) =
   Stream w arrs nes lam
 setLambda lam (Scatter len arrs spec _lam) =
   Scatter len arrs spec lam
-setLambda lam (Screma w arrs (ScremaForm scan red _)) =
-  Screma w arrs (ScremaForm scan red lam)
+setLambda lam (Screma w arrs (ScremaForm _ scan red)) =
+  Screma w arrs (ScremaForm lam scan red)
 setLambda lam (Hist w ops inps _) =
   Hist w ops inps lam
 
