@@ -117,7 +117,7 @@ simplifySOAC (Hist w imgs ops bfun) = do
   imgs' <- mapM Engine.simplify imgs
   (bfun', bfun_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty bfun
   pure (Hist w' imgs' ops' bfun', mconcat hoisted <> bfun_hoisted)
-simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
+simplifySOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
   (scans', scans_hoisted) <- fmap unzip $
     forM scans $ \(Scan lam nes) -> do
       (lam', hoisted) <- Engine.simplifyLambda mempty lam
@@ -136,7 +136,7 @@ simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
     <$> ( Screma
             <$> Engine.simplify w
             <*> Engine.simplify arrs
-            <*> pure (ScremaForm scans' reds' map_lam')
+            <*> pure (ScremaForm map_lam' scans' reds')
         )
     <*> pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
 
@@ -399,10 +399,10 @@ removeUnusedSOACInput ::
   TopDownRuleOp rep
 removeUnusedSOACInput _ pat aux op
   | Just (Screma w arrs form :: SOAC rep) <- asSOAC op,
-    ScremaForm scan reduce map_lam <- form,
+    ScremaForm map_lam scan reduce <- form,
     Just (used_arrs, map_lam') <- remove map_lam arrs =
       Simplify . auxing aux . letBind pat . Op $
-        soacOp (Screma w used_arrs (ScremaForm scan reduce map_lam'))
+        soacOp (Screma w used_arrs (ScremaForm map_lam' scan reduce))
   | Just (Scatter w arrs dests map_lam :: SOAC rep) <- asSOAC op,
     Just (used_arrs, map_lam') <- remove map_lam arrs =
       Simplify . auxing aux . letBind pat . Op $
@@ -418,7 +418,7 @@ removeUnusedSOACInput _ pat aux op
 removeUnusedSOACInput _ _ _ _ = Skip
 
 removeDeadMapping :: BottomUpRuleOp (Wise SOACS)
-removeDeadMapping (_, used) (Pat pes) aux (Screma w arrs (ScremaForm scans reds lam))
+removeDeadMapping (_, used) (Pat pes) aux (Screma w arrs (ScremaForm lam scans reds))
   | (nonmap_pes, map_pes) <- splitAt num_nonmap_res pes,
     not $ null map_pes =
       let (nonmap_res, map_res) = splitAt num_nonmap_res $ bodyResult $ lambdaBody lam
@@ -434,10 +434,8 @@ removeDeadMapping (_, used) (Pat pes) aux (Screma w arrs (ScremaForm scans reds 
        in if map_pes /= map_pes'
             then
               Simplify . auxing aux $
-                letBind (Pat $ nonmap_pes <> map_pes') $
-                  Op $
-                    Screma w arrs $
-                      ScremaForm scans reds lam'
+                letBind (Pat $ nonmap_pes <> map_pes') . Op $
+                  Screma w arrs (ScremaForm lam' scans reds)
             else Skip
   where
     num_nonmap_res = scanResults scans + redResults reds
@@ -642,7 +640,7 @@ simplifyKnownIterationSOAC ::
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
   TopDownRuleOp rep
 simplifyKnownIterationSOAC _ pat _ op
-  | Just (Screma (Constant k) arrs (ScremaForm scans reds map_lam)) <- asSOAC op,
+  | Just (Screma (Constant k) arrs (ScremaForm map_lam scans reds)) <- asSOAC op,
     oneIsh k = Simplify $ do
       let (Reduce _ red_lam red_nes) = singleReduce reds
           (Scan scan_lam scan_nes) = singleScan scans
@@ -697,7 +695,7 @@ simplifyKnownIterationSOAC _ pat _ op
         certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 --
 simplifyKnownIterationSOAC _ pat aux op
-  | Just (Screma (Constant (IntValue (Int64Value k))) arrs (ScremaForm [] [] map_lam)) <- asSOAC op,
+  | Just (Screma (Constant (IntValue (Int64Value k))) arrs (ScremaForm map_lam [] [])) <- asSOAC op,
     "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
       arrs_elems <- fmap transpose . forM [0 .. k - 1] $ \i -> do
         map_lam' <- renameLambda map_lam
@@ -836,7 +834,7 @@ simplifyMapIota ::
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
   TopDownRuleOp rep
 simplifyMapIota vtable screma_pat aux op
-  | Just (Screma w arrs (ScremaForm scan reduce map_lam) :: SOAC rep) <- asSOAC op,
+  | Just (Screma w arrs (ScremaForm map_lam scan reduce) :: SOAC rep) <- asSOAC op,
     Just (p, _) <- find isIota (zip (lambdaParams map_lam) arrs),
     indexings <-
       mapMaybe (indexesWith (paramName p)) . S.toList $
@@ -855,7 +853,7 @@ simplifyMapIota vtable screma_pat aux op
               }
 
       auxing aux . letBind screma_pat . Op . soacOp $
-        Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
+        Screma w (arrs <> more_arrs) (ScremaForm map_lam' scan reduce)
   where
     isIota (_, arr) = case ST.lookupBasicOp arr vtable of
       Just (Iota _ (Constant o) (Constant s) _, _) ->
@@ -908,7 +906,7 @@ simplifyMapIota _ _ _ _ = Skip
 -- corresponding to that transformation performed on the rows of the
 -- full array.
 moveTransformToInput :: TopDownRuleOp (Wise SOACS)
-moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan reduce map_lam))
+moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_lam scan reduce))
   | ops <- filter arrayIsMapParam $ S.toList $ arrayOps mempty $ lambdaBody map_lam,
     not $ null ops = Simplify $ do
       (more_arrs, more_params, replacements) <-
@@ -923,7 +921,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
               }
 
       auxing aux . letBind screma_pat . Op $
-        Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
+        Screma w (arrs <> more_arrs) (ScremaForm map_lam' scan reduce)
   where
     -- It is not safe to move the transform if the root array is being
     -- consumed by the Screma.  This is a bit too conservative - it's
