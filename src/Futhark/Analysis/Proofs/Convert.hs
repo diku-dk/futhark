@@ -11,7 +11,7 @@ import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, justSingleCase, unzipT, catVar)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, justSingleCase, unzipT)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes)
@@ -134,8 +134,14 @@ forward (E.Literal (E.SignedValue (E.Int64Value x)) _) =
   pure . fromScalar . int2SoP $ toInteger x
 forward (E.IntLit x _ _) =
   pure . fromScalar $ int2SoP x
-forward (E.Negate (E.IntLit x _ _) _) =
-  pure . fromScalar . negSoP $ int2SoP x
+forward (E.Negate x _) = do
+  -- Numeric negation.
+  fn <- forward x
+  pure $
+    IndexFn
+      { iterator = iterator fn,
+        body = cases [(p, negSoP v) | (p, v) <- casesToList (body fn)]
+      }
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   indexfns <- gets indexfns
   case M.lookup vn indexfns of
