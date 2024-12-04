@@ -305,7 +305,7 @@ mkIrregFromReg segments arr = do
   arr_D <-
     letExp "reg_D" . BasicOp $
       Reshape ReshapeArbitrary (Shape [num_elems]) arr
-  arr_F <- letExp "reg_F" <=< segMap (Solo num_elems) $ \(Solo i) -> do
+  arr_F <- letExp "reg_F" <=< segMap (MkSolo num_elems) $ \(MkSolo i) -> do
     flag <- letSubExp "flag" <=< toExp $ (pe64 i `rem` pe64 segment_size) .==. 0
     pure [subExpRes flag]
   arr_O <- letExp "reg_O" <=< segMap (shapeDims (segmentsShape segments)) $ \is -> do
@@ -354,8 +354,8 @@ replicateIrreg segments env ns desc rep = do
   num_segments <- arraySize 0 <$> lookupType ns
 
   -- ns multipled with existing segment sizes.
-  ns_full <- letExp (baseString ns <> "_full") <=< segMap (Solo num_segments) $
-    \(Solo i) -> do
+  ns_full <- letExp (baseString ns <> "_full") <=< segMap (MkSolo num_segments) $
+    \(MkSolo i) -> do
       n <-
         letSubExp "n" =<< eIndex ns [eSubExp i]
       old_segment <-
@@ -369,7 +369,7 @@ replicateIrreg segments env ns desc rep = do
 
   w <- arraySize 0 <$> lookupType ns_full_D
 
-  elems <- letExp (desc <> "_rep_D") <=< segMap (Solo w) $ \(Solo i) -> do
+  elems <- letExp (desc <> "_rep_D") <=< segMap (MkSolo w) $ \(MkSolo i) -> do
     -- Which segment we are in.
     segment_i <-
       letSubExp "segment_i" =<< eIndex ns_full_D [eSubExp i]
@@ -416,8 +416,8 @@ rearrangeIrreg segments env v_t perm (IrregularRep shape flags offsets elems) = 
   m <- arraySize 0 <$> lookupType elems
   (_, _, ii1_vss) <- doRepIota shape
   (_, _, ii2_vss) <- doSegIota shape
-  elems' <- letExp "elems_rearrange" <=< renameExp <=< segMap (Solo m) $
-    \(Solo i) -> do
+  elems' <- letExp "elems_rearrange" <=< renameExp <=< segMap (MkSolo m) $
+    \(MkSolo i) -> do
       seg_i <- letSubExp "seg_i" =<< eIndex ii1_vss [eSubExp i]
       offset <- letSubExp "offset" =<< eIndex offsets [eSubExp seg_i]
       in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp i]
@@ -505,7 +505,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       (res_F, res_O, res_D) <- certifying (distCerts inps aux env) $ doSegIota ns
       (_, _, repiota_D) <- doRepIota ns
       m <- arraySize 0 <$> lookupType res_D
-      res_D' <- letExp "iota_D_fixed" <=< segMap (Solo m) $ \(Solo i) -> do
+      res_D' <- letExp "iota_D_fixed" <=< segMap (MkSolo m) $ \(MkSolo i) -> do
         segment <- letSubExp "segment" =<< eIndex repiota_D [eSubExp i]
         v' <- letSubExp "v" =<< eIndex res_D [eSubExp i]
         x' <- letSubExp "x" =<< eIndex xs [eSubExp segment]
@@ -641,15 +641,15 @@ onMapFreeVar segments env inps ws (ws_F, ws_O, ws_data) v = do
       DistInputFree v' t -> do
         fmap (`MapArray` t)
           . letExp (baseString v <> "_rep_free_free_inp")
-          <=< segMap (Solo ws_prod)
-          $ \(Solo i) -> do
+          <=< segMap (MkSolo ws_prod)
+          $ \(MkSolo i) -> do
             segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
             subExpsRes . pure <$> (letSubExp "v" =<< eIndex v' [eSubExp segment])
       DistInput rt t -> case resVar rt env of
         Irregular rep -> do
           offsets <- letExp (baseString v <> "_rep_free_irreg_O")
-            <=< segMap (Solo ws_prod)
-            $ \(Solo i) -> do
+            <=< segMap (MkSolo ws_prod)
+            $ \(MkSolo i) -> do
               segment <- letSubExp "segment" =<< eIndex ws_data [eSubExp i]
               subExpsRes . pure <$> (letSubExp "v" =<< eIndex (irregularO rep) [eSubExp segment])
           let rep' =
@@ -663,8 +663,8 @@ onMapFreeVar segments env inps ws (ws_F, ws_O, ws_data) v = do
         Regular vs ->
           fmap (`MapArray` t)
             . letExp (baseString v <> "_rep_free_reg_inp")
-            <=< segMap (Solo ws_prod)
-            $ \(Solo i) -> do
+            <=< segMap (MkSolo ws_prod)
+            $ \(MkSolo i) -> do
               segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
               subExpsRes . pure <$> (letSubExp "v" =<< eIndex vs [eSubExp segment])
 
@@ -700,8 +700,8 @@ onMapInputArr segments env inps ii2 p arr = do
                   -- Otherwise we need to perform surgery on the metadata.
                   ~[p_segments, p_O] <- letTupExp
                     (baseString (paramName p) <> "_rep_inp_irreg")
-                    <=< segMap (Solo ws_prod)
-                    $ \(Solo i) -> do
+                    <=< segMap (MkSolo ws_prod)
+                    $ \(MkSolo i) -> do
                       segment_i <-
                         letSubExp "segment" =<< eIndex ii2 [eSubExp i]
                       segment <-
@@ -837,7 +837,7 @@ transformDistStm segments env (DistStm inps res stm) = do
               [1 ..]
       let equiv_case_default = eBody [toExp $ intConst Int64 0]
       -- Match the scrutinees againts the branch cases
-      equiv_classes <- letExp "equiv_classes" <=< segMap (Solo w) $ \(Solo i) -> do
+      equiv_classes <- letExp "equiv_classes" <=< segMap (MkSolo w) $ \(MkSolo i) -> do
         scruts <- mapM (letSubExp "scruts" <=< flip eIndex [toExp i]) lifted_scrutinees
         cls <- letSubExp "cls" =<< eMatch scruts equiv_cases equiv_case_default
         pure [subExpRes cls]
@@ -869,7 +869,7 @@ transformDistStm segments env (DistStm inps res stm) = do
                 -- In the regular case we just take the elements
                 -- of the array given by `is`
                 n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-                arr' <- letExp "split_arr" <=< segMap (Solo n) $ \(Solo i) -> do
+                arr' <- letExp "split_arr" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
                   idx <- letExp "idx" =<< eIndex is [eSubExp i]
                   subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
                 pure $ Regular arr'
@@ -877,7 +877,7 @@ transformDistStm segments env (DistStm inps res stm) = do
                 -- In the irregular case we take the elements
                 -- of the `segs` array given by `is` like in the regular case
                 n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-                segs' <- letExp "split_segs" <=< segMap (Solo n) $ \(Solo i) -> do
+                segs' <- letExp "split_segs" <=< segMap (MkSolo n) $ \(MkSolo i) -> do
                   idx <- letExp "idx" =<< eIndex is [eSubExp i]
                   subExpsRes . pure <$> (letSubExp "segs" =<< eIndex segs [toExp idx])
                 -- From this we calculate the offsets and number of elements
@@ -891,7 +891,7 @@ transformDistStm segments env (DistStm inps res stm) = do
                 -- `offset = offsets[is[ii1[i]]]`
                 -- We then add `ii2[i]` to `offset`
                 -- and use that to index into `elems` and `flags`.
-                ~[flags', elems'] <- letTupExp "split_F_data" <=< segMap (Solo num_data) $ \(Solo i) -> do
+                ~[flags', elems'] <- letTupExp "split_F_data" <=< segMap (MkSolo num_data) $ \(MkSolo i) -> do
                   offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp i]]]
                   idx <- letExp "idx" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp i])
                   flags_split <- letSubExp "flags" =<< eIndex flags [toExp idx]
