@@ -202,6 +202,10 @@ gpumemtcPipeline =
         LowerAllocations.lowerAllocationsGPUMem,
         performCSE False,
         simplifyGPUMem,
+        -- Memory block merging does not keep track of alias information
+        -- across function calls. Our function call approach therefore
+        -- sometimes fails because a memory block is reused, even though
+        -- it is consumed in a function call.
         MemoryBlockMerging.optimise,
         simplifyGPUMem,
         expandAllocations,
