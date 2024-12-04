@@ -985,7 +985,13 @@ checkSizeExp e = runTermTypeM checkExp $ do
 -- | Type-check a single predicate expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case it is unified with t -> bool.
 checkPredExp :: TypeBase Size NoUniqueness -> ExpBase NoInfo VName -> TypeM Exp
-checkPredExp _ty _e = undefined
+checkPredExp ty e = runTermTypeM checkExp $ do
+  e' <- checkExp e
+  let t = toStruct $ typeOf e'
+  let p = Arrow mempty Unnamed Observe ty (RetType [] $ Scalar $ Prim Bool)
+  -- XXX NoUniqueness?
+  unify (mkUsage (locOf e') "Refinement predicate expression") t (Scalar p)
+  updateTypes e'
 
 -- Verify that all sum type constructors and empty array literals have
 -- a size that is known (rigid or a type parameter).  This is to

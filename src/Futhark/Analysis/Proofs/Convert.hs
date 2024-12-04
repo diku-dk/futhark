@@ -597,31 +597,28 @@ getPrecondition = fmap (fmap fst) . getRefinement
 getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe (Check, Effect))
 getRefinement (E.PatParens pat _) = getRefinement pat
 getRefinement (E.PatAscription pat _ _) = getRefinement pat
-getRefinement (E.Id param (E.Info {E.unInfo = E.Scalar (E.Refinement _ty ref)}) _) = do
-  whenDebug . traceM $ "Getting type refinement" <> prettyString (param, ref)
-  Just <$> mkRef ref
+getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
+  | E.Array _ _ (E.Refinement _ty ref) <- info = do
+      whenDebug . traceM $ "Getting (array) type refinement" <> prettyString (param, ref)
+      hole <- sym2SoP . Hole <$> newVName "h"
+      Just <$> mkRef (`Idx` hole) ref
+  | E.Scalar (E.Refinement _ty ref) <- info = do
+      whenDebug . traceM $ "Getting type refinement" <> prettyString (param, ref)
+      Just <$> mkRef id ref
   where
-    mkRef ((E.AppExp (E.Apply f args _) _))
-      | Just "elementwise" <- getFun f,
-        [E.OpSectionRight (E.QualName [] vn_op) _ y _ _ _] <- getArgs args = do
-          let op = case E.baseString vn_op of
-                ">=" -> (:>=)
-                _ -> undefined
-          y' <- getScalar <$> (forward y >>= rewrite)
-          let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `op` y'
-          let effect = do
-                hole <- sym2SoP . Hole <$> newVName "h"
-                alg_vn <- newVName (E.baseString param <> "ª")
-                addUntrans (Algebra.Var alg_vn) (Idx (Var param) hole)
-                addRange (Algebra.Var alg_vn) . mkRangeLB =<< toAlgebra y'
-          pure (check, effect)
-      | Just "equals" <- getFun f,
-        [y] <- getArgs args = do
-          y' <- getScalar <$> (forward y >>= rewrite)
-          let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) :== y'
-          let effect = addEquiv (Algebra.Var param) =<< toAlgebra y'
-          pure (check, effect)
-    mkRef x = error $ "Unhandled refinement predicate " <> show x
+    mkRef wrap (E.OpSectionRight (E.QualName [] vn_op) _ y _ _ _) = do
+      let (op, adder) = case E.baseString vn_op of
+            ">=" -> ((:>=), \vn -> addRange (Algebra.Var vn) . mkRangeLB)
+            "==" -> ((:==), addEquiv . Algebra.Var)
+            _ -> undefined
+      y' <- getScalar <$> (forward y >>= rewrite)
+      let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `op` y'
+      let effect = do
+            alg_vn <- newVName (E.baseString param <> "ª")
+            addUntrans (Algebra.Var alg_vn) (wrap (Var param)) -- (Idx (Var param) hole)
+            adder alg_vn =<< toAlgebra y'
+      pure (check, effect)
+    mkRef _ x = error $ "Unhandled refinement predicate " <> show x
 
     mkCheck check_fn (size_rep, param_subst) = do
       check <- repIndexFn size_rep <$> substParams check_fn param_subst
