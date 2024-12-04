@@ -82,16 +82,16 @@ simplifyConsts =
 simplifySOAC ::
   (Simplify.SimplifiableRep rep) =>
   Simplify.SimplifyOp rep (SOAC (Wise rep))
-simplifySOAC (VJP lam arr vec) = do
+simplifySOAC (VJP arr vec lam) = do
   (lam', hoisted) <- Engine.simplifyLambda mempty lam
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
-  pure (VJP lam' arr' vec', hoisted)
-simplifySOAC (JVP lam arr vec) = do
+  pure (VJP arr' vec' lam', hoisted)
+simplifySOAC (JVP arr vec lam) = do
   (lam', hoisted) <- Engine.simplifyLambda mempty lam
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
-  pure (JVP lam' arr' vec', hoisted)
+  pure (JVP arr' vec' lam', hoisted)
 simplifySOAC (Stream outerdim arr nes lam) = do
   outerdim' <- Engine.simplify outerdim
   nes' <- mapM Engine.simplify nes

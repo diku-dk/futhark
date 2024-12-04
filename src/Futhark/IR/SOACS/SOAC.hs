@@ -125,9 +125,9 @@ data SOAC rep
     -- The final lambda produces indexes and values for the 'HistOp's.
     Hist SubExp [VName] [HistOp rep] (Lambda rep)
   | -- FIXME: this should not be here
-    JVP (Lambda rep) [SubExp] [SubExp]
+    JVP [SubExp] [SubExp] (Lambda rep)
   | -- FIXME: this should not be here
-    VJP (Lambda rep) [SubExp] [SubExp]
+    VJP [SubExp] [SubExp] (Lambda rep)
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
@@ -399,16 +399,16 @@ mapSOACM ::
   SOACMapper frep trep m ->
   SOAC frep ->
   m (SOAC trep)
-mapSOACM tv (JVP lam args vec) =
+mapSOACM tv (JVP args vec lam) =
   JVP
-    <$> mapOnSOACLambda tv lam
-    <*> mapM (mapOnSOACSubExp tv) args
+    <$> mapM (mapOnSOACSubExp tv) args
     <*> mapM (mapOnSOACSubExp tv) vec
-mapSOACM tv (VJP lam args vec) =
+    <*> mapOnSOACLambda tv lam
+mapSOACM tv (VJP args vec lam) =
   VJP
-    <$> mapOnSOACLambda tv lam
-    <*> mapM (mapOnSOACSubExp tv) args
+    <$> mapM (mapOnSOACSubExp tv) args
     <*> mapM (mapOnSOACSubExp tv) vec
+    <*> mapOnSOACLambda tv lam
 mapSOACM tv (Stream size arrs accs lam) =
   Stream
     <$> mapOnSOACSubExp tv size
@@ -514,12 +514,10 @@ instance (ASTRep rep) => Rename (SOAC rep) where
 
 -- | The type of a SOAC.
 soacType :: (Typed (LParamInfo rep)) => SOAC rep -> [Type]
-soacType (JVP lam _ _) =
-  lambdaReturnType lam
-    ++ lambdaReturnType lam
-soacType (VJP lam _ _) =
-  lambdaReturnType lam
-    ++ map paramType (lambdaParams lam)
+soacType (JVP _ _ lam) =
+  lambdaReturnType lam ++ lambdaReturnType lam
+soacType (VJP _ _ lam) =
+  lambdaReturnType lam ++ map paramType (lambdaParams lam)
 soacType (Stream outersize _ accs lam) =
   map (substNamesInType substs) rtp
   where
@@ -572,10 +570,10 @@ mapHistOp f (HistOp w rf dests nes lam) =
   HistOp w rf dests nes $ f lam
 
 instance CanBeAliased SOAC where
-  addOpAliases aliases (JVP lam args vec) =
-    JVP (Alias.analyseLambda aliases lam) args vec
-  addOpAliases aliases (VJP lam args vec) =
-    VJP (Alias.analyseLambda aliases lam) args vec
+  addOpAliases aliases (JVP args vec lam) =
+    JVP args vec (Alias.analyseLambda aliases lam)
+  addOpAliases aliases (VJP args vec lam) =
+    VJP args vec (Alias.analyseLambda aliases lam)
   addOpAliases aliases (Stream size arr accs lam) =
     Stream size arr accs $ Alias.analyseLambda aliases lam
   addOpAliases aliases (Scatter len arrs dests lam) =
@@ -631,12 +629,12 @@ instance IsOp SOAC where
     where
       flattenBlocks (_, arr, ivs) =
         oneName arr <> mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
-  opDependencies (JVP lam args vec) =
+  opDependencies (JVP args vec lam) =
     mconcat $
       replicate 2 $
         lambdaDependencies mempty lam $
           zipWith (<>) (map depsOf' args) (map depsOf' vec)
-  opDependencies (VJP lam args vec) =
+  opDependencies (VJP args vec lam) =
     lambdaDependencies
       mempty
       lam
@@ -713,7 +711,7 @@ instance (RepTypes rep) => ST.IndexOp (SOAC rep) where
 
 -- | Type-check a SOAC.
 typeCheckSOAC :: (TC.Checkable rep) => SOAC (Aliases rep) -> TC.TypeM rep ()
-typeCheckSOAC (VJP lam args vec) = do
+typeCheckSOAC (VJP args vec lam) = do
   args' <- mapM TC.checkArg args
   TC.checkLambda lam $ map TC.noArgAliases args'
   vec_ts <- mapM TC.checkSubExp vec
@@ -723,7 +721,7 @@ typeCheckSOAC (VJP lam args vec) = do
         </> PP.indent 2 (pretty (lambdaReturnType lam))
         </> "does not match type of seed vector"
         </> PP.indent 2 (pretty vec_ts)
-typeCheckSOAC (JVP lam args vec) = do
+typeCheckSOAC (JVP args vec lam) = do
   args' <- mapM TC.checkArg args
   TC.checkLambda lam $ map TC.noArgAliases args'
   vec_ts <- mapM TC.checkSubExp vec
@@ -893,10 +891,10 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
       <> " wrong for given scan and reduction functions."
 
 instance RephraseOp SOAC where
-  rephraseInOp r (VJP lam args vec) =
-    VJP <$> rephraseLambda r lam <*> pure args <*> pure vec
-  rephraseInOp r (JVP lam args vec) =
-    JVP <$> rephraseLambda r lam <*> pure args <*> pure vec
+  rephraseInOp r (VJP args vec lam) =
+    VJP args vec <$> rephraseLambda r lam
+  rephraseInOp r (JVP args vec lam) =
+    JVP args vec <$> rephraseLambda r lam
   rephraseInOp r (Stream w arrs acc lam) =
     Stream w arrs acc <$> rephraseLambda r lam
   rephraseInOp r (Scatter w arrs dests lam) =
@@ -918,9 +916,9 @@ instance RephraseOp SOAC where
       onRed (Reduce comm op nes) = Reduce comm <$> rephraseLambda r op <*> pure nes
 
 instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
-  opMetrics (VJP lam _ _) =
+  opMetrics (VJP _ _ lam) =
     inside "VJP" $ lambdaMetrics lam
-  opMetrics (JVP lam _ _) =
+  opMetrics (JVP _ _ lam) =
     inside "JVP" $ lambdaMetrics lam
   opMetrics (Stream _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
@@ -935,25 +933,21 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
       mapM_ (lambdaMetrics . redLambda) reds
 
 instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
-  pretty (VJP lam args vec) =
+  pretty (VJP args vec lam) =
     "vjp"
       <> parens
         ( PP.align $
-            pretty lam
-              <> comma
-                </> PP.braces (commasep $ map pretty args)
-              <> comma
-                </> PP.braces (commasep $ map pretty vec)
+            PP.braces (commasep $ map pretty args)
+              <> comma </> PP.braces (commasep $ map pretty vec)
+              <> comma </> pretty lam
         )
-  pretty (JVP lam args vec) =
+  pretty (JVP args vec lam) =
     "jvp"
       <> parens
         ( PP.align $
-            pretty lam
-              <> comma
-                </> PP.braces (commasep $ map pretty args)
-              <> comma
-                </> PP.braces (commasep $ map pretty vec)
+            PP.braces (commasep $ map pretty args)
+              <> comma </> PP.braces (commasep $ map pretty vec)
+              <> comma </> pretty lam
         )
   pretty (Stream size arrs acc lam) =
     ppStream size arrs acc lam
