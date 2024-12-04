@@ -64,6 +64,7 @@ extra-source-files:
     rts/c/util.h
     rts/c/server.h
     rts/cuda/prelude.cu
+    rts/cuda/preludeMMM.cu
     rts/futhark-doc/style.css
     rts/javascript/server.js
     rts/javascript/values.js

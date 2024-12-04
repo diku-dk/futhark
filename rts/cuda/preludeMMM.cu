@@ -155,16 +155,44 @@ FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigne
     Tensor sA = make_tensor(make_smem_ptr(reinterpret_cast<ElmTypeA *>(A_mem)), sA_layout);            // (BLK_M,BLK_K)
     Tensor sB = make_tensor(make_smem_ptr(reinterpret_cast<ElmTypeB *>(B_mem)), sB_layout);
 
-    Tensor tCsA = thr_mma.partition_A(sA);
-    Tensor tCsB = thr_mma.partition_B(sB);
+    // Tensor tCsA = thr_mma.partition_A(sA);
+    // Tensor tCsB = thr_mma.partition_B(sB);
 
 //     TODO: use async?
 //     cp_async_wait<0>();
 //     __syncthreads();
     // TODO: add tDrD? try cooperative gemm
-    gemm(tiled_mma, tCsA, tCsB, tCrC);
+    // gemm(tiled_mma, tCsA, tCsB, tCrC);
 //     TODO: probably not needed since not reusing buffers
 //    __syncthreads();
+
+    TiledCopy smem_tiled_copy_A = make_tiled_copy_A(Copy_Atom<SM75_U32x4_LDSM_N, ElmTypeA>{}, tiled_mma);
+    TiledCopy smem_tiled_copy_B = make_tiled_copy_B(Copy_Atom<SM75_U16x8_LDSM_T, ElmTypeB>{}, tiled_mma);
+
+    // Create register tensors for the MMA to operate on
+    Tensor tCrA  = thr_mma.partition_fragment_A(sA);                    // (MMA,MMA_M,MMA_K)
+    Tensor tCrB  = thr_mma.partition_fragment_B(sB);                    // (MMA,MMA_N,MMA_K)
+
+    auto smem_thr_copy_A   = smem_tiled_copy_A.get_thread_slice(threadIdx.x);
+    Tensor tCsA            = smem_thr_copy_A.partition_S(sA);
+    Tensor tCrA_copy_view  = smem_thr_copy_A.retile_D(tCrA);
+
+    auto smem_thr_copy_B   = smem_tiled_copy_B.get_thread_slice(threadIdx.x);
+    Tensor tCsB            = smem_thr_copy_B.partition_S(sB);
+    Tensor tCrB_copy_view  = smem_thr_copy_B.retile_D(tCrB);
+
+    // Inner loop
+    constexpr int K_BLOCK_MAX = size<2>(tCrA);
+    CUTE_UNROLL
+    for (int k_block = 0; k_block < K_BLOCK_MAX; ++k_block)
+    {
+        // Copy shared -> registers
+        copy(smem_tiled_copy_A, tCsA(_,_,k_block), tCrA_copy_view(_,_,k_block));
+        copy(smem_tiled_copy_B, tCsB(_,_,k_block), tCrB_copy_view(_,_,k_block));
+
+        // GEMM on k_block in registers
+        gemm(tiled_mma, tCrA(_,_,k_block), tCrB(_,_,k_block), tCrC);
+    }
 
     for (int32_t i = 0; i < numRegs; i++)
         (*mem_out_p)[i] = C_mem[i];
