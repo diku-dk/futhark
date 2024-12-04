@@ -350,6 +350,7 @@ compileOpenCLAction fcfg mode outpath =
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- TODO: Add include directory to action
+-- The @futhark cudatc@ action.
 compileCUDATCAction ::
   FutharkConfig ->
   CompilerMode ->
@@ -360,8 +361,33 @@ compileCUDATCAction fcfg mode cuteincludepath outpath =
   Action
     { actionName = "Compile to CUDA with tensor cores",
       actionDescription = "Compile to CUDA using tensor cores where possible",
-      actionProcedure = actionProcedure (compileCUDAAction fcfg mode outpath)
+      -- TODO(k): Use custom compilation
+      actionProcedure = helper
     }
+    where
+      helper prog = do
+        cprog <- handleWarnings fcfg $ CCUDA.compileProgWithTC versionString prog
+        let cpath = outpath `addExtension` "c"
+            hpath = outpath `addExtension` "h"
+            jsonpath = outpath `addExtension` "json"
+            extra_options =
+              [ "-lcuda",
+                "-lcudart",
+                "-lnvrtc"              
+              ]
+        case mode of
+          ToLibrary -> do
+            let (header, impl, manifest) = CCUDA.asLibrary cprog
+            liftIO $ T.writeFile hpath $ cPrependHeader header
+            liftIO $ T.writeFile cpath $ cPrependHeader impl
+            liftIO $ T.writeFile jsonpath manifest
+          ToExecutable -> do
+            liftIO $ T.writeFile cpath $ cPrependHeader $ CCUDA.asExecutable cprog
+            runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+          ToServer -> do
+            liftIO $ T.writeFile cpath $ cPrependHeader $ CCUDA.asServer cprog
+            runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+
 
 -- | The @futhark cuda@ action.
 compileCUDAAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem

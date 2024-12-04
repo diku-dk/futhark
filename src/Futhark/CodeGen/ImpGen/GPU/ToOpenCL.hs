@@ -5,6 +5,7 @@
 module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
   ( kernelsToOpenCL,
     kernelsToCUDA,
+    kernelsToCUDATC,
     kernelsToHIP,
   )
 where
@@ -48,6 +49,11 @@ kernelsToHIP = translateGPU TargetHIP
 -- | Generate CUDA host and device code.
 kernelsToCUDA :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateGPU TargetCUDA
+
+-- TODO(k): kernelsToCUDATC
+-- | Like @kernelsToCUDA@, but also supports tensor cores
+kernelsToCUDATC :: ImpGPU.Program -> ImpOpenCL.Program
+kernelsToCUDATC = translateGPU TargetCUDATC
 
 -- | Generate OpenCL host and device code.
 kernelsToOpenCL :: ImpGPU.Program -> ImpOpenCL.Program
@@ -100,6 +106,8 @@ translateGPU target prog =
         }
   where
     genPrelude TargetOpenCL = genOpenClPrelude
+    -- TODO(k): Add TargetCUDATC
+    genPrelude TargetCUDATC = const genCUDATCPrelude
     genPrelude TargetCUDA = const genCUDAPrelude
     genPrelude TargetHIP = const genHIPPrelude
 
@@ -425,6 +433,7 @@ onKernel target kernel = do
             ( [[C.cparam|__local typename uint64_t* shared_mem_aligned|]],
               [C.citems|__local unsigned char* shared_mem = (__local unsigned char*)shared_mem_aligned;|]
             )
+          TargetCUDATC -> (mempty, mempty)
           TargetCUDA -> (mempty, mempty)
           TargetHIP -> (mempty, mempty)
 
@@ -563,7 +572,17 @@ genCUDAPrelude =
   "#define FUTHARK_CUDA\n"
     <> preludeCU
     <> commonPrelude
-    <> preludeMMM
+    -- TODO(k): remove this prelude
+    -- <> preludeMMM
+
+-- TODO(k): add prelude for tensor cores
+genCUDATCPrelude :: T.Text
+genCUDATCPrelude =
+  "#define FUTHARK_CUDA\n" 
+  <> "#define FUTHARK_CUDATC\n"
+  <> preludeCU
+  <> commonPrelude
+  <> preludeMMM -- Must come last
 
 genHIPPrelude :: T.Text
 genHIPPrelude =

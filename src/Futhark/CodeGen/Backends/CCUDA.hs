@@ -3,6 +3,7 @@
 -- | Code generation for CUDA.
 module Futhark.CodeGen.Backends.CCUDA
   ( compileProg,
+    compileProgWithTC,
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
@@ -17,6 +18,7 @@ import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.ImpGen.CUDA qualified as ImpGen
+import Futhark.CodeGen.ImpGen.CUDATC qualified as ImpGenTC
 import Futhark.CodeGen.RTS.C (backendsCudaH)
 import Futhark.IR.GPUMem hiding
   ( CmpSizeLe,
@@ -106,8 +108,6 @@ cudaMemoryType :: GC.MemoryType OpenCL ()
 cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
 cudaMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
 
--- TODO: Could we have another function that compiles to imp with
--- our modifications
 -- | Compile the program to C with calls to CUDA.
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
@@ -142,3 +142,42 @@ compileProg version prog = do
        #include <cuda_runtime.h>
        #include <nvrtc.h>
       |]
+
+-- TODO(k): Could we have another function that compiles to imp with
+-- our modifications
+-- | Like @compileProg@ but adds tensor core support.
+compileProgWithTC :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
+compileProgWithTC version prog = do
+  ( ws,
+    Program cuda_code cuda_prelude macros kernels types params failures prog'
+    ) <-
+    -- TODO(k): use our custom kernel compilation that adds tensor cores
+    ImpGenTC.compileProg prog
+  (ws,)
+    <$> GC.compileProg
+      "cudatc"
+      version
+      params
+      operations
+      (mkBoilerplate (cuda_prelude <> cuda_code) macros kernels types failures)
+      cuda_includes
+      (Space "device", [Space "device", DefaultSpace])
+      cliOptions
+      prog'
+  where
+    operations :: GC.Operations OpenCL ()
+    operations =
+      gpuOperations
+        { GC.opsMemoryType = cudaMemoryType,
+          GC.opsCritical =
+            ( [C.citems|CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cu_ctx));|],
+              [C.citems|CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cu_ctx));|]
+            )
+        }
+    cuda_includes =
+      [untrimming|
+       #include <cuda.h>
+       #include <cuda_runtime.h>
+       #include <nvrtc.h>
+      |]
+        
