@@ -21,7 +21,7 @@ import Futhark.Analysis.Proofs.Unify (Substitution, unify)
 import Futhark.Analysis.Proofs.Util (converge)
 import Futhark.SoP.SoP (SoP, justSym, sym2SoP)
 import Debug.Trace (traceM)
-import Futhark.Util.Pretty (docString, pretty)
+import Futhark.Util.Pretty (docString, pretty, docStringW)
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -165,4 +165,4 @@ cnfToList x = [x]
 algDebugPrettyM :: String -> SoP Symbol -> IndexFnM ()
 algDebugPrettyM msg x = do
   alg_x <- toAlgebra x
-  whenDebug $ traceM $ docString $ "🐛 " <> pretty msg <> " " <> pretty alg_x
+  whenDebug $ traceM $ docStringW 110 $ "    " <> pretty msg <> " " <> pretty alg_x

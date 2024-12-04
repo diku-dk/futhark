@@ -41,6 +41,7 @@ module Futhark.Util.Pretty
 
     -- * Operators
     (</>),
+    prettyStringW,
   )
 where
 
@@ -53,7 +54,6 @@ import Prettyprinter.Render.Terminal qualified
 import Prettyprinter.Render.Text qualified
 import Prettyprinter.Symbols.Ascii
 import System.IO (Handle, hIsTerminalDevice, hPutStrLn, stdout)
-import Prettyprinter.Util (reflow)
 
 -- | Print a doc with styling to the given file; stripping colors if
 -- the file does not seem to support such things.
@@ -99,6 +99,9 @@ docTextForHandle h d = do
 -- | Prettyprint a value to a 'String', appropriately wrapped.
 prettyString :: (Pretty a) => a -> String
 prettyString = T.unpack . prettyText
+
+prettyStringW :: (Pretty a) => Int -> a -> String
+prettyStringW w = T.unpack . docTextW w . pretty
 
 -- | Prettyprint a value to a 'String' on a single line.
 prettyStringOneLine :: (Pretty a) => a -> String

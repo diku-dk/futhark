@@ -2,7 +2,7 @@ module Futhark.Analysis.Proofs.Symbol where
 
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, justConstant, justSym)
-import Futhark.Util.Pretty (Pretty, apply, brackets, commasep, parens, pretty, prettyString, (<+>))
+import Futhark.Util.Pretty (Pretty, apply, brackets, commasep, parens, pretty, prettyString, (<+>), softline)
 import Language.Futhark (VName)
 
 data Symbol
@@ -123,4 +123,4 @@ instance Pretty Symbol where
       autoParens x@(Var _) = pretty x
       autoParens x@(Hole _) = pretty x
       autoParens x = parens (pretty x)
-      prettyOp s x y = pretty x <+> s <+> pretty y
+      prettyOp s x y = pretty x <> softline <> s <+> pretty y

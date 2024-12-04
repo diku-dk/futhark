@@ -275,7 +275,11 @@ idxSym False = Algebra.One
 -- as y[0] + Sum y[1:b] with fresh name y mapped to ⟦x[hole] + 1⟧.
 -- This is done so because the algebra layer needs to know about indexing.
 toAlgebra_ :: Symbol -> IndexFnM Algebra.Symbol
-toAlgebra_ (Var x) = pure $ Algebra.Var x
+toAlgebra_ (Var x) = do
+  inv_map <- inv <$> getUntrans
+  case inv_map M.!? Var x of
+    Nothing -> pure $ Algebra.Var x
+    Just alg_x -> pure alg_x
 toAlgebra_ (Hole _) = error "toAlgebra_ on Hole"
 toAlgebra_ (Sum j lb ub x) = do
   res <- search x

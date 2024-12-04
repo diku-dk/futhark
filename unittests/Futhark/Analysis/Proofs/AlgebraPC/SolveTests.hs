@@ -373,9 +373,10 @@ tests =
               m <- newNameFromString "m"
               vn_shp <- newNameFromString "shp"
               let shp = One vn_shp
-              -- \s -> ∑shpª₃₃₇₈₀[0 : -1 + s]
-              let shp_sum' s = sym2SoP $ Sum shp (int 0) (s .-. int 1)
-              let shp_sum = shp_sum' . sVar
+              -- \s -> ∑shpª₃₃₇₈₀[0 : s]
+              let shp_sum s = sym2SoP $ Sum shp (int 0) s
+              -- max{1} <= m₄₆₇₈
+              addRange (Var m) $ mkRangeLB (int 1)
               -- max{0} <= shapeª₃₃₇₈₀ <= min{}
               addRange (Var vn_shp) $ mkRangeLB (int 0)
               -- max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈}
@@ -383,8 +384,8 @@ tests =
               -- max{0, 1, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
               --   <= i₉₆₆₄
               --   <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
-              addRange (Var i) $ mkRange (int 1) (shp_sum m .-. int 1)
-              addRange (Var i) $ mkRange (shp_sum k) (shp_sum' (sVar k .+. int 1) .-. int 1)
+              addRange (Var i) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
               -- max{0} <= j₅₀₁₃₁ <= min{-1 + i₉₆₆₄}
               addRange (Var j) $ mkRange (int 0) (sVar i .-. int 1)
               -- c is disjoint with some other predicate d.
@@ -395,8 +396,210 @@ tests =
               addEquiv (Idx c (sVar i)) (int 1)
               addEquiv (Idx c (sVar j)) (int 1)
               -- \s -> ∑⟦cª₄₉₈₉₅⟧[∑shpª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈] : s]
-              let c_sum s = sym2SoP $ Sum c (shp_sum k) (sVar s)
+              let c_sum s = sym2SoP $ Sum c (shp_sum (sVar k .-. int 1)) (sVar s)
               c_sum i FM.$>$ c_sum j
+          )
+          @??= True,
+      testCase "Monotonicity 2 (from part2indicesL)" $
+        -- j < i, shp >= 0, c[i] = 0, c[j] = 0
+        -- =>  i₉₆₆₄ + ∑⟦cª₄₉₈₉₅⟧[1 + i₉₆₆₄ : -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]]
+        --       > j₅₀₂₈₂ + ∑⟦cª₄₉₈₉₅⟧[1 + j₅₀₂₈₂ : -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]]
+        --
+        --   Proof:
+        --     i₉₆₆₄
+        --       + ∑⟦cª₄₉₈₉₅⟧[1 + i₉₆₆₄ : -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]]
+        --       - ∑⟦cª₄₉₈₉₅⟧[1 + j₅₀₂₈₂ : -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]]
+        --       > j₅₀₂₈₂
+        --
+        --   Both sums satisfy "empty by atmost -1" given ranges on i₉₆₆₄ and j₅₀₂₈₂.
+        --     i₉₆₆₄ - ∑⟦cª₄₉₈₉₅⟧[1 + j₅₀₂₈₂ : i₉₆₆₄]
+        --       > j₅₀₂₈₂
+        --
+        --   Replace sum by its upper bound to minimize LHS:
+        --     i₉₆₆₄ - (i₉₆₆₄ - 1 + j₅₀₂₈₂) > j₅₀₂₈₂
+        --
+        --     1 + j₅₀₂₈₂ > j₅₀₂₈₂
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              k <- newNameFromString "k"
+              j <- newNameFromString "j"
+              m <- newNameFromString "m"
+              vn_shp <- newNameFromString "shp"
+              let shp = One vn_shp
+              -- \s -> ∑shpª₃₃₇₈₀[0 : s]
+              let shp_sum s = sym2SoP $ Sum shp (int 0) s
+              -- max{1} <= m₄₆₇₈
+              addRange (Var m) $ mkRangeLB (int 1)
+              -- max{0} <= shapeª₃₃₇₈₀ <= min{}
+              addRange (Var vn_shp) $ mkRangeLB (int 0)
+              -- max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈}
+              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
+              -- max{0, 1, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
+              --   <= i₉₆₆₄
+              --   <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
+              addRange (Var i) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              -- max{0} <= j₅₀₁₃₁ <= min{-1 + i₉₆₆₄}
+              addRange (Var j) $ mkRange (int 0) (sVar i .-. int 1)
+              -- c is disjoint with some other predicate d.
+              addProperty (Var c0) (Disjoint $ S.singleton d0)
+              addProperty (Var c0) Boolean
+              addRange (Var c0) $ mkRange (int 0) (int 1)
+              -- Add equivalences.
+              addEquiv (Idx c (sVar i)) (int 0)
+              addEquiv (Idx c (sVar j)) (int 0)
+              -- \idx -> ∑⟦cª₄₉₈₉₅⟧[1 + idx : ∑shpª₃₃₇₈₀[0 : k₄₉₈₄₈] - 1]
+              let c_sum s = sym2SoP $ Sum c (sVar s .+. int 1) (shp_sum (sVar k) .-. int 1)
+              (sVar i .+. c_sum i) FM.$>$ (sVar j .+. c_sum j)
+          )
+          @??= True,
+      testCase "In-bounds (from part2indicesL)" $
+        -- ∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈]
+        --     ≤ -1 + ∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈] + ∑⟦cª₄₉₈₉₅⟧[∑shape₄₆₇₉[0 : -1 + k₁] : i₄₉₉₁₂]
+        --
+        -- 1. Sum over cª₄₉₈₉₅ is non-empty due to bounds on i₄₉₉₁₂.
+        -- 2. We have cª₄₉₈₉₅[i₄₉₉₁₂] = 1.
+        -- 3. Hence -1 cancels out by peeling the sum.
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              k <- newNameFromString "k"
+              m <- newNameFromString "m"
+              vn_shp <- newNameFromString "shp"
+              let shp = One vn_shp
+              -- \s -> ∑shpª₃₃₇₈₀[0 : s]
+              let shp_sum s = sym2SoP $ Sum shp (int 0) s
+              -- max{1} <= m₄₆₇₈
+              addRange (Var m) $ mkRangeLB (int 1)
+              -- max{0} <= shapeª₃₃₇₈₀ <= min{}
+              addRange (Var vn_shp) $ mkRangeLB (int 0)
+              -- max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈}
+              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
+              -- max{0} <= cª₄₉₈₉₅ <= min{1}
+              addRange (Var c0) $ mkRange (int 0) (int 1)
+              -- max{0, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
+              --   <= i₉₆₆₄
+              --   <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
+              addRange (Var i) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              -- c is disjoint with some other predicate d.
+              addProperty (Var c0) (Disjoint $ S.singleton d0)
+              addProperty (Var c0) Boolean
+              -- Add equivalences.
+              addEquiv (Idx c (sVar i)) (int 1)
+              -- \idx -> ∑⟦cª₄₉₈₉₅⟧[∑shpª₃₃₇₈₀[0 : k₄₉₈₄₈ - 1] : idx]
+              let c_sum s = sym2SoP $ Sum c (shp_sum (sVar k .-. int 1)) (sVar s)
+              shp_sum (sVar k .-. int 1) FM.$<=$ (int (-1) .+. shp_sum (sVar k .-. int 1) .+. c_sum i)
+          )
+          @??= True,
+      testCase "In-bounds 2 (from part2indicesL)" $
+        -- -1 + ∑shape₄₆₇₉[0 : k₄₉₈₄₈]
+        --     > -1 + ∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈] + ∑⟦cª₄₉₈₉₅⟧[∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈] : i₄₉₉₁₂]
+        --
+        -- Proof:
+        -- ∑shape₄₆₇₉[0 : k₄₉₈₄₈] - ∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈]
+        --     > ∑⟦cª₄₉₈₉₅⟧[∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈] : i₄₉₉₁₂]
+        --
+        -- shape₄₆₇₉[k₄₉₈₄₈]
+        --     > ∑⟦cª₄₉₈₉₅⟧[∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈] : i₄₉₉₁₂]
+        --
+        -- Maximising sum (using minimum of upper bounds):
+        -- shape₄₆₇₉[k₄₉₈₄₈]
+        --     > ∑⟦cª₄₉₈₉₅⟧[∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈] : -1 + ∑shape₄₆₇₉[0 : k₄₉₈₄₈]]
+        --
+        -- Maximising RHS:
+        -- shape₄₆₇₉[k₄₉₈₄₈] > (-1 + ∑shape₄₆₇₉[0 : k₄₉₈₄₈]) - ∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈]
+        --
+        -- shape₄₆₇₉[k₄₉₈₄₈] > -1 + ∑shape₄₆₇₉[k₄₉₈₄₈ : k₄₉₈₄₈]
+        --
+        -- shape₄₆₇₉[k₄₉₈₄₈] > -1 + ∑shape₄₆₇₉[k₄₉₈₄₈]
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              k <- newNameFromString "k"
+              m <- newNameFromString "m"
+              vn_shp <- newNameFromString "shp"
+              let shp = One vn_shp
+              -- \s -> ∑shpª₃₃₇₈₀[0 : s]
+              let shp_sum s = sym2SoP $ Sum shp (int 0) s
+              -- max{1} <= m₄₆₇₈
+              addRange (Var m) $ mkRangeLB (int 1)
+              -- max{0} <= shapeª₃₃₇₈₀ <= min{}
+              addRange (Var vn_shp) $ mkRangeLB (int 0)
+              -- max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈}
+              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
+              -- max{0} <= cª₄₉₈₉₅ <= min{1}
+              addRange (Var c0) $ mkRange (int 0) (int 1)
+              -- max{0, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
+              --   <= i₉₆₆₄
+              --   <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
+              addRange (Var i) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              -- c is disjoint with some other predicate d.
+              addProperty (Var c0) (Disjoint $ S.singleton d0)
+              addProperty (Var c0) Boolean
+              -- Add equivalences.
+              addEquiv (Idx c (sVar i)) (int 1)
+              -- \idx -> ∑⟦cª₄₉₈₉₅⟧[∑shpª₃₃₇₈₀[0 : k₄₉₈₄₈ - 1] : idx]
+              let c_sum s = sym2SoP $ Sum c (shp_sum (sVar k .-. int 1)) (sVar s)
+              (int (-1) .+. shp_sum (sVar k)) FM.$>$ (int (-1) .+. shp_sum (sVar k .-. int 1) .+. c_sum i)
+          )
+          @??= True,
+      testCase "Sorting (from part2indicesL)" $
+        -- f: i₄₉₉₁₂ + ∑⟦cª₄₉₈₉₅⟧[1 + i₄₉₉₁₂ : -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]]
+        -- g: -1 + ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈] + ∑⟦cª₄₉₈₉₅⟧[∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈] : j₄₉₉₁₃]
+        --
+        -- Ranges: max{1} <= m₄₆₇₈ <= min{},
+        --         max{0} <= shapeª₃₃₇₈₀ <= min{},
+        --         max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈},
+        --         max{0} <= cª₄₉₈₉₅ <= min{1},
+        --         max{0} <= dª₄₉₉₀₅ <= min{1},
+        --         max{0} <= i₄₉₉₁₂ <= min{-1 + j₄₉₉₁₃},
+        --         max{0, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
+        --           <= j₄₉₉₁₃ <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
+        --
+        -- Equivalences: [ (⟦cª₄₉₈₉₅⟧[i₄₉₉₁₂], 0)
+        --               , (⟦cª₄₉₈₉₅⟧[j₄₉₉₁₃], 1)
+        --               , (⟦dª₄₉₉₀₅⟧[i₄₉₉₁₂], 1)
+        --               , (⟦dª₄₉₉₀₅⟧[j₄₉₉₁₃], 0) ]
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              j <- newNameFromString "j"
+              k <- newNameFromString "k"
+              m <- newNameFromString "m"
+              vn_shp <- newNameFromString "shp"
+              let shp = One vn_shp
+              -- \s -> ∑shpª₃₃₇₈₀[0 : s]
+              let shp_sum s = sym2SoP $ Sum shp (int 0) s
+              -- Ranges (in order)
+              addRange (Var m) $ mkRangeLB (int 1)
+              addRange (Var vn_shp) $ mkRangeLB (int 0)
+              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
+              addRange (Var c0) $ mkRange (int 0) (int 1)
+              addRange (Var d0) $ mkRange (int 0) (int 1)
+              addRange (Var i) $ mkRange (int 0) (sVar j .-. int 1)
+              addRange (Var j) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var j) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              -- Add equivalences.
+              addEquiv (Idx c (sVar i)) (int 0)
+              addEquiv (Idx c (sVar j)) (int 1)
+              addEquiv (Idx d (sVar i)) (int 1)
+              addEquiv (Idx d (sVar j)) (int 0)
+              -- Add properties.
+              addProperty (Var c0) (Disjoint $ S.singleton d0)
+              debugOn
+              debugPrintAlgEnv
+              -- \a b -> ∑⟦cª₄₉₈₉₅⟧[a : b]
+              let c_sum lb ub = sym2SoP $ Sum c lb ub
+              let f = sVar i .+. c_sum (sVar i .+. int 1) (int (-1) .+. shp_sum (sVar k))
+              let g = int (-1) .+. shp_sum (sVar k .-. int 1) .+. c_sum (shp_sum (sVar k .+. int 1)) (sVar j)
+              f FM.$>$ g
           )
           @??= True,
       --
