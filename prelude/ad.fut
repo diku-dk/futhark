@@ -95,18 +95,28 @@
 
 -- | Jacobian-Vector Product ("forward mode"), producing also the
 -- primal result as the first element of the result tuple.
-def jvp2 'a 'b (f: a -> b) (x: a) (x': a): (b, b) =
+def jvp2 'a 'b (f: a -> b) (x: a) (x': a) : (b, b) =
   intrinsics.jvp2 f x x'
 
 -- | Vector-Jacobian Product ("reverse mode"), producing also the
 -- primal result as the first element of the result tuple.
-def vjp2 'a 'b (f: a -> b) (x: a) (y': b): (b, a) =
+def vjp2 'a 'b (f: a -> b) (x: a) (y': b) : (b, a) =
   intrinsics.vjp2 f x y'
 
+-- | As `jvp2`, but accepts a vector of seed values. Semantically
+-- equivalent to mapping, but may be more efficient.
+def jvp2_vec 'a 'b [n] (f: a -> b) (x: a) (x': [n]a) : (b, [n]b) =
+  intrinsics.jvp2_vec f x x'
+
+-- | As `vjp2`, but accepts a vector of seed values. Semantically
+-- equivalent to mapping, but may be more efficient.
+def vjp2_vec 'a 'b [n] (f: a -> b) (x: a) (y': [n]b) : (b, [n]a) =
+  intrinsics.vjp2_vec f x y'
+
 -- | Jacobian-Vector Product ("forward mode").
-def jvp 'a 'b (f: a -> b) (x: a) (x': a): b =
+def jvp 'a 'b (f: a -> b) (x: a) (x': a) : b =
   (jvp2 f x x').1
 
 -- | Vector-Jacobian Product ("reverse mode").
-def vjp 'a 'b (f: a -> b) (x: a) (y': b): a =
+def vjp 'a 'b (f: a -> b) (x: a) (y': b) : a =
   (vjp2 f x y').1

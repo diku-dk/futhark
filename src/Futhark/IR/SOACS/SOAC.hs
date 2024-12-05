@@ -125,9 +125,9 @@ data SOAC rep
     -- The final lambda produces indexes and values for the 'HistOp's.
     Hist SubExp [VName] [HistOp rep] (Lambda rep)
   | -- FIXME: this should not be here
-    JVP [SubExp] [SubExp] (Lambda rep)
+    JVP Shape [SubExp] [SubExp] (Lambda rep)
   | -- FIXME: this should not be here
-    VJP [SubExp] [SubExp] (Lambda rep)
+    VJP Shape [SubExp] [SubExp] (Lambda rep)
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
@@ -399,14 +399,16 @@ mapSOACM ::
   SOACMapper frep trep m ->
   SOAC frep ->
   m (SOAC trep)
-mapSOACM tv (JVP args vec lam) =
+mapSOACM tv (JVP shape args vec lam) =
   JVP
-    <$> mapM (mapOnSOACSubExp tv) args
+    <$> mapM (mapOnSOACSubExp tv) shape
+    <*> mapM (mapOnSOACSubExp tv) args
     <*> mapM (mapOnSOACSubExp tv) vec
     <*> mapOnSOACLambda tv lam
-mapSOACM tv (VJP args vec lam) =
+mapSOACM tv (VJP shape args vec lam) =
   VJP
-    <$> mapM (mapOnSOACSubExp tv) args
+    <$> mapM (mapOnSOACSubExp tv) shape
+    <*> mapM (mapOnSOACSubExp tv) args
     <*> mapM (mapOnSOACSubExp tv) vec
     <*> mapOnSOACLambda tv lam
 mapSOACM tv (Stream size arrs accs lam) =
@@ -514,10 +516,10 @@ instance (ASTRep rep) => Rename (SOAC rep) where
 
 -- | The type of a SOAC.
 soacType :: (Typed (LParamInfo rep)) => SOAC rep -> [Type]
-soacType (JVP _ _ lam) =
-  lambdaReturnType lam ++ lambdaReturnType lam
-soacType (VJP _ _ lam) =
-  lambdaReturnType lam ++ map paramType (lambdaParams lam)
+soacType (JVP shape _ _ lam) =
+  lambdaReturnType lam ++ map (`arrayOfShape` shape) (lambdaReturnType lam)
+soacType (VJP shape _ _ lam) =
+  lambdaReturnType lam ++ map ((`arrayOfShape` shape) . paramType) (lambdaParams lam)
 soacType (Stream outersize _ accs lam) =
   map (substNamesInType substs) rtp
   where
@@ -570,10 +572,10 @@ mapHistOp f (HistOp w rf dests nes lam) =
   HistOp w rf dests nes $ f lam
 
 instance CanBeAliased SOAC where
-  addOpAliases aliases (JVP args vec lam) =
-    JVP args vec (Alias.analyseLambda aliases lam)
-  addOpAliases aliases (VJP args vec lam) =
-    VJP args vec (Alias.analyseLambda aliases lam)
+  addOpAliases aliases (JVP shape args vec lam) =
+    JVP shape args vec (Alias.analyseLambda aliases lam)
+  addOpAliases aliases (VJP shape args vec lam) =
+    VJP shape args vec (Alias.analyseLambda aliases lam)
   addOpAliases aliases (Stream size arr accs lam) =
     Stream size arr accs $ Alias.analyseLambda aliases lam
   addOpAliases aliases (Scatter len arrs dests lam) =
@@ -629,12 +631,12 @@ instance IsOp SOAC where
     where
       flattenBlocks (_, arr, ivs) =
         oneName arr <> mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
-  opDependencies (JVP args vec lam) =
+  opDependencies (JVP _ args vec lam) =
     mconcat $
       replicate 2 $
         lambdaDependencies mempty lam $
           zipWith (<>) (map depsOf' args) (map depsOf' vec)
-  opDependencies (VJP args vec lam) =
+  opDependencies (VJP _ args vec lam) =
     lambdaDependencies
       mempty
       lam
@@ -711,26 +713,32 @@ instance (RepTypes rep) => ST.IndexOp (SOAC rep) where
 
 -- | Type-check a SOAC.
 typeCheckSOAC :: (TC.Checkable rep) => SOAC (Aliases rep) -> TC.TypeM rep ()
-typeCheckSOAC (VJP args vec lam) = do
+typeCheckSOAC (VJP shape args vec lam) = do
+  mapM_ (TC.require [Prim int64]) shape
   args' <- mapM TC.checkArg args
   TC.checkLambda lam $ map TC.noArgAliases args'
   vec_ts <- mapM TC.checkSubExp vec
-  unless (vec_ts == lambdaReturnType lam) $
+  unless (vec_ts == map (`arrayOfShape` shape) (lambdaReturnType lam)) $
     TC.bad . TC.TypeError . docText $
       "Return type"
         </> PP.indent 2 (pretty (lambdaReturnType lam))
-        </> "does not match type of seed vector"
+        </> "inconsistent with type of seed vector"
         </> PP.indent 2 (pretty vec_ts)
-typeCheckSOAC (JVP args vec lam) = do
+        </> "with shape"
+        </> PP.indent 2 (pretty shape)
+typeCheckSOAC (JVP shape args vec lam) = do
+  mapM_ (TC.require [Prim int64]) shape
   args' <- mapM TC.checkArg args
   TC.checkLambda lam $ map TC.noArgAliases args'
   vec_ts <- mapM TC.checkSubExp vec
-  unless (vec_ts == map TC.argType args') $
+  unless (vec_ts == map ((`arrayOfShape` shape) . TC.argType) args') $
     TC.bad . TC.TypeError . docText $
       "Parameter type"
         </> PP.indent 2 (pretty $ map TC.argType args')
         </> "does not match type of seed vector"
         </> PP.indent 2 (pretty vec_ts)
+        </> "with shape"
+        </> PP.indent 2 (pretty shape)
 typeCheckSOAC (Stream size arrexps accexps lam) = do
   TC.require [Prim int64] size
   accargs <- mapM TC.checkArg accexps
@@ -891,10 +899,10 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
       <> " wrong for given scan and reduction functions."
 
 instance RephraseOp SOAC where
-  rephraseInOp r (VJP args vec lam) =
-    VJP args vec <$> rephraseLambda r lam
-  rephraseInOp r (JVP args vec lam) =
-    JVP args vec <$> rephraseLambda r lam
+  rephraseInOp r (VJP shape args vec lam) =
+    VJP shape args vec <$> rephraseLambda r lam
+  rephraseInOp r (JVP shape args vec lam) =
+    JVP shape args vec <$> rephraseLambda r lam
   rephraseInOp r (Stream w arrs acc lam) =
     Stream w arrs acc <$> rephraseLambda r lam
   rephraseInOp r (Scatter w arrs dests lam) =
@@ -916,9 +924,9 @@ instance RephraseOp SOAC where
       onRed (Reduce comm op nes) = Reduce comm <$> rephraseLambda r op <*> pure nes
 
 instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
-  opMetrics (VJP _ _ lam) =
+  opMetrics (VJP _ _ _ lam) =
     inside "VJP" $ lambdaMetrics lam
-  opMetrics (JVP _ _ lam) =
+  opMetrics (JVP _ _ _ lam) =
     inside "JVP" $ lambdaMetrics lam
   opMetrics (Stream _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
@@ -933,19 +941,21 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
       mapM_ (lambdaMetrics . redLambda) reds
 
 instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
-  pretty (VJP args vec lam) =
+  pretty (VJP shape args vec lam) =
     "vjp"
       <> parens
         ( PP.align $
-            PP.braces (commasep $ map pretty args)
+            pretty shape
+              <> comma </> PP.braces (commasep $ map pretty args)
               <> comma </> PP.braces (commasep $ map pretty vec)
               <> comma </> pretty lam
         )
-  pretty (JVP args vec lam) =
+  pretty (JVP shape args vec lam) =
     "jvp"
       <> parens
         ( PP.align $
-            PP.braces (commasep $ map pretty args)
+            pretty shape
+              <> comma </> PP.braces (commasep $ map pretty args)
               <> comma </> PP.braces (commasep $ map pretty vec)
               <> comma </> pretty lam
         )

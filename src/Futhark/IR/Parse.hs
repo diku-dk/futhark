@@ -798,7 +798,9 @@ pSOAC pr =
     pVJP =
       parens $
         SOAC.VJP
-          <$> braces (pSubExp `sepBy` pComma)
+          <$> pShape
+          <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
@@ -806,7 +808,9 @@ pSOAC pr =
     pJVP =
       parens $
         SOAC.JVP
-          <$> braces (pSubExp `sepBy` pComma)
+          <$> pShape
+          <* pComma
+          <*> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma

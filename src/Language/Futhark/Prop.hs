@@ -953,6 +953,34 @@ intrinsics =
                   $ RetType []
                   $ Scalar
                   $ tupleRecord [Scalar $ t_b Nonunique, Scalar $ t_a Nonunique]
+              ),
+              ( "jvp2_vec",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_n]
+                  [ Scalar (t_a mempty) `arr` Scalar (t_b Nonunique),
+                    Scalar (t_a Observe),
+                    array_a Observe $ shape [n]
+                  ]
+                  $ RetType []
+                  $ Scalar
+                  $ tupleRecord
+                    [ Scalar $ t_b Nonunique,
+                      array_b Unique $ shape [n]
+                    ]
+              ),
+              ( "vjp2_vec",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_n]
+                  [ Scalar (t_a mempty) `arr` Scalar (t_b Nonunique),
+                    Scalar (t_a Observe),
+                    array_b Observe $ shape [n]
+                  ]
+                  $ RetType []
+                  $ Scalar
+                  $ tupleRecord
+                    [ Scalar $ t_b Nonunique,
+                      array_a Unique $ shape [n]
+                    ]
               )
             ]
               ++
