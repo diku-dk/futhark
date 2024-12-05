@@ -1704,14 +1704,24 @@ isIntrinsicFunction qname args loc = do
     handleAccs _ _ = Nothing
 
     handleAD [f, x, v] fname
-      | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
+      | fname `elem` ["jvp2", "vjp2", "jvp2_vec", "vjp2_vec"] = Just $ \desc -> do
           x' <- internaliseExp "ad_x" x
           v' <- internaliseExp "ad_v" v
+          x_t <- subExpType $ head x'
+          v_t <- subExpType $ head v'
           lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
           fmap (map I.Var) . letTupExp desc . Op $
             case fname of
               "jvp2" -> JVP mempty x' v' lam
-              _ -> VJP mempty x' v' lam
+              "vjp2" -> VJP mempty x' v' lam
+              "jvp2_vec" ->
+                JVP (vecShape x_t v_t) x' v' lam
+              "vjp2_vec" ->
+                VJP (vecShape (head (lambdaReturnType lam)) v_t) x' v' lam
+              _ -> error "handleAD: not supposed to happen."
+      where
+        vecShape t1 t2 =
+          I.Shape $ take (I.arrayRank t2 - I.arrayRank t1) (I.arrayDims t2)
     handleAD _ _ = Nothing
 
     handleRest [a, si, v] "scatter" = Just $ scatterF 1 a si v
