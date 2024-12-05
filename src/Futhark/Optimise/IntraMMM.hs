@@ -605,11 +605,9 @@ getOptimalWarps blockSize (InnerMMAMatch _ _ sizeM sizeN _) =
 getOptimalBlockSize :: InnerMMAMatch -> Int
 getOptimalBlockSize (InnerMMAMatch _ _ sizeM sizeN _sizeK) =
 --  TODO: Should also depend on types, check if this is actually always optimal
---  TODO: maybe use 4096 instead?
-    let optimalElmsPerWarp = 2048 in
---    TODO: change back
+--  TODO: maybe use 2048 instead?
+    let optimalElmsPerWarp = 4096 in
     ((sizeM * sizeN) `divUp` optimalElmsPerWarp) * 32
---    128
 
 
 -- Pattern matching
