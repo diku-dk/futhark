@@ -107,6 +107,7 @@ data OpenCL
 data KernelTarget
   = TargetOpenCL
   | TargetCUDA
+  | TargetCUDATC -- Cuda with tensor core operations
   | TargetHIP
   deriving (Eq)
 

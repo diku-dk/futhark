@@ -1,19 +1,22 @@
 // start of prelude.cu
-
-#include <cute/tensor.hpp>
-
 #define SCALAR_FUN_ATTR __device__ static inline
 #define FUTHARK_FUN_ATTR __device__ static
 #define FUTHARK_F64_ENABLED
 
-// typedef char int8_t;
-// typedef short int16_t;
-// typedef int int32_t;
-// typedef long long int64_t;
-// typedef unsigned char uint8_t;
-// typedef unsigned short uint16_t;
-// typedef unsigned int uint32_t;
-// typedef unsigned long long uint64_t;
+// TODO(k): Should only be commented for CUDATC.
+#ifdef FUTHARK_CUDATC
+// The header defines these standard types
+#include <cute/tensor.hpp> 
+#else
+typedef char int8_t;
+typedef short int16_t;
+typedef int int32_t;
+typedef long long int64_t;
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
+#endif
 
 #define __global
 #define __local

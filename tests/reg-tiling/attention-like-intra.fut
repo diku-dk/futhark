@@ -31,9 +31,14 @@ def seq_acc2 (acc: *[m][n]f32) (C: *[m][n]f32) =
   in acc' with [row, col_offset:col_offset + 32] =
     tabulate 32 (\k -> acc'[row, col_offset + k] + C[row, col_offset + k])
 
-let seq_acc3 (acc: *[m][n]f32) (C: [m][n]f32) : *[m][n]f32 =
+let seq_acc3 (acc: *[m][n]f32) (C: *[m][n]f32) =
   loop acc': *[m][n]f32 = (acc : *[m][n]f32) for i < m do
       acc' with [i, :] = map2 (+) C[i] acc'[i]
+
+let seq_acc4 (acc: *[m][n]f32) (C: *[m][n]f32) =
+  loop acc': *[m][n]f32 = (acc : *[m][n]f32) for i < m do
+      acc' with [i, :] = map2 (+) C[i] acc'[i]
+
 
 def attention_like [q] (A: [m][k]f16) (B: [q][k][n]f16) : [m][n]f32 =
   -- Copy to shared
@@ -42,15 +47,11 @@ def attention_like [q] (A: [m][k]f16) (B: [q][k][n]f16) : [m][n]f32 =
            else replicate (m * k) 0.0f16 |> unflatten
 
   let acc_init : *[m][n]f32 = replicate (m * n) 0.0f32 |> unflatten in
-  loop (acc : *[m][n]f32) = (acc_init: *[m][n]f32) for i < q do
-    let B' = B[i]
-    let C : *[m][n]f32 = matmul A' B' in
-    copy C
-    -- seq_acc3 acc C
-    -- seq_acc acc C
-    -- if true then C else acc
-    -- map2 (map2 (+)) acc C
+  --let acc_init : *[m][k]f32 = replicate (m * k) 0.0f32 |> unflatten in
+  loop acc = (acc_init: *[m][n]f32) for i < q do
+    let B' = B[0]
+    let C : *[m][n]f32 = matmul A' B'
+    in seq_acc3 acc C
 
 def main [q][p] (A: [p][m][k]f16) (B: [p][q][k][n]f16) =
   #[incremental_flattening(only_intra)]map2 attention_like A B
---  map2 attention_like A B

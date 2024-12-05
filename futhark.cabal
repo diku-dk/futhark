@@ -64,6 +64,7 @@ extra-source-files:
     rts/c/util.h
     rts/c/server.h
     rts/cuda/prelude.cu
+    rts/cuda/preludeMMM.cu
     rts/futhark-doc/style.css
     rts/javascript/server.js
     rts/javascript/values.js
@@ -218,6 +219,7 @@ library
       Futhark.CodeGen.ImpCode.Sequential
       Futhark.CodeGen.ImpGen
       Futhark.CodeGen.ImpGen.CUDA
+      Futhark.CodeGen.ImpGen.CUDATC
       Futhark.CodeGen.ImpGen.GPU
       Futhark.CodeGen.ImpGen.GPU.Base
       Futhark.CodeGen.ImpGen.GPU.Block
