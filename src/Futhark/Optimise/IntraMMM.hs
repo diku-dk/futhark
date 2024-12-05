@@ -517,7 +517,7 @@ transformOp op = pure op
 transformSegOp :: SegOp SegLevel GPU -> IntraMMMMonad (SegOp SegLevel GPU)
 transformSegOp sOp@(SegMap
     (SegBlock SegNoVirt (Just (KernelGrid (Count numBlocks) (Count _blockSize))))
-    space@(SegSpace _ [_blockInfo])
+    space@(SegSpace _ _)
     ts
     body@(KernelBody _ stms _)
   ) = do
