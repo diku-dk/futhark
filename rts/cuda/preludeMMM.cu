@@ -45,26 +45,26 @@ struct get_mma_config<half_t, half_t, float, SizeM, SizeN, WarpsM, WarpsN>{
     >;
 };
 
-template<class SizeY, class SizeX, class Swizzle, class Majorness>
+template<class SizeY, class SizeX, class Swizzle, class Majorness, int shift_len>
 struct get_layout_config {};
 
-template<class SizeY, class SizeX>
-struct get_layout_config<SizeY, SizeX, _1, LayoutRight>{
-    using SharedLayout = ComposedLayout<Swizzle<3, 3>, _0, Layout<Shape<SizeY, SizeX>, Stride<SizeX, _1>>>;
+template<class SizeY, class SizeX, int shift_len>
+struct get_layout_config<SizeY, SizeX, _1, LayoutRight, shift_len>{
+    using SharedLayout = ComposedLayout<Swizzle<3, 3, shift_len>, _0, Layout<Shape<SizeY, SizeX>, Stride<SizeX, _1>>>;
 };
 
-template<class SizeY, class SizeX>
-struct get_layout_config<SizeY, SizeX, _0, LayoutRight>{
+template<class SizeY, class SizeX, int shift_len>
+struct get_layout_config<SizeY, SizeX, _0, LayoutRight, shift_len>{
     using SharedLayout = Layout<Shape<SizeY, SizeX>, Stride<SizeX, _1>>;
 };
 
-template<class SizeY, class SizeX>
-struct get_layout_config<SizeY, SizeX, _1, LayoutLeft>{
-    using SharedLayout = ComposedLayout<Swizzle<3, 3>, _0, Layout<Shape<SizeY, SizeX>, Stride<_1, SizeY>>>;
+template<class SizeY, class SizeX, int shift_len>
+struct get_layout_config<SizeY, SizeX, _1, LayoutLeft, shift_len>{
+    using SharedLayout = ComposedLayout<Swizzle<3, 3, shift_len>, _0, Layout<Shape<SizeY, SizeX>, Stride<_1, SizeY>>>;
 };
 
-template<class SizeY, class SizeX>
-struct get_layout_config<SizeY, SizeX, _0, LayoutLeft>{
+template<class SizeY, class SizeX, int shift_len>
+struct get_layout_config<SizeY, SizeX, _0, LayoutLeft, shift_len>{
     using SharedLayout = Layout<Shape<SizeY, SizeX>, Stride<_1, SizeY>>;
 };
 
@@ -89,7 +89,12 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigne
       constexpr int threadsX = SizeX{} / elmsPerLoad;
       constexpr int threadsY = (WarpsM{} * WarpsN{} * 32) / threadsX;
 
-      auto s_layout = composition(Swizzle<3, 3>{}, make_layout(Shape<SizeY, SizeX>{}, LayoutRight{}));
+      constexpr unsigned int sizeXunsigned = SizeX{};
+      constexpr unsigned int shift_len = max(bit_width(sizeXunsigned) - 4, _3{});
+
+      using LayoutConfig = get_layout_config<SizeY, SizeX, _1, LayoutRight, shift_len>;
+      typename LayoutConfig::SharedLayout s_layout;
+
       auto g_layout = make_layout(Shape<SizeY, SizeX>{}, LayoutRight{});
 
       TiledCopy copy_global_shared = make_tiled_copy(Copy_Atom<CopyOpGlobalShared, ElmType>{},
@@ -162,8 +167,14 @@ FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigne
     using MMAConfig = get_mma_config<ElmTypeA, ElmTypeB, ElmTypeC, SizeM, SizeN, WarpsM, WarpsN>;
     typename MMAConfig::TiledMMA tiled_mma;
 
-    using ALayoutConfig = get_layout_config<SizeM, SizeK, ASwizzled, LayoutRight>;
-    using BLayoutConfig = get_layout_config<SizeN, SizeK, BSwizzled, LayoutLeft>;
+    constexpr unsigned int sizeKunsigned = SizeK{};
+    constexpr unsigned int shift_lenK = max(bit_width(sizeKunsigned) - 4, _3{});
+
+    constexpr unsigned int sizeNunsigned = SizeN{};
+    constexpr unsigned int shift_lenN = max(bit_width(sizeNunsigned) - 4, _3{});
+
+    using ALayoutConfig = get_layout_config<SizeM, SizeK, ASwizzled, LayoutRight, shift_lenK>;
+    using BLayoutConfig = get_layout_config<SizeN, SizeK, BSwizzled, LayoutLeft, shift_lenN>;
     typename ALayoutConfig::SharedLayout sA_layout;
     typename BLayoutConfig::SharedLayout sB_layout;
 
