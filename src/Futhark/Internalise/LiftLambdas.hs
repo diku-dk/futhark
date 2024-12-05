@@ -6,6 +6,7 @@ module Futhark.Internalise.LiftLambdas (transformProg) where
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
+import Data.Bitraversable
 import Data.Foldable
 import Data.List (partition)
 import Data.Map.Strict qualified as M
@@ -144,6 +145,12 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
 transformSubExps :: ASTMapper LiftM
 transformSubExps = identityMapper {mapOnExp = transformExp}
 
+transformType :: TypeBase Exp u -> LiftM (TypeBase Exp u)
+transformType = bitraverse transformExp pure
+
+transformPat :: PatBase Info VName (TypeBase Exp u) -> LiftM (PatBase Info VName (TypeBase Exp u))
+transformPat = traverse transformType
+
 transformExp :: Exp -> LiftM Exp
 transformExp (AppExp (LetFun fname (tparams, params, _, Info ret, funbody) body _) _) = do
   funbody' <- bindingParams (map typeParamName tparams) params $ transformExp funbody
@@ -156,8 +163,9 @@ transformExp e@(Lambda params body _ (Info ret) _) = do
   liftFunction fname [] params ret body' <*> pure (typeOf e)
 transformExp (AppExp (LetPat sizes pat e body loc) appres) = do
   e' <- transformExp e
-  body' <- bindingLetPat (map sizeName sizes) pat $ transformExp body
-  pure $ AppExp (LetPat sizes pat e' body' loc) appres
+  pat' <- transformPat pat
+  body' <- bindingLetPat (map sizeName sizes) pat' $ transformExp body
+  pure $ AppExp (LetPat sizes pat' e' body' loc) appres
 transformExp (AppExp (Match e cases loc) appres) = do
   e' <- transformExp e
   cases' <- mapM transformCase cases
@@ -173,10 +181,11 @@ transformExp (AppExp (Loop sizes pat args form body loc) appres) = do
     form' <- astMap transformSubExps form
     body' <- bindingForm form' $ transformExp body
     pure $ AppExp (Loop sizes pat (LoopInitExplicit args') form' body' loc) appres
-transformExp e@(Var v (Info t) _) =
+transformExp (Var v (Info t) loc) = do
+  t' <- transformType t
   -- Note that function-typed variables can only occur in expressions,
   -- not in other places where VNames/QualNames can occur.
-  asks $ maybe e ($ t) . M.lookup (qualLeaf v) . envReplace
+  asks $ maybe (Var v (Info t') loc) ($ t') . M.lookup (qualLeaf v) . envReplace
 transformExp e = astMap transformSubExps e
 
 transformValBind :: ValBind -> LiftM ()

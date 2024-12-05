@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   ranges with start==end and negative step size, e.g. `1..0...1`
   produces `[1]` rather than an invalid range error.
 
+* Inconsistent handling of types in lambda lifting (#2197).
+
 ## [0.25.24]
 
 ### Added
