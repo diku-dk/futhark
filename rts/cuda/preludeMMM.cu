@@ -13,25 +13,24 @@ struct convert_type<f16> {
 template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class WarpsM, class WarpsN>
 struct get_mma_config {};
 
+// TODO: add fallback FMA?
+
 template<class SizeM, class SizeN, class WarpsM, class WarpsN>
 struct get_mma_config<half_t, half_t, half_t, SizeM, SizeN, WarpsM, WarpsN> {
-// TODO: should depend on type and arch
+    // TODO: should depend on type and arch
     using MMATraits = MMA_Traits<SM80_16x8x16_F16F16F16F16_TN>;
     using MMATile = Tile<Int<16 * WarpsM{}>, Int<16 * WarpsN{}>, _16>;
 
     using TiledMma = TiledMMA<
-    //    MMA_Atom<UniversalFMA<half_t>>,
-    //    Layout<Shape<_4,_8,_1>>,
         MMA_Atom<MMATraits>,
         Layout<Shape<WarpsM,WarpsN,_1>>,
         MMATile
     >;
 };
 
-
 template<class SizeM, class SizeN, class WarpsM, class WarpsN>
 struct get_mma_config<half_t, half_t, float, SizeM, SizeN, WarpsM, WarpsN>{
-// TODO: should depend on type and arch
+    // TODO: should depend on type and arch
     using MMATraits = MMA_Traits<SM80_16x8x16_F32F16F16F32_TN>;
     using MMATile = Tile<Int<16 * WarpsM{}>, Int<16 * WarpsN{}>, _16>;
 
@@ -40,6 +39,29 @@ struct get_mma_config<half_t, half_t, float, SizeM, SizeN, WarpsM, WarpsN>{
         Layout<Shape<WarpsM,WarpsN,_1>>,
         MMATile
     >;
+};
+
+template<class SizeY, class SizeX, class Swizzle, class Majorness>
+struct get_layout_config {};
+
+template<class SizeY, class SizeX>
+struct get_layout_config<SizeY, SizeX, _1, LayoutRight>{
+    using SharedLayout = ComposedLayout<Swizzle<3, 3>, _0, Layout<Shape<SizeY, SizeX>, Stride<SizeX, _1>>>;
+};
+
+template<class SizeY, class SizeX>
+struct get_layout_config<SizeY, SizeX, _0, LayoutRight>{
+    using SharedLayout = Layout<Shape<SizeY, SizeX>, Stride<SizeX, _1>>;
+};
+
+template<class SizeY, class SizeX>
+struct get_layout_config<SizeY, SizeX, _1, LayoutLeft>{
+    using SharedLayout = ComposedLayout<Swizzle<3, 3>, _0, Layout<Shape<SizeY, SizeX>, Stride<_1, SizeY>>>;
+};
+
+template<class SizeY, class SizeX>
+struct get_layout_config<SizeY, SizeX, _0, LayoutLeft>{
+    using SharedLayout = Layout<Shape<SizeY, SizeX>, Stride<_1, SizeY>>;
 };
 
 
@@ -63,11 +85,10 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigne
       constexpr int threadsX = SizeX{} / elmsPerLoad;
       constexpr int threadsY = (WarpsM{} * WarpsN{} * 32) / threadsX;
 
-// TODO: change back or ensure we can always swizzle
+      // TODO: change back or ensure we can always swizzle
       auto s_layout = composition(Swizzle<3, 3>{}, make_layout(Shape<SizeY, SizeX>{}, LayoutRight{}));
-//       auto s_layout = make_layout(Shape<SizeY, SizeX>{}, LayoutRight{});
-      //     TODO: change if swizzling
-      auto g_layout = s_layout;
+      // auto s_layout = make_layout(Shape<SizeY, SizeX>{}, LayoutRight{});
+      auto g_layout = make_layout(Shape<SizeY, SizeX>{}, LayoutRight{});
 
       TiledCopy copy_global_shared = make_tiled_copy(Copy_Atom<CopyOpGlobalShared, ElmType>{},
           make_layout(Shape<Int<threadsY>, Int<threadsX>>{}, LayoutRight{}),
@@ -75,7 +96,6 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigne
       );
 
       Tensor s = make_tensor(make_smem_ptr(reinterpret_cast<ElmType *>(shared_mem)), s_layout);
-  //     TODO: blockIdx.x should be arg
       Tensor g = make_tensor(make_gmem_ptr(&reinterpret_cast<ElmType *>(global_mem)[offset]), g_layout);
 
       ThrCopy thr_copy_global_shared = copy_global_shared.get_slice(flatThreadIdx);
@@ -84,11 +104,11 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigne
 
       copy(copy_global_shared, tAgA, tAsA);
 
-  //     TODO: use async?
+      // TODO: use async?
       cp_async_fence();
     }
 
-//     TODO: should ideally be just before gemm, could do in function
+    // TODO: should ideally be just before gemm, could do in function
     cp_async_wait<0>();
     __syncthreads();
 }
@@ -100,7 +120,6 @@ FUTHARK_FUN_ATTR void futrts_copyRegistersShared(unsigned char **mem_out_p, ElmT
 
     int flatThreadIdx = threadIdx.z * blockDim.y * blockDim.x + threadIdx.y * blockDim.x + threadIdx.x;
 
-// TODO: handle non flat indices
     if (flatThreadIdx < WarpsM{} * WarpsN{} * 32) {
 
         using ElmTypeA = typename convert_type<ElmTypeAIn>::TypeOut;
@@ -110,7 +129,6 @@ FUTHARK_FUN_ATTR void futrts_copyRegistersShared(unsigned char **mem_out_p, ElmT
         using MMAConfig = get_mma_config<ElmTypeA, ElmTypeB, ElmTypeC, SizeM, SizeN, WarpsM, WarpsN>;
         using TiledMMA_ = typename MMAConfig::TiledMma;
 
-    //    TODO: try tiledcopy instead?
         auto s_layout = make_layout(Shape<SizeM, SizeN>{}, LayoutRight{});
         TiledMMA_ tiled_mma;
 
@@ -120,18 +138,18 @@ FUTHARK_FUN_ATTR void futrts_copyRegistersShared(unsigned char **mem_out_p, ElmT
         Tensor tCrC = make_tensor(make_rmem_ptr(reinterpret_cast<ElmTypeC *>(registers_mem)), rC_layout);
 
         Tensor s = make_tensor(make_gmem_ptr(reinterpret_cast<ElmTypeC *>(shared_mem)), s_layout);
-        Tensor tCgC = thr_mma.partition_C(s);
+        Tensor tCsC = thr_mma.partition_C(s);
 
-    //  TODO: take as input
+        //  TODO: take as input, or just use copy instead?
         auto alpha = _1{};
         auto beta = _0{};
-        axpby(alpha, tCrC, beta, tCgC);
+        axpby(alpha, tCrC, beta, tCsC);
     }
     __syncthreads();
 }
 
-template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class SizeK, class WarpsM, class WarpsN, int numRegs>
-FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigned char *A_mem, unsigned char *B_mem, ElmTypeCIn (&C_mem)[numRegs], ElmTypeAIn, ElmTypeBIn, SizeM, SizeN, SizeK, WarpsM, WarpsN)
+template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class SizeK, class WarpsM, class WarpsN, class ASwizzled, class BSwizzled, int numRegs>
+FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigned char *A_mem, unsigned char *B_mem, ElmTypeCIn (&C_mem)[numRegs], ElmTypeAIn, ElmTypeBIn, SizeM, SizeN, SizeK, WarpsM, WarpsN, ASwizzled, BSwizzled)
 {
     int flatThreadIdx = threadIdx.z * blockDim.y * blockDim.x + threadIdx.y * blockDim.x + threadIdx.x;
 
@@ -143,10 +161,16 @@ FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigne
     using TiledMMA_ = typename MMAConfig::TiledMma;
 
 // TODO: change back or ensure we can always swizzle
-    auto sA_layout = composition(Swizzle<3, 3>{}, make_layout(Shape<SizeM, SizeK>{}, LayoutRight{}));
-    auto sB_layout = composition(Swizzle<3, 3>{}, make_layout(Shape<SizeN, SizeK>{}, LayoutLeft{}));
+//     auto sA_layout = composition(Swizzle<3, 3>{}, make_layout(Shape<SizeM, SizeK>{}, LayoutRight{}));
+//     auto sB_layout = composition(Swizzle<3, 3>{}, make_layout(Shape<SizeN, SizeK>{}, LayoutLeft{}));
 //     auto sA_layout = make_layout(Shape<SizeM, SizeK>{}, LayoutRight{});
 //     auto sB_layout = make_layout(Shape<SizeN, SizeK>{}, LayoutLeft{});
+
+    using ALayoutConfig = get_layout_config<SizeM, SizeK, ASwizzled, LayoutRight>;
+    using BLayoutConfig = get_layout_config<SizeN, SizeK, BSwizzled, LayoutLeft>;
+    typename ALayoutConfig::SharedLayout sA_layout;
+    typename BLayoutConfig::SharedLayout sB_layout;
+
     auto sC_layout = make_layout(Shape<SizeM, SizeN>{}, LayoutRight{});
 
     TiledMMA_ tiled_mma;
@@ -162,7 +186,7 @@ FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigne
 //     Tensor tCsA = thr_mma.partition_A(sA);
 //     Tensor tCsB = thr_mma.partition_B(sB);
 
-// TODO: only use LDSM with f16
+    // TODO: only use LDSM with f16
     //    TODO: move to mma config
     // For LDSM copies
     TiledCopy smem_tiled_copy_A = make_tiled_copy_A(Copy_Atom<SM75_U32x4_LDSM_N, ElmTypeA>{}, tiled_mma);

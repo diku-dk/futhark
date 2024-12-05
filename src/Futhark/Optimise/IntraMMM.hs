@@ -114,6 +114,8 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
   kParam <- newParam "K" $ Prim int64
   mWarpsParam <- newParam "mWarps" $ Prim int64
   nWarpsParam <- newParam "nWarps" $ Prim int64
+  aSwizzledParam <- newParam "aSwizzledParam" $ Prim int64
+  bSwizzledParam <- newParam "bSwizzledParam" $ Prim int64
 
   fName <- fmap (nameFromString . prettyString) $ newName $ VName gemmName 0
   let funParams =
@@ -126,7 +128,9 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
           nParam,
           kParam,
           mWarpsParam,
-          nWarpsParam
+          nWarpsParam,
+          aSwizzledParam,
+          bSwizzledParam
         ]
   pure
     ( GemmSignature elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs,
@@ -254,6 +258,7 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
   let blockSize = warpsM * warpsN * 32
   let cValsPerThread = sizeM * sizeN `div` blockSize
 
+-- TODO: remove
   traceM $ "blockSize: " ++ show blockSize
   traceM $ "actualBlockSize: " ++ show actualBlockSize
   traceM $ "warpsM: " ++ show warpsM
@@ -385,7 +390,9 @@ buildMMM resName actualBlockSize match@(InnerMMAMatch kernelBodyMatch ne sizeM s
               (mkInt64Const sizeN, ObservePrim),
               (mkInt64Const sizeK, ObservePrim),
               (mkInt64Const warpsM, ObservePrim),
-              (mkInt64Const warpsN, ObservePrim)
+              (mkInt64Const warpsN, ObservePrim),
+              (mkInt64Const 1, ObservePrim),
+              (mkInt64Const 1, ObservePrim)
             ]
       let mmmRets =
             [ ( Array
@@ -598,10 +605,11 @@ getOptimalWarps blockSize (InnerMMAMatch _ _ sizeM sizeN _) =
 getOptimalBlockSize :: InnerMMAMatch -> Int
 getOptimalBlockSize (InnerMMAMatch _ _ sizeM sizeN _sizeK) =
 --  TODO: Should also depend on types, check if this is actually always optimal
+--  TODO: maybe use 4096 instead?
     let optimalElmsPerWarp = 2048 in
 --    TODO: change back
---    ((sizeM * sizeN) `divUp` optimalElmsPerWarp) * 32
-    128
+    ((sizeM * sizeN) `divUp` optimalElmsPerWarp) * 32
+--    128
 
 
 -- Pattern matching
@@ -802,7 +810,7 @@ data SpaceType = Device | Shared | Scalar
 
 -- TODO: use map?
 -- TODO: add mapping like ("gemm_123456", ["shared", "shared", "regs"]) to make general?
-type FixState = [(VName, VName)]
+type FixState = [(VName, (VName, Bool))]
 
 -- type FixMonad a = RWST FixEnv () FixState PassM a
 type FixMonad a = RWST FixEnv () FixState PassM a
@@ -848,33 +856,33 @@ fixParamsCopyGlobalShared (
 fixParamsCopyGlobalShared params = params
 
 fixParamsCopyRegistersShared :: [FParam GPUMem] -> [FParam GPUMem]
-fixParamsCopyRegistersShared [
-    Param attrs1 vName1 (MemMem (Space "device")),
-    Param attrs2 vName2 (MemMem (Space "device")),
-    p3@(Param _ _ (MemArray t shp _ (ArrayIn _ _))), p4, p5, p6, p7, p8, p9
-  ] =
+fixParamsCopyRegistersShared (
+    Param attrs1 vName1 (MemMem (Space "device")) :
+    Param attrs2 vName2 (MemMem (Space "device")) :
+    p3@(Param _ _ (MemArray t shp _ (ArrayIn _ _))) : rest
+  ) =
   let space = ScalarSpace (drop 1 $ shapeDims shp) t in
-  [
-    Param attrs1 vName1 (MemMem space),
-    Param attrs2 vName2 (MemMem (Space "shared")),
-    p3, p4, p5, p6, p7, p8, p9
-  ]
+  (
+    Param attrs1 vName1 (MemMem space) :
+    Param attrs2 vName2 (MemMem (Space "shared")) :
+    p3 : rest
+  )
 fixParamsCopyRegistersShared params = params
 
 fixParamsGemmFun :: [FParam GPUMem] -> [FParam GPUMem]
-fixParamsGemmFun [
-    Param attrs1 vName1 (MemMem (Space "device")),
-    Param attrs2 vName2 (MemMem (Space "device")),
-    Param attrs3 vName3 (MemMem (Space "device")),
-    p4, p5, p6@(Param _ _ (MemArray t shp _ (ArrayIn _ _))), p7, p8, p9, p10, p11, p12
-  ] =
+fixParamsGemmFun (
+    Param attrs1 vName1 (MemMem (Space "device")) :
+    Param attrs2 vName2 (MemMem (Space "device")) :
+    Param attrs3 vName3 (MemMem (Space "device")) :
+    p4 : p5 : p6@(Param _ _ (MemArray t shp _ (ArrayIn _ _))) : rest
+  ) =
   let space = ScalarSpace (shapeDims shp) t in
-  [
-      Param attrs1 vName1 (MemMem (Space "shared")),
-      Param attrs2 vName2 (MemMem (Space "shared")),
-      Param attrs3 vName3 (MemMem space),
-      p4, p5, p6, p7, p8, p9, p10, p11, p12
-    ]
+    (
+      Param attrs1 vName1 (MemMem (Space "shared")) :
+      Param attrs2 vName2 (MemMem (Space "shared")) :
+      Param attrs3 vName3 (MemMem space) :
+      p4 : p5 : p6 : rest
+    )
 fixParamsGemmFun params = params
 
 fixRetType :: SpaceType -> [(RetType GPUMem, RetAls)] -> [(RetType GPUMem, RetAls)]
@@ -909,7 +917,7 @@ fixStmt stm@(Let (Pat [PatElem resName (MemArray _ _ _ (ArrayIn resMem _))]) _ (
   case info of
     --    TODO: match more cases
     LetName (MemArray _ _ _ (ArrayIn inputMem _)) -> do
-      modify ([(resName, inputName), (resMem, inputMem)] <>)
+      modify ([(resName, (inputName, False)), (resMem, (inputMem, False))] <>)
       defaultFixStm stm
     _ -> defaultFixStm stm
 fixStmt (
@@ -921,7 +929,9 @@ fixStmt (
   (Apply fName args rets info)) | gemmName `isPrefixOfName` fName = do
   let space = ScalarSpace (shapeDims shp2) t2
   let newRets = fixRetType Scalar rets
-  newArgs <- mapM replaceArg args
+  (replacedArgs, removedCopy) <- fmap unzip $ mapM replaceArg args
+  let (removedAcopy : removedBcopy : _) = removedCopy
+  let newArgs = take (length replacedArgs - 2) replacedArgs <> [(mkInt64Const $ boolToInt $ not removedAcopy, ObservePrim), (mkInt64Const $ boolToInt $ not removedBcopy, ObservePrim)]
   pure $ oneStm $
     Let (Pat [
       PatElem vName1 (MemMem space),
@@ -939,33 +949,24 @@ fixStmt (
   let space = Space "shared"
 --  TODO: check if need to handle uniqueness/consumption
   let newRets = fixRetType Shared rets
-  newArgs <- mapM replaceArg args
+  (newArgs, _removedCopy) <- fmap unzip $ mapM replaceArg args
 --  TODO: check this, maybe use case instead
   let ((Var srcMemMem, _) : _ : (Var srcArray, _) : _restArgs) = newArgs
   srcMemInfo <- lookupInfo srcMemMem
   case srcMemInfo of
     LetName (MemMem srcMemSpace) | srcMemSpace == space ->
-      pure $ stmsFromList
-        [
-          Let (Pat [
-                PatElem vName1 (MemMem space)
-              ])
-              aux
-              $ BasicOp $ SubExp $ Var srcMemMem,
-          Let (Pat [
-                PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
-              ])
-              aux
-              $ BasicOp $ SubExp $ Var srcArray
-        ]
+--    TODO: try to replace Futhark copy global -> shared with ours in this case?
+--  Array is already in shared so add to replaceArgs map to remove call to copyGlobalShared
+      modify ([(vName2, (srcArray, True)), (vName1, (srcMemMem, True))]<>)
     _ ->
-      pure $ oneStm $
-        Let (Pat [
-          PatElem vName1 (MemMem space),
-          PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
-        ])
-        aux
-        $ Apply fName newArgs newRets info
+      pure ()
+  pure $ oneStm $
+    Let (Pat [
+      PatElem vName1 (MemMem space),
+      PatElem vName2 (MemArray t2 shp2 u2 (ArrayIn mName2 lmad2))
+    ])
+    aux
+    $ Apply fName newArgs newRets info
 -- TODO: check this
 fixStmt (
   Let (Pat [
@@ -976,7 +977,7 @@ fixStmt (
   (Apply fName args rets info)) | copyRegistersSharedName `isPrefixOfName` fName = do
   let space = Space "shared"
   let newRets = fixRetType Shared rets
-  newArgs <- mapM replaceArg args
+  (newArgs, _removedCopy) <- fmap unzip $ mapM replaceArg args
   pure $ oneStm $
     Let (Pat [
       PatElem vName1 (MemMem space),
@@ -992,16 +993,21 @@ defaultFixStm (Let pat aux e) = do
   pure $ oneStm $ Let pat aux e'
 
 
+boolToInt :: Bool -> Int
+boolToInt True = 1
+boolToInt False = 0
+
+
 -- TODO: this may be too aggressive
-replaceArg :: (SubExp, Diet) -> FixMonad (SubExp, Diet)
+replaceArg :: (SubExp, Diet) -> FixMonad ((SubExp, Diet), Bool)
 replaceArg (Var v, d) = do
   manifestMap <- get
   case lookup v manifestMap of
-    Just v' ->
-      pure (Var v', d)
+    Just (v', removedCopy) ->
+      pure ((Var v', d), removedCopy)
     Nothing ->
-      pure (Var v, d)
-replaceArg a = pure a
+      pure ((Var v, d), False)
+replaceArg a = pure (a, False)
 
 
 -- TODO: add stuff to scope in other places

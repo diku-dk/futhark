@@ -796,7 +796,7 @@ inKernelOperations env mode body =
           what_next <- whatNext
           GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
       | Just mmmName <- MMM.getMMMName fname = do
-        let numStaticArgs = if mmmName == MMM.gemmName then 5 else 4
+        let numStaticArgs = if mmmName == MMM.gemmName then 7 else 4
         let (dynamicArgs, staticArgs) = splitAt (length args - numStaticArgs) args
         let convertedArgs = dynamicArgs <> fmap templateStatic staticArgs
         let out_args = [[C.cexp|&$id:d|] | d <- dests]
