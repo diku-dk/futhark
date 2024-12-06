@@ -68,8 +68,9 @@ import Prelude hiding (div, rem)
 --   - A_II2 : [m]t; the "inner indices"; a mapping from element index
 --     to index within its corresponding segment.
 --
--- Some of these structures can be computed from each other, but
--- conceptually they all coexist.
+-- The arrays that are not the data array are collectively called the
+-- "structure arrays". All of the structure arrays can be computed
+-- from each other, but conceptually they all coexist.
 --
 -- Note that we only consider the *outer* dimension to be the
 -- "segments". Also, 't' may actually be an array itself (although in
