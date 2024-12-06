@@ -72,7 +72,7 @@ data DistStm = DistStm
 --
 -- Second is the name to which is should be bound.
 --
--- Third is the element type (i.e. excluding segments).
+-- Third is the element type (i.e. excluding shape of segments).
 type ResMap = M.Map ResTag ([DistInput], VName, Type)
 
 -- | The results of a map-distribution that were free or identity
@@ -105,13 +105,17 @@ instance Pretty DistStm where
   pretty (DistStm inputs res stm) =
     "let" <+> ppTuple' (map pretty res) <+> "=" </> indent 2 stm'
     where
-      res' = "return" <+> ppTuple' (map pretty res)
       stm' =
         "map"
           <+> nestedBlock
             "{"
             "}"
-            (stack (map onInput inputs ++ [pretty stm, res']))
+            ( stack $
+                map onInput inputs
+                  ++ [ pretty stm,
+                       "return" <+> ppTuple' (map pretty res)
+                     ]
+            )
       onInput (v, inp) =
         "for"
           <+> parens (pretty v <> colon <+> pretty (distInputType inp))
@@ -236,7 +240,8 @@ distributeMap outer_scope map_pat w arrs lam =
   let ((_, arrmap), param_inputs) =
         L.mapAccumL paramInput (ResTag 0, mempty) $
           zip (lambdaParams lam) arrs
-      (avail_inputs, stms) = distributeBody outer_scope w param_inputs $ lambdaBody lam
+      (avail_inputs, stms) =
+        distributeBody outer_scope w param_inputs $ lambdaBody lam
       resmap =
         resultMap avail_inputs stms map_pat $
           bodyResult (lambdaBody lam)

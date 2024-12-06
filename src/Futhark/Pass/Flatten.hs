@@ -1313,7 +1313,11 @@ transformProg prog = do
     mapM (liftFunDef $ scopeOf (progConsts prog)) $
       filter (isNothing . funDefEntryPoint) $
         progFuns prog
-  pure $ prog {progConsts = consts', progFuns = flatteningBuiltins <> lifted_funs <> funs'}
+  pure $
+    prog
+      { progConsts = consts',
+        progFuns = flatteningBuiltins <> lifted_funs <> funs'
+      }
 
 -- | Transform a SOACS program to a GPU program, using flattening.
 flattenSOACs :: Pass SOACS GPU
