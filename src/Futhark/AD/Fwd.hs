@@ -264,13 +264,13 @@ zeroFromSubExp (Var v) = do
   letExp "zero" $ zeroExp t
 
 fwdSOAC :: Pat Type -> StmAux () -> SOAC SOACS -> ADM ()
-fwdSOAC pat aux (Screma size xs (ScremaForm scs reds f)) = do
+fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds)) = do
   pat' <- bundleNewPat pat
   xs' <- bundleTangents xs
+  f' <- fwdLambda f
   scs' <- mapM fwdScan scs
   reds' <- mapM fwdRed reds
-  f' <- fwdLambda f
-  addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm scs' reds' f'
+  addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm f' scs' reds'
   where
     fwdScan :: Scan SOACS -> ADM (Scan SOACS)
     fwdScan sc = do
