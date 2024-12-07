@@ -422,6 +422,11 @@ fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
 fromArray v = error $ "Expected array value, but found: " <> show v
 
+project :: Name -> Value -> Value
+project f (ValueRecord fs)
+  | Just v' <- M.lookup f fs = v'
+project _ _ = error "Value does not have expected field."
+
 apply :: SrcLoc -> Env -> Value -> Value -> EvalM Value
 apply loc env (ValueFun f) v = stacking loc env (f v)
 apply _ _ f _ = error $ "Cannot apply non-function: " <> show f
@@ -1063,10 +1068,7 @@ eval _ (ProjectSection ks _ _) =
       | Just v' <- M.lookup f fs = pure v'
     walk _ _ = error "Value does not have expected field."
 eval env (Project f e _ _) = do
-  v <- eval env e
-  case v of
-    ValueRecord fs | Just v' <- M.lookup f fs -> pure v'
-    _ -> error "Value does not have expected field."
+  project f <$> eval env e
 eval env (Assert what e (Info s) loc) = do
   cond <- asBool <$> eval env what
   unless cond $ bad loc env s
@@ -1249,7 +1251,140 @@ breakOnNaN inputs result
 breakOnNaN _ _ =
   pure ()
 
--- | The initial environment contains definitions of the various intrinsic functions.
+getV :: PrimValue -> Maybe P.PrimValue
+getV (SignedValue x) = Just $ P.IntValue x
+getV (UnsignedValue x) = Just $ P.IntValue x
+getV (FloatValue x) = Just $ P.FloatValue x
+getV (BoolValue x) = Just $ P.BoolValue x
+
+putV :: P.PrimValue -> PrimValue
+putV (P.IntValue x) = SignedValue x
+putV (P.FloatValue x) = FloatValue x
+putV (P.BoolValue x) = BoolValue x
+putV P.UnitValue = BoolValue True
+
+getAD :: Value -> Maybe AD.ADValue
+getAD (ValuePrim v) = AD.Constant <$> getV v
+getAD (ValueAD d v) = Just $ AD.Variable d v
+getAD _ = Nothing
+
+putAD :: AD.ADValue -> Value
+putAD (AD.Variable d s) = ValueAD d s
+putAD (AD.Constant v) = ValuePrim $ putV v
+
+modifyValue :: (Num t) => (t -> Value -> Value) -> Value -> Value
+modifyValue f v = snd $ valueAccum (\a b -> (a + 1, f a b)) 0 v
+
+modifyValueM ::
+  (Num t, Monad m) =>
+  (t -> Value -> m Value) ->
+  Value ->
+  m Value
+modifyValueM f v = snd <$> valueAccumLM g 0 v
+  where
+    g a b = do
+      b' <- f a b
+      pure (a + 1, b')
+
+-- TODO: This could be much better. Currently, it is very inefficient
+-- Perhaps creating JVPValues could be abstracted into a function
+-- exposed by the AD module?
+doJVP2 :: Value -> Value -> Value -> EvalM Value
+doJVP2 f v s = do
+  -- Get the depth
+  depth <- length <$> stacktrace
+
+  -- Turn the seeds into a list of ADValues
+  let s' =
+        fromMaybe (error $ "jvp: invalid seeds " ++ show s) $
+          mapM getAD $
+            fst $
+              valueAccum (\a b -> (b : a, b)) [] s
+  -- Augment the values
+  let v' =
+        fromMaybe (error $ "jvp: invalid values " ++ show v) $
+          modifyValueM
+            ( \i lv -> do
+                lv' <- getAD lv
+                pure $ ValueAD depth . AD.JVP . AD.JVPValue lv' $ s' !! (length s' - 1 - i)
+            )
+            v
+
+  -- Run the function, and turn its outputs into a list of Values
+  o <- apply noLoc mempty f v'
+  let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
+
+  -- For each output..
+  let m =
+        fromMaybe (error "jvp: differentiation failed") $
+          forM o' $ \on -> case on of
+            -- If it is a JVP variable of the correct depth, return its primal and derivative
+            (ValueAD d (AD.JVP (AD.JVPValue pv dv))) | d == depth -> Just (putAD pv, putAD dv)
+            -- Otherwise, its partial derivatives are all 0
+            _ -> (on,) . ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD on
+
+  -- Extract the output values, and the partial derivatives
+  let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
+      od = modifyValue (\i _ -> snd $ m !! (length m - 1 - i)) o
+
+  -- Return a tuple of the output values, and partial derivatives
+  pure $ toTuple [ov, od]
+
+-- TODO: This could be much better. Currently, it is very inefficient
+-- Perhaps creating VJPValues could be abstracted into a function
+-- exposed by the AD module?
+doVJP2 :: Value -> Value -> Value -> EvalM Value
+doVJP2 f v s = do
+  -- Get the depth
+  depth <- length <$> stacktrace
+
+  -- Augment the values
+  let v' =
+        fromMaybe (error $ "vjp: invalid values " ++ show v) $
+          modifyValueM (\i lv -> ValueAD depth . AD.VJP . AD.VJPValue . AD.TapeID i <$> getAD lv) v
+  -- Turn the seeds into a list of ADValues
+  let s' =
+        fromMaybe (error $ "vjp: invalid seeds " ++ show s) $
+          mapM getAD $
+            fst $
+              valueAccum (\a b -> (b : a, b)) [] s
+
+  -- Run the function, and turn its outputs into a list of Values
+  o <- apply noLoc mempty f v'
+  let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
+
+  -- For each output..
+  let m =
+        fromMaybe (error "vjp: differentiation failed") $
+          forM (zip o' s') $ \(on, sn) -> case on of
+            -- If it is a VJP variable of the correct depth, run
+            -- deriveTape on it- and its corresponding seed
+            (ValueAD d (AD.VJP (AD.VJPValue t)))
+              | d == depth ->
+                  (putAD $ AD.tapePrimal t,) <$> AD.deriveTape t sn
+            -- Otherwise, its partial derivatives are all 0
+            _ -> Just (on, M.empty)
+
+  -- Add together every derivative
+  let drvs = M.map (Just . putAD) $ M.unionsWith add $ map snd m
+
+  -- Extract the output values, and the partial derivatives
+  let ov = modifyValue (\i _ -> fst $ m !! i) o
+  let od =
+        fromMaybe (error "vjp: differentiation failed") $
+          modifyValueM (\i vo -> M.findWithDefault (ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD vo) i drvs) v
+
+  -- Return a tuple of the output values, and partial derivatives
+  pure $ toTuple [ov, od]
+  where
+    -- TODO: Perhaps this could be fully abstracted by AD?
+    -- Making addFor private would be nice..
+    add x y =
+      fromMaybe (error "jvp: illtyped add") $
+        AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
+
+-- | The initial environment contains definitions of the various
+-- intrinsic functions.
 initialCtx :: Ctx
 initialCtx =
   Ctx
@@ -1306,15 +1441,6 @@ initialCtx =
       ]
     boolCmp f = [(getB, Just . BoolValue, P.doCmpOp f, adBinOp $ AD.OpCmp f)]
 
-    getV (SignedValue x) = Just $ P.IntValue x
-    getV (UnsignedValue x) = Just $ P.IntValue x
-    getV (FloatValue x) = Just $ P.FloatValue x
-    getV (BoolValue x) = Just $ P.BoolValue x
-    putV (P.IntValue x) = SignedValue x
-    putV (P.FloatValue x) = FloatValue x
-    putV (P.BoolValue x) = BoolValue x
-    putV P.UnitValue = BoolValue True
-
     getS (SignedValue x) = Just $ P.IntValue x
     getS _ = Nothing
     putS (P.IntValue x) = Just $ SignedValue x
@@ -1334,12 +1460,6 @@ initialCtx =
     getB _ = Nothing
     putB (P.BoolValue x) = Just $ BoolValue x
     putB _ = Nothing
-
-    getAD (ValuePrim v) = AD.Constant <$> getV v
-    getAD (ValueAD d v) = Just $ AD.Variable d v
-    getAD _ = Nothing
-    putAD (AD.Variable d s) = ValueAD d s
-    putAD (AD.Constant v) = ValuePrim $ putV v
 
     adToPrim v = putV $ AD.primitive v
 
@@ -1970,130 +2090,20 @@ initialCtx =
                 <> "]"
           else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "manifest" = Just $ fun1 pure
-    def "vjp2" = Just $
-      -- TODO: This could be much better. Currently, it is very inefficient
-      -- Perhaps creating VJPValues could be abstracted into a function
-      -- exposed by the AD module?
-      fun3 $ \f v s -> do
-        -- Get the depth
-        depth <- length <$> stacktrace
-
-        -- Augment the values
-        let v' =
-              fromMaybe (error $ "vjp: invalid values " ++ show v) $
-                modifyValueM (\i lv -> ValueAD depth . AD.VJP . AD.VJPValue . AD.TapeID i <$> getAD lv) v
-        -- Turn the seeds into a list of ADValues
-        let s' =
-              fromMaybe (error $ "vjp: invalid seeds " ++ show s) $
-                mapM getAD $
-                  fst $
-                    valueAccum (\a b -> (b : a, b)) [] s
-
-        -- Run the function, and turn its outputs into a list of Values
-        o <- apply noLoc mempty f v'
-        let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
-
-        -- For each output..
-        let m =
-              fromMaybe (error "vjp: differentiation failed") $
-                zipWithM
-                  ( \on sn -> case on of
-                      -- If it is a VJP variable of the correct depth, run deriveTape on it- and its corresponding seed
-                      (ValueAD d (AD.VJP (AD.VJPValue t))) | d == depth -> (putAD $ AD.tapePrimal t,) <$> AD.deriveTape t sn
-                      -- Otherwise, its partial derivatives are all 0
-                      _ -> Just (on, M.empty)
-                  )
-                  o'
-                  s'
-
-        -- Add together every derivative
-        let drvs = M.map (Just . putAD) $ M.unionsWith add $ map snd m
-
-        -- Extract the output values, and the partial derivatives
-        let ov = modifyValue (\i _ -> fst $ m !! i) o
-        let od =
-              fromMaybe (error "vjp: differentiation failed") $
-                modifyValueM (\i vo -> M.findWithDefault (ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD vo) i drvs) v
-
-        -- Return a tuple of the output values, and partial derivatives
-        pure $ toTuple [ov, od]
-      where
-        modifyValue f v = snd $ valueAccum (\a b -> (a + 1, f a b)) 0 v
-        modifyValueM f v =
-          snd
-            <$> valueAccumLM
-              ( \a b -> do
-                  b' <- f a b
-                  pure (a + 1, b')
-              )
-              0
-              v
-
-        -- TODO: Perhaps this could be fully abstracted by AD?
-        -- Making addFor private would be nice..
-        add x y =
-          fromMaybe (error "jvp: illtyped add") $
-            AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
-    def "jvp2" = Just $
-      -- TODO: This could be much better. Currently, it is very inefficient
-      -- Perhaps creating JVPValues could be abstracted into a function
-      -- exposed by the AD module?
-      fun3 $ \f v s -> do
-        -- Get the depth
-        depth <- length <$> stacktrace
-
-        -- Turn the seeds into a list of ADValues
-        let s' =
-              expectJust ("jvp: invalid seeds " ++ show s) $
-                mapM getAD $
-                  fst $
-                    valueAccum (\a b -> (b : a, b)) [] s
-        -- Augment the values
-        let v' =
-              expectJust ("jvp: invalid values " ++ show v) $
-                modifyValueM
-                  ( \i lv -> do
-                      lv' <- getAD lv
-                      pure $ ValueAD depth . AD.JVP . AD.JVPValue lv' $ s' !! (length s' - 1 - i)
-                  )
-                  v
-
-        -- Run the function, and turn its outputs into a list of Values
-        o <- apply noLoc mempty f v'
-        let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
-
-        -- For each output..
-        let m =
-              expectJust "jvp: differentiation failed" $
-                mapM
-                  ( \on -> case on of
-                      -- If it is a JVP variable of the correct depth, return its primal and derivative
-                      (ValueAD d (AD.JVP (AD.JVPValue pv dv))) | d == depth -> Just (putAD pv, putAD dv)
-                      -- Otherwise, its partial derivatives are all 0
-                      _ -> (on,) . ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD on
-                  )
-                  o'
-
-        -- Extract the output values, and the partial derivatives
-        let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
-            od = modifyValue (\i _ -> snd $ m !! (length m - 1 - i)) o
-
-        -- Return a tuple of the output values, and partial derivatives
-        pure $ toTuple [ov, od]
-      where
-        modifyValue f v = snd $ valueAccum (\a b -> (a + 1, f a b)) 0 v
-        modifyValueM f v =
-          snd
-            <$> valueAccumLM
-              ( \a b -> do
-                  b' <- f a b
-                  pure (a + 1, b')
-              )
-              0
-              v
-
-        expectJust _ (Just v) = v
-        expectJust s Nothing = error s
+    def "jvp2" = Just $ fun3 doJVP2
+    def "vjp2" = Just $ fun3 doVJP2
+    def "jvp2_vec" = Just $ fun3 $ \f x seeds -> do
+      v <- apply noLoc mempty f x
+      dvs <-
+        toArray' (valueShape v) . map (project "1")
+          <$> mapM (doJVP2 f x) (snd (fromArray seeds))
+      pure $ toTuple [v, dvs]
+    def "vjp2_vec" = Just $ fun3 $ \f x seeds -> do
+      v <- apply noLoc mempty f x
+      dvs <-
+        toArray' (valueShape x)
+          <$> mapM (doVJP2 f x) (snd (fromArray seeds))
+      pure $ toTuple [v, dvs]
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ s

@@ -42,6 +42,7 @@ module Futhark.AD.Rev.Monad
     zeroExp,
     unitAdjOfType,
     addLambda,
+    vecOpExp,
     --
     VjpOps (..),
     --
@@ -311,7 +312,12 @@ addBinOp (FloatType ft) = FAdd ft
 addBinOp Bool = LogAnd
 addBinOp Unit = LogAnd
 
-tabNest :: Int -> [VName] -> ([VName] -> [VName] -> ADM [VName]) -> ADM [VName]
+tabNest ::
+  (MonadBuilder m, Rep m ~ SOACS) =>
+  Int ->
+  [VName] ->
+  ([VName] -> [VName] -> m [VName]) ->
+  m [VName]
 tabNest = tabNest' []
   where
     tabNest' is 0 vs f = f (reverse is) vs
@@ -352,7 +358,29 @@ addLambda t@Array {} = do
 addLambda t =
   error $ "addLambda: " ++ show t
 
--- Construct an expression for adding the two variables.
+-- | Construct a lambda for binop'ing two values of the given type,
+-- which may be arrays.
+vecOpLambda :: (PrimType -> BinOp) -> Type -> ADM (Lambda SOACS)
+vecOpLambda bop (Prim pt) = binOpLambda (bop pt) pt
+vecOpLambda bop t@Array {} = do
+  xs_p <- newParam "xs" t
+  ys_p <- newParam "ys" t
+  lam <- vecOpLambda bop $ rowType t
+  body <- insertStmsM $ do
+    res <-
+      letSubExp "lam_map" . Op $
+        Screma (arraySize 0 t) [paramName xs_p, paramName ys_p] (mapSOAC lam)
+    pure $ resultBody [res]
+  pure
+    Lambda
+      { lambdaParams = [xs_p, ys_p],
+        lambdaReturnType = [t],
+        lambdaBody = body
+      }
+vecOpLambda _ t =
+  error $ "vecOpLambda: " ++ show t
+
+-- | Construct an expression for adding the two variables.
 addExp :: VName -> VName -> ADM (Exp SOACS)
 addExp x y = do
   x_t <- lookupType x
@@ -364,6 +392,19 @@ addExp x y = do
       pure $ Op $ Screma (arraySize 0 x_t) [x, y] (mapSOAC lam)
     _ ->
       error $ "addExp: unexpected type: " ++ prettyString x_t
+
+-- | Construct an expression for performing this binary operation on two variables.
+vecOpExp :: (PrimType -> BinOp) -> VName -> VName -> ADM (Exp SOACS)
+vecOpExp bop x y = do
+  x_t <- lookupType x
+  case x_t of
+    Prim pt ->
+      pure $ BasicOp $ BinOp (bop pt) (Var x) (Var y)
+    Array {} -> do
+      lam <- vecOpLambda bop $ rowType x_t
+      pure $ Op $ Screma (arraySize 0 x_t) [x, y] (mapSOAC lam)
+    _ ->
+      error $ "vecOpExp: unexpected type: " ++ prettyString x_t
 
 lookupAdj :: VName -> ADM Adj
 lookupAdj v = do

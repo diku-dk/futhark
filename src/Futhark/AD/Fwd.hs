@@ -3,7 +3,7 @@
 module Futhark.AD.Fwd (fwdJVP) where
 
 import Control.Monad
-import Control.Monad.RWS.Strict
+import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
 import Data.List (transpose)
@@ -26,11 +26,17 @@ zeroExp (Array pt shape _) =
   BasicOp $ Replicate shape $ Constant $ blankPrimValue pt
 zeroExp t = error $ "zeroExp: " ++ show t
 
-tanType :: TypeBase s u -> ADM (TypeBase s u)
+tanType :: (ArrayShape s, Monoid u) => TypeBase s u -> ADM (TypeBase s u)
 tanType (Acc acc ispace ts u) = do
   ts_tan <- mapM tanType ts
   pure $ Acc acc ispace (ts ++ ts_tan) u
-tanType t = pure t
+tanType t = do
+  shape <- askShape
+  pure $
+    arrayOf
+      (Prim (elemType t))
+      (shape `prependShape` arrayShape t)
+      (uniqueness t)
 
 slocal' :: ADM a -> ADM a
 slocal' = slocal id
@@ -48,7 +54,7 @@ data RState = RState
     stateNameSource :: VNameSource
   }
 
-newtype ADM a = ADM (BuilderT SOACS (State RState) a)
+newtype ADM a = ADM (BuilderT SOACS (ReaderT Shape (State RState)) a)
   deriving
     ( Functor,
       Applicative,
@@ -72,12 +78,15 @@ instance MonadFreshNames (State RState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify (\env -> env {stateNameSource = src})
 
-runADM :: (MonadFreshNames m) => ADM a -> m a
-runADM (ADM m) =
+askShape :: ADM Shape
+askShape = ADM $ lift ask
+
+runADM :: (MonadFreshNames m) => Shape -> ADM a -> m a
+runADM shape (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
       runState
-        (fst <$> runBuilderT m mempty)
+        (runReaderT (fst <$> runBuilderT m mempty) shape)
         (RState mempty vn)
 
 tanVName :: VName -> ADM VName
@@ -94,7 +103,7 @@ class TanBuilder a where
 bundleNewList :: (TanBuilder a) => [a] -> ADM [a]
 bundleNewList = fmap mconcat . mapM bundleNew
 
-instance TanBuilder (PatElem (TypeBase s u)) where
+instance (ArrayShape s, Monoid u) => TanBuilder (PatElem (TypeBase s u)) where
   newTan (PatElem p t)
     | isAcc t = do
         insertTan p p
@@ -117,7 +126,7 @@ newTanPat (Pat pes) = Pat <$> mapM newTan pes
 bundleNewPat :: (TanBuilder (PatElem t)) => Pat t -> ADM (Pat t)
 bundleNewPat (Pat pes) = Pat <$> bundleNewList pes
 
-instance TanBuilder (Param (TypeBase s u)) where
+instance (ArrayShape s, Monoid u) => TanBuilder (Param (TypeBase s u)) where
   newTan (Param _ p t) = do
     PatElem p' t' <- newTan $ PatElem p t
     pure $ Param mempty p' t'
@@ -129,7 +138,10 @@ instance TanBuilder (Param (TypeBase s u)) where
       then pure [param']
       else pure [param, param']
 
-instance (Tangent a) => TanBuilder (Param (TypeBase s u), a) where
+instance
+  (ArrayShape s, Monoid u, Tangent a) =>
+  TanBuilder (Param (TypeBase s u), a)
+  where
   newTan (p, x) = (,) <$> newTan p <*> tangent x
   bundleNew (p, x) = do
     b <- bundleNew p
@@ -140,7 +152,7 @@ class Tangent a where
   tangent :: a -> ADM a
   bundleTan :: a -> ADM [a]
 
-instance Tangent (TypeBase s u) where
+instance (ArrayShape s, Monoid u) => Tangent (TypeBase s u) where
   tangent = tanType
   bundleTan t
     | isAcc t = do
@@ -181,6 +193,51 @@ instance Tangent SubExpRes where
   tangent (SubExpRes cs se) = SubExpRes cs <$> tangent se
   bundleTan (SubExpRes cs se) = map (SubExpRes cs) <$> bundleTan se
 
+asVName :: SubExp -> ADM VName
+asVName (Var v) = pure v
+asVName (Constant x) = letExp "v" $ BasicOp $ SubExp $ Constant x
+
+withTan ::
+  SubExp ->
+  (SubExp -> ADM (Exp SOACS)) ->
+  ADM (Exp SOACS)
+withTan x f = do
+  shape <- askShape
+  x_tan <- tangent x
+  if shape == mempty
+    then f x_tan
+    else do
+      let w = shapeSize 0 shape
+      x_tan_v <- asVName x_tan
+      x_tan_p <- newParam "x_tanp" . rowType =<< lookupType x_tan_v
+      lam <- mkLambda [x_tan_p] $ do
+        fmap (subExpsRes . pure) . letSubExp "tan"
+          =<< f (Var (paramName x_tan_p))
+      pure $ Op $ Screma w [x_tan_v] (mapSOAC lam)
+
+withTans ::
+  PrimType ->
+  SubExp ->
+  SubExp ->
+  (PrimExp VName -> PrimExp VName -> PrimExp VName) ->
+  ADM (Exp SOACS)
+withTans t x y f = do
+  shape <- askShape
+  x_tan <- asVName =<< tangent x
+  y_tan <- asVName =<< tangent y
+  if shape == mempty
+    then toExp $ f (LeafExp x_tan t) (LeafExp y_tan t)
+    else do
+      let w = shapeSize 0 shape
+      x_tan_p <- newParam "x_tanp" . rowType =<< lookupType x_tan
+      y_tan_p <- newParam "y_tanp" . rowType =<< lookupType y_tan
+      lam <- mkLambda [x_tan_p, y_tan_p] $ do
+        fmap (subExpsRes . pure) . letSubExp "tan" <=< toExp $
+          f
+            (LeafExp (paramName x_tan_p) t)
+            (LeafExp (paramName y_tan_p) t)
+      pure $ Op $ Screma w [x_tan, y_tan] (mapSOAC lam)
+
 basicFwd :: Pat Type -> StmAux () -> BasicOp -> ADM ()
 basicFwd pat aux op = do
   pat_tan <- newTanPat pat
@@ -198,17 +255,15 @@ basicFwd pat aux op = do
       let t = unOpType unop
           x_pe = primExpFromSubExp t x
           dx = pdUnOp unop x_pe
-      x_tan <- primExpFromSubExp t <$> tangent x
-      auxing aux $ letBindNames (patNames pat_tan) <=< toExp $ x_tan ~*~ dx
+      auxing aux $ letBindNames (patNames pat_tan) <=< withTan x $ \x_tan ->
+        toExp $ primExpFromSubExp t x_tan ~*~ dx
     BinOp bop x y -> do
       let t = binOpType bop
-      x_tan <- primExpFromSubExp t <$> tangent x
-      y_tan <- primExpFromSubExp t <$> tangent y
-      let (wrt_x, wrt_y) =
-            pdBinOp bop (primExpFromSubExp t x) (primExpFromSubExp t y)
-      auxing aux $
-        letBindNames (patNames pat_tan) <=< toExp $
-          x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
+      auxing aux . letBindNames (patNames pat_tan) <=< withTans t x y $
+        \x_tan y_tan ->
+          let (wrt_x, wrt_y) =
+                pdBinOp bop (primExpFromSubExp t x) (primExpFromSubExp t y)
+           in x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
     CmpOp {} ->
       addStm $ Let pat_tan aux $ BasicOp op
     ConvOp cop x -> do
@@ -217,7 +272,9 @@ basicFwd pat aux op = do
     Assert {} -> pure ()
     Index arr slice -> do
       arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Index arr_tan slice
+      dims <- shapeDims <$> askShape
+      let slice' = Slice $ map sliceDim dims <> unSlice slice
+      addStm $ Let pat_tan aux $ BasicOp $ Index arr_tan slice'
     Update safety arr slice se -> do
       arr_tan <- tangent arr
       se_tan <- tangent se
@@ -225,32 +282,47 @@ basicFwd pat aux op = do
     Concat d (arr :| arrs) w -> do
       arr_tan <- tangent arr
       arrs_tans <- mapM tangent arrs
-      addStm $ Let pat_tan aux $ BasicOp $ Concat d (arr_tan :| arrs_tans) w
+      r <- shapeRank <$> askShape
+      addStm $ Let pat_tan aux $ BasicOp $ Concat (d + r) (arr_tan :| arrs_tans) w
     Manifest ds arr -> do
       arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Manifest ds arr_tan
+      r <- shapeRank <$> askShape
+      addStm . Let pat_tan aux . BasicOp $
+        Manifest ([0 .. r - 1] ++ map (+ r) ds) arr_tan
     Iota n _ _ it -> do
-      addStm $ Let pat_tan aux $ BasicOp $ Replicate (Shape [n]) (intConst it 0)
-    Replicate n x -> do
-      x_tan <- tangent x
-      addStm $ Let pat_tan aux $ BasicOp $ Replicate n x_tan
-    Scratch t shape ->
-      addStm $ Let pat_tan aux $ BasicOp $ Scratch t shape
+      shape <- askShape
+      addStm . Let pat_tan aux . BasicOp $
+        Replicate (shape <> Shape [n]) (intConst it 0)
+    Replicate n x ->
+      auxing aux $ letBind pat_tan <=< withTan x $ \x_tan ->
+        pure $ BasicOp $ Replicate n x_tan
+    Scratch t shape -> do
+      tan_shape <- askShape
+      addStm $ Let pat_tan aux $ BasicOp $ Scratch t $ shapeDims tan_shape <> shape
     Reshape k reshape arr -> do
       arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Reshape k reshape arr_tan
+      shape <- askShape
+      addStm $ Let pat_tan aux $ BasicOp $ Reshape k (shape <> reshape) arr_tan
     Rearrange perm arr -> do
       arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Rearrange perm arr_tan
+      r <- shapeRank <$> askShape
+      addStm . Let pat_tan aux . BasicOp $
+        Rearrange ([0 .. r - 1] <> map (+ r) perm) arr_tan
     _ -> error $ "basicFwd: Unsupported op " ++ prettyString op
 
 fwdLambda :: Lambda SOACS -> ADM (Lambda SOACS)
-fwdLambda l@(Lambda params ret body) =
-  Lambda <$> bundleNewList params <*> bundleTangents ret <*> inScopeOf l (fwdBody body)
+fwdLambda (Lambda params ret body) = do
+  params' <- bundleNewList params
+  Lambda params'
+    <$> bundleTangents ret
+    <*> localScope (scopeOfLParams params') (fwdBody body)
 
 fwdStreamLambda :: Lambda SOACS -> ADM (Lambda SOACS)
-fwdStreamLambda l@(Lambda params ret body) =
-  Lambda <$> ((take 1 params ++) <$> bundleNewList (drop 1 params)) <*> bundleTangents ret <*> inScopeOf l (fwdBody body)
+fwdStreamLambda (Lambda params ret body) = do
+  params' <- (take 1 params ++) <$> bundleNewList (drop 1 params)
+  Lambda params'
+    <$> bundleTangents ret
+    <*> localScope (scopeOfLParams params') (fwdBody body)
 
 interleave :: [a] -> [a] -> [a]
 interleave xs ys = concat $ transpose [xs, ys]
@@ -272,24 +344,27 @@ fwdSOAC pat aux (Screma size xs (ScremaForm f scs reds)) = do
   reds' <- mapM fwdRed reds
   addStm $ Let pat' aux $ Op $ Screma size xs' $ ScremaForm f' scs' reds'
   where
+    zeroTans lam =
+      mapM (letSubExp "zero" . zeroExp <=< tanType) $ lambdaReturnType lam
+
     fwdScan :: Scan SOACS -> ADM (Scan SOACS)
     fwdScan sc = do
       op' <- fwdLambda $ scanLambda sc
-      neutral_tans <- mapM zeroFromSubExp $ scanNeutral sc
+      neutral_tans <- zeroTans $ scanLambda sc
       pure $
         Scan
-          { scanNeutral = scanNeutral sc `interleave` map Var neutral_tans,
+          { scanNeutral = scanNeutral sc `interleave` neutral_tans,
             scanLambda = op'
           }
     fwdRed :: Reduce SOACS -> ADM (Reduce SOACS)
     fwdRed red = do
       op' <- fwdLambda $ redLambda red
-      neutral_tans <- mapM zeroFromSubExp $ redNeutral red
+      neutral_tans <- zeroTans $ redLambda red
       pure $
         Reduce
           { redComm = redComm red,
             redLambda = op',
-            redNeutral = redNeutral red `interleave` map Var neutral_tans
+            redNeutral = redNeutral red `interleave` neutral_tans
           }
 fwdSOAC pat aux (Stream size xs nes lam) = do
   pat' <- bundleNewPat pat
@@ -369,8 +444,7 @@ fwdStm (Let pat aux (BasicOp (UpdateAcc safety acc i x))) = do
   addStm $ Let pat' aux $ BasicOp $ UpdateAcc safety acc_tan i x'
 fwdStm stm@(Let pat aux (BasicOp e)) = do
   -- XXX: this has to be too naive.
-  unless (any isAcc $ patTypes pat) $
-    addStm stm
+  unless (any isAcc $ patTypes pat) $ addStm stm
   basicFwd pat aux e
 fwdStm stm@(Let pat _ (Apply f args _ _))
   | Just (ret, argts) <- M.lookup f builtInFunctions = do
@@ -450,10 +524,14 @@ fwdBodyTansLast (Body _ stms res) = buildBody_ $ do
   mapM_ fwdStm stms
   (res <>) <$> mapM tangent res
 
-fwdJVP :: (MonadFreshNames m) => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
-fwdJVP scope l@(Lambda params ret body) =
-  runADM . localScope scope . inScopeOf l $ do
+fwdJVP ::
+  (MonadFreshNames m) =>
+  Scope SOACS ->
+  Shape ->
+  Lambda SOACS ->
+  m (Lambda SOACS)
+fwdJVP scope shape (Lambda params _ body) =
+  runADM shape . localScope scope $ do
     params_tan <- mapM newTan params
-    body_tan <- fwdBodyTansLast body
-    ret_tan <- mapM tangent ret
-    pure $ Lambda (params ++ params_tan) (ret <> ret_tan) body_tan
+    mkLambda (params <> params_tan) $
+      bodyBind =<< fwdBodyTansLast body

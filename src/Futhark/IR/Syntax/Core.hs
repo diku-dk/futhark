@@ -168,9 +168,13 @@ class (Monoid a, Eq a, Ord a) => ArrayShape a where
   -- | Check whether one shape if a subset of another shape.
   subShapeOf :: a -> a -> Bool
 
+  -- | Prepend the dimensions of a 'Shape'.
+  prependShape :: Shape -> a -> a
+
 instance ArrayShape (ShapeBase SubExp) where
   shapeRank (Shape l) = length l
   subShapeOf = (==)
+  prependShape = (<>)
 
 instance ArrayShape (ShapeBase ExtSize) where
   shapeRank (Shape l) = length l
@@ -193,6 +197,8 @@ instance ArrayShape (ShapeBase ExtSize) where
             put $ M.insert y x extmap
             pure True
 
+  prependShape shape = (fmap Free shape <>)
+
 instance Semigroup Rank where
   Rank x <> Rank y = Rank $ x + y
 
@@ -202,6 +208,7 @@ instance Monoid Rank where
 instance ArrayShape Rank where
   shapeRank (Rank x) = x
   subShapeOf = (==)
+  prependShape shape (Rank x) = Rank $ shapeRank shape + x
 
 -- | The memory space of a block.  If 'DefaultSpace', this is the "default"
 -- space, whatever that is.  The exact meaning of the 'SpaceId'
