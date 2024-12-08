@@ -303,7 +303,7 @@ instance Format UncheckedCase where
 
 instance Format (AppExpBase NoInfo Name) where
   fmt (BinOp (bop, _) _ (x, _) (y, _) loc) =
-    addComments loc $ fmt x </> fmtBinOp bop <+> fmt y
+    addComments loc $ align (fmt x) </> fmtBinOp bop <+> align (fmt y)
   fmt (Match e cs loc) =
     addComments loc $ "match" <+> fmt e </> sep line (map fmt $ toList cs)
   -- need some way to omit the inital value expression, when this it's trivial
