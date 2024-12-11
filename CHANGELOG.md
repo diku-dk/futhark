@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Inconsistent handling of types in lambda lifting (#2197).
 
+* Invalid primal results from `vjp2` in interpreter (#2199).
+
 ## [0.25.24]
 
 ### Added
