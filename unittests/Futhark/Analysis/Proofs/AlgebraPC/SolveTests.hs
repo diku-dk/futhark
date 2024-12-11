@@ -560,9 +560,12 @@ tests =
         --         max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈},
         --         max{0} <= cª₄₉₈₉₅ <= min{1},
         --         max{0} <= dª₄₉₉₀₅ <= min{1},
-        --         max{0} <= i₄₉₉₁₂ <= min{-1 + j₄₉₉₁₃},
         --         max{0, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
-        --           <= j₄₉₉₁₃ <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
+        --           <= i₄₉₉₁₂
+        --           <= min{-1 + j₄₉₉₁₃},
+        --         max{0, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
+        --           <= j₄₉₉₁₃
+        --           <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
         --
         -- Equivalences: [ (⟦cª₄₉₈₉₅⟧[i₄₉₉₁₂], 0)
         --               , (⟦cª₄₉₈₉₅⟧[j₄₉₉₁₃], 1)
@@ -570,12 +573,6 @@ tests =
         --               , (⟦dª₄₉₉₀₅⟧[j₄₉₉₁₃], 0) ]
         run
           ( do
-              -- TODO nikolaj: separate into two queries where
-              -- 1) 0 <= i <= ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]
-              -- 2) ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈] <= i <= j - 1
-              -- Both 1 and 2 must hold.
-              -- Hence we relate i to k(j) without restricting
-              -- i and j to be in the same interval.
               clearAlgEnv
               i <- newNameFromString "i"
               j <- newNameFromString "j"
@@ -592,6 +589,7 @@ tests =
               addRange (Var c0) $ mkRange (int 0) (int 1)
               addRange (Var d0) $ mkRange (int 0) (int 1)
               addRange (Var i) $ mkRange (int 0) (sVar j .-. int 1)
+              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (sVar j .-. int 1)
               addRange (Var j) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
               addRange (Var j) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
               -- Add equivalences.
