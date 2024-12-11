@@ -226,6 +226,29 @@ instance Format PrimValue where
       BoolValue False -> "false"
       FloatValue v -> prettyText v
 
+updates ::
+  UncheckedExp ->
+  (UncheckedExp, [(Fmt, Fmt)])
+updates (RecordUpdate src fs ve _ _) = second (++ [(fs', ve')]) $ updates src
+  where
+    fs' = sep "." $ fmt <$> fs
+    ve' = fmt ve
+updates (Update src is ve _) = second (++ [(is', ve')]) $ updates src
+  where
+    is' = brackets $ sep ("," <> space) $ map fmt is
+    ve' = fmt ve
+updates e = (e, [])
+
+fmtUpdate :: UncheckedExp -> Fmt
+fmtUpdate e =
+  -- Special case multiple chained Updates/RecordUpdates.
+  let (root, us) = updates e
+      loc = srclocOf e
+   in addComments loc . localLayout loc $
+        fmt root <+> align (sep line (map fmtWith us))
+  where
+    fmtWith (fs', v) = "with" <+> fs' <+> "=" <+> v
+
 instance Format UncheckedExp where
   fmt (Var name _ loc) = addComments loc $ fmtQualName name
   fmt (Hole _ loc) = addComments loc "???"
@@ -246,16 +269,8 @@ instance Format UncheckedExp where
   fmt (Project k e _ loc) = addComments loc $ fmt e <> "." <> fmt k
   fmt (Negate e loc) = addComments loc $ "-" <> fmt e
   fmt (Not e loc) = addComments loc $ "!" <> fmt e
-  fmt (Update src idxs ve loc) =
-    addComments loc $
-      fmt src <+> "with" <+> idxs' <+> stdNest ("=" </> fmt ve)
-    where
-      idxs' = brackets $ sep ("," <> space) $ map fmt idxs
-  fmt (RecordUpdate src fs ve _ loc) =
-    addComments loc $
-      fmt src <+> "with" <+> fs' <+> stdNest ("=" </> fmt ve)
-    where
-      fs' = sep "." $ fmt <$> fs
+  fmt e@Update {} = fmtUpdate e
+  fmt e@RecordUpdate {} = fmtUpdate e
   fmt (Assert e1 e2 _ loc) =
     addComments loc $ "assert" <+> fmt e1 <+> fmt e2
   fmt (Lambda params body rettype _ loc) =
