@@ -399,13 +399,6 @@ replicateIrreg segments env ns desc rep = do
         irregularD = elems
       }
 
-rearrangeFlat :: (IntegralExp num) => [Int] -> [num] -> num -> num
-rearrangeFlat perm dims i =
-  -- TODO?  Maybe we need to invert one of these permutations.
-  flattenIndex dims $
-    rearrangeShape perm $
-      unflattenIndex (rearrangeShape perm dims) i
-
 -- | Flatten the arrays of an IrregularRep to be entirely one-dimensional.
 flattenIrregularRep :: IrregularRep -> Builder GPU IrregularRep
 flattenIrregularRep ir@(IrregularRep shape flags offsets elems) = do
@@ -413,59 +406,66 @@ flattenIrregularRep ir@(IrregularRep shape flags offsets elems) = do
   if arrayRank elems_t == 1
     then pure ir
     else do
-      let m = arraySize 0 elems_t
+      n <- arraySize 0 <$> lookupType shape
       m' <- letSubExp "flat_m" <=< toExp $ product $ map pe64 $ arrayDims elems_t
       elems' <-
         letExp (baseString elems <> "_flat") $
           BasicOp $
             Reshape ReshapeArbitrary (Shape [m']) elems
+
+      shape' <- letExp (baseString shape <> "_flat") <=< renameExp <=< segMap (MkSolo n) $
+        \(MkSolo i) -> do
+          old_shape <- letSubExp "old_shape" =<< eIndex shape [toExp i]
+          segment_shape <-
+            letSubExp "segment_shape" <=< toExp $
+              pe64 old_shape * product (map pe64 $ tail $ arrayDims elems_t)
+          pure [subExpRes segment_shape]
+
+      offsets' <- letExp (baseString offsets <> "_flat") <=< renameExp <=< segMap (MkSolo n) $
+        \(MkSolo i) -> do
+          old_offsets <- letSubExp "old_offsets" =<< eIndex offsets [toExp i]
+          segment_offsets <-
+            letSubExp "segment_offsets" <=< toExp $
+              pe64 old_offsets * product (map pe64 $ tail $ arrayDims elems_t)
+          pure [subExpRes segment_offsets]
+
       flags' <- letExp (baseString flags <> "_flat") <=< renameExp <=< segMap (MkSolo m') $
         \(MkSolo i) -> do
-          let head_i = head $ unflattenIndex (map pe64 $ arrayDims elems_t) (pe64 m')
+          let head_i = head $ unflattenIndex (map pe64 $ arrayDims elems_t) (pe64 i)
           flag <- letSubExp "flag" =<< eIndex flags [toExp head_i]
           pure [subExpRes flag]
-      pure $ IrregularRep shape flags' offsets elems'
+      pure $ IrregularRep shape' flags' offsets' elems'
 
--- The main challenge here is that we have to flatten out the value
--- array such that it is single-dimensional. This is because any inner
--- regularity is not necessarily preserved when rearranging
--- dimensions. We could in principle detect the cases where we can
--- preserve some of it.
+rearrangeFlat :: (IntegralExp num) => [Int] -> [num] -> num -> num
+rearrangeFlat perm dims i =
+  -- TODO?  Maybe we need to invert one of these permutations.
+  flattenIndex dims $
+    rearrangeShape perm $
+      unflattenIndex (rearrangeShape perm dims) i
+
 rearrangeIrreg ::
   Segments ->
   DistEnv ->
-  Type ->
+  TypeBase Shape u ->
   [Int] ->
   IrregularRep ->
   Builder GPU IrregularRep
-rearrangeIrreg segments env v_t perm (IrregularRep shape flags offsets elems) = do
-  elems_t <- lookupType elems
-  let m = arraySize 0 elems_t
-  m' <- letSubExp "flat_m" <=< toExp $ product $ map pe64 $ arrayDims elems_t
+rearrangeIrreg segments env v_t perm ir = do
+  (IrregularRep shape flags offsets elems) <- flattenIrregularRep ir
+  m <- arraySize 0 <$> lookupType elems
   (_, _, ii1_vss) <- doRepIota shape
   (_, _, ii2_vss) <- doSegIota shape
-  elems' <- letExp "elems_rearrange" <=< renameExp <=< segMap (MkSolo m') $
+  elems' <- letExp "elems_rearrange" <=< renameExp <=< segMap (MkSolo m) $
     \(MkSolo i) -> do
-      elems_shape_prod <-
-        letSubExp "elems_shape_prod" <=< toExp $
-          product (map pe64 $ tail $ arrayDims elems_t)
-      head_i <- letSubExp "head_i" <=< toExp $ pe64 i `div` pe64 elems_shape_prod
-      tail_i <- letSubExp "tail_i" <=< toExp $ pe64 i `rem` pe64 elems_shape_prod
-      seg_i <- letSubExp "seg_i" =<< eIndex ii1_vss [eSubExp head_i]
+      seg_i <- letSubExp "seg_i" =<< eIndex ii1_vss [eSubExp i]
       offset <- letSubExp "offset" =<< eIndex offsets [eSubExp seg_i]
-      in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp head_i]
+      in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp i]
       let v_dims = map pe64 $ arrayDims v_t
-          in_seg_is_tr =
-            rearrangeFlat perm v_dims $
-              pe64 in_seg_i * pe64 elems_shape_prod + pe64 tail_i
+          in_seg_is_tr = rearrangeFlat perm v_dims $ pe64 in_seg_i
       v' <-
-        (letSubExp "v" <=< eIndex elems) $
-          map toExp $
-            unflattenIndex (map pe64 (arrayDims elems_t)) $
-              pe64 offset * pe64 elems_shape_prod + in_seg_is_tr
+        letSubExp "v"
+          =<< eIndex elems [toExp $ pe64 offset + in_seg_is_tr]
       pure [subExpRes v']
-  -- TODO: the shape, flags, and offsets arrays here must also be
-  -- modified.
   pure $
     IrregularRep
       { irregularS = shape,
