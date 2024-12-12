@@ -136,8 +136,8 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
             debugPrettyM "Case:" (p @ i :: SoP Symbol)
             debugPrettyM "       =>" (f @ i :: SoP Symbol)
             let bug1 = debugT ("    >= " <> prettyStringW 110 start)
-            let bug2 = debugT ("    < " <> prettyStringW 110 end)
-            bug1 (start $<= f @ i) `andM` bug2 (f @ i $< end)
+            let bug2 = debugT ("    <= " <> prettyStringW 110 end)
+            bug1 (start $<= f @ i) `andM` bug2 (f @ i $<= end)
 
       let (p_f, f) `cmp` (p_g, g) = do
             assume (fromJust . justSym $ p_f @ i)

@@ -35,43 +35,43 @@ tests =
     [ mkTest
         "tests/indexfn/part2indices.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
-            prove (PermutationOfZeroTo n) fn
+            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/dummyindices.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
-            prove (PermutationOfZeroTo n) fn
+            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Unknown,
       mkTest
         "tests/indexfn/dummyindices2.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
-            prove (PermutationOfZeroTo n) fn
+            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Unknown,
       mkTest
         "tests/indexfn/part2indices_numeric_conds.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
-            prove (PermutationOfZeroTo n) fn
+            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices_predicatefn.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
-            prove (PermutationOfZeroTo n) fn
+            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices_predicatefn2.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
-            prove (PermutationOfZeroTo n) fn
+            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part3indices.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
-            prove (PermutationOfZeroTo n) fn
+            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
