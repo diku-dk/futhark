@@ -12,7 +12,7 @@
 import "mmm-intra-helpers"
 
 def mmm_intra [q] [d] (A: [q][d][d]f16) (B: [q][d][d]f16) : [q][d][d]f32 =
-  #[incremental_flattening(only_intra)]map2 matmul A B
+  #[incremental_flattening(only_intra)]map2 matmul_f16_f32 A B
 
 entry mmm_intra16 [q] (A: [q][16][16]f16) (B: [q][16][16]f16) =
   mmm_intra A B
