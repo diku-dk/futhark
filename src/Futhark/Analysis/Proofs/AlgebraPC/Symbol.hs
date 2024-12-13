@@ -21,11 +21,12 @@ import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (Nameable (mkName), MonadSoP, askPropertyWith)
-import Futhark.SoP.SoP (SoP, sopToLists)
+import Futhark.SoP.SoP (SoP, sopToLists, Free(..))
 import Futhark.Util.Pretty (Pretty, brackets, commasep, enclose, parens, pretty, viaShow, (<+>))
 import Language.Futhark (VName, nameFromString)
 import Language.Futhark qualified as E
 import Control.Monad (unless)
+-- import Futhark.Util.Pretty
 
 data IdxSym
   = -- | one regular name
@@ -50,6 +51,13 @@ data Symbol
     --   should be verified before construction
     Pow (Integer, SoP Symbol)
   deriving (Show, Eq, Ord)
+
+instance Free Symbol Symbol where
+  free (Var _) = S.empty
+  free (Idx _ sop) = free sop
+  free (Mdf _ _ s1 s2) = free s1 <> free s2
+  free (Sum _ s1 s2) = free s1 <> free s2
+  free (Pow (_, sop))= free sop
 
 instance Pretty IdxSym where
   pretty (One x) = prettyName x

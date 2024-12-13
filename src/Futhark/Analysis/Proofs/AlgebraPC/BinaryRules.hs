@@ -8,7 +8,7 @@ module Futhark.Analysis.Proofs.AlgebraPC.BinaryRules
 where
 
 import Data.Map.Strict qualified as M
-import Data.Maybe
+-- import Data.Maybe
 import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 -- import Futhark.Analysis.Proofs.AlgebraPC.Algebra
@@ -126,11 +126,11 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
       let bidx_m_1 = bidx .-. (sop_one)
           bidx_p_1 = bidx .+. (sop_one)
       case (valid_slice, bidx_m_1 == aidx_end, bidx_p_1 == aidx_beg) of
-        (True, True, _) -> -- extends the upper bound
+        (True, True, _) ->  -- extends the upper bound
           pure $ Just $ mkEquivSoPs (Sum anm aidx_beg bidx, sym1, sym2) (ms1, k1, k1)
-        (True, _, True) -> -- extends the lower bound
+        (True, _, True) ->  -- extends the lower bound
           pure $ Just $ mkEquivSoPs (Sum anm bidx aidx_end, sym1, sym2) (ms1, k1, k1)
-        _ -> pure Nothing -- be conservative if slice is not provably non-empty
+        _ -> pure Nothing   -- be conservative if slice is not provably non-empty
   -- case 2:
   | Sum anm aidx_beg aidx_end <- sym1,
     Sum bnm bidx_beg bidx_end <- sym2,

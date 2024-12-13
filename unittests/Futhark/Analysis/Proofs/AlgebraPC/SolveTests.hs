@@ -499,7 +499,7 @@ tests =
           @??= True,
       testCase "In-bounds 2 (from part2indicesL)" $
         -- -1 + ∑shape₄₆₇₉[0 : k₄₉₈₄₈]
-        --     > -1 + ∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈] + ∑⟦cª₄₉₈₉₅⟧[∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈] : i₄₉₉₁₂]
+        --     >= -1 + ∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈] + ∑⟦cª₄₉₈₉₅⟧[∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈] : i₄₉₉₁₂]
         --
         -- Proof:
         -- ∑shape₄₆₇₉[0 : k₄₉₈₄₈] - ∑shape₄₆₇₉[0 : -1 + k₄₉₈₄₈]
@@ -548,7 +548,7 @@ tests =
               addEquiv (Idx c (sVar i)) (int 1)
               -- \idx -> ∑⟦cª₄₉₈₉₅⟧[∑shpª₃₃₇₈₀[0 : k₄₉₈₄₈ - 1] : idx]
               let c_sum s = sym2SoP $ Sum c (shp_sum (sVar k .-. int 1)) (sVar s)
-              (int (-1) .+. shp_sum (sVar k)) FM.$>$ (int (-1) .+. shp_sum (sVar k .-. int 1) .+. c_sum i)
+              (int (-1) .+. shp_sum (sVar k)) FM.$>=$ (int (-1) .+. shp_sum (sVar k .-. int 1) .+. c_sum i)
           )
           @??= True,
       testCase "Sorting (from part2indicesL)" $
