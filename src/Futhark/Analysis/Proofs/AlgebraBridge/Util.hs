@@ -4,18 +4,15 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Util where
 import Control.Monad (unless, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
-import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, isBooleanM, rollbackAlgEnv, toAlgebra, toAlgebraSymbol)
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, isBooleanM, rollbackAlgEnv, toAlgebra)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrintAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
-import Futhark.SoP.Monad (addEquiv, addRange, mkRange)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Range (Range), Rel (..), SoP, int2SoP, justAffine, (.-.))
-import Futhark.SoP.SoP qualified as SoP
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), prettyString, viaShow)
 
 assume :: Symbol -> IndexFnM ()
@@ -30,7 +27,9 @@ assume p = do
   -- Add that pairwise disjoint symbols are false.
   mapM_ (addEq 0) =<< getDisjoint p
   where
-    addEq i = flip addEquiv (int2SoP i) <=< toAlgebraSymbol
+    addEq n sym = do
+      x <- toAlgebra (sym2SoP sym)
+      addRel (x :==: int2SoP n)
 
 -- | Adds a relation on symbols to the algebraic environment.
 -- No-op if `p` is not a relation.
@@ -65,29 +64,23 @@ addRelIterator :: Iterator -> IndexFnM ()
 addRelIterator (Forall i dom) = case dom of
   Iota n -> do
     n' <- toAlgebra n
-    boundIndexValues n'
+    addRel (int2SoP 1 :<=: n')
     dom_end <- Algebra.simplify =<< toAlgebra (domainEnd dom)
-    addRange (Algebra.Var i) (mkRange (int2SoP 0) dom_end)
+    addBound (int2SoP 0, i, dom_end)
   Cat k m b -> do
     m' <- toAlgebra m
-    boundIndexValues m'
-    addRange (Algebra.Var k) (mkRange (int2SoP 0) (m' .-. int2SoP 1))
+    addRel (int2SoP 1 :<=: m')
+    addBound (int2SoP 0, k, m' .-. int2SoP 1)
     dom_start <- Algebra.simplify =<< toAlgebra (domainStart dom)
     dom_end <- Algebra.simplify =<< toAlgebra (domainEnd dom)
-    addRange (Algebra.Var i) (mkRange dom_start dom_end)
+    addBound (dom_start, i, dom_end)
     interval_start <- Algebra.simplify =<< toAlgebra b
     interval_end <- Algebra.simplify =<< toAlgebra (intervalEnd dom)
-    addRange (Algebra.Var i) (mkRange interval_start interval_end)
+    addBound (interval_start, i, interval_end)
   where
-    boundIndexValues e = do
-      -- The type of Range restricts us to bound affine n. Lower bound is 1
-      -- since otherwise Iterator would be a single point (and hence Empty).
-      case justAffine (SoP.normalize e) of
-        Just (c, x, b) | c > 0 -> do
-          -- Add bound 1 - b <= c*x <= infinity
-          let lb = int2SoP $ toInteger (1 :: Int) - b
-          addRange x (Range (S.singleton lb) c mempty)
-        _ -> pure ()
+    addBound (x, vn, y) = do
+      addRel (x :<=: sym2SoP (Algebra.Var vn))
+      addRel (sym2SoP (Algebra.Var vn) :<=: y)
 addRelIterator _ = pure ()
 
 -- Fourer Motzkin Elimination solver may return True or False.

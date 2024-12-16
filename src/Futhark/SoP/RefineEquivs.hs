@@ -13,15 +13,12 @@ import Data.Map.Strict qualified as M
 import Data.MultiSet qualified as MS
 import Data.Set (Set)
 import Data.Set qualified as S
-import Debug.Trace
-import Futhark.Analysis.PrimExp
 import Futhark.SoP.Convert
 import Futhark.SoP.Expression
 import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
-import Futhark.Util.Pretty
 
 addEq :: forall u e p m. (ToSoP u e, MonadSoP u e p m) => u -> SoP u -> m ()
 addEq sym sop = do
