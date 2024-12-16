@@ -13,7 +13,6 @@ module Futhark.Pass.Flatten (flattenSOACs) where
 
 import Control.Monad
 import Control.Monad.Reader
-import Control.Monad.State
 import Data.Bifunctor (bimap, first, second)
 import Data.Foldable
 import Data.List qualified as L
@@ -26,14 +25,12 @@ import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass
-import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace, segScan)
-import Futhark.Pass.ExtractKernels.ToGPU (scopeForGPU, soacsExpToGPU, soacsLambdaToGPU, soacsStmToGPU)
+import Futhark.Pass.ExtractKernels.ToGPU (soacsStmToGPU)
 import Futhark.Pass.Flatten.Builtins
 import Futhark.Pass.Flatten.Distribute
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (mapEither)
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, rem)
 
@@ -74,11 +71,11 @@ import Prelude hiding (div, rem)
 --
 -- Note that we only consider the *outer* dimension to be the
 -- "segments". Also, 't' may actually be an array itself (although in
--- this case, the shape must be invariant to all parallel dimensions).
--- The inner structure is preserved through code, not data. (Or in
--- practice, ad-hoc auxiliary arrays produced by code.) In Cosmin's
--- notation, we maintain only the information for the outermost
--- dimension.
+-- this case, the shape of 't' must be invariant to all parallel
+-- dimensions). The inner structure is preserved through code, not
+-- data. (Or in practice, ad-hoc auxiliary arrays produced by code.)
+-- In Cosmin's notation, we maintain only the information for the
+-- outermost dimension.
 --
 -- As an example, consider an irregular array
 --
@@ -101,18 +98,6 @@ import Prelude hiding (div, rem)
 --   A_II1 = [0,0,0,1,3,3,4,6,6,6]
 --
 --   A_II2 = [1,1,1,1,1,1,2,2,2,2]
-
-data FlattenEnv = FlattenEnv
-
-newtype FlattenM a = FlattenM (StateT VNameSource (Reader FlattenEnv) a)
-  deriving
-    ( MonadState VNameSource,
-      MonadFreshNames,
-      MonadReader FlattenEnv,
-      Monad,
-      Functor,
-      Applicative
-    )
 
 data IrregularRep = IrregularRep
   { -- | Array of size of each segment, type @[]i64@.
@@ -168,7 +153,7 @@ resVar rt env = fromMaybe bad $ M.lookup rt $ distResMap env
     bad = error $ "resVar: unknown tag: " ++ show rt
 
 segsAndElems :: DistEnv -> [DistInput] -> (Maybe (VName, VName, VName), [VName])
-segsAndElems env [] = (Nothing, [])
+segsAndElems _ [] = (Nothing, [])
 segsAndElems env (DistInputFree v _ : vs) =
   second (v :) $ segsAndElems env vs
 segsAndElems env (DistInput rt _ : vs) =
@@ -194,12 +179,9 @@ segmentsShape = Shape . toList
 segmentsRank :: Segments -> Int
 segmentsRank = shapeRank . segmentsShape
 
-segmentsDims :: Segments -> [SubExp]
-segmentsDims = shapeDims . segmentsShape
-
 readInput :: Segments -> DistEnv -> [SubExp] -> DistInputs -> SubExp -> Builder GPU SubExp
 readInput _ _ _ _ (Constant x) = pure $ Constant x
-readInput segments env is inputs (Var v) =
+readInput _segments env is inputs (Var v) =
   case lookup v inputs of
     Nothing -> pure $ Var v
     Just (DistInputFree arr _) ->
@@ -208,11 +190,11 @@ readInput segments env is inputs (Var v) =
       case resVar rt env of
         Regular arr ->
           letSubExp (baseString v) =<< eIndex arr (map eSubExp is)
-        Irregular (IrregularRep _ flags offsets elems) ->
+        Irregular (IrregularRep _ _flags _offsets _elems) ->
           undefined
 
 readInputs :: Segments -> DistEnv -> [SubExp] -> DistInputs -> Builder GPU ()
-readInputs segments env is = mapM_ onInput
+readInputs _segments env is = mapM_ onInput
   where
     onInput (v, DistInputFree arr _) =
       letBindNames [v] =<< eIndex arr (map eSubExp is)
@@ -348,7 +330,7 @@ replicateIrreg ::
   String ->
   IrregularRep ->
   Builder GPU IrregularRep
-replicateIrreg segments env ns desc rep = do
+replicateIrreg _segments _env ns desc rep = do
   -- Replication does not change the number of segments - it simply
   -- makes each of them larger.
 
@@ -450,7 +432,7 @@ rearrangeIrreg ::
   [Int] ->
   IrregularRep ->
   Builder GPU IrregularRep
-rearrangeIrreg segments env v_t perm ir = do
+rearrangeIrreg _segments _env v_t perm ir = do
   (IrregularRep shape flags offsets elems) <- flattenIrregularRep ir
   m <- arraySize 0 <$> lookupType elems
   (_, _, ii1_vss) <- doRepIota shape
@@ -496,7 +478,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       scalarCase
     Assert {} ->
       scalarCase
-    Opaque op se
+    Opaque _op se
       | Var v <- se,
         Just (DistInput rt_in _) <- lookup v inps ->
           -- TODO: actually insert opaques
@@ -671,7 +653,7 @@ onMapFreeVar ::
   (VName, VName, VName) ->
   VName ->
   Maybe (Builder GPU (VName, MapArray IrregularRep))
-onMapFreeVar segments env inps ws (ws_F, ws_O, ws_data) v = do
+onMapFreeVar _segments env inps ws (_ws_F, _ws_O, ws_data) v = do
   let segments_per_elem = ws_data
   v_inp <- lookup v inps
   pure $ do
@@ -756,7 +738,7 @@ onMapInputArr segments env inps ii2 p arr = do
                             irregularO = p_O
                           }
                   pure $ MapOther rep' elems_t
-            Regular vs ->
+            Regular _vs ->
               undefined
     Nothing -> do
       arr_row_t <- rowType <$> lookupType arr
