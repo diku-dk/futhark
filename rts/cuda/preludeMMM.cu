@@ -113,6 +113,10 @@ FUTHARK_FUN_ATTR void futrts_copyGlobalShared(unsigned char **mem_out_p, unsigne
 
       cp_async_fence();
     }
+
+//     Assuming the copied data is only used in futrts_tensorMMM, we do not need to wait for it here
+//     cp_async_wait<0>();
+//     __syncthreads();
 }
 
 template<class ElmTypeAIn, class ElmTypeBIn, class ElmTypeCIn, class SizeM, class SizeN, class WarpsM, class WarpsN, int numRegs>
@@ -138,7 +142,7 @@ FUTHARK_FUN_ATTR void futrts_copyRegistersShared(unsigned char **mem_out_p, ElmT
         auto rC_layout = partition_shape_C(thr_mma, s_layout.shape());
         Tensor tCrC = make_tensor(make_rmem_ptr(reinterpret_cast<ElmTypeC *>(registers_mem)), rC_layout);
 
-        Tensor s = make_tensor(make_gmem_ptr(reinterpret_cast<ElmTypeC *>(shared_mem)), s_layout);
+        Tensor s = make_tensor(make_smem_ptr(reinterpret_cast<ElmTypeC *>(shared_mem)), s_layout);
         Tensor tCsC = thr_mma.partition_C(s);
 
         //  TODO: take as input, or just use copy instead?
@@ -199,6 +203,8 @@ FUTHARK_FUN_ATTR void futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigne
     Tensor tCrB_copy_view  = smem_thr_copy_B.retile_D(tCrB);
 
     // TODO: add tDrD? try cooperative gemm
+
+    // Wait for data copied asynchronously by futrts_copyGlobalShared
     cp_async_wait<0>();
     __syncthreads();
 
