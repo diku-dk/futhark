@@ -551,7 +551,6 @@ test-suite unit
       Futhark.Analysis.Proofs.RewriteTests
       Futhark.Analysis.Proofs.UnifyTests
       Futhark.Analysis.Proofs.AlgebraPC.SolveTests
-      Futhark.Analysis.Proofs.AlgebraPC.TempTests
       Futhark.BenchTests
       Futhark.IR.GPUTests
       Futhark.IR.MCTests

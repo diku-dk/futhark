@@ -21,8 +21,9 @@ import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
-import Futhark.SoP.Monad (addEquiv, addProperty, addRange, addUntrans, mkRangeLB)
-import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP_, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
+import Futhark.SoP.Monad (addProperty, addUntrans)
+import Futhark.SoP.Refine (addRel)
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP_, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
@@ -169,8 +170,6 @@ forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do
       idx@(IndexFn idx_iter _) <- forward idx'
       xs <- forward xs'
-      debugPrettyM "idx" idx
-      debugPrettyM "xs" xs
       -- If xs has a Cat iterator, this indexing can only be done
       -- if we can express k in terms of i.
       capture_avoiding_rep <-
@@ -461,9 +460,6 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       domain_covered <- f_seg `at_k` m .-. int2SoP 1 $== dest_size
       when (isUnknown domain_covered) $
         error "scatter: segments do not cover iterator domain"
-      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --     | i == seg(k) ^ p(k) => vals[k]
-      --     | i /= seg(k) || not p(k) => dest[i]
       i <- newVName "i"
       dest_hole <- newVName "dest_hole"
       vals_hole <- newVName "vals_hole"
@@ -540,8 +536,6 @@ forward expr@(E.AppExp (E.Apply f args _) _)
                       singleCase . sym2SoP $
                         Apply (Var g) (map (sym2SoP . Var) arg_names)
                   }
-          debugPrettyM "g_fn:" g_fn
-          debugPrettyM "g:" g
           when (typeIsBool return_type) $ addProperty (Algebra.Var g) Algebra.Boolean
           substParams g_fn (zip arg_names arg_fns)
 forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
@@ -607,16 +601,17 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
       Just <$> mkRef id ref
   where
     mkRef wrap (E.OpSectionRight (E.QualName [] vn_op) _ y _ _ _) = do
-      let (op, adder) = case E.baseString vn_op of
-            ">=" -> ((:>=), \vn -> addRange (Algebra.Var vn) . mkRangeLB)
-            "==" -> ((:==), addEquiv . Algebra.Var)
+      let (rel, alg_rel) = case E.baseString vn_op of
+            ">=" -> ((:>=), (:>=:))
+            "==" -> ((:==), (:==:))
             _ -> undefined
       y' <- getScalar <$> (forward y >>= rewrite)
-      let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `op` y'
+      let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `rel` y'
       let effect = do
-            alg_vn <- newVName (E.baseString param <> "ª")
-            addUntrans (Algebra.Var alg_vn) (wrap (Var param)) -- (Idx (Var param) hole)
-            adder alg_vn =<< toAlgebra y'
+            alg_param <- Algebra.Var <$> newVName (E.baseString param <> "ª")
+            addUntrans alg_param (wrap (Var param))
+            alg_y' <- toAlgebra y'
+            addRel $ alg_rel (sym2SoP alg_param) alg_y'
       pure (check, effect)
     mkRef _ x = error $ "Unhandled refinement predicate " <> show x
 

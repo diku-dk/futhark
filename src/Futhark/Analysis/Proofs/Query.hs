@@ -25,13 +25,13 @@ import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrint
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
-import Futhark.SoP.Monad (MonadSoP, addRange, mkRange, mkRangeLB, mkRangeUB)
-import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.-.))
+import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.-.), Rel (..))
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
 import Futhark.Analysis.Proofs.IndexFnPlus (repDomain)
 import Control.Monad (void)
-import Futhark.Util.Pretty (prettyStringW, docStringW, pretty, indent, hang)
+import Futhark.Util.Pretty (prettyStringW)
+import Futhark.SoP.Refine (addRel)
 
 data MonoDir = Inc | IncStrict | Dec | DecStrict
   deriving (Show, Eq, Ord)
@@ -54,9 +54,10 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
         case it of
           Forall i _ -> do
             -- Add j < i. Check p(j) ^ p(i) => q(j) `rel` q(i).
-            addRange (Algebra.Var i) (mkRangeLB $ int2SoP 1)
+            addRel (int2SoP 1 :<=: sym2SoP (Algebra.Var i))
             j <- newVName "j"
-            addRange (Algebra.Var j) (mkRange (int2SoP 0) (sym2SoP (Algebra.Var i) .-. int2SoP 1))
+            addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var j))
+            addRel (sym2SoP (Algebra.Var j) :<=: sym2SoP (Algebra.Var i) .-. int2SoP 1)
             assume (fromJust . justSym $ p @ Var j)
             let rel = case dir of
                   Inc -> ($<=)
@@ -121,8 +122,8 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
       let branches = casesToList cs
       i <- newNameFromString "i"
       j <- newNameFromString "j"
-      addRange (Algebra.Var i) (mkRangeLB (int2SoP 0))
-      addRange (Algebra.Var j) (mkRangeLB (int2SoP 0))
+      addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var i))
+      addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var j))
       let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
       let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
@@ -202,9 +203,8 @@ sorted cmp wat = runMaybeT $ quicksort wat
         Undefined -> fail ""
         _ -> pure ord
 
-(+<) :: (MonadSoP Algebra.Symbol e p m) => VName -> VName -> m ()
 i +< j = do
-  addRange (Algebra.Var i) (mkRangeUB (sym2SoP (Algebra.Var j) .-. int2SoP 1))
+  addRel (sym2SoP (Algebra.Var i) :<=: sym2SoP (Algebra.Var j) .-. int2SoP 1)
 
 isYes :: Answer -> Bool
 isYes Yes = True

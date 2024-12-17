@@ -8,9 +8,9 @@ import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
-import Futhark.SoP.Expression (Expression)
+import Futhark.SoP.Expression (Expression (divInsteadOfMod, moduloIsh, processExp))
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
-import Futhark.Util.Pretty (Pretty, docString, pretty, prettyString, docStringW)
+import Futhark.Util.Pretty (Pretty, docString, docStringW, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 
@@ -39,9 +39,9 @@ instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
   putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
 
-instance Expression Symbol
-
--- TODO Is this constraint on MonadSoP needed?
+-- TODO remove moduloIsh from RefineEquivs if unimplemented.
+instance Expression Symbol where
+  moduloIsh _ = Nothing
 
 instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
   getUntrans = gets (untrans . algenv)

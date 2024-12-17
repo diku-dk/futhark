@@ -4,7 +4,6 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
     fromAlgebra,
     rollbackAlgEnv,
     algebraContext,
-    toAlgebraSymbol,
     isBooleanM,
     getDisjoint,
   )
@@ -24,8 +23,9 @@ import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap, 
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
-import Futhark.SoP.Monad (addEquiv, addProperty, addRange, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym, mkRange)
-import Futhark.SoP.SoP (SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
+import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym)
+import Futhark.SoP.Refine (addRel)
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 
@@ -72,7 +72,8 @@ algebraContext fn m = rollbackAlgEnv $ do
       vn <- case fst <$> res of
         Nothing -> addUntrans =<< x `removeQuantifier` i
         Just vn -> pure vn
-      addRange (Algebra.Var vn) (mkRange (int2SoP 0) (int2SoP 1))
+      addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var vn))
+      addRel (sym2SoP (Algebra.Var vn) :<=: int2SoP 1)
       addProperty (Algebra.Var vn) Algebra.Boolean
       pure vn
 
@@ -184,9 +185,6 @@ instance ToSoP Algebra.Symbol Symbol where
 ------------------------------------------------------------------------------
 toAlgebra :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
 toAlgebra = mapSymSoP2M_ toAlgebra_ <=< handleQuantifiers
-
-toAlgebraSymbol :: Symbol -> IndexFnM Algebra.Symbol
-toAlgebraSymbol = toAlgebra_ <=< handleQuantifiers
 
 -- Replace bound variable `k` in `e` by Hole.
 removeQuantifier :: Symbol -> VName -> IndexFnM Symbol
@@ -322,7 +320,7 @@ toAlgebra_ x = handleBoolean x
 handleBoolean :: Symbol -> IndexFnM Algebra.Symbol
 handleBoolean (Bool p) = do
   x <- lookupUntransPE (Bool p)
-  addEquiv x (int2SoP $ boolToInt p)
+  addRel (sym2SoP x :==: int2SoP (boolToInt p))
   pure x
   where
     boolToInt True = 1
@@ -332,7 +330,8 @@ handleBoolean p = do
   vn <- case fst <$> res of
     Nothing -> addUntrans p
     Just vn -> pure vn
-  addRange (Algebra.Var vn) (mkRange (int2SoP 0) (int2SoP 1))
+  addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var vn))
+  addRel (sym2SoP (Algebra.Var vn) :<=: int2SoP 1)
   addProperty (Algebra.Var vn) Algebra.Boolean
   case snd =<< res of
     Just idx -> do
