@@ -194,6 +194,11 @@ tests =
         run
           ( do
               -- n >  i₁₈₀₉₀ + ∑j₁₈₀₀₂∈(i₁₈₀₉₀ .. -1 + n₄₅₄₃) (conds₄₅₄₅[j₁₈₀₀₂] = 1) + ∑j₁₈₀₀₂∈(i₁₈₀₉₀ .. -1 + n₄₅₄₃) (conds₄₅₄₅[j₁₈₀₀₂] = 2)
+              --       Untranslatable: []
+              -- Equivalences: [(A₇[i2₄], 0), (⟦C₉⟧[i1₃], 0), (⟦D₁₀⟧[i1₃], 0)]
+              -- Ranges: max{0} <= i1₃ <= min{-1 + n₆}
+              -- Properties: [(C₉, {Disjoint (D₁₀, E₁₁)}), (D₁₀, {Disjoint (C₉, E₁₁)})]
+              -- 
               addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
               let pc = POR $ S.singleton c0 -- conds[i] == 1
               let pd = POR $ S.singleton d0 -- conds[i] == 2
@@ -202,6 +207,8 @@ tests =
               addEquiv (Idx pc (sVar i1)) (int 0)
               addProperty (Var c0) (Disjoint set_de)
               addProperty (Var d0) (Disjoint set_ce)
+              -- debugOn
+              -- debugPrintAlgEnv
               let sum1 = Sum pc (sVar i1) (sVar n .-. int 1)
                   sum2 = Sum pd (sVar i1) (sVar n .-. int 1)
               (sVar i1 .+. (sum1 ~+~ sum2)) FM.$<$ sVar n
@@ -246,7 +253,7 @@ tests =
       testCase "Partition3 branch comparison (new form)" $
         run
           ( do
-              debugOn
+              -- debugOn
               -- 0 <= i2 < i1 < n
               addRange (Var  n) $ mkRangeLB (int 1)
               addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
@@ -599,8 +606,8 @@ tests =
               addEquiv (Idx d (sVar j)) (int 0)
               -- Add properties.
               addProperty (Var c0) (Disjoint $ S.singleton d0)
-              debugOn
-              debugPrintAlgEnv
+              -- debugOn
+              -- debugPrintAlgEnv
               -- \a b -> ∑⟦cª₄₉₈₉₅⟧[a : b]
               let c_sum lb ub = sym2SoP $ Sum c lb ub
               let f = sVar i .+. c_sum (sVar i .+. int 1) (int (-1) .+. shp_sum (sVar k))

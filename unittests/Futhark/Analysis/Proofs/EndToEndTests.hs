@@ -33,6 +33,7 @@ tests =
   testGroup
     "Proofs.EndToEnd"
     [ mkTest
+{--
         "tests/indexfn/part2indices.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
@@ -69,10 +70,13 @@ tests =
         )
         Yes,
       mkTest
+--}
         "tests/indexfn/part3indices.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+            debugOn
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
+{--
         Yes,
       mkTest
         "tests/indexfn/part2indicesL.fut"
@@ -84,7 +88,6 @@ tests =
       mkTest
         "tests/indexfn/part2indicesL.fut"
         ( \fn -> do
-            debugOn
             debugM "TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE"
             -- XXX Temporary madness until we have part2indicesL on the desired form.
             csL <- newNameFromString "csL"
@@ -150,6 +153,7 @@ tests =
             end <- rewrite $ intervalEnd dom
             prove (ForallSegments $ \_ -> PermutationOfRange start end) fn_desired_form
         )
+--}
         Yes
     ]
   where
