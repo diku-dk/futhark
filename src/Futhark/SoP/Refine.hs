@@ -24,6 +24,9 @@ import Futhark.SoP.SoP
 import Futhark.SoP.Util
 import Futhark.Util.Pretty
 
+-- | The result is a tuple of sets:
+--   the first  set contains equal-to-zero constraints,
+--   the second set contains inequality (`>= 0`) constraints
 constraintToSoP :: (Ord u, MonadSoP u e p m) => Rel u -> m (Set (SoP u == 0), Set (SoP u >= 0))
 constraintToSoP (x :<=: y) = pure (mempty, S.singleton $ y .-. x)
 constraintToSoP (x :<: y) = pure (mempty, S.singleton $ y .-. (x .+. int2SoP 1))

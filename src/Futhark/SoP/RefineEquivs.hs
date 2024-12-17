@@ -164,7 +164,7 @@ addLegalCands cand_set = do
   rs <- getRanges
   eqs <- getEquivs
   let -- Chose the candidate @sym -> sop@ whose @sop@ has
-      -- the smallest number of symbols in the environment.
+      -- the smallest number of symbols not present in the environment.
       env_syms = M.keysSet eqs <> M.keysSet rs
       cand = minimumBy (scoreCand env_syms) cand_set
   -- Check whether target substitution does not create cycles
