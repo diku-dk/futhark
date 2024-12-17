@@ -91,9 +91,6 @@ combineSamePow (q, tab) (b, sop) =
 sop_one :: SoP Symbol
 sop_one = int2SoP 1
 
-sop_zero :: SoP Symbol
-sop_zero = int2SoP 0
-
 type FoldFunTp m =
       Maybe (SoP Symbol, Symbol) ->
       (Symbol, Int) ->
@@ -159,8 +156,8 @@ getEquivSoP equivs symb@(Idx (POR nms) ind_sop)
   then pure $ Just sop_one
   -- \^ we found a True term in an OR node => True
   else if length eq_vs == length syms &&
-          all (== sop_zero) eq_vs
-       then pure $ Just sop_zero
+          all isZero eq_vs
+       then pure $ Just $ int2SoP 0
        -- \^ all are zero
        else pure $ M.lookup symb equivs
   where

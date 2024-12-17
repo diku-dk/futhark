@@ -58,6 +58,7 @@ module Futhark.SoP.SoP
     padWithZero,
     mapSymSoP2M_,
     mapSymSoP2M,
+    isZero,
   )
 where
 
@@ -438,6 +439,11 @@ justPositive sop
   | Just (t, a) <- justSingleTerm sop =
       a > 0 && all (even . snd) (termPowers t)
   | otherwise = False
+
+-- | Is this SoP equal to zero?
+isZero :: (Ord u) => SoP u -> Bool
+isZero sop | Just 0 <- justConstant sop = True
+isZero _ = False
 
 --------------------------------------------------------------------------------
 -- Free symbols in SoPs
