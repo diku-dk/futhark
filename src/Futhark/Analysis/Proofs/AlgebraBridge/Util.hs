@@ -1,31 +1,32 @@
 -- Utilities for using the Algebra layer from the IndexFn layer.
 module Futhark.Analysis.Proofs.AlgebraBridge.Util where
 
-import Control.Monad (unless, (<=<))
+import Control.Monad (unless)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, isBooleanM, rollbackAlgEnv, toAlgebra)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugPrintAlgEnv)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
+import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), prettyString, viaShow)
 
 assume :: Symbol -> IndexFnM ()
-assume (p :&& q) = assume p >> assume q
 assume p = do
   booltype <- isBooleanM p
   -- This is could just be a no-op, if not boolean, but I'd like to know why.
   unless booltype (error $ "Assume on non-boolean: " <> prettyString p)
   addRelSymbol p
   addEq 1 p
-  addEq 0 (neg p)
   -- Add that pairwise disjoint symbols are false.
   mapM_ (addEq 0) =<< getDisjoint p
+  case p of
+    p1 :&& p2 -> assume p1 >> assume p2
+    _ -> pure ()
   where
     addEq n sym = do
       x <- toAlgebra (sym2SoP sym)
