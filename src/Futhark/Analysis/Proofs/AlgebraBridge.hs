@@ -165,4 +165,4 @@ cnfToList x = [x]
 algDebugPrettyM :: String -> SoP Symbol -> IndexFnM ()
 algDebugPrettyM msg x = do
   alg_x <- toAlgebra x
-  whenDebug $ traceM $ docStringW 110 $ "    " <> pretty msg <> " " <> pretty alg_x
+  whenDebug $ traceM $ docStringW 110 $ "  " <> pretty msg <> " " <> pretty alg_x

@@ -21,7 +21,7 @@ import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algDe
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (repDomain)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugT, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
@@ -48,7 +48,7 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
   case query of
     CaseCheck transf -> check (transf q)
     CaseIsMonotonic dir ->
-      debugT (prettyString p <> " is monotonic " <> show dir <> ": ") $
+      debugT "  " $
         case it of
           Forall i _ -> do
             -- Add j < i. Check p(j) ^ p(i) => q(j) `rel` q(i).
@@ -62,8 +62,8 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
                   IncStrict -> ($<)
                   Dec -> ($>=)
                   DecStrict -> ($>)
-            algDebugPrettyM "q @ i:" q
-            algDebugPrettyM "q @ j:" (q @ Var j :: SoP Symbol)
+            debugM $ "  Monotonic " <> show dir <> ": " <> prettyString p
+            algDebugPrettyM "  =>" q
             (q @ Var j) `rel` q
             where
               f @ x = rep (mkRep i x) f
@@ -132,8 +132,8 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
   let case_in_bounds (p, f) = rollbackAlgEnv $ do
         addRelIterator iter_i
         assume (fromJust . justSym $ p @ i)
-        debugPrettyM "Case:" (p @ i :: SoP Symbol)
-        debugPrettyM "       =>" (f @ i :: SoP Symbol)
+        algDebugPrettyM "Case:" (p @ i :: SoP Symbol)
+        algDebugPrettyM "\t=>" (f @ i :: SoP Symbol)
         let bug1 = debugT ("    >= " <> prettyStringW 110 start)
         let bug2 = debugT ("    <= " <> prettyStringW 110 end)
         bug1 (start $<= f @ i) `andM` bug2 (f @ i $<= end)
@@ -154,16 +154,16 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
                     j +< i
                     (f @ i) `rel` (g @ j)
                in case_i_lt_j `andM` case_i_gt_j
-        algDebugPrettyM "p_f(i) =>" (p_f @ i :: SoP Symbol)
-        algDebugPrettyM "\tf(i)" (f @ i :: SoP Symbol)
-        algDebugPrettyM "p_g(i) =>" (p_g @ i :: SoP Symbol)
-        algDebugPrettyM "\tg(j)" (g @ j :: SoP Symbol)
-        f_LT_g <- debugT "case f < g" $ f_rel_g ($<)
-        debugT "  f `cmp` g" $
+        algDebugPrettyM "f(i):" (p_f @ i :: SoP Symbol)
+        algDebugPrettyM "\t=>" (f @ i :: SoP Symbol)
+        algDebugPrettyM "g(i):" (p_g @ i :: SoP Symbol)
+        algDebugPrettyM "\t=>" (g @ j :: SoP Symbol)
+        f_LT_g <- f_rel_g ($<)
+        debugT "\tf `cmp` g" $
           case f_LT_g of
             Yes -> pure LT
             Unknown -> do
-              f_GT_g <- debugT "case f > g" $ f_rel_g ($>)
+              f_GT_g <- f_rel_g ($>)
               case f_GT_g of
                 Yes -> pure GT
                 Unknown -> pure Undefined
