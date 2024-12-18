@@ -16,6 +16,7 @@ where
 import Control.Monad (unless)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
+import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, isBooleanM, toAlgebra)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
@@ -23,9 +24,10 @@ import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
-import Futhark.SoP.Refine (addRel)
+import Futhark.SoP.Refine (addRel, addRels)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), prettyString, viaShow)
+import Futhark.SoP.Monad (addRange, mkRange)
 
 -- Fourer Motzkin Elimination solver may return True or False.
 -- True means the query holds. False means "I don't know".
@@ -85,23 +87,34 @@ addRelIterator :: Iterator -> IndexFnM ()
 addRelIterator (Forall i dom) = case dom of
   Iota n -> do
     n' <- toAlgebra n
-    addRel (int2SoP 1 :<=: n')
     dom_end <- Algebra.simplify =<< toAlgebra (domainEnd dom)
-    addBound (int2SoP 0, i, dom_end)
+    addRels'
+      [ int2SoP 1 :<=: n',
+        int2SoP 0 :<=: sVar i,
+        sVar i :<=: dom_end
+      ]
   Cat k m b -> do
     m' <- toAlgebra m
-    addRel (int2SoP 1 :<=: m')
-    addBound (int2SoP 0, k, m' .-. int2SoP 1)
     dom_start <- Algebra.simplify =<< toAlgebra (domainStart dom)
     dom_end <- Algebra.simplify =<< toAlgebra (domainEnd dom)
-    addBound (dom_start, i, dom_end)
     interval_start <- Algebra.simplify =<< toAlgebra b
     interval_end <- Algebra.simplify =<< toAlgebra (intervalEnd dom)
-    addBound (interval_start, i, interval_end)
+    -- addRange (Algebra.Var i) $ mkRange interval_start interval_end
+    addRels'
+      [
+        interval_start :<=: sVar i,
+        sVar i :<=: interval_end
+      ]
+    addRels'
+      [ int2SoP 1 :<=: m',
+        int2SoP 0 :<=: sVar k,
+        sVar k :<=: m' .-. int2SoP 1
+        -- dom_start :<=: sVar i
+        -- sVar i :<=: dom_end,
+      ]
   where
-    addBound (x, vn, y) = do
-      addRel (x :<=: sym2SoP (Algebra.Var vn))
-      addRel (sym2SoP (Algebra.Var vn) :<=: y)
+    sVar = sym2SoP . Algebra.Var
+    addRels' = addRels . S.fromList
 addRelIterator _ = pure ()
 
 answerFromBool :: Bool -> Answer

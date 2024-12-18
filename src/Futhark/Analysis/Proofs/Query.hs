@@ -21,15 +21,17 @@ import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algDe
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (repDomain)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugT, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugT, rollbackAlgEnv, debugPrintAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
-import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, sym2SoP, (.-.))
+import Futhark.SoP.Refine (addRel, addRels)
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, sym2SoP, (.-.), Range (lowerBound))
 import Futhark.Util.Pretty (prettyStringW)
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
+import Futhark.SoP.Monad (lookupRange)
+import qualified Data.Set as S
 
 data MonoDir = Inc | IncStrict | Dec | DecStrict
   deriving (Show, Eq, Ord)
@@ -43,6 +45,7 @@ data Query
 askQ :: Query -> IndexFn -> Int -> IndexFnM Answer
 askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
   let (p, q) = getCase case_idx cs
+  debugPrintAlgEnv
   addRelIterator it
   assume p
   case query of
@@ -52,18 +55,20 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
         case it of
           Forall i _ -> do
             -- Add j < i. Check p(j) ^ p(i) => q(j) `rel` q(i).
-            addRel (int2SoP 1 :<=: sym2SoP (Algebra.Var i))
             j <- newVName "j"
-            addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var j))
-            addRel (sym2SoP (Algebra.Var j) :<=: sym2SoP (Algebra.Var i) .-. int2SoP 1)
+            j `addLowerBoundLike` i
+            j +< i
             assume (fromJust . justSym $ p @ Var j)
             let rel = case dir of
                   Inc -> ($<=)
                   IncStrict -> ($<)
                   Dec -> ($>=)
                   DecStrict -> ($>)
+            debugPrintAlgEnv
             debugM $ "  Monotonic " <> show dir <> ": " <> prettyString p
-            algDebugPrettyM "  =>" q
+            algDebugPrettyM "" (sym2SoP p)
+            algDebugPrettyM "    =>" q
+            -- simplified <- Algebra.simplify $ q .-. (q @ Var j)
             (q @ Var j) `rel` q
             where
               f @ x = rep (mkRep i x) f
@@ -120,8 +125,10 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
   let branches = casesToList cs
   i <- newNameFromString "i"
   j <- newNameFromString "j"
-  addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var i))
-  addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var j))
+  -- addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var i))
+  -- addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var j))
+  -- addRelIterator $ Forall i $ repDomain (mkRep i0 (Var i)) dom
+  -- addRelIterator $ Forall j $ repDomain (mkRep i0 (Var j)) dom
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
   let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
@@ -146,11 +153,13 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
               let case_i_lt_j = rollbackAlgEnv $ do
                     -- Case i < j => f(i) `rel` g(j).
                     addRelIterator iter_j
+                    i `addLowerBoundLike` j
                     i +< j
                     (f @ i) `rel` (g @ j)
                   case_i_gt_j = rollbackAlgEnv $ do
                     -- Case i > j => f(i) `rel` g(j):
                     addRelIterator iter_i
+                    j `addLowerBoundLike` i
                     j +< i
                     (f @ i) `rel` (g @ j)
                in case_i_lt_j `andM` case_i_gt_j
@@ -205,6 +214,11 @@ sorted cmp wat = runMaybeT $ quicksort wat
 (+<) :: VName -> VName -> IndexFnM ()
 i +< j = do
   addRel (sym2SoP (Algebra.Var i) :<=: sym2SoP (Algebra.Var j) .-. int2SoP 1)
+
+addLowerBoundLike :: VName -> VName -> IndexFnM ()
+i `addLowerBoundLike` j = do
+  lbs <- lowerBound <$> lookupRange (Algebra.Var j)
+  addRels (S.map (\lb -> lb :<=: sym2SoP (Algebra.Var i)) lbs)
 
 isYes :: Answer -> Bool
 isYes Yes = True
