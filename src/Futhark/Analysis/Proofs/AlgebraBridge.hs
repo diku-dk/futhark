@@ -163,6 +163,6 @@ cnfToList x = [x]
 -- WARNING: This adds stuff to the Algebra environment.
 -- (Should be used inside algebra rollbacks.)
 algDebugPrettyM :: String -> SoP Symbol -> IndexFnM ()
-algDebugPrettyM msg x = do
+algDebugPrettyM msg x = rollbackAlgEnv $ do
   alg_x <- toAlgebra x
   whenDebug $ traceM $ docStringW 110 $ "  " <> pretty msg <> " " <> pretty alg_x
