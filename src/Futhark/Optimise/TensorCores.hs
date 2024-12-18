@@ -730,6 +730,7 @@ innerOpMatch
     )
     | Just ne <- segBinOpsMatch segBinOps =
         do
+          -- TODO: Types should be f16 or f32 for the segred
           let (dimVars, segDims) = unzip $ unSegSpace space
           --  TODO: check this, probably not correct when not maintaining scope
           let freeVars = freeIn segRed
@@ -763,6 +764,14 @@ singleDim :: [d] -> Maybe d
 singleDim [v] = Just v
 singleDim _ = Nothing
 
+hasCorrectMatMulOperandType :: Type -> Bool
+hasCorrectMatMulOperandType (Array typ _ _) = hasCorrectMatMulOperandType_ typ
+hasCorrectMatMulOperandType _ = False
+
+hasCorrectMatMulOperandType_ :: PrimType -> Bool
+hasCorrectMatMulOperandType_ (FloatType Float16) = True
+hasCorrectMatMulOperandType_ _ = False
+
 -- TODO: support more than 3 dimensions?
 -- The indexVars corresponds to the variables from the SegSpace
 inBlockKernelBodyMatch ::
@@ -779,8 +788,9 @@ inBlockKernelBodyMatch
     let sTable = ST.insertStms (informStms stms) $ ST.fromScope $ addScopeWisdom scope
     --  TODO: rename to use A, B, C?
     (resExp, _) <- ST.lookupExp res sTable
-    resWithoutConversion <- case resExp of
-      BasicOp (ConvOp _ (Var converted)) -> do
+    -- Check that the result is optionally converted from f16->f32
+    resWithoutConversion <- case resExp of    
+      BasicOp (ConvOp (FPConv Float16 Float32) (Var converted)) -> do
         (convertedExp, _) <- ST.lookupExp converted sTable
         pure convertedExp
       notConvertedExp ->
@@ -790,8 +800,14 @@ inBlockKernelBodyMatch
     (mulArg2Exp, _) <- ST.lookupExp mulArg2 sTable
     (arr1, slice1) <- matchesMulArg $ removeExpWisdom mulArg1Exp
     (arr2, slice2) <- matchesMulArg $ removeExpWisdom mulArg2Exp
+
+    -- For now we only support mixed f16/f32 tensor core operations.
+    -- Therefore the array operands A and B in C = A @ B must be f16.
     arr1Type <- ST.lookupType arr1 sTable
     arr2Type <- ST.lookupType arr2 sTable
+    guard $ hasCorrectMatMulOperandType arr1Type
+    guard $ hasCorrectMatMulOperandType arr2Type
+    
     resType <- ST.lookupType res sTable
     slice1' <- mapM dimFix $ unSlice slice1
     slice2' <- mapM dimFix $ unSlice slice2
