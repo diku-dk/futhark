@@ -138,7 +138,7 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
         let bug2 = debugT ("    <= " <> prettyStringW 110 end)
         bug1 (start $<= f @ i) `andM` bug2 (f @ i $<= end)
 
-  let (p_f, f) `cmp` (p_g, g) = do
+  let (p_f, f) `cmp` (p_g, g) = rollbackAlgEnv $ do
         assume (fromJust . justSym $ p_f @ i)
         assume (fromJust . justSym $ p_g @ j)
         let f_rel_g rel =
