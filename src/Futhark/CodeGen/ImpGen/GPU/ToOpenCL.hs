@@ -38,7 +38,7 @@ import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 import Prelude hiding (rem)
-import qualified Futhark.Optimise.IntraMMM.Utils as MMM
+import qualified Futhark.Optimise.TensorCores.Utils as TC
 import Text.PrettyPrint.Mainland
 import Text.PrettyPrint.Mainland.Class
 
@@ -269,7 +269,7 @@ genGPUCode env mode body failures =
 -- Compilation of a device function that is not not invoked from the
 -- host, but is invoked by (perhaps multiple) kernels.
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
-generateDeviceFun fname _ | MMM.isMMMName fname = pure ()
+generateDeviceFun fname _ | TC.isMMMName fname = pure ()
 generateDeviceFun fname device_func = do
 -- TODO: handle?
   when (any memParam $ functionInput device_func) bad
@@ -814,8 +814,8 @@ inKernelOperations env mode body =
 
           what_next <- whatNext
           GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
-      | Just mmmName <- MMM.getMMMName fname = do
-        let numStaticArgs = if mmmName == MMM.gemmName then 7 else 4
+      | Just mmmName <- TC.getMMMName fname = do
+        let numStaticArgs = if mmmName == TC.gemmName then 7 else 4
         let (dynamicArgs, staticArgs) = splitAt (length args - numStaticArgs) args
         let convertedArgs = dynamicArgs <> fmap templateStatic staticArgs
         let out_args = [[C.cexp|&$id:d|] | d <- dests]

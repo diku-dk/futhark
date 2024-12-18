@@ -321,8 +321,8 @@ library
       Futhark.Optimise.GenRedOpt
       Futhark.Optimise.HistAccs
       Futhark.Optimise.InliningDeadFun
-      Futhark.Optimise.IntraMMM
-      Futhark.Optimise.IntraMMM.Utils
+      Futhark.Optimise.TensorCores
+      Futhark.Optimise.TensorCores.Utils
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
       Futhark.Optimise.ArrayShortCircuiting

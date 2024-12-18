@@ -46,7 +46,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
-import Futhark.Optimise.IntraMMM
+import Futhark.Optimise.TensorCores
 import Futhark.Pipeline
 
 -- | A pipeline used by all current compilers.  Performs inlining,
@@ -92,7 +92,7 @@ gputcPipeline =
       [ simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
-        intraMMM,
+        extractTensorCores,
         simplifyGPU,
         tileLoops,
         simplifyGPU,
@@ -185,7 +185,7 @@ gpumemtcPipeline =
     >>> onePass GPU.explicitAllocations
     >>> passes
       [
-        intraMMMMemFixup,
+        tensorCoreMemFixup,
         simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,

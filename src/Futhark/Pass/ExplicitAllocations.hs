@@ -56,7 +56,7 @@ import Futhark.Optimise.Simplify.Rep (mkWiseBody)
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Util (maybeNth, splitAt3)
-import qualified Futhark.Optimise.IntraMMM.Utils as MMM
+import qualified Futhark.Optimise.TensorCores.Utils as TC
 
 
 type Allocable fromrep torep inner =
@@ -613,15 +613,15 @@ explicitAllocationsGeneric space handleOp hints =
 
     allocInFun consts (FunDef entry attrs fname rettype params fbody) =
       let (paramSpaces, bodySpace, retSpace) =
-              if MMM.gemmName `MMM.isPrefixOfName` fname then
+              if TC.gemmName `TC.isPrefixOfName` fname then
                 let _ : _ : (Param _ _ (Array t shp _)) : _ = params in
                 let regsSpace = ScalarSpace (shapeDims shp) t in
                 ([Space "shared", Space "shared", regsSpace] <> replicate (length params - 3) space, regsSpace, regsSpace)
-              else if MMM.copyRegistersSharedName `MMM.isPrefixOfName` fname then
+              else if TC.copyRegistersSharedName `TC.isPrefixOfName` fname then
                 let (Param _ _ (Array t shp _)) : _ = params in
                 let regsSpace = ScalarSpace (drop 1 $ shapeDims shp) t in
                 ([regsSpace, Space "shared"] <> replicate (length params - 2) space, Space "shared", Space "shared")
-              else if MMM.copyGlobalSharedName `MMM.isPrefixOfName` fname then
+              else if TC.copyGlobalSharedName `TC.isPrefixOfName` fname then
                 ([Space "device", Space "shared"] <> replicate (length params - 2) space, Space "shared", Space "shared")
               else
                 (replicate (length params) space, space, space)
@@ -931,7 +931,7 @@ allocInExp (Loop merge form (Body () bodystms bodyres)) =
 allocInExp (Apply fname args rettype loc) = do
   space <- askDefaultSpace
   (forced_arg_spaces, retSpace) <-
-      if MMM.gemmName `MMM.isPrefixOfName` fname then do
+      if TC.gemmName `TC.isPrefixOfName` fname then do
         let _ : _ : (Var regsVar, _) : _ = args
         info <- lookupInfo regsVar
         case info of
@@ -943,7 +943,7 @@ allocInExp (Apply fname args rettype loc) = do
               regsSpace
             )
           _ -> pure (replicate (length args) Nothing, space)
-      else if MMM.copyRegistersSharedName `MMM.isPrefixOfName` fname then do
+      else if TC.copyRegistersSharedName `TC.isPrefixOfName` fname then do
         let (Var regsVar, _) : _ = args
         info <- lookupInfo regsVar
         case info of
@@ -955,7 +955,7 @@ allocInExp (Apply fname args rettype loc) = do
               Space "shared"
             )
           _ -> pure (replicate (length args) Nothing, space)
-      else if MMM.copyGlobalSharedName `MMM.isPrefixOfName` fname then
+      else if TC.copyGlobalSharedName `TC.isPrefixOfName` fname then
         pure ([Just $ Space "device", Just $ Space "shared"] <> replicate (length args - 2) Nothing, Space "shared")
       else
         pure (replicate (length args) Nothing, space)

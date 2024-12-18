@@ -47,7 +47,7 @@ import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Optimise.EntryPointMem
-import Futhark.Optimise.IntraMMM
+import Futhark.Optimise.TensorCores
 import Futhark.Pass
 import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
@@ -71,8 +71,6 @@ import System.Exit
 import System.FilePath
 import System.IO
 import Prelude hiding (id)
-import Futhark.Optimise.Simplify.Rep (Informing, Wise)
-import Futhark.IR.Traversals (TraverseOpStms)
 
 -- | What to do with the program after it has been read.
 data FutharkPipeline
@@ -685,8 +683,8 @@ commandLineOptions =
     typedPassOption soacsProg MC extractMulticore [],
     allocateOption "a",
     kernelsMemPassOption entryPointMemGPU [],
-    kernelsMemPassOption intraMMMMemFixup [],
-    kernelsPassOption intraMMM [],
+    kernelsMemPassOption tensorCoreMemFixup [],
+    kernelsPassOption extractTensorCores [],
     kernelsPassOption mergeGPUBodies [],
     kernelsMemPassOption doubleBufferGPU [],
     mcMemPassOption doubleBufferMC [],
