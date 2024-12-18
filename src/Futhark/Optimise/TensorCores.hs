@@ -730,7 +730,6 @@ innerOpMatch
     )
     | Just ne <- segBinOpsMatch segBinOps =
         do
-          -- TODO: Types should be f16 or f32 for the segred
           let (dimVars, segDims) = unzip $ unSegSpace space
           --  TODO: check this, probably not correct when not maintaining scope
           let freeVars = freeIn segRed
@@ -764,13 +763,10 @@ singleDim :: [d] -> Maybe d
 singleDim [v] = Just v
 singleDim _ = Nothing
 
-hasCorrectMatMulOperandType :: Type -> Bool
-hasCorrectMatMulOperandType (Array typ _ _) = hasCorrectMatMulOperandType_ typ
-hasCorrectMatMulOperandType _ = False
+hasCorrectMatMulOperandType :: Type -> PrimType -> Bool
+hasCorrectMatMulOperandType (Array typ _ _) pt = typ == pt
+hasCorrectMatMulOperandType _ _ = False
 
-hasCorrectMatMulOperandType_ :: PrimType -> Bool
-hasCorrectMatMulOperandType_ (FloatType Float16) = True
-hasCorrectMatMulOperandType_ _ = False
 
 -- TODO: support more than 3 dimensions?
 -- The indexVars corresponds to the variables from the SegSpace
@@ -785,10 +781,13 @@ inBlockKernelBodyMatch
   freeVars
   (KernelBody _ stms [Returns _ _ (Var res)])
   scope = do
+    let f16_type = FloatType Float16
     let sTable = ST.insertStms (informStms stms) $ ST.fromScope $ addScopeWisdom scope
     --  TODO: rename to use A, B, C?
     (resExp, _) <- ST.lookupExp res sTable
-    -- Check that the result is optionally converted from f16->f32
+    -- Check that the result is optionally converted from f16->f32.
+    -- In case it is not, then since the program type checks and the
+    -- arrays are asserted to be f16, then all operators must be f16
     resWithoutConversion <- case resExp of    
       BasicOp (ConvOp (FPConv Float16 Float32) (Var converted)) -> do
         (convertedExp, _) <- ST.lookupExp converted sTable
@@ -805,8 +804,8 @@ inBlockKernelBodyMatch
     -- Therefore the array operands A and B in C = A @ B must be f16.
     arr1Type <- ST.lookupType arr1 sTable
     arr2Type <- ST.lookupType arr2 sTable
-    guard $ hasCorrectMatMulOperandType arr1Type
-    guard $ hasCorrectMatMulOperandType arr2Type
+    guard $ hasCorrectMatMulOperandType arr1Type f16_type
+    guard $ hasCorrectMatMulOperandType arr2Type f16_type
     
     resType <- ST.lookupType res sTable
     slice1' <- mapM dimFix $ unSlice slice1
