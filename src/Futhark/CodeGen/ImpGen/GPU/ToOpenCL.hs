@@ -32,15 +32,15 @@ import Futhark.CodeGen.RTS.CUDA (preludeCU, preludeMMM)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
+import Futhark.Optimise.TensorCores.Utils qualified as TC
 import Futhark.Util (zEncodeText)
 import Futhark.Util.IntegralExp (rem)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
-import Prelude hiding (rem)
-import qualified Futhark.Optimise.TensorCores.Utils as TC
 import Text.PrettyPrint.Mainland
 import Text.PrettyPrint.Mainland.Class
+import Prelude hiding (rem)
 
 -- | Generate HIP host and device code.
 kernelsToHIP :: ImpGPU.Program -> ImpOpenCL.Program
@@ -51,6 +51,7 @@ kernelsToCUDA :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateGPU TargetCUDA
 
 -- TODO(k): kernelsToCUDATC
+
 -- | Like @kernelsToCUDA@, but also supports tensor cores
 kernelsToCUDATC :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToCUDATC = translateGPU TargetCUDATC
@@ -271,7 +272,7 @@ genGPUCode env mode body failures =
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
 generateDeviceFun fname _ | TC.isMMMName fname = pure ()
 generateDeviceFun fname device_func = do
--- TODO: handle?
+  -- TODO: handle?
   when (any memParam $ functionInput device_func) bad
 
   env <- ask
@@ -395,7 +396,6 @@ onKernel target kernel = do
               then (SafetyNone, [])
               else -- No possible failures in this kernel, so if we make
               -- it past an initial check, then we are good to go.
-
                 ( SafetyCheap,
                   [C.citems|if (*global_failure >= 0) { return; }|]
                 )
@@ -572,17 +572,18 @@ genCUDAPrelude =
   "#define FUTHARK_CUDA\n"
     <> preludeCU
     <> commonPrelude
-    -- TODO(k): remove this prelude
-    -- <> preludeMMM
+
+-- TODO(k): remove this prelude
+-- <> preludeMMM
 
 -- TODO(k): add prelude for tensor cores
 genCUDATCPrelude :: T.Text
 genCUDATCPrelude =
-  "#define FUTHARK_CUDA\n" 
-  <> "#define FUTHARK_CUDATC\n"
-  <> preludeCU
-  <> commonPrelude
-  <> preludeMMM -- Must come last
+  "#define FUTHARK_CUDA\n"
+    <> "#define FUTHARK_CUDATC\n"
+    <> preludeCU
+    <> commonPrelude
+    <> preludeMMM -- Must come last
 
 genHIPPrelude :: T.Text
 genHIPPrelude =
@@ -815,12 +816,12 @@ inKernelOperations env mode body =
           what_next <- whatNext
           GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
       | Just mmmName <- TC.getMMMName fname = do
-        let numStaticArgs = if mmmName == TC.gemmName then 7 else 4
-        let (dynamicArgs, staticArgs) = splitAt (length args - numStaticArgs) args
-        let convertedArgs = dynamicArgs <> fmap templateStatic staticArgs
-        let out_args = [[C.cexp|&$id:d|] | d <- dests]
-            args' = out_args ++ convertedArgs
-        GC.item [C.citem|$id:(funName mmmName)($args:args');|]
+          let numStaticArgs = if mmmName == TC.gemmName then 7 else 4
+          let (dynamicArgs, staticArgs) = splitAt (length args - numStaticArgs) args
+          let convertedArgs = dynamicArgs <> fmap templateStatic staticArgs
+          let out_args = [[C.cexp|&$id:d|] | d <- dests]
+              args' = out_args ++ convertedArgs
+          GC.item [C.citem|$id:(funName mmmName)($args:args');|]
       | otherwise = do
           let out_args = [[C.cexp|&$id:d|] | d <- dests]
               args' = out_args ++ args
@@ -847,12 +848,10 @@ inKernelOperations env mode body =
                                  $items:what_next
                                }|]
 
-
 templateStatic :: C.Exp -> C.Exp
---templateConsts (C.Cast _ (C.Const (C.IntConst s _ _ _) _) _) = [C.cexp|$esc:("Int<" <> s <> ">{}")|]
---templateConsts e = e
+-- templateConsts (C.Cast _ (C.Const (C.IntConst s _ _ _) _) _) = [C.cexp|$esc:("Int<" <> s <> ">{}")|]
+-- templateConsts e = e
 templateStatic e = [C.cexp|$esc:("Int<" <> (prettyCompact $ ppr e) <> ">{}")|]
-
 
 --- Checking requirements
 

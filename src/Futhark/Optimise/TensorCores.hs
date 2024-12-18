@@ -1,7 +1,8 @@
 module Futhark.Optimise.TensorCores
   ( extractTensorCores,
-    tensorCoreMemFixup
-  ) where
+    tensorCoreMemFixup,
+  )
+where
 
 import Control.Monad
 import Control.Monad.Identity
@@ -32,6 +33,7 @@ import Futhark.Pass
 import Futhark.Pass.Simplify
 import Prelude hiding (lookup)
 
+-- | Divide and round up.
 divUp :: Int -> Int -> Int
 divUp x y = (x + y - 1) `div` y
 
@@ -44,6 +46,7 @@ extractTensorCores =
     "Extracts NVIDIA tensor core MMA operations"
     transformProg
 
+-- Tensor core functions emitted (gemm, copy global shared, copy registers shared)
 type TcFunDef = (MMMSignature, FunDef GPU)
 
 type TcFuns = [TcFunDef]
@@ -55,6 +58,7 @@ data ExtractTcEnv = ExtractTcEnv
     envBlockSize :: Maybe Int
   }
 
+-- | Monad that the tensor core match and GPU IR code transformations runs within.
 type TensorCoreM = RWS ExtractTcEnv TcFuns VNameSource
 
 instance HasScope GPU TensorCoreM where
@@ -74,6 +78,7 @@ runBuilderMMM :: Builder GPU a -> Scope GPU -> TensorCoreM (a, Stms GPU)
 runBuilderMMM m s =
   modifyNameSource $ runState $ runBuilderT m s
 
+-- | Map a function over stmts and update the scope for each stmt.
 mapStmsWithScope ::
   (Monoid a, LocalScope rep f) =>
   (Stm rep -> f a) ->
@@ -87,10 +92,11 @@ mapStmsWithScope f stms =
       stms'' <- inScopeOf stm $ mapStmsWithScope f stms'
       pure $ stm' <> stms''
 
+-- | Creates an i64 SubExp
 mkInt64Const :: Int -> SubExp
 mkInt64Const = Constant . IntValue . intValue Int64
 
--- IR generation
+-- | Create the gemm function defintion.
 mkGemmFun ::
   (MonadFreshNames m) =>
   PrimType ->
@@ -161,6 +167,7 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
         resultBody [Var $ paramName cParam]
     )
 
+-- | Create the copy global shared function definition.
 mkCopyGlobalShared :: (MonadFreshNames m) => PrimType -> Int -> Int -> m TcFunDef
 mkCopyGlobalShared elmType sizeY sizeX = do
   let arrShape =
@@ -203,6 +210,7 @@ mkCopyGlobalShared elmType sizeY sizeX = do
         resultBody [Var $ paramName sharedParam]
     )
 
+-- | Create the copy from registers to shared memory definition.
 mkCopyRegistersShared ::
   (MonadFreshNames m) =>
   PrimType ->
@@ -262,10 +270,12 @@ mkCopyRegistersShared elmTypeA elmTypeB elmTypeC sizeM sizeN sizeRegs blockSize 
         resultBody [Var $ paramName sharedParam]
     )
 
--- Expression for creating shared(scratch) memory
+-- | Create some  shared (scratch) memory of the specified type and shape.
 scratchMem :: PrimType -> [Int] -> Exp GPU
 scratchMem elmType dims = BasicOp $ Scratch elmType $ map mkInt64Const dims
 
+-- | Rebuild the matrix multiplication computation.  The SegRed will be
+-- replae by calls to three tensor core related functions.
 buildMMM :: VName -> Int -> TensorCoreMatch -> Builder GPU TcFuns
 buildMMM
   resName
@@ -283,7 +293,7 @@ buildMMM
     let (warpsM, warpsN) = getOptimalWarps actualBlockSize match
     let blockSize = warpsM * warpsN * 32
     let cValsPerThread = sizeM * sizeN `div` blockSize
-    
+
     let elmTypeC = typeC kernelBodyMatch
         elmTypeB = typeB kernelBodyMatch
         elmTypeA = typeA kernelBodyMatch
@@ -451,7 +461,7 @@ buildMMM
               (Safe, SrcLoc NoLoc, [])
         pure [varRes threadMMAres]
     let [inBlockMMAres] = inBlockMMAres_list
-    -- BasicOp $ Scratch (typeC kernelBodyMatch) [mkInt64Const sizeM, mkInt64Const sizeN]
+
     cScratch <- letExp "cScratch" $ scratchMem elmTypeC [sizeM, sizeN]
     let copyArgsC =
           [ (Var inBlockMMAres, ObservePrim),
@@ -482,7 +492,8 @@ buildMMM
     letBindNames [resName] $ BasicOp $ SubExp $ Var cCopied
     pure addedFuns
 
--- Traverse and transform
+-- Functions for traversing the input program and transforming the relevant
+-- statement to use tensor cores.
 transformProg :: Prog GPU -> PassM (Prog GPU)
 transformProg (Prog opaqueTypes consts funs) = do
   (transformedFuns, mmmFuns) <-
@@ -544,6 +555,8 @@ transformOp :: Op GPU -> TensorCoreM (Op GPU)
 transformOp (SegOp sOp) = SegOp <$> transformSegOp sOp
 transformOp op = pure op
 
+-- | First we match an out SegMap to get the block size.  Later we
+-- try to set the block size dependent on the matrix multiplication dims.
 transformSegOp :: SegOp SegLevel GPU -> TensorCoreM (SegOp SegLevel GPU)
 transformSegOp
   sOp@( SegMap
@@ -589,8 +602,7 @@ transformKernelBody (KernelBody desc stms res) =
     <$> transformStms stms
     <*> pure res
 
--- Block size
-
+-- | Do we know the block size or not?
 data KnownUnknown a = Known a | Unknown
   deriving (Show, Eq, Ord)
 
@@ -601,25 +613,28 @@ instance (Semigroup a) => Semigroup (KnownUnknown a) where
   Known a <> Known b = Known $ a <> b
   _ <> _ = Unknown
 
-type MaxBlockSizeMonad = ReaderT (Scope GPU) (Writer (KnownUnknown (Max Int)))
+type MaxBlockSizeM = ReaderT (Scope GPU) (Writer (KnownUnknown (Max Int)))
 
-maxBlockSizeWalker :: Walker GPU MaxBlockSizeMonad
+-- | Find the max block size required for the intragroup kernels.
+-- This is needed in case more threads are needed than what is ideal for
+-- matmul using the tensor cores.
+maxBlockSizeWalker :: Walker GPU MaxBlockSizeM
 maxBlockSizeWalker =
   (identityWalker @GPU)
     { walkOnOp = maxBlockSizeOp,
       walkOnBody = maxBlockSizeBody
     }
 
-maxBlockSizeStms :: Stms GPU -> MaxBlockSizeMonad ()
+maxBlockSizeStms :: Stms GPU -> MaxBlockSizeM ()
 maxBlockSizeStms = mapStmsWithScope maxBlockSizeStm
 
-maxBlockSizeStm :: Stm GPU -> MaxBlockSizeMonad ()
+maxBlockSizeStm :: Stm GPU -> MaxBlockSizeM ()
 maxBlockSizeStm (Let _ _ e) = maxBlockSizeExp e
 
-maxBlockSizeExp :: Exp GPU -> MaxBlockSizeMonad ()
+maxBlockSizeExp :: Exp GPU -> MaxBlockSizeM ()
 maxBlockSizeExp = walkExpM maxBlockSizeWalker
 
-maxBlockSizeOp :: Op GPU -> MaxBlockSizeMonad ()
+maxBlockSizeOp :: Op GPU -> MaxBlockSizeM ()
 maxBlockSizeOp op = do
   scope <- askScope
   case (innerOpMatch scope op, op) of
@@ -630,7 +645,7 @@ maxBlockSizeOp op = do
           tell $ foldl prodKnownSegDim (Known 1) $ unSegSpace $ segSpace sOp
     _ -> pure ()
 
-maxBlockSizeBody :: Scope GPU -> Body GPU -> MaxBlockSizeMonad ()
+maxBlockSizeBody :: Scope GPU -> Body GPU -> MaxBlockSizeM ()
 maxBlockSizeBody scope (Body _ stms _) = localScope scope $ maxBlockSizeStms stms
 
 prodKnownSegDim ::
@@ -678,7 +693,7 @@ getOptimalWarps blockSize (TensorCoreMatch _ _ sizeM sizeN _) =
 --  3. Type of program. Sometimes more threads can be good.
 -- The current estimate might not be optimal in all cases.
 getOptimalBlockSize :: TensorCoreMatch -> Int
-getOptimalBlockSize (TensorCoreMatch _ _ sizeM sizeN _sizeK) =  
+getOptimalBlockSize (TensorCoreMatch _ _ sizeM sizeN _sizeK) =
   let optimalElmsPerWarp = 4096
    in ((sizeM * sizeN) `divUp` optimalElmsPerWarp) * 32
 
@@ -696,8 +711,7 @@ data TensorCoreMatch = TensorCoreMatch
 -- NOTE: The only type currently supported is f16 for A and B and f32 for C.
 -- Future work should also support f64 or maybe even mixed u8/s32.
 data KernelBodyMatch = KernelBodyMatch
-  {
-    innerIndecesA :: [VName],
+  { innerIndecesA :: [VName],
     innerIndecesB :: [VName],
     outerIndecesA :: [SubExp],
     outerIndecesB :: [SubExp],
@@ -783,7 +797,7 @@ inBlockKernelBodyMatch
     -- Check that the result is optionally converted from f16->f32.
     -- In case it is not, then since the program type checks and the
     -- arrays are asserted to be f16, then all operators must be f16
-    resWithoutConversion <- case resExp of    
+    resWithoutConversion <- case resExp of
       BasicOp (ConvOp (FPConv Float16 Float32) (Var converted)) -> do
         (convertedExp, _) <- ST.lookupExp converted sTable
         pure convertedExp
@@ -801,7 +815,7 @@ inBlockKernelBodyMatch
     arr2Type <- ST.lookupType arr2 sTable
     guard $ hasCorrectMatMulOperandType arr1Type f16_type
     guard $ hasCorrectMatMulOperandType arr2Type f16_type
-    
+
     resType <- ST.lookupType res sTable
     slice1' <- mapM dimFix $ unSlice slice1
     slice2' <- mapM dimFix $ unSlice slice2
@@ -1100,7 +1114,7 @@ fixStmt
     srcMemInfo <- lookupInfo srcMemMem
     case srcMemInfo of
       LetName (MemMem srcMemSpace)
-        | srcMemSpace == space ->            
+        | srcMemSpace == space ->
             -- Array is already in shared. Therefore, the copyGlobalShared call
             -- should be removed and we return removedCopy=True.
             modify ([(vName2, (srcArray, True)), (vName1, (srcMemMem, True))] <>)
@@ -1116,7 +1130,6 @@ fixStmt
         )
         aux
       $ Apply fName newArgs newRets info
-
 fixStmt
   ( Let
       ( Pat
@@ -1177,9 +1190,9 @@ replaceArg a = pure (a, False)
 fixExp :: Exp GPUMem -> FixM (Exp GPUMem)
 fixExp (Match subExps cases body matchDec) =
   Match subExps
-  <$> mapM fixCase cases
-  <*> fixBody body
-  <*> pure matchDec
+    <$> mapM fixCase cases
+    <*> fixBody body
+    <*> pure matchDec
 fixExp (Loop params form body) =
   localScope (scopeOfFParams (map fst params) <> scopeOfLoopForm form) $ do
     newBody <- fixBody body

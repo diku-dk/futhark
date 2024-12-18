@@ -143,15 +143,12 @@ compileProg version prog = do
        #include <nvrtc.h>
       |]
 
--- TODO(k): Could we have another function that compiles to imp with
--- our modifications
 -- | Like @compileProg@ but adds tensor core support.
 compileProgWithTC :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProgWithTC version prog = do
   ( ws,
     Program cuda_code cuda_prelude macros kernels types params failures prog'
     ) <-
-    -- TODO(k): use our custom kernel compilation that adds tensor cores
     ImpGenTC.compileProg prog
   (ws,)
     <$> GC.compileProg
@@ -180,4 +177,3 @@ compileProgWithTC version prog = do
        #include <cuda_runtime.h>
        #include <nvrtc.h>
       |]
-        
