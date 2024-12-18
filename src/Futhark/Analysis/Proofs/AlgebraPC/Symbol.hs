@@ -89,7 +89,8 @@ instance Pretty Symbol where
 instance Nameable Symbol where
   mkName (VNameSource i) = (Var $ E.VName (name i) i, VNameSource $ i + 1)
     where
-      name j = nameFromString [cycle ['a' .. 'z'] !! j, 'ª']
+      name j = nameFromString [cycle symbols !! j, 'ª']
+      symbols = ['a'  .. 'd'] <> ['p' .. 'r'] <> ['u' .. 'z']
 
 -- Returns the set of free variable names in a SoP Symbol.
 fv :: SoP Symbol -> S.Set VName
