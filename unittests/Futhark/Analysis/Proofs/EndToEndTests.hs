@@ -1,13 +1,18 @@
 module Futhark.Analysis.Proofs.EndToEndTests (tests) where
 
 import Control.Monad (forM_, unless)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromJust, mapMaybe)
 import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
+import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd, subIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query
+import Futhark.Analysis.Proofs.Rewrite (rewrite)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
+import Futhark.Analysis.Proofs.Unify (unify)
 import Futhark.Compiler.CLI (fileProg, readProgramOrDie)
-import Futhark.SoP.SoP (int2SoP, (.-.))
+import Futhark.MonadFreshNames (newNameFromString)
+import Futhark.SoP.SoP (int2SoP, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (docStringW, line, pretty, (<+>))
 import Language.Futhark qualified as E
 import Test.Tasty
@@ -18,7 +23,6 @@ tests =
   testGroup
     "Proofs.EndToEnd"
     [ mkTest
-{--
         "tests/indexfn/part2indices.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
@@ -55,13 +59,10 @@ tests =
         )
         Yes,
       mkTest
---}
         "tests/indexfn/part3indices.fut"
         ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
-            debugOn
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
-{--
         Yes,
       mkTest
         "tests/indexfn/part2indicesL.fut"
@@ -73,6 +74,7 @@ tests =
       mkTest
         "tests/indexfn/part2indicesL.fut"
         ( \fn -> do
+            debugOn
             debugM "TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE"
             -- XXX Temporary madness until we have part2indicesL on the desired form.
             csL <- newNameFromString "csL"
@@ -138,7 +140,6 @@ tests =
             end <- rewrite $ intervalEnd dom
             prove (ForallSegments $ \_ -> PermutationOfRange start end) fn_desired_form
         )
---}
         Yes
     ]
   where
