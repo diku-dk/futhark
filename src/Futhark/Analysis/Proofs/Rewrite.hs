@@ -1,11 +1,11 @@
-module Futhark.Analysis.Proofs.Rewrite where
+module Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules) where
 
 import Control.Monad (filterM, (<=<))
 import Data.List.NonEmpty qualified as NE
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, rollbackAlgEnv, simplify, ($>))
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, simplify, ($>))
 import Futhark.Analysis.Proofs.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd)
-import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Query (isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))

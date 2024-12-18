@@ -1,4 +1,11 @@
-module Futhark.Analysis.Proofs.Rule where
+module Futhark.Analysis.Proofs.Rule
+  ( applyRuleBook,
+    rulesIndexFn,
+    rulesSoP,
+    RuleBook,
+    Rule (..),
+  )
+where
 
 import Control.Monad (foldM, msum, (<=<))
 import Data.List (subsequences, (\\))
@@ -96,9 +103,6 @@ vacuous = const (pure True)
 
 int :: Integer -> SoP Symbol
 int = int2SoP
-
-sVar :: VName -> SoP Symbol
-sVar = sym2SoP . Var
 
 hole :: VName -> SoP Symbol
 hole = sym2SoP . Hole

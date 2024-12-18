@@ -1,32 +1,17 @@
 module Futhark.Analysis.Proofs.EndToEndTests (tests) where
 
 import Control.Monad (forM_, unless)
-import Data.Maybe (fromJust, mapMaybe)
+import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd, subIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query
-import Futhark.Analysis.Proofs.Rewrite (rewrite)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg)
-import Futhark.Analysis.Proofs.Unify (sub, unify)
-import Futhark.Compiler.CLI (Imports, fileProg, readProgramOrDie)
-import Futhark.MonadFreshNames (newNameFromString)
-import Futhark.SoP.SoP (int2SoP, sym2SoP, (.+.), (.-.))
+import Futhark.Compiler.CLI (fileProg, readProgramOrDie)
+import Futhark.SoP.SoP (int2SoP, (.-.))
 import Futhark.Util.Pretty (docStringW, line, pretty, (<+>))
 import Language.Futhark qualified as E
 import Test.Tasty
 import Test.Tasty.HUnit
-
--- Doubly last: get the last ValBind in the last import.
-getLastValBind :: Imports -> E.ValBind
-getLastValBind imports = case reverse imports of
-  [] -> error "No imports"
-  finalImport : _ ->
-    last . mapMaybe getValBind . E.progDecs . fileProg . snd $ finalImport
-  where
-    getValBind (E.ValDec vb) = Just vb
-    getValBind _ = Nothing
 
 tests :: TestTree
 tests =

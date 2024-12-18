@@ -335,6 +335,8 @@ tests =
 
     sHole = sym2SoP . Hole
 
+    sVar = sym2SoP . Var
+
     actual @??= expected = unless (actual == expected) (assertFailure msg)
       where
         msg = do

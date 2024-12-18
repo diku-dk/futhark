@@ -1,8 +1,7 @@
-module Futhark.Analysis.Proofs.Convert where
+module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (foldM, forM, forM_, msum, unless, void, when, (<=<))
-import Control.Monad.RWS (gets)
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
@@ -95,8 +94,8 @@ mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
   indexfn <- forward body >>= rewrite >>= bindfn vn
   insertTopLevel vn (params, indexfn)
   _ <- algebraContext indexfn $ do
-    alg <- gets algenv
-    whenDebug . traceM $ "Algebra context for indexfn:\n" <> prettyString alg
+    whenDebug . traceM $ "Algebra context for indexfn:\n"
+    debugPrintAlgEnv
   pure indexfn
 
 bindfn :: E.VName -> IndexFn -> IndexFnM IndexFn
@@ -144,7 +143,7 @@ forward (E.Negate x _) = do
         body = cases [(p, negSoP v) | (p, v) <- casesToList (body fn)]
       }
 forward e@(E.Var (E.QualName _ vn) _ _) = do
-  indexfns <- gets indexfns
+  indexfns <- getIndexFns
   case M.lookup vn indexfns of
     Just indexfn -> do
       pure indexfn
@@ -478,7 +477,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
   | (E.Var (E.QualName [] g) info _) <- f,
     args' <- getArgs args,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
-      toplevel <- gets toplevel
+      toplevel <- getTopLevelIndexFns
       case M.lookup g toplevel of
         Just (pats, indexfn) -> do
           -- g is a previously analyzed top-level function definiton.
@@ -666,6 +665,6 @@ bindLambdaBodyParams params = do
     -- Renaming k bound in `tmp_iter` to k bound in `iter`.
     let k_rep =
           fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
-    unless (null k_rep) $ debugPrettyM2 "k_rep" k_rep
+    unless (null k_rep) $ debugPrettyM "k_rep" k_rep
     insertIndexFn paramName (repIndexFn k_rep $ IndexFn Empty cs)
   pure iter

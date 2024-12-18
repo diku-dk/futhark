@@ -2,7 +2,6 @@
 module Futhark.Analysis.Proofs.AlgebraBridge.Translate
   ( toAlgebra,
     fromAlgebra,
-    rollbackAlgEnv,
     algebraContext,
     isBooleanM,
     getDisjoint,
@@ -10,13 +9,12 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
 where
 
 import Control.Monad (forM_, when, (<=<))
-import Control.Monad.RWS (gets, modify)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn (iterator), Iterator (..), getPredicates)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, VEnv (algenv))
+import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap, identityMapper)
@@ -28,13 +26,6 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
-
-rollbackAlgEnv :: IndexFnM a -> IndexFnM a
-rollbackAlgEnv computation = do
-  alg <- gets algenv
-  res <- computation
-  modify (\env -> env {algenv = alg})
-  pure res
 
 -- Do this action inside an Algebra "context" created for an IndexFn, ensuring:
 -- (1) Modifications to the Algebra environment are ephemeral; they are
@@ -177,7 +168,6 @@ repHoles x replacement =
 
 instance ToSoP Algebra.Symbol Symbol where
   -- Convert from IndexFn Symbol to Algebra Symbol.
-  -- toSoPNum symbol = (1,) . sym2SoP <$> toAlgebra symbol
   toSoPNum symbol = error $ "toSoPNum used on " <> prettyString symbol
 
 -----------------------------------------------------------------------------

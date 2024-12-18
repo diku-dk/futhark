@@ -6,7 +6,6 @@ import Data.Map qualified as M
 import Data.Maybe (isJust)
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (simplify)
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (rollbackAlgEnv)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repDomain)

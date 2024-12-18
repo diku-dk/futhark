@@ -2,35 +2,23 @@ module Futhark.Analysis.Proofs.AlgebraPC.SolveTests (tests) where
 
 import Control.Monad (unless, forM)
 import Data.Set qualified as S
-import Data.Map qualified as M
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, AlgEnv (..), UntransEnv (..), mkRangeUB, addProperty)
+import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, mkRangeUB, addProperty)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..), (~+~), negSoP)
-import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
-import qualified Futhark.Analysis.Proofs.Symbol as IxFn
-import Futhark.Analysis.Proofs.Monad (IndexFnM(..), VEnv(..), debugPrintAlgEnv, debugOn, debugPrettyM, clearAlgEnv)
-import Control.Monad.RWS.Strict hiding (Sum)
+import Futhark.Analysis.Proofs.Monad (IndexFnM(..), debugPrettyM, clearAlgEnv, runIndexFnM)
 import Futhark.SoP.FourierMotzkin qualified as FM
 
 import Futhark.Util.Pretty
-import Debug.Trace
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"
 -------------------------------------
-
-runAlgM :: IndexFnM a -> AlgEnv Symbol IxFn.Symbol Property -> VNameSource -> (a, VEnv)
-runAlgM (IndexFnM m) env vns = getRes $ runRWS m () s
-  where
-    getRes (x, env1, _) = (x, env1)
-    s = VEnv vns env mempty mempty False
-
-runTest :: IndexFnM a -> AlgEnv Symbol IxFn.Symbol Property -> a
-runTest test env = fst $ runAlgM test env blankNameSource
+runTest :: IndexFnM a -> a
+runTest test = fst $ runIndexFnM test blankNameSource
 
 num_tests_pow :: Integer
 num_tests_pow = 1 -- 100000
@@ -87,6 +75,7 @@ tests =
               addRange (Var n) $ mkRangeLB (int 0)
               addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
               addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addEquiv (Idx a (sVar i2)) (int 0)
               let sum1 = sym2SoP $ Sum a (int 0) $ sVar i1
                   sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar n .+. int (-1)
               simplifyLevel $ sum2 .+. sVar i2 .+. int 1 .-. sum1
@@ -632,11 +621,6 @@ tests =
     sVar = sym2SoP . Var
     pow2 some_sop = sym2SoP $ Pow (2, some_sop)
 
-    env_empty = AlgEnv { untrans = Unknowns M.empty M.empty
-                       , equivs  = M.empty
-                       , ranges  = M.empty
-                       , properties = M.empty
-                       }
     varsM =
       (,,,,,,,,,,,)
         <$> newVName "x"
@@ -651,7 +635,7 @@ tests =
         <*> newVName "C"
         <*> newVName "D"
         <*> newVName "E"
-    (x, y, z, i1, i2, i3, n, a0, b0, c0, d0, e0) = runTest varsM env_empty
+    (x, y, z, i1, i2, i3, n, a0, b0, c0, d0, e0) = runTest varsM
     (a, b, c, d, e) = (One a0, One b0, POR (S.singleton c0), POR (S.singleton d0), POR (S.singleton e0))
 
     set_de = S.insert d0 $ S.singleton e0
@@ -662,13 +646,9 @@ tests =
         <$> newVName "q"
         <*> newVName "k"
         <*> newVName "j"
-    (q,k,j) = runTest varsFFT env_empty
+    (q,k,j) = runTest varsFFT
 
-    env = env_empty { equivs = M.singleton (Idx a (sVar i2)) (int 0)
-                    , ranges = M.empty
-                    }
-
-    run f = runTest f env
+    run = runTest
 
     -- Less fragile renaming.
     e @??= e' = do

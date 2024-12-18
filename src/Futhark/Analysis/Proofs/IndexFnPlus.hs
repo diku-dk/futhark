@@ -1,6 +1,15 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Futhark.Analysis.Proofs.IndexFnPlus where
+module Futhark.Analysis.Proofs.IndexFnPlus
+  ( domainStart,
+    domainEnd,
+    repIndexFn,
+    subIndexFn,
+    intervalEnd,
+    repDomain,
+    unifyIndexFnWith,
+  )
+where
 
 import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List.NonEmpty qualified as NE
@@ -13,8 +22,8 @@ import Futhark.Analysis.Proofs.Unify (FreeVariables (..), Renameable (..), Repla
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames)
-import Futhark.SoP.SoP (SoP (SoP), int2SoP, sym2SoP, (.+.), (.-.), isConstTerm)
-import Futhark.Util.Pretty (Pretty (pretty), commastack, line, parens, stack, (<+>), softline, punctuate, indent, vsep, align, comma, sep, hang)
+import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.+.), (.-.))
+import Futhark.Util.Pretty (Pretty (pretty), align, comma, commastack, hang, indent, line, parens, punctuate, sep, softline, stack, (<+>))
 import Language.Futhark (VName)
 
 domainStart :: Domain -> SoP Symbol
@@ -90,7 +99,7 @@ instance FreeVariables Domain where
   fv (Cat _ m b) = fv m <> fv b
 
 instance FreeVariables (Cases Symbol (SoP Symbol)) where
-  fv cs = mconcat $ map (\(c,v) -> fv c <> fv v) $ casesToList cs
+  fv cs = mconcat $ map (\(c, v) -> fv c <> fv v) $ casesToList cs
 
 -------------------------------------------------------------------------------
 -- Unification.

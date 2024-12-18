@@ -1,4 +1,26 @@
-module Futhark.Analysis.Proofs.Monad where
+{-# OPTIONS_GHC -Wno-orphans #-}
+
+module Futhark.Analysis.Proofs.Monad
+  ( VEnv,
+    IndexFnM(..),
+    runIndexFnM,
+    insertIndexFn,
+    insertTopLevel,
+    clearAlgEnv,
+    whenDebug,
+    debugM,
+    debugT,
+    debugT',
+    debugPrettyM,
+    debugPrintAlgEnv,
+    debugOn,
+    withDebug,
+    withoutDebug,
+    rollbackAlgEnv,
+    getIndexFns,
+    getTopLevelIndexFns,
+  )
+where
 
 import Control.Monad (when)
 import Control.Monad.RWS.Strict
@@ -8,9 +30,9 @@ import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
-import Futhark.SoP.Expression (Expression (divInsteadOfMod, moduloIsh, processExp))
+import Futhark.SoP.Expression (Expression (..))
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
-import Futhark.Util.Pretty (Pretty, docString, docStringW, pretty, prettyString)
+import Futhark.Util.Pretty (Pretty, docStringW, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 
@@ -39,9 +61,12 @@ instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
   putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
 
--- TODO remove moduloIsh from RefineEquivs if unimplemented.
+-- TODO Remove Expression constraint from MonadSoP, if these are unused.
+-- See, for example, RefineEquivs.
 instance Expression Symbol where
   moduloIsh _ = Nothing
+  divInsteadOfMod = undefined
+  processExp = undefined
 
 instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
   getUntrans = gets (untrans . algenv)
@@ -50,6 +75,12 @@ instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
   getProperties = gets (properties . algenv)
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
   findSymLEq0 = Algebra.findSymbolLEq0
+
+getIndexFns :: IndexFnM (M.Map VName IndexFn)
+getIndexFns = gets indexfns
+
+getTopLevelIndexFns :: IndexFnM (M.Map VName ([E.Pat E.ParamType], IndexFn))
+getTopLevelIndexFns = gets toplevel
 
 runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
@@ -69,6 +100,13 @@ insertTopLevel vn (args, ixfn) =
 clearAlgEnv :: IndexFnM ()
 clearAlgEnv =
   modify $ \env -> env {algenv = mempty}
+
+rollbackAlgEnv :: IndexFnM a -> IndexFnM a
+rollbackAlgEnv computation = do
+  alg <- gets algenv
+  res <- computation
+  modify (\env -> env {algenv = alg})
+  pure res
 
 --------------------------------------------------------------
 -- Utilities
@@ -94,16 +132,9 @@ debugT' msg m = do
   debugM (msg <> ": " <> prettyString a)
   pure a
 
-debugLn :: IndexFnM ()
-debugLn = traceM "\n"
-
 debugPrettyM :: (Pretty a) => String -> a -> IndexFnM ()
 debugPrettyM msg x = do
   whenDebug $ traceM $ docStringW 110 $ "🪲 " <> pretty msg <> " " <> pretty x
-
-debugPrettyM2 :: (Pretty a) => String -> a -> IndexFnM ()
-debugPrettyM2 msg x = do
-  whenDebug $ traceM $ docStringW 110 $ "🐞 " <> pretty msg <> " " <> pretty x
 
 debugPrintAlgEnv :: IndexFnM ()
 debugPrintAlgEnv = do

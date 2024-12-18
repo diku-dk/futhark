@@ -1,17 +1,13 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Futhark.Analysis.Proofs.SymbolPlus where
+module Futhark.Analysis.Proofs.SymbolPlus (toSumOfSums, repVName) where
 
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename, rename_), Replaceable (rep), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshName, unifies_)
-import Futhark.MonadFreshNames (MonadFreshNames)
-import Futhark.SoP.SoP (SoP, int2SoP, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.), (.*.))
+import Futhark.Analysis.Proofs.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Replacement, ReplacementBuilder (..), Unify (..), freshName, unifies_)
+import Futhark.SoP.SoP (SoP, int2SoP, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.))
 import Language.Futhark (VName)
-
-getRenamedSumBoundVar :: (MonadFreshNames f) => Substitution u -> Symbol -> f (Maybe VName)
-getRenamedSumBoundVar s x = getSumBoundVar <$> rename (vns s) x
 
 -- Given iterator, lower bound, upper bound and a SoP, create
 -- a linear combination of sums.

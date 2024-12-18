@@ -4,11 +4,11 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Util where
 import Control.Monad (unless)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, isBooleanM, rollbackAlgEnv, toAlgebra)
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, isBooleanM, toAlgebra)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Proofs.Monad (IndexFnM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Refine (addRel)
