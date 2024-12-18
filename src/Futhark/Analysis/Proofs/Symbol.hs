@@ -1,4 +1,12 @@
-module Futhark.Analysis.Proofs.Symbol where
+module Futhark.Analysis.Proofs.Symbol
+  ( Symbol (..),
+    isBoolean,
+    sop2Symbol,
+    toDNF,
+    toCNF,
+    neg,
+  )
+where
 
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, justConstant, justSym)
@@ -66,10 +74,6 @@ sop2Symbol sop
   | Just 1 <- justConstant sop = Bool True
   | Just 0 <- justConstant sop = Bool False
   | otherwise = error $ "sop2Symbol on non-symbol: " <> prettyString sop
-
-getSumBoundVar :: Symbol -> Maybe VName
-getSumBoundVar (Sum i _ _ _) = Just i
-getSumBoundVar _ = Nothing
 
 toDNF :: Symbol -> Symbol
 toDNF (a :&& (b :|| c)) = toDNF (a :&& b) :|| toDNF (a :&& c)
