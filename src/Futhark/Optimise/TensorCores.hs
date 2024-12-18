@@ -1,4 +1,7 @@
-module Futhark.Optimise.TensorCores (extractTensorCores, tensorCoreMemFixup) where
+module Futhark.Optimise.TensorCores
+  ( extractTensorCores,
+    tensorCoreMemFixup
+  ) where
 
 import Control.Monad
 import Control.Monad.Identity
@@ -13,7 +16,6 @@ import Data.Loc (Loc (NoLoc), SrcLoc (SrcLoc))
 import Data.Map.Strict qualified as M
 import Data.Semigroup
 import Data.Set (difference, fromList)
-import Debug.Trace
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Builder
 import Futhark.Construct
