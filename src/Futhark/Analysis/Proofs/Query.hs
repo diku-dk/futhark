@@ -147,16 +147,17 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
                     -- Case i < j => f(i) `rel` g(j).
                     addRelIterator iter_j
                     i +< j
-                    debugPrintAlgEnv
-                    debugT "i < j" $ (f @ i) `rel` (g @ j)
+                    (f @ i) `rel` (g @ j)
                   case_i_gt_j = rollbackAlgEnv $ do
                     -- Case i > j => f(i) `rel` g(j):
                     addRelIterator iter_i
                     j +< i
-                    debugT "i > j" $ (f @ i) `rel` (g @ j)
+                    (f @ i) `rel` (g @ j)
                in case_i_lt_j `andM` case_i_gt_j
-        algDebugPrettyM "f:" (f @ i :: SoP Symbol)
-        algDebugPrettyM "g:" (g @ j :: SoP Symbol)
+        algDebugPrettyM "p_f(i) =>" (p_f @ i :: SoP Symbol)
+        algDebugPrettyM "\tf(i)" (f @ i :: SoP Symbol)
+        algDebugPrettyM "p_g(i) =>" (p_g @ i :: SoP Symbol)
+        algDebugPrettyM "\tg(j)" (g @ j :: SoP Symbol)
         f_LT_g <- debugT "case f < g" $ f_rel_g ($<)
         debugT "  f `cmp` g" $
           case f_LT_g of
