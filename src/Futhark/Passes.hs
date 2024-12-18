@@ -33,6 +33,7 @@ import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
 import Futhark.Optimise.MergeGPUBodies
 import Futhark.Optimise.ReduceDeviceSyncs
 import Futhark.Optimise.Sink
+import Futhark.Optimise.TensorCores
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.AD
@@ -46,7 +47,6 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
-import Futhark.Optimise.IntraMMM
 import Futhark.Pipeline
 
 -- | A pipeline used by all current compilers.  Performs inlining,
@@ -92,7 +92,7 @@ gputcPipeline =
       [ simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
-        intraMMM,
+        extractTensorCores,
         simplifyGPU,
         tileLoops,
         simplifyGPU,
@@ -113,7 +113,6 @@ gputcPipeline =
         simplifyGPU,
         performCSE True
       ]
-    
 
 -- | The pipeline used by the CUDA, HIP, and OpenCL backends, but before
 -- adding memory information.  Includes 'standardPipeline'.
@@ -184,8 +183,7 @@ gpumemtcPipeline =
   gputcPipeline
     >>> onePass GPU.explicitAllocations
     >>> passes
-      [
-        intraMMMMemFixup,
+      [ tensorCoreMemFixup,
         simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,
@@ -211,6 +209,7 @@ gpumemtcPipeline =
         expandAllocations,
         simplifyGPUMem
       ]
+
 -- | Run 'gpuPipeline', then add memory information (and optimise
 -- it a lot).
 gpumemPipeline :: Pipeline SOACS GPUMem
@@ -218,8 +217,7 @@ gpumemPipeline =
   gpuPipeline
     >>> onePass GPU.explicitAllocations
     >>> passes
-      [
-        simplifyGPUMem,
+      [ simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,
         entryPointMemGPU,
