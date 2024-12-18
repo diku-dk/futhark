@@ -74,8 +74,7 @@ tests =
       mkTest
         "tests/indexfn/part2indicesL.fut"
         ( \fn -> do
-            debugOn
-            debugM "TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE"
+            debugM "TEMPORARY CASE TEMPORARY CASE TEMPORARY CASE"
             -- XXX Temporary madness until we have part2indicesL on the desired form.
             csL <- newNameFromString "csL"
             shape <- newNameFromString "shape"
@@ -134,7 +133,7 @@ tests =
                           ]
                     }
             s <- fromJust <$> unify actual_pat fn
-            debugPrettyM "SUB SUB SUB SUB SUB SUB SUB SUB SUB SUB SUB SUB SUB SUB\n" s
+            debugPrettyM "Putting part2indicesL on desired form.\n" s
             fn_desired_form <- subIndexFn s desired_pat
             let IndexFn (Forall _ dom@(Cat _ _ start)) _ = fn_desired_form
             end <- rewrite $ intervalEnd dom
