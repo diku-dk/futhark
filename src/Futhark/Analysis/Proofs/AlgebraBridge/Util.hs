@@ -1,5 +1,16 @@
 -- Utilities for using the Algebra layer from the IndexFn layer.
-module Futhark.Analysis.Proofs.AlgebraBridge.Util where
+module Futhark.Analysis.Proofs.AlgebraBridge.Util
+  ( assume,
+    addRelIterator,
+    answerFromBool,
+    ($<),
+    ($<=),
+    ($>),
+    ($>=),
+    ($==),
+    ($/=),
+  )
+where
 
 import Control.Monad (unless)
 import Control.Monad.Trans (lift)
