@@ -1,6 +1,7 @@
 -- Utilities for using the Algebra layer from the IndexFn layer.
 module Futhark.Analysis.Proofs.AlgebraBridge.Util
-  ( assume,
+  ( Answer (..),
+    assume,
     addRelIterator,
     answerFromBool,
     ($<),
@@ -25,6 +26,14 @@ import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), prettyString, viaShow)
+
+-- Fourer Motzkin Elimination solver may return True or False.
+-- True means the query holds. False means "I don't know".
+data Answer = Yes | Unknown
+  deriving (Show, Eq)
+
+instance Pretty Answer where
+  pretty = viaShow
 
 assume :: Symbol -> IndexFnM ()
 assume p = do
@@ -95,17 +104,9 @@ addRelIterator (Forall i dom) = case dom of
       addRel (sym2SoP (Algebra.Var vn) :<=: y)
 addRelIterator _ = pure ()
 
--- Fourer Motzkin Elimination solver may return True or False.
--- True means the query holds. False means "I don't know".
-data Answer = Yes | Unknown
-  deriving (Show, Eq)
-
 answerFromBool :: Bool -> Answer
 answerFromBool True = Yes
 answerFromBool False = Unknown
-
-instance Pretty Answer where
-  pretty = viaShow
 
 convFME :: (SoP Algebra.Symbol -> SoP Algebra.Symbol -> IndexFnM Bool) -> SoP Symbol -> SoP Symbol -> IndexFnM Answer
 convFME op x y = rollbackAlgEnv $ do
