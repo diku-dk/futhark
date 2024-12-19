@@ -7,15 +7,10 @@ module Futhark.SoP.RefineRanges
 where
 
 import Control.Monad (filterM, forM)
-import Control.Monad.State
 import Data.Map.Strict qualified as M
 import Data.MultiSet qualified as MS
 import Data.Set (Set)
 import Data.Set qualified as S
-import Debug.Trace
-import Futhark.Analysis.PrimExp
-import Futhark.Analysis.PrimExp.Convert
-import Futhark.SoP.Convert
 import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
@@ -23,7 +18,7 @@ import Futhark.SoP.Util
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe >= 0@
 --   for each 'PrimExp' in the set.
-addIneqZeros :: forall u e p m. (ToSoP u e, MonadSoP u e p m) => Set (SoP u >= 0) -> m ()
+addIneqZeros :: forall u e p m. (MonadSoP u e p m) => Set (SoP u >= 0) -> m ()
 addIneqZeros sops = do
   ineq_cands <-
     mconcat
@@ -39,9 +34,6 @@ data RangeCand u = RangeCand
     rangeCandSoP :: SoP u
   }
   deriving (Eq, Show, Ord)
-
-instance (Ord u) => Free u (RangeCand u) where
-  free = free . rangeCandSoP
 
 -- | Make range candidates from a 'SoP' from its 'Term's.  A candidate
 --   'Term' for the range env is found when:
@@ -156,7 +148,7 @@ addRangeCands cand_set = do
   let cands = S.toList cand_set
       -- 1. Compute the transitive closure of the 'SoP' of
       --    each candidate through the range environment.
-      tcs = map (transClosInRanges rs . free) cands
+      tcs = map (transClosInRanges rs . free . rangeCandSoP) cands
       -- 2. Filter out the candidates that introduce cycles
       --    through the range environment. A cycle appears iff
       --    @sym@ appears in the transitive closure of the

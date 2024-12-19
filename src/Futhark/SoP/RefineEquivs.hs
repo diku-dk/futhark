@@ -20,7 +20,7 @@ import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
 
-addEq :: forall u e p m. (ToSoP u e, MonadSoP u e p m) => u -> SoP u -> m ()
+addEq :: forall u e p m. (MonadSoP u e p m) => u -> SoP u -> m ()
 addEq sym sop = do
   -- cands <- mkEquivCands (/= sym) $ sop .-. sym2SoP sym
   addLegalCands $ S.singleton $ EquivCand sym sop
@@ -46,9 +46,6 @@ data EquivCand u = EquivCand
     equivCandSoP :: SoP u
   }
   deriving (Eq, Show, Ord)
-
-instance (Ord u) => Free u (EquivCand u) where
-  free = free . equivCandSoP
 
 instance (Ord u) => Substitute u (SoP u) (EquivCand u) where
   substitute subst (EquivCand sym sop) =
@@ -134,7 +131,7 @@ refineEquivCand cand@(EquivCand sym sop) = do
                   pure (pe_ineq, new_cand)
             _ -> pure (mempty, cand)
     _ -> do
-      if (justPositive sop)
+      if justPositive sop
         then pure (S.singleton $ sym2SoP sym, cand)
         else pure (mempty, cand)
 
@@ -202,8 +199,8 @@ addLegalCands cand_set = do
         -- substitutions), we do not need to (explicitly) compute the
         -- transititve closures.
         hasEquivCycle (sym, sop) =
-          (sym `elem` free cand)
-            && (equivCandSym cand `elem` free sop)
+          sym `elem` free (equivCandSoP cand)
+            && equivCandSym cand `elem` free sop
         hasRangeCycle (sym, range) =
-          (sym `elem` transClosInRanges rs (free cand))
-            && (equivCandSym cand `elem` free range)
+          sym `elem` transClosInRanges rs (free (equivCandSoP cand))
+            && equivCandSym cand `elem` free range
