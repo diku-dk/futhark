@@ -103,9 +103,14 @@ transClosInRangesSym sym = do
   dep_names <- transClosHelper S.empty S.empty active
   case S.null (S.intersection leaders dep_names) of
     True  -> pure dep_names
-    False -> error ( "Circular range encountered in sym: " ++ prettyString sym ++
-                     " dependent name: " ++ show dep_names
-                   )
+    False -> do
+      ranges <- getRanges
+      equivs <- getEquivs
+      error ( "Circular range encountered in sym: " ++ prettyString sym ++
+              "\nDependent names: " ++ prettyString dep_names ++
+              "\n" ++ prettyString ranges ++
+              "\n" ++ prettyString equivs
+            )
   where
     transClosHelper :: (MonadSoP Symbol e Property m) =>
         S.Set VName -> S.Set Symbol -> S.Set Symbol -> m (S.Set VName)
