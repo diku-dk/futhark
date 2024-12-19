@@ -5,8 +5,9 @@ module Futhark.Optimise.TensorCores.Utils
     isMMMName,
     isPrefixOfName,
     getMMMName,
-    MMMSignature (..)
-  ) where
+    MMMSignature (..),
+  )
+where
 
 import Data.List (find, isPrefixOf)
 import Futhark.IR
