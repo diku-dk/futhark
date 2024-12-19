@@ -4,7 +4,6 @@ import Control.Monad
 import Control.Monad.Writer
 import Data.Semigroup
 import Futhark.IR
-import Futhark.IR.Traversals
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Pass
@@ -29,7 +28,7 @@ initNames p = do
   pure p
 
 maxNameProg :: (MaxNames rep) => Prog rep -> MaxMonad ()
-maxNameProg (Prog ts consts funs) = do
+maxNameProg (Prog _ts consts funs) = do
   tell $ Max $ maxIntrinsicTag
   maxNameStms $ informStms consts
   mapM_ (maxNameFun . informFunDef) funs

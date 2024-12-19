@@ -355,9 +355,8 @@ compileCUDATCAction ::
   FutharkConfig ->
   CompilerMode ->
   FilePath ->
-  FilePath ->
   Action GPUMem
-compileCUDATCAction fcfg mode cuteincludepath outpath =
+compileCUDATCAction fcfg mode outpath =
   Action
     { actionName = "Compile to CUDA with tensor cores",
       actionDescription = "Compile to CUDA using tensor cores where possible",
