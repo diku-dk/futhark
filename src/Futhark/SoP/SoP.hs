@@ -450,6 +450,7 @@ isZero _ = False
 --------------------------------------------------------------------------------
 
 class Free u a where
+  -- | Returns the free symbols in the argument.
   free :: a -> Set u
 
 instance (Ord u, Free u a) => Free u (Set a) where
