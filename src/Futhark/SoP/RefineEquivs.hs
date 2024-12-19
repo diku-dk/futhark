@@ -182,18 +182,18 @@ addLegalCands cand_set = do
       let score cand = length $ free (equivCandSoP cand) S.\\ env_syms
        in score cand1 `compare` score cand2
     validCand rs eqs cand =
-      not $
-        -- Check if a candidate is already present in the
-        -- equivalence environment.
-        equivCandSym cand
-          `elem` M.keysSet eqs
-          -- Detect if an equivalence candidate would introduce
-          -- a cycle into the equivalence environment.
-          && any hasEquivCycle (M.toList eqs)
-          -- Detect if an equivalence candidate would introduce
-          -- a cycle into the range environment.
-          && any hasRangeCycle (M.toList rs)
+      -- Check if a candidate is already present in the
+      -- equivalence environment.
+      equivCandSym cand
+        `notElem` M.keysSet eqs
+        -- Detect if an equivalence candidate would introduce
+        -- a cycle into the equivalence environment.
+        && none hasEquivCycle (M.toList eqs)
+        -- Detect if an equivalence candidate would introduce
+        -- a cycle into the range environment.
+        && none hasRangeCycle (M.toList rs)
       where
+        none f = not . any f
         -- Since the equivalence environment contains the fully
         -- substituted bindings (accounting for predecessor
         -- substitutions), we do not need to (explicitly) compute the

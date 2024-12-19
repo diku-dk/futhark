@@ -21,7 +21,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (Nameable (mkName), MonadSoP, askPropertyWith)
-import Futhark.SoP.SoP (SoP, sopToLists, Free(..))
+import Futhark.SoP.SoP (SoP, sopToLists, Free(..), Var (..))
 import Futhark.Util.Pretty (Pretty, brackets, commasep, enclose, parens, pretty, viaShow, (<+>))
 import Language.Futhark (VName, nameFromString)
 import Language.Futhark qualified as E
@@ -58,6 +58,10 @@ instance Free Symbol Symbol where
   free (Mdf _ _ s1 s2) = free s1 <> free s2
   free (Sum _ s1 s2) = free s1 <> free s2
   free (Pow (_, sop))= free sop
+
+instance Var Symbol where
+  isVar (Var _) = True
+  isVar _ = False
 
 instance Pretty IdxSym where
   pretty (One x) = prettyName x

@@ -18,7 +18,7 @@ import Futhark.SoP.Util
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe >= 0@
 --   for each 'PrimExp' in the set.
-addIneqZeros :: forall u e p m. (MonadSoP u e p m) => Set (SoP u >= 0) -> m ()
+addIneqZeros :: forall u e p m. (MonadSoP u e p m, Var u) => Set (SoP u >= 0) -> m ()
 addIneqZeros sops = do
   ineq_cands <-
     mconcat
@@ -45,13 +45,13 @@ data RangeCand u = RangeCand
 --          @nx - nbq - n = 0@ is equivalent to
 --          @n*(x-bq-1) >= 0@, hence, if we can prove
 --          that @n >= 0@ we can derive @x >= bq+1@.
-mkRangeCands :: (MonadSoP u e p m) => (SoP u >= 0) -> m (Set (RangeCand u))
+mkRangeCands :: (MonadSoP u e p m, Var u) => (SoP u >= 0) -> m (Set (RangeCand u))
 mkRangeCands sop = do
   -- sop' <- substEquivs sop
   let sop' = sop
   let singleSymCands = mkSingleSymCands sop'
   factorCands <- factorCandsM sop'
-  pure $ singleSymCands <> factorCands
+  pure $ S.filter (isVar . rangeCandSym) $ singleSymCands <> factorCands
   where
     factorCandsM sop' =
       mconcat
@@ -95,7 +95,7 @@ mkRangeCands sop = do
 --   these are @lbs' <= -j_z * sop@ (@j_z * sop <= ubs'@) where @lbs'@
 --   (@ubs'@) are the refined bounds from the previous step.
 refineRangeInEnv ::
-  (MonadSoP u e p m) =>
+  (MonadSoP u e p m, Var u) =>
   RangeCand u ->
   m (Set (RangeCand u))
 refineRangeInEnv (RangeCand j sym sop) = do
@@ -140,7 +140,7 @@ data CandRank
   | SymNotBound
   deriving (Ord, Eq)
 
-addRangeCands :: (MonadSoP u e p m) => Set (RangeCand u) -> m ()
+addRangeCands :: (MonadSoP u e p m, Var u) => Set (RangeCand u) -> m ()
 addRangeCands cand_set
   | S.null cand_set = pure ()
 addRangeCands cand_set = do
