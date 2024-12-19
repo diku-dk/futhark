@@ -215,10 +215,10 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
                )
             ++ [ErrorVal int64 end'_i64, " is invalid."]
 
-  (it, le_op, lt_op) <-
+  (it, lt_op) <-
     case E.typeOf start of
-      E.Scalar (E.Prim (E.Signed it)) -> pure (it, CmpSle it, CmpSlt it)
-      E.Scalar (E.Prim (E.Unsigned it)) -> pure (it, CmpUle it, CmpUlt it)
+      E.Scalar (E.Prim (E.Signed it)) -> pure (it, CmpSlt it)
+      E.Scalar (E.Prim (E.Unsigned it)) -> pure (it, CmpUlt it)
       start_t -> error $ "Start value in range has type " ++ prettyString start_t
 
   let one = intConst it 1
@@ -245,7 +245,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
   bounds_invalid_downwards <-
     letSubExp "bounds_invalid_downwards" $
       I.BasicOp $
-        I.CmpOp le_op start' end'
+        I.CmpOp lt_op start' end'
   bounds_invalid_upwards <-
     letSubExp "bounds_invalid_upwards" $
       I.BasicOp $
@@ -1715,8 +1715,8 @@ isIntrinsicFunction qname all_args loc = do
           lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
           fmap (map I.Var) . letTupExp desc . Op $
             case fname of
-              "jvp2" -> JVP lam x' v'
-              _ -> VJP lam x' v'
+              "jvp2" -> JVP x' v' lam
+              _ -> VJP x' v' lam
     handleAD _ _ = Nothing
 
     handleRest [a, si, v] "scatter" = Just $ scatterF 1 a si v

@@ -125,7 +125,7 @@ transformSOAC _ JVP {} =
   error "transformSOAC: unhandled JVP"
 transformSOAC _ VJP {} =
   error "transformSOAC: unhandled VJP"
-transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
+transformSOAC pat (Screma w arrs form@(ScremaForm map_lam scans reds)) = do
   -- See Note [Translation of Screma].
   --
   -- Start by combining all the reduction and scan parts into a single

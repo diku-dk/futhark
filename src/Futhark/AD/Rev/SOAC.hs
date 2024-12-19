@@ -227,7 +227,7 @@ mapOp (Lambda [pa1, pa2] _ lam_body)
     cs == mempty,
     [map_stm] <- stmsToList (bodyStms lam_body),
     (Let (Pat [pe]) _ (Op scrm)) <- map_stm,
-    (Screma _ [a1, a2] (ScremaForm [] [] map_lam)) <- scrm,
+    (Screma _ [a1, a2] (ScremaForm map_lam [] [])) <- scrm,
     (a1 == paramName pa1 && a2 == paramName pa2) || (a1 == paramName pa2 && a2 == paramName pa1),
     r == Var (patElemName pe) =
       Just map_lam

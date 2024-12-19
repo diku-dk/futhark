@@ -433,7 +433,7 @@ hFuseNodeT _ _ = pure Nothing
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
 removeOutputsExcept toKeep s = case s of
-  SoacNode ots (Pat pats1) soac@(H.Screma _ _ (ScremaForm scans_1 red_1 lam_1)) aux1 ->
+  SoacNode ots (Pat pats1) soac@(H.Screma _ _ (ScremaForm lam_1 scans_1 red_1)) aux1 ->
     SoacNode ots (Pat $ pats_unchanged <> pats_new) (H.setLambda lam_new soac) aux1
     where
       scan_output_size = Futhark.scanResults scans_1
@@ -541,12 +541,12 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     cases' <- mapM (traverse $ renameBody <=< (`doFusionWithDelayed` to_fuse)) cases
     defbody' <- doFusionWithDelayed defbody to_fuse
     pure (incoming, node, MatchNode (Let pat aux (Match cond cases' defbody' dec)) [], outgoing)
-  StmNode (Let pat aux (Op (Futhark.VJP lam args vec))) -> doFuseScans $ do
+  StmNode (Let pat aux (Op (Futhark.VJP args vec lam))) -> doFuseScans $ do
     lam' <- fst <$> doFusionInLambda lam
-    pure (incoming, node, StmNode (Let pat aux (Op (Futhark.VJP lam' args vec))), outgoing)
-  StmNode (Let pat aux (Op (Futhark.JVP lam args vec))) -> doFuseScans $ do
+    pure (incoming, node, StmNode (Let pat aux (Op (Futhark.VJP args vec lam'))), outgoing)
+  StmNode (Let pat aux (Op (Futhark.JVP args vec lam))) -> doFuseScans $ do
     lam' <- fst <$> doFusionInLambda lam
-    pure (incoming, node, StmNode (Let pat aux (Op (Futhark.JVP lam' args vec))), outgoing)
+    pure (incoming, node, StmNode (Let pat aux (Op (Futhark.JVP args vec lam'))), outgoing)
   StmNode (Let pat aux (WithAcc inputs lam)) -> doFuseScans $ do
     lam' <- fst <$> doFusionInLambda lam
     pure (incoming, node, StmNode (Let pat aux (WithAcc inputs lam')), outgoing)
