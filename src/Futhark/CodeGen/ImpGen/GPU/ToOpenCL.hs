@@ -38,8 +38,8 @@ import Futhark.Util.IntegralExp (rem)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
-import Text.PrettyPrint.Mainland
-import Text.PrettyPrint.Mainland.Class
+import Text.PrettyPrint.Mainland (prettyCompact)
+import Text.PrettyPrint.Mainland.Class (Pretty(ppr))
 import Prelude hiding (rem)
 
 -- | Generate HIP host and device code.
