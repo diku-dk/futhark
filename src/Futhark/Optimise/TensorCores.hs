@@ -51,8 +51,6 @@ type TcFunDef = (MMMSignature, FunDef GPU)
 
 type TcFuns = [TcFunDef]
 
--- TODO: implement Eq to ensure no duplicate defs
-
 data ExtractTcEnv = ExtractTcEnv
   { envScope :: Scope GPU,
     envBlockSize :: Maybe Int
@@ -123,7 +121,6 @@ mkGemmFun elmTypeA elmTypeB elmTypeC sizeM sizeN sizeK sizeRegs = do
           elmTypeC
           (Shape [mkInt64Const sizeRegs])
           Unique
-      --  TODO: use Free or Ext?
       typeCout =
         [ ( Array
               elmTypeC
@@ -188,7 +185,6 @@ mkCopyGlobalShared elmType sizeY sizeX = do
   fName <-
     fmap (nameFromString . prettyString) $ newName $ VName copyGlobalSharedName 0
 
-  --  TODO: use Free or Ext?
   let sharedOut =
         [ ( Array elmType (fmap Free arrShape) Unique,
             RetAls [] []
@@ -245,7 +241,6 @@ mkCopyRegistersShared elmTypeA elmTypeB elmTypeC sizeM sizeN sizeRegs blockSize 
     nameFromString . prettyString
       <$> newName (VName copyRegistersSharedName 0)
 
-  --  TODO: use Free or Ext?
   let sharedOut =
         [ ( Array
               elmTypeC
@@ -281,14 +276,6 @@ buildMMM
   resName
   actualBlockSize
   match@(TensorCoreMatch kernelBodyMatch ne sizeM sizeN sizeK) = do
-    --  TODO: check this?
-    --  unless ([fst $ outerBlockInfo outerMatch] == outerIndecesA kernelBodyMatch && outerIndecesA kernelBodyMatch == outerIndecesB kernelBodyMatch) $
-    --    compilerLimitationS "Not implemented"
-
-    --    TODO: remove?
-    --    let optimalWarpTileM = 64 in
-    --    let optimalWarpTileN = 64 in
-    --    let (warpsM, warpsN) = (sizeM `divUp` optimalWarpTileM, sizeN `divUp` optimalWarpTileN)
     -- Get the best tile of warps given the block size.
     let (warpsM, warpsN) = getOptimalWarps actualBlockSize match
     let blockSize = warpsM * warpsN * 32
@@ -654,7 +641,10 @@ prodKnownSegDim ::
   KnownUnknown (Max Int)
 prodKnownSegDim (Known (Max acc)) (_, Constant (IntValue n)) =
   Known $ Max $ acc * valueIntegral n
--- TODO: should lookup?
+-- TODO: should lookup if variable dimension?
+-- Currently we do not match if any dimensions are not statically known integers.
+-- The only reason a lookup might be relevant is if the variable is bound to a
+-- statically known variable. This might already be handled by constant folding.
 prodKnownSegDim _ _ = Unknown
 
 getFactorPairs :: Int -> [(Int, Int)]
@@ -740,15 +730,11 @@ innerOpMatch
     )
     | Just ne <- segBinOpsMatch segBinOps =
         do
-          -- TODO: Do we need to check the type of ts or can we rely on the
-          -- types in the kernelbody to match?
-          let (dimVars, segDims) = unzip $ unSegSpace space
-          --  TODO: check this, probably not correct when not maintaining scope
+          let (dimVars, segDims) = unzip $ unSegSpace space          
           let freeVars = freeIn segRed
           bodyMatch <- inBlockKernelBodyMatch dimVars freeVars body scope
           constSegDims <- mapM constantValueMatch segDims
           case constSegDims of
-            --  TODO: also match bodyMatch? allow more sizes?
             [m, n, k]
               | all sizeMatches constSegDims ->
                   Just (TensorCoreMatch bodyMatch ne m n k)
@@ -1059,7 +1045,6 @@ fixStmt
         ) = do
     info <- lookupInfo inputName
     case info of
-      --    TODO: match more cases
       LetName (MemArray _ _ _ (ArrayIn inputMem _)) -> do
         modify ([(resName, (inputName, False)), (resMem, (inputMem, False))] <>)
         defaultFixStm stm
@@ -1208,12 +1193,10 @@ fixBody (Body dec stms res) = Body dec <$> fixStmts stms <*> pure res
 
 fixOp :: Op GPUMem -> FixM (Op GPUMem)
 fixOp (Inner hostOp) = Inner <$> fixHostOp hostOp
--- TODO: recurse here?
 fixOp op = pure op
 
 fixHostOp :: HostOp NoOp GPUMem -> FixM (HostOp NoOp GPUMem)
 fixHostOp (SegOp op) = SegOp <$> fixSegOp op
--- TODO: run recurisvely?
 fixHostOp op = pure op
 
 fixSegOp :: SegOp SegLevel GPUMem -> FixM (SegOp SegLevel GPUMem)
