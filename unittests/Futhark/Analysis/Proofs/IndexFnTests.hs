@@ -266,12 +266,8 @@ tests =
                                 -- offset at segment k
                                 seg_k_start
                                   -- number of trues in this segment up to and including current index
-                                  .+. sym2SoP (Sum j seg_k_start (sHole i) (Idx (Hole csL) (sHole j)))
-                                  -- minus 1 (remember that current index csL[i] is true)
-                                  .-. int 1
+                                  .+. sym2SoP (Sum j seg_k_start (sHole i .-. int 1) (Idx (Hole csL) (sHole j)))
                               ),
-                              -- TODO we could simplify the above to sum exclusive current index and then
-                              -- do away with the (-1).
                               ( neg csL_i,
                                 -- global index
                                 sHole i
