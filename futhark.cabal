@@ -205,8 +205,7 @@ library
       Futhark.CodeGen.Backends.SequentialC.Boilerplate
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SequentialWASM
-      Futhark.CodeGen.Backends.SimpleRep
-      Futhark.CodeGen.Backends.TensorCore
+      Futhark.CodeGen.Backends.SimpleRep      
       Futhark.CodeGen.RTS.C
       Futhark.CodeGen.RTS.CUDA
       Futhark.CodeGen.RTS.OpenCL
