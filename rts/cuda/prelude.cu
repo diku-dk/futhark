@@ -3,10 +3,8 @@
 #define FUTHARK_FUN_ATTR __device__ static
 #define FUTHARK_F64_ENABLED
 
-// TODO(k): Should only be commented for CUDATC.
 #ifdef FUTHARK_CUDATC
-// The header defines these standard types
-#include <cute/tensor.hpp> 
+#include <cute/tensor.hpp>
 #else
 typedef char int8_t;
 typedef short int16_t;

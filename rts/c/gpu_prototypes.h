@@ -1,6 +1,6 @@
 // Start of gpu_prototypes.h
 
-// TODO: move
+// Dummy definitions for Tensor Core functions in C code
 #define memblock_shared memblock_device
 #define memblock_set_shared memblock_set_device
 #define memblock_unref_shared memblock_unref_device

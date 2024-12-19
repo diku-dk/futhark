@@ -28,7 +28,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
-import Futhark.CodeGen.RTS.CUDA (preludeCU, preludeMMM)
+import Futhark.CodeGen.RTS.CUDA (preludeCU, preludeTensorCores)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
@@ -49,8 +49,6 @@ kernelsToHIP = translateGPU TargetHIP
 -- | Generate CUDA host and device code.
 kernelsToCUDA :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToCUDA = translateGPU TargetCUDA
-
--- TODO(k): kernelsToCUDATC
 
 -- | Like @kernelsToCUDA@, but also supports tensor cores
 kernelsToCUDATC :: ImpGPU.Program -> ImpOpenCL.Program
@@ -107,7 +105,6 @@ translateGPU target prog =
         }
   where
     genPrelude TargetOpenCL = genOpenClPrelude
-    -- TODO(k): Add TargetCUDATC
     genPrelude TargetCUDATC = const genCUDATCPrelude
     genPrelude TargetCUDA = const genCUDAPrelude
     genPrelude TargetHIP = const genHIPPrelude
@@ -270,9 +267,10 @@ genGPUCode env mode body failures =
 -- Compilation of a device function that is not not invoked from the
 -- host, but is invoked by (perhaps multiple) kernels.
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
-generateDeviceFun fname _ | TC.isMMMName fname = pure ()
+generateDeviceFun fname _ | TC.isTCName fname =
+--  Don't compile Tensor Core functions
+  pure ()
 generateDeviceFun fname device_func = do
-  -- TODO: handle?
   when (any memParam $ functionInput device_func) bad
 
   env <- ask
@@ -396,6 +394,7 @@ onKernel target kernel = do
               then (SafetyNone, [])
               else -- No possible failures in this kernel, so if we make
               -- it past an initial check, then we are good to go.
+
                 ( SafetyCheap,
                   [C.citems|if (*global_failure >= 0) { return; }|]
                 )
@@ -573,17 +572,13 @@ genCUDAPrelude =
     <> preludeCU
     <> commonPrelude
 
--- TODO(k): remove this prelude
--- <> preludeMMM
-
--- TODO(k): add prelude for tensor cores
 genCUDATCPrelude :: T.Text
 genCUDATCPrelude =
   "#define FUTHARK_CUDA\n"
     <> "#define FUTHARK_CUDATC\n"
     <> preludeCU
     <> commonPrelude
-    <> preludeMMM -- Must come last
+    <> preludeTensorCores -- Must come last
 
 genHIPPrelude :: T.Text
 genHIPPrelude =
@@ -815,7 +810,7 @@ inKernelOperations env mode body =
 
           what_next <- whatNext
           GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
-      | Just mmmName <- TC.getMMMName fname = do
+      | Just mmmName <- TC.getTCName fname = do
           let numStaticArgs = if mmmName == TC.gemmName then 7 else 4
           let (dynamicArgs, staticArgs) = splitAt (length args - numStaticArgs) args
           let convertedArgs = dynamicArgs <> fmap templateStatic staticArgs
@@ -849,8 +844,6 @@ inKernelOperations env mode body =
                                }|]
 
 templateStatic :: C.Exp -> C.Exp
--- templateConsts (C.Cast _ (C.Const (C.IntConst s _ _ _) _) _) = [C.cexp|$esc:("Int<" <> s <> ">{}")|]
--- templateConsts e = e
 templateStatic e = [C.cexp|$esc:("Int<" <> (prettyCompact $ ppr e) <> ">{}")|]
 
 --- Checking requirements

@@ -2,17 +2,18 @@ module Futhark.Optimise.TensorCores.Utils
   ( gemmName,
     copyGlobalSharedName,
     copyRegistersSharedName,
-    isMMMName,
+    isTCName,
     isPrefixOfName,
-    getMMMName,
+    getTCName,
     MMMSignature (..),
+    mkInt64Const,
+    mapStmsWithScope
   )
 where
 
 import Data.List (find, isPrefixOf)
 import Futhark.IR
 
--- TODO: encode sig in names
 data MMMSignature
   = GemmSignature
       { elmTypeAGemm :: PrimType,
@@ -52,8 +53,29 @@ isPrefixOfName prefix name = nameToString prefix `isPrefixOf` nameToString name
 funNames :: [Name]
 funNames = [gemmName, copyGlobalSharedName, copyRegistersSharedName]
 
-isMMMName :: Name -> Bool
-isMMMName name = any (`isPrefixOfName` name) funNames
+isTCName :: Name -> Bool
+isTCName name = any (`isPrefixOfName` name) funNames
 
-getMMMName :: Name -> Maybe Name
-getMMMName name = find (`isPrefixOfName` name) funNames
+getTCName :: Name -> Maybe Name
+getTCName name = find (`isPrefixOfName` name) funNames
+
+
+-- Helper functions
+
+-- | Creates an i64 SubExp
+mkInt64Const :: Int -> SubExp
+mkInt64Const = Constant . IntValue . intValue Int64
+
+-- | Map a function over stmts and update the scope for each stmt.
+mapStmsWithScope ::
+  (Monoid a, LocalScope rep f) =>
+  (Stm rep -> f a) ->
+  Stms rep ->
+  f a
+mapStmsWithScope f stms =
+  case stmsHead stms of
+    Nothing -> pure mempty
+    Just (stm, stms') -> do
+      stm' <- f stm
+      stms'' <- inScopeOf stm $ mapStmsWithScope f stms'
+      pure $ stm' <> stms''

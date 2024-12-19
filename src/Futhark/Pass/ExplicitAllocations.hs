@@ -169,7 +169,8 @@ allocForArray ::
   Type ->
   Space ->
   AllocM fromrep torep VName
-allocForArray t space = allocForArray' t space
+allocForArray t space = do
+  allocForArray' t space
 
 -- | Repair an expression that cannot be assigned an index function.
 -- There is a simple remedy for this: normalise the input arrays and
@@ -575,7 +576,6 @@ funcallArgs args forced_spaces = do
     forM (zip args forced_spaces) $ \((arg, d), forced_space) -> do
       t <- lift $ subExpType arg
       space <- lift askDefaultSpace
---      TODO: always use device as default in GPU function args?
       let space' = fromMaybe space forced_space
       arg' <- linearFuncallArg t space' arg
       pure (arg', d)

@@ -64,7 +64,7 @@ extra-source-files:
     rts/c/util.h
     rts/c/server.h
     rts/cuda/prelude.cu
-    rts/cuda/preludeMMM.cu
+    rts/cuda/preludeTensorCores.cu
     rts/futhark-doc/style.css
     rts/javascript/server.js
     rts/javascript/values.js
@@ -205,7 +205,7 @@ library
       Futhark.CodeGen.Backends.SequentialC.Boilerplate
       Futhark.CodeGen.Backends.SequentialPython
       Futhark.CodeGen.Backends.SequentialWASM
-      Futhark.CodeGen.Backends.SimpleRep      
+      Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.RTS.C
       Futhark.CodeGen.RTS.CUDA
       Futhark.CodeGen.RTS.OpenCL
@@ -322,6 +322,8 @@ library
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.TensorCores
       Futhark.Optimise.TensorCores.Utils
+      Futhark.Optimise.TensorCores.ExtractTensorCores
+      Futhark.Optimise.TensorCores.TensorCoreMemFixup
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
       Futhark.Optimise.ArrayShortCircuiting

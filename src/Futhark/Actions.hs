@@ -349,7 +349,7 @@ compileOpenCLAction fcfg mode outpath =
           liftIO $ T.writeFile cpath $ cPrependHeader $ COpenCL.asServer cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
--- TODO: Add include directory to action
+-- TODO: Add Cutlass include directory to action
 -- The @futhark cudatc@ action.
 compileCUDATCAction ::
   FutharkConfig ->
@@ -361,7 +361,6 @@ compileCUDATCAction fcfg mode cuteincludepath outpath =
   Action
     { actionName = "Compile to CUDA with tensor cores",
       actionDescription = "Compile to CUDA using tensor cores where possible",
-      -- TODO(k): Use custom compilation
       actionProcedure = helper
     }
   where
