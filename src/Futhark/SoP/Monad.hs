@@ -325,11 +325,14 @@ instance (Pretty u, Pretty e) => Pretty (UntransEnv u e) where
 --   its equivalent 'SoP' representation.
 type EquivEnv u = Map u (SoP u)
 
+instance (Pretty u) => Pretty (EquivEnv u) where
+  pretty = stack . map (\(a, b) -> pretty a <> " ≡ " <> pretty b) . M.toList
+
 -- | The range environment binds a variable name to a range.
 type RangeEnv u = Map u (Range u)
 
 instance (Pretty u) => Pretty (RangeEnv u) where
-  pretty = pretty . M.toList
+  pretty = stack . map pretty . M.toList
 
 instance (Pretty u, Pretty p) => Pretty (Map u (Set p)) where
   pretty = pretty . M.toList
@@ -361,10 +364,10 @@ instance (Pretty u, Pretty e, Pretty p) => Pretty (AlgEnv u e p) where
       <> pretty (untrans env)
       <> line
       <> "Equivalences: "
-      <> pretty (M.toList $ equivs env)
+      <> pretty (equivs env)
       <> line
       <> "Ranges: "
-      <> commastack (map pretty (M.toList $ ranges env))
+      <> pretty (ranges env)
       <> line
       <> "Properties: "
       <> pretty (M.toList $ properties env)
