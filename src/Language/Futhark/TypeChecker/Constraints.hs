@@ -373,6 +373,14 @@ cannotUnify reason notes bcs t1 t2 = do
           "Latter:" <+> pretty latter'
         ]
 
+unsharedConstructorsMsg :: M.Map Name t -> M.Map Name t -> Doc a
+unsharedConstructorsMsg cs1 cs2 =
+  "Unshared constructors:" <+> commasep (map (("#" <>) . pretty) missing) <> "."
+  where
+    missing =
+      filter (`notElem` M.keys cs1) (M.keys cs2)
+        ++ filter (`notElem` M.keys cs2) (M.keys cs1)
+
 -- Precondition: 'v' is currently flexible.
 subTyVar :: Reason -> BreadCrumbs -> VName -> Type -> SolveM ()
 subTyVar reason bcs v t = do
@@ -412,6 +420,7 @@ subTyVar reason bcs v t = do
                 </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs1)))
                 </> "with type with constructors"
                 </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs2)))
+                </> unsharedConstructorsMsg cs1 cs2
     ( Just (Right (TyVarUnsol (TyVarSum _ cs1))),
       _
       ) ->

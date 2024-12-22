@@ -1,5 +1,5 @@
 -- ==
--- error: cannot match
+-- error: 0 constructor arguments
 
 type t = #foo f64
 
