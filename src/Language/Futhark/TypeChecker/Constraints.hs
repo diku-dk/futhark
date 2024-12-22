@@ -373,14 +373,6 @@ cannotUnify reason notes bcs t1 t2 = do
           "Latter:" <+> pretty latter'
         ]
 
-unsharedConstructorsMsg :: M.Map Name t -> M.Map Name t -> Doc a
-unsharedConstructorsMsg cs1 cs2 =
-  "Unshared constructors:" <+> commasep (map (("#" <>) . pretty) missing) <> "."
-  where
-    missing =
-      filter (`notElem` M.keys cs1) (M.keys cs2)
-        ++ filter (`notElem` M.keys cs2) (M.keys cs1)
-
 -- Precondition: 'v' is currently flexible.
 subTyVar :: Reason -> BreadCrumbs -> VName -> Type -> SolveM ()
 subTyVar reason bcs v t = do
@@ -511,7 +503,7 @@ unionTyVars reason bcs v t = do
         typeError (locOf reason) mempty $
           "Cannot unify type that must be one of"
             </> indent 2 (pretty v_pts)
-            </> "with type that must be record."
+            </> "with type that must be a record."
     ( TyVarUnsol (TyVarPrim _ v_pts),
       TyVarSum {}
       ) ->
@@ -593,6 +585,14 @@ unionTyVars reason bcs v t = do
     alreadySolved = error $ "Type variable already solved: " <> prettyNameString v
     isParam = error $ "Type name is a type parameter: " <> prettyNameString v
 
+unsharedConstructorsMsg :: M.Map Name t -> M.Map Name t -> Doc a
+unsharedConstructorsMsg cs1 cs2 =
+  "Unshared constructors:" <+> commasep (map (("#" <>) . pretty) missing) <> "."
+  where
+    missing =
+      filter (`notElem` M.keys cs1) (M.keys cs2)
+        ++ filter (`notElem` M.keys cs2) (M.keys cs1)
+
 -- Unify at the root, emitting new equalities that must hold.
 unify :: Type -> Type -> Either (Doc a) [(BreadCrumbs, (Type, Type))]
 unify (Scalar (Prim pt1)) (Scalar (Prim pt2))
@@ -630,13 +630,15 @@ unify (Scalar (Record fs1)) (Scalar (Record fs2))
             filter (`notElem` M.keys fs1) (M.keys fs2)
               <> filter (`notElem` M.keys fs2) (M.keys fs1)
        in Left $
-            "Unshared fields:" <+> commasep (map pretty missing) <> "."
+            "unshared fields:" <+> commasep (map pretty missing) <> "."
 unify (Scalar (Sum cs1)) (Scalar (Sum cs2))
   | M.keys cs1 == M.keys cs2 =
       fmap concat . forM cs' $ \(c, (ts1, ts2)) -> do
         if length ts1 == length ts2
           then Right $ zipWith (curry (matchingConstructor c,)) ts1 ts2
           else Left mempty
+  | otherwise =
+      Left $ unsharedConstructorsMsg cs1 cs2
   where
     cs' = M.toList $ M.intersectionWith (,) cs1 cs2
 unify t1 t2
@@ -773,6 +775,9 @@ solveTyVar (tv, (lvl, TyVarFree loc l)) = do
 solveTyVar (tv, (_, TyVarPrim loc pts)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
+    Right (Scalar (Prim ty))
+      | [ty] == pts ->
+          setInfo tv $ TyVarSol $ Scalar $ Prim ty
     Right ty
       | ty `elem` map (Scalar . Prim) pts -> pure ()
       | otherwise ->
