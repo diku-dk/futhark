@@ -53,7 +53,7 @@ compileProg version =
         mempty
         operations
         generateBoilerplate
-        ""
+        "#include <pthread.h>\n"
         (DefaultSpace, [DefaultSpace])
         cliOptions
     )
