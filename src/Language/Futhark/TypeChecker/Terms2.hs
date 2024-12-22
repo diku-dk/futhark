@@ -698,8 +698,7 @@ checkApplyOne loc fname (fframe, ftype) (arg, argframe, argtype) = do
       rhs = arrayOf (toShape (SVar m)) a
   ctAM (Reason (locOf loc)) r m $ fmap toSComp (toShape m_var <> fframe)
   let reason = case arg of
-        Just arg' ->
-          ReasonApply (locOf loc) (fst fname) arg' lhs rhs
+        Just arg' -> ReasonApply (locOf arg) (fst fname) arg' lhs rhs
         Nothing -> Reason (locOf loc)
   ctEq reason lhs rhs
   debugTraceM 3 $

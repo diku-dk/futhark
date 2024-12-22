@@ -213,6 +213,9 @@ type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
 -- a constraint on how it can be instantiated.
 type UnconTyVar = (VName, Liftedness)
 
+typeVar :: (Monoid u) => VName -> TypeBase dim u
+typeVar v = Scalar $ TypeVar mempty (qualName v) []
+
 solution :: SolverState -> ([UnconTyVar], Solution)
 solution s =
   ( mapMaybe unconstrained $ M.toList $ solverTyVars s,
@@ -388,9 +391,11 @@ subTyVar reason bcs v t = do
       ) ->
         if t `elem` map (Scalar . Prim) v_pts
           then pure ()
-          else
-            typeError (locOf reason) mempty $
-              "Cannot unify type that must be one of"
+          else cannotUnify reason notes bcs (typeVar v) t
+        where
+          notes =
+            aNote $
+              "Cannot instance type that must be one of"
                 </> indent 2 (pretty v_pts)
                 </> "with"
                 </> indent 2 (pretty t)
@@ -399,12 +404,14 @@ subTyVar reason bcs v t = do
       ) ->
         if all (`elem` M.keys cs2) (M.keys cs1)
           then unifySharedConstructors reason bcs cs1 cs2
-          else
-            typeError (locOf reason) mempty $
-              "Cannot unify type with constructors"
-                </> indent 2 (pretty (Sum cs1))
-                </> "with type"
-                </> indent 2 (pretty (Sum cs2))
+          else cannotUnify reason notes bcs (typeVar v) t
+        where
+          notes =
+            aNote $
+              "Cannot match type with constructors"
+                </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs1)))
+                </> "with type with constructors"
+                </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs2)))
     ( Just (Right (TyVarUnsol (TyVarSum _ cs1))),
       _
       ) ->
