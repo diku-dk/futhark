@@ -1337,7 +1337,7 @@ generaliseAndDefaults ::
 generaliseAndDefaults unconstrained solution t = do
   let (generalised, unconstrained') =
         generalise t unconstrained solution
-  solution' <- doDefaults (map typeParamName generalised) solution
+  solution' <- doDefaults (S.toList $ typeVars t) solution
   pure
     ( generalised,
       -- See #1552 for why we resolve unconstrained and
