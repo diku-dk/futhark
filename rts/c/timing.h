@@ -14,6 +14,10 @@ static int64_t get_wall_time(void) {
   return ((double)time.QuadPart / freq.QuadPart) * 1000000;
 }
 
+static int64_t get_wall_time_ns(void) {
+  return get_wall_time() * 1000;
+}
+
 #else
 // Assuming POSIX
 
