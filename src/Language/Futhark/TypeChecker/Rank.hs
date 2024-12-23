@@ -167,8 +167,6 @@ addTyVarInfo tv (_, TyVarRecord {}) =
   addConstraint $ rank tv ~==~ constant 0
 addTyVarInfo tv (_, TyVarSum {}) =
   addConstraint $ rank tv ~==~ constant 0
-addTyVarInfo tv (_, TyVarEql {}) =
-  addConstraint $ rank tv ~==~ constant 0
 
 mkLinearProg :: [Ct] -> TyVars -> LinearProg
 mkLinearProg cs tyVars =
@@ -454,7 +452,6 @@ instance SubstRanks TyVarInfo where
     TyVarRecord loc <$> traverse substRanks fs
   substRanks (TyVarSum loc cs) =
     TyVarSum loc <$> (traverse . traverse) substRanks cs
-  substRanks tv@TyVarEql {} = pure tv
 
 instance SubstRanks (Int, TyVarInfo) where
   substRanks (lvl, tv) = (lvl,) <$> substRanks tv

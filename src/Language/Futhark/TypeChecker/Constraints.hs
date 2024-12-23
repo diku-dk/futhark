@@ -110,8 +110,6 @@ data TyVarInfo
     TyVarRecord Loc (M.Map Name Type)
   | -- | Must be a sum type with these fields.
     TyVarSum Loc (M.Map Name [Type])
-  | -- | Must be a type that supports equality.
-    TyVarEql Loc
   deriving (Show, Eq)
 
 instance Pretty TyVarInfo where
@@ -119,14 +117,12 @@ instance Pretty TyVarInfo where
   pretty (TyVarPrim _ pts) = "∈" <+> pretty pts
   pretty (TyVarRecord _ fs) = pretty $ Scalar $ Record fs
   pretty (TyVarSum _ cs) = pretty $ Scalar $ Sum cs
-  pretty (TyVarEql _) = "equality"
 
 instance Located TyVarInfo where
   locOf (TyVarFree loc _) = loc
   locOf (TyVarPrim loc _) = loc
   locOf (TyVarRecord loc _) = loc
   locOf (TyVarSum loc _) = loc
-  locOf (TyVarEql loc) = loc
 
 type TyVar = VName
 
@@ -285,9 +281,6 @@ unifySharedFields reason bcs fs1 fs2 =
   forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(f, (ts1, ts2)) ->
     solveEq reason (matchingField f <> bcs) ts1 ts2
 
-mustSupportEql :: Reason -> Type -> SolveM ()
-mustSupportEql _reason _t = pure ()
-
 scopeViolation :: Reason -> VName -> Type -> VName -> SolveM ()
 scopeViolation reason v1 ty v2 =
   typeError (locOf reason) mempty $
@@ -440,8 +433,6 @@ subTyVar reason bcs v t = do
             </> indent 2 (pretty (Record fs1))
             </> "with type"
             </> indent 2 (pretty t)
-    (Just (Right (TyVarUnsol (TyVarEql _))), _) ->
-      mustSupportEql reason t
     --
     -- Internal error cases
     (Just (Right TyVarSol {}), _) ->
@@ -481,10 +472,6 @@ unionTyVars reason bcs v t = do
         setInfo t (TyVarUnsol info)
     --
     -- TyVarPrim cases
-    ( TyVarUnsol info@TyVarPrim {},
-      TyVarEql {}
-      ) ->
-        setInfo t (TyVarUnsol info)
     ( TyVarUnsol (TyVarPrim _ v_pts),
       TyVarPrim t_loc t_pts
       ) ->
@@ -533,10 +520,6 @@ unionTyVars reason bcs v t = do
             </> indent 2 (pretty (Sum cs1))
             </> "with type"
             </> indent 2 (pretty (Scalar (Record fs)))
-    ( TyVarUnsol (TyVarSum _ cs1),
-      TyVarEql _
-      ) ->
-        mapM_ (mapM_ (mustSupportEql reason)) cs1
     --
     -- TyVarRecord cases
     ( TyVarUnsol (TyVarRecord _ fs1),
@@ -559,20 +542,6 @@ unionTyVars reason bcs v t = do
             </> indent 2 (pretty (Record fs1))
             </> "with type"
             </> indent 2 (pretty (Scalar (Sum cs)))
-    ( TyVarUnsol (TyVarRecord _ fs1),
-      TyVarEql _
-      ) ->
-        mapM_ (mustSupportEql reason) fs1
-    --
-    -- TyVarEql cases
-    (TyVarUnsol (TyVarEql _), TyVarPrim {}) ->
-      pure ()
-    (TyVarUnsol (TyVarEql _), TyVarEql {}) ->
-      pure ()
-    (TyVarUnsol (TyVarEql _), TyVarRecord _ fs) ->
-      mustSupportEql reason $ Scalar $ Record fs
-    (TyVarUnsol (TyVarEql _), TyVarSum _ cs) ->
-      mustSupportEql reason $ Scalar $ Sum cs
     --
     -- Internal error cases
     (TyVarSol {}, _) ->
@@ -750,21 +719,6 @@ solveTyVar (tv, (_, TyVarSum loc cs1)) = do
           </> "Must be a sum type with constructors"
           </> indent 2 (pretty (Scalar (Sum cs1)))
     Right _ -> pure ()
-solveTyVar (tv, (_, TyVarEql loc)) = do
-  tv_t <- lookupTyVar tv
-  case tv_t of
-    Left TyVarEql {} ->
-      typeError loc mempty $
-        "Type is ambiguous (must be equality type)"
-          </> "Add a type annotation to disambiguate the type."
-    Left _ -> pure ()
-    Right ty
-      | orderZero ty -> pure ()
-      | otherwise ->
-          typeError loc mempty $
-            "Type"
-              </> indent 2 (align (pretty ty))
-              </> "does not support equality (may contain function)."
 solveTyVar (tv, (lvl, TyVarFree loc l)) = do
   tv_t <- lookupTyVar tv
   case tv_t of

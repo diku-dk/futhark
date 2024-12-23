@@ -1143,6 +1143,14 @@ mustBeIrrefutable p = do
         "Refutable pattern not allowed here.\nUnmatched cases:"
           </> indent 2 (stack (map pretty ps'))
 
+supportsEquality :: TypeBase dim u -> Bool
+supportsEquality (Array _ _ t) = supportsEquality $ Scalar t
+supportsEquality (Scalar Prim {}) = True
+supportsEquality (Scalar TypeVar {}) = False
+supportsEquality (Scalar (Record fs)) = all supportsEquality fs
+supportsEquality (Scalar (Sum fs)) = all (all supportsEquality) fs
+supportsEquality (Scalar Arrow {}) = False
+
 -- | Traverse the expression, emitting warnings and errors for various
 -- problems:
 --
@@ -1163,6 +1171,12 @@ localChecks = void . check
               </> indent 2 (stack (map pretty ps'))
     check e@(AppExp (LetPat _ p _ _ _) _) =
       mustBeIrrefutable p *> recurse e
+    check e@(AppExp (BinOp (v, loc) _ (x, _) _ _) _)
+      | qualLeaf v == intrinsicVar "==" =
+          checkEquality loc (typeOf x) *> recurse e
+    check e@(Var v (Info t) loc)
+      | qualLeaf v == intrinsicVar "==" =
+          checkEquality loc t *> recurse e
     check e@(Lambda ps _ _ _ _) =
       mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
     check e@(AppExp (LetFun _ (_, ps, _, _, _) _ _) _) =
@@ -1187,6 +1201,13 @@ localChecks = void . check
         _ -> error "Inferred type of int literal is not a number"
     check e = recurse e
     recurse = astMap identityMapper {mapOnExp = check}
+
+    checkEquality loc t =
+      unless (supportsEquality t) $
+        typeError loc mempty $
+          "Comparing equality of values of type"
+            </> indent 2 (pretty t)
+            </> "which does not support equality."
 
     bitWidth ty = 8 * intByteSize ty :: Int
 

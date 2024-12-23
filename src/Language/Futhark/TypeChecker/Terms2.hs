@@ -438,7 +438,7 @@ lookupVar loc qn@(QualName qs name) = do
           -- TODO - qualify type names, like in the old type checker.
           pure t'
     Just EqualityF -> do
-      argtype <- tyVarType Observe <$> newTyVarWith "t" (TyVarEql (locOf loc))
+      argtype <- tyVarType Observe <$> newTyVarWith "t" (TyVarFree (locOf loc) Unlifted)
       pure $ foldFunType [argtype, argtype] $ RetType [] $ Scalar $ Prim Bool
     Just (OverloadedF ts pts rt) -> do
       argtype <- newTypeOverloaded loc "t" ts
