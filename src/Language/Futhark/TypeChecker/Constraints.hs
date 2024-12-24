@@ -68,7 +68,11 @@ data Reason
   | -- | Arising from explicit ascription.
     ReasonAscription Loc Type Type
   | ReasonRetType Loc Type Type
-  | ReasonApply Loc (Maybe (QualName VName)) Exp Type Type
+  | ReasonApply Loc (Maybe (QualName VName), Int) Exp Type Type
+  | -- | Used when unifying a type with a function type in a function
+    -- application. If this unification fails, it means the supposed
+    -- function was not a function after all.
+    ReasonApplySplit Loc (QualName VName, Int) Exp
   | ReasonBranches Loc Type Type
   deriving (Eq, Show)
 
@@ -78,6 +82,7 @@ instance Located Reason where
   locOf (ReasonAscription l _ _) = l
   locOf (ReasonRetType l _ _) = l
   locOf (ReasonApply l _ _ _ _) = l
+  locOf (ReasonApplySplit l _ _) = l
   locOf (ReasonBranches l _ _) = l
 
 data Ct
@@ -347,16 +352,26 @@ cannotUnify reason notes bcs t1 t2 = do
       where
         header =
           case f of
-            Nothing ->
+            (Nothing, _) ->
               "Cannot apply function to"
                 <+> dquotes (shorten $ group $ pretty e)
                 <> " (invalid type)."
-            Just fname ->
+            (Just fname, _) ->
               "Cannot apply"
                 <+> dquotes (pretty fname)
                 <+> "to"
                 <+> dquotes (align $ shorten $ group $ pretty e)
                 <> " (invalid type)."
+    ReasonApplySplit loc (fname, i) e ->
+      typeError loc notes $
+        stack
+          [ "Cannot apply"
+              <+> dquotes (pretty fname)
+              <+> "to"
+              <+> dquotes (align $ shorten $ group $ pretty e)
+              <> ".",
+            "Function accepts only" <+> pretty i <+> "arguments."
+          ]
     ReasonBranches loc former latter -> do
       former' <- enrichType former
       latter' <- enrichType latter

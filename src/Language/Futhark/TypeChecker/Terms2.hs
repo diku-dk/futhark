@@ -698,7 +698,7 @@ checkApplyOne loc fname (fframe, ftype) (arg, argframe, argtype) = do
       rhs = arrayOf (toShape (SVar m)) a
   ctAM (Reason (locOf loc)) r m $ fmap toSComp (toShape m_var <> fframe)
   let reason = case arg of
-        Just arg' -> ReasonApply (locOf arg) (fst fname) arg' lhs rhs
+        Just arg' -> ReasonApply (locOf arg) fname arg' lhs rhs
         Nothing -> Reason (locOf loc)
   ctEq reason lhs rhs
   debugTraceM 3 $
@@ -741,7 +741,10 @@ checkApplyOne loc fname (fframe, ftype) (arg, argframe, argtype) = do
     split ftype' = do
       a <- newType loc Lifted "arg" NoUniqueness
       b <- newType loc Lifted "res" Nonunique
-      ctEq (Reason (locOf loc)) ftype' $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] b
+      let reason = case (fname, arg) of
+            ((Just fname', i), Just arg') -> ReasonApplySplit (locOf loc) (fname', i) arg'
+            _ -> Reason (locOf loc)
+      ctEq reason ftype' $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] b
       pure (a, b `setUniqueness` NoUniqueness)
 
 checkApply ::
