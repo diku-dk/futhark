@@ -72,7 +72,7 @@ data Reason
   | -- | Used when unifying a type with a function type in a function
     -- application. If this unification fails, it means the supposed
     -- function was not a function after all.
-    ReasonApplySplit Loc (QualName VName, Int) Exp
+    ReasonApplySplit Loc (Maybe (QualName VName), Int) Exp Type
   | ReasonBranches Loc Type Type
   deriving (Eq, Show)
 
@@ -82,7 +82,7 @@ instance Located Reason where
   locOf (ReasonAscription l _ _) = l
   locOf (ReasonRetType l _ _) = l
   locOf (ReasonApply l _ _ _ _) = l
-  locOf (ReasonApplySplit l _ _) = l
+  locOf (ReasonApplySplit l _ _ _) = l
   locOf (ReasonBranches l _ _) = l
 
 data Ct
@@ -362,16 +362,28 @@ cannotUnify reason notes bcs t1 t2 = do
                 <+> "to"
                 <+> dquotes (align $ shorten $ group $ pretty e)
                 <> " (invalid type)."
-    ReasonApplySplit loc (fname, i) e ->
+    ReasonApplySplit loc (fname, 0) _ ftype ->
       typeError loc notes $
         stack
           [ "Cannot apply"
-              <+> dquotes (pretty fname)
+              <+> fname'
+              <+> "as function, as it has non-function type:"
+              </> indent 2 (align $ pretty ftype)
+          ]
+      where
+        fname' = maybe "expression" (dquotes . pretty) fname
+    ReasonApplySplit loc (fname, i) e _ ->
+      typeError loc notes $
+        stack
+          [ "Cannot apply"
+              <+> fname'
               <+> "to"
               <+> dquotes (align $ shorten $ group $ pretty e)
               <> ".",
             "Function accepts only" <+> pretty i <+> "arguments."
           ]
+      where
+        fname' = maybe "expression" (dquotes . pretty) fname
     ReasonBranches loc former latter -> do
       former' <- enrichType former
       latter' <- enrichType latter

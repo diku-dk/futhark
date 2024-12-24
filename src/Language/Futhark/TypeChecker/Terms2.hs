@@ -741,9 +741,9 @@ checkApplyOne loc fname (fframe, ftype) (arg, argframe, argtype) = do
     split ftype' = do
       a <- newType loc Lifted "arg" NoUniqueness
       b <- newType loc Lifted "res" Nonunique
-      let reason = case (fname, arg) of
-            ((Just fname', i), Just arg') -> ReasonApplySplit (locOf loc) (fname', i) arg'
-            _ -> Reason (locOf loc)
+      let reason = case arg of
+            Just arg' -> ReasonApplySplit (locOf loc) fname arg' ftype'
+            Nothing -> Reason $ locOf loc
       ctEq reason ftype' $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] b
       pure (a, b `setUniqueness` NoUniqueness)
 
