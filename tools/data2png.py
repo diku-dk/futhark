@@ -9,6 +9,7 @@
 #  [height][width]u32
 #
 #  [height][width]f32
+#  [height][width]f64
 #
 #  [height][width][3]i8
 #  [height][width][3]u8
@@ -23,6 +24,10 @@ import sys
 import struct
 import numpy as np
 import png
+
+if "purepng" not in png.__file__:
+    print("data2png works only with purepng, not pypng.", file=sys.stderr)
+    sys.exit(1)
 
 
 def read_image(f):
@@ -93,7 +98,6 @@ if __name__ == "__main__":
 
     with open(infile, "rb") as f_in:
         width, height, img = read_image(f_in)
-
         with open(outfile, "wb") as f_out:
             w = png.Writer(width=width, height=height, alpha=False)
             w.write(f_out, img)
