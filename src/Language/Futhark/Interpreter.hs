@@ -2011,7 +2011,7 @@ initialCtx =
         let drvs = M.map (Just . putAD) $ M.unionsWith add $ map snd m
 
         -- Extract the output values, and the partial derivatives
-        let ov = modifyValue (\i _ -> fst $ m !! i) o
+        let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
         let od =
               fromMaybe (error "vjp: differentiation failed") $
                 modifyValueM (\i vo -> M.findWithDefault (ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD vo) i drvs) v
