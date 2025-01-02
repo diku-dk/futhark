@@ -321,7 +321,6 @@ getIrregRep segments env inps v =
           Replicate (segmentsShape segments) (Var v)
       mkIrregFromReg segments v'
 
-
 -- Do 'map2 (++) A B' where 'A' and 'B' are irregular arrays and have the same
 -- number of subarrays
 concatIrreg ::
@@ -329,42 +328,67 @@ concatIrreg ::
   DistEnv ->
   VName ->
   String ->
+  String ->
   IrregularRep ->
+  IrregularRep ->
+  VName ->
+  VName ->
   Builder GPU IrregularRep
-concatIrreg _segments _env ns desc rep = do
+concatIrreg _segments _env ns descx descy repx repy x y = do
   -- Concatenation does not change the number of segments - it simply
   -- makes each of them larger.
 
   -- Does this check for correct size of both lists?
   num_segments <- arraySize 0 <$> lookupType ns
 
-
-  -- DONT KNOW THAT IS HAPPENING HERE!
   -- ns multipled with existing segment sizes.
+  -- Constructs the full list size / shape that should hold the final results.
+  -- Should be augmented to instead sum the segment sizes of both input array.
+  
   ns_full <- letExp (baseString ns <> "_full") <=< segMap (MkSolo num_segments) $
     \(MkSolo i) -> do
-      n <-
-        letSubExp "n" =<< eIndex ns [eSubExp i]
-      old_segment <-
-        letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp i]
+      old_segmentx <-
+        letSubExp "old_segmentx" =<< eIndex (irregularS repx) [eSubExp i]
+      old_segmenty <-
+        letSubExp "old_segmenty" =<< eIndex (irregularS repy) [eSubExp i]
       full_segment <-
-        letSubExp "new_segment" =<< toExp (pe64 n * pe64 old_segment)
+        letSubExp "new_segment" =<< toExp (pe64 old_segmentx + pe64 old_segmenty)
       pure $ subExpsRes [full_segment]
 
-  (ns_full_F, ns_full_O, ns_full_D) <- doRepIota ns_full -- Looks like II1
-  (_, _, flat_to_segs) <- doSegIota ns_full              -- Looks like II2
+  (ns_full_F, ns_full_O, ns_full_D) <- doRepIota ns_full
+  (_, _, flat_to_segs) <- doSegIota ns_full
+
+  (x_F, x_O, x_D) <- doRepIota x -- Looks like II1
+  (_, _, x_flat_to_segs) <- doSegIota x-- Looks like II2
+
+  (y_F, y_O, y_D) <- doRepIota y -- Looks like II1
+  (_, _, y_flat_to_segs) <- doSegIota y -- Looks like II2
+
+
+  -- x = [1, 2, 3, 4, 5], [3, 2]  -> [0, 0, 0, 1, 1]
+  -- y = [6, 7, 8, 9, 10], [2, 3] -> [0, 0, 1, 1, 1]
+  -- ns = [?], [5, 5]
+  -- doRepIota ns = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
 
   -- Dont know what w does
-  w <- arraySize 0 <$> lookupType ns_full_D
+  -- w <- arraySize 0 <$> lookupType ns_full_D
+  n <- arraySize 0 <$> lookupType x_D
+  m <- arraySize 0 <$> lookupType y_D
 
-  elems <- letExp (desc <> "_rep_D") <=< segMap (MkSolo w) $ \(MkSolo i) -> do
+  -- Maps array index to new value. Should be done in two steps,
+  -- one for the x values and one for the y values. 
+  elems <- letExp (descx <> "_rep_D") <=< segMap (MkSolo n) $ \(MkSolo i) -> do
     -- Which segment we are in.
     segment_i <-
-      letSubExp "segment_i" =<< eIndex ns_full_D [eSubExp i]
+      letSubExp "segment_i" =<< eIndex x_D [eSubExp i]
     -- Size of original segment.
     old_segment <-
-      letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp segment_i]
+      letSubExp "old_segment" =<< eIndex (irregularS repx) [eSubExp segment_i]
     -- Index of value inside *new* segment.
+
+    --TODO: Calculate the offset into the final array. 
+    offsets <-
+      letSubExp "j_offset" =<< toExp (pe64 old_segmentx + pe64 old_segmenty)
     j_new <-
       letSubExp "j_new" =<< eIndex flat_to_segs [eSubExp i]
     -- Index of value inside *old* segment.
@@ -372,11 +396,13 @@ concatIrreg _segments _env ns desc rep = do
       letSubExp "j_old" =<< toExp (pe64 j_new `rem` pe64 old_segment)
     -- Offset of values in original segment.
     offset <-
-      letSubExp "offset" =<< eIndex (irregularO rep) [eSubExp segment_i]
+      letSubExp "offset" =<< eIndex (irregularO repx) [eSubExp segment_i]
     v <-
       letSubExp "v"
-        =<< eIndex (irregularD rep) [toExp $ pe64 offset + pe64 j_old]
+        =<< eIndex (irregularD repx) [toExp $ pe64 offset + pe64 j_old]
     pure $ subExpsRes [v]
+
+    -- TODO: Perform the same mapping for the y elements.
 
   pure $
     IrregularRep
@@ -385,7 +411,6 @@ concatIrreg _segments _env ns desc rep = do
         irregularO = ns_full_O,
         irregularD = elems
       }
-
 
 -- Do 'map2 replicate ns A', where 'A' is an irregular array (and so
 -- is the result, obviously).
@@ -602,11 +627,20 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             ~+~ sExt it (untyped (pe64 v'))
             ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns res_F res_O (distResTag res) res_D' env
-    Concat 0 x ys -> do
-      xs <- dataArr segments env inps x
-      yss <- dataArr segments env inps ys
+    Concat 0 arr shp -> do
+      -- TODO: continue implementation
+      {- xs <- dataArr segments env inps (Var $ NE.head arr)
+      ys <- dataArr segments env inps (Var $ NE.last arr) -}
 
-      return undefined
+
+      ns <- dataArr segments env inps shp
+      xs <- getIrregRep segments env inps (NE.head arr)
+      ys <- getIrregRep segments env inps (NE.last arr)
+
+      rep' <- concatIrreg segments env ns (baseString $ NE.head arr) (baseString $ NE.last arr) xs ys (NE.head arr) (NE.last arr)
+      pure $ insertRep (distResTag res) (Irregular rep') env
+
+
     Replicate (Shape [n]) (Var v) -> do
       ns <- dataArr segments env inps n
       rep <- getIrregRep segments env inps v
