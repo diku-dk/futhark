@@ -695,6 +695,8 @@ scopeCheck reason v v_lvl ty = do
       case ty_v_info of
         Just (Right (TyVarParam ty_v_lvl _ _))
           | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
+        Just (Right (TyVarSol ty')) ->
+          mapM_ check $ typeVars ty'
         _ -> pure ()
 
 -- If a type variable has a liftedness constraint, we propagate that
