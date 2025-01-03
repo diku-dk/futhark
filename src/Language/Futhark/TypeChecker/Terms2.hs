@@ -595,13 +595,13 @@ checkPat' (PatConstr n NoInfo ps loc) (Ascribed t) = do
   ps' <- forM ps $ \p -> do
     p_t <- newType (srclocOf p) Lifted "t" Observe
     checkPat' p $ Ascribed p_t
-  t' <- newTypeWithConstr loc "t" Observe n $ map (toType . patternType) ps'
+  t' <- newTypeWithConstr loc "t" Observe n =<< mapM (asType . patternType) ps'
   ctEq (Reason (locOf loc)) t' t
   t'' <- asStructType t'
   pure $ PatConstr n (Info $ toParam Observe t'') ps' loc
 checkPat' (PatConstr n NoInfo ps loc) NoneInferred = do
   ps' <- mapM (`checkPat'` NoneInferred) ps
-  t <- newTypeWithConstr loc "t" Observe n $ map (toType . patternType) ps'
+  t <- newTypeWithConstr loc "t" Observe n =<< mapM (asType . patternType) ps'
   t' <- asStructType t
   pure $ PatConstr n (Info $ toParam Observe t') ps' loc
 
@@ -807,13 +807,13 @@ checkCases ::
   Type ->
   NE.NonEmpty (CaseBase NoInfo VName) ->
   TermM (NE.NonEmpty (CaseBase Info VName), Type)
-checkCases mt rest_cs =
-  case NE.uncons rest_cs of
-    (c, Nothing) -> do
-      (c', t) <- checkCase mt c
-      pure (NE.singleton c', t)
-    (c, Just cs) -> do
-      (c', c_t) <- checkCase mt c
+checkCases mt rest_cs = do
+  let (c, rest_cs') = NE.uncons rest_cs
+  (c', c_t) <- checkCase mt c
+  case rest_cs' of
+    Nothing ->
+      pure (NE.singleton c', c_t)
+    Just cs -> do
       (cs', cs_t) <- checkCases mt cs
       ctEq (ReasonBranches (locOf c) c_t cs_t) c_t cs_t
       pure (NE.cons c' cs', c_t)
