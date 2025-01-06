@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Some Windows compatibility quirks (#2200, #2201).
+
+## [0.25.25]
+
+### Added
+
+* Improvements to `futhark fmt`.
+
+### Fixed
+
 * Sizes that go out of scope due to use of higher order functions will
   now work in more cases by adding existentials. (#2193)
 
@@ -26,6 +36,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   produces `[1]` rather than an invalid range error.
 
 * Inconsistent handling of types in lambda lifting (#2197).
+
+* Invalid primal results from `vjp2` in interpreter (#2199).
 
 ## [0.25.24]
 

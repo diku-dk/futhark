@@ -78,7 +78,7 @@ compileProg version prog = do
               generateBoilerplate
               mapM_ compileBuiltinFun funs
           )
-          mempty
+          "#include <pthread.h>\n"
           (DefaultSpace, [DefaultSpace])
           MC.cliOptions
       )
