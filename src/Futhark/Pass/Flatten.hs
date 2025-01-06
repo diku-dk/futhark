@@ -331,10 +331,8 @@ concatIrreg ::
   String ->
   IrregularRep ->
   IrregularRep ->
-  VName ->
-  VName ->
   Builder GPU IrregularRep
-concatIrreg _segments _env ns descx descy repx repy x y = do
+concatIrreg _segments _env ns descx descy repx repy = do
   -- Concatenation does not change the number of segments - it simply
   -- makes each of them larger.
 
@@ -355,14 +353,14 @@ concatIrreg _segments _env ns descx descy repx repy x y = do
         letSubExp "new_segment" =<< toExp (pe64 old_segmentx + pe64 old_segmenty)
       pure $ subExpsRes [full_segment]
 
-  (ns_full_F, ns_full_O, ns_full_D) <- doRepIota ns_full
-  (_, _, flat_to_segs) <- doSegIota ns_full
+  (ns_full_F, ns_full_O, _ns_II1) <- doRepIota ns_full
+  (_, _, _ns_II2) <- doSegIota ns_full
 
-  (x_F, x_O, x_D) <- doRepIota x -- Looks like II1
-  (_, _, x_flat_to_segs) <- doSegIota x-- Looks like II2
+  (_x_F, _x_O, x_II1) <- doRepIota (irregularS repx)
+  (_, _, x_II2) <- doSegIota (irregularS repx)
 
-  (y_F, y_O, y_D) <- doRepIota y -- Looks like II1
-  (_, _, y_flat_to_segs) <- doSegIota y -- Looks like II2
+  (_y_F, _y_O, y_II1) <- doRepIota (irregularS repy)
+  (_, _, y_II2) <- doSegIota (irregularS repy)
 
 
   -- x = [1, 2, 3, 4, 5], [3, 2]  -> [0, 0, 0, 1, 1]
@@ -370,39 +368,55 @@ concatIrreg _segments _env ns descx descy repx repy x y = do
   -- ns = [?], [5, 5]
   -- doRepIota ns = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
 
-  -- Dont know what w does
   -- w <- arraySize 0 <$> lookupType ns_full_D
-  n <- arraySize 0 <$> lookupType x_D
-  m <- arraySize 0 <$> lookupType y_D
+  n <- arraySize 0 <$> lookupType x_II1
+  m <- arraySize 0 <$> lookupType y_II1
 
-  -- Maps array index to new value. Should be done in two steps,
-  -- one for the x values and one for the y values. 
-  elems <- letExp (descx <> "_rep_D") <=< segMap (MkSolo n) $ \(MkSolo i) -> do
+
+  -- Scatter data elements into new result
+  elems_x <- letExp "irregular_scatter_elemsx" <=< genScatter ns_full n $ \gid -> do
     -- Which segment we are in.
     segment_i <-
-      letSubExp "segment_i" =<< eIndex x_D [eSubExp i]
-    -- Size of original segment.
-    old_segment <-
-      letSubExp "old_segment" =<< eIndex (irregularS repx) [eSubExp segment_i]
-    -- Index of value inside *new* segment.
+      letSubExp "segment_i" =<< eIndex x_II1 [eSubExp gid]
 
-    --TODO: Calculate the offset into the final array. 
-    offsets <-
-      letSubExp "j_offset" =<< toExp (pe64 old_segmentx + pe64 old_segmenty)
-    j_new <-
-      letSubExp "j_new" =<< eIndex flat_to_segs [eSubExp i]
-    -- Index of value inside *old* segment.
-    j_old <-
-      letSubExp "j_old" =<< toExp (pe64 j_new `rem` pe64 old_segment)
-    -- Offset of values in original segment.
-    offset <-
-      letSubExp "offset" =<< eIndex (irregularO repx) [eSubExp segment_i]
-    v <-
-      letSubExp "v"
-        =<< eIndex (irregularD repx) [toExp $ pe64 offset + pe64 j_old]
-    pure $ subExpsRes [v]
+    -- Get segment offset in final array
+    segment_o <-
+      letSubExp "segment_o" =<< eIndex ns_full_O [eSubExp segment_i]
 
-    -- TODO: Perform the same mapping for the y elements.
+    -- Value to write
+    v' <- letSubExp "v" =<< eIndex (irregularD repx) [eSubExp gid]
+    o' <- letSubExp "o" =<< eIndex x_II2 [eSubExp gid]
+
+    -- Index to write `v'` at
+    i <- letExp "i" =<< toExp (pe64 o' + pe64 segment_o)
+   
+    pure (i, v')
+
+
+  -- Scatter data elements into new result
+  elems <- letExp "irregular_scatter_elems" <=< genScatter elems_x m $ \gid -> do
+    -- Which segment we are in.
+    segment_i <-
+      letSubExp "segment_i" =<< eIndex y_II1 [eSubExp gid]
+
+    -- Get segment offset in final array
+    segment_o <-
+      letSubExp "segment_o" =<< eIndex ns_full_O [eSubExp segment_i]
+
+    -- Get segment x shape
+    segment_x <-
+      letSubExp "segment_x" =<< eIndex (irregularS repx) [eSubExp segment_i]
+
+    -- Value to write
+    v' <- letSubExp "v" =<< eIndex (irregularD repx) [eSubExp gid]
+    o' <- letSubExp "o" =<< eIndex y_II2 [eSubExp gid]
+
+    -- Index to write `v'` at
+    i <- letExp "i" =<< toExp (pe64 o' + pe64 segment_x + pe64 segment_o)
+   
+    pure (i, v')
+
+
 
   pure $
     IrregularRep
@@ -637,7 +651,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       xs <- getIrregRep segments env inps (NE.head arr)
       ys <- getIrregRep segments env inps (NE.last arr)
 
-      rep' <- concatIrreg segments env ns (baseString $ NE.head arr) (baseString $ NE.last arr) xs ys (NE.head arr) (NE.last arr)
+      rep' <- concatIrreg segments env ns (baseString $ NE.head arr) (baseString $ NE.last arr) xs ys
       pure $ insertRep (distResTag res) (Irregular rep') env
 
 
