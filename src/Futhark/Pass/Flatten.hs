@@ -353,7 +353,7 @@ concatIrreg _segments _env ns descx descy repx repy = do
         letSubExp "new_segment" =<< toExp (pe64 old_segmentx + pe64 old_segmenty)
       pure $ subExpsRes [full_segment]
 
-  (ns_full_F, ns_full_O, _ns_II1) <- doRepIota ns_full
+  (ns_full_F, ns_full_O, ns_II1) <- doRepIota ns_full
   (_, _, _ns_II2) <- doSegIota ns_full
 
   (_x_F, _x_O, x_II1) <- doRepIota (irregularS repx)
@@ -374,7 +374,7 @@ concatIrreg _segments _env ns descx descy repx repy = do
 
 
   -- Scatter data elements into new result
-  elems_x <- letExp "irregular_scatter_elemsx" <=< genScatter ns_full n $ \gid -> do
+  elems_x <- letExp "irregular_scatter_elemsx" <=< genScatter ns_II1 n $ \gid -> do
     -- Which segment we are in.
     segment_i <-
       letSubExp "segment_i" =<< eIndex x_II1 [eSubExp gid]
