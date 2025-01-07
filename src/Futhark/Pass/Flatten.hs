@@ -408,15 +408,13 @@ concatIrreg _segments _env ns descx descy repx repy = do
       letSubExp "segment_x" =<< eIndex (irregularS repx) [eSubExp segment_i]
 
     -- Value to write
-    v' <- letSubExp "v" =<< eIndex (irregularD repx) [eSubExp gid]
+    v' <- letSubExp "v" =<< eIndex (irregularD repy) [eSubExp gid]
     o' <- letSubExp "o" =<< eIndex y_II2 [eSubExp gid]
 
     -- Index to write `v'` at
     i <- letExp "i" =<< toExp (pe64 o' + pe64 segment_x + pe64 segment_o)
    
     pure (i, v')
-
-
 
   pure $
     IrregularRep
