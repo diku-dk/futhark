@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Some Windows compatibility quirks (#2200, #2201).
 
+* `futhark pkg`: fixed parsing of Git timestamps in Z time zone.
+
 ## [0.25.25]
 
 ### Added
