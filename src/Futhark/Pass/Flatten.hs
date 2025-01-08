@@ -342,69 +342,66 @@ concatIrreg _segments _env ns reparr = do
   let zero = Constant $ IntValue $ intValue Int64 (0 :: Int)
   ns_full <- letExp (baseString ns <> "_full") <=< segMap (MkSolo num_segments) $
     \(MkSolo i) -> do
-      old_segments <- mapM (\(j, rep) -> letSubExp ("old_segment_" ++ show j) =<< eIndex (irregularS rep) [eSubExp i]) (zip [0..] reparr)
+      old_segments <- mapM (\(j, rep) -> letSubExp ("old_segment_" ++ show j) =<< eIndex (irregularS rep) [eSubExp i]) (zip [0 ..] reparr)
       full_segment <-
         letSubExp "new_segment" =<< toExp (foldl (+) (pe64 $ zero) $ map (pe64) old_segments)
 
       pure $ subExpsRes [full_segment]
-  
+
   (ns_full_F, ns_full_O, ns_II1) <- doRepIota ns_full
   (_, _, _ns_II2) <- doSegIota ns_full
 
   repIota <- mapM (doRepIota . irregularS) reparr
   segIota <- mapM (doSegIota . irregularS) reparr
 
-  let (_, _, rep_II1) = unzip3 repIota  
+  let (_, _, rep_II1) = unzip3 repIota
   let (_, _, rep_II2) = unzip3 segIota
 
-{- 
-  (_x_F, _x_O, x_II1) <- doRepIota (irregularS repx)
-  (_, _, x_II2) <- doSegIota (irregularS repx)
+  {-
+    (_x_F, _x_O, x_II1) <- doRepIota (irregularS repx)
+    (_, _, x_II2) <- doSegIota (irregularS repx)
 
-  (_y_F, _y_O, y_II1) <- doRepIota (irregularS repy)
-  (_, _, y_II2) <- doSegIota (irregularS repy)
+    (_y_F, _y_O, y_II1) <- doRepIota (irregularS repy)
+    (_, _, y_II2) <- doSegIota (irregularS repy)
 
- -}
+   -}
   -- x = [1, 2, 3, 4, 5], [3, 2]  -> [0, 0, 0, 1, 1]
   -- y = [6, 7, 8, 9, 10], [2, 3] -> [0, 0, 1, 1, 1]
   -- ns = [?], [5, 5]
   -- doRepIota ns = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
 
-  
-  n_arr <- mapM (\ii1 -> arraySize 0 <$> lookupType ii1) rep_II1
+  n_arr <- mapM (fmap (arraySize 0) . lookupType) rep_II1
 
-  let shapes = map (irregularS) reparr
+  let shapes = map irregularS reparr
 
   scatter_offsets <- letExp "irregular_scatter_offsets" <=< segMap (MkSolo num_segments) $
     \(MkSolo i) -> do
-      segment_sizes <- mapM (\(shape, j)->
-        do
-          shp <- 
-            letSubExp ("segment_size_" ++ show j) =<< eIndex shape [eSubExp i]
-          pure $ shp
-        ) (zip shapes [0..])
-      let prefixes = L.init $ L.inits (segment_sizes) 
-      sumprefix <- mapM (\pref -> letSubExp "segment_prefix" =<< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0) pref) prefixes
-      pure $ subExpsRes sumprefix
-
-
+      segment_sizes <-
+        mapM
+          ( \(shape, j) ->
+              letSubExp ("segment_size_" ++ show j) =<< eIndex shape [eSubExp i]
+          )
+          (zip shapes [0 ..])
+      let prefixes = L.init $ L.inits segment_sizes
+      sumprefix <-
+        mapM
+          (letTupExp' "segment_prefix" <=< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0))
+          prefixes
+      pure $ subExpsRes $ L.last sumprefix
 
   -- Scatter data into result array
   -- TODO: Use scratch array instead of ns_II1?
   w <- arraySize 0 <$> lookupType ns_II1
   elems <- letExp "irregular_scatter_elems" <=< genScatter ns_II1 w $ \gid -> do
-
-
     -- Value to write
-    v' <- letSubExp "v" =<< toExp zero
-    --o' <- letSubExp "o" =<< eIndex x_II2 [eSubExp gid]
+    v' <- letSubExp "v" =<< eIndex scatter_offsets [eSubExp zero] -- toExp zero
+    -- o' <- letSubExp "o" =<< eIndex x_II2 [eSubExp gid]
 
     -- Index to write `v'` at
     i <- letExp "i" =<< toExp zero
 
-    pure $ (i, v')
-    
-  
+    pure (i, v')
+
   pure $
     IrregularRep
       { irregularS = ns_full,
@@ -633,14 +630,11 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       {- xs <- dataArr segments env inps (Var $ NE.head arr)
       ys <- dataArr segments env inps (Var $ NE.last arr) -}
 
-
       ns <- dataArr segments env inps shp
       reparr <- mapM (getIrregRep segments env inps) (NE.toList arr)
 
       rep' <- concatIrreg segments env ns reparr
       pure $ insertRep (distResTag res) (Irregular rep') env
-
-
     Replicate (Shape [n]) (Var v) -> do
       ns <- dataArr segments env inps n
       rep <- getIrregRep segments env inps v
