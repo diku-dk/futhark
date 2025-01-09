@@ -8,12 +8,12 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==))
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, justSingleCase, unzipT)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), MonoDir (..), Query (..), allCases, askQ, isUnknown, isYes)
+import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), allCases, askQ, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
@@ -427,14 +427,14 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       let IndexFn inds_iter@(Forall k (Iota m)) _ = inds
       -- Determine which is OOB and which is e1.
       let isOOB ub = CaseCheck (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
-      (case_idx_seg, vn_p_seg, vn_f_seg) <- do
+      (vn_p_seg, vn_f_seg) <- do
         case0_is_OOB <- askQ (isOOB vn_f1) inds 0
         case case0_is_OOB of
-          Yes -> pure (1, vn_p1, vn_f1)
+          Yes -> pure (vn_p1, vn_f1)
           Unknown -> do
             case1_is_OOB <- askQ (isOOB vn_f0) inds 1
             case case1_is_OOB of
-              Yes -> pure (0, vn_p0, vn_f0)
+              Yes -> pure (vn_p0, vn_f0)
               Unknown -> error "scatter: unable to determine OOB branch"
       let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
       let f_seg = mapping s M.! vn_f_seg
@@ -444,14 +444,19 @@ forward expr@(E.AppExp (E.Apply f args _) _)
         seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
         p_desired_form :: Maybe (Substitution Symbol) <- unify p_seg (seg_delta :> int2SoP 0)
         unless (isJust p_desired_form) $ error "p is not on desired form"
-      -- Check that seg(0) = 0 and that seg is monotonically increasing.
+      -- Check that seg(0) = 0.
+      -- (Not using CaseCheck as it has to hold outside case predicate.)
       let x `at_k` i = rep (mkRep k i) x
       let zero :: SoP Symbol = int2SoP 0
-      eq0 <- askQ (CaseCheck (\seg -> seg `at_k` zero :== int2SoP 0)) inds case_idx_seg
+      eq0 <- f_seg `at_k` zero $== int2SoP 0
       when (isUnknown eq0) $ error "scatter: unable to determine segment start"
-      -- Check that seg is monotonically increasing.
-      mono <- askQ (CaseIsMonotonic Inc) inds case_idx_seg
-      when (isUnknown mono) $ error "scatter: unable to show segment monotonicity"
+      -- Check that seg is monotonically increasing. (Essentially checking
+      -- that OOB branch is never taken in inds.)
+      algebraContext inds $ do
+        addRelIterator inds_iter
+        seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
+        mono <- seg_delta $>= int2SoP 0
+        when (isUnknown mono) $ error "scatter: unable to show segment monotonicity"
       -- Check that the proposed end of segments seg(m) - 1 equals the size of dest.
       -- (Note that has to hold outside the context of inds, so we cannot assume p_seg.)
       let IndexFn (Forall _ dom_dest) _ = dest
