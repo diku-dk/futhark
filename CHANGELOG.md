@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * GPU backends did not handle array constants correctly in some cases.
 
+* `futhark fmt`: do not throw away doc comments for `local`
+  definitions.
+
 ## [0.25.25]
 
 ### Added
