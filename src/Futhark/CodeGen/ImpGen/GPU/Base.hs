@@ -184,6 +184,9 @@ compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =
   -- Cannot print in GPU code.
   copyDWIM (patElemName pe) [] se []
+-- The static arrays stuff does not work inside kernels.
+compileThreadExp (Pat [dest]) (BasicOp (ArrayVal vs t)) =
+  compileThreadExp (Pat [dest]) (BasicOp (ArrayLit (map Constant vs) (Prim t)))
 compileThreadExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []

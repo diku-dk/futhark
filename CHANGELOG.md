@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark pkg`: fixed parsing of Git timestamps in Z time zone.
 
+* GPU backends did not handle array constants correctly in some cases.
+
 ## [0.25.25]
 
 ### Added
