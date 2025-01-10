@@ -372,9 +372,9 @@ concatIrreg _segments _env ns reparr = do
       let prefixes = L.init $ L.inits segment_sizes
       sumprefix <-
         mapM
-          (letTupExp' "segment_prefix" <=< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0))
+          (letSubExp "segment_prefix" <=< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0))
           prefixes
-      pure $ subExpsRes $ L.concat sumprefix
+      pure $ subExpsRes sumprefix
 
   scatter_offsets_T <- letTupExp "irregular_scatter_offsets_T" <=< segMap (MkSolo num_segments) $
     \(MkSolo i) -> do
