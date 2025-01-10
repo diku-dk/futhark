@@ -637,13 +637,8 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns res_F res_O (distResTag res) res_D' env
     Concat 0 arr shp -> do
-      -- TODO: continue implementation
-      {- xs <- dataArr segments env inps (Var $ NE.head arr)
-      ys <- dataArr segments env inps (Var $ NE.last arr) -}
-
       ns <- dataArr segments env inps shp
       reparr <- mapM (getIrregRep segments env inps) (NE.toList arr)
-
       rep' <- concatIrreg segments env ns reparr
       pure $ insertRep (distResTag res) (Irregular rep') env
     Replicate (Shape [n]) (Var v) -> do
