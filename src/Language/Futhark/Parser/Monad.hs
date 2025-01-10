@@ -59,6 +59,7 @@ addDoc doc (ValDec val) = ValDec (val {valBindDoc = Just doc})
 addDoc doc (TypeDec tp) = TypeDec (tp {typeDoc = Just doc})
 addDoc doc (ModTypeDec sig) = ModTypeDec (sig {modTypeDoc = Just doc})
 addDoc doc (ModDec mod) = ModDec (mod {modDoc = Just doc})
+addDoc doc (LocalDec dec loc) = LocalDec (addDoc doc dec) loc
 addDoc _ dec = dec
 
 addDocSpec :: DocComment -> SpecBase NoInfo Name -> SpecBase NoInfo Name
@@ -66,7 +67,7 @@ addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig {typeDoc = Just doc})
 addDocSpec doc (ValSpec name ps t NoInfo _ loc) = ValSpec name ps t NoInfo (Just doc) loc
 addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
 addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
-addDocSpec _ spec = spec
+addDocSpec _ spec@IncludeSpec {} = spec
 
 addAttr :: AttrInfo Name -> UncheckedDec -> UncheckedDec
 addAttr attr (ValDec val) =
