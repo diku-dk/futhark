@@ -385,7 +385,7 @@ concatIrreg _segments _env ns reparr = do
   elems <- foldlM (\ elems (idx, n, ii1, ii2) -> do
     -- TODO: get offset array: scatter_offsets: [VName] -> [[0 (segment 0, liste 0), 3 (segment 0, list 1), 7],[0, ],[]]
     --offsets <- mapM () scatter_offsets
-    new_elems <- letExp "irregular_scatter_elems" <=< genScatter elems n $ \gid -> do
+    letExp "irregular_scatter_elems" <=< genScatter elems n $ \gid -> do
       -- Which segment we are in.
       segment_i <-
         letSubExp "segment_i" =<< eIndex ii1 [eSubExp gid]
@@ -406,8 +406,6 @@ concatIrreg _segments _env ns reparr = do
       i <- letExp "i" =<< toExp (pe64 o' + pe64 segment_local_o + pe64 segment_o)
    
       pure (i, v')
-
-    pure $ new_elems
 
     ) ns_II1 $ L.zip4 [0..] n_arr rep_II1 rep_II2
 
