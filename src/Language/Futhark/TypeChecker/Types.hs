@@ -439,6 +439,32 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
     mkSubst p a =
       error $ "applyType mkSubst: cannot substitute " ++ prettyString a ++ " for " ++ prettyString p
 
+-- In case we are substituting the same RetType in multiple
+-- places, we must ensure each instance is given distinct
+-- dimensions.  E.g. substituting 'a ↦ ?[n].[n]bool' into '(a,a)'
+-- should give '?[n][m].([n]bool,[m]bool)'.
+--
+-- XXX: the size names we invent here not globally unique.  This
+-- is _probably_ not a problem, since substituting types with
+-- outermost non-null existential sizes is done only when type
+-- checking modules and monomorphising.
+freshDims ::
+  (Monoid as) =>
+  RetTypeBase Size as ->
+  State [VName] (RetTypeBase Size as)
+freshDims (RetType [] t) = pure $ RetType [] t
+freshDims (RetType ext t) = do
+  seen_ext <- get
+  if not $ any (`elem` seen_ext) ext
+    then pure $ RetType ext t
+    else do
+      let start = maximum $ map baseTag seen_ext
+          ext' = zipWith VName (map baseName ext) [start + 1 ..]
+          mkSubst = ExpSubst . flip sizeFromName mempty . qualName
+          extsubsts = M.fromList $ zip ext $ map mkSubst ext'
+          RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
+      pure $ RetType ext' t'
+
 substTypesRet ::
   (Monoid u) =>
   (VName -> Maybe (Subst (RetTypeBase Size u))) ->
@@ -447,28 +473,6 @@ substTypesRet ::
 substTypesRet lookupSubst ot =
   uncurry (flip RetType) $ runState (onType ot) []
   where
-    -- In case we are substituting the same RetType in multiple
-    -- places, we must ensure each instance is given distinct
-    -- dimensions.  E.g. substituting 'a ↦ ?[n].[n]bool' into '(a,a)'
-    -- should give '?[n][m].([n]bool,[m]bool)'.
-    --
-    -- XXX: the size names we invent here not globally unique.  This
-    -- is _probably_ not a problem, since substituting types with
-    -- outermost non-null existential sizes is done only when type
-    -- checking modules and monomorphising.
-    freshDims (RetType [] t) = pure $ RetType [] t
-    freshDims (RetType ext t) = do
-      seen_ext <- get
-      if not $ any (`elem` seen_ext) ext
-        then pure $ RetType ext t
-        else do
-          let start = maximum $ map baseTag seen_ext
-              ext' = zipWith VName (map baseName ext) [start + 1 ..]
-              mkSubst = ExpSubst . flip sizeFromName mempty . qualName
-              extsubsts = M.fromList $ zip ext $ map mkSubst ext'
-              RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
-          pure $ RetType ext' t'
-
     onType ::
       forall as.
       (Monoid as) =>
