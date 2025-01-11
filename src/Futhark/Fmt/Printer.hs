@@ -619,6 +619,7 @@ instance Format UncheckedDec where
     addComments loc $ "import" <+> "\"" <> fmtPretty path <> "\""
 
 instance Format UncheckedProg where
+  fmt (Prog Nothing []) = popComments
   fmt (Prog Nothing decs) = sepDecs fmt decs </> popComments
   fmt (Prog (Just dc) decs) = fmt dc </> sepDecs fmt decs </> popComments
 
