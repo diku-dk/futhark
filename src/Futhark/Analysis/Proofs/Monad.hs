@@ -47,8 +47,8 @@ data IndexFnProperty
 data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Algebra.Symbol Symbol Algebra.Property,
-    indexfns :: M.Map VName IndexFn,
-    toplevel :: M.Map VName ([E.Pat E.ParamType], IndexFn),
+    indexfns :: M.Map VName [IndexFn],
+    toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn]),
     mem :: M.Map Symbol VName,
     debug :: Bool
   }
@@ -81,13 +81,13 @@ instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
   findSymLEq0 = Algebra.findSymbolLEq0
 
-getIndexFns :: IndexFnM (M.Map VName IndexFn)
+getIndexFns :: IndexFnM (M.Map VName [IndexFn])
 getIndexFns = gets indexfns
 
-getTopLevelIndexFns :: IndexFnM (M.Map VName ([E.Pat E.ParamType], IndexFn))
+getTopLevelIndexFns :: IndexFnM (M.Map VName ([E.Pat E.ParamType], [IndexFn]))
 getTopLevelIndexFns = gets toplevel
 
-runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
+runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
@@ -118,14 +118,14 @@ forget computation = do
   modify (\env -> env {mem = m})
   pure res
 
-insertIndexFn :: E.VName -> IndexFn -> IndexFnM ()
+insertIndexFn :: E.VName -> [IndexFn] -> IndexFnM ()
 insertIndexFn x v =
   modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
 
-insertTopLevel :: E.VName -> ([E.Pat E.ParamType], IndexFn) -> IndexFnM ()
-insertTopLevel vn (args, ixfn) =
+insertTopLevel :: E.VName -> ([E.Pat E.ParamType], [IndexFn]) -> IndexFnM ()
+insertTopLevel vn (args, fns) =
   modify $
-    \env -> env {toplevel = M.insert vn (args, ixfn) $ toplevel env}
+    \env -> env {toplevel = M.insert vn (args, fns) $ toplevel env}
 
 clearAlgEnv :: IndexFnM ()
 clearAlgEnv =

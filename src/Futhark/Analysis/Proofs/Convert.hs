@@ -68,7 +68,7 @@ getArgs = map (stripExp . snd) . NE.toList
 --------------------------------------------------------------
 -- Construct index function for source program
 --------------------------------------------------------------
-mkIndexFnProg :: VNameSource -> Imports -> M.Map E.VName IndexFn
+mkIndexFnProg :: VNameSource -> Imports -> M.Map E.VName [IndexFn]
 mkIndexFnProg vns prog = snd $ runIndexFnM (mkIndexFnImports prog) vns
 
 mkIndexFnImports :: [(ImportName, FileModule)] -> IndexFnM ()
@@ -85,7 +85,7 @@ mkIndexFnDecs (E.ValDec vb : rest) = do
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 -- toplevel_indexfns
-mkIndexFnValBind :: E.ValBind -> IndexFnM IndexFn
+mkIndexFnValBind :: E.ValBind -> IndexFnM [IndexFn]
 mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
   clearAlgEnv
   whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
@@ -94,12 +94,12 @@ mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
   forM_ params addSizeVariables
   indexfn <- forward body >>= rewrite >>= bindfn vn
   insertTopLevel vn (params, indexfn)
-  _ <- algebraContext indexfn $ do
-    whenDebug . traceM $ "Algebra context for indexfn:\n"
-    debugPrintAlgEnv
+  -- _ <- algebraContext indexfn $ do
+  --   whenDebug . traceM $ "Algebra context for indexfn:\n"
+  --   debugPrintAlgEnv
   pure indexfn
 
-bindfn :: E.VName -> IndexFn -> IndexFnM IndexFn
+bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
 bindfn vn indexfn = do
   insertIndexFn vn indexfn
   whenDebug (traceM $ prettyBinding vn indexfn <> "\n")
@@ -109,10 +109,10 @@ bindfn vn indexfn = do
 singleCase :: a -> Cases Symbol a
 singleCase e = cases [(Bool True, e)]
 
-fromScalar :: SoP Symbol -> IndexFn
-fromScalar e = IndexFn Empty (singleCase e)
+fromScalar :: SoP Symbol -> [IndexFn]
+fromScalar e = [IndexFn Empty (singleCase e)]
 
-forward :: E.Exp -> IndexFnM IndexFn
+forward :: E.Exp -> IndexFnM [IndexFn]
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
@@ -122,12 +122,12 @@ forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
 forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
   -- tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX x]
   whenDebug . traceM $ "Forward on " <> prettyString patterns
-  xs <- unzipT <$> forward x
+  xs <- forward x
   forM_ (zip patterns xs) bindfnOrDiscard
   forward body
   where
     bindfnOrDiscard (E.Wildcard {}, _) = pure ()
-    bindfnOrDiscard (E.Id vn _ _, indexfn) = void (bindfn vn indexfn)
+    bindfnOrDiscard (E.Id vn _ _, indexfn) = void (bindfn vn [indexfn])
     bindfnOrDiscard e = error ("not implemented for " <> show e)
 forward (E.Literal (E.BoolValue x) _) =
   pure . fromScalar . sym2SoP $ Bool x
@@ -512,7 +512,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
       toplevel <- getTopLevelIndexFns
       case M.lookup g toplevel of
-        Just (pats, indexfn) -> do
+        Just (pats, [indexfn]) -> do
           -- g is a previously analyzed top-level function definiton.
           whenDebug . traceM $ "✨ Using index fn " <> prettyBinding' g indexfn
           let param_names = mconcat . map E.patNames $ pats
@@ -520,7 +520,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           -- The arguments that the parameters are to be replaced for.
           arg_fns <- mapM forward args'
           arg_sizes <- mapM sizeOfDomain arg_fns
-          when (length param_names /= length arg_fns) (error "must be fully applied")
+          -- when (length param_names /= length arg_fns) (error "must be fully applied")
           -- Size paramters must be replaced as well.
           unless (map isJust param_sizes == map isJust arg_sizes) (error "sizes don't align")
           let size_rep = M.fromList $ catMaybes $ zipMaybes param_sizes arg_sizes
@@ -550,6 +550,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
 
             zipMaybes = zipWith (liftA2 (,))
+        Just _ -> error "TODO"
         Nothing -> do
           -- g is a free variable in this expression (probably a parameter
           -- to the top-level function currently being analyzed).
