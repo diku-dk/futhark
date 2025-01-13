@@ -2,9 +2,12 @@ module Futhark.Analysis.Proofs.Traversals
   ( ASTMapper (..),
     ASTMappable (..),
     identityMapper,
+    ASTFolder (..),
+    ASTFoldable (..),
   )
 where
 
+import Control.Monad (foldM)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Proofs.Symbol
@@ -81,3 +84,41 @@ instance ASTMappable Algebra.Symbol Algebra.Symbol where
     mapOnSymbol m =<< Algebra.Sum vn <$> astMap m lb <*> astMap m ub
   astMap m (Algebra.Pow (c, x)) =
     mapOnSymbol m . curry Algebra.Pow c =<< astMap m x
+
+newtype ASTFolder a b m = ASTFolder
+  { foldOnSymbol :: b -> a -> m b }
+
+class ASTFoldable a c where
+  astFold :: (Monad m) => ASTFolder a b m -> b -> c -> m b
+  astFoldF :: (Monad m) => ASTFolder a b m -> c -> b -> m b
+  astFoldF m = flip (astFold m)
+
+instance ASTFoldable Symbol (SoP Symbol) where
+  astFold m acc =
+    foldM (astFold m) acc . concatMap fst . sopToLists
+
+instance ASTFoldable Symbol Symbol where
+  astFold m acc (Sum _ lb ub x) =
+    astFold m acc lb >>= astFoldF m ub >>= astFoldF m x
+  astFold m acc (Idx xs i) =
+    astFold m acc xs >>= astFoldF m i
+  astFold m acc (Apply f xs) =
+    astFold m acc f >>= \a -> foldM (astFold m) a xs
+  astFold m acc (Not x) =
+    astFold m acc x
+  astFold m acc (x :== y) =
+    astFold m acc x >>= astFoldF m y
+  astFold m acc (x :< y) =
+    astFold m acc x >>= astFoldF m y
+  astFold m acc (x :> y) =
+    astFold m acc x >>= astFoldF m y
+  astFold m acc (x :>= y) =
+    astFold m acc x >>= astFoldF m y
+  astFold m acc (x :<= y) =
+    astFold m acc x >>= astFoldF m y
+  astFold m acc (x :&& y) =
+    astFold m acc x >>= astFoldF m y
+  astFold m acc (x :|| y) =
+    astFold m acc x >>= astFoldF m y
+  -- Recurr, Var, Hole
+  astFold m acc sym = foldOnSymbol m acc sym
