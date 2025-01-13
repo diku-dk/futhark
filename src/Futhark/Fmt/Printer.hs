@@ -614,11 +614,12 @@ instance Format UncheckedDec where
   fmt (ModTypeDec tb) = fmt tb
   fmt (ModDec tb) = fmt tb
   fmt (OpenDec tb loc) = addComments loc $ "open" <+> fmt tb
-  fmt (LocalDec tb loc) = addComments loc $ "local" <+> fmt tb
+  fmt (LocalDec tb loc) = addComments loc $ "local" </> fmt tb
   fmt (ImportDec path _tb loc) =
     addComments loc $ "import" <+> "\"" <> fmtPretty path <> "\""
 
 instance Format UncheckedProg where
+  fmt (Prog Nothing []) = popComments
   fmt (Prog Nothing decs) = sepDecs fmt decs </> popComments
   fmt (Prog (Just dc) decs) = fmt dc </> sepDecs fmt decs </> popComments
 

@@ -223,11 +223,10 @@ withAcc pat inputs lam = do
           locksForInputs atomics inputs'
 
 expCompiler :: ExpCompiler GPUMem HostEnv Imp.HostOp
--- We generate a simple kernel for itoa and replicate.
+-- We generate a simple kernel for iota and replicate.
 expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   x' <- toExp x
   s' <- toExp s
-
   sIota (patElemName pe) (pe64 n) x' s' et
 expCompiler (Pat [pe]) (BasicOp (Replicate shape se))
   | Acc {} <- patElemType pe = pure ()
