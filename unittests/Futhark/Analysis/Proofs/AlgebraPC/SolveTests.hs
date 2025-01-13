@@ -4,15 +4,18 @@ import Control.Monad (unless, forM)
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, mkRangeUB, addProperty)
-import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..), (~+~), negSoP)
+import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..), (~+~), negSoP, Rel (..))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
-import Futhark.Analysis.Proofs.Monad (IndexFnM(..), debugPrettyM, clearAlgEnv, runIndexFnM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM(..), debugPrettyM, clearAlgEnv, runIndexFnM, debugOn, debugPrintAlgEnv)
+import Futhark.Analysis.Proofs.Symbol qualified as IndexFn
 import Futhark.SoP.FourierMotzkin qualified as FM
 
 import Futhark.Util.Pretty
+import Futhark.SoP.Refine (addRels)
+import Futhark.SoP.Convert (ToSoP (toSoPNum))
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"
@@ -25,6 +28,10 @@ num_tests_pow = 1 -- 100000
 
 num_tests_sum_sub :: Integer
 num_tests_sum_sub = 1 -- 1000
+
+-- Need this dummy to use addRels.
+instance ToSoP Symbol IndexFn.Symbol where
+  toSoPNum _ = undefined
 
 
 tests :: TestTree
@@ -592,6 +599,40 @@ tests =
               let f = sVar i .+. c_sum (sVar i .+. int 1) (int (-1) .+. shp_sum (sVar k))
               let g = int (-1) .+. shp_sum (sVar k .-. int 1) .+. c_sum (shp_sum (sVar k .+. int 1)) (sVar j)
               f FM.$>$ g
+          )
+          @??= True,
+      testCase "∑shapeª[0 : -1 + k] ≤ -1 + ∑shapeª[0 : -1 + m] (bounds-check from part2indicesL)" $
+        -- Ranges: max{1} <= m₄₆₂₀ <= min{},
+        --         max{0, ∑shapeª₁₁₈₁₄[0 : -1 + k₂₄₃₃₃]}
+        --           <= i₁₁₁₁₁
+        --           <= min{-1 + ∑shapeª₁₁₈₁₄[0 : -1 + m₄₆₂₀], -1 + ∑shapeª₁₁₈₁₄[0 : k₂₄₃₃₃]}
+        --         max{0} <= shapeª₁₁₈₁₄ <= min{}
+        --         max{0} <= k₂₄₃₃₃ <= min{-1 + m₄₆₂₀}
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              k <- newNameFromString "k"
+              m <- newNameFromString "m"
+              vn_shp <- newNameFromString "shp"
+              let shp = One vn_shp
+              -- \s -> ∑shpª₃₃₇₈₀[0 : s]
+              let shp_sum s = sym2SoP $ Sum shp (int 0) s
+              let sum_0_km1 = shp_sum (sVar k .-. int 1)
+              let sum_0_mm1 = shp_sum (sVar m .-. int 1)
+              -- Ranges (in order)
+              addRels $
+                S.fromList
+                  [ int 1 :<=: sVar m,
+                    int 0 :<=: sVar i :&&: sVar i:<=: (sum_0_mm1 .-. int 1),
+                    sum_0_km1 :<=: sVar i :&&: sVar i:<=: (shp_sum (sVar k) .-. int 1),
+                    int 0 :<=: sVar vn_shp,
+                    int 0 :<=: sVar k :&&: sVar k :<=: sVar m .-. int2SoP 1
+                  ]
+              -- This fails because after simplification, we get
+              --   0 ≤ -1 + ∑shapeª[k : -1 + m]
+              -- which is clearly not known.
+              sum_0_km1 FM.$<=$ (sum_0_mm1 .-. int 1)
           )
           @??= True,
       --
