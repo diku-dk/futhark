@@ -219,6 +219,7 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
         E.Less -> doOp (~<~)
         E.Greater -> doOp (~>~)
         E.Leq -> doOp (~<=~)
+        E.Geq -> doOp (~>=~)
         E.LogAnd -> doOp (~&&~)
         E.LogOr -> doOp (~||~)
         _ -> error ("forward not implemented for bin op: " <> show bop)
@@ -304,6 +305,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           "+" -> pure (~+~)
           "-" -> pure (~-~)
           "*" -> pure (~*~)
+          "&&" -> pure (~&&~)
           _ -> error ("scan not implemented for bin op: " <> show vn)
       let base_case = sym2SoP (Var i) :== int2SoP 0
       x <- newVName "a"
@@ -573,6 +575,9 @@ x ~>~ y = sym2SoP $ sym2SoP x :> sym2SoP y
 
 (~<=~) :: Symbol -> Symbol -> SoP Symbol
 x ~<=~ y = sym2SoP $ sym2SoP x :<= sym2SoP y
+
+(~>=~) :: Symbol -> Symbol -> SoP Symbol
+x ~>=~ y = sym2SoP $ sym2SoP x :<= sym2SoP y
 
 (~&&~) :: Symbol -> Symbol -> SoP Symbol
 x ~&&~ y = sym2SoP $ x :&& y
