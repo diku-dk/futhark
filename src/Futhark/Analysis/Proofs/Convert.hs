@@ -273,11 +273,11 @@ forward expr@(E.AppExp (E.Apply f args _) _)
         -- Parameters as tuples are not implemented yet.
         -- (\(x,y) -> ...) is handled, but (\xy -> ...) is not.
         error "map: unhandled lambda paramter pattern"
-      iter <- bindLambdaBodyParams (zip param_names arrs)
-      -- Body was transformed from (\x -> e(x)) to (\i -> e(x[i])), so bound i.
-      body_fn <- rollbackAlgEnv $ do
+      (iter, body_fn) <- rollbackAlgEnv $ do
+        -- Transform body from (\x -> e(x)) to (\i -> e(x[i])), so bound i.
+        iter <- bindLambdaBodyParams (zip param_names arrs)
         addRelIterator iter
-        forward body
+        (iter,) <$> forward body
       case body_fn of
         IndexFn Empty body_cases -> rewrite $ IndexFn iter body_cases
         _ -> error "Non-scalar body."
@@ -355,9 +355,11 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- We pick the first argument of the lambda to be the accumulator
       -- and the second argument to be an element of the input array.
       -- (The lambda is associative, so we are free to pick.)
-      iter <- bindLambdaBodyParams . zip paramNames_x . unzipT =<< forward lam_xs
       let accToRecurrence = M.fromList (map (,sym2SoP Recurrence) paramNames_acc)
-      body_fn <- repIndexFn accToRecurrence <$> forward lam_body
+      (iter, body_fn) <- rollbackAlgEnv $ do
+        iter <- bindLambdaBodyParams . zip paramNames_x . unzipT =<< forward lam_xs
+        addRelIterator iter
+        (iter,) . repIndexFn accToRecurrence <$> forward lam_body
       case body_fn of
         IndexFn Empty body_cases -> rewrite $ IndexFn iter body_cases
         _ -> error "Non-scalar body."
