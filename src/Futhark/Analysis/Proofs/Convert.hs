@@ -268,14 +268,9 @@ forward expr@(E.AppExp (E.Apply f args _) _)
     E.Lambda params body _ _ _ : args' <- getArgs args = do
       -- tell ["Using map rule ", toLaTeX y']
       arrs <- concatMap unzipT <$> mapM forward args'
-      let param_names = concatMap E.patNames params
-      unless (length param_names == length arrs) $
-        -- Parameters as tuples are not implemented yet.
-        -- (\(x,y) -> ...) is handled, but (\xy -> ...) is not.
-        error "map: unhandled lambda paramter pattern"
       (iter, body_fn) <- rollbackAlgEnv $ do
         -- Transform body from (\x -> e(x)) to (\i -> e(x[i])), so bound i.
-        iter <- bindLambdaBodyParams (zip param_names arrs)
+        iter <- bindLambdaBodyParams (zip (concatMap E.patNames params) arrs)
         addRelIterator iter
         (iter,) <$> forward body
       case body_fn of
