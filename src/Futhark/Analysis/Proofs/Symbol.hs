@@ -103,14 +103,14 @@ instance Pretty Symbol where
     (Var x) -> prettyName x
     (Hole x) -> prettyHole x
     (Idx x i) -> autoParens x <> brackets (pretty i)
-    (Sum i lb ub e)
-      | Idx x j <- e,
-        Just (Var j') <- justSym j,
-        j' == i ->
-          -- Make sum slices extra pretty.
-          "∑"
-            <> pretty x
-            <> brackets (pretty lb <+> ":" <+> pretty ub)
+    -- (Sum i lb ub e)
+    --   | Idx x j <- e,
+    --     Just (Var j') <- justSym j,
+    --     j' == i ->
+    --       -- Make sum slices extra pretty.
+    --       "∑"
+    --         <> pretty x
+    --         <> brackets (pretty lb <+> ":" <+> pretty ub)
     (Sum i lb ub e) ->
       "∑"
         <> prettyName i

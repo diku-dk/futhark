@@ -2,7 +2,7 @@
 
 module Futhark.Analysis.Proofs.Monad
   ( VEnv,
-    IndexFnM(..),
+    IndexFnM (..),
     runIndexFnM,
     insertIndexFn,
     insertTopLevel,
@@ -19,6 +19,10 @@ module Futhark.Analysis.Proofs.Monad
     rollbackAlgEnv,
     getIndexFns,
     getTopLevelIndexFns,
+    modifyMem,
+    getMem,
+    remember,
+    forget,
   )
 where
 
@@ -45,6 +49,7 @@ data VEnv = VEnv
     algenv :: AlgEnv Algebra.Symbol Symbol Algebra.Property,
     indexfns :: M.Map VName IndexFn,
     toplevel :: M.Map VName ([E.Pat E.ParamType], IndexFn),
+    mem :: M.Map Symbol VName,
     debug :: Bool
   }
 
@@ -86,7 +91,32 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName IndexFn)
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty False
+    s = VEnv vns mempty mempty mempty mempty False
+
+modifyMem :: (MonadState VEnv m) => Symbol -> VName -> m ()
+modifyMem vn x = do
+  modify $
+    \env -> env {mem = M.insert vn x (mem env)}
+
+remember :: (MonadState VEnv m, MonadFreshNames m) => Symbol -> m VName
+remember x = do
+  m <- gets mem
+  case m M.!? x of
+    Nothing -> do
+      vn <- newVName ("<" <> prettyString x <> ">")
+      modifyMem x vn
+      pure vn
+    Just vn -> pure vn
+
+getMem :: IndexFnM (M.Map Symbol VName)
+getMem = gets mem
+
+forget :: IndexFnM a -> IndexFnM a
+forget computation = do
+  m <- getMem
+  res <- computation
+  modify (\env -> env {mem = m})
+  pure res
 
 insertIndexFn :: E.VName -> IndexFn -> IndexFnM ()
 insertIndexFn x v =

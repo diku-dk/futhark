@@ -128,6 +128,7 @@ rulesIndexFn = do
   b <- newVName "b"
   h1 <- newVName "h"
   h2 <- newVName "h"
+  h3 <- newVName "h"
   pure
     [ Rule
         { name = "Rule 5 (carry)",
@@ -194,7 +195,11 @@ rulesIndexFn = do
         { name = "Prefix sum",
           -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
           --    | i == b => e1              (e1 may depend on i)
-          --    | i /= b => y[i-1] + e2     (e2 may depend on i)
+          --    | p_rec  => y[i-1] + e2     (e2 may depend on i)
+          --
+          -- If y is a valid index function p_rec can match any expression;
+          -- we know that it will reduce to i > 0. (For example, p_rec = i /= b
+          -- and i in [b, b+1, ...] implies that p_rec <=> i > b.)
           --
           -- e2 is a SoP with terms e2_0, ..., e2_l.
           -- _______________________________________________________________
@@ -206,7 +211,7 @@ rulesIndexFn = do
                 body =
                   cases
                     [ (hole i :== int 0, hole h1),
-                      (hole i :/= int 0, Recurrence ~+~ Hole h2)
+                      (Hole h3, Recurrence ~+~ Hole h2)
                     ]
               },
           to = \s -> do
@@ -236,7 +241,7 @@ rulesIndexFn = do
                 body =
                   cases
                     [ (hole i :== hole b, hole h1),
-                      (hole i :/= hole b, Recurrence ~+~ Hole h2)
+                      (Hole h3, Recurrence ~+~ Hole h2)
                     ]
               },
           to = \s -> debugT' "prefix sum cat" $ do

@@ -83,10 +83,10 @@ rewrite_ fn@(IndexFn it xs) = normalizeIndexFn =<< simplifyIndexFn
     -- the second case is covered by the first when k <= 0. So we want just:
     --   | True  => sum_{j=0}^{k-1} e_j
     --
-    -- NOTE This does not attempt all possible ways to merge.
-    -- Given [(p_a, v_a), (p_b, v_b), ...], it attempts to merge the second case
-    -- with the first by checking if v_b is equal to v_a assuming p_a, but it doesn't
-    -- perform the analogous check assuming p_b.
+    -- NOTE This does not attempt all possible ways to merge. Given
+    --   [(p_a => v_a), (p_b => v_b), ...]
+    -- it attempts to merge the second case with the first by checking
+    -- if v_b is equal to v_a assuming p_a---and vice versa.
     mergeCases cs = merge cs []
       where
         merge [] acc = pure $ reverse acc
@@ -97,7 +97,13 @@ rewrite_ fn@(IndexFn it xs) = normalizeIndexFn =<< simplifyIndexFn
             then do
               p <- rewrite $ p_b :|| p_a
               merge as ((p, v_b) : bs)
-            else merge as (a : b : bs)
+            else do
+              (_, v_a') <- simplifyCase (p_b, v_a)
+              if v_b == v_a'
+                then do
+                  p <- rewrite $ p_a :|| p_b
+                  merge as ((p, v_a) : bs)
+                else merge as (a : b : bs)
 
     -- Remove cases for which the predicate can be shown False.
     eliminateFalsifiableCases = filterM (fmap isUnknown . isFalse . fst)

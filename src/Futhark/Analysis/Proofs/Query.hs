@@ -10,28 +10,30 @@ module Futhark.Analysis.Proofs.Query
     isUnknown,
     orM,
     allCases,
+    foreachCase,
   )
 where
 
+import Control.Monad (forM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
+import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algDebugPrettyM, algebraContext, answerFromBool, assume, isTrue, ($/=), ($<), ($<=), ($==), ($>), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (repDomain)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugT, rollbackAlgEnv, debugPrintAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
+import Futhark.SoP.Monad (lookupRange)
 import Futhark.SoP.Refine (addRel, addRels)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, sym2SoP, (.-.), Range (lowerBound))
+import Futhark.SoP.SoP (Range (lowerBound), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.-.))
 import Futhark.Util.Pretty (prettyStringW)
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
-import Futhark.SoP.Monad (lookupRange)
-import qualified Data.Set as S
 
 data MonoDir = Inc | IncStrict | Dec | DecStrict
   deriving (Show, Eq, Ord)
@@ -43,16 +45,15 @@ data Query
 
 -- | Answers a query on an index function case.
 askQ :: Query -> IndexFn -> Int -> IndexFnM Answer
-askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
-  let (p, q) = getCase case_idx cs
-  debugPrintAlgEnv
-  addRelIterator it
+askQ query fn case_idx = algebraContext fn $ do
+  let (p, q) = getCase case_idx (body fn)
+  addRelIterator (iterator fn)
   assume p
   case query of
-    CaseCheck transf -> check (transf q)
+    CaseCheck transf -> debugPrintAlgEnv >> check (transf q)
     CaseIsMonotonic dir ->
       debugT "  " $
-        case it of
+        case iterator fn of
           Forall i _ -> do
             -- Add j < i. Check p(j) ^ p(i) => q(j) `rel` q(i).
             j <- newVName "j"
@@ -64,7 +65,6 @@ askQ query fn@(IndexFn it cs) case_idx = algebraContext fn $ do
                   IncStrict -> ($<)
                   Dec -> ($>=)
                   DecStrict -> ($>)
-            debugPrintAlgEnv
             debugM $ "  Monotonic " <> show dir <> ": " <> prettyString p
             algDebugPrettyM "" (sym2SoP p)
             algDebugPrettyM "    =>" q
@@ -88,6 +88,10 @@ check a = isTrue a
 allCases :: (IndexFn -> Int -> IndexFnM Answer) -> IndexFn -> IndexFnM Answer
 allCases query fn@(IndexFn _ cs) =
   allM $ zipWith (\_ i -> query fn i) (casesToList cs) [0 ..]
+
+foreachCase :: IndexFn -> (Int -> IndexFnM a) -> IndexFnM ()
+foreachCase (IndexFn _ cs) f =
+  forM_ (zip (casesToList cs) [0 ..]) $ \(_, i) -> f i
 
 data Property
   = PermutationOf VName

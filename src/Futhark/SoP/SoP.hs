@@ -59,7 +59,8 @@ module Futhark.SoP.SoP
     mapSymSoP2M_,
     mapSymSoP2M,
     isZero,
-    Var(..),
+    hasConstant,
+    Var (..),
   )
 where
 
@@ -445,6 +446,10 @@ justPositive sop
 isZero :: (Ord u) => SoP u -> Bool
 isZero sop | Just 0 <- justConstant sop = True
 isZero _ = False
+
+hasConstant :: (Ord u) => SoP u -> Bool
+hasConstant sop =
+  isJust (justConstant sop) || any isConstTerm (sopTerms sop)
 
 --------------------------------------------------------------------------------
 -- Free symbols in SoPs

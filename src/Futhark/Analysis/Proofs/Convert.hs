@@ -8,7 +8,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, toAlgebra, ($==), ($>=))
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, justSingleCase, unzipT)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn)
@@ -91,6 +91,7 @@ mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
   whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
   forM_ params addTypeRefinement
   forM_ params addBooleanNames
+  forM_ params addSizeVariables
   indexfn <- forward body >>= rewrite >>= bindfn vn
   insertTopLevel vn (params, indexfn)
   _ <- algebraContext indexfn $ do
@@ -224,23 +225,43 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
         E.LogOr -> doOp (~||~)
         _ -> error ("forward not implemented for bin op: " <> show bop)
 forward (E.AppExp (E.If c t f _) _) = do
-  IndexFn iter_c c' <- forward c
-  vt <- forward t
-  vf <- forward f
-  -- Negating `c` means negating the case _values_ of c, keeping the
-  -- conditions of any nested if-statements (case conditions) untouched.
+  vc <- forward c
+  unless (iterator vc == Empty) $ error "Condition in if-statement is an array?"
+  -- Flatten the condition index function to a single case
+  -- so that we may assume its value in the corresponding branches.
+  --   c:  | p  ⇒  q
+  --       | ¬p ⇒  r
+  -- Is logically the same as
+  --   (p => q) and (not p => r)
+  -- which, in turn, is
+  --   (not p or q) and (p or r)
+  -- Hence
+  --   c: | true => (not p or q) and (p or r)
+  c' <-
+    rewrite $
+      foldl1 (:&&) [neg p :|| sop2Symbol q | (p, q) <- casesToList (body vc)]
+  debugPrettyM "E.If c t f; c':" c'
+  vt <- rollbackAlgEnv $ do
+    debugPrettyM "assuming c'" c'
+    assume c'
+    forward t
+  vf <- rollbackAlgEnv $ do
+    debugPrettyM "assuming (not c')" (neg c')
+    assume (neg c')
+    forward f
+  let flat_vc = IndexFn Empty (singleCase $ sym2SoP c')
   cond <- newVName "if-condition"
   t_branch <- newVName "t_branch"
   f_branch <- newVName "f_branch"
   let y =
         IndexFn
-          iter_c
+          (iterator vt)
           ( cases
               [ (Var cond, sym2SoP $ Var t_branch),
                 (neg $ Var cond, sym2SoP $ Var f_branch)
               ]
           )
-  substParams y [(cond, IndexFn iter_c c'), (t_branch, vt), (f_branch, vf)]
+  substParams y [(cond, flat_vc), (t_branch, vt), (f_branch, vf)]
 forward expr@(E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
@@ -248,7 +269,10 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- tell ["Using map rule ", toLaTeX y']
       arrs <- concatMap unzipT <$> mapM forward args'
       iter <- bindLambdaBodyParams (zip (concatMap E.patNames params) arrs)
-      body_fn <- forward body
+      -- Body was transformed from (\x -> e(x)) to (\i -> e(x[i])), so bound i.
+      body_fn <- rollbackAlgEnv $ do
+        addRelIterator iter
+        forward body
       case body_fn of
         IndexFn Empty body_cases -> rewrite $ IndexFn iter body_cases
         _ -> error "Non-scalar body."
@@ -498,6 +522,8 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           -- Size paramters must be replaced as well.
           unless (map isJust param_sizes == map isJust arg_sizes) (error "sizes don't align")
           let size_rep = M.fromList $ catMaybes $ zipMaybes param_sizes arg_sizes
+          whenDebug . traceM $
+            "Size variable replacement " <> prettyString size_rep
           -- Check that preconditions are satisfied.
           preconditions <- mapM getPrecondition pats
           when (isJust $ msum preconditions) $
@@ -611,12 +637,18 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
   where
     mkRef wrap (E.OpSectionRight (E.QualName [] vn_op) _ y _ _ _) = do
       let (rel, alg_rel) = case E.baseString vn_op of
+            ">" -> ((:>), (:>:))
             ">=" -> ((:>=), (:>=:))
+            "<" -> ((:<), (:<:))
+            "<=" -> ((:<=), (:<=:))
             "==" -> ((:==), (:==:))
             _ -> undefined
       y' <- getScalar <$> (forward y >>= rewrite)
+      -- Create check as an index function whose cases contain the check.
       let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `rel` y'
       let effect = do
+            -- FIXME why am I using addUntrans directly and not toAlgebra?
+            -- We should not know anything about algebra translation here!
             alg_param <- Algebra.Var <$> newVName (E.baseString param <> "ª")
             addUntrans alg_param (wrap (Var param))
             alg_y' <- toAlgebra y'
@@ -624,8 +656,11 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
       pure (check, effect)
     mkRef _ x = error $ "Unhandled refinement predicate " <> show x
 
+    -- Check that all branches of check_fn evaluate to true
+    -- when substituting in param_subst.
     mkCheck check_fn (size_rep, param_subst) = do
-      check <- repIndexFn size_rep <$> substParams check_fn param_subst
+      whenDebug . traceM $ "Checking precondition on " <> prettyString param
+      check <- substParams (repIndexFn size_rep check_fn) param_subst
       allCases (askQ (CaseCheck sop2Symbol)) check
 
     getScalar (IndexFn Empty cs) | [(Bool True, x)] <- casesToList cs = x
@@ -653,6 +688,21 @@ addBooleanNames (E.Id param (E.Info {E.unInfo = E.Array _ _ t}) _) = do
 addBooleanNames (E.Id param (E.Info {E.unInfo = t}) _) = do
   when (typeIsBool t) $ addProperty (Algebra.Var param) Algebra.Boolean
 addBooleanNames _ = pure ()
+
+-- Lowerbounds size variables by 0.
+addSizeVariables :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
+addSizeVariables (E.PatParens pat _) = addSizeVariables pat
+addSizeVariables (E.PatAscription pat _ _) = addSizeVariables pat
+addSizeVariables (E.Id _ (E.Info {E.unInfo = E.Array _ shp _}) _) = do
+  mapM_ addSize (E.shapeDims shp)
+  where
+    addSize (E.Var (E.QualName _ d) _ _) = do
+      alg_d <- toAlgebra (sym2SoP $ Var d)
+      addRel (alg_d :>=: int2SoP 0)
+    addSize _ = pure ()
+addSizeVariables (E.Id param (E.Info {E.unInfo = t}) _) = do
+  when (typeIsBool t) $ addProperty (Algebra.Var param) Algebra.Boolean
+addSizeVariables _ = pure ()
 
 -- Binds names of scalar parameters to scalar values of corresponding
 -- index functions. Assumes that domains are equivalent across index

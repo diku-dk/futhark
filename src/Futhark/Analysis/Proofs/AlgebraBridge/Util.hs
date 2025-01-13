@@ -3,6 +3,7 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Util
   ( Answer (..),
     assume,
     addRelIterator,
+    addRelSymbol,
     answerFromBool,
     ($<),
     ($<=),
@@ -13,21 +14,19 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Util
   )
 where
 
-import Control.Monad (unless)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, isBooleanM, toAlgebra)
+import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, toAlgebra)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
-import Futhark.SoP.Monad (addRange, mkRange)
 import Futhark.SoP.Refine (addRel, addRels)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.-.))
-import Futhark.Util.Pretty (Pretty (pretty), prettyString, viaShow)
+import Futhark.Util.Pretty (Pretty (pretty), viaShow)
 
 -- Fourer Motzkin Elimination solver may return True or False.
 -- True means the query holds. False means "I don't know".
@@ -39,9 +38,16 @@ instance Pretty Answer where
 
 assume :: Symbol -> IndexFnM ()
 assume p = do
-  booltype <- isBooleanM p
-  -- This is could just be a no-op, if not boolean, but I'd like to know why.
-  unless booltype (error $ "Assume on non-boolean: " <> prettyString p)
+  -- FIXME I'd like to have the below safety check, which is only really
+  -- relevant for me accidentally calling assume on something non-bool.
+  -- The source program has been type checked, so things that are in
+  -- boolean places (such as predicates in cases) are really boolean.
+  --
+  -- Can't have it right now due to assume on c in E.If c t f, in Convert.hs.
+  -- (Try to uncomment the below and run tests.)
+  --
+  -- booltype <- isBooleanM p
+  -- unless booltype (error $ "Assume on non-boolean: " <> prettyString p)
   addRelSymbol p
   addEq 1 p
   -- Add that pairwise disjoint symbols are false.
@@ -79,7 +85,16 @@ addRelSymbol p = do
     toRel_ (x :== y) = convCmp (:==:) x y
     toRel_ (x :&& y) = convOp toRel_ (liftOp (:&&:)) x y
     toRel_ (x :|| y) = convOp toRel_ (liftOp (:||:)) x y
-    -- toRel_ (x :/= y) = convCmp (:/=:) x y -- This won't work with addRel.
+    toRel_ (x :/= y) = do
+      -- Inequality can only be expressed indirectly.
+      gte <- lift $ x $>= y
+      case gte of
+        Yes -> toRel_ (x :> y)
+        _ -> do
+          lte <- lift $ x $<= y
+          case lte of
+            Yes -> toRel_ (x :< y)
+            _ -> fail ""
     toRel_ _ = fail ""
 
 -- | Add relations derived from the iterator to the algebraic environment.

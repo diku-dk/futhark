@@ -9,6 +9,8 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
 where
 
 import Control.Monad (forM_, when, (<=<))
+import Data.Function (on)
+import Data.List (sortBy)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
@@ -17,13 +19,13 @@ import Futhark.Analysis.Proofs.IndexFn (IndexFn (iterator), Iterator (..), getPr
 import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
-import Futhark.Analysis.Proofs.Traversals (ASTMappable, ASTMapper (..), astMap, identityMapper)
+import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMappable, ASTMapper (..), astFold, astMap, identityMapper)
 import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
+import Futhark.SoP.SoP (Rel (..), SoP, hasConstant, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 
@@ -204,32 +206,60 @@ handleQuantifiers = astMap m
 -- any symbol in the environment that is syntactically identical up to one hole.
 -- For example, `search x[0]` in environment `{y : x[hole]}`,
 -- returns `(y, 0)`, implying hole maps to 0.
+--
+-- Note: The symbol may match with multiple untranslatable symbols.
+-- For instance, `search (shape[i] > 0)` in environment
+--   (alg_a, shape[hole_1] > 0)
+--   (alg_b, hole_2 > 0)
+-- will match both entries with {hole_1 |-> i} and {hole_2 |-> shape[i]},
+-- respectively. To disambiguate, we choose the one with the "smallest"
+-- substitution.
+-- Choose the wrong one and we may lose information. For example,
+-- if we have alg_a[i] = 1 (true), we would be unable to use that
+-- information when picking alg_b[shape[i]]. (alg_a and alg_b are
+-- distinct, opaque symbols to the Algebra layer.)
 search :: Symbol -> IndexFnM (Maybe (VName, Maybe (SoP Symbol)))
 search x = do
   inv_map <- inv <$> getUntrans
   case inv_map M.!? x of
     Just algsym ->
-      -- Symbol is a key in untranslatable env.
+      -- Exact match.
       pure $ Just (Algebra.getVName algsym, Nothing)
     Nothing -> do
-      -- Search for symbol in untranslatable environment; if x unifies
-      -- with some key in the environment, return that key.
-      -- Otherwise create a new entry in the environment.
-      let syms = M.toList inv_map
-      matches <- catMaybes <$> mapM (\(sym, algsym) -> fmap (algsym,) <$> unify sym x) syms
-      case matches of
-        [] -> pure Nothing
-        [(algsym, sub)] | null (mapping sub) -> do
+      -- Search for matches using unification.
+      matches <-
+        catMaybes
+          <$> mapM
+            (\(sym, algsym) -> fmap ((algsym,) . M.elems . mapping) <$> unify sym x)
+            (M.toList inv_map)
+      -- Disambiguate multiple matches.
+      scores :: [Integer] <- mapM (fmap sum . mapM score . snd) matches
+      let match = getMinimum $ sortBy (compare `on` fst) (zip scores matches)
+      case match of
+        Nothing -> pure Nothing
+        Just (algsym, []) ->
+          -- This case should be impossible as x would've matched in the exact lookup.
           pure $ Just (Algebra.getVName algsym, Nothing)
-        [(algsym, sub)] | [s] <- M.elems (mapping sub) -> do
-          pure $
-            Just (Algebra.getVName algsym, Just s)
-        [y] ->
-          error $
-            "search: " <> prettyString x <> " multiple holes: " <> prettyString y
-        ys ->
-          error $
-            "search: " <> prettyString x <> " unifies with multiple symbols: " <> prettyString ys
+        Just (algsym, [sub]) ->
+          pure $ Just (Algebra.getVName algsym, Just sub)
+        Just (algsym, subs) ->
+          errorMsg $
+            "multiple holes (env is invalid): " <> prettyString (algsym, subs)
+  where
+    errorMsg txt = error $ "search: " <> prettyString x <> " " <> txt
+
+    score sop = do
+      n <- astFold (ASTFolder {foldOnSymbol = scoreSymbol}) 0 sop
+      pure $ if hasConstant sop then n + 1 else n
+
+    scoreSymbol :: Integer -> Symbol -> IndexFnM Integer
+    scoreSymbol acc _ = pure $ acc + 1
+
+    getMinimum [] = Nothing
+    getMinimum ys@(a : b : _)
+      | a == b =
+          errorMsg $ "ambiguous matches: " <> prettyString ys
+    getMinimum (a : _) = Just (snd a)
 
 isBooleanM :: Symbol -> IndexFnM Bool
 isBooleanM (Var vn) = do
@@ -278,7 +308,11 @@ toAlgebra_ (Sum j lb ub x) = do
       b <- mapSymSoP2M_ toAlgebra_ (rep (mkRep j ub) idx)
       booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
       pure $ Algebra.Sum (idxSym booltype vn) a b
-    Nothing -> error "handleQuantifiers need to be run"
+    Nothing ->
+      -- Either handle quantifiers needs to be run on the symbol first
+      -- or x did not depend j. Both cases would be odd, and I'd like
+      -- to know why it would happen.
+      error "handleQuantifiers need to be run"
 toAlgebra_ sym@(Idx (Var xs) i) = do
   res <- search sym
   vn <- case fst <$> res of
