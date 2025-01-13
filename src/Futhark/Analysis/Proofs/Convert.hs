@@ -22,7 +22,7 @@ import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addProperty, addUntrans)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~), mapSymSoP)
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
@@ -163,8 +163,8 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
 forward (E.TupLit xs _) = do
   fns <- mapM forward xs
   vns <- forM fns (\_ -> newVName "f")
-  let IndexFn it1 _ = head fns -- TODO probably want to grab most complex iterator here.
-  let y = IndexFn it1 (cases [(Bool True, sym2SoP . Tuple $ map (sym2SoP . Var) vns)])
+  let it = maximum (map iterator fns)
+  let y = IndexFn it (cases [(Bool True, sym2SoP . Tuple $ map (sym2SoP . Var) vns)])
   substParams y (zip vns fns)
 forward (E.AppExp (E.Index xs' slice _) _)
   | [E.DimFix idx'] <- slice = do
