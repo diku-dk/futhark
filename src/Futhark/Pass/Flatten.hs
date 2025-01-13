@@ -343,10 +343,10 @@ concatIrreg _segments _env ns reparr = do
   ns_full <- letExp (baseString ns <> "_full") <=< segMap (MkSolo num_segments) $
     \(MkSolo i) -> do
       old_segments <- mapM (\(j, rep) -> letSubExp ("old_segment_" ++ show j) =<< eIndex (irregularS rep) [eSubExp i]) (zip [0 ..] reparr)
-      full_segment <-
-        letSubExp "new_segment" =<< toExp (foldl (+) (pe64 $ zero) $ map (pe64) old_segments)
+      new_segment <-
+        letSubExp "new_segment" =<< toExp (foldl (+) (pe64 $ zero) $ map (pe64) old_segments) -- this code block might be redundant
 
-      pure $ subExpsRes [full_segment]
+      pure $ subExpsRes [new_segment]
 
   (ns_full_F, ns_full_O, ns_II1) <- doRepIota ns_full
   (_, _, _ns_II2) <- doSegIota ns_full
@@ -634,7 +634,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             ~+~ sExt it (untyped (pe64 v'))
             ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns res_F res_O (distResTag res) res_D' env
-    Concat 0 arr shp -> do
+    Concat 0 arr shp -> do -- peter: what is shp, because right now it looks like it is the same as ns_full
       ns <- dataArr segments env inps shp
       reparr <- mapM (getIrregRep segments env inps) (NE.toList arr)
       rep' <- concatIrreg segments env ns reparr
