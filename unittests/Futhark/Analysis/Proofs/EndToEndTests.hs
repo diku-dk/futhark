@@ -24,49 +24,49 @@ tests =
     "Proofs.EndToEnd"
     [ mkTest
         "tests/indexfn/part2indices.fut"
-        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+        ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/dummyindices.fut"
-        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+        ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Unknown,
       mkTest
         "tests/indexfn/dummyindices2.fut"
-        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+        ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Unknown,
       mkTest
         "tests/indexfn/part2indices_numeric_conds.fut"
-        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+        ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices_predicatefn.fut"
-        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+        ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices_predicatefn2.fut"
-        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+        ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part3indices.fut"
-        ( \fn@(IndexFn (Forall _ (Iota n)) _) -> do
+        ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indicesL.fut"
-        ( \fn@(IndexFn (Forall _ dom@(Cat _ _ start)) _) -> do
+        ( \[fn@(IndexFn (Forall _ dom@(Cat _ _ start)) _)] -> do
             end <- rewrite $ intervalEnd dom
             prove (ForallSegments $ \_ -> PermutationOfRange start end) fn
         )

@@ -335,8 +335,6 @@ toAlgebra_ sym@(Apply (Var f) [x]) = do
   booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
   pure $ Algebra.Idx (idxSym booltype vn) idx'
 toAlgebra_ x@(Apply {}) = lookupUntransPE x
-toAlgebra_ x@(Tuple {}) =
-  error $ "toAlgebra_: " <> prettyString x -- XXX unzip before getting here!
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
 -- The rest are boolean statements.
 toAlgebra_ x = handleBoolean x

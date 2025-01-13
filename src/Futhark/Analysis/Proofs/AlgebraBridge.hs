@@ -20,7 +20,7 @@ import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF, toDNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Proofs.Unify (Substitution, unify)
 import Futhark.Analysis.Proofs.Util (converge)
-import Futhark.SoP.SoP (SoP, justSym, sym2SoP)
+import Futhark.SoP.SoP (SoP)
 import Futhark.Util.Pretty (docStringW, pretty)
 
 -- | Simplify symbols using algebraic solver.
@@ -34,9 +34,6 @@ simplify = astMap m
         }
 
     simplifyAlgebra :: SoP Symbol -> IndexFnM (SoP Symbol)
-    simplifyAlgebra x | Just (Tuple xs) <- justSym x = do
-      ys <- mapM simplifyAlgebra xs
-      pure . sym2SoP $ Tuple ys
     simplifyAlgebra x = rollbackAlgEnv $ do
       y <- toAlgebra x
       z <- Algebra.simplify y

@@ -10,7 +10,7 @@ where
 
 import Futhark.Analysis.Proofs.Util (prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, justConstant, justSym)
-import Futhark.Util.Pretty (Pretty, apply, brackets, commasep, parens, pretty, prettyString, softline, (<+>))
+import Futhark.Util.Pretty (Pretty, apply, brackets, parens, pretty, prettyString, softline, (<+>))
 import Language.Futhark (VName)
 
 data Symbol
@@ -25,7 +25,6 @@ data Symbol
       (SoP Symbol) -- upper bound
       Symbol
   | Apply Symbol [SoP Symbol] -- First argument is Var or Hole.
-  | Tuple [SoP Symbol]
   | Bool Bool
   | Not Symbol
   | SoP Symbol :< SoP Symbol
@@ -119,7 +118,6 @@ instance Pretty Symbol where
         <> " "
         <> autoParens e
     Apply f xs -> pretty f <> apply (map pretty xs)
-    Tuple xs -> parens (commasep $ map pretty xs)
     Bool x -> pretty x
     Not x -> "¬" <> autoParens x
     x :< y -> prettyOp "<" x y
