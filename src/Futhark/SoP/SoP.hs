@@ -7,9 +7,9 @@ module Futhark.SoP.SoP
     mapSoP,
     mapTermSoP,
     mapTermSoPM,
-    mapSymSoP_,
-    mapSymSoPM,
     mapSymSoP,
+    mapSymSoPM,
+    mapSymM,
     isConstTerm,
     filterSoP,
     term2SoP,
@@ -56,8 +56,6 @@ module Futhark.SoP.SoP
     andRel,
     normalize,
     padWithZero,
-    mapSymSoP2M_,
-    mapSymSoP2M,
     isZero,
     hasConstant,
     Var (..),
@@ -228,12 +226,6 @@ mapSoP f (SoP ts) = SoP $ fmap f ts
 mapTermSoP :: (Foldable t, Ord u, Ord (t u)) => ([u] -> Integer -> (t u, Integer)) -> SoP u -> SoP u
 mapTermSoP f = sopFromList . map (uncurry f) . sopToLists
 
-mapSymSoP_ :: (Ord u) => (u -> u) -> SoP u -> SoP u
-mapSymSoP_ f = SoP . M.mapKeys (Term . MS.map f . getTerm) . getTerms
-
-mapSymSoPM :: (Ord u, Monad m) => (u -> m u) -> SoP u -> m (SoP u)
-mapSymSoPM f = fmap sopFromList . mapM (\(ts, a) -> (,a) <$> mapM f ts) . sopToLists
-
 mapSymSoP :: (Ord u) => (u -> SoP u) -> SoP u -> SoP u
 mapSymSoP f =
   foldr
@@ -247,17 +239,17 @@ mapSymSoP f =
     (int2SoP 0)
     . sopToLists
 
-mapSymSoP2M_ :: (Ord u, Ord v, Monad m) => (u -> m v) -> SoP u -> m (SoP v)
-mapSymSoP2M_ f = fmap sopFromList . mapM (\(ts, a) -> (,a) <$> mapM f ts) . sopToLists
-
-mapSymSoP2M :: (Ord u, Ord v, Monad m) => (u -> m (SoP v)) -> SoP u -> m (SoP v)
-mapSymSoP2M f x = do
+mapSymSoPM :: (Ord u, Ord v, Monad m) => (u -> m (SoP v)) -> SoP u -> m (SoP v)
+mapSymSoPM f x = do
   xs <- mapM (\(ts, a) -> (,a) <$> mapM f ts) (sopToLists x)
   pure $
     foldr
       (\(ts, a) acc -> foldr (.*.) (int2SoP a) ts .+. acc)
       (int2SoP 0)
       xs
+
+mapSymM :: (Ord u, Ord v, Monad m) => (u -> m v) -> SoP u -> m (SoP v)
+mapSymM f = mapSymSoPM (fmap sym2SoP . f)
 
 mapTermSoPM :: (Foldable t, Ord u, Ord (t u), Monad m) => ([u] -> Integer -> m (t u, Integer)) -> SoP u -> m (SoP u)
 mapTermSoPM f =

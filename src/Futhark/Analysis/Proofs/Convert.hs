@@ -22,7 +22,7 @@ import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addProperty, addUntrans)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP_, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~), mapSymSoP)
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
@@ -199,7 +199,7 @@ forward (E.AppExp (E.Index xs' slice _) _)
       pure $ s >>= (M.!? k_hole)
 forward (E.Not e _) = do
   IndexFn it e' <- forward e
-  rewrite $ IndexFn it $ cmapValues (mapSymSoP_ neg) e'
+  rewrite $ IndexFn it $ cmapValues (mapSymSoP (sym2SoP . neg)) e'
 forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op',

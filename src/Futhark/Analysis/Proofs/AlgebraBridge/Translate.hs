@@ -25,7 +25,7 @@ import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, hasConstant, int2SoP, justSym, mapSymSoP2M, mapSymSoP2M_, sym2SoP, (.+.), (~-~))
+import Futhark.SoP.SoP (Rel (..), SoP, hasConstant, int2SoP, justSym, mapSymM, mapSymSoPM, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 
@@ -100,7 +100,7 @@ algebraContext fn m = rollbackAlgEnv $ do
 -- Translation from Algebra to IndexFn layer.
 ------------------------------------------------------------------------------
 fromAlgebra :: SoP Algebra.Symbol -> IndexFnM (SoP Symbol)
-fromAlgebra = mapSymSoP2M fromAlgebra_
+fromAlgebra = mapSymSoPM fromAlgebra_
 
 fromAlgebra_ :: Algebra.Symbol -> IndexFnM (SoP Symbol)
 fromAlgebra_ (Algebra.Var vn) = do
@@ -176,7 +176,7 @@ instance ToSoP Algebra.Symbol Symbol where
 -- Translation from IndexFn to Algebra layer.
 ------------------------------------------------------------------------------
 toAlgebra :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
-toAlgebra = mapSymSoP2M_ toAlgebra_ <=< handleQuantifiers
+toAlgebra = mapSymM toAlgebra_ <=< handleQuantifiers
 
 -- Replace bound variable `k` in `e` by Hole.
 removeQuantifier :: Symbol -> VName -> IndexFnM Symbol
@@ -304,8 +304,8 @@ toAlgebra_ (Sum j lb ub x) = do
   case res of
     Just (vn, match) -> do
       let idx = fromMaybe (sym2SoP $ Var j) match
-      a <- mapSymSoP2M_ toAlgebra_ (rep (mkRep j lb) idx)
-      b <- mapSymSoP2M_ toAlgebra_ (rep (mkRep j ub) idx)
+      a <- mapSymM toAlgebra_ (rep (mkRep j lb) idx)
+      b <- mapSymM toAlgebra_ (rep (mkRep j ub) idx)
       booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
       pure $ Algebra.Sum (idxSym booltype vn) a b
     Nothing ->
@@ -319,7 +319,7 @@ toAlgebra_ sym@(Idx (Var xs) i) = do
     Just vn -> pure vn
     Nothing -> addUntrans (Var xs)
   let idx = fromMaybe i (snd =<< res)
-  idx' <- mapSymSoP2M_ toAlgebra_ idx
+  idx' <- mapSymM toAlgebra_ idx
   booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
   pure $ Algebra.Idx (idxSym booltype vn) idx'
 toAlgebra_ (Idx {}) = undefined
@@ -329,7 +329,7 @@ toAlgebra_ sym@(Apply (Var f) [x]) = do
     Just vn -> pure vn
     Nothing -> addUntrans sym
   let idx = fromMaybe x (snd =<< res)
-  idx' <- mapSymSoP2M_ toAlgebra_ idx
+  idx' <- mapSymM toAlgebra_ idx
   f_is_bool <- askProperty (Algebra.Var f) Algebra.Boolean
   when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
   booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
@@ -359,7 +359,7 @@ handleBoolean p = do
   addProperty (Algebra.Var vn) Algebra.Boolean
   case snd =<< res of
     Just idx -> do
-      idx' <- mapSymSoP2M_ toAlgebra_ idx
+      idx' <- mapSymM toAlgebra_ idx
       pure $ Algebra.Idx (Algebra.POR (S.singleton vn)) idx'
     Nothing -> pure $ Algebra.Var vn
 

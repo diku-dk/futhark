@@ -15,7 +15,7 @@ import Futhark.Analysis.Proofs.Query (Query (CaseCheck), askQ, foreachCase, isYe
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap, identityMapper)
-import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameSame)
+import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM, renameSame)
 import Futhark.Analysis.Proofs.Util (prettyBinding')
 import Futhark.MonadFreshNames (newName, newVName)
 import Futhark.SoP.SoP (SoP, justSym, sym2SoP)
@@ -43,10 +43,10 @@ inline (f_name, f) g = do
   (f', g', app_reps) <- mkApplicationReps (f_name, f) g
   iter <- mergeIterators f' $ inlineIterator app_reps g'
   cs <- inlineCases app_reps f' g'
-  pure (IndexFn iter cs)
+  IndexFn iter <$> simplify cs
   where
     inlineCases reps f' g' =
-      simplify . cases $ do
+      renameM $ cases $ do
         (f_cond, f_val) <- casesToList (body f')
         (g_cond, g_val) <- casesToList (body g')
         pure $
