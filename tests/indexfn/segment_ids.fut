@@ -1,4 +1,4 @@
-let sum_i64 [n] (xs: [n]i64) = (scan (+) 0 xs)[n-1]
+let sum_i64 [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
 type nat_i64 = {i64 | (>= 0)}
 
