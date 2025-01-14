@@ -30,7 +30,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/map-tuple.fut"
-        ( withDebug $ pure $ \(i, n, xs, _) ->
+        ( pure $ \(i, n, xs, _) ->
             [IndexFn
               { iterator = Forall i (Iota (sHole n)),
                 body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Idx (Hole xs) (sHole i)))]
@@ -148,16 +148,6 @@ tests =
                     [(Bool True, sym2SoP $ Idx (Hole h1) (sHole h2 .-. int2SoP 1))]
               }]
         ),
-      -- mkTest
-      --   "tests/indexfn/map3.fut"
-      --   ( pure $ \(i, n, h1, h2) ->
-      --       IndexFn
-      --         { iterator = Forall i (Iota (sHole n)),
-      --           body =
-      --             cases
-      --               [(Bool True, sym2SoP $ Idx (Hole h1) (sHole h2 .-. int2SoP 1))]
-      --         }
-      --   ),
       mkTest
         "tests/indexfn/part2indices_numeric_conds.fut"
         ( pure $ \(i, n, xs, j) ->
@@ -270,7 +260,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/segment_ids.fut"
-        ( withDebug $ pure $ \(i, m, k, b) ->
+        ( pure $ \(i, m, k, b) ->
             [IndexFn
               { iterator = Forall i (Cat k (sHole m) (sHole b)),
                 body = cases [(Bool True, sHole k)]

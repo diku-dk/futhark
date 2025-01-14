@@ -1,24 +1,20 @@
 -- Index function substitution.
 module Futhark.Analysis.Proofs.Substitute ((@)) where
 
-import Control.Monad (forM_, unless, when)
+import Control.Monad (unless)
 import Data.Map qualified as M
-import Data.Maybe (fromJust, isJust)
-import Data.Set qualified as S
+import Data.Maybe (isJust)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (algebraContext, simplify, toAlgebra)
-import Futhark.Analysis.Proofs.AlgebraBridge.Util (addRelSymbol)
+import Futhark.Analysis.Proofs.AlgebraBridge (simplify)
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repDomain)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Query (CaseCheck), askQ, foreachCase, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Traversals (ASTMapper (..), astMap, identityMapper)
 import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM, renameSame)
 import Futhark.Analysis.Proofs.Util (prettyBinding')
-import Futhark.MonadFreshNames (newName, newVName)
-import Futhark.SoP.SoP (SoP, justSym, sym2SoP)
+import Futhark.MonadFreshNames (newVName)
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 
@@ -133,28 +129,20 @@ mkApplicationReps (f_name, f) g = rollbackAlgEnv $ do
   (f', g') <- renameSame f g
   let notQuantifier vn = vn < k || Just vn == catVar (iterator g')
   -- If f has multiple cases, we would not know which case to substitute in Sum j a b f(e(j)).
-  let nonCapturingArg arg = hasSingleCase f || all notQuantifier (fv arg)
+  let nonCapturingArg arg = hasSingleCase f' || all notQuantifier (fv arg)
   -- Collect and replace applications f(e(j)) in g by fresh variables.
   -- Returns, for example, (g{f(i) |-> f_i}, [{f_i |-> f(i)}]).
   -- NOTE the domain of g is also traversed.
   (g_for_inlining, apps) <- forget $ do
-    g'' <- repAppByFreshName nonCapturingArg =<< handleQuantifiers g'
+    g'' <- repAppByFreshName nonCapturingArg g'
     (g'',) . map mkApp . M.assocs <$> getMem
   -- If there are no f(e(j)), handle direct references to f without any args.
+  let no_arg_rep = case (iterator f', iterator g') of
+        (Forall i _, Forall j _) -> mkRep i (Var j)
+        _ -> mempty
   let reps = case apps of
-        [] ->
-          let i_rep = case (iterator f', iterator g') of
-                (Forall i _, Forall j _) -> mkRep i (Var j)
-                _ -> mempty
-           in [(f_name, i_rep)]
+        [] -> [(f_name, no_arg_rep)]
         _ -> apps
-  -- NOTE Not using g_for_inlining in bounds checking because its iterator
-  -- is potentially bogus before inlining f.
-  checkIndexingWithinBounds
-    f_name
-    f'
-    g'
-    [arg | (_, app_rep) <- reps, (_i, arg) <- M.toList app_rep]
   pure (f', g_for_inlining, reps)
   where
     hasSingleCase = isJust . justSingleCase
@@ -166,19 +154,6 @@ mkApplicationReps (f_name, f) g = rollbackAlgEnv $ do
     toRep idx = case iterator f of
       Forall i _ -> mkRep i idx
       Empty -> error "Indexing into a scalar function"
-
-    -- We need to add ranges on quantifiers in order to do bounds-checking.
-    -- For example, if g = | True ⇒  ∑j∈(0 .. -1 + m) xs[j].
-    handleQuantifiers = astMap m
-      where
-        m = ASTMapper {mapOnSymbol = handleQuant, mapOnSoP = pure}
-        handleQuant (Sum j lb ub x) = do
-          fresh_j <- newName j
-          let j' = sym2SoP (Var fresh_j)
-          addRelSymbol (lb :<= j' :&& j' :<= ub)
-          let x' :: Symbol = fromJust . justSym $ rep (mkRep j j') x
-          pure (Sum fresh_j lb ub x')
-        handleQuant x = pure x
 
     repAppByFreshName nonCapturingArg = astMap m
       where
@@ -197,45 +172,6 @@ mkApplicationReps (f_name, f) g = rollbackAlgEnv $ do
         repApp (Idx (Var x) _)
           | x == f_name = error "Capturing variable(s)"
         repApp sym = pure sym
-
--- When applying f to args inside g, is f defined at args?
-checkIndexingWithinBounds :: VName -> IndexFn -> IndexFn -> [SoP Symbol] -> IndexFnM ()
-checkIndexingWithinBounds _ _ _ [] = pure ()
-checkIndexingWithinBounds f_name (IndexFn Empty _) _ args =
-  unless (null args) $ error $ "Indexing into scalar " <> prettyString f_name
-checkIndexingWithinBounds f_name f@(IndexFn (Forall _ dom) _) g args = algebraContext g $ do
-  forM_ args $ \arg -> do
-    doCheck (domainStart dom :<= arg) arg
-    doCheck (arg :<= domainEnd dom) arg
-  where
-    fIsIn (p, q) = f_name `S.member` (fv p `S.union` fv q)
-
-    doCheck bound arg =
-      foreachCase g $ \i ->
-        when (fIsIn $ getCase i $ body g) $ do
-          c <- askQ (CaseCheck (const bound)) g i
-          when (isYes c) $ do
-            debugPrettyM "PASSED" bound
-          unless (isYes c) $ do
-            debugPrettyM "CASE " i
-            debugM $
-              "Failed bounds-checking:"
-                <> "\nf:"
-                <> prettyString f
-                <> "\ng: "
-                <> prettyString g
-                <> "\nargs: "
-                <> prettyString args
-            alg_end <- toAlgebra (domainEnd dom)
-            error $
-              "Unsafe indexing: "
-                <> prettyString (Idx (Var f_name) arg)
-                <> " (failed to show: "
-                <> prettyString bound
-                <> ")."
-                <> " (in algebra: "
-                <> prettyString alg_end
-                <> ")."
 
 -- XXX when to rewrite recurrences as sums?
 -- When substitituting a recurrent index fn into some other index fn.

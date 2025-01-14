@@ -10,10 +10,10 @@ import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, justSingleCase)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, getCase, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), allCases, askQ, isUnknown, isYes)
+import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), allCases, askQ, foreachCase, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
@@ -30,9 +30,12 @@ import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
 --------------------------------------------------------------
+justVName :: E.Exp -> Maybe E.VName
+justVName (E.Var (E.QualName [] vn) _ _) = Just vn
+justVName _ = Nothing
+
 getFun :: E.Exp -> Maybe String
-getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
-getFun _ = Nothing
+getFun e = E.baseString <$> justVName e
 
 getSize :: E.Exp -> Maybe (SoP Symbol)
 getSize (E.Var _ (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
@@ -165,33 +168,36 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
           pure [IndexFn Empty (singleCase . sym2SoP $ Var vn)]
 forward (E.TupLit xs _) = do
   mconcat <$> mapM forward xs
-forward (E.AppExp (E.Index xs' slice _) _)
-  | [E.DimFix idx'] <- slice = do
-      idxs <- forward idx'
-      xss <- forward xs'
-      forM (zip idxs xss) $ \(idx, xs) -> do
-        -- If xs has a Cat iterator, this indexing can only be done
-        -- if we can express k in terms of i.
-        capture_avoiding_rep <-
-          case (xs, justSingleCase idx) of
-            (IndexFn (Forall _ (Cat k m b)) _, Just idx1) -> do
-              s1 <- solve_for k b idx1
-              s2 <- solve_for k (intervalEnd $ Cat k m b) idx1
-              pure $ maybe mempty (mkRep k) (s1 <|> s2)
+forward (E.AppExp (E.Index e_xs slice loc) _)
+  | [E.DimFix e_idx] <- slice = do
+      xss <- forward e_xs
+      idxs <- forward e_idx
+      forM (zip xss idxs) $ \(f_xs, f_idx) -> do
+        -- If xs has a Cat iterator, we need to express k in terms of idx
+        -- lest we capture k.
+        k_rep <-
+          case (iterator f_xs, justSingleCase f_idx) of
+            (Forall _ (Cat k m b), Just idx) -> do
+              s1 <- solve_for k b idx
+              s2 <- solve_for k (intervalEnd $ Cat k m b) idx
+              case s1 <|> s2 of
+                Just s -> pure $ mkRep k s
+                Nothing -> error "E.Index: Indexing would capture k"
+            (Forall _ (Cat {}), Nothing) ->
+              error "E.Index: Not implemented yet"
             _ ->
               pure mempty
-        unless (null capture_avoiding_rep) $
-          debugPrettyM "capture_avoiding_rep" capture_avoiding_rep
-        let ys = repIndexFn capture_avoiding_rep xs
-        unless (null capture_avoiding_rep) $ debugPrettyM "xs repped" ys
+        unless (null k_rep) $ debugPrettyM "E.Index: solved for k:" k_rep
+        checkBounds f_xs f_idx k_rep
         i <- newVName "i"
         x <- newVName "x"
         let y =
               IndexFn
-                { iterator = iterator idx,
+                { iterator = iterator f_idx,
                   body = singleCase . sym2SoP $ Idx (Var x) (sym2SoP $ Var i)
                 }
-        debugT' "idx res" $ substParams y [(i, idx), (x, ys)]
+        debugT' "E.Index result: " $
+          substParams y [(i, f_idx), (x, repIndexFn k_rep f_xs)]
   where
     -- Solve for k in x(k) = y.
     solve_for k x y = do
@@ -199,6 +205,54 @@ forward (E.AppExp (E.Index xs' slice _) _)
       let x_holed = rep (M.singleton k $ sym2SoP (Hole k_hole)) x
       s :: Maybe (Replacement Symbol) <- fmap mapping <$> unify x_holed y
       pure $ s >>= (M.!? k_hole)
+
+    checkBounds (IndexFn Empty _) _ _ =
+      error "E.Index: Indexing into scalar"
+    checkBounds f_xs@(IndexFn (Forall _ dom) _) f_idx k_rep = algebraContext f_idx $ do
+      dom_start <- rewrite $ domainStart dom
+      dom_end <- rewrite $ domainEnd dom
+      case dom of
+        Cat k m _ | k `M.member` k_rep -> do
+          let k_value = k_rep M.! k
+          doCheck (\_ -> int2SoP 0 :<= k_value)
+          doCheck (\_ -> k_value :<= m)
+        Cat _ _ b -> do
+          doCheck (\idx -> b :<= idx :|| dom_start :<= idx)
+          doCheck (\idx -> idx :<= intervalEnd dom :|| idx :<= dom_end)
+        Iota _ -> do
+          doCheck (dom_start :<=)
+          doCheck (:<= dom_end)
+      where
+        doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
+        doCheck bound =
+          foreachCase f_idx $ \n -> do
+            c <- askQ (CaseCheck bound) f_idx n
+            let (p_idx, e_idx) = getCase n $ body f_idx
+            when (isYes c) $ do
+              debugPrettyM "PASSED" (bound e_idx)
+            unless (isYes c) $ do
+              debugM $
+                "Failed bounds-checking:"
+                  <> "\nf_xs:"
+                  <> prettyString f_xs
+                  <> "\nf_idx: "
+                  <> prettyString f_idx
+                  <> "\nCASE f_idx: "
+                  <> show n
+              errorMsg loc $
+                "Unsafe indexing: "
+                  <> showE e_idx
+                  <> " (failed to show: "
+                  <> prettyString p_idx
+                  <> " => "
+                  <> prettyString (bound e_idx)
+                  <> ")."
+
+    showE idx
+      | Just vn <- justVName e_xs =
+          prettyString $ Idx (Var vn) idx
+    showE idx =
+      "_[" <> prettyString idx <> "]"
 forward (E.Not e _) = do
   fns <- forward e
   forM fns $ \fn -> do
@@ -801,3 +855,8 @@ bindLambdaBodyParams params = do
     unless (null k_rep) $ debugPrettyM "k_rep" k_rep
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
   pure iter
+
+errorMsg :: (E.Located a) => a -> String -> b
+errorMsg loc msg =
+  error $
+    "Error at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
