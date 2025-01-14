@@ -9,7 +9,7 @@ where
 import Control.Monad (forM, (<=<))
 import Data.MultiSet qualified as MS
 import Data.Set qualified as S
--- import Data.Map.Strict qualified as M
+import Data.Map.Strict qualified as M
 import Futhark.Analysis.Proofs.AlgebraPC.All2AllDriver
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.Analysis.Proofs.AlgebraPC.UnaryRules
@@ -220,8 +220,11 @@ getRangeOfSym sym@Var{} = do
 getRangeOfSym (Idx (POR {}) _) =
   pure $ Range sop0s 1 sop1s
 --
-getRangeOfSym (Idx (One arr_nm) _) =
-  getRangeOfSym $ Var arr_nm
+getRangeOfSym idxsym@(Idx (One arr_nm) _) = do
+  ranges <- getRanges
+  case M.lookup idxsym ranges of
+    Nothing -> getRangeOfSym $ Var arr_nm
+    Just rg -> pure rg
 --
 getRangeOfSym (Pow{}) = do
   pure $ Range sop1s 1 S.empty
