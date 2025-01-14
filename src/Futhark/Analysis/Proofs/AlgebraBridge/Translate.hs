@@ -65,8 +65,6 @@ algebraContext fn m = rollbackAlgEnv $ do
       vn <- case fst <$> res of
         Nothing -> addUntrans =<< x `removeQuantifier` i
         Just vn -> pure vn
-      addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var vn))
-      addRel (sym2SoP (Algebra.Var vn) :<=: int2SoP 1)
       addProperty (Algebra.Var vn) Algebra.Boolean
       pure vn
 
