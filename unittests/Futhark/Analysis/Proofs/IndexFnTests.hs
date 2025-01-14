@@ -30,7 +30,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/map-tuple.fut"
-        ( pure $ \(i, n, xs, _) ->
+        ( withDebug $ pure $ \(i, n, xs, _) ->
             [IndexFn
               { iterator = Forall i (Iota (sHole n)),
                 body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Idx (Hole xs) (sHole i)))]
@@ -240,7 +240,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/mk_flag_array.fut"
-        ( withDebug $ newNameFromString "k" >>= \k ->
+        ( newNameFromString "k" >>= \k ->
             newNameFromString "j" >>= \j ->
               newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
                 let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Idx (Hole shape) (sVar j))
@@ -270,7 +270,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/segment_ids.fut"
-        ( pure $ \(i, m, k, b) ->
+        ( withDebug $ pure $ \(i, m, k, b) ->
             [IndexFn
               { iterator = Forall i (Cat k (sHole m) (sHole b)),
                 body = cases [(Bool True, sHole k)]

@@ -50,7 +50,7 @@ askQ query fn case_idx = algebraContext fn $ do
   addRelIterator (iterator fn)
   assume p
   case query of
-    CaseCheck transf -> debugPrintAlgEnv >> check (transf q)
+    CaseCheck transf -> debugPrettyM "askQ: " (transf q) >> debugPrintAlgEnv >> check (transf q)
     CaseIsMonotonic dir ->
       debugT "  " $
         case iterator fn of
