@@ -533,7 +533,7 @@ instance Format UncheckedModTypeExp where
     let (root, withs) = typeWiths mte
      in addComments loc . localLayout loc $
           fmt root
-            </> sep line (map fmtWith (withs ++ [tr]))
+            </> sep line (map fmtWith (reverse $ tr : withs))
     where
       fmtWith (TypeRef v ps td _) =
         "with"
