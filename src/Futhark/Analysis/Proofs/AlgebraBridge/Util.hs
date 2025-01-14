@@ -63,6 +63,7 @@ assume p = do
 -- | Adds a relation on symbols to the algebraic environment.
 -- No-op if `p` is not a relation.
 addRelSymbol :: Symbol -> IndexFnM ()
+addRelSymbol (Bool _) = pure ()
 addRelSymbol p = do
   rel <- toRel p
   maybe (pure ()) addRel rel
