@@ -249,34 +249,80 @@ forward (E.AppExp (E.If c t f _) _) = do
   c' <-
     rewrite $
       foldl1 (:&&) [neg p :|| sop2Symbol q | (p, q) <- casesToList (body vc)]
-  debugPrettyM "E.If c t f; c':" c'
-  vts <- rollbackAlgEnv $ do
+  let flat_vc = IndexFn Empty (singleCase $ sym2SoP c')
+  cond <- newVName "if-condition"
+  t_branch <- newVName "t_branch"
+  f_branch <- newVName "f_branch"
+  fn_if <-
+    IndexFn
+      (iterator vc)
+      ( cases
+          [ (Var cond, sym2SoP $ Var t_branch),
+            (neg $ Var cond, sym2SoP $ Var f_branch)
+          ]
+      )
+      @ (cond, flat_vc)
+  debugPrettyM "E.If c t f; fn_if\n" fn_if
+  -- TODO fix map2.fut test.
+  -- Problem is that fn_if has scalar iterator here,
+  -- hence we cannot remove quantifier i from predicates
+  -- and use their knowledge in the Algebra layer, which does
+  -- _not_ admit ranges on expressions, only variables.
+  -- Hence assume inds₄₅₃₆[i₄₅₅₄] > 0 is a no-op in terms
+  -- of the range environment.
+  --
+  -- Context for:
+  -- fn_if =
+  --    | inds₄₅₃₆[i₄₅₅₄] > 0 ⇒    t_branch₄₆₃₅
+  --    | inds₄₅₃₆[i₄₅₅₄] ≤ 0 ⇒    f_branch₄₆₃₆
+  -- is
+  --        Untranslatable: []
+  --        Equivalences:
+  --        Ranges: max{0, 1} <= n₄₅₃₄ <= min{}
+  --                max{0} <= i₄₅₅₄ <= min{-1 + n₄₅₃₄}
+  --        Properties: []
+  -- So we want instead at this point (propagated from `map` case):
+  -- i :: 0 .. n
+  -- fn_if = \i ->
+  --    | inds₄₅₃₆[i₄₅₅₄] > 0 ⇒    t_branch₄₆₃₅
+  --    | inds₄₅₃₆[i₄₅₅₄] ≤ 0 ⇒    f_branch₄₆₃₆
+  --
+  -- I believe this can be done because the motivation for creating
+  -- bindLambdaBodyParams and doing things scalar was to solve for
+  -- k in E.Index when necessary, but I think this could be deferred
+  -- to checkIndexingWithinBounds in Substitute.hs.
+  vts <- algebraContext fn_if $ do
+    -- TODO make scalar func from c'
     debugPrettyM "assuming c'" c'
     assume c'
     forward t
-  vfs <- rollbackAlgEnv $ do
+  vfs <- algebraContext fn_if $ do
     debugPrettyM "assuming (not c')" (neg c')
     assume (neg c')
     forward f
   forM (zip vts vfs) $ \(vt, vf) -> do
-    let flat_vc = IndexFn Empty (singleCase $ sym2SoP c')
-    cond <- newVName "if-condition"
-    t_branch <- newVName "t_branch"
-    f_branch <- newVName "f_branch"
-    let y =
-          IndexFn
-            (iterator vt)
-            ( cases
-                [ (Var cond, sym2SoP $ Var t_branch),
-                  (neg $ Var cond, sym2SoP $ Var f_branch)
-                ]
-            )
-    substParams y [(cond, flat_vc), (t_branch, vt), (f_branch, vf)]
+    substParams fn_if [(t_branch, vt), (f_branch, vf)]
 forward expr@(E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params lam_body _ _ _ : args' <- getArgs args = do
       -- tell ["Using map rule ", toLaTeX y']
+      -- FIXME Refactor to remove use of bindLambdaBodyParams.
+      -- `forward body` does not know that it comes from a map context
+      -- except in that we explicitly addRelIterator iter.
+      -- It would be more natural (and give more information in the
+      -- forward pass on body) to do
+      --  ... = do
+      --    arrs <- mconcat <$> mapM forward args'
+      --    body_fn <- forward body
+      --
+      -- create an index fn
+      --   i :: 0 .. n
+      --   IndexFn (
+      -- We go out of our way to transforming body from
+      -- (\x -> e(x)) to (\i -> e(x[i])), hence `forward body`
+      -- is weird in that
+      -- analy
       arrs <- mconcat <$> mapM forward args'
       (iter, fns) <- rollbackAlgEnv $ do
         -- Transform body from (\x -> e(x)) to (\i -> e(x[i])), so bound i.
@@ -535,6 +581,13 @@ forward expr@(E.AppExp (E.Apply f args _) _)
             arg_sizes <- mapM sizeOfDomain arg_fns
             -- when (length param_names /= length arg_fns) (error "must be fully applied")
             -- Size paramters must be replaced as well.
+            -- asdf  param_sizes length /= param_names, need one size for each name im extracting!
+            debugPrettyM "param_names" param_names
+            debugPrettyM "param_sizes" param_sizes
+            debugPrettyM "arg_sizes" arg_sizes
+            debugM $ "SHOW param_sizes" <> (show param_sizes)
+            debugM $ "SHOW arg_sizes" <> (show arg_sizes)
+            debugPrettyM "arg_fns" arg_fns
             unless (map isJust param_sizes == map isJust arg_sizes) (error "sizes don't align")
             let size_rep = M.fromList $ catMaybes $ zipMaybes param_sizes arg_sizes
             whenDebug . traceM $
