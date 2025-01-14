@@ -13,7 +13,7 @@ import System.IO
 
 -- | Run @futhark fmt@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions () [] "[FILES" $ \args () ->
+main = mainWithOptions () [] "[FILES]" $ \args () ->
   case args of
     [] -> Just $ putDoc =<< onInput =<< T.getContents
     files ->
