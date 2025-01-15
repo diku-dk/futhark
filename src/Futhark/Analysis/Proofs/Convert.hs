@@ -825,6 +825,4 @@ quantifiedBy Empty m = m
 quantifiedBy iter m =
   rollbackAlgEnv $ do
     addRelIterator iter
-    rollbackTransEnv $ do
-      addFreeIterator iter
-      m
+    m

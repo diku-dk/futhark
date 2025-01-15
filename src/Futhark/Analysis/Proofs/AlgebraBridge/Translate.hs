@@ -16,7 +16,7 @@ import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn (iterator), Iterator (..), getPredicates)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, getFreeIterators, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMappable, ASTMapper (..), astFold, astMap, identityMapper)
@@ -53,8 +53,7 @@ algebraContext fn m = rollbackAlgEnv $ do
   let ps = getPredicates fn
   mapM_ trackBooleanNames ps
   _ <- handleQuantifiers fn
-  free_iters <- getFreeIterators
-  case getIterName (iterator fn) <> concatMap getIterName free_iters of
+  case getIterName (iterator fn) of
     [] -> pure ()
     is -> do
       mapM_ (handlePreds is) ps
