@@ -19,7 +19,6 @@ import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesSoP)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF, toDNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Proofs.Unify (Substitution, unify)
-import Futhark.Analysis.Proofs.Util (converge)
 import Futhark.SoP.SoP (SoP)
 import Futhark.Util.Pretty (docStringW, pretty)
 
@@ -29,7 +28,7 @@ simplify = astMap m
   where
     m :: ASTMapper Symbol IndexFnM =
       ASTMapper
-        { mapOnSymbol = converge (simplifySymbol . toCNF),
+        { mapOnSymbol = simplifySymbol . toCNF,
           mapOnSoP = simplifyAlgebra <=< applyRuleBook rulesSoP
         }
 

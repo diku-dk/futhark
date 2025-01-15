@@ -33,10 +33,10 @@ class (Monad m) => Rewritable v m where
   rewrite :: v -> m v
 
 instance Rewritable (SoP Symbol) IndexFnM where
-  rewrite = simplify
+  rewrite = convergeRename simplify
 
 instance Rewritable Symbol IndexFnM where
-  rewrite = simplify
+  rewrite = convergeRename simplify
 
 instance Rewritable IndexFn IndexFnM where
   rewrite = convergeRename (rewrite_ <=< applyRuleBook rulesIndexFn)
