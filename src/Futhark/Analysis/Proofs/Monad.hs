@@ -23,6 +23,9 @@ module Futhark.Analysis.Proofs.Monad
     getMem,
     remember,
     forget,
+    getFreeIterators,
+    rollbackTransEnv,
+    addFreeIterator,
   )
 where
 
@@ -50,8 +53,17 @@ data VEnv = VEnv
     indexfns :: M.Map VName [IndexFn],
     toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn]),
     mem :: M.Map Symbol VName,
+    transenv :: TranslationEnv,
     debug :: Bool
   }
+
+newtype TranslationEnv = TranslationEnv
+  { freeIterators :: [Iterator]
+  }
+  deriving
+    ( Semigroup,
+      Monoid
+    )
 
 newtype IndexFnM a = IndexFnM (RWS () () VEnv a)
   deriving
@@ -91,7 +103,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty False
+    s = VEnv vns mempty mempty mempty mempty mempty False
 
 modifyMem :: (MonadState VEnv m) => Symbol -> VName -> m ()
 modifyMem vn x = do
@@ -137,6 +149,25 @@ rollbackAlgEnv computation = do
   res <- computation
   modify (\env -> env {algenv = alg})
   pure res
+
+rollbackTransEnv :: IndexFnM a -> IndexFnM a
+rollbackTransEnv computation = do
+  t <- gets transenv
+  res <- computation
+  modify (\env -> env {transenv = t})
+  pure res
+
+addFreeIterator :: Iterator -> IndexFnM ()
+addFreeIterator iter =
+  modify $
+    \env ->
+      let t = transenv env
+       in env {transenv = t {freeIterators = iter : freeIterators t}}
+
+getFreeIterators :: IndexFnM [Iterator]
+getFreeIterators = do
+  t <- gets transenv
+  pure $ [iter | iter <- freeIterators t, iter /= Empty]
 
 --------------------------------------------------------------
 -- Utilities

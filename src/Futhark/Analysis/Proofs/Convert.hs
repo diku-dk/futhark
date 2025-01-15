@@ -339,11 +339,9 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- is weird in that
       -- analy
       arrs <- mconcat <$> mapM forward args'
-      (iter, fns) <- rollbackAlgEnv $ do
-        -- Transform body from (\x -> e(x)) to (\i -> e(x[i])), so bound i.
-        iter <- bindLambdaBodyParams (zip (concatMap E.patNames params) arrs)
-        addRelIterator iter
-        (iter,) <$> forward lam_body
+      iter <- bindLambdaBodyParams (zip (concatMap E.patNames params) arrs)
+      -- Transform body from (\x -> e(x)) to (\i -> e(x[i])), so bound i.
+      fns <- quantifiedBy iter $ forward lam_body
       forM fns $ \body_fn ->
         if iterator body_fn == Empty
           then rewrite $ IndexFn iter (body body_fn)
@@ -422,10 +420,10 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- and the second argument to be an element of the input array.
       -- (The lambda is associative, so we are free to pick.)
       let accToRecurrence = M.fromList (map (,sym2SoP Recurrence) paramNames_acc)
-      (iter, fns) <- rollbackAlgEnv $ do
-        iter <- bindLambdaBodyParams . zip paramNames_x =<< forward lam_xs
-        addRelIterator iter
-        (iter,) . map (repIndexFn accToRecurrence) <$> forward lam_body
+      iter <- bindLambdaBodyParams . zip paramNames_x =<< forward lam_xs
+      fns <-
+        quantifiedBy iter $
+          map (repIndexFn accToRecurrence) <$> forward lam_body
       forM fns $ \body_fn ->
         if iterator body_fn == Empty
           then rewrite $ IndexFn iter (body body_fn)
@@ -821,3 +819,12 @@ errorMsg :: (E.Located a) => a -> String -> b
 errorMsg loc msg =
   error $
     "Error at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
+
+quantifiedBy :: Iterator -> IndexFnM a -> IndexFnM a
+quantifiedBy Empty m = m
+quantifiedBy iter m =
+  rollbackAlgEnv $ do
+    addRelIterator iter
+    rollbackTransEnv $ do
+      addFreeIterator iter
+      m
