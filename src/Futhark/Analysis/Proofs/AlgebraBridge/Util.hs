@@ -21,7 +21,7 @@ import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, toAlgebra)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv, debugPrettyM, debugPrintAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Refine (addRel, addRels)
@@ -37,7 +37,7 @@ instance Pretty Answer where
   pretty = viaShow
 
 assume :: Symbol -> IndexFnM ()
-assume p = do
+assume sym = do
   -- FIXME I'd like to have the below safety check, which is only really
   -- relevant for me accidentally calling assume on something non-bool.
   -- The source program has been type checked, so things that are in
@@ -48,17 +48,20 @@ assume p = do
   --
   -- booltype <- isBooleanM p
   -- unless booltype (error $ "Assume on non-boolean: " <> prettyString p)
-  addRelSymbol p
-  addEq 1 p
-  -- Add that pairwise disjoint symbols are false.
-  mapM_ (addEq 0) =<< getDisjoint p
-  case p of
-    p1 :&& p2 -> assume p1 >> assume p2
-    _ -> pure ()
+  addRelSymbol sym
+  assume_ sym
   where
-    addEq n sym = do
-      x <- toAlgebra (sym2SoP sym)
-      addRel (x :==: int2SoP n)
+   assume_ p = do
+    addEq 1 p
+    -- Add that pairwise disjoint symbols are false.
+    mapM_ (addEq 0) =<< getDisjoint p
+    case p of
+      p1 :&& p2 -> assume_ p1 >> assume_ p2
+      _ -> pure ()
+
+   addEq n e = do
+     x <- toAlgebra (sym2SoP e)
+     addRel (x :==: int2SoP n)
 
 -- | Adds a relation on symbols to the algebraic environment.
 -- No-op if `p` is not a relation.
@@ -84,8 +87,6 @@ addRelSymbol p = do
     toRel_ (x :> y) = convCmp (:>:) x y
     toRel_ (x :>= y) = convCmp (:>=:) x y
     toRel_ (x :== y) = convCmp (:==:) x y
-    toRel_ (x :&& y) = convOp toRel_ (liftOp (:&&:)) x y
-    toRel_ (x :|| y) = convOp toRel_ (liftOp (:||:)) x y
     toRel_ (x :/= y) = do
       -- Inequality can only be expressed indirectly.
       gte <- lift $ x $>= y
@@ -96,6 +97,8 @@ addRelSymbol p = do
           case lte of
             Yes -> toRel_ (x :< y)
             _ -> fail ""
+    toRel_ (x :&& y) = convOp toRel_ (liftOp (:&&:)) x y
+    toRel_ (_ :|| _) = fail "toRel on :||" -- convOp toRel_ (liftOp (:||:)) x y
     toRel_ _ = fail ""
 
 -- | Add relations derived from the iterator to the algebraic environment.
