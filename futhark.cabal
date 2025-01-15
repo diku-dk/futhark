@@ -139,7 +139,6 @@ library
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
       Futhark.Analysis.PrimExp.Table
-      Futhark.Analysis.Proofs.Algebra
       Futhark.Analysis.Proofs.AlgebraBridge
       Futhark.Analysis.Proofs.AlgebraBridge.Translate
       Futhark.Analysis.Proofs.AlgebraBridge.Util
