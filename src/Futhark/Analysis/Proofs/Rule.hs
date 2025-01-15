@@ -192,6 +192,57 @@ rulesIndexFn = do
           sideCondition = vacuous
         },
       Rule
+        { name = "Rule 5 (carry) (case order switched)",
+          -- TODO deduplicate
+          from =
+            IndexFn
+              { iterator = Forall i (Iota (hole n)),
+                body =
+                  cases
+                    [ (hole i :/= int 0, sym2SoP Recurrence),
+                      (hole i :== int 0, hole h1)
+                    ]
+              },
+          -- Indexing variable i replaced by 0 in e1.
+          to = \s ->
+            subIndexFn s =<< do
+              let i' = repVName (mapping s) i
+              e1 <- sub s (hole h1)
+              let e1_b = rep (mkRep i' (int 0)) e1
+              pure $
+                IndexFn
+                  { iterator = Forall i (Iota (hole n)),
+                    body = cases [(Bool True, e1_b)]
+                  },
+          sideCondition = vacuous
+        },
+      Rule
+        { name = "Rule 5 (carry) (case order switched)",
+          -- TODO deduplicate
+          from =
+            IndexFn
+              { iterator = Forall i (Cat k (hole m) (hole b)),
+                body =
+                  cases
+                    [ (hole i :/= hole b, sym2SoP Recurrence),
+                      (hole i :== hole b, hole h1)
+                    ]
+              },
+          to = \s ->
+            subIndexFn s =<< do
+              let i' = repVName (mapping s) i
+              e1 <- sub s (hole h1)
+              b' <- sub s (hole b)
+              -- Use that i = b to remove any dependence on i.
+              let e1_b = rep (mkRep i' b') e1
+              pure $
+                IndexFn
+                  { iterator = Forall i (Cat k (hole m) (hole b)),
+                    body = cases [(Bool True, e1_b)]
+                  },
+          sideCondition = vacuous
+        },
+      Rule
         { name = "Prefix sum",
           -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
           --    | i == b => e1              (e1 may depend on i)
