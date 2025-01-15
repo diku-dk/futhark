@@ -20,8 +20,8 @@ where
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (Nameable (mkName), MonadSoP, askPropertyWith)
-import Futhark.SoP.SoP (SoP, sopToLists, Free(..), Var (..))
+import Futhark.SoP.Monad (Nameable (mkName), MonadSoP, askPropertyWith, RangeRelated (rangeRelatedTo))
+import Futhark.SoP.SoP (SoP, sopToLists, Free(..))
 import Futhark.Util.Pretty (Pretty, brackets, commasep, enclose, parens, pretty, viaShow, (<+>))
 import Language.Futhark (VName, nameFromString)
 import Language.Futhark qualified as E
@@ -59,9 +59,17 @@ instance Free Symbol Symbol where
   free (Sum _ s1 s2) = free s1 <> free s2
   free (Pow (_, sop))= free sop
 
-instance Var Symbol where
-  isVar (Var _) = True
-  isVar _ = False
+instance RangeRelated Symbol where
+  rangeRelatedTo = leadingNames
+    where
+      leadingNames (Var vn) = S.singleton (Var vn)
+      leadingNames (Pow _ ) = S.empty
+      leadingNames (Idx ix _ ) = leadingIdxNames ix
+      leadingNames (Mdf _ vn _ _ ) = S.singleton (Var vn)
+      leadingNames (Sum ix _ _ ) = leadingIdxNames ix
+
+      leadingIdxNames (One vn ) = S.singleton (Var vn)
+      leadingIdxNames (POR vns) = S.map Var vns
 
 instance Pretty IdxSym where
   pretty (One x) = prettyName x

@@ -202,5 +202,5 @@ addLegalCands cand_set = do
           sym `elem` free (equivCandSoP cand)
             && equivCandSym cand `elem` free sop
         hasRangeCycle (sym, range) =
-          sym `elem` transClosInRanges rs (free (equivCandSoP cand))
+          sym `elem` transitiveClosure rs (equivCandSoP cand)
             && equivCandSym cand `elem` free range

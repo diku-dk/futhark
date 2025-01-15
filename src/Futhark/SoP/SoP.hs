@@ -58,7 +58,6 @@ module Futhark.SoP.SoP
     padWithZero,
     isZero,
     hasConstant,
-    Var (..),
   )
 where
 
@@ -459,10 +458,6 @@ instance (Ord u) => Free u (SoP u) where
 
 instance (Ord u) => Free u (Range u) where
   free r = free (lowerBound r) <> free (upperBound r)
-
-class Var u where
-  -- | Is this symbol a variable?
-  isVar :: u -> Bool
 
 --------------------------------------------------------------------------------
 -- Substitutions in SoPs

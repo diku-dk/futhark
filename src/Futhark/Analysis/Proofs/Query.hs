@@ -29,8 +29,8 @@ import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (lookupRange)
-import Futhark.SoP.Refine (addRel, addRels)
-import Futhark.SoP.SoP (Range (lowerBound), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.-.))
+import Futhark.SoP.Refine (addRels)
+import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.))
 import Futhark.Util.Pretty (prettyStringW)
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
@@ -55,9 +55,8 @@ askQ query fn case_idx = algebraContext fn $ do
       debugT "  " $
         case iterator fn of
           Forall i _ -> do
-            -- Add j < i. Check p(j) ^ p(i) => q(j) `rel` q(i).
+            -- Check j < i ^ p(j) ^ p(i) => q(j) `rel` q(i).
             j <- newVName "j"
-            j `addLowerBoundLike` i
             j +< i
             assume (fromJust . justSym $ p @ Var j)
             let rel = case dir of
@@ -68,7 +67,6 @@ askQ query fn case_idx = algebraContext fn $ do
             debugM $ "  Monotonic " <> show dir <> ": " <> prettyString p
             algDebugPrettyM "" (sym2SoP p)
             algDebugPrettyM "    =>" q
-            -- simplified <- Algebra.simplify $ q .-. (q @ Var j)
             (q @ Var j) `rel` q
             where
               f @ x = rep (mkRep i x) f
@@ -123,16 +121,12 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
   --  to reduce the number of tests needed, but the only thing
   --  that matters is that this sorting exists.
   debugM $
-    "prove permutation of " <> prettyString start <> " .. " <> prettyString end
+    "Prove permutation of " <> prettyString start <> " .. " <> prettyString end
   debugPrettyM "\n" fn
 
   let branches = casesToList cs
   i <- newNameFromString "i"
   j <- newNameFromString "j"
-  -- addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var i))
-  -- addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var j))
-  -- addRelIterator $ Forall i $ repDomain (mkRep i0 (Var i)) dom
-  -- addRelIterator $ Forall j $ repDomain (mkRep i0 (Var j)) dom
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
   let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
@@ -157,13 +151,11 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
               let case_i_lt_j = rollbackAlgEnv $ do
                     -- Case i < j => f(i) `rel` g(j).
                     addRelIterator iter_j
-                    i `addLowerBoundLike` j
                     i +< j
                     (f @ i) `rel` (g @ j)
                   case_i_gt_j = rollbackAlgEnv $ do
                     -- Case i > j => f(i) `rel` g(j):
                     addRelIterator iter_i
-                    j `addLowerBoundLike` i
                     j +< i
                     (f @ i) `rel` (g @ j)
                in case_i_lt_j `andM` case_i_gt_j
@@ -215,14 +207,18 @@ sorted cmp wat = runMaybeT $ quicksort wat
         Undefined -> fail ""
         _ -> pure ord
 
+-- Bounds i like j, but with the additional constraint that i < j.
 (+<) :: VName -> VName -> IndexFnM ()
 i +< j = do
-  addRel (sym2SoP (Algebra.Var i) :<=: sym2SoP (Algebra.Var j) .-. int2SoP 1)
-
-addLowerBoundLike :: VName -> VName -> IndexFnM ()
-i `addLowerBoundLike` j = do
-  lbs <- lowerBound <$> lookupRange (Algebra.Var j)
-  addRels (S.map (\lb -> lb :<=: sym2SoP (Algebra.Var i)) lbs)
+  range <- lookupRange j'
+  let ki = int2SoP (rangeMult range) .*. sym2SoP i'
+  addRels $
+    S.map (:<=: ki) (lowerBound range)
+      <> S.map (:>=: ki) (upperBound range)
+      <> S.singleton (sym2SoP i' :<: sym2SoP j')
+  where
+    j' = Algebra.Var j
+    i' = Algebra.Var i
 
 isYes :: Answer -> Bool
 isYes Yes = True

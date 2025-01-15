@@ -12,7 +12,6 @@ module Futhark.SoP.Monad
     UntransEnv (..),
     AlgEnv (..),
     addUntrans,
-    transClosInRanges,
     lookupUntransPE,
     lookupUntransSym,
     lookupRange,
@@ -39,6 +38,7 @@ module Futhark.SoP.Monad
     mkRangeLB,
     mkRangeUB,
     askPropertyWith,
+    RangeRelated(..),
   )
 where
 
@@ -86,6 +86,7 @@ class
   ( Ord u,
     Ord e,
     Nameable u,
+    RangeRelated u,
     Show u, -- To be removed
     Pretty u, -- To be removed
     MonadFreshNames m,
@@ -178,7 +179,7 @@ findSymLEq0Def :: (MonadSoP u e p m) => SoP u -> m (SoP u, Maybe (u, Range u))
 findSymLEq0Def sop = do
   rs <- getRanges
   let syms = S.toList $ free sop
-      is = map (\s -> (length $ transClosInRanges rs $ S.singleton s, s)) syms
+      is = map (\s -> (length $ transitiveClosure rs (sym2SoP s), s)) syms
   case is of
     [] -> pure (sop, Nothing)
     _ -> do
@@ -190,6 +191,7 @@ instance
   ( Ord u,
     Ord e,
     Nameable u,
+    RangeRelated u,
     Show u,
     Pretty u,
     MonadFreshNames m,
@@ -370,22 +372,36 @@ instance (Pretty u, Pretty e, Pretty p) => Pretty (AlgEnv u e p) where
       <> "Properties: "
       <> pretty (M.toList $ properties env)
 
-transClosInRanges :: (Ord u) => RangeEnv u -> Set u -> Set u
-transClosInRanges rs syms =
-  transClosHelper rs syms S.empty syms
-  where
-    transClosHelper rs' clos_syms seen active
-      | S.null active = clos_syms
-      | (sym, active') <- S.deleteFindMin active,
-        seen' <- S.insert sym seen =
-          case M.lookup sym rs' of
-            Nothing ->
-              transClosHelper rs' clos_syms seen' active'
-            Just range ->
-              let new_syms = free range S.\\ seen
-                  clos_syms' = S.union clos_syms new_syms
-                  active'' = S.union new_syms active'
-               in transClosHelper rs' clos_syms' seen' active''
+class (Ord u, Free u u) => RangeRelated u where
+  rangeRelatedTo :: u -> S.Set u
+  rangeRelatedTo = const S.empty
+
+  isRangeRelatedTo :: u -> u -> Bool
+  x `isRangeRelatedTo` y = y `S.member` rangeRelatedTo x
+
+  -- | Get the set of symbols that `sym` is (transitively) related to
+  -- in the range environment.
+  -- You can redefine `rangeRelatedTo` to extend this set. For example,
+  -- if the representation of u includes indexing statements, defining
+  --   rangeRelatedTo (Idx x _) = x
+  -- will include things bounded by `x` in the closure for `Idx x y`.
+  transitiveClosure :: RangeEnv u -> SoP u -> Set u
+  transitiveClosure ranges sop =
+    tc ranges mempty mempty (free sop)
+    where
+      tc rs closure seen active
+        | S.null active = closure
+        | (sym, active') <- S.deleteFindMin active,
+          closure' <- closure <> rangeRelatedTo sym,
+          seen' <- S.insert sym seen =
+            case M.lookup sym rs of
+              Nothing ->
+                let active'' = active' <> free sym
+                in tc rs closure' seen' active''
+              Just range ->
+                let new_syms = free range S.\\ seen
+                    active'' = active' <> free sym <> new_syms
+                 in tc rs closure' seen' active''
 
 substEquivs :: (MonadSoP u e p m) => SoP u -> m (SoP u)
 substEquivs sop = flip substitute sop <$> getEquivs

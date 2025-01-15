@@ -3,19 +3,20 @@ module Futhark.Analysis.Proofs.AlgebraPC.SolveTests (tests) where
 import Control.Monad (unless, forM)
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, mkRangeUB, addProperty)
+import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, mkRangeUB, addProperty, getRanges)
 import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.), Range(..), (~+~), negSoP, Rel (..))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
-import Futhark.Analysis.Proofs.Monad (IndexFnM(..), debugPrettyM, clearAlgEnv, runIndexFnM, debugOn, debugPrintAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM(..), debugPrettyM, clearAlgEnv, runIndexFnM, debugOn, debugPrintAlgEnv, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol qualified as IndexFn
 import Futhark.SoP.FourierMotzkin qualified as FM
 
 import Futhark.Util.Pretty
 import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
+import qualified Data.Map as M
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"
@@ -601,6 +602,47 @@ tests =
               f FM.$>$ g
           )
           @??= True,
+      testCase "Ranges (from part2indicesL)" $
+        -- When adding the relations of the part2indicesL iterator, we want
+        -- Ranges: max{1} <= shapeª₃₃₇₈₀ <= min{},
+        --         max{∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
+        --           <= i₄₉₉₁₂
+        --           <= min{-1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]},
+        --
+        -- NOTE using 1 as lower bound on shp because 0 is ambiguous in the
+        -- SoP representation; equality checks on zeros in the expected
+        -- and actual ranges might be erroneous.
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              k <- newNameFromString "k"
+              vn_shp <- newNameFromString "shp"
+              let shp = One vn_shp
+              -- \s -> ∑shpª₃₃₇₈₀[0 : s]
+              let shp_sum s = sym2SoP $ Sum shp (int 0) s
+              -- Ranges (in order)
+              addRels $
+                S.fromList [
+                  int 1 :<=: sVar vn_shp,
+                  shp_sum (sVar k .-. int 1) :<=: sVar i,
+                  sVar i :<=: shp_sum (sVar k) .-. int 1
+                ]
+              getRanges
+          )
+          @??= run ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              k <- newNameFromString "k"
+              vn_shp <- newNameFromString "shp"
+              let shp = One vn_shp
+              -- \s -> ∑shpª₃₃₇₈₀[0 : s]
+              let shp_sum s = sym2SoP $ Sum shp (int 0) s
+              -- Ranges (in order)
+              addRange (Var vn_shp) $ mkRangeLB (int 1)
+              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              getRanges
+          ),
       --
       testCase "FME1" $
         run

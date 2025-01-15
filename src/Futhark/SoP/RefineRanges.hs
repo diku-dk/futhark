@@ -15,10 +15,11 @@ import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
+import Futhark.Util.Pretty (Pretty (pretty))
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe >= 0@
 --   for each 'PrimExp' in the set.
-addIneqZeros :: forall u e p m. (MonadSoP u e p m, Var u) => Set (SoP u >= 0) -> m ()
+addIneqZeros :: forall u e p m. (MonadSoP u e p m) => Set (SoP u >= 0) -> m ()
 addIneqZeros sops = do
   ineq_cands <-
     mconcat
@@ -35,6 +36,10 @@ data RangeCand u = RangeCand
   }
   deriving (Eq, Show, Ord)
 
+instance (Pretty u) => Pretty (RangeCand u) where
+  pretty (RangeCand v sym sop) =
+    pretty v <> "* (" <> pretty sym <> ") >= " <> pretty (negSoP sop)
+
 -- | Make range candidates from a 'SoP' from its 'Term's.  A candidate
 --   'Term' for the range env is found when:
 --
@@ -45,13 +50,13 @@ data RangeCand u = RangeCand
 --          @nx - nbq - n = 0@ is equivalent to
 --          @n*(x-bq-1) >= 0@, hence, if we can prove
 --          that @n >= 0@ we can derive @x >= bq+1@.
-mkRangeCands :: (MonadSoP u e p m, Var u) => (SoP u >= 0) -> m (Set (RangeCand u))
+mkRangeCands :: (MonadSoP u e p m) => (SoP u >= 0) -> m (Set (RangeCand u))
 mkRangeCands sop = do
   -- sop' <- substEquivs sop
   let sop' = sop
   let singleSymCands = mkSingleSymCands sop'
   factorCands <- factorCandsM sop'
-  pure $ S.filter (isVar . rangeCandSym) $ singleSymCands <> factorCands
+  pure $ singleSymCands <> factorCands
   where
     factorCandsM sop' =
       mconcat
@@ -95,7 +100,7 @@ mkRangeCands sop = do
 --   these are @lbs' <= -j_z * sop@ (@j_z * sop <= ubs'@) where @lbs'@
 --   (@ubs'@) are the refined bounds from the previous step.
 refineRangeInEnv ::
-  (MonadSoP u e p m, Var u) =>
+  (MonadSoP u e p m) =>
   RangeCand u ->
   m (Set (RangeCand u))
 refineRangeInEnv (RangeCand j sym sop) = do
@@ -140,7 +145,7 @@ data CandRank
   | SymNotBound
   deriving (Ord, Eq)
 
-addRangeCands :: (MonadSoP u e p m, Var u) => Set (RangeCand u) -> m ()
+addRangeCands :: (MonadSoP u e p m) => Set (RangeCand u) -> m ()
 addRangeCands cand_set
   | S.null cand_set = pure ()
 addRangeCands cand_set = do
@@ -148,7 +153,7 @@ addRangeCands cand_set = do
   let cands = S.toList cand_set
       -- 1. Compute the transitive closure of the 'SoP' of
       --    each candidate through the range environment.
-      tcs = map (transClosInRanges rs . free . rangeCandSoP) cands
+      tcs = map (transitiveClosure rs . rangeCandSoP) cands
       -- 2. Filter out the candidates that introduce cycles
       --    through the range environment. A cycle appears iff
       --    @sym@ appears in the transitive closure of the
@@ -156,7 +161,7 @@ addRangeCands cand_set = do
       cands_tcs = filter (not . uncurry hasCycle) $ zip cands tcs
       -- 3. Choose the candidates whose transitive closure through the
       --    range env have the lowest number of free symbols (symbols
-      --    which do not belong to the keys f the range env.)
+      --    which do not belong to the keys in the range env.)
       cands' = fst $ foldr (compareNumFreeInRangeEnv rs) (mempty, maxBound) cands_tcs
       -- 4. Rank the candidates.
       cands'' = fst $ foldr (compareRank rs) (mempty, Default) cands'
@@ -179,8 +184,8 @@ addRangeCands cand_set = do
     -- that the range of @sym@ depends on @x@
     -- and the range of @x@ depends on @sym@. It follows that
     -- @sym@ will be in its transitive closure.
-    hasCycle cand tc =
-      rangeCandSym cand `S.member` tc
+    hasCycle cand =
+      any (rangeCandSym cand `isRangeRelatedTo`)
     compareNumFreeInRangeEnv rs (cand, tc) (acc, n_acc) =
       case n_acc `compare` n_free of
         LT -> (acc, n_acc)

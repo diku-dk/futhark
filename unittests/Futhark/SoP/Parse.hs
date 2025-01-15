@@ -152,5 +152,9 @@ parsePrimExp s =
     Left bundle -> error $ show bundle
     Right pe -> pe
 
+instance RangeRelated [Char] where
+
+instance Free [Char] [Char] where
+
 parsePrimExpToSoP :: String -> SoPM String (PrimExp String) p (Integer, SoP String)
 parsePrimExpToSoP = toSoPNum . parsePrimExp

@@ -32,13 +32,13 @@ constraintToSoP (x :==: y) = pure (S.singleton $ x .-. y, mempty)
 constraintToSoP (x :&&: y) = (<>) <$> constraintToSoP x <*> constraintToSoP y
 constraintToSoP c = error $ "constraintToSoP: " <> prettyString c
 
-addRel :: (ToSoP u e, MonadSoP u e p m, Var u) => Rel u -> m ()
+addRel :: (ToSoP u e, MonadSoP u e p m) => Rel u -> m ()
 addRel c = do
   (eqZs, ineqZs) <- constraintToSoP c
   extra_ineqZs <- addEqZeros eqZs
   addIneqZeros $ ineqZs <> extra_ineqZs
 
-addRels :: (ToSoP u e, MonadSoP u e p m, Var u) => Set (Rel u) -> m ()
+addRels :: (ToSoP u e, MonadSoP u e p m) => Set (Rel u) -> m ()
 addRels cs = do
   -- Split candidates into equality and inequality sets.
   (eqZs, ineqZs) <- mconcat <$> mapM constraintToSoP (S.toList cs)
