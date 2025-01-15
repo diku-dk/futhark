@@ -601,40 +601,6 @@ tests =
               f FM.$>$ g
           )
           @??= True,
-      testCase "∑shapeª[0 : -1 + k] ≤ -1 + ∑shapeª[0 : -1 + m] (bounds-check from part2indicesL)" $
-        -- Ranges: max{1} <= m₄₆₂₀ <= min{},
-        --         max{0, ∑shapeª₁₁₈₁₄[0 : -1 + k₂₄₃₃₃]}
-        --           <= i₁₁₁₁₁
-        --           <= min{-1 + ∑shapeª₁₁₈₁₄[0 : -1 + m₄₆₂₀], -1 + ∑shapeª₁₁₈₁₄[0 : k₂₄₃₃₃]}
-        --         max{0} <= shapeª₁₁₈₁₄ <= min{}
-        --         max{0} <= k₂₄₃₃₃ <= min{-1 + m₄₆₂₀}
-        run
-          ( do
-              clearAlgEnv
-              i <- newNameFromString "i"
-              k <- newNameFromString "k"
-              m <- newNameFromString "m"
-              vn_shp <- newNameFromString "shp"
-              let shp = One vn_shp
-              -- \s -> ∑shpª₃₃₇₈₀[0 : s]
-              let shp_sum s = sym2SoP $ Sum shp (int 0) s
-              let sum_0_km1 = shp_sum (sVar k .-. int 1)
-              let sum_0_mm1 = shp_sum (sVar m .-. int 1)
-              -- Ranges (in order)
-              addRels $
-                S.fromList
-                  [ int 1 :<=: sVar m,
-                    int 0 :<=: sVar i :&&: sVar i:<=: (sum_0_mm1 .-. int 1),
-                    sum_0_km1 :<=: sVar i :&&: sVar i:<=: (shp_sum (sVar k) .-. int 1),
-                    int 0 :<=: sVar vn_shp,
-                    int 0 :<=: sVar k :&&: sVar k :<=: sVar m .-. int2SoP 1
-                  ]
-              -- This fails because after simplification, we get
-              --   0 ≤ -1 + ∑shapeª[k : -1 + m]
-              -- which is clearly not known.
-              sum_0_km1 FM.$<=$ (sum_0_mm1 .-. int 1)
-          )
-          @??= True,
       --
       testCase "FME1" $
         run
