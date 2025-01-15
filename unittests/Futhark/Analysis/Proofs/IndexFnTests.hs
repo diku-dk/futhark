@@ -141,11 +141,15 @@ tests =
       mkTest
         "tests/indexfn/map2.fut"
         ( pure $ \(i, n, h1, h2) ->
-            [IndexFn
+            let inds_i = sym2SoP $ Idx (Hole h2) (sHole i)
+                p = int2SoP 0 :< inds_i :&& inds_i :<= sHole n
+            in [IndexFn
               { iterator = Forall i (Iota (sHole n)),
                 body =
                   cases
-                    [(Bool True, sym2SoP $ Idx (Hole h1) (sHole h2 .-. int2SoP 1))]
+                    [(p, sym2SoP $ Idx (Hole h1) (inds_i .-. int2SoP 1)),
+                     (neg p, int2SoP 0)
+                    ]
               }]
         ),
       mkTest
