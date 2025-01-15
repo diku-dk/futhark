@@ -240,15 +240,13 @@ lookupUntransSym :: (MonadSoP u e p m) => u -> m (Maybe e)
 lookupUntransSym sym = (M.!? sym) . dir <$> getUntrans
 
 -- \| Look-up the range of a symbol. If no such range exists,
---    return the empty range (and add it to the environment).
+--    return the empty range.
 lookupRange :: (MonadSoP u e p m) => u -> m (Range u)
 lookupRange sym = do
   mr <- (M.!? sym) <$> getRanges
   case mr of
     Nothing -> do
-      let r = Range mempty 1 mempty
-      addRange sym r
-      pure r
+      pure $ Range mempty 1 mempty
     Just r
       | rangeMult r <= 0 -> error "Non-positive constant encountered in range."
       | otherwise -> pure r
