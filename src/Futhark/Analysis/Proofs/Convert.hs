@@ -284,78 +284,39 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
           E.LogAnd -> doOp (~&&~)
           E.LogOr -> doOp (~||~)
           _ -> error ("forward not implemented for bin op: " <> show bop)
-forward (E.AppExp (E.If c t f _) _) = do
-  vcs <- forward c
-  let vc = case vcs of
+forward (E.AppExp (E.If e_c e_t e_f _) _) = do
+  cs <- forward e_c
+  let f_c = case cs of
         [v] -> v
         _ -> error "If on tuple?"
-  unless (iterator vc == Empty) $ error "Condition in if-statement is an array?"
-  -- Flatten the condition index function to a single case
-  -- so that we may assume its value in the corresponding branches.
-  --   c:  | p  ⇒  q
-  --       | ¬p ⇒  r
-  -- Is logically the same as
-  --   (p => q) and (not p => r)
-  -- which, in turn, is
-  --   (not p or q) and (p or r)
-  -- Hence
-  --   c: | true => (not p or q) and (p or r)
-  c' <-
-    rewrite $
-      foldl1 (:&&) [neg p :|| sop2Symbol q | (p, q) <- casesToList (body vc)]
-  let flat_vc = IndexFn Empty (singleCase $ sym2SoP c')
+  unless (iterator f_c == Empty) $ error "Condition in if-statement is an array?"
   cond <- newVName "if-condition"
   t_branch <- newVName "t_branch"
   f_branch <- newVName "f_branch"
   fn_if <-
     IndexFn
-      (iterator vc)
+      (iterator f_c)
       ( cases
           [ (Var cond, sym2SoP $ Var t_branch),
             (neg $ Var cond, sym2SoP $ Var f_branch)
           ]
       )
-      @ (cond, flat_vc)
-  debugPrettyM "E.If c t f; fn_if\n" fn_if
-  -- TODO fix map2.fut test.
-  -- Problem is that fn_if has scalar iterator here,
-  -- hence we cannot remove quantifier i from predicates
-  -- and use their knowledge in the Algebra layer, which does
-  -- _not_ admit ranges on expressions, only variables.
-  -- Hence assume inds₄₅₃₆[i₄₅₅₄] > 0 is a no-op in terms
-  -- of the range environment.
-  --
-  -- Context for:
-  -- fn_if =
-  --    | inds₄₅₃₆[i₄₅₅₄] > 0 ⇒    t_branch₄₆₃₅
-  --    | inds₄₅₃₆[i₄₅₅₄] ≤ 0 ⇒    f_branch₄₆₃₆
-  -- is
-  --        Untranslatable: []
-  --        Equivalences:
-  --        Ranges: max{0, 1} <= n₄₅₃₄ <= min{}
-  --                max{0} <= i₄₅₅₄ <= min{-1 + n₄₅₃₄}
-  --        Properties: []
-  -- So we want instead at this point (propagated from `map` case):
-  -- i :: 0 .. n
-  -- fn_if = \i ->
-  --    | inds₄₅₃₆[i₄₅₅₄] > 0 ⇒    t_branch₄₆₃₅
-  --    | inds₄₅₃₆[i₄₅₅₄] ≤ 0 ⇒    f_branch₄₆₃₆
-  --
-  -- I believe this can be done because the motivation for creating
-  -- bindLambdaBodyParams and doing things scalar was to solve for
-  -- k in E.Index when necessary, but I think this could be deferred
-  -- to checkIndexingWithinBounds in Substitute.hs.
-  vts <- algebraContext fn_if $ do
-    -- TODO make scalar func from c'
-    debugPrettyM "assuming c'" c'
-    assume c'
-    forward t
-  vfs <- algebraContext fn_if $ do
-    debugPrettyM "assuming (not c')" (neg c')
-    assume (neg c')
-    forward f
-  forM (zip vts vfs) $ \(vt, vf) -> do
-    substParams fn_if [(t_branch, vt), (f_branch, vf)]
+      @ (cond, f_c)
+  debugPrettyM "E.If fn_if:\n" fn_if
+  (ts, fs) <- algebraContext fn_if $ do
+    ts <- rollbackAlgEnv $ do
+      debugPrettyM "E.If true branch: assuming " (getPredicate 0 fn_if)
+      assume (getPredicate 0 fn_if)
+      forward e_t
+    fs <- rollbackAlgEnv $ do
+      debugPrettyM "E.If false branch: assuming " (getPredicate 1 fn_if)
+      assume (getPredicate 1 fn_if)
+      forward e_f
+    pure (ts, fs)
+  forM (zip ts fs) $ \(t, f) -> do
+    substParams fn_if [(t_branch, t), (f_branch, f)]
+  where
+    getPredicate n fn = fst . getCase n $ body fn
 forward expr@(E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
