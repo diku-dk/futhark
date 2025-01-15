@@ -1,8 +1,9 @@
 -- ==
--- error: cannot match
+-- error: constructor arguments
 
-type surface = #asphere {curvature: f64}
-             | #sphere  {curvature: f64}
+type surface =
+    #asphere {curvature: f64}
+  | #sphere {curvature: f64}
 
 entry sag (surf: surface) : f64 =
   match surf
