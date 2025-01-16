@@ -29,6 +29,15 @@ tests =
               }]
         ),
       mkTest
+        "tests/indexfn/abs.fut"
+        ( withDebug $ pure $ \(_, _, x, _) ->
+            [IndexFn
+              { iterator = Empty,
+                body = cases [(sHole x :< int2SoP 0, int2SoP (-1) .*. sHole x),
+                              (sHole x :>= int2SoP 0, sHole x)]
+              }]
+        ),
+      mkTest
         "tests/indexfn/map-tuple.fut"
         ( pure $ \(i, n, xs, ys) ->
             [IndexFn
