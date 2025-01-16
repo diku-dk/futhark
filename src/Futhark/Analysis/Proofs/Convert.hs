@@ -733,7 +733,7 @@ x ~>~ y = sym2SoP $ sym2SoP x :> sym2SoP y
 x ~<=~ y = sym2SoP $ sym2SoP x :<= sym2SoP y
 
 (~>=~) :: Symbol -> Symbol -> SoP Symbol
-x ~>=~ y = sym2SoP $ sym2SoP x :<= sym2SoP y
+x ~>=~ y = sym2SoP $ sym2SoP x :>= sym2SoP y
 
 (~&&~) :: Symbol -> Symbol -> SoP Symbol
 x ~&&~ y = sym2SoP $ x :&& y
