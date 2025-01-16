@@ -1,7 +1,7 @@
 module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, forM, forM_, msum, unless, void, when, (<=<))
+import Control.Monad (foldM, forM, forM_, msum, unless, void, when)
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
@@ -37,26 +37,24 @@ justVName _ = Nothing
 getFun :: E.Exp -> Maybe String
 getFun e = E.baseString <$> justVName e
 
-getSize :: E.Exp -> Maybe (SoP Symbol)
+getSize :: E.Exp -> IndexFnM (Maybe (SoP Symbol))
 getSize (E.Var _ (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
 getSize (E.ArrayLit [] (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
 getSize e = error $ "getSize: " <> prettyString e <> "\n" <> show e
 
-sizeOfTypeBase :: E.TypeBase E.Exp as -> Maybe (SoP Symbol)
+sizeOfTypeBase :: E.TypeBase E.Size as -> IndexFnM (Maybe (SoP Symbol))
 sizeOfTypeBase (E.Scalar (E.Refinement ty _)) =
   sizeOfTypeBase ty
 sizeOfTypeBase (E.Scalar (E.Arrow _ _ _ _ return_type)) =
   sizeOfTypeBase (E.retType return_type)
 sizeOfTypeBase (E.Array _ shape _)
-  | dim : _ <- E.shapeDims shape =
-      Just $ convertSize dim
-  where
-    convertSize (E.Var (E.QualName _ x) _ _) = sym2SoP $ Var x
-    convertSize (E.Parens e _) = convertSize e
-    convertSize (E.Attr _ e _) = convertSize e
-    convertSize (E.IntLit x _ _) = int2SoP x
-    convertSize e = error ("convertSize not implemented for: " <> show e)
-sizeOfTypeBase _ = Nothing
+  | dim : _ <- E.shapeDims shape = do
+      -- FIXME Only supporting one dimensional arrays.
+      d <- scalarFromIndexFn . head <$> forward dim
+      pure $ Just d
+sizeOfTypeBase (E.Scalar (E.Record _)) =
+  error "Run E.patternMap first"
+sizeOfTypeBase _ = pure Nothing
 
 typeIsBool :: E.TypeBase E.Exp as -> Bool
 typeIsBool (E.Scalar (E.Prim E.Bool)) = True
@@ -153,7 +151,8 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
     Just indexfns -> do
       pure indexfns
     _ -> do
-      case getSize e of
+      size <- getSize e
+      case size of
         Just sz -> do
           -- Canonical array representation.
           i <- newVName "i"
@@ -578,7 +577,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
                 }
         substParams fn [(vals_hole, vals), (dest_hole, dest)]
   -- Applying other functions, for instance, user-defined ones.
-  | (E.Var (E.QualName [] g) info _) <- f,
+  | (E.Var (E.QualName [] g) info loc) <- f,
     args' <- getArgs args,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
       toplevel <- getTopLevelIndexFns
@@ -587,19 +586,18 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           forM indexfns $ \indexfn -> do
             -- g is a previously analyzed top-level function definiton.
             whenDebug . traceM $ "✨ Using index fn " <> prettyBinding' g indexfn
-            let param_names = mconcat . map E.patNames $ pats
-            let param_sizes = map (getVName <=< sizeOfTypeBase . E.patternType) pats
+            let names_types = mconcat $ map E.patternMap pats
+            let param_names = map fst names_types
+            param_sizes <- mapM (fmap (>>= getVName) . sizeOfTypeBase . snd) names_types
             -- The arguments that the parameters are to be replaced for.
             arg_fns <- mconcat <$> mapM forward args'
             arg_sizes <- mapM sizeOfDomain arg_fns
-            -- when (length param_names /= length arg_fns) (error "must be fully applied")
+            when (length param_names /= length arg_fns) $
+              errorMsg loc "Bound functions must be fully applied. Maybe you want to use a lambda?"
             -- Size paramters must be replaced as well.
-            -- asdf  param_sizes length /= param_names, need one size for each name im extracting!
             debugPrettyM "param_names" param_names
             debugPrettyM "param_sizes" param_sizes
             debugPrettyM "arg_sizes" arg_sizes
-            debugM $ "SHOW param_sizes" <> (show param_sizes)
-            debugM $ "SHOW arg_sizes" <> (show arg_sizes)
             debugPrettyM "arg_fns" arg_fns
             unless (map isJust param_sizes == map isJust arg_sizes) (error "sizes don't align")
             let size_rep = M.fromList $ catMaybes $ zipMaybes param_sizes arg_sizes
@@ -629,21 +627,18 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
 
             zipMaybes = zipWith (liftA2 (,))
-        Just _ -> error "TODO"
         Nothing -> do
           -- g is a free variable in this expression (probably a parameter
           -- to the top-level function currently being analyzed).
           arg_fnss <- mapM forward args'
+          size <- sizeOfTypeBase return_type
           forM arg_fnss $ \arg_fns -> do
             arg_names <- forM arg_fns (const $ newVName "x")
-            iter <-
-              case sizeOfTypeBase return_type of
-                Just sz -> do
-                  -- Function returns an array.
-                  i <- newVName "i"
-                  pure $ Forall i (Iota sz)
-                Nothing -> do
-                  pure Empty
+            iter <- case size of
+              Just sz ->
+                flip Forall (Iota sz) <$> newVName "i"
+              Nothing ->
+                pure Empty
             let g_fn =
                   IndexFn
                     { iterator = iter,
@@ -728,7 +723,7 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
             _ -> undefined
       ys <- forward y
       y' <- case ys of
-        [y''] -> getScalar <$> rewrite y''
+        [y''] -> scalarFromIndexFn <$> rewrite y''
         _ -> undefined
       -- Create check as an index function whose cases contain the check.
       let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `rel` y'
@@ -748,9 +743,6 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
       whenDebug . traceM $ "Checking precondition on " <> prettyString param
       check <- substParams (repIndexFn size_rep check_fn) param_subst
       allCases (askQ (CaseCheck sop2Symbol)) check
-
-    getScalar (IndexFn Empty cs) | [(Bool True, x)] <- casesToList cs = x
-    getScalar _ = error "getScalar on non-scalar index function"
 
     toScalarFn x = IndexFn Empty (cases [(Bool True, x)])
 getRefinement _ = pure Nothing
@@ -814,6 +806,9 @@ bindLambdaBodyParams params = do
     unless (null k_rep) $ debugPrettyM "k_rep" k_rep
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
   pure iter
+
+scalarFromIndexFn (IndexFn Empty cs) | [(Bool True, x)] <- casesToList cs = x
+scalarFromIndexFn _ = error "scalarFromIndexFn on non-scalar index function"
 
 errorMsg :: (E.Located a) => a -> String -> b
 errorMsg loc msg =
