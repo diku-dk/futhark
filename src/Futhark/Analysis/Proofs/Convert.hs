@@ -3,6 +3,7 @@ module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 import Control.Applicative ((<|>))
 import Control.Monad (foldM, forM, forM_, msum, unless, void, when)
 import Data.Bifunctor
+import Data.Foldable (for_)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
@@ -13,7 +14,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, getCase, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), allCases, askQ, foreachCase, isUnknown, isYes)
+import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), allCases, askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
@@ -87,18 +88,39 @@ mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 -- toplevel_indexfns
 mkIndexFnValBind :: E.ValBind -> IndexFnM [IndexFn]
-mkIndexFnValBind val@(E.ValBind _ vn _ret _ _ params body _ _ _) = do
+mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
   clearAlgEnv
   whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
   forM_ params addTypeRefinement
   forM_ params addBooleanNames
   forM_ params addSizeVariables
-  indexfn <- forward body >>= mapM rewrite >>= bindfn vn
-  insertTopLevel vn (params, indexfn)
+  indexfns <- forward body >>= mapM rewrite >>= bindfn vn
+  insertTopLevel vn (params, indexfns)
   -- _ <- algebraContext indexfn $ do
   --   whenDebug . traceM $ "Algebra context for indexfn:\n"
   --   debugPrintAlgEnv
-  pure indexfn
+  for_ ret (checkRefinement indexfns)
+  pure indexfns
+  where
+    checkRefinement indexfns decl@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
+      whenDebug . traceM $ "Need to show: " <> prettyString decl
+      let param_names = map fst $ mconcat $ map E.patternMap lam_params
+      forM_ (zip param_names indexfns) $ \(nm, fn) -> insertIndexFn nm [fn]
+      postconds <- forward lam_body
+      -- Result of function (ValBind) is already substituted in, so
+      -- post conditions fns are likely simplified to
+      -- 0 (False) or 1 (True).
+      debugPrettyM "postconditions: " postconds
+      answer <- askRefinements postconds
+      case answer of
+        Yes -> do
+          debugM "PROVED."
+          pure ()
+        Unknown ->
+          errorMsg loc $ "Failed to show refinement: " <> prettyString decl
+    checkRefinement _ (E.TERefine _ _ loc) = do
+      errorMsg loc "Only lambda post-conditions are currently supported."
+    checkRefinement _ _ = pure ()
 
 bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
 bindfn vn indexfn = do
@@ -316,6 +338,8 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
     substParams fn_if [(t_branch, t), (f_branch, f)]
   where
     getPredicate n fn = fst . getCase n $ body fn
+forward (E.Lambda _ _ _ _ loc) =
+  errorMsg loc "Unapplied anonymous are not supported."
 forward expr@(E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
@@ -745,7 +769,7 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
     mkCheck check_fn (size_rep, param_subst) = do
       whenDebug . traceM $ "Checking precondition on " <> prettyString param
       check <- substParams (repIndexFn size_rep check_fn) param_subst
-      allCases (askQ (CaseCheck sop2Symbol)) check
+      askRefinement check
 
     toScalarFn x = IndexFn Empty (cases [(Bool True, x)])
 getRefinement _ = pure Nothing

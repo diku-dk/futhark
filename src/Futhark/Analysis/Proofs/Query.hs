@@ -11,6 +11,8 @@ module Futhark.Analysis.Proofs.Query
     orM,
     allCases,
     foreachCase,
+    askRefinement,
+    askRefinements,
   )
 where
 
@@ -25,7 +27,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (repDomain)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, rollbackAlgEnv)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..))
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (lookupRange)
@@ -42,9 +44,18 @@ data Query
   = CaseIsMonotonic MonoDir
   | -- Apply transform to case value, then check whether it simplifies to true.
     CaseCheck (SoP Symbol -> Symbol)
+  | -- Check whether case is true.
+    Truth
+
+askRefinement :: IndexFn -> IndexFnM Answer
+askRefinement = allCases (askQ Truth)
+
+askRefinements :: [IndexFn] -> IndexFnM Answer
+askRefinements = allM . map askRefinement
 
 -- | Answers a query on an index function case.
 askQ :: Query -> IndexFn -> Int -> IndexFnM Answer
+askQ Truth fn case_idx = askQ (CaseCheck sop2Symbol) fn case_idx
 askQ query fn case_idx = algebraContext fn $ do
   let (p, q) = getCase case_idx (body fn)
   addRelIterator (iterator fn)
