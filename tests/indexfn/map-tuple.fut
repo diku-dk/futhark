@@ -1,4 +1,4 @@
-def add (x, y) z = (x+z, y+z)
+def add (x, y) (z,a) = (x+z, y+a)
 
-entry f xs =
-  map (\(x,y) -> add (x,y) 2) xs
+def f xs ys =
+  map (\(x, y) -> add (x,y) (2,3)) (zip xs ys)

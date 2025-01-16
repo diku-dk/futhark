@@ -338,7 +338,10 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       -- is weird in that
       -- analy
       arrs <- mconcat <$> mapM forward args'
-      iter <- bindLambdaBodyParams (zip (concatMap E.patNames params) arrs)
+      let names = concatMap E.patNames params
+      when (length arrs /= length names) $
+        errorMsg (E.locOf expr) "Unsupported map: arguments and pattern names must align."
+      iter <- bindLambdaBodyParams (zip names arrs)
       -- Transform body from (\x -> e(x)) to (\i -> e(x[i])), so bound i.
       fns <- quantifiedBy iter $ forward lam_body
       forM fns $ \body_fn ->

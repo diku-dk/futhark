@@ -30,10 +30,14 @@ tests =
         ),
       mkTest
         "tests/indexfn/map-tuple.fut"
-        ( pure $ \(i, n, xs, _) ->
+        ( pure $ \(i, n, xs, ys) ->
             [IndexFn
               { iterator = Forall i (Iota (sHole n)),
-                body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Idx (Hole xs) (sHole i)))]
+                body = cases [(Bool True, int2SoP 2 .+. sym2SoP (Idx (Hole xs) (sHole i)))]
+              }
+            , IndexFn
+              { iterator = Forall i (Iota (sHole n)),
+                body = cases [(Bool True, int2SoP 3 .+. sym2SoP (Idx (Hole ys) (sHole i)))]
               }]
         ),
       mkTest
@@ -319,9 +323,8 @@ tests =
             [] -> error "No imports"
             x : _ -> x
       let vbs = getValBinds last_import
-      let results = runTest vns vbs expectedPat
-      forM_ results $ \(actual, expected) ->
-        actual @??= expected
+      let (actuals, expecteds) = unzip $ runTest vns vbs expectedPat
+      actuals @??= expecteds
 
     getValBinds = mapMaybe getValBind . E.progDecs . fileProg . snd
 
