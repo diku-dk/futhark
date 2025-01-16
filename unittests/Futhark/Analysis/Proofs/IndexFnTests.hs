@@ -38,6 +38,14 @@ tests =
               }]
         ),
       mkTest
+        "tests/indexfn/rotate.fut"
+        ( pure $ \(_, _, _, _) ->
+            [IndexFn
+              { iterator = Empty,
+                body = cases [(Bool True, int2SoP 0)]
+              }]
+        ),
+      mkTest
         "tests/indexfn/map-tuple.fut"
         ( pure $ \(i, n, xs, ys) ->
             [IndexFn
