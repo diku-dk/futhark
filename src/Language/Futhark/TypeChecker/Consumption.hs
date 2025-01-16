@@ -405,6 +405,7 @@ combineAliases (Scalar (Sum cs1)) (Scalar (Sum cs2))
     L.sort (M.keys cs1) == L.sort (M.keys cs2) =
       Scalar $ Sum $ M.intersectionWith (zipWith combineAliases) cs1 cs2
 combineAliases (Scalar (Prim t)) _ = Scalar $ Prim t
+combineAliases (Scalar (Refinement (Scalar (Prim t)) _)) _ = Scalar $ Prim t
 combineAliases t1 t2 =
   error $ "combineAliases invalid args: " ++ show (t1, t2)
 

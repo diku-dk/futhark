@@ -756,7 +756,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       link
       equalityType usage tp
     Just (Overloaded ts old_usage)
-      | tp `notElem` map (Scalar . Prim) ts -> do
+      | stripRefinement tp `notElem` map (Scalar . Prim) ts -> do
           link
           case tp of
             Scalar (TypeVar _ (QualName [] v) [])
@@ -775,6 +775,9 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
                   </> "due to"
                   <+> pretty old_usage
                   <> "."
+      where
+        stripRefinement (Scalar (Refinement (Scalar t) _)) = Scalar t
+        stripRefinement t = t
     Just (HasFields l required_fields old_usage) -> do
       when (l == Unlifted) $ arrayElemTypeWith usage (unliftedBcs old_usage) tp
       case tp of

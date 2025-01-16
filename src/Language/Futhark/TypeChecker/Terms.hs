@@ -1174,9 +1174,12 @@ localChecks = void . check
         _ -> pure ()
       recurse e
     check e@(IntLit x ty loc) =
-      e <$ case ty of
+      e <$ case stripRefinement ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI x t) x t loc
         _ -> error "Inferred type of int literal is not a number"
+      where
+        stripRefinement (Info (Scalar (Refinement (Scalar t) _))) = Info (Scalar t)
+        stripRefinement t = t
     check e@(FloatLit x ty loc) =
       e <$ case ty of
         Info (Scalar (Prim (FloatType t))) -> errorBounds (inBoundsF x t) x t loc
