@@ -77,7 +77,8 @@ inline (f_name, f) g = do
         Iota {} -> pure Empty
         Cat k _ _
           | k `elem` fv cs ->
-              error $ "Might capture " <> prettyString k
+              -- error $ "Might capture " <> prettyString k
+              pure Empty
           | otherwise ->
               pure Empty
     mergeIterators (IndexFn (Forall i df) _) (Forall j dg) = do

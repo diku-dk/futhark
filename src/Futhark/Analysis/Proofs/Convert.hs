@@ -7,7 +7,7 @@ import Data.Foldable (for_)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromMaybe, isJust)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
@@ -67,6 +67,22 @@ getArgs = map (stripExp . snd) . NE.toList
   where
     stripExp x = fromMaybe x (E.stripExp x)
 
+-- Like patternMap, but doesn't discard information about wildcards.
+patternMapAligned :: E.Pat t -> [(Maybe E.VName, t)]
+patternMapAligned = map f . patIdentsAligned
+  where
+    f (v, E.Info t) = (v, t)
+
+    patIdentsAligned (E.Id v t _) = [(Just v, t)]
+    patIdentsAligned (E.PatParens p _) = patIdentsAligned p
+    patIdentsAligned (E.TuplePat pats _) = foldMap patIdentsAligned pats
+    patIdentsAligned (E.RecordPat fs _) = foldMap (patIdentsAligned . snd) fs
+    patIdentsAligned (E.Wildcard t _) = [(Nothing, t)]
+    patIdentsAligned (E.PatAscription p _ _) = patIdentsAligned p
+    patIdentsAligned (E.PatLit _ t _) = [(Nothing, t)]
+    patIdentsAligned (E.PatConstr _ _ ps _) = foldMap patIdentsAligned ps
+    patIdentsAligned (E.PatAttr _ p _) = patIdentsAligned p
+
 --------------------------------------------------------------
 -- Construct index function for source program
 --------------------------------------------------------------
@@ -104,17 +120,20 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
   where
     checkRefinement indexfns decl@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
       whenDebug . traceM $ "Need to show: " <> prettyString decl
-      let param_names = map fst $ mconcat $ map E.patternMap lam_params
-      forM_ (zip param_names indexfns) $ \(nm, fn) -> insertIndexFn nm [fn]
+      let param_names = map fst $ mconcat $ map patternMapAligned lam_params
+      debugPrettyM "patternMap" $ map E.patternMap lam_params
+      debugPrettyM "param_names" param_names
+      forM_ (zip param_names indexfns) $ \(nm, fn) ->
+        when (isJust nm) . void $ bindfn (fromJust nm) [fn]
       postconds <- forward lam_body
       -- Result of function (ValBind) is already substituted in, so
       -- post conditions fns are likely simplified to
       -- 0 (False) or 1 (True).
-      debugPrettyM "postconditions: " postconds
+      debugM $ "Postcondition after substituting in results: " <> prettyString postconds
       answer <- askRefinements postconds
       case answer of
         Yes -> do
-          debugM "PROVED."
+          debugM (E.baseString vn <> " ∎")
           pure ()
         Unknown ->
           errorMsg loc $ "Failed to show refinement: " <> prettyString decl
@@ -146,12 +165,11 @@ forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
   -- tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX x]
   whenDebug . traceM $ "Forward on " <> prettyString patterns
   xs <- forward x
-  forM_ (zip patterns xs) bindfnOrDiscard
+  forM_ (zip (mconcat $ map patternMapAligned patterns) xs) bindfnOrDiscard
   forward body
   where
-    bindfnOrDiscard (E.Wildcard {}, _) = pure ()
-    bindfnOrDiscard (E.Id vn _ _, indexfn) = void (bindfn vn [indexfn])
-    bindfnOrDiscard e = error ("not implemented for " <> show e)
+    bindfnOrDiscard ((Nothing, _), _) = pure ()
+    bindfnOrDiscard ((Just vn, _), indexfn) = void (bindfn vn [indexfn])
 forward (E.Literal (E.BoolValue x) _) =
   pure . fromScalar . sym2SoP $ Bool x
 forward (E.Literal (E.SignedValue (E.Int64Value x)) _) =
@@ -611,40 +629,47 @@ forward expr@(E.AppExp (E.Apply f args _) _)
       case M.lookup g toplevel of
         Just (pats, indexfns) -> do
           forM indexfns $ \indexfn -> do
-            -- g is a previously analyzed top-level function definiton.
             whenDebug . traceM $ "✨ Using index fn " <> prettyBinding' g indexfn
-            let names_types = mconcat $ map E.patternMap pats
-            let param_names = map fst names_types
-            param_sizes <- mapM (fmap (>>= getVName) . sizeOfTypeBase . snd) names_types
+            -- g is a previously analyzed top-level function definition.
+            -- Unpack information about parameters.
+            let (pnames, ptypes) = unzip $ mconcat $ map patternMapAligned pats
+            psizes <- mapM (fmap (>>= getVName) . sizeOfTypeBase) ptypes
             -- The arguments that the parameters are to be replaced for.
             arg_fns <- mconcat <$> mapM forward args'
-            arg_sizes <- mapM sizeOfDomain arg_fns
-            when (length param_names /= length arg_fns) $
+            when (length pnames /= length arg_fns) $
               errorMsg loc "Bound functions must be fully applied. Maybe you want to use a lambda?"
-            -- Size paramters must be replaced as well.
-            debugPrettyM "param_names" param_names
-            debugPrettyM "param_sizes" param_sizes
-            debugPrettyM "arg_sizes" arg_sizes
+            arg_sizes <- mapM sizeOfDomain arg_fns
+            unless (map isJust psizes == map isJust arg_sizes) $
+              error "sizes don't align"
+            -- Align arguments with parameters, discarding unused parameters such as wildcards.
+            let actual_args =
+                  catMaybes $ zipWith (\p arg -> (,arg) <$> p) pnames arg_fns
+            debugPrettyM "param_names" pnames
+            debugPrettyM "param_types" ptypes
             debugPrettyM "arg_fns" arg_fns
-            unless (map isJust param_sizes == map isJust arg_sizes) (error "sizes don't align")
-            let size_rep = M.fromList $ catMaybes $ zipMaybes param_sizes arg_sizes
+            debugPrettyM "actual_args" actual_args
+            debugPrettyM "param_sizes" psizes
+            debugPrettyM "arg_sizes" arg_sizes
+            -- Size parameters must be replaced as well.
+            let size_rep = M.fromList $ catMaybes $ zipMaybes psizes arg_sizes
             whenDebug . traceM $
               "Size variable replacement " <> prettyString size_rep
             -- Check that preconditions are satisfied.
             preconditions <- mapM getPrecondition pats
-            when (isJust $ msum preconditions) $
-              whenDebug . traceM $
-                "Checking preconditions for " <> prettyString g
             forM_ (zip3 pats preconditions arg_fns) $ \(pat, pre, fn) -> do
               ans <- case pre of
                 Nothing -> pure Yes
-                Just check -> check (size_rep, zip param_names arg_fns)
-              unless (isYes ans) . error $
-                "Precondition on " <> prettyString pat <> " not satisfied for " <> prettyString fn
+                Just check -> do
+                  whenDebug . traceM $
+                    "Checking precondition " <> prettyString pat <> " for " <> prettyString g
+                  check (size_rep, actual_args)
+              unless (isYes ans) . errorMsg loc $
+                "Failed to show precondition " <> prettyString pat <> " for " <> prettyString fn
             -- The resulting index fn will be fully applied, so we can rewrite recurrences here.
             -- (Which speeds up things by eliminating cases.)
-            substParams (repIndexFn size_rep indexfn) (zip param_names arg_fns)
-              >>= rewrite
+            debugT' "Result: " $
+              substParams (repIndexFn size_rep indexfn) actual_args
+                >>= rewrite
           where
             getVName x | Just (Var vn) <- justSym x = Just vn
             getVName _ = Nothing

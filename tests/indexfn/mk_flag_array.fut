@@ -1,9 +1,12 @@
+-- Copied from prelude/array.fut to infer index function.
+def length [n] 't (_: [n]t) = n
+
 let sum_i64 [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
-let mk_flag_array 't [m]
+def mk_flag_array 't [m]
         (zero: t)
         (shape: [m]{i64 | (>= 0) })
-        (xs: [m]t) : {(i64, []t) | \(n, _flags) -> n == sum_i64 shape} =
+        (xs: [m]t) : {(i64, []t) | \(_, flags) -> length flags == sum_i64 shape} =
   let shp_rot = map (\ i -> if i==0 then 0i64 else shape[i-1]) (iota m)
   let shp_scn = scan (+) 0i64 shp_rot
   let aoa_len = if m > 0 then shp_scn[m-1] + shape[m-1] else 0
