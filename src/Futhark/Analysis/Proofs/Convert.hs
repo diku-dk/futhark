@@ -1,7 +1,7 @@
 module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, forM, forM_, msum, unless, void, when)
+import Control.Monad (foldM, forM, forM_, unless, void, when)
 import Data.Bifunctor
 import Data.Foldable (for_)
 import Data.List qualified as L
@@ -9,19 +9,19 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, toAlgebra, ($==), ($>=))
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, getCase, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), allCases, askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes)
+import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
-import Futhark.SoP.Monad (addProperty, addUntrans)
+import Futhark.SoP.Monad (addProperty)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Futhark.Util.Pretty (prettyString)
@@ -758,12 +758,12 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
   | E.Array _ _ (E.Refinement _ty ref) <- info = do
       whenDebug . traceM $ "Getting (array) type refinement" <> prettyString (param, ref)
       hole <- sym2SoP . Hole <$> newVName "h"
-      Just <$> mkRef (`Idx` hole) ref
+      Just <$> mkRef ((`Idx` hole) . Var) ref
   | E.Scalar (E.Refinement _ty ref) <- info = do
       whenDebug . traceM $ "Getting type refinement" <> prettyString (param, ref)
-      Just <$> mkRef id ref
+      Just <$> mkRef Var ref
   where
-    mkRef wrap (E.OpSectionRight (E.QualName [] vn_op) _ y _ _ _) = do
+    mkRef wrap (E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _) = do
       let (rel, alg_rel) = case E.baseString vn_op of
             ">" -> ((:>), (:>:))
             ">=" -> ((:>=), (:>=:))
@@ -771,19 +771,15 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
             "<=" -> ((:<=), (:<=:))
             "==" -> ((:==), (:==:))
             _ -> undefined
-      ys <- forward y
-      y' <- case ys of
-        [y''] -> scalarFromIndexFn <$> rewrite y''
-        _ -> undefined
-      -- Create check as an index function whose cases contain the check.
-      let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `rel` y'
+      ys <- forward e_y
+      y <- case ys of
+        [y'] -> scalarFromIndexFn <$> rewrite y'
+        _ -> error "Impossible: Refinements have return type bool."
+      -- Create check as an index function whose cases contain the refinement.
+      let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `rel` y
       let effect = do
-            -- FIXME why am I using addUntrans directly and not toAlgebra?
-            -- We should not know anything about algebra translation here!
-            alg_param <- Algebra.Var <$> newVName (E.baseString param <> "ª")
-            addUntrans alg_param (wrap (Var param))
-            alg_y' <- toAlgebra y'
-            addRel $ alg_rel (sym2SoP alg_param) alg_y'
+            alg_param <- paramToAlgebra param wrap
+            addRel . alg_rel (sym2SoP alg_param) =<< toAlgebra y
       pure (check, effect)
     mkRef _ x = error $ "Unhandled refinement predicate " <> show x
 
@@ -857,6 +853,7 @@ bindLambdaBodyParams params = do
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
   pure iter
 
+scalarFromIndexFn :: IndexFn -> SoP Symbol
 scalarFromIndexFn (IndexFn Empty cs) | [(Bool True, x)] <- casesToList cs = x
 scalarFromIndexFn _ = error "scalarFromIndexFn on non-scalar index function"
 

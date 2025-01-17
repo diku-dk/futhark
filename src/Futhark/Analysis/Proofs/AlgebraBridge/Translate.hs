@@ -5,6 +5,7 @@ module Futhark.Analysis.Proofs.AlgebraBridge.Translate
     algebraContext,
     isBooleanM,
     getDisjoint,
+    paramToAlgebra,
   )
 where
 
@@ -24,10 +25,11 @@ import Futhark.Analysis.Proofs.Unify (Substitution (mapping), mkRep, rep, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym)
+import Futhark.SoP.Monad qualified as SoPM (addUntrans)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, hasConstant, int2SoP, justSym, mapSymM, mapSymSoPM, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
-import Language.Futhark (VName)
+import Language.Futhark (VName, baseString)
 
 -- Do this action inside an Algebra "context" created for an IndexFn, ensuring:
 -- (1) Modifications to the Algebra environment are ephemeral; they are
@@ -178,6 +180,13 @@ instance ToSoP Algebra.Symbol Symbol where
 ------------------------------------------------------------------------------
 toAlgebra :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
 toAlgebra = mapSymM toAlgebra_ <=< handleQuantifiers
+
+-- Use to add refinements to the algebra environment in Convert.hs.
+paramToAlgebra :: VName -> (VName -> Symbol) -> IndexFnM Algebra.Symbol
+paramToAlgebra vn wrapper = do
+  alg_param <- Algebra.Var <$> newVName (baseString vn <> "ª")
+  SoPM.addUntrans alg_param (wrapper vn)
+  pure alg_param
 
 -- Replace bound variable `k` in `e` by Hole.
 removeQuantifier :: Symbol -> VName -> IndexFnM Symbol
