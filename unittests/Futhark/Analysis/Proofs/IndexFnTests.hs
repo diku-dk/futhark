@@ -39,7 +39,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/rotate.fut"
-        ( pure $ \(i, r, a, n) ->
+        ( withDebug $ pure $ \(i, r, a, n) ->
             let shift = sHole r .+. sHole i
             in [IndexFn
               { iterator = Forall i (Iota (sHole n)),
