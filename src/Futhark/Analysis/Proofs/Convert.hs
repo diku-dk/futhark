@@ -1,7 +1,7 @@
 module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, forM, forM_, unless, void, when)
+import Control.Monad (foldM, forM, forM_, unless, void, when, foldM_)
 import Data.Bifunctor
 import Data.Foldable (for_)
 import Data.List qualified as L
@@ -39,6 +39,8 @@ getFun :: E.Exp -> Maybe String
 getFun e = E.baseString <$> justVName e
 
 getSize :: E.Exp -> IndexFnM (Maybe (SoP Symbol))
+getSize (E.Var _ (E.Info {E.unInfo = (E.Scalar (E.Record _))}) loc) =
+  errorMsg loc "Record-type variables must be unpacked."
 getSize (E.Var _ (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
 getSize (E.ArrayLit [] (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
 getSize e = error $ "getSize: " <> prettyString e <> "\n" <> show e
@@ -639,43 +641,44 @@ forward expr@(E.AppExp (E.Apply f args _) _)
             whenDebug . traceM $ "✨ Using index fn " <> prettyBinding' g indexfn
             -- g is a previously analyzed top-level function definition.
             -- Unpack information about parameters.
-            let (pnames, ptypes) = unzip $ mconcat $ map patternMapAligned pats
-            psizes <- mapM (fmap (>>= getVName) . sizeOfTypeBase) ptypes
-            -- The arguments that the parameters are to be replaced for.
-            arg_fns <- mconcat <$> mapM forward args'
-            when (length pnames /= length arg_fns) $
+            let pmaps = map patternMapAligned pats
+            pargs <- mapM forward args'
+            unless (length pmaps == length pargs) $
               errorMsg loc "Bound functions must be fully applied. Maybe you want to use a lambda?"
-            arg_sizes <- mapM sizeOfDomain arg_fns
-            unless (map isJust psizes == map isJust arg_sizes) $
-              error "sizes don't align"
-            -- Align arguments with parameters, discarding unused parameters such as wildcards.
-            let actual_args =
-                  catMaybes $ zipWith (\p arg -> (,arg) <$> p) pnames arg_fns
-            debugPrettyM "param_names" pnames
-            debugPrettyM "param_types" ptypes
-            debugPrettyM "arg_fns" arg_fns
-            debugPrettyM "actual_args" actual_args
-            debugPrettyM "param_sizes" psizes
-            debugPrettyM "arg_sizes" arg_sizes
+            -- Align parameters and arguments. Each parameter is a "pattern";
+            -- a list of VNames (singleton for a variable; non-singleton for tuples).
+            actual_args <- forM (zip pmaps pargs) $ \(pmap, parg) -> do
+              debugPrettyM "pmap" pmap
+              debugPrettyM "parg" parg
+              unless (length pmap == length parg) $
+                errorMsg loc "Internal error: actual argument does not match parameter pattern."
+              let pnames = map fst pmap
+              -- Discard unused parameters such as wildcards while maintaining alignment.
+              pure $ catMaybes $ zipWith (\p arg -> (,arg) <$> p) pnames parg
             -- Size parameters must be replaced as well.
-            let size_rep = M.fromList $ catMaybes $ zipMaybes psizes arg_sizes
+            actual_sizes <- forM (zip pmaps pargs) $ \(pmap, parg) -> do
+              let types = map snd pmap
+              size_names <- mapM (fmap (>>= getVName) . sizeOfTypeBase) types
+              parg_sizes <- mapM sizeOfDomain parg
+              unless (map isJust size_names == map isJust parg_sizes) $
+                error "Internal error: sizes don't align."
+              pure $ catMaybes $ zipMaybes size_names parg_sizes
+            let size_rep = M.fromList $ mconcat actual_sizes
             whenDebug . traceM $
               "Size variable replacement " <> prettyString size_rep
             -- Check that preconditions are satisfied.
-            preconditions <- mapM getPrecondition pats
-            forM_ (zip3 pats preconditions arg_fns) $ \(pat, pre, fn) -> do
-              ans <- case pre of
-                Nothing -> pure Yes
-                Just check -> do
-                  whenDebug . traceM $
-                    "Checking precondition " <> prettyString pat <> " for " <> prettyString g
-                  check (size_rep, actual_args)
-              unless (isYes ans) . errorMsg loc $
-                "Failed to show precondition " <> prettyString pat <> " for " <> prettyString fn
+            foldM_
+              (\args_in_scope (pat, arg) -> do
+                let scope = args_in_scope <> arg
+                checkPrecondition size_rep scope pat
+                pure scope
+              )
+              []
+              (zip pats actual_args)
             -- The resulting index fn will be fully applied, so we can rewrite recurrences here.
             -- (Which speeds up things by eliminating cases.)
             debugT' "Result: " $
-              substParams (repIndexFn size_rep indexfn) actual_args
+              substParams (repIndexFn size_rep indexfn) (mconcat actual_args)
                 >>= rewrite
           where
             getVName x | Just (Var vn) <- justSym x = Just vn
@@ -686,6 +689,17 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
 
             zipMaybes = zipWith (liftA2 (,))
+
+            checkPrecondition size_rep scope pat = do
+              cond <- getPrecondition pat
+              ans <- case cond of
+                Nothing -> pure Yes
+                Just check -> do
+                  whenDebug . traceM $
+                    "Checking precondition " <> prettyString pat <> " for " <> prettyString g
+                  check (size_rep, scope)
+              unless (isYes ans) . errorMsg loc $
+                "Failed to show precondition " <> prettyString pat <> " in context: " <> prettyString scope
         Nothing -> do
           -- g is a free variable in this expression (probably a parameter
           -- to the top-level function currently being analyzed).
@@ -763,22 +777,22 @@ getPrecondition = fmap (fmap fst) . getRefinement
 getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe (Check, Effect))
 getRefinement (E.PatParens pat _) = getRefinement pat
 getRefinement (E.PatAscription pat _ _) = getRefinement pat
-getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
+getRefinement (E.Id param (E.Info {E.unInfo = info}) loc)
   | E.Array _ _ (E.Refinement _ty ref) <- info = do
-      whenDebug . traceM $ "Getting (array) type refinement" <> prettyString (param, ref)
+      whenDebug . traceM $ "Getting (array) type refinement " <> prettyString (param, ref)
       hole <- sym2SoP . Hole <$> newVName "h"
       Just <$> mkRef ((`Idx` hole) . Var) ref
   | E.Scalar (E.Refinement _ty ref) <- info = do
-      whenDebug . traceM $ "Getting type refinement" <> prettyString (param, ref)
+      whenDebug . traceM $ "Getting type refinement " <> prettyString (param, ref)
       Just <$> mkRef Var ref
   where
     mkRef wrap (E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _) = do
-      let (rel, alg_rel) = case E.baseString vn_op of
-            ">" -> ((:>), (:>:))
-            ">=" -> ((:>=), (:>=:))
-            "<" -> ((:<), (:<:))
-            "<=" -> ((:<=), (:<=:))
-            "==" -> ((:==), (:==:))
+      let rel = case E.baseString vn_op of
+            ">" -> (:>)
+            ">=" -> (:>=)
+            "<" -> (:<)
+            "<=" -> (:<=)
+            "==" -> (:==)
             _ -> undefined
       ys <- forwardRefinementExp e_y
       -- Create check as an index function whose cases contain the refinement.
@@ -787,9 +801,10 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
               IndexFn Empty . cases $
                 map (second (sym2SoP . (sym2SoP (Var param) `rel`))) (casesToList ys)
       let effect = do
-            alg_param <- paramToAlgebra param wrap
+            -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
+            alg_vn <- paramToAlgebra param wrap
             y <- rewrite $ flattenCases ys
-            addRel . alg_rel (sym2SoP alg_param) =<< toAlgebra y
+            addRelSymbol $ sym2SoP (Var alg_vn) `rel` y
       pure (check, effect)
     mkRef _ x = error $ "Unhandled refinement predicate " <> show x
 
@@ -801,9 +816,13 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
 
     -- Check that all branches of check_fn evaluate to true
     -- when substituting in param_subst.
-    mkCheck check_fn (size_rep, param_subst) = do
-      whenDebug . traceM $ "Checking precondition on " <> prettyString param
-      check <- substParams (repIndexFn size_rep check_fn) param_subst
+    mkCheck check_fn (size_rep, args_in_scope) = do
+      -- Substitute parameters in scope.
+      -- The refinement of a parameter can use previous parameters:
+      --   (x : []i64) (n : {i64 | (== sum x))
+      -- NOTE unpacked record-types are disallowed:
+      --   (x : {(t1, t2) | \(a, b) -> ...})
+      check <- substParams (repIndexFn size_rep check_fn) args_in_scope
       askRefinement check
 getRefinement _ = pure Nothing
 

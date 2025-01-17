@@ -181,12 +181,13 @@ instance ToSoP Algebra.Symbol Symbol where
 toAlgebra :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
 toAlgebra = mapSymM toAlgebra_ <=< handleQuantifiers
 
--- Use to add refinements to the algebra environment in Convert.hs.
-paramToAlgebra :: VName -> (VName -> Symbol) -> IndexFnM Algebra.Symbol
+-- Used to add refinements to the algebra environment in Convert.hs.
+-- (The secret is that it allows adding symbols with holes in the environment.)
+paramToAlgebra :: VName -> (VName -> Symbol) -> IndexFnM VName
 paramToAlgebra vn wrapper = do
-  alg_param <- Algebra.Var <$> newVName (baseString vn <> "ª")
-  SoPM.addUntrans alg_param (wrapper vn)
-  pure alg_param
+  alg_vn <- newVName (baseString vn <> "ª")
+  SoPM.addUntrans (Algebra.Var alg_vn) (wrapper vn)
+  pure alg_vn
 
 -- Replace bound variable `k` in `e` by Hole.
 removeQuantifier :: Symbol -> VName -> IndexFnM Symbol
