@@ -1,7 +1,7 @@
 -- Copied from prelude/array.fut to infer index function.
 def length [n] 't (_: [n]t) = n
 
-let sum_i64 [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
+def sum_i64 [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
 def mk_flag_array 't [m]
         (zero: t)
