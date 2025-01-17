@@ -39,10 +39,12 @@ tests =
         ),
       mkTest
         "tests/indexfn/rotate.fut"
-        ( pure $ \(_, _, _, _) ->
-            [IndexFn
-              { iterator = Empty,
-                body = cases [(Bool True, int2SoP 0)]
+        ( pure $ \(i, r, a, n) ->
+            let shift = sHole r .+. sHole i
+            in [IndexFn
+              { iterator = Forall i (Iota (sHole n)),
+                body = cases [(shift :< sHole n, sym2SoP $ Idx (Hole a) shift),
+                              (shift :>= sHole n, sym2SoP $ Idx (Hole a) (shift .-. sHole n))]
               }]
         ),
       mkTest

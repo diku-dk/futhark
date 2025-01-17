@@ -5,6 +5,7 @@ module Futhark.Analysis.Proofs.IndexFnPlus
     domainEnd,
     repIndexFn,
     subIndexFn,
+    repCases,
     intervalEnd,
     repDomain,
     unifyIndexFnWith,

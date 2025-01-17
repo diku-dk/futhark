@@ -9,10 +9,10 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=))
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=), addRelSymbol)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, flattenCases, getCase, justSingleCase)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn, repCases)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
@@ -806,6 +806,23 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) loc)
             y <- rewrite $ flattenCases ys
             addRelSymbol $ sym2SoP (Var alg_vn) `rel` y
       pure (check, effect)
+    mkRef wrap (E.Lambda lam_params lam_body _ _ _) = do
+      let param_names = map fst $ mconcat $ map patternMapAligned lam_params
+      case param_names of
+        [lam_param] -> do
+          body <- forwardRefinementExp lam_body
+          let ref = case lam_param of
+                Just vn -> repCases (mkRep vn $ wrap param) body
+                Nothing -> body
+          let check = mkCheck $ IndexFn Empty ref
+          let effect = do
+                y <- rewrite $ flattenCases ref
+                addRelSymbol (sop2Symbol y)
+          pure (check, effect)
+        _ ->
+          errorMsg
+            loc
+            "Only single-parameter lambdas are allowed as refinements."
     mkRef _ x = error $ "Unhandled refinement predicate " <> show x
 
     forwardRefinementExp e = do
