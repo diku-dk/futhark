@@ -336,9 +336,8 @@ concatIrreg _segments _env ns reparr = do
   -- Does this check for correct size of both lists?
   num_segments <- arraySize 0 <$> lookupType ns
 
-  -- ns multipled with existing segment sizes.
   -- Constructs the full list size / shape that should hold the final results.
-  -- Should be augmented to instead sum the segment sizes of both input array.
+
   let zero = Constant $ IntValue $ intValue Int64 (0 :: Int)
   ns_full <- letExp (baseString ns <> "_full") <=< segMap (MkSolo num_segments) $
     \(MkSolo i) -> do
@@ -383,8 +382,6 @@ concatIrreg _segments _env ns reparr = do
 
   -- Scatter data into result array
   elems <- foldlM (\ elems (idx, n, ii1, ii2) -> do
-    -- TODO: get offset array: scatter_offsets: [VName] -> [[0 (segment 0, liste 0), 3 (segment 0, list 1), 7],[0, ],[]]
-    --offsets <- mapM () scatter_offsets
     letExp "irregular_scatter_elems" <=< genScatter elems n $ \gid -> do
       -- Which segment we are in.
       segment_i <-
@@ -634,7 +631,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             ~+~ sExt it (untyped (pe64 v'))
             ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns res_F res_O (distResTag res) res_D' env
-    Concat 0 arr shp -> do -- peter: what is shp, because right now it looks like it is the same as ns_full
+    Concat 0 arr shp -> do
       ns <- dataArr segments env inps shp
       reparr <- mapM (getIrregRep segments env inps) (NE.toList arr)
       rep' <- concatIrreg segments env ns reparr
