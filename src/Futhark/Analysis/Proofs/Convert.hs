@@ -703,24 +703,24 @@ forward expr@(E.AppExp (E.Apply f args _) _)
         Nothing -> do
           -- g is a free variable in this expression (probably a parameter
           -- to the top-level function currently being analyzed).
-          arg_fnss <- mapM forward args'
+          arg_fns <- mconcat <$> mapM forward args'
           size <- sizeOfTypeBase return_type
-          forM arg_fnss $ \arg_fns -> do
-            arg_names <- forM arg_fns (const $ newVName "x")
-            iter <- case size of
-              Just sz ->
-                flip Forall (Iota sz) <$> newVName "i"
-              Nothing ->
-                pure Empty
-            let g_fn =
-                  IndexFn
-                    { iterator = iter,
-                      body =
-                        singleCase . sym2SoP $
-                          Apply (Var g) (map (sym2SoP . Var) arg_names)
-                    }
-            when (typeIsBool return_type) $ addProperty (Algebra.Var g) Algebra.Boolean
-            substParams g_fn (zip arg_names arg_fns)
+          arg_names <- forM arg_fns (const $ newVName "x")
+          iter <- case size of
+            Just sz ->
+              flip Forall (Iota sz) <$> newVName "i"
+            Nothing ->
+              pure Empty
+          let g_fn =
+                IndexFn
+                  { iterator = iter,
+                    body =
+                      singleCase . sym2SoP $
+                        Apply (Var g) (map (sym2SoP . Var) arg_names)
+                  }
+          when (typeIsBool return_type) $ addProperty (Algebra.Var g) Algebra.Boolean
+          fn <- substParams g_fn (zip arg_names arg_fns)
+          pure [fn]
 forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
 
 substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
