@@ -537,6 +537,8 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form) =
         let redlam_deps = dataDependencies $ lambdaBody redlam,
         let redlam_res = bodyResult $ lambdaBody redlam,
         let redlam_params = lambdaParams redlam,
+        let (redlam_xparams, redlam_yparams) =
+              splitAt (length nes) (lambdaParams redlam),
         let used_after =
               map snd . filter ((`UT.used` used) . patElemName . fst) $
                 zip red_pes redlam_params,
@@ -546,12 +548,17 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form) =
                 (zip redlam_params $ map resSubExp $ redlam_res <> redlam_res)
                 redlam_deps,
         let alive_mask = map ((`nameIn` necessary) . paramName) redlam_params,
-        not $ and (take (length nes) alive_mask) = Simplify $ do
+        not $ and alive_mask = Simplify $ do
           let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
               dead_fix = zipWith fixDeadToNeutral alive_mask nes
+              keep (_, (x, y), _) =
+                (paramName x `nameIn` necessary)
+                  || (paramName y `nameIn` necessary)
               (used_red_pes, _, used_nes) =
-                unzip3 . filter (\(_, x, _) -> paramName x `nameIn` necessary) $
-                  zip3 red_pes redlam_params nes
+                unzip3 . filter keep $
+                  zip3 red_pes (zip redlam_xparams redlam_yparams) nes
+
+          when (used_nes == nes) cannotSimplify
 
           let maplam' = removeLambdaResults (take (length nes) alive_mask) maplam
           redlam' <- removeLambdaResults (take (length nes) alive_mask) <$> fixLambdaParams redlam (dead_fix ++ dead_fix)
