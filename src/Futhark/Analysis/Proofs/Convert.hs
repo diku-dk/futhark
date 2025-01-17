@@ -11,7 +11,7 @@ import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, getCase, justSingleCase)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, flattenCases, getCase, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes)
@@ -51,8 +51,17 @@ sizeOfTypeBase (E.Scalar (E.Arrow _ _ _ _ return_type)) =
 sizeOfTypeBase (E.Array _ shape _)
   | dim : _ <- E.shapeDims shape = do
       -- FIXME Only supporting one dimensional arrays.
-      d <- scalarFromIndexFn . head <$> forward dim
-      pure $ Just d
+      ds <- forward dim
+      case ds of
+        [f_d]
+          | Just d <- justSingleCase f_d ->
+              pure $ Just d
+        [_] ->
+          -- FIXME Pretty sure all branches would have the same size?
+          -- So could we just pick one?
+          error "sizeOfTypBase on multiple case function"
+        _ ->
+          error "Currently only has support for one dimensional arrays."
 sizeOfTypeBase (E.Scalar (E.Record _)) =
   error "Run E.patternMap first"
 sizeOfTypeBase _ = pure Nothing
@@ -771,17 +780,24 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
             "<=" -> ((:<=), (:<=:))
             "==" -> ((:==), (:==:))
             _ -> undefined
-      ys <- forward e_y
-      y <- case ys of
-        [y'] -> scalarFromIndexFn <$> rewrite y'
-        _ -> error "Impossible: Refinements have return type bool."
+      ys <- forwardRefinementExp e_y
       -- Create check as an index function whose cases contain the refinement.
-      let check = mkCheck $ toScalarFn . sym2SoP $ sym2SoP (Var param) `rel` y
+      let check =
+            mkCheck $
+              IndexFn Empty . cases $
+                map (second (sym2SoP . (sym2SoP (Var param) `rel`))) (casesToList ys)
       let effect = do
             alg_param <- paramToAlgebra param wrap
+            y <- rewrite $ flattenCases ys
             addRel . alg_rel (sym2SoP alg_param) =<< toAlgebra y
       pure (check, effect)
     mkRef _ x = error $ "Unhandled refinement predicate " <> show x
+
+    forwardRefinementExp e = do
+      fns <- forward e
+      case fns of
+        [fn] -> body <$> rewrite fn
+        _ -> error "Impossible: Refinements have return type bool."
 
     -- Check that all branches of check_fn evaluate to true
     -- when substituting in param_subst.
@@ -789,8 +805,6 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _)
       whenDebug . traceM $ "Checking precondition on " <> prettyString param
       check <- substParams (repIndexFn size_rep check_fn) param_subst
       askRefinement check
-
-    toScalarFn x = IndexFn Empty (cases [(Bool True, x)])
 getRefinement _ = pure Nothing
 
 -- This function adds the effects of type refinements to the environment
@@ -852,10 +866,6 @@ bindLambdaBodyParams params = do
     unless (null k_rep) $ debugPrettyM "k_rep" k_rep
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
   pure iter
-
-scalarFromIndexFn :: IndexFn -> SoP Symbol
-scalarFromIndexFn (IndexFn Empty cs) | [(Bool True, x)] <- casesToList cs = x
-scalarFromIndexFn _ = error "scalarFromIndexFn on non-scalar index function"
 
 errorMsg :: (E.Located a) => a -> String -> b
 errorMsg loc msg =

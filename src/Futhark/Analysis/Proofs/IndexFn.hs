@@ -4,7 +4,7 @@ module Futhark.Analysis.Proofs.IndexFn where
 
 import Data.List.NonEmpty qualified as NE
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.SoP.SoP (SoP, int2SoP)
+import Futhark.SoP.SoP (SoP, int2SoP, (.*.), sym2SoP, (.+.))
 import Language.Futhark (VName)
 
 data IndexFn = IndexFn
@@ -58,9 +58,9 @@ getCases (IndexFn _ cs) = cs
 justSingleCase :: IndexFn -> Maybe (SoP Symbol)
 justSingleCase f
   | [(Bool True, f_val)] <- casesToList $ body f =
-    Just f_val
+      Just f_val
   | otherwise =
-    Nothing
+      Nothing
 
 catVar :: Iterator -> Maybe VName
 catVar (Forall _ (Cat k _ _)) = Just k
@@ -69,3 +69,6 @@ catVar _ = Nothing
 domainSegStart :: Domain -> SoP Symbol
 domainSegStart (Iota _) = int2SoP 0
 domainSegStart (Cat _ _ b) = b
+
+flattenCases :: Ord u => Cases u (SoP u) -> SoP u
+flattenCases cs = foldl1 (.+.) [sym2SoP p .*. q | (p, q) <- casesToList cs]
