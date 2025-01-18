@@ -200,8 +200,10 @@ resolveTypeParams names orig_t1 orig_t2 =
 
     matchExps bound (Var (QualName _ d1) _ _) e
       | d1 `elem` names,
-        not $ any (`elem` bound) $ fvVars $ freeInExp e =
+        not $ any problematic $ fvVars $ freeInExp e =
           addDim d1 e
+      where
+        problematic v = v `elem` bound || v `elem` names
     matchExps bound e1 e2
       | Just es <- similarExps e1 e2 =
           mapM_ (uncurry $ matchExps bound) es
@@ -2185,11 +2187,13 @@ checkEntryArgs entry args entry_t
 -- horribly if these are ill-typed.
 interpretFunction :: Ctx -> VName -> [V.Value] -> Either T.Text (F ExtOp Value)
 interpretFunction ctx fname vs = do
-  ft <- case lookupVar (qualName fname) $ ctxEnv ctx of
-    Just (TermValue (Just (T.BoundV _ t)) _) ->
-      updateType (map valueType vs) t
-    Just (TermPoly (Just (T.BoundV _ t)) _) ->
-      updateType (map valueType vs) t
+  (ft, mkf) <- case lookupVar (qualName fname) $ ctxEnv ctx of
+    Just (TermValue (Just (T.BoundV _ t)) v) -> do
+      ft <- updateType (map valueType vs) t
+      pure (ft, pure v)
+    Just (TermPoly (Just (T.BoundV _ t)) v) -> do
+      ft <- updateType (map valueType vs) t
+      pure (ft, v ft =<< evalWithExts (ctxEnv ctx))
     _ ->
       Left $ "Unknown function `" <> nameToText (toName fname) <> "`."
 
@@ -2197,18 +2201,14 @@ interpretFunction ctx fname vs = do
 
   checkEntryArgs fname vs ft
 
-  Right $
-    runEvalM (ctxImports ctx) $ do
-      -- XXX: We are providing a dummy type here.  This is OK as long
-      -- as the function we invoke is monomorphic, which is what we
-      -- require of entry points.  This is to avoid reimplementing
-      -- type inference machinery here.
-      f <- evalTermVar (ctxEnv ctx) (qualName fname) (Scalar (Prim Bool))
-      foldM (apply noLoc mempty) f vs'
+  Right $ runEvalM (ctxImports ctx) $ do
+    f <- mkf
+    foldM (apply noLoc mempty) f vs'
   where
     updateType (vt : vts) (Scalar (Arrow als pn d pt (RetType dims rt))) = do
       checkInput vt pt
-      Scalar . Arrow als pn d (valueStructType vt) . RetType dims . toRes Nonunique <$> updateType vts (toStruct rt)
+      Scalar . Arrow als pn d (valueStructType vt) . RetType dims . toRes Nonunique
+        <$> updateType vts (toStruct rt)
     updateType _ t =
       Right t
 
