@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark eval`: any errors in the provided .fut file would cause a
+  "file not found" error message.
+
 ## [0.25.26]
 
 ### Fixed
