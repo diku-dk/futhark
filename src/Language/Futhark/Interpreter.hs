@@ -1154,15 +1154,11 @@ evalModExp _ (ModImport _ (Info f) _) = do
 evalModExp env (ModDecs ds _) = do
   Env terms types <- foldM evalDec env ds
   -- Remove everything that was present in the original Env.
-  pure
-    ( Env
-        (terms `M.difference` envTerm env)
-        (types `M.difference` envType env),
-      Module $
+  let env' =
         Env
           (terms `M.difference` envTerm env)
           (types `M.difference` envType env)
-    )
+  pure (env', Module env')
 evalModExp env (ModVar qv _) =
   (mempty,) <$> evalModuleVar env qv
 evalModExp env (ModAscript me _ (Info substs) _) =
@@ -1197,8 +1193,7 @@ evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalFunctionBinding env tparams ps ret fbody
   sizes <- extEnv
-  pure $
-    env {envTerm = M.insert v binding $ envTerm env} <> sizes
+  pure $ env {envTerm = M.insert v binding $ envTerm env} <> sizes
 evalDec env (OpenDec me _) = do
   (me_env, me') <- evalModExp env me
   case me' of
