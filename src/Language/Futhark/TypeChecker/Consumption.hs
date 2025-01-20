@@ -430,6 +430,8 @@ arrayAliases (Scalar (TypeVar als _ _)) = als
 arrayAliases (Scalar Arrow {}) = mempty
 arrayAliases (Scalar (Sum fs)) =
   mconcat $ concatMap (map arrayAliases) $ M.elems fs
+arrayAliases (Scalar (Refinement als _)) =
+  arrayAliases als
 
 overlapCheck :: (Pretty src, Pretty ve) => Loc -> (src, TypeAliases) -> (ve, TypeAliases) -> CheckM ()
 overlapCheck loc (src, src_als) (ve, ve_als) =
