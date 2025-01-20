@@ -1,7 +1,7 @@
 module Futhark.Analysis.Proofs.Rule
   ( applyRuleBook,
     rulesIndexFn,
-    rulesSoP,
+    vacuous,
     RuleBook,
     Rule (..),
   )
@@ -17,7 +17,7 @@ import Futhark.Analysis.Proofs.SymbolPlus (repVName, toSumOfSums)
 import Futhark.Analysis.Proofs.Unify (Replaceable (rep), Substitution (mapping), Unify (unify), mkRep, renameAnd, sub, unifies, unifies_)
 import Futhark.Analysis.Proofs.Util (allocateTerms)
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sopToLists, sym2SoP, (.+.), (.-.), (~+~))
+import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sopToLists, sym2SoP, (.+.), (~+~))
 import Futhark.Util.Pretty (Pretty)
 import Language.Futhark (VName)
 
@@ -106,18 +106,6 @@ int = int2SoP
 
 hole :: VName -> SoP Symbol
 hole = sym2SoP . Hole
-
-rulesSoP :: IndexFnM [Rule (SoP Symbol) Symbol IndexFnM]
-rulesSoP = do
-  h1 <- newVName "h"
-  pure
-    [ Rule
-        { name = "⟦¬x⟧ => 1 - ⟦x⟧",
-          from = sym2SoP $ Not (Hole h1),
-          to = \s -> sub s $ int 1 .-. sym2SoP (Hole h1),
-          sideCondition = vacuous
-        }
-    ]
 
 rulesIndexFn :: IndexFnM [Rule IndexFn Symbol IndexFnM]
 rulesIndexFn = do

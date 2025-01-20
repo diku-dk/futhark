@@ -15,11 +15,12 @@ import Futhark.Analysis.Proofs.AlgebraBridge.Translate
 import Futhark.Analysis.Proofs.AlgebraBridge.Util
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv, whenDebug)
-import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesSoP)
+import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook, vacuous)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF, toDNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
-import Futhark.Analysis.Proofs.Unify (Substitution, unify)
-import Futhark.SoP.SoP (SoP)
+import Futhark.Analysis.Proofs.Unify (Substitution, sub, unify)
+import Futhark.MonadFreshNames (newVName)
+import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (docStringW, pretty)
 
 -- | Simplify symbols using algebraic solver.
@@ -31,6 +32,38 @@ simplify = astMap m
         { mapOnSymbol = simplifySymbol . toCNF,
           mapOnSoP = simplifyAlgebra <=< applyRuleBook rulesSoP
         }
+
+    rulesSoP :: IndexFnM [Rule (SoP Symbol) Symbol IndexFnM]
+    rulesSoP = do
+      h1 <- newVName "h"
+      h2 <- newVName "h"
+      h3 <- newVName "h"
+      pure
+        [ Rule
+            { name = "⟦¬x⟧ => 1 - ⟦x⟧",
+              from = sym2SoP $ Not (Hole h1),
+              to = \s -> sub s $ int2SoP 1 .-. sym2SoP (Hole h1),
+              sideCondition = vacuous
+            },
+          Rule
+            { name = "Sum True",
+              from = sym2SoP $ Sum h1 (hole h2) (hole h3) (Bool True),
+              to = \s -> do
+                a <- sub s (hole h2)
+                b <- sub s (hole h3)
+                non_empty <- a $<= b
+                case non_empty of
+                  Yes -> pure $ b .-. a .+. int2SoP 1
+                  Unknown -> do
+                    empty <- a $> b
+                    case empty of
+                      Yes -> pure $ int2SoP 0
+                      Unknown -> sub s $ Sum h1 (hole h2) (hole h3) (Bool True),
+              sideCondition = vacuous
+            }
+        ]
+      where
+        hole = sym2SoP . Hole
 
     simplifyAlgebra :: SoP Symbol -> IndexFnM (SoP Symbol)
     simplifyAlgebra x = rollbackAlgEnv $ do
@@ -99,11 +132,7 @@ simplify = astMap m
       b <- solve relation
       case b of
         Yes -> pure $ Bool True
-        Unknown -> do
-          not_b <- solve (neg relation)
-          case not_b of
-            Yes -> pure $ Bool False
-            Unknown -> pure relation
+        Unknown -> pure relation
 
     -- Use Fourier-Motzkin elimination to determine the truth value
     -- of an expresion, if it can be determined in the given environment.
