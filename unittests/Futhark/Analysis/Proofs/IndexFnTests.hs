@@ -149,6 +149,14 @@ tests =
         ( pure $ \(i, n, xs, j) ->
             let xs_i = Idx (Hole xs) (sHole i)
              in [IndexFn
+                  { iterator = Empty,
+                    body =
+                      cases
+                        [ ( Bool True,
+                            sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (Idx (Hole xs) (sHole j)))
+                          )]
+                  },
+                 IndexFn
                   { iterator = Forall i (Iota (sHole n)),
                     body =
                       cases
