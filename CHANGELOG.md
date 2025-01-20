@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark eval`: any errors in the provided .fut file would cause a
   "file not found" error message.
 
+* Handling of module-dependent size expressions in type abbreviations
+  (#2209).
+
 ## [0.25.26]
 
 ### Fixed
