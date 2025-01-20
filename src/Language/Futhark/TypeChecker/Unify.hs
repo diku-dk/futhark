@@ -931,6 +931,7 @@ mustBeOneOf ts usage t = do
     Scalar (TypeVar _ (QualName [] v) [])
       | not $ isRigid' v -> linkVarToTypes usage v ts
     Scalar (Prim pt) | pt `elem` ts -> pure ()
+    Scalar (Refinement (Scalar (Prim pt)) _) | pt `elem` ts -> pure ()
     _ -> failure
   where
     failure =
