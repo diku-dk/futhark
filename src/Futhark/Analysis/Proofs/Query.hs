@@ -16,18 +16,19 @@ module Futhark.Analysis.Proofs.Query
   )
 where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, zipWithM)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
-import Data.List (partition)
+import Data.List (partition, tails)
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algDebugPrettyM, algebraContext, answerFromBool, assume, isTrue, ($/=), ($<), ($<=), ($==), ($>), ($>=))
+import Futhark.Analysis.Proofs.AlgebraBridge.Util (addRelSymbol)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (repDomain)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, rollbackAlgEnv)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (lookupRange)
@@ -111,6 +112,7 @@ data Property
     PermutationOfRange (SoP Symbol) (SoP Symbol)
   | -- For all k in Cat k _ _, prove property f(k).
     ForallSegments (VName -> Property)
+  | Injective
 
 data Order = LT | GT | LTE | GTE | Undefined
   deriving (Eq, Show)
@@ -118,6 +120,37 @@ data Order = LT | GT | LTE | GTE | Undefined
 prove :: Property -> IndexFn -> IndexFnM Answer
 prove (PermutationOf {}) _fn = undefined
 prove (PermutationOfZeroTo m) fn = prove (PermutationOfRange (int2SoP 0) m) fn
+prove Injective fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
+  let branches = casesToList cs
+  i <- newNameFromString "i"
+  j <- newNameFromString "j"
+  let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
+  let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
+
+  let (p_f, f) != (p_g, g) = rollbackAlgEnv $ do
+        -- Try to show: forall i /= j . f(i) /= g(j)
+        let case_i_lt_j = rollbackAlgEnv $ do
+              -- Case i < j => f(i) `rel` g(j).
+              addRelIterator iter_j
+              i +< j
+              assume (fromJust . justSym $ p_f @ i)
+              assume (fromJust . justSym $ p_g @ j)
+              (f @ i) $/= (g @ j)
+            case_i_gt_j = rollbackAlgEnv $ do
+              -- Case i > j => f(i) `rel` g(j):
+              addRelIterator iter_i
+              j +< i
+              assume (fromJust . justSym $ p_f @ i)
+              assume (fromJust . justSym $ p_g @ j)
+              (f @ i) $/= (g @ j)
+         in case_i_lt_j `andM` case_i_gt_j
+
+  -- NOTE could optimise this by sorting the distinct branches,
+  -- (just see how to do that below) but I don't think it's worth the added complexity.
+  allM [x != y | (x : ys) <- tails branches, y <- ys]
+    `andM` allM [x != x | x <- branches]
+  where
+    f @ x = rep (mkRep i0 (Var x)) f
 prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
   -- 1. Prove that each case is strictly monotonic.
   -- 2. Prove that all branches are within bounds (start, end - 1).

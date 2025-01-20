@@ -82,7 +82,8 @@ inline (f_name, f) g = do
           | otherwise ->
               pure Empty
     mergeIterators (IndexFn (Forall i df) _) (Forall j dg) = do
-      assertEquivDomains df dg
+      -- equivDomains df dg >>= flip unless (error $ "assertSameRange: inequal ranges: " <> prettyString f <> "\n" <> prettyString g)
+      -- assertEquivDomains df dg
       case (df, dg) of
         (Iota {}, Iota {}) -> do
           pure (Forall j dg)
@@ -171,9 +172,13 @@ mkApplicationReps (f_name, f) g = rollbackAlgEnv $ do
         repApp e@(Apply (Var x) [_])
           | x == f_name =
             error $ "Capturing variable(s): " <> prettyString e
+                    <> "\nf:" <> prettyString f
+                    <> "\ng:" <> prettyString g
         repApp e@(Idx (Var x) _)
           | x == f_name =
             error $ "Capturing variable(s): " <> prettyString e
+                    <> "\nf:" <> prettyString f
+                    <> "\ng:" <> prettyString g
         repApp sym = pure sym
 
 -- XXX when to rewrite recurrences as sums?

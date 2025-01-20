@@ -26,6 +26,18 @@ tests =
         )
         Yes,
       mkTest
+        "tests/indexfn/part2indices.fut"
+        ( \[_pivot, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
+            prove Injective fn
+        )
+        Yes,
+      mkTest
+        "tests/indexfn/part2indicesL.fut"
+        ( \[fn@(IndexFn (Forall _ _) _)] -> do
+            prove (ForallSegments $ const Injective) fn
+        )
+        Yes,
+      mkTest
         "tests/indexfn/dummyindices.fut"
         ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
             prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn

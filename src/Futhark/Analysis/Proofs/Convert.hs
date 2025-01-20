@@ -288,6 +288,7 @@ forward (E.AppExp (E.Index e_xs slice loc) _)
                   <> prettyString f_idx
                   <> "\nCASE f_idx: "
                   <> show n
+              debugPrintAlgEnv
               errorMsg loc $
                 "Unsafe indexing: "
                   <> showE e_idx
@@ -593,7 +594,7 @@ forward expr@(E.AppExp (E.Apply f args _) _)
           addRelIterator inds_iter
           seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
           p_desired_form :: Maybe (Substitution Symbol) <- unify p_seg (seg_delta :> int2SoP 0)
-          unless (isJust p_desired_form) $ error "p is not on desired form"
+          unless (isJust p_desired_form) $ error "scatter: p is not on desired form"
         -- Check that seg(0) = 0.
         -- (Not using CaseCheck as it has to hold outside case predicate.)
         let x `at_k` i = rep (mkRep k i) x
@@ -656,6 +657,8 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               let types = map snd pmap
               size_names <- mapM (fmap (>>= getVName) . sizeOfTypeBase) types
               parg_sizes <- mapM sizeOfDomain parg
+              debugPrettyM "size_names" size_names
+              debugPrettyM "parg_sizes" parg_sizes
               unless (map isJust size_names == map isJust parg_sizes) $
                 error "Internal error: sizes don't align."
               pure $ catMaybes $ zipMaybes size_names parg_sizes

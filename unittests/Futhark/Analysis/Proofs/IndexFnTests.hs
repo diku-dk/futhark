@@ -163,7 +163,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/part2indices.fut"
-        ( pure $ \(i, n, xs, j) ->
+        ( withDebug $ pure $ \(i, n, xs, j) ->
             let xs_i = Idx (Hole xs) (sHole i)
              in [ IndexFn
                     { iterator = Empty,
