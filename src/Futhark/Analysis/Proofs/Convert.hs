@@ -1,7 +1,7 @@
 module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, forM, forM_, unless, void, when, foldM_)
+import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when)
 import Data.Bifunctor
 import Data.Foldable (for_)
 import Data.List qualified as L
@@ -9,10 +9,10 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Debug.Trace (traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=), addRelSymbol)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, flattenCases, getCase, justSingleCase)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repIndexFn, repCases)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
@@ -121,6 +121,8 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
   forM_ params addTypeRefinement
   forM_ params addBooleanNames
   forM_ params addSizeVariables
+  debugM $ "params" <> show params
+  debugPrintAlgEnv
   indexfns <- forward body >>= mapM rewrite >>= bindfn vn
   insertTopLevel vn (params, indexfns)
   -- _ <- algebraContext indexfn $ do
@@ -132,10 +134,21 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
     checkRefinement indexfns decl@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
       whenDebug . traceM $ "Need to show: " <> prettyString decl
       let param_names = map fst $ mconcat $ map patternMapAligned lam_params
+      postconds_for_debugging <- forward lam_body
+      debugM $
+        "Postconditions before substituting in results:\n  "
+          <> prettyString postconds_for_debugging
       forM_ (zip param_names indexfns) $ \(nm, fn) ->
         when (isJust nm) . void $ bindfn (fromJust nm) [fn]
-      postconds <- forward lam_body
-      debugM $ "Postcondition after substituting in results: " <> prettyString postconds
+      postconds_not_rewritten <- forward lam_body
+      debugM $
+        "Postconditions after substituting in results:\n  "
+          <> prettyString postconds_not_rewritten
+      postconds <- mapM rewrite postconds_not_rewritten
+      debugM $
+        "Postconditions after rewrites:\n  "
+          <> prettyString postconds
+      debugPrintAlgEnv
       -- let fns = map (\(x,y) -> (fromJust x, y)) $ filter (isJust . fst) (zip param_names indexfns)
       -- postconds' <- mapM (flip substParams fns) postconds
       -- debugM $ "Postcondition before substituting in results: " <> prettyString postconds
@@ -366,7 +379,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   where
     getPredicate n fn = fst . getCase n $ body fn
 forward (E.Lambda _ _ _ _ loc) =
-  errorMsg loc "Unapplied anonymous are not supported."
+  errorMsg loc "Unapplied anonymous functions are not supported."
 forward expr@(E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
@@ -668,10 +681,10 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               "Size variable replacement " <> prettyString size_rep
             -- Check that preconditions are satisfied.
             foldM_
-              (\args_in_scope (pat, arg) -> do
-                let scope = args_in_scope <> arg
-                checkPrecondition size_rep scope pat
-                pure scope
+              ( \args_in_scope (pat, arg) -> do
+                  let scope = args_in_scope <> arg
+                  checkPrecondition size_rep scope pat
+                  pure scope
               )
               []
               (zip pats actual_args)
