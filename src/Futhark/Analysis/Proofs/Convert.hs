@@ -133,11 +133,6 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
   where
     checkRefinement indexfns decl@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
       whenDebug . traceM $ "Need to show: " <> prettyString decl
-      postconds_for_debugging <- forward lam_body
-      debugM $
-        "Post-condition as index function:\n  "
-          <> prettyString postconds_for_debugging
-
       let param_names = map fst $ mconcat $ map patternMapAligned lam_params
       forM_ (zip param_names indexfns) $ \(nm, fn) ->
         when (isJust nm) . void $ bindfn (fromJust nm) [fn]
