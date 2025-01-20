@@ -168,10 +168,12 @@ mkApplicationReps (f_name, f) g = rollbackAlgEnv $ do
           | x == f_name,
             nonCapturingArg arg =
               Var <$> remember (Idx (Var x) arg)
-        repApp (Apply (Var x) [_])
-          | x == f_name = error "Capturing variable(s)"
-        repApp (Idx (Var x) _)
-          | x == f_name = error "Capturing variable(s)"
+        repApp e@(Apply (Var x) [_])
+          | x == f_name =
+            error $ "Capturing variable(s): " <> prettyString e
+        repApp e@(Idx (Var x) _)
+          | x == f_name =
+            error $ "Capturing variable(s): " <> prettyString e
         repApp sym = pure sym
 
 -- XXX when to rewrite recurrences as sums?

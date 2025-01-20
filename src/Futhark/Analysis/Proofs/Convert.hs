@@ -133,25 +133,18 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
   where
     checkRefinement indexfns decl@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
       whenDebug . traceM $ "Need to show: " <> prettyString decl
-      let param_names = map fst $ mconcat $ map patternMapAligned lam_params
       postconds_for_debugging <- forward lam_body
       debugM $
-        "Postconditions before substituting in results:\n  "
+        "Post-condition as index function:\n  "
           <> prettyString postconds_for_debugging
+
+      let param_names = map fst $ mconcat $ map patternMapAligned lam_params
       forM_ (zip param_names indexfns) $ \(nm, fn) ->
         when (isJust nm) . void $ bindfn (fromJust nm) [fn]
-      postconds_not_rewritten <- forward lam_body
+      postconds <- forward lam_body >>= mapM rewrite
       debugM $
-        "Postconditions after substituting in results:\n  "
-          <> prettyString postconds_not_rewritten
-      postconds <- mapM rewrite postconds_not_rewritten
-      debugM $
-        "Postconditions after rewrites:\n  "
+        "Post-conditions after substituting in results:\n  "
           <> prettyString postconds
-      debugPrintAlgEnv
-      -- let fns = map (\(x,y) -> (fromJust x, y)) $ filter (isJust . fst) (zip param_names indexfns)
-      -- postconds' <- mapM (flip substParams fns) postconds
-      -- debugM $ "Postcondition before substituting in results: " <> prettyString postconds
       answer <- askRefinements postconds
       case answer of
         Yes -> do
@@ -363,14 +356,11 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
           ]
       )
       @ (cond, f_c)
-  debugPrettyM "E.If fn_if:\n" fn_if
   (ts, fs) <- algebraContext fn_if $ do
     ts <- rollbackAlgEnv $ do
-      debugPrettyM "E.If true branch: assuming " (getPredicate 0 fn_if)
       assume (getPredicate 0 fn_if)
       forward e_t
     fs <- rollbackAlgEnv $ do
-      debugPrettyM "E.If false branch: assuming " (getPredicate 1 fn_if)
       assume (getPredicate 1 fn_if)
       forward e_f
     pure (ts, fs)
@@ -661,8 +651,6 @@ forward expr@(E.AppExp (E.Apply f args _) _)
             -- Align parameters and arguments. Each parameter is a "pattern";
             -- a list of VNames (singleton for a variable; non-singleton for tuples).
             actual_args <- forM (zip pmaps pargs) $ \(pmap, parg) -> do
-              debugPrettyM "pmap" pmap
-              debugPrettyM "parg" parg
               unless (length pmap == length parg) $
                 errorMsg loc "Internal error: actual argument does not match parameter pattern."
               let pnames = map fst pmap
@@ -905,14 +893,12 @@ bindLambdaBodyParams params = do
   fns <- renamesM (map snd params)
   let iter@(Forall i _) = maximum (map iterator fns)
   forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
-    debugPrettyM (prettyString paramName) fn
     vn <- newVName "tmp_fn"
     IndexFn tmp_iter cs <-
       IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
     -- Renaming k bound in `tmp_iter` to k bound in `iter`.
     let k_rep =
           fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
-    unless (null k_rep) $ debugPrettyM "k_rep" k_rep
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
   pure iter
 
