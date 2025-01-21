@@ -23,7 +23,7 @@ import Futhark.Analysis.Proofs.Unify (FreeVariables (..), Renameable (..), Repla
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames)
-import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.+.), (.-.))
+import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.+.), (.-.), Free (..))
 import Futhark.Util.Pretty (Pretty (pretty), align, comma, commastack, hang, indent, line, parens, punctuate, sep, softline, stack, (<+>))
 import Language.Futhark (VName)
 
@@ -101,6 +101,10 @@ instance FreeVariables Domain where
 
 instance FreeVariables (Cases Symbol (SoP Symbol)) where
   fv cs = mconcat $ map (\(c, v) -> fv c <> fv v) $ casesToList cs
+
+instance FreeVariables IndexFn where
+  fv (IndexFn Empty cs) = fv cs
+  fv (IndexFn (Forall _ dom) cs) = fv dom <> fv cs
 
 -------------------------------------------------------------------------------
 -- Unification.

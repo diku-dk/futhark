@@ -40,7 +40,7 @@ import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (Pretty (pretty), braces, commastack)
 import Language.Futhark (VName)
 
-class (Ord a) => FreeVariables a where
+class FreeVariables a where
   fv :: a -> S.Set VName
 
 -- | Produce a fresh name.
@@ -184,7 +184,7 @@ instance (Ord u, Renameable u) => Renameable (SoP u) where
 instance FreeVariables VName where
   fv = S.singleton
 
-instance (FreeVariables u) => FreeVariables (SoP u) where
+instance (Ord u, FreeVariables u) => FreeVariables (SoP u) where
   fv x = S.unions [fv t | (ts, _) <- sopToLists x, t <- ts]
 
 instance (Ord u, Replaceable u u) => Replaceable (Term u, Integer) u where
