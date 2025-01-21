@@ -97,27 +97,48 @@ instance ASTFoldable Symbol (SoP Symbol) where
     foldM (astFold m) acc . concatMap fst . sopToLists
 
 instance ASTFoldable Symbol Symbol where
-  astFold m acc (Sum _ lb ub x) =
-    astFold m acc lb >>= astFoldF m ub >>= astFoldF m x
-  astFold m acc (Idx xs i) =
-    astFold m acc xs >>= astFoldF m i
-  astFold m acc (Apply f xs) =
-    astFold m acc f >>= \a -> foldM (astFold m) a xs
-  astFold m acc (Not x) =
-    astFold m acc x
-  astFold m acc (x :== y) =
-    astFold m acc x >>= astFoldF m y
-  astFold m acc (x :< y) =
-    astFold m acc x >>= astFoldF m y
-  astFold m acc (x :> y) =
-    astFold m acc x >>= astFoldF m y
-  astFold m acc (x :>= y) =
-    astFold m acc x >>= astFoldF m y
-  astFold m acc (x :<= y) =
-    astFold m acc x >>= astFoldF m y
-  astFold m acc (x :&& y) =
-    astFold m acc x >>= astFoldF m y
-  astFold m acc (x :|| y) =
-    astFold m acc x >>= astFoldF m y
-  -- Recurr, Var, Hole
-  astFold m acc sym = foldOnSymbol m acc sym
+  astFold m acc e@(Sum _ lb ub x) =
+    astFold m acc lb >>= astFoldF m ub >>= astFoldF m x >>= flip (foldOnSymbol m) e
+  astFold m acc e@(Idx xs i) =
+    astFold m acc xs >>= astFoldF m i >>= flip (foldOnSymbol m) e
+  astFold m acc e@(Apply f xs) =
+    astFold m acc f >>= \a -> foldM (astFold m) a xs >>= flip (foldOnSymbol m) e
+  astFold m acc e@(Not x) =
+    astFold m acc x >>= flip (foldOnSymbol m) e
+  astFold m acc e@(x :== y) =
+    astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
+  astFold m acc e@(x :/= y) =
+    astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
+  astFold m acc e@(x :< y) =
+    astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
+  astFold m acc e@(x :> y) =
+    astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
+  astFold m acc e@(x :>= y) =
+    astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
+  astFold m acc e@(x :<= y) =
+    astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
+  astFold m acc e@(x :&& y) =
+    astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
+  astFold m acc e@(x :|| y) =
+    astFold m acc x >>= astFoldF m y >>= flip (foldOnSymbol m) e
+  astFold m acc Recurrence = foldOnSymbol m acc Recurrence
+  astFold m acc (Var x) = foldOnSymbol m acc (Var x)
+  astFold m acc (Hole x) = foldOnSymbol m acc (Hole x)
+  astFold m acc (Bool x) = foldOnSymbol m acc (Bool x)
+
+instance ASTFoldable Symbol IndexFn where
+  astFold m acc (IndexFn dom body) = astFold m acc dom >>= astFoldF m body
+
+instance ASTFoldable Symbol Iterator where
+  astFold m acc (Forall _ dom) = astFold m acc dom
+  astFold _ acc Empty = pure acc
+
+instance ASTFoldable Symbol Domain where
+  astFold m acc (Iota n) = astFold m acc n
+  astFold m acc (Cat _ n b) = astFold m acc n >>= astFoldF m b
+
+instance ASTFoldable Symbol (Cases Symbol (SoP Symbol)) where
+  astFold m acc cs = do
+    let (ps, qs) = unzip $ casesToList cs
+    acc' <- foldM (astFold m) acc ps
+    foldM (astFold m) acc' qs
