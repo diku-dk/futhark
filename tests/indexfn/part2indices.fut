@@ -30,16 +30,25 @@ def slice xs (a: {i64 | (>= 0)}) (b: {i64 | (<= length xs)}) =
 
 -- TODO fix iota 0; think it causes troubles when substituted in
 
+-- These should all pass.
+def sanity_check1 n = injectiveOn (0, n) (iota n)
+def sanity_check2 n = injectiveOn (0, n-1) (iota n)
+def sanity_check3 n = injectiveOn (1, n) (replicate n 0)
+
+-- TODO this fails because injectiveOn is checked in forward.
+-- def permutation_of_indices [n]
+--   (xs: {[n]i64 | \xs ->
+--       and (map (\i -> 0 <= i && i < n) xs)
+--         && injectiveOn (0, n) xs
+--   }) = 1
+
 -- def part2Indices [n] 't (conds: [n]bool) : {[n]i64 | \res-> permutationOf res (0...n-1)} =
 def part2Indices [n]
   (conds: [n]bool)
   : {(i64, [n]i64) | \(num_true, inds) ->
       num_true == sum_i64 (map (\c -> if c then 1 else 0) conds)
       && and (map (\i -> 0 <= i && i < n) inds)
-      -- && scatter inds
-      -- && injective inds
-      -- && injective_on (0, num_true) (slice inds 0 num_true)
-      -- && injective_on (num_true, n) (slice inds num_true n)
+      && injectiveOn (0, n) inds
     } =
   let tflgs = map (\c -> if c then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs
@@ -49,6 +58,30 @@ def part2Indices [n]
   let indsF = map (\t -> t +lst) tmp
   let inds  = map3 (\ c indT indF -> if c then indT-1 else indF-1) conds indsT indsF
   in  (lst, inds)
+
+-- def lol i j = i +< j
+-- def injective [n]
+--   (i : {i64 | \i -> 0 <= i && i < n})
+--   (j : {i64 | (+< i)})
+--   (xs: [n]i64) =
+--     xs[i] != xs[j]
+
+
+-- def injective [n] (i: {i64 | \i -> 0 <= i && i < n}) (j: {i64 | \j -> i < j && j < n}) (xs: [n]i64) =
+--   xs[i] != xs[j]
+
+-- TODO currently not able to show this:
+-- def proof_part2indices_is_injective [n]
+--   -- ((i,j): {(i64, i64) | \(i,j) -> 0 <= i && i < j && j < n})
+--   i (j: {i64 | \j -> 0 <= i && i < j && j < n})
+--   (conds: [n]bool)
+--   : {(i64, [n]i64) | \(_, inds) -> inds[i] != inds[j] }=
+--   part2Indices conds
+
+
+
+
+ 
 
 -- def part2Indices_ext [n] conds
 --   : {(i64, [n]bool) | \(num_true, inds) ->

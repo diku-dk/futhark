@@ -13,6 +13,7 @@ module Futhark.Analysis.Proofs.Query
     foreachCase,
     askRefinement,
     askRefinements,
+    (+<),
   )
 where
 
@@ -26,7 +27,7 @@ import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algDe
 import Futhark.Analysis.Proofs.AlgebraBridge.Util (addRelSymbol)
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
-import Futhark.Analysis.Proofs.IndexFnPlus (repDomain)
+import Futhark.Analysis.Proofs.IndexFnPlus (repDomain, domainEnd)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
@@ -64,7 +65,7 @@ askQ query fn case_idx = algebraContext fn $ do
   case query of
     CaseCheck transf -> do
       debugPrettyM "askQ check: " (transf q)
-      check (transf q)
+      whenUnknown debugPrintAlgEnv $ check (transf q)
     CaseIsMonotonic dir ->
       debugT "  " $
         case iterator fn of
@@ -85,6 +86,12 @@ askQ query fn case_idx = algebraContext fn $ do
             where
               f @ x = rep (mkRep i x) f
           Empty -> undefined
+
+whenUnknown effect m = do
+  ans <- m
+  case ans of
+    Yes -> pure ans
+    Unknown -> effect >> pure ans
 
 check :: Symbol -> IndexFnM Answer
 check (a :&& b) = check a `andM` check b
@@ -112,6 +119,7 @@ data Property
     PermutationOfRange (SoP Symbol) (SoP Symbol)
   | -- For all k in Cat k _ _, prove property f(k).
     ForallSegments (VName -> Property)
+  | InjectiveOn (SoP Symbol) (SoP Symbol)
   | Injective
 
 data Order = LT | GT | LTE | GTE | Undefined
@@ -120,30 +128,46 @@ data Order = LT | GT | LTE | GTE | Undefined
 prove :: Property -> IndexFn -> IndexFnM Answer
 prove (PermutationOf {}) _fn = undefined
 prove (PermutationOfZeroTo m) fn = prove (PermutationOfRange (int2SoP 0) m) fn
-prove Injective fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
+prove Injective fn@(IndexFn (Forall _ dom) _) =
+  prove (InjectiveOn (int2SoP 0) (domainEnd dom)) fn
+prove (InjectiveOn start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
   let branches = casesToList cs
   i <- newNameFromString "i"
   j <- newNameFromString "j"
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
   let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
+  debugPrettyM "Showing i /= j . f(i) /= g(j)" fn
   let (p_f, f) != (p_g, g) = rollbackAlgEnv $ do
+        debugPrettyM "  " (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
+        debugPrettyM "    => " ((f @ i) :/= (g @ j))
         -- Try to show: forall i /= j . f(i) /= g(j)
         let case_i_lt_j = rollbackAlgEnv $ do
               -- Case i < j => f(i) `rel` g(j).
               addRelIterator iter_j
               i +< j
-              assume (fromJust . justSym $ p_f @ i)
-              assume (fromJust . justSym $ p_g @ j)
+              debugPrintAlgEnv
+              assume (sop2Symbol $ p_f @ i)
+              assume (sop2Symbol $ p_g @ j)
+
               (f @ i) $/= (g @ j)
+              `orM`
+              check (f @ i :< start :|| end :< f @ i
+                      :||
+                      g @ j :< start :|| end :< g @ j)
             case_i_gt_j = rollbackAlgEnv $ do
               -- Case i > j => f(i) `rel` g(j):
               addRelIterator iter_i
               j +< i
-              assume (fromJust . justSym $ p_f @ i)
-              assume (fromJust . justSym $ p_g @ j)
+              assume (sop2Symbol $ p_f @ i)
+              assume (sop2Symbol $ p_g @ j)
+
               (f @ i) $/= (g @ j)
-         in case_i_lt_j `andM` case_i_gt_j
+              `orM`
+              check (f @ i :< start :|| end :< f @ i
+                      :||
+                      g @ j :< start :|| end :< g @ j)
+         in case_i_lt_j `orM` case_i_gt_j
 
   -- NOTE could optimise this by sorting the distinct branches,
   -- (just see how to do that below) but I don't think it's worth the added complexity.
@@ -293,4 +317,5 @@ orM m1 m2 = do
     Unknown -> m2
 
 allM :: [IndexFnM Answer] -> IndexFnM Answer
-allM = foldl1 andM
+allM [] = pure Yes
+allM xs = foldl1 andM xs

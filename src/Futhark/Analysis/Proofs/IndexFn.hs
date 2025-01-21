@@ -52,9 +52,6 @@ getCase n (Cases cs) = NE.toList cs !! n
 getPredicates :: IndexFn -> [Symbol]
 getPredicates (IndexFn _ cs) = map fst $ casesToList cs
 
-getCases :: IndexFn -> Cases Symbol (SoP Symbol)
-getCases (IndexFn _ cs) = cs
-
 justSingleCase :: IndexFn -> Maybe (SoP Symbol)
 justSingleCase f
   | [(Bool True, f_val)] <- casesToList $ body f =

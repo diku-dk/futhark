@@ -14,7 +14,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, flattenCases, getCase, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes)
+import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes, Property (Injective, InjectiveOn), prove, (+<))
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
@@ -115,13 +115,16 @@ mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 -- toplevel_indexfns
 mkIndexFnValBind :: E.ValBind -> IndexFnM [IndexFn]
+-- mkIndexFnValBind (E.ValBind _ vn _ _ _ _ _ _ _ _)
+--   | and (zipWith (==) (E.baseString vn) "PROOF_") = do
+--     debugM $ "Skipping proof: " <> prettyString vn
+--     pure []
 mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
   clearAlgEnv
   whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
   forM_ params addTypeRefinement
   forM_ params addBooleanNames
   forM_ params addSizeVariables
-  debugM $ "params" <> show params
   debugPrintAlgEnv
   indexfns <- forward body >>= mapM rewrite >>= bindfn vn
   insertTopLevel vn (params, indexfns)
@@ -139,7 +142,7 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
       postconds <- forward lam_body >>= mapM rewrite
       debugM $
         "Post-conditions after substituting in results:\n  "
-          <> prettyString postconds
+          <> prettyStr postconds
       answer <- askRefinements postconds
       case answer of
         Yes -> do
@@ -327,6 +330,7 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
           E.Times -> doOp (~*~)
           E.Minus -> doOp (~-~)
           E.Equal -> doOp (~==~)
+          E.NotEqual -> doOp (~/=~)
           E.Less -> doOp (~<~)
           E.Greater -> doOp (~>~)
           E.Leq -> doOp (~<=~)
@@ -366,7 +370,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
     getPredicate n fn = fst . getCase n $ body fn
 forward (E.Lambda _ _ _ _ loc) =
   errorMsg loc "Unapplied anonymous functions are not supported."
-forward expr@(E.AppExp (E.Apply f args _) _)
+forward expr@(E.AppExp (E.Apply f args loc) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params lam_body _ _ _ : args' <- getArgs args = do
@@ -629,6 +633,20 @@ forward expr@(E.AppExp (E.Apply f args _) _)
                       ]
                 }
         substParams fn [(vals_hole, vals), (dest_hole, dest)]
+  | Just "injectiveOn" <- getFun f,
+    [e_rng, e_xs] <- getArgs args = do
+      rng <- forward e_rng
+      case rng of
+        [f_start, f_end]
+          | Just start <- justSingleCase f_start,
+            Just end <- justSingleCase f_end -> do
+              xss <- forward e_xs
+              debugPrettyM "xss" xss
+              forM_ xss $ \xs -> do
+                ans <- prove (InjectiveOn start end) xs
+                unless (isYes ans) $ errorMsg loc "Failed to show injectiveOn."
+              pure [IndexFn Empty (cases [(Bool True, int2SoP 1)])]
+        _ -> undefined
   -- Applying other functions, for instance, user-defined ones.
   | (E.Var (E.QualName [] g) info loc) <- f,
     args' <- getArgs args,
@@ -676,6 +694,16 @@ forward expr@(E.AppExp (E.Apply f args _) _)
               (zip pats actual_args)
             -- The resulting index fn will be fully applied, so we can rewrite recurrences here.
             -- (Which speeds up things by eliminating cases.)
+            -- let y = repIndexFn size_rep indexfn
+            -- debugPrettyM "Use: template fn" (repIndexFn size_rep indexfn)
+            -- _ <- foldM (\acc arg -> do
+            --   y' <- substParams acc [arg]
+            --   debugPrettyM "    Use: sub in " arg
+            --   debugPrettyM "    ==== " y'
+            --   pure y'
+            --   )
+            --   y
+            --   (mconcat actual_args) 
             debugT' "Result: " $
               substParams (repIndexFn size_rep indexfn) (mconcat actual_args)
                 >>= rewrite
@@ -743,6 +771,9 @@ sVar = sym2SoP . Var
 (~==~) :: Symbol -> Symbol -> SoP Symbol
 x ~==~ y = sym2SoP $ sym2SoP x :== sym2SoP y
 
+(~/=~) :: Symbol -> Symbol -> SoP Symbol
+x ~/=~ y = sym2SoP $ sym2SoP x :/= sym2SoP y
+
 (~<~) :: Symbol -> Symbol -> SoP Symbol
 x ~<~ y = sym2SoP $ sym2SoP x :< sym2SoP y
 
@@ -792,8 +823,10 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) loc)
             "<" -> (:<)
             "<=" -> (:<=)
             "==" -> (:==)
+            "!=" -> (:/=)
             _ -> undefined
       ys <- forwardRefinementExp e_y
+      debugPrintAlgEnv
       -- Create check as an index function whose cases contain the refinement.
       let check =
             mkCheck $

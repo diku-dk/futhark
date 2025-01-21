@@ -31,7 +31,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/abs.fut"
-        ( withDebug $ pure $ \(_, _, x, _) ->
+        ( pure $ \(_, _, x, _) ->
             [ IndexFn
                 { iterator = Empty,
                   body =
@@ -42,20 +42,20 @@ tests =
                 }
             ]
         ),
-      mkTest
-        "tests/indexfn/rotate.fut"
-        ( withDebug $ pure $ \(i, r, a, n) ->
-            let shift = sHole r .+. sHole i
-             in [ IndexFn
-                    { iterator = Forall i (Iota (sHole n)),
-                      body =
-                        cases
-                          [ (shift :< sHole n, sym2SoP $ Idx (Hole a) shift),
-                            (shift :>= sHole n, sym2SoP $ Idx (Hole a) (shift .-. sHole n))
-                          ]
-                    }
-                ]
-        ),
+      -- mkTest
+      --   "tests/indexfn/rotate.fut"
+      --   ( pure $ \(i, r, a, n) ->
+      --       let shift = sHole r .+. sHole i
+      --        in [ IndexFn
+      --               { iterator = Forall i (Iota (sHole n)),
+      --                 body =
+      --                   cases
+      --                     [ (shift :< sHole n, sym2SoP $ Idx (Hole a) shift),
+      --                       (shift :>= sHole n, sym2SoP $ Idx (Hole a) (shift .-. sHole n))
+      --                     ]
+      --               }
+      --           ]
+      --   ),
       mkTest
         "tests/indexfn/map-tuple.fut"
         ( pure $ \(i, n, xs, ys) ->

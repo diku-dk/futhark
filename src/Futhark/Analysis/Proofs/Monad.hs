@@ -23,6 +23,7 @@ module Futhark.Analysis.Proofs.Monad
     getMem,
     remember,
     forget,
+    prettyStr,
   )
 where
 
@@ -165,6 +166,9 @@ debugT' msg m = do
 debugPrettyM :: (Pretty a) => String -> a -> IndexFnM ()
 debugPrettyM msg x = do
   whenDebug $ traceM $ docStringW 110 $ "🪲 " <> pretty msg <> " " <> pretty x
+
+prettyStr :: Pretty a => a -> String
+prettyStr x = docStringW 110 (pretty x)
 
 debugPrintAlgEnv :: IndexFnM ()
 debugPrintAlgEnv = do

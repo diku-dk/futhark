@@ -27,8 +27,15 @@ tests =
         Yes,
       mkTest
         "tests/indexfn/part2indices.fut"
-        ( \[_pivot, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
+        ( \[_pivot, fn@(IndexFn (Forall _ (Iota _)) _)] -> do
             prove Injective fn
+        )
+        Yes,
+      mkTest
+        "tests/indexfn/part2indices.fut"
+        ( \[_pivot, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
+            debugOn
+            prove (InjectiveOn (int2SoP 0) (int2SoP 3)) fn
         )
         Yes,
       mkTest
