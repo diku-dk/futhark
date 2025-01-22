@@ -17,6 +17,7 @@ import Futhark.Util.Pretty
 import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import qualified Data.Map as M
+import Futhark.SoP.Refine (addRel)
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"
@@ -643,6 +644,47 @@ tests =
               addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
               getRanges
           ),
+      testCase "Injective 1 (part2indices)" $
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              vn_conds <- newNameFromString "conds"
+              let conds = POR (S.singleton vn_conds)
+              -- \a b -> ∑conds[a : b]
+              let sum_conds a b = sym2SoP $ Sum conds a b
+              -- Ranges
+              addRel $
+                int 0 :<=: sVar vn_conds
+                  :&&: int 2 :<=: sVar n
+                  :&&: int 0 :<=: sVar i :&&: sVar i :<: sVar n
+
+              (int 1 .+. sVar i .+. sum_conds (int 2 .+. sVar i) (sVar n .-. int 1))
+                FM.$/=$ sum_conds (int 0) (sVar i)
+          )
+          @??= True,
+      testCase "Injective 2 (part2indices)" $
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              vn_conds <- newNameFromString "conds"
+              let conds = POR (S.singleton vn_conds)
+              -- \s -> ∑shpª₃₃₇₈₀[0 : s]
+              let sum_conds a b = sym2SoP $ Sum conds a b
+              -- Ranges (in order)
+              addRel $
+                int 0 :<=: sVar vn_conds
+                  :&&: int 2 :<=: sVar n
+                  :&&: int 0 :<=: sVar i :&&: sVar i :<: sVar n
+              -- Add equivalence that makes this true.
+              addEquiv (Idx conds (int 1 .+. sVar i)) (int 0)
+
+              (sVar i .+. sum_conds (int 1 .+. sVar i) (sVar n .-. int 1))
+                FM.$/=$ (int 1 .+. sVar i .+. sum_conds (int 2 .+. sVar i) (sVar n .-. int 1))
+
+          )
+          @??= True,
       --
       testCase "FME1" $
         run
