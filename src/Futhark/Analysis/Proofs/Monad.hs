@@ -24,6 +24,9 @@ module Futhark.Analysis.Proofs.Monad
     remember,
     forget,
     prettyStr,
+    -- withPreludeEffects,
+    -- getUsePreludeEffects,
+    warningString,
   )
 where
 
@@ -51,6 +54,7 @@ data VEnv = VEnv
     indexfns :: M.Map VName [IndexFn],
     toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn]),
     mem :: M.Map Symbol VName,
+    -- usePreludeEffects :: Bool,
     debug :: Bool
   }
 
@@ -87,6 +91,20 @@ getIndexFns = gets indexfns
 
 getTopLevelIndexFns :: IndexFnM (M.Map VName ([E.Pat E.ParamType], [IndexFn]))
 getTopLevelIndexFns = gets toplevel
+
+-- getUsePreludeEffects :: IndexFnM Bool
+-- getUsePreludeEffects =
+--   gets usePreludeEffects
+
+-- -- Enables checks on special prelude functions
+-- -- that behave differently during refinement checking.
+-- withPreludeEffects :: MonadState VEnv m => m b -> m b
+-- withPreludeEffects m = do
+--   b <- gets usePreludeEffects
+--   modify (\s -> s {usePreludeEffects = True})
+--   res <- m
+--   modify (\s -> s {usePreludeEffects = b})
+--   pure res
 
 runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
@@ -191,3 +209,6 @@ withoutDebug f = do
   x <- f
   modify (\s -> s {debug = toggle})
   pure x
+
+warningString :: String -> String
+warningString s = "\ESC[93m" <> s <> "\ESC[0m"
