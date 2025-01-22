@@ -14,7 +14,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, flattenCases, getCase, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes, Property (Injective, InjectiveOn), prove, (+<))
+import Futhark.Analysis.Proofs.Query (Answer (..), Property (Injective, InjectiveOn), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes, prove)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
@@ -24,7 +24,7 @@ import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addProperty)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
-import Futhark.Util.Pretty (prettyString)
+import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
@@ -637,20 +637,51 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
     [_, e] <- getArgs args = do
       -- No-op.
       forward e
+  | Just "injective" <- getFun f,
+    [e_xs] <- getArgs args = do
+      xss <- forward e_xs
+      forM xss $ \xs -> do
+        fromPreludeEffect loc expr xs $ prove Injective xs
   | Just "injectiveOn" <- getFun f,
     [e_rng, e_xs] <- getArgs args = do
       rng <- forward e_rng
       case rng of
-        [f_start, f_end]
-          | Just start <- justSingleCase f_start,
-            Just end <- justSingleCase f_end -> do
-              xss <- forward e_xs
-              debugPrettyM "xss" xss
-              forM_ xss $ \xs -> do
-                ans <- prove (InjectiveOn start end) xs
-                unless (isYes ans) $ errorMsg loc "Failed to show injectiveOn."
-              pure [IndexFn Empty (cases [(Bool True, int2SoP 1)])]
+        [IndexFn Empty cs_start, IndexFn Empty cs_end] -> do
+          xss <- forward e_xs
+          let start = flattenCases cs_start
+          let end = flattenCases cs_end
+          forM xss $ \xs -> do
+            fromPreludeEffect loc expr xs $ prove (InjectiveOn start end) xs
         _ -> undefined
+  | Just "and" <- getFun f,
+    [e_xs] <- getArgs args = do
+      -- No-op: The argument e_xs is a boolean array; each branch will
+      -- be checked in refinements.
+      -- XXX but we lose information about iterator at check site, hm...
+      xss <- forward e_xs
+      forM xss $ \xs -> do
+        -- It's easier to do check here than after converting xss into
+        -- a reduce.
+        fromPreludeEffect loc expr xs $ askRefinement xs
+  -- _ -> do
+  --   emitWarning
+  --   let Forall _ dom = iterator xs -- e_xs is array type.
+  --   let n = domainEnd dom
+  --   j <- newVName "j"
+  --   vn <- newVName "and_xs"
+  --   let summation = Sum j (int2SoP 0) n (Idx (Var vn) (sym2SoP $ Var j))
+  --   IndexFn
+  --     { iterator = Empty,
+  --       body = cases [(Bool True, sym2SoP $ n :== sym2SoP summation)]
+  --     }
+  --     @ (vn, xs)
+  --   where
+  --     emitWarning =
+  --       warningMsg loc $
+  --         "Failed to simplify: "
+  --           <> prettyString expr
+  --           <> "\nIndex function:\n"
+  --           <> prettyString xs
   -- Applying other functions, for instance, user-defined ones.
   | (E.Var (E.QualName [] g) info loc) <- f,
     args' <- getArgs args,
@@ -948,3 +979,16 @@ quantifiedBy iter m =
   rollbackAlgEnv $ do
     addRelIterator iter
     m
+
+fromPreludeEffect :: (Monad m, E.Located a1, Pretty a2, Pretty a3) => a1 -> a2 -> a3 -> m Answer -> m IndexFn
+fromPreludeEffect loc expr fn m = do
+  ans <- m
+  case ans of
+    Yes ->
+      pure $ IndexFn Empty (cases [(Bool True, int2SoP 1)])
+    _ ->
+      errorMsg loc $
+        "Failed to show: "
+          <> prettyString expr
+          <> "\nIndex function:\n"
+          <> prettyString fn
