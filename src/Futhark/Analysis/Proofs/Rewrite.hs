@@ -123,7 +123,6 @@ rewrite_ fn@(IndexFn it xs) = normalizeIndexFn =<< simplifyIndexFn
           -- Make sure that cases predicates still partition the domain (disjunction is a tautology).
           let q = foldl (:||) (Bool False) $ map fst unreachables
           mapM (\(p, v) -> (,v) <$> rewrite (p :|| q)) reachables
-        -- XXX simplify the expected part2L test; e.g., sum i+1 ... interval end . csL; removal of two first cases
         _ -> pure cs
 
 rewriteWithoutRules :: IndexFn -> IndexFnM IndexFn
