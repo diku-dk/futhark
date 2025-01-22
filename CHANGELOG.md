@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Handling of module-dependent size expressions in type abbreviations
   (#2209).
 
+* A `let`-bound size would mistakenly be in scope of the bound
+  expression (#2210).
+
 ## [0.25.26]
 
 ### Fixed
