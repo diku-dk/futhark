@@ -633,6 +633,10 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
                       ]
                 }
         substParams fn [(vals_hole, vals), (dest_hole, dest)]
+  | Just "sized" <- getFun f,
+    [_, e] <- getArgs args = do
+      -- No-op.
+      forward e
   | Just "injectiveOn" <- getFun f,
     [e_rng, e_xs] <- getArgs args = do
       rng <- forward e_rng
