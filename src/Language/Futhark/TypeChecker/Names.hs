@@ -338,8 +338,8 @@ resolveAppExp (Match e cases loc) =
       resolvePat p $ \p' -> CasePat p' <$> resolveExp body <*> pure cloc
 resolveAppExp (LetPat sizes p e1 e2 loc) = do
   checkForDuplicateNames (map sizeBinderToParam sizes) [p]
+  e1' <- resolveExp e1
   resolveSizes sizes $ \sizes' -> do
-    e1' <- resolveExp e1
     resolvePat p $ \p' -> do
       e2' <- resolveExp e2
       pure $ LetPat sizes' p' e1' e2' loc
