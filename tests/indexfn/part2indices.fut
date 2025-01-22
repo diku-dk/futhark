@@ -6,49 +6,59 @@ def length [n] 't (_: [n]t) = n
 def sum [n] (xs: [n]i64) =
   if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
-def and xs =
-  length xs == sum (map (\x -> if x then 1 else 0) xs)
-
-def all 't (p: t -> bool) (xs: []t) =
-  and (map (\x -> p x) xs)
-
-def indices [n] 't (_: [n]t) =
-  iota n
-
--- Program
-def monotonic 't [n] (compare: t -> t -> bool) (xs: [n]t) =
-  if n < 2 then true
-  else and (map (\i -> compare xs[i] xs[i+1]) (iota (n - 1)))
-
-def up [n] (xs: [n]i64) =
-  if n < 2 then true
-  else and (map (\i -> xs[i] < xs[i+1]) (iota (n - 1)))
-
--- NOTE iota 0 lets us write the empty array literal [].
 def slice xs (a: {i64 | (>= 0)}) (b: {i64 | (<= length xs)}) =
   map (\i -> xs[a+i]) (iota (b - a))
 
--- TODO fix iota 0; think it causes troubles when substituted in
 
 -- These should all pass.
 def sanity_check1 n = injectiveOn (0, n) (iota n)
 def sanity_check2 n = injectiveOn (0, n-1) (iota n)
 def sanity_check3 n = injectiveOn (1, n) (replicate n 0)
 
--- TODO this fails because injectiveOn is checked in forward.
--- def permutation_of_indices [n]
---   (xs: {[n]i64 | \xs ->
---       and (map (\i -> 0 <= i && i < n) xs)
---         && injectiveOn (0, n) xs
---   }) = 1
-
--- def part2Indices [n] 't (conds: [n]bool) : {[n]i64 | \res-> permutationOf res (0...n-1)} =
+-- [NOTE] So far:
+-- - andR makes proofs easier because futhark `and` is problematic in that
+--   we have to substitute index functions (with multiple cases)
+--   into a sum!
+--   (This only fails when the andR check would fail anyway, however.
+--    Since, if the check succeeds, all cases are 1 and hence get merged.
+--    But it also makes it impossible to use andR outside refinements:
+--      def injective xs = andR (map (\i -> xs[i] != xs[i+1]) (iota (n - 1))).)
+--
+-- - andR injectivity proof doesn't go through, but the simplifications
+--   needed are obvious:
+--      forall i₁₉₃₁₂ . | (conds₄₆₉₂[i₁₉₃₁₂]) ^ (conds₄₆₉₂[1 + i₁₉₃₁₂]) ⇒    1
+--                      | (¬(conds₄₆₉₂[i₁₉₃₁₂])) ^ (conds₄₆₉₂[1 + i₁₉₃₁₂]) ⇒
+--                        1 + i₁₉₃₁₂ + ∑j₂₇₀₈₇∈(2 + i₁₉₃₁₂ .. -1 + n₄₆₉₁) (conds₄₆₉₂[j₂₇₀₈₇])
+--                          ≠ ∑j₂₇₀₈₇∈(0 .. i₁₉₃₁₂) (conds₄₆₉₂[j₂₇₀₈₇])
+--                      | (conds₄₆₉₂[i₁₉₃₁₂]) ^ (¬(conds₄₆₉₂[1 + i₁₉₃₁₂])) ⇒    1
+--                      | (¬(conds₄₆₉₂[i₁₉₃₁₂])) ^ (¬(conds₄₆₉₂[1 + i₁₉₃₁₂])) ⇒
+--                        i₁₉₃₁₂ + ∑j₂₇₀₈₇∈(1 + i₁₉₃₁₂ .. -1 + n₄₆₉₁) (conds₄₆₉₂[j₂₇₀₈₇])
+--                          ≠ 1 + i₁₉₃₁₂ + ∑j₂₇₀₈₇∈(2 + i₁₉₃₁₂ .. -1 + n₄₆₉₁) (conds₄₆₉₂[j₂₇₀₈₇]) ]
+--   Add tests for Cosmin: [x]
+--   Done? [ ]
+--
+-- - Once andR goes through, I actually think that plain and might go through
+--   as well...
+-- 
+-- - injectiveOn/injective works
+-- 
+-- - andR and injectiveOn in forward creates the problem that you cannot
+--   put this on preconditions in a top-level def, because it will try
+--   to show the precondition on the formal parameter during forward
+--   Solution: Delay actual checking to pre- and postcondition checks.
+--   Done? [ ]
+-- 
+-- - TODO fix iota 0; think it causes troubles when substituted in
+-- 
 def part2Indices [n]
   (conds: [n]bool)
   : {(i64, [n]i64) | \(num_true, inds) ->
       num_true == sum_i64 (map (\c -> if c then 1 else 0) conds)
       && and (map (\i -> 0 <= i && i < n) inds)
-      && injectiveOn (0, n) inds
+      -- && injectiveOn (0, n) inds
+      && injective inds
+      -- && and (map (\i -> inds[i] != inds[i+1]) (iota (n-1)))
+      -- && and (map2 (\x y -> x != y) (sized (n-1) (slice inds 0 (n-1))) (slice inds 1 n))
     } =
   let tflgs = map (\c -> if c then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs
@@ -59,41 +69,30 @@ def part2Indices [n]
   let inds  = map3 (\ c indT indF -> if c then indT-1 else indF-1) conds indsT indsF
   in  (lst, inds)
 
--- def lol i j = i +< j
--- def injective [n]
---   (i : {i64 | \i -> 0 <= i && i < n})
---   (j : {i64 | (+< i)})
---   (xs: [n]i64) =
---     xs[i] != xs[j]
+-- TODO this fails because injectiveOn is checked in forward.
+-- def permutation_of_indices [n]
+--   (xs: {[n]i64 | \xs ->
+--       and (map (\i -> 0 <= i && i < n) xs)
+--         && injectiveOn (0, n) xs
+--   }) = xs
+-- def injective [n] (xs: [n]i64) =
+--   and (map (\i -> xs[i] != xs[i+1]) (iota (n - 1)))
+-- def injective [n] (xs: [n]i64) =
+--   injectiveOn (0, n) xs
 
+-- [Fun stuff]
+--
+-- def and xs =
+--   length xs == sum (map (\x -> if x then 1 else 0) xs)
 
--- def injective [n] (i: {i64 | \i -> 0 <= i && i < n}) (j: {i64 | \j -> i < j && j < n}) (xs: [n]i64) =
---   xs[i] != xs[j]
+-- def all 't (p: t -> bool) (xs: []t) =
+--   and (map (\x -> p x) xs)
 
--- TODO currently not able to show this:
--- def proof_part2indices_is_injective [n]
---   -- ((i,j): {(i64, i64) | \(i,j) -> 0 <= i && i < j && j < n})
---   i (j: {i64 | \j -> 0 <= i && i < j && j < n})
---   (conds: [n]bool)
---   : {(i64, [n]i64) | \(_, inds) -> inds[i] != inds[j] }=
---   part2Indices conds
+-- def monotonic 't [n] (compare: t -> t -> bool) (xs: [n]t) =
+--   if n < 2 then true
+--   else and (map (\i -> compare xs[i] xs[i+1]) (iota (n - 1)))
 
+-- def up [n] (xs: [n]i64) =
+--   if n < 2 then true
+--   else and (map (\i -> xs[i] < xs[i+1]) (iota (n - 1)))
 
-
-
- 
-
--- def part2Indices_ext [n] conds
---   : {(i64, [n]bool) | \(num_true, inds) ->
---       and inds
---     } =
---   let (num_true, inds) = part2Indices conds
---   in (num_true, map (\i -> if conds[i] then i < num_true else i >= num_true) inds)
-
-
--- [16]> let conds = [true,false,false,true]
--- [17]> let inds = [0,2,3i64,1]
--- [18]> scatter (replicate 4 1337) inds (map i64.bool conds)
--- [1, 1, 0, 0]
--- [19]> scatter (replicate 4 1337) inds (iota 4)
--- [0, 3, 1, 2]
