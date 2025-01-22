@@ -1,7 +1,7 @@
 module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when)
+import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM_)
 import Data.Bifunctor
 import Data.Foldable (for_)
 import Data.List qualified as L
@@ -134,8 +134,11 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
   for_ ret (checkRefinement indexfns)
   pure indexfns
   where
-    checkRefinement indexfns decl@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
-      whenDebug . traceM $ "Need to show: " <> prettyString decl
+    checkRefinement indexfns (E.TEParens te _) =
+      checkRefinement indexfns te
+    checkRefinement indexfns te@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
+      warningMsg loc $
+        "\nChecking post-condition:\n" <> prettyStr te
       let param_names = map fst $ mconcat $ map patternMapAligned lam_params
       forM_ (zip param_names indexfns) $ \(nm, fn) ->
         when (isJust nm) . void $ bindfn (fromJust nm) [fn]
@@ -146,12 +149,17 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
       answer <- askRefinements postconds
       case answer of
         Yes -> do
-          debugM (E.baseString vn <> " ∎")
+          debugM (E.baseString vn <> " ∎\n\n")
           pure ()
         Unknown ->
-          errorMsg loc $ "Failed to show refinement: " <> prettyString decl
+          errorMsg loc $ "Failed to show refinement: " <> prettyString te
     checkRefinement _ (E.TERefine _ _ loc) = do
       errorMsg loc "Only lambda post-conditions are currently supported."
+    checkRefinement indexfns (E.TETuple tes _)
+      | length indexfns == length tes = do
+        zipWithM_ checkRefinement (map (:[]) indexfns) tes
+      | otherwise =
+        undefined
     checkRefinement _ _ = pure ()
 
 bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
@@ -962,7 +970,7 @@ errorMsg loc msg =
 warningMsg :: (Applicative f, E.Located a) => a -> String -> f ()
 warningMsg loc msg = do
   traceM . warningString $
-    "Warning at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
+    prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
 
 quantifiedBy :: Iterator -> IndexFnM a -> IndexFnM a
 quantifiedBy Empty m = m
