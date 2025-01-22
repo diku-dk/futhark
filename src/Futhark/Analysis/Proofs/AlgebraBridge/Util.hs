@@ -141,7 +141,6 @@ convFME :: (SoP Algebra.Symbol -> SoP Algebra.Symbol -> IndexFnM Bool) -> SoP Sy
 convFME op x y = rollbackAlgEnv $ do
   a <- toAlgebra x
   b <- toAlgebra y
-  -- debugPrettyM2 "FME" (a, b)
   ans <- a `op` b
   pure $ if ans then Yes else Unknown
 
