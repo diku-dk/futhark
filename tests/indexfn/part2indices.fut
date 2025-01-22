@@ -48,23 +48,33 @@ def sanity_check3 n = injectiveOn (1, n) (replicate n 0)
 --   Solution: Delay actual checking to pre- and postcondition checks.
 --   Done? [ ]
 -- 
+-- - There are problems with expressing this: (Indexing conds[Sum conds[0:i]] cannot be shown safe).
+--   and (map (\i -> conds[i]) (slice inds 0 num_true))
+--
 -- - TODO fix iota 0; think it causes troubles when substituted in
 -- 
 def part2Indices [n]
   (conds: [n]bool)
-  : ({i64 | \n ->
-        n == sum_i64 (map (\c -> if c then 1 else 0) conds)
-     }, {[n]i64 | \inds ->
-      and (map (\i -> 0 <= i && i < n) inds)
-      && injective inds
-      -- && injectiveOn (0, n) inds
-      -- && and (map (\i -> inds[i] != inds[i+1]) (iota (n-1)))
-      -- && and (map2 (\x y -> x != y) (sized (n-1) (slice inds 0 (n-1))) (slice inds 1 n))
-    }) =
-  -- We can also do it tupled if the checks depend on each other:
-  -- : {(i64, [n]i64) | \(num_true, inds) ->
-  --     ..
-  --   } =
+  : {(i64, [n]i64) | \(num_true, inds) ->
+      num_true == sum_i64 (map (\c -> if c then 1 else 0) conds)
+        && num_true <= n
+        -- Proof that inds are a permutation of 0 ... n - 1.
+        && and (map (\i -> 0 <= i && i < n) inds)
+        && injective inds
+        -- Other ways of writing injective:
+        -- && injectiveOn (0, n) inds
+        -- && and (map (\i -> inds[i] != inds[i+1]) (iota (n-1)))
+        -- && and (map2 (\x y -> x != y) (sized (n-1) (slice inds 0 (n-1))) (slice inds 1 n))
+        -- Problems with expressing this: (Indexing conds[Sum conds[0:i]] cannot be shown safe).
+        -- && and (map (\i -> conds[i]) (slice inds 0 num_true))
+    } =
+  -- We can do the refinements on each element of the tuple.
+  -- : ({i64 | \n ->
+  --       n == sum_i64 (map (\c -> if c then 1 else 0) conds)
+  --    }, {[n]i64 | \inds ->
+  --     and (map (\i -> 0 <= i && i < n) inds)
+  --       && injective inds
+  --   }) =
   let tflgs = map (\c -> if c then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs
   let indsT = scan (+) 0 tflgs
