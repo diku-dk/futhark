@@ -280,8 +280,6 @@ forward (E.AppExp (E.Index e_xs slice loc) _)
           foreachCase f_idx $ \n -> do
             c <- askQ (CaseCheck bound) f_idx n
             let (p_idx, e_idx) = getCase n $ body f_idx
-            when (isYes c) $ do
-              debugPrettyM "PASSED" (bound e_idx)
             unless (isYes c) $ do
               debugM $
                 "Failed bounds-checking:"
@@ -710,8 +708,6 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
               let types = map snd pmap
               size_names <- mapM (fmap (>>= getVName) . sizeOfTypeBase) types
               parg_sizes <- mapM sizeOfDomain parg
-              debugPrettyM "size_names" size_names
-              debugPrettyM "parg_sizes" parg_sizes
               unless (map isJust size_names == map isJust parg_sizes) $
                 error "Internal error: sizes don't align."
               pure $ catMaybes $ zipMaybes size_names parg_sizes
@@ -729,16 +725,6 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
               (zip pats actual_args)
             -- The resulting index fn will be fully applied, so we can rewrite recurrences here.
             -- (Which speeds up things by eliminating cases.)
-            -- let y = repIndexFn size_rep indexfn
-            -- debugPrettyM "Use: template fn" (repIndexFn size_rep indexfn)
-            -- _ <- foldM (\acc arg -> do
-            --   y' <- substParams acc [arg]
-            --   debugPrettyM "    Use: sub in " arg
-            --   debugPrettyM "    ==== " y'
-            --   pure y'
-            --   )
-            --   y
-            --   (mconcat actual_args) 
             debugT' "Result: " $
               substParams (repIndexFn size_rep indexfn) (mconcat actual_args)
                 >>= rewrite
@@ -972,6 +958,11 @@ errorMsg :: (E.Located a) => a -> String -> b
 errorMsg loc msg =
   error $
     "Error at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
+
+warningMsg :: (Applicative f, E.Located a) => a -> String -> f ()
+warningMsg loc msg = do
+  traceM . warningString $
+    "Warning at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
 
 quantifiedBy :: Iterator -> IndexFnM a -> IndexFnM a
 quantifiedBy Empty m = m
