@@ -4,7 +4,7 @@ module Futhark.Analysis.Proofs.Substitute ((@)) where
 import Control.Monad (unless)
 import Data.Maybe (isJust)
 import Data.Set qualified as S
-import Debug.Trace (traceM)
+import Debug.Trace (trace, traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (simplify)
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repDomain)
@@ -43,42 +43,45 @@ substituteInto (f_name, src_fn) dest_fn = do
   k <- newVName "variables after this are quantifiers"
   (f, g) <- renameSame src_fn dest_fn
 
-  let notQuantifier vn = vn < k || Just vn == catVar (iterator g)
   -- If f has multiple cases, we would not know which case to substitute
-  -- in Sum j a b f(e(j)).
-  let legalArg arg = hasSingleCase f || all notQuantifier (fv arg)
+  -- into quantified symbols (e.g., Sum j a b f(e(j))).
+  let legalArg e args =
+        let notQuantifier vn = vn < k || Just vn == catVar (iterator g)
+         in (hasSingleCase f || all (all notQuantifier . fv) args)
+              || warning
+        where
+          warning =
+            flip trace False $
+              warningString $
+                "Warning: Unable to substitute "
+                  <> prettyString e
+                  <> " in\n"
+                  <> prettyString dest_fn
+                  <> "\nfor\n"
+                  <> prettyString src_fn
 
-  app <- getApply g
+  app <- getApply legalArg g
   case app of
     Just apply -> do
-      checkArg legalArg apply
       h <- substituteOnce f g apply
       (f_name, f) `substituteInto` h
     Nothing ->
       -- When converting expressions a function may be substituted without arguments.
       substituteOnce f g (Var f_name, [])
   where
-    getApply = astFold (ASTFolder {foldOnSymbol = getApply_}) Nothing
+    getApply argCheck = astFold (ASTFolder {foldOnSymbol = getApply_ argCheck}) Nothing
 
-    getApply_ Nothing e@(Apply (Var vn) args)
-      | vn == f_name =
+    getApply_ argCheck Nothing e@(Apply (Var vn) args)
+      | vn == f_name,
+        argCheck e args =
           pure $ Just (e, args)
-    getApply_ Nothing e@(Idx (Var vn) arg)
-      | vn == f_name =
+    getApply_ argCheck Nothing e@(Idx (Var vn) arg)
+      | vn == f_name,
+        argCheck e [arg] =
           pure $ Just (e, [arg])
-    getApply_ acc _ = pure acc
+    getApply_ _ acc _ = pure acc
 
     hasSingleCase = isJust . justSingleCase
-
-    checkArg nonCapturingArg (e, args) = do
-      unless (all nonCapturingArg args) $
-        error $
-          "Illegal argument: "
-            <> prettyString e
-            <> "\nf:"
-            <> prettyString src_fn
-            <> "\ng:"
-            <> prettyString dest_fn
 
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM IndexFn
 substituteOnce f g_non_repped (f_apply, args) = do
