@@ -150,18 +150,8 @@ prove (InjectiveOn start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext f
 
                   (f @ i) $/= (g @ j)
                   `orM` check
-                    ( f
-                        @ i
-                        :< start
-                        :|| end
-                        :< f
-                        @ i
-                        :|| g
-                        @ j
-                        :< start
-                        :|| end
-                        :< g
-                        @ j
+                    ( (f @ i :< start :|| end :< f @ i)
+                        :|| (g @ j :< start :|| end :< g @ j)
                     )
             case_i_gt_j =
               rollbackAlgEnv $
@@ -174,18 +164,8 @@ prove (InjectiveOn start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext f
 
                   (f @ i) $/= (g @ j)
                   `orM` check
-                    ( f
-                        @ i
-                        :< start
-                        :|| end
-                        :< f
-                        @ i
-                        :|| g
-                        @ j
-                        :< start
-                        :|| end
-                        :< g
-                        @ j
+                    ( (f @ i :< start :|| end :< f @ i)
+                        :|| (g @ j :< start :|| end :< g @ j)
                     )
          in case_i_lt_j `orM` case_i_gt_j
 
