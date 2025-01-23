@@ -7,7 +7,7 @@ import Data.Foldable (for_)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
@@ -375,35 +375,16 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   where
     getPredicate n fn = fst . getCase n $ body fn
 forward (E.Lambda _ _ _ _ loc) =
-  errorMsg loc "Unapplied anonymous functions are not supported."
+  errorMsg loc "Cannot create index function for unapplied lambda."
 forward expr@(E.AppExp (E.Apply f args loc) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
-    E.Lambda params lam_body _ _ _ : args' <- getArgs args = do
-      -- tell ["Using map rule ", toLaTeX y']
-      -- FIXME Refactor to remove use of bindLambdaBodyParams.
-      -- `forward body` does not know that it comes from a map context
-      -- except in that we explicitly addRelIterator iter.
-      -- It would be more natural (and give more information in the
-      -- forward pass on body) to do
-      --  ... = do
-      --    arrs <- mconcat <$> mapM forward args'
-      --    body_fn <- forward body
-      --
-      -- create an index fn
-      --   i :: 0 .. n
-      --   IndexFn (
-      -- We go out of our way to transforming body from
-      -- (\x -> e(x)) to (\i -> e(x[i])), hence `forward body`
-      -- is weird in that
-      -- analy
-      arrs <- mconcat <$> mapM forward args'
-      let names = concatMap E.patNames params
-      when (length arrs /= length names) $
-        errorMsg loc "Unsupported map: arguments and pattern names must align."
-      iter <- bindLambdaBodyParams (zip names arrs)
-      -- Transform body from (\x -> e(x)) to (\i -> e(x[i])), so bound i.
+    E.Lambda params lam_body _ _ _ : _args <- getArgs args,
+    Just arrays <- NE.nonEmpty (NE.tail args) = do
+      (aligned_args, _aligned_sizes) <- zipArgs loc params arrays
+      iter <- bindLambdaBodyParams (mconcat aligned_args)
       fns <- quantifiedBy iter $ forward lam_body
+
       forM fns $ \body_fn ->
         if iterator body_fn == Empty
           then rewrite $ IndexFn iter (body body_fn)
@@ -473,16 +454,19 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         y @ (x, fn)
           >>= rewrite
   | Just "scan" <- getFun f,
-    [E.Lambda params lam_body _ _ _, _ne, lam_xs] <- getArgs args,
-    [paramNames_acc, paramNames_x] <- map E.patNames params = do
+    [E.Lambda params lam_body _ _ _, _ne, _xs] <- getArgs args,
+    xs <- NE.fromList [NE.last args],
+    [pat_acc, pat_x] <- params = do
       -- We pick the first argument of the lambda to be the accumulator
       -- and the second argument to be an element of the input array.
       -- (The lambda is associative, so we are free to pick.)
-      let accToRecurrence = M.fromList (map (,sym2SoP Recurrence) paramNames_acc)
-      iter <- bindLambdaBodyParams . zip paramNames_x =<< forward lam_xs
+      (aligned_args, _) <- zipArgs loc [pat_x] xs
+      iter <- bindLambdaBodyParams (mconcat aligned_args)
+      let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
       fns <-
         quantifiedBy iter $
-          map (repIndexFn accToRecurrence) <$> forward lam_body
+          map (repIndexFn accToRec) <$> forward lam_body
+
       forM fns $ \body_fn ->
         if iterator body_fn == Empty
           then rewrite $ IndexFn iter (body body_fn)
@@ -777,7 +761,8 @@ zipArgs loc formal_args actual_args = do
     let types = map snd pat
     size_names <- mapM (fmap (>>= getVName) . sizeOfTypeBase) types
     arg_sizes <- mapM sizeOfDomain arg
-    unless (map isJust size_names == map isJust arg_sizes) $
+    -- Assert that if there is a size parameter, then we have a size to bind it to.
+    when (any (\(vn, sz) -> isJust vn && isNothing sz) (zip size_names arg_sizes)) $
       errorMsg loc "Internal error: sizes don't align."
     pure $ catMaybes $ zipMaybes size_names arg_sizes
 
