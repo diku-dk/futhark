@@ -24,7 +24,7 @@ import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addProperty)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
-import Futhark.Util.Pretty (Pretty, prettyString)
+import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
@@ -686,44 +686,24 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
   --           <> "\nIndex function:\n"
   --           <> prettyString xs
   -- Applying other functions, for instance, user-defined ones.
-  | (E.Var (E.QualName [] g) info loc) <- f,
-    args' <- getArgs args,
+  | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
       toplevel <- getTopLevelIndexFns
       case M.lookup g toplevel of
         Just (pats, indexfns) -> do
           forM indexfns $ \indexfn -> do
             whenDebug . traceM $ "✨ Using index fn " <> prettyBinding' g indexfn
-            -- g is a previously analyzed top-level function definition.
-            -- Unpack information about parameters.
-            let pmaps = map patternMapAligned pats
-            pargs <- mapM forward args'
-            unless (length pmaps == length pargs) $
-              errorMsg loc "Bound functions must be fully applied. Maybe you want to use a lambda?"
-            -- Align parameters and arguments. Each parameter is a "pattern";
-            -- a list of VNames (singleton for a variable; non-singleton for tuples).
-            actual_args <- forM (zip pmaps pargs) $ \(pmap, parg) -> do
-              unless (length pmap == length parg) $
-                errorMsg loc "Internal error: actual argument does not match parameter pattern."
-              let pnames = map fst pmap
-              -- Discard unused parameters such as wildcards while maintaining alignment.
-              pure $ catMaybes $ zipWith (\p arg -> (,arg) <$> p) pnames parg
-            -- Size parameters must be replaced as well.
-            actual_sizes <- forM (zip pmaps pargs) $ \(pmap, parg) -> do
-              let types = map snd pmap
-              size_names <- mapM (fmap (>>= getVName) . sizeOfTypeBase) types
-              parg_sizes <- mapM sizeOfDomain parg
-              unless (map isJust size_names == map isJust parg_sizes) $
-                error "Internal error: sizes don't align."
-              pure $ catMaybes $ zipMaybes size_names parg_sizes
+            (actual_args, actual_sizes) <- zipArgs loc' pats args
+
             let size_rep = M.fromList $ mconcat actual_sizes
             whenDebug . traceM $
               "Size variable replacement " <> prettyString size_rep
+
             -- Check that preconditions are satisfied.
             foldM_
               ( \args_in_scope (pat, arg) -> do
                   let scope = args_in_scope <> arg
-                  checkPrecondition size_rep scope pat
+                  checkPatPrecondition size_rep scope pat
                   pure scope
               )
               []
@@ -734,16 +714,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
               substParams (repIndexFn size_rep indexfn) (mconcat actual_args)
                 >>= rewrite
           where
-            getVName x | Just (Var vn) <- justSym x = Just vn
-            getVName _ = Nothing
-
-            sizeOfDomain (IndexFn Empty _) = pure Nothing
-            sizeOfDomain (IndexFn (Forall _ d) _) =
-              Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
-
-            zipMaybes = zipWith (liftA2 (,))
-
-            checkPrecondition size_rep scope pat = do
+            checkPatPrecondition size_rep scope pat = do
               cond <- getPrecondition pat
               ans <- case cond of
                 Nothing -> pure Yes
@@ -756,7 +727,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         Nothing -> do
           -- g is a free variable in this expression (probably a parameter
           -- to the top-level function currently being analyzed).
-          arg_fns <- mconcat <$> mapM forward args'
+          arg_fns <- mconcat <$> mapM forward (getArgs args)
           size <- sizeOfTypeBase return_type
           arg_names <- forM arg_fns (const $ newVName "x")
           iter <- case size of
@@ -775,6 +746,51 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
           fn <- substParams g_fn (zip arg_names arg_fns)
           pure [fn]
 forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
+
+-- Align parameters and arguments. Each parameter is a pattern.
+-- A pattern unpacks to a list of (optional) names with type information.
+-- An argument is an expression, which `forward` will, correspondingly,
+-- return a list of index functions for.
+-- Patterns and arguments must align---otherwise an error is raised.
+zipArgs ::
+  E.SrcLoc ->
+  [E.Pat E.ParamType] ->
+  NE.NonEmpty (a, E.Exp) ->
+  IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
+zipArgs loc formal_args actual_args = do
+  let pats = map patternMapAligned formal_args
+  args <- mapM forward (getArgs actual_args)
+
+  unless (length pats == length args) $
+    errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
+  unless (map length pats == map length args) $
+    errorMsg loc "Internal error: actual argument does not match parameter pattern."
+
+  -- Discard unused parameters such as wildcards while maintaining alignment.
+  let aligned_args = do
+        (pat, arg) <- zip pats args
+        pure . catMaybes $ zipWith (\vn fn -> (,fn) <$> vn) (map fst pat) arg
+
+  -- When applying bound functions size parameters must be replaced as well.
+  -- (E.g., if we are zipping index functions with use of a top-level definition.)
+  aligned_sizes <- forM (zip pats args) $ \(pat, arg) -> do
+    let types = map snd pat
+    size_names <- mapM (fmap (>>= getVName) . sizeOfTypeBase) types
+    arg_sizes <- mapM sizeOfDomain arg
+    unless (map isJust size_names == map isJust arg_sizes) $
+      errorMsg loc "Internal error: sizes don't align."
+    pure $ catMaybes $ zipMaybes size_names arg_sizes
+
+  pure (aligned_args, aligned_sizes)
+  where
+    getVName x | Just (Var vn) <- justSym x = Just vn
+    getVName _ = Nothing
+
+    sizeOfDomain (IndexFn Empty _) = pure Nothing
+    sizeOfDomain (IndexFn (Forall _ d) _) =
+      Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
+
+    zipMaybes = zipWith (liftA2 (,))
 
 substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
 substParams = foldM substParam
