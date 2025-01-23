@@ -513,8 +513,8 @@ removeIdentityMappingGeneral bound pat res =
         expandTarget
       )
   where
-    isIdentity (patElem, SubExpRes cs (Var v))
-      | v `notNameIn` bound = Left (patElem, (cs, v))
+    isIdentity (patElem, SubExpRes _ (Var v))
+      | v `notNameIn` bound = Left (patElem, (mempty, v))
     isIdentity x = Right x
 
 removeIdentityMappingFromNesting ::
