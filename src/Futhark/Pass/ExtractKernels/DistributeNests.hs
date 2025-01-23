@@ -806,12 +806,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   traverse renameStm <=< runBuilder_ $ do
     addStms k_stms
 
-    let pat =
-          Pat . rearrangeShape perm $
-            patElems $
-              loopNestingPat $
-                fst nest
-
+    let pat = Pat . rearrangeShape perm $ patElems $ loopNestingPat $ fst nest
     letBind pat $ Op $ segOp k
   where
     findInput kernel_inps a =
