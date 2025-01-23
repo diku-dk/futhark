@@ -137,8 +137,8 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
     checkRefinement indexfns (E.TEParens te _) =
       checkRefinement indexfns te
     checkRefinement indexfns te@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
-      warningMsg loc $
-        "\nChecking post-condition:\n" <> prettyStr te
+      debugM . warningString $
+          "\ESC[93mChecking post-condition:\n" <> prettyStr te <> "\ESC[0m"
       let param_names = map fst $ mconcat $ map patternMapAligned lam_params
       forM_ (zip param_names indexfns) $ \(nm, fn) ->
         when (isJust nm) . void $ bindfn (fromJust nm) [fn]
@@ -157,9 +157,9 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
       errorMsg loc "Only lambda post-conditions are currently supported."
     checkRefinement indexfns (E.TETuple tes _)
       | length indexfns == length tes = do
-        zipWithM_ checkRefinement (map (:[]) indexfns) tes
+          zipWithM_ checkRefinement (map (: []) indexfns) tes
       | otherwise =
-        undefined
+          undefined
     checkRefinement _ _ = pure ()
 
 bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
@@ -400,7 +400,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       arrs <- mconcat <$> mapM forward args'
       let names = concatMap E.patNames params
       when (length arrs /= length names) $
-        errorMsg (E.locOf expr) "Unsupported map: arguments and pattern names must align."
+        errorMsg loc "Unsupported map: arguments and pattern names must align."
       iter <- bindLambdaBodyParams (zip names arrs)
       -- Transform body from (\x -> e(x)) to (\i -> e(x[i])), so bound i.
       fns <- quantifiedBy iter $ forward lam_body
@@ -411,10 +411,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
-      error $
-        "forward on map with non-lambda function arg: "
-          <> prettyString expr
-          <> ". Eta-expand your program."
+      etaExpandErrorMsg loc (head $ getArgs args)
   | Just "replicate" <- getFun f,
     [n, x] <- getArgs args = do
       ns <- forward n
@@ -962,10 +959,16 @@ bindLambdaBodyParams params = do
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
   pure iter
 
-errorMsg :: (E.Located a) => a -> String -> b
+errorMsg :: E.SrcLoc -> String -> a
 errorMsg loc msg =
   error $
     "Error at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
+
+etaExpandErrorMsg :: E.SrcLoc -> E.Exp -> a
+etaExpandErrorMsg loc fn =
+  errorMsg loc $
+    "Only anonymous functions may be passed as argument. Perhaps you want to eta-expand: "
+      <> prettyString fn
 
 warningMsg :: (Applicative f, E.Located a) => a -> String -> f ()
 warningMsg loc msg = do
