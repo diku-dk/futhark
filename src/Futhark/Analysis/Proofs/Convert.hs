@@ -834,7 +834,7 @@ getPrecondition = fmap (fmap fst) . getRefinement
 getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe (Check, Effect))
 getRefinement (E.PatParens pat _) = getRefinement pat
 getRefinement (E.PatAscription pat _ _) = getRefinement pat
-getRefinement (E.Id param (E.Info {E.unInfo = info}) loc)
+getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
   | E.Array _ _ (E.Refinement _ty ref) <- info = do
       whenDebug . traceM $ "Getting (array) type refinement " <> prettyString (param, ref)
       hole <- sym2SoP . Hole <$> newVName "h"
@@ -879,9 +879,7 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) loc)
                 addRelSymbol (sop2Symbol y)
           pure (check, effect)
         _ ->
-          errorMsg
-            loc
-            "Only single-parameter lambdas are allowed as refinements."
+          error "Impossible: Refinements have type t -> bool."
     mkRef _ x = error $ "Unhandled refinement predicate " <> show x
 
     forwardRefinementExp e = do
