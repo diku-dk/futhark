@@ -126,47 +126,46 @@ data Order = LT | GT | LTE | GTE | Undefined
   deriving (Eq, Show)
 
 prove :: Property -> IndexFn -> IndexFnM Answer
+prove (ForallSegments fprop) fn@(IndexFn (Forall _ (Cat k _ _)) _) =
+  prove (fprop k) fn
 prove (PermutationOf {}) _fn = undefined
 prove (PermutationOfZeroTo m) fn = prove (PermutationOfRange (int2SoP 0) m) fn
 prove Injective fn@(IndexFn (Forall _ dom) _) =
   prove (InjectiveOn (int2SoP 0) (domainEnd dom)) fn
 prove (InjectiveOn start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
+  -- debugPrettyM "Proving InjectiveOn " (start, end, fn)
   let branches = casesToList cs
   i <- newNameFromString "i"
   j <- newNameFromString "j"
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
   let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
+  let out_of_range x = x :< start :|| end :< x
+
   let (p_f, f) != (p_g, g) = rollbackAlgEnv $ do
         -- Try to show: forall i /= j . f(i) /= g(j)
         let case_i_lt_j =
               rollbackAlgEnv $
                 do
-                  -- Case i < j => f(i) `rel` g(j).
+                  -- Case i < j => f(i) /= g(j).
                   addRelIterator iter_j
                   i +< j
                   assume (sop2Symbol $ p_f @ i)
                   assume (sop2Symbol $ p_g @ j)
 
                   (f @ i) $/= (g @ j)
-                  `orM` check
-                    ( (f @ i :< start :|| end :< f @ i)
-                        :|| (g @ j :< start :|| end :< g @ j)
-                    )
+                  `orM` check (out_of_range (f @ i) :|| out_of_range (g @ j))
             case_i_gt_j =
               rollbackAlgEnv $
                 do
-                  -- Case i > j => f(i) `rel` g(j):
+                  -- Case i > j => f(i) /= g(j):
                   addRelIterator iter_i
                   j +< i
                   assume (sop2Symbol $ p_f @ i)
                   assume (sop2Symbol $ p_g @ j)
 
                   (f @ i) $/= (g @ j)
-                  `orM` check
-                    ( (f @ i :< start :|| end :< f @ i)
-                        :|| (g @ j :< start :|| end :< g @ j)
-                    )
+                  `orM` check (out_of_range (f @ i) :|| out_of_range (g @ j))
          in case_i_lt_j `orM` case_i_gt_j
 
   -- NOTE could optimise this by sorting the distinct branches,
@@ -255,8 +254,6 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
   monotonic `andM` within_bounds `andM` no_overlap
   where
     f @ x = rep (mkRep i0 (Var x)) f
-prove (ForallSegments fprop) fn@(IndexFn (Forall _ (Cat k _ _)) _) =
-  prove (fprop k) fn
 prove _ _ = error "Not implemented yet."
 
 -- Strict sorting.
