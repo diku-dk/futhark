@@ -8,13 +8,14 @@ import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
+import Data.Set qualified as S
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, flattenCases, getCase, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), Property (Injective, InjectiveOn), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes, prove)
+import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes, prove)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
@@ -31,6 +32,15 @@ import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
 --------------------------------------------------------------
+refinementPrelude :: S.Set String
+refinementPrelude =
+  S.fromList
+    [ "injective",
+      "injectiveOn",
+      "and"
+      -- "segments"
+    ]
+
 justVName :: E.Exp -> Maybe E.VName
 justVName (E.Var (E.QualName [] vn) _ _) = Just vn
 justVName _ = Nothing
@@ -243,7 +253,12 @@ forward (E.AppExp (E.Index e_xs slice loc) _)
               case s1 <|> s2 of
                 Just s -> pure $ mkRep k s
                 Nothing -> error "E.Index: Indexing would capture k"
-            (Forall _ (Cat {}), Nothing) ->
+            (Forall _ (Cat {}), Nothing) -> do
+              debugPrettyM "e_xs" e_xs
+              debugPrettyM "e_xs" e_idx
+              debugPrettyM "f_xs" f_xs
+              debugPrettyM "f_idx" f_idx
+              debugPrintAlgEnv
               error "E.Index: Not implemented yet"
             _ ->
               pure mempty
@@ -624,51 +639,9 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
     [_, e] <- getArgs args = do
       -- No-op.
       forward e
-  | Just "injective" <- getFun f,
-    [e_xs] <- getArgs args = do
-      xss <- forward e_xs
-      forM xss $ \xs -> do
-        fromPreludeEffect loc expr xs $ prove Injective xs
-  | Just "injectiveOn" <- getFun f,
-    [e_rng, e_xs] <- getArgs args = do
-      rng <- forward e_rng
-      case rng of
-        [IndexFn Empty cs_start, IndexFn Empty cs_end] -> do
-          xss <- forward e_xs
-          let start = flattenCases cs_start
-          let end = flattenCases cs_end
-          forM xss $ \xs -> do
-            fromPreludeEffect loc expr xs $ prove (InjectiveOn start end) xs
-        _ -> undefined
-  | Just "and" <- getFun f,
-    [e_xs] <- getArgs args = do
-      -- No-op: The argument e_xs is a boolean array; each branch will
-      -- be checked in refinements.
-      -- XXX but we lose information about iterator at check site, hm...
-      xss <- forward e_xs
-      forM xss $ \xs -> do
-        -- It's easier to do check here than after converting xss into
-        -- a reduce.
-        fromPreludeEffect loc expr xs $ askRefinement xs
-  -- _ -> do
-  --   emitWarning
-  --   let Forall _ dom = iterator xs -- e_xs is array type.
-  --   let n = domainEnd dom
-  --   j <- newVName "j"
-  --   vn <- newVName "and_xs"
-  --   let summation = Sum j (int2SoP 0) n (Idx (Var vn) (sym2SoP $ Var j))
-  --   IndexFn
-  --     { iterator = Empty,
-  --       body = cases [(Bool True, sym2SoP $ n :== sym2SoP summation)]
-  --     }
-  --     @ (vn, xs)
-  --   where
-  --     emitWarning =
-  --       warningMsg loc $
-  --         "Failed to simplify: "
-  --           <> prettyString expr
-  --           <> "\nIndex function:\n"
-  --           <> prettyString xs
+  | Just vn <- getFun f,
+    vn `S.member` refinementPrelude = do
+      forwardRefPrelude loc expr vn args
   -- Applying other functions, for instance, user-defined ones.
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
@@ -981,15 +954,90 @@ quantifiedBy iter m =
     addRelIterator iter
     m
 
-fromPreludeEffect :: (Monad m, E.Located a1, Pretty a2, Pretty a3) => a1 -> a2 -> a3 -> m Answer -> m IndexFn
-fromPreludeEffect loc expr fn m = do
-  ans <- m
-  case ans of
-    Yes ->
-      pure $ IndexFn Empty (cases [(Bool True, int2SoP 1)])
+forwardRefPrelude :: E.SrcLoc -> E.Exp -> String -> NE.NonEmpty (a4, E.Exp) -> IndexFnM [IndexFn]
+forwardRefPrelude loc e f args = do
+  -- case f of
+  -- "segments"
+  --   | E.Lambda lam_params lam_body _ _ _ : _ <- getArgs args,
+  --     Just lam_args <- NE.nonEmpty (NE.tail args) -> do
+  --       debugPrettyM "segments" f
+  --       -- No-op.
+  --       (aligned_args, _) <- zipArgs loc lam_params lam_args
+  --       case mconcat aligned_args of
+  --         [(vn_seg, fn)] -> do
+  --           seg <- getSegment fn
+  --           case seg of
+  --             Just (seg_start, seg_end) -> do
+  --               -- bind lambda body params to segment
+  --               -- forward on lam_body
+  --               debugPrettyM "segment:" seg
+  --               iter <- bindLambdaBodyParams (mconcat aligned_args)
+  --               fns <- quantifiedBy iter $ forward lam_body
+
+  --               forM fns $ \body_fn ->
+  --                 if iterator body_fn == Empty
+  --                   then rewrite $ IndexFn iter (body body_fn)
+  --                   else error "scan: Non-scalar body."
+
+  --               undefined
+  --             Nothing ->
+  --               errorMsg loc "not segmented"
+  --         _ ->
+  --           undefined
+  -- "segments" ->
+  --   etaExpandErrorMsg loc (head $ getArgs args)
+  -- _ -> do
+  (effect, xss) <- parsePrelude f args
+  forM xss $ \xs -> do
+    fromPreludeEffect xs $ effect xs
+  where
+    -- inPrelude :: E.Exp -> Bool
+    -- inPrelude (E.Var (E.QualName _ vn) _ _) =
+    --   E.baseString vn `S.member` refinementPrelude
+    -- inPrelude (E.AppExp (E.Apply g _ _) _)
+    --   | Just vn <- getFun g =
+    --       vn `S.member` refinementPrelude
+    -- inPrelude _ = False
+
+    fromPreludeEffect fn m = do
+      ans <- m
+      case ans of
+        Yes ->
+          pure $ IndexFn Empty (cases [(Bool True, int2SoP 1)])
+        _ ->
+          errorMsg loc $
+            "Failed to show: "
+              <> prettyString e
+              <> "\nIndex function:\n"
+              <> prettyString fn
+
+-- getSegment (IndexFn (Forall _ dom@(Cat _ _ b)) _) = do
+--   end <- rewrite $ intervalEnd dom
+--   pure (Just (b, end))
+-- getSegment _ =
+--   pure Nothing
+
+parsePrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM (IndexFn -> IndexFnM Answer, [IndexFn])
+parsePrelude f args =
+  case f of
+    "injective" | [e_xs] <- getArgs args -> do
+      xss <- forward e_xs
+      pure (prove Injective, xss)
+    "injectiveOn" | [e_rng, e_xs] <- getArgs args -> do
+      rng <- forward e_rng
+      case rng of
+        [IndexFn Empty cs_start, IndexFn Empty cs_end] -> do
+          xss <- forward e_xs
+          let start = flattenCases cs_start
+          let end = flattenCases cs_end
+          pure (prove (InjectiveOn start end), xss)
+        _ ->
+          undefined
+    "and" | [e_xs] <- getArgs args -> do
+      -- No-op: The argument e_xs is a boolean array; each branch will
+      -- be checked in refinements.
+      -- XXX but we lose information about iterator at check site, hm...
+      xss <- forward e_xs
+      pure (askRefinement, xss)
     _ ->
-      errorMsg loc $
-        "Failed to show: "
-          <> prettyString expr
-          <> "\nIndex function:\n"
-          <> prettyString fn
+      undefined
