@@ -99,12 +99,19 @@ substituteOnce f g_non_repped (f_apply, args) = do
 
   -- If f has a segmented structure (Cat k _ _), make sure that
   -- k is not captured in the body of g after substitution.
-  (new_iter, s) <- case (iterator f, subIterator vn (iterator g)) of
-    (Forall i df@(Cat k _ _), Forall j dg@(Iota {}))
+  let itg = subIterator vn (iterator g)
+  (new_iter, s) <- case (iterator f, itg) of
+    (Forall i df@(Cat k m _), Forall j dg@(Iota n))
       | k `S.member` fv new_body -> do
-          -- Try to propagate structure of f into g.
-          assertSameRange df dg
-          pure (Forall j $ repDomain (mkRep i $ Var j) df, mempty)
+          c :: Maybe (Substitution Symbol) <- unify m n
+          if isJust c
+          then do
+            -- g actually iterates over k.
+            pure (itg, mkRep k $ Var j)
+          else do
+            -- Try to propagate structure of f into g.
+            assertSameRange df dg
+            pure (Forall j $ repDomain (mkRep i $ Var j) df, mempty)
     (Forall i df@(Cat k _ _), Empty)
       | k `S.member` fv new_body -> do
           -- No way to propagate. Try to solve for k in f_arg.
@@ -117,7 +124,7 @@ substituteOnce f g_non_repped (f_apply, args) = do
             Nothing ->
               error $
                 "Would capture k in g: f" <> prettyString f_arg
-    (_, itg) ->
+    _ ->
       pure (itg, mempty)
 
   pure $ repIndexFn s $ IndexFn new_iter new_body
@@ -172,4 +179,7 @@ assertSameRange df dg = do
   eq_start :: Maybe (Substitution Symbol) <- unify start_f start_g
   eq_end :: Maybe (Substitution Symbol) <- unify end_f end_g
   unless (isJust eq_start && isJust eq_end) $
-    error "assertSameRange: inequal ranges"
+    error $
+      "assertSameRange: inequal ranges: "
+      <> prettyString (start_f, end_f)
+      <> prettyString (start_g, end_g)
