@@ -16,7 +16,7 @@ import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.SoP.SoP
-import Futhark.SoP.Monad (MonadSoP, getEquivs, getProperties)  -- lookupRange
+import Futhark.SoP.Monad (MonadSoP, getEquivs, getProperties, getRanges)  -- lookupRange
 import Futhark.SoP.FourierMotzkin qualified as FM
 import Language.Futhark (VName)
 
@@ -245,6 +245,51 @@ peelSumSymbHelper tab_props sym@(Sum (POR nms) beg end)
 peelSumSymbHelper _ sym@(Sum arr beg end) = do -- Case 3
   equivs <- getEquivs
   non_empty_slice <- beg FM.$<=$ end
+  if not non_empty_slice
+  then pure Nothing
+  else do
+    res_eq <- peelSumSymbEquiv arr beg end
+    case res_eq of
+      Just res -> pure $ Just res
+      Nothing  -> peelSumSymbIneq arr beg end
+  where
+    -- try to peel of an end of the interval when
+    --   the end is in the equivalence table
+    peelSumSymbEquiv arr lb ub = do
+      equivs <- getEquivs
+      mfst_el <- getEquivSoP equivs $ Idx arr beg
+      mlst_el <- getEquivSoP equivs $ Idx arr end
+      case (mfst_el, mlst_el) of
+        (Just fst_el, Nothing) -> do
+          let new_sum = Sum arr (beg .+. sop_one) end
+          pure $ Just (fst_el .+. sym2SoP new_sum, sym)
+        (Nothing, Just lst_el) -> do
+          let new_sum = Sum arr beg (end .-. sop_one)
+          pure $ Just (lst_el .+. sym2SoP new_sum, sym)
+        (Just fst_el, Just lst_el) -> do
+          let new_sum = Sum arr (beg .+. sop_one) (end .-. sop_one)
+          pure $ Just (fst_el .+. lst_el .+. sym2SoP new_sum, sym)
+        (Nothing, Nothing) -> pure Nothing
+    -- try to peel of an end of the interval when the end
+    --   has a more specialized range than the array.
+    peelSumSymbIneq arr lb ub = do
+      ranges <- getRanges
+      let [beg_sym, end_sym] = map (Idx arr) [beg, end]
+      case map (`M.lookup` ranges) [beg_sym, end_sym] of
+        [Just _, Nothing] -> do
+          let new_sum = Sum arr (beg .+. sop_one) end
+          pure $ Just (sym2SoP beg_sym .+. sym2SoP new_sum, sym)
+        [Nothing, Just _] -> do
+          let new_sum = Sum arr beg (end .-. sop_one)
+          pure $ Just (sym2SoP end_sym .+. sym2SoP new_sum, sym)
+        [Just _, Just _] -> do
+          let new_sum = Sum arr (beg .+. sop_one) (end .-. sop_one)
+          pure $ Just (sym2SoP beg_sym .+. sym2SoP end_sym .+. sym2SoP new_sum, sym)
+        [Nothing, Nothing] -> pure Nothing
+{--
+peelSumSymbHelper _ sym@(Sum arr beg end) = do -- Case 3
+  equivs <- getEquivs
+  non_empty_slice <- beg FM.$<=$ end
   mfst_el <- getEquivSoP equivs $ Idx arr beg
   mlst_el <- getEquivSoP equivs $ Idx arr end
   --  mfst_el = M.lookup (Idx arr beg) equivs
@@ -262,6 +307,7 @@ peelSumSymbHelper _ sym@(Sum arr beg end) = do -- Case 3
       let new_sum = Sum arr (beg .+. sop_one) (end .-. sop_one)
       pure $ Just (fst_el .+. lst_el .+. sym2SoP new_sum, sym)
     (True, Nothing, Nothing) -> pure Nothing
+--}
 --
 peelSumSymbHelper _ sym@(Idx arr idx) = do -- Case 4
   equivs <- getEquivs
