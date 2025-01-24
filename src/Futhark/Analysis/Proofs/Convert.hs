@@ -123,12 +123,7 @@ mkIndexFnDecs (E.ValDec vb : rest) = do
   mkIndexFnDecs rest
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
--- toplevel_indexfns
 mkIndexFnValBind :: E.ValBind -> IndexFnM [IndexFn]
--- mkIndexFnValBind (E.ValBind _ vn _ _ _ _ _ _ _ _)
---   | and (zipWith (==) (E.baseString vn) "PROOF_") = do
---     debugM $ "Skipping proof: " <> prettyString vn
---     pure []
 mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
   clearAlgEnv
   whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
