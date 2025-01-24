@@ -21,6 +21,9 @@ module Futhark.Analysis.Proofs.Monad
     getTopLevelIndexFns,
     prettyStr,
     warningString,
+    getLiftCtx,
+    LiftContext (..),
+    withLiftCtx,
   )
 where
 
@@ -38,12 +41,20 @@ import Futhark.Util.Pretty (Pretty, docStringW, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 
+newtype LiftContext = LiftContext
+  { iterators :: [Iterator]
+  }
+  deriving
+    ( Semigroup,
+      Monoid
+    )
 
 data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Algebra.Symbol Symbol Algebra.Property,
     indexfns :: M.Map VName [IndexFn],
     toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn]),
+    liftctx :: LiftContext,
     debug :: Bool
   }
 
@@ -60,8 +71,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty False
-
+    s = VEnv vns mempty mempty mempty mempty False
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -81,7 +91,6 @@ instance Expression Symbol where
   moduloIsh _ = Nothing
   divInsteadOfMod = undefined
   processExp = undefined
-
 
 getIndexFns :: IndexFnM (M.Map VName [IndexFn])
 getIndexFns = gets indexfns
@@ -107,6 +116,18 @@ rollbackAlgEnv computation = do
   alg <- gets algenv
   res <- computation
   modify (\env -> env {algenv = alg})
+  pure res
+
+getLiftCtx :: IndexFnM LiftContext
+getLiftCtx = gets liftctx
+
+withLiftCtx :: Iterator -> IndexFnM a -> IndexFnM a
+withLiftCtx iter m = do
+  ctx <- getLiftCtx
+  let new_ctx = ctx {iterators = iterators ctx <> [iter]}
+  modify (\s -> s {liftctx = new_ctx})
+  res <- m
+  modify (\s -> s {liftctx = ctx})
   pure res
 
 --------------------------------------------------------------
@@ -137,7 +158,7 @@ debugPrettyM :: (Pretty a) => String -> a -> IndexFnM ()
 debugPrettyM msg x = do
   whenDebug $ traceM $ docStringW 110 $ "🪲 " <> pretty msg <> " " <> pretty x
 
-prettyStr :: Pretty a => a -> String
+prettyStr :: (Pretty a) => a -> String
 prettyStr x = docStringW 110 (pretty x)
 
 debugPrintAlgEnv :: IndexFnM ()

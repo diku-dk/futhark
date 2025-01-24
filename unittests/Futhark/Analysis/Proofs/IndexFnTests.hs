@@ -330,7 +330,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/part2indicesL.fut"
-        ( newNameFromString "csL" >>= \csL ->
+        ( withDebug $ newNameFromString "csL" >>= \csL ->
             newNameFromString "shape" >>= \shape ->
               newNameFromString "j" >>= \j -> pure $ \(i, m, k, b) ->
                 let int = int2SoP

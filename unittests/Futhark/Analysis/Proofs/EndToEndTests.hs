@@ -40,7 +40,7 @@ tests =
         Yes,
       mkTest
         "tests/indexfn/part2indicesL.fut"
-        ( \[fn@(IndexFn (Forall _ _) _)] -> do
+        ( \(fn@(IndexFn (Forall _ _) _) : _) -> do
             prove (ForallSegments $ const Injective) fn
         )
         Yes,
@@ -82,7 +82,7 @@ tests =
         Yes,
       mkTest
         "tests/indexfn/part2indicesL.fut"
-        ( \[fn@(IndexFn (Forall _ dom@(Cat _ _ start)) _)] -> do
+        ( \(fn@(IndexFn (Forall _ dom@(Cat _ _ start)) _) : _) -> do
             end <- rewrite $ intervalEnd dom
             prove (ForallSegments $ \_ -> PermutationOfRange start end) fn
         )

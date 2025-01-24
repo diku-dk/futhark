@@ -19,7 +19,7 @@ import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), as
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
-import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
+import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify, fv)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addProperty)
@@ -168,11 +168,11 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
     checkRefinement _ _ = pure ()
 
 bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
-bindfn vn indexfn = do
-  insertIndexFn vn indexfn
-  whenDebug (traceM $ prettyBinding vn indexfn <> "\n")
+bindfn vn indexfns = do
+  insertIndexFn vn indexfns
+  whenDebug $ traceM $ prettyBinding vn indexfns <> "\n"
   -- tell ["resulting in", toLaTeX (vn, indexfn')]
-  pure indexfn
+  pure indexfns
 
 singleCase :: a -> Cases Symbol a
 singleCase e = cases [(Bool True, e)]
@@ -233,95 +233,35 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
           pure [IndexFn Empty (singleCase . sym2SoP $ Var vn)]
 forward (E.TupLit xs _) = do
   mconcat <$> mapM forward xs
-forward (E.AppExp (E.Index e_xs slice loc) _)
+forward e@(E.AppExp (E.Index e_xs slice loc) _)
   | [E.DimFix e_idx] <- slice = do
-      xss <- forward e_xs
-      idxs <- forward e_idx
-      forM (zip xss idxs) $ \(f_xs, f_idx) -> do
-        -- If xs has a Cat iterator, we need to express k in terms of idx
-        -- lest we capture k.
-        k_rep <-
-          case (iterator f_xs, justSingleCase f_idx) of
-            (Forall _ (Cat k m b), Just idx) -> do
-              s1 <- solve_for k b idx
-              s2 <- solve_for k (intervalEnd $ Cat k m b) idx
-              case s1 <|> s2 of
-                Just s -> pure $ mkRep k s
-                Nothing -> error "E.Index: Indexing would capture k"
-            (Forall _ (Cat {}), Nothing) -> do
-              debugPrettyM "e_xs" e_xs
-              debugPrettyM "e_xs" e_idx
-              debugPrettyM "f_xs" f_xs
-              debugPrettyM "f_idx" f_idx
-              debugPrintAlgEnv
-              error "E.Index: Not implemented yet"
-            _ ->
-              pure mempty
-        unless (null k_rep) $ debugPrettyM "E.Index: solved for k:" k_rep
-        checkBounds f_xs f_idx k_rep
-        i <- newVName "i"
-        x <- newVName "x"
-        let y =
-              IndexFn
-                { iterator = iterator f_idx,
-                  body = singleCase . sym2SoP $ Idx (Var x) (sym2SoP $ Var i)
-                }
-        debugT' "E.Index result: " $
-          substParams y [(i, f_idx), (x, repIndexFn k_rep f_xs)]
-  where
-    -- Solve for k in x(k) = y.
-    solve_for k x y = do
-      k_hole <- newVName "k_hole"
-      let x_holed = rep (M.singleton k $ sym2SoP (Hole k_hole)) x
-      s :: Maybe (Replacement Symbol) <- fmap mapping <$> unify x_holed y
-      pure $ s >>= (M.!? k_hole)
+      f_xss <- forward e_xs
+      f_idxs <- forward e_idx
+      forM (zip f_xss f_idxs) $ \(f_xs, f_idx) -> do
+        checkBounds e f_xs f_idx
 
-    checkBounds (IndexFn Empty _) _ _ =
-      error "E.Index: Indexing into scalar"
-    checkBounds f_xs@(IndexFn (Forall _ dom) _) f_idx k_rep = algebraContext f_idx $ do
-      dom_start <- rewrite $ domainStart dom
-      dom_end <- rewrite $ domainEnd dom
-      case dom of
-        Cat k m _ | k `M.member` k_rep -> do
-          let k_value = k_rep M.! k
-          doCheck (\_ -> int2SoP 0 :<= k_value)
-          doCheck (\_ -> k_value :<= m)
-        Cat _ _ b -> do
-          doCheck (\idx -> b :<= idx :|| dom_start :<= idx)
-          doCheck (\idx -> idx :<= intervalEnd dom :|| idx :<= dom_end)
-        Iota _ -> do
-          doCheck (dom_start :<=)
-          doCheck (:<= dom_end)
-      where
-        doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
-        doCheck bound =
-          foreachCase f_idx $ \n -> do
-            c <- askQ (CaseCheck bound) f_idx n
-            let (p_idx, e_idx) = getCase n $ body f_idx
-            unless (isYes c) $ do
-              debugM $
-                "Failed bounds-checking:"
-                  <> "\nf_xs:"
-                  <> prettyString f_xs
-                  <> "\nf_idx: "
-                  <> prettyString f_idx
-                  <> "\nCASE f_idx: "
-                  <> show n
-              debugPrintAlgEnv
-              errorMsg loc $
-                "Unsafe indexing: "
-                  <> showE e_idx
-                  <> " (failed to show: "
-                  <> prettyString p_idx
-                  <> " => "
-                  <> prettyString (bound e_idx)
-                  <> ")."
-
-    showE idx
-      | Just vn <- justVName e_xs =
-          prettyString $ Idx (Var vn) idx
-    showE idx =
-      "_[" <> prettyString idx <> "]"
+        ctx <- getLiftCtx
+        xs <- newVName "f_xs"
+        idx <- newVName "f_idx"
+        let f_body = singleCase . sym2SoP $ Idx (Var xs) (sym2SoP $ Var idx)
+        debugT' "E.Index result: " $ case iterators ctx of
+          [] -> do
+            substParams
+              (IndexFn (iterator f_idx) f_body)
+              [(idx, f_idx), (xs, f_xs)]
+          [ctx_i] -> do
+            let fF_idx = IndexFn ctx_i (body f_idx)
+            fF <-
+              substParams
+                (IndexFn (iterator fF_idx) f_body)
+                [(idx, fF_idx), (xs, f_xs)]
+            pure $ repIndexFn (k_rep fF ctx_i) $ IndexFn Empty (body fF)
+          _ ->
+            errorMsg loc "Multi-dim not supported yet."
+        where
+          k_rep (IndexFn (Forall _ (Cat k _ _)) _) (Forall _ (Cat k' _ _)) =
+            mkRep k (Var k')
+          k_rep _ _ = mempty
 forward (E.Not e _) = do
   fns <- forward e
   forM fns $ \fn -> do
@@ -926,7 +866,7 @@ bindLambdaBodyParams params = do
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
   pure iter
 
-errorMsg :: E.SrcLoc -> String -> a
+errorMsg :: E.Located a1 => a1 -> [Char] -> a2
 errorMsg loc msg =
   error $
     "Error at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
@@ -945,9 +885,10 @@ warningMsg loc msg = do
 quantifiedBy :: Iterator -> IndexFnM a -> IndexFnM a
 quantifiedBy Empty m = m
 quantifiedBy iter m =
-  rollbackAlgEnv $ do
-    addRelIterator iter
-    m
+  withLiftCtx iter $
+    rollbackAlgEnv $ do
+      addRelIterator iter
+      m
 
 forwardRefPrelude :: E.SrcLoc -> E.Exp -> String -> NE.NonEmpty (a4, E.Exp) -> IndexFnM [IndexFn]
 forwardRefPrelude loc e f args = do
@@ -1036,3 +977,43 @@ parsePrelude f args =
       pure (askRefinement, xss)
     _ ->
       undefined
+
+checkBounds :: E.Exp -> IndexFn -> IndexFn -> IndexFnM ()
+checkBounds _ (IndexFn Empty _) _ =
+  error "E.Index: Indexing into scalar"
+checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
+  df_start <- rewrite $ domainStart df
+  df_end <- rewrite $ domainEnd df
+  case df of
+    Cat _ _ b -> do
+      doCheck (\idx -> b :<= idx :|| df_start :<= idx)
+      doCheck (\idx -> idx :<= intervalEnd df :|| idx :<= df_end)
+    Iota _ -> do
+      doCheck (df_start :<=)
+      doCheck (:<= df_end)
+  where
+    doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
+    doCheck bound =
+      foreachCase f_idx $ \n -> do
+        -- addRelIterator (iterator f_xs)
+        c <- askQ (CaseCheck bound) f_idx n
+        unless (isYes c) $ do
+          debugM $
+            "Failed bounds-checking:"
+              <> "\nf_xs:"
+              <> prettyString f_xs
+              <> "\nf_idx: "
+              <> prettyString f_idx
+              <> "\nCASE f_idx: "
+              <> show n
+          debugPrintAlgEnv
+
+          let (p_idx, e_idx) = getCase n $ body f_idx
+          errorMsg (E.locOf e) $
+            "Unsafe indexing: "
+              <> prettyString e
+              <> " (failed to show: "
+              <> prettyString p_idx
+              <> " => "
+              <> prettyString (bound e_idx)
+              <> ")."
