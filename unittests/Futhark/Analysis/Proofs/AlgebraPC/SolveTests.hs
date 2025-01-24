@@ -644,6 +644,28 @@ tests =
               addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
               getRanges
           ),
+      testCase "Bounds-check (part2indices)" $
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              m <- newNameFromString "m"
+              vn_shp <- newNameFromString "shp"
+              let shp = One vn_shp
+              -- \a b -> ∑shp[a : b]
+              let sum_shp a b = sym2SoP $ Sum shp a b
+              -- Ranges
+              addRel $
+                int 1 :<=: sym2SoP (Idx shp (sVar i))
+                  :&&: int 0 :<=: sVar i :&&: sVar i :<: sVar m
+                  :&&: int 1 :<=: sVar m
+
+              debugOn
+              debugPrintAlgEnv
+              debugPrettyM "expression: " (sum_shp (int 0) (sVar i) .-. int 1)
+              int 0 FM.$<=$ (sum_shp (int 0) (sVar i) .-. int 1)
+          )
+          @??= True,
       testCase "Injective 1 (part2indices)" $
         run
           ( do
