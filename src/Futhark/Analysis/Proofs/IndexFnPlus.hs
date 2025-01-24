@@ -9,6 +9,7 @@ module Futhark.Analysis.Proofs.IndexFnPlus
     intervalEnd,
     repDomain,
     unifyIndexFnWith,
+    intervalStart,
   )
 where
 
@@ -34,6 +35,10 @@ domainStart (Cat k _ b) = rep (mkRep k (int2SoP 0 :: SoP Symbol)) b
 domainEnd :: Domain -> SoP Symbol
 domainEnd (Iota n) = n .-. int2SoP 1
 domainEnd (Cat k m b) = rep (mkRep k m) b .-. int2SoP 1
+
+intervalStart :: Domain -> SoP Symbol
+intervalStart (Cat _ _ b) = b
+intervalStart (Iota _) = error "intervalEnd on iota"
 
 intervalEnd :: Domain -> SoP Symbol
 intervalEnd (Cat k _ b) = rep (mkRep k (sym2SoP (Var k) .+. int2SoP 1)) b .-. int2SoP 1

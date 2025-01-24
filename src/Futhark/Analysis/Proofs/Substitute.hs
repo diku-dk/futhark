@@ -1,13 +1,15 @@
 -- Index function substitution.
 module Futhark.Analysis.Proofs.Substitute ((@)) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (unless)
+import Data.Map qualified as M
 import Data.Maybe (isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace, traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (simplify)
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repDomain)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
@@ -15,7 +17,7 @@ import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMapper (..), astFo
 import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameSame)
 import Futhark.Analysis.Proofs.Util (prettyBinding')
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP)
+import Futhark.SoP.SoP (SoP, sym2SoP)
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 
@@ -83,22 +85,44 @@ substituteInto (f_name, src_fn) dest_fn = do
 
     hasSingleCase = isJust . justSingleCase
 
+-- Assumes f and g_non_repped have been renamed using renameSame.
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM IndexFn
 substituteOnce f g_non_repped (f_apply, args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
   g <- repApply vn g_non_repped
-  it <- mergeIterators (iterator f) (subIterator vn $ iterator g)
-  cs <- simplify $ cases $ do
+
+  new_body <- simplify $ cases $ do
     (p_f, v_f) <- casesToList (body f)
     (p_g, v_g) <- casesToList (body g)
     let s = mkRep vn (rep f_arg v_f)
     pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep f_arg p_f), rep s v_g)
-  pure $
-    IndexFn
-      { iterator = it,
-        body = cs
-      }
+
+  -- If f has a segmented structure (Cat k _ _), make sure that
+  -- k is not captured in the body of g after substitution.
+  (new_iter, s) <- case (iterator f, subIterator vn (iterator g)) of
+    (Forall i df@(Cat k _ _), Forall j dg@(Iota {}))
+      | k `S.member` fv new_body -> do
+          -- Try to propagate structure of f into g.
+          assertSameRange df dg
+          pure (Forall j $ repDomain (mkRep i $ Var j) df, mempty)
+    (Forall i df@(Cat k _ _), Empty)
+      | k `S.member` fv new_body -> do
+          -- No way to propagate. Try to solve for k in f_arg.
+          -- Succeeds if f_arg indexes into the segment bounds of f.
+          res1 <- solveFor k (intervalStart df) (f_arg M.! i)
+          res2 <- solveFor k (intervalEnd df) (f_arg M.! i)
+          case res1 <|> res2 of
+            Just res ->
+              pure (Empty, mkRep k res)
+            Nothing ->
+              error $
+                "Would capture k in g: f" <> prettyString f_arg
+    (_, itg) ->
+      pure (itg, mempty)
+
+  pure $ repIndexFn s $ IndexFn new_iter new_body
   where
+    -- Construct replacement from formal arguments of f to actual arguments.
     f_arg :: Replacement Symbol =
       case iterator f of
         Empty ->
@@ -130,12 +154,14 @@ substituteOnce f g_non_repped (f_apply, args) = do
     subIterator _ _ =
       error "Only single-case index functions may substitute into domain."
 
--- Preserve Cat knowledge.
-mergeIterators :: Iterator -> Iterator -> IndexFnM Iterator
-mergeIterators (Forall i df@(Cat {})) (Forall j dg@(Iota {})) = do
-  assertSameRange df dg
-  pure (Forall j $ repDomain (mkRep i $ Var j) df)
-mergeIterators _ g_iter = pure g_iter
+-- Solve for x in e(x) = e'.
+solveFor :: (Replaceable p Symbol) => VName -> p -> SoP Symbol -> IndexFnM (Maybe (SoP Symbol))
+solveFor x e1 e2 = do
+  x_hole <- newVName "x_hole"
+  -- (Not using mkRep because this has check disallowing Holes.)
+  let e1' = rep (M.singleton x $ sym2SoP (Hole x_hole)) e1
+  s :: Maybe (Replacement Symbol) <- fmap mapping <$> unify e1' e2
+  pure $ s >>= (M.!? x_hole)
 
 assertSameRange :: Domain -> Domain -> IndexFnM ()
 assertSameRange df dg = do
