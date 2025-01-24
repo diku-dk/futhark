@@ -182,7 +182,7 @@ isFalse p = do
         Unknown -> falsify left (q : right)
 
 cnfToList :: Symbol -> [Symbol]
-cnfToList (a :&& b) = a : cnfToList b
+cnfToList (a :&& b) = cnfToList a <> cnfToList b
 cnfToList x = [x]
 
 -- WARNING: This adds stuff to the Algebra environment.
