@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Improved reverse-mode AD of `scan` with complicated operators. Work
+  by Peter Adema and Sophus Valentin Willumsgaard.
+
 ### Removed
 
 ### Changed
