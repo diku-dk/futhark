@@ -163,7 +163,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/part2indices.fut"
-        ( withDebug $ pure $ \(i, n, xs, j) ->
+        ( pure $ \(i, n, xs, j) ->
             let xs_i = Idx (Hole xs) (sHole i)
              in [ IndexFn
                     { iterator = Empty,
@@ -330,7 +330,7 @@ tests =
         ),
       mkTest
         "tests/indexfn/part2indicesL.fut"
-        ( withDebug $ newNameFromString "csL" >>= \csL ->
+        ( newNameFromString "csL" >>= \csL ->
             newNameFromString "shape" >>= \shape ->
               newNameFromString "j" >>= \j -> pure $ \(i, m, k, b) ->
                 let int = int2SoP
