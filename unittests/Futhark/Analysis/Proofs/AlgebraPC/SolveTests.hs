@@ -659,6 +659,7 @@ tests =
                 int 1 :<=: sym2SoP (Idx shp (sVar i))
                   :&&: int 0 :<=: sVar i :&&: sVar i :<: sVar m
                   :&&: int 1 :<=: sVar m
+                  :&&: int 0 :<=: sVar vn_shp
 
               debugOn
               debugPrintAlgEnv
