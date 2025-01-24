@@ -345,7 +345,6 @@ concatIrreg _segments _env ns reparr = do
       pure $ subExpsRes [new_segment]
 
   (ns_full_F, ns_full_O, ns_II1) <- doRepIota ns_full
-  (_, _, _ns_II2) <- doSegIota ns_full
 
   repIota <- mapM (doRepIota . irregularS) reparr
   segIota <- mapM (doSegIota . irregularS) reparr
