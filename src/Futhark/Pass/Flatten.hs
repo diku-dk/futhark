@@ -95,9 +95,9 @@ import Prelude hiding (div, rem)
 --
 --   A_O = [0, 0, 6]
 --
---   A_II1 = [0,0,0,1,3,3,4,6,6,6]  // fault
+--   A_II1 = [1,1,1,1,1,1,2,2,2,2]
 --
---   A_II2 = [1,1,1,1,1,1,2,2,2,2]  // fault
+--   A_II2 = [0,0,0,1,3,3,0,2,2,2]
 
 data IrregularRep = IrregularRep
   { -- | Array of size of each segment, type @[]i64@.
