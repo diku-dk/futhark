@@ -339,9 +339,15 @@ concatIrreg _segments _env ns reparr = do
   let zero = Constant $ IntValue $ intValue Int64 (0 :: Int)
   ns_full <- letExp (baseString ns <> "_full") <=< segMap (MkSolo num_segments) $
     \(MkSolo i) -> do
-      old_segments <- mapM (\rep -> letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp i]) reparr
+      old_segments <-
+        mapM
+          ( \rep ->
+              letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp i]
+          )
+          reparr
       new_segment <-
-        letSubExp "new_segment" =<< toExp (foldl (+) (pe64 zero) $ map pe64 old_segments)
+        letSubExp "new_segment"
+          =<< toExp (foldl (+) (pe64 zero) $ map pe64 old_segments)
       pure $ subExpsRes [new_segment]
 
   (ns_full_F, ns_full_O, ns_II1) <- doRepIota ns_full
@@ -356,25 +362,34 @@ concatIrreg _segments _env ns reparr = do
 
   -- Calculate offsets for the scatter operations
   let shapes = map irregularS reparr
-  scatter_offsets <- letTupExp "irregular_scatter_offsets" <=< segMap (MkSolo num_segments) $
-    \(MkSolo i) -> do
-      segment_sizes <-
-        mapM
-          ( \shape ->
-              letSubExp "segment_size" =<< eIndex shape [eSubExp i]
-          )
-          shapes
-      let prefixes = L.init $ L.inits segment_sizes
-      sumprefix <-
-        mapM
-          (letSubExp "segment_prefix" <=< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0))
-          prefixes
-      pure $ subExpsRes sumprefix
+  scatter_offsets <-
+    letTupExp "irregular_scatter_offsets" <=< segMap (MkSolo num_segments) $
+      \(MkSolo i) -> do
+        segment_sizes <-
+          mapM
+            ( \shape ->
+                letSubExp "segment_size" =<< eIndex shape [eSubExp i]
+            )
+            shapes
+        let prefixes = L.init $ L.inits segment_sizes
+        sumprefix <-
+          mapM
+            ( letSubExp "segment_prefix"
+                <=< foldBinOp (Add Int64 OverflowUndef) (intConst Int64 0)
+            )
+            prefixes
+        pure $ subExpsRes sumprefix
 
-  scatter_offsets_T <- letTupExp "irregular_scatter_offsets_T" <=< segMap (MkSolo num_segments) $
-    \(MkSolo i) -> do
-      columns <- mapM (\offsets -> letSubExp "segment_offset" =<< eIndex offsets [eSubExp i]) scatter_offsets
-      pure $ subExpsRes columns
+  scatter_offsets_T <-
+    letTupExp "irregular_scatter_offsets_T" <=< segMap (MkSolo num_segments) $
+      \(MkSolo i) -> do
+        columns <-
+          mapM
+            ( \offsets ->
+                letSubExp "segment_offset" =<< eIndex offsets [eSubExp i]
+            )
+            scatter_offsets
+        pure $ subExpsRes columns
 
   -- Scatter data into result array
   elems <-
@@ -391,14 +406,17 @@ concatIrreg _segments _env ns reparr = do
 
             -- Get local segment offset
             segment_local_o <-
-              letSubExp "segment_local_o" =<< eIndex (scatter_offsets_T !! idx) [eSubExp segment_i]
+              letSubExp "segment_local_o"
+                =<< eIndex (scatter_offsets_T !! idx) [eSubExp segment_i]
 
             -- Value to write
-            v' <- letSubExp "v" =<< eIndex (irregularD (reparr !! idx)) [eSubExp gid]
+            v' <-
+              letSubExp "v" =<< eIndex (irregularD (reparr !! idx)) [eSubExp gid]
             o' <- letSubExp "o" =<< eIndex ii2 [eSubExp gid]
 
             -- Index to write `v'` at
-            i <- letExp "i" =<< toExp (pe64 o' + pe64 segment_local_o + pe64 segment_o)
+            i <-
+              letExp "i" =<< toExp (pe64 o' + pe64 segment_local_o + pe64 segment_o)
 
             pure (i, v')
       )
