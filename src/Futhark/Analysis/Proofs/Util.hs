@@ -4,9 +4,9 @@ import Control.Monad (guard)
 import Data.List (subsequences, (\\))
 import Data.Maybe (fromJust)
 import Debug.Trace (trace)
-import Futhark.Util.Pretty (Doc, Pretty, docString, pretty, prettyString, (<+>), line, align)
+import Futhark.SoP.SoP (SoP, numTerms, sopFromList, sopToList, term2SoP)
+import Futhark.Util.Pretty (Doc, Pretty, align, docString, line, ppTupleLines', pretty, prettyString, (<+>))
 import Language.Futhark (VName (VName))
-import Futhark.SoP.SoP (SoP, numTerms, term2SoP, sopFromList, sopToList)
 
 prettyName :: VName -> Doc ann
 prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
@@ -16,8 +16,15 @@ prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show 
 prettyHole :: VName -> Doc ann
 prettyHole x = "•" <> prettyName x
 
-prettyBinding :: (Pretty a1, Pretty a2) => a1 -> a2 -> String
-prettyBinding a b = docString $ ">>>" <+> pretty a <+> "=" <> line <> "    " <> align (pretty b)
+prettyBinding :: (Pretty a) => VName -> [a] -> String
+prettyBinding vn e =
+  docString $
+    "λ "
+      <+> prettyName vn
+      <+> "="
+      <> line
+      <> "    "
+      <> align (ppTupleLines' $ map pretty e)
 
 prettyBinding' :: (Pretty a1, Pretty a2) => a1 -> a2 -> String
 prettyBinding' a b = docString $ pretty a <+> "=" <+> align (pretty b)
