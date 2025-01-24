@@ -661,9 +661,6 @@ tests =
                   :&&: int 1 :<=: sVar m
                   :&&: int 0 :<=: sVar vn_shp
 
-              debugOn
-              debugPrintAlgEnv
-              debugPrettyM "expression: " (sum_shp (int 0) (sVar i) .-. int 1)
               int 0 FM.$<=$ (sum_shp (int 0) (sVar i) .-. int 1)
           )
           @??= True,
