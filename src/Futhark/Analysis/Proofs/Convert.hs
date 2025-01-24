@@ -17,7 +17,7 @@ import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd,
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes, prove)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
-import Futhark.Analysis.Proofs.Substitute ((@), mergeIterators)
+import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
@@ -915,9 +915,7 @@ bindLambdaBodyParams :: [(E.VName, IndexFn)] -> IndexFnM Iterator
 bindLambdaBodyParams params = do
   -- Make sure all Cat k bound in iterators are identical by renaming.
   fns <- renamesM (map snd params)
-  let iters = map iterator fns
-  iter <- foldM mergeIterators (head iters) (tail iters)
-  let Forall i _ = iter
+  let iter@(Forall i _) = maximum (map iterator fns)
   forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
     vn <- newVName "tmp_fn"
     IndexFn tmp_iter cs <-
