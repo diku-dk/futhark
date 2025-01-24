@@ -69,6 +69,8 @@ rewrite_ fn@(IndexFn it xs) = normalizeIndexFn =<< simplifyIndexFn
       pure $ cases cs'
 
     -- Simplify x under the assumption that p is true.
+    simplifyCase (p, x) | Just _ <- justConstant x =
+      pure (p, x)
     simplifyCase (p, x) = rollbackAlgEnv $ do
       -- Take care to convert x first to hopefully get sums of predicates
       -- translated first.
