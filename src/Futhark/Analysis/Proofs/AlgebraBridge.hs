@@ -160,17 +160,17 @@ isFalse p = do
   -- Our solver may return False when the query is undecidable,
   -- so instead check if the negation of p is true.
   let neg_p_dnf = toDNF (neg p)
-  not_p <- isTrue neg_p_dnf
-  case not_p of
-    Yes -> pure Yes
-    Unknown -> do
-      -- If we convert p to CNF, a sufficient condition for p to be false
-      -- is that some clause q in p is false. Hence we can pick a clause q,
-      -- assume all other clauses to be true, and use that information when
-      -- checking q. This lets us easily falsify, for example,
-      -- x == 1 :&& x == 2.
-      let p_cnf = cnfToList $ neg neg_p_dnf -- Converts p to CNF.
-      falsify p_cnf []
+  -- not_p <- isTrue neg_p_dnf
+  -- \^This check gets prohibitively expensive when there are many disjunctions
+  -- (such as when merging multiple index function cases). The below strategy
+  -- scales better.
+  --
+  -- If we convert p to CNF, a sufficient condition for p to be false
+  -- is that some clause q in p is false. Hence we can pick a clause q,
+  -- assume all other clauses to be true, and use that information when
+  -- checking q. This lets us easily falsify, for example, x == 1 :&& x == 2.
+  let p_cnf = cnfToList $ neg neg_p_dnf -- Converts p to CNF.
+  falsify p_cnf []
   where
     falsify [] _ = pure Unknown
     falsify (q : left) right = do
