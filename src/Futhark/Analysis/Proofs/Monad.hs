@@ -19,13 +19,7 @@ module Futhark.Analysis.Proofs.Monad
     rollbackAlgEnv,
     getIndexFns,
     getTopLevelIndexFns,
-    modifyMem,
-    getMem,
-    remember,
-    forget,
     prettyStr,
-    -- withPreludeEffects,
-    -- getUsePreludeEffects,
     warningString,
   )
 where
@@ -44,17 +38,12 @@ import Futhark.Util.Pretty (Pretty, docStringW, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 
-data IndexFnProperty
-  = Blah
-  deriving (Show, Eq, Ord)
 
 data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Algebra.Symbol Symbol Algebra.Property,
     indexfns :: M.Map VName [IndexFn],
     toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn]),
-    mem :: M.Map Symbol VName,
-    -- usePreludeEffects :: Bool,
     debug :: Bool
   }
 
@@ -67,16 +56,16 @@ newtype IndexFnM a = IndexFnM (RWS () () VEnv a)
       MonadState VEnv
     )
 
+runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
+runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
+  where
+    getRes (x, env, _) = (x, indexfns env)
+    s = VEnv vns mempty mempty mempty mempty False
+
+
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
   putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
-
--- TODO Remove Expression constraint from MonadSoP, if these are unused.
--- See, for example, RefineEquivs.
-instance Expression Symbol where
-  moduloIsh _ = Nothing
-  divInsteadOfMod = undefined
-  processExp = undefined
 
 instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
   getUntrans = gets (untrans . algenv)
@@ -86,56 +75,19 @@ instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
   findSymLEq0 = Algebra.findSymbolLEq0
 
+-- TODO Remove Expression constraint from MonadSoP, if these are unused.
+-- See, for example, RefineEquivs.
+instance Expression Symbol where
+  moduloIsh _ = Nothing
+  divInsteadOfMod = undefined
+  processExp = undefined
+
+
 getIndexFns :: IndexFnM (M.Map VName [IndexFn])
 getIndexFns = gets indexfns
 
 getTopLevelIndexFns :: IndexFnM (M.Map VName ([E.Pat E.ParamType], [IndexFn]))
 getTopLevelIndexFns = gets toplevel
-
--- getUsePreludeEffects :: IndexFnM Bool
--- getUsePreludeEffects =
---   gets usePreludeEffects
-
--- -- Enables checks on special prelude functions
--- -- that behave differently during refinement checking.
--- withPreludeEffects :: MonadState VEnv m => m b -> m b
--- withPreludeEffects m = do
---   b <- gets usePreludeEffects
---   modify (\s -> s {usePreludeEffects = True})
---   res <- m
---   modify (\s -> s {usePreludeEffects = b})
---   pure res
-
-runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
-runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
-  where
-    getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty False
-
-modifyMem :: (MonadState VEnv m) => Symbol -> VName -> m ()
-modifyMem vn x = do
-  modify $
-    \env -> env {mem = M.insert vn x (mem env)}
-
-remember :: (MonadState VEnv m, MonadFreshNames m) => Symbol -> m VName
-remember x = do
-  m <- gets mem
-  case m M.!? x of
-    Nothing -> do
-      vn <- newVName ("<" <> prettyString x <> ">")
-      modifyMem x vn
-      pure vn
-    Just vn -> pure vn
-
-getMem :: IndexFnM (M.Map Symbol VName)
-getMem = gets mem
-
-forget :: IndexFnM a -> IndexFnM a
-forget computation = do
-  m <- getMem
-  res <- computation
-  modify (\env -> env {mem = m})
-  pure res
 
 insertIndexFn :: E.VName -> [IndexFn] -> IndexFnM ()
 insertIndexFn x v =
