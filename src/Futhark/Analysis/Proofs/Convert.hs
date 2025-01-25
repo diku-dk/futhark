@@ -1,6 +1,5 @@
 module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
-import Control.Applicative ((<|>))
 import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM_)
 import Data.Bifunctor
 import Data.Foldable (for_)
@@ -19,8 +18,8 @@ import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), as
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
-import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify, fv)
-import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
+import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
+import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding', prettyLet)
 import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addProperty)
 import Futhark.SoP.Refine (addRel)
@@ -124,37 +123,40 @@ mkIndexFnDecs (E.ValDec vb : rest) = do
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
 mkIndexFnValBind :: E.ValBind -> IndexFnM [IndexFn]
-mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
-  clearAlgEnv
-  whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
-  forM_ params addTypeRefinement
-  forM_ params addBooleanNames
-  forM_ params addSizeVariables
-  debugPrintAlgEnv
-  indexfns <- forward body >>= mapM rewrite >>= bindfn vn
-  insertTopLevel vn (params, indexfns)
-  -- _ <- algebraContext indexfn $ do
-  --   whenDebug . traceM $ "Algebra context for indexfn:\n"
-  --   debugPrintAlgEnv
-  for_ ret (checkRefinement indexfns)
-  pure indexfns
+mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ val_loc) = do
+    clearAlgEnv
+    printM 1 $
+      emphString  ("Analyzing " <> prettyString (E.locText (E.srclocOf val_loc)))
+      <> prettyString val
+    whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
+    forM_ params addTypeRefinement
+    forM_ params addBooleanNames
+    forM_ params addSizeVariables
+    debugPrintAlgEnv
+    indexfns <- forward body >>= mapM rewrite >>= bindfn vn Nothing
+    insertTopLevel vn (params, indexfns)
+    -- _ <- algebraContext indexfn $ do
+    --   whenDebug . traceM $ "Algebra context for indexfn:\n"
+    --   debugPrintAlgEnv
+    for_ ret (checkRefinement indexfns)
+    pure indexfns
   where
     checkRefinement indexfns (E.TEParens te _) =
       checkRefinement indexfns te
     checkRefinement indexfns te@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
-      debugM . warningString $
-        "\ESC[93mChecking post-condition:\n" <> prettyStr te <> "\ESC[0m"
+      printM 1 . warningString $
+        "Checking post-condition:\n" <> prettyStr te
       let param_names = map fst $ mconcat $ map patternMapAligned lam_params
       forM_ (zip param_names indexfns) $ \(nm, fn) ->
-        when (isJust nm) . void $ bindfn (fromJust nm) [fn]
+        when (isJust nm) . void $ bindfn (fromJust nm) Nothing [fn]
       postconds <- forward lam_body >>= mapM rewrite
-      debugM $
+      printM 1 $
         "Post-conditions after substituting in results:\n  "
           <> prettyStr postconds
       answer <- askRefinements postconds
       case answer of
         Yes -> do
-          debugM (E.baseString vn <> " ∎\n\n")
+          printM 1 (E.baseString vn <> " ∎\n\n")
           pure ()
         Unknown ->
           errorMsg loc $ "Failed to show refinement: " <> prettyString te
@@ -167,10 +169,11 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ _) = do
           undefined
     checkRefinement _ _ = pure ()
 
-bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
-bindfn vn indexfns = do
+bindfn :: E.VName -> Maybe E.Exp -> [IndexFn] -> IndexFnM [IndexFn]
+bindfn vn e indexfns = do
   insertIndexFn vn indexfns
-  whenDebug $ traceM $ prettyBinding vn indexfns <> "\n"
+  when (isJust e) $ printM 3 $ prettyLet vn e
+  printM 1 $ prettyBinding vn indexfns
   -- tell ["resulting in", toLaTeX (vn, indexfn')]
   pure indexfns
 
@@ -186,7 +189,7 @@ forward (E.Attr _ e _) = forward e
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
   -- tell [textbf "Forward on " <> Math.math (toLaTeX vn) <> toLaTeX x]
   whenDebug . traceM $ "Forward on " <> prettyString vn
-  (bindfn vn =<< forward x) >> forward in_body
+  (bindfn vn (Just x) =<< forward x) >> forward in_body
 forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
   -- tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX x]
   whenDebug . traceM $ "Forward on " <> prettyString patterns
@@ -195,7 +198,7 @@ forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
   forward body
   where
     bindfnOrDiscard ((Nothing, _), _) = pure ()
-    bindfnOrDiscard ((Just vn, _), indexfn) = void (bindfn vn [indexfn])
+    bindfnOrDiscard ((Just vn, _), indexfn) = void (bindfn vn (Just x) [indexfn])
 forward (E.Literal (E.BoolValue x) _) =
   pure . fromScalar . sym2SoP $ Bool x
 forward (E.Literal (E.SignedValue (E.Int64Value x)) _) =
@@ -258,10 +261,10 @@ forward e@(E.AppExp (E.Index e_xs slice loc) _)
             pure $ repIndexFn (k_rep fF ctx_i) $ IndexFn Empty (body fF)
           _ ->
             errorMsg loc "Multi-dim not supported yet."
-        where
-          k_rep (IndexFn (Forall _ (Cat k _ _)) _) (Forall _ (Cat k' _ _)) =
-            mkRep k (Var k')
-          k_rep _ _ = mempty
+  where
+    k_rep (IndexFn (Forall _ (Cat k _ _)) _) (Forall _ (Cat k' _ _)) =
+      mkRep k (Var k')
+    k_rep _ _ = mempty
 forward (E.Not e _) = do
   fns <- forward e
   forM fns $ \fn -> do
@@ -866,7 +869,7 @@ bindLambdaBodyParams params = do
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
   pure iter
 
-errorMsg :: E.Located a1 => a1 -> [Char] -> a2
+errorMsg :: (E.Located a1) => a1 -> [Char] -> a2
 errorMsg loc msg =
   error $
     "Error at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg

@@ -24,6 +24,10 @@ module Futhark.Analysis.Proofs.Monad
     getLiftCtx,
     LiftContext (..),
     withLiftCtx,
+    insertTopLevelDef,
+    getTopLevelDefs,
+    printM,
+    emphString,
   )
 where
 
@@ -37,6 +41,7 @@ import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
 import Futhark.SoP.Expression (Expression (..))
 import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
+import Futhark.Util (isEnvVarAtLeast)
 import Futhark.Util.Pretty (Pretty, docStringW, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
@@ -54,6 +59,7 @@ data VEnv = VEnv
     algenv :: AlgEnv Algebra.Symbol Symbol Algebra.Property,
     indexfns :: M.Map VName [IndexFn],
     toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn]),
+    defs :: M.Map VName ([E.Pat E.ParamType], E.Exp),
     liftctx :: LiftContext,
     debug :: Bool
   }
@@ -71,7 +77,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty False
+    s = VEnv vns mempty mempty mempty mempty mempty False
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -98,6 +104,9 @@ getIndexFns = gets indexfns
 getTopLevelIndexFns :: IndexFnM (M.Map VName ([E.Pat E.ParamType], [IndexFn]))
 getTopLevelIndexFns = gets toplevel
 
+getTopLevelDefs :: IndexFnM (M.Map VName ([E.Pat E.ParamType], E.Exp))
+getTopLevelDefs = gets defs
+
 insertIndexFn :: E.VName -> [IndexFn] -> IndexFnM ()
 insertIndexFn x v =
   modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
@@ -106,6 +115,11 @@ insertTopLevel :: E.VName -> ([E.Pat E.ParamType], [IndexFn]) -> IndexFnM ()
 insertTopLevel vn (args, fns) =
   modify $
     \env -> env {toplevel = M.insert vn (args, fns) $ toplevel env}
+
+insertTopLevelDef :: E.VName -> ([E.Pat E.ParamType], E.Exp) -> IndexFnM ()
+insertTopLevelDef vn (args, e) =
+  modify $
+    \env -> env {defs = M.insert vn (args, e) $ defs env}
 
 clearAlgEnv :: IndexFnM ()
 clearAlgEnv =
@@ -185,3 +199,11 @@ withoutDebug f = do
 
 warningString :: String -> String
 warningString s = "\ESC[93m" <> s <> "\ESC[0m"
+
+emphString :: String -> String
+emphString s = "\ESC[95m\n|\n| " <> s <> "\n|\ESC[0m\n"
+
+printM :: (Monad m) => Int -> String -> m ()
+printM level
+  | isEnvVarAtLeast "FUTHARK_INDEXFN" level = traceM
+  | otherwise = const $ pure ()
