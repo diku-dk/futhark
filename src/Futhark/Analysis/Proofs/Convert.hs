@@ -2,7 +2,6 @@ module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM_)
 import Data.Bifunctor
-import Data.Foldable (for_)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
@@ -21,7 +20,7 @@ import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding', prettyLet)
 import Futhark.MonadFreshNames (VNameSource, newVName)
-import Futhark.SoP.Monad (addProperty)
+import Futhark.SoP.Monad (addProperty, addEquiv)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Futhark.Util.Pretty (prettyString)
@@ -122,24 +121,29 @@ mkIndexFnDecs (E.ValDec vb : rest) = do
   mkIndexFnDecs rest
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
+hasRefinement :: E.TypeExp d vn -> Bool
+hasRefinement (E.TEParens te _) =
+  hasRefinement te
+hasRefinement (E.TERefine {}) = True
+hasRefinement (E.TETuple tes _) =
+  any hasRefinement tes
+hasRefinement _ = False
+
 mkIndexFnValBind :: E.ValBind -> IndexFnM [IndexFn]
-mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ val_loc) = do
-    clearAlgEnv
-    printM 1 $
-      emphString  ("Analyzing " <> prettyString (E.locText (E.srclocOf val_loc)))
-      <> prettyString val
-    whenDebug . traceM $ "\n\n==== mkIndexFnValBind:\n\n" <> prettyString val
-    forM_ params addTypeRefinement
-    forM_ params addBooleanNames
-    forM_ params addSizeVariables
-    debugPrintAlgEnv
-    indexfns <- forward body >>= mapM rewrite >>= bindfn vn Nothing
-    insertTopLevel vn (params, indexfns)
-    -- _ <- algebraContext indexfn $ do
-    --   whenDebug . traceM $ "Algebra context for indexfn:\n"
-    --   debugPrintAlgEnv
-    for_ ret (checkRefinement indexfns)
-    pure indexfns
+mkIndexFnValBind val@(E.ValBind _ vn (Just ret) _ _ params body _ _ val_loc)
+  | hasRefinement ret = do
+      clearAlgEnv
+      printM 1 $
+        emphString ("Analyzing " <> prettyString (E.locText (E.srclocOf val_loc)))
+          <> prettyString val
+      forM_ params addTypeRefinement
+      forM_ params addBooleanNames
+      forM_ params addSizeVariables
+      debugPrintAlgEnv
+      indexfns <- forward body >>= mapM rewrite >>= bindfn vn
+      insertTopLevel vn (params, indexfns)
+      checkRefinement indexfns ret
+      pure indexfns
   where
     checkRefinement indexfns (E.TEParens te _) =
       checkRefinement indexfns te
@@ -148,7 +152,7 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ val_loc) = do
         "Checking post-condition:\n" <> prettyStr te
       let param_names = map fst $ mconcat $ map patternMapAligned lam_params
       forM_ (zip param_names indexfns) $ \(nm, fn) ->
-        when (isJust nm) . void $ bindfn (fromJust nm) Nothing [fn]
+        when (isJust nm) . void $ bindfn (fromJust nm) [fn]
       postconds <- forward lam_body >>= mapM rewrite
       printM 1 $
         "Post-conditions after substituting in results:\n  "
@@ -168,13 +172,17 @@ mkIndexFnValBind val@(E.ValBind _ vn ret _ _ params body _ _ val_loc) = do
       | otherwise =
           undefined
     checkRefinement _ _ = pure ()
+mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
+  insertTopLevelDef vn (params, body)
+  pure []
 
-bindfn :: E.VName -> Maybe E.Exp -> [IndexFn] -> IndexFnM [IndexFn]
-bindfn vn e indexfns = do
+bindfn :: E.VName -> [IndexFn] -> IndexFnM [IndexFn]
+bindfn = bindfn_ 1
+
+bindfn_ :: Int -> E.VName -> [IndexFn] -> IndexFnM [IndexFn]
+bindfn_ level vn indexfns = do
   insertIndexFn vn indexfns
-  when (isJust e) $ printM 3 $ prettyLet vn e
-  printM 1 $ prettyBinding vn indexfns
-  -- tell ["resulting in", toLaTeX (vn, indexfn')]
+  printM level $ prettyBinding vn indexfns
   pure indexfns
 
 singleCase :: a -> Cases Symbol a
@@ -189,7 +197,7 @@ forward (E.Attr _ e _) = forward e
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
   -- tell [textbf "Forward on " <> Math.math (toLaTeX vn) <> toLaTeX x]
   whenDebug . traceM $ "Forward on " <> prettyString vn
-  (bindfn vn (Just x) =<< forward x) >> forward in_body
+  (bindfn vn =<< forward x) >> forward in_body
 forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
   -- tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX x]
   whenDebug . traceM $ "Forward on " <> prettyString patterns
@@ -198,7 +206,7 @@ forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
   forward body
   where
     bindfnOrDiscard ((Nothing, _), _) = pure ()
-    bindfnOrDiscard ((Just vn, _), indexfn) = void (bindfn vn (Just x) [indexfn])
+    bindfnOrDiscard ((Just vn, _), indexfn) = void (bindfn vn [indexfn])
 forward (E.Literal (E.BoolValue x) _) =
   pure . fromScalar . sym2SoP $ Bool x
 forward (E.Literal (E.SignedValue (E.Int64Value x)) _) =
@@ -584,62 +592,89 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
       toplevel <- getTopLevelIndexFns
+
+      -- A top-level definition with an index function.
       case M.lookup g toplevel of
         Just (pats, indexfns) -> do
-          forM indexfns $ \indexfn -> do
-            whenDebug . traceM $ "✨ Using index fn " <> prettyBinding' g indexfn
-            (actual_args, actual_sizes) <- zipArgs loc' pats args
+          printM 1337 $ "✨ Using index fn " <> prettyBinding' g indexfns
+          (actual_args, _, size_rep) <- handleArgs loc' g pats
 
-            let size_rep = M.fromList $ mconcat actual_sizes
-            whenDebug . traceM $
-              "Size variable replacement " <> prettyString size_rep
-
-            -- Check that preconditions are satisfied.
-            foldM_
-              ( \args_in_scope (pat, arg) -> do
-                  let scope = args_in_scope <> arg
-                  checkPatPrecondition size_rep scope pat
-                  pure scope
-              )
-              []
-              (zip pats actual_args)
-            -- The resulting index fn will be fully applied, so we can rewrite recurrences here.
-            -- (Which speeds up things by eliminating cases.)
-            debugT' "Result: " $
-              substParams (repIndexFn size_rep indexfn) (mconcat actual_args)
-                >>= rewrite
-          where
-            checkPatPrecondition size_rep scope pat = do
-              cond <- getPrecondition pat
-              ans <- case cond of
-                Nothing -> pure Yes
-                Just check -> do
-                  whenDebug . traceM $
-                    "Checking precondition " <> prettyString pat <> " for " <> prettyString g
-                  check (size_rep, scope)
-              unless (isYes ans) . errorMsg loc $
-                "Failed to show precondition " <> prettyString pat <> " in context: " <> prettyString scope
+          forM indexfns $ \fn -> do
+            substParams (repIndexFn size_rep fn) (mconcat actual_args)
+              >>= rewrite
         Nothing -> do
-          -- g is a free variable in this expression (probably a parameter
-          -- to the top-level function currently being analyzed).
-          arg_fns <- mconcat <$> mapM forward (getArgs args)
-          size <- sizeOfTypeBase return_type
-          arg_names <- forM arg_fns (const $ newVName "x")
-          iter <- case size of
-            Just sz ->
-              flip Forall (Iota sz) <$> newVName "i"
-            Nothing ->
-              pure Empty
-          let g_fn =
-                IndexFn
-                  { iterator = iter,
-                    body =
-                      singleCase . sym2SoP $
-                        Apply (Var g) (map (sym2SoP . Var) arg_names)
-                  }
-          when (typeIsBool return_type) $ addProperty (Algebra.Var g) Algebra.Boolean
-          fn <- substParams g_fn (zip arg_names arg_fns)
-          pure [fn]
+          defs <- getTopLevelDefs
+
+          -- A top-level definition without an index function.
+          case M.lookup g defs of
+            -- NOTE This "inlines" the definition of top-level definition,
+            -- as opposed to the treatment for "top-level index functions"
+            -- where the args are substituted into the previously analyzed
+            -- index function. (Less work, but more likely to fail.
+            -- For example, substituting into a Sum fails in some cases.)
+            Just (pats, e) -> do
+              printM 1337 $ "✨ Using top-level def " <> prettyString g
+              (actual_args, actual_sizes, _) <- handleArgs loc' g pats
+
+              forM_ (mconcat actual_sizes) $ \(n, sz) -> do
+                addEquiv (Algebra.Var n) =<< toAlgebra sz
+              forM_ (mconcat actual_args) $ \(vn, fn) ->
+                void $ bindfn_ 1337 vn [fn]
+              forward e
+            Nothing -> do
+              -- g is a free variable in this expression (probably a parameter
+              -- to the top-level function currently being analyzed).
+              arg_fns <- mconcat <$> mapM forward (getArgs args)
+              size <- sizeOfTypeBase return_type
+              arg_names <- forM arg_fns (const $ newVName "x")
+              iter <- case size of
+                Just sz ->
+                  flip Forall (Iota sz) <$> newVName "i"
+                Nothing ->
+                  pure Empty
+              when (typeIsBool return_type) $ addProperty (Algebra.Var g) Algebra.Boolean
+
+              let g_fn =
+                    IndexFn
+                      { iterator = iter,
+                        body =
+                          singleCase . sym2SoP $
+                            Apply (Var g) (map (sym2SoP . Var) arg_names)
+                      }
+              fn <- substParams g_fn (zip arg_names arg_fns)
+              pure [fn]
+        where
+          handleArgs loc' g pats = do
+                (actual_args, actual_sizes) <- zipArgs loc' pats args
+                let size_rep = M.fromList $ mconcat actual_sizes
+                whenDebug . traceM $
+                  "Size variable replacement " <> prettyString size_rep
+
+                checkPreconditions actual_args size_rep
+
+                pure (actual_args, actual_sizes, size_rep)
+
+            where
+              checkPreconditions actual_args size_rep = do
+                foldM_
+                  ( \args_in_scope (pat, arg) -> do
+                      let scope = args_in_scope <> arg
+                      checkPatPrecondition scope pat size_rep
+                      pure scope
+                  )
+                  []
+                  (zip pats actual_args)
+
+              checkPatPrecondition scope pat size_rep = do
+                cond <- getPrecondition pat
+                ans <- case cond of
+                  Nothing -> pure Yes
+                  Just check -> do
+                    whenDebug . traceM $
+                      "Checking precondition " <> prettyString pat <> " for " <> prettyString g
+                    check (size_rep, scope)
+                unless (isYes ans) . errorMsg loc $
+                  "Failed to show precondition " <> prettyString pat <> " in context: " <> prettyString scope
 forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
 
 -- Align parameters and arguments. Each parameter is a pattern.

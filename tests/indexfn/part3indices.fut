@@ -1,5 +1,5 @@
 -- def part3indices [n] 't (conds: [n]i8) : {[n]i64 | \res-> permutationOf res (0...n-1)} =
-def part3indices [n] 't (conds: [n]i8) : [n]i64 =
+def part3indices [n] 't (conds: [n]i8) : {[n]i64 | \_ -> true} =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
   let eflags = map (\c -> if c == 2 then 1 else 0 ) conds
 
