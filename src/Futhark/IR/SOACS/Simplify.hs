@@ -537,30 +537,36 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form) =
         let redlam_deps = dataDependencies $ lambdaBody redlam,
         let redlam_res = bodyResult $ lambdaBody redlam,
         let redlam_params = lambdaParams redlam,
+        let (redlam_xparams, redlam_yparams) =
+              splitAt (length nes) redlam_params,
         let used_after =
               map snd . filter ((`UT.used` used) . patElemName . fst) $
-                zip red_pes redlam_params,
+                zip (red_pes <> red_pes) redlam_params,
         let necessary =
               findNecessaryForReturned
                 (`elem` used_after)
                 (zip redlam_params $ map resSubExp $ redlam_res <> redlam_res)
                 redlam_deps,
-        let alive_mask = map ((`nameIn` necessary) . paramName) redlam_params,
-        not $ and (take (length nes) alive_mask) = Simplify $ do
+        let alive_mask =
+              zipWith
+                (||)
+                (map ((`nameIn` necessary) . paramName) redlam_xparams)
+                (map ((`nameIn` necessary) . paramName) redlam_yparams),
+        not $ and alive_mask = Simplify $ do
           let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
               dead_fix = zipWith fixDeadToNeutral alive_mask nes
-              (used_red_pes, _, used_nes) =
-                unzip3 . filter (\(_, x, _) -> paramName x `nameIn` necessary) $
-                  zip3 red_pes redlam_params nes
+              (used_red_pes, used_nes) =
+                unzip . map snd . filter fst $ zip alive_mask $ zip red_pes nes
 
-          let maplam' = removeLambdaResults (take (length nes) alive_mask) maplam
-          redlam' <- removeLambdaResults (take (length nes) alive_mask) <$> fixLambdaParams redlam (dead_fix ++ dead_fix)
+          when (used_nes == nes) cannotSimplify
 
-          auxing aux $
-            letBind (Pat $ used_red_pes ++ map_pes) $
-              Op $
-                Screma w arrs $
-                  mkOp redlam' used_nes maplam'
+          let maplam' = removeLambdaResults alive_mask maplam
+          redlam' <-
+            removeLambdaResults alive_mask
+              <$> fixLambdaParams redlam (dead_fix ++ dead_fix)
+
+          auxing aux . letBind (Pat $ used_red_pes ++ map_pes) . Op $
+            Screma w arrs (mkOp redlam' used_nes maplam')
     removeDeadReduction' _ _ _ _ = Skip
 removeDeadReduction _ _ _ _ = Skip
 

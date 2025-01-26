@@ -30,6 +30,9 @@ module type mt4 = {
  -> [n]i32
 
 
+  val block [m1] [m2] [n1] [n2] :
+    (A: [m1][n1]i32) -> (B: [m1][n2]i32) -> (C: [m2][n1]i32) -> (D: [m2][n2]i32)
+    -> [m1 + m2][n1 + n2]i32
 }
 
 module pm1 (P: {}) : {} = {

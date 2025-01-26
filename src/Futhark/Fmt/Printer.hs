@@ -511,7 +511,7 @@ instance Format UncheckedSpec where
     where
       sub
         | null ps = fmtName bindingStyle name
-        | otherwise = fmtName bindingStyle name <+> align (sep line $ map fmt ps)
+        | otherwise = fmtName bindingStyle name <+> align (sep space $ map fmt ps)
   fmt (ModSpec name mte doc loc) =
     addComments loc $ fmt doc <> "module" <+> fmtName bindingStyle name <> ":" <+> fmt mte
   fmt (IncludeSpec mte loc) = addComments loc $ "include" <+> fmt mte
@@ -533,7 +533,7 @@ instance Format UncheckedModTypeExp where
     let (root, withs) = typeWiths mte
      in addComments loc . localLayout loc $
           fmt root
-            </> sep line (map fmtWith (withs ++ [tr]))
+            </> sep line (map fmtWith (reverse $ tr : withs))
     where
       fmtWith (TypeRef v ps td _) =
         "with"

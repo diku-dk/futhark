@@ -9,9 +9,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Improved reverse-mode AD of `scan` with complicated operators. Work
+  by Peter Adema and Sophus Valentin Willumsgaard.
+
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* `futhark eval`: any errors in the provided .fut file would cause a
+  "file not found" error message.
+
+* Handling of module-dependent size expressions in type abbreviations
+  (#2209).
+
+* A `let`-bound size would mistakenly be in scope of the bound
+  expression (#2210).
+
+## [0.25.26]
 
 ### Fixed
 
@@ -23,6 +39,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark fmt`: do not throw away doc comments for `local`
   definitions.
+
+* `futhark fmt`: improve formatting of value specs.
+
+* `futhark fmt`: add `--check` option.
 
 ## [0.25.25]
 
