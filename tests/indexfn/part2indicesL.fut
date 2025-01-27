@@ -48,29 +48,38 @@ let segment_ids [m]
   let flags_bool = map (\f -> f > 0) flags
   in (sgm_sum flags_bool flags_sgmind, flags_bool)
 
--- def something (xs
---   and (map (\i -> seg_starts[seg_ids[i]] <= i) inds)
-
--- def permutation xs { injective , within 0 and n } =
-
 let part2indicesL 't [m][n]
       (shape: [m]nat64)
       (csL: {[n]bool | \_ -> n == sum shape})
-      : {([n]i64, [m]i64, [n]i64) | \(inds, seg_ends, seg_ids) ->
-          -- Prove for inds:
-          -- there are no duplicate values
-          --   and each value is within the bounds of the segment sizes
-          -- ==> each segment is a permutation of the segment indices
-          injective inds
+      : {([n]i64, [m]i64, [n]i64, [m]i64) | \(inds, seg_ends, seg_ids, num_trues) ->
+          -- Assuming csL is a flat representation of a segmented array of booleans
+          -- with segment sizes denoted by shape, part2indicesL returns:
+          --   (1) A flat array of the same shape as csL, whose values are the indices:
+          --       (0, 1, ..., n).
+          --   (2) The indices in each row k are a permutation of
+          --         sum shape[0:k-1], ..., (sum shape[0:k]) - 1.
+          --   (3) The indices in each row k are partitioned by csL.
+          -- 
+          -- Proof.
+          --   (1) Values are in this range and there are no duplicates:
+          and (map (\i -> 0 <= i && i < n) inds)
+            && injective inds
+          --   (2) Using no duplicate values shown in (1) and
             && and (map (\i ->
                           let k = seg_ids[i]
                           let seg_start = seg_ends[k] - shape[k]
-                          let seg_i = i - seg_start
-                          in 0 <= seg_i && seg_i < shape[k]
+                          in seg_start <= i && i < seg_start + shape[k]
                         )
                         inds)
-            -- (Redundant since n == sum shape:)
-            && and (map (\i -> 0 <= i && i < n) inds)
+          --  (3)
+            && and (map2 (\c i ->
+                           let k = seg_ids[i]
+                           let seg_start = seg_ends[k] - shape[k]
+                           let p = num_trues[k]
+                           in if c
+                           then i - seg_start < p
+                           else i - seg_start >= p
+                         ) csL inds)
         } =
   let (seg_ids, flags) = segment_ids shape
 
@@ -96,4 +105,4 @@ let part2indicesL 't [m][n]
                       if c then offset + indT - 1
                            else offset + indF - 1
                   ) csL indsT indsF offs
-  in (inds, ends, seg_ids)
+  in (inds, ends, seg_ids, lst)
