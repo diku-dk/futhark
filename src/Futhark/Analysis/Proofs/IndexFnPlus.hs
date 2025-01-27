@@ -188,7 +188,7 @@ unifyIndexFnWith ::
 unifyIndexFnWith unifyBody k (IndexFn Empty body1) (IndexFn Empty body2) =
   unifyBody k body1 body2
 unifyIndexFnWith unifyBody k (IndexFn (Forall i dom1) body1) (IndexFn (Forall j dom2) body2) = do
-  s <- unify_ k (Hole i) (Var j)
+  s <- if i == j then pure mempty else unify_ k (Hole i) (Var j)
   s' <- (s <>) <$> unify_ k (repDomain s dom1) (repDomain s dom2)
   (s' <>) <$> unifyBody k (repCases s' body1) (repCases s' body2)
 unifyIndexFnWith _ _ _ _ = fail "Incompatible iterators"
