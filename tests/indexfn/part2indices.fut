@@ -56,11 +56,17 @@ def sanity_check3 n = injectiveOn (1, n) (replicate n 0)
 def part2Indices [n]
   (conds: [n]bool)
   : {(i64, [n]i64) | \(num_true, inds) ->
-      num_true == sum_i64 (map (\c -> if c then 1 else 0) conds)
-        && num_true <= n
+        num_true <= n
         -- Proof that inds are a permutation of 0 ... n - 1.
         && and (map (\i -> 0 <= i && i < n) inds)
         && injective inds
+        -- Proof that inds partition according to conds.
+        && num_true == sum_i64 (map (\c -> if c then 1 else 0) conds)
+        && and (map2 (\c ind ->
+                       if c
+                       then ind < num_true
+                       else ind >= num_true
+                     ) conds inds)
         -- Other ways of writing injective:
         -- && injectiveOn (0, n) inds
         -- && and (map (\i -> inds[i] != inds[i+1]) (iota (n-1)))
@@ -68,7 +74,7 @@ def part2Indices [n]
         -- Problems with expressing this: (Indexing conds[Sum conds[0:i]] cannot be shown safe).
         -- && and (map (\i -> conds[i]) (slice inds 0 num_true))
     } =
-  -- We can do the refinements on each element of the tuple.
+  -- We could also do the refinements on each element of the tuple.
   -- : ({i64 | \n ->
   --       n == sum_i64 (map (\c -> if c then 1 else 0) conds)
   --    }, {[n]i64 | \inds ->
@@ -83,31 +89,3 @@ def part2Indices [n]
   let indsF = map (\t -> t +lst) tmp
   let inds  = map3 (\ c indT indF -> if c then indT-1 else indF-1) conds indsT indsF
   in  (lst, inds)
-
--- TODO this fails because injectiveOn is checked in forward.
--- def permutation_of_indices [n]
---   (xs: {[n]i64 | \xs ->
---       and (map (\i -> 0 <= i && i < n) xs)
---         && injectiveOn (0, n) xs
---   }) = xs
--- def injective [n] (xs: [n]i64) =
---   and (map (\i -> xs[i] != xs[i+1]) (iota (n - 1)))
--- def injective [n] (xs: [n]i64) =
---   injectiveOn (0, n) xs
-
--- [Fun stuff]
---
--- def and xs =
---   length xs == sum (map (\x -> if x then 1 else 0) xs)
-
--- def all 't (p: t -> bool) (xs: []t) =
---   and (map (\x -> p x) xs)
-
--- def monotonic 't [n] (compare: t -> t -> bool) (xs: [n]t) =
---   if n < 2 then true
---   else and (map (\i -> compare xs[i] xs[i+1]) (iota (n - 1)))
-
--- def up [n] (xs: [n]i64) =
---   if n < 2 then true
---   else and (map (\i -> xs[i] < xs[i+1]) (iota (n - 1)))
-
