@@ -1,6 +1,9 @@
 module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM_)
+import Control.Monad.Except (ExceptT)
+import Control.Monad.Trans (lift)
+import Control.Monad.Trans.Maybe (MaybeT (runMaybeT), hoistMaybe)
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
@@ -20,12 +23,13 @@ import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding', prettyLet)
 import Futhark.MonadFreshNames (VNameSource, newVName)
-import Futhark.SoP.Monad (addProperty, addEquiv)
+import Futhark.SoP.Monad (addEquiv, addProperty)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
+import Control.Applicative ((<|>))
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -434,153 +438,79 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
           else error "scan: Non-scalar body."
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
-      -- Scatter in-bounds-monotonic indices.
+      -- `scatter dest is vs` calculates the equivalent of this imperative code:
       --
-      -- y = scatter dest inds vals
-      -- where
-      --   inds = ∀k ∈ [0, ..., m-1] .
-      --       | seg(k+1) - seg(k) > 0  => seg(k)
-      --       | seg(k+1) - seg(k) <= 0 => OOB
-      --   seg(0) is 0
-      --   seg(k) is monotonically increasing
-      --   dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
-      --   OOB < 0 or OOB >= seg(m) - 1
-      -- ___________________________________________________
-      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --     | i == inds[k] => vals[k]
-      --     | i /= inds[k] => dest[i]
+      -- ```
+      -- for k in 0 .. length is:
+      --   i = is[k]
+      --   if i >= 0 && i < length dest:
+      --     dest[i] = vs[k]
+      -- ```
       --
-      -- by the semantics of scatter, equivalent to
-      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --     | i == seg(k) => vals[k]
-      --     | i /= seg(k) => dest[i]
+      -- Scatter in-bounds-monotonic indices:
+      --   - If `is` is a monotonically increasing sequence of values
+      --     that starts at 0 and ends at length dest-1, we can express
+      --     the scatter as an index function by the following rule:
       --
-      -- (i == seg(k) implies seg(k+1) - seg(k) > 0, since otherwise
-      --  the interval [seg(k), ..., seg(k+1) - 1] is empty and i could
-      --  not be equal to seg(k).)
-      -- TODO find a nicer way to express this index function.
+      --     is = ∀k ∈ [0, ..., m-1] .
+      --         | seg(k+1) - seg(k) > 0  => seg(k)
+      --         | seg(k+1) - seg(k) <= 0 => OOB
+      --     seg(0) is 0
+      --     seg(k) is monotonically increasing
+      --     dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
+      --     OOB < 0 or OOB >= seg(m) - 1
+      --     _________________________________________________
+      --     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --         | i == seg(k) => vals[k]
+      --         | i /= seg(k) => dest[i]
       --
+      --     See [1] below for derivation.
       --
-      -- From type checking, we have:
-      -- scatter : (dest : [n]t) -> (inds : [m]i64) -> (vals : [m]t) : [n]t
-      -- \* inds and vals are same size
-      -- \* dest and result are same size
-
-      ----------------------------
-      -- WIP More general rule:
+      -- Scatter permutation indices:
+      --   - If `is` is a permutation of (0 .. length dst), then the
+      --     inverse of `is` exists and the scatter is equivalent to a gather:
+      --     ```
+      --     for i in 0 .. length dest:
+      --         k = is^(-1)(i)
+      --         dest[i] = vs[k]
+      --     ```
+      --   - Rule:
+      --     (`is` is a permutation of (0 .. length dst))
+      --     ___________________________________________________
+      --     y = ∀i ∈ 0 .. length dest . vs[is^(-1)(i)]
       --
-      --   inds = ∀k ∈ [0, ..., m-1] .
-      --       | p(k) => seg(k)
-      --       | p(k) => OOB
-      --   seg(0) is 0
-      --   seg(k) is monotonically increasing
-      --   dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
-      --   OOB < 0 or OOB >= seg(m) - 1
-      -- ___________________________________________________
-      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --     | i == inds[k] => vals[k]
-      --     | i /= inds[k] => dest[i]
-      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --     | i == seg(k) ^ p(k) => vals[k]
-      --     | i == OOB ^ not p(k) => vals[k]
-      --     | i /= seg(k) ^ p(k) => dest[i]
-      --     | i /= OOB ^ not p(k) => dest[i]
+      -- Scatter generic:
+      --   - The indices are integers, so they are ordered.
+      --   - Let P be the permutation that sorts indices in ascending order.
+      --   - Then ...
       --
-      -- by OOB < 0, we know that i == OOB is false and i /= OOB is true:
-      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --     | i == seg(k) ^ p(k) => vals[k]
-      --     | False ^ not p(k) => vals[k]
-      --     | i /= seg(k) ^ p(k) => dest[i]
-      --     | True ^ not p(k) => dest[i]
+      -- [1] By the semantics of scatter, the conclusion is:
+      --   y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --       | i == is[k] => vals[k]
+      --       | i /= is[k] => dest[i]
+      --   Substituting is[k]
+      --   y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --       | i == seg(k) ^ seg(k+1) - seg(k) > 0 => vals[k]
+      --       | i == seg(k) ^ seg(k+1) - seg(k) <= 0 => vals[k]
+      --       | i /= seg(k) => dest[i]
+      --   Since i ∈ [seg(k), ..., seg(k+1) - 1], we have
+      --   y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+      --       | i == seg(k) ^ True => vals[k]
+      --       | i == seg(k) ^ False => vals[k]
+      --       | i /= seg(k) => dest[i]
+      --   which simplifies to what we wanted to show.
       --
-      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --     | i == seg(k) ^ p(k) => vals[k]
-      --     | i /= seg(k) ^ p(k) => dest[i]
-      --     | not p(k) => dest[i]
-      --
-      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --     | i == seg(k) ^ p(k) => vals[k]
-      --     | i /= seg(k) ^ p(k) || True ^ not p(k) => dest[i]
-      --
-      -- y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --     | i == seg(k) ^ p(k) => vals[k]
-      --     | i /= seg(k) => dest[i]
       dests <- forward dest_arg >>= mapM rewrite
       indss <- forward inds_arg >>= mapM rewrite
       valss <- forward vals_arg >>= mapM rewrite
       forM (zip3 dests indss valss) $ \(dest, inds, vals) -> do
-        -- 1. Check that inds is on the right form.
-        vn_k <- newVName "k"
-        vn_m <- newVName "m"
-        vn_p0 <- newVName "p0"
-        vn_f0 <- newVName "f0"
-        vn_p1 <- newVName "p1"
-        vn_f1 <- newVName "f1"
-        let inds_template =
-              IndexFn
-                { iterator = Forall vn_k (Iota $ sym2SoP $ Hole vn_m),
-                  body =
-                    cases
-                      [ (Hole vn_p0, sym2SoP $ Hole vn_f0),
-                        (Hole vn_p1, sym2SoP $ Hole vn_f1)
-                      ]
-                }
-        s <- fromMaybe (error "unhandled scatter") <$> unify inds_template inds
-        -- Safe to do this now:
-        let IndexFn inds_iter@(Forall k (Iota m)) _ = inds
-        -- Determine which is OOB and which is e1.
-        let isOOB ub = CaseCheck (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
-        (vn_p_seg, vn_f_seg) <- do
-          case0_is_OOB <- askQ (isOOB vn_f1) inds 0
-          case case0_is_OOB of
-            Yes -> pure (vn_p1, vn_f1)
-            Unknown -> do
-              case1_is_OOB <- askQ (isOOB vn_f0) inds 1
-              case case1_is_OOB of
-                Yes -> pure (vn_p0, vn_f0)
-                Unknown -> error "scatter: unable to determine OOB branch"
-        let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
-        let f_seg = mapping s M.! vn_f_seg
-        -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
-        algebraContext inds $ do
-          addRelIterator inds_iter
-          seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
-          p_desired_form :: Maybe (Substitution Symbol) <- unify p_seg (seg_delta :> int2SoP 0)
-          unless (isJust p_desired_form) $ error "scatter: p is not on desired form"
-        -- Check that seg(0) = 0.
-        -- (Not using CaseCheck as it has to hold outside case predicate.)
-        let x `at_k` i = rep (mkRep k i) x
-        let zero :: SoP Symbol = int2SoP 0
-        eq0 <- f_seg `at_k` zero $== int2SoP 0
-        when (isUnknown eq0) $ error "scatter: unable to determine segment start"
-        -- Check that seg is monotonically increasing. (Essentially checking
-        -- that OOB branch is never taken in inds.)
-        algebraContext inds $ do
-          addRelIterator inds_iter
-          seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
-          mono <- seg_delta $>= int2SoP 0
-          when (isUnknown mono) $ error "scatter: unable to show segment monotonicity"
-        -- Check that the proposed end of segments seg(m) - 1 equals the size of dest.
-        -- (Note that has to hold outside the context of inds, so we cannot assume p_seg.)
-        let IndexFn (Forall _ dom_dest) _ = dest
-        let dest_size = domainEnd dom_dest
-        domain_covered <- f_seg `at_k` m .-. int2SoP 1 $== dest_size
-        when (isUnknown domain_covered) $
-          error "scatter: segments do not cover iterator domain"
-        i <- newVName "i"
-        dest_hole <- newVName "dest_hole"
-        vals_hole <- newVName "vals_hole"
-        let p = sVar i :== f_seg
-        let fn =
-              IndexFn
-                { iterator = Forall i (Cat k m f_seg),
-                  body =
-                    cases
-                      [ (p, sym2SoP $ Apply (Var vals_hole) [sVar k]),
-                        (neg p, sym2SoP $ Apply (Var dest_hole) [sVar i])
-                      ]
-                }
-        substParams fn [(vals_hole, vals), (dest_hole, dest)]
+        -- 1. Scatter in-bounds-monotonic indices:
+        rule1 <- runMaybeT $ scatterMono dest inds vals
+        let rule2 = Nothing
+        let res = rule1 <|> rule2
+        case res of
+          Just fn -> pure fn
+          Nothing -> undefined
   | Just "sized" <- getFun f,
     [_, e] <- getArgs args = do
       -- No-op.
@@ -643,38 +573,37 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
                       }
               fn <- substParams g_fn (zip arg_names arg_fns)
               pure [fn]
-        where
-          handleArgs loc' g pats = do
-                (actual_args, actual_sizes) <- zipArgs loc' pats args
-                let size_rep = M.fromList $ mconcat actual_sizes
-                whenDebug . traceM $
-                  "Size variable replacement " <> prettyString size_rep
+  where
+    handleArgs loc' g pats = do
+      (actual_args, actual_sizes) <- zipArgs loc' pats args
+      let size_rep = M.fromList $ mconcat actual_sizes
+      whenDebug . traceM $
+        "Size variable replacement " <> prettyString size_rep
 
-                checkPreconditions actual_args size_rep
+      checkPreconditions actual_args size_rep
 
-                pure (actual_args, actual_sizes, size_rep)
+      pure (actual_args, actual_sizes, size_rep)
+      where
+        checkPreconditions actual_args size_rep = do
+          foldM_
+            ( \args_in_scope (pat, arg) -> do
+                let scope = args_in_scope <> arg
+                checkPatPrecondition scope pat size_rep
+                pure scope
+            )
+            []
+            (zip pats actual_args)
 
-            where
-              checkPreconditions actual_args size_rep = do
-                foldM_
-                  ( \args_in_scope (pat, arg) -> do
-                      let scope = args_in_scope <> arg
-                      checkPatPrecondition scope pat size_rep
-                      pure scope
-                  )
-                  []
-                  (zip pats actual_args)
-
-              checkPatPrecondition scope pat size_rep = do
-                cond <- getPrecondition pat
-                ans <- case cond of
-                  Nothing -> pure Yes
-                  Just check -> do
-                    whenDebug . traceM $
-                      "Checking precondition " <> prettyString pat <> " for " <> prettyString g
-                    check (size_rep, scope)
-                unless (isYes ans) . errorMsg loc $
-                  "Failed to show precondition " <> prettyString pat <> " in context: " <> prettyString scope
+        checkPatPrecondition scope pat size_rep = do
+          cond <- getPrecondition pat
+          ans <- case cond of
+            Nothing -> pure Yes
+            Just check -> do
+              whenDebug . traceM $
+                "Checking precondition " <> prettyString pat <> " for " <> prettyString g
+              check (size_rep, scope)
+          unless (isYes ans) . errorMsg loc $
+            "Failed to show precondition " <> prettyString pat <> " in context: " <> prettyString scope
 forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
 
 -- Align parameters and arguments. Each parameter is a pattern.
@@ -730,6 +659,89 @@ substParams = foldM substParam
     -- paramter-substitution.
     substParam fn (paramName, paramIndexFn) =
       (fn @ (paramName, paramIndexFn)) >>= rewriteWithoutRules
+
+scatterMono :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterMono dest inds vals = do
+  -- This is safe, since the arguments have been type-checked already.
+  let IndexFn (Forall _ dom_dest) _ = dest
+  dest_size <- lift $ rewrite $ domainEnd dom_dest
+  let IndexFn inds_iter@(Forall k (Iota m)) _ = inds
+
+  -- Match rule.
+  vn_k <- newVName "k"
+  vn_m <- newVName "m"
+  vn_p0 <- newVName "p0"
+  vn_f0 <- newVName "f0"
+  vn_p1 <- newVName "p1"
+  vn_f1 <- newVName "f1"
+  let inds_template =
+        IndexFn
+          { iterator = Forall vn_k (Iota $ sym2SoP $ Hole vn_m),
+            body =
+              cases
+                [ (Hole vn_p0, sym2SoP $ Hole vn_f0),
+                  (Hole vn_p1, sym2SoP $ Hole vn_f1)
+                ]
+          }
+  s <- hoistMaybe =<< lift (unify inds_template inds)
+  -- Determine which is OOB and which is e1.
+  let isOOB ub = CaseCheck (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
+  (vn_p_seg, vn_f_seg) <- do
+    case0_is_OOB <- lift $ askQ (isOOB vn_f1) inds 0
+    case case0_is_OOB of
+      Yes -> pure (vn_p1, vn_f1)
+      Unknown -> do
+        case1_is_OOB <- lift $ askQ (isOOB vn_f0) inds 1
+        case case1_is_OOB of
+          Yes -> pure (vn_p0, vn_f0)
+          Unknown -> failM "scatterMono: unable to determine OOB branch"
+  let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
+  let f_seg = mapping s M.! vn_f_seg
+  -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
+  s_p :: Maybe (Substitution Symbol) <- lift $ algebraContext inds $ do
+      addRelIterator inds_iter
+      seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
+      unify p_seg (seg_delta :> int2SoP 0)
+  when (isNothing s_p) (failM "scatterMono: predicate not on desired form")
+  -- Check that seg is monotonically increasing. (Essentially checking
+  -- that OOB branch is never taken in inds.)
+  mono <- lift $ algebraContext inds $ do
+    addRelIterator inds_iter
+    seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
+    seg_delta $>= int2SoP 0
+  when (isUnknown mono) (failM "scatterMono: unable to show monotonicity")
+  -- Check that seg(0) = 0.
+  -- (Not using CaseCheck as it has to hold outside case predicate.)
+  let x `at_k` i = rep (mkRep k i) x
+  let zero :: SoP Symbol = int2SoP 0
+  eq0 <- lift $ f_seg `at_k` zero $== int2SoP 0
+  when (isUnknown eq0) (failM "scatterMono: unable to determine segment start")
+
+  -- Check that the proposed end of segments seg(m) - 1 equals the size of dest.
+  -- (Note that has to hold outside the context of inds, so we cannot assume p_seg.)
+  domain_covered <- lift $ f_seg `at_k` m .-. int2SoP 1 $== dest_size
+  when (isUnknown domain_covered) $
+    fail "scatter: segments do not cover iterator domain"
+
+  i <- newVName "i"
+  dest_hole <- newVName "dest_hole"
+  vals_hole <- newVName "vals_hole"
+  let p = sVar i :== f_seg
+  let fn =
+        IndexFn
+          { iterator = Forall i (Cat k m f_seg),
+            body =
+              cases
+                [ (p, sym2SoP $ Apply (Var vals_hole) [sVar k]),
+                  (neg p, sym2SoP $ Apply (Var dest_hole) [sVar i])
+                ]
+          }
+  lift $ substParams fn [(vals_hole, vals), (dest_hole, dest)]
+  where
+    failM msg = do
+      printM 1337 msg
+      fail msg
+
 
 cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
 cmap f (Cases xs) = Cases (fmap f xs)
