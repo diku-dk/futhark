@@ -95,7 +95,7 @@ instance Pretty Iterator where
       <> line
       <> "forall "
       <> prettyName i <+> "."
-  pretty Empty = ""
+  pretty Empty = "•"
 
 instance Pretty IndexFn where
   pretty (IndexFn iter e) = pretty iter <+> pretty e

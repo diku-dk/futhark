@@ -1,4 +1,4 @@
-def part2indices [n] (p: f32 -> bool) (xs : [n]f32) : [n]i64 =
+def part2indices [n] (p: f32 -> bool) (xs : [n]f32) : {[n]i64 | \_ -> true} =
   let conds = map (\x -> p x) xs
   let tflgs = map (\c -> if c then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs

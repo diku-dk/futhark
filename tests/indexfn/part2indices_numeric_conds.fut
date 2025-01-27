@@ -1,5 +1,5 @@
 -- def part2Indices [n] 't (conds: [n]bool) : {[n]i64 | \res-> permutationOf res (0...n-1)} =
-def part2Indices [n] 't (conds: [n]i64) : [n]i64 =
+def part2Indices [n] 't (conds: [n]i64) : {[n]i64 | \_ -> true} =
   -- let tflgs = map (\c -> i64.bool c) conds
   let tflgs = map (\c -> if c == 1 then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs

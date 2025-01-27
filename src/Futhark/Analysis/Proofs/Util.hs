@@ -7,6 +7,7 @@ import Debug.Trace (trace)
 import Futhark.SoP.SoP (SoP, numTerms, sopFromList, sopToList, term2SoP)
 import Futhark.Util.Pretty (Doc, Pretty, align, docString, line, ppTupleLines', pretty, prettyString, (<+>))
 import Language.Futhark (VName (VName))
+import Language.Futhark.Syntax qualified as E
 
 prettyName :: VName -> Doc ann
 prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
@@ -19,12 +20,17 @@ prettyHole x = "•" <> prettyName x
 prettyBinding :: (Pretty a) => VName -> [a] -> String
 prettyBinding vn e =
   docString $
-    "λ "
+    "\ESC[34mι\ESC[0m "
       <+> prettyName vn
       <+> "="
       <> line
       <> "    "
       <> align (ppTupleLines' $ map pretty e)
+
+prettyLet :: (Pretty a) => VName -> a -> String
+prettyLet vn e =
+  docString $
+    "let" <+> pretty (E.baseString vn) <+> "=" <+> align (pretty e)
 
 prettyBinding' :: (Pretty a1, Pretty a2) => a1 -> a2 -> String
 prettyBinding' a b = docString $ pretty a <+> "=" <+> align (pretty b)
