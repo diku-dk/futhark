@@ -202,7 +202,9 @@ rulesIndexFn = do
                   { iterator = Forall i (Iota (hole n)),
                     body = cases [(Bool True, e1_b)]
                   },
-          sideCondition = vacuous
+          sideCondition = \s -> do
+            e1_symbols <- concatMap fst . sopToLists <$> sub s (Hole h1)
+            pure $ Recurrence `notElem` e1_symbols
         },
       Rule
         { name = "Rule 5 (carry) (case order switched)",
@@ -228,7 +230,10 @@ rulesIndexFn = do
                   { iterator = Forall i (Cat k (hole m) (hole b)),
                     body = cases [(Bool True, e1_b)]
                   },
-          sideCondition = vacuous
+          sideCondition = \s -> do
+            b_symbols <- concatMap fst . sopToLists <$> sub s (Hole b)
+            e1_symbols <- concatMap fst . sopToLists <$> sub s (Hole h1)
+            pure $ Recurrence `notElem` (b_symbols <> e1_symbols)
         },
       Rule
         { name = "Prefix sum",
