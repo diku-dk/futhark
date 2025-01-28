@@ -385,7 +385,7 @@ concatIrreg _segments _env ns reparr = do
   -- Scatter data into result array
   elems <-
     foldlM
-      ( \elems (idx, n, ii1, ii2) -> do
+      ( \elems (reparr1, scatter_offset, n, ii1, ii2) -> do
           letExp "irregular_scatter_elems" <=< genScatter elems n $ \gid -> do
             -- Which segment we are in.
             segment_i <-
@@ -398,11 +398,11 @@ concatIrreg _segments _env ns reparr = do
             -- Get local segment offset
             segment_local_o <-
               letSubExp "segment_local_o"
-                =<< eIndex (scatter_offsets_T !! idx) [eSubExp segment_i]
+                =<< eIndex scatter_offset [eSubExp segment_i]
 
             -- Value to write
             v' <-
-              letSubExp "v" =<< eIndex (irregularD (reparr !! idx)) [eSubExp gid]
+              letSubExp "v" =<< eIndex (irregularD reparr1) [eSubExp gid]
             o' <- letSubExp "o" =<< eIndex ii2 [eSubExp gid]
 
             -- Index to write `v'` at
@@ -412,7 +412,7 @@ concatIrreg _segments _env ns reparr = do
             pure (i, v')
       )
       ns_II1
-      $ L.zip4 [0 ..] n_arr rep_II1 rep_II2
+      $ L.zip5 reparr scatter_offsets_T n_arr rep_II1 rep_II2
 
   pure $
     IrregularRep
