@@ -1,5 +1,6 @@
 module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM_)
 import Control.Monad.Except (ExceptT)
 import Control.Monad.Trans (lift)
@@ -20,7 +21,7 @@ import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), as
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
-import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
+import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), fv, mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding', prettyLet)
 import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty)
@@ -29,7 +30,6 @@ import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
-import Control.Applicative ((<|>))
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -436,7 +436,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
           then rewrite $ IndexFn iter (body body_fn)
           else error "scan: Non-scalar body."
   | Just "scatter" <- getFun f,
-    [dest_arg, inds_arg, vals_arg] <- getArgs args = do
+    [e_dest, e_inds, e_vals] <- getArgs args = do
       -- `scatter dest is vs` calculates the equivalent of this imperative code:
       --
       -- ```
@@ -446,70 +446,23 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       --     dest[i] = vs[k]
       -- ```
       --
-      -- Scatter in-bounds-monotonic indices:
-      --   - If `is` is a monotonically increasing sequence of values
-      --     that starts at 0 and ends at length dest-1, we can express
-      --     the scatter as an index function by the following rule:
-      --
-      --     is = ∀k ∈ [0, ..., m-1] .
-      --         | seg(k+1) - seg(k) > 0  => seg(k)
-      --         | seg(k+1) - seg(k) <= 0 => OOB
-      --     seg(0) is 0
-      --     seg(k) is monotonically increasing
-      --     dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
-      --     OOB < 0 or OOB >= seg(m) - 1
-      --     _________________________________________________
-      --     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --         | i == seg(k) => vals[k]
-      --         | i /= seg(k) => dest[i]
-      --
-      --     See [1] below for derivation.
-      --
-      -- Scatter permutation indices:
-      --   - If `is` is a permutation of (0 .. length dst), then the
-      --     inverse of `is` exists and the scatter is equivalent to a gather:
-      --     ```
-      --     for i in 0 .. length dest:
-      --         k = is^(-1)(i)
-      --         dest[i] = vs[k]
-      --     ```
-      --   - Rule:
-      --     (`is` is a permutation of (0 .. length dst))
-      --     ___________________________________________________
-      --     y = ∀i ∈ 0 .. length dest . vs[is^(-1)(i)]
-      --
       -- Scatter generic:
       --   - The indices are integers, so they are ordered.
       --   - Let P be the permutation that sorts indices in ascending order.
-      --   - Then ...
+      --   - Then ... TODO
       --
-      -- [1] By the semantics of scatter, the conclusion is:
-      --   y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --       | i == is[k] => vals[k]
-      --       | i /= is[k] => dest[i]
-      --   Substituting is[k]
-      --   y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --       | i == seg(k) ^ seg(k+1) - seg(k) > 0 => vals[k]
-      --       | i == seg(k) ^ seg(k+1) - seg(k) <= 0 => vals[k]
-      --       | i /= seg(k) => dest[i]
-      --   Since i ∈ [seg(k), ..., seg(k+1) - 1], we have
-      --   y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
-      --       | i == seg(k) ^ True => vals[k]
-      --       | i == seg(k) ^ False => vals[k]
-      --       | i /= seg(k) => dest[i]
-      --   which simplifies to what we wanted to show.
-      --
-      dests <- forward dest_arg >>= mapM rewrite
-      indss <- forward inds_arg >>= mapM rewrite
-      valss <- forward vals_arg >>= mapM rewrite
+      dests <- forward e_dest >>= mapM rewrite
+      indss <- forward e_inds >>= mapM rewrite
+      valss <- forward e_vals >>= mapM rewrite
+
       forM (zip3 dests indss valss) $ \(dest, inds, vals) -> do
         -- 1. Scatter in-bounds-monotonic indices:
         rule1 <- runMaybeT $ scatterMono dest inds vals
-        let rule2 = Nothing
-        let res = rule1 <|> rule2
-        case res of
-          Just fn -> pure fn
-          Nothing -> undefined
+        rule2 <- runMaybeT $ scatterPerm dest inds vals e_inds
+        maybe
+          (errorMsg loc "Failed to infer index function for scatter.")
+          pure
+          (rule1 <|> rule2)
   | Just "sized" <- getFun f,
     [_, e] <- getArgs args = do
       -- No-op.
@@ -659,13 +612,85 @@ substParams = foldM substParam
     substParam fn (paramName, paramIndexFn) =
       (fn @ (paramName, paramIndexFn)) >>= rewriteWithoutRules
 
-scatterMono :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterMono dest inds vals = do
-  -- This is safe, since the arguments have been type-checked already.
-  let IndexFn (Forall _ dom_dest) _ = dest
+-- Scatter permutation indices:
+--   - If `is` is a permutation of (0 .. length dst), then the
+--     inverse of `is` exists and the scatter is equivalent to a gather:
+--     ```
+--     for i in 0 .. length dest:
+--         k = is^(-1)(i)
+--         dest[i] = vs[k]
+--     ```
+--   - Rule:
+--     (`is` is a permutation of (0 .. length dst))
+--     ___________________________________________________
+--     y = ∀i ∈ 0 .. length dest . vs[is^(-1)(i)]
+scatterPerm :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
+scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
-  let IndexFn inds_iter@(Forall k (Iota m)) _ = inds
+  perm <- lift $ prove (PermutationOfZeroTo dest_size) inds
+  case perm of
+    Unknown -> fail "scatterPerm: no match"
+    Yes -> do
+      vn_inds <- warningInds
 
+      -- No out-of-bounds and no duplicate indices.
+      vn_vals <- newVName "vals"
+      i <- newVName "i"
+      vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
+
+      let inv_ind = Idx (Var vn_inv) (sym2SoP (Var i))
+      lift $
+        IndexFn
+          { iterator = Forall i (Iota dest_size),
+            body = cases [(Bool True, sym2SoP $ Idx (Var vn_vals) (sym2SoP inv_ind))]
+          }
+          @ (vn_vals, vals)
+  where
+    warningInds
+      | Just vn <- justVName e_inds = pure vn
+      | otherwise = do
+          warningMsg (E.locOf e_inds) $
+            "You might want to bind scattered indices to a name to aid"
+              <> " index function inference: "
+              <> prettyString e_inds
+          fail ""
+scatterPerm _ _ _ _ = fail ""
+
+-- Scatter in-bounds-monotonic indices:
+--   - If `is` is a monotonically increasing sequence of values
+--     that starts at 0 and ends at length dest-1, we can express
+--     the scatter as an index function by the following rule:
+--
+--     is = ∀k ∈ [0, ..., m-1] .
+--         | seg(k+1) - seg(k) > 0  => seg(k)
+--         | seg(k+1) - seg(k) <= 0 => OOB
+--     seg(0) is 0
+--     seg(k) is monotonically increasing
+--     dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
+--     OOB < 0 or OOB >= seg(m) - 1
+--     _________________________________________________
+--     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+--         | i == seg(k) => vals[k]
+--         | i /= seg(k) => dest[i]
+--
+--   - By the semantics of scatter, the conclusion is:
+--     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+--         | i == is[k] => vals[k]
+--         | i /= is[k] => dest[i]
+--     Substituting is[k]
+--     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+--         | i == seg(k) ^ seg(k+1) - seg(k) > 0 => vals[k]
+--         | i == seg(k) ^ seg(k+1) - seg(k) <= 0 => vals[k]
+--         | i /= seg(k) => dest[i]
+--     Since i ∈ [seg(k), ..., seg(k+1) - 1], we have
+--     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+--         | i == seg(k) ^ True => vals[k]
+--         | i == seg(k) ^ False => vals[k]
+--         | i /= seg(k) => dest[i]
+--     which simplifies to what we wanted to show.
+scatterMono :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterMono dest@(IndexFn (Forall _ dom_dest) _) inds@(IndexFn inds_iter@(Forall k (Iota m)) _) vals = do
+  dest_size <- lift $ rewrite $ domainEnd dom_dest
   -- Match rule.
   vn_k <- newVName "k"
   vn_m <- newVName "m"
@@ -738,9 +763,9 @@ scatterMono dest inds vals = do
   lift $ substParams fn [(vals_hole, vals), (dest_hole, dest)]
   where
     failM msg = do
-      printM 1337 msg
+      printM 1338 msg
       fail msg
-
+scatterMono _ _ _ = fail ""
 
 cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
 cmap f (Cases xs) = Cases (fmap f xs)
@@ -925,9 +950,9 @@ etaExpandErrorMsg loc fn =
     "Only anonymous functions may be passed as argument. Perhaps you want to eta-expand: "
       <> prettyString fn
 
-warningMsg :: (Applicative f, E.Located a) => a -> String -> f ()
+warningMsg :: (Monad m, E.Located a) => a -> String -> m ()
 warningMsg loc msg = do
-  traceM . warningString $
+  printM 1 . warningString $
     prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
 
 quantifiedBy :: Iterator -> IndexFnM a -> IndexFnM a
