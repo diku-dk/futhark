@@ -33,8 +33,7 @@ tests =
         Yes,
       mkTest
         "tests/indexfn/part2indices.fut"
-        ( \[_pivot, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            debugOn
+        ( \[_pivot, fn@(IndexFn (Forall _ (Iota _)) _)] -> do
             prove (InjectiveOn (int2SoP 0) (int2SoP 3)) fn
         )
         Yes,
