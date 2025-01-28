@@ -340,11 +340,8 @@ concatIrreg _segments _env ns reparr = do
   ns_full <- letExp (baseString ns <> "_full") <=< segMap (MkSolo num_segments) $
     \(MkSolo i) -> do
       old_segments <-
-        mapM
-          ( \rep ->
-              letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp i]
-          )
-          reparr
+        forM reparr $ \rep ->
+          letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp i]
       new_segment <-
         letSubExp "new_segment"
           =<< toExp (foldl (+) (pe64 zero) $ map pe64 old_segments)
@@ -366,11 +363,8 @@ concatIrreg _segments _env ns reparr = do
     letTupExp "irregular_scatter_offsets" <=< segMap (MkSolo num_segments) $
       \(MkSolo i) -> do
         segment_sizes <-
-          mapM
-            ( \shape ->
-                letSubExp "segment_size" =<< eIndex shape [eSubExp i]
-            )
-            shapes
+          forM shapes $ \shape ->
+            letSubExp "segment_size" =<< eIndex shape [eSubExp i]
         let prefixes = L.init $ L.inits segment_sizes
         sumprefix <-
           mapM
@@ -384,11 +378,8 @@ concatIrreg _segments _env ns reparr = do
     letTupExp "irregular_scatter_offsets_T" <=< segMap (MkSolo num_segments) $
       \(MkSolo i) -> do
         columns <-
-          mapM
-            ( \offsets ->
-                letSubExp "segment_offset" =<< eIndex offsets [eSubExp i]
-            )
-            scatter_offsets
+          forM scatter_offsets $ \offsets ->
+            letSubExp "segment_offset" =<< eIndex offsets [eSubExp i]
         pure $ subExpsRes columns
 
   -- Scatter data into result array
