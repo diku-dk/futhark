@@ -2,16 +2,17 @@
 --
 -- The strategy is to split type checking into two (main) passes:
 --
--- 1) A size-agnostic pass that generates constraints (type Ct) which
--- are then solved offline to find a solution. This produces an AST
--- where most of the type annotations are just references to type
--- variables. Further, all the size-specific annotations (e.g.
--- existential sizes) just contain dummy values, such as empty lists.
--- The constraints use a type representation where all dimensions are
--- the same. However, we do try to take to store the sizes resulting
--- from explicit type ascriptions - these cannot refer to inferred
--- existentials, so it is safe to resolve them here. We don't do
--- anything with this information, however.
+-- 1) A size-agnostic pass that generates type constraints (type Ct)
+-- and AUTOMAP constraints (type CtAM) which are later solved offline
+-- to find a solution. This produces an AST where most of the type
+-- annotations are just references to type variables. Further, all the
+-- size-specific annotations (e.g. existential sizes) just contain
+-- dummy values, such as empty lists. The constraints use a type
+-- representation where all dimensions are the same. However, we do
+-- try to store the sizes resulting from explicit type ascriptions -
+-- these cannot refer to inferred existentials, so it is safe to
+-- resolve them here. We don't do anything with this information,
+-- however.
 --
 -- 2) Pass (1) has given us a program where we know the types of
 -- everything, but the sizes of nothing. Pass (2) then does
@@ -20,21 +21,6 @@
 -- type of everything. This can be implemented using online constraint
 -- solving (as before), or perhaps a completely syntax-driven
 -- approach.
---
--- As of this writing, only the constraint generation part of pass (1)
--- has been implemented, and it is very likely that some of the
--- constraints are actually wrong. Next step is to imlement the
--- solver. Currently all we do is dump the constraints to the
--- terminal.
---
--- Also, no thought whatsoever has been put into quality of type
--- errors yet. However, I think an approach based on tacking source
--- information onto constraints should work well, as all constraints
--- ultimately originate from some bit of program syntax.
---
--- Also no thought has been put into how to handle the liftedness
--- stuff. Since it does not really affect choices made during
--- inference, perhaps we can do it in a post-inference check.
 module Language.Futhark.TypeChecker.Terms2
   ( checkValDef,
     checkSingleExp,
@@ -1353,6 +1339,7 @@ generaliseAndDefaults unconstrained solution t = do
       M.fromList (map (,Scalar (Record mempty)) unconstrained') <> solution'
     )
 
+-- | Type check a single value definition.
 checkValDef ::
   ( VName,
     Maybe (TypeExp (ExpBase NoInfo VName) VName),
@@ -1430,6 +1417,8 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
     onArtificial artificial solution =
       M.map (substTyVars (`M.lookup` solution) . first (const ())) artificial <> solution
 
+-- | Type check a single expression, which may have a polymorphic
+-- type.
 checkSingleExp ::
   ExpBase NoInfo VName ->
   TypeM (Either TypeError ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
@@ -1449,8 +1438,8 @@ checkSingleExp e = runTermM $ do
       x <- generaliseAndDefaults unconstrained solution $ first (const ()) e_t
       pure (Right x, e'')
 
--- | Type-check a single size expression in isolation.  This expression may
--- turn out to be polymorphic, in which case it is unified with i64.
+-- | Type-check a single size expression in isolation, which must have
+-- type @i64@.
 checkSizeExp ::
   ExpBase NoInfo VName ->
   TypeM (Either TypeError ([UnconTyVar], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
