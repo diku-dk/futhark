@@ -698,9 +698,9 @@ scatterMono dest inds vals = do
   let f_seg = mapping s M.! vn_f_seg
   -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
   s_p :: Maybe (Substitution Symbol) <- lift $ algebraContext inds $ do
-      addRelIterator inds_iter
-      seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
-      unify p_seg (seg_delta :> int2SoP 0)
+    addRelIterator inds_iter
+    seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
+    unify p_seg (seg_delta :> int2SoP 0)
   when (isNothing s_p) (failM "scatterMono: predicate not on desired form")
   -- Check that seg is monotonically increasing. (Essentially checking
   -- that OOB branch is never taken in inds.)
@@ -1056,17 +1056,17 @@ checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
               <> " => "
               <> prettyString (bound e_idx)
               <> ")."
-          where
-            -- TODO remove this.
-            printExtraDebugInfo n = do
-              env <- getAlgEnv
-              printM 1337 $
-                "Failed bounds-checking:"
-                  <> "\nf_xs:"
-                  <> prettyString f_xs
-                  <> "\nf_idx: "
-                  <> prettyString f_idx
-                  <> "\nCASE f_idx: "
-                  <> show n
-                  <> "\nUnder AlgEnv:"
-                  <> prettyString env
+      where
+        -- TODO remove this.
+        printExtraDebugInfo n = do
+          env <- getAlgEnv
+          printM 1337 $
+            "Failed bounds-checking:"
+              <> "\nf_xs:"
+              <> prettyString f_xs
+              <> "\nf_idx: "
+              <> prettyString f_idx
+              <> "\nCASE f_idx: "
+              <> show n
+              <> "\nUnder AlgEnv:"
+              <> prettyString env
