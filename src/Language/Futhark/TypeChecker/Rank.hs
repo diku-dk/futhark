@@ -1,6 +1,7 @@
 module Language.Futhark.TypeChecker.Rank
   ( rankAnalysis,
     rankAnalysis1,
+    CtAM (..),
   )
 where
 
@@ -24,6 +25,14 @@ import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad
 import System.IO.Unsafe
+
+data CtAM = CtAM Reason SVar SVar (Shape SComp)
+
+instance Located CtAM where
+  locOf (CtAM r _ _ _) = locOf r
+
+instance Pretty CtAM where
+  pretty (CtAM _ r m _) = prettyName r <+> "=" <+> "•" <+> "∨" <+> prettyName m <+> "=" <+> "•"
 
 type LSum = LP.LSum VName Int
 
@@ -84,7 +93,6 @@ distribAndSplitArrows (CtEq r t1 t2) =
           t1r' = t1r `setUniqueness` NoUniqueness
           t2r' = t2r `setUniqueness` NoUniqueness
     splitArrows c = [c]
-distribAndSplitArrows ct = [ct]
 
 distribAndSplitCnstrs :: Ct -> [Ct]
 distribAndSplitCnstrs ct@(CtEq r t1 t2) =
@@ -103,7 +111,6 @@ distribAndSplitCnstrs ct@(CtEq r t1 t2) =
     splitCnstrs (CtEq reason (Scalar (Sum cs1)) (Scalar (Sum cs2))) =
       concat $ concat $ (zipWith . zipWith) (\x y -> distribAndSplitCnstrs $ CtEq reason x y) (M.elems cs1) (M.elems cs2)
     splitCnstrs _ = []
-distribAndSplitCnstrs ct = [ct]
 
 data RankState = RankState
   { rankBinVars :: Map VName VName,
@@ -148,7 +155,9 @@ addObj sv =
 
 addCt :: Ct -> RankM ()
 addCt (CtEq _ t1 t2) = addConstraint $ rank t1 ~==~ rank t2
-addCt (CtAM _ r m f) = do
+
+addCtAM :: CtAM -> RankM ()
+addCtAM (CtAM _ r m f) = do
   b_r <- binVar r
   b_m <- binVar m
   b_max <- VName "c_max" <$> incCounter
@@ -168,8 +177,8 @@ addTyVarInfo tv (_, TyVarRecord {}) =
 addTyVarInfo tv (_, TyVarSum {}) =
   addConstraint $ rank tv ~==~ constant 0
 
-mkLinearProg :: [Ct] -> TyVars -> LinearProg
-mkLinearProg cs tyVars =
+mkLinearProg :: [Ct] -> [CtAM] -> TyVars -> LinearProg
+mkLinearProg cs cs_am tyVars =
   LP.LinearProg
     { optType = Minimize,
       objective = rankObj finalState,
@@ -187,6 +196,7 @@ mkLinearProg cs tyVars =
         }
     buildLP = do
       mapM_ addCt cs
+      mapM_ addCtAM cs_am
       mapM_ (uncurry addTyVarInfo) $ M.toList tyVars
     finalState = flip execState initState $ runRankM buildLP
 
@@ -249,7 +259,7 @@ solveRankILP loc prog = do
 rankAnalysis1 ::
   (MonadTypeChecker m) =>
   SrcLoc ->
-  [Ct] ->
+  ([Ct], [CtAM]) ->
   TyVars ->
   M.Map TyVar Type ->
   [Pat ParamType] ->
@@ -261,8 +271,8 @@ rankAnalysis1 ::
       Exp,
       Maybe (TypeExp Exp VName)
     )
-rankAnalysis1 loc cs tyVars artificial params body retdecl = do
-  solutions <- rankAnalysis loc cs tyVars artificial params body retdecl
+rankAnalysis1 loc (cs, cs_am) tyVars artificial params body retdecl = do
+  solutions <- rankAnalysis loc (cs, cs_am) tyVars artificial params body retdecl
   case solutions of
     [sol] -> pure sol
     sols -> do
@@ -277,7 +287,7 @@ rankAnalysis1 loc cs tyVars artificial params body retdecl = do
 rankAnalysis ::
   (MonadTypeChecker m) =>
   SrcLoc ->
-  [Ct] ->
+  ([Ct], [CtAM]) ->
   TyVars ->
   M.Map TyVar Type ->
   [Pat ParamType] ->
@@ -290,9 +300,9 @@ rankAnalysis ::
         Maybe (TypeExp Exp VName)
       )
     ]
-rankAnalysis _ [] tyVars artificial params body retdecl =
+rankAnalysis _ ([], []) tyVars artificial params body retdecl =
   pure [(([], artificial, tyVars), params, body, retdecl)]
-rankAnalysis loc cs tyVars artificial params body retdecl = do
+rankAnalysis loc (cs, cs_am) tyVars artificial params body retdecl = do
   debugTraceM 3 $
     unlines
       [ "##rankAnalysis",
@@ -301,8 +311,8 @@ rankAnalysis loc cs tyVars artificial params body retdecl = do
         "cs':",
         unlines $ map prettyString cs'
       ]
-  rank_maps <- solveRankILP loc (mkLinearProg cs' tyVars)
-  cts_tyvars' <- mapM (substRankInfo cs artificial tyVars) rank_maps
+  rank_maps <- solveRankILP loc (mkLinearProg cs' cs_am tyVars)
+  cts_tyvars' <- mapM (substRankInfo (cs, cs_am) artificial tyVars) rank_maps
   let bodys = map (`updAM` body) rank_maps
       params' = map ((`map` params) . updAMPat) rank_maps
       retdecls = map ((<$> retdecl) . updAMTypeExp) rank_maps
@@ -316,19 +326,16 @@ type RankMap = M.Map VName Int
 
 substRankInfo ::
   (MonadTypeChecker m) =>
-  [Ct] ->
+  ([Ct], [CtAM]) ->
   M.Map VName Type ->
   TyVars ->
   RankMap ->
   m ([Ct], M.Map VName Type, TyVars)
-substRankInfo cs artificial tyVars rankmap = do
+substRankInfo (cs, _cs_am) artificial tyVars rankmap = do
   ((cs', artificial', tyVars'), new_cs, new_tyVars) <-
     runSubstT tyVars rankmap $
-      (,,) <$> substRanks (filter (not . isCtAM) cs) <*> traverse substRanks artificial <*> traverse substRanks tyVars
+      (,,) <$> substRanks cs <*> traverse substRanks artificial <*> traverse substRanks tyVars
   pure (cs' <> new_cs, artificial', new_tyVars <> tyVars')
-  where
-    isCtAM (CtAM {}) = True
-    isCtAM _ = False
 
 runSubstT :: (MonadTypeChecker m) => TyVars -> RankMap -> SubstT m a -> m (a, [Ct], TyVars)
 runSubstT tyVars rankmap (SubstT m) = do
@@ -443,7 +450,6 @@ instance SubstRanks (TypeBase SComp u) where
 
 instance SubstRanks Ct where
   substRanks (CtEq r t1 t2) = CtEq r <$> substRanks t1 <*> substRanks t2
-  substRanks _ = error ""
 
 instance SubstRanks TyVarInfo where
   substRanks tv@TyVarFree {} = pure tv

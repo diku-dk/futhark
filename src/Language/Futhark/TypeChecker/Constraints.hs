@@ -1,3 +1,5 @@
+-- | Constraint solver for solving type equations produced
+-- post-AUTOMAP.
 module Language.Futhark.TypeChecker.Constraints
   ( Reason (..),
     SVar,
@@ -85,21 +87,17 @@ instance Located Reason where
   locOf (ReasonApplySplit l _ _ _) = l
   locOf (ReasonBranches l _ _) = l
 
-data Ct
-  = CtEq Reason Type Type
-  | CtAM Reason SVar SVar (Shape SComp)
+data Ct = CtEq Reason Type Type
   deriving (Show)
 
 ctReason :: Ct -> Reason
 ctReason (CtEq r _ _) = r
-ctReason (CtAM r _ _ _) = r
 
 instance Located Ct where
   locOf = locOf . ctReason
 
 instance Pretty Ct where
   pretty (CtEq _ t1 t2) = pretty t1 <+> "~" <+> pretty t2
-  pretty (CtAM _ r m _) = prettyName r <+> "=" <+> "•" <+> "∨" <+> prettyName m <+> "=" <+> "•"
 
 type Constraints = [Ct]
 
@@ -684,7 +682,6 @@ solveCt :: Ct -> SolveM ()
 solveCt ct =
   case ct of
     CtEq reason t1 t2 -> solveEq reason mempty t1 t2
-    CtAM {} -> pure () -- Good vibes only.
 
 scopeCheck :: Reason -> TyVar -> Int -> Type -> SolveM ()
 scopeCheck reason v v_lvl ty = do

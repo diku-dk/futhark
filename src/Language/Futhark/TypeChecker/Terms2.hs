@@ -112,6 +112,7 @@ data TermEnv = TermEnv
 -- generating unique names, as these will be user-visible.
 data TermState = TermState
   { termConstraints :: Constraints,
+    termAM :: [CtAM],
     termTyVars :: TyVars,
     termTyParams :: TyParams,
     termCounter :: !Int,
@@ -193,6 +194,7 @@ runTermM (TermM m) = do
       initial_state =
         TermState
           { termConstraints = mempty,
+            termAM = mempty,
             termTyVars = mempty,
             termTyParams = mempty,
             termWarnings = mempty,
@@ -311,7 +313,10 @@ ctEq reason t1 t2 =
     t2' = t2 `setUniqueness` NoUniqueness
 
 ctAM :: Reason -> SVar -> SVar -> Shape SComp -> TermM ()
-ctAM reason r m f = addCt $ CtAM reason r m f
+ctAM reason r m f =
+  modify $ \s -> s {termAM = ct : termAM s}
+  where
+    ct = CtAM reason r m f
 
 localScope :: (TermScope -> TermScope) -> TermM a -> TermM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
@@ -1370,6 +1375,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
       pure (params', body', retdecl')
 
   cts <- gets termConstraints
+  cts_am <- gets termAM
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
   artificial <- gets termArtificial
@@ -1389,7 +1395,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
       ]
 
   onRankSolution typarams
-    =<< rankAnalysis1 loc cts tyvars artificial params' body' retdecl'
+    =<< rankAnalysis1 loc (cts, cts_am) tyvars artificial params' body' retdecl'
   where
     onRankSolution typarams ((cts', artificial, tyvars'), params', body'', retdecl') = do
       solution <-
@@ -1430,11 +1436,12 @@ checkSingleExp ::
 checkSingleExp e = runTermM $ do
   e' <- checkExp e
   cts <- gets termConstraints
+  cts_am <- gets termAM
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
   artificial <- gets termArtificial
   ((cts', _artificial', tyvars'), _, e'', _) <-
-    rankAnalysis1 (srclocOf e') cts tyvars artificial [] e' Nothing
+    rankAnalysis1 (srclocOf e') (cts, cts_am) tyvars artificial [] e' Nothing
   case solve cts' typarams tyvars' of
     Left err -> pure (Left err, e'')
     Right (unconstrained, solution) -> do
@@ -1450,12 +1457,13 @@ checkSizeExp ::
 checkSizeExp e = runTermM $ do
   e' <- checkSizeExp' e
   cts <- gets termConstraints
+  cts_am <- gets termAM
   tyvars <- gets termTyVars
   typarams <- gets termTyParams
   artificial <- gets termArtificial
 
   (cts_tyvars', _, es', _) <-
-    L.unzip4 <$> rankAnalysis (srclocOf e) cts tyvars artificial [] e' Nothing
+    L.unzip4 <$> rankAnalysis (srclocOf e) (cts, cts_am) tyvars artificial [] e' Nothing
 
   solutions <-
     forM cts_tyvars' $ \(cts', _artificial', tyvars') ->
