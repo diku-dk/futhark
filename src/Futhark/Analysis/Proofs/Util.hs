@@ -15,7 +15,7 @@ prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show 
     subscript = flip lookup $ zip "-0123456789" "₋₀₁₂₃₄₅₆₇₈₉"
 
 prettyHole :: VName -> Doc ann
-prettyHole x = "\ESC[31m•" <> prettyName x <> "\ESC[0m"
+prettyHole x = "\ESC[4m•" <> prettyName x <> "\ESC[24m"
 
 prettyBinding :: (Pretty a) => VName -> [a] -> String
 prettyBinding vn e =
