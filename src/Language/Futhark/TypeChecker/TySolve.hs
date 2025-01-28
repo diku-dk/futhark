@@ -1,6 +1,6 @@
+-- | The constraint solver for type equality constraints.
 module Language.Futhark.TypeChecker.TySolve
   ( Type,
-    TyParams,
     Solution,
     UnconTyVar,
     solve,
@@ -24,9 +24,10 @@ import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
 import Language.Futhark.TypeChecker.Types (substTyVars)
 
 -- | The type representation used by the constraint solver. Agnostic
--- to sizes.
+-- to sizes and uniqueness.
 type Type = CtType ()
 
+-- | A (partial) solution for a type variable.
 data TyVarSol
   = -- | Has been substituted with this.
     TyVarSol Type
@@ -652,6 +653,8 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
               </> "which is not possible."
     _ -> pure ()
 
+-- | Solve type constraints, producing either an error or a solution,
+-- alongside a list of unconstrained type variables.
 solve ::
   [CtTy ()] ->
   TyParams ->
