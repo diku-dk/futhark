@@ -143,7 +143,6 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just ret) _ _ params body _ _ val_loc)
       forM_ params addTypeRefinement
       forM_ params addBooleanNames
       forM_ params addSizeVariables
-      debugPrintAlgEnv
       indexfns <- forward body >>= mapM rewrite >>= bindfn vn
       insertTopLevel vn (params, indexfns)
       checkRefinement indexfns ret
@@ -811,7 +810,6 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
             "!=" -> (:/=)
             _ -> undefined
       ys <- forwardRefinementExp e_y
-      debugPrintAlgEnv
       -- Create check as an index function whose cases contain the refinement.
       let check =
             mkCheck $
@@ -1045,18 +1043,9 @@ checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
     doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
     doCheck bound =
       foreachCase f_idx $ \n -> do
-        -- addRelIterator (iterator f_xs)
         c <- askQ (CaseCheck bound) f_idx n
         unless (isYes c) $ do
-          debugM $
-            "Failed bounds-checking:"
-              <> "\nf_xs:"
-              <> prettyString f_xs
-              <> "\nf_idx: "
-              <> prettyString f_idx
-              <> "\nCASE f_idx: "
-              <> show n
-          debugPrintAlgEnv
+          printExtraDebugInfo n
 
           let (p_idx, e_idx) = getCase n $ body f_idx
           errorMsg (E.locOf e) $
@@ -1067,3 +1056,17 @@ checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
               <> " => "
               <> prettyString (bound e_idx)
               <> ")."
+          where
+            -- TODO remove this.
+            printExtraDebugInfo n = do
+              env <- getAlgEnv
+              printM 1337 $
+                "Failed bounds-checking:"
+                  <> "\nf_xs:"
+                  <> prettyString f_xs
+                  <> "\nf_idx: "
+                  <> prettyString f_idx
+                  <> "\nCASE f_idx: "
+                  <> show n
+                  <> "\nUnder AlgEnv:"
+                  <> prettyString env

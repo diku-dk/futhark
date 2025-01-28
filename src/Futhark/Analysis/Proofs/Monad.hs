@@ -28,6 +28,7 @@ module Futhark.Analysis.Proofs.Monad
     getTopLevelDefs,
     printM,
     emphString,
+    getAlgEnv,
   )
 where
 
@@ -106,6 +107,9 @@ getTopLevelIndexFns = gets toplevel
 
 getTopLevelDefs :: IndexFnM (M.Map VName ([E.Pat E.ParamType], E.Exp))
 getTopLevelDefs = gets defs
+
+getAlgEnv :: IndexFnM (AlgEnv Algebra.Symbol Symbol Algebra.Property)
+getAlgEnv = gets algenv
 
 insertIndexFn :: E.VName -> [IndexFn] -> IndexFnM ()
 insertIndexFn x v =
