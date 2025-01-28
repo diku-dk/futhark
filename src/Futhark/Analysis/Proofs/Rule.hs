@@ -268,8 +268,9 @@ rulesIndexFn = do
                   body = cases [(Bool True, e1_b .+. e2_sum)]
                 },
           sideCondition = \s -> do
+            e1_symbols <- concatMap fst . sopToLists <$> sub s (Hole h1)
             e2_symbols <- concatMap fst . sopToLists <$> sub s (Hole h2)
-            pure $ Recurrence `notElem` e2_symbols
+            pure $ Recurrence `notElem` (e1_symbols <> e2_symbols)
         },
       -- TODO deduplicate Iota/Cat rules
       Rule
@@ -301,7 +302,8 @@ rulesIndexFn = do
                   body = cases [(Bool True, e1_b .+. e2_sum)]
                 },
           sideCondition = \s -> do
+            e1_symbols <- concatMap fst . sopToLists <$> sub s (Hole h1)
             e2_symbols <- concatMap fst . sopToLists <$> sub s (Hole h2)
-            pure $ Recurrence `notElem` e2_symbols
+            pure $ Recurrence `notElem` (e1_symbols <> e2_symbols)
         }
     ]
