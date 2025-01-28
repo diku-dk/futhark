@@ -35,7 +35,7 @@ import Futhark.Analysis.Proofs.Monad (IndexFnM)
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), VNameSource, newNameFromString)
-import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mulSoPs, sopFromList, sopToList, sopToLists, term2SoP, termToList, toTerm, zeroSoP, mapSymM)
+import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mapSymM, mulSoPs, sopToList, sopToLists, term2SoP, termToList, toTerm, zeroSoP)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (Pretty (pretty), braces, commastack)
 import Language.Futhark (VName)
