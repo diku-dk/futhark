@@ -26,21 +26,11 @@ import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad
 import System.IO.Unsafe
 
-data CtAM = CtAM Reason SVar SVar (Shape SComp)
-
-instance Located CtAM where
-  locOf (CtAM r _ _ _) = locOf r
-
-instance Pretty CtAM where
-  pretty (CtAM _ r m _) = prettyName r <+> "=" <+> "•" <+> "∨" <+> prettyName m <+> "=" <+> "•"
-
 type LSum = LP.LSum VName Int
 
 type Constraint = LP.Constraint VName Int
 
 type LinearProg = LP.LinearProg VName Int
-
-type ScalarType = ScalarTypeBase SComp NoUniqueness
 
 class Rank a where
   rank :: a -> LSum
@@ -55,7 +45,7 @@ instance Rank SComp where
 instance Rank (Shape SComp) where
   rank = foldr (\d r -> rank d ~+~ r) (constant 0) . shapeDims
 
-instance Rank ScalarType where
+instance Rank (ScalarTypeBase SComp u) where
   rank Prim {} = constant 0
   rank (TypeVar _ (QualName [] v) []) = var v
   rank (TypeVar {}) = constant 0
@@ -63,11 +53,11 @@ instance Rank ScalarType where
   rank (Record {}) = constant 0
   rank (Sum {}) = constant 0
 
-instance Rank Type where
+instance Rank (TypeBase SComp u) where
   rank (Scalar t) = rank t
   rank (Array _ shape t) = rank shape ~+~ rank t
 
-distribAndSplitArrows :: Ct -> [Ct]
+distribAndSplitArrows :: CtTy d -> [CtTy d]
 distribAndSplitArrows (CtEq r t1 t2) =
   splitArrows $ CtEq r (distribute t1) (distribute t2)
   where
@@ -94,7 +84,7 @@ distribAndSplitArrows (CtEq r t1 t2) =
           t2r' = t2r `setUniqueness` NoUniqueness
     splitArrows c = [c]
 
-distribAndSplitCnstrs :: Ct -> [Ct]
+distribAndSplitCnstrs :: CtTy d -> [CtTy d]
 distribAndSplitCnstrs ct@(CtEq r t1 t2) =
   ct : splitCnstrs (CtEq r (distribute1 t1) (distribute1 t2))
   where
@@ -153,7 +143,7 @@ addObj :: SVar -> RankM ()
 addObj sv =
   modify $ \s -> s {rankObj = rankObj s ~+~ var sv}
 
-addCt :: Ct -> RankM ()
+addCt :: CtTy SComp -> RankM ()
 addCt (CtEq _ t1 t2) = addConstraint $ rank t1 ~==~ rank t2
 
 addCtAM :: CtAM -> RankM ()
@@ -168,7 +158,7 @@ addCtAM (CtAM _ r m f) = do
   addObj m
   addObj tr
 
-addTyVarInfo :: TyVar -> (Int, TyVarInfo) -> RankM ()
+addTyVarInfo :: TyVar -> (Int, TyVarInfo d) -> RankM ()
 addTyVarInfo _ (_, TyVarFree {}) = pure ()
 addTyVarInfo tv (_, TyVarPrim {}) =
   addConstraint $ rank tv ~==~ constant 0
@@ -177,7 +167,7 @@ addTyVarInfo tv (_, TyVarRecord {}) =
 addTyVarInfo tv (_, TyVarSum {}) =
   addConstraint $ rank tv ~==~ constant 0
 
-mkLinearProg :: [Ct] -> [CtAM] -> TyVars -> LinearProg
+mkLinearProg :: [CtTy SComp] -> [CtAM] -> TyVars d -> LinearProg
 mkLinearProg cs cs_am tyVars =
   LP.LinearProg
     { optType = Minimize,
@@ -259,14 +249,14 @@ solveRankILP loc prog = do
 rankAnalysis1 ::
   (MonadTypeChecker m) =>
   SrcLoc ->
-  ([Ct], [CtAM]) ->
-  TyVars ->
-  M.Map TyVar Type ->
+  ([CtTy SComp], [CtAM]) ->
+  TyVars SComp ->
+  M.Map TyVar (CtType SComp) ->
   [Pat ParamType] ->
   Exp ->
   Maybe (TypeExp Exp VName) ->
   m
-    ( ([Ct], M.Map TyVar Type, TyVars),
+    ( ([CtTy ()], M.Map TyVar (CtType ()), TyVars ()),
       [Pat ParamType],
       Exp,
       Maybe (TypeExp Exp VName)
@@ -287,21 +277,22 @@ rankAnalysis1 loc (cs, cs_am) tyVars artificial params body retdecl = do
 rankAnalysis ::
   (MonadTypeChecker m) =>
   SrcLoc ->
-  ([Ct], [CtAM]) ->
-  TyVars ->
-  M.Map TyVar Type ->
+  ([CtTy SComp], [CtAM]) ->
+  TyVars SComp ->
+  M.Map TyVar (CtType SComp) ->
   [Pat ParamType] ->
   Exp ->
   Maybe (TypeExp Exp VName) ->
   m
-    [ ( ([Ct], M.Map TyVar Type, TyVars),
+    [ ( ([CtTy ()], M.Map TyVar (CtType ()), TyVars ()),
         [Pat ParamType],
         Exp,
         Maybe (TypeExp Exp VName)
       )
     ]
-rankAnalysis _ ([], []) tyVars artificial params body retdecl =
-  pure [(([], artificial, tyVars), params, body, retdecl)]
+rankAnalysis _ ([], []) tyVars artificial params body retdecl = do
+  (_, artificial', tyVars') <- substRankInfo ([], []) artificial tyVars mempty
+  pure [(([], artificial', tyVars'), params, body, retdecl)]
 rankAnalysis loc (cs, cs_am) tyVars artificial params body retdecl = do
   debugTraceM 3 $
     unlines
@@ -326,18 +317,26 @@ type RankMap = M.Map VName Int
 
 substRankInfo ::
   (MonadTypeChecker m) =>
-  ([Ct], [CtAM]) ->
-  M.Map VName Type ->
-  TyVars ->
+  ([CtTy SComp], [CtAM]) ->
+  M.Map VName (CtType SComp) ->
+  TyVars SComp ->
   RankMap ->
-  m ([Ct], M.Map VName Type, TyVars)
+  m ([CtTy ()], M.Map VName (CtType ()), TyVars ())
 substRankInfo (cs, _cs_am) artificial tyVars rankmap = do
   ((cs', artificial', tyVars'), new_cs, new_tyVars) <-
     runSubstT tyVars rankmap $
-      (,,) <$> substRanks cs <*> traverse substRanks artificial <*> traverse substRanks tyVars
+      (,,)
+        <$> traverse substRanksCt cs
+        <*> traverse substRanksType artificial
+        <*> substRanksTyVars tyVars
   pure (cs' <> new_cs, artificial', new_tyVars <> tyVars')
 
-runSubstT :: (MonadTypeChecker m) => TyVars -> RankMap -> SubstT m a -> m (a, [Ct], TyVars)
+runSubstT ::
+  (MonadTypeChecker m) =>
+  TyVars SComp ->
+  RankMap ->
+  SubstT m a ->
+  m (a, [CtTy ()], TyVars ())
 runSubstT tyVars rankmap (SubstT m) = do
   let env =
         SubstEnv
@@ -364,14 +363,14 @@ newtype SubstT m a = SubstT (StateT SubstState (ReaderT SubstEnv m) a)
     )
 
 data SubstEnv = SubstEnv
-  { envTyVars :: TyVars,
+  { envTyVars :: TyVars SComp,
     envRanks :: RankMap
   }
 
 data SubstState = SubstState
-  { substTyVars :: TyVars,
+  { substTyVars :: TyVars (),
     substNewVars :: Map TyVar TyVar,
-    substNewCts :: [Ct]
+    substNewCts :: [CtTy ()]
   }
 
 instance MonadTrans SubstT where
@@ -395,10 +394,10 @@ newTyVar t = do
       }
   pure t'
 
-rankToShape :: (Monad m) => VName -> SubstT m (Shape SComp)
+rankToShape :: (Monad m) => VName -> SubstT m (Shape ())
 rankToShape x = do
   rs <- asks envRanks
-  pure $ Shape $ replicate (fromJust $ rs M.!? x) SDim
+  pure $ Shape $ replicate (fromJust $ rs M.!? x) ()
 
 addRankInfo :: (MonadTypeChecker m) => TyVar -> SubstT m ()
 addRankInfo t = do
@@ -416,51 +415,56 @@ addRankInfo t = do
           l = case tvinfo of
             TyVarFree _ tvinfo_l -> tvinfo_l
             _ -> Unlifted
-      modify $ \s -> s {substTyVars = M.insert t' (level, tvinfo) $ substTyVars s}
+      tvinfo' <- substRanksTyVarInfo tvinfo
+      modify $ \s -> s {substTyVars = M.insert t' (level, tvinfo') $ substTyVars s}
       modify $ \s -> s {substTyVars = M.insert t (level, TyVarFree (locOf tvinfo) l) $ substTyVars s}
 
-class SubstRanks a where
-  substRanks :: (MonadTypeChecker m) => a -> SubstT m a
+substRanksShape :: (Monad m) => Shape SComp -> SubstT m (Shape ())
+substRanksShape = foldM (\s d -> (s <>) <$> instDim d) mempty
+  where
+    instDim SDim = pure $ Shape [()]
+    instDim (SVar x) = rankToShape x
 
-instance (SubstRanks a) => SubstRanks [a] where
-  substRanks = mapM substRanks
+substRanksType :: (MonadTypeChecker m) => TypeBase SComp u -> SubstT m (TypeBase () u)
+substRanksType (Scalar (TypeVar vn (QualName qs x) targs)) = do
+  when (null qs) $ addRankInfo x
+  targs' <- mapM onTypeArg targs
+  pure $ Scalar $ TypeVar vn (QualName qs x) targs'
+  where
+    onTypeArg (TypeArgType t) = TypeArgType <$> substRanksType t
+    -- SVar cannot occur as argument to abstract ype.
+    onTypeArg (TypeArgDim _) = pure $ TypeArgDim ()
+substRanksType (Scalar (Arrow u p d ta (RetType retdims tr))) = do
+  ta' <- substRanksType ta
+  tr' <- substRanksType tr
+  pure $ Scalar (Arrow u p d ta' (RetType retdims tr'))
+substRanksType (Scalar (Record fs)) =
+  Scalar . Record <$> traverse substRanksType fs
+substRanksType (Scalar (Sum cs)) =
+  Scalar . Sum <$> (traverse . traverse) substRanksType cs
+substRanksType (Scalar (Prim pt)) = pure $ Scalar $ Prim pt
+substRanksType (Array u shape t) = do
+  shape' <- substRanksShape shape
+  t' <- substRanksType $ Scalar t
+  pure $ arrayOfWithAliases u shape' t'
 
-instance SubstRanks (Shape SComp) where
-  substRanks = foldM (\s d -> (s <>) <$> instDim d) mempty
-    where
-      instDim SDim = pure $ Shape $ pure SDim
-      instDim (SVar x) = rankToShape x
+substRanksCt :: (MonadTypeChecker m) => CtTy SComp -> SubstT m (CtTy ())
+substRanksCt (CtEq r t1 t2) =
+  CtEq
+    <$> traverse substRanksType r
+    <*> substRanksType t1
+    <*> substRanksType t2
 
-instance SubstRanks (TypeBase SComp u) where
-  substRanks t@(Scalar (TypeVar _ (QualName [] x) [])) =
-    addRankInfo x >> pure t
-  substRanks (Scalar (Arrow u p d ta (RetType retdims tr))) = do
-    ta' <- substRanks ta
-    tr' <- substRanks tr
-    pure $ Scalar (Arrow u p d ta' (RetType retdims tr'))
-  substRanks (Scalar (Record fs)) =
-    Scalar . Record <$> traverse substRanks fs
-  substRanks (Scalar (Sum cs)) =
-    Scalar . Sum <$> (traverse . traverse) substRanks cs
-  substRanks (Array u shape t) = do
-    shape' <- substRanks shape
-    t' <- substRanks $ Scalar t
-    pure $ arrayOfWithAliases u shape' t'
-  substRanks t = pure t
+substRanksTyVarInfo :: (MonadTypeChecker m) => TyVarInfo SComp -> SubstT m (TyVarInfo ())
+substRanksTyVarInfo (TyVarFree loc l) = pure $ TyVarFree loc l
+substRanksTyVarInfo (TyVarPrim loc ts) = pure $ TyVarPrim loc ts
+substRanksTyVarInfo (TyVarRecord loc fs) =
+  TyVarRecord loc <$> traverse substRanksType fs
+substRanksTyVarInfo (TyVarSum loc cs) =
+  TyVarSum loc <$> traverse (traverse substRanksType) cs
 
-instance SubstRanks Ct where
-  substRanks (CtEq r t1 t2) = CtEq r <$> substRanks t1 <*> substRanks t2
-
-instance SubstRanks TyVarInfo where
-  substRanks tv@TyVarFree {} = pure tv
-  substRanks tv@TyVarPrim {} = pure tv
-  substRanks (TyVarRecord loc fs) =
-    TyVarRecord loc <$> traverse substRanks fs
-  substRanks (TyVarSum loc cs) =
-    TyVarSum loc <$> (traverse . traverse) substRanks cs
-
-instance SubstRanks (Int, TyVarInfo) where
-  substRanks (lvl, tv) = (lvl,) <$> substRanks tv
+substRanksTyVars :: (MonadTypeChecker m) => TyVars SComp -> SubstT m (TyVars ())
+substRanksTyVars = traverse $ \(lvl, tv) -> (lvl,) <$> substRanksTyVarInfo tv
 
 updAM :: RankMap -> Exp -> Exp
 updAM rank_map e =

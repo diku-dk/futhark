@@ -425,6 +425,7 @@ library
       Language.Futhark.TypeChecker
       Language.Futhark.TypeChecker.Consumption
       Language.Futhark.TypeChecker.Constraints
+      Language.Futhark.TypeChecker.TySolve
       Language.Futhark.TypeChecker.Error
       Language.Futhark.TypeChecker.Names
       Language.Futhark.TypeChecker.Match

@@ -36,6 +36,7 @@ import Futhark.Util (topologicalSort)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Traversals
+import Language.Futhark.TypeChecker.Constraints (Level)
 import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Types
@@ -59,11 +60,6 @@ instance Pretty Usage where
 
 instance Located Usage where
   locOf (Usage _ loc) = locOf loc
-
--- | The level at which a type variable is bound.  Higher means
--- deeper.  We can only unify a type variable at level @i@ with a type
--- @t@ if all type names that occur in @t@ are at most at level @i@.
-type Level = Int
 
 -- | A constraint on a yet-ambiguous type variable.
 data Constraint

@@ -54,8 +54,9 @@ import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Rank
+import Language.Futhark.TypeChecker.TySolve hiding (Type)
 import Language.Futhark.TypeChecker.Types
-import Language.Futhark.TypeChecker.Unify (Level, mkUsage)
+import Language.Futhark.TypeChecker.Unify (mkUsage)
 import Prelude hiding (mod)
 
 data Inferred t
@@ -65,6 +66,13 @@ data Inferred t
 instance Functor Inferred where
   fmap _ NoneInferred = NoneInferred
   fmap f (Ascribed t) = Ascribed (f t)
+
+type Type = CtType SComp
+
+-- | Careful when using this on something that already has an SComp
+-- size: it will throw away information by converting them to SDim.
+toType :: TypeBase Size u -> TypeBase SComp u
+toType = first (const SDim)
 
 data ValBinding
   = BoundV [TypeParam] Type
@@ -97,9 +105,9 @@ data TermEnv = TermEnv
 -- type names.  This is distinct from the usual counter we use for
 -- generating unique names, as these will be user-visible.
 data TermState = TermState
-  { termConstraints :: Constraints,
+  { termConstraints :: [CtTy SComp],
     termAM :: [CtAM],
-    termTyVars :: TyVars,
+    termTyVars :: TyVars SComp,
     termTyParams :: TyParams,
     termCounter :: !Int,
     termWarnings :: Warnings,
@@ -212,7 +220,7 @@ incCounter = do
 tyVarType :: u -> TyVar -> TypeBase dim u
 tyVarType u v = Scalar $ TypeVar u (qualName v) []
 
-newTyVarWith :: Name -> TyVarInfo -> TermM TyVar
+newTyVarWith :: Name -> TyVarInfo SComp -> TermM TyVar
 newTyVarWith desc info = do
   i <- incCounter
   v <- newID $ mkTypeVarName desc i
@@ -286,10 +294,10 @@ asType t = do
 expType :: Exp -> TermM Type
 expType = asType . typeOf -- NOTE: Only place you should use typeOf.
 
-addCt :: Ct -> TermM ()
+addCt :: CtTy SComp -> TermM ()
 addCt ct = modify $ \s -> s {termConstraints = ct : termConstraints s}
 
-ctEq :: Reason -> TypeBase SComp u1 -> TypeBase SComp u2 -> TermM ()
+ctEq :: Reason (CtType SComp) -> TypeBase SComp u1 -> TypeBase SComp u2 -> TermM ()
 ctEq reason t1 t2 =
   -- As a minor optimisation, do not add constraint if the types are
   -- equal.
@@ -298,7 +306,7 @@ ctEq reason t1 t2 =
     t1' = t1 `setUniqueness` NoUniqueness
     t2' = t2 `setUniqueness` NoUniqueness
 
-ctAM :: Reason -> SVar -> SVar -> Shape SComp -> TermM ()
+ctAM :: Reason (CtType SComp) -> SVar -> SVar -> Shape SComp -> TermM ()
 ctAM reason r m f =
   modify $ \s -> s {termAM = ct : termAM s}
   where
