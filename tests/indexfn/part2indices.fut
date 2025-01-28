@@ -1,8 +1,4 @@
 -- Prelude
-def sum_i64 [n] (xs: [n]i64) = if n > 0 then (scan (+) 0 xs)[n-1] else 0
-
-def length [n] 't (_: [n]t) = n
-
 def sum [n] (xs: [n]i64) =
   if n > 0 then (scan (+) 0 xs)[n-1] else 0
 
@@ -15,45 +11,7 @@ def sanity_check1 n = injectiveOn (0, n) (iota n)
 def sanity_check2 n = injectiveOn (0, n-1) (iota n)
 def sanity_check3 n = injectiveOn (1, n) (replicate n 0)
 
--- [NOTE] So far:
--- - andR makes proofs easier because futhark `and` is problematic in that
---   we have to substitute index functions (with multiple cases)
---   into a sum!
---   (This only fails when the andR check would fail anyway, however.
---    Since, if the check succeeds, all cases are 1 and hence get merged.
---    But it also makes it impossible to use andR outside refinements:
---      def injective xs = andR (map (\i -> xs[i] != xs[i+1]) (iota (n - 1))).)
---
--- - andR injectivity proof doesn't go through, but the simplifications
---   needed are obvious:
---      forall i₁₉₃₁₂ . | (conds₄₆₉₂[i₁₉₃₁₂]) ^ (conds₄₆₉₂[1 + i₁₉₃₁₂]) ⇒    1
---                      | (¬(conds₄₆₉₂[i₁₉₃₁₂])) ^ (conds₄₆₉₂[1 + i₁₉₃₁₂]) ⇒
---                        1 + i₁₉₃₁₂ + ∑j₂₇₀₈₇∈(2 + i₁₉₃₁₂ .. -1 + n₄₆₉₁) (conds₄₆₉₂[j₂₇₀₈₇])
---                          ≠ ∑j₂₇₀₈₇∈(0 .. i₁₉₃₁₂) (conds₄₆₉₂[j₂₇₀₈₇])
---                      | (conds₄₆₉₂[i₁₉₃₁₂]) ^ (¬(conds₄₆₉₂[1 + i₁₉₃₁₂])) ⇒    1
---                      | (¬(conds₄₆₉₂[i₁₉₃₁₂])) ^ (¬(conds₄₆₉₂[1 + i₁₉₃₁₂])) ⇒
---                        i₁₉₃₁₂ + ∑j₂₇₀₈₇∈(1 + i₁₉₃₁₂ .. -1 + n₄₆₉₁) (conds₄₆₉₂[j₂₇₀₈₇])
---                          ≠ 1 + i₁₉₃₁₂ + ∑j₂₇₀₈₇∈(2 + i₁₉₃₁₂ .. -1 + n₄₆₉₁) (conds₄₆₉₂[j₂₇₀₈₇]) ]
---   Add tests for Cosmin: [x]
---   Done? [ ]
---
--- - Once andR goes through, I actually think that plain and might go through
---   as well...
--- 
--- - injectiveOn/injective works
--- 
--- - andR and injectiveOn in forward creates the problem that you cannot
---   put this on preconditions in a top-level def, because it will try
---   to show the precondition on the formal parameter during forward
---   Solution: Delay actual checking to pre- and postcondition checks.
---   Done? [ ]
--- 
--- - There are problems with expressing this: (Indexing conds[Sum conds[0:i]] cannot be shown safe).
---   and (map (\i -> conds[i]) (slice inds 0 num_true))
---
--- - TODO fix iota 0; think it causes troubles when substituted in
--- 
-def part2Indices [n]
+def part2indices [n]
   (conds: [n]bool)
   : {(i64, [n]i64) | \(num_true, inds) ->
         num_true <= n
@@ -61,7 +19,7 @@ def part2Indices [n]
         && and (map (\i -> 0 <= i && i < n) inds)
         && injective inds
         -- Proof that inds partition according to conds.
-        && num_true == sum_i64 (map (\c -> if c then 1 else 0) conds)
+        && num_true == sum (map (\c -> if c then 1 else 0) conds)
         && and (map2 (\c ind ->
                        if c
                        then ind < num_true
@@ -76,7 +34,7 @@ def part2Indices [n]
     } =
   -- We could also do the refinements on each element of the tuple.
   -- : ({i64 | \n ->
-  --       n == sum_i64 (map (\c -> if c then 1 else 0) conds)
+  --       n == sum (map (\c -> if c then 1 else 0) conds)
   --    }, {[n]i64 | \inds ->
   --     and (map (\i -> 0 <= i && i < n) inds)
   --       && injective inds
