@@ -1,7 +1,6 @@
 module Language.Futhark.TypeChecker.Rank
   ( rankAnalysis,
     rankAnalysis1,
-    CtAM (..),
   )
 where
 

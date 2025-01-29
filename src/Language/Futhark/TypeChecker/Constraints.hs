@@ -1,5 +1,4 @@
--- | Constraint solver for solving type equations produced
--- post-AUTOMAP.
+-- | Constraints produced (and solved) by the type checker.
 module Language.Futhark.TypeChecker.Constraints
   ( Reason (..),
     SVar,
