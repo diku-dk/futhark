@@ -509,7 +509,7 @@ checkPat' p@(TuplePat ps loc) (Ascribed t)
         "Pattern"
           </> indent 2 (pretty p)
           </> "cannot match ascripted type"
-          </> pretty t
+          </> indent 2 (pretty t)
 checkPat' (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (`checkPat'` NoneInferred) ps <*> pure loc
 checkPat' p@(RecordPat p_fs loc) _
@@ -529,12 +529,11 @@ checkPat' p@(RecordPat p_fs loc) (Ascribed t)
     map fst t_fs' == map (unLoc . fst) p_fs' =
       RecordPat <$> zipWithM check p_fs' t_fs' <*> pure loc
   | otherwise = do
-      p_fs' <-
-        traverse (const $ newType loc Lifted "t" NoUniqueness) $
-          M.fromList $
-            map (first unLoc) p_fs
-      ctEq (Reason (locOf loc)) (Scalar (Record p_fs')) t
-      checkPat' p $ Ascribed $ Observe <$ Scalar (Record p_fs')
+      typeError loc mempty $
+        "Pattern"
+          </> indent 2 (pretty p)
+          </> "cannot match ascripted type"
+          </> indent 2 (pretty t)
   where
     check (L f_loc f, p_f) (_, t_f) =
       (L f_loc f,) <$> checkPat' p_f (Ascribed t_f)
@@ -572,27 +571,17 @@ checkPat' (PatLit l NoInfo loc) NoneInferred = do
   t' <- patLitMkType l loc
   pure $ PatLit l (Info t') loc
 checkPat' (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
-  | Just ts <- M.lookup n cs = do
-      when (length ps /= length ts) $
-        typeError loc mempty $
-          "Pattern #"
-            <> pretty n
-            <> " expects"
-              <+> pretty (length ps)
-              <+> "constructor arguments, but type provides"
-              <+> pretty (length ts)
-              <+> "arguments."
+  | Just ts <- M.lookup n cs,
+    length ps == length ts = do
       ps' <- zipWithM checkPat' ps $ map Ascribed ts
       cs' <- traverse (mapM asStructType) cs
       pure $ PatConstr n (Info (Scalar (Sum cs'))) ps' loc
-checkPat' (PatConstr n NoInfo ps loc) (Ascribed t) = do
-  ps' <- forM ps $ \p -> do
-    p_t <- newType (srclocOf p) Lifted "t" Observe
-    checkPat' p $ Ascribed p_t
-  t' <- newTypeWithConstr loc "t" Observe n =<< mapM (asType . patternType) ps'
-  ctEq (Reason (locOf loc)) t' t
-  t'' <- asStructType t'
-  pure $ PatConstr n (Info $ toParam Observe t'') ps' loc
+checkPat' p@(PatConstr {}) (Ascribed t) =
+  typeError (locOf p) mempty $
+    "Pattern"
+      </> indent 2 (pretty p)
+      </> "cannot match ascripted type"
+      </> indent 2 (pretty t)
 checkPat' (PatConstr n NoInfo ps loc) NoneInferred = do
   ps' <- mapM (`checkPat'` NoneInferred) ps
   t <- newTypeWithConstr loc "t" Observe n =<< mapM (asType . patternType) ps'
