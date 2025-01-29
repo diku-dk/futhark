@@ -54,12 +54,12 @@ algebraContext :: IndexFn -> IndexFnM b -> IndexFnM b
 algebraContext fn m = rollbackAlgEnv $ do
   let ps = getPredicates fn
   mapM_ trackBooleanNames ps
-  _ <- handleQuantifiers fn
   case getIterName (iterator fn) of
     [] -> pure ()
     is -> do
       mapM_ (handlePreds is) ps
       addDisjointedness is ps
+  _ <- handleQuantifiers fn
   m
   where
     getIterName Empty = []
