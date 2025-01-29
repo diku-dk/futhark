@@ -6,6 +6,21 @@
 -- number of built-in language constructs, as well as uniqueness
 -- types.  This is mostly done in an ad hoc way, and many programs
 -- will require the programmer to fall back on type annotations.
+--
+-- The strategy is to split type checking into sveral (main) passes:
+--
+-- 1) A size-agnostic pass implemented in
+-- "Language.Futhark.TypeChecker.Terms.Unsized".
+--
+-- 2) Pass (1) has given us a program where we know the types of
+-- everything, but the sizes of nothing. Pass (2) then does
+-- essentially size inference, with the benefit of already knowing the
+-- full unsized type of everything. This is done using a syntax-driven
+-- approach, similar to Algorithm W.
+--
+-- 3) The program is then checked for violation of uniqueness
+-- properties, which is implemented in
+-- "Language.Futhark.TypeChecker.Consumption".
 module Language.Futhark.TypeChecker.Terms
   ( checkOneExp,
     checkSizeExp,
@@ -37,7 +52,7 @@ import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
 import Language.Futhark.TypeChecker.Terms.Loop
 import Language.Futhark.TypeChecker.Terms.Monad
 import Language.Futhark.TypeChecker.Terms.Pat
-import Language.Futhark.TypeChecker.Terms2 qualified as Terms2
+import Language.Futhark.TypeChecker.Terms.Unsized qualified as Unsized
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
@@ -965,7 +980,7 @@ checkApply _ _ _ _ _ =
 -- parameters will be non-empty.
 checkOneExp :: ExpBase NoInfo VName -> TypeM ([TypeParam], Exp)
 checkOneExp e = do
-  (maybe_tysubsts, e') <- Terms2.checkSingleExp e
+  (maybe_tysubsts, e') <- Unsized.checkSingleExp e
   case maybe_tysubsts of
     Left err -> throwError err
     Right (_generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
@@ -983,7 +998,7 @@ checkOneExp e = do
 -- turn out to be polymorphic, in which case it is unified with i64.
 checkSizeExp :: ExpBase NoInfo VName -> TypeM Exp
 checkSizeExp e = do
-  (maybe_tysubsts, e') <- Terms2.checkSizeExp e
+  (maybe_tysubsts, e') <- Unsized.checkSizeExp e
   case maybe_tysubsts of
     Left err -> throwError err
     Right (_generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
@@ -1578,7 +1593,7 @@ checkFunDef ::
       Exp
     )
 checkFunDef (fname, retdecl, tparams, params, body, loc) =
-  doChecks =<< Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
+  doChecks =<< Unsized.checkValDef (fname, retdecl, tparams, params, body, loc)
   where
     -- TODO: Print out the possibilities. (And also potentially eliminate
     --- some of the possibilities to disambiguate).

@@ -1,4 +1,4 @@
--- | The constraint solver for type equality constraints.
+-- | The constraint solver for unsized type equality constraints.
 module Language.Futhark.TypeChecker.TySolve
   ( Type,
     Solution,

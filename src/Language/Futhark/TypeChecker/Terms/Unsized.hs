@@ -1,27 +1,15 @@
--- | A very WIP reimplementation of type checking of terms.
+-- | Unsized type checking.
 --
--- The strategy is to split type checking into two (main) passes:
---
--- 1) A size-agnostic pass that generates type constraints (type Ct)
--- and AUTOMAP constraints (type CtAM) which are later solved offline
--- to find a solution. This produces an AST where most of the type
--- annotations are just references to type variables. Further, all the
+-- This checker generates type constraints (type 'CtTy') and AUTOMAP
+-- constraints (type 'CtAM') which are then solved to find a solution.
+-- The result is a decorated AST where most of the type annotations
+-- are just references to type variables. Further, all the
 -- size-specific annotations (e.g. existential sizes) just contain
--- dummy values, such as empty lists. The constraints use a type
--- representation where all dimensions are the same. However, we do
--- try to store the sizes resulting from explicit type ascriptions -
--- these cannot refer to inferred existentials, so it is safe to
--- resolve them here. We don't do anything with this information,
--- however.
+-- dummy values, such as empty lists.
 --
--- 2) Pass (1) has given us a program where we know the types of
--- everything, but the sizes of nothing. Pass (2) then does
--- essentially size inference, much like the current/old type checker,
--- but of course with the massive benefit of already knowing the full
--- type of everything. This can be implemented using online constraint
--- solving (as before), or perhaps a completely syntax-driven
--- approach.
-module Language.Futhark.TypeChecker.Terms2
+-- If Futhark had no fancy type system features, then this pass would
+-- essentially be all you needed.
+module Language.Futhark.TypeChecker.Terms.Unsized
   ( checkValDef,
     checkSingleExp,
     checkSizeExp,

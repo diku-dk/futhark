@@ -433,10 +433,10 @@ library
       Language.Futhark.TypeChecker.Monad
       Language.Futhark.TypeChecker.Rank
       Language.Futhark.TypeChecker.Terms
-      Language.Futhark.TypeChecker.Terms2
       Language.Futhark.TypeChecker.Terms.Loop
       Language.Futhark.TypeChecker.Terms.Monad
       Language.Futhark.TypeChecker.Terms.Pat
+      Language.Futhark.TypeChecker.Terms.Unsized
       Language.Futhark.TypeChecker.Types
       Language.Futhark.TypeChecker.Unify
       Language.Futhark.Warnings
