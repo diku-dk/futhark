@@ -474,27 +474,29 @@ checkSizeExp' e = do
   ctEq (Reason (locOf e)) e_t (Scalar (Prim (Signed Int64)))
   pure e'
 
-data Inferred t
+-- | During type checking a pattern, we might find an explicit
+-- ascription. These contain complete type information (although they
+-- must of course still be checked against what remains of the
+-- pattern).
+data Inferred
   = NoneInferred
-  | Ascribed t
+  | Ascribed ParamType
 
 checkPat' ::
   PatBase NoInfo VName ParamType ->
-  Inferred (TypeBase SComp Diet) ->
+  Inferred ->
   TermM (Pat ParamType)
 checkPat' (PatParens p loc) t =
   PatParens <$> checkPat' p t <*> pure loc
 checkPat' (PatAttr attr p loc) t =
   PatAttr <$> checkAttr attr <*> checkPat' p t <*> pure loc
-checkPat' (Id name NoInfo loc) (Ascribed t) = do
-  t' <- asStructType t
-  pure $ Id name (Info t') loc
+checkPat' (Id name NoInfo loc) (Ascribed t) =
+  pure $ Id name (Info t) loc
 checkPat' (Id name NoInfo loc) NoneInferred = do
   t <- newType loc Lifted "t" Observe
   pure $ Id name (Info t) loc
 checkPat' (Wildcard _ loc) (Ascribed t) = do
-  t' <- asStructType t
-  pure $ Wildcard (Info t') loc
+  pure $ Wildcard (Info t) loc
 checkPat' (Wildcard NoInfo loc) NoneInferred = do
   t <- newType loc Lifted "t" Observe
   pure $ Wildcard (Info t) loc
@@ -508,7 +510,7 @@ checkPat' p@(TuplePat ps loc) (Ascribed t)
       typeError loc mempty $
         "Pattern"
           </> indent 2 (pretty p)
-          </> "cannot match ascripted type"
+          </> "cannot match ascribed type"
           </> indent 2 (pretty t)
 checkPat' (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (`checkPat'` NoneInferred) ps <*> pure loc
@@ -532,7 +534,7 @@ checkPat' p@(RecordPat p_fs loc) (Ascribed t)
       typeError loc mempty $
         "Pattern"
           </> indent 2 (pretty p)
-          </> "cannot match ascripted type"
+          </> "cannot match ascribed type"
           </> indent 2 (pretty t)
   where
     check (L f_loc f, p_f) (_, t_f) =
@@ -544,16 +546,16 @@ checkPat' (RecordPat fs loc) NoneInferred =
 checkPat' (PatAscription p t loc) maybe_outer_t = do
   (t', _, RetType _ st, _) <- checkTypeExp checkSizeExp' t
 
-  -- Uniqueness kung fu to make the Monoid(mempty) instance give what
-  -- we expect.  We should perhaps stop being so implicit.
-  st' <- asType $ resToParam st
+  let st' = resToParam st
 
   case maybe_outer_t of
     Ascribed outer_t -> do
-      ctEq
-        (ReasonAscription (locOf loc) (toStruct st') (toStruct outer_t))
-        st'
-        outer_t
+      unless (toType st' == toType outer_t) $
+        typeError loc mempty $
+          "Ascribed type"
+            </> indent 2 (pretty st)
+            </> "cannot match outer ascribed type"
+            </> indent 2 (pretty outer_t)
       PatAscription
         <$> checkPat' p (Ascribed st')
         <*> pure t'
@@ -565,7 +567,7 @@ checkPat' (PatAscription p t loc) maybe_outer_t = do
         <*> pure loc
 checkPat' (PatLit l NoInfo loc) (Ascribed t) = do
   t' <- patLitMkType l loc
-  ctEq (Reason (locOf loc)) (toType t') t
+  ctEq (Reason (locOf loc)) (toType t') (toType t)
   pure $ PatLit l (Info t') loc
 checkPat' (PatLit l NoInfo loc) NoneInferred = do
   t' <- patLitMkType l loc
@@ -574,13 +576,12 @@ checkPat' (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
   | Just ts <- M.lookup n cs,
     length ps == length ts = do
       ps' <- zipWithM checkPat' ps $ map Ascribed ts
-      cs' <- traverse (mapM asStructType) cs
-      pure $ PatConstr n (Info (Scalar (Sum cs'))) ps' loc
+      pure $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
 checkPat' p@(PatConstr {}) (Ascribed t) =
   typeError (locOf p) mempty $
     "Pattern"
       </> indent 2 (pretty p)
-      </> "cannot match ascripted type"
+      </> "cannot match ascribed type"
       </> indent 2 (pretty t)
 checkPat' (PatConstr n NoInfo ps loc) NoneInferred = do
   ps' <- mapM (`checkPat'` NoneInferred) ps
