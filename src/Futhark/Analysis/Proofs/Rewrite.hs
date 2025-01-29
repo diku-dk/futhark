@@ -82,30 +82,27 @@ rewrite_ fn@(IndexFn it xs) = normalizeIndexFn =<< simplifyIndexFn
     -- For example, in
     --   | k > 0  => sum_{j=0}^{k-1} e_j
     --   | k <= 0 => 0
-    -- the second case is covered by the first when k <= 0. So we want just:
+    -- the second case is covered by the first when k <= 0:
     --   | True  => sum_{j=0}^{k-1} e_j
     --
-    -- NOTE This does not attempt all possible ways to merge. Given
-    --   [(p_a => v_a), (p_b => v_b), ...]
-    -- it attempts to merge the second case with the first by checking
-    -- if v_b is equal to v_a assuming p_a---and vice versa.
-    mergeCases cs = merge cs []
+    -- NOTE only tries to merge adjacent cases.
+    mergeCases = merge []
       where
-        merge [] acc = pure $ reverse acc
-        merge (a : as) [] = merge as [a]
-        merge (a@(p_a, v_a) : as) (b@(p_b, v_b) : bs) = do
-          (_, v_b') <- simplifyCase (p_a, v_b)
-          if v_b' == v_a
+        merge acc [] = pure $ reverse acc
+        merge [] (a : as) = merge [a] as
+        merge ((c, e) : as) ((c', e') : bs) = do
+          (_, e_assuming_c') <- simplifyCase (c', e)
+          if e_assuming_c' == e'
             then do
-              p <- rewrite $ p_b :|| p_a
-              merge as ((p, v_b) : bs)
+              c'' <- rewrite $ c :|| c'
+              merge ((c'', e) : as) bs
             else do
-              (_, v_a') <- simplifyCase (p_b, v_a)
-              if v_b == v_a'
+              (_, e'_assuming_c) <- simplifyCase (c, e')
+              if e'_assuming_c == e
                 then do
-                  p <- rewrite $ p_a :|| p_b
-                  merge as ((p, v_a) : bs)
-                else merge as (a : b : bs)
+                  c'' <- rewrite $ c :|| c'
+                  merge ((c'', e') : as) bs
+                else merge ((c', e') : (c, e) : as) bs
 
     -- Remove cases for which the predicate can be shown False.
     eliminateFalsifiableCases = filterM (fmap isUnknown . isFalse . fst)

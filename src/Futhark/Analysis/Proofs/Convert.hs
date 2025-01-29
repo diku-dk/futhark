@@ -30,6 +30,7 @@ import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
+import qualified Futhark.SoP.SoP as SoP (isZero)
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -358,28 +359,32 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       -- No need to handle map non-lambda yet as program can just be rewritten.
       etaExpandErrorMsg loc (head $ getArgs args)
   | Just "replicate" <- getFun f,
-    [n, x] <- getArgs args = do
-      ns <- forward n
-      xs <- forward x
-      forM (zip ns xs) $ \(n', x') -> do
+    [e_n, e_x] <- getArgs args = do
+      ns <- forward e_n
+      xs <- forward e_x
+      forM (zip ns xs) $ \(n, x) -> do
         i <- newVName "i"
-        case (n', x') of
-          ( IndexFn Empty (Cases ((Bool True, m) NE.:| [])),
-            IndexFn Empty body
-            ) ->
-              -- XXX support only 1D arrays for now.
-              rewrite $ IndexFn (Forall i (Iota m)) body
-          _ -> undefined -- TODO See iota comment.
+        case x of
+          IndexFn Empty body -> do
+            case n of
+              IndexFn Empty cs -> do
+                m <- rewrite $ flattenCases cs
+                rewrite $ IndexFn (Forall i (Iota m)) body
+              _ ->
+                errorMsg loc "type error"
+          _ -> do
+            errorMsg loc "Multi-dimensional arrays not supported yet."
   | Just "iota" <- getFun f,
-    [n] <- getArgs args = do
-      ns <- forward n
-      forM ns $ \n' -> do
+    [e_n] <- getArgs args = do
+      ns <- forward e_n
+      forM ns $ \n -> do
         i <- newVName "i"
-        case n' of
-          IndexFn Empty (Cases ((Bool True, m) NE.:| [])) ->
+        case n of
+          IndexFn Empty cs -> do
+            m <- rewrite $ flattenCases cs
             rewrite $ IndexFn (Forall i (Iota m)) (singleCase . sym2SoP $ Var i)
-          _ -> undefined -- TODO We've no way to express this yet.
-          -- Have talked with Cosmin about an "outer if" before.
+          _ ->
+            errorMsg loc "type error"
   | Just fname <- getFun f,
     "zip" `L.isPrefixOf` fname = do
       mconcat <$> mapM forward (getArgs args)
