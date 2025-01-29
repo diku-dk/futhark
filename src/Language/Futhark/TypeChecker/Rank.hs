@@ -172,8 +172,6 @@ mkLinearProg cs cs_am tyVars =
   LP.LinearProg
     { optType = Minimize,
       objective = rankObj finalState,
-      -- let shape_vars = M.keys $ rankBinVars finalState
-      -- in foldr (\sv s -> var sv ~+~ s) (constant 0) shape_vars,
       constraints = rankConstraints finalState
     }
   where
