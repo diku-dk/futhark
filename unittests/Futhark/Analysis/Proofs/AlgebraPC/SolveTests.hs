@@ -9,7 +9,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol
 import Futhark.Analysis.Proofs.AlgebraPC.Solve
 import Test.Tasty
 import Test.Tasty.HUnit
-import Futhark.Analysis.Proofs.Monad (IndexFnM(..), debugPrettyM, clearAlgEnv, runIndexFnM, debugOn, debugPrintAlgEnv, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM(..), debugPrettyM, clearAlgEnv, runIndexFnM, debugOn, debugPrintAlgEnv, rollbackAlgEnv, getAlgEnv, printM)
 import Futhark.Analysis.Proofs.Symbol qualified as IndexFn
 import Futhark.SoP.FourierMotzkin qualified as FM
 
@@ -703,6 +703,52 @@ tests =
               (sVar i .+. sum_conds (int 1 .+. sVar i) (sVar n .-. int 1))
                 FM.$/=$ (int 1 .+. sVar i .+. sum_conds (int 2 .+. sVar i) (sVar n .-. int 1))
 
+          )
+          @??= True,
+      testCase "Monotonicity (part3indices)" $
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              j <- newNameFromString "j"
+              vn_conds <- newNameFromString "conds"
+              c_eq_2 <- newNameFromString "conds[•] = 2"
+              c_eq_1 <- newNameFromString "conds[•] = 1"
+              c_otherwise <- newNameFromString "conds[•] ≠ 1 && conds[•] ≠ 2"
+
+              addProperty (Var c_eq_1) (Disjoint $ S.fromList [c_eq_2, c_otherwise])
+              addProperty (Var c_eq_2) (Disjoint $ S.fromList [c_eq_1, c_otherwise])
+              addProperty (Var c_otherwise) (Disjoint $ S.fromList [c_eq_1, c_eq_2])
+              -- Ranges
+              let por = POR . S.singleton
+              addRel $
+                int 0 :<=: sVar i :&&: sVar i :<: sVar n
+                  :&&: int 0 :<=: sVar j :&&: sVar j :<: sVar i
+                  :&&: int 2 :<=: sVar n
+                  :&&: sym2SoP (Idx (One vn_conds) (sVar i)) :==: int 2
+                  :&&: sym2SoP (Idx (One vn_conds) (sVar j)) :==: int 2
+                  :&&: sym2SoP (Idx (por c_eq_1) (sVar i)) :==: int 0
+                  :&&: sym2SoP (Idx (por c_eq_1) (sVar j)) :==: int 0
+                  :&&: sym2SoP (Idx (por c_eq_2) (sVar i)) :==: int 1
+                  :&&: sym2SoP (Idx (por c_eq_2) (sVar j)) :==: int 1
+                  :&&: sym2SoP (Idx (por c_otherwise) (sVar i)) :==: int 0
+                  :&&: sym2SoP (Idx (por c_otherwise) (sVar j)) :==: int 0
+
+              -- \x a b -> ∑⟦x⟧[a : b]
+              let sum_ x a b = sym2SoP $ Sum (por x) a b
+
+              debugOn
+              debugPrettyM "\nMonotonicity (part3indices) debug output:" i
+              debugPrintAlgEnv
+
+              let e ind =
+                    sum_ c_eq_2 (int 0) (sVar ind .-. int 1)
+                      .+. sum_ c_eq_1 (int 0) (sVar ind .-. int 1)
+                      .+. sum_ c_eq_1 (sVar ind .+. int 1) (sVar n)
+
+              debugPrettyM "\ne(i)" (e i)
+
+              e j FM.$<$ e i
           )
           @??= True,
       --
