@@ -127,14 +127,14 @@ binVar sv = do
       modify $ \s ->
         s
           { rankBinVars = M.insert sv bv $ rankBinVars s,
-            rankConstraints = rankConstraints s ++ [bin bv, var bv ~<=~ var sv]
+            rankConstraints = [bin bv, var bv ~<=~ var sv] <> rankConstraints s
           }
       pure bv
     Just bv -> pure bv
 
 addConstraints :: [Constraint] -> RankM ()
 addConstraints cs =
-  modify $ \s -> s {rankConstraints = rankConstraints s ++ cs}
+  modify $ \s -> s {rankConstraints = cs <> rankConstraints s}
 
 addConstraint :: Constraint -> RankM ()
 addConstraint = addConstraints . pure
@@ -194,14 +194,14 @@ ambigCheckLinearProg :: LinearProg -> (Int, Map VName Int) -> LinearProg
 ambigCheckLinearProg prog (opt, ranks) =
   prog
     { constraints =
-        constraints prog
-          -- https://yetanothermathprogrammingconsultant.blogspot.com/2011/10/integer-cuts.html
-          ++ [ lsum (var <$> M.keys one_bins)
-                 ~-~ lsum (var <$> M.keys zero_bins)
-                 ~<=~ constant (fromIntegral $ length one_bins)
-                 ~-~ constant 1,
-               objective prog ~==~ constant (fromIntegral opt)
-             ]
+        -- https://yetanothermathprogrammingconsultant.blogspot.com/2011/10/integer-cuts.html
+        [ lsum (var <$> M.keys one_bins)
+            ~-~ lsum (var <$> M.keys zero_bins)
+            ~<=~ constant (fromIntegral $ length one_bins)
+            ~-~ constant 1,
+          objective prog ~==~ constant (fromIntegral opt)
+        ]
+          ++ constraints prog
     }
   where
     -- We really need to track which variables are binary in the LinearProg
@@ -376,6 +376,11 @@ data SubstState = SubstState
 instance MonadTrans SubstT where
   lift = SubstT . lift . lift
 
+rankToShape :: (Monad m) => VName -> SubstT m (Shape ())
+rankToShape x = do
+  rs <- asks envRanks
+  pure $ Shape $ replicate (fromJust $ rs M.!? x) ()
+
 newTyVar :: (MonadTypeChecker m) => TyVar -> SubstT m TyVar
 newTyVar t = do
   t' <- lift $ newTypeName (baseName t)
@@ -385,19 +390,13 @@ newTyVar t = do
     s
       { substNewVars = M.insert t t' $ substNewVars s,
         substNewCts =
-          substNewCts s
-            ++ [ CtEq
-                   (Reason loc)
-                   (Scalar (TypeVar mempty (QualName [] t) []))
-                   (arrayOf shape (Scalar (TypeVar mempty (QualName [] t') [])))
-               ]
+          CtEq
+            (Reason loc)
+            (Scalar (TypeVar mempty (QualName [] t) []))
+            (arrayOf shape (Scalar (TypeVar mempty (QualName [] t') [])))
+            : substNewCts s
       }
   pure t'
-
-rankToShape :: (Monad m) => VName -> SubstT m (Shape ())
-rankToShape x = do
-  rs <- asks envRanks
-  pure $ Shape $ replicate (fromJust $ rs M.!? x) ()
 
 addRankInfo :: (MonadTypeChecker m) => TyVar -> SubstT m ()
 addRankInfo t = do
