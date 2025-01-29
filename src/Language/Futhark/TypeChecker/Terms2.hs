@@ -59,14 +59,6 @@ import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify (mkUsage)
 import Prelude hiding (mod)
 
-data Inferred t
-  = NoneInferred
-  | Ascribed t
-
-instance Functor Inferred where
-  fmap _ NoneInferred = NoneInferred
-  fmap f (Ascribed t) = Ascribed (f t)
-
 type Type = CtType SComp
 
 -- | Careful when using this on something that already has an SComp
@@ -482,6 +474,10 @@ checkSizeExp' e = do
   ctEq (Reason (locOf e)) e_t (Scalar (Prim (Signed Int64)))
   pure e'
 
+data Inferred t
+  = NoneInferred
+  | Ascribed t
+
 checkPat' ::
   PatBase NoInfo VName ParamType ->
   Inferred (TypeBase SComp Diet) ->
@@ -502,19 +498,18 @@ checkPat' (Wildcard _ loc) (Ascribed t) = do
 checkPat' (Wildcard NoInfo loc) NoneInferred = do
   t <- newType loc Lifted "t" Observe
   pure $ Wildcard (Info t) loc
-checkPat' (TuplePat ps loc) (Ascribed t)
+checkPat' p@(TuplePat ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t,
     length ts == length ps =
       TuplePat
         <$> zipWithM checkPat' ps (map Ascribed ts)
         <*> pure loc
-  | otherwise = do
-      ps_tvs <- replicateM (length ps) (newTyVar loc Lifted "t")
-      ctEq
-        (ReasonPatMatch (locOf loc) (TuplePat ps loc) (toStruct t))
-        (Scalar (tupleRecord $ map (tyVarType NoUniqueness) ps_tvs))
-        t
-      TuplePat <$> zipWithM checkPat' ps (map (Ascribed . tyVarType Observe) ps_tvs) <*> pure loc
+  | otherwise =
+      typeError loc mempty $
+        "Pattern"
+          </> indent 2 (pretty p)
+          </> "cannot match ascripted type"
+          </> pretty t
 checkPat' (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (`checkPat'` NoneInferred) ps <*> pure loc
 checkPat' p@(RecordPat p_fs loc) _
@@ -601,18 +596,16 @@ checkPat' (PatConstr n NoInfo ps loc) (Ascribed t) = do
 checkPat' (PatConstr n NoInfo ps loc) NoneInferred = do
   ps' <- mapM (`checkPat'` NoneInferred) ps
   t <- newTypeWithConstr loc "t" Observe n =<< mapM (asType . patternType) ps'
-  t' <- asStructType t
-  pure $ PatConstr n (Info $ toParam Observe t') ps' loc
+  pure $ PatConstr n (Info $ toParam Observe t) ps' loc
 
 checkPat ::
   PatBase NoInfo VName (TypeBase Size u) ->
-  Inferred Type ->
   (Pat ParamType -> TermM a) ->
   TermM a
-checkPat p t m =
-  m =<< checkPat' (fmap (toParam Observe) p) (fmap (fmap (const Observe)) t)
+checkPat p m =
+  m =<< checkPat' (fmap (toParam Observe) p) NoneInferred
 
--- | Bind @let@-bound sizes.  This is usually followed by 'bindletPat'
+-- | Bind @let@-bound sizes. This is usually followed by 'bindLetPat'
 -- immediately afterwards.
 bindSizes :: [SizeBinder VName] -> TermM a -> TermM a
 bindSizes [] m = m -- Minor optimisation.
@@ -627,9 +620,10 @@ bindLetPat ::
   (Pat ParamType -> TermM a) ->
   TermM a
 bindLetPat p t m = do
-  checkPat p (Ascribed t) $ \p' ->
-    bind (patIdents (fmap toStruct p')) $
-      m p'
+  checkPat p $ \p' -> do
+    pt <- asType $ patternType p'
+    ctEq (ReasonPatMatch (locOf p) (fmap toStruct p) t) pt t
+    bind (patIdents (fmap toStruct p')) $ m p'
 
 typeParamIdent :: TypeParam -> Maybe (Ident StructType)
 typeParamIdent (TypeParamDim v loc) =
@@ -674,7 +668,7 @@ bindParams ::
   TermM a
 bindParams tps orig_ps m = bindTypeParams tps $ do
   let descend ps' (p : ps) =
-        checkPat p NoneInferred $ \p' ->
+        checkPat p $ \p' ->
           bind (patIdents $ fmap toStruct p') $ incLevel $ descend (p' : ps') ps
       descend ps' [] = m $ reverse ps'
 

@@ -1,5 +1,5 @@
 -- ==
--- error: constructor arguments
+-- error: differ in arity
 
 type surface =
     #asphere {curvature: f64}

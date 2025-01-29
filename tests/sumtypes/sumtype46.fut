@@ -1,5 +1,5 @@
 -- ==
--- error: 0 constructor arguments
+-- error: differ in arity
 
 type t = #foo f64
 

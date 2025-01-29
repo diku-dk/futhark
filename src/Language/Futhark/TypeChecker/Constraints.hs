@@ -48,7 +48,7 @@ data Reason t
   = -- | No particular reason.
     Reason Loc
   | -- | Arising from pattern match.
-    ReasonPatMatch Loc (PatBase NoInfo VName ParamType) t
+    ReasonPatMatch Loc (PatBase NoInfo VName StructType) t
   | -- | Arising from explicit ascription.
     ReasonAscription Loc t t
   | ReasonRetType Loc t t
