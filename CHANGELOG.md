@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A `let`-bound size would mistakenly be in scope of the bound
   expression (#2210).
 
+* An overzealous floating-point simplification rule.
+
 ## [0.25.26]
 
 ### Fixed
