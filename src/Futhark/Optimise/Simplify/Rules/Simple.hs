@@ -118,8 +118,6 @@ simplifyBinOp _ _ (BinOp Mul {} e1 e2)
   | isCt1 e1 = resIsSubExp e2
   | isCt1 e2 = resIsSubExp e1
 simplifyBinOp _ _ (BinOp FMul {} e1 e2)
-  | isCt0 e1 = resIsSubExp e1
-  | isCt0 e2 = resIsSubExp e2
   | isCt1 e1 = resIsSubExp e2
   | isCt1 e2 = resIsSubExp e1
 simplifyBinOp look _ (BinOp (SMod t _) e1 e2)
