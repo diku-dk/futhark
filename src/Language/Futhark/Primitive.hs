@@ -92,6 +92,8 @@ module Language.Futhark.Primitive
 
     -- * Primitive functions
     primFuns,
+    condFun,
+    isCondFun,
 
     -- * Utility
     zeroIsh,
@@ -128,6 +130,7 @@ import Data.Bits
   )
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Word (Word16, Word32, Word64, Word8)
@@ -1181,6 +1184,17 @@ doubleToWord = G.runGet G.getWord64le . P.runPut . P.putDoublele
 wordToDouble :: Word64 -> Double
 wordToDouble = G.runGet G.getDoublele . P.runPut . P.putWord64le
 
+-- | @condFun t@ is the name of the ternary conditional function that
+-- accepts operands of type @[Bool, t, t]@, and returns either the
+-- first or second @t@ based on the truth value of the @Bool@.
+condFun :: PrimType -> T.Text
+condFun t = "cond_" <> prettyText t
+
+-- | Is this the name of a condition function as per 'condFun', and
+-- for which type?
+isCondFun :: T.Text -> Maybe PrimType
+isCondFun v = L.find (\t -> condFun t == v) allPrimTypes
+
 -- | A mapping from names of primitive functions to their parameter
 -- types, their result type, and a function for evaluating them.
 primFuns ::
@@ -1191,7 +1205,7 @@ primFuns ::
       [PrimValue] -> Maybe PrimValue
     )
 primFuns =
-  M.fromList
+  M.fromList $
     [ f16 "sqrt16" sqrt,
       f32 "sqrt32" sqrt,
       f64 "sqrt64" sqrt,
@@ -1529,6 +1543,17 @@ primFuns =
       f32_3 "fma32" (\a b c -> a * b + c),
       f64_3 "fma64" (\a b c -> a * b + c)
     ]
+      <> [ ( condFun t,
+             ( [Bool, t, t],
+               t,
+               \case
+                 [BoolValue b, tv, fv] ->
+                   Just $ if b then tv else fv
+                 _ -> Nothing
+             )
+           )
+           | t <- allPrimTypes
+         ]
   where
     i8 s f = (s, ([IntType Int8], IntType Int32, i8PrimFun f))
     i16 s f = (s, ([IntType Int16], IntType Int32, i16PrimFun f))

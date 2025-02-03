@@ -59,6 +59,7 @@ module Futhark.Analysis.PrimExp
     fMax16,
     fMax32,
     fMax64,
+    condExp,
 
     -- * Untyped construction
     (~*~),
@@ -700,6 +701,17 @@ fMax32 x y = isF32 $ BinOpExp (FMax Float32) (untyped x) (untyped y)
 -- | 64-bit float maximum.
 fMax64 :: TPrimExp Double v -> TPrimExp Double v -> TPrimExp Double v
 fMax64 x y = isF64 $ BinOpExp (FMax Float64) (untyped x) (untyped y)
+
+-- | Conditional expression.
+condExp :: TPrimExp Bool v -> TPrimExp t v -> TPrimExp t v -> TPrimExp t v
+condExp x y z =
+  TPrimExp $
+    FunExp
+      (condFun t)
+      [untyped x, untyped y, untyped z]
+      t
+  where
+    t = primExpType $ untyped y
 
 -- | Convert result of some integer expression to have the same type
 -- as another, using sign extension.
