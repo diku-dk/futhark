@@ -16,7 +16,7 @@ where
 
 import Control.Monad (foldM, zipWithM)
 import Data.Either (isRight)
-import Data.List (find)
+import Data.List (find, foldl')
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
@@ -217,17 +217,20 @@ doOp op o
           -- least one variable of depth > 0
           error "find isRight"
 
-calculatePDs :: Op -> [ADValue] -> Maybe [ADValue]
-calculatePDs op p = do
+calculatePDs :: Op -> [ADValue] -> [ADValue]
+calculatePDs op p =
   -- Create a unique VName for each operand
   let n = map (\i -> VName (nameFromString $ "x" ++ show i) i) [1 .. length p]
-  -- Put the operands in the environment
-  let m = M.fromList $ zip n p
+      -- Put the operands in the environment
+      m = M.fromList $ zip n p
 
-  -- Look up, and calculate the partial derivative
-  -- of the operation with respect to each operand
-  pde <- lookupPDs op $ map (`LeafExp` opReturnType op) n
-  mapM (evalPrimExp m) pde
+      -- Look up, and calculate the partial derivative
+      -- of the operation with respect to each operand
+      pde =
+        fromMaybe (error "lookupPDs failed") $
+          lookupPDs op $
+            map (`LeafExp` opReturnType op) n
+   in map (fromMaybe (error "evalPrimExp failed") . evalPrimExp m) pde
 
 -- VJP / Reverse mode automatic differentiation--
 -- In reverse mode AD, the entire computation
@@ -268,29 +271,31 @@ vjpHandleOp op p v = do
 -- | This calculates every partial derivative of a 'Tape'. The result
 -- is a map of the partial derivatives, each key corresponding to the
 -- ID of a free variable (see TapeID).
-deriveTape :: Tape -> ADValue -> Maybe (M.Map Int ADValue)
-deriveTape (TapeID i _) s = Just $ M.fromList [(i, s)]
-deriveTape (TapeConst _) _ = Just M.empty
-deriveTape (TapeOp op p _) s = do
+deriveTape :: Tape -> ADValue -> M.Map Int ADValue
+deriveTape (TapeID i _) s = M.fromList [(i, s)]
+deriveTape (TapeConst _) _ = M.empty
+deriveTape (TapeOp op p _) s =
   -- Calculate the new sensitivities
-  s'' <- case op of
-    OpConv op' -> do
-      -- In case of type conversion, simply convert the sensitivity
-      s' <- doOp (OpConv $ flipConvOp op') [s]
-      Just [s']
-    _ -> do
-      pds <- calculatePDs op $ map tapePrimal p
-      mapM (mul s) pds
+  let s'' = case op of
+        OpConv op' ->
+          -- In case of type conversion, simply convert the sensitivity
+          [ fromMaybe (error "deriveTape: doOp failed") $
+              doOp (OpConv $ flipConvOp op') [s]
+          ]
+        _ ->
+          map (mul s) $ calculatePDs op $ map tapePrimal p
 
-  -- Propagate the new sensitivities
-  pd <- zipWithM deriveTape p s''
-  -- Add up the results
-  Just $ foldl (M.unionWith add) M.empty pd
+      -- Propagate the new sensitivities
+      pd = zipWith deriveTape p s''
+   in -- Add up the results
+      foldl' (M.unionWith add) M.empty pd
   where
     add x y =
-      fromMaybe (error "deriveTape: addition failed") $
+      fromMaybe (error "deriveTape: add failed") $
         doOp (OpBin $ addFor $ opReturnType op) [x, y]
-    mul x y = doOp (OpBin $ mulFor $ opReturnType op) [x, y]
+    mul x y =
+      fromMaybe (error "deriveTape: mul failed") $
+        doOp (OpBin $ mulFor $ opReturnType op) [x, y]
 
 -- JVP / Forward mode automatic differentiation--
 
@@ -312,7 +317,7 @@ jvpHandleFn op p = do
     _ -> do
       -- Calculate the new derivative using the chain
       -- rule
-      pds <- calculatePDs op $ map primal' p
+      let pds = calculatePDs op $ map primal' p
       vs <- zipWithM mul pds $ map derivative p
       foldM add (Constant $ blankPrimValue $ opReturnType op) vs
   where
