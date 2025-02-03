@@ -1,9 +1,10 @@
 module Futhark.AD.DerivativesTests (tests) where
 
 import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.AD.Derivatives
 import Futhark.Analysis.PrimExp
-import Futhark.IR.Syntax.Core (nameFromString)
+import Futhark.IR.Syntax.Core (nameFromText)
 import Futhark.Util.Pretty (prettyString)
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -23,8 +24,8 @@ tests =
     blank = ValueExp . blankPrimValue
 
     primFunTest (f, (ts, ret, _)) =
-      testCase f $
-        case pdBuiltin (nameFromString f) (map blank ts) of
+      testCase (T.unpack f) $
+        case pdBuiltin (nameFromText f) (map blank ts) of
           Nothing -> assertFailure "pdBuiltin gives Nothing"
           Just v -> map primExpType v @?= replicate (length ts) ret
 

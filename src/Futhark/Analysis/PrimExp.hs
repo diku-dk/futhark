@@ -73,6 +73,7 @@ import Control.Category
 import Control.Monad
 import Data.Map qualified as M
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Traversable
 import Futhark.IR.Prop.Names
 import Futhark.Util.IntegralExp
@@ -93,7 +94,7 @@ data PrimExp v
   | CmpOpExp CmpOp (PrimExp v) (PrimExp v)
   | UnOpExp UnOp (PrimExp v)
   | ConvOpExp ConvOp (PrimExp v)
-  | FunExp String [PrimExp v] PrimType
+  | FunExp T.Text [PrimExp v] PrimType
   deriving (Eq, Ord, Show)
 
 instance Functor PrimExp where

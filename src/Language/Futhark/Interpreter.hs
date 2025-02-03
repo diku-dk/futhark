@@ -40,7 +40,6 @@ import Data.List
     foldl',
     genericLength,
     genericTake,
-    isPrefixOf,
     transpose,
   )
 import Data.List qualified as L
@@ -1264,7 +1263,7 @@ initialCtx =
   Ctx
     ( Env
         ( M.insert
-            (VName (nameFromString "intrinsics") 0)
+            (VName (nameFromText "intrinsics") 0)
             (TermModule (Module $ Env terms types))
             terms
         )
@@ -1272,8 +1271,8 @@ initialCtx =
     )
     mempty
   where
-    terms = M.mapMaybeWithKey (const . def . baseString) intrinsics
-    types = M.mapMaybeWithKey (const . tdef . baseString) intrinsics
+    terms = M.mapMaybeWithKey (const . def . baseText) intrinsics
+    types = M.mapMaybeWithKey (const . tdef . baseName) intrinsics
 
     sintOp f =
       [ (getS, putS, P.doBinOp (f Int8), adBinOp $ AD.OpBin (f Int8)),
@@ -1481,6 +1480,7 @@ initialCtx =
               <+> dquotes (prettyValue v)
               <> "."
 
+    def :: T.Text -> Maybe TermBinding
     def "!" =
       Just $
         unopDef
@@ -1587,13 +1587,13 @@ initialCtx =
               ++ floatCmp P.FCmpLe
               ++ boolCmp P.CmpLle
     def s
-      | Just bop <- find ((s ==) . prettyString) P.allBinOps =
+      | Just bop <- find ((s ==) . prettyText) P.allBinOps =
           Just $ tbopDef (AD.OpBin bop) $ P.doBinOp bop
-      | Just unop <- find ((s ==) . prettyString) P.allCmpOps =
+      | Just unop <- find ((s ==) . prettyText) P.allCmpOps =
           Just $ tbopDef (AD.OpCmp unop) $ \x y -> P.BoolValue <$> P.doCmpOp unop x y
-      | Just cop <- find ((s ==) . prettyString) P.allConvOps =
+      | Just cop <- find ((s ==) . prettyText) P.allConvOps =
           Just $ unopDef [(getV, Just . putV, P.doConvOp cop, adUnOp $ AD.OpConv cop)]
-      | Just unop <- find ((s ==) . prettyString) P.allUnOps =
+      | Just unop <- find ((s ==) . prettyText) P.allUnOps =
           Just $ unopDef [(getV, Just . putV, P.doUnOp unop, adUnOp $ AD.OpUn unop)]
       | Just (pts, _, f) <- M.lookup s P.primFuns =
           case length pts of
@@ -1609,25 +1609,20 @@ initialCtx =
                         pure $ ValuePrim res
                   _ ->
                     error $ "Cannot apply " <> prettyString s ++ " to " <> show x
-      | "sign_" `isPrefixOf` s =
+      | "sign_" `T.isPrefixOf` s =
           Just $
             fun1 $ \x ->
               case x of
                 (ValuePrim (UnsignedValue x')) ->
                   pure $ ValuePrim $ SignedValue x'
                 _ -> error $ "Cannot sign: " <> show x
-      | "unsign_" `isPrefixOf` s =
+      | "unsign_" `T.isPrefixOf` s =
           Just $
             fun1 $ \x ->
               case x of
                 (ValuePrim (SignedValue x')) ->
                   pure $ ValuePrim $ UnsignedValue x'
                 _ -> error $ "Cannot unsign: " <> show x
-    def s
-      | "map_stream" `isPrefixOf` s =
-          Just $ fun2 stream
-    def s | "reduce_stream" `isPrefixOf` s =
-      Just $ fun3 $ \_ f arg -> stream f arg
     def "map" = Just $
       TermPoly Nothing $ \t -> do
         t' <- evalTypeFully t
@@ -1640,7 +1635,7 @@ initialCtx =
               error $
                 "Invalid arguments to map intrinsic:\n"
                   ++ unlines [prettyString t, show f, show xs]
-    def s | "reduce" `isPrefixOf` s = Just $
+    def s | "reduce" `T.isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs
     def "scan" = Just $
@@ -2100,17 +2095,13 @@ initialCtx =
         expectJust _ (Just v) = v
         expectJust s Nothing = error s
     def "acc" = Nothing
-    def s | nameFromString s `M.member` namesToPrimTypes = Nothing
-    def s = error $ "Missing intrinsic: " ++ s
+    def s | nameFromText s `M.member` namesToPrimTypes = Nothing
+    def s = error $ "Missing intrinsic: " ++ T.unpack s
 
+    tdef :: Name -> Maybe (Env, T.TypeBinding)
     tdef s = do
-      t <- nameFromString s `M.lookup` namesToPrimTypes
+      t <- s `M.lookup` namesToPrimTypes
       pure (mempty, T.TypeAbbr Unlifted [] $ RetType [] $ Scalar $ Prim t)
-
-    stream f arg@(ValueArray _ xs) =
-      let n = ValuePrim $ SignedValue $ Int64Value $ arrayLength xs
-       in apply2 noLoc mempty f n arg
-    stream _ arg = error $ "Cannot stream: " <> show arg
 
 intrinsicVal :: Name -> Value
 intrinsicVal name =

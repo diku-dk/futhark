@@ -1185,7 +1185,7 @@ wordToDouble = G.runGet G.getDoublele . P.runPut . P.putWord64le
 -- types, their result type, and a function for evaluating them.
 primFuns ::
   M.Map
-    String
+    T.Text
     ( [PrimType],
       PrimType,
       [PrimValue] -> Maybe PrimValue

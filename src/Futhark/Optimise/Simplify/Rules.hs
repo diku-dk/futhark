@@ -97,7 +97,7 @@ removeUnnecessaryCopy _ _ _ _ = Skip
 constantFoldPrimFun :: (BuilderOps rep) => TopDownRuleGeneric rep
 constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
   | Just args' <- mapM (isConst . fst) args,
-    Just (_, _, fun) <- M.lookup (nameToString fname) primFuns,
+    Just (_, _, fun) <- M.lookup (nameToText fname) primFuns,
     Just result <- fun args' =
       Simplify $
         certifying cs $

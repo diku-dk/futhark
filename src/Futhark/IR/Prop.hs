@@ -65,7 +65,7 @@ isBuiltInFunction fnm = fnm `M.member` builtInFunctions
 builtInFunctions :: M.Map Name (PrimType, [PrimType])
 builtInFunctions = M.fromList $ map namify $ M.toList primFuns
   where
-    namify (k, (paramts, ret, _)) = (nameFromString k, (ret, paramts))
+    namify (k, (paramts, ret, _)) = (nameFromText k, (ret, paramts))
 
 -- | If the expression is a t'BasicOp', return it, otherwise 'Nothing'.
 asBasicOp :: Exp rep -> Maybe BasicOp
