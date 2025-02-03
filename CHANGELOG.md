@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Corrected AD of `x**y` where `x==0` (#2216).
 
+* `futhark fmt`: correct file name in parse errors.
+
 ## [0.25.26]
 
 ### Fixed
