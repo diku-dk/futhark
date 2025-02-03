@@ -1996,15 +1996,14 @@ initialCtx =
         -- For each output..
         let m =
               fromMaybe (error "vjp: differentiation failed") $
-                zipWithM
-                  ( \on sn -> case on of
-                      -- If it is a VJP variable of the correct depth, run deriveTape on it- and its corresponding seed
-                      (ValueAD d (AD.VJP (AD.VJPValue t))) | d == depth -> (putAD $ AD.tapePrimal t,) <$> AD.deriveTape t sn
-                      -- Otherwise, its partial derivatives are all 0
-                      _ -> Just (on, M.empty)
-                  )
-                  o'
-                  s'
+                forM (zip o' s') $ \(on, sn) -> case on of
+                  -- If it is a VJP variable of the correct depth, run
+                  -- deriveTapqe on it- and its corresponding seed
+                  (ValueAD d (AD.VJP (AD.VJPValue t)))
+                    | d == depth ->
+                        (putAD $ AD.tapePrimal t,) <$> AD.deriveTape t sn
+                  -- Otherwise, its partial derivatives are all 0
+                  _ -> Just (on, M.empty)
 
         -- Add together every derivative
         let drvs = M.map (Just . putAD) $ M.unionsWith add $ map snd m
