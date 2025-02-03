@@ -15,8 +15,8 @@ def expand_reduce 'a 'b [n]
 
 def smvm ({row_off,col_idx,vals} : csr i32) (v:[]i32) =
   let rows = map (\i -> (i,
-			 row_off[i],
-			 row_off[i+1]-row_off[i]))
+       row_off[i],
+       row_off[i+1]-row_off[i]))
                  (iota(length row_off - 1))
   let sz r = r.2
   let get r i = vals[r.1+i] * v[col_idx[r.1+i]]

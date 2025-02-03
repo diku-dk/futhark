@@ -11,8 +11,8 @@
 def main [n] (is : [n]i64) (ys_bar: *[n]f32) =
   let scatter_res_adj_gather =
     map (\ is_elem -> if is_elem >= 0 && is_elem < n
-    	 			  then ys_bar[is_elem] else 0
-    	) is
+               then ys_bar[is_elem] else 0
+      ) is
   let zeros = replicate n 0.0f32
   let map_res_bar = scatter ys_bar is zeros
   let map_adjs_1 =
