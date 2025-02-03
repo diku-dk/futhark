@@ -5,7 +5,7 @@ def moving_point (x: i64, y: i64) : ([][]u32, (i64, i64)) =
 ```
 
 ```
-> :video (moving_point, (10i64, 10i64), 50i64);
+> :video (moving_point, (10i64, 10i64), 50i64,);
 fps: 1
 format: gif
 ```

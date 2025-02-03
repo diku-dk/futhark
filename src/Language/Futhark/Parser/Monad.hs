@@ -18,7 +18,6 @@ module Language.Futhark.Parser.Monad
     primNegate,
     applyExp,
     arrayLitExp,
-    patternExp,
     addDocSpec,
     addAttrSpec,
     addDoc,
@@ -60,6 +59,7 @@ addDoc doc (ValDec val) = ValDec (val {valBindDoc = Just doc})
 addDoc doc (TypeDec tp) = TypeDec (tp {typeDoc = Just doc})
 addDoc doc (ModTypeDec sig) = ModTypeDec (sig {modTypeDoc = Just doc})
 addDoc doc (ModDec mod) = ModDec (mod {modDoc = Just doc})
+addDoc doc (LocalDec dec loc) = LocalDec (addDoc doc dec) loc
 addDoc _ dec = dec
 
 addDocSpec :: DocComment -> SpecBase NoInfo Name -> SpecBase NoInfo Name
@@ -67,7 +67,7 @@ addDocSpec doc (TypeAbbrSpec tpsig) = TypeAbbrSpec (tpsig {typeDoc = Just doc})
 addDocSpec doc (ValSpec name ps t NoInfo _ loc) = ValSpec name ps t NoInfo (Just doc) loc
 addDocSpec doc (TypeSpec l name ps _ loc) = TypeSpec l name ps (Just doc) loc
 addDocSpec doc (ModSpec name se _ loc) = ModSpec name se (Just doc) loc
-addDocSpec _ spec = spec
+addDocSpec _ spec@IncludeSpec {} = spec
 
 addAttr :: AttrInfo Name -> UncheckedDec -> UncheckedDec
 addAttr attr (ValDec val) =
@@ -137,19 +137,6 @@ applyExp es =
       where
         index = AppExp (Index e (is ++ map DimFix xs) xloc) NoInfo
     op f x = pure $ mkApplyUT f x
-
-patternExp :: UncheckedPat t -> ParserMonad UncheckedExp
-patternExp (Id v _ loc) = pure $ Var (qualName v) NoInfo loc
-patternExp (TuplePat pats loc) = TupLit <$> mapM patternExp pats <*> pure loc
-patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
-patternExp (PatLit _ _ loc) = parseErrorAt loc $ Just "cannot have literal here."
-patternExp (PatConstr _ _ _ loc) = parseErrorAt loc $ Just "cannot have constructor here."
-patternExp (PatAttr _ p _) = patternExp p
-patternExp (PatAscription pat _ _) = patternExp pat
-patternExp (PatParens pat _) = patternExp pat
-patternExp (RecordPat fs loc) = RecordLit <$> mapM field fs <*> pure loc
-  where
-    field (name, pat) = RecordFieldExplicit name <$> patternExp pat <*> pure loc
 
 binOpName :: L Token -> (QualName Name, Loc)
 binOpName (L loc (SYMBOL _ qs op)) = (QualName qs op, loc)

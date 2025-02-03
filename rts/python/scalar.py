@@ -1028,4 +1028,16 @@ def futhark_fma64(a, b, c):
 
 futhark_copysign16 = futhark_copysign32 = futhark_copysign64 = np.copysign
 
+
+def futhark_cond(x, y, z):
+    return y if x else z
+
+
+futhark_cond_f16 = futhark_cond_f32 = futhark_cond_f64 = futhark_cond
+futhark_cond_i18 = futhark_cond_i16 = futhark_cond_i32 = futhark_cond_i64 = (
+    futhark_cond
+)
+futhark_cond_bool = futhark_cond_unit = futhark_cond
+
+
 # End of scalar.py.

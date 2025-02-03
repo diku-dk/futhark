@@ -9,9 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* `futhark script` now supports an `-f` option.
-
-* `futhark script` now supports the builtin procedure `$store`.
+* Improved reverse-mode AD of `scan` with complicated operators. Work
+  by Peter Adema and Sophus Valentin Willumsgaard.
 
 ### Removed
 
@@ -19,10 +18,118 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark eval`: any errors in the provided .fut file would cause a
+  "file not found" error message.
+
+* Handling of module-dependent size expressions in type abbreviations
+  (#2209).
+
+* A `let`-bound size would mistakenly be in scope of the bound
+  expression (#2210).
+
+* An overzealous floating-point simplification rule.
+
+* Corrected AD of `x**y` where `x==0` (#2216).
+
+## [0.25.26]
+
+### Fixed
+
+* Some Windows compatibility quirks (#2200, #2201).
+
+* `futhark pkg`: fixed parsing of Git timestamps in Z time zone.
+
+* GPU backends did not handle array constants correctly in some cases.
+
+* `futhark fmt`: do not throw away doc comments for `local`
+  definitions.
+
+* `futhark fmt`: improve formatting of value specs.
+
+* `futhark fmt`: add `--check` option.
+
+## [0.25.25]
+
+### Added
+
+* Improvements to `futhark fmt`.
+
+### Fixed
+
+* Sizes that go out of scope due to use of higher order functions will
+  now work in more cases by adding existentials. (#2193)
+
+* Tracing inside AD operators with the interpreter now prints values
+  properly.
+
+* Compiled and interpreted code now have same treatment of inclusive
+  ranges with start==end and negative step size, e.g. `1..0...1`
+  produces `[1]` rather than an invalid range error.
+
+* Inconsistent handling of types in lambda lifting (#2197).
+
+* Invalid primal results from `vjp2` in interpreter (#2199).
+
+## [0.25.24]
+
+### Added
+
+* `futhark doc` now produces better (and stable) anchor IDs.
+
+* `futhark profile` now supports multiple JSON files.
+
+* `futhark fmt`, by William Due and Therese Lyngby.
+
+* Lambdas can now be passed as the last argument to a function application.
+
+### Fixed
+
+* Negation of floating-point positive zero now produces a negative
+  zero.
+
+* Necessary inlining of functions used inside AD constructs.
+
+* A compile time regression for programs that used higher order
+  functions very aggressively.
+
+* Uniqueness bug related to slice simplification.
+
+## [0.25.23]
+
+### Added
+
+* Trailing commas are now allowed for arrays, records, and tuples in
+  the textual value format and in FutharkScript.
+
+* Faster floating-point atomics with OpenCL backend on AMD and NVIDIA
+  GPUs. This affects histogram workloads.
+
+* AD is now supported by the interpreter (thanks to Marcus Jensen).
+
+### Fixed
+
+* Some instances of invalid copy removal. (Again.)
+
+* An issue related to entry points with nontrivial sizes in their
+  arguments, where the entry points were also used as normal functions
+  elsewhere. (#2184)
+
+## [0.25.22]
+
+### Added
+
+* `futhark script` now supports an `-f` option.
+
+* `futhark script` now supports the builtin procedure `$store`.
+
+### Fixed
+
 * An error in tuning file validation.
 
 * Constant folding for loops that produce floating point results could
   result in different numerical behaviour.
+
+* Compiler crash in memory short circuiting (#2176).
 
 ## [0.25.21]
 

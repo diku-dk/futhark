@@ -758,17 +758,22 @@ code.
 
 Construct a signed integer array whose first element is ``x`` and
 which proceeds with a stride of ``y-x`` until reaching ``z``
-(inclusive).  The ``..y`` part can be elided in which case a stride of
-1 is used.  A run-time error occurs if ``z`` is less than ``x`` or
-``y``, or if ``x`` and ``y`` are the same value.
+(inclusive). The ``..y`` part can be elided in which case a stride of
+``1`` is used. All components must be of the same unsigned integer
+type.
+
+A run-time error occurs if ``z`` is less than ``x`` or ``y``, or if
+``x`` and ``y`` are the same value.
 
 In the general case, the size of the array produced by a range is
 unknown (see `Size types`_).  In a few cases, the size is known
 statically:
 
-  * ``1..2...n`` has size ``n``
+  * ``0..<n`` has size ``n``.
 
-This holds only if ``n`` is a variable or constant.
+  * ``0..1..<n`` has size ``n``.
+
+  * ``1..2...n`` has size ``n``
 
 .. _range_upto:
 
@@ -880,7 +885,7 @@ Apply the function ``f`` to the argument ``x``.
 ``#c x y z``
 ............
 
-Apply the sum type constructor ``#x`` to the payload ``x``, ``y``, and
+Apply the sum type constructor ``#c`` to the payload ``x``, ``y``, and
 ``z``.  A constructor application is always assumed to be saturated,
 i.e. its entire payload provided.  This means that constructors may
 not be partially applied.
@@ -1462,7 +1467,8 @@ instead::
   def consumes_first_arg (a: *[]i32) (b: []i32) = ...
 
 For bulk in-place updates with multiple values, use the ``scatter``
-function in the basis library.
+function from the `prelude
+<https://futhark-lang.org/docs/prelude/doc/prelude/soacs.html>`_.
 
 Alias Analysis
 ~~~~~~~~~~~~~~

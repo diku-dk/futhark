@@ -3048,4 +3048,16 @@ SCALAR_FUN_ATTR double fpconv_f64_f64(double x) {
 
 #endif
 
+#define futrts_cond_f16(x,y,z) ((x) ? (y) : (z))
+#define futrts_cond_f32(x,y,z) ((x) ? (y) : (z))
+#define futrts_cond_f64(x,y,z) ((x) ? (y) : (z))
+
+#define futrts_cond_i8(x,y,z) ((x) ? (y) : (z))
+#define futrts_cond_i16(x,y,z) ((x) ? (y) : (z))
+#define futrts_cond_i32(x,y,z) ((x) ? (y) : (z))
+#define futrts_cond_i64(x,y,z) ((x) ? (y) : (z))
+
+#define futrts_cond_bool(x,y,z) ((x) ? (y) : (z))
+#define futrts_cond_unit(x,y,z) ((x) ? (y) : (z))
+
 // End of scalar.h.

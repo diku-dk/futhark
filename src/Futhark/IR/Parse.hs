@@ -727,24 +727,25 @@ pSOAC pr =
           <*> p
     pScremaForm =
       SOAC.ScremaForm
-        <$> braces (pScan pr `sepBy` pComma)
+        <$> pLambda pr
+        <* pComma
+        <*> braces (pScan pr `sepBy` pComma)
         <* pComma
         <*> braces (pReduce pr `sepBy` pComma)
-        <* pComma
-        <*> pLambda pr
     pRedomapForm =
-      SOAC.ScremaForm mempty
-        <$> braces (pReduce pr `sepBy` pComma)
+      SOAC.ScremaForm
+        <$> pLambda pr
+        <*> pure []
         <* pComma
-        <*> pLambda pr
+        <*> braces (pReduce pr `sepBy` pComma)
     pScanomapForm =
       SOAC.ScremaForm
-        <$> braces (pScan pr `sepBy` pComma)
+        <$> pLambda pr
         <* pComma
-        <*> pure mempty
-        <*> pLambda pr
+        <*> braces (pScan pr `sepBy` pComma)
+        <*> pure []
     pMapForm =
-      SOAC.ScremaForm mempty mempty <$> pLambda pr
+      SOAC.ScremaForm <$> pLambda pr <*> pure mempty <*> pure mempty
     pScatter =
       keyword "scatter"
         *> parens
@@ -797,19 +798,19 @@ pSOAC pr =
     pVJP =
       parens $
         SOAC.VJP
-          <$> pLambda pr
+          <$> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
+          <*> pLambda pr
     pJVP =
       parens $
         SOAC.JVP
-          <$> pLambda pr
+          <$> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
+          <*> pLambda pr
 
 pSizeClass :: Parser GPU.SizeClass
 pSizeClass =

@@ -53,12 +53,9 @@ import Prelude
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
 data ProgramTest = ProgramTest
-  { testDescription ::
-      T.Text,
-    testTags ::
-      [T.Text],
-    testAction ::
-      TestAction
+  { testDescription :: T.Text,
+    testTags :: [T.Text],
+    testAction :: TestAction
   }
   deriving (Show)
 
@@ -109,7 +106,7 @@ instance Show WarningTest where
 
 -- | A condition for execution, input, and expected result.
 data TestRun = TestRun
-  { runTags :: [String],
+  { runTags :: [T.Text],
     runInput :: Values,
     runExpectedResult :: ExpectedResult Success,
     runIndex :: Int,
@@ -201,10 +198,17 @@ parseDescription sep =
     pDescLine = restOfLine <* sep
     pDescriptionSeparator = void $ "==" *> sep
 
+lTagName :: Parser () -> Parser T.Text
+lTagName sep =
+  lexeme sep $
+    takeWhile1P (Just "tag-constituent character") tagConstituent
+
 parseTags :: Parser () -> Parser [T.Text]
-parseTags sep = lexeme' "tags" *> inBraces sep (many parseTag) <|> pure []
-  where
-    parseTag = T.pack <$> lexeme sep (some $ satisfy tagConstituent)
+parseTags sep =
+  choice
+    [ lexeme' "tags" *> inBraces sep (many (lTagName sep)),
+      pure []
+    ]
 
 tagConstituent :: Char -> Bool
 tagConstituent c = isAlphaNum c || c == '_' || c == '-'
@@ -233,11 +237,11 @@ parseEntryPoints sep =
   (lexeme' "entry:" *> many entry <* sep) <|> pure ["main"]
   where
     constituent c = not (isSpace c) && c /= '}'
-    entry = lexeme' $ T.pack <$> some (satisfy constituent)
+    entry = lexeme' $ takeWhile1P Nothing constituent
 
-parseRunTags :: Parser [String]
-parseRunTags = many . try . lexeme' $ do
-  s <- some $ satisfy tagConstituent
+parseRunTags :: Parser () -> Parser [T.Text]
+parseRunTags sep = many . try . lexeme' $ do
+  s <- lTagName sep
   guard $ s `notElem` ["input", "structure", "warning"]
   pure s
 
@@ -253,7 +257,7 @@ parseRunCases sep = parseRunCases' (0 :: Int)
         <|> pure []
     parseRunCase i = do
       name <- optional $ parseStringLiteral sep
-      tags <- parseRunTags
+      tags <- parseRunTags sep
       void $ lexeme sep "input"
       input <-
         if "random" `elem` tags
@@ -360,7 +364,7 @@ optimisePipeline sep =
 parseMetrics :: Parser () -> Parser AstMetrics
 parseMetrics sep =
   inBraces sep . fmap (AstMetrics . M.fromList) . many $
-    (,) <$> (T.pack <$> lexeme sep (some (satisfy constituent))) <*> parseNatural sep
+    (,) <$> lexeme sep (takeWhile1P Nothing constituent) <*> parseNatural sep
   where
     constituent c = isAlpha c || c == '/'
 

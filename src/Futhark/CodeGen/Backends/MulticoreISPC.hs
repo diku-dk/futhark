@@ -20,7 +20,6 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.DList qualified as DL
 import Data.List (unzip4)
-import Data.Loc (noLoc)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
@@ -79,7 +78,7 @@ compileProg version prog = do
               generateBoilerplate
               mapM_ compileBuiltinFun funs
           )
-          mempty
+          "#include <pthread.h>\n"
           (DefaultSpace, [DefaultSpace])
           MC.cliOptions
       )
@@ -415,9 +414,12 @@ compileExp (LeafExp v _) =
 compileExp (UnOpExp Complement {} x) = do
   x' <- compileExp x
   pure [C.cexp|~$exp:x'|]
-compileExp (UnOpExp Not {} x) = do
+compileExp (UnOpExp (Neg Bool) x) = do
   x' <- compileExp x
   pure [C.cexp|!$exp:x'|]
+compileExp (UnOpExp Neg {} x) = do
+  x' <- compileExp x
+  pure [C.cexp|-$exp:x'|]
 compileExp (UnOpExp (FAbs Float32) x) = do
   x' <- compileExp x
   pure [C.cexp|(float)fabs($exp:x')|]
@@ -465,7 +467,7 @@ compileExp (BinOpExp bop x y) = do
     _ -> [C.cexp|$id:(prettyString bop)($exp:x', $exp:y')|]
 compileExp (FunExp h args _) = do
   args' <- mapM compileExp args
-  pure [C.cexp|$id:(funName (nameFromString h))($args:args')|]
+  pure [C.cexp|$id:(funName (nameFromText h))($args:args')|]
 
 -- | Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.

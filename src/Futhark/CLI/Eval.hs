@@ -38,8 +38,8 @@ runExprs exprs cfg = do
   let InterpreterConfig _ file = cfg
   maybe_new_state <- newFutharkiState cfg file
   (src, env, ctx) <- case maybe_new_state of
-    Left _ -> do
-      hPutStrLn stderr $ fromJust file <> ": file not found."
+    Left reason -> do
+      hPutDocLn stderr reason
       exitWith $ ExitFailure 2
     Right s -> pure s
   mapM_ (runExpr src env ctx) exprs

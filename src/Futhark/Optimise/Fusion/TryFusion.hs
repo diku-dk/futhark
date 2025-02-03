@@ -262,11 +262,18 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       | unfus_set /= mempty,
         not (SOAC.nullTransforms $ fsOutputTransform ker) ->
           fail "Cannot perform diagonal fusion in the presence of output transforms."
-    ( SOAC.Screma _ _ (ScremaForm scans_c reds_c _),
-      SOAC.Screma _ _ (ScremaForm scans_p reds_p _),
+    ( SOAC.Screma _ _ (ScremaForm _ scans_c reds_c),
+      SOAC.Screma _ _ (ScremaForm _ scans_p reds_p),
       _
       )
-        | scremaFusionOK (splitAt (Futhark.scanResults scans_p + Futhark.redResults reds_p) outVars) ker -> do
+        | scremaFusionOK
+            ( splitAt
+                ( Futhark.scanResults scans_p
+                    + Futhark.redResults reds_p
+                )
+                outVars
+            )
+            ker -> do
             let red_nes_p = concatMap redNeutral reds_p
                 red_nes_c = concatMap redNeutral reds_c
                 scan_nes_p = concatMap scanNeutral scans_p
@@ -300,7 +307,7 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
               $ SOAC.Screma
                 w
                 new_inp
-                (ScremaForm (scans_p ++ scans_c) (reds_p ++ reds_c) res_lam')
+                (ScremaForm res_lam' (scans_p ++ scans_c) (reds_p ++ reds_c))
 
     ------------------
     -- Scatter fusion --
@@ -587,7 +594,7 @@ iswim _ (SOAC.Screma w arrs form) ots
             t : _ -> 1 : 0 : [2 .. arrayRank t]
 
       pure
-        ( SOAC.Screma map_w map_arrs' (ScremaForm [] [] map_fun'),
+        ( SOAC.Screma map_w map_arrs' (mapSOAC map_fun'),
           ots SOAC.|> SOAC.Rearrange map_cs perm
         )
 iswim _ _ _ =
@@ -789,7 +796,8 @@ pullReshape (SOAC.Screma _ inps form) ots
 
             inner_body <-
               runBodyBuilder $
-                eBody [SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps]
+                varsRes
+                  <$> (letTupExp "x" <=< SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps)
             let inner_fun =
                   Lambda
                     { lambdaParams = ps,

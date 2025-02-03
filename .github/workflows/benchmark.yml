@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install Nix
       uses: cachix/install-nix-action@v27
@@ -28,7 +28,7 @@ jobs:
     - name: Build Futhark
       run: nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $GITHUB_SHA
 
-    - uses: actions/upload-artifact@v1
+    - uses: actions/upload-artifact@v4
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
         path: result/futhark-nightly-linux-x86_64.tar.xz
@@ -40,7 +40,7 @@ jobs:
     env:
       TMPDIR: "/scratch"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
         fetch-depth: 0
@@ -56,7 +56,7 @@ jobs:
     env:
       TMPDIR: "/scratch"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
         fetch-depth: 0
@@ -70,7 +70,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
         fetch-depth: 0
@@ -78,19 +78,19 @@ jobs:
       with:
         backend: opencl
         system: A100
-        slurm-options: -p gpu --mem=16G  --gres=gpu:a100:1 --job-name=fut-opencl-A100 --exclude=hendrixgpu14fl
+        slurm-options: -p gpu --mem=48G  --gres=gpu:a100:1 --job-name=fut-opencl-A100 --exclude=hendrixgpu14fl
     - uses: ./.github/actions/benchmark
       with:
         backend: cuda
         system: A100
-        slurm-options: -p gpu --mem=16G --gres=gpu:a100:1 --job-name=fut-cuda-A100 --exclude=hendrixgpu14fl
+        slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cuda-A100 --exclude=hendrixgpu14fl
 
   # benchmark-titanx-cuda:
   #   runs-on: hendrix
   #   needs: [build-linux-nix]
 
   #   steps:
-  #   - uses: actions/checkout@v3
+  #   - uses: actions/checkout@v4
   #     with:
   #       submodules: recursive
   #       fetch-depth: 0
@@ -106,7 +106,7 @@ jobs:
   #   needs: [build-linux-nix]
 
   #   steps:
-  #   - uses: actions/checkout@v3
+  #   - uses: actions/checkout@v4
   #     with:
   #       submodules: recursive
   #       fetch-depth: 0
@@ -122,7 +122,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
         fetch-depth: 0
@@ -130,14 +130,14 @@ jobs:
       with:
         backend: cuda
         system: titanrtx
-        slurm-options: -p gpu --mem=16G --gres=gpu:titanrtx:1 --job-name=fut-cuda-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --mem=48G --gres=gpu:titanrtx:1 --job-name=fut-cuda-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   benchmark-titanrtx-opencl:
     runs-on: hendrix
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
         fetch-depth: 0
@@ -145,7 +145,7 @@ jobs:
       with:
         backend: opencl
         system: titanrtx
-        slurm-options: -p gpu --mem=16G --gres=gpu:titanrtx:1 --job-name=fut-opencl-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --mem=48G --gres=gpu:titanrtx:1 --job-name=fut-opencl-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   benchmark-results:
     runs-on: ubuntu-22.04
@@ -164,7 +164,7 @@ jobs:
       with:
         key: ${{ secrets.SSHKEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS }}
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
     - run: |
         ls -R
     - name: Prepare package

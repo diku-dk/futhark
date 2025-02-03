@@ -53,7 +53,7 @@ freeInExp expr = case expr of
   RecordLit fs _ -> foldMap freeInExpField fs
     where
       freeInExpField (RecordFieldExplicit _ e _) = freeInExp e
-      freeInExpField (RecordFieldImplicit vn t _) = ident $ Ident vn t mempty
+      freeInExpField (RecordFieldImplicit (L _ vn) t _) = ident $ Ident vn t mempty
   ArrayVal {} -> mempty
   ArrayLit es t _ ->
     foldMap freeInExp es <> freeInType (unInfo t)
@@ -87,7 +87,7 @@ freeInExp expr = case expr of
   IndexSection idxs _ _ -> foldMap freeInDimIndex idxs
   AppExp (Loop sparams pat e1 form e3 _) _ ->
     let (e2fv, e2ident) = formVars form
-     in freeInExp e1
+     in freeInExp (loopInitExp e1)
           <> ( (e2fv <> freeInExp e3)
                  `freeWithoutL` (sparams <> patNames pat <> e2ident)
              )

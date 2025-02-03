@@ -31,7 +31,9 @@ module Language.Futhark.Prop
     valBindBound,
     funType,
     stripExp,
+    subExps,
     similarExps,
+    sameExp,
 
     -- * Queries on patterns and params
     patIdents,
@@ -138,6 +140,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Util (maxinum)
 import Futhark.Util.Pretty
 import Language.Futhark.Primitive qualified as Primitive
@@ -460,8 +463,8 @@ typeOf (TupLit es _) = Scalar $ tupleRecord $ map typeOf es
 typeOf (RecordLit fs _) =
   Scalar $ Record $ M.fromList $ map record fs
   where
-    record (RecordFieldExplicit name e _) = (name, typeOf e)
-    record (RecordFieldImplicit name (Info t) _) = (baseName name, t)
+    record (RecordFieldExplicit (L _ name) e _) = (name, typeOf e)
+    record (RecordFieldImplicit (L _ name) (Info t) _) = (baseName name, t)
 typeOf (ArrayLit _ (Info t) _) = t
 typeOf (ArrayVal vs t loc) =
   Array mempty (Shape [sizeFromInteger (genericLength vs) loc]) (Prim t)
@@ -596,7 +599,8 @@ patternType (Wildcard (Info t) _) = t
 patternType (PatParens p _) = patternType p
 patternType (Id _ (Info t) _) = t
 patternType (TuplePat pats _) = Scalar $ tupleRecord $ map patternType pats
-patternType (RecordPat fs _) = Scalar $ Record $ patternType <$> M.fromList fs
+patternType (RecordPat fs _) =
+  Scalar $ Record $ patternType <$> M.fromList (map (first unLoc) fs)
 patternType (PatAscription p _ _) = patternType p
 patternType (PatLit _ (Info t) _) = t
 patternType (PatConstr _ (Info t) _ _) = t
@@ -1065,12 +1069,20 @@ intrinsics =
             )
           ++
           -- This overrides the ! from Primitive.
-
-          -- This overrides the ! from Primitive.
           [ ( "!",
               IntrinsicOverloadedFun
                 ( map Signed [minBound .. maxBound]
                     ++ map Unsigned [minBound .. maxBound]
+                    ++ [Bool]
+                )
+                [Nothing]
+                Nothing
+            ),
+            ( "neg",
+              IntrinsicOverloadedFun
+                ( map Signed [minBound .. maxBound]
+                    ++ map Unsigned [minBound .. maxBound]
+                    ++ map FloatType [minBound .. maxBound]
                     ++ [Bool]
                 )
                 [Nothing]
@@ -1084,7 +1096,7 @@ intrinsics =
 
     intrinsicStart = 1 + baseTag (fst $ last primOp)
 
-    [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
+    [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromText ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
 
     t_a u = TypeVar u (qualName a) []
     array_a u s = Array u s $ t_a mempty
@@ -1110,37 +1122,37 @@ intrinsics =
     accType u t =
       TypeVar u (qualName (fst intrinsicAcc)) [TypeArgType t]
 
-    namify i (x, y) = (VName (nameFromString x) i, y)
+    namify i (x, y) = (VName (nameFromText x) i, y)
 
     primFun (name, (ts, t, _)) =
       (name, IntrinsicMonoFun (map unPrim ts) $ unPrim t)
 
-    unOpFun bop = (prettyString bop, IntrinsicMonoFun [t] t)
+    unOpFun bop = (prettyText bop, IntrinsicMonoFun [t] t)
       where
         t = unPrim $ Primitive.unOpType bop
 
-    binOpFun bop = (prettyString bop, IntrinsicMonoFun [t, t] t)
+    binOpFun bop = (prettyText bop, IntrinsicMonoFun [t, t] t)
       where
         t = unPrim $ Primitive.binOpType bop
 
-    cmpOpFun bop = (prettyString bop, IntrinsicMonoFun [t, t] Bool)
+    cmpOpFun bop = (prettyText bop, IntrinsicMonoFun [t, t] Bool)
       where
         t = unPrim $ Primitive.cmpOpType bop
 
-    convOpFun cop = (prettyString cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
+    convOpFun cop = (prettyText cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
       where
         (ft, tt) = Primitive.convOpType cop
 
-    signFun t = ("sign_" ++ prettyString t, IntrinsicMonoFun [Unsigned t] $ Signed t)
+    signFun t = ("sign_" <> prettyText t, IntrinsicMonoFun [Unsigned t] $ Signed t)
 
-    unsignFun t = ("unsign_" ++ prettyString t, IntrinsicMonoFun [Signed t] $ Unsigned t)
+    unsignFun t = ("unsign_" <> prettyText t, IntrinsicMonoFun [Signed t] $ Unsigned t)
 
     unPrim (Primitive.IntType t) = Signed t
     unPrim (Primitive.FloatType t) = FloatType t
     unPrim Primitive.Bool = Bool
     unPrim Primitive.Unit = Bool
 
-    intrinsicPrim t = (prettyString t, IntrinsicType Unlifted [] $ Scalar $ Prim t)
+    intrinsicPrim t = (prettyText t, IntrinsicType Unlifted [] $ Scalar $ Prim t)
 
     anyIntType =
       map Signed [minBound .. maxBound]
@@ -1150,10 +1162,10 @@ intrinsics =
         ++ map FloatType [minBound .. maxBound]
     anyPrimType = Bool : anyNumberType
 
-    mkIntrinsicBinOp :: BinOp -> Maybe (String, Intrinsic)
+    mkIntrinsicBinOp :: BinOp -> Maybe (T.Text, Intrinsic)
     mkIntrinsicBinOp op = do
       op' <- intrinsicBinOp op
-      pure (prettyString op, op')
+      pure (prettyText op, op')
 
     binOp ts = Just $ IntrinsicOverloadedFun ts [Nothing, Nothing] Nothing
     ordering = Just $ IntrinsicOverloadedFun anyPrimType [Nothing, Nothing] (Just Bool)
@@ -1362,6 +1374,20 @@ stripExp (Attr _ e _) = stripExp e `mplus` Just e
 stripExp (Ascript e _ _) = stripExp e `mplus` Just e
 stripExp _ = Nothing
 
+-- | All non-trivial subexpressions (as by stripExp) of some
+-- expression, not including the expression itself.
+subExps :: Exp -> [Exp]
+subExps e
+  | Just e' <- stripExp e = subExps e'
+  | otherwise = astMap mapper e `execState` mempty
+  where
+    mapOnExp e'
+      | Just e'' <- stripExp e' = mapOnExp e''
+      | otherwise = do
+          modify (e' :)
+          astMap mapper e'
+    mapper = identityMapper {mapOnExp}
+
 similarSlices :: Slice -> Slice -> Maybe [(Exp, Exp)]
 similarSlices slice1 slice2
   | length slice1 == length slice2 = do
@@ -1409,9 +1435,9 @@ similarExps (RecordLit fs1 _) (RecordLit fs2 _)
   | length fs1 == length fs2 =
       zipWithM onFields fs1 fs2
   where
-    onFields (RecordFieldExplicit n1 fe1 _) (RecordFieldExplicit n2 fe2 _)
+    onFields (RecordFieldExplicit (L _ n1) fe1 _) (RecordFieldExplicit (L _ n2) fe2 _)
       | n1 == n2 = Just (fe1, fe2)
-    onFields (RecordFieldImplicit vn1 ty1 _) (RecordFieldImplicit vn2 ty2 _) =
+    onFields (RecordFieldImplicit (L _ vn1) ty1 _) (RecordFieldImplicit (L _ vn2) ty2 _) =
       Just (Var (qualName vn1) ty1 mempty, Var (qualName vn2) ty2 mempty)
     onFields _ _ = Nothing
 similarExps (ArrayLit es1 _ _) (ArrayLit es2 _ _)
@@ -1444,6 +1470,14 @@ similarExps (ProjectSection names1 _ _) (ProjectSection names2 _ _)
 similarExps (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
   similarSlices slice1 slice2
 similarExps _ _ = Nothing
+
+-- | Are these the same expression as per recursively invoking
+-- 'similarExps'?
+sameExp :: Exp -> Exp -> Bool
+sameExp e1 e2
+  | Just es <- similarExps e1 e2 =
+      all (uncurry sameExp) es
+  | otherwise = False
 
 -- | An identifier with type- and aliasing information.
 type Ident = IdentBase Info VName

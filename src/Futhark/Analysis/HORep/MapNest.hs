@@ -76,7 +76,7 @@ fromSOAC' ::
   [Ident] ->
   SOAC rep ->
   m (Maybe (MapNest rep))
-fromSOAC' bound (SOAC.Screma w inps (SOAC.ScremaForm [] [] lam)) = do
+fromSOAC' bound (SOAC.Screma w inps (SOAC.ScremaForm lam [] [])) = do
   maybenest <- case ( stmsToList $ bodyStms $ lambdaBody lam,
                       bodyResult $ lambdaBody lam
                     ) of
@@ -154,7 +154,7 @@ toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
       letBindNames nres
         =<< SOAC.toExp
         =<< toSOAC (MapNest nw lam ns $ map (SOAC.identInput . paramIdent) nparams)
-      pure $ resultBody $ map Var nres
+      pure $ varsRes nres
   let outerlam =
         Lambda
           { lambdaParams = nparams,

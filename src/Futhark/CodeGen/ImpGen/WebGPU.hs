@@ -22,7 +22,7 @@ import Futhark.CodeGen.ImpGen.GPU qualified as ImpGPU
 import Futhark.CodeGen.RTS.WGSL qualified as RTS
 import Futhark.IR.GPUMem qualified as F
 import Futhark.MonadFreshNames
-import Futhark.Util (convFloat, zEncodeText, nubOrd)
+import Futhark.Util (convFloat, nubOrd, zEncodeText)
 import Futhark.Util.Pretty (docText)
 import Language.Futhark.Warnings (Warnings)
 import Language.WGSL qualified as WGSL
@@ -145,7 +145,7 @@ isShared :: WGSL.Ident -> KernelM Bool
 isShared ident = any (\(sz, _) -> sz == ident <> "_size") <$> gets ksSharedMem
 
 isAtomic :: WGSL.Ident -> KernelM Bool
-isAtomic ident = any (\i -> i == ident) <$> gets ksAtomicMem
+isAtomic ident = elem ident <$> gets ksAtomicMem
 
 -- | Add a scalar struct field.
 addScalar :: WGSL.PrimType -> KernelM ()
@@ -357,9 +357,9 @@ wgslSharedBufferType ::
   (PrimType, Bool, Signedness) ->
   Maybe WGSL.Exp ->
   WGSL.Typ
-wgslSharedBufferType (Bool, _, _) = WGSL.Array $ WGSL.Bool
-wgslSharedBufferType (IntType Int8, _, _) = WGSL.Array $ WGSL.Int32
-wgslSharedBufferType (IntType Int16, _, _) = WGSL.Array $ WGSL.Int32
+wgslSharedBufferType (Bool, _, _) = WGSL.Array WGSL.Bool
+wgslSharedBufferType (IntType Int8, _, _) = WGSL.Array WGSL.Int32
+wgslSharedBufferType (IntType Int16, _, _) = WGSL.Array WGSL.Int32
 wgslSharedBufferType (IntType Int32, False, _) = WGSL.Array WGSL.Int32
 wgslSharedBufferType (IntType Int32, True, Signed) =
   WGSL.Array $ WGSL.Atomic WGSL.Int32
@@ -377,9 +377,10 @@ genArrayWrite fun mem i v = do
   mem' <- getIdent mem
   shared <- isShared mem'
   if not shared
-     then let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
-           in WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
-     else WGSL.AssignIndex mem' <$> indexExp i <*> genWGSLExp v
+    then
+      let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
+       in WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
+    else WGSL.AssignIndex mem' <$> indexExp i <*> genWGSLExp v
 
 genArrayRead ::
   WGSL.Ident ->
@@ -392,11 +393,11 @@ genArrayRead fun tgt mem i = do
   mem' <- getIdent mem
   shared <- isShared mem'
   if not shared
-     then
-       let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
-           call = WGSL.CallExp fun <$> sequence [buf, indexExp i]
-        in WGSL.Assign tgt' <$> call
-     else WGSL.Assign tgt' . WGSL.IndexExp mem' <$> indexExp i
+    then
+      let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
+          call = WGSL.CallExp fun <$> sequence [buf, indexExp i]
+       in WGSL.Assign tgt' <$> call
+    else WGSL.Assign tgt' . WGSL.IndexExp mem' <$> indexExp i
 
 genIntAtomicOp ::
   WGSL.Ident ->
@@ -450,8 +451,10 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
   maybeElemPrimType <- findSingleMemoryType name
   case maybeElemPrimType of
     Just elemPrimType@(_, atomic, _) -> do
-      let bufType = wgslSharedBufferType elemPrimType
-                      (Just $ WGSL.VarExp sizeName)
+      let bufType =
+            wgslSharedBufferType
+              elemPrimType
+              (Just $ WGSL.VarExp sizeName)
 
       addOverride sizeName (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
       addDecl $ WGSL.VarDecl [] WGSL.Workgroup moduleName bufType
@@ -477,9 +480,12 @@ genWGSLStm (Write mem i _ _ _ v) = do
   v' <- genWGSLExp v
   atomic <- isAtomic mem'
   if atomic
-     then pure $ WGSL.Call "atomicStore"
-                   [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i', v']
-     else pure $ WGSL.AssignIndex mem' i' v'
+    then
+      pure $
+        WGSL.Call
+          "atomicStore"
+          [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i', v']
+    else pure $ WGSL.AssignIndex mem' i' v'
 genWGSLStm (SetScalar name e) =
   liftM2 WGSL.Assign (getIdent name) (genWGSLExp e)
 genWGSLStm (Read tgt mem i Bool _ _) = genArrayRead "read_bool" tgt mem i
@@ -490,10 +496,13 @@ genWGSLStm (Read tgt mem i _ _ _) = do
   mem' <- getIdent mem
   i' <- indexExp i
   atomic <- isAtomic mem'
-  let e = if atomic
-            then WGSL.CallExp "atomicLoad"
-                   [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
-            else WGSL.IndexExp mem' i'
+  let e =
+        if atomic
+          then
+            WGSL.CallExp
+              "atomicLoad"
+              [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
+          else WGSL.IndexExp mem' i'
   pure $ WGSL.Assign tgt' e
 genWGSLStm s@(SetMem {}) = unsupported s
 genWGSLStm (Call [dest] f args) = do
@@ -551,9 +560,10 @@ genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg _ dest mem i cmp val))) = 
   i' <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
   val' <- genWGSLExp val
   cmp' <- genWGSLExp cmp
-  let call = WGSL.CallExp
-               "atomicCompareExchangeWeak"
-               [WGSL.UnOpExp "&" i', cmp', val']
+  let call =
+        WGSL.CallExp
+          "atomicCompareExchangeWeak"
+          [WGSL.UnOpExp "&" i', cmp', val']
   let res = WGSL.FieldExp call "old_value"
   WGSL.Assign <$> getIdent dest <*> pure res
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = do
@@ -589,8 +599,9 @@ genWGSLStm (Op (ImpGPU.UniformRead tgt mem i _ _)) = do
   tgt' <- getIdent tgt
   mem' <- getIdent mem
   i' <- indexExp i
-  pure $ WGSL.Assign tgt' $
-    WGSL.CallExp "workgroupUniformLoad" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
+  pure $
+    WGSL.Assign tgt' $
+      WGSL.CallExp "workgroupUniformLoad" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
 genWGSLStm (Op (ImpGPU.ErrorSync f)) = genWGSLStm $ Op (ImpGPU.Barrier f)
 
 call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
@@ -670,7 +681,7 @@ wgslCmpOp CmpLle = call2 "lle"
 -- Similarly to CmpOps above, the defaults work for smaller integers already
 -- given our representation.
 wgslUnOp :: UnOp -> WGSL.Exp -> WGSL.Exp
-wgslUnOp Not = WGSL.UnOpExp "!"
+wgslUnOp (Neg _) = WGSL.UnOpExp "!"
 wgslUnOp (Complement _) = WGSL.UnOpExp "~"
 wgslUnOp (Abs Int64) = call1 "abs_i64"
 wgslUnOp (Abs _) = call1 "abs"
@@ -865,9 +876,10 @@ findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
   where
     find (ImpGPU.Write n _ t _ _ _) | n == name = S.singleton (t, False, Signed)
     find (ImpGPU.Read _ n _ t _ _) | n == name = S.singleton (t, False, Signed)
-    find (Op (ImpGPU.Atomic _ op)) | atomicOpArray op == name =
-      let (t, sgn) = atomicOpType op
-       in S.singleton (t, True, sgn)
+    find (Op (ImpGPU.Atomic _ op))
+      | atomicOpArray op == name =
+          let (t, sgn) = atomicOpType op
+           in S.singleton (t, True, sgn)
     find (s1 :>>: s2) = find s1 <> find s2
     find (For _ _ body) = find body
     find (While _ body) = find body
@@ -887,10 +899,11 @@ findSingleMemoryType name = do
       -- make sure there is only one type combination total.
       let atomic = L.find (\(_, a, _) -> a) types
       case atomic of
-        Just (_, _, sgn) | canBeAtomic prim ->
-          if all (\(_, _, s) -> s == sgn) types
-             then pure $ Just (prim, True, sgn)
-             else error "Atomic type used at multiple signednesses"
+        Just (_, _, sgn)
+          | canBeAtomic prim ->
+              if all (\(_, _, s) -> s == sgn) types
+                then pure $ Just (prim, True, sgn)
+                else error "Atomic type used at multiple signednesses"
         Just _ -> error "Non i32 or u32 used atomically"
         Nothing -> pure $ Just (prim, False, Signed)
     _tooMany -> error "Buffer used at multiple types"
