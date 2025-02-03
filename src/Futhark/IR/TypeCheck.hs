@@ -1424,7 +1424,7 @@ checkPrimExp (ConvOpExp op x) = requirePrimExp (fst $ convOpType op) x
 checkPrimExp (FunExp h args t) = do
   (h_ts, h_ret, _) <-
     maybe
-      (bad $ TypeError $ "Unknown function: " <> T.pack h)
+      (bad $ TypeError $ "Unknown function: " <> h)
       pure
       $ M.lookup h primFuns
   when (length h_ts /= length args) . bad . TypeError $

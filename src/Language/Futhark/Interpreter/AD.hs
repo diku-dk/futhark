@@ -19,9 +19,10 @@ import Data.Either (isRight)
 import Data.List (find)
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
+import Data.Text qualified as T
 import Futhark.AD.Derivatives (pdBinOp, pdBuiltin, pdUnOp)
 import Futhark.Analysis.PrimExp (PrimExp (..))
-import Language.Futhark.Core (VName (..), nameFromString)
+import Language.Futhark.Core (VName (..), nameFromString, nameFromText)
 import Language.Futhark.Primitive
 
 -- Mathematical operations subject to AD.
@@ -29,7 +30,7 @@ data Op
   = OpBin BinOp
   | OpCmp CmpOp
   | OpUn UnOp
-  | OpFn String
+  | OpFn T.Text
   | OpConv ConvOp
   deriving (Show)
 
@@ -133,7 +134,7 @@ lookupPDs (OpBin op) [x, y] = Just $ do
   let (a, b) = pdBinOp op x y
   [a, b]
 lookupPDs (OpUn op) [x] = Just [pdUnOp op x]
-lookupPDs (OpFn fn) p = pdBuiltin (nameFromString fn) p
+lookupPDs (OpFn fn) p = pdBuiltin (nameFromText fn) p
 lookupPDs _ _ = Nothing
 
 -- Shared AD logic--
