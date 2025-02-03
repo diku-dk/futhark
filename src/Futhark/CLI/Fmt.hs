@@ -32,11 +32,11 @@ fmtOptions =
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialFmtCfg fmtOptions "[FILES]" $ \args cfg ->
   case args of
-    [] -> Just $ putDoc =<< onInput =<< T.getContents
+    [] -> Just $ putDoc =<< onInput "<stdin>" =<< T.getContents
     files ->
       Just $ forM_ files $ \file -> do
         file_s <- T.readFile file
-        doc <- onInput file_s
+        doc <- onInput file file_s
         if cfgCheck cfg
           then unless (docText doc == file_s) $ do
             T.hPutStrLn stderr $ T.pack file <> ": not formatted correctly."
@@ -44,9 +44,9 @@ main = mainWithOptions initialFmtCfg fmtOptions "[FILES]" $ \args cfg ->
             exitFailure
           else withFile file WriteMode $ \h -> hPutDoc h doc
   where
-    onInput s = do
-      case fmtToDoc "<stdin>" s of
+    onInput fname s = do
+      case fmtToDoc fname s of
         Left (SyntaxError loc err) -> do
-          T.hPutStr stderr $ locText loc <> ":\n" <> prettyText err
+          T.hPutStrLn stderr $ locText loc <> ":\n" <> prettyText err
           exitFailure
         Right fmt -> pure fmt
