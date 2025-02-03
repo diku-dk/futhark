@@ -8,7 +8,7 @@ where
 
 import Data.Bifunctor (bimap)
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.Syntax.Core (Name, VName)
+import Futhark.IR.Syntax.Core (Name, VName, nameToText)
 import Futhark.Util.IntegralExp
 import Prelude hiding (quot)
 
@@ -134,7 +134,14 @@ pdBinOp (FDiv ft) a b =
 pdBinOp (FPow ft) a b =
   floatBinOp derivs derivs derivs ft a b
   where
-    derivs x y = (y * (x ** (y - 1)), (x ** y) * log x)
+    derivs x y =
+      ( y * (x ** (y - 1)),
+        TPrimExp $
+          FunExp
+            (condFun (FloatType ft))
+            [untyped (x .==. 0), fConst ft 0, untyped $ (x ** y) * log x]
+            (FloatType ft)
+      )
 pdBinOp (FMax ft) a b =
   floatBinOp derivs derivs derivs ft a b
   where
@@ -375,6 +382,21 @@ pdBuiltin "copysign32" [_x, y] =
   Just [untyped $ 1 * isF32 (UnOpExp (FSignum Float32) y), fConst Float32 0]
 pdBuiltin "copysign64" [_x, y] =
   Just [untyped $ 1 * isF64 (UnOpExp (FSignum Float64) y), fConst Float64 0]
+pdBuiltin h [x, _y, _z]
+  | Just t <- isCondFun $ nameToText h =
+      Just
+        [ boolToT t false,
+          boolToT t $ isBool x,
+          boolToT t $ bNot $ isBool x
+        ]
+  where
+    boolToT t = case t of
+      IntType it ->
+        ConvOpExp (BToI it) . untyped
+      FloatType ft ->
+        ConvOpExp (SIToFP Int32 ft) . ConvOpExp (BToI Int32) . untyped
+      Bool -> untyped
+      Unit -> const $ ValueExp UnitValue
 -- More problematic derivatives follow below.
 pdBuiltin "umul_hi8" [x, y] = Just [y, x]
 pdBuiltin "umul_hi16" [x, y] = Just [y, x]
