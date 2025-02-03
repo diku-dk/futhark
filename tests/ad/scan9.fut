@@ -1,7 +1,7 @@
 -- Scan with 4x4 matrix multiplication.
 -- ==
 -- entry: fwd rev
--- no_oclgrind input {
+-- compiled no_oclgrind input {
 -- [[1f32,2f32,3f32,4f32,5f32,6f32,7f32,8f32,9f32,10f32,11f32,12f32,13f32,14f32,15f32,16f32],
 --  [16f32,15f32,14f32,13f32,12f32,11f32,10f32,9f32,8f32,7f32,6f32,5f32,4f32,3f32,2f32,1f32],
 --  [1f32,2f32,3f32,4f32,5f32,6f32,7f32,8f32,9f32,10f32,11f32,12f32,13f32,14f32,15f32,16f32],
