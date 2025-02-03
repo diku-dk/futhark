@@ -77,12 +77,11 @@ multiplicity :: (Constraints rep) => Stm rep -> M.Map VName Int
 multiplicity stm =
   case stmExp stm of
     Match cond cases defbody _ ->
-      foldl comb mempty $
-        free 1 cond
-          : free 1 defbody
-          : map (free 1 . caseBody) cases
+      foldl' comb mempty $
+        free 1 cond : free 1 defbody : map (free 1 . caseBody) cases
     Op {} -> free 2 stm
     Loop {} -> free 2 stm
+    WithAcc {} -> free 2 stm
     _ -> free 1 stm
   where
     free k x = M.fromList $ map (,k) $ namesToList $ freeIn x
