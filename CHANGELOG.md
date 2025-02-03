@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark fmt`: correct file name in parse errors.
 
+* A bug in the "sink" optimisation pass could cause compiler crashes.
+
 ## [0.25.26]
 
 ### Fixed
