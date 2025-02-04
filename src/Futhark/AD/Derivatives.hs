@@ -136,11 +136,7 @@ pdBinOp (FPow ft) a b =
   where
     derivs x y =
       ( y * (x ** (y - 1)),
-        TPrimExp $
-          FunExp
-            (condFun (FloatType ft))
-            [untyped (x .==. 0), fConst ft 0, untyped $ (x ** y) * log x]
-            (FloatType ft)
+        condExp (x .<=. 0) 0 ((x ** y) * log x)
       )
 pdBinOp (FMax ft) a b =
   floatBinOp derivs derivs derivs ft a b
