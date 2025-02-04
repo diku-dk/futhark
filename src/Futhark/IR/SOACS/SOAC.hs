@@ -131,6 +131,9 @@ data SOAC rep
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
+  | -- | @ScanScatter <width> <arrays> <map-lambda> <scan>
+    -- <scatter-lambda> <dest-arrays>
+    ScanScatter SubExp [VName] (Lambda rep) (Scan rep) (Lambda rep) [VName]
   deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
