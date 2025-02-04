@@ -474,9 +474,9 @@ unifyWith onDims usage = subunify False
             | uncurry (<) $ swap ord (uniqueness b2) (uniqueness b1) -> do
                 unifyError usage mempty bcs . withIndexLink "unify-return-uniqueness" $
                   "Return types"
-                    </> indent 2 (pretty d1 <> pretty b1)
+                    </> indent 2 (pretty b1)
                     </> "and"
-                    </> indent 2 (pretty d2 <> pretty b2)
+                    </> indent 2 (pretty b2)
                     </> "have incompatible uniqueness."
             | otherwise -> do
                 -- Introduce the existentials as size variables so they
