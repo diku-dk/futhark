@@ -138,7 +138,7 @@ compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
   where
     field name (ct, Prim _) =
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=(($ty:ct*)&$id:name);
-               $escstm:("#if ISPC")
+               $escstm:("#if defined(ISPC)")
                $id:struct.$id:(closureRetvalStructField name)+= programIndex;
                $escstm:("#endif")|]
     field name (_, MemBlock) =
