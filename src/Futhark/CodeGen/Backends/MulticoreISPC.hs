@@ -803,7 +803,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   aos_name <- newVName "aos"
   GC.items
     [C.citems|
-    $escstm:("#if ISPC")
+    $escstm:("#if defined(ISPC)")
     $tyqual:uniform struct $id:fstruct $id:aos_name[programCount];
     $id:aos_name[programIndex] = $id:(fstruct <> "_");
     $escstm:("foreach_active (i)")

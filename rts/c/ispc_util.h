@@ -27,17 +27,17 @@ make_extract(uint64)
 make_extract(float16)
 make_extract(float)
 make_extract(double)
-make_extract(int8* uniform)
-make_extract(int16* uniform)
-make_extract(int32* uniform)
-make_extract(int64* uniform)
-make_extract(uint8* uniform)
-make_extract(uint16* uniform)
-make_extract(uint32* uniform)
-make_extract(uint64* uniform)
-make_extract(float16* uniform)
-make_extract(float* uniform)
-make_extract(double* uniform)
+/* make_extract(int8* uniform) */
+/* make_extract(int16* uniform) */
+/* make_extract(int32* uniform) */
+/* make_extract(int64* uniform) */
+/* make_extract(uint8* uniform) */
+/* make_extract(uint16* uniform) */
+/* make_extract(uint32* uniform) */
+/* make_extract(uint64* uniform) */
+/* make_extract(float16* uniform) */
+/* make_extract(float* uniform) */
+/* make_extract(double* uniform) */
 make_extract(struct futhark_context)
 make_extract(struct memblock)
 

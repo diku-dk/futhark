@@ -68,7 +68,7 @@ SCALAR_FUN_ATTR uint64_t mul64(uint64_t x, uint64_t y) {
   return x * y;
 }
 
-#if ISPC
+#if defined(ISPC)
 
 SCALAR_FUN_ATTR uint8_t udiv8(uint8_t x, uint8_t y) {
   // This strange pattern is used to prevent the ISPC compiler from
@@ -1309,7 +1309,7 @@ SCALAR_FUN_ATTR  uint8_t futrts_smul_hi8 ( int8_t a, int8_t b) { return ((int16_
 SCALAR_FUN_ATTR uint16_t futrts_smul_hi16(int16_t a, int16_t b) { return ((int32_t)a) * ((int32_t)b) >> 16; }
 SCALAR_FUN_ATTR uint32_t futrts_smul_hi32(int32_t a, int32_t b) { return __mulhi(a, b); }
 SCALAR_FUN_ATTR uint64_t futrts_smul_hi64(int64_t a, int64_t b) { return __mul64hi(a, b); }
-#elif ISPC
+#elif defined(ISPC)
 SCALAR_FUN_ATTR uint8_t futrts_umul_hi8(uint8_t a, uint8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
 SCALAR_FUN_ATTR uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
 SCALAR_FUN_ATTR uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return ((uint64_t)a) * ((uint64_t)b) >> 32; }
@@ -1430,7 +1430,7 @@ SCALAR_FUN_ATTR int32_t futrts_clzz64(int64_t x) {
   return __clzll(x);
 }
 
-#elif ISPC
+#elif defined(ISPC)
 
 SCALAR_FUN_ATTR int32_t futrts_clzz8(int8_t x) {
   return count_leading_zeros((int32_t)(uint8_t)x)-24;
@@ -1518,7 +1518,7 @@ SCALAR_FUN_ATTR int32_t futrts_ctzz64(int64_t x) {
   return y == 0 ? 64 : y - 1;
 }
 
-#elif ISPC
+#elif defined(ISPC)
 
 SCALAR_FUN_ATTR int32_t futrts_ctzz8(int8_t x) {
   return x == 0 ? 8 : count_trailing_zeros((int32_t)x);
@@ -1628,7 +1628,7 @@ SCALAR_FUN_ATTR float fpow32(float x, float y) {
   return pow(x, y);
 }
 
-#elif ISPC
+#elif defined(ISPC)
 
 SCALAR_FUN_ATTR float fabs32(float x) {
   return abs(x);
@@ -1645,7 +1645,7 @@ SCALAR_FUN_ATTR float fmin32(float x, float y) {
 SCALAR_FUN_ATTR float fpow32(float a, float b) {
   float ret;
   foreach_active (i) {
-      uniform float r = __stdlib_powf(extract(a, i), extract(b, i));
+      uniform float r = pow(extract(a, i), extract(b, i));
       ret = insert(ret, i, r);
   }
   return ret;
@@ -1674,7 +1674,7 @@ SCALAR_FUN_ATTR bool futrts_isnan32(float x) {
   return isnan(x);
 }
 
-#if ISPC
+#if defined(ISPC)
 
 SCALAR_FUN_ATTR bool futrts_isinf32(float x) {
   return !isnan(x) && isnan(x - x);
@@ -1905,7 +1905,7 @@ SCALAR_FUN_ATTR float futrts_fma32(float a, float b, float c) {
   return fma(a, b, c);
 }
 
-#elif ISPC
+#elif defined(ISPC)
 
 SCALAR_FUN_ATTR float futrts_log32(float x) {
   return futrts_isfinite32(x) || (futrts_isinf32(x) && x < 0)? log(x) : x;
@@ -2107,7 +2107,7 @@ SCALAR_FUN_ATTR float futrts_lerp32(float v0, float v1, float t) {
 }
 
 SCALAR_FUN_ATTR float futrts_ldexp32(float x, int32_t y) {
-  return x * pow((double)2.0, (double)y);
+  return x * pow((uniform float)2.0, (float)y);
 }
 
 SCALAR_FUN_ATTR float futrts_copysign32(float x, float y) {
@@ -2267,7 +2267,7 @@ SCALAR_FUN_ATTR float futrts_fma32(float a, float b, float c) {
 }
 #endif
 
-#if ISPC
+#if defined(ISPC)
 SCALAR_FUN_ATTR int32_t futrts_to_bits32(float x) {
   return intbits(x);
 }
@@ -2306,7 +2306,7 @@ SCALAR_FUN_ATTR float fsignum32(float x) {
 SCALAR_FUN_ATTR double futrts_from_bits64(int64_t x);
 SCALAR_FUN_ATTR int64_t futrts_to_bits64(double x);
 
-#if ISPC
+#if defined(ISPC)
 SCALAR_FUN_ATTR bool futrts_isinf64(float x) {
   return !isnan(x) && isnan(x - x);
 }
@@ -2386,7 +2386,7 @@ SCALAR_FUN_ATTR double fmin64(double x, double y) {
 SCALAR_FUN_ATTR double fpow64(double a, double b) {
   float ret;
   foreach_active (i) {
-      uniform float r = __stdlib_powf(extract(a, i), extract(b, i));
+      uniform float r = pow(extract(a, i), extract(b, i));
       ret = insert(ret, i, r);
   }
   return ret;
@@ -2673,7 +2673,7 @@ SCALAR_FUN_ATTR double futrts_lerp64(double v0, double v1, double t) {
 }
 
 SCALAR_FUN_ATTR double futrts_ldexp64(double x, int32_t y) {
-  return x * pow((double)2.0, (double)y);
+  return x * pow((uniform double)2.0, (double)y);
 }
 
 SCALAR_FUN_ATTR double futrts_copysign64(double x, double y) {

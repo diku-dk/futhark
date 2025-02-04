@@ -1,10 +1,9 @@
-
 // Start of uniform.h
 
 // Uniform versions of all library functions as to
 // improve performance in ISPC when in an uniform context.
 
-#if ISPC
+#if defined(ISPC)
 
 static inline uniform uint8_t add8(uniform uint8_t x, uniform uint8_t y) {
   return x + y;
@@ -839,7 +838,7 @@ static inline uniform float fmin32(uniform float x, uniform float y) {
 }
 
 static inline uniform float fpow32(uniform float x, uniform float y) {
-  return __stdlib_powf(x, y);
+  return pow(x, y);
 }
 
 static inline uniform bool futrts_isnan32(uniform float x) {
@@ -1181,7 +1180,7 @@ static inline uniform double fmin64(uniform double x, uniform double y) {
 }
 
 static inline uniform double fpow64(uniform double x, uniform double y) {
-  return __stdlib_powf(x, y);
+  return pow(x, y);
 }
 
 static inline uniform double futrts_log64(uniform double x) {
@@ -1445,7 +1444,7 @@ static inline uniform double fpconv_f16_f64(uniform f16 x) {
 }
 
 static inline uniform f16 fpconv_f64_f16(uniform double x) {
-  return (uniform f16) ((uniform float)x); 
+  return (uniform f16) ((uniform float)x);
 }
 
 #endif

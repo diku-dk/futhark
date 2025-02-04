@@ -23,7 +23,7 @@
 // compiler will have to be real careful!
 typedef float f16;
 
-#elif ISPC
+#elif defined(ISPC)
 typedef float16 f16;
 
 #else
@@ -154,7 +154,7 @@ SCALAR_FUN_ATTR f16 fpow16(f16 x, f16 y) {
   return pow(x, y);
 }
 
-#elif ISPC
+#elif defined(ISPC)
 SCALAR_FUN_ATTR f16 fabs16(f16 x) {
   return abs(x);
 }
@@ -190,7 +190,7 @@ SCALAR_FUN_ATTR f16 fpow16(f16 x, f16 y) {
 }
 #endif
 
-#if ISPC
+#if defined(ISPC)
 SCALAR_FUN_ATTR bool futrts_isinf16(float x) {
   return !futrts_isnan16(x) && futrts_isnan16(x - x);
 }
@@ -345,7 +345,7 @@ SCALAR_FUN_ATTR f16 futrts_mad16(f16 a, f16 b, f16 c) {
 SCALAR_FUN_ATTR f16 futrts_fma16(f16 a, f16 b, f16 c) {
   return fma(a, b, c);
 }
-#elif ISPC
+#elif defined(ISPC)
 
 SCALAR_FUN_ATTR f16 futrts_log16(f16 x) {
   return futrts_isfinite16(x) || (futrts_isinf16(x) && x < 0) ? log(x) : x;
@@ -664,7 +664,7 @@ SCALAR_FUN_ATTR int16_t futrts_to_bits16(f16 x) {
 SCALAR_FUN_ATTR f16 futrts_from_bits16(int16_t x) {
   return __ushort_as_half(x);
 }
-#elif ISPC
+#elif defined(ISPC)
 
 SCALAR_FUN_ATTR int16_t futrts_to_bits16(f16 x) {
   varying int16_t y = *((varying int16_t * uniform)&x);
@@ -916,7 +916,7 @@ SCALAR_FUN_ATTR double fpconv_f16_f64(f16 x) {
   return (double) x;
 }
 
-#if ISPC
+#if defined(ISPC)
 SCALAR_FUN_ATTR f16 fpconv_f64_f16(double x) {
   return (f16) ((float)x);
 }

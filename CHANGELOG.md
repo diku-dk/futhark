@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A bug in the "sink" optimisation pass could cause compiler crashes.
 
+* Compile errors with newer versions of `ispc`.
+
 ## [0.25.26]
 
 ### Fixed
