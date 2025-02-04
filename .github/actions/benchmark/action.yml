@@ -25,7 +25,7 @@ runs:
           module load perl
           cd futhark-benchmarks
           ./get-data.sh external-data.txt
-        slurm-options: --time=30:00  --exclude=hendrixgpu23fl,hendrixgpu24fl,hendrixgpu25fl,hendrixgpu26fl
+        slurm-options: --time=30:00
 
     - uses: ./.github/actions/futhark-slurm
       with:
