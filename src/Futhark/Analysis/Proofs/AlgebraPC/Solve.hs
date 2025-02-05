@@ -72,28 +72,32 @@ simplifyLevel sop_orig = do
 findSymbolLEq0 :: (MonadSoP Symbol e Property m) =>
   SoP Symbol -> m (SoP Symbol, Maybe (Symbol, Range Symbol))
 findSymbolLEq0 sop = do
+  -- perform general simplifications
   sop' <- simplify sop
+  -- try to extract an equivalent SoP inequlity by "unifying" exponentials.
   sop'' <-
     if S.null $ S.filter hasPow (free sop')
       then pure sop'
       else powEquiv sop'
+  -- peel off the end indices of sums if they have more specialized ranges.
+  (_, sop''') <- simplifyPeelSumForFM sop''
   -- find me a symbol to eliminate
   -- trace("Begin Sym2Elim for SOP: "++prettyString sop) $
-  let (syms_pow, syms) = S.partition hasPow $ free sop''
+  let (syms_pow, syms) = S.partition hasPow $ free sop'''
       -- is = map (\s -> (length $ transClosInRanges rs $ S.singleton s, s)) $ S.toList syms
   is <- forM (S.toList syms) $ \ s -> do
           nms <- transClosInRangesSym s
           pure (S.size nms, s)
   -- trace("After Sym2Elim for SOP: "++prettyString sop ++ " " ++ prettyString is)
   case (is, S.size syms_pow) of
-    ([], 0) -> pure (sop'', Nothing)
+    ([], 0) -> pure (sop''', Nothing)
     _ -> do
       let sym2elim =
             if null is 
             then S.elemAt 0 syms_pow -- a pow sym
             else snd $ maximum $ is  -- Yayyy, we have a non-Pow symbol
       range <- getRangeOfSym sym2elim
-      pure $ (sop'', Just (sym2elim, range))
+      pure $ (sop''', Just (sym2elim, range))
 
 transClosInRangesSym :: (MonadSoP Symbol e Property m) => Symbol -> m (S.Set VName)
 transClosInRangesSym sym = do

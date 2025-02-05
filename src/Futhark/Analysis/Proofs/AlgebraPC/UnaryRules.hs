@@ -5,7 +5,8 @@
 module Futhark.Analysis.Proofs.AlgebraPC.UnaryRules
   ( simplifyPows,
     simplifyOneSumBef,
-    simplifyOneSumAft
+    simplifyOneSumAft,
+    simplifyPeelSumForFM
   )
 where
 
@@ -176,6 +177,8 @@ getEquivSoP _ _ =
 ---               not empty by FM.                          ---
 ---------------------------------------------------------------
 
+-- | This is the last stage of SoP simplification, hence
+--   it is also used by ther FM solver.
 simplifyOneSumAft ::
   (MonadSoP Symbol e Property m) => SoP Symbol -> m (Bool, SoP Symbol)
 simplifyOneSumAft sop = do
@@ -184,6 +187,15 @@ simplifyOneSumAft sop = do
   let (succ1, sop'') = transfSum2Idx sop'
   (succ2, sop''') <- unaryOpOnSumFP (hasPeelableSums equivs) peelSumSymb sop''
   pure (succ1 || succ2, sop''')
+
+-- | This is intended to only by used by the FM solver, i.e.,
+--   not for just simplification. It only splits the start/emd
+--   indices of the sum, if either array index has a more
+--   specialized range (in the range symbol table).
+simplifyPeelSumForFM ::
+  (MonadSoP Symbol e Property m) => SoP Symbol -> m (Bool, SoP Symbol)
+simplifyPeelSumForFM sop =
+  unaryOpOnSumFP (\ _ -> True) peelSumOnRanges sop
 
 transfSum2Idx :: SoP Symbol -> (Bool, SoP Symbol)
 transfSum2Idx sop
@@ -227,7 +239,8 @@ disjointAllTheWay _ _ =
 --   Case 3 (SUM): 
 --     peeling off first/last known elements of a sum
 --     (requires non-empty slice)
---   Case 4 (IDX): similar to Case 2 but for index.
+--   Case 4 (IDX): replaces an index symbol that is found in
+--     equiv symtab.
 peelSumSymbHelper :: (MonadSoP Symbol e Property m) =>
   M.Map Symbol (S.Set Property) -> Symbol -> m (Maybe (SoP Symbol, Symbol))
 peelSumSymbHelper tab_props sym@(Idx (POR nms) _idx)
@@ -242,20 +255,15 @@ peelSumSymbHelper tab_props sym@(Sum (POR nms) beg end)
   then pure $ Just $ (end_p_1 .-. beg, sym)
   else pure Nothing
 --
-peelSumSymbHelper _ sym@(Sum arr beg end) = do -- Case 3
-  equivs <- getEquivs
-  non_empty_slice <- beg FM.$<=$ end
+peelSumSymbHelper _ sym@(Sum xs lb ub) = do -- Case 3
+  non_empty_slice <- lb FM.$<=$ ub
   if not non_empty_slice
   then pure Nothing
-  else do
-    res_eq <- peelSumSymbEquiv arr beg end
-    case res_eq of
-      Just res -> pure $ Just res
-      Nothing  -> peelSumSymbIneq arr beg end
+  else peelSumSymbEquiv xs lb ub
   where
     -- try to peel of an end of the interval when
     --   the end is in the equivalence table
-    peelSumSymbEquiv arr lb ub = do
+    peelSumSymbEquiv arr beg end = do
       equivs <- getEquivs
       mfst_el <- getEquivSoP equivs $ Idx arr beg
       mlst_el <- getEquivSoP equivs $ Idx arr end
@@ -270,22 +278,6 @@ peelSumSymbHelper _ sym@(Sum arr beg end) = do -- Case 3
           let new_sum = Sum arr (beg .+. sop_one) (end .-. sop_one)
           pure $ Just (fst_el .+. lst_el .+. sym2SoP new_sum, sym)
         (Nothing, Nothing) -> pure Nothing
-    -- try to peel of an end of the interval when the end
-    --   has a more specialized range than the array.
-    peelSumSymbIneq arr lb ub = do
-      ranges <- getRanges
-      let [beg_sym, end_sym] = map (Idx arr) [beg, end]
-      case map (`M.lookup` ranges) [beg_sym, end_sym] of
-        [Just _, Nothing] -> do
-          let new_sum = Sum arr (beg .+. sop_one) end
-          pure $ Just (sym2SoP beg_sym .+. sym2SoP new_sum, sym)
-        [Nothing, Just _] -> do
-          let new_sum = Sum arr beg (end .-. sop_one)
-          pure $ Just (sym2SoP end_sym .+. sym2SoP new_sum, sym)
-        [Just _, Just _] -> do
-          let new_sum = Sum arr (beg .+. sop_one) (end .-. sop_one)
-          pure $ Just (sym2SoP beg_sym .+. sym2SoP end_sym .+. sym2SoP new_sum, sym)
-        [Nothing, Nothing] -> pure Nothing
 {--
 peelSumSymbHelper _ sym@(Sum arr beg end) = do -- Case 3
   equivs <- getEquivs
@@ -326,6 +318,34 @@ peelSumSymb Nothing (sym, 1) = do
   tab_props <- getProperties
   peelSumSymbHelper tab_props sym
 peelSumSymb Nothing _ = pure Nothing
+
+-- | tries to peel of one or both of the ends of a
+--   Sum interval when the end has a more specialized range than the array.
+peelSumOnRanges :: (MonadSoP Symbol e Property m) => FoldFunTp m
+peelSumOnRanges acc@(Just {}) _ = pure acc
+peelSumOnRanges Nothing (sym@(Sum xs lb ub), 1) = do
+  -- \^ ToDo: extend for any multiplicity >= 1
+  non_empty_slice <- lb FM.$<=$ ub
+  if not non_empty_slice
+  then pure Nothing
+  else peelSumSymbIneq xs lb ub
+  where
+    peelSumSymbIneq arr beg end = do
+      ranges <- getRanges
+      let (beg_sym, end_sym) = (Idx arr beg, Idx arr end)
+      case (M.lookup beg_sym ranges, M.lookup end_sym ranges) of
+        (Just _, Nothing) -> do
+          let new_sum = Sum arr (beg .+. sop_one) end
+          pure $ Just (sym2SoP beg_sym .+. sym2SoP new_sum, sym)
+        (Nothing, Just _) -> do
+          let new_sum = Sum arr beg (end .-. sop_one)
+          pure $ Just (sym2SoP end_sym .+. sym2SoP new_sum, sym)
+        (Just _, Just _) -> do
+          let new_sum = Sum arr (beg .+. sop_one) (end .-. sop_one)
+          pure $ Just (sym2SoP beg_sym .+. sym2SoP end_sym .+. sym2SoP new_sum, sym)
+        (Nothing, Nothing) ->
+          pure Nothing
+peelSumOnRanges Nothing _ = pure Nothing
 
 ----------------------------------------
 --- Common Infrastructure for Unary  ---
