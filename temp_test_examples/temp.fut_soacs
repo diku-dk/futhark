@@ -1,0 +1,31 @@
+types {
+
+}
+
+
+
+entry("main",
+      {xs: []i32},
+      {[]i32})
+  entry_main (n_5232 : i64,
+              xs_5233 : [n_5232]i32)
+  : {[n_5232]i32#([1], [0])} = {
+  let {defunc_0_scan_res_5256 : [n_5232]i32} =
+    scanscatter(n_5232,
+             {xs_5233},
+             \ {x_5252 : i32}
+               : {i32} ->
+               {x_5252},
+             \ {eta_p_5253 : i32,
+                 eta_p_5254 : i32}
+               : {i32} ->
+               let {defunc_0_op_res_5255 : i32} =
+                 add32(eta_p_5253, eta_p_5254)
+               in {defunc_0_op_res_5255},
+             {0i32},
+             \ {x_5252 : i32}
+               : {i32} ->
+               {x_5252},
+             {xs_5233})
+  in {defunc_0_scan_res_5256}
+}

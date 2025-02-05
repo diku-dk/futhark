@@ -710,6 +710,7 @@ pSOAC pr =
       keyword "redomap" *> pScrema pRedomapForm,
       keyword "scanomap" *> pScrema pScanomapForm,
       keyword "screma" *> pScrema pScremaForm,
+      pScanScatter,
       keyword "vjp" *> pVJP,
       keyword "jvp" *> pJVP,
       pScatter,
@@ -811,6 +812,22 @@ pSOAC pr =
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> pLambda pr
+    pScanScatter =
+      keyword "scanscatter"
+        *> parens
+          ( SOAC.ScanScatter
+              <$> pSubExp
+              <* pComma
+              <*> braces (pVName `sepBy` pComma)
+              <* pComma
+              <*> pLambda pr
+              <* pComma
+              <*> pScan pr
+              <* pComma
+              <*> pLambda pr
+              <* pComma
+              <*> braces (pVName `sepBy` pComma)
+          )
 
 pSizeClass :: Parser GPU.SizeClass
 pSizeClass =
