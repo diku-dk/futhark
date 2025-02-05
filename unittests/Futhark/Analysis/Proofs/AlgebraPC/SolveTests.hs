@@ -664,7 +664,7 @@ tests =
               int 0 FM.$<=$ (sum_shp (int 0) (sVar i) .-. int 1)
           )
           @??= True,
-      testCase "Injective 1 (part2indices)" $
+      testCase "Injective 1 (part2indices): this test is unprovable, please fix it!" $
         run
           ( do
               clearAlgEnv
@@ -683,7 +683,7 @@ tests =
                 FM.$/=$ sum_conds (int 0) (sVar i)
           )
           @??= True,
-      testCase "Injective 2 (part2indices)" $
+      testCase "Injective 2 (part2indices): this test was unprovable in original form, fixed it by setting `i  < n-1`" $
         run
           ( do
               clearAlgEnv
@@ -696,7 +696,7 @@ tests =
               addRel $
                 int 0 :<=: sVar vn_conds
                   :&&: int 2 :<=: sVar n
-                  :&&: int 0 :<=: sVar i :&&: sVar i :<: sVar n
+                  :&&: int 0 :<=: sVar i :&&: sVar i :<: sVar n .-. int 1
               -- Add equivalence that makes this true.
               addEquiv (Idx conds (int 1 .+. sVar i)) (int 0)
 
@@ -737,16 +737,18 @@ tests =
               -- \x a b -> ∑⟦x⟧[a : b]
               let sum_ x a b = sym2SoP $ Sum (por x) a b
 
-              debugOn
-              debugPrettyM "\nMonotonicity (part3indices) debug output:" i
-              debugPrintAlgEnv
+              -- debugOn
+              -- debugPrettyM "\nMonotonicity (part3indices) debug output:" i
+              -- debugPrintAlgEnv
 
               let e ind =
                     sum_ c_eq_2 (int 0) (sVar ind .-. int 1)
                       .+. sum_ c_eq_1 (int 0) (sVar ind .-. int 1)
                       .+. sum_ c_eq_1 (sVar ind .+. int 1) (sVar n)
 
-              debugPrettyM "\ne(i)" (e i)
+              -- debugPrettyM "\ne(i)" (e i)
+              -- e_diff <- simplify ((e i) .-. (e j))
+              -- debugPrettyM "\ne(i) - e(j): " e_diff
 
               e j FM.$<$ e i
           )

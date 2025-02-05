@@ -104,8 +104,9 @@ matchMonIdxDif _ _ = pure Nothing
 --     1. a sum of a slice that can be extended with an index, or
 --     2. two sum of slices that come in continuation of each other:
 --            Sum(X[lb: mb]) + Sum(X[mb+1:ub]) => Sum(X[lb:ub])
---     2. an overlapping addition of two sums of boolean slices, or
---     3. a subtraction of two sums of slices of the same array
+--     3. an overlapping addition of two sums of boolean slices, or
+--     4. an overlapping subtraction of two sums of boolean slices, or
+--     5. a subtraction of two sums of slices of the same array
 --   Remember to call this twice: on the current and reversed pair.
 matchUniteSums ::
   (MonadSoP Symbol e Property m) =>
@@ -164,7 +165,39 @@ matchUniteSums (sym1, (ms1, k1)) (sym2, (ms2, k2))
               pure $ Just $ fPOR (anms, abnms, anms) aidx_beg bidx_beg bidx_end aidx_end
             _ -> pure Nothing
       else pure Nothing  
-  -- case 4:
+  -- case 4: overlapping subtraction range of (not fully) overlapping POR symbols
+  --   the implementation recursively leverages the next case 5 by separating the
+  --   subtraction of the slices of the common symbols (`POR cnms`), followed by
+  --   adding the original sums of the remaining subset of POR symbols, i.e., 
+  --   `Sum (POR anms')` and `Sum (POR bnms')`.
+  | Sum (POR anms) aidx_beg aidx_end <- sym1,
+    Sum (POR bnms) bidx_beg bidx_end <- sym2,
+    S.size anms > 0 && S.size bnms > 0,
+    anms /= bnms,
+    cnms <- S.intersection anms bnms,
+    S.size cnms > 0,
+    ms1 == ms2 && k1 == 0 - k2 = do
+  -- by defnition of POR, the names in `anms` and `bnms` must be disjoint
+  let csym1 = Sum (POR cnms) aidx_beg aidx_end
+  let csym2 = Sum (POR cnms) bidx_beg bidx_end
+  rec_res <- matchUniteSums (csym1, (ms1, k1)) (csym2, (ms2, k2))
+  case rec_res of
+    Nothing -> pure Nothing
+    Just (new_common_sop, _) -> do
+      let old_sop = mkOrigTerms (sym1, sym2) (ms1, k1, k2)
+          [anms', bnms'] = map (`S.difference` cnms) [anms, bnms]
+          sym1' = Sum (POR anms') aidx_beg aidx_end
+          sym2' = Sum (POR bnms') bidx_beg bidx_end
+          oneSoP sym (Term ms, kk) = SoP $ (`M.singleton` kk) $ Term $ MS.insert sym ms
+          new_other_sop =
+           case (S.null anms', S.null bnms') of
+            (False, True) -> oneSoP sym1' (ms1, k1)
+            (True, False) -> oneSoP sym2' (ms1, k2)
+            (False, False)-> mkOrigTerms (sym1', sym2') (ms1, k1, k2)
+            (True, True)  -> error "Error: Unreachable case reached!"      
+      pure $ Just (new_other_sop .+. new_common_sop, old_sop)  
+  --
+  -- case 5:
   | Sum anm aidx_beg aidx_end <- sym1,
     Sum bnm bidx_beg bidx_end <- sym2,
     anm == bnm && ms1 == ms2 && k1 == 0 - k2 = do
