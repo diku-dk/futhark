@@ -758,9 +758,8 @@ pSOAC pr =
               <*> many (pDest <* pComma)
               <*> pLambda pr
           )
-      where
-        pDest =
-          parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
+    pDest =
+      parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
     pHist =
       keyword "hist"
         *> parens
@@ -824,9 +823,8 @@ pSOAC pr =
               <* pComma
               <*> pScan pr
               <* pComma
+              <*> many (pDest <* pComma)
               <*> pLambda pr
-              <* pComma
-              <*> braces (pVName `sepBy` pComma)
           )
 
 pSizeClass :: Parser GPU.SizeClass

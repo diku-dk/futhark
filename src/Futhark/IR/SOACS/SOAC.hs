@@ -132,8 +132,8 @@ data SOAC rep
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
   | -- | @ScanScatter <width> <arrays> <map-lambda> <scan>
-    -- <scatter-lambda> <dest-arrays>
-    ScanScatter SubExp [VName] (Lambda rep) (Scan rep) (Lambda rep) [VName]
+    -- <dest-arrays-and-ops> <scatter-lambda>
+    ScanScatter SubExp [VName] (Lambda rep) (Scan rep) (ScatterSpec VName) (Lambda rep)
   deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
@@ -422,14 +422,7 @@ mapSOACM tv (Scatter w ivs as lam) =
   Scatter
     <$> mapOnSOACSubExp tv w
     <*> mapM (mapOnSOACVName tv) ivs
-    <*> mapM
-      ( \(aw, an, a) ->
-          (,,)
-            <$> mapM (mapOnSOACSubExp tv) aw
-            <*> pure an
-            <*> mapOnSOACVName tv a
-      )
-      as
+    <*> mapOnSOACScatterSpec tv as
     <*> mapOnSOACLambda tv lam
 mapSOACM tv (Hist w arrs ops bucket_fun) =
   Hist
@@ -452,21 +445,39 @@ mapSOACM tv (Screma w arrs (ScremaForm map_lam scans reds)) =
     <*> mapM (mapOnSOACVName tv) arrs
     <*> ( ScremaForm
             <$> mapOnSOACLambda tv map_lam
-            <*> forM
-              scans
-              ( \(Scan red_lam red_nes) ->
-                  Scan
-                    <$> mapOnSOACLambda tv red_lam
-                    <*> mapM (mapOnSOACSubExp tv) red_nes
-              )
-            <*> forM
-              reds
-              ( \(Reduce comm red_lam red_nes) ->
-                  Reduce comm
-                    <$> mapOnSOACLambda tv red_lam
-                    <*> mapM (mapOnSOACSubExp tv) red_nes
-              )
+            <*> mapM (mapOnSOACScan tv) scans
+            <*> mapM (mapOnSOACReduce tv) reds
         )
+mapSOACM tv (ScanScatter w arrs map_lam scan dests scatter_lam) =
+  ScanScatter
+    <$> mapOnSOACSubExp tv w
+    <*> mapM (mapOnSOACVName tv) arrs
+    <*> mapOnSOACLambda tv map_lam
+    <*> mapOnSOACScan tv scan
+    <*> mapOnSOACScatterSpec tv dests
+    <*> mapOnSOACLambda tv scatter_lam
+
+mapOnSOACScatterSpec :: (Monad m) => SOACMapper frep trep m -> ScatterSpec VName -> m (ScatterSpec VName)
+mapOnSOACScatterSpec tv =
+  mapM
+      ( \(aw, an, a) ->
+          (,,)
+            <$> mapM (mapOnSOACSubExp tv) aw
+            <*> pure an
+            <*> mapOnSOACVName tv a
+      )
+
+mapOnSOACScan :: (Monad m) => SOACMapper frep trep m -> Scan frep -> m (Scan trep)
+mapOnSOACScan tv (Scan red_lam red_nes) =
+  Scan
+    <$> mapOnSOACLambda tv red_lam
+    <*> mapM (mapOnSOACSubExp tv) red_nes
+
+mapOnSOACReduce :: (Monad m) => SOACMapper frep trep m -> Reduce frep -> m (Reduce trep)
+mapOnSOACReduce tv (Reduce comm red_lam red_nes) =
+  Reduce comm
+    <$> mapOnSOACLambda tv red_lam
+    <*> mapM (mapOnSOACSubExp tv) red_nes
 
 -- | A helper for defining 'TraverseOpStms'.
 traverseSOACStms :: (Monad m) => OpStmsTraverser m (SOAC rep) rep
@@ -537,6 +548,14 @@ soacType (Hist _ _ ops _bucket_fun) = do
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
 soacType (Screma w _arrs form) =
   scremaType w form
+soacType (ScanScatter _w _arrs _map_lam _scan dests scatter_lam) =
+  -- At some point this should probably allow for the ability to
+  -- produce array results from the map, scan or other results from
+  -- the scatter lambda. As seen in scremaType.
+  zipWith arrayOfShape (map (snd . head) rets) shapes
+  where
+    (shapes, _, rets) =
+      unzip3 $ groupScatterResults dests $ lambdaReturnType scatter_lam
 
 instance TypedOp SOAC where
   opType = pure . staticShapes . soacType
@@ -564,6 +583,11 @@ instance AliasedOp SOAC where
     namesFromList $ map (\(_, _, a) -> a) spec
   consumedInOp (Hist _ _ ops _) =
     namesFromList $ concatMap histDest ops
+  consumedInOp (ScanScatter _ arrs map_lam _ _ _) =
+    mapNames consumedArray $ consumedByLambda map_lam
+    where
+      consumedArray v = fromMaybe v $ lookup v params_to_arrs
+      params_to_arrs = zip (map paramName $ lambdaParams map_lam) arrs
 
 mapHistOp ::
   (Lambda frep -> Lambda trep) ->
@@ -596,6 +620,14 @@ instance CanBeAliased SOAC where
     where
       onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
       onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
+  addOpAliases aliases (ScanScatter w arrs map_lam scan dests scatter_lam) =
+    ScanScatter
+      w
+      arrs
+      (Alias.analyseLambda aliases map_lam)
+      (scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan})
+      dests
+      (Alias.analyseLambda aliases scatter_lam)
 
 instance IsOp SOAC where
   safeOp _ = False
@@ -657,6 +689,8 @@ instance IsOp SOAC where
         reductionDependencies mempty lam nes deps_in
       depsOfRed (Reduce _ lam nes, deps_in) =
         reductionDependencies mempty lam nes deps_in
+  opDependencies (ScanScatter w arrs map_lam scan dests scatter_lam) =
+    undefined
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t
