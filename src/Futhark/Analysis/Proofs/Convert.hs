@@ -2,7 +2,6 @@ module Futhark.Analysis.Proofs.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM_)
-import Control.Monad.Except (ExceptT)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT (runMaybeT), hoistMaybe)
 import Data.Bifunctor
@@ -21,8 +20,8 @@ import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), as
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
-import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), fv, mkRep, renamesM, rep, unify)
-import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding', prettyLet)
+import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
+import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
 import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty)
 import Futhark.SoP.Refine (addRel)
@@ -30,7 +29,6 @@ import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
-import qualified Futhark.SoP.SoP as SoP (isZero)
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -315,30 +313,33 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
         [v] -> v
         _ -> error "If on tuple?"
   unless (iterator f_c == Empty) $ error "Condition in if-statement is an array?"
+
+  -- Create boolean expression for true and false branches.
+  c_t_branch <-
+    rewrite $
+      foldl1 (:||) [p :&& sop2Symbol q | (p, q) <- casesToList $ body f_c]
+  c_f_branch <- rewrite (neg c_t_branch)
+
+  ts <- rollbackAlgEnv $ do
+    assume c_t_branch
+    forward e_t
+  fs <- rollbackAlgEnv $ do
+    assume c_f_branch
+    forward e_f
+
   cond <- newVName "if-condition"
   t_branch <- newVName "t_branch"
   f_branch <- newVName "f_branch"
-  fn_if <-
-    IndexFn
-      (iterator f_c)
-      ( cases
-          [ (Var cond, sym2SoP $ Var t_branch),
-            (neg $ Var cond, sym2SoP $ Var f_branch)
-          ]
-      )
-      @ (cond, f_c)
-  (ts, fs) <- algebraContext fn_if $ do
-    ts <- rollbackAlgEnv $ do
-      assume (getPredicate 0 fn_if)
-      forward e_t
-    fs <- rollbackAlgEnv $ do
-      assume (getPredicate 1 fn_if)
-      forward e_f
-    pure (ts, fs)
+  let fn_if =
+        IndexFn
+          (iterator f_c)
+          ( cases
+              [ (Var cond, sym2SoP $ Var t_branch),
+                (neg $ Var cond, sym2SoP $ Var f_branch)
+              ]
+          )
   forM (zip ts fs) $ \(t, f) -> do
-    substParams fn_if [(t_branch, t), (f_branch, f)]
-  where
-    getPredicate n fn = fst . getCase n $ body fn
+    substParams fn_if [(cond, f_c), (t_branch, t), (f_branch, f)]
 forward (E.Lambda _ _ _ _ loc) =
   errorMsg loc "Cannot create index function for unapplied lambda."
 forward expr@(E.AppExp (E.Apply f args loc) _)

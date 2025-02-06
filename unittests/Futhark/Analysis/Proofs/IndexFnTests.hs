@@ -99,6 +99,20 @@ tests =
                 ]
         ),
       mkTest
+        "tests/indexfn/map-if-nested.fut"
+        ( pure $ \(i, n, xs, _) ->
+            let xs_i = sym2SoP (Idx (Hole xs) (sHole i))
+             in [ IndexFn
+                    { iterator = Forall i (Iota (sHole n)),
+                      body =
+                        cases
+                          [ (xs_i :> int2SoP 100, int2SoP 2 .*. xs_i),
+                            (xs_i :<= int2SoP 100 :|| int2SoP 0 :>= xs_i, xs_i)
+                          ]
+                    }
+                ]
+        ),
+      mkTest
         "tests/indexfn/map-if-elim.fut"
         ( pure $ \(i, n, xs, _) ->
             let xs_i = sym2SoP (Idx (Hole xs) (sHole i))
