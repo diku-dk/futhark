@@ -21,11 +21,11 @@ import Futhark.Analysis.Proofs.AlgebraBridge.Translate (getDisjoint, toAlgebra)
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv, debugPrettyM, debugPrintAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Refine (addRel, addRels)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.-.))
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), viaShow)
 
 -- Fourer Motzkin Elimination solver may return True or False.
@@ -51,17 +51,17 @@ assume sym = do
   addRelSymbol sym
   assume_ sym
   where
-   assume_ p = do
-    addEq 1 p
-    -- Add that pairwise disjoint symbols are false.
-    mapM_ (addEq 0) =<< getDisjoint p
-    case p of
-      p1 :&& p2 -> assume_ p1 >> assume_ p2
-      _ -> pure ()
+    assume_ p = do
+      addEq 1 p
+      -- Add that pairwise disjoint symbols are false.
+      mapM_ (addEq 0) =<< getDisjoint p
+      case p of
+        p1 :&& p2 -> assume_ p1 >> assume_ p2
+        _ -> pure ()
 
-   addEq n e = do
-     x <- toAlgebra (sym2SoP e)
-     addRel (x :==: int2SoP n)
+    addEq n e = do
+      x <- toAlgebra (sym2SoP e)
+      addRel (x :==: int2SoP n)
 
 -- | Adds a relation on symbols to the algebraic environment.
 -- No-op if `p` is not a relation.
@@ -129,6 +129,9 @@ addRelIterator (Forall i dom) = case dom of
           int2SoP 0 :<=: sVar k,
           sVar k :<=: m' .-. int2SoP 1
         ]
+    interval_size <-
+      Algebra.simplify $ (interval_end .+. int2SoP 1) .-. interval_start
+    addRel (interval_size :>: int2SoP 0)
   where
     sVar = sym2SoP . Algebra.Var
 addRelIterator _ = pure ()

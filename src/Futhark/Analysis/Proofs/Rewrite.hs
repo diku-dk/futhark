@@ -2,11 +2,10 @@ module Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules) where
 
 import Control.Monad (filterM, (<=<))
 import Data.List.NonEmpty qualified as NE
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, simplify, ($>))
-import Futhark.Analysis.Proofs.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
-import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, simplify)
+import Futhark.Analysis.Proofs.IndexFn (Cases (..), IndexFn (..), cases, casesToList)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
-import Futhark.Analysis.Proofs.Query (isUnknown, isYes)
+import Futhark.Analysis.Proofs.Query (isUnknown)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (Renameable, renameSame)
@@ -63,14 +62,14 @@ rewrite_ fn@(IndexFn it xs) = normalizeIndexFn =<< simplifyIndexFn
       ps_simplified <- mapM rewrite ps
       cs' <-
         eliminateFalsifiableCases (zip ps_simplified vs)
-          >>= eliminateUnreachableCases
           >>= mapM simplifyCase
           >>= mergeCases
       pure $ cases cs'
 
     -- Simplify x under the assumption that p is true.
-    simplifyCase (p, x) | Just _ <- justConstant x =
-      pure (p, x)
+    simplifyCase (p, x)
+      | Just _ <- justConstant x =
+          pure (p, x)
     simplifyCase (p, x) = rollbackAlgEnv $ do
       -- Take care to convert x first to hopefully get sums of predicates
       -- translated first.
@@ -107,31 +106,6 @@ rewrite_ fn@(IndexFn it xs) = normalizeIndexFn =<< simplifyIndexFn
     -- Remove cases for which the predicate can be shown False.
     eliminateFalsifiableCases = filterM (fmap isUnknown . isFalse . fst)
 
-    -- Remove cases for which the predicate causes the current interval to be
-    -- empty; hence unreachable.
-    eliminateUnreachableCases cs = do
-      case it of
-        (Forall _ dom@(Cat _ _ b)) -> do
-          (unreachables, reachables) <-
-            partitionM
-              ( \(p, _) -> rollbackAlgEnv $ do
-                  assume p
-                  isYes <$> (b $> intervalEnd dom)
-              )
-              cs
-          -- Make sure that cases predicates still partition the domain (disjunction is a tautology).
-          let q = foldl (:||) (Bool False) $ map fst unreachables
-          mapM (\(p, v) -> (,v) <$> rewrite (p :|| q)) reachables
-        _ -> pure cs
-
 rewriteWithoutRules :: IndexFn -> IndexFnM IndexFn
 rewriteWithoutRules =
   convergeRename rewrite_
-
--- https://hackage.haskell.org/package/extra-1.8/docs/src/Control.Monad.Extra.html#partitionM
-partitionM :: (Monad m) => (a -> m Bool) -> [a] -> m ([a], [a])
-partitionM _ [] = pure ([], [])
-partitionM f (x : xs) = do
-  res <- f x
-  (as, bs) <- partitionM f xs
-  pure ([x | res] ++ as, [x | not res] ++ bs)
