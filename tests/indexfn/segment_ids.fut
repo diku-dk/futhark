@@ -36,7 +36,7 @@ def sgm_sum [n] 't
 let segment_ids [m]
       (shape: [m]nat_i64)
       (n: {i64 | (== sum_i64 shape)})
-      : []i64 =
+      : {[]i64 | \_ -> true} =
   let flags1 = map (\i -> i + 1) (iota m)
   let flags = mk_flag_array shape n 0i64 flags1
   let flags_sgmind = map (\f -> if f == 0 then 0 else f-1) flags
