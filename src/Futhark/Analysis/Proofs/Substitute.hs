@@ -101,17 +101,30 @@ substituteOnce f g_non_repped (f_apply, args) = do
   -- k is not captured in the body of g after substitution.
   let itg = subIterator vn (iterator g)
   (new_iter, s) <- case (iterator f, itg) of
+    (Forall _ df@(Cat k _ _), Forall _ dg@(Cat k' _ _))
+      | k `S.member` fv new_body -> do
+          unless (k == k') $ error "Error in renaming."
+          assertSameRange df dg
+          pure (itg, mempty)
     (Forall i df@(Cat k m _), Forall j dg@(Iota n))
       | k `S.member` fv new_body -> do
           c :: Maybe (Substitution Symbol) <- unify m n
           if isJust c
-          then do
-            -- g actually iterates over k.
-            pure (itg, mkRep k $ Var j)
-          else do
-            -- Try to propagate structure of f into g.
-            assertSameRange df dg
-            pure (Forall j $ repDomain (mkRep i $ Var j) df, mempty)
+            then do
+              -- g actually iterates over k.
+              res1 <- solveFor k (intervalStart df) (f_arg M.! i)
+              res2 <- solveFor k (intervalEnd df) (f_arg M.! i)
+              case res1 <|> res2 of
+                Just res ->
+                  pure (itg, mkRep k res)
+                Nothing ->
+                  error $
+                    "Would capture k in g: f" <> prettyString f_arg
+            else -- pure (itg, mkRep k $ Var j)
+            do
+              -- Try to propagate structure of f into g.
+              assertSameRange df dg
+              pure (Forall j $ repDomain (mkRep i $ Var j) df, mempty)
     (Forall i df@(Cat k _ _), Empty)
       | k `S.member` fv new_body -> do
           -- No way to propagate. Try to solve for k in f_arg.
@@ -162,7 +175,8 @@ substituteOnce f g_non_repped (f_apply, args) = do
       error "Only single-case index functions may substitute into domain."
 
 -- Solve for x in e(x) = e'.
-solveFor :: (Replaceable p Symbol) => VName -> p -> SoP Symbol -> IndexFnM (Maybe (SoP Symbol))
+-- solveFor :: (Replaceable p Symbol) => VName -> p -> SoP Symbol -> IndexFnM (Maybe (SoP Symbol))
+solveFor :: VName -> SoP Symbol -> SoP Symbol -> IndexFnM (Maybe (SoP Symbol))
 solveFor x e1 e2 = do
   x_hole <- newVName "x_hole"
   -- (Not using mkRep because this has check disallowing Holes.)
@@ -172,14 +186,19 @@ solveFor x e1 e2 = do
 
 assertSameRange :: Domain -> Domain -> IndexFnM ()
 assertSameRange df dg = do
-  start_f <- rewrite (domainStart df)
-  start_g <- rewrite (domainStart dg)
-  end_f <- rewrite (domainEnd df)
-  end_g <- rewrite (domainEnd dg)
-  eq_start :: Maybe (Substitution Symbol) <- unify start_f start_g
-  eq_end :: Maybe (Substitution Symbol) <- unify end_f end_g
-  unless (isJust eq_start && isJust eq_end) $
+  c <- case (df, dg) of
+    (Cat {}, Cat {}) ->
+      isJust <$> (unify df dg :: IndexFnM (Maybe (Substitution Symbol)))
+    _ -> do
+      start_f <- rewrite (domainStart df)
+      start_g <- rewrite (domainStart dg)
+      end_f <- rewrite (domainEnd df)
+      end_g <- rewrite (domainEnd dg)
+      eq_start :: Maybe (Substitution Symbol) <- unify start_f start_g
+      eq_end :: Maybe (Substitution Symbol) <- unify end_f end_g
+      pure (isJust eq_start && isJust eq_end)
+  unless c $
     error $
       "assertSameRange: inequal ranges: "
-      <> prettyString (start_f, end_f)
-      <> prettyString (start_g, end_g)
+        <> prettyString df
+        <> prettyString dg
