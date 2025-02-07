@@ -460,12 +460,12 @@ mapSOACM tv (ScanScatter w arrs map_lam scan dests scatter_lam) =
 mapOnSOACScatterSpec :: (Monad m) => SOACMapper frep trep m -> ScatterSpec VName -> m (ScatterSpec VName)
 mapOnSOACScatterSpec tv =
   mapM
-      ( \(aw, an, a) ->
-          (,,)
-            <$> mapM (mapOnSOACSubExp tv) aw
-            <*> pure an
-            <*> mapOnSOACVName tv a
-      )
+    ( \(aw, an, a) ->
+        (,,)
+          <$> mapM (mapOnSOACSubExp tv) aw
+          <*> pure an
+          <*> mapOnSOACVName tv a
+    )
 
 mapOnSOACScan :: (Monad m) => SOACMapper frep trep m -> Scan frep -> m (Scan trep)
 mapOnSOACScan tv (Scan red_lam red_nes) =
