@@ -1,32 +1,14 @@
 module Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules) where
 
 import Control.Monad (filterM, (<=<))
-import Data.List.NonEmpty qualified as NE
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, simplify)
-import Futhark.Analysis.Proofs.IndexFn (Cases (..), IndexFn (..), cases, casesToList)
+import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), cases, casesToList)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Query (isUnknown)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.Unify (Renameable, renameSame)
-import Futhark.SoP.SoP (SoP, int2SoP, justConstant, sym2SoP, (.*.), (.+.))
-import Futhark.SoP.SoP qualified as SoP
-
-normalizeIndexFn :: IndexFn -> IndexFnM IndexFn
-normalizeIndexFn = allCasesAreConstants
-
-allCasesAreConstants :: IndexFn -> IndexFnM IndexFn
-allCasesAreConstants v@(IndexFn _ (Cases ((Bool True, _) NE.:| []))) = pure v
-allCasesAreConstants (IndexFn it (Cases cs))
-  | cs' <- NE.toList cs,
-    Just vs <- mapM (justConstant . snd) cs' = do
-      let ps = map fst cs'
-      let sumOfBools =
-            SoP.normalize . foldl1 (.+.) $
-              zipWith (\p x -> sym2SoP p .*. int2SoP x) ps vs
-      -- tell ["Using simplification rule: integer-valued cases"]
-      pure $ IndexFn it $ Cases (NE.singleton (Bool True, sumOfBools))
-allCasesAreConstants v = pure v
+import Futhark.SoP.SoP (SoP, justConstant)
 
 class (Monad m) => Rewritable v m where
   rewrite :: v -> m v
@@ -50,7 +32,7 @@ convergeRename f x = do
       convergeRename f y'
 
 rewrite_ :: IndexFn -> IndexFnM IndexFn
-rewrite_ fn@(IndexFn it xs) = normalizeIndexFn =<< simplifyIndexFn
+rewrite_ fn@(IndexFn it xs) = simplifyIndexFn
   where
     simplifyIndexFn = algebraContext fn $ do
       addRelIterator it
