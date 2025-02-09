@@ -178,9 +178,7 @@ WGPUQueueWorkDoneStatus wgpu_block_until_work_done(WGPUInstance instance,
     wgpuInstanceWaitAny(instance, 1, &f_info, 0);
   }
 #else
-  // TODO: What does the signalValue (second arg) mean here?
-  wgpuQueueOnSubmittedWorkDone(queue, 0, wgpu_on_work_done_callback,
-                               (void *)&info);
+  wgpuQueueOnSubmittedWorkDone(queue, wgpu_on_work_done_callback, (void *)&info);
 
   while (!info.released) {
     emscripten_sleep(0);
@@ -220,29 +218,21 @@ struct futhark_context_config {
 
   char *program;
 
-  size_t default_block_size;
-  size_t default_grid_size;
-  size_t default_tile_size;
-  size_t default_reg_tile_size;
-  size_t default_threshold;
-
-  int default_block_size_changed;
-  int default_grid_size_changed;
-  int default_tile_size_changed;
+  struct gpu_config gpu;
 };
 
 static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->program = strconcat(gpu_program);
 
-  cfg->default_block_size = 256;
-  cfg->default_grid_size = 0; // Set properly later.
-  cfg->default_tile_size = 32;
-  cfg->default_reg_tile_size = 2;
-  cfg->default_threshold = 32*1024;
+  cfg->gpu.default_block_size = 256;
+  cfg->gpu.default_grid_size = 0; // Set properly later.
+  cfg->gpu.default_tile_size = 32;
+  cfg->gpu.default_reg_tile_size = 2;
+  cfg->gpu.default_threshold = 32*1024;
 
-  cfg->default_block_size_changed = 0;
-  cfg->default_grid_size_changed = 0;
-  cfg->default_tile_size_changed = 0;
+  cfg->gpu.default_block_size_changed = 0;
+  cfg->gpu.default_grid_size_changed = 0;
+  cfg->gpu.default_tile_size_changed = 0;
 }
 
 static void backend_context_config_teardown(struct futhark_context_config *cfg) {
@@ -256,73 +246,6 @@ const char* futhark_context_config_get_program(struct futhark_context_config *cf
 void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
   free(cfg->program);
   cfg->program = strdup(s);
-}
-
-void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_block_size = size;
-  cfg->default_block_size_changed = 1;
-}
-
-void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
-  cfg->default_grid_size = num;
-  cfg->default_grid_size_changed = 1;
-}
-
-void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
-  futhark_context_config_set_default_thread_block_size(cfg, size);
-}
-
-void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
-  futhark_context_config_set_default_grid_size(cfg, num);
-}
-
-void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_tile_size = size;
-  cfg->default_tile_size_changed = 1;
-}
-
-void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size) {
-  cfg->default_reg_tile_size = size;
-}
-
-void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size) {
-  cfg->default_threshold = size;
-}
-
-int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
-                                            const char *param_name,
-                                            size_t new_value) {
-  for (int i = 0; i < cfg->num_tuning_params; i++) {
-    if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
-      cfg->tuning_params[i] = new_value;
-      return 0;
-    }
-  }
-
-  if (strcmp(param_name, "default_thread_block_size") == 0
-      || strcmp(param_name, "default_group_size") == 0) {
-    cfg->default_block_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_num_groups") == 0 ||
-      strcmp(param_name, "default_grid_size") == 0) {
-    cfg->default_grid_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_threshold") == 0) {
-    cfg->default_threshold = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_tile_size") == 0) {
-    cfg->default_tile_size = new_value;
-    return 0;
-  }
-  if (strcmp(param_name, "default_reg_tile_size") == 0) {
-    cfg->default_reg_tile_size = new_value;
-    return 0;
-  }
-
-  return 1;
 }
 
 struct futhark_context {
@@ -369,7 +292,11 @@ struct futhark_context {
 
   size_t lockstep_width;
   size_t max_thread_block_size;
+  size_t max_grid_size;
+  size_t max_tile_size;
+  size_t max_threshold;
   size_t max_shared_memory;
+  size_t max_registers;
   size_t max_cache;
 
   struct builtin_kernels* kernels;
@@ -392,8 +319,8 @@ static void wgpu_size_setup(struct futhark_context *ctx) {
 
   // TODO: See if we can also do some proper heuristic for default_grid_size
   // here.
-  if (!cfg->default_grid_size_changed) {
-    cfg->default_grid_size = 16;
+  if (!cfg->gpu.default_grid_size_changed) {
+    cfg->gpu.default_grid_size = 16;
   }
 
   for (int i = 0; i < cfg->num_tuning_params; i++) {
@@ -405,10 +332,10 @@ static void wgpu_size_setup(struct futhark_context *ctx) {
 
     if (strstr(size_class, "thread_block_size") == size_class) {
       //max_value = ctx->max_thread_block_size;
-      default_value = cfg->default_block_size;
+      default_value = cfg->gpu.default_block_size;
     } else if (strstr(size_class, "grid_size") == size_class) {
       //max_value = ctx->max_grid_size;
-      default_value = cfg->default_grid_size;
+      default_value = cfg->gpu.default_grid_size;
       // XXX: as a quick and dirty hack, use twice as many threads for
       // histograms by default.  We really should just be smarter
       // about sizes somehow.
@@ -417,13 +344,13 @@ static void wgpu_size_setup(struct futhark_context *ctx) {
       }
     } else if (strstr(size_class, "tile_size") == size_class) {
       //max_value = ctx->max_tile_size;
-      default_value = cfg->default_tile_size;
+      default_value = cfg->gpu.default_tile_size;
     } else if (strstr(size_class, "reg_tile_size") == size_class) {
       //max_value = 0; // No limit.
-      default_value = cfg->default_reg_tile_size;
+      default_value = cfg->gpu.default_reg_tile_size;
     } else if (strstr(size_class, "threshold") == size_class) {
       // Threshold can be as large as it takes.
-      default_value = cfg->default_threshold;
+      default_value = cfg->gpu.default_threshold;
     } else {
       // Bespoke sizes have no limit or default.
     }
@@ -468,7 +395,12 @@ int backend_context_setup(struct futhark_context *ctx) {
   // limit unless we explicitly request a larger one (which we do not currently
   // do).
   ctx->max_thread_block_size = 256;
+  ctx->max_grid_size = 65536; // TODO: idk what these should be, just put a large enough value.
+  ctx->max_tile_size = 65536; // TODO: idk what these should be, just put a large enough value.
+  ctx->max_threshold = 65536; // TODO: idk what these should be, just put a large enough value.
   ctx->max_shared_memory = 16384;
+
+  ctx->max_registers = 65536; // TODO: idk what these should be, just put a large enough value.
 
   // This is a number we picked semi-arbitrarily (2 MiB). There does not seem to
   // be a way to get L2 cache size from the WebGPU API.
@@ -491,7 +423,7 @@ int backend_context_setup(struct futhark_context *ctx) {
 
   WGPUFeatureName required_features[] = { WGPUFeatureName_ShaderF16 };
   WGPUDeviceDescriptor device_desc = {
-    .requiredFeaturesCount = 1,
+    .requiredFeatureCount = 1,
     .requiredFeatures = required_features,
   };
   wgpu_request_device_result device_result
