@@ -132,8 +132,16 @@ data SOAC rep
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
   | -- | @ScanScatter <width> <arrays> <map-lambda> <scan>
-    -- <dest-arrays-and-ops> <scatter-lambda>
-    ScanScatter SubExp [VName] (Lambda rep) (Scan rep) (ScatterSpec VName) (Lambda rep)
+    -- <dest-arrays> <scatter-lambda>
+    --
+    -- This SOAC has <width> for the input arrays which are mapped
+    -- over with <map-lambda> given to the <scan>. The result of the
+    -- scan is then mapped using the <scatter-lambda> and written to
+    -- the destination arrays <dest-arrays>. Here <map-lambda> and
+    -- <scan> will not produce any sub results and write them. All the
+    -- sub results will not be written anywhere and will be passed
+    -- directly to the <scatter-lambda> and written to <dest-arrays>.
+    ScanScatter SubExp [VName] (Lambda rep) (Scan rep) [VName] (Lambda rep)
   deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
@@ -454,7 +462,7 @@ mapSOACM tv (ScanScatter w arrs map_lam scan dests scatter_lam) =
     <*> mapM (mapOnSOACVName tv) arrs
     <*> mapOnSOACLambda tv map_lam
     <*> mapOnSOACScan tv scan
-    <*> mapOnSOACScatterSpec tv dests
+    <*> mapM (mapOnSOACVName tv) dests
     <*> mapOnSOACLambda tv scatter_lam
 
 mapOnSOACScatterSpec :: (Monad m) => SOACMapper frep trep m -> ScatterSpec VName -> m (ScatterSpec VName)
@@ -548,14 +556,8 @@ soacType (Hist _ _ ops _bucket_fun) = do
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
 soacType (Screma w _arrs form) =
   scremaType w form
-soacType (ScanScatter _w _arrs _map_lam _scan dests scatter_lam) =
-  -- At some point this should probably allow for the ability to
-  -- produce array results from the map, scan or other results from
-  -- the scatter lambda. As seen in scremaType.
-  zipWith arrayOfShape (map (snd . head) rets) shapes
-  where
-    (shapes, _, rets) =
-      unzip3 $ groupScatterResults dests $ lambdaReturnType scatter_lam
+soacType (ScanScatter w _arrs _map_lam _scan _dests scatter_lam) =
+  map (`arrayOfRow` w) $ lambdaReturnType scatter_lam
 
 instance TypedOp SOAC where
   opType = pure . staticShapes . soacType
@@ -689,8 +691,8 @@ instance IsOp SOAC where
         reductionDependencies mempty lam nes deps_in
       depsOfRed (Reduce _ lam nes, deps_in) =
         reductionDependencies mempty lam nes deps_in
-  opDependencies (ScanScatter w arrs map_lam scan dests scatter_lam) =
-    undefined
+  opDependencies (ScanScatter w arrs map_lam _scan _dests _scatter_lam) =
+    lambdaDependencies mempty map_lam (depsOfArrays w arrs)
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t

@@ -823,7 +823,8 @@ pSOAC pr =
               <* pComma
               <*> pScan pr
               <* pComma
-              <*> many (pDest <* pComma)
+              <*> braces (pVName `sepBy` pComma)
+              <* pComma
               <*> pLambda pr
           )
 
