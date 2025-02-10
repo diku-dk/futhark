@@ -965,12 +965,23 @@ instance RephraseOp SOAC where
     Screma w arrs
       <$> ( ScremaForm
               <$> rephraseLambda r lam
-              <*> mapM onScan scans
-              <*> mapM onRed red
+              <*> mapM (rephraseScan r) scans
+              <*> mapM (rephraseRed r) red
           )
-    where
-      onScan (Scan op nes) = Scan <$> rephraseLambda r op <*> pure nes
-      onRed (Reduce comm op nes) = Reduce comm <$> rephraseLambda r op <*> pure nes
+  rephraseInOp r (ScanScatter w arrs map_lam scan dests scatter_lam) =
+    ScanScatter w arrs
+      <$> rephraseLambda r map_lam
+      <*> rephraseScan r scan
+      <*> pure dests
+      <*> rephraseLambda r scatter_lam
+
+rephraseRed :: (Monad m) => Rephraser m from to -> Reduce from -> m (Reduce to)
+rephraseRed r (Reduce comm op nes) =
+  Reduce comm <$> rephraseLambda r op <*> pure nes
+
+rephraseScan :: (Monad m) => Rephraser m from to -> Scan from -> m (Scan to)
+rephraseScan r (Scan op nes) =
+  Scan <$> rephraseLambda r op <*> pure nes
 
 instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
   opMetrics (VJP _ _ lam) =
@@ -988,6 +999,11 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
       lambdaMetrics map_lam
       mapM_ (lambdaMetrics . scanLambda) scans
       mapM_ (lambdaMetrics . redLambda) reds
+  opMetrics (ScanScatter _ _ map_lam scan _ scatter_lam) =
+    inside "ScanScatter" $ do
+      lambdaMetrics map_lam
+      lambdaMetrics $ scanLambda scan
+      lambdaMetrics scatter_lam
 
 instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
   pretty (VJP args vec lam) =
@@ -1041,6 +1057,16 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
                     (mconcat $ intersperse (comma <> PP.line) $ map pretty scans)
             )
   pretty (Screma w arrs form) = ppScrema w arrs form
+  pretty (ScanScatter w arrs map_lam scan dests scatter_lam) =
+    "scanscatter"
+      <> (parens . align)
+        ( pretty w
+            <> comma </> ppTuple' (map pretty arrs)
+            <> comma </> pretty map_lam
+            <> pretty scan
+            <> comma </> ppTuple' (map pretty dests)
+            <> comma </> pretty scatter_lam
+        )
 
 -- | Prettyprint the given Screma.
 ppScrema ::

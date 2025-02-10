@@ -118,18 +118,8 @@ simplifySOAC (Hist w imgs ops bfun) = do
   (bfun', bfun_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty bfun
   pure (Hist w' imgs' ops' bfun', mconcat hoisted <> bfun_hoisted)
 simplifySOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
-  (scans', scans_hoisted) <- fmap unzip $
-    forM scans $ \(Scan lam nes) -> do
-      (lam', hoisted) <- Engine.simplifyLambda mempty lam
-      nes' <- Engine.simplify nes
-      pure (Scan lam' nes', hoisted)
-
-  (reds', reds_hoisted) <- fmap unzip $
-    forM reds $ \(Reduce comm lam nes) -> do
-      (lam', hoisted) <- Engine.simplifyLambda mempty lam
-      nes' <- Engine.simplify nes
-      pure (Reduce comm lam' nes', hoisted)
-
+  (scans', scans_hoisted) <- unzip <$> mapM simplifyScan scans
+  (reds', reds_hoisted) <- unzip <$> mapM simplifyReduce reds
   (map_lam', map_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty map_lam
 
   (,)
@@ -139,6 +129,37 @@ simplifySOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
             <*> pure (ScremaForm map_lam' scans' reds')
         )
     <*> pure (mconcat scans_hoisted <> mconcat reds_hoisted <> map_lam_hoisted)
+simplifySOAC (ScanScatter w arrs map_lam scan dests scatter_lam) = do
+  (map_lam', map_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty map_lam
+  (scan', scan_hoisted) <- simplifyScan scan
+  (scatter_lam', scatter_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty scatter_lam
+
+  (,)
+    <$> ( ScanScatter
+            <$> Engine.simplify w
+            <*> Engine.simplify arrs
+            <*> pure map_lam'
+            <*> pure scan'
+            <*> Engine.simplify dests
+            <*> pure scatter_lam'
+        )
+    <*> pure (map_lam_hoisted <> scan_hoisted <> scatter_lam_hoisted)
+
+simplifyScan ::
+  (Simplify.SimplifiableRep rep) =>
+  Simplify.SimplifyOp rep (Scan (Wise rep))
+simplifyScan (Scan lam nes) = do
+  (lam', hoisted) <- Engine.simplifyLambda mempty lam
+  nes' <- Engine.simplify nes
+  pure (Scan lam' nes', hoisted)
+
+simplifyReduce ::
+  (Simplify.SimplifiableRep rep) =>
+  Simplify.SimplifyOp rep (Reduce (Wise rep))
+simplifyReduce (Reduce comm lam nes) = do
+  (lam', hoisted) <- Engine.simplifyLambda mempty lam
+  nes' <- Engine.simplify nes
+  pure (Reduce comm lam' nes', hoisted)
 
 instance BuilderOps (Wise SOACS)
 
