@@ -4,13 +4,14 @@ module Futhark.Analysis.Proofs.Substitute ((@)) where
 import Control.Applicative ((<|>))
 import Control.Monad (unless)
 import Data.Map qualified as M
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import Data.Set qualified as S
 import Debug.Trace (trace, traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (simplify)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, simplify, ($<), ($<=), ($>=))
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
+import Futhark.Analysis.Proofs.Query (Answer (..), Query (CaseCheck), allCases, askQ, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMapper (..), astFold, astMap, identityMapper)
@@ -18,7 +19,7 @@ import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, Replacement
 import Futhark.Analysis.Proofs.Util (prettyBinding')
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, sym2SoP)
-import Futhark.Util.Pretty (prettyString)
+import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName)
 
 tracer :: (VName, IndexFn) -> IndexFn -> IndexFn -> IndexFnM IndexFn
@@ -97,50 +98,52 @@ substituteOnce f g_non_repped (f_apply, args) = do
     let s = mkRep vn (rep f_arg v_f)
     pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep f_arg p_f), rep s v_g)
 
+  let g_iter = subIterator vn (iterator g)
+  same_range <- isSameRange (iterator f) g_iter
+  let new_iter = case (iterator f, g_iter) of
+        -- Propagate domain of f into g.
+        (Forall i df@(Cat {}), Forall j (Iota {}))
+          | same_range ->
+              Forall j $ repDomain (mkRep i $ Var j) df
+        _ -> g_iter
+
   -- If f has a segmented structure (Cat k _ _), make sure that
   -- k is not captured in the body of g after substitution.
-  let itg = subIterator vn (iterator g)
-  (new_iter, s) <- case (iterator f, itg) of
-    (Forall _ df@(Cat k _ _), Forall _ dg@(Cat k' _ _))
+  case iterator f of
+    Forall i df@(Cat k _ _)
       | k `S.member` fv new_body -> do
-          unless (k == k') $ error "Error in renaming."
-          assertSameRange df dg
-          pure (itg, mempty)
-    (Forall i df@(Cat k m _), Forall j dg@(Iota n))
-      | k `S.member` fv new_body -> do
-          c :: Maybe (Substitution Symbol) <- unify m n
-          if isJust c
-            then do
-              -- g actually iterates over k.
-              res1 <- solveFor k (intervalStart df) (f_arg M.! i)
-              res2 <- solveFor k (intervalEnd df) (f_arg M.! i)
-              case res1 <|> res2 of
-                Just res ->
-                  pure (itg, mkRep k res)
-                Nothing ->
-                  error $
-                    "Would capture k in g: f" <> prettyString f_arg
-            else -- pure (itg, mkRep k $ Var j)
-            do
-              -- Try to propagate structure of f into g.
-              assertSameRange df dg
-              pure (Forall j $ repDomain (mkRep i $ Var j) df, mempty)
-    (Forall i df@(Cat k _ _), Empty)
-      | k `S.member` fv new_body -> do
-          -- No way to propagate. Try to solve for k in f_arg.
-          -- Succeeds if f_arg indexes into the segment bounds of f.
-          res1 <- solveFor k (intervalStart df) (f_arg M.! i)
-          res2 <- solveFor k (intervalEnd df) (f_arg M.! i)
-          case res1 <|> res2 of
-            Just res ->
-              pure (Empty, mkRep k res)
+          let t1 =
+                if same_range
+                  then do
+                    -- Check that indexing into f is within segment bounds.
+                    let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
+                    in_segment <-
+                      allCases
+                        (askQ (CaseCheck (\_ -> bounds $ f_arg M.! i)))
+                        (IndexFn new_iter (body g))
+                    case in_segment of
+                      Yes -> pure $ Just (sym2SoP (Var k))
+                      Unknown -> pure Nothing
+                  else pure Nothing
+          let t2 = solveFor k (intervalStart df) (f_arg M.! i)
+          let t3 = solveFor k (intervalEnd df) (f_arg M.! i)
+          k_solution <- firstAlt [t1, t2, t3]
+          case k_solution of
+            Just res -> do
+              printM 1338 $ "SOLVED: " <> prettyString res
+              pure (repIndexFn (mkRep k res) $ IndexFn new_iter new_body)
             Nothing ->
               error $
-                "Would capture k in g: f" <> prettyString f_arg
+                "Would capture k in g: f"
+                  <> prettyString f_arg
+                  <> "\n"
+                  <> prettyString g
+                  <> "\nwhere "
+                  <> prettyString f_apply
+                  <> " = \n"
+                  <> prettyString f
     _ ->
-      pure (itg, mempty)
-
-  pure $ repIndexFn s $ IndexFn new_iter new_body
+      pure (IndexFn new_iter new_body)
   where
     -- Construct replacement from formal arguments of f to actual arguments.
     f_arg :: Replacement Symbol =
@@ -184,11 +187,16 @@ solveFor x e1 e2 = do
   s :: Maybe (Replacement Symbol) <- fmap mapping <$> unify e1' e2
   pure $ s >>= (M.!? x_hole)
 
-assertSameRange :: Domain -> Domain -> IndexFnM ()
-assertSameRange df dg = do
-  c <- case (df, dg) of
+isSameRange :: Iterator -> Iterator -> IndexFnM Bool
+isSameRange Empty Empty = pure True
+isSameRange Empty _ = pure False
+isSameRange _ Empty = pure False
+isSameRange (Forall _ df) (Forall _ dg) = do
+  case (df, dg) of
+    (Iota {}, Iota {}) ->
+      equiv df dg
     (Cat {}, Cat {}) ->
-      isJust <$> (unify df dg :: IndexFnM (Maybe (Substitution Symbol)))
+      equiv df dg
     _ -> do
       start_f <- rewrite (domainStart df)
       start_g <- rewrite (domainStart dg)
@@ -197,8 +205,14 @@ assertSameRange df dg = do
       eq_start :: Maybe (Substitution Symbol) <- unify start_f start_g
       eq_end :: Maybe (Substitution Symbol) <- unify end_f end_g
       pure (isJust eq_start && isJust eq_end)
-  unless c $
-    error $
-      "assertSameRange: inequal ranges: "
-        <> prettyString df
-        <> prettyString dg
+  where
+    equiv a b = isJust <$> (unify a b :: IndexFnM (Maybe (Substitution Symbol)))
+
+firstAlt :: (Monad f) => [f (Maybe (SoP Symbol))] -> f (Maybe (SoP Symbol))
+firstAlt [] = pure Nothing
+firstAlt (m : ms) = do
+  x <- m
+  printM 1338 $ "firstAlt m: " <> prettyString x
+  case x of
+    Just y -> pure (Just y)
+    Nothing -> firstAlt ms
