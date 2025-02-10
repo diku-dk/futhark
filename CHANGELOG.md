@@ -5,16 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.26.0]
+## [0.26.00]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* Compiler crash for intrablock scatters that write to
+  multidimensional arrays. (#2218)
+
+## [0.25.27]
 
 ### Added
 
 * Improved reverse-mode AD of `scan` with complicated operators. Work
   by Peter Adema and Sophus Valentin Willumsgaard.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
@@ -30,6 +39,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * An overzealous floating-point simplification rule.
 
 * Corrected AD of `x**y` where `x==0` (#2216).
+
+* `futhark fmt`: correct file name in parse errors.
+
+* A bug in the "sink" optimisation pass could cause compiler crashes.
+
+* Compile errors with newer versions of `ispc`.
 
 ## [0.25.26]
 
