@@ -51,7 +51,7 @@ import Data.Ord
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.Data qualified as V
-import Futhark.Util (chunk, maybeHead)
+import Futhark.Util (chunk)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
@@ -1121,7 +1121,6 @@ substituteInModule substs = onModule
   where
     rev_substs = reverseSubstitutions substs
     replace v = fromMaybe [v] $ M.lookup v rev_substs
-    replaceQ v = maybe v qualName $ maybeHead =<< M.lookup (qualLeaf v) rev_substs
     replaceM f m = M.fromList $ do
       (k, v) <- M.toList m
       k' <- replace k
@@ -1135,10 +1134,7 @@ substituteInModule substs = onModule
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
-    onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
-    onDim (Var v typ loc) = Var (replaceQ v) typ loc
-    onDim (IntLit x t loc) = IntLit x t loc
-    onDim _ = error "Arbitrary expression not supported yet"
+    onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps t
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
