@@ -795,7 +795,9 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
   dest_arrs_ts <- mapM (lookupType . kernelInputArray) dest_arrs
 
-  let k_body = KernelBody () k_body_stms (zipWith (inPlaceReturn ispace) dest_arrs_ts grouped)
+  let k_body =
+        KernelBody () k_body_stms $
+          zipWith (inPlaceReturn ispace) dest_arrs_ts grouped
       -- Remove unused kernel inputs, since some of these might
       -- reference the array we are scattering into.
       kernel_inps' =
@@ -814,15 +816,17 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
     bad = error "Ill-typed nested scatter encountered."
 
     inPlaceReturn ispace arr_t (_, inp, is_vs) =
-      WriteReturns
-        ( foldMap (foldMap resCerts . fst) is_vs
-            <> foldMap (resCerts . snd) is_vs
-        )
-        (kernelInputArray inp)
-        [ (fullSlice arr_t $ map DimFix $ map Var (init gtids) ++ map resSubExp is, resSubExp v)
-          | (is, v) <- is_vs
-        ]
+      WriteReturns write_cs (kernelInputArray inp) $ do
+        (is, v) <- is_vs
+        pure
+          ( fullSlice arr_t . map DimFix $
+              map Var (init gtids) ++ map resSubExp is,
+            resSubExp v
+          )
       where
+        write_cs =
+          foldMap (foldMap resCerts . fst) is_vs
+            <> foldMap (resCerts . snd) is_vs
         (gtids, _ws) = unzip ispace
 
 segmentedUpdateKernel ::
