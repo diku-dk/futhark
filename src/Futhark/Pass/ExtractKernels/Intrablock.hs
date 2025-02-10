@@ -300,13 +300,22 @@ intrablockStm stm@(Let pat aux e) = do
       space <- mkSegSpace [(write_i, w)]
 
       let lam' = soacsLambdaToGPU lam
-          krets = do
-            (_a_w, a, is_vs) <-
-              groupScatterResults dests $ bodyResult $ lambdaBody lam'
+          grouped = groupScatterResults dests $ bodyResult $ lambdaBody lam'
+          (_, dest_arrs, _) = unzip3 grouped
+
+      dest_ts <- mapM lookupType dest_arrs
+
+      let krets = do
+            (a_t, (_a_w, a, is_vs)) <- zip dest_ts grouped
             let cs =
                   foldMap (foldMap resCerts . fst) is_vs
                     <> foldMap (resCerts . snd) is_vs
-                is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+                is_vs' = do
+                  (is, v) <- is_vs
+                  pure
+                    ( fullSlice a_t $ map (DimFix . resSubExp) is,
+                      resSubExp v
+                    )
             pure $ WriteReturns cs a is_vs'
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
