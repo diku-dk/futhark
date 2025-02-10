@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Compiler crash for intrablock scatters that write to
+  multidimensional arrays. (#2218)
+
 ## [0.25.27]
 
 ### Added
