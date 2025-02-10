@@ -118,8 +118,8 @@ simplifySOAC (Hist w imgs ops bfun) = do
   (bfun', bfun_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty bfun
   pure (Hist w' imgs' ops' bfun', mconcat hoisted <> bfun_hoisted)
 simplifySOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
-  (scans', scans_hoisted) <- unzip <$> mapM simplifyScan scans
-  (reds', reds_hoisted) <- unzip <$> mapM simplifyReduce reds
+  (scans', scans_hoisted) <- mapAndUnzipM simplifyScan scans
+  (reds', reds_hoisted) <- mapAndUnzipM simplifyReduce reds
   (map_lam', map_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty map_lam
 
   (,)

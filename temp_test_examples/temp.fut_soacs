@@ -23,9 +23,9 @@ entry("main",
                  add32(eta_p_5253, eta_p_5254)
                in {defunc_0_op_res_5255},
              {0i32},
+             {xs_5233},
              \ {x_5252 : i32}
                : {i32} ->
-               {x_5252},
-             {xs_5233})
+               {x_5252})
   in {defunc_0_scan_res_5256}
 }

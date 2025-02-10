@@ -365,6 +365,8 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
 
   -- Wrap up the above into a for-loop.
   letBind pat $ Loop merge (ForLoop iter Int64 len) loopBody
+transformSOAC pat (ScanScatter w arrs map_lam scan dests scatter_lam) = do
+  undefined
 
 -- | Recursively first-order-transform a lambda.
 transformLambda ::
