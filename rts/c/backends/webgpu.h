@@ -763,7 +763,7 @@ static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
   wgpuQueueWriteBuffer(ctx->queue, dst, dst_offset, buf + offset, copy_size);
 
   if (buf != src) {
-    free(buf);
+    free((void*)buf);
   }
 
   return FUTHARK_SUCCESS;
