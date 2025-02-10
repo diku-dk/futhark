@@ -916,8 +916,10 @@ typeCheckSOAC (ScanScatter w arrs map_lam scan dests scatter_lam) = do
     $ "Map function return type "
       <> prettyTuple map_lam_ts
       <> " wrong for given scan functions."
-  
-  pure ()
+  TC.checkLambda scatter_lam scan_nes'
+  dests' <- TC.checkSOACArrayArgs w dests
+  TC.checkLambda scatter_lam dests'
+  mapM_ (TC.consume <=< TC.lookupAliases) dests
 
 typeCheckScan :: (TC.Checkable rep) => Scan (Aliases rep) -> TC.TypeM rep [(Type, Names)]
 typeCheckScan (Scan scan_lam scan_nes) = do
