@@ -24,8 +24,10 @@ entry("main",
                in {defunc_0_op_res_5255},
              {0i32},
              {xs_5233},
-             \ {x_5252 : i32}
+             \ {u_10000 : i32}
                : {i32} ->
-               {x_5252})
+               let {temp_10001 : i32} = u_10000
+               in {temp_10001}
+             )
   in {defunc_0_scan_res_5256}
 }
