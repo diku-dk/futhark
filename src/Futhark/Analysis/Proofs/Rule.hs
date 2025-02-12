@@ -7,7 +7,7 @@ module Futhark.Analysis.Proofs.Rule
   )
 where
 
-import Control.Monad (foldM, msum, (<=<))
+import Control.Monad (foldM, msum, unless, (<=<))
 import Data.List (subsequences, (\\))
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Proofs.IndexFnPlus (subIndexFn, unifyIndexFnWith)
@@ -67,6 +67,9 @@ instance ApplyRule IndexFn Symbol where
       matchCases k cs1 cs2 = do
         let (p_xs, v_xs) = unzip $ casesToList cs1
         let (p_ys, v_ys) = unzip $ casesToList cs2
+        unless
+          (length p_xs == length p_ys)
+          (fail "Number of cases should match too.")
         s1 <- unifies_ k (zip p_xs p_ys)
         foldM
           ( \s (x, y) ->
@@ -74,6 +77,7 @@ instance ApplyRule IndexFn Symbol where
           )
           s1
           (zip v_xs v_ys)
+
       -- TODO does msum here exclude potential matches?
       -- (That is, rather than try every possible fold above,
       -- we select the first valid always.)
