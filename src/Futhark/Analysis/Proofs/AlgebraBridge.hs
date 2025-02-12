@@ -16,7 +16,7 @@ import Futhark.Analysis.Proofs.AlgebraBridge.Util
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv, whenDebug)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook, vacuous)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF, toDNF)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Proofs.Unify (Substitution, sub, unify)
 import Futhark.MonadFreshNames (newVName)
@@ -157,20 +157,11 @@ isTrue sym = do
 -- | Does this symbol simplify to false?
 isFalse :: Symbol -> IndexFnM Answer
 isFalse p = do
-  -- Our solver may return False when the query is undecidable,
-  -- so instead check if the negation of p is true.
-  let neg_p_dnf = toDNF (neg p)
-  -- not_p <- isTrue neg_p_dnf
-  -- \^This check gets prohibitively expensive when there are many disjunctions
-  -- (such as when merging multiple index function cases). The below strategy
-  -- scales better.
-  --
   -- If we convert p to CNF, a sufficient condition for p to be false
   -- is that some clause q in p is false. Hence we can pick a clause q,
   -- assume all other clauses to be true, and use that information when
   -- checking q. This lets us easily falsify, for example, x == 1 :&& x == 2.
-  let p_cnf = cnfToList $ neg neg_p_dnf -- Converts p to CNF.
-  falsify p_cnf []
+  falsify (conjToList $ toCNF p) []
   where
     falsify [] _ = pure Unknown
     falsify (q : left) right = do
@@ -181,12 +172,9 @@ isFalse p = do
         Yes -> pure Yes
         Unknown -> falsify left (q : right)
 
-cnfToList :: Symbol -> [Symbol]
-cnfToList (a :&& b) = cnfToList a <> cnfToList b
-cnfToList x = [x]
+    conjToList (a :&& b) = conjToList a <> conjToList b
+    conjToList x = [x]
 
--- WARNING: This adds stuff to the Algebra environment.
--- (Should be used inside algebra rollbacks.)
 algDebugPrettyM :: String -> SoP Symbol -> IndexFnM ()
 algDebugPrettyM msg x = rollbackAlgEnv $ do
   alg_x <- toAlgebra x
