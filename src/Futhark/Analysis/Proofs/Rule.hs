@@ -314,5 +314,44 @@ rulesIndexFn = do
             e1_symbols <- concatMap fst . sopToLists <$> sub s (Hole h1)
             e2_symbols <- concatMap fst . sopToLists <$> sub s (Hole h2)
             pure $ Recurrence `notElem` (e1_symbols <> e2_symbols)
+        },
+      Rule
+        { name = "bool2int",
+          -- NOTE not needed in the paper because all values are ints there?
+          from =
+            IndexFn
+              { iterator = Forall i (Iota (hole n)),
+                body =
+                  cases
+                    [ (Hole h1, int2SoP 1),
+                      (Hole h2, int2SoP 0)
+                    ]
+              },
+          to = \s ->
+            subIndexFn s $
+              IndexFn
+                { iterator = Forall i (Iota (hole n)),
+                  body = cases [(Bool True, hole h1)]
+                },
+          sideCondition = vacuous
+        },
+      Rule
+        { name = "bool2int (case order switched)",
+          from =
+            IndexFn
+              { iterator = Forall i (Iota (hole n)),
+                body =
+                  cases
+                    [ (Hole h1, int2SoP 0),
+                      (Hole h2, int2SoP 1)
+                    ]
+              },
+          to = \s ->
+            subIndexFn s $
+              IndexFn
+                { iterator = Forall i (Iota (hole n)),
+                  body = cases [(Bool True, hole h2)]
+                },
+          sideCondition = vacuous
         }
     ]
