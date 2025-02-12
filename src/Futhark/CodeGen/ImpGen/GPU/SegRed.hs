@@ -143,7 +143,12 @@ compileSegRed' ::
 compileSegRed' pat grid space segbinops map_body_cont
   | genericLength segbinops > maxNumOps =
       compilerLimitationS $
-        ("compileSegRed': at most " <> show maxNumOps <> " reduction operators are supported.\n")
+        ( "compileSegRed': at most "
+            <> show maxNumOps
+            <> " reduction operators are supported,\nbut found kernel with "
+            <> show (length segbinops)
+            <> ".\n"
+        )
           <> ("Pattern: " <> prettyString pat)
   | otherwise = do
       chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
