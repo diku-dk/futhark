@@ -370,7 +370,9 @@ transformSOAC pat (ScanScatter w arrs map_lam scan dests scatter_lam) = do
   scan_arrs <- resultArray [] scan_arr_ts
   let Scan scan_lam scan_nes = scan
   scanacc_params <- mapM (newParam "scanacc" . flip toDecl Nonunique) $ lambdaReturnType scan_lam
-  undefined
+  pure ()
+
+-- undefined
 
 -- | Recursively first-order-transform a lambda.
 transformLambda ::
