@@ -556,8 +556,12 @@ soacType (Hist _ _ ops _bucket_fun) = do
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
 soacType (Screma w _arrs form) =
   scremaType w form
-soacType (ScanScatter w _arrs _map_lam _scan _dests scatter_lam) =
-  map (`arrayOfRow` w) $ lambdaReturnType scatter_lam
+soacType (ScanScatter w _arrs _map_lam _scan dests scatter_lam) =
+  (`arrayOfRow` w) <$> drop (len_rettype - len_dests) rettype
+  where
+    rettype = lambdaReturnType scatter_lam
+    len_rettype = length rettype
+    len_dests = length dests
 
 instance TypedOp SOAC where
   opType = pure . staticShapes . soacType

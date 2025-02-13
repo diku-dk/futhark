@@ -366,11 +366,70 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
   -- Wrap up the above into a for-loop.
   letBind pat $ Loop merge (ForLoop iter Int64 len) loopBody
 transformSOAC pat (ScanScatter w arrs map_lam scan dests scatter_lam) = do
-  let scan_arr_ts = (`arrayOfRow` w) <$> (lambdaReturnType . scanLambda) scan
-  scan_arrs <- resultArray [] scan_arr_ts
   let Scan scan_lam scan_nes = scan
   scanacc_params <- mapM (newParam "scanacc" . flip toDecl Nonunique) $ lambdaReturnType scan_lam
-  pure ()
+  i <- newVName "i"
+  arr_ts <- mapM lookupType arrs
+  ts <- mapM lookupType dests
+  asOuts <- mapM (newIdent "write_out") ts
+
+  let loopform = ForLoop i Int64 w
+      lam_cons = consumedByLambda $ Alias.analyseLambda mempty map_lam
+      merge =
+        zip scanacc_params scan_nes
+          ++ loopMerge asOuts (map Var dests)
+
+  loop_body <- runBodyBuilder
+    . localScope (scopeOfFParams (map fst merge) <> scopeOfLoopForm loopform)
+    $ do
+      forM_ (zip3 (lambdaParams map_lam) arrs arr_ts) $ \(p, arr, arr_t) ->
+        if paramName p `nameIn` lam_cons
+          then do
+            p' <-
+              letExp (baseString (paramName p)) . BasicOp $
+                Index arr $
+                  fullSlice arr_t [DimFix $ Var i]
+            letBindNames [paramName p] $ BasicOp $ Replicate mempty $ Var p'
+          else
+            letBindNames [paramName p] . BasicOp . Index arr $
+              fullSlice arr_t [DimFix $ Var i]
+
+      mapM_ addStm $ bodyStms $ lambdaBody map_lam
+
+      let map_res = bodyResult $ lambdaBody map_lam
+
+      scan_res' <-
+        eLambda scan_lam $
+          map (pure . BasicOp . SubExp) $
+            map (Var . paramName) scanacc_params ++ map resSubExp map_res
+
+      let scan_res_bind = resSubExp <$> scan_res'
+      let map_param_bind = paramName <$> lambdaParams map_lam
+      let param_bind = scan_res_bind ++ (Var <$> map_param_bind)
+      forM_ (zip (paramName <$> lambdaParams scatter_lam) param_bind) $
+        \(scatter_p, v) -> do
+          letBindNames [scatter_p] $ BasicOp $ SubExp v
+
+      mapM_ addStm $ bodyStms $ lambdaBody scatter_lam
+      let (indices, values) =
+            splitAt (length dests) $
+              fmap resSubExp $
+                bodyResult $
+                  lambdaBody scatter_lam
+
+      let outs = map identName asOuts
+      write_res <- forM (zip3 outs indices values) $ \(arr, idx, val) -> do
+        arr_t <- lookupType arr
+        letExp "write_out" $
+          BasicOp $
+            Update Safe arr (fullSlice arr_t [DimFix idx]) val
+
+      pure $ scan_res' ++ varsRes write_res
+
+  names <-
+    (++ patNames pat)
+      <$> replicateM (length scanacc_params) (newVName "discard")
+  letBindNames names $ Loop merge loopform loop_body
 
 -- undefined
 

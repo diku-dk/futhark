@@ -9,7 +9,7 @@ entry("main",
               xs_5233 : [n_5232]i32)
   : {[n_5232]i32#([1], [0])} = {
   let {dest_53290 : [n_5232]i32} = replicate([n_5232], 0i32)
-  let {temp_93124 : [n_5232]i64, defunc_0_scan_res_52563 : [n_5232]i32} =
+  let {defunc_0_scan_res_52563 : [n_5232]i32} =
     scanscatter(n_5232,
              {xs_5233},
              \ {eta_p_52571 : i32}
