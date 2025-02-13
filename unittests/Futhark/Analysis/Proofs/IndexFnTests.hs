@@ -107,7 +107,7 @@ tests =
                       body =
                         cases
                           [ (xs_i :> int2SoP 100, int2SoP 2 .*. xs_i),
-                            (xs_i :<= int2SoP 100 :|| int2SoP 0 :>= xs_i, xs_i)
+                            ((xs_i :<= int2SoP 100 :&& int2SoP 0 :< xs_i) :|| int2SoP 0 :>= xs_i, xs_i)
                           ]
                     }
                 ]

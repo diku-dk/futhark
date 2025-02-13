@@ -16,7 +16,7 @@ import Futhark.Analysis.Proofs.AlgebraBridge.Util
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv, whenDebug)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook, vacuous)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF, toDNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Proofs.Unify (Substitution, sub, unify)
 import Futhark.MonadFreshNames (newVName)
@@ -29,7 +29,7 @@ simplify = astMap m
   where
     m :: ASTMapper Symbol IndexFnM =
       ASTMapper
-        { mapOnSymbol = simplifySymbol . toCNF,
+        { mapOnSymbol = simplifySymbol . toDNF,
           mapOnSoP = simplifyAlgebra <=< applyRuleBook rulesSoP
         }
 
