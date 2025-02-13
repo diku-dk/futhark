@@ -34,7 +34,9 @@ entry("main",
                   eq_i32(==_lhs_54292, 0i32)
                 let {lifted_lambda_res_54312 : i64} =
                   if cond_54302
-                  then {-1i64} else {eta_p_54282} : {i64}
+                  then {-1i64}
+                  else {let {res_97891: i64} = sub64(eta_p_54282, 1i64)
+                       in {res_97891}} : {i64}
                 in {lifted_lambda_res_54312, eta_p_54272})
   in {defunc_0_scan_res_52563}
 }
