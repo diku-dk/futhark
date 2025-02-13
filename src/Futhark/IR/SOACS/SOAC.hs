@@ -557,11 +557,7 @@ soacType (Hist _ _ ops _bucket_fun) = do
 soacType (Screma w _arrs form) =
   scremaType w form
 soacType (ScanScatter w _arrs _map_lam _scan dests scatter_lam) =
-  (`arrayOfRow` w) <$> drop (len_rettype - len_dests) rettype
-  where
-    rettype = lambdaReturnType scatter_lam
-    len_rettype = length rettype
-    len_dests = length dests
+  (`arrayOfRow` w) <$> drop (length dests) (lambdaReturnType scatter_lam)
 
 instance TypedOp SOAC where
   opType = pure . staticShapes . soacType
@@ -921,7 +917,19 @@ typeCheckSOAC (ScanScatter w arrs map_lam scan dests scatter_lam) = do
       <> prettyTuple map_lam_ts
       <> " wrong for given scan functions."
   TC.checkLambda scatter_lam (scan_nes' ++ arrs')
-  -- Some more type checking is needed but this is better.
+  dests' <- TC.checkSOACArrayArgs w dests
+  let scatter_lam_ts = lambdaReturnType scatter_lam
+  let scatter_ret_t =
+        replicate (length dests') (Prim int64) ++ fmap TC.argType dests'
+  unless
+    ( scatter_lam_ts == scatter_ret_t
+    )
+    . TC.bad
+    . TC.TypeError
+    $ "Scatter map function has return type "
+      <> prettyTuple scatter_lam_ts
+      <> " but should have type "
+      <> prettyTuple scatter_lam_ts
   mapM_ (TC.consume <=< TC.lookupAliases) dests
 
 typeCheckScan :: (TC.Checkable rep) => Scan (Aliases rep) -> TC.TypeM rep [(Type, Names)]
