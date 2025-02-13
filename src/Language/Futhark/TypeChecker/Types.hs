@@ -493,6 +493,7 @@ substTypesRet lookupSubst ot =
       Scalar <$> (Arrow u v d <$> onType t1 <*> onRetType t2)
     onType (Scalar (Sum ts)) =
       Scalar . Sum <$> traverse (traverse onType) ts
+
     onRetType (RetType dims t) = do
       ext <- get
       let (t', ext') = runState (onType t) ext
