@@ -168,6 +168,8 @@ You can set the level of debug verbosity via the environment variable
 You can run the various compiler passes in whatever order you wish.
 There are also various shorthands for running entire standard pipelines:
 
+- `-s`: "standard" pipeline; how all other piplines start, and stops
+  just before flattening.
 - `--gpu`: pipeline used for GPU backends (stopping just before adding
   memory information).
 - `--gpu-mem`: pipeline used for GPU backends, with memory
@@ -180,6 +182,8 @@ There are also various shorthands for running entire standard pipelines:
   adding memory information).
 - `--mc-mem`: pipeline used for multicore backends, with memory
   information. This will show the IR that is passed to ImpGen.
+
+Remember that you can use `-v` to log the actual passes as they run.
 
 By default, `futhark dev` will print the resulting IR. You can switch to
 a different *action* with one of the following options:
