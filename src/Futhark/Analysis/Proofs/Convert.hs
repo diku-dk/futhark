@@ -251,19 +251,21 @@ forward e@(E.AppExp (E.Index e_xs slice loc) _)
       f_xss <- forward e_xs
       f_idxs <- forward e_idx
       forM (zip f_xss f_idxs) $ \(f_xs, f_idx) -> do
-        checkBounds e f_xs f_idx
-
         ctx <- getLiftCtx
         xs <- newVName "f_xs"
         idx <- newVName "f_idx"
         let f_body = singleCase . sym2SoP $ Idx (Var xs) (sym2SoP $ Var idx)
         debugT' "E.Index result: " $ case iterators ctx of
           [] -> do
+            checkBounds e f_xs f_idx
+
             substParams
               (IndexFn (iterator f_idx) f_body)
               [(idx, f_idx), (xs, f_xs)]
           [ctx_i] -> do
             let fF_idx = IndexFn ctx_i (body f_idx)
+            checkBounds e f_xs fF_idx
+
             fF <-
               substParams
                 (IndexFn (iterator fF_idx) f_body)
