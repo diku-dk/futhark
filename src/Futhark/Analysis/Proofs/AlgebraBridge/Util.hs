@@ -123,11 +123,14 @@ addRelIterator (Forall i dom) = case dom of
       S.fromList
         [ interval_start :<=: sVar i,
           sVar i :<=: interval_end,
-          dom_start :<=: sVar i,
-          sVar i :<=: dom_end,
           int2SoP 1 :<=: m',
           int2SoP 0 :<=: sVar k,
           sVar k :<=: m' .-. int2SoP 1
+        ]
+    addRels $
+      S.fromList
+        [ dom_start :<=: sVar i,
+          sVar i :<=: dom_end
         ]
     interval_size <-
       Algebra.simplify $ (interval_end .+. int2SoP 1) .-. interval_start
