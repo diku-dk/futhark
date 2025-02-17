@@ -556,8 +556,6 @@ compileWebGPUAction fcfg mode tgtpath =
           jsserverpath = tgtpath `addExtension` "server.js"
           jsonpath = tgtpath `addExtension` "json"
           extra_options =
-            -- [ "-DUSE_DAWN"
-            -- ]
             [ "-sUSE_WEBGPU",
               "-sASYNCIFY",
               "-sMODULARIZE",
@@ -565,7 +563,6 @@ compileWebGPUAction fcfg mode tgtpath =
               "-sEXPORTED_RUNTIME_METHODS=cwrap,ccall,Asyncify",
               "--extern-post-js",
               jslibpath
-              --"-g"
             ]
           export_option =
             "-sEXPORTED_FUNCTIONS="
