@@ -27,8 +27,8 @@ import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algDe
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, repDomain)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugPrintAlgEnv, debugT, rollbackAlgEnv)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugT, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol, toDNF)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (lookupRange)
@@ -60,11 +60,9 @@ askQ Truth fn case_idx = askQ (CaseCheck sop2Symbol) fn case_idx
 askQ query fn case_idx = algebraContext fn $ do
   let (p, q) = getCase case_idx (body fn)
   addRelIterator (iterator fn)
-  assume p
   case query of
     CaseCheck transf -> do
-      debugPrettyM "askQ check: " (transf q)
-      whenUnknown debugPrintAlgEnv $ check (transf q)
+      dnfQuery p (check $ transf q)
     CaseIsMonotonic dir ->
       debugT "  " $
         case iterator fn of
@@ -72,26 +70,22 @@ askQ query fn case_idx = algebraContext fn $ do
             -- Check j < i ^ p(j) ^ p(i) => q(j) `rel` q(i).
             j <- newVName "j"
             j +< i
-            assume (fromJust . justSym $ p @ Var j)
             let rel = case dir of
                   Inc -> ($<=)
                   IncStrict -> ($<)
                   Dec -> ($>=)
                   DecStrict -> ($>)
-            debugM $ "  Monotonic " <> show dir <> ": " <> prettyString p
-            algDebugPrettyM "" (sym2SoP p)
-            algDebugPrettyM "    =>" q
-            (q @ Var j) `rel` q
+            dnfQuery (p :&& (fromJust . justSym $ p @ Var j)) ((q @ Var j) `rel` q)
             where
               f @ x = rep (mkRep i x) f
           Empty -> undefined
 
-whenUnknown :: (Monad m) => m a -> m Answer -> m Answer
-whenUnknown effect m = do
-  ans <- m
-  case ans of
-    Yes -> pure ans
-    Unknown -> effect >> pure ans
+dnfQuery :: Symbol -> IndexFnM Answer -> IndexFnM Answer
+dnfQuery p f = do
+  allM $ map (\q -> rollbackAlgEnv (assume q >> f)) (disjToList $ toDNF p)
+  where
+    disjToList (a :|| b) = disjToList a <> disjToList b
+    disjToList x = [x]
 
 check :: Symbol -> IndexFnM Answer
 check (a :&& b) = check a `andM` check b
@@ -150,22 +144,28 @@ prove (InjectiveOn start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext f
                   -- Case i < j => f(i) /= g(j).
                   addRelIterator iter_j
                   i +< j
-                  assume (sop2Symbol $ p_f @ i)
-                  assume (sop2Symbol $ p_g @ j)
 
-                  (f @ i) $/= (g @ j)
-                  `orM` check (out_of_range (f @ i) :|| out_of_range (g @ j))
+                  dnfQuery
+                    (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
+                    ((f @ i) $/= (g @ j))
+                    `orM`
+                    dnfQuery
+                      (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
+                      (check (out_of_range (f @ i) :|| out_of_range (g @ j)))
             case_i_gt_j =
               rollbackAlgEnv $
                 do
                   -- Case i > j => f(i) /= g(j):
                   addRelIterator iter_i
                   j +< i
-                  assume (sop2Symbol $ p_f @ i)
-                  assume (sop2Symbol $ p_g @ j)
 
-                  (f @ i) $/= (g @ j)
-                  `orM` check (out_of_range (f @ i) :|| out_of_range (g @ j))
+                  dnfQuery
+                    (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
+                    ((f @ i) $/= (g @ j))
+                    `orM`
+                    dnfQuery
+                      (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
+                      (check (out_of_range (f @ i) :|| out_of_range (g @ j)))
          in case_i_lt_j `orM` case_i_gt_j
 
   -- NOTE could optimise this by sorting the distinct branches,

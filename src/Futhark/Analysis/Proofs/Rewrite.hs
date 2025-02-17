@@ -6,7 +6,7 @@ import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), cases, casesToList)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Query (isUnknown)
 import Futhark.Analysis.Proofs.Rule (applyRuleBook, rulesIndexFn)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..))
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), toCNF)
 import Futhark.Analysis.Proofs.Unify (Renameable, renameSame)
 import Futhark.SoP.SoP (SoP, justConstant)
 
@@ -53,9 +53,7 @@ rewrite_ fn@(IndexFn it xs) = simplifyIndexFn
       | Just _ <- justConstant x =
           pure (p, x)
     simplifyCase (p, x) = rollbackAlgEnv $ do
-      -- Take care to convert x first to hopefully get sums of predicates
-      -- translated first.
-      assume p
+      assume (toCNF p)
       y <- rewrite x
       pure (p, y)
 
@@ -74,15 +72,11 @@ rewrite_ fn@(IndexFn it xs) = simplifyIndexFn
         merge ((c, e) : as) ((c', e') : bs) = do
           (_, e_assuming_c') <- simplifyCase (c', e)
           if e_assuming_c' == e'
-            then do
-              c'' <- rewrite $ c :|| c'
-              merge ((c'', e) : as) bs
+            then merge ((c :|| c', e) : as) bs
             else do
               (_, e'_assuming_c) <- simplifyCase (c, e')
               if e'_assuming_c == e
-                then do
-                  c'' <- rewrite $ c :|| c'
-                  merge ((c'', e') : as) bs
+                then merge ((c :|| c', e') : as) bs
                 else merge ((c', e') : (c, e) : as) bs
 
     -- Remove cases for which the predicate can be shown False.
