@@ -4,9 +4,13 @@ let
   pkgs = import sources.nixpkgs {};
   python = pkgs.python312Packages;
   haskell = pkgs.haskell.packages.ghc96;
+  PWD = builtins.getEnv "PWD";
 in
 pkgs.stdenv.mkDerivation {
   name = "futhark";
+
+  EM_CACHE = "${PWD}/em_cache";
+
   buildInputs =
     with pkgs;
     [
