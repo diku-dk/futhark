@@ -6,6 +6,7 @@
 /**/*.expected
 /**/*.actual
 /**/*.wasm
+/**/*.js
 /**/*.json
 /**/*.ispc
 /**/*.cache
