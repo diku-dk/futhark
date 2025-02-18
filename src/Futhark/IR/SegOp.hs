@@ -148,10 +148,8 @@ data SegBinOp rep = SegBinOp
   }
   deriving (Eq, Ord, Show)
 
-data SegScatterOp rep = SegScatterOp
-  { segScatterOpLambda :: Lambda rep,
-    segScatterOpShape :: Shape
-  }
+newtype SegScatterOp rep = SegScatterOp
+  {segScatterOpLambda :: Lambda rep}
   deriving (Eq, Ord, Show)
 
 -- | How many reduction results are produced by these 'SegBinOp's?
@@ -520,13 +518,10 @@ segOpType (SegScan _ space scans lam ts kbody) =
   where
     map_ts = drop (length scan_ts) ts
     scan_ts = do
-      op <- scans
+      -- Some scan outputs may be used by a scatter lambda.
+      op <- drop (length lam) scans
       let shape = Shape (segSpaceDims space) <> segBinOpShape op
       map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
-    lam_ts = do
-      op <- lam
-      let shape = Shape (segSpaceDims space) <> segScatterOpShape op
-      map (`arrayOfShape` shape) (lambdaReturnType $ segScatterOpLambda op)
 segOpType (SegHist _ space ops _ _) = do
   op <- ops
   let shape = Shape segment_dims <> histShape op <> histOpShape op
@@ -570,7 +565,7 @@ typeCheckSegOp checkLvl (SegRed lvl space reds ts body) = do
         (map segBinOpLambda reds)
         (map segBinOpNeutral reds)
         (map segBinOpShape reds)
-typeCheckSegOp checkLvl (SegScan lvl space scans ts body) = do
+typeCheckSegOp checkLvl (SegScan lvl space scans lam ts body) = do
   checkLvl lvl
   checkScanRed space scans' ts body
   where
@@ -710,10 +705,9 @@ mapSegScatterOp ::
   SegOpMapper lvl frep trep m ->
   SegScatterOp frep ->
   m (SegScatterOp trep)
-mapSegScatterOp tv (SegScatterOp lam shape) =
+mapSegScatterOp tv (SegScatterOp lam) =
   SegScatterOp
     <$> mapOnSegOpLambda tv lam
-    <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
 
 -- | Apply a 'SegOpMapper' to the given 'SegOp'.
 mapSegOpM ::
@@ -788,8 +782,8 @@ rephraseScatterOp ::
   Rephraser f from rep ->
   SegScatterOp from ->
   f (SegScatterOp rep)
-rephraseScatterOp r (SegScatterOp lam shape) =
-  SegScatterOp <$> rephraseLambda r lam <*> pure shape
+rephraseScatterOp r (SegScatterOp lam) =
+  SegScatterOp <$> rephraseLambda r lam
 
 rephraseKernelBody ::
   (Monad f) =>
@@ -911,6 +905,10 @@ instance (PrettyRep rep) => Pretty (SegBinOp rep) where
       comm' = case comm of
         Commutative -> "commutative "
         Noncommutative -> mempty
+
+instance (PrettyRep rep) => Pretty (SegScatterOp rep) where
+  pretty (SegScatterOp lam) =
+    pretty lam
 
 instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
   pretty (SegMap lvl space ts body) =
@@ -1149,12 +1147,11 @@ simplifySegScatterOp ::
   VName ->
   SegScatterOp (Wise rep) ->
   Engine.SimpleM rep (SegScatterOp (Wise rep), Stms (Wise rep))
-simplifySegScatterOp phys_id (SegScatterOp lam shape) = do
+simplifySegScatterOp phys_id (SegScatterOp lam) = do
   (lam', hoisted) <-
     Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
       simplifyLambda (oneName phys_id) lam
-  shape' <- Engine.simplify shape
-  pure $ (SegScatterOp lam' shape', hoisted)
+  pure (SegScatterOp lam', hoisted)
 
 -- | Simplify the given 'SegOp'.
 simplifySegOp ::
