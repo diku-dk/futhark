@@ -139,7 +139,10 @@ instance (Renameable a, Renameable b) => Renameable (Cases a b) where
       re (p, q) = (,) <$> rename_ vns tau p <*> rename_ vns tau q
 
 instance Renameable Domain where
-  rename_ vns tau (Cat xn m b) = Cat xn <$> rename_ vns tau m <*> rename_ vns tau b
+  rename_ vns tau (Cat xn m b) = do
+    (xm, vns') <- freshNameFromString vns "k"
+    let tau' = M.insert xn xm tau
+    Cat xm <$> rename_ vns' tau' m <*> rename_ vns' tau' b
   rename_ vns tau (Iota n) = Iota <$> rename_ vns tau n
 
 instance Renameable Iterator where
