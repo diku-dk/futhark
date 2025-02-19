@@ -18,7 +18,7 @@ import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd,
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes, prove)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
-import Futhark.Analysis.Proofs.Substitute ((@))
+import Futhark.Analysis.Proofs.Substitute ((@), subst)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
@@ -254,29 +254,44 @@ forward e@(E.AppExp (E.Index e_xs slice loc) _)
         ctx <- getLiftCtx
         xs <- newVName "f_xs"
         idx <- newVName "f_idx"
+        -- let f_body = singleCase . sym2SoP $ Idx (Var xs) (sym2SoP $ Idx (Var idx) (int2SoP 0))
         let f_body = singleCase . sym2SoP $ Idx (Var xs) (sym2SoP $ Var idx)
-        debugT' "E.Index result: " $ case iterators ctx of
-          [] -> do
-            checkBounds e f_xs f_idx
+        -- checkBounds e f_xs f_idx
 
-            substParams
-              (IndexFn (iterator f_idx) f_body)
-              [(idx, f_idx), (xs, f_xs)]
-          [ctx_i] -> do
-            let fF_idx = IndexFn ctx_i (body f_idx)
-            checkBounds e f_xs fF_idx
-
-            fF <-
-              substParams
-                (IndexFn (iterator fF_idx) f_body)
-                [(idx, fF_idx), (xs, f_xs)]
-            pure $ repIndexFn (k_rep fF ctx_i) $ IndexFn Empty (body fF)
-          _ ->
-            errorMsg loc "Multi-dim not supported yet."
-  where
-    k_rep (IndexFn (Forall _ (Cat k _ _)) _) (Forall _ (Cat k' _ _)) =
-      mkRep k (Var k')
-    k_rep _ _ = mempty
+        printM 1337 $ "E.Index (has ctx: " <> prettyString (not . null $ iterators ctx) <> " )"
+        -- insertIndexFn xs [f_xs]
+        -- let IndexFn Empty ges_idx = f_idx
+        -- i <- newVName "i"
+        -- insertIndexFn idx [IndexFn (Forall i (Iota $ int2SoP 1)) ges_idx]
+        -- subst (IndexFn (iterator f_idx) f_body)
+        --   >>= rewriteWithoutRules
+        -- 
+        insertIndexFn xs [f_xs]
+        -- insertIndexFn idx [f_idx]
+        -- pure (IndexFn Empty f_body)
+        substParams
+          (IndexFn (iterator f_idx) f_body)
+          [(idx, f_idx), (xs, f_xs)]
+        -- substParams
+        --   (IndexFn Empty f_body)
+        --   [(idx, f_idx)]
+        --   >>= subst
+        -- case iterators ctx of
+        --   [] -> do
+        --     printM 1337 $ "case 1 : " <> prettyString f_body
+        --     substParams
+        --       (IndexFn (iterator f_idx) f_body)
+        --       [(idx, f_idx), (xs, f_xs)]
+        --   [ctx_i] -> do
+        --     printM 1337 $ "case 2 : " <> prettyString f_body
+        --     insertIndexFn xs [f_xs]
+        --     -- insertIndexFn idx [f_idx]
+        --     -- pure (IndexFn Empty f_body)
+        --     substParams
+        --       (IndexFn Empty f_body)
+        --       [(idx, f_idx)]
+        --   _ ->
+        --     errorMsg loc "Multi-dim not supported yet."
 forward (E.Not e _) = do
   fns <- forward e
   forM fns $ \fn -> do
@@ -342,6 +357,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
           )
   forM (zip ts fs) $ \(t, f) -> do
     substParams fn_if [(cond, f_c), (t_branch, t), (f_branch, f)]
+      >>= rewrite
 forward (E.Lambda _ _ _ _ loc) =
   errorMsg loc "Cannot create index function for unapplied lambda."
 forward expr@(E.AppExp (E.Apply f args loc) _)
@@ -351,12 +367,12 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
     Just arrays <- NE.nonEmpty (NE.tail args) = do
       (aligned_args, _aligned_sizes) <- zipArgs loc params arrays
       iter <- bindLambdaBodyParams (mconcat aligned_args)
-      fns <- quantifiedBy iter $ forward lam_body
+      bodies <- quantifiedBy iter $ forward lam_body
+      -- fns <- quantifiedBy iter $ forward lam_body
 
-      forM fns $ \body_fn ->
-        if iterator body_fn == Empty
-          then rewrite $ IndexFn iter (body body_fn)
-          else error "scan: Non-scalar body."
+      forM bodies $ \body_fn -> do
+        subst (IndexFn iter (body body_fn))
+          >>= rewrite
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
@@ -433,16 +449,14 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       -- and the second argument to be an element of the input array.
       -- (The lambda is associative, so we are free to pick.)
       (aligned_args, _) <- zipArgs loc [pat_x] xs
+
       iter <- bindLambdaBodyParams (mconcat aligned_args)
       let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
-      fns <-
-        quantifiedBy iter $
-          map (repIndexFn accToRec) <$> forward lam_body
+      bodies <- map (repIndexFn accToRec) <$> (quantifiedBy iter $ forward lam_body)
 
-      forM fns $ \body_fn ->
-        if iterator body_fn == Empty
-          then rewrite $ IndexFn iter (body body_fn)
-          else error "scan: Non-scalar body."
+      forM bodies $ \body_fn -> do
+        subst (IndexFn iter (body body_fn))
+          >>= rewrite
   | Just "scatter" <- getFun f,
     [e_dest, e_inds, e_vals] <- getArgs args = do
       -- `scatter dest is vs` calculates the equivalent of this imperative code:
@@ -937,14 +951,19 @@ bindLambdaBodyParams params = do
   -- Make sure all Cat k bound in iterators are identical by renaming.
   fns <- renamesM (map snd params)
   let iter@(Forall i _) = maximum (map iterator fns)
-  forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
-    vn <- newVName "tmp_fn"
-    IndexFn tmp_iter cs <-
-      IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
-    -- Renaming k bound in `tmp_iter` to k bound in `iter`.
-    let k_rep =
-          fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
-    insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
+  -- forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
+  --   vn <- newVName "tmp_fn"
+  --   IndexFn tmp_iter cs <-
+  --     IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
+  --   -- Renaming k bound in `tmp_iter` to k bound in `iter`.
+  --   let k_rep =
+  --         fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
+  --   insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
+  forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
+    xs <- newVName "X_from_lambda"
+    insertIndexFn xs [f_xs]
+    let f_body = singleCase . sym2SoP $ Idx (Var xs) (sVar i)
+    insertIndexFn paramName [IndexFn Empty f_body]
   pure iter
 
 errorMsg :: (E.Located a1) => a1 -> [Char] -> a2
@@ -1062,7 +1081,7 @@ parsePrelude f args =
 checkBounds :: E.Exp -> IndexFn -> IndexFn -> IndexFnM ()
 checkBounds _ (IndexFn Empty _) _ =
   error "E.Index: Indexing into scalar"
-checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
+checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = rollbackAlgEnv $ do
   df_start <- rewrite $ domainStart df
   df_end <- rewrite $ domainEnd df
   case df of
