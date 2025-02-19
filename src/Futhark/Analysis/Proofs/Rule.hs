@@ -320,7 +320,7 @@ rulesIndexFn = do
           -- NOTE not needed in the paper because all values are ints there?
           from =
             IndexFn
-              { iterator = Forall i (Iota (hole n)),
+              { iterator = Empty,
                 body =
                   cases
                     [ (Hole h1, int2SoP 1),
@@ -330,7 +330,7 @@ rulesIndexFn = do
           to = \s ->
             subIndexFn s $
               IndexFn
-                { iterator = Forall i (Iota (hole n)),
+                { iterator = Empty,
                   body = cases [(Bool True, hole h1)]
                 },
           sideCondition = vacuous
@@ -339,7 +339,7 @@ rulesIndexFn = do
         { name = "Bool is Int (case order switched)",
           from =
             IndexFn
-              { iterator = Forall i (Iota (hole n)),
+              { iterator = Empty,
                 body =
                   cases
                     [ (Hole h1, int2SoP 0),
@@ -349,7 +349,7 @@ rulesIndexFn = do
           to = \s ->
             subIndexFn s $
               IndexFn
-                { iterator = Forall i (Iota (hole n)),
+                { iterator = Empty,
                   body = cases [(Bool True, hole h2)]
                 },
           sideCondition = vacuous
