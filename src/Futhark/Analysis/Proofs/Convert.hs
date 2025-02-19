@@ -267,15 +267,13 @@ forward e@(E.AppExp (E.Index e_xs slice loc) _)
         --   >>= rewriteWithoutRules
         -- 
         insertIndexFn xs [f_xs]
-        -- insertIndexFn idx [f_idx]
-        -- pure (IndexFn Empty f_body)
-        substParams
-          (IndexFn (iterator f_idx) f_body)
-          [(idx, f_idx), (xs, f_xs)]
         -- substParams
-        --   (IndexFn Empty f_body)
-        --   [(idx, f_idx)]
-        --   >>= subst
+        --   (IndexFn (iterator f_idx) f_body)
+        --   [(idx, f_idx), (xs, f_xs)]
+        substParams
+          (IndexFn Empty f_body)
+          [(idx, f_idx)]
+          >>= subst
         -- case iterators ctx of
         --   [] -> do
         --     printM 1337 $ "case 1 : " <> prettyString f_body
@@ -951,19 +949,19 @@ bindLambdaBodyParams params = do
   -- Make sure all Cat k bound in iterators are identical by renaming.
   fns <- renamesM (map snd params)
   let iter@(Forall i _) = maximum (map iterator fns)
-  -- forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
-  --   vn <- newVName "tmp_fn"
-  --   IndexFn tmp_iter cs <-
-  --     IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
-  --   -- Renaming k bound in `tmp_iter` to k bound in `iter`.
-  --   let k_rep =
-  --         fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
-  --   insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
-  forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
-    xs <- newVName "X_from_lambda"
-    insertIndexFn xs [f_xs]
-    let f_body = singleCase . sym2SoP $ Idx (Var xs) (sVar i)
-    insertIndexFn paramName [IndexFn Empty f_body]
+  forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
+    vn <- newVName "tmp_fn"
+    IndexFn tmp_iter cs <-
+      IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
+    -- Renaming k bound in `tmp_iter` to k bound in `iter`.
+    let k_rep =
+          fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
+    insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
+  -- forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
+  --   xs <- newVName "X_from_lambda"
+  --   insertIndexFn xs [f_xs]
+  --   let f_body = singleCase . sym2SoP $ Idx (Var xs) (sVar i)
+  --   insertIndexFn paramName [IndexFn Empty f_body]
   pure iter
 
 errorMsg :: (E.Located a1) => a1 -> [Char] -> a2
@@ -985,7 +983,6 @@ warningMsg loc msg = do
 quantifiedBy :: Iterator -> IndexFnM a -> IndexFnM a
 quantifiedBy Empty m = m
 quantifiedBy iter m =
-  withLiftCtx iter $
     rollbackAlgEnv $ do
       addRelIterator iter
       m

@@ -18,7 +18,7 @@ import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMapper (..), astFo
 import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM, renameSame)
 import Futhark.Analysis.Proofs.Util (prettyBinding')
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, sym2SoP)
+import Futhark.SoP.SoP (SoP, sym2SoP, isZero)
 import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName)
 import qualified Language.Futhark as E
@@ -133,6 +133,7 @@ subber argCheck seen g = do
         argCheck f e args -> do
           -- TODO check bounds
           -- checkBounds e f g
+          checkBounds f g (e, args)
           -- printM 1337 $ "I'm here " <> prettyString f
           g' <- substituteOnce f g (e, args)
           -- printM 1337 $ "I did susbstituteOnce " <> prettyString g
@@ -311,3 +312,68 @@ firstAlt (m : ms) = do
   case x of
     Just y -> pure (Just y)
     Nothing -> firstAlt ms
+
+
+
+-- checkBounds f g (f_apply, args) = do
+--   ans <- checkBounds_ f g (f_apply, args)
+--   unless (isYes ans) $ error $
+--     "Unsafe indexing: "
+--       <> prettyString f_apply
+--       -- <> " (failed to show: "
+--       -- <> prettyString p_idx
+--       -- <> " => "
+--       -- <> prettyString (bound e_idx)
+      -- <> ")."
+
+checkBounds (IndexFn Empty _) _ (_, []) = pure ()
+checkBounds (IndexFn Empty _) _ _ = error "checkBounds: indexing into scalar"
+checkBounds f@(IndexFn (Forall _ df@(Iota _)) _) g (f_apply, [f_arg]) = algebraContext g $ do
+  beg <- rewrite $ domainStart df
+  end <- rewrite $ domainEnd df
+  doCheck (\_ -> beg :<= f_arg)
+  doCheck (\_ -> f_arg :<= end)
+  where
+    doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
+    doCheck bound =
+      foreachCase g $ \n -> do
+        c <- askQ (CaseCheck bound) g n
+        unless (isYes c) $ do
+          printExtraDebugInfo n
+
+          let (p_idx, e_idx) = getCase n $ body g
+          error $
+            "Unsafe indexing: "
+              <> prettyString f_apply
+              <> " (failed to show: "
+              <> prettyString p_idx
+              <> " => "
+              <> prettyString (bound e_idx)
+              <> ")."
+      where
+        -- TODO remove this.
+        printExtraDebugInfo n = do
+          env <- getAlgEnv
+          printM 1337 $
+            "Failed bounds-checking:"
+              <> "\nf:"
+              <> prettyString f
+              <> "\ng: "
+              <> prettyString g
+              <> "\nCASE g: "
+              <> show n
+              <> "\nUnder AlgEnv:"
+              <> prettyString env
+checkBounds (IndexFn (Forall _ df@(Cat _ _ b)) _) g (f_apply, [f_arg]) = algebraContext g $ do
+  beg <- rewrite $ domainStart df
+  end <- rewrite $ domainEnd df
+  let bounds e = (beg :<= e :|| b :<= e) :&& (e :<= intervalEnd df :|| e :<= end)
+  -- allCases (askQ (CaseCheck (\_ -> bounds f_arg))) g
+  pure ()
+checkBounds _ _ _ = undefined
+
+errorMsg :: (E.Located a1) => a1 -> [Char] -> a2
+errorMsg loc msg =
+  error $
+    "Error at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
+
