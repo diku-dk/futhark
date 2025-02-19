@@ -108,7 +108,7 @@ compilePrimExp f (BinOpExp bop x y) = do
     _ -> [C.cexp|$id:(prettyString bop)($exp:x', $exp:y')|]
 compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
-  pure [C.cexp|$id:(funName (nameFromString h))($args:args')|]
+  pure [C.cexp|$id:(funName (nameFromText h))($args:args')|]
 
 -- | Compile prim expression to C expression.
 compileExp :: Exp -> CompilerM op s C.Exp

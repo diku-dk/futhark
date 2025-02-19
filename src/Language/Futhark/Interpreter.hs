@@ -40,7 +40,6 @@ import Data.List
     foldl',
     genericLength,
     genericTake,
-    isPrefixOf,
     transpose,
   )
 import Data.List qualified as L
@@ -52,7 +51,7 @@ import Data.Ord
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.Data qualified as V
-import Futhark.Util (chunk, maybeHead)
+import Futhark.Util (chunk)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
@@ -332,7 +331,7 @@ lookupInEnv onEnv qv env = f env $ qualQuals qv
 lookupVar :: QualName VName -> Env -> Maybe TermBinding
 lookupVar = lookupInEnv envTerm
 
-lookupType :: QualName VName -> Env -> Maybe (Env, T.TypeBinding)
+lookupType :: QualName VName -> Env -> Maybe TypeBinding
 lookupType = lookupInEnv envType
 
 -- | A TermValue with a 'Nothing' type annotation is an intrinsic or
@@ -350,6 +349,9 @@ instance Show TermBinding where
   show (TermPoly bv _) = unwords ["TermPoly", show bv]
   show (TermModule m) = unwords ["TermModule", show m]
 
+data TypeBinding = TypeBinding Env [TypeParam] StructRetType
+  deriving (Show)
+
 data Module
   = Module Env
   | ModuleFun (Module -> EvalM Module)
@@ -361,7 +363,7 @@ instance Show Module where
 -- | The actual type- and value environment.
 data Env = Env
   { envTerm :: M.Map VName TermBinding,
-    envType :: M.Map VName (Env, T.TypeBinding)
+    envType :: M.Map VName TypeBinding
   }
   deriving (Show)
 
@@ -401,7 +403,7 @@ typeEnv m =
       envType = M.map tbind m
     }
   where
-    tbind = (mempty,) . T.TypeAbbr Unlifted [] . RetType []
+    tbind = TypeBinding mempty [] . RetType []
 
 i64Env :: M.Map VName Int64 -> Env
 i64Env = valEnv . M.map f
@@ -681,7 +683,7 @@ expandType env t@(Array u shape _) =
    in second (const u) (arrayOf shape' $ toStruct et')
 expandType env (Scalar (TypeVar u tn args)) =
   case lookupType tn env of
-    Just (tn_env, T.TypeAbbr _ ps (RetType ext t')) ->
+    Just (TypeBinding tn_env ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
           onDim (SizeClosure _ (Var v _ _))
             | Just e <- M.lookup (qualLeaf v) substs =
@@ -700,9 +702,9 @@ expandType env (Scalar (TypeVar u tn args)) =
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim e) =
       (M.singleton p e, mempty)
-    matchPtoA (TypeParamType l p _) (TypeArgType t') =
+    matchPtoA (TypeParamType _ p _) (TypeArgType t') =
       let t'' = evalToStruct $ expandType env t' -- FIXME, we are throwing away the closure here.
-       in (mempty, M.singleton p (mempty, T.TypeAbbr l [] $ RetType [] t''))
+       in (mempty, M.singleton p (TypeBinding mempty [] $ RetType [] t''))
     matchPtoA _ _ = mempty
     expandArg (TypeArgDim s) = TypeArgDim $ SizeClosure env s
     expandArg (TypeArgType t) = TypeArgType $ expandType env t
@@ -1172,13 +1174,12 @@ substituteInModule substs = onModule
   where
     rev_substs = reverseSubstitutions substs
     replace v = fromMaybe [v] $ M.lookup v rev_substs
-    replaceQ v = maybe v qualName $ maybeHead =<< M.lookup (qualLeaf v) rev_substs
     replaceM f m = M.fromList $ do
       (k, v) <- M.toList m
       k' <- replace k
       pure (k', f v)
     onEnv (Env terms types) =
-      Env (replaceM onTerm terms) (replaceM (bimap onEnv onType) types)
+      Env (replaceM onTerm terms) (replaceM onType types)
     onModule (Module env) =
       Module $ onEnv env
     onModule (ModuleFun f) =
@@ -1186,10 +1187,7 @@ substituteInModule substs = onModule
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
-    onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
-    onDim (Var v typ loc) = Var (replaceQ v) typ loc
-    onDim (IntLit x t loc) = IntLit x t loc
-    onDim _ = error "Arbitrary expression not supported yet"
+    onType (TypeBinding env ps t) = TypeBinding (onEnv env) ps t
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1267,8 +1265,8 @@ evalDec env (ImportDec name name' loc) =
   evalDec env $ LocalDec (OpenDec (ModImport name name' loc) loc) loc
 evalDec env (LocalDec d _) = evalDec env d
 evalDec env ModTypeDec {} = pure env
-evalDec env (TypeDec (TypeBind v l ps _ (Info (RetType dims t)) _ _)) = do
-  let abbr = (env, T.TypeAbbr l ps . RetType dims $ evalToStruct $ expandType env t)
+evalDec env (TypeDec (TypeBind v _ ps _ (Info (RetType dims t)) _ _)) = do
+  let abbr = TypeBinding env ps . RetType dims $ evalToStruct $ expandType env t
   pure env {envType = M.insert v abbr $ envType env}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
   (mod_env, mod) <- evalModExp env $ wrapInLambda ps
@@ -1314,7 +1312,7 @@ initialCtx =
   Ctx
     ( Env
         ( M.insert
-            (VName (nameFromString "intrinsics") 0)
+            (VName (nameFromText "intrinsics") 0)
             (TermModule (Module $ Env terms types))
             terms
         )
@@ -1322,8 +1320,8 @@ initialCtx =
     )
     mempty
   where
-    terms = M.mapMaybeWithKey (const . def . baseString) intrinsics
-    types = M.mapMaybeWithKey (const . tdef . baseString) intrinsics
+    terms = M.mapMaybeWithKey (const . def . baseText) intrinsics
+    types = M.mapMaybeWithKey (const . tdef . baseName) intrinsics
 
     sintOp f =
       [ (getS, putS, P.doBinOp (f Int8), adBinOp $ AD.OpBin (f Int8)),
@@ -1531,6 +1529,7 @@ initialCtx =
               <+> dquotes (prettyValue v)
               <> "."
 
+    def :: T.Text -> Maybe TermBinding
     def "!" =
       Just $
         unopDef
@@ -1637,13 +1636,13 @@ initialCtx =
               ++ floatCmp P.FCmpLe
               ++ boolCmp P.CmpLle
     def s
-      | Just bop <- find ((s ==) . prettyString) P.allBinOps =
+      | Just bop <- find ((s ==) . prettyText) P.allBinOps =
           Just $ tbopDef (AD.OpBin bop) $ P.doBinOp bop
-      | Just unop <- find ((s ==) . prettyString) P.allCmpOps =
+      | Just unop <- find ((s ==) . prettyText) P.allCmpOps =
           Just $ tbopDef (AD.OpCmp unop) $ \x y -> P.BoolValue <$> P.doCmpOp unop x y
-      | Just cop <- find ((s ==) . prettyString) P.allConvOps =
+      | Just cop <- find ((s ==) . prettyText) P.allConvOps =
           Just $ unopDef [(getV, Just . putV, P.doConvOp cop, adUnOp $ AD.OpConv cop)]
-      | Just unop <- find ((s ==) . prettyString) P.allUnOps =
+      | Just unop <- find ((s ==) . prettyText) P.allUnOps =
           Just $ unopDef [(getV, Just . putV, P.doUnOp unop, adUnOp $ AD.OpUn unop)]
       | Just (pts, _, f) <- M.lookup s P.primFuns =
           case length pts of
@@ -1659,26 +1658,21 @@ initialCtx =
                         pure $ ValuePrim res
                   _ ->
                     error $ "Cannot apply " <> prettyString s ++ " to " <> show x
-      | "sign_" `isPrefixOf` s =
+      | "sign_" `T.isPrefixOf` s =
           Just $
             fun1 $ \x ->
               case x of
                 (ValuePrim (UnsignedValue x')) ->
                   pure $ ValuePrim $ SignedValue x'
                 _ -> error $ "Cannot sign: " <> show x
-      | "unsign_" `isPrefixOf` s =
+      | "unsign_" `T.isPrefixOf` s =
           Just $
             fun1 $ \x ->
               case x of
                 (ValuePrim (SignedValue x')) ->
                   pure $ ValuePrim $ UnsignedValue x'
                 _ -> error $ "Cannot unsign: " <> show x
-    def s
-      | "map_stream" `isPrefixOf` s =
-          Just $ fun2 stream
-    def s | "reduce_stream" `isPrefixOf` s =
-      Just $ fun3 $ \_ f arg -> stream f arg
-    def s | "reduce" `isPrefixOf` s = Just $
+    def s | "reduce" `T.isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs
     def "scan" = Just $
@@ -2037,17 +2031,14 @@ initialCtx =
         let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
 
         -- For each output..
-        let m =
-              fromMaybe (error "vjp: differentiation failed") $
-                zipWithM
-                  ( \on sn -> case on of
-                      -- If it is a VJP variable of the correct depth, run deriveTape on it- and its corresponding seed
-                      (ValueAD d (AD.VJP (AD.VJPValue t))) | d == depth -> (putAD $ AD.tapePrimal t,) <$> AD.deriveTape t sn
-                      -- Otherwise, its partial derivatives are all 0
-                      _ -> Just (on, M.empty)
-                  )
-                  o'
-                  s'
+        let m = flip map (zip o' s') $ \(on, sn) -> case on of
+              -- If it is a VJP variable of the correct depth, run
+              -- deriveTapqe on it- and its corresponding seed
+              (ValueAD d (AD.VJP (AD.VJPValue t)))
+                | d == depth ->
+                    (putAD $ AD.tapePrimal t, AD.deriveTape t sn)
+              -- Otherwise, its partial derivatives are all 0
+              _ -> (on, M.empty)
 
         -- Add together every derivative
         let drvs = M.map (Just . putAD) $ M.unionsWith add $ map snd m
@@ -2138,17 +2129,13 @@ initialCtx =
         expectJust _ (Just v) = v
         expectJust s Nothing = error s
     def "acc" = Nothing
-    def s | nameFromString s `M.member` namesToPrimTypes = Nothing
-    def s = error $ "Missing intrinsic: " ++ s
+    def s | nameFromText s `M.member` namesToPrimTypes = Nothing
+    def s = error $ "Missing intrinsic: " ++ T.unpack s
 
+    tdef :: Name -> Maybe TypeBinding
     tdef s = do
-      t <- nameFromString s `M.lookup` namesToPrimTypes
-      pure (mempty, T.TypeAbbr Unlifted [] $ RetType [] $ Scalar $ Prim t)
-
-    stream f arg@(ValueArray _ xs) =
-      let n = ValuePrim $ SignedValue $ Int64Value $ arrayLength xs
-       in apply2 noLoc mempty f n arg
-    stream _ arg = error $ "Cannot stream: " <> show arg
+      t <- s `M.lookup` namesToPrimTypes
+      pure $ TypeBinding mempty [] $ RetType [] $ Scalar $ Prim t
 
 intrinsicVal :: Name -> Value
 intrinsicVal name =

@@ -23,6 +23,10 @@
 let
   config = {
     packageOverrides = pkgs: rec {
+      # Very ugly hack to use an older version of elfutils, as the
+      # newest apparently does not work with static linking.
+      elfutils191 = pkgs.callPackage ./nix/elfutils191.nix {};
+
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
           futhark-data =
@@ -65,7 +69,7 @@ let
             pkgs.haskell.lib.overrideCabal
               (pkgs.haskell.lib.addBuildTools
                 (haskellPackagesOld.callCabal2nix "futhark" (cleanSource ./.) { })
-                [ pkgs.python39Packages.sphinx ])
+                [ pkgs.python312Packages.sphinx ])
               ( _drv: {
                 isLibrary = false;
                 isExecutable = true;
@@ -94,7 +98,7 @@ let
                   "--extra-lib-dirs=${(pkgs.xz.override { enableStatic = true; }).out}/lib"
                   "--extra-lib-dirs=${(pkgs.zstd.override { enableStatic = true; }).out}/lib"
                   "--extra-lib-dirs=${(pkgs.bzip2.override { enableStatic = true; }).out}/lib"
-                  "--extra-lib-dirs=${(pkgs.elfutils.overrideAttrs (old: { dontDisableStatic= true; })).out}/lib"
+                  "--extra-lib-dirs=${(elfutils191.overrideAttrs (old: { dontDisableStatic= true; })).out}/lib"
                 ];
 
                 preBuild = ''
