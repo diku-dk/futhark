@@ -381,6 +381,17 @@ tests =
                       [(Bool True, int2SoP 0)]
                 }
             ]
+        ),
+      mkTest
+        "tests/indexfn/filter_segmented_array.fut"
+        ( pure $ \(i, n, _, _) ->
+            [ IndexFn
+                { iterator = Forall i (Iota (sHole n)),
+                  body =
+                    cases
+                      [(Bool True, int2SoP 0)]
+                }
+            ]
         )
     ]
   where
