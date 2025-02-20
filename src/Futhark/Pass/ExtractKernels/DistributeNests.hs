@@ -1029,6 +1029,7 @@ segmentedScanomapKernel ::
   SubExp ->
   Lambda SOACS ->
   Lambda rep ->
+  Lambda rep ->
   [SubExp] ->
   [VName] ->
   DistNestT rep m (Maybe (Stms rep))

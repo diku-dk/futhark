@@ -97,17 +97,18 @@ segScan ::
   Certs ->
   SubExp -> -- segment size
   [SegBinOp rep] ->
+  SegScatterOp rep ->
   Lambda rep ->
   [VName] ->
   [(VName, SubExp)] -> -- ispace = pair of (gtid, size) for the maps on "top" of this scan
   [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
   m (Stms rep)
-segScan lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
+segScan lvl pat cs w ops scatter_op map_lam arrs ispace inps = runBuilder_ $ do
   (kspace, kbody) <- prepareRedOrScan cs w map_lam arrs ispace inps
   letBind pat $
     Op $
       segOp $
-        SegScan lvl kspace ops (lambdaReturnType map_lam) kbody
+        SegScan lvl kspace ops scatter_op (lambdaReturnType map_lam) kbody
 
 segMap ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>

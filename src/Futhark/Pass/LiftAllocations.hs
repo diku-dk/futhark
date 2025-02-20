@@ -123,9 +123,9 @@ liftAllocationsInSegOp (SegMap lvl sp tps body) = do
 liftAllocationsInSegOp (SegRed lvl sp binops tps body) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
   pure $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
-liftAllocationsInSegOp (SegScan lvl sp binops tps body) = do
+liftAllocationsInSegOp (SegScan lvl sp binops scatter_op tps body) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
-  pure $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
+  pure $ SegScan lvl sp binops scatter_op tps $ body {kernelBodyStms = stms}
 liftAllocationsInSegOp (SegHist lvl sp histops tps body) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
   pure $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}

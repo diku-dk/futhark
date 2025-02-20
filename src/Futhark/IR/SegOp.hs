@@ -28,6 +28,7 @@ module Futhark.IR.SegOp
     KernelResult (..),
     kernelResultCerts,
     kernelResultSubExp,
+    SegScatterOp (..),
 
     -- ** Generic traversal
     SegOpMapper (..),
@@ -546,6 +547,15 @@ instance (ASTConstraints lvl) => AliasedOp (SegOp lvl) where
   consumedInOp (SegHist _ _ ops _ kbody) =
     namesFromList (concatMap histDest ops) <> consumedInKernelBody kbody
 
+typeCheckScatterSegOp ::
+  (TC.Checkable rep) =>
+  SegScatterOp (Aliases rep) ->
+  TC.TypeM rep ()
+typeCheckScatterSegOp (SegScatterOp lam dest shape) = do
+  -- I am not completely sure how this should be type check so I will
+  -- leave this for now.
+  undefined
+
 -- | Type check a 'SegOp', given a checker for its level.
 typeCheckSegOp ::
   (TC.Checkable rep) =>
@@ -567,6 +577,7 @@ typeCheckSegOp checkLvl (SegRed lvl space reds ts body) = do
 typeCheckSegOp checkLvl (SegScan lvl space scans lam ts body) = do
   checkLvl lvl
   checkScanRed space scans' ts body
+  typeCheckScatterSegOp lam
   where
     scans' =
       zip3
@@ -936,6 +947,7 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
       <> pretty lvl
         </> PP.align (pretty space)
         </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
+      <> PP.comma
         </> pretty lam
         </> PP.colon
         <+> ppTuple' (map pretty ts)
@@ -1497,7 +1509,6 @@ segOpReturns k@(SegMap _ _ _ kbody) =
 segOpReturns k@(SegRed _ _ _ _ kbody) =
   kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns k@(SegScan _ _ _ _ _ kbody) =
-  -- I have no clue if this is correct.
   kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns (SegHist _ _ ops _ _) =
   concat <$> mapM (mapM varReturns . histDest) ops

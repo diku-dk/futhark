@@ -969,8 +969,24 @@ pSegOp pr pLvl =
         <*> pShape
         <* pComma
         <*> pLambda pr
+    pScatterOp =
+      SegOp.SegScatterOp
+        <$> pLambda pr
+        <* pComma
+        <*> braces (pVName `sepBy` pComma)
+        <* pComma
+        <*> pShape
     pSegRed = pSegOp' SegOp.SegRed pSegBinOp
-    pSegScan = pSegOp' SegOp.SegScan pSegBinOp
+    pSegScan =
+      SegOp.SegScan
+        <$> pLvl
+        <*> pSegSpace
+        <*> parens (pSegBinOp `sepBy` pComma)
+        <* pComma
+        <*> pScatterOp
+        <* pColon
+        <*> pTypes
+        <*> braces (pKernelBody pr)
     pSegHist = pSegOp' SegOp.SegHist pHistOp
 
 pSegLevel :: Parser GPU.SegLevel

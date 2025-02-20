@@ -1078,7 +1078,8 @@ graphedScalarOperands e =
       collectSegLevel lvl
       collectSegSpace sp
       mapM_ collectSegBinOp ops
-    collectHostOp (SegOp (SegScan lvl sp ops _ _)) = do
+    collectHostOp (SegOp (SegScan lvl sp ops _ _ _)) = do
+      -- I think this should just be ignored.
       collectSegLevel lvl
       collectSegSpace sp
       mapM_ collectSegBinOp ops
