@@ -340,7 +340,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
     Just arrays <- NE.nonEmpty (NE.tail args) = do
       (aligned_args, _aligned_sizes) <- zipArgs loc params arrays
       iter <- bindLambdaBodyParams (mconcat aligned_args)
-      bodies <- quantifiedBy iter $ forward lam_body
+      bodies <- forward lam_body
 
       forM bodies $ \body_fn -> do
         subst (IndexFn iter (body body_fn))
@@ -424,7 +424,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
 
       iter <- bindLambdaBodyParams (mconcat aligned_args)
       let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
-      bodies <- map (repIndexFn accToRec) <$> quantifiedBy iter (forward lam_body)
+      bodies <- map (repIndexFn accToRec) <$> forward lam_body
 
       forM bodies $ \body_fn -> do
         subst (IndexFn iter (body body_fn))
@@ -946,13 +946,6 @@ warningMsg :: (Monad m, E.Located a) => a -> String -> m ()
 warningMsg loc msg = do
   printM 1 . warningString $
     prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
-
-quantifiedBy :: Iterator -> IndexFnM a -> IndexFnM a
-quantifiedBy Empty m = m
-quantifiedBy iter m =
-  rollbackAlgEnv $ do
-    addRelIterator iter
-    m
 
 forwardRefPrelude :: E.SrcLoc -> E.Exp -> String -> NE.NonEmpty (a4, E.Exp) -> IndexFnM [IndexFn]
 forwardRefPrelude loc e f args = do
