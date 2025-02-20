@@ -1,83 +1,71 @@
 -- Index function substitution.
 module Futhark.Analysis.Proofs.Substitute ((@), subst) where
 
-import Control.Applicative ((<|>))
 import Control.Monad (unless)
 import Data.Map qualified as M
-import Data.Maybe (isJust, fromJust)
+import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
-import Debug.Trace (trace, traceM)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, simplify, ($<), ($<=), ($>=))
+import Debug.Trace (trace)
+import Futhark.Analysis.Proofs.AlgebraBridge (algebraContext, simplify)
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), Query (CaseCheck), allCases, askQ, isYes, foreachCase)
+import Futhark.Analysis.Proofs.Query (Answer (..), Query (CaseCheck), allCases, askQ, foreachCase, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Symbol
-import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMapper (..), astFold, astMap, identityMapper, ASTFoldable)
+import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMapper (..), astFold, astMap, identityMapper)
 import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM, renameSame)
-import Futhark.Analysis.Proofs.Util (prettyBinding')
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, sym2SoP, isZero)
+import Futhark.SoP.SoP (SoP, sym2SoP)
 import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName)
-import qualified Language.Futhark as E
 
-tracer :: (VName, IndexFn) -> IndexFn -> IndexFn -> IndexFnM IndexFn
-tracer (vn, f@(IndexFn (Forall {}) _)) g@(IndexFn (Forall {}) _) res = do
-  printM 2000 $
-      "🎭  "
-        <> prettyBinding' vn f
-        <> prettyBinding' ("\n    into _" :: String) g
-        <> prettyBinding' ("\n          " :: String) res
-  pure res
-tracer _ _ res = pure res
+-- If f has multiple cases, we would not know which case to substitute
+-- into quantified symbols (e.g., Sum j a b f(e(j))).
+legalArg k g f e args =
+  let notQuantifier vn = vn < k || Just vn == catVar (iterator g)
+   in (hasSingleCase f || all (all notQuantifier . fv) args)
+        || warning
+  where
+    warning =
+      flip trace False $
+        warningString $
+          "Warning: Unable to substitute "
+            <> prettyString e
+            <> " in\n"
+            <> prettyString g
+            <> "\nfor\n"
+            <> prettyString f
 
--- Substitute applications of f into g.
+    hasSingleCase = isJust . justSingleCase
+
+-- Substitute applications of (f_name = f) into g.
+-- Unlike `subst` this errors if the substitution fails and
+-- will not check that indexing is within bounds.
+-- We use @ for convenience when substituting intermediate results in Convert.
 -- 'g @ (f_name, f)' substitutes name 'f_name' for indexfn 'f' in indexfn 'g'.
+-- TODO remove this or deduplicate overlap with `subst`.
 (@) :: IndexFn -> (VName, IndexFn) -> IndexFnM IndexFn
-g @ (vn, f) = tracer (vn, f) g =<< (vn, f) `substituteInto` g
-
-substituteInto :: (VName, IndexFn) -> IndexFn -> IndexFnM IndexFn
-substituteInto (f_name, _) dest_fn
+dest_fn @ (f_name, _)
   | f_name `S.notMember` fv dest_fn =
       pure dest_fn
-substituteInto (f_name, src_fn) dest_fn = do
+dest_fn @ (f_name, src_fn) = do
   k <- newVName "variables after this are quantifiers"
   (f, g) <- renameSame src_fn dest_fn
 
-  -- If f has multiple cases, we would not know which case to substitute
-  -- into quantified symbols (e.g., Sum j a b f(e(j))).
-  let legalArg e args =
-        let notQuantifier vn = vn < k || Just vn == catVar (iterator g)
-         in (hasSingleCase f || all (all notQuantifier . fv) args)
-              || warning
-        where
-          warning =
-            flip trace False $
-              warningString $
-                "Warning: Unable to substitute "
-                  <> prettyString e
-                  <> " in\n"
-                  <> prettyString dest_fn
-                  <> "\nfor\n"
-                  <> prettyString src_fn
-
-  printM 1337 $ prettyString f_name <> " substituteInto " <> prettyString g
-  app <- getApply legalArg g
+  printM 1337 $ prettyString g <> " @ " <> prettyString f_name
+  app <- getApply (legalArg k g f) g
   case app of
     Just apply -> do
-      printM 1337 $ prettyString f_name <> " substituteInto " <> prettyString apply
+      printM 1337 $ prettyString apply <> " @ " <> prettyString g
       h <- substituteOnce f g apply
-      (f_name, f) `substituteInto` fromJust h
+      fromJust h @ (f_name, f)
     Nothing ->
       -- When converting expressions a function may be substituted without arguments.
       fromJust <$> substituteOnce f g (Var f_name, [])
   where
-    -- getApply :: ASTFoldable Symbol a => (Symbol -> [SoP Symbol] -> Bool) -> a -> IndexFnM (Maybe (Symbol, [SoP Symbol]))
     getApply argCheck = astFold (ASTFolder {foldOnSymbol = getApply_ argCheck}) Nothing
 
-    -- getApply_ _ _ e | trace ("getApply " <> prettyString e) False = undefined
     getApply_ argCheck Nothing e@(Apply (Var vn) args)
       | vn == f_name,
         argCheck e args =
@@ -85,86 +73,60 @@ substituteInto (f_name, src_fn) dest_fn = do
     getApply_ argCheck Nothing e@(Idx (Var vn) arg)
       | vn == f_name,
         argCheck e [arg] = do
-          printM 1337 $ "getApply_ hit " <> prettyString e
           pure $ Just (e, [arg])
-          -- printM 1337 $ "Checking nested app " <> prettyString arg
-          -- nested_app <- getApply argCheck arg
-          -- printM 1337 $ "     =>             " <> prettyString nested_app
-          -- case nested_app of
-          --   Just _ -> pure nested_app
-          --   Nothing ->
-          --     pure $ Just (e, [arg])
     getApply_ _ acc _ = pure acc
 
-    hasSingleCase = isJust . justSingleCase
-
+-- Substitution as defined in the paper.
+-- Unlike @ this will attempt to substitute all indexing/applications
+-- in the index function and allows those substitutions to fail (no-op).
+-- Unlike @ this also checks bounds.
+subst :: IndexFn -> IndexFnM IndexFn
 subst indexfn = do
   k <- newVName "variables after this are quantifiers"
   g <- renameM indexfn
-  -- If f has multiple cases, we would not know which case to substitute
-  -- into quantified symbols (e.g., Sum j a b f(e(j))).
-  let legalArg f e args =
-        let notQuantifier vn = vn < k || Just vn == catVar (iterator g)
-         in (hasSingleCase f || all (all notQuantifier . fv) args)
-              || warning
-        where
-          warning =
-            flip trace False $
-              warningString $
-                "Warning: Unable to substitute "
-                  <> prettyString e
-                  <> " in\n"
-                  <> prettyString g
-                  <> "\nfor\n"
-                  <> prettyString f
-  subber legalArg mempty g
+  subber (legalArg k g) g
+
+subber :: (IndexFn -> Symbol -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
+subber argCheck g = do
+  go mempty
   where
-    hasSingleCase = isJust . justSingleCase
+    go seen = do
+      apply <- getApply seen g
+      ixfns <- getIndexFns
+      printM 1337 $
+        "subst " <> prettyString seen <> " : " <> prettyString g <> " : " <> prettyString apply
+      case apply of
+        Just (e, vn, args)
+          | Just [f] <- ixfns M.!? vn,
+            argCheck f e args -> do
+              printM 1 . warningString $
+                "Checking indexing within bounds " <> prettyString e
+              checkBounds f g (e, args)
+              g' <- substituteOnce f g (e, args)
+              case g' of
+                Just new_fn ->
+                  subst new_fn
+                Nothing ->
+                  go (S.insert (vn, args) seen)
+        Just (_, vn, args)
+          | otherwise ->
+              go (S.insert (vn, args) seen)
+        Nothing ->
+          pure g
 
-subber argCheck seen g = do
-  printM 1337 $ "subst " <> prettyString seen <> " : " <> prettyString g
+    getApply seen = astFold (ASTFolder {foldOnSymbol = getApply_ seen}) Nothing
 
-  apply <- getApply g
-  ixfns <- getIndexFns
-  printM 1337 $ "subber " <> prettyString apply
-  case apply of
-    Just (e, vn, args)
-      | Just [f] <- ixfns M.!? vn,
-        argCheck f e args -> do
-          printM 1 . warningString $
-            "Checking indexing within bounds " <> prettyString e
-          checkBounds f g (e, args)
-          -- printM 1337 $ "I'm here " <> prettyString f
-          g' <- substituteOnce f g (e, args)
-          -- printM 1337 $ "I did susbstituteOnce " <> prettyString g
-          case g' of
-            Just new_fn ->
-              subst new_fn
-            Nothing ->
-              subber argCheck (S.insert (vn, args) seen) g
-    Just (_, vn, args)
-      | otherwise ->
-          subber argCheck (S.insert (vn, args) seen) g
-    Nothing -> do
-      -- TODO handle vars without indexing
-      -- printM 1337 $ "subber EXITING" <> prettyString apply
-      pure g
-  where
-    -- This should traverse bottom-up?
-    getApply = astFold (ASTFolder {foldOnSymbol = getApply_}) Nothing
-
-    getApply_ Nothing e@(Apply (Var vn) args)
+    getApply_ seen Nothing e@(Apply (Var vn) args)
       | (vn, args) `S.notMember` seen =
           pure $ Just (e, vn, args)
-    getApply_ Nothing e@(Idx (Var vn) arg)
+    getApply_ seen Nothing e@(Idx (Var vn) arg)
       | (vn, [arg]) `S.notMember` seen =
           pure $ Just (e, vn, [arg])
-    getApply_ acc _ = pure acc
+    getApply_ _ acc _ = pure acc
 
 -- Assumes f and g_non_repped have been renamed using renameSame.
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
 substituteOnce f g_non_repped (f_apply, args) = do
-  -- printM 1338 $ "Substitute " <> prettyString f_apply <> " into " <> prettyString g_non_repped
   vn <- newVName ("<" <> prettyString f_apply <> ">")
   g <- repApply vn g_non_repped
 
@@ -183,12 +145,6 @@ substituteOnce f g_non_repped (f_apply, args) = do
               Forall j $ repDomain (mkRep i $ Var j) df
         _ -> g_iter
 
-  -- printM 1337 $ " f iter    " <> prettyString (iterator f)
-  -- printM 1337 $ " g iter    " <> prettyString g_iter
-  -- printM 1337 $ "f " <> prettyString f
-  -- printM 1337 $ "g " <> prettyString g
-  -- printM 1337 $ "new_iter " <> prettyString new_iter
-
   -- If f has a segmented structure (Cat k _ _), make sure that
   -- k is not captured in the body of g after substitution.
   case iterator f of
@@ -197,18 +153,18 @@ substituteOnce f g_non_repped (f_apply, args) = do
           let t1 =
                 if same_range
                   then do
-                    if f_arg M.!? i == (sym2SoP . Var <$> iterVar g_iter) -- ugly asf
-                    then pure (sym2SoP . Var <$> catVar new_iter)
-                    -- Check that indexing into f is within segment bounds.
-                    else do
-                      let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
-                      in_segment <-
-                        allCases
-                          (askQ (CaseCheck (\_ -> bounds $ f_arg M.! i)))
-                          (IndexFn new_iter (body g))
-                      case in_segment of
-                        Yes -> pure (sym2SoP . Var <$> catVar new_iter)
-                        Unknown -> pure Nothing
+                    if f_arg M.!? i == (sym2SoP . Var <$> iterVar g_iter)
+                      then pure (sym2SoP . Var <$> catVar new_iter)
+                      else -- Check that indexing into f is within segment bounds.
+                      do
+                        let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
+                        in_segment <-
+                          allCases
+                            (askQ (CaseCheck (\_ -> bounds $ f_arg M.! i)))
+                            (IndexFn new_iter (body g))
+                        case in_segment of
+                          Yes -> pure (sym2SoP . Var <$> catVar new_iter)
+                          Unknown -> pure Nothing
                   else pure Nothing
           let t2 = solveFor k (intervalStart df) (f_arg M.! i)
           let t3 = solveFor k (intervalEnd df) (f_arg M.! i)
@@ -271,8 +227,8 @@ substituteOnce f g_non_repped (f_apply, args) = do
     subIterator _ _ =
       error "Only single-case index functions may substitute into domain."
 
-iterVar (Forall i _) = Just i
-iterVar Empty = Nothing
+    iterVar (Forall i _) = Just i
+    iterVar Empty = Nothing
 
 -- Solve for x in e(x) = e'.
 -- solveFor :: (Replaceable p Symbol) => VName -> p -> SoP Symbol -> IndexFnM (Maybe (SoP Symbol))
@@ -313,8 +269,7 @@ firstAlt (m : ms) = do
     Just y -> pure (Just y)
     Nothing -> firstAlt ms
 
-
-checkBounds :: Pretty a => IndexFn -> IndexFn -> (a, [SoP Symbol]) -> IndexFnM ()
+checkBounds :: (Pretty a) => IndexFn -> IndexFn -> (a, [SoP Symbol]) -> IndexFnM ()
 checkBounds (IndexFn Empty _) _ (_, []) = pure ()
 checkBounds (IndexFn Empty _) _ _ = error "checkBounds: indexing into scalar"
 checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g $ do
