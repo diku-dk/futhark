@@ -131,8 +131,8 @@ subber argCheck seen g = do
     Just (e, vn, args)
       | Just [f] <- ixfns M.!? vn,
         argCheck f e args -> do
-          -- TODO check bounds
-          -- checkBounds e f g
+          printM 1 . warningString $
+            "Checking indexing within bounds " <> prettyString e
           checkBounds f g (e, args)
           -- printM 1337 $ "I'm here " <> prettyString f
           g' <- substituteOnce f g (e, args)
@@ -314,25 +314,21 @@ firstAlt (m : ms) = do
     Nothing -> firstAlt ms
 
 
-
--- checkBounds f g (f_apply, args) = do
---   ans <- checkBounds_ f g (f_apply, args)
---   unless (isYes ans) $ error $
---     "Unsafe indexing: "
---       <> prettyString f_apply
---       -- <> " (failed to show: "
---       -- <> prettyString p_idx
---       -- <> " => "
---       -- <> prettyString (bound e_idx)
-      -- <> ")."
-
+checkBounds :: Pretty a => IndexFn -> IndexFn -> (a, [SoP Symbol]) -> IndexFnM ()
 checkBounds (IndexFn Empty _) _ (_, []) = pure ()
 checkBounds (IndexFn Empty _) _ _ = error "checkBounds: indexing into scalar"
-checkBounds f@(IndexFn (Forall _ df@(Iota _)) _) g (f_apply, [f_arg]) = algebraContext g $ do
+checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g $ do
   beg <- rewrite $ domainStart df
   end <- rewrite $ domainEnd df
-  doCheck (\_ -> beg :<= f_arg)
-  doCheck (\_ -> f_arg :<= end)
+  case df of
+    Iota {} -> do
+      doCheck (\_ -> beg :<= f_arg)
+      doCheck (\_ -> f_arg :<= end)
+    Cat {} -> do
+      interval_beg <- rewrite $ intervalStart df
+      interval_end <- rewrite $ intervalEnd df
+      doCheck (\_ -> beg :<= f_arg :|| interval_beg :<= f_arg)
+      doCheck (\_ -> f_arg :<= end :|| interval_end :<= f_arg)
   where
     doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
     doCheck bound =
@@ -351,7 +347,6 @@ checkBounds f@(IndexFn (Forall _ df@(Iota _)) _) g (f_apply, [f_arg]) = algebraC
               <> prettyString (bound e_idx)
               <> ")."
       where
-        -- TODO remove this.
         printExtraDebugInfo n = do
           env <- getAlgEnv
           printM 1337 $
@@ -364,16 +359,4 @@ checkBounds f@(IndexFn (Forall _ df@(Iota _)) _) g (f_apply, [f_arg]) = algebraC
               <> show n
               <> "\nUnder AlgEnv:"
               <> prettyString env
-checkBounds (IndexFn (Forall _ df@(Cat _ _ b)) _) g (f_apply, [f_arg]) = algebraContext g $ do
-  beg <- rewrite $ domainStart df
-  end <- rewrite $ domainEnd df
-  let bounds e = (beg :<= e :|| b :<= e) :&& (e :<= intervalEnd df :|| e :<= end)
-  -- allCases (askQ (CaseCheck (\_ -> bounds f_arg))) g
-  pure ()
-checkBounds _ _ _ = undefined
-
-errorMsg :: (E.Located a1) => a1 -> [Char] -> a2
-errorMsg loc msg =
-  error $
-    "Error at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
-
+checkBounds _ _ _ = error "checkBounds: multi-dim not implemented yet"

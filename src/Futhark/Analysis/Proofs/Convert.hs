@@ -22,7 +22,7 @@ import Futhark.Analysis.Proofs.Substitute ((@), subst)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
-import Futhark.MonadFreshNames (VNameSource, newVName)
+import Futhark.MonadFreshNames (VNameSource, newVName, newName)
 import Futhark.SoP.Monad (addEquiv, addProperty)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
@@ -246,50 +246,23 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
           pure [IndexFn Empty (singleCase . sym2SoP $ Var vn)]
 forward (E.TupLit xs _) = do
   mconcat <$> mapM forward xs
-forward e@(E.AppExp (E.Index e_xs slice loc) _)
+forward (E.AppExp (E.Index e_xs slice _loc) _)
   | [E.DimFix e_idx] <- slice = do
       f_xss <- forward e_xs
       f_idxs <- forward e_idx
       forM (zip f_xss f_idxs) $ \(f_xs, f_idx) -> do
-        ctx <- getLiftCtx
-        xs <- newVName "f_xs"
-        idx <- newVName "f_idx"
-        -- let f_body = singleCase . sym2SoP $ Idx (Var xs) (sym2SoP $ Idx (Var idx) (int2SoP 0))
-        let f_body = singleCase . sym2SoP $ Idx (Var xs) (sym2SoP $ Var idx)
-        -- checkBounds e f_xs f_idx
+        xs <- case justVName e_xs of
+          Just vn -> newName vn
+          Nothing -> newVName "INTERNAL_xs"
+        idx <- newVName "INTERNAL_idx"
 
-        printM 1337 $ "E.Index (has ctx: " <> prettyString (not . null $ iterators ctx) <> " )"
-        -- insertIndexFn xs [f_xs]
-        -- let IndexFn Empty ges_idx = f_idx
-        -- i <- newVName "i"
-        -- insertIndexFn idx [IndexFn (Forall i (Iota $ int2SoP 1)) ges_idx]
-        -- subst (IndexFn (iterator f_idx) f_body)
-        --   >>= rewriteWithoutRules
-        -- 
+        -- Allows substitution of xs to fail for now.
+        -- Necessary because f_idx be nested inside a map.
         insertIndexFn xs [f_xs]
-        -- substParams
-        --   (IndexFn (iterator f_idx) f_body)
-        --   [(idx, f_idx), (xs, f_xs)]
         substParams
-          (IndexFn Empty f_body)
+          (IndexFn Empty $ singleCase . sym2SoP $ Idx (Var xs) (sVar idx))
           [(idx, f_idx)]
           >>= subst
-        -- case iterators ctx of
-        --   [] -> do
-        --     printM 1337 $ "case 1 : " <> prettyString f_body
-        --     substParams
-        --       (IndexFn (iterator f_idx) f_body)
-        --       [(idx, f_idx), (xs, f_xs)]
-        --   [ctx_i] -> do
-        --     printM 1337 $ "case 2 : " <> prettyString f_body
-        --     insertIndexFn xs [f_xs]
-        --     -- insertIndexFn idx [f_idx]
-        --     -- pure (IndexFn Empty f_body)
-        --     substParams
-        --       (IndexFn Empty f_body)
-        --       [(idx, f_idx)]
-        --   _ ->
-        --     errorMsg loc "Multi-dim not supported yet."
 forward (E.Not e _) = do
   fns <- forward e
   forM fns $ \fn -> do
@@ -303,8 +276,8 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
       vxs <- forward x'
       vys <- forward y'
       forM (zip vxs vys) $ \(vx, vy) -> do
-        a <- newVName "a"
-        b <- newVName "b"
+        a <- newVName "INTERNAL_a"
+        b <- newVName "INTERNAL_b"
         let doOp op =
               substParams
                 (IndexFn Empty (singleCase $ op (Var a) (Var b)))
@@ -450,7 +423,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
 
       iter <- bindLambdaBodyParams (mconcat aligned_args)
       let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
-      bodies <- map (repIndexFn accToRec) <$> (quantifiedBy iter $ forward lam_body)
+      bodies <- map (repIndexFn accToRec) <$> quantifiedBy iter (forward lam_body)
 
       forM bodies $ \body_fn -> do
         subst (IndexFn iter (body body_fn))
@@ -950,7 +923,9 @@ bindLambdaBodyParams params = do
   fns <- renamesM (map snd params)
   let iter@(Forall i _) = maximum (map iterator fns)
   forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
-    vn <- newVName "tmp_fn"
+    vn <- newName paramName
+    insertIndexFn vn [fn]
+    -- TODO if we use subst do we have to do the k renaming and iterator alignment?
     IndexFn tmp_iter cs <-
       IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
     -- Renaming k bound in `tmp_iter` to k bound in `iter`.
