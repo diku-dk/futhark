@@ -13,7 +13,7 @@ import Data.Set qualified as S
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, flattenCases, justSingleCase)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), askQ, askRefinement, askRefinements, isUnknown, isYes, prove)
@@ -256,13 +256,15 @@ forward (E.AppExp (E.Index e_xs slice _loc) _)
           Nothing -> newVName "I_xs"
         idx <- newVName "I_idx"
 
-        -- Allows substitution of xs to fail for now.
-        -- Necessary because f_idx be nested inside a map.
+        -- We don't use substParams on f_xs because the substitution
+        -- might fail here (e.g., if we are inside a map lambda).
         insertIndexFn xs [f_xs]
-        substParams
-          (IndexFn Empty $ singleCase . sym2SoP $ Idx (Var xs) (sVar idx))
-          [(idx, f_idx)]
-          >>= subst
+        -- Lift idx.
+        unless (iterator f_idx == Empty) $ error "E.Index: internal error"
+        i <- newVName "i"
+        insertIndexFn idx [IndexFn (Forall i (Iota $ int2SoP 1)) (body f_idx)]
+        subst
+          (IndexFn Empty $ singleCase . sym2SoP $ Idx (Var xs) (sym2SoP $ Idx (Var idx) (int2SoP 0)))
 forward (E.Not e _) = do
   fns <- forward e
   forM fns $ \fn -> do
@@ -921,22 +923,12 @@ bindLambdaBodyParams params = do
   -- Make sure all Cat k bound in iterators are identical by renaming.
   fns <- renamesM (map snd params)
   let iter@(Forall i _) = maximum (map iterator fns)
-  forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
-    vn <- newVName ("I_" <> E.baseString paramName <> "s")
-    -- TODO get rid of the substitution below
-    IndexFn tmp_iter cs <-
-      IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i))
-        @ (vn, fn)
-    -- Renaming k bound in `tmp_iter` to k bound in `iter`.
-    let k_rep =
-          fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
-    insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
-  -- XXX hitting some circular range in part2indicesL when using the below:
-  -- forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
-  --   xs <- newVName "X_from_lambda"
-  --   insertIndexFn xs [f_xs]
-  --   let f_body = singleCase . sym2SoP $ Idx (Var xs) (sVar i)
-  --   insertIndexFn paramName [IndexFn Empty f_body]
+  forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
+    vn <- newVName ("I_lam_" <> E.baseString paramName)
+    insertIndexFn vn [f_xs]
+    insertIndexFn
+      paramName
+      [IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i)]
   pure iter
 
 errorMsg :: (E.Located a1) => a1 -> [Char] -> a2

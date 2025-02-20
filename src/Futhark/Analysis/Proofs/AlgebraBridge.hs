@@ -156,6 +156,7 @@ isTrue sym = do
 
 -- | Does this symbol simplify to false?
 isFalse :: Symbol -> IndexFnM Answer
+isFalse (Bool False) = pure Yes
 isFalse p = do
   -- If we convert p to CNF, a sufficient condition for p to be false
   -- is that some clause q in p is false. Hence we can pick a clause q,
