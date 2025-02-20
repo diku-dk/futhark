@@ -6,7 +6,7 @@ let mk_flag_array 't 'a [m]
         (shape: [m]nat_i64)
         (n: {i64 | (== sum_i64 shape)})
         (zero: t)
-        (xs: [m]t) : [n]t =
+        (xs: [m]t) : {[n]t | \_ -> true} =
   let shp_rot = map (\i -> if i==0 then 0i64 else shape[i-1]) (iota m)
   let shp_scn = scan (+) 0i64 shp_rot
   let shp_ind =
@@ -20,7 +20,7 @@ let mk_flag_array 't 'a [m]
 
 def sgm_sum [n] 't
       (flags: [n]bool)
-      (xs: [n]i64): [n]i64 =
+      (xs: [n]i64): {[n]i64 | \_ -> true} =
   let zipped = zip flags xs
   let flags_ys =
     scan (\(x_flag,x) (y_flag,y) ->

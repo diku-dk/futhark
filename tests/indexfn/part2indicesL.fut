@@ -65,21 +65,19 @@ let part2indicesL 't [m][n]
           and (map (\i -> 0 <= i && i < n) inds)
             && injective inds
           --   (2) Using no duplicate values shown in (1) and
-            && and (map (\i ->
-                          let k = seg_ids[i]
+            && and (map2 (\i k ->
                           let seg_start = seg_ends[k] - shape[k]
                           in seg_start <= i && i < seg_start + shape[k]
                         )
-                        inds)
+                        inds seg_ids)
           --  (3)
-            && and (map2 (\c i ->
-                           let k = seg_ids[i]
+            && and (map3 (\c i k ->
                            let seg_start = seg_ends[k] - shape[k]
                            let p = num_trues[k]
                            in if c
                            then i - seg_start < p
                            else i - seg_start >= p
-                         ) csL inds)
+                         ) csL inds seg_ids)
         } =
   let (seg_ids, flags) = segment_ids shape
 
