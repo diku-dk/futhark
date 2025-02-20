@@ -1,7 +1,7 @@
 -- Index function substitution.
 module Futhark.Analysis.Proofs.Substitute ((@), subst) where
 
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
@@ -53,11 +53,12 @@ dest_fn @ (f_name, src_fn) = do
   k <- newVName "variables after this are quantifiers"
   (f, g) <- renameSame src_fn dest_fn
 
-  printM 1337 $ prettyString g <> " @ " <> prettyString f_name
+  printM 1337 $
+    "(" <> prettyString g <> ") @ " <> prettyString f_name <> " = " <> prettyString f
   app <- getApply (legalArg k g f) g
   case app of
     Just apply -> do
-      printM 1337 $ prettyString apply <> " @ " <> prettyString g
+      printM 1337 $ " @ " <> prettyString apply
       h <- substituteOnce f g apply
       fromJust h @ (f_name, f)
     Nothing ->
@@ -269,7 +270,7 @@ firstAlt (m : ms) = do
     Just y -> pure (Just y)
     Nothing -> firstAlt ms
 
-checkBounds :: (Pretty a) => IndexFn -> IndexFn -> (a, [SoP Symbol]) -> IndexFnM ()
+checkBounds :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM ()
 checkBounds (IndexFn Empty _) _ (_, []) = pure ()
 checkBounds (IndexFn Empty _) _ _ = error "checkBounds: indexing into scalar"
 checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g $ do
@@ -285,22 +286,33 @@ checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g 
       doCheck (\_ -> beg :<= f_arg :|| interval_beg :<= f_arg)
       doCheck (\_ -> f_arg :<= end :|| interval_end :<= f_arg)
   where
+    applyIn =
+      astFold
+        -- (ASTFolder { foldOnSymbol = \acc e -> (acc ||) <$> equiv e f_apply })
+        (ASTFolder { foldOnSymbol = \acc e -> pure (acc || e == f_apply) })
+        False
+
     doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
     doCheck bound =
       foreachCase g $ \n -> do
-        c <- askQ (CaseCheck bound) g n
-        unless (isYes c) $ do
-          printExtraDebugInfo n
-
-          let (p_idx, e_idx) = getCase n $ body g
-          error $
-            "Unsafe indexing: "
-              <> prettyString f_apply
-              <> " (failed to show: "
-              <> prettyString p_idx
-              <> " => "
-              <> prettyString (bound e_idx)
-              <> ")."
+        let (p_idx, e_idx) = getCase n $ body g
+        need_to_check <- (||) <$> applyIn (sym2SoP p_idx) <*> applyIn e_idx
+        when need_to_check $ do
+          c <- askQ (CaseCheck bound) g n
+          unless (isYes c) $ do
+            printExtraDebugInfo n
+            -- error $
+            printM 1 . warningString $
+              "Unsafe indexing: "
+                <> prettyString f_apply
+                <> " (failed to show: "
+                <> prettyString p_idx
+                <> " => "
+                <> prettyString (bound e_idx)
+                <> ")."
+        unless need_to_check $ do
+          printM 1337 $
+            "doCheck skip case: apply not in " <> prettyString (p_idx, e_idx)
       where
         printExtraDebugInfo n = do
           env <- getAlgEnv
