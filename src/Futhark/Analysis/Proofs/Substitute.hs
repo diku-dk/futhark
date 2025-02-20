@@ -11,7 +11,7 @@ import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), Query (CaseCheck), allCases, askQ, foreachCase, isYes)
-import Futhark.Analysis.Proofs.Rewrite (rewrite)
+import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMapper (..), astFold, astMap, identityMapper)
 import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM, renameSame)
@@ -94,21 +94,24 @@ subber argCheck g = do
     go seen = do
       apply <- getApply seen g
       ixfns <- getIndexFns
-      printM 1337 $
-        "subst " <> prettyString seen <> " : " <> prettyString g <> " : " <> prettyString apply
+      printM 1337 $ warningString "subst " <> prettyString seen
+      printM 1337 $ "apply " <> prettyString apply
+      printM 1337 $ "      " <> prettyString g
       case apply of
         Just (e, vn, args)
           | Just [f] <- ixfns M.!? vn,
             argCheck f e args -> do
               printM 1 . warningString $
                 "Checking indexing within bounds " <> prettyString e
-              checkBounds f g (e, args)
-              g' <- substituteOnce f g (e, args)
-              case g' of
-                Just new_fn ->
-                  subst new_fn
-                Nothing ->
-                  go (S.insert (vn, args) seen)
+              c <- checkBounds f g (e, args)
+              if c then do
+                g' <- substituteOnce f g (e, args)
+                case g' of
+                  Just new_fn -> do
+                    subst =<< rewriteWithoutRules new_fn
+                  Nothing ->
+                    go (S.insert (vn, args) seen)
+              else go (S.insert (vn, args) seen)
         Just (_, vn, args)
           | otherwise ->
               go (S.insert (vn, args) seen)
@@ -270,49 +273,54 @@ firstAlt (m : ms) = do
     Just y -> pure (Just y)
     Nothing -> firstAlt ms
 
-checkBounds :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM ()
-checkBounds (IndexFn Empty _) _ (_, []) = pure ()
+checkBounds :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM Bool
+checkBounds (IndexFn Empty _) _ (_, []) = pure True
 checkBounds (IndexFn Empty _) _ _ = error "checkBounds: indexing into scalar"
 checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g $ do
   beg <- rewrite $ domainStart df
   end <- rewrite $ domainEnd df
   case df of
     Iota {} -> do
-      doCheck (\_ -> beg :<= f_arg)
-      doCheck (\_ -> f_arg :<= end)
+      (&&)
+        <$> doCheck (\_ -> beg :<= f_arg)
+        <*> doCheck (\_ -> f_arg :<= end)
     Cat {} -> do
       interval_beg <- rewrite $ intervalStart df
       interval_end <- rewrite $ intervalEnd df
-      doCheck (\_ -> beg :<= f_arg :|| interval_beg :<= f_arg)
-      doCheck (\_ -> f_arg :<= end :|| interval_end :<= f_arg)
+      (&&)
+        <$> doCheck (\_ -> beg :<= f_arg :|| interval_beg :<= f_arg)
+        <*> doCheck (\_ -> f_arg :<= end :|| interval_end :<= f_arg)
   where
     applyIn =
       astFold
         -- (ASTFolder { foldOnSymbol = \acc e -> (acc ||) <$> equiv e f_apply })
-        (ASTFolder { foldOnSymbol = \acc e -> pure (acc || e == f_apply) })
+        (ASTFolder {foldOnSymbol = \acc e -> pure (acc || e == f_apply)})
         False
 
-    doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
+    doCheck :: (SoP Symbol -> Symbol) -> IndexFnM Bool
     doCheck bound =
-      foreachCase g $ \n -> do
+      fmap and . foreachCase g $ \n -> do
         let (p_idx, e_idx) = getCase n $ body g
         need_to_check <- (||) <$> applyIn (sym2SoP p_idx) <*> applyIn e_idx
-        when need_to_check $ do
-          c <- askQ (CaseCheck bound) g n
-          unless (isYes c) $ do
-            printExtraDebugInfo n
-            -- error $
-            printM 1 . warningString $
-              "Unsafe indexing: "
-                <> prettyString f_apply
-                <> " (failed to show: "
-                <> prettyString p_idx
-                <> " => "
-                <> prettyString (bound e_idx)
-                <> ")."
-        unless need_to_check $ do
-          printM 1337 $
-            "doCheck skip case: apply not in " <> prettyString (p_idx, e_idx)
+        if need_to_check
+          then do
+            c <- askQ (CaseCheck bound) g n
+            unless (isYes c) $ do
+              printExtraDebugInfo n
+              -- error $
+              printM 1 . warningString $
+                "Unsafe indexing: "
+                  <> prettyString f_apply
+                  <> " (failed to show: "
+                  <> prettyString p_idx
+                  <> " => "
+                  <> prettyString (bound e_idx)
+                  <> ")."
+            pure (isYes c)
+          else do
+            printM 1337 $
+              "doCheck skip case: apply not in " <> prettyString (p_idx, e_idx)
+            pure True
       where
         printExtraDebugInfo n = do
           env <- getAlgEnv

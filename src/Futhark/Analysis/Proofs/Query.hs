@@ -17,7 +17,7 @@ module Futhark.Analysis.Proofs.Query
   )
 where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, forM)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition, tails)
@@ -102,9 +102,9 @@ allCases :: (IndexFn -> Int -> IndexFnM Answer) -> IndexFn -> IndexFnM Answer
 allCases query fn@(IndexFn _ cs) =
   allM $ zipWith (\_ i -> query fn i) (casesToList cs) [0 ..]
 
-foreachCase :: IndexFn -> (Int -> IndexFnM a) -> IndexFnM ()
+foreachCase :: IndexFn -> (Int -> IndexFnM a) -> IndexFnM [a]
 foreachCase (IndexFn _ cs) f =
-  forM_ (zip (casesToList cs) [0 ..]) $ \(_, i) -> f i
+  forM (zip (casesToList cs) [0 ..]) $ \(_, i) -> f i
 
 data Property
   = PermutationOf VName
