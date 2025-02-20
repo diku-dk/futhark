@@ -62,22 +62,21 @@ let part2indicesL 't [m][n]
           -- 
           -- Proof.
           --   (1) Values are in this range and there are no duplicates:
-          and (map (\i -> 0 <= i && i < n) inds)
-            && injective inds
+          let step1 = map (\i -> 0 <= i && i < n) inds
           --   (2) Using no duplicate values shown in (1) and
-            && and (map2 (\i k ->
-                          let seg_start = seg_ends[k] - shape[k]
-                          in seg_start <= i && i < seg_start + shape[k]
-                        )
-                        inds seg_ids)
-          --  (3)
-            && and (map3 (\c i k ->
-                           let seg_start = seg_ends[k] - shape[k]
-                           let p = num_trues[k]
-                           in if c
-                           then i - seg_start < p
-                           else i - seg_start >= p
-                         ) csL inds seg_ids)
+          let step2 =
+            map2 (\i k ->
+              let seg_start = seg_ends[k] - shape[k]
+              in seg_start <= i && i < seg_start + shape[k]
+            ) inds seg_ids
+          --   (3) Use num_trues to show partition point for each segment.
+          let seg_starts = map (\k -> seg_ends[k] - shape[k]) seg_ids
+          let seg_parts = map (\k -> num_trues[k]) seg_ids
+          let seg_inds = map2 (\i seg_start -> i - seg_start) inds seg_starts
+          let step3 = map3 (\c j p ->
+              if c then j < p else j >= p
+            ) csL seg_inds seg_parts
+          in and step1 && and step2 && and step3
         } =
   let (seg_ids, flags) = segment_ids shape
 
