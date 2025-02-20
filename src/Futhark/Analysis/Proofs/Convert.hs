@@ -13,16 +13,16 @@ import Data.Set qualified as S
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, flattenCases, getCase, justSingleCase)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, catVar, flattenCases, justSingleCase)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), askQ, askRefinement, askRefinements, foreachCase, isUnknown, isYes, prove)
+import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), askQ, askRefinement, askRefinements, isUnknown, isYes, prove)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
-import Futhark.Analysis.Proofs.Substitute ((@), subst)
+import Futhark.Analysis.Proofs.Substitute (subst, (@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyBinding, prettyBinding')
-import Futhark.MonadFreshNames (VNameSource, newVName, newName)
+import Futhark.MonadFreshNames (VNameSource, newName, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
@@ -253,8 +253,8 @@ forward (E.AppExp (E.Index e_xs slice _loc) _)
       forM (zip f_xss f_idxs) $ \(f_xs, f_idx) -> do
         xs <- case justVName e_xs of
           Just vn -> newName vn
-          Nothing -> newVName "INTERNAL_xs"
-        idx <- newVName "INTERNAL_idx"
+          Nothing -> newVName "I_xs"
+        idx <- newVName "I_idx"
 
         -- Allows substitution of xs to fail for now.
         -- Necessary because f_idx be nested inside a map.
@@ -276,8 +276,8 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
       vxs <- forward x'
       vys <- forward y'
       forM (zip vxs vys) $ \(vx, vy) -> do
-        a <- newVName "INTERNAL_a"
-        b <- newVName "INTERNAL_b"
+        a <- newVName "I_a"
+        b <- newVName "I_b"
         let doOp op =
               substParams
                 (IndexFn Empty (singleCase $ op (Var a) (Var b)))
@@ -339,7 +339,6 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       (aligned_args, _aligned_sizes) <- zipArgs loc params arrays
       iter <- bindLambdaBodyParams (mconcat aligned_args)
       bodies <- quantifiedBy iter $ forward lam_body
-      -- fns <- quantifiedBy iter $ forward lam_body
 
       forM bodies $ \body_fn -> do
         subst (IndexFn iter (body body_fn))
@@ -923,15 +922,16 @@ bindLambdaBodyParams params = do
   fns <- renamesM (map snd params)
   let iter@(Forall i _) = maximum (map iterator fns)
   forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
-    vn <- newName paramName
-    insertIndexFn vn [fn]
-    -- TODO if we use subst do we have to do the k renaming and iterator alignment?
+    vn <- newVName ("I_" <> E.baseString paramName <> "s")
+    -- TODO get rid of the substitution below
     IndexFn tmp_iter cs <-
-      IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
+      IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i))
+        @ (vn, fn)
     -- Renaming k bound in `tmp_iter` to k bound in `iter`.
     let k_rep =
           fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
+  -- XXX hitting some circular range in part2indicesL when using the below:
   -- forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
   --   xs <- newVName "X_from_lambda"
   --   insertIndexFn xs [f_xs]
@@ -958,9 +958,9 @@ warningMsg loc msg = do
 quantifiedBy :: Iterator -> IndexFnM a -> IndexFnM a
 quantifiedBy Empty m = m
 quantifiedBy iter m =
-    rollbackAlgEnv $ do
-      addRelIterator iter
-      m
+  rollbackAlgEnv $ do
+    addRelIterator iter
+    m
 
 forwardRefPrelude :: E.SrcLoc -> E.Exp -> String -> NE.NonEmpty (a4, E.Exp) -> IndexFnM [IndexFn]
 forwardRefPrelude loc e f args = do
@@ -1049,48 +1049,3 @@ parsePrelude f args =
       pure (askRefinement, xss)
     _ ->
       undefined
-
-checkBounds :: E.Exp -> IndexFn -> IndexFn -> IndexFnM ()
-checkBounds _ (IndexFn Empty _) _ =
-  error "E.Index: Indexing into scalar"
-checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = rollbackAlgEnv $ do
-  df_start <- rewrite $ domainStart df
-  df_end <- rewrite $ domainEnd df
-  case df of
-    Cat _ _ b -> do
-      doCheck (\idx -> b :<= idx :|| df_start :<= idx)
-      doCheck (\idx -> idx :<= intervalEnd df :|| idx :<= df_end)
-    Iota _ -> do
-      doCheck (df_start :<=)
-      doCheck (:<= df_end)
-  where
-    doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
-    doCheck bound =
-      foreachCase f_idx $ \n -> do
-        c <- askQ (CaseCheck bound) f_idx n
-        unless (isYes c) $ do
-          printExtraDebugInfo n
-
-          let (p_idx, e_idx) = getCase n $ body f_idx
-          errorMsg (E.locOf e) $
-            "Unsafe indexing: "
-              <> prettyString e
-              <> " (failed to show: "
-              <> prettyString p_idx
-              <> " => "
-              <> prettyString (bound e_idx)
-              <> ")."
-      where
-        -- TODO remove this.
-        printExtraDebugInfo n = do
-          env <- getAlgEnv
-          printM 1337 $
-            "Failed bounds-checking:"
-              <> "\nf_xs:"
-              <> prettyString f_xs
-              <> "\nf_idx: "
-              <> prettyString f_idx
-              <> "\nCASE f_idx: "
-              <> show n
-              <> "\nUnder AlgEnv:"
-              <> prettyString env
