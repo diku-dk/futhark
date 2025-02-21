@@ -472,7 +472,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       -- A top-level definition with an index function.
       case M.lookup g toplevel of
         Just (pats, indexfns) -> do
-          printM 1337 $ "✨ Using index fn " <> prettyBinding' g indexfns
+          printM 5 $ "✨ Using index fn " <> prettyString g
           (actual_args, _, size_rep) <- handleArgs loc' g pats
 
           forM indexfns $ \fn -> do
@@ -489,7 +489,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
             -- index function. (Less work, but more likely to fail.
             -- For example, substituting into a Sum fails in some cases.)
             Just (pats, e) -> do
-              printM 1337 $ "✨ Using top-level def " <> prettyString g
+              printM 5 $ "✨ Using top-level def " <> prettyString g
               (actual_args, actual_sizes, _) <- handleArgs loc' g pats
 
               forM_ (mconcat actual_sizes) $ \(n, sz) -> do

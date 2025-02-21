@@ -101,7 +101,7 @@ subber argCheck g = do
         Just (e, vn, args)
           | Just [f] <- ixfns M.!? vn,
             argCheck f e args -> do
-              printM 1 . warningString $
+              printM 10 . warningString $
                 "Checking indexing within bounds " <> prettyString e
               c <- checkBounds f g (e, args)
               if c then do
@@ -308,7 +308,7 @@ checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g 
             unless (isYes c) $ do
               printExtraDebugInfo n
               -- error $
-              printM 1 . warningString $
+              printM 10 . warningString $
                 "Unsafe indexing: "
                   <> prettyString f_apply
                   <> " (failed to show: "
