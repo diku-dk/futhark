@@ -970,10 +970,8 @@ pSegOp pr pLvl =
         <* pComma
         <*> pLambda pr
     pScatterOp =
-      SegOp.SegScatterOp
+      SegOp.SegPostOp
         <$> pLambda pr
-        <* pComma
-        <*> braces (pVName `sepBy` pComma)
         <* pComma
         <*> pShape
     pSegRed = pSegOp' SegOp.SegRed pSegBinOp
