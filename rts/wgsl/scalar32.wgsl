@@ -96,4 +96,16 @@ fn u32_to_f32(a: i32) -> f32 {
   return f32(bitcast<u32>(a));
 }
 
+fn f32_inf() -> f32 {
+  return f32(bitcast<u32>(0x7f800000));
+}
+
+fn f32_neg_inf() -> f32 {
+  return f32(bitcast<u32>(0xff800000));
+}
+
+fn f32_nan() -> f32 {
+  return f32(bitcast<u32>(0x7fc00000));
+}
+
 // End of scalar32.wgsl

@@ -762,15 +762,21 @@ intLiteral (Int64Value v) = WGSL.CallExp "i64" [low, high]
     high = WGSL.IntExp $ fromIntegral $ (v `Bits.shift` (-32)) Bits..&. 0xffffff
 intLiteral v = WGSL.IntExp (valueIntegral v)
 
-valueFloat :: FloatValue -> Double
-valueFloat (Float16Value v) = convFloat v
-valueFloat (Float32Value v) = convFloat v
-valueFloat (Float64Value v) = v
+handleSpecialFloats :: T.Text -> Double -> WGSL.Exp
+handleSpecialFloats s v | isInfinite v, v > 0 = WGSL.CallExp (s <> "_inf") []
+                        | isInfinite v, v < 0 = WGSL.CallExp (s <> "_neg_inf") []
+                        | isNaN v = WGSL.CallExp (s <> "_nan") []
+                        | otherwise = WGSL.FloatExp v
+
+genFloatExp :: FloatValue -> WGSL.Exp
+genFloatExp (Float16Value v) = handleSpecialFloats "f16" (convFloat v)
+genFloatExp (Float32Value v) = handleSpecialFloats "f32" (convFloat v)
+genFloatExp (Float64Value v) = handleSpecialFloats "f64" v
 
 genWGSLExp :: Exp -> KernelM WGSL.Exp
 genWGSLExp (LeafExp name _) = WGSL.VarExp <$> getIdent name
 genWGSLExp (ValueExp (IntValue v)) = pure $ intLiteral v
-genWGSLExp (ValueExp (FloatValue v)) = pure $ WGSL.FloatExp (valueFloat v)
+genWGSLExp (ValueExp (FloatValue v)) = pure $ genFloatExp v
 genWGSLExp (ValueExp (BoolValue v)) = pure $ WGSL.BoolExp v
 genWGSLExp (ValueExp UnitValue) =
   error "should not attempt to generate unit expressions"

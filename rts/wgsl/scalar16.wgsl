@@ -166,4 +166,16 @@ fn bool_to_i16(a: bool) -> i16 {
   if a { return 1; } else { return 0; }
 }
 
+fn f16_inf() -> f16 {
+  return f16(bitcast<u32>(0x7c00));
+}
+
+fn f16_neg_inf() -> f16 {
+  return f16(bitcast<u32>(0xfc00));
+}
+
+fn f16_nan() -> f16 {
+  return f16(bitcast<u32>(0x7e00));
+}
+
 // End of scalar16.wgsl
