@@ -50,7 +50,15 @@ internaliseValBind types fb@(E.ValBind entry fname _ (Info rettype) tparams para
   bindingFParams tparams params $ \shapeparams params' -> do
     let shapenames = map I.paramName shapeparams
         all_params = map pure shapeparams ++ concat params'
-        msg = errorMsg ["Function return value does not match shape of declared return type."]
+        msg =
+          errorMsg
+            [ "Internal runtime error.\n",
+              "Return value of ",
+              ErrorString (prettyText fname),
+              " does not match type shape.\n",
+              "This is a bug in the Futhark compiler. Please report this:\n",
+              "  https://github.com/diku-dk/futhark/issues"
+            ]
 
     (body', rettype') <- buildBody $ do
       body_res <- internaliseExp (baseString fname <> "_res") body
