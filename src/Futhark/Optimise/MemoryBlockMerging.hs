@@ -69,30 +69,18 @@ setAllocsSegOp ::
 setAllocsSegOp m (SegMap lvl sp tps body) =
   SegMap lvl sp tps $
     body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
-setAllocsSegOp m (SegRed lvl sp tps body segbinops) =
-  SegRed
-    lvl
-    sp
-    tps
-    ( body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
-    )
-    segbinops
-setAllocsSegOp m (SegScan lvl sp tps body segbinops) =
-  SegScan
-    lvl
-    sp
-    tps
-    ( body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
-    )
-    segbinops
-setAllocsSegOp m (SegHist lvl sp tps body seghistops) =
-  SegHist
-    lvl
-    sp
-    tps
-    ( body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
-    )
-    seghistops
+setAllocsSegOp m (SegRed lvl sp tps body ops) =
+  SegRed lvl sp tps body' ops
+  where
+    body' = body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
+setAllocsSegOp m (SegScan lvl sp tps body ops) =
+  SegScan lvl sp tps body' ops
+  where
+    body' = body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
+setAllocsSegOp m (SegHist lvl sp tps body ops) =
+  SegHist lvl sp tps body' ops
+  where
+    body' = body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
 
 maxSubExp :: (MonadBuilder m) => Set SubExp -> m SubExp
 maxSubExp = helper . S.toList
