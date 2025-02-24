@@ -166,15 +166,15 @@ replaceInSegOp ::
 replaceInSegOp (SegMap lvl sp tps body) = do
   stms <- updateStms $ kernelBodyStms body
   pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
-replaceInSegOp (SegRed lvl sp binops tps body) = do
+replaceInSegOp (SegRed lvl sp tps body binops) = do
   stms <- updateStms $ kernelBodyStms body
-  pure $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
-replaceInSegOp (SegScan lvl sp binops tps body) = do
+  pure $ SegRed lvl sp tps (body {kernelBodyStms = stms}) binops
+replaceInSegOp (SegScan lvl sp tps body binops) = do
   stms <- updateStms $ kernelBodyStms body
-  pure $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
-replaceInSegOp (SegHist lvl sp hist_ops tps body) = do
+  pure $ SegScan lvl sp tps (body {kernelBodyStms = stms}) binops
+replaceInSegOp (SegHist lvl sp tps body hist_ops) = do
   stms <- updateStms $ kernelBodyStms body
-  pure $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
+  pure $ SegHist lvl sp tps (body {kernelBodyStms = stms}) hist_ops
 
 replaceInHostOp :: HostOp NoOp GPUMem -> UpdateM (HostOp NoOp GPUMem) (HostOp NoOp GPUMem)
 replaceInHostOp (SegOp op) = SegOp <$> replaceInSegOp op
