@@ -896,9 +896,9 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
     "segscan"
       <> pretty lvl
         </> PP.align (pretty space)
-        <+> PP.nestedBlock "{" "}" (pretty body)
         </> PP.colon
         <+> ppTuple' (map pretty ts)
+        <+> PP.nestedBlock "{" "}" (pretty body)
         </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
   pretty (SegHist lvl space ts body ops) =
     "seghist"
