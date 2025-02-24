@@ -163,30 +163,18 @@ optimiseKernel graph segop0 = do
     SegMap lvl sp tps body ->
       SegMap lvl sp tps $
         body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
-    SegRed lvl sp tps body binops ->
-      SegRed
-        lvl
-        sp
-        tps
-        ( body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
-        )
-        binops
-    SegScan lvl sp tps body binops ->
-      SegScan
-        lvl
-        sp
-        tps
-        ( body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
-        )
-        binops
-    SegHist lvl sp tps body binops ->
-      SegHist
-        lvl
-        sp
-        tps
-        ( body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
-        )
-        binops
+    SegRed lvl sp tps body ops ->
+      SegRed lvl sp tps body' ops
+      where
+        body' = body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
+    SegScan lvl sp tps body ops ->
+      SegScan lvl sp tps body' ops
+      where
+        body' = body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
+    SegHist lvl sp tps body ops ->
+      SegHist lvl sp tps body' ops
+      where
+        body' = body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
 
 -- | Helper function that modifies kernels found inside some statements.
 onKernels ::
