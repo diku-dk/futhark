@@ -1169,11 +1169,10 @@ simplifySegOp (SegHist lvl space ts kbody ops) = do
           ( HistOp w' rf' arrs' nes' dims' lam',
             op_hoisted
           )
-  (kbody', body_hoisted) <-
-    simplifyKernelBody
-      space
-      kbody
-      pure
+
+    (kbody', body_hoisted) <- simplifyKernelBody space kbody
+
+    pure
       ( SegHist lvl' space' ts' kbody' ops',
         mconcat ops_hoisted <> body_hoisted
       )
