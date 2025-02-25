@@ -1,7 +1,7 @@
 -- Index function substitution.
 module Futhark.Analysis.Proofs.Substitute ((@), subst) where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
@@ -17,11 +17,12 @@ import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMapper (..), astFo
 import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM, renameSame)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, sym2SoP)
-import Futhark.Util.Pretty (Pretty, prettyString)
+import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName)
 
 -- If f has multiple cases, we would not know which case to substitute
 -- into quantified symbols (e.g., Sum j a b f(e(j))).
+legalArg :: VName -> IndexFn -> IndexFn -> Symbol -> [SoP Symbol] -> Bool
 legalArg k g f e args =
   let notQuantifier vn = vn < k || Just vn == catVar (iterator g)
    in (hasSingleCase f || all (all notQuantifier . fv) args)
@@ -104,14 +105,15 @@ subber argCheck g = do
               printM 1 . warningString $
                 "Checking indexing within bounds " <> prettyString e
               c <- checkBounds f g (e, args)
-              if c then do
-                g' <- substituteOnce f g (e, args)
-                case g' of
-                  Just new_fn -> do
-                    subst =<< rewriteWithoutRules new_fn
-                  Nothing ->
-                    go (S.insert (vn, args) seen)
-              else go (S.insert (vn, args) seen)
+              if c
+                then do
+                  g' <- substituteOnce f g (e, args)
+                  case g' of
+                    Just new_fn -> do
+                      subst =<< rewriteWithoutRules new_fn
+                    Nothing ->
+                      go (S.insert (vn, args) seen)
+                else go (S.insert (vn, args) seen)
         Just (_, vn, args)
           | otherwise ->
               go (S.insert (vn, args) seen)
