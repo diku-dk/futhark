@@ -143,7 +143,12 @@ compileSegRed' ::
 compileSegRed' pat grid space segbinops map_body_cont
   | genericLength segbinops > maxNumOps =
       compilerLimitationS $
-        ("compileSegRed': at most " <> show maxNumOps <> " reduction operators are supported.\n")
+        ( "compileSegRed': at most "
+            <> show maxNumOps
+            <> " reduction operators are supported,\nbut found kernel with "
+            <> show (length segbinops)
+            <> ".\n"
+        )
           <> ("Pattern: " <> prettyString pat)
   | otherwise = do
       chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
@@ -921,10 +926,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
       block_res_arrs = blockResArrs slug
 
   old_counter <- dPrim "old_counter"
-  (counter_mem, _, counter_offset) <-
-    fullyIndexArray
-      counters
-      [counter_idx]
+  (counter_mem, _, counter_offset) <- fullyIndexArray counters [counter_idx]
   sComment "first thread in block saves block result to global memory" $
     sWhen (ltid32 .==. 0) $ do
       forM_ (take (length nes) $ zip block_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->

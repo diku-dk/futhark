@@ -935,18 +935,10 @@ pSegOp pr pLvl =
       keyword "seghist" *> pSegHist
     ]
   where
-    pSegMap =
-      SegOp.SegMap
-        <$> pLvl
-        <*> pSegSpace
-        <* pColon
-        <*> pTypes
-        <*> braces (pKernelBody pr)
-    pSegOp' f p =
+    pSegOp' f =
       f
         <$> pLvl
         <*> pSegSpace
-        <*> parens (p `sepBy` pComma)
         <* pColon
         <*> pTypes
         <*> braces (pKernelBody pr)
@@ -969,23 +961,10 @@ pSegOp pr pLvl =
         <*> pShape
         <* pComma
         <*> pLambda pr
-    pScatterOp =
-      SegOp.SegPostOp
-        <$> pLambda pr
-        <* pComma
-        <*> pShape
-    pSegRed = pSegOp' SegOp.SegRed pSegBinOp
-    pSegScan =
-      SegOp.SegScan
-        <$> pLvl
-        <*> pSegSpace
-        <*> parens (pSegBinOp `sepBy` pComma)
-        <* pComma
-        <*> pScatterOp
-        <* pColon
-        <*> pTypes
-        <*> braces (pKernelBody pr)
-    pSegHist = pSegOp' SegOp.SegHist pHistOp
+    pSegMap = pSegOp' SegOp.SegMap
+    pSegRed = pSegOp' SegOp.SegRed <*> parens (pSegBinOp `sepBy` pComma)
+    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma)
+    pSegHist = pSegOp' SegOp.SegHist <*> parens (pHistOp `sepBy` pComma)
 
 pSegLevel :: Parser GPU.SegLevel
 pSegLevel =

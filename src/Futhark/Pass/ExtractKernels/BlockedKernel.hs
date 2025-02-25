@@ -88,7 +88,7 @@ segRed lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
   letBind pat $
     Op $
       segOp $
-        SegRed lvl kspace ops (lambdaReturnType map_lam) kbody
+        SegRed lvl kspace (lambdaReturnType map_lam) kbody ops
 
 segScan ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
@@ -108,7 +108,7 @@ segScan lvl pat cs w ops post_op map_lam arrs ispace inps = runBuilder_ $ do
   letBind pat $
     Op $
       segOp $
-        SegScan lvl kspace ops post_op (lambdaReturnType map_lam) kbody
+        SegScan lvl kspace (lambdaReturnType map_lam) kbody ops
 
 segMap ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>
@@ -198,7 +198,7 @@ segHist lvl pat arr_w ispace inps ops lam arrs = runBuilder_ $ do
         forM res $ \(SubExpRes cs se) ->
           pure $ Returns ResultMaySimplify cs se
 
-  letBind pat $ Op $ segOp $ SegHist lvl space ops (lambdaReturnType lam) kbody
+  letBind pat $ Op $ segOp $ SegHist lvl space (lambdaReturnType lam) kbody ops
 
 mapKernelSkeleton ::
   (DistRep rep, HasScope rep m, MonadFreshNames m) =>

@@ -154,4 +154,6 @@ main = reportingIOErrors $ do
   case args of
     cmd : args'
       | Just (m, _) <- lookup cmd commands -> m (unwords [prog, cmd]) args'
+      | otherwise ->
+          optionsError $ "unknown subcommand \"" <> cmd <> "\"."
     _ -> mainWithOptions () [] msg (const . const Nothing) prog args
