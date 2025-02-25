@@ -108,7 +108,7 @@ segScan lvl pat cs w ops post_op map_lam arrs ispace inps = runBuilder_ $ do
   letBind pat $
     Op $
       segOp $
-        SegScan lvl kspace (lambdaReturnType map_lam) kbody ops
+        SegScan lvl kspace (lambdaReturnType map_lam) kbody ops post_op
 
 segMap ::
   (MonadFreshNames m, DistRep rep, HasScope rep m) =>

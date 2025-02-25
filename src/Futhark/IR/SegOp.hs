@@ -78,6 +78,7 @@ import Futhark.IR.Aliases
   )
 import Futhark.IR.Mem
 import Futhark.IR.Prop.Aliases
+import Futhark.IR.SOACS.SOAC (ScatterSpec, groupScatterResults)
 import Futhark.IR.TypeCheck qualified as TC
 import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
@@ -151,7 +152,7 @@ data SegBinOp rep = SegBinOp
 
 data SegPostOp rep = SegPostOp
   { segPostOpLambda :: Lambda rep,
-    segPostOpShape :: Shape
+    segPostOpScatterSpec :: ScatterSpec VName
   }
   deriving (Eq, Ord, Show)
 
@@ -458,7 +459,7 @@ data SegOp lvl rep
   | -- | The KernelSpace must always have at least two dimensions,
     -- implying that the result of a SegRed is always an array.
     SegRed lvl SegSpace [Type] (KernelBody rep) [SegBinOp rep]
-  | SegScan lvl SegSpace [Type] (KernelBody rep) [SegBinOp rep]
+  | SegScan lvl SegSpace [Type] (KernelBody rep) [SegBinOp rep] (SegPostOp rep)
   | SegHist lvl SegSpace [Type] (KernelBody rep) [HistOp rep]
   deriving (Eq, Ord, Show)
 
@@ -482,7 +483,7 @@ segBody segop =
   case segop of
     SegMap _ _ _ body -> body
     SegRed _ _ _ body _ -> body
-    SegScan _ _ _ body _ -> body
+    SegScan _ _ _ body _ _ -> body
     SegHist _ _ _ body _ -> body
 
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
@@ -512,18 +513,25 @@ segOpType (SegRed _ space ts kbody reds) =
       op <- reds
       let shape = Shape segment_dims <> segBinOpShape op
       map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
-segOpType (SegScan _ space ts kbody scans) =
-  scan_ts
+segOpType (SegScan _ space ts kbody scans post_op) =
+  -- scans_ts
+  post_op_ts
     ++ zipWith
       (segResultShape space)
       map_ts
       (drop (length scans) $ kernelBodyResult kbody)
   where
-    map_ts = drop (length scan_ts) ts
-    scan_ts = do
-      op <- scans
-      let shape = Shape (segSpaceDims space) <> segBinOpShape op
-      map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
+    map_ts = drop (length scans) ts
+    post_op_ret = lambdaReturnType $ segPostOpLambda post_op
+    spec = segPostOpScatterSpec post_op
+    post_op_ts = do
+      (shp, _, arrs) <- groupScatterResults spec post_op_ret
+      let shape = Shape (segSpaceDims space) <> shp
+      pure . (`arrayOfShape` shape) . snd . head $ arrs
+-- scans_ts = do
+--   op <- drop (length post_op_ts) scans
+--   let shape = Shape (segSpaceDims space) <> segBinOpShape op
+--   map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
 segOpType (SegHist _ space _ _ ops) = do
   op <- ops
   let shape = Shape segment_dims <> histShape op <> histOpShape op
@@ -542,19 +550,11 @@ instance (ASTConstraints lvl) => AliasedOp (SegOp lvl) where
     consumedInKernelBody kbody
   consumedInOp (SegRed _ _ _ kbody _) =
     consumedInKernelBody kbody
-  consumedInOp (SegScan _ _ _ kbody _) =
-    consumedInKernelBody kbody
+  consumedInOp (SegScan _ _ _ kbody _ post_op) =
+    namesFromList ((\(_, _, a) -> a) <$> segPostOpScatterSpec post_op)
+      <> consumedInKernelBody kbody
   consumedInOp (SegHist _ _ _ kbody ops) =
     namesFromList (concatMap histDest ops) <> consumedInKernelBody kbody
-
-typeCheckScatterSegOp ::
-  (TC.Checkable rep) =>
-  SegPostOp (Aliases rep) ->
-  TC.TypeM rep ()
-typeCheckScatterSegOp (SegPostOp lam shape) = do
-  -- I am not completely sure how this should be type check so I will
-  -- leave this for now.
-  pure ()
 
 -- | Type check a 'SegOp', given a checker for its level.
 typeCheckSegOp ::
@@ -574,10 +574,10 @@ typeCheckSegOp checkLvl (SegRed lvl space ts body reds) = do
         (map segBinOpLambda reds)
         (map segBinOpNeutral reds)
         (map segBinOpShape reds)
-typeCheckSegOp checkLvl (SegScan lvl space ts body scans) = do
+typeCheckSegOp checkLvl (SegScan lvl space ts body scans post_op) = do
   checkLvl lvl
+  -- Type check last lambda
   checkScanRed space scans' ts body
-  typeCheckScatterSegOp lam
   where
     scans' =
       zip3
@@ -715,10 +715,16 @@ mapSegPostOp ::
   SegOpMapper lvl frep trep m ->
   SegPostOp frep ->
   m (SegPostOp trep)
-mapSegPostOp tv (SegPostOp lam shape) =
+mapSegPostOp tv (SegPostOp lam scatter_spec) =
   SegPostOp
     <$> mapOnSegOpLambda tv lam
-    <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
+    <*> mapM mapSpec scatter_spec
+  where
+    mapSpec (shape, n, dest) =
+      (,,)
+        <$> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
+        <*> pure n
+        <*> mapOnSegOpVName tv dest
 
 -- | Apply a 'SegOpMapper' to the given 'SegOp'.
 mapSegOpM ::
@@ -739,13 +745,14 @@ mapSegOpM tv (SegRed lvl space ts body reds) =
     <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
     <*> mapOnSegOpBody tv body
     <*> mapM (mapSegBinOp tv) reds
-mapSegOpM tv (SegScan lvl space ts body scans) =
+mapSegOpM tv (SegScan lvl space ts body scans post_op) =
   SegScan
     <$> mapOnSegOpLevel tv lvl
     <*> mapOnSegSpace tv space
     <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
     <*> mapOnSegOpBody tv body
     <*> mapM (mapSegBinOp tv) scans
+    <*> mapSegPostOp tv post_op
 mapSegOpM tv (SegHist lvl space ts body ops) =
   SegHist
     <$> mapOnSegOpLevel tv lvl
@@ -787,13 +794,13 @@ rephraseBinOp ::
 rephraseBinOp r (SegBinOp comm lam nes shape) =
   SegBinOp comm <$> rephraseLambda r lam <*> pure nes <*> pure shape
 
-rephraseScatterOp ::
+rephrasePostOp ::
   (Monad f) =>
   Rephraser f from rep ->
   SegPostOp from ->
   f (SegPostOp rep)
-rephraseScatterOp r (SegPostOp lam shape) =
-  SegPostOp <$> rephraseLambda r lam <*> pure shape
+rephrasePostOp r (SegPostOp lam scatter_spec) =
+  SegPostOp <$> rephraseLambda r lam <*> pure scatter_spec
 
 rephraseKernelBody ::
   (Monad f) =>
@@ -810,10 +817,11 @@ instance RephraseOp (SegOp lvl) where
     SegRed lvl space ts
       <$> rephraseKernelBody r body
       <*> mapM (rephraseBinOp r) reds
-  rephraseInOp r (SegScan lvl space ts body scans) =
+  rephraseInOp r (SegScan lvl space ts body scans post_op) =
     SegScan lvl space ts
       <$> rephraseKernelBody r body
       <*> mapM (rephraseBinOp r) scans
+      <*> rephrasePostOp r post_op
   rephraseInOp r (SegHist lvl space ts body hists) =
     SegHist lvl space ts
       <$> rephraseKernelBody r body
@@ -880,10 +888,10 @@ instance (OpMetrics (Op rep)) => OpMetrics (SegOp lvl rep) where
     inside "SegRed" $ do
       mapM_ (inside "SegBinOp" . lambdaMetrics . segBinOpLambda) reds
       kernelBodyMetrics body
-  opMetrics (SegScan _ _ _ body scans) =
+  opMetrics (SegScan _ _ _ body scans post_op) =
     inside "SegScan" $ do
       mapM_ (inside "SegBinOp" . lambdaMetrics . segBinOpLambda) scans
-      inside "SegBinOp" $ lambdaMetrics $ segPostOpLambda lam
+      inside "SegBinOp" $ lambdaMetrics $ segPostOpLambda post_op
       kernelBodyMetrics body
   opMetrics (SegHist _ _ _ body ops) =
     inside "SegHist" $ do
@@ -913,10 +921,10 @@ instance (PrettyRep rep) => Pretty (SegBinOp rep) where
         Noncommutative -> mempty
 
 instance (PrettyRep rep) => Pretty (SegPostOp rep) where
-  pretty (SegPostOp lam shape) =
+  pretty (SegPostOp lam scatter_spec) =
     pretty lam
       <> PP.comma
-        </> pretty shape
+        </> PP.commasep (map pretty scatter_spec)
 
 instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
   pretty (SegMap lvl space ts body) =
@@ -934,7 +942,7 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
         <+> ppTuple' (map pretty ts)
         <+> PP.nestedBlock "{" "}" (pretty body)
         </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
-  pretty (SegScan lvl space ts body scans) =
+  pretty (SegScan lvl space ts body scans post_op) =
     "segscan"
       <> pretty lvl
         </> PP.align (pretty space)
@@ -942,6 +950,7 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
         <+> ppTuple' (map pretty ts)
         <+> PP.nestedBlock "{" "}" (pretty body)
         </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
+        </> pretty post_op
   pretty (SegHist lvl space ts body ops) =
     "seghist"
       <> pretty lvl
@@ -1154,12 +1163,17 @@ simplifySegPostOp ::
   VName ->
   SegPostOp (Wise rep) ->
   Engine.SimpleM rep (SegPostOp (Wise rep), Stms (Wise rep))
-simplifySegPostOp phys_id (SegPostOp lam shape) = do
+simplifySegPostOp phys_id (SegPostOp lam scatter_spec) = do
   (lam', hoisted) <-
     Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
       simplifyLambda (oneName phys_id) lam
-  shape' <- Engine.simplify shape
-  pure (SegPostOp lam' shape', hoisted)
+  scatter_spec' <- mapM simplifySpec scatter_spec
+  pure (SegPostOp lam' scatter_spec', hoisted)
+  where
+    simplifySpec (shape, n, dest) = do
+      shape' <- Engine.simplify shape
+      dest' <- Engine.simplify dest
+      pure (shape', n, dest')
 
 -- | Simplify the given 'SegOp'.
 simplifySegOp ::
@@ -1190,19 +1204,19 @@ simplifySegOp (SegRed lvl space ts kbody reds) = do
   where
     scope = scopeOfSegSpace space
     scope_vtable = ST.fromScope scope
-simplifySegOp (SegScan lvl space ts kbody scans) = do
+simplifySegOp (SegScan lvl space ts kbody scans post_op) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (scans', scans_hoisted) <-
     Engine.localVtable (<> scope_vtable) $
       mapAndUnzipM (simplifySegBinOp (segFlat space)) scans
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
-  (lam', lam_hoisted) <-
+  (post_op', post_op_hoisted) <-
     Engine.localVtable (<> scope_vtable) $
-      simplifySegPostOp (segFlat space) lam
+      simplifySegPostOp (segFlat space) post_op
 
   pure
-    ( SegScan lvl' space' ts' kbody' scans',
-      mconcat scans_hoisted <> body_hoisted
+    ( SegScan lvl' space' ts' kbody' scans' post_op',
+      mconcat scans_hoisted <> body_hoisted <> post_op_hoisted
     )
   where
     scope = scopeOfSegSpace space
@@ -1371,8 +1385,8 @@ segOpGuts ::
   )
 segOpGuts (SegMap lvl space kts body) =
   (kts, body, 0, SegMap lvl space)
-segOpGuts (SegScan lvl space kts body ops) =
-  (kts, body, segBinOpResults ops, \t b -> SegScan lvl space t b ops)
+segOpGuts (SegScan lvl space kts body ops post_op) =
+  (kts, body, segBinOpResults ops, \t b -> SegScan lvl space t b ops post_op)
 segOpGuts (SegRed lvl space kts body ops) =
   (kts, body, segBinOpResults ops, \t b -> SegRed lvl space t b ops)
 segOpGuts (SegHist lvl space kts body ops) =
@@ -1497,7 +1511,7 @@ segOpReturns k@(SegMap _ _ _ kbody) =
   kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns k@(SegRed _ _ _ kbody _) =
   kernelBodyReturns kbody . extReturns =<< opType k
-segOpReturns k@(SegScan _ _ _ kbody _) =
+segOpReturns k@(SegScan _ _ _ kbody _ _) =
   kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns (SegHist _ _ _ _ ops) =
   concat <$> mapM (mapM varReturns . histDest) ops
