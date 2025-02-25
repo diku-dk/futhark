@@ -830,11 +830,11 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
       pure e1
 
     onExps bound (Var v _ _) e = do
-      unless (any (`elem` bound) $ freeVarsInExp e) $
-        modify (M.insert (qualLeaf v) e)
       case lookup (qualLeaf v) named1 of
         Just rexp -> onExps bound (unReplaced rexp) e
-        Nothing -> pure ()
+        Nothing ->
+          unless (any (`elem` bound) $ freeVarsInExp e) $
+            modify (M.insert (qualLeaf v) e)
     onExps bound e (Var v _ _)
       | Just rexp <- lookup (qualLeaf v) named2 =
           onExps bound e (unReplaced rexp)
