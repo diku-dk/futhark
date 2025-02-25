@@ -37,11 +37,11 @@ getAllocsStm _ = mempty
 getAllocsSegOp :: SegOp lvl GPUMem -> Allocs
 getAllocsSegOp (SegMap _ _ _ body) =
   foldMap getAllocsStm (kernelBodyStms body)
-getAllocsSegOp (SegRed _ _ _ _ body) =
+getAllocsSegOp (SegRed _ _ _ body _) =
   foldMap getAllocsStm (kernelBodyStms body)
-getAllocsSegOp (SegScan _ _ _ _ body) =
+getAllocsSegOp (SegScan _ _ _ body _) =
   foldMap getAllocsStm (kernelBodyStms body)
-getAllocsSegOp (SegHist _ _ _ _ body) =
+getAllocsSegOp (SegHist _ _ _ body _) =
   foldMap getAllocsStm (kernelBodyStms body)
 
 setAllocsStm :: Map VName SubExp -> Stm GPUMem -> Stm GPUMem
@@ -69,15 +69,18 @@ setAllocsSegOp ::
 setAllocsSegOp m (SegMap lvl sp tps body) =
   SegMap lvl sp tps $
     body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
-setAllocsSegOp m (SegRed lvl sp segbinops tps body) =
-  SegRed lvl sp segbinops tps $
-    body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
-setAllocsSegOp m (SegScan lvl sp segbinops tps body) =
-  SegScan lvl sp segbinops tps $
-    body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
-setAllocsSegOp m (SegHist lvl sp segbinops tps body) =
-  SegHist lvl sp segbinops tps $
-    body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
+setAllocsSegOp m (SegRed lvl sp tps body ops) =
+  SegRed lvl sp tps body' ops
+  where
+    body' = body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
+setAllocsSegOp m (SegScan lvl sp tps body ops) =
+  SegScan lvl sp tps body' ops
+  where
+    body' = body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
+setAllocsSegOp m (SegHist lvl sp tps body ops) =
+  SegHist lvl sp tps body' ops
+  where
+    body' = body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
 
 maxSubExp :: (MonadBuilder m) => Set SubExp -> m SubExp
 maxSubExp = helper . S.toList
@@ -105,15 +108,15 @@ onKernelBodyStms ::
 onKernelBodyStms (SegMap lvl space ts body) f = do
   stms <- f $ kernelBodyStms body
   pure $ SegMap lvl space ts $ body {kernelBodyStms = stms}
-onKernelBodyStms (SegRed lvl space binops ts body) f = do
+onKernelBodyStms (SegRed lvl space ts body binops) f = do
   stms <- f $ kernelBodyStms body
-  pure $ SegRed lvl space binops ts $ body {kernelBodyStms = stms}
-onKernelBodyStms (SegScan lvl space binops ts body) f = do
+  pure $ SegRed lvl space ts (body {kernelBodyStms = stms}) binops
+onKernelBodyStms (SegScan lvl space ts body binops) f = do
   stms <- f $ kernelBodyStms body
-  pure $ SegScan lvl space binops ts $ body {kernelBodyStms = stms}
-onKernelBodyStms (SegHist lvl space binops ts body) f = do
+  pure $ SegScan lvl space ts (body {kernelBodyStms = stms}) binops
+onKernelBodyStms (SegHist lvl space ts body binops) f = do
   stms <- f $ kernelBodyStms body
-  pure $ SegHist lvl space binops ts $ body {kernelBodyStms = stms}
+  pure $ SegHist lvl space ts (body {kernelBodyStms = stms}) binops
 
 -- | This is the actual optimiser. Given an interference graph and a @SegOp@,
 -- replace allocations and references to memory blocks inside with a (hopefully)
@@ -148,15 +151,18 @@ optimiseKernel graph segop0 = do
     SegMap lvl sp tps body ->
       SegMap lvl sp tps $
         body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
-    SegRed lvl sp binops tps body ->
-      SegRed lvl sp binops tps $
-        body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
-    SegScan lvl sp binops tps body ->
-      SegScan lvl sp binops tps $
-        body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
-    SegHist lvl sp binops tps body ->
-      SegHist lvl sp binops tps $
-        body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
+    SegRed lvl sp tps body ops ->
+      SegRed lvl sp tps body' ops
+      where
+        body' = body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
+    SegScan lvl sp tps body ops ->
+      SegScan lvl sp tps body' ops
+      where
+        body' = body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
+    SegHist lvl sp tps body ops ->
+      SegHist lvl sp tps body' ops
+      where
+        body' = body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
 
 -- | Helper function that modifies kernels found inside some statements.
 onKernels ::
