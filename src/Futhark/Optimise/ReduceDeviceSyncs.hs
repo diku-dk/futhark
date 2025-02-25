@@ -328,15 +328,18 @@ optimizeWithAccInput acc (shape, arrs, Just (op, nes)) = do
 optimizeHostOp :: HostOp op GPU -> ReduceM (HostOp op GPU)
 optimizeHostOp (SegOp (SegMap lvl space types kbody)) =
   SegOp . SegMap lvl space types <$> addReadsToKernelBody kbody
-optimizeHostOp (SegOp (SegRed lvl space ops types kbody)) = do
+optimizeHostOp (SegOp (SegRed lvl space types kbody ops)) = do
   ops' <- mapM addReadsToSegBinOp ops
-  SegOp . SegRed lvl space ops' types <$> addReadsToKernelBody kbody
-optimizeHostOp (SegOp (SegScan lvl space ops types kbody)) = do
+  kbody' <- addReadsToKernelBody kbody
+  pure . SegOp $ SegRed lvl space types kbody' ops'
+optimizeHostOp (SegOp (SegScan lvl space types kbody ops)) = do
   ops' <- mapM addReadsToSegBinOp ops
-  SegOp . SegScan lvl space ops' types <$> addReadsToKernelBody kbody
-optimizeHostOp (SegOp (SegHist lvl space ops types kbody)) = do
+  kbody' <- addReadsToKernelBody kbody
+  pure . SegOp $ SegScan lvl space types kbody' ops'
+optimizeHostOp (SegOp (SegHist lvl space types kbody ops)) = do
   ops' <- mapM addReadsToHistOp ops
-  SegOp . SegHist lvl space ops' types <$> addReadsToKernelBody kbody
+  kbody' <- addReadsToKernelBody kbody
+  pure . SegOp $ SegHist lvl space types kbody' ops'
 optimizeHostOp (SizeOp op) =
   pure (SizeOp op)
 optimizeHostOp OtherOp {} =
