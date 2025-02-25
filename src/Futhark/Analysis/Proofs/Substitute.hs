@@ -190,14 +190,17 @@ substituteOnce f g_non_repped (f_apply, args) = do
                   <> " = \n"
                   <> prettyString f
               -- Create II array.
-              -- let f_II = IndexFn (iterator f) (cases [(Bool True, sym2SoP (Var k))])
-              -- printM 1337 . warningString $
-              --   "Creating II array " <> prettyString f_II
-              -- vn_II <- newVName "II"
-              -- insertIndexFn vn_II [f_II]
-              -- let res = sym2SoP (Idx (Var vn_II) (f_arg M.! i))
-              -- pure (Just $ repIndexFn (mkRep k res) $ IndexFn new_iter new_body)
-              pure Nothing
+              let f_II = IndexFn (iterator f) (cases [(Bool True, sym2SoP (Var k))])
+              printM 1337 . warningString $
+                "Creating II array " <> prettyString f_II
+              vn_II <- newVName "II"
+              insertIndexFn vn_II [f_II]
+              let res = sym2SoP (Idx (Var vn_II) (f_arg M.! i))
+              let Forall _ new_dom = new_iter
+              n <- rewrite $ domainEnd new_dom
+              let iota_iter = Forall i (Iota n)
+              pure (Just $ repIndexFn (mkRep k res) $ IndexFn iota_iter new_body)
+              -- pure Nothing
     _ ->
       pure (Just $ IndexFn new_iter new_body)
   where
