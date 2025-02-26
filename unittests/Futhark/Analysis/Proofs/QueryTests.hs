@@ -93,7 +93,7 @@ tests =
                             )
                           ]
                     }
-              prove (PermutationOfZeroTo $ sVar n) fn
+              prove (PermutationOfZeroTo $ sVar n .-. int2SoP 1) fn
           )
           @?= Yes
     ]
