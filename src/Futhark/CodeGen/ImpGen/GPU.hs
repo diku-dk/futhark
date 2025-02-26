@@ -153,11 +153,11 @@ segOpCompiler ::
   CallKernelGen ()
 segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
-segOpCompiler pat (SegRed lvl@(SegThread _ _) space reds _ kbody) =
+segOpCompiler pat (SegRed lvl@(SegThread _ _) space _ kbody reds) =
   compileSegRed pat lvl space reds kbody
-segOpCompiler pat (SegScan lvl@(SegThread _ _) space scans _ kbody) =
+segOpCompiler pat (SegScan lvl@(SegThread _ _) space _ kbody scans) =
   compileSegScan pat lvl space scans kbody
-segOpCompiler pat (SegHist lvl@(SegThread _ _) space ops _ kbody) =
+segOpCompiler pat (SegHist lvl@(SegThread _ _) space _ kbody ops) =
   compileSegHist pat lvl space ops kbody
 segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ prettyString (segLevel segop) ++ " for rhs of pattern " ++ prettyString pat

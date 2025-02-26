@@ -111,15 +111,15 @@ lowerAllocationsInSegOp ::
 lowerAllocationsInSegOp (SegMap lvl sp tps body) = do
   stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
   pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
-lowerAllocationsInSegOp (SegRed lvl sp binops tps body) = do
+lowerAllocationsInSegOp (SegRed lvl sp tps body binops) = do
   stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegRed lvl sp binops tps $ body {kernelBodyStms = stms}
-lowerAllocationsInSegOp (SegScan lvl sp binops tps body) = do
+  pure $ SegRed lvl sp tps (body {kernelBodyStms = stms}) binops
+lowerAllocationsInSegOp (SegScan lvl sp tps body binops) = do
   stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegScan lvl sp binops tps $ body {kernelBodyStms = stms}
-lowerAllocationsInSegOp (SegHist lvl sp histops tps body) = do
+  pure $ SegScan lvl sp tps (body {kernelBodyStms = stms}) binops
+lowerAllocationsInSegOp (SegHist lvl sp tps body histops) = do
   stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
+  pure $ SegHist lvl sp tps (body {kernelBodyStms = stms}) histops
 
 lowerAllocationsInHostOp :: HostOp NoOp GPUMem -> LowerM (HostOp NoOp GPUMem) (HostOp NoOp GPUMem)
 lowerAllocationsInHostOp (SegOp op) = SegOp <$> lowerAllocationsInSegOp op

@@ -146,7 +146,7 @@ optimiseStm accs (Let pat aux (Op (SegOp (SegMap lvl space _ kbody))))
       (space', kbody'') <- flatKernelBody space kbody'
 
       hist_dest_upd <-
-        letTupExp "hist_dest_upd" $ Op $ SegOp $ SegHist lvl space' [histop] ts' kbody''
+        letTupExp "hist_dest_upd" $ Op $ SegOp $ SegHist lvl space' ts' kbody'' [histop]
 
       addStm . Let pat aux =<< addArrsToAcc lvl acc_shape hist_dest_upd acc
 optimiseStm accs (Let pat aux e) =

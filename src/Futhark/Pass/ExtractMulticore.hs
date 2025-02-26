@@ -188,7 +188,7 @@ transformRedomap rename onBody w reds map_lam arrs = do
   (reds_stms, reds') <- mapAndUnzipM reduceToSegBinOp reds
   op' <-
     renameIfNeeded rename $
-      SegRed () space reds' (lambdaReturnType map_lam) kbody
+      SegRed () space (lambdaReturnType map_lam) kbody reds'
   pure (reds_stms, op')
 
 transformHist ::
@@ -205,7 +205,7 @@ transformHist rename onBody w hists map_lam arrs = do
   (hists_stms, hists') <- mapAndUnzipM histToSegBinOp hists
   op' <-
     renameIfNeeded rename $
-      SegHist () space hists' (lambdaReturnType map_lam) kbody
+      SegHist () space (lambdaReturnType map_lam) kbody hists'
   pure (hists_stms, op')
 
 transformSOAC :: Pat Type -> Attrs -> SOAC SOACS -> ExtractM (Stms MC)
@@ -245,7 +245,7 @@ transformSOAC pat _ (Screma w arrs form)
             ( Let pat (defAux ()) $
                 Op $
                   ParOp Nothing $
-                    SegScan () space scans' (lambdaReturnType map_lam) kbody
+                    SegScan () space (lambdaReturnType map_lam) kbody scans'
             )
   | otherwise = do
       -- This screma is too complicated for us to immediately do

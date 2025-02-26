@@ -159,11 +159,11 @@ analyseSegOp ::
   m (InUse, LastUsed, Graph VName)
 analyseSegOp lumap inuse (SegMap _ _ _ body) =
   analyseKernelBody lumap inuse body
-analyseSegOp lumap inuse (SegRed _ _ binops _ body) =
+analyseSegOp lumap inuse (SegRed _ _ _ body binops) =
   segWithBinOps lumap inuse binops body
-analyseSegOp lumap inuse (SegScan _ _ binops _ body) = do
+analyseSegOp lumap inuse (SegScan _ _ _ body binops) = do
   segWithBinOps lumap inuse binops body
-analyseSegOp lumap inuse (SegHist _ _ histops _ body) = do
+analyseSegOp lumap inuse (SegHist _ _ _ body histops) = do
   (inuse', lus', graph) <- analyseKernelBody lumap inuse body
   (inuse'', lus'', graph') <- mconcat <$> mapM (analyseHistOp lumap inuse') histops
   pure (inuse'', lus' <> lus'', graph <> graph')

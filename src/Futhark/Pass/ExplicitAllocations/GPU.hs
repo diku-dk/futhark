@@ -105,7 +105,7 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
   pure [Hint lmad $ Space "device"]
 kernelExpHints (Op (Inner (SegOp (SegMap lvl@(SegThread _ _) space ts body)))) =
   zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
-kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space reds ts body)))) =
+kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space ts body reds)))) =
   (map (const NoHint) red_res <>) <$> zipWithM (mapResultHint lvl space) (drop num_reds ts) map_res
   where
     num_reds = segBinOpResults reds

@@ -201,7 +201,7 @@ shortCircuitSegOp ::
 shortCircuitSegOp lvlOK lutab pat pat_certs (SegMap lvl space _ kernel_body) td_env bu_env =
   -- No special handling necessary for 'SegMap'. Just call the helper-function.
   shortCircuitSegOpHelper 0 lvlOK lvl lutab pat pat_certs space kernel_body td_env bu_env
-shortCircuitSegOp lvlOK lutab pat pat_certs (SegRed lvl space binops _ kernel_body) td_env bu_env =
+shortCircuitSegOp lvlOK lutab pat pat_certs (SegRed lvl space _ kernel_body binops) td_env bu_env =
   -- When handling 'SegRed', we we first invalidate all active coalesce-entries
   -- where any of the variables in 'vartab' are also free in the list of
   -- 'SegBinOp'. In other words, anything that is used as part of the reduction
@@ -218,14 +218,14 @@ shortCircuitSegOp lvlOK lutab pat pat_certs (SegRed lvl space binops _ kernel_bo
       op <- binops
       let shp = Shape segment_dims <> segBinOpShape op
       map (`arrayOfShape` shp) (lambdaReturnType $ segBinOpLambda op)
-shortCircuitSegOp lvlOK lutab pat pat_certs (SegScan lvl space binops _ kernel_body) td_env bu_env =
+shortCircuitSegOp lvlOK lutab pat pat_certs (SegScan lvl space _ kernel_body binops) td_env bu_env =
   -- Like in the handling of 'SegRed', we do not want to coalesce anything that
   -- is used in the 'SegBinOp'
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
    in shortCircuitSegOpHelper 0 lvlOK lvl lutab pat pat_certs space kernel_body td_env bu_env'
-shortCircuitSegOp lvlOK lutab pat pat_certs (SegHist lvl space histops _ kernel_body) td_env bu_env = do
+shortCircuitSegOp lvlOK lutab pat pat_certs (SegHist lvl space _ kernel_body histops) td_env bu_env = do
   -- Need to take zipped patterns and histDest (flattened) and insert transitive coalesces
   let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . histOp) histops) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail

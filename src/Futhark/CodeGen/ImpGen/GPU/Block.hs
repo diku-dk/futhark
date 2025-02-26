@@ -365,7 +365,7 @@ compileBlockOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
       zipWithM_ (compileThreadResult space) (patElems pat) $
         kernelBodyResult body
   sOp $ Imp.ErrorSync Imp.FenceLocal
-compileBlockOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
+compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans))) = do
   compileFlatId space
 
   let (ltids, dims) = unzip $ unSegSpace space
@@ -412,7 +412,7 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space scans _ body))) = do
         (product dims')
         (segBinOpLambda scan)
         arrs_flat
-compileBlockOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
+compileBlockOp pat (Inner (SegOp (SegRed lvl space _ body ops))) = do
   compileFlatId space
 
   let dims' = map pe64 dims
@@ -533,7 +533,7 @@ compileBlockOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
             (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' - 1])
 
       sOp $ Imp.Barrier Imp.FenceLocal
-compileBlockOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
+compileBlockOp pat (Inner (SegOp (SegHist lvl space _ kbody ops))) = do
   compileFlatId space
   let (ltids, dims) = unzip $ unSegSpace space
 
