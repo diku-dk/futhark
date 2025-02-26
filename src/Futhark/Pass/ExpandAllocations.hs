@@ -117,28 +117,28 @@ transformExp (Op (Inner (SegOp (SegMap lvl space ts kbody)))) = do
     ( alloc_stms,
       Op $ Inner $ SegOp $ SegMap lvl' space ts kbody'
     )
-transformExp (Op (Inner (SegOp (SegRed lvl space reds ts kbody)))) = do
+transformExp (Op (Inner (SegOp (SegRed lvl space ts kbody reds)))) = do
   (alloc_stms, (lvl', lams, kbody')) <-
     transformScanRed lvl space (map segBinOpLambda reds) kbody
   let reds' = zipWith (\red lam -> red {segBinOpLambda = lam}) reds lams
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegRed lvl' space reds' ts kbody'
+      Op $ Inner $ SegOp $ SegRed lvl' space ts kbody' reds'
     )
-transformExp (Op (Inner (SegOp (SegScan lvl space scans ts kbody)))) = do
+transformExp (Op (Inner (SegOp (SegScan lvl space ts kbody scans)))) = do
   (alloc_stms, (lvl', lams, kbody')) <-
     transformScanRed lvl space (map segBinOpLambda scans) kbody
   let scans' = zipWith (\red lam -> red {segBinOpLambda = lam}) scans lams
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegScan lvl' space scans' ts kbody'
+      Op $ Inner $ SegOp $ SegScan lvl' space ts kbody' scans'
     )
-transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
+transformExp (Op (Inner (SegOp (SegHist lvl space ts kbody ops)))) = do
   (alloc_stms, (lvl', lams', kbody')) <- transformScanRed lvl space lams kbody
   let ops' = zipWith onOp ops lams'
   pure
     ( alloc_stms,
-      Op $ Inner $ SegOp $ SegHist lvl' space ops' ts kbody'
+      Op $ Inner $ SegOp $ SegHist lvl' space ts kbody' ops'
     )
   where
     lams = map histOp ops
