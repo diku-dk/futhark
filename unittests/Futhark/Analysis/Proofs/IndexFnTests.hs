@@ -372,6 +372,35 @@ tests =
                     ]
         ),
       mkTest
+        "tests/indexfn/filter_indices.fut"
+        ( newNameFromString "xs" >>= \xs ->
+            newNameFromString "n" >>= \n ->
+              newNameFromString "p" >>= \p -> pure $ \(i, _, _, j) ->
+                let p_xs arg = Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole arg)]
+                 in [ IndexFn
+                        { iterator = Empty,
+                          body =
+                            cases
+                              [ ( Bool True,
+                                  sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (p_xs j))
+                                )
+                              ]
+                        },
+                      IndexFn
+                        { iterator = Forall i (Iota (sHole n)),
+                          body =
+                            cases
+                              [ ( p_xs i,
+                                  sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (p_xs j))
+                                ),
+                                ( neg (p_xs i),
+                                  int2SoP (-1)
+                                )
+                              ]
+                        }
+                    ]
+        ),
+      mkTest
         "tests/indexfn/partition2.fut"
         ( pure $ \(i, n, _, _) ->
             [ IndexFn
