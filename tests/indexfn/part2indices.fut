@@ -17,7 +17,7 @@ def part2indices [n]
         num_true <= n
         -- Proof that inds are a permutation of 0 ... n - 1.
         && and (map (\i -> 0 <= i && i < n) inds)
-        && injective inds
+        && injectiveOn (0, n-1) inds
         -- Proof that inds partition according to conds.
         && num_true == sum (map (\c -> if c then 1 else 0) conds)
         && and (map2 (\c ind ->
@@ -25,12 +25,6 @@ def part2indices [n]
                        then ind < num_true
                        else ind >= num_true
                      ) conds inds)
-        -- Other ways of writing injective:
-        -- && injectiveOn (0, n) inds
-        -- && and (map (\i -> inds[i] != inds[i+1]) (iota (n-1)))
-        -- && and (map2 (\x y -> x != y) (sized (n-1) (slice inds 0 (n-1))) (slice inds 1 n))
-        -- Problems with expressing this: (Indexing conds[Sum conds[0:i]] cannot be shown safe).
-        -- && and (map (\i -> conds[i]) (slice inds 0 num_true))
     } =
   -- We could also do the refinements on each element of the tuple.
   -- : ({i64 | \n ->

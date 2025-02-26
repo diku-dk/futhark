@@ -17,23 +17,23 @@ module Futhark.Analysis.Proofs.Query
   )
 where
 
-import Control.Monad (forM_, forM)
+import Control.Monad (forM, forM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition, tails)
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algDebugPrettyM, algebraContext, answerFromBool, assume, isTrue, ($/=), ($<), ($<=), ($==), ($>), ($>=), simplify)
+import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algDebugPrettyM, algebraContext, answerFromBool, assume, isTrue, simplify, ($/=), ($<), ($<=), ($==), ($>), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, repDomain, intervalEnd, intervalStart)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repDomain)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugT, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol, toDNF)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (lookupRange)
 import Futhark.SoP.Refine (addRels)
-import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.-.), (.+.))
+import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (prettyStringW)
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
@@ -114,7 +114,6 @@ data Property
   | -- For all k in Cat k _ _, prove property f(k).
     ForallSegments (VName -> Property)
   | InjectiveOn (SoP Symbol) (SoP Symbol)
-  | Injective
 
 data Order = LT | GT | LTE | GTE | Undefined
   deriving (Eq, Show)
@@ -124,8 +123,6 @@ prove (ForallSegments fprop) fn@(IndexFn (Forall _ (Cat k _ _)) _) =
   prove (fprop k) fn
 prove (PermutationOf {}) _fn = undefined
 prove (PermutationOfZeroTo m) fn = prove (PermutationOfRange (int2SoP 0) m) fn
-prove Injective fn@(IndexFn (Forall _ dom) _) =
-  prove (InjectiveOn (int2SoP 0) (domainEnd dom)) fn
 prove (InjectiveOn start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
   -- debugPrettyM "Proving InjectiveOn " (start, end, fn)
   let branches = casesToList cs
@@ -148,8 +145,7 @@ prove (InjectiveOn start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext f
                   dnfQuery
                     (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
                     ((f @ i) $/= (g @ j))
-                    `orM`
-                    dnfQuery
+                    `orM` dnfQuery
                       (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
                       (check (out_of_range (f @ i) :|| out_of_range (g @ j)))
             case_i_gt_j =
@@ -162,8 +158,7 @@ prove (InjectiveOn start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext f
                   dnfQuery
                     (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
                     ((f @ i) $/= (g @ j))
-                    `orM`
-                    dnfQuery
+                    `orM` dnfQuery
                       (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
                       (check (out_of_range (f @ i) :|| out_of_range (g @ j)))
          in case_i_lt_j `orM` case_i_gt_j
