@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Compiler crash for intrablock scatters that write to
   multidimensional arrays. (#2218)
 
+* Handling of size expressions in abstract types in the interpreter (#2222).
+
 ## [0.25.27]
 
 ### Added
