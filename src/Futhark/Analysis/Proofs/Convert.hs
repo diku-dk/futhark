@@ -1013,9 +1013,6 @@ forwardRefPrelude loc e f args = do
 parsePrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM (IndexFn -> IndexFnM Answer, [IndexFn])
 parsePrelude f args =
   case f of
-    "injective" | [e_xs] <- getArgs args -> do
-      xss <- forward e_xs
-      pure (prove Injective, xss)
     "injectiveOn" | [e_rng, e_xs] <- getArgs args -> do
       rng <- forward e_rng
       case rng of

@@ -9,7 +9,7 @@ import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Compiler.CLI (fileProg, readProgramOrDie)
-import Futhark.SoP.SoP (int2SoP, (.-.))
+import Futhark.SoP.SoP (int2SoP, (.-.), (.+.))
 import Futhark.Util.Pretty (docStringW, line, pretty, (<+>))
 import Language.Futhark qualified as E
 import Test.Tasty
@@ -27,8 +27,8 @@ tests =
         Yes,
       mkTest
         "tests/indexfn/part2indices.fut"
-        ( \[_pivot, fn@(IndexFn (Forall _ (Iota _)) _)] -> do
-            prove Injective fn
+        ( \[_pivot, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
+            prove (InjectiveOn (int2SoP 0) n) fn
         )
         Yes,
       mkTest
@@ -39,8 +39,8 @@ tests =
         Yes,
       mkTest
         "tests/indexfn/part2indicesL.fut"
-        ( \(fn@(IndexFn (Forall _ _) _) : _) -> do
-            prove (ForallSegments $ const Injective) fn
+        ( \(fn@(IndexFn (Forall _ (Cat _ _ b)) _) : _) -> do
+            prove (ForallSegments $ \_ -> InjectiveOn (int2SoP 0) b) fn
         )
         Yes,
       mkTest

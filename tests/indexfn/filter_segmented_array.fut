@@ -63,6 +63,10 @@ def part2indices [n] (conds: [n]bool) : {(i64, [n]i64) | \_ -> true} =
   let inds  = map3 (\ c indT indF -> if c then indT-1 else indF-1) conds indsT indsF
   in  (lst, inds)
 
+
+def slice [n] (xs: [n]f32) (a: nat64) (b: {i64 | \b' -> a <= b' && b' < n}) =
+  map (\i -> xs[a+i]) (iota (b - a + 1))
+
 def filter_segmented_array [m][n]
       (shape: [m]nat64)
       (pivots: [m]f32)
@@ -71,9 +75,5 @@ def filter_segmented_array [m][n]
   -- xs is segmented by shape
   let (II, _) = segment_ids shape
   let conds = map (\i -> xs[i] < pivots[II[i]]) (iota n)
-  -- XXX conds has a union iterator due to indexing into II,
-  --     but has to have a non-union iterator to proceed here!
-  --     In particular: conds will be summed and we cannot sum over a union conds,
-  --     because the body contains k.
-  let (_, perm) = part2indices conds
-  in map (\i -> xs[i]) perm
+  let (new_n, perm) = part2indices conds
+  in = scatter (replicate new_n 0f32) perm xs
