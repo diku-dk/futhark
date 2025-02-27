@@ -956,7 +956,7 @@ pSegOp pr pLvl =
         <* pComma
         <*> many (pDest <* pComma)
         <* pComma
-        <*> many (pShape <* pComma)
+        <*> pShape
     pHistOp =
       SegOp.HistOp
         <$> pShape

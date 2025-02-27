@@ -158,7 +158,7 @@ data SegPostOp rep = SegPostOp
     segPostOpScatterSpec :: ScatterSpec VName,
     -- | The remainding results of @segPostOpLambda@ will not be
     -- scattered and just writte with the following shapes.
-    segPostOpRemShape :: [Shape]
+    segPostOpRemShape :: Shape
   }
   deriving (Eq, Ord, Show)
 
@@ -516,14 +516,14 @@ splitPostOpResults (SegPostOp _ spec _) results =
 -- the types of the arrays being scattered to and not being scattered
 -- to.
 postOpResultsType :: SegPostOp rep -> ([Type], [Type])
-postOpResultsType op@(SegPostOp lambda spec shapes) =
+postOpResultsType op@(SegPostOp lambda spec shape) =
   (scatter_ts', noscatter_ts')
   where
     (_, scatter_ts, noscatter_ts) =
       splitPostOpResults op $ lambdaReturnType lambda
     scatter_ts' =
-      zipWith (\t (shape, _, _) -> t `arrayOfShape` shape) scatter_ts spec
-    noscatter_ts' = zipWith arrayOfShape noscatter_ts shapes
+      zipWith (\t (shp, _, _) -> t `arrayOfShape` shp) scatter_ts spec
+    noscatter_ts' = map (`arrayOfShape` shape) noscatter_ts
 
 -- | The return type of a 'SegOp'.
 segOpType :: SegOp lvl rep -> [Type]
@@ -749,16 +749,16 @@ mapSegPostOp ::
   SegOpMapper lvl frep trep m ->
   SegPostOp frep ->
   m (SegPostOp trep)
-mapSegPostOp tv (SegPostOp lam scatter_spec shapes) =
+mapSegPostOp tv (SegPostOp lam scatter_spec shape) =
   SegPostOp
     <$> mapOnSegOpLambda tv lam
     <*> mapM mapSpec scatter_spec
-    <*> mapM mapShape shapes
+    <*> mapShape shape
   where
     mapShape shp = Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shp)
-    mapSpec (shape, n, dest) =
+    mapSpec (shp, n, dest) =
       (,,)
-        <$> mapShape shape
+        <$> mapShape shp
         <*> pure n
         <*> mapOnSegOpVName tv dest
 
@@ -957,12 +957,12 @@ instance (PrettyRep rep) => Pretty (SegBinOp rep) where
         Noncommutative -> mempty
 
 instance (PrettyRep rep) => Pretty (SegPostOp rep) where
-  pretty (SegPostOp lam scatter_spec shapes) =
+  pretty (SegPostOp lam scatter_spec shape) =
     pretty lam
       <> PP.comma
         </> PP.commasep (map pretty scatter_spec)
       <> PP.comma
-        </> PP.commasep (map pretty shapes)
+        </> pretty shape
 
 instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
   pretty (SegMap lvl space ts body) =
