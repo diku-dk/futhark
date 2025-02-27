@@ -7,9 +7,9 @@ def slice xs (a: {i64 | (>= 0)}) (b: {i64 | (<= length xs)}) =
 
 
 -- These should all pass.
-def sanity_check1 n = injectiveOn (0, n) (iota n)
-def sanity_check2 n = injectiveOn (0, n-1) (iota n)
-def sanity_check3 n = injectiveOn (1, n) (replicate n 0)
+def sanity_check1 n = injectivePreimage (0, n) (iota n)
+def sanity_check2 n = injectivePreimage (0, n-1) (iota n)
+def sanity_check3 n = injectivePreimage (1, n) (replicate n 0)
 
 def part2indices [n]
   (conds: [n]bool)
@@ -17,7 +17,7 @@ def part2indices [n]
         num_true <= n
         -- Proof that inds are a permutation of 0 ... n - 1.
         && and (map (\i -> 0 <= i && i < n) inds)
-        && injectiveOn (0, n-1) inds
+        && injectivePreimage (0, n-1) inds
         -- Proof that inds partition according to conds.
         && num_true == sum (map (\c -> if c then 1 else 0) conds)
         && and (map2 (\c ind ->

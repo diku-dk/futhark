@@ -37,7 +37,7 @@ refinementPrelude :: S.Set String
 refinementPrelude =
   S.fromList
     [ "injective",
-      "injectiveOn",
+      "injectivePreimage",
       "and"
       -- "segments"
     ]
@@ -550,7 +550,10 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
               check (size_rep, scope)
           unless (isYes ans) . errorMsg loc $
             "Failed to show precondition " <> prettyString pat <> " in context: " <> prettyString scope
-forward e = error $ "forward on " <> show e <> "\nPretty: " <> prettyString e
+forward e = do
+  printM 1337 $ "forward on " <> show e <> "\nPretty: " <> prettyString e
+  vn <- newVName "I_e_untrans"
+  pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
 
 -- Align parameters and arguments. Each parameter is a pattern.
 -- A pattern unpacks to a list of (optional) names with type information.
@@ -621,9 +624,10 @@ substParams = foldM substParam
 scatterPerm :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
 scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
-  perm <- lift $ prove (PermutationOfZeroTo dest_size) inds
+  printM 1337 $ "scatterPerm: dest_size" <> prettyString dest_size
+  perm <- lift $ prove (PermutationOfRange (int2SoP 0) dest_size) inds
   case perm of
-    Unknown -> fail "scatterPerm: no match"
+    Unknown -> failMsg "scatterPerm: no match"
     Yes -> do
       vn_inds <- warningInds
 
@@ -712,7 +716,7 @@ scatterMono dest@(IndexFn (Forall _ dom_dest) _) inds@(IndexFn inds_iter@(Forall
         case1_is_OOB <- lift $ askQ (isOOB vn_f0) inds 1
         case case1_is_OOB of
           Yes -> pure (vn_p0, vn_f0)
-          Unknown -> failM "scatterMono: unable to determine OOB branch"
+          Unknown -> failMsg "scatterMono: unable to determine OOB branch"
   let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
   let f_seg = mapping s M.! vn_f_seg
   -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
@@ -720,20 +724,20 @@ scatterMono dest@(IndexFn (Forall _ dom_dest) _) inds@(IndexFn inds_iter@(Forall
     addRelIterator inds_iter
     seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
     unify p_seg (seg_delta :> int2SoP 0)
-  when (isNothing s_p) (failM "scatterMono: predicate not on desired form")
+  when (isNothing s_p) (failMsg "scatterMono: predicate not on desired form")
   -- Check that seg is monotonically increasing. (Essentially checking
   -- that OOB branch is never taken in inds.)
   mono <- lift $ algebraContext inds $ do
     addRelIterator inds_iter
     seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
     seg_delta $>= int2SoP 0
-  when (isUnknown mono) (failM "scatterMono: unable to show monotonicity")
+  when (isUnknown mono) (failMsg "scatterMono: unable to show monotonicity")
   -- Check that seg(0) = 0.
   -- (Not using CaseCheck as it has to hold outside case predicate.)
   let x `at_k` i = rep (mkRep k i) x
   let zero :: SoP Symbol = int2SoP 0
   eq0 <- lift $ f_seg `at_k` zero $== int2SoP 0
-  when (isUnknown eq0) (failM "scatterMono: unable to determine segment start")
+  when (isUnknown eq0) (failMsg "scatterMono: unable to determine segment start")
 
   -- Check that the proposed end of segments seg(m) - 1 equals the size of dest.
   -- (Note that has to hold outside the context of inds, so we cannot assume p_seg.)
@@ -755,11 +759,12 @@ scatterMono dest@(IndexFn (Forall _ dom_dest) _) inds@(IndexFn inds_iter@(Forall
                 ]
           }
   lift $ substParams fn [(vals_hole, vals), (dest_hole, dest)]
-  where
-    failM msg = do
-      printM 1338 msg
-      fail msg
 scatterMono _ _ _ = fail ""
+
+failMsg :: MonadFail m => String -> m b
+failMsg msg = do
+  printM 1337 msg
+  fail msg
 
 cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
 cmap f (Cases xs) = Cases (fmap f xs)
@@ -1013,14 +1018,14 @@ forwardRefPrelude loc e f args = do
 parsePrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM (IndexFn -> IndexFnM Answer, [IndexFn])
 parsePrelude f args =
   case f of
-    "injectiveOn" | [e_rng, e_xs] <- getArgs args -> do
+    "injectivePreimage" | [e_rng, e_xs] <- getArgs args -> do
       rng <- forward e_rng
       case rng of
         [IndexFn Empty cs_start, IndexFn Empty cs_end] -> do
           xss <- forward e_xs
-          let start = flattenCases cs_start
-          let end = flattenCases cs_end
-          pure (prove (InjectiveOn start end), xss)
+          let a = flattenCases cs_start
+          let b = flattenCases cs_end
+          pure (prove (InjectivePreimage (a, b)), xss)
         _ ->
           undefined
     "and" | [e_xs] <- getArgs args -> do

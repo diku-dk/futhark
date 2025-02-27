@@ -17,7 +17,7 @@ import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn (iterator), Iterator (..), getPredicates)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv, printM)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMappable, ASTMapper (..), astFold, astMap, identityMapper)
@@ -319,10 +319,11 @@ toAlgebra_ (Sum j lb ub x) = do
       b <- mapSymM toAlgebra_ (rep (mkRep j ub) idx)
       booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
       pure $ Algebra.Sum (idxSym booltype vn) a b
-    Nothing ->
+    Nothing -> do
       -- Either handle quantifiers needs to be run on the symbol first
       -- or x did not depend j. Both cases would be odd, and I'd like
       -- to know why it would happen.
+      printM 2000 $ "toAlgebra_: " <> prettyString (Sum j lb ub x)
       error "handleQuantifiers need to be run"
 toAlgebra_ sym@(Idx (Var xs) i) = do
   res <- search sym

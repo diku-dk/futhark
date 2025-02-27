@@ -55,11 +55,11 @@ dest_fn @ (f_name, src_fn) = do
   (f, g) <- renameSame src_fn dest_fn
 
   printM 1337 $
-    "(" <> prettyString g <> ") @ " <> prettyString f_name <> " = " <> prettyString f
+    "" <> prettyString g <> warningString " @ " <> prettyString f_name <> " = " <> prettyString f
   app <- getApply (legalArg k g f) g
   case app of
     Just apply -> do
-      printM 1337 $ " @ " <> prettyString apply
+      printM 1337 $ "\t@ " <> prettyString (fst apply)
       h <- substituteOnce f g apply
       fromJust h @ (f_name, f)
     Nothing ->
@@ -141,6 +141,8 @@ substituteOnce f g_non_repped (f_apply, args) = do
     (p_g, v_g) <- casesToList (body g)
     let s = mkRep vn (rep f_arg v_f)
     pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep f_arg p_f), rep s v_g)
+
+  printM 2000 $ "New body: " <> prettyString new_body
 
   let g_iter = subIterator vn (iterator g)
   same_range <- isSameRange (iterator f) g_iter

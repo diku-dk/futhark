@@ -28,19 +28,19 @@ tests =
       mkTest
         "tests/indexfn/part2indices.fut"
         ( \[_pivot, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            prove (InjectiveOn (int2SoP 0) n) fn
+            prove (InjectivePreimage (int2SoP 0, n)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices.fut"
         ( \[_pivot, fn@(IndexFn (Forall _ (Iota _)) _)] -> do
-            prove (InjectiveOn (int2SoP 0) (int2SoP 3)) fn
+            prove (InjectivePreimage (int2SoP 0, int2SoP 3)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indicesL.fut"
         ( \(fn@(IndexFn (Forall _ (Cat _ _ b)) _) : _) -> do
-            prove (ForallSegments $ \_ -> InjectiveOn (int2SoP 0) b) fn
+            prove (ForallSegments $ \_ -> InjectivePreimage (int2SoP 0, b)) fn
         )
         Yes,
       mkTest

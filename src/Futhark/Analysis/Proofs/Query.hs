@@ -17,24 +17,23 @@ module Futhark.Analysis.Proofs.Query
   )
 where
 
-import Control.Monad (forM, forM_)
+import Control.Monad (forM)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
-import Data.List (partition, tails)
+import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
-import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algDebugPrettyM, algebraContext, answerFromBool, assume, isTrue, simplify, ($/=), ($<), ($<=), ($==), ($>), ($>=))
+import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, isTrue, simplify, ($/=), ($<), ($<=), ($==), ($>), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repDomain)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugM, debugPrettyM, debugT, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd, intervalStart, repDomain)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugT, printM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol, toDNF)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (lookupRange)
 import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
-import Futhark.Util.Pretty (prettyStringW)
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
 
@@ -62,7 +61,7 @@ askQ query fn case_idx = algebraContext fn $ do
   addRelIterator (iterator fn)
   case query of
     CaseCheck transf -> do
-      dnfQuery p (check $ transf q)
+      p =>? transf q
     CaseIsMonotonic dir ->
       debugT "  " $
         case iterator fn of
@@ -86,6 +85,11 @@ dnfQuery p f = do
   where
     disjToList (a :|| b) = disjToList a <> disjToList b
     disjToList x = [x]
+
+(=>?) :: Symbol -> Symbol -> IndexFnM Answer
+p =>? q = dnfQuery p (check q)
+
+infixl 8 =>?
 
 check :: Symbol -> IndexFnM Answer
 check (a :&& b) = check a `andM` check b
@@ -113,90 +117,105 @@ data Property
     PermutationOfRange (SoP Symbol) (SoP Symbol)
   | -- For all k in Cat k _ _, prove property f(k).
     ForallSegments (VName -> Property)
-  | InjectiveOn (SoP Symbol) (SoP Symbol)
+  -- The restriction of f to the preimage [a,b] is injective.
+  | InjectivePreimage (SoP Symbol, SoP Symbol)
+  -- The restriction of f to the preimage [a,b] is bijective.
+  | BijectivePreimage (SoP Symbol, SoP Symbol)
 
-data Order = LT | GT | LTE | GTE | Undefined
+data Order = LT | GT | Undefined
   deriving (Eq, Show)
 
 prove :: Property -> IndexFn -> IndexFnM Answer
-prove (ForallSegments fprop) fn@(IndexFn (Forall _ (Cat k _ _)) _) =
-  prove (fprop k) fn
-prove (PermutationOf {}) _fn = undefined
-prove (PermutationOfZeroTo m) fn = prove (PermutationOfRange (int2SoP 0) m) fn
-prove (InjectiveOn start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
-  -- debugPrettyM "Proving InjectiveOn " (start, end, fn)
-  let branches = casesToList cs
+prove (InjectivePreimage (a,b)) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
+  printM 1000 $ "Proving InjectiveOn " <> prettyString (a, b, fn)
+  let guards = casesToList cs
   i <- newNameFromString "i"
   j <- newNameFromString "j"
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
   let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
-  let out_of_range x = x :< start :|| end :< x
-
-  let (p_f, f) != (p_g, g) = rollbackAlgEnv $ do
-        -- Try to show: forall i /= j . f(i) /= g(j)
-        let case_i_lt_j =
-              rollbackAlgEnv $
-                do
-                  -- Case i < j => f(i) /= g(j).
-                  addRelIterator iter_j
-                  i +< j
-
-                  dnfQuery
-                    (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
-                    ((f @ i) $/= (g @ j))
-                    `orM` dnfQuery
-                      (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
-                      (check (out_of_range (f @ i) :|| out_of_range (g @ j)))
-            case_i_gt_j =
-              rollbackAlgEnv $
-                do
-                  -- Case i > j => f(i) /= g(j):
-                  addRelIterator iter_i
-                  j +< i
-
-                  dnfQuery
-                    (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
-                    ((f @ i) $/= (g @ j))
-                    `orM` dnfQuery
-                      (sop2Symbol (p_f @ i) :&& sop2Symbol (p_g @ j))
-                      (check (out_of_range (f @ i) :|| out_of_range (g @ j)))
-         in case_i_lt_j `orM` case_i_gt_j
-
-  -- NOTE could optimise this by sorting the distinct branches,
-  -- (just see how to do that below) but I don't think it's worth the added complexity.
-  allM [x != y | (x : ys) <- tails branches, y <- ys]
-    `andM` allM [x != x | x <- branches]
-  where
-    f @ x = rep (mkRep i0 (Var x)) f
-prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
-  -- 0. Prove that the size of the domain equals (end - start + 1).
-  -- 1. Prove that each case is strictly monotonic.
-  -- 2. Prove that all branches are within bounds (start, end - 1).
-  -- 3. Prove no overlap between case values.
+  -- (1) Prove that within in a given case, there are no duplicate values in [a,b].
+  -- (2) Prove that there are no duplicate values in [a,b] across cases.
   --  It is sufficient to show that the case values can be sorted
-  --  in a strictly increasing order. That is, given a list of branches
-  --  on the form (p_f => f) and two indices i /= j in [0,...,n-1],
-  --  we want to show
-  --    forall (p_f => f) /= (p_g => g) in our list of branches .
-  --      p_f(i) ^ p_g(j) ==> f(i) < g(j) OR f(i) > g(j).
+  --  in a strictly increasing order. That is, given
+  --    i /= j in [0,...,n-1]
+  --  we want to show:
+  --    forall (c_1 => e_1) /= (c_2 => e_2) .
+  --      c_1(i) ^ c_2(j) ==> f(i) < g(j) OR f(i) > g(j).
   --
   --  We define a comparison operator that returns the appropriate
   --  relation above, if it exists, and use a sorting algorithm
   --  to reduce the number of tests needed, but the only thing
   --  that matters is that this sorting exists.
-  debugM $
-    "Prove permutation of " <> prettyString start <> " .. " <> prettyString end
-  debugPrettyM "\n" fn
+  --
+  let out_of_range x = x :< a :|| b :< x
 
-  let branches = casesToList cs
+  -- Proof of (1).
+  let step1 = allM [no_dups g | g <- guards]
+        where
+          no_dups (c, e) = rollbackAlgEnv $ do
+            -- WTS: i < j ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b
+            --        => e(i) /= e(j).
+            addRelIterator iter_j
+            i +< j
+
+            let oob =
+                  (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
+                    =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
+            let neq =
+                  (sop2Symbol (c @ i) :&& sop2Symbol (c @ j)) -- XXX could use in_range f@i g@j here
+                    =>? (e @ i :/= e @ j)
+            oob `orM` neq
+
+  -- Proof of (2).
+  let step2 = answerFromBool . isJust <$> sorted cmp guards
+        where
+          (p_f, f) `cmp` (p_g, g) = rollbackAlgEnv $ do
+            let p =
+                  (fromJust . justSym $ p_f @ i) :&& (fromJust . justSym $ p_g @ j)
+            let f_rel_g rel =
+                  -- WTS: forall i /= j ^ p_f(i) ^ p_g(j) . f(i) `rel` g(j)
+                  -- XXX could use in_range f@i g@j here
+                  let case_i_lt_j = rollbackAlgEnv $ do
+                        addRelIterator iter_j
+                        i +< j
+                        p =>? (f @ i) `rel` (g @ j)
+                      case_i_gt_j = rollbackAlgEnv $ do
+                        addRelIterator iter_i
+                        j +< i
+                        p =>? (f @ i) `rel` (g @ j)
+                   in case_i_lt_j `andM` case_i_gt_j
+            ifM
+              (f_rel_g (:<))
+              LT
+              ( ifM
+                  (f_rel_g (:>))
+                  GT
+                  (pure Undefined)
+              )
+
+  step1 `andM` step2
+  where
+    f @ x = rep (mkRep i0 (Var x)) f
+
+    ifM m t f = do
+      res <- m
+      case res of
+        Yes -> pure t
+        Unknown -> f
+prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
+  printM 1000 $ "Proving PermutationOfRange" <> prettyString (start, end, fn)
+  let guards = casesToList cs
   i <- newNameFromString "i"
-  j <- newNameFromString "j"
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
-  let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
-  range_sz <- simplify $ end .-. start .+. int2SoP 1
-  let size_eq_range =
+  -- (1) Prove that the size of the domain equals (end - start + 1).
+  -- (2) Prove that all branches are within bounds (start, end - 1).
+  -- (3) Prove that fn values have no duplicates in [start, end].
+  --
+
+  let step1 = do
+        range_sz <- simplify $ end .-. start .+. int2SoP 1
         case dom of
           Iota n ->
             n $== range_sz
@@ -204,61 +223,22 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
             n <- simplify (intervalEnd dom .-. intervalStart dom .+. int2SoP 1)
             n $== range_sz
 
-  let case_monotonic c =
-        askQ (CaseIsMonotonic IncStrict) fn c
-          `orM` askQ (CaseIsMonotonic DecStrict) fn c
+  let step2 = allM $ map case_in_bounds guards
+        where
+          case_in_bounds (p, f) = rollbackAlgEnv $ do
+            addRelIterator iter_i
+            assume (fromJust . justSym $ p @ i)
+            (start $<= f @ i) `andM` (f @ i $<= end)
 
-  let case_in_bounds (p, f) = rollbackAlgEnv $ do
-        addRelIterator iter_i
-        assume (fromJust . justSym $ p @ i)
-        algDebugPrettyM "Case:" (p @ i :: SoP Symbol)
-        algDebugPrettyM "\t=>" (f @ i :: SoP Symbol)
-        let bug1 = debugT ("    >= " <> prettyStringW 110 start)
-        let bug2 = debugT ("    <= " <> prettyStringW 110 end)
-        bug1 (start $<= f @ i) `andM` bug2 (f @ i $<= end)
+  let step3 = prove (InjectivePreimage (start, end)) fn
 
-  let (p_f, f) `cmp` (p_g, g) = rollbackAlgEnv $ do
-        assume (fromJust . justSym $ p_f @ i)
-        assume (fromJust . justSym $ p_g @ j)
-        let f_rel_g rel =
-              -- Try to show: forall i /= j . f(i) `rel` g(j)
-              let case_i_lt_j = rollbackAlgEnv $ do
-                    -- Case i < j => f(i) `rel` g(j).
-                    addRelIterator iter_j
-                    i +< j
-                    (f @ i) `rel` (g @ j)
-                  case_i_gt_j = rollbackAlgEnv $ do
-                    -- Case i > j => f(i) `rel` g(j):
-                    addRelIterator iter_i
-                    j +< i
-                    (f @ i) `rel` (g @ j)
-               in case_i_lt_j `andM` case_i_gt_j
-        algDebugPrettyM "f(i):" (p_f @ i :: SoP Symbol)
-        algDebugPrettyM "\t=>" (f @ i :: SoP Symbol)
-        algDebugPrettyM "g(i):" (p_g @ i :: SoP Symbol)
-        algDebugPrettyM "\t=>" (g @ j :: SoP Symbol)
-        f_LT_g <- f_rel_g ($<)
-        debugT "\tf `cmp` g" $
-          case f_LT_g of
-            Yes -> pure LT
-            Unknown -> do
-              f_GT_g <- f_rel_g ($>)
-              case f_GT_g of
-                Yes -> pure GT
-                Unknown -> pure Undefined
-
-  let monotonic = do
-        debugM "1.  MONOTONICITY"
-        allM $ zipWith (curry (case_monotonic . snd)) branches [0 ..]
-  let within_bounds = do
-        debugM "2.  WITHIN BOUNDS"
-        allM $ map case_in_bounds branches
-  let no_overlap = do
-        debugM "3.  NO OVERLAP"
-        answerFromBool . isJust <$> sorted cmp branches
-  size_eq_range `andM` monotonic `andM` within_bounds `andM` no_overlap
+  step1 `andM` step2 `andM` step3
   where
     f @ x = rep (mkRep i0 (Var x)) f
+prove (PermutationOfZeroTo m) fn =
+  prove (PermutationOfRange (int2SoP 0) m) fn
+prove (ForallSegments fprop) fn@(IndexFn (Forall _ (Cat k _ _)) _) =
+  prove (fprop k) fn
 prove _ _ = error "Not implemented yet."
 
 -- Strict sorting.

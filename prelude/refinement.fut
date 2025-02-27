@@ -1,7 +1,7 @@
-def injectiveOn 't ((a, b) : (i64, i64)) (_: []t) : bool = ???
+def injectivePreimage 't ((a, b) : (i64, i64)) (_: []t) : bool = ???
 
 def injective [n] (xs: [n]i64) =
-  injectiveOn (0,n) xs
+  injectivePreimage (0,n) xs
 
 -- import "soacs"
 -- import "functional"
