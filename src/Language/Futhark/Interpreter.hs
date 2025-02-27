@@ -62,6 +62,7 @@ import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
 import Language.Futhark.Primitive qualified as P
 import Language.Futhark.Semantic qualified as T
+import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
 import Prelude hiding (break, mod)
 
 data StackFrame = StackFrame
@@ -652,15 +653,15 @@ expandType env (Scalar (TypeVar u tn args)) =
   case lookupType tn env of
     Just (TypeBinding tn_env ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
-          onDim (SizeClosure _ (Var v _ _))
-            | Just e <- M.lookup (qualLeaf v) substs =
-                SizeClosure env e
-          -- The next case can occur when a type with existential size
-          -- has been hidden by a module ascription,
-          -- e.g. tests/modules/sizeparams4.fut.
-          onDim (SizeClosure _ e)
-            | any (`elem` ext) $ fvVars $ freeInExp e = SizeClosure mempty anySize
-          onDim d = d
+          onDim (SizeClosure dim_env dim)
+            | any (`elem` ext) $ fvVars $ freeInExp dim =
+                -- The case can occur when a type with existential
+                -- size has been hidden by a module ascription, e.g.
+                -- tests/modules/sizeparams4.fut.
+                SizeClosure mempty anySize
+            | otherwise =
+                SizeClosure (env <> dim_env) $
+                  applySubst (`M.lookup` substs) dim
        in bimap onDim (const u) $ expandType (Env mempty types <> tn_env) t'
     Nothing ->
       -- This case only happens for built-in abstract types,
@@ -668,7 +669,7 @@ expandType env (Scalar (TypeVar u tn args)) =
       Scalar (TypeVar u tn $ map expandArg args)
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim e) =
-      (M.singleton p e, mempty)
+      (M.singleton p $ ExpSubst e, mempty)
     matchPtoA (TypeParamType _ p _) (TypeArgType t') =
       let t'' = evalToStruct $ expandType env t' -- FIXME, we are throwing away the closure here.
        in (mempty, M.singleton p (TypeBinding mempty [] $ RetType [] t''))
