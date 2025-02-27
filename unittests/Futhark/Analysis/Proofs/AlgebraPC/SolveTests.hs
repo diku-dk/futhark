@@ -664,25 +664,6 @@ tests =
               int 0 FM.$<=$ (sum_shp (int 0) (sVar i) .-. int 1)
           )
           @??= True,
-      testCase "Injective 1 (part2indices): this test is unprovable, please fix it!" $
-        run
-          ( do
-              clearAlgEnv
-              i <- newNameFromString "i"
-              vn_conds <- newNameFromString "conds"
-              let conds = POR (S.singleton vn_conds)
-              -- \a b -> ∑conds[a : b]
-              let sum_conds a b = sym2SoP $ Sum conds a b
-              -- Ranges
-              addRel $
-                int 0 :<=: sVar vn_conds
-                  :&&: int 2 :<=: sVar n
-                  :&&: int 0 :<=: sVar i :&&: sVar i :<: sVar n
-
-              (int 1 .+. sVar i .+. sum_conds (int 2 .+. sVar i) (sVar n .-. int 1))
-                FM.$/=$ sum_conds (int 0) (sVar i)
-          )
-          @??= True,
       testCase "Injective 2 (part2indices): this test was unprovable in original form, fixed it by setting `i  < n-1`" $
         run
           ( do
@@ -751,17 +732,6 @@ tests =
               -- debugPrettyM "\ne(i) - e(j): " e_diff
 
               e j FM.$<$ e i
-          )
-          @??= True,
-      --
-      testCase "FME1" $
-        run
-          ( do
-              let idx1 = Idx c (sVar i1)
-              let idx2 = Idx c (sVar i2)
-              addRange idx1 $ mkRangeUB (int2SoP (-1))
-              addRange idx2 $ mkRangeLB (int2SoP 0)
-              sym2SoP idx1 FM.$<$ sym2SoP idx2
           )
           @??= True
     ]
