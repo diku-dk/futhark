@@ -1002,7 +1002,7 @@ eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
 eval env (Ascript e _ _) = eval env e
 eval env (Coerce e te (Info t) loc) = do
   v <- eval env e
-  t' <- evalTypeFully $ expandType env $ toStruct t
+  t' <- evalTypeFully $ expandType env t
   case checkShape (typeShape t') (valueShape v) of
     Just _ -> pure v
     Nothing ->
