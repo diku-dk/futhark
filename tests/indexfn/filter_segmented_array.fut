@@ -76,4 +76,4 @@ def filter_segmented_array [m][n]
   let (II, _) = segment_ids shape
   let conds = map (\i -> xs[i] < pivots[II[i]]) (iota n)
   let (new_n, perm) = part2indices conds
-  in = scatter (replicate new_n 0f32) perm xs
+  in scatter (replicate new_n 0f32) perm xs
