@@ -76,6 +76,4 @@ def filter_segmented_array [m][n]
   let (II, _) = segment_ids shape
   let conds = map (\i -> xs[i] < pivots[II[i]]) (iota n)
   let (new_n, perm) = part2indices conds
-  let partitioned = map (\i -> xs[i]) perm
-  in slice partitioned 0 new_n
-  -- ^ fails to show slice precondition here, should be possible from looking at index fns
+  in = scatter (replicate new_n 0f32) perm xs
