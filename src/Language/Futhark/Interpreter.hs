@@ -1216,7 +1216,7 @@ evalDec env (ImportDec name name' loc) =
 evalDec env (LocalDec d _) = evalDec env d
 evalDec env ModTypeDec {} = pure env
 evalDec env (TypeDec (TypeBind v _ ps _ (Info (RetType dims t)) _ _)) = do
-  let abbr = TypeBinding env ps . RetType dims $ evalToStruct $ expandType env t
+  let abbr = TypeBinding env ps $ RetType dims t
   pure env {envType = M.insert v abbr $ envType env}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
   (mod_env, mod) <- evalModExp env $ wrapInLambda ps
