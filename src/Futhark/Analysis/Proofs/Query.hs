@@ -25,10 +25,10 @@ import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, answerFromBool, assume, isTrue, simplify, ($/=), ($<), ($<=), ($==), ($>), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), casesToList, getCase, cases, getPredicates)
 import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd, intervalStart, repDomain)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugT, printM, rollbackAlgEnv)
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol, toDNF)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol, toDNF, neg)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (lookupRange)
@@ -36,6 +36,7 @@ import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
+import Futhark.Analysis.Proofs.Substitute ((@))
 
 data MonoDir = Inc | IncStrict | Dec | DecStrict
   deriving (Show, Eq, Ord)
@@ -203,7 +204,53 @@ prove (InjectivePreimage (a,b)) fn@(IndexFn (Forall i0 dom) cs) = algebraContext
       case res of
         Yes -> pure t
         Unknown -> f
+prove (BijectivePreimage (a,b)) f@(IndexFn (Forall i0 dom) cs) = algebraContext f $ do
+  printM 1000 $ "Proving BijectivePreimage "
+    <> "\n  a = " <> prettyString a
+    <> "\n  b = " <> prettyString b
+    <> "\n  f = " <> prettyString f
+  let guards = casesToList cs
+  i <- newNameFromString "i"
+  j <- newNameFromString "j"
+  let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
+  let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
+
+  -- Let X be the preimage of [a, b] under f
+  -- so that f restricted to X is the function:
+  --   f|X : X -> [a, b].
+  -- WTS(1): f|X is injective.
+  -- WTS(2): f|X is surjective.
+
+  let step1 = undefined
+
+  let step2 = do
+        -- WTS: If |X| = |[a,b]|, then we have (2).
+        -- Proof. Assume that |X| = |[a,b]|. By step (1), f|X is injective,
+        -- so f maps X to exactly |X| = |[a,b]| distinct values. But the
+        -- codomain of f|X is by definition [a,b], meaning [a,b] must be covered.
+        --
+        -- WTS: |X| = |[a,b]|.
+        -- We can find the cardinality of X by counting how many values
+        -- in the (unrestricted) domain of f are mapped to values in [a,b].
+        x <- newVName "x"
+        let x_i = sym2SoP (Idx (Var x) (sym2SoP (Var i0)))
+        let c = a :<= x_i :&& x_i :<= b
+        let oob = a .-. int2SoP 1
+        f_restricted_to_X <-
+          IndexFn (Forall i0 dom) (cases [(c, x_i), (neg c, oob)])
+            @ (x, f)
+        printM 2000 $ "f_restricted_to_X: " <> prettyString f_restricted_to_X
+        let cs' = foldl1 (:||) (getPredicates f_restricted_to_X)
+
+        undefined
+
+  undefined
+
 prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
+
+  -- equivalent with BijectivePreimage (start dom, end dom)
+
+
   printM 1000 $ "Proving PermutationOfRange" <> prettyString (start, end, fn)
   let guards = casesToList cs
   i <- newNameFromString "i"
