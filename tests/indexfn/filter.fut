@@ -15,7 +15,6 @@ def filter_indices [n]
       -- m is the correct size and is is a permutation of 0 .. m:
       in correct_size && no_dups && and in_range
     } =
-  -- let cs = map (\x -> p x) xs
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) cs)
   let new_size = if n > 0 then num_trues[n-1] else 0
   let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
