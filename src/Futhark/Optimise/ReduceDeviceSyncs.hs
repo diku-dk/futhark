@@ -332,10 +332,11 @@ optimizeHostOp (SegOp (SegRed lvl space types kbody ops)) = do
   ops' <- mapM addReadsToSegBinOp ops
   kbody' <- addReadsToKernelBody kbody
   pure . SegOp $ SegRed lvl space types kbody' ops'
-optimizeHostOp (SegOp (SegScan lvl space types kbody ops)) = do
+optimizeHostOp (SegOp (SegScan lvl space types kbody ops post_op)) = do
   ops' <- mapM addReadsToSegBinOp ops
+  post_op' <- addReadsToSegPostOp post_op
   kbody' <- addReadsToKernelBody kbody
-  pure . SegOp $ SegScan lvl space types kbody' ops'
+  pure . SegOp $ SegScan lvl space types kbody' ops' post_op'
 optimizeHostOp (SegOp (SegHist lvl space types kbody ops)) = do
   ops' <- mapM addReadsToHistOp ops
   kbody' <- addReadsToKernelBody kbody
@@ -645,6 +646,12 @@ addReadsToSegBinOp :: SegBinOp GPU -> ReduceM (SegBinOp GPU)
 addReadsToSegBinOp op = do
   f' <- addReadsToLambda (segBinOpLambda op)
   pure (op {segBinOpLambda = f'})
+
+-- | Rewrite 'SegPostOp' dependencies to scalars that have been migrated.
+addReadsToSegPostOp :: SegPostOp GPU -> ReduceM (SegPostOp GPU)
+addReadsToSegPostOp op = do
+  f' <- addReadsToLambda (segPostOpLambda op)
+  pure (op {segPostOpLambda = f'})
 
 -- | Rewrite 'HistOp' dependencies to scalars that have been migrated.
 addReadsToHistOp :: HistOp GPU -> ReduceM (HistOp GPU)

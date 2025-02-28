@@ -1048,9 +1048,9 @@ segmentedScanomapKernel nest perm cs segment_size lam post_lam spec map_lam nes 
       (lam', nes'', shape) <- determineReduceOp lam nes'
       lam'' <- onLambda' lam'
       let scan_op = SegBinOp Noncommutative lam'' nes'' shape
-      let (shape', scatter_op') = isVectorMap post_lam
+      let (_, scatter_op') = isVectorMap post_lam
       scatter_op'' <- onLambda' scatter_op'
-      let post_op = SegPostOp scatter_op'' spec shape'
+      let post_op = SegPostOp scatter_op'' spec
       lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
       addStms
         =<< traverse renameStm

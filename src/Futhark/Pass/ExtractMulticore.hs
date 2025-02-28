@@ -239,9 +239,9 @@ transformSOAC pat _ (Screma w arrs form)
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
       (scans_stms, scans') <- mapAndUnzipM scanToSegBinOp scans
-      let ret = concatMap (lambdaReturnType . scanLambda) scans
+      let ret = concatMap (lambdaReturnType . segBinOpLambda) scans'
       identity <- mkIdentityLambda ret
-      let post_op = SegPostOp identity [] (segBinOpShape $ head scans') -- This seems wrong.
+      let post_op = SegPostOp identity []
       pure $
         mconcat scans_stms
           <> oneStm

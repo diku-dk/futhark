@@ -153,12 +153,8 @@ data SegBinOp rep = SegBinOp
 data SegPostOp rep = SegPostOp
   { -- | The function applied the the result of some SegBinOp.
     segPostOpLambda :: Lambda rep,
-    -- | The first results of the @segPostOpLambda@ corresponds to
-    -- values that will be scattered using the following specification.
-    segPostOpScatterSpec :: ScatterSpec VName,
-    -- | The remainding results of @segPostOpLambda@ will not be
-    -- scattered and just writte with the following shapes.
-    segPostOpRemShape :: Shape
+    -- | The scatter spec of what @segPostOpLambda@ is scattered.
+    segPostOpScatterSpec :: ScatterSpec VName
   }
   deriving (Eq, Ord, Show)
 
@@ -506,7 +502,7 @@ segResultShape _ t (RegTileReturns _ dims_n_tiles _) =
 -- indices, elements that will be scattered, and elements that will
 -- not be scattered.
 splitPostOpResults :: SegPostOp rep -> [a] -> ([a], [a], [a])
-splitPostOpResults (SegPostOp _ spec _) results =
+splitPostOpResults (SegPostOp _ spec) results =
   (indices, scatter_ts, noscatter_ts)
   where
     (indices, post_op_ts) = splitScatterResults spec results
@@ -515,15 +511,16 @@ splitPostOpResults (SegPostOp _ spec _) results =
 -- | Given a 'SegPostOp' it will result in a tuple where consisting of
 -- the types of the arrays being scattered to and not being scattered
 -- to.
-postOpResultsType :: SegPostOp rep -> ([Type], [Type])
-postOpResultsType op@(SegPostOp lambda spec shape) =
+postOpResultsType :: SegSpace -> SegPostOp rep -> ([Type], [Type])
+postOpResultsType space op@(SegPostOp lambda spec) =
   (scatter_ts', noscatter_ts')
   where
     (_, scatter_ts, noscatter_ts) =
       splitPostOpResults op $ lambdaReturnType lambda
     scatter_ts' =
       zipWith (\t (shp, _, _) -> t `arrayOfShape` shp) scatter_ts spec
-    noscatter_ts' = map (`arrayOfShape` shape) noscatter_ts
+    noscatter_ts' = map (flip (foldr (flip arrayOfRow)) segment_dims) noscatter_ts
+    segment_dims = segSpaceDims space
 
 -- | The return type of a 'SegOp'.
 segOpType :: SegOp lvl rep -> [Type]
@@ -543,14 +540,15 @@ segOpType (SegRed _ space ts kbody reds) =
       let shape = Shape segment_dims <> segBinOpShape op
       map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
 segOpType (SegScan _ space ts kbody scans post_op) =
-  post_op_ts
+  scatter_ts
+    ++ post_op_ts
     ++ zipWith
       (segResultShape space)
       map_ts
       (drop (length scans) $ kernelBodyResult kbody)
   where
     map_ts = drop (length scans) ts
-    (_, post_op_ts) = postOpResultsType post_op
+    (scatter_ts, post_op_ts) = postOpResultsType space post_op
 segOpType (SegHist _ space _ _ ops) = do
   op <- ops
   let shape = Shape segment_dims <> histShape op <> histOpShape op
@@ -658,12 +656,19 @@ checkSegPostOp ::
   SegPostOp (Aliases rep) ->
   [(Lambda (Aliases rep), [SubExp], Shape)] ->
   TC.TypeM rep ()
-checkSegPostOp space (SegPostOp lam spec _) ops = do
+checkSegPostOp space op@(SegPostOp lam spec) ops = do
   TC.binding (scopeOfSegSpace space) $ do
     let nes = concatMap (\(_, a, _) -> a) ops
     nes' <- mapM TC.checkArg nes
     TC.checkLambda lam $ map TC.noArgAliases nes'
-    forM_ spec $ \(_, _, dest) -> do
+    let (idxs, ts, _) = splitPostOpResults op $ lambdaReturnType lam
+    forM_ idxs $ \i -> do
+      unless (Prim int64 == i) $
+        TC.bad $
+          TC.TypeError "PostOp: Index return type must be i64."
+
+    forM_ (zip ts spec) $ \(t, (dest_shape, _, dest)) -> do
+      TC.requireI [t `arrayOfShape` dest_shape] dest
       TC.consume =<< TC.lookupAliases dest
   pure ()
 
@@ -749,11 +754,10 @@ mapSegPostOp ::
   SegOpMapper lvl frep trep m ->
   SegPostOp frep ->
   m (SegPostOp trep)
-mapSegPostOp tv (SegPostOp lam scatter_spec shape) =
+mapSegPostOp tv (SegPostOp lam scatter_spec) =
   SegPostOp
     <$> mapOnSegOpLambda tv lam
     <*> mapM mapSpec scatter_spec
-    <*> mapShape shape
   where
     mapShape shp = Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shp)
     mapSpec (shp, n, dest) =
@@ -835,8 +839,8 @@ rephrasePostOp ::
   Rephraser f from rep ->
   SegPostOp from ->
   f (SegPostOp rep)
-rephrasePostOp r (SegPostOp lam scatter_spec shapes) =
-  SegPostOp <$> rephraseLambda r lam <*> pure scatter_spec <*> pure shapes
+rephrasePostOp r (SegPostOp lam scatter_spec) =
+  SegPostOp <$> rephraseLambda r lam <*> pure scatter_spec
 
 rephraseKernelBody ::
   (Monad f) =>
@@ -957,12 +961,10 @@ instance (PrettyRep rep) => Pretty (SegBinOp rep) where
         Noncommutative -> mempty
 
 instance (PrettyRep rep) => Pretty (SegPostOp rep) where
-  pretty (SegPostOp lam scatter_spec shape) =
+  pretty (SegPostOp lam scatter_spec) =
     pretty lam
       <> PP.comma
         </> PP.commasep (map pretty scatter_spec)
-      <> PP.comma
-        </> pretty shape
 
 instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
   pretty (SegMap lvl space ts body) =
@@ -1201,13 +1203,12 @@ simplifySegPostOp ::
   VName ->
   SegPostOp (Wise rep) ->
   Engine.SimpleM rep (SegPostOp (Wise rep), Stms (Wise rep))
-simplifySegPostOp phys_id (SegPostOp lam scatter_spec shapes) = do
+simplifySegPostOp phys_id (SegPostOp lam scatter_spec) = do
   (lam', hoisted) <-
     Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
       simplifyLambda (oneName phys_id) lam
   scatter_spec' <- mapM simplifySpec scatter_spec
-  shapes' <- mapM Engine.simplify shapes
-  pure (SegPostOp lam' scatter_spec' shapes', hoisted)
+  pure (SegPostOp lam' scatter_spec', hoisted)
   where
     simplifySpec (shape, n, dest) = do
       shape' <- Engine.simplify shape

@@ -70,7 +70,7 @@ analyzeHostOp m (SegOp (SegMap _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
 analyzeHostOp m (SegOp (SegRed _ _ _ kbody _)) =
   analyzeStms (kernelBodyStms kbody) m
-analyzeHostOp m (SegOp (SegScan _ _ _ kbody _)) =
+analyzeHostOp m (SegOp (SegScan _ _ _ kbody _ _)) =
   analyzeStms (kernelBodyStms kbody) m
 analyzeHostOp m (SegOp (SegHist _ _ _ kbody _)) =
   analyzeStms (kernelBodyStms kbody) m
