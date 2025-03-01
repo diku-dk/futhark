@@ -10,16 +10,18 @@ import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, assume, simplify, ($<=), ($==))
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, casesToList, getPredicates)
-import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd, intervalStart, repDomain)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd, intervalStart, repDomain, domainStart, domainEnd)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, rollbackAlgEnv, debugPrintAlgEnv, debugOn, getAlgEnv)
 import Futhark.Analysis.Proofs.Substitute qualified as Subst ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
-import Futhark.Analysis.Proofs.Unify (mkRep, rep)
+import Futhark.Analysis.Proofs.Unify (mkRep, rep, unify, Substitution)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.+.), (.-.))
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
 import Futhark.Analysis.Proofs.Query
+import Futhark.Analysis.Proofs.Rewrite (rewrite)
+import Futhark.SoP.Monad (getRanges)
 
 data Property
   = PermutationOf VName
@@ -115,13 +117,13 @@ prove (InjectivePreimage (a, b)) fn@(IndexFn (Forall i0 dom) cs) = algebraContex
       case res of
         Yes -> pure t
         Unknown -> f
-prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i0 dom) cs) = algebraContext f $ do
+prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) cs) = algebraContext f $ do
   printM 1000 $
-    "Proving BijectiveRCD "
-      <> "\n  a = "
-      <> prettyString a
-      <> "\n  b = "
-      <> prettyString b
+    "Proving Bijective "
+      <> "\n  RCD (a,b) = "
+      <> prettyString (a,b)
+      <> "\n  RCD_Img (c,d) = "
+      <> prettyString (c,d)
       <> "\n  f = "
       <> prettyString f
   let guards = casesToList cs
@@ -134,32 +136,87 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i0 dom) cs) = algebraConte
   -- so that f restricted to X is the function:
   --   f|X : X -> [a, b].
   -- WTS(1): f|X is injective.
-  -- WTS(2): f|X is surjective.
+  -- WTS(2): f|X is surjective with Img(f|X) = [c,d].
+  --
+  -- Even though we know the image of
+  --   f|X : X -> [a, b]
+  -- is [c, d] (subset of [a,b]), using [a, b] to restrict
+  -- the codomain of f additionally tells us that ([a,b] \ [c,d])
+  -- under f is empty, if (1) and (2) are true.
 
-  let step1 = undefined
+  -- TODO rename to InjectiveRCD
+  let step1 = prove (InjectivePreimage (a, b)) f
 
-  let step2 = do
-        -- WTS: If |X| = |[a,b]|, then we have (2).
-        -- Proof. Assume that |X| = |[a,b]|. By step (1), f|X is injective,
-        -- so f maps X to exactly |X| = |[a,b]| distinct values. But the
-        -- codomain of f|X is by definition [a,b], meaning [a,b] must be covered.
+  let step2 = rollbackAlgEnv $ do
+        -- WTS(2.1): If |X| = |[c,d]| and (y in f(X) => y in [c,d]), then (2) holds.
+        -- Proof. Assume that |X| = |[c,d]| and that (y in f(X) => y in [c,d]).
+        -- By step (1), f|X is injective, so f maps X to exactly |X| = |[c,d]|
+        -- distinct values in [c,d]. Hence the set must be covered.
         --
-        -- WTS: |X| = |[a,b]|.
+        -- WTS(2.2): |X| = |[c,d]|.
         -- We can find the cardinality of X by counting how many values
         -- in the (unrestricted) domain of f are mapped to values in [a,b].
+        -- We then show equivalence by unifying the two sizes.       ^1
+        --
+        -- WTS(2.3): y in f(X) => y in [c,d].
+        -- We show this by querying the solver: c <= y <= d.
+        --
+        -- ______
+        -- ^1 Not a typo; using [a,b] over [c,d] is what gives us that
+        -- ([a,b] \ [c,d]) is empty under f.
+        addRelIterator it
+
         x <- newVName "x"
         let x_i = sym2SoP (Idx (Var x) (sym2SoP (Var i0)))
-        let c = a :<= x_i :&& x_i :<= b
-        let oob = a .-. int2SoP 1
+        let in_RCD = a :<= x_i :&& x_i :<= b
+        let infinity = b .+. int2SoP 1
         f_restricted_to_X <-
-          IndexFn (Forall i0 dom) (cases [(c, x_i), (neg c, oob)])
+          IndexFn (Forall i0 dom) (cases [(in_RCD, x_i), (neg in_RCD, infinity)])
             Subst.@ (x, f)
         printM 2000 $ "f_restricted_to_X: " <> prettyString f_restricted_to_X
-        let cs' = foldl1 (:||) (getPredicates f_restricted_to_X)
+        f_restricted_to_X' <- rewrite f_restricted_to_X
+        printM 2000 $ "~~> simplifies to " <> prettyString f_restricted_to_X'
+        cs' <- rewrite $ foldl1 (:||) (getPredicates f_restricted_to_X')
+        printM 2000 $ "cs': " <> prettyString cs'
 
-        undefined
+        let step_2_2 = rollbackAlgEnv $ do
+              start <- rewrite $ domainStart dom
+              end <- rewrite $ domainEnd dom
 
-  undefined
+              j_sum <- newVName "j"
+
+              size_X <- rewrite $ sym2SoP $ Sum j_sum start end cs'
+              printM 2000 $ "size_X " <> prettyString size_X
+
+              size_RCD_image <- rewrite $ d .-. c .+. int2SoP 1
+              printM 2000 $ "size_RCD_image " <> prettyString size_RCD_image
+
+              s :: Maybe (Substitution Symbol) <- unify size_X size_RCD_image
+              printM 2000 $ "|X| = |[c,d]| is " <> prettyString (isJust s)
+
+              pure (answerFromBool $ isJust s)
+
+        let step_2_3 = allM $ map case_in_bounds (casesToList $ body f_restricted_to_X')
+              where
+                case_in_bounds (p, e) = rollbackAlgEnv $ do
+                  addRelIterator iter_i
+                  assume (fromJust . justSym $ p @ i)
+                  (c $<= e @ i) `andM` (e @ i $<= d)
+
+        -- NOTES:
+        -- [ ] BijF1 has a possibly unintended effect where
+        -- if you specify an RCD/RCD_Img that's smaller than
+        -- the actual image of f restricted to the preimage of RCD,
+        -- then the unification test on RCD_img will fail
+        -- because the sum over predicates range over
+        -- the unrestricted domain of f.
+        -- So currently RCD_img must be the exact image
+        -- of f restricted to the preimage of RCD.
+        step_2_2 `andM` step_2_3
+
+  step1 `andM` step2
+  where
+    f @ x = rep (mkRep i0 (Var x)) f
 prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
   -- equivalent with BijectivePreimage (start dom, end dom)
 

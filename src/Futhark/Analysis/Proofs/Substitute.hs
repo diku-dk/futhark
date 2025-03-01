@@ -142,8 +142,6 @@ substituteOnce f g_non_repped (f_apply, args) = do
     let s = mkRep vn (rep f_arg v_f)
     pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep f_arg p_f), rep s v_g)
 
-  printM 2000 $ "New body: " <> prettyString new_body
-
   let g_iter = subIterator vn (iterator g)
   same_range <- isSameRange (iterator f) g_iter
   let new_iter = case (iterator f, g_iter) of

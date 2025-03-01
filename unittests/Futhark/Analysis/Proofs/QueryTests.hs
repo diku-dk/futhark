@@ -96,6 +96,42 @@ tests =
                     }
               prove (PermutationOfZeroTo $ sVar n .-. int2SoP 1) fn
           )
+          @?= Yes,
+      testCase "bijective" $
+        run
+          ( \(i, _, _, n, _, _, _) -> do
+              let fn = IndexFn
+                    { iterator = Forall i (Iota (sVar n)),
+                      body =
+                        cases
+                          [ ( Bool True, sVar i .+. int2SoP 1) ]
+                    }
+              prove (BijectiveRCD (int2SoP 1, sVar n) (int2SoP 1, sVar n)) fn
+          )
+          @?= Yes,
+      testCase "(1 + iota n) is bijective (2, n-1)" $
+        run
+          ( \(i, _, _, n, _, _, _) -> do
+              let fn = IndexFn
+                    { iterator = Forall i (Iota (sVar n)),
+                      body =
+                        cases
+                          [ ( Bool True, sVar i .+. int2SoP 1) ]
+                    }
+              prove (BijectiveRCD (int2SoP 2, sVar n .-. int2SoP 1) (int2SoP 2, sVar n .-. int2SoP 1)) fn
+          )
+          @?= Yes,
+      testCase "(1 + iota n) is bijective (-1, n+1)" $
+        run
+          ( \(i, _, _, n, _, _, _) -> do
+              let fn = IndexFn
+                    { iterator = Forall i (Iota (sVar n)),
+                      body =
+                        cases
+                          [ ( Bool True, sVar i .+. int2SoP 1) ]
+                    }
+              prove (BijectiveRCD (int2SoP (-1), sVar n .+. int2SoP 1) (int2SoP (-1), sVar n .+. int2SoP 1)) fn
+          )
           @?= Yes
     ]
   where
