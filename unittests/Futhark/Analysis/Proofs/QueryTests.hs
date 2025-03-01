@@ -3,6 +3,7 @@ module Futhark.Analysis.Proofs.QueryTests (tests) where
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query
+import Futhark.Analysis.Proofs.Properties
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.MonadFreshNames
 import Futhark.SoP.SoP (sym2SoP, (~-~), int2SoP, (.-.), (.+.))

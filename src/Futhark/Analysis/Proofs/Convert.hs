@@ -16,7 +16,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query (Answer (..), Property (..), Query (..), askQ, askRefinement, askRefinements, isUnknown, isYes, prove)
+import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute (subst, (@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
@@ -29,6 +29,7 @@ import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
+import Futhark.Analysis.Proofs.Properties (prove, Property (..))
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.

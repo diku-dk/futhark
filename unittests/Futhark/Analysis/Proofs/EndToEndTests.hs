@@ -7,6 +7,7 @@ import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query
+import Futhark.Analysis.Proofs.Properties
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Compiler.CLI (fileProg, readProgramOrDie)
 import Futhark.SoP.SoP (int2SoP, (.-.), (.+.))
