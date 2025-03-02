@@ -168,69 +168,71 @@ struct builtin_kernels {
   gpu_kernel lmad_copy_8b;
 };
 
+/* TODO: uncomment these again */
 struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx) {
   struct builtin_kernels *kernels = malloc(sizeof(struct builtin_kernels));
-  gpu_create_kernel(ctx, &kernels->map_transpose_1b, "map_transpose_1b");
-  gpu_create_kernel(ctx, &kernels->map_transpose_1b_large, "map_transpose_1b_large");
-  gpu_create_kernel(ctx, &kernels->map_transpose_1b_low_height, "map_transpose_1b_low_height");
-  gpu_create_kernel(ctx, &kernels->map_transpose_1b_low_width, "map_transpose_1b_low_width");
-  gpu_create_kernel(ctx, &kernels->map_transpose_1b_small, "map_transpose_1b_small");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_1b, "map_transpose_1b");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_1b_large, "map_transpose_1b_large");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_1b_low_height, "map_transpose_1b_low_height");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_1b_low_width, "map_transpose_1b_low_width");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_1b_small, "map_transpose_1b_small");
 
-  gpu_create_kernel(ctx, &kernels->map_transpose_2b, "map_transpose_2b");
-  gpu_create_kernel(ctx, &kernels->map_transpose_2b_large, "map_transpose_2b_large");
-  gpu_create_kernel(ctx, &kernels->map_transpose_2b_low_height, "map_transpose_2b_low_height");
-  gpu_create_kernel(ctx, &kernels->map_transpose_2b_low_width, "map_transpose_2b_low_width");
-  gpu_create_kernel(ctx, &kernels->map_transpose_2b_small, "map_transpose_2b_small");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_2b, "map_transpose_2b");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_2b_large, "map_transpose_2b_large");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_2b_low_height, "map_transpose_2b_low_height");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_2b_low_width, "map_transpose_2b_low_width");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_2b_small, "map_transpose_2b_small");
 
   gpu_create_kernel(ctx, &kernels->map_transpose_4b, "map_transpose_4b");
-  gpu_create_kernel(ctx, &kernels->map_transpose_4b_large, "map_transpose_4b_large");
-  gpu_create_kernel(ctx, &kernels->map_transpose_4b_low_height, "map_transpose_4b_low_height");
-  gpu_create_kernel(ctx, &kernels->map_transpose_4b_low_width, "map_transpose_4b_low_width");
-  gpu_create_kernel(ctx, &kernels->map_transpose_4b_small, "map_transpose_4b_small");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_4b_large, "map_transpose_4b_large");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_4b_low_height, "map_transpose_4b_low_height");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_4b_low_width, "map_transpose_4b_low_width");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_4b_small, "map_transpose_4b_small");
 
-  gpu_create_kernel(ctx, &kernels->map_transpose_8b, "map_transpose_8b");
-  gpu_create_kernel(ctx, &kernels->map_transpose_8b_large, "map_transpose_8b_large");
-  gpu_create_kernel(ctx, &kernels->map_transpose_8b_low_height, "map_transpose_8b_low_height");
-  gpu_create_kernel(ctx, &kernels->map_transpose_8b_low_width, "map_transpose_8b_low_width");
-  gpu_create_kernel(ctx, &kernels->map_transpose_8b_small, "map_transpose_8b_small");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_8b, "map_transpose_8b");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_8b_large, "map_transpose_8b_large");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_8b_low_height, "map_transpose_8b_low_height");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_8b_low_width, "map_transpose_8b_low_width");
+  //gpu_create_kernel(ctx, &kernels->map_transpose_8b_small, "map_transpose_8b_small");
 
-  gpu_create_kernel(ctx, &kernels->lmad_copy_1b, "lmad_copy_1b");
-  gpu_create_kernel(ctx, &kernels->lmad_copy_2b, "lmad_copy_2b");
-  gpu_create_kernel(ctx, &kernels->lmad_copy_4b, "lmad_copy_4b");
-  gpu_create_kernel(ctx, &kernels->lmad_copy_8b, "lmad_copy_8b");
+  //gpu_create_kernel(ctx, &kernels->lmad_copy_1b, "lmad_copy_1b");
+  //gpu_create_kernel(ctx, &kernels->lmad_copy_2b, "lmad_copy_2b");
+  //gpu_create_kernel(ctx, &kernels->lmad_copy_4b, "lmad_copy_4b");
+  //gpu_create_kernel(ctx, &kernels->lmad_copy_8b, "lmad_copy_8b");
 
   return kernels;
 }
 
+/* TODO: uncomment these again */
 void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* kernels) {
-  gpu_free_kernel(ctx, kernels->map_transpose_1b);
-  gpu_free_kernel(ctx, kernels->map_transpose_1b_large);
-  gpu_free_kernel(ctx, kernels->map_transpose_1b_low_height);
-  gpu_free_kernel(ctx, kernels->map_transpose_1b_low_width);
-  gpu_free_kernel(ctx, kernels->map_transpose_1b_small);
+  //gpu_free_kernel(ctx, kernels->map_transpose_1b);
+  //gpu_free_kernel(ctx, kernels->map_transpose_1b_large);
+  //gpu_free_kernel(ctx, kernels->map_transpose_1b_low_height);
+  //gpu_free_kernel(ctx, kernels->map_transpose_1b_low_width);
+  //gpu_free_kernel(ctx, kernels->map_transpose_1b_small);
 
-  gpu_free_kernel(ctx, kernels->map_transpose_2b);
-  gpu_free_kernel(ctx, kernels->map_transpose_2b_large);
-  gpu_free_kernel(ctx, kernels->map_transpose_2b_low_height);
-  gpu_free_kernel(ctx, kernels->map_transpose_2b_low_width);
-  gpu_free_kernel(ctx, kernels->map_transpose_2b_small);
+  //gpu_free_kernel(ctx, kernels->map_transpose_2b);
+  //gpu_free_kernel(ctx, kernels->map_transpose_2b_large);
+  //gpu_free_kernel(ctx, kernels->map_transpose_2b_low_height);
+  //gpu_free_kernel(ctx, kernels->map_transpose_2b_low_width);
+  //gpu_free_kernel(ctx, kernels->map_transpose_2b_small);
 
   gpu_free_kernel(ctx, kernels->map_transpose_4b);
-  gpu_free_kernel(ctx, kernels->map_transpose_4b_large);
-  gpu_free_kernel(ctx, kernels->map_transpose_4b_low_height);
-  gpu_free_kernel(ctx, kernels->map_transpose_4b_low_width);
-  gpu_free_kernel(ctx, kernels->map_transpose_4b_small);
+  //gpu_free_kernel(ctx, kernels->map_transpose_4b_large);
+  //gpu_free_kernel(ctx, kernels->map_transpose_4b_low_height);
+  //gpu_free_kernel(ctx, kernels->map_transpose_4b_low_width);
+  //gpu_free_kernel(ctx, kernels->map_transpose_4b_small);
 
-  gpu_free_kernel(ctx, kernels->map_transpose_8b);
-  gpu_free_kernel(ctx, kernels->map_transpose_8b_large);
-  gpu_free_kernel(ctx, kernels->map_transpose_8b_low_height);
-  gpu_free_kernel(ctx, kernels->map_transpose_8b_low_width);
-  gpu_free_kernel(ctx, kernels->map_transpose_8b_small);
+  //gpu_free_kernel(ctx, kernels->map_transpose_8b);
+  //gpu_free_kernel(ctx, kernels->map_transpose_8b_large);
+  //gpu_free_kernel(ctx, kernels->map_transpose_8b_low_height);
+  //gpu_free_kernel(ctx, kernels->map_transpose_8b_low_width);
+  //gpu_free_kernel(ctx, kernels->map_transpose_8b_small);
 
-  gpu_free_kernel(ctx, kernels->lmad_copy_1b);
-  gpu_free_kernel(ctx, kernels->lmad_copy_2b);
-  gpu_free_kernel(ctx, kernels->lmad_copy_4b);
-  gpu_free_kernel(ctx, kernels->lmad_copy_8b);
+  //gpu_free_kernel(ctx, kernels->lmad_copy_1b);
+  //gpu_free_kernel(ctx, kernels->lmad_copy_2b);
+  //gpu_free_kernel(ctx, kernels->lmad_copy_4b);
+  //gpu_free_kernel(ctx, kernels->lmad_copy_8b);
 
   free(kernels);
 }
@@ -432,6 +434,27 @@ static int gpu_map_transpose(struct futhark_context* ctx,
     args_sizes[7] = sizeof(int64_t);
     args_sizes[8] = sizeof(int64_t);
   }
+
+  /* TODO: remove this again */
+  printf("gpu_map_transpose: Forcing kernel to be kernel_default (%p)\n", kernel_default);
+  kernel = kernel_default;
+  grid[0] = (m+TR_TILE_DIM-1)/TR_TILE_DIM;
+  grid[1] = (n+TR_TILE_DIM-1)/TR_TILE_DIM;
+  grid[2] = k;
+  block[0] = TR_TILE_DIM;
+  block[1] = TR_TILE_DIM/TR_ELEMS_PER_THREAD;
+  block[2] = 1;
+  args[4] = &k32;
+  args[5] = &m32;
+  args[6] = &n32;
+  args[7] = &mulx32;
+  args[8] = &muly32;
+  args_sizes[4] = sizeof(int32_t);
+  args_sizes[5] = sizeof(int32_t);
+  args_sizes[6] = sizeof(int32_t);
+  args_sizes[7] = sizeof(int32_t);
+  args_sizes[8] = sizeof(int32_t);
+  /* TODO: remove this again */
 
   // Cap the number of thead blocks we launch and figure out how many
   // repeats we need alongside each dimension.

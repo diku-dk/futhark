@@ -7,6 +7,7 @@ module Futhark.CodeGen.RTS.WGSL
     scalar16,
     scalar32,
     scalar64,
+    builtin_kernels,
   )
 where
 
@@ -37,3 +38,8 @@ scalar32 = $(embedStringFile "rts/wgsl/scalar32.wgsl")
 scalar64 :: T.Text
 scalar64 = $(embedStringFile "rts/wgsl/scalar64.wgsl")
 {-# NOINLINE scalar64 #-}
+
+-- | @rts/wgsl/builtin_kernels.wgsl@
+builtin_kernels :: T.Text
+builtin_kernels = $(embedStringFile "rts/wgsl/builtin_kernels.wgsl")
+{-# NOINLINE builtin_kernels #-}

@@ -120,6 +120,25 @@ mkKernelInfos kernels = do
                    }|]
     info_inits = map info_init (M.toList kernels)
 
+-- We need to generate kernel_infos for built-in kernels
+builtinKernels :: M.Map Name KernelInterface
+builtinKernels =
+  M.fromList
+    [ (nameFromText "map_transpose_4b", interface)
+    ]
+  where
+    interface =
+      KernelInterface
+        { safety = SafetyNone,
+          scalarsOffsets = [0, 8, 16, 24, 32, 36, 40, 44, 48, 52, 56],
+          scalarsSize = 60,
+          scalarsBindSlot = 0,
+          memBindSlots = [],
+          overrideNames = [],
+          dynamicBlockDims = [],
+          sharedMemoryOverrides = []
+        }
+
 mkBoilerplate ::
   T.Text ->
   [(Name, KernelConstExp)] ->
@@ -128,7 +147,7 @@ mkBoilerplate ::
   [FailureMsg] ->
   GC.CompilerM HostOp () ()
 mkBoilerplate wgsl_program macros kernels types failures = do
-  mkKernelInfos kernels
+  mkKernelInfos (M.union kernels builtinKernels)
   generateGPUBoilerplate
     wgsl_program
     macros

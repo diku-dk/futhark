@@ -453,12 +453,6 @@ int backend_context_setup(struct futhark_context *ctx) {
   ctx->scalar_readback_buffer = wgpuDeviceCreateBuffer(ctx->device, &desc);
   free_list_init(&ctx->gpu_free_list);
 
-  // TODO: Do builtin kernels at some point
-  //if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
-  //  printf("Failed to init builtin kernels\n");
-  //  return 1;
-  //}
-
   // We implement macros as override constants.
   int64_t *macro_vals;
   ctx->num_overrides = gpu_macros(ctx, &ctx->override_names,
@@ -470,6 +464,11 @@ int backend_context_setup(struct futhark_context *ctx) {
   free(macro_vals);
 
   wgpu_module_setup(ctx);
+
+  if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
+    printf("Failed to init builtin kernels\n");
+    return 1;
+  }
 
   return 0;
 }
@@ -640,7 +639,9 @@ static void gpu_create_kernel(struct futhark_context *ctx,
         .constants = const_entries,
       }
     };
+
     kernel->pipeline = wgpuDeviceCreateComputePipeline(ctx->device, &desc);
+
     free(const_entries);
   }
 

@@ -258,6 +258,7 @@ onKernel kernel = do
         ]
   let memArgs = [MemKArg n | ImpGPU.MemoryUse n <- ImpGPU.kernelUses kernel]
   let args = extraArgs ++ scalarArgs ++ memArgs
+
   pure $ LaunchKernel SafetyNone name 0 args numBlocks blockDim
 
 onHostOp :: ImpGPU.HostOp -> WebGPUM HostOp
@@ -305,7 +306,8 @@ kernelsToWebGPU prog =
             RTS.scalar32,
             RTS.scalar8,
             RTS.scalar16,
-            RTS.scalar64
+            RTS.scalar64,
+            RTS.builtin_kernels
           ]
       constants = wsMacroDefs translation
       -- TODO: Compute functions using tuning params
