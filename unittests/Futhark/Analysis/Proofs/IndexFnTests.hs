@@ -448,7 +448,7 @@ tests =
     --     Right (vbs, vns) -> do
     --       let (actual, expected) = runTest vns vbs expectedPat
     --       actual @??= expected
-    mkTest programFile expectedPat = testCase programFile $ do
+    mkTest programFile expectedPat = testCase (basename programFile) $ do
       (_, imports, vns) <- readProgramOrDie programFile
       let last_import = case reverse imports of
             [] -> error "No imports"
@@ -456,6 +456,10 @@ tests =
       let vbs = getValBinds last_import
       let (actuals, expecteds) = unzip $ runTest vns vbs expectedPat
       actuals @??= expecteds
+
+    basename = drop (length prefix)
+      where
+        prefix :: String = "tests/indexfn/"
 
     getValBinds = mapMaybe getValBind . E.progDecs . fileProg . snd
 

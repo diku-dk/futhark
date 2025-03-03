@@ -13,7 +13,7 @@ def part2indices [n]
         num_true <= n
         -- Proof that inds are a permutation of 0 ... n - 1.
         && and (map (\i -> 0 <= i && i < n) inds)
-        && injective inds
+        && injectiveRCD (0,n-1) inds
         -- Proof that inds partition according to conds.
         && num_true == sum (map (\c -> if c then 1 else 0) conds)
         && and (map2 (\c ind ->
