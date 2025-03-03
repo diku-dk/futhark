@@ -26,6 +26,7 @@ module Futhark.Analysis.Proofs.Monad
     printM,
     emphString,
     getAlgEnv,
+    printTrace,
   )
 where
 
@@ -187,3 +188,9 @@ printM :: (Monad m) => Int -> String -> m ()
 printM level
   | isEnvVarAtLeast "FUTHARK_INDEXFN" level = traceM
   | otherwise = const $ pure ()
+
+printTrace :: (Monad m, Pretty b) => Int -> String -> m b -> m b
+printTrace level msg m = do
+  a <- m
+  printM level (msg <> " " <> prettyString a)
+  pure a

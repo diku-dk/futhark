@@ -16,6 +16,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
+import Futhark.Analysis.Proofs.Properties (Property (..), prove)
 import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute (subst, (@))
@@ -29,7 +30,6 @@ import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
-import Futhark.Analysis.Proofs.Properties (prove, Property (..))
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -626,7 +626,7 @@ scatterPerm :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
 scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
   printM 1337 $ "scatterPerm: dest_size" <> prettyString dest_size
-  perm <- lift $ prove (PermutationOfRange (int2SoP 0) dest_size) inds
+  perm <- lift $ prove (BijectiveRCD (int2SoP 0, dest_size) (int2SoP 0, dest_size)) inds
   case perm of
     Unknown -> failMsg "scatterPerm: no match"
     Yes -> do
@@ -762,7 +762,7 @@ scatterMono dest@(IndexFn (Forall _ dom_dest) _) inds@(IndexFn inds_iter@(Forall
   lift $ substParams fn [(vals_hole, vals), (dest_hole, dest)]
 scatterMono _ _ _ = fail ""
 
-failMsg :: MonadFail m => String -> m b
+failMsg :: (MonadFail m) => String -> m b
 failMsg msg = do
   printM 1337 msg
   fail msg
@@ -1033,14 +1033,17 @@ parsePrelude f args =
       f_RCD <- forward e_RCD
       f_ImgRCD <- forward e_ImgRCD
       case f_RCD <> f_ImgRCD of
-        [IndexFn Empty g_a, IndexFn Empty g_b,
-         IndexFn Empty g_c, IndexFn Empty g_d] -> do
-          xss <- forward e_xs
-          let a = flattenCases g_a
-          let b = flattenCases g_b
-          let c = flattenCases g_c
-          let d = flattenCases g_d
-          pure (prove (BijectiveRCD (a, b) (c,d)), xss)
+        [ IndexFn Empty g_a,
+          IndexFn Empty g_b,
+          IndexFn Empty g_c,
+          IndexFn Empty g_d
+          ] -> do
+            xss <- forward e_xs
+            let a = flattenCases g_a
+            let b = flattenCases g_b
+            let c = flattenCases g_c
+            let d = flattenCases g_d
+            pure (prove (BijectiveRCD (a, b) (c, d)), xss)
         _ ->
           undefined
     "and" | [e_xs] <- getArgs args -> do

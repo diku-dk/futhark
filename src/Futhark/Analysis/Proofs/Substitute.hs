@@ -1,7 +1,7 @@
 -- Index function substitution.
 module Futhark.Analysis.Proofs.Substitute ((@), subst) where
 
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
@@ -15,6 +15,7 @@ import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMapper (..), astFold, astMap, identityMapper)
 import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM, renameSame)
+import Futhark.Analysis.Proofs.Util (prettyIndent)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, sym2SoP)
 import Futhark.Util.Pretty (prettyString)
@@ -54,12 +55,12 @@ dest_fn @ (f_name, src_fn) = do
   k <- newVName "variables after this are quantifiers"
   (f, g) <- renameSame src_fn dest_fn
 
-  printM 1337 $
-    "" <> prettyString g <> warningString " @ " <> prettyString f_name <> " = " <> prettyString f
   app <- getApply (legalArg k g f) g
+  printM 1337 . gray $ prettyString g
+  printM 1337 $ warningString "\t@ " <> gray (prettyString (fst <$> app))
+  printM 1337 . gray $ "\t  where " <> prettyString f_name <> " =\n" <> prettyIndent 16 f
   case app of
     Just apply -> do
-      printM 1337 $ "\t@ " <> prettyString (fst apply)
       h <- substituteOnce f g apply
       fromJust h @ (f_name, f)
     Nothing ->
@@ -95,9 +96,10 @@ subber argCheck g = do
     go seen = do
       apply <- getApply seen g
       ixfns <- getIndexFns
-      printM 1337 $ warningString "subst " <> prettyString seen
-      printM 1337 $ "apply " <> prettyString apply
-      printM 1337 $ "      " <> prettyString g
+      when (isJust apply) $ do
+        printM 1337 $ warningString "subst " <> prettyString seen
+        printM 1337 . gray $ prettyIndent 4 g
+        printM 1337 . gray $ "\t@ " <> prettyString apply
       case apply of
         Just (e, vn, args)
           | Just [f] <- ixfns M.!? vn,
@@ -200,7 +202,6 @@ substituteOnce f g_non_repped (f_apply, args) = do
               n <- rewrite $ domainEnd new_dom
               let iota_iter = Forall i (Iota n)
               pure (Just $ repIndexFn (mkRep k res) $ IndexFn iota_iter new_body)
-              -- pure Nothing
     _ ->
       pure (Just $ IndexFn new_iter new_body)
   where
@@ -340,3 +341,6 @@ checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g 
               <> "\nUnder AlgEnv:"
               <> prettyString env
 checkBounds _ _ _ = error "checkBounds: multi-dim not implemented yet"
+
+gray :: String -> String
+gray s = "\ESC[2m" <> s <> "\ESC[0m"

@@ -8,19 +8,21 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, assume, simplify, ($<=), ($==))
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, casesToList, getPredicates)
-import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd, intervalStart, repDomain, domainStart, domainEnd)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, answerFromBool, assume, simplify, toAlgebra, ($<=), ($==))
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, casesToList, getPredicates, guards)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, getAlgEnv, printM, printTrace, rollbackAlgEnv, warningString)
+import Futhark.Analysis.Proofs.Query
+import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Substitute qualified as Subst ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
-import Futhark.Analysis.Proofs.Unify (mkRep, rep, unify, Substitution)
+import Futhark.Analysis.Proofs.Unify (Substitution, mkRep, rep, unify)
+import Futhark.Analysis.Proofs.Util (prettyIndent)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
+import Futhark.SoP.Monad (addEquiv)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.+.), (.-.))
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
-import Futhark.Analysis.Proofs.Query
-import Futhark.Analysis.Proofs.Rewrite (rewrite)
 
 data Property
   = PermutationOf VName
@@ -39,9 +41,13 @@ data Order = LT | GT | Undefined
   deriving (Eq, Show)
 
 prove :: Property -> IndexFn -> IndexFnM Answer
-prove (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
-  printM 1000 $ "Proving InjectiveOn " <> prettyString (a, b, fn)
-  let guards = casesToList cs
+prove (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
+  printM 1000 $
+    title "Proving InjectiveRCD "
+      <> "\n  RCD (a,b) = "
+      <> prettyString (a, b)
+      <> "\n"
+      <> prettyIndent 2 fn
   i <- newNameFromString "i"
   j <- newNameFromString "j"
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
@@ -64,7 +70,7 @@ prove (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn 
   let out_of_range x = x :< a :|| b :< x
 
   -- Proof of (1).
-  let step1 = allM [no_dups g | g <- guards]
+  let step1 = allM [no_dups g | g <- guards fn]
         where
           no_dups (c, e) = rollbackAlgEnv $ do
             -- WTS: i < j ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b
@@ -81,7 +87,7 @@ prove (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn 
             oob `orM` neq
 
   -- Proof of (2).
-  let step2 = answerFromBool . isJust <$> sorted cmp guards
+  let step2 = answerFromBool . isJust <$> sorted cmp (guards fn)
         where
           (p_f, f) `cmp` (p_g, g) = rollbackAlgEnv $ do
             let p =
@@ -116,15 +122,15 @@ prove (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn 
       case res of
         Yes -> pure t
         Unknown -> f
-prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = algebraContext f $ do
+prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAlgEnv $ do
   printM 1000 $
-    "Proving Bijective "
+    title "Proving BijectiveRCD "
       <> "\n  RCD (a,b) = "
-      <> prettyString (a,b)
+      <> prettyString (a, b)
       <> "\n  RCD_Img (c,d) = "
-      <> prettyString (c,d)
-      <> "\n  f = "
-      <> prettyString f
+      <> prettyString (c, d)
+      <> "\n"
+      <> prettyIndent 2 f
   i <- newNameFromString "i"
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
 
@@ -140,7 +146,9 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = algebraCon
   -- the codomain of f additionally tells us that ([a,b] \ [c,d])
   -- under f is empty, if (1) and (2) are true.
 
-  let step1 = prove (InjectiveRCD (a, b)) f
+  let step1 =
+        printTrace 2000 "Step (1)" $
+          prove (InjectiveRCD (a, b)) f
 
   let step2 = rollbackAlgEnv $ do
         -- WTS(2.1): If |X| = |[c,d]| and (y in f(X) => y in [c,d]), then (2) holds.
@@ -157,41 +165,44 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = algebraCon
         -- We show this by querying the solver: c <= y <= d.
         --
         -- ______
-        -- ^1 Not a typo; using [a,b] over [c,d] is what gives us that
+        -- \^1 Not a typo; using [a,b] over [c,d] is what gives us that
         -- ([a,b] \ [c,d]) is empty under f.
         addRelIterator it
 
         x <- newVName "x"
         let x_i = sym2SoP (Idx (Var x) (sym2SoP (Var i0)))
         let in_RCD = a :<= x_i :&& x_i :<= b
-        let infinity = b .+. int2SoP 1
+        infinity <- sym2SoP . Var <$> newVName "∞"
         f_restricted_to_X <-
           IndexFn (Forall i0 dom) (cases [(in_RCD, x_i), (neg in_RCD, infinity)])
             Subst.@ (x, f)
-        printM 2000 $ "f_restricted_to_X: " <> prettyString f_restricted_to_X
-        f_restricted_to_X' <- rewrite f_restricted_to_X
-        printM 2000 $ "~~> simplifies to " <> prettyString f_restricted_to_X'
-        cs' <- rewrite $ foldl1 (:||) (getPredicates f_restricted_to_X')
-        printM 2000 $ "cs': " <> prettyString cs'
+        fX <- rewrite f_restricted_to_X
 
-        let step_2_2 = rollbackAlgEnv $ do
+        let guards_in_RCD = [(p, e) | (p, e) <- guards fX, e /= infinity]
+
+        let step_2_2 = algebraContext fX $ do
+              size_RCD_image <- rewrite $ d .-. c .+. int2SoP 1
+
               start <- rewrite $ domainStart dom
               end <- rewrite $ domainEnd dom
+              cs <- rewrite $ foldl1 (:||) (map fst guards_in_RCD)
 
               j_sum <- newVName "j"
-
-              size_X <- rewrite $ sym2SoP $ Sum j_sum start end cs'
-              printM 2000 $ "size_X " <> prettyString size_X
-
-              size_RCD_image <- rewrite $ d .-. c .+. int2SoP 1
-              printM 2000 $ "size_RCD_image " <> prettyString size_RCD_image
+              size_X <-
+                rewrite . sym2SoP $
+                  Sum j_sum start end (sop2Symbol $ cs @ j_sum)
 
               s :: Maybe (Substitution Symbol) <- unify size_X size_RCD_image
-              printM 2000 $ "|X| = |[c,d]| is " <> prettyString (isJust s)
 
-              pure (answerFromBool $ isJust s)
+              printM 2000 $ "size_RCD_image " <> prettyString size_RCD_image
+              printM 2000 $ "size_X " <> prettyString size_X
+              printTrace 2000 "Step (2.2)" $
+                pure (answerFromBool $ isJust s)
 
-        let step_2_3 = allM $ map case_in_bounds (casesToList $ body f_restricted_to_X')
+        let step_2_3 = algebraContext fX $ do
+              printTrace 2000 "Step (2.3)" $
+                allM $
+                  map case_in_bounds guards_in_RCD
               where
                 case_in_bounds (p, e) = rollbackAlgEnv $ do
                   addRelIterator iter_i
@@ -207,16 +218,17 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = algebraCon
         -- the unrestricted domain of f.
         -- So currently RCD_img must be the exact image
         -- of f restricted to the preimage of RCD.
-        step_2_2 `andM` step_2_3
+        printM 2000 $ "f restricted to X: " <> prettyString fX
+        printTrace 2000 "Step (2)" $
+          step_2_2 `andM` step_2_3
 
   step1 `andM` step2
   where
     e @ x = rep (mkRep i0 (Var x)) e
-prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
+prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
   -- equivalent with BijectivePreimage (start dom, end dom)
 
-  printM 1000 $ "Proving PermutationOfRange" <> prettyString (start, end, fn)
-  let guards = casesToList cs
+  printM 1000 $ title "Proving PermutationOfRange" <> prettyString (start, end, fn)
   i <- newNameFromString "i"
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
 
@@ -234,7 +246,7 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
             n <- simplify (intervalEnd dom .-. intervalStart dom .+. int2SoP 1)
             n $== range_sz
 
-  let step2 = allM $ map case_in_bounds guards
+  let step2 = allM $ map case_in_bounds (guards fn)
         where
           case_in_bounds (p, f) = rollbackAlgEnv $ do
             addRelIterator iter_i
@@ -269,3 +281,6 @@ sorted cmp wat = runMaybeT $ quicksort wat
       case ord of
         Undefined -> fail ""
         _ -> pure ord
+
+title :: String -> String
+title s = "\ESC[4m" <> s <> "\ESC[0m"

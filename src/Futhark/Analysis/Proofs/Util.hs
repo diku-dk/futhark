@@ -3,13 +3,14 @@ module Futhark.Analysis.Proofs.Util
     prettyHole,
     prettyBinding,
     partitions,
+    prettyIndent,
   )
 where
 
 import Control.Monad (guard)
 import Data.List (subsequences, (\\))
 import Data.Maybe (fromJust)
-import Futhark.Util.Pretty (Doc, Pretty, align, docString, line, ppTupleLines', pretty, (<+>))
+import Futhark.Util.Pretty (Doc, Pretty, align, docString, docStringW, indent, line, ppTupleLines', pretty, viaShow, (<+>))
 import Language.Futhark (VName (VName))
 
 prettyName :: VName -> Doc ann
@@ -29,6 +30,9 @@ prettyBinding vn e =
       <> line
       <> "    "
       <> align (ppTupleLines' $ map pretty e)
+
+prettyIndent :: (Pretty a) => Int -> a -> String
+prettyIndent n e = docStringW 80 $ indent n (pretty e)
 
 -- Generate all partitions of `xs` into `k` sublists.
 -- Includes sublists that are permutations of other sublists.
