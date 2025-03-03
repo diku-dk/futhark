@@ -365,7 +365,7 @@ compileBlockOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
       zipWithM_ (compileThreadResult space) (patElems pat) $
         kernelBodyResult body
   sOp $ Imp.ErrorSync Imp.FenceLocal
-compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans))) = do
+compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
   compileFlatId space
 
   let (ltids, dims) = unzip $ unSegSpace space

@@ -39,7 +39,7 @@ getAllocsSegOp (SegMap _ _ _ body) =
   foldMap getAllocsStm (kernelBodyStms body)
 getAllocsSegOp (SegRed _ _ _ body _) =
   foldMap getAllocsStm (kernelBodyStms body)
-getAllocsSegOp (SegScan _ _ _ body _) =
+getAllocsSegOp (SegScan _ _ _ body _ _) =
   foldMap getAllocsStm (kernelBodyStms body)
 getAllocsSegOp (SegHist _ _ _ body _) =
   foldMap getAllocsStm (kernelBodyStms body)
@@ -73,8 +73,8 @@ setAllocsSegOp m (SegRed lvl sp tps body ops) =
   SegRed lvl sp tps body' ops
   where
     body' = body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
-setAllocsSegOp m (SegScan lvl sp tps body ops) =
-  SegScan lvl sp tps body' ops
+setAllocsSegOp m (SegScan lvl sp tps body ops post_op) =
+  SegScan lvl sp tps body' ops post_op
   where
     body' = body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
 setAllocsSegOp m (SegHist lvl sp tps body ops) =
@@ -111,9 +111,9 @@ onKernelBodyStms (SegMap lvl space ts body) f = do
 onKernelBodyStms (SegRed lvl space ts body binops) f = do
   stms <- f $ kernelBodyStms body
   pure $ SegRed lvl space ts (body {kernelBodyStms = stms}) binops
-onKernelBodyStms (SegScan lvl space ts body binops) f = do
+onKernelBodyStms (SegScan lvl space ts body binops post_op) f = do
   stms <- f $ kernelBodyStms body
-  pure $ SegScan lvl space ts (body {kernelBodyStms = stms}) binops
+  pure $ SegScan lvl space ts (body {kernelBodyStms = stms}) binops post_op
 onKernelBodyStms (SegHist lvl space ts body binops) f = do
   stms <- f $ kernelBodyStms body
   pure $ SegHist lvl space ts (body {kernelBodyStms = stms}) binops
@@ -155,8 +155,8 @@ optimiseKernel graph segop0 = do
       SegRed lvl sp tps body' ops
       where
         body' = body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
-    SegScan lvl sp tps body ops ->
-      SegScan lvl sp tps body' ops
+    SegScan lvl sp tps body ops post_op ->
+      SegScan lvl sp tps body' ops post_op
       where
         body' = body {kernelBodyStms = maxstms <> stms <> kernelBodyStms body}
     SegHist lvl sp tps body ops ->

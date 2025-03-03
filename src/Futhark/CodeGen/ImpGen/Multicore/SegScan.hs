@@ -16,15 +16,16 @@ import Prelude hiding (quot, rem)
 compileSegScan ::
   Pat LetDecMem ->
   SegSpace ->
-  [SegBinOp MCMem] ->
   KernelBody MCMem ->
+  [SegBinOp MCMem] ->
+  SegPostOp MCMem ->
   TV Int32 ->
   MulticoreGen Imp.MCCode
-compileSegScan pat space reds kbody nsubtasks
+compileSegScan pat space kbody reds post_op nsubtasks
   | [_] <- unSegSpace space =
-      nonsegmentedScan pat space reds kbody nsubtasks
+      nonsegmentedScan pat space kbody reds post_op nsubtasks
   | otherwise =
-      segmentedScan pat space reds kbody
+      segmentedScan pat space kbody reds post_op
 
 xParams, yParams :: SegBinOp MCMem -> [LParam MCMem]
 xParams scan =
@@ -50,11 +51,12 @@ carryArrays s nsubtasks segops =
 nonsegmentedScan ::
   Pat LetDecMem ->
   SegSpace ->
-  [SegBinOp MCMem] ->
   KernelBody MCMem ->
+  [SegBinOp MCMem] ->
+  SegPostOp MCMem ->
   TV Int32 ->
   MulticoreGen Imp.MCCode
-nonsegmentedScan pat space scan_ops kbody nsubtasks = do
+nonsegmentedScan pat space kbody scan_ops post_op nsubtasks = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
   collect $ do
     -- Are we working with nested arrays
@@ -421,23 +423,25 @@ scanStage3Fallback pat space scan_ops per_scan_carries = do
 segmentedScan ::
   Pat LetDecMem ->
   SegSpace ->
-  [SegBinOp MCMem] ->
   KernelBody MCMem ->
+  [SegBinOp MCMem] ->
+  SegPostOp MCMem ->
   MulticoreGen Imp.MCCode
-segmentedScan pat space scan_ops kbody = do
+segmentedScan pat space kbody scan_ops post_op = do
   emit $ Imp.DebugPrint "segmented segScan" Nothing
   collect $ do
-    body <- compileSegScanBody pat space scan_ops kbody
+    body <- compileSegScanBody pat space kbody scan_ops post_op
     free_params <- freeParams body
     emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
 
 compileSegScanBody ::
   Pat LetDecMem ->
   SegSpace ->
-  [SegBinOp MCMem] ->
   KernelBody MCMem ->
+  [SegBinOp MCMem] ->
+  SegPostOp MCMem ->
   MulticoreGen Imp.MCCode
-compileSegScanBody pat space scan_ops kbody = collect $ do
+compileSegScanBody pat space kbody scan_ops post_op = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map pe64 ns
 
@@ -454,6 +458,7 @@ compileSegScanBody pat space scan_ops kbody = collect $ do
         copyDWIMFix (paramName p) [] ne []
 
       let inner_bound = last ns_64
+
       -- Perform a sequential scan over the segment ``segment_i``
       sFor "i" inner_bound $ \i -> do
         zipWithM_ dPrimV_ (init is) $ unflattenIndex (init ns_64) segment_i
