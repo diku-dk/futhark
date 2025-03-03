@@ -147,7 +147,7 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAl
   -- under f is empty, if (1) and (2) are true.
 
   let step1 =
-        printTrace 2000 "Step (1)" $
+        printTrace 1000 "Step (1)" $
           prove (InjectiveRCD (a, b)) f
 
   let step2 = rollbackAlgEnv $ do
@@ -194,13 +194,13 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAl
 
               s :: Maybe (Substitution Symbol) <- unify size_X size_RCD_image
 
-              printM 2000 $ "size_RCD_image " <> prettyString size_RCD_image
-              printM 2000 $ "size_X " <> prettyString size_X
-              printTrace 2000 "Step (2.2)" $
+              printM 1000 $ "size_RCD_image " <> prettyString size_RCD_image
+              printM 1000 $ "size_X " <> prettyString size_X
+              printTrace 1000 "Step (2.2)" $
                 pure (answerFromBool $ isJust s)
 
         let step_2_3 = algebraContext fX $ do
-              printTrace 2000 "Step (2.3)" $
+              printTrace 1000 "Step (2.3)" $
                 allM $
                   map case_in_bounds guards_in_RCD
               where
@@ -218,8 +218,8 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAl
         -- the unrestricted domain of f.
         -- So currently RCD_img must be the exact image
         -- of f restricted to the preimage of RCD.
-        printM 2000 $ "f restricted to X: " <> prettyString fX
-        printTrace 2000 "Step (2)" $
+        printM 1000 $ "f restricted to X: " <> prettyString fX
+        printTrace 1000 "Step (2)" $
           step_2_2 `andM` step_2_3
 
   step1 `andM` step2
