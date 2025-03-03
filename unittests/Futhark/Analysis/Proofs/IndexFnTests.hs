@@ -401,24 +401,24 @@ tests =
                     ]
         ),
       mkTest
-        "tests/indexfn/filter.fut"
-        ( pure $ \(i, n, _, _) ->
+        "tests/indexfn/partition2.fut"
+        ( pure $ \(i, n, xs, is_inv) ->
             [ IndexFn
                 { iterator = Forall i (Iota (sHole n)),
                   body =
                     cases
-                      [(Bool True, int2SoP 0)]
+                      [(Bool True, sym2SoP $ Idx (Hole xs) (sym2SoP $ Idx (Hole is_inv) (sHole i)))]
                 }
             ]
         ),
       mkTest
-        "tests/indexfn/partition2.fut"
-        ( pure $ \(i, n, _, _) ->
+        "tests/indexfn/filter.fut"
+        ( pure $ \(i, n, xs, is_inv) ->
             [ IndexFn
                 { iterator = Forall i (Iota (sHole n)),
                   body =
                     cases
-                      [(Bool True, int2SoP 0)]
+                      [(Bool True, sym2SoP $ Idx (Hole xs) (sym2SoP $ Idx (Hole is_inv) (sHole i)))]
                 }
             ]
         ),
