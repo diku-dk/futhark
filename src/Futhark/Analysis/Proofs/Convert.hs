@@ -640,7 +640,7 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
       let inv_ind = Idx (Var vn_inv) (sym2SoP (Var i))
       lift $
         IndexFn
-          { iterator = Forall i (Iota dest_size),
+          { iterator = Forall i (Iota $ dest_size .+. int2SoP 1),
             body = cases [(Bool True, sym2SoP $ Idx (Var vn_vals) (sym2SoP inv_ind))]
           }
           @ (vn_vals, vals)
