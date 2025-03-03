@@ -11,7 +11,7 @@ import Data.Maybe (fromJust, isJust)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, assume, simplify, ($<=), ($==))
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, casesToList, getPredicates)
 import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd, intervalStart, repDomain, domainStart, domainEnd)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, rollbackAlgEnv, debugPrintAlgEnv, debugOn, getAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Substitute qualified as Subst ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep, unify, Substitution)
@@ -21,7 +21,6 @@ import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
 import Futhark.Analysis.Proofs.Query
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
-import Futhark.SoP.Monad (getRanges)
 
 data Property
   = PermutationOf VName
@@ -30,7 +29,7 @@ data Property
   | -- For all k in Cat k _ _, prove property f(k).
     ForallSegments (VName -> Property)
   | -- The restriction of f to the preimage of [a,b] is injective.
-    InjectivePreimage (SoP Symbol, SoP Symbol)
+    InjectiveRCD (SoP Symbol, SoP Symbol)
   | -- BijectiveRCD (a,b) (c,d).
     -- The restriction of f to the preimage of [a,b] is bijective.
     -- [c,d] (subset of [a,b]) is the image of this restricted f.
@@ -40,7 +39,7 @@ data Order = LT | GT | Undefined
   deriving (Eq, Show)
 
 prove :: Property -> IndexFn -> IndexFnM Answer
-prove (InjectivePreimage (a, b)) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
+prove (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
   printM 1000 $ "Proving InjectiveOn " <> prettyString (a, b, fn)
   let guards = casesToList cs
   i <- newNameFromString "i"
@@ -117,7 +116,7 @@ prove (InjectivePreimage (a, b)) fn@(IndexFn (Forall i0 dom) cs) = algebraContex
       case res of
         Yes -> pure t
         Unknown -> f
-prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) cs) = algebraContext f $ do
+prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = algebraContext f $ do
   printM 1000 $
     "Proving Bijective "
       <> "\n  RCD (a,b) = "
@@ -126,11 +125,8 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) cs) = algebraCo
       <> prettyString (c,d)
       <> "\n  f = "
       <> prettyString f
-  let guards = casesToList cs
   i <- newNameFromString "i"
-  j <- newNameFromString "j"
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
-  let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
   -- Let X be the preimage of [a, b] under f
   -- so that f restricted to X is the function:
@@ -144,8 +140,7 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) cs) = algebraCo
   -- the codomain of f additionally tells us that ([a,b] \ [c,d])
   -- under f is empty, if (1) and (2) are true.
 
-  -- TODO rename to InjectiveRCD
-  let step1 = prove (InjectivePreimage (a, b)) f
+  let step1 = prove (InjectiveRCD (a, b)) f
 
   let step2 = rollbackAlgEnv $ do
         -- WTS(2.1): If |X| = |[c,d]| and (y in f(X) => y in [c,d]), then (2) holds.
@@ -216,7 +211,7 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) cs) = algebraCo
 
   step1 `andM` step2
   where
-    f @ x = rep (mkRep i0 (Var x)) f
+    e @ x = rep (mkRep i0 (Var x)) e
 prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraContext fn $ do
   -- equivalent with BijectivePreimage (start dom, end dom)
 
@@ -246,7 +241,7 @@ prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) cs) = algebraCo
             assume (fromJust . justSym $ p @ i)
             (start $<= f @ i) `andM` (f @ i $<= end)
 
-  let step3 = prove (InjectivePreimage (start, end)) fn
+  let step3 = prove (InjectiveRCD (start, end)) fn
 
   step1 `andM` step2 `andM` step3
   where

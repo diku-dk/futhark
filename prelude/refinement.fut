@@ -1,7 +1,6 @@
-def injectivePreimage 't ((a, b) : (i64, i64)) (_: []t) : bool = ???
+def injectiveRCD 't ((a, b) : (i64, i64)) (_: []t) : bool = ???
 
-def injective [n] (xs: [n]i64) =
-  injectivePreimage (0,n) xs
+def bijectiveRCD 't ((a, b) : (i64, i64)) ((c, d) : (i64, i64)) (_: []t) : bool = ???
 
 -- import "soacs"
 -- import "functional"

@@ -10,7 +10,7 @@ def filter_indices [n]
   (xs: [n]f32)
   : {(i64, [n]i64) | \(m, is) ->
       let correct_size = m == sum (map (\x -> to_i64 x) cs)
-      let no_dups = injectivePreimage (0, m-1) is
+      let no_dups = injectiveRCD (0, m-1) is
       let in_range = map2 (\c i -> if c then 0 <= i && i < m else true) cs is
       -- m is the correct size and is is a permutation of 0 .. m:
       in correct_size && no_dups && and in_range

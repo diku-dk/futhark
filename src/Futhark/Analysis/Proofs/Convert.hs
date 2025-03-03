@@ -37,8 +37,8 @@ import Futhark.Analysis.Proofs.Properties (prove, Property (..))
 refinementPrelude :: S.Set String
 refinementPrelude =
   S.fromList
-    [ "injective",
-      "injectivePreimage",
+    [ "injectiveRCD",
+      "bijectiveRCD",
       "and"
       -- "segments"
     ]
@@ -1019,14 +1019,28 @@ forwardRefPrelude loc e f args = do
 parsePrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM (IndexFn -> IndexFnM Answer, [IndexFn])
 parsePrelude f args =
   case f of
-    "injectivePreimage" | [e_rng, e_xs] <- getArgs args -> do
-      rng <- forward e_rng
-      case rng of
-        [IndexFn Empty cs_start, IndexFn Empty cs_end] -> do
+    "injectiveRCD" | [e_RCD, e_xs] <- getArgs args -> do
+      f_RCD <- forward e_RCD
+      case f_RCD of
+        [IndexFn Empty g_a, IndexFn Empty g_b] -> do
           xss <- forward e_xs
-          let a = flattenCases cs_start
-          let b = flattenCases cs_end
-          pure (prove (InjectivePreimage (a, b)), xss)
+          let a = flattenCases g_a
+          let b = flattenCases g_b
+          pure (prove (InjectiveRCD (a, b)), xss)
+        _ ->
+          undefined
+    "bijectiveRCD" | [e_RCD, e_ImgRCD, e_xs] <- getArgs args -> do
+      f_RCD <- forward e_RCD
+      f_ImgRCD <- forward e_ImgRCD
+      case f_RCD <> f_ImgRCD of
+        [IndexFn Empty g_a, IndexFn Empty g_b,
+         IndexFn Empty g_c, IndexFn Empty g_d] -> do
+          xss <- forward e_xs
+          let a = flattenCases g_a
+          let b = flattenCases g_b
+          let c = flattenCases g_c
+          let d = flattenCases g_d
+          pure (prove (BijectiveRCD (a, b) (c,d)), xss)
         _ ->
           undefined
     "and" | [e_xs] <- getArgs args -> do
