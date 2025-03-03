@@ -51,9 +51,9 @@ legalArg k g f e args =
 dest_fn @ (f_name, _)
   | f_name `S.notMember` fv dest_fn =
       pure dest_fn
-dest_fn @ (f_name, src_fn) = do
+dest_fn @ (f_name, f) = do
   k <- newVName "variables after this are quantifiers"
-  (f, g) <- renameSame src_fn dest_fn
+  g <- renameM dest_fn
 
   app <- getApply (legalArg k g f) g
   printM 1337 . gray $ prettyString g
