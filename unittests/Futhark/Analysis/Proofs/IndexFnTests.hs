@@ -435,19 +435,6 @@ tests =
         )
     ]
   where
-    -- mkTest programFile expectedPat = testCase programFile $ do
-    --   let config = newFutharkConfig
-    --   prog <- flip runFutharkM NotVerbose $ do
-    --         (_, prog_imports, namesrc) <- readProgramOrDie programFile
-    --         putNameSource namesrc
-    --         int_prog <- almostInternaliseProg config prog_imports
-    --         namesrc' <- getNameSource
-    --         pure (int_prog, namesrc')
-    --   case prog of
-    --     Left _ -> error "meh"
-    --     Right (vbs, vns) -> do
-    --       let (actual, expected) = runTest vns vbs expectedPat
-    --       actual @??= expected
     mkTest programFile expectedPat = testCase (basename programFile) $ do
       (_, imports, vns) <- readProgramOrDie programFile
       let last_import = case reverse imports of
