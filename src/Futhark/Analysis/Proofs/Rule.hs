@@ -15,11 +15,11 @@ import Futhark.Analysis.Proofs.Monad (IndexFnM, debugPrettyM, debugT')
 import Futhark.Analysis.Proofs.Symbol (Symbol (..))
 import Futhark.Analysis.Proofs.SymbolPlus (repVName, toSumOfSums)
 import Futhark.Analysis.Proofs.Unify (Replaceable (rep), Substitution (mapping), Unify (unify), mkRep, renameAnd, sub, unifies, unifies_)
-import Futhark.Analysis.Proofs.Util (allocateTerms)
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sopToLists, sym2SoP, (.+.), (~+~))
+import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sopToLists, sym2SoP, (.+.), (~+~), term2SoP)
 import Futhark.Util.Pretty (Pretty)
 import Language.Futhark (VName)
+import Futhark.Analysis.Proofs.Util (partitions)
 
 data Rule a b m = Rule
   { name :: String,
@@ -88,6 +88,28 @@ check _ Nothing = pure Nothing
 check cond (Just s) = do
   b <- cond s
   pure $ if b then Just s else Nothing
+
+-- Pair each term in `x` with subterms of `y`, in all possible ways such that
+-- all terms in `x` and all terms in `y` are paired.
+-- (Analogously, consider terms in `x` to be bins and terms in `y` to be balls.
+--  Generate all allocations of balls into bins such that no bin is empty.)
+-- For example, x = h1 + h2 and y = a + b + c pairs as follows
+-- [[(h1, a), (h2, b+c)],
+--  [(h1, a+b), (h2, c)],
+--  [(h1, a+c), (h2, b)],
+--  ... permutations where h1 and h2 are switched
+-- ]
+allocateTerms :: (Ord u) => SoP u -> SoP u -> [[(SoP u, SoP u)]]
+allocateTerms x y
+  | k <= numTerms y = do
+      partition <- partitions k ys
+      pure $
+        zipWith (\t ts -> (uncurry term2SoP t, sopFromList ts)) xs partition
+  | otherwise = mempty
+  where
+    k = numTerms x
+    xs = sopToList x
+    ys = sopToList y
 
 applyRuleDefault :: (Unify b u, Pretty b) => Rule b u IndexFnM -> b -> IndexFnM b
 applyRuleDefault rule x =
