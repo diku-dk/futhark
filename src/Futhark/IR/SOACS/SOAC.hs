@@ -141,7 +141,7 @@ data SOAC rep
     -- <scan> will not produce any sub results and write them. All the
     -- sub results will not be written anywhere and will be passed
     -- directly to the <scatter-lambda> and written to <dest-arrays>.
-    ScanScatter SubExp [VName] (Lambda rep) (Scan rep) [VName] (Lambda rep)
+    ScanScatter SubExp [VName] (Lambda rep) (Scan rep) (ScatterSpec VName) (Lambda rep)
   deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
@@ -462,7 +462,7 @@ mapSOACM tv (ScanScatter w arrs map_lam scan dests scatter_lam) =
     <*> mapM (mapOnSOACVName tv) arrs
     <*> mapOnSOACLambda tv map_lam
     <*> mapOnSOACScan tv scan
-    <*> mapM (mapOnSOACVName tv) dests
+    <*> mapOnSOACScatterSpec tv dests
     <*> mapOnSOACLambda tv scatter_lam
 
 mapOnSOACScatterSpec :: (Monad m) => SOACMapper frep trep m -> ScatterSpec VName -> m (ScatterSpec VName)

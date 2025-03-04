@@ -291,7 +291,20 @@ transformSOAC pat _ (Stream w arrs nes lam) = do
     flip runBuilderT_ soacs_scope $
       sequentialStreamWholeArray pat w nes lam arrs
   transformStms stream_stms
-transformSOAC pat _ _ = undefined
+transformSOAC pat _ (ScanScatter w arrs map_lam scan dest post_lam) = do
+  (gtid, space) <- mkSegSpace w
+  kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
+  (scan_stms, scan') <- scanToSegBinOp scan
+
+  let post_op = SegPostOp undefined []
+  pure $
+    scan_stms
+      <> oneStm
+        ( Let pat (defAux ()) $
+            Op $
+              ParOp Nothing $
+                SegScan () space (lambdaReturnType map_lam) kbody [scan'] post_op
+        )
 
 transformProg :: Prog SOACS -> PassM (Prog MC)
 transformProg prog =
