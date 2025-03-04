@@ -180,23 +180,22 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAl
         let guards_in_RCD = [(p, e) | (p, e) <- guards fX, e /= infinity]
 
         let step_2_2 = algebraContext fX $ do
-              size_RCD_image <- rewrite $ d .-. c .+. int2SoP 1
+              let size_RCD_image = d .-. c .+. int2SoP 1
 
               start <- rewrite $ domainStart dom
               end <- rewrite $ domainEnd dom
               cs <- rewrite $ foldl1 (:||) (map fst guards_in_RCD)
 
               j_sum <- newVName "j"
-              size_X <-
-                rewrite . sym2SoP $
-                  Sum j_sum start end (sop2Symbol $ cs @ j_sum)
+              let size_X = sym2SoP $ Sum j_sum start end (sop2Symbol $ cs @ j_sum)
 
-              s :: Maybe (Substitution Symbol) <- unify size_X size_RCD_image
-
+              ans <- rewrite $ size_RCD_image :== size_X
               printM 1000 $ "size_RCD_image " <> prettyString size_RCD_image
               printM 1000 $ "size_X         " <> prettyString size_X
-              printTrace 1000 "Step (2.2)" $
-                pure (answerFromBool $ isJust s)
+              printM 1000 $ "Step (2.2) " <> prettyString ans
+              case ans of
+                Bool True -> pure Yes
+                _ -> pure Unknown
 
         let step_2_3 = algebraContext fX $ do
               printTrace 1000 "Step (2.3)" $
