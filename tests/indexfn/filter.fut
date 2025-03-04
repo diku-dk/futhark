@@ -7,7 +7,6 @@ def to_i64 c : i64 = if c then 1 else 0
 
 def filter_indices [n]
   (cs: [n]bool)
-  (xs: [n]f32)
   : {(i64, [n]i64) | \(m, is) ->
       let correct_size = m == sum (map (\x -> to_i64 x) cs)
       let no_dups = injectiveRCD (0, m-1) is
@@ -22,6 +21,6 @@ def filter_indices [n]
 
 def filter [n] (p: f32 -> bool) (xs: [n]f32) : {[]f32 | \_ -> true} =
   let cs = map (\x -> p x) xs
-  let (new_n, is) = filter_indices cs xs
+  let (new_n, is) = filter_indices cs
   let scratch = replicate new_n 0f32
   in scatter scratch is xs

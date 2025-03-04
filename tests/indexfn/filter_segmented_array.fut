@@ -4,6 +4,8 @@ def length [n] 't (_: [n]t) = n
 
 type nat64 = {i64 | (>= 0)}
 
+def to_i64 c : i64 = if c then 1 else 0
+
 
 def mk_flag_array 't 'a [m]
         (shape: [m]nat64)
@@ -53,19 +55,19 @@ def segment_ids [m]
   let flags_bool = map (\f -> f > 0) flags
   in (sgm_sum flags_bool flags_sgmind, flags_bool)
 
-def part2indices [n] (conds: [n]bool) : {(i64, [n]i64) | \_ -> true} =
-  let tflgs = map (\c -> if c then 1 else 0) conds
-  let fflgs = map (\ b -> 1 - b) tflgs
-  let indsT = scan (+) 0 tflgs
-  let tmp   = scan (+) 0 fflgs
-  let lst   = if n > 0 then indsT[n-1] else 0
-  let indsF = map (\t -> t +lst) tmp
-  let inds  = map3 (\ c indT indF -> if c then indT-1 else indF-1) conds indsT indsF
-  in  (lst, inds)
-
-
-def slice [n] (xs: [n]f32) (a: nat64) (b: {i64 | \b' -> a <= b' && b' < n}) =
-  map (\i -> xs[a+i]) (iota (b - a + 1))
+def filter_indices [n]
+  (cs: [n]bool)
+  : {(i64, [n]i64) | \(m, is) ->
+      let correct_size = m == sum (map (\x -> to_i64 x) cs)
+      let no_dups = injectiveRCD (0, m-1) is
+      let in_range = map2 (\c i -> if c then 0 <= i && i < m else true) cs is
+      -- m is the correct size and is is a permutation of 0 .. m:
+      in correct_size && no_dups && and in_range
+    } =
+  let num_trues = scan (+) 0 (map (\c -> to_i64 c) cs)
+  let new_size = if n > 0 then num_trues[n-1] else 0
+  let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
+  in (new_size, is)
 
 def filter_segmented_array [m][n]
       (shape: [m]nat64)
@@ -74,6 +76,7 @@ def filter_segmented_array [m][n]
       : {[]f32 | \_ -> true} =
   -- xs is segmented by shape
   let (II, _) = segment_ids shape
-  let conds = map (\i -> xs[i] < pivots[II[i]]) (iota n)
-  let (new_n, perm) = part2indices conds
-  in scatter (replicate new_n 0f32) perm xs
+  let cs = map (\i -> xs[i] < pivots[II[i]]) (iota n)
+  let (new_n, is) = filter_indices cs
+  let scratch = replicate new_n 0f32
+  in scatter scratch is xs
