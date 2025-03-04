@@ -24,7 +24,7 @@ import Futhark.Analysis.Proofs.Unify (FreeVariables (..), Renameable (..), Repla
 import Futhark.Analysis.Proofs.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames)
-import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.+.), (.-.), Free (..))
+import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), align, comma, commastack, hang, indent, line, parens, punctuate, sep, softline, stack, (<+>))
 import Language.Futhark (VName)
 

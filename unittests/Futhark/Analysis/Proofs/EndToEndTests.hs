@@ -6,11 +6,11 @@ import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
 import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Query
 import Futhark.Analysis.Proofs.Properties
+import Futhark.Analysis.Proofs.Query
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Compiler.CLI (fileProg, readProgramOrDie)
-import Futhark.SoP.SoP (int2SoP, (.-.), (.+.))
+import Futhark.SoP.SoP (int2SoP, (.-.))
 import Futhark.Util.Pretty (docStringW, line, pretty, (<+>))
 import Language.Futhark qualified as E
 import Test.Tasty

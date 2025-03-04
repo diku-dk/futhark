@@ -69,12 +69,6 @@ simplify = astMap m
     simplifyAlgebra x = rollbackAlgEnv $ do
       y <- toAlgebra x
       z <- Algebra.simplify y
-      -- let boring = isJust (justSym x) || isJust (justConstant x)
-      -- unless boring $ debugPrettyM "simplify" x
-      -- unless boring $ debugPrettyM "========" y
-      -- unless boring $ debugPrettyM "resultin" z
-      -- unless boring debugPrintAlgEnv
-      -- unless boring debugLn
       fromAlgebra z
 
     simplifySymbol :: Symbol -> IndexFnM Symbol

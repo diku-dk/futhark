@@ -13,7 +13,7 @@ import Data.Set qualified as S
 import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, justSingleCase)
+import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, guards, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Properties (Property (..), prove)
@@ -308,7 +308,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   -- Create boolean expression for true and false branches.
   c_t_branch <-
     rewrite $
-      foldl1 (:||) [p :&& sop2Symbol q | (p, q) <- casesToList $ body f_c]
+      foldl1 (:||) [p :&& sop2Symbol q | (p, q) <- guards f_c]
   c_f_branch <- rewrite (neg c_t_branch)
 
   ts <- rollbackAlgEnv $ do

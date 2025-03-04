@@ -10,7 +10,7 @@ where
 import Control.Monad (guard)
 import Data.List (subsequences, (\\))
 import Data.Maybe (fromJust)
-import Futhark.Util.Pretty (Doc, Pretty, align, docString, docStringW, indent, line, ppTupleLines', pretty, viaShow, (<+>))
+import Futhark.Util.Pretty (Doc, Pretty, align, docString, docStringW, indent, line, ppTupleLines', pretty, (<+>))
 import Language.Futhark (VName (VName))
 
 prettyName :: VName -> Doc ann

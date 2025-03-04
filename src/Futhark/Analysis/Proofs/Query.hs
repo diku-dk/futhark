@@ -23,7 +23,7 @@ import Data.Maybe (fromJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, assume, isTrue, ($/=), ($<), ($<=), ($==), ($>), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), Iterator (..), casesToList, getCase)
+import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), Iterator (..), casesToList, getCase, guards)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, debugT, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol, toDNF)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
@@ -100,8 +100,8 @@ check (a :<= b) = a $<= b
 check a = isTrue a
 
 allCases :: (IndexFn -> Int -> IndexFnM Answer) -> IndexFn -> IndexFnM Answer
-allCases query fn@(IndexFn _ cs) =
-  allM $ zipWith (\_ i -> query fn i) (casesToList cs) [0 ..]
+allCases query fn =
+  allM $ zipWith (\_ i -> query fn i) (guards fn) [0 ..]
 
 foreachCase :: IndexFn -> (Int -> IndexFnM a) -> IndexFnM [a]
 foreachCase (IndexFn _ cs) f =

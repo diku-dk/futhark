@@ -8,10 +8,10 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, answerFromBool, assume, simplify, toAlgebra, ($<=), ($==))
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, casesToList, getPredicates, guards)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, assume, simplify, ($<=), ($==))
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, guards)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, getAlgEnv, printM, printTrace, rollbackAlgEnv, warningString)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Query
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Substitute qualified as Subst ((@))
@@ -19,7 +19,6 @@ import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.Unify (Substitution, mkRep, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyIndent)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
-import Futhark.SoP.Monad (addEquiv)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.+.), (.-.))
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
@@ -195,7 +194,7 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAl
               s :: Maybe (Substitution Symbol) <- unify size_X size_RCD_image
 
               printM 1000 $ "size_RCD_image " <> prettyString size_RCD_image
-              printM 1000 $ "size_X " <> prettyString size_X
+              printM 1000 $ "size_X         " <> prettyString size_X
               printTrace 1000 "Step (2.2)" $
                 pure (answerFromBool $ isJust s)
 

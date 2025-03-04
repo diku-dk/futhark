@@ -17,7 +17,7 @@ import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn (iterator), Iterator (..), getPredicates)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv, printM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Proofs.SymbolPlus ()
 import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMappable, ASTMapper (..), astFold, astMap, identityMapper)
