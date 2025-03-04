@@ -27,6 +27,8 @@ module Futhark.Analysis.Proofs.Monad
     emphString,
     getAlgEnv,
     printTrace,
+    getII,
+    insertII,
   )
 where
 
@@ -51,6 +53,7 @@ data VEnv = VEnv
     indexfns :: M.Map VName [IndexFn],
     toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn]),
     defs :: M.Map VName ([E.Pat E.ParamType], E.Exp),
+    ii :: M.Map Domain (VName, IndexFn),
     debug :: Bool
   }
 
@@ -67,7 +70,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty False
+    s = VEnv vns mempty mempty mempty mempty mempty False
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -100,6 +103,9 @@ getTopLevelDefs = gets defs
 getAlgEnv :: IndexFnM (AlgEnv Algebra.Symbol Symbol Algebra.Property)
 getAlgEnv = gets algenv
 
+getII :: IndexFnM (M.Map Domain (VName, IndexFn))
+getII = gets ii
+
 insertIndexFn :: E.VName -> [IndexFn] -> IndexFnM ()
 insertIndexFn x v =
   modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
@@ -113,6 +119,10 @@ insertTopLevelDef :: E.VName -> ([E.Pat E.ParamType], E.Exp) -> IndexFnM ()
 insertTopLevelDef vn (args, e) =
   modify $
     \env -> env {defs = M.insert vn (args, e) $ defs env}
+
+insertII :: Domain -> (VName, IndexFn) -> IndexFnM ()
+insertII dom (vn, f) = do
+  modify $ \env -> env {ii = M.insert dom (vn, f) $ ii env}
 
 clearAlgEnv :: IndexFnM ()
 clearAlgEnv =

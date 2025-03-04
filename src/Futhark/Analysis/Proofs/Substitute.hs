@@ -8,17 +8,17 @@ import Data.Set qualified as S
 import Debug.Trace (trace)
 import Futhark.Analysis.Proofs.AlgebraBridge (algebraContext, simplify)
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain, repIndexFn)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Query (Answer (..), Query (CaseCheck), allCases, askQ, foreachCase, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Symbol
 import Futhark.Analysis.Proofs.Traversals (ASTFolder (..), ASTMapper (..), astFold, astMap, identityMapper)
-import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM, renameSame)
+import Futhark.Analysis.Proofs.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM)
 import Futhark.Analysis.Proofs.Util (prettyIndent)
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, sym2SoP)
-import Futhark.Util.Pretty (prettyString)
+import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.))
+import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName)
 
 -- If f has multiple cases, we would not know which case to substitute
@@ -62,7 +62,9 @@ dest_fn @ (f_name, f) = do
   case app of
     Just apply -> do
       h <- substituteOnce f g apply
-      fromJust h @ (f_name, f)
+      h' <- fromJust h @ (f_name, f)
+      printM 1337 . gray $ "\t  ->\n" <> prettyIndent 16 h'
+      pure h'
     Nothing ->
       -- When converting expressions a function may be substituted without arguments.
       fromJust <$> substituteOnce f g (Var f_name, [])
@@ -132,17 +134,16 @@ subber argCheck g = do
           pure $ Just (e, vn, [arg])
     getApply_ _ acc _ = pure acc
 
--- Assumes f and g_non_repped have been renamed using renameSame.
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
 substituteOnce f g_non_repped (f_apply, args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
   g <- repApply vn g_non_repped
 
-  new_body <- simplify $ cases $ do
-    (p_f, v_f) <- casesToList (body f)
-    (p_g, v_g) <- casesToList (body g)
-    let s = mkRep vn (rep f_arg v_f)
-    pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep f_arg p_f), rep s v_g)
+  let new_body_unsimplified = cases $ do
+        (p_f, v_f) <- guards f
+        (p_g, v_g) <- guards g
+        let s = mkRep vn (rep f_arg v_f)
+        pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep f_arg p_f), rep s v_g)
 
   let g_iter = subIterator vn (iterator g)
   same_range <- isSameRange (iterator f) g_iter
@@ -157,7 +158,7 @@ substituteOnce f g_non_repped (f_apply, args) = do
   -- k is not captured in the body of g after substitution.
   case iterator f of
     Forall i df@(Cat k _ _)
-      | k `S.member` fv new_body -> do
+      | k `S.member` fv new_body_unsimplified -> do
           let t1 =
                 if same_range
                   then do
@@ -179,30 +180,41 @@ substituteOnce f g_non_repped (f_apply, args) = do
           k_solution <- firstAlt [t1, t2, t3]
           case k_solution of
             Just res -> do
+              printM 1337 $ "\tk SOLVED " <> prettyString res
+              new_body <- simplify new_body_unsimplified
               pure (Just $ repIndexFn (mkRep k res) $ IndexFn new_iter new_body)
             Nothing -> do
-              printM 1337 $ "new_body " <> prettyString new_body
-              printM 1337 . warningString $
-                "Would capture k in g: f"
-                  <> prettyString f_arg
-                  <> "\n"
-                  <> prettyString g
-                  <> "\nwhere "
+              printM 1337 $ "new_body " <> prettyString new_body_unsimplified
+              printM 1337 $
+                warningString "Would capture k in:\n"
+                  <> prettyIndent 2 g
+                  <> "\n  where "
                   <> prettyString f_apply
                   <> " = \n"
-                  <> prettyString f
+                  <> prettyIndent 8 f
+                  <> "\n  with "
+                  <> prettyString f_arg
+
               -- Create II array.
-              let f_II = IndexFn (iterator f) (cases [(Bool True, sym2SoP (Var k))])
-              printM 1337 . warningString $
-                "Creating II array " <> prettyString f_II
-              vn_II <- newVName "II"
+              let def_II = IndexFn (iterator f) (cases [(Bool True, sym2SoP (Var k))])
+              (vn_II, f_II) <- lookupII df def_II
               insertIndexFn vn_II [f_II]
-              let res = sym2SoP (Idx (Var vn_II) (f_arg M.! i))
-              let Forall _ new_dom = new_iter
-              n <- rewrite $ domainEnd new_dom
-              let iota_iter = Forall i (Iota n)
-              pure (Just $ repIndexFn (mkRep k res) $ IndexFn iota_iter new_body)
-    _ ->
+
+              -- Replace k by II[j].
+              -- k in new_iter and k in (iterator f) may be different names.
+              (new_iter', kRep) <- case new_iter of
+                Forall j new_dom@(Cat k2 _ _) -> do
+                  n <- rewrite $ domainEnd new_dom .+. int2SoP 1
+                  pure (Forall j (Iota n), mkRep k2 (sym2SoP (Idx (Var vn_II) (sym2SoP $ Var j))))
+                Forall j (Iota n) -> do
+                  pure (Forall j (Iota n), mempty)
+                Empty -> pure (Empty, mempty)
+              let kRep' = kRep <> mkRep k (sym2SoP (Idx (Var vn_II) (f_arg M.! i)))
+
+              new_body <- simplify (repCases kRep' new_body_unsimplified)
+              pure (Just $ repIndexFn kRep' $ IndexFn new_iter' new_body)
+    _ -> do
+      new_body <- simplify new_body_unsimplified
       pure (Just $ IndexFn new_iter new_body)
   where
     -- Construct replacement from formal arguments of f to actual arguments.
@@ -344,3 +356,31 @@ checkBounds _ _ _ = error "checkBounds: multi-dim not implemented yet"
 
 gray :: String -> String
 gray s = "\ESC[2m" <> s <> "\ESC[0m"
+
+lookupII :: Domain -> IndexFn -> IndexFnM (VName, IndexFn)
+lookupII dom def = do
+  mapping <- getII
+  v <- unisearch dom mapping
+  case v of
+    Just res -> pure res
+    Nothing -> do
+      vn <- newVName "II"
+      insertII dom (vn, def)
+      pure (vn, def)
+
+-- Search a mapping using unification for equality checks.
+unisearch :: (Ord v, Unify v Symbol, Pretty v) => v -> M.Map v a -> IndexFnM (Maybe a)
+unisearch x mapping = do
+  case mapping M.!? x of
+    Just v ->
+      -- Exact match.
+      pure (Just v)
+    Nothing -> do
+      -- Search for matches using unification.
+      matches :: [(a, Maybe (Substitution Symbol))] <-
+        mapM (\(k, v) -> (v,) <$> unify k x) (M.toList mapping)
+      case matches of
+        [] -> pure Nothing
+        [(v, _)] ->
+          pure (Just v)
+        _ -> error "unisearch: multiple matches"
