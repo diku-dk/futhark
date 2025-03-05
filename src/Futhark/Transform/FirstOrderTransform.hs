@@ -368,16 +368,25 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
 transformSOAC pat (ScanScatter w arrs map_lam scan dests scatter_lam) = do
   let Scan scan_lam scan_nes = scan
   scanacc_params <- mapM (newParam "scanacc" . flip toDecl Nonunique) $ lambdaReturnType scan_lam
+  let (as_ws, as_ns, as_vs) = unzip3 dests
+      num_idxs = sum $ zipWith (*) as_ns $ map length as_ws
+      num_scatter_ts = sum as_ns + num_idxs
+      map_ts = drop num_scatter_ts $ lambdaReturnType scatter_lam
+
+  mapout_params <- mapM (newParam "mapout" . flip toDecl Unique) map_ts
+
+  map_arrs <- resultArray arrs map_ts
   i <- newVName "i"
   arr_ts <- mapM lookupType arrs
-  ts <- mapM lookupType dests
+  ts <- mapM lookupType as_vs
   asOuts <- mapM (newIdent "write_out") ts
 
   let loopform = ForLoop i Int64 w
       lam_cons = consumedByLambda $ Alias.analyseLambda mempty map_lam
       merge =
         zip scanacc_params scan_nes
-          ++ loopMerge asOuts (map Var dests)
+          ++ loopMerge asOuts (map Var as_vs)
+          ++ zip mapout_params (map Var map_arrs)
 
   loop_body <- runBodyBuilder
     . localScope (scopeOfFParams (map fst merge) <> scopeOfLoopForm loopform)
@@ -416,6 +425,7 @@ transformSOAC pat (ScanScatter w arrs map_lam scan dests scatter_lam) = do
               fmap resSubExp $
                 bodyResult $
                   lambdaBody scatter_lam
+      -- let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
 
       let outs = map identName asOuts
       write_res <- forM (zip3 outs indices values) $ \(arr, idx, val) -> do
@@ -430,8 +440,6 @@ transformSOAC pat (ScanScatter w arrs map_lam scan dests scatter_lam) = do
     (++ patNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
   letBindNames names $ Loop merge loopform loop_body
-
--- undefined
 
 -- | Recursively first-order-transform a lambda.
 transformLambda ::
