@@ -917,20 +917,33 @@ typeCheckSOAC (ScanScatter w arrs map_lam scan dests scatter_lam) = do
       <> prettyTuple map_lam_ts
       <> " wrong for given scan functions."
   TC.checkLambda scatter_lam (scan_nes' ++ arrs')
-  dests' <- TC.checkSOACArrayArgs w dests
-  let scatter_lam_ts = lambdaReturnType scatter_lam
-  let scatter_ret_t =
-        replicate (length dests') (Prim int64) ++ fmap TC.argType dests'
-  unless
-    ( scatter_lam_ts == scatter_ret_t
-    )
-    . TC.bad
-    . TC.TypeError
-    $ "Scatter map function has return type "
-      <> prettyTuple scatter_lam_ts
-      <> " but should have type "
-      <> prettyTuple scatter_lam_ts
-  mapM_ (TC.consume <=< TC.lookupAliases) dests
+  let (as_ws, as_ns, _as_vs) = unzip3 dests
+      indexes = sum $ zipWith (*) as_ns $ map length as_ws
+      rts = lambdaReturnType scatter_lam
+      rts_i = take indexes rts
+      rts_v = drop indexes rts
+      num_rts_i = sum (zipWith (*) as_ns $ map length as_ws)
+      num_scatter_rts = sum as_ns + num_rts_i
+
+  unless (length rts >= num_scatter_rts) $
+    TC.bad $
+      TC.TypeError "ScanScatter: number of index types, value types and array outputs do not match."
+
+  -- 2.
+  forM_ rts_i $ \rt_i ->
+    unless (Prim int64 == rt_i) $
+      TC.bad $
+        TC.TypeError "Scatter: Index return type must be i64."
+
+  forM_ (zip (chunks as_ns rts_v) dests) $ \(rtVs, (aw, _, a)) -> do
+    -- All lengths must have type i64.
+    mapM_ (TC.require [Prim int64]) aw
+
+    -- 3.
+    forM_ rtVs $ \rtV -> TC.requireI [arrayOfShape rtV aw] a
+
+    -- 4.
+    TC.consume =<< TC.lookupAliases a
 
 typeCheckScan :: (TC.Checkable rep) => Scan (Aliases rep) -> TC.TypeM rep [(Type, Names)]
 typeCheckScan (Scan scan_lam scan_nes) = do
@@ -1075,7 +1088,7 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
             <> comma </> ppTuple' (map pretty arrs)
             <> comma </> pretty map_lam
             <> comma </> pretty scan
-            <> comma </> ppTuple' (map pretty dests)
+            <> comma </> commasep (map pretty dests)
             <> comma </> pretty scatter_lam
         )
 
