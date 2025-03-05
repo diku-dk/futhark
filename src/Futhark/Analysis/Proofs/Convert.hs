@@ -1069,7 +1069,7 @@ parsePrelude f args =
               f_split <-
                 IndexFn Empty (cases [(Bool True, sym2SoP sum_part)])
                   @ (x, part)
-              let split = flattenCases (body f_split)
+              split <- rewrite $ flattenCases (body f_split)
 
               pure (prove (FiltPartInv filt part split), f_Xs)
             _ -> undefined

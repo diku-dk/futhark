@@ -87,12 +87,12 @@ dnfQuery p f = do
     disjToList x = [x]
 
 (=>?) :: Symbol -> Symbol -> IndexFnM Answer
-p =>? q = dnfQuery p (check q)
--- p =>? q = do
---   ans <- dnfQuery p (check q)
---   when (isUnknown ans) $
---     printM 3000 $ "Failed to show:\n" <> prettyIndent 4 p <> "\n =>?\n" <> prettyIndent 4 q
---   pure ans
+-- p =>? q = dnfQuery p (check q)
+p =>? q = do
+  ans <- dnfQuery p (check q)
+  when (isUnknown ans) $
+    printM 3000 $ "Failed to show:\n" <> prettyIndent 4 p <> "\n =>?\n" <> prettyIndent 4 q
+  pure ans
 
 infixl 8 =>?
 

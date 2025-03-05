@@ -4,25 +4,27 @@ module Futhark.Analysis.Proofs.Properties
   )
 where
 
+import Control.Monad (forM)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, assume, simplify, toAlgebra, ($<=), ($==), addRelSymbol, printAlgM)
-import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, guards)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain, repCases)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv, warningString, getAlgEnv)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, isTrue)
+import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, flattenCases, guards)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv, getAlgEnv)
 import Futhark.Analysis.Proofs.Query
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
-import Futhark.Analysis.Proofs.Substitute qualified as Subst ((@))
+import Futhark.Analysis.Proofs.Substitute qualified as Subst
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Proofs.SymbolPlus (toSumOfSums)
-import Futhark.Analysis.Proofs.Unify (Substitution, mkRep, rep, unify)
+import Futhark.Analysis.Proofs.Unify (mkRep, rep, fv)
 import Futhark.Analysis.Proofs.Util (prettyIndent)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.+.), (.-.))
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
+import qualified Data.Set as S
 
 data Property
   = PermutationOf VName
@@ -172,7 +174,6 @@ prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i dom) _)
         -- ______
         -- \^1 Not a typo; using [a,b] over [c,d] is what gives us that
         -- ([a,b] \ [c,d]) is empty under f.
-        addRelIterator it
         infinity <- sym2SoP . Var <$> newVName "∞"
 
         -- f_restricted_to_X <-
@@ -183,7 +184,7 @@ prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i dom) _)
         answers <- mapM (askQ (CaseCheck in_RCD) f) [0 .. length (guards f) - 1]
         let guards' =
               zipWith
-                (\g ans -> if isYes ans then g else (Bool True, infinity))
+                (\(p, e) ans -> if isYes ans then (p, e) else (p, infinity))
                 (guards f)
                 answers
         fX <- rewrite $ IndexFn (Forall i dom) (cases guards')
@@ -191,6 +192,7 @@ prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i dom) _)
         let guards_in_RCD = [(p, e) | (p, e) <- guards fX, e /= infinity]
 
         let step_2_2 = algebraContext fX $ do
+              addRelIterator (iterator fX)
               let size_RCD_image = d .-. c .+. int2SoP 1
 
               start <- rewrite $ if is_segmented then intervalStart dom else domainStart dom
@@ -212,22 +214,120 @@ prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i dom) _)
                 _ -> pure Unknown
 
         let step_2_3 = algebraContext fX $ do
-              addRelIterator it
+              addRelIterator (iterator fX)
               printTrace 1000 "Step (2.3)" $
                 allM $
-                  map (\(p,e) -> p =>? (c :<= e :&& e :<= d)) guards_in_RCD
+                  map (\(p, e) -> p =>? (c :<= e :&& e :<= d)) guards_in_RCD
 
-        printM 1000 $ "f restricted to X: " <> prettyString fX
+        printM 1000 $ "f restricted to X:\n" <> prettyIndent 4 fX
         printTrace 1000 "Step (2)" $
           step_2_2 `andM` step_2_3
 
   step1 `andM` step2
   where
     e @ x = rep (mkRep i (Var x)) e
-prove_ _ (FiltPartInv filt part split) f@(IndexFn it@(Forall i0 dom) _) = rollbackAlgEnv $ do
-  -- let step1 = BijectiveRCD (int2SoP 0, m) (int2SoP 0, m)
-  -- (BijectiveRCD (a, b) (c, d))
-  undefined
+prove_ baggage (FiltPartInv filt part split) f@(IndexFn (Forall i dom) _) = rollbackAlgEnv $ do
+  printM 1000 $
+    title "Proving FiltPartInv\n"
+      <> "  filter:\n"
+      <> prettyIndent 4 filt
+      <> "\n  partition:\n"
+      <> prettyIndent 4 part
+      <> "\n  partition split:\n"
+      <> prettyString split
+      <> "\n  function:\n"
+      <> prettyIndent 4 f
+  -- Construct size after filtering.
+  n <- rewrite $ domainEnd dom
+  j_sum <- newVName "j"
+  x <- newVName "x"
+  let sum_filt = Sum j_sum (int2SoP 0) n (Idx (Var x) (sym2SoP $ Var j_sum))
+  f_split <-
+    IndexFn Empty (cases [(Bool True, sym2SoP sum_filt)])
+      Subst.@ (x, filt)
+  m <- rewrite $ flattenCases (body f_split)
+  printM 3000 $ "m = " <> prettyString m
+  let mm1 = m .-. int2SoP 1
+
+  step1 <- prove_ baggage (BijectiveRCD (int2SoP 0, mm1) (int2SoP 0, mm1)) f
+
+  let step2 = algebraContext f $ do
+        vn_filt <- newVName "filt"
+        let filt_i = Idx (Var vn_filt) (sym2SoP (Var i))
+        vn_f <- newVName "f"
+        let f_i = Idx (Var vn_f) (sym2SoP (Var i))
+        checker <-
+          IndexFn
+            (iterator f)
+            ( cases
+                [ (filt_i, sym2SoP $ Bool True),
+                  (Not filt_i, sym2SoP $ int2SoP 0 :> sym2SoP f_i :|| sym2SoP f_i :>= m)
+                ]
+            )
+            Subst.@ (vn_filt, filt)
+            >>= (Subst.@ (vn_f, f))
+            >>= rewrite
+        printM 3000 $ "checker " <> prettyString checker
+        printTrace 1000 "FiltPartInv Step (2)" $
+          allCases (askQ Truth) checker
+
+  infinity <- sym2SoP . Var <$> newVName "∞"
+  f_filtered <- do
+        vn_filt <- newVName "filt"
+        let filt_i = Idx (Var vn_filt) (sym2SoP (Var i))
+        vn_f <- newVName "f"
+        f' <- IndexFn
+          { iterator = iterator f,
+            body =
+              cases
+                [ (filt_i, sym2SoP $ Idx (Var vn_f) (sym2SoP (Var i))),
+                  (Not filt_i, infinity)
+                ]
+          }
+          Subst.@ (vn_filt, filt)
+          >>= (Subst.@ (vn_f, f))
+          >>= rewrite
+        let guards_filtered = [(p, e) | (p, e) <- guards f', e /= infinity]
+        pure $ IndexFn (iterator f') (cases guards_filtered)
+
+  printM 3000 $ "f_filtered:\n" <> prettyIndent 4 f_filtered
+
+  j <- newNameFromString "j"
+  let step3and4 = algebraContext f_filtered $ do
+        addRelIterator (iterator f_filtered)
+        j +< i
+        printTrace 1000 "FiltPartInv Steps (3--4)" $
+          allM [mono_strict_inc g | g <- guards f_filtered]
+        where
+          -- mono_strict_inc (_, e) | infinity `S.member` fv e = pure Yes
+          mono_strict_inc (c, e) = rollbackAlgEnv $ do
+            -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
+            (sop2Symbol (c @ j) :&& sop2Symbol (c @ i)) =>? (e @ j :< e @ i)
+
+  let step5and6 = do
+        vn_part <- newVName "part"
+        let part_i = Idx (Var vn_part) (sym2SoP (Var i))
+        vn_f <- newVName "f"
+        let f_i = sym2SoP (Idx (Var vn_f) (sym2SoP (Var i)))
+        checker <-
+          IndexFn
+            { iterator = iterator f_filtered,
+              body =
+                cases
+                  [ (part_i, sym2SoP $ f_i :< split),
+                    (Not part_i, sym2SoP $ f_i :>= split)
+                  ]
+            }
+            Subst.@ (vn_part, part)
+            >>= (Subst.@ (vn_f, f_filtered))
+            >>= rewrite
+        printM 3000 $ "checker " <> prettyString checker
+        printTrace 1000 "FiltPartInv Steps (5--6)" $
+          allCases (askQ Truth) checker
+
+  pure step1 `andM` step2 `andM` step3and4 `andM` step5and6
+  where
+    fn @ idx = rep (mkRep i (Var idx)) fn
 prove_ baggage (PermutationOfRange start end) f =
   prove_ baggage (BijectiveRCD (start, end) (start, end)) f
 prove_ baggage (PermutationOfZeroTo m) fn =
