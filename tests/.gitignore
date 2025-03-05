@@ -3,6 +3,7 @@
 !/**/*.*
 /**/data
 /**/*.c
+/**/*.js
 /**/*.expected
 /**/*.actual
 /**/*.wasm
