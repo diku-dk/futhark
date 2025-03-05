@@ -5,6 +5,7 @@ module Futhark.Analysis.Proofs.AlgebraBridge
     isTrue,
     isFalse,
     algDebugPrettyM,
+    printAlgM,
   )
 where
 
@@ -14,14 +15,14 @@ import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate
 import Futhark.Analysis.Proofs.AlgebraBridge.Util
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv, whenDebug)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv, whenDebug, printM)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook, vacuous)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF, toDNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Proofs.Unify (Substitution, sub, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.), (.-.))
-import Futhark.Util.Pretty (docStringW, pretty)
+import Futhark.Util.Pretty (docStringW, pretty, prettyString)
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -174,3 +175,8 @@ algDebugPrettyM :: String -> SoP Symbol -> IndexFnM ()
 algDebugPrettyM msg x = rollbackAlgEnv $ do
   alg_x <- toAlgebra x
   whenDebug $ traceM $ docStringW 110 $ "  " <> pretty msg <> " " <> pretty alg_x
+
+printAlgM :: SoP Symbol -> IndexFnM ()
+printAlgM x = rollbackAlgEnv $ do
+  alg_x <- toAlgebra x
+  printM 4000 (prettyString alg_x)

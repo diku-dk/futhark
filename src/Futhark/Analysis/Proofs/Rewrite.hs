@@ -27,9 +27,9 @@ convergeRename f x = do
   y <- f x
   (x', y') <- renameSame x y
   if x' == y'
-    then pure x'
+    then pure x
     else do
-      convergeRename f y'
+      convergeRename f y
 
 rewrite_ :: IndexFn -> IndexFnM IndexFn
 rewrite_ fn@(IndexFn it xs) = simplifyIndexFn

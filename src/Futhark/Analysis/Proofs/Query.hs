@@ -18,21 +18,22 @@ module Futhark.Analysis.Proofs.Query
   )
 where
 
-import Control.Monad (forM)
+import Control.Monad (forM, when)
 import Data.Maybe (fromJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Proofs.AlgebraBridge (Answer (..), addRelIterator, algebraContext, assume, isTrue, ($/=), ($<), ($<=), ($==), ($>), ($>=))
 import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (IndexFn (..), Iterator (..), casesToList, getCase, guards)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, debugT, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, debugT, rollbackAlgEnv, printM)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol, toDNF)
 import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Monad (lookupRange)
 import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.))
-import Language.Futhark (VName)
+import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
+import Futhark.Analysis.Proofs.Util (prettyIndent)
 
 data MonoDir = Inc | IncStrict | Dec | DecStrict
   deriving (Show, Eq, Ord)
@@ -76,6 +77,8 @@ askQ query fn case_idx = algebraContext fn $ do
               f @ x = rep (mkRep i x) f
           Empty -> undefined
 
+-- askQcase query fn (p, e) = 
+
 dnfQuery :: Symbol -> IndexFnM Answer -> IndexFnM Answer
 dnfQuery p f = do
   allM $ map (\q -> rollbackAlgEnv (assume q >> f)) (disjToList $ toDNF p)
@@ -85,6 +88,11 @@ dnfQuery p f = do
 
 (=>?) :: Symbol -> Symbol -> IndexFnM Answer
 p =>? q = dnfQuery p (check q)
+-- p =>? q = do
+--   ans <- dnfQuery p (check q)
+--   when (isUnknown ans) $
+--     printM 3000 $ "Failed to show:\n" <> prettyIndent 4 p <> "\n =>?\n" <> prettyIndent 4 q
+--   pure ans
 
 infixl 8 =>?
 

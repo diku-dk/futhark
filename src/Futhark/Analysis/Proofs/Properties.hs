@@ -8,14 +8,15 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, assume, simplify, ($<=), ($==))
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, assume, simplify, toAlgebra, ($<=), ($==), addRelSymbol, printAlgM)
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, guards)
-import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain, repCases)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv, warningString, getAlgEnv)
 import Futhark.Analysis.Proofs.Query
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Substitute qualified as Subst ((@))
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
+import Futhark.Analysis.Proofs.SymbolPlus (toSumOfSums)
 import Futhark.Analysis.Proofs.Unify (Substitution, mkRep, rep, unify)
 import Futhark.Analysis.Proofs.Util (prettyIndent)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
@@ -35,12 +36,19 @@ data Property
     -- The restriction of f to the preimage of [a,b] is bijective.
     -- [c,d] (subset of [a,b]) is the image of this restricted f.
     BijectiveRCD (SoP Symbol, SoP Symbol) (SoP Symbol, SoP Symbol)
+  | -- The index functions are the filtering and partitioning predicates.
+    FiltPartInv IndexFn IndexFn (SoP Symbol)
 
 data Order = LT | GT | Undefined
   deriving (Eq, Show)
 
 prove :: Property -> IndexFn -> IndexFnM Answer
-prove (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
+prove (ForallSegments fprop) f@(IndexFn (Forall _ (Cat k _ _)) _) =
+  prove_ True (fprop k) f
+prove prop f = prove_ False prop f
+
+prove_ :: Bool -> Property -> IndexFn -> IndexFnM Answer
+prove_ _ (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
   printM 1000 $
     title "Proving InjectiveRCD "
       <> "\n  RCD (a,b) = "
@@ -121,7 +129,7 @@ prove (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $
       case res of
         Yes -> pure t
         Unknown -> f
-prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAlgEnv $ do
+prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i dom) _) = rollbackAlgEnv $ do
   printM 1000 $
     title "Proving BijectiveRCD "
       <> "\n  RCD (a,b) = "
@@ -130,8 +138,6 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAl
       <> prettyString (c, d)
       <> "\n"
       <> prettyIndent 2 f
-  i <- newNameFromString "i"
-  let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
 
   -- Let X be the preimage of [a, b] under f
   -- so that f restricted to X is the function:
@@ -147,7 +153,7 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAl
 
   let step1 =
         printTrace 1000 "Step (1)" $
-          prove (InjectiveRCD (a, b)) f
+          prove_ is_segmented (InjectiveRCD (a, b)) f
 
   let step2 = rollbackAlgEnv $ do
         -- WTS(2.1): If |X| = |[c,d]| and (y in f(X) => y in [c,d]), then (2) holds.
@@ -167,27 +173,35 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAl
         -- \^1 Not a typo; using [a,b] over [c,d] is what gives us that
         -- ([a,b] \ [c,d]) is empty under f.
         addRelIterator it
-
-        x <- newVName "x"
-        let x_i = sym2SoP (Idx (Var x) (sym2SoP (Var i0)))
-        let in_RCD = a :<= x_i :&& x_i :<= b
         infinity <- sym2SoP . Var <$> newVName "∞"
-        f_restricted_to_X <-
-          IndexFn (Forall i0 dom) (cases [(in_RCD, x_i), (neg in_RCD, infinity)])
-            Subst.@ (x, f)
-        fX <- rewrite f_restricted_to_X
+
+        -- f_restricted_to_X <-
+        --   IndexFn (Forall i0 dom) (cases [(in_RCD, x_i), (neg in_RCD, infinity)])
+        --     Subst.@ (x, f)
+        -- fX <- rewrite f_restricted_to_X
+        let in_RCD x = a :<= x :&& x :<= b
+        answers <- mapM (askQ (CaseCheck in_RCD) f) [0 .. length (guards f) - 1]
+        let guards' =
+              zipWith
+                (\g ans -> if isYes ans then g else (Bool True, infinity))
+                (guards f)
+                answers
+        fX <- rewrite $ IndexFn (Forall i dom) (cases guards')
 
         let guards_in_RCD = [(p, e) | (p, e) <- guards fX, e /= infinity]
 
         let step_2_2 = algebraContext fX $ do
               let size_RCD_image = d .-. c .+. int2SoP 1
 
-              start <- rewrite $ domainStart dom
-              end <- rewrite $ domainEnd dom
-              cs <- rewrite $ foldl1 (:||) (map fst guards_in_RCD)
+              start <- rewrite $ if is_segmented then intervalStart dom else domainStart dom
+              end <- rewrite $ if is_segmented then intervalEnd dom else domainEnd dom
 
               j_sum <- newVName "j"
-              let size_X = sym2SoP $ Sum j_sum start end (sop2Symbol $ cs @ j_sum)
+              let cs = map ((@ j_sum) . sym2SoP . fst) guards_in_RCD
+              let size_X =
+                    if null cs
+                      then int2SoP 0
+                      else toSumOfSums j_sum start end $ foldl1 (.+.) cs
 
               ans <- rewrite $ size_RCD_image :== size_X
               printM 1000 $ "size_RCD_image " <> prettyString size_RCD_image
@@ -198,69 +212,29 @@ prove (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i0 dom) _) = rollbackAl
                 _ -> pure Unknown
 
         let step_2_3 = algebraContext fX $ do
+              addRelIterator it
               printTrace 1000 "Step (2.3)" $
                 allM $
-                  map case_in_bounds guards_in_RCD
-              where
-                case_in_bounds (p, e) = rollbackAlgEnv $ do
-                  addRelIterator iter_i
-                  assume (fromJust . justSym $ p @ i)
-                  (c $<= e @ i) `andM` (e @ i $<= d)
+                  map (\(p,e) -> p =>? (c :<= e :&& e :<= d)) guards_in_RCD
 
-        -- NOTES:
-        -- [ ] BijF1 has a possibly unintended effect where
-        -- if you specify an RCD/RCD_Img that's smaller than
-        -- the actual image of f restricted to the preimage of RCD,
-        -- then the unification test on RCD_img will fail
-        -- because the sum over predicates range over
-        -- the unrestricted domain of f.
-        -- So currently RCD_img must be the exact image
-        -- of f restricted to the preimage of RCD.
         printM 1000 $ "f restricted to X: " <> prettyString fX
         printTrace 1000 "Step (2)" $
           step_2_2 `andM` step_2_3
 
   step1 `andM` step2
   where
-    e @ x = rep (mkRep i0 (Var x)) e
-prove (PermutationOfRange start end) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
-  -- equivalent with BijectivePreimage (start dom, end dom)
-
-  printM 1000 $ title "Proving PermutationOfRange" <> prettyString (start, end, fn)
-  i <- newNameFromString "i"
-  let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
-
-  -- (1) Prove that the size of the domain equals (end - start + 1).
-  -- (2) Prove that all branches are within bounds (start, end - 1).
-  -- (3) Prove that fn values have no duplicates in [start, end].
-  --
-
-  let step1 = do
-        range_sz <- simplify $ end .-. start .+. int2SoP 1
-        case dom of
-          Iota n ->
-            n $== range_sz
-          Cat {} -> do
-            n <- simplify (intervalEnd dom .-. intervalStart dom .+. int2SoP 1)
-            n $== range_sz
-
-  let step2 = allM $ map case_in_bounds (guards fn)
-        where
-          case_in_bounds (p, f) = rollbackAlgEnv $ do
-            addRelIterator iter_i
-            assume (fromJust . justSym $ p @ i)
-            (start $<= f @ i) `andM` (f @ i $<= end)
-
-  let step3 = prove (InjectiveRCD (start, end)) fn
-
-  step1 `andM` step2 `andM` step3
-  where
-    f @ x = rep (mkRep i0 (Var x)) f
-prove (PermutationOfZeroTo m) fn =
-  prove (PermutationOfRange (int2SoP 0) m) fn
-prove (ForallSegments fprop) fn@(IndexFn (Forall _ (Cat k _ _)) _) =
-  prove (fprop k) fn
-prove _ _ = error "Not implemented yet."
+    e @ x = rep (mkRep i (Var x)) e
+prove_ _ (FiltPartInv filt part split) f@(IndexFn it@(Forall i0 dom) _) = rollbackAlgEnv $ do
+  -- let step1 = BijectiveRCD (int2SoP 0, m) (int2SoP 0, m)
+  -- (BijectiveRCD (a, b) (c, d))
+  undefined
+prove_ baggage (PermutationOfRange start end) f =
+  prove_ baggage (BijectiveRCD (start, end) (start, end)) f
+prove_ baggage (PermutationOfZeroTo m) fn =
+  prove_ baggage (PermutationOfRange (int2SoP 0) m) fn
+prove_ _ (ForallSegments _) _ =
+  undefined
+prove_ _ _ _ = error "Not implemented yet."
 
 -- Strict sorting.
 sorted :: (t -> t -> IndexFnM Order) -> [t] -> IndexFnM (Maybe [t])

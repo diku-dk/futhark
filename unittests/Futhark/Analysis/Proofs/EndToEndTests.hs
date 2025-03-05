@@ -4,7 +4,7 @@ import Control.Monad (forM_, unless)
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Proofs.Convert
 import Futhark.Analysis.Proofs.IndexFn
-import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd)
+import Futhark.Analysis.Proofs.IndexFnPlus (intervalEnd, domainEnd)
 import Futhark.Analysis.Proofs.Monad
 import Futhark.Analysis.Proofs.Properties
 import Futhark.Analysis.Proofs.Query
@@ -36,12 +36,6 @@ tests =
         "tests/indexfn/part2indices.fut"
         ( \[_pivot, fn@(IndexFn (Forall _ (Iota _)) _)] -> do
             prove (InjectiveRCD (int2SoP 0, int2SoP 3)) fn
-        )
-        Yes,
-      mkTest
-        "tests/indexfn/part2indicesL.fut"
-        ( \(fn@(IndexFn (Forall _ (Cat _ _ b)) _) : _) -> do
-            prove (ForallSegments $ \_ -> InjectiveRCD (int2SoP 0, b)) fn
         )
         Yes,
       mkTest

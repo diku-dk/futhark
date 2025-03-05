@@ -39,6 +39,7 @@ refinementPrelude =
   S.fromList
     [ "injectiveRCD",
       "bijectiveRCD",
+      "filtPartInv",
       "and"
       -- "segments"
     ]
@@ -569,7 +570,6 @@ zipArgs ::
 zipArgs loc formal_args actual_args = do
   let pats = map patternMapAligned formal_args
   args <- mapM forward (getArgs actual_args)
-
   unless (length pats == length args) $
     errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
   unless (map length pats == map length args) $
@@ -1046,6 +1046,33 @@ parsePrelude f args =
             pure (prove (BijectiveRCD (a, b) (c, d)), xss)
         _ ->
           undefined
+    "filtPartInv"
+      | [e_X, e_filt, e_part] <- getArgs args,
+        E.Lambda params_filt lam_filt _ _ _ <- e_filt,
+        [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
+        E.Lambda params_part lam_part _ _ _ <- e_part,
+        [[(Just param_part, _)]] <- map patternMapAligned params_part -> do
+          f_Xs <- forward e_X
+          case f_Xs of
+            [f_X] | Forall i dom_X <- iterator f_X -> do
+              -- Map filter and partition lambdas over indices of X.
+              let iota = IndexFn (iterator f_X) (cases [(Bool True, sym2SoP (Var i))])
+              _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
+              filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
+              part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
+
+              -- Construct partitioning split point.
+              n <- rewrite $ domainEnd dom_X
+              j <- newVName "j"
+              x <- newVName "x"
+              let sum_part = Sum j (int2SoP 0) n (Idx (Var x) (sym2SoP $ Var j))
+              f_split <-
+                IndexFn Empty (cases [(Bool True, sym2SoP sum_part)])
+                  @ (x, part)
+              let split = flattenCases (body f_split)
+
+              pure (prove (FiltPartInv filt part split), f_Xs)
+            _ -> undefined
     "and" | [e_xs] <- getArgs args -> do
       -- No-op: The argument e_xs is a boolean array; each branch will
       -- be checked in refinements.
