@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Handling of size expressions in abstract types in the interpreter (#2222).
 
+* GPU code generation of segmented reductions with array operands. (#2227)
+
 ## [0.25.27]
 
 ### Added
