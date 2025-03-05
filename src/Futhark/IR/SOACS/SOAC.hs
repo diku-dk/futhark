@@ -919,7 +919,7 @@ typeCheckSOAC (ScanScatter w arrs map_lam scan dests scatter_lam) = do
   TC.checkLambda scatter_lam (scan_nes' ++ arrs')
   let (as_ws, as_ns, _as_vs) = unzip3 dests
       rts = lambdaReturnType scatter_lam
-      num_idxs = sum (zipWith (*) as_ns $ map length as_ws)
+      num_idxs = sum $ zipWith (*) as_ns $ map length as_ws
       rts_i = take num_idxs rts
       rts_v = drop num_idxs rts
       num_scatter_rts = sum as_ns + num_idxs
