@@ -385,7 +385,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
     dPrimVE "segment_size_nonzero" $ sMax64 1 segment_size
 
   let tblock_size_se = unCount tblock_size
-      num_tblocks_se = unCount tblock_size
+      num_tblocks_se = unCount num_tblocks
       num_tblocks' = pe64 num_tblocks_se
       tblock_size' = pe64 tblock_size_se
   num_threads <- fmap tvSize $ dPrimV "num_threads" $ num_tblocks' * tblock_size'
