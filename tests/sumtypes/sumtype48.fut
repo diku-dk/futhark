@@ -3,4 +3,4 @@
 
 type t = #foo | #bar
 
-let f b : t = if b then #foo else #baar
+def f b : t = if b then #foo else #baar

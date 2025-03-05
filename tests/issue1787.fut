@@ -1,5 +1,5 @@
 -- ==
--- error: found to be functional
+-- error: function type
 
 entry main: i32 -> i32 -> i32 =
   ((true, (.0)), (false, (.1)))
