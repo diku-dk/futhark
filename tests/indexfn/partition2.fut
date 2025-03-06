@@ -10,17 +10,8 @@ def slice xs (a: {i64 | (>= 0)}) (b: {i64 | (<= length xs)}) =
 def part2indices [n]
   (conds: [n]bool)
   : {(i64, [n]i64) | \(num_true, inds) ->
-        num_true <= n
-        -- Proof that inds are a permutation of 0 ... n - 1.
-        && and (map (\i -> 0 <= i && i < n) inds)
-        && injectiveRCD (0,n-1) inds
-        -- Proof that inds partition according to conds.
+      filtPartInv inds (\_i -> true) (\i -> conds[i])
         && num_true == sum (map (\c -> if c then 1 else 0) conds)
-        && and (map2 (\c ind ->
-                       if c
-                       then ind < num_true
-                       else ind >= num_true
-                     ) conds inds)
     } =
   let tflgs = map (\c -> if c then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs
