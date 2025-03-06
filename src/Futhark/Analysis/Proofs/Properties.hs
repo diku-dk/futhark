@@ -5,27 +5,25 @@ module Futhark.Analysis.Proofs.Properties
   )
 where
 
-import Control.Monad (forM)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, isTrue, addRelSymbol)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, answerFromBool)
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, flattenCases, guards)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv, getAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv)
 import Futhark.Analysis.Proofs.Query
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Substitute qualified as Subst
-import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, sop2Symbol)
+import Futhark.Analysis.Proofs.Symbol (Symbol (..), sop2Symbol)
 import Futhark.Analysis.Proofs.SymbolPlus (toSumOfSums)
-import Futhark.Analysis.Proofs.Unify (mkRep, rep, fv)
+import Futhark.Analysis.Proofs.Unify (mkRep, rep)
 import Futhark.Analysis.Proofs.Util (prettyIndent)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.SoP (SoP, int2SoP, justSym, sym2SoP, (.+.), (.-.))
 import Language.Futhark (VName, prettyString)
 import Prelude hiding (GT, LT)
-import qualified Data.Set as S
 
 data Property
   = PermutationOf VName
@@ -267,22 +265,23 @@ prove_ baggage (FiltPartInv filt part split) f@(IndexFn (Forall i _) _) = rollba
 
   infinity <- sym2SoP . Var <$> newVName "∞"
   f_filtered <- do
-        vn_filt <- newVName "filt"
-        let filt_i = Idx (Var vn_filt) (sym2SoP (Var i))
-        vn_f <- newVName "f"
-        f' <- IndexFn
-          { iterator = iterator f,
-            body =
-              cases
-                [ (filt_i, sym2SoP $ Idx (Var vn_f) (sym2SoP (Var i))),
-                  (Not filt_i, infinity)
-                ]
-          }
-          Subst.@ (vn_filt, filt)
-          >>= (Subst.@ (vn_f, f))
-          >>= rewrite
-        let guards_filtered = [(p, e) | (p, e) <- guards f', e /= infinity]
-        pure $ IndexFn (iterator f') (cases guards_filtered)
+    vn_filt <- newVName "filt"
+    let filt_i = Idx (Var vn_filt) (sym2SoP (Var i))
+    vn_f <- newVName "f"
+    f' <-
+      IndexFn
+        { iterator = iterator f,
+          body =
+            cases
+              [ (filt_i, sym2SoP $ Idx (Var vn_f) (sym2SoP (Var i))),
+                (Not filt_i, infinity)
+              ]
+        }
+        Subst.@ (vn_filt, filt)
+        >>= (Subst.@ (vn_f, f))
+        >>= rewrite
+    let guards_filtered = [(p, e) | (p, e) <- guards f', e /= infinity]
+    pure $ IndexFn (iterator f') (cases guards_filtered)
 
   printM 3000 $ "f_filtered:\n" <> prettyIndent 4 f_filtered
 
