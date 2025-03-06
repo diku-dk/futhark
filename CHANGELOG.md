@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * GPU code generation of segmented reductions with array operands. (#2227)
 
+* Server-mode timing is now done with a monotonic clock.
+
 ## [0.25.27]
 
 ### Added

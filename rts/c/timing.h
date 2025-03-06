@@ -24,17 +24,16 @@ static int64_t get_wall_time_ns(void) {
 #include <time.h>
 #include <sys/time.h>
 
-static int64_t get_wall_time(void) {
-  struct timeval time;
-  assert(gettimeofday(&time,NULL) == 0);
-  return time.tv_sec * 1000000 + time.tv_usec;
-}
-
 static int64_t get_wall_time_ns(void) {
   struct timespec time;
-  assert(clock_gettime(CLOCK_REALTIME, &time) == 0);
+  assert(clock_gettime(CLOCK_MONOTONIC, &time) == 0);
   return time.tv_sec * 1000000000 + time.tv_nsec;
 }
+
+static int64_t get_wall_time(void) {
+  return get_wall_time_ns() / 1000;
+}
+
 
 #endif
 
