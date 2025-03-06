@@ -824,7 +824,6 @@ pSOAC pr =
               <*> pScan pr
               <* pComma
               <*> many (pDest <* pComma)
-              <* pComma
               <*> pLambda pr
           )
 

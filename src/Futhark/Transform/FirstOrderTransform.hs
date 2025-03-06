@@ -420,21 +420,26 @@ transformSOAC pat (ScanScatter w arrs map_lam scan dests scatter_lam) = do
           letBindNames [scatter_p] $ BasicOp $ SubExp v
 
       mapM_ addStm $ bodyStms $ lambdaBody scatter_lam
-      let (indices, values) =
-            splitAt (length dests) $
-              fmap resSubExp $
-                bodyResult $
-                  lambdaBody scatter_lam
-      -- let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
+      let ret = take num_scatter_ts $ bodyResult $ lambdaBody scatter_lam
+          indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ret
 
-      let outs = map identName asOuts
-      write_res <- forM (zip3 outs indices values) $ \(arr, idx, val) -> do
+      write_res <- forM indexes $ \(_, arr, indexes') -> do
         arr_t <- lookupType arr
-        letExp "write_out" $
-          BasicOp $
-            Update Safe arr (fullSlice arr_t [DimFix idx]) val
+        let saveInArray arr' (indexCur, SubExpRes value_cs valueCur) =
+              certifying (foldMap resCerts indexCur <> value_cs) . letExp "write_out" $
+                BasicOp $
+                  Update Safe arr' (fullSlice arr_t $ map (DimFix . resSubExp) indexCur) valueCur
 
-      pure $ scan_res' ++ varsRes write_res
+        foldM saveInArray arr indexes'
+
+      let mapout_res = drop num_scatter_ts $ bodyResult $ lambdaBody scatter_lam
+
+      mapout_res' <-
+        certifying (foldMap resCerts map_res) $
+          letwith (map paramName mapout_params) (Var i) $
+            map resSubExp mapout_res
+
+      pure $ scan_res' ++ varsRes write_res ++ varsRes mapout_res'
 
   names <-
     (++ patNames pat)

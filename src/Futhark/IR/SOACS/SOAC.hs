@@ -557,7 +557,16 @@ soacType (Hist _ _ ops _bucket_fun) = do
 soacType (Screma w _arrs form) =
   scremaType w form
 soacType (ScanScatter w _arrs _map_lam _scan dests scatter_lam) =
-  (`arrayOfRow` w) <$> drop (length dests) (lambdaReturnType scatter_lam)
+  zipWith arrayOfShape (map (snd . head) rets) shapes
+    <> map (`arrayOfRow` w) (drop num_scatter_rts rts)
+  where
+    (as_ws, as_ns, _as_vs) = unzip3 dests
+    rts = lambdaReturnType scatter_lam
+    num_idxs = sum $ zipWith (*) as_ns $ map length as_ws
+    num_vs = sum as_ns
+    num_scatter_rts = num_vs + num_idxs
+    (shapes, _, rets) =
+      unzip3 $ groupScatterResults dests $ lambdaReturnType scatter_lam
 
 instance TypedOp SOAC where
   opType = pure . staticShapes . soacType
@@ -920,9 +929,10 @@ typeCheckSOAC (ScanScatter w arrs map_lam scan dests scatter_lam) = do
   let (as_ws, as_ns, _as_vs) = unzip3 dests
       rts = lambdaReturnType scatter_lam
       num_idxs = sum $ zipWith (*) as_ns $ map length as_ws
+      num_vs = sum as_ns
       rts_i = take num_idxs rts
-      rts_v = drop num_idxs rts
-      num_scatter_rts = sum as_ns + num_idxs
+      rts_v = take num_vs $ drop num_idxs rts
+      num_scatter_rts = num_vs + num_idxs
 
   unless (length rts >= num_scatter_rts) $
     TC.bad $
