@@ -16,7 +16,7 @@ import Futhark.Analysis.Proofs.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Proofs.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, guards, justSingleCase)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Proofs.Monad
-import Futhark.Analysis.Proofs.Properties (Property (..), prove)
+import Futhark.Analysis.Proofs.Properties (Property (..), prove, sumOverIndexFn)
 import Futhark.Analysis.Proofs.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, isUnknown, isYes)
 import Futhark.Analysis.Proofs.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Proofs.Substitute (subst, (@))
@@ -1054,7 +1054,7 @@ parsePrelude f args =
         [[(Just param_part, _)]] <- map patternMapAligned params_part -> do
           f_Xs <- forward e_X
           case f_Xs of
-            [f_X] | Forall i dom_X <- iterator f_X -> do
+            [f_X] | Forall i _ <- iterator f_X -> do
               -- Map filter and partition lambdas over indices of X.
               let iota = IndexFn (iterator f_X) (cases [(Bool True, sym2SoP (Var i))])
               _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
@@ -1062,14 +1062,7 @@ parsePrelude f args =
               part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
 
               -- Construct partitioning split point.
-              n <- rewrite $ domainEnd dom_X
-              j <- newVName "j"
-              x <- newVName "x"
-              let sum_part = Sum j (int2SoP 0) n (Idx (Var x) (sym2SoP $ Var j))
-              f_split <-
-                IndexFn Empty (cases [(Bool True, sym2SoP sum_part)])
-                  @ (x, part)
-              split <- rewrite $ flattenCases (body f_split)
+              split <- sumOverIndexFn part
 
               pure (prove (FiltPartInv filt part split), f_Xs)
             _ -> undefined

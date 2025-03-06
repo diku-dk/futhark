@@ -1,6 +1,7 @@
 module Futhark.Analysis.Proofs.Properties
   ( Property (..),
     prove,
+    sumOverIndexFn,
   )
 where
 
@@ -9,7 +10,7 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, isTrue)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, isTrue, addRelSymbol)
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, flattenCases, guards)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv, getAlgEnv)
@@ -226,7 +227,7 @@ prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i dom) _)
   step1 `andM` step2
   where
     e @ x = rep (mkRep i (Var x)) e
-prove_ baggage (FiltPartInv filt part split) f@(IndexFn (Forall i dom) _) = rollbackAlgEnv $ do
+prove_ baggage (FiltPartInv filt part split) f@(IndexFn (Forall i _) _) = rollbackAlgEnv $ do
   printM 1000 $
     title "Proving FiltPartInv\n"
       <> "  filter:\n"
@@ -237,16 +238,9 @@ prove_ baggage (FiltPartInv filt part split) f@(IndexFn (Forall i dom) _) = roll
       <> prettyString split
       <> "\n  function:\n"
       <> prettyIndent 4 f
+
   -- Construct size after filtering.
-  n <- rewrite $ domainEnd dom
-  j_sum <- newVName "j"
-  x <- newVName "x"
-  let sum_filt = Sum j_sum (int2SoP 0) n (Idx (Var x) (sym2SoP $ Var j_sum))
-  f_split <-
-    IndexFn Empty (cases [(Bool True, sym2SoP sum_filt)])
-      Subst.@ (x, filt)
-  m <- rewrite $ flattenCases (body f_split)
-  printM 3000 $ "m = " <> prettyString m
+  m <- sumOverIndexFn filt
   let mm1 = m .-. int2SoP 1
 
   step1 <- prove_ baggage (BijectiveRCD (int2SoP 0, mm1) (int2SoP 0, mm1)) f
@@ -356,3 +350,16 @@ sorted cmp wat = runMaybeT $ quicksort wat
 
 title :: String -> String
 title s = "\ESC[4m" <> s <> "\ESC[0m"
+
+sumOverIndexFn :: IndexFn -> IndexFnM (SoP Symbol)
+sumOverIndexFn f@(IndexFn (Forall _ dom) _) = do
+  n <- rewrite $ domainEnd dom
+  addRelSymbol (n :>= int2SoP 0) -- n is a size.
+  j <- newVName "j"
+  x <- newVName "x"
+  let sum_part = Sum j (int2SoP 0) n (Idx (Var x) (sym2SoP $ Var j))
+  f_split <-
+    IndexFn Empty (cases [(Bool True, sym2SoP sum_part)])
+      Subst.@ (x, f)
+  rewrite $ flattenCases (body f_split)
+sumOverIndexFn (IndexFn Empty _) = undefined
