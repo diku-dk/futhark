@@ -15,9 +15,8 @@ def to_i64 (c: bool): i64 = if c then 1 else 0
 def all (p: i64 -> bool) (n: i64) =
   and (map (\i -> p i) (iota n))
 
--- def partitionedInv [n] (is: [n] i64) (p: i64 -> bool) = ???
--- def filtPartInv [n] (X : [n]i64) (filt: [n]bool) (part: [n]bool) (s: i64) =
-def filtPartInv [n] (_X : [n]i64) (_filt: i64 -> bool) (_part: i64 -> bool) = ???
+def filtPartInv [n] (_X : [n]i64) (_filt: i64 -> bool) (_part: i64 -> bool) =
+  ???
   -- let filt_arr = map (\i -> filt i) (iota n)
   -- let m = sum (map (\i -> to_i64 (filt i)) (iota n))
   -- let step1 = bijectiveRCD (0, m-1) (0, m-1) X
