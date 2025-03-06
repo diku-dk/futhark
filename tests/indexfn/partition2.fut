@@ -17,7 +17,7 @@ def part2indices [n]
   let inds  = map3 (\ c indT indF -> if c then indT-1 else indF-1) conds indsT indsF
   in  (lst, inds)
 
-def partition2 [n] (p: i64 -> bool) (xs: [n]i64) : {[n]i64 | \_ -> true} =
+def partition2 [n] (p: f32 -> bool) (xs: [n]f32) : {[n]f32 | \_ -> true} =
   let conds = map (\x -> p x) xs
   let (_lst, inds) = part2indices conds
   in scatter (replicate n 0) inds xs
