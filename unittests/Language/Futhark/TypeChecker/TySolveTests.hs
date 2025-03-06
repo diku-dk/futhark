@@ -2,10 +2,11 @@ module Language.Futhark.TypeChecker.TySolveTests (tests) where
 
 import Data.Map qualified as M
 import Futhark.Util.Pretty (docString)
-import Language.Futhark.Syntax (Liftedness (..))
+import Language.Futhark.Syntax (Liftedness (..), NoUniqueness, TypeBase, VName)
 import Language.Futhark.SyntaxTests ()
 import Language.Futhark.TypeChecker.Constraints
   ( CtTy (..),
+    Level,
     Reason (..),
     TyParams,
     TyVarInfo (..),
@@ -29,7 +30,13 @@ testSolve constraints typarams tyvars expected =
 
 -- When writing type variables/names here (a_0, b_1), make *sure* that
 -- the numbers are distinct. These are all that actually matter for
--- determining identify.
+-- determining identity.
+
+(~) :: TypeBase () NoUniqueness -> TypeBase () NoUniqueness -> CtTy ()
+t1 ~ t2 = CtEq (Reason mempty) t1 t2
+
+tv :: VName -> Level -> (VName, (Level, TyVarInfo ()))
+tv v lvl = (v, (lvl, TyVarFree mempty Unlifted))
 
 tests :: TestTree
 tests =
@@ -39,8 +46,8 @@ tests =
         testSolve [] mempty mempty ([], mempty),
       testCase "a_0 ~ b_1" $
         testSolve
-          [CtEq (Reason mempty) "a_0" "b_1"]
+          ["a_0" ~ "b_1"]
           mempty
-          (M.fromList [("a_0", (0, TyVarFree mempty Unlifted))])
+          (M.fromList [tv "a_0" 0])
           ([], M.fromList [("a_0", Right "b_1")])
     ]
