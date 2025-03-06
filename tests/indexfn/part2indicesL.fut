@@ -54,16 +54,15 @@ let part2indicesL 't [m][n]
       : {([n]i64, [m]i64, [n]i64, [m]i64) | \(inds, seg_ends, seg_ids, num_trues) ->
           -- Assuming csL is a flat representation of a segmented array of booleans
           -- with segment sizes denoted by shape, part2indicesL returns:
-          --   (1) A flat array of the same shape as csL, whose values are the indices:
-          --       (0, 1, ..., n).
+          --   (1) A flat array whose values are a permutation of the indices:
+          --       (0, 1, ..., n - 1).
           --   (2) The indices in each row k are a permutation of
           --         sum shape[0:k-1], ..., (sum shape[0:k]) - 1.
           --   (3) The indices in each row k are partitioned by csL.
           -- 
           -- Proof.
-          --   (1) Values are in this range and there are no duplicates:
-          let step1 = map (\i -> 0 <= i && i < n) inds
-          --   (2) Using no duplicate values shown in (1) and
+          --   (1) A bijection from X to X is a permutation of X.
+          let step1 = bijectiveRCD (0, n-1) (0, n-1) inds
           let step2 =
             map2 (\i k ->
               let seg_start = seg_ends[k] - shape[k]
@@ -76,7 +75,7 @@ let part2indicesL 't [m][n]
           let step3 = map3 (\c j p ->
               if c then j < p else j >= p
             ) csL seg_inds seg_parts
-          in and step1 && and step2 && and step3
+          in step1 && and step2 && and step3
         } =
   let (seg_ids, flags) = segment_ids shape
 
