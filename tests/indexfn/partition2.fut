@@ -1,11 +1,6 @@
 -- Prelude
-def length [n] 't (_: [n]t) = n
-
 def sum [n] (xs: [n]i64) =
   if n > 0 then (scan (+) 0 xs)[n-1] else 0
-
-def slice xs (a: {i64 | (>= 0)}) (b: {i64 | (<= length xs)}) =
-  map (\i -> xs[a+i]) (iota (b - a))
 
 def part2indices [n]
   (conds: [n]bool)
