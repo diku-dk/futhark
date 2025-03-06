@@ -551,6 +551,7 @@ test-suite unit
       Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
+      Language.Futhark.TypeChecker.TySolveTests
       Language.Futhark.TypeCheckerTests
   build-depends:
       QuickCheck >=2.8
