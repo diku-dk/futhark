@@ -15,7 +15,7 @@ import Debug.Trace (traceM)
 import Futhark.Analysis.Proofs.AlgebraBridge.Translate
 import Futhark.Analysis.Proofs.AlgebraBridge.Util
 import Futhark.Analysis.Proofs.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Proofs.Monad (IndexFnM, rollbackAlgEnv, whenDebug, printM)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, getAlgEnv, printM, rollbackAlgEnv, whenDebug)
 import Futhark.Analysis.Proofs.Rule (Rule (..), applyRuleBook, vacuous)
 import Futhark.Analysis.Proofs.Symbol (Symbol (..), neg, toCNF, toDNF)
 import Futhark.Analysis.Proofs.Traversals (ASTMappable (..), ASTMapper (..))
@@ -179,4 +179,6 @@ algDebugPrettyM msg x = rollbackAlgEnv $ do
 printAlgM :: SoP Symbol -> IndexFnM ()
 printAlgM x = rollbackAlgEnv $ do
   alg_x <- toAlgebra x
-  printM 4000 (prettyString alg_x)
+  printM 3000 (prettyString alg_x)
+  env <- getAlgEnv
+  printM 3000 $ "under alg env " <> prettyString env
