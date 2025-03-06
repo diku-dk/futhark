@@ -113,7 +113,11 @@ instance (Ord u) => Monoid (Range u) where
 
 instance (Pretty u) => Pretty (Term u) where
   pretty (Term t) =
-    mconcat $ punctuate "*" $ map pretty $ MS.toList t
+    mconcat $ punctuate "*" $ map (autoParens . pretty) $ MS.toList t
+    where
+      autoParens
+        | MS.size t > 1 = parens
+        | otherwise = id
 
 instance (Pretty u) => Pretty (SoP u) where
   pretty (SoP ts)
