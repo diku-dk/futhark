@@ -31,7 +31,7 @@ import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.Monad (lookupRange)
 import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.))
-import Language.Futhark (VName, prettyString)
+import Language.Futhark (VName)
 import Prelude hiding (GT, LT)
 import Futhark.Analysis.Proofs.Util (prettyIndent)
 

@@ -9,10 +9,10 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool, addRelSymbol)
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, flattenCases, guards)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
-import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv)
+import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv, warningString)
 import Futhark.Analysis.Proofs.Query
 import Futhark.Analysis.Proofs.Rewrite (rewrite)
 import Futhark.Analysis.Proofs.Substitute qualified as Subst
@@ -57,12 +57,13 @@ prove_ _ (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext f
       <> "\n"
       <> prettyIndent 2 fn
   i <- newNameFromString "i"
-  j <- newNameFromString "j"
+  j <- newNameFromString "I"
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
   let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
-  -- (1) Prove that within in a given case, there are no duplicate values in [a,b].
-  -- (2) Prove that there are no duplicate values in [a,b] across cases.
+  -- WTS(1): Within in a given case, there are no duplicate values in [a,b].
+  --
+  -- WTS(2): There are no duplicate values in [a,b] across cases.
   --  It is sufficient to show that the case values can be sorted
   --  in a strictly increasing order. That is, given
   --    i /= j in [0,...,n-1]
@@ -75,9 +76,12 @@ prove_ _ (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext f
   --  to reduce the number of tests needed, but the only thing
   --  that matters is that this sorting exists.
   --
+  -- WTS(3): If fn is segmented, there are no duplicates across segments.
+  --   Shown similarly to (2), by choosing i in [e_k, ..., e_{k+1}]
+  --   and j in [e_{k+1},...,e_{k+2}].
+  --
   let out_of_range x = x :< a :|| b :< x
 
-  -- Proof of (1).
   let step1 = allM [no_dups g | g <- guards fn]
         where
           no_dups (c, e) = rollbackAlgEnv $ do
@@ -94,15 +98,13 @@ prove_ _ (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext f
                     =>? (e @ i :/= e @ j)
             oob `orM` neq
 
-  -- Proof of (2).
-  let step2 = answerFromBool . isJust <$> sorted cmp (guards fn)
+  let step2 = guards fn `canBeSortedBy` cmp
         where
+          -- Order guards by querying the solver.
           (p_f, f) `cmp` (p_g, g) = rollbackAlgEnv $ do
-            let p =
-                  (fromJust . justSym $ p_f @ i) :&& (fromJust . justSym $ p_g @ j)
+            let p = (fromJust . justSym $ p_f @ i) :&& (fromJust . justSym $ p_g @ j)
             let f_rel_g rel =
-                  -- WTS: forall i /= j ^ p_f(i) ^ p_g(j) . f(i) `rel` g(j)
-                  -- XXX could use in_range f@i g@j here
+                  -- WTS: forall i /= j . p_f(i) ^ p_g(j) => f(i) `rel` g(j)
                   let case_i_lt_j = rollbackAlgEnv $ do
                         addRelIterator iter_j
                         i +< j
@@ -112,24 +114,46 @@ prove_ _ (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext f
                         j +< i
                         p =>? (f @ i) `rel` (g @ j)
                    in case_i_lt_j `andM` case_i_gt_j
-            ifM
-              (f_rel_g (:<))
-              LT
-              ( ifM
-                  (f_rel_g (:>))
-                  GT
-                  (pure Undefined)
-              )
+            relationToOrder f_rel_g
 
-  step1 `andM` step2
+  let step3 = case dom of
+        Iota {} -> pure Yes
+        Cat k _ _ -> guards fn `canBeSortedBy` cmp
+          where
+            kp1_rep = mkRep k $ sym2SoP (Var k) .+. int2SoP 1
+            dom' = repDomain kp1_rep dom
+            iter_j' = Forall j $ repDomain (mkRep i0 (Var j)) dom'
+
+            -- Order guards by querying the solver.
+            (p_f, f) `cmp` (p_g', g') = rollbackAlgEnv $ do
+              let (p_g, g) = (rep kp1_rep p_g', rep kp1_rep g')
+              let p = (fromJust . justSym $ p_f @ i) :&& (fromJust . justSym $ p_g @ j)
+              -- WTS: forall i,j . e_k <= i < e_{k+1}
+              --                     ^ e_{k+1} <= j < e_{k+2}
+              --                     ^ p_f(i) ^ p_g(j)
+              --                       => f(i) `rel` g(j)
+              let f_rel_g rel =
+                    rollbackAlgEnv $ do
+                      addRelIterator iter_j'
+                      addRelIterator iter_i
+                      p =>? (f @ i) `rel` (g @ j)
+              relationToOrder f_rel_g
+
+  step1 `andM` step2 `andM` step3
   where
     f @ x = rep (mkRep i0 (Var x)) f
 
-    ifM m t f = do
-      res <- m
-      case res of
-        Yes -> pure t
-        Unknown -> f
+    xs `canBeSortedBy` cmp = answerFromBool . isJust <$> sorted cmp xs
+
+    relationToOrder rel = do
+      lt <- rel (:<)
+      case lt of
+        Yes -> pure LT
+        Unknown -> do
+          gt <- rel (:>)
+          case gt of
+            Yes -> pure GT
+            Unknown -> pure Undefined
 prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) = rollbackAlgEnv $ do
   printM 1000 $
     title "Proving BijectiveRCD "
