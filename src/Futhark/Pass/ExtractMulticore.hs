@@ -295,8 +295,9 @@ transformSOAC pat _ (ScanScatter w arrs map_lam scan dest post_lam) = do
   (gtid, space) <- mkSegSpace w
   kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
   (scan_stms, scan') <- scanToSegBinOp scan
+  post_lam' <- transformLambda post_lam
 
-  let post_op = SegPostOp undefined []
+  let post_op = SegPostOp post_lam' dest
   pure $
     scan_stms
       <> oneStm

@@ -36,6 +36,7 @@ module Futhark.IR.SOACS.SOAC
     ppHist,
     ppStream,
     ppScatter,
+    ppScanScatter,
     groupScatterResults,
     groupScatterResults',
     splitScatterResults,
@@ -557,7 +558,7 @@ soacType (Hist _ _ ops _bucket_fun) = do
 soacType (Screma w _arrs form) =
   scremaType w form
 soacType (ScanScatter w _arrs _map_lam _scan dests scatter_lam) =
-  zipWith arrayOfShape (map (snd . head) rets) shapes
+  zipWith arrayOfShape (drop num_idxs rts) as_ws
     <> map (`arrayOfRow` w) (drop num_scatter_rts rts)
   where
     (as_ws, as_ns, _as_vs) = unzip3 dests
@@ -565,8 +566,6 @@ soacType (ScanScatter w _arrs _map_lam _scan dests scatter_lam) =
     num_idxs = sum $ zipWith (*) as_ns $ map length as_ws
     num_vs = sum as_ns
     num_scatter_rts = num_vs + num_idxs
-    (shapes, _, rets) =
-      unzip3 $ groupScatterResults dests $ lambdaReturnType scatter_lam
 
 instance TypedOp SOAC where
   opType = pure . staticShapes . soacType
@@ -1091,15 +1090,27 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
             )
   pretty (Screma w arrs form) = ppScrema w arrs form
   pretty (ScanScatter w arrs map_lam scan dests scatter_lam) =
-    "scanscatter"
-      <> (parens . align)
-        ( pretty w
-            <> comma </> ppTuple' (map pretty arrs)
-            <> comma </> pretty map_lam
-            <> comma </> pretty scan
-            <> comma </> commasep (map pretty dests)
-            <> comma </> pretty scatter_lam
-        )
+    ppScanScatter w arrs map_lam scan dests scatter_lam
+
+ppScanScatter ::
+  (PrettyRep rep, Pretty inp) =>
+  SubExp ->
+  [inp] ->
+  Lambda rep ->
+  Scan rep ->
+  ScatterSpec VName ->
+  Lambda rep ->
+  Doc ann
+ppScanScatter w arrs map_lam scan dests scatter_lam =
+  "scanscatter"
+    <> (parens . align)
+      ( pretty w
+          <> comma </> ppTuple' (map pretty arrs)
+          <> comma </> pretty map_lam
+          <> comma </> pretty scan
+          <> comma </> commasep (map pretty dests)
+          <> comma </> pretty scatter_lam
+      )
 
 -- | Prettyprint the given Screma.
 ppScrema ::

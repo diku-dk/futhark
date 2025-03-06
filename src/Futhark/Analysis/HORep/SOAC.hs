@@ -86,6 +86,7 @@ import Futhark.IR hiding
 import Futhark.IR qualified as Futhark
 import Futhark.IR.SOACS.SOAC
   ( HistOp (..),
+    Scan (..),
     ScatterSpec,
     ScremaForm (..),
     scremaType,
@@ -407,6 +408,7 @@ data SOAC rep
   | Scatter SubExp [Input] (ScatterSpec VName) (Lambda rep)
   | Screma SubExp [Input] (ScremaForm rep)
   | Hist SubExp [Input] [HistOp rep] (Lambda rep)
+  | ScanScatter SubExp [Input] (Lambda rep) (Scan rep) (ScatterSpec VName) (Lambda rep)
   deriving (Eq, Show)
 
 -- | Returns the inputs used in a SOAC.
@@ -415,6 +417,7 @@ inputs (Stream _ arrs _ _) = arrs
 inputs (Scatter _ arrs _lam _spec) = arrs
 inputs (Screma _ arrs _) = arrs
 inputs (Hist _ inps _ _) = inps
+inputs (ScanScatter _ arrs _ _ _ _) = arrs
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC rep -> SOAC rep
@@ -426,6 +429,8 @@ setInputs arrs (Screma w _ form) =
   Screma w arrs form
 setInputs inps (Hist w _ ops lam) =
   Hist w inps ops lam
+setInputs arrs (ScanScatter w _ map_lam scan dest scatter_lam) =
+  ScanScatter w arrs map_lam scan dest scatter_lam
 
 newWidth :: [Input] -> SubExp -> SubExp
 newWidth [] w = w
@@ -437,6 +442,7 @@ lambda (Stream _ _ _ lam) = lam
 lambda (Scatter _len _ivs _spec lam) = lam
 lambda (Screma _ _ (ScremaForm lam _ _)) = lam
 lambda (Hist _ _ _ lam) = lam
+lambda (ScanScatter _ _ lam _ _ _) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda rep -> SOAC rep -> SOAC rep
@@ -448,6 +454,8 @@ setLambda lam (Screma w arrs (ScremaForm _ scan red)) =
   Screma w arrs (ScremaForm lam scan red)
 setLambda lam (Hist w ops inps _) =
   Hist w ops inps lam
+setLambda lam (ScanScatter w arrs _ scan dest scatter_lam) =
+  ScanScatter w arrs lam scan dest scatter_lam
 
 -- | The return type of a SOAC.
 typeOf :: SOAC rep -> [Type]
@@ -469,6 +477,15 @@ typeOf (Screma w _ form) =
 typeOf (Hist _ _ ops _) = do
   op <- ops
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
+typeOf (ScanScatter w _arrs _map_lam _scan dests scatter_lam) =
+  zipWith arrayOfShape (drop num_idxs rts) as_ws
+    <> map (`arrayOfRow` w) (drop num_scatter_rts rts)
+  where
+    (as_ws, as_ns, _as_vs) = unzip3 dests
+    rts = lambdaReturnType scatter_lam
+    num_idxs = sum $ zipWith (*) as_ns $ map length as_ws
+    num_vs = sum as_ns
+    num_scatter_rts = num_vs + num_idxs
 
 -- | The "width" of a SOAC is the expected outer size of its array
 -- inputs _after_ input-transforms have been carried out.
@@ -477,6 +494,7 @@ width (Stream w _ _ _) = w
 width (Scatter len _lam _ivs _as) = len
 width (Screma w _ _) = w
 width (Hist w _ _ _) = w
+width (ScanScatter w _ _ _ _ _) = w
 
 -- | Convert a SOAC to the corresponding expression.
 toExp ::
@@ -495,6 +513,13 @@ toSOAC (Screma w arrs form) =
   Futhark.Screma w <$> inputsToSubExps arrs <*> pure form
 toSOAC (Hist w arrs ops lam) =
   Futhark.Hist w <$> inputsToSubExps arrs <*> pure ops <*> pure lam
+toSOAC (ScanScatter w arrs map_lam scan dests scatter_lam) =
+  Futhark.ScanScatter w
+    <$> inputsToSubExps arrs
+    <*> pure map_lam
+    <*> pure scan
+    <*> pure dests
+    <*> pure scatter_lam
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -518,6 +543,15 @@ fromExp (Op (Futhark.Screma w arrs form)) =
   Right <$> (Screma w <$> traverse varInput arrs <*> pure form)
 fromExp (Op (Futhark.Hist w arrs ops lam)) =
   Right <$> (Hist w <$> traverse varInput arrs <*> pure ops <*> pure lam)
+fromExp (Op (Futhark.ScanScatter w arrs map_lam scan dests scatter_lam)) =
+  Right
+    <$> ( ScanScatter w
+            <$> traverse varInput arrs
+            <*> pure map_lam
+            <*> pure scan
+            <*> pure dests
+            <*> pure scatter_lam
+        )
 fromExp _ = pure $ Left NotSOAC
 
 -- | To-Stream translation of SOACs.
@@ -728,3 +762,5 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
   pretty (Hist len imgs ops bucket_fun) = Futhark.ppHist len imgs ops bucket_fun
   pretty (Stream w arrs nes lam) = Futhark.ppStream w arrs nes lam
   pretty (Scatter w arrs dests lam) = Futhark.ppScatter w arrs dests lam
+  pretty (ScanScatter w arrs map_lam scan dests scatter_lam) =
+    Futhark.ppScanScatter w arrs map_lam scan dests scatter_lam
