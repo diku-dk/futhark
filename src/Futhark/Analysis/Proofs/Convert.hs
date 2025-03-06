@@ -41,7 +41,6 @@ refinementPrelude =
       "bijectiveRCD",
       "filtPartInv",
       "and"
-      -- "segments"
     ]
 
 justVName :: E.Exp -> Maybe E.VName
@@ -955,49 +954,10 @@ warningMsg loc msg = do
 
 forwardRefPrelude :: E.SrcLoc -> E.Exp -> String -> NE.NonEmpty (a4, E.Exp) -> IndexFnM [IndexFn]
 forwardRefPrelude loc e f args = do
-  -- case f of
-  -- "segments"
-  --   | E.Lambda lam_params lam_body _ _ _ : _ <- getArgs args,
-  --     Just lam_args <- NE.nonEmpty (NE.tail args) -> do
-  --       debugPrettyM "segments" f
-  --       -- No-op.
-  --       (aligned_args, _) <- zipArgs loc lam_params lam_args
-  --       case mconcat aligned_args of
-  --         [(vn_seg, fn)] -> do
-  --           seg <- getSegment fn
-  --           case seg of
-  --             Just (seg_start, seg_end) -> do
-  --               -- bind lambda body params to segment
-  --               -- forward on lam_body
-  --               debugPrettyM "segment:" seg
-  --               iter <- bindLambdaBodyParams (mconcat aligned_args)
-  --               fns <- quantifiedBy iter $ forward lam_body
-
-  --               forM fns $ \body_fn ->
-  --                 if iterator body_fn == Empty
-  --                   then rewrite $ IndexFn iter (body body_fn)
-  --                   else error "scan: Non-scalar body."
-
-  --               undefined
-  --             Nothing ->
-  --               errorMsg loc "not segmented"
-  --         _ ->
-  --           undefined
-  -- "segments" ->
-  --   etaExpandErrorMsg loc (head $ getArgs args)
-  -- _ -> do
-  (effect, xss) <- parsePrelude f args
+  (effect, xss) <- parsePrelude
   forM xss $ \xs -> do
     fromPreludeEffect xs $ effect xs
   where
-    -- inPrelude :: E.Exp -> Bool
-    -- inPrelude (E.Var (E.QualName _ vn) _ _) =
-    --   E.baseString vn `S.member` refinementPrelude
-    -- inPrelude (E.AppExp (E.Apply g _ _) _)
-    --   | Just vn <- getFun g =
-    --       vn `S.member` refinementPrelude
-    -- inPrelude _ = False
-
     fromPreludeEffect fn m = do
       ans <- m
       case ans of
@@ -1010,67 +970,62 @@ forwardRefPrelude loc e f args = do
               <> "\nIndex function:\n"
               <> prettyString fn
 
--- getSegment (IndexFn (Forall _ dom@(Cat _ _ b)) _) = do
---   end <- rewrite $ intervalEnd dom
---   pure (Just (b, end))
--- getSegment _ =
---   pure Nothing
+    parsePrelude =
+      case f of
+        "injectiveRCD" | [e_RCD, e_xs] <- getArgs args -> do
+          f_RCD <- forward e_RCD
+          case f_RCD of
+            [IndexFn Empty g_a, IndexFn Empty g_b] -> do
+              xss <- forward e_xs
+              let a = flattenCases g_a
+              let b = flattenCases g_b
+              pure (prove (InjectiveRCD (a, b)), xss)
+            _ ->
+              undefined
+        "bijectiveRCD" | [e_RCD, e_ImgRCD, e_xs] <- getArgs args -> do
+          f_RCD <- forward e_RCD
+          f_ImgRCD <- forward e_ImgRCD
+          case f_RCD <> f_ImgRCD of
+            [ IndexFn Empty g_a,
+              IndexFn Empty g_b,
+              IndexFn Empty g_c,
+              IndexFn Empty g_d
+              ] -> do
+                xss <- forward e_xs
+                let a = flattenCases g_a
+                let b = flattenCases g_b
+                let c = flattenCases g_c
+                let d = flattenCases g_d
+                pure (prove (BijectiveRCD (a, b) (c, d)), xss)
+            _ ->
+              undefined
+        "filtPartInv"
+          | [e_X, e_filt, e_part] <- getArgs args,
+            E.Lambda params_filt lam_filt _ _ _ <- e_filt,
+            [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
+            E.Lambda params_part lam_part _ _ _ <- e_part,
+            [[(Just param_part, _)]] <- map patternMapAligned params_part -> do
+              f_Xs <- forward e_X
+              case f_Xs of
+                [f_X] | Forall i _ <- iterator f_X -> do
+                  -- Map filter and partition lambdas over indices of X.
+                  let iota = IndexFn (iterator f_X) (cases [(Bool True, sym2SoP (Var i))])
+                  _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
+                  filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
+                  part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
 
-parsePrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM (IndexFn -> IndexFnM Answer, [IndexFn])
-parsePrelude f args =
-  case f of
-    "injectiveRCD" | [e_RCD, e_xs] <- getArgs args -> do
-      f_RCD <- forward e_RCD
-      case f_RCD of
-        [IndexFn Empty g_a, IndexFn Empty g_b] -> do
+                  renamed <- renamesM [f_X, filt, part]
+                  let [f_X', filt', part'] = renamed
+                  -- Construct partitioning split point.
+                  split <- sumOverIndexFn part'
+
+                  pure (prove (FiltPartInv filt' part' split), [f_X'])
+                _ -> undefined
+        "and" | [e_xs] <- getArgs args -> do
+          -- No-op: The argument e_xs is a boolean array; each branch will
+          -- be checked in refinements.
+          -- XXX but we lose information about iterator at check site, hm...
           xss <- forward e_xs
-          let a = flattenCases g_a
-          let b = flattenCases g_b
-          pure (prove (InjectiveRCD (a, b)), xss)
+          pure (askRefinement, xss)
         _ ->
           undefined
-    "bijectiveRCD" | [e_RCD, e_ImgRCD, e_xs] <- getArgs args -> do
-      f_RCD <- forward e_RCD
-      f_ImgRCD <- forward e_ImgRCD
-      case f_RCD <> f_ImgRCD of
-        [ IndexFn Empty g_a,
-          IndexFn Empty g_b,
-          IndexFn Empty g_c,
-          IndexFn Empty g_d
-          ] -> do
-            xss <- forward e_xs
-            let a = flattenCases g_a
-            let b = flattenCases g_b
-            let c = flattenCases g_c
-            let d = flattenCases g_d
-            pure (prove (BijectiveRCD (a, b) (c, d)), xss)
-        _ ->
-          undefined
-    "filtPartInv"
-      | [e_X, e_filt, e_part] <- getArgs args,
-        E.Lambda params_filt lam_filt _ _ _ <- e_filt,
-        [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
-        E.Lambda params_part lam_part _ _ _ <- e_part,
-        [[(Just param_part, _)]] <- map patternMapAligned params_part -> do
-          f_Xs <- forward e_X
-          case f_Xs of
-            [f_X] | Forall i _ <- iterator f_X -> do
-              -- Map filter and partition lambdas over indices of X.
-              let iota = IndexFn (iterator f_X) (cases [(Bool True, sym2SoP (Var i))])
-              _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
-              filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
-              part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
-
-              -- Construct partitioning split point.
-              split <- sumOverIndexFn part
-
-              pure (prove (FiltPartInv filt part split), f_Xs)
-            _ -> undefined
-    "and" | [e_xs] <- getArgs args -> do
-      -- No-op: The argument e_xs is a boolean array; each branch will
-      -- be checked in refinements.
-      -- XXX but we lose information about iterator at check site, hm...
-      xss <- forward e_xs
-      pure (askRefinement, xss)
-    _ ->
-      undefined

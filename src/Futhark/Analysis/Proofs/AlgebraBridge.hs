@@ -52,8 +52,8 @@ simplify = astMap m
               to = \s -> do
                 a <- sub s (hole h2)
                 b <- sub s (hole h3)
-                non_empty <- a $<= b
-                case non_empty of
+                nicely_non_empty <- a $<= b .+. int2SoP 1
+                case nicely_non_empty of
                   Yes -> pure $ b .-. a .+. int2SoP 1
                   Unknown -> do
                     empty <- a $> b

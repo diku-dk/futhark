@@ -9,7 +9,7 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.List (partition)
 import Data.Maybe (fromJust, isJust)
-import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, answerFromBool)
+import Futhark.Analysis.Proofs.AlgebraBridge (addRelIterator, algebraContext, answerFromBool)
 import Futhark.Analysis.Proofs.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, flattenCases, guards)
 import Futhark.Analysis.Proofs.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
 import Futhark.Analysis.Proofs.Monad (IndexFnM, printM, printTrace, rollbackAlgEnv)
@@ -130,7 +130,7 @@ prove_ _ (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext f
       case res of
         Yes -> pure t
         Unknown -> f
-prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn it@(Forall i dom) _) = rollbackAlgEnv $ do
+prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) = rollbackAlgEnv $ do
   printM 1000 $
     title "Proving BijectiveRCD "
       <> "\n  RCD (a,b) = "
@@ -353,7 +353,6 @@ title s = "\ESC[4m" <> s <> "\ESC[0m"
 sumOverIndexFn :: IndexFn -> IndexFnM (SoP Symbol)
 sumOverIndexFn f@(IndexFn (Forall _ dom) _) = do
   n <- rewrite $ domainEnd dom
-  addRelSymbol (n :>= int2SoP 0) -- n is a size.
   j <- newVName "j"
   x <- newVName "x"
   let sum_part = Sum j (int2SoP 0) n (Idx (Var x) (sym2SoP $ Var j))
