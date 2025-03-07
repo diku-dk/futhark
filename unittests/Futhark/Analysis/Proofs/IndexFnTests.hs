@@ -432,6 +432,17 @@ tests =
                       [(Bool True, sym2SoP $ Idx (Hole xs) (sym2SoP $ Idx (Hole is_inv) (sHole i)))]
                 }
             ]
+        ),
+      mkTest
+        "tests/indexfn/maximalMatching_step3-1.fut"
+        ( pure $ \(i, n, _, _) ->
+            [ IndexFn
+                { iterator = Forall i (Iota (sHole n)),
+                  body =
+                    cases
+                      [(Bool True, int2SoP 0)]
+                }
+            ]
         )
     ]
   where
