@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Server-mode timing is now done with a monotonic clock.
 
+* `futhark test` now respects `notest`, similar to `nobench` for `futhark bench`.
+
 ## [0.25.27]
 
 ### Added
