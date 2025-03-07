@@ -17,6 +17,7 @@ import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.))
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Test.Tasty
 import Test.Tasty.HUnit
+import qualified Futhark.Analysis.Properties.Property as Property
 
 runTest :: IndexFnM a -> a
 runTest test = fst $ runIndexFnM test blankNameSource
@@ -244,8 +245,8 @@ tests =
       testCase "Match subsymbol" $
         run
           ( \(x, y, _, _, _, _, _, _) -> do
-              addProperty (Algebra.Var x) Algebra.Boolean
-              addProperty (Algebra.Var y) Algebra.Boolean
+              addProperty (Algebra.Var x) Property.Boolean
+              addProperty (Algebra.Var y) Property.Boolean
               rewrite (Var x :&& (Var y :&& neg (int 1 :>= int 2)))
           )
           @??= (Var x :&& Var y),

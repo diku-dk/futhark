@@ -46,10 +46,11 @@ import Futhark.Util (isEnvVarAtLeast)
 import Futhark.Util.Pretty (Pretty, docStringW, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
+import Futhark.Analysis.Properties.Property (Property)
 
 data VEnv = VEnv
   { vnamesource :: VNameSource,
-    algenv :: AlgEnv Algebra.Symbol Symbol Algebra.Property,
+    algenv :: AlgEnv Algebra.Symbol Symbol Property,
     indexfns :: M.Map VName [IndexFn],
     toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn]),
     defs :: M.Map VName ([E.Pat E.ParamType], E.Exp),
@@ -76,7 +77,7 @@ instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
   putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
 
-instance MonadSoP Algebra.Symbol Symbol Algebra.Property IndexFnM where
+instance MonadSoP Algebra.Symbol Symbol Property IndexFnM where
   getUntrans = gets (untrans . algenv)
   getRanges = gets (ranges . algenv)
   getEquivs = gets (equivs . algenv)
@@ -100,7 +101,7 @@ getTopLevelIndexFns = gets toplevel
 getTopLevelDefs :: IndexFnM (M.Map VName ([E.Pat E.ParamType], E.Exp))
 getTopLevelDefs = gets defs
 
-getAlgEnv :: IndexFnM (AlgEnv Algebra.Symbol Symbol Algebra.Property)
+getAlgEnv :: IndexFnM (AlgEnv Algebra.Symbol Symbol Property)
 getAlgEnv = gets algenv
 
 getII :: IndexFnM (M.Map Domain (VName, IndexFn))

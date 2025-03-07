@@ -109,7 +109,7 @@ tests =
                                cases
                                  [(Bool True, sVar i .+. int2SoP 1)]
                            }
-                   prove (BijectiveRCD (int2SoP a, f (sVar n)) (int2SoP c, g (sVar n))) fn
+                   prove (PBijectiveRCD (int2SoP a, f (sVar n)) (int2SoP c, g (sVar n))) fn
                )
                @?= answer
            | (a, f, c, g, answer) <-

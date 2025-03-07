@@ -4,14 +4,16 @@ module Futhark.Analysis.Properties.Util
     prettyBinding,
     partitions,
     prettyIndent,
+    prettyFun,
+    dummyVName,
   )
 where
 
 import Control.Monad (guard)
 import Data.List (subsequences, (\\))
 import Data.Maybe (fromJust)
-import Futhark.Util.Pretty (Doc, Pretty, align, docString, docStringW, indent, line, ppTupleLines', pretty, (<+>))
-import Language.Futhark (VName (VName))
+import Futhark.Util.Pretty
+import Language.Futhark (VName (VName), nameFromString)
 
 prettyName :: VName -> Doc ann
 prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
@@ -33,6 +35,15 @@ prettyBinding vn e =
 
 prettyIndent :: (Pretty a) => Int -> a -> String
 prettyIndent n e = docStringW 80 $ indent n (pretty e)
+
+prettyFun :: Pretty a => (VName -> a) -> [Char] -> Doc ann
+prettyFun f arg_name =
+  "λ" <> prettyName arg <> dot <+> pretty (f arg)
+  where
+    arg = VName (nameFromString arg_name) (-1)
+
+dummyVName :: VName
+dummyVName = VName (nameFromString "DUMMY_NAME") (-1)
 
 -- Generate all partitions of `xs` into `k` sublists.
 -- Includes sublists that are permutations of other sublists.

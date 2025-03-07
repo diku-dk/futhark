@@ -12,6 +12,7 @@ import Futhark.Analysis.Properties.Monad (IndexFnM, runIndexFnM, clearAlgEnv)
 import Futhark.SoP.FourierMotzkin qualified as FM
 
 import Futhark.Util.Pretty
+import Futhark.Analysis.Properties.Property
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-show-details=always --test-option="--pattern=Proofs.AlgebraPC.TempTests"

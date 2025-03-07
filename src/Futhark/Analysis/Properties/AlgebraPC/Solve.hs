@@ -20,6 +20,7 @@ import Futhark.SoP.SoP
 import Language.Futhark (VName)
 
 import Futhark.Util.Pretty
+import Futhark.Analysis.Properties.Property
 -- import Debug.Trace
 
 sop0 :: SoP Symbol

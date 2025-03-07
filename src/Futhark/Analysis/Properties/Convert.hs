@@ -30,6 +30,7 @@ import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
+import qualified Futhark.Analysis.Properties.Property as Property
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -509,7 +510,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
                   flip Forall (Iota sz) <$> newVName "i"
                 Nothing ->
                   pure Empty
-              when (typeIsBool return_type) $ addProperty (Algebra.Var g) Algebra.Boolean
+              when (typeIsBool return_type) $ addProperty (Algebra.Var g) Property.Boolean
 
               let g_fn =
                     IndexFn
@@ -625,7 +626,7 @@ scatterPerm :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
 scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
   printM 1337 $ "scatterPerm: dest_size" <> prettyString dest_size
-  perm <- lift $ prove (BijectiveRCD (int2SoP 0, dest_size) (int2SoP 0, dest_size)) inds
+  perm <- lift $ prove (PBijectiveRCD (int2SoP 0, dest_size) (int2SoP 0, dest_size)) inds
   case perm of
     Unknown -> failMsg "scatterPerm: no match"
     Yes -> do
@@ -895,9 +896,9 @@ addBooleanNames :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
 addBooleanNames (E.PatParens pat _) = addBooleanNames pat
 addBooleanNames (E.PatAscription pat _ _) = addBooleanNames pat
 addBooleanNames (E.Id param (E.Info {E.unInfo = E.Array _ _ t}) _) = do
-  when (typeIsBool $ E.Scalar t) $ addProperty (Algebra.Var param) Algebra.Boolean
+  when (typeIsBool $ E.Scalar t) $ addProperty (Algebra.Var param) Property.Boolean
 addBooleanNames (E.Id param (E.Info {E.unInfo = t}) _) = do
-  when (typeIsBool t) $ addProperty (Algebra.Var param) Algebra.Boolean
+  when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
 addBooleanNames _ = pure ()
 
 -- Lowerbounds size variables by 0.
@@ -912,7 +913,7 @@ addSizeVariables (E.Id _ (E.Info {E.unInfo = E.Array _ shp _}) _) = do
       addRel (alg_d :>=: int2SoP 0)
     addSize _ = pure ()
 addSizeVariables (E.Id param (E.Info {E.unInfo = t}) _) = do
-  when (typeIsBool t) $ addProperty (Algebra.Var param) Algebra.Boolean
+  when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
 addSizeVariables _ = pure ()
 
 -- Binds names of scalar parameters to scalar values of corresponding
@@ -979,7 +980,7 @@ forwardRefPrelude loc e f args = do
               xss <- forward e_xs
               let a = flattenCases g_a
               let b = flattenCases g_b
-              pure (prove (InjectiveRCD (a, b)), xss)
+              pure (prove (PInjectiveRCD (a, b)), xss)
             _ ->
               undefined
         "BijectiveRCD" | [e_RCD, e_ImgRCD, e_xs] <- getArgs args -> do
@@ -996,7 +997,7 @@ forwardRefPrelude loc e f args = do
                 let b = flattenCases g_b
                 let c = flattenCases g_c
                 let d = flattenCases g_d
-                pure (prove (BijectiveRCD (a, b) (c, d)), xss)
+                pure (prove (PBijectiveRCD (a, b) (c, d)), xss)
             _ ->
               undefined
         "FiltPartInv"
@@ -1019,7 +1020,7 @@ forwardRefPrelude loc e f args = do
                   -- Construct partitioning split point.
                   split <- sumOverIndexFn part'
 
-                  pure (prove (FiltPartInv filt' part' split), [f_X'])
+                  pure (prove (PFiltPartInv filt' part' split), [f_X'])
                 _ -> undefined
         "and" | [e_xs] <- getArgs args -> do
           -- No-op: The argument e_xs is a boolean array; each branch will

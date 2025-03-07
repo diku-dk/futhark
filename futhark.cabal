@@ -146,6 +146,7 @@ library
       Futhark.Analysis.Properties.IndexFn
       Futhark.Analysis.Properties.Monad
       Futhark.Analysis.Properties.IndexFnPlus
+      Futhark.Analysis.Properties.Property
       Futhark.Analysis.Properties.Prove
       Futhark.Analysis.Properties.Query
       Futhark.Analysis.Properties.Rewrite

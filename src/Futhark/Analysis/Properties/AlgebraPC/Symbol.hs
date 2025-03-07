@@ -2,16 +2,11 @@ module Futhark.Analysis.Properties.AlgebraPC.Symbol
   ( IdxSym (..),
     Symbol (..),
     MonDir (..),
-    Property (..),
     hasPow,
     hasSum,
     hasIdx,
     hasMdf,
-    hasDisjoint,
     hasIdxOrSum,
-    hasMon,
-    askMonotonic,
-    askDisjoint,
     getVName,
     fv,
   )
@@ -20,12 +15,11 @@ where
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.Util (prettyName)
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (Nameable (mkName), MonadSoP, askPropertyWith, RangeRelated (rangeRelatedTo))
+import Futhark.SoP.Monad (Nameable (mkName), RangeRelated (rangeRelatedTo))
 import Futhark.SoP.SoP (SoP, sopToLists, Free(..))
-import Futhark.Util.Pretty (Pretty, brackets, commasep, enclose, parens, pretty, viaShow, (<+>))
+import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName, nameFromString)
 import Language.Futhark qualified as E
-import Control.Monad (unless)
 -- import Futhark.Util.Pretty
 
 data IdxSym
@@ -50,6 +44,9 @@ data Symbol
   | -- | assumes positive base (>1) and exponents (>= 0);
     --   should be verified before construction
     Pow (Integer, SoP Symbol)
+  deriving (Show, Eq, Ord)
+
+data MonDir = Inc | IncS | Dec | DecS
   deriving (Show, Eq, Ord)
 
 instance Free Symbol Symbol where
@@ -117,22 +114,6 @@ fv sop = S.unions [fvSymbol t | (ts, _) <- sopToLists sop, t <- ts]
     fvSymbol (Sum xs lb ub) = fvIdxSym xs <> fv lb <> fv ub
     fvSymbol (Pow (_, x)) = fv x
 
-data MonDir = Inc | IncS | Dec | DecS
-  deriving (Show, Eq, Ord)
-
-data Property
-  = Monotonic MonDir
-  | Injective
-  | Boolean
-  | -- These predicates are pairwise disjoint and collectively exhaustive.
-    Disjoint (S.Set VName)
-  deriving (Show, Eq, Ord)
-
-instance Pretty Property where
-  pretty (Disjoint s) =
-    "Disjoint" <+> parens (commasep $ map prettyName $ S.toList s)
-  pretty p = viaShow p
-
 ---------------------------------
 --- Simple accessor functions ---
 ---------------------------------
@@ -158,34 +139,6 @@ hasIdxOrSum x = hasIdx x || hasMdf x || hasSum x
 
 -- tab_props <- getProperties
 -- case hasMon (fromMaybe S.empty $ M.lookup (Var anm) tab_props) of
-
-askMonotonic :: MonadSoP u e Property m => u -> m (Maybe MonDir)
-askMonotonic sym = askPropertyWith sym hasMon
-
-askDisjoint :: MonadSoP u e Property m => u -> m (Maybe (S.Set VName))
-askDisjoint sym = askPropertyWith sym hasDisjoint
-
-hasMon :: S.Set Property -> Maybe MonDir
-hasMon props
-  | S.null props = Nothing
-  | Monotonic dir : rest <- filter f (S.toList props) = do
-    unless (null rest) $ error "hasMon multiple Monotonic"
-    Just dir
-  where
-    f (Monotonic _) = True
-    f _ = False
-hasMon _ = Nothing
-
-hasDisjoint :: S.Set Property -> Maybe (S.Set VName)
-hasDisjoint props
-  | S.null props = Nothing
-  | Disjoint nms : rest <- filter f (S.toList props) = do
-    unless (null rest) $ error "hasDisjoint multiple Disjoint"
-    Just nms
-  where
-    f (Disjoint{}) = True
-    f _ = False
-hasDisjoint _ = Nothing
 
 getVName :: Symbol -> VName
 getVName (Var vn) = vn

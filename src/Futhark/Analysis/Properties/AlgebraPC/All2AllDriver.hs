@@ -14,6 +14,7 @@ import Futhark.Analysis.Properties.AlgebraPC.BinaryRules
 import Futhark.Analysis.Properties.AlgebraPC.Symbol
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
+import Futhark.Analysis.Properties.Property (Property)
 
 simplifyAll2All ::
   (MonadSoP Symbol e Property m) =>

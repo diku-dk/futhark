@@ -30,6 +30,7 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, hasConstant, int2SoP, justSym, mapSymM, mapSymSoPM, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName, baseString)
+import Futhark.Analysis.Properties.Property (Property(..), askDisjoint)
 
 -- Do this action inside an Algebra "context" created for an IndexFn, ensuring:
 -- (1) Modifications to the Algebra environment are ephemeral; they are
@@ -77,23 +78,23 @@ algebraContext fn m = rollbackAlgEnv $ do
       vns <- mapM (lookupUntransBool is) ps
       forM_ vns $ \vn ->
         addProperty (Algebra.Var vn) $
-          Algebra.Disjoint (S.fromList vns S.\\ S.singleton vn)
+          Disjoint (S.fromList vns S.\\ S.singleton vn)
 
     lookupUntransBool is x = do
       res <- search x
       vn <- case fst <$> res of
         Nothing -> addUntrans =<< foldM removeQuantifier x is
         Just vn -> pure vn
-      addProperty (Algebra.Var vn) Algebra.Boolean
+      addProperty (Algebra.Var vn) Boolean
       pure vn
 
     -- Add boolean tag to IndexFn layer names where applicable.
     trackBooleanNames (Var vn) = do
-      addProperty (Algebra.Var vn) Algebra.Boolean
+      addProperty (Algebra.Var vn) Boolean
     trackBooleanNames (Idx (Var vn) _) = do
-      addProperty (Algebra.Var vn) Algebra.Boolean
+      addProperty (Algebra.Var vn) Boolean
     trackBooleanNames (Apply (Var vn) _) = do
-      addProperty (Algebra.Var vn) Algebra.Boolean
+      addProperty (Algebra.Var vn) Boolean
     trackBooleanNames (Not x) = trackBooleanNames x
     trackBooleanNames (x :&& y) = trackBooleanNames x >> trackBooleanNames y
     trackBooleanNames (x :|| y) = trackBooleanNames x >> trackBooleanNames y
@@ -209,7 +210,7 @@ handleQuantifiers = astMap m
         Nothing -> do
           vn <- addUntrans =<< x `removeQuantifier` j
           booltype <- isBooleanM x
-          when booltype $ addProperty (Algebra.Var vn) Algebra.Boolean
+          when booltype $ addProperty (Algebra.Var vn) Boolean
           pure sym
     handleQuant x = pure x
 
@@ -274,11 +275,11 @@ search x = do
 
 isBooleanM :: Symbol -> IndexFnM Bool
 isBooleanM (Var vn) = do
-  askProperty (Algebra.Var vn) Algebra.Boolean
+  askProperty (Algebra.Var vn) Boolean
 isBooleanM (Idx (Var vn) _) = do
-  askProperty (Algebra.Var vn) Algebra.Boolean
+  askProperty (Algebra.Var vn) Boolean
 isBooleanM (Apply (Var vn) _) = do
-  askProperty (Algebra.Var vn) Algebra.Boolean
+  askProperty (Algebra.Var vn) Boolean
 isBooleanM x = pure $ isBoolean x
 
 getDisjoint :: Symbol -> IndexFnM [Symbol]
@@ -287,7 +288,7 @@ getDisjoint x = do
   case res of
     Nothing -> pure []
     Just (vn, idx) -> do
-      disjoint_vns <- fromMaybe mempty <$> Algebra.askDisjoint (Algebra.Var vn)
+      disjoint_vns <- fromMaybe mempty <$> askDisjoint (Algebra.Var vn)
       xs <- mapM lookupSym (S.toList disjoint_vns)
       case idx of
         Just j -> mapM (`repHoles` j) xs
@@ -317,7 +318,7 @@ toAlgebra_ (Sum j lb ub x) = do
       let idx = fromMaybe (sym2SoP $ Var j) match
       a <- mapSymM toAlgebra_ (rep (mkRep j lb) idx)
       b <- mapSymM toAlgebra_ (rep (mkRep j ub) idx)
-      booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
+      booltype <- askProperty (Algebra.Var vn) Boolean
       pure $ Algebra.Sum (idxSym booltype vn) a b
     Nothing -> do
       -- Either handle quantifiers needs to be run on the symbol first
@@ -332,7 +333,7 @@ toAlgebra_ sym@(Idx (Var xs) i) = do
     Nothing -> addUntrans (Var xs)
   let idx = fromMaybe i (snd =<< res)
   idx' <- mapSymM toAlgebra_ idx
-  booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
+  booltype <- askProperty (Algebra.Var vn) Boolean
   pure $ Algebra.Idx (idxSym booltype vn) idx'
 toAlgebra_ (Idx {}) = undefined
 toAlgebra_ sym@(Apply (Var f) [x]) = do
@@ -342,9 +343,9 @@ toAlgebra_ sym@(Apply (Var f) [x]) = do
     Nothing -> addUntrans sym
   let idx = fromMaybe x (snd =<< res)
   idx' <- mapSymM toAlgebra_ idx
-  f_is_bool <- askProperty (Algebra.Var f) Algebra.Boolean
-  when f_is_bool $ addProperty (Algebra.Var vn) Algebra.Boolean
-  booltype <- askProperty (Algebra.Var vn) Algebra.Boolean
+  f_is_bool <- askProperty (Algebra.Var f) Boolean
+  when f_is_bool $ addProperty (Algebra.Var vn) Boolean
+  booltype <- askProperty (Algebra.Var vn) Boolean
   pure $ Algebra.Idx (idxSym booltype vn) idx'
 toAlgebra_ x@(Apply {}) = lookupUntransPE x
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
@@ -366,7 +367,7 @@ handleBoolean p = do
     Just vn -> pure vn
   addRel (int2SoP 0 :<=: sym2SoP (Algebra.Var vn))
   addRel (sym2SoP (Algebra.Var vn) :<=: int2SoP 1)
-  addProperty (Algebra.Var vn) Algebra.Boolean
+  addProperty (Algebra.Var vn) Boolean
   case snd =<< res of
     Just idx -> do
       idx' <- mapSymM toAlgebra_ idx

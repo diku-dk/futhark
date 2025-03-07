@@ -18,6 +18,7 @@ import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import qualified Data.Map as M
 import Futhark.SoP.Refine (addRel)
+import Futhark.Analysis.Properties.Property
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"

@@ -32,13 +32,13 @@ data Property
   | -- For all k in Cat k _ _, prove property f(k).
     ForallSegments (VName -> Property)
   | -- The restriction of f to the preimage of [a,b] is injective.
-    InjectiveRCD (SoP Symbol, SoP Symbol)
+    PInjectiveRCD (SoP Symbol, SoP Symbol)
   | -- BijectiveRCD (a,b) (c,d).
     -- The restriction of f to the preimage of [a,b] is bijective.
     -- [c,d] (subset of [a,b]) is the image of this restricted f.
-    BijectiveRCD (SoP Symbol, SoP Symbol) (SoP Symbol, SoP Symbol)
+    PBijectiveRCD (SoP Symbol, SoP Symbol) (SoP Symbol, SoP Symbol)
   | -- The index functions are the filtering and partitioning predicates.
-    FiltPartInv IndexFn IndexFn (SoP Symbol)
+    PFiltPartInv IndexFn IndexFn (SoP Symbol)
 
 data Order = LT | GT | Undefined
   deriving (Eq, Show)
@@ -49,7 +49,7 @@ prove (ForallSegments fprop) f@(IndexFn (Forall _ (Cat k _ _)) _) =
 prove prop f = prove_ False prop f
 
 prove_ :: Bool -> Property -> IndexFn -> IndexFnM Answer
-prove_ _ (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
+prove_ _ (PInjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
   printM 1000 $
     title "Proving InjectiveRCD "
       <> "\n  RCD (a,b) = "
@@ -154,7 +154,7 @@ prove_ _ (InjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext f
           case gt of
             Yes -> pure GT
             Unknown -> pure Undefined
-prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) = rollbackAlgEnv $ do
+prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) = rollbackAlgEnv $ do
   printM 1000 $
     title "Proving BijectiveRCD "
       <> "\n  RCD (a,b) = "
@@ -178,7 +178,7 @@ prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) = 
 
   let step1 =
         printTrace 1000 "Step (1)" $
-          prove_ is_segmented (InjectiveRCD (a, b)) f
+          prove_ is_segmented (PInjectiveRCD (a, b)) f
 
   let step2 = rollbackAlgEnv $ do
         -- WTS(2.1): If |X| = |[c,d]| and (y in f(X) => y in [c,d]), then (2) holds.
@@ -249,7 +249,7 @@ prove_ is_segmented (BijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) = 
   step1 `andM` step2
   where
     e @ x = rep (mkRep i (Var x)) e
-prove_ baggage (FiltPartInv filt part split) f@(IndexFn (Forall i _) _) = rollbackAlgEnv $ do
+prove_ baggage (PFiltPartInv filt part split) f@(IndexFn (Forall i _) _) = rollbackAlgEnv $ do
   printM 1000 $
     title "Proving FiltPartInv\n"
       <> "  filter:\n"
@@ -265,7 +265,7 @@ prove_ baggage (FiltPartInv filt part split) f@(IndexFn (Forall i _) _) = rollba
   m <- sumOverIndexFn filt
   let mm1 = m .-. int2SoP 1
 
-  step1 <- prove_ baggage (BijectiveRCD (int2SoP 0, mm1) (int2SoP 0, mm1)) f
+  step1 <- prove_ baggage (PBijectiveRCD (int2SoP 0, mm1) (int2SoP 0, mm1)) f
 
   let step2 = algebraContext f $ do
         vn_filt <- newVName "filt"
@@ -346,7 +346,7 @@ prove_ baggage (FiltPartInv filt part split) f@(IndexFn (Forall i _) _) = rollba
   where
     fn @ idx = rep (mkRep i (Var idx)) fn
 prove_ baggage (PermutationOfRange start end) f =
-  prove_ baggage (BijectiveRCD (start, end) (start, end)) f
+  prove_ baggage (PBijectiveRCD (start, end) (start, end)) f
 prove_ baggage (PermutationOfZeroTo m) fn =
   prove_ baggage (PermutationOfRange (int2SoP 0) m) fn
 prove_ _ (ForallSegments _) _ =

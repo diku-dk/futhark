@@ -29,13 +29,13 @@ tests =
       mkTest
         "tests/indexfn/part2indices.fut"
         ( \[_pivot, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            prove (InjectiveRCD (int2SoP 0, n)) fn
+            prove (PInjectiveRCD (int2SoP 0, n)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices.fut"
         ( \[_pivot, fn@(IndexFn (Forall _ (Iota _)) _)] -> do
-            prove (InjectiveRCD (int2SoP 0, int2SoP 3)) fn
+            prove (PInjectiveRCD (int2SoP 0, int2SoP 3)) fn
         )
         Yes,
       mkTest

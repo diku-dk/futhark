@@ -16,6 +16,7 @@ import Data.Maybe
 import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol
+import Futhark.Analysis.Properties.Property
 import Futhark.SoP.SoP
 import Futhark.SoP.Monad (MonadSoP, getEquivs, getProperties, getRanges)  -- lookupRange
 import Futhark.SoP.FourierMotzkin qualified as FM
