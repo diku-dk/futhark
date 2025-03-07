@@ -1,4 +1,4 @@
-module Futhark.Analysis.Proofs.Properties
+module Futhark.Analysis.Proofs.Prove
   ( Property (..),
     prove,
     sumOverIndexFn,
