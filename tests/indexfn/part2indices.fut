@@ -1,7 +1,7 @@
 -- These should all pass.
-def sanity_check1 n : {bool | \_ -> true} = injectiveRCD (0, n) (iota n)
-def sanity_check2 n : {bool | \_ -> true} = injectiveRCD (0, n-1) (iota n)
-def sanity_check3 n : {bool | \_ -> true} = injectiveRCD (1, n) (replicate n 0)
+def sanity_check1 n : {bool | \_ -> true} = InjectiveRCD (0, n) (iota n)
+def sanity_check2 n : {bool | \_ -> true} = InjectiveRCD (0, n-1) (iota n)
+def sanity_check3 n : {bool | \_ -> true} = InjectiveRCD (1, n) (replicate n 0)
 
 
 def sum [n] (xs: [n]i64) =
@@ -10,7 +10,7 @@ def sum [n] (xs: [n]i64) =
 def part2indices [n]
   (conds: [n]bool)
   : {(i64, [n]i64) | \(num_true, inds) ->
-      filtPartInv inds (\_i -> true) (\i -> conds[i])
+      FiltPartInv inds (\_i -> true) (\i -> conds[i])
         && num_true == sum (map (\c -> if c then 1 else 0) conds)
     } =
   let tflgs = map (\c -> if c then 1 else 0) conds
@@ -32,7 +32,7 @@ def part2indices [n]
 -- --
 -- let step1 =
 --   -- A bijection from X to X is a permutation of X.
---   bijectiveRCD (0, n-1) (0, n-1) inds
+--   BijectiveRCD (0, n-1) (0, n-1) inds
 -- let step2 =
 --   num_true == sum (map (\c -> if c then 1 else 0) conds)
 --   && and (map2 (\c ind -> if c then ind < num_true else ind >= num_true) conds inds)

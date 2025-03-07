@@ -10,7 +10,7 @@ def filter_indices [n]
   (xs: [n]f32)
   : {(i64, [n]i64) | \(m, is) ->
       let cs = map (\x -> p x) xs
-      in filtPartInv is (\i -> cs[i]) (\i -> true)
+      in FiltPartInv is (\i -> cs[i]) (\i -> true)
           && (m == sum (map (\x -> to_i64 x) cs))
     } =
   let cs = map (\x -> p x) xs

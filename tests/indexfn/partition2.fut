@@ -5,7 +5,7 @@ def sum [n] (xs: [n]i64) =
 def part2indices [n]
   (conds: [n]bool)
   : {(i64, [n]i64) | \(num_true, inds) ->
-      filtPartInv inds (\_i -> true) (\i -> conds[i])
+      FiltPartInv inds (\_i -> true) (\i -> conds[i])
         && num_true == sum (map (\c -> if c then 1 else 0) conds)
     } =
   let tflgs = map (\c -> if c then 1 else 0) conds

@@ -62,7 +62,7 @@ let part2indicesL 't [m][n]
           -- 
           -- Proof.
           --   (1) A bijection from X to X is a permutation of X.
-          let step1 = bijectiveRCD (0, n-1) (0, n-1) inds
+          let step1 = BijectiveRCD (0, n-1) (0, n-1) inds
           let step2 =
             map2 (\i k ->
               let seg_start = seg_ends[k] - shape[k]

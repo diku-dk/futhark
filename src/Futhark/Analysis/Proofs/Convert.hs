@@ -37,9 +37,9 @@ import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 refinementPrelude :: S.Set String
 refinementPrelude =
   S.fromList
-    [ "injectiveRCD",
-      "bijectiveRCD",
-      "filtPartInv",
+    [ "InjectiveRCD",
+      "BijectiveRCD",
+      "FiltPartInv",
       "and"
     ]
 
@@ -972,7 +972,7 @@ forwardRefPrelude loc e f args = do
 
     parsePrelude =
       case f of
-        "injectiveRCD" | [e_RCD, e_xs] <- getArgs args -> do
+        "InjectiveRCD" | [e_RCD, e_xs] <- getArgs args -> do
           f_RCD <- forward e_RCD
           case f_RCD of
             [IndexFn Empty g_a, IndexFn Empty g_b] -> do
@@ -982,7 +982,7 @@ forwardRefPrelude loc e f args = do
               pure (prove (InjectiveRCD (a, b)), xss)
             _ ->
               undefined
-        "bijectiveRCD" | [e_RCD, e_ImgRCD, e_xs] <- getArgs args -> do
+        "BijectiveRCD" | [e_RCD, e_ImgRCD, e_xs] <- getArgs args -> do
           f_RCD <- forward e_RCD
           f_ImgRCD <- forward e_ImgRCD
           case f_RCD <> f_ImgRCD of
@@ -999,7 +999,7 @@ forwardRefPrelude loc e f args = do
                 pure (prove (BijectiveRCD (a, b) (c, d)), xss)
             _ ->
               undefined
-        "filtPartInv"
+        "FiltPartInv"
           | [e_X, e_filt, e_part] <- getArgs args,
             E.Lambda params_filt lam_filt _ _ _ <- e_filt,
             [[(Just param_filt, _)]] <- map patternMapAligned params_filt,

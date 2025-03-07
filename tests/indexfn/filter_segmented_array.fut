@@ -59,7 +59,7 @@ def filter_indices [n]
   (cs: [n]bool)
   : {(i64, [n]i64) | \(m, is) ->
       let correct_size = m == sum (map (\x -> to_i64 x) cs)
-      in filtPartInv is (\i -> cs[i]) (\i -> true)
+      in FiltPartInv is (\i -> cs[i]) (\i -> true)
           && correct_size
     } =
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) cs)
