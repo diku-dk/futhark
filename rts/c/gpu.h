@@ -168,71 +168,70 @@ struct builtin_kernels {
   gpu_kernel lmad_copy_8b;
 };
 
-/* TODO: uncomment these again */
 struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx) {
   struct builtin_kernels *kernels = malloc(sizeof(struct builtin_kernels));
-  //gpu_create_kernel(ctx, &kernels->map_transpose_1b, "map_transpose_1b");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_1b_large, "map_transpose_1b_large");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_1b_low_height, "map_transpose_1b_low_height");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_1b_low_width, "map_transpose_1b_low_width");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_1b_small, "map_transpose_1b_small");
 
-  //gpu_create_kernel(ctx, &kernels->map_transpose_2b, "map_transpose_2b");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_2b_large, "map_transpose_2b_large");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_2b_low_height, "map_transpose_2b_low_height");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_2b_low_width, "map_transpose_2b_low_width");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_2b_small, "map_transpose_2b_small");
+  gpu_create_kernel(ctx, &kernels->map_transpose_1b, "map_transpose_1b");
+  gpu_create_kernel(ctx, &kernels->map_transpose_1b_large, "map_transpose_1b_large");
+  gpu_create_kernel(ctx, &kernels->map_transpose_1b_low_height, "map_transpose_1b_low_height");
+  gpu_create_kernel(ctx, &kernels->map_transpose_1b_low_width, "map_transpose_1b_low_width");
+  gpu_create_kernel(ctx, &kernels->map_transpose_1b_small, "map_transpose_1b_small");
+
+  gpu_create_kernel(ctx, &kernels->map_transpose_2b, "map_transpose_2b");
+  gpu_create_kernel(ctx, &kernels->map_transpose_2b_large, "map_transpose_2b_large");
+  gpu_create_kernel(ctx, &kernels->map_transpose_2b_low_height, "map_transpose_2b_low_height");
+  gpu_create_kernel(ctx, &kernels->map_transpose_2b_low_width, "map_transpose_2b_low_width");
+  gpu_create_kernel(ctx, &kernels->map_transpose_2b_small, "map_transpose_2b_small");
 
   gpu_create_kernel(ctx, &kernels->map_transpose_4b, "map_transpose_4b");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_4b_large, "map_transpose_4b_large");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_4b_low_height, "map_transpose_4b_low_height");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_4b_low_width, "map_transpose_4b_low_width");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_4b_small, "map_transpose_4b_small");
+  gpu_create_kernel(ctx, &kernels->map_transpose_4b_large, "map_transpose_4b_large");
+  gpu_create_kernel(ctx, &kernels->map_transpose_4b_low_height, "map_transpose_4b_low_height");
+  gpu_create_kernel(ctx, &kernels->map_transpose_4b_low_width, "map_transpose_4b_low_width");
+  gpu_create_kernel(ctx, &kernels->map_transpose_4b_small, "map_transpose_4b_small");
 
-  //gpu_create_kernel(ctx, &kernels->map_transpose_8b, "map_transpose_8b");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_8b_large, "map_transpose_8b_large");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_8b_low_height, "map_transpose_8b_low_height");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_8b_low_width, "map_transpose_8b_low_width");
-  //gpu_create_kernel(ctx, &kernels->map_transpose_8b_small, "map_transpose_8b_small");
+  gpu_create_kernel(ctx, &kernels->map_transpose_8b, "map_transpose_8b");
+  gpu_create_kernel(ctx, &kernels->map_transpose_8b_large, "map_transpose_8b_large");
+  gpu_create_kernel(ctx, &kernels->map_transpose_8b_low_height, "map_transpose_8b_low_height");
+  gpu_create_kernel(ctx, &kernels->map_transpose_8b_low_width, "map_transpose_8b_low_width");
+  gpu_create_kernel(ctx, &kernels->map_transpose_8b_small, "map_transpose_8b_small");
 
-  //gpu_create_kernel(ctx, &kernels->lmad_copy_1b, "lmad_copy_1b");
-  //gpu_create_kernel(ctx, &kernels->lmad_copy_2b, "lmad_copy_2b");
-  //gpu_create_kernel(ctx, &kernels->lmad_copy_4b, "lmad_copy_4b");
-  //gpu_create_kernel(ctx, &kernels->lmad_copy_8b, "lmad_copy_8b");
+  gpu_create_kernel(ctx, &kernels->lmad_copy_1b, "lmad_copy_1b");
+  gpu_create_kernel(ctx, &kernels->lmad_copy_2b, "lmad_copy_2b");
+  gpu_create_kernel(ctx, &kernels->lmad_copy_4b, "lmad_copy_4b");
+  gpu_create_kernel(ctx, &kernels->lmad_copy_8b, "lmad_copy_8b");
 
   return kernels;
 }
 
-/* TODO: uncomment these again */
 void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* kernels) {
-  //gpu_free_kernel(ctx, kernels->map_transpose_1b);
-  //gpu_free_kernel(ctx, kernels->map_transpose_1b_large);
-  //gpu_free_kernel(ctx, kernels->map_transpose_1b_low_height);
-  //gpu_free_kernel(ctx, kernels->map_transpose_1b_low_width);
-  //gpu_free_kernel(ctx, kernels->map_transpose_1b_small);
+  gpu_free_kernel(ctx, kernels->map_transpose_1b);
+  gpu_free_kernel(ctx, kernels->map_transpose_1b_large);
+  gpu_free_kernel(ctx, kernels->map_transpose_1b_low_height);
+  gpu_free_kernel(ctx, kernels->map_transpose_1b_low_width);
+  gpu_free_kernel(ctx, kernels->map_transpose_1b_small);
 
-  //gpu_free_kernel(ctx, kernels->map_transpose_2b);
-  //gpu_free_kernel(ctx, kernels->map_transpose_2b_large);
-  //gpu_free_kernel(ctx, kernels->map_transpose_2b_low_height);
-  //gpu_free_kernel(ctx, kernels->map_transpose_2b_low_width);
-  //gpu_free_kernel(ctx, kernels->map_transpose_2b_small);
+  gpu_free_kernel(ctx, kernels->map_transpose_2b);
+  gpu_free_kernel(ctx, kernels->map_transpose_2b_large);
+  gpu_free_kernel(ctx, kernels->map_transpose_2b_low_height);
+  gpu_free_kernel(ctx, kernels->map_transpose_2b_low_width);
+  gpu_free_kernel(ctx, kernels->map_transpose_2b_small);
 
   gpu_free_kernel(ctx, kernels->map_transpose_4b);
-  //gpu_free_kernel(ctx, kernels->map_transpose_4b_large);
-  //gpu_free_kernel(ctx, kernels->map_transpose_4b_low_height);
-  //gpu_free_kernel(ctx, kernels->map_transpose_4b_low_width);
-  //gpu_free_kernel(ctx, kernels->map_transpose_4b_small);
+  gpu_free_kernel(ctx, kernels->map_transpose_4b_large);
+  gpu_free_kernel(ctx, kernels->map_transpose_4b_low_height);
+  gpu_free_kernel(ctx, kernels->map_transpose_4b_low_width);
+  gpu_free_kernel(ctx, kernels->map_transpose_4b_small);
 
-  //gpu_free_kernel(ctx, kernels->map_transpose_8b);
-  //gpu_free_kernel(ctx, kernels->map_transpose_8b_large);
-  //gpu_free_kernel(ctx, kernels->map_transpose_8b_low_height);
-  //gpu_free_kernel(ctx, kernels->map_transpose_8b_low_width);
-  //gpu_free_kernel(ctx, kernels->map_transpose_8b_small);
+  gpu_free_kernel(ctx, kernels->map_transpose_8b);
+  gpu_free_kernel(ctx, kernels->map_transpose_8b_large);
+  gpu_free_kernel(ctx, kernels->map_transpose_8b_low_height);
+  gpu_free_kernel(ctx, kernels->map_transpose_8b_low_width);
+  gpu_free_kernel(ctx, kernels->map_transpose_8b_small);
 
-  //gpu_free_kernel(ctx, kernels->lmad_copy_1b);
-  //gpu_free_kernel(ctx, kernels->lmad_copy_2b);
-  //gpu_free_kernel(ctx, kernels->lmad_copy_4b);
-  //gpu_free_kernel(ctx, kernels->lmad_copy_8b);
+  gpu_free_kernel(ctx, kernels->lmad_copy_1b);
+  gpu_free_kernel(ctx, kernels->lmad_copy_2b);
+  gpu_free_kernel(ctx, kernels->lmad_copy_4b);
+  gpu_free_kernel(ctx, kernels->lmad_copy_8b);
 
   free(kernels);
 }
@@ -350,21 +349,25 @@ static int gpu_map_transpose(struct futhark_context* ctx,
 
   void* args[11];
   size_t args_sizes[11] = {
-    sizeof(gpu_mem), sizeof(int64_t),
-    sizeof(gpu_mem), sizeof(int64_t),
-    sizeof(int32_t),
-    sizeof(int32_t),
-    sizeof(int32_t),
-    sizeof(int32_t),
-    sizeof(int32_t)
+    sizeof(int64_t), // dst_offset
+    sizeof(int64_t), // src_offset
+    sizeof(int32_t), // num_arrays
+    sizeof(int32_t), // x_elems
+    sizeof(int32_t), // y_elems
+    sizeof(int32_t), // mulx
+    sizeof(int32_t), // muly
+    sizeof(int32_t), // repeat_1
+    sizeof(int32_t), // repeat_2
+    sizeof(gpu_mem), // dst
+    sizeof(gpu_mem)  // src
   };
 
-  args[0] = &dst;
-  args[1] = &dst_offset;
-  args[2] = &src;
-  args[3] = &src_offset;
-  args[7] = &mulx;
-  args[8] = &muly;
+  args[9] = &dst;
+  args[0] = &dst_offset;
+  args[10] = &src;
+  args[1] = &src_offset;
+  args[5] = &mulx;
+  args[6] = &muly;
 
   if (dst_offset + k * n * m <= 2147483647L &&
       src_offset + k * n * m <= 2147483647L) {
@@ -409,11 +412,11 @@ static int gpu_map_transpose(struct futhark_context* ctx,
       block[1] = TR_TILE_DIM/TR_ELEMS_PER_THREAD;
       block[2] = 1;
     }
-    args[4] = &k32;
-    args[5] = &m32;
-    args[6] = &n32;
-    args[7] = &mulx32;
-    args[8] = &muly32;
+    args[2] = &k32;
+    args[3] = &m32;
+    args[4] = &n32;
+    args[5] = &mulx32;
+    args[6] = &muly32;
   } else {
     if (ctx->logging) { fprintf(ctx->log, "Using large kernel\n"); }
     kernel = kernel_large;
@@ -423,38 +426,17 @@ static int gpu_map_transpose(struct futhark_context* ctx,
     block[0] = TR_TILE_DIM;
     block[1] = TR_TILE_DIM/TR_ELEMS_PER_THREAD;
     block[2] = 1;
-    args[4] = &k;
-    args[5] = &m;
-    args[6] = &n;
-    args[7] = &mulx;
-    args[8] = &muly;
+    args[2] = &k;
+    args[3] = &m;
+    args[4] = &n;
+    args[5] = &mulx;
+    args[6] = &muly;
+    args_sizes[2] = sizeof(int64_t);
+    args_sizes[3] = sizeof(int64_t);
     args_sizes[4] = sizeof(int64_t);
     args_sizes[5] = sizeof(int64_t);
     args_sizes[6] = sizeof(int64_t);
-    args_sizes[7] = sizeof(int64_t);
-    args_sizes[8] = sizeof(int64_t);
   }
-
-  /* TODO: remove this again */
-  printf("gpu_map_transpose: Forcing kernel to be kernel_default (%p)\n", kernel_default);
-  kernel = kernel_default;
-  grid[0] = (m+TR_TILE_DIM-1)/TR_TILE_DIM;
-  grid[1] = (n+TR_TILE_DIM-1)/TR_TILE_DIM;
-  grid[2] = k;
-  block[0] = TR_TILE_DIM;
-  block[1] = TR_TILE_DIM/TR_ELEMS_PER_THREAD;
-  block[2] = 1;
-  args[4] = &k32;
-  args[5] = &m32;
-  args[6] = &n32;
-  args[7] = &mulx32;
-  args[8] = &muly32;
-  args_sizes[4] = sizeof(int32_t);
-  args_sizes[5] = sizeof(int32_t);
-  args_sizes[6] = sizeof(int32_t);
-  args_sizes[7] = sizeof(int32_t);
-  args_sizes[8] = sizeof(int32_t);
-  /* TODO: remove this again */
 
   // Cap the number of thead blocks we launch and figure out how many
   // repeats we need alongside each dimension.
@@ -462,10 +444,10 @@ static int gpu_map_transpose(struct futhark_context* ctx,
   int32_t repeat_2 = grid[2] / MAX_TR_THREAD_BLOCKS;
   grid[1] = repeat_1 > 0 ? MAX_TR_THREAD_BLOCKS : grid[1];
   grid[2] = repeat_2 > 0 ? MAX_TR_THREAD_BLOCKS : grid[2];
-  args[9] = &repeat_1;
-  args[10] = &repeat_2;
-  args_sizes[9] = sizeof(repeat_1);
-  args_sizes[10] = sizeof(repeat_2);
+  args[7] = &repeat_1;
+  args[8] = &repeat_2;
+  args_sizes[7] = sizeof(repeat_1);
+  args_sizes[8] = sizeof(repeat_2);
 
   if (ctx->logging) {
     fprintf(ctx->log, "\n");
@@ -512,33 +494,34 @@ static int gpu_lmad_copy(struct futhark_context* ctx,
   void* args[6+(8*3)];
   size_t args_sizes[6+(8*3)];
 
-  args[0] = &dst;
-  args_sizes[0] = sizeof(gpu_mem);
-  args[1] = &dst_offset;
-  args_sizes[1] = sizeof(dst_offset);
-  args[2] = &src;
-  args_sizes[2] = sizeof(gpu_mem);
-  args[3] = &src_offset;
-  args_sizes[3] = sizeof(src_offset);
-  args[4] = &n;
-  args_sizes[4] = sizeof(n);
-  args[5] = &r;
-  args_sizes[5] = sizeof(r);
+  args[28] = &dst;
+  args_sizes[28] = sizeof(gpu_mem);
+  args[29] = &src;
+  args_sizes[29] = sizeof(gpu_mem);
+
+  args[0] = &dst_offset;
+  args_sizes[0] = sizeof(dst_offset);
+  args[1] = &src_offset;
+  args_sizes[1] = sizeof(src_offset);
+  args[2] = &n;
+  args_sizes[2] = sizeof(n);
+  args[3] = &r;
+  args_sizes[3] = sizeof(r);
 
   int64_t zero = 0;
 
   for (int i = 0; i < 8; i++) {
-    args_sizes[6+i*3] = sizeof(int64_t);
-    args_sizes[6+i*3+1] = sizeof(int64_t);
-    args_sizes[6+i*3+2] = sizeof(int64_t);
+    args_sizes[4+i*3] = sizeof(int64_t);
+    args_sizes[4+i*3+1] = sizeof(int64_t);
+    args_sizes[4+i*3+2] = sizeof(int64_t);
     if (i < r) {
-      args[6+i*3] = &shape[i];
-      args[6+i*3+1] = &dst_strides[i];
-      args[6+i*3+2] = &src_strides[i];
+      args[4+i*3] = &shape[i];
+      args[4+i*3+1] = &dst_strides[i];
+      args[4+i*3+2] = &src_strides[i];
     } else {
-      args[6+i*3] = &zero;
-      args[6+i*3+1] = &zero;
-      args[6+i*3+2] = &zero;
+      args[4+i*3] = &zero;
+      args[4+i*3+1] = &zero;
+      args[4+i*3+2] = &zero;
     }
   }
   const size_t w = 256; // XXX: hardcoded thread block size.

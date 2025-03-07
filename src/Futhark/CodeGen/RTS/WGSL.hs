@@ -41,5 +41,20 @@ scalar64 = $(embedStringFile "rts/wgsl/scalar64.wgsl")
 
 -- | @rts/wgsl/builtin_kernels.wgsl@
 builtin_kernels :: T.Text
-builtin_kernels = $(embedStringFile "rts/wgsl/builtin_kernels.wgsl")
+builtin_kernels = T.concat
+  [ header
+  , T.concat
+    [ genTransposeKernel "1b" "i8"
+    , genTransposeKernel "2b" "i16"
+    , genTransposeKernel "4b" "i32"
+    , genTransposeKernel "8b" "i64"
+    ]
+  , footer
+  ]
+  where
+    content = $(embedStringFile "rts/wgsl/builtin_kernels.wgsl")
+    (header, middle) = T.breakOn "// Begin of builtin kernel group" content
+    (kernel, footer) = T.breakOn "// End of builtin kernel group" middle
+    genTransposeKernel name elemType =
+      T.replace "NAME" name $ T.replace "ELEM_TYPE" elemType kernel
 {-# NOINLINE builtin_kernels #-}

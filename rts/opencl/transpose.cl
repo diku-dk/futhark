@@ -3,9 +3,7 @@
 #define GEN_TRANSPOSE_KERNELS(NAME, ELEM_TYPE)                          \
 FUTHARK_KERNEL_SIZED(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1)\
 void map_transpose_##NAME(SHARED_MEM_PARAM                              \
-                          __global ELEM_TYPE *dst_mem,                  \
                           int64_t dst_offset,                           \
-                          __global ELEM_TYPE *src_mem,                  \
                           int64_t src_offset,                           \
                           int32_t num_arrays,                           \
                           int32_t x_elems,                              \
@@ -13,7 +11,9 @@ void map_transpose_##NAME(SHARED_MEM_PARAM                              \
                           int32_t mulx,                                 \
                           int32_t muly,                                 \
                           int32_t repeat_1,                             \
-                          int32_t repeat_2) {                           \
+                          int32_t repeat_2,                             \
+                          __global ELEM_TYPE *dst_mem,                  \
+                          __global ELEM_TYPE *src_mem) {                \
   (void)mulx; (void)muly;                                               \
   __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;            \
   int tblock_id_0 = get_tblock_id(0);                                   \

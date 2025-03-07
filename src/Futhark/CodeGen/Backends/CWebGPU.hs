@@ -123,19 +123,61 @@ mkKernelInfos kernels = do
 -- We need to generate kernel_infos for built-in kernels
 builtinKernels :: M.Map Name KernelInterface
 builtinKernels =
-  M.fromList
-    [ (nameFromText "map_transpose_4b", interface)
-    ]
+  M.fromList $ concatMap generateKernels builtinKernelTemplates
   where
-    interface =
+    nameParams = ["1b", "2b", "4b", "8b"]
+    builtinKernelTemplates =
+      [ ("lmad_copy_NAME", copyInterface)
+      , ("map_transpose_NAME", transposeInterface)
+      , ("map_transpose_NAME_low_height", transposeInterface)
+      , ("map_transpose_NAME_low_width", transposeInterface)
+      , ("map_transpose_NAME_small", transposeInterface)
+      , ("map_transpose_NAME_large", transposeInterfaceLarge)
+      ]
+
+    generateKernels (template, interface) =
+      [(nameFromText (T.replace "NAME" name template), interface) | name <- nameParams]
+
+    transposeInterface =
       KernelInterface
         { safety = SafetyNone,
-          scalarsOffsets = [0, 8, 16, 24, 32, 36, 40, 44, 48, 52, 56],
-          scalarsSize = 60,
+          scalarsOffsets = [0, 8, 16, 20, 24, 28, 32, 36, 40],
+          scalarsSize = 48, -- uniform buffers must be multiple of 16 bytes
           scalarsBindSlot = 0,
-          memBindSlots = [],
+          memBindSlots = [1, 2],
           overrideNames = [],
           dynamicBlockDims = [],
+          sharedMemoryOverrides = []
+        }
+
+    transposeInterfaceLarge =
+      KernelInterface
+        { safety = SafetyNone,
+          scalarsOffsets = [0, 8, 16, 24, 32, 40, 48, 56, 60],
+          scalarsSize = 64, -- uniform buffers must be multiple of 16 bytes
+          scalarsBindSlot = 0,
+          memBindSlots = [1, 2],
+          overrideNames = [],
+          dynamicBlockDims = [],
+          sharedMemoryOverrides = []
+        }
+
+    copyInterface =
+      KernelInterface
+        { safety = SafetyNone,
+          scalarsOffsets = [0,  8,  16,  24,  32,  40,  -- note that we need to align the 'r'
+                               48,  56,  64,  72,  80,  -- field to 8-bytes despite it being
+                               88,  96, 104, 112, 120,  -- an i32 due to uniform buffer alignment
+                              128, 136, 144, 152, 160,  -- requirements
+                              168, 176, 184, 192, 200,
+                              208, 216],
+          scalarsSize = 224, -- uniform buffers must be multiple of 16 bytes
+          scalarsBindSlot = 0,
+          memBindSlots = [1, 2],
+          overrideNames = ["lmad_copy_block_size_x", "lmad_copy_block_size_y", "lmad_copy_block_size_z"],
+          dynamicBlockDims = [(0, "lmad_copy_block_size_x")
+                             ,(1, "lmad_copy_block_size_y")
+                             ,(2, "lmad_copy_block_size_z")],
           sharedMemoryOverrides = []
         }
 
