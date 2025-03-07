@@ -139,29 +139,29 @@ library
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
       Futhark.Analysis.PrimExp.Table
-      Futhark.Analysis.Proofs.AlgebraBridge
-      Futhark.Analysis.Proofs.AlgebraBridge.Translate
-      Futhark.Analysis.Proofs.AlgebraBridge.Util
-      Futhark.Analysis.Proofs.Convert
-      Futhark.Analysis.Proofs.IndexFn
-      Futhark.Analysis.Proofs.Monad
-      Futhark.Analysis.Proofs.IndexFnPlus
-      Futhark.Analysis.Proofs.Prove
-      Futhark.Analysis.Proofs.Query
-      Futhark.Analysis.Proofs.Rewrite
-      Futhark.Analysis.Proofs.Rule
-      Futhark.Analysis.Proofs.Substitute
-      Futhark.Analysis.Proofs.Symbol
-      Futhark.Analysis.Proofs.SymbolPlus
-      Futhark.Analysis.Proofs.Traversals
-      Futhark.Analysis.Proofs.Unify
-      Futhark.Analysis.Proofs.Util
-      Futhark.Analysis.Proofs.AlgebraPC.Algebra
-      Futhark.Analysis.Proofs.AlgebraPC.All2AllDriver
-      Futhark.Analysis.Proofs.AlgebraPC.BinaryRules
-      Futhark.Analysis.Proofs.AlgebraPC.Solve
-      Futhark.Analysis.Proofs.AlgebraPC.Symbol
-      Futhark.Analysis.Proofs.AlgebraPC.UnaryRules
+      Futhark.Analysis.Properties.AlgebraBridge
+      Futhark.Analysis.Properties.AlgebraBridge.Translate
+      Futhark.Analysis.Properties.AlgebraBridge.Util
+      Futhark.Analysis.Properties.Convert
+      Futhark.Analysis.Properties.IndexFn
+      Futhark.Analysis.Properties.Monad
+      Futhark.Analysis.Properties.IndexFnPlus
+      Futhark.Analysis.Properties.Prove
+      Futhark.Analysis.Properties.Query
+      Futhark.Analysis.Properties.Rewrite
+      Futhark.Analysis.Properties.Rule
+      Futhark.Analysis.Properties.Substitute
+      Futhark.Analysis.Properties.Symbol
+      Futhark.Analysis.Properties.SymbolPlus
+      Futhark.Analysis.Properties.Traversals
+      Futhark.Analysis.Properties.Unify
+      Futhark.Analysis.Properties.Util
+      Futhark.Analysis.Properties.AlgebraPC.Algebra
+      Futhark.Analysis.Properties.AlgebraPC.All2AllDriver
+      Futhark.Analysis.Properties.AlgebraPC.BinaryRules
+      Futhark.Analysis.Properties.AlgebraPC.Solve
+      Futhark.Analysis.Properties.AlgebraPC.Symbol
+      Futhark.Analysis.Properties.AlgebraPC.UnaryRules
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench
@@ -545,13 +545,13 @@ test-suite unit
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
-      Futhark.Analysis.Proofs.EndToEndTests
-      Futhark.Analysis.Proofs.IndexFnTests
-      Futhark.Analysis.Proofs.QueryTests
-      Futhark.Analysis.Proofs.RewriteTests
-      Futhark.Analysis.Proofs.UnifyTests
-      Futhark.Analysis.Proofs.AlgebraPC.SolveTests
-      Futhark.Analysis.Proofs.AlgebraPC.TempTests
+      Futhark.Analysis.Properties.EndToEndTests
+      Futhark.Analysis.Properties.IndexFnTests
+      Futhark.Analysis.Properties.QueryTests
+      Futhark.Analysis.Properties.RewriteTests
+      Futhark.Analysis.Properties.UnifyTests
+      Futhark.Analysis.Properties.AlgebraPC.SolveTests
+      Futhark.Analysis.Properties.AlgebraPC.TempTests
       Futhark.BenchTests
       Futhark.IR.GPUTests
       Futhark.IR.MCTests

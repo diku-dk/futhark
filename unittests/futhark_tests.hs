@@ -2,13 +2,13 @@ module Main (main) where
 
 import Futhark.AD.DerivativesTests qualified
 import Futhark.Analysis.AlgSimplifyTests qualified
-import Futhark.Analysis.Proofs.EndToEndTests qualified
-import Futhark.Analysis.Proofs.IndexFnTests qualified
-import Futhark.Analysis.Proofs.QueryTests qualified
-import Futhark.Analysis.Proofs.RewriteTests qualified
-import Futhark.Analysis.Proofs.UnifyTests qualified
-import Futhark.Analysis.Proofs.AlgebraPC.SolveTests qualified
-import Futhark.Analysis.Proofs.AlgebraPC.TempTests qualified
+import Futhark.Analysis.Properties.EndToEndTests qualified
+import Futhark.Analysis.Properties.IndexFnTests qualified
+import Futhark.Analysis.Properties.QueryTests qualified
+import Futhark.Analysis.Properties.RewriteTests qualified
+import Futhark.Analysis.Properties.UnifyTests qualified
+import Futhark.Analysis.Properties.AlgebraPC.SolveTests qualified
+import Futhark.Analysis.Properties.AlgebraPC.TempTests qualified
 import Futhark.BenchTests qualified
 import Futhark.IR.Mem.IntervalTests qualified
 import Futhark.IR.Mem.IxFunTests qualified
@@ -33,13 +33,13 @@ allTests =
     ""
     [ Language.Futhark.SyntaxTests.tests,
       Futhark.AD.DerivativesTests.tests,
-      Futhark.Analysis.Proofs.EndToEndTests.tests,
-      Futhark.Analysis.Proofs.IndexFnTests.tests,
-      Futhark.Analysis.Proofs.QueryTests.tests,
-      Futhark.Analysis.Proofs.RewriteTests.tests,
-      Futhark.Analysis.Proofs.UnifyTests.tests,
-      Futhark.Analysis.Proofs.AlgebraPC.SolveTests.tests,
-      Futhark.Analysis.Proofs.AlgebraPC.TempTests.tests,
+      Futhark.Analysis.Properties.EndToEndTests.tests,
+      Futhark.Analysis.Properties.IndexFnTests.tests,
+      Futhark.Analysis.Properties.QueryTests.tests,
+      Futhark.Analysis.Properties.RewriteTests.tests,
+      Futhark.Analysis.Properties.UnifyTests.tests,
+      Futhark.Analysis.Properties.AlgebraPC.SolveTests.tests,
+      Futhark.Analysis.Properties.AlgebraPC.TempTests.tests,
       Futhark.BenchTests.tests,
       Futhark.IR.PropTests.tests,
       Futhark.IR.Syntax.CoreTests.tests,
