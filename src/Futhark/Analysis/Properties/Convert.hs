@@ -28,7 +28,6 @@ import Futhark.MonadFreshNames (VNameSource, newName, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
-import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
@@ -56,7 +55,7 @@ getSize (E.Var _ (E.Info {E.unInfo = (E.Scalar (E.Record _))}) loc) =
   errorMsg loc "Record-type variables must be unpacked."
 getSize (E.Var _ (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
 getSize (E.ArrayLit [] (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
-getSize e = error $ "getSize: " <> prettyString e <> "\n" <> show e
+getSize e = error $ "getSize: " <> prettyStr e <> "\n" <> show e
 
 sizeOfTypeBase :: E.TypeBase E.Size as -> IndexFnM (Maybe (SoP Symbol))
 sizeOfTypeBase (E.Scalar (E.Refinement ty _)) =
@@ -139,8 +138,8 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just ret) _ _ params body _ _ val_loc)
   | hasRefinement ret = do
       clearAlgEnv
       printM 1 $
-        emphString ("Analyzing " <> prettyString (E.locText (E.srclocOf val_loc)))
-          <> prettyString val
+        emphString ("Analyzing " <> prettyStr (E.locText (E.srclocOf val_loc)))
+          <> prettyStr val
       forM_ params addTypeRefinement
       forM_ params addBooleanNames
       forM_ params addSizeVariables
@@ -172,11 +171,11 @@ forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
   -- tell [textbf "Forward on " <> Math.math (toLaTeX vn) <> toLaTeX x]
-  whenDebug . traceM $ "Forward on " <> prettyString vn
+  whenDebug . traceM $ "Forward on " <> prettyStr vn
   (bindfn vn =<< forward x) >> forward in_body
 forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
   -- tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX x]
-  whenDebug . traceM $ "Forward on " <> prettyString patterns
+  whenDebug . traceM $ "Forward on " <> prettyStr patterns
   xs <- forward x
   forM_ (zip (mconcat $ map patternMapAligned patterns) xs) bindfnOrDiscard
   forward body
@@ -248,7 +247,7 @@ forward (E.Not e _) = do
 forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op',
-    Just bop <- L.find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
+    Just bop <- L.find ((name ==) . prettyStr) [minBound .. maxBound :: E.BinOp] = do
       vxs <- forward x'
       vys <- forward y'
       forM (zip vxs vys) $ \(vx, vy) -> do
@@ -324,7 +323,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       -- No need to handle map non-lambda yet as program can just be rewritten.
       errorMsg loc $
         "Only anonymous functions may be passed as argument. Perhaps you want to eta-expand: "
-          <> prettyString (head $ getArgs args)
+          <> prettyStr (head $ getArgs args)
   | Just "replicate" <- getFun f,
     [e_n, e_x] <- getArgs args = do
       ns <- forward e_n
@@ -448,7 +447,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       -- A top-level definition with an index function.
       case M.lookup g toplevel of
         Just (pats, indexfns) -> do
-          printM 5 $ "✨ Using index fn " <> prettyString g
+          printM 5 $ "✨ Using index fn " <> prettyStr g
           (actual_args, _, size_rep) <- handleArgs loc' g pats
 
           forM indexfns $ \fn -> do
@@ -465,7 +464,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
             -- index function. (Less work, but more likely to fail.
             -- For example, substituting into a Sum fails in some cases.)
             Just (pats, e) -> do
-              printM 5 $ "✨ Using top-level def " <> prettyString g
+              printM 5 $ "✨ Using top-level def " <> prettyStr g
               (actual_args, actual_sizes, _) <- handleArgs loc' g pats
 
               forM_ (mconcat actual_sizes) $ \(n, sz) -> do
@@ -500,7 +499,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       (actual_args, actual_sizes) <- zipArgs loc' pats args
       let size_rep = M.fromList $ mconcat actual_sizes
       whenDebug . traceM $
-        "Size variable replacement " <> prettyString size_rep
+        "Size variable replacement " <> prettyStr size_rep
 
       checkPreconditions actual_args size_rep
 
@@ -522,12 +521,12 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
             Nothing -> pure Yes
             Just check -> do
               whenDebug . traceM $
-                "Checking precondition " <> prettyString pat <> " for " <> prettyString g
+                "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
               check (size_rep, scope)
           unless (isYes ans) . errorMsg loc $
-            "Failed to show precondition " <> prettyString pat <> " in context: " <> prettyString scope
+            "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
 forward e = do
-  printM 1337 $ "forward on " <> show e <> "\nPretty: " <> prettyString e
+  printM 1337 $ "forward on " <> show e <> "\nPretty: " <> prettyStr e
   vn <- newVName "I_e_untrans"
   pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
 
@@ -599,7 +598,7 @@ substParams = foldM substParam
 scatterPerm :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
 scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
-  printM 1337 $ "scatterPerm: dest_size" <> prettyString dest_size
+  printM 1337 $ "scatterPerm: dest_size" <> prettyStr dest_size
   perm <- lift $ prove (PBijectiveRCD (int2SoP 0, dest_size) (int2SoP 0, dest_size)) inds
   case perm of
     Unknown -> failMsg "scatterPerm: no match"
@@ -625,7 +624,7 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
           printM 1 . warningMsg (E.locOf e_inds) $
             "You might want to bind scattered indices to a name to aid"
               <> " index function inference: "
-              <> prettyString e_inds
+              <> prettyStr e_inds
           fail ""
 scatterPerm _ _ _ _ = fail ""
 
@@ -792,11 +791,11 @@ getRefinement (E.PatParens pat _) = getRefinement pat
 getRefinement (E.PatAscription pat _ _) = getRefinement pat
 getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
   | E.Array _ _ (E.Refinement _ty ref) <- info = do
-      whenDebug . traceM $ "Getting (array) type refinement " <> prettyString (param, ref)
+      whenDebug . traceM $ "Getting (array) type refinement " <> prettyStr (param, ref)
       hole <- sym2SoP . Hole <$> newVName "h"
       Just <$> mkRef ((`Idx` hole) . Var) ref
   | E.Scalar (E.Refinement _ty ref) <- info = do
-      whenDebug . traceM $ "Getting type refinement " <> prettyString (param, ref)
+      whenDebug . traceM $ "Getting type refinement " <> prettyStr (param, ref)
       Just <$> mkRef Var ref
   where
     mkRef wrap (E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _) = do
@@ -925,9 +924,9 @@ forwardRefPrelude loc e f args = do
         _ ->
           errorMsg loc $
             "Failed to show: "
-              <> prettyString e
+              <> prettyStr e
               <> "\nIndex function:\n"
-              <> prettyString fn
+              <> prettyStr fn
 
     parsePrelude =
       case f of
