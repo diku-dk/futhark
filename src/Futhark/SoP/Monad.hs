@@ -38,7 +38,7 @@ module Futhark.SoP.Monad
     mkRangeLB,
     mkRangeUB,
     askPropertyWith,
-    RangeRelated(..),
+    RangeRelated (..),
   )
 where
 
@@ -49,7 +49,6 @@ import Data.Map (Map)
 import Data.Map.Strict qualified as M
 import Data.Set (Set)
 import Data.Set qualified as S
-import Futhark.Analysis.PrimExp
 import Futhark.FreshNames
 import Futhark.MonadFreshNames
 import Futhark.SoP.Expression
@@ -92,7 +91,7 @@ class
     MonadFreshNames m,
     Expression e
   ) =>
-  MonadSoP u e p m
+  MonadSoP u e p m -- u is algebra symbols, e is "source" symbols.
     | m -> u,
       m -> e,
       m -> p
@@ -145,13 +144,13 @@ instance (MonadWriter w m) => MonadWriter w (SoPMT u e p m) where
 
 type SoPM u e p = SoPMT u e p (State VNameSource)
 
-runSoPMT :: (MonadFreshNames m) => AlgEnv u e p -> SoPMT u e p m a -> m (a, AlgEnv u e p)
+runSoPMT :: AlgEnv u e p -> SoPMT u e p m a -> m (a, AlgEnv u e p)
 runSoPMT env (SoPMT sm) = runStateT sm env
 
-runSoPMT_ :: (Ord u, Ord e, MonadFreshNames m) => SoPMT u e p m a -> m (a, AlgEnv u e p)
+runSoPMT_ :: (Ord u, Ord e) => SoPMT u e p m a -> m (a, AlgEnv u e p)
 runSoPMT_ = runSoPMT mempty
 
-runSoPM :: (Ord u, Ord e) => AlgEnv u e p -> SoPM u e p a -> (a, AlgEnv u e p)
+runSoPM :: AlgEnv u e p -> SoPM u e p a -> (a, AlgEnv u e p)
 runSoPM env = flip evalState mempty . runSoPMT env
 
 runSoPM_ :: (Ord u, Ord e) => SoPM u e p a -> (a, AlgEnv u e p)
@@ -163,7 +162,7 @@ evalSoPMT env m = fst <$> runSoPMT env m
 evalSoPMT_ :: (Ord u, Ord e, MonadFreshNames m) => SoPMT u e p m a -> m a
 evalSoPMT_ = evalSoPMT mempty
 
-evalSoPM :: (Ord u, Ord e) => AlgEnv u e p -> SoPM u e p a -> a
+evalSoPM :: AlgEnv u e p -> SoPM u e p a -> a
 evalSoPM env = fst . runSoPM env
 
 evalSoPM_ :: (Ord u, Ord e) => SoPM u e p a -> a
@@ -183,9 +182,9 @@ findSymLEq0Def sop = do
   case is of
     [] -> pure (sop, Nothing)
     _ -> do
-      let i = snd $ maximum $ is
+      let i = snd $ maximum is
       rg <- lookupRange i
-      pure $ (sop, Just (i, rg))
+      pure (sop, Just (i, rg))
 
 instance
   ( Ord u,
@@ -263,10 +262,10 @@ addRange sym r =
 mkRange :: SoP u -> SoP u -> Range u
 mkRange lb ub = Range (S.singleton lb) 1 (S.singleton ub)
 
-mkRangeLB :: Ord u => SoP u -> Range u
+mkRangeLB :: (Ord u) => SoP u -> Range u
 mkRangeLB n = Range (S.singleton n) 1 mempty
 
-mkRangeUB :: Ord u => SoP u -> Range u
+mkRangeUB :: (Ord u) => SoP u -> Range u
 mkRangeUB n = Range mempty 1 (S.singleton n)
 
 -- \| Add equivalent information for a symbol; unsafe and
@@ -289,7 +288,7 @@ askProperty sym prop = do
     Nothing -> pure False
     Just props -> pure $ prop `S.member` props
 
-askPropertyWith :: MonadSoP u e p m => u -> (Set p -> Maybe a) -> m (Maybe a)
+askPropertyWith :: (MonadSoP u e p m) => u -> (Set p -> Maybe a) -> m (Maybe a)
 askPropertyWith sym getter = do
   mp <- (M.!? sym) <$> getProperties
   case mp of
@@ -359,18 +358,19 @@ instance (Ord u, Ord e) => Monoid (AlgEnv u e p) where
 
 instance (Pretty u, Pretty e, Pretty p) => Pretty (AlgEnv u e p) where
   pretty env =
-     hang 4 $ line
-      <> "Untranslatable: "
-      <> pretty (untrans env)
-      <> line
-      <> "Equivalences: "
-      <> pretty (equivs env)
-      <> line
-      <> "Ranges: "
-      <> pretty (ranges env)
-      <> line
-      <> "Properties: "
-      <> pretty (M.toList $ properties env)
+    hang 4 $
+      line
+        <> "Untranslatable: "
+        <> pretty (untrans env)
+        <> line
+        <> "Equivalences: "
+        <> pretty (equivs env)
+        <> line
+        <> "Ranges: "
+        <> pretty (ranges env)
+        <> line
+        <> "Properties: "
+        <> pretty (M.toList $ properties env)
 
 class (Ord u, Free u u) => RangeRelated u where
   rangeRelatedTo :: u -> S.Set u
@@ -397,7 +397,7 @@ class (Ord u, Free u u) => RangeRelated u where
             case M.lookup sym rs of
               Nothing ->
                 let active'' = active' <> free sym
-                in tc rs closure' seen' active''
+                 in tc rs closure' seen' active''
               Just range ->
                 let new_syms = free range S.\\ seen
                     active'' = active' <> free sym <> new_syms
