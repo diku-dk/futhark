@@ -16,6 +16,7 @@ import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, guards, justSingleCase)
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
+import Futhark.Analysis.Properties.Property qualified as Property
 import Futhark.Analysis.Properties.Prove (Property (..), prove, sumOverIndexFn)
 import Futhark.Analysis.Properties.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, isUnknown, isYes)
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
@@ -30,7 +31,6 @@ import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
-import qualified Futhark.Analysis.Properties.Property as Property
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -146,36 +146,8 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just ret) _ _ params body _ _ val_loc)
       forM_ params addSizeVariables
       indexfns <- forward body >>= mapM rewrite >>= bindfn vn
       insertTopLevel vn (params, indexfns)
-      checkRefinement indexfns ret
+      checkRefinement vn indexfns ret
       pure indexfns
-  where
-    checkRefinement indexfns (E.TEParens te _) =
-      checkRefinement indexfns te
-    checkRefinement indexfns te@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
-      printM 1 . warningString $
-        "Checking post-condition:\n" <> prettyStr te
-      let param_names = map fst $ mconcat $ map patternMapAligned lam_params
-      forM_ (zip param_names indexfns) $ \(nm, fn) ->
-        when (isJust nm) . void $ bindfn (fromJust nm) [fn]
-      postconds <- forward lam_body >>= mapM rewrite
-      printM 1 $
-        "Post-conditions after substituting in results:\n  "
-          <> prettyStr postconds
-      answer <- askRefinements postconds
-      case answer of
-        Yes -> do
-          printM 1 (E.baseString vn <> " ∎\n\n")
-          pure ()
-        Unknown ->
-          errorMsg loc $ "Failed to show refinement: " <> prettyString te
-    checkRefinement _ (E.TERefine _ _ loc) = do
-      errorMsg loc "Only lambda post-conditions are currently supported."
-    checkRefinement indexfns (E.TETuple tes _)
-      | length indexfns == length tes = do
-          zipWithM_ checkRefinement (map (: []) indexfns) tes
-      | otherwise =
-          undefined
-    checkRefinement _ _ = pure ()
 mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
   insertTopLevelDef vn (params, body)
   pure []
@@ -1016,3 +988,32 @@ forwardRefPrelude loc e f args = do
           pure (askRefinement, xss)
         _ ->
           undefined
+
+checkRefinement :: (E.IsName vn) => E.VName -> [IndexFn] -> E.TypeExp (E.ExpBase E.Info E.VName) vn -> IndexFnM ()
+checkRefinement vn indexfns (E.TEParens te _) =
+  checkRefinement vn indexfns te
+checkRefinement vn indexfns te@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
+  printM 1 . warningString $
+    "Checking post-condition:\n" <> prettyStr te
+  let param_names = map fst $ mconcat $ map patternMapAligned lam_params
+  forM_ (zip param_names indexfns) $ \(nm, fn) ->
+    when (isJust nm) . void $ bindfn (fromJust nm) [fn]
+  postconds <- forward lam_body >>= mapM rewrite
+  printM 1 $
+    "Post-conditions after substituting in results:\n  "
+      <> prettyStr postconds
+  answer <- askRefinements postconds
+  case answer of
+    Yes -> do
+      printM 1 (E.baseString vn <> " ∎\n\n")
+      pure ()
+    Unknown ->
+      errorMsg loc $ "Failed to show refinement: " <> prettyStr te
+checkRefinement _ _ (E.TERefine _ _ loc) = do
+  errorMsg loc "Only lambda post-conditions are currently supported."
+checkRefinement vn indexfns (E.TETuple tes _)
+  | length indexfns == length tes = do
+      zipWithM_ (checkRefinement vn) (map (: []) indexfns) tes
+  | otherwise =
+      undefined
+checkRefinement _ _ _ = pure ()
