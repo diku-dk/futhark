@@ -26,7 +26,7 @@ tests =
                           body =
                             cases [(Bool True, sVar i)]
                         }
-                askQ (CaseIsMonotonic Inc) fn 0
+                queryCase (CaseIsMonotonic Inc) fn 0
             )
             @?= Yes,
         testCase "Monotonically decreasing" $
@@ -38,7 +38,7 @@ tests =
                           body =
                             cases [(Bool True, Var n ~-~ Var i)]
                         }
-                askQ (CaseIsMonotonic Dec) fn 0
+                queryCase (CaseIsMonotonic Dec) fn 0
             )
             @?= Yes,
         testCase "Monotonicity unknown 1" $
@@ -50,7 +50,7 @@ tests =
                           body =
                             cases [(Bool True, sym2SoP $ Idx (Var x) (sVar i))]
                         }
-                askQ (CaseIsMonotonic Inc) fn 0
+                queryCase (CaseIsMonotonic Inc) fn 0
             )
             @?= Unknown,
         testCase "Monotonicity unknown 2" $
@@ -62,7 +62,7 @@ tests =
                           body =
                             cases [(Bool True, Var x ~-~ Var i)]
                         }
-                askQ (CaseIsMonotonic Inc) fn 0
+                queryCase (CaseIsMonotonic Inc) fn 0
             )
             @?= Unknown,
         testCase "Monotonic constant" $
@@ -74,7 +74,7 @@ tests =
                           body =
                             cases [(Bool True, sVar x)]
                         }
-                askQ (CaseIsMonotonic Inc) fn 0
+                queryCase (CaseIsMonotonic Inc) fn 0
             )
             @?= Yes,
         testCase "Permutation of domain" $

@@ -18,7 +18,7 @@ import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property qualified as Property
 import Futhark.Analysis.Properties.Prove (Property (..), prove, sumOverIndexFn)
-import Futhark.Analysis.Properties.Query (Answer (..), Query (..), askQ, askRefinement, askRefinements, isUnknown, isYes)
+import Futhark.Analysis.Properties.Query (Answer (..), Query (..), queryCase, askRefinement, askRefinements, isUnknown, isYes)
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Substitute (subst, (@))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
@@ -711,11 +711,11 @@ scatterMono dest@(IndexFn (Forall _ dom_dest) _) inds@(IndexFn inds_iter@(Forall
   -- Determine which is OOB and which is e1.
   let isOOB ub = CaseCheck (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
   (vn_p_seg, vn_f_seg) <- do
-    case0_is_OOB <- lift $ askQ (isOOB vn_f1) inds 0
+    case0_is_OOB <- lift $ queryCase (isOOB vn_f1) inds 0
     case case0_is_OOB of
       Yes -> pure (vn_p1, vn_f1)
       Unknown -> do
-        case1_is_OOB <- lift $ askQ (isOOB vn_f0) inds 1
+        case1_is_OOB <- lift $ queryCase (isOOB vn_f0) inds 1
         case case1_is_OOB of
           Yes -> pure (vn_p0, vn_f0)
           Unknown -> failMsg "scatterMono: unable to determine OOB branch"
@@ -840,7 +840,7 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
       ys <- forwardRefinementExp e_y
       -- Create check as an index function whose cases contain the refinement.
       let check =
-            mkCheck $
+            checkFn $
               IndexFn Empty . cases $
                 map (second (sym2SoP . (sVar param `rel`))) (casesToList ys)
       let effect = do
@@ -857,7 +857,7 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
           let ref = case lam_param of
                 Just vn -> repCases (mkRep vn $ wrap param) body
                 Nothing -> body
-          let check = mkCheck $ IndexFn Empty ref
+          let check = checkFn $ IndexFn Empty ref
           let effect = do
                 y <- rewrite $ flattenCases ref
                 addRelSymbol (sop2Symbol y)
@@ -872,9 +872,10 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
         [fn] -> body <$> rewrite fn
         _ -> error "Impossible: Refinements have return type bool."
 
-    -- Check that all branches of check_fn evaluate to true
-    -- when substituting in param_subst.
-    mkCheck check_fn (size_rep, args_in_scope) = do
+    -- Verifies a Check encoded as an IndexFn.
+    -- (All branches of check_fn evaluate to true in the CheckContext.)
+    checkFn :: IndexFn -> CheckContext -> IndexFnM Answer
+    checkFn check_fn (size_rep, args_in_scope) = do
       -- Substitute parameters in scope.
       -- The refinement of a parameter can use previous parameters:
       --   (x : []i64) (n : {i64 | (== sum x))
@@ -940,11 +941,11 @@ checkPostcondition _ _ _ = pure ()
 
 forwardPropertyPrelude :: E.SrcLoc -> E.Exp -> String -> NE.NonEmpty (a4, E.Exp) -> IndexFnM [IndexFn]
 forwardPropertyPrelude loc e f args = do
-  (effect, xss) <- parsePrelude
+  (check, xss) <- parsePrelude
   forM xss $ \xs -> do
-    fromPreludeEffect xs $ effect xs
+    fromPreludeCheck xs $ check xs
   where
-    fromPreludeEffect fn m = do
+    fromPreludeCheck fn m = do
       ans <- m
       case ans of
         Yes ->

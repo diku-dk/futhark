@@ -3,12 +3,12 @@ module Futhark.Analysis.Properties.Query
   ( Answer (..),
     MonoDir (..),
     Query (..),
-    askQ,
+    queryCase,
     askRefinement,
     askRefinements,
     allM,
     andM,
-    allCases,
+    askQ,
     foreachCase,
     orM,
     isYes,
@@ -45,16 +45,41 @@ data Query
   | -- Check whether case is true.
     Truth
 
+-- NOTE rewriting askQ so that it can also check proof obligations.
+--
+-- Want to also parse prelude properties into index functions
+-- to allow for substitution of formal arguments.
+--
+--   f = for i < n . true => x[i] >= 0 && IsTrue (InjectiveRCD x (0, n))
+--
+-- Then askQ can discharge proofs of properties inside IsTrue () to Prove.hs.
+-- - This probably requires changing Prove.Properties to not include index fns?
+-- - Need to be able to add properties nested inside symbols to env:
+--     x[i] >= 0 && IsTrue prop
+--   Does this work simply by extending addRelSymbol to also handle IsTrue prop?
+--   This might even make sense in the paper; \Alg is a conjunction of boolean symbols,
+--   but a property is just a relation, hence (when fully applied) it too is just a
+--   boolean. So \Alg ^ x[i] >= 0 ^ InjectiveRCD x (0, n) is naturally valid.
+-- - Possible to use Properties.Property? (Defined in terms of Algebra symbols.)
+--   E.g., by making Properties.Property parametric over the symbol type;
+--   then we can just translate between Algebra and IndexFn symbols?
+--   For example, index fns can have (Property Symbol), and then when
+--   addRelSymbol is called this Property gets translated into (Property Algebra.Symbol)
+--   and is added to the Alg env.
+askQ :: Query -> IndexFn -> IndexFnM Answer
+askQ query fn =
+  allM $ zipWith (\_ i -> queryCase query fn i) (guards fn) [0 ..]
+
 askRefinement :: IndexFn -> IndexFnM Answer
-askRefinement = allCases (askQ Truth)
+askRefinement = askQ Truth
 
 askRefinements :: [IndexFn] -> IndexFnM Answer
 askRefinements = allM . map askRefinement
 
 -- | Answers a query on an index function case.
-askQ :: Query -> IndexFn -> Int -> IndexFnM Answer
-askQ Truth fn case_idx = askQ (CaseCheck sop2Symbol) fn case_idx
-askQ query fn case_idx = algebraContext fn $ do
+queryCase :: Query -> IndexFn -> Int -> IndexFnM Answer
+queryCase Truth fn case_idx = queryCase (CaseCheck sop2Symbol) fn case_idx
+queryCase query fn case_idx = algebraContext fn $ do
   let (p, q) = getCase case_idx (body fn)
   addRelIterator (iterator fn)
   case query of
@@ -76,8 +101,6 @@ askQ query fn case_idx = algebraContext fn $ do
             where
               f @ x = rep (mkRep i x) f
           Empty -> undefined
-
--- askQcase query fn (p, e) = 
 
 dnfQuery :: Symbol -> IndexFnM Answer -> IndexFnM Answer
 dnfQuery p f = do
@@ -106,10 +129,6 @@ check (a :>= b) = a $>= b
 check (a :< b) = a $< b
 check (a :<= b) = a $<= b
 check a = isTrue a
-
-allCases :: (IndexFn -> Int -> IndexFnM Answer) -> IndexFn -> IndexFnM Answer
-allCases query fn =
-  allM $ zipWith (\_ i -> query fn i) (guards fn) [0 ..]
 
 foreachCase :: IndexFn -> (Int -> IndexFnM a) -> IndexFnM [a]
 foreachCase (IndexFn _ cs) f =

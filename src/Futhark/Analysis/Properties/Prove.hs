@@ -204,7 +204,7 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) =
         --     Subst.@ (x, f)
         -- fX <- rewrite f_restricted_to_X
         let in_RCD x = a :<= x :&& x :<= b
-        answers <- mapM (askQ (CaseCheck in_RCD) f) [0 .. length (guards f) - 1]
+        answers <- mapM (queryCase (CaseCheck in_RCD) f) [0 .. length (guards f) - 1]
         let guards' =
               zipWith
                 (\(p, e) ans -> if isYes ans then (p, e) else (p, infinity))
@@ -285,7 +285,7 @@ prove_ baggage (PFiltPartInv filt part split) f@(IndexFn (Forall i _) _) = rollb
             >>= rewrite
         printM 3000 $ "checker " <> prettyString checker
         printTrace 1000 "FiltPartInv Step (2)" $
-          allCases (askQ Truth) checker
+          askQ Truth checker
 
   infinity <- sym2SoP . Var <$> newVName "∞"
   f_filtered <- do
@@ -340,7 +340,7 @@ prove_ baggage (PFiltPartInv filt part split) f@(IndexFn (Forall i _) _) = rollb
             >>= rewrite
         printM 3000 $ "checker " <> prettyString checker
         printTrace 1000 "FiltPartInv Steps (5--6)" $
-          allCases (askQ Truth) checker
+          askQ Truth checker
 
   pure step1 `andM` step2 `andM` step3and4 `andM` step5and6
   where

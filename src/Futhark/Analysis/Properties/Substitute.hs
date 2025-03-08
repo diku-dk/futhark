@@ -10,7 +10,7 @@ import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, simplify)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), allCases, askQ, foreachCase, isYes)
+import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ, foreachCase, isYes, queryCase)
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMapper (..), astFold, astMap, identityMapper)
@@ -168,8 +168,8 @@ substituteOnce f g_non_repped (f_apply, args) = do
                       do
                         let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
                         in_segment <-
-                          allCases
-                            (askQ (CaseCheck (\_ -> bounds $ f_arg M.! i)))
+                          askQ
+                            (CaseCheck (\_ -> bounds $ f_arg M.! i))
                             (IndexFn new_iter (body g))
                         case in_segment of
                           Yes -> pure (sym2SoP . Var <$> catVar new_iter)
@@ -322,7 +322,7 @@ checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g 
         need_to_check <- (||) <$> applyIn (sym2SoP p_idx) <*> applyIn e_idx
         if need_to_check
           then do
-            c <- askQ (CaseCheck bound) g n
+            c <- queryCase (CaseCheck bound) g n
             unless (isYes c) $ do
               printExtraDebugInfo n
               -- error $
