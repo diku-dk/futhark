@@ -15,7 +15,7 @@ import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMapper (..), astFold, astMap, identityMapper)
 import Futhark.Analysis.Properties.Unify (Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM)
-import Futhark.Analysis.Properties.Util (prettyIndent)
+import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.))
 import Futhark.Util.Pretty (Pretty, prettyString)

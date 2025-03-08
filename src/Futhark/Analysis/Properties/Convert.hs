@@ -22,7 +22,7 @@ import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Substitute (subst, (@))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Properties.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
-import Futhark.Analysis.Properties.Util (prettyBinding)
+import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newName, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty)
 import Futhark.SoP.Refine (addRel)
@@ -350,7 +350,9 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
-      etaExpandErrorMsg loc (head $ getArgs args)
+      errorMsg loc $
+        "Only anonymous functions may be passed as argument. Perhaps you want to eta-expand: "
+          <> prettyString (head $ getArgs args)
   | Just "replicate" <- getFun f,
     [e_n, e_x] <- getArgs args = do
       ns <- forward e_n
@@ -648,7 +650,7 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
     warningInds
       | Just vn <- justVName e_inds = pure vn
       | otherwise = do
-          warningMsg (E.locOf e_inds) $
+          printM 1 . warningMsg (E.locOf e_inds) $
             "You might want to bind scattered indices to a name to aid"
               <> " index function inference: "
               <> prettyString e_inds
@@ -936,22 +938,6 @@ bindLambdaBodyParams params = do
       paramName
       [IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i)]
   pure iter
-
-errorMsg :: (E.Located a1) => a1 -> [Char] -> a2
-errorMsg loc msg =
-  error $
-    "Error at " <> prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
-
-etaExpandErrorMsg :: E.SrcLoc -> E.Exp -> a
-etaExpandErrorMsg loc fn =
-  errorMsg loc $
-    "Only anonymous functions may be passed as argument. Perhaps you want to eta-expand: "
-      <> prettyString fn
-
-warningMsg :: (Monad m, E.Located a) => a -> String -> m ()
-warningMsg loc msg = do
-  printM 1 . warningString $
-    prettyString (E.locText (E.srclocOf loc)) <> ": " <> msg
 
 forwardRefPrelude :: E.SrcLoc -> E.Exp -> String -> NE.NonEmpty (a4, E.Exp) -> IndexFnM [IndexFn]
 forwardRefPrelude loc e f args = do

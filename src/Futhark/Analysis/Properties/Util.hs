@@ -6,6 +6,9 @@ module Futhark.Analysis.Properties.Util
     prettyIndent,
     prettyFun,
     dummyVName,
+    warningMsg,
+    warningString,
+    errorMsg,
   )
 where
 
@@ -13,7 +16,7 @@ import Control.Monad (guard)
 import Data.List (subsequences, (\\))
 import Data.Maybe (fromJust)
 import Futhark.Util.Pretty
-import Language.Futhark (VName (VName), nameFromString)
+import Language.Futhark (Located, VName (VName), locText, nameFromString, srclocOf)
 
 prettyName :: VName -> Doc ann
 prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
@@ -36,7 +39,7 @@ prettyBinding vn e =
 prettyIndent :: (Pretty a) => Int -> a -> String
 prettyIndent n e = docStringW 80 $ indent n (pretty e)
 
-prettyFun :: Pretty a => (VName -> a) -> [Char] -> Doc ann
+prettyFun :: (Pretty a) => (VName -> a) -> [Char] -> Doc ann
 prettyFun f arg_name =
   "λ" <> prettyName arg <> dot <+> pretty (f arg)
   where
@@ -59,3 +62,16 @@ partitions k xs
       x <- partitions (k - 1) (xs \\ s)
       [s : x]
   | otherwise = []
+
+errorMsg :: (Located a1) => a1 -> [Char] -> a2
+errorMsg loc msg =
+  error $
+    "Error at " <> prettyString (locText (srclocOf loc)) <> ": " <> msg
+
+warningMsg :: (Located a) => a -> String -> String
+warningMsg loc msg = do
+  warningString $
+    prettyString (locText (srclocOf loc)) <> ": " <> msg
+
+warningString :: String -> String
+warningString s = "\ESC[93m" <> s <> "\ESC[0m"

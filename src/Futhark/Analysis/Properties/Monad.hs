@@ -20,7 +20,6 @@ module Futhark.Analysis.Properties.Monad
     getIndexFns,
     getTopLevelIndexFns,
     prettyStr,
-    warningString,
     insertTopLevelDef,
     getTopLevelDefs,
     printM,
@@ -38,6 +37,7 @@ import Data.Map qualified as M
 import Debug.Trace (traceM)
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
+import Futhark.Analysis.Properties.Property (Property)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.MonadFreshNames
 import Futhark.SoP.Expression (Expression (..))
@@ -46,7 +46,6 @@ import Futhark.Util (isEnvVarAtLeast)
 import Futhark.Util.Pretty (Pretty, docStringW, pretty, prettyString)
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
-import Futhark.Analysis.Properties.Property (Property)
 
 data VEnv = VEnv
   { vnamesource :: VNameSource,
@@ -188,9 +187,6 @@ withoutDebug f = do
   x <- f
   modify (\s -> s {debug = toggle})
   pure x
-
-warningString :: String -> String
-warningString s = "\ESC[93m" <> s <> "\ESC[0m"
 
 emphString :: String -> String
 emphString s = "\ESC[95m\n|\n| " <> s <> "\n|\ESC[0m\n"
