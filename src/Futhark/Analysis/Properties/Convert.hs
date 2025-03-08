@@ -34,8 +34,8 @@ import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
 --------------------------------------------------------------
-refinementPrelude :: S.Set String
-refinementPrelude =
+propertyPrelude :: S.Set String
+propertyPrelude =
   S.fromList
     [ "InjectiveRCD",
       "BijectiveRCD",
@@ -140,13 +140,20 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just ret) _ _ params body _ _ val_loc)
       printM 1 $
         emphString ("Analyzing " <> prettyStr (E.locText (E.srclocOf val_loc)))
           <> prettyStr val
-      forM_ params addTypeRefinement
+      forM_ params addPreconditions
       forM_ params addBooleanNames
       forM_ params addSizeVariables
       indexfns <- forward body >>= mapM rewrite >>= bindfn vn
       insertTopLevel vn (params, indexfns)
-      checkRefinement vn indexfns ret
+      checkPostcondition vn indexfns ret
       pure indexfns
+  where
+    -- Adds the effect of a precondition without checking that it holds.
+    addPreconditions pat = do
+      ref <- getRefinement pat
+      case ref of
+        Just (_, effect) -> effect
+        _ -> pure ()
 mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
   insertTopLevelDef vn (params, body)
   pure []
@@ -437,8 +444,8 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       -- No-op.
       forward e
   | Just vn <- getFun f,
-    vn `S.member` refinementPrelude = do
-      forwardRefPrelude loc expr vn args
+    vn `S.member` propertyPrelude = do
+      forwardPropertyPrelude loc expr vn args
   -- Applying other functions, for instance, user-defined ones.
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
@@ -783,9 +790,11 @@ type Check = CheckContext -> IndexFnM Answer
 
 type Effect = IndexFnM ()
 
+-- Extract the Check to verify a formal argument's precondition, if it exists.
 getPrecondition :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe Check)
 getPrecondition = fmap (fmap fst) . getRefinement
 
+-- Extract the Check to verify, and the Effect of, a formal argument's refinement, if it exists.
 getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe (Check, Effect))
 getRefinement (E.PatParens pat _) = getRefinement pat
 getRefinement (E.PatAscription pat _ _) = getRefinement pat
@@ -854,17 +863,7 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
       askRefinement check
 getRefinement _ = pure Nothing
 
--- This function adds the effects of type refinements to the environment
--- without checking that they hold.
--- Use this function on the parameters of top-level definitions, where
--- refinements are pre-requisites assumed to be true.
-addTypeRefinement :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
-addTypeRefinement pat = do
-  ref <- getRefinement pat
-  case ref of
-    Just (_, effect) -> effect
-    _ -> pure ()
-
+-- Tags formal arguments that are booleans or arrays of booleans as such.
 addBooleanNames :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
 addBooleanNames (E.PatParens pat _) = addBooleanNames pat
 addBooleanNames (E.PatAscription pat _ _) = addBooleanNames pat
@@ -874,7 +873,7 @@ addBooleanNames (E.Id param (E.Info {E.unInfo = t}) _) = do
   when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
 addBooleanNames _ = pure ()
 
--- Lowerbounds size variables by 0.
+-- Automatically refines size variables to be non-negative.
 addSizeVariables :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
 addSizeVariables (E.PatParens pat _) = addSizeVariables pat
 addSizeVariables (E.PatAscription pat _ _) = addSizeVariables pat
@@ -910,8 +909,37 @@ bindLambdaBodyParams params = do
       [IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i)]
   pure iter
 
-forwardRefPrelude :: E.SrcLoc -> E.Exp -> String -> NE.NonEmpty (a4, E.Exp) -> IndexFnM [IndexFn]
-forwardRefPrelude loc e f args = do
+checkPostcondition :: (E.IsName vn) => E.VName -> [IndexFn] -> E.TypeExp (E.ExpBase E.Info E.VName) vn -> IndexFnM ()
+checkPostcondition vn indexfns (E.TEParens te _) =
+  checkPostcondition vn indexfns te
+checkPostcondition vn indexfns te@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
+  printM 1 . warningString $
+    "Checking post-condition:\n" <> prettyStr te
+  let param_names = map fst $ mconcat $ map patternMapAligned lam_params
+  forM_ (zip param_names indexfns) $ \(nm, fn) ->
+    when (isJust nm) . void $ bindfn (fromJust nm) [fn]
+  postconds <- forward lam_body >>= mapM rewrite
+  printM 1 $
+    "Post-conditions after substituting in results:\n  "
+      <> prettyStr postconds
+  answer <- askRefinements postconds
+  case answer of
+    Yes -> do
+      printM 1 (E.baseString vn <> " ∎\n\n")
+      pure ()
+    Unknown ->
+      errorMsg loc $ "Failed to show refinement: " <> prettyStr te
+checkPostcondition _ _ (E.TERefine _ _ loc) = do
+  errorMsg loc "Only lambda post-conditions are currently supported."
+checkPostcondition vn indexfns (E.TETuple tes _)
+  | length indexfns == length tes = do
+      zipWithM_ (checkPostcondition vn) (map (: []) indexfns) tes
+  | otherwise =
+      undefined
+checkPostcondition _ _ _ = pure ()
+
+forwardPropertyPrelude :: E.SrcLoc -> E.Exp -> String -> NE.NonEmpty (a4, E.Exp) -> IndexFnM [IndexFn]
+forwardPropertyPrelude loc e f args = do
   (effect, xss) <- parsePrelude
   forM xss $ \xs -> do
     fromPreludeEffect xs $ effect xs
@@ -987,32 +1015,3 @@ forwardRefPrelude loc e f args = do
           pure (askRefinement, xss)
         _ ->
           undefined
-
-checkRefinement :: (E.IsName vn) => E.VName -> [IndexFn] -> E.TypeExp (E.ExpBase E.Info E.VName) vn -> IndexFnM ()
-checkRefinement vn indexfns (E.TEParens te _) =
-  checkRefinement vn indexfns te
-checkRefinement vn indexfns te@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
-  printM 1 . warningString $
-    "Checking post-condition:\n" <> prettyStr te
-  let param_names = map fst $ mconcat $ map patternMapAligned lam_params
-  forM_ (zip param_names indexfns) $ \(nm, fn) ->
-    when (isJust nm) . void $ bindfn (fromJust nm) [fn]
-  postconds <- forward lam_body >>= mapM rewrite
-  printM 1 $
-    "Post-conditions after substituting in results:\n  "
-      <> prettyStr postconds
-  answer <- askRefinements postconds
-  case answer of
-    Yes -> do
-      printM 1 (E.baseString vn <> " ∎\n\n")
-      pure ()
-    Unknown ->
-      errorMsg loc $ "Failed to show refinement: " <> prettyStr te
-checkRefinement _ _ (E.TERefine _ _ loc) = do
-  errorMsg loc "Only lambda post-conditions are currently supported."
-checkRefinement vn indexfns (E.TETuple tes _)
-  | length indexfns == length tes = do
-      zipWithM_ (checkRefinement vn) (map (: []) indexfns) tes
-  | otherwise =
-      undefined
-checkRefinement _ _ _ = pure ()
