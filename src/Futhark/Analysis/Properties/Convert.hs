@@ -240,12 +240,12 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
           pure
             [ IndexFn
                 { iterator = Forall i (Iota sz),
-                  body = singleCase . sym2SoP $ Idx (Var vn) (sym2SoP $ Var i)
+                  body = singleCase . sym2SoP $ Idx (Var vn) (sVar i)
                 }
             ]
         Nothing ->
           -- Canonical scalar representation.
-          pure [IndexFn Empty (singleCase . sym2SoP $ Var vn)]
+          pure [IndexFn Empty (singleCase $ sVar vn)]
 forward (E.TupLit xs _) = do
   mconcat <$> mapM forward xs
 forward (E.AppExp (E.Index e_xs slice _loc) _)
@@ -326,8 +326,8 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
         IndexFn
           (iterator f_c)
           ( cases
-              [ (Var cond, sym2SoP $ Var t_branch),
-                (neg $ Var cond, sym2SoP $ Var f_branch)
+              [ (Var cond, sVar t_branch),
+                (neg $ Var cond, sVar f_branch)
               ]
           )
   forM (zip ts fs) $ \(t, f) -> do
@@ -377,7 +377,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         case n of
           IndexFn Empty cs -> do
             m <- rewrite $ flattenCases cs
-            rewrite $ IndexFn (Forall i (Iota m)) (singleCase . sym2SoP $ Var i)
+            rewrite $ IndexFn (Forall i (Iota m)) (singleCase $ sVar i)
           _ ->
             errorMsg loc "type error"
   | Just fname <- getFun f,
@@ -404,7 +404,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
             "*" -> pure (~*~)
             "&&" -> pure (~&&~)
             _ -> error ("scan not implemented for bin op: " <> show vn)
-        let base_case = sym2SoP (Var i) :== int2SoP 0
+        let base_case = sVar i :== int2SoP 0
         x <- newVName "a"
         let y =
               IndexFn
@@ -519,7 +519,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
                       { iterator = iter,
                         body =
                           singleCase . sym2SoP $
-                            Apply (Var g) (map (sym2SoP . Var) arg_names)
+                            Apply (Var g) (map sVar arg_names)
                       }
               fn <- substParams g_fn (zip arg_names arg_fns)
               pure [fn]
@@ -639,7 +639,7 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
       i <- newVName "i"
       vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
 
-      let inv_ind = Idx (Var vn_inv) (sym2SoP (Var i))
+      let inv_ind = Idx (Var vn_inv) (sVar i)
       lift $
         IndexFn
           { iterator = Forall i (Iota $ dest_size .+. int2SoP 1),
@@ -841,12 +841,12 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
       let check =
             mkCheck $
               IndexFn Empty . cases $
-                map (second (sym2SoP . (sym2SoP (Var param) `rel`))) (casesToList ys)
+                map (second (sym2SoP . (sVar param `rel`))) (casesToList ys)
       let effect = do
             -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
             alg_vn <- paramToAlgebra param wrap
             y <- rewrite $ flattenCases ys
-            addRelSymbol $ sym2SoP (Var alg_vn) `rel` y
+            addRelSymbol $ sVar alg_vn `rel` y
       pure (check, effect)
     mkRef wrap (E.Lambda lam_params lam_body _ _ _) = do
       let param_names = map fst $ mconcat $ map patternMapAligned lam_params
@@ -996,7 +996,7 @@ forwardRefPrelude loc e f args = do
               case f_Xs of
                 [f_X] | Forall i _ <- iterator f_X -> do
                   -- Map filter and partition lambdas over indices of X.
-                  let iota = IndexFn (iterator f_X) (cases [(Bool True, sym2SoP (Var i))])
+                  let iota = IndexFn (iterator f_X) (cases [(Bool True, sVar i)])
                   _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
                   filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
                   part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
