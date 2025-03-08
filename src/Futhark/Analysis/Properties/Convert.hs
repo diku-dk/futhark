@@ -537,6 +537,27 @@ forward e = do
   vn <- newVName "I_e_untrans"
   pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
 
+-- Binds names of scalar parameters to scalar values of corresponding
+-- index functions. Assumes that domains are equivalent across index
+-- functions. Returns the most "complex" iterator over these domains.
+-- For example, this would transform the lambda body of the following
+--   map (\x y z -> x + y + z) xs ys zs
+-- into
+--   map (\i -> xs[i] + ys[i] + zs[i]) (indices xs)
+-- where xs is the index function with the most "complex" iterator.
+bindLambdaBodyParams :: [(E.VName, IndexFn)] -> IndexFnM Iterator
+bindLambdaBodyParams params = do
+  -- Make sure all Cat k bound in iterators are identical by renaming.
+  fns <- renamesM (map snd params)
+  let iter@(Forall i _) = maximum (map iterator fns)
+  forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
+    vn <- newVName ("I_lam_" <> E.baseString paramName)
+    insertIndexFn vn [f_xs]
+    insertIndexFn
+      paramName
+      [IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i)]
+  pure iter
+
 -- Align parameters and arguments. Each parameter is a pattern.
 -- A pattern unpacks to a list of (optional) names with type information.
 -- An argument is an expression, which `forward` will, correspondingly,
@@ -887,27 +908,6 @@ addSizeVariables (E.Id _ (E.Info {E.unInfo = E.Array _ shp _}) _) = do
 addSizeVariables (E.Id param (E.Info {E.unInfo = t}) _) = do
   when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
 addSizeVariables _ = pure ()
-
--- Binds names of scalar parameters to scalar values of corresponding
--- index functions. Assumes that domains are equivalent across index
--- functions. Returns the most "complex" iterator over these domains.
--- For example, this would transform the lambda body of the following
---   map (\x y z -> x + y + z) xs ys zs
--- into
---   map (\i -> xs[i] + ys[i] + zs[i]) (indices xs)
--- where xs is the index function with the most "complex" iterator.
-bindLambdaBodyParams :: [(E.VName, IndexFn)] -> IndexFnM Iterator
-bindLambdaBodyParams params = do
-  -- Make sure all Cat k bound in iterators are identical by renaming.
-  fns <- renamesM (map snd params)
-  let iter@(Forall i _) = maximum (map iterator fns)
-  forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
-    vn <- newVName ("I_lam_" <> E.baseString paramName)
-    insertIndexFn vn [f_xs]
-    insertIndexFn
-      paramName
-      [IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i)]
-  pure iter
 
 checkPostcondition :: (E.IsName vn) => E.VName -> [IndexFn] -> E.TypeExp (E.ExpBase E.Info E.VName) vn -> IndexFnM ()
 checkPostcondition vn indexfns (E.TEParens te _) =
