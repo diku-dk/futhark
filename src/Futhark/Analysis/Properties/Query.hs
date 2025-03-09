@@ -53,7 +53,7 @@ data Query
 --   f = for i < n . true => x[i] >= 0 && IsTrue (InjectiveRCD x (0, n))
 --
 -- Then askQ can discharge proofs of properties inside IsTrue () to Prove.hs.
--- - This probably requires changing Prove.Properties to not include index fns?
+--
 -- - Need to be able to add properties nested inside symbols to env:
 --     x[i] >= 0 && IsTrue prop
 --   Does this work simply by extending addRelSymbol to also handle IsTrue prop?
@@ -66,6 +66,10 @@ data Query
 --   For example, index fns can have (Property Symbol), and then when
 --   addRelSymbol is called this Property gets translated into (Property Algebra.Symbol)
 --   and is added to the Alg env.
+--
+-- [x] Add Property to IndexFn Symbol.
+-- [ ] Parse property prelude into IndexFn symbols; i.e., don't check immediately.
+--     - should allow for properties in preconditions
 askQ :: Query -> IndexFn -> IndexFnM Answer
 askQ query fn =
   allM $ zipWith (\_ i -> queryCase query fn i) (guards fn) [0 ..]

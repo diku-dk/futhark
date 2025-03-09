@@ -18,7 +18,7 @@ import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property qualified as Property
 import Futhark.Analysis.Properties.Prove (Property (..), prove, sumOverIndexFn)
-import Futhark.Analysis.Properties.Query (Answer (..), Query (..), queryCase, askRefinement, askRefinements, isUnknown, isYes)
+import Futhark.Analysis.Properties.Query (Answer (..), Query (..), askRefinement, askRefinements, isUnknown, isYes, queryCase)
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Substitute (subst, (@))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
@@ -1028,3 +1028,58 @@ forwardPropertyPrelude loc e f args = do
           pure (askRefinement, xss)
         _ ->
           undefined
+
+parsePropPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM (Property.Property Symbol)
+parsePropPrelude f args =
+  case f of
+    "InjectiveRCD"
+      | [e_RCD, e_X] <- getArgs args,
+        Just x <- justVName e_X -> do
+          f_RCD <- forward e_RCD
+          case f_RCD of
+            [IndexFn Empty g_a, IndexFn Empty g_b] -> do
+              let a = flattenCases g_a
+              let b = flattenCases g_b
+              pure (Property.InjectiveRCD x (a, b))
+            _ ->
+              undefined
+    "BijectiveRCD"
+      | [e_RCD, e_ImgRCD, e_X] <- getArgs args,
+        Just x <- justVName e_X -> do
+          f_RCD <- forward e_RCD
+          f_ImgRCD <- forward e_ImgRCD
+          case f_RCD <> f_ImgRCD of
+            [ IndexFn Empty g_a,
+              IndexFn Empty g_b,
+              IndexFn Empty g_c,
+              IndexFn Empty g_d
+              ] -> do
+                let a = flattenCases g_a
+                let b = flattenCases g_b
+                let c = flattenCases g_c
+                let d = flattenCases g_d
+                pure (Property.BijectiveRCD x (a, b) (c, d))
+            _ ->
+              undefined
+    "FiltPartInv"
+      | [e_X, e_filt, e_part, e_part_split] <- getArgs args,
+        E.Lambda params_filt lam_filt _ _ _ <- e_filt,
+        [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
+        E.Lambda params_part lam_part _ _ _ <- e_part,
+        [[(Just param_part, _)]] <- map patternMapAligned params_part,
+        Just x <- justVName e_X -> do
+          f_filt <- forward lam_filt
+          f_part <- forward lam_part
+          f_split <- forward e_part_split
+          case f_filt <> f_part <> f_split of
+            [ IndexFn Empty g_filt,
+              IndexFn Empty g_part,
+              IndexFn Empty g_split
+              ] -> do
+                let filt = flattenCases g_filt
+                let part = flattenCases g_part
+                let split = flattenCases g_split
+                pure (Property.FiltPartInv x (Property.Predicate param_filt filt) [(Property.Predicate param_part part, split)])
+            _ -> undefined
+    _ ->
+      undefined
