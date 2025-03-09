@@ -4,8 +4,9 @@ module Futhark.Analysis.Properties.SymbolPlus (toSumOfSums, repVName) where
 
 import Data.Map qualified as M
 import Data.Set qualified as S
+import Futhark.Analysis.Properties.Property (Property (..))
 import Futhark.Analysis.Properties.Symbol
-import Futhark.Analysis.Properties.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Rep (..), Replacement, ReplacementBuilder (..), Unify (..), freshName, unifies_)
+import Futhark.Analysis.Properties.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Rep (..), Replacement, ReplacementBuilder (..), Unify (..), freshName, repPredicate, repTuple, unifies_)
 import Futhark.SoP.SoP (SoP, int2SoP, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.))
 import Language.Futhark (VName)
 
@@ -39,7 +40,7 @@ instance FreeVariables Symbol where
     x :&& y -> fv x <> fv y
     x :|| y -> fv x <> fv y
     Recurrence -> mempty
-    Prop _ -> undefined
+    Prop p -> fv p
 
 instance Renameable Symbol where
   rename_ vns tau sym = case sym of
@@ -65,7 +66,7 @@ instance Renameable Symbol where
     x :&& y -> g (:&&) x y
     x :|| y -> g (:||) x y
     Recurrence -> pure Recurrence
-    Prop _ -> undefined
+    Prop p -> Prop <$> rename_ vns tau p
     where
       g op x y = op <$> rename_ vns tau x <*> rename_ vns tau y
 
@@ -101,10 +102,21 @@ instance Rep Symbol Symbol where
     x :&& y -> binopS (:&&) x y
     x :|| y -> binopS (:||) x y
     Recurrence -> sym2SoP Recurrence
-    Prop _ -> undefined
+    Prop p -> sym2SoP $ Prop (repProperty s p)
     where
       binop op x y = sym2SoP $ rep s x `op` rep s y
       binopS op x y = sym2SoP $ sop2Symbol (rep s x) `op` sop2Symbol (rep s y)
+
+repProperty :: Replacement Symbol -> Property Symbol -> Property Symbol
+repProperty _ Boolean = Boolean
+repProperty s (Disjoint x) = Disjoint $ S.map (repVName s) x
+repProperty _ p@(Monotonic {}) = p
+repProperty s (InjectiveRCD x rcd) =
+  InjectiveRCD (repVName s x) (repTuple s rcd)
+repProperty s (BijectiveRCD x rcd img) =
+  BijectiveRCD (repVName s x) (repTuple s rcd) (repTuple s img)
+repProperty s (FiltPartInv x pf pps) =
+  FiltPartInv (repVName s x) (repPredicate s pf) [(repPredicate s pp, rep s e) | (pp, e) <- pps]
 
 instance Hole Symbol where
   justHole (Hole x) = Just x
@@ -154,7 +166,7 @@ instance Unify Symbol Symbol where
   unify_ _ (Bool x) (Bool y) | x == y = pure mempty
   unify_ k (Not x) (Not y) = unify_ k x y
   unify_ _ Recurrence Recurrence = pure mempty
-  unify_ _ (Prop _) (Prop _) = undefined
+  unify_ k (Prop p) (Prop q) = unify_ k p q
   unify_ k a b = case (a, b) of
     (x1 :< y1, x2 :< y2) -> unifies_ k [x1, y1] [x2, y2]
     (x1 :<= y1, x2 :<= y2) -> unifies_ k [x1, y1] [x2, y2]

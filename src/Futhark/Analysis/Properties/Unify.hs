@@ -22,6 +22,8 @@ module Futhark.Analysis.Properties.Unify
     renameAnd,
     renameM,
     renamesM,
+    repTuple,
+    repPredicate,
   )
 where
 
@@ -323,7 +325,7 @@ repTuple :: (Rep v1 u, Rep v2 u) => Replacement u -> (v1, v2) -> (SoP u, SoP u)
 repTuple s (a, b) = do
   (rep s a, rep s b)
 
-unifyTuple :: (Unify v1 u, Unify u u, Ord u, Hole u, Rep u u, Rep v2 u,  Rep v3 u) => VName -> (v1, v2) -> (v1, v3) -> MaybeT IndexFnM (Replacement u)
+unifyTuple :: (Unify v1 u, Unify u u, Ord u, Hole u, Rep u u, Rep v2 u, Rep v3 u) => VName -> (v1, v2) -> (v1, v3) -> MaybeT IndexFnM (Replacement u)
 unifyTuple k (a, b) (a', b') = do
   s <- unify_ k a a'
   (s <>) <$> unify_ k (rep s b) (rep s b')
@@ -337,9 +339,9 @@ instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Predicate a
   unify_ k (Predicate _ e_x) (Predicate _ e_y) = do
     unify_ k e_x e_y
 
-instance (Ord a, Renameable a, Rep a a, Rep VName a, Unify a a, Hole a) => Unify (Property a) a where
+instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Property a) a where
   unify_ _ Boolean Boolean = pure mempty
-  unify_ k (Disjoint x) (Disjoint y) = unifies_ k (S.elems x) (S.elems y)
+  unify_ _ (Disjoint x) (Disjoint y) | x == y = pure mempty
   unify_ _ x@(Monotonic {}) y@(Monotonic {}) | x == y = pure mempty
   unify_ k (InjectiveRCD x rcd1) (InjectiveRCD y rcd2) = do
     s <- unify_ k x y
@@ -362,3 +364,17 @@ instance (Ord a, Renameable a, Rep a a, Rep VName a, Unify a a, Hole a) => Unify
         s0 <- uncurry (unify_ k) u
         foldM (\s (a, b) -> (s <>) <$> unify_ k (repPredicate s a) (repPredicate s b)) s0 us
   unify_ _ _ _ = fail "no unify"
+
+instance (FreeVariables u, FreeVariables v) => FreeVariables (u, v) where
+  fv (a, b) = fv a <> fv b
+
+instance (FreeVariables u, Ord u) => FreeVariables (Predicate u) where
+  fv (Predicate vn e) = fv vn <> fv e
+
+instance (FreeVariables u, Ord u) => FreeVariables (Property u) where
+  fv Boolean = mempty
+  fv (Disjoint x) = x
+  fv Monotonic {} = mempty
+  fv (InjectiveRCD x rcd) = fv x <> fv rcd
+  fv (BijectiveRCD x rcd img) = fv x <> fv rcd <> fv img
+  fv (FiltPartInv x pf pps) = fv x <> fv pf <> S.unions (map fv pps)
