@@ -1,6 +1,8 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
+
 module Futhark.Analysis.Properties.Property
   ( Property (..),
+    MonDir (..),
     askMonotonic,
     askDisjoint,
     hasMon,
@@ -10,33 +12,35 @@ where
 
 import Control.Monad (unless)
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.AlgebraPC.Symbol (MonDir, Symbol)
 import Futhark.Analysis.Properties.Util
 import Futhark.SoP.Monad (MonadSoP, askPropertyWith)
 import Futhark.SoP.SoP (SoP)
 import Futhark.Util.Pretty
 import Language.Futhark (VName)
 
-data Property
+data Property u
   = Boolean
   | -- These predicates are pairwise disjoint and collectively exhaustive.
     Disjoint (S.Set VName)
   | Monotonic MonDir
   | -- The restriction of f to the preimage of [a,b] is injective.
-    InjectiveRCD (SoP Symbol, SoP Symbol)
+    InjectiveRCD (SoP u, SoP u)
   | -- The restriction of f to the preimage of [a,b] is bijective.
     -- [c,d] (subset of [a,b]) is the image of this restricted f.
-    BijectiveRCD (SoP Symbol, SoP Symbol) (SoP Symbol, SoP Symbol)
-  | FiltPartInv (VName -> SoP Symbol) [(VName -> SoP Symbol, SoP Symbol)]
+    BijectiveRCD (SoP u, SoP u) (SoP u, SoP u)
+  | FiltPartInv (VName -> SoP u) [(VName -> SoP u, SoP u)]
   deriving (Eq, Ord)
 
-instance Eq (VName -> SoP Symbol) where
+instance (Ord u) => Eq (VName -> SoP u) where
   f == g = f dummyVName == g dummyVName
 
-instance Ord (VName -> SoP Symbol) where
+instance (Ord u) => Ord (VName -> SoP u) where
   f `compare` g = f dummyVName `compare` g dummyVName
 
-instance Pretty Property where
+data MonDir = Inc | IncS | Dec | DecS
+  deriving (Show, Eq, Ord)
+
+instance (Pretty u) => Pretty (Property u) where
   pretty Boolean = "Boolean"
   pretty (Disjoint s) =
     "Disjoint" <+> parens (commasep $ map prettyName $ S.toList s)
@@ -52,13 +56,13 @@ instance Pretty Property where
 
 -- Querying properties.
 --------------------------------------------------------------------------------
-askMonotonic :: (MonadSoP u e Property m) => u -> m (Maybe MonDir)
+askMonotonic :: (MonadSoP u e (Property u) m) => u -> m (Maybe MonDir)
 askMonotonic sym = askPropertyWith sym hasMon
 
-askDisjoint :: (MonadSoP u e Property m) => u -> m (Maybe (S.Set VName))
+askDisjoint :: (MonadSoP u e (Property u) m) => u -> m (Maybe (S.Set VName))
 askDisjoint sym = askPropertyWith sym hasDisjoint
 
-hasMon :: S.Set Property -> Maybe MonDir
+hasMon :: S.Set (Property u) -> Maybe MonDir
 hasMon props
   | S.null props = Nothing
   | Monotonic dir : rest <- filter f (S.toList props) = do
@@ -69,7 +73,7 @@ hasMon props
     f _ = False
 hasMon _ = Nothing
 
-hasDisjoint :: S.Set Property -> Maybe (S.Set VName)
+hasDisjoint :: S.Set (Property u) -> Maybe (S.Set VName)
 hasDisjoint props
   | S.null props = Nothing
   | Disjoint nms : rest <- filter f (S.toList props) = do

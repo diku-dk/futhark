@@ -864,6 +864,11 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
           pure (check, effect)
         _ ->
           error "Impossible: Refinements have type t -> bool."
+    mkRef wrap e@(E.AppExp (E.Apply f args loc) _)
+      | Just vn <- getFun f,
+        vn `S.member` propertyPrelude = do
+          forwardPropertyPrelude loc e vn args
+          undefined
     mkRef _ x = error $ "Unhandled refinement predicate " <> show x
 
     forwardRefinementExp e = do
@@ -883,6 +888,13 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
       --   (x : {(t1, t2) | \(a, b) -> ...})
       check <- substParams (repIndexFn size_rep check_fn) args_in_scope
       askRefinement check
+
+    -- Verifies a Property.
+    checkProp :: Property -> IndexFn -> CheckContext -> IndexFnM Answer
+    checkProp prop f =
+      -- f' <- substParams (repIndexFn size_rep f) args_in_scope
+      -- rep size_rep
+      undefined
 getRefinement _ = pure Nothing
 
 -- Tags formal arguments that are booleans or arrays of booleans as such.

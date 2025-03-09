@@ -16,11 +16,11 @@ import Data.Maybe
 import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol
-import Futhark.Analysis.Properties.Property
 import Futhark.SoP.SoP
 import Futhark.SoP.Monad (MonadSoP, getEquivs, getProperties, getRanges)  -- lookupRange
 import Futhark.SoP.FourierMotzkin qualified as FM
 import Language.Futhark (VName)
+import Futhark.Analysis.Properties.Property (hasDisjoint)
 
 -- import Futhark.Util.Pretty
 -- import Debug.Trace
@@ -181,7 +181,7 @@ getEquivSoP _ _ =
 -- | This is the last stage of SoP simplification, hence
 --   it is also used by ther FM solver.
 simplifyOneSumAft ::
-  (MonadSoP Symbol e Property m) => SoP Symbol -> m (Bool, SoP Symbol)
+  (MonadSoP Symbol e Prop m) => SoP Symbol -> m (Bool, SoP Symbol)
 simplifyOneSumAft sop = do
   equivs <- getEquivs
   sop' <- elimEmptySums sop
@@ -194,7 +194,7 @@ simplifyOneSumAft sop = do
 --   indices of the sum, if either array index has a more
 --   specialized range (in the range symbol table).
 simplifyPeelSumForFM ::
-  (MonadSoP Symbol e Property m) => SoP Symbol -> m (Bool, SoP Symbol)
+  (MonadSoP Symbol e Prop m) => SoP Symbol -> m (Bool, SoP Symbol)
 simplifyPeelSumForFM sop =
   unaryOpOnSumFP (\ _ -> True) peelSumOnRanges sop
 
@@ -221,7 +221,7 @@ hasPeelableSums equivs = (\ _ -> True)
         || isJust (M.lookup (Idx nm end) equivs)
     hasPeelableSumSym _ = False
 
-disjointAllTheWay :: M.Map Symbol (S.Set Property) -> S.Set VName -> Bool
+disjointAllTheWay :: M.Map Symbol (S.Set Prop) -> S.Set VName -> Bool
 disjointAllTheWay tab_props nms
   | S.size nms > 1,
     nm <- S.elemAt 0 nms,
@@ -242,8 +242,8 @@ disjointAllTheWay _ _ =
 --     (requires non-empty slice)
 --   Case 4 (IDX): replaces an index symbol that is found in
 --     equiv symtab.
-peelSumSymbHelper :: (MonadSoP Symbol e Property m) =>
-  M.Map Symbol (S.Set Property) -> Symbol -> m (Maybe (SoP Symbol, Symbol))
+peelSumSymbHelper :: (MonadSoP Symbol e Prop m) =>
+  M.Map Symbol (S.Set Prop) -> Symbol -> m (Maybe (SoP Symbol, Symbol))
 peelSumSymbHelper tab_props sym@(Idx (POR nms) _idx)
   | disjointAllTheWay tab_props nms = do -- Case 2
   pure $ Just (sop_one, sym)
@@ -312,7 +312,7 @@ peelSumSymbHelper _ sym@(Idx arr idx) = do -- Case 4
 peelSumSymbHelper _ _ =
   pure Nothing
   
-peelSumSymb :: (MonadSoP Symbol e Property m) => FoldFunTp m
+peelSumSymb :: (MonadSoP Symbol e Prop m) => FoldFunTp m
 peelSumSymb acc@(Just {}) _ = pure acc
 peelSumSymb Nothing (sym, 1) = do
   -- \^ ToDo: extend for any multiplicity >= 1
@@ -322,7 +322,7 @@ peelSumSymb Nothing _ = pure Nothing
 
 -- | tries to peel of one or both of the ends of a
 --   Sum interval when the end has a more specialized range than the array.
-peelSumOnRanges :: (MonadSoP Symbol e Property m) => FoldFunTp m
+peelSumOnRanges :: (MonadSoP Symbol e Prop m) => FoldFunTp m
 peelSumOnRanges acc@(Just {}) _ = pure acc
 peelSumOnRanges Nothing (sym@(Sum xs lb ub), 1) = do
   -- \^ ToDo: extend for any multiplicity >= 1

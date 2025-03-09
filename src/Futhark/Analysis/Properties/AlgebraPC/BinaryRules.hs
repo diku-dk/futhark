@@ -13,10 +13,10 @@ import Data.MultiSet qualified as MS
 import Data.Set qualified as S
 -- import Futhark.Analysis.Properties.AlgebraPC.Algebra
 import Futhark.Analysis.Properties.AlgebraPC.Symbol
-import Futhark.Analysis.Properties.Property
 import Futhark.SoP.FourierMotzkin qualified as FM
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
+import Futhark.Analysis.Properties.Property (askMonotonic, askDisjoint)
 
 -- import Futhark.Util.Pretty
 -- import Debug.Trace
@@ -25,7 +25,7 @@ sop_one :: SoP Symbol
 sop_one = int2SoP 1
 
 simplifyPair ::
-  (MonadSoP Symbol e Property m) =>
+  (MonadSoP Symbol e Prop m) =>
   (Symbol, (Term Symbol, Integer)) ->
   (Symbol, (Term Symbol, Integer)) ->
   m (Maybe (SoP Symbol, SoP Symbol))
@@ -49,7 +49,7 @@ simplifyPair t1 t2 = do
 --             t1 * MonDif A i_3 i_2
 -- This implements half of the functionality, i.e., call it twice.
 matchMonIdxDif ::
-  (MonadSoP Symbol e Property m) =>
+  (MonadSoP Symbol e Prop m) =>
   (Symbol, (Term Symbol, Integer)) ->
   (Symbol, (Term Symbol, Integer)) ->
   m (Maybe (SoP Symbol, SoP Symbol))
@@ -110,7 +110,7 @@ matchMonIdxDif _ _ = pure Nothing
 --     5. a subtraction of two sums of slices of the same array
 --   Remember to call this twice: on the current and reversed pair.
 matchUniteSums ::
-  (MonadSoP Symbol e Property m) =>
+  (MonadSoP Symbol e Prop m) =>
   (Symbol, (Term Symbol, Integer)) ->
   (Symbol, (Term Symbol, Integer)) ->
   m (Maybe (SoP Symbol, SoP Symbol))

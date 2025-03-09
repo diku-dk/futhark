@@ -34,7 +34,7 @@ sop1s = S.singleton $ int2SoP 1
 
 -- | Simplifies the input SoP on all levels
 simplify ::
-  (MonadSoP Symbol e Property m) =>
+  (MonadSoP Symbol e Prop m) =>
   SoP Symbol ->
   m (SoP Symbol)
 simplify = substEquivs <=< astMap m <=< substEquivs
@@ -44,7 +44,7 @@ simplify = substEquivs <=< astMap m <=< substEquivs
 -- | Performs all accurate simplifications on the
 --   current level of the input SoP
 simplifyLevel ::
-  (MonadSoP Symbol e Property m) =>
+  (MonadSoP Symbol e Prop m) =>
   SoP Symbol ->
   m (SoP Symbol)
 simplifyLevel sop_orig = do
@@ -70,7 +70,7 @@ simplifyLevel sop_orig = do
 --   corresponding to the maximal set of VNames appearing
 --   in the transitive closure of its ranges, i.e., we
 --   call it ``the most dependent'' symbol
-findSymbolLEq0 :: (MonadSoP Symbol e Property m) =>
+findSymbolLEq0 :: (MonadSoP Symbol e Prop m) =>
   SoP Symbol -> m (SoP Symbol, Maybe (Symbol, Range Symbol))
 findSymbolLEq0 sop = do
   -- perform general simplifications
@@ -100,7 +100,7 @@ findSymbolLEq0 sop = do
       range <- getRangeOfSym sym2elim
       pure $ (sop''', Just (sym2elim, range))
 
-transClosInRangesSym :: (MonadSoP Symbol e Property m) => Symbol -> m (S.Set VName)
+transClosInRangesSym :: (MonadSoP Symbol e Prop m) => Symbol -> m (S.Set VName)
 transClosInRangesSym sym = do
   let leaders = leadingNames sym
   range <- getRangeOfSym sym
@@ -117,7 +117,7 @@ transClosInRangesSym sym = do
               "\n" ++ prettyString equivs
             )
   where
-    transClosHelper :: (MonadSoP Symbol e Property m) =>
+    transClosHelper :: (MonadSoP Symbol e Prop m) =>
         S.Set VName -> S.Set Symbol -> S.Set Symbol -> m (S.Set VName)
     transClosHelper clos_nms seen active
       | S.null active = pure clos_nms
@@ -144,7 +144,7 @@ transClosInRangesSym sym = do
     leadingIdxNames (POR nms) = nms
 
 powEquiv ::
-  (MonadSoP Symbol e Property m) =>
+  (MonadSoP Symbol e Prop m) =>
   SoP Symbol ->
   m (SoP Symbol)
 powEquiv sop

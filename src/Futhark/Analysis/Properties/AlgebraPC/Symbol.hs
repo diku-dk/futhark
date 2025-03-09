@@ -1,7 +1,7 @@
 module Futhark.Analysis.Properties.AlgebraPC.Symbol
   ( IdxSym (..),
     Symbol (..),
-    MonDir (..),
+    Prop,
     hasPow,
     hasSum,
     hasIdx,
@@ -20,6 +20,7 @@ import Futhark.SoP.SoP (SoP, sopToLists, Free(..))
 import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName, nameFromString)
 import Language.Futhark qualified as E
+import Futhark.Analysis.Properties.Property (Property, MonDir)
 -- import Futhark.Util.Pretty
 
 data IdxSym
@@ -46,8 +47,7 @@ data Symbol
     Pow (Integer, SoP Symbol)
   deriving (Show, Eq, Ord)
 
-data MonDir = Inc | IncS | Dec | DecS
-  deriving (Show, Eq, Ord)
+type Prop = Property Symbol
 
 instance Free Symbol Symbol where
   free (Var _) = S.empty
