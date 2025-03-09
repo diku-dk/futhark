@@ -349,6 +349,7 @@ toAlgebra_ sym@(Apply (Var f) [x]) = do
   pure $ Algebra.Idx (idxSym booltype vn) idx'
 toAlgebra_ x@(Apply {}) = lookupUntransPE x
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
+toAlgebra_ Prop {} = undefined
 -- The rest are boolean statements.
 toAlgebra_ x = handleBoolean x
 

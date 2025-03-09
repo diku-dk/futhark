@@ -29,13 +29,16 @@ data Property u
     -- [c,d] (subset of [a,b]) is the image of this restricted f.
     BijectiveRCD (SoP u, SoP u) (SoP u, SoP u)
   | FiltPartInv (VName -> SoP u) [(VName -> SoP u, SoP u)]
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 instance (Ord u) => Eq (VName -> SoP u) where
   f == g = f dummyVName == g dummyVName
 
 instance (Ord u) => Ord (VName -> SoP u) where
   f `compare` g = f dummyVName `compare` g dummyVName
+
+instance (Show u) => Show (VName -> SoP u) where
+  show f = show (f dummyVName)
 
 data MonDir = Inc | IncS | Dec | DecS
   deriving (Show, Eq, Ord)

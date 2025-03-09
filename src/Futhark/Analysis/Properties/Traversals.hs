@@ -12,6 +12,7 @@ import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.SoP.SoP (SoP, int2SoP, sopToLists, sym2SoP, (.*.), (.+.))
+import Futhark.Analysis.Properties.Property (Property)
 
 data ASTMapper a m = ASTMapper
   { mapOnSymbol :: a -> m a,
@@ -36,6 +37,9 @@ instance (Ord a, ASTMappable a a) => ASTMappable a (SoP a) where
         ts' <- mapM (astMap m) ts
         pure $ foldl (.*.) (int2SoP 1) (int2SoP c : map sym2SoP ts')
 
+instance ASTMappable a (Property a) where
+  astMap _m _prop = undefined
+
 instance ASTMappable Symbol Symbol where
   astMap _ Recurrence = pure Recurrence
   astMap m (Var x) = mapOnSymbol m $ Var x
@@ -55,6 +59,7 @@ instance ASTMappable Symbol Symbol where
   astMap m (x :<= y) = mapOnSymbol m =<< (:<=) <$> astMap m x <*> astMap m y
   astMap m (x :&& y) = mapOnSymbol m =<< (:&&) <$> astMap m x <*> astMap m y
   astMap m (x :|| y) = mapOnSymbol m =<< (:||) <$> astMap m x <*> astMap m y
+  astMap m (Prop p) = Prop <$> astMap m p
 
 instance ASTMappable Symbol IndexFn where
   astMap m (IndexFn dom body) = IndexFn <$> astMap m dom <*> astMap m body
@@ -96,6 +101,9 @@ instance ASTFoldable Symbol (SoP Symbol) where
   astFold m acc =
     foldM (astFold m) acc . concatMap fst . sopToLists
 
+instance ASTFoldable Symbol (Property Symbol) where
+  astFold _m _acc = undefined
+
 instance ASTFoldable Symbol Symbol where
   astFold m acc e@(Sum _ lb ub x) =
     astFold m acc lb >>= astFoldF m ub >>= astFoldF m x >>= flip (foldOnSymbol m) e
@@ -125,6 +133,7 @@ instance ASTFoldable Symbol Symbol where
   astFold m acc (Var x) = foldOnSymbol m acc (Var x)
   astFold m acc (Hole x) = foldOnSymbol m acc (Hole x)
   astFold m acc (Bool x) = foldOnSymbol m acc (Bool x)
+  astFold m acc (Prop p) = astFold m acc p
 
 instance ASTFoldable Symbol IndexFn where
   astFold m acc (IndexFn dom body) = astFold m acc dom >>= astFoldF m body

@@ -39,6 +39,7 @@ import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mapSymM, mulSoPs, 
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (Pretty (pretty), braces, commastack)
 import Language.Futhark (VName)
+import Futhark.Analysis.Properties.Property (Property)
 
 class FreeVariables a where
   fv :: a -> S.Set VName
@@ -291,3 +292,5 @@ instance
   unify_ k x y
     | Just h <- justHole x = pure $ addRep h y mempty
     | otherwise = unifyAnyPerm k (sopToList x) (sopToList y)
+
+instance (Renameable (Property a)) => Unify (Property a) a

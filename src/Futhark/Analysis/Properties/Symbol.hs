@@ -12,6 +12,7 @@ import Futhark.Analysis.Properties.Util (prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, justConstant, justSym)
 import Futhark.Util.Pretty (Pretty, apply, brackets, parens, pretty, prettyString, softline, (<+>))
 import Language.Futhark (VName)
+import Futhark.Analysis.Properties.Property (Property)
 
 data Symbol
   = Var VName
@@ -36,6 +37,8 @@ data Symbol
   | Symbol :&& Symbol
   | Symbol :|| Symbol
   | Recurrence
+  | -- Properties are used only in index functions for pre-/post-conditions.
+    Prop (Property Symbol)
   deriving (Show, Eq, Ord)
 
 infixr 4 :<
@@ -129,6 +132,7 @@ instance Pretty Symbol where
     x :&& y -> autoParens x <+> "^" <+> autoParens y
     x :|| y -> prettyOp "∨" x y
     Recurrence -> "↺ "
+    Prop p -> pretty p
     where
       autoParens x@(Var _) = pretty x
       autoParens x@(Hole _) = pretty x
