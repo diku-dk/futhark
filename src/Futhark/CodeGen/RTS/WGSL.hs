@@ -44,10 +44,10 @@ builtin_kernels :: T.Text
 builtin_kernels = T.concat
   [ header
   , T.concat
-    [ genTransposeKernel "1b" "i8"
-    , genTransposeKernel "2b" "i16"
-    , genTransposeKernel "4b" "i32"
-    , genTransposeKernel "8b" "i64"
+    [ genTransposeKernel "1b" "i8" True
+    , genTransposeKernel "2b" "i16" True
+    , genTransposeKernel "4b" "i32" False
+    , genTransposeKernel "8b" "i64" False
     ]
   , footer
   ]
@@ -55,6 +55,9 @@ builtin_kernels = T.concat
     content = $(embedStringFile "rts/wgsl/builtin_kernels.wgsl")
     (header, middle) = T.breakOn "// Begin of builtin kernel group" content
     (kernel, footer) = T.breakOn "// End of builtin kernel group" middle
-    genTransposeKernel name elemType =
-      T.replace "NAME" name $ T.replace "ELEM_TYPE" elemType kernel
+    genTransposeKernel name elemType atomic =
+      let baseKernel = if atomic
+                       then T.replace "<ELEM_TYPE>" "<atomic<ELEM_TYPE>>" kernel
+                       else kernel
+      in T.replace "NAME" name $ T.replace "ELEM_TYPE" elemType baseKernel
 {-# NOINLINE builtin_kernels #-}

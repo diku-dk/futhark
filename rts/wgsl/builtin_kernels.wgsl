@@ -132,7 +132,7 @@ fn lmad_copy_NAME(@builtin(global_invocation_id) global_id: vec3<u32>) {
       remainder  /= copy_args_NAME.shape7.x;
     }
 
-    copy_dst_NAME_mem[dst_offset] = copy_src_NAME_mem[src_offset];
+    write_ELEM_TYPE(&copy_dst_NAME_mem, dst_offset, read_ELEM_TYPE(&copy_src_NAME_mem, src_offset));
 }
 
 @group(0) @binding(0) var<uniform> mt_NAME_args: MapTransposeParameters;
@@ -147,8 +147,9 @@ fn map_transpose_NAME(
 ) {
     for (var y = 0; y < mt_NAME_args.y_elems; y += 1) {
         for (var x = 0; x < mt_NAME_args.x_elems; x += 1) {
-            mt_NAME_dst_mem[mt_NAME_args.dst_offset[0] + x * mt_NAME_args.y_elems + y] = 
-                mt_NAME_src_mem[mt_NAME_args.src_offset[0] + y * mt_NAME_args.y_elems + x];
+            let dst_idx = mt_NAME_args.dst_offset[0] + x * mt_NAME_args.y_elems + y;
+            let src_idx = mt_NAME_args.src_offset[0] + y * mt_NAME_args.y_elems + x;
+            write_ELEM_TYPE(&mt_NAME_dst_mem, dst_idx, read_ELEM_TYPE(&mt_NAME_src_mem, src_idx));
         }
     }
 }
@@ -165,8 +166,9 @@ fn map_transpose_NAME_low_height(
 ) {
     for (var y = 0; y < mt_lh_NAME_args.y_elems; y += 1) {
         for (var x = 0; x < mt_lh_NAME_args.x_elems; x += 1) {
-            mt_lh_NAME_dst_mem[mt_lh_NAME_args.dst_offset[0] + x * mt_lh_NAME_args.y_elems + y] = 
-                mt_lh_NAME_src_mem[mt_lh_NAME_args.src_offset[0] + y * mt_lh_NAME_args.y_elems + x];
+            let dst_idx = mt_lh_NAME_args.dst_offset[0] + x * mt_lh_NAME_args.y_elems + y;
+            let src_idx = mt_lh_NAME_args.src_offset[0] + y * mt_lh_NAME_args.y_elems + x;
+            write_ELEM_TYPE(&mt_lh_NAME_dst_mem, dst_idx, read_ELEM_TYPE(&mt_lh_NAME_src_mem, src_idx));
         }
     }
 }
@@ -183,8 +185,9 @@ fn map_transpose_NAME_low_width(
 ) {
     for (var y = 0; y < mt_lw_NAME_args.y_elems; y += 1) {
         for (var x = 0; x < mt_lw_NAME_args.x_elems; x += 1) {
-            mt_lw_NAME_dst_mem[mt_lw_NAME_args.dst_offset[0] + x * mt_lw_NAME_args.y_elems + y] =
-                mt_lw_NAME_src_mem[mt_lw_NAME_args.src_offset[0] + y * mt_lw_NAME_args.y_elems + x];
+            let dst_idx = mt_lw_NAME_args.dst_offset[0] + x * mt_lw_NAME_args.y_elems + y;
+            let src_idx = mt_lw_NAME_args.src_offset[0] + y * mt_lw_NAME_args.y_elems + x;
+            write_ELEM_TYPE(&mt_lw_NAME_dst_mem, dst_idx, read_ELEM_TYPE(&mt_lw_NAME_src_mem, src_idx));
         }
     }
 }
@@ -201,8 +204,9 @@ fn map_transpose_NAME_small(
 ) {
     for (var y = 0; y < mt_s_NAME_args.y_elems; y += 1) {
         for (var x = 0; x < mt_s_NAME_args.x_elems; x += 1) {
-            mt_s_NAME_dst_mem[mt_s_NAME_args.dst_offset[0] + x * mt_s_NAME_args.y_elems + y] =
-                mt_s_NAME_src_mem[mt_s_NAME_args.src_offset[0] + y * mt_s_NAME_args.y_elems + x];
+            let dst_idx = mt_s_NAME_args.dst_offset[0] + x * mt_s_NAME_args.y_elems + y;
+            let src_idx = mt_s_NAME_args.src_offset[0] + y * mt_s_NAME_args.y_elems + x;
+            write_ELEM_TYPE(&mt_s_NAME_dst_mem, dst_idx, read_ELEM_TYPE(&mt_s_NAME_src_mem, src_idx));
         }
     }
 }
@@ -219,8 +223,9 @@ fn map_transpose_NAME_large(
 ) {
     for (var y = 0; y < mt_l_NAME_args.y_elems[0]; y += 1) {
         for (var x = 0; x < mt_l_NAME_args.x_elems[0]; x += 1) {
-            mt_l_NAME_dst_mem[mt_l_NAME_args.dst_offset[0] + x * mt_l_NAME_args.y_elems[0] + y] =
-                mt_l_NAME_src_mem[mt_l_NAME_args.src_offset[0] + y * mt_l_NAME_args.y_elems[0] + x];
+            let dst_idx = mt_l_NAME_args.dst_offset[0] + x * mt_l_NAME_args.y_elems[0] + y;
+            let src_idx = mt_l_NAME_args.src_offset[0] + y * mt_l_NAME_args.y_elems[0] + x;
+            write_ELEM_TYPE(&mt_l_NAME_dst_mem, dst_idx, read_ELEM_TYPE(&mt_l_NAME_src_mem, src_idx));
         }
     }
 }

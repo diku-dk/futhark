@@ -5,6 +5,14 @@ alias i64 = vec2<i32>; // (low, high)
 const zero_i64: i64 = i64(0, 0); 
 const one_i64: i64 = i64(1, 0);
 
+fn read_i64(buffer: ptr<storage, array<i64>, read_write>, i: i32) -> i64 {
+  return (*buffer)[i];
+}
+
+fn write_i64(buffer: ptr<storage, array<i64>, read_write>, i: i32, val: i64) {
+  (*buffer)[i] = val;
+}
+
 fn add_i64(a: i64, b: i64) -> i64 {
   // return bitcast<i64>(add_u64(bitcast<u64>(a), bitcast<u64>(b)));
   var r = a + b;

@@ -1,5 +1,13 @@
 // Start of scalar32.wgsl
 
+fn read_i32(buffer: ptr<storage, array<i32>, read_write>, i: i32) -> i32 {
+  return (*buffer)[i];
+}
+
+fn write_i32(buffer: ptr<storage, array<i32>, read_write>, i: i32, val: i32) {
+  (*buffer)[i] = val;
+}
+
 fn udiv_i32(a: i32, b: i32) -> i32 {
   return bitcast<i32>(bitcast<u32>(a) / bitcast<u32>(b));
 }
