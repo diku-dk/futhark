@@ -343,12 +343,12 @@ resolveMTyNames = resolveMTyNames'
 missingType :: (Pretty a) => Loc -> a -> Either TypeError b
 missingType loc name =
   Left . TypeError loc mempty $
-    "Module does not define a type named" <+> pretty name <> "."
+    "Module does not define a type named" <+> dquotes (pretty name) <> "."
 
 missingVal :: (Pretty a) => Loc -> a -> Either TypeError b
 missingVal loc name =
   Left . TypeError loc mempty $
-    "Module does not define a value named" <+> pretty name <> "."
+    "Module does not define a value named" <+> dquotes (pretty name) <> "."
 
 topLevelSize :: Loc -> VName -> Either TypeError b
 topLevelSize loc name =
@@ -358,7 +358,7 @@ topLevelSize loc name =
 missingMod :: (Pretty a) => Loc -> a -> Either TypeError b
 missingMod loc name =
   Left . TypeError loc mempty $
-    "Module does not define a module named" <+> pretty name <> "."
+    "Module does not define a module named" <+> dquotes (pretty name) <> "."
 
 mismatchedType ::
   Loc ->
