@@ -20,7 +20,7 @@ import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (repVName)
-import Futhark.Analysis.Properties.Unify (FreeVariables (..), Renameable (..), Replaceable (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
+import Futhark.Analysis.Properties.Unify (FreeVariables (..), Renameable (..), Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
 import Futhark.Analysis.Properties.Util (prettyName)
 import Futhark.FreshNames (VNameSource)
 import Futhark.MonadFreshNames (MonadFreshNames)

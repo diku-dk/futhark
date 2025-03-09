@@ -5,7 +5,7 @@ module Futhark.Analysis.Properties.SymbolPlus (toSumOfSums, repVName) where
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.Symbol
-import Futhark.Analysis.Properties.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Replaceable (rep), Replacement, ReplacementBuilder (..), Unify (..), freshName, unifies_)
+import Futhark.Analysis.Properties.Unify (FreeVariables (fv), Hole (justHole), Renameable (rename_), Rep (..), Replacement, ReplacementBuilder (..), Unify (..), freshName, unifies_)
 import Futhark.SoP.SoP (SoP, int2SoP, scaleSoP, sopToLists, sym2SoP, (.+.), (.-.))
 import Language.Futhark (VName)
 
@@ -78,7 +78,7 @@ repVName s vn
       i
 repVName _ _ = error "repVName substitutes for non-VName."
 
-instance Replaceable Symbol Symbol where
+instance Rep Symbol Symbol where
   rep s symbol = case symbol of
     Var x -> M.findWithDefault (sym2SoP $ Var x) x s
     Hole x -> M.findWithDefault (sym2SoP $ Hole x) x s

@@ -9,7 +9,7 @@ module Futhark.Analysis.Properties.Unify
     Renameable (..),
     Replacement,
     ReplacementBuilder (..),
-    Replaceable (rep),
+    Rep (rep),
     Substitution (..),
     FreeVariables (..),
     Hole (justHole),
@@ -125,7 +125,7 @@ freshNameFromString vns s = do
 -}
 type Replacement u = M.Map VName (SoP u)
 
-class Replaceable v u where
+class Rep v u where
   -- Implements the replacement operation from Sieg and Kaufmann.
   rep :: Replacement u -> v -> SoP u
 
@@ -134,11 +134,11 @@ class ReplacementBuilder v u where
   mkRep :: VName -> v -> Replacement u
   mkRep vn x = addRep vn x mempty
 
-instance (Ord u, Replaceable u u) => Replaceable (Term u, Integer) u where
+instance (Ord u, Rep u u) => Rep (Term u, Integer) u where
   rep s (x, c) =
     SoP.scaleSoP c . foldr (mulSoPs . rep s) (int2SoP 1) . termToList $ x
 
-instance (Ord u, Replaceable u u) => Replaceable (SoP u) u where
+instance (Ord u, Rep u u) => Rep (SoP u) u where
   rep s = foldr (addSoPs . rep s) zeroSoP . sopToList
 
 instance (Ord u, Hole u) => ReplacementBuilder (SoP u) u where
@@ -174,7 +174,7 @@ instance (Pretty v) => Pretty (Replacement v) where
 instance (Pretty v) => Pretty (Substitution v) where
   pretty = pretty . mapping
 
-sub :: (MonadFreshNames m, Renameable v, Replaceable v u) => Substitution u -> v -> m (SoP u)
+sub :: (MonadFreshNames m, Renameable v, Rep v u) => Substitution u -> v -> m (SoP u)
 sub s x = rep (mapping s) <$> rename (vns s) x
 
 {-
@@ -208,8 +208,8 @@ renameAnd unifier x y = runMaybeT $ do
   pure $ Substitution {mapping = s, vns = vns}
 
 unifies_ ::
-  ( Replaceable v u,
-    Replaceable u u,
+  ( Rep v u,
+    Rep u u,
     Unify v u,
     Unify u u,
     Ord u,
@@ -224,8 +224,8 @@ unifies_ k (u : us) = do
   foldM (\s (a, b) -> (s <>) <$> unify_ k (rep s a) (rep s b)) s0 us
 
 unifies ::
-  ( Replaceable v u,
-    Replaceable u u,
+  ( Rep v u,
+    Rep u u,
     Unify v u,
     Unify u u,
     Ord u,
@@ -238,8 +238,8 @@ unifies us =
    in renameAnd (\k as bs -> unifies_ k (zip as bs)) xs ys
 
 unifyAnyPerm ::
-  ( Replaceable v u,
-    Replaceable u u,
+  ( Rep v u,
+    Rep u u,
     Unify v u,
     Unify u u,
     Ord u,
@@ -255,14 +255,7 @@ unifyAnyPerm k xs ys
       msum $ map (unifies_ k . zip xs) (L.permutations ys)
   | otherwise = fail "unifyAnyPerm unequal lengths"
 
-instance
-  ( Replaceable u u,
-    Unify u u,
-    Hole u,
-    Ord u
-  ) =>
-  Unify (Term u, Integer) u
-  where
+instance (Rep u u, Unify u u, Hole u, Ord u) => Unify (Term u, Integer) u where
   -- Unify on permutations of symbols in term.
   unify_ k (xs, a) (ys, b)
     | Just h <- justSym (term2SoP xs a) >>= justHole =
@@ -284,14 +277,7 @@ instance
     | a == b = unifyAnyPerm k (termToList xs) (termToList ys)
     | otherwise = fail "Unable to unify constants."
 
-instance
-  ( Replaceable u u,
-    Unify u u,
-    Ord u,
-    Hole u
-  ) =>
-  Unify (SoP u) u
-  where
+instance (Rep u u, Unify u u, Ord u, Hole u) => Unify (SoP u) u where
   -- Unify on permutations of terms.
   unify_ k x y
     | Just h <- justHole x = pure $ addRep h y mempty
