@@ -32,6 +32,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.Monad (IndexFnM)
+import Futhark.Analysis.Properties.Property (Property)
 import Futhark.Analysis.Properties.Util (prettyName)
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames (getNameSource), VNameSource, newNameFromString)
@@ -39,10 +40,65 @@ import Futhark.SoP.SoP (SoP, Term, addSoPs, int2SoP, justSym, mapSymM, mulSoPs, 
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.Util.Pretty (Pretty (pretty), braces, commastack)
 import Language.Futhark (VName)
-import Futhark.Analysis.Properties.Property (Property)
 
+{-
+              Utilities
+-}
 class FreeVariables a where
   fv :: a -> S.Set VName
+
+instance FreeVariables VName where
+  fv = S.singleton
+
+instance (Ord u, FreeVariables u) => FreeVariables (SoP u) where
+  fv x = S.unions [fv t | (ts, _) <- sopToLists x, t <- ts]
+
+class Hole u where
+  justHole :: u -> Maybe VName
+
+instance (Hole u, Ord u) => Hole (SoP u) where
+  justHole sop = justSym sop >>= justHole
+
+{-
+              Rename
+-}
+class Renameable u where
+  -- Implements subC(id,tau,e) from Sieg and Kaufmann where
+  -- tau is a renaming of bound variables. The context C is given by
+  -- VNameSource in MonadFreshNames.
+  rename_ :: (MonadFreshNames m) => VNameSource -> M.Map VName VName -> u -> m u
+
+  -- Rename bound variables in u. Equivalent to subC(id,id,e).
+  rename :: (MonadFreshNames m) => VNameSource -> u -> m u
+  rename vns = rename_ vns mempty
+
+instance Renameable VName where
+  rename_ _ tau x = pure $ M.findWithDefault x x tau
+
+instance (Renameable u) => Renameable [u] where
+  rename_ vns tau = mapM (rename_ vns tau)
+
+instance (Renameable u, Ord u) => Renameable (Term u, Integer) where
+  rename_ vns tau (x, c) = (,c) . toTerm <$> mapM (rename_ vns tau) (termToList x)
+
+instance (Ord u, Renameable u) => Renameable (SoP u) where
+  rename_ vns tau = mapSymM (rename_ vns tau)
+
+renameM :: (MonadFreshNames m, Renameable u) => u -> m u
+renameM x = getNameSource >>= flip rename x
+
+-- Renames any number of renameables using the same name source for each.
+renamesM :: (MonadFreshNames m, Traversable t, Renameable b) => t b -> m (t b)
+renamesM xs = getNameSource >>= \vns -> mapM (rename vns) xs
+
+-- Rename bound variables in `a` and `b`. Renamed variables are
+-- identical, if `a` and `b` are syntactically equivalent.
+renameSame :: (MonadFreshNames m, Renameable a, Renameable b) => a -> b -> m (a, b)
+renameSame a b = do
+  vns <- getNameSource
+  a' <- rename vns a
+  b' <- rename vns b
+  pure (a', b')
 
 -- | Produce a fresh name.
 -- Like "FreshNames.newName", except it lets us reuse the same name
@@ -64,32 +120,9 @@ freshNameFromString vns s = do
   let (j, vns') = FreshNames.newName vns x
   pure (j, vns')
 
-class Renameable u where
-  -- Implements subC(id,tau,e) from Sieg and Kaufmann where
-  -- tau is a renaming of bound variables. The context C is given by
-  -- VNameSource in MonadFreshNames.
-  rename_ :: (MonadFreshNames m) => VNameSource -> M.Map VName VName -> u -> m u
-
-  -- Rename bound variables in u. Equivalent to subC(id,id,e).
-  rename :: (MonadFreshNames m) => VNameSource -> u -> m u
-  rename vns = rename_ vns mempty
-
-renameM :: (MonadFreshNames m, Renameable u) => u -> m u
-renameM x = getNameSource >>= flip rename x
-
--- Renames any number of renameables using the same name source for each.
-renamesM :: (MonadFreshNames m, Traversable t, Renameable b) => t b -> m (t b)
-renamesM xs = getNameSource >>= \vns -> mapM (rename vns) xs
-
--- Rename bound variables in `a` and `b`. Renamed variables are
--- identical, if `a` and `b` are syntactically equivalent.
-renameSame :: (MonadFreshNames m, Renameable a, Renameable b) => a -> b -> m (a, b)
-renameSame a b = do
-  vns <- getNameSource
-  a' <- rename vns a
-  b' <- rename vns b
-  pure (a', b')
-
+{-
+              Replace
+-}
 type Replacement u = M.Map VName (SoP u)
 
 class Replaceable v u where
@@ -101,6 +134,24 @@ class ReplacementBuilder v u where
   mkRep :: VName -> v -> Replacement u
   mkRep vn x = addRep vn x mempty
 
+instance (Ord u, Replaceable u u) => Replaceable (Term u, Integer) u where
+  rep s (x, c) =
+    SoP.scaleSoP c . foldr (mulSoPs . rep s) (int2SoP 1) . termToList $ x
+
+instance (Ord u, Replaceable u u) => Replaceable (SoP u) u where
+  rep s = foldr (addSoPs . rep s) zeroSoP . sopToList
+
+instance (Ord u, Hole u) => ReplacementBuilder (SoP u) u where
+  addRep _ x _
+    | hasHole =
+        error "Creating substitution for SoP with Hole. Are you trying to unify a Hole?"
+    where
+      hasHole = any (any (isJust . justHole) . fst) (sopToLists x)
+  addRep vn x s = M.insert vn x s
+
+{-
+              Substitute (replace with renaming)
+-}
 data Substitution u = Substitution
   { mapping :: Replacement u,
     vns :: VNameSource
@@ -113,11 +164,7 @@ instance (Eq u, Ord u) => Eq (Substitution u) where
   a == b = mapping a == mapping b
 
 instance Semigroup (Substitution u) where
-  a <> b =
-    Substitution
-      { mapping = mapping a <> mapping b,
-        vns = vns a <> vns b
-      }
+  a <> b = Substitution {mapping = mapping a <> mapping b, vns = vns a <> vns b}
 
 instance (Pretty v) => Pretty (Replacement v) where
   pretty = braces . commastack . map prettyKV . M.toList
@@ -127,22 +174,12 @@ instance (Pretty v) => Pretty (Replacement v) where
 instance (Pretty v) => Pretty (Substitution v) where
   pretty = pretty . mapping
 
-sub ::
-  ( MonadFreshNames m,
-    Renameable v,
-    Replaceable v u
-  ) =>
-  Substitution u ->
-  v ->
-  m (SoP u)
+sub :: (MonadFreshNames m, Renameable v, Replaceable v u) => Substitution u -> v -> m (SoP u)
 sub s x = rep (mapping s) <$> rename (vns s) x
 
-class Hole u where
-  justHole :: u -> Maybe VName
-
-instance (Hole u, Ord u) => Hole (SoP u) where
-  justHole sop = justSym sop >>= justHole
-
+{-
+              Unify
+-}
 class (Renameable v) => Unify v u where
   -- `unify_ k eq` is the unification algorithm from Sieg and Kauffmann,
   -- Unification for quantified formulae, 1993.
@@ -169,39 +206,6 @@ renameAnd unifier x y = runMaybeT $ do
   b <- rename vns y
   s <- unifier k a b
   pure $ Substitution {mapping = s, vns = vns}
-
-instance Renameable VName where
-  rename_ _ tau x = pure $ M.findWithDefault x x tau
-
-instance (Renameable u) => Renameable [u] where
-  rename_ vns tau = mapM (rename_ vns tau)
-
-instance (Renameable u, Ord u) => Renameable (Term u, Integer) where
-  rename_ vns tau (x, c) = (,c) . toTerm <$> mapM (rename_ vns tau) (termToList x)
-
-instance (Ord u, Renameable u) => Renameable (SoP u) where
-  rename_ vns tau = mapSymM (rename_ vns tau)
-
-instance FreeVariables VName where
-  fv = S.singleton
-
-instance (Ord u, FreeVariables u) => FreeVariables (SoP u) where
-  fv x = S.unions [fv t | (ts, _) <- sopToLists x, t <- ts]
-
-instance (Ord u, Replaceable u u) => Replaceable (Term u, Integer) u where
-  rep s (x, c) =
-    SoP.scaleSoP c . foldr (mulSoPs . rep s) (int2SoP 1) . termToList $ x
-
-instance (Ord u, Replaceable u u) => Replaceable (SoP u) u where
-  rep s = foldr (addSoPs . rep s) zeroSoP . sopToList
-
-instance (Ord u, Hole u) => ReplacementBuilder (SoP u) u where
-  addRep _ x _
-    | hasHole =
-        error "Creating substitution for SoP with Hole. Are you trying to unify a Hole?"
-    where
-      hasHole = any (any (isJust . justHole) . fst) (sopToLists x)
-  addRep vn x s = M.insert vn x s
 
 unifies_ ::
   ( Replaceable v u,
