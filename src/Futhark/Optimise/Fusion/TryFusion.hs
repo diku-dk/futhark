@@ -405,11 +405,25 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                 }
         success (fsOutNames ker ++ returned_outvars) $
           SOAC.Scatter w (ivs_c ++ ivs_p) (as_c ++ as_p) lam'
-    ( SOAC.Scatter _len _ivs dests _lam,
-      SOAC.Screma _ _ form,
+    ( SOAC.Scatter _len _inp_c dests scatter_lam,
+      SOAC.Screma _ inp_p form,
       Vertical
       )
-        | isJust $ isScanomapSOAC form -> undefined
+        | isJust maybe_scans -> do
+            let Just (scans, lam) = maybe_scans
+            let scan = singleScan scans
+
+            let scatter_lam' =
+                  Lambda
+                    { lambdaParams = lambdaParams scatter_lam,
+                      lambdaBody = lambdaBody scatter_lam,
+                      lambdaReturnType = lambdaReturnType scatter_lam
+                    }
+
+            success (fsOutNames ker ++ returned_outvars) $
+              SOAC.ScanScatter w inp_p lam scan dests scatter_lam
+        where
+          maybe_scans = isScanomapSOAC form
     (SOAC.Scatter {}, _, _) ->
       fail "Cannot fuse a scatter with anything else than a scatter or a map"
     (_, SOAC.Scatter {}, _) ->
