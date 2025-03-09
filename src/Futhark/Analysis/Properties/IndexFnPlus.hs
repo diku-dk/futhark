@@ -172,8 +172,8 @@ instance Unify Domain Symbol where
 
 instance Unify (Cases Symbol (SoP Symbol)) Symbol where
   unify_ k (Cases cs1) (Cases cs2) = do
-    s <- unifies_ k (zip (map fst xs) (map fst ys))
-    s2 <- unifies_ k (zip (map (rep s . snd) xs) (map (rep s . snd) ys))
+    s <- unifies_ k (map fst xs) (map fst ys)
+    s2 <- unifies_ k (map (rep s . snd) xs) (map (rep s . snd) ys)
     pure $ s <> s2
     where
       xs = NE.toList cs1

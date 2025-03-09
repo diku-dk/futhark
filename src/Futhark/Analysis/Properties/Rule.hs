@@ -52,7 +52,7 @@ instance ApplyRule (SoP Symbol) Symbol where
       -- Unify subterms in `x` with subterms in `y` in all possible ways.
       matchPartition s =
         msum
-          <$> mapM (check (sideCondition rule) <=< unifies) (allocateTerms (from rule) s)
+          <$> mapM (check (sideCondition rule) <=< uncurry unifies . unzip) (allocateTerms (from rule) s)
 
 instance ApplyRule Symbol Symbol where
   applyRule = applyRuleDefault
@@ -70,7 +70,7 @@ instance ApplyRule IndexFn Symbol where
         unless
           (length p_xs == length p_ys)
           (fail "Number of cases should match too.")
-        s1 <- unifies_ k (zip p_xs p_ys)
+        s1 <- unifies_ k p_xs p_ys
         foldM
           ( \s (x, y) ->
               (s <>) <$> matchSoP k (rep s x) (rep s y)
@@ -81,7 +81,7 @@ instance ApplyRule IndexFn Symbol where
       -- TODO does msum here exclude potential matches?
       -- (That is, rather than try every possible fold above,
       -- we select the first valid always.)
-      matchSoP k x y = msum $ map (unifies_ k) (allocateTerms x y)
+      matchSoP k x y = msum $ map (uncurry (unifies_ k) . unzip) (allocateTerms x y)
 
 check :: (Monad f) => (a -> f Bool) -> Maybe a -> f (Maybe a)
 check _ Nothing = pure Nothing

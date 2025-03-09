@@ -131,7 +131,7 @@ instance Unify Symbol Symbol where
   --     isVar _ = False
   -- 2.
   unify_ _ _ (Hole _) = error "Holes are not allowed in the second argument!"
-  unify_ _ (Var x) t | Var x == t = pure mempty
+  unify_ k (Var x) (Var y) = unify_ k x y
   -- XXX Are the checks on bound vars redundant with holes?
   unify_ k (Hole x) t
     | x >= k = error "2.b.i"
@@ -149,19 +149,19 @@ instance Unify Symbol Symbol where
     s <- unify_ k xs ys
     (s <>) <$> unify_ k (rep s i) (rep s j)
   unify_ k (Apply f xs) (Apply g ys) = do
-    s <- unifies_ k (zip xs ys)
+    s <- unifies_ k xs ys
     (s <>) <$> unify_ k (rep s f) (rep s g)
   unify_ _ (Bool x) (Bool y) | x == y = pure mempty
   unify_ k (Not x) (Not y) = unify_ k x y
   unify_ _ Recurrence Recurrence = pure mempty
   unify_ _ (Prop _) (Prop _) = undefined
   unify_ k a b = case (a, b) of
-    (x1 :< y1, x2 :< y2) -> unifies_ k [(x1, x2), (y1, y2)]
-    (x1 :<= y1, x2 :<= y2) -> unifies_ k [(x1, x2), (y1, y2)]
-    (x1 :> y1, x2 :> y2) -> unifies_ k [(x1, x2), (y1, y2)]
-    (x1 :>= y1, x2 :>= y2) -> unifies_ k [(x1, x2), (y1, y2)]
-    (x1 :== y1, x2 :== y2) -> unifies_ k [(x1, x2), (y1, y2)]
-    (x1 :/= y1, x2 :/= y2) -> unifies_ k [(x1, x2), (y1, y2)]
-    (x1 :&& y1, x2 :&& y2) -> unifies_ k [(x1, x2), (y1, y2)]
-    (x1 :|| y1, x2 :|| y2) -> unifies_ k [(x1, x2), (y1, y2)]
+    (x1 :< y1, x2 :< y2) -> unifies_ k [x1, y1] [x2, y2]
+    (x1 :<= y1, x2 :<= y2) -> unifies_ k [x1, y1] [x2, y2]
+    (x1 :> y1, x2 :> y2) -> unifies_ k [x1, y1] [x2, y2]
+    (x1 :>= y1, x2 :>= y2) -> unifies_ k [x1, y1] [x2, y2]
+    (x1 :== y1, x2 :== y2) -> unifies_ k [x1, y1] [x2, y2]
+    (x1 :/= y1, x2 :/= y2) -> unifies_ k [x1, y1] [x2, y2]
+    (x1 :&& y1, x2 :&& y2) -> unifies_ k [x1, y1] [x2, y2]
+    (x1 :|| y1, x2 :|| y2) -> unifies_ k [x1, y1] [x2, y2]
     _ -> fail "Incompatible"

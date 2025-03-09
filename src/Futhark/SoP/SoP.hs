@@ -6,7 +6,6 @@ module Futhark.SoP.SoP
     toTerm,
     mapSoP,
     mapTermSoP,
-    mapTermSoPM,
     mapSymSoP,
     mapSymSoPM,
     mapSymM,
@@ -253,10 +252,6 @@ mapSymSoPM f x = do
 
 mapSymM :: (Ord u, Ord v, Monad m) => (u -> m v) -> SoP u -> m (SoP v)
 mapSymM f = mapSymSoPM (fmap sym2SoP . f)
-
-mapTermSoPM :: (Foldable t, Ord u, Ord (t u), Monad m) => ([u] -> Integer -> m (t u, Integer)) -> SoP u -> m (SoP u)
-mapTermSoPM f =
-  fmap sopFromList . mapM (uncurry f) . sopToLists
 
 sopToList :: SoP u -> [(Term u, Integer)]
 sopToList (SoP ts) = M.toList ts
