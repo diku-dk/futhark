@@ -307,7 +307,7 @@ kernelsToWebGPU prog =
             RTS.scalar8,
             RTS.scalar16,
             RTS.scalar64,
-            RTS.builtin_kernels
+            RTS.builtinKernels
           ]
       constants = wsMacroDefs translation
       -- TODO: Compute functions using tuning params
@@ -765,10 +765,11 @@ intLiteral (Int64Value v) = WGSL.CallExp "i64" [low, high]
 intLiteral v = WGSL.IntExp (valueIntegral v)
 
 handleSpecialFloats :: T.Text -> Double -> WGSL.Exp
-handleSpecialFloats s v | isInfinite v, v > 0 = WGSL.CallExp (s <> "_inf") []
-                        | isInfinite v, v < 0 = WGSL.CallExp (s <> "_neg_inf") []
-                        | isNaN v = WGSL.CallExp (s <> "_nan") []
-                        | otherwise = WGSL.FloatExp v
+handleSpecialFloats s v
+  | isInfinite v, v > 0 = WGSL.CallExp (s <> "_inf") []
+  | isInfinite v, v < 0 = WGSL.CallExp (s <> "_neg_inf") []
+  | isNaN v = WGSL.CallExp (s <> "_nan") []
+  | otherwise = WGSL.FloatExp v
 
 genFloatExp :: FloatValue -> WGSL.Exp
 genFloatExp (Float16Value v) = handleSpecialFloats "f16" (convFloat v)

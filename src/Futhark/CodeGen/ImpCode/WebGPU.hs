@@ -70,4 +70,4 @@ instance Pretty Program where
       </> indent 2 (stack $ map pretty $ T.lines $ webgpuProgram prog)
       </> "}"
       </> ""
-        <> pretty (hostDefinitions prog)
+      <> pretty (hostDefinitions prog)

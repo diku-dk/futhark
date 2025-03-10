@@ -257,10 +257,12 @@ instance Pretty KernelOp where
     pretty name
       <+> "<-"
       <+> "read_uniform"
-      <> parens (commasep
-           [ pretty v <> langle <> pretty bt <> pretty space' <> rangle,
-             pretty is
-           ])
+      <> parens
+        ( commasep
+            [ pretty v <> langle <> pretty bt <> pretty space' <> rangle,
+              pretty is
+            ]
+        )
   pretty (Atomic _ (AtomicAdd t old arr ind x)) =
     pretty old
       <+> "<-"

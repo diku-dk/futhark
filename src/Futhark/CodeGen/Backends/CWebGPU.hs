@@ -63,7 +63,7 @@ mkKernelInfos kernels = do
     num_kernels = M.size kernels
     sc_offs_decl (n, k) =
       let offs = map (\o -> [C.cinit|$int:o|]) (scalarsOffsets k)
-       in [C.cunit|static typename size_t $id:(n <> "_scalar_offsets")[] 
+       in [C.cunit|static typename size_t $id:(n <> "_scalar_offsets")[]
                      = {$inits:offs};|]
     bind_idxs_decl (n, k) =
       let idxs = map (\i -> [C.cinit|$int:i|]) (memBindSlots k)
@@ -127,12 +127,12 @@ builtinKernels =
   where
     nameParams = ["1b", "2b", "4b", "8b"]
     builtinKernelTemplates =
-      [ ("lmad_copy_NAME", copyInterface)
-      , ("map_transpose_NAME", transposeInterface)
-      , ("map_transpose_NAME_low_height", transposeInterface)
-      , ("map_transpose_NAME_low_width", transposeInterface)
-      , ("map_transpose_NAME_small", transposeInterface)
-      , ("map_transpose_NAME_large", transposeInterfaceLarge)
+      [ ("lmad_copy_NAME", copyInterface),
+        ("map_transpose_NAME", transposeInterface),
+        ("map_transpose_NAME_low_height", transposeInterface),
+        ("map_transpose_NAME_low_width", transposeInterface),
+        ("map_transpose_NAME_small", transposeInterface),
+        ("map_transpose_NAME_large", transposeInterfaceLarge)
       ]
 
     generateKernels (template, interface) =
@@ -165,19 +165,19 @@ builtinKernels =
     copyInterface =
       KernelInterface
         { safety = SafetyNone,
-          scalarsOffsets = [0,  8,  16,  24,  32,  40,  -- note that we need to align the 'r'
-                               48,  56,  64,  72,  80,  -- field to 8-bytes despite it being
-                               88,  96, 104, 112, 120,  -- an i32 due to uniform buffer alignment
-                              128, 136, 144, 152, 160,  -- requirements
-                              168, 176, 184, 192, 200,
-                              208, 216],
+          -- note that we need to align the 'r' field to 8-bytes
+          -- despite it being an i32 due to uniform buffer alignment
+          -- requirements
+          scalarsOffsets = [0, 8 .. 216],
           scalarsSize = 224, -- uniform buffers must be multiple of 16 bytes
           scalarsBindSlot = 0,
           memBindSlots = [1, 2],
           overrideNames = ["lmad_copy_block_size_x", "lmad_copy_block_size_y", "lmad_copy_block_size_z"],
-          dynamicBlockDims = [(0, "lmad_copy_block_size_x")
-                             ,(1, "lmad_copy_block_size_y")
-                             ,(2, "lmad_copy_block_size_z")],
+          dynamicBlockDims =
+            [ (0, "lmad_copy_block_size_x"),
+              (1, "lmad_copy_block_size_y"),
+              (2, "lmad_copy_block_size_z")
+            ],
           sharedMemoryOverrides = []
         }
 

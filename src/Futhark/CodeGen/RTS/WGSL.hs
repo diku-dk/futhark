@@ -7,7 +7,7 @@ module Futhark.CodeGen.RTS.WGSL
     scalar16,
     scalar32,
     scalar64,
-    builtin_kernels,
+    builtinKernels,
   )
 where
 
@@ -40,24 +40,26 @@ scalar64 = $(embedStringFile "rts/wgsl/scalar64.wgsl")
 {-# NOINLINE scalar64 #-}
 
 -- | @rts/wgsl/builtin_kernels.wgsl@
-builtin_kernels :: T.Text
-builtin_kernels = T.concat
-  [ header
-  , T.concat
-    [ genTransposeKernel "1b" "i8" True
-    , genTransposeKernel "2b" "i16" True
-    , genTransposeKernel "4b" "i32" False
-    , genTransposeKernel "8b" "i64" False
+builtinKernels :: T.Text
+builtinKernels =
+  T.concat
+    [ header,
+      T.concat
+        [ genTransposeKernel "1b" "i8" True,
+          genTransposeKernel "2b" "i16" True,
+          genTransposeKernel "4b" "i32" False,
+          genTransposeKernel "8b" "i64" False
+        ],
+      footer
     ]
-  , footer
-  ]
   where
     content = $(embedStringFile "rts/wgsl/builtin_kernels.wgsl")
     (header, middle) = T.breakOn "// Begin of builtin kernel group" content
     (kernel, footer) = T.breakOn "// End of builtin kernel group" middle
     genTransposeKernel name elemType atomic =
-      let baseKernel = if atomic
-                       then T.replace "<ELEM_TYPE>" "<atomic<ELEM_TYPE>>" kernel
-                       else kernel
-      in T.replace "NAME" name $ T.replace "ELEM_TYPE" elemType baseKernel
-{-# NOINLINE builtin_kernels #-}
+      let baseKernel =
+            if atomic
+              then T.replace "<ELEM_TYPE>" "<atomic<ELEM_TYPE>>" kernel
+              else kernel
+       in T.replace "NAME" name $ T.replace "ELEM_TYPE" elemType baseKernel
+{-# NOINLINE builtinKernels #-}

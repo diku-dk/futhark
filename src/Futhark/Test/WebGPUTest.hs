@@ -53,13 +53,19 @@ kernelInfoLiteral prog = "window.kernels = " <> docText fmtInfos <> ";"
       "{"
         </> indent
           2
-          ( "name: '" <> pretty name <> "',"
-              </> "overrides: ["
-                <> commasep
-                  (map (\o -> "'" <> pretty o <> "'") (overrideNames ki))
-                <> "],"
-              </> "scalarsBindSlot: " <> pretty (scalarsBindSlot ki) <> ","
-              </> "bindSlots: " <> pretty (memBindSlots ki) <> ","
+          ( "name: '"
+              <> pretty name
+              <> "',"
+                </> "overrides: ["
+              <> commasep
+                (map (\o -> "'" <> pretty o <> "'") (overrideNames ki))
+              <> "],"
+                </> "scalarsBindSlot: "
+              <> pretty (scalarsBindSlot ki)
+              <> ","
+                </> "bindSlots: "
+              <> pretty (memBindSlots ki)
+              <> ","
           )
         </> "}"
 
@@ -121,15 +127,19 @@ instance Pretty JsTestRun where
                   inputTyps
               )
             <> "],"
-            </> "input: " <> fmt inputTyps input <> ","
-            </> "expectedTypes: ["
-              <> commasep
-                ( map
-                    (\t -> "'" <> pretty (V.primTypeText t) <> "'")
-                    expectedTyps
-                )
-              <> "],"
-            </> "expected: " <> fmt expectedTyps expected <> ","
+              </> "input: "
+            <> fmt inputTyps input
+            <> ","
+              </> "expectedTypes: ["
+            <> commasep
+              ( map
+                  (\t -> "'" <> pretty (V.primTypeText t) <> "'")
+                  expectedTyps
+              )
+            <> "],"
+              </> "expected: "
+            <> fmt expectedTyps expected
+            <> ","
         )
       </> "}"
     where
@@ -156,9 +166,11 @@ instance Pretty JsTestSpec where
     "{"
       </> indent
         2
-        ( "entry: '" <> pretty entry <> "',"
-            </> "runs: ["
-            </> indent 2 (commastack $ map pretty runs)
-            </> "],"
+        ( "entry: '"
+            <> pretty entry
+            <> "',"
+              </> "runs: ["
+              </> indent 2 (commastack $ map pretty runs)
+              </> "],"
         )
       </> "}"
