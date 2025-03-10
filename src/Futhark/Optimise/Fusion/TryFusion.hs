@@ -199,6 +199,15 @@ mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
   where
     inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
 
+reorderLambda ::
+  [VName] ->
+  Lambda rep ->
+  [SOAC.Input] ->
+  Lambda rep ->
+  Lambda rep
+reorderLambda outVars lam_p inps lam_c =
+  undefined
+
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::
   Mode ->
