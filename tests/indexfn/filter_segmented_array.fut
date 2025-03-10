@@ -58,9 +58,7 @@ def segment_ids [m]
 def filter_indices [n]
   (cs: [n]bool)
   : {(i64, [n]i64) | \(m, is) ->
-      let correct_size = m == sum (map (\x -> to_i64 x) cs)
-      in FiltPartInv is (\i -> cs[i]) (\i -> true)
-          && correct_size
+      FiltPartInv is (\i -> cs[i]) (\i -> true) m
     } =
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) cs)
   let new_size = if n > 0 then num_trues[n-1] else 0

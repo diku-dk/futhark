@@ -1,7 +1,10 @@
 def to_bool (i: i64) : bool = i == 1
 
 def part2Indices [n] 't (conds: [n]i64)
-    : {[n]i64 | \is -> FiltPartInv is (\_i -> true) (\i -> to_bool conds[i])} =
+    : {[n]i64 | \is ->
+      let split = sum conds
+      in FiltPartInv is (\_i -> true) (\i -> to_bool conds[i]) split
+    } =
   let tflgs = map (\c -> if c == 1 then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs
   let indsT = scan (+) 0 tflgs
