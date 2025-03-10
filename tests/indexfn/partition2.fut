@@ -5,8 +5,8 @@ def sum [n] (xs: [n]i64) =
 def part2indices [n]
   (conds: [n]bool)
   : {(i64, [n]i64) | \(num_true, inds) ->
-      let split = sum (map (\c -> if c then 1 else 0) conds)
-      in FiltPartInv inds (\_i -> true) (\i -> conds[i]) split
+      FiltPartInv inds (\_i -> true) (\i -> conds[i])
+        && num_true == sum (map (\c -> if c then 1 else 0) conds)
     } =
   let tflgs = map (\c -> if c then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs

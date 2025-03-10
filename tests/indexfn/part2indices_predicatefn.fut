@@ -4,8 +4,7 @@ def sum [n] (xs: [n]i64) =
 def part2indices [n] (p: f32 -> bool) (xs : [n]f32)
   : {[n]i64 | \inds ->
         let conds = map (\x -> p x) xs
-        let split = sum (map (\c -> if c then 1 else 0) conds)
-        in FiltPartInv inds (\_i -> true) (\i -> conds[i]) split
+        in FiltPartInv inds (\_i -> true) (\i -> conds[i])
     } =
   let conds = map (\x -> p x) xs
   let tflgs = map (\c -> if c then 1 else 0) conds

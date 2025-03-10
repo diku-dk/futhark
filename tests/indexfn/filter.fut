@@ -7,8 +7,8 @@ def to_i64 c : i64 = if c then 1 else 0
 def filter_indices [n]
   (cs: [n]bool)
   : {(i64, [n]i64) | \(m, is) ->
-      let split = sum (map (\c -> if c then 1 else 0) cs)
-      in FiltPartInv is (\i -> cs[i]) (\i -> true) split
+      FiltPartInv is (\i -> cs[i]) (\i -> true)
+        && (m == sum (map (\x -> to_i64 x) cs))
     } =
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) cs)
   let new_size = if n > 0 then num_trues[n-1] else 0
