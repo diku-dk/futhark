@@ -47,5 +47,8 @@ check-commit:
 unittest:
 	cabal run unit
 
+test-oclgrind:
+	cabal run -- futhark test tests -c --backend=opencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
+
 clean:
 	cabal clean

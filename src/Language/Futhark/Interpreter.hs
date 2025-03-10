@@ -62,6 +62,7 @@ import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
 import Language.Futhark.Primitive qualified as P
 import Language.Futhark.Semantic qualified as T
+import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
 import Prelude hiding (break, mod)
 
 data StackFrame = StackFrame
@@ -331,7 +332,7 @@ lookupInEnv onEnv qv env = f env $ qualQuals qv
 lookupVar :: QualName VName -> Env -> Maybe TermBinding
 lookupVar = lookupInEnv envTerm
 
-lookupType :: QualName VName -> Env -> Maybe (Env, T.TypeBinding)
+lookupType :: QualName VName -> Env -> Maybe TypeBinding
 lookupType = lookupInEnv envType
 
 -- | A TermValue with a 'Nothing' type annotation is an intrinsic or
@@ -349,6 +350,9 @@ instance Show TermBinding where
   show (TermPoly bv _) = unwords ["TermPoly", show bv]
   show (TermModule m) = unwords ["TermModule", show m]
 
+data TypeBinding = TypeBinding Env [TypeParam] StructRetType
+  deriving (Show)
+
 data Module
   = Module Env
   | ModuleFun (Module -> EvalM Module)
@@ -360,7 +364,7 @@ instance Show Module where
 -- | The actual type- and value environment.
 data Env = Env
   { envTerm :: M.Map VName TermBinding,
-    envType :: M.Map VName (Env, T.TypeBinding)
+    envType :: M.Map VName TypeBinding
   }
   deriving (Show)
 
@@ -400,7 +404,7 @@ typeEnv m =
       envType = M.map tbind m
     }
   where
-    tbind = (mempty,) . T.TypeAbbr Unlifted [] . RetType []
+    tbind = TypeBinding mempty [] . RetType []
 
 i64Env :: M.Map VName Int64 -> Env
 i64Env = valEnv . M.map f
@@ -647,17 +651,17 @@ expandType env t@(Array u shape _) =
    in second (const u) (arrayOf shape' $ toStruct et')
 expandType env (Scalar (TypeVar u tn args)) =
   case lookupType tn env of
-    Just (tn_env, T.TypeAbbr _ ps (RetType ext t')) ->
+    Just (TypeBinding tn_env ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
-          onDim (SizeClosure _ (Var v _ _))
-            | Just e <- M.lookup (qualLeaf v) substs =
-                SizeClosure env e
-          -- The next case can occur when a type with existential size
-          -- has been hidden by a module ascription,
-          -- e.g. tests/modules/sizeparams4.fut.
-          onDim (SizeClosure _ e)
-            | any (`elem` ext) $ fvVars $ freeInExp e = SizeClosure mempty anySize
-          onDim d = d
+          onDim (SizeClosure dim_env dim)
+            | any (`elem` ext) $ fvVars $ freeInExp dim =
+                -- The case can occur when a type with existential
+                -- size has been hidden by a module ascription, e.g.
+                -- tests/modules/sizeparams4.fut.
+                SizeClosure mempty anySize
+            | otherwise =
+                SizeClosure (env <> dim_env) $
+                  applySubst (`M.lookup` substs) dim
        in bimap onDim (const u) $ expandType (Env mempty types <> tn_env) t'
     Nothing ->
       -- This case only happens for built-in abstract types,
@@ -665,10 +669,10 @@ expandType env (Scalar (TypeVar u tn args)) =
       Scalar (TypeVar u tn $ map expandArg args)
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim e) =
-      (M.singleton p e, mempty)
-    matchPtoA (TypeParamType l p _) (TypeArgType t') =
+      (M.singleton p $ ExpSubst e, mempty)
+    matchPtoA (TypeParamType _ p _) (TypeArgType t') =
       let t'' = evalToStruct $ expandType env t' -- FIXME, we are throwing away the closure here.
-       in (mempty, M.singleton p (mempty, T.TypeAbbr l [] $ RetType [] t''))
+       in (mempty, M.singleton p (TypeBinding mempty [] $ RetType [] t''))
     matchPtoA _ _ = mempty
     expandArg (TypeArgDim s) = TypeArgDim $ SizeClosure env s
     expandArg (TypeArgType t) = TypeArgType $ expandType env t
@@ -999,7 +1003,7 @@ eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
 eval env (Ascript e _ _) = eval env e
 eval env (Coerce e te (Info t) loc) = do
   v <- eval env e
-  t' <- evalTypeFully $ expandType env $ toStruct t
+  t' <- evalTypeFully $ expandType env t
   case checkShape (typeShape t') (valueShape v) of
     Just _ -> pure v
     Nothing ->
@@ -1126,7 +1130,7 @@ substituteInModule substs = onModule
       k' <- replace k
       pure (k', f v)
     onEnv (Env terms types) =
-      Env (replaceM onTerm terms) (replaceM (bimap onEnv onType) types)
+      Env (replaceM onTerm terms) (replaceM onType types)
     onModule (Module env) =
       Module $ onEnv env
     onModule (ModuleFun f) =
@@ -1134,7 +1138,7 @@ substituteInModule substs = onModule
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
-    onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps t
+    onType (TypeBinding env ps t) = TypeBinding (onEnv env) ps t
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1212,8 +1216,8 @@ evalDec env (ImportDec name name' loc) =
   evalDec env $ LocalDec (OpenDec (ModImport name name' loc) loc) loc
 evalDec env (LocalDec d _) = evalDec env d
 evalDec env ModTypeDec {} = pure env
-evalDec env (TypeDec (TypeBind v l ps _ (Info (RetType dims t)) _ _)) = do
-  let abbr = (env, T.TypeAbbr l ps . RetType dims $ evalToStruct $ expandType env t)
+evalDec env (TypeDec (TypeBind v _ ps _ (Info (RetType dims t)) _ _)) = do
+  let abbr = TypeBinding env ps $ RetType dims t
   pure env {envType = M.insert v abbr $ envType env}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
   (mod_env, mod) <- evalModExp env $ wrapInLambda ps
@@ -2091,10 +2095,10 @@ initialCtx =
     def s | nameFromText s `M.member` namesToPrimTypes = Nothing
     def s = error $ "Missing intrinsic: " ++ T.unpack s
 
-    tdef :: Name -> Maybe (Env, T.TypeBinding)
+    tdef :: Name -> Maybe TypeBinding
     tdef s = do
       t <- s `M.lookup` namesToPrimTypes
-      pure (mempty, T.TypeAbbr Unlifted [] $ RetType [] $ Scalar $ Prim t)
+      pure $ TypeBinding mempty [] $ RetType [] $ Scalar $ Prim t
 
 intrinsicVal :: Name -> Value
 intrinsicVal name =

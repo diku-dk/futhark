@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.26.00]
+## [0.26.0]
 
 ### Added
 
@@ -15,8 +15,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.25.28]
+
+### Fixed
+
 * Compiler crash for intrablock scatters that write to
   multidimensional arrays. (#2218)
+
+* Handling of size expressions in abstract types in the interpreter (#2222).
+
+* GPU code generation of segmented reductions with array operands. (#2227)
+
+* Server-mode timing is now done with a monotonic clock.
+
+* `futhark test` now respects `notest`, similar to `nobench` for `futhark bench`.
 
 ## [0.25.27]
 

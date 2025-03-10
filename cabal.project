@@ -1,5 +1,5 @@
 packages: futhark.cabal, language-wgsl
-index-state: 2025-01-10T04:07:23Z
+index-state: 2025-03-07T17:51:56Z
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie

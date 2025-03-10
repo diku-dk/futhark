@@ -312,17 +312,17 @@ lastUseSegOp (SegMap _ _ tps kbody) used_nms = do
   (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (body_lutab, lu_vars, used_nms' <> used_nms'')
-lastUseSegOp (SegRed _ _ sbos tps kbody) used_nms = do
+lastUseSegOp (SegRed _ _ tps kbody sbos) used_nms = do
   (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseSegBinOp sbos used_nms
   (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
-lastUseSegOp (SegScan _ _ sbos tps kbody) used_nms = do
+lastUseSegOp (SegScan _ _ tps kbody sbos) used_nms = do
   (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseSegBinOp sbos used_nms
   (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
   pure (M.union lutab_sbo body_lutab, lu_vars <> lu_vars_sbo, used_nms_sbo <> used_nms' <> used_nms'')
-lastUseSegOp (SegHist _ _ hos tps kbody) used_nms = do
+lastUseSegOp (SegHist _ _ tps kbody hos) used_nms = do
   (lutab_sbo, lu_vars_sbo, used_nms_sbo) <- lastUseHistOp hos used_nms
   (used_nms', lu_vars) <- lastUsedInNames used_nms_sbo $ freeIn tps
   (body_lutab, used_nms'') <- lastUseKernelBody kbody (mempty, used_nms')
