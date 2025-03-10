@@ -209,9 +209,11 @@ doOp op o
         -- Finally, we perform the necessary steps for the given
         -- type of AD
         Just (Right (VJP {})) ->
-          Just . Variable dep . VJP . VJPValue $ vjpHandleOp op (map extractVJP o') vprev
+          Just . Variable dep . VJP . VJPValue $
+            vjpHandleOp op (map extractVJP o') vprev
         Just (Right (JVP {})) ->
-          Variable dep . JVP . JVPValue vprev <$> jvpHandleFn op (map extractJVP o')
+          Variable dep . JVP . JVPValue vprev
+            <$> jvpHandleFn op (map extractJVP o')
         _ ->
           -- Since the maximum depth is non-zero, there must be at
           -- least one variable of depth > 0

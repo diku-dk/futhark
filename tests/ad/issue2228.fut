@@ -1,3 +1,7 @@
+-- ==
+-- input { [[2.0,3.0]] [1.0,2.0] [3.0,4.0] 5.0 [1.0,2.0] [3.0,5.0] true }
+-- output { -16.0 }
+
 def grad f x = vjp f x 1f64
 
 def magnitude_squared = map (** 2) >-> f64.sum
@@ -14,5 +18,5 @@ def naive_euler charges x_initial xdot_initial (w: f64) =
           then (xdot, xddot, true)
           else (x, xdot, false)
 
-entry particle charges x_initial xdot_initial =
-  vjp (naive_euler charges x_initial xdot_initial)
+entry main charges x_initial xdot_initial x a b c =
+  vjp (naive_euler charges x_initial xdot_initial) x (a, b, c)
