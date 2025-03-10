@@ -22,29 +22,28 @@ module Futhark.Analysis.Properties.Query
 where
 
 import Control.Monad (forM, when)
-import Data.Maybe ( fromJust, isJust )
+import Control.Monad.Trans (lift)
+import Control.Monad.Trans.Maybe (runMaybeT)
+import Data.Bifunctor (second)
+import Data.List (partition)
+import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
+import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
 import Futhark.Analysis.Properties.Monad
+import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), sop2Symbol, toDNF)
+import Futhark.Analysis.Properties.SymbolPlus (toSumOfSums)
 import Futhark.Analysis.Properties.Unify (mkRep, rep)
 import Futhark.Analysis.Properties.Util
-import Futhark.MonadFreshNames ( newVName, newNameFromString )
+import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Monad (lookupRange)
 import Futhark.SoP.Refine (addRels)
-import Futhark.SoP.SoP ( Range(..), Rel(..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.) )
+import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
 import Prelude hiding (GT, LT)
-import Control.Monad.Trans (lift)
-import Control.Monad.Trans.Maybe (runMaybeT)
-import Data.List (partition)
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
-import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
-import Futhark.Analysis.Properties.SymbolPlus (toSumOfSums)
-import Prelude hiding (GT, LT)
-import Data.Bifunctor (second)
 
 data MonoDir = Inc | IncStrict | Dec | DecStrict
   deriving (Show, Eq, Ord)
@@ -193,8 +192,6 @@ allM :: [IndexFnM Answer] -> IndexFnM Answer
 allM [] = pure Yes
 allM xs = foldl1 andM xs
 
-
-
 {-
               Proofs
 -}
@@ -236,7 +233,6 @@ getFn vn = do
     Just [f] -> pure f
     _ -> error "internal error"
 
--- TODO get rid of this.
 proveFn :: Statement -> IndexFn -> IndexFnM Answer
 proveFn (ForallSegments fprop) f@(IndexFn (Forall _ (Cat k _ _)) _) =
   prove_ True (fprop k) f
@@ -478,9 +474,6 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbac
   --         if_filtered_then_OOB e =
   --           pf i :|| (int2SoP 0 :> e :|| e :>= m)
 
-  -- (infinity, f_filtered) <- filterIndexFnBy pf f
-  -- printM 3000 $ "f_filtered:\n" <> prettyIndent 4 f_filtered
-
   j <- newNameFromString "j"
   let step3and4 = algebraContext f $ do
         addRelIterator (iterator f)
@@ -488,26 +481,22 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbac
         printTrace 1000 "FiltPartInv Steps (3--4)" $
           allM [mono_strict_inc g | g <- guards f]
         where
-          mono_strict_inc (c, e) = rollbackAlgEnv $ do
-            -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
-            sop2Symbol (c @ i) =>? Not (pf i)
-            `orM`
-              (sop2Symbol (c @ j) =>? Not (pf j))
-              `orM`
-              ((sop2Symbol (c @ j) :&& sop2Symbol (c @ i)) =>? (e @ j :< e @ i))
+          mono_strict_inc (c, e) =
+            rollbackAlgEnv $
+              do
+                -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
+                sop2Symbol (c @ i) =>? Not (pf i)
+                `orM` (sop2Symbol (c @ j) =>? Not (pf j))
+                `orM` ((sop2Symbol (c @ j) :&& sop2Symbol (c @ i)) =>? (e @ j :< e @ i))
 
   let step5and6 = do
-        -- printM 0 $ "gsT " <> prettyStr gsT
-        -- printM 0 $ "gsF " <> prettyStr gsF
-        -- printM 0 $ "gs " <> prettyStr gs
-        -- printM 0 $ "gs' " <> prettyStr gs'
         gs <- simplify $ cases (map (second sym2SoP) $ gsT <> gsF)
-        let gs' = cases [(c,e) | (c,e) <- casesToList gs, c /= Bool False]
+        let gs' = cases [(c, e) | (c, e) <- casesToList gs, c /= Bool False]
         printTrace 1000 "FiltPartInv Steps (5--6)" $
           askQ Truth (IndexFn (iterator f) gs')
         where
-          gsT = [(pp i :&& c, Not (pf i) :|| e :< split) | (c,e) <- guards f]
-          gsF = [(Not (pp i) :&& c, Not (pf i) :|| e :>= split) | (c,e) <- guards f]
+          gsT = [(pp i :&& c, Not (pf i) :|| e :< split) | (c, e) <- guards f]
+          gsF = [(Not (pp i) :&& c, Not (pf i) :|| e :>= split) | (c, e) <- guards f]
 
   pure step1 `andM` step2 `andM` step3and4 `andM` step5and6
   where
@@ -540,19 +529,3 @@ sorted cmp wat = runMaybeT $ quicksort wat
 
 title :: String -> String
 title s = "\ESC[4m" <> s <> "\ESC[0m"
-
--- Filter `f` by `p` where if `p i` is true then `f i`
--- is kept; otherwise it's filtered (mapped to infinity).
--- 
--- Returns the filtered function and infinity.
-filterIndexFnBy :: (VName -> Symbol) -> IndexFn -> IndexFnM (SoP Symbol, IndexFn)
-filterIndexFnBy p f@(IndexFn (Forall i dom) _) = do
-    infinity <- sym2SoP . Var <$> newVName "∞"
-    answers <- mapM (queryCase (CaseCheck . const $ p i) f) [0 .. length (guards f) - 1]
-    let guards' =
-          zipWith
-            (\(c, e) ans -> if isYes ans then (c, e) else (c, infinity))
-            (guards f)
-            answers
-    (infinity,) <$> simplify (IndexFn (Forall i dom) (cases guards'))
-filterIndexFnBy _ (IndexFn Empty _) = undefined
