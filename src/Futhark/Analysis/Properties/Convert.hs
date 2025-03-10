@@ -447,7 +447,7 @@ forward (E.AppExp (E.Apply f args loc) _)
       forward e
   | Just vn <- getFun f,
     vn `S.member` propertyPrelude = do
-      (: []) <$> parsePropPrelude vn args
+      (: []) <$> forwardPropertyPrelude vn args
   -- Applying other functions, for instance, user-defined ones.
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
@@ -535,8 +535,8 @@ forward (E.AppExp (E.Apply f args loc) _)
           unless (isYes ans) . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
 forward e = do
-  printM 1337 $ "forward on " <> show e <> "\nPretty: " <> prettyStr e
-  vn <- newVName "I_e_untrans"
+  printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
+  vn <- newVName $ "untrans(" <> prettyStr e <> ")"
   pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
 
 -- Binds names of scalar parameters to scalar values of corresponding
@@ -943,8 +943,8 @@ checkPostcondition _ _ _ = pure ()
 
 -- TODO make it return a lsit of functions just to remove the many undefined cases
 -- (it should never happen in practice as these functions are type checked).
-parsePropPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM IndexFn
-parsePropPrelude f args =
+forwardPropertyPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM IndexFn
+forwardPropertyPrelude f args =
   case f of
     "InjectiveRCD"
       | [e_RCD, e_X] <- getArgs args,
