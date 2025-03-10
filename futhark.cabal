@@ -88,6 +88,7 @@ extra-source-files:
     rts/wgsl/scalar16.wgsl
     rts/wgsl/scalar32.wgsl
     rts/wgsl/scalar64.wgsl
+    rts/wgsl/builtin_kernels.wgsl
     prelude/functional.fut
     prelude/math.fut
     prelude/soacs.fut
