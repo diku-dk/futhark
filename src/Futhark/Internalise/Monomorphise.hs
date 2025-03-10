@@ -997,7 +997,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
         substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
       params' = map (substPat substStructType) params
   params'' <- withArgs shape_names $ mapM transformPat params'
-  exp_naming <- paramGetClean
+  exp_naming <- get <* put mempty
 
   let args = S.fromList $ foldMap patNames params
       arg_params = map snd exp_naming
@@ -1006,7 +1006,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
     withParams exp_naming $
       withArgs (args <> shape_names) $
         hardTransformRetType (applySubst (`M.lookup` substs') rettype)
-  extNaming <- paramGetClean
+  extNaming <- get <* put mempty
   scope <- S.union shape_names <$> askScope'
   let (rettype'', new_params) = arrowArg scope args arg_params rettype'
       bind_t' = substTypesAny (`M.lookup` substs') bind_t
@@ -1062,11 +1062,6 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
     shape_params = filter (not . isTypeParam) tparams
 
     updateExpTypes substs = astMap (mapper substs)
-
-    paramGetClean = do
-      ret <- get
-      put mempty
-      pure ret
 
     hardTransformRetType (RetType dims ty) = do
       ty' <- transformType ty
