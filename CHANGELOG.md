@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* AD would in some cases produce code that would cause a compiler
+  crash (#2228).
+
 ## [0.25.28]
 
 ### Fixed
