@@ -107,6 +107,8 @@ instance Rep Symbol Symbol where
       binop op x y = sym2SoP $ rep s x `op` rep s y
       binopS op x y = sym2SoP $ sop2Symbol (rep s x) `op` sop2Symbol (rep s y)
 
+  repSelf s symbol = sop2Symbol $ rep s symbol
+
 repProperty :: Replacement Symbol -> Property Symbol -> Property Symbol
 repProperty _ Boolean = Boolean
 repProperty s (Disjoint x) = Disjoint $ S.map (repVName s) x

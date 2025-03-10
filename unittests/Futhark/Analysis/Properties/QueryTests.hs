@@ -95,7 +95,7 @@ tests =
                                 )
                               ]
                         }
-                prove (PermutationOfZeroTo $ sVar n .-. int2SoP 1) fn
+                proveFn (PermutationOfZeroTo $ sVar n .-. int2SoP 1) fn
             )
             @?= Yes
       ]
@@ -109,7 +109,7 @@ tests =
                                cases
                                  [(Bool True, sVar i .+. int2SoP 1)]
                            }
-                   prove (PBijectiveRCD (int2SoP a, f (sVar n)) (int2SoP c, g (sVar n))) fn
+                   proveFn (PBijectiveRCD (int2SoP a, f (sVar n)) (int2SoP c, g (sVar n))) fn
                )
                @?= answer
            | (a, f, c, g, answer) <-

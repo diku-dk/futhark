@@ -143,6 +143,7 @@ simplify = astMap m
 
 -- | Does this symbol simplify to true?
 isTrue :: Symbol -> IndexFnM Answer
+isTrue (Bool True) = pure Yes
 isTrue sym = do
   p <- simplify sym
   case p of

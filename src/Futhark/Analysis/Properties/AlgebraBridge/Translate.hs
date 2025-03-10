@@ -17,7 +17,7 @@ import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (IndexFn (iterator), Iterator (..), getPredicates)
-import Futhark.Analysis.Properties.Monad (IndexFnM, printM, rollbackAlgEnv)
+import Futhark.Analysis.Properties.Monad (IndexFnM, printM, rollbackAlgEnv, prettyStr)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), isBoolean)
 import Futhark.Analysis.Properties.SymbolPlus ()
 import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMappable, ASTMapper (..), astFold, astMap, identityMapper)
@@ -310,7 +310,7 @@ toAlgebra_ (Var x) = do
   case inv_map M.!? Var x of
     Nothing -> pure $ Algebra.Var x
     Just alg_x -> pure alg_x
-toAlgebra_ (Hole _) = error "toAlgebra_ on Hole"
+toAlgebra_ e@(Hole _) = error ("toAlgebra_ on Hole " <> prettyStr e)
 toAlgebra_ (Sum j lb ub x) = do
   res <- search x
   case res of
@@ -349,7 +349,6 @@ toAlgebra_ sym@(Apply (Var f) [x]) = do
   pure $ Algebra.Idx (idxSym booltype vn) idx'
 toAlgebra_ x@(Apply {}) = lookupUntransPE x
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
-toAlgebra_ Prop {} = undefined
 -- The rest are boolean statements.
 toAlgebra_ x = handleBoolean x
 

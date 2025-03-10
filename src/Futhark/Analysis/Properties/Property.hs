@@ -32,7 +32,7 @@ data Property u
   | FiltPartInv VName (Predicate u) [(Predicate u, SoP u)]
   deriving (Eq, Ord, Show)
 
-data Predicate u = Predicate VName (SoP u)
+data Predicate u = Predicate VName u
   deriving (Eq, Ord, Show)
 
 data MonDir = Inc | IncS | Dec | DecS

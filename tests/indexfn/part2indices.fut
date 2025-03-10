@@ -1,7 +1,13 @@
 -- These should all pass.
-def sanity_check1 n : {bool | \_ -> true} = InjectiveRCD (0, n) (iota n)
-def sanity_check2 n : {bool | \_ -> true} = InjectiveRCD (0, n-1) (iota n)
-def sanity_check3 n : {bool | \_ -> true} = InjectiveRCD (1, n) (replicate n 0)
+def sanity_check1 n : {bool | \_ -> true} =
+  let X = iota n
+  in InjectiveRCD (0, n) X
+def sanity_check2 n : {bool | \_ -> true} =
+  let X = iota n
+  in InjectiveRCD (0, n-1) X
+def sanity_check3 n : {bool | \_ -> true} =
+  let X = replicate n 0
+  in InjectiveRCD (1, n) X
 
 
 def sum [n] (xs: [n]i64) =
@@ -9,9 +15,9 @@ def sum [n] (xs: [n]i64) =
 
 def part2indices [n]
   (conds: [n]bool)
-  : {(i64, [n]i64) | \(num_true, inds) ->
-      let split = sum (map (\c -> if c then 1 else 0) conds)
-      in FiltPartInv inds (\_i -> true) (\i -> conds[i]) split
+  : {(i64, [n]i64) | \(split, inds) ->
+      FiltPartInv inds (\_i -> true) (\i -> conds[i])
+        && split == sum (map (\c -> if c then 1 else 0) conds)
     } =
   let tflgs = map (\c -> if c then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs

@@ -11,20 +11,20 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
 import Data.Set qualified as S
 import Debug.Trace (traceM)
-import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=), simplify)
+import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, guards, justSingleCase)
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property qualified as Property
-import Futhark.Analysis.Properties.Prove (Property (..), prove, sumOverIndexFn)
-import Futhark.Analysis.Properties.Query (Answer (..), Query (..), askRefinement, askRefinements, isUnknown, isYes, queryCase)
+-- import Futhark.Analysis.Properties.Prove (Statement (..), proveFn)
+import Futhark.Analysis.Properties.Query -- (Answer (..), Query (..), askRefinement, askRefinements, isUnknown, isYes, queryCase)
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Substitute (subst, (@))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Properties.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Properties.Util
-import Futhark.MonadFreshNames (VNameSource, newName, newVName)
+import Futhark.MonadFreshNames (VNameSource, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
@@ -232,13 +232,15 @@ forward (E.AppExp (E.Index e_xs slice _loc) _)
       f_idxs <- forward e_idx
       forM (zip f_xss f_idxs) $ \(f_xs, f_idx) -> do
         xs <- case justVName e_xs of
-          Just vn -> newName vn
-          Nothing -> newVName "I_xs"
+          Just vn -> pure vn
+          Nothing -> do
+            vn <- newVName "I_xs"
+            insertIndexFn vn [f_xs]
+            pure vn
         idx <- newVName "I_idx"
 
         -- We don't use substParams on f_xs because the substitution
         -- might fail here (e.g., if we are inside a map lambda).
-        insertIndexFn xs [f_xs]
         -- Lift idx.
         unless (iterator f_idx == Empty) $ error "E.Index: internal error"
         i <- newVName "i"
@@ -313,7 +315,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
       >>= rewrite
 forward (E.Lambda _ _ _ _ loc) =
   errorMsg loc "Cannot create index function for unapplied lambda."
-forward expr@(E.AppExp (E.Apply f args loc) _)
+forward (E.AppExp (E.Apply f args loc) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params lam_body _ _ _ : _args <- getArgs args,
@@ -629,7 +631,7 @@ scatterPerm :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
 scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
   printM 1337 $ "scatterPerm: dest_size" <> prettyStr dest_size
-  perm <- lift $ prove (PBijectiveRCD (int2SoP 0, dest_size) (int2SoP 0, dest_size)) inds
+  perm <- lift $ proveFn (PBijectiveRCD (int2SoP 0, dest_size) (int2SoP 0, dest_size)) inds
   case perm of
     Unknown -> failMsg "scatterPerm: no match"
     Yes -> do
@@ -941,84 +943,6 @@ checkPostcondition vn indexfns (E.TETuple tes _)
       undefined
 checkPostcondition _ _ _ = pure ()
 
-forwardPropertyPrelude :: E.SrcLoc -> E.Exp -> String -> NE.NonEmpty (a4, E.Exp) -> IndexFnM [IndexFn]
-forwardPropertyPrelude loc e f args = do
-  (check, xss) <- parsePrelude
-  forM xss $ \xs -> do
-    fromPreludeCheck xs $ check xs
-  where
-    fromPreludeCheck fn m = do
-      ans <- m
-      case ans of
-        Yes ->
-          pure $ IndexFn Empty (cases [(Bool True, int2SoP 1)])
-        _ ->
-          errorMsg loc $
-            "Failed to show: "
-              <> prettyStr e
-              <> "\nIndex function:\n"
-              <> prettyStr fn
-
-    parsePrelude =
-      case f of
-        "InjectiveRCD" | [e_RCD, e_xs] <- getArgs args -> do
-          f_RCD <- forward e_RCD
-          case f_RCD of
-            [IndexFn Empty g_a, IndexFn Empty g_b] -> do
-              xss <- forward e_xs
-              let a = flattenCases g_a
-              let b = flattenCases g_b
-              pure (prove (PInjectiveRCD (a, b)), xss)
-            _ ->
-              undefined
-        "BijectiveRCD" | [e_RCD, e_ImgRCD, e_xs] <- getArgs args -> do
-          f_RCD <- forward e_RCD
-          f_ImgRCD <- forward e_ImgRCD
-          case f_RCD <> f_ImgRCD of
-            [ IndexFn Empty g_a,
-              IndexFn Empty g_b,
-              IndexFn Empty g_c,
-              IndexFn Empty g_d
-              ] -> do
-                xss <- forward e_xs
-                let a = flattenCases g_a
-                let b = flattenCases g_b
-                let c = flattenCases g_c
-                let d = flattenCases g_d
-                pure (prove (PBijectiveRCD (a, b) (c, d)), xss)
-            _ ->
-              undefined
-        "FiltPartInv"
-          | [e_X, e_filt, e_part] <- getArgs args,
-            E.Lambda params_filt lam_filt _ _ _ <- e_filt,
-            [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
-            E.Lambda params_part lam_part _ _ _ <- e_part,
-            [[(Just param_part, _)]] <- map patternMapAligned params_part -> do
-              f_Xs <- forward e_X
-              case f_Xs of
-                [f_X] | Forall i _ <- iterator f_X -> do
-                  -- Map filter and partition lambdas over indices of X.
-                  let iota = IndexFn (iterator f_X) (cases [(Bool True, sVar i)])
-                  _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
-                  filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
-                  part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
-
-                  renamed <- renamesM [f_X, filt, part]
-                  let [f_X', filt', part'] = renamed
-                  -- Construct partitioning split point.
-                  split <- sumOverIndexFn part'
-
-                  pure (prove (PFiltPartInv filt' part' split), [f_X'])
-                _ -> undefined
-        "and" | [e_xs] <- getArgs args -> do
-          -- No-op: The argument e_xs is a boolean array; each branch will
-          -- be checked in refinements.
-          -- XXX but we lose information about iterator at check site, hm...
-          xss <- forward e_xs
-          pure (askRefinement, xss)
-        _ ->
-          undefined
-
 parsePropPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM (Cases Symbol (SoP Symbol))
 parsePropPrelude f args =
   case f of
@@ -1054,30 +978,55 @@ parsePropPrelude f args =
             _ ->
               undefined
     "FiltPartInv"
-      | [e_X, e_filt, e_part, e_part_split] <- getArgs args,
+      | [e_X, e_filt, e_part] <- getArgs args,
         E.Lambda params_filt lam_filt _ _ _ <- e_filt,
         [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
         E.Lambda params_part lam_part _ _ _ <- e_part,
         [[(Just param_part, _)]] <- map patternMapAligned params_part,
-        Just x <- justVName e_X -> do
-          f_filt <- forward lam_filt
-          f_part <- forward lam_part
-          f_split <- forward e_part_split
-          case f_filt <> f_part <> f_split of
-            [ IndexFn Empty g_filt,
-              IndexFn Empty g_part,
-              IndexFn Empty g_split
-              ] -> do
-                simplify . cases $ do
-                  (p_filt, filt) <- casesToList g_filt
-                  (p_part, part) <- casesToList g_part
-                  (p_split, split) <- casesToList g_split
-                  pure
-                    ( p_filt :&& p_part :&& p_split,
-                      pr $ Property.FiltPartInv x (Property.Predicate param_filt filt) [(Property.Predicate param_part part, split)]
-                    )
+        Just x <- justVName e_X -> rollbackAlgEnv $ do
+          res <- lookupIndexFn x
+          case res of
+            Just [f_X] | Forall i _ <- iterator f_X -> rollbackAlgEnv $ do
+              -- Map filter and partition lambdas over indices of X
+              -- to get proper substitutions (iterator discarded afterwards).
+              let iota = IndexFn (iterator f_X) (cases [(Bool True, sVar i)])
+              _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
+              f_filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
+              f_part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
+
+              -- Construct partitioning split point.
+              f_split <- sumOverIndexFn f_part
+
+              case (f_filt, f_part, f_split) of
+                ( IndexFn _ g_filt,
+                  IndexFn _ g_part,
+                  IndexFn Empty g_split
+                  ) -> do
+                    simplify . cases $ do
+                      (p_filt, filt) <- casesToList g_filt
+                      (p_part, part) <- casesToList g_part
+                      (p_split, split) <- casesToList g_split
+                      pure
+                        ( p_filt :&& p_part :&& p_split,
+                          pr $ Property.FiltPartInv x (toPredicate filt) [(toPredicate part, split)]
+                        )
+                    where
+                      toPredicate e = Property.Predicate i (sop2Symbol e)
+                _ -> undefined
             _ -> undefined
-    _ ->
-      undefined
+    _ -> do
+      error $
+        "Properties must be in A-normal form: " <> prettyStr f <> " " <> prettyStr (NE.map snd args)
   where
     pr = sym2SoP . Prop
+
+sumOverIndexFn :: IndexFn -> IndexFnM IndexFn
+sumOverIndexFn f@(IndexFn (Forall _ dom) _) = do
+  n <- rewrite $ domainEnd dom
+  j <- newVName "j"
+  x <- newVName "x"
+  let sum_part = Sum j (int2SoP 0) n (Idx (Var x) (sym2SoP $ Var j))
+  rewrite
+    =<< IndexFn Empty (cases [(Bool True, sym2SoP sum_part)])
+      @ (x, f)
+sumOverIndexFn (IndexFn Empty _) = undefined

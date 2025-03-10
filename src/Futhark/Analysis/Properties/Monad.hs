@@ -28,6 +28,7 @@ module Futhark.Analysis.Properties.Monad
     printTrace,
     getII,
     insertII,
+    lookupIndexFn,
   )
 where
 
@@ -105,6 +106,9 @@ getAlgEnv = gets algenv
 
 getII :: IndexFnM (M.Map Domain (VName, IndexFn))
 getII = gets ii
+
+lookupIndexFn :: VName -> IndexFnM (Maybe [IndexFn])
+lookupIndexFn vn = M.lookup vn <$> getIndexFns
 
 insertIndexFn :: E.VName -> [IndexFn] -> IndexFnM ()
 insertIndexFn x v =

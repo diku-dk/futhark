@@ -12,7 +12,8 @@ import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.SoP.SoP (SoP, int2SoP, sopToLists, sym2SoP, (.*.), (.+.))
-import Futhark.Analysis.Properties.Property (Property)
+import Futhark.Analysis.Properties.Property (Property (..), Predicate (..))
+import qualified Data.Set as S
 
 data ASTMapper a m = ASTMapper
   { mapOnSymbol :: a -> m a,
@@ -37,8 +38,24 @@ instance (Ord a, ASTMappable a a) => ASTMappable a (SoP a) where
         ts' <- mapM (astMap m) ts
         pure $ foldl (.*.) (int2SoP 1) (int2SoP c : map sym2SoP ts')
 
-instance ASTMappable a (Property a) where
-  astMap _m _prop = undefined
+instance (Ord a, ASTMappable a a) => ASTMappable a (Predicate a) where
+  astMap m (Predicate vn e) = Predicate vn <$> astMap m e
+
+instance (Ord a, ASTMappable a a) => ASTMappable a (Property a) where
+  astMap _ Boolean = pure Boolean
+  astMap _ (Disjoint vns) = pure (Disjoint vns)
+  astMap _ (Monotonic dir) = pure (Monotonic dir)
+  astMap m (InjectiveRCD x (a,b)) = curry (InjectiveRCD x) <$> astMap m a <*> astMap m b
+  astMap m (BijectiveRCD x (a,b) (c,d)) = do
+    rcd <- (,) <$> astMap m a <*> astMap m b
+    img <- (,) <$> astMap m c <*> astMap m d
+    pure $ BijectiveRCD x rcd img
+  astMap m (FiltPartInv x pf pps) = do
+    pf' <- astMap m pf
+    let (pp, splits) = unzip pps
+    pp' <- mapM (astMap m) pp
+    splits' <- mapM (astMap m) splits
+    pure $ FiltPartInv x pf' (zip pp' splits')
 
 instance ASTMappable Symbol Symbol where
   astMap _ Recurrence = pure Recurrence
@@ -101,8 +118,22 @@ instance ASTFoldable Symbol (SoP Symbol) where
   astFold m acc =
     foldM (astFold m) acc . concatMap fst . sopToLists
 
+instance ASTFoldable Symbol (Predicate Symbol) where
+  astFold m acc (Predicate _ e) = astFold m acc e
+
 instance ASTFoldable Symbol (Property Symbol) where
-  astFold _m _acc = undefined
+  -- astFold _m _acc = undefined
+  astFold _ acc Boolean = pure acc
+  astFold _ acc Disjoint {} = pure acc
+  astFold _ acc Monotonic {} = pure acc
+  astFold m acc (InjectiveRCD _ (a,b)) = astFold m acc a >>= astFoldF m b
+  astFold m acc (BijectiveRCD _ (a,b) (c,d)) =
+    astFold m acc a >>= astFoldF m b >>= astFoldF m c >>= astFoldF m d
+  astFold m acc (FiltPartInv _ pf pps) = do
+    acc' <- astFold m acc pf
+    let (pp, splits) = unzip pps
+    acc'' <- foldM (astFold m) acc' pp
+    foldM (astFold m) acc'' splits
 
 instance ASTFoldable Symbol Symbol where
   astFold m acc e@(Sum _ lb ub x) =

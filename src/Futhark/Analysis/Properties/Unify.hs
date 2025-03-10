@@ -9,7 +9,7 @@ module Futhark.Analysis.Properties.Unify
     Renameable (..),
     Replacement,
     ReplacementBuilder (..),
-    Rep (rep),
+    Rep (..),
     Substitution (..),
     FreeVariables (..),
     Hole (justHole),
@@ -136,6 +136,8 @@ type Replacement u = M.Map VName (SoP u)
 class Rep v u where
   -- Implements the replacement operation from Sieg and Kaufmann.
   rep :: Replacement u -> v -> SoP u
+
+  repSelf :: Replacement u -> v -> v
 
 class ReplacementBuilder v u where
   addRep :: VName -> v -> Replacement u -> Replacement u
@@ -333,7 +335,7 @@ unifyTuple k (a, b) (a', b') = do
 repPredicate :: (Ord u, Rep u u) => Replacement u -> Predicate u -> Predicate u
 repPredicate s (Predicate vn e) =
   let s' = M.delete vn s
-   in Predicate vn (rep s' e)
+   in Predicate vn (repSelf s' e)
 
 instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Predicate a) a where
   unify_ k (Predicate _ e_x) (Predicate _ e_y) = do

@@ -23,62 +23,62 @@ tests =
     [ mkTest
         "tests/indexfn/part2indices.fut"
         ( \[_pivot, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
+            proveFn (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices.fut"
         ( \[_pivot, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            prove (PInjectiveRCD (int2SoP 0, n)) fn
+            proveFn (PInjectiveRCD (int2SoP 0, n)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices.fut"
         ( \[_pivot, fn@(IndexFn (Forall _ (Iota _)) _)] -> do
-            prove (PInjectiveRCD (int2SoP 0, int2SoP 3)) fn
+            proveFn (PInjectiveRCD (int2SoP 0, int2SoP 3)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/dummyindices.fut"
         ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
+            proveFn (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Unknown,
       mkTest
         "tests/indexfn/dummyindices2.fut"
         ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
+            proveFn (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Unknown,
       mkTest
         "tests/indexfn/part2indices_numeric_conds.fut"
         ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
+            proveFn (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices_predicatefn.fut"
         ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
+            proveFn (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices_predicatefn2.fut"
         ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
+            proveFn (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part3indices.fut"
         ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            prove (PermutationOfZeroTo (n .-. int2SoP 1)) fn
+            proveFn (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indicesL.fut"
         ( \(fn@(IndexFn (Forall _ dom@(Cat _ _ start)) _) : _) -> do
             end <- rewrite $ intervalEnd dom
-            prove (ForallSegments $ \_ -> PermutationOfRange start end) fn
+            proveFn (ForallSegments $ \_ -> PermutationOfRange start end) fn
         )
         Yes
     ]
