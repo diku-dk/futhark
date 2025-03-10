@@ -132,6 +132,7 @@ check (a :> b) = a $> b
 check (a :>= b) = a $>= b
 check (a :< b) = a $< b
 check (a :<= b) = a $<= b
+check (Prop prop) = undefined
 check a = isTrue a
 
 foreachCase :: IndexFn -> (Int -> IndexFnM a) -> IndexFnM [a]

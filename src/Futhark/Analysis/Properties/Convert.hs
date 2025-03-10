@@ -11,7 +11,7 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
 import Data.Set qualified as S
 import Debug.Trace (traceM)
-import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=))
+import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, toAlgebra, ($==), ($>=), simplify)
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, guards, justSingleCase)
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
@@ -445,7 +445,9 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       forward e
   | Just vn <- getFun f,
     vn `S.member` propertyPrelude = do
-      forwardPropertyPrelude loc expr vn args
+      -- forwardPropertyPrelude loc expr vn args
+      gs <- parsePropPrelude vn args
+      pure [IndexFn Empty gs]
   -- Applying other functions, for instance, user-defined ones.
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
@@ -864,11 +866,6 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
           pure (check, effect)
         _ ->
           error "Impossible: Refinements have type t -> bool."
-    mkRef wrap e@(E.AppExp (E.Apply f args loc) _)
-      | Just vn <- getFun f,
-        vn `S.member` propertyPrelude = do
-          forwardPropertyPrelude loc e vn args
-          undefined
     mkRef _ x = error $ "Unhandled refinement predicate " <> show x
 
     forwardRefinementExp e = do
@@ -888,13 +885,6 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
       --   (x : {(t1, t2) | \(a, b) -> ...})
       check <- substParams (repIndexFn size_rep check_fn) args_in_scope
       askRefinement check
-
-    -- Verifies a Property.
-    checkProp :: Property -> IndexFn -> CheckContext -> IndexFnM Answer
-    checkProp prop f =
-      -- f' <- substParams (repIndexFn size_rep f) args_in_scope
-      -- rep size_rep
-      undefined
 getRefinement _ = pure Nothing
 
 -- Tags formal arguments that are booleans or arrays of booleans as such.
@@ -1029,7 +1019,7 @@ forwardPropertyPrelude loc e f args = do
         _ ->
           undefined
 
-parsePropPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM (Property.Property Symbol)
+parsePropPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM (Cases Symbol (SoP Symbol))
 parsePropPrelude f args =
   case f of
     "InjectiveRCD"
@@ -1037,10 +1027,11 @@ parsePropPrelude f args =
         Just x <- justVName e_X -> do
           f_RCD <- forward e_RCD
           case f_RCD of
-            [IndexFn Empty g_a, IndexFn Empty g_b] -> do
-              let a = flattenCases g_a
-              let b = flattenCases g_b
-              pure (Property.InjectiveRCD x (a, b))
+            [IndexFn Empty g_a, IndexFn Empty g_b] ->
+              simplify . cases $ do
+                (p_a, a) <- casesToList g_a
+                (p_b, b) <- casesToList g_b
+                pure (p_a :&& p_b, pr $ Property.InjectiveRCD x (a, b))
             _ ->
               undefined
     "BijectiveRCD"
@@ -1053,12 +1044,13 @@ parsePropPrelude f args =
               IndexFn Empty g_b,
               IndexFn Empty g_c,
               IndexFn Empty g_d
-              ] -> do
-                let a = flattenCases g_a
-                let b = flattenCases g_b
-                let c = flattenCases g_c
-                let d = flattenCases g_d
-                pure (Property.BijectiveRCD x (a, b) (c, d))
+              ] ->
+                simplify . cases $ do
+                  (p_a, a) <- casesToList g_a
+                  (p_b, b) <- casesToList g_b
+                  (p_c, c) <- casesToList g_c
+                  (p_d, d) <- casesToList g_d
+                  pure (p_a :&& p_b :&& p_c :&& p_d, pr $ Property.BijectiveRCD x (a, b) (c, d))
             _ ->
               undefined
     "FiltPartInv"
@@ -1076,10 +1068,16 @@ parsePropPrelude f args =
               IndexFn Empty g_part,
               IndexFn Empty g_split
               ] -> do
-                let filt = flattenCases g_filt
-                let part = flattenCases g_part
-                let split = flattenCases g_split
-                pure (Property.FiltPartInv x (Property.Predicate param_filt filt) [(Property.Predicate param_part part, split)])
+                simplify . cases $ do
+                  (p_filt, filt) <- casesToList g_filt
+                  (p_part, part) <- casesToList g_part
+                  (p_split, split) <- casesToList g_split
+                  pure
+                    ( p_filt :&& p_part :&& p_split,
+                      pr $ Property.FiltPartInv x (Property.Predicate param_filt filt) [(Property.Predicate param_part part, split)]
+                    )
             _ -> undefined
     _ ->
       undefined
+  where
+    pr = sym2SoP . Prop
