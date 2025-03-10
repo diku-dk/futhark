@@ -447,9 +447,7 @@ forward (E.AppExp (E.Apply f args loc) _)
       forward e
   | Just vn <- getFun f,
     vn `S.member` propertyPrelude = do
-      -- forwardPropertyPrelude loc expr vn args
-      gs <- parsePropPrelude vn args
-      pure [IndexFn Empty gs]
+      (: []) <$> parsePropPrelude vn args
   -- Applying other functions, for instance, user-defined ones.
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
@@ -943,7 +941,9 @@ checkPostcondition vn indexfns (E.TETuple tes _)
       undefined
 checkPostcondition _ _ _ = pure ()
 
-parsePropPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM (Cases Symbol (SoP Symbol))
+-- TODO make it return a lsit of functions just to remove the many undefined cases
+-- (it should never happen in practice as these functions are type checked).
+parsePropPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM IndexFn
 parsePropPrelude f args =
   case f of
     "InjectiveRCD"
@@ -952,7 +952,7 @@ parsePropPrelude f args =
           f_RCD <- forward e_RCD
           case f_RCD of
             [IndexFn Empty g_a, IndexFn Empty g_b] ->
-              simplify . cases $ do
+              fmap (IndexFn Empty) . simplify . cases $ do
                 (p_a, a) <- casesToList g_a
                 (p_b, b) <- casesToList g_b
                 pure (p_a :&& p_b, pr $ Property.InjectiveRCD x (a, b))
@@ -969,7 +969,7 @@ parsePropPrelude f args =
               IndexFn Empty g_c,
               IndexFn Empty g_d
               ] ->
-                simplify . cases $ do
+                fmap (IndexFn Empty) . simplify . cases $ do
                   (p_a, a) <- casesToList g_a
                   (p_b, b) <- casesToList g_b
                   (p_c, c) <- casesToList g_c
@@ -1002,7 +1002,7 @@ parsePropPrelude f args =
                   IndexFn _ g_part,
                   IndexFn Empty g_split
                   ) -> do
-                    simplify . cases $ do
+                    fmap (IndexFn Empty) . simplify . cases $ do
                       (p_filt, filt) <- casesToList g_filt
                       (p_part, part) <- casesToList g_part
                       (p_split, split) <- casesToList g_split
@@ -1014,6 +1014,14 @@ parsePropPrelude f args =
                       toPredicate e = Property.Predicate i (sop2Symbol e)
                 _ -> undefined
             _ -> undefined
+    "and" | [e_xs] <- getArgs args -> do
+      -- No-op: The argument e_xs is a boolean array; each branch will
+      -- be checked in refinements.
+      -- XXX but we lose information about iterator at check site, hm...
+      xss <- forward e_xs
+      case xss of
+        [xs] -> pure xs
+        _ -> undefined
     _ -> do
       error $
         "Properties must be in A-normal form: " <> prettyStr f <> " " <> prettyStr (NE.map snd args)
