@@ -29,6 +29,7 @@ module Futhark.Analysis.Properties.Monad
     getII,
     insertII,
     lookupIndexFn,
+    printAlgEnv,
   )
 where
 
@@ -205,3 +206,7 @@ printTrace level msg m = do
   a <- m
   printM level (msg <> " " <> prettyString a)
   pure a
+
+printAlgEnv :: Int -> IndexFnM ()
+printAlgEnv level = do
+  printM level . prettyStr =<< getAlgEnv

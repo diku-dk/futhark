@@ -14,16 +14,20 @@ module Futhark.Analysis.Properties.AlgebraBridge.Util
   )
 where
 
+import Control.Monad (forM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
+import Data.Maybe (catMaybes)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv)
-import Futhark.Analysis.Properties.Symbol (Symbol (..))
+import Futhark.Analysis.Properties.Property (Property (..))
+import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
+import Futhark.SoP.Monad (addProperty)
 import Futhark.SoP.Refine (addRel, addRels)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), viaShow)
@@ -70,7 +74,10 @@ addRelSymbol (Bool _) = pure ()
 addRelSymbol p = do
   rel <- toRel p
   maybe (pure ()) addRel rel
+  props <- toProps p
+  forM_ props addProperty_
   where
+    toRel :: Symbol -> IndexFnM (Maybe (Rel Algebra.Symbol))
     toRel = runMaybeT . toRel_
 
     convOp transf op x y = do
@@ -100,6 +107,33 @@ addRelSymbol p = do
     toRel_ (x :&& y) = convOp toRel_ (liftOp (:&&:)) x y
     toRel_ (_ :|| _) = fail "toRel on :||" -- convOp toRel_ (liftOp (:||:)) x y
     toRel_ _ = fail ""
+
+    -- Convert to CNF, then get all conjuncts that are properties.
+    -- (Any properties nested inside disjunctions are ignored.)
+    toProps :: Symbol -> IndexFnM [Property Algebra.Symbol]
+    toProps sym = catMaybes <$> mapM toProp_ (getProps $ toCNF sym)
+      where
+        getProps :: Symbol -> [Property Symbol]
+        getProps (Prop prop) = [prop]
+        getProps (a :&& b) = getProps a <> getProps b
+        getProps _ = []
+
+        toProp_ :: Property Symbol -> IndexFnM (Maybe (Property Algebra.Symbol))
+        toProp_ (InjectiveRCD x rcd) =
+          Just . InjectiveRCD x <$> toAlgebraPair rcd
+        toProp_ (BijectiveRCD x rcd img) =
+          fmap Just . BijectiveRCD x <$> toAlgebraPair rcd <*> toAlgebraPair img
+        toProp_ FiltPartInv {} = pure $ fail "not implemented yet"
+        toProp_ _ = pure $ fail "not implemented yet"
+
+        toAlgebraPair (a, b) = (,) <$> toAlgebra a <*> toAlgebra b
+
+    addProperty_ prop = addProperty (Algebra.Var (propName prop)) prop
+
+    propName (InjectiveRCD x _) = x
+    propName (BijectiveRCD x _ _) = x
+    propName (FiltPartInv x _ _) = x
+    propName _ = undefined
 
 -- | Add relations derived from the iterator to the algebraic environment.
 addRelIterator :: Iterator -> IndexFnM ()

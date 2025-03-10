@@ -154,6 +154,9 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just ret) _ _ params body _ _ val_loc)
       case ref of
         Just (_, effect) -> effect
         _ -> pure ()
+      printM 1 $ "Adding precondition on " <> prettyStr pat
+      printAlgEnv 1
+      error "stop her"
 mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
   insertTopLevelDef vn (params, body)
   pure []
