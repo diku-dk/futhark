@@ -841,12 +841,12 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
     -- the thing that should be fixed, but it requires fiddling with
     -- the defunctorisation of size-lifted types.
 
-    onExps bound (Var v _ _) e
-      | Just rexp <- lookup (qualLeaf v) named1 =
-          onExps mempty (unReplaced rexp) e
-      | otherwise =
-          unless (any (`elem` bound) $ freeVarsInExp e) $
-            modify (M.insert (qualLeaf v) e)
+    onExps bound (Var v _ _) e = do
+      unless (any (`elem` bound) $ freeVarsInExp e) $
+        modify (M.insert (qualLeaf v) e)
+      case lookup (qualLeaf v) named1 of
+        Just rexp -> onExps mempty (unReplaced rexp) e
+        Nothing -> pure ()
     onExps _bound e (Var v _ _)
       | Just rexp <- lookup (qualLeaf v) named2 =
           onExps mempty e (unReplaced rexp)
