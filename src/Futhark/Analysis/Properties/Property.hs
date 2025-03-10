@@ -55,8 +55,9 @@ instance (Pretty u) => Pretty (Property u) where
 instance (Pretty u) => Pretty (Predicate u) where
   pretty (Predicate vn e) = "λ" <> prettyName vn <> dot <+> pretty e
 
--- Querying properties.
---------------------------------------------------------------------------------
+{-
+               Querying properties.
+-}
 askMonotonic :: (MonadSoP u e (Property u) m) => u -> m (Maybe MonDir)
 askMonotonic sym = askPropertyWith sym hasMon
 
