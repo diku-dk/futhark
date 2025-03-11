@@ -1,6 +1,6 @@
 module Futhark.Analysis.Properties.IndexFnTests (tests) where
 
-import Control.Monad (forM, forM_, unless)
+import Control.Monad (forM, forM_, unless, when)
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Properties.Convert
 import Futhark.Analysis.Properties.IndexFn
@@ -453,6 +453,8 @@ tests =
             x : _ -> x
       let vbs = getValBinds last_import
       let (actuals, expecteds) = unzip $ runTest vns vbs expectedPat
+      when (null actuals) $
+        assertFailure "The last value binding does not create an index function."
       actuals @??= expecteds
 
     basename = drop (length prefix)
