@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * AD would in some cases produce code that would cause a compiler
   crash (#2228).
 
+* Slight error in the definition of the partial derivatives for the
+  `**` operator could cause NaNs in the interpreter when using
+  forward-mode AD (#2229).
+
 ## [0.25.28]
 
 ### Fixed
