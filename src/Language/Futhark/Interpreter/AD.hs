@@ -220,10 +220,10 @@ doOp op o
       case find isRight o' of
         -- Finally, we perform the necessary steps for the given
         -- type of AD
-        Just (Right (VJP {})) -> do
+        Just (Right (VJP {})) ->
           Right . Variable dep . VJP . VJPValue $
             vjpHandleOp op (map extractVJP o') vprev
-        Just (Right (JVP {})) -> do
+        Just (Right (JVP {})) ->
           Variable dep . JVP . JVPValue vprev
             <$> jvpHandleOp op (map extractJVP o')
         _ ->
