@@ -156,7 +156,6 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just ret) _ _ params body _ _ val_loc)
         _ -> pure ()
       printM 1 $ "Adding precondition on " <> prettyStr pat
       printAlgEnv 1
-      error "stop her"
 mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
   insertTopLevelDef vn (params, body)
   pure []
@@ -487,6 +486,10 @@ forward (E.AppExp (E.Apply f args loc) _)
             Nothing -> do
               -- g is a free variable in this expression (probably a parameter
               -- to the top-level function currently being analyzed).
+              --
+              -- We treat it as an uninterpreted function. Function congruence
+              -- lets us check equality on g regardless:
+              --   forall i,j . i = j => g(i) = g(j).
               arg_fns <- mconcat <$> mapM forward (getArgs args)
               size <- sizeOfTypeBase return_type
               arg_names <- forM arg_fns (const $ newVName "x")
@@ -538,7 +541,7 @@ forward (E.AppExp (E.Apply f args loc) _)
           unless (isYes ans) . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
 forward e = do
-  printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
+  -- printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
   vn <- newVName $ "untrans(" <> prettyStr e <> ")"
   pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
 
