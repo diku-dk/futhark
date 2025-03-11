@@ -35,6 +35,7 @@ import Control.Monad.Trans.Maybe
 import Data.Array
 import Data.Bifunctor
 import Data.Bitraversable
+import Data.Either (fromRight)
 import Data.List
   ( find,
     foldl',
@@ -1351,8 +1352,9 @@ initialCtx =
 
     adToPrim v = putV $ AD.primitive v
 
-    adBinOp op x y = AD.doOp op [x, y]
-    adUnOp op x = AD.doOp op [x]
+    adBinOp op x y =
+      either (const Nothing) Just $ AD.doOp op [x, y]
+    adUnOp op x = either (const Nothing) Just $ AD.doOp op [x]
 
     fun1 f =
       TermValue Nothing $ ValueFun $ \x -> f x
@@ -1421,7 +1423,7 @@ initialCtx =
         _
           | Just x' <- getAD x,
             Just y' <- getAD y,
-            Just z <- msum $ map (`bopDefAD'` (x', y')) fs -> do
+            Just z <- msum $ map (`bopDefAD` (x', y')) fs -> do
               breakOnNaN [adToPrim x', adToPrim y'] $ adToPrim z
               pure $ putAD z
         _ ->
@@ -1436,7 +1438,7 @@ initialCtx =
           x' <- valf x
           y' <- valf y
           retf =<< op x' y'
-        bopDefAD' (_, _, _, dop) (x, y) = dop x y
+        bopDefAD (_, _, _, dop) (x, y) = dop x y
 
     unopDef fs = fun1 $ \x ->
       case x of
@@ -1471,7 +1473,7 @@ initialCtx =
         Just [x, y]
           | Just x' <- getAD x,
             Just y' <- getAD y,
-            Just z <- AD.doOp op [x', y'] -> do
+            Right z <- AD.doOp op [x', y'] -> do
               breakOnNaN [adToPrim x', adToPrim y'] $ adToPrim z
               pure $ putAD z
         _ ->
@@ -2029,7 +2031,7 @@ initialCtx =
         -- TODO: Perhaps this could be fully abstracted by AD?
         -- Making addFor private would be nice..
         add x y =
-          fromMaybe (error "jvp: illtyped add") $
+          fromRight (error "jvp: illtyped add") $
             AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
     def "jvp2" = Just $
       -- TODO: This could be much better. Currently, it is very inefficient
