@@ -70,12 +70,14 @@ mulFor (FloatType t) = FMul t
 mulFor Bool = LogAnd
 mulFor t = error $ "mulFor: " ++ show t
 
+type Depth = Int
+
 -- Types and utility functions--
 -- When taking the partial derivative of a function, we
 -- must differentiate between the values which are kept
 -- constant, and those which are not
 data ADValue
-  = Variable Int ADVariable
+  = Variable Depth ADVariable
   | Constant PrimValue
   deriving (Show)
 
@@ -88,7 +90,7 @@ data ADVariable
   | JVP JVPValue
   deriving (Show)
 
-depth :: ADValue -> Int
+depth :: ADValue -> Depth
 depth (Variable d _) = d
 depth (Constant _) = 0
 
@@ -157,7 +159,7 @@ doOp op o
   where
     pv = map primitive o
 
-    divideDepths :: Int -> ADValue -> Either ADValue ADVariable
+    divideDepths :: Depth -> ADValue -> Either ADValue ADVariable
     divideDepths _ v@(Constant {}) = Left v
     divideDepths d v@(Variable d' v') = if d' < d then Left v else Right v'
 
@@ -246,7 +248,7 @@ newtype VJPValue = VJPValue Tape
 data Tape
   = -- | This represents a variable. Each variable is given a unique ID,
     -- and has an initial value
-    TapeID Int ADValue
+    TapeID Depth ADValue
   | -- | This represents a constant.
     TapeConst ADValue
   | -- | This represents the application of a mathematical operation.
