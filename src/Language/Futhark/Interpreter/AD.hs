@@ -15,7 +15,7 @@ module Language.Futhark.Interpreter.AD
 where
 
 import Control.Monad (foldM, zipWithM)
-import Data.Either (isRight)
+import Data.Either (fromRight, isRight)
 import Data.List (find, foldl')
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
@@ -99,6 +99,12 @@ primal (Variable _ (VJP (VJPValue t))) = tapePrimal t
 primal (Variable _ (JVP (JVPValue v _))) = primal v
 primal (Constant v) = Constant v
 
+primalFor :: Depth -> ADValue -> ADValue
+primalFor cur v@(Variable tag _) | cur /= tag = v
+primalFor _ (Variable _ (VJP (VJPValue t))) = tapePrimal t
+primalFor cur (Variable _ (JVP (JVPValue v _))) = primalFor cur v
+primalFor _ (Constant v) = Constant v
+
 primitive :: ADValue -> PrimValue
 primitive (Variable _ v) = varPrimal v
 primitive (Constant v) = v
@@ -108,9 +114,11 @@ varPrimal (VJP (VJPValue t)) = primitive $ tapePrimal t
 varPrimal (JVP (JVPValue v _)) = primitive $ primal v
 
 -- Evaluates a PrimExp using doOp
-evalPrimExp :: M.Map VName ADValue -> PrimExp VName -> Maybe ADValue
-evalPrimExp m (LeafExp n _) = M.lookup n m
-evalPrimExp _ (ValueExp pv) = Just $ Constant pv
+evalPrimExp :: M.Map VName ADValue -> PrimExp VName -> Either String ADValue
+evalPrimExp m (LeafExp n _) =
+  maybe (Left $ "Unknown variable " <> show n) Right $ M.lookup n m
+evalPrimExp _ (ValueExp pv) =
+  Right $ Constant pv
 evalPrimExp m (BinOpExp op x y) = do
   x' <- evalPrimExp m x
   y' <- evalPrimExp m y
@@ -143,19 +151,21 @@ lookupPDs _ _ = Nothing
 -- This function performs a mathematical operation on a
 -- list of operands, performing automatic differentiation
 -- if one or more operands is a Variable (of depth > 0)
-doOp :: Op -> [ADValue] -> Maybe ADValue
+doOp :: Op -> [ADValue] -> Either String ADValue
 doOp op o
   | not $ opTypeMatch op (map primValueType pv) =
       -- This function may be called with arguments of invalid types,
       -- because it is used as part of an overloaded operator.
-      Nothing
+      Left $ unwords ["invalid types for op", show op, "and operands", show o]
   | otherwise = do
       let dep = case op of
             OpCmp _ -> 0 -- AD is not well-defined for comparason operations
             -- There are no derivatives for those written in
             -- PrimExp (check lookupPDs)
             _ -> maximum (map depth o)
-      if dep == 0 then constCase else nonconstCase dep
+      if dep == 0
+        then maybe (Left "failed to evaluate const") Right constCase
+        else nonconstCase dep
   where
     pv = map primitive o
 
@@ -200,7 +210,7 @@ doOp op o
       -- have to perform the necessary steps for AD
 
       -- First, we calculate the value for the previous depth
-      let oprev = map primal o
+      let oprev = map (primalFor dep) o
       vprev <- doOp op oprev
 
       -- Then we separate the values of the maximum depth from
@@ -210,31 +220,32 @@ doOp op o
       case find isRight o' of
         -- Finally, we perform the necessary steps for the given
         -- type of AD
-        Just (Right (VJP {})) ->
-          Just . Variable dep . VJP . VJPValue $
+        Just (Right (VJP {})) -> do
+          Right . Variable dep . VJP . VJPValue $
             vjpHandleOp op (map extractVJP o') vprev
-        Just (Right (JVP {})) ->
+        Just (Right (JVP {})) -> do
           Variable dep . JVP . JVPValue vprev
-            <$> jvpHandleFn op (map extractJVP o')
+            <$> jvpHandleOp op (map extractJVP o')
         _ ->
           -- Since the maximum depth is non-zero, there must be at
           -- least one variable of depth > 0
           error "find isRight"
 
 calculatePDs :: Op -> [ADValue] -> [ADValue]
-calculatePDs op p =
+calculatePDs op args =
   -- Create a unique VName for each operand
-  let n = map (\i -> VName (nameFromString $ "x" ++ show i) i) [1 .. length p]
+  let n = map (\i -> VName (nameFromString $ "x" ++ show i) i) [1 .. length args]
       -- Put the operands in the environment
-      m = M.fromList $ zip n p
+      m = M.fromList $ zip n args
 
       -- Look up, and calculate the partial derivative
       -- of the operation with respect to each operand
       pde =
         fromMaybe (error "lookupPDs failed") $
           lookupPDs op $
-            map (`LeafExp` opReturnType op) n
-   in map (fromMaybe (error "evalPrimExp failed") . evalPrimExp m) pde
+            zipWith (\v val -> LeafExp v $ primValueType $ primitive val) n args
+      res = map (either (error . ("evalPrimExp failed: " <>)) id . evalPrimExp m) pde
+   in res
 
 -- VJP / Reverse mode automatic differentiation--
 -- In reverse mode AD, the entire computation
@@ -283,7 +294,7 @@ deriveTape (TapeOp op p _) s =
   let s'' = case op of
         OpConv op' ->
           -- In case of type conversion, simply convert the sensitivity
-          [ fromMaybe (error "deriveTape: doOp failed") $
+          [ fromRight (error "deriveTape: doOp failed") $
               doOp (OpConv $ flipConvOp op') [s]
           ]
         _ ->
@@ -295,10 +306,10 @@ deriveTape (TapeOp op p _) s =
       foldl' (M.unionWith add) M.empty pd
   where
     add x y =
-      fromMaybe (error "deriveTape: add failed") $
+      fromRight (error "deriveTape: add failed") $
         doOp (OpBin $ addFor $ opReturnType op) [x, y]
     mul x y =
-      fromMaybe (error "deriveTape: mul failed") $
+      fromRight (error "deriveTape: mul failed") $
         doOp (OpBin $ mulFor $ opReturnType op) [x, y]
 
 -- JVP / Forward mode automatic differentiation--
@@ -308,27 +319,26 @@ deriveTape (TapeOp op p _) s =
 data JVPValue = JVPValue ADValue ADValue
   deriving (Show)
 
--- | This calculates the derivative part of the JVPValue resulting
+-- | This calculates the tangent part of the JVPValue resulting
 -- from the application of a mathematical operation on one or more
 -- JVPValues.
-jvpHandleFn :: Op -> [Either ADValue JVPValue] -> Maybe ADValue
-jvpHandleFn op p = do
+jvpHandleOp :: Op -> [Either ADValue JVPValue] -> Either String ADValue
+jvpHandleOp op p = do
   case op of
     OpConv _ ->
       -- In case of type conversion, simply convert
-      -- the old derivative
-      doOp op [derivative $ head p]
+      -- the old tangent
+      doOp op [tangent $ head p]
     _ -> do
-      -- Calculate the new derivative using the chain
-      -- rule
+      -- Calculate the new tangent using the chain rule
       let pds = calculatePDs op $ map primal' p
-      vs <- zipWithM mul pds $ map derivative p
-      foldM add (Constant $ blankPrimValue $ opReturnType op) vs
+      vs <- zipWithM mul pds $ map tangent p
+      foldM add (Constant $ blankPrimValue op_t) vs
   where
+    op_t = opReturnType op
     primal' (Left v) = v
     primal' (Right (JVPValue v _)) = v
-    derivative (Left v) = Constant $ blankPrimValue $ primValueType $ primitive v
-    derivative (Right (JVPValue _ d)) = d
-
+    tangent (Left _) = Constant $ blankPrimValue $ opReturnType op
+    tangent (Right (JVPValue _ d)) = d
     add x y = doOp (OpBin $ addFor $ opReturnType op) [x, y]
     mul x y = doOp (OpBin $ mulFor $ opReturnType op) [x, y]
