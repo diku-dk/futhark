@@ -71,22 +71,14 @@ def filter_indices [n]
   let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
   in (new_size, is)
 
-def filterBy [n] 't (cs: [n]bool) (xs: [n]t) : {(i64, []t) | \_ -> true} =
+def filterBy [n] 't (cs: [n]bool) (xs: [n]t)
+    : {(i64, []t) | \(_, ys) -> FiltPart ys xs (\i -> cs[i]) (\_i -> true)} =
   let (new_n, is) = filter_indices cs
   let dummy = xs[0]
   let scratch = replicate new_n dummy
   in (new_n, scatter scratch is xs)
 
---
---            Helpers
--- 
--- Functions that we have to extract from the bodies of top-level defintions
--- in order to put properties on them.
-def Monotonic (cmp: i64 -> i64 -> bool) (xs: []i64) = true
-
-def edge2Ids_helper [n] nEdges (xs: {[n]i64 | \xs' -> Monotonic (<)  xs'})
-    : { [n]i64 | \ys -> Monotonic (<) ys } =
-  map (\i -> 2*i) xs
+def length [n] 't (xs: [n]t) = n
 
 -- 
 --            Program
@@ -94,8 +86,7 @@ def edge2Ids_helper [n] nEdges (xs: {[n]i64 | \xs' -> Monotonic (<)  xs'})
 -- Return the edge-id pairs with the smallest edge id
 def getSmallestPairs [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: {[arraySizeFlat]i64 | \x -> Monotonic (<) x}) (nVerts: i64) (nEdges_2: i64)
       : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
-           true
-           -- InjectiveRCD new_edges (0,length new_edges - 1) && Monotonic (<) new_edgeIds
+           InjectiveRCD new_edges (0,length new_edges - 1) && Monotonic (<) new_edgeIds
         } =
     -- The original program transforms edgeIds as follows:
     --      0,  1,  2,  3,  4,  5
@@ -118,12 +109,7 @@ def getSmallestPairs [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: {[arr
     let cs = map (\(i, j) -> H[i] == j) zippedArray
     let (newSize, ys) = filterBy cs flatE
     let (_, zs) = filterBy cs flatE2i
-    let zs' = zs
-    let hm = filter_indices cs
-    in (ys :> [newSize]i64, zs' :> [newSize]i64)
-    -- in filter (\i -> H[i.0] == i.1) zippedArray
-    --    --  |> unzip
-    --     |> map (\i -> (i.0, i.1 / 2)) |> unzip
+    in (ys :> [newSize]i64, zs :> [newSize]i64)
 
 -- -- Return the edge if it's ID is the smallest, else return placeholder
 -- def getMMEdges (smallestEdgeId: []i64) (e: i64) (i: i64): (i64, i64) =

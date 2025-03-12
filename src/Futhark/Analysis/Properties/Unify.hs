@@ -149,8 +149,12 @@ instance (Ord u, Rep u u) => Rep (Term u, Integer) u where
   rep s (x, c) =
     SoP.scaleSoP c . foldr (mulSoPs . rep s) (int2SoP 1) . termToList $ x
 
+  repSelf = undefined
+
 instance (Ord u, Rep u u) => Rep (SoP u) u where
   rep s = SoP.mapSymSoP (rep s)
+
+  repSelf = rep
 
 instance (Ord u, Hole u) => ReplacementBuilder (SoP u) u where
   addRep _ x _
@@ -317,6 +321,8 @@ instance (Ord a, Renameable a) => Renameable (Property a) where
     BijectiveRCD x <$> rename_ vns tau rcd <*> rename_ vns tau img
   rename_ vns tau (FiltPartInv x pf pps) =
     FiltPartInv x <$> rename_ vns tau pf <*> mapM (rename_ vns tau) pps
+  rename_ vns tau (FiltPart x y pf pps) =
+    FiltPart x y <$> rename_ vns tau pf <*> mapM (rename_ vns tau) pps
 
 instance Unify VName a where
   unify_ _ x y
@@ -332,7 +338,7 @@ unifyTuple k (a, b) (a', b') = do
   s <- unify_ k a a'
   (s <>) <$> unify_ k (rep s b) (rep s b')
 
-repPredicate :: (Ord u, Rep u u) => Replacement u -> Predicate u -> Predicate u
+repPredicate :: (Rep u u) =>Replacement u -> Predicate u -> Predicate u
 repPredicate s (Predicate vn e) =
   let s' = M.delete vn s
    in Predicate vn (repSelf s' e)
@@ -370,7 +376,7 @@ instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Property a)
 instance (FreeVariables u, FreeVariables v) => FreeVariables (u, v) where
   fv (a, b) = fv a <> fv b
 
-instance (FreeVariables u, Ord u) => FreeVariables (Predicate u) where
+instance (FreeVariables u) => FreeVariables (Predicate u) where
   fv (Predicate vn e) = fv vn <> fv e
 
 instance (FreeVariables u, Ord u) => FreeVariables (Property u) where
@@ -380,3 +386,4 @@ instance (FreeVariables u, Ord u) => FreeVariables (Property u) where
   fv (InjectiveRCD x rcd) = fv x <> fv rcd
   fv (BijectiveRCD x rcd img) = fv x <> fv rcd <> fv img
   fv (FiltPartInv x pf pps) = fv x <> fv pf <> S.unions (map fv pps)
+  fv (FiltPart x y pf pps) = fv x <> fv y <> fv pf <> S.unions (map fv pps)

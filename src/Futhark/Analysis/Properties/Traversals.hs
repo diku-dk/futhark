@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
+
 module Futhark.Analysis.Properties.Traversals
   ( ASTMapper (..),
     ASTMappable (..),
@@ -10,10 +12,9 @@ where
 import Control.Monad (foldM)
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
+import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
 import Futhark.Analysis.Properties.Symbol
 import Futhark.SoP.SoP (SoP, int2SoP, sopToLists, sym2SoP, (.*.), (.+.))
-import Futhark.Analysis.Properties.Property (Property (..), Predicate (..))
-import qualified Data.Set as S
 
 data ASTMapper a m = ASTMapper
   { mapOnSymbol :: a -> m a,
@@ -44,9 +45,9 @@ instance (Ord a, ASTMappable a a) => ASTMappable a (Predicate a) where
 instance (Ord a, ASTMappable a a) => ASTMappable a (Property a) where
   astMap _ Boolean = pure Boolean
   astMap _ (Disjoint vns) = pure (Disjoint vns)
-  astMap _ (Monotonic dir) = pure (Monotonic dir)
-  astMap m (InjectiveRCD x (a,b)) = curry (InjectiveRCD x) <$> astMap m a <*> astMap m b
-  astMap m (BijectiveRCD x (a,b) (c,d)) = do
+  astMap _ (Monotonic x dir) = pure (Monotonic x dir)
+  astMap m (InjectiveRCD x (a, b)) = curry (InjectiveRCD x) <$> astMap m a <*> astMap m b
+  astMap m (BijectiveRCD x (a, b) (c, d)) = do
     rcd <- (,) <$> astMap m a <*> astMap m b
     img <- (,) <$> astMap m c <*> astMap m d
     pure $ BijectiveRCD x rcd img
@@ -56,6 +57,12 @@ instance (Ord a, ASTMappable a a) => ASTMappable a (Property a) where
     pp' <- mapM (astMap m) pp
     splits' <- mapM (astMap m) splits
     pure $ FiltPartInv x pf' (zip pp' splits')
+  astMap m (FiltPart x y pf pps) = do
+    pf' <- astMap m pf
+    let (pp, splits) = unzip pps
+    pp' <- mapM (astMap m) pp
+    splits' <- mapM (astMap m) splits
+    pure $ FiltPart x y pf' (zip pp' splits')
 
 instance ASTMappable Symbol Symbol where
   astMap _ Recurrence = pure Recurrence
@@ -107,7 +114,7 @@ instance ASTMappable Algebra.Symbol Algebra.Symbol where
     mapOnSymbol m . curry Algebra.Pow c =<< astMap m x
 
 newtype ASTFolder a b m = ASTFolder
-  { foldOnSymbol :: b -> a -> m b }
+  {foldOnSymbol :: b -> a -> m b}
 
 class ASTFoldable a c where
   astFold :: (Monad m) => ASTFolder a b m -> b -> c -> m b
@@ -126,10 +133,15 @@ instance ASTFoldable Symbol (Property Symbol) where
   astFold _ acc Boolean = pure acc
   astFold _ acc Disjoint {} = pure acc
   astFold _ acc Monotonic {} = pure acc
-  astFold m acc (InjectiveRCD _ (a,b)) = astFold m acc a >>= astFoldF m b
-  astFold m acc (BijectiveRCD _ (a,b) (c,d)) =
+  astFold m acc (InjectiveRCD _ (a, b)) = astFold m acc a >>= astFoldF m b
+  astFold m acc (BijectiveRCD _ (a, b) (c, d)) =
     astFold m acc a >>= astFoldF m b >>= astFoldF m c >>= astFoldF m d
   astFold m acc (FiltPartInv _ pf pps) = do
+    acc' <- astFold m acc pf
+    let (pp, splits) = unzip pps
+    acc'' <- foldM (astFold m) acc' pp
+    foldM (astFold m) acc'' splits
+  astFold m acc (FiltPart _ _ pf pps) = do
     acc' <- astFold m acc pf
     let (pp, splits) = unzip pps
     acc'' <- foldM (astFold m) acc' pp

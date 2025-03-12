@@ -16,9 +16,12 @@ import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, guards, justSingleCase)
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Property qualified as Property
 -- import Futhark.Analysis.Properties.Prove (Statement (..), proveFn)
-import Futhark.Analysis.Properties.Query -- (Answer (..), Query (..), askRefinement, askRefinements, isUnknown, isYes, queryCase)
+-- (Answer (..), Query (..), askRefinement, askRefinements, isUnknown, isYes, queryCase)
+
+import Futhark.Analysis.Properties.Property (MonDir (..))
+import Futhark.Analysis.Properties.Property qualified as Property
+import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Substitute (subst, (@))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
@@ -37,9 +40,11 @@ import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 propertyPrelude :: S.Set String
 propertyPrelude =
   S.fromList
-    [ "InjectiveRCD",
+    [ "Monotonic",
+      "InjectiveRCD",
       "BijectiveRCD",
       "FiltPartInv",
+      "FiltPart",
       "and"
     ]
 
@@ -540,8 +545,11 @@ forward (E.AppExp (E.Apply f args loc) _)
               check (size_rep, scope)
           unless (isYes ans) . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
+forward (E.Coerce e _ _ _) = do
+  -- No-op; I've only seen coercions that are hints for array sizes.
+  forward e
 forward e = do
-  -- printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
+  printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
   vn <- newVName $ "untrans(" <> prettyStr e <> ")"
   pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
 
@@ -581,7 +589,7 @@ zipArgs loc formal_args actual_args = do
   args <- mapM forward (getArgs actual_args)
   unless (length pats == length args) $
     errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
-  unless (map length pats == map length args) $
+  unless (map length pats == map length args) $ do
     errorMsg loc "Internal error: actual argument does not match parameter pattern."
 
   -- Discard unused parameters such as wildcards while maintaining alignment.
@@ -837,14 +845,7 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
       Just <$> mkRef Var ref
   where
     mkRef wrap (E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _) = do
-      let rel = case E.baseString vn_op of
-            ">" -> (:>)
-            ">=" -> (:>=)
-            "<" -> (:<)
-            "<=" -> (:<=)
-            "==" -> (:==)
-            "!=" -> (:/=)
-            _ -> undefined
+      let rel = fromJust $ parseOpVName vn_op
       ys <- forwardRefinementExp e_y
       -- Create check as an index function whose cases contain the refinement.
       let check =
@@ -952,6 +953,18 @@ checkPostcondition _ _ _ = pure ()
 forwardPropertyPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM IndexFn
 forwardPropertyPrelude f args =
   case f of
+    "Monotonic"
+      | [E.OpSection (E.QualName [] vn_op) _ _, e_X] <- getArgs args,
+        Just x <- justVName e_X,
+        Just dir <- opToMonDir (E.baseString vn_op) -> do
+          printM 1 $ prettyStr (IndexFn Empty $ cases [(Bool True, pr $ Property.Monotonic x dir)])
+          pure (IndexFn Empty $ cases [(Bool True, pr $ Property.Monotonic x dir)])
+      where
+        opToMonDir ">" = pure DecS
+        opToMonDir ">=" = pure Dec
+        opToMonDir "<" = pure IncS
+        opToMonDir "<=" = pure Inc
+        opToMonDir _ = Nothing
     "InjectiveRCD"
       | [e_X, e_RCD] <- getArgs args,
         Just x <- justVName e_X -> do
@@ -989,37 +1002,23 @@ forwardPropertyPrelude f args =
         [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
         E.Lambda params_part lam_part _ _ _ <- e_part,
         [[(Just param_part, _)]] <- map patternMapAligned params_part,
-        Just x <- justVName e_X -> rollbackAlgEnv $ do
-          res <- lookupIndexFn x
-          case res of
-            Just [f_X] | Forall i _ <- iterator f_X -> rollbackAlgEnv $ do
-              -- Map filter and partition lambdas over indices of X
-              -- to get proper substitutions (iterator discarded afterwards).
-              let iota = IndexFn (iterator f_X) (cases [(Bool True, sVar i)])
-              _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
-              f_filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
-              f_part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
-
-              -- Construct partitioning split point.
-              f_split <- sumOverIndexFn f_part
-
-              case (f_filt, f_part, f_split) of
-                ( IndexFn _ g_filt,
-                  IndexFn _ g_part,
-                  IndexFn Empty g_split
-                  ) -> do
-                    fmap (IndexFn Empty) . simplify . cases $ do
-                      (p_filt, filt) <- casesToList g_filt
-                      (p_part, part) <- casesToList g_part
-                      (p_split, split) <- casesToList g_split
-                      pure
-                        ( p_filt :&& p_part :&& p_split,
-                          pr $ Property.FiltPartInv x (toPredicate filt) [(toPredicate part, split)]
-                        )
-                    where
-                      toPredicate e = Property.Predicate i (sop2Symbol e)
-                _ -> undefined
-            _ -> undefined
+        Just x <- justVName e_X -> do
+          propArgs <- commonFiltPart x (param_filt, lam_filt) (param_part, lam_part)
+          fmap (IndexFn Empty) . simplify . cases $ do
+            (c, pf, pps) <- propArgs
+            pure (c, pr $ Property.FiltPartInv x pf pps)
+    "FiltPart"
+      | [e_X, e_Y, e_filt, e_part] <- getArgs args,
+        E.Lambda params_filt lam_filt _ _ _ <- e_filt,
+        [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
+        E.Lambda params_part lam_part _ _ _ <- e_part,
+        [[(Just param_part, _)]] <- map patternMapAligned params_part,
+        Just x <- justVName e_X,
+        Just y <- justVName e_Y -> rollbackAlgEnv $ do
+          propArgs <- commonFiltPart x (param_filt, lam_filt) (param_part, lam_part)
+          fmap (IndexFn Empty) . simplify . cases $ do
+            (c, pf, pps) <- propArgs
+            pure (c, pr $ Property.FiltPart x y pf pps)
     "and" | [e_xs] <- getArgs args -> do
       -- No-op: The argument e_xs is a boolean array; each branch will
       -- be checked in refinements.
@@ -1034,6 +1033,40 @@ forwardPropertyPrelude f args =
   where
     pr = sym2SoP . Prop
 
+    commonFiltPart x (param_filt, lam_filt) (param_part, lam_part) = do
+      res <- lookupIndexFn x
+      case res of
+        Just [f_X] | Forall i _ <- iterator f_X -> rollbackAlgEnv $ do
+          -- Map filter and partition lambdas over indices of X
+          -- to get proper substitutions (iterator discarded afterwards).
+          -- (Note that this essentially just uses the inferred size of X;
+          -- f_X could simply be the trivial function: for i < n . true => X[i].)
+          let iota = IndexFn (iterator f_X) (cases [(Bool True, sVar i)])
+          _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
+          f_filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
+          f_part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
+
+          -- Construct partitioning split point.
+          f_split <- sumOverIndexFn f_part
+
+          case (f_filt, f_part, f_split) of
+            ( IndexFn _ g_filt,
+              IndexFn _ g_part,
+              IndexFn Empty g_split
+              ) -> pure $ do
+                (p_filt, filt) <- casesToList g_filt
+                (p_part, part) <- casesToList g_part
+                (p_split, split) <- casesToList g_split
+                pure
+                  ( p_filt :&& p_part :&& p_split,
+                    toPredicate filt,
+                    [(toPredicate part, split)]
+                  )
+                where
+                  toPredicate e = Property.Predicate i (sop2Symbol e)
+            _ -> undefined
+        _ -> undefined
+
 sumOverIndexFn :: IndexFn -> IndexFnM IndexFn
 sumOverIndexFn f@(IndexFn (Forall _ dom) _) = do
   n <- rewrite $ domainEnd dom
@@ -1044,3 +1077,14 @@ sumOverIndexFn f@(IndexFn (Forall _ dom) _) = do
     =<< IndexFn Empty (cases [(Bool True, sym2SoP sum_part)])
       @ (x, f)
 sumOverIndexFn (IndexFn Empty _) = undefined
+
+parseOpVName :: E.VName -> Maybe (SoP Symbol -> SoP Symbol -> Symbol)
+parseOpVName vn =
+  case E.baseString vn of
+    ">" -> Just (:>)
+    ">=" -> Just (:>=)
+    "<" -> Just (:<)
+    "<=" -> Just (:<=)
+    "==" -> Just (:==)
+    "!=" -> Just (:/=)
+    _ -> Nothing

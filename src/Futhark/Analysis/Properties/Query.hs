@@ -1,7 +1,6 @@
 -- Answer queries on index functions using algebraic solver.
 module Futhark.Analysis.Properties.Query
   ( Answer (..),
-    MonoDir (..),
     Query (..),
     queryCase,
     askRefinement,
@@ -26,6 +25,7 @@ import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Bifunctor (second)
 import Data.List (partition)
+import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge
@@ -33,23 +33,20 @@ import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
+import Futhark.Analysis.Properties.Property (MonDir (..), Predicate (..), Property (..), getFiltPart, getInjectiveRCD, translateProp, translatePredicate)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), sop2Symbol, toDNF)
 import Futhark.Analysis.Properties.SymbolPlus (toSumOfSums)
-import Futhark.Analysis.Properties.Unify (mkRep, rep)
+import Futhark.Analysis.Properties.Unify (mkRep, rep, Rep)
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (newNameFromString, newVName)
-import Futhark.SoP.Monad (lookupRange)
+import Futhark.SoP.Monad (getProperties, lookupRange)
 import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
 import Prelude hiding (GT, LT)
 
-data MonoDir = Inc | IncStrict | Dec | DecStrict
-  deriving (Show, Eq, Ord)
-
 data Query
-  = CaseIsMonotonic MonoDir
+  = CaseIsMonotonic MonDir
   | -- Apply transform to case value, then check whether it simplifies to true.
     CaseCheck (SoP Symbol -> Symbol)
   | -- Check whether case is true.
@@ -107,9 +104,9 @@ queryCase query fn case_idx = algebraContext fn $ do
             j +< i
             let rel = case dir of
                   Inc -> ($<=)
-                  IncStrict -> ($<)
+                  IncS -> ($<)
                   Dec -> ($>=)
-                  DecStrict -> ($>)
+                  DecS -> ($>)
             dnfQuery (p :&& (fromJust . justSym $ p @ Var j)) ((q @ Var j) `rel` q)
             where
               f @ x = rep (mkRep i x) f
@@ -214,29 +211,84 @@ data Order = LT | GT | Undefined
   deriving (Eq, Show)
 
 prove :: Property Symbol -> IndexFnM Answer
-prove Monotonic {} = error "Not implemented yet"
-prove (InjectiveRCD x rcd) = proveFn (PInjectiveRCD rcd) =<< getFn x
-prove (BijectiveRCD x rcd img) = proveFn (PBijectiveRCD rcd img) =<< getFn x
-prove (FiltPartInv x pf [(pp, split)]) = do
-  f_X <- getFn x
-  proveFn (PFiltPartInv (predToFun pf) (predToFun pp) split) f_X
+prove prop = failOnUnknown <$> matchProof prop
   where
+    failOnUnknown Unknown = error $ "Failed to prove " <> prettyStr prop
+    failOnUnknown Yes = Yes
+
+    matchProof Monotonic {} = error "Not implemented yet"
+    matchProof (InjectiveRCD x rcd) = do
+      printAlgEnv 1
+      -- XXX implement PInjGe
+      props <- getProperties
+      indexfns <- getIndexFns
+      case getFiltPart =<< M.lookup (Algebra.Var x) props of
+        Just (y, pf, _) | Just [f@(IndexFn (Forall i0 d) _)] <- M.lookup y indexfns ->
+          -- x is a filtering/partition of y, hence x will be "opaque" (a gather
+          -- on inverse indices), but we can try to prove the following logically equivalent query
+          -- x[i] = x[j] => i = j   <=>   y[i'] = y[j'] ^ pf(i') ^ pf(j') => i' = j'
+          algebraContext f $ do
+            i <- newNameFromString "i"
+            j <- newNameFromString "j"
+            pf' <- translatePredicate fromAlgebra pf
+            assume (predToFun pf' i)
+            assume (predToFun pf' j)
+            nextGenProver (PInjGe i j d rcd (body f))
+            error "hello"
+            -- NEXT-UP: ^ add FiltPart ys to env to pattern match here
+        _ ->
+          proveFn (PInjectiveRCD rcd) =<< getFn x
+    matchProof (BijectiveRCD x rcd img) =
+      proveFn (PBijectiveRCD rcd img) =<< getFn x
+    matchProof (FiltPartInv x pf [(pp, split)]) = do
+      f_X <- getFn x
+      proveFn (PFiltPartInv (predToFun pf) (predToFun pp) split) f_X
+    matchProof (FiltPartInv {}) = error "Not implemented yet"
+    matchProof p = error $ "prove: called on " <> prettyStr p <> " (internal error)"
+
+    getFn vn = do
+      fs <- lookupIndexFn vn
+      case fs of
+        Just [f] -> pure f
+        _ -> error "internal error"
+
     predToFun (Predicate vn e) arg =
       sop2Symbol $ rep (mkRep vn (sym2SoP $ Var arg)) e
-prove (FiltPartInv {}) = error "Not implemented yet"
-prove p = error $ "prove: called on " <> prettyStr p <> " (internal error)"
-
-getFn :: VName -> IndexFnM IndexFn
-getFn vn = do
-  fs <- lookupIndexFn vn
-  case fs of
-    Just [f] -> pure f
-    _ -> error "internal error"
 
 proveFn :: Statement -> IndexFn -> IndexFnM Answer
 proveFn (ForallSegments fprop) f@(IndexFn (Forall _ (Cat k _ _)) _) =
   prove_ True (fprop k) f
 proveFn prop f = prove_ False prop f
+
+data PStatement =
+    PInjGe VName VName Domain (SoP Symbol, SoP Symbol) (Cases Symbol (SoP Symbol))
+
+sVar :: VName -> SoP Symbol
+sVar = sym2SoP . Var
+
+nextGenProver :: PStatement -> IndexFnM Answer
+nextGenProver (PInjGe i j d (a,b) ges) = do
+  -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
+  allM [no_dups g | g <- casesToList ges]
+  where
+    e @ arg = rep (mkRep i (Var arg)) e
+
+    iter_i = Forall i d
+    iter_j = Forall j d
+
+    out_of_range x = x :< a :|| b :< x
+
+    no_dups (c, e) = rollbackAlgEnv $ do
+      addRelIterator iter_i
+      addRelIterator iter_j
+
+      let oob =
+            (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
+              =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
+      let eq =
+            (sop2Symbol (c @ i) :&& sop2Symbol (c @ j) :&& e @ i :== e @ j)
+              =>? (sVar i :== sVar j)
+      oob `orM` eq
 
 prove_ :: Bool -> Statement -> IndexFn -> IndexFnM Answer
 prove_ _ (PInjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
@@ -247,7 +299,7 @@ prove_ _ (PInjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext 
       <> "\n"
       <> prettyIndent 2 fn
   i <- newNameFromString "i"
-  j <- newNameFromString "I"
+  j <- newNameFromString "j"
   let iter_i = Forall i $ repDomain (mkRep i0 (Var i)) dom
   let iter_j = Forall j $ repDomain (mkRep i0 (Var j)) dom
 
@@ -286,7 +338,12 @@ prove_ _ (PInjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext 
             let neq =
                   (sop2Symbol (c @ i) :&& sop2Symbol (c @ j)) -- XXX could use in_range f@i g@j here
                     =>? (e @ i :/= e @ j)
+            -- printM 1 $ prettyStr (e @ i .-. e @ j :: SoP Symbol)
+            -- lol <- simplify (e @ i .-. e @ j :: SoP Symbol)
+            -- printM 1 $ prettyStr lol
             oob `orM` neq
+
+  -- printAlgEnv 1
 
   let step2 = guards fn `canBeSortedBy` cmp
         where

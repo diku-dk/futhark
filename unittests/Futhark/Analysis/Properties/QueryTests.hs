@@ -2,6 +2,7 @@ module Futhark.Analysis.Properties.QueryTests (tests) where
 
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.Monad
+import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Prove
 import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Symbol

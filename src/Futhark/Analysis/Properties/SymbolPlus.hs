@@ -112,13 +112,15 @@ instance Rep Symbol Symbol where
 repProperty :: Replacement Symbol -> Property Symbol -> Property Symbol
 repProperty _ Boolean = Boolean
 repProperty s (Disjoint x) = Disjoint $ S.map (repVName s) x
-repProperty _ p@(Monotonic {}) = p
+repProperty s (Monotonic x dir) = Monotonic (repVName s x) dir
 repProperty s (InjectiveRCD x rcd) =
   InjectiveRCD (repVName s x) (repTuple s rcd)
 repProperty s (BijectiveRCD x rcd img) =
   BijectiveRCD (repVName s x) (repTuple s rcd) (repTuple s img)
 repProperty s (FiltPartInv x pf pps) =
   FiltPartInv (repVName s x) (repPredicate s pf) [(repPredicate s pp, rep s e) | (pp, e) <- pps]
+repProperty s (FiltPart x y pf pps) =
+  FiltPart (repVName s x) (repVName s y) (repPredicate s pf) [(repPredicate s pp, rep s e) | (pp, e) <- pps]
 
 instance Hole Symbol where
   justHole (Hole x) = Just x
