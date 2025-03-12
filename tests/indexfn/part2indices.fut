@@ -1,13 +1,10 @@
 -- These should all pass.
-def sanity_check1 n : {bool | \_ -> true} =
-  let X = iota n
-  in InjectiveRCD (0, n) X
-def sanity_check2 n : {bool | \_ -> true} =
-  let X = iota n
-  in InjectiveRCD (0, n-1) X
-def sanity_check3 n : {bool | \_ -> true} =
-  let X = replicate n 0
-  in InjectiveRCD (1, n) X
+def sanity_check1 n : {[n]i64 | \X -> InjectiveRCD X (0, n)} =
+  iota n
+def sanity_check2 n : {[n]i64 | \X -> InjectiveRCD X (0, n-1)} =
+  iota n
+def sanity_check3 n : {[n]i64 | \X -> InjectiveRCD X (1, n)} =
+  replicate n 0
 
 
 def sum [n] (xs: [n]i64) =
@@ -38,7 +35,7 @@ def part2indices [n]
 -- --
 -- let step1 =
 --   -- A bijection from X to X is a permutation of X.
---   BijectiveRCD (0, n-1) (0, n-1) inds
+--   BijectiveRCD inds (0, n-1) (0, n-1)
 -- let step2 =
 --   num_true == sum (map (\c -> if c then 1 else 0) conds)
 --   && and (map2 (\c ind -> if c then ind < num_true else ind >= num_true) conds inds)

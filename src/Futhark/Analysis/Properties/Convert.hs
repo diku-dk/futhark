@@ -953,7 +953,7 @@ forwardPropertyPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM IndexFn
 forwardPropertyPrelude f args =
   case f of
     "InjectiveRCD"
-      | [e_RCD, e_X] <- getArgs args,
+      | [e_X, e_RCD] <- getArgs args,
         Just x <- justVName e_X -> do
           f_RCD <- forward e_RCD
           case f_RCD of
@@ -965,7 +965,7 @@ forwardPropertyPrelude f args =
             _ ->
               undefined
     "BijectiveRCD"
-      | [e_RCD, e_ImgRCD, e_X] <- getArgs args,
+      | [e_X, e_RCD, e_ImgRCD] <- getArgs args,
         Just x <- justVName e_X -> do
           f_RCD <- forward e_RCD
           f_ImgRCD <- forward e_ImgRCD

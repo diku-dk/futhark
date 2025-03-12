@@ -3,9 +3,9 @@ import "array"
 
 def and (_: []bool) : bool = ???
 
-def InjectiveRCD 't (_ : (i64, i64)) (_: []t) : bool = ???
+def InjectiveRCD 't (_: []t) (_ : (i64, i64)) : bool = ???
 
-def BijectiveRCD 't (_ : (i64, i64)) (_ : (i64, i64)) (_: []t) : bool = ???
+def BijectiveRCD 't (_: []t) (_ : (i64, i64)) (_ : (i64, i64)) : bool = ???
 
 def sum [n] (xs: [n]i64) =
   if n > 0 then (scan (+) 0 xs)[n-1] else 0
