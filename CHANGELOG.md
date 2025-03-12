@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `**` operator could cause NaNs in the interpreter when using
   forward-mode AD (#2229).
 
+* The magical machinery for inferring external API types did not
+  handle arrays with uniqueness annotations consistently, resulting in
+  incompatible entry point types being generated, leading to a
+  compiler crash. (#2231)
+
 ## [0.25.28]
 
 ### Fixed
