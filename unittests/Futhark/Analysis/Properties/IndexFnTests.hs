@@ -434,9 +434,15 @@ tests =
             ]
         ),
       mkTest
-        "tests/indexfn/maximalMatching_step3-1.fut"
+        "tests/indexfn/maxMatch.fut"
         ( pure $ \(i, n, _, _) ->
             [ IndexFn
+                { iterator = Forall i (Iota (sHole n)),
+                  body =
+                    cases
+                      [(Bool True, int2SoP 0)]
+                },
+              IndexFn
                 { iterator = Forall i (Iota (sHole n)),
                   body =
                     cases
