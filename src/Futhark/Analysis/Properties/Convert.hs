@@ -835,46 +835,52 @@ getPrecondition = fmap (fmap fst) . getRefinement
 getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe (Check, Effect))
 getRefinement (E.PatParens pat _) = getRefinement pat
 getRefinement (E.PatAscription pat _ _) = getRefinement pat
-getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
-  | E.Array _ _ (E.Refinement _ty ref) <- info = do
-      whenDebug . traceM $ "Getting (array) type refinement " <> prettyStr (param, ref)
-      hole <- sym2SoP . Hole <$> newVName "h"
-      Just <$> mkRef ((`Idx` hole) . Var) ref
-  | E.Scalar (E.Refinement _ty ref) <- info = do
-      whenDebug . traceM $ "Getting type refinement " <> prettyStr (param, ref)
-      Just <$> mkRef Var ref
-  where
-    mkRef wrap (E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _) = do
-      let rel = fromJust $ parseOpVName vn_op
-      ys <- forwardRefinementExp e_y
-      -- Create check as an index function whose cases contain the refinement.
-      let check =
-            checkFn $
-              IndexFn Empty . cases $
-                map (second (sym2SoP . (sVar param `rel`))) (casesToList ys)
-      let effect = do
-            -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
-            alg_vn <- paramToAlgebra param wrap
-            y <- rewrite $ flattenCases ys
-            addRelSymbol $ sVar alg_vn `rel` y
-      pure (check, effect)
-    mkRef wrap (E.Lambda lam_params lam_body _ _ _) = do
-      let param_names = map fst $ mconcat $ map patternMapAligned lam_params
-      case param_names of
-        [lam_param] -> do
-          body <- forwardRefinementExp lam_body
-          let ref = case lam_param of
-                Just vn -> repCases (mkRep vn $ wrap param) body
-                Nothing -> body
-          let check = checkFn $ IndexFn Empty ref
-          let effect = do
-                y <- rewrite $ flattenCases ref
-                addRelSymbol (sop2Symbol y)
-          pure (check, effect)
-        _ ->
-          error "Impossible: Refinements have type t -> bool."
-    mkRef _ x = error $ "Unhandled refinement predicate " <> show x
+getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc) = getRefinementFromType param info
+getRefinement _ = pure Nothing
 
+-- Associates any refinement in `ty` with the name `vn`.
+getRefinementFromType :: E.VName -> E.TypeBase dim u -> IndexFnM (Maybe (Check, Effect))
+getRefinementFromType vn ty = case ty of
+  E.Array _ _ (E.Refinement _ ref) -> do
+    hole <- sym2SoP . Hole <$> newVName "h"
+    Just <$> mkRef vn ((`Idx` hole) . Var) ref
+  E.Scalar (E.Refinement _ ref) ->
+    Just <$> mkRef vn Var ref
+  _ -> pure Nothing
+
+mkRef :: E.VName -> (E.VName -> Symbol) -> E.ExpBase E.Info E.VName -> IndexFnM (CheckContext -> IndexFnM Answer, IndexFnM ())
+mkRef name wrap ref = case ref of
+  E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _ -> do
+    let rel = fromJust $ parseOpVName vn_op
+    ys <- forwardRefinementExp e_y
+    -- Create check as an index function whose cases contain the refinement.
+    let check =
+          checkFn $
+            IndexFn Empty . cases $
+              map (second (sym2SoP . (sVar name `rel`))) (casesToList ys)
+    let effect = do
+          -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
+          alg_vn <- paramToAlgebra name wrap
+          y <- rewrite $ flattenCases ys
+          addRelSymbol $ sVar alg_vn `rel` y
+    pure (check, effect)
+  E.Lambda lam_params lam_body _ _ _ -> do
+    let param_names = map fst $ mconcat $ map patternMapAligned lam_params
+    case param_names of
+      [lam_param] -> do
+        body <- forwardRefinementExp lam_body
+        let ref' = case lam_param of
+              Just vn -> repCases (mkRep vn $ wrap name) body
+              Nothing -> body
+        let check = checkFn $ IndexFn Empty ref'
+        let effect = do
+              y <- rewrite $ flattenCases ref'
+              addRelSymbol (sop2Symbol y)
+        pure (check, effect)
+      _ ->
+        error "Impossible: Refinements have type t -> bool."
+  x -> error $ "Unhandled refinement predicate " <> show x
+  where
     forwardRefinementExp e = do
       fns <- forward e
       case fns of
@@ -892,7 +898,6 @@ getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc)
       --   (x : {(t1, t2) | \(a, b) -> ...})
       check <- substParams (repIndexFn size_rep check_fn) args_in_scope
       askRefinement check
-getRefinement _ = pure Nothing
 
 -- Tags formal arguments that are booleans or arrays of booleans as such.
 addBooleanNames :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
