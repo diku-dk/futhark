@@ -1,7 +1,9 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Futhark.Analysis.Properties.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM_)
+import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT (runMaybeT), hoistMaybe)
 import Data.Bifunctor
@@ -13,7 +15,7 @@ import Data.Set qualified as S
 import Debug.Trace (traceM)
 import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Properties.IndexFn (Cases (Cases), Domain (..), IndexFn (..), Iterator (..), cases, casesToList, flattenCases, guards, justSingleCase)
+import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
 -- import Futhark.Analysis.Properties.Prove (Statement (..), proveFn)
@@ -27,7 +29,7 @@ import Futhark.Analysis.Properties.Substitute (subst, (@))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Properties.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
 import Futhark.Analysis.Properties.Util
-import Futhark.MonadFreshNames (VNameSource, newVName)
+import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
@@ -111,9 +113,23 @@ patternMapAligned = map f . patIdentsAligned
     patIdentsAligned (E.PatConstr _ _ ps _) = foldMap patIdentsAligned ps
     patIdentsAligned (E.PatAttr _ p _) = patIdentsAligned p
 
---------------------------------------------------------------
--- Construct index function for source program
---------------------------------------------------------------
+getTERefine :: E.TypeExp E.Exp E.VName -> [E.Exp]
+getTERefine (E.TEParens te _) = getTERefine te
+getTERefine (E.TETuple tes _) = do
+  te <- tes
+  getTERefine te
+getTERefine (E.TERefine _ e@(E.Lambda {}) _) =
+  pure e
+getTERefine (E.TERefine _ _ loc) =
+  errorMsg loc "Only lambda postconditions are currently supported."
+getTERefine _ = []
+
+hasRefinement :: E.TypeExp E.Exp E.VName -> Bool
+hasRefinement = not . null . getTERefine
+
+{-
+    Construct index function for source program
+-}
 mkIndexFnProg :: VNameSource -> Imports -> M.Map E.VName [IndexFn]
 mkIndexFnProg vns prog = snd $ runIndexFnM (mkIndexFnImports prog) vns
 
@@ -122,7 +138,6 @@ mkIndexFnImports = mapM_ (mkIndexFnDecs . E.progDecs . fileProg . snd)
 
 -- A program is a list of declarations (DecBase); functions are value bindings
 -- (ValBind). Everything is in an AppExp.
-
 mkIndexFnDecs :: [E.Dec] -> IndexFnM ()
 mkIndexFnDecs [] = pure ()
 mkIndexFnDecs (E.ValDec vb : rest) = do
@@ -130,17 +145,9 @@ mkIndexFnDecs (E.ValDec vb : rest) = do
   mkIndexFnDecs rest
 mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
 
-hasRefinement :: E.TypeExp d vn -> Bool
-hasRefinement (E.TEParens te _) =
-  hasRefinement te
-hasRefinement (E.TERefine {}) = True
-hasRefinement (E.TETuple tes _) =
-  any hasRefinement tes
-hasRefinement _ = False
-
 mkIndexFnValBind :: E.ValBind -> IndexFnM [IndexFn]
-mkIndexFnValBind val@(E.ValBind _ vn (Just ret) _ _ params body _ _ val_loc)
-  | hasRefinement ret = do
+mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
+  | hasRefinement te = do
       clearAlgEnv
       printM 1 $
         emphString ("Analyzing " <> prettyStr (E.locText (E.srclocOf val_loc)))
@@ -149,8 +156,8 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just ret) _ _ params body _ _ val_loc)
       forM_ params addBooleanNames
       forM_ params addSizeVariables
       indexfns <- forward body >>= mapM rewrite >>= bindfn vn
-      insertTopLevel vn (params, indexfns)
-      checkPostcondition vn indexfns ret
+      insertTopLevel vn (params, indexfns, te)
+      checkPostcondition vn indexfns te
       pure indexfns
   where
     -- Adds the effect of a precondition without checking that it holds.
@@ -174,28 +181,60 @@ bindfn_ level vn indexfns = do
   printM level $ prettyBinding vn indexfns
   pure indexfns
 
-singleCase :: a -> Cases Symbol a
-singleCase e = cases [(Bool True, e)]
+checkPostcondition :: E.VName -> [IndexFn] -> E.TypeExp E.Exp E.VName -> IndexFnM ()
+checkPostcondition vn indexfns te = do
+  let refs = getTERefine te
+  forM_ refs $ \e@(E.Lambda lam_params lam_body _ _ _) -> do
+    printM 1 . warningString $
+      "Checking post-condition:\n" <> prettyStr te
+    let param_names = map fst $ mconcat $ map patternMapAligned lam_params
+    forM_ (zip param_names indexfns) $ \(nm, fn) ->
+      when (isJust nm) . void $ bindfn (fromJust nm) [fn]
+    postconds <- forward lam_body >>= mapM rewrite
+    printM 1 $
+      "Postconditions after substituting in results:\n  "
+        <> prettyStr postconds
+    answer <- askRefinements postconds
+    case answer of
+      Yes -> do
+        printM 1 (E.baseString vn <> " ∎\n\n")
+        pure ()
+      Unknown ->
+        errorMsg (E.locOf e) $
+          "Failed to show postcondition:\n" <> prettyStr e <> "\n" <> prettyStr postconds
 
-fromScalar :: SoP Symbol -> [IndexFn]
-fromScalar e = [IndexFn Empty (singleCase e)]
+{-
+    Construct index function for source expression.
+-}
+
+-- Propagate postcondition effects, such as adding properties.
+-- Fires binding applications of top-level defs to names.
+forwardLetEffects :: [Maybe E.VName] -> E.Exp -> IndexFnM [IndexFn]
+forwardLetEffects bound_names x = do
+  toplevel_fns <- getTopLevelIndexFns
+  defs <- getTopLevelDefs
+  case forwardApplyDef toplevel_fns defs x of
+    Just effect_and_fns -> do
+      (effect, fns) <- effect_and_fns
+      bound_names' <- forM bound_names $ \case
+        Just vn -> pure vn
+        Nothing -> newNameFromString "_" -- HACK Apply effects to unusable wildcard.
+      effect bound_names'
+      printM 1 $ warningString "Propating effects on " <> prettyStr bound_names'
+      printAlgEnv 1
+      pure fns
+    Nothing -> forward x
 
 forward :: E.Exp -> IndexFnM [IndexFn]
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
-  -- ref <- getRefinementFromType vn (E.typeOf x)
-  -- case ref of
-  --   Just (_, effect) -> do
-  --     printM 0 $ "Adding effect on " <> prettyStr vn <> " = " <> prettyStr x
-  --     effect -- Assumes this has already been checked.
-  --     printAlgEnv 0
-  --   Nothing -> pure ()
-
-  (bindfn vn =<< forward x) >> forward in_body
+  fs <- forwardLetEffects [Just vn] x
+  bindfn vn fs >> forward in_body
 forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
-  xs <- forward x
-  forM_ (zip (mconcat $ map patternMapAligned patterns) xs) bindfnOrDiscard
+  let bound_names = map fst $ mconcat $ map patternMapAligned patterns
+  fs <- forwardLetEffects bound_names x
+  forM_ (zip (mconcat $ map patternMapAligned patterns) fs) bindfnOrDiscard
   forward body
   where
     bindfnOrDiscard ((Nothing, _), _) = pure ()
@@ -465,9 +504,9 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       toplevel_fns <- getTopLevelIndexFns
       defs <- getTopLevelDefs
       case forwardApplyDef toplevel_fns defs expr of
-        Just mf ->
+        Just effect_and_fs ->
           -- g is a top-level definition.
-          mf
+          snd <$> effect_and_fs
         Nothing -> do
           -- g is a free variable in this expression (probably a parameter
           -- to the top-level function currently being analyzed).
@@ -505,25 +544,28 @@ forward e = do
 -- Applying top-level definitions of functions.
 -- Returns nothing if the function is not defined at top-level.
 forwardApplyDef ::
-  M.Map E.VName ([E.PatBase E.Info E.VName (E.TypeBase E.Size E.Diet)], [IndexFn]) ->
+  M.Map E.VName ([E.PatBase E.Info E.VName (E.TypeBase E.Size E.Diet)], [IndexFn], E.TypeExp E.Exp E.VName) ->
   M.Map E.VName ([E.PatBase E.Info E.VName (E.TypeBase E.Size E.Diet)], E.Exp) ->
   E.Exp ->
-  Maybe (IndexFnM [IndexFn])
+  Maybe (IndexFnM ([E.VName] -> IndexFnM (), [IndexFn]))
 forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
   | (E.Var (E.QualName [] g) info loc') <- f,
-    E.Scalar (E.Arrow _ _ _ _ (E.RetType _ _)) <- E.unInfo info,
-    Just (pats, indexfns) <- M.lookup g toplevel_fns = Just $ do
+    E.Scalar (E.Arrow {}) <- E.unInfo info,
+    Just (pats, indexfns, te) <- M.lookup g toplevel_fns = Just $ do
       -- A top-level definition with an index function.
       printM 5 $ "✨ Using index fn " <> prettyStr g
       (actual_args, _, size_rep) <- handleArgs loc' g pats
 
-      forM indexfns $ \fn -> do
+      fs <- forM indexfns $ \fn -> do
         substParams (repIndexFn size_rep fn) (mconcat actual_args)
           >>= rewrite
+      printM 1 $ "forwardApplyDef " <> prettyStr g
+      printM 1 $ "forwardApplyDef " <> prettyStr te
+      pure (mkEffectFromTypeExp te size_rep actual_args, fs)
   | (E.Var (E.QualName [] g) info loc') <- f,
-    E.Scalar (E.Arrow _ _ _ _ (E.RetType _ _)) <- E.unInfo info,
+    E.Scalar (E.Arrow {}) <- E.unInfo info,
     Just (pats, e) <- M.lookup g defs = Just $ do
-      -- A top-level definition without an index function.
+      -- A top-level definition without an index function (no postcondition).
       --
       -- NOTE This "inlines" the definition of top-level definition,
       -- as opposed to the treatment for "top-level index functions"
@@ -537,8 +579,14 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
         addEquiv (Algebra.Var n) =<< toAlgebra sz
       forM_ (mconcat actual_args) $ \(vn, fn) ->
         void $ bindfn_ 1337 vn [fn]
-      forward e
+      (const $ pure (),) <$> forward e
   where
+    mkEffectFromTypeExp te size_rep actual_args vns =
+      let ref_exps = getTERefine te
+       in forM_ (map (mkRef vns Var) ref_exps) $ \ref -> do
+            (_check, effect) <- ref
+            effect (size_rep, mconcat actual_args)
+
     handleArgs loc' g pats = do
       (actual_args, actual_sizes) <- zipArgs loc' pats args
       let size_rep = M.fromList $ mconcat actual_sizes
@@ -549,8 +597,8 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
 
       pure (actual_args, actual_sizes, size_rep)
       where
-        -- Puts parameters in scope before checking.
-        -- The refinement of a parameter can use previous parameters:
+        -- Puts parameters in scope one-by-one before checking;
+        -- the refinement of a parameter can use previous parameters:
         --   (x : []i64) (n : {i64 | (== sum x))
         checkPreconditions actual_args size_rep = do
           foldM_
@@ -562,12 +610,13 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
             []
             (zip pats actual_args)
 
+        -- TODO could probably be deduplicated by merging with mkEffectFromTypeExp.
         checkPatPrecondition scope pat size_rep = do
           cond <- getPrecondition pat
           ans <- case cond of
             Nothing -> pure Yes
             Just check -> do
-              whenDebug . traceM $
+              printM 3000 $
                 "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
               check (size_rep, scope)
           unless (isYes ans) . errorMsg loc $
@@ -859,58 +908,54 @@ getPrecondition = fmap (fmap fst) . getRefinement
 getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe (Check, Effect))
 getRefinement (E.PatParens pat _) = getRefinement pat
 getRefinement (E.PatAscription pat _ _) = getRefinement pat
-getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc) = getRefinementFromType param info
+getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc) = getRefinementFromType [param] info
 getRefinement _ = pure Nothing
 
 -- Associates any refinement in `ty` with the name `vn`.
-getRefinementFromType :: E.VName -> E.TypeBase dim u -> IndexFnM (Maybe (Check, Effect))
-getRefinementFromType vn ty = case ty of
+getRefinementFromType :: [E.VName] -> E.TypeBase dim u -> IndexFnM (Maybe (Check, Effect))
+getRefinementFromType vns ty = case ty of
   E.Array _ _ (E.Refinement _ ref) -> do
     hole <- sym2SoP . Hole <$> newVName "h"
-    Just <$> mkRef vn ((`Idx` hole) . Var) ref
+    Just <$> mkRef vns ((`Idx` hole) . Var) ref
   E.Scalar (E.Refinement _ ref) ->
-    Just <$> mkRef vn Var ref
+    Just <$> mkRef vns Var ref
   _ -> pure Nothing
 
-mkRef :: E.VName -> (E.VName -> Symbol) -> E.ExpBase E.Info E.VName -> IndexFnM (Check, Effect)
-mkRef name wrap ref = case ref of
-  E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _ -> do
-    let rel = fromJust $ parseOpVName vn_op
-    g <- forwardRefinementExp e_y
-    -- Create check as an index function whose cases contain the refinement.
-    let check =
-          inContext
-            askRefinement
-            (cases $ map (second (sym2SoP . (sVar name `rel`))) (casesToList g))
-    let effect =
-          inContext
-            ( \f -> do
-                -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
-                alg_vn <- paramToAlgebra name wrap
-                y <- rewrite $ flattenCases (body f)
-                addRelSymbol $ sVar alg_vn `rel` y
-            )
-            g
-    pure (check, effect)
-  E.Lambda lam_params lam_body _ _ _ -> do
-    let param_names = map fst $ mconcat $ map patternMapAligned lam_params
-    case param_names of
-      [lam_param] -> do
-        g <- forwardRefinementExp lam_body
-        let ref' = case lam_param of
-              Just vn -> repCases (mkRep vn $ wrap name) g
-              Nothing -> g
-        let check = inContext askRefinement ref'
+mkRef :: [E.VName] -> (E.VName -> Symbol) -> E.Exp -> IndexFnM (Check, Effect)
+mkRef vns wrap refexp = case refexp of
+  E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _
+    | [name] <- vns -> do
+        let rel = fromJust $ parseOpVName vn_op
+        g <- forwardRefinementExp e_y
+        -- Create check as an index function whose cases contain the refinement.
+        let check =
+              inContext
+                askRefinement
+                (cases $ map (second (sym2SoP . (sVar name `rel`))) (casesToList g))
         let effect =
               inContext
                 ( \f -> do
+                    -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
+                    alg_vn <- paramToAlgebra name wrap
                     y <- rewrite $ flattenCases (body f)
-                    addRelSymbol (sop2Symbol y)
+                    addRelSymbol $ sVar alg_vn `rel` y
                 )
-                ref'
+                g
         pure (check, effect)
-      _ ->
-        error "Impossible: Refinements have type t -> bool."
+  E.Lambda lam_params lam_body _ _ loc -> do
+    let param_names = map fst $ mconcat $ map patternMapAligned lam_params
+    ref <- forwardRefinementExp lam_body
+    unless (length vns == length param_names) $ errorMsg loc "Internal error: mkRef."
+    let ref' = foldl repParam ref (zip param_names vns)
+    let check = inContext askRefinement ref'
+    let effect =
+          inContext
+            ( \f -> do
+                y <- rewrite $ flattenCases (body f)
+                addRelSymbol (sop2Symbol y)
+            )
+            ref'
+    pure (check, effect)
   x -> error $ "Unhandled refinement predicate " <> show x
   where
     forwardRefinementExp e = do
@@ -918,6 +963,9 @@ mkRef name wrap ref = case ref of
       case fns of
         [fn] -> body <$> rewrite fn
         _ -> error "Impossible: Refinements have return type bool."
+
+    repParam g (Just param_name, vn) = repCases (mkRep param_name $ wrap vn) g
+    repParam g (Nothing, _) = g
 
     -- This wraps a Check or an Effect, making sure that parameters/names/sizes
     -- are substituted correctly at the evaluation site.
@@ -949,35 +997,6 @@ addSizeVariables (E.Id _ (E.Info {E.unInfo = E.Array _ shp _}) _) = do
 addSizeVariables (E.Id param (E.Info {E.unInfo = t}) _) = do
   when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
 addSizeVariables _ = pure ()
-
-checkPostcondition :: (E.IsName vn) => E.VName -> [IndexFn] -> E.TypeExp (E.ExpBase E.Info E.VName) vn -> IndexFnM ()
-checkPostcondition vn indexfns (E.TEParens te _) =
-  checkPostcondition vn indexfns te
-checkPostcondition vn indexfns te@(E.TERefine _ (E.Lambda lam_params lam_body _ _ _) loc) = do
-  printM 1 . warningString $
-    "Checking post-condition:\n" <> prettyStr te
-  let param_names = map fst $ mconcat $ map patternMapAligned lam_params
-  forM_ (zip param_names indexfns) $ \(nm, fn) ->
-    when (isJust nm) . void $ bindfn (fromJust nm) [fn]
-  postconds <- forward lam_body >>= mapM rewrite
-  printM 1 $
-    "Postconditions after substituting in results:\n  "
-      <> prettyStr postconds
-  answer <- askRefinements postconds
-  case answer of
-    Yes -> do
-      printM 1 (E.baseString vn <> " ∎\n\n")
-      pure ()
-    Unknown ->
-      errorMsg loc $ "Failed to show postcondition: " <> prettyStr te
-checkPostcondition _ _ (E.TERefine _ _ loc) = do
-  errorMsg loc "Only lambda post-conditions are currently supported."
-checkPostcondition vn indexfns (E.TETuple tes _)
-  | length indexfns == length tes = do
-      zipWithM_ (checkPostcondition vn) (map (: []) indexfns) tes
-  | otherwise =
-      undefined
-checkPostcondition _ _ _ = pure ()
 
 -- TODO make it return a lsit of functions just to remove the many undefined cases
 -- (it should never happen in practice as these functions are type checked).

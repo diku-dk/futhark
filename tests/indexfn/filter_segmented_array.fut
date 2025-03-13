@@ -39,15 +39,15 @@ def sgm_sum [n] 't
 -- Expands a shape array to flat arrays of segment ids and flags.
 def segment_ids [m]
       (shape: [m]nat64)
-      -- : {([]i64, []bool) | \(ids, flags) ->
-      --      length ids == sum shape
-      --        && length flags == sum shape
-      --        && and (map (\id -> 0 <= id && id < m) ids)
-      --   } =
-      : ({[]i64 | \ids ->
+      : {([]i64, []bool) | \(ids, flags) ->
            length ids == sum shape
+             && length flags == sum shape
              && and (map (\id -> 0 <= id && id < m) ids)
-        }, {[]bool | \flags -> length flags == sum shape}) =
+        } =
+      -- : ({[]i64 | \ids ->
+      --      length ids == sum shape
+      --        && and (map (\id -> 0 <= id && id < m) ids)
+      --   }, {[]bool | \flags -> length flags == sum shape}) =
 
   let flags1 = map (\i -> i + 1) (iota m)
   let flags = mk_flag_array shape 0i64 flags1
