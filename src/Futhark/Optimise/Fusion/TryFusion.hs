@@ -207,7 +207,7 @@ reorderLambdaParams ::
 reorderLambdaParams out inp' lam = do
   let params = lambdaParams lam
   inp <- mapM (liftMaybe . SOAC.isVarishInput) inp'
-  -- guard $ sort inp `isSubsequenceOf` sort out -- Assert that the input is a subset of the outs.
+  guard $ sort inp `isSubsequenceOf` sort out -- Assert that the input is a subset of the outs.
   let name_to_param = M.fromList $ zip inp params
   new_params <- mapM (lookupParam name_to_param) out
   pure $ lam {lambdaParams = new_params}
@@ -215,10 +215,28 @@ reorderLambdaParams out inp' lam = do
     lookupParam mapping name =
       case M.lookup name mapping of
         Just v -> pure v
-        Nothing -> do
-          -- This is wrong but it will be ignored.
-          t <- lookupType name
-          newParam "ignore" t
+        Nothing -> lookupType name >>= newParam "ignore" . rowType
+
+extendSOACLambda ::
+  [VName] ->
+  Lambda SOACS ->
+  TryFusion (Lambda SOACS)
+extendSOACLambda names lam = do
+  let params = lambdaParams lam
+  extra_params <- mapM (lookupType >=> newParam "x" . rowType) names
+  let extra_rets = varRes . paramName <$> extra_params
+      extra_ts = paramType <$> extra_params
+      body = lambdaBody lam
+      new_body = body {bodyResult = bodyResult body <> extra_rets}
+      new_rets = lambdaReturnType lam <> extra_ts
+      new_params = params <> extra_params
+
+  pure $
+    lam
+      { lambdaBody = new_body,
+        lambdaReturnType = new_rets,
+        lambdaParams = new_params
+      }
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::
@@ -441,15 +459,18 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       SOAC.Screma _ inp_p form,
       Vertical
       )
-        | isJust maybe_scans -> do
+        | isJust maybe_scans,
+          all (`notNameIn` unfus_set) outVars -> do
             -- all (`notNameIn` unfus_set) outVars
             let Just (scans, lam) = maybe_scans
                 scan = singleScan scans
             names_p <- mapM (liftMaybe . SOAC.isVarishInput) inp_p
-            scatter_lam <- reorderLambdaParams (returned_outvars <> names_p) inp_c lam_c'
+            names_c <- mapM (liftMaybe . SOAC.isVarishInput) inp_c
+            lam' <- extendSOACLambda names_c lam
+            scatter_lam <- reorderLambdaParams (returned_outvars <> names_p) inp_c lam'
 
-            success (fsOutNames ker ++ returned_outvars) $
-              SOAC.ScanScatter w inp_p lam scan dests scatter_lam
+            success (fsOutNames ker <> returned_outvars) $
+              SOAC.ScanScatter w inp_p lam' scan dests scatter_lam
         where
           maybe_scans = isScanomapSOAC form
     (SOAC.Scatter {}, _, _) ->
