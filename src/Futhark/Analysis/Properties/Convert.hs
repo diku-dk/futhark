@@ -157,7 +157,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just ret) _ _ params body _ _ val_loc)
     addPreconditions pat = do
       ref <- getRefinement pat
       case ref of
-        Just (_, effect) -> effect
+        Just (_, effect) -> effect emptyCheckContext
         _ -> pure ()
       printM 1 $ "Adding precondition on " <> prettyStr pat
       printAlgEnv 1
@@ -184,12 +184,16 @@ forward :: E.Exp -> IndexFnM [IndexFn]
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
-  -- tell [textbf "Forward on " <> Math.math (toLaTeX vn) <> toLaTeX x]
-  whenDebug . traceM $ "Forward on " <> prettyStr vn
+  -- ref <- getRefinementFromType vn (E.typeOf x)
+  -- case ref of
+  --   Just (_, effect) -> do
+  --     printM 0 $ "Adding effect on " <> prettyStr vn <> " = " <> prettyStr x
+  --     effect -- Assumes this has already been checked.
+  --     printAlgEnv 0
+  --   Nothing -> pure ()
+
   (bindfn vn =<< forward x) >> forward in_body
 forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
-  -- tell [textbf "Forward on " <> Math.math (toLaTeX (S.toList $ E.patNames p)) <> toLaTeX x]
-  whenDebug . traceM $ "Forward on " <> prettyStr patterns
   xs <- forward x
   forM_ (zip (mconcat $ map patternMapAligned patterns) xs) bindfnOrDiscard
   forward body
@@ -322,7 +326,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
       >>= rewrite
 forward (E.Lambda _ _ _ _ loc) =
   errorMsg loc "Cannot create index function for unapplied lambda."
-forward (E.AppExp (E.Apply f args loc) _)
+forward expr@(E.AppExp (E.Apply f args loc) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params lam_body _ _ _ : _args <- getArgs args,
@@ -456,64 +460,84 @@ forward (E.AppExp (E.Apply f args loc) _)
     vn `S.member` propertyPrelude = do
       (: []) <$> forwardPropertyPrelude vn args
   -- Applying other functions, for instance, user-defined ones.
-  | (E.Var (E.QualName [] g) info loc') <- f,
+  | (E.Var (E.QualName [] g) info _) <- f,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
-      toplevel <- getTopLevelIndexFns
-
-      -- A top-level definition with an index function.
-      case M.lookup g toplevel of
-        Just (pats, indexfns) -> do
-          printM 5 $ "✨ Using index fn " <> prettyStr g
-          (actual_args, _, size_rep) <- handleArgs loc' g pats
-
-          forM indexfns $ \fn -> do
-            substParams (repIndexFn size_rep fn) (mconcat actual_args)
-              >>= rewrite
+      toplevel_fns <- getTopLevelIndexFns
+      defs <- getTopLevelDefs
+      case forwardApplyDef toplevel_fns defs expr of
+        Just mf ->
+          -- g is a top-level definition.
+          mf
         Nothing -> do
-          defs <- getTopLevelDefs
+          -- g is a free variable in this expression (probably a parameter
+          -- to the top-level function currently being analyzed).
+          --
+          -- We treat it as an uninterpreted function. Function congruence
+          -- lets us check equality on g regardless:
+          --   forall i,j . i = j => g(i) = g(j).
+          arg_fns <- mconcat <$> mapM forward (getArgs args)
+          size <- sizeOfTypeBase return_type
+          arg_names <- forM arg_fns (const $ newVName "x")
+          iter <- case size of
+            Just sz ->
+              flip Forall (Iota sz) <$> newVName "i"
+            Nothing ->
+              pure Empty
+          when (typeIsBool return_type) $ addProperty (Algebra.Var g) Property.Boolean
 
-          -- A top-level definition without an index function.
-          case M.lookup g defs of
-            -- NOTE This "inlines" the definition of top-level definition,
-            -- as opposed to the treatment for "top-level index functions"
-            -- where the args are substituted into the previously analyzed
-            -- index function. (Less work, but more likely to fail.
-            -- For example, substituting into a Sum fails in some cases.)
-            Just (pats, e) -> do
-              printM 5 $ "✨ Using top-level def " <> prettyStr g
-              (actual_args, actual_sizes, _) <- handleArgs loc' g pats
+          let g_fn =
+                IndexFn
+                  { iterator = iter,
+                    body =
+                      singleCase . sym2SoP $
+                        Apply (Var g) (map sVar arg_names)
+                  }
+          fn <- substParams g_fn (zip arg_names arg_fns)
+          pure [fn]
+forward (E.Coerce e _ _ _) = do
+  -- No-op; I've only seen coercions that are hints for array sizes.
+  forward e
+forward e = do
+  printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
+  vn <- newVName $ "untrans(" <> prettyStr e <> ")"
+  pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
 
-              forM_ (mconcat actual_sizes) $ \(n, sz) -> do
-                addEquiv (Algebra.Var n) =<< toAlgebra sz
-              forM_ (mconcat actual_args) $ \(vn, fn) ->
-                void $ bindfn_ 1337 vn [fn]
-              forward e
-            Nothing -> do
-              -- g is a free variable in this expression (probably a parameter
-              -- to the top-level function currently being analyzed).
-              --
-              -- We treat it as an uninterpreted function. Function congruence
-              -- lets us check equality on g regardless:
-              --   forall i,j . i = j => g(i) = g(j).
-              arg_fns <- mconcat <$> mapM forward (getArgs args)
-              size <- sizeOfTypeBase return_type
-              arg_names <- forM arg_fns (const $ newVName "x")
-              iter <- case size of
-                Just sz ->
-                  flip Forall (Iota sz) <$> newVName "i"
-                Nothing ->
-                  pure Empty
-              when (typeIsBool return_type) $ addProperty (Algebra.Var g) Property.Boolean
+-- Applying top-level definitions of functions.
+-- Returns nothing if the function is not defined at top-level.
+forwardApplyDef ::
+  M.Map E.VName ([E.PatBase E.Info E.VName (E.TypeBase E.Size E.Diet)], [IndexFn]) ->
+  M.Map E.VName ([E.PatBase E.Info E.VName (E.TypeBase E.Size E.Diet)], E.Exp) ->
+  E.Exp ->
+  Maybe (IndexFnM [IndexFn])
+forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
+  | (E.Var (E.QualName [] g) info loc') <- f,
+    E.Scalar (E.Arrow _ _ _ _ (E.RetType _ _)) <- E.unInfo info,
+    Just (pats, indexfns) <- M.lookup g toplevel_fns = Just $ do
+      -- A top-level definition with an index function.
+      printM 5 $ "✨ Using index fn " <> prettyStr g
+      (actual_args, _, size_rep) <- handleArgs loc' g pats
 
-              let g_fn =
-                    IndexFn
-                      { iterator = iter,
-                        body =
-                          singleCase . sym2SoP $
-                            Apply (Var g) (map sVar arg_names)
-                      }
-              fn <- substParams g_fn (zip arg_names arg_fns)
-              pure [fn]
+      forM indexfns $ \fn -> do
+        substParams (repIndexFn size_rep fn) (mconcat actual_args)
+          >>= rewrite
+  | (E.Var (E.QualName [] g) info loc') <- f,
+    E.Scalar (E.Arrow _ _ _ _ (E.RetType _ _)) <- E.unInfo info,
+    Just (pats, e) <- M.lookup g defs = Just $ do
+      -- A top-level definition without an index function.
+      --
+      -- NOTE This "inlines" the definition of top-level definition,
+      -- as opposed to the treatment for "top-level index functions"
+      -- where the args are substituted into the previously analyzed
+      -- index function. (Less work, but more likely to fail.
+      -- For example, substituting into a Sum fails in some cases.)
+      printM 5 $ "✨ Using top-level def " <> prettyStr g
+      (actual_args, actual_sizes, _) <- handleArgs loc' g pats
+
+      forM_ (mconcat actual_sizes) $ \(n, sz) -> do
+        addEquiv (Algebra.Var n) =<< toAlgebra sz
+      forM_ (mconcat actual_args) $ \(vn, fn) ->
+        void $ bindfn_ 1337 vn [fn]
+      forward e
   where
     handleArgs loc' g pats = do
       (actual_args, actual_sizes) <- zipArgs loc' pats args
@@ -525,6 +549,9 @@ forward (E.AppExp (E.Apply f args loc) _)
 
       pure (actual_args, actual_sizes, size_rep)
       where
+        -- Puts parameters in scope before checking.
+        -- The refinement of a parameter can use previous parameters:
+        --   (x : []i64) (n : {i64 | (== sum x))
         checkPreconditions actual_args size_rep = do
           foldM_
             ( \args_in_scope (pat, arg) -> do
@@ -545,13 +572,7 @@ forward (E.AppExp (E.Apply f args loc) _)
               check (size_rep, scope)
           unless (isYes ans) . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
-forward (E.Coerce e _ _ _) = do
-  -- No-op; I've only seen coercions that are hints for array sizes.
-  forward e
-forward e = do
-  printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
-  vn <- newVName $ "untrans(" <> prettyStr e <> ")"
-  pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
+forwardApplyDef _ _ _ = Nothing
 
 -- Binds names of scalar parameters to scalar values of corresponding
 -- index functions. Assumes that domains are equivalent across index
@@ -823,9 +844,12 @@ x ~||~ y = sym2SoP $ x :|| y
 --------------------------------------------------------------
 type CheckContext = (Replacement Symbol, [(E.VName, IndexFn)])
 
+emptyCheckContext :: CheckContext
+emptyCheckContext = (mempty, mempty)
+
 type Check = CheckContext -> IndexFnM Answer
 
-type Effect = IndexFnM ()
+type Effect = CheckContext -> IndexFnM ()
 
 -- Extract the Check to verify a formal argument's precondition, if it exists.
 getPrecondition :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe Check)
@@ -848,34 +872,42 @@ getRefinementFromType vn ty = case ty of
     Just <$> mkRef vn Var ref
   _ -> pure Nothing
 
-mkRef :: E.VName -> (E.VName -> Symbol) -> E.ExpBase E.Info E.VName -> IndexFnM (CheckContext -> IndexFnM Answer, IndexFnM ())
+mkRef :: E.VName -> (E.VName -> Symbol) -> E.ExpBase E.Info E.VName -> IndexFnM (Check, Effect)
 mkRef name wrap ref = case ref of
   E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _ -> do
     let rel = fromJust $ parseOpVName vn_op
-    ys <- forwardRefinementExp e_y
+    g <- forwardRefinementExp e_y
     -- Create check as an index function whose cases contain the refinement.
     let check =
-          checkFn $
-            IndexFn Empty . cases $
-              map (second (sym2SoP . (sVar name `rel`))) (casesToList ys)
-    let effect = do
-          -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
-          alg_vn <- paramToAlgebra name wrap
-          y <- rewrite $ flattenCases ys
-          addRelSymbol $ sVar alg_vn `rel` y
+          inContext
+            askRefinement
+            (cases $ map (second (sym2SoP . (sVar name `rel`))) (casesToList g))
+    let effect =
+          inContext
+            ( \f -> do
+                -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
+                alg_vn <- paramToAlgebra name wrap
+                y <- rewrite $ flattenCases (body f)
+                addRelSymbol $ sVar alg_vn `rel` y
+            )
+            g
     pure (check, effect)
   E.Lambda lam_params lam_body _ _ _ -> do
     let param_names = map fst $ mconcat $ map patternMapAligned lam_params
     case param_names of
       [lam_param] -> do
-        body <- forwardRefinementExp lam_body
+        g <- forwardRefinementExp lam_body
         let ref' = case lam_param of
-              Just vn -> repCases (mkRep vn $ wrap name) body
-              Nothing -> body
-        let check = checkFn $ IndexFn Empty ref'
-        let effect = do
-              y <- rewrite $ flattenCases ref'
-              addRelSymbol (sop2Symbol y)
+              Just vn -> repCases (mkRep vn $ wrap name) g
+              Nothing -> g
+        let check = inContext askRefinement ref'
+        let effect =
+              inContext
+                ( \f -> do
+                    y <- rewrite $ flattenCases (body f)
+                    addRelSymbol (sop2Symbol y)
+                )
+                ref'
         pure (check, effect)
       _ ->
         error "Impossible: Refinements have type t -> bool."
@@ -887,17 +919,11 @@ mkRef name wrap ref = case ref of
         [fn] -> body <$> rewrite fn
         _ -> error "Impossible: Refinements have return type bool."
 
-    -- Verifies a Check encoded as an IndexFn.
-    -- (All branches of check_fn evaluate to true in the CheckContext.)
-    checkFn :: IndexFn -> CheckContext -> IndexFnM Answer
-    checkFn check_fn (size_rep, args_in_scope) = do
-      -- Substitute parameters in scope.
-      -- The refinement of a parameter can use previous parameters:
-      --   (x : []i64) (n : {i64 | (== sum x))
-      -- NOTE unpacked record-types are disallowed:
-      --   (x : {(t1, t2) | \(a, b) -> ...})
-      check <- substParams (repIndexFn size_rep check_fn) args_in_scope
-      askRefinement check
+    -- This wraps a Check or an Effect, making sure that parameters/names/sizes
+    -- are substituted correctly at the evaluation site.
+    inContext f e (size_rep, args) = do
+      fn <- substParams (repIndexFn size_rep (IndexFn Empty e)) args
+      f fn
 
 -- Tags formal arguments that are booleans or arrays of booleans as such.
 addBooleanNames :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
@@ -935,7 +961,7 @@ checkPostcondition vn indexfns te@(E.TERefine _ (E.Lambda lam_params lam_body _ 
     when (isJust nm) . void $ bindfn (fromJust nm) [fn]
   postconds <- forward lam_body >>= mapM rewrite
   printM 1 $
-    "Post-conditions after substituting in results:\n  "
+    "Postconditions after substituting in results:\n  "
       <> prettyStr postconds
   answer <- askRefinements postconds
   case answer of
@@ -943,7 +969,7 @@ checkPostcondition vn indexfns te@(E.TERefine _ (E.Lambda lam_params lam_body _ 
       printM 1 (E.baseString vn <> " ∎\n\n")
       pure ()
     Unknown ->
-      errorMsg loc $ "Failed to show refinement: " <> prettyStr te
+      errorMsg loc $ "Failed to show postcondition: " <> prettyStr te
 checkPostcondition _ _ (E.TERefine _ _ loc) = do
   errorMsg loc "Only lambda post-conditions are currently supported."
 checkPostcondition vn indexfns (E.TETuple tes _)
