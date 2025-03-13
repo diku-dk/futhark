@@ -4,25 +4,23 @@ module Futhark.Analysis.Properties.AlgebraBridge
     simplify,
     isTrue,
     isFalse,
-    algDebugPrettyM,
     printAlgM,
   )
 where
 
 import Control.Monad ((<=<))
 import Data.Maybe (isJust)
-import Debug.Trace (traceM)
 import Futhark.Analysis.Properties.AlgebraBridge.Translate
 import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Properties.Monad (IndexFnM, getAlgEnv, printM, rollbackAlgEnv, whenDebug)
+import Futhark.Analysis.Properties.Monad (IndexFnM, getAlgEnv, printM, rollbackAlgEnv, prettyStr)
 import Futhark.Analysis.Properties.Rule (Rule (..), applyRuleBook, vacuous)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, toCNF, toDNF)
 import Futhark.Analysis.Properties.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Properties.Unify (Substitution, sub, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.), (.-.))
-import Futhark.Util.Pretty (docStringW, pretty, prettyString)
+import Futhark.Util.Pretty (prettyString)
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -172,14 +170,9 @@ isFalse p = do
     conjToList (a :&& b) = conjToList a <> conjToList b
     conjToList x = [x]
 
-algDebugPrettyM :: String -> SoP Symbol -> IndexFnM ()
-algDebugPrettyM msg x = rollbackAlgEnv $ do
-  alg_x <- toAlgebra x
-  whenDebug $ traceM $ docStringW 110 $ "  " <> pretty msg <> " " <> pretty alg_x
-
 printAlgM :: SoP Symbol -> IndexFnM ()
 printAlgM x = rollbackAlgEnv $ do
-  alg_x <- toAlgebra x
-  printM 3000 (prettyString alg_x)
+  alg_x :: SoP Algebra.Symbol <- toAlgebra x
+  printM 3000 (prettyStr alg_x)
   env <- getAlgEnv
   printM 3000 $ "under alg env " <> prettyString env

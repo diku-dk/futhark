@@ -18,7 +18,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (IndexFn (iterator), Iterator (..), getPredicates)
 import Futhark.Analysis.Properties.Monad (IndexFnM, printM, rollbackAlgEnv, prettyStr)
-import Futhark.Analysis.Properties.Symbol (Symbol (..), isBoolean)
+import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus ()
 import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMappable, ASTMapper (..), astFold, astMap, identityMapper)
 import Futhark.Analysis.Properties.Unify (Substitution (mapping), mkRep, rep, unify)
@@ -30,7 +30,62 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, hasConstant, int2SoP, justSym, mapSymM, mapSymSoPM, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName, baseString)
-import Futhark.Analysis.Properties.Property (Property(..), askDisjoint)
+import Futhark.Analysis.Properties.Property
+
+class AlgTranslatable u v where
+  fromAlgebra :: u -> IndexFnM v
+  toAlgebra :: v -> IndexFnM u
+
+instance (AlgTranslatable u v, AlgTranslatable a b) => AlgTranslatable (u,a) (v,b) where
+  fromAlgebra (x,y) = (,) <$> fromAlgebra x <*> fromAlgebra y
+  toAlgebra (x,y) = (,) <$> toAlgebra x <*> toAlgebra y
+
+-- Do not implement this instance; loads of places assume that toAlgebra must be called on SoPs.
+-- instance AlgTranslatable Algebra.Symbol Symbol where
+--   fromAlgebra = fmap fromSoP . fromAlgebra_
+--   toAlgebra = undefined
+
+instance AlgTranslatable (SoP Algebra.Symbol) (SoP Symbol) where
+  fromAlgebra = fromAlgebraSoP
+  toAlgebra = toAlgebraSoP
+
+instance AlgTranslatable (Predicate Algebra.Symbol) (Predicate Symbol) where
+  fromAlgebra = translatePredicate fromAlgebra
+  toAlgebra = translatePredicate toAlgebra
+
+translatePredicate :: (Monad m, Ord u, Ord v) => (SoP u -> m (SoP v)) -> Predicate u -> m (Predicate v)
+translatePredicate translator (Predicate vn e) = do
+  e' <- translator (sym2SoP e)
+  case justSym e' of
+    Just v -> pure $ Predicate vn v
+    Nothing -> undefined
+
+instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
+  fromAlgebra = translateProp fromAlgebra
+  toAlgebra = translateProp toAlgebra
+
+translateProp :: (Monad m, Ord u, Ord v) => (SoP u -> m (SoP v)) -> Property u -> m (Property v)
+translateProp translator = trans
+  where
+    transPair (a, b) = (,) <$> translator a <*> translator b
+
+    transPredPair (a, b) = (,) <$> translatePredicate translator a <*> translator b
+
+    trans Boolean = pure Boolean
+    trans (Disjoint vns) = pure (Disjoint vns)
+    trans (Monotonic x dir) = pure (Monotonic x dir)
+    trans (InjectiveRCD x rcd) =
+      InjectiveRCD x <$> transPair rcd
+    trans (BijectiveRCD x rcd img) =
+      BijectiveRCD x <$> transPair rcd <*> transPair img
+    trans (FiltPartInv x pf pps) =
+      FiltPartInv x <$> translatePredicate translator pf <*> mapM transPredPair pps
+    trans FiltPart {} = pure $ error "not implemented yet"
+
+
+-- HINT currently unused constraint from addRel/MonadSoP.
+instance ToSoP Algebra.Symbol Symbol where
+  toSoPNum symbol = error $ "toSoPNum used on " <> prettyString symbol
 
 -- Do this action inside an Algebra "context" created for an IndexFn, ensuring:
 -- (1) Modifications to the Algebra environment are ephemeral; they are
@@ -103,8 +158,8 @@ algebraContext fn m = rollbackAlgEnv $ do
 -----------------------------------------------------------------------------
 -- Translation from Algebra to IndexFn layer.
 ------------------------------------------------------------------------------
-fromAlgebra :: SoP Algebra.Symbol -> IndexFnM (SoP Symbol)
-fromAlgebra = mapSymSoPM fromAlgebra_
+fromAlgebraSoP :: SoP Algebra.Symbol -> IndexFnM (SoP Symbol)
+fromAlgebraSoP = mapSymSoPM fromAlgebra_
 
 fromAlgebra_ :: Algebra.Symbol -> IndexFnM (SoP Symbol)
 fromAlgebra_ (Algebra.Var vn) = do
@@ -172,15 +227,11 @@ repHoles x replacement =
                 _ -> pure sop
             }
 
-instance ToSoP Algebra.Symbol Symbol where
-  -- Convert from IndexFn Symbol to Algebra Symbol.
-  toSoPNum symbol = error $ "toSoPNum used on " <> prettyString symbol
-
 -----------------------------------------------------------------------------
 -- Translation from IndexFn to Algebra layer.
 ------------------------------------------------------------------------------
-toAlgebra :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
-toAlgebra = mapSymM toAlgebra_ <=< handleQuantifiers
+toAlgebraSoP :: SoP Symbol -> IndexFnM (SoP Algebra.Symbol)
+toAlgebraSoP = mapSymM toAlgebra_ <=< handleQuantifiers
 
 -- Used to add refinements to the algebra environment in Convert.hs.
 -- (The secret is that it allows adding symbols with holes in the environment.)

@@ -17,14 +17,13 @@ where
 import Control.Monad (forM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
-import Data.Maybe (catMaybes)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv)
-import Futhark.Analysis.Properties.Property (Property (..), propName, translateProp)
+import Futhark.Analysis.Properties.Property (Property (..), propName)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Monad (addProperty)
@@ -111,7 +110,7 @@ addRelSymbol p = do
     -- Convert to CNF, then get all conjuncts that are properties.
     -- (Any properties nested inside disjunctions are ignored.)
     toProps :: Symbol -> IndexFnM [Property Algebra.Symbol]
-    toProps sym = mapM (translateProp toAlgebra) (getProps $ toCNF sym)
+    toProps sym = mapM toAlgebra (getProps $ toCNF sym)
       where
         getProps :: Symbol -> [Property Symbol]
         getProps (Prop prop) = [prop]

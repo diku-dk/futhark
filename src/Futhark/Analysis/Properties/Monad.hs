@@ -30,6 +30,8 @@ module Futhark.Analysis.Properties.Monad
     insertII,
     lookupIndexFn,
     printAlgEnv,
+    addInvAlias,
+    getInvAlias,
   )
 where
 
@@ -39,11 +41,11 @@ import Data.Map qualified as M
 import Debug.Trace (traceM)
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.Property (Property)
+import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Symbol
 import Futhark.MonadFreshNames
 import Futhark.SoP.Expression (Expression (..))
-import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
+import Futhark.SoP.Monad
 import Futhark.Util (isEnvVarAtLeast)
 import Futhark.Util.Pretty (Pretty, docStringW, pretty, prettyString)
 import Language.Futhark (VName)
@@ -53,9 +55,10 @@ data VEnv = VEnv
   { vnamesource :: VNameSource,
     algenv :: AlgEnv Algebra.Symbol Symbol (Property Algebra.Symbol),
     indexfns :: M.Map VName [IndexFn],
-    toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn]),
+    toplevel :: M.Map VName ([E.Pat E.ParamType], [IndexFn], E.TypeExp E.Exp VName),
     defs :: M.Map VName ([E.Pat E.ParamType], E.Exp),
     ii :: M.Map Domain (VName, IndexFn),
+    invalias :: M.Map VName VName,
     debug :: Bool
   }
 
@@ -72,7 +75,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty mempty False
+    s = VEnv vns mempty mempty mempty mempty mempty mempty False
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -96,7 +99,7 @@ instance Expression Symbol where
 getIndexFns :: IndexFnM (M.Map VName [IndexFn])
 getIndexFns = gets indexfns
 
-getTopLevelIndexFns :: IndexFnM (M.Map VName ([E.Pat E.ParamType], [IndexFn]))
+getTopLevelIndexFns :: IndexFnM (M.Map VName ([E.Pat E.ParamType], [IndexFn], E.TypeExp E.Exp VName))
 getTopLevelIndexFns = gets toplevel
 
 getTopLevelDefs :: IndexFnM (M.Map VName ([E.Pat E.ParamType], E.Exp))
@@ -115,10 +118,10 @@ insertIndexFn :: E.VName -> [IndexFn] -> IndexFnM ()
 insertIndexFn x v =
   modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
 
-insertTopLevel :: E.VName -> ([E.Pat E.ParamType], [IndexFn]) -> IndexFnM ()
-insertTopLevel vn (args, fns) =
+insertTopLevel :: E.VName -> ([E.Pat E.ParamType], [IndexFn], E.TypeExp E.Exp VName) -> IndexFnM ()
+insertTopLevel vn (args, fns, te) =
   modify $
-    \env -> env {toplevel = M.insert vn (args, fns) $ toplevel env}
+    \env -> env {toplevel = M.insert vn (args, fns, te) $ toplevel env}
 
 insertTopLevelDef :: E.VName -> ([E.Pat E.ParamType], E.Exp) -> IndexFnM ()
 insertTopLevelDef vn (args, e) =
@@ -139,6 +142,15 @@ rollbackAlgEnv computation = do
   res <- computation
   modify (\env -> env {algenv = alg})
   pure res
+
+-- Maps vn to vn' and vn' to vn.
+addInvAlias :: VName -> VName -> IndexFnM ()
+addInvAlias vn vn' =
+  modify $
+    \env -> env {invalias = M.insert vn' vn $ M.insert vn vn' $ invalias env}
+
+getInvAlias :: VName -> IndexFnM (Maybe VName)
+getInvAlias vn = (M.!? vn) <$> gets invalias
 
 --------------------------------------------------------------
 -- Utilities

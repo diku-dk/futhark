@@ -717,12 +717,13 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
   case perm of
     Unknown -> failMsg "scatterPerm: no match"
     Yes -> do
+      -- `inds` is invertible on the whole domain.
       vn_inds <- warningInds
-
-      -- No out-of-bounds and no duplicate indices.
       vn_vals <- newVName "vals"
       i <- newVName "i"
       vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
+
+      lift $ addInvAlias vn_inv vn_inds
 
       let inv_ind = Idx (Var vn_inv) (sVar i)
       lift $

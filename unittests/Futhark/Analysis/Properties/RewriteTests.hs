@@ -13,11 +13,12 @@ import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Unify
 import Futhark.MonadFreshNames
 import Futhark.SoP.Monad (addEquiv, addRange, mkRange, mkRangeLB, mkRangeUB, addProperty)
-import Futhark.SoP.SoP (int2SoP, sym2SoP, (.*.), (.+.), (.-.))
+import Futhark.SoP.SoP
 import Futhark.Util.Pretty (docString, line, pretty, (<+>))
 import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Futhark.Analysis.Properties.Property as Property
+import Language.Futhark (VName)
 
 runTest :: IndexFnM a -> a
 runTest test = fst $ runIndexFnM test blankNameSource
@@ -488,6 +489,7 @@ tests =
       a <- toAlgebra x
       addRange (Algebra.Var vn) (mkRangeUB a)
 
+    addAlgRange :: VName -> SoP Symbol -> SoP Symbol -> IndexFnM ()
     addAlgRange vn x y = do
       a <- toAlgebra x
       b <- toAlgebra y

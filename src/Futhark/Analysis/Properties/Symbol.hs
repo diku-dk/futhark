@@ -1,5 +1,6 @@
 module Futhark.Analysis.Properties.Symbol
   ( Symbol (..),
+    FromSoP (..),
     isBoolean,
     sop2Symbol,
     toDNF,
@@ -56,6 +57,13 @@ infixr 4 :/=
 infixr 3 :&&
 
 infixr 2 :||
+
+class FromSoP u where
+  fromSoP :: SoP u -> u
+
+instance FromSoP Symbol where
+  -- WARNING: partial function.
+  fromSoP = sop2Symbol
 
 isBoolean :: Symbol -> Bool
 isBoolean (Bool {}) = True

@@ -13,6 +13,8 @@ module Futhark.Analysis.Properties.IndexFn
     getCase,
     guards,
     justSingleCase,
+    singleCase,
+    fromScalar,
   )
 where
 
@@ -82,3 +84,9 @@ catVar _ = Nothing
 
 flattenCases :: (Ord u) => Cases u (SoP u) -> SoP u
 flattenCases cs = foldl1 (.+.) [sym2SoP p .*. q | (p, q) <- casesToList cs]
+
+singleCase :: a -> Cases Symbol a
+singleCase e = cases [(Bool True, e)]
+
+fromScalar :: SoP Symbol -> [IndexFn]
+fromScalar e = [IndexFn Empty (singleCase e)]

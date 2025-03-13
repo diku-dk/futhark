@@ -10,9 +10,9 @@ module Futhark.Analysis.Properties.Property
     hasDisjoint,
     propName,
     getFiltPart,
-    getInjectiveRCD,
-    translateProp,
-    translatePredicate,
+    getFiltPartInv,
+    askFiltPartInv,
+    askFiltPart,
   )
 where
 
@@ -20,7 +20,7 @@ import Control.Monad (unless)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.Util
 import Futhark.SoP.Monad (MonadSoP, askPropertyWith)
-import Futhark.SoP.SoP (SoP, justSym, sym2SoP)
+import Futhark.SoP.SoP (SoP)
 import Futhark.Util.Pretty
 import Language.Futhark (VName)
 
@@ -58,38 +58,13 @@ instance (Pretty u) => Pretty (Property u) where
   pretty (FiltPart x y pf pps) =
     "FiltPart" <+> prettyName x <+> prettyName y <+> parens (pretty pf) <+> ppr pps
 
+ppr :: (Pretty a1, Pretty a2) => [(a1, a2)] -> Doc ann
 ppr pps =
   brackets . commasep $
     map (\(pp, s) -> parens (pretty pp <> comma <+> pretty s)) pps
 
 instance (Pretty u) => Pretty (Predicate u) where
   pretty (Predicate vn e) = "λ" <> prettyName vn <> dot <+> pretty e
-
-translateProp :: (Monad m, Ord u, Ord v) => (SoP u -> m (SoP v)) -> Property u -> m (Property v)
-translateProp translator = trans
-  where
-    transPair (a, b) = (,) <$> translator a <*> translator b
-
-    transPredPair (a, b) = (,) <$> translatePredicate translator a <*> translator b
-
-    -- trans :: Property u -> m (Maybe (Property v))
-    trans Boolean = pure Boolean
-    trans (Disjoint vns) = pure (Disjoint vns)
-    trans (Monotonic x dir) = pure (Monotonic x dir)
-    trans (InjectiveRCD x rcd) =
-      InjectiveRCD x <$> transPair rcd
-    trans (BijectiveRCD x rcd img) =
-      BijectiveRCD x <$> transPair rcd <*> transPair img
-    trans (FiltPartInv x pf pps) =
-      FiltPartInv x <$> translatePredicate translator pf <*> mapM transPredPair pps
-    trans FiltPart {} = pure $ error "not implemented yet"
-
-translatePredicate :: (Monad m, Ord u, Ord v) => (SoP u -> m (SoP v)) -> Predicate u -> m (Predicate v)
-translatePredicate translator (Predicate vn e) = do
-  e' <- translator (sym2SoP e)
-  case justSym e' of
-    Just v -> pure $ Predicate vn v
-    Nothing -> undefined
 
 {-
                Querying properties.
@@ -122,11 +97,17 @@ hasDisjoint props
     f _ = False
 hasDisjoint _ = Nothing
 
-getFiltPart :: S.Set (Property u) -> Maybe (VName, Predicate u, [(Predicate u, SoP u)])
-getFiltPart = undefined
+askFiltPartInv :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
+askFiltPartInv = (`askPropertyWith` getFiltPartInv)
 
-getInjectiveRCD :: S.Set (Property u) -> Maybe (SoP u, SoP u)
-getInjectiveRCD = undefined
+askFiltPart :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
+askFiltPart = (`askPropertyWith` getFiltPart)
+
+getFiltPartInv :: S.Set (Property u) -> Maybe (Property u)
+getFiltPartInv = undefined
+
+getFiltPart :: S.Set (Property u) -> Maybe (Property u)
+getFiltPart = undefined
 
 propName :: Property u -> VName
 propName (Monotonic x _) = x
