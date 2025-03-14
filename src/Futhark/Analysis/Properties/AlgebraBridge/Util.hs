@@ -23,7 +23,7 @@ import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv)
-import Futhark.Analysis.Properties.Property (Property (..), propName)
+import Futhark.Analysis.Properties.Property (Property (..), nameAffectedBy)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Monad (addProperty)
@@ -117,7 +117,7 @@ addRelSymbol p = do
         getProps (a :&& b) = getProps a <> getProps b
         getProps _ = []
 
-    addProperty_ prop = addProperty (Algebra.Var (propName prop)) prop
+    addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
 
 -- | Add relations derived from the iterator to the algebraic environment.
 addRelIterator :: Iterator -> IndexFnM ()

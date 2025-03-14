@@ -8,11 +8,11 @@ module Futhark.Analysis.Properties.Property
     askDisjoint,
     hasMon,
     hasDisjoint,
-    propName,
     getFiltPart,
     getFiltPartInv,
     askFiltPartInv,
     askFiltPart,
+    nameAffectedBy,
   )
 where
 
@@ -116,9 +116,10 @@ getFiltPartInv props
 getFiltPart :: S.Set (Property u) -> Maybe (Property u)
 getFiltPart = undefined
 
-propName :: Property u -> VName
-propName (Monotonic x _) = x
-propName (InjectiveRCD x _) = x
-propName (BijectiveRCD x _ _) = x
-propName (FiltPartInv x _ _) = x
-propName _ = undefined
+nameAffectedBy :: Property u -> VName
+nameAffectedBy (Monotonic x _) = x
+nameAffectedBy (InjectiveRCD x _) = x
+nameAffectedBy (BijectiveRCD x _ _) = x
+nameAffectedBy (FiltPartInv x _ _) = x
+nameAffectedBy (FiltPart y _x _ _) = y
+nameAffectedBy _ = undefined
