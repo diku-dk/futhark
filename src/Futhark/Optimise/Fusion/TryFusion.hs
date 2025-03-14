@@ -18,9 +18,10 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (find, isSubsequenceOf, sort, tails, (\\))
+import Data.List (find, tails, (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Debug.Trace
 import Futhark.Analysis.HORep.MapNest qualified as MapNest
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Construct
@@ -199,18 +200,27 @@ mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
   where
     inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
 
+debug :: (Show a) => a -> a
+debug a = traceShow a a
+
 reorderLambdaParams ::
   [VName] ->
+  Lambda SOACS ->
   [SOAC.Input] ->
   Lambda SOACS ->
-  TryFusion (Lambda SOACS)
-reorderLambdaParams out inp' lam = do
+  TryFusion (Lambda SOACS, Lambda SOACS)
+reorderLambdaParams out map_lam inp' lam = do
   let params = lambdaParams lam
   inp <- mapM (liftMaybe . SOAC.isVarishInput) inp'
-  guard $ sort inp `isSubsequenceOf` sort out -- Assert that the input is a subset of the outs.
-  let name_to_param = M.fromList $ zip inp params
+  let not_in_out = filter (`notElem` out) inp
+      name_to_param = M.fromList $ zip inp params
   new_params <- mapM (lookupParam name_to_param) out
-  pure $ lam {lambdaParams = new_params}
+  new_params' <- mapM (lookupParam name_to_param) not_in_out
+  new_map_lam <- extendSOACLambda not_in_out map_lam
+  pure
+    ( new_map_lam,
+      lam {lambdaParams = new_params <> new_params'}
+    )
   where
     lookupParam mapping name =
       case M.lookup name mapping of
@@ -444,33 +454,32 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                 }
         success (fsOutNames ker ++ returned_outvars) $
           SOAC.Scatter w (ivs_c ++ ivs_p) (as_c ++ as_p) lam'
-    ( SOAC.ScanScatter _ _ _ scan dests lam,
-      SOAC.Screma _ _ form,
-      Vertical
-      )
-        | isJust $ isMapSOAC form,
-          all (`notNameIn` unfus_set) outVars,
-          mapWriteFusionOK outVars ker -> do
-            let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-            guard $ null extra_nms -- This should be allowed at some point.
-            success (fsOutNames ker ++ extra_nms) $
-              SOAC.ScanScatter w new_inp res_lam' scan dests lam
+    {- ( SOAC.ScanScatter _ _ _ scan dests lam,
+          SOAC.Screma _ _ form,
+          Vertical
+          )
+            | isJust $ isMapSOAC form,
+              all (`notNameIn` unfus_set) outVars,
+              mapWriteFusionOK outVars ker -> do
+                let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
+                guard $ null extra_nms -- This should be allowed at some point.
+                success (fsOutNames ker ++ extra_nms) $
+                  SOAC.ScanScatter w new_inp res_lam' scan dests lam
+    -}
     ( SOAC.Scatter _len inp_c dests lam_c',
       SOAC.Screma _ inp_p form,
       Vertical
       )
         | isJust maybe_scans,
           all (`notNameIn` unfus_set) outVars -> do
-            -- all (`notNameIn` unfus_set) outVars
             let Just (scans, lam) = maybe_scans
                 scan = singleScan scans
             names_p <- mapM (liftMaybe . SOAC.isVarishInput) inp_p
-            names_c <- mapM (liftMaybe . SOAC.isVarishInput) inp_c
-            lam' <- extendSOACLambda names_c lam
-            scatter_lam <- reorderLambdaParams (returned_outvars <> names_p) inp_c lam'
+            (lam', scatter_lam) <- reorderLambdaParams (outVars <> names_p) lam inp_c lam_c'
+            new_inp <- (inp_p <>) <$> filterM (fmap (`notElem` outVars) . liftMaybe . SOAC.isVarishInput) inp_c
 
-            success (fsOutNames ker <> returned_outvars) $
-              SOAC.ScanScatter w inp_p lam' scan dests scatter_lam
+            success (fsOutNames ker) $
+              SOAC.ScanScatter w new_inp lam' scan dests scatter_lam
         where
           maybe_scans = isScanomapSOAC form
     (SOAC.Scatter {}, _, _) ->
