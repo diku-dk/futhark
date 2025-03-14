@@ -104,7 +104,14 @@ askFiltPart :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
 askFiltPart = (`askPropertyWith` getFiltPart)
 
 getFiltPartInv :: S.Set (Property u) -> Maybe (Property u)
-getFiltPartInv = undefined
+getFiltPartInv props
+  | fp@(FiltPartInv {}) : rest <- filter f (S.toList props) = do
+      unless (null rest) $ error "getFiltPartInv multiple FiltPartInv"
+      Just fp
+  | otherwise = Nothing
+  where
+    f (FiltPartInv {}) = True
+    f _ = False
 
 getFiltPart :: S.Set (Property u) -> Maybe (Property u)
 getFiltPart = undefined
