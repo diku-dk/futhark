@@ -282,7 +282,7 @@ prove prop = failOnUnknown <$> matchProof prop
       fs <- lookupIndexFn vn
       case fs of
         Just [f] -> pure f
-        _ -> error "internal error"
+        _ -> error $ "internal error: getFn " <> prettyStr vn <> " " <> prettyStr fs
 
     predToFun (Predicate vn e) arg =
       sop2Symbol $ rep (mkRep vn (sym2SoP $ Var arg)) e

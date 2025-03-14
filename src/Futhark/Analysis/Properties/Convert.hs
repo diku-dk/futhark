@@ -10,10 +10,10 @@ import Data.Bifunctor
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing, mapMaybe)
 import Data.Set qualified as S
 import Debug.Trace (traceM)
-import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
+import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, simplify, toAlgebra, ($==), ($>=), fromAlgebra)
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
@@ -21,7 +21,7 @@ import Futhark.Analysis.Properties.Monad
 -- import Futhark.Analysis.Properties.Prove (Statement (..), proveFn)
 -- (Answer (..), Query (..), askRefinement, askRefinements, isUnknown, isYes, queryCase)
 
-import Futhark.Analysis.Properties.Property (MonDir (..))
+import Futhark.Analysis.Properties.Property (MonDir (..), Property)
 import Futhark.Analysis.Properties.Property qualified as Property
 import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
@@ -30,11 +30,12 @@ import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
-import Futhark.SoP.Monad (addEquiv, addProperty)
+import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
+import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -183,25 +184,44 @@ bindfn_ level vn indexfns = do
 
 checkPostcondition :: E.VName -> [IndexFn] -> E.TypeExp E.Exp E.VName -> IndexFnM ()
 checkPostcondition vn indexfns te = do
-  let refs = getTERefine te
-  forM_ refs $ \e@(E.Lambda lam_params lam_body _ _ _) -> do
-    printM 1 . warningString $
-      "Checking post-condition:\n" <> prettyStr te
-    let param_names = map fst $ mconcat $ map patternMapAligned lam_params
-    forM_ (zip param_names indexfns) $ \(nm, fn) ->
-      when (isJust nm) . void $ bindfn (fromJust nm) [fn]
-    postconds <- forward lam_body >>= mapM rewrite
-    printM 1 $
-      "Postconditions after substituting in results:\n  "
-        <> prettyStr postconds
-    answer <- askRefinements postconds
-    case answer of
-      Yes -> do
-        printM 1 (E.baseString vn <> " ∎\n\n")
-        pure ()
-      Unknown ->
-        errorMsg (E.locOf e) $
-          "Failed to show postcondition:\n" <> prettyStr e <> "\n" <> prettyStr postconds
+  case getTERefine te of
+    [e@(E.Lambda lam_params lam_body _ _ _)] -> do
+      actual_names <- mapM reverseLookupIndexFn indexfns
+      let param_names = map fst $ mconcat $ map patternMapAligned lam_params
+      -- Propagate properties on the final let-body expression
+      -- to the postcondition lambda parameterslambda parameters
+      -- WARN Assumes that the final let-body is in ANF: let ... in (x,...,z).
+      when (length actual_names == length param_names) $ do
+        let aligned =  catMaybes $ zipWith (\x y -> (,) <$> x <*> (sym2SoP . Var <$> y)) actual_names param_names
+        let name_rep = mkRepFromList aligned
+
+        forM_ aligned $ \(actual, _) -> do
+          props <- (M.!? Algebra.Var actual) <$> getProperties
+          case S.toList <$> props of
+            Just ps -> do
+              forM_ ps $ \p -> do
+                addRelSymbol . Prop . repProperty name_rep =<< fromAlgebra p
+            Nothing -> pure ()
+
+      -- Substitute lam_params for indexfns and perform checks.
+      printM 1 . warningString $
+        "Checking post-condition:\n" <> prettyStr te
+      forM_ (zip param_names indexfns) $ \(nm, fn) ->
+        when (isJust nm) . void $ bindfn (fromJust nm) [fn]
+      postconds <- forward lam_body >>= mapM rewrite
+      printM 1 $
+        "Postconditions after substituting in results:\n  "
+          <> prettyStr postconds
+
+      answer <- askRefinements postconds
+      case answer of
+        Yes -> do
+          printM 1 (E.baseString vn <> " ∎\n\n")
+          pure ()
+        Unknown ->
+          errorMsg (E.locOf e) $
+            "Failed to show postcondition:\n" <> prettyStr e <> "\n" <> prettyStr postconds
+    _ -> error "Tuples of postconditions not implemented yet."
 
 {-
     Construct index function for source expression.
@@ -210,6 +230,10 @@ checkPostcondition vn indexfns te = do
 -- Propagate postcondition effects, such as adding properties.
 -- Fires binding applications of top-level defs to names.
 forwardLetEffects :: [Maybe E.VName] -> E.Exp -> IndexFnM [IndexFn]
+forwardLetEffects [Just _] e@(E.Var (E.QualName _ _) _ loc) = do
+  printM 0 . warningMsg loc $
+    "Warning: Aliasing " <> prettyStr e <> " strips property information."
+  forward e
 forwardLetEffects bound_names x = do
   toplevel_fns <- getTopLevelIndexFns
   defs <- getTopLevelDefs

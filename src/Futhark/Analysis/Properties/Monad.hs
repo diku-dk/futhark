@@ -31,6 +31,7 @@ module Futhark.Analysis.Properties.Monad
     printAlgEnv,
     addInvAlias,
     getInvAlias,
+    reverseLookupIndexFn,
   )
 where
 
@@ -112,6 +113,14 @@ getII = gets ii
 
 lookupIndexFn :: VName -> IndexFnM (Maybe [IndexFn])
 lookupIndexFn vn = M.lookup vn <$> getIndexFns
+
+reverseLookupIndexFn :: IndexFn -> IndexFnM (Maybe VName)
+reverseLookupIndexFn f = do
+  res <- filter ((== [f]) . snd) . M.toList <$> getIndexFns
+  case res of
+    [(vn,_)] -> pure (Just vn)
+    _ -> pure Nothing
+    -- _ -> error "reverseLookupIndexFn: ambiguous lookup"
 
 insertIndexFn :: E.VName -> [IndexFn] -> IndexFnM ()
 insertIndexFn x v =

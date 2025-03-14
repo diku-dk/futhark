@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Futhark.Analysis.Properties.SymbolPlus (toSumOfSums, repVName) where
+module Futhark.Analysis.Properties.SymbolPlus (toSumOfSums, repVName, repProperty) where
 
 import Data.Map qualified as M
 import Data.Set qualified as S

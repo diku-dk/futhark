@@ -76,9 +76,10 @@ def filterBy [n] 't (cs: [n]bool) (xs: [n]t)
   let (new_n, is) = filter_indices cs
   let dummy = xs[0]
   let scratch = replicate new_n dummy
-  in (new_n, scatter scratch is xs)
+  let is = scatter scratch is xs
+  in (new_n, is)
 
-def length [n] 't (xs: [n]t) = n
+def length [n] 't (_xs: [n]t) = n
 
 -- 
 --            Program
@@ -96,19 +97,16 @@ def getSmallestPairs [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: {[arr
     -- 
     -- The length of the flattened arrays
     -- let arraySizeFlat = arraySize * 2
-    let edge2Ids = edgeIds        -- map (\i -> [2*i, 2*i+1]) edgeIds
+    -- let edge2Ids = map (\i -> [2*i, 2*i+1]) edgeIds
+    -- let flatE = flatten edges :> [arraySizeFlat]i32
+    -- let flatE2i = flatten edge2Ids :> [arraySizeFlat]i32
+    let zippedArray = zip edges edgeIds
+    -- let verts = map i64.i32 flatE
 
-    let flatE = edges             -- flatten edges :> [arraySizeFlat]i32
-    let flatE2i = edge2Ids        -- flatten edge2Ids :> [arraySizeFlat]i32
-
-    let zippedArray = zip flatE flatE2i
-
-    let verts = flatE             -- map i64.i32 flatE
-
-    let H = hist i64.min nEdges_2 nVerts verts flatE2i
+    let H = hist i64.min nEdges_2 nVerts edges edgeIds
     let cs = map (\(i, j) -> H[i] == j) zippedArray
-    let (newSize, ys) = filterBy cs flatE
-    let (_, zs) = filterBy cs flatE2i
+    let (newSize, ys) = filterBy cs edges
+    let (_, zs) = filterBy cs edgeIds
     in (ys :> [newSize]i64, zs :> [newSize]i64)
 
 -- -- Return the edge if it's ID is the smallest, else return placeholder

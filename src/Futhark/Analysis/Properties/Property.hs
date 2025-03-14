@@ -114,7 +114,14 @@ getFiltPartInv props
     f _ = False
 
 getFiltPart :: S.Set (Property u) -> Maybe (Property u)
-getFiltPart = undefined
+getFiltPart props
+  | fp@(FiltPart {}) : rest <- filter f (S.toList props) = do
+      unless (null rest) $ error "getFiltPart multiple FiltPart"
+      Just fp
+  | otherwise = Nothing
+  where
+    f (FiltPart {}) = True
+    f _ = False
 
 nameAffectedBy :: Property u -> VName
 nameAffectedBy (Monotonic x _) = x
