@@ -1,4 +1,5 @@
 -- Translation between Algebra and IndexFn layers.
+{-# LANGUAGE LambdaCase #-}
 module Futhark.Analysis.Properties.AlgebraBridge.Translate
   ( toAlgebra,
     fromAlgebra,
@@ -51,7 +52,9 @@ instance AlgTranslatable (SoP Algebra.Symbol) (SoP Symbol) where
 
 instance AlgTranslatable (Predicate Algebra.Symbol) (Predicate Symbol) where
   fromAlgebra = translatePredicate fromAlgebra
-  toAlgebra = translatePredicate toAlgebra
+  toAlgebra (Predicate j e) = do
+    _ <- lookupUntransBool [j] e
+    translatePredicate toAlgebra (Predicate j e)
 
 translatePredicate :: (Monad m, Ord u, Ord v) => (SoP u -> m (SoP v)) -> Predicate u -> m (Predicate v)
 translatePredicate translator (Predicate vn e) = do
@@ -61,27 +64,22 @@ translatePredicate translator (Predicate vn e) = do
     Nothing -> undefined
 
 instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
-  fromAlgebra = translateProp fromAlgebra
-  toAlgebra = translateProp toAlgebra
-
-translateProp :: (Monad m, Ord u, Ord v) => (SoP u -> m (SoP v)) -> Property u -> m (Property v)
-translateProp translator = trans
-  where
-    transPair (a, b) = (,) <$> translator a <*> translator b
-
-    transPredPair (a, b) = (,) <$> translatePredicate translator a <*> translator b
-
-    trans Boolean = pure Boolean
-    trans (Disjoint vns) = pure (Disjoint vns)
-    trans (Monotonic x dir) = pure (Monotonic x dir)
-    trans (InjectiveRCD x rcd) =
-      InjectiveRCD x <$> transPair rcd
-    trans (BijectiveRCD x rcd img) =
-      BijectiveRCD x <$> transPair rcd <*> transPair img
-    trans (FiltPartInv x pf pps) =
-      FiltPartInv x <$> translatePredicate translator pf <*> mapM transPredPair pps
-    trans (FiltPart y x pf pps) =
-      FiltPart y x <$> translatePredicate translator pf <*> mapM transPredPair pps
+  fromAlgebra = \case
+    Boolean -> pure Boolean
+    (Disjoint vns) -> pure (Disjoint vns)
+    (Monotonic x dir) -> pure (Monotonic x dir)
+    (InjectiveRCD x rcd) -> InjectiveRCD x <$> fromAlgebra rcd
+    (BijectiveRCD x rcd img) -> BijectiveRCD x <$> fromAlgebra rcd <*> fromAlgebra img
+    (FiltPartInv x pf pps) -> FiltPartInv x <$> fromAlgebra pf <*> mapM fromAlgebra pps
+    (FiltPart y x pf pps) -> FiltPart y x <$> fromAlgebra pf <*> mapM fromAlgebra pps
+  toAlgebra = \case
+    Boolean -> pure Boolean
+    (Disjoint vns) -> pure (Disjoint vns)
+    (Monotonic x dir) -> pure (Monotonic x dir)
+    (InjectiveRCD x rcd) -> InjectiveRCD x <$> toAlgebra rcd
+    (BijectiveRCD x rcd img) -> BijectiveRCD x <$> toAlgebra rcd <*> toAlgebra img
+    (FiltPartInv x pf pps) -> FiltPartInv x <$> toAlgebra pf <*> mapM toAlgebra pps
+    (FiltPart y x pf pps) -> FiltPart y x <$> toAlgebra pf <*> mapM toAlgebra pps
 
 
 -- HINT currently unused constraint from addRel/MonadSoP.
@@ -136,14 +134,6 @@ algebraContext fn m = rollbackAlgEnv $ do
         addProperty (Algebra.Var vn) $
           Disjoint (S.fromList vns S.\\ S.singleton vn)
 
-    lookupUntransBool is x = do
-      res <- search x
-      vn <- case fst <$> res of
-        Nothing -> addUntrans =<< foldM removeQuantifier x is
-        Just vn -> pure vn
-      addProperty (Algebra.Var vn) Boolean
-      pure vn
-
     -- Add boolean tag to IndexFn layer names where applicable.
     trackBooleanNames (Var vn) = do
       addProperty (Algebra.Var vn) Boolean
@@ -155,6 +145,15 @@ algebraContext fn m = rollbackAlgEnv $ do
     trackBooleanNames (x :&& y) = trackBooleanNames x >> trackBooleanNames y
     trackBooleanNames (x :|| y) = trackBooleanNames x >> trackBooleanNames y
     trackBooleanNames _ = pure ()
+
+lookupUntransBool :: Foldable t => t VName -> Symbol -> IndexFnM VName
+lookupUntransBool is x = do
+  res <- search x
+  vn <- case fst <$> res of
+    Nothing -> addUntrans =<< foldM removeQuantifier x is
+    Just vn -> pure vn
+  addProperty (Algebra.Var vn) Boolean
+  pure vn
 
 -----------------------------------------------------------------------------
 -- Translation from Algebra to IndexFn layer.
