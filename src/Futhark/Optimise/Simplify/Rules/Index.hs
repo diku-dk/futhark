@@ -33,6 +33,8 @@ data IndexResult
   | SubExpResult Certs SubExp
 
 -- Fake expressions that we can recognise.
+--
+-- See Note [Simplifying a Slice].
 fakeIndices :: [TPrimExp Int64 VName]
 fakeIndices = map f [0 :: Int ..]
   where
@@ -61,6 +63,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         worthInlining e,
         all (`ST.elem` vtable) (unCerts cs) ->
           Just $ SubExpResult cs <$> toSubExp "index_primexp" e
+      -- For the two cases below, see Note [Simplifying a Slice].
       | Just inds' <- sliceIndices (Slice inds),
         Just (ST.IndexedArray cs arr inds'') <- ST.index idd inds' vtable,
         all (worthInlining . untyped) inds'',
@@ -77,6 +80,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         not consuming,
         not $ consumed arr,
         Just inds''' <- mapM okIdx inds'' -> do
+          -- FIXME - this permutes the indexes
           Just $ IndexResult cs arr . Slice <$> sequence inds'''
       where
         matches = zip fakeIndices $ sliceDims $ Slice inds
@@ -258,3 +262,48 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
           True
       | otherwise =
           False
+
+-- Note [Simplifying a Slice]
+--
+-- The 'indexOp' simplification machinery permits simplification of
+-- full indexing (i.e., where every component of the Slice is a
+-- DimFix). We use this in a creative way to also simplify slices.
+-- For example, for a slice
+--
+--   A[i:j:+n]
+--
+-- we synthesize a uniquely recognizable index expression "ie" (see
+-- 'fakeIndices'), we use `indexOp` to simplify the full indexing
+--
+--   A[ie]
+--
+-- and if that produces a simplification result
+--
+--   B[ie]
+--
+-- then we can replace the "ie" DimFix with our original slice and
+-- produce
+--
+--   B[i:j:+n]
+--
+-- While the above case is trivial, this is useful for cases that
+-- intermix indexing and slicing. We must be careful, however: If we
+-- have an original expression
+--
+--   A[i0:j0:+n0,i1:j1:+n1]
+--
+-- for which we then synthesize the expression
+--
+--   A[ie0, ie1]
+--
+-- then if we receive back the result
+--
+--   B[ie1, ie0]
+--
+-- we cannot just replace the indexes with the original slices, as
+-- that would change the shape (and semantics) of the result:
+--
+--   B[i1:j1:+n1,i0:j0:+n0]
+--
+-- In such cases we must actually insert a Rearrange operation to move
+-- the dimensions of B appropriately before we slice it.
