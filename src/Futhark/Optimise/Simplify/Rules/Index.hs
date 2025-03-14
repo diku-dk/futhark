@@ -8,6 +8,8 @@ module Futhark.Optimise.Simplify.Rules.Index
 where
 
 import Control.Monad (guard)
+import Data.Bifunctor (first)
+import Data.List qualified as L
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
@@ -79,18 +81,28 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         all (`ST.elem` vtable) (unCerts cs),
         not consuming,
         not $ consumed arr,
-        Just inds''' <- mapM okIdx inds'' -> do
-          -- FIXME - this permutes the indexes
-          Just $ IndexResult cs arr . Slice <$> sequence inds'''
+        Just (ordering, inds''') <- first concat . unzip <$> mapM okIdx inds'',
+        Just perm <- L.sort ordering `isPermutationOf` ordering ->
+          if isIdentityPerm perm
+            then Just $ IndexResult cs arr . Slice <$> sequence inds'''
+            else Just $ do
+              arr_sliced <-
+                certifying cs $
+                  letExp (baseString arr <> "_sliced") . BasicOp . Index arr . Slice
+                    =<< sequence inds'''
+              arr_sliced_tr <-
+                letSubExp (baseString arr_sliced <> "_tr") $
+                  BasicOp (Rearrange perm arr_sliced)
+              pure $ SubExpResult mempty arr_sliced_tr
       where
-        matches = zip fakeIndices $ sliceDims $ Slice inds
+        matches = zip fakeIndices $ zip [0 :: Int ..] $ sliceDims $ Slice inds
         okIdx i =
           case lookup i matches of
-            Just w ->
-              Just $ pure $ DimSlice (constant (0 :: Int64)) w (constant (1 :: Int64))
+            Just (j, w) ->
+              Just ([j], pure $ DimSlice (constant (0 :: Int64)) w (constant (1 :: Int64)))
             Nothing -> do
               guard $ not $ any ((`namesIntersect` freeIn i) . freeIn . fst) matches
-              Just $ DimFix <$> toSubExp "index_primexp" i
+              Just ([], DimFix <$> toSubExp "index_primexp" i)
     Nothing -> Nothing
     Just (SubExp (Var v), cs) ->
       Just $ pure $ IndexResult cs v $ Slice inds
@@ -306,4 +318,4 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
 --   B[i1:j1:+n1,i0:j0:+n0]
 --
 -- In such cases we must actually insert a Rearrange operation to move
--- the dimensions of B appropriately before we slice it.
+-- the dimensions of the result appropriately.
