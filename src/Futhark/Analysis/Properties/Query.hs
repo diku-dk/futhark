@@ -20,7 +20,7 @@ module Futhark.Analysis.Properties.Query
   )
 where
 
-import Control.Monad (forM, join, when, zipWithM)
+import Control.Monad (forM, join, when)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Bifunctor (second)
@@ -213,7 +213,7 @@ data Order = LT | GT | Undefined
 prove :: Property Symbol -> IndexFnM Answer
 prove prop = failOnUnknown <$> matchProof prop
   where
-    failOnUnknown Unknown = error $ "Failed to prove " <> prettyStr prop
+    failOnUnknown Unknown = error $ "Failed to verify " <> prettyStr prop
     failOnUnknown Yes = Yes
 
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
@@ -268,21 +268,15 @@ prove prop = failOnUnknown <$> matchProof prop
       is <- join <$> traverse getInvAlias is_inv
       mfpi <- join <$> traverse (askFiltPartInv . Algebra.Var) is
       mfpi' :: Maybe (Property Symbol) <- traverse fromAlgebra mfpi
-      printM 1 $ "FPV2 " <> prettyStr f_Y
-      printM 1 $ "FPV2 " <> prettyStr is_inv
-      printM 1 $ "FPV2 " <> prettyStr is
-      printM 1 $ "FPV2 " <> prettyStr mfpi
-      printM 1 $ "FPV2 " <> prettyStr mfpi'
-      printAlgEnv 1
       case mfpi' of
-        Just (FiltPartInv z pf' pps') -> do
-          -- Check that the predicates and split points are equivalent.
+        Just (FiltPartInv z pf' pps') | Just z == is -> do
+          -- If the predicates and split points are equivalent, we are done.
           s' <- unify (FiltPartInv z pf pps) (FiltPartInv z pf' pps')
           if isJust (s' :: Maybe (Substitution Symbol))
-          then do
-            error "yeeha"
-          else pure Unknown
-        _ -> undefined
+            then pure Yes
+            else pure Unknown
+        _ | Just z <- is -> prove (FiltPartInv z pf pps)
+        _ -> pure Unknown
 
     getFn vn = do
       fs <- lookupIndexFn vn
