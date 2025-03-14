@@ -1054,22 +1054,23 @@ forwardPropertyPrelude f args =
         E.Lambda params_part lam_part _ _ _ <- e_part,
         [[(Just param_part, _)]] <- map patternMapAligned params_part,
         Just x <- justVName e_X -> do
-          propArgs <- commonFiltPart x (param_filt, lam_filt) (param_part, lam_part)
+          propArgs <- commonFiltPart e_X (param_filt, lam_filt) (param_part, lam_part)
           fmap (IndexFn Empty) . simplify . cases $ do
             (c, pf, pps) <- propArgs
             pure (c, pr $ Property.FiltPartInv x pf pps)
     "FiltPart"
-      | [e_X, e_Y, e_filt, e_part] <- getArgs args,
+      | [e_Y, e_X, e_filt, e_part] <- getArgs args,
         E.Lambda params_filt lam_filt _ _ _ <- e_filt,
         [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
         E.Lambda params_part lam_part _ _ _ <- e_part,
         [[(Just param_part, _)]] <- map patternMapAligned params_part,
-        Just x <- justVName e_X,
-        Just y <- justVName e_Y -> rollbackAlgEnv $ do
-          propArgs <- commonFiltPart x (param_filt, lam_filt) (param_part, lam_part)
+        Just y <- justVName e_Y,
+        Just x <- justVName e_X -> rollbackAlgEnv $ do
+          -- HINT make sure in \i -> pf, i gets the iterator of e_Y not e_X.
+          propArgs <- commonFiltPart e_X (param_filt, lam_filt) (param_part, lam_part)
           fmap (IndexFn Empty) . simplify . cases $ do
             (c, pf, pps) <- propArgs
-            pure (c, pr $ Property.FiltPart x y pf pps)
+            pure (c, pr $ Property.FiltPart y x pf pps)
     "and" | [e_xs] <- getArgs args -> do
       -- No-op: The argument e_xs is a boolean array; each branch will
       -- be checked in refinements.
@@ -1084,10 +1085,11 @@ forwardPropertyPrelude f args =
   where
     pr = sym2SoP . Prop
 
-    commonFiltPart x (param_filt, lam_filt) (param_part, lam_part) = do
-      res <- lookupIndexFn x
-      case res of
-        Just [f_X] | Forall i _ <- iterator f_X -> rollbackAlgEnv $ do
+    commonFiltPart e_X (param_filt, lam_filt) (param_part, lam_part) = do
+      -- If e_X is a top-level parameter, no binding exists for it.
+      f_Xs <- forward e_X
+      case f_Xs of
+        [f_X] | Forall i _ <- iterator f_X -> rollbackAlgEnv $ do
           -- Map filter and partition lambdas over indices of X
           -- to get proper substitutions (iterator discarded afterwards).
           -- (Note that this essentially just uses the inferred size of X;
@@ -1115,8 +1117,11 @@ forwardPropertyPrelude f args =
                   )
                 where
                   toPredicate e = Property.Predicate i (sop2Symbol e)
-            _ -> undefined
-        _ -> undefined
+            _ ->
+              undefined
+        _ -> do
+          error $
+            "Property on tuple where non-tuple was expected: " <> prettyStr e_X
 
 sumOverIndexFn :: IndexFn -> IndexFnM IndexFn
 sumOverIndexFn f@(IndexFn (Forall _ dom) _) = do
