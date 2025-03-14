@@ -559,8 +559,6 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       fs <- forM indexfns $ \fn -> do
         substParams (repIndexFn size_rep fn) (mconcat actual_args)
           >>= rewrite
-      printM 1 $ "forwardApplyDef " <> prettyStr g
-      printM 1 $ "forwardApplyDef " <> prettyStr te
       pure (mkEffectFromTypeExp te size_rep actual_args, fs)
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow {}) <- E.unInfo info,
