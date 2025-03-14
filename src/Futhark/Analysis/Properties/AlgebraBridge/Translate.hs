@@ -80,7 +80,8 @@ translateProp translator = trans
       BijectiveRCD x <$> transPair rcd <*> transPair img
     trans (FiltPartInv x pf pps) =
       FiltPartInv x <$> translatePredicate translator pf <*> mapM transPredPair pps
-    trans FiltPart {} = pure $ error "not implemented yet"
+    trans (FiltPart y x pf pps) =
+      FiltPart y x <$> translatePredicate translator pf <*> mapM transPredPair pps
 
 
 -- HINT currently unused constraint from addRel/MonadSoP.
