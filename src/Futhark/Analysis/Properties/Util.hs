@@ -7,6 +7,7 @@ module Futhark.Analysis.Properties.Util
     warningMsg,
     warningString,
     errorMsg,
+    emphString,
   )
 where
 
@@ -64,3 +65,6 @@ warningMsg loc msg = do
 
 warningString :: String -> String
 warningString s = "\ESC[93m" <> s <> "\ESC[0m"
+
+emphString :: String -> String
+emphString s = "\ESC[95m\n|\n| " <> s <> "\n|\ESC[0m\n"

@@ -23,7 +23,6 @@ module Futhark.Analysis.Properties.Monad
     insertTopLevelDef,
     getTopLevelDefs,
     printM,
-    emphString,
     getAlgEnv,
     printTrace,
     getII,
@@ -204,9 +203,6 @@ withoutDebug f = do
   x <- f
   modify (\s -> s {debug = toggle})
   pure x
-
-emphString :: String -> String
-emphString s = "\ESC[95m\n|\n| " <> s <> "\n|\ESC[0m\n"
 
 printM :: (Monad m) => Int -> String -> m ()
 printM level
