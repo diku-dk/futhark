@@ -91,6 +91,13 @@ subst indexfn = do
   g <- renameM indexfn
   subber (legalArg k g) g
 
+-- Are you substituting xs[i] for xs = for i < e . true => xs[i]?
+-- This happens when xs is a formal argument.
+trivialSub :: (ReplacementBuilder v Symbol) => IndexFn -> Symbol -> [v] -> Bool
+trivialSub (IndexFn (Forall i _) gs) e [arg] =
+  repCases (mkRep i arg) gs == cases [(Bool True, sym2SoP e)]
+trivialSub _ _ _ = False
+
 subber :: (IndexFn -> Symbol -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
 subber argCheck g = do
   go mempty
@@ -105,6 +112,7 @@ subber argCheck g = do
       case apply of
         Just (e, vn, args)
           | Just [f] <- ixfns M.!? vn,
+            not (trivialSub f e args),
             argCheck f e args -> do
               printM 10 . warningString $
                 "Checking indexing within bounds " <> prettyString e
@@ -115,7 +123,7 @@ subber argCheck g = do
                   case g' of
                     Just new_fn -> do
                       subst =<< rewriteWithoutRules new_fn
-                    Nothing ->
+                    _ ->
                       go (S.insert (vn, args) seen)
                 else go (S.insert (vn, args) seen)
         Just (_, vn, args)

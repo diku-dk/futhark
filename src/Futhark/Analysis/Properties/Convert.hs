@@ -10,23 +10,21 @@ import Data.Bifunctor
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing, mapMaybe)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
 import Data.Set qualified as S
 import Debug.Trace (traceM)
-import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, paramToAlgebra, simplify, toAlgebra, ($==), ($>=), fromAlgebra)
+import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, fromAlgebra, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
--- import Futhark.Analysis.Properties.Prove (Statement (..), proveFn)
--- (Answer (..), Query (..), askRefinement, askRefinements, isUnknown, isYes, queryCase)
-
-import Futhark.Analysis.Properties.Property (MonDir (..), Property)
+import Futhark.Analysis.Properties.Property (MonDir (..))
 import Futhark.Analysis.Properties.Property qualified as Property
 import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Substitute (subst, (@))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
+import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
@@ -35,7 +33,6 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
-import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -192,7 +189,7 @@ checkPostcondition vn indexfns te = do
       -- to the postcondition lambda parameterslambda parameters
       -- WARN Assumes that the final let-body is in ANF: let ... in (x,...,z).
       when (length actual_names == length param_names) $ do
-        let aligned =  catMaybes $ zipWith (\x y -> (,) <$> x <*> (sym2SoP . Var <$> y)) actual_names param_names
+        let aligned = catMaybes $ zipWith (\x y -> (,) <$> x <*> (sym2SoP . Var <$> y)) actual_names param_names
         let name_rep = mkRepFromList aligned
 
         forM_ aligned $ \(actual, _) -> do
@@ -285,7 +282,7 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
       pure indexfns
     _ -> do
       size <- getSize e
-      case size of
+      f <- case size of
         Just sz -> do
           -- Canonical array representation.
           i <- newVName "i"
@@ -298,6 +295,8 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
         Nothing ->
           -- Canonical scalar representation.
           pure [IndexFn Empty (singleCase $ sVar vn)]
+      insertIndexFn vn f
+      pure f
 forward (E.TupLit xs _) = do
   mconcat <$> mapM forward xs
 forward (E.AppExp (E.Index e_xs slice _loc) _)
@@ -1098,7 +1097,7 @@ forwardPropertyPrelude f args =
         E.Lambda params_part lam_part _ _ _ <- e_part,
         [[(Just param_part, _)]] <- map patternMapAligned params_part,
         Just x <- justVName e_X -> do
-          propArgs <- commonFiltPart e_X (param_filt, lam_filt) (param_part, lam_part)
+          propArgs <- commonFiltPart x (param_filt, lam_filt) (param_part, lam_part)
           fmap (IndexFn Empty) . simplify . cases $ do
             (c, pf, pps) <- propArgs
             pure (c, pr $ Property.FiltPartInv x pf pps)
@@ -1111,7 +1110,7 @@ forwardPropertyPrelude f args =
         Just y <- justVName e_Y,
         Just x <- justVName e_X -> rollbackAlgEnv $ do
           -- HINT make sure in \i -> pf, i gets the iterator of e_Y not e_X.
-          propArgs <- commonFiltPart e_X (param_filt, lam_filt) (param_part, lam_part)
+          propArgs <- commonFiltPart x (param_filt, lam_filt) (param_part, lam_part)
           fmap (IndexFn Empty) . simplify . cases $ do
             (c, pf, pps) <- propArgs
             pure (c, pr $ Property.FiltPart y x pf pps)
@@ -1129,11 +1128,10 @@ forwardPropertyPrelude f args =
   where
     pr = sym2SoP . Prop
 
-    commonFiltPart e_X (param_filt, lam_filt) (param_part, lam_part) = do
-      -- If e_X is a top-level parameter, no binding exists for it.
-      f_Xs <- forward e_X
-      case f_Xs of
-        [f_X] | Forall i _ <- iterator f_X -> rollbackAlgEnv $ do
+    commonFiltPart vn (param_filt, lam_filt) (param_part, lam_part) = do
+      res <- lookupIndexFn vn
+      case res of
+        Just [f_X] | Forall i _ <- iterator f_X -> rollbackAlgEnv $ do
           -- Map filter and partition lambdas over indices of X
           -- to get proper substitutions (iterator discarded afterwards).
           -- (Note that this essentially just uses the inferred size of X;
@@ -1164,8 +1162,7 @@ forwardPropertyPrelude f args =
             _ ->
               undefined
         _ -> do
-          error $
-            "Property on tuple where non-tuple was expected: " <> prettyStr e_X
+          error "Applying property to name bound to tuple?"
 
 sumOverIndexFn :: IndexFn -> IndexFnM IndexFn
 sumOverIndexFn f@(IndexFn (Forall _ dom) _) = do
