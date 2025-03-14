@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   incompatible entry point types being generated, leading to a
   compiler crash. (#2231)
 
+* A simplification rule for array slices would in some cases produce
+  type-incorrect code. (#2232)
+
 ## [0.25.28]
 
 ### Fixed

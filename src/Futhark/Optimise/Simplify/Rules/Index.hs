@@ -8,6 +8,8 @@ module Futhark.Optimise.Simplify.Rules.Index
 where
 
 import Control.Monad (guard)
+import Data.Bifunctor (first)
+import Data.List qualified as L
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
@@ -33,6 +35,8 @@ data IndexResult
   | SubExpResult Certs SubExp
 
 -- Fake expressions that we can recognise.
+--
+-- See Note [Simplifying a Slice].
 fakeIndices :: [TPrimExp Int64 VName]
 fakeIndices = map f [0 :: Int ..]
   where
@@ -61,6 +65,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         worthInlining e,
         all (`ST.elem` vtable) (unCerts cs) ->
           Just $ SubExpResult cs <$> toSubExp "index_primexp" e
+      -- For the two cases below, see Note [Simplifying a Slice].
       | Just inds' <- sliceIndices (Slice inds),
         Just (ST.IndexedArray cs arr inds'') <- ST.index idd inds' vtable,
         all (worthInlining . untyped) inds'',
@@ -76,17 +81,28 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         all (`ST.elem` vtable) (unCerts cs),
         not consuming,
         not $ consumed arr,
-        Just inds''' <- mapM okIdx inds'' -> do
-          Just $ IndexResult cs arr . Slice <$> sequence inds'''
+        Just (ordering, inds''') <- first concat . unzip <$> mapM okIdx inds'',
+        Just perm <- L.sort ordering `isPermutationOf` ordering ->
+          if isIdentityPerm perm
+            then Just $ IndexResult cs arr . Slice <$> sequence inds'''
+            else Just $ do
+              arr_sliced <-
+                certifying cs $
+                  letExp (baseString arr <> "_sliced") . BasicOp . Index arr . Slice
+                    =<< sequence inds'''
+              arr_sliced_tr <-
+                letSubExp (baseString arr_sliced <> "_tr") $
+                  BasicOp (Rearrange perm arr_sliced)
+              pure $ SubExpResult mempty arr_sliced_tr
       where
-        matches = zip fakeIndices $ sliceDims $ Slice inds
+        matches = zip fakeIndices $ zip [0 :: Int ..] $ sliceDims $ Slice inds
         okIdx i =
           case lookup i matches of
-            Just w ->
-              Just $ pure $ DimSlice (constant (0 :: Int64)) w (constant (1 :: Int64))
+            Just (j, w) ->
+              Just ([j], pure $ DimSlice (constant (0 :: Int64)) w (constant (1 :: Int64)))
             Nothing -> do
               guard $ not $ any ((`namesIntersect` freeIn i) . freeIn . fst) matches
-              Just $ DimFix <$> toSubExp "index_primexp" i
+              Just ([], DimFix <$> toSubExp "index_primexp" i)
     Nothing -> Nothing
     Just (SubExp (Var v), cs) ->
       Just $ pure $ IndexResult cs v $ Slice inds
@@ -258,3 +274,48 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
           True
       | otherwise =
           False
+
+-- Note [Simplifying a Slice]
+--
+-- The 'indexOp' simplification machinery permits simplification of
+-- full indexing (i.e., where every component of the Slice is a
+-- DimFix). We use this in a creative way to also simplify slices.
+-- For example, for a slice
+--
+--   A[i:j:+n]
+--
+-- we synthesize a uniquely recognizable index expression "ie" (see
+-- 'fakeIndices'), we use `indexOp` to simplify the full indexing
+--
+--   A[ie]
+--
+-- and if that produces a simplification result
+--
+--   B[ie]
+--
+-- then we can replace the "ie" DimFix with our original slice and
+-- produce
+--
+--   B[i:j:+n]
+--
+-- While the above case is trivial, this is useful for cases that
+-- intermix indexing and slicing. We must be careful, however: If we
+-- have an original expression
+--
+--   A[i0:j0:+n0,i1:j1:+n1]
+--
+-- for which we then synthesize the expression
+--
+--   A[ie0, ie1]
+--
+-- then if we receive back the result
+--
+--   B[ie1, ie0]
+--
+-- we cannot just replace the indexes with the original slices, as
+-- that would change the shape (and semantics) of the result:
+--
+--   B[i1:j1:+n1,i0:j0:+n0]
+--
+-- In such cases we must actually insert a Rearrange operation to move
+-- the dimensions of the result appropriately.
