@@ -145,6 +145,9 @@ class ReplacementBuilder v u where
   mkRep :: VName -> v -> Replacement u
   mkRep vn x = addRep vn x mempty
 
+  mkRepFromList :: [(VName, v)] -> Replacement u
+  mkRepFromList = foldl (\s (k,v) -> addRep k v s) mempty
+
 instance (Ord u, Rep u u) => Rep (Term u, Integer) u where
   rep s (x, c) =
     SoP.scaleSoP c . foldr (mulSoPs . rep s) (int2SoP 1) . termToList $ x

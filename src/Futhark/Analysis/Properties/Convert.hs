@@ -27,7 +27,7 @@ import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Substitute (subst, (@))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
-import Futhark.Analysis.Properties.Unify (Replacement, Substitution (mapping), mkRep, renamesM, rep, unify)
+import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty)
@@ -548,7 +548,7 @@ forwardApplyDef ::
   M.Map E.VName ([E.PatBase E.Info E.VName (E.TypeBase E.Size E.Diet)], E.Exp) ->
   E.Exp ->
   Maybe (IndexFnM ([E.VName] -> IndexFnM (), [IndexFn]))
-forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
+forwardApplyDef toplevel_fns defs expr@(E.AppExp (E.Apply f args loc) _)
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow {}) <- E.unInfo info,
     Just (pats, indexfns, te) <- M.lookup g toplevel_fns = Just $ do
@@ -559,7 +559,7 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       fs <- forM indexfns $ \fn -> do
         substParams (repIndexFn size_rep fn) (mconcat actual_args)
           >>= rewrite
-      pure (mkEffectFromTypeExp te size_rep actual_args, fs)
+      pure (mkEffectFromTypeExp te size_rep (mconcat actual_args), fs)
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow {}) <- E.unInfo info,
     Just (pats, e) <- M.lookup g defs = Just $ do
@@ -579,11 +579,32 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
         void $ bindfn_ 1337 vn [fn]
       (const $ pure (),) <$> forward e
   where
+    -- Assume ANF to handle name substitutions in Properties.
+    --
+    -- HINT This limitation only exists because FiltPart Y X needs to substitute
+    -- the name X for the corresponding argument, for instance, in
+    --   def filter X p : \Y -> FiltPart Y X p _ = ...
+    --   def f ... =
+    --     let ys = filter p x
+    --     --> FiltPart ys x p _
+    -- and we want x to be meaningful to the user (i.e., to not bind X to fresh X'
+    -- and X' to x).
+    checkANF xs | Just xs' <- mapM justVName xs = xs'
+    checkANF _ =
+      error $
+        "Limitation: Application of top-level definitions with postconditions must be in A-normal form: "
+          <> prettyStr expr
+
+    renamingRep actual_args =
+      let arg_vns = checkANF (getArgs args)
+       in mkRepFromList
+            (zipWith (\k v -> (fst k, sym2SoP $ Var v)) actual_args arg_vns)
+
     mkEffectFromTypeExp te size_rep actual_args vns =
       let ref_exps = getTERefine te
        in forM_ (map (mkRef vns Var) ref_exps) $ \ref -> do
             (_check, effect) <- ref
-            effect (size_rep, mconcat actual_args)
+            effect (size_rep, actual_args, renamingRep actual_args)
 
     handleArgs loc' g pats = do
       (actual_args, actual_sizes) <- zipArgs loc' pats args
@@ -616,7 +637,7 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
             Just check -> do
               printM 3000 $
                 "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
-              check (size_rep, scope)
+              check (size_rep, scope, mempty)
           unless (isYes ans) . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
 forwardApplyDef _ _ _ = Nothing
@@ -890,10 +911,10 @@ x ~||~ y = sym2SoP $ x :|| y
 --------------------------------------------------------------
 -- Handling refinement types.
 --------------------------------------------------------------
-type CheckContext = (Replacement Symbol, [(E.VName, IndexFn)])
+type CheckContext = (Replacement Symbol, [(E.VName, IndexFn)], Replacement Symbol)
 
 emptyCheckContext :: CheckContext
-emptyCheckContext = (mempty, mempty)
+emptyCheckContext = (mempty, mempty, mempty)
 
 type Check = CheckContext -> IndexFnM Answer
 
@@ -968,9 +989,10 @@ mkRef vns wrap refexp = case refexp of
 
     -- This wraps a Check or an Effect, making sure that parameters/names/sizes
     -- are substituted correctly at the evaluation site.
-    inContext f e (size_rep, args) = do
+    -- (renaming_rep used only by postcondition effects; see forwardApplyDef).
+    inContext f e (size_rep, args, renaming_rep) = do
       fn <- substParams (repIndexFn size_rep (IndexFn Empty e)) args
-      f fn
+      f (repIndexFn renaming_rep fn)
 
 -- Tags formal arguments that are booleans or arrays of booleans as such.
 addBooleanNames :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
