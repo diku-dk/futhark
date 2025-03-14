@@ -119,8 +119,8 @@ repProperty s (BijectiveRCD x rcd img) =
   BijectiveRCD (repVName s x) (repTuple s rcd) (repTuple s img)
 repProperty s (FiltPartInv x pf pps) =
   FiltPartInv (repVName s x) (repPredicate s pf) [(repPredicate s pp, rep s e) | (pp, e) <- pps]
-repProperty s (FiltPart x y pf pps) =
-  FiltPart (repVName s x) (repVName s y) (repPredicate s pf) [(repPredicate s pp, rep s e) | (pp, e) <- pps]
+repProperty s (FiltPart y x pf pps) =
+  FiltPart (repVName s y) (repVName s x) (repPredicate s pf) [(repPredicate s pp, rep s e) | (pp, e) <- pps]
 
 instance Hole Symbol where
   justHole (Hole x) = Just x
