@@ -156,8 +156,8 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
       forM_ params addBooleanNames
       forM_ params addSizeVariables
       indexfns <- forward body >>= mapM rewrite >>= bindfn vn
-      insertTopLevel vn (params, indexfns, te)
       checkPostcondition vn indexfns te
+      insertTopLevel vn (params, indexfns, te)
       pure indexfns
   where
     -- Adds the effect of a precondition without checking that it holds.
