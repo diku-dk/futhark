@@ -219,27 +219,30 @@ prove prop = failOnUnknown <$> matchProof prop
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
     matchProof Disjoint {} = error "prove called on Disjoint property (nothing to prove)"
     matchProof Monotonic {} = error "Not implemented yet"
-    matchProof (InjectiveRCD x rcd) = do
-      printAlgEnv 1
+    matchProof (InjectiveRCD y rcd) = do
       indexfns <- getIndexFns
-      fp <- traverse fromAlgebra =<< askFiltPart (Algebra.Var x)
+      fp <- traverse fromAlgebra =<< askFiltPart (Algebra.Var y)
+      printAlgEnv 1
+      printM 1 $ "fp " <> prettyStr fp
       case fp of
-        Just (FiltPartInv y pf _ :: Property Symbol)
-          | Just [f@(IndexFn (Forall i0 d) _)] <- M.lookup y indexfns ->
+        Just (FiltPart y' x pf _ :: Property Symbol)
+          | y' == y,
+            Just [f_x@(IndexFn (Forall _ d) _)] <- M.lookup x indexfns ->
+            -- XXX ^ I'm here: edges_4684 is not in env because it is a parameter of this def
+            -- 
               -- x is a filtering/partition of y, hence x will be "opaque" (a gather
               -- on inverse indices), but we can try to prove the following logically equivalent query
               -- x[i] = x[j] => i = j   <=>   y[i'] = y[j'] ^ pf(i') ^ pf(j') => i' = j'
-              algebraContext f $ do
+              algebraContext f_x $ do
                 i <- newNameFromString "i"
                 j <- newNameFromString "j"
                 -- pf' <- fromAlgebra pf
                 assume (predToFun pf i)
                 assume (predToFun pf j)
-                nextGenProver (PInjGe i j d rcd (body f))
+                nextGenProver (PInjGe i j d rcd (body f_x))
                 error "hello"
-        -- NEXT-UP: ^ add FiltPart ys to env to pattern match here
         _ ->
-          proveFn (PInjectiveRCD rcd) =<< getFn x
+          proveFn (PInjectiveRCD rcd) =<< getFn y
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
     matchProof (FiltPartInv x pf [(pp, split)]) = do
