@@ -143,6 +143,7 @@ library
       Futhark.Analysis.Properties.AlgebraBridge.Translate
       Futhark.Analysis.Properties.AlgebraBridge.Util
       Futhark.Analysis.Properties.Convert
+      Futhark.Analysis.Properties.EqSimplifier
       Futhark.Analysis.Properties.IndexFn
       Futhark.Analysis.Properties.Monad
       Futhark.Analysis.Properties.IndexFnPlus

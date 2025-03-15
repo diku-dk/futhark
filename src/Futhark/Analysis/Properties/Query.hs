@@ -1,4 +1,6 @@
 -- Answer queries on index functions using algebraic solver.
+{-# LANGUAGE LambdaCase #-}
+
 module Futhark.Analysis.Properties.Query
   ( Answer (..),
     Query (..),
@@ -24,9 +26,9 @@ import Control.Monad (forM, join, when)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Bifunctor (second)
-import Data.List (partition)
+import Data.List ( partition)
 import Data.Map qualified as M
-import Data.Maybe (fromJust, isJust)
+import Data.Maybe (fromJust, isJust, mapMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
@@ -34,8 +36,9 @@ import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property
-import Futhark.Analysis.Properties.Symbol (Symbol (..), sop2Symbol, toDNF)
+import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (toSumOfSums)
+import Futhark.Analysis.Properties.Traversals
 import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (newNameFromString, newVName)
@@ -44,6 +47,15 @@ import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
 import Prelude hiding (GT, LT)
+import Data.Graph
+
+import Data.Set (Set)
+import Futhark.Util (nubOrd)
+
+import Data.Tree (Tree(..))
+import Futhark.Analysis.Properties.EqSimplifier
+
+
 
 data Query
   = CaseIsMonotonic MonDir
@@ -124,7 +136,7 @@ p =>? q | p == q = pure Yes
 p =>? q = do
   ans <- dnfQuery p (check q)
   when (isUnknown ans) $
-    printM 3000 $
+    printM 1000 $
       "Failed to show:\n" <> prettyIndent 4 p <> "\n =>?\n" <> prettyIndent 4 q
   pure ans
 
@@ -227,20 +239,17 @@ prove prop = failOnUnknown <$> matchProof prop
       case fp of
         Just (FiltPart y' x pf _ :: Property Symbol)
           | y' == y,
-            Just [f_x@(IndexFn (Forall _ d) _)] <- M.lookup x indexfns ->
-            -- XXX ^ I'm here: edges_4684 is not in env because it is a parameter of this def
-            -- 
+            Just [f_x@(IndexFn (Forall i d) _)] <- M.lookup x indexfns ->
+              -- XXX ^ I'm here: edges_4684 is not in env because it is a parameter of this def
+              --
               -- x is a filtering/partition of y, hence x will be "opaque" (a gather
               -- on inverse indices), but we can try to prove the following logically equivalent query
               -- x[i] = x[j] => i = j   <=>   y[i'] = y[j'] ^ pf(i') ^ pf(j') => i' = j'
               algebraContext f_x $ do
-                i <- newNameFromString "i"
                 j <- newNameFromString "j"
-                -- pf' <- fromAlgebra pf
-                assume (predToFun pf i)
-                assume (predToFun pf j)
-                nextGenProver (PInjGe i j d rcd (body f_x))
-                error "hello"
+                gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
+                printM 1 $ "gs " <> prettyStr gs
+                nextGenProver (PInjGe i j d rcd gs)
         _ ->
           proveFn (PInjectiveRCD rcd) =<< getFn y
     matchProof (BijectiveRCD x rcd img) =
@@ -301,8 +310,10 @@ data PStatement
   | PFiltPart VName (Predicate Symbol) (Predicate Symbol, SoP Symbol)
 
 nextGenProver :: PStatement -> IndexFnM Answer
-nextGenProver (PInjGe i j d (a, b) ges) = do
+nextGenProver (PInjGe i j d (a, b) ges) = rollbackAlgEnv $ do
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
+  addRelIterator iter_i
+  addRelIterator iter_j
   allM [no_dups g | g <- casesToList ges]
   where
     e @ arg = rep (mkRep i (Var arg)) e
@@ -312,15 +323,71 @@ nextGenProver (PInjGe i j d (a, b) ges) = do
 
     out_of_range x = x :< a :|| b :< x
 
-    no_dups (c, e) = rollbackAlgEnv $ do
-      addRelIterator iter_i
-      addRelIterator iter_j
+    eqToPair (x :== y) = Just (x,y)
+    eqToPair _ = Nothing
 
+    no_dups (c, e) = rollbackAlgEnv $ do
+      -- PROOF by syntactical equivalences.
+      printAlgEnv 1
+      -- Assume e @ i == e @ j by syntactical substitution in c @ j.
+      -- ( 1. c @ j converts c to a SoP;
+      --   2. e is a SoP; hence if nested inside c, then it will be there also as a SoP. )
+      c_j' :: SoP Symbol <-
+        astMap
+          ( identityMapper
+              { mapOnSoP = \sym ->
+                  if sym == (e @ j :: SoP Symbol)
+                    then pure (e @ i)
+                    else pure sym
+              }
+          )
+          (c @ j)
+      let p = sop2Symbol (c @ i) :&& sop2Symbol c_j'
+      printM 1 $ prettyStr p
+      let p' = mapMaybe eqToPair . conjToList $ toCNF p
+      printM 1 $ prettyStr p'
+      let p'' = groupEqualities p'
+      printM 1 $ prettyStr p''
+
+      printM 1 "---------------"
+      printM 1 $ prettyStr p
+      let p'' = groupEqualities . mapMaybe eqToPair . conjToList $ toCNF p
+      printM 1 $ prettyStr p''
+      printM 1 "---------------"
+      let p'' = equivClasses . mapMaybe eqToPair . conjToList $ toCNF p
+      printM 1 $ concatMap prettyStr p''
+      -- XXX use this as a starting point bc it will guide how the algorithm
+      -- needs to iteratively apply equalities and merge components
+
+      -- i have a list of pairs representing equalities, and I want
+      -- to eliminate reduce the number of equalities as much
+      -- as possible. Remember that equality is commutative,
+      -- so the order of the pairs doesn't matter.
+      -- Example input: [(b,a), (c,a), (a,d), (p,q)]
+      --         output: [(b,c), (c, d), (p,q)]
+      --
+      --  Write a function in Haskell that solves this.
+      -- 
+      -- 
+      -- 2. add commute pairs
+      -- 3. groupby eq
+      -- 4. pick largest group?
+      -- 5. take one element out, equate it with the next element
+      --    until there is one element left; discard this last ele
+      --      b = a, c = a, d = a
+      --      b = c, c = d
+
+      -- printAlgEnv 1
+      -- hm <- simplify $ cases [
+      --     (sop2Symbol (c @ i) :&& sop2Symbol (c @ j) :&& e @ i :== e @ j,
+      --      sym2SoP $ sym2SoP (Var i) :== sym2SoP (Var j))
+      --   ]
+      -- printM 1 $ "hm " <> prettyStr hm
       let oob =
             (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
               =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
       let eq =
-            (sop2Symbol (c @ i) :&& sop2Symbol (c @ j) :&& e @ i :== e @ j)
+            (sop2Symbol (c @ i) :&& sop2Symbol c_j')
               =>? (sym2SoP (Var i) :== sym2SoP (Var j))
       oob `orM` eq
 nextGenProver (PFiltPart {}) = undefined
@@ -625,3 +692,6 @@ title s = "\ESC[4m" <> s <> "\ESC[0m"
 justName :: SoP Symbol -> Maybe VName
 justName e | Just (Var vn) <- justSym e = Just vn
 justName _ = Nothing
+
+equalitySolver = undefined
+  -- use equality simplifier, then run queries on each returned simplified expression

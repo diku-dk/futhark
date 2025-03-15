@@ -13,14 +13,13 @@ import Data.Maybe (isJust)
 import Futhark.Analysis.Properties.AlgebraBridge.Translate
 import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Properties.Monad (IndexFnM, getAlgEnv, printM, rollbackAlgEnv, prettyStr)
+import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Rule (Rule (..), applyRuleBook, vacuous)
-import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, toCNF, toDNF)
+import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Properties.Unify (Substitution, sub, unify)
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.), (.-.))
-import Futhark.Util.Pretty (prettyString)
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -167,12 +166,9 @@ isFalse p = do
         Yes -> pure Yes
         Unknown -> falsify left (q : right)
 
-    conjToList (a :&& b) = conjToList a <> conjToList b
-    conjToList x = [x]
-
-printAlgM :: SoP Symbol -> IndexFnM ()
-printAlgM x = rollbackAlgEnv $ do
+printAlgM :: Int -> SoP Symbol -> IndexFnM ()
+printAlgM level x = rollbackAlgEnv $ do
   alg_x :: SoP Algebra.Symbol <- toAlgebra x
-  printM 3000 (prettyStr alg_x)
-  env <- getAlgEnv
-  printM 3000 $ "under alg env " <> prettyString env
+  printM level (prettyStr alg_x)
+  -- env <- getAlgEnv
+  -- printM level $ "under alg env " <> prettyString env

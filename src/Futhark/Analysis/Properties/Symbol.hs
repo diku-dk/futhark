@@ -6,6 +6,7 @@ module Futhark.Analysis.Properties.Symbol
     toDNF,
     toCNF,
     neg,
+    conjToList,
   )
 where
 
@@ -93,6 +94,10 @@ toDNF p = p
 
 toCNF :: Symbol -> Symbol
 toCNF p = neg $ toDNF (neg p)
+
+conjToList :: Symbol -> [Symbol]
+conjToList (a :&& b) = conjToList a <> conjToList b
+conjToList x = [x]
 
 neg :: Symbol -> Symbol
 neg (Not x) = x
