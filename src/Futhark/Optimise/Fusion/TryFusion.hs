@@ -208,18 +208,20 @@ reorderLambdaParams ::
   Lambda SOACS ->
   [SOAC.Input] ->
   Lambda SOACS ->
-  TryFusion (Lambda SOACS, Lambda SOACS)
+  TryFusion (Lambda SOACS, Lambda SOACS, [SOAC.Input])
 reorderLambdaParams out map_lam inp' lam = do
   let params = lambdaParams lam
+  not_in_out' <- filterM (fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput) inp'
+  not_in_out <- mapM (liftMaybe . SOAC.isVarishInput) not_in_out'
   inp <- mapM (liftMaybe . SOAC.isVarishInput) inp'
-  let not_in_out = filter (`notElem` out) inp
-      name_to_param = M.fromList $ zip inp params
+  let name_to_param = M.fromList $ zip inp params
   new_params <- mapM (lookupParam name_to_param) out
   new_params' <- mapM (lookupParam name_to_param) not_in_out
   new_map_lam <- extendSOACLambda not_in_out map_lam
   pure
     ( new_map_lam,
-      lam {lambdaParams = new_params <> new_params'}
+      lam {lambdaParams = new_params <> new_params'},
+      not_in_out'
     )
   where
     lookupParam mapping name =
@@ -475,8 +477,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
             let Just (scans, lam) = maybe_scans
                 scan = singleScan scans
             names_p <- mapM (liftMaybe . SOAC.isVarishInput) inp_p
-            (lam', scatter_lam) <- reorderLambdaParams (outVars <> names_p) lam inp_c lam_c'
-            new_inp <- (inp_p <>) <$> filterM (fmap (`notElem` outVars) . liftMaybe . SOAC.isVarishInput) inp_c
+            (lam', scatter_lam, extra_inp) <- reorderLambdaParams (outVars <> names_p) lam inp_c lam_c'
+            let new_inp = inp_p <> extra_inp
 
             success (fsOutNames ker) $
               SOAC.ScanScatter w new_inp lam' scan dests scatter_lam

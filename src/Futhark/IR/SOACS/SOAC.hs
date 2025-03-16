@@ -917,13 +917,13 @@ typeCheckSOAC (ScanScatter w arrs map_lam scan dests scatter_lam) = do
   scan_nes' <- typeCheckScan scan
   let map_lam_ts = lambdaReturnType map_lam
   unless
-    ( map_lam_ts == map TC.argType scan_nes'
+    ( take (length scan_nes') map_lam_ts == map TC.argType scan_nes'
     )
     . TC.bad
     . TC.TypeError
     $ "Map function return type "
       <> prettyTuple map_lam_ts
-      <> " wrong for given scan functions."
+      <> " wrong for given the scan functions."
   TC.checkLambda scatter_lam (scan_nes' ++ arrs')
   let (as_ws, as_ns, _as_vs) = unzip3 dests
       rts = lambdaReturnType scatter_lam
