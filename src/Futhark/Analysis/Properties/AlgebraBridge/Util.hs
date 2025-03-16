@@ -48,7 +48,6 @@ instance Pretty Answer where
 -- Short-circuit evaluation `and`. (Unless debugging is on.)
 andF :: Answer -> IndexFnM Answer -> IndexFnM Answer
 andF Yes m = m
--- andF Unknown m = whenDebug (void m) >> pure Unknown
 andF Unknown _ = pure Unknown
 
 andM :: IndexFnM Answer -> IndexFnM Answer -> IndexFnM Answer
@@ -74,7 +73,6 @@ isYes _ = False
 isUnknown :: Answer -> Bool
 isUnknown Unknown = True
 isUnknown _ = False
-
 
 assume :: Symbol -> IndexFnM ()
 assume sym = do

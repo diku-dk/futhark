@@ -6,7 +6,7 @@ import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
-import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, simplify, isYes)
+import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, isYes, simplify)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad

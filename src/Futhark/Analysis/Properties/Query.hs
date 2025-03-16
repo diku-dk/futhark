@@ -189,11 +189,8 @@ prove prop = failOnUnknown <$> matchProof prop
     matchProof Disjoint {} = error "prove called on Disjoint property (nothing to prove)"
     matchProof Monotonic {} = error "Not implemented yet"
     matchProof wts@(InjectiveRCD y rcd) = do
-      printM 1 $ "------\n matchProof InjectiveRCD " <> prettyStr y <> " " <> prettyStr rcd
       indexfns <- getIndexFns
       fp <- traverse fromAlgebra =<< askFiltPart (Algebra.Var y)
-      printAlgEnv 1
-      printM 1 $ "fp " <> prettyStr fp
       case fp of
         Just (FiltPart y' x pf _ :: Property Symbol)
           | y' == y,
@@ -211,7 +208,6 @@ prove prop = failOnUnknown <$> matchProof prop
               -- TODO strat1 duplicates matchProof (FiltPart {}) code?
               let strat1 = rollbackAlgEnv $ do
                     alg_inj <- askInjectiveRCD (Algebra.Var x)
-                    printM 1 $ "askInjective " <> prettyStr x <> prettyStr alg_inj
                     case alg_inj of
                       Just (InjectiveRCD _ x_rcd) -> do
                         -- Check equivalent RCDs.
@@ -223,7 +219,6 @@ prove prop = failOnUnknown <$> matchProof prop
               let strat2 = algebraContext f_x $ do
                     j <- newNameFromString "j"
                     gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
-                    printM 1 $ "gs " <> prettyStr gs
                     nextGenProver (PInjGe i j d gs) -- Ignores RCD, checks whole codomain.
               strat1 `orM` strat2
         _ ->
@@ -287,7 +282,6 @@ data PStatement
 
 nextGenProver :: PStatement -> IndexFnM Answer
 nextGenProver (PInjGe i j d ges) = rollbackAlgEnv $ do
-  printM 1 $ "nextGenProver PinjGe : " <> prettyStr d <> prettyStr ges
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
   addRelIterator iter_i
   addRelIterator iter_j
@@ -324,12 +318,7 @@ nextGenProver (PInjGe i j d ges) = rollbackAlgEnv $ do
       -- let oob =
       --       (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
       --         =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
-      let eq = p =>? (sym2SoP (Var i) :== sym2SoP (Var j))
-
-      hm <- eq
-      printM 1 $ "eq : " <> prettyStr hm
-      -- oob `orM` eq
-      eq
+      p =>? (sym2SoP (Var i) :== sym2SoP (Var j))
 nextGenProver (PFiltPart {}) = undefined
 
 prove_ :: Bool -> Statement -> IndexFn -> IndexFnM Answer
@@ -380,9 +369,6 @@ prove_ _ (PInjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext 
             let neq =
                   (sop2Symbol (c @ i) :&& sop2Symbol (c @ j)) -- XXX could use in_range f@i g@j here
                     =>? (e @ i :/= e @ j)
-            -- printM 1 $ prettyStr (e @ i .-. e @ j :: SoP Symbol)
-            -- lol <- simplify (e @ i .-. e @ j :: SoP Symbol)
-            -- printM 1 $ prettyStr lol
             oob `orM` neq
 
   let step2 = guards fn `canBeSortedBy` cmp
