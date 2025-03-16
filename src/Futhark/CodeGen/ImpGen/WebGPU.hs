@@ -223,7 +223,8 @@ genKernel kernel = do
             memBindSlots = tail (ksBindSlots s),
             overrideNames = ksOverrides s,
             dynamicBlockDims = dynamicBlockDims,
-            sharedMemoryOverrides = sharedMemOverrides
+            sharedMemoryOverrides = sharedMemOverrides,
+            gpuProgram = T.empty
           }
   State.modify $ \ws -> ws {wsKernels = wsKernels ws <> [(name, interface)]}
   pure (nameFromText name, map (,IntType Int32) sharedMemExps)
@@ -297,25 +298,13 @@ kernelsToWebGPU prog =
         Definitions types (Constants ps consts') (Functions funs')
 
       kernels = M.fromList $ map (first nameFromText) (wsKernels translation)
-      -- Put scalar32 in front of the other integer types since they are all
-      -- internally represented using i32.
-      webgpu_prelude =
-        mconcat
-          [ "enable f16;\n",
-            RTS.scalar,
-            RTS.scalar32,
-            RTS.scalar8,
-            RTS.scalar16,
-            RTS.scalar64,
-            RTS.builtinKernels
-          ]
       constants = wsMacroDefs translation
       -- TODO: Compute functions using tuning params
       params = M.map (,S.empty) $ wsSizes translation
       failures = mempty
    in Program
         { webgpuProgram = wsCode translation,
-          webgpuPrelude = webgpu_prelude,
+          webgpuPrelude = RTS.wgsl_prelude,
           webgpuMacroDefs = constants,
           webgpuKernels = kernels,
           webgpuParams = params,

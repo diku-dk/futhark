@@ -7,7 +7,13 @@ module Futhark.CodeGen.RTS.WGSL
     scalar16,
     scalar32,
     scalar64,
-    builtinKernels,
+    wgsl_prelude,
+    lmad_copy,
+    map_transpose,
+    map_transpose_low_height,
+    map_transpose_low_width,
+    map_transpose_small,
+    map_transpose_large,
   )
 where
 
@@ -39,27 +45,45 @@ scalar64 :: T.Text
 scalar64 = $(embedStringFile "rts/wgsl/scalar64.wgsl")
 {-# NOINLINE scalar64 #-}
 
--- | @rts/wgsl/builtin_kernels.wgsl@
-builtinKernels :: T.Text
-builtinKernels =
-  T.concat
-    [ header,
-      T.concat
-        [ genTransposeKernel "1b" "i8" True,
-          genTransposeKernel "2b" "i16" True,
-          genTransposeKernel "4b" "i32" False,
-          genTransposeKernel "8b" "i64" False
-        ],
-      footer
+wgsl_prelude :: T.Text
+wgsl_prelude =
+  -- Put scalar32 in front of the other integer types since they are all
+  -- internally represented using i32.
+  mconcat
+    [ "enable f16;\n",
+      scalar,
+      scalar32,
+      scalar8,
+      scalar16,
+      scalar64
     ]
-  where
-    content = $(embedStringFile "rts/wgsl/builtin_kernels.wgsl")
-    (header, middle) = T.breakOn "// Begin of builtin kernel group" content
-    (kernel, footer) = T.breakOn "// End of builtin kernel group" middle
-    genTransposeKernel name elemType atomic =
-      let baseKernel =
-            if atomic
-              then T.replace "<ELEM_TYPE>" "<atomic<ELEM_TYPE>>" kernel
-              else kernel
-       in T.replace "NAME" name $ T.replace "ELEM_TYPE" elemType baseKernel
-{-# NOINLINE builtinKernels #-}
+
+-- | @rts/wgsl/lmad_copy.wgsl@
+lmad_copy :: T.Text
+lmad_copy = $(embedStringFile "rts/wgsl/lmad_copy.wgsl")
+{-# NOINLINE lmad_copy #-}
+
+-- | @rts/wgsl/map_transpose.wgsl@
+map_transpose :: T.Text
+map_transpose = $(embedStringFile "rts/wgsl/map_transpose.wgsl")
+{-# NOINLINE map_transpose #-}
+
+-- | @rts/wgsl/map_transpose_low_height.wgsl@
+map_transpose_low_height :: T.Text
+map_transpose_low_height = $(embedStringFile "rts/wgsl/map_transpose_low_height.wgsl")
+{-# NOINLINE map_transpose_low_height #-}
+
+-- | @rts/wgsl/map_transpose_low_width.wgsl@
+map_transpose_low_width :: T.Text
+map_transpose_low_width = $(embedStringFile "rts/wgsl/map_transpose_low_width.wgsl")
+{-# NOINLINE map_transpose_low_width #-}
+
+-- | @rts/wgsl/map_transpose_small.wgsl@
+map_transpose_small :: T.Text
+map_transpose_small = $(embedStringFile "rts/wgsl/map_transpose_small.wgsl")
+{-# NOINLINE map_transpose_small #-}
+
+-- | @rts/wgsl/map_transpose_large.wgsl@
+map_transpose_large :: T.Text
+map_transpose_large = $(embedStringFile "rts/wgsl/map_transpose_large.wgsl")
+{-# NOINLINE map_transpose_large #-}

@@ -89,6 +89,12 @@ extra-source-files:
     rts/wgsl/scalar32.wgsl
     rts/wgsl/scalar64.wgsl
     rts/wgsl/builtin_kernels.wgsl
+    rts/wgsl/lmad_copy.wgsl
+    rts/wgsl/map_transpose.wgsl
+    rts/wgsl/map_transpose_low_height.wgsl
+    rts/wgsl/map_transpose_low_width.wgsl
+    rts/wgsl/map_transpose_small.wgsl
+    rts/wgsl/map_transpose_large.wgsl
     prelude/functional.fut
     prelude/math.fut
     prelude/soacs.fut

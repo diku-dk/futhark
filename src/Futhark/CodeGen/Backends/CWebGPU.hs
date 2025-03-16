@@ -23,8 +23,10 @@ import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsWebGPUH)
 import Futhark.CodeGen.RTS.WebGPU (serverWsJs, utilJs, valuesJs, wrappersJs)
+import Futhark.CodeGen.RTS.WGSL qualified as RTS
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.MonadFreshNames
+import Futhark.Util (chunk)
 import Language.C.Quote.C qualified as C
 import NeatInterpolation (text, untrimming)
 
@@ -47,6 +49,7 @@ mkKernelInfos kernels = do
                char **dynamic_block_dim_names;
                typename uint32_t num_shared_mem_overrides;
                char **shared_mem_overrides;
+               const char **gpu_program;
              } wgpu_kernel_info;
              static typename size_t wgpu_num_kernel_infos = $exp:num_kernels; |]
   mapM_ GC.earlyDecl $ concatMap sc_offs_decl (M.toList kernels)
@@ -55,6 +58,7 @@ mkKernelInfos kernels = do
   mapM_ GC.earlyDecl $ concatMap dynamic_block_dim_indices_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap dynamic_block_dim_names_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap shared_mem_overrides_decl (M.toList kernels)
+  mapM_ GC.earlyDecl $ concatMap gpu_programs (M.toList kernels)
   mapM_
     GC.earlyDecl
     [C.cunit|static struct wgpu_kernel_info wgpu_kernel_infos[]
@@ -94,6 +98,11 @@ mkKernelInfos kernels = do
               (sharedMemoryOverrides k)
        in [C.cunit|static char* $id:(n <> "_shared_mem_overrides")[]
                     = {$inits:names};|]
+    gpu_programs (n, k) =
+      let program_fragments = [[C.cinit|$string:s|] | s <- chunk 2000 $ T.unpack $ gpuProgram k]
+       in [C.cunit|static const char* $id:(n <> "_gpu_program")[]
+                    = {$inits:program_fragments, NULL};|]
+
     info_init (n, k) =
       let num_scalars = length (scalarsOffsets k)
           num_bindings = length (memBindSlots k)
@@ -117,28 +126,38 @@ mkKernelInfos kernels = do
                      .num_shared_mem_overrides = $int:num_shared_mem_overrides,
                      .shared_mem_overrides =
                         $id:(n <> "_shared_mem_overrides"),
+                     .gpu_program = $id:(n <> "_gpu_program")
                    }|]
     info_inits = map info_init (M.toList kernels)
 
--- We need to generate kernel_infos for built-in kernels
+-- We need to generate kernel_infos for built-in kernels as well.
 builtinKernels :: M.Map Name KernelInterface
 builtinKernels =
   M.fromList $ concatMap generateKernels builtinKernelTemplates
   where
-    nameParams = ["1b", "2b", "4b", "8b"]
     builtinKernelTemplates =
-      [ ("lmad_copy_NAME", copyInterface),
-        ("map_transpose_NAME", transposeInterface),
-        ("map_transpose_NAME_low_height", transposeInterface),
-        ("map_transpose_NAME_low_width", transposeInterface),
-        ("map_transpose_NAME_small", transposeInterface),
-        ("map_transpose_NAME_large", transposeInterfaceLarge)
+      [ ("lmad_copy_NAME",                copyInterface RTS.lmad_copy)
+      , ("map_transpose_NAME",            transposeInterface RTS.map_transpose)
+      , ("map_transpose_NAME_low_height", transposeInterface RTS.map_transpose_low_height)
+      , ("map_transpose_NAME_low_width",  transposeInterface RTS.map_transpose_low_width)
+      , ("map_transpose_NAME_small",      transposeInterface RTS.map_transpose_small)
+      , ("map_transpose_NAME_large",      transposeInterfaceLarge RTS.map_transpose_large)
       ]
 
-    generateKernels (template, interface) =
-      [(nameFromText (T.replace "NAME" name template), interface) | name <- nameParams]
+    generateKernelProgram kernel name elemType atomic =
+      let baseKernel = if atomic
+                       then T.replace "<ELEM_TYPE>" "<atomic<ELEM_TYPE>>" kernel
+                       else kernel
+      in RTS.wgsl_prelude <> (T.replace "NAME" name $ T.replace "ELEM_TYPE" elemType baseKernel)
 
-    transposeInterface =
+    generateKernels (template, interface) =
+      [(nameFromText (T.replace "NAME" name template), interface name elemType atomic) 
+        | (name, elemType, atomic) <- [("1b", "i8", True)
+                                      ,("2b", "i16", True)
+                                      ,("4b", "i32", False)
+                                      ,("8b", "i64", False)]]
+
+    transposeInterface program name elemType atomic =
       KernelInterface
         { safety = SafetyNone,
           scalarsOffsets = [0, 8, 16, 20, 24, 28, 32, 36, 40],
@@ -147,10 +166,11 @@ builtinKernels =
           memBindSlots = [1, 2],
           overrideNames = [],
           dynamicBlockDims = [],
-          sharedMemoryOverrides = []
+          sharedMemoryOverrides = [],
+          gpuProgram = generateKernelProgram program name elemType atomic
         }
 
-    transposeInterfaceLarge =
+    transposeInterfaceLarge program name elemType atomic =
       KernelInterface
         { safety = SafetyNone,
           scalarsOffsets = [0, 8, 16, 24, 32, 40, 48, 56, 60],
@@ -159,10 +179,11 @@ builtinKernels =
           memBindSlots = [1, 2],
           overrideNames = [],
           dynamicBlockDims = [],
-          sharedMemoryOverrides = []
+          sharedMemoryOverrides = [],
+          gpuProgram = generateKernelProgram program name elemType atomic
         }
 
-    copyInterface =
+    copyInterface program name elemType atomic =
       KernelInterface
         { safety = SafetyNone,
           -- note that we need to align the 'r' field to 8-bytes
@@ -178,7 +199,8 @@ builtinKernels =
               (1, "lmad_copy_block_size_y"),
               (2, "lmad_copy_block_size_z")
             ],
-          sharedMemoryOverrides = []
+          sharedMemoryOverrides = [],
+          gpuProgram = generateKernelProgram program name elemType atomic
         }
 
 mkBoilerplate ::

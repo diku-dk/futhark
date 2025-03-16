@@ -43,7 +43,10 @@ data KernelInterface = KernelInterface
     dynamicBlockDims :: [(Int, T.Text)],
     -- | Override names for shared memory sizes. They are also included in
     -- `overrideNames`.
-    sharedMemoryOverrides :: [T.Text]
+    sharedMemoryOverrides :: [T.Text],
+    -- | WGSL source of the kernel. This is only used for the built-in kernels.
+    -- The compiled wgsl kernel from futhark source is still stored in the gpu_program.
+    gpuProgram :: T.Text
   }
 
 -- | A program calling WebGPU kernels.

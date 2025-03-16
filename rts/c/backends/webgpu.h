@@ -365,19 +365,19 @@ static void wgpu_size_setup(struct futhark_context *ctx) {
   }
 }
 
-void wgpu_module_setup(struct futhark_context *ctx) {
+void wgpu_module_setup(struct futhark_context *ctx, const char *program, WGPUShaderModule *module) {
   WGPUShaderModuleWGSLDescriptor wgsl_desc = {
     .chain = {
       .sType = WGPUSType_ShaderModuleWGSLDescriptor
     },
-    .code = ctx->cfg->program
+    .code = program
   };
   WGPUShaderModuleDescriptor desc = {
     .nextInChain = &wgsl_desc.chain
   };
-  ctx->module = wgpuDeviceCreateShaderModule(ctx->device, &desc);
+  *module = wgpuDeviceCreateShaderModule(ctx->device, &desc);
 
-  wgpuShaderModuleGetCompilationInfo(ctx->module, wgpu_on_shader_compiled, NULL);
+  wgpuShaderModuleGetCompilationInfo(*module, wgpu_on_shader_compiled, NULL);
 }
 
 struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx);
@@ -463,7 +463,7 @@ int backend_context_setup(struct futhark_context *ctx) {
   }
   free(macro_vals);
 
-  wgpu_module_setup(ctx);
+  wgpu_module_setup(ctx, ctx->cfg->program, &ctx->module);
 
   if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
     printf("Failed to init builtin kernels\n");
@@ -538,11 +538,16 @@ struct wgpu_kernel {
   // need to create a new pipeline for every kernel launch.
   bool static_pipeline;
 
+  // ShaderModule for this kernel. Generated from the gpu_program of the kernel
+  // info.
+  WGPUShaderModule module;
+
   // Only set if static_pipeline.
   WGPUComputePipeline pipeline;
 
   // Only set if !static_pipeline.
   WGPUConstantEntry *const_entries;
+
   // How many entries are already set; there is enough space in the allocation
   // to additionally set the shared memory and dynamic block dimension entries.
   int const_entries_set;
@@ -560,6 +565,13 @@ static void gpu_create_kernel(struct futhark_context *ctx,
   struct wgpu_kernel_info *kernel_info = wgpu_get_kernel_info(name);
   struct wgpu_kernel *kernel = malloc(sizeof(struct wgpu_kernel));
   kernel->info = kernel_info;
+
+  // If this is a builtin kernel, generate the shader module here
+  if (kernel_info->gpu_program[0]) {
+    const char* wgsl = strconcat(kernel_info->gpu_program);
+    wgpu_module_setup(ctx, wgsl, &kernel->module);
+    free(wgsl);
+  }
 
   WGPUBufferDescriptor scalars_desc = {
     .label = "kernel scalars",
@@ -633,7 +645,7 @@ static void gpu_create_kernel(struct futhark_context *ctx,
     WGPUComputePipelineDescriptor desc = {
       .layout = kernel->pipeline_layout,
       .compute = {
-        .module = ctx->module,
+        .module = kernel_info->gpu_program[0] ? kernel->module : ctx->module,
         .entryPoint = kernel_info->name,
         .constantCount = kernel_info->num_overrides,
         .constants = const_entries,
