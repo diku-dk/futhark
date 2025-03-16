@@ -11,7 +11,7 @@ module Futhark.Analysis.Properties.Symbol
 where
 
 import Futhark.Analysis.Properties.Util (prettyHole, prettyName)
-import Futhark.SoP.SoP (SoP, justConstant, justSym)
+import Futhark.SoP.SoP (SoP, justConstant, justSym, justAffine)
 import Futhark.Util.Pretty (Pretty, apply, brackets, parens, pretty, prettyString, softline, (<+>))
 import Language.Futhark (VName)
 import Futhark.Analysis.Properties.Property (Property)
@@ -84,6 +84,7 @@ sop2Symbol sop
   | Just t <- justSym sop = t
   | Just 1 <- justConstant sop = Bool True
   | Just 0 <- justConstant sop = Bool False
+  | Just (-1, x, 1) <- justAffine sop = Not x
   | otherwise = error $ "sop2Symbol on non-symbol: " <> prettyString sop
 
 toDNF :: Symbol -> Symbol

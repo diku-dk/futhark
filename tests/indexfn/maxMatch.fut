@@ -76,8 +76,8 @@ def filterBy [n] 't (cs: [n]bool) (xs: [n]t)
   let (new_n, is) = filter_indices cs
   let dummy = xs[0]
   let scratch = replicate new_n dummy
-  let is = scatter scratch is xs
-  in (new_n, is)
+  let xs' = scatter scratch is xs
+  in (new_n, xs')
 
 def length [n] 't (_xs: [n]t) = n
 
@@ -85,10 +85,16 @@ def length [n] 't (_xs: [n]t) = n
 --            Program
 --
 -- Return the edge-id pairs with the smallest edge id
-def getSmallestPairs [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: {[arraySizeFlat]i64 | \x -> InjectiveRCD x (0, arraySizeFlat - 1)}) (nVerts: i64) (nEdges_2: i64)
-      : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
-           InjectiveRCD new_edges (0,length new_edges - 1) && InjectiveRCD new_edgeIds (0, arraySizeFlat - 1) -- Monotonic (<) new_edgeIds
-        } =
+def getSmallestPairs [arraySizeFlat]
+    (edges: [arraySizeFlat]i64)
+    (edgeIds: {[arraySizeFlat]i64 | \x -> InjectiveRCD x (0, arraySizeFlat - 1)})
+    (nVerts: i64)
+    (nEdges_2: i64)
+    : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
+         InjectiveRCD new_edges (0, arraySizeFlat - 1)
+           && InjectiveRCD new_edgeIds (0, arraySizeFlat - 1)
+      }
+    =
     -- The original program transforms edgeIds as follows:
     --      0,  1,  2,  3,  4,  5
     --      |   |   |   |   |   |
@@ -114,8 +120,14 @@ def getMMEdges (smallestEdgeId: []i64) (e: i64) (i: i64): (i64, i64) =
     if smallestEdgeId[e] == i then (e, i) else (-1, -1)
 
 -- Update the marked vertexes and included edges
-def update [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: [arraySizeFlat]i64) (smallestEdgeId: []i64)
-                       (markedVerts: *[]bool) (includedEdges: *[]bool): {(*[]bool, *[]bool) | \_ -> true} =
+def update [arraySizeFlat]
+    (edges: [arraySizeFlat]i64)
+    (edgeIds: [arraySizeFlat]i64)
+    (smallestEdgeId: []i64)
+    (markedVerts: *[]bool)
+    (includedEdges: *[]bool)
+    : {(*[]bool, *[]bool) | \_ -> true}
+    =
     -- The length of the flattened arrays
     -- let arraySizeFlat = arraySize*2
 
@@ -130,14 +142,27 @@ def update [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: [arraySizeFlat]
     let includedEdges = scatter includedEdges e2i trues
     in (markedVerts, includedEdges)
 
--- -- Remove the marked edges
--- def removeMarked [arraySizeFlat] (markedVerts: []bool) (edges: [arraySizeFlat]i64) (edgeIds: [arraySizeFlat]i64): ([]i64, []i64) = 
---     -- zip edges edgeIds
---     --     |> filter (\(v, _) -> !(markedVerts[v[0]] || markedVerts[v[1]]))
---     --     |> unzip
---     let zipped = zip edges edgeIds
---     let filtered = filter (\(v, _) -> !markedVerts[v]) zipped
---     in unzip filtered
+-- Remove the marked edges
+def removeMarked [arraySizeFlat]
+    (markedVerts: []bool)
+    (edges: [arraySizeFlat]i64)
+    (edgeIds: {[arraySizeFlat]i64 | \x -> InjectiveRCD x (0, arraySizeFlat - 1)})
+    : {([]i64, []i64) | \(_, new_edgeIds) ->
+          InjectiveRCD new_edgeIds (0, arraySizeFlat - 1)
+      }
+    =
+    -- zip edges edgeIds
+    --     |> filter (\(v, _) -> !(markedVerts[v[0]] || markedVerts[v[1]]))
+    --     |> unzip
+    let cs = map (\v -> !markedVerts[v]) edges
+    let (new_n, is) = filter_indices cs
+
+    let scratch = replicate new_n edges[0]
+    let edges' = scatter scratch is edges
+
+    let scratch = replicate new_n edgeIds[0]
+    let edgeIds' = scatter scratch is edgeIds
+    in (edges', edgeIds')
 
 -- -- Reset the smallest id of each vertex
 -- def resetsmallestEdgeId (smallestEdgeId: []i64): *[]i64 =

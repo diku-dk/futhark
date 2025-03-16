@@ -89,10 +89,12 @@ eqSolverRules = do
             e_j <- sub s (hole j)
             pure (e_i :== e_j),
           sideCondition = \s -> do
+            printM 1 $ "hello? " <> prettyStr s
             e_x <- sub s (hole x)
             e_i <- sub s (hole i)
             e_j <- sub s (hole j)
             alg_inj <- join <$> traverse askInjectiveRCD (toAlgVar e_x)
+            printM 1 $ "alg_inj? " <> prettyStr alg_inj
             case alg_inj of
               Just (InjectiveRCD _ rcd) -> do
                 rcd' <- fromAlgebra rcd

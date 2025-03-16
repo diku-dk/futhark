@@ -778,6 +778,7 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
       vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
 
       lift $ addInvAlias vn_inv vn_inds
+      lift $ addRelSymbol (Prop $ Property.BijectiveRCD vn_inv (int2SoP 0, dest_size) (int2SoP 0, dest_size))
 
       let inv_ind = Idx (Var vn_inv) (sVar i)
       lift $

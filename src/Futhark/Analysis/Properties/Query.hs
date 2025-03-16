@@ -221,8 +221,15 @@ prove prop = failOnUnknown <$> matchProof prop
                     gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
                     nextGenProver (PInjGe i j d gs) -- Ignores RCD, checks whole codomain.
               strat1 `orM` strat2
-        _ ->
-          proveFn (PInjectiveRCD rcd) =<< getFn y
+        _ -> do
+          f_y <- getFn y
+          let strat1 = proveFn (PInjectiveRCD rcd) f_y
+          let strat2 = case f_y of
+               IndexFn Empty _ -> pure Yes
+               IndexFn (Forall i d) gs -> algebraContext f_y $ do
+                  j <- newNameFromString "j"
+                  nextGenProver (PInjGe i j d gs) -- Ignores RCD, checks whole codomain.
+          strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
     matchProof (FiltPartInv x pf [(pp, split)]) = do
@@ -310,7 +317,9 @@ nextGenProver (PInjGe i j d ges) = rollbackAlgEnv $ do
                 }
             )
             (c @ j)
-      p <- eqSolver $ sop2Symbol (c @ i) :&& c_j'
+      p <- eqSolver $ sop2Symbol (c @ i) :&& c_j' :&& e @ i :== e @ j
+      printM 1 $ "no_dups " <> prettyStr (sop2Symbol (c @ i) :&& e @ i :== e @ j)
+      printM 1 $ "no_dups " <> prettyStr p
 
       -- TODO this caused an infinite loop somewhere on maxMatch.fut?
       --      (Add RCD to PInjGE if you want to add this again.)
@@ -369,6 +378,7 @@ prove_ _ (PInjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext 
             let neq =
                   (sop2Symbol (c @ i) :&& sop2Symbol (c @ j)) -- XXX could use in_range f@i g@j here
                     =>? (e @ i :/= e @ j)
+            printAlgEnv 1
             oob `orM` neq
 
   let step2 = guards fn `canBeSortedBy` cmp
