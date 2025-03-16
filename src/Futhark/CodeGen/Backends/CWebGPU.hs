@@ -164,11 +164,11 @@ builtinKernels =
           scalarsSize = 48, -- uniform buffers must be multiple of 16 bytes
           scalarsBindSlot = 0,
           memBindSlots = [1, 2],
-          overrideNames = ["map_transpose_block_size_x", "map_transpose_block_size_y", "map_transpose_block_size_z"],
+          overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
           dynamicBlockDims = 
-            [ (0, "map_transpose_block_size_x"),
-              (1, "map_transpose_block_size_y"),
-              (2, "map_transpose_block_size_z")
+            [ (0, "block_size_x"),
+              (1, "block_size_y"),
+              (2, "block_size_z")
             ],
           sharedMemoryOverrides = [],
           gpuProgram = generateKernelProgram program name elemType atomic
@@ -181,11 +181,11 @@ builtinKernels =
           scalarsSize = 64, -- uniform buffers must be multiple of 16 bytes
           scalarsBindSlot = 0,
           memBindSlots = [1, 2],
-          overrideNames = ["map_transpose_block_size_x", "map_transpose_block_size_y", "map_transpose_block_size_z"],
+          overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
           dynamicBlockDims = 
-            [ (0, "map_transpose_block_size_x"),
-              (1, "map_transpose_block_size_y"),
-              (2, "map_transpose_block_size_z")
+            [ (0, "block_size_x"),
+              (1, "block_size_y"),
+              (2, "block_size_z")
             ],
           sharedMemoryOverrides = [],
           gpuProgram = generateKernelProgram program name elemType atomic
@@ -201,11 +201,11 @@ builtinKernels =
           scalarsSize = 224, -- uniform buffers must be multiple of 16 bytes
           scalarsBindSlot = 0,
           memBindSlots = [1, 2],
-          overrideNames = ["lmad_copy_block_size_x", "lmad_copy_block_size_y", "lmad_copy_block_size_z"],
+          overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
           dynamicBlockDims =
-            [ (0, "lmad_copy_block_size_x"),
-              (1, "lmad_copy_block_size_y"),
-              (2, "lmad_copy_block_size_z")
+            [ (0, "block_size_x"),
+              (1, "block_size_y"),
+              (2, "block_size_z")
             ],
           sharedMemoryOverrides = [],
           gpuProgram = generateKernelProgram program name elemType atomic
