@@ -19,6 +19,7 @@ import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
+import Futhark.Util.Pretty (Pretty (..))
 
 addEq :: forall u e p m. (MonadSoP u e p m) => u -> SoP u -> m ()
 addEq sym sop = do
@@ -46,6 +47,10 @@ data EquivCand u = EquivCand
     equivCandSoP :: SoP u
   }
   deriving (Eq, Show, Ord)
+
+instance (Pretty u) => Pretty (EquivCand u) where
+  pretty (EquivCand sym sop) =
+    "(" <> pretty sym <> ") = " <> pretty (negSoP sop)
 
 instance (Ord u) => Substitute u (SoP u) (EquivCand u) where
   substitute subst (EquivCand sym sop) =
@@ -192,6 +197,9 @@ addLegalCands cand_set = do
         -- Detect if an equivalence candidate would introduce
         -- a cycle into the range environment.
         && none hasRangeCycle (M.toList rs)
+        -- Candidate is not an equivalence on itself.
+        -- TODO should probably make it so that we never generate these.
+        && sym2SoP (equivCandSym cand) /= equivCandSoP cand
       where
         none f = not . any f
         -- Since the equivalence environment contains the fully
