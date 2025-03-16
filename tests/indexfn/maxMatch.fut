@@ -109,25 +109,26 @@ def getSmallestPairs [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: {[arr
     let (_, zs) = filterBy cs edgeIds
     in (ys :> [newSize]i64, zs :> [newSize]i64)
 
--- -- Return the edge if it's ID is the smallest, else return placeholder
--- def getMMEdges (smallestEdgeId: []i64) (e: i64) (i: i64): (i64, i64) =
---     if smallestEdgeId[e] == i then (e, i) else (-1, -1)
+-- Return the edge if it's ID is the smallest, else return placeholder
+def getMMEdges (smallestEdgeId: []i64) (e: i64) (i: i64): (i64, i64) =
+    if smallestEdgeId[e] == i then (e, i) else (-1, -1)
 
--- -- Update the marked vertexes and included edges
--- def update [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: [arraySizeFlat]i64) (smallestEdgeId: []i64)
---                        (markedVerts: *[]bool) (includedEdges: *[]bool): (*[]bool, *[]bool) =
---     -- The length of the flattened arrays
---     -- let arraySizeFlat = arraySize*2
+-- Update the marked vertexes and included edges
+def update [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: [arraySizeFlat]i64) (smallestEdgeId: []i64)
+                       (markedVerts: *[]bool) (includedEdges: *[]bool): {(*[]bool, *[]bool) | \_ -> true} =
+    -- The length of the flattened arrays
+    -- let arraySizeFlat = arraySize*2
 
---     let (e, e2i) = unzip (map2 (getMMEdges smallestEdgeId) edges edgeIds)
---     let flatE = e                  -- flatten e :> [arraySizeFlat]i64
---     let flatEi2 = e2i              -- flatten e2i :> [arraySizeFlat]i64
+    let zipped = map2 (\edge id -> getMMEdges smallestEdgeId edge id) edges edgeIds
+    let (e, e2i) = unzip zipped
+    -- let flatE = flatten e :> [arraySizeFlat]i64
+    -- let flatEi2 = flatten e2i :> [arraySizeFlat]i64
 
---     let trues = replicate arraySizeFlat true
+    let trues = replicate arraySizeFlat true
 
---     let markedVerts = scatter markedVerts flatE trues
---     let includedEdges = scatter includedEdges flatEi2 trues
---     in (markedVerts, includedEdges)
+    let markedVerts = scatter markedVerts e trues
+    let includedEdges = scatter includedEdges e2i trues
+    in (markedVerts, includedEdges)
 
 -- -- Remove the marked edges
 -- def removeMarked [arraySizeFlat] (markedVerts: []bool) (edges: [arraySizeFlat]i64) (edgeIds: [arraySizeFlat]i64): ([]i64, []i64) = 
@@ -179,5 +180,3 @@ def getSmallestPairs [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: {[arr
 -- output @ data/rMatGraph_E_10_20000000.out
 -- input @ data/2Dgrid_E_64000000.in
 -- output @ data/2Dgrid_E_64000000.out
-
-

@@ -510,10 +510,11 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         -- 1. Scatter in-bounds-monotonic indices:
         rule1 <- runMaybeT $ scatterMono dest inds vals
         rule2 <- runMaybeT $ scatterPerm dest inds vals e_inds
+        rule3 <- runMaybeT $ scatterRep dest inds vals
         maybe
           (errorMsg loc "Failed to infer index function for scatter.")
           pure
-          (rule1 <|> rule2)
+          (rule1 <|> rule2 <|> rule3)
   | Just "sized" <- getFun f,
     [_, e] <- getArgs args = do
       -- No-op.
@@ -739,7 +740,18 @@ substParams = foldM substParam
     substParam fn (paramName, paramIndexFn) =
       (fn @ (paramName, paramIndexFn)) >>= rewriteWithoutRules
 
--- Scatter permutation indices:
+-- Scatter replicated value (result is uninterpreted, but safe):
+scatterRep :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterRep (IndexFn (Forall _ dom_dest) _) _ vals@(IndexFn (Forall i (Iota _)) _)
+  | i `S.notMember` fv (body vals) = do
+      uninterpreted <- newNameFromString "scatter_rep"
+      lift . pure $
+        IndexFn
+          { iterator = Forall i dom_dest,
+            body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
+          }
+scatterRep _ _ _ = fail ""
+
 --   - If `is` is a permutation of (0 .. length dst), then the
 --     inverse of `is` exists and the scatter is equivalent to a gather:
 --     ```
