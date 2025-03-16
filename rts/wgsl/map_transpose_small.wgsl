@@ -3,9 +3,9 @@ const TR_BLOCK_DIM:        i32 = 16;
 const TR_TILE_DIM:         i32 = 32;
 const TR_ELEMS_PER_THREAD: i32 = 8;
 
-override map_transpose_small_block_size_x: i32 = 1;
-override map_transpose_small_block_size_y: i32 = 1;
-override map_transpose_small_block_size_z: i32 = 1;
+override map_transpose_block_size_x: i32 = 1;
+override map_transpose_block_size_y: i32 = 1;
+override map_transpose_block_size_z: i32 = 1;
 
 struct MapTransposeParameters {
     dst_offset: i64,    // 0
@@ -24,7 +24,7 @@ var<workgroup> transpose_shared_memory_ELEM_TYPE: array<ELEM_TYPE, TR_TILE_DIM*(
 @group(0) @binding(0) var<uniform> mt_s_NAME_args: MapTransposeParameters;
 @group(0) @binding(1) var<storage, read_write> mt_s_NAME_dst_mem: array<ELEM_TYPE>;
 @group(0) @binding(2) var<storage, read_write> mt_s_NAME_src_mem: array<ELEM_TYPE>;
-@compute @workgroup_size(map_transpose_small_block_size_x, map_transpose_small_block_size_y, map_transpose_small_block_size_z)
+@compute @workgroup_size(map_transpose_block_size_x, map_transpose_block_size_y, map_transpose_block_size_z)
 fn map_transpose_NAME_small(
     @builtin(workgroup_id)         group_id: vec3<u32>,  // tblock_id -> unique id of a group  within a dispatch
     @builtin(global_invocation_id) global_id: vec3<u32>, // global_id -> unique id of a thread within a dispatch

@@ -164,8 +164,12 @@ builtinKernels =
           scalarsSize = 48, -- uniform buffers must be multiple of 16 bytes
           scalarsBindSlot = 0,
           memBindSlots = [1, 2],
-          overrideNames = [],
-          dynamicBlockDims = [],
+          overrideNames = ["map_transpose_block_size_x", "map_transpose_block_size_y", "map_transpose_block_size_z"],
+          dynamicBlockDims = 
+            [ (0, "map_transpose_block_size_x"),
+              (1, "map_transpose_block_size_y"),
+              (2, "map_transpose_block_size_z")
+            ],
           sharedMemoryOverrides = [],
           gpuProgram = generateKernelProgram program name elemType atomic
         }
@@ -177,8 +181,12 @@ builtinKernels =
           scalarsSize = 64, -- uniform buffers must be multiple of 16 bytes
           scalarsBindSlot = 0,
           memBindSlots = [1, 2],
-          overrideNames = [],
-          dynamicBlockDims = [],
+          overrideNames = ["map_transpose_block_size_x", "map_transpose_block_size_y", "map_transpose_block_size_z"],
+          dynamicBlockDims = 
+            [ (0, "map_transpose_block_size_x"),
+              (1, "map_transpose_block_size_y"),
+              (2, "map_transpose_block_size_z")
+            ],
           sharedMemoryOverrides = [],
           gpuProgram = generateKernelProgram program name elemType atomic
         }

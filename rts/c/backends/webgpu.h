@@ -365,7 +365,7 @@ static void wgpu_size_setup(struct futhark_context *ctx) {
   }
 }
 
-void wgpu_module_setup(struct futhark_context *ctx, const char *program, WGPUShaderModule *module) {
+void wgpu_module_setup(struct futhark_context *ctx, const char *program, WGPUShaderModule *module, const char* label) {
   WGPUShaderModuleWGSLDescriptor wgsl_desc = {
     .chain = {
       .sType = WGPUSType_ShaderModuleWGSLDescriptor
@@ -373,6 +373,7 @@ void wgpu_module_setup(struct futhark_context *ctx, const char *program, WGPUSha
     .code = program
   };
   WGPUShaderModuleDescriptor desc = {
+    .label = label,
     .nextInChain = &wgsl_desc.chain
   };
   *module = wgpuDeviceCreateShaderModule(ctx->device, &desc);
@@ -463,7 +464,7 @@ int backend_context_setup(struct futhark_context *ctx) {
   }
   free(macro_vals);
 
-  wgpu_module_setup(ctx, ctx->cfg->program, &ctx->module);
+  wgpu_module_setup(ctx, ctx->cfg->program, &ctx->module, "Futhark program");
 
   if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
     printf("Failed to init builtin kernels\n");
@@ -569,8 +570,11 @@ static void gpu_create_kernel(struct futhark_context *ctx,
   // If this is a builtin kernel, generate the shader module here
   if (kernel_info->gpu_program[0]) {
     const char* wgsl = strconcat(kernel_info->gpu_program);
-    wgpu_module_setup(ctx, wgsl, &kernel->module);
+    wgpu_module_setup(ctx, wgsl, &kernel->module, name);
     free(wgsl);
+  }
+  else {
+    kernel->module = ctx->module;
   }
 
   WGPUBufferDescriptor scalars_desc = {
@@ -835,6 +839,8 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              size_t args_sizes[num_args]) {
   struct wgpu_kernel_info *kernel_info = kernel->info;
 
+  printf("Launching kernel %s\n", name);
+
   if (num_args !=
       kernel_info->num_shared_mem_overrides
       + kernel_info->num_scalars
@@ -903,7 +909,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     WGPUComputePipelineDescriptor desc = {
       .layout = kernel->pipeline_layout,
       .compute = {
-        .module = ctx->module,
+        .module = kernel->module,
         .entryPoint = kernel_info->name,
         .constantCount = kernel_info->num_overrides,
         .constants = kernel->const_entries,
