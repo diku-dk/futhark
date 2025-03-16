@@ -7,13 +7,8 @@ module Futhark.Analysis.Properties.Query
     queryCase,
     askRefinement,
     askRefinements,
-    allM,
-    andM,
     askQ,
     foreachCase,
-    orM,
-    isYes,
-    isUnknown,
     (+<),
     (=>?),
     Statement (..),
@@ -26,12 +21,13 @@ import Control.Monad (forM, join, when)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Bifunctor (second)
-import Data.List ( partition)
+import Data.List (partition)
 import Data.Map qualified as M
-import Data.Maybe (fromJust, isJust, mapMaybe)
+import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
+import Futhark.Analysis.Properties.EqSimplifier
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
 import Futhark.Analysis.Properties.Monad
@@ -47,15 +43,6 @@ import Futhark.SoP.Refine (addRels)
 import Futhark.SoP.SoP (Range (..), Rel (..), SoP, int2SoP, justSym, sym2SoP, (.*.), (.+.), (.-.))
 import Language.Futhark (VName)
 import Prelude hiding (GT, LT)
-import Data.Graph
-
-import Data.Set (Set)
-import Futhark.Util (nubOrd)
-
-import Data.Tree (Tree(..))
-import Futhark.Analysis.Properties.EqSimplifier
-
-
 
 data Query
   = CaseIsMonotonic MonDir
@@ -171,36 +158,6 @@ i +< j = do
     j' = Algebra.Var j
     i' = Algebra.Var i
 
-isYes :: Answer -> Bool
-isYes Yes = True
-isYes _ = False
-
-isUnknown :: Answer -> Bool
-isUnknown Unknown = True
-isUnknown _ = False
-
--- Short-circuit evaluation `and`. (Unless debugging is on.)
-andF :: Answer -> IndexFnM Answer -> IndexFnM Answer
-andF Yes m = m
--- andF Unknown m = whenDebug (void m) >> pure Unknown
-andF Unknown _ = pure Unknown
-
-andM :: IndexFnM Answer -> IndexFnM Answer -> IndexFnM Answer
-andM m1 m2 = do
-  ans <- m1
-  ans `andF` m2
-
-orM :: (Monad m) => m Answer -> m Answer -> m Answer
-orM m1 m2 = do
-  a1 <- m1
-  case a1 of
-    Yes -> pure Yes
-    Unknown -> m2
-
-allM :: [IndexFnM Answer] -> IndexFnM Answer
-allM [] = pure Yes
-allM xs = foldl1 andM xs
-
 {-
               Proofs
 -}
@@ -231,7 +188,8 @@ prove prop = failOnUnknown <$> matchProof prop
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
     matchProof Disjoint {} = error "prove called on Disjoint property (nothing to prove)"
     matchProof Monotonic {} = error "Not implemented yet"
-    matchProof (InjectiveRCD y rcd) = do
+    matchProof wts@(InjectiveRCD y rcd) = do
+      printM 1 $ "------\n matchProof InjectiveRCD " <> prettyStr y <> " " <> prettyStr rcd
       indexfns <- getIndexFns
       fp <- traverse fromAlgebra =<< askFiltPart (Algebra.Var y)
       printAlgEnv 1
@@ -239,17 +197,35 @@ prove prop = failOnUnknown <$> matchProof prop
       case fp of
         Just (FiltPart y' x pf _ :: Property Symbol)
           | y' == y,
-            Just [f_x@(IndexFn (Forall i d) _)] <- M.lookup x indexfns ->
-              -- XXX ^ I'm here: edges_4684 is not in env because it is a parameter of this def
+            Just [f_x@(IndexFn (Forall i d) _)] <- M.lookup x indexfns -> do
+              -- y is a filtering/partition of x, hence x will be "opaque"
+              -- (a gather on inverse indices), but we can try two strategies:
               --
-              -- x is a filtering/partition of y, hence x will be "opaque" (a gather
-              -- on inverse indices), but we can try to prove the following logically equivalent query
-              -- x[i] = x[j] => i = j   <=>   y[i'] = y[j'] ^ pf(i') ^ pf(j') => i' = j'
-              algebraContext f_x $ do
-                j <- newNameFromString "j"
-                gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
-                printM 1 $ "gs " <> prettyStr gs
-                nextGenProver (PInjGe i j d rcd gs)
+              -- 1. Simply check that x is injective in RCD. A filter/partition
+              --    of an "injective" array is still injective.
+              --
+              -- 2. Prove the statement on the unfiltered array guarded
+              --    by the filtering predicate:
+              --      y[i'] = y[j'] ^ pf(i') ^ pf(j') => i' = j'
+              --    (This is logically equivalent to x[i] = x[j] => i = j.)
+              -- TODO strat1 duplicates matchProof (FiltPart {}) code?
+              let strat1 = rollbackAlgEnv $ do
+                    alg_inj <- askInjectiveRCD (Algebra.Var x)
+                    printM 1 $ "askInjective " <> prettyStr x <> prettyStr alg_inj
+                    case alg_inj of
+                      Just (InjectiveRCD _ x_rcd) -> do
+                        -- Check equivalent RCDs.
+                        s' <- unify wts =<< fromAlgebra (InjectiveRCD y x_rcd)
+                        if isJust (s' :: Maybe (Substitution Symbol))
+                          then pure Yes
+                          else pure Unknown
+                      _ -> pure Unknown
+              let strat2 = algebraContext f_x $ do
+                    j <- newNameFromString "j"
+                    gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
+                    printM 1 $ "gs " <> prettyStr gs
+                    nextGenProver (PInjGe i j d gs) -- Ignores RCD, checks whole codomain.
+              strat1 `orM` strat2
         _ ->
           proveFn (PInjectiveRCD rcd) =<< getFn y
     matchProof (BijectiveRCD x rcd img) =
@@ -305,12 +281,13 @@ proveFn (ForallSegments fprop) f@(IndexFn (Forall _ (Cat k _ _)) _) =
 proveFn prop f = prove_ False prop f
 
 data PStatement
-  = -- Fresh i; fresh j; domain of index function; RCD; cases of index function.
-    PInjGe VName VName Domain (SoP Symbol, SoP Symbol) (Cases Symbol (SoP Symbol))
+  = -- Fresh i; fresh j; domain of index function; cases of index function.
+    PInjGe VName VName Domain (Cases Symbol (SoP Symbol))
   | PFiltPart VName (Predicate Symbol) (Predicate Symbol, SoP Symbol)
 
 nextGenProver :: PStatement -> IndexFnM Answer
-nextGenProver (PInjGe i j d (a, b) ges) = rollbackAlgEnv $ do
+nextGenProver (PInjGe i j d ges) = rollbackAlgEnv $ do
+  printM 1 $ "nextGenProver PinjGe : " <> prettyStr d <> prettyStr ges
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
   addRelIterator iter_i
   addRelIterator iter_j
@@ -321,75 +298,38 @@ nextGenProver (PInjGe i j d (a, b) ges) = rollbackAlgEnv $ do
     iter_i = Forall i d
     iter_j = Forall j d
 
-    out_of_range x = x :< a :|| b :< x
-
-    eqToPair (x :== y) = Just (x,y)
-    eqToPair _ = Nothing
-
     no_dups (c, e) = rollbackAlgEnv $ do
-      -- PROOF by syntactical equivalences.
-      printAlgEnv 1
+      -- PROOF of e(i) = e(j) => i = j.
       -- Assume e @ i == e @ j by syntactical substitution in c @ j.
-      -- ( 1. c @ j converts c to a SoP;
-      --   2. e is a SoP; hence if nested inside c, then it will be there also as a SoP. )
-      c_j' :: SoP Symbol <-
-        astMap
-          ( identityMapper
-              { mapOnSoP = \sym ->
-                  if sym == (e @ j :: SoP Symbol)
-                    then pure (e @ i)
-                    else pure sym
-              }
-          )
-          (c @ j)
-      let p = sop2Symbol (c @ i) :&& sop2Symbol c_j'
-      printM 1 $ prettyStr p
-      let p' = mapMaybe eqToPair . conjToList $ toCNF p
-      printM 1 $ prettyStr p'
-      let p'' = groupEqualities p'
-      printM 1 $ prettyStr p''
+      c_j' <-
+        sop2Symbol
+          <$> astMap
+            ( identityMapper
+                { mapOnSoP = \sym ->
+                    -- It is sufficient to mapOnSoP.
+                    -- 1. c @ j converts c to a SoP.
+                    -- 2. e is a SoP; hence if nested inside c, then it will be
+                    -- there also as a SoP.
+                    if sym == (e @ j :: SoP Symbol)
+                      then pure (e @ i)
+                      else pure sym
+                }
+            )
+            (c @ j)
+      p <- eqSolver $ sop2Symbol (c @ i) :&& c_j'
 
-      printM 1 "---------------"
-      printM 1 $ prettyStr p
-      let p'' = groupEqualities . mapMaybe eqToPair . conjToList $ toCNF p
-      printM 1 $ prettyStr p''
-      printM 1 "---------------"
-      let p'' = equivClasses . mapMaybe eqToPair . conjToList $ toCNF p
-      printM 1 $ concatMap prettyStr p''
-      -- XXX use this as a starting point bc it will guide how the algorithm
-      -- needs to iteratively apply equalities and merge components
+      -- TODO this caused an infinite loop somewhere on maxMatch.fut?
+      --      (Add RCD to PInjGE if you want to add this again.)
+      -- let out_of_range x = x :< a :|| b :< x
+      -- let oob =
+      --       (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
+      --         =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
+      let eq = p =>? (sym2SoP (Var i) :== sym2SoP (Var j))
 
-      -- i have a list of pairs representing equalities, and I want
-      -- to eliminate reduce the number of equalities as much
-      -- as possible. Remember that equality is commutative,
-      -- so the order of the pairs doesn't matter.
-      -- Example input: [(b,a), (c,a), (a,d), (p,q)]
-      --         output: [(b,c), (c, d), (p,q)]
-      --
-      --  Write a function in Haskell that solves this.
-      -- 
-      -- 
-      -- 2. add commute pairs
-      -- 3. groupby eq
-      -- 4. pick largest group?
-      -- 5. take one element out, equate it with the next element
-      --    until there is one element left; discard this last ele
-      --      b = a, c = a, d = a
-      --      b = c, c = d
-
-      -- printAlgEnv 1
-      -- hm <- simplify $ cases [
-      --     (sop2Symbol (c @ i) :&& sop2Symbol (c @ j) :&& e @ i :== e @ j,
-      --      sym2SoP $ sym2SoP (Var i) :== sym2SoP (Var j))
-      --   ]
-      -- printM 1 $ "hm " <> prettyStr hm
-      let oob =
-            (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
-              =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
-      let eq =
-            (sop2Symbol (c @ i) :&& sop2Symbol c_j')
-              =>? (sym2SoP (Var i) :== sym2SoP (Var j))
-      oob `orM` eq
+      hm <- eq
+      printM 1 $ "eq : " <> prettyStr hm
+      -- oob `orM` eq
+      eq
 nextGenProver (PFiltPart {}) = undefined
 
 prove_ :: Bool -> Statement -> IndexFn -> IndexFnM Answer
@@ -444,8 +384,6 @@ prove_ _ (PInjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext 
             -- lol <- simplify (e @ i .-. e @ j :: SoP Symbol)
             -- printM 1 $ prettyStr lol
             oob `orM` neq
-
-  -- printAlgEnv 1
 
   let step2 = guards fn `canBeSortedBy` cmp
         where
@@ -692,6 +630,3 @@ title s = "\ESC[4m" <> s <> "\ESC[0m"
 justName :: SoP Symbol -> Maybe VName
 justName e | Just (Var vn) <- justSym e = Just vn
 justName _ = Nothing
-
-equalitySolver = undefined
-  -- use equality simplifier, then run queries on each returned simplified expression

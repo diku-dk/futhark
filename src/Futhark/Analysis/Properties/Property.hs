@@ -13,6 +13,7 @@ module Futhark.Analysis.Properties.Property
     askFiltPartInv,
     askFiltPart,
     nameAffectedBy,
+    askInjectiveRCD,
   )
 where
 
@@ -97,11 +98,24 @@ hasDisjoint props
     f _ = False
 hasDisjoint _ = Nothing
 
+askInjectiveRCD :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
+askInjectiveRCD = (`askPropertyWith` getInjectiveRCD)
+
 askFiltPartInv :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
 askFiltPartInv = (`askPropertyWith` getFiltPartInv)
 
 askFiltPart :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
 askFiltPart = (`askPropertyWith` getFiltPart)
+
+getInjectiveRCD :: S.Set (Property u) -> Maybe (Property u)
+getInjectiveRCD props
+  | fp@(InjectiveRCD {}) : rest <- filter f (S.toList props) = do
+      unless (null rest) $ error "getInjectiveRCD multiple InjectiveRCD"
+      Just fp
+  | otherwise = Nothing
+  where
+    f (InjectiveRCD {}) = True
+    f _ = False
 
 getFiltPartInv :: S.Set (Property u) -> Maybe (Property u)
 getFiltPartInv props

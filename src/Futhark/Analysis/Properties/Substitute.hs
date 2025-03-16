@@ -6,11 +6,11 @@ import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
-import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, simplify)
+import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, simplify, isYes)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ, foreachCase, isYes, queryCase)
+import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ, foreachCase, queryCase)
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMapper (..), astFold, astMap, identityMapper)

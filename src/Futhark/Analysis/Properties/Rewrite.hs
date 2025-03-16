@@ -1,10 +1,9 @@
 module Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules) where
 
 import Control.Monad (filterM, (<=<))
-import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, simplify)
+import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, simplify, isUnknown)
 import Futhark.Analysis.Properties.IndexFn (IndexFn (..), cases, casesToList)
 import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv)
-import Futhark.Analysis.Properties.Query (isUnknown)
 import Futhark.Analysis.Properties.Rule (applyRuleBook, rulesIndexFn)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
 import Futhark.Analysis.Properties.Unify (Renameable, renameSame)

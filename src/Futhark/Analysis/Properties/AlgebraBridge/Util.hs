@@ -11,6 +11,12 @@ module Futhark.Analysis.Properties.AlgebraBridge.Util
     ($>=),
     ($==),
     ($/=),
+    andF,
+    andM,
+    orM,
+    allM,
+    isUnknown,
+    isYes,
   )
 where
 
@@ -38,6 +44,37 @@ data Answer = Yes | Unknown
 
 instance Pretty Answer where
   pretty = viaShow
+
+-- Short-circuit evaluation `and`. (Unless debugging is on.)
+andF :: Answer -> IndexFnM Answer -> IndexFnM Answer
+andF Yes m = m
+-- andF Unknown m = whenDebug (void m) >> pure Unknown
+andF Unknown _ = pure Unknown
+
+andM :: IndexFnM Answer -> IndexFnM Answer -> IndexFnM Answer
+andM m1 m2 = do
+  ans <- m1
+  ans `andF` m2
+
+orM :: (Monad m) => m Answer -> m Answer -> m Answer
+orM m1 m2 = do
+  a1 <- m1
+  case a1 of
+    Yes -> pure Yes
+    Unknown -> m2
+
+allM :: [IndexFnM Answer] -> IndexFnM Answer
+allM [] = pure Yes
+allM xs = foldl1 andM xs
+
+isYes :: Answer -> Bool
+isYes Yes = True
+isYes _ = False
+
+isUnknown :: Answer -> Bool
+isUnknown Unknown = True
+isUnknown _ = False
+
 
 assume :: Symbol -> IndexFnM ()
 assume sym = do

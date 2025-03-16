@@ -85,9 +85,9 @@ def length [n] 't (_xs: [n]t) = n
 --            Program
 --
 -- Return the edge-id pairs with the smallest edge id
-def getSmallestPairs [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: {[arraySizeFlat]i64 | \x -> Monotonic (<) x}) (nVerts: i64) (nEdges_2: i64)
+def getSmallestPairs [arraySizeFlat] (edges: [arraySizeFlat]i64) (edgeIds: {[arraySizeFlat]i64 | \x -> InjectiveRCD x (0, arraySizeFlat - 1)}) (nVerts: i64) (nEdges_2: i64)
       : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
-           InjectiveRCD new_edges (0,length new_edges - 1) && Monotonic (<) new_edgeIds
+           InjectiveRCD new_edges (0,length new_edges - 1) && InjectiveRCD new_edgeIds (0, arraySizeFlat - 1) -- Monotonic (<) new_edgeIds
         } =
     -- The original program transforms edgeIds as follows:
     --      0,  1,  2,  3,  4,  5
