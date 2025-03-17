@@ -31,7 +31,8 @@ module Futhark.Analysis.Properties.Monad
     printAlgEnv,
     addInvAlias,
     getInvAlias,
-    reverseLookupIndexFn,
+    setOutputNames,
+    getOutputNames,
   )
 where
 
@@ -59,6 +60,7 @@ data VEnv = VEnv
     defs :: M.Map VName ([E.Pat E.ParamType], E.Exp),
     ii :: M.Map Domain (VName, IndexFn),
     invalias :: M.Map VName VName,
+    outputNames :: [VName],
     debug :: Bool
   }
 
@@ -75,7 +77,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty mempty mempty False
+    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty False
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -114,14 +116,6 @@ getII = gets ii
 lookupIndexFn :: VName -> IndexFnM (Maybe [IndexFn])
 lookupIndexFn vn = M.lookup vn <$> getIndexFns
 
-reverseLookupIndexFn :: IndexFn -> IndexFnM (Maybe VName)
-reverseLookupIndexFn f = do
-  res <- filter ((== [f]) . snd) . M.toList <$> getIndexFns
-  case res of
-    [(vn,_)] -> pure (Just vn)
-    _ -> pure Nothing
-    -- _ -> error "reverseLookupIndexFn: ambiguous lookup"
-
 insertIndexFn :: E.VName -> [IndexFn] -> IndexFnM ()
 insertIndexFn x v =
   modify $ \env -> env {indexfns = M.insert x v $ indexfns env}
@@ -159,6 +153,13 @@ addInvAlias vn vn' =
 
 getInvAlias :: VName -> IndexFnM (Maybe VName)
 getInvAlias vn = (M.!? vn) <$> gets invalias
+
+setOutputNames :: MonadState VEnv m => [VName] -> m ()
+setOutputNames vns =
+  modify $ \env -> env {outputNames = vns}
+
+getOutputNames :: MonadState VEnv m => m [VName]
+getOutputNames = gets outputNames
 
 --------------------------------------------------------------
 -- Utilities

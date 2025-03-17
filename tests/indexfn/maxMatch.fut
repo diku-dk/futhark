@@ -87,12 +87,11 @@ def length [n] 't (_xs: [n]t) = n
 -- Return the edge-id pairs with the smallest edge id
 def getSmallestPairs [arraySizeFlat]
     (edges: [arraySizeFlat]i64)
-    (edgeIds: {[arraySizeFlat]i64 | \x -> InjectiveRCD x (0, arraySizeFlat - 1)})
+    (edgeIds: {[arraySizeFlat]i64 | \x -> Injective x})
     (nVerts: i64)
     (nEdges_2: i64)
     : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
-         InjectiveRCD new_edges (0, length new_edges - 1)
-           && InjectiveRCD new_edgeIds (0, arraySizeFlat - 1)
+         Injective new_edges && Injective new_edgeIds
       }
     =
     -- The original program transforms edgeIds as follows:
@@ -146,9 +145,9 @@ def update [arraySizeFlat]
 def removeMarked [arraySizeFlat]
     (markedVerts: []bool)
     (edges: [arraySizeFlat]i64)
-    (edgeIds: {[arraySizeFlat]i64 | \x -> InjectiveRCD x (0, arraySizeFlat - 1)})
+    (edgeIds: {[arraySizeFlat]i64 | \x -> Injective x})
     : {([]i64, []i64) | \(_, new_edgeIds) ->
-          InjectiveRCD new_edgeIds (0, arraySizeFlat - 1)
+          Injective new_edgeIds
       }
     =
     -- zip edges edgeIds
@@ -171,13 +170,13 @@ def resetsmallestEdgeId [n] (_smallestEdgeId: [n]i64): {*[n]i64 | \_ -> true} =
 
 def loopBody [arraySizeFlat] [nVerts]
     (edges: [arraySizeFlat]i64)
-    (edgeIds: {[arraySizeFlat]i64 | \x -> InjectiveRCD x (0, arraySizeFlat - 1)})
+    (edgeIds: {[arraySizeFlat]i64 | \x -> Injective x})
     (markedVerts: *[nVerts]bool)
     (smallestEdgeId: *[nVerts]i64)
     (includedEdges: *[arraySizeFlat]bool)
     : { ([]i64, []i64, *[]bool, *[nVerts]i64, *[]bool) |
-          \(edges', new_edgeIds, markedVerts', smallestEdgeId', includedEdges') ->
-            InjectiveRCD new_edgeIds (0, arraySizeFlat - 1)
+          \(_, new_edgeIds, _, _, _) ->
+            Injective new_edgeIds
       }
     =
     let (smallestTargets, smallestValues) = getSmallestPairs edges edgeIds nVerts arraySizeFlat
@@ -189,7 +188,29 @@ def loopBody [arraySizeFlat] [nVerts]
     let (edges, edgeIds) = removeMarked markedVerts edges edgeIds
 
     let smallestEdgeId = resetsmallestEdgeId smallestEdgeId
-    in (edges, edgeIds, copy markedVerts, smallestEdgeId, includedEdges)
+    in (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges)
+
+def main [nEdges]
+    (edges_enc: *[nEdges][2]i64)
+    : {[]i64 |
+          \edgeIds' ->
+            Injective edgeIds'
+      }
+    =
+    let edges = flatten edges_enc
+    let nVerts = edges |> i64.maximum |> (+1)
+
+    let edgeIds = iota (nEdges*2)
+
+    let markedVerts = replicate nVerts false
+    let smallestEdgeId = replicate nVerts i64.highest
+
+    let includedEdges = replicate (nEdges*2) false
+
+    -- Skipping loop; pre- and postconditions on each loop iteration
+    -- is shown by loopBody.
+    let (_, edgeIds', _, _, _) = loopBody edges edgeIds markedVerts smallestEdgeId includedEdges
+    in edgeIds'
 
 -- def MM [nVerts] [nEdges_2] (edges: [nEdges_2]i64) (edgeIds_all: [nEdges_2]i64) (markedVerts: *[nVerts]bool)
 --                          (smallestEdgeId: *[nVerts]i64) (includedEdges: *[nEdges_2]bool) =

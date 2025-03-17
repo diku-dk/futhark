@@ -147,6 +147,7 @@ mkIndexFnValBind :: E.ValBind -> IndexFnM [IndexFn]
 mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
   | hasRefinement te = do
       clearAlgEnv
+      setOutputNames []
       printM 1 $
         emphString ("Analyzing " <> prettyStr (E.locText (E.srclocOf val_loc)))
           <> prettyStr val
@@ -183,13 +184,14 @@ checkPostcondition :: E.VName -> [IndexFn] -> E.TypeExp E.Exp E.VName -> IndexFn
 checkPostcondition vn indexfns te = do
   case getTERefine te of
     [e@(E.Lambda lam_params lam_body _ _ _)] -> do
-      actual_names <- mapM reverseLookupIndexFn indexfns
+      actual_names <- getOutputNames
+      printM 10 $ prettyStr vn <> " output names: " <> prettyStr actual_names
       let param_names = map fst $ mconcat $ map patternMapAligned lam_params
       -- Propagate properties on the final let-body expression
       -- to the postcondition lambda parameterslambda parameters
       -- WARN Assumes that the final let-body is in ANF: let ... in (x,...,z).
       when (length actual_names == length param_names) $ do
-        let aligned = catMaybes $ zipWith (\x y -> (,) <$> x <*> (sym2SoP . Var <$> y)) actual_names param_names
+        let aligned = catMaybes $ zipWith (\x y -> (x,) <$> (sym2SoP . Var <$> y)) actual_names param_names
         let name_rep = mkRepFromList aligned
 
         forM_ aligned $ \(actual, _) -> do
@@ -246,13 +248,37 @@ forwardLetEffects bound_names x = do
       pure fns
     Nothing -> forward x
 
+-- HACK this lets us propagate any properties on the output names
+-- to the postcondition. For example, in the below we want to
+-- know that y' = y (the name, because y' = indexfn of y).
+--
+-- def f x : {\y' -> property y} =
+--   let y = ...
+--   let z = funWithPostCond y
+--   in y
+--
+-- A more elegant solution would change the return type of forward...
+trackNamesOfFinalLetBody :: E.Exp -> IndexFnM ()
+trackNamesOfFinalLetBody (E.TupLit es _)
+  | Just vns <- mapM (justVName . stripCoerce) es =
+      setOutputNames vns
+trackNamesOfFinalLetBody e
+  | Just vn <- justVName (stripCoerce e) = setOutputNames [vn]
+  | otherwise = pure ()
+
+stripCoerce :: E.Exp -> E.Exp
+stripCoerce (E.Coerce e _ _ _) = e
+stripCoerce e = e
+
 forward :: E.Exp -> IndexFnM [IndexFn]
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
+  trackNamesOfFinalLetBody in_body
   fs <- forwardLetEffects [Just vn] x
   bindfn vn fs >> forward in_body
 forward (E.AppExp (E.LetPat _ (E.TuplePat patterns _) x body _) _) = do
+  trackNamesOfFinalLetBody body
   let bound_names = map fst $ mconcat $ map patternMapAligned patterns
   fs <- forwardLetEffects bound_names x
   forM_ (zip (mconcat $ map patternMapAligned patterns) fs) bindfnOrDiscard
@@ -664,7 +690,7 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
           ans <- case cond of
             Nothing -> pure Yes
             Just check -> do
-              printM 3000 $
+              printM 1 $
                 "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
               check (size_rep, scope, name_rep)
           unless (isYes ans) . errorMsg loc $
