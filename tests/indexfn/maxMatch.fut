@@ -164,9 +164,10 @@ def removeMarked [arraySizeFlat]
     let edgeIds' = scatter scratch is edgeIds
     in (edges', edgeIds')
 
--- -- Reset the smallest id of each vertex
--- def resetsmallestEdgeId (smallestEdgeId: []i64): *[]i64 =
---     map (\_ -> i64.highest) smallestEdgeId
+-- Reset the smallest id of each vertex
+def resetsmallestEdgeId [n] (_smallestEdgeId: [n]i64): {*[n]i64 | \_ -> true} =
+    let i64_highest = 9223372036854775807i64
+    in replicate n i64_highest
 
 -- def MM [nVerts] [nEdges_2] (edges: [nEdges_2]i64) (edgeIds_all: [nEdges_2]i64) (markedVerts: *[nVerts]bool)
 --                          (smallestEdgeId: *[nVerts]i64) (includedEdges: *[nEdges_2]bool) =

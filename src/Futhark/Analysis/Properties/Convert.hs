@@ -675,6 +675,7 @@ forwardApplyDef _ _ _ = Nothing
 --   map (\i -> xs[i] + ys[i] + zs[i]) (indices xs)
 -- where xs is the index function with the most "complex" iterator.
 bindLambdaBodyParams :: [(E.VName, IndexFn)] -> IndexFnM Iterator
+bindLambdaBodyParams [] = error "Internal error: are you mapping with wildcard only?"
 bindLambdaBodyParams params = do
   -- Make sure all Cat k bound in iterators are identical by renaming.
   fns <- renamesM (map snd params)
