@@ -138,7 +138,10 @@ check (a :> b) = a $> b
 check (a :>= b) = a $>= b
 check (a :< b) = a $< b
 check (a :<= b) = a $<= b
-check (Prop prop) = prove prop
+check (Prop prop) = failOnUnknown <$> prove prop
+  where
+    failOnUnknown Unknown = error $ "Failed to verify " <> prettyStr prop
+    failOnUnknown Yes = Yes
 check a = isTrue a
 
 foreachCase :: IndexFn -> (Int -> IndexFnM a) -> IndexFnM [a]
@@ -180,15 +183,35 @@ data Order = LT | GT | Undefined
   deriving (Eq, Show)
 
 prove :: Property Symbol -> IndexFnM Answer
-prove prop = failOnUnknown <$> matchProof prop
+prove prop = alreadyKnown prop `orM` matchProof prop
   where
-    failOnUnknown Unknown = error $ "Failed to verify " <> prettyStr prop
-    failOnUnknown Yes = Yes
-
+    alreadyKnown wts@(InjectiveRCD y _) = do
+      res <- askInjectiveRCD (Algebra.Var y)
+      case res of
+        Just (InjectiveRCD y' rcd') | y' == y -> do
+          -- Check equivalent RCDs.
+          -- TODO could check that rcd is a subset of rcd'.
+          s' <- unify wts =<< fromAlgebra (InjectiveRCD y rcd')
+          if isJust (s' :: Maybe (Substitution Symbol))
+            then pure Yes
+            else pure Unknown
+        _ -> pure Unknown
+    alreadyKnown wts@(FiltPartInv y _ _) = do
+      res <- askFiltPartInv (Algebra.Var y)
+      case res of
+        Just (FiltPartInv y' pf' pps') | y' == y -> do
+          -- If the predicates and split points are equivalent, we are done.
+          s' <- unify wts =<< fromAlgebra (FiltPartInv y' pf' pps')
+          if isJust (s' :: Maybe (Substitution Symbol))
+            then pure Yes
+            else pure Unknown
+        _ -> pure Unknown
+    alreadyKnown _ = pure Unknown
+  
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
     matchProof Disjoint {} = error "prove called on Disjoint property (nothing to prove)"
     matchProof Monotonic {} = error "Not implemented yet"
-    matchProof wts@(InjectiveRCD y rcd) = do
+    matchProof (InjectiveRCD y rcd) = do
       indexfns <- getIndexFns
       fp <- traverse fromAlgebra =<< askFiltPart (Algebra.Var y)
       case fp of
@@ -206,16 +229,7 @@ prove prop = failOnUnknown <$> matchProof prop
               --      y[i'] = y[j'] ^ pf(i') ^ pf(j') => i' = j'
               --    (This is logically equivalent to x[i] = x[j] => i = j.)
               -- TODO strat1 duplicates matchProof (FiltPart {}) code?
-              let strat1 = rollbackAlgEnv $ do
-                    alg_inj <- askInjectiveRCD (Algebra.Var x)
-                    case alg_inj of
-                      Just (InjectiveRCD _ x_rcd) -> do
-                        -- Check equivalent RCDs.
-                        s' <- unify wts =<< fromAlgebra (InjectiveRCD y x_rcd)
-                        if isJust (s' :: Maybe (Substitution Symbol))
-                          then pure Yes
-                          else pure Unknown
-                      _ -> pure Unknown
+              let strat1 = prove (InjectiveRCD x rcd)
               let strat2 = algebraContext f_x $ do
                     j <- newNameFromString "j"
                     gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
@@ -225,8 +239,8 @@ prove prop = failOnUnknown <$> matchProof prop
           f_y <- getFn y
           let strat1 = proveFn (PInjectiveRCD rcd) f_y
           let strat2 = case f_y of
-               IndexFn Empty _ -> pure Yes
-               IndexFn (Forall i d) gs -> algebraContext f_y $ do
+                IndexFn Empty _ -> pure Yes
+                IndexFn (Forall i d) gs -> algebraContext f_y $ do
                   j <- newNameFromString "j"
                   nextGenProver (PInjGe i j d gs) -- Ignores RCD, checks whole codomain.
           strat1 `orM` strat2
@@ -255,18 +269,10 @@ prove prop = failOnUnknown <$> matchProof prop
       s <- unify pattern_Y f_Y
       -- Get is (the inverse of is^-1).
       let is_inv = justName =<< (M.!? is_inv_hole) . mapping =<< s
-      is <- join <$> traverse getInvAlias is_inv
-      mfpi <- join <$> traverse (askFiltPartInv . Algebra.Var) is
-      mfpi' :: Maybe (Property Symbol) <- traverse fromAlgebra mfpi
-      case mfpi' of
-        Just (FiltPartInv z pf' pps') | Just z == is -> do
-          -- If the predicates and split points are equivalent, we are done.
-          s' <- unify (FiltPartInv z pf pps) (FiltPartInv z pf' pps')
-          if isJust (s' :: Maybe (Substitution Symbol))
-            then pure Yes
-            else pure Unknown
-        _ | Just z <- is -> prove (FiltPartInv z pf pps)
-        _ -> pure Unknown
+      mis <- join <$> traverse getInvAlias is_inv
+      case mis of
+        Just is -> prove (FiltPartInv is pf pps)
+        Nothing -> pure Unknown
 
     getFn vn = do
       fs <- lookupIndexFn vn

@@ -91,7 +91,7 @@ def getSmallestPairs [arraySizeFlat]
     (nVerts: i64)
     (nEdges_2: i64)
     : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
-         InjectiveRCD new_edges (0, arraySizeFlat - 1)
+         InjectiveRCD new_edges (0, length new_edges - 1)
            && InjectiveRCD new_edgeIds (0, arraySizeFlat - 1)
       }
     =
@@ -176,8 +176,8 @@ def loopBody [arraySizeFlat] [nVerts]
     (smallestEdgeId: *[nVerts]i64)
     (includedEdges: *[arraySizeFlat]bool)
     : { ([]i64, []i64, *[]bool, *[nVerts]i64, *[]bool) |
-          \(edges', edgeIds', markedVerts', smallestEdgeId', includedEdges') ->
-            true
+          \(edges', new_edgeIds, markedVerts', smallestEdgeId', includedEdges') ->
+            InjectiveRCD new_edgeIds (0, arraySizeFlat - 1)
       }
     =
     let (smallestTargets, smallestValues) = getSmallestPairs edges edgeIds nVerts arraySizeFlat
@@ -189,7 +189,6 @@ def loopBody [arraySizeFlat] [nVerts]
     let (edges, edgeIds) = removeMarked markedVerts edges edgeIds
 
     let smallestEdgeId = resetsmallestEdgeId smallestEdgeId
-    -- I don't get why this copy is needed. I feel like it shouldn't be
     in (edges, edgeIds, copy markedVerts, smallestEdgeId, includedEdges)
 
 -- def MM [nVerts] [nEdges_2] (edges: [nEdges_2]i64) (edgeIds_all: [nEdges_2]i64) (markedVerts: *[nVerts]bool)

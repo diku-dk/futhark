@@ -12,8 +12,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
 import Data.Set qualified as S
-import Debug.Trace (trace, traceM)
-import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, fromAlgebra, isUnknown, isYes, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
+import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, fromAlgebra, isUnknown, isYes, orM, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
@@ -28,7 +27,7 @@ import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
-import Futhark.SoP.Monad (addEquiv, addProperty, getProperties, lookupUntransPE)
+import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
@@ -511,10 +510,11 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         rule1 <- runMaybeT $ scatterMono dest inds vals
         rule2 <- runMaybeT $ scatterPerm dest inds vals e_inds
         rule3 <- runMaybeT $ scatterRep dest inds vals
+        rule4 <- runMaybeT $ scatterInj dest inds vals e_inds
         maybe
           (errorMsg loc "Failed to infer index function for scatter.")
           pure
-          (rule1 <|> rule2 <|> rule3)
+          (rule1 <|> rule2 <|> rule3 <|> rule4)
   | Just "sized" <- getFun f,
     [_, e] <- getArgs args = do
       -- No-op.
@@ -744,6 +744,29 @@ substParams = foldM substParam
     -- paramter-substitution.
     substParam fn (paramName, paramIndexFn) =
       (fn @ (paramName, paramIndexFn)) >>= rewriteWithoutRules
+
+-- Scatter with injective indices (result is uninterpreted, but safe):
+scatterInj :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
+scatterInj (IndexFn (Forall i dom_dest) _) inds@(IndexFn (Forall _ dom_inds) _) _vals e_inds = do
+  inds_size <- lift $ rewrite $ domainEnd dom_inds
+  dest_size <- lift $ rewrite $ domainEnd dom_dest
+  inj <- lift $ case justVName e_inds of
+    Just vn_inds -> do
+      prove (Property.InjectiveRCD vn_inds (int2SoP 0, dest_size))
+        -- XXX change to or inds are injective _everywhere_
+        -- `orM` prove (Property.InjectiveRCD vn_inds (int2SoP 0, inds_size))
+    Nothing ->
+      proveFn (PInjectiveRCD (int2SoP 0, dest_size)) inds
+  case inj of
+    Unknown -> failMsg "scatterInj: no match"
+    Yes -> do
+      uninterpreted <- newNameFromString "scatter_inj"
+      lift . pure $
+        IndexFn
+          { iterator = Forall i dom_dest,
+            body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
+          }
+scatterInj _ _ _ _ = fail ""
 
 -- Scatter replicated value (result is uninterpreted, but safe):
 scatterRep :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
@@ -1016,7 +1039,8 @@ mkRef vns wrap refexp = case refexp of
   E.Lambda lam_params lam_body _ _ loc -> do
     let param_names = map fst $ mconcat $ map patternMapAligned lam_params
     ref <- forwardRefinementExp lam_body
-    unless (length vns == length param_names) $ errorMsg loc "Internal error: mkRef."
+    unless (length vns >= length (catMaybes param_names)) . errorMsg loc $
+      "Internal error: mkRef: " <> prettyStr refexp
     let ref' = foldl repParam ref (zip param_names vns)
     let check = inContext askRefinement ref'
     let effect =

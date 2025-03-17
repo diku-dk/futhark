@@ -14,6 +14,7 @@ module Futhark.Analysis.Properties.Property
     askFiltPart,
     nameAffectedBy,
     askInjectiveRCD,
+    askSimProp,
   )
 where
 
@@ -97,6 +98,24 @@ hasDisjoint props
     f (Disjoint {}) = True
     f _ = False
 hasDisjoint _ = Nothing
+
+askSimProp :: (MonadSoP u e (Property u) m) => Property u -> u -> m (Maybe (Property u))
+askSimProp prop = (`askPropertyWith` getSimilarProp)
+  where
+    getSimilarProp props
+      | p : rest <- filter (match prop) (S.toList props) = do
+          unless (null rest) $ error "getSimilarProp multiple similar"
+          Just p
+      | otherwise = Nothing
+
+    match Boolean Boolean = True
+    match (Disjoint {}) (Disjoint {}) = True
+    match (Monotonic {}) (Monotonic {}) = True
+    match (InjectiveRCD {}) (InjectiveRCD {}) = True
+    match (BijectiveRCD {}) (BijectiveRCD {}) = True
+    match (FiltPartInv {}) (FiltPartInv {}) = True
+    match (FiltPart {}) (FiltPart {}) = True
+    match _ _ = False
 
 askInjectiveRCD :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
 askInjectiveRCD = (`askPropertyWith` getInjectiveRCD)
