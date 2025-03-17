@@ -169,21 +169,35 @@ def resetsmallestEdgeId [n] (_smallestEdgeId: [n]i64): {*[n]i64 | \_ -> true} =
     let i64_highest = 9223372036854775807i64
     in replicate n i64_highest
 
+def loopBody [arraySizeFlat] [nVerts]
+    (edges: [arraySizeFlat]i64)
+    (edgeIds: {[arraySizeFlat]i64 | \x -> InjectiveRCD x (0, arraySizeFlat - 1)})
+    (markedVerts: *[nVerts]bool)
+    (smallestEdgeId: *[nVerts]i64)
+    (includedEdges: *[arraySizeFlat]bool)
+    : { ([]i64, []i64, *[]bool, *[nVerts]i64, *[]bool) |
+          \(edges', edgeIds', markedVerts', smallestEdgeId', includedEdges') ->
+            true
+      }
+    =
+    let (smallestTargets, smallestValues) = getSmallestPairs edges edgeIds nVerts arraySizeFlat
+
+    let smallestEdgeId = scatter smallestEdgeId smallestTargets smallestValues
+
+    let (markedVerts, includedEdges) = update edges edgeIds smallestEdgeId markedVerts includedEdges
+
+    let (edges, edgeIds) = removeMarked markedVerts edges edgeIds
+
+    let smallestEdgeId = resetsmallestEdgeId smallestEdgeId
+    -- I don't get why this copy is needed. I feel like it shouldn't be
+    in (edges, edgeIds, copy markedVerts, smallestEdgeId, includedEdges)
+
 -- def MM [nVerts] [nEdges_2] (edges: [nEdges_2]i64) (edgeIds_all: [nEdges_2]i64) (markedVerts: *[nVerts]bool)
 --                          (smallestEdgeId: *[nVerts]i64) (includedEdges: *[nEdges_2]bool) =
 --     let edgeIds = edgeIds_all
 --     let (_, _, _, _, includedEdges) = loop (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges) while (length edges > 0) do
---         let (smallestTargets, smallestValues) = getSmallestPairs edges edgeIds nVerts nEdges_2
-
---         let smallestEdgeId = scatter smallestEdgeId smallestTargets smallestValues
-
---         let (markedVerts, includedEdges) = update edges edgeIds smallestEdgeId markedVerts includedEdges
-
---         let (edges, edgeIds) = removeMarked markedVerts edges edgeIds
-
---         let smallestEdgeId = resetsmallestEdgeId smallestEdgeId
---         -- I don't get why this copy is needed. I feel like it shouldn't be
---         in (edges, edgeIds, copy markedVerts, smallestEdgeId, includedEdges)
+--         let loopres = loopBody edges edgeIds markedVerts smallestEdgeId includedEdges
+--         in loopres
 --     in filter (.1) (zip edgeIds_all includedEdges) |> map (.0)
 
 -- def main [nEdges] (edges_enc: *[nEdges][2]i64) =
