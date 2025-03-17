@@ -49,7 +49,7 @@ fn map_transpose_NAME_large(
         var tblock_id_2 = i32(group_id[2]);
         var global_id_2 = i32(global_id[2]);
 
-        for (var i2 = 0; i2 < args.repeat_2; i2++) {
+        for (var i2 = 0; i2 <= args.repeat_2; i2++) {
             let our_array_offset = tblock_id_2 * x_elems * y_elems;
             let odata_offset = dst_offset + i32(our_array_offset);
             let idata_offset = src_offset + i32(our_array_offset);

@@ -46,7 +46,7 @@ fn map_transpose_NAME(
         var tblock_id_2 = i32(group_id[2]);
         var global_id_2 = i32(global_id[2]);
 
-        for (var i2 = 0; i2 < args.repeat_2; i2++) {
+        for (var i2 = 0; i2 <= args.repeat_2; i2++) {
             let our_array_offset = tblock_id_2 * args.x_elems * args.y_elems;
             let odata_offset = dst_offset + our_array_offset;
             let idata_offset = src_offset + our_array_offset;
