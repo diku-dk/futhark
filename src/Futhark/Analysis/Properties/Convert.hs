@@ -12,8 +12,8 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
 import Data.Set qualified as S
-import Debug.Trace (traceM)
-import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, fromAlgebra, paramToAlgebra, simplify, toAlgebra, ($==), ($>=), isYes, isUnknown)
+import Debug.Trace (trace, traceM)
+import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, fromAlgebra, isUnknown, isYes, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
@@ -572,13 +572,19 @@ forwardApplyDef ::
   M.Map E.VName ([E.PatBase E.Info E.VName (E.TypeBase E.Size E.Diet)], E.Exp) ->
   E.Exp ->
   Maybe (IndexFnM ([E.VName] -> IndexFnM (), [IndexFn]))
-forwardApplyDef toplevel_fns defs expr@(E.AppExp (E.Apply f args loc) _)
+forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
   | (E.Var (E.QualName [] g) info loc') <- f,
     E.Scalar (E.Arrow {}) <- E.unInfo info,
     Just (pats, indexfns, te) <- M.lookup g toplevel_fns = Just $ do
       -- A top-level definition with an index function.
       printM 5 $ "✨ Using index fn " <> prettyStr g
-      (actual_args, _, size_rep) <- handleArgs loc' g pats
+
+      (actual_args, actual_sizes) <- zipArgs loc' pats args
+
+      -- Application is in ANF; rename formal arguments to actual arguments
+      -- to check preconditions.
+      let name_rep = renamingRep (mconcat actual_args)
+      size_rep <- checkPreconditions g pats (actual_args, actual_sizes) name_rep
 
       fs <- forM indexfns $ \fn -> do
         substParams (repIndexFn size_rep fn) (mconcat actual_args)
@@ -595,7 +601,8 @@ forwardApplyDef toplevel_fns defs expr@(E.AppExp (E.Apply f args loc) _)
       -- index function. (Less work, but more likely to fail.
       -- For example, substituting into a Sum fails in some cases.)
       printM 5 $ "✨ Using top-level def " <> prettyStr g
-      (actual_args, actual_sizes, _) <- handleArgs loc' g pats
+      (actual_args, actual_sizes) <- zipArgs loc' pats args
+      _ <- checkPreconditions g pats (actual_args, actual_sizes) mempty
 
       forM_ (mconcat actual_sizes) $ \(n, sz) -> do
         addEquiv (Algebra.Var n) =<< toAlgebra sz
@@ -613,11 +620,15 @@ forwardApplyDef toplevel_fns defs expr@(E.AppExp (E.Apply f args loc) _)
     --     --> FiltPart ys x p _
     -- and we want x to be meaningful to the user (i.e., to not bind X to fresh X'
     -- and X' to x).
-    checkANF xs | Just xs' <- mapM justVName xs = xs'
-    checkANF _ =
-      error $
-        "Limitation: Application of top-level definitions with postconditions must be in A-normal form: "
-          <> prettyStr expr
+    checkANF [] = []
+    checkANF (arg : as) =
+      case justVName arg of
+        Just vn -> vn : checkANF as
+        _ ->
+          errorMsg (E.locOf arg) $
+            "Limitation: Application of top-level definitions"
+              <> " with postconditions must be in A-normal form: "
+              <> prettyStr arg
 
     renamingRep actual_args =
       let arg_vns = checkANF (getArgs args)
@@ -630,29 +641,22 @@ forwardApplyDef toplevel_fns defs expr@(E.AppExp (E.Apply f args loc) _)
             (_check, effect) <- ref
             effect (size_rep, actual_args, renamingRep actual_args)
 
-    handleArgs loc' g pats = do
-      (actual_args, actual_sizes) <- zipArgs loc' pats args
+    -- Puts parameters in scope one-by-one before checking preconditions;
+    -- the refinement of a parameter can use previous parameters:
+    --   (x : []i64) (n : {i64 | (== sum x))
+    checkPreconditions g pats (actual_args, actual_sizes) name_rep = do
       let size_rep = M.fromList $ mconcat actual_sizes
-      whenDebug . traceM $
-        "Size variable replacement " <> prettyStr size_rep
+      foldM_
+        ( \args_in_scope (pat, arg) -> do
+            let scope = args_in_scope <> arg
+            checkPatPrecondition scope pat size_rep
+            pure scope
+        )
+        []
+        (zip pats actual_args)
 
-      checkPreconditions actual_args size_rep
-
-      pure (actual_args, actual_sizes, size_rep)
+      pure size_rep
       where
-        -- Puts parameters in scope one-by-one before checking;
-        -- the refinement of a parameter can use previous parameters:
-        --   (x : []i64) (n : {i64 | (== sum x))
-        checkPreconditions actual_args size_rep = do
-          foldM_
-            ( \args_in_scope (pat, arg) -> do
-                let scope = args_in_scope <> arg
-                checkPatPrecondition scope pat size_rep
-                pure scope
-            )
-            []
-            (zip pats actual_args)
-
         -- TODO could probably be deduplicated by merging with mkEffectFromTypeExp.
         checkPatPrecondition scope pat size_rep = do
           cond <- getPrecondition pat
@@ -661,7 +665,7 @@ forwardApplyDef toplevel_fns defs expr@(E.AppExp (E.Apply f args loc) _)
             Just check -> do
               printM 3000 $
                 "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
-              check (size_rep, scope, mempty)
+              check (size_rep, scope, name_rep)
           unless (isYes ans) . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
 forwardApplyDef _ _ _ = Nothing
