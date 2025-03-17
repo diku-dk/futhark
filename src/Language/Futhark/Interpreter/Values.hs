@@ -200,7 +200,8 @@ valueShape _ = ShapeLeaf
 valueAccum :: (a -> Value m -> (a, Value m)) -> a -> Value m -> (a, Value m)
 valueAccum f i v@(ValuePrim {}) = f i v
 valueAccum f i v@(ValueAD {}) = f i v
-valueAccum f i (ValueRecord m) = second ValueRecord $ M.mapAccum (valueAccum f) i m
+valueAccum f i (ValueRecord m) =
+  second ValueRecord $ M.mapAccum (valueAccum f) i m
 valueAccum f i (ValueArray s a) = do
   -- TODO: This could probably be better
   -- Transform into a map

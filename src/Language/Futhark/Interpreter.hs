@@ -35,6 +35,7 @@ import Control.Monad.Trans.Maybe
 import Data.Array
 import Data.Bifunctor
 import Data.Bitraversable
+import Data.Either (fromRight)
 import Data.List
   ( find,
     foldl',
@@ -62,6 +63,7 @@ import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
 import Language.Futhark.Primitive qualified as P
 import Language.Futhark.Semantic qualified as T
+import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
 import Prelude hiding (break, mod)
 
 data StackFrame = StackFrame
@@ -652,15 +654,15 @@ expandType env (Scalar (TypeVar u tn args)) =
   case lookupType tn env of
     Just (TypeBinding tn_env ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
-          onDim (SizeClosure _ (Var v _ _))
-            | Just e <- M.lookup (qualLeaf v) substs =
-                SizeClosure env e
-          -- The next case can occur when a type with existential size
-          -- has been hidden by a module ascription,
-          -- e.g. tests/modules/sizeparams4.fut.
-          onDim (SizeClosure _ e)
-            | any (`elem` ext) $ fvVars $ freeInExp e = SizeClosure mempty anySize
-          onDim d = d
+          onDim (SizeClosure dim_env dim)
+            | any (`elem` ext) $ fvVars $ freeInExp dim =
+                -- The case can occur when a type with existential
+                -- size has been hidden by a module ascription, e.g.
+                -- tests/modules/sizeparams4.fut.
+                SizeClosure mempty anySize
+            | otherwise =
+                SizeClosure (env <> dim_env) $
+                  applySubst (`M.lookup` substs) dim
        in bimap onDim (const u) $ expandType (Env mempty types <> tn_env) t'
     Nothing ->
       -- This case only happens for built-in abstract types,
@@ -668,7 +670,7 @@ expandType env (Scalar (TypeVar u tn args)) =
       Scalar (TypeVar u tn $ map expandArg args)
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim e) =
-      (M.singleton p e, mempty)
+      (M.singleton p $ ExpSubst e, mempty)
     matchPtoA (TypeParamType _ p _) (TypeArgType t') =
       let t'' = evalToStruct $ expandType env t' -- FIXME, we are throwing away the closure here.
        in (mempty, M.singleton p (TypeBinding mempty [] $ RetType [] t''))
@@ -1002,7 +1004,7 @@ eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
 eval env (Ascript e _ _) = eval env e
 eval env (Coerce e te (Info t) loc) = do
   v <- eval env e
-  t' <- evalTypeFully $ expandType env $ toStruct t
+  t' <- evalTypeFully $ expandType env t
   case checkShape (typeShape t') (valueShape v) of
     Just _ -> pure v
     Nothing ->
@@ -1216,7 +1218,7 @@ evalDec env (ImportDec name name' loc) =
 evalDec env (LocalDec d _) = evalDec env d
 evalDec env ModTypeDec {} = pure env
 evalDec env (TypeDec (TypeBind v _ ps _ (Info (RetType dims t)) _ _)) = do
-  let abbr = TypeBinding env ps . RetType dims $ evalToStruct $ expandType env t
+  let abbr = TypeBinding env ps $ RetType dims t
   pure env {envType = M.insert v abbr $ envType env}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
   (mod_env, mod) <- evalModExp env $ wrapInLambda ps
@@ -1350,8 +1352,9 @@ initialCtx =
 
     adToPrim v = putV $ AD.primitive v
 
-    adBinOp op x y = AD.doOp op [x, y]
-    adUnOp op x = AD.doOp op [x]
+    adBinOp op x y =
+      either (const Nothing) Just $ AD.doOp op [x, y]
+    adUnOp op x = either (const Nothing) Just $ AD.doOp op [x]
 
     fun1 f =
       TermValue Nothing $ ValueFun $ \x -> f x
@@ -1420,7 +1423,7 @@ initialCtx =
         _
           | Just x' <- getAD x,
             Just y' <- getAD y,
-            Just z <- msum $ map (`bopDefAD'` (x', y')) fs -> do
+            Just z <- msum $ map (`bopDefAD` (x', y')) fs -> do
               breakOnNaN [adToPrim x', adToPrim y'] $ adToPrim z
               pure $ putAD z
         _ ->
@@ -1435,7 +1438,7 @@ initialCtx =
           x' <- valf x
           y' <- valf y
           retf =<< op x' y'
-        bopDefAD' (_, _, _, dop) (x, y) = dop x y
+        bopDefAD (_, _, _, dop) (x, y) = dop x y
 
     unopDef fs = fun1 $ \x ->
       case x of
@@ -1470,7 +1473,7 @@ initialCtx =
         Just [x, y]
           | Just x' <- getAD x,
             Just y' <- getAD y,
-            Just z <- AD.doOp op [x', y'] -> do
+            Right z <- AD.doOp op [x', y'] -> do
               breakOnNaN [adToPrim x', adToPrim y'] $ adToPrim z
               pure $ putAD z
         _ ->
@@ -2028,7 +2031,7 @@ initialCtx =
         -- TODO: Perhaps this could be fully abstracted by AD?
         -- Making addFor private would be nice..
         add x y =
-          fromMaybe (error "jvp: illtyped add") $
+          fromRight (error "jvp: illtyped add") $
             AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
     def "jvp2" = Just $
       -- TODO: This could be much better. Currently, it is very inefficient

@@ -829,15 +829,27 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
       onExps bound e1 e2
       pure e1
 
+    -- XXX: It is intentional that we throw away the 'bound'
+    -- information after looking up ExpReplacements, as there are
+    -- cases (particularly including the function types that occur
+    -- after lambda lifting) where some troublesome shadowing occurs,
+    -- and the names are not actually locally bound. We cannot just
+    -- ignore the bound information entirely, and expect that any
+    -- instantiation uses only names in scope at the outer level, due
+    -- to truly exotic cases like entry-lifted.fut, where the real
+    -- sizes were not visible to the type checker. Arguably that is
+    -- the thing that should be fixed, but it requires fiddling with
+    -- the defunctorisation of size-lifted types.
+
     onExps bound (Var v _ _) e = do
       unless (any (`elem` bound) $ freeVarsInExp e) $
         modify (M.insert (qualLeaf v) e)
       case lookup (qualLeaf v) named1 of
-        Just rexp -> onExps bound (unReplaced rexp) e
+        Just rexp -> onExps mempty (unReplaced rexp) e
         Nothing -> pure ()
-    onExps bound e (Var v _ _)
+    onExps _bound e (Var v _ _)
       | Just rexp <- lookup (qualLeaf v) named2 =
-          onExps bound e (unReplaced rexp)
+          onExps mempty e (unReplaced rexp)
     onExps bound e1 e2
       | Just es <- similarExps e1 e2 =
           mapM_ (uncurry $ onExps bound) es
@@ -985,7 +997,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
         substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
       params' = map (substPat substStructType) params
   params'' <- withArgs shape_names $ mapM transformPat params'
-  exp_naming <- paramGetClean
+  exp_naming <- get <* put mempty
 
   let args = S.fromList $ foldMap patNames params
       arg_params = map snd exp_naming
@@ -994,7 +1006,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
     withParams exp_naming $
       withArgs (args <> shape_names) $
         hardTransformRetType (applySubst (`M.lookup` substs') rettype)
-  extNaming <- paramGetClean
+  extNaming <- get <* put mempty
   scope <- S.union shape_names <$> askScope'
   let (rettype'', new_params) = arrowArg scope args arg_params rettype'
       bind_t' = substTypesAny (`M.lookup` substs') bind_t
@@ -1050,11 +1062,6 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
     shape_params = filter (not . isTypeParam) tparams
 
     updateExpTypes substs = astMap (mapper substs)
-
-    paramGetClean = do
-      ret <- get
-      put mempty
-      pure ret
 
     hardTransformRetType (RetType dims ty) = do
       ty' <- transformType ty

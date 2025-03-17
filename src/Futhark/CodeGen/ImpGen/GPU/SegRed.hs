@@ -197,7 +197,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     all isPrimSegBinOp segbinops =
       noncommPrimSegRedInterms
   | otherwise =
-      generalSegRedInterms tblock_id tblock_size segbinops
+      generalSegRedInterms False tblock_id tblock_size segbinops
   where
     params = map paramOf segbinops
 
@@ -251,24 +251,28 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
 
 generalSegRedInterms ::
+  Bool ->
   Imp.TExp Int64 ->
   SubExp ->
   [SegBinOp GPUMem] ->
   InKernelGen [SegRedIntermediateArrays]
-generalSegRedInterms tblock_id tblock_size segbinops =
-  fmap (map GeneralSegRedInterms) $
-    forM (map paramOf segbinops) $
-      mapM $ \p ->
-        case paramDec p of
-          MemArray pt shape _ (ArrayIn mem _) -> do
-            let shape' = Shape [tblock_size] <> shape
-            let shape_E = map pe64 $ shapeDims shape'
-            sArray ("red_arr_" ++ prettyString pt) pt shape' mem $
-              LMAD.iota (tblock_id * product shape_E) shape_E
-          _ -> do
-            let pt = elemType $ paramType p
-                shape = Shape [tblock_size]
-            sAllocArray ("red_arr_" ++ prettyString pt) pt shape $ Space "shared"
+generalSegRedInterms segmented tblock_id tblock_size segbinops =
+  fmap (map GeneralSegRedInterms) . forM (map paramOf segbinops) . mapM $ \p ->
+    case paramDec p of
+      MemArray pt shape _ (ArrayIn mem ixfun) -> do
+        let shape' = Shape [tblock_size] <> shape
+        let shape_E = map pe64 $ shapeDims shape'
+        sArray ("red_arr_" ++ prettyString pt) pt shape' mem $
+          -- This 'segmented' thing here is a hack, related to #2227.
+          -- There absolutely must be some unifying principle we are
+          -- missing.
+          if segmented
+            then ixfun
+            else LMAD.iota (tblock_id * product shape_E) shape_E
+      _ -> do
+        let pt = elemType $ paramType p
+            shape = Shape [tblock_size]
+        sAllocArray ("red_arr_" ++ prettyString pt) pt shape $ Space "shared"
 
 -- | Arrays for storing block results.
 --
@@ -385,7 +389,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
     dPrimVE "segment_size_nonzero" $ sMax64 1 segment_size
 
   let tblock_size_se = unCount tblock_size
-      num_tblocks_se = unCount tblock_size
+      num_tblocks_se = unCount num_tblocks
       num_tblocks' = pe64 num_tblocks_se
       tblock_size' = pe64 tblock_size_se
   num_threads <- fmap tvSize $ dPrimV "num_threads" $ num_tblocks' * tblock_size'
@@ -404,7 +408,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
     let tblock_id = kernelBlockSize constants
         ltid = sExt64 $ kernelLocalThreadId constants
 
-    interms <- generalSegRedInterms tblock_id tblock_size_se segbinops
+    interms <- generalSegRedInterms True tblock_id tblock_size_se segbinops
     let reds_arrs = map blockRedArrs interms
 
     -- We probably do not have enough actual threadblocks to cover the
