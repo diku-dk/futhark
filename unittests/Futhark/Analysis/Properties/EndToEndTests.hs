@@ -4,9 +4,8 @@ import Control.Monad (forM_, unless)
 import Data.Maybe (mapMaybe)
 import Futhark.Analysis.Properties.Convert
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (intervalEnd, domainEnd)
+import Futhark.Analysis.Properties.IndexFnPlus (intervalEnd)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Prove
 import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Rewrite (rewrite)
 import Futhark.Compiler.CLI (fileProg, readProgramOrDie)
@@ -29,13 +28,13 @@ tests =
       mkTest
         "tests/indexfn/part2indices.fut"
         ( \[_pivot, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
-            proveFn (PInjectiveRCD (int2SoP 0, n)) fn
+            proveFn (PInjective $ Just (int2SoP 0, n)) fn
         )
         Yes,
       mkTest
         "tests/indexfn/part2indices.fut"
         ( \[_pivot, fn@(IndexFn (Forall _ (Iota _)) _)] -> do
-            proveFn (PInjectiveRCD (int2SoP 0, int2SoP 3)) fn
+            proveFn (PInjective $ Just (int2SoP 0, int2SoP 3)) fn
         )
         Yes,
       mkTest

@@ -46,7 +46,8 @@ instance (Ord a, ASTMappable a a) => ASTMappable a (Property a) where
   astMap _ Boolean = pure Boolean
   astMap _ (Disjoint vns) = pure (Disjoint vns)
   astMap _ (Monotonic x dir) = pure (Monotonic x dir)
-  astMap m (InjectiveRCD x (a, b)) = curry (InjectiveRCD x) <$> astMap m a <*> astMap m b
+  astMap m (Injective x (Just (a, b))) = curry (Injective x . Just) <$> astMap m a <*> astMap m b
+  astMap _ (Injective x Nothing) = pure (Injective x Nothing)
   astMap m (BijectiveRCD x (a, b) (c, d)) = do
     rcd <- (,) <$> astMap m a <*> astMap m b
     img <- (,) <$> astMap m c <*> astMap m d
@@ -133,7 +134,8 @@ instance ASTFoldable Symbol (Property Symbol) where
   astFold _ acc Boolean = pure acc
   astFold _ acc Disjoint {} = pure acc
   astFold _ acc Monotonic {} = pure acc
-  astFold m acc (InjectiveRCD _ (a, b)) = astFold m acc a >>= astFoldF m b
+  astFold m acc (Injective _ (Just (a, b))) = astFold m acc a >>= astFoldF m b
+  astFold _ acc (Injective _ Nothing) = pure acc
   astFold m acc (BijectiveRCD _ (a, b) (c, d)) =
     astFold m acc a >>= astFoldF m b >>= astFoldF m c >>= astFoldF m d
   astFold m acc (FiltPartInv _ pf pps) = do

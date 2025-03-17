@@ -40,6 +40,7 @@ propertyPrelude :: S.Set String
 propertyPrelude =
   S.fromList
     [ "Monotonic",
+      "Injective",
       "InjectiveRCD",
       "BijectiveRCD",
       "FiltPartInv",
@@ -747,16 +748,14 @@ substParams = foldM substParam
 
 -- Scatter with injective indices (result is uninterpreted, but safe):
 scatterInj :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
-scatterInj (IndexFn (Forall i dom_dest) _) inds@(IndexFn (Forall _ dom_inds) _) _vals e_inds = do
-  inds_size <- lift $ rewrite $ domainEnd dom_inds
+scatterInj (IndexFn (Forall i dom_dest) _) inds _vals e_inds = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
   inj <- lift $ case justVName e_inds of
     Just vn_inds -> do
-      prove (Property.InjectiveRCD vn_inds (int2SoP 0, dest_size))
-        -- XXX change to or inds are injective _everywhere_
-        -- `orM` prove (Property.InjectiveRCD vn_inds (int2SoP 0, inds_size))
+      prove (Property.Injective vn_inds $ Just (int2SoP 0, dest_size))
+        `orM` prove (Property.Injective vn_inds Nothing)
     Nothing ->
-      proveFn (PInjectiveRCD (int2SoP 0, dest_size)) inds
+      proveFn (PInjective $ Just (int2SoP 0, dest_size)) inds
   case inj of
     Unknown -> failMsg "scatterInj: no match"
     Yes -> do
@@ -808,7 +807,7 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
       lift $ addInvAlias vn_inv vn_inds
       lift $ addRelSymbol (Prop $ Property.BijectiveRCD vn_inv (int2SoP 0, dest_size) (int2SoP 0, dest_size))
       -- TODO make bijective cover injective also!
-      lift $ addRelSymbol (Prop $ Property.InjectiveRCD vn_inv (int2SoP 0, dest_size))
+      lift $ addRelSymbol (Prop $ Property.Injective vn_inv $ Just (int2SoP 0, dest_size))
       -- TODO add these ranges when needed using the property table.
       -- Here we add them as a special case because we know is^(-1) will
       -- be used for indirect indexing.
@@ -1111,6 +1110,14 @@ forwardPropertyPrelude f args =
         opToMonDir "<" = pure IncS
         opToMonDir "<=" = pure Inc
         opToMonDir _ = Nothing
+    "Injective"
+      | [e_X] <- getArgs args,
+        Just x <- justVName e_X -> do
+          pure $
+            IndexFn
+              { iterator = Empty,
+                body = cases [(Bool True, pr $ Property.Injective x Nothing)]
+              }
     "InjectiveRCD"
       | [e_X, e_RCD] <- getArgs args,
         Just x <- justVName e_X -> do
@@ -1120,7 +1127,7 @@ forwardPropertyPrelude f args =
               fmap (IndexFn Empty) . simplify . cases $ do
                 (p_a, a) <- casesToList g_a
                 (p_b, b) <- casesToList g_b
-                pure (p_a :&& p_b, pr $ Property.InjectiveRCD x (a, b))
+                pure (p_a :&& p_b, pr $ Property.Injective x $ Just (a, b))
             _ ->
               undefined
     "BijectiveRCD"

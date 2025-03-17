@@ -172,7 +172,7 @@ data Statement
   | -- For all k in Cat k _ _, prove property f(k).
     ForallSegments (VName -> Statement)
   | -- The restriction of f to the preimage of [a,b] is injective.
-    PInjectiveRCD (SoP Symbol, SoP Symbol)
+    PInjective (Maybe (SoP Symbol, SoP Symbol))
   | -- BijectiveRCD (a,b) (c,d).
     -- The restriction of f to the preimage of [a,b] is bijective.
     -- [c,d] (subset of [a,b]) is the image of this restricted f.
@@ -185,16 +185,20 @@ data Order = LT | GT | Undefined
 prove :: Property Symbol -> IndexFnM Answer
 prove prop = alreadyKnown prop `orM` matchProof prop
   where
-    alreadyKnown wts@(InjectiveRCD y _) = do
+    alreadyKnown wts@(Injective y _) = do
       res <- askInjectiveRCD (Algebra.Var y)
       case res of
-        Just (InjectiveRCD y' rcd') | y' == y -> do
-          -- Check equivalent RCDs.
-          -- TODO could check that rcd is a subset of rcd'.
-          s' <- unify wts =<< fromAlgebra (InjectiveRCD y rcd')
-          if isJust (s' :: Maybe (Substitution Symbol))
-            then pure Yes
-            else pure Unknown
+        Just (Injective y' rcd')
+          | y' == y,
+            Nothing <- rcd' -> do
+              pure Yes
+          | y' == y -> do
+            -- Check equivalent RCDs.
+            -- TODO could check that rcd is a subset of rcd'.
+            s' <- unify wts =<< fromAlgebra (Injective y rcd')
+            if isJust (s' :: Maybe (Substitution Symbol))
+              then pure Yes
+              else pure Unknown
         _ -> pure Unknown
     alreadyKnown wts@(FiltPartInv y _ _) = do
       res <- askFiltPartInv (Algebra.Var y)
@@ -211,7 +215,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
     matchProof Disjoint {} = error "prove called on Disjoint property (nothing to prove)"
     matchProof Monotonic {} = error "Not implemented yet"
-    matchProof (InjectiveRCD y rcd) = do
+    matchProof (Injective y rcd) = do
       indexfns <- getIndexFns
       fp <- traverse fromAlgebra =<< askFiltPart (Algebra.Var y)
       case fp of
@@ -229,7 +233,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
               --      y[i'] = y[j'] ^ pf(i') ^ pf(j') => i' = j'
               --    (This is logically equivalent to x[i] = x[j] => i = j.)
               -- TODO strat1 duplicates matchProof (FiltPart {}) code?
-              let strat1 = prove (InjectiveRCD x rcd)
+              let strat1 = prove (Injective x rcd)
               let strat2 = algebraContext f_x $ do
                     j <- newNameFromString "j"
                     gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
@@ -237,7 +241,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
               strat1 `orM` strat2
         _ -> do
           f_y <- getFn y
-          let strat1 = proveFn (PInjectiveRCD rcd) f_y
+          let strat1 = proveFn (PInjective rcd) f_y
           let strat2 = case f_y of
                 IndexFn Empty _ -> pure Yes
                 IndexFn (Forall i d) gs -> algebraContext f_y $ do
@@ -337,11 +341,11 @@ nextGenProver (PInjGe i j d ges) = rollbackAlgEnv $ do
 nextGenProver (PFiltPart {}) = undefined
 
 prove_ :: Bool -> Statement -> IndexFn -> IndexFnM Answer
-prove_ _ (PInjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
+prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
   printM 1000 $
     title "Proving InjectiveRCD "
-      <> "\n  RCD (a,b) = "
-      <> prettyStr (a, b)
+      <> "\n  RCD = "
+      <> prettyStr rcd
       <> "\n"
       <> prettyIndent 2 fn
   i <- newNameFromString "i"
@@ -368,7 +372,6 @@ prove_ _ (PInjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext 
   --   Shown similarly to (2), by choosing i in [e_k, ..., e_{k+1}]
   --   and j in [e_{k+1},...,e_{k+2}].
   --
-  let out_of_range x = x :< a :|| b :< x
 
   let step1 = allM [no_dups g | g <- guards fn]
         where
@@ -379,8 +382,12 @@ prove_ _ (PInjectiveRCD (a, b)) fn@(IndexFn (Forall i0 dom) _) = algebraContext 
             i +< j
 
             let oob =
-                  (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
-                    =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
+                  case rcd of
+                    Just (a, b) -> do
+                      let out_of_range x = x :< a :|| b :< x
+                      (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
+                        =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
+                    Nothing -> pure Unknown
             let neq =
                   (sop2Symbol (c @ i) :&& sop2Symbol (c @ j)) -- XXX could use in_range f@i g@j here
                     =>? (e @ i :/= e @ j)
@@ -467,7 +474,7 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) =
 
   let step1 =
         printTrace 1000 "Step (1)" $
-          prove_ is_segmented (PInjectiveRCD (a, b)) f
+          prove_ is_segmented (PInjective $ Just (a, b)) f
 
   let step2 = rollbackAlgEnv $ do
         -- WTS(2.1): If |X| = |[c,d]| and (y in f(X) => y in [c,d]), then (2) holds.

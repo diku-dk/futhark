@@ -80,6 +80,11 @@ instance (Renameable a, Renameable b) => Renameable (a, b) where
 instance (Renameable u) => Renameable [u] where
   rename_ vns tau = mapM (rename_ vns tau)
 
+
+instance (Renameable u) => Renameable (Maybe u) where
+  rename_ vns tau (Just x) = Just <$> rename_ vns tau x
+  rename_ _ _ Nothing = pure Nothing
+
 instance Renameable VName where
   rename_ _ tau x = pure $ M.findWithDefault x x tau
 
@@ -318,8 +323,8 @@ instance (Ord a, Renameable a) => Renameable (Property a) where
   rename_ vns tau (Disjoint s) =
     Disjoint . S.fromList <$> mapM (rename_ vns tau) (S.toList s)
   rename_ _ _ p@(Monotonic {}) = pure p
-  rename_ vns tau (InjectiveRCD x rcd) =
-    InjectiveRCD x <$> rename_ vns tau rcd
+  rename_ vns tau (Injective x rcd) =
+    Injective x <$> rename_ vns tau rcd
   rename_ vns tau (BijectiveRCD x rcd img) =
     BijectiveRCD x <$> rename_ vns tau rcd <*> rename_ vns tau img
   rename_ vns tau (FiltPartInv x pf pps) =
@@ -354,9 +359,11 @@ instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Property a)
   unify_ _ Boolean Boolean = pure mempty
   unify_ _ (Disjoint x) (Disjoint y) | x == y = pure mempty
   unify_ _ x@(Monotonic {}) y@(Monotonic {}) | x == y = pure mempty
-  unify_ k (InjectiveRCD x rcd1) (InjectiveRCD y rcd2) = do
+  unify_ k (Injective x (Just rcd1)) (Injective y (Just rcd2)) = do
     s <- unify_ k x y
     (s <>) <$> unifyTuple k (repTuple s rcd1) (repTuple s rcd2)
+  unify_ k (Injective x Nothing) (Injective y Nothing) =
+    unify_ k x y
   unify_ k (BijectiveRCD x rcd1 img1) (BijectiveRCD y rcd2 img2) = do
     s1 <- unify_ k x y
     s2 <- unifyTuple k (repTuple s1 rcd1) (repTuple s1 rcd2)
@@ -386,7 +393,8 @@ instance (FreeVariables u, Ord u) => FreeVariables (Property u) where
   fv Boolean = mempty
   fv (Disjoint x) = x
   fv Monotonic {} = mempty
-  fv (InjectiveRCD x rcd) = fv x <> fv rcd
+  fv (Injective x (Just rcd)) = fv x <> fv rcd
+  fv (Injective x Nothing) = fv x
   fv (BijectiveRCD x rcd img) = fv x <> fv rcd <> fv img
   fv (FiltPartInv x pf pps) = fv x <> fv pf <> S.unions (map fv pps)
   fv (FiltPart x y pf pps) = fv x <> fv y <> fv pf <> S.unions (map fv pps)

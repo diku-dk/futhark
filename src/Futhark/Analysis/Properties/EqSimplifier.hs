@@ -94,9 +94,11 @@ eqSolverRules = do
             e_j <- sub s (hole j)
             alg_inj <- join <$> traverse askInjectiveRCD (toAlgVar e_x)
             case alg_inj of
-              Just (InjectiveRCD _ rcd) -> do
+              Just (Injective _ (Just rcd)) -> do
                 rcd' <- fromAlgebra rcd
                 isYes <$> (e_i `inRange` rcd') `andM` (e_j `inRange` rcd')
+              Just (Injective _ Nothing) ->
+                pure True
               _ -> pure False
         }
     ]

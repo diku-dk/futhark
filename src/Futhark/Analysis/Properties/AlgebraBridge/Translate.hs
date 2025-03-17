@@ -68,7 +68,8 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     Boolean -> pure Boolean
     (Disjoint vns) -> pure (Disjoint vns)
     (Monotonic x dir) -> pure (Monotonic x dir)
-    (InjectiveRCD x rcd) -> InjectiveRCD x <$> fromAlgebra rcd
+    (Injective x (Just rcd)) -> Injective x . Just <$> fromAlgebra rcd
+    (Injective x Nothing) -> pure $ Injective x Nothing
     (BijectiveRCD x rcd img) -> BijectiveRCD x <$> fromAlgebra rcd <*> fromAlgebra img
     (FiltPartInv x pf pps) -> FiltPartInv x <$> fromAlgebra pf <*> mapM fromAlgebra pps
     (FiltPart y x pf pps) -> FiltPart y x <$> fromAlgebra pf <*> mapM fromAlgebra pps
@@ -76,7 +77,8 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     Boolean -> pure Boolean
     (Disjoint vns) -> pure (Disjoint vns)
     (Monotonic x dir) -> pure (Monotonic x dir)
-    (InjectiveRCD x rcd) -> InjectiveRCD x <$> toAlgebra rcd
+    (Injective x (Just rcd)) -> Injective x . Just <$> toAlgebra rcd
+    (Injective x Nothing) -> pure $ Injective x Nothing
     (BijectiveRCD x rcd img) -> BijectiveRCD x <$> toAlgebra rcd <*> toAlgebra img
     (FiltPartInv x pf pps) -> FiltPartInv x <$> toAlgebra pf <*> mapM toAlgebra pps
     (FiltPart y x pf pps) -> FiltPart y x <$> toAlgebra pf <*> mapM toAlgebra pps

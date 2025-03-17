@@ -113,8 +113,10 @@ repProperty :: Replacement Symbol -> Property Symbol -> Property Symbol
 repProperty _ Boolean = Boolean
 repProperty s (Disjoint x) = Disjoint $ S.map (repVName s) x
 repProperty s (Monotonic x dir) = Monotonic (repVName s x) dir
-repProperty s (InjectiveRCD x rcd) =
-  InjectiveRCD (repVName s x) (repTuple s rcd)
+repProperty s (Injective x (Just rcd)) =
+  Injective (repVName s x) (Just $ repTuple s rcd)
+repProperty s (Injective x Nothing) =
+  Injective (repVName s x) Nothing
 repProperty s (BijectiveRCD x rcd img) =
   BijectiveRCD (repVName s x) (repTuple s rcd) (repTuple s img)
 repProperty s (FiltPartInv x pf pps) =

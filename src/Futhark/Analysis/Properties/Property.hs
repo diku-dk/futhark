@@ -32,7 +32,7 @@ data Property u
     Disjoint (S.Set VName)
   | Monotonic VName MonDir
   | -- The restriction of f to the preimage of [a,b] is injective.
-    InjectiveRCD VName (SoP u, SoP u)
+    Injective VName (Maybe (SoP u, SoP u))
   | -- The restriction of f to the preimage of [a,b] is bijective.
     -- [c,d] (subset of [a,b]) is the image of this restricted f.
     BijectiveRCD VName (SoP u, SoP u) (SoP u, SoP u)
@@ -51,7 +51,7 @@ instance (Pretty u) => Pretty (Property u) where
   pretty (Disjoint s) =
     "Disjoint" <+> parens (commasep $ map prettyName $ S.toList s)
   pretty (Monotonic x dir) = "Mono" <+> prettyName x <+> viaShow dir
-  pretty (InjectiveRCD x rcd) =
+  pretty (Injective x rcd) =
     "InjectiveRCD" <+> prettyName x <+> parens (pretty rcd)
   pretty (BijectiveRCD x rcd img) =
     "BijectiveRCD" <+> prettyName x <+> parens (pretty rcd) <+> parens (pretty img)
@@ -111,7 +111,7 @@ askSimProp prop = (`askPropertyWith` getSimilarProp)
     match Boolean Boolean = True
     match (Disjoint {}) (Disjoint {}) = True
     match (Monotonic {}) (Monotonic {}) = True
-    match (InjectiveRCD {}) (InjectiveRCD {}) = True
+    match (Injective {}) (Injective {}) = True
     match (BijectiveRCD {}) (BijectiveRCD {}) = True
     match (FiltPartInv {}) (FiltPartInv {}) = True
     match (FiltPart {}) (FiltPart {}) = True
@@ -128,12 +128,12 @@ askFiltPart = (`askPropertyWith` getFiltPart)
 
 getInjectiveRCD :: S.Set (Property u) -> Maybe (Property u)
 getInjectiveRCD props
-  | fp@(InjectiveRCD {}) : rest <- filter f (S.toList props) = do
+  | fp@(Injective {}) : rest <- filter f (S.toList props) = do
       unless (null rest) $ error "getInjectiveRCD multiple InjectiveRCD"
       Just fp
   | otherwise = Nothing
   where
-    f (InjectiveRCD {}) = True
+    f (Injective {}) = True
     f _ = False
 
 getFiltPartInv :: S.Set (Property u) -> Maybe (Property u)
@@ -158,7 +158,7 @@ getFiltPart props
 
 nameAffectedBy :: Property u -> VName
 nameAffectedBy (Monotonic x _) = x
-nameAffectedBy (InjectiveRCD x _) = x
+nameAffectedBy (Injective x _) = x
 nameAffectedBy (BijectiveRCD x _ _) = x
 nameAffectedBy (FiltPartInv x _ _) = x
 nameAffectedBy (FiltPart y _x _ _) = y
