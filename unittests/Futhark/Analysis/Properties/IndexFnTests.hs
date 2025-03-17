@@ -435,18 +435,12 @@ tests =
         ),
       mkTest
         "tests/indexfn/maxMatch.fut"
-        ( pure $ \(i, n, _, _) ->
+        ( pure $ \(i, n, is_inv, _) ->
             [ IndexFn
                 { iterator = Forall i (Iota (sHole n)),
                   body =
                     cases
-                      [(Bool True, int2SoP 0)]
-                },
-              IndexFn
-                { iterator = Forall i (Iota (sHole n)),
-                  body =
-                    cases
-                      [(Bool True, int2SoP 0)]
+                      [(Bool True, sym2SoP $ Idx (Hole is_inv) (sHole i))]
                 }
             ]
         )
