@@ -192,13 +192,11 @@ def loopBody [arraySizeFlat] [nVerts]
 
 def main [nEdges]
     (edges_enc: *[nEdges][2]i64)
-    : {[]i64 |
-          \edgeIds' ->
-            Injective edgeIds'
-      }
+    : {[]i64 | \edgeIds' -> Injective edgeIds' }
     =
     let edges = flatten edges_enc
-    let nVerts = edges |> i64.maximum |> (+1)
+    let max_edge = i64.maximum edges
+    let nVerts = max_edge + 1
 
     let edgeIds = iota (nEdges*2)
 
