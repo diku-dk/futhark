@@ -28,7 +28,7 @@ var<workgroup> shared_memory_i64: array<i64, TR_TILE_DIM*(TR_TILE_DIM+1)>;
 @group(0) @binding(0) var<uniform> args: MapTransposeParametersLarge;
 @group(0) @binding(1) var<storage, read_write> dst_mem: array<ELEM_TYPE>;
 @group(0) @binding(2) var<storage, read_write> src_mem: array<ELEM_TYPE>;
-@compute @workgroup_size(block_size_x, block_size_y,block_size_z)
+@compute @workgroup_size(block_size_x, block_size_y, block_size_z)
 fn map_transpose_NAME_large(
     @builtin(workgroup_id)         group_id: vec3<u32>,  // tblock_id -> unique id of a group  within a dispatch
     @builtin(global_invocation_id) global_id: vec3<u32>, // global_id -> unique id of a thread within a dispatch

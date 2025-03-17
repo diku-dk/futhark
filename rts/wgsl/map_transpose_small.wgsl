@@ -22,7 +22,7 @@ struct MapTransposeParameters {
 @group(0) @binding(0) var<uniform> args: MapTransposeParameters;
 @group(0) @binding(1) var<storage, read_write> dst_mem: array<ELEM_TYPE>;
 @group(0) @binding(2) var<storage, read_write> src_mem: array<ELEM_TYPE>;
-@compute @workgroup_size(block_size_x, block_size_y,block_size_z)
+@compute @workgroup_size(block_size_x, block_size_y, block_size_z)
 fn map_transpose_NAME_small(
     @builtin(workgroup_id)         group_id: vec3<u32>,  // tblock_id -> unique id of a group  within a dispatch
     @builtin(global_invocation_id) global_id: vec3<u32>, // global_id -> unique id of a thread within a dispatch
@@ -32,34 +32,18 @@ fn map_transpose_NAME_small(
     let dst_offset = args.dst_offset[0];
     let src_offset = args.src_offset[0];
 
-    let tblock_id_0 = i32(group_id[0]);
     let global_id_0 = i32(global_id[0]);
-    var tblock_id_1 = i32(group_id[1]);
-    var global_id_1 = i32(global_id[1]);
 
-    for (var i1 = 0; i1 <= args.repeat_1; i1++) {
-        var tblock_id_2 = i32(group_id[2]);
-        var global_id_2 = i32(global_id[2]);
+    let our_array_offset = global_id_0 / (args.y_elems * args.x_elems) * args.y_elems * args.x_elems;
+    let x_index = (global_id_0 % (args.y_elems * args.x_elems)) / args.y_elems;
+    let y_index = global_id_0 % args.y_elems;
 
-        for (var i2 = 0; i2 < args.repeat_2; i2++) {
-            let our_array_offset = global_id_0 / (args.y_elems * args.x_elems) * args.y_elems * args.x_elems;
-            let x_index = (global_id_0 % (args.y_elems * args.x_elems)) / args.y_elems;
-            let y_index = global_id_0 % args.y_elems;
-            
-            let odata_offset = dst_offset + our_array_offset;
-            let idata_offset = src_offset + our_array_offset;
-            let index_in = y_index * args.x_elems + x_index;
-            let index_out = x_index * args.y_elems + y_index;
+    let odata_offset = dst_offset + our_array_offset;
+    let idata_offset = src_offset + our_array_offset;
+    let index_in = y_index * args.x_elems + x_index;
+    let index_out = x_index * args.y_elems + y_index;
 
-            if (global_id_0 < args.x_elems * args.y_elems * args.num_arrays) {
-                write_ELEM_TYPE(&dst_mem, odata_offset + index_out, read_ELEM_TYPE(&src_mem, idata_offset + index_in));
-            }
-
-            tblock_id_2 += i32(num_groups[2]);
-            global_id_2 += i32(num_groups[2]) * block_size_z;
-        }
-
-        tblock_id_1 += i32(num_groups[1]);
-        global_id_1 += i32(num_groups[1]) * block_size_y;
+    if (global_id_0 < args.x_elems * args.y_elems * args.num_arrays) {
+        write_ELEM_TYPE(&dst_mem, odata_offset + index_out, read_ELEM_TYPE(&src_mem, idata_offset + index_in));
     }
 }

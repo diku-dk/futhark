@@ -62,17 +62,17 @@ void map_transpose_##NAME(SHARED_MEM_PARAM                              \
                                                                         \
 FUTHARK_KERNEL_SIZED(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)                     \
 void map_transpose_##NAME##_low_height(SHARED_MEM_PARAM                 \
-                                                __global ELEM_TYPE *dst_mem, \
-                                                int64_t dst_offset,     \
-                                                __global ELEM_TYPE *src_mem, \
-                                                int64_t src_offset,     \
-                                                int32_t num_arrays,     \
-                                                int32_t x_elems,        \
-                                                int32_t y_elems,        \
-                                                int32_t mulx,           \
-                                                int32_t muly,           \
-                                                int32_t repeat_1,       \
-                                                int32_t repeat_2) {     \
+                                       int64_t dst_offset,              \
+                                       int64_t src_offset,              \
+                                       int32_t num_arrays,              \
+                                       int32_t x_elems,                 \
+                                       int32_t y_elems,                 \
+                                       int32_t mulx,                    \
+                                       int32_t muly,                    \
+                                       int32_t repeat_1,                \
+                                       int32_t repeat_2,                \
+                                       __global ELEM_TYPE *dst_mem,     \
+                                       __global ELEM_TYPE *src_mem) {   \
   __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;            \
   int tblock_id_0 = get_tblock_id(0);                                   \
   int global_id_0 = get_global_id(0);                                   \
@@ -116,9 +116,7 @@ void map_transpose_##NAME##_low_height(SHARED_MEM_PARAM                 \
                                                                         \
 FUTHARK_KERNEL_SIZED(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)                     \
 void map_transpose_##NAME##_low_width(SHARED_MEM_PARAM                  \
-                                      __global ELEM_TYPE *dst_mem,      \
                                       int64_t dst_offset,               \
-                                      __global ELEM_TYPE *src_mem,      \
                                       int64_t src_offset,               \
                                       int32_t num_arrays,               \
                                       int32_t x_elems,                  \
@@ -126,7 +124,9 @@ void map_transpose_##NAME##_low_width(SHARED_MEM_PARAM                  \
                                       int32_t mulx,                     \
                                       int32_t muly,                     \
                                       int32_t repeat_1,                 \
-                                      int32_t repeat_2) {               \
+                                      int32_t repeat_2,                 \
+                                      __global ELEM_TYPE *dst_mem,      \
+                                      __global ELEM_TYPE *src_mem) {    \
   __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;            \
   int tblock_id_0 = get_tblock_id(0);                                   \
   int global_id_0 = get_global_id(0);                                   \
@@ -166,10 +166,8 @@ void map_transpose_##NAME##_low_width(SHARED_MEM_PARAM                  \
 }                                                                       \
                                                                         \
 FUTHARK_KERNEL_SIZED(TR_BLOCK_DIM*TR_BLOCK_DIM, 1, 1)                   \
-void map_transpose_##NAME##_small(SHARED_MEM_PARAM                       \
-                                  __global ELEM_TYPE *dst_mem,          \
+void map_transpose_##NAME##_small(SHARED_MEM_PARAM                      \
                                   int64_t dst_offset,                   \
-                                  __global ELEM_TYPE *src_mem,          \
                                   int64_t src_offset,                   \
                                   int32_t num_arrays,                   \
                                   int32_t x_elems,                      \
@@ -177,7 +175,9 @@ void map_transpose_##NAME##_small(SHARED_MEM_PARAM                       \
                                   int32_t mulx,                         \
                                   int32_t muly,                         \
                                   int32_t repeat_1,                     \
-                                  int32_t repeat_2) {                   \
+                                  int32_t repeat_2,                     \
+                                  __global ELEM_TYPE *dst_mem,          \
+                                  __global ELEM_TYPE *src_mem) {        \
   (void)mulx; (void)muly;                                               \
   __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;            \
   int tblock_id_0 = get_tblock_id(0);                                   \
@@ -208,9 +208,7 @@ void map_transpose_##NAME##_small(SHARED_MEM_PARAM                       \
                                                                         \
 FUTHARK_KERNEL_SIZED(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1)\
 void map_transpose_##NAME##_large(SHARED_MEM_PARAM                      \
-                                  __global ELEM_TYPE *dst_mem,          \
                                   int64_t dst_offset,                   \
-                                  __global ELEM_TYPE *src_mem,          \
                                   int64_t src_offset,                   \
                                   int64_t num_arrays,                   \
                                   int64_t x_elems,                      \
@@ -218,9 +216,11 @@ void map_transpose_##NAME##_large(SHARED_MEM_PARAM                      \
                                   int64_t mulx,                         \
                                   int64_t muly,                         \
                                   int32_t repeat_1,                     \
-                                  int32_t repeat_2) {                   \
+                                  int32_t repeat_2,                     \
+                                  __global ELEM_TYPE *dst_mem,          \
+                                  __global ELEM_TYPE *src_mem) {        \
   (void)mulx; (void)muly;                                               \
-  __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;             \
+  __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;            \
   int tblock_id_0 = get_tblock_id(0);                                   \
   int global_id_0 = get_global_id(0);                                   \
   int tblock_id_1 = get_tblock_id(1);                                   \

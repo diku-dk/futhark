@@ -839,7 +839,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              size_t args_sizes[num_args]) {
   struct wgpu_kernel_info *kernel_info = kernel->info;
 
-  printf("Launching kernel %s\n", name);
+  printf("Launching kernel %s\n", kernel_info->name);
 
   if (num_args !=
       kernel_info->num_shared_mem_overrides
