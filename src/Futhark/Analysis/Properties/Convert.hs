@@ -28,7 +28,7 @@ import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
-import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
+import Futhark.SoP.Monad (addEquiv, addProperty, getProperties, lookupUntransPE)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
@@ -779,6 +779,16 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
 
       lift $ addInvAlias vn_inv vn_inds
       lift $ addRelSymbol (Prop $ Property.BijectiveRCD vn_inv (int2SoP 0, dest_size) (int2SoP 0, dest_size))
+      -- TODO make bijective cover injective also!
+      lift $ addRelSymbol (Prop $ Property.InjectiveRCD vn_inv (int2SoP 0, dest_size))
+      -- TODO add these ranges when needed using the property table.
+      -- Here we add them as a special case because we know is^(-1) will
+      -- be used for indirect indexing.
+      hole <- sym2SoP . Hole <$> newVName "h"
+      let wrap = (`Idx` hole) . Var
+      alg_vn <- lift $ paramToAlgebra vn_inv wrap
+      lift $ addRelSymbol (sVar alg_vn :< dest_size)
+      lift $ addRelSymbol (int2SoP 0 :<= sVar alg_vn)
 
       let inv_ind = Idx (Var vn_inv) (sVar i)
       lift $

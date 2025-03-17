@@ -317,7 +317,7 @@ nextGenProver (PInjGe i j d ges) = rollbackAlgEnv $ do
                 }
             )
             (c @ j)
-      p <- eqSolver $ sop2Symbol (c @ i) :&& c_j' :&& e @ i :== e @ j
+      p <- simplify =<< eqSolver (sop2Symbol (c @ i) :&& c_j' :&& e @ i :== e @ j)
       printM 1 $ "no_dups " <> prettyStr (sop2Symbol (c @ i) :&& e @ i :== e @ j)
       printM 1 $ "no_dups " <> prettyStr p
 

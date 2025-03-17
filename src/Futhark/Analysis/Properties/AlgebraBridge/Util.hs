@@ -163,9 +163,12 @@ addRelIterator (Forall i dom) = case dom of
     addRels $
       S.fromList
         [ int2SoP 1 :<=: n',
-          int2SoP 0 :<=: sVar i,
           sVar i :<=: dom_end
         ]
+    -- TODO why do I have to add the range in two steps?
+    -- Want to enforce range on i without causing cycles---not move lb/ub around
+    -- using heuristics.
+    addRels $ S.fromList [ int2SoP 0 :<=: sVar i ]
   Cat k m b -> do
     m' <- toAlgebra m
     dom_start <- Algebra.simplify =<< toAlgebra (domainStart dom)

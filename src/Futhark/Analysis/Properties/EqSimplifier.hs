@@ -56,7 +56,7 @@ eqSolver :: Symbol -> IndexFnM Symbol
 eqSolver p = do
   -- TODO change this to also include the equalities transformed by astMap m?
   -- For example, x[i] = x[j] => i = j, returns only i = j, replacing x[i] = x[j].
-  astMap m $ foldl (:&&) p (getTransitiveEqs p)
+  fixPointM (astMap rules) (foldl (:&&) p (getTransitiveEqs p))
   where
     getTransitiveEqs = map fromEquality . concatMap transitiveEqs . equivST . getEqualities
 
@@ -69,7 +69,7 @@ eqSolver p = do
     fromEquality :: Equality (SoP Symbol) -> Symbol
     fromEquality (x, y) = x :== y
 
-    m :: ASTMapper Symbol IndexFnM =
+    rules :: ASTMapper Symbol IndexFnM =
       ASTMapper
         { mapOnSymbol = applyRuleBook eqSolverRules,
           mapOnSoP = pure
@@ -89,12 +89,10 @@ eqSolverRules = do
             e_j <- sub s (hole j)
             pure (e_i :== e_j),
           sideCondition = \s -> do
-            printM 1 $ "hello? " <> prettyStr s
             e_x <- sub s (hole x)
             e_i <- sub s (hole i)
             e_j <- sub s (hole j)
             alg_inj <- join <$> traverse askInjectiveRCD (toAlgVar e_x)
-            printM 1 $ "alg_inj? " <> prettyStr alg_inj
             case alg_inj of
               Just (InjectiveRCD _ rcd) -> do
                 rcd' <- fromAlgebra rcd
@@ -111,3 +109,8 @@ eqSolverRules = do
     toAlgVar _ = Nothing
 
     inRange e (a, b) = isTrue (a :<= e :&& e :<= b)
+
+fixPointM :: (Renameable t, Eq t) => (t -> IndexFnM t) -> t -> IndexFnM t
+fixPointM f x = do
+  x' <- f x
+  if x' == x then pure x else fixPointM f x'

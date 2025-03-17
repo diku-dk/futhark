@@ -25,10 +25,7 @@ convergeRename :: (Renameable t, Eq t) => (t -> IndexFnM t) -> t -> IndexFnM t
 convergeRename f x = do
   y <- f x
   (x', y') <- renameSame x y
-  if x' == y'
-    then pure x
-    else do
-      convergeRename f y
+  if x' == y' then pure x else convergeRename f y
 
 rewrite_ :: IndexFn -> IndexFnM IndexFn
 rewrite_ fn@(IndexFn it xs) = simplifyIndexFn
