@@ -200,8 +200,12 @@ addLegalCands cand_set = do
         -- Candidate is not an equivalence on itself.
         -- TODO should probably make it so that we never generate these.
         && sym2SoP (equivCandSym cand) /= equivCandSoP cand
+        && not hasSelfCycle
       where
         none f = not . any f
+        hasSelfCycle =
+          equivCandSym cand `elem` freevar (equivCandSoP cand)
+            || any (`elem` freevar (sym2SoP $ equivCandSym cand)) (free (equivCandSoP cand))
         -- Since the equivalence environment contains the fully
         -- substituted bindings (accounting for predecessor
         -- substitutions), we do not need to (explicitly) compute the
@@ -210,5 +214,5 @@ addLegalCands cand_set = do
           sym `elem` free (equivCandSoP cand)
             && equivCandSym cand `elem` free sop
         hasRangeCycle (sym, range) =
-          sym `elem` transitiveClosure rs (equivCandSoP cand)
+          any (sym `isRangeRelatedTo`) (transitiveClosure rs (equivCandSoP cand))
             && equivCandSym cand `elem` free range

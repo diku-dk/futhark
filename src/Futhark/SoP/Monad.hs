@@ -373,6 +373,8 @@ instance (Pretty u, Pretty e, Pretty p) => Pretty (AlgEnv u e p) where
         <> pretty (M.toList $ properties env)
 
 class (Ord u, Free u u) => RangeRelated u where
+  freevar :: SoP u -> S.Set u
+
   rangeRelatedTo :: u -> S.Set u
   rangeRelatedTo = const S.empty
 

@@ -15,7 +15,7 @@ where
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.Util (prettyName)
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad (Nameable (mkName), RangeRelated (rangeRelatedTo))
+import Futhark.SoP.Monad (Nameable (mkName), RangeRelated (..))
 import Futhark.SoP.SoP (SoP, sopToLists, Free(..))
 import Futhark.Util.Pretty (Pretty, brackets, enclose, parens, pretty, (<+>))
 import Language.Futhark (VName, nameFromString)
@@ -57,6 +57,8 @@ instance Free Symbol Symbol where
   free (Pow (_, sop))= free sop
 
 instance RangeRelated Symbol where
+  freevar = S.map Var . fv
+
   rangeRelatedTo = leadingNames
     where
       leadingNames (Var vn) = S.singleton (Var vn)
