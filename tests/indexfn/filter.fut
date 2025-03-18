@@ -15,7 +15,9 @@ def filter_indices [n]
   let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
   in (new_size, is)
 
-def filter [n] (p: f32 -> bool) (xs: [n]f32) : {[]f32 | \_ -> true} =
+def filter [n] (p: f32 -> bool) (xs: [n]f32)
+  : {[]f32 | \ys -> FiltPart ys xs (\i -> p xs[i]) (\_i -> true)}
+  =
   let cs = map (\x -> p x) xs
   let (new_n, is) = filter_indices cs
   let scratch = replicate new_n 0f32
