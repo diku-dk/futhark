@@ -15,6 +15,7 @@ module Futhark.Analysis.Properties.Property
     nameAffectedBy,
     askInjectiveRCD,
     askSimProp,
+    askRng,
   )
 where
 
@@ -31,6 +32,7 @@ data Property u
   | -- These predicates are pairwise disjoint and collectively exhaustive.
     Disjoint (S.Set VName)
   | Monotonic VName MonDir
+  | Rng VName (SoP u, SoP u)
   | -- The restriction of f to the preimage of [a,b] is injective.
     Injective VName (Maybe (SoP u, SoP u))
   | -- The restriction of f to the preimage of [a,b] is bijective.
@@ -54,10 +56,12 @@ instance (Pretty u) => Pretty (Property u) where
   pretty (Disjoint s) =
     "Disjoint" <+> parens (commasep $ map prettyName $ S.toList s)
   pretty (Monotonic x dir) = "Mono" <+> prettyName x <+> pretty dir
+  pretty (Rng x rng) =
+    "Range" <+> prettyName x <+> parens (pretty rng)
   pretty (Injective x rcd) =
-    "InjectiveRCD" <+> prettyName x <+> parens (pretty rcd)
+    "Inj" <+> prettyName x <+> parens (pretty rcd)
   pretty (BijectiveRCD x rcd img) =
-    "BijectiveRCD" <+> prettyName x <+> parens (pretty rcd) <+> parens (pretty img)
+    "Bij" <+> prettyName x <+> parens (pretty rcd) <+> parens (pretty img)
   pretty (FiltPartInv x pf pps) =
     "FiltPartInv" <+> prettyName x <+> parens (pretty pf) <+> ppr pps
   pretty (FiltPart x y pf pps) =
@@ -120,6 +124,9 @@ askSimProp prop = (`askPropertyWith` getSimilarProp)
     match (FiltPart {}) (FiltPart {}) = True
     match _ _ = False
 
+askRng :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
+askRng = (`askPropertyWith` getRng)
+
 askInjectiveRCD :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
 askInjectiveRCD = (`askPropertyWith` getInjectiveRCD)
 
@@ -128,6 +135,16 @@ askFiltPartInv = (`askPropertyWith` getFiltPartInv)
 
 askFiltPart :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
 askFiltPart = (`askPropertyWith` getFiltPart)
+
+getRng :: S.Set (Property u) -> Maybe (Property u)
+getRng props
+  | fp@(Rng {}) : rest <- filter f (S.toList props) = do
+      unless (null rest) $ error "getRng multiple Rng"
+      Just fp
+  | otherwise = Nothing
+  where
+    f (Rng {}) = True
+    f _ = False
 
 getInjectiveRCD :: S.Set (Property u) -> Maybe (Property u)
 getInjectiveRCD props

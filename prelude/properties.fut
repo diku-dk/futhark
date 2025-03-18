@@ -2,6 +2,8 @@ def and (_: []bool) : bool = ???
 
 def Monotonic 't (_ : t -> t -> bool) (_: []t) : bool = ???
 
+def Range 't (_: t) (_ : (i64, i64)) : bool = ???
+
 def Injective 't (_: []t) : bool = ???
 
 def InjectiveRCD 't (_: []t) (_ : (i64, i64)) : bool = ???

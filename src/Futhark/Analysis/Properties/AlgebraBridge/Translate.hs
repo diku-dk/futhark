@@ -68,6 +68,7 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     Boolean -> pure Boolean
     (Disjoint vns) -> pure (Disjoint vns)
     (Monotonic x dir) -> pure (Monotonic x dir)
+    (Rng x rng) -> Rng x <$> fromAlgebra rng
     (Injective x (Just rcd)) -> Injective x . Just <$> fromAlgebra rcd
     (Injective x Nothing) -> pure $ Injective x Nothing
     (BijectiveRCD x rcd img) -> BijectiveRCD x <$> fromAlgebra rcd <*> fromAlgebra img
@@ -77,6 +78,7 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     Boolean -> pure Boolean
     (Disjoint vns) -> pure (Disjoint vns)
     (Monotonic x dir) -> pure (Monotonic x dir)
+    (Rng x rng) -> Rng x <$> toAlgebra rng
     (Injective x (Just rcd)) -> Injective x . Just <$> toAlgebra rcd
     (Injective x Nothing) -> pure $ Injective x Nothing
     (BijectiveRCD x rcd img) -> BijectiveRCD x <$> toAlgebra rcd <*> toAlgebra img

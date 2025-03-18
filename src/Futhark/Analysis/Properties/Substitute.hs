@@ -121,7 +121,7 @@ subber argCheck g = do
                 then do
                   g' <- substituteOnce f g (e, args)
                   case g' of
-                    Just new_fn -> do
+                    Just new_fn | new_fn /= g -> do
                       subst =<< rewriteWithoutRules new_fn
                     _ ->
                       go (S.insert (vn, args) seen)

@@ -42,7 +42,7 @@ def segment_ids [m]
       : {([]i64, []bool) | \(ids, flags) ->
            length ids == sum shape
              && length flags == sum shape
-             && and (map (\id -> 0 <= id && id < m) ids)
+             && Range ids (0, m)
         } =
       -- : ({[]i64 | \ids ->
       --      length ids == sum shape
@@ -53,7 +53,8 @@ def segment_ids [m]
   let flags = mk_flag_array shape 0i64 flags1
   let flags_sgmind = map (\f -> if f == 0 then 0 else f-1) flags
   let flags_bool = map (\f -> f > 0) flags
-  in (sgm_sum flags_bool flags_sgmind, flags_bool)
+  let ids = sgm_sum flags_bool flags_sgmind
+  in (ids, flags_bool)
 
 def filter_indices [n]
   (cs: [n]bool)

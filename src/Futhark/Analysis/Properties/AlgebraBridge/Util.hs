@@ -28,11 +28,11 @@ import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, toAlgeb
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Domain (..), Iterator (..))
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv)
+import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv, printAlgEnv)
 import Futhark.Analysis.Properties.Property (Property (..), nameAffectedBy)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
-import Futhark.SoP.Monad (addProperty)
+import Futhark.SoP.Monad (addProperty, addRange, mkRange)
 import Futhark.SoP.Refine (addRel, addRels)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), viaShow)
@@ -152,6 +152,9 @@ addRelSymbol p = do
         getProps (a :&& b) = getProps a <> getProps b
         getProps _ = []
 
+    addProperty_ (Rng x (a, b)) = do
+      addRange (Algebra.Var x) (mkRange a (b .-. int2SoP 1))
+      addProperty (Algebra.Var x) (Rng x (a,b))
     addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
 
 -- | Add relations derived from the iterator to the algebraic environment.

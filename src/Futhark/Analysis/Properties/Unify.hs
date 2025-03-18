@@ -323,6 +323,8 @@ instance (Ord a, Renameable a) => Renameable (Property a) where
   rename_ vns tau (Disjoint s) =
     Disjoint . S.fromList <$> mapM (rename_ vns tau) (S.toList s)
   rename_ _ _ p@(Monotonic {}) = pure p
+  rename_ vns tau (Rng x rng) =
+    Rng x <$> rename_ vns tau rng
   rename_ vns tau (Injective x rcd) =
     Injective x <$> rename_ vns tau rcd
   rename_ vns tau (BijectiveRCD x rcd img) =
@@ -359,6 +361,9 @@ instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Property a)
   unify_ _ Boolean Boolean = pure mempty
   unify_ _ (Disjoint x) (Disjoint y) | x == y = pure mempty
   unify_ _ x@(Monotonic {}) y@(Monotonic {}) | x == y = pure mempty
+  unify_ k (Rng x rng1) (Rng y rng2) = do
+    s <- unify_ k x y
+    (s <>) <$> unifyTuple k (repTuple s rng1) (repTuple s rng2)
   unify_ k (Injective x (Just rcd1)) (Injective y (Just rcd2)) = do
     s <- unify_ k x y
     (s <>) <$> unifyTuple k (repTuple s rcd1) (repTuple s rcd2)
@@ -397,6 +402,7 @@ instance (FreeVariables u, Ord u) => FreeVariables (Property u) where
   fv Boolean = mempty
   fv (Disjoint x) = x
   fv Monotonic {} = mempty
+  fv (Rng x rng) = fv x <> fv rng
   fv (Injective x (Just rcd)) = fv x <> fv rcd
   fv (Injective x Nothing) = fv x
   fv (BijectiveRCD x rcd img) = fv x <> fv rcd <> fv img

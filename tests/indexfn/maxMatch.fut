@@ -71,18 +71,17 @@ def filter_indices [n]
   let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
   in (new_size, is)
 
-def filterBy [n] 't (cs: [n]bool) (xs: [n]t)
+def filterBy [n] 't (cs: [n]bool) (xs: [n]t) (dummy: t)
     : {(i64, []t) | \(_, ys) -> FiltPart ys xs (\i -> cs[i]) (\_i -> true)} =
   let (new_n, is) = filter_indices cs
-  let dummy = xs[0]
   let scratch = replicate new_n dummy
   let xs' = scatter scratch is xs
   in (new_n, xs')
 
-def filter [n] 't (p: t -> bool) (xs: [n]t)
+def filter [n] 't (p: t -> bool) (xs: [n]t) (dummy: t)
     : {(i64, []t) | \(_, ys) -> FiltPart ys xs (\i -> p xs[i]) (\_i -> true)} =
   let cs = map (\x -> p x) xs
-  let (m, zs) = filterBy cs xs
+  let (m, zs) = filterBy cs xs dummy
   in (m, zs)
 
 def length [n] 't (_xs: [n]t) = n
@@ -90,12 +89,22 @@ def length [n] 't (_xs: [n]t) = n
 -- 
 --            Program
 --
+type nat64 = {i64 | (>= 0)}
+
+def x +< y = x < y && 0i64 <= x
+
+-- def histogram 'a [n] (op: a -> a -> a) (ne: a) (kaaa: i64) (is: [n]i64) (as: [n]a) : *[kaaa]a =
+--    hist op ne kaaa is as
+-- def histo 'a [n] (op: a -> a -> a) (ne: a) (k: i64) (is: [n]i64) (as: [n]a) : *[k]a =
+--   hist op ne k is as
+
+
 -- Return the edge-id pairs with the smallest edge id
 def getSmallestPairs [arraySizeFlat]
-    (edges: [arraySizeFlat]i64)
-    (edgeIds: {[arraySizeFlat]i64 | \x -> Injective x})
     (nVerts: i64)
     (nEdges_2: i64)
+    (edges: {[arraySizeFlat]i64 | \x -> Range x (0, nVerts)})
+    (edgeIds: {[arraySizeFlat]i64 | \x -> Injective x})
     : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
          Injective new_edges && Injective new_edgeIds
       }
@@ -111,24 +120,25 @@ def getSmallestPairs [arraySizeFlat]
     -- let edge2Ids = map (\i -> [2*i, 2*i+1]) edgeIds
     -- let flatE = flatten edges :> [arraySizeFlat]i32
     -- let flatE2i = flatten edge2Ids :> [arraySizeFlat]i32
-    let zippedArray = zip edges edgeIds
+    -- let zippedArray = zip edges edgeIds
     -- let verts = map i64.i32 flatE
 
     let H = hist i64.min nEdges_2 nVerts edges edgeIds
-    let cs = map (\(i, j) -> H[i] == j) zippedArray
-    let (newSize, ys) = filterBy cs edges
-    let (_, zs) = filterBy cs edgeIds
+    let cs = map2 (\i j -> H[i] == j) edges edgeIds
+    let dummy = 0i64
+    let (newSize, ys) = filterBy cs edges dummy
+    let (_, zs) = filterBy cs edgeIds dummy
     in (ys :> [newSize]i64, zs :> [newSize]i64)
 
--- Return the edge if it's ID is the smallest, else return placeholder
-def getMMEdges (smallestEdgeId: []i64) (e: i64) (i: i64): (i64, i64) =
+-- Return the edge if its ID is the smallest, else return placeholder
+def getMMEdges [nVerts] (smallestEdgeId: [nVerts]i64) (e: {i64 | \x -> 0 <= x}) (i: i64): (i64, i64) =
     if smallestEdgeId[e] == i then (e, i) else (-1, -1)
 
 -- Update the marked vertexes and included edges
-def update [arraySizeFlat]
-    (edges: [arraySizeFlat]i64)
+def update [arraySizeFlat] [nVerts]
+    (smallestEdgeId: [nVerts]i64)
+    (edges: {[arraySizeFlat]i64 | \x -> Range x (0,nVerts)})
     (edgeIds: [arraySizeFlat]i64)
-    (smallestEdgeId: []i64)
     (markedVerts: *[]bool)
     (includedEdges: *[]bool)
     : {(*[]bool, *[]bool) | \_ -> true}
@@ -148,9 +158,9 @@ def update [arraySizeFlat]
     in (markedVerts, includedEdges)
 
 -- Remove the marked edges
-def removeMarked [arraySizeFlat]
-    (markedVerts: []bool)
-    (edges: [arraySizeFlat]i64)
+def removeMarked [arraySizeFlat] [nVerts]
+    (markedVerts: [nVerts]bool)
+    (edges: {[arraySizeFlat]i64 | \x -> Range x (0,nVerts)})
     (edgeIds: {[arraySizeFlat]i64 | \x -> Injective x})
     : {([]i64, []i64) | \(_, new_edgeIds) ->
           Injective new_edgeIds
@@ -162,10 +172,10 @@ def removeMarked [arraySizeFlat]
     let cs = map (\v -> !markedVerts[v]) edges
     let (new_n, is) = filter_indices cs
 
-    let scratch = replicate new_n edges[0]
+    let scratch = replicate new_n 0i64
     let edges' = scatter scratch is edges
 
-    let scratch = replicate new_n edgeIds[0]
+    let scratch = replicate new_n 0i64
     let edgeIds' = scatter scratch is edgeIds
     in (edges', edgeIds')
 
@@ -175,7 +185,7 @@ def resetsmallestEdgeId [n] (_smallestEdgeId: [n]i64): {*[n]i64 | \_ -> true} =
     in replicate n i64_highest
 
 def loopBody [arraySizeFlat] [nVerts]
-    (edges: [arraySizeFlat]i64)
+    (edges: {[arraySizeFlat]i64 | \x -> Range x (0,nVerts)})
     (edgeIds: {[arraySizeFlat]i64 | \x -> Injective x})
     (markedVerts: *[nVerts]bool)
     (smallestEdgeId: *[nVerts]i64)
@@ -185,31 +195,33 @@ def loopBody [arraySizeFlat] [nVerts]
             Injective new_edgeIds
       }
     =
-    let (smallestTargets, smallestValues) = getSmallestPairs edges edgeIds nVerts arraySizeFlat
+    let (smallestTargets, smallestValues) = getSmallestPairs nVerts arraySizeFlat edges edgeIds
 
     let smallestEdgeId = scatter smallestEdgeId smallestTargets smallestValues
 
-    let (markedVerts, includedEdges) = update edges edgeIds smallestEdgeId markedVerts includedEdges
+    let (markedVerts, includedEdges) = update smallestEdgeId edges edgeIds markedVerts includedEdges
 
     let (edges, edgeIds) = removeMarked markedVerts edges edgeIds
 
     let smallestEdgeId = resetsmallestEdgeId smallestEdgeId
     in (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges)
 
-def main [nEdges]
-    (edges_enc: *[nEdges][2]i64)
+def main [nEdges_2]
+    -- (edges_enc: *[nEdges][2]i64)
+    (nVerts: i64)
+    (edges: {*[nEdges_2]i64 | \x -> Range x (0, nVerts) && nVerts == i64.maximum x + 1})
     : {[]i64 | \edgeIds' -> Injective edgeIds' }
     =
-    let edges = flatten edges_enc
-    let max_edge = i64.maximum edges
-    let nVerts = max_edge + 1
+    -- let edges = flatten edges_enc
+    -- let max_edge = i64.maximum edges
+    -- let nVerts = max_edge + 1
 
-    let edgeIds = iota (nEdges*2)
+    let edgeIds = iota nEdges_2
 
     let markedVerts = replicate nVerts false
     let smallestEdgeId = replicate nVerts i64.highest
 
-    let includedEdges = replicate (nEdges*2) false
+    let includedEdges = replicate nEdges_2 false
 
     -- Skipping loop; pre- and postconditions on each loop iteration
     -- is shown by loopBody.

@@ -185,6 +185,18 @@ data Order = LT | GT | Undefined
 prove :: Property Symbol -> IndexFnM Answer
 prove prop = alreadyKnown prop `orM` matchProof prop
   where
+    alreadyKnown wts@(Rng y _) = do
+      res <- askRng (Algebra.Var y)
+      case res of
+        Just (Rng y' rng')
+          | y' == y -> do
+            -- Check equivalent rngs.
+            -- TODO could check that rng is a subset of rng'.
+            s <- unify wts =<< fromAlgebra (Rng y rng')
+            if isJust (s :: Maybe (Substitution Symbol))
+              then pure Yes
+              else pure Unknown
+        _ -> pure Unknown
     alreadyKnown wts@(Injective y _) = do
       res <- askInjectiveRCD (Algebra.Var y)
       case res of
@@ -225,6 +237,8 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
     matchProof Disjoint {} = error "prove called on Disjoint property (nothing to prove)"
     matchProof Monotonic {} = error "Not implemented yet"
+    matchProof (Rng x (a, b)) =
+      askQ (CaseCheck (\e -> a :<= e :&& e :< b)) =<< getFn x
     matchProof (Injective y rcd) = do
       indexfns <- getIndexFns
       fp <- traverse fromAlgebra =<< askFiltPart (Algebra.Var y)
@@ -338,8 +352,8 @@ nextGenProver (PInjGe i j d ges) = rollbackAlgEnv $ do
             )
             (c @ j)
       p <- simplify =<< eqSolver (sop2Symbol (c @ i) :&& c_j' :&& e @ i :== e @ j)
-      printM 1 $ "no_dups " <> prettyStr (sop2Symbol (c @ i) :&& e @ i :== e @ j)
-      printM 1 $ "no_dups " <> prettyStr p
+      printM 10 $ "no_dups " <> prettyStr (sop2Symbol (c @ i) :&& e @ i :== e @ j)
+      printM 10 $ "no_dups " <> prettyStr p
 
       -- TODO this caused an infinite loop somewhere on maxMatch.fut?
       --      (Add RCD to PInjGE if you want to add this again.)
@@ -401,7 +415,6 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
             let neq =
                   (sop2Symbol (c @ i) :&& sop2Symbol (c @ j)) -- XXX could use in_range f@i g@j here
                     =>? (e @ i :/= e @ j)
-            printAlgEnv 1
             oob `orM` neq
 
   let step2 = guards fn `canBeSortedBy` cmp

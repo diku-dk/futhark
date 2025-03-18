@@ -1177,15 +1177,12 @@ localChecks = void . check
       e <$ case stripRefinement ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI x t) x t loc
         _ -> error "Inferred type of int literal is not a number"
-      where
-        stripRefinement (Info (Scalar (Refinement (Scalar t) _))) = Info (Scalar t)
-        stripRefinement t = t
     check e@(FloatLit x ty loc) =
       e <$ case ty of
         Info (Scalar (Prim (FloatType t))) -> errorBounds (inBoundsF x t) x t loc
         _ -> error "Inferred type of float literal is not a float"
     check e@(Negate (IntLit x ty loc1) loc2) =
-      e <$ case ty of
+      e <$ case stripRefinement ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
         _ -> error "Inferred type of int literal is not a number"
     check e@(AppExp (BinOp (QualName [] v, _) _ (x, _) _ loc) _)
@@ -1219,6 +1216,9 @@ localChecks = void . check
             <> " out of bounds for inferred type "
             <> pretty ty
             <> "."
+
+    stripRefinement (Info (Scalar (Refinement (Scalar t) _))) = Info (Scalar t)
+    stripRefinement t = t
 
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant

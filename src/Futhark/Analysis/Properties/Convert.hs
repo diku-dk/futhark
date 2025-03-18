@@ -3,7 +3,7 @@
 module Futhark.Analysis.Properties.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when)
+import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT (runMaybeT), hoistMaybe)
 import Data.Bifunctor
@@ -15,7 +15,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, fromAlgebra, isUnknown, isYes, orM, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
+import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn, intervalEnd)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (MonDir (..))
 import Futhark.Analysis.Properties.Property qualified as Property
@@ -40,6 +40,7 @@ propertyPrelude :: S.Set String
 propertyPrelude =
   S.fromList
     [ "Monotonic",
+      "Range",
       "Injective",
       "InjectiveRCD",
       "BijectiveRCD",
@@ -161,12 +162,10 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
   where
     -- Adds the effect of a precondition without checking that it holds.
     addPreconditions pat = do
+      printM 1 $ "+ Adding precondition on " <> prettyStr pat
       ref <- getRefinement pat
-      case ref of
-        Just (_, effect) -> effect emptyCheckContext
-        _ -> pure ()
-      printM 1 $ "Adding precondition on " <> prettyStr pat
-      printAlgEnv 1
+      forM_ ref $ \(_, effect) -> effect emptyCheckContext
+      printAlgEnv 3
 mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
   insertTopLevelDef vn (params, body)
   pure []
@@ -185,7 +184,6 @@ checkPostcondition vn indexfns te = do
   case getTERefine te of
     [e@(E.Lambda lam_params lam_body _ _ _)] -> do
       actual_names <- getOutputNames
-      printM 10 $ prettyStr vn <> " output names: " <> prettyStr actual_names
       let param_names = map fst $ mconcat $ map patternMapAligned lam_params
       -- Propagate properties on the final let-body expression
       -- to the postcondition lambda parameterslambda parameters
@@ -193,24 +191,16 @@ checkPostcondition vn indexfns te = do
       when (length actual_names == length param_names) $ do
         let aligned = catMaybes $ zipWith (\x y -> (x,) <$> (sym2SoP . Var <$> y)) actual_names param_names
         let name_rep = mkRepFromList aligned
-        printM 1 $ "name_rep " <> prettyStr name_rep
 
         forM_ aligned $ \(actual, _) -> do
-          printM 1 $ "actual " <> prettyStr actual
           props <- (M.!? Algebra.Var actual) <$> getProperties
-          printM 1 $ "props " <> prettyStr props
           case S.toList <$> props of
-            Just ps -> do
-              forM_ ps $ \p -> do
-                -- tf <- Prop . repProperty name_rep <$> fromAlgebra p
-                -- printM 1 $ "tf " <> prettyStr tf
-                -- addRelSymbol tf
-                addRelSymbol . Prop . repProperty name_rep =<< fromAlgebra p
+            Just ps ->
+              forM_ ps $ (addRelSymbol . Prop . repProperty name_rep) <=< fromAlgebra
             Nothing -> pure ()
 
       -- Substitute lam_params for indexfns and perform checks.
-      printM 1 . warningString $
-        "Checking post-condition:\n" <> prettyStr te
+      printM 1 $ warningString "Checking postcondition: " <> prettyStr te
       forM_ (zip param_names indexfns) $ \(nm, fn) ->
         when (isJust nm) . void $ bindfn (fromJust nm) [fn]
       postconds <- forward lam_body >>= mapM rewrite
@@ -221,7 +211,7 @@ checkPostcondition vn indexfns te = do
       answer <- askRefinements postconds
       case answer of
         Yes -> do
-          printM 1 (E.baseString vn <> " ∎\n\n")
+          printM 1 (E.baseString vn <> greenString " OK\n\n")
           pure ()
         Unknown ->
           errorMsg (E.locOf e) $
@@ -249,8 +239,8 @@ forwardLetEffects bound_names x = do
         Just vn -> pure vn
         Nothing -> newNameFromString "_" -- HACK Apply effects to unusable wildcard.
       effect bound_names'
-      printM 1 $ warningString "Propating effects on " <> prettyStr bound_names'
-      printAlgEnv 1
+      printM 3 $ "Propating effects on " <> prettyStr bound_names'
+      printAlgEnv 3
       pure fns
     Nothing -> forward x
 
@@ -331,11 +321,12 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
       pure f
 forward (E.TupLit xs _) = do
   mconcat <$> mapM forward xs
-forward (E.AppExp (E.Index e_xs slice _loc) _)
+forward expr@(E.AppExp (E.Index e_xs slice _loc) _)
   | [E.DimFix e_idx] <- slice = do
       f_xss <- forward e_xs
       f_idxs <- forward e_idx
       forM (zip f_xss f_idxs) $ \(f_xs, f_idx) -> do
+        checkBounds expr f_xs f_idx
         xs <- case justVName e_xs of
           Just vn -> pure vn
           Nothing -> do
@@ -427,7 +418,9 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
     Just arrays <- NE.nonEmpty (NE.tail args) = do
       (aligned_args, _aligned_sizes) <- zipArgs loc params arrays
       iter <- bindLambdaBodyParams (mconcat aligned_args)
-      bodies <- forward lam_body
+      bodies <- rollbackAlgEnv $ do
+        addRelIterator iter
+        forward lam_body
 
       forM bodies $ \body_fn -> do
         subst (IndexFn iter (body body_fn))
@@ -548,6 +541,27 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
           (errorMsg loc "Failed to infer index function for scatter.")
           pure
           (rule1 <|> rule2 <|> rule3 <|> rule4)
+  | Just "hist" <- getFun f,
+    Just hist_vn <- justVName f,
+    [_, _, e_k, _, _] <- getArgs args = do
+      -- TODO remove this. It's only here to infer the size of the output hist.
+      f_ks <- forward e_k
+      case f_ks of
+        [IndexFn Empty cs] | [(Bool True, k)] <- casesToList cs -> do
+          arg_fns <- mconcat <$> mapM forward (getArgs args) -- redundant forward on e_k again.
+          i <- newNameFromString "i"
+          arg_names <- forM arg_fns (const $ newVName "x")
+          let g_fn =
+                IndexFn
+                  { iterator = Forall i (Iota k),
+                    body =
+                      singleCase . sym2SoP $
+                        Apply (Var hist_vn) (map sVar arg_names)
+                  }
+          fn <- substParams g_fn (zip arg_names arg_fns)
+          pure [fn]
+        _ ->
+          undefined
   | Just "sized" <- getFun f,
     [_, e] <- getArgs args = do
       -- No-op.
@@ -692,15 +706,14 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       where
         -- TODO could probably be deduplicated by merging with mkEffectFromTypeExp.
         checkPatPrecondition scope pat size_rep = do
-          cond <- getPrecondition pat
-          ans <- case cond of
-            Nothing -> pure Yes
-            Just check -> do
-              printM 1 $
-                "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
-              check (size_rep, scope, name_rep)
-          unless (isYes ans) . errorMsg loc $
+          conds <- getPrecondition pat
+          answers <- forM conds $ \check -> do
+            printM 1 $
+              "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
+            check (size_rep, scope, name_rep)
+          unless (all isYes answers) . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
+          unless (null conds) $ printM 1 $ "... " <> greenString "OK"
 forwardApplyDef _ _ _ = Nothing
 
 -- Binds names of scalar parameters to scalar values of corresponding
@@ -717,12 +730,22 @@ bindLambdaBodyParams params = do
   -- Make sure all Cat k bound in iterators are identical by renaming.
   fns <- renamesM (map snd params)
   let iter@(Forall i _) = maximum (map iterator fns)
-  forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
-    vn <- newVName ("#lam_" <> E.baseString paramName)
-    insertIndexFn vn [f_xs]
-    insertIndexFn
-      paramName
-      [IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i)]
+  -- forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
+  --   vn <- newVName ("#lam_" <> E.baseString paramName)
+  --   insertIndexFn vn [f_xs]
+  --   insertIndexFn
+  --     paramName
+  --     [IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i)]
+  -- pure iter
+  forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
+    vn <- newVName "tmp_fn"
+    IndexFn tmp_iter cs <-
+      IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
+    -- Renaming k bound in `tmp_iter` to k bound in `iter`.
+    let k_rep =
+          fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
+    insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
+    -- insertIndexFn paramName [IndexFn Empty cs]
   pure iter
 
 -- Align parameters and arguments. Each parameter is a pattern.
@@ -1026,25 +1049,25 @@ type Check = CheckContext -> IndexFnM Answer
 type Effect = CheckContext -> IndexFnM ()
 
 -- Extract the Check to verify a formal argument's precondition, if it exists.
-getPrecondition :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe Check)
+getPrecondition :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM [Check]
 getPrecondition = fmap (fmap fst) . getRefinement
 
 -- Extract the Check to verify, and the Effect of, a formal argument's refinement, if it exists.
-getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe (Check, Effect))
+getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM [(Check, Effect)]
 getRefinement (E.PatParens pat _) = getRefinement pat
 getRefinement (E.PatAscription pat _ _) = getRefinement pat
 getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc) = getRefinementFromType [param] info
-getRefinement _ = pure Nothing
+getRefinement _ = pure []
 
 -- Associates any refinement in `ty` with the name `vn`.
-getRefinementFromType :: [E.VName] -> E.TypeBase dim u -> IndexFnM (Maybe (Check, Effect))
+getRefinementFromType :: [E.VName] -> E.TypeBase dim u -> IndexFnM [(Check, Effect)]
 getRefinementFromType vns ty = case ty of
   E.Array _ _ (E.Refinement _ ref) -> do
     hole <- sym2SoP . Hole <$> newVName "h"
-    Just <$> mkRef vns ((`Idx` hole) . Var) ref
+    pure <$> mkRef vns ((`Idx` hole) . Var) ref
   E.Scalar (E.Refinement _ ref) ->
-    Just <$> mkRef vns Var ref
-  _ -> pure Nothing
+    pure <$> mkRef vns Var ref
+  _ -> pure []
 
 mkRef :: [E.VName] -> (E.VName -> Symbol) -> E.Exp -> IndexFnM (Check, Effect)
 mkRef vns wrap refexp = case refexp of
@@ -1090,7 +1113,7 @@ mkRef vns wrap refexp = case refexp of
         [fn] -> body <$> rewrite fn
         _ -> error "Impossible: Refinements have return type bool."
 
-    repParam g (Just param_name, vn) = repCases (mkRep param_name $ wrap vn) g
+    repParam g (Just param_name, vn) = repCases (mkRep param_name $ sym2SoP (Var vn)) g
     repParam g (Nothing, _) = g
 
     -- This wraps a Check or an Effect, making sure that parameters/names/sizes
@@ -1142,6 +1165,18 @@ forwardPropertyPrelude f args =
         opToMonDir "<" = pure IncS
         opToMonDir "<=" = pure Inc
         opToMonDir _ = Nothing
+    "Range"
+      | [e_X, e_rng] <- getArgs args,
+        Just x <- justVName e_X -> do
+          f_rng <- forward e_rng
+          case f_rng of
+            [IndexFn Empty g_a, IndexFn Empty g_b] ->
+              fmap (IndexFn Empty) . simplify . cases $ do
+                (p_a, a) <- casesToList g_a
+                (p_b, b) <- casesToList g_b
+                pure (p_a :&& p_b, pr $ Property.Rng x (a, b))
+            _ ->
+              undefined
     "Injective"
       | [e_X] <- getArgs args,
         Just x <- justVName e_X -> do
@@ -1229,6 +1264,7 @@ forwardPropertyPrelude f args =
           -- f_X could simply be the trivial function: for i < n . true => X[i].)
           let iota = IndexFn (iterator f_X) (cases [(Bool True, sVar i)])
           _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
+          addRelIterator (iterator f_X)
           f_filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
           f_part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
 
@@ -1275,4 +1311,51 @@ parseOpVName vn =
     "<=" -> Just (:<=)
     "==" -> Just (:==)
     "!=" -> Just (:/=)
+    "+<" -> Just (\x y -> int2SoP 0 :<= x :&& x :< y)
     _ -> Nothing
+
+checkBounds :: E.Exp -> IndexFn -> IndexFn -> IndexFnM ()
+checkBounds _ (IndexFn Empty _) _ =
+  error "E.Index: Indexing into scalar"
+checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
+  df_start <- rewrite $ domainStart df
+  df_end <- rewrite $ domainEnd df
+  case df of
+    Cat _ _ b -> do
+      doCheck (\idx -> b :<= idx :|| df_start :<= idx)
+      doCheck (\idx -> idx :<= intervalEnd df :|| idx :<= df_end)
+    Iota _ -> do
+      doCheck (df_start :<=)
+      doCheck (:<= df_end)
+  where
+    doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
+    doCheck bound = do
+      _ <- foreachCase f_idx $ \n -> do
+        c <- isYes <$> queryCase (CaseCheck bound) f_idx n
+        when c $ printM 1 . locMsg (E.locOf e) $ prettyStr e <> greenString " OK"
+        unless c $ do
+          printExtraDebugInfo n
+          let (p_idx, e_idx) = getCase n $ body f_idx
+          errorMsg (E.locOf e) $
+            "Unsafe indexing: "
+              <> prettyStr e
+              <> " (failed to show: "
+              <> prettyStr p_idx
+              <> " => "
+              <> prettyStr (bound e_idx)
+              <> ")."
+      pure ()
+      where
+        -- TODO remove this.
+        printExtraDebugInfo n = do
+          env <- getAlgEnv
+          printM 1337 $
+            "Failed bounds-checking:"
+              <> "\nf_xs:"
+              <> prettyStr f_xs
+              <> "\nf_idx: "
+              <> prettyStr f_idx
+              <> "\nCASE f_idx: "
+              <> show n
+              <> "\nUnder AlgEnv:"
+              <> prettyStr env

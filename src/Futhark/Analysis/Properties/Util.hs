@@ -8,6 +8,8 @@ module Futhark.Analysis.Properties.Util
     warningString,
     errorMsg,
     emphString,
+    locMsg,
+    greenString,
   )
 where
 
@@ -63,8 +65,15 @@ warningMsg loc msg = do
   warningString $
     prettyString (locText (srclocOf loc)) <> ": " <> msg
 
+locMsg :: (Located a) => a -> String -> String
+locMsg loc msg = do
+  prettyString (locText (srclocOf loc)) <> ": " <> msg
+
 warningString :: String -> String
 warningString s = "\ESC[93m" <> s <> "\ESC[0m"
 
 emphString :: String -> String
 emphString s = "\ESC[95m\n|\n| " <> s <> "\n|\ESC[0m\n"
+
+greenString :: String -> String
+greenString s = "\ESC[92m" <> s <> "\ESC[0m"
