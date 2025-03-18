@@ -1,7 +1,7 @@
 -- Index function substitution.
 module Futhark.Analysis.Properties.Substitute ((@), subst) where
 
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
@@ -302,7 +302,7 @@ firstAlt (m : ms) = do
 checkBounds :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM Bool
 checkBounds (IndexFn Empty _) _ (_, []) = pure True
 checkBounds (IndexFn Empty _) _ _ = error "checkBounds: indexing into scalar"
-checkBounds (IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g $ do
+checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g $ do
   beg <- rewrite $ domainStart df
   end <- rewrite $ domainEnd df
   case df of
@@ -329,11 +329,37 @@ checkBounds (IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g $ 
         let (p_idx, e_idx) = getCase n $ body g
         need_to_check <- (||) <$> applyIn (sym2SoP p_idx) <*> applyIn e_idx
         if need_to_check
-          then isYes <$> queryCase (CaseCheck bound) g n
+          then do
+            c <- queryCase (CaseCheck bound) g n
+            unless (isYes c) $ do
+              printExtraDebugInfo n
+              -- error $
+              printM 10 . warningString $
+                "Unsafe indexing: "
+                  <> prettyString f_apply
+                  <> " (failed to show: "
+                  <> prettyString p_idx
+                  <> " => "
+                  <> prettyString (bound e_idx)
+                  <> ")."
+            pure (isYes c)
           else do
             printM 1337 $
               "doCheck skip case: apply not in " <> prettyString (p_idx, e_idx)
             pure True
+      where
+        printExtraDebugInfo n = do
+          env <- getAlgEnv
+          printM 1337 $
+            "Failed bounds-checking:"
+              <> "\nf:"
+              <> prettyString f
+              <> "\ng: "
+              <> prettyString g
+              <> "\nCASE g: "
+              <> show n
+              <> "\nUnder AlgEnv:"
+              <> prettyString env
 checkBounds _ _ _ = error "checkBounds: multi-dim not implemented yet"
 
 gray :: String -> String
