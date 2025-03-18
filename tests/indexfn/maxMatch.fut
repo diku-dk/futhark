@@ -208,6 +208,8 @@ def main [nEdges]
     -- Skipping loop; pre- and postconditions on each loop iteration
     -- is shown by loopBody.
     let (_, edgeIds', _, _, _) = loopBody edges edgeIds markedVerts smallestEdgeId includedEdges
+    -- NOTE this is _one_ iteration of the loop, because I removed the loop construct.
+    -- Hence the index function resulting below is not correct if the loop was there.
     in edgeIds'
 
 -- def MM [nVerts] [nEdges_2] (edges: [nEdges_2]i64) (edgeIds_all: [nEdges_2]i64) (markedVerts: *[nVerts]bool)
