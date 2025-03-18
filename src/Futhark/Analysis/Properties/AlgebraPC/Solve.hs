@@ -114,7 +114,8 @@ transClosInRangesSym sym = do
       error ( "Circular range encountered in sym: " ++ prettyString sym ++
               "\nDependent names: " ++ prettyString dep_names ++
               "\n" ++ prettyString ranges ++
-              "\n" ++ prettyString equivs
+              "\n" ++ prettyString equivs ++
+              "\n" ++ prettyString (free sym :: S.Set Symbol)
             )
   where
     transClosHelper :: (MonadSoP Symbol e Prop m) =>

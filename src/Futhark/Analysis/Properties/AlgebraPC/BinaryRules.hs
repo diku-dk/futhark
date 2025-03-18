@@ -17,6 +17,8 @@ import Futhark.SoP.FourierMotzkin qualified as FM
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.Analysis.Properties.Property (askMonotonic, askDisjoint)
+import Debug.Trace
+import Language.Futhark.Pretty (prettyString)
 
 -- import Futhark.Util.Pretty
 -- import Debug.Trace
@@ -62,6 +64,9 @@ matchMonIdxDif t1@(sym1, (ms1, k1)) t2@(sym2, (ms2, k2))
     Idx (One bnm) bidx <- sym2,
     anm == bnm && k1 == 0 - k2 = do
       mono <- askMonotonic (Var anm)
+      -- traceM $ "matchMonIdxDif " <> prettyString anm <> " mono " <> prettyString mono
+      -- rngs <- getRanges
+      -- traceM $ "matchMonIdxDif " <> prettyString rngs
       case mono of
         Nothing -> pure Nothing
         Just dir ->

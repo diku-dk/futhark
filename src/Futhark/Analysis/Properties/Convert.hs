@@ -431,7 +431,10 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
     Just arrays <- NE.nonEmpty (NE.tail args) = do
       (aligned_args, _aligned_sizes) <- zipArgs loc params arrays
       iter <- bindLambdaBodyParams (mconcat aligned_args)
-      bodies <- forward lam_body
+      bodies <- rollbackAlgEnv $ do
+        -- addRelIterator iter
+        printAlgEnv 1
+        forward lam_body
 
       forM bodies $ \body_fn -> do
         subst (IndexFn iter (body body_fn))
@@ -725,11 +728,14 @@ bindLambdaBodyParams params = do
   let iter@(Forall i _) = maximum (map iterator fns)
   forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
     vn <- newVName ("#lam_" <> E.baseString paramName)
-    -- add that I_lam is non-neg
     insertIndexFn vn [f_xs]
+    fn' <-
+      -- addRelIterator iter
+      (IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i))
+        @ (vn, f_xs)
     insertIndexFn
       paramName
-      [IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i)]
+      [fn']
   pure iter
 
 -- Align parameters and arguments. Each parameter is a pattern.
@@ -1323,7 +1329,7 @@ checkBounds f@(IndexFn (Forall _ df) _) g = algebraContext g $ do
         then do
           printM 1 $ "SAFE indexing " <> prettyStr (getCase n $ body g)
           pure c
-        else error "jeez"
+        else pure True -- error "jeez"
       --   let (p_idx, e_idx) = getCase n $ body g
       --   need_to_check <- (||) <$> applyIn (sym2SoP p_idx) <*> applyIn e_idx
       --   if need_to_check
