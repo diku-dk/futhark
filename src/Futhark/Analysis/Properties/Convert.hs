@@ -15,7 +15,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, fromAlgebra, isUnknown, isYes, orM, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn)
+import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn, intervalEnd, intervalStart)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (MonDir (..))
 import Futhark.Analysis.Properties.Property qualified as Property
@@ -32,6 +32,7 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
+import Futhark.Analysis.Properties.Traversals
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -161,11 +162,11 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
   where
     -- Adds the effect of a precondition without checking that it holds.
     addPreconditions pat = do
-      ref <- getRefinement pat
-      case ref of
-        Just (_, effect) -> effect emptyCheckContext
-        _ -> pure ()
       printM 1 $ "Adding precondition on " <> prettyStr pat
+      ref <- getRefinement pat
+      printM 1 $ "ref " <> prettyStr pat
+      forM_ ref $ \(_, effect) -> effect emptyCheckContext
+      printM 1 $ "ref " <> prettyStr pat
       printAlgEnv 1
 mkIndexFnValBind (E.ValBind _ vn _ _ _ params body _ _ _) = do
   insertTopLevelDef vn (params, body)
@@ -337,12 +338,15 @@ forward (E.AppExp (E.Index e_xs slice _loc) _)
       f_idxs <- forward e_idx
       forM (zip f_xss f_idxs) $ \(f_xs, f_idx) -> do
         xs <- case justVName e_xs of
-          Just vn -> pure vn
+          Just vn -> do
+            -- Indexing is in ANF; check bounds of f_idx.
+            checkBounds f_xs f_idx
+            pure vn
           Nothing -> do
-            vn <- newVName "I_xs"
+            vn <- newVName "#I_xs"
             insertIndexFn vn [f_xs]
             pure vn
-        idx <- newVName "I_idx"
+        idx <- newVName "#I_idx"
 
         -- We don't use substParams on f_xs because the substitution
         -- might fail here (e.g., if we are inside a map lambda).
@@ -365,8 +369,8 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
       vxs <- forward x'
       vys <- forward y'
       forM (zip vxs vys) $ \(vx, vy) -> do
-        a <- newVName "I_a"
-        b <- newVName "I_b"
+        a <- newVName "#I_a"
+        b <- newVName "#I_b"
         let doOp op =
               substParams
                 (IndexFn Empty (singleCase $ op (Var a) (Var b)))
@@ -593,6 +597,10 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
 forward (E.Coerce e _ _ _) = do
   -- No-op; I've only seen coercions that are hints for array sizes.
   forward e
+-- forward (E.AppExp (E.LetPat {}) _) = do
+--   -- dont try to create index fn but do forward on body to check indices
+--   -- (add ranges on loop var etc)
+--   -- let rest be an untranslatable fun
 forward e = do
   printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
   vn <- newVName $ "untrans(" <> prettyStr e <> ")"
@@ -692,14 +700,12 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       where
         -- TODO could probably be deduplicated by merging with mkEffectFromTypeExp.
         checkPatPrecondition scope pat size_rep = do
-          cond <- getPrecondition pat
-          ans <- case cond of
-            Nothing -> pure Yes
-            Just check -> do
-              printM 1 $
-                "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
-              check (size_rep, scope, name_rep)
-          unless (isYes ans) . errorMsg loc $
+          conds <- getPrecondition pat
+          answers <- forM conds $ \check -> do
+            printM 1 $
+              "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
+            check (size_rep, scope, name_rep)
+          unless (all isYes answers) . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
 forwardApplyDef _ _ _ = Nothing
 
@@ -718,7 +724,8 @@ bindLambdaBodyParams params = do
   fns <- renamesM (map snd params)
   let iter@(Forall i _) = maximum (map iterator fns)
   forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
-    vn <- newVName ("I_lam_" <> E.baseString paramName)
+    vn <- newVName ("#I_lam_" <> E.baseString paramName)
+    -- add that I_lam is non-neg
     insertIndexFn vn [f_xs]
     insertIndexFn
       paramName
@@ -1026,25 +1033,32 @@ type Check = CheckContext -> IndexFnM Answer
 type Effect = CheckContext -> IndexFnM ()
 
 -- Extract the Check to verify a formal argument's precondition, if it exists.
-getPrecondition :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe Check)
+getPrecondition :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM [Check]
 getPrecondition = fmap (fmap fst) . getRefinement
 
 -- Extract the Check to verify, and the Effect of, a formal argument's refinement, if it exists.
-getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM (Maybe (Check, Effect))
+getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM [(Check, Effect)]
 getRefinement (E.PatParens pat _) = getRefinement pat
 getRefinement (E.PatAscription pat _ _) = getRefinement pat
 getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc) = getRefinementFromType [param] info
-getRefinement _ = pure Nothing
+getRefinement _ = pure []
 
 -- Associates any refinement in `ty` with the name `vn`.
-getRefinementFromType :: [E.VName] -> E.TypeBase dim u -> IndexFnM (Maybe (Check, Effect))
-getRefinementFromType vns ty = case ty of
-  E.Array _ _ (E.Refinement _ ref) -> do
-    hole <- sym2SoP . Hole <$> newVName "h"
-    Just <$> mkRef vns ((`Idx` hole) . Var) ref
-  E.Scalar (E.Refinement _ ref) ->
-    Just <$> mkRef vns Var ref
-  _ -> pure Nothing
+getRefinementFromType :: [E.VName] -> E.TypeBase dim u -> IndexFnM [(Check, Effect)]
+getRefinementFromType vns = get Var
+  where
+    get :: (E.VName -> Symbol) -> E.TypeBase dim u -> IndexFnM [(Check, Effect)]
+    get wrap ty = case ty of
+      E.Array _ _ (E.Refinement ty' ref) -> do
+        hole <- sym2SoP . Hole <$> newVName "h"
+        r <- mkRef vns ((`Idx` hole) . Var) ref
+        rs <- get ((`Idx` hole) . Var) ty'
+        pure $ r : rs
+      E.Scalar (E.Refinement ty' ref) -> do
+        r <- mkRef vns Var ref
+        rs <- get wrap ty'
+        pure $ r : rs
+      _ -> pure []
 
 mkRef :: [E.VName] -> (E.VName -> Symbol) -> E.Exp -> IndexFnM (Check, Effect)
 mkRef vns wrap refexp = case refexp of
@@ -1063,22 +1077,29 @@ mkRef vns wrap refexp = case refexp of
                     -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
                     alg_vn <- paramToAlgebra name wrap
                     y <- rewrite $ flattenCases (body f)
+                    printM 1 $ "y " <> prettyStr y
                     addRelSymbol $ sVar alg_vn `rel` y
                 )
                 g
         pure (check, effect)
   E.Lambda lam_params lam_body _ _ loc -> do
+    printM 1 $ "mkRef " <> prettyStr vns <> " " <> prettyStr (wrap (head vns)) <> " " <> prettyStr refexp
     let param_names = map fst $ mconcat $ map patternMapAligned lam_params
     ref <- forwardRefinementExp lam_body
     unless (length vns >= length (catMaybes param_names)) . errorMsg loc $
       "Internal error: mkRef: " <> prettyStr refexp
-    let ref' = foldl repParam ref (zip param_names vns)
+    let ref' = foldl (repParam $ sym2SoP . Var) ref (zip param_names vns)
+    printM 1 $ "mkRef ref' " <> prettyStr ref'
     let check = inContext askRefinement ref'
     let effect =
           inContext
             ( \f -> do
+                alg_vns <- mapM (\name -> sVar <$> paramToAlgebra name wrap) vns
                 y <- rewrite $ flattenCases (body f)
-                addRelSymbol (sop2Symbol y)
+                -- Might contain holes:
+                let y_holed = foldl (repParam' wrap) y (zip param_names vns)
+                let y' = rep (mkRepFromList (zip vns alg_vns)) y_holed
+                addRelSymbol (sop2Symbol y')
             )
             ref'
     pure (check, effect)
@@ -1090,8 +1111,11 @@ mkRef vns wrap refexp = case refexp of
         [fn] -> body <$> rewrite fn
         _ -> error "Impossible: Refinements have return type bool."
 
-    repParam g (Just param_name, vn) = repCases (mkRep param_name $ wrap vn) g
-    repParam g (Nothing, _) = g
+    repParam wrapper g (Just param_name, vn) = repCases (mkRep param_name $ wrapper vn) g
+    repParam _ g (Nothing, _) = g
+
+    repParam' wrapper g (Just param_name, vn) = rep (mkRep param_name $ wrapper vn) g
+    repParam' _ g (Nothing, _) = g
 
     -- This wraps a Check or an Effect, making sure that parameters/names/sizes
     -- are substituted correctly at the evaluation site.
@@ -1276,3 +1300,70 @@ parseOpVName vn =
     "==" -> Just (:==)
     "!=" -> Just (:/=)
     _ -> Nothing
+
+checkBounds f@(IndexFn (Forall _ df) _) g = algebraContext g $ do
+  beg <- rewrite $ domainStart df
+  end <- rewrite $ domainEnd df
+  case df of
+    Iota {} -> do
+      (&&)
+        <$> doCheck (beg :<=)
+        <*> doCheck (:<= end)
+    Cat {} -> do
+      interval_beg <- rewrite $ intervalStart df
+      interval_end <- rewrite $ intervalEnd df
+      (&&)
+        <$> doCheck (\e -> beg :<= e :|| interval_beg :<= e)
+        <*> doCheck (\e -> e :<= end :|| interval_end :<= e)
+  where
+    doCheck bound =
+      fmap and . foreachCase g $ \n -> do
+        c <- isYes <$> queryCase (CaseCheck bound) g n
+        if c
+        then do
+          printM 1 $ "SAFE indexing " <> prettyStr (getCase n $ body g)
+          pure c
+        else error "jeez"
+      --   let (p_idx, e_idx) = getCase n $ body g
+      --   need_to_check <- (||) <$> applyIn (sym2SoP p_idx) <*> applyIn e_idx
+      --   if need_to_check
+      --     then do
+      --       c <- queryCase (CaseCheck bound) g n
+      --       if isYes c
+      --       then do
+      --         printM 2 $ "SAFE indexing: " <> prettyStr f_apply
+      --       else do
+      --         unless (isInternalVar f_apply) $ do
+      --           printExtraDebugInfo n
+      --           -- error $
+      --           printM 10 . warningString $
+      --             "Unsafe indexing: "
+      --               <> prettyStr f_apply
+      --               <> " (failed to show: "
+      --               <> prettyStr p_idx
+      --               <> " => "
+      --               <> prettyStr (bound e_idx)
+      --               <> ")."
+      --       pure (isYes c)
+      --     else do
+      --       printM 1337 $
+      --         "doCheck skip case: apply not in " <> prettyStr (p_idx, e_idx)
+      --       pure True
+      -- where
+      --   isInternalVar (Var vn) = "#" `L.isPrefixOf` E.baseString vn
+      --   isInternalVar _ = False
+
+      --   printExtraDebugInfo n = do
+      --     env <- getAlgEnv
+      --     printM 1337 $
+      --       "Failed bounds-checking:"
+      --         <> "\nf:"
+      --         <> prettyStr f
+      --         <> "\ng: "
+      --         <> prettyStr g
+      --         <> "\nCASE g: "
+      --         <> show n
+      --         <> "\nUnder AlgEnv:"
+      --         <> prettyStr env
+checkBounds _ _ = error "checkBounds: not implemented yet"
+

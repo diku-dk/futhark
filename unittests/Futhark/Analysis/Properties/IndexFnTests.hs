@@ -443,6 +443,17 @@ tests =
                       [(Bool True, sym2SoP $ Idx (Hole is_inv) (sHole i))]
                 }
             ]
+        ),
+      mkTest
+        "tests/indexfn/kmeans_kernel.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { iterator = Forall i (Iota (sHole n)),
+                  body =
+                    cases
+                      [(Bool True, sym2SoP $ Idx (Hole xs) (sHole i))]
+                }
+            ]
         )
     ]
   where
