@@ -46,11 +46,14 @@ data Predicate u = Predicate VName u
 data MonDir = Inc | IncS | Dec | DecS
   deriving (Show, Eq, Ord)
 
+instance Pretty MonDir where
+  pretty = viaShow
+
 instance (Pretty u) => Pretty (Property u) where
   pretty Boolean = "Boolean"
   pretty (Disjoint s) =
     "Disjoint" <+> parens (commasep $ map prettyName $ S.toList s)
-  pretty (Monotonic x dir) = "Mono" <+> prettyName x <+> viaShow dir
+  pretty (Monotonic x dir) = "Mono" <+> prettyName x <+> pretty dir
   pretty (Injective x rcd) =
     "InjectiveRCD" <+> prettyName x <+> parens (pretty rcd)
   pretty (BijectiveRCD x rcd img) =
