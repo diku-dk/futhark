@@ -343,10 +343,10 @@ forward (E.AppExp (E.Index e_xs slice _loc) _)
             checkBounds f_xs f_idx
             pure vn
           Nothing -> do
-            vn <- newVName "#I_xs"
+            vn <- newVName "#xs"
             insertIndexFn vn [f_xs]
             pure vn
-        idx <- newVName "#I_idx"
+        idx <- newVName "#idx"
 
         -- We don't use substParams on f_xs because the substitution
         -- might fail here (e.g., if we are inside a map lambda).
@@ -369,8 +369,8 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
       vxs <- forward x'
       vys <- forward y'
       forM (zip vxs vys) $ \(vx, vy) -> do
-        a <- newVName "#I_a"
-        b <- newVName "#I_b"
+        a <- newVName "#a"
+        b <- newVName "#b"
         let doOp op =
               substParams
                 (IndexFn Empty (singleCase $ op (Var a) (Var b)))
@@ -724,7 +724,7 @@ bindLambdaBodyParams params = do
   fns <- renamesM (map snd params)
   let iter@(Forall i _) = maximum (map iterator fns)
   forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
-    vn <- newVName ("#I_lam_" <> E.baseString paramName)
+    vn <- newVName ("#lam_" <> E.baseString paramName)
     -- add that I_lam is non-neg
     insertIndexFn vn [f_xs]
     insertIndexFn
