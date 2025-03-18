@@ -79,6 +79,12 @@ def filterBy [n] 't (cs: [n]bool) (xs: [n]t)
   let xs' = scatter scratch is xs
   in (new_n, xs')
 
+def filter [n] 't (p: t -> bool) (xs: [n]t)
+    : {(i64, []t) | \(_, ys) -> FiltPart ys xs (\i -> p xs[i]) (\_i -> true)} =
+  let cs = map (\x -> p x) xs
+  let (m, zs) = filterBy cs xs
+  in (m, zs)
+
 def length [n] 't (_xs: [n]t) = n
 
 -- 

@@ -193,12 +193,18 @@ checkPostcondition vn indexfns te = do
       when (length actual_names == length param_names) $ do
         let aligned = catMaybes $ zipWith (\x y -> (x,) <$> (sym2SoP . Var <$> y)) actual_names param_names
         let name_rep = mkRepFromList aligned
+        printM 1 $ "name_rep " <> prettyStr name_rep
 
         forM_ aligned $ \(actual, _) -> do
+          printM 1 $ "actual " <> prettyStr actual
           props <- (M.!? Algebra.Var actual) <$> getProperties
+          printM 1 $ "props " <> prettyStr props
           case S.toList <$> props of
             Just ps -> do
               forM_ ps $ \p -> do
+                -- tf <- Prop . repProperty name_rep <$> fromAlgebra p
+                -- printM 1 $ "tf " <> prettyStr tf
+                -- addRelSymbol tf
                 addRelSymbol . Prop . repProperty name_rep =<< fromAlgebra p
             Nothing -> pure ()
 

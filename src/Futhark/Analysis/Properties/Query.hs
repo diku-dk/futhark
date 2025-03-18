@@ -195,8 +195,8 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           | y' == y -> do
             -- Check equivalent RCDs.
             -- TODO could check that rcd is a subset of rcd'.
-            s' <- unify wts =<< fromAlgebra (Injective y rcd')
-            if isJust (s' :: Maybe (Substitution Symbol))
+            s <- unify wts =<< fromAlgebra (Injective y rcd')
+            if isJust (s :: Maybe (Substitution Symbol))
               then pure Yes
               else pure Unknown
         _ -> pure Unknown
@@ -205,8 +205,18 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       case res of
         Just (FiltPartInv y' pf' pps') | y' == y -> do
           -- If the predicates and split points are equivalent, we are done.
-          s' <- unify wts =<< fromAlgebra (FiltPartInv y' pf' pps')
-          if isJust (s' :: Maybe (Substitution Symbol))
+          s <- unify wts =<< fromAlgebra (FiltPartInv y' pf' pps')
+          if isJust (s :: Maybe (Substitution Symbol))
+            then pure Yes
+            else pure Unknown
+        _ -> pure Unknown
+    alreadyKnown wts@(FiltPart y x _ _) = do
+      res <- askFiltPart (Algebra.Var y)
+      case res of
+        Just (FiltPart y' x' pf' pps') | y' == y, x == x' -> do
+          -- If the predicates and split points are equivalent, we are done.
+          s <- unify wts =<< fromAlgebra (FiltPart y' x' pf' pps')
+          if isJust (s :: Maybe (Substitution Symbol))
             then pure Yes
             else pure Unknown
         _ -> pure Unknown

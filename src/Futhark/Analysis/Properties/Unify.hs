@@ -346,7 +346,7 @@ unifyTuple k (a, b) (a', b') = do
   s <- unify_ k a a'
   (s <>) <$> unify_ k (rep s b) (rep s b')
 
-repPredicate :: (Rep u u) =>Replacement u -> Predicate u -> Predicate u
+repPredicate :: (Rep u u) => Replacement u -> Predicate u -> Predicate u
 repPredicate s (Predicate vn e) =
   let s' = M.delete vn s
    in Predicate vn (repSelf s' e)
@@ -369,19 +369,23 @@ instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Property a)
     s2 <- unifyTuple k (repTuple s1 rcd1) (repTuple s1 rcd2)
     s3 <- unifyTuple k (repTuple (s1 <> s2) img1) (repTuple (s1 <> s2) img2)
     pure (s1 <> s2 <> s3)
-  unify_ k (FiltPartInv x pf1 pps1) (FiltPartInv y pf2 pps2) = do
-    s1 <- unify_ k x y
+  unify_ k (FiltPartInv x pf1 pps1) (FiltPartInv y pf2 pps2) | x == y = do
     let (pp1, splits1) = unzip pps1
     let (pp2, splits2) = unzip pps2
-    s2 <- unifies_ k (map (rep s1) splits1) (map (rep s1) splits2)
-    let s' = s1 <> s2
-    (s' <>) <$> unifiesPredicates (zip (map (repPredicate s') $ pf1 : pp1) (map (repPredicate s') $ pf2 : pp2))
-    where
-      unifiesPredicates [] = pure mempty
-      unifiesPredicates (u : us) = do
-        s0 <- uncurry (unify_ k) u
-        foldM (\s (a, b) -> (s <>) <$> unify_ k (repPredicate s a) (repPredicate s b)) s0 us
+    s <- unifies_ k splits1 splits2
+    (s <>) <$> unifiesPredicates k (zip (map (repPredicate s) $ pf1 : pp1) (map (repPredicate s) $ pf2 : pp2))
+  unify_ k (FiltPart y x pf1 pps1) (FiltPart y' x' pf2 pps2) | y == y', x == x' = do
+    let (pp1, splits1) = unzip pps1
+    let (pp2, splits2) = unzip pps2
+    s <- unifies_ k splits1 splits2
+    (s <>) <$> unifiesPredicates k (zip (map (repPredicate s) $ pf1 : pp1) (map (repPredicate s) $ pf2 : pp2))
   unify_ _ _ _ = fail "no unify"
+
+unifiesPredicates :: (Ord u, Rep u u, Unify u u, Hole u) => VName -> [(Predicate u, Predicate u)] -> MaybeT IndexFnM (Replacement u)
+unifiesPredicates _ [] = pure mempty
+unifiesPredicates k (u : us) = do
+  s0 <- uncurry (unify_ k) u
+  foldM (\s (a, b) -> (s <>) <$> unify_ k (repPredicate s a) (repPredicate s b)) s0 us
 
 instance (FreeVariables u, FreeVariables v) => FreeVariables (u, v) where
   fv (a, b) = fv a <> fv b
