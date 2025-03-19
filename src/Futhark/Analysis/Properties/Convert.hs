@@ -15,7 +15,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, fromAlgebra, isUnknown, isYes, orM, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, repCases, repIndexFn, intervalEnd)
+import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (MonDir (..))
 import Futhark.Analysis.Properties.Property qualified as Property
@@ -429,7 +429,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
       errorMsg loc $
-        "Only anonymous functions may be passed as argument. Perhaps you want to eta-expand: "
+        "map takes lambda as first argument. Perhaps you want to eta-expand: "
           <> prettyStr (head $ getArgs args)
   | Just "replicate" <- getFun f,
     [e_n, e_x] <- getArgs args = do
@@ -604,6 +604,18 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
                   }
           fn <- substParams g_fn (zip arg_names arg_fns)
           pure [fn]
+forward e@(E.AppExp (E.Loop _sz _init_pat _init (E.For ident e_sz) e_body loc) _) = do
+  let i = E.identName ident
+  f_szs <- forward e_sz
+  case map justSingleCase f_szs of
+    [Just sz] -> do
+      addRelSymbol (Prop $ Property.Rng i (int2SoP 0, sz))
+      printM 1 $
+        warningMsg loc "Analyzing loop body, but resulting index function will be uninterpreted."
+      _ <- forward e_body
+      vn <- newVName $ "untrans(" <> prettyStr e <> ")"
+      pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
+    _ -> error "not implemented yet"
 forward (E.Coerce e _ _ _) = do
   -- No-op; I've only seen coercions that are hints for array sizes.
   forward e

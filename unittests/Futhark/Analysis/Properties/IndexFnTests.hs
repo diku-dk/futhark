@@ -443,6 +443,18 @@ tests =
                       [(Bool True, sym2SoP $ Idx (Hole is_inv) (sHole i))]
                 }
             ]
+        ),
+      mkTest
+        "tests/indexfn/kmeans_kernel.fut"
+        ( pure $ \(anything, _, _, _) ->
+            -- Match anything here; this test merely checks bounds in the program.
+            [ IndexFn
+                { iterator = Empty,
+                  body =
+                    cases
+                      [(Bool True, sHole anything)]
+                }
+            ]
         )
     ]
   where
