@@ -1338,12 +1338,12 @@ checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
     Iota _ -> do
       doCheck (df_start :<=)
       doCheck (:<= df_end)
+  printM 1 . locMsg (E.locOf e) $ prettyStr e <> greenString " OK"
   where
     doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
     doCheck bound = do
       _ <- foreachCase f_idx $ \n -> do
         c <- isYes <$> queryCase (CaseCheck bound) f_idx n
-        when c $ printM 1 . locMsg (E.locOf e) $ prettyStr e <> greenString " OK"
         unless c $ do
           printExtraDebugInfo n
           let (p_idx, e_idx) = getCase n $ body f_idx
