@@ -206,10 +206,12 @@ def loopBody [arraySizeFlat] [nVerts]
     let smallestEdgeId = resetsmallestEdgeId smallestEdgeId
     in (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges)
 
+def i64_maximum xs = i64.maximum xs
+
 def main [nEdges_2]
     -- (edges_enc: *[nEdges][2]i64)
     (nVerts: i64)
-    (edges: {*[nEdges_2]i64 | \x -> Range x (0, nVerts) && nVerts == i64.maximum x + 1})
+    (edges: {*[nEdges_2]i64 | \x -> Range x (0, nVerts) && nVerts == i64_maximum x + 1})
     : {[]i64 | \edgeIds' -> Injective edgeIds' }
     =
     -- let edges = flatten edges_enc
