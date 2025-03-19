@@ -6,7 +6,7 @@ def kmeansKer_body [num_cols] [nnz]
     (cluster: [num_cols]f32)
     (pointers: {[n + 1]i64 | \x -> Range x (0,infinity) && Monotonic (<=) x})
     (values: {[nnz]f32 | \_ -> nnz == pointers[n]})
-    (indices_data: {[nnz]i64 | \x -> Range x (0, num_cols) && nnz == pointers[n]})
+    (indices_data: {[nnz]i64 | \x -> Range x (0, num_cols)})
     : {f32 | \_ -> true} =
   let index_start = pointers[row]
   let nnz_sgm = pointers[row+1] - index_start
