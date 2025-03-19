@@ -745,7 +745,6 @@ bindLambdaBodyParams params = do
     let k_rep =
           fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
-    -- insertIndexFn paramName [IndexFn Empty cs]
   pure iter
 
 -- Align parameters and arguments. Each parameter is a pattern.
