@@ -130,7 +130,11 @@ p =>? q = do
 infixl 8 =>?
 
 check :: Symbol -> IndexFnM Answer
-check (a :&& b) = check a `andM` check b
+check (a :&& b) = do
+  ans <- check a
+  case ans of
+    Yes -> addRelSymbol a >> check b
+    Unknown -> pure Unknown
 check (a :|| b) = check a `orM` check b
 check (a :== b) = a $== b
 check (a :/= b) = a $/= b
@@ -138,10 +142,15 @@ check (a :> b) = a $> b
 check (a :>= b) = a $>= b
 check (a :< b) = a $< b
 check (a :<= b) = a $<= b
-check (Prop prop) = failOnUnknown <$> prove prop
+check (Prop prop) = do
+  ans <- prove prop
+  when (isYes ans) . printM 5 $ "Verifying "  <> prettyStr prop <> "... " <> greenString "OK"
+  failOnUnknown ans
   where
-    failOnUnknown Unknown = error $ "Failed to verify " <> prettyStr prop
-    failOnUnknown Yes = Yes
+    failOnUnknown Unknown = do
+      printAlgEnv 10
+      error $ "Failed to verify " <> prettyStr prop
+    failOnUnknown Yes = pure Yes
 check a = isTrue a
 
 foreachCase :: IndexFn -> (Int -> IndexFnM a) -> IndexFnM [a]
@@ -294,6 +303,19 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                       )
                     ]
               }
+      -- let pattern_Y_iota_X = -- Only case where we can substitute the indirect indexing.
+      --       IndexFn
+      --         { iterator = Forall i $ Iota n,
+      --           body =
+      --             cases
+      --               [ ( Bool True,
+      --                   sym2SoP $ Idx (Hole is_inv_hole) (sym2SoP $ Hole i)
+      --                 )
+      --               ]
+      --         }
+      -- s1 <- unify pattern_Y f_Y
+      -- s2 <- unify pattern_Y_iota_X f_Y
+      -- let s = s1 <|> s2
       s <- unify pattern_Y f_Y
       -- Get is (the inverse of is^-1).
       let is_inv = justName =<< (M.!? is_inv_hole) . mapping =<< s
