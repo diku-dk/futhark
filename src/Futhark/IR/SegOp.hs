@@ -581,10 +581,12 @@ typeCheckSegOp ::
   TC.TypeM rep ()
 typeCheckSegOp checkLvl (SegMap lvl space ts kbody) = do
   checkLvl lvl
-  checkScanRed space [] ts kbody
+  checkSegSpace space
+  TC.binding (scopeOfSegSpace space) $ checkScanRed [] ts kbody
 typeCheckSegOp checkLvl (SegRed lvl space ts body reds) = do
   checkLvl lvl
-  checkScanRed space reds' ts body
+  checkSegSpace space
+  TC.binding (scopeOfSegSpace space) $ checkScanRed reds' ts body
   where
     reds' =
       zip3
@@ -593,8 +595,10 @@ typeCheckSegOp checkLvl (SegRed lvl space ts body reds) = do
         (map segBinOpShape reds)
 typeCheckSegOp checkLvl (SegScan lvl space ts body scans post_op) = do
   checkLvl lvl
-  checkScanRed space scans' ts body
-  checkSegPostOp space post_op scans'
+  checkSegSpace space
+  TC.binding (scopeOfSegSpace space) $ do
+    checkScanRed scans' ts body
+    checkSegPostOp post_op scans'
   where
     scans' =
       zip3
@@ -652,64 +656,58 @@ typeCheckSegOp checkLvl (SegHist lvl space ts kbody ops) = do
 
 checkSegPostOp ::
   (TC.Checkable rep) =>
-  SegSpace ->
   SegPostOp (Aliases rep) ->
   [(Lambda (Aliases rep), [SubExp], Shape)] ->
   TC.TypeM rep ()
-checkSegPostOp space op@(SegPostOp lam spec) ops = do
-  TC.binding (scopeOfSegSpace space) $ do
-    let nes = concatMap (\(_, a, _) -> a) ops
-    nes' <- mapM TC.checkArg nes
-    TC.checkLambda lam $ map TC.noArgAliases nes'
-    let (idxs, ts, _) = splitPostOpResults op $ lambdaReturnType lam
-    forM_ idxs $ \i -> do
-      unless (Prim int64 == i) $
-        TC.bad $
-          TC.TypeError "PostOp: Index return type must be i64."
+checkSegPostOp op@(SegPostOp lam spec) ops = do
+  let nes = concatMap (\(_, a, _) -> a) ops
+  nes' <- mapM TC.checkArg nes
+  TC.checkLambda lam $ map TC.noArgAliases nes'
+  let (idxs, ts, _) = splitPostOpResults op $ lambdaReturnType lam
+  forM_ idxs $ \i -> do
+    unless (Prim int64 == i) $
+      TC.bad $
+        TC.TypeError "PostOp: Index return type must be i64."
 
-    forM_ (zip ts spec) $ \(t, (dest_shape, _, dest)) -> do
-      TC.requireI [t `arrayOfShape` dest_shape] dest
-      TC.consume =<< TC.lookupAliases dest
-  pure ()
+  forM_ (zip ts spec) $ \(t, (dest_shape, _, dest)) -> do
+    TC.requireI [t `arrayOfShape` dest_shape] dest
+    TC.consume =<< TC.lookupAliases dest
 
 checkScanRed ::
   (TC.Checkable rep) =>
-  SegSpace ->
   [(Lambda (Aliases rep), [SubExp], Shape)] ->
   [Type] ->
   KernelBody (Aliases rep) ->
   TC.TypeM rep ()
-checkScanRed space ops ts kbody = do
-  checkSegSpace space
+checkScanRed ops ts kbody = do
   mapM_ TC.checkType ts
 
-  TC.binding (scopeOfSegSpace space) $ do
-    ne_ts <- forM ops $ \(lam, nes, shape) -> do
-      mapM_ (TC.require [Prim int64]) $ shapeDims shape
-      nes' <- mapM TC.checkArg nes
+  ne_ts <- forM ops $ \(lam, nes, shape) -> do
+    mapM_ (TC.require [Prim int64]) $ shapeDims shape
+    nes' <- mapM TC.checkArg nes
 
-      -- Operator type must match the type of neutral elements.
-      TC.checkLambda lam $ map TC.noArgAliases $ nes' ++ nes'
-      let nes_t = map TC.argType nes'
+    -- Operator type must match the type of neutral elements.
+    TC.checkLambda lam $ map TC.noArgAliases $ nes' ++ nes'
+    let nes_t = map TC.argType nes'
 
-      unless (lambdaReturnType lam == nes_t) $
-        TC.bad $
-          TC.TypeError "wrong type for operator or neutral elements."
-
-      pure $ map (`arrayOfShape` shape) nes_t
-
-    let expecting = concat ne_ts
-        got = take (length expecting) ts
-    unless (expecting == got) $
+    unless (lambdaReturnType lam == nes_t) $
       TC.bad $
-        TC.TypeError $
-          "Wrong return for body (does not match neutral elements; expected "
-            <> prettyText expecting
-            <> "; found "
-            <> prettyText got
-            <> ")"
+        TC.TypeError "wrong type for operator or neutral elements."
 
-    checkKernelBody ts kbody
+    pure $ map (`arrayOfShape` shape) nes_t
+
+  let expecting = concat ne_ts
+      got = take (length expecting) ts
+  unless (expecting == got) $
+    TC.bad $
+      TC.TypeError $
+        "Wrong return for body (does not match neutral elements; expected "
+          <> prettyText expecting
+          <> "; found "
+          <> prettyText got
+          <> ")"
+
+  checkKernelBody ts kbody
 
 -- | Like 'Mapper', but just for 'SegOp's.
 data SegOpMapper lvl frep trep m = SegOpMapper
