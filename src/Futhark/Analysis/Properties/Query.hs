@@ -357,25 +357,8 @@ nextGenProver (PInjGe i j d ges) = rollbackAlgEnv $ do
 
     no_dups (c, e) = rollbackAlgEnv $ do
       -- PROOF of e(i) = e(j) => i = j.
-      -- Assume e @ i == e @ j by syntactical substitution in c @ j.
-      c_j' <-
-        sop2Symbol
-          <$> astMap
-            ( identityMapper
-                { mapOnSoP = \sym ->
-                    -- It is sufficient to mapOnSoP.
-                    -- 1. c @ j converts c to a SoP.
-                    -- 2. e is a SoP; hence if nested inside c, then it will be
-                    -- there also as a SoP.
-                    if sym == (e @ j :: SoP Symbol)
-                      then pure (e @ i)
-                      else pure sym
-                }
-            )
-            (c @ j)
-      p <- simplify =<< eqSolver (sop2Symbol (c @ i) :&& c_j' :&& e @ i :== e @ j)
-      printM 10 $ "no_dups " <> prettyStr (sop2Symbol (c @ i) :&& e @ i :== e @ j)
-      printM 10 $ "no_dups " <> prettyStr p
+      p <- simplify =<< eqSolver (e @ i, e @ j) (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
+      printM 10 $ "     --> " <> prettyStr p
 
       -- TODO this caused an infinite loop somewhere on maxMatch.fut?
       --      (Add RCD to PInjGE if you want to add this again.)

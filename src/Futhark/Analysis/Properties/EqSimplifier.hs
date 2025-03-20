@@ -52,11 +52,29 @@ transitiveEqs (Node root trees) = concatMap go (skipDirectSucc trees)
               Solver for Symbol.
 -}
 
-eqSolver :: Symbol -> IndexFnM Symbol
-eqSolver p = do
+-- The first argument "guides" the solving by making a syntactical
+-- substitution {a |-> b} in p and then enriching p with a == b afterwards.
+eqSolver :: Equality (SoP Symbol) -> Symbol -> IndexFnM Symbol
+eqSolver (a,b) p = do
+  -- Assume a == b by syntactical substitution in p.
+  p' <-
+    sop2Symbol
+      <$> astMap
+        ( identityMapper
+            { mapOnSoP = \sym ->
+                if sym == (b :: SoP Symbol)
+                  then pure a
+                  else pure sym
+            }
+        )
+        (sym2SoP p)
+  printM 10 $ "eqSolver " <> prettyStr (a,b) <> " " <> prettyStr p
+  -- Make sure we don't lose the original equality. (E.g., if p = (a == b).)
+  let p'' = p' :&& a :== b
+  printM 10 $ "     --> " <> prettyStr p''
   -- TODO change this to also include the equalities transformed by astMap m?
   -- For example, x[i] = x[j] => i = j, returns only i = j, replacing x[i] = x[j].
-  fixPointM (astMap rules) (foldl (:&&) p (getTransitiveEqs p))
+  fixPointM (astMap rules) (foldl (:&&) p'' (getTransitiveEqs p''))
   where
     getTransitiveEqs = map fromEquality . concatMap transitiveEqs . equivST . getEqualities
 
