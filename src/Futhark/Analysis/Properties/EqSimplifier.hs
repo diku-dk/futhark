@@ -54,8 +54,8 @@ transitiveEqs (Node root trees) = concatMap go (skipDirectSucc trees)
 
 -- The first argument "guides" the solving by making a syntactical
 -- substitution {a |-> b} in p and then enriching p with a == b afterwards.
-eqSolver :: Equality (SoP Symbol) -> Symbol -> IndexFnM Symbol
-eqSolver (a,b) p = do
+eqSolver :: Symbol -> Symbol -> IndexFnM Symbol
+eqSolver (a :== b) p = do
   printM 10 $ "eqSolver " <> prettyStr (a,b) <> " " <> prettyStr p
   -- Assume a == b by syntactical substitution in p.
   p' <-
@@ -92,6 +92,7 @@ eqSolver (a,b) p = do
         { mapOnSymbol = applyRuleBook eqSolverRules,
           mapOnSoP = pure
         }
+eqSolver _ _ = error "eqSolver not implemented for this guide"
 
 eqSolverRules :: IndexFnM [Rule Symbol Symbol IndexFnM]
 eqSolverRules = do

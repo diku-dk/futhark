@@ -270,7 +270,8 @@ prove prop = alreadyKnown prop `orM` matchProof prop
               let strat2 = algebraContext f_x $ do
                     j <- newNameFromString "j"
                     gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
-                    nextGenProver (PInjGe i j d gs rcd)
+                    let x_at ident = sym2SoP $ Idx (Var x) (sym2SoP (Var ident))
+                    nextGenProver (PInjGe i j d gs rcd (x_at i :== x_at j))
               strat1 `orM` strat2
         _ -> do
           f_y <- getFn y
@@ -279,7 +280,8 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                 IndexFn Empty _ -> pure Yes
                 IndexFn (Forall i d) gs -> algebraContext f_y $ do
                   j <- newNameFromString "j"
-                  nextGenProver (PInjGe i j d gs rcd)
+                  let y_at ident = sym2SoP $ Idx (Var y) (sym2SoP (Var ident))
+                  nextGenProver (PInjGe i j d gs rcd (y_at i :== y_at j))
           strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
@@ -326,12 +328,12 @@ proveFn (ForallSegments fprop) f@(IndexFn (Forall _ (Cat k _ _)) _) =
 proveFn prop f = prove_ False prop f
 
 data PStatement
-  = -- Fresh i; fresh j; domain of index function; cases of index function.
-    PInjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol))
+  = -- Fresh i; fresh j; domain of index function; cases of index function; RCD; guiding equation.
+    PInjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol)) Symbol
   | PFiltPart VName (Predicate Symbol) (Predicate Symbol, SoP Symbol)
 
 nextGenProver :: PStatement -> IndexFnM Answer
-nextGenProver (PInjGe i j d ges rcd) = rollbackAlgEnv $ do
+nextGenProver (PInjGe i j d ges rcd guide) = rollbackAlgEnv $ do
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
   addRelIterator iter_i
   addRelIterator iter_j
@@ -344,7 +346,7 @@ nextGenProver (PInjGe i j d ges rcd) = rollbackAlgEnv $ do
 
     no_dups (c, e) = rollbackAlgEnv $ do
       -- PROOF of e(i) = e(j) => i = j.
-      p <- simplify =<< eqSolver (e @ i, e @ j) (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
+      p <- simplify =<< eqSolver guide (sop2Symbol (c @ i) :&& sop2Symbol (c @ j) :&& (e @ i) :== (e @ j))
       printM 10 $ "     --> " <> prettyStr p
 
       let oob = case rcd of
