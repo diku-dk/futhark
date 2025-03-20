@@ -310,8 +310,11 @@ dimMapping' t1 t2 = M.mapMaybe f $ dimMapping t1 t2
     f _ = Nothing
 
 sizesToRename :: StaticVal -> S.Set VName
-sizesToRename (DynamicFun (_, sv1) sv2) =
-  sizesToRename sv1 <> sizesToRename sv2
+sizesToRename (DynamicFun (_, sv1) _sv2) =
+  -- It is intentional that we do not look at sv2 here, as some names
+  -- that are free in sv2 are actually bound by the parameters in sv1.
+  -- See #2234.
+  sizesToRename sv1
 sizesToRename IntrinsicSV =
   mempty
 sizesToRename HoleSV {} =
