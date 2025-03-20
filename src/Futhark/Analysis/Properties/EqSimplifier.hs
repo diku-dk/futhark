@@ -56,6 +56,7 @@ transitiveEqs (Node root trees) = concatMap go (skipDirectSucc trees)
 -- substitution {a |-> b} in p and then enriching p with a == b afterwards.
 eqSolver :: Equality (SoP Symbol) -> Symbol -> IndexFnM Symbol
 eqSolver (a,b) p = do
+  printM 10 $ "eqSolver " <> prettyStr (a,b) <> " " <> prettyStr p
   -- Assume a == b by syntactical substitution in p.
   p' <-
     sop2Symbol
@@ -68,7 +69,6 @@ eqSolver (a,b) p = do
             }
         )
         (sym2SoP p)
-  printM 10 $ "eqSolver " <> prettyStr (a,b) <> " " <> prettyStr p
   -- Make sure we don't lose the original equality. (E.g., if p = (a == b).)
   let p'' = p' :&& a :== b
   printM 10 $ "     --> " <> prettyStr p''

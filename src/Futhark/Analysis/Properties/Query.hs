@@ -270,7 +270,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
               let strat2 = algebraContext f_x $ do
                     j <- newNameFromString "j"
                     gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
-                    nextGenProver (PInjGe i j d gs) -- Ignores RCD, checks whole codomain.
+                    nextGenProver (PInjGe i j d gs rcd)
               strat1 `orM` strat2
         _ -> do
           f_y <- getFn y
@@ -279,7 +279,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                 IndexFn Empty _ -> pure Yes
                 IndexFn (Forall i d) gs -> algebraContext f_y $ do
                   j <- newNameFromString "j"
-                  nextGenProver (PInjGe i j d gs) -- Ignores RCD, checks whole codomain.
+                  nextGenProver (PInjGe i j d gs rcd)
           strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
@@ -303,19 +303,6 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                       )
                     ]
               }
-      -- let pattern_Y_iota_X = -- Only case where we can substitute the indirect indexing.
-      --       IndexFn
-      --         { iterator = Forall i $ Iota n,
-      --           body =
-      --             cases
-      --               [ ( Bool True,
-      --                   sym2SoP $ Idx (Hole is_inv_hole) (sym2SoP $ Hole i)
-      --                 )
-      --               ]
-      --         }
-      -- s1 <- unify pattern_Y f_Y
-      -- s2 <- unify pattern_Y_iota_X f_Y
-      -- let s = s1 <|> s2
       s <- unify pattern_Y f_Y
       -- Get is (the inverse of is^-1).
       let is_inv = justName =<< (M.!? is_inv_hole) . mapping =<< s
@@ -340,11 +327,11 @@ proveFn prop f = prove_ False prop f
 
 data PStatement
   = -- Fresh i; fresh j; domain of index function; cases of index function.
-    PInjGe VName VName Domain (Cases Symbol (SoP Symbol))
+    PInjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol))
   | PFiltPart VName (Predicate Symbol) (Predicate Symbol, SoP Symbol)
 
 nextGenProver :: PStatement -> IndexFnM Answer
-nextGenProver (PInjGe i j d ges) = rollbackAlgEnv $ do
+nextGenProver (PInjGe i j d ges rcd) = rollbackAlgEnv $ do
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
   addRelIterator iter_i
   addRelIterator iter_j
@@ -360,13 +347,14 @@ nextGenProver (PInjGe i j d ges) = rollbackAlgEnv $ do
       p <- simplify =<< eqSolver (e @ i, e @ j) (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
       printM 10 $ "     --> " <> prettyStr p
 
-      -- TODO this caused an infinite loop somewhere on maxMatch.fut?
-      --      (Add RCD to PInjGE if you want to add this again.)
-      -- let out_of_range x = x :< a :|| b :< x
-      -- let oob =
-      --       (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
-      --         =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
-      p =>? (sym2SoP (Var i) :== sym2SoP (Var j))
+      let oob = case rcd of
+            Just (a,b) ->
+              (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
+                =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
+              where
+                  out_of_range x = x :< a :|| b :< x
+            Nothing -> pure Unknown
+      oob `orM` (p =>? (sym2SoP (Var i) :== sym2SoP (Var j)))
 nextGenProver (PFiltPart {}) = undefined
 
 prove_ :: Bool -> Statement -> IndexFn -> IndexFnM Answer
