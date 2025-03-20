@@ -280,6 +280,25 @@ tests =
             let cs_i = sym2SoP $ Idx (Hole cs) (sHole i)
                 cs_j = sym2SoP $ Idx (Hole cs) (sHole j)
              in [ IndexFn
+                    { iterator = Empty,
+                      body =
+                        cases
+                          [ ( Bool True,
+                              sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 1))
+                            )
+                          ]
+                    },
+                  IndexFn
+                    { iterator = Empty,
+                      body =
+                        cases
+                          [ ( Bool True,
+                              sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 1))
+                                .+. sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (cs_j :== int2SoP 2))
+                            )
+                          ]
+                    },
+                  IndexFn
                     { iterator = Forall i (Iota (sHole n)),
                       body =
                         cases

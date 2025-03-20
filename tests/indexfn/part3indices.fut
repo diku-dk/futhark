@@ -1,5 +1,11 @@
--- def part3indices [n] 't (conds: [n]i8) : {[n]i64 | \res-> permutationOf res (0...n-1)} =
-def part3indices [n] 't (conds: [n]i8) : {[n]i64 | \_ -> true} =
+def sum [n] (xs: [n]i64) =
+  if n > 0 then (scan (+) 0 xs)[n-1] else 0
+
+def part3indices [n] 't (conds: [n]i8) : {(i64,i64,[n]i64) | \(s1,s2,is) ->
+    BijectiveRCD is (0, n-1) (0, n-1)
+      && s1 == sum (map (\c -> if c == 1 then 1 else 0 ) conds)
+      && s2 == s1 + sum (map (\c -> if c == 2 then 1 else 0 ) conds)
+  } =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
   let eflags = map (\c -> if c == 2 then 1 else 0 ) conds
 
@@ -14,4 +20,4 @@ def part3indices [n] 't (conds: [n]i8) : {[n]i64 | \_ -> true} =
                         else if c == 2 then s1 + indE - 1
                         else s1 + s2 + i - indsL[i] - indsE[i]
                    ) conds indsL indsE (iota n)
-  in  inds
+  in  (s1, s1 + s2, inds)
