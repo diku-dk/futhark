@@ -885,8 +885,9 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
           globals <- asks fst
           let bound_sizes = S.fromList dims' <> globals
           pats' <- instAnySizes pats
+          let dims'' = dims' ++ unboundSizes bound_sizes pats'
 
-          liftValDec fname (RetType [] rettype') (dims' ++ unboundSizes bound_sizes pats') pats' e0
+          liftValDec fname (RetType [] rettype') dims'' pats' e0
           pure
             ( Var
                 (qualName fname)
