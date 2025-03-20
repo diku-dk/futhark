@@ -241,7 +241,6 @@ transformSOAC pat _ (Screma w arrs form)
       (scans_stms, scans') <- mapAndUnzipM scanToSegBinOp scans
       let ret = concatMap (lambdaReturnType . segBinOpLambda) scans'
       identity <- mkIdentityLambda ret
-      -- let temp = Lambda mempty mempty (Body mempty mempty mempty)
       let post_op = SegPostOp identity []
       pure $
         mconcat scans_stms
