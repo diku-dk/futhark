@@ -726,7 +726,6 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
             check (size_rep, scope, name_rep)
           unless (all isYes answers) . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
-          unless (null conds) $ printM 1 $ "... " <> greenString "OK"
 forwardApplyDef _ _ _ = Nothing
 
 -- Binds names of scalar parameters to scalar values of corresponding
@@ -881,8 +880,7 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
       hole <- sym2SoP . Hole <$> newVName "h"
       let wrap = (`Idx` hole) . Var
       alg_vn <- lift $ paramToAlgebra vn_inv wrap
-      lift $ addRelSymbol (sVar alg_vn :< dest_size)
-      lift $ addRelSymbol (int2SoP 0 :<= sVar alg_vn)
+      lift $ addRelSymbol (Prop $ Property.Rng alg_vn (int2SoP 0, dest_size))
 
       let inv_ind = Idx (Var vn_inv) (sVar i)
       lift $
@@ -1262,7 +1260,7 @@ forwardPropertyPrelude f args =
         _ -> undefined
     _ -> do
       error $
-        "Properties must be in A-normal form: " <> prettyStr f <> " " <> prettyStr (NE.map snd args)
+        "Properties must be in A-normal form and not use wildcards: " <> prettyStr f <> " " <> prettyStr (NE.map snd args)
   where
     pr = sym2SoP . Prop
 
@@ -1361,7 +1359,7 @@ checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
         -- TODO remove this.
         printExtraDebugInfo n = do
           env <- getAlgEnv
-          printM 1337 $
+          printM 100 $
             "Failed bounds-checking:"
               <> "\nf_xs:"
               <> prettyStr f_xs

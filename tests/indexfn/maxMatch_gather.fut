@@ -1,3 +1,4 @@
+
 -- maximalMatching from the PBBS.
 -- https://github.com/cmuparlay/pbbsbench
 -- 
@@ -71,17 +72,48 @@ def filter_indices [n]
   let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
   in (new_size, is)
 
-def filter_by [n] 't (cs: [n]bool) (xs: [n]t) (dummy: t)
+def filterBy [n] 't (cs: [n]bool) (xs: [n]t) (dummy: t)
     : {(i64, []t) | \(_, ys) -> FiltPart ys xs (\i -> cs[i]) (\_i -> true)} =
   let (new_n, is) = filter_indices cs
   let scratch = replicate new_n dummy
   let xs' = scatter scratch is xs
   in (new_n, xs')
 
+def filter [n] 't (p: t -> bool) (xs: [n]t) (dummy: t)
+    : {(i64, []t) | \(_, ys) -> FiltPart ys xs (\i -> p xs[i]) (\_i -> true)} =
+  let cs = map (\x -> p x) xs
+  let (m, zs) = filterBy cs xs dummy
+  in (m, zs)
+
+def length [n] 't (_xs: [n]t) = n
+
 -- 
 --            Program
 --
 type nat64 = {i64 | (>= 0)}
+
+def x +< y = x < y && 0i64 <= x
+
+-- def histogram 'a [n] (op: a -> a -> a) (ne: a) (kaaa: i64) (is: [n]i64) (as: [n]a) : *[kaaa]a =
+--    hist op ne kaaa is as
+-- def histo 'a [n] (op: a -> a -> a) (ne: a) (k: i64) (is: [n]i64) (as: [n]a) : *[k]a =
+--   hist op ne k is as
+
+-- def filter_perm [n] 't (cs: [n]bool)
+--     : {(i64, [n]i64, []i64) | \(m, iot, is_inv) ->
+--           FiltPart is_inv iot (\i -> cs[i]) (\_i -> true)
+--             && Range is_inv (0, n) -- Actually (0, m <= n).
+--       } =
+--   let (new_n, is) = filter_indices cs
+--   let iot = iota n
+--   let dummy = 0i64
+--   let scratch = replicate new_n dummy
+--   let ys = scatter scratch is iot
+--   in (new_n, iot, ys)
+
+def gather [n][m] 't (xs: [n]t) (is: {[m]i64 | \x -> Range x (0, n)})
+    : {[m]t | \_ -> true} =
+  map (\i -> xs[i]) is
 
 -- Return the edge-id pairs with the smallest edge id
 def getSmallestPairs [arraySizeFlat]
@@ -89,8 +121,9 @@ def getSmallestPairs [arraySizeFlat]
     (nEdges_2: i64)
     (edges: {[arraySizeFlat]i64 | \x -> Range x (0, nVerts)})
     (edgeIds: {[arraySizeFlat]i64 | \x -> Injective x})
-    : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
-         Injective new_edges && Injective new_edgeIds
+    : {([arraySizeFlat]bool, []i64, []i64) | \(cs, new_edges, new_edgeIds) ->
+         FiltPart new_edges edges (\i -> cs[i]) (\_i -> true)
+           && Injective new_edges && Injective new_edgeIds
       }
     =
     -- The original program transforms edgeIds as follows:
@@ -110,9 +143,14 @@ def getSmallestPairs [arraySizeFlat]
     let H = hist i64.min nEdges_2 nVerts edges edgeIds
     let cs = map2 (\i j -> H[i] == j) edges edgeIds
     let dummy = 0i64
-    let (newSize, ys) = filter_by cs edges dummy
-    let (_, zs) = filter_by cs edgeIds dummy
-    in (ys :> [newSize]i64, zs :> [newSize]i64)
+    -- Gather not supported yet (need to propagate properties across map)
+    -- let (newSize, _iot, perm) = filter_perm cs
+    -- let ys = gather edges perm
+    -- let zs = gather edgeIds perm
+    let (newSize, inv_perm) = filter_indices cs
+    let ys = scatter (replicate newSize 0) inv_perm edges
+    let zs = scatter (replicate newSize 0) inv_perm edgeIds
+    in (cs, ys :> [newSize]i64, zs :> [newSize]i64)
 
 -- Return the edge if its ID is the smallest, else return placeholder
 def getMMEdges [nVerts] (smallestEdgeId: [nVerts]i64) (e: {i64 | \x -> 0 <= x}) (i: i64): (i64, i64) =
@@ -179,7 +217,7 @@ def loopBody [arraySizeFlat] [nVerts]
             Injective new_edgeIds
       }
     =
-    let (smallestTargets, smallestValues) = getSmallestPairs nVerts arraySizeFlat edges edgeIds
+    let (_, smallestTargets, smallestValues) = getSmallestPairs nVerts arraySizeFlat edges edgeIds
 
     let smallestEdgeId = scatter smallestEdgeId smallestTargets smallestValues
 

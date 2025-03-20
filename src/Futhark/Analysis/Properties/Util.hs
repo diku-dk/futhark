@@ -10,6 +10,7 @@ module Futhark.Analysis.Properties.Util
     emphString,
     locMsg,
     greenString,
+    blueString,
   )
 where
 
@@ -18,6 +19,7 @@ import Data.List (subsequences, (\\))
 import Data.Maybe (fromJust)
 import Futhark.Util.Pretty
 import Language.Futhark (Located, VName (VName), locText, srclocOf)
+import Data.String (IsString)
 
 prettyName :: VName -> Doc ann
 prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
@@ -77,3 +79,6 @@ emphString s = "\ESC[95m\n|\n| " <> s <> "\n|\ESC[0m\n"
 
 greenString :: String -> String
 greenString s = "\ESC[92m" <> s <> "\ESC[0m"
+
+blueString :: (Semigroup a, IsString a) => a -> a
+blueString s = "\ESC[96m" <> s <> "\ESC[0m"

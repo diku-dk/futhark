@@ -57,15 +57,15 @@ instance (Pretty u) => Pretty (Property u) where
     "Disjoint" <+> parens (commasep $ map prettyName $ S.toList s)
   pretty (Monotonic x dir) = "Mono" <+> prettyName x <+> pretty dir
   pretty (Rng x rng) =
-    "Range" <+> prettyName x <+> parens (pretty rng)
+    blueString "Range" <+> prettyName x <+> parens (pretty rng)
   pretty (Injective x rcd) =
-    "Inj" <+> prettyName x <+> parens (pretty rcd)
+    blueString "Inj" <+> prettyName x <+> parens (pretty rcd)
   pretty (BijectiveRCD x rcd img) =
-    "Bij" <+> prettyName x <+> parens (pretty rcd) <+> parens (pretty img)
+    blueString "Bij" <+> prettyName x <+> parens (pretty rcd) <+> parens (pretty img)
   pretty (FiltPartInv x pf pps) =
-    "FiltPartInv" <+> prettyName x <+> parens (pretty pf) <+> ppr pps
+    blueString "FiltPartInv" <+> prettyName x <+> parens (pretty pf) <+> ppr pps
   pretty (FiltPart x y pf pps) =
-    "FiltPart" <+> prettyName x <+> prettyName y <+> parens (pretty pf) <+> ppr pps
+    blueString "FiltPart" <+> prettyName x <+> prettyName y <+> parens (pretty pf) <+> ppr pps
 
 ppr :: (Pretty a1, Pretty a2) => [(a1, a2)] -> Doc ann
 ppr pps =

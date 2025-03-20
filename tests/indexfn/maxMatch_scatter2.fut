@@ -71,13 +71,6 @@ def filter_indices [n]
   let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
   in (new_size, is)
 
-def filter_by [n] 't (cs: [n]bool) (xs: [n]t) (dummy: t)
-    : {(i64, []t) | \(_, ys) -> FiltPart ys xs (\i -> cs[i]) (\_i -> true)} =
-  let (new_n, is) = filter_indices cs
-  let scratch = replicate new_n dummy
-  let xs' = scatter scratch is xs
-  in (new_n, xs')
-
 -- 
 --            Program
 --
@@ -89,8 +82,9 @@ def getSmallestPairs [arraySizeFlat]
     (nEdges_2: i64)
     (edges: {[arraySizeFlat]i64 | \x -> Range x (0, nVerts)})
     (edgeIds: {[arraySizeFlat]i64 | \x -> Injective x})
-    : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
-         Injective new_edges && Injective new_edgeIds
+    : {([arraySizeFlat]bool, []i64, []i64) | \(cs, new_edges, new_edgeIds) ->
+         FiltPart new_edges edges (\i -> cs[i]) (\_i -> true)
+           && Injective new_edges && Injective new_edgeIds
       }
     =
     -- The original program transforms edgeIds as follows:
@@ -109,10 +103,10 @@ def getSmallestPairs [arraySizeFlat]
 
     let H = hist i64.min nEdges_2 nVerts edges edgeIds
     let cs = map2 (\i j -> H[i] == j) edges edgeIds
-    let dummy = 0i64
-    let (newSize, ys) = filter_by cs edges dummy
-    let (_, zs) = filter_by cs edgeIds dummy
-    in (ys :> [newSize]i64, zs :> [newSize]i64)
+    let (newSize, inv_perm) = filter_indices cs
+    let ys = scatter (replicate newSize 0) inv_perm edges
+    let zs = scatter (replicate newSize 0) inv_perm edgeIds
+    in (cs, ys :> [newSize]i64, zs :> [newSize]i64)
 
 -- Return the edge if its ID is the smallest, else return placeholder
 def getMMEdges [nVerts] (smallestEdgeId: [nVerts]i64) (e: {i64 | \x -> 0 <= x}) (i: i64): (i64, i64) =
@@ -179,7 +173,7 @@ def loopBody [arraySizeFlat] [nVerts]
             Injective new_edgeIds
       }
     =
-    let (smallestTargets, smallestValues) = getSmallestPairs nVerts arraySizeFlat edges edgeIds
+    let (_, smallestTargets, smallestValues) = getSmallestPairs nVerts arraySizeFlat edges edgeIds
 
     let smallestEdgeId = scatter smallestEdgeId smallestTargets smallestValues
 
