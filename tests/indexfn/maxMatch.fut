@@ -81,8 +81,6 @@ def filter_by [n] 't (cs: [n]bool) (xs: [n]t) (dummy: t)
 -- 
 --            Program
 --
-type nat64 = {i64 | (>= 0)}
-
 -- Return the edge-id pairs with the smallest edge id
 def getSmallestPairs [arraySizeFlat]
     (nVerts: i64)
