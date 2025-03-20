@@ -239,13 +239,16 @@ transformSOAC pat _ (Screma w arrs form)
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
       (scans_stms, scans') <- mapAndUnzipM scanToSegBinOp scans
+      let ret = concatMap (lambdaReturnType . segBinOpLambda) scans'
+      identity <- mkIdentityLambda ret
+      let post_op = SegPostOp identity []
       pure $
         mconcat scans_stms
           <> oneStm
             ( Let pat (defAux ()) $
                 Op $
                   ParOp Nothing $
-                    SegScan () space (lambdaReturnType map_lam) kbody scans'
+                    SegScan () space (lambdaReturnType map_lam) kbody scans' post_op
             )
   | otherwise = do
       -- This screma is too complicated for us to immediately do
@@ -288,6 +291,21 @@ transformSOAC pat _ (Stream w arrs nes lam) = do
     flip runBuilderT_ soacs_scope $
       sequentialStreamWholeArray pat w nes lam arrs
   transformStms stream_stms
+transformSOAC pat _ (ScanScatter w arrs map_lam scan dest post_lam) = do
+  (gtid, space) <- mkSegSpace w
+  kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
+  (scan_stms, scan') <- scanToSegBinOp scan
+  post_lam' <- transformLambda post_lam
+
+  let post_op = SegPostOp post_lam' dest
+  pure $
+    scan_stms
+      <> oneStm
+        ( Let pat (defAux ()) $
+            Op $
+              ParOp Nothing $
+                SegScan () space (lambdaReturnType map_lam) kbody [scan'] post_op
+        )
 
 transformProg :: Prog SOACS -> PassM (Prog MC)
 transformProg prog =

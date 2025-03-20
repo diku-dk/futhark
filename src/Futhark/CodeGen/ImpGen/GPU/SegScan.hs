@@ -67,10 +67,11 @@ compileSegScan ::
   Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
-  [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
+  [SegBinOp GPUMem] ->
+  SegPostOp GPUMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scan_ops map_kbody =
+compileSegScan pat lvl space map_kbody scan_ops post_op =
   sWhen (0 .<. n) $ do
     emit $ Imp.DebugPrint "\n# SegScan" Nothing
     target <- hostTarget <$> askEnv
