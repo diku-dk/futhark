@@ -661,7 +661,8 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       -- For example, substituting into a Sum fails in some cases.)
       printM 5 $ "✨ Using top-level def " <> prettyStr g
       (actual_args, actual_sizes) <- zipArgs loc' pats args
-      _ <- checkPreconditions g pats (actual_args, actual_sizes) mempty
+      let name_rep = renamingRep (mconcat actual_args)
+      _ <- checkPreconditions g pats (actual_args, actual_sizes) name_rep
 
       forM_ (mconcat actual_sizes) $ \(n, sz) -> do
         addEquiv (Algebra.Var n) =<< toAlgebra sz
