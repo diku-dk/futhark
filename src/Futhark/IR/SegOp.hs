@@ -598,7 +598,7 @@ typeCheckSegOp checkLvl (SegScan lvl space ts body scans post_op) = do
   checkSegSpace space
   TC.binding (scopeOfSegSpace space) $ do
     checkScanRed scans' ts body
-    checkSegPostOp post_op scans'
+    checkSegPostOp post_op ts scans'
   where
     scans' =
       zip3
@@ -657,19 +657,31 @@ typeCheckSegOp checkLvl (SegHist lvl space ts kbody ops) = do
 checkSegPostOp ::
   (TC.Checkable rep) =>
   SegPostOp (Aliases rep) ->
+  [Type] ->
   [(Lambda (Aliases rep), [SubExp], Shape)] ->
   TC.TypeM rep ()
-checkSegPostOp op@(SegPostOp lam spec) ops = do
+checkSegPostOp op@(SegPostOp lam spec) ts ops = do
   let nes = concatMap (\(_, a, _) -> a) ops
-  nes' <- mapM TC.checkArg nes
-  TC.checkLambda lam $ map TC.noArgAliases nes'
-  let (idxs, ts, _) = splitPostOpResults op $ lambdaReturnType lam
+  nes' <- mapM (fmap TC.argType . TC.checkArg) nes
+
+  lam_ts <- mapM (lookupType . paramName) $ lambdaParams lam
+
+  unless (lam_ts == nes' <> ts) $
+    TC.bad $
+      TC.TypeError $
+        "PostOp: Wrong parameters for the given lambda."
+          <> " Expected:\n"
+          <> prettyText (nes' <> ts)
+          <> "\nBut received:\n"
+          <> prettyText lam_ts
+
+  let (idxs, ts', _) = splitPostOpResults op $ lambdaReturnType lam
   forM_ idxs $ \i -> do
     unless (Prim int64 == i) $
       TC.bad $
         TC.TypeError "PostOp: Index return type must be i64."
 
-  forM_ (zip ts spec) $ \(t, (dest_shape, _, dest)) -> do
+  forM_ (zip ts' spec) $ \(t, (dest_shape, _, dest)) -> do
     TC.requireI [t `arrayOfShape` dest_shape] dest
     TC.consume =<< TC.lookupAliases dest
 
