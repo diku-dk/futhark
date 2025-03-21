@@ -1,12 +1,18 @@
 def infinity = i64.highest
 
-def kmeansKer_body [num_cols] [nnz]
-    (n: {i64 | (>= 0)})
+def kmeansKer_body [num_cols] [nnz] [n]
+    -- (n: {i64 | (>= 0)})
+    -- (row: {i64 | \row -> Range row (0,n)})
+    -- (cluster: [num_cols]f32)
+    -- (pointers: {[n + 1]i64 | \x -> Range x (0,infinity)})
+    -- (values: {[nnz]f32 | \_ -> nnz == pointers[n]})
+    -- (indices_data: {[nnz]i64 | \x -> Range x (0, num_cols)})
+    -- (n: {i64 | (>= 0)})
     (row: {i64 | \row -> Range row (0,n)})
     (cluster: [num_cols]f32)
-    (pointers: {[n + 1]i64 | \x -> Range x (0,infinity) && Monotonic (<=) x})
-    (values: {[nnz]f32 | \_ -> nnz == pointers[n]})
-    (indices_data: {[nnz]i64 | \x -> Range x (0, num_cols)})
+    (pointers: {[n + 1]i64 | \x -> Range x (0,nnz)})
+    (values: {[nnz]f32 | \_ -> true})
+    (indices_data: {[nnz]i64 | \x -> Range x (0,num_cols)})
     : {f32 | \_ -> true} =
   let index_start = pointers[row]
   let nnz_sgm = pointers[row+1] - index_start
