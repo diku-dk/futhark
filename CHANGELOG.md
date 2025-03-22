@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   that used both higher order functions and size expressions in clever
   ways (#2234).
 
+* Fusion could crash after AD in some circumstances (#2236).
+
 ## [0.25.28]
 
 ### Fixed

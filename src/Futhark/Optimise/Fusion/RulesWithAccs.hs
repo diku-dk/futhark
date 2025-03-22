@@ -400,7 +400,7 @@ tryFuseWithAccs ::
   [VName] ->
   Stm SOACS ->
   Stm SOACS ->
-  m (Maybe (Stm SOACS))
+  Maybe (m (Stm SOACS))
 tryFuseWithAccs
   infusible
   (Let pat1 aux1 (WithAcc w_inps1 lam1))
@@ -424,7 +424,7 @@ tryFuseWithAccs
       all (`notElem` infusible) bs,
       -- safety 3:
       cs <- namesFromList $ concatMap ((\(_, xs, _) -> xs) . accTup2) acc_tup2,
-      all ((`notNameIn` cs) . patElemName . fst) other_pr1 = do
+      all ((`notNameIn` cs) . patElemName . fst) other_pr1 = Just $ do
         let getCertPairs (t1, t2) = (paramName (accTup3 t2), paramName (accTup3 t1))
             tab_certs = M.fromList $ map getCertPairs tup_common
             lam2_bdy' = substituteNames tab_certs (lambdaBody lam2)
@@ -472,8 +472,7 @@ tryFuseWithAccs
                 ++ map fst (other_pr1 ++ other_pr2)
             res_w_inps = map (accTup2 . fst) tup_common ++ map accTup2 (acc_tup1' ++ acc_tup2')
         res_w_inps' <- mapM renameLamInWAccInp res_w_inps
-        let stm_res = Let (Pat res_pat) (aux1 <> aux2) $ WithAcc res_w_inps' res_lam'
-        pure $ Just stm_res
+        pure $ Let (Pat res_pat) (aux1 <> aux2) $ WithAcc res_w_inps' res_lam'
     where
       -- local helpers:
 
@@ -535,7 +534,7 @@ tryFuseWithAccs
       renameLamInWAccInp winp = pure winp
 --
 tryFuseWithAccs _ _ _ =
-  pure Nothing
+  Nothing
 
 -------------------------------
 --- simple helper functions ---
