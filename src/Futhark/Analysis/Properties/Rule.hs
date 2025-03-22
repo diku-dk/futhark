@@ -16,10 +16,11 @@ import Futhark.Analysis.Properties.Symbol (Symbol (..))
 import Futhark.Analysis.Properties.SymbolPlus (repVName, toSumOfSums)
 import Futhark.Analysis.Properties.Unify (Rep (rep), Substitution (mapping), Unify (unify), mkRep, renameAnd, sub, unifies, unifies_)
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sopToLists, sym2SoP, (.+.), (~+~), term2SoP)
+import Futhark.SoP.SoP (SoP, int2SoP, numTerms, sopFromList, sopToList, sopToLists, sym2SoP, (.+.), (~+~), term2SoP, justConstant, (.*.))
 import Futhark.Util.Pretty (Pretty)
 import Language.Futhark (VName)
 import Futhark.Analysis.Properties.Util (partitions)
+import Data.Maybe (isJust)
 
 data Rule a b m = Rule
   { name :: String,
@@ -143,6 +144,7 @@ rulesIndexFn = do
   h1 <- newVName "h"
   h2 <- newVName "h"
   h3 <- newVName "h"
+  h4 <- newVName "h"
   pure
     [ Rule
         { name = "Rule 5 (carry)",
@@ -338,42 +340,25 @@ rulesIndexFn = do
             pure $ Recurrence `notElem` (e1_symbols <> e2_symbols)
         },
       Rule
-        { name = "Bool is Int",
-          -- NOTE not needed in the paper because all values are ints there?
+        { name = "Bool to Int",
           from =
             IndexFn
               { iterator = Empty,
                 body =
                   cases
-                    [ (Hole h1, int2SoP 1),
-                      (Hole h2, int2SoP 0)
+                    [ (Hole h1, hole h3),
+                      (Hole h2, hole h4)
                     ]
               },
           to = \s ->
             subIndexFn s $
               IndexFn
                 { iterator = Empty,
-                  body = cases [(Bool True, hole h1)]
+                  body = cases [(Bool True, hole h1 .*. hole h3 .+. hole h2 .*. hole h4)]
                 },
-          sideCondition = vacuous
-        },
-      Rule
-        { name = "Bool is Int (case order switched)",
-          from =
-            IndexFn
-              { iterator = Empty,
-                body =
-                  cases
-                    [ (Hole h1, int2SoP 0),
-                      (Hole h2, int2SoP 1)
-                    ]
-              },
-          to = \s ->
-            subIndexFn s $
-              IndexFn
-                { iterator = Empty,
-                  body = cases [(Bool True, hole h2)]
-                },
-          sideCondition = vacuous
+          sideCondition = \s -> do
+            e_1 <- sub s (hole h3)
+            e_2 <- sub s (hole h4)
+            pure $ isJust (justConstant e_1) && isJust (justConstant e_2)
         }
     ]
