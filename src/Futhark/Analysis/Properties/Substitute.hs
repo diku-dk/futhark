@@ -205,22 +205,27 @@ substituteOnce f g_non_repped (f_apply, args) = do
 
               -- Create II array.
               let def_II = IndexFn (iterator f) (cases [(Bool True, sym2SoP (Var k))])
-              (vn_II, f_II) <- lookupII df def_II
-              insertIndexFn vn_II [f_II]
+              -- Is f already an II array? (One defined by the user.)
+              s :: Maybe (Substitution Symbol) <- unify f def_II
+              case s of
+                Just _ -> pure Nothing
+                Nothing -> do
+                  (vn_II, f_II) <- lookupII df def_II
+                  insertIndexFn vn_II [f_II]
 
-              -- Replace k by II[j].
-              -- k in new_iter and k in (iterator f) may be different names.
-              (new_iter', kRep) <- case new_iter of
-                Forall j new_dom@(Cat k2 _ _) -> do
-                  n <- rewrite $ domainEnd new_dom .+. int2SoP 1
-                  pure (Forall j (Iota n), mkRep k2 (sym2SoP (Idx (Var vn_II) (sym2SoP $ Var j))))
-                Forall j (Iota n) -> do
-                  pure (Forall j (Iota n), mempty)
-                Empty -> pure (Empty, mempty)
-              let kRep' = kRep <> mkRep k (sym2SoP (Idx (Var vn_II) (f_arg M.! i)))
+                  -- Replace k by II[j].
+                  -- k in new_iter and k in (iterator f) may be different names.
+                  (new_iter', kRep) <- case new_iter of
+                    Forall j new_dom@(Cat k2 _ _) -> do
+                      n <- rewrite $ domainEnd new_dom .+. int2SoP 1
+                      pure (Forall j (Iota n), mkRep k2 (sym2SoP (Idx (Var vn_II) (sym2SoP $ Var j))))
+                    Forall j (Iota n) -> do
+                      pure (Forall j (Iota n), mempty)
+                    Empty -> pure (Empty, mempty)
+                  let kRep' = kRep <> mkRep k (sym2SoP (Idx (Var vn_II) (f_arg M.! i)))
 
-              new_body <- simplify (repCases kRep' new_body_unsimplified)
-              pure (Just $ repIndexFn kRep' $ IndexFn new_iter' new_body)
+                  new_body <- simplify (repCases kRep' new_body_unsimplified)
+                  pure (Just $ repIndexFn kRep' $ IndexFn new_iter' new_body)
     _ -> do
       new_body <- simplify new_body_unsimplified
       pure (Just $ IndexFn new_iter new_body)
