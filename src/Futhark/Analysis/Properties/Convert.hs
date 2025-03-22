@@ -506,7 +506,9 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
 
       iter <- bindLambdaBodyParams (mconcat aligned_args)
       let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
-      bodies <- map (repIndexFn accToRec) <$> forward lam_body
+      bodies <- rollbackAlgEnv $ do
+        addRelIterator iter
+        map (repIndexFn accToRec) <$> forward lam_body
 
       forM bodies $ \body_fn -> do
         subst (IndexFn iter (body body_fn))
