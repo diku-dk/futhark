@@ -38,12 +38,6 @@ simplify = astMap m
       h3 <- newVName "h"
       pure
         [ Rule
-            { name = "⟦¬x⟧ => 1 - ⟦x⟧",
-              from = sym2SoP $ Not (Hole h1),
-              to = \s -> sub s $ int2SoP 1 .-. sym2SoP (Hole h1),
-              sideCondition = vacuous
-            },
-          Rule
             { name = "Sum True",
               from = sym2SoP $ Sum h1 (hole h2) (hole h3) (Bool True),
               to = \s -> do
