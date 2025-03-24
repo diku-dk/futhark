@@ -7,6 +7,7 @@ module Futhark.CodeGen.RTS.WGSL
     scalar16,
     scalar32,
     scalar64,
+    atomics,
     wgsl_prelude,
     lmad_copy,
     map_transpose,
@@ -45,6 +46,11 @@ scalar64 :: T.Text
 scalar64 = $(embedStringFile "rts/wgsl/scalar64.wgsl")
 {-# NOINLINE scalar64 #-}
 
+-- | @rts/wgsl/atomics.wgsl@
+atomics :: T.Text
+atomics = $(embedStringFile "rts/wgsl/atomics.wgsl")
+{-# NOINLINE atomics #-}
+
 wgsl_prelude :: T.Text
 wgsl_prelude =
   -- Put scalar32 in front of the other integer types since they are all
@@ -55,7 +61,8 @@ wgsl_prelude =
       scalar32,
       scalar8,
       scalar16,
-      scalar64
+      scalar64,
+      atomics
     ]
 
 -- | @rts/wgsl/lmad_copy.wgsl@

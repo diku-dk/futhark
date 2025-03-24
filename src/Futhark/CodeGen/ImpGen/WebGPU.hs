@@ -342,6 +342,8 @@ wgslBufferType (IntType Int32, True, Signed) =
   WGSL.Array $ WGSL.Atomic WGSL.Int32
 wgslBufferType (IntType Int32, True, Unsigned) =
   WGSL.Array $ WGSL.Atomic WGSL.UInt32
+wgslBufferType (FloatType Float32, True, _) =
+  WGSL.Array $ WGSL.Atomic WGSL.Int32
 wgslBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
 wgslSharedBufferType ::
@@ -356,6 +358,8 @@ wgslSharedBufferType (IntType Int32, True, Signed) =
   WGSL.Array $ WGSL.Atomic WGSL.Int32
 wgslSharedBufferType (IntType Int32, True, Unsigned) =
   WGSL.Array $ WGSL.Atomic WGSL.UInt32
+wgslSharedBufferType (FloatType Float32, True, _) =
+  WGSL.Array $ WGSL.Atomic WGSL.Int32
 wgslSharedBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
 genArrayWrite ::
@@ -465,7 +469,7 @@ genWGSLStm s@(Copy {}) = unsupported s
 genWGSLStm (Write mem i Bool _ _ v) = genArrayWrite "write_bool" mem i v
 genWGSLStm (Write mem i (IntType Int8) _ _ v) = genArrayWrite "write_i8" mem i v
 genWGSLStm (Write mem i (IntType Int16) _ _ v) = genArrayWrite "write_i16" mem i v
-genWGSLStm (Write mem i _ _ _ v) = do
+genWGSLStm (Write mem i t _ _ v) = do
   mem' <- getIdent mem
   i' <- indexExp i
   v' <- genWGSLExp v
@@ -473,16 +477,22 @@ genWGSLStm (Write mem i _ _ _ v) = do
   if atomic
     then
       pure $
-        WGSL.Call
-          "atomicStore"
-          [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i', v']
+        case t of
+          FloatType _ ->
+            WGSL.Call
+              "atomicStore"
+              [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i', WGSL.to_i32 v']
+          _ ->
+            WGSL.Call
+              "atomicStore"
+              [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i', v']
     else pure $ WGSL.AssignIndex mem' i' v'
 genWGSLStm (SetScalar name e) =
   liftM2 WGSL.Assign (getIdent name) (genWGSLExp e)
 genWGSLStm (Read tgt mem i Bool _ _) = genArrayRead "read_bool" tgt mem i
 genWGSLStm (Read tgt mem i (IntType Int8) _ _) = genArrayRead "read_i8" tgt mem i
 genWGSLStm (Read tgt mem i (IntType Int16) _ _) = genArrayRead "read_i16" tgt mem i
-genWGSLStm (Read tgt mem i _ _ _) = do
+genWGSLStm (Read tgt mem i t _ _) = do
   tgt' <- getIdent tgt
   mem' <- getIdent mem
   i' <- indexExp i
@@ -490,9 +500,16 @@ genWGSLStm (Read tgt mem i _ _ _) = do
   let e =
         if atomic
           then
-            WGSL.CallExp
-              "atomicLoad"
-              [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
+            case t of
+              FloatType _ ->
+                WGSL.CallExp "bitcast<f32>" $
+                  [WGSL.CallExp
+                    "atomicLoad"
+                    [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']]
+              _ ->
+                WGSL.CallExp
+                  "atomicLoad"
+                  [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
           else WGSL.IndexExp mem' i'
   pure $ WGSL.Assign tgt' e
 genWGSLStm s@(SetMem {}) = unsupported s
@@ -559,12 +576,23 @@ genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg _ dest mem i cmp val))) = 
   WGSL.Assign <$> getIdent dest <*> pure res
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = do
   genIntAtomicOp "atomicExchange" dest mem i e
-genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicWrite _ mem i v))) = do
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicWrite t mem i v))) = do
   mem' <- getIdent mem
   i' <- indexExp i
   v' <- genWGSLExp v
-  pure $ WGSL.Call "atomicStore" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i', v']
-genWGSLStm s@(Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd {}))) = unsupported s
+  case t of
+    FloatType _ ->
+      pure $
+        WGSL.Call "atomicStore" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i', WGSL.to_i32 v']
+    _ ->
+      pure $
+        WGSL.Call "atomicStore" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i', v']
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd _ dest mem i e))) = do
+  mem' <- getIdent mem
+  shared <- isShared mem'
+  if shared
+    then genIntAtomicOp "atomic_fadd_f32_shared" dest mem i e
+    else genIntAtomicOp "atomic_fadd_f32_global" dest mem i e
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceLocal)) =
   pure $ WGSL.Call "workgroupBarrier" []
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceGlobal)) =
@@ -908,6 +936,7 @@ findSingleMemoryType name = do
   where
     canBeAtomic (IntType Int64) = False
     canBeAtomic (IntType _) = True
+    canBeAtomic (FloatType Float32) = True
     canBeAtomic _ = False
 
 -- | Generate binding declarations for memory buffers used by kernel. Produces
