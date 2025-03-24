@@ -293,11 +293,15 @@ transformSOAC pat _ (Stream w arrs nes lam) = do
   transformStms stream_stms
 transformSOAC pat _ (ScanScatter w arrs map_lam scan dest post_lam) = do
   (gtid, space) <- mkSegSpace w
-  kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
+  let body = lambdaBody map_lam
+      extra_res = varRes . paramName <$> lambdaParams map_lam
+      map_lam' =
+        map_lam
+          { lambdaBody = body {bodyResult = extra_res <> bodyResult body}
+          }
+  kbody <- mapLambdaToKernelBody transformBody gtid map_lam' arrs
   (scan_stms, scan') <- scanToSegBinOp scan
-  post_lam' <- transformLambda post_lam
-
-  let post_op = SegPostOp post_lam' dest
+  post_op <- postLamToSegPosOp post_lam dest
   pure $
     scan_stms
       <> oneStm
@@ -306,6 +310,14 @@ transformSOAC pat _ (ScanScatter w arrs map_lam scan dest post_lam) = do
               ParOp Nothing $
                 SegScan () space (lambdaReturnType map_lam) kbody [scan'] post_op
         )
+
+postLamToSegPosOp ::
+  Lambda SOACS ->
+  SOACS.ScatterSpec VName ->
+  ExtractM (SegPostOp MC)
+postLamToSegPosOp lam dest = do
+  new_lam <- transformLambda lam
+  pure $ SegPostOp new_lam dest
 
 transformProg :: Prog SOACS -> PassM (Prog MC)
 transformProg prog =

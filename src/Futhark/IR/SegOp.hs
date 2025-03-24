@@ -598,7 +598,7 @@ typeCheckSegOp checkLvl (SegScan lvl space ts body scans post_op) = do
   checkSegSpace space
   TC.binding (scopeOfSegSpace space) $ do
     checkScanRed scans' ts body
-    checkSegPostOp post_op ts scans'
+    checkSegPostOp post_op scans' body
   where
     scans' =
       zip3
@@ -657,23 +657,18 @@ typeCheckSegOp checkLvl (SegHist lvl space ts kbody ops) = do
 checkSegPostOp ::
   (TC.Checkable rep) =>
   SegPostOp (Aliases rep) ->
-  [Type] ->
   [(Lambda (Aliases rep), [SubExp], Shape)] ->
+  KernelBody (Aliases rep) ->
   TC.TypeM rep ()
-checkSegPostOp op@(SegPostOp lam spec) ts ops = do
+checkSegPostOp op@(SegPostOp lam spec) ops kbody = do
   let nes = concatMap (\(_, a, _) -> a) ops
-  nes' <- mapM (fmap TC.argType . TC.checkArg) nes
+  nes' <- mapM TC.checkArg nes
+  kbody' <- mapM (TC.checkArg . kernelResultSubExp) $ kernelBodyResult kbody
 
-  lam_ts <- mapM (lookupType . paramName) $ lambdaParams lam
-
-  unless (lam_ts == nes' <> ts) $
-    TC.bad $
-      TC.TypeError $
-        "PostOp: Wrong parameters for the given lambda."
-          <> " Expected:\n"
-          <> prettyText (nes' <> ts)
-          <> "\nBut received:\n"
-          <> prettyText lam_ts
+  TC.checkLambda lam $
+    map TC.noArgAliases $
+      take (length $ lambdaParams lam) $
+        nes' <> kbody'
 
   let (idxs, ts', _) = splitPostOpResults op $ lambdaReturnType lam
   forM_ idxs $ \i -> do
