@@ -1210,6 +1210,10 @@ primFuns =
       f32 "sqrt32" sqrt,
       f64 "sqrt64" sqrt,
       --
+      f16 "rsqrt16" $ recip . sqrt,
+      f32 "rsqrt32" $ recip . sqrt,
+      f64 "rsqrt64" $ recip . sqrt,
+      --
       f16 "cbrt16" $ convFloat . cbrtf . convFloat,
       f32 "cbrt32" cbrtf,
       f64 "cbrt64" cbrt,

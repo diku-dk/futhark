@@ -1785,6 +1785,10 @@ SCALAR_FUN_ATTR float futrts_sqrt32(float x) {
   return sqrt(x);
 }
 
+SCALAR_FUN_ATTR float futrts_rsqrt32(float x) {
+  return rsqrt(x);
+}
+
 SCALAR_FUN_ATTR float futrts_cbrt32(float x) {
   return cbrt(x);
 }
@@ -1928,6 +1932,10 @@ SCALAR_FUN_ATTR float futrts_log1p_32(float x) {
 
 SCALAR_FUN_ATTR float futrts_sqrt32(float x) {
   return sqrt(x);
+}
+
+SCALAR_FUN_ATTR float futrts_rsqrt32(float x) {
+  return 1/sqrt(x);
 }
 
 extern "C" unmasked uniform float cbrtf(uniform float);
@@ -2144,6 +2152,10 @@ SCALAR_FUN_ATTR float futrts_log1p_32(float x) {
 
 SCALAR_FUN_ATTR float futrts_sqrt32(float x) {
   return sqrtf(x);
+}
+
+SCALAR_FUN_ATTR float futrts_rsqrt32(float x) {
+  return 1/sqrtf(x);
 }
 
 SCALAR_FUN_ATTR float futrts_cbrt32(float x) {
@@ -2413,6 +2425,10 @@ SCALAR_FUN_ATTR double futrts_log1p_64(double x) {
 
 SCALAR_FUN_ATTR double futrts_sqrt64(double x) {
   return sqrt(x);
+}
+
+SCALAR_FUN_ATTR double futrts_rsqrt64(double x) {
+  return 1/sqrt(x);
 }
 
 extern "C" unmasked uniform double cbrt(uniform double);
@@ -2794,6 +2810,10 @@ SCALAR_FUN_ATTR double futrts_log1p_64(double x) {
 
 SCALAR_FUN_ATTR double futrts_sqrt64(double x) {
   return sqrt(x);
+}
+
+SCALAR_FUN_ATTR double futrts_rsqrt64(double x) {
+  return 1/sqrt(x);
 }
 
 SCALAR_FUN_ATTR double futrts_cbrt64(double x) {
