@@ -239,7 +239,9 @@ transformSOAC pat _ (Screma w arrs form)
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
       (scans_stms, scans') <- mapAndUnzipM scanToSegBinOp scans
-      let ret = concatMap (lambdaReturnType . segBinOpLambda) scans'
+      let ret' = concatMap (lambdaReturnType . segBinOpLambda) scans'
+          ret'' = drop (length ret') $ lambdaReturnType map_lam
+          ret = ret' <> ret''
       identity <- mkIdentityLambda ret
       let post_op = SegPostOp identity []
       pure $
@@ -293,13 +295,7 @@ transformSOAC pat _ (Stream w arrs nes lam) = do
   transformStms stream_stms
 transformSOAC pat _ (ScanScatter w arrs map_lam scan dest post_lam) = do
   (gtid, space) <- mkSegSpace w
-  let body = lambdaBody map_lam
-      extra_res = varRes . paramName <$> lambdaParams map_lam
-      map_lam' =
-        map_lam
-          { lambdaBody = body {bodyResult = extra_res <> bodyResult body}
-          }
-  kbody <- mapLambdaToKernelBody transformBody gtid map_lam' arrs
+  kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
   (scan_stms, scan') <- scanToSegBinOp scan
   post_op <- postLamToSegPosOp post_lam dest
   pure $
