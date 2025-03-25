@@ -150,6 +150,10 @@ module type real = {
   -- | Square root.
   val sqrt: t -> t
 
+  -- | Inverse square root. Depending on the backend, this may be
+  -- faster than `1/sqrt(x)`.
+  val rsqrt: t -> t
+
   -- | Cube root.
   val cbrt: t -> t
   val exp: t -> t
@@ -967,6 +971,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   def abs (x: f64) = intrinsics.fabs64 x
 
   def sqrt (x: f64) = intrinsics.sqrt64 x
+  def rsqrt (x: f64) = intrinsics.rsqrt64 x
   def cbrt (x: f64) = intrinsics.cbrt64 x
 
   def log (x: f64) = intrinsics.log64 x
@@ -1084,6 +1089,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   def abs (x: f32) = intrinsics.fabs32 x
 
   def sqrt (x: f32) = intrinsics.sqrt32 x
+  def rsqrt (x: f32) = intrinsics.rsqrt32 x
   def cbrt (x: f32) = intrinsics.cbrt32 x
 
   def log (x: f32) = intrinsics.log32 x
@@ -1205,6 +1211,7 @@ module f16: (float with t = f16 with int_t = u16) = {
   def abs (x: f16) = intrinsics.fabs16 x
 
   def sqrt (x: f16) = intrinsics.sqrt16 x
+  def rsqrt (x: f16) = intrinsics.rsqrt16 x
   def cbrt (x: f16) = intrinsics.cbrt16 x
 
   def log (x: f16) = intrinsics.log16 x

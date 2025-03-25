@@ -226,6 +226,10 @@ SCALAR_FUN_ATTR f16 futrts_sqrt16(f16 x) {
   return sqrt(x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_rsqrt16(f16 x) {
+  return rsqrt(x);
+}
+
 SCALAR_FUN_ATTR f16 futrts_cbrt16(f16 x) {
   return cbrt(x);
 }
@@ -368,6 +372,10 @@ SCALAR_FUN_ATTR f16 futrts_log1p_16(f16 x) {
 
 SCALAR_FUN_ATTR f16 futrts_sqrt16(f16 x) {
   return (float16)sqrt((float)x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_rsqrt16(f16 x) {
+  return (float16)1/sqrt((float)x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_exp16(f16 x) {
@@ -531,6 +539,10 @@ SCALAR_FUN_ATTR f16 futrts_log1p_16(f16 x) {
 
 SCALAR_FUN_ATTR f16 futrts_sqrt16(f16 x) {
   return hsqrt(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_rsqrt16(f16 x) {
+  return hrsqrt(x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_cbrt16(f16 x) {
@@ -741,6 +753,10 @@ SCALAR_FUN_ATTR f16 futrts_log1p_16(f16 x) {
 
 SCALAR_FUN_ATTR f16 futrts_sqrt16(f16 x) {
   return futrts_sqrt32(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_rsqrt16(f16 x) {
+  return futrts_rsqrt32(x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_cbrt16(f16 x) {

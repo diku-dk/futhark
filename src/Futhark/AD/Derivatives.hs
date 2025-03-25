@@ -159,6 +159,12 @@ pdBuiltin "sqrt32" [x] =
   Just [untyped $ 1 / (2 * sqrt (isF32 x))]
 pdBuiltin "sqrt64" [x] =
   Just [untyped $ 1 / (2 * sqrt (isF64 x))]
+pdBuiltin "rsqrt16" [x] =
+  Just [untyped $ -1 / (2 * (isF16 x ** (3 / 2)))]
+pdBuiltin "rsqrt32" [x] =
+  Just [untyped $ -1 / (2 * (isF32 x ** (3 / 2)))]
+pdBuiltin "rsqrt64" [x] =
+  Just [untyped $ -1 / (2 * (isF64 x ** (3 / 2)))]
 pdBuiltin "cbrt16" [x] =
   Just [untyped $ 1 / (3 * cbrt16 (isF16 x) * cbrt16 (isF16 x))]
   where
