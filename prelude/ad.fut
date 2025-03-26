@@ -85,6 +85,11 @@
 -- primitive floating-point operations, without ever converting to or
 -- from integers.
 --
+-- Note that a function whose input or output is a sum type with more
+-- than one constructor is *not* differentiable (or at least the
+-- sum-typed part is not). This is because the choice of constructor
+-- is not a continuous quantity.
+--
 -- ## Limitations
 --
 -- `jvp` is expected to work in all cases. `vjp` has limitations when

@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* The interpreter no longer crashes when passing a sum-typed value
+  into AD, but it is unlikely to produce a usable result (#2238).
+
 ## [0.25.29]
 
 ### Fixed
