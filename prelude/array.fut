@@ -3,7 +3,7 @@
 import "math"
 import "soacs"
 import "functional"
-open import "zip" -- Rexport.
+open import "zip"
 
 -- | The size of the outer dimension of an array.
 --
