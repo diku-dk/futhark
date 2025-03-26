@@ -421,6 +421,27 @@ tests =
         ),
       mkTest
         "tests/indexfn/partition2.fut"
+        ( newNameFromString "j" >>= \j ->
+            newNameFromString "p" >>= \p -> pure $ \(i, n, xs, is_inv) ->
+              [ IndexFn
+                  { iterator = Empty,
+                    body =
+                      cases
+                        [ ( Bool True,
+                            sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole j)]))
+                          )
+                        ]
+                  },
+                IndexFn
+                  { iterator = Forall i (Iota (sHole n)),
+                    body =
+                      cases
+                        [(Bool True, sym2SoP $ Idx (Hole xs) (sym2SoP $ Idx (Hole is_inv) (sHole i)))]
+                  }
+              ]
+        ),
+      mkTest
+        "tests/indexfn/partition2_alt.fut"
         ( pure $ \(i, n, xs, is_inv) ->
             [ IndexFn
                 { iterator = Forall i (Iota (sHole n)),
