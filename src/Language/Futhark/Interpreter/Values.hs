@@ -29,8 +29,8 @@ module Language.Futhark.Interpreter.Values
   )
 where
 
+import Control.Monad.Identity
 import Data.Array
-import Data.Bifunctor (Bifunctor (second))
 import Data.List (genericLength)
 import Data.Map qualified as M
 import Data.Maybe
@@ -198,20 +198,9 @@ valueShape _ = ShapeLeaf
 -- TODO: Perhaps there is some clever way to reuse the code between
 -- valueAccum and valueAccumLM
 valueAccum :: (a -> Value m -> (a, Value m)) -> a -> Value m -> (a, Value m)
-valueAccum f i v@(ValuePrim {}) = f i v
-valueAccum f i v@(ValueAD {}) = f i v
-valueAccum f i (ValueRecord m) =
-  second ValueRecord $ M.mapAccum (valueAccum f) i m
-valueAccum f i (ValueArray s a) = do
-  -- TODO: This could probably be better
-  -- Transform into a map
-  let m = M.fromList $ assocs a
-  -- Accumulate over the map
-  let (i', m') = M.mapAccum (valueAccum f) i m
-  -- Transform back into an array and return
-  let a' = array (bounds a) (M.toList m')
-  (i', ValueArray s a')
-valueAccum _ _ v = error $ "valueAccum not implemented for " ++ show v
+valueAccum f i = runIdentity . valueAccumLM f' i
+  where
+    f' acc v = pure $ f acc v
 
 valueAccumLM :: (Monad f) => (a -> Value m -> f (a, Value m)) -> a -> Value m -> f (a, Value m)
 valueAccumLM f i v@(ValuePrim {}) = f i v
@@ -228,6 +217,9 @@ valueAccumLM f i (ValueArray s a) = do
   -- Transform back into an array and return
   let a' = array (bounds a) (M.toList m')
   pure (i', ValueArray s a')
+valueAccumLM f i (ValueSum shape c vs) = do
+  (a, vs') <- mapAccumLM (valueAccumLM f) i vs
+  pure (a, ValueSum shape c vs')
 valueAccumLM _ _ v = error $ "valueAccum not implemented for " ++ show v
 
 -- | Does the value correspond to an empty array?
