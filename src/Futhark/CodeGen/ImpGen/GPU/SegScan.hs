@@ -78,9 +78,9 @@ compileSegScan pat lvl space map_kbody scan_ops post_op =
 
     case (targetSupportsSinglePass target, canBeSinglePass scan_ops) of
       (True, Just scan_ops') ->
-        SinglePass.compileSegScan pat lvl space scan_ops' map_kbody
+        SinglePass.compileSegScan pat lvl space scan_ops' map_kbody post_op
       _ ->
-        TwoPass.compileSegScan pat lvl space scan_ops map_kbody
+        TwoPass.compileSegScan pat lvl space scan_ops map_kbody post_op
     emit $ Imp.DebugPrint "" Nothing
   where
     n = product $ map pe64 $ segSpaceDims space

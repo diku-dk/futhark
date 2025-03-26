@@ -18,9 +18,10 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (find, tails, (\\))
+import Data.List (find, partition, tails, (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Data.Text qualified as T
 import Debug.Trace
 import Futhark.Analysis.HORep.MapNest qualified as MapNest
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
@@ -203,52 +204,63 @@ mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
 debug :: (Show a) => a -> a
 debug a = traceShow a a
 
-reorderLambdaParams ::
-  [VName] ->
-  Lambda SOACS ->
+prettyDebug :: (Pretty a) => a -> a
+prettyDebug a = trace (T.unpack $ prettyText a) a
+
+newScanScatterMapLambda ::
   [SOAC.Input] ->
   Lambda SOACS ->
-  TryFusion (Lambda SOACS, Lambda SOACS, [SOAC.Input])
-reorderLambdaParams out map_lam inp' lam = do
-  let params = lambdaParams lam
-  not_in_out' <- filterM (fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput) inp'
-  not_in_out <- mapM (liftMaybe . SOAC.isVarishInput) not_in_out'
-  inp <- mapM (liftMaybe . SOAC.isVarishInput) inp'
-  let name_to_param = M.fromList $ zip inp params
-  new_params <- mapM (lookupParam name_to_param) out
-  new_params' <- mapM (lookupParam name_to_param) not_in_out
-  new_map_lam <- extendSOACLambda not_in_out map_lam
-  pure
-    ( new_map_lam,
-      lam {lambdaParams = new_params <> new_params'},
-      not_in_out'
-    )
-  where
-    lookupParam mapping name =
-      case M.lookup name mapping of
-        Just v -> pure v
-        Nothing -> lookupType name >>= newParam "ignore" . rowType
-
-extendSOACLambda ::
   [VName] ->
-  Lambda SOACS ->
-  TryFusion (Lambda SOACS)
-extendSOACLambda names lam = do
-  let params = lambdaParams lam
-  extra_params <- mapM (lookupType >=> newParam "x" . rowType) names
-  let extra_rets = varRes . paramName <$> extra_params
-      extra_ts = paramType <$> extra_params
-      body = lambdaBody lam
-      new_body = body {bodyResult = bodyResult body <> extra_rets}
-      new_rets = lambdaReturnType lam <> extra_ts
-      new_params = params <> extra_params
+  [SOAC.Input] ->
+  TryFusion ([SOAC.Input], Lambda SOACS, [VName])
+newScanScatterMapLambda inp lam out inp' = do
+  (old, new) <- combineInputs inp lam out inp'
+  let new_lam = extendLambda lam $ snd <$> new
+      new_inp = fst <$> old <> new
+      extra_out = paramName . snd <$> new
+      new_out = out <> extra_out
+  pure (new_inp, new_lam, new_out)
 
-  pure $
-    lam
-      { lambdaBody = new_body,
-        lambdaReturnType = new_rets,
-        lambdaParams = new_params
-      }
+extendLambda ::
+  Lambda SOACS ->
+  [Param Type] ->
+  Lambda SOACS
+extendLambda lam extra_params =
+  lam
+    { lambdaBody = new_body,
+      lambdaReturnType = new_rets,
+      lambdaParams = new_params
+    }
+  where
+    params = lambdaParams lam
+    extra_rets = varRes . paramName <$> extra_params
+    extra_ts = paramType <$> extra_params
+    body = lambdaBody lam
+    new_body = body {bodyResult = bodyResult body <> extra_rets}
+    new_rets = lambdaReturnType lam <> extra_ts
+    new_params = params <> extra_params
+
+fusability :: Names -> [VName] -> ([VName], [VName])
+fusability unfus_set = partition (`notNameIn` unfus_set)
+
+combineInputs ::
+  [SOAC.Input] ->
+  Lambda SOACS ->
+  [VName] ->
+  [SOAC.Input] ->
+  TryFusion ([(SOAC.Input, Param Type)], [(SOAC.Input, Param Type)])
+combineInputs inp lam out inp' =
+  (old_inputs,) <$> new_inputs
+  where
+    old_inputs = zip inp $ lambdaParams lam
+    vNameToNewParam = lookupType >=> newParam "x" . rowType
+    inputToVName = liftMaybe . SOAC.isVarishInput
+    inputToNewParam = inputToVName >=> vNameToNewParam
+    toNewParamPair inp'' = (inp'',) <$> inputToNewParam inp''
+    isNotDuplicate = isNothing . (`lookup` old_inputs)
+    isNotOutput = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
+    predicate x = (&& isNotDuplicate x) <$> isNotOutput x
+    new_inputs = mapM toNewParamPair =<< filterM predicate inp'
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::
@@ -472,18 +484,20 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       SOAC.Screma _ inp_p form,
       Vertical
       )
-        | isJust maybe_scans,
-          all (`notNameIn` unfus_set) outVars -> do
-            let Just (scans, lam) = maybe_scans
-                scan = singleScan scans
-            names_p <- mapM (liftMaybe . SOAC.isVarishInput) inp_p
-            (lam', scatter_lam, extra_inp) <- reorderLambdaParams (outVars <> names_p) lam inp_c lam_c'
-            let new_inp = inp_p <> extra_inp
+        | Just (scans, lam) <- isScanomapSOAC form -> do
+            let scan = singleScan scans
 
-            success (fsOutNames ker) $
-              SOAC.ScanScatter w new_inp lam' scan dests scatter_lam
-        where
-          maybe_scans = isScanomapSOAC form
+            let scan_out =
+                  take (length $ lambdaReturnType $ scanLambda scan) outVars
+            ( new_inp,
+              new_map_lam,
+              new_map_out
+              ) <-
+              newScanScatterMapLambda inp_p lam outVars inp_c
+            let new_out = scan_out <> new_map_out
+            success (fsOutNames ker <> returned_outvars) $
+              prettyDebug $
+                SOAC.ScanScatter w new_inp new_map_lam scan dests lam_c'
     (SOAC.Scatter {}, _, _) ->
       fail "Cannot fuse a scatter with anything else than a scatter or a map"
     (_, SOAC.Scatter {}, _) ->

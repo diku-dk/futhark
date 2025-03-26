@@ -487,8 +487,9 @@ compileSegScan ::
   SegSpace ->
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
+  SegPostOp GPUMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scans kbody = do
+compileSegScan pat lvl space scans kbody post_op = do
   attrs <- lvlKernelAttrs lvl
 
   -- Since stage 2 involves a group size equal to the number of groups
