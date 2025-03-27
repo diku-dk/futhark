@@ -413,8 +413,8 @@ transformSOAC pat (ScanScatter w arrs map_lam scan dests scatter_lam) = do
             map (Var . paramName) scanacc_params ++ map resSubExp map_res
 
       let scan_res_bind = resSubExp <$> scan_res'
-      let map_param_bind = paramName <$> lambdaParams map_lam
-      let param_bind = scan_res_bind ++ (Var <$> map_param_bind)
+      let map_param_bind = fmap resSubExp $ drop (length scan_res_bind) $ bodyResult $ lambdaBody map_lam
+      let param_bind = scan_res_bind <> map_param_bind
       forM_ (zip (paramName <$> lambdaParams scatter_lam) param_bind) $
         \(scatter_p, v) -> do
           letBindNames [scatter_p] $ BasicOp $ SubExp v
