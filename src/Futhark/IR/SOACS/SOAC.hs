@@ -924,7 +924,8 @@ typeCheckSOAC (ScanScatter w arrs map_lam scan dests scatter_lam) = do
     $ "Map function return type "
       <> prettyTuple map_lam_ts
       <> " wrong for given the scan functions."
-  TC.checkLambda scatter_lam (scan_nes' ++ arrs')
+  let map_args = (,mempty) <$> drop (length scan_nes') map_lam_ts
+  TC.checkLambda scatter_lam (scan_nes' <> map_args)
   let (as_ws, as_ns, _as_vs) = unzip3 dests
       rts = lambdaReturnType scatter_lam
       num_idxs = sum $ zipWith (*) as_ns $ map length as_ws

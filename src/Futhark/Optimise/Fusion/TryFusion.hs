@@ -292,10 +292,8 @@ combineInputs inp lam out inp' =
   where
     old_inputs = zip inp $ lambdaParams lam
     toNewParamPair inp'' = (inp'',) <$> inputToNewParam inp''
-    isNotDuplicate = isNothing . (`lookup` old_inputs)
-    isNotOutput = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
-    predicate x = (&& isNotDuplicate x) <$> isNotOutput x
-    new_inputs = mapM toNewParamPair =<< filterM predicate inp'
+    isOutput = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
+    new_inputs = mapM toNewParamPair =<< filterM isOutput inp'
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::
