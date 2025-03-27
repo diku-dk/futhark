@@ -216,7 +216,7 @@ scanScatterMapLambda ::
 scanScatterMapLambda inp lam out inp' = do
   (old, new) <- combineInputs inp lam out inp'
   let new_lam = extendLambda lam $ snd <$> new
-      new_inp = fst <$> old <> new
+      new_inp = fst <$> old <> filter (`notElem` old) new
   extra_out <- mapM (inputToVName . fst) new
   let new_scatter_inp = out <> extra_out
   pure (new_inp, new_lam, new_scatter_inp)
@@ -267,7 +267,7 @@ extendLambda lam extra_params =
     body = lambdaBody lam
     new_body = body {bodyResult = bodyResult body <> extra_rets}
     new_rets = lambdaReturnType lam <> extra_ts
-    new_params = params <> extra_params
+    new_params = params <> filter (`notElem` params) extra_params
 
 fusability :: Names -> [VName] -> ([VName], [VName])
 fusability unfus_set = partition (`notNameIn` unfus_set)
@@ -291,7 +291,11 @@ combineInputs inp lam out inp' =
   (old_inputs,) <$> new_inputs
   where
     old_inputs = zip inp $ lambdaParams lam
-    toNewParamPair inp'' = (inp'',) <$> inputToNewParam inp''
+    toNewParamPair inp'' =
+      maybe
+        ((inp'',) <$> inputToNewParam inp'')
+        (pure . (inp'',))
+        (lookup inp'' old_inputs)
     isOutput = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
     new_inputs = mapM toNewParamPair =<< filterM isOutput inp'
 
