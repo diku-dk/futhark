@@ -371,7 +371,7 @@ transformSOAC pat (ScanScatter w arrs map_lam scan dests scatter_lam) = do
   let (as_ws, as_ns, as_vs) = unzip3 dests
       num_idxs = sum $ zipWith (*) as_ns $ map length as_ws
       num_scatter_ts = sum as_ns + num_idxs
-      map_ts = drop num_scatter_ts $ lambdaReturnType scatter_lam
+      map_ts = fmap (`arrayOfRow` w) . drop num_scatter_ts $ lambdaReturnType scatter_lam
 
   mapout_params <- mapM (newParam "mapout" . flip toDecl Unique) map_ts
 
