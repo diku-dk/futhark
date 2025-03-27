@@ -521,16 +521,13 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       )
         | Just (scans, lam) <- isScanomapSOAC form -> do
             let scan = singleScan scans
-            let scan_out =
-                  take (length $ lambdaReturnType $ scanLambda scan) outVars
             let (_, extra_out) = fusability unfus_set outVars
             ( new_inp,
               new_map_lam,
-              map_out
+              new_scatter_inp
               ) <-
               scanScatterMapLambda inp_p lam outVars inp_c
-            let new_map_out = scan_out <> map_out
-            new_scatter_lam <- scanScatterPostLambda new_map_out extra_out inp_c lam_c'
+            new_scatter_lam <- scanScatterPostLambda new_scatter_inp extra_out inp_c lam_c'
             success (fsOutNames ker <> extra_out) $
               SOAC.ScanScatter w new_inp new_map_lam scan dests new_scatter_lam
     (SOAC.Scatter {}, _, _) ->
