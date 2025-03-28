@@ -539,15 +539,10 @@ segOpType (SegRed _ space ts kbody reds) =
       op <- reds
       let shape = Shape segment_dims <> segBinOpShape op
       map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
-segOpType (SegScan _ space ts kbody scans post_op) =
+segOpType (SegScan _ space _ts _kbody _scans post_op) =
   scatter_ts
     ++ post_op_ts
-    ++ zipWith
-      (segResultShape space)
-      map_ts
-      (drop (length scans) $ kernelBodyResult kbody)
   where
-    map_ts = drop (length scans) ts
     (scatter_ts, post_op_ts) = postOpResultsType space post_op
 segOpType (SegHist _ space _ _ ops) = do
   op <- ops
@@ -598,7 +593,7 @@ typeCheckSegOp checkLvl (SegScan lvl space ts body scans post_op) = do
   checkSegSpace space
   TC.binding (scopeOfSegSpace space) $ do
     checkScanRed scans' ts body
-    checkSegPostOp post_op scans' body
+    checkSegPostOp post_op scans' ts
   where
     scans' =
       zip3
@@ -658,17 +653,16 @@ checkSegPostOp ::
   (TC.Checkable rep) =>
   SegPostOp (Aliases rep) ->
   [(Lambda (Aliases rep), [SubExp], Shape)] ->
-  KernelBody (Aliases rep) ->
+  [Type] ->
   TC.TypeM rep ()
-checkSegPostOp op@(SegPostOp lam spec) ops kbody = do
+checkSegPostOp op@(SegPostOp lam spec) ops ts = do
   let nes = concatMap (\(_, a, _) -> a) ops
   nes' <- mapM TC.checkArg nes
-  kbody' <- mapM (TC.checkArg . kernelResultSubExp) $ kernelBodyResult kbody
+  let kbody' = (,mempty) <$> drop (length nes') ts
 
   TC.checkLambda lam $
     map TC.noArgAliases $
-      take (length $ lambdaParams lam) $
-        nes' <> kbody'
+      nes' <> kbody'
 
   let (idxs, ts', _) = splitPostOpResults op $ lambdaReturnType lam
   forM_ idxs $ \i -> do
