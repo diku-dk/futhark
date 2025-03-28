@@ -1,7 +1,7 @@
 -- ==
--- input{} output { [-4.0, -2.0, 0.0] }
+-- input { [1.0, 1.0, 1.0] } output { [-4.0, -2.0, 0.0] }
 
-entry main =
+entry main seed =
   let eq (w': [3]f64) =
     let w0 = 1 - 2 * f64.sum w'
     let w = concat [w0] w'
@@ -11,4 +11,4 @@ entry main =
       |> map (scan (+) 0)
     in A[1, 1:]
   let start_w = [0.1027, -1.9606, 1.9381]
-  in jvp eq start_w [1, 1, 1]
+  in jvp eq start_w seed
