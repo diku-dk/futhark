@@ -51,28 +51,8 @@ commonBasicOp pat aux op m = do
 diffBasicOp :: Pat Type -> StmAux () -> BasicOp -> ADM () -> ADM ()
 diffBasicOp pat aux e m =
   case e of
-    CmpOp cmp x y -> do
-      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ do
-        let t = cmpOpType cmp
-            update contrib = do
-              void $ updateSubExpAdj x contrib
-              void $ updateSubExpAdj y contrib
-
-        case t of
-          FloatType ft ->
-            update <=< letExp "contrib" $
-              Match
-                [Var pat_adj]
-                [Case [Just $ BoolValue True] $ resultBody [constant (floatValue ft (1 :: Int))]]
-                (resultBody [constant (floatValue ft (0 :: Int))])
-                (MatchDec [Prim (FloatType ft)] MatchNormal)
-          IntType it ->
-            update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var pat_adj)
-          Bool ->
-            update pat_adj
-          Unit ->
-            pure ()
+    CmpOp {} ->
+      void $ commonBasicOp pat aux e m
     --
     ConvOp op x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m

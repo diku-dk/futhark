@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The interpreter no longer crashes when passing a sum-typed value
   into AD, but it is unlikely to produce a usable result (#2238).
 
+* The partial derivatives of comparisons are now always zero.
+  Previously we had some code that made an attempt at giving these
+  another interpretation, but it was never mathematically sound, not
+  useful, and sometimes buggy. (#2239).
+
 ## [0.25.29]
 
 ### Fixed
