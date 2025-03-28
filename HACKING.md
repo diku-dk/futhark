@@ -163,7 +163,7 @@ You can set the level of debug verbosity via the environment variable
   + All of the effects of `FUTHARK_COMPILER_DEBUGGING=1`.
   + The frontend prints explicit type annotations.
 
-## Running compiler pipelines
+### Running compiler pipelines
 
 You can run the various compiler passes in whatever order you wish.
 There are also various shorthands for running entire standard pipelines:
@@ -201,7 +201,7 @@ and compilation as `futhark c`.  This is useful for experimenting with
 other compiler pipelines, but still producing an executable or
 library.
 
-## IR as input
+### IR as input
 
 The `futhark dev` command also accepts the textual IR format as input.
 This is done by passing it a file with one of the following
