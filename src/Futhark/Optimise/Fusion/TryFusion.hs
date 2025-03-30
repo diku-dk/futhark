@@ -21,6 +21,7 @@ import Control.Monad.State
 import Data.List (find, (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Futhark.Analysis.HORep.MapNest (MapNest)
 import Futhark.Analysis.HORep.MapNest qualified as MapNest
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Construct
@@ -65,8 +66,6 @@ liftMaybe Nothing = fail "Nothing"
 liftMaybe (Just x) = pure x
 
 type SOAC = SOAC.SOAC SOACS
-
-type MapNest = MapNest.MapNest SOACS
 
 inputToOutput :: SOAC.Input -> Maybe (SOAC.ArrayTransform, SOAC.Input)
 inputToOutput (SOAC.Input ts ia iat) =
