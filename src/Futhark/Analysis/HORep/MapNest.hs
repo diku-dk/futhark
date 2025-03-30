@@ -103,12 +103,20 @@ massage ::
 massage (SOAC.Screma w inps form)
   | Just lam <- Futhark.isMapSOAC form,
     Just (init_stms, last_stm) <- stmsLast $ bodyStms $ lambdaBody lam,
+    all (cheap . stmExp) init_stms,
     all (`notNameIn` freeIn (bodyResult (lambdaBody lam))) $
       foldMap (patNames . stmPat) init_stms,
     Just last_stm' <- pushIntoMapLambda init_stms last_stm =
       let lam' =
             lam {lambdaBody = (lambdaBody lam) {bodyStms = oneStm last_stm'}}
        in SOAC.Screma w inps (Futhark.mapSOAC lam')
+  where
+    cheap (BasicOp BinOp {}) = True
+    cheap (BasicOp SubExp {}) = True
+    cheap (BasicOp CmpOp {}) = True
+    cheap (BasicOp ConvOp {}) = True
+    cheap (BasicOp UnOp {}) = True
+    cheap _ = False
 massage soac = soac
 
 fromSOAC' ::
