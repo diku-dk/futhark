@@ -18,7 +18,7 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (find, tails, (\\))
+import Data.List (find, (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.HORep.MapNest qualified as MapNest
@@ -767,52 +767,19 @@ fixupInputs inpIds inps =
       | otherwise = Nothing
 
 pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
-pullReshape (SOAC.Screma _ inps form) ots
-  | Just maplam <- Futhark.isMapSOAC form,
-    SOAC.Reshape cs k shape SOAC.:< ots' <- SOAC.viewf ots,
-    all primType $ lambdaReturnType maplam = do
-      let mapw' = case reverse $ shapeDims shape of
-            [] -> intConst Int64 0
-            d : _ -> d
-          trInput inp
-            | arrayRank (SOAC.inputType inp) == 1 =
-                SOAC.addTransform (SOAC.Reshape cs k shape) inp
-            | otherwise =
-                SOAC.addTransform (SOAC.ReshapeOuter cs k shape) inp
-          inputs' = map trInput inps
-          inputTypes = map SOAC.inputType inputs'
-
-      let outersoac ::
-            ([SOAC.Input] -> SOAC) ->
-            (SubExp, [SubExp]) ->
-            TryFusion ([SOAC.Input] -> SOAC)
-          outersoac inner (w, outershape) = do
-            let addDims t = arrayOf t (Shape outershape) NoUniqueness
-                retTypes = map addDims $ lambdaReturnType maplam
-
-            ps <- forM inputTypes $ \inpt ->
-              newParam "pullReshape_param" $
-                stripArray (length shape - length outershape) inpt
-
-            inner_body <-
-              runBodyBuilder $
-                varsRes
-                  <$> (letTupExp "x" <=< SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps)
-            let inner_fun =
-                  Lambda
-                    { lambdaParams = ps,
-                      lambdaReturnType = retTypes,
-                      lambdaBody = inner_body
-                    }
-            pure $ flip (SOAC.Screma w) $ Futhark.mapSOAC inner_fun
-
-      op' <-
-        foldM outersoac (flip (SOAC.Screma mapw') $ Futhark.mapSOAC maplam) $
-          zip (drop 1 $ reverse $ shapeDims shape) $
-            drop 1 . reverse . drop 1 . tails $
-              shapeDims shape
-      pure (op' inputs', ots')
-pullReshape _ _ = fail "Cannot pull reshape"
+pullReshape soac ots = do
+  Just mapnest <- MapNest.fromSOAC soac
+  SOAC.Reshape cs _kind newshape SOAC.:< ots' <- pure $ SOAC.viewf ots
+  -- This handles only the easy case where the underlying lambda is
+  -- scalar. The more complicated cases could also be handled, but
+  -- requires more tricky checks.
+  guard $
+    all
+      ((== MapNest.depth mapnest) . arrayRank)
+      (MapNest.typeOf mapnest)
+  mapnest' <- MapNest.reshape cs newshape mapnest
+  soac' <- MapNest.toSOAC mapnest'
+  pure (soac', ots')
 
 -- Tie it all together in exposeInputs (for making inputs to a
 -- consumer available) and pullOutputTransforms (for moving
@@ -825,6 +792,7 @@ exposeInputs ::
 exposeInputs inpIds ker =
   (exposeInputs' =<< pushRearrange')
     <|> (exposeInputs' =<< pullRearrange')
+    <|> (exposeInputs' =<< pullReshape')
     <|> (exposeInputs' =<< pullIndex')
     <|> exposeInputs' ker
   where
@@ -842,6 +810,16 @@ exposeInputs inpIds ker =
       (soac', ot') <- pullRearrange (fsSOAC ker) ot
       unless (SOAC.nullTransforms ot') $
         fail "pullRearrange was not enough"
+      pure
+        ker
+          { fsSOAC = soac',
+            fsOutputTransform = SOAC.noTransforms
+          }
+
+    pullReshape' = do
+      (soac', ot') <- pullReshape (fsSOAC ker) ot
+      unless (SOAC.nullTransforms ot') $
+        fail "pullReshape was not enough"
       pure
         ker
           { fsSOAC = soac',
