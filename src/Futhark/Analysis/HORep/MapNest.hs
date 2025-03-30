@@ -231,13 +231,17 @@ fixInputs w ourInps = mapM inspect
 -- already been done. Will automatically reshape the inputs
 -- appropriately.
 reshape ::
-  (MonadFreshNames m) => Certs -> Shape -> MapNest rep -> m (MapNest rep)
+  (ASTRep rep, MonadFreshNames m) => Certs -> Shape -> MapNest rep -> m (MapNest rep)
 reshape cs shape (MapNest _ map_lam _ inps) =
   descend [] $ stripDims 1 shape
   where
     w = shapeSize 0 shape
-    tr = SOAC.Reshape cs ReshapeArbitrary shape
-    inps' = map (SOAC.addTransform tr) inps
+    transform p inp =
+      let shape' = shape <> arrayShape p
+          tr = SOAC.Reshape cs ReshapeArbitrary shape'
+       in SOAC.addTransform tr inp
+    inps' = zipWith transform (map paramType $ lambdaParams map_lam) inps
+
     descend nests nest_shape
       | shapeRank nest_shape == 0 =
           pure $ MapNest w map_lam nests inps'
