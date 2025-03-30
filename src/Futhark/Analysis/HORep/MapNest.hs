@@ -22,10 +22,11 @@ import Futhark.Analysis.HORep.SOAC (SOAC)
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
 import Futhark.Construct
 import Futhark.IR hiding (typeOf)
+import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SOACS.SOAC qualified as Futhark
 import Futhark.Transform.Substitute
 
-data Nesting rep = Nesting
+data Nesting = Nesting
   { nestingParamNames :: [VName],
     nestingResult :: [VName],
     nestingReturnType :: [Type],
@@ -33,33 +34,33 @@ data Nesting rep = Nesting
   }
   deriving (Eq, Ord, Show)
 
-data MapNest rep = MapNest
+data MapNest = MapNest
   { mapNestWidth :: SubExp,
-    mapNestLambda :: Lambda rep,
-    mapNestNestings :: [Nesting rep],
+    mapNestLambda :: Lambda SOACS,
+    mapNestNestings :: [Nesting],
     mapNestInput :: [SOAC.Input]
   }
   deriving (Show)
 
-depth :: MapNest rep -> Int
+depth :: MapNest -> Int
 depth (MapNest _ _ nests _) = 1 + length nests
 
-typeOf :: MapNest rep -> [Type]
+typeOf :: MapNest -> [Type]
 typeOf (MapNest w lam [] _) =
   map (`arrayOfRow` w) $ lambdaReturnType lam
 typeOf (MapNest w _ (nest : _) _) =
   map (`arrayOfRow` w) $ nestingReturnType nest
 
-params :: MapNest rep -> [VName]
+params :: MapNest -> [VName]
 params (MapNest _ lam [] _) =
   map paramName $ lambdaParams lam
 params (MapNest _ _ (nest : _) _) =
   nestingParamNames nest
 
-inputs :: MapNest rep -> [SOAC.Input]
+inputs :: MapNest -> [SOAC.Input]
 inputs (MapNest _ _ _ inps) = inps
 
-setInputs :: [SOAC.Input] -> MapNest rep -> MapNest rep
+setInputs :: [SOAC.Input] -> MapNest -> MapNest
 setInputs [] (MapNest w body ns _) = MapNest w body ns []
 setInputs (inp : inps) (MapNest _ body ns _) = MapNest w body ns' (inp : inps)
   where
@@ -68,21 +69,10 @@ setInputs (inp : inps) (MapNest _ body ns _) = MapNest w body ns' (inp : inps)
     ns' = zipWith setDepth ns ws
     setDepth n nw = n {nestingWidth = nw}
 
-fromSOAC ::
-  ( Buildable rep,
-    MonadFreshNames m,
-    LocalScope rep m,
-    Op rep ~ Futhark.SOAC rep
-  ) =>
-  SOAC rep ->
-  m (Maybe (MapNest rep))
-fromSOAC = fromSOAC' mempty
-
 pushIntoMapLambda ::
-  (Op rep ~ Futhark.SOAC rep) =>
-  Stms rep ->
-  Stm rep ->
-  Maybe (Stm rep)
+  Stms SOACS ->
+  Stm SOACS ->
+  Maybe (Stm SOACS)
 pushIntoMapLambda stms (Let pat aux (Op (Futhark.Screma w inps form)))
   | Just map_lam <- Futhark.isMapSOAC form,
     not $ any ((`namesIntersect` bound_by_stms) . freeIn) inps =
@@ -95,11 +85,7 @@ pushIntoMapLambda stms (Let pat aux (Op (Futhark.Screma w inps form)))
     bound_by_stms = namesFromList $ foldMap (patNames . stmPat) stms
 pushIntoMapLambda _ _ = Nothing
 
-massage ::
-  ( Op rep ~ Futhark.SOAC rep
-  ) =>
-  SOAC rep ->
-  SOAC rep
+massage :: SOAC SOACS -> SOAC SOACS
 massage (SOAC.Screma w inps form)
   | Just lam <- Futhark.isMapSOAC form,
     Just (init_stms, last_stm) <- stmsLast $ bodyStms $ lambdaBody lam,
@@ -120,14 +106,10 @@ massage (SOAC.Screma w inps form)
 massage soac = soac
 
 fromSOAC' ::
-  ( Buildable rep,
-    MonadFreshNames m,
-    LocalScope rep m,
-    Op rep ~ Futhark.SOAC rep
-  ) =>
+  (MonadFreshNames m, LocalScope SOACS m) =>
   [Ident] ->
-  SOAC rep ->
-  m (Maybe (MapNest rep))
+  SOAC SOACS ->
+  m (Maybe MapNest)
 fromSOAC' bound soac
   | SOAC.Screma w inps (SOAC.ScremaForm lam [] []) <- massage soac = do
       let bound' = bound <> map paramIdent (lambdaParams lam)
@@ -189,15 +171,10 @@ fromSOAC' bound soac
           pure $ Just $ MapNest w lam' [] inps'
 fromSOAC' _ _ = pure Nothing
 
-toSOAC ::
-  ( MonadFreshNames m,
-    HasScope rep m,
-    Buildable rep,
-    BuilderOps rep,
-    Op rep ~ Futhark.SOAC rep
-  ) =>
-  MapNest rep ->
-  m (SOAC rep)
+fromSOAC :: (MonadFreshNames m, LocalScope SOACS m) => SOAC SOACS -> m (Maybe MapNest)
+fromSOAC = fromSOAC' mempty
+
+toSOAC :: (MonadFreshNames m, HasScope SOACS m) => MapNest -> m (SOAC SOACS)
 toSOAC (MapNest w lam [] inps) =
   pure $ SOAC.Screma w inps (Futhark.mapSOAC lam)
 toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
@@ -238,8 +215,7 @@ fixInputs w ourInps = mapM inspect
 -- | Reshape a map nest. It is assumed that any validity tests have
 -- already been done. Will automatically reshape the inputs
 -- appropriately.
-reshape ::
-  (ASTRep rep, MonadFreshNames m) => Certs -> Shape -> MapNest rep -> m (MapNest rep)
+reshape :: (MonadFreshNames m) => Certs -> Shape -> MapNest -> m MapNest
 reshape cs shape (MapNest _ map_lam _ inps) =
   descend [] $ stripDims 1 shape
   where
