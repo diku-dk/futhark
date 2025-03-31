@@ -114,6 +114,14 @@ data ArrayTransform
     Index Certs (Slice SubExp)
   deriving (Show, Eq, Ord)
 
+instance FreeIn ArrayTransform where
+  freeIn' (Rearrange cs _) = freeIn' cs
+  freeIn' (Reshape cs _ shape) = freeIn' cs <> freeIn' shape
+  freeIn' (ReshapeOuter cs _ shape) = freeIn' cs <> freeIn' shape
+  freeIn' (ReshapeInner cs _ shape) = freeIn' cs <> freeIn' shape
+  freeIn' (Replicate cs shape) = freeIn' cs <> freeIn' shape
+  freeIn' (Index cs slice) = freeIn' cs <> freeIn' slice
+
 instance Substitute ArrayTransform where
   substituteNames substs (Rearrange cs xs) =
     Rearrange (substituteNames substs cs) xs
@@ -153,6 +161,9 @@ instance Monoid ArrayTransforms where
 instance Substitute ArrayTransforms where
   substituteNames substs (ArrayTransforms ts) =
     ArrayTransforms $ substituteNames substs <$> ts
+
+instance FreeIn ArrayTransforms where
+  freeIn' (ArrayTransforms trs) = foldMap freeIn' trs
 
 -- | The empty transformation list.
 noTransforms :: ArrayTransforms
@@ -268,6 +279,9 @@ transformToExp (Index cs slice) ia = do
 -- the first element of the 'ArrayTransform' list is applied first.
 data Input = Input ArrayTransforms VName Type
   deriving (Show, Eq, Ord)
+
+instance FreeIn Input where
+  freeIn' (Input trs v t) = freeIn' trs <> freeIn' v <> freeIn' t
 
 instance Substitute Input where
   substituteNames substs (Input ts v t) =

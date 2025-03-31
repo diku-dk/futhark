@@ -9,9 +9,27 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* New math functions: `f16.rsqrt`, `f32.rsqrt`, `f64.rsqrt`.
+
+* Slight improvements in the ability of the fusion engine to fuse
+  across `map` nests separated by `reshape` operations. Only works if
+  the innermost return type is purely scalar.
+
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* The interpreter no longer crashes when passing a sum-typed value
+  into AD, but it is unlikely to produce a usable result (#2238).
+
+* The partial derivatives of comparisons are now always zero.
+  Previously we had some code that made an attempt at giving these
+  another interpretation, but it was never mathematically sound, not
+  useful, and sometimes buggy. (#2239).
+
+## [0.25.29]
 
 ### Fixed
 
@@ -33,6 +51,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A bug in the defunctionaliser could cause a compiler crash in code
   that used both higher order functions and size expressions in clever
   ways (#2234).
+
+* Fusion could crash after AD in some circumstances (#2236).
 
 ## [0.25.28]
 

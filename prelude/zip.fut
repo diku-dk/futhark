@@ -9,7 +9,8 @@
 -- We need a map to define some of the zip variants, but this file is
 -- depended upon by soacs.fut.  So we just define a quick-and-dirty
 -- internal one here that uses the intrinsic version.
-local def internal_map 'a [n] 'x (f: a -> x) (as: [n]a) : *[n]x =
+local
+def internal_map 'a [n] 'x (f: a -> x) (as: [n]a) : *[n]x =
   intrinsics.map f as
 
 -- | Construct an array of pairs from two arrays.
