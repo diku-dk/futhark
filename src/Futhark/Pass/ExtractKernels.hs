@@ -564,6 +564,36 @@ transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w imgs ops bucket_fun))) 
     addStms =<< histKernel onLambda lvl orig_pat [] [] cs w ops bfun' imgs
   where
     onLambda = pure . soacsLambdaToGPU
+transformStm path (Let pat aux@(StmAux cs _ _) (Op (ScanScatter w arrs map_lam scan dests scatter_lam))) = do
+  let paralleliseOuter = runBuilder_ $ do
+        scan_ops <- do
+          let Scan scan_lam nes = scan
+          (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
+          let scan_lam'' = soacsLambdaToGPU scan_lam'
+          pure $ SegBinOp Noncommutative scan_lam'' nes' shape
+        let map_lam_sequential = soacsLambdaToGPU map_lam
+        let scatter_lam_sequential = soacsLambdaToGPU scatter_lam
+        let post_op = SegPostOp scatter_lam_sequential dests
+        lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
+        addStms . fmap (certify cs)
+          =<< segScan lvl pat mempty w [scan_ops] post_op map_lam_sequential arrs [] []
+
+      outerParallelBody =
+        renameBody
+          =<< (mkBody <$> paralleliseOuter <*> pure (varsRes (patNames pat)))
+
+      paralleliseInner path' = do
+        (mapstm, scanstm) <-
+          scanomapToMapAndScan pat (w, [scan], map_lam, arrs)
+        types <- asksScope scopeForSOACs
+        transformStms path' . stmsToList <=< (`runBuilderT_` types) $
+          addStms =<< simplifyStms (stmsFromList [certify cs mapstm, certify cs scanstm])
+
+      innerParallelBody path' =
+        renameBody
+          =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
+
+  versionScanRed path pat aux w map_lam paralleliseOuter outerParallelBody innerParallelBody
 transformStm _ stm =
   runBuilder_ $ FOT.transformStmRecursively stm
 
