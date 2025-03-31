@@ -4,6 +4,7 @@
 module Futhark.Pass.ExplicitAllocations.SegOp
   ( allocInKernelBody,
     allocInBinOpLambda,
+    allocInPostOpLambda,
   )
 where
 
@@ -21,16 +22,6 @@ allocInKernelBody ::
 allocInKernelBody (KernelBody () stms res) =
   uncurry (flip (KernelBody ()))
     <$> collectStms (allocInStms stms (pure res))
-
-allocInLambda ::
-  (Allocable fromrep torep inner) =>
-  [LParam torep] ->
-  Body fromrep ->
-  AllocM fromrep torep (Lambda torep)
-allocInLambda params body =
-  mkLambda params . allocInStms (bodyStms body) $
-    pure $
-      bodyResult body
 
 allocInBinOpParams ::
   (Allocable fromrep torep inner) =>
@@ -97,3 +88,16 @@ allocInBinOpLambda num_threads (SegSpace flat _) lam = do
     allocInBinOpParams num_threads index_x index_y acc_params arr_params
 
   allocInLambda (acc_params' ++ arr_params') (lambdaBody lam)
+
+allocInPostOpLambda ::
+  (Allocable fromrep torep inner) =>
+  SubExp ->
+  SegSpace ->
+  Lambda fromrep ->
+  AllocM fromrep torep (Lambda torep)
+allocInPostOpLambda num_threads (SegSpace flat _) lam = do
+  let arr_params = lambdaParams lam
+      index_x = TPrimExp $ LeafExp flat int64
+  arr_params' <- allocInLParams num_threads index_x arr_params
+
+  allocInLambda arr_params' (lambdaBody lam)

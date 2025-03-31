@@ -713,7 +713,8 @@ checkScanRed ops ts kbody = do
 -- | Like 'Mapper', but just for 'SegOp's.
 data SegOpMapper lvl frep trep m = SegOpMapper
   { mapOnSegOpSubExp :: SubExp -> m SubExp,
-    mapOnSegOpLambda :: Lambda frep -> m (Lambda trep),
+    mapOnSegBinOpLambda :: Lambda frep -> m (Lambda trep),
+    mapOnSegPostOpLambda :: Lambda frep -> m (Lambda trep),
     mapOnSegOpBody :: KernelBody frep -> m (KernelBody trep),
     mapOnSegOpVName :: VName -> m VName,
     mapOnSegOpLevel :: lvl -> m lvl
@@ -724,7 +725,8 @@ identitySegOpMapper :: (Monad m) => SegOpMapper lvl rep rep m
 identitySegOpMapper =
   SegOpMapper
     { mapOnSegOpSubExp = pure,
-      mapOnSegOpLambda = pure,
+      mapOnSegBinOpLambda = pure,
+      mapOnSegPostOpLambda = pure,
       mapOnSegOpBody = pure,
       mapOnSegOpVName = pure,
       mapOnSegOpLevel = pure
@@ -744,7 +746,7 @@ mapSegBinOp ::
   m (SegBinOp trep)
 mapSegBinOp tv (SegBinOp comm red_op nes shape) =
   SegBinOp comm
-    <$> mapOnSegOpLambda tv red_op
+    <$> mapOnSegBinOpLambda tv red_op
     <*> mapM (mapOnSegOpSubExp tv) nes
     <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
 
@@ -755,7 +757,7 @@ mapSegPostOp ::
   m (SegPostOp trep)
 mapSegPostOp tv (SegPostOp lam scatter_spec) =
   SegPostOp
-    <$> mapOnSegOpLambda tv lam
+    <$> mapOnSegPostOpLambda tv lam
     <*> mapM mapSpec scatter_spec
   where
     mapShape shp = Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shp)
@@ -807,7 +809,7 @@ mapSegOpM tv (SegHist lvl space ts body ops) =
         <*> mapM (mapOnSegOpVName tv) arrs
         <*> mapM (mapOnSegOpSubExp tv) nes
         <*> (Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shape))
-        <*> mapOnSegOpLambda tv op
+        <*> mapOnSegBinOpLambda tv op
 
 mapOnSegOpType ::
   (Monad m) =>
@@ -877,7 +879,7 @@ traverseSegOpStms f segop = mapSegOpM mapper segop
     f' scope = f (seg_scope <> scope)
     mapper =
       identitySegOpMapper
-        { mapOnSegOpLambda = traverseLambdaStms f',
+        { mapOnSegBinOpLambda = traverseLambdaStms f',
           mapOnSegOpBody = onBody
         }
     onBody (KernelBody dec stms res) =
@@ -892,7 +894,8 @@ instance
       substitute =
         SegOpMapper
           { mapOnSegOpSubExp = pure . substituteNames subst,
-            mapOnSegOpLambda = pure . substituteNames subst,
+            mapOnSegBinOpLambda = pure . substituteNames subst,
+            mapOnSegPostOpLambda = pure . substituteNames subst,
             mapOnSegOpBody = pure . substituteNames subst,
             mapOnSegOpVName = pure . substituteNames subst,
             mapOnSegOpLevel = pure . substituteNames subst
@@ -902,7 +905,7 @@ instance (ASTRep rep, ASTConstraints lvl) => Rename (SegOp lvl rep) where
   rename op =
     renameBound (M.keys (scopeOfSegSpace (segSpace op))) $ mapSegOpM renamer op
     where
-      renamer = SegOpMapper rename rename rename rename rename
+      renamer = SegOpMapper rename rename rename rename rename rename
 
 instance (ASTRep rep, FreeIn lvl) => FreeIn (SegOp lvl rep) where
   freeIn' e =
@@ -914,7 +917,8 @@ instance (ASTRep rep, FreeIn lvl) => FreeIn (SegOp lvl rep) where
       free =
         SegOpMapper
           { mapOnSegOpSubExp = walk freeIn',
-            mapOnSegOpLambda = walk freeIn',
+            mapOnSegBinOpLambda = walk freeIn',
+            mapOnSegPostOpLambda = walk freeIn',
             mapOnSegOpBody = walk freeIn',
             mapOnSegOpVName = walk freeIn',
             mapOnSegOpLevel = walk freeIn'
@@ -1019,6 +1023,7 @@ instance CanBeAliased (SegOp lvl) where
         SegOpMapper
           pure
           (pure . Alias.analyseLambda aliases)
+          (pure . Alias.analyseLambda aliases)
           (pure . aliasAnalyseKernelBody aliases)
           pure
           pure
@@ -1033,6 +1038,7 @@ instance CanBeWise (SegOp lvl) where
       add =
         SegOpMapper
           pure
+          (pure . informLambda)
           (pure . informLambda)
           (pure . informKernelBody)
           pure

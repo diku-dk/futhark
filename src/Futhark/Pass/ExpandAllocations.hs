@@ -456,7 +456,8 @@ extractStmAllocations user bound_outside bound_kernel stm = do
 
     opMapper user' =
       identitySegOpMapper
-        { mapOnSegOpLambda = onLambda user',
+        { mapOnSegBinOpLambda = onLambda user',
+          mapOnSegPostOpLambda = onLambda user',
           mapOnSegOpBody = onKernelBody user'
         }
 
@@ -813,7 +814,8 @@ offsetMemoryInExp offsets = mapExpM recurse
         segOpMapper =
           identitySegOpMapper
             { mapOnSegOpBody = offsetMemoryInKernelBody offsets,
-              mapOnSegOpLambda = offsetMemoryInLambda offsets
+              mapOnSegBinOpLambda = offsetMemoryInLambda offsets,
+              mapOnSegPostOpLambda = offsetMemoryInLambda offsets
             }
     onOp op = pure op
 
@@ -901,7 +903,8 @@ unAllocGPUStms = unAllocStms False
       where
         mapper =
           identitySegOpMapper
-            { mapOnSegOpLambda = unAllocLambda,
+            { mapOnSegBinOpLambda = unAllocLambda,
+              mapOnSegPostOpLambda = unAllocLambda,
               mapOnSegOpBody = unAllocKernelBody
             }
 
