@@ -5,6 +5,7 @@ module Language.Futhark.Interpreter.AD
     Tape (..),
     VJPValue (..),
     JVPValue (..),
+    Counter (..),
     doOp,
     addFor,
     tapePrimal,
@@ -21,7 +22,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT, catchE, runExceptT, throwE)
 import Control.Monad.Trans.State (State, get, modify, runState)
 import Data.Either (isRight)
-import Data.Foldable (foldlM, find)
+import Data.Foldable (find, foldlM)
 import Data.Functor ((<&>))
 import Data.Map qualified as M
 import Data.Maybe (fromJust, fromMaybe)
@@ -30,27 +31,33 @@ import Futhark.AD.Derivatives (pdBinOp, pdBuiltin, pdUnOp)
 import Futhark.Analysis.PrimExp (PrimExp (..))
 import Language.Futhark.Core (VName (..), nameFromString, nameFromText)
 import Language.Futhark.Primitive
-    ( ConvOp,
-      CmpOp,
-      BinOp(LogAnd, Add, FAdd, LogOr, Mul, FMul),
-      Overflow(OverflowWrap),
-      UnOp,
-      PrimValue(BoolValue),
-      PrimType(Bool, IntType, FloatType),
-      primValueType,
-      blankPrimValue,
-      doUnOp,
-      doBinOp,
-      doConvOp,
-      flipConvOp,
-      doCmpOp,
-      binOpType,
-      cmpOpType,
-      unOpType,
-      convOpType,
-      primFuns )
+  ( BinOp (Add, FAdd, FMul, LogAnd, LogOr, Mul),
+    CmpOp,
+    ConvOp,
+    Overflow (OverflowWrap),
+    PrimType (Bool, FloatType, IntType),
+    PrimValue (BoolValue),
+    UnOp,
+    binOpType,
+    blankPrimValue,
+    cmpOpType,
+    convOpType,
+    doBinOp,
+    doCmpOp,
+    doConvOp,
+    doUnOp,
+    flipConvOp,
+    primFuns,
+    primValueType,
+    unOpType,
+  )
 
-type ADMonad = ExceptT String (State Int)
+newtype Counter = Counter Int
+
+type ADMonad = ExceptT String (State Counter)
+
+incrementCounter :: ADMonad ()
+incrementCounter = lift $ modify (\(Counter i) -> Counter (i + 1))
 
 -- Mathematical operations subject to AD.
 data Op
@@ -178,7 +185,7 @@ lookupPDs _ _ = Nothing
 -- This function performs a mathematical operation on a
 -- list of operands, performing automatic differentiation
 -- if one or more operands is a Variable (of depth > 0)
-doOp :: Op -> [ADValue] -> Int -> Either String (ADValue, Int)
+doOp :: Op -> [ADValue] -> Counter -> Either String (ADValue, Counter)
 doOp op o uid = case runState (runExceptT $ doOp' op o) uid of
   (Left s, _) -> Left s
   (Right v, uid') -> Right (v, uid')
@@ -196,7 +203,7 @@ doOp' op o
             -- PrimExp (check lookupPDs)
             _ -> maximum (map depth o)
       if dep == 0
-        then lift (modify (+1)) *> maybe (throwE "failed to evaluate const") pure constCase
+        then maybe (throwE "failed to evaluate const") pure constCase <* incrementCounter
         else nonconstCase dep
   where
     pv = map primitive o
@@ -253,8 +260,8 @@ doOp' op o
         -- Finally, we perform the necessary steps for the given
         -- type of AD
         Just (Right (VJP {})) ->
-          Variable dep . VJP . VJPValue <$>
-            vjpHandleOp op (map extractVJP o') vprev
+          Variable dep . VJP . VJPValue
+            <$> vjpHandleOp op (map extractVJP o') vprev
         Just (Right (JVP {})) ->
           Variable dep . JVP . JVPValue vprev
             <$> jvpHandleOp op (map extractJVP o')
@@ -310,7 +317,7 @@ tapePrimal (TapeOp _ _ _ v) = v
 -- treating all operands of a lower depth as constants
 vjpHandleOp :: Op -> [Either ADValue VJPValue] -> ADValue -> ADMonad Tape
 vjpHandleOp op p v = do
-  i <- lift get
+  Counter i <- lift get
   pure $ TapeOp op (map toTape p) i v
   where
     toTape (Left v') = TapeConst v'
@@ -329,7 +336,7 @@ unionsWithM f = foldM (unionWithM f) M.empty
 -- | This calculates every partial derivative of a 'Tape'. The result
 -- is a map of the partial derivatives, each key corresponding to the
 -- ID of a free variable (see TapeID).
-deriveTape :: Tape -> ADValue -> Int -> Either String (M.Map Int ADValue, Int)
+deriveTape :: Tape -> ADValue -> Counter -> Either String (M.Map Int ADValue, Counter)
 deriveTape tp s uid = case runState (runExceptT $ deriveTape' tp s) uid of
   (Left e, _) -> Left e
   (Right v, uid') -> Right (v, uid')
@@ -338,7 +345,7 @@ deriveTape' :: Tape -> ADValue -> ADMonad (M.Map Int ADValue)
 deriveTape' (TapeID i _) s = pure $ M.fromList [(i, s)]
 deriveTape' (TapeConst _) _ = pure M.empty
 deriveTape' tp@(TapeOp op p uid _) s =
-  fst <$> derive tp s M.empty (countReferences p $ M.fromList [(-uid-1, 1)])
+  fst <$> derive tp s M.empty (countReferences p $ M.fromList [(-uid - 1, 1)])
   where
     add x y = doOp' (OpBin $ addFor $ opReturnType op) [x, y]
     mul x y = doOp' (OpBin $ mulFor $ opReturnType op) [x, y]
@@ -351,35 +358,39 @@ deriveTape' tp@(TapeOp op p uid _) s =
     derive (TapeConst _) _ ss rs = pure (ss, rs)
     derive (TapeOp op' p' uid' _) s' ss rs = do
       -- Decrease the reference counter
-      let r = fromJust (M.lookup (-uid'-1) rs) - 1
-          rs' = M.insert (-uid'-1) r rs
+      let r = fromJust (M.lookup (-uid' - 1) rs) - 1
+          rs' = M.insert (-uid' - 1) r rs
       -- Add the sensitivity
-      ss' <- madd (-uid'-1) s' ss
+      ss' <- madd (-uid' - 1) s' ss
       -- If there are still more references left, do nothing
-      if r > 0 then
-        pure (ss', rs')
-      -- Otherwise, derive the tape
-      else if r == 0 then do
-        let s'' = fromJust (M.lookup (-uid'-1) ss')
+      if r > 0
+        then
+          pure (ss', rs')
+        -- Otherwise, derive the tape
+        else
+          if r == 0
+            then do
+              let s'' = fromJust (M.lookup (-uid' - 1) ss')
 
-        -- Calculate the new sensitivities
-        s''' <- case op' of
-          OpConv op'' ->
-            -- In case of type conversion, simply convert the sensitivity
-            sequence [ doOp' (OpConv $ flipConvOp op'') [s''] ]
-          _ -> calculatePDs op' (map tapePrimal p') >>= mapM (mul s'')
+              -- Calculate the new sensitivities
+              s''' <- case op' of
+                OpConv op'' ->
+                  -- In case of type conversion, simply convert the sensitivity
+                  sequence [doOp' (OpConv $ flipConvOp op'') [s'']]
+                _ -> calculatePDs op' (map tapePrimal p') >>= mapM (mul s'')
 
-        -- Propagate the new sensitivities
-        foldlM (\(a, b) (c, d) -> derive c d a b) (ss', rs') $ zip p' s'''
-      else
-        error "TODO: TIS!"
+              -- Propagate the new sensitivities
+              foldlM (\(ss'', rs'') (p'', s'''') -> derive p'' s'''' ss'' rs'') (ss', rs') $ zip p' s'''
+            else
+              error "TODO: This branch is unreachable unless `countReferences` undercounts"
     countReferences :: [Tape] -> M.Map Int Int -> M.Map Int Int
-    countReferences p' d' =
-      foldl (\d'' x -> case x of
-              (TapeOp _ p'' uid'' _) -> case M.lookup (-uid''-1) d'' of
-                  Just v -> M.insert (-uid''-1) (v + 1) d''
-                  Nothing -> countReferences p'' $ M.insert (-uid''-1) 1 d''
-              _ -> d'') d' p'
+    countReferences p' d' = foldl f d' p'
+    f d'' x =
+      case x of
+        (TapeOp _ p'' uid'' _) -> case M.lookup (-uid'' - 1) d'' of
+          Just v -> M.insert (-uid'' - 1) (v + 1) d''
+          Nothing -> countReferences p'' $ M.insert (-uid'' - 1) 1 d''
+        _ -> d''
 
 -- JVP / Forward mode automatic differentiation--
 

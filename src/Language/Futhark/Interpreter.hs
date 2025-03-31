@@ -101,7 +101,7 @@ newtype EvalM a
   = EvalM
       ( ReaderT
           (Stack, M.Map ImportName Env)
-          (StateT (Exts, Int) (F ExtOp))
+          (StateT (Exts, AD.Counter) (F ExtOp))
           a
       )
   deriving
@@ -110,11 +110,11 @@ newtype EvalM a
       Functor,
       MonadFree ExtOp,
       MonadReader (Stack, M.Map ImportName Env),
-      MonadState (Exts, Int)
+      MonadState (Exts, AD.Counter)
     )
 
 runEvalM :: M.Map ImportName Env -> EvalM a -> F ExtOp a
-runEvalM imports (EvalM m) = evalStateT (runReaderT m (mempty, imports)) (mempty, 0)
+runEvalM imports (EvalM m) = evalStateT (runReaderT m (mempty, imports)) (mempty, AD.Counter 0)
 
 stacking :: SrcLoc -> Env -> EvalM a -> EvalM a
 stacking loc env = local $ \(ss, imports) ->
@@ -134,19 +134,15 @@ lookupImport :: ImportName -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
 putExtSize :: VName -> Value -> EvalM ()
-putExtSize v x = do
-  (exts, uid) <- get
-  put (M.insert v x exts, uid)
+putExtSize v x = modify $ first $ M.insert v x
 
 getExts :: EvalM Exts
 getExts = gets fst
 
-putCounter :: Int -> EvalM ()
-putCounter i = do
-  (exts, _) <- get
-  put (exts, i)
+putCounter :: AD.Counter -> EvalM ()
+putCounter i = modify $ second $ const i
 
-getCounter :: EvalM Int
+getCounter :: EvalM AD.Counter
 getCounter = gets snd
 
 -- | Disregard any existential sizes computed during this action.
@@ -2014,16 +2010,21 @@ initialCtx =
         let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
 
         -- For each output..
-        m <- forM (zip o' s') (\(on, sn) -> case on of
-              -- If it is a VJP variable of the correct depth, run
-              -- deriveTapqe on it- and its corresponding seed
-              (ValueAD d (AD.VJP (AD.VJPValue t)))
-                | d == depth ->
-                    getCounter >>=
-                      either (pure . Left) (\(m', i) -> putCounter i $> Right (putAD $ AD.tapePrimal t, m'))
-                        . AD.deriveTape t sn
-              -- Otherwise, its partial derivatives are all 0
-              _ -> pure $ Right (on, M.empty)) <&> fromRight (error "TODO") . sequence
+        m <-
+          forM
+            (zip o' s')
+            ( \(on, sn) -> case on of
+                -- If it is a VJP variable of the correct depth, run
+                -- deriveTapqe on it- and its corresponding seed
+                (ValueAD d (AD.VJP (AD.VJPValue t)))
+                  | d == depth ->
+                      getCounter
+                        >>= either (pure . Left) (\(m', i) -> putCounter i $> Right (putAD $ AD.tapePrimal t, m'))
+                          . AD.deriveTape t sn
+                -- Otherwise, its partial derivatives are all 0
+                _ -> pure $ Right (on, M.empty)
+            )
+            <&> fromRight (error "TODO") . sequence
 
         -- Add together every derivative
         drvs' <- AD.unionsWithM add (map snd m)
@@ -2051,7 +2052,7 @@ initialCtx =
 
         -- TODO: Perhaps this could be fully abstracted by AD?
         -- Making addFor private would be nice..
-        add x y = getCounter >>= either (error "TODO") (\(a, b) -> putCounter b >> pure a) . AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
+        add x y = getCounter >>= either (error "TODO: Forward the error from `doOp`") (\(a, b) -> putCounter b >> pure a) . AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
     def "jvp2" = Just $
       -- TODO: This could be much better. Currently, it is very inefficient
       -- Perhaps creating JVPValues could be abstracted into a function
