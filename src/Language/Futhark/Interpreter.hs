@@ -36,6 +36,7 @@ import Data.Array
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Either (fromRight)
+import Data.Functor (($>), (<&>))
 import Data.List
   ( find,
     foldl',
@@ -100,7 +101,7 @@ newtype EvalM a
   = EvalM
       ( ReaderT
           (Stack, M.Map ImportName Env)
-          (StateT Exts (F ExtOp))
+          (StateT (Exts, Int) (F ExtOp))
           a
       )
   deriving
@@ -109,11 +110,11 @@ newtype EvalM a
       Functor,
       MonadFree ExtOp,
       MonadReader (Stack, M.Map ImportName Env),
-      MonadState Exts
+      MonadState (Exts, Int)
     )
 
 runEvalM :: M.Map ImportName Env -> EvalM a -> F ExtOp a
-runEvalM imports (EvalM m) = evalStateT (runReaderT m (mempty, imports)) mempty
+runEvalM imports (EvalM m) = evalStateT (runReaderT m (mempty, imports)) (mempty, 0)
 
 stacking :: SrcLoc -> Env -> EvalM a -> EvalM a
 stacking loc env = local $ \(ss, imports) ->
@@ -133,19 +134,30 @@ lookupImport :: ImportName -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
 putExtSize :: VName -> Value -> EvalM ()
-putExtSize v x = modify $ M.insert v x
+putExtSize v x = do
+  (exts, uid) <- get
+  put (M.insert v x exts, uid)
 
 getExts :: EvalM Exts
-getExts = get
+getExts = gets fst
+
+putCounter :: Int -> EvalM ()
+putCounter i = do
+  (exts, _) <- get
+  put (exts, i)
+
+getCounter :: EvalM Int
+getCounter = gets snd
 
 -- | Disregard any existential sizes computed during this action.
 -- This is used so that existentials computed during one iteration of
 -- a loop or a function call are not remembered the next time around.
 localExts :: EvalM a -> EvalM a
 localExts m = do
-  s <- get
+  e <- getExts
   x <- m
-  put s
+  i <- getCounter
+  put (e, i)
   pure x
 
 extEnv :: EvalM Env
@@ -1352,9 +1364,9 @@ initialCtx =
 
     adToPrim v = putV $ AD.primitive v
 
-    adBinOp op x y =
-      either (const Nothing) Just $ AD.doOp op [x, y]
-    adUnOp op x = either (const Nothing) Just $ AD.doOp op [x]
+    adBinOp op x y i =
+      either (const Nothing) Just $ AD.doOp op [x, y] i
+    adUnOp op x i = either (const Nothing) Just $ AD.doOp op [x] i
 
     fun1 f =
       TermValue Nothing $ ValueFun $ \x -> f x
@@ -1414,7 +1426,8 @@ initialCtx =
                       pure . ValueFun $ \g ->
                         pure . ValueFun $ \h -> f x y z a b c d e g h
 
-    bopDef fs = fun2 $ \x y ->
+    bopDef fs = fun2 $ \x y -> do
+      i <- getCounter
       case (x, y) of
         (ValuePrim x', ValuePrim y')
           | Just z <- msum $ map (`bopDef'` (x', y')) fs -> do
@@ -1423,7 +1436,8 @@ initialCtx =
         _
           | Just x' <- getAD x,
             Just y' <- getAD y,
-            Just z <- msum $ map (`bopDefAD` (x', y')) fs -> do
+            Just (z, i') <- msum $ map (`bopDefAD` (x', y', i)) fs -> do
+              putCounter i'
               breakOnNaN [adToPrim x', adToPrim y'] $ adToPrim z
               pure $ putAD z
         _ ->
@@ -1438,9 +1452,10 @@ initialCtx =
           x' <- valf x
           y' <- valf y
           retf =<< op x' y'
-        bopDefAD (_, _, _, dop) (x, y) = dop x y
+        bopDefAD (_, _, _, dop) (x, y, i) = dop x y i
 
-    unopDef fs = fun1 $ \x ->
+    unopDef fs = fun1 $ \x -> do
+      i <- getCounter
       case x of
         (ValuePrim x')
           | Just r <- msum $ map (`unopDef'` x') fs -> do
@@ -1448,7 +1463,8 @@ initialCtx =
               pure $ ValuePrim r
         _
           | Just x' <- getAD x,
-            Just r <- msum $ map (`unopDefAD'` x') fs -> do
+            Just (r, i') <- msum $ map (`unopDefAD'` (x', i)) fs -> do
+              putCounter i'
               breakOnNaN [adToPrim x'] $ adToPrim r
               pure $ putAD r
         _ ->
@@ -1460,9 +1476,10 @@ initialCtx =
         unopDef' (valf, retf, op, _) x = do
           x' <- valf x
           retf =<< op x'
-        unopDefAD' (_, _, _, dop) = dop
+        unopDefAD' (_, _, _, dop) (x, i) = dop x i
 
-    tbopDef op f = fun1 $ \v ->
+    tbopDef op f = fun1 $ \v -> do
+      i <- getCounter
       case fromTuple v of
         Just [ValuePrim x, ValuePrim y]
           | Just x' <- getV x,
@@ -1473,7 +1490,8 @@ initialCtx =
         Just [x, y]
           | Just x' <- getAD x,
             Just y' <- getAD y,
-            Right z <- AD.doOp op [x', y'] -> do
+            Right (z, i') <- AD.doOp op [x', y'] i -> do
+              putCounter i'
               breakOnNaN [adToPrim x', adToPrim y'] $ adToPrim z
               pure $ putAD z
         _ ->
@@ -1996,17 +2014,20 @@ initialCtx =
         let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
 
         -- For each output..
-        let m = flip map (zip o' s') $ \(on, sn) -> case on of
+        m <- forM (zip o' s') (\(on, sn) -> case on of
               -- If it is a VJP variable of the correct depth, run
               -- deriveTapqe on it- and its corresponding seed
               (ValueAD d (AD.VJP (AD.VJPValue t)))
                 | d == depth ->
-                    (putAD $ AD.tapePrimal t, AD.deriveTape t sn)
+                    getCounter >>=
+                      either (pure . Left) (\(m', i) -> putCounter i $> Right (putAD $ AD.tapePrimal t, m'))
+                        . AD.deriveTape t sn
               -- Otherwise, its partial derivatives are all 0
-              _ -> (on, M.empty)
+              _ -> pure $ Right (on, M.empty)) <&> fromRight (error "TODO") . sequence
 
         -- Add together every derivative
-        let drvs = M.map (Just . putAD) $ M.unionsWith add $ map snd m
+        drvs' <- AD.unionsWithM add (map snd m)
+        let drvs = M.map (Just . putAD) drvs'
 
         -- Extract the output values, and the partial derivatives
         let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
@@ -2030,9 +2051,7 @@ initialCtx =
 
         -- TODO: Perhaps this could be fully abstracted by AD?
         -- Making addFor private would be nice..
-        add x y =
-          fromRight (error "jvp: illtyped add") $
-            AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
+        add x y = getCounter >>= either (error "TODO") (\(a, b) -> putCounter b >> pure a) . AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
     def "jvp2" = Just $
       -- TODO: This could be much better. Currently, it is very inefficient
       -- Perhaps creating JVPValues could be abstracted into a function
