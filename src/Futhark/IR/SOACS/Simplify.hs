@@ -1051,18 +1051,16 @@ moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm ma
         Just t <- typeOf <$> M.lookup arr scope,
         invariantToMap t =
           let cs = stmAuxCerts aux <> resCerts res
-              transform = ArrayReshape cs arr k (Shape [w] <> new_shape)
+              transform = (arr, cs, BasicOp . Reshape k (Shape [w] <> new_shape))
            in ((t, screma_pe, transform) : transformed, map_pesres', stms)
       where
         matches (r, _, _) = resSubExp r == Var (patElemName pe)
     onStm (transformed, map_infos, stms) stm =
       (transformed, map_infos, stms <> oneStm stm)
 
-    mkTransformed (t, pe, ArrayReshape cs arr k new_shape) = do
+    mkTransformed (t, pe, (arr, cs, f)) = do
       v <- newVName (baseString (patElemName pe) <> "_pretr")
-      let bind =
-            letBindNames [patElemName pe] . BasicOp $ Reshape k new_shape v
+      let bind = letBindNames [patElemName pe] $ f v
       pure (SubExpRes cs (Var arr), t, v, bind)
-    mkTransformed _ = error "moveTransformToOutput: can only handle Reshape"
 moveTransformToOutput _ _ _ _ =
   Skip
