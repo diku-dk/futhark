@@ -84,7 +84,7 @@ nonsegmentedScan pat space kbody scan_ops post_op nsubtasks = do
       carries <- scanStage2 pat nsubtasks space scan_ops2
       scan_ops3 <- renameSegBinOp scan_ops
       emit $ Imp.DebugPrint "Scan stage 3" Nothing
-      scanStage3 pat space scan_ops3 carries post_op
+      scanStage3 pat space scan_ops3 carries kbody post_op
 
 -- Different ways to generate code for a scan loop
 data ScanLoopType
@@ -317,9 +317,10 @@ scanStage3Scalar ::
   SegSpace ->
   [SegBinOp MCMem] ->
   [[VName]] ->
+  KernelBody MCMem ->
   SegPostOp MCMem ->
   MulticoreGen ()
-scanStage3Scalar pat space scan_ops per_scan_carries post_op = do
+scanStage3Scalar pat space scan_ops per_scan_carries kbody post_op = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
@@ -343,8 +344,12 @@ scanStage3Scalar pat space scan_ops per_scan_carries post_op = do
         sComment "combine carry with partial result" $
           forM_ (zip per_scan_pes scan_ops) $ \(scan_pes, scan_op) ->
             compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip scan_pes $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(pe, se) ->
-                copyDWIMFix (patElemName pe) (map Imp.le64 is) se []
+              forM_ (zip scan_pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
+                \(pe, se) ->
+                  copyDWIMFix (patElemName pe) (map Imp.le64 is) se []
+        sComment "Scatter elements" $
+          pure ()
+  -- forM_ (zip pat (concat per_scan_pes))
 
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
@@ -354,9 +359,10 @@ scanStage3Nested ::
   SegSpace ->
   [SegBinOp MCMem] ->
   [[VName]] ->
+  KernelBody MCMem ->
   SegPostOp MCMem ->
   MulticoreGen ()
-scanStage3Nested pat space scan_ops per_scan_carries post_op = do
+scanStage3Nested pat space scan_ops per_scan_carries kbody post_op = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
@@ -389,9 +395,10 @@ scanStage3Fallback ::
   SegSpace ->
   [SegBinOp MCMem] ->
   [[VName]] ->
+  KernelBody MCMem ->
   SegPostOp MCMem ->
   MulticoreGen ()
-scanStage3Fallback pat space scan_ops per_scan_carries post_op = do
+scanStage3Fallback pat space scan_ops per_scan_carries kbody post_op = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
