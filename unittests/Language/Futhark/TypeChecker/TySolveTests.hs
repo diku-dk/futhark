@@ -28,6 +28,16 @@ testSolve constraints typarams tyvars expected =
     Right s -> s @?= expected
     Left e -> assertFailure $ docString $ prettyTypeError e
 
+testSolveFail ::
+  [CtTy ()] ->
+  TyParams ->
+  TyVars () ->
+  Assertion
+testSolveFail constraints typarams tyvars =
+  case solve constraints typarams tyvars of
+    Left _ -> pure ()
+    Right _ -> assertFailure "Expected type error, but got a solution"
+
 -- When writing type variables/names here (a_0, b_1), make *sure* that
 -- the numbers are distinct. These are all that actually matter for
 -- determining identity.
@@ -123,22 +133,14 @@ tests =
           ([("a_0", Unlifted)], mempty),
 
       testCase "unification fail" $
-        let res = solve 
-                  ["a_0" ~ "i32", "a_0" ~ "bool"] 
-                  mempty 
-                  (M.fromList [tv "a_0" 0]) 
-        in 
-          case res of
-            Left _ -> pure ()
-            Right _ -> assertFailure "Expected type error, but got a solution",
-            
+        testSolveFail
+          ["a_0" ~ "i32", "a_0" ~ "bool"] 
+          mempty 
+          (M.fromList [tv "a_0" 0]),
+      
       testCase "infinite type" $
-        let res = solve
-                  ["a_0" ~ "a_0 -> b_1"]
-                  mempty
-                  (M.fromList [tv "a_0" 0])
-        in
-          case res of
-            Left _ -> pure ()
-            Right _ -> assertFailure "Expected type error, but got a solution"
+        testSolveFail
+          ["a_0" ~ "a_0 -> b_1"]
+          mempty
+          (M.fromList [tv "a_0" 0])
     ]
