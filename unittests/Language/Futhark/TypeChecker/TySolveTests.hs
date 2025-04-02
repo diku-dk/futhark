@@ -44,10 +44,45 @@ tests =
     "Unsized constraint solver"
     [ testCase "empty" $
         testSolve [] mempty mempty ([], mempty),
+
       testCase "a_0 ~ b_1" $
         testSolve
           ["a_0" ~ "b_1"]
           mempty
           (M.fromList [tv "a_0" 0])
-          ([], M.fromList [("a_0", Right "b_1")])
+          ([], M.fromList [("a_0", Right "b_1")]),
+
+      testCase "a_0 ~ i32" $
+        testSolve
+          ["a_0" ~ "i32"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          ([], M.fromList [("a_0", Right "i32")]),
+
+      testCase "a_0 ~ a_0" $
+        testSolve
+          ["a_0" ~ "a_0"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          ([("a_0", Unlifted)], mempty),
+
+      testCase "unification fail" $
+        let res = solve 
+                  ["a_0" ~ "i32", "a_0" ~ "bool"] 
+                  mempty 
+                  (M.fromList [tv "a_0" 0]) 
+        in 
+          case res of
+            Left _ -> pure ()
+            Right _ -> assertFailure "Expected type error, but got a solution",
+            
+      testCase "infinite type" $
+        let res = solve
+                  ["a_0" ~ "a_0 -> b_1"]
+                  mempty
+                  (M.fromList [tv "a_0" 0])
+        in
+          case res of
+            Left _ -> pure ()
+            Right _ -> assertFailure "Expected type error, but got a solution"
     ]
