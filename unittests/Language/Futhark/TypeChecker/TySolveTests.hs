@@ -12,7 +12,7 @@ import Language.Futhark.TypeChecker.Constraints
     TyVarInfo (..),
     TyVars,
   )
-import Language.Futhark.TypeChecker.Monad (prettyTypeError)
+import Language.Futhark.TypeChecker.Monad (prettyTypeError, TypeError(TypeError))
 import Language.Futhark.TypeChecker.TySolve
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
@@ -32,10 +32,11 @@ testSolveFail ::
   [CtTy ()] ->
   TyParams ->
   TyVars () ->
+  String ->
   Assertion
-testSolveFail constraints typarams tyvars =
+testSolveFail constraints typarams tyvars expectedMsg =
   case solve constraints typarams tyvars of
-    Left _ -> pure ()
+    Left (TypeError _ _ actualMsg) -> docString actualMsg @?= expectedMsg
     Right _ -> assertFailure "Expected type error, but got a solution"
 
 -- When writing type variables/names here (a_0, b_1), make *sure* that
@@ -136,11 +137,13 @@ tests =
         testSolveFail
           ["a_0" ~ "i32", "a_0" ~ "bool"] 
           mempty 
-          (M.fromList [tv "a_0" 0]),
+          (M.fromList [tv "a_0" 0])
+          "Cannot unify\n  i32\nwith\n  bool",
       
       testCase "infinite type" $
         testSolveFail
           ["a_0" ~ "a_0 -> b_1"]
           mempty
           (M.fromList [tv "a_0" 0])
+          "Occurs check: cannot instantiate a with a -> b."
     ]
