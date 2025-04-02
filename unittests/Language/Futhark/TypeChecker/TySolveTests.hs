@@ -12,7 +12,7 @@ import Language.Futhark.TypeChecker.Constraints
     TyVarInfo (..),
     TyVars,
   )
-import Language.Futhark.TypeChecker.Monad (prettyTypeError)
+import Language.Futhark.TypeChecker.Monad (prettyTypeError, TypeError(TypeError))
 import Language.Futhark.TypeChecker.TySolve
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
@@ -27,6 +27,17 @@ testSolve constraints typarams tyvars expected =
   case solve constraints typarams tyvars of
     Right s -> s @?= expected
     Left e -> assertFailure $ docString $ prettyTypeError e
+
+testSolveFail ::
+  [CtTy ()] ->
+  TyParams ->
+  TyVars () ->
+  String ->
+  Assertion
+testSolveFail constraints typarams tyvars expectedMsg =
+  case solve constraints typarams tyvars of
+    Left (TypeError _ _ actualMsg) -> docString actualMsg @?= expectedMsg
+    Right _ -> assertFailure "Expected type error, but got a solution"
 
 -- When writing type variables/names here (a_0, b_1), make *sure* that
 -- the numbers are distinct. These are all that actually matter for
@@ -107,12 +118,6 @@ tests =
             ("b_1", Right "c_2 -> c_2"),
             ("d_3", Right "c_2 -> c_2")
           ]),
-    --   testCase "Infinite type failure" $
-    --     testSolve
-    --       ["a_0" ~ "a_0 -> b_1"]
-    --       mempty
-    --       (M.fromList [tv "a_0" 0, tv "b_1" 0])
-    --       ([], mempty)
 
       testCase "a_0 ~ i32" $
         testSolve
@@ -129,22 +134,16 @@ tests =
           ([("a_0", Unlifted)], mempty),
 
       testCase "unification fail" $
-        let res = solve 
-                  ["a_0" ~ "i32", "a_0" ~ "bool"] 
-                  mempty 
-                  (M.fromList [tv "a_0" 0]) 
-        in 
-          case res of
-            Left _ -> pure ()
-            Right _ -> assertFailure "Expected type error, but got a solution",
-            
+        testSolveFail
+          ["a_0" ~ "i32", "a_0" ~ "bool"] 
+          mempty 
+          (M.fromList [tv "a_0" 0])
+          "Cannot unify\n  i32\nwith\n  bool",
+      
       testCase "infinite type" $
-        let res = solve
-                  ["a_0" ~ "a_0 -> b_1"]
-                  mempty
-                  (M.fromList [tv "a_0" 0])
-        in
-          case res of
-            Left _ -> pure ()
-            Right _ -> assertFailure "Expected type error, but got a solution"
+        testSolveFail
+          ["a_0" ~ "a_0 -> b_1"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          "Occurs check: cannot instantiate a with a -> b."
     ]
