@@ -5,12 +5,16 @@ where
 
 import Control.Monad
 import Data.List (zip4)
+import Debug.Trace
 import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 import Futhark.Util.IntegralExp (quot, rem)
 import Prelude hiding (quot, rem)
+
+debug :: (Show a) => a -> a
+debug x = traceShow x x
 
 -- Compile a SegScan construct
 compileSegScan ::
@@ -73,7 +77,6 @@ nonsegmentedScan pat space kbody scan_ops post_op nsubtasks = do
           | scalars = (scanStage1Scalar, scanStage3Scalar)
           | vectorize && no_array_param = (scanStage1Nested, scanStage3Nested)
           | otherwise = (scanStage1Fallback, scanStage3Fallback)
-
     emit $ Imp.DebugPrint "Scan stage 1" Nothing
     scanStage1 pat space kbody scan_ops
 
@@ -322,6 +325,7 @@ scanStage3Scalar ::
   MulticoreGen ()
 scanStage3Scalar pat space scan_ops per_scan_carries kbody post_op = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
+      per_scan_post_par = segBinOpChunks scan_ops $ lambdaParams $ segPostOpLambda post_op
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
 
@@ -336,19 +340,23 @@ scanStage3Scalar pat space scan_ops per_scan_carries kbody post_op = do
           forM_ (zip (xParams scan_op) op_carries) $ \(p, carries) ->
             copyDWIMFix (paramName p) [] (Var carries) [le64 (segFlat space)]
       generateChunkLoop "SegScan" Vectorized $ \i -> do
+        dScope Nothing $
+          scopeOfLParams $
+            lambdaParams $
+              segPostOpLambda post_op
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
         sComment "load partial result" $
           forM_ (zip per_scan_pes scan_ops) $ \(scan_pes, scan_op) ->
             forM_ (zip (yParams scan_op) scan_pes) $ \(p, pe) ->
               copyDWIMFix (paramName p) [] (Var (patElemName pe)) (map le64 is)
         sComment "combine carry with partial result" $
-          forM_ (zip per_scan_pes scan_ops) $ \(scan_pes, scan_op) ->
+          forM_ (zip per_scan_post_par scan_ops) $ \(ps, scan_op) ->
             compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip scan_pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
-                \(pe, se) ->
-                  copyDWIMFix (patElemName pe) (map Imp.le64 is) se []
-        sComment "Scatter elements" $
-          pure ()
+              forM_ (zip ps $ bodyResult $ lambdaBody $ segBinOpLambda scan_op) $ \(p, res) ->
+                copyDWIMFix (paramName p) [] (resSubExp res) []
+        sComment "Compute post op." $
+          compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $
+            pure ()
   -- forM_ (zip pat (concat per_scan_pes))
 
   free_params <- freeParams body
