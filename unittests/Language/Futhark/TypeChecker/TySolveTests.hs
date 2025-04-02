@@ -107,12 +107,6 @@ tests =
             ("b_1", Right "c_2 -> c_2"),
             ("d_3", Right "c_2 -> c_2")
           ]),
-    --   testCase "Infinite type failure" $
-    --     testSolve
-    --       ["a_0" ~ "a_0 -> b_1"]
-    --       mempty
-    --       (M.fromList [tv "a_0" 0, tv "b_1" 0])
-    --       ([], mempty)
 
       testCase "a_0 ~ i32" $
         testSolve
