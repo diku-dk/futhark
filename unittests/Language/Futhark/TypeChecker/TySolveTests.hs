@@ -51,6 +51,68 @@ tests =
           mempty
           (M.fromList [tv "a_0" 0])
           ([], M.fromList [("a_0", Right "b_1")]),
+      testCase "Two variables" $
+        testSolve 
+          ["a_0" ~ "b_1", "c_2" ~ "d_3"]
+          mempty
+          (M.fromList [tv "a_0" 0, tv "c_2" 0])
+          ([], M.fromList [("a_0", Right "b_1"), ("c_2", Right "d_3")]),
+      testCase "i32 + (i32 + i32)" $
+        testSolve
+          ["i32 -> i32 -> a_0" ~ "i32 -> i32 -> i32",
+           "i32 -> a_0 -> b_1" ~ "i32 -> i32 -> i32"]
+          mempty
+          (M.fromList [tv "a_0" 0, tv "b_1" 0])
+          ([], M.fromList [("a_0", Right "i32"), ("b_1", Right "i32")]),
+      testCase "((λx -> λy -> x * y) i32) i32" $
+        testSolve
+          ["a_0 -> b_1 -> c_2" ~ "i32 -> i32 -> i32",
+           "a_0 -> b_1 -> c_2" ~ "i32 -> d_3",
+           "d_3" ~ "i32 -> e_4"]
+          mempty
+          (M.fromList [tv "a_0" 0, tv "b_1" 0, tv "c_2" 0, tv "d_3" 0, tv "e_4" 0])
+          ([], M.fromList [
+                           ("a_0", Right "i32"),
+                           ("b_1", Right "i32"),
+                           ("c_2", Right "i32"),
+                           ("d_3", Right "i32 -> i32"),
+                           ("e_4", Right "i32")
+                          ]),
+      testCase "rec λf -> λn -> if n == 0 then 1 else n * (f (n - 1))" $
+        testSolve
+          ["b_1 -> i32 -> c_2" ~ "i32 -> i32 -> bool",
+           "b_1 -> i32 -> d_3" ~ "i32 -> i32 -> i32",
+           "a_0" ~ "d_3 -> e_4",
+           "b_1 -> e_4 -> f_5" ~ "i32 -> i32 -> i32",
+           "c_2" ~ "bool",
+           "i32" ~ "f_5",
+           "g_6 -> g_6" ~ "a_0 -> b_1 -> i32"] 
+          mempty
+          (M.fromList [tv "a_0" 0, tv "b_1" 0, tv "c_2" 0, tv "d_3" 0, tv "e_4" 0, tv "f_5" 0, tv "g_6" 0])
+          ([], M.fromList [
+                  ("a_0", Right "i32 -> i32"),
+                  ("b_1", Right "i32"),
+                  ("c_2", Right "bool"),
+                  ("d_3", Right "i32"),
+                  ("e_4", Right "i32"),
+                  ("f_5", Right "i32"),
+                  ("g_6", Right "i32 -> i32")
+                ]),
+      testCase "let id = λx -> x in id id" $
+        testSolve
+          ["b_1 -> b_1" ~ "(c_2 -> c_2) -> d_3"]
+          mempty
+          (M.fromList [tv "b_1" 0, tv "c_2" 0, tv "d_3" 0])
+          ([("c_2", Unlifted)], M.fromList [
+            ("b_1", Right "c_2 -> c_2"),
+            ("d_3", Right "c_2 -> c_2")
+          ]),
+    --   testCase "Infinite type failure" $
+    --     testSolve
+    --       ["a_0" ~ "a_0 -> b_1"]
+    --       mempty
+    --       (M.fromList [tv "a_0" 0, tv "b_1" 0])
+    --       ([], mempty)
 
       testCase "a_0 ~ i32" $
         testSolve
