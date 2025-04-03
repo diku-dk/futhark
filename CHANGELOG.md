@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   another interpretation, but it was never mathematically sound, not
   useful, and sometimes buggy. (#2239).
 
+* Out-of-bounds reads in GPU backends when transposing a great many
+  matrices in parallel (#2241).
+
 ## [0.25.29]
 
 ### Fixed
