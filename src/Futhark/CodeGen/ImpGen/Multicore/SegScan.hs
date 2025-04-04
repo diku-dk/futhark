@@ -20,14 +20,15 @@ debug x = traceShow x x
 compileSegScan ::
   Pat LetDecMem ->
   SegSpace ->
+  [Type] ->
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
   SegPostOp MCMem ->
   TV Int32 ->
   MulticoreGen Imp.MCCode
-compileSegScan pat space kbody reds post_op nsubtasks
+compileSegScan pat space ts kbody reds post_op nsubtasks
   | [_] <- unSegSpace space =
-      nonsegmentedScan pat space kbody reds post_op nsubtasks
+      nonsegmentedScan pat space ts kbody reds post_op nsubtasks
   | otherwise =
       segmentedScan pat space kbody reds post_op
 
@@ -55,12 +56,13 @@ carryArrays s nsubtasks segops =
 nonsegmentedScan ::
   Pat LetDecMem ->
   SegSpace ->
+  [Type] ->
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
   SegPostOp MCMem ->
   TV Int32 ->
   MulticoreGen Imp.MCCode
-nonsegmentedScan pat space kbody scan_ops post_op nsubtasks = do
+nonsegmentedScan pat space ts kbody scan_ops post_op nsubtasks = do
   emit $ Imp.DebugPrint "nonsegmented segScan" Nothing
   collect $ do
     -- Are we working with nested arrays
@@ -73,12 +75,15 @@ nonsegmentedScan pat space kbody scan_ops post_op nsubtasks = do
     let param_types = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
     let no_array_param = all primType param_types
 
+    map_aux <- forM (drop (segBinOpResults scan_ops) ts) $ \t ->
+      sAllocArray "mapout" (elemType t) (arrayShape t) DefaultSpace
+
     let (scanStage1, scanStage3)
           | scalars = (scanStage1Scalar, scanStage3Scalar)
           | vectorize && no_array_param = (scanStage1Nested, scanStage3Nested)
           | otherwise = (scanStage1Fallback, scanStage3Fallback)
     emit $ Imp.DebugPrint "Scan stage 1" Nothing
-    scanStage1 pat space kbody scan_ops
+    scanStage1 pat space kbody scan_ops map_aux
 
     let nsubtasks' = tvExp nsubtasks
     sWhen (nsubtasks' .>. 1) $ do
@@ -183,19 +188,23 @@ genScanLoop ::
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
   [[VName]] ->
+  [VName] ->
   Imp.TExp Int64 ->
   ImpM MCMem HostEnv Imp.Multicore ()
-genScanLoop typ pat space kbody scan_ops local_accs i = do
+genScanLoop typ pat space kbody scan_ops local_accs map_aux i = do
   let (all_scan_res, map_res) =
         splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
+  let map_subexps = kernelResultSubExp <$> map_res
 
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
   compileStms mempty (kernelBodyStms kbody) $ do
-    let map_arrs = drop (segBinOpResults scan_ops) $ patElems pat
     sComment "write mapped values results to memory" $
-      zipWithM_ (compileThreadResult space) map_arrs map_res
+      forM_ (zip map_aux map_subexps) $ \(name, subexp) -> do
+        pure ()
+    -- let is' = map (Imp.le64 . fst) $ unSegSpace space
+    -- copyDWIMFix name is' subexp []
     sComment "Apply scan op" $
       applyScanOps typ pat space (map kernelResultSubExp all_scan_res) scan_ops local_accs
 
@@ -204,8 +213,9 @@ scanStage1Scalar ::
   SegSpace ->
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
+  [VName] ->
   MulticoreGen ()
-scanStage1Scalar pat space kbody scan_ops = do
+scanStage1Scalar pat space kbody scan_ops map_aux = do
   fbody <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
@@ -214,7 +224,7 @@ scanStage1Scalar pat space kbody scan_ops = do
     local_accs <- genLocalAccsStage1 scan_ops
     inISPC $
       generateChunkLoop "SegScan" Vectorized $
-        genScanLoop ScanScalar pat space kbody scan_ops local_accs
+        genScanLoop ScanScalar pat space kbody scan_ops local_accs map_aux
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
@@ -223,8 +233,9 @@ scanStage1Nested ::
   SegSpace ->
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
+  [VName] ->
   MulticoreGen ()
-scanStage1Nested pat space kbody scan_ops = do
+scanStage1Nested pat space kbody scan_ops map_aux = do
   fbody <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
@@ -234,7 +245,7 @@ scanStage1Nested pat space kbody scan_ops = do
     inISPC $ do
       genBinOpParams scan_ops
       generateChunkLoop "SegScan" Scalar $ \i -> do
-        genScanLoop ScanNested pat space kbody scan_ops local_accs i
+        genScanLoop ScanNested pat space kbody scan_ops local_accs undefined i
 
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
@@ -244,8 +255,9 @@ scanStage1Fallback ::
   SegSpace ->
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
+  [VName] ->
   MulticoreGen ()
-scanStage1Fallback pat space kbody scan_ops = do
+scanStage1Fallback pat space kbody scan_ops map_aux = do
   -- Stage 1 : each thread partially scans a chunk of the input
   -- Writes directly to the resulting array
   fbody <- collect $ do
@@ -256,7 +268,7 @@ scanStage1Fallback pat space kbody scan_ops = do
     local_accs <- genLocalAccsStage1 scan_ops
 
     generateChunkLoop "SegScan" Scalar $
-      genScanLoop ScanSeq pat space kbody scan_ops local_accs
+      genScanLoop ScanSeq pat space kbody scan_ops local_accs undefined
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
