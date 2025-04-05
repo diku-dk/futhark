@@ -20,6 +20,7 @@ module Futhark.IR.SegOp
     splitHistResults,
     SegBinOp (..),
     segBinOpResults,
+    splitPostOpResults,
     segBinOpChunks,
     KernelBody (..),
     aliasAnalyseKernelBody,
