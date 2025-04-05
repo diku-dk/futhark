@@ -207,8 +207,9 @@ genScanLoop typ pat space kbody scan_ops local_accs map_aux i = do
       forM_ (zip map_aux map_subexps) $ \(name, subexp) -> do
         let is' = map (Imp.le64 . fst) $ unSegSpace space
         copyDWIMFix name is' subexp []
-    sComment "Apply scan op" $
-      applyScanOps typ pat space (map kernelResultSubExp all_scan_res) scan_ops local_accs
+
+-- sComment "Apply scan op" $
+--   applyScanOps typ pat space (map kernelResultSubExp all_scan_res) scan_ops local_accs
 
 scanStage1Scalar ::
   Pat LetDecMem ->
