@@ -17,6 +17,10 @@
 // Double-precision definitions are only included if the preprocessor
 // macro FUTHARK_F64_ENABLED is set.
 
+#ifndef M_PI
+#define M_PI 3.141592653589793
+#endif
+
 SCALAR_FUN_ATTR int32_t futrts_to_bits32(float x);
 SCALAR_FUN_ATTR float futrts_from_bits32(int32_t x);
 
@@ -1801,24 +1805,48 @@ SCALAR_FUN_ATTR float futrts_cos32(float x) {
   return cos(x);
 }
 
+SCALAR_FUN_ATTR float futrts_cospi32(float x) {
+  return cospi(x);
+}
+
 SCALAR_FUN_ATTR float futrts_sin32(float x) {
   return sin(x);
+}
+
+SCALAR_FUN_ATTR float futrts_sinpi32(float x) {
+  return sinpi(x);
 }
 
 SCALAR_FUN_ATTR float futrts_tan32(float x) {
   return tan(x);
 }
 
+SCALAR_FUN_ATTR float futrts_tanpi32(float x) {
+  return tanpi(x);
+}
+
 SCALAR_FUN_ATTR float futrts_acos32(float x) {
   return acos(x);
+}
+
+SCALAR_FUN_ATTR float futrts_acospi32(float x) {
+  return acospi(x);
 }
 
 SCALAR_FUN_ATTR float futrts_asin32(float x) {
   return asin(x);
 }
 
+SCALAR_FUN_ATTR float futrts_asinpi32(float x) {
+  return asinpi(x);
+}
+
 SCALAR_FUN_ATTR float futrts_atan32(float x) {
   return atan(x);
+}
+
+SCALAR_FUN_ATTR float futrts_atanpi32(float x) {
+  return atanpi(x);
 }
 
 SCALAR_FUN_ATTR float futrts_cosh32(float x) {
@@ -1847,6 +1875,10 @@ SCALAR_FUN_ATTR float futrts_atanh32(float x) {
 
 SCALAR_FUN_ATTR float futrts_atan2_32(float x, float y) {
   return atan2(x, y);
+}
+
+SCALAR_FUN_ATTR float futrts_atan2pi_32(float x, float y) {
+  return atan2pi(x, y);
 }
 
 SCALAR_FUN_ATTR float futrts_hypot32(float x, float y) {
@@ -1956,25 +1988,50 @@ SCALAR_FUN_ATTR float futrts_cos32(float x) {
   return cos(x);
 }
 
+SCALAR_FUN_ATTR float futrts_cospi32(float x) {
+  return cos((float)M_PI*x);
+}
+
 SCALAR_FUN_ATTR float futrts_sin32(float x) {
   return sin(x);
+}
+
+SCALAR_FUN_ATTR float futrts_sinpi32(float x) {
+  return sin(M_PI*x);
 }
 
 SCALAR_FUN_ATTR float futrts_tan32(float x) {
   return tan(x);
 }
 
+SCALAR_FUN_ATTR float futrts_tanpi32(float x) {
+  return tan((float)M_PI*x);
+}
+
 SCALAR_FUN_ATTR float futrts_acos32(float x) {
   return acos(x);
+}
+
+SCALAR_FUN_ATTR float futrts_acospi32(float x) {
+  return acos(x)/(float)M_PI;
 }
 
 SCALAR_FUN_ATTR float futrts_asin32(float x) {
   return asin(x);
 }
 
+SCALAR_FUN_ATTR float futrts_asinpi32(float x) {
+  return asin(x)/(float)M_PI;
+}
+
 SCALAR_FUN_ATTR float futrts_atan32(float x) {
   return atan(x);
 }
+
+SCALAR_FUN_ATTR float futrts_atanpi32(float x) {
+  return atan(x)/(float)M_PI;
+}
+
 
 SCALAR_FUN_ATTR float futrts_cosh32(float x) {
   return (exp(x)+exp(-x)) / 2.0f;
@@ -2011,6 +2068,11 @@ SCALAR_FUN_ATTR float futrts_atanh32(float x) {
 SCALAR_FUN_ATTR float futrts_atan2_32(float x, float y) {
   return (x == 0.0f && y == 0.0f) ? 0.0f : atan2(x, y);
 }
+
+SCALAR_FUN_ATTR float futrts_atan2pi_32(float x, float y) {
+  return (x == 0.0f && y == 0.0f) ? 0.0f : atan2(x, y) / (float)M_PI;
+}
+
 
 SCALAR_FUN_ATTR float futrts_hypot32(float x, float y) {
   if (futrts_isfinite32(x) && futrts_isfinite32(y)) {
@@ -2170,24 +2232,56 @@ SCALAR_FUN_ATTR float futrts_cos32(float x) {
   return cosf(x);
 }
 
+SCALAR_FUN_ATTR float futrts_cospi32(float x) {
+#if defined(__CUDA_ARCH__)
+  return cospif(x);
+#else
+  return cosf(((float)M_PI)*x);
+#endif
+}
+
 SCALAR_FUN_ATTR float futrts_sin32(float x) {
   return sinf(x);
+}
+
+SCALAR_FUN_ATTR float futrts_sinpi32(float x) {
+#if defined(__CUDA_ARCH__)
+  return sinpif(x);
+#else
+  return sinf((float)M_PI*x);
+#endif
 }
 
 SCALAR_FUN_ATTR float futrts_tan32(float x) {
   return tanf(x);
 }
 
+SCALAR_FUN_ATTR float futrts_tanpi32(float x) {
+  return tanf((float)M_PI*x);
+}
+
 SCALAR_FUN_ATTR float futrts_acos32(float x) {
   return acosf(x);
+}
+
+SCALAR_FUN_ATTR float futrts_acospi32(float x) {
+  return acosf(x)/(float)M_PI;
 }
 
 SCALAR_FUN_ATTR float futrts_asin32(float x) {
   return asinf(x);
 }
 
+SCALAR_FUN_ATTR float futrts_asinpi32(float x) {
+  return asinf(x)/(float)M_PI;
+}
+
 SCALAR_FUN_ATTR float futrts_atan32(float x) {
   return atanf(x);
+}
+
+SCALAR_FUN_ATTR float futrts_atanpi32(float x) {
+  return atanf(x)/(float)M_PI;
 }
 
 SCALAR_FUN_ATTR float futrts_cosh32(float x) {
@@ -2216,6 +2310,10 @@ SCALAR_FUN_ATTR float futrts_atanh32(float x) {
 
 SCALAR_FUN_ATTR float futrts_atan2_32(float x, float y) {
   return atan2f(x, y);
+}
+
+SCALAR_FUN_ATTR float futrts_atan2pi_32(float x, float y) {
+  return atan2f(x, y) / (float)M_PI;
 }
 
 SCALAR_FUN_ATTR float futrts_hypot32(float x, float y) {
@@ -2449,24 +2547,48 @@ SCALAR_FUN_ATTR double futrts_cos64(double x) {
   return cos(x);
 }
 
+SCALAR_FUN_ATTR double futrts_cospi64(double x) {
+  return cos(M_PI*x);
+}
+
 SCALAR_FUN_ATTR double futrts_sin64(double x) {
   return sin(x);
+}
+
+SCALAR_FUN_ATTR double futrts_sinpi64(double x) {
+  return sin(M_PI*x);
 }
 
 SCALAR_FUN_ATTR double futrts_tan64(double x) {
   return tan(x);
 }
 
+SCALAR_FUN_ATTR double futrts_tanpi64(double x) {
+  return tan(M_PI*x);
+}
+
 SCALAR_FUN_ATTR double futrts_acos64(double x) {
   return acos(x);
+}
+
+SCALAR_FUN_ATTR double futrts_acospi64(double x) {
+  return acos(x)/M_PI;
 }
 
 SCALAR_FUN_ATTR double futrts_asin64(double x) {
   return asin(x);
 }
 
+SCALAR_FUN_ATTR double futrts_asinpi64(double x) {
+  return asin(x)/M_PI;
+}
+
 SCALAR_FUN_ATTR double futrts_atan64(double x) {
   return atan(x);
+}
+
+SCALAR_FUN_ATTR double futrts_atanpi64(double x) {
+  return atan(x)/M_PI;
 }
 
 SCALAR_FUN_ATTR double futrts_cosh64(double x) {
@@ -2497,11 +2619,14 @@ SCALAR_FUN_ATTR double futrts_atanh64(double x) {
   double f = (1.0d+x)/(1.0d-x);
   if(futrts_isfinite64(f)) return log(f)/2.0d;
   return f;
-
 }
 
 SCALAR_FUN_ATTR double futrts_atan2_64(double x, double y) {
   return atan2(x, y);
+}
+
+SCALAR_FUN_ATTR double futrts_atan2pi_64(double x, double y) {
+  return atan2(x, y) / M_PI;
 }
 
 extern "C" unmasked uniform double hypot(uniform double x, uniform double y);
@@ -2828,24 +2953,76 @@ SCALAR_FUN_ATTR double futrts_cos64(double x) {
   return cos(x);
 }
 
+SCALAR_FUN_ATTR double futrts_cospi64(double x) {
+#ifdef __OPENCL_VERSION__
+  return cospi(x);
+#elif defined(__CUDA_ARCH__)
+  return cospi(x);
+#else
+  return cos(M_PI*x);
+#endif
+}
+
 SCALAR_FUN_ATTR double futrts_sin64(double x) {
   return sin(x);
+}
+
+SCALAR_FUN_ATTR double futrts_sinpi64(double x) {
+#ifdef __OPENCL_VERSION__
+  return sinpi(x);
+#elif defined(__CUDA_ARCH__)
+  return sinpi(x);
+#else
+  return sin(M_PI*x);
+#endif
 }
 
 SCALAR_FUN_ATTR double futrts_tan64(double x) {
   return tan(x);
 }
 
+SCALAR_FUN_ATTR double futrts_tanpi64(double x) {
+#ifdef __OPENCL_VERSION__
+  return tanpi(x);
+#else
+  return tan(M_PI*x);
+#endif
+}
+
 SCALAR_FUN_ATTR double futrts_acos64(double x) {
   return acos(x);
+}
+
+SCALAR_FUN_ATTR double futrts_acospi64(double x) {
+#ifdef __OPENCL_VERSION__
+  return acospi(x);
+#else
+  return acos(x) / M_PI;
+#endif
 }
 
 SCALAR_FUN_ATTR double futrts_asin64(double x) {
   return asin(x);
 }
 
+SCALAR_FUN_ATTR double futrts_asinpi64(double x) {
+#ifdef __OPENCL_VERSION__
+  return asinpi(x);
+#else
+  return asin(x) / M_PI;
+#endif
+}
+
 SCALAR_FUN_ATTR double futrts_atan64(double x) {
   return atan(x);
+}
+
+SCALAR_FUN_ATTR double futrts_atanpi64(double x) {
+#ifdef __OPENCL_VERSION__
+  return atanpi(x);
+#else
+  return atan(x) / M_PI;
+#endif
 }
 
 SCALAR_FUN_ATTR double futrts_cosh64(double x) {
@@ -2874,6 +3051,14 @@ SCALAR_FUN_ATTR double futrts_atanh64(double x) {
 
 SCALAR_FUN_ATTR double futrts_atan2_64(double x, double y) {
   return atan2(x, y);
+}
+
+SCALAR_FUN_ATTR double futrts_atan2pi_64(double x, double y) {
+#ifdef __OPENCL_VERSION__
+  return atan2pi(x, y);
+#else
+  return atan2(x, y) / M_PI;
+#endif
 }
 
 SCALAR_FUN_ATTR double futrts_hypot64(double x, double y) {

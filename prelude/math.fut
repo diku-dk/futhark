@@ -162,9 +162,25 @@ module type real = {
   val cos : t -> t
   val tan : t -> t
 
+  -- | `sin(pi*x)` - depending on backing, may be faster or more
+  -- accurate.
+  val sinpi : t -> t
+
+  -- | `cos(pi*x)` - depending on backing, may be faster or more
+  -- accurate.
+  val cospi : t -> t
+
+  -- | `tan(pi*x)` - depending on backing, may be faster or more
+  -- accurate.
+  val tanpi : t -> t
+
   val asin : t -> t
   val acos : t -> t
   val atan : t -> t
+
+  val asinpi : t -> t
+  val acospi : t -> t
+  val atanpi : t -> t
 
   val sinh : t -> t
   val cosh : t -> t
@@ -175,6 +191,7 @@ module type real = {
   val atanh : t -> t
 
   val atan2 : t -> t -> t
+  val atan2pi : t -> t -> t
 
   -- | Compute the length of the hypotenuse of a right-angled
   -- triangle.  That is, `hypot x y` computes *√(x²+y²)*.  Put another
@@ -982,9 +999,15 @@ module f64 : (float with t = f64 with int_t = u64) = {
   def sin (x: f64) = intrinsics.sin64 x
   def cos (x: f64) = intrinsics.cos64 x
   def tan (x: f64) = intrinsics.tan64 x
+  def sinpi (x: f64) = intrinsics.sinpi64 x
+  def cospi (x: f64) = intrinsics.cospi64 x
+  def tanpi (x: f64) = intrinsics.tanpi64 x
   def acos (x: f64) = intrinsics.acos64 x
   def asin (x: f64) = intrinsics.asin64 x
   def atan (x: f64) = intrinsics.atan64 x
+  def acospi (x: f64) = intrinsics.acospi64 x
+  def asinpi (x: f64) = intrinsics.asinpi64 x
+  def atanpi (x: f64) = intrinsics.atanpi64 x
   def sinh (x: f64) = intrinsics.sinh64 x
   def cosh (x: f64) = intrinsics.cosh64 x
   def tanh (x: f64) = intrinsics.tanh64 x
@@ -992,6 +1015,7 @@ module f64 : (float with t = f64 with int_t = u64) = {
   def asinh (x: f64) = intrinsics.asinh64 x
   def atanh (x: f64) = intrinsics.atanh64 x
   def atan2 (x: f64) (y: f64) = intrinsics.atan2_64 (x, y)
+  def atan2pi (x: f64) (y: f64) = intrinsics.atan2pi_64 (x, y)
   def hypot (x: f64) (y: f64) = intrinsics.hypot64 (x, y)
   def gamma = intrinsics.gamma64
   def lgamma = intrinsics.lgamma64
@@ -1100,9 +1124,15 @@ module f32 : (float with t = f32 with int_t = u32) = {
   def sin (x: f32) = intrinsics.sin32 x
   def cos (x: f32) = intrinsics.cos32 x
   def tan (x: f32) = intrinsics.tan32 x
+  def sinpi (x: f32) = intrinsics.sinpi32 x
+  def cospi (x: f32) = intrinsics.cospi32 x
+  def tanpi (x: f32) = intrinsics.tanpi32 x
   def acos (x: f32) = intrinsics.acos32 x
   def asin (x: f32) = intrinsics.asin32 x
   def atan (x: f32) = intrinsics.atan32 x
+  def acospi (x: f32) = intrinsics.acospi32 x
+  def asinpi (x: f32) = intrinsics.asinpi32 x
+  def atanpi (x: f32) = intrinsics.atanpi32 x
   def sinh (x: f32) = intrinsics.sinh32 x
   def cosh (x: f32) = intrinsics.cosh32 x
   def tanh (x: f32) = intrinsics.tanh32 x
@@ -1110,6 +1140,7 @@ module f32 : (float with t = f32 with int_t = u32) = {
   def asinh (x: f32) = intrinsics.asinh32 x
   def atanh (x: f32) = intrinsics.atanh32 x
   def atan2 (x: f32) (y: f32) = intrinsics.atan2_32 (x, y)
+  def atan2pi (x: f32) (y: f32) = intrinsics.atan2pi_32 (x, y)
   def hypot (x: f32) (y: f32) = intrinsics.hypot32 (x, y)
   def gamma = intrinsics.gamma32
   def lgamma = intrinsics.lgamma32
@@ -1222,9 +1253,15 @@ module f16 : (float with t = f16 with int_t = u16) = {
   def sin (x: f16) = intrinsics.sin16 x
   def cos (x: f16) = intrinsics.cos16 x
   def tan (x: f16) = intrinsics.tan16 x
+  def sinpi (x: f16) = intrinsics.sinpi16 x
+  def cospi (x: f16) = intrinsics.cospi16 x
+  def tanpi (x: f16) = intrinsics.tanpi16 x
   def acos (x: f16) = intrinsics.acos16 x
   def asin (x: f16) = intrinsics.asin16 x
   def atan (x: f16) = intrinsics.atan16 x
+  def acospi (x: f16) = intrinsics.acospi16 x
+  def asinpi (x: f16) = intrinsics.asinpi16 x
+  def atanpi (x: f16) = intrinsics.atanpi16 x
   def sinh (x: f16) = intrinsics.sinh16 x
   def cosh (x: f16) = intrinsics.cosh16 x
   def tanh (x: f16) = intrinsics.tanh16 x
@@ -1232,6 +1269,7 @@ module f16 : (float with t = f16 with int_t = u16) = {
   def asinh (x: f16) = intrinsics.asinh16 x
   def atanh (x: f16) = intrinsics.atanh16 x
   def atan2 (x: f16) (y: f16) = intrinsics.atan2_16 (x, y)
+  def atan2pi (x: f16) (y: f16) = intrinsics.atan2pi_16 (x, y)
   def hypot (x: f16) (y: f16) = intrinsics.hypot16 (x, y)
   def gamma = intrinsics.gamma16
   def lgamma = intrinsics.lgamma16

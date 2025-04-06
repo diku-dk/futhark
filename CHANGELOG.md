@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * New math functions: `f16.rsqrt`, `f32.rsqrt`, `f64.rsqrt`.
 
+* New math functions: `cospi`, `sinpi`, `tanpi`, `acospi`, `asinpi`,
+  `atanpi`, `atan2pi`, in each of the `f16`/`f32`/`f64` modules. (#2243)
+
 * Slight improvements in the ability of the fusion engine to fuse
   across `map` nests separated by `reshape` operations. Only works if
   the innermost return type is purely scalar.
