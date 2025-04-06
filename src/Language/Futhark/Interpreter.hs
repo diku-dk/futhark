@@ -130,6 +130,11 @@ stacking loc env = local $ \(ss, imports) ->
 stacktrace :: EvalM [Loc]
 stacktrace = asks $ map stackFrameLoc . fst
 
+-- | Instead of tracking the actual depth of AD, we just use the size
+-- of the stack as a proxy.
+adDepth :: EvalM AD.Depth
+adDepth = AD.Depth . length <$> stacktrace
+
 lookupImport :: ImportName -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
@@ -1992,7 +1997,7 @@ initialCtx =
       -- exposed by the AD module?
       fun3 $ \f v s -> do
         -- Get the depth
-        depth <- length <$> stacktrace
+        depth <- adDepth
 
         -- Augment the values
         let v' =
@@ -2058,8 +2063,7 @@ initialCtx =
       -- Perhaps creating JVPValues could be abstracted into a function
       -- exposed by the AD module?
       fun3 $ \f v s -> do
-        -- Get the depth
-        depth <- length <$> stacktrace
+        depth <- adDepth
 
         -- Turn the seeds into a list of ADValues
         let s' =
@@ -2087,7 +2091,8 @@ initialCtx =
                 mapM
                   ( \on -> case on of
                       -- If it is a JVP variable of the correct depth, return its primal and derivative
-                      (ValueAD d (AD.JVP (AD.JVPValue pv dv))) | d == depth -> Just (putAD pv, putAD dv)
+                      (ValueAD d (AD.JVP (AD.JVPValue pv dv)))
+                        | d == depth -> Just (putAD pv, putAD dv)
                       -- Otherwise, its partial derivatives are all 0
                       _ -> (on,) . ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD on
                   )

@@ -6,6 +6,7 @@ module Language.Futhark.Interpreter.AD
     VJPValue (..),
     JVPValue (..),
     Counter (..),
+    Depth (..),
     doOp,
     addFor,
     tapePrimal,
@@ -52,12 +53,13 @@ import Language.Futhark.Primitive
     unOpType,
   )
 
+-- | Used to uniquely identify values.
 newtype Counter = Counter Int
 
 type ADMonad = ExceptT String (State Counter)
 
-incrementCounter :: ADMonad ()
-incrementCounter = lift $ modify (\(Counter i) -> Counter (i + 1))
+incCounter :: ADMonad ()
+incCounter = lift $ modify (\(Counter i) -> Counter (i + 1))
 
 -- Mathematical operations subject to AD.
 data Op
@@ -104,7 +106,10 @@ mulFor (FloatType t) = FMul t
 mulFor Bool = LogAnd
 mulFor t = error $ "mulFor: " ++ show t
 
-type Depth = Int
+-- | An indication of the nesting depth of AD. This is used to avoid
+-- pertubation confusion.
+newtype Depth = Depth Int
+  deriving (Ord, Eq, Show)
 
 -- Types and utility functions--
 -- When taking the partial derivative of a function, we
@@ -126,7 +131,7 @@ data ADVariable
 
 depth :: ADValue -> Depth
 depth (Variable d _) = d
-depth (Constant _) = 0
+depth (Constant _) = Depth 0
 
 primal :: ADValue -> ADValue
 primal (Variable _ (VJP (VJPValue t))) = tapePrimal t
@@ -198,12 +203,12 @@ doOp' op o
       throwE $ unwords ["invalid types for op", show op, "and operands", show o]
   | otherwise = do
       let dep = case op of
-            OpCmp _ -> 0 -- AD is not well-defined for comparason operations
+            OpCmp _ -> Depth 0 -- AD is not well-defined for comparason operations
             -- There are no derivatives for those written in
             -- PrimExp (check lookupPDs)
             _ -> maximum (map depth o)
-      if dep == 0
-        then maybe (throwE "failed to evaluate const") pure constCase <* incrementCounter
+      if dep == Depth 0
+        then maybe (throwE "failed to evaluate const") pure constCase <* incCounter
         else nonconstCase dep
   where
     pv = map primitive o

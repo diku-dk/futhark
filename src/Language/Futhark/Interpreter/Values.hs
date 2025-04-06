@@ -111,7 +111,7 @@ data Value m
   | -- The shape, the update function, and the array.
     ValueAcc ValueShape (Value m -> Value m -> m (Value m)) !(Array Int (Value m))
   | -- A primitive value with added information used in automatic differentiation
-    ValueAD Int AD.ADVariable
+    ValueAD AD.Depth AD.ADVariable
 
 instance Show (Value m) where
   show (ValuePrim v) = "ValuePrim " <> show v <> ""
