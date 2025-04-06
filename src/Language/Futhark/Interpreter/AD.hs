@@ -364,10 +364,9 @@ deriveTape' tp@(TapeOp op p uid _) s =
       ss' <- madd (-uid' - 1) s' ss
       -- If there are still more references left, do nothing
       if r > 0
-        then
-          pure (ss', rs')
-        -- Otherwise, derive the tape
-        else
+        then pure (ss', rs')
+        else -- Otherwise, derive the tape
+
           if r == 0
             then do
               let s'' = fromJust (M.lookup (-uid' - 1) ss')
@@ -381,8 +380,7 @@ deriveTape' tp@(TapeOp op p uid _) s =
 
               -- Propagate the new sensitivities
               foldlM (\(ss'', rs'') (p'', s'''') -> derive p'' s'''' ss'' rs'') (ss', rs') $ zip p' s'''
-            else
-              error "TODO: This branch is unreachable unless `countReferences` undercounts"
+            else error "TODO: This branch is unreachable unless `countReferences` undercounts"
     countReferences :: [Tape] -> M.Map Int Int -> M.Map Int Int
     countReferences p' d' = foldl f d' p'
     f d'' x =
