@@ -8,3 +8,11 @@ entry main [n] (as: [n]i32): *[]i32 =
             as
     in result[:last offsets]
   else []
+
+-- ==
+-- entry: test
+-- random input { [10000]i32 }
+-- output { true }
+entry test [n] (as: [n]i32): bool =
+  main as |> all i32.((==1) <-< (%2))
+  
