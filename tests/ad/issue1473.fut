@@ -56,7 +56,7 @@ def sweep [t] [n] (ng: i64) (horizon: i64) (dt: f32) (buf: mpr_hist [t] [n]) (co
   in map (\g -> vjp do_one g 1f32) Gs
 
 -- ==
--- no_ispc compiled input { 1i64 5i64 10i64 7i64 }
+-- no_ispc input { 1i64 5i64 10i64 7i64 }
 -- output { [0.000086f32] }
 def main (ng: i64) (nh: i64) (nt: i64) (nn: i64) =
   let dt = 0.01f32
