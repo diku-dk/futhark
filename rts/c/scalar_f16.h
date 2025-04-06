@@ -242,24 +242,48 @@ SCALAR_FUN_ATTR f16 futrts_cos16(f16 x) {
   return cos(x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_cospi16(f16 x) {
+  return cospi(x);
+}
+
 SCALAR_FUN_ATTR f16 futrts_sin16(f16 x) {
   return sin(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_sinpi16(f16 x) {
+  return sinpi(x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_tan16(f16 x) {
   return tan(x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_tanpi16(f16 x) {
+  return tanpi(x);
+}
+
 SCALAR_FUN_ATTR f16 futrts_acos16(f16 x) {
   return acos(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_acospi16(f16 x) {
+  return acospi(x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_asin16(f16 x) {
   return asin(x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_asinpi16(f16 x) {
+  return asinpi(x);
+}
+
 SCALAR_FUN_ATTR f16 futrts_atan16(f16 x) {
   return atan(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_atanpi16(f16 x) {
+  return atanpi(x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_cosh16(f16 x) {
@@ -288,6 +312,10 @@ SCALAR_FUN_ATTR f16 futrts_atanh16(f16 x) {
 
 SCALAR_FUN_ATTR f16 futrts_atan2_16(f16 x, f16 y) {
   return atan2(x, y);
+}
+
+SCALAR_FUN_ATTR f16 futrts_atan2pi_16(f16 x, f16 y) {
+  return atan2pi(x, y);
 }
 
 SCALAR_FUN_ATTR f16 futrts_hypot16(f16 x, f16 y) {
@@ -386,24 +414,48 @@ SCALAR_FUN_ATTR f16 futrts_cos16(f16 x) {
   return (float16)cos((float)x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_cospi16(f16 x) {
+  return (float16)cos((float)M_PI*(float)x);
+}
+
 SCALAR_FUN_ATTR f16 futrts_sin16(f16 x) {
   return (float16)sin((float)x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_sinpi16(f16 x) {
+  return (float16)sin((float)M_PI*(float)x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_tan16(f16 x) {
   return (float16)tan((float)x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_tanpi16(f16 x) {
+  return (float16)(tan((float)M_PI*(float)x));
+}
+
 SCALAR_FUN_ATTR f16 futrts_acos16(f16 x) {
   return (float16)acos((float)x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_acospi16(f16 x) {
+  return (float16)(acos((float)x)/(float)M_PI);
 }
 
 SCALAR_FUN_ATTR f16 futrts_asin16(f16 x) {
   return (float16)asin((float)x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_asinpi16(f16 x) {
+  return (float16)(asin((float)x)/(float)M_PI);
+}
+
 SCALAR_FUN_ATTR f16 futrts_atan16(f16 x) {
   return (float16)atan((float)x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_atanpi16(f16 x) {
+  return (float16)(atan((float)x)/(float)M_PI);
 }
 
 SCALAR_FUN_ATTR f16 futrts_cosh16(f16 x) {
@@ -438,6 +490,10 @@ SCALAR_FUN_ATTR f16 futrts_atanh16(f16 x) {
 
 SCALAR_FUN_ATTR f16 futrts_atan2_16(f16 x, f16 y) {
   return (float16)atan2((float)x, (float)y);
+}
+
+SCALAR_FUN_ATTR f16 futrts_atan2pi_16(f16 x, f16 y) {
+  return (float16)(atan2((float)x, (float)y)/(float)M_PI);
 }
 
 SCALAR_FUN_ATTR f16 futrts_hypot16(f16 x, f16 y) {
@@ -557,24 +613,48 @@ SCALAR_FUN_ATTR f16 futrts_cos16(f16 x) {
   return hcos(x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_cospi16(f16 x) {
+  return hcos((f16)M_PI*x);
+}
+
 SCALAR_FUN_ATTR f16 futrts_sin16(f16 x) {
   return hsin(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_sinpi16(f16 x) {
+  return hsin((f16)M_PI*x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_tan16(f16 x) {
   return tanf(x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_tanpi16(f16 x) {
+  return tanf((f16)M_PI*x);
+}
+
 SCALAR_FUN_ATTR f16 futrts_acos16(f16 x) {
   return acosf(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_acospi16(f16 x) {
+  return (f16)acosf(x)/(f16)M_PI;
 }
 
 SCALAR_FUN_ATTR f16 futrts_asin16(f16 x) {
   return asinf(x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_asinpi16(f16 x) {
+  return (f16)asinf(x)/(f16)M_PI;
+}
+
 SCALAR_FUN_ATTR f16 futrts_atan16(f16 x) {
-  return atanf(x);
+  return (f16)atanf(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_atanpi16(f16 x) {
+  return (f16)atanf(x)/(f16)M_PI;
 }
 
 SCALAR_FUN_ATTR f16 futrts_cosh16(f16 x) {
@@ -602,7 +682,11 @@ SCALAR_FUN_ATTR f16 futrts_atanh16(f16 x) {
 }
 
 SCALAR_FUN_ATTR f16 futrts_atan2_16(f16 x, f16 y) {
-  return atan2f(x, y);
+  return (f16)atan2f(x, y);
+}
+
+SCALAR_FUN_ATTR f16 futrts_atan2pi_16(f16 x, f16 y) {
+  return (f16)atan2f(x, y)/(f16)M_PI;
 }
 
 SCALAR_FUN_ATTR f16 futrts_hypot16(f16 x, f16 y) {
@@ -771,24 +855,48 @@ SCALAR_FUN_ATTR f16 futrts_cos16(f16 x) {
   return futrts_cos32(x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_cospi16(f16 x) {
+  return futrts_cospi32(x);
+}
+
 SCALAR_FUN_ATTR f16 futrts_sin16(f16 x) {
   return futrts_sin32(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_sinpi16(f16 x) {
+  return futrts_sinpi32(x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_tan16(f16 x) {
   return futrts_tan32(x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_tanpi16(f16 x) {
+  return futrts_tanpi32(x);
+}
+
 SCALAR_FUN_ATTR f16 futrts_acos16(f16 x) {
   return futrts_acos32(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_acospi16(f16 x) {
+  return futrts_acospi32(x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_asin16(f16 x) {
   return futrts_asin32(x);
 }
 
+SCALAR_FUN_ATTR f16 futrts_asinpi16(f16 x) {
+  return futrts_asinpi32(x);
+}
+
 SCALAR_FUN_ATTR f16 futrts_atan16(f16 x) {
   return futrts_atan32(x);
+}
+
+SCALAR_FUN_ATTR f16 futrts_atanpi16(f16 x) {
+  return futrts_atanpi32(x);
 }
 
 SCALAR_FUN_ATTR f16 futrts_cosh16(f16 x) {
@@ -817,6 +925,10 @@ SCALAR_FUN_ATTR f16 futrts_atanh16(f16 x) {
 
 SCALAR_FUN_ATTR f16 futrts_atan2_16(f16 x, f16 y) {
   return futrts_atan2_32(x, y);
+}
+
+SCALAR_FUN_ATTR f16 futrts_atan2pi_16(f16 x, f16 y) {
+  return futrts_atan2pi_32(x, y);
 }
 
 SCALAR_FUN_ATTR f16 futrts_hypot16(f16 x, f16 y) {
