@@ -35,7 +35,6 @@ import Control.Monad.Trans.Maybe
 import Data.Array
 import Data.Bifunctor
 import Data.Bitraversable
-import Data.Either (fromRight)
 import Data.Functor (($>), (<&>))
 import Data.List
   ( find,
@@ -2020,16 +2019,18 @@ initialCtx =
             (zip o' s')
             ( \(on, sn) -> case on of
                 -- If it is a VJP variable of the correct depth, run
-                -- deriveTapqe on it- and its corresponding seed
+                -- deriveTape on it- and its corresponding seed
                 (ValueAD d (AD.VJP (AD.VJPValue t)))
                   | d == depth ->
                       getCounter
-                        >>= either (pure . Left) (\(m', i) -> putCounter i $> Right (putAD $ AD.tapePrimal t, m'))
+                        >>= either
+                          (pure . Left)
+                          (\(m', i) -> putCounter i $> Right (putAD $ AD.tapePrimal t, m'))
                           . AD.deriveTape t sn
                 -- Otherwise, its partial derivatives are all 0
                 _ -> pure $ Right (on, M.empty)
             )
-            <&> fromRight (error "TODO") . sequence
+            <&> either (error . show) id . sequence
 
         -- Add together every derivative
         drvs' <- AD.unionsWithM add (map snd m)
@@ -2057,7 +2058,12 @@ initialCtx =
 
         -- TODO: Perhaps this could be fully abstracted by AD?
         -- Making addFor private would be nice..
-        add x y = getCounter >>= either (error "TODO: Forward the error from `doOp`") (\(a, b) -> putCounter b >> pure a) . AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
+        add x y =
+          getCounter
+            >>= either
+              (error . show)
+              (\(a, b) -> putCounter b >> pure a)
+              . AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
     def "jvp2" = Just $
       -- TODO: This could be much better. Currently, it is very inefficient
       -- Perhaps creating JVPValues could be abstracted into a function

@@ -55,11 +55,12 @@ import Language.Futhark.Primitive
 
 -- | Used to uniquely identify values.
 newtype Counter = Counter Int
+  deriving (Eq, Ord, Num, Show)
 
 type ADMonad = ExceptT String (State Counter)
 
 incCounter :: ADMonad ()
-incCounter = lift $ modify (\(Counter i) -> Counter (i + 1))
+incCounter = lift $ modify $ \i -> i + 1
 
 -- Mathematical operations subject to AD.
 data Op
@@ -299,17 +300,17 @@ newtype VJPValue = VJPValue Tape
   deriving (Show)
 
 -- | Represents a computation tree, as well as every intermediate
--- value in its evaluation. TODO: make this a graph.
+-- value in its evaluation.
 data Tape
   = -- | This represents a variable. Each variable is given a unique ID,
     -- and has an initial value
-    TapeID Int ADValue
+    TapeID Counter ADValue
   | -- | This represents a constant.
     TapeConst ADValue
   | -- | This represents the application of a mathematical operation.
     -- Each parameter is given by its Tape, and the return value of
     -- the operation is saved
-    TapeOp Op [Tape] Int ADValue
+    TapeOp Op [Tape] Counter ADValue
   deriving (Show)
 
 -- | Returns the primal value of a Tape.
@@ -322,7 +323,7 @@ tapePrimal (TapeOp _ _ _ v) = v
 -- treating all operands of a lower depth as constants
 vjpHandleOp :: Op -> [Either ADValue VJPValue] -> ADValue -> ADMonad Tape
 vjpHandleOp op p v = do
-  Counter i <- lift get
+  i <- lift get
   pure $ TapeOp op (map toTape p) i v
   where
     toTape (Left v') = TapeConst v'
@@ -341,24 +342,29 @@ unionsWithM f = foldM (unionWithM f) M.empty
 -- | This calculates every partial derivative of a 'Tape'. The result
 -- is a map of the partial derivatives, each key corresponding to the
 -- ID of a free variable (see TapeID).
-deriveTape :: Tape -> ADValue -> Counter -> Either String (M.Map Int ADValue, Counter)
+deriveTape :: Tape -> ADValue -> Counter -> Either String (M.Map Counter ADValue, Counter)
 deriveTape tp s uid = case runState (runExceptT $ deriveTape' tp s) uid of
   (Left e, _) -> Left e
   (Right v, uid') -> Right (v, uid')
 
-deriveTape' :: Tape -> ADValue -> ADMonad (M.Map Int ADValue)
-deriveTape' (TapeID i _) s = pure $ M.fromList [(i, s)]
+deriveTape' :: Tape -> ADValue -> ADMonad (M.Map Counter ADValue)
+deriveTape' (TapeID i _) s = pure $ M.singleton i s
 deriveTape' (TapeConst _) _ = pure M.empty
 deriveTape' tp@(TapeOp op p uid _) s =
-  fst <$> derive tp s M.empty (countReferences p $ M.fromList [(-uid - 1, 1)])
+  fst <$> derive tp s M.empty (countReferences p $ M.singleton (-uid - 1) 1)
   where
     add x y = doOp' (OpBin $ addFor $ opReturnType op) [x, y]
     mul x y = doOp' (OpBin $ mulFor $ opReturnType op) [x, y]
-    madd :: Int -> ADValue -> M.Map Int ADValue -> ADMonad (M.Map Int ADValue)
+    madd :: Counter -> ADValue -> M.Map Counter ADValue -> ADMonad (M.Map Counter ADValue)
     madd i a m = case M.lookup i m of
       Just b -> add a b <&> (\x -> M.insert i x m)
       Nothing -> pure $ M.insert i a m
-    derive :: Tape -> ADValue -> M.Map Int ADValue -> M.Map Int Int -> ADMonad (M.Map Int ADValue, M.Map Int Int)
+    derive ::
+      Tape ->
+      ADValue ->
+      M.Map Counter ADValue ->
+      M.Map Counter Int ->
+      ADMonad (M.Map Counter ADValue, M.Map Counter Int)
     derive (TapeID i _) s' ss rs = madd i s' ss <&> (,rs)
     derive (TapeConst _) _ ss rs = pure (ss, rs)
     derive (TapeOp op' p' uid' _) s' ss rs = do
@@ -386,7 +392,7 @@ deriveTape' tp@(TapeOp op p uid _) s =
               -- Propagate the new sensitivities
               foldlM (\(ss'', rs'') (p'', s'''') -> derive p'' s'''' ss'' rs'') (ss', rs') $ zip p' s'''
             else error "TODO: This branch is unreachable unless `countReferences` undercounts"
-    countReferences :: [Tape] -> M.Map Int Int -> M.Map Int Int
+    countReferences :: [Tape] -> M.Map Counter Int -> M.Map Counter Int
     countReferences p' d' = foldl f d' p'
     f d'' x =
       case x of
