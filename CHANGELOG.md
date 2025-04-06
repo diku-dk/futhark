@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Out-of-bounds reads in GPU backends when transposing a great many
   matrices in parallel (#2241).
 
+* `vjp` in the interpreter is now asymptotically efficient (#2187,
+  #2240). Work by Marcus Jensen.
+
 ## [0.25.29]
 
 ### Fixed
