@@ -412,7 +412,9 @@ scanStage3Nested ::
   [VName] ->
   MulticoreGen ()
 scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = do
-  let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
+  let per_scan_out = segBinOpChunks scan_ops scan_out
+      (scan_pars, map_pars) = splitAt (segBinOpResults scan_ops) $ lambdaParams $ segPostOpLambda post_op
+      per_scan_post_par = segBinOpChunks scan_ops scan_pars
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   body <- collect $ do
@@ -422,19 +424,22 @@ scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = 
     generateChunkLoop "SegScan" Scalar $ \i -> do
       genBinOpParams scan_ops
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-      forM_ (zip3 per_scan_pes per_scan_carries scan_ops) $ \(scan_pes, op_carries, scan_op) -> do
+      forM_ (zip4 per_scan_post_par per_scan_out per_scan_carries scan_ops) $ \(pars, outs, op_carries, scan_op) -> do
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
           sComment "load carry-in" $
             forM_ (zip (xParams scan_op) op_carries) $ \(p, carries) ->
               copyDWIMFix (paramName p) [] (Var carries) (le64 (segFlat space) : vec_is)
 
           sComment "load partial result" $
-            forM_ (zip (yParams scan_op) scan_pes) $ \(p, pe) ->
-              copyDWIMFix (paramName p) [] (Var (patElemName pe)) (map le64 is ++ vec_is)
+            forM_ (zip (yParams scan_op) outs) $ \(p, out) ->
+              copyDWIMFix (paramName p) [] (Var out) (map le64 is ++ vec_is)
           sComment "combine carry with partial result" $
             compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip scan_pes $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(pe, se) ->
-                copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
+              forM_ (zip pars $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(par, se) ->
+                copyDWIMFix (paramName par) (map Imp.le64 is ++ vec_is) se []
+          sComment "read kernel body map results" $
+            forM_ (zip map_pars map_out) $ \(par, out) ->
+              copyDWIMFix (paramName par) [] (Var out) (map le64 is)
 
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
