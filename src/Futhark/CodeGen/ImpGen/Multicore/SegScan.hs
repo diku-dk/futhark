@@ -78,24 +78,33 @@ nonsegmentedScan pat space ts kbody scan_ops post_op nsubtasks = do
     let param_types = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
     let no_array_param = all primType param_types
 
+    let scan_ts = concatMap (lambdaReturnType . segBinOpLambda) scan_ops
+    let shpOfT t =
+          arrayShape $
+            foldr (flip arrayOfRow) t $
+              segSpaceDims space
+
+    scan_out <- forM scan_ts $ \t ->
+      sAllocArray "scan_out" (elemType t) (shpOfT t) DefaultSpace
+
     map_out <- forM (drop (segBinOpResults scan_ops) ts) $ \t ->
-      sAllocArray "map_out" (elemType t) (arrayShape $ foldr (flip arrayOfRow) t $ segSpaceDims space) DefaultSpace
+      sAllocArray "map_out" (elemType t) (shpOfT t) DefaultSpace
 
     let (scanStage1, scanStage3)
           | scalars = (scanStage1Scalar, scanStage3Scalar)
           | vectorize && no_array_param = (scanStage1Nested, scanStage3Nested)
           | otherwise = (scanStage1Fallback, scanStage3Fallback)
     emit $ Imp.DebugPrint "Scan stage 1" Nothing
-    scanStage1 pat space kbody scan_ops map_out
+    scanStage1 space kbody scan_ops scan_out map_out
 
     let nsubtasks' = tvExp nsubtasks
     sWhen (nsubtasks' .>. 1) $ do
       scan_ops2 <- renameSegBinOp scan_ops
       emit $ Imp.DebugPrint "Scan stage 2" Nothing
-      carries <- scanStage2 pat nsubtasks space scan_ops2
+      carries <- scanStage2 nsubtasks space scan_ops2 scan_out
       scan_ops3 <- renameSegBinOp scan_ops
       emit $ Imp.DebugPrint "Scan stage 3" Nothing
-      scanStage3 pat space scan_ops3 carries post_op map_out
+      scanStage3 pat space scan_ops3 carries post_op scan_out map_out
 
 -- Different ways to generate code for a scan loop
 data ScanLoopType
@@ -151,20 +160,20 @@ getNestLoop _ = sLoopNest
 
 applyScanOps ::
   ScanLoopType ->
-  Pat LetDecMem ->
+  [VName] ->
   SegSpace ->
   [SubExp] ->
   [SegBinOp MCMem] ->
   [[VName]] ->
   ImpM MCMem HostEnv Imp.Multicore ()
-applyScanOps typ pat space all_scan_res scan_ops local_accs = do
+applyScanOps typ scan_out space all_scan_res scan_ops local_accs = do
   let per_scan_res = segBinOpChunks scan_ops all_scan_res
-      per_scan_pes = segBinOpChunks scan_ops $ patElems pat
+      per_scan_out = segBinOpChunks scan_ops scan_out
   let (is, _) = unzip $ unSegSpace space
 
   -- Potential vector load and then do sequential scan
   getScanLoop typ $ \j ->
-    forM_ (zip4 per_scan_pes scan_ops per_scan_res local_accs) $ \(pes, scan_op, scan_res, acc) ->
+    forM_ (zip4 per_scan_out scan_ops per_scan_res local_accs) $ \(outs, scan_op, scan_res, acc) ->
       getNestLoop typ (segBinOpShape scan_op) $ \vec_is -> do
         sComment "Read accumulator" $
           forM_ (zip (xParams scan_op) acc) $ \(p, acc') -> do
@@ -177,24 +186,24 @@ applyScanOps typ pat space all_scan_res scan_ops local_accs = do
         -- Scan body
         sComment "Scan op body" $
           compileStms mempty (bodyStms $ lamBody scan_op) $
-            forM_ (zip3 acc pes $ map resSubExp $ bodyResult $ lamBody scan_op) $
-              \(acc', pe, se) -> do
-                copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
+            forM_ (zip3 acc outs $ map resSubExp $ bodyResult $ lamBody scan_op) $
+              \(acc', out, se) -> do
+                copyDWIMFix out (map Imp.le64 is ++ vec_is) se []
                 copyDWIMFix acc' vec_is se []
 
 -- Generate a loop which performs a potentially vectorized scan on the
 -- result of a kernel body.
 genScanLoop ::
   ScanLoopType ->
-  Pat LetDecMem ->
   SegSpace ->
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
   [[VName]] ->
   [VName] ->
+  [VName] ->
   Imp.TExp Int64 ->
   ImpM MCMem HostEnv Imp.Multicore ()
-genScanLoop typ pat space kbody scan_ops local_accs map_aux i = do
+genScanLoop typ space kbody scan_ops local_accs scan_out map_out i = do
   let (all_scan_res, map_res) =
         splitAt (segBinOpResults scan_ops) $ kernelBodyResult kbody
   let (is, ns) = unzip $ unSegSpace space
@@ -204,21 +213,20 @@ genScanLoop typ pat space kbody scan_ops local_accs map_aux i = do
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
   compileStms mempty (kernelBodyStms kbody) $ do
     sComment "write mapped values results to memory" $
-      forM_ (zip map_aux map_subexps) $ \(name, subexp) -> do
+      forM_ (zip map_out map_subexps) $ \(name, subexp) -> do
         let is' = map (Imp.le64 . fst) $ unSegSpace space
         copyDWIMFix name is' subexp []
-
--- sComment "Apply scan op" $
---   applyScanOps typ pat space (map kernelResultSubExp all_scan_res) scan_ops local_accs
+    sComment "Apply scan op" $
+      applyScanOps typ scan_out space (map kernelResultSubExp all_scan_res) scan_ops local_accs
 
 scanStage1Scalar ::
-  Pat LetDecMem ->
   SegSpace ->
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
   [VName] ->
+  [VName] ->
   MulticoreGen ()
-scanStage1Scalar pat space kbody scan_ops map_aux = do
+scanStage1Scalar space kbody scan_ops scan_out map_out = do
   fbody <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
@@ -227,18 +235,18 @@ scanStage1Scalar pat space kbody scan_ops map_aux = do
     local_accs <- genLocalAccsStage1 scan_ops
     inISPC $
       generateChunkLoop "SegScan" Vectorized $
-        genScanLoop ScanScalar pat space kbody scan_ops local_accs map_aux
+        genScanLoop ScanScalar space kbody scan_ops local_accs scan_out map_out
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
 scanStage1Nested ::
-  Pat LetDecMem ->
   SegSpace ->
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
   [VName] ->
+  [VName] ->
   MulticoreGen ()
-scanStage1Nested pat space kbody scan_ops map_aux = do
+scanStage1Nested space kbody scan_ops scan_out map_out = do
   fbody <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
@@ -248,19 +256,19 @@ scanStage1Nested pat space kbody scan_ops map_aux = do
     inISPC $ do
       genBinOpParams scan_ops
       generateChunkLoop "SegScan" Scalar $
-        genScanLoop ScanNested pat space kbody scan_ops local_accs map_aux
+        genScanLoop ScanNested space kbody scan_ops local_accs scan_out map_out
 
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
 scanStage1Fallback ::
-  Pat LetDecMem ->
   SegSpace ->
   KernelBody MCMem ->
   [SegBinOp MCMem] ->
   [VName] ->
+  [VName] ->
   MulticoreGen ()
-scanStage1Fallback pat space kbody scan_ops map_aux = do
+scanStage1Fallback space kbody scan_ops scan_out map_out = do
   -- Stage 1 : each thread partially scans a chunk of the input
   -- Writes directly to the resulting array
   fbody <- collect $ do
@@ -271,20 +279,20 @@ scanStage1Fallback pat space kbody scan_ops map_aux = do
     local_accs <- genLocalAccsStage1 scan_ops
 
     generateChunkLoop "SegScan" Scalar $
-      genScanLoop ScanSeq pat space kbody scan_ops local_accs map_aux
+      genScanLoop ScanSeq space kbody scan_ops local_accs scan_out map_out
   free_params <- freeParams fbody
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_1" fbody free_params
 
 scanStage2 ::
-  Pat LetDecMem ->
   TV Int32 ->
   SegSpace ->
   [SegBinOp MCMem] ->
+  [VName] ->
   MulticoreGen [[VName]]
-scanStage2 pat nsubtasks space scan_ops = do
+scanStage2 nsubtasks space scan_ops scan_out = do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map pe64 ns
-      per_scan_pes = segBinOpChunks scan_ops $ patElems pat
+      per_scan_out = segBinOpChunks scan_ops scan_out
       nsubtasks' = sExt64 $ tvExp nsubtasks
 
   dScope Nothing $ scopeOfLParams $ concatMap (lambdaParams . segBinOpLambda) scan_ops
@@ -313,15 +321,15 @@ scanStage2 pat nsubtasks space scan_ops = do
     offset_index <-- offset_index' + offset'
     zipWithM_ dPrimV_ is $ unflattenIndex ns_64 $ sExt64 offset_index'
 
-    forM_ (zip3 per_scan_pes scan_ops carries) $ \(pes, scan_op, carry) ->
+    forM_ (zip3 per_scan_out scan_ops carries) $ \(outs, scan_op, carry) ->
       sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
         sComment "Read carry" $
           forM_ (zip (xParams scan_op) carry) $ \(p, carry') ->
             copyDWIMFix (paramName p) [] (Var carry') (i : vec_is)
 
         sComment "Read next values" $
-          forM_ (zip (yParams scan_op) pes) $ \(p, pe) ->
-            copyDWIMFix (paramName p) [] (Var $ patElemName pe) ((offset_index' - 1) : vec_is)
+          forM_ (zip (yParams scan_op) outs) $ \(p, out) ->
+            copyDWIMFix (paramName p) [] (Var out) ((offset_index' - 1) : vec_is)
 
         compileStms mempty (bodyStms $ lamBody scan_op) $
           forM_ (zip carry $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(carry', se) -> do
@@ -337,15 +345,17 @@ scanStage3Scalar ::
   [[VName]] ->
   SegPostOp MCMem ->
   [VName] ->
+  [VName] ->
   MulticoreGen ()
-scanStage3Scalar pat space scan_ops per_scan_carries post_op map_out = do
-  let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
+scanStage3Scalar pat space scan_ops per_scan_carries post_op scan_out map_out = do
+  let per_scan_out = segBinOpChunks scan_ops scan_out
       (scan_pars, map_pars) = splitAt (segBinOpResults scan_ops) $ lambdaParams $ segPostOpLambda post_op
       per_scan_post_par = segBinOpChunks scan_ops scan_pars
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
-      (idxs, vals, map_res) = splitPostOpResults post_op $ bodyResult $ lambdaBody $ segPostOpLambda post_op
-      groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs ++ vals)
+      (idxs, vals, map_res) = splitPostOpResults post_op $ fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+      groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
+      (pat_scatter, pat_map) = splitAt (length $ groups) $ patElems pat
 
   body <- collect $ do
     dPrim_ (segFlat space) int64
@@ -364,9 +374,9 @@ scanStage3Scalar pat space scan_ops per_scan_carries post_op map_out = do
               segPostOpLambda post_op
         zipWithM_ dPrimV_ is $ unflattenIndex ns' i
         sComment "load partial result" $
-          forM_ (zip per_scan_pes scan_ops) $ \(scan_pes, scan_op) ->
-            forM_ (zip (yParams scan_op) scan_pes) $ \(p, pe) ->
-              copyDWIMFix (paramName p) [] (Var (patElemName pe)) (map le64 is)
+          forM_ (zip per_scan_out scan_ops) $ \(outs, scan_op) ->
+            forM_ (zip (yParams scan_op) outs) $ \(p, out) ->
+              copyDWIMFix (paramName p) [] (Var out) (map le64 is)
         sComment "combine carry with partial result" $
           forM_ (zip per_scan_post_par scan_ops) $ \(ps, scan_op) ->
             compileStms mempty (bodyStms $ lamBody scan_op) $
@@ -376,18 +386,18 @@ scanStage3Scalar pat space scan_ops per_scan_carries post_op map_out = do
           forM_ (zip map_pars map_out) $ \(par, out) ->
             copyDWIMFix (paramName par) [] (Var out) (map le64 is)
         sComment "compute post op." $
-          compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $
-            forM_ groups $ \(_, arr, idxs_vals) -> do
-              sComment "write scatter values." $
+          compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+            sComment "write scatter values." $
+              forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
                 forM_ idxs_vals $ \(is', val) -> do
                   arr_t <- lookupType arr
                   let rws' = map pe64 $ arrayDims arr_t
-                      slice' = fmap pe64 $ fullSlice arr_t $ map (DimFix . resSubExp) is'
+                      slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
                   sWhen (inBounds slice' rws') $
-                    copyDWIM arr (unSlice slice') (resSubExp val) []
-              sComment "write map out values" $
-                forM_ (zip (drop (length groups) $ patElems pat) map_res) $ \(pe, res) ->
-                  copyDWIMFix (patElemName pe) (map le64 is) (resSubExp res) []
+                    copyDWIM (patElemName pe) (unSlice slice') val []
+            sComment "write mapped values" $
+              forM_ (zip pat_map map_res) $ \(pe, res) ->
+                copyDWIMFix (patElemName pe) (map le64 is) res []
 
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
@@ -399,8 +409,9 @@ scanStage3Nested ::
   [[VName]] ->
   SegPostOp MCMem ->
   [VName] ->
+  [VName] ->
   MulticoreGen ()
-scanStage3Nested pat space scan_ops per_scan_carries post_op map_out = do
+scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
@@ -435,8 +446,9 @@ scanStage3Fallback ::
   [[VName]] ->
   SegPostOp MCMem ->
   [VName] ->
+  [VName] ->
   MulticoreGen ()
-scanStage3Fallback pat space scan_ops per_scan_carries post_op map_out = do
+scanStage3Fallback pat space scan_ops per_scan_carries post_op scan_out map_out = do
   let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
