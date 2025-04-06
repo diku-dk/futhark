@@ -355,7 +355,7 @@ scanStage3Scalar pat space scan_ops per_scan_carries post_op scan_out map_out = 
       ns' = map pe64 ns
       (idxs, vals, map_res) = splitPostOpResults post_op $ fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
       groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
-      (pat_scatter, pat_map) = splitAt (length $ groups) $ patElems pat
+      (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
 
   body <- collect $ do
     dPrim_ (segFlat space) int64
