@@ -63,6 +63,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Fusion could crash after AD in some circumstances (#2236).
 
+* Under very unlikely circumstances, an "intrablock" flat parallel
+  operation could be hoisted out of its enclosing GPU kernel, causing
+  a compiler crash.
+
 ## [0.25.28]
 
 ### Fixed
