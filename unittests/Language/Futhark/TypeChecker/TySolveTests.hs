@@ -141,7 +141,7 @@ tests =
           (M.fromList [tv "a_0" 0])
           ([("a_0", Unlifted)], mempty),
 
-      testCase "unification fail" $
+      testCase "non-unifiable types" $
         testSolveFail
           ["a_0" ~ "i32", "a_0" ~ "bool"] 
           mempty 
