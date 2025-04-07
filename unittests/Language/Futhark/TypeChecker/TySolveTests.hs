@@ -183,6 +183,13 @@ tests =
       --     (M.fromList [tv "a_0" 0])
       --     "Occurs check: cannot instantiate a with #foo: a.",
 
+      testCase "infinite type (consuming array param)" $
+        testSolveFail
+          ["a_0" ~ "*[]a_0"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          "Occurs check: cannot instantiate a with []a.",
+
       testCase "vector and 2D matrix" $
         testSolveFail
           ["a_0" ~ "[]i32", "a_0" ~ "[][]i32"]
