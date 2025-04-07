@@ -1,6 +1,7 @@
 module Language.Futhark.TypeChecker.TySolveTests (tests) where
 
 import Data.Map qualified as M
+import Data.Loc
 import Futhark.Util.Pretty (docString)
 import Language.Futhark.Syntax (Liftedness (..), NoUniqueness, TypeBase, VName)
 import Language.Futhark.SyntaxTests ()
@@ -49,6 +50,9 @@ t1 ~ t2 = CtEq (Reason mempty) t1 t2
 tv :: VName -> Level -> (VName, (Level, TyVarInfo ()))
 tv v lvl = (v, (lvl, TyVarFree mempty Unlifted))
 
+typaram :: VName -> Level -> Liftedness -> (VName, (Level, Liftedness, Loc))
+typaram v lvl liftedness = (v, (lvl, liftedness, noLoc))
+
 tests :: TestTree
 tests =
   testGroup
@@ -62,12 +66,14 @@ tests =
           mempty
           (M.fromList [tv "a_0" 0])
           ([], M.fromList [("a_0", Right "b_1")]),
+          
       testCase "Two variables" $
         testSolve 
           ["a_0" ~ "b_1", "c_2" ~ "d_3"]
           mempty
           (M.fromList [tv "a_0" 0, tv "c_2" 0])
           ([], M.fromList [("a_0", Right "b_1"), ("c_2", Right "d_3")]),
+
       testCase "i32 + (i32 + i32)" $
         testSolve
           ["i32 -> i32 -> a_0" ~ "i32 -> i32 -> i32",
@@ -75,6 +81,7 @@ tests =
           mempty
           (M.fromList [tv "a_0" 0, tv "b_1" 0])
           ([], M.fromList [("a_0", Right "i32"), ("b_1", Right "i32")]),
+
       testCase "((λx -> λy -> x * y) i32) i32" $
         testSolve
           ["a_0 -> b_1 -> c_2" ~ "i32 -> i32 -> i32",
@@ -89,6 +96,7 @@ tests =
                            ("d_3", Right "i32 -> i32"),
                            ("e_4", Right "i32")
                           ]),
+
       testCase "rec λf -> λn -> if n == 0 then 1 else n * (f (n - 1))" $
         testSolve
           ["b_1 -> i32 -> c_2" ~ "i32 -> i32 -> bool",
@@ -140,10 +148,126 @@ tests =
           (M.fromList [tv "a_0" 0])
           "Cannot unify\n  i32\nwith\n  bool",
       
-      testCase "infinite type" $
+      testCase "infinite type (function)" $
         testSolveFail
           ["a_0" ~ "a_0 -> b_1"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Occurs check: cannot instantiate a with a -> b."
+          "Occurs check: cannot instantiate a with a -> b.",
+
+      testCase "infinite type (list)" $
+        testSolveFail
+          ["a_0" ~ "[]a_0"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          "Occurs check: cannot instantiate a with []a.",
+
+      testCase "infinite type (tuple)" $
+        testSolveFail
+          ["a_0" ~ "(a_0, bool)"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          "Occurs check: cannot instantiate a with (a, bool).",
+
+      testCase "infinite type (record)" $
+        testSolveFail
+          ["a_0" ~ "{foo: a_0, bar: f32}"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          "Occurs check: cannot instantiate a with {bar: f32, foo: a}.",
+
+      -- testCase "infinite type (sum type)" $
+      --   testSolveFail
+      --     ["a_0" ~ "#foo: a_0"]
+      --     mempty
+      --     (M.fromList [tv "a_0" 0])
+      --     "Occurs check: cannot instantiate a with #foo: a.",
+
+      testCase "vector and 2D matrix" $
+        testSolveFail
+          ["a_0" ~ "[]i32", "a_0" ~ "[][]i32"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          "Cannot unify\n  i32\nwith\n  []i32",
+
+      testCase "different array types" $
+        testSolveFail
+          ["a_0" ~ "[]f64", "a_0" ~ "[]i64"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          "Cannot unify\n  f64\nwith\n  i64",
+
+      testCase "simple record" $
+        testSolve
+          ["a_0" ~ "{foo: i32, bar: bool}"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          ([], M.fromList [("a_0", Right "{foo: i32, bar: bool}")]),
+
+      testCase "record 2" $
+        testSolve
+          ["a_0" ~ "{foo: b_1, bar: c_2}", "b_1" ~ "c_2", "c_2" ~ "i64"]
+          mempty
+          (M.fromList [tv "a_0" 0, tv "b_1" 0, tv "c_2" 0])
+          ([], M.fromList 
+                [("a_0", Right "{foo: i64, bar: i64}"), 
+                 ("b_1", Right "i64"),
+                 ("c_2", Right "i64")
+                ]
+          ),
+
+      testCase "record 3" $
+        testSolve
+          ["a_0" ~ "{foo: b_1, bar: c_2}", "b_1" ~ "c_2"]
+          (M.fromList [typaram "c_2" 0 Lifted])
+          (M.fromList [tv "a_0" 0, tv "b_1" 0])
+          ([], M.fromList 
+                [("a_0", Right "{foo: c_2, bar: c_2}"), 
+                 ("b_1", Right "c_2")
+                ]
+          ),
+
+      testCase "tuple" $
+        testSolve
+          ["a_0" ~ "(b_1, c_2, d_3)", "c_2" ~ "d_3"]
+          mempty
+          (M.fromList [tv "a_0" 0, tv "b_1" 0, tv "c_2" 0, tv "d_3" 0])
+          ([("b_1", Unlifted), ("d_3", Unlifted)], 
+           M.fromList 
+            [("a_0", Right "(b_1, c_2, d_3)"),
+             ("c_2", Right "d_3")
+            ]
+          ),
+
+      testCase "compatible levels" $ 
+        testSolve
+          ["a_0" ~ "{foo: b_1, bar: i8}", "b_1" ~ "u32"]
+          mempty
+          (M.fromList [tv "a_0" 3, tv "b_1" 2])
+          ([], M.fromList 
+                [("a_0", Right "{foo: u32, bar: i8}"),
+                 ("b_1", Right "u32")
+                ]
+          ),
+
+      -- testCase "incompatible levels" $ 
+      --   testSolveFail
+      --     ["a_0" ~ "(b_1, c_2)"]
+      --     mempty
+      --     (M.fromList [tv "a_0" 0, tv "b_1" 1, tv "c_2" 2])
+      --     "",
+
+      testCase "lifted type param" $
+        testSolve
+          ["a_0" ~ "b_1", "b_1" ~ "i32 -> bool"]
+          (M.fromList [typaram "a_0" 0 Lifted])
+          (M.fromList [tv "b_1" 0])
+          ([], M.fromList [("b_1", Right "i32")])
+
+      -- testCase "different array sizes" $
+      --   testSolveFail
+      --     ["a_0" ~ "[n]i32", "a_0" ~ "[n]i32"]
+      --     mempty
+      --     (M.fromList [tv "a_0" 0])
+          -- "Cannot unify\n  [1]i32\nwith\n  [2]i32"
     ]

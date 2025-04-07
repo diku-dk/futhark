@@ -566,3 +566,4 @@ test-suite unit
     , tasty-quickcheck
     , text
     , vector >=0.12
+    , srcloc
