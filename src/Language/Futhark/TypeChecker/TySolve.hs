@@ -16,11 +16,13 @@ import Data.Loc
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Debug.Trace
+import Futhark.Util (isEnvVarAtLeast)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Error
-import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
+import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote, prettyTypeError)
 import Language.Futhark.TypeChecker.Types (substTyVars)
 
 -- | The type representation used by the constraint solver. Agnostic
@@ -661,11 +663,31 @@ solve ::
   TyVars () ->
   Either TypeError ([UnconTyVar], Solution)
 solve constraints typarams tyvars =
-  second solution
+  logProblem
+    . second solution
     . runExcept
     . flip execStateT (initialState typarams tyvars)
     . runSolveM
     $ do
       mapM_ solveCt constraints
       mapM_ solveTyVar (M.toList tyvars)
+  where
+    logProblem
+      | isEnvVarAtLeast "FUTHARK_LOG_TYSOLVE" 0 = \s ->
+          let msg =
+                unlines
+                  [ "# TySolve.solve",
+                    "## constraints",
+                    show constraints,
+                    "## typarams",
+                    show typarams,
+                    "## tyvars",
+                    show tyvars,
+                    either
+                      (("## error\n" <>) . docString . prettyTypeError)
+                      (("## solution\n" <>) . show)
+                      s
+                  ]
+           in trace msg s
+      | otherwise = id
 {-# NOINLINE solve #-}
