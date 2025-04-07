@@ -66,12 +66,14 @@ tests =
           mempty
           (M.fromList [tv "a_0" 0])
           ([], M.fromList [("a_0", Right "b_1")]),
+          
       testCase "Two variables" $
         testSolve 
           ["a_0" ~ "b_1", "c_2" ~ "d_3"]
           mempty
           (M.fromList [tv "a_0" 0, tv "c_2" 0])
           ([], M.fromList [("a_0", Right "b_1"), ("c_2", Right "d_3")]),
+
       testCase "i32 + (i32 + i32)" $
         testSolve
           ["i32 -> i32 -> a_0" ~ "i32 -> i32 -> i32",
@@ -79,6 +81,7 @@ tests =
           mempty
           (M.fromList [tv "a_0" 0, tv "b_1" 0])
           ([], M.fromList [("a_0", Right "i32"), ("b_1", Right "i32")]),
+
       testCase "((λx -> λy -> x * y) i32) i32" $
         testSolve
           ["a_0 -> b_1 -> c_2" ~ "i32 -> i32 -> i32",
@@ -93,6 +96,7 @@ tests =
                            ("d_3", Right "i32 -> i32"),
                            ("e_4", Right "i32")
                           ]),
+
       testCase "rec λf -> λn -> if n == 0 then 1 else n * (f (n - 1))" $
         testSolve
           ["b_1 -> i32 -> c_2" ~ "i32 -> i32 -> bool",
