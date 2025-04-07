@@ -460,7 +460,7 @@ doTest = catching . runTestM . runTestCase
 
 makeTestCase :: TestConfig -> TestMode -> (FilePath, ProgramTest) -> TestCase
 makeTestCase config mode (file, spec) =
-  TestCase mode file spec $ configPrograms config
+  excludeCases config $ TestCase mode file spec $ configPrograms config
 
 data ReportMsg
   = TestStarted TestCase
@@ -677,7 +677,7 @@ defaultConfig :: TestConfig
 defaultConfig =
   TestConfig
     { configTestMode = Compiled,
-      configExclude = ["disable"],
+      configExclude = ["disable", "notest"],
       configPrograms =
         ProgConfig
           { configBackend = "c",

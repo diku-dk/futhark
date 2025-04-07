@@ -28,6 +28,15 @@ patName :: Pat Type -> ADM VName
 patName (Pat [pe]) = pure $ patElemName pe
 patName pat = error $ "Expected single-element pattern: " ++ prettyString pat
 
+copyIfArray :: VName -> ADM VName
+copyIfArray v = do
+  v_t <- lookupType v
+  case v_t of
+    Array {} ->
+      letExp (baseString v <> "_copy") . BasicOp $
+        Replicate mempty (Var v)
+    _ -> pure v
+
 -- The vast majority of BasicOps require no special treatment in the
 -- forward pass and produce one value (and hence one adjoint).  We
 -- deal with that case here.
@@ -42,28 +51,8 @@ commonBasicOp pat aux op m = do
 diffBasicOp :: Pat Type -> StmAux () -> BasicOp -> ADM () -> ADM ()
 diffBasicOp pat aux e m =
   case e of
-    CmpOp cmp x y -> do
-      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ do
-        let t = cmpOpType cmp
-            update contrib = do
-              void $ updateSubExpAdj x contrib
-              void $ updateSubExpAdj y contrib
-
-        case t of
-          FloatType ft ->
-            update <=< letExp "contrib" $
-              Match
-                [Var pat_adj]
-                [Case [Just $ BoolValue True] $ resultBody [constant (floatValue ft (1 :: Int))]]
-                (resultBody [constant (floatValue ft (0 :: Int))])
-                (MatchDec [Prim (FloatType ft)] MatchNormal)
-          IntType it ->
-            update <=< letExp "contrib" $ BasicOp $ ConvOp (BToI it) (Var pat_adj)
-          Bool ->
-            update pat_adj
-          Unit ->
-            pure ()
+    CmpOp {} ->
+      void $ commonBasicOp pat aux e m
     --
     ConvOp op x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -202,13 +191,7 @@ diffBasicOp pat aux e m =
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ do
         v_adj <- letExp "update_val_adj" $ BasicOp $ Index pat_adj slice
-        t <- lookupType v_adj
-        v_adj_copy <-
-          case t of
-            Array {} ->
-              letExp "update_val_adj_copy" . BasicOp $
-                Replicate mempty (Var v_adj)
-            _ -> pure v_adj
+        v_adj_copy <- copyIfArray v_adj
         updateSubExpAdj v v_adj_copy
         zeroes <- letSubExp "update_zero" . zeroExp =<< subExpType v
         void $
@@ -278,7 +261,9 @@ diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
           ses
           (map (fmap $ diffBody adjs branches_free) cases)
           (diffBody adjs branches_free defbody)
-    zipWithM_ insAdj branches_free branches_free_adj
+    -- See Note [Array Adjoints of Match]
+    forM_ (zip branches_free branches_free_adj) $ \(v, v_adj) ->
+      insAdj v =<< copyIfArray v_adj
 diffStm (Let pat aux (Op soac)) m =
   vjpSOAC vjpOps pat aux soac m
 diffStm (Let pat aux loop@Loop {}) m =
@@ -439,3 +424,43 @@ revVJP scope (Lambda params ts body) =
 -- our current translation rules, they will be dead code.  As long as
 -- we are careful to run dead code elimination after revVJP, we should
 -- be good.
+
+-- Note [Array Adjoints of Match]
+--
+-- Some unusual, but sadly not completely contrived, contain Match
+-- expressions that return multiple arrays, and there the arrays
+-- returned by one branch have overlapping aliases with another
+-- branch, although in different places. As an example consider this:
+--
+--   let (X,Y) = if c
+--               then (A, B)
+--               else (B, A)
+--
+-- Because our aliasing representation cannot express mutually
+-- exclusive aliases, we will consider X and Y to be aliased to each
+-- other. In practice, this means it is unlikely for X or Y to be
+-- consumed, because it would also consume the other (although it's
+-- possible for carefully written code).
+--
+-- When producing adjoints for this, it will be something like
+--
+--   let (X_adj,Y_adj) = if c
+--                       then (A_adj, B_adj)
+--                       else (B_adj, A_adj)
+--
+-- which completely reflects the primal code. However, while it is
+-- unlikely that any consumption takes place for the original primal
+-- variables, it is almost guaranteed that X_adj and Y_adj will be
+-- consumed (that is the main way we use adjoints after all), and due
+-- to the conservative aliasing, when one is consumed, so is the
+-- other! To avoid this tragic fate, we are forced to copy any
+-- array-typed adjoints returned by a Match. This can be quite costly.
+-- However:
+--
+-- 1) Futhark has pretty OK copy removal, so maybe it can get rid of
+--    these by using information not available to the AD pass.
+--
+-- 2) In many cases, arrays will have accumulator adjoints, which are
+--    not subject to this problem.
+--
+-- Issue #2228 was caused by neglecting to do this.

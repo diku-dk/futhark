@@ -210,7 +210,7 @@ basicFwd pat aux op = do
         letBindNames (patNames pat_tan) <=< toExp $
           x_tan ~*~ wrt_x ~+~ y_tan ~*~ wrt_y
     CmpOp {} ->
-      addStm $ Let pat_tan aux $ BasicOp op
+      addStm $ Let pat_tan aux $ zeroExp $ Prim Bool
     ConvOp cop x -> do
       x_tan <- tangent x
       addStm $ Let pat_tan aux $ BasicOp $ ConvOp cop x_tan
