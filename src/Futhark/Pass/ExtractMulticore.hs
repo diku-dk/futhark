@@ -10,6 +10,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bitraversable
+import Debug.Trace
 import Futhark.IR
 import Futhark.IR.MC
 import Futhark.IR.MC qualified as MC
@@ -174,6 +175,9 @@ transformMap rename onBody w map_lam arrs = do
   renameIfNeeded rename $
     SegMap () space (lambdaReturnType map_lam) kbody
 
+debug :: (Show a) => a -> a
+debug x = traceShow x x
+
 transformRedomap ::
   NeedsRename ->
   (Body SOACS -> ExtractM (Body MC)) ->
@@ -239,7 +243,9 @@ transformSOAC pat _ (Screma w arrs form)
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
       (scans_stms, scans') <- mapAndUnzipM scanToSegBinOp scans
-      let ret' = concatMap (lambdaReturnType . segBinOpLambda) scans'
+      let segBinOpType op =
+            flip arrayOfShape (segBinOpShape op) <$> lambdaReturnType (segBinOpLambda op)
+          ret' = concatMap segBinOpType scans'
           ret'' = drop (length ret') $ lambdaReturnType map_lam
           ret = ret' <> ret''
       identity <- mkIdentityLambda ret

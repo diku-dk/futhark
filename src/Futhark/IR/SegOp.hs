@@ -657,13 +657,13 @@ checkSegPostOp ::
   [Type] ->
   TC.TypeM rep ()
 checkSegPostOp op@(SegPostOp lam spec) ops ts = do
-  let nes = concatMap (\(_, a, _) -> a) ops
+  let (shps, nes) = unzip $ concatMap (\(_, a, shp) -> (shp,) <$> a) ops
   nes' <- mapM TC.checkArg nes
   let kbody' = (,mempty) <$> drop (length nes') ts
 
   TC.checkLambda lam $
     map TC.noArgAliases $
-      nes' <> kbody'
+      zipWith (\shp (t, e) -> (arrayOfShape t shp, e)) shps nes' <> kbody'
 
   let (idxs, ts', _) = splitPostOpResults op $ lambdaReturnType lam
   forM_ idxs $ \i -> do

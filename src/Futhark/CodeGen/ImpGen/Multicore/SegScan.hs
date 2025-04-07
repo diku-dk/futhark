@@ -78,17 +78,18 @@ nonsegmentedScan pat space ts kbody scan_ops post_op nsubtasks = do
     let param_types = concatMap (map paramType . (lambdaParams . segBinOpLambda)) scan_ops
     let no_array_param = all primType param_types
 
-    let scan_ts = concatMap (lambdaReturnType . segBinOpLambda) scan_ops
-    let shpOfT t =
+    let shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
+    let scan_ts = concatMap shpT scan_ops
+    let shpOfT t s =
           arrayShape $
-            foldr (flip arrayOfRow) t $
+            foldr (flip arrayOfRow) (arrayOfShape t s) $
               segSpaceDims space
 
-    scan_out <- forM scan_ts $ \t ->
-      sAllocArray "scan_out" (elemType t) (shpOfT t) DefaultSpace
+    scan_out <- forM scan_ts $ \(s, t) ->
+      sAllocArray "scan_out" (elemType t) (shpOfT t s) DefaultSpace
 
     map_out <- forM (drop (segBinOpResults scan_ops) ts) $ \t ->
-      sAllocArray "map_out" (elemType t) (shpOfT t) DefaultSpace
+      sAllocArray "map_out" (elemType t) (shpOfT t mempty) DefaultSpace
 
     let (scanStage1, scanStage3)
           | scalars = (scanStage1Scalar, scanStage3Scalar)
@@ -209,7 +210,6 @@ genScanLoop typ space kbody scan_ops local_accs scan_out map_out i = do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   let map_subexps = kernelResultSubExp <$> map_res
-
   zipWithM_ dPrimV_ is $ unflattenIndex ns' i
   compileStms mempty (kernelBodyStms kbody) $ do
     sComment "write mapped values results to memory" $
@@ -424,6 +424,11 @@ scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = 
     generateChunkLoop "SegScan" Scalar $ \i -> do
       genBinOpParams scan_ops
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
+      dScope Nothing $
+        scopeOfLParams $
+          lambdaParams $
+            segPostOpLambda post_op
+
       forM_ (zip4 per_scan_post_par per_scan_out per_scan_carries scan_ops) $ \(pars, outs, op_carries, scan_op) -> do
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
           sComment "load carry-in" $
@@ -436,7 +441,7 @@ scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = 
           sComment "combine carry with partial result" $
             compileStms mempty (bodyStms $ lamBody scan_op) $
               forM_ (zip pars $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(par, se) ->
-                copyDWIMFix (paramName par) (map Imp.le64 is ++ vec_is) se []
+                copyDWIMFix (paramName par) (vec_is) se []
           sComment "read kernel body map results" $
             forM_ (zip map_pars map_out) $ \(par, out) ->
               copyDWIMFix (paramName par) [] (Var out) (map le64 is)
