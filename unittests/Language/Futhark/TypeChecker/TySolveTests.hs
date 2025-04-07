@@ -55,19 +55,22 @@ tests =
       testCase "infer unlifted" $
         testSolve
           [ CtEq (ReasonBranches noLoc "t_9895" "t_9896") "t_9895" "if_t_9897",
-            CtEq (ReasonBranches noLoc "t_9895" "t_9896") (Scalar "t_9896") "if_t_9897"
+            CtEq (ReasonBranches noLoc "t_9895" "t_9896") (Scalar "t_9896") "if_t_9897",
+            "if_t_9897" ~ "res_42"
           ]
           mempty
           ( M.fromList
               [ ("t_9895", (2, TyVarFree noLoc Lifted)),
                 ("t_9896", (3, TyVarFree noLoc Lifted)),
-                ("if_t_9897", (4, TyVarFree noLoc SizeLifted))
+                ("if_t_9897", (4, TyVarFree noLoc SizeLifted)),
+                ("res_42", (1, TyVarFree noLoc Lifted))
               ]
           )
-          ( [("if_t_9897", SizeLifted)],
+          ( [("res_42", SizeLifted)],
             M.fromList
-              [ ("t_9895", Right "if_t_9897"),
-                ("t_9896", Right "if_t_9897")
+              [ ("t_9895", Right "res_42"),
+                ("t_9896", Right "res_42"),
+                ("if_t_9897", Right "res_42")
               ]
           )
     ]
