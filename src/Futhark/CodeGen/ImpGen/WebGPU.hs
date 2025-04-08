@@ -351,8 +351,10 @@ wgslSharedBufferType ::
   Maybe WGSL.Exp ->
   WGSL.Typ
 wgslSharedBufferType (Bool, _, _) = WGSL.Array WGSL.Bool
-wgslSharedBufferType (IntType Int8, _, _) = WGSL.Array WGSL.Int32
-wgslSharedBufferType (IntType Int16, _, _) = WGSL.Array WGSL.Int32
+wgslSharedBufferType (IntType Int8, True, _) = WGSL.Array $ WGSL.Atomic WGSL.Int32
+wgslSharedBufferType (IntType Int16, True, _) = WGSL.Array $ WGSL.Atomic WGSL.Int32
+wgslSharedBufferType (IntType Int8, False, _) = WGSL.Array WGSL.Int32
+wgslSharedBufferType (IntType Int16, False, _) = WGSL.Array WGSL.Int32
 wgslSharedBufferType (IntType Int32, False, _) = WGSL.Array WGSL.Int32
 wgslSharedBufferType (IntType Int32, True, Signed) =
   WGSL.Array $ WGSL.Atomic WGSL.Int32
@@ -371,11 +373,24 @@ genArrayWrite ::
 genArrayWrite fun mem i v = do
   mem' <- getIdent mem
   shared <- isShared mem'
-  if not shared
+  atomic <- isAtomic mem'
+  i' <- indexExp i
+
+  let fun' =
+          if not atomic
+            then fun
+            else "atomic_" <> fun <> (if shared then "_shared" else "_global")
+
+  if atomic
     then
-      let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
-       in WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
-    else WGSL.AssignIndex mem' <$> indexExp i <*> genWGSLExp v
+      let ptr = pure $ WGSL.UnOpExp "&" (WGSL.IndexExp mem' i')
+      in WGSL.Call fun' <$> sequence [ptr, genWGSLExp v]
+    else
+      if not shared
+        then
+          let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
+          in WGSL.Call fun' <$> sequence [buf, indexExp i, genWGSLExp v]
+        else WGSL.AssignIndex mem' <$> indexExp i <*> genWGSLExp v
 
 genArrayRead ::
   WGSL.Ident ->
@@ -387,12 +402,25 @@ genArrayRead fun tgt mem i = do
   tgt' <- getIdent tgt
   mem' <- getIdent mem
   shared <- isShared mem'
-  if not shared
+  atomic <- isAtomic mem'
+  i' <- indexExp i
+
+  let fun' =
+          if not atomic
+            then fun
+            else "atomic_" <> fun <> (if shared then "_shared" else "_global")
+
+  if atomic
     then
-      let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
-          call = WGSL.CallExp fun <$> sequence [buf, indexExp i]
-       in WGSL.Assign tgt' <$> call
-    else WGSL.Assign tgt' . WGSL.IndexExp mem' <$> indexExp i
+      let ptr = pure $ WGSL.UnOpExp "&" (WGSL.IndexExp mem' i')
+      in WGSL.Call fun' <$> sequence [ptr]
+    else
+      if not shared
+        then
+          let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
+              call = WGSL.CallExp fun' <$> sequence [buf, indexExp i]
+          in WGSL.Assign tgt' <$> call
+        else WGSL.Assign tgt' . WGSL.IndexExp mem' <$> indexExp i
 
 genIntAtomicOp ::
   WGSL.Ident ->
