@@ -429,7 +429,7 @@ scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = 
           lambdaParams $
             segPostOpLambda post_op
 
-      forM_ (zip4 per_scan_post_par per_scan_out per_scan_carries scan_ops) $ \(pars, outs, op_carries, scan_op) -> do
+      forM_ (zip3 per_scan_out per_scan_carries scan_ops) $ \(outs, op_carries, scan_op) -> do
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
           sComment "load carry-in" $
             forM_ (zip (xParams scan_op) op_carries) $ \(p, carries) ->
@@ -440,10 +440,10 @@ scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = 
               copyDWIMFix (paramName p) [] (Var out) (map le64 is ++ vec_is)
           sComment "combine carry with partial result" $
             compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip pars $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(par, se) ->
-                copyDWIMFix (paramName par) (vec_is) se []
+              forM_ (zip outs $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(out, se) ->
+                copyDWIMFix out (map le64 is <> vec_is) se []
           sComment "read kernel body map results" $
-            forM_ (zip map_pars map_out) $ \(par, out) ->
+            forM_ (zip scan_pars map_out) $ \(par, out) ->
               copyDWIMFix (paramName par) [] (Var out) (map le64 is)
 
   free_params <- freeParams body
