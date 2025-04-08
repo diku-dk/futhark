@@ -1,7 +1,7 @@
 module Language.Futhark.TypeChecker.TySolveTests (tests) where
 
 import Data.Map qualified as M
-import Data.Loc
+import Data.Loc ( Loc, noLoc )
 import Futhark.Util.Pretty (docString)
 import Language.Futhark.Syntax (Liftedness (..), NoUniqueness, TypeBase, VName)
 import Language.Futhark.SyntaxTests ()
