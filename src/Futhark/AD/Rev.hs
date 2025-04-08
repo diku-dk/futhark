@@ -109,8 +109,7 @@ diffBasicOp pat aux e m =
     --
     Index arr slice -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ do
-        void $ updateAdjSlice slice arr pat_adj
+      returnSweepCode $ void $ updateAdjSlice slice arr pat_adj
     FlatIndex {} -> error "FlatIndex not handled by AD yet."
     FlatUpdate {} -> error "FlatUpdate not handled by AD yet."
     --

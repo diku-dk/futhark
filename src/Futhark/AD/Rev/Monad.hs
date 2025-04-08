@@ -93,7 +93,8 @@ data InBounds
   = -- | If a SubExp is provided, it references a boolean that is true
     -- when in-bounds.
     CheckBounds (Maybe SubExp)
-  | AssumeBounds
+  | -- | Assume that these are always in-bounds.
+    AssumeBounds
   | -- | Dynamically these will always fail, so don't bother
     -- generating code for the update.  This is only needed to ensure
     -- a consistent representation of sparse Jacobians.
@@ -379,59 +380,6 @@ lookupAdj v = do
 lookupAdjVal :: VName -> ADM VName
 lookupAdjVal v = adjVal =<< lookupAdj v
 
-updateAdj :: VName -> VName -> ADM ()
-updateAdj v d = do
-  maybeAdj <- gets $ M.lookup v . stateAdjs
-  case maybeAdj of
-    Nothing ->
-      insAdj v d
-    Just adj -> do
-      v_adj <- adjVal adj
-      v_adj_t <- lookupType v_adj
-      case v_adj_t of
-        Acc {} -> do
-          dims <- arrayDims <$> lookupType d
-          ~[v_adj'] <-
-            tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] ->
-              letTupExp "acc" . BasicOp $
-                UpdateAcc Safe v_adj' (map Var is) [Var d']
-          insAdj v v_adj'
-        _ -> do
-          v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
-          insAdj v v_adj'
-
-updateAdjSlice :: Slice SubExp -> VName -> VName -> ADM ()
-updateAdjSlice (Slice [DimFix i]) v d =
-  updateAdjIndex v (AssumeBounds, i) (Var d)
-updateAdjSlice slice v d = do
-  t <- lookupType v
-  v_adj <- lookupAdjVal v
-  v_adj_t <- lookupType v_adj
-  v_adj' <- case v_adj_t of
-    Acc {} -> do
-      let dims = sliceDims slice
-      ~[v_adj'] <-
-        tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] -> do
-          slice' <-
-            traverse (toSubExp "index") $
-              fixSlice (fmap pe64 slice) $
-                map le64 is
-          letTupExp (baseString v_adj') . BasicOp $
-            UpdateAcc Safe v_adj' slice' [Var d']
-      pure v_adj'
-    _ -> do
-      v_adjslice <-
-        if primType t
-          then pure v_adj
-          else letExp (baseString v ++ "_slice") $ BasicOp $ Index v_adj slice
-      letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
-  insAdj v v_adj'
-
-updateSubExpAdj :: SubExp -> VName -> ADM ()
-updateSubExpAdj Constant {} _ = pure ()
-updateSubExpAdj (Var v) d = void $ updateAdj v d
-
--- The index may be negative, in which case the update has no effect.
 updateAdjIndex :: VName -> (InBounds, SubExp) -> SubExp -> ADM ()
 updateAdjIndex v (check, i) se = do
   maybeAdj <- gets $ M.lookup v . stateAdjs
@@ -450,16 +398,18 @@ updateAdjIndex v (check, i) se = do
       se_v <- letExp "se_v" $ BasicOp $ SubExp se
       insAdj v
         =<< case v_adj_t of
-          Acc {}
-            | check == OutOfBounds ->
-                pure v_adj
-            | otherwise -> do
-                dims <- arrayDims <$> lookupType se_v
-                ~[v_adj'] <-
-                  tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
-                    letTupExp "acc" . BasicOp $
-                      UpdateAcc Safe v_adj' (i : map Var is) [Var se_v']
-                pure v_adj'
+          Acc {} -> do
+            let stms s = do
+                  dims <- arrayDims <$> lookupType se_v
+                  ~[v_adj'] <-
+                    tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
+                      letTupExp "acc" . BasicOp $
+                        UpdateAcc s v_adj' (i : map Var is) [Var se_v']
+                  pure v_adj'
+            case check of
+              CheckBounds _ -> stms Safe
+              AssumeBounds -> stms Unsafe
+              OutOfBounds -> pure v_adj
           _ -> do
             let stms s = do
                   v_adj_i <-
@@ -473,6 +423,68 @@ updateAdjIndex v (check, i) se = do
               CheckBounds _ -> stms Safe
               AssumeBounds -> stms Unsafe
               OutOfBounds -> pure v_adj
+
+updateAdjWithSafety :: VName -> VName -> Safety -> ADM ()
+updateAdjWithSafety v d safety = do
+  maybeAdj <- gets $ M.lookup v . stateAdjs
+  case maybeAdj of
+    Nothing ->
+      insAdj v d
+    Just adj -> do
+      v_adj <- adjVal adj
+      v_adj_t <- lookupType v_adj
+      case v_adj_t of
+        Acc {} -> do
+          dims <- arrayDims <$> lookupType d
+          ~[v_adj'] <-
+            tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] ->
+              letTupExp "acc" . BasicOp $
+                UpdateAcc safety v_adj' (map Var is) [Var d']
+          insAdj v v_adj'
+        _ -> do
+          v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
+          insAdj v v_adj'
+
+updateAdjSliceWithSafety :: Slice SubExp -> VName -> VName -> Safety -> ADM ()
+updateAdjSliceWithSafety (Slice [DimFix i]) v d safety =
+  updateAdjIndex v (bounds, i) (Var d)
+  where
+    bounds = case safety of
+      Safe -> CheckBounds Nothing
+      Unsafe -> AssumeBounds
+updateAdjSliceWithSafety slice v d safety = do
+  t <- lookupType v
+  v_adj <- lookupAdjVal v
+  v_adj_t <- lookupType v_adj
+  v_adj' <- case v_adj_t of
+    Acc {} -> do
+      let dims = sliceDims slice
+      ~[v_adj'] <-
+        tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] -> do
+          slice' <-
+            traverse (toSubExp "index") $
+              fixSlice (fmap pe64 slice) $
+                map le64 is
+          letTupExp (baseString v_adj') . BasicOp $
+            UpdateAcc safety v_adj' slice' [Var d']
+      pure v_adj'
+    _ -> do
+      v_adjslice <-
+        if primType t
+          then pure v_adj
+          else letExp (baseString v ++ "_slice") $ BasicOp $ Index v_adj slice
+      letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
+  insAdj v v_adj'
+
+updateAdj :: VName -> VName -> ADM ()
+updateAdj v d = updateAdjWithSafety v d Unsafe
+
+updateAdjSlice :: Slice SubExp -> VName -> VName -> ADM ()
+updateAdjSlice slice v d = updateAdjSliceWithSafety slice v d Unsafe
+
+updateSubExpAdj :: SubExp -> VName -> ADM ()
+updateSubExpAdj Constant {} _ = pure ()
+updateSubExpAdj (Var v) d = void $ updateAdj v d
 
 -- | Is this primal variable active in the AD sense?  FIXME: this is
 -- (obviously) much too conservative.
