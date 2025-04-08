@@ -1,5 +1,6 @@
 module Language.Futhark.TypeChecker.TySolveTests (tests) where
 
+import Data.Loc (Loc (NoLoc))
 import Data.Map qualified as M
 import Futhark.Util.Pretty (docString)
 import Language.Futhark.Syntax
@@ -54,23 +55,23 @@ tests =
       --
       testCase "infer unlifted" $
         testSolve
-          [ CtEq (ReasonBranches noLoc "t_9895" "t_9896") "t_9895" "if_t_9897",
-            CtEq (ReasonBranches noLoc "t_9895" "t_9896") (Scalar "t_9896") "if_t_9897",
-            "if_t_9897" ~ "res_42"
+          [ "t\8320_9896" ~ "if_t\8322_9898",
+            "t\8321_9897" ~ "if_t\8322_9898",
+            "t\8323_9899" ~ "if_t\8322_9898"
           ]
           mempty
           ( M.fromList
-              [ ("t_9895", (2, TyVarFree noLoc Lifted)),
-                ("t_9896", (3, TyVarFree noLoc Lifted)),
-                ("if_t_9897", (4, TyVarFree noLoc SizeLifted)),
-                ("res_42", (1, TyVarFree noLoc Lifted))
+              [ ("t\8320_9896", (2, TyVarFree NoLoc Lifted)),
+                ("t\8321_9897", (3, TyVarFree NoLoc Lifted)),
+                ("if_t\8322_9898", (4, TyVarFree NoLoc SizeLifted)),
+                ("t\8323_9899", (5, TyVarFree NoLoc Lifted))
               ]
           )
-          ( [("res_42", SizeLifted)],
+          ( [("if_t\8322_9898", SizeLifted)],
             M.fromList
-              [ ("t_9895", Right "res_42"),
-                ("t_9896", Right "res_42"),
-                ("if_t_9897", Right "res_42")
+              [ ("t\8320_9896", Right "if_t\8322_9898"),
+                ("t\8321_9897", Right "if_t\8322_9898"),
+                ("t\8323_9899", Right "if_t\8322_9898")
               ]
           )
     ]

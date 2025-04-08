@@ -561,6 +561,7 @@ test-suite unit
     , free
     , futhark
     , megaparsec
+    , srcloc >=0.4
     , tasty
     , tasty-hunit
     , tasty-quickcheck
