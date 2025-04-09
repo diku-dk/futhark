@@ -25,6 +25,7 @@ import Data.List (partition)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
+import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.EqSimplifier
@@ -112,20 +113,20 @@ queryCase query fn case_idx = algebraContext fn $ do
           Empty -> undefined
 
 dnfQuery :: Symbol -> IndexFnM Answer -> IndexFnM Answer
-dnfQuery p q = allM $ map (\p' -> rollbackAlgEnv (assume p' >> q)) (disjToList $ toDNF p)
+dnfQuery p query =
+  allM $
+    map (\p' -> rollbackAlgEnv (assume p' >> query)) (disjToList $ toDNF p)
   where
     disjToList (a :|| b) = disjToList a <> disjToList b
     disjToList x = [x]
 
+-- Check whether p implies q.
 (=>?) :: Symbol -> Symbol -> IndexFnM Answer
--- p =>? q = dnfQuery p (check q)
 p =>? q | p == q = pure Yes
 p =>? q = do
-  ans <- dnfQuery p (check q)
-  when (isUnknown ans) $
-    printM 1000 $
-      "Failed to show:\n" <> prettyIndent 4 p <> "\n =>?\n" <> prettyIndent 4 q
-  pure ans
+  let ans = dnfQuery p (check q)
+  printTrace 1337 (prettyIndent 2 p <> " =>? " <> prettyStr q) $
+    ans `orM` isFalse p
 
 infixl 8 =>?
 
