@@ -481,17 +481,19 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) =
       <> "\n"
       <> prettyIndent 2 f
 
-  -- Let X be the preimage of [a, b] under f
-  -- so that f restricted to X is the function:
-  --   f|X : X -> [a, b].
+  -- Let X be the preimage of [a, b] under f. We want to show that
+  -- the restriction of f to X is a function
+  --   f|X : X -> Y.
   -- WTS(1): f|X is injective.
-  -- WTS(2): f|X is surjective with Img(f|X) = [c,d].
+  -- WTS(2): f|X is surjective with Y = [c,d].
   --
-  -- Even though we know the image of
-  --   f|X : X -> [a, b]
-  -- is [c, d] (subset of [a,b]), using [a, b] to restrict
-  -- the codomain of f additionally tells us that ([a,b] \ [c,d])
-  -- under f is empty, if (1) and (2) are true.
+  -- It follows from (1) and (2) that [c,d] is a subset of [a,b]
+  -- and that f|X maps no values into ([a,b] \ [c,d]).
+  --                  _________
+  --                /  [a,b]   \
+  --   f|X : X --> |   /[c,d]\ |
+  --               \__|______|/
+  --                   ^ all values are mapped in here.
 
   let step1 =
         printTrace 1000 "Step (1)" $
