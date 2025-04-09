@@ -298,6 +298,12 @@ combineInputs inp lam out inp' =
     isOutput = fmap (`notElem` out) . liftMaybe . SOAC.isVarishInput
     new_inputs = mapM toNewParamPair =<< filterM isOutput inp'
 
+splitPostLambdaResult :: ScatterSpec VName -> [a] -> ([a], [a], [a])
+splitPostLambdaResult dest as = (is, val, ret)
+  where
+    (is, as') = splitScatterResults dest as
+    (val, ret) = splitAt (length dest) as'
+
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer ::
   Mode ->
@@ -504,6 +510,14 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                 }
         success (fsOutNames ker ++ returned_outvars) $
           SOAC.Scatter w (ivs_c ++ ivs_p) (as_c ++ as_p) lam'
+    ( SOAC.ScanScatter _w_c inp_c lam_c' scan_c dest_c scatter_lam_c,
+      SOAC.ScanScatter _w_p inp_p lam_p' scan_p dest_p scatter_lam_p,
+      Horizontal
+      ) -> do
+        let (is_c, val_c, map_c) = splitPostLambdaResult dest_c $ lambdaReturnType scatter_lam_c
+        success
+          (fsOutNames ker ++ returned_outvars)
+          $ SOAC.ScanScatter w (inp_c ++ inp_p) lam_c' scan_c dest_c scatter_lam_c
     ( SOAC.ScanScatter _ _ _ scan dests lam,
       SOAC.Screma _ _ form,
       Vertical
@@ -514,6 +528,16 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
             let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
             success (fsOutNames ker ++ extra_nms) $
               SOAC.ScanScatter w new_inp res_lam' scan dests lam
+    ( SOAC.Screma _ _inp_c form_c,
+      SOAC.Screma _ inp_p form_p,
+      Vertical
+      )
+        | Just (scans, lam_p') <- isScanomapSOAC form_p,
+          Just lam_c' <- isMapSOAC form_c,
+          all (`notNameIn` unfus_set) outVars -> do
+            let scan = singleScan scans
+            success (fsOutNames ker) $
+              SOAC.ScanScatter w inp_p lam_p' scan [] lam_c'
     ( SOAC.Scatter _len inp_c dests lam_c',
       SOAC.Screma _ inp_p form,
       Vertical
