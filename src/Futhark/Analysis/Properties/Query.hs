@@ -274,7 +274,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                     j <- newNameFromString "j"
                     gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
                     let x_at ident = sym2SoP $ Idx (Var x) (sym2SoP (Var ident))
-                    nextGenProver (PInjGe i j d gs rcd (x_at i :== x_at j))
+                    nextGenProver (InjGe i j d gs rcd (x_at i :== x_at j))
               strat1 `orM` strat2
         _ -> do
           f_y <- getFn y
@@ -284,7 +284,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                 IndexFn (Forall i d) gs -> algebraContext f_y $ do
                   j <- newNameFromString "j"
                   let y_at ident = sym2SoP $ Idx (Var y) (sym2SoP (Var ident))
-                  nextGenProver (PInjGe i j d gs rcd (y_at i :== y_at j))
+                  nextGenProver (InjGe i j d gs rcd (y_at i :== y_at j))
           strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
@@ -293,28 +293,8 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       proveFn (PFiltPartInv (predToFun pf) (predToFun pp) split) f_X
     matchProof (FiltPartInv {}) = error "Not implemented yet"
     matchProof (FiltPart y x pf pps) = do
-      -- FPV2
       f_Y <- getFn y
-      i <- newNameFromString "i"
-      n <- sym2SoP . Hole <$> newNameFromString "n"
-      is_inv_hole <- newNameFromString "is^-1"
-      let pattern_Y =
-            IndexFn
-              { iterator = Forall i $ Iota n,
-                body =
-                  cases
-                    [ ( Bool True,
-                        sym2SoP $ Idx (Var x) (sym2SoP $ Idx (Hole is_inv_hole) (sym2SoP $ Hole i))
-                      )
-                    ]
-              }
-      s <- unify pattern_Y f_Y
-      -- Get is (the inverse of is^-1).
-      let is_inv = justName =<< (M.!? is_inv_hole) . mapping =<< s
-      mis <- join <$> traverse getInvAlias is_inv
-      case mis of
-        Just is -> prove (FiltPartInv is pf pps)
-        Nothing -> pure Unknown
+      nextGenProver (FPV2 f_Y x pf pps)
 
     getFn vn = do
       fs <- lookupIndexFn vn
@@ -332,11 +312,12 @@ proveFn prop f = prove_ False prop f
 
 data PStatement
   = -- Fresh i; fresh j; domain of index function; cases of index function; RCD; guiding equation.
-    PInjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol)) Symbol
-  | PFiltPart VName (Predicate Symbol) (Predicate Symbol, SoP Symbol)
+    InjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol)) Symbol
+  | -- Indexfn of y; x; pf; pps
+    FPV2 IndexFn VName (Predicate Symbol) [(Predicate Symbol, SoP Symbol)]
 
 nextGenProver :: PStatement -> IndexFnM Answer
-nextGenProver (PInjGe i j d ges rcd guide) = rollbackAlgEnv $ do
+nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
   addRelIterator iter_i
   addRelIterator iter_j
@@ -360,7 +341,27 @@ nextGenProver (PInjGe i j d ges rcd guide) = rollbackAlgEnv $ do
                 out_of_range x = x :< a :|| b :< x
             Nothing -> pure Unknown
       oob `orM` (p =>? (sym2SoP (Var i) :== sym2SoP (Var j)))
-nextGenProver (PFiltPart {}) = undefined
+nextGenProver (FPV2 f_Y x pf pps) = do
+  i <- newNameFromString "i"
+  n <- sym2SoP . Hole <$> newNameFromString "n"
+  is_inv_hole <- newNameFromString "is^-1"
+  let pattern_Y =
+        IndexFn
+          { iterator = Forall i $ Iota n,
+            body =
+              cases
+                [ ( Bool True,
+                    sym2SoP $ Idx (Var x) (sym2SoP $ Idx (Hole is_inv_hole) (sym2SoP $ Hole i))
+                  )
+                ]
+          }
+  s <- unify pattern_Y f_Y
+  -- Get is (the inverse of is^-1).
+  let is_inv = justName =<< (M.!? is_inv_hole) . mapping =<< s
+  mis <- join <$> traverse getInvAlias is_inv
+  case mis of
+    Just is -> prove (FiltPartInv is pf pps)
+    Nothing -> pure Unknown
 
 prove_ :: Bool -> Statement -> IndexFn -> IndexFnM Answer
 prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ do
