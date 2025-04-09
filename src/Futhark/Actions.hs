@@ -12,6 +12,8 @@ module Futhark.Actions
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
+    webgpuImpCodeGenAction,
+    webgpuTestKernelsAction,
     metricsAction,
     compileCAction,
     compileCtoWASMAction,
@@ -23,6 +25,7 @@ module Futhark.Actions
     compileMulticoreToWASMAction,
     compilePythonAction,
     compilePyOpenCLAction,
+    compileWebGPUAction,
   )
 where
 
@@ -43,6 +46,7 @@ import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.Analysis.Metrics
 import Futhark.CodeGen.Backends.CCUDA qualified as CCUDA
 import Futhark.CodeGen.Backends.COpenCL qualified as COpenCL
+import Futhark.CodeGen.Backends.CWebGPU qualified as CWebGPU
 import Futhark.CodeGen.Backends.HIP qualified as HIP
 import Futhark.CodeGen.Backends.MulticoreC qualified as MulticoreC
 import Futhark.CodeGen.Backends.MulticoreISPC qualified as MulticoreISPC
@@ -54,6 +58,7 @@ import Futhark.CodeGen.Backends.SequentialWASM qualified as SequentialWASM
 import Futhark.CodeGen.ImpGen.GPU qualified as ImpGenGPU
 import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGenMulticore
 import Futhark.CodeGen.ImpGen.Sequential qualified as ImpGenSequential
+import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGenWebGPU
 import Futhark.Compiler.CLI
 import Futhark.IR
 import Futhark.IR.GPUMem (GPUMem)
@@ -61,6 +66,7 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.Fusion.GraphRep qualified
+import Futhark.Test.WebGPUTest qualified as WebGPUTest
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Futhark.Version (versionString)
 import System.Directory
@@ -187,6 +193,24 @@ multicoreImpCodeGenAction =
     { actionName = "Compile to imperative multicore",
       actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
       actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenMulticore.compileProg
+    }
+
+-- | Convert the program to WebGPU ImpCode and print it to stdout.
+webgpuImpCodeGenAction :: Action GPUMem
+webgpuImpCodeGenAction =
+  Action
+    { actionName = "Compile imperative WebGPU",
+      actionDescription = "Translate program into imperative IL with WebGPU and write it on standard output.",
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenWebGPU.compileProg
+    }
+
+-- | Convert the program to WebGPU ImpCode and generate test runner input.
+webgpuTestKernelsAction :: FilePath -> Action GPUMem
+webgpuTestKernelsAction f =
+  Action
+    { actionName = "Setup test for WebGPU WGSL kernels",
+      actionDescription = "Translate program into imperative IL with WebGPU and write it on standard output.",
+      actionProcedure = liftIO . putStrLn . prettyString <=< WebGPUTest.generateTests f
     }
 
 -- Lines that we prepend (in comments) to generated code.
@@ -511,30 +535,95 @@ compilePyOpenCLAction fcfg mode outpath =
       actionProcedure = pythonCommon PyOpenCL.compileProg fcfg mode outpath
     }
 
+-- | The @futhark webgpu@ action.
+compileWebGPUAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
+compileWebGPUAction fcfg mode tgtpath =
+  Action
+    { actionName = "Compile to WebGPU",
+      actionDescription = "Compile to WebGPU",
+      actionProcedure = helper
+    }
+  where
+    helper prog = do
+      (cprog, jslib, exports) <-
+        handleWarnings fcfg $ CWebGPU.compileProg versionString prog
+      let outpath =
+            if takeExtension tgtpath == "js"
+              then tgtpath
+              else tgtpath `addExtension` "js"
+          cpath = tgtpath `addExtension` "c"
+          jslibpath = tgtpath `addExtension` "wrapper.js"
+          jsserverpath = tgtpath `addExtension` "server.js"
+          jsonpath = tgtpath `addExtension` "json"
+          extra_options =
+            [ "-sUSE_WEBGPU",
+              "-sASYNCIFY",
+              "-sMODULARIZE",
+              "-sWASM_BIGINT",
+              "-sEXPORTED_RUNTIME_METHODS=cwrap,ccall,Asyncify",
+              "--extern-post-js",
+              jslibpath
+            ]
+          export_option =
+            "-sEXPORTED_FUNCTIONS="
+              ++ intercalate "," ['_' : T.unpack e | e <- exports]
+      case mode of
+        ToLibrary -> do
+          let (_header, impl, manifest) = CWebGPU.asLibrary cprog
+          liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jslibpath jslib
+          liftIO $ T.writeFile jsonpath manifest
+          runEMCC
+            cpath
+            outpath
+            ["-O3", "-std=c99"]
+            ["-lm"]
+            (export_option : extra_options)
+        ToExecutable -> do
+          liftIO $ T.writeFile cpath $ cPrependHeader $ CWebGPU.asExecutable cprog
+          liftIO $ T.writeFile jslibpath jslib
+          runEMCC cpath outpath ["-O3", "-std=c99"] ["-lm"] extra_options
+        ToServer -> do
+          let (impl, server) = CWebGPU.asJSServer cprog
+          liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jslibpath jslib
+          liftIO $ T.writeFile jsserverpath server
+          let serverArgs = ["--extern-post-js", jsserverpath]
+          runEMCC
+            cpath
+            outpath
+            ["-O3", "-std=c99"]
+            ["-lm"]
+            (export_option : extra_options ++ serverArgs)
+
 cmdEMCFLAGS :: [String] -> [String]
 cmdEMCFLAGS def = maybe def words $ lookup "EMCFLAGS" unixEnvironment
 
-runEMCC :: String -> String -> FilePath -> [String] -> [String] -> [String] -> Bool -> FutharkM ()
-runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
+wasmFlags :: FilePath -> [String] -> Bool -> [String]
+wasmFlags classpath expfuns lib =
+  ["-lnodefs.js"]
+    ++ ["-s", "--extern-post-js", classpath]
+    ++ ( if lib
+           then ["-s", "EXPORT_NAME=loadWASM"]
+           else []
+       )
+    ++ ["-s", "WASM_BIGINT"]
+    ++ [ "-s",
+         "EXPORTED_FUNCTIONS=["
+           ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
+           ++ "]"
+       ]
+
+runEMCC :: String -> String -> [String] -> [String] -> [String] -> FutharkM ()
+runEMCC cpath outpath cflags_def ldflags extra_flags = do
   ret <-
     liftIO $
       runProgramWithExitCode
         "emcc"
         ( [cpath, "-o", outpath]
-            ++ ["-lnodefs.js"]
-            ++ ["-s", "--extern-post-js", classpath]
-            ++ ( if lib
-                   then ["-s", "EXPORT_NAME=loadWASM"]
-                   else []
-               )
-            ++ ["-s", "WASM_BIGINT"]
+            ++ extra_flags
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
-            ++ [ "-s",
-                 "EXPORTED_FUNCTIONS=["
-                   ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
-                   ++ "]"
-               ]
             -- The default LDFLAGS are always added.
             ++ ldflags
         )
@@ -567,12 +656,22 @@ compileCtoWASMAction fcfg mode outpath =
         ToLibrary -> do
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath SequentialWASM.libraryExports
-          runEMCC cpath mjspath classpath ["-O3", "-msimd128"] ["-lm"] exps True
+          runEMCC
+            cpath
+            mjspath
+            ["-O3", "-msimd128"]
+            ["-lm"]
+            (wasmFlags classpath exps True)
         _ -> do
           -- Non-server executables are not supported.
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath SequentialWASM.runServer
-          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm"] exps False
+          runEMCC
+            cpath
+            outpath
+            ["-O3", "-msimd128"]
+            ["-lm"]
+            (wasmFlags classpath exps False)
     writeLibs cprog jsprog = do
       let (h, imp, _) = SequentialC.asLibrary cprog
       liftIO $ T.writeFile hpath h
@@ -601,12 +700,22 @@ compileMulticoreToWASMAction fcfg mode outpath =
         ToLibrary -> do
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath MulticoreWASM.libraryExports
-          runEMCC cpath mjspath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True
+          runEMCC
+            cpath
+            mjspath
+            ["-O3", "-msimd128"]
+            ["-lm", "-pthread"]
+            (wasmFlags classpath exps True)
         _ -> do
           -- Non-server executables are not supported.
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath MulticoreWASM.runServer
-          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps False
+          runEMCC
+            cpath
+            outpath
+            ["-O3", "-msimd128"]
+            ["-lm", "-pthread"]
+            (wasmFlags classpath exps False)
 
     writeLibs cprog jsprog = do
       let (h, imp, _) = MulticoreC.asLibrary cprog
