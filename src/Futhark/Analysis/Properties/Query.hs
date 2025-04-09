@@ -519,6 +519,13 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) =
         -- fX <- rewrite f_restricted_to_X
         let in_RCD x = a :<= x :&& x :<= b
         answers <- mapM (queryCase (CaseCheck in_RCD) f) [0 .. length (guards f) - 1]
+        -- Check that we can show whether each case is RCD or not.
+        let rcd_sanity_check =
+              allM $
+                zipWith
+                  (\j ans -> pure ans `orM` queryCase (CaseCheck (neg . in_RCD)) f j)
+                  [0 ..]
+                  answers
         let guards' =
               zipWith
                 (\(p, e) ans -> if isYes ans then (p, e) else (p, infinity))
@@ -558,7 +565,7 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) =
 
         printM 1000 $ "f restricted to X:\n" <> prettyIndent 4 fX
         printTrace 1000 "Step (2)" $
-          step_2_2 `andM` step_2_3
+          rcd_sanity_check `andM` step_2_2 `andM` step_2_3
 
   step1 `andM` step2
   where
