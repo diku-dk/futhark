@@ -268,7 +268,6 @@ prove prop = alreadyKnown prop `orM` matchProof prop
               --    by the filtering predicate:
               --      y[i'] = y[j'] ^ pf(i') ^ pf(j') => i' = j'
               --    (This is logically equivalent to x[i] = x[j] => i = j.)
-              -- TODO strat1 duplicates matchProof (FiltPart {}) code?
               let strat1 = prove (Injective x rcd)
               let strat2 = algebraContext f_x $ do
                     j <- newNameFromString "j"
@@ -310,15 +309,16 @@ proveFn (ForallSegments fprop) f@(IndexFn (Forall _ (Cat k _ _)) _) =
   prove_ True (fprop k) f
 proveFn prop f = prove_ False prop f
 
-data PStatement
+data PRule
   = -- Fresh i; fresh j; domain of index function; cases of index function; RCD; guiding equation.
     InjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol)) Symbol
   | -- Indexfn of y; x; pf; pps
     FPV2 IndexFn VName (Predicate Symbol) [(Predicate Symbol, SoP Symbol)]
 
-nextGenProver :: PStatement -> IndexFnM Answer
+nextGenProver :: PRule -> IndexFnM Answer
 nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
+  -- TODO needs to consider also across segments for Cat domain (see PInjective)
   addRelIterator iter_i
   addRelIterator iter_j
   allM [no_dups g | g <- casesToList ges]
@@ -416,7 +416,7 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
                     =>? (e @ i :/= e @ j)
             oob `orM` neq
 
-  let step2 = guards fn `canBeSortedBy` cmp
+  let sorted_guards = sorted cmp (guards fn)
         where
           -- Order guards by querying the solver.
           (p_f, f) `cmp` (p_g, g) = rollbackAlgEnv $ do
@@ -434,34 +434,54 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
                    in case_i_lt_j `andM` case_i_gt_j
             relationToOrder f_rel_g
 
+  let step2 = answerFromBool . isJust <$> sorted_guards -- sorting exists.
+
+  -- TODO this is WRONG.
+  -- HINT Instead:
+  --   1. get the sorted cases from above
+  --   2. show that the "largest" case is smaller than all kp1 cases
+  --      (linear)
   let step3 = case dom of
         Iota {} -> pure Yes
-        Cat k _ _ -> guards fn `canBeSortedBy` cmp
+        Cat k _ _ -> do
+          sorted_guards' <- sorted_guards
+          printM 1337 $ "# SORTED CASES " <> prettyStr sorted_guards'
+          largest_guard <- maximum <$> sorted_guards
+          allM [fix123 g | g <- guards fn]
           where
             kp1_rep = mkRep k $ sym2SoP (Var k) .+. int2SoP 1
             dom' = repDomain kp1_rep dom
             iter_j' = Forall j $ repDomain (mkRep i0 (Var j)) dom'
 
-            -- Order guards by querying the solver.
-            (p_f, f) `cmp` (p_g', g') = rollbackAlgEnv $ do
+            -- -- Order guards by querying the solver.
+            -- (p_f, f) `cmp` (p_g', g') = rollbackAlgEnv $ do
+            --   let (p_g, g) = (rep kp1_rep p_g', rep kp1_rep g')
+            --   let p = (fromJust . justSym $ p_f @ i) :&& (fromJust . justSym $ p_g @ j)
+            --   -- WTS: forall i,j . e_k <= i < e_{k+1}
+            --   --                     ^ e_{k+1} <= j < e_{k+2}
+            --   --                     ^ p_f(i) ^ p_g(j)
+            --   --                       => f(i) `rel` g(j)
+            --   let f_rel_g rel =
+            --         rollbackAlgEnv $ do
+            --           addRelIterator iter_j'
+            --           addRelIterator iter_i
+            --           p =>? (f @ i) `rel` (g @ j)
+            --   relationToOrder f_rel_g
+
+            fix123 (p_f, f) (p_g', g') = rollbackAlgEnv $ do
               let (p_g, g) = (rep kp1_rep p_g', rep kp1_rep g')
               let p = (fromJust . justSym $ p_f @ i) :&& (fromJust . justSym $ p_g @ j)
-              -- WTS: forall i,j . e_k <= i < e_{k+1}
-              --                     ^ e_{k+1} <= j < e_{k+2}
-              --                     ^ p_f(i) ^ p_g(j)
-              --                       => f(i) `rel` g(j)
-              let f_rel_g rel =
-                    rollbackAlgEnv $ do
-                      addRelIterator iter_j'
-                      addRelIterator iter_i
-                      p =>? (f @ i) `rel` (g @ j)
-              relationToOrder f_rel_g
+              asdf
 
   step1 `andM` step2 `andM` step3
   where
     f @ x = rep (mkRep i0 (Var x)) f
 
-    xs `canBeSortedBy` cmp = answerFromBool . isJust <$> sorted cmp xs
+    -- xs `canBeSortedBy` cmp = answerFromBool . isJust <$> sorted cmp xs
+    xs `canBeSortedBy` cmp = do
+      sorted_cases <- sorted cmp xs
+      printM 1337 $ "# SORTED CASES " <> prettyStr sorted_cases
+      pure . answerFromBool . isJust $ sorted_cases
 
     relationToOrder rel = do
       lt <- rel (:<)
@@ -504,7 +524,8 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) =
         -- WTS(2.1): If |X| = |[c,d]| and (y in f(X) => y in [c,d]), then (2) holds.
         -- Proof. Assume that |X| = |[c,d]| and that (y in f(X) => y in [c,d]).
         -- By step (1), f|X is injective, so f maps X to exactly |X| = |[c,d]|
-        -- distinct values in [c,d]. Hence the set must be covered.
+        -- distinct values in [c,d]. Hence the set must be covered and
+        -- Img(f|X) = [c,d].
         --
         -- WTS(2.2): |X| = |[c,d]|.
         -- We can find the cardinality of X by counting how many values
@@ -525,7 +546,7 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) =
         -- fX <- rewrite f_restricted_to_X
         let in_RCD x = a :<= x :&& x :<= b
         answers <- mapM (queryCase (CaseCheck in_RCD) f) [0 .. length (guards f) - 1]
-        -- Check that we can show whether each case is RCD or not.
+        -- Check that we can show whether each case is in RCD or not.
         let rcd_sanity_check =
               allM $
                 zipWith
@@ -587,18 +608,20 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbac
       <> prettyIndent 4 split
       <> "\n  function:\n"
       <> prettyIndent 4 f
-  -- Construct size after filtering.
+  -- n: Size before filtering.
+  -- m: Size after filtering.
   n <- simplify $ domainEnd dom
   j_sum <- newNameFromString "j_sum"
   m <- simplify $ toSumOfSums j_sum (int2SoP 0) n (sym2SoP $ pf j_sum)
-  let mm1 = m .-. int2SoP 1
 
-  -- (1) f restricted to [0, m - 1] is a permutation.
+  -- (1) f restricted to [0, m - 1] is a permutation of [0, m - 1].
+  let img = (int2SoP 0, m .-. int2SoP 1)
   step1 <-
     printTrace 1000 "FiltPartInv Step (1)" $
-      prove_ baggage (PBijectiveRCD (int2SoP 0, mm1) (int2SoP 0, mm1)) f
+      prove_ baggage (PBijectiveRCD img img) f
 
-  -- (2) f maps filtered indices to values that are not in [0, m].
+  -- (2) f maps filtered-away indices to values that are not in [0, m - 1].
+  -- TODO looks like Cosmin removed this query from the paper?
   let step2 = algebraContext f $ do
         addRelIterator (iterator f)
         printTrace 1000 "FiltPartInv Step (2)" $
@@ -606,6 +629,9 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbac
         where
           if_filtered_then_OOB (c, e) = rollbackAlgEnv $ do
             (c =>? pf i) `orM` (c =>? (int2SoP 0 :> e :|| e :>= m))
+
+  -- (3)
+  -- d
 
   -- (3) f is monotonic on the filtered domain.
   -- (0 <= j < i < n  ^  c(i)  ^  c(j))  =>?  e(i) < e(j)
@@ -644,24 +670,67 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbac
               let c_kp1 = rep kp1 c
                   e_kp1 = rep kp1 e
                   pf_kp1 = sop2Symbol . rep kp1 . pf
-              in rollbackAlgEnv $
-                do
-                  -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
-                  sop2Symbol (c @ i) =>? Not (pf i)
-                  `orM` (sop2Symbol (c_kp1 @ j) =>? Not (pf_kp1 j))
-                  `orM` ( (sop2Symbol (c_kp1 @ j) :&& sop2Symbol (c @ i))
-                            =>? (e @ i :< e_kp1 @ j)
-                        )
-  let step5and6 = do
-        gs <- simplify $ cases (map (second sym2SoP) $ gsT <> gsF)
-        let gs' = cases [(c, e) | (c, e) <- casesToList gs, c /= Bool False]
-        printTrace 1000 "FiltPartInv Steps (5--6)" $
-          askQ Truth (IndexFn (iterator f) gs')
-        where
-          gsT = [(pp i :&& c, Not (pf i) :|| e :< split) | (c, e) <- guards f]
-          gsF = [(Not (pp i) :&& c, Not (pf i) :|| e :>= split) | (c, e) <- guards f]
+               in rollbackAlgEnv $
+                    do
+                      -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
+                      sop2Symbol (c @ i) =>? Not (pf i)
+                      `orM` (sop2Symbol (c_kp1 @ j) =>? Not (pf_kp1 j))
+                      `orM` ( (sop2Symbol (c_kp1 @ j) :&& sop2Symbol (c @ i))
+                                =>? (e @ i :< e_kp1 @ j)
+                            )
 
-  pure step1 `andM` step2 `andM` step3and4 `andM` step3_cat `andM` step5and6
+  -- TODO not sure using the split point is the correct strategy?
+  -- kinda messy because we have to infer it by summing over the
+  -- partitioning predicate; gets messier with multiple predicates and segmented domains.
+  -- HINT I think, a better strategy is to do like Fig 5 and check SOMETHING LIKE:
+  -- forall i,j . i < j ^ pf i ^ pf j
+  --    c(i) =>?  not (pf i)
+  --    OR
+  --    c(j) =>?  not (pf j)
+  --    OR
+  --    pp i  ^ not (pp j)  =>?  e(i) < e(j)
+  --    OR
+  --    not (pp i)  ^ pp j  =>?  e(i) > e(j)
+  -- in which case the test may also cover step (3) above.
+  -- let step5and6 = do
+  --       gs <- simplify $ cases (map (second sym2SoP) $ gsT <> gsF)
+  --       let gs' = cases [(c, e) | (c, e) <- casesToList gs, c /= Bool False]
+  --       printTrace 1000 "FiltPartInv Steps (5--6)" $
+  --         askQ Truth (IndexFn (iterator f) gs')
+  --       where
+  --         gsT = [(pp i :&& c, Not (pf i) :|| e :< split) | (c, e) <- guards f]
+  --         gsF = [(Not (pp i) :&& c, Not (pf i) :|| e :>= split) | (c, e) <- guards f]
+
+  let step5and6_revised = algebraContext f $ do
+        addRelIterator (iterator f)
+        j +< i
+        printTrace 1000 "FiltPartInv Steps (5--6)" $
+          allM [mono_strict_inc g | g <- guards f]
+        where
+          -- TODO asdf mangler der cases? 2x queries men fire kombinationer?
+
+          mono_strict_inc (c, e) =
+            rollbackAlgEnv $
+              do
+                -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
+                sop2Symbol (c @ i) =>? neg (pf i)
+                `orM` (sop2Symbol (c @ j) =>? neg (pf j))
+                `orM` ( ( sop2Symbol (c @ j)
+                            :&& sop2Symbol (c @ i)
+                            :&& pp i
+                            :&& neg (pp j)
+                        )
+                          =>? (e @ j :< e @ i)
+                      )
+                `orM` ( ( sop2Symbol (c @ j)
+                            :&& sop2Symbol (c @ i)
+                            :&& neg (pp i)
+                            :&& pp j
+                        )
+                          =>? (e @ j :> e @ i)
+                      )
+
+  pure step1 `andM` step2 `andM` step3and4 `andM` step3_cat `andM` step5and6_revised
   where
     fn @ idx = rep (mkRep i (Var idx)) fn
 prove_ baggage (PermutationOfRange start end) f =
