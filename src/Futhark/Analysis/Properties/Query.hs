@@ -593,11 +593,9 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbac
         where
           if_filtered_then_OOB (c, e) = rollbackAlgEnv $ do
             (c =>? pf i) `orM` (c =>? (int2SoP 0 :> e :|| e :>= m))
-  -- let step2 = askQ (CaseCheck if_filtered_then_OOB) f
-  --       where
-  --         if_filtered_then_OOB e =
-  --           pf i :|| (int2SoP 0 :> e :|| e :>= m)
 
+  -- (3) f is monotonic on the filtered domain.
+  -- (0 <= j < i < n  ^  c(i)  ^  c(j))  =>?  e(i) < e(j)
   j <- newNameFromString "j"
   let step3and4 = algebraContext f $ do
         addRelIterator (iterator f)
@@ -611,8 +609,36 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbac
                 -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
                 sop2Symbol (c @ i) =>? Not (pf i)
                 `orM` (sop2Symbol (c @ j) =>? Not (pf j))
-                `orM` ((sop2Symbol (c @ j) :&& sop2Symbol (c @ i)) =>? (e @ j :< e @ i))
+                `orM` ( (sop2Symbol (c @ j) :&& sop2Symbol (c @ i))
+                          =>? (e @ j :< e @ i)
+                      )
 
+  -- Continued (3) verify monotonicity across segments.
+  -- TODO deduplicate with intrasegment case.
+  let step3_cat = case dom of
+        Iota {} -> pure Yes
+        Cat k _ _ -> algebraContext f $ do
+          addRelIterator (iterator f)
+          addRelIterator iter_j
+          printTrace 1000 "FiltPartInv Steps (3--4) across segments" $
+            allM [mono_strict_inc g | g <- guards f]
+          where
+            kp1 = mkRep k $ sym2SoP (Var k) .+. int2SoP 1
+            dom_kp1 = repDomain kp1 dom
+            iter_j = Forall j $ repDomain (mkRep i (Var j)) dom_kp1
+
+            mono_strict_inc (c, e) =
+              let c_kp1 = rep kp1 c
+                  e_kp1 = rep kp1 e
+                  pf_kp1 = sop2Symbol . rep kp1 . pf
+              in rollbackAlgEnv $
+                do
+                  -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
+                  sop2Symbol (c @ i) =>? Not (pf i)
+                  `orM` (sop2Symbol (c_kp1 @ j) =>? Not (pf_kp1 j))
+                  `orM` ( (sop2Symbol (c_kp1 @ j) :&& sop2Symbol (c @ i))
+                            =>? (e @ i :< e_kp1 @ j)
+                        )
   let step5and6 = do
         gs <- simplify $ cases (map (second sym2SoP) $ gsT <> gsF)
         let gs' = cases [(c, e) | (c, e) <- casesToList gs, c /= Bool False]
@@ -622,7 +648,7 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbac
           gsT = [(pp i :&& c, Not (pf i) :|| e :< split) | (c, e) <- guards f]
           gsF = [(Not (pp i) :&& c, Not (pf i) :|| e :>= split) | (c, e) <- guards f]
 
-  pure step1 `andM` step2 `andM` step3and4 `andM` step5and6
+  pure step1 `andM` step2 `andM` step3and4 `andM` step3_cat `andM` step5and6
   where
     fn @ idx = rep (mkRep i (Var idx)) fn
 prove_ baggage (PermutationOfRange start end) f =
