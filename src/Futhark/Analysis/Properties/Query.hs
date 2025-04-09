@@ -145,7 +145,7 @@ check (a :< b) = a $< b
 check (a :<= b) = a $<= b
 check (Prop prop) = do
   ans <- prove prop
-  when (isYes ans) . printM 5 $ "Verifying "  <> prettyStr prop <> "... " <> greenString "OK"
+  when (isYes ans) . printM 5 $ "Verifying " <> prettyStr prop <> "... " <> greenString "OK"
   failOnUnknown ans
   where
     failOnUnknown Unknown = do
@@ -200,12 +200,12 @@ prove prop = alreadyKnown prop `orM` matchProof prop
       case res of
         Just (Rng y' rng')
           | y' == y -> do
-            -- Check equivalent rngs.
-            -- TODO could check that rng is a subset of rng'.
-            s <- unify wts =<< fromAlgebra (Rng y rng')
-            if isJust (s :: Maybe (Substitution Symbol))
-              then pure Yes
-              else pure Unknown
+              -- Check equivalent rngs.
+              -- TODO could check that rng is a subset of rng'.
+              s <- unify wts =<< fromAlgebra (Rng y rng')
+              if isJust (s :: Maybe (Substitution Symbol))
+                then pure Yes
+                else pure Unknown
         _ -> pure Unknown
     alreadyKnown wts@(Injective y _) = do
       res <- askInjectiveRCD (Algebra.Var y)
@@ -215,12 +215,12 @@ prove prop = alreadyKnown prop `orM` matchProof prop
             Nothing <- rcd' -> do
               pure Yes
           | y' == y -> do
-            -- Check equivalent RCDs.
-            -- TODO could check that rcd is a subset of rcd'.
-            s <- unify wts =<< fromAlgebra (Injective y rcd')
-            if isJust (s :: Maybe (Substitution Symbol))
-              then pure Yes
-              else pure Unknown
+              -- Check equivalent RCDs.
+              -- TODO could check that rcd is a subset of rcd'.
+              s <- unify wts =<< fromAlgebra (Injective y rcd')
+              if isJust (s :: Maybe (Substitution Symbol))
+                then pure Yes
+                else pure Unknown
         _ -> pure Unknown
     alreadyKnown wts@(FiltPartInv y _ _) = do
       res <- askFiltPartInv (Algebra.Var y)
@@ -235,15 +235,17 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     alreadyKnown wts@(FiltPart y x _ _) = do
       res <- askFiltPart (Algebra.Var y)
       case res of
-        Just (FiltPart y' x' pf' pps') | y' == y, x == x' -> do
-          -- If the predicates and split points are equivalent, we are done.
-          s <- unify wts =<< fromAlgebra (FiltPart y' x' pf' pps')
-          if isJust (s :: Maybe (Substitution Symbol))
-            then pure Yes
-            else pure Unknown
+        Just (FiltPart y' x' pf' pps')
+          | y' == y,
+            x == x' -> do
+              -- If the predicates and split points are equivalent, we are done.
+              s <- unify wts =<< fromAlgebra (FiltPart y' x' pf' pps')
+              if isJust (s :: Maybe (Substitution Symbol))
+                then pure Yes
+                else pure Unknown
         _ -> pure Unknown
     alreadyKnown _ = pure Unknown
-  
+
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
     matchProof Disjoint {} = error "prove called on Disjoint property (nothing to prove)"
     matchProof Monotonic {} = error "Not implemented yet"
@@ -351,11 +353,11 @@ nextGenProver (PInjGe i j d ges rcd guide) = rollbackAlgEnv $ do
       printM 10 $ "     --> " <> prettyStr p
 
       let oob = case rcd of
-            Just (a,b) ->
+            Just (a, b) ->
               (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
                 =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
               where
-                  out_of_range x = x :< a :|| b :< x
+                out_of_range x = x :< a :|| b :< x
             Nothing -> pure Unknown
       oob `orM` (p =>? (sym2SoP (Var i) :== sym2SoP (Var j)))
 nextGenProver (PFiltPart {}) = undefined
