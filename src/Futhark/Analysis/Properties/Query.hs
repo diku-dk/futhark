@@ -436,42 +436,31 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
 
   let step2 = answerFromBool . isJust <$> sorted_guards -- sorting exists.
 
-  -- TODO this is WRONG.
-  -- HINT Instead:
-  --   1. get the sorted cases from above
-  --   2. show that the "largest" case is smaller than all kp1 cases
-  --      (linear)
+  k' <- newNameFromString "k'"
   let step3 = case dom of
         Iota {} -> pure Yes
-        Cat k _ _ -> do
-          sorted_guards' <- sorted_guards
-          printM 1337 $ "# SORTED CASES " <> prettyStr sorted_guards'
-          largest_guard <- maximum <$> sorted_guards
-          allM [fix123 g | g <- guards fn]
+        Cat k m b -> do
+          gs <- sorted_guards
+          case gs of
+            Just gs' -> rollbackAlgEnv $ do
+              let (p_min, e_min) = head gs'
+              let (p_max, e_max) = last gs'
+              addRelIterator iter_i
+              addRelIterator iter_j'
+              k' +< k
+              let k'_always_smaller =
+                    (sop2Symbol (rep' $ p_max @ j) :&& sop2Symbol (p_min @ i))
+                      =>? (rep' e_max @ j :< e_min @ i)
+              let k'_always_larger =
+                    (sop2Symbol (rep' $ p_min @ j) :&& sop2Symbol (p_max @ i))
+                      =>? (rep' e_min @ j :> e_max @ i)
+              k'_always_smaller `orM` k'_always_larger
+            Nothing ->
+              pure Unknown
           where
-            kp1_rep = mkRep k $ sym2SoP (Var k) .+. int2SoP 1
-            dom' = repDomain kp1_rep dom
+            rep' = rep (mkRep k $ sym2SoP (Var k'))
+            dom' = Cat k' m (rep' b) -- wrong kan ikke replace k med repDomain!
             iter_j' = Forall j $ repDomain (mkRep i0 (Var j)) dom'
-
-            -- -- Order guards by querying the solver.
-            -- (p_f, f) `cmp` (p_g', g') = rollbackAlgEnv $ do
-            --   let (p_g, g) = (rep kp1_rep p_g', rep kp1_rep g')
-            --   let p = (fromJust . justSym $ p_f @ i) :&& (fromJust . justSym $ p_g @ j)
-            --   -- WTS: forall i,j . e_k <= i < e_{k+1}
-            --   --                     ^ e_{k+1} <= j < e_{k+2}
-            --   --                     ^ p_f(i) ^ p_g(j)
-            --   --                       => f(i) `rel` g(j)
-            --   let f_rel_g rel =
-            --         rollbackAlgEnv $ do
-            --           addRelIterator iter_j'
-            --           addRelIterator iter_i
-            --           p =>? (f @ i) `rel` (g @ j)
-            --   relationToOrder f_rel_g
-
-            fix123 (p_f, f) (p_g', g') = rollbackAlgEnv $ do
-              let (p_g, g) = (rep kp1_rep p_g', rep kp1_rep g')
-              let p = (fromJust . justSym $ p_f @ i) :&& (fromJust . justSym $ p_g @ j)
-              asdf
 
   step1 `andM` step2 `andM` step3
   where
