@@ -125,7 +125,7 @@ dnfQuery p query =
 p =>? q | p == q = pure Yes
 p =>? q = do
   let ans = dnfQuery p (check q)
-  printTrace 1337 (prettyIndent 2 p <> " =>? " <> prettyStr q) $
+  printTrace 1337 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q) $
     ans `orM` isFalse p
 
 infixl 8 =>?
@@ -459,18 +459,12 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
               pure Unknown
           where
             rep' = rep (mkRep k $ sym2SoP (Var k'))
-            dom' = Cat k' m (rep' b) -- wrong kan ikke replace k med repDomain!
+            dom' = Cat k' m (rep' b)
             iter_j' = Forall j $ repDomain (mkRep i0 (Var j)) dom'
 
   step1 `andM` step2 `andM` step3
   where
     f @ x = rep (mkRep i0 (Var x)) f
-
-    -- xs `canBeSortedBy` cmp = answerFromBool . isJust <$> sorted cmp xs
-    xs `canBeSortedBy` cmp = do
-      sorted_cases <- sorted cmp xs
-      printM 1337 $ "# SORTED CASES " <> prettyStr sorted_cases
-      pure . answerFromBool . isJust $ sorted_cases
 
     relationToOrder rel = do
       lt <- rel (:<)
@@ -732,7 +726,7 @@ prove_ _ _ _ = error "Not implemented yet."
 
 -- Strict sorting.
 sorted :: (t -> t -> IndexFnM Order) -> [t] -> IndexFnM (Maybe [t])
-sorted cmp wat = runMaybeT $ quicksort wat
+sorted cmp = runMaybeT . quicksort
   where
     quicksort [] = pure []
     quicksort (p : xs) = do
