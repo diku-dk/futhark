@@ -25,6 +25,7 @@
 -- still needed in monomorphisation for now.
 module Futhark.Internalise.FullNormalise (transformProg) where
 
+import Control.Monad (zipWithM)
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
@@ -173,8 +174,10 @@ getOrdering _ e@Var {} = pure e
 getOrdering final (Parens e _) = getOrdering final e
 getOrdering final (QualParens _ e _) = getOrdering final e
 getOrdering _ (TupLit es loc) = do
-  es' <- mapM (getOrdering False) es
+  es' <- zipWithM f [0 :: Int ..] es
   pure $ TupLit es' loc
+  where
+    f i = naming ("tup" <> show i) . getOrdering False
 getOrdering _ (RecordLit fs loc) = do
   fs' <- mapM f fs
   pure $ RecordLit fs' loc
@@ -200,10 +203,10 @@ getOrdering _ (Project n e ty loc) = do
   e' <- getOrdering False e
   pure $ Project n e' ty loc
 getOrdering _ (Negate e loc) = do
-  e' <- getOrdering False e
+  e' <- naming "neg_arg" $ getOrdering False e
   pure $ Negate e' loc
 getOrdering _ (Not e loc) = do
-  e' <- getOrdering False e
+  e' <- naming "not_arg" $ getOrdering False e
   pure $ Not e' loc
 getOrdering final (Constr n es ty loc) = do
   es' <- mapM (getOrdering False) es
@@ -339,19 +342,19 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
     isAnd = baseName (qualLeaf op) == "&&"
 getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
   e' <- getOrdering False e
-  slice' <- astMap mapper slice
+  slice' <- naming "idx" $ astMap mapper slice
   addBind $ PatBind [] (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc)
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
 getOrdering final (AppExp (Index e slice loc) resT) = do
   e' <- getOrdering False e
-  slice' <- astMap mapper slice
+  slice' <- naming "idx" $ astMap mapper slice
   nameExp final $ AppExp (Index e' slice' loc) resT
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
 getOrdering final (AppExp (Match expr cs loc) resT) = do
-  expr' <- getOrdering False expr
+  expr' <- naming "match_on" $ getOrdering False expr
   cs' <- mapM f cs
   nameExp final $ AppExp (Match expr' cs' loc) resT
   where
