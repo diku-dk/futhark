@@ -1,10 +1,15 @@
--- | This full normalisation module converts a well-typed, polymorphic,
--- module-free Futhark program into an equivalent with only simple expresssions.
--- Notably, all non-trivial expression are converted into a list of
--- let-bindings to make them simpler, with no nested apply, nested lets...
+-- | This full normalisation module converts a well-typed,
+-- polymorphic, module-free Futhark program into an equivalent with
+-- only simple subexpresssions. Notably, all non-trivial expression
+-- are converted into a list of let-bindings to make them simpler,
+-- with no nested applications, nested lets, etc. The result is
+-- similar to Administrative Normal Form.
+--
 -- This module only performs syntactic operations.
 --
 -- Also, it performs various kinds of desugaring:
+--
+-- * Removes all parentheses.
 --
 -- * Turns operator sections into explicit lambdas.
 --
@@ -31,12 +36,14 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
--- Modifier to apply on binding, this is used to propagate attributes and move assertions
+-- Modifier to apply on binding, this is used to propagate attributes
+-- and move assertions
 data BindModifier
   = Ass Exp (Info T.Text) SrcLoc
   | Att (AttrInfo VName)
 
--- Apply a list of modifiers, removing the assertions as it is not needed to check them multiple times
+-- Apply a list of modifiers, removing the assertions as it is not
+-- needed to check them multiple times
 applyModifiers :: Exp -> [BindModifier] -> (Exp, [BindModifier])
 applyModifiers =
   foldr f . (,[])
@@ -53,15 +60,18 @@ data Binding
 
 type NormState = (([Binding], [BindModifier]), VNameSource)
 
--- | Main monad of this module, the state as 3 parts:
+-- | Main monad of this module, the state has 3 parts:
+--
 -- * the VNameSource to produce new names
+--
 -- * the [Binding] is the accumulator for the result
 --   It behave a bit like a writer
--- * the [BindModifier] is the current list of modifiers to apply to the introduced bindings
+--
+-- * the [BindModifier] is the current list of modifiers to apply to
+--   the introduced bindings
+--
 --   It behave like a reader for attributes modifier, and as a state for assertion,
 --   they have to be in the same list to conserve their order
--- Direct interaction with the inside state should be done with caution, that's why their
--- no instance of `MonadState`.
 newtype OrderingM a = OrderingM (StateT NormState (Reader String) a)
   deriving
     (Functor, Applicative, Monad, MonadReader String, MonadState NormState)
@@ -100,10 +110,11 @@ runOrdering (OrderingM m) =
 naming :: String -> OrderingM a -> OrderingM a
 naming s = local (const s)
 
--- | From now, we say an expression is "final" if it's going to be stored in a let-bind
--- or is at the end of the body e.g. after all lets
+-- From now, we say an expression is "final" if it's going to be
+-- stored in a let-bind or is at the end of the body e.g. after all
+-- lets
 
--- Replace a non-final expression by a let-binded variable
+-- | Replace a non-final expression by a let-bound variable
 nameExp :: Bool -> Exp -> OrderingM Exp
 nameExp True e = pure e
 nameExp False e = do
@@ -118,6 +129,7 @@ nameExp False e = do
 -- expression bound to this pattern.
 patRepName :: Pat t -> String
 patRepName (PatAscription p _ _) = patRepName p
+patRepName (PatParens p _) = patRepName p
 patRepName (Id v _ _) = baseString v
 patRepName _ = "tmp"
 
@@ -156,7 +168,7 @@ getOrdering _ e@Literal {} = pure e
 getOrdering _ e@IntLit {} = pure e
 getOrdering _ e@FloatLit {} = pure e
 getOrdering _ e@StringLit {} = pure e
-getOrdering _ e@Hole {} = pure e -- can we still have some ?
+getOrdering _ e@Hole {} = pure e
 getOrdering _ e@Var {} = pure e
 getOrdering final (Parens e _) = getOrdering final e
 getOrdering final (QualParens _ e _) = getOrdering final e
