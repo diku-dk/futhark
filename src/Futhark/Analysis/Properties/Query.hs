@@ -21,7 +21,7 @@ import Control.Monad (forM, join, when)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Bifunctor (second)
-import Data.List (partition)
+import Data.List (partition, tails)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
@@ -124,9 +124,13 @@ dnfQuery p query =
 (=>?) :: Symbol -> Symbol -> IndexFnM Answer
 p =>? q | p == q = pure Yes
 p =>? q = do
-  let ans = dnfQuery p (check q)
   printTrace 1337 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q) $
-    ans `orM` isFalse p
+    dnfQuery p (check q) `orM` antecedentIsFalse
+  where
+    antecedentIsFalse = do
+      ans <- isFalse =<< simplify p
+      when (isYes ans) $ printM 1337 "    (^antecedent falsified)"
+      pure ans
 
 infixl 8 =>?
 
@@ -252,6 +256,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
     matchProof (Rng x (a, b)) =
       askQ (CaseCheck (\e -> a :<= e :&& e :< b)) =<< getFn x
     matchProof (Injective y rcd) = do
+      -- InjV2
       indexfns <- getIndexFns
       fp <- traverse fromAlgebra =<< askFiltPart (Algebra.Var y)
       case fp of
@@ -310,8 +315,10 @@ proveFn (ForallSegments fprop) f@(IndexFn (Forall _ (Cat k _ _)) _) =
 proveFn prop f = prove_ False prop f
 
 data PRule
-  = -- Fresh i; fresh j; domain of index function; cases of index function; RCD; guiding equation.
+  = -- i of index function; fresh j; domain of index function; cases of index function; RCD; guiding equation.
     InjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol)) Symbol
+  | -- Relation; i of index function; fresh j; domain of index function; cases of index function.
+    MonGe (SoP Symbol -> SoP Symbol -> Symbol) VName VName Domain (Cases Symbol (SoP Symbol))
   | -- Indexfn of y; x; pf; pps
     FPV2 IndexFn VName (Predicate Symbol) [(Predicate Symbol, SoP Symbol)]
 
@@ -319,20 +326,16 @@ nextGenProver :: PRule -> IndexFnM Answer
 nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
   -- TODO needs to consider also across segments for Cat domain (see PInjective)
-  addRelIterator iter_i
-  addRelIterator iter_j
+  addRelIterator (Forall i d)
+  addRelIterator (Forall j d)
   allM [no_dups g | g <- casesToList ges]
   where
     e @ arg = rep (mkRep i (Var arg)) e
-
-    iter_i = Forall i d
-    iter_j = Forall j d
 
     no_dups (c, e) = rollbackAlgEnv $ do
       -- PROOF of e(i) = e(j) => i = j.
       p <- simplify =<< eqSolver guide (sop2Symbol (c @ i) :&& sop2Symbol (c @ j) :&& (e @ i) :== (e @ j))
       printM 10 $ "     --> " <> prettyStr p
-
       let oob = case rcd of
             Just (a, b) ->
               (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
@@ -341,6 +344,43 @@ nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
                 out_of_range x = x :< a :|| b :< x
             Nothing -> pure Unknown
       oob `orM` (p =>? (sym2SoP (Var i) :== sym2SoP (Var j)))
+nextGenProver (MonGe rel i j d ges') = do
+  -- WTS: forall ((c1,e1), (c2,e2)) in ges x ges .
+  --        i < j ^ c1(i) ^ c2(j) => e1(i) `rel` e2(j).
+  let intersegment = rollbackAlgEnv $ do
+        addRelIterator (Forall j d)
+        i +< j
+        allM [g `cmp` g' | g : gs <- tails ges, g' <- g : gs]
+        where
+          (c1, e1) `cmp` (c2, e2) =
+            (sop2Symbol (c1 @ i) :&& sop2Symbol (c2 @ j))
+              =>? ((e1 @ i) `rel` (e2 @ j))
+
+  -- WTS: the same across segments.
+  -- TODO this is not successful on part2indicesL.
+  k' <- newNameFromString "k'"
+  let intrasegment =
+        case d of
+          Iota {} -> pure Yes
+          Cat k m b -> rollbackAlgEnv $ do
+            addRelIterator (Forall i d)
+            addRelIterator (Forall j d')
+            k +< k'
+            addRelSymbol (sym2SoP (Var i) :< sym2SoP (Var j))
+            allM [g `cmp` g' | g : gs <- tails ges, g' <- g : gs]
+            where
+              rep' = rep (mkRep k $ sym2SoP (Var k'))
+              d' = Cat k' m (rep' b)
+
+              (c1, e1) `cmp` (c2, e2) =
+                (sop2Symbol (c1 @ i) :&& sop2Symbol (rep' $ c2 @ j))
+                  =>? (e1 @ i `rel` (rep' e2 @ j))
+
+  intersegment `andM` intrasegment
+  where
+    e @ arg = rep (mkRep i (Var arg)) e
+
+    ges = casesToList ges'
 nextGenProver (FPV2 f_Y x pf pps) = do
   i <- newNameFromString "i"
   n <- sym2SoP . Hole <$> newNameFromString "n"
@@ -380,11 +420,9 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
   --
   -- WTS(2): There are no duplicate values in [a,b] across cases.
   --  It is sufficient to show that the case values can be sorted
-  --  in a strictly increasing order. That is, given
-  --    i /= j in [0,...,n-1]
-  --  we want to show:
-  --    forall (c_1 => e_1) /= (c_2 => e_2) .
-  --      c_1(i) ^ c_2(j) ==> f(i) < g(j) OR f(i) > g(j).
+  --  in a strict order:
+  --    forall  i /= j in [0,n)  ^  (c_1 => e_1) /= (c_2 => e_2) in f's cases .
+  --      c_1(i) ^ c_2(j) ==> (f(i) < g(j)  v  f(i) > g(j)).
   --
   --  We define a comparison operator that returns the appropriate
   --  relation above, if it exists, and use a sorting algorithm
@@ -392,9 +430,9 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
   --  that matters is that this sorting exists.
   --
   -- WTS(3): If fn is segmented, there are no duplicates across segments.
-  --   Shown similarly to (2), by choosing i in [e_k, ..., e_{k+1}]
-  --   and j in [e_{k+1},...,e_{k+2}].
-  --
+  --   We use the sorting from (2) to check that forall k < k',
+  --   cases with k are either all strictly smaller or all strictly greater
+  --   than cases with k'.
 
   let step1 = allM [no_dups g | g <- guards fn]
         where
@@ -435,7 +473,6 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
             relationToOrder f_rel_g
 
   let step2 = answerFromBool . isJust <$> sorted_guards -- sorting exists.
-
   k' <- newNameFromString "k'"
   let step3 = case dom of
         Iota {} -> pure Yes
@@ -450,10 +487,10 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
               k' +< k
               let k'_always_smaller =
                     (sop2Symbol (rep' $ p_max @ j) :&& sop2Symbol (p_min @ i))
-                      =>? (rep' e_max @ j :< e_min @ i)
+                      =>? ((rep' e_max @ j) :< e_min @ i)
               let k'_always_larger =
                     (sop2Symbol (rep' $ p_min @ j) :&& sop2Symbol (p_max @ i))
-                      =>? (rep' e_min @ j :> e_max @ i)
+                      =>? ((rep' e_min @ j) :> e_max @ i)
               k'_always_smaller `orM` k'_always_larger
             Nothing ->
               pure Unknown
@@ -580,7 +617,7 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) =
   step1 `andM` step2
   where
     e @ x = rep (mkRep i (Var x)) e
-prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbackAlgEnv $ do
+prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = algebraContext f $ do
   printM 1000 $
     title "Proving FiltPartInv\n"
       <> "  filter:\n"
@@ -599,68 +636,53 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbac
 
   -- (1) f restricted to [0, m - 1] is a permutation of [0, m - 1].
   let img = (int2SoP 0, m .-. int2SoP 1)
-  step1 <-
-    printTrace 1000 "FiltPartInv Step (1)" $
-      prove_ baggage (PBijectiveRCD img img) f
+  step1 <- prove_ baggage (PBijectiveRCD img img) f
 
   -- (2) f maps filtered-away indices to values that are not in [0, m - 1].
   -- TODO looks like Cosmin removed this query from the paper?
-  let step2 = algebraContext f $ do
+  -- (I guess (1) kinda implies this together with |Img| = sum over pf??
+  -- maybe I should replace this check by something like this?
+  -- Summing over pf seems more complex though?)
+  let step2 = rollbackAlgEnv $ do
         addRelIterator (iterator f)
-        printTrace 1000 "FiltPartInv Step (2)" $
-          allM [if_filtered_then_OOB g | g <- guards f]
+        allM [if_filtered_then_OOB g | g <- guards f]
         where
           if_filtered_then_OOB (c, e) = rollbackAlgEnv $ do
             (c =>? pf i) `orM` (c =>? (int2SoP 0 :> e :|| e :>= m))
 
-  -- (3)
-  -- d
-
-  -- (3) f is monotonic on the filtered domain.
-  -- (0 <= j < i < n  ^  c(i)  ^  c(j))  =>?  e(i) < e(j)
+  -- (3) the filtering/partitioning is stable.
+  --   (0 <= j < i < n  ^  c(i)  ^  c(j)  ^  pf(i)  ^ pf(j))
+  --     =>?  e(i) < e(j)
   j <- newNameFromString "j"
-  let step3and4 = algebraContext f $ do
-        addRelIterator (iterator f)
-        j +< i
-        printTrace 1000 "FiltPartInv Steps (3--4)" $
-          allM [mono_strict_inc g | g <- guards f]
+  let filtered_guards = [(c :&& pf i, e) | (c, e) <- guards f]
+  -- let step3 = nextGenProver (MonGe (:<) i j dom (cases filtered_guards))
+  -- ^
+  -- TODO MonGe fails to be shown for part2indicesL in one of
+  -- the queries that check strict monotonicity across segments.
+  -- (TODO extract failing query).
+  -- As a temporary workaround, we show the following equivalent things.
+  -- The values in each segment are
+  -- 1. strictly monotonically increasing, and
+  -- 2. within segment bounds.
+  -- Step (1) implies that all values are unique and the segment bounds
+  -- are monotonically increasing, hence we get that the values are in fact
+  -- monotonically increasing across segments.
+  let step3_1 = rollbackAlgEnv $ do
+        addRelIterator (Forall j dom)
+        i +< j
+        allM [g `cmp` g' | g : gs <- tails filtered_guards, g' <- g : gs]
         where
-          mono_strict_inc (c, e) =
-            rollbackAlgEnv $
-              do
-                -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
-                sop2Symbol (c @ i) =>? Not (pf i)
-                `orM` (sop2Symbol (c @ j) =>? Not (pf j))
-                `orM` ( (sop2Symbol (c @ j) :&& sop2Symbol (c @ i))
-                          =>? (e @ j :< e @ i)
-                      )
-
-  -- Continued (3) verify monotonicity across segments.
-  -- TODO deduplicate with intrasegment case.
-  let step3_cat = case dom of
+          (c1, e1) `cmp` (c2, e2) =
+            (sop2Symbol (c1 @ i) :&& sop2Symbol (c2 @ j))
+              =>? ((e1 @ i) :< (e2 @ j))
+  let step3_2 = case dom of
         Iota {} -> pure Yes
-        Cat k _ _ -> algebraContext f $ do
+        Cat _ _ b -> rollbackAlgEnv $ do
+          seg_end <- simplify $ intervalEnd dom
           addRelIterator (iterator f)
-          addRelIterator iter_j
-          printTrace 1000 "FiltPartInv Steps (3--4) across segments" $
-            allM [mono_strict_inc g | g <- guards f]
-          where
-            kp1 = mkRep k $ sym2SoP (Var k) .+. int2SoP 1
-            dom_kp1 = repDomain kp1 dom
-            iter_j = Forall j $ repDomain (mkRep i (Var j)) dom_kp1
+          allM [c =>? (b :<= e :&& e :<= seg_end) | (c, e) <- filtered_guards]
+  let step3 = step3_1 `andM` step3_2
 
-            mono_strict_inc (c, e) =
-              let c_kp1 = rep kp1 c
-                  e_kp1 = rep kp1 e
-                  pf_kp1 = sop2Symbol . rep kp1 . pf
-               in rollbackAlgEnv $
-                    do
-                      -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
-                      sop2Symbol (c @ i) =>? Not (pf i)
-                      `orM` (sop2Symbol (c_kp1 @ j) =>? Not (pf_kp1 j))
-                      `orM` ( (sop2Symbol (c_kp1 @ j) :&& sop2Symbol (c @ i))
-                                =>? (e @ i :< e_kp1 @ j)
-                            )
 
   -- TODO not sure using the split point is the correct strategy?
   -- kinda messy because we have to infer it by summing over the
@@ -713,7 +735,7 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = rollbac
                           =>? (e @ j :> e @ i)
                       )
 
-  pure step1 `andM` step2 `andM` step3and4 `andM` step3_cat `andM` step5and6_revised
+  pure step1 `andM` step2 `andM` step3 `andM` step5and6_revised
   where
     fn @ idx = rep (mkRep i (Var idx)) fn
 prove_ baggage (PermutationOfRange start end) f =
