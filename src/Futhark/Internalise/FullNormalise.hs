@@ -28,7 +28,6 @@ module Futhark.Internalise.FullNormalise (transformProg) where
 import Control.Monad (zipWithM)
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.Bifunctor
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Text qualified as T
@@ -59,7 +58,11 @@ data Binding
   = PatBind [SizeBinder VName] (Pat StructType) Exp
   | FunBind VName ([TypeParam], [Pat ParamType], Maybe (TypeExp Exp VName), Info ResRetType, Exp)
 
-type NormState = (([Binding], [BindModifier]), VNameSource)
+data NormState = NormState
+  { stateBindings :: [Binding],
+    stateMods :: [BindModifier],
+    stateNameSource :: VNameSource
+  }
 
 -- | Main monad of this module, the state has 3 parts:
 --
@@ -78,35 +81,41 @@ newtype OrderingM a = OrderingM (StateT NormState (Reader String) a)
     (Functor, Applicative, Monad, MonadReader String, MonadState NormState)
 
 instance MonadFreshNames OrderingM where
-  getNameSource = OrderingM $ gets snd
-  putNameSource = OrderingM . modify . second . const
+  getNameSource = OrderingM $ gets stateNameSource
+  putNameSource src = OrderingM $ modify $ \s -> s {stateNameSource = src}
 
 addModifier :: BindModifier -> OrderingM ()
-addModifier = OrderingM . modify . first . second . (:)
+addModifier m = modify $ \s -> s {stateMods = m : stateMods s}
 
 rmModifier :: OrderingM ()
-rmModifier = OrderingM $ modify $ first $ second tail
+rmModifier = modify $ \s -> s {stateMods = tail $ stateMods s}
 
 addBind :: Binding -> OrderingM ()
-addBind (PatBind s p e) = do
-  modifs <- gets $ snd . fst
+addBind (PatBind sz p e) = do
+  modifs <- gets stateMods
   let (e', modifs') = applyModifiers e modifs
-  modify $ first $ bimap (PatBind (s <> implicit) p e' :) (const modifs')
+  modify $ \s ->
+    s
+      { stateBindings = PatBind (sz <> implicit) p e' : stateBindings s,
+        stateMods = modifs'
+      }
   where
     implicit = case e of
       (AppExp _ (Info (AppRes _ ext))) -> map (`SizeBinder` mempty) ext
       _ -> []
 addBind b@FunBind {} =
-  OrderingM $ modify $ first $ first (b :)
+  OrderingM $ modify $ \s -> s {stateBindings = b : stateBindings s}
 
 runOrdering :: (MonadFreshNames m) => OrderingM a -> m (a, [Binding])
 runOrdering (OrderingM m) =
-  modifyNameSource $ mod_tup . flip runReader "tmp" . runStateT m . (([], []),)
+  modifyNameSource $
+    mod_tup
+      . flip runReader "tmp"
+      . runStateT m
+      . NormState mempty mempty
   where
-    mod_tup (a, ((binds, modifs), src)) =
-      if null modifs
-        then ((a, binds), src)
-        else error "not all bind modifiers were freed"
+    mod_tup (a, NormState binds [] src) = ((a, binds), src)
+    mod_tup _ = error "not all bind modifiers were freed"
 
 naming :: String -> OrderingM a -> OrderingM a
 naming s = local (const s)
@@ -147,10 +156,10 @@ argRepName e i = expRepName e <> "_arg" <> show i
 getOrdering :: Bool -> Exp -> OrderingM Exp
 getOrdering final (Assert ass e txt loc) = do
   ass' <- getOrdering False ass
-  l_prev <- OrderingM $ gets $ length . snd . fst
+  l_prev <- gets $ length . stateMods
   addModifier $ Ass ass' txt loc
   e' <- getOrdering final e
-  l_after <- OrderingM $ gets $ length . snd . fst
+  l_after <- gets $ length . stateMods
   -- if the list of modifier has reduced in size, that means that
   -- all assertions as been inserted,
   -- else, we have to introduce the assertion ourself
