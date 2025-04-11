@@ -375,15 +375,9 @@ instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Property a)
     s3 <- unifyTuple k (repTuple (s1 <> s2) img1) (repTuple (s1 <> s2) img2)
     pure (s1 <> s2 <> s3)
   unify_ k (FiltPartInv x pf1 pps1) (FiltPartInv y pf2 pps2) | x == y = do
-    let (pp1, splits1) = unzip pps1
-    let (pp2, splits2) = unzip pps2
-    s <- unifies_ k splits1 splits2
-    (s <>) <$> unifiesPredicates k (zip (map (repPredicate s) $ pf1 : pp1) (map (repPredicate s) $ pf2 : pp2))
+    unifiesPredicates k (zip (pf1 : pps1) (pf2 : pps2))
   unify_ k (FiltPart y x pf1 pps1) (FiltPart y' x' pf2 pps2) | y == y', x == x' = do
-    let (pp1, splits1) = unzip pps1
-    let (pp2, splits2) = unzip pps2
-    s <- unifies_ k splits1 splits2
-    (s <>) <$> unifiesPredicates k (zip (map (repPredicate s) $ pf1 : pp1) (map (repPredicate s) $ pf2 : pp2))
+    unifiesPredicates k (zip (pf1 : pps1) (pf2 : pps2))
   unify_ _ _ _ = fail "no unify"
 
 unifiesPredicates :: (Ord u, Rep u u, Unify u u, Hole u) => VName -> [(Predicate u, Predicate u)] -> MaybeT IndexFnM (Replacement u)

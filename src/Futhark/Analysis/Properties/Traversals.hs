@@ -55,16 +55,12 @@ instance (Ord a, ASTMappable a a) => ASTMappable a (Property a) where
     pure $ BijectiveRCD x rcd img
   astMap m (FiltPartInv x pf pps) = do
     pf' <- astMap m pf
-    let (pp, splits) = unzip pps
-    pp' <- mapM (astMap m) pp
-    splits' <- mapM (astMap m) splits
-    pure $ FiltPartInv x pf' (zip pp' splits')
+    pps' <- mapM (astMap m) pps
+    pure $ FiltPartInv x pf' pps'
   astMap m (FiltPart x y pf pps) = do
     pf' <- astMap m pf
-    let (pp, splits) = unzip pps
-    pp' <- mapM (astMap m) pp
-    splits' <- mapM (astMap m) splits
-    pure $ FiltPart x y pf' (zip pp' splits')
+    pps' <- mapM (astMap m) pps
+    pure $ FiltPart x y pf' pps'
 
 instance ASTMappable Symbol Symbol where
   astMap _ Recurrence = pure Recurrence
@@ -142,14 +138,10 @@ instance ASTFoldable Symbol (Property Symbol) where
     astFold m acc a >>= astFoldF m b >>= astFoldF m c >>= astFoldF m d
   astFold m acc (FiltPartInv _ pf pps) = do
     acc' <- astFold m acc pf
-    let (pp, splits) = unzip pps
-    acc'' <- foldM (astFold m) acc' pp
-    foldM (astFold m) acc'' splits
+    foldM (astFold m) acc' pps
   astFold m acc (FiltPart _ _ pf pps) = do
     acc' <- astFold m acc pf
-    let (pp, splits) = unzip pps
-    acc'' <- foldM (astFold m) acc' pp
-    foldM (astFold m) acc'' splits
+    foldM (astFold m) acc' pps
 
 instance ASTFoldable Symbol Symbol where
   astFold m acc e@(Sum _ lb ub x) =

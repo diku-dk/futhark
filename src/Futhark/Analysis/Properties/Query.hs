@@ -191,7 +191,7 @@ data Statement
     -- The restriction of f to the preimage of [a,b] is bijective.
     -- [c,d] (subset of [a,b]) is the image of this restricted f.
     PBijectiveRCD (SoP Symbol, SoP Symbol) (SoP Symbol, SoP Symbol)
-  | PFiltPartInv (VName -> Symbol) (VName -> Symbol) (SoP Symbol)
+  | PFiltPartInv (VName -> Symbol) (VName -> Symbol)
 
 data Order = LT | GT | Undefined
   deriving (Eq, Show)
@@ -292,9 +292,9 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
-    matchProof (FiltPartInv x pf [(pp, split)]) = do
+    matchProof (FiltPartInv x pf [pp]) = do
       f_X <- getFn x
-      proveFn (PFiltPartInv (predToFun pf) (predToFun pp) split) f_X
+      proveFn (PFiltPartInv (predToFun pf) (predToFun pp)) f_X
     matchProof (FiltPartInv {}) = error "Not implemented yet"
     matchProof (FiltPart y x pf pps) = do
       f_Y <- getFn y
@@ -320,7 +320,7 @@ data PRule
   | -- Relation; i of index function; fresh j; domain of index function; cases of index function.
     MonGe (SoP Symbol -> SoP Symbol -> Symbol) VName VName Domain (Cases Symbol (SoP Symbol))
   | -- Indexfn of y; x; pf; pps
-    FPV2 IndexFn VName (Predicate Symbol) [(Predicate Symbol, SoP Symbol)]
+    FPV2 IndexFn VName (Predicate Symbol) [Predicate Symbol]
 
 nextGenProver :: PRule -> IndexFnM Answer
 nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
@@ -616,15 +616,13 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) =
   step1 `andM` step2
   where
     e @ x = rep (mkRep i (Var x)) e
-prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = algebraContext f $ do
+prove_ baggage (PFiltPartInv pf pp) f@(IndexFn (Forall i dom) _) = algebraContext f $ do
   printM 1000 $
     title "Proving FiltPartInv\n"
       <> "  filter:\n"
       <> prettyIndent 4 (Predicate i $ pf i)
       <> "\n  partition:\n"
       <> prettyIndent 4 (Predicate i $ pp i)
-      <> "\n  partition split:\n"
-      <> prettyIndent 4 split
       <> "\n  function:\n"
       <> prettyIndent 4 f
   -- n: Size before filtering.

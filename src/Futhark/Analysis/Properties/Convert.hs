@@ -1266,53 +1266,33 @@ forwardPropertyPrelude f args =
   where
     pr = sym2SoP . Prop
 
-    commonFiltPart vn (param_filt, lam_filt) (param_part, lam_part) = do
-      res <- lookupIndexFn vn
+    -- Map filter and partition lambdas over indices of X to infer their
+    -- index functions.
+    -- substitutions (e.g., sizes). Then extract the inferred cases to create
+    -- `Property.Predicate`s which is the internal representation of the lambdas.
+    -- Returns combined
+    commonFiltPart x (param_filt, lam_filt) (param_part, lam_part) = do
+      -- (Note that this essentially just uses the inferred size of X;
+      -- f_X could simply be the trivial function: for i < n . true => X[i].)
+      res <- lookupIndexFn x
       case res of
         Just [f_X] | Forall i _ <- iterator f_X -> rollbackAlgEnv $ do
-          -- Map filter and partition lambdas over indices of X
-          -- to get proper substitutions (iterator discarded afterwards).
-          -- (Note that this essentially just uses the inferred size of X;
-          -- f_X could simply be the trivial function: for i < n . true => X[i].)
           let iota = IndexFn (iterator f_X) (cases [(Bool True, sVar i)])
           _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
           addRelIterator (iterator f_X)
           f_filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
           f_part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
 
-          -- Construct partitioning split point.
-          f_split <- sumOverIndexFn f_part
-
-          case (f_filt, f_part, f_split) of
-            ( IndexFn _ g_filt,
-              IndexFn _ g_part,
-              IndexFn Empty g_split
-              ) -> pure $ do
-                (p_filt, filt) <- casesToList g_filt
-                (p_part, part) <- casesToList g_part
-                (p_split, split) <- casesToList g_split
-                pure
-                  ( p_filt :&& p_part :&& p_split,
-                    toPredicate filt,
-                    [(toPredicate part, split)]
-                  )
-                where
-                  toPredicate e = Property.Predicate i (sop2Symbol e)
-            _ ->
-              undefined
+          pure $ do
+            (p_filt, filt) <- guards f_filt
+            (p_part, part) <- guards f_part
+            pure
+              ( p_filt :&& p_part,
+                Property.Predicate i (sop2Symbol filt),
+                [Property.Predicate i (sop2Symbol part)]
+              )
         _ -> do
           error "Applying property to name bound to tuple?"
-
-sumOverIndexFn :: IndexFn -> IndexFnM IndexFn
-sumOverIndexFn f@(IndexFn (Forall _ dom) _) = do
-  n <- rewrite $ domainEnd dom
-  j <- newVName "j"
-  x <- newVName "x"
-  let sum_part = Sum j (int2SoP 0) n (Idx (Var x) (sym2SoP $ Var j))
-  rewrite
-    =<< IndexFn Empty (cases [(Bool True, sym2SoP sum_part)])
-      @ (x, f)
-sumOverIndexFn (IndexFn Empty _) = undefined
 
 parseOpVName :: E.VName -> Maybe (SoP Symbol -> SoP Symbol -> Symbol)
 parseOpVName vn =

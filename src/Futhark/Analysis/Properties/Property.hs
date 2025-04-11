@@ -38,8 +38,8 @@ data Property u
   | -- The restriction of f to the preimage of [a,b] is bijective.
     -- [c,d] (subset of [a,b]) is the image of this restricted f.
     BijectiveRCD VName (SoP u, SoP u) (SoP u, SoP u)
-  | FiltPartInv VName (Predicate u) [(Predicate u, SoP u)]
-  | FiltPart VName VName (Predicate u) [(Predicate u, SoP u)]
+  | FiltPartInv VName (Predicate u) [Predicate u]
+  | FiltPart VName VName (Predicate u) [Predicate u]
   deriving (Eq, Ord, Show)
 
 data Predicate u = Predicate VName u
@@ -63,14 +63,9 @@ instance (Pretty u) => Pretty (Property u) where
   pretty (BijectiveRCD x rcd img) =
     blueString "Bij" <+> prettyName x <+> parens (pretty rcd) <+> parens (pretty img)
   pretty (FiltPartInv x pf pps) =
-    blueString "FiltPartInv" <+> prettyName x <+> parens (pretty pf) <+> ppr pps
+    blueString "FiltPartInv" <+> prettyName x <+> parens (pretty pf) <+> pretty pps
   pretty (FiltPart x y pf pps) =
-    blueString "FiltPart" <+> prettyName x <+> prettyName y <+> parens (pretty pf) <+> ppr pps
-
-ppr :: (Pretty a1, Pretty a2) => [(a1, a2)] -> Doc ann
-ppr pps =
-  brackets . commasep $
-    map (\(pp, s) -> parens (pretty pp <> comma <+> pretty s)) pps
+    blueString "FiltPart" <+> prettyName x <+> prettyName y <+> parens (pretty pf) <+> pretty pps
 
 instance (Pretty u) => Pretty (Predicate u) where
   pretty (Predicate vn e) = "λ" <> prettyName vn <> dot <+> pretty e
