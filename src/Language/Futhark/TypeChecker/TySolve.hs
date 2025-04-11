@@ -539,13 +539,13 @@ solveEq reason obcs orig_t1 orig_t2 = do
             Just (Right TyVarSol {}) -> False
             Just (Right TyVarParam {}) -> False
             Nothing -> False
-          sub t@(Scalar (TypeVar u (QualName [] v) [])) =
+          normalize t@(Scalar (TypeVar u (QualName [] v) [])) =
             case M.lookup v tyvars of
-              Just (Left v') -> sub $ Scalar (TypeVar u (QualName [] v') [])
-              Just (Right (TyVarSol t')) -> sub t'
+              Just (Left v') -> normalize $ Scalar (TypeVar u (QualName [] v') [])
+              Just (Right (TyVarSol t')) -> normalize t'
               _ -> t
-          sub t = t
-      case (sub t1, sub t2) of
+          normalize t = t
+      case (normalize t1, normalize t2) of
         ( t1'@(Scalar (TypeVar _ (QualName [] v1) [])),
           t2'@(Scalar (TypeVar _ (QualName [] v2) []))
           )
