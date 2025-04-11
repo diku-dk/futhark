@@ -57,10 +57,9 @@ partitions k xs
       [s : x]
   | otherwise = []
 
-errorMsg :: (Located a1) => a1 -> [Char] -> a2
+errorMsg :: (Located a) => a -> [Char] -> String
 errorMsg loc msg =
-  error $
-    "Error at " <> prettyString (locText (srclocOf loc)) <> ": " <> msg
+  "Error at " <> prettyString (locText (srclocOf loc)) <> ": " <> msg
 
 warningMsg :: (Located a) => a -> String -> String
 warningMsg loc msg = do

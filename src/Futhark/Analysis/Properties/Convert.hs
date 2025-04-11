@@ -58,7 +58,7 @@ getFun e = E.baseString <$> justVName e
 
 getSize :: E.Exp -> IndexFnM (Maybe (SoP Symbol))
 getSize (E.Var _ (E.Info {E.unInfo = (E.Scalar (E.Record _))}) loc) =
-  errorMsg loc "Record-type variables must be unpacked."
+  error $ errorMsg loc "Record-type variables must be unpacked."
 getSize (E.Var _ (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
 getSize (E.ArrayLit [] (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
 getSize e = error $ "getSize: " <> prettyStr e <> "\n" <> show e
@@ -120,7 +120,7 @@ getTERefine (E.TETuple tes _) = do
 getTERefine (E.TERefine _ e@(E.Lambda {}) _) =
   pure e
 getTERefine (E.TERefine _ _ loc) =
-  errorMsg loc "Only lambda postconditions are currently supported."
+  error $ errorMsg loc "Only lambda postconditions are currently supported."
 getTERefine _ = []
 
 hasRefinement :: E.TypeExp E.Exp E.VName -> Bool
@@ -214,7 +214,7 @@ checkPostcondition vn indexfns te = do
           printM 1 (E.baseString vn <> greenString " OK\n\n")
           pure ()
         Unknown ->
-          errorMsg (E.locOf e) $
+          error . errorMsg (E.locOf e) $
             "Failed to show postcondition:\n" <> prettyStr e <> "\n" <> prettyStr postconds
     _ -> error "Tuples of postconditions not implemented yet."
 
@@ -410,7 +410,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
     substParams fn_if [(cond, f_c), (t_branch, t), (f_branch, f)]
       >>= rewrite
 forward (E.Lambda _ _ _ _ loc) =
-  errorMsg loc "Cannot create index function for unapplied lambda."
+  error $ errorMsg loc "Cannot create index function for unapplied lambda."
 forward expr@(E.AppExp (E.Apply f args loc) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
@@ -428,7 +428,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
-      errorMsg loc $
+      error . errorMsg loc $
         "map takes lambda as first argument. Perhaps you want to eta-expand: "
           <> prettyStr (head $ getArgs args)
   | Just "replicate" <- getFun f,
@@ -444,9 +444,9 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
                 m <- rewrite $ flattenCases cs
                 rewrite $ IndexFn (Forall i (Iota m)) body
               _ ->
-                errorMsg loc "type error"
+                error $ errorMsg loc "type error"
           _ -> do
-            errorMsg loc "Multi-dimensional arrays not supported yet."
+            error $ errorMsg loc "Multi-dimensional arrays not supported yet."
   | Just "iota" <- getFun f,
     [e_n] <- getArgs args = do
       ns <- forward e_n
@@ -457,7 +457,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
             m <- rewrite $ flattenCases cs
             rewrite $ IndexFn (Forall i (Iota m)) (singleCase $ sVar i)
           _ ->
-            errorMsg loc "type error"
+            error $ errorMsg loc "type error"
   | Just fname <- getFun f,
     "zip" `L.isPrefixOf` fname = do
       mconcat <$> mapM forward (getArgs args)
@@ -540,7 +540,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         rule3 <- runMaybeT $ scatterRep dest inds vals
         rule4 <- runMaybeT $ scatterInj dest inds vals e_inds
         maybe
-          (errorMsg loc "Failed to infer index function for scatter.")
+          (error $ errorMsg loc "Failed to infer index function for scatter.")
           pure
           (rule1 <|> rule2 <|> rule3 <|> rule4)
   | Just "hist" <- getFun f,
@@ -687,7 +687,7 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       case justVName arg of
         Just vn -> vn : checkANF as
         _ ->
-          errorMsg (E.locOf arg) $
+          error . errorMsg (E.locOf arg) $
             "Limitation: Application of top-level definitions"
               <> " with postconditions must be in A-normal form: "
               <> prettyStr arg
@@ -726,7 +726,7 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
             printM 1 $
               "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
             check (size_rep, scope, name_rep)
-          unless (all isYes answers) . errorMsg loc $
+          unless (all isYes answers) . error . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
 forwardApplyDef _ _ _ = Nothing
 
@@ -774,9 +774,9 @@ zipArgs ::
 zipArgs loc formal_args actual_args = do
   let pats = map patternMapAligned formal_args
   args <- mapM forward (getArgs actual_args)
-  unless (length pats == length args) $
+  unless (length pats == length args) . error $
     errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
-  unless (map length pats == map length args) $ do
+  unless (map length pats == map length args) . error $
     errorMsg loc "Internal error: actual argument does not match parameter pattern."
 
   -- Discard unused parameters such as wildcards while maintaining alignment.
@@ -791,7 +791,7 @@ zipArgs loc formal_args actual_args = do
     size_names <- mapM (fmap (>>= getVName) . sizeOfTypeBase) types
     arg_sizes <- mapM sizeOfDomain arg
     -- Assert that if there is a size parameter, then we have a size to bind it to.
-    when (any (\(vn, sz) -> isJust vn && isNothing sz) (zip size_names arg_sizes)) $
+    when (any (\(vn, sz) -> isJust vn && isNothing sz) (zip size_names arg_sizes)) . error $
       errorMsg loc "Internal error: sizes don't align."
     pure $ catMaybes $ zipMaybes size_names arg_sizes
 
@@ -1105,8 +1105,8 @@ mkRef vns wrap refexp = case refexp of
   E.Lambda lam_params lam_body _ _ loc -> do
     let param_names = map fst $ mconcat $ map patternMapAligned lam_params
     ref <- forwardRefinementExp lam_body
-    unless (length vns >= length (catMaybes param_names)) . errorMsg loc $
-      "Internal error: mkRef: " <> prettyStr refexp
+    unless (length vns >= length (catMaybes param_names)) . error $
+      errorMsg loc ("Internal error: mkRef: " <> prettyStr refexp)
     let ref' = foldl repParam ref (zip param_names vns)
     let check = inContext askRefinement ref'
     let effect =
@@ -1328,7 +1328,7 @@ checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
         unless c $ do
           printExtraDebugInfo n
           let (p_idx, e_idx) = getCase n $ body f_idx
-          errorMsg (E.locOf e) $
+          error . errorMsg (E.locOf e) $
             "Unsafe indexing: "
               <> prettyStr e
               <> " (failed to show: "
