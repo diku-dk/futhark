@@ -357,7 +357,6 @@ nextGenProver (MonGe rel i j d ges') = do
               =>? ((e1 @ i) `rel` (e2 @ j))
 
   -- WTS: the same across segments.
-  -- TODO this is not successful on part2indicesL.
   k' <- newNameFromString "k'"
   let intrasegment =
         case d of
@@ -365,8 +364,8 @@ nextGenProver (MonGe rel i j d ges') = do
           Cat k m b -> rollbackAlgEnv $ do
             addRelIterator (Forall i d)
             addRelIterator (Forall j d')
-            k +< k'
             addRelSymbol (sym2SoP (Var i) :< sym2SoP (Var j))
+            addRelSymbol (sym2SoP (Var k) :< sym2SoP (Var k'))
             allM [g `cmp` g' | g : gs <- tails ges, g' <- g : gs]
             where
               rep' = rep (mkRep k $ sym2SoP (Var k'))
@@ -655,34 +654,7 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = algebra
   --     =>?  e(i) < e(j)
   j <- newNameFromString "j"
   let filtered_guards = [(c :&& pf i, e) | (c, e) <- guards f]
-  -- let step3 = nextGenProver (MonGe (:<) i j dom (cases filtered_guards))
-  -- ^
-  -- TODO MonGe fails to be shown for part2indicesL in one of
-  -- the queries that check strict monotonicity across segments.
-  -- (TODO extract failing query).
-  -- As a temporary workaround, we show the following equivalent things.
-  -- The values in each segment are
-  -- 1. strictly monotonically increasing, and
-  -- 2. within segment bounds.
-  -- Step (1) implies that all values are unique and the segment bounds
-  -- are monotonically increasing, hence we get that the values are in fact
-  -- monotonically increasing across segments.
-  let step3_1 = rollbackAlgEnv $ do
-        addRelIterator (Forall j dom)
-        i +< j
-        allM [g `cmp` g' | g : gs <- tails filtered_guards, g' <- g : gs]
-        where
-          (c1, e1) `cmp` (c2, e2) =
-            (sop2Symbol (c1 @ i) :&& sop2Symbol (c2 @ j))
-              =>? ((e1 @ i) :< (e2 @ j))
-  let step3_2 = case dom of
-        Iota {} -> pure Yes
-        Cat _ _ b -> rollbackAlgEnv $ do
-          seg_end <- simplify $ intervalEnd dom
-          addRelIterator (iterator f)
-          allM [c =>? (b :<= e :&& e :<= seg_end) | (c, e) <- filtered_guards]
-  let step3 = step3_1 `andM` step3_2
-
+  let step3 = nextGenProver (MonGe (:<) i j dom (cases filtered_guards))
 
   -- TODO not sure using the split point is the correct strategy?
   -- kinda messy because we have to infer it by summing over the

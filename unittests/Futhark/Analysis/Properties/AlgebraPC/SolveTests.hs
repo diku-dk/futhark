@@ -19,6 +19,7 @@ import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import qualified Data.Map as M
 import Futhark.SoP.Refine (addRel)
 import Futhark.Analysis.Properties.Property
+import Futhark.Analysis.Properties.Monad (printAlgEnv)
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"
@@ -733,6 +734,59 @@ tests =
               -- debugPrettyM "\ne(i) - e(j): " e_diff
 
               e j FM.$<$ e i
+          )
+          @??= True,
+      testCase "Monotonicity across segments (part2indicesL)" $
+        run
+          ( do
+              clearAlgEnv
+              i <- newNameFromString "i"
+              j <- newNameFromString "j"
+              m <- newNameFromString "m"
+              k <- newNameFromString "k"
+              k' <- newNameFromString "k'"
+              shape <- newNameFromString "shape"
+              csL <- newNameFromString "csL"
+              not_csL <- newNameFromString "¬csL"
+
+              -- Properties
+              -- addProperty (Var csL) (Disjoint $ S.fromList [not_csL])
+              -- addProperty (Var not_csL) (Disjoint $ S.fromList [csL])
+
+              -- \a b -> ∑⟦csL⟧[a : b]
+              let sum_csL a b = sym2SoP $ Sum (POR (S.singleton csL)) a b
+              -- \b -> ∑⟦shape⟧[0 : b]
+              let sum_shp s = sym2SoP $ Sum (One shape) (int 0) s
+
+              -- Ranges
+              let por = POR . S.singleton
+              addRel $
+                sum_shp (sVar k' .-. int 1) :<=: sVar j :&&: sVar j :<: sum_shp (sVar k')
+                  :&&: sum_shp (sVar k .-. int 1) :<=: sVar i :&&: sVar i :<: sum_shp (sVar k)
+                  :&&: sVar n :==: sum_shp (sVar m)
+                  :&&: int 2 :<=: sVar m
+                  :&&: int 1 :<=: sVar k' :&&: sVar k' :<: sVar m
+                  :&&: int 0 :<=: sVar k :&&: sVar k :<: sVar m
+                  :&&: int 0 :<=: sVar shape
+                  :&&: int 1 :<=: sym2SoP (Idx (One shape) (sVar k))
+                  :&&: int 1 :<=: sym2SoP (Idx (One shape) (sVar k'))
+                  :&&: int 1 :<=: sum_shp (sVar k)
+                  :&&: int 1 :<=: sum_shp (sVar k')
+
+              addRel $ sVar i :<: sVar j
+              addRel $ sVar k :<: sVar k'
+
+              -- Add equivalences.
+              addEquiv (Idx (One csL) (sVar i)) (int 0)
+              addEquiv (Idx (One csL) (sVar j)) (int 0)
+              addEquiv (Idx (One not_csL) (sVar i)) (int 1)
+              addEquiv (Idx (One not_csL) (sVar j)) (int 1)
+
+              let e x y =
+                    sVar x
+                    .+. sum_csL (sVar x .+. int 1) (sum_shp (sVar y) .-. int 1)
+
+              e i k FM.$<$ e j k'
           )
           @??= True
     ]
