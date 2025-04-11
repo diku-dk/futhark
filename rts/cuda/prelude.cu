@@ -103,7 +103,7 @@ static inline __device__ void barrier_local() {
   __syncthreads();
 }
 
-#ifdef __CUDACC_RTC__
+#if defined(__CUDACC_RTC__) || defined(__HIPCC_RTC__)
 #define NAN (0.0/0.0)
 #define INFINITY (1.0/0.0)
 #endif
