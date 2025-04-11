@@ -4,7 +4,7 @@
 #define FUTHARK_FUN_ATTR __device__ static
 #define FUTHARK_F64_ENABLED
 
-#ifdef __CUDACC_RTC__
+#if defined(__CUDACC_RTC__) || defined(__HIPCC_RTC__)
 typedef char int8_t;
 typedef short int16_t;
 typedef int int32_t;
