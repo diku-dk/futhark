@@ -218,10 +218,11 @@ shortCircuitSegOp lvlOK lutab pat pat_certs (SegRed lvl space _ kernel_body bino
       op <- binops
       let shp = Shape segment_dims <> segBinOpShape op
       map (`arrayOfShape` shp) (lambdaReturnType $ segBinOpLambda op)
-shortCircuitSegOp lvlOK lutab pat pat_certs (SegScan lvl space _ kernel_body binops) td_env bu_env =
+shortCircuitSegOp lvlOK lutab pat pat_certs (SegScan lvl space _ kernel_body binops post_op) td_env bu_env =
   -- Like in the handling of 'SegRed', we do not want to coalesce anything that
-  -- is used in the 'SegBinOp'
-  let to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` foldMap (freeIn . segBinOpLambda) binops) $ activeCoals bu_env
+  -- is used in the 'SegBinOp'. We do not coalesce anything that is using in SegPostOp either.
+  let free_in_lams = freeIn (segPostOpLambda post_op) <> foldMap (freeIn . segBinOpLambda) binops
+      to_fail = M.filter (\entry -> namesFromList (M.keys $ vartab entry) `namesIntersect` free_in_lams) $ activeCoals bu_env
       (active, inh) = foldl markFailedCoal (activeCoals bu_env, inhibit bu_env) $ M.keys to_fail
       bu_env' = bu_env {activeCoals = active, inhibit = inh}
    in shortCircuitSegOpHelper 0 lvlOK lvl lutab pat pat_certs space kernel_body td_env bu_env'
