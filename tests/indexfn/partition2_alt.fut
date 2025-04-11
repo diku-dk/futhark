@@ -20,7 +20,7 @@ def part2indices [n]
   in  (lst, inds)
 
 def partition2 [n] (p: f32 -> bool) (xs: [n]f32)
-    : {[n]f32 | \ys-> FiltPart ys xs (\i -> p xs[i]) (\_i -> true)} =
+    : {[n]f32 | \ys-> FiltPart ys xs (\_i -> true) (\i -> p xs[i])} =
   let conds = map (\x -> p x) xs
   let (_lst, inds) = part2indices conds
   in scatter (replicate n 0) inds xs

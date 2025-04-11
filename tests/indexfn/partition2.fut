@@ -4,7 +4,7 @@ def sum [n] (xs: [n]i64) =
 
 def partition2 [n] (p: f32 -> bool) (xs: [n]f32)
     : {(i64, [n]f32) | \(num_true, ys)->
-      FiltPart ys xs (\i -> p xs[i]) (\_i -> true)
+      FiltPart ys xs (\_i -> true) (\i -> p xs[i])
         && num_true == sum (map (\x -> if p x then 1 else 0) xs)
     } =
   let conds = map (\x -> p x) xs
