@@ -52,32 +52,7 @@ let segment_ids [m]
 let part2indicesL 't [m][n]
       (shape: [m]nat64)
       (csL: {[n]bool | \_ -> n == sum shape})
-      : {([n]i64, [m]i64, [n]i64, [m]i64) | \(inds, seg_ends, seg_ids, num_trues) ->
-          -- Assuming csL is a flat representation of a segmented array of booleans
-          -- with segment sizes denoted by shape, part2indicesL returns:
-          --   (1) A flat array whose values are a permutation of the indices:
-          --       (0, 1, ..., n - 1).
-          --   (2) The indices in each row k are a permutation of
-          --         sum shape[0:k-1], ..., (sum shape[0:k]) - 1.
-          --   (3) The indices in each row k are partitioned by csL.
-          -- 
-          -- Proof.
-          --   (1) A bijection from X to X is a permutation of X.
-          let step1 = BijectiveRCD inds (0, n-1) (0, n-1)
-          let step2 =
-            map2 (\i k ->
-              let seg_start = seg_ends[k] - shape[k]
-              in seg_start <= i && i < seg_start + shape[k]
-            ) inds seg_ids
-          --   (3) Use num_trues to show partition point for each segment.
-          let seg_starts = map (\k -> seg_ends[k] - shape[k]) seg_ids
-          let seg_parts = map (\k -> num_trues[k]) seg_ids
-          let seg_inds = map2 (\i seg_start -> i - seg_start) inds seg_starts
-          let step3 = map3 (\c j p ->
-              if c then j < p else j >= p
-            ) csL seg_inds seg_parts
-          in step1 && and step2 && and step3
-        } =
+      : {[n]i64 | \inds -> FiltPartInv inds (\_i -> true) (\i -> csL[i]) } =
   let (seg_ids, flags) = segment_ids shape
 
   -- v Size hints for the existing type-system.
@@ -102,13 +77,13 @@ let part2indicesL 't [m][n]
                       if c then offset + indT - 1
                            else offset + indF - 1
                   ) csL indsT indsF offs
-  in (inds, ends, seg_ids, lst)
+  in inds
 
-let partition2 't [m][n]
+let partition2L 't [m][n]
       (shape: [m]nat64)
       (csL: {[n]bool | \_ -> n == sum shape})
       (xs: [n]i64)
-      : {[n]i64 | \_ -> true} =
-  let (inds, _, _, _) = part2indicesL shape csL
+      : {[n]i64 | \ys -> FiltPart ys xs (\_i -> true) (\i -> csL[i])} =
+  let inds = part2indicesL shape csL
   let zeros = replicate n 0i64
   in scatter zeros inds xs

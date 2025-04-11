@@ -698,10 +698,14 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
             (zipWith (\k v -> (fst k, sym2SoP $ Var v)) actual_args arg_vns)
 
     mkEffectFromTypeExp te size_rep actual_args vns =
-      let ref_exps = getTERefine te
-       in forM_ (map (mkRef vns Var) ref_exps) $ \ref -> do
-            (_check, effect) <- ref
-            effect (size_rep, actual_args, renamingRep actual_args)
+      forM_ (getTERefine te) $ \ref_exp -> do
+        -- Bounds checking is disabled because the bounds in the refinement
+        -- of te was already checked previously (when creating the
+        -- top level index funciton used here).
+        -- We don't simply check bounds again because they might rely on a
+        -- context that is now out of scope.
+        (_check, effect) <- withoutBoundsChecks (mkRef vns Var ref_exp)
+        effect (size_rep, actual_args, renamingRep actual_args)
 
     -- Puts parameters in scope one-by-one before checking preconditions;
     -- the refinement of a parameter can use previous parameters:
@@ -1310,16 +1314,18 @@ checkBounds :: E.Exp -> IndexFn -> IndexFn -> IndexFnM ()
 checkBounds _ (IndexFn Empty _) _ =
   error "E.Index: Indexing into scalar"
 checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
-  df_start <- rewrite $ domainStart df
-  df_end <- rewrite $ domainEnd df
-  case df of
-    Cat _ _ b -> do
-      doCheck (\idx -> b :<= idx :|| df_start :<= idx)
-      doCheck (\idx -> idx :<= intervalEnd df :|| idx :<= df_end)
-    Iota _ -> do
-      doCheck (df_start :<=)
-      doCheck (:<= df_end)
-  printM 1 . locMsg (E.locOf e) $ prettyStr e <> greenString " OK"
+  c <- getCheckBounds
+  when c $ do
+    df_start <- rewrite $ domainStart df
+    df_end <- rewrite $ domainEnd df
+    case df of
+      Cat _ _ b -> do
+        doCheck (\idx -> b :<= idx :|| df_start :<= idx)
+        doCheck (\idx -> idx :<= intervalEnd df :|| idx :<= df_end)
+      Iota _ -> do
+        doCheck (df_start :<=)
+        doCheck (:<= df_end)
+    printM 1 . locMsg (E.locOf e) $ prettyStr e <> greenString " OK"
   where
     doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
     doCheck bound = do

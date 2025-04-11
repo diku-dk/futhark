@@ -33,6 +33,8 @@ module Futhark.Analysis.Properties.Monad
     getInvAlias,
     setOutputNames,
     getOutputNames,
+    getCheckBounds,
+    withoutBoundsChecks,
   )
 where
 
@@ -61,6 +63,7 @@ data VEnv = VEnv
     ii :: M.Map Domain (VName, IndexFn),
     invalias :: M.Map VName VName,
     outputNames :: [VName],
+    checkBounds :: Bool,
     debug :: Bool
   }
 
@@ -77,7 +80,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty False
+    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty False False
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -160,6 +163,16 @@ setOutputNames vns =
 
 getOutputNames :: MonadState VEnv m => m [VName]
 getOutputNames = gets outputNames
+
+getCheckBounds :: IndexFnM Bool
+getCheckBounds = gets checkBounds
+
+withoutBoundsChecks :: IndexFnM a -> IndexFnM a
+withoutBoundsChecks m = do
+  modify $ \env -> env {checkBounds = False}
+  res <- m
+  modify $ \env -> env {checkBounds = True}
+  pure res
 
 --------------------------------------------------------------
 -- Utilities
