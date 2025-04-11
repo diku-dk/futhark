@@ -650,64 +650,35 @@ prove_ baggage (PFiltPartInv pf pp split) f@(IndexFn (Forall i dom) _) = algebra
             (c =>? pf i) `orM` (c =>? (int2SoP 0 :> e :|| e :>= m))
 
   -- (3) the filtering/partitioning is stable.
-  --   (0 <= j < i < n  ^  c(i)  ^  c(j)  ^  pf(i)  ^ pf(j))
-  --     =>?  e(i) < e(j)
+  --   j < i ^  c(i)  ^  c(j)  ^  pf(i)  ^ pf(j)  =>?  e(i) < e(j)
   j <- newNameFromString "j"
   let filtered_guards = [(c :&& pf i, e) | (c, e) <- guards f]
   let step3 = nextGenProver (MonGe (:<) i j dom (cases filtered_guards))
 
-  -- TODO not sure using the split point is the correct strategy?
-  -- kinda messy because we have to infer it by summing over the
-  -- partitioning predicate; gets messier with multiple predicates and segmented domains.
-  -- HINT I think, a better strategy is to do like Fig 5 and check SOMETHING LIKE:
-  -- forall i,j . i < j ^ pf i ^ pf j
-  --    c(i) =>?  not (pf i)
-  --    OR
-  --    c(j) =>?  not (pf j)
-  --    OR
-  --    pp i  ^ not (pp j)  =>?  e(i) < e(j)
-  --    OR
-  --    not (pp i)  ^ pp j  =>?  e(i) > e(j)
-  -- in which case the test may also cover step (3) above.
-  -- let step5and6 = do
-  --       gs <- simplify $ cases (map (second sym2SoP) $ gsT <> gsF)
-  --       let gs' = cases [(c, e) | (c, e) <- casesToList gs, c /= Bool False]
-  --       printTrace 1000 "FiltPartInv Steps (5--6)" $
-  --         askQ Truth (IndexFn (iterator f) gs')
-  --       where
-  --         gsT = [(pp i :&& c, Not (pf i) :|| e :< split) | (c, e) <- guards f]
-  --         gsF = [(Not (pp i) :&& c, Not (pf i) :|| e :>= split) | (c, e) <- guards f]
-
-  let step5and6_revised = algebraContext f $ do
+  -- (4) Partition predicates impose an ordering.
+  -- WTS: forall ((c1,e1), (c2,e2)) in ges x ges .
+  --   j < i  ^  pf j  ^  pf i  ^  pp j  ^  not (pp i)  =>?  e(j) < e(i)
+  --   AND
+  --   j < i  ^  pf j  ^  pf i  ^  not (pp j)  ^  pp i  =>?  e(j) > e(i)
+  let step4 = algebraContext f $ do
         addRelIterator (iterator f)
         j +< i
-        printTrace 1000 "FiltPartInv Steps (5--6)" $
-          allM [mono_strict_inc g | g <- guards f]
+        printTrace 1000 "FiltPartInv Step 4" $
+          allM [g `cmp` g' | g : gs <- tails filtered_guards, g' <- g : gs]
         where
-          -- TODO asdf mangler der cases? 2x queries men fire kombinationer?
+          (c1, e1) `cmp` (c2, e2) =
+            do
+              ( (sop2Symbol (c1 @ j) :&& pp j)
+                  :&& (sop2Symbol (c2 @ i) :&& neg (pp i))
+                )
+                =>? (e2 @ j :< e2 @ i)
+              `andM` ( ( (sop2Symbol (c1 @ j) :&& neg (pp j))
+                           :&& (sop2Symbol (c2 @ i) :&& pp i)
+                       )
+                         =>? (e1 @ j :> e2 @ i)
+                     )
 
-          mono_strict_inc (c, e) =
-            rollbackAlgEnv $
-              do
-                -- WTS: j < i ^ c(i) ^ c(j) => e(i) < e(j).
-                sop2Symbol (c @ i) =>? neg (pf i)
-                `orM` (sop2Symbol (c @ j) =>? neg (pf j))
-                `orM` ( ( sop2Symbol (c @ j)
-                            :&& sop2Symbol (c @ i)
-                            :&& pp i
-                            :&& neg (pp j)
-                        )
-                          =>? (e @ j :< e @ i)
-                      )
-                `orM` ( ( sop2Symbol (c @ j)
-                            :&& sop2Symbol (c @ i)
-                            :&& neg (pp i)
-                            :&& pp j
-                        )
-                          =>? (e @ j :> e @ i)
-                      )
-
-  pure step1 `andM` step2 `andM` step3 `andM` step5and6_revised
+  pure step1 `andM` step2 `andM` step3 `andM` step4
   where
     fn @ idx = rep (mkRep i (Var idx)) fn
 prove_ baggage (PermutationOfRange start end) f =
