@@ -20,12 +20,10 @@ where
 import Control.Monad (forM, join, when)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
-import Data.Bifunctor (second)
 import Data.List (partition, tails)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
-import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.EqSimplifier
@@ -35,7 +33,6 @@ import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (toSumOfSums)
-import Futhark.Analysis.Properties.Traversals
 import Futhark.Analysis.Properties.Unify
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (newNameFromString, newVName)
