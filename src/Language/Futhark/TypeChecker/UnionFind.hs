@@ -1,11 +1,22 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
-module Language.Futhark.TypeChecker.UnionFind where
+module Language.Futhark.TypeChecker.UnionFind 
+  ( VarNode(..),
+    makeSet,
+    find,
+    getType,
+    getKey,
+    assignType,
+    union
+  ) 
+where
 
-import Type
+import Language.Futhark.TypeChecker.Constraints
 
 import Control.Monad ( when )
 import Control.Monad.ST
 import Data.STRef
+
+type Type = CtType ()
 
 newtype VarNode s = Node (STRef s (Link s)) deriving Eq
 
@@ -20,16 +31,16 @@ data Info = MkInfo
   { weight :: {-# UNPACK #-} !Int
     -- ^ The size of the equivalence class, used by 'union'.
   , descr  :: Maybe Type
-  , key :: TVar
+  , key :: TyVar
   } deriving Eq
 
 -- | /O(1)/. Create a fresh node and return it.  A fresh node is in
 -- the equivalence class that contains only itself.
-makeSet :: TVar -> ST s (VarNode s)
+makeSet :: TyVar -> ST s (VarNode s)
 makeSet tv = do
   info <- newSTRef (MkInfo { weight = 1, descr = Nothing, key = tv})
   l <- newSTRef (Repr info)
-  return (Node l)
+  pure (Node l)
 
 -- | /O(1)/. @find node@ returns the representative node of
 -- @node@'s equivalence class.
@@ -40,7 +51,7 @@ find node@(Node l) = do
   link <- readSTRef l
   case link of
     -- Input node is representative.
-    Repr _ -> return node
+    Repr _ -> pure node
 
     -- Input node's parent is another node.
     Link node'@(Node l') -> do
@@ -50,7 +61,7 @@ find node@(Node l) = do
         -- performing path compression.
         link' <- readSTRef l'
         writeSTRef l link'
-      return node''
+      pure node''
 
 -- | Return the reference to the node's equivalence class's
 -- descriptor.
@@ -58,11 +69,11 @@ descrRef :: VarNode s -> ST s (STRef s Info)
 descrRef node@(Node link_ref) = do
   link <- readSTRef link_ref
   case link of
-    Repr info -> return info
+    Repr info -> pure info
     Link (Node link'_ref) -> do
       link' <- readSTRef link'_ref
       case link' of
-        Repr info -> return info
+        Repr info -> pure info
         _ -> descrRef =<< find node
 
 -- | /O(1)/. Return the type associated with argument node's
@@ -71,16 +82,16 @@ getType :: VarNode s -> ST s (Maybe Type)
 getType node = do
   descr <$> (readSTRef =<< descrRef node)
 
-getKey :: VarNode s -> ST s TVar
+getKey :: VarNode s -> ST s TyVar
 getKey node = do
   key <$> (readSTRef =<< descrRef node)
 
 -- | /O(1)/. Replace the type of the node's equivalence class
 -- with the second argument.
 assignType :: VarNode s -> Type -> ST s ()
-assignType node new_descr = do
+assignType node t = do
   r <- descrRef node
-  modifySTRef r $ \i -> i { descr = Just new_descr }
+  modifySTRef r $ \i -> i { descr = Just t }
 
 -- modifyDescriptor :: VarNode s -> (Type -> Type) -> ST s ()
 -- modifyDescriptor node f = do
@@ -113,5 +124,5 @@ union n1 n2 = do
 
 -- | /O(1)/. Return @True@ if both nodes belong to the same
 -- | equivalence class.
-equivalent :: VarNode s -> VarNode s -> ST s Bool
-equivalent n1 n2 = (==) <$> find n1 <*> find n2
+-- equivalent :: VarNode s -> VarNode s -> ST s Bool
+-- equivalent n1 n2 = (==) <$> find n1 <*> find n2
