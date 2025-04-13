@@ -98,6 +98,8 @@ assignType node t = do
 --   r <- descrRef node
 --   modifySTRef r $ \i -> i { descr = f (descr i) }
 
+-- TODO: Make sure we correctly handle level, liftedness, and if it's a
+-- TODO: type parameter.
 -- | Join the equivalence classes of the nodes.
 union :: VarNode s -> VarNode s -> ST s ()
 union n1 n2 = do
