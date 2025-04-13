@@ -34,7 +34,7 @@ data Info = MkInfo
   , key :: TyVar
   } deriving Eq
 
--- | /O(1)/. Create a fresh node and return it.  A fresh node is in
+-- | Create a fresh node and return it.  A fresh node is in
 -- the equivalence class that contains only itself.
 makeSet :: TyVar -> ST s (VarNode s)
 makeSet tv = do
@@ -42,7 +42,7 @@ makeSet tv = do
   l <- newSTRef (Repr info)
   pure (Node l)
 
--- | /O(1)/. @find node@ returns the representative node of
+-- | @find node@ returns the representative node of
 -- @node@'s equivalence class.
 --
 -- This method performs the path compresssion.
@@ -76,7 +76,7 @@ descrRef node@(Node link_ref) = do
         Repr info -> pure info
         _ -> descrRef =<< find node
 
--- | /O(1)/. Return the type associated with argument node's
+-- | Return the type associated with argument node's
 -- equivalence class.
 getType :: VarNode s -> ST s (Maybe Type)
 getType node = do
@@ -86,7 +86,7 @@ getKey :: VarNode s -> ST s TyVar
 getKey node = do
   key <$> (readSTRef =<< descrRef node)
 
--- | /O(1)/. Replace the type of the node's equivalence class
+-- | Replace the type of the node's equivalence class
 -- with the second argument.
 assignType :: VarNode s -> Type -> ST s ()
 assignType node t = do
@@ -98,7 +98,7 @@ assignType node t = do
 --   r <- descrRef node
 --   modifySTRef r $ \i -> i { descr = f (descr i) }
 
--- | /O(1)/. Join the equivalence classes of the nodes.
+-- | Join the equivalence classes of the nodes.
 union :: VarNode s -> VarNode s -> ST s ()
 union n1 n2 = do
   node1@(Node link_ref1) <- find n1
