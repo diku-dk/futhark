@@ -9,6 +9,7 @@ where
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
+import Control.Monad.ST
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.Loc
