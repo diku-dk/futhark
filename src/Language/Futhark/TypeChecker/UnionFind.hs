@@ -15,6 +15,7 @@ import Language.Futhark.TypeChecker.Constraints
 import Control.Monad ( when )
 import Control.Monad.ST
 import Data.STRef
+import Language.Futhark.TypeChecker.Constraints
 
 type Type = CtType ()
 
