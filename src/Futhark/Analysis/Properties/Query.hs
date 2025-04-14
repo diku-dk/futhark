@@ -184,8 +184,7 @@ data Statement
     -- The restriction of f to the preimage of [a,b] is bijective.
     -- [c,d] (subset of [a,b]) is the image of this restricted f.
     PBijectiveRCD (SoP Symbol, SoP Symbol) (SoP Symbol, SoP Symbol)
-  | PFiltPartInv (VName -> Symbol) (VName -> Symbol)
-
+  | PFiltPartInv (VName -> Symbol) [VName -> Symbol]
 
 prove :: Property Symbol -> IndexFnM Answer
 prove prop = alreadyKnown prop `orM` matchProof prop
@@ -283,10 +282,9 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
       proveFn (PBijectiveRCD rcd img) =<< getFn x
-    matchProof (FiltPartInv x pf [pp]) = do
+    matchProof (FiltPartInv x pf pps) = do
       f_X <- getFn x
-      proveFn (PFiltPartInv (predToFun pf) (predToFun pp)) f_X
-    matchProof (FiltPartInv {}) = error "Not implemented yet"
+      proveFn (PFiltPartInv (predToFun pf) (map predToFun pps)) f_X
     matchProof (FiltPart y x pf pps) = do
       f_Y <- getFn y
       nextGenProver (FPV2 f_Y x pf pps)
@@ -586,13 +584,15 @@ prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) =
   step1 `andM` step2
   where
     e @ x = rep (mkRep i (Var x)) e
-prove_ baggage (PFiltPartInv pf pp) f@(IndexFn (Forall i dom) _) = algebraContext f $ do
+prove_ baggage (PFiltPartInv pf pps') f@(IndexFn (Forall i dom) _) = algebraContext f $ do
+  let p_otherwise x = foldl1 (:&&) [neg (pp x) | pp <- pps']
+  let pps = pps' <> [p_otherwise]
   printM 1000 $
     title "Proving FiltPartInv\n"
       <> "  filter:\n"
       <> prettyIndent 4 (Predicate i $ pf i)
       <> "\n  partition:\n"
-      <> prettyIndent 4 (Predicate i $ pp i)
+      <> prettyIndent 4 [Predicate i $ pp i | pp <- pps]
       <> "\n  function:\n"
       <> prettyIndent 4 f
   -- n: Size before filtering.
@@ -624,27 +624,34 @@ prove_ baggage (PFiltPartInv pf pp) f@(IndexFn (Forall i dom) _) = algebraContex
   let step3 = nextGenProver (MonGe LT i j dom (cases filtered_guards))
 
   -- (4) Partition predicates impose an ordering.
-  -- WTS: forall ((c1,e1), (c2,e2)) in ges x ges .
-  --   j < i  ^  pf j  ^  pf i  ^  pp j  ^  not (pp i)  =>?  e(j) < e(i)
-  --   AND
-  --   j < i  ^  pf j  ^  pf i  ^  not (pp j)  ^  pp i  =>?  e(j) > e(i)
-  let step4 = algebraContext f $ do
+  -- WTS:
+  --   forall (pp1, pp2) in pps x pps .
+  --     forall ((c1,e1), (c2,e2)) in ges x ges .
+  --       j < i  ^  pf j  ^  pf i  ^  pp1 j  ^  pp2 i
+  --         ^ c1 j ^ c2 i =>?  e1(j) < e2(i)
+  --       AND
+  --       j < i  ^  pf j  ^  pf i  ^  pp1 i  ^  pp2 j
+  --         ^ c1 i ^ c2 j =>?  e1(i) < e2(j)
+  let isParted pp1 pp2 = algebraContext f $ do
         addRelIterator (iterator f)
         j +< i
-        printTrace 1000 "FiltPartInv Step 4" $
+        printTrace 1000 ("FiltPartInv Step 4 " <> prettyStr (pp1 i, pp2 i)) $
           allM [g `cmp` g' | g : gs <- tails filtered_guards, g' <- g : gs]
         where
           (c1, e1) `cmp` (c2, e2) =
             do
-              ( (sop2Symbol (c1 @ j) :&& pp j)
-                  :&& (sop2Symbol (c2 @ i) :&& neg (pp i))
+              ( (sop2Symbol (c1 @ j) :&& pp1 j)
+                  :&& (sop2Symbol (c2 @ i) :&& pp2 i)
                 )
                 =>? (e2 @ j :< e2 @ i)
-              `andM` ( ( (sop2Symbol (c1 @ j) :&& neg (pp j))
-                           :&& (sop2Symbol (c2 @ i) :&& pp i)
+              `andM` ( ( (sop2Symbol (c1 @ i) :&& pp1 i)
+                           :&& (sop2Symbol (c2 @ j) :&& pp2 j)
                        )
-                         =>? (e1 @ j :> e2 @ i)
+                         =>? (e1 @ i :< e2 @ j)
                      )
+  printM 1337 $
+    "# Checking partitions" <> prettyStr [(p i, q i) | p : pp <- tails pps, q <- pp]
+  let step4 = allM ([isParted p q | p : pp <- tails pps, q <- pp])
 
   pure step1 `andM` step2 `andM` step3 `andM` step4
   where
