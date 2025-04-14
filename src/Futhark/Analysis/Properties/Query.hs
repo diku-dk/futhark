@@ -186,8 +186,6 @@ data Statement
     PBijectiveRCD (SoP Symbol, SoP Symbol) (SoP Symbol, SoP Symbol)
   | PFiltPartInv (VName -> Symbol) (VName -> Symbol)
 
-data Order = LT | GT | Undefined
-  deriving (Eq, Show)
 
 prove :: Property Symbol -> IndexFnM Answer
 prove prop = alreadyKnown prop `orM` matchProof prop
@@ -311,7 +309,7 @@ data PRule
   = -- i of index function; fresh j; domain of index function; cases of index function; RCD; guiding equation.
     InjGe VName VName Domain (Cases Symbol (SoP Symbol)) (Maybe (SoP Symbol, SoP Symbol)) Symbol
   | -- Relation; i of index function; fresh j; domain of index function; cases of index function.
-    MonGe (SoP Symbol -> SoP Symbol -> Symbol) VName VName Domain (Cases Symbol (SoP Symbol))
+    MonGe Order VName VName Domain (Cases Symbol (SoP Symbol))
   | -- Indexfn of y; x; pf; pps
     FPV2 IndexFn VName (Predicate Symbol) [Predicate Symbol]
 
@@ -337,17 +335,18 @@ nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
                 out_of_range x = x :< a :|| b :< x
             Nothing -> pure Unknown
       oob `orM` (p =>? (sym2SoP (Var i) :== sym2SoP (Var j)))
-nextGenProver (MonGe rel i j d ges') = do
+nextGenProver (MonGe order i j d ges') = do
   -- WTS: forall ((c1,e1), (c2,e2)) in ges x ges .
   --        i < j ^ c1(i) ^ c2(j) => e1(i) `rel` e2(j).
-  let intersegment = rollbackAlgEnv $ do
+  let intercase = rollbackAlgEnv $ do
         addRelIterator (Forall j d)
         i +< j
-        allM [g `cmp` g' | g : gs <- tails ges, g' <- g : gs]
-        where
-          (c1, e1) `cmp` (c2, e2) =
-            (sop2Symbol (c1 @ i) :&& sop2Symbol (c2 @ j))
-              =>? ((e1 @ i) `rel` (e2 @ j))
+        allM
+          [ (sop2Symbol (c @ i) :&& sop2Symbol (c @ j)) =>? (e @ i) `rel` (e @ j)
+            | (c, e) <- ges
+          ]
+  let intracase = answerFromBool . isJust <$> sortGes i j d ges
+  let intersegment = intercase `andM` intracase
 
   -- WTS: the same across segments.
   k' <- newNameFromString "k'"
@@ -373,6 +372,11 @@ nextGenProver (MonGe rel i j d ges') = do
     e @ arg = rep (mkRep i (Var arg)) e
 
     ges = casesToList ges'
+
+    rel = case order of
+      LT -> (:<)
+      GT -> (:>)
+      _ -> error "MonGe not implemented yet for non-strict relation"
 nextGenProver (FPV2 f_Y x pf pps) = do
   i <- newNameFromString "i"
   n <- sym2SoP . Hole <$> newNameFromString "n"
@@ -446,24 +450,7 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
                     =>? (e @ i :/= e @ j)
             oob `orM` neq
 
-  let sorted_guards = sorted cmp (guards fn)
-        where
-          -- Order guards by querying the solver.
-          (p_f, f) `cmp` (p_g, g) = rollbackAlgEnv $ do
-            let p = (fromJust . justSym $ p_f @ i) :&& (fromJust . justSym $ p_g @ j)
-            let f_rel_g rel =
-                  -- WTS: forall i /= j . p_f(i) ^ p_g(j) => f(i) `rel` g(j)
-                  let case_i_lt_j = rollbackAlgEnv $ do
-                        addRelIterator iter_j
-                        i +< j
-                        p =>? (f @ i) `rel` (g @ j)
-                      case_i_gt_j = rollbackAlgEnv $ do
-                        addRelIterator iter_i
-                        j +< i
-                        p =>? (f @ i) `rel` (g @ j)
-                   in case_i_lt_j `andM` case_i_gt_j
-            relationToOrder f_rel_g
-
+  let sorted_guards = sortGes i0 j dom (guards fn)
   let step2 = answerFromBool . isJust <$> sorted_guards -- sorting exists.
   k' <- newNameFromString "k'"
   let step3 = case dom of
@@ -494,16 +481,6 @@ prove_ _ (PInjective rcd) fn@(IndexFn (Forall i0 dom) _) = algebraContext fn $ d
   step1 `andM` step2 `andM` step3
   where
     f @ x = rep (mkRep i0 (Var x)) f
-
-    relationToOrder rel = do
-      lt <- rel (:<)
-      case lt of
-        Yes -> pure LT
-        Unknown -> do
-          gt <- rel (:>)
-          case gt of
-            Yes -> pure GT
-            Unknown -> pure Undefined
 prove_ is_segmented (PBijectiveRCD (a, b) (c, d)) f@(IndexFn (Forall i dom) _) = rollbackAlgEnv $ do
   printM 1000 $
     title "Proving BijectiveRCD "
@@ -644,7 +621,7 @@ prove_ baggage (PFiltPartInv pf pp) f@(IndexFn (Forall i dom) _) = algebraContex
   --   j < i ^  c(i)  ^  c(j)  ^  pf(i)  ^ pf(j)  =>?  e(i) < e(j)
   j <- newNameFromString "j"
   let filtered_guards = [(c :&& pf i, e) | (c, e) <- guards f]
-  let step3 = nextGenProver (MonGe (:<) i j dom (cases filtered_guards))
+  let step3 = nextGenProver (MonGe LT i j dom (cases filtered_guards))
 
   -- (4) Partition predicates impose an ordering.
   -- WTS: forall ((c1,e1), (c2,e2)) in ges x ges .
@@ -680,6 +657,9 @@ prove_ _ (ForallSegments _) _ =
   undefined
 prove_ _ _ _ = error "Not implemented yet."
 
+data Order = LT | GT | Undefined
+  deriving (Eq, Show)
+
 -- Strict sorting.
 sorted :: (t -> t -> IndexFnM Order) -> [t] -> IndexFnM (Maybe [t])
 sorted cmp = runMaybeT . quicksort
@@ -697,6 +677,38 @@ sorted cmp = runMaybeT . quicksort
       case ord of
         Undefined -> fail ""
         _ -> pure ord
+
+-- Strict sorting of guarded expressions.
+sortGes :: (Rep b Symbol, Rep a Symbol) => VName -> VName -> Domain -> [(a, b)] -> IndexFnM (Maybe [(a, b)])
+sortGes i j d = sorted cmp
+  where
+    e @ arg = rep (mkRep i (Var arg)) e
+
+    -- Order guards by querying the solver.
+    (p_f, f) `cmp` (p_g, g) = rollbackAlgEnv $ do
+      let p = (fromJust . justSym $ p_f @ i) :&& (fromJust . justSym $ p_g @ j)
+      let f_rel_g op =
+            -- WTS: forall i /= j . p_f(i) ^ p_g(j) => f(i) `rel` g(j)
+            let case_i_lt_j = rollbackAlgEnv $ do
+                  addRelIterator (Forall j d)
+                  i +< j
+                  p =>? (f @ i) `op` (g @ j)
+                case_i_gt_j = rollbackAlgEnv $ do
+                  addRelIterator (Forall i d)
+                  j +< i
+                  p =>? (f @ i) `op` (g @ j)
+             in case_i_lt_j `andM` case_i_gt_j
+      relationToOrder f_rel_g
+
+    relationToOrder rel = do
+      lt <- rel (:<)
+      case lt of
+        Yes -> pure LT
+        Unknown -> do
+          gt <- rel (:>)
+          case gt of
+            Yes -> pure GT
+            Unknown -> pure Undefined
 
 title :: String -> String
 title s = "\ESC[4m" <> s <> "\ESC[0m"
