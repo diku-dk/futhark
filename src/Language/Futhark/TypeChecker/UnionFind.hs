@@ -1,53 +1,87 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
-module Language.Futhark.TypeChecker.UnionFind 
-  ( VarNode(..),
-    makeSet,
+module Language.Futhark.TypeChecker.UnionFind
+  ( TyVarNode,
+    TyVarSol(..),
+    makeTyVarNode,
+    makeTyParamNode,
     find,
-    getType,
+    getDescr,
     getKey,
     assignType,
     union
-  ) 
+  )
 where
-
-import Language.Futhark.TypeChecker.Constraints
 
 import Control.Monad ( when )
 import Control.Monad.ST
 import Data.STRef
+import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
 
 type Type = CtType ()
 
-newtype VarNode s = Node (STRef s (Link s)) deriving Eq
+-- | A (partial) solution for a type variable.
+data TyVarSol
+  = Solved Type
+    -- ^ Has been assigned this type.
+  | Param Level Liftedness Loc
+    -- ^ Is an explicit (rigid) type parameter in the source program.
+  | Unsolved (TyVarInfo ())
+    -- ^ An unsolved type variable; has this constraint.
+  deriving (Show, Eq)
+
+newtype TyVarNode s = Node (STRef s (Link s)) deriving Eq
 
 data Link s
-    = Repr {-# UNPACK #-} !(STRef s Info)
-      -- ^ This is the representative of the equivalence class.
-    | Link {-# UNPACK #-} !(VarNode s)
-      -- ^ Pointer to some other element of the equivalence class.
-     deriving Eq
+  = Repr {-# UNPACK #-} !(STRef s ReprInfo)
+    -- ^ The representative of an equivalence class.
+  | Link {-# UNPACK #-} !(TyVarNode s)
+    -- ^ Pointer to some other element of the equivalence class.
+    deriving Eq
 
-data Info = MkInfo
+-- | Information about an equivalence class.
+data ReprInfo = MkInfo
   { weight :: {-# UNPACK #-} !Int
-    -- ^ The size of the equivalence class, used by 'union'.
-  , descr  :: Maybe Type
-  , key :: TyVar
+    -- ^ The size of the equivalence class, used by 'union'. 
+  , descr  :: {-# UNPACK #-} !TyVarSol
+    -- ^ The "type" of the equivalence class.
+  , key :: {-# UNPACK #-} !TyVar
+    -- ^ The name of the type variable representing the equivalence class.
+
+  --   -- TODO: Should we have this "permanent" level field?
+  -- , level :: {-# UNPACK #-} !Level
+  --   -- ^ The level of the representative type variable.
   } deriving Eq
 
--- | Create a fresh node and return it.  A fresh node is in
--- the equivalence class that contains only itself.
-makeSet :: TyVar -> ST s (VarNode s)
-makeSet tv = do
-  info <- newSTRef (MkInfo { weight = 1, descr = Nothing, key = tv})
-  l <- newSTRef (Repr info)
-  pure (Node l)
+-- | Create a fresh node of a type variable and return it. A fresh node
+-- is in the equivalence class that contains only itself.
+makeTyVarNode :: TyVar -> TyVarInfo () -> ST s (TyVarNode s)
+makeTyVarNode tv constraint = do
+  info <- newSTRef (MkInfo {
+      weight = 1
+    , descr = Unsolved constraint
+    , key = tv
+  })
+  l <- newSTRef $ Repr info
+  pure $ Node l
 
--- | @find node@ returns the representative node of
+-- | Create a fresh node of a type parameter and return it. A fresh node
+-- is in the equivalence class that contains only itself.
+makeTyParamNode :: TyVar -> Level -> Liftedness -> Loc -> ST s (TyVarNode s)
+makeTyParamNode tv lvl lft loc = do
+  info <- newSTRef (MkInfo {
+      weight = 1
+    , descr = Param lvl lft loc
+    , key = tv
+  })
+  l <- newSTRef $ Repr info
+  pure $ Node l
+
+-- | @find node@ returns the representative of
 -- @node@'s equivalence class.
 --
 -- This method performs the path compresssion.
-find :: VarNode s -> ST s (VarNode s)
+find :: TyVarNode s -> ST s (TyVarNode s)
 find node@(Node l) = do
   link <- readSTRef l
   case link of
@@ -64,9 +98,9 @@ find node@(Node l) = do
         writeSTRef l link'
       pure node''
 
--- | Return the reference to the node's equivalence class's
--- descriptor.
-descrRef :: VarNode s -> ST s (STRef s Info) 
+-- | Return the reference to the descriptor of the node's
+-- equivalence class.
+descrRef :: TyVarNode s -> ST s (STRef s ReprInfo)
 descrRef node@(Node link_ref) = do
   link <- readSTRef link_ref
   case link of
@@ -77,55 +111,56 @@ descrRef node@(Node link_ref) = do
         Repr info -> pure info
         _ -> descrRef =<< find node
 
--- | Return the type associated with argument node's
+-- | Return the descriptor associated with the argument node's
 -- equivalence class.
-getType :: VarNode s -> ST s (Maybe Type)
-getType node = do
+getDescr :: TyVarNode s -> ST s TyVarSol
+getDescr node = do
   descr <$> (readSTRef =<< descrRef node)
 
-getKey :: VarNode s -> ST s TyVar
+getKey :: TyVarNode s -> ST s TyVar
 getKey node = do
   key <$> (readSTRef =<< descrRef node)
 
+-- TODO: Determine if it should be a precondition that the input
+-- TODO: node is in an "unsolved" equivalence class.
 -- | Replace the type of the node's equivalence class
 -- with the second argument.
-assignType :: VarNode s -> Type -> ST s ()
+assignType :: TyVarNode s -> Type -> ST s ()
 assignType node t = do
-  r <- descrRef node
-  modifySTRef r $ \i -> i { descr = Just t }
-
--- modifyDescriptor :: VarNode s -> (Type -> Type) -> ST s ()
--- modifyDescriptor node f = do
---   r <- descrRef node
---   modifySTRef r $ \i -> i { descr = f (descr i) }
+  ref <- descrRef node
+  info <- readSTRef ref
+  case descr info of
+    Unsolved _ -> modifySTRef ref $ \i -> i { descr = Solved t }
+    _          -> pure () -- This would be an error.
 
 -- TODO: Make sure we correctly handle level, liftedness, and if 
 -- TODO: type parameters are involved.
--- | Join the equivalence classes of the nodes.
-union :: VarNode s -> VarNode s -> ST s ()
+-- | Join the equivalence classes of the nodes. The resulting
+-- equivalence class has the same solution as the second argument.
+union :: TyVarNode s -> TyVarNode s -> ST s ()
 union n1 n2 = do
-  node1@(Node link_ref1) <- find n1
-  node2@(Node link_ref2) <- find n2
+  root1@(Node link_ref1) <- find n1
+  root2@(Node link_ref2) <- find n2
 
   -- Ensure that nodes aren't in the same equivalence class. 
-  when (node1 /= node2) $ do
+  when (root1 /= root2) $ do
     link1 <- readSTRef link_ref1
     link2 <- readSTRef link_ref2
     case (link1, link2) of
       (Repr info_ref1, Repr info_ref2) -> do
-        (MkInfo w1 _ tv1) <- readSTRef info_ref1
-        (MkInfo w2 mt2 tv2) <- readSTRef info_ref2
+        (MkInfo w1 _   k1) <- readSTRef info_ref1
+        (MkInfo w2 sol k2) <- readSTRef info_ref2
         if w1 >= w2 then do
-          writeSTRef link_ref2 (Link n1)
-          writeSTRef info_ref1 (MkInfo (w1 + w2) mt2 tv1)
+          writeSTRef link_ref2 (Link root1)
+          writeSTRef info_ref1 (MkInfo (w1 + w2) sol k1)
         else do
-          writeSTRef link_ref1 (Link node2)
-          writeSTRef info_ref2 (MkInfo (w1 + w2) mt2 tv2)
+          writeSTRef link_ref1 (Link root2)
+          writeSTRef info_ref2 (MkInfo (w1 + w2) sol k2)
 
       -- This shouldn't be possible.       
-      _ -> error "'find' somehow didn't return a Repr" 
+      _ -> error "'find' somehow didn't return a Repr"
 
--- | /O(1)/. Return @True@ if both nodes belong to the same
--- | equivalence class.
--- equivalent :: VarNode s -> VarNode s -> ST s Bool
+-- | Return @True@ if both nodes belong to the same
+-- equivalence class.
+-- equivalent :: TyVarNode s -> TyVarNode s -> ST s Bool
 -- equivalent n1 n2 = (==) <$> find n1 <*> find n2
