@@ -165,4 +165,4 @@ printAlgM level x = rollbackAlgEnv $ do
   alg_x :: SoP Algebra.Symbol <- toAlgebra x
   printM level (prettyStr alg_x)
   -- env <- getAlgEnv
-  -- printM level $ "under alg env " <> prettyString env
+  -- printM level $ "under alg env " <> prettyStr env
