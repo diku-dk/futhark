@@ -201,12 +201,12 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                 then pure Yes
                 else pure Unknown
         _ -> pure Unknown
-    alreadyKnown wts@(Injective y _) = do
+    alreadyKnown wts@(Injective y rcd) = do
       res <- askInjectiveRCD (Algebra.Var y)
       case res of
         Just (Injective y' rcd')
           | y' == y,
-            Nothing <- rcd' -> do
+            Nothing <- rcd' ->
               pure Yes
           | y' == y -> do
               -- Check equivalent RCDs.
@@ -215,6 +215,44 @@ prove prop = alreadyKnown prop `orM` matchProof prop
               if isJust (s :: Maybe (Substitution Symbol))
                 then pure Yes
                 else pure Unknown
+        _ | Just (a, b) <- rcd -> do
+          res2 <- askFiltPartInv (Algebra.Var y)
+          f <- getFn y
+          case (res2, f) of
+            (Just (FiltPartInv y' pf' _), IndexFn (Forall _ d) _) | y' == y -> do
+              pf :: Predicate Symbol <- fromAlgebra pf'
+              m <- inferFiltPartInvSize (predToFun pf) d
+              s1 :: Maybe (Substitution Symbol) <- unify (int2SoP 0) a
+              s2 :: Maybe (Substitution Symbol) <- unify (m .-. int2SoP 1) b
+              if isJust s1 && isJust s2
+                then pure Yes
+                else pure Unknown
+            _ -> pure Unknown
+        _ -> pure Unknown
+    alreadyKnown wts@(BijectiveRCD y rcd img) = do
+      res <- askBijectiveRCD (Algebra.Var y)
+      case res of
+        Just (BijectiveRCD y' rcd' img')
+          | y' == y -> do
+              -- Check equivalent RCDs.
+              -- TODO could check that rcd is a subset of rcd'.
+              s <- unify wts =<< fromAlgebra (BijectiveRCD y rcd' img')
+              if isJust (s :: Maybe (Substitution Symbol))
+                then pure Yes
+                else pure Unknown
+        _ | rcd == img -> do
+          res2 <- askFiltPartInv (Algebra.Var y)
+          f <- getFn y
+          case (res2, f) of
+            (Just (FiltPartInv y' pf' _), IndexFn (Forall _ d) _) | y' == y -> do
+              pf :: Predicate Symbol <- fromAlgebra pf'
+              m <- inferFiltPartInvSize (predToFun pf) d
+              s1 :: Maybe (Substitution Symbol) <- unify (int2SoP 0) (fst img)
+              s2 :: Maybe (Substitution Symbol) <- unify (m .-. int2SoP 1) (snd img)
+              if isJust s1 && isJust s2
+                then pure Yes
+                else pure Unknown
+            _ -> pure Unknown
         _ -> pure Unknown
     alreadyKnown wts@(FiltPartInv y _ _) = do
       res <- askFiltPartInv (Algebra.Var y)
@@ -595,11 +633,8 @@ prove_ baggage (PFiltPartInv pf pps') f@(IndexFn (Forall i dom) _) = algebraCont
       <> prettyIndent 4 [Predicate i $ pp i | pp <- pps]
       <> "\n  function:\n"
       <> prettyIndent 4 f
-  -- n: Size before filtering.
   -- m: Size after filtering.
-  n <- simplify $ domainEnd dom
-  j_sum <- newNameFromString "j_sum"
-  m <- simplify $ toSumOfSums j_sum (int2SoP 0) n (sym2SoP $ pf j_sum)
+  m <- inferFiltPartInvSize pf dom
 
   -- (1) f restricted to [0, m - 1] is a permutation of [0, m - 1].
   let img = (int2SoP 0, m .-. int2SoP 1)
@@ -716,6 +751,13 @@ sortGes i j d = sorted cmp
           case gt of
             Yes -> pure GT
             Unknown -> pure Undefined
+
+-- Size after filtering over the domain.
+inferFiltPartInvSize :: (VName -> Symbol) -> Domain -> IndexFnM (SoP Symbol)
+inferFiltPartInvSize pf dom = do
+  n <- simplify $ domainEnd dom -- Size before filtering.
+  j_sum <- newNameFromString "j_sum"
+  simplify $ toSumOfSums j_sum (int2SoP 0) n (sym2SoP $ pf j_sum)
 
 title :: String -> String
 title s = "\ESC[4m" <> s <> "\ESC[0m"

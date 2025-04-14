@@ -1255,6 +1255,7 @@ forwardPropertyPrelude f args =
           fmap (IndexFn Empty) . simplify . cases $ do
             (c, pf, pps) <- propArgs
             pure (c, pr $ Property.FiltPart y x pf pps)
+    "FiltPart2" -> forwardPropertyPrelude "FiltPart" args
     "and" | [e_xs] <- getArgs args -> do
       -- No-op: The argument e_xs is a boolean array; each branch will
       -- be checked in refinements.
