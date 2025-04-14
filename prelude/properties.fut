@@ -14,3 +14,8 @@ def FiltPartInv (_X: []i64) (_pf: i64 -> bool) (_pp: i64 -> bool) = ???
 
 def FiltPart 't (_X :[]t) (_Y: []t) (_pf: i64 -> bool) (_pp: i64 -> bool) =
   ???
+
+def FiltPartInv2 (_X: []i64) (_pf: i64 -> bool) (_pp: i64 -> bool) (_pp2: i64 -> bool) = ???
+
+def FiltPart2 't (_X :[]t) (_Y: []t) (_pf: i64 -> bool) (_pp: i64 -> bool) (_pp2: i64 -> bool) =
+  ???

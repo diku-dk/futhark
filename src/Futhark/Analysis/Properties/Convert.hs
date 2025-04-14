@@ -46,6 +46,8 @@ propertyPrelude =
       "BijectiveRCD",
       "FiltPartInv",
       "FiltPart",
+      "FiltPartInv2",
+      "FiltPart2",
       "and"
     ]
 
@@ -1232,27 +1234,24 @@ forwardPropertyPrelude f args =
                   pure (p_a :&& p_b :&& p_c :&& p_d, pr $ Property.BijectiveRCD x (a, b) (c, d))
             _ ->
               undefined
+    "FiltPartInv2" -> forwardPropertyPrelude "FiltPartInv" args
     "FiltPartInv"
-      | [e_X, e_filt, e_part] <- getArgs args,
-        E.Lambda params_filt lam_filt _ _ _ <- e_filt,
-        [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
-        E.Lambda params_part lam_part _ _ _ <- e_part,
-        [[(Just param_part, _)]] <- map patternMapAligned params_part,
+      | e_X : e_filt : e_parts <- getArgs args,
+        Just (param_filt, lam_filt) <- parsePredicate e_filt,
+        Just parts <- mapM parsePredicate e_parts,
         Just x <- justVName e_X -> do
-          propArgs <- commonFiltPart x (param_filt, lam_filt) (param_part, lam_part)
+          propArgs <- commonFiltPart x (param_filt, lam_filt) parts
           fmap (IndexFn Empty) . simplify . cases $ do
             (c, pf, pps) <- propArgs
             pure (c, pr $ Property.FiltPartInv x pf pps)
     "FiltPart"
-      | [e_Y, e_X, e_filt, e_part] <- getArgs args,
-        E.Lambda params_filt lam_filt _ _ _ <- e_filt,
-        [[(Just param_filt, _)]] <- map patternMapAligned params_filt,
-        E.Lambda params_part lam_part _ _ _ <- e_part,
-        [[(Just param_part, _)]] <- map patternMapAligned params_part,
+      | e_Y : e_X : e_filt : e_parts <- getArgs args,
+        Just (param_filt, lam_filt) <- parsePredicate e_filt,
+        Just parts <- mapM parsePredicate e_parts,
         Just y <- justVName e_Y,
         Just x <- justVName e_X -> rollbackAlgEnv $ do
           -- HINT make sure in \i -> pf, i gets the iterator of e_Y not e_X.
-          propArgs <- commonFiltPart x (param_filt, lam_filt) (param_part, lam_part)
+          propArgs <- commonFiltPart x (param_filt, lam_filt) parts
           fmap (IndexFn Empty) . simplify . cases $ do
             (c, pf, pps) <- propArgs
             pure (c, pr $ Property.FiltPart y x pf pps)
@@ -1270,30 +1269,43 @@ forwardPropertyPrelude f args =
   where
     pr = sym2SoP . Prop
 
+    parsePredicate (E.Lambda params lam _ _ _)
+      | [[(Just param, _)]] <- map patternMapAligned params =
+          Just (param, lam)
+    parsePredicate _ = Nothing
+
     -- Map filter and partition lambdas over indices of X to infer their
     -- index functions.
     -- substitutions (e.g., sizes). Then extract the inferred cases to create
     -- `Property.Predicate`s which is the internal representation of the lambdas.
     -- Returns combined
-    commonFiltPart x (param_filt, lam_filt) (param_part, lam_part) = do
+    commonFiltPart x (param_filt, lam_filt) parts = do
       -- (Note that this essentially just uses the inferred size of X;
       -- f_X could simply be the trivial function: for i < n . true => X[i].)
       res <- lookupIndexFn x
       case res of
         Just [f_X] | Forall i _ <- iterator f_X -> rollbackAlgEnv $ do
           let iota = IndexFn (iterator f_X) (cases [(Bool True, sVar i)])
-          _ <- bindLambdaBodyParams [(param_filt, iota), (param_part, iota)]
+          _ <-
+            bindLambdaBodyParams $
+              (param_filt, iota) : map ((,iota) . fst) parts
           addRelIterator (iterator f_X)
           f_filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
-          f_part <- forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
+          f_parts <- forM parts $ \(_, lam_part) ->
+            forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
+
+          let g_parts = [g | f_part <- f_parts, g <- guards f_part]
+          unless (all ((== Bool True) . fst) g_parts) $
+            error "Predicates with if-statements not implemented yet."
 
           pure $ do
             (p_filt, filt) <- guards f_filt
-            (p_part, part) <- guards f_part
             pure
-              ( p_filt :&& p_part,
+              ( p_filt,
                 Property.Predicate i (sop2Symbol filt),
-                [Property.Predicate i (sop2Symbol part)]
+                [ Property.Predicate i (sop2Symbol part)
+                  | (Bool True, part) <- g_parts
+                ]
               )
         _ -> do
           error "Applying property to name bound to tuple?"
