@@ -52,11 +52,21 @@ type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
 -- a constraint on how it can be instantiated.
 type UnconTyVar = (VName, Liftedness)
 
-newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except TypeError) a}
-  deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError TypeError)
+newtype SolveM s a = SolveM { runSolveM :: ExceptT TypeError (ST s) a }
+  deriving (Functor, Applicative, Monad, MonadError TypeError)
 
-initialState :: TyParams -> TyVars () -> SolverState
-initialState _typarams _tyvars = undefined
+liftST :: ST s a -> SolveM s a
+liftST = SolveM . lift
+
+initialState :: TyParams -> TyVars () -> SolveM s (UF s)
+initialState typarams tyvars = do
+  tyvars' <- liftST $ M.traverseWithKey f tyvars
+  typarams' <- liftST $ M.traverseWithKey g typarams
+  pure $ typarams' <> tyvars'
+
+  where
+    f tv (_lvl, info) = makeTyVarNode tv info
+    g tv (lvl, lft, loc) = makeTyParamNode tv lvl lft loc
 
 solution :: SolverState -> ([UnconTyVar], Solution)
 solution _s = undefined
