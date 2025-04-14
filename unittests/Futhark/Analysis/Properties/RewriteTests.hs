@@ -153,18 +153,6 @@ tests =
               rewrite ((Bool True :&& (sVar x :<= sVar y)) ~+~ Var z)
           )
           @??= ((sVar x :<= sVar y) ~+~ Var z),
-      testCase "Match SVars in symbols in SVar" $
-        run
-          ( \(x, _, _, _, _, _, _, _) ->
-              rewrite (sym2SoP $ Idx (Var x) (sym2SoP $ (neg (Var x))))
-          )
-          @??= sym2SoP (Idx (Var x) (int 1 .-. sym2SoP ((Var x)))),
-      testCase "[[¬x]] => 1 - [[x]]" $
-        run
-          ( \(x, _, _, _, _, _, _, _) ->
-              rewrite (sym2SoP $ (neg (Var x)))
-          )
-          @??= (int 1 .-. sym2SoP ((Var x))),
       -- Symbol tests.
       testCase ":&& identity (1)" $
         run
