@@ -16,6 +16,7 @@ module Futhark.Analysis.Properties.Property
     askInjectiveRCD,
     askSimProp,
     askRng,
+    askBijectiveRCD,
   )
 where
 
@@ -125,6 +126,9 @@ askRng = (`askPropertyWith` getRng)
 askInjectiveRCD :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
 askInjectiveRCD = (`askPropertyWith` getInjectiveRCD)
 
+askBijectiveRCD :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
+askBijectiveRCD = (`askPropertyWith` getBijectiveRCD)
+
 askFiltPartInv :: (MonadSoP u e (Property u) m) => u -> m (Maybe (Property u))
 askFiltPartInv = (`askPropertyWith` getFiltPartInv)
 
@@ -149,6 +153,16 @@ getInjectiveRCD props
   | otherwise = Nothing
   where
     f (Injective {}) = True
+    f _ = False
+
+getBijectiveRCD :: S.Set (Property u) -> Maybe (Property u)
+getBijectiveRCD props
+  | fp@(BijectiveRCD {}) : rest <- filter f (S.toList props) = do
+      unless (null rest) $ error "getBijectiveRCD multiple BijectiveRCD"
+      Just fp
+  | otherwise = Nothing
+  where
+    f (BijectiveRCD {}) = True
     f _ = False
 
 getFiltPartInv :: S.Set (Property u) -> Maybe (Property u)

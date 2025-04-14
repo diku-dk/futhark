@@ -538,7 +538,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       forM (zip3 dests indss valss) $ \(dest, inds, vals) -> do
         -- 1. Scatter in-bounds-monotonic indices:
         rule1 <- runMaybeT $ scatterMono dest inds vals
-        rule2 <- runMaybeT $ scatterPerm dest inds vals e_inds
+        rule2 <- runMaybeT $ scatterPerm dest vals e_inds
         rule3 <- runMaybeT $ scatterRep dest inds vals
         rule4 <- runMaybeT $ scatterInj dest inds vals e_inds
         maybe
@@ -864,16 +864,16 @@ scatterRep _ _ _ = fail ""
 --     (`is` is a permutation of (0 .. length dst))
 --     ___________________________________________________
 --     y = ∀i ∈ 0 .. length dest . vs[is^(-1)(i)]
-scatterPerm :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
-scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
+scatterPerm :: IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
+scatterPerm (IndexFn (Forall _ dom_dest) _) vals e_inds = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
   printM 1337 $ "scatterPerm: dest_size" <> prettyStr dest_size
-  perm <- lift $ proveFn (PBijectiveRCD (int2SoP 0, dest_size) (int2SoP 0, dest_size)) inds
+  vn_inds <- warningInds
+  perm <- lift $ prove (Property.BijectiveRCD vn_inds (int2SoP 0, dest_size) (int2SoP 0, dest_size))
   case perm of
     Unknown -> failMsg "scatterPerm: no match"
     Yes -> do
       -- `inds` is invertible on the whole domain.
-      vn_inds <- warningInds
       vn_vals <- newVName "vals"
       i <- newVName "i"
       vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
@@ -906,7 +906,7 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) inds vals e_inds = do
               <> " index function inference: "
               <> prettyStr e_inds
           fail ""
-scatterPerm _ _ _ _ = fail ""
+scatterPerm _ _ _ = fail ""
 
 -- Scatter in-bounds-monotonic indices:
 --   - If `is` is a monotonically increasing sequence of values
