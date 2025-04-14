@@ -121,13 +121,9 @@ dnfQuery p query =
 (=>?) :: Symbol -> Symbol -> IndexFnM Answer
 p =>? q | p == q = pure Yes
 p =>? q = do
-  printTrace 1337 (prettyIndent 2 p <> " =>?\n" <> prettyIndent 4 q) $
-    dnfQuery p (check q) `orM` antecedentIsFalse
-  where
-    antecedentIsFalse = do
-      ans <- isFalse =<< simplify p
-      when (isYes ans) $ printM 1337 "    (^antecedent falsified)"
-      pure ans
+  p' <- simplify p
+  printTrace 1337 (prettyIndent 2 p' <> " =>?\n" <> prettyIndent 4 q) $
+    isFalse p' `orM` dnfQuery p (check q) -- NOTE uses unsimplified p in query.
 
 infixl 8 =>?
 
