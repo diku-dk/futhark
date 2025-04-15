@@ -137,8 +137,8 @@ assignType node t = do
 
 -- TODO: Make sure we correctly handle level, liftedness, and if 
 -- TODO: type parameters are involved.
--- | Join the equivalence classes of the nodes. The resulting
--- equivalence class has the same solution as the second argument.
+-- | Join the equivalence classes of the nodes. The resulting equivalence
+-- class has the same solution and key as the second argument.
 union :: TyVarNode s -> TyVarNode s -> ST s ()
 union n1 n2 = do
   root1@(Node link_ref1) <- find n1
@@ -150,14 +150,14 @@ union n1 n2 = do
     link2 <- readSTRef link_ref2
     case (link1, link2) of
       (Repr info_ref1, Repr info_ref2) -> do
-        (MkInfo w1 _   k1) <- readSTRef info_ref1
-        (MkInfo w2 sol k2) <- readSTRef info_ref2
+        (MkInfo w1 _   _) <- readSTRef info_ref1
+        (MkInfo w2 sol k) <- readSTRef info_ref2
         if w1 >= w2 then do
           writeSTRef link_ref2 (Link root1)
-          writeSTRef info_ref1 (MkInfo (w1 + w2) sol k1)
+          writeSTRef info_ref1 (MkInfo (w1 + w2) sol k)
         else do
           writeSTRef link_ref1 (Link root2)
-          writeSTRef info_ref2 (MkInfo (w1 + w2) sol k2)
+          writeSTRef info_ref2 (MkInfo (w1 + w2) sol k)
 
       -- This shouldn't be possible.       
       _ -> error "'find' somehow didn't return a Repr"
