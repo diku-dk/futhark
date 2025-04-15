@@ -13,10 +13,12 @@ module Language.Futhark.TypeChecker.UnionFind
 where
 
 import Control.Monad ( when )
-import Control.Monad.ST
+import Control.Monad.ST ( ST )
 import Data.STRef
-import Language.Futhark
+    ( STRef, modifySTRef, newSTRef, readSTRef, writeSTRef )
+import Language.Futhark ( Loc, Liftedness )
 import Language.Futhark.TypeChecker.Constraints
+    ( CtType, Level, TyVar, TyVarInfo )
 
 type Type = CtType ()
 
