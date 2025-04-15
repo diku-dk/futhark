@@ -28,20 +28,14 @@ import Language.Futhark.TypeChecker.UnionFind
 -- to sizes and uniqueness.
 type Type = CtType ()
 
--- | A (partial) solution for a type variable.
-data TyVarSol
-  = -- | Has been substituted with this.
-    TyVarSol Type
-  | -- | Is an explicit (rigid) type parameter in the source program.
-    TyVarParam Level Liftedness Loc
-  | -- | Not substituted yet; has this constraint.
-    TyVarUnsol (TyVarInfo ())
-  deriving (Show)
+type UF s = M.Map TyVar (TyVarNode s)
 
-newtype SolverState s = SolverState
-  { -- | Left means linked to this other type variable.
-    solverTyVars :: M.Map TyVar (VarNode s)
-  }
+type Unifier s = (UF s, [CtTy ()])
+
+newtype SolverState s = SolverState { solverTyVars :: UF s }
+
+newtype SolveM s a = SolveM { runSolveM :: StateT (SolverState s) (ExceptT TypeError (ST s)) a }
+  deriving (Functor, Applicative, Monad, MonadError TypeError, MonadState (SolverState s))
 
 -- | A solution maps a type variable to its substitution. This
 -- substitution is complete, in the sense there are no right-hand
@@ -52,30 +46,30 @@ type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
 -- a constraint on how it can be instantiated.
 type UnconTyVar = (VName, Liftedness)
 
-newtype SolveM s a = SolveM { runSolveM :: ExceptT TypeError (ST s) a }
-  deriving (Functor, Applicative, Monad, MonadError TypeError)
-
 liftST :: ST s a -> SolveM s a
-liftST = SolveM . lift
+liftST = SolveM . lift . lift
 
-initialState :: TyParams -> TyVars () -> SolveM s (UF s)
+initialState :: TyParams -> TyVars () -> SolveM s ()
 initialState typarams tyvars = do
-  tyvars' <- liftST $ M.traverseWithKey f tyvars
-  typarams' <- liftST $ M.traverseWithKey g typarams
-  pure $ typarams' <> tyvars'
+  tyvars' <- M.traverseWithKey f tyvars
+  typarams' <- M.traverseWithKey g typarams
+  put $ SolverState $ typarams' <> tyvars'
 
   where
-    f tv (_lvl, info) = makeTyVarNode tv info
-    g tv (lvl, lft, loc) = makeTyParamNode tv lvl lft loc
+    f tv (_lvl, info) = liftST $ makeTyVarNode tv info
+    g tv (lvl, lft, loc) = liftST $ makeTyParamNode tv lvl lft loc
 
-solution :: SolverState -> ([UnconTyVar], Solution)
+solution :: SolverState s -> ([UnconTyVar], Solution)
 solution _s = undefined
 
-solveCt :: CtTy () -> SolveM ()
-solveCt _ct = undefined
+solveCt :: CtTy () -> SolveM s ()
+solveCt (CtEq reason t1 t2) = solveEq reason mempty t1 t2
 
-solveTyVar :: (VName, (Level, TyVarInfo ())) -> SolveM ()
-solveTyVar _ = undefined
+solveEq :: Reason Type -> BreadCrumbs -> Type -> Type -> SolveM s ()
+solveEq _reason _obcs _orig_t1 _orig_t2 = undefined
+
+solveTyVar :: (VName, (Level, TyVarInfo ())) -> SolveM s (UF s)
+solveTyVar _ = gets solverTyVars -- Just a test to see if everything works as expected.
 
 -- | Solve type constraints, producing either an error or a solution,
 -- alongside a list of unconstrained type variables.
@@ -84,12 +78,5 @@ solve ::
   TyParams ->
   TyVars () ->
   Either TypeError ([UnconTyVar], Solution)
-solve constraints typarams tyvars =
-  second solution
-    . runExcept
-    . flip execStateT (initialState typarams tyvars)
-    . runSolveM
-    $ do
-      mapM_ solveCt constraints
-      mapM_ solveTyVar (M.toList tyvars)
+solve _constraints _typarams _tyvars = undefined
 {-# NOINLINE solve #-}
