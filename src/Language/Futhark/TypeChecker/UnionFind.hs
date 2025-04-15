@@ -29,7 +29,7 @@ data TyVarSol
   | Param Level Liftedness Loc
     -- ^ Is an explicit (rigid) type parameter in the source program.
   | Unsolved (TyVarInfo ())
-    -- ^ An unsolved type variable; has this constraint.
+    -- ^ Is unsolved but has this constraint.
   deriving (Show, Eq)
 
 newtype TyVarNode s = Node (STRef s (Link s)) deriving Eq
