@@ -22,6 +22,7 @@ import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
 import Language.Futhark.TypeChecker.Types (substTyVars)
+import Debug.Trace (traceM)
 
 -- | The type representation used by the constraint solver. Agnostic
 -- to sizes and uniqueness.
@@ -288,7 +289,8 @@ subTyVar reason bcs v t = do
   setInfo v (TyVarSol t)
 
   case (v_info, t) of
-    ( Just (Right (TyVarUnsol TyVarFree {})), _ ) ->
+    ( Just (Right (TyVarUnsol TyVarFree {})), _ ) -> do
+      traceM $ "jada!! " ++ show v
       pure ()
     ( Just (Right (TyVarUnsol (TyVarPrim _ v_pts))), _ ) ->
         if t `elem` map (Scalar . Prim) v_pts
@@ -625,6 +627,7 @@ solveTyVar (tv, (lvl, TyVarFree loc l)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
     Right ty -> do
+      traceM $ "nejda!! " ++ show tv
       scopeCheck (Reason loc) tv lvl ty
       liftednessCheck l ty
     _ -> pure ()
