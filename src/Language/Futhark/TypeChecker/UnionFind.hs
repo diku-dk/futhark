@@ -34,6 +34,15 @@ data TyVarSol
 
 newtype TyVarNode s = Node (STRef s (Link s)) deriving Eq
 
+-- TODO: Determine if this is a more suitable representation.
+-- data TyVarKind
+--   = Flexible (TyVarInfo ())
+--   | Rigid RigidTyVar
+
+-- data RigidTyVar
+--   = Solved Type
+--   | Param Level Liftedness Loc
+
 data Link s
   = Repr {-# UNPACK #-} !(STRef s ReprInfo)
     -- ^ The representative of an equivalence class.
