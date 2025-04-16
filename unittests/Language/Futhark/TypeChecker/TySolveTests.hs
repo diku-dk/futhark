@@ -17,6 +17,7 @@ import Language.Futhark.TypeChecker.Monad (prettyTypeError, TypeError(TypeError)
 import Language.Futhark.TypeChecker.TySolve
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Text.Regex.TDFA
 
 testSolve ::
   [CtTy ()] ->
