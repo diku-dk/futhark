@@ -569,3 +569,4 @@ test-suite unit
     , text
     , vector >=0.12
     , srcloc
+    , regex-tdfa ^>= 1.3.2
