@@ -60,18 +60,19 @@ data ReprInfo = MkInfo
     -- ^ The name of the type variable representing the equivalence class.
 
   --   -- TODO: Should we have this "permanent" level field?
-  -- , level :: {-# UNPACK #-} !Level
-  --   -- ^ The level of the representative type variable.
+  , level :: {-# UNPACK #-} !Level
+    -- ^ The level of the representative type variable.
   } deriving Eq
 
 -- | Create a fresh node of a type variable and return it. A fresh node
 -- is in the equivalence class that contains only itself.
-makeTyVarNode :: TyVar -> TyVarInfo () -> ST s (TyVarNode s)
-makeTyVarNode tv constraint = do
+makeTyVarNode :: TyVar -> Level -> TyVarInfo () -> ST s (TyVarNode s)
+makeTyVarNode tv lvl constraint = do
   info <- newSTRef (MkInfo {
       weight = 1
     , descr = Unsolved constraint
     , key = tv
+    , level = lvl
   })
   l <- newSTRef $ Repr info
   pure $ Node l
@@ -84,6 +85,7 @@ makeTyParamNode tv lvl lft loc = do
       weight = 1
     , descr = Param lvl lft loc
     , key = tv
+    , level = lvl
   })
   l <- newSTRef $ Repr info
   pure $ Node l
