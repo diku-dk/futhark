@@ -616,6 +616,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
               && not (S.null (aliases t `S.intersection` (cons <> obs)))
           )
           $ lift . addError loop_loc mempty
+          $ withIndexLink "aliases-previously-returned"
           $ "Return value for consuming loop parameter"
             <+> dquotes (prettyName pat_v)
             <+> "aliases previously returned value."

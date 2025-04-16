@@ -367,6 +367,28 @@ also be due to size inference:
 Here the type rules force ``A`` to have size ``x``, leading to a
 problematic type.  It can be fixed using the techniques above.
 
+.. _aliases-previously-returned:
+
+"Return value for consuming loop parameter *x* aliases previously returned value"
+---------------------------------------------------------------------------------
+
+This error occurs when you have a loop with multiple loop parameters,
+at least one of which is consuming, and the values returned by the
+loop body alias each other. This would result in the consuming loop
+parameter aliasing another loop parameter, which is not allowed. It is
+essentially :ref:`unique-return-aliased` from a loop perspective.
+
+A (contrived) example of this error is the following:
+
+.. code-block:: futhark
+
+  loop (acc: []f64, arr: *[][]f64) for i < length arr-1 do
+    let arr[i] = acc
+    -- Error, because 'arr[i]' and 'arr' are aliased, yet the latter
+    -- is consumed.
+    in (arr[i+1], arr)
+
+
 Size errors
 -----------
 
