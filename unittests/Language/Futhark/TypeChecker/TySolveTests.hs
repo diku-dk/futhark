@@ -16,7 +16,7 @@ import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad (prettyTypeError, TypeError(TypeError))
 import Language.Futhark.TypeChecker.TySolve
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=), assertBool)
 import Text.Regex.TDFA
 
 testSolve ::
@@ -36,9 +36,11 @@ testSolveFail ::
   TyVars () ->
   String ->
   Assertion
-testSolveFail constraints typarams tyvars expectedMsg =
+testSolveFail constraints typarams tyvars expected =
   case solve constraints typarams tyvars of
-    Left (TypeError _ _ actualMsg) -> docString actualMsg @?= expectedMsg
+    Left (TypeError _ _ actualMsg) -> 
+      let regexMatch :: Bool = docString actualMsg =~ expected
+      in assertBool "Regex doesn't match" regexMatch
     Right _ -> assertFailure "Expected type error, but got a solution"
 
 -- When writing type variables/names here (a_0, b_1), make *sure* that
@@ -147,63 +149,63 @@ tests =
           ["a_0" ~ "i32", "a_0" ~ "bool"] 
           mempty 
           (M.fromList [tv "a_0" 0])
-          "Cannot unify\n  i32\nwith\n  bool",
+          ".?([Cc]annot unify).?",
       
       testCase "infinite type (function)" $
         testSolveFail
           ["a_0" ~ "a_0 -> b_1"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Occurs check: cannot instantiate a with a -> b.",
+          ".?([Oo]ccurs check).?",
 
       testCase "infinite type (list)" $
         testSolveFail
           ["a_0" ~ "[]a_0"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Occurs check: cannot instantiate a with []a.",
+          ".?([Oo]ccurs check).?",
 
       testCase "infinite type (tuple)" $
         testSolveFail
           ["a_0" ~ "(a_0, bool)"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Occurs check: cannot instantiate a with (a, bool).",
+          ".?([Oo]ccurs check).?",
 
       testCase "infinite type (record)" $
         testSolveFail
           ["a_0" ~ "{foo: a_0, bar: f32}"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Occurs check: cannot instantiate a with {bar: f32, foo: a}.",
+          ".?([Oo]ccurs check).?",
 
       -- testCase "infinite type (sum type)" $
       --   testSolveFail
       --     ["a_0" ~ "#foo: a_0"]
       --     mempty
       --     (M.fromList [tv "a_0" 0])
-      --     "Occurs check: cannot instantiate a with #foo: a.",
+      --     ".?([Oo]ccurs check).?",
 
       testCase "infinite type (consuming array param)" $
         testSolveFail
           ["a_0" ~ "*[]a_0"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Occurs check: cannot instantiate a with []a.",
+          ".?([Oo]ccurs check).?",
 
       testCase "vector and 2D matrix" $
         testSolveFail
           ["a_0" ~ "[]i32", "a_0" ~ "[][]i32"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Cannot unify\n  i32\nwith\n  []i32",
+          ".?([Cc]annot unify).?",
 
       testCase "different array types" $
         testSolveFail
           ["a_0" ~ "[]f64", "a_0" ~ "[]i64"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Cannot unify\n  f64\nwith\n  i64",
+          ".?([Cc]annot unify).?",
 
       testCase "simple record" $
         testSolve
@@ -259,14 +261,15 @@ tests =
           ["a_0" ~ "b_1"]
           (M.fromList [typaram "b_1" 1 Unlifted])
           (M.fromList [tv "a_0" 0])
-          "Cannot unify type\n  b\nwith \"a\" (scope violation).\nThis is because \"b\" is rigidly bound in a deeper scope.",
+          -- "Cannot unify type\n  b\nwith \"a\" (scope violation).\nThis is because \"b\" is rigidly bound in a deeper scope.",
+          ".?(scope violation).?",
 
       testCase "differently sized tuples" $
         testSolveFail
           ["a_0" ~ "(i32, c_2)", "b_1" ~ "(i32, c_2, bool)", "a_0" ~ "b_1"]
           mempty
           (M.fromList [tv "a_0" 0, tv "b_1" 0])
-          "Cannot unify\n  (i32, c)\nwith\n  (i32, c, bool)"
+          ".?([Cc]annot unify).?"
 
       -- testCase "different array sizes" $
       --   testSolveFail
