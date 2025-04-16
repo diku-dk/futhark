@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   across `map` nests separated by `reshape` operations. Only works if
   the innermost return type is purely scalar.
 
+* `futhark pkg` now allows underscores in package paths.
+
 ### Removed
 
 ### Changed
