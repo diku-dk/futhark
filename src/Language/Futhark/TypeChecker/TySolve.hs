@@ -568,7 +568,7 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
       ty_v_info <- gets $ M.lookup ty_v . solverTyVars
       case ty_v_info of
         Just (Right (TyVarParam ty_v_lvl _ _))
-          -- Type parameter has a higher level than the type variable.
+          -- Type parameter has a higher level than the (free) type variable.
           | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
         Just (Right (TyVarSol ty')) ->
           mapM_ check $ typeVars ty'
