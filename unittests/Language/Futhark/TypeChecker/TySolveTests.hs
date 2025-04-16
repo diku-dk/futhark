@@ -1,7 +1,7 @@
 module Language.Futhark.TypeChecker.TySolveTests (tests) where
 
 import Data.Map qualified as M
-import Data.Loc
+import Data.Loc ( Loc, noLoc )
 import Futhark.Util.Pretty (docString)
 import Language.Futhark.Syntax (Liftedness (..), NoUniqueness, TypeBase, VName)
 import Language.Futhark.SyntaxTests ()
@@ -141,7 +141,7 @@ tests =
           (M.fromList [tv "a_0" 0])
           ([("a_0", Unlifted)], mempty),
 
-      testCase "unification fail" $
+      testCase "non-unifiable types" $
         testSolveFail
           ["a_0" ~ "i32", "a_0" ~ "bool"] 
           mempty 
@@ -182,6 +182,13 @@ tests =
       --     mempty
       --     (M.fromList [tv "a_0" 0])
       --     "Occurs check: cannot instantiate a with #foo: a.",
+
+      testCase "infinite type (consuming array param)" $
+        testSolveFail
+          ["a_0" ~ "*[]a_0"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          "Occurs check: cannot instantiate a with []a.",
 
       testCase "vector and 2D matrix" $
         testSolveFail
@@ -239,30 +246,26 @@ tests =
             ]
           ),
 
-      testCase "compatible levels" $ 
+      testCase "compatible levels" $
         testSolve
-          ["a_0" ~ "{foo: b_1, bar: i8}", "b_1" ~ "u32"]
+          ["a_0" ~ "b_1"]
+          (M.fromList [typaram "a_0" 0 Unlifted])
+          (M.fromList [tv "b_1" 1])
+          ([], M.fromList [("b_1", Right "a_0")]),
+
+      testCase "incompatible levels" $
+        testSolveFail
+          ["a_0" ~ "b_1"]
+          (M.fromList [typaram "b_1" 1 Unlifted])
+          (M.fromList [tv "a_0" 0])
+          "Cannot unify type\n  b\nwith \"a\" (scope violation).\nThis is because \"b\" is rigidly bound in a deeper scope.",
+
+      testCase "differently sized tuples" $
+        testSolveFail
+          ["a_0" ~ "(i32, c_2)", "b_1" ~ "(i32, c_2, bool)", "a_0" ~ "b_1"]
           mempty
-          (M.fromList [tv "a_0" 3, tv "b_1" 2])
-          ([], M.fromList 
-                [("a_0", Right "{foo: u32, bar: i8}"),
-                 ("b_1", Right "u32")
-                ]
-          ),
-
-      -- testCase "incompatible levels" $ 
-      --   testSolveFail
-      --     ["a_0" ~ "(b_1, c_2)"]
-      --     mempty
-      --     (M.fromList [tv "a_0" 0, tv "b_1" 1, tv "c_2" 2])
-      --     "",
-
-      testCase "lifted type param" $
-        testSolve
-          ["a_0" ~ "b_1", "b_1" ~ "i32 -> bool"]
-          (M.fromList [typaram "a_0" 0 Lifted])
-          (M.fromList [tv "b_1" 0])
-          ([], M.fromList [("b_1", Right "i32")])
+          (M.fromList [tv "a_0" 0, tv "b_1" 0])
+          "Cannot unify\n  (i32, c)\nwith\n  (i32, c, bool)"
 
       -- testCase "different array sizes" $
       --   testSolveFail
