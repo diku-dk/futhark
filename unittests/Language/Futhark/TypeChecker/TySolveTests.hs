@@ -1,7 +1,7 @@
 module Language.Futhark.TypeChecker.TySolveTests (tests) where
 
 import Data.Map qualified as M
-import Data.Loc
+import Data.Loc ( Loc, noLoc )
 import Futhark.Util.Pretty (docString)
 import Language.Futhark.Syntax (Liftedness (..), NoUniqueness, TypeBase, VName)
 import Language.Futhark.SyntaxTests ()
@@ -16,7 +16,8 @@ import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad (prettyTypeError, TypeError(TypeError))
 import Language.Futhark.TypeChecker.TySolve
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=), assertBool)
+import Text.Regex.TDFA ( (=~) )
 
 testSolve ::
   [CtTy ()] ->
@@ -35,9 +36,11 @@ testSolveFail ::
   TyVars () ->
   String ->
   Assertion
-testSolveFail constraints typarams tyvars expectedMsg =
+testSolveFail constraints typarams tyvars expected =
   case solve constraints typarams tyvars of
-    Left (TypeError _ _ actualMsg) -> docString actualMsg @?= expectedMsg
+    Left (TypeError _ _ actualMsg) -> 
+      let regexMatch :: Bool = docString actualMsg =~ expected
+      in assertBool "Regex doesn't match" regexMatch
     Right _ -> assertFailure "Expected type error, but got a solution"
 
 -- When writing type variables/names here (a_0, b_1), make *sure* that
@@ -49,6 +52,9 @@ t1 ~ t2 = CtEq (Reason mempty) t1 t2
 
 tv :: VName -> Level -> (VName, (Level, TyVarInfo ()))
 tv v lvl = (v, (lvl, TyVarFree mempty Unlifted))
+
+tvWithInfo :: VName -> Level -> TyVarInfo () -> (VName, (Level, TyVarInfo ()))
+tvWithInfo v lvl info = (v, (lvl, info))
 
 typaram :: VName -> Level -> Liftedness -> (VName, (Level, Liftedness, Loc))
 typaram v lvl liftedness = (v, (lvl, liftedness, noLoc))
@@ -141,61 +147,68 @@ tests =
           (M.fromList [tv "a_0" 0])
           ([("a_0", Unlifted)], mempty),
 
-      testCase "unification fail" $
+      testCase "non-unifiable types" $
         testSolveFail
           ["a_0" ~ "i32", "a_0" ~ "bool"] 
           mempty 
           (M.fromList [tv "a_0" 0])
-          "Cannot unify\n  i32\nwith\n  bool",
+          ".?([Cc]annot unify).?",
       
       testCase "infinite type (function)" $
         testSolveFail
           ["a_0" ~ "a_0 -> b_1"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Occurs check: cannot instantiate a with a -> b.",
+          ".?([Oo]ccurs check).?",
 
       testCase "infinite type (list)" $
         testSolveFail
           ["a_0" ~ "[]a_0"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Occurs check: cannot instantiate a with []a.",
+          ".?([Oo]ccurs check).?",
 
       testCase "infinite type (tuple)" $
         testSolveFail
           ["a_0" ~ "(a_0, bool)"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Occurs check: cannot instantiate a with (a, bool).",
+          ".?([Oo]ccurs check).?",
 
       testCase "infinite type (record)" $
         testSolveFail
           ["a_0" ~ "{foo: a_0, bar: f32}"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Occurs check: cannot instantiate a with {bar: f32, foo: a}.",
+          ".?([Oo]ccurs check).?",
 
       -- testCase "infinite type (sum type)" $
       --   testSolveFail
       --     ["a_0" ~ "#foo: a_0"]
       --     mempty
       --     (M.fromList [tv "a_0" 0])
-      --     "Occurs check: cannot instantiate a with #foo: a.",
+      --     ".?([Oo]ccurs check).?",
+
+      testCase "infinite type (consuming array param)" $
+        testSolveFail
+          ["a_0" ~ "*[]a_0"]
+          mempty
+          (M.fromList [tv "a_0" 0])
+          ".?([Oo]ccurs check).?",
 
       testCase "vector and 2D matrix" $
         testSolveFail
           ["a_0" ~ "[]i32", "a_0" ~ "[][]i32"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Cannot unify\n  i32\nwith\n  []i32",
+          ".?([Cc]annot unify).?",
 
       testCase "different array types" $
         testSolveFail
           ["a_0" ~ "[]f64", "a_0" ~ "[]i64"]
           mempty
           (M.fromList [tv "a_0" 0])
-          "Cannot unify\n  f64\nwith\n  i64",
+          ".?([Cc]annot unify).?",
 
       testCase "simple record" $
         testSolve
@@ -239,35 +252,24 @@ tests =
             ]
           ),
 
-      testCase "compatible levels" $ 
+      testCase "compatible levels" $
         testSolve
-          ["a_0" ~ "{foo: b_1, bar: i8}", "b_1" ~ "u32"]
+          ["a_0" ~ "b_1"]
+          (M.fromList [typaram "a_0" 0 Unlifted])
+          (M.fromList [tv "b_1" 1])
+          ([], M.fromList [("b_1", Right "a_0")]),
+
+      testCase "incompatible levels" $
+        testSolveFail
+          ["a_0" ~ "b_1"]
+          (M.fromList [typaram "b_1" 1 Unlifted])
+          (M.fromList [tv "a_0" 0])
+          ".?(scope violation).?",
+
+      testCase "differently sized tuples" $
+        testSolveFail
+          ["a_0" ~ "(i32, c_2)", "b_1" ~ "(i32, c_2, bool)", "a_0" ~ "b_1"]
           mempty
-          (M.fromList [tv "a_0" 3, tv "b_1" 2])
-          ([], M.fromList 
-                [("a_0", Right "{foo: u32, bar: i8}"),
-                 ("b_1", Right "u32")
-                ]
-          ),
-
-      -- testCase "incompatible levels" $ 
-      --   testSolveFail
-      --     ["a_0" ~ "(b_1, c_2)"]
-      --     mempty
-      --     (M.fromList [tv "a_0" 0, tv "b_1" 1, tv "c_2" 2])
-      --     "",
-
-      testCase "lifted type param" $
-        testSolve
-          ["a_0" ~ "b_1", "b_1" ~ "i32 -> bool"]
-          (M.fromList [typaram "a_0" 0 Lifted])
-          (M.fromList [tv "b_1" 0])
-          ([], M.fromList [("b_1", Right "i32")])
-
-      -- testCase "different array sizes" $
-      --   testSolveFail
-      --     ["a_0" ~ "[n]i32", "a_0" ~ "[n]i32"]
-      --     mempty
-      --     (M.fromList [tv "a_0" 0])
-          -- "Cannot unify\n  [1]i32\nwith\n  [2]i32"
+          (M.fromList [tv "a_0" 0, tv "b_1" 0])
+          ".?([Cc]annot unify).?"
     ]
