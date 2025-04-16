@@ -290,7 +290,7 @@ subTyVar reason bcs v t = do
 
   case (v_info, t) of
     ( Just (Right (TyVarUnsol TyVarFree {})), _ ) -> do
-      traceM $ "jada!! " ++ show v
+      traceM $ "jada!!\n" ++ show v ++ " | " ++ show t
       pure ()
     ( Just (Right (TyVarUnsol (TyVarPrim _ v_pts))), _ ) ->
         if t `elem` map (Scalar . Prim) v_pts
@@ -627,7 +627,7 @@ solveTyVar (tv, (lvl, TyVarFree loc l)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
     Right ty -> do
-      traceM $ "nejda!! " ++ show tv
+      traceM $ "nejda!!\n" ++ show tv ++ " | " ++ show ty
       scopeCheck (Reason loc) tv lvl ty
       liftednessCheck l ty
     _ -> pure ()
