@@ -37,11 +37,14 @@ newtype TyVarNode s = Node (STRef s (Link s)) deriving Eq
 -- TODO: Determine if this is a more suitable representation.
 -- data TyVarKind
 --   = Flexible (TyVarInfo ())
+--     -- ^ A flexible type variable.
 --   | Rigid RigidTyVar
+--     -- ^ A rigid type variable: either already assigned a type or is 
+--     -- an explicit type parameter in the source program.
 
 -- data RigidTyVar
---   = Solved Type
---   | Param Level Liftedness Loc
+--   = TyVarSol Type
+--   | TyVarParam Level Liftedness Loc
 
 data Link s
   = Repr {-# UNPACK #-} !(STRef s ReprInfo)
