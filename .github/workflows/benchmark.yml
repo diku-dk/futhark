@@ -85,78 +85,12 @@ jobs:
         system: A100
         slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cuda-A100 --exclude=hendrixgpu14fl
 
-  # benchmark-titanx-cuda:
-  #   runs-on: hendrix
-  #   needs: [build-linux-nix]
-
-  #   steps:
-  #   - uses: actions/checkout@v4
-  #     with:
-  #       submodules: recursive
-  #       fetch-depth: 0
-  #   - uses: ./.github/actions/benchmark
-  #     with:
-  #       backend: cuda
-  #       system: titanx
-  #       slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-cuda-titanx --exclude=hendrixgpu05fl,hendrixgpu06fl
-  #       futhark-options: --exclude=mem_16gb
-
-  # benchmark-titanx-opencl:
-  #   runs-on: hendrix
-  #   needs: [build-linux-nix]
-
-  #   steps:
-  #   - uses: actions/checkout@v4
-  #     with:
-  #       submodules: recursive
-  #       fetch-depth: 0
-  #   - uses: ./.github/actions/benchmark
-  #     with:
-  #       backend: opencl
-  #       system: titanx
-  #       slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-opencl-titanx --exclude=hendrixgpu05fl,hendrixgpu06fl
-  #       futhark-options: --exclude=mem_16gb
-
-  benchmark-titanrtx-cuda:
-    runs-on: hendrix
-    needs: [build-linux-nix]
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 0
-    - uses: ./.github/actions/benchmark
-      with:
-        backend: cuda
-        system: titanrtx
-        slurm-options: -p gpu --mem=48G --gres=gpu:titanrtx:1 --job-name=fut-cuda-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
-
-  benchmark-titanrtx-opencl:
-    runs-on: hendrix
-    needs: [build-linux-nix]
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 0
-    - uses: ./.github/actions/benchmark
-      with:
-        backend: opencl
-        system: titanrtx
-        slurm-options: -p gpu --mem=48G --gres=gpu:titanrtx:1 --job-name=fut-opencl-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
-
   benchmark-results:
     runs-on: ubuntu-22.04
     needs:
       - benchmark-A100
-#      - benchmark-MI100-opencl
-#      - benchmark-MI100-hip
-#     - benchmark-titanx-cuda
-#     - benchmark-titanx-opencl
-      - benchmark-titanrtx-cuda
-      - benchmark-titanrtx-opencl
+      - benchmark-MI100-opencl
+      - benchmark-MI100-hip
     if: github.ref == 'refs/heads/master'
     steps:
     - name: Install SSH key
