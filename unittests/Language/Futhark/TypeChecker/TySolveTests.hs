@@ -261,7 +261,6 @@ tests =
           ["a_0" ~ "b_1"]
           (M.fromList [typaram "b_1" 1 Unlifted])
           (M.fromList [tv "a_0" 0])
-          -- "Cannot unify type\n  b\nwith \"a\" (scope violation).\nThis is because \"b\" is rigidly bound in a deeper scope.",
           ".?(scope violation).?",
 
       testCase "differently sized tuples" $
@@ -270,11 +269,4 @@ tests =
           mempty
           (M.fromList [tv "a_0" 0, tv "b_1" 0])
           ".?([Cc]annot unify).?"
-
-      -- testCase "different array sizes" $
-      --   testSolveFail
-      --     ["a_0" ~ "[n]i32", "a_0" ~ "[n]i32"]
-      --     mempty
-      --     (M.fromList [tv "a_0" 0])
-          -- "Cannot unify\n  [1]i32\nwith\n  [2]i32"
     ]
