@@ -487,6 +487,7 @@ jobs:
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
+        cache-key: emsdk-wasm
 
     - uses: actions/setup-node@v3.5.1
       with:
@@ -524,6 +525,7 @@ jobs:
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-mc-cache'
+        cache-key: emsdk-wasm-multicore
 
     - uses: actions/setup-node@v3.5.1
       with:
@@ -556,6 +558,7 @@ jobs:
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
+        cache-key: emsdk-wasm-lib
 
     - uses: actions/setup-node@v3.5.1
       with:
