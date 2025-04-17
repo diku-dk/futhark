@@ -35,7 +35,7 @@ interpret config fp = do
   pr <- newFutharkiState config fp
   (tenv, ienv) <- case pr of
     Left err -> do
-      hPutDoc stderr err
+      hPutDocLn stderr err
       exitFailure
     Right env -> pure env
 
