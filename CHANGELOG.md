@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `vjp` in the interpreter is now asymptotically efficient (#2187,
   #2240). Work by Marcus Jensen.
 
+* The interpreter did not handle `open` correctly.
+
 ## [0.25.29]
 
 ### Fixed
