@@ -10,6 +10,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bitraversable
+import Debug.Trace
 import Futhark.IR
 import Futhark.IR.MC
 import Futhark.IR.MC qualified as MC
@@ -174,6 +175,9 @@ transformMap rename onBody w map_lam arrs = do
   renameIfNeeded rename $
     SegMap () space (lambdaReturnType map_lam) kbody
 
+debug :: (Show a) => a -> a
+debug x = traceShow x x
+
 transformRedomap ::
   NeedsRename ->
   (Body SOACS -> ExtractM (Body MC)) ->
@@ -239,13 +243,20 @@ transformSOAC pat _ (Screma w arrs form)
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
       (scans_stms, scans') <- mapAndUnzipM scanToSegBinOp scans
+      let segBinOpType op =
+            flip arrayOfShape (segBinOpShape op) <$> lambdaReturnType (segBinOpLambda op)
+          ret' = concatMap segBinOpType scans'
+          ret'' = drop (length ret') $ lambdaReturnType map_lam
+          ret = ret' <> ret''
+      identity <- mkIdentityLambda ret
+      let post_op = SegPostOp identity []
       pure $
         mconcat scans_stms
           <> oneStm
             ( Let pat (defAux ()) $
                 Op $
                   ParOp Nothing $
-                    SegScan () space (lambdaReturnType map_lam) kbody scans'
+                    SegScan () space (lambdaReturnType map_lam) kbody scans' post_op
             )
   | otherwise = do
       -- This screma is too complicated for us to immediately do
@@ -288,6 +299,27 @@ transformSOAC pat _ (Stream w arrs nes lam) = do
     flip runBuilderT_ soacs_scope $
       sequentialStreamWholeArray pat w nes lam arrs
   transformStms stream_stms
+transformSOAC pat _ (ScanScatter w arrs map_lam scan dest post_lam) = do
+  (gtid, space) <- mkSegSpace w
+  kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
+  (scan_stms, scan') <- scanToSegBinOp scan
+  post_op <- postLamToSegPosOp post_lam dest
+  pure $
+    scan_stms
+      <> oneStm
+        ( Let pat (defAux ()) $
+            Op $
+              ParOp Nothing $
+                SegScan () space (lambdaReturnType map_lam) kbody [scan'] post_op
+        )
+
+postLamToSegPosOp ::
+  Lambda SOACS ->
+  SOACS.ScatterSpec VName ->
+  ExtractM (SegPostOp MC)
+postLamToSegPosOp lam dest = do
+  new_lam <- transformLambda lam
+  pure $ SegPostOp new_lam dest
 
 transformProg :: Prog SOACS -> PassM (Prog MC)
 transformProg prog =
