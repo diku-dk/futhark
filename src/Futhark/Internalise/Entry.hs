@@ -191,6 +191,10 @@ elemTypeExp (E.TEUnique te _) = elemTypeExp te
 elemTypeExp (E.TEParens te _) = elemTypeExp te
 elemTypeExp _ = Nothing
 
+rowTypeExp :: Int -> E.TypeExp E.Exp VName -> Maybe (E.TypeExp E.Exp VName)
+rowTypeExp 0 te = Just te
+rowTypeExp r te = rowTypeExp (r - 1) =<< elemTypeExp te
+
 entryPointType ::
   VisibleTypes ->
   E.EntryType ->
@@ -227,13 +231,14 @@ entryPointType types t ts
                   rank = E.shapeRank shape
                   ts' = map (strip rank) ts
                   record_t = E.Scalar (E.Record fs)
-                  record_te = elemTypeExp =<< E.entryAscribed t
+                  record_te = rowTypeExp rank =<< E.entryAscribed t
               ept <- snd <$> entryPointType types (E.EntryType record_t record_te) ts'
               addType desc . I.OpaqueRecordArray rank (entryPointTypeName ept)
                 =<< opaqueRecordArray types rank fs' ts
         E.Array _ shape et -> do
           let ts' = map (strip (E.shapeRank shape)) ts
-              elem_te = elemTypeExp =<< E.entryAscribed t
+              rank = E.shapeRank shape
+              elem_te = rowTypeExp rank =<< E.entryAscribed t
           ept <- snd <$> entryPointType types (E.EntryType (E.Scalar et) elem_te) ts'
           addType desc . I.OpaqueArray (E.shapeRank shape) (entryPointTypeName ept) $
             map valueType ts
