@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   across `map` nests separated by `reshape` operations. Only works if
   the innermost return type is purely scalar.
 
+* `futhark pkg` now allows underscores in package paths.
+
 ### Removed
 
 ### Changed
@@ -37,6 +39,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `vjp` in the interpreter is now asymptotically efficient (#2187,
   #2240). Work by Marcus Jensen.
+
+* The interpreter did not handle `open` correctly.
+
+* Incorrect handling of some size inference edge cases during
+  monomorphisation (#2252).
 
 ## [0.25.29]
 
