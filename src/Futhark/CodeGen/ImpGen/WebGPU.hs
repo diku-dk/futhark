@@ -438,10 +438,10 @@ genArrayRead t tgt mem i = do
       if shared
         then
           let ptr = WGSL.UnOpExp "&" . WGSL.IndexExp mem' <$> indexExp i
-          in WGSL.Call ("atomic_read_" <> typeStr t <> "_shared") <$> sequence [ptr]
+          in WGSL.Assign tgt' . WGSL.CallExp ("atomic_read_" <> typeStr t <> "_shared") <$> sequence [ptr]
         else
           let ptr = WGSL.UnOpExp "&" . WGSL.IndexExp mem' <$> pure (packedElemIndex t i')
-          in WGSL.Call ("atomic_read_" <> typeStr t <> "_global") <$> sequence [ptr, pure $ packedElemOffset t i']
+          in WGSL.Assign tgt' . WGSL.CallExp ("atomic_read_" <> typeStr t <> "_global") <$> sequence [ptr, pure $ packedElemOffset t i']
     else
       if not shared
         then
@@ -601,10 +601,7 @@ genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg t dest mem i cmp val))) = 
   val' <- genWGSLExp val
   cmp' <- genWGSLExp cmp
   i' <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
-  --liftM2 WGSL.Assign (getIdent dest) (pure $ WGSL.FieldExp (WGSL.CallExp "atomicCompareExchangeWeak" [WGSL.UnOpExp "&" i', cmp', val']) "old_value")
-  liftM2 WGSL.Assign (getIdent dest) (pure $ WGSL.FieldExp (WGSL.CallExp "atomicCompareExchangeWeak" [WGSL.UnOpExp "&" i', WGSL.IntExp 1, WGSL.IntExp 2]) "old_value")
-  --liftM2 WGSL.Assign (getIdent dest) (pure $ WGSL.CallExp "atomicExchange" [WGSL.UnOpExp "&" i', val'])
-  --liftM2 WGSL.Assign (getIdent dest) (pure $ WGSL.CallExp "atomicExchange" [WGSL.UnOpExp "&" i', WGSL.IntExp 0])
+  liftM2 WGSL.Assign (getIdent dest) (pure $ WGSL.FieldExp (WGSL.CallExp "atomicCompareExchangeWeak" [WGSL.UnOpExp "&" i', cmp', val']) "old_value")
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = genIntAtomicOp "atomicExchange" dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicWrite t mem i v))) = genArrayWrite t mem i v
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd _ dest mem i e))) = do
