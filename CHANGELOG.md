@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The interpreter did not handle `open` correctly.
 
+* Incorrect handling of some size inference edge cases during
+  monomorphisation (#2252).
+
 ## [0.25.29]
 
 ### Fixed
