@@ -69,7 +69,7 @@ tests =
         Yes,
       mkTest
         "tests/indexfn/part3indices.fut"
-        ( \[fn@(IndexFn (Forall _ (Iota n)) _)] -> do
+        ( \[_, _, fn@(IndexFn (Forall _ (Iota n)) _)] -> do
             proveFn (PermutationOfZeroTo (n .-. int2SoP 1)) fn
         )
         Yes,
