@@ -56,7 +56,7 @@ initialState typarams tyvars = do
   put $ SolverState $ typarams' <> tyvars'
 
   where
-    f tv (_lvl, info) = liftST $ makeTyVarNode tv info
+    f tv (lvl, info) = liftST $ makeTyVarNode tv lvl info
     g tv (lvl, lft, loc) = liftST $ makeTyParamNode tv lvl lft loc
 
 solution :: SolverState s -> ([UnconTyVar], Solution)
