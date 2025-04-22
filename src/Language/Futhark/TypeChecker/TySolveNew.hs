@@ -69,7 +69,7 @@ solveEq :: Reason Type -> BreadCrumbs -> Type -> Type -> SolveM s ()
 solveEq _reason _obcs _orig_t1 _orig_t2 = undefined
 
 solveTyVar :: (VName, (Level, TyVarInfo ())) -> SolveM s (UF s)
-solveTyVar _ = gets solverTyVars -- Just a test to see if everything works as expected.
+solveTyVar _ = gets solverTyVars -- Just a test to see if things typecheck.
 
 -- | Solve type constraints, producing either an error or a solution,
 -- alongside a list of unconstrained type variables.
