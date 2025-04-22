@@ -1,7 +1,7 @@
 -- Index function substitution.
 module Futhark.Analysis.Properties.Substitute ((@), subst) where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless, when, zipWithM)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
@@ -25,7 +25,7 @@ import Language.Futhark (VName)
 -- into quantified symbols (e.g., Sum j a b f(e(j))).
 legalArg :: VName -> IndexFn -> IndexFn -> Symbol -> [SoP Symbol] -> Bool
 legalArg k g f e args =
-  let notQuantifier vn = vn < k || Just vn == catVar (iterator g)
+  let notQuantifier vn = vn < k || or [Just vn == catVar it | it <- shape g]
    in (hasSingleCase f || all (all notQuantifier . fv) args)
         || warning
   where
@@ -94,9 +94,10 @@ subst indexfn = do
 -- Are you substituting xs[i] for xs = for i < e . true => xs[i]?
 -- This happens when xs is a formal argument.
 trivialSub :: (ReplacementBuilder v Symbol) => IndexFn -> Symbol -> [v] -> Bool
-trivialSub (IndexFn (Forall i _) gs) e [arg] =
+trivialSub (IndexFn [] _) _ _ = False
+trivialSub (IndexFn [Forall i _] gs) e [arg] =
   repCases (mkRep i arg) gs == cases [(Bool True, sym2SoP e)]
-trivialSub _ _ _ = False
+trivialSub _ _ _ = error "multi-dim not implemented yet"
 
 subber :: (IndexFn -> Symbol -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
 subber argCheck g = do
@@ -142,26 +143,57 @@ subber argCheck g = do
           pure $ Just (e, vn, [arg])
     getApply_ _ acc _ = pure acc
 
+
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
-substituteOnce f g_non_repped (f_apply, args) = do
-  vn <- newVName ("<" <> prettyString f_apply <> ">")
-  g <- repApply vn g_non_repped
+substituteOnce f g_input (f_apply_sym, args) = do
+  f_apply <- newVName ("<" <> prettyString f_apply_sym <> ">")
+  g <- repApply f_apply g_input
 
   let new_body_unsimplified = cases $ do
         (p_f, v_f) <- guards f
         (p_g, v_g) <- guards g
-        let s = mkRep vn (rep f_arg v_f)
+        let s = mkRep f_apply (rep f_arg v_f)
         pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep f_arg p_f), rep s v_g)
 
-  let g_iter = subIterator vn (iterator g)
-  same_range <- isSameRange (iterator f) g_iter
-  let new_iter = case (iterator f, g_iter) of
-        -- Propagate domain of f into g.
-        (Forall i df@(Cat {}), Forall j (Iota {}))
-          | same_range ->
-              Forall j $ repDomain (mkRep i $ Var j) df
-        _ -> g_iter
+  -- TODO couldn't this check be done on (shape g_input)? And hence be moved to where-clause.
+  --      Check this by running all tests once multi-dim is done.
+  let g_shape = map (subIterator f_apply) (shape g)
+  shape_compatible <- compatibleShapes (shape f) g_shape
+  let propagate_structure f_iter g_iter =
+        case (f_iter, g_iter) of
+          -- Propagate domain of f into g.
+          (Forall i df@(Cat {}), Forall j (Iota {}))
+            | shape_compatible ->
+                Forall j $ repDomain (mkRep i $ Var j) df
+          _ -> g_iter
+  let new_shape = zipWith propagate_structure (shape f) g_shape
 
+   iam here asdfkjasfd, rewriting substitution because it's confusing
+    need to define the below before adding multi-dim support,
+    then "map" it over the shapes
+  let subRules [] _ =
+        Just . IndexFn new_shape <$> simplify new_body_unsimplified
+      subRules [Forall _ (Iota _)] _ =
+        Just . IndexFn new_shape <$> simplify new_body_unsimplified
+      subRules [Forall i df@(Cat k _ _)] [new_iter@(Forall _ (Iota _))]
+        | k `S.member` fv new_body_unsimplified,
+          shape_compatible = do
+               let t1 =
+                     if f_arg M.!? i == (sym2SoP . Var <$> iterVar new_iter) -- XXX new_iter?
+                       then pure (sym2SoP . Var <$> catVar new_iter)
+                       else -- Check that indexing into f is within segment bounds.
+                       do
+                         let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
+                         in_segment <-
+                           askQ
+                             (CaseCheck (\_ -> bounds $ f_arg M.! i))
+                             (IndexFn new_iter (body g))
+                         case in_segment of
+                           Yes -> pure (sym2SoP . Var <$> catVar new_iter)
+                           Unknown -> pure Nothing
+               undefined
+
+  -- Avoid capturing k from any segmented dimension of f in the new body of g.
   -- If f has a segmented structure (Cat k _ _), make sure that
   -- k is not captured in the body of g after substitution.
   case iterator f of
@@ -232,27 +264,27 @@ substituteOnce f g_non_repped (f_apply, args) = do
   where
     -- Construct replacement from formal arguments of f to actual arguments.
     f_arg :: Replacement Symbol =
-      case iterator f of
-        Empty ->
+      case shape f of
+        [] ->
           case args of
             [] -> mempty
             _ -> error "Arguments supplied to scalar index function."
-        Forall i _ ->
-          case (iterator g_non_repped, args) of
-            (Empty, []) -> mempty
-            (Forall j _, []) -> mkRep i (Var j)
-            (_, [arg]) -> mkRep i arg
+        [Forall i _] ->
+          case (shape g_input, args) of
+            ([], []) -> mempty
+            ([Forall j _], []) -> mkRep i (Var j)
+            ([_], [arg]) -> mkRep i arg
             (_, _) -> error "Multi-dim not implemented yet."
+        _ -> error "Multi-dim not implemented yet."
 
     repApply vn =
       astMap
         ( identityMapper
             { mapOnSymbol = \e ->
-                pure $ if e == f_apply then Var vn else e
+                pure $ if e == f_apply_sym then Var vn else e
             }
         )
 
-    subIterator _ Empty = Empty
     subIterator vn (Forall j dg)
       | vn `notElem` fv dg =
           Forall j dg
@@ -263,7 +295,6 @@ substituteOnce f g_non_repped (f_apply, args) = do
       error "Only single-case index functions may substitute into domain."
 
     iterVar (Forall i _) = Just i
-    iterVar Empty = Nothing
 
 -- Solve for x in e(x) = e'.
 -- solveFor :: (Replaceable p Symbol) => VName -> p -> SoP Symbol -> IndexFnM (Maybe (SoP Symbol))
@@ -275,10 +306,14 @@ solveFor x e1 e2 = do
   s :: Maybe (Replacement Symbol) <- fmap mapping <$> unify e1' e2
   pure $ s >>= (M.!? x_hole)
 
+compatibleShapes :: [Iterator] -> [Iterator] -> IndexFnM Bool
+compatibleShapes xs ys
+  | length xs == length ys =
+      and <$> zipWithM isSameRange xs ys
+  | otherwise =
+      pure False
+
 isSameRange :: Iterator -> Iterator -> IndexFnM Bool
-isSameRange Empty Empty = pure True
-isSameRange Empty _ = pure False
-isSameRange _ Empty = pure False
 isSameRange (Forall _ df) (Forall _ dg) = do
   case (df, dg) of
     (Iota {}, Iota {}) ->
@@ -305,9 +340,9 @@ firstAlt (m : ms) = do
     Nothing -> firstAlt ms
 
 checkBounds :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM Bool
-checkBounds (IndexFn Empty _) _ (_, []) = pure True
-checkBounds (IndexFn Empty _) _ _ = error "checkBounds: indexing into scalar"
-checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g $ do
+checkBounds (IndexFn [] _) _ (_, []) = pure True
+checkBounds (IndexFn [] _) _ _ = error "checkBounds: indexing into scalar"
+checkBounds f@(IndexFn [Forall _ df] _) g (f_apply, [f_arg]) = algebraContext g $ do
   beg <- rewrite $ domainStart df
   end <- rewrite $ domainEnd df
   case df of

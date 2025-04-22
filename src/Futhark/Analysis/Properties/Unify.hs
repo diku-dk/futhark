@@ -340,8 +340,7 @@ instance Unify VName a where
     | otherwise = fail "no unify"
 
 repTuple :: (Rep v1 u, Rep v2 u) => Replacement u -> (v1, v2) -> (SoP u, SoP u)
-repTuple s (a, b) = do
-  (rep s a, rep s b)
+repTuple s (a, b) = (rep s a, rep s b)
 
 unifyTuple :: (Unify v1 u, Unify u u, Ord u, Hole u, Rep u u, Rep v2 u, Rep v3 u) => VName -> (v1, v2) -> (v1, v3) -> MaybeT IndexFnM (Replacement u)
 unifyTuple k (a, b) (a', b') = do

@@ -1,7 +1,7 @@
 module Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules) where
 
 import Control.Monad (filterM, (<=<))
-import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, isUnknown, simplify)
+import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, algebraContext, assume, isFalse, isUnknown, simplify, addRelShape)
 import Futhark.Analysis.Properties.IndexFn (IndexFn (..), cases, casesToList)
 import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv)
 import Futhark.Analysis.Properties.Rule (applyRuleBook, rulesIndexFn)
@@ -31,7 +31,7 @@ rewrite_ :: IndexFn -> IndexFnM IndexFn
 rewrite_ fn@(IndexFn it xs) = simplifyIndexFn
   where
     simplifyIndexFn = algebraContext fn $ do
-      addRelIterator it
+      addRelShape it
       ys <- simplifyCases xs
       pure $ IndexFn it ys
 
