@@ -9,6 +9,7 @@ module Futhark.IR.Prop.Reshape
     reshapeInner,
 
     -- * Simplification
+    flipReshapeRearrange,
 
     -- * Shape calculations
     reshapeIndex,
@@ -18,7 +19,9 @@ module Futhark.IR.Prop.Reshape
   )
 where
 
+import Control.Monad (guard)
 import Data.Foldable
+import Futhark.IR.Prop.Rearrange (isMapTranspose)
 import Futhark.IR.Syntax
 import Futhark.Util.IntegralExp
 import Prelude hiding (product, quot, sum)
@@ -101,3 +104,36 @@ sliceSizes (n : ns) =
   product (n : ns) : sliceSizes ns
 
 {- HLINT ignore sliceSizes -}
+
+-- | Interchange a reshape and rearrange. Essentially, rewrite composition
+--
+-- @
+-- let v1 = reshape(v1_shape, v0)
+-- let v2 = rearrange(perm, v1)
+-- @
+--
+-- into
+--
+-- @
+-- let v1' = rearrange(perm', v0)
+-- let v2' = reshape(v1_shape', v1')
+--
+-- The function is given the shape of @v0@, @v1@, and the @perm@, and returns
+-- @perm'@. This is a meaningful operation when @v2@ is itself reshaped, as the
+-- reshape-reshape can be fused. This can significantly simplify long chains of
+-- reshapes and rearranges.
+flipReshapeRearrange ::
+  (Eq d) =>
+  [d] ->
+  [d] ->
+  [Int] ->
+  Maybe [Int]
+flipReshapeRearrange v0_shape v1_shape perm = do
+  (num_map_dims, 1, 1) <- isMapTranspose perm
+  let map_dims = take num_map_dims v0_shape
+  guard $ map_dims == take num_map_dims v1_shape
+  let orig_inner_dims = drop (num_map_dims + 1) v0_shape
+      perm' =
+        [0 .. num_map_dims - 1]
+          ++ map (+ num_map_dims) ([1 .. length orig_inner_dims] ++ [0])
+  Just perm'

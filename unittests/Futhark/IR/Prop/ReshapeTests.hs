@@ -11,6 +11,9 @@ import Futhark.IR.Syntax
 import Test.Tasty
 import Test.Tasty.HUnit
 
+intShape :: [Int] -> Shape
+intShape = Shape . map (intConst Int32 . toInteger)
+
 reshapeOuterTests :: [TestTree]
 reshapeOuterTests =
   [ testCase (unwords ["reshapeOuter", show sc, show n, show shape, "==", show sc_res]) $
@@ -35,10 +38,27 @@ reshapeInnerTests =
         ]
   ]
 
-intShape :: [Int] -> Shape
-intShape = Shape . map (intConst Int32 . toInteger)
+flipTests :: [TestTree]
+flipTests =
+  [ testCase
+      ( unwords
+          [ "flipReshapeRearrange",
+            show v0_shape,
+            show v1_shape,
+            show perm
+          ]
+      )
+      $ flipReshapeRearrange v0_shape v1_shape perm @?= res
+    | (v0_shape :: [String], v1_shape, perm, res) <-
+        [ ( ["A", "B", "C"],
+            ["A", "BC"],
+            [1, 0],
+            Just [1, 2, 0]
+          )
+        ]
+  ]
 
 tests :: TestTree
 tests =
   testGroup "ReshapeTests" $
-    reshapeOuterTests ++ reshapeInnerTests
+    reshapeOuterTests ++ reshapeInnerTests ++ flipTests
