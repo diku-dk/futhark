@@ -129,11 +129,15 @@ flipReshapeRearrange ::
   [Int] ->
   Maybe [Int]
 flipReshapeRearrange v0_shape v1_shape perm = do
-  (num_map_dims, 1, 1) <- isMapTranspose perm
+  (num_map_dims, num_a_dims, num_b_dims) <- isMapTranspose perm
+  guard $ num_a_dims == 1
+  guard $ num_b_dims == 1
   let map_dims = take num_map_dims v0_shape
   guard $ map_dims == take num_map_dims v1_shape
-  let orig_inner_dims = drop (num_map_dims + 1) v0_shape
+  guard $ take num_a_dims v0_shape == take num_b_dims v1_shape
+  let b_dims = drop (num_map_dims + num_a_dims) v0_shape
       perm' =
         [0 .. num_map_dims - 1]
-          ++ map (+ num_map_dims) ([1 .. length orig_inner_dims] ++ [0])
+          ++ map (+ num_map_dims) ([1 .. length b_dims] ++ [0])
   Just perm'
+{-# NOINLINE flipReshapeRearrange #-}
