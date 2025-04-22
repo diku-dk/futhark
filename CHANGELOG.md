@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Incorrect registration of entry point types when mixing type
   abbreviations and arrays (#2253).
 
+* Reverse mode AD now handles sequential streams. (#2256)
+
 ## [0.25.29]
 
 ### Fixed
