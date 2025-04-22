@@ -290,7 +290,8 @@ subTyVar reason bcs v t = do
 
   case (v_info, t) of
     ( Just (Right (TyVarUnsol TyVarFree {})), _ ) -> do
-      traceM $ "jada!!\n" ++ show v ++ " | " ++ show t
+      let r = typeVars t
+      traceM $ "jada!!\n" ++ show v ++ " | " ++ (show . S.toList) r
       pure ()
     ( Just (Right (TyVarUnsol (TyVarPrim _ v_pts))), _ ) ->
         if t `elem` map (Scalar . Prim) v_pts
