@@ -19,10 +19,11 @@ module Futhark.IR.Prop.Reshape
   )
 where
 
-import Control.Monad (guard)
+import Control.Monad (guard, mplus)
 import Data.Foldable
 import Futhark.IR.Prop.Rearrange (isMapTranspose)
 import Futhark.IR.Syntax
+import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp
 import Prelude hiding (product, quot, sum)
 
@@ -133,11 +134,24 @@ flipReshapeRearrange v0_shape v1_shape perm = do
   guard $ num_a_dims == 1
   guard $ num_b_dims == 1
   let map_dims = take num_map_dims v0_shape
+      num_b_dims_expanded = length v0_shape - num_map_dims - num_a_dims
+      num_a_dims_expanded = length v0_shape - num_map_dims - num_b_dims
+      caseA = do
+        guard $ take num_a_dims v0_shape == take num_b_dims v1_shape
+        let perm' =
+              [0 .. num_map_dims - 1]
+                ++ map (+ num_map_dims) ([1 .. num_b_dims_expanded] ++ [0])
+        Just perm'
+      caseB = do
+        guard $ takeLast num_b_dims v0_shape == takeLast num_b_dims v1_shape
+        let perm' =
+              [0 .. num_map_dims - 1]
+                ++ map
+                  (+ num_map_dims)
+                  (num_a_dims_expanded : [0 .. num_a_dims_expanded - 1])
+        Just perm'
+
   guard $ map_dims == take num_map_dims v1_shape
-  guard $ take num_a_dims v0_shape == take num_b_dims v1_shape
-  let b_dims = drop (num_map_dims + num_a_dims) v0_shape
-      perm' =
-        [0 .. num_map_dims - 1]
-          ++ map (+ num_map_dims) ([1 .. length b_dims] ++ [0])
-  Just perm'
+
+  caseA `mplus` caseB
 {-# NOINLINE flipReshapeRearrange #-}
