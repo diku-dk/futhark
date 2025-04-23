@@ -63,19 +63,19 @@ data ReprInfo = MkInfo
     -- ^ The name of the type variable representing the equivalence class.
 
   --   -- TODO: Should we have this "permanent" level field?
-  , level :: {-# UNPACK #-} !Level
-    -- ^ The level of the representative type variable.
+  -- , level :: {-# UNPACK #-} !Level
+  --   -- ^ The level of the representative type variable.
   } deriving Eq
 
 -- | Create a fresh node of a type variable and return it. A fresh node
 -- is in the equivalence class that contains only itself.
 makeTyVarNode :: TyVar -> Level -> TyVarInfo () -> ST s (TyVarNode s)
-makeTyVarNode tv lvl constraint = do
+makeTyVarNode tv _lvl constraint = do
   info <- newSTRef (MkInfo {
       weight = 1
     , descr = Unsolved constraint
     , key = tv
-    , level = lvl
+    -- , level = lvl
   })
   l <- newSTRef $ Repr info
   pure $ Node l
@@ -88,7 +88,7 @@ makeTyParamNode tv lvl lft loc = do
       weight = 1
     , descr = Param lvl lft loc
     , key = tv
-    , level = lvl
+    -- , level = lvl
   })
   l <- newSTRef $ Repr info
   pure $ Node l
@@ -164,15 +164,15 @@ union n1 n2 = do
     link2 <- readSTRef link_ref2
     case (link1, link2) of
       (Repr info_ref1, Repr info_ref2) -> do
-        (MkInfo w1 _   _ l1) <- readSTRef info_ref1
-        (MkInfo w2 sol k l2) <- readSTRef info_ref2
-        let min_lvl = min l1 l2
+        (MkInfo w1 _   _) <- readSTRef info_ref1
+        (MkInfo w2 sol k) <- readSTRef info_ref2
+        -- let min_lvl = min l1 l2
         if w1 >= w2 then do
           writeSTRef link_ref2 (Link root1)
-          writeSTRef info_ref1 (MkInfo (w1 + w2) sol k min_lvl)
+          writeSTRef info_ref1 (MkInfo (w1 + w2) sol k)
         else do
           writeSTRef link_ref1 (Link root2)
-          writeSTRef info_ref2 (MkInfo (w1 + w2) sol k min_lvl)
+          writeSTRef info_ref2 (MkInfo (w1 + w2) sol k)
 
       -- This shouldn't be possible.       
       _ -> error "'find' somehow didn't return a Repr"
