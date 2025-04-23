@@ -288,24 +288,19 @@ subTyVar reason bcs v t = do
   setInfo v (TyVarSol t)
 
   case (v_info, t) of
-    (Just (Right (TyVarUnsol TyVarFree {})), _) ->
-      pure ()
-    ( Just (Right (TyVarUnsol (TyVarPrim _ v_pts))),
-      _
-      ) ->
+    ( Just (Right (TyVarUnsol TyVarFree {})), _ ) -> pure ()
+    ( Just (Right (TyVarUnsol (TyVarPrim _ v_pts))), _ ) ->
         if t `elem` map (Scalar . Prim) v_pts
           then pure ()
           else cannotUnify reason notes bcs (typeVar v) t
         where
           notes =
             aNote $
-              "Cannot instance type that must be one of"
+              "Cannot instantiate type that must be one of"
                 </> indent 2 (pretty v_pts)
                 </> "with"
                 </> indent 2 (pretty t)
-    ( Just (Right (TyVarUnsol (TyVarSum _ cs1))),
-      Scalar (Sum cs2)
-      ) ->
+    ( Just (Right (TyVarUnsol (TyVarSum _ cs1))), Scalar (Sum cs2) ) ->
         if all (`elem` M.keys cs2) (M.keys cs1)
           then unifySharedConstructors reason bcs cs1 cs2
           else cannotUnify reason notes bcs (typeVar v) t
@@ -317,17 +312,13 @@ subTyVar reason bcs v t = do
                 </> "with type with constructors"
                 </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs2)))
                 </> unsharedConstructorsMsg cs1 cs2
-    ( Just (Right (TyVarUnsol (TyVarSum _ cs1))),
-      _
-      ) ->
+    ( Just (Right (TyVarUnsol (TyVarSum _ cs1))), _ ) ->
         typeError (locOf reason) mempty $
           "Cannot unify type with constructors"
             </> indent 2 (pretty (Sum cs1))
             </> "with type"
             </> indent 2 (pretty t)
-    ( Just (Right (TyVarUnsol (TyVarRecord _ fs1))),
-      Scalar (Record fs2)
-      ) ->
+    ( Just (Right (TyVarUnsol (TyVarRecord _ fs1))), Scalar (Record fs2) ) ->
         if all (`elem` M.keys fs2) (M.keys fs1)
           then unifySharedFields reason bcs fs1 fs2
           else
@@ -336,9 +327,7 @@ subTyVar reason bcs v t = do
                 </> indent 2 (pretty (Record fs1))
                 </> "with record type"
                 </> indent 2 (pretty (Record fs2))
-    ( Just (Right (TyVarUnsol (TyVarRecord _ fs1))),
-      _
-      ) ->
+    ( Just (Right (TyVarUnsol (TyVarRecord _ fs1))), _ ) ->
         typeError (locOf reason) mempty $
           "Cannot unify record type with fields"
             </> indent 2 (pretty (Record fs1))
@@ -539,13 +528,13 @@ solveEq reason obcs orig_t1 orig_t2 = do
             Just (Right TyVarSol {}) -> False
             Just (Right TyVarParam {}) -> False
             Nothing -> False
-          sub t@(Scalar (TypeVar u (QualName [] v) [])) =
+          normalize t@(Scalar (TypeVar u (QualName [] v) [])) =
             case M.lookup v tyvars of
-              Just (Left v') -> sub $ Scalar (TypeVar u (QualName [] v') [])
-              Just (Right (TyVarSol t')) -> sub t'
+              Just (Left v') -> normalize $ Scalar (TypeVar u (QualName [] v') [])
+              Just (Right (TyVarSol t')) -> normalize t'
               _ -> t
-          sub t = t
-      case (sub t1, sub t2) of
+          normalize t = t
+      case (normalize t1, normalize t2) of
         ( t1'@(Scalar (TypeVar _ (QualName [] v1) [])),
           t2'@(Scalar (TypeVar _ (QualName [] v2) []))
           )
@@ -570,13 +559,13 @@ solveCt ct =
     CtEq reason t1 t2 -> solveEq reason mempty t1 t2
 
 scopeCheck :: Reason Type -> TyVar -> Int -> Type -> SolveM ()
-scopeCheck reason v v_lvl ty = do
-  mapM_ check $ typeVars ty
+scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
   where
     check ty_v = do
       ty_v_info <- gets $ M.lookup ty_v . solverTyVars
       case ty_v_info of
         Just (Right (TyVarParam ty_v_lvl _ _))
+          -- Type parameter has a higher level than the (free) type variable.
           | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
         Just (Right (TyVarSol ty')) ->
           mapM_ check $ typeVars ty'
