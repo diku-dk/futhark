@@ -9,6 +9,7 @@ module Futhark.IR.Prop.Reshape
     reshapeInner,
 
     -- * Simplification
+    flipReshapeRearrange,
 
     -- * Shape calculations
     reshapeIndex,
@@ -18,8 +19,11 @@ module Futhark.IR.Prop.Reshape
   )
 where
 
+import Control.Monad (guard, mplus)
 import Data.Foldable
+import Futhark.IR.Prop.Rearrange (isMapTranspose)
 import Futhark.IR.Syntax
+import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp
 import Prelude hiding (product, quot, sum)
 
@@ -101,3 +105,53 @@ sliceSizes (n : ns) =
   product (n : ns) : sliceSizes ns
 
 {- HLINT ignore sliceSizes -}
+
+-- | Interchange a reshape and rearrange. Essentially, rewrite composition
+--
+-- @
+-- let v1 = reshape(v1_shape, v0)
+-- let v2 = rearrange(perm, v1)
+-- @
+--
+-- into
+--
+-- @
+-- let v1' = rearrange(perm', v0)
+-- let v2' = reshape(v1_shape', v1')
+--
+-- The function is given the shape of @v0@, @v1@, and the @perm@, and returns
+-- @perm'@. This is a meaningful operation when @v2@ is itself reshaped, as the
+-- reshape-reshape can be fused. This can significantly simplify long chains of
+-- reshapes and rearranges.
+flipReshapeRearrange ::
+  (Eq d) =>
+  [d] ->
+  [d] ->
+  [Int] ->
+  Maybe [Int]
+flipReshapeRearrange v0_shape v1_shape perm = do
+  (num_map_dims, num_a_dims, num_b_dims) <- isMapTranspose perm
+  guard $ num_a_dims == 1
+  guard $ num_b_dims == 1
+  let map_dims = take num_map_dims v0_shape
+      num_b_dims_expanded = length v0_shape - num_map_dims - num_a_dims
+      num_a_dims_expanded = length v0_shape - num_map_dims - num_b_dims
+      caseA = do
+        guard $ take num_a_dims v0_shape == take num_b_dims v1_shape
+        let perm' =
+              [0 .. num_map_dims - 1]
+                ++ map (+ num_map_dims) ([1 .. num_b_dims_expanded] ++ [0])
+        Just perm'
+      caseB = do
+        guard $ takeLast num_b_dims v0_shape == takeLast num_b_dims v1_shape
+        let perm' =
+              [0 .. num_map_dims - 1]
+                ++ map
+                  (+ num_map_dims)
+                  (num_a_dims_expanded : [0 .. num_a_dims_expanded - 1])
+        Just perm'
+
+  guard $ map_dims == take num_map_dims v1_shape
+
+  caseA `mplus` caseB
+{-# NOINLINE flipReshapeRearrange #-}
