@@ -164,15 +164,15 @@ union n1 n2 = do
     link2 <- readSTRef link_ref2
     case (link1, link2) of
       (Repr info_ref1, Repr info_ref2) -> do
-        (MkInfo w1 _   _) <- readSTRef info_ref1
-        (MkInfo w2 sol k) <- readSTRef info_ref2
+        (MkInfo w1 _   k1) <- readSTRef info_ref1
+        (MkInfo w2 sol k2) <- readSTRef info_ref2
         -- let min_lvl = min l1 l2
         if w1 >= w2 then do
           writeSTRef link_ref2 (Link root1)
-          writeSTRef info_ref1 (MkInfo (w1 + w2) sol k)
+          writeSTRef info_ref1 (MkInfo (w1 + w2) sol k1)
         else do
           writeSTRef link_ref1 (Link root2)
-          writeSTRef info_ref2 (MkInfo (w1 + w2) sol k)
+          writeSTRef info_ref2 (MkInfo (w1 + w2) sol k2)
 
       -- This shouldn't be possible.       
       _ -> error "'find' somehow didn't return a Repr"
