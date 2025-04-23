@@ -9,7 +9,7 @@ where
 
 import Control.Monad (foldM, msum, unless, (<=<))
 import Data.List (subsequences, (\\))
-import Futhark.Analysis.Properties.IndexFn (Domain (..), IndexFn (..), Quantified (..), cases, casesToList)
+import Futhark.Analysis.Properties.IndexFn (Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
 import Futhark.Analysis.Properties.IndexFnPlus (subIndexFn, unifyIndexFnWith)
 import Futhark.Analysis.Properties.Monad (IndexFnM, debugPrettyM, debugT')
 import Futhark.Analysis.Properties.Symbol (Symbol (..))
@@ -155,7 +155,7 @@ rulesIndexFn = do
           -- y = ∀i ∈ [0, 1, ..., n - 1] . {i->b}e1
           from =
             IndexFn
-              { shape = [Forall i (Iota (hole n))],
+              { iterator = Forall i (Iota (hole n)),
                 body =
                   cases
                     [ (hole i :== int 0, hole h1),
@@ -170,7 +170,7 @@ rulesIndexFn = do
               let e1_b = rep (mkRep i' (int 0)) e1
               pure $
                 IndexFn
-                  { shape = [Forall i (Iota (hole n))],
+                  { iterator = Forall i (Iota (hole n)),
                     body = cases [(Bool True, e1_b)]
                   },
           sideCondition = vacuous
@@ -186,7 +186,7 @@ rulesIndexFn = do
           -- Note that b may depend on k.
           from =
             IndexFn
-              { shape = [Forall i (Cat k (hole m) (hole b))],
+              { iterator = Forall i (Cat k (hole m) (hole b)),
                 body =
                   cases
                     [ (hole i :== hole b, hole h1),
@@ -202,7 +202,7 @@ rulesIndexFn = do
               let e1_b = rep (mkRep i' b') e1
               pure $
                 IndexFn
-                  { shape = [Forall i (Cat k (hole m) (hole b))],
+                  { iterator = Forall i (Cat k (hole m) (hole b)),
                     body = cases [(Bool True, e1_b)]
                   },
           sideCondition = vacuous
@@ -212,7 +212,7 @@ rulesIndexFn = do
           -- TODO deduplicate
           from =
             IndexFn
-              { shape = [Forall i (Iota (hole n))],
+              { iterator = Forall i (Iota (hole n)),
                 body =
                   cases
                     [ (hole i :/= int 0, sym2SoP Recurrence),
@@ -227,7 +227,7 @@ rulesIndexFn = do
               let e1_b = rep (mkRep i' (int 0)) e1
               pure $
                 IndexFn
-                  { shape = [Forall i (Iota (hole n))],
+                  { iterator = Forall i (Iota (hole n)),
                     body = cases [(Bool True, e1_b)]
                   },
           sideCondition = \s -> do
@@ -239,7 +239,7 @@ rulesIndexFn = do
           -- TODO deduplicate
           from =
             IndexFn
-              { shape = [Forall i (Cat k (hole m) (hole b))],
+              { iterator = Forall i (Cat k (hole m) (hole b)),
                 body =
                   cases
                     [ (hole i :/= hole b, sym2SoP Recurrence),
@@ -255,7 +255,7 @@ rulesIndexFn = do
               let e1_b = rep (mkRep i' b') e1
               pure $
                 IndexFn
-                  { shape = [Forall i (Cat k (hole m) (hole b))],
+                  { iterator = Forall i (Cat k (hole m) (hole b)),
                     body = cases [(Bool True, e1_b)]
                   },
           sideCondition = \s -> do
@@ -279,7 +279,7 @@ rulesIndexFn = do
           --    e1{b/i} + (Σ_{j=b+1}^i e2_0{j/i}) + ... + (Σ_{j=b+1}^i e2_l{j/i})
           from =
             IndexFn
-              { shape = [Forall i (Iota (hole n))],
+              { iterator = Forall i (Iota (hole n)),
                 body =
                   cases
                     [ (hole i :== int 0, hole h1),
@@ -297,7 +297,7 @@ rulesIndexFn = do
             let e2_sum = toSumOfSums j (b' .+. int2SoP 1) (sym2SoP $ Var iter) e2_j
             subIndexFn s $
               IndexFn
-                { shape = [Forall i (Iota (hole n))],
+                { iterator = Forall i (Iota (hole n)),
                   body = cases [(Bool True, e1_b .+. e2_sum)]
                 },
           sideCondition = \s -> do
@@ -310,7 +310,7 @@ rulesIndexFn = do
         { name = "Prefix sum",
           from =
             IndexFn
-              { shape = [Forall i (Cat k (hole m) (hole b))],
+              { iterator = Forall i (Cat k (hole m) (hole b)),
                 body =
                   cases
                     [ (hole i :== hole b, hole h1),
@@ -331,7 +331,7 @@ rulesIndexFn = do
             debugPrettyM "e2_sum" e2_sum
             subIndexFn s $
               IndexFn
-                { shape = [Forall i (Cat k (hole m) (hole b))],
+                { iterator = Forall i (Cat k (hole m) (hole b)),
                   body = cases [(Bool True, e1_b .+. e2_sum)]
                 },
           sideCondition = \s -> do
@@ -343,7 +343,7 @@ rulesIndexFn = do
         { name = "Bool to Int",
           from =
             IndexFn
-              { shape = [],
+              { iterator = Empty,
                 body =
                   cases
                     [ (Hole h1, hole h3),
@@ -353,7 +353,7 @@ rulesIndexFn = do
           to = \s ->
             subIndexFn s $
               IndexFn
-                { shape = [],
+                { iterator = Empty,
                   body = cases [(Bool True, hole h1 .*. hole h3 .+. hole h2 .*. hole h4)]
                 },
           sideCondition = \s -> do

@@ -3,7 +3,7 @@
 module Futhark.Analysis.Properties.IndexFn
   ( IndexFn (..),
     Domain (..),
-    Quantified (..),
+    Iterator (..),
     Cases (..),
     cases,
     casesToList,
@@ -15,7 +15,6 @@ module Futhark.Analysis.Properties.IndexFn
     justSingleCase,
     singleCase,
     fromScalar,
-    Iterator,
   )
 where
 
@@ -25,7 +24,7 @@ import Futhark.SoP.SoP (SoP, sym2SoP, (.*.), (.+.))
 import Language.Futhark (VName)
 
 data IndexFn = IndexFn
-  { shape :: [Quantified Domain],
+  { iterator :: Iterator,
     body :: Cases Symbol (SoP Symbol)
   }
   deriving (Show, Eq)
@@ -38,22 +37,21 @@ data Domain
       (SoP Symbol) -- b
   deriving (Show, Eq, Ord)
 
-data Quantified a = Forall VName a
-  deriving (Show, Ord)
+data Iterator
+  = Forall VName Domain
+  | Empty
+  deriving (Show)
 
-instance Eq a => Eq (Quantified a) where
+instance Eq Iterator where
+  (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
   (Forall _ u) == (Forall _ v) = u == v
+  Empty == Empty = True
+  _ == _ = False
 
-type Iterator = Quantified Domain
-
--- instance Eq (Quantified Domain) where
---   (Forall _ u@(Cat k _ _)) == (Forall _ v@(Cat k' _ _)) = u == v && k == k'
---   (Forall _ u) == (Forall _ v) = u == v
-
--- instance Ord Iterator where
---   (<=) :: Iterator -> Iterator -> Bool
---   _ <= Empty = False
---   _ <= Forall {} = True
+instance Ord Iterator where
+  (<=) :: Iterator -> Iterator -> Bool
+  _ <= Empty = False
+  _ <= Forall {} = True
 
 newtype Cases a b = Cases (NE.NonEmpty (a, b))
   deriving (Show, Eq, Ord)
@@ -80,7 +78,7 @@ justSingleCase f
   | otherwise =
       Nothing
 
-catVar :: Quantified Domain -> Maybe VName
+catVar :: Iterator -> Maybe VName
 catVar (Forall _ (Cat k _ _)) = Just k
 catVar _ = Nothing
 
@@ -91,4 +89,4 @@ singleCase :: a -> Cases Symbol a
 singleCase e = cases [(Bool True, e)]
 
 fromScalar :: SoP Symbol -> [IndexFn]
-fromScalar e = [IndexFn [] (singleCase e)]
+fromScalar e = [IndexFn Empty (singleCase e)]
