@@ -1,12 +1,14 @@
 -- Index function substitution.
 module Futhark.Analysis.Properties.Substitute ((@), subst) where
 
-import Control.Monad (unless, when)
+import Control.Monad (guard, unless, when)
+import Control.Monad.RWS (lift)
+import Control.Monad.Trans.Maybe (MaybeT)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
-import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, isYes, simplify)
+import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, answerFromBool, isYes, orM, simplify)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
@@ -161,6 +163,47 @@ substituteOnce f g_non_repped (f_apply, args) = do
           | same_range ->
               Forall j $ repDomain (mkRep i $ Var j) df
         _ -> g_iter
+
+  let arg_in_segment df i j = do
+        let arg_eq_j = pure . answerFromBool $ f_arg M.! i == sym2SoP (Var j)
+        let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
+        let arg_in_segment_bounds =
+              askQ
+                (CaseCheck (\_ -> bounds $ f_arg M.! i))
+                (IndexFn new_iter (body g))
+        arg_eq_j `orM` arg_in_segment_bounds
+
+  let subRules :: Iterator -> Iterator -> MaybeT IndexFnM IndexFn
+      subRules Empty _ =
+        -- Sub1
+        IndexFn g_iter <$> lift (simplify new_body_unsimplified)
+      subRules (Forall _ (Iota _)) _ =
+        -- Sub1
+        IndexFn g_iter <$> lift (simplify new_body_unsimplified)
+      subRules (Forall i df@(Cat k _ _)) (Forall j (Iota n))
+        | k `S.member` fv new_body_unsimplified = do
+            -- Sub2
+            True <- lift $ rewrite (domainEnd df) >>= unifiesWith n
+            Yes <- lift $ arg_in_segment df i j
+            IndexFn g_iter <$> lift (simplify new_body_unsimplified)
+      subRules (Forall i df@(Cat k _ _)) (Forall j dg@(Cat k' _ _))
+        | k `S.member` fv new_body_unsimplified = do
+            -- Sub3
+            True <- lift $ df `unifiesWith` dg
+            Yes <- lift $ arg_in_segment df i j
+            repIndexFn (mkRep k (sym2SoP $ Var k')) . IndexFn g_iter <$>
+              lift (simplify new_body_unsimplified)
+      subRules (Forall i df@(Cat k _ _)) _ = do
+        -- Sub 4
+        Just solution <-
+          lift . firstAlt . map (\e_k -> solveFor k e_k (f_arg M.! i)) $
+            [intervalStart df, intervalEnd df]
+        repIndexFn (mkRep k solution) . IndexFn g_iter <$>
+          lift (simplify new_body_unsimplified)
+
+  -- XXX add separate func here that extracts Sub 4 above and falls back to II creation
+  -- (Right now it's not entirely equivalent to before or to paper because
+  --  sub 4 should be tried whenever sub 2 or 3 fails.)
 
   -- If f has a segmented structure (Cat k _ _), make sure that
   -- k is not captured in the body of g after substitution.
@@ -397,3 +440,8 @@ unisearch x mapping = do
         [(v, _)] ->
           pure (Just v)
         _ -> error "unisearch: multiple matches"
+
+unifiesWith :: (Unify v Symbol, Pretty v) => v -> v -> IndexFnM Bool
+unifiesWith a b = do
+  equiv :: Maybe (Substitution Symbol) <- unify a b
+  pure $ isJust equiv
