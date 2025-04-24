@@ -46,6 +46,7 @@ type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
 -- a constraint on how it can be instantiated.
 type UnconTyVar = (VName, Liftedness)
 
+
 liftST :: ST s a -> SolveM s a
 liftST = SolveM . lift . lift
 
@@ -54,10 +55,224 @@ initialState typarams tyvars = do
   tyvars' <- M.traverseWithKey f tyvars
   typarams' <- M.traverseWithKey g typarams
   put $ SolverState $ typarams' <> tyvars'
-
   where
     f tv (lvl, info) = liftST $ makeTyVarNode tv lvl info
     g tv (lvl, lft, loc) = liftST $ makeTyParamNode tv lvl lft loc
+
+typeError :: Loc -> Notes -> Doc () -> SolveM s ()
+typeError loc notes msg =
+  throwError $ TypeError loc notes msg
+
+typeVar :: (Monoid u) => VName -> TypeBase dim u
+typeVar v = Scalar $ TypeVar mempty (qualName v) []
+
+enrichType :: Type -> SolveM s Type
+enrichType t = do
+  s <- get
+  uf <- convertUF (solverTyVars s)
+  pure $ substTyVars (substTyVar uf) t
+
+cannotUnify ::
+  Reason Type ->
+  Notes ->
+  BreadCrumbs ->
+  Type ->
+  Type ->
+  SolveM s ()
+cannotUnify reason notes bcs t1 t2 = do
+  t1' <- enrichType t1
+  t2' <- enrichType t2
+  case reason of
+    Reason loc ->
+      typeError loc notes . stack $
+        [ "Cannot unify",
+          indent 2 (pretty t1'),
+          "with",
+          indent 2 (pretty t2')
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    ReasonPatMatch loc pat value_t ->
+      typeError loc notes . stack $
+        [ "Pattern",
+          indent 2 $ align $ pretty pat,
+          "cannot match value of type",
+          indent 2 $ align $ pretty value_t
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    ReasonAscription loc expected actual ->
+      typeError loc notes . stack $
+        [ "Expression does not have expected type from type ascription.",
+          "Expected:" <+> align (pretty expected),
+          "Actual:  " <+> align (pretty actual)
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    ReasonRetType loc expected actual -> do
+      expected' <- enrichType expected
+      actual' <- enrichType actual
+      typeError loc notes . stack $
+        [ "Function body does not have expected type.",
+          "Expected:" <+> align (pretty expected'),
+          "Actual:  " <+> align (pretty actual')
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    ReasonApply loc f e expected actual -> do
+      expected' <- enrichType expected
+      actual' <- enrichType actual
+      typeError loc notes . stack $
+        [ header,
+          "Expected:" <+> align (pretty expected'),
+          "Actual:  " <+> align (pretty actual')
+        ]
+      where
+        header =
+          case f of
+            (Nothing, _) ->
+              "Cannot apply function to"
+                <+> dquotes (shorten $ group $ pretty e)
+                <> " (invalid type)."
+            (Just fname, _) ->
+              "Cannot apply"
+                <+> dquotes (pretty fname)
+                <+> "to"
+                <+> dquotes (align $ shorten $ group $ pretty e)
+                <> " (invalid type)."
+    ReasonApplySplit loc (fname, 0) _ ftype ->
+      typeError loc notes $
+        stack
+          [ "Cannot apply"
+              <+> fname'
+              <+> "as function, as it has non-function type:"
+              </> indent 2 (align $ pretty ftype)
+          ]
+      where
+        fname' = maybe "expression" (dquotes . pretty) fname
+    ReasonApplySplit loc (fname, i) e _ ->
+      typeError loc notes $
+        stack
+          [ "Cannot apply"
+              <+> fname'
+              <+> "to"
+              <+> dquotes (align $ shorten $ group $ pretty e)
+              <> ".",
+            "Function accepts only" <+> pretty i <+> "arguments."
+          ]
+      where
+        fname' = maybe "expression" (dquotes . pretty) fname
+    ReasonBranches loc former latter -> do
+      former' <- enrichType former
+      latter' <- enrichType latter
+      typeError loc notes . stack $
+        [ "Branches differ in type.",
+          "Former:" <+> pretty former',
+          "Latter:" <+> pretty latter'
+        ]
+
+unsharedConstructorsMsg :: M.Map Name t -> M.Map Name t -> Doc a
+unsharedConstructorsMsg cs1 cs2 =
+  "Unshared constructors:" <+> commasep (map (("#" <>) . pretty) missing) <> "."
+  where
+    missing =
+      filter (`notElem` M.keys cs1) (M.keys cs2)
+        ++ filter (`notElem` M.keys cs2) (M.keys cs1)
+
+convertUF :: UF s -> SolveM s (M.Map TyVar TyVarSol)
+convertUF uf = do
+  mappings <- mapM maybeLookupSol (M.toList uf)
+  pure $ M.fromList $ catMaybes mappings
+  where
+    maybeLookupSol :: (TyVar, TyVarNode s) -> SolveM s (Maybe (TyVar, TyVarSol))
+    maybeLookupSol (tv, node) = do
+      root <- liftST $ find node
+      descr <- liftST $ getDescr root
+      pure $ case descr of
+        t@(Solved _) -> Just (tv, t)
+        _ -> Nothing
+
+substTyVar :: (Monoid u) => M.Map TyVar TyVarSol -> VName -> Maybe (TypeBase () u)
+substTyVar m v =
+  case M.lookup v m of
+    Just (Solved t') -> Just $ second (const mempty) $ substTyVars (substTyVar m) t'
+    _ -> Nothing
+
+occursCheck :: Reason Type -> VName -> Type -> SolveM s ()
+occursCheck reason v tp = do
+  vars <- gets solverTyVars
+  vars' <- convertUF vars
+  let tp' = substTyVars (substTyVar vars') tp
+  when (v `S.member` typeVars tp') . typeError (locOf reason) mempty $
+    "Occurs check: cannot instantiate"
+      <+> prettyName v
+      <+> "with"
+      <+> pretty tp
+      <> "."
+
+bindTyVar :: Reason Type -> BreadCrumbs -> VName -> Type -> SolveM s ()
+bindTyVar reason bcs v t = do
+  occursCheck reason v t
+  v_node <- lookupUF v
+
+  setInfo v_node (Solved t)
+
+  v_info <- liftST $ getDescr v_node
+
+  case (v_info, t) of
+    ( Unsolved TyVarFree {}, _ ) -> pure ()
+    ( Unsolved (TyVarPrim _ v_pts), _ ) ->
+        if t `elem` map (Scalar . Prim) v_pts
+          then pure ()
+          else cannotUnify reason notes bcs (typeVar v) t
+        where
+          notes =
+            aNote $
+              "Cannot instantiate type that must be one of"
+                </> indent 2 (pretty v_pts)
+                </> "with"
+                </> indent 2 (pretty t)
+    ( Unsolved (TyVarSum _ cs1), Scalar (Sum cs2) ) ->
+        if all (`elem` M.keys cs2) (M.keys cs1)
+          then unifySharedConstructors reason bcs cs1 cs2
+          else cannotUnify reason notes bcs (typeVar v) t
+        where
+          notes =
+            aNote $
+              "Cannot match type with constructors"
+                </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs1)))
+                </> "with type with constructors"
+                </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs2)))
+                </> unsharedConstructorsMsg cs1 cs2
+    ( Unsolved (TyVarSum _ cs1), _ ) ->
+        typeError (locOf reason) mempty $
+          "Cannot unify type with constructors"
+            </> indent 2 (pretty (Sum cs1))
+            </> "with type"
+            </> indent 2 (pretty t)
+    ( Unsolved (TyVarRecord _ fs1), Scalar (Record fs2) ) ->
+        if all (`elem` M.keys fs2) (M.keys fs1)
+          then unifySharedFields reason bcs fs1 fs2
+          else
+            typeError (locOf reason) mempty $
+              "Cannot unify record type with fields"
+                </> indent 2 (pretty (Record fs1))
+                </> "with record type"
+                </> indent 2 (pretty (Record fs2))
+    ( Unsolved (TyVarRecord _ fs1), _ ) ->
+        typeError (locOf reason) mempty $
+          "Cannot unify record type with fields"
+            </> indent 2 (pretty (Record fs1))
+            </> "with type"
+            </> indent 2 (pretty t)
+    --
+    -- Internal error cases
+    (Solved {}, _) ->
+      error $ "Type variable already solved: " <> prettyNameString v
+    (Param {}, _) ->
+      error $ "Cannot substitute type parameter: " <> prettyNameString v
+    -- ({}, _) ->
+    --   error $ "Type variable already linked: " <> prettyNameString v
+    -- (Nothing, _) ->
+    --   error $ "subTyVar: Nothing v: " <> prettyNameString v
+  
+  
 
 solution :: SolverState s -> ([UnconTyVar], Solution)
 solution _s = undefined
@@ -316,10 +531,6 @@ lookupUF tv = do
   case M.lookup tv uf of
     Nothing -> error $ "Unknown tyvar: " <> prettyNameString tv
     Just node -> pure node
-
-typeError :: Loc -> Notes -> Doc () -> SolveM s ()
-typeError loc notes msg =
-  throwError $ TypeError loc notes msg
 
 unifySharedFields ::
   Reason Type ->
