@@ -26,7 +26,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Either
 import Data.Foldable
-import Data.List (partition, transpose, unzip6, zip6)
+import Data.List (partition, transpose, unzip4, unzip6, zip6)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -227,7 +227,8 @@ topDownRules =
     RuleOp removeDuplicateMapOutput,
     RuleOp fuseConcatScatter,
     RuleOp simplifyMapIota,
-    RuleOp moveTransformToInput
+    RuleOp moveTransformToInput,
+    RuleOp moveTransformToOutput
   ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -1010,4 +1011,77 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
               )
     mapOverArr _ = pure Nothing
 moveTransformToInput _ _ _ _ =
+  Skip
+
+-- The idea behidn this rule is to tak cases such as
+--
+--   let ...A... =
+--     map (\x -> ...
+--              let x = ...
+--              ...
+--              let y = f(x)
+--              ...
+--              in ...y ...)
+--
+-- where 'f' is some transformation like a reshape, and move it out
+-- such that we get
+--
+--   let ...A'... =
+--     map (\x -> ...
+--              let x = ...
+--              ...
+--              in ...x ...)
+--   let A' = f'(A')
+--
+-- This can improve simplification in case A' fuses or simplifies with
+-- something else.
+--
+-- TODO: currently we only handle reshapes here, but the principle
+-- should actually hold for any ArrayTransform.
+moveTransformToOutput :: TopDownRuleOp (Wise SOACS)
+moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm map_lam scan reduce))
+  | (transformed, map_infos, stms') <-
+      foldl' onStm ([], zip3 map_res map_rets map_pes, mempty) $ bodyStms $ lambdaBody map_lam,
+    (map_res', map_rets', map_pes') <- unzip3 map_infos,
+    not $ null transformed = Simplify $ do
+      (tr_res, tr_rets, tr_names, post) <- unzip4 <$> mapM mkTransformed transformed
+      let map_lam' =
+            map_lam
+              { lambdaBody = mkBody stms' $ nonmap_res <> map_res' <> tr_res,
+                lambdaReturnType = nonmap_rets <> map_rets' <> tr_rets
+              }
+          pat_names = map patElemName (nonmap_pes <> map_pes') <> tr_names
+      auxing screma_aux . letBindNames pat_names . Op $
+        Screma w arrs (ScremaForm map_lam' scan reduce)
+      sequence_ post
+  where
+    num_nonmap_res = scanResults scan + redResults reduce
+    (nonmap_pes, map_pes) =
+      splitAt num_nonmap_res $ patElems screma_pat
+    (nonmap_rets, map_rets) =
+      splitAt num_nonmap_res $ lambdaReturnType map_lam
+    (nonmap_res, map_res) =
+      splitAt num_nonmap_res $ bodyResult $ lambdaBody map_lam
+
+    scope = scopeOf $ bodyStms $ lambdaBody map_lam
+
+    invariantToMap = all (`ST.elem` vtable) . namesToList . freeIn
+
+    onStm (transformed, map_infos, stms) (Let (Pat [pe]) aux (BasicOp (Reshape k new_shape arr)))
+      | ([(res, _, screma_pe)], map_pesres') <- partition matches map_infos,
+        Just t <- typeOf <$> M.lookup arr scope,
+        invariantToMap t =
+          let cs = stmAuxCerts aux <> resCerts res
+              transform = (arr, cs, BasicOp . Reshape k (Shape [w] <> new_shape))
+           in ((t, screma_pe, transform) : transformed, map_pesres', stms)
+      where
+        matches (r, _, _) = resSubExp r == Var (patElemName pe)
+    onStm (transformed, map_infos, stms) stm =
+      (transformed, map_infos, stms <> oneStm stm)
+
+    mkTransformed (t, pe, (arr, cs, f)) = do
+      v <- newVName (baseString (patElemName pe) <> "_pretr")
+      let bind = letBindNames [patElemName pe] $ f v
+      pure (SubExpRes cs (Var arr), t, v, bind)
+moveTransformToOutput _ _ _ _ =
   Skip

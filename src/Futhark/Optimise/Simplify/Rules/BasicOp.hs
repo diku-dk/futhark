@@ -366,6 +366,16 @@ ruleBasicOp vtable pat aux (Manifest perm v1)
     ST.available v2 vtable =
       Simplify . auxing aux . certifying cs . letBind pat . BasicOp $
         Manifest perm v2
+ruleBasicOp vtable pat aux (Reshape ReshapeArbitrary v3_shape v2)
+  | Just (Rearrange perm v1, v2_cs) <- ST.lookupBasicOp v2 vtable,
+    Just (Reshape ReshapeArbitrary v1_shape v0, v1_cs) <- ST.lookupBasicOp v1 vtable,
+    Just v0_shape <- arrayShape <$> ST.lookupType v0 vtable,
+    Just perm' <-
+      flipReshapeRearrange (shapeDims v0_shape) (shapeDims v1_shape) perm =
+      Simplify $ do
+        v1' <- letExp (baseString v1) $ BasicOp $ Rearrange perm' v0
+        auxing aux . certifying (v1_cs <> v2_cs) . letBind pat $
+          BasicOp (Reshape ReshapeArbitrary v3_shape v1')
 ruleBasicOp _ _ _ _ =
   Skip
 

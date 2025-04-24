@@ -535,7 +535,7 @@ prepareIntermediateArraysLocal num_subhistos_per_block blocks_per_segment =
             let lock_shape =
                   Shape [tvSize num_subhistos_per_block, hist_H_chk]
 
-            let dims = map pe64 $ shapeDims lock_shape
+            let dims = [sExt64 (tvExp num_subhistos_per_block), pe64 hist_H_chk]
 
             locks <- sAllocArray "locks" int32 lock_shape $ Space "shared"
 
