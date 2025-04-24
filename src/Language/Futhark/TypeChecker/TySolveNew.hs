@@ -187,7 +187,7 @@ unionTyVars reason bcs v t = do
       ) -> do
         unifySharedConstructors reason bcs cs1 cs2
         let cs3 = cs1 <> cs2
-        setInfo t_node (Unsolved (TyVarSum loc cs3))
+        setInfo t_node $ Unsolved $ TyVarSum loc cs3
     ( Unsolved TyVarSum {},
       TyVarPrim _ pts
       ) ->
