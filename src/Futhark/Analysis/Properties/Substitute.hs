@@ -157,20 +157,20 @@ substituteOnce f g_non_repped (f_apply, args) = do
 
   let g_iter = subIterator vn (iterator g)
   same_range <- isSameRange (iterator f) g_iter
-  let new_iter = case (iterator f, g_iter) of
-        -- Propagate domain of f into g.
-        (Forall i df@(Cat {}), Forall j (Iota {}))
-          | same_range ->
-              Forall j $ repDomain (mkRep i $ Var j) df
-        _ -> g_iter
+  -- let new_iter = case (iterator f, g_iter) of
+  --       -- Propagate domain of f into g.
+  --       (Forall i df@(Cat {}), Forall j (Iota {}))
+  --         | same_range ->
+  --             Forall j $ repDomain (mkRep i $ Var j) df
+  --       _ -> g_iter
 
-  let arg_in_segment df i j = do
+  let arg_in_segment df itg i j = do
         let arg_eq_j = pure . answerFromBool $ f_arg M.! i == sym2SoP (Var j)
         let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
         let arg_in_segment_bounds =
               askQ
                 (CaseCheck (\_ -> bounds $ f_arg M.! i))
-                (IndexFn new_iter (body g))
+                (IndexFn itg (body g))
         arg_eq_j `orM` arg_in_segment_bounds
 
   let subRules :: Iterator -> Iterator -> MaybeT IndexFnM IndexFn
@@ -184,22 +184,30 @@ substituteOnce f g_non_repped (f_apply, args) = do
         | k `S.member` fv new_body_unsimplified = do
             -- Sub2
             True <- lift $ rewrite (domainEnd df) >>= unifiesWith n
-            Yes <- lift $ arg_in_segment df i j
-            IndexFn g_iter <$> lift (simplify new_body_unsimplified)
+            -- Propagate domain of f into g.
+            let new_iter = Forall j $ repDomain (mkRep i $ Var j) df
+            Yes <- lift $ arg_in_segment df new_iter i j
+            IndexFn new_iter <$> lift (simplify new_body_unsimplified)
       subRules (Forall i df@(Cat k _ _)) (Forall j dg@(Cat k' _ _))
         | k `S.member` fv new_body_unsimplified = do
             -- Sub3
             True <- lift $ df `unifiesWith` dg
-            Yes <- lift $ arg_in_segment df i j
+            Yes <- lift $ arg_in_segment df g_iter i j
             repIndexFn (mkRep k (sym2SoP $ Var k')) . IndexFn g_iter <$>
               lift (simplify new_body_unsimplified)
-      subRules (Forall i df@(Cat k _ _)) _ = do
+      subRules _ _ = fail "No match."
+
+      subRules2 (Forall i df@(Cat k _ _)) _ = do
         -- Sub 4
         Just solution <-
           lift . firstAlt . map (\e_k -> solveFor k e_k (f_arg M.! i)) $
             [intervalStart df, intervalEnd df]
         repIndexFn (mkRep k solution) . IndexFn g_iter <$>
           lift (simplify new_body_unsimplified)
+
+      subRules3 (Forall i df@(Cat k _ _)) _ = do
+        -- II fallback
+        undefined
 
   -- XXX add separate func here that extracts Sub 4 above and falls back to II creation
   -- (Right now it's not entirely equivalent to before or to paper because
