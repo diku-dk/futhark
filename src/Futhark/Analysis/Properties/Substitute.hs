@@ -1,9 +1,10 @@
 -- Index function substitution.
 module Futhark.Analysis.Properties.Substitute ((@), subst) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (guard, unless, when)
 import Control.Monad.RWS (lift)
-import Control.Monad.Trans.Maybe (MaybeT)
+import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
@@ -156,13 +157,6 @@ substituteOnce f g_non_repped (f_apply, args) = do
         pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep f_arg p_f), rep s v_g)
 
   let g_iter = subIterator vn (iterator g)
-  same_range <- isSameRange (iterator f) g_iter
-  -- let new_iter = case (iterator f, g_iter) of
-  --       -- Propagate domain of f into g.
-  --       (Forall i df@(Cat {}), Forall j (Iota {}))
-  --         | same_range ->
-  --             Forall j $ repDomain (mkRep i $ Var j) df
-  --       _ -> g_iter
 
   let arg_in_segment df itg i j = do
         let arg_eq_j = pure . answerFromBool $ f_arg M.! i == sym2SoP (Var j)
@@ -170,9 +164,13 @@ substituteOnce f g_non_repped (f_apply, args) = do
         let arg_in_segment_bounds =
               askQ
                 (CaseCheck (\_ -> bounds $ f_arg M.! i))
-                (IndexFn itg (body g))
+                (IndexFn itg (body g_non_repped)) -- XXX non_repped?
         arg_eq_j `orM` arg_in_segment_bounds
 
+  -- TODO define these functions at top-level
+  -- but of type IndexFn -> IndexFn -> ...
+  -- let the rest of the code here be a pre-processing step
+  -- but extract new_body_unsimplified as a function? using this in each case of subRules
   let subRules :: Iterator -> Iterator -> MaybeT IndexFnM IndexFn
       subRules Empty _ =
         -- Sub1
@@ -193,93 +191,50 @@ substituteOnce f g_non_repped (f_apply, args) = do
             -- Sub3
             True <- lift $ df `unifiesWith` dg
             Yes <- lift $ arg_in_segment df g_iter i j
-            repIndexFn (mkRep k (sym2SoP $ Var k')) . IndexFn g_iter <$>
-              lift (simplify new_body_unsimplified)
+            repIndexFn (mkRep k (sym2SoP $ Var k')) . IndexFn g_iter
+              <$> lift (simplify new_body_unsimplified)
       subRules _ _ = fail "No match."
 
+      subRules2 :: Iterator -> Iterator -> MaybeT IndexFnM IndexFn
       subRules2 (Forall i df@(Cat k _ _)) _ = do
         -- Sub 4
         Just solution <-
           lift . firstAlt . map (\e_k -> solveFor k e_k (f_arg M.! i)) $
             [intervalStart df, intervalEnd df]
-        repIndexFn (mkRep k solution) . IndexFn g_iter <$>
-          lift (simplify new_body_unsimplified)
+        repIndexFn (mkRep k solution) . IndexFn g_iter
+          <$> lift (simplify new_body_unsimplified)
+      subRules2 _ _ = fail "No match."
 
-      subRules3 (Forall i df@(Cat k _ _)) _ = do
-        -- II fallback
-        undefined
+      subRules3 :: Iterator -> Iterator -> MaybeT IndexFnM IndexFn
+      subRules3 f_iter@(Forall i df@(Cat k _ _)) itg = do
+        -- Create II array.
+        let def_II = IndexFn f_iter (cases [(Bool True, sym2SoP (Var k))])
+        -- Make sure that f is not already an II array. (One defined by the user.)
+        Nothing :: Maybe (Substitution Symbol) <- lift $ unify f def_II
 
-  -- XXX add separate func here that extracts Sub 4 above and falls back to II creation
-  -- (Right now it's not entirely equivalent to before or to paper because
-  --  sub 4 should be tried whenever sub 2 or 3 fails.)
+        (vn_II, f_II) <- lift $ lookupII df def_II
+        lift $ insertIndexFn vn_II [f_II]
 
-  -- If f has a segmented structure (Cat k _ _), make sure that
-  -- k is not captured in the body of g after substitution.
-  case iterator f of
-    Forall i df@(Cat k _ _)
-      | k `S.member` fv new_body_unsimplified -> do
-          let t1 =
-                if same_range
-                  then do
-                    if f_arg M.!? i == (sym2SoP . Var <$> iterVar g_iter)
-                      then pure (sym2SoP . Var <$> catVar new_iter)
-                      else -- Check that indexing into f is within segment bounds.
-                      do
-                        let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
-                        in_segment <-
-                          askQ
-                            (CaseCheck (\_ -> bounds $ f_arg M.! i))
-                            (IndexFn new_iter (body g))
-                        case in_segment of
-                          Yes -> pure (sym2SoP . Var <$> catVar new_iter)
-                          Unknown -> pure Nothing
-                  else pure Nothing
-          let t2 = solveFor k (intervalStart df) (f_arg M.! i)
-          let t3 = solveFor k (intervalEnd df) (f_arg M.! i)
-          k_solution <- firstAlt [t1, t2, t3]
-          case k_solution of
-            Just res -> do
-              printM 1337 $ "\tk SOLVED " <> prettyString res
-              new_body <- simplify new_body_unsimplified
-              pure (Just $ repIndexFn (mkRep k res) $ IndexFn new_iter new_body)
-            Nothing -> do
-              printM 1337 $ "new_body " <> prettyString new_body_unsimplified
-              printM 1337 $
-                warningString "Would capture k in:\n"
-                  <> prettyIndent 2 g
-                  <> "\n  where "
-                  <> prettyString f_apply
-                  <> " = \n"
-                  <> prettyIndent 8 f
-                  <> "\n  with "
-                  <> prettyString f_arg
+        new_iter <- case itg of
+          Forall j dg@(Cat {}) ->
+            Forall j . Iota <$> lift (rewrite (domainEnd dg .+. int2SoP 1))
+          _ -> pure itg
 
-              -- Create II array.
-              let def_II = IndexFn (iterator f) (cases [(Bool True, sym2SoP (Var k))])
-              -- Is f already an II array? (One defined by the user.)
-              s :: Maybe (Substitution Symbol) <- unify f def_II
-              case s of
-                Just _ -> pure Nothing
-                Nothing -> do
-                  (vn_II, f_II) <- lookupII df def_II
-                  insertIndexFn vn_II [f_II]
+        let ii idx = sym2SoP (Idx (Var vn_II) idx)
+        let k_rep = case itg of
+              Forall j (Cat k' _ _) ->
+                mkRep k' (ii (sym2SoP $ Var j)) <> mkRep k (ii $ f_arg M.! i)
+              _ -> mkRep k (ii $ f_arg M.! i)
 
-                  -- Replace k by II[j].
-                  -- k in new_iter and k in (iterator f) may be different names.
-                  (new_iter', kRep) <- case new_iter of
-                    Forall j new_dom@(Cat k2 _ _) -> do
-                      n <- rewrite $ domainEnd new_dom .+. int2SoP 1
-                      pure (Forall j (Iota n), mkRep k2 (sym2SoP (Idx (Var vn_II) (sym2SoP $ Var j))))
-                    Forall j (Iota n) -> do
-                      pure (Forall j (Iota n), mempty)
-                    Empty -> pure (Empty, mempty)
-                  let kRep' = kRep <> mkRep k (sym2SoP (Idx (Var vn_II) (f_arg M.! i)))
+        -- TODO why not just k rep and then simplify whole function?
+        new_body <- lift $ simplify (repCases k_rep new_body_unsimplified)
+        pure (repIndexFn k_rep $ IndexFn new_iter new_body)
+      subRules3 _ _ = fail "No match."
 
-                  new_body <- simplify (repCases kRep' new_body_unsimplified)
-                  pure (Just $ repIndexFn kRep' $ IndexFn new_iter' new_body)
-    _ -> do
-      new_body <- simplify new_body_unsimplified
-      pure (Just $ IndexFn new_iter new_body)
+  runMaybeT $
+    subRules (iterator f) g_iter
+    <|> subRules2 (iterator f) g_iter
+    <|> subRules3 (iterator f) g_iter
   where
     -- Construct replacement from formal arguments of f to actual arguments.
     f_arg :: Replacement Symbol =
