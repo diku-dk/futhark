@@ -65,8 +65,225 @@ solution _s = undefined
 solveCt :: CtTy () -> SolveM s ()
 solveCt (CtEq reason t1 t2) = solveEq reason mempty t1 t2
 
+unsharedConstructorsMsg :: M.Map Name t -> M.Map Name t -> Doc a
+unsharedConstructorsMsg cs1 cs2 =
+  "Unshared constructors:" <+> commasep (map (("#" <>) . pretty) missing) <> "."
+  where
+    missing =
+      filter (`notElem` M.keys cs1) (M.keys cs2)
+        ++ filter (`notElem` M.keys cs2) (M.keys cs1)
+
 solveEq :: Reason Type -> BreadCrumbs -> Type -> Type -> SolveM s ()
-solveEq _reason _obcs _orig_t1 _orig_t2 = undefined
+solveEq reason obcs orig_t1 orig_t2 = do
+  solveCt' (obcs, (orig_t1, orig_t2))
+  where
+    flexible :: VName -> SolveM s Bool
+    flexible v = do
+      uf <- gets solverTyVars
+      case M.lookup v uf of
+        Just node -> do
+          sol <- liftST $ getDescr node
+          pure $ case sol of
+            Unsolved _ -> True
+            _ -> False
+        Nothing -> pure False
+
+    sub :: TypeBase () NoUniqueness -> SolveM s (TypeBase () NoUniqueness)
+    sub t@(Scalar (TypeVar _ (QualName [] v) [])) = do
+      uf <- gets solverTyVars
+      case M.lookup v uf of
+        Just node -> do
+          descr <- liftST $ getDescr node
+          case descr of
+            Solved t' -> sub t'
+            _ -> pure t
+        _ -> pure t
+    sub t = pure t
+
+    solveCt' :: (BreadCrumbs, (Type, Type)) -> SolveM s ()
+    solveCt' (bcs, (t1, t2)) = do
+      sub_t1 <- sub t1
+      sub_t2 <- sub t2
+      case (sub_t1, sub_t2) of
+        ( t1'@(Scalar (TypeVar _ (QualName [] v1) [])),
+          t2'@(Scalar (TypeVar _ (QualName [] v2) []))
+          )
+            | v1 == v2 -> pure ()
+            | otherwise -> do
+                v1_flexible <- flexible v1
+                v2_flexible <- flexible v2
+                case (v1_flexible, v2_flexible) of
+                  (False, False) -> cannotUnify reason mempty bcs t1 t2
+                  (True, False) -> bindTyVar reason bcs v1 t2'
+                  (False, True) -> bindTyVar reason bcs v2 t1'
+                  (True, True) -> unionTyVars reason bcs v1 v2
+        (Scalar (TypeVar _ (QualName [] v1) []), t2') -> do
+          v1_flexible <- flexible v1
+          when v1_flexible $ bindTyVar reason bcs v1 t2'
+        (t1', Scalar (TypeVar _ (QualName [] v2) [])) -> do
+          v2_flexible <- flexible v2
+          when v2_flexible $ bindTyVar reason bcs v2 t1'
+        (t1', t2') -> case unify t1' t2' of
+          Left details -> cannotUnify reason (aNote details) bcs t1' t2'
+          Right eqs -> mapM_ solveCt' eqs
+
+-- Unify at the root, emitting new equalities that must hold.
+unify :: Type -> Type -> Either (Doc a) [(BreadCrumbs, (Type, Type))]
+unify (Scalar (Prim pt1)) (Scalar (Prim pt2))
+  | pt1 == pt2 = Right []
+unify
+  (Scalar (TypeVar _ (QualName _ v1) targs1))
+  (Scalar (TypeVar _ (QualName _ v2) targs2))
+    | v1 == v2 =
+        Right $ mapMaybe f $ zip targs1 targs2
+    where
+      f (TypeArgType t1, TypeArgType t2) = Just (mempty, (t1, t2))
+      f _ = Nothing
+unify (Scalar (Arrow _ _ _ t1a (RetType _ t1r))) (Scalar (Arrow _ _ _ t2a (RetType _ t2r))) =
+  Right [(mempty, (t1a, t2a)), (mempty, (t1r', t2r'))]
+  where
+    t1r' = t1r `setUniqueness` NoUniqueness
+    t2r' = t2r `setUniqueness` NoUniqueness
+unify (Scalar (Record fs1)) (Scalar (Record fs2))
+  | M.keys fs1 == M.keys fs2 =
+      Right $
+        map (first matchingField) $
+          M.toList $
+            M.intersectionWith (,) fs1 fs2
+  | Just n1 <- length <$> areTupleFields fs1,
+    Just n2 <- length <$> areTupleFields fs2,
+    n1 /= n2 =
+      Left $
+        "Tuples have"
+          <+> pretty n1
+          <+> "and"
+          <+> pretty n2
+          <+> "elements respectively."
+  | otherwise =
+      let missing =
+            filter (`notElem` M.keys fs1) (M.keys fs2)
+              <> filter (`notElem` M.keys fs2) (M.keys fs1)
+       in Left $
+            "unshared fields:" <+> commasep (map pretty missing) <> "."
+unify (Scalar (Sum cs1)) (Scalar (Sum cs2))
+  | M.keys cs1 == M.keys cs2 =
+      fmap concat . forM cs' $ \(c, (ts1, ts2)) -> do
+        if length ts1 == length ts2
+          then Right $ zipWith (curry (matchingConstructor c,)) ts1 ts2
+          else Left mempty
+  | otherwise =
+      Left $ unsharedConstructorsMsg cs1 cs2
+  where
+    cs' = M.toList $ M.intersectionWith (,) cs1 cs2
+unify t1 t2
+  | Just t1' <- peelArray 1 t1,
+    Just t2' <- peelArray 1 t2 =
+      Right [(mempty, (t1', t2'))]
+unify _ _ = Left mempty
+
+cannotUnify ::
+  Reason Type ->
+  Notes ->
+  BreadCrumbs ->
+  Type ->
+  Type ->
+  SolveM s ()
+cannotUnify reason notes bcs t1 t2 = do
+  t1' <- enrichType t1
+  t2' <- enrichType t2
+  case reason of
+    Reason loc ->
+      typeError loc notes . stack $
+        [ "Cannot unify",
+          indent 2 (pretty t1'),
+          "with",
+          indent 2 (pretty t2')
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    ReasonPatMatch loc pat value_t ->
+      typeError loc notes . stack $
+        [ "Pattern",
+          indent 2 $ align $ pretty pat,
+          "cannot match value of type",
+          indent 2 $ align $ pretty value_t
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    ReasonAscription loc expected actual ->
+      typeError loc notes . stack $
+        [ "Expression does not have expected type from type ascription.",
+          "Expected:" <+> align (pretty expected),
+          "Actual:  " <+> align (pretty actual)
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    ReasonRetType loc expected actual -> do
+      expected' <- enrichType expected
+      actual' <- enrichType actual
+      typeError loc notes . stack $
+        [ "Function body does not have expected type.",
+          "Expected:" <+> align (pretty expected'),
+          "Actual:  " <+> align (pretty actual')
+        ]
+          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
+    ReasonApply loc f e expected actual -> do
+      expected' <- enrichType expected
+      actual' <- enrichType actual
+      typeError loc notes . stack $
+        [ header,
+          "Expected:" <+> align (pretty expected'),
+          "Actual:  " <+> align (pretty actual')
+        ]
+      where
+        header =
+          case f of
+            (Nothing, _) ->
+              "Cannot apply function to"
+                <+> dquotes (shorten $ group $ pretty e)
+                <> " (invalid type)."
+            (Just fname, _) ->
+              "Cannot apply"
+                <+> dquotes (pretty fname)
+                <+> "to"
+                <+> dquotes (align $ shorten $ group $ pretty e)
+                <> " (invalid type)."
+    ReasonApplySplit loc (fname, 0) _ ftype ->
+      typeError loc notes $
+        stack
+          [ "Cannot apply"
+              <+> fname'
+              <+> "as function, as it has non-function type:"
+              </> indent 2 (align $ pretty ftype)
+          ]
+      where
+        fname' = maybe "expression" (dquotes . pretty) fname
+    ReasonApplySplit loc (fname, i) e _ ->
+      typeError loc notes $
+        stack
+          [ "Cannot apply"
+              <+> fname'
+              <+> "to"
+              <+> dquotes (align $ shorten $ group $ pretty e)
+              <> ".",
+            "Function accepts only" <+> pretty i <+> "arguments."
+          ]
+      where
+        fname' = maybe "expression" (dquotes . pretty) fname
+    ReasonBranches loc former latter -> do
+      former' <- enrichType former
+      latter' <- enrichType latter
+      typeError loc notes . stack $
+        [ "Branches differ in type.",
+          "Former:" <+> pretty former',
+          "Latter:" <+> pretty latter'
+        ]
+
+-- Try to substitute as much information as we have.
+enrichType :: Type -> SolveM s Type
+enrichType t = undefined -- do
+  -- s <- get
+  -- pure $ substTyVars (substTyVar (solverTyVars s)) t
+
+bindTyVar :: Reason Type -> BreadCrumbs -> VName -> Type -> SolveM s ()
+bindTyVar reason bcs v t = undefined
 
 maybeLookupTyVar :: TyVar -> SolveM s (Maybe TyVarSol)
 maybeLookupTyVar tv = do
@@ -84,7 +301,7 @@ lookupTyVar tv =
     bad = error $ "Unknown tyvar: " <> prettyNameString tv
     unpack (Param {}) = error $ "Is a type param: " <> prettyNameString tv
     unpack (Solved t) = Right t
-    unpack (Unsolved info) = Left info    
+    unpack (Unsolved info) = Left info
 
 lookupTyVarInfo :: TyVar -> SolveM s (TyVarInfo ())
 lookupTyVarInfo v = do
@@ -146,8 +363,8 @@ unionTyVars reason bcs v t = do
   v_info <- liftST $ getDescr v_node
   t_info <- lookupTyVarInfo t
   case (v_info, t_info) of
-    (Unsolved (TyVarFree _ v_l), TyVarFree t_loc t_l) 
-      | v_l /= t_l -> 
+    (Unsolved (TyVarFree _ v_l), TyVarFree t_loc t_l)
+      | v_l /= t_l ->
         setInfo t_node $ Unsolved $ TyVarFree t_loc (min v_l t_l)
     (Unsolved TyVarFree {}, _) -> pure ()
     (Unsolved info, TyVarFree {}) -> do
@@ -231,7 +448,7 @@ unionTyVars reason bcs v t = do
 
   where
     alreadySolved = error $ "Type variable already solved: " <> prettyNameString v
-    isParam = error $ "Type name is a type parameter: " <> prettyNameString v    
+    isParam = error $ "Type name is a type parameter: " <> prettyNameString v
 
 solveTyVar :: (VName, (Level, TyVarInfo ())) -> SolveM s (UF s)
 solveTyVar _ = gets solverTyVars -- Just a test to see if things typecheck.
