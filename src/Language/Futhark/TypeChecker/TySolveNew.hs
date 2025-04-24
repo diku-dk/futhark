@@ -271,8 +271,6 @@ bindTyVar reason bcs v t = do
     --   error $ "Type variable already linked: " <> prettyNameString v
     -- (Nothing, _) ->
     --   error $ "subTyVar: Nothing v: " <> prettyNameString v
-  
-  
 
 solution :: SolverState s -> ([UnconTyVar], Solution)
 solution _s = undefined
@@ -459,9 +457,9 @@ unionTyVars reason bcs v t = do
   -- Unify the equivalence classes of v and t.
   liftST $ union v_node t_node
 
-  v_info <- liftST $ getDescr v_node
+  v_sol <- liftST $ getDescr v_node
   t_info <- lookupTyVarInfo t
-  case (v_info, t_info) of
+  case (v_sol, t_info) of
     (Unsolved (TyVarFree _ v_l), TyVarFree t_loc t_l)
       | v_l /= t_l ->
         setInfo t_node $ Unsolved $ TyVarFree t_loc (min v_l t_l)
