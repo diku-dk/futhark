@@ -280,14 +280,6 @@ solution _s = undefined
 solveCt :: CtTy () -> SolveM s ()
 solveCt (CtEq reason t1 t2) = solveEq reason mempty t1 t2
 
-unsharedConstructorsMsg :: M.Map Name t -> M.Map Name t -> Doc a
-unsharedConstructorsMsg cs1 cs2 =
-  "Unshared constructors:" <+> commasep (map (("#" <>) . pretty) missing) <> "."
-  where
-    missing =
-      filter (`notElem` M.keys cs1) (M.keys cs2)
-        ++ filter (`notElem` M.keys cs2) (M.keys cs1)
-
 solveEq :: Reason Type -> BreadCrumbs -> Type -> Type -> SolveM s ()
 solveEq reason obcs orig_t1 orig_t2 = do
   solveCt' (obcs, (orig_t1, orig_t2))
@@ -395,110 +387,6 @@ unify t1 t2
     Just t2' <- peelArray 1 t2 =
       Right [(mempty, (t1', t2'))]
 unify _ _ = Left mempty
-
-cannotUnify ::
-  Reason Type ->
-  Notes ->
-  BreadCrumbs ->
-  Type ->
-  Type ->
-  SolveM s ()
-cannotUnify reason notes bcs t1 t2 = do
-  t1' <- enrichType t1
-  t2' <- enrichType t2
-  case reason of
-    Reason loc ->
-      typeError loc notes . stack $
-        [ "Cannot unify",
-          indent 2 (pretty t1'),
-          "with",
-          indent 2 (pretty t2')
-        ]
-          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
-    ReasonPatMatch loc pat value_t ->
-      typeError loc notes . stack $
-        [ "Pattern",
-          indent 2 $ align $ pretty pat,
-          "cannot match value of type",
-          indent 2 $ align $ pretty value_t
-        ]
-          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
-    ReasonAscription loc expected actual ->
-      typeError loc notes . stack $
-        [ "Expression does not have expected type from type ascription.",
-          "Expected:" <+> align (pretty expected),
-          "Actual:  " <+> align (pretty actual)
-        ]
-          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
-    ReasonRetType loc expected actual -> do
-      expected' <- enrichType expected
-      actual' <- enrichType actual
-      typeError loc notes . stack $
-        [ "Function body does not have expected type.",
-          "Expected:" <+> align (pretty expected'),
-          "Actual:  " <+> align (pretty actual')
-        ]
-          <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
-    ReasonApply loc f e expected actual -> do
-      expected' <- enrichType expected
-      actual' <- enrichType actual
-      typeError loc notes . stack $
-        [ header,
-          "Expected:" <+> align (pretty expected'),
-          "Actual:  " <+> align (pretty actual')
-        ]
-      where
-        header =
-          case f of
-            (Nothing, _) ->
-              "Cannot apply function to"
-                <+> dquotes (shorten $ group $ pretty e)
-                <> " (invalid type)."
-            (Just fname, _) ->
-              "Cannot apply"
-                <+> dquotes (pretty fname)
-                <+> "to"
-                <+> dquotes (align $ shorten $ group $ pretty e)
-                <> " (invalid type)."
-    ReasonApplySplit loc (fname, 0) _ ftype ->
-      typeError loc notes $
-        stack
-          [ "Cannot apply"
-              <+> fname'
-              <+> "as function, as it has non-function type:"
-              </> indent 2 (align $ pretty ftype)
-          ]
-      where
-        fname' = maybe "expression" (dquotes . pretty) fname
-    ReasonApplySplit loc (fname, i) e _ ->
-      typeError loc notes $
-        stack
-          [ "Cannot apply"
-              <+> fname'
-              <+> "to"
-              <+> dquotes (align $ shorten $ group $ pretty e)
-              <> ".",
-            "Function accepts only" <+> pretty i <+> "arguments."
-          ]
-      where
-        fname' = maybe "expression" (dquotes . pretty) fname
-    ReasonBranches loc former latter -> do
-      former' <- enrichType former
-      latter' <- enrichType latter
-      typeError loc notes . stack $
-        [ "Branches differ in type.",
-          "Former:" <+> pretty former',
-          "Latter:" <+> pretty latter'
-        ]
-
--- Try to substitute as much information as we have.
-enrichType :: Type -> SolveM s Type
-enrichType t = undefined -- do
-  -- s <- get
-  -- pure $ substTyVars (substTyVar (solverTyVars s)) t
-
-bindTyVar :: Reason Type -> BreadCrumbs -> VName -> Type -> SolveM s ()
-bindTyVar reason bcs v t = undefined
 
 maybeLookupTyVar :: TyVar -> SolveM s (Maybe TyVarSol)
 maybeLookupTyVar tv = do
