@@ -414,7 +414,7 @@ scanStage3Nested ::
 scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = do
   let per_scan_out = segBinOpChunks scan_ops scan_out
       (scan_pars, map_pars) = splitAt (segBinOpResults scan_ops) $ lambdaParams $ segPostOpLambda post_op
-      per_scan_post_par = segBinOpChunks scan_ops scan_pars
+      per_scan_pars = segBinOpChunks scan_ops scan_pars
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   body <- collect $ do
@@ -429,7 +429,7 @@ scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = 
           lambdaParams $
             segPostOpLambda post_op
 
-      forM_ (zip3 per_scan_out per_scan_carries scan_ops) $ \(outs, op_carries, scan_op) -> do
+      forM_ (zip4 per_scan_pars per_scan_out per_scan_carries scan_ops) $ \(pars, outs, op_carries, scan_op) -> do
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
           sComment "load carry-in" $
             forM_ (zip (xParams scan_op) op_carries) $ \(p, carries) ->
@@ -438,13 +438,16 @@ scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = 
           sComment "load partial result" $
             forM_ (zip (yParams scan_op) outs) $ \(p, out) ->
               copyDWIMFix (paramName p) [] (Var out) (map le64 is ++ vec_is)
+
           sComment "combine carry with partial result" $
             compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip outs $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(out, se) ->
-                copyDWIMFix out (map le64 is <> vec_is) se []
-          sComment "read kernel body map results" $
-            forM_ (zip scan_pars map_out) $ \(par, out) ->
-              copyDWIMFix (paramName par) [] (Var out) (map le64 is)
+              forM_ (zip pars $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(par, se) ->
+                copyDWIMFix (paramName par) vec_is se []
+      sComment "copy map out to params" $
+        forM_ (zip map_out map_pars) $ \(out, par) ->
+          copyDWIMFix (paramName par) [] (Var out) []
+
+      compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ pure ()
 
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
