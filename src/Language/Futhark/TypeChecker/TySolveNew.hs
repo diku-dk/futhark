@@ -46,6 +46,10 @@ type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
 -- a constraint on how it can be instantiated.
 type UnconTyVar = (VName, Liftedness)
 
+typeError :: Loc -> Notes -> Doc () -> SolveM s ()
+typeError loc notes msg =
+  throwError $ TypeError loc notes msg
+
 liftST :: ST s a -> SolveM s a
 liftST = SolveM . lift . lift
 
@@ -58,6 +62,40 @@ initialState typarams tyvars = do
   where
     f tv (lvl, info) = liftST $ makeTyVarNode tv lvl info
     g tv (lvl, lft, loc) = liftST $ makeTyParamNode tv lvl lft loc
+
+convertUF :: UF s -> SolveM s (M.Map TyVar TyVarSol)
+convertUF uf = do
+  mappings <- mapM maybeLookupSol (M.toList uf)
+  pure $ M.fromList $ catMaybes mappings
+  where
+    maybeLookupSol :: (TyVar, TyVarNode s) -> SolveM s (Maybe (TyVar, TyVarSol))
+    maybeLookupSol (tv, node) = do
+      root <- liftST $ find node
+      descr <- liftST $ getDescr root
+      pure $ case descr of
+        t@(Solved _) -> Just (tv, t)
+        _ -> Nothing
+
+substTyVar :: (Monoid u) => M.Map TyVar TyVarSol -> VName -> Maybe (TypeBase () u)
+substTyVar m v =
+  case M.lookup v m of
+    Just (Solved t') -> Just $ second (const mempty) $ substTyVars (substTyVar m) t'
+    _ -> Nothing
+
+occursCheck :: Reason Type -> VName -> Type -> SolveM s ()
+occursCheck reason v tp = do
+  vars <- gets solverTyVars
+  vars' <- convertUF vars
+  let tp' = substTyVars (substTyVar vars') tp
+  when (v `S.member` typeVars tp') . typeError (locOf reason) mempty $
+    "Occurs check: cannot instantiate"
+      <+> prettyName v
+      <+> "with"
+      <+> pretty tp
+      <> "."
+
+bindTyVar :: Reason Type -> BreadCrumbs -> VName -> Type -> SolveM s ()
+bindTyVar reason bcs v t = undefined
 
 solution :: SolverState s -> ([UnconTyVar], Solution)
 solution _s = undefined
