@@ -7,7 +7,7 @@ module Language.Futhark.TypeChecker.UnionFind
     find,
     getDescr,
     getKey,
-    assignType,
+    assignNewSol,
     union
   )
 where
@@ -141,12 +141,12 @@ getKey node = do
 -- TODO: node is in an "unsolved" equivalence class.
 -- | Replace the type of the node's equivalence class
 -- with the second argument.
-assignType :: TyVarNode s -> Type -> ST s ()
-assignType node t = do
+assignNewSol :: TyVarNode s -> TyVarSol -> ST s ()
+assignNewSol node sol = do
   ref <- descrRef node
   info <- readSTRef ref
   case descr info of
-    Unsolved _ -> modifySTRef ref $ \i -> i { descr = Solved t }
+    Unsolved _ -> modifySTRef ref $ \i -> i { descr = sol }
     _          -> pure () -- This would be an error.
 
 -- TODO: Make sure we correctly handle level, liftedness, and if 
