@@ -478,9 +478,14 @@ scanStage3Fallback ::
   [VName] ->
   MulticoreGen ()
 scanStage3Fallback pat space scan_ops per_scan_carries post_op scan_out map_out = do
-  let per_scan_pes = segBinOpChunks scan_ops $ patElems pat
+  let per_scan_out = segBinOpChunks scan_ops scan_out
+      (scan_pars, map_pars) = splitAt (segBinOpResults scan_ops) $ lambdaParams $ segPostOpLambda post_op
+      per_scan_pars = segBinOpChunks scan_ops scan_pars
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
+      (idxs, vals, map_res) = splitPostOpResults post_op $ fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+      groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
+      (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
   body <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
@@ -488,20 +493,45 @@ scanStage3Fallback pat space scan_ops per_scan_carries post_op scan_out map_out 
     genBinOpParams scan_ops
 
     generateChunkLoop "SegScan" Scalar $ \i -> do
+      genBinOpParams scan_ops
       zipWithM_ dPrimV_ is $ unflattenIndex ns' i
-      forM_ (zip3 per_scan_pes per_scan_carries scan_ops) $ \(scan_pes, op_carries, scan_op) -> do
+      dScope Nothing $
+        scopeOfLParams $
+          lambdaParams $
+            segPostOpLambda post_op
+
+      forM_ (zip4 per_scan_pars per_scan_out per_scan_carries scan_ops) $ \(pars, outs, op_carries, scan_op) -> do
         sLoopNest (segBinOpShape scan_op) $ \vec_is -> do
           sComment "load carry-in" $
             forM_ (zip (xParams scan_op) op_carries) $ \(p, carries) ->
               copyDWIMFix (paramName p) [] (Var carries) (le64 (segFlat space) : vec_is)
 
           sComment "load partial result" $
-            forM_ (zip (yParams scan_op) scan_pes) $ \(p, pe) ->
-              copyDWIMFix (paramName p) [] (Var (patElemName pe)) (map le64 is ++ vec_is)
-          sComment "combine carry with partial result" $ do
+            forM_ (zip (yParams scan_op) outs) $ \(p, out) ->
+              copyDWIMFix (paramName p) [] (Var out) (map le64 is ++ vec_is)
+
+          sComment "combine carry with partial result" $
             compileStms mempty (bodyStms $ lamBody scan_op) $
-              forM_ (zip scan_pes $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(pe, se) ->
-                copyDWIMFix (patElemName pe) (map Imp.le64 is ++ vec_is) se []
+              forM_ (zip pars $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(par, se) ->
+                copyDWIMFix (paramName par) vec_is se []
+
+      sComment "copy map out to params" $
+        forM_ (zip map_out map_pars) $ \(out, par) ->
+          copyDWIMFix (paramName par) [] (Var out) []
+
+      sComment "compute post op" $
+        compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+          sComment "write scatter values." $
+            forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
+              forM_ idxs_vals $ \(is', val) -> do
+                arr_t <- lookupType arr
+                let rws' = map pe64 $ arrayDims arr_t
+                    slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
+                sWhen (inBounds slice' rws') $
+                  copyDWIM (patElemName pe) (unSlice slice') val []
+          sComment "write mapped values" $
+            forM_ (zip pat_map map_res) $ \(pe, res) ->
+              copyDWIMFix (patElemName pe) (map le64 is) res []
 
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
