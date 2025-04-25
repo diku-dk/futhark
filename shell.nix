@@ -41,6 +41,7 @@ pkgs.stdenv.mkDerivation {
       python.jsonschema
       python.sphinx
       python.sphinxcontrib-bibtex
+      python.pyqt6
       imagemagick # needed for literate tests
     ]
     ++ lib.optionals (stdenv.isLinux)

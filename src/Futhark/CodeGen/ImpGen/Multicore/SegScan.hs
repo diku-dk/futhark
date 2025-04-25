@@ -417,6 +417,9 @@ scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = 
       per_scan_pars = segBinOpChunks scan_ops scan_pars
       (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
+      (idxs, vals, map_res) = splitPostOpResults post_op $ fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+      groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
+      (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
   body <- collect $ do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
@@ -443,11 +446,24 @@ scanStage3Nested pat space scan_ops per_scan_carries post_op scan_out map_out = 
             compileStms mempty (bodyStms $ lamBody scan_op) $
               forM_ (zip pars $ map resSubExp $ bodyResult $ lamBody scan_op) $ \(par, se) ->
                 copyDWIMFix (paramName par) vec_is se []
+
       sComment "copy map out to params" $
         forM_ (zip map_out map_pars) $ \(out, par) ->
           copyDWIMFix (paramName par) [] (Var out) []
 
-      compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ pure ()
+      sComment "compute post op" $
+        compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+          sComment "write scatter values." $
+            forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
+              forM_ idxs_vals $ \(is', val) -> do
+                arr_t <- lookupType arr
+                let rws' = map pe64 $ arrayDims arr_t
+                    slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
+                sWhen (inBounds slice' rws') $
+                  copyDWIM (patElemName pe) (unSlice slice') val []
+          sComment "write mapped values" $
+            forM_ (zip pat_map map_res) $ \(pe, res) ->
+              copyDWIMFix (patElemName pe) (map le64 is) res []
 
   free_params <- freeParams body
   emit $ Imp.Op $ Imp.ParLoop "scan_stage_3" body free_params
