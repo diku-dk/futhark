@@ -192,6 +192,9 @@ vjpSOAC ops pat _aux (Hist n as histops f) m
       (mapstm, redstm) <-
         histomapToMapAndHist pat (n, histops, f, as)
       vjpStm ops mapstm $ vjpStm ops redstm m
+vjpSOAC ops pat aux (Stream w as accs lam) m = do
+  stms <- collectStms_ $ auxing aux $ sequentialStreamWholeArray pat w accs lam as
+  foldr (vjpStm ops) m stms
 vjpSOAC _ _ _ soac _ =
   error $ "vjpSOAC unhandled:\n" ++ prettyString soac
 

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.25.30]
+
+### Added
+
 * New math functions: `f16.rsqrt`, `f32.rsqrt`, `f64.rsqrt`.
 
 * New math functions: `cospi`, `sinpi`, `tanpi`, `acospi`, `asinpi`,
@@ -19,10 +29,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   the innermost return type is purely scalar.
 
 * `futhark pkg` now allows underscores in package paths.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
@@ -44,6 +50,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect handling of some size inference edge cases during
   monomorphisation (#2252).
+
+* Incorrect registration of entry point types when mixing type
+  abbreviations and arrays (#2253).
+
+* Reverse mode AD now handles sequential streams. (#2256)
 
 ## [0.25.29]
 
