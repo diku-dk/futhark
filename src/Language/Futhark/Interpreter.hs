@@ -35,6 +35,7 @@ import Control.Monad.Trans.Maybe
 import Data.Array
 import Data.Bifunctor
 import Data.Bitraversable
+import Data.Functor (($>), (<&>))
 import Data.List
   ( find,
     foldl',
@@ -99,7 +100,7 @@ newtype EvalM a
   = EvalM
       ( ReaderT
           (Stack, M.Map ImportName Env)
-          (StateT Exts (F ExtOp))
+          (StateT (Exts, AD.Counter) (F ExtOp))
           a
       )
   deriving
@@ -108,11 +109,11 @@ newtype EvalM a
       Functor,
       MonadFree ExtOp,
       MonadReader (Stack, M.Map ImportName Env),
-      MonadState Exts
+      MonadState (Exts, AD.Counter)
     )
 
 runEvalM :: M.Map ImportName Env -> EvalM a -> F ExtOp a
-runEvalM imports (EvalM m) = evalStateT (runReaderT m (mempty, imports)) mempty
+runEvalM imports (EvalM m) = evalStateT (runReaderT m (mempty, imports)) (mempty, AD.Counter 0)
 
 stacking :: SrcLoc -> Env -> EvalM a -> EvalM a
 stacking loc env = local $ \(ss, imports) ->
@@ -128,23 +129,35 @@ stacking loc env = local $ \(ss, imports) ->
 stacktrace :: EvalM [Loc]
 stacktrace = asks $ map stackFrameLoc . fst
 
+-- | Instead of tracking the actual depth of AD, we just use the size
+-- of the stack as a proxy.
+adDepth :: EvalM AD.Depth
+adDepth = AD.Depth . length <$> stacktrace
+
 lookupImport :: ImportName -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
 putExtSize :: VName -> Value -> EvalM ()
-putExtSize v x = modify $ M.insert v x
+putExtSize v x = modify $ first $ M.insert v x
 
 getExts :: EvalM Exts
-getExts = get
+getExts = gets fst
+
+putCounter :: AD.Counter -> EvalM ()
+putCounter i = modify $ second $ const i
+
+getCounter :: EvalM AD.Counter
+getCounter = gets snd
 
 -- | Disregard any existential sizes computed during this action.
 -- This is used so that existentials computed during one iteration of
 -- a loop or a function call are not remembered the next time around.
 localExts :: EvalM a -> EvalM a
 localExts m = do
-  s <- get
+  e <- getExts
   x <- m
-  put s
+  i <- getCounter
+  put (e, i)
   pure x
 
 extEnv :: EvalM Env
@@ -1165,13 +1178,8 @@ evalModExp _ (ModImport _ (Info f) _) = do
           ]
     Just m -> pure (mempty, Module m)
 evalModExp env (ModDecs ds _) = do
-  Env terms types <- foldM evalDec env ds
-  -- Remove everything that was present in the original Env.
-  let env' =
-        Env
-          (terms `M.difference` envTerm env)
-          (types `M.difference` envType env)
-  pure (env', Module env')
+  (_, built_env) <- evalDecs env ds
+  pure (built_env, Module built_env)
 evalModExp env (ModVar qv _) =
   (mempty,) <$> evalModuleVar env qv
 evalModExp env (ModAscript me _ (Info substs) _) =
@@ -1206,28 +1214,35 @@ evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalFunctionBinding env tparams ps ret fbody
   sizes <- extEnv
-  pure $ env {envTerm = M.insert v binding $ envTerm env} <> sizes
+  pure $ mempty {envTerm = M.singleton v binding} <> sizes
 evalDec env (OpenDec me _) = do
   (me_env, me') <- evalModExp env me
   case me' of
-    Module me'' -> pure $ me'' <> me_env <> env
+    Module me'' -> pure $ me'' <> me_env
     _ -> error "Expected Module"
 evalDec env (ImportDec name name' loc) =
   evalDec env $ LocalDec (OpenDec (ModImport name name' loc) loc) loc
 evalDec env (LocalDec d _) = evalDec env d
-evalDec env ModTypeDec {} = pure env
+evalDec _env ModTypeDec {} = pure mempty
 evalDec env (TypeDec (TypeBind v _ ps _ (Info (RetType dims t)) _ _)) = do
   let abbr = TypeBinding env ps $ RetType dims t
-  pure env {envType = M.insert v abbr $ envType env}
+  pure mempty {envType = M.singleton v abbr}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
   (mod_env, mod) <- evalModExp env $ wrapInLambda ps
-  pure $ modEnv (M.singleton v mod) <> mod_env <> env
+  pure $ modEnv (M.singleton v mod) <> mod_env
   where
     wrapInLambda [] = case ret of
       Just (se, substs) -> ModAscript body se substs loc
       Nothing -> body
     wrapInLambda [p] = ModLambda p ret body loc
     wrapInLambda (p : ps') = ModLambda p Nothing (wrapInLambda ps') loc
+
+evalDecs :: Env -> [Dec] -> EvalM (Env, Env)
+evalDecs env = foldM evalDec' (env, mempty)
+  where
+    evalDec' (env', built_env) dec = do
+      dec_env <- evalDec env' dec
+      pure (dec_env <> env', dec_env <> built_env)
 
 -- | The interpreter context.  All evaluation takes place with respect
 -- to a context, and it can be extended with more definitions, which
@@ -1351,8 +1366,9 @@ initialCtx =
 
     adToPrim v = putV $ AD.primitive v
 
-    adBinOp op x y = AD.doOp op [x, y]
-    adUnOp op x = AD.doOp op [x]
+    adBinOp op x y i =
+      either (const Nothing) Just $ AD.doOp op [x, y] i
+    adUnOp op x i = either (const Nothing) Just $ AD.doOp op [x] i
 
     fun1 f =
       TermValue Nothing $ ValueFun $ \x -> f x
@@ -1412,7 +1428,8 @@ initialCtx =
                       pure . ValueFun $ \g ->
                         pure . ValueFun $ \h -> f x y z a b c d e g h
 
-    bopDef fs = fun2 $ \x y ->
+    bopDef fs = fun2 $ \x y -> do
+      i <- getCounter
       case (x, y) of
         (ValuePrim x', ValuePrim y')
           | Just z <- msum $ map (`bopDef'` (x', y')) fs -> do
@@ -1421,7 +1438,8 @@ initialCtx =
         _
           | Just x' <- getAD x,
             Just y' <- getAD y,
-            Just z <- msum $ map (`bopDefAD'` (x', y')) fs -> do
+            Just (z, i') <- msum $ map (`bopDefAD` (x', y', i)) fs -> do
+              putCounter i'
               breakOnNaN [adToPrim x', adToPrim y'] $ adToPrim z
               pure $ putAD z
         _ ->
@@ -1436,9 +1454,10 @@ initialCtx =
           x' <- valf x
           y' <- valf y
           retf =<< op x' y'
-        bopDefAD' (_, _, _, dop) (x, y) = dop x y
+        bopDefAD (_, _, _, dop) (x, y, i) = dop x y i
 
-    unopDef fs = fun1 $ \x ->
+    unopDef fs = fun1 $ \x -> do
+      i <- getCounter
       case x of
         (ValuePrim x')
           | Just r <- msum $ map (`unopDef'` x') fs -> do
@@ -1446,7 +1465,8 @@ initialCtx =
               pure $ ValuePrim r
         _
           | Just x' <- getAD x,
-            Just r <- msum $ map (`unopDefAD'` x') fs -> do
+            Just (r, i') <- msum $ map (`unopDefAD'` (x', i)) fs -> do
+              putCounter i'
               breakOnNaN [adToPrim x'] $ adToPrim r
               pure $ putAD r
         _ ->
@@ -1458,9 +1478,10 @@ initialCtx =
         unopDef' (valf, retf, op, _) x = do
           x' <- valf x
           retf =<< op x'
-        unopDefAD' (_, _, _, dop) = dop
+        unopDefAD' (_, _, _, dop) (x, i) = dop x i
 
-    tbopDef op f = fun1 $ \v ->
+    tbopDef op f = fun1 $ \v -> do
+      i <- getCounter
       case fromTuple v of
         Just [ValuePrim x, ValuePrim y]
           | Just x' <- getV x,
@@ -1471,7 +1492,8 @@ initialCtx =
         Just [x, y]
           | Just x' <- getAD x,
             Just y' <- getAD y,
-            Just z <- AD.doOp op [x', y'] -> do
+            Right (z, i') <- AD.doOp op [x', y'] i -> do
+              putCounter i'
               breakOnNaN [adToPrim x', adToPrim y'] $ adToPrim z
               pure $ putAD z
         _ ->
@@ -1976,7 +1998,7 @@ initialCtx =
       -- exposed by the AD module?
       fun3 $ \f v s -> do
         -- Get the depth
-        depth <- length <$> stacktrace
+        depth <- adDepth
 
         -- Augment the values
         let v' =
@@ -1994,17 +2016,27 @@ initialCtx =
         let o' = fst $ valueAccum (\a b -> (b : a, b)) [] o
 
         -- For each output..
-        let m = flip map (zip o' s') $ \(on, sn) -> case on of
-              -- If it is a VJP variable of the correct depth, run
-              -- deriveTapqe on it- and its corresponding seed
-              (ValueAD d (AD.VJP (AD.VJPValue t)))
-                | d == depth ->
-                    (putAD $ AD.tapePrimal t, AD.deriveTape t sn)
-              -- Otherwise, its partial derivatives are all 0
-              _ -> (on, M.empty)
+        m <-
+          forM
+            (zip o' s')
+            ( \(on, sn) -> case on of
+                -- If it is a VJP variable of the correct depth, run
+                -- deriveTape on it- and its corresponding seed
+                (ValueAD d (AD.VJP (AD.VJPValue t)))
+                  | d == depth ->
+                      getCounter
+                        >>= either
+                          (pure . Left)
+                          (\(m', i) -> putCounter i $> Right (putAD $ AD.tapePrimal t, m'))
+                          . AD.deriveTape t sn
+                -- Otherwise, its partial derivatives are all 0
+                _ -> pure $ Right (on, M.empty)
+            )
+            <&> either (error . show) id . sequence
 
         -- Add together every derivative
-        let drvs = M.map (Just . putAD) $ M.unionsWith add $ map snd m
+        drvs' <- AD.unionsWithM add (map snd m)
+        let drvs = M.map (Just . putAD) drvs'
 
         -- Extract the output values, and the partial derivatives
         let ov = modifyValue (\i _ -> fst $ m !! (length m - 1 - i)) o
@@ -2029,15 +2061,17 @@ initialCtx =
         -- TODO: Perhaps this could be fully abstracted by AD?
         -- Making addFor private would be nice..
         add x y =
-          fromMaybe (error "jvp: illtyped add") $
-            AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
+          getCounter
+            >>= either
+              (error . show)
+              (\(a, b) -> putCounter b >> pure a)
+              . AD.doOp (AD.OpBin $ AD.addFor $ P.primValueType $ AD.primitive x) [x, y]
     def "jvp2" = Just $
       -- TODO: This could be much better. Currently, it is very inefficient
       -- Perhaps creating JVPValues could be abstracted into a function
       -- exposed by the AD module?
       fun3 $ \f v s -> do
-        -- Get the depth
-        depth <- length <$> stacktrace
+        depth <- adDepth
 
         -- Turn the seeds into a list of ADValues
         let s' =
@@ -2065,7 +2099,8 @@ initialCtx =
                 mapM
                   ( \on -> case on of
                       -- If it is a JVP variable of the correct depth, return its primal and derivative
-                      (ValueAD d (AD.JVP (AD.JVPValue pv dv))) | d == depth -> Just (putAD pv, putAD dv)
+                      (ValueAD d (AD.JVP (AD.JVPValue pv dv)))
+                        | d == depth -> Just (putAD pv, putAD dv)
                       -- Otherwise, its partial derivatives are all 0
                       _ -> (on,) . ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD on
                   )
@@ -2118,7 +2153,7 @@ interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e
 interpretDecs :: Ctx -> [Dec] -> F ExtOp Env
 interpretDecs ctx decs =
   runEvalM (ctxImports ctx) $ do
-    env <- foldM evalDec (ctxEnv ctx) decs
+    (env, _) <- evalDecs (ctxEnv ctx) decs
     -- We need to extract any new existential sizes and add them as
     -- ordinary bindings to the context, or we will not be able to
     -- look up their values later.

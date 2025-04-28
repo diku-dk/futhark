@@ -24,6 +24,7 @@ void map_transpose_##NAME(SHARED_MEM_PARAM                              \
     int tblock_id_2 = get_tblock_id(2);                                 \
     int global_id_2 = get_global_id(2);                                 \
     for (int i2 = 0; i2 <= repeat_2; i2++) {                            \
+      if (tblock_id_2 >= num_arrays) { break; }                         \
       int32_t our_array_offset = tblock_id_2 * x_elems * y_elems;       \
       int32_t odata_offset = dst_offset + our_array_offset;             \
       int32_t idata_offset = src_offset + our_array_offset;             \
@@ -82,6 +83,7 @@ void map_transpose_##NAME##_low_height(SHARED_MEM_PARAM                 \
     int tblock_id_2 = get_tblock_id(2);                                 \
     int global_id_2 = get_global_id(2);                                 \
     for (int i2 = 0; i2 <= repeat_2; i2++) {                            \
+      if (tblock_id_2 >= num_arrays) { break; }                         \
       int32_t our_array_offset = tblock_id_2 * x_elems * y_elems;       \
       int32_t odata_offset = dst_offset + our_array_offset;             \
       int32_t idata_offset = src_offset + our_array_offset;             \
@@ -136,6 +138,7 @@ void map_transpose_##NAME##_low_width(SHARED_MEM_PARAM                  \
     int tblock_id_2 = get_tblock_id(2);                                 \
     int global_id_2 = get_global_id(2);                                 \
     for (int i2 = 0; i2 <= repeat_2; i2++) {                            \
+      if (tblock_id_2 >= num_arrays) { break; }                         \
       int32_t our_array_offset = tblock_id_2 * x_elems * y_elems;       \
       int32_t odata_offset = dst_offset + our_array_offset;             \
       int32_t idata_offset = src_offset + our_array_offset;             \
@@ -229,6 +232,7 @@ void map_transpose_##NAME##_large(SHARED_MEM_PARAM                      \
     int tblock_id_2 = get_tblock_id(2);                                 \
     int global_id_2 = get_global_id(2);                                 \
     for (int i2 = 0; i2 <= repeat_2; i2++) {                            \
+      if (tblock_id_2 >= num_arrays) { break; }                         \
       int64_t our_array_offset = tblock_id_2 * x_elems * y_elems;       \
       int64_t odata_offset = dst_offset + our_array_offset;             \
       int64_t idata_offset = src_offset + our_array_offset;             \

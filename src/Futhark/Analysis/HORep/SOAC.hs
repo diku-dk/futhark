@@ -103,25 +103,23 @@ data ArrayTransform
     Rearrange Certs [Int]
   | -- | A reshaping of an otherwise valid input.
     Reshape Certs ReshapeKind Shape
-  | -- | A reshaping of the outer dimension.
-    ReshapeOuter Certs ReshapeKind Shape
-  | -- | A reshaping of everything but the outer dimension.
-    ReshapeInner Certs ReshapeKind Shape
   | -- | Replicate the rows of the array a number of times.
     Replicate Certs Shape
   | -- | An array indexing operation.
     Index Certs (Slice SubExp)
   deriving (Show, Eq, Ord)
 
+instance FreeIn ArrayTransform where
+  freeIn' (Rearrange cs _) = freeIn' cs
+  freeIn' (Reshape cs _ shape) = freeIn' cs <> freeIn' shape
+  freeIn' (Replicate cs shape) = freeIn' cs <> freeIn' shape
+  freeIn' (Index cs slice) = freeIn' cs <> freeIn' slice
+
 instance Substitute ArrayTransform where
   substituteNames substs (Rearrange cs xs) =
     Rearrange (substituteNames substs cs) xs
   substituteNames substs (Reshape cs k ses) =
     Reshape (substituteNames substs cs) k (substituteNames substs ses)
-  substituteNames substs (ReshapeOuter cs k ses) =
-    ReshapeOuter (substituteNames substs cs) k (substituteNames substs ses)
-  substituteNames substs (ReshapeInner cs k ses) =
-    ReshapeInner (substituteNames substs cs) k (substituteNames substs ses)
   substituteNames substs (Replicate cs se) =
     Replicate (substituteNames substs cs) (substituteNames substs se)
   substituteNames substs (Index cs slice) =
@@ -152,6 +150,9 @@ instance Monoid ArrayTransforms where
 instance Substitute ArrayTransforms where
   substituteNames substs (ArrayTransforms ts) =
     ArrayTransforms $ substituteNames substs <$> ts
+
+instance FreeIn ArrayTransforms where
+  freeIn' (ArrayTransforms trs) = foldMap freeIn' trs
 
 -- | The empty transformation list.
 noTransforms :: ArrayTransforms
@@ -251,12 +252,6 @@ transformToExp (Rearrange cs perm) ia = do
   pure (cs, BasicOp $ Futhark.Rearrange (perm ++ [length perm .. r - 1]) ia)
 transformToExp (Reshape cs k shape) ia = do
   pure (cs, BasicOp $ Futhark.Reshape k shape ia)
-transformToExp (ReshapeOuter cs k shape) ia = do
-  shape' <- reshapeOuter shape 1 . arrayShape <$> lookupType ia
-  pure (cs, BasicOp $ Futhark.Reshape k shape' ia)
-transformToExp (ReshapeInner cs k shape) ia = do
-  shape' <- reshapeInner shape 1 . arrayShape <$> lookupType ia
-  pure (cs, BasicOp $ Futhark.Reshape k shape' ia)
 transformToExp (Index cs slice) ia = do
   pure (cs, BasicOp $ Futhark.Index ia slice)
 
@@ -267,6 +262,9 @@ transformToExp (Index cs slice) ia = do
 -- the first element of the 'ArrayTransform' list is applied first.
 data Input = Input ArrayTransforms VName Type
   deriving (Show, Eq, Ord)
+
+instance FreeIn Input where
+  freeIn' (Input trs v t) = freeIn' trs <> freeIn' v <> freeIn' t
 
 instance Substitute Input where
   substituteNames substs (Input ts v t) =
@@ -320,8 +318,6 @@ applyTransform tr ia = do
       Replicate {} -> "replicate"
       Rearrange {} -> "rearrange"
       Reshape {} -> "reshape"
-      ReshapeOuter {} -> "reshape_outer"
-      ReshapeInner {} -> "reshape_inner"
       Index {} -> "index"
 
 applyTransforms :: (MonadBuilder m) => ArrayTransforms -> VName -> m VName
@@ -355,12 +351,6 @@ inputType (Input (ArrayTransforms ts) _ at) =
       rearrangeType perm t
     transformType t (Reshape _ _ shape) =
       t `setArrayShape` shape
-    transformType t (ReshapeOuter _ _ shape) =
-      let Shape oldshape = arrayShape t
-       in t `setArrayShape` Shape (shapeDims shape ++ drop 1 oldshape)
-    transformType t (ReshapeInner _ _ shape) =
-      let Shape oldshape = arrayShape t
-       in t `setArrayShape` Shape (take 1 oldshape ++ shapeDims shape)
     transformType t (Index _ slice) =
       t `setArrayShape` sliceShape slice
 
@@ -381,7 +371,7 @@ transformRows (ArrayTransforms ts) =
     transformRows' inp (Rearrange cs perm) =
       addTransform (Rearrange cs (0 : map (+ 1) perm)) inp
     transformRows' inp (Reshape cs k shape) =
-      addTransform (ReshapeInner cs k shape) inp
+      addTransform (Reshape cs k (Shape [arraySize 0 (inputType inp)] <> shape)) inp
     transformRows' inp (Replicate cs n)
       | inputRank inp == 1 =
           Rearrange mempty [1, 0]
@@ -702,16 +692,8 @@ ppArrayTransform e (Rearrange cs perm) =
   "rearrange" <> pretty cs <> PP.apply [PP.apply (map pretty perm), e]
 ppArrayTransform e (Reshape cs ReshapeArbitrary shape) =
   "reshape" <> pretty cs <> PP.apply [pretty shape, e]
-ppArrayTransform e (ReshapeOuter cs ReshapeArbitrary shape) =
-  "reshape_outer" <> pretty cs <> PP.apply [pretty shape, e]
-ppArrayTransform e (ReshapeInner cs ReshapeArbitrary shape) =
-  "reshape_inner" <> pretty cs <> PP.apply [pretty shape, e]
 ppArrayTransform e (Reshape cs ReshapeCoerce shape) =
   "coerce" <> pretty cs <> PP.apply [pretty shape, e]
-ppArrayTransform e (ReshapeOuter cs ReshapeCoerce shape) =
-  "coerce_outer" <> pretty cs <> PP.apply [pretty shape, e]
-ppArrayTransform e (ReshapeInner cs ReshapeCoerce shape) =
-  "coerce_inner" <> pretty cs <> PP.apply [pretty shape, e]
 ppArrayTransform e (Replicate cs ne) =
   "replicate" <> pretty cs <> PP.apply [pretty ne, e]
 ppArrayTransform e (Index cs slice) =
