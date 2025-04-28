@@ -145,23 +145,35 @@ subber argCheck g = do
           pure $ Just (e, vn, [arg])
     getApply_ _ acc _ = pure acc
 
+shape :: IndexFn -> [Iterator]
+shape f = [iterator f]
+
+getQuantifier :: Iterator -> VName
+getQuantifier Empty = undefined
+getQuantifier (Forall i _) = i
+
+{-
+              Substitution rules
+-}
+-- TODO Add support for multiple arguments in substituteOnce.
+-- TODO git revert 31d79980a270d30a1c3183aafef1bcbb42ae8e3f
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
-substituteOnce f g_non_repped (f_apply, args) = do
+substituteOnce f g_presub (f_apply, f_args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
-  g <- repApply vn g_non_repped
+  g <- repApply vn g_presub
 
   let new_body = cases $ do
         (p_f, e_f) <- guards f
         (p_g, e_g) <- guards g
-        let s = mkRep vn (rep f_arg e_f)
-        pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep f_arg p_f), rep s e_g)
+        let s = mkRep vn (rep args e_f)
+        pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep args p_f), rep s e_g)
 
   let new_iter = case iterator g of
         Empty -> Empty
         Forall _ dg | vn `notElem` fv dg -> iterator g
         Forall j dg
           | Just e_f <- justSingleCase f ->
-              Forall j $ repDomain (mkRep vn (rep f_arg e_f)) dg
+              Forall j $ repDomain (mkRep vn (rep args e_f)) dg
         _ -> error "Not implemented yet: multi-case domain."
 
   let new_g = IndexFn new_iter new_body
@@ -192,7 +204,7 @@ substituteOnce f g_non_repped (f_apply, args) = do
         Forall i df@(Cat k _ _) ->
           if k `S.member` fv new_body
             then do
-              Just arg <- hoistMaybe . pure $ f_arg M.!? i
+              Just arg <- hoistMaybe . pure $ args M.!? i
               Just solution <-
                 lift . firstAlt . map (\e_k -> solveFor k e_k arg) $
                   [intervalStart df, intervalEnd df]
@@ -202,7 +214,7 @@ substituteOnce f g_non_repped (f_apply, args) = do
 
       subFallback = case iterator f of
         Forall i df@(Cat k _ _) | k `S.member` fv new_body -> do
-          Just arg <- hoistMaybe . pure $ f_arg M.!? i
+          Just arg <- hoistMaybe . pure $ args M.!? i
           -- Create II array.
           let def_II = IndexFn (iterator f) (cases [(Bool True, sym2SoP (Var k))])
           -- Make sure that f is not already an II array. (One defined by the user.)
@@ -229,18 +241,34 @@ substituteOnce f g_non_repped (f_apply, args) = do
   traverse simplify g'
   where
     -- Construct replacement from formal arguments of f to actual arguments.
-    f_arg :: Replacement Symbol =
-      case iterator f of
-        Empty ->
-          case args of
-            [] -> mempty
-            _ -> error "Arguments supplied to scalar index function."
-        Forall i _ ->
-          case (iterator g_non_repped, args) of
-            (Empty, []) -> mempty
-            (Forall j _, []) -> mkRep i (Var j)
-            (_, [arg]) -> mkRep i arg
-            (_, _) -> error "Multi-dim not implemented yet."
+    -- (`f_args` may be empty for convience; used internally in Convert).
+    args :: Replacement Symbol =
+      case f_args of
+        []
+          | [Empty] <- shape f ->
+              -- All source-program variable references should hit this case.
+              mempty
+          | [Empty] <- shape g_presub ->
+              -- This case is a HACK to allow substitution into preconditions:
+              --   Checking precondition ((shape: [m]{i64| (>= 0)}): [m]nat_i64) for mk_flag_array_4631
+              --   • | True ⇒    shape₄₆₁₉ ≥ 0
+              --   	@
+              --   	  where shape_4619 =
+              --                   i₁₆₄₂₄ :: 0 .. m₄₆₈₇
+              --                   forall i₁₆₄₂₄ . | True ⇒    shape₄₆₈₈[i₁₆₄₂₄]
+              mempty
+          | length (shape f) == length (shape g_presub) ->
+              -- Case used internally in Convert (empty args for convenience).
+              map_formal_args_to $
+                map (sym2SoP . Var . getQuantifier) (shape g_presub)
+        _
+          | length (shape f) == length f_args ->
+              -- All source-program indexing should hit this case.
+              map_formal_args_to f_args
+          | otherwise ->
+              error "Argument mismatch."
+      where
+        map_formal_args_to = mconcat . zipWith (mkRep . getQuantifier) (shape f)
 
     repApply vn =
       astMap
@@ -252,17 +280,20 @@ substituteOnce f g_non_repped (f_apply, args) = do
 
     -- Side condition for Sub 2 and Sub 3:
     -- If f has a segmented domain, is f(arg) inside the k'th segment?
-    arg_in_segment_of_f = case (iterator f, iterator g_non_repped) of
+    arg_in_segment_of_f = case (iterator f, iterator g_presub) of
       (Forall i df, Forall j _) -> do
-        let arg_eq_j = pure . answerFromBool $ f_arg M.! i == sym2SoP (Var j)
+        let arg_eq_j = pure . answerFromBool $ args M.! i == sym2SoP (Var j)
         let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
         let arg_in_segment_bounds =
               askQ
-                (CaseCheck (\_ -> bounds $ f_arg M.! i))
-                g_non_repped
+                (CaseCheck (\_ -> bounds $ args M.! i))
+                g_presub
         arg_eq_j `orM` arg_in_segment_bounds
       _ -> pure Unknown
 
+{-
+              Utilities
+-}
 -- Solve for x in e(x) = e'.
 -- solveFor :: (Replaceable p Symbol) => VName -> p -> SoP Symbol -> IndexFnM (Maybe (SoP Symbol))
 solveFor :: VName -> SoP Symbol -> SoP Symbol -> IndexFnM (Maybe (SoP Symbol))

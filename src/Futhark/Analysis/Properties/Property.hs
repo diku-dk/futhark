@@ -186,6 +186,7 @@ getFiltPart props
     f _ = False
 
 nameAffectedBy :: Property u -> VName
+nameAffectedBy (Rng x _) = x
 nameAffectedBy (Monotonic x _) = x
 nameAffectedBy (Injective x _) = x
 nameAffectedBy (BijectiveRCD x _ _) = x
