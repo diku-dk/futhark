@@ -15,6 +15,7 @@ import Futhark.CLI.Check qualified as Check
 import Futhark.CLI.Datacmp qualified as Datacmp
 import Futhark.CLI.Dataset qualified as Dataset
 import Futhark.CLI.Defs qualified as Defs
+import Futhark.CLI.Deps qualified as Deps
 import Futhark.CLI.Dev qualified as Dev
 import Futhark.CLI.Doc qualified as Doc
 import Futhark.CLI.Eval qualified as Eval
@@ -88,7 +89,8 @@ commands =
       ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
       ("benchcmp", (Benchcmp.main, "Compare two benchmark results.")),
       ("profile", (Profile.main, "Analyse profiling data.")),
-      ("fmt", (Fmt.main, "Reformat Futhark source file."))
+      ("fmt", (Fmt.main, "Reformat Futhark source file.")),
+      ("deps", (Deps.main, "Locate instances of irregular parallel data-nesting."))
     ]
 
 msg :: String
