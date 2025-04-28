@@ -357,13 +357,13 @@ indexExp table (BasicOp (Replicate s (Var v))) _ is = do
   guard $ v `available` table
   guard $ s /= mempty
   index' v (drop (shapeRank s) is) table
-indexExp table (BasicOp (Reshape _ newshape v)) _ is
+indexExp table (BasicOp (Reshape newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
       -- TODO: handle coercions more efficiently.
       let is' =
             reshapeIndex
               (map pe64 oldshape)
-              (map pe64 $ shapeDims newshape)
+              (map pe64 $ shapeDims $ newShape newshape)
               is
        in index' v is' table
 indexExp table (BasicOp (Index v slice)) _ is = do

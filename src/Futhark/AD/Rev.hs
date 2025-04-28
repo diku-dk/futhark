@@ -117,13 +117,13 @@ diffBasicOp pat aux e m =
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ updateSubExpAdj se pat_adj
     --
-    Reshape k _ arr -> do
+    Reshape newshape arr -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ do
         arr_shape <- arrayShape <$> lookupType arr
         void $
           updateAdj arr <=< letExp "adj_reshape" . BasicOp $
-            Reshape k arr_shape pat_adj
+            Reshape (reshapeAll (newShape newshape) arr_shape) pat_adj
     --
     Rearrange perm arr -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -145,7 +145,7 @@ diffBasicOp pat aux e m =
         n <- letSubExp "rep_size" =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ns
         pat_adj_flat <-
           letExp (baseString pat_adj <> "_flat") . BasicOp $
-            Reshape ReshapeArbitrary (Shape $ n : arrayDims x_t) pat_adj
+            Reshape (reshapeAll (Shape ns) (Shape $ n : arrayDims x_t)) pat_adj
         reduce <- reduceSOAC [Reduce Commutative lam [ne]]
         updateSubExpAdj x
           =<< letExp "rep_contrib" (Op $ Screma n [pat_adj_flat] reduce)

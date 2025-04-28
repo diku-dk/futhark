@@ -482,7 +482,8 @@ analyseBasicOp ctx expression pats =
         Iota end start stride _ -> concatVariableInfos mempty [end, start, stride]
         Replicate (Shape shape) value' -> concatVariableInfos mempty (value' : shape)
         Scratch _ sers -> concatVariableInfos mempty sers
-        Reshape _ (Shape shape_subexp) name -> concatVariableInfos (oneName name) shape_subexp
+        Reshape newshape name ->
+          concatVariableInfos (oneName name) (shapeDims (newShape newshape))
         Rearrange _ name -> varInfoFromNames ctx $ oneName name
         UpdateAcc _ name lsubexprs rsubexprs ->
           concatVariableInfos (oneName name) (lsubexprs ++ rsubexprs)

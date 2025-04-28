@@ -33,6 +33,7 @@ where
 
 import Data.List.NonEmpty (NonEmpty (..))
 import Futhark.IR.Prop.Constants
+import Futhark.IR.Prop.Reshape (newShape)
 import Futhark.IR.Prop.Scope
 import Futhark.IR.Prop.Types
 import Futhark.IR.RetType
@@ -101,14 +102,10 @@ basicOpType (Replicate shape e) =
   pure . flip arrayOfShape shape <$> subExpType e
 basicOpType (Scratch t shape) =
   pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
-basicOpType (Reshape _ (Shape []) e) =
+basicOpType (Reshape shape e) =
   result <$> lookupType e
   where
-    result t = [Prim $ elemType t]
-basicOpType (Reshape _ shape e) =
-  result <$> lookupType e
-  where
-    result t = [t `setArrayShape` shape]
+    result t = [t `setArrayShape` newShape shape]
 basicOpType (Rearrange perm e) =
   result <$> lookupType e
   where

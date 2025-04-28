@@ -49,6 +49,7 @@ import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Futhark.IR.Prop.Pat
+import Futhark.IR.Prop.Reshape (newShape)
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Util.Pretty
@@ -344,6 +345,9 @@ instance FreeIn Space where
 
 instance (FreeIn d) => FreeIn (ShapeBase d) where
   freeIn' = freeIn' . shapeDims
+
+instance (FreeIn d) => FreeIn (NewShape d) where
+  freeIn' = freeIn' . shapeDims . newShape
 
 instance (FreeIn d) => FreeIn (Ext d) where
   freeIn' (Free x) = freeIn' x

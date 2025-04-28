@@ -1046,12 +1046,12 @@ expReturns (BasicOp (SubExp se)) =
   Just . pure <$> subExpReturns se
 expReturns (BasicOp (Opaque _ (Var v))) =
   Just . pure <$> varReturns v
-expReturns (BasicOp (Reshape k newshape v)) = do
+expReturns (BasicOp (Reshape newshape v)) = do
   (et, _, mem, lmad) <- arrayVarReturns v
-  case reshaper k lmad $ map pe64 $ shapeDims newshape of
+  case reshaper (reshapeKind newshape) lmad $ map pe64 $ shapeDims $ newShape newshape of
     Just lmad' ->
       pure . Just $
-        [ MemArray et (fmap Free newshape) NoUniqueness . Just $
+        [ MemArray et (Free <$> newShape newshape) NoUniqueness . Just $
             ReturnsInBlock mem (existentialiseLMAD [] lmad')
         ]
     Nothing -> pure Nothing

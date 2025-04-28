@@ -73,7 +73,7 @@ data ErrorCase rep
   | UnknownVariableError VName
   | UnknownFunctionError Name
   | ParameterMismatch (Maybe Name) [Type] [Type]
-  | SlicingError Int Int
+  | SlicingError Shape Int
   | BadAnnotation String Type Type
   | ReturnAliased Name VName
   | UniqueReturnAliased Name
@@ -143,7 +143,7 @@ instance (Checkable rep) => Show (ErrorCase rep) where
       ngot = length got
       fname' = maybe "anonymous function" (("function " ++) . nameToString) fname
   show (SlicingError dims got) =
-    show got ++ " indices given, but type of indexee has " ++ show dims ++ " dimension(s)."
+    show got ++ " indices given, but type of indexee has shape " ++ prettyString dims
   show (BadAnnotation desc expected got) =
     "Annotation of \""
       ++ desc
@@ -834,7 +834,7 @@ checkBody (Body (_, rep) stms res) = do
 checkSlice :: (Checkable rep) => Type -> Slice SubExp -> TypeM rep ()
 checkSlice vt (Slice idxes) = do
   when (arrayRank vt /= length idxes) . bad $
-    SlicingError (arrayRank vt) (length idxes)
+    SlicingError (arrayShape vt) (length idxes)
   mapM_ (traverse $ require [Prim int64]) idxes
 
 checkBasicOp :: (Checkable rep) => BasicOp -> TypeM rep ()
@@ -883,15 +883,11 @@ checkBasicOp (Update _ src slice se) = do
 checkBasicOp (FlatIndex ident slice) = do
   vt <- lookupType ident
   observe ident
-  when (arrayRank vt /= 1) $
-    bad $
-      SlicingError (arrayRank vt) 1
+  when (arrayRank vt /= 1) $ bad $ SlicingError (arrayShape vt) 1
   checkFlatSlice slice
 checkBasicOp (FlatUpdate src slice v) = do
   (src_shape, src_pt) <- checkArrIdent src
-  when (shapeRank src_shape /= 1) $
-    bad $
-      SlicingError (shapeRank src_shape) 1
+  when (shapeRank src_shape /= 1) $ bad $ SlicingError src_shape 1
 
   v_aliases <- lookupAliases v
   when (src `nameIn` v_aliases) $
@@ -910,15 +906,17 @@ checkBasicOp (Replicate (Shape dims) valexp) = do
   void $ checkSubExp valexp
 checkBasicOp (Scratch _ shape) =
   mapM_ checkSubExp shape
-checkBasicOp (Reshape k newshape arrexp) = do
+checkBasicOp (Reshape newshape arrexp) = do
   rank <- shapeRank . fst <$> checkArrIdent arrexp
-  mapM_ (require [Prim int64]) $ shapeDims newshape
-  case k of
-    ReshapeCoerce ->
-      when (shapeRank newshape /= rank) . bad $
-        TypeError "Coercion changes rank of array."
-    ReshapeArbitrary ->
-      pure ()
+  mapM_ (require [Prim int64]) $ shapeDims (newShape newshape)
+  let newshape_rank = sum (map fst (unNewShape newshape))
+  when (newshape_rank /= rank) $
+    bad $
+      TypeError $
+        "Reshaping "
+          <> showText newshape_rank
+          <> " dimensions, but underlying array has rank "
+          <> showText rank
 checkBasicOp (Rearrange perm arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt

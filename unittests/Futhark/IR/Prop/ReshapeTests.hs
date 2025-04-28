@@ -8,6 +8,7 @@ where
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Syntax
+import Futhark.IR.SyntaxTests ()
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -78,7 +79,27 @@ flipTests =
         ]
   ]
 
+fuseTests :: [TestTree]
+fuseTests =
+  [ testCase (unwords ["fuseReshape", show old, show new]) $
+      fuseReshape (NewShape old) (NewShape new) @?= NewShape <$> expected
+    | (old :: [(Int, ShapeBase String)], new, expected) <-
+        [ ( [(1, Shape ["AB"])],
+            [(1, Shape ["A", "B"])],
+            Just [(1, Shape ["A", "B"])]
+          ),
+          ( [(1, Shape ["AB", "C"])],
+            [(1, Shape ["A", "B"]), (1, Shape ["C"])],
+            Just [(1, Shape ["A", "B", "C"])]
+          )
+        ]
+  ]
+
 tests :: TestTree
 tests =
-  testGroup "ReshapeTests" $
-    reshapeOuterTests ++ reshapeInnerTests ++ flipTests
+  testGroup "ReshapeTests" . mconcat $
+    [ reshapeOuterTests,
+      reshapeInnerTests,
+      flipTests,
+      fuseTests
+    ]

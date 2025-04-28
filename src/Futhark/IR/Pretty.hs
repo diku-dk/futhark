@@ -1,9 +1,8 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
--- | Futhark prettyprinter.  This module defines 'Pretty' instances
--- for the AST defined in "Futhark.IR.Syntax",
--- but also a number of convenience functions if you don't want to use
--- the interface from 'Pretty'.
+-- | Futhark prettyprinter. This module defines 'Pretty' instances for the AST
+-- defined in "Futhark.IR.Syntax", but also a number of convenience functions if
+-- you don't want to use the interface from 'Pretty'.
 module Futhark.IR.Pretty
   ( prettyTuple,
     prettyTupleLines,
@@ -15,6 +14,7 @@ where
 import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
+import Futhark.IR.Prop.Reshape (ReshapeKind (..), newShape, reshapeKind)
 import Futhark.IR.Syntax
 import Futhark.Util.Pretty
 
@@ -187,6 +187,11 @@ instance (Pretty d) => Pretty (FlatDimIndex d) where
 instance (Pretty a) => Pretty (FlatSlice a) where
   pretty (FlatSlice offset xs) = brackets (pretty offset <> ";" <+> commasep (map pretty xs))
 
+instance Pretty (NewShape SubExp) where
+  pretty (NewShape ds) = parens $ foldMap f ds
+    where
+      f (k, to) = pretty k <> "=>" <> pretty to
+
 instance Pretty BasicOp where
   pretty (SubExp se) = pretty se
   pretty (Opaque OpaqueNil e) = "opaque" <> apply [pretty e]
@@ -228,10 +233,12 @@ instance Pretty BasicOp where
     "replicate" <> apply [pretty ne, align (pretty ve)]
   pretty (Scratch t shape) =
     "scratch" <> apply (pretty t : map pretty shape)
-  pretty (Reshape ReshapeArbitrary shape e) =
-    "reshape" <> apply [pretty shape, pretty e]
-  pretty (Reshape ReshapeCoerce shape e) =
-    "coerce" <> apply [pretty shape, pretty e]
+  pretty (Reshape reshape e) =
+    case reshapeKind reshape of
+      ReshapeArbitrary ->
+        "reshape" <> apply [pretty reshape, pretty e]
+      ReshapeCoerce ->
+        "coerce" <> apply [pretty (newShape reshape), pretty e]
   pretty (Rearrange perm e) =
     "rearrange" <> apply [apply (map pretty perm), pretty e]
   pretty (Concat i (x :| xs) w) =

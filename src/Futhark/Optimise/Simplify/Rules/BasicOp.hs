@@ -191,9 +191,10 @@ ruleBasicOp vtable pat aux (Update Unsafe dest is se)
     isFullSlice (arrayShape dest_t) is = Simplify . auxing aux $
       case se of
         Var v | not $ null $ sliceDims is -> do
+          v_t <- lookupType v
           v_reshaped <-
             letSubExp (baseString v ++ "_reshaped") . BasicOp $
-              Reshape ReshapeArbitrary (arrayShape dest_t) v
+              Reshape (reshapeAll (arrayShape v_t) (arrayShape dest_t)) v
           letBind pat $ BasicOp $ Replicate mempty v_reshaped
         _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
 ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update safety1 dest1 is1 (Var v1))
@@ -254,10 +255,10 @@ ruleBasicOp _ pat _ (ArrayLit (se : ses) _)
          in letBind pat $ BasicOp $ Replicate (Shape [n]) se
 ruleBasicOp vtable pat aux (Index idd slice)
   | Just inds <- sliceIndices slice,
-    Just (BasicOp (Reshape k newshape idd2), idd_cs) <- ST.lookupExp idd vtable,
+    Just (BasicOp (Reshape newshape idd2), idd_cs) <- ST.lookupExp idd vtable,
     length newshape == length inds =
       Simplify $
-        case k of
+        case reshapeKind newshape of
           ReshapeCoerce ->
             certifying idd_cs . auxing aux . letBind pat . BasicOp $
               Index idd2 slice
@@ -267,7 +268,7 @@ ruleBasicOp vtable pat aux (Index idd slice)
             let new_inds =
                   reshapeIndex
                     (map pe64 oldshape)
-                    (map pe64 $ shapeDims newshape)
+                    (map pe64 $ shapeDims $ newShape newshape)
                     (map pe64 inds)
             new_inds' <-
               mapM (toSubExp "new_index") new_inds
@@ -366,16 +367,18 @@ ruleBasicOp vtable pat aux (Manifest perm v1)
     ST.available v2 vtable =
       Simplify . auxing aux . certifying cs . letBind pat . BasicOp $
         Manifest perm v2
-ruleBasicOp vtable pat aux (Reshape ReshapeArbitrary v3_shape v2)
-  | Just (Rearrange perm v1, v2_cs) <- ST.lookupBasicOp v2 vtable,
-    Just (Reshape ReshapeArbitrary v1_shape v0, v1_cs) <- ST.lookupBasicOp v1 vtable,
+ruleBasicOp vtable pat aux (Reshape v3_shape v2)
+  | ReshapeArbitrary <- reshapeKind v3_shape,
+    Just (Rearrange perm v1, v2_cs) <- ST.lookupBasicOp v2 vtable,
+    Just (Reshape v1_shape v0, v1_cs) <- ST.lookupBasicOp v1 vtable,
+    ReshapeArbitrary <- reshapeKind v1_shape,
     Just v0_shape <- arrayShape <$> ST.lookupType v0 vtable,
     Just perm' <-
-      flipReshapeRearrange (shapeDims v0_shape) (shapeDims v1_shape) perm =
+      flipReshapeRearrange (shapeDims v0_shape) (shapeDims (newShape v1_shape)) perm =
       Simplify $ do
         v1' <- letExp (baseString v1) $ BasicOp $ Rearrange perm' v0
         auxing aux . certifying (v1_cs <> v2_cs) . letBind pat $
-          BasicOp (Reshape ReshapeArbitrary v3_shape v1')
+          BasicOp (Reshape v3_shape v1')
 ruleBasicOp _ _ _ _ =
   Skip
 

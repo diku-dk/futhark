@@ -130,7 +130,7 @@ module Futhark.IR.Syntax
     CmpOp (..),
     ConvOp (..),
     OpaqueOp (..),
-    ReshapeKind (..),
+    NewShape (..),
     WithAccInput,
     Exp (..),
     Case (..),
@@ -305,13 +305,11 @@ data OpaqueOp
     OpaqueTrace T.Text
   deriving (Eq, Ord, Show)
 
--- | Which kind of reshape is this?
-data ReshapeKind
-  = -- | New shape is dynamically same as original.
-    ReshapeCoerce
-  | -- | Any kind of reshaping.
-    ReshapeArbitrary
-  deriving (Eq, Ord, Show)
+-- | A reshaping operation. Each entry in the list denotes changing some
+-- sequence of dimensions into a new sequence of dimensions. The total number of
+-- dimensions reshaped must equal the number of dimensions in the input array.
+newtype NewShape d = NewShape {unNewShape :: [(Int, ShapeBase d)]}
+  deriving (Eq, Ord, Show, Monoid, Semigroup, Functor, Foldable, Traversable)
 
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.
@@ -379,7 +377,7 @@ data BasicOp
   | -- | Create array of given type and shape, with undefined elements.
     Scratch PrimType [SubExp]
   | -- | 1st arg is the new shape, 2nd arg is the input array.
-    Reshape ReshapeKind Shape VName
+    Reshape (NewShape SubExp) VName
   | -- | Permute the dimensions of the input array.  The list
     -- of integers is a list of dimensions (0-indexed), which
     -- must be a permutation of @[0,n-1]@, where @n@ is the

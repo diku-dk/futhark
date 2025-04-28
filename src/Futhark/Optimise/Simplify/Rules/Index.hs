@@ -184,17 +184,19 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         not consuming,
         ST.available src vtable ->
           Just $ pure $ IndexResult cs src $ Slice inds
-    Just (Reshape ReshapeCoerce newshape src, cs)
-      | Just olddims <- arrayDims <$> seType (Var src),
-        changed_dims <- zipWith (/=) (shapeDims newshape) olddims,
+    Just (Reshape newshape src, cs)
+      | ReshapeCoerce <- reshapeKind newshape,
+        Just olddims <- arrayDims <$> seType (Var src),
+        changed_dims <- zipWith (/=) (shapeDims (newShape newshape)) olddims,
         not $ or $ drop (length inds) changed_dims ->
           Just $ pure $ IndexResult cs src $ Slice inds
       | Just olddims <- arrayDims <$> seType (Var src),
         length newshape == length inds,
-        length olddims == length (shapeDims newshape) ->
+        length olddims == length (shapeDims (newShape newshape)) ->
           Just $ pure $ IndexResult cs src $ Slice inds
-    Just (Reshape _ (Shape [_]) v2, cs)
-      | Just [_] <- arrayDims <$> seType (Var v2) ->
+    Just (Reshape newshape v2, cs)
+      | Shape [_] <- newShape newshape,
+        Just [_] <- arrayDims <$> seType (Var v2) ->
           Just $ pure $ IndexResult cs v2 $ Slice inds
     Just (Concat d (x :| xs) _, cs)
       | -- HACK: simplifying the indexing of an N-array concatenation

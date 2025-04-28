@@ -279,10 +279,10 @@ pBasicOp =
           ),
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
-      keyword "reshape"
-        *> parens (Reshape ReshapeArbitrary <$> pShape <* pComma <*> pVName),
-      keyword "coerce"
-        *> parens (Reshape ReshapeCoerce <$> pShape <* pComma <*> pVName),
+      -- keyword "reshape"
+      --   *> parens (Reshape ReshapeArbitrary <$> pShape <* pComma <*> pVName),
+      -- keyword "coerce"
+      --   *> parens (Reshape ReshapeCoerce <$> pShape <* pComma <*> pVName),
       keyword "scratch"
         *> parens (Scratch <$> pPrimType <*> many (pComma *> pSubExp)),
       keyword "rearrange"

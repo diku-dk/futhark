@@ -3,6 +3,8 @@
 module Futhark.IR.Prop.Reshape
   ( -- * Construction
     shapeCoerce,
+    reshapeAll,
+    reshapeCoerce,
 
     -- * Execution
     reshapeOuter,
@@ -16,10 +18,17 @@ module Futhark.IR.Prop.Reshape
     flattenIndex,
     unflattenIndex,
     sliceSizes,
+
+    -- * Analysis
+    ReshapeKind (..),
+    reshapeKind,
+    newShape,
+    fuseReshape,
   )
 where
 
 import Control.Monad (guard, mplus)
+import Data.Bifunctor (first)
 import Data.Foldable
 import Futhark.IR.Prop.Rearrange (isMapTranspose)
 import Futhark.IR.Syntax
@@ -30,7 +39,19 @@ import Prelude hiding (product, quot, sum)
 -- | Construct a 'Reshape' that is a 'ReshapeCoerce'.
 shapeCoerce :: [SubExp] -> VName -> Exp rep
 shapeCoerce newdims arr =
-  BasicOp $ Reshape ReshapeCoerce (Shape newdims) arr
+  BasicOp $ Reshape (NewShape (map dim newdims)) arr
+  where
+    dim x = (1, Shape [x])
+
+-- | Construct a 'NewShape' that completely reshapes the initial shape.
+reshapeAll :: (ArrayShape old) => old -> ShapeBase new -> NewShape new
+reshapeAll old new = NewShape [(shapeRank old, new)]
+
+-- | Construct a 'NewShape' that coerces the shape.
+reshapeCoerce :: ShapeBase new -> NewShape new
+reshapeCoerce (Shape newdims) = NewShape $ map dim newdims
+  where
+    dim x = (1, Shape [x])
 
 -- | @reshapeOuter newshape n oldshape@ returns a 'Reshape' expression
 -- that replaces the outer @n@ dimensions of @oldshape@ with @newshape@.
@@ -154,4 +175,41 @@ flipReshapeRearrange v0_shape v1_shape perm = do
   guard $ map_dims == take num_map_dims v1_shape
 
   caseA `mplus` caseB
+
+-- | Which kind of reshape is this?
+data ReshapeKind
+  = -- | New shape is dynamically same as original.
+    ReshapeCoerce
+  | -- | Any kind of reshaping.
+    ReshapeArbitrary
+  deriving (Eq, Ord, Show)
+
+reshapeKind :: NewShape SubExp -> ReshapeKind
+reshapeKind (NewShape rs) = if all unit rs then ReshapeCoerce else ReshapeArbitrary
+  where
+    unit r = fst r == 1 && shapeRank (snd r) == 1
+
+-- | The shape resulting from applying this new shape.
+newShape :: NewShape d -> ShapeBase d
+newShape = foldMap snd . unNewShape
+
+-- | Combine two reshape operations when this is possible without loss of
+-- information.
+fuseReshape :: NewShape d -> NewShape d -> Maybe (NewShape d)
+fuseReshape (NewShape []) (NewShape []) = Just $ NewShape []
+fuseReshape (NewShape old) (NewShape ((k, s) : new)) = do
+  (l, old') <- getTo k old
+  (NewShape [(l, s)] <>) <$> fuseReshape (NewShape old') (NewShape new)
+  where
+    getTo 0 old' = Just (0, old')
+    getTo k' ((old_k, old_s) : old')
+      | length old_s <= k' =
+          first (old_k +) <$> getTo (k' - length old_s) old'
+      | otherwise =
+          Just (k', (old_k - k', stripDims k' old_s) : old')
+    getTo _ _ = Nothing
+fuseReshape _ _ = Nothing
+
 {-# NOINLINE flipReshapeRearrange #-}
+
+{-# NOINLINE fuseReshape #-}

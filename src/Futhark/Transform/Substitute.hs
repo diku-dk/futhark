@@ -145,6 +145,9 @@ instance (Substitute d) => Substitute (ShapeBase d) where
   substituteNames substs (Shape es) =
     Shape $ map (substituteNames substs) es
 
+instance (Substitute d) => Substitute (NewShape d) where
+  substituteNames substs = fmap (substituteNames substs)
+
 instance (Substitute d) => Substitute (Ext d) where
   substituteNames substs (Free x) = Free $ substituteNames substs x
   substituteNames _ (Ext x) = Ext x

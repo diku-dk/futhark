@@ -615,10 +615,10 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Rearrange perm stm_arr))) acc =
         [ Let (Pat [PatElem arr' arr_t]) aux $ BasicOp $ Replicate mempty $ Var arr,
           Let outerpat aux $ BasicOp $ Rearrange perm' arr'
         ]
-maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape k reshape stm_arr))) acc =
+maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape reshape stm_arr))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
-    let reshape' = Shape (kernelNestWidths nest) <> reshape
-    pure $ oneStm $ Let outerpat aux $ BasicOp $ Reshape k reshape' arr
+    let reshape' = reshapeCoerce (Shape (kernelNestWidths nest)) <> reshape
+    pure $ oneStm $ Let outerpat aux $ BasicOp $ Reshape reshape' arr
 maybeDistributeStm stm@(Let pat aux (BasicOp (Update _ arr slice (Var v)))) acc
   | not $ null $ sliceDims slice =
       distributeSingleStm acc stm >>= \case
