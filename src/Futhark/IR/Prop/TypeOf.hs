@@ -33,7 +33,6 @@ where
 
 import Data.List.NonEmpty (NonEmpty (..))
 import Futhark.IR.Prop.Constants
-import Futhark.IR.Prop.Reshape (newShape)
 import Futhark.IR.Prop.Scope
 import Futhark.IR.Prop.Types
 import Futhark.IR.RetType

@@ -837,6 +837,9 @@ checkSlice vt (Slice idxes) = do
     SlicingError (arrayShape vt) (length idxes)
   mapM_ (traverse $ require [Prim int64]) idxes
 
+checkShape :: (Checkable rep) => Shape -> TypeM rep ()
+checkShape = mapM_ (require [Prim int64])
+
 checkBasicOp :: (Checkable rep) => BasicOp -> TypeM rep ()
 checkBasicOp (SubExp es) =
   void $ checkSubExp es
@@ -905,18 +908,22 @@ checkBasicOp (Replicate (Shape dims) valexp) = do
   mapM_ (require [Prim int64]) dims
   void $ checkSubExp valexp
 checkBasicOp (Scratch _ shape) =
-  mapM_ checkSubExp shape
+  checkShape $ Shape shape
 checkBasicOp (Reshape newshape arrexp) = do
-  rank <- shapeRank . fst <$> checkArrIdent arrexp
-  mapM_ (require [Prim int64]) $ shapeDims (newShape newshape)
-  let newshape_rank = sum (map fst (unNewShape newshape))
-  when (newshape_rank /= rank) $
-    bad $
-      TypeError $
-        "Reshaping "
-          <> showText newshape_rank
-          <> " dimensions, but underlying array has rank "
-          <> showText rank
+  (arr_shape, _) <- checkArrIdent arrexp
+  checkShape $ newShape newshape
+  spliced_shape <- foldM checkSplice arr_shape $ dimSplices newshape
+  when (spliced_shape /= newShape newshape) . bad . TypeError $
+    "Splice produces shape "
+      <> prettyText (newShape newshape)
+      <> " but annotation is shape "
+      <> prettyText spliced_shape
+  where
+    checkSplice arr_shape sp@(DimJoin i k shape) = do
+      mapM_ (require [Prim int64]) $ newShape newshape
+      when (i < 0 || i + i >= shapeRank arr_shape) . bad . TypeError $
+        "Splice " <> showText sp <> " cannot be applied to shape " <> prettyText arr_shape
+      pure $ takeDims i arr_shape <> shape <> stripDims (i + k) arr_shape
 checkBasicOp (Rearrange perm arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt

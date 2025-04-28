@@ -49,7 +49,6 @@ import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Futhark.IR.Prop.Pat
-import Futhark.IR.Prop.Reshape (newShape)
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Util.Pretty

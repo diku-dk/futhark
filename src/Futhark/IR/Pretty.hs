@@ -14,7 +14,7 @@ where
 import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
-import Futhark.IR.Prop.Reshape (ReshapeKind (..), newShape, reshapeKind)
+import Futhark.IR.Prop.Reshape (ReshapeKind (..), reshapeKind)
 import Futhark.IR.Syntax
 import Futhark.Util.Pretty
 
@@ -187,10 +187,12 @@ instance (Pretty d) => Pretty (FlatDimIndex d) where
 instance (Pretty a) => Pretty (FlatSlice a) where
   pretty (FlatSlice offset xs) = brackets (pretty offset <> ";" <+> commasep (map pretty xs))
 
+instance Pretty (DimSplice SubExp) where
+  pretty (DimJoin i k shape) = pretty i <> "::" <> pretty k <> "=>" <> pretty shape
+  pretty (DimSplit i shape) = pretty i <> "=>" <> pretty shape
+
 instance Pretty (NewShape SubExp) where
-  pretty (NewShape ds) = parens $ foldMap f ds
-    where
-      f (k, to) = pretty k <> "=>" <> pretty to
+  pretty (NewShape ds _) = parens $ commasep $ map pretty ds
 
 instance Pretty BasicOp where
   pretty (SubExp se) = pretty se

@@ -130,6 +130,7 @@ module Futhark.IR.Syntax
     CmpOp (..),
     ConvOp (..),
     OpaqueOp (..),
+    DimSplice (..),
     NewShape (..),
     WithAccInput,
     Exp (..),
@@ -305,11 +306,24 @@ data OpaqueOp
     OpaqueTrace T.Text
   deriving (Eq, Ord, Show)
 
--- | A reshaping operation. Each entry in the list denotes changing some
--- sequence of dimensions into a new sequence of dimensions. The total number of
--- dimensions reshaped must equal the number of dimensions in the input array.
-newtype NewShape d = NewShape {unNewShape :: [(Int, ShapeBase d)]}
-  deriving (Eq, Ord, Show, Monoid, Semigroup, Functor, Foldable, Traversable)
+-- | Split or join a range of dimensions.
+data DimSplice d
+  = -- | Join from this dimension, this many
+    -- dimensions, into the given shape.
+    DimJoin Int Int (ShapeBase d)
+  | -- | Split a single dimension into multiple dimensions.
+    DimSplit Int (ShapeBase d)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+-- | A reshaping operation consists of a sequence of splices.
+data NewShape d = NewShape
+  { dimSplices :: [DimSplice d],
+    newShape :: ShapeBase d
+  }
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+instance Semigroup (NewShape d) where
+  NewShape ss1 _ <> NewShape ss2 shape = NewShape (ss1 <> ss2) shape
 
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.
