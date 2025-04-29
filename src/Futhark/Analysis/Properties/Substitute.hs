@@ -4,7 +4,7 @@
 module Futhark.Analysis.Properties.Substitute ((@), subst) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (unless, when)
+import Control.Monad (foldM, msum, unless, when)
 import Control.Monad.RWS (lift)
 import Control.Monad.Trans.Maybe (MaybeT, hoistMaybe, runMaybeT)
 import Data.Functor ((<&>))
@@ -19,11 +19,11 @@ import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ, foreachCase, queryCase)
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Symbol
-import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMapper (..), astFold, astMap, identityMapper)
+import Futhark.Analysis.Properties.Traversals
 import Futhark.Analysis.Properties.Unify (Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), fv, renameM)
 import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.))
+import Futhark.SoP.SoP (SoP, sym2SoP)
 import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName)
 
@@ -182,60 +182,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
 
   let new_iter = head new_iter_
 
-  let new_g = IndexFn new_iter new_body
-
-  -- TODO change new_iter to be applied _after_ substitution rules?
-  -- TODO change rules to be foldable(?) over (shape f) (shape g) new_shape
-  -- beginning at trailing dimensions (foldr)
-  -- let rules f_iter g_iter new_iter
-  let sub1 :: MaybeT IndexFnM IndexFn
-      sub1 = case iterator f of
-        Empty -> pure new_g
-        Forall _ Iota {} -> pure new_g
-        _ -> fail "No match."
-
-      sub2 = case (iterator f, iterator g) of
-        (Forall i df@Cat {}, Forall j dg@Iota {}) -> do
-          Yes <- lift arg_in_segment_of_f
-          True <- lift $ rewrite (domainEnd df) >>= unifiesWith (domainEnd dg)
-          let new_iter' = Forall j $ repDomain (mkRep i $ Var j) df
-          pure $ new_g {iterator = new_iter'}
-        _ -> fail "No match."
-
-      sub3 = case (iterator f, iterator g) of
-        (Forall _ df@(Cat k _ _), Forall _ dg@(Cat k' _ _))
-          | k `S.member` fv new_body -> do
-              Yes <- lift arg_in_segment_of_f
-              True <- lift $ df `unifiesWith` dg
-              pure $ repIndexFn (mkRep k (sym2SoP $ Var k')) new_g
-        _ -> fail "No match."
-
-      sub4 = case iterator f of
-        Forall i df@(Cat k _ _) ->
-          if k `S.member` fv new_body
-            then do
-              Just arg <- hoistMaybe . pure $ args M.!? i
-              Just solution <-
-                lift . firstAlt . map (\e_k -> solveFor k e_k arg) $
-                  [intervalStart df, intervalEnd df]
-              pure $ repIndexFn (mkRep k solution) new_g
-            else pure new_g
-        _ -> fail "No match."
-
-      subFallback = case iterator f of
-        Forall i df@(Cat k _ _) | k `S.member` fv new_body -> do
-          Just arg <- hoistMaybe . pure $ args M.!? i
-          -- Create/lookup II array, checking that f is not already this
-          -- II array (e.g., defined by the user).
-          let def_II = IndexFn (iterator f) (cases [(Bool True, sym2SoP (Var k))])
-          Nothing :: Maybe (Substitution Symbol) <- lift $ unify f def_II
-          (vn_II, f_II) <- lift $ lookupII df def_II
-          lift $ insertIndexFn vn_II [f_II]
-          let k_rep = mkRep k (sym2SoP (Idx (Var vn_II) arg))
-          pure . repIndexFn k_rep $ IndexFn new_iter new_body
-        _ -> error "No substitution rule matches."
-
-  g' <- runMaybeT (sub1 <|> sub2 <|> sub3 <|> sub4 <|> subFallback)
+  g' <- subRules (IndexFn new_iter new_body)
   traverse simplify g'
   where
     -- Construct replacement from formal arguments of f to actual arguments.
@@ -287,6 +234,60 @@ substituteOnce f g_presub (f_apply, actual_args) = do
                 g_presub
         arg_eq_j `orM` arg_in_segment_bounds
       _ -> pure Unknown
+
+    -- Apply first matching rule for each dimension in g.
+    -- TODO for now, this assumes g and f dims align;
+    -- need to consider each dimension in f always to make sure
+    -- all Cat k's are handled.
+    subRules g = runMaybeT $ foldM rules g [0 .. length (shape g) - 1]
+      where
+        rules g' n =
+          sub1 n g' <|> sub2 n g' <|> sub3 n g' <|> sub4 n g' <|> subX n g'
+
+    sub1 n g = case shape f !! n of
+      Empty -> pure g
+      Forall _ Iota {} -> pure g
+      _ -> fail "No match."
+
+    sub2 n g = case (shape f !! n, shape g !! n) of
+      (Forall i df@Cat {}, Forall j dg@Iota {}) -> do
+        Yes <- lift arg_in_segment_of_f
+        True <- lift $ rewrite (domainEnd df) >>= unifiesWith (domainEnd dg)
+        let new_iter' = Forall j $ repDomain (mkRep i $ Var j) df
+        pure $ g {iterator = new_iter'} -- XXX update `n`th iter
+      _ -> fail "No match."
+
+    sub3 n g = case (shape f !! n, shape g !! n) of
+      (Forall _ df@(Cat k _ _), Forall _ dg@(Cat k' _ _))
+        | k `S.member` fv (body g) -> do
+            Yes <- lift arg_in_segment_of_f
+            True <- lift $ df `unifiesWith` dg
+            pure $ repIndexFn (mkRep k (sym2SoP $ Var k')) g
+      _ -> fail "No match."
+
+    sub4 n g = case shape f !! n of
+      Forall i df@(Cat k _ _) -> do
+        if k `S.member` fv (body g)
+          then do
+            Just arg <- hoistMaybe . pure $ args M.!? i
+            Just solution <-
+              lift . firstAlt . map (\e_k -> solveFor k e_k arg) $
+                [intervalStart df, intervalEnd df]
+            pure $ repIndexFn (mkRep k solution) g
+          else pure g
+      _ -> fail "No match."
+
+    subX n g = case shape f !! n of
+      Forall i df@(Cat k _ _) | k `S.member` fv (body g) -> do
+        Just arg <- hoistMaybe . pure $ args M.!? i
+        -- Create/lookup II array.
+        let def_II = IndexFn (shape f !! n) (cases [(Bool True, sym2SoP (Var k))])
+        -- Check that f is not already this II array (e.g., defined by the user).
+        Nothing :: Maybe (Substitution Symbol) <- lift $ unify f def_II
+        (vn_II, f_II) <- lift $ lookupII df def_II
+        lift $ insertIndexFn vn_II [f_II]
+        pure (repIndexFn (mkRep k (sym2SoP (Idx (Var vn_II) arg))) g)
+      _ -> fail "No match."
 
 {-
               Utilities
