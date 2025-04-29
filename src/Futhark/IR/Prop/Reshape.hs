@@ -9,6 +9,7 @@ module Futhark.IR.Prop.Reshape
     -- * Execution
     reshapeOuter,
     reshapeInner,
+    newshapeInner,
 
     -- * Simplification
     flipReshapeRearrange,
@@ -28,8 +29,9 @@ module Futhark.IR.Prop.Reshape
 where
 
 import Control.Monad (guard, mplus)
-import Data.Bifunctor (first)
 import Data.Foldable
+import Data.List qualified as L
+import Data.Ord (comparing)
 import Futhark.IR.Prop.Rearrange (isMapTranspose)
 import Futhark.IR.Syntax
 import Futhark.Util (takeLast)
@@ -38,13 +40,13 @@ import Prelude hiding (product, quot, sum)
 
 -- | Construct a 'NewShape' that completely reshapes the initial shape.
 reshapeAll :: (ArrayShape old) => old -> ShapeBase new -> NewShape new
-reshapeAll old new = NewShape [DimJoin 0 (shapeRank old) new] new
+reshapeAll old new = NewShape new [DimSplice 0 (shapeRank old) new]
 
 -- | Construct a 'NewShape' that coerces the shape.
 reshapeCoerce :: ShapeBase new -> NewShape new
-reshapeCoerce shape = NewShape (zipWith dim (shapeDims shape) [0 ..]) shape
+reshapeCoerce shape = NewShape shape $ zipWith dim (shapeDims shape) [0 ..]
   where
-    dim x i = DimJoin i 1 $ Shape [x]
+    dim x i = DimSplice i 1 $ Shape [x]
 
 -- | Construct a 'Reshape' that is a 'ReshapeCoerce'.
 shapeCoerce :: [SubExp] -> VName -> Exp rep
@@ -57,12 +59,23 @@ reshapeOuter :: Shape -> Int -> Shape -> Shape
 reshapeOuter newshape n oldshape =
   newshape <> Shape (drop n (shapeDims oldshape))
 
--- | @reshapeInner newshape n oldshape@ returns a 'Reshape' expression
--- that replaces the inner @m-n@ dimensions (where @m@ is the rank of
--- @oldshape@) of @src@ with @newshape@.
+-- | @reshapeInner newshape n oldshape@ produces a shape that replaces the inner
+-- @m-n@ dimensions (where @m@ is the rank of @oldshape@) of @src@ with
+-- @newshape@.
 reshapeInner :: Shape -> Int -> Shape -> Shape
 reshapeInner newshape n oldshape =
   Shape (take n (shapeDims oldshape)) <> newshape
+
+-- | @newshapeInner outershape newshape@ bumps all the dimensions in @newshape@
+-- by the rank of @outershape@, essentially making them operate on the inner
+-- dimensions of a larger array, and also updates the shape of @newshape@ to
+-- have @outershape@ outermost.
+newshapeInner :: Shape -> NewShape SubExp -> NewShape SubExp
+newshapeInner outershape (NewShape oldshape ss) =
+  NewShape (outershape <> oldshape) (map f ss)
+  where
+    r = shapeRank outershape
+    f (DimSplice i k shape) = DimSplice (r + i) k shape
 
 -- | @reshapeIndex to_dims from_dims is@ transforms the index list
 -- @is@ (which is into an array of shape @from_dims@) into an index
@@ -183,13 +196,13 @@ data ReshapeKind
   deriving (Eq, Ord, Show)
 
 reshapeKind :: NewShape SubExp -> ReshapeKind
-reshapeKind (NewShape rs _)
-  | all unit rs = ReshapeCoerce
+reshapeKind (NewShape _ ss)
+  | all unit $ zip (L.sortBy (comparing dim) ss) [0 ..] = ReshapeCoerce
   | otherwise = ReshapeArbitrary
   where
-    unit (DimJoin _ 1 (Shape [_])) = True
-    unit (DimSplit _ (Shape [_])) = True
+    unit (DimSplice j 1 (Shape [_]), i) = i == j
     unit _ = False
+    dim (DimSplice j _ _) = j
 
 -- | Combine two reshape operations when this is possible without loss of
 -- information.
@@ -199,3 +212,7 @@ fuseReshape x y = Just $ x <> y
 {-# NOINLINE flipReshapeRearrange #-}
 
 {-# NOINLINE fuseReshape #-}
+
+{-# NOINLINE reshapeKind #-}
+
+{-# NOINLINE newshapeInner #-}

@@ -149,10 +149,10 @@ mapExpM tv (BasicOp (Replicate shape vexp)) =
   BasicOp <$> (Replicate <$> mapOnShape tv shape <*> mapOnSubExp tv vexp)
 mapExpM tv (BasicOp (Scratch t shape)) =
   BasicOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
-mapExpM tv (BasicOp (Reshape shape arrexp)) =
+mapExpM tv (BasicOp (Reshape newshape arrexp)) =
   BasicOp
     <$> ( Reshape
-            <$> mapM (mapOnSubExp tv) shape
+            <$> mapM (mapOnSubExp tv) newshape
             <*> mapOnVName tv arrexp
         )
 mapExpM tv (BasicOp (Rearrange perm e)) =

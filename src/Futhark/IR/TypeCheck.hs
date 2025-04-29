@@ -915,14 +915,14 @@ checkBasicOp (Reshape newshape arrexp) = do
   spliced_shape <- foldM checkSplice arr_shape $ dimSplices newshape
   when (spliced_shape /= newShape newshape) . bad . TypeError $
     "Splice produces shape "
-      <> prettyText (newShape newshape)
-      <> " but annotation is shape "
       <> prettyText spliced_shape
+      <> " but annotation is shape "
+      <> prettyText (newShape newshape)
   where
-    checkSplice arr_shape sp@(DimJoin i k shape) = do
-      mapM_ (require [Prim int64]) $ newShape newshape
-      when (i < 0 || i + i >= shapeRank arr_shape) . bad . TypeError $
-        "Splice " <> showText sp <> " cannot be applied to shape " <> prettyText arr_shape
+    checkSplice arr_shape sp@(DimSplice i k shape) = do
+      checkShape shape
+      when (i < 0 || i + k > shapeRank arr_shape) . bad . TypeError $
+        "Splice " <> prettyText sp <> " cannot be applied to shape " <> prettyText arr_shape
       pure $ takeDims i arr_shape <> shape <> stripDims (i + k) arr_shape
 checkBasicOp (Rearrange perm arr) = do
   arrt <- lookupType arr

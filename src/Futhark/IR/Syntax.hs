@@ -306,24 +306,35 @@ data OpaqueOp
     OpaqueTrace T.Text
   deriving (Eq, Ord, Show)
 
--- | Split or join a range of dimensions.
+-- | Split or join a range of dimensions. A reshaping operation consists of a
+-- sequence of these. The purpose is to maintain information about the original
+-- operations (flatten/unflatten), which can then be used for algebraic
+-- optimisations.
 data DimSplice d
-  = -- | Join from this dimension, this many
-    -- dimensions, into the given shape.
-    DimJoin Int Int (ShapeBase d)
-  | -- | Split a single dimension into multiple dimensions.
-    DimSplit Int (ShapeBase d)
+  = -- | @DimSplice i k s@ modifies dimensions @i@ to @i+k-1@ to instead have
+    -- shape @s@.
+    --
+    -- If @k@ is 1 and the rank of @s@ is greater than 1, then this is
+    -- equivalent to splitting a dimension.
+    --
+    -- If @k@ is greater than 1 and the rank of @s@ is 1, then this is
+    -- equivalent to merging adjacent dimensions.
+    --
+    -- Other cases can do arbitrary changes, but are harder for the compiler to
+    -- analyse.
+    DimSplice Int Int (ShapeBase d)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
--- | A reshaping operation consists of a sequence of splices.
+-- | A reshaping operation consists of a sequence of splices, as well as an
+-- annotation indicating the final shape.
 data NewShape d = NewShape
-  { dimSplices :: [DimSplice d],
-    newShape :: ShapeBase d
+  { newShape :: ShapeBase d,
+    dimSplices :: [DimSplice d]
   }
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
 instance Semigroup (NewShape d) where
-  NewShape ss1 _ <> NewShape ss2 shape = NewShape (ss1 <> ss2) shape
+  NewShape _ ss1 <> NewShape shape ss2 = NewShape shape (ss1 <> ss2)
 
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.

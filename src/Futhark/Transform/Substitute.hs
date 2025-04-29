@@ -142,8 +142,7 @@ instance Substitute (NoOp rep) where
   substituteNames _ = id
 
 instance (Substitute d) => Substitute (ShapeBase d) where
-  substituteNames substs (Shape es) =
-    Shape $ map (substituteNames substs) es
+  substituteNames substs = fmap (substituteNames substs)
 
 instance (Substitute d) => Substitute (NewShape d) where
   substituteNames substs = fmap (substituteNames substs)

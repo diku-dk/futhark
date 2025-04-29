@@ -82,18 +82,35 @@ flipTests =
 fuseTests :: [TestTree]
 fuseTests =
   [ testCase (unwords ["fuseReshape", show old, show new]) $
-      fuseReshape (NewShape old) (NewShape new) @?= NewShape <$> expected
-    | (old :: [(Int, ShapeBase String)], new, expected) <-
-        [ ( [(1, Shape ["AB"])],
-            [(1, Shape ["A", "B"])],
-            Just [(1, Shape ["A", "B"])]
+      fuseReshape (uncurry (NewShape . Shape) old) (uncurry (NewShape . Shape) new)
+        @?= uncurry (NewShape . Shape) <$> expected
+    | ( old :: ([String], [DimSplice String]),
+        new,
+        expected
+        ) <-
+        [ ( (["AB"], [dimJoin 1 1 "AB"]),
+            (["A", "B"], [dimSplit 1 ["A", "B"]]),
+            Just
+              ( ["A", "B"],
+                [ dimJoin 1 1 "AB",
+                  dimSplit 1 ["A", "B"]
+                ]
+              )
           ),
-          ( [(1, Shape ["AB", "C"])],
-            [(1, Shape ["A", "B"]), (1, Shape ["C"])],
-            Just [(1, Shape ["A", "B", "C"])]
+          ( (["A", "BC"], [dimSplit 1 ["A", "BC"]]),
+            (["A", "B", "C"], [dimSplit 2 ["B", "C"]]),
+            Just
+              ( ["A", "B", "C"],
+                [ dimSplit 1 ["A", "BC"],
+                  dimSplit 2 ["B", "C"]
+                ]
+              )
           )
         ]
   ]
+  where
+    dimJoin i k w = DimSplice i k (Shape [w])
+    dimSplit i ws = DimSplice i 1 (Shape ws)
 
 tests :: TestTree
 tests =

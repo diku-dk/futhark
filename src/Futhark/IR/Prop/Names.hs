@@ -346,7 +346,7 @@ instance (FreeIn d) => FreeIn (ShapeBase d) where
   freeIn' = freeIn' . shapeDims
 
 instance (FreeIn d) => FreeIn (NewShape d) where
-  freeIn' = freeIn' . shapeDims . newShape
+  freeIn' = foldMap freeIn'
 
 instance (FreeIn d) => FreeIn (Ext d) where
   freeIn' (Free x) = freeIn' x

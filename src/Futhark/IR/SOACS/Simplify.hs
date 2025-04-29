@@ -35,7 +35,7 @@ import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Prop.Aliases
-import Futhark.IR.SOACS
+import Futhark.IR.SOACS hiding (reshapeInner)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify qualified as Simplify
 import Futhark.Optimise.Simplify.Engine qualified as Engine
@@ -471,6 +471,11 @@ removeDuplicateMapOutput _ (Pat pes) aux (Screma w arrs form)
       | otherwise = (ses_ts_pes' ++ [(se, t, pe)], copies)
 removeDuplicateMapOutput _ _ _ _ = Skip
 
+reshapeInner :: SubExp -> NewShape SubExp -> NewShape SubExp
+reshapeInner w new_shape = reshapeCoerce outer <> newshapeInner outer new_shape
+  where
+    outer = Shape [w]
+
 -- Mapping some operations becomes an extension of that operation.
 mapOpToOp :: BottomUpRuleOp (Wise SOACS)
 mapOpToOp (_, used) pat aux1 e
@@ -479,7 +484,7 @@ mapOpToOp (_, used) pat aux1 e
     paramName p == reshape_arr,
     not $ UT.isConsumed (patElemName map_pe) used = Simplify $ do
       certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
-        Reshape (reshapeCoerce (Shape [w]) <> newshape) arr
+        Reshape (reshapeInner w newshape) arr
   | Just (_, cs, _, BasicOp (Concat d (arr :| arrs) dw), ps, outer_arr : outer_arrs) <-
       isMapWithOp pat e,
     (arr : arrs) == map paramName ps =
@@ -976,7 +981,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
                 ArrayRearrange _ _ perm ->
                   BasicOp $ Rearrange (0 : map (+ 1) perm) arr
                 ArrayReshape _ _ new_shape ->
-                  BasicOp $ Reshape (reshapeCoerce (Shape [w]) <> new_shape) arr
+                  BasicOp $ Reshape (reshapeInner w new_shape) arr
                 ArrayCopy {} ->
                   BasicOp $ Replicate mempty $ Var arr
                 ArrayVar {} ->
@@ -1052,7 +1057,7 @@ moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm ma
         Just t <- typeOf <$> M.lookup arr scope,
         invariantToMap t =
           let cs = stmAuxCerts aux <> resCerts res
-              transform = (arr, cs, BasicOp . Reshape (reshapeCoerce (Shape [w]) <> new_shape))
+              transform = (arr, cs, BasicOp . Reshape (reshapeInner w new_shape))
            in ((t, screma_pe, transform) : transformed, map_pesres', stms)
       where
         matches (r, _, _) = resSubExp r == Var (patElemName pe)

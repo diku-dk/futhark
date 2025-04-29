@@ -260,6 +260,12 @@ pIota =
               <*> pure t
           )
 
+pDimSplice :: Parser (DimSplice SubExp)
+pDimSplice = DimSplice <$> pInt <* lexeme "::" <*> pInt <* lexeme "=>" <*> pShape
+
+pNewShape :: Parser (NewShape SubExp)
+pNewShape = parens $ NewShape <$> pShape <* pSemi <*> (pDimSplice `sepBy` pComma)
+
 pBasicOp :: Parser BasicOp
 pBasicOp =
   choice
@@ -279,10 +285,10 @@ pBasicOp =
           ),
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
-      -- keyword "reshape"
-      --   *> parens (Reshape ReshapeArbitrary <$> pShape <* pComma <*> pVName),
-      -- keyword "coerce"
-      --   *> parens (Reshape ReshapeCoerce <$> pShape <* pComma <*> pVName),
+      keyword "reshape"
+        *> parens (Reshape <$> pNewShape <* pComma <*> pVName),
+      keyword "coerce"
+        *> parens (Reshape <$> (reshapeCoerce <$> pShape) <* pComma <*> pVName),
       keyword "scratch"
         *> parens (Scratch <$> pPrimType <*> many (pComma *> pSubExp)),
       keyword "rearrange"

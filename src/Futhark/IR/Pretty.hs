@@ -188,11 +188,11 @@ instance (Pretty a) => Pretty (FlatSlice a) where
   pretty (FlatSlice offset xs) = brackets (pretty offset <> ";" <+> commasep (map pretty xs))
 
 instance Pretty (DimSplice SubExp) where
-  pretty (DimJoin i k shape) = pretty i <> "::" <> pretty k <> "=>" <> pretty shape
-  pretty (DimSplit i shape) = pretty i <> "=>" <> pretty shape
+  pretty (DimSplice i k shape) = pretty i <> "::" <> pretty k <> "=>" <> pretty shape
 
 instance Pretty (NewShape SubExp) where
-  pretty (NewShape ds _) = parens $ commasep $ map pretty ds
+  pretty (NewShape shape ds) =
+    parens $ align $ pretty shape <> semi </> commasep (map pretty ds)
 
 instance Pretty BasicOp where
   pretty (SubExp se) = pretty se
