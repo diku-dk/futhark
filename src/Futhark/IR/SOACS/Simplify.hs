@@ -1055,7 +1055,7 @@ moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm ma
     onStm (transformed, map_infos, stms) (Let (Pat [pe]) aux (BasicOp (Reshape new_shape arr)))
       | ([(res, _, screma_pe)], map_pesres') <- partition matches map_infos,
         Just t <- typeOf <$> M.lookup arr scope,
-        invariantToMap t =
+        invariantToMap (t, new_shape) =
           let cs = stmAuxCerts aux <> resCerts res
               transform = (arr, cs, BasicOp . Reshape (reshapeInner w new_shape))
            in ((t, screma_pe, transform) : transformed, map_pesres', stms)
