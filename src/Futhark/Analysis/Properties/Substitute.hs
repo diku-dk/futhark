@@ -158,7 +158,8 @@ getQuantifier (Forall i _) = i
 {-
               Substitution rules
 -}
--- TODO Add support for multiple arguments in substituteOnce.
+-- Basic support for multiple arguments is done.
+-- (We should reconsider the Cat k abstraction before adding proper support.)
 -- TODO git revert 31d79980a270d30a1c3183aafef1bcbb42ae8e3f
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
 substituteOnce f g_presub (f_apply, actual_args) = do
@@ -236,7 +237,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
       _ -> pure Unknown
 
     -- Apply first matching rule for each dimension in g.
-    -- TODO for now, this assumes g and f dims align;
+    -- XXX for now, this assumes g and f dims align;
     -- need to consider each dimension in f always to make sure
     -- all Cat k's are handled.
     subRules g = runMaybeT $ foldM rules g [0 .. length (shape g) - 1]
