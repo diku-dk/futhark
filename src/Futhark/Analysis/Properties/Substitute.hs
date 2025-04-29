@@ -1,10 +1,13 @@
 -- Index function substitution.
+{-# LANGUAGE LambdaCase #-}
+
 module Futhark.Analysis.Properties.Substitute ((@), subst) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (unless, when)
 import Control.Monad.RWS (lift)
 import Control.Monad.Trans.Maybe (MaybeT, hoistMaybe, runMaybeT)
+import Data.Functor ((<&>))
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
@@ -158,7 +161,7 @@ getQuantifier (Forall i _) = i
 -- TODO Add support for multiple arguments in substituteOnce.
 -- TODO git revert 31d79980a270d30a1c3183aafef1bcbb42ae8e3f
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
-substituteOnce f g_presub (f_apply, f_args) = do
+substituteOnce f g_presub (f_apply, actual_args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
   g <- repApply vn g_presub
 
@@ -168,16 +171,23 @@ substituteOnce f g_presub (f_apply, f_args) = do
         let s = mkRep vn (rep args e_f)
         pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep args p_f), rep s e_g)
 
-  let new_iter = case iterator g of
-        Empty -> Empty
-        Forall _ dg | vn `notElem` fv dg -> iterator g
-        Forall j dg
-          | Just e_f <- justSingleCase f ->
-              Forall j $ repDomain (mkRep vn (rep args e_f)) dg
-        _ -> error "Not implemented yet: multi-case domain."
+  let new_iter_ =
+        shape g <&> \case
+          Empty -> Empty
+          Forall j dg
+            | vn `notElem` fv dg -> Forall j dg
+            | Just e_f <- justSingleCase f ->
+                Forall j $ repDomain (mkRep vn (rep args e_f)) dg
+          _ -> error "Not implemented yet: multi-case domain."
+
+  let new_iter = head new_iter_
 
   let new_g = IndexFn new_iter new_body
 
+  -- TODO change new_iter to be applied _after_ substitution rules?
+  -- TODO change rules to be foldable(?) over (shape f) (shape g) new_shape
+  -- beginning at trailing dimensions (foldr)
+  -- let rules f_iter g_iter new_iter
   let sub1 :: MaybeT IndexFnM IndexFn
       sub1 = case iterator f of
         Empty -> pure new_g
@@ -215,35 +225,23 @@ substituteOnce f g_presub (f_apply, f_args) = do
       subFallback = case iterator f of
         Forall i df@(Cat k _ _) | k `S.member` fv new_body -> do
           Just arg <- hoistMaybe . pure $ args M.!? i
-          -- Create II array.
+          -- Create/lookup II array, checking that f is not already this
+          -- II array (e.g., defined by the user).
           let def_II = IndexFn (iterator f) (cases [(Bool True, sym2SoP (Var k))])
-          -- Make sure that f is not already an II array. (One defined by the user.)
           Nothing :: Maybe (Substitution Symbol) <- lift $ unify f def_II
-
           (vn_II, f_II) <- lift $ lookupII df def_II
           lift $ insertIndexFn vn_II [f_II]
-
-          new_iter' <- case new_iter of
-            Forall j dg@(Cat {}) ->
-              Forall j . Iota <$> lift (rewrite (domainEnd dg .+. int2SoP 1))
-            _ -> pure new_iter
-
-          let ii idx = sym2SoP (Idx (Var vn_II) idx)
-          let k_rep = case new_iter of
-                Forall j (Cat k' _ _) ->
-                  mkRep k' (ii (sym2SoP $ Var j)) <> mkRep k (ii arg)
-                _ -> mkRep k (ii arg)
-
-          pure . repIndexFn k_rep $ IndexFn new_iter' new_body
+          let k_rep = mkRep k (sym2SoP (Idx (Var vn_II) arg))
+          pure . repIndexFn k_rep $ IndexFn new_iter new_body
         _ -> error "No substitution rule matches."
 
   g' <- runMaybeT (sub1 <|> sub2 <|> sub3 <|> sub4 <|> subFallback)
   traverse simplify g'
   where
     -- Construct replacement from formal arguments of f to actual arguments.
-    -- (`f_args` may be empty for convience; used internally in Convert).
+    -- (`actual_args` may be empty for convience; used internally in Convert).
     args :: Replacement Symbol =
-      case f_args of
+      case actual_args of
         []
           | [Empty] <- shape f ->
               -- All source-program variable references should hit this case.
@@ -259,12 +257,11 @@ substituteOnce f g_presub (f_apply, f_args) = do
               mempty
           | length (shape f) == length (shape g_presub) ->
               -- Case used internally in Convert (empty args for convenience).
-              map_formal_args_to $
-                map (sym2SoP . Var . getQuantifier) (shape g_presub)
+              map_formal_args_to (shape g_presub <&> sym2SoP . Var . getQuantifier)
         _
-          | length (shape f) == length f_args ->
+          | length (shape f) == length actual_args ->
               -- All source-program indexing should hit this case.
-              map_formal_args_to f_args
+              map_formal_args_to actual_args
           | otherwise ->
               error "Argument mismatch."
       where
