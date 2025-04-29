@@ -43,7 +43,7 @@ instance Pretty Commutativity where
   pretty Commutative = "commutative"
   pretty Noncommutative = "noncommutative"
 
-instance Pretty Shape where
+instance (Pretty d) => Pretty (ShapeBase d) where
   pretty = mconcat . map (brackets . pretty) . shapeDims
 
 instance Pretty Rank where
@@ -52,9 +52,6 @@ instance Pretty Rank where
 instance (Pretty a) => Pretty (Ext a) where
   pretty (Free e) = pretty e
   pretty (Ext x) = "?" <> pretty (show x)
-
-instance Pretty ExtShape where
-  pretty = mconcat . map (brackets . pretty) . shapeDims
 
 instance Pretty Space where
   pretty DefaultSpace = mempty
@@ -187,10 +184,10 @@ instance (Pretty d) => Pretty (FlatDimIndex d) where
 instance (Pretty a) => Pretty (FlatSlice a) where
   pretty (FlatSlice offset xs) = brackets (pretty offset <> ";" <+> commasep (map pretty xs))
 
-instance Pretty (DimSplice SubExp) where
+instance (Pretty d) => Pretty (DimSplice d) where
   pretty (DimSplice i k shape) = pretty i <> "::" <> pretty k <> "=>" <> pretty shape
 
-instance Pretty (NewShape SubExp) where
+instance (Pretty d) => Pretty (NewShape d) where
   pretty (NewShape shape ds) =
     parens $ align $ pretty shape <> semi </> commasep (map pretty ds)
 

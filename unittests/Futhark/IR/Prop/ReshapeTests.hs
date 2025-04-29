@@ -81,36 +81,33 @@ flipTests =
 
 fuseTests :: [TestTree]
 fuseTests =
-  [ testCase (unwords ["fuseReshape", show old, show new]) $
-      fuseReshape (uncurry (NewShape . Shape) old) (uncurry (NewShape . Shape) new)
+  [ testCase (unwords ["simplifyNewShape", prettyString input]) $
+      simplifyNewShape (uncurry (NewShape . Shape) input)
         @?= uncurry (NewShape . Shape) <$> expected
-    | ( old :: ([String], [DimSplice String]),
-        new,
+    | ( input :: ([String], [DimSplice String]),
         expected
         ) <-
-        [ ( (["AB"], [dimJoin 1 1 "AB"]),
-            (["A", "B"], [dimSplit 1 ["A", "B"]]),
-            Just
-              ( ["A", "B"],
-                [ dimJoin 1 1 "AB",
-                  dimSplit 1 ["A", "B"]
-                ]
-              )
+        [ -- Inverse flatten and unflatten - simple case.
+          ( (["A", "B"], [dimJoin 0 2 "AB", dimSplit 0 ["A", "B"]]),
+            Just (["A", "B"], [])
           ),
-          ( (["A", "BC"], [dimSplit 1 ["A", "BC"]]),
-            (["A", "B", "C"], [dimSplit 2 ["B", "C"]]),
+          -- Two unflattens - simple case.
+          ( (["A", "B", "C"], [dimSplit 0 ["A", "BC"], dimSplit 1 ["B", "C"]]),
             Just
               ( ["A", "B", "C"],
-                [ dimSplit 1 ["A", "BC"],
-                  dimSplit 2 ["B", "C"]
-                ]
+                [dimSplit 0 ["A", "B", "C"]]
               )
+          ),
+          -- Get rid of a coerce.
+          ( (["A", "B"], [dimCoerce 0 "AB", dimSplit 0 ["A", "B"]]),
+            Just (["A", "B"], [dimSplit 0 ["A", "B"]])
           )
         ]
   ]
   where
     dimJoin i k w = DimSplice i k (Shape [w])
     dimSplit i ws = DimSplice i 1 (Shape ws)
+    dimCoerce i w = DimSplice i 1 (Shape [w])
 
 tests :: TestTree
 tests =

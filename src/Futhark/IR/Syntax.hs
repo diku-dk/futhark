@@ -320,6 +320,9 @@ data DimSplice d
     -- If @k@ is greater than 1 and the rank of @s@ is 1, then this is
     -- equivalent to merging adjacent dimensions.
     --
+    -- If @k@ is 1 and the rank of @s@ is 1, then it is a coercion - a change
+    -- that only affects the type, but does not have any semantic effect.
+    --
     -- Other cases can do arbitrary changes, but are harder for the compiler to
     -- analyse.
     DimSplice Int Int (ShapeBase d)
@@ -332,9 +335,6 @@ data NewShape d = NewShape
     dimSplices :: [DimSplice d]
   }
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
-
-instance Semigroup (NewShape d) where
-  NewShape _ ss1 <> NewShape shape ss2 = NewShape shape (ss1 <> ss2)
 
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.

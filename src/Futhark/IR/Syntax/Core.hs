@@ -15,6 +15,7 @@ module Futhark.IR.Syntax.Core
     ShapeBase (..),
     Shape,
     stripDims,
+    dropDims,
     takeDims,
     Ext (..),
     ExtSize,
@@ -124,10 +125,14 @@ instance Semigroup (ShapeBase d) where
 instance Monoid (ShapeBase d) where
   mempty = Shape mempty
 
--- | @stripDims n shape@ strips the outer @n@ dimensions from
--- @shape@.
+-- | Alias for 'dropDims'
 stripDims :: Int -> ShapeBase d -> ShapeBase d
-stripDims n (Shape dims) = Shape $ drop n dims
+stripDims = dropDims
+
+-- | @dropDims n shape@ strips the outer @n@ dimensions from
+-- @shape@.
+dropDims :: Int -> ShapeBase d -> ShapeBase d
+dropDims n (Shape dims) = Shape $ drop n dims
 
 -- | @takeDims n shape@ takes the outer @n@ dimensions from @shape@, up to the
 -- number of dimensions in @shape@.
