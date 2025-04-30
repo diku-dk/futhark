@@ -277,9 +277,10 @@ simplifyIdentityReshape _ seType (Reshape newshape v)
 simplifyIdentityReshape _ _ _ = Nothing
 
 simplifyReshapeReshape :: SimpleRule rep
-simplifyReshapeReshape defOf _ (Reshape newshape v)
-  | Just (BasicOp (Reshape oldnewshape v2), v_cs) <- defOf v =
-      Just (Reshape (fuseReshape oldnewshape newshape) v2, v_cs)
+simplifyReshapeReshape defOf seType (Reshape newshape v)
+  | Just (BasicOp (Reshape oldnewshape v2), v_cs) <- defOf v,
+    Just v2_shape <- fmap arrayShape . seType $ Var v2 =
+      Just (Reshape (fuseReshape v2_shape oldnewshape newshape) v2, v_cs)
 simplifyReshapeReshape _ _ _ = Nothing
 
 simplifyReshapeScratch :: SimpleRule rep

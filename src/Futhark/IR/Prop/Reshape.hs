@@ -10,6 +10,7 @@ module Futhark.IR.Prop.Reshape
     reshapeOuter,
     reshapeInner,
     newshapeInner,
+    applySplice,
 
     -- * Simplification
     flipReshapeRearrange,
@@ -206,24 +207,36 @@ reshapeKind (NewShape _ ss)
     unit _ = False
     dim (DimSplice j _ _) = j
 
-move :: DimSplice a -> [DimSplice a] -> Maybe [DimSplice a]
+-- | Apply the splice to a shape.
+applySplice :: ShapeBase d -> DimSplice d -> ShapeBase d
+applySplice shape_bef (DimSplice i k shape) =
+  takeDims i shape_bef <> shape <> stripDims (i + k) shape_bef
+
+dimSpan i n = takeDims n . dropDims i
+
+next shape x y ss =
+  (x :) <$> move (applySplice shape x, y) ss
+
+move ::
+  (Eq d) =>
+  (ShapeBase d, DimSplice d) ->
+  [DimSplice d] ->
+  Maybe [DimSplice d]
 move _ [] = Nothing
 --
 -- A coercion can be fused with anything.
-move (DimSplice i1 1 (Shape [_])) (DimSplice i2 n2 s2 : ss)
+move (shape_bef, DimSplice i1 1 (Shape [_])) (DimSplice i2 n2 s2 : ss)
   | i1 == i2 =
       Just $ DimSplice i2 n2 s2 : ss
 --
--- A join with a matching split turns into nothing.
-move (DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
+-- A flatten with an inverse unflatten turns into nothing.
+move (shape_bef, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i1 == i2,
-    length s1 == 1,
-    n2 == 1,
-    n1 == length s2 =
+    dimSpan i1 n1 shape_bef == s2 =
       Just ss
 --
 -- A split where one of the dimensions is then further split.
-move (DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
+move (shape_bef, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i2 >= i1,
     i2 < i1 + length s1,
     n1 == 1,
@@ -236,35 +249,33 @@ move (DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
 --
 -- These cases is for updating dimensions as we move across intervening
 -- operations.
-move (DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
+move (shape, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i1 > i2 + n2 =
-      (DimSplice i2 n2 s2 :)
-        <$> move (DimSplice (i1 - n2 + length s2) n1 s1) ss
+      next shape (DimSplice i2 n2 s2) (DimSplice (i1 - n2 + length s2) n1 s1) ss
   | i2 > i1 + n1 =
-      (DimSplice (i2 - n1 + length s1) n2 s2 :)
-        <$> move (DimSplice i1 n2 s1) ss
+      next shape (DimSplice (i2 - n1 + length s1) n2 s2) (DimSplice i1 n2 s1) ss
   | otherwise = Nothing
 
 -- | This is a quadratic-time function that looks for a DimSplice that can be
 -- combined with a move DimSlice (and then does so). Since these lists are
 -- usually small, this should not be a problem. It is called to convergence by
 -- 'improve'.
-improveOne :: [DimSplice a] -> Maybe [DimSplice a]
-improveOne [] = Nothing
-improveOne (s : ss) =
-  move s ss `mplus` ((s :) <$> improveOne ss)
+improveOne :: (Eq d) => ShapeBase d -> [DimSplice d] -> Maybe [DimSplice d]
+improveOne _ [] = Nothing
+improveOne shape (s : ss) =
+  move (shape, s) ss `mplus` ((s :) <$> improveOne shape ss)
 
 -- | Try to simplify the given 'NewShape'. Returns 'Nothing' if no improvement
 -- is possible.
-simplifyNewShape :: NewShape d -> Maybe (NewShape d)
-simplifyNewShape (NewShape shape ss) =
-  NewShape shape . improve <$> improveOne ss
+simplifyNewShape :: (Eq d) => ShapeBase d -> NewShape d -> Maybe (NewShape d)
+simplifyNewShape shape_bef (NewShape shape ss) =
+  NewShape shape . improve <$> improveOne shape_bef ss
   where
-    improve ss' = maybe ss' improve $ improveOne ss'
+    improve ss' = maybe ss' improve $ improveOne shape_bef ss'
 
 -- | Combine two reshape operations without loss of information.
-fuseReshape :: NewShape d -> NewShape d -> NewShape d
-fuseReshape x y = fromMaybe z $ simplifyNewShape z
+fuseReshape :: (Eq d) => ShapeBase d -> NewShape d -> NewShape d -> NewShape d
+fuseReshape shape_bef x y = fromMaybe z $ simplifyNewShape shape_bef z
   where
     z = NewShape (newShape y) (dimSplices x <> dimSplices y)
 

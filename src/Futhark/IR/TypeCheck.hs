@@ -923,7 +923,7 @@ checkBasicOp (Reshape newshape arrexp) = do
       checkShape shape
       when (i < 0 || i + k > shapeRank arr_shape) . bad . TypeError $
         "Splice " <> prettyText sp <> " cannot be applied to shape " <> prettyText arr_shape
-      pure $ takeDims i arr_shape <> shape <> stripDims (i + k) arr_shape
+      pure $ applySplice arr_shape sp
 checkBasicOp (Rearrange perm arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt

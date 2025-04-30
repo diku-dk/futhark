@@ -82,43 +82,47 @@ flipTests =
 simplifyTests :: [TestTree]
 simplifyTests =
   [ testCase (unwords ["simplifyNewShape", prettyString input]) $
-      simplifyNewShape (uncurry (NewShape . Shape) input)
-        @?= uncurry (NewShape . Shape) <$> expected
-    | ( input :: ([String], [DimSplice String]),
-        expected
-        ) <-
+      simplifyNewShape (Shape orig_shape) (uncurry (NewShape . Shape) input)
+        @?= uncurry (NewShape . Shape) . (fst input,) <$> expected
+    | (orig_shape :: [String], input, expected) <-
         [ -- Inverse flatten and unflatten - simple case.
-          ( (["A", "B"], [dimJoin 0 2 "AB", dimSplit 0 ["A", "B"]]),
-            Just (["A", "B"], [])
+          ( ["A", "B"],
+            ( ["A", "B"],
+              [dimJoin 0 2 "AB", dimSplit 0 ["A", "B"]]
+            ),
+            Just []
           ),
           -- Non-inverse flatten and unflatten - simple case.
-          ( (["C", "D"], [dimJoin 0 2 "AB", dimSplit 0 ["C", "D"]]),
-            Just (["C", "D"], [dimJoin 0 2 "AB", dimSplit 0 ["C", "D"]])
+          ( ["A", "B"],
+            ( ["C", "D"],
+              [dimJoin 0 2 "AB", dimSplit 0 ["C", "D"]]
+            ),
+            Nothing
           ),
           -- Inverse flatten and unflatten - separated by coercion.
-          ( ( ["C", "D"],
+          ( ["A", "B"],
+            ( ["C", "D"],
               [ dimJoin 0 2 "AB",
                 dimCoerce 0 "CD",
                 dimSplit 0 ["C", "D"]
               ]
             ),
             Just
-              ( ["C", "D"],
-                [ dimJoin 0 2 "AB",
-                  dimSplit 0 ["C", "D"]
-                ]
-              )
+              [ dimJoin 0 2 "AB",
+                dimSplit 0 ["C", "D"]
+              ]
           ),
           -- Two unflattens - simple case.
-          ( (["A", "B", "C"], [dimSplit 0 ["A", "BC"], dimSplit 1 ["B", "C"]]),
-            Just
-              ( ["A", "B", "C"],
-                [dimSplit 0 ["A", "B", "C"]]
-              )
+          ( ["ABC"],
+            (["A", "B", "C"], [dimSplit 0 ["A", "BC"], dimSplit 1 ["B", "C"]]),
+            Just [dimSplit 0 ["A", "B", "C"]]
           ),
           -- Get rid of a coerce.
-          ( (["A", "B"], [dimCoerce 0 "AB", dimSplit 0 ["A", "B"]]),
-            Just (["A", "B"], [dimSplit 0 ["A", "B"]])
+          ( ["CD"],
+            ( ["A", "B"],
+              [dimCoerce 0 "AB", dimSplit 0 ["A", "B"]]
+            ),
+            Just [dimSplit 0 ["A", "B"]]
           )
         ]
   ]

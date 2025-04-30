@@ -473,7 +473,7 @@ removeDuplicateMapOutput _ _ _ _ = Skip
 
 reshapeInner :: SubExp -> NewShape SubExp -> NewShape SubExp
 reshapeInner w new_shape =
-  fuseReshape (reshapeCoerce outer) (newshapeInner outer new_shape)
+  reshapeCoerce outer <> newshapeInner outer new_shape
   where
     outer = Shape [w]
 
