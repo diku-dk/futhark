@@ -44,7 +44,6 @@ type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
 -- a constraint on how it can be instantiated.
 type UnconTyVar = (VName, Liftedness)
 
-
 liftST :: ST s a -> SolveM s a
 liftST = SolveM . lift . lift
 
@@ -555,5 +554,15 @@ solve ::
   TyParams ->
   TyVars () ->
   Either TypeError ([UnconTyVar], Solution)
-solve _constraints _typarams _tyvars = undefined
+solve constraints typarams tyvars =
+  runST 
+    $ runExceptT 
+    . flip evalStateT (SolverState M.empty) 
+    . runSolveM 
+    $ do
+      initialState typarams tyvars
+      mapM_ solveCt constraints
+      mapM_ solveTyVar (M.toList tyvars)
+      s <- get
+      solution s
 {-# NOINLINE solve #-}
