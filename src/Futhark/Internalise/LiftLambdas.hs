@@ -120,7 +120,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
         valBindRetType = Info (RetType dims ret),
         valBindBody = funbody,
         valBindDoc = Nothing,
-        valBindAttrs = mempty,
+        valBindAttrs = [AttrAtom (AtomName "inline") mempty],
         valBindLocation = mempty,
         valBindEntryPoint = Nothing
       }

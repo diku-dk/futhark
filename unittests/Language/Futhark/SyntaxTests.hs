@@ -51,7 +51,7 @@ instance Arbitrary PrimValue where
 
 instance IsString VName where
   fromString s =
-    let (s', '_' : tag) = span (/= '_') s
+    let (tag, s') = bimap reverse (reverse . tail) $ span (/= '_') $ reverse s
      in VName (fromString s') (read tag)
 
 instance (IsString v) => IsString (QualName v) where

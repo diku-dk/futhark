@@ -6,6 +6,7 @@ module Futhark.IR.Prop.Rearrange
     rearrangeReach,
     rearrangeCompose,
     isPermutationOf,
+    isIdentityPerm,
     transposeIndex,
     isMapTranspose,
   )
@@ -61,6 +62,11 @@ isPermutationOf l1 l2 =
       | otherwise = do
           (xs', v) <- pick (i + 1) xs y
           pure (x : xs', v)
+
+-- | Is this an identify permutation? An identity permutation is of
+-- the form @[0, 1, ..., k]@.
+isIdentityPerm :: [Int] -> Bool
+isIdentityPerm perm = perm == [0 .. length perm - 1]
 
 -- | If @l@ is an index into the array @a@, then @transposeIndex k n
 -- l@ is an index to the same element in the array @transposeArray k n

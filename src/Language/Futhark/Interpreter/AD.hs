@@ -5,25 +5,62 @@ module Language.Futhark.Interpreter.AD
     Tape (..),
     VJPValue (..),
     JVPValue (..),
+    Counter (..),
+    Depth (..),
     doOp,
     addFor,
     tapePrimal,
     primitive,
     varPrimal,
     deriveTape,
+    unionWithM,
+    unionsWithM,
   )
 where
 
 import Control.Monad (foldM, zipWithM)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Except (ExceptT, catchE, runExceptT, throwE)
+import Control.Monad.Trans.State (State, get, modify, runState)
 import Data.Either (isRight)
-import Data.List (find, foldl')
+import Data.Foldable (find, foldlM)
+import Data.Functor ((<&>))
 import Data.Map qualified as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Text qualified as T
 import Futhark.AD.Derivatives (pdBinOp, pdBuiltin, pdUnOp)
 import Futhark.Analysis.PrimExp (PrimExp (..))
 import Language.Futhark.Core (VName (..), nameFromString, nameFromText)
 import Language.Futhark.Primitive
+  ( BinOp (Add, FAdd, FMul, LogAnd, LogOr, Mul),
+    CmpOp,
+    ConvOp,
+    Overflow (OverflowWrap),
+    PrimType (Bool, FloatType, IntType),
+    PrimValue (BoolValue),
+    UnOp,
+    binOpType,
+    blankPrimValue,
+    cmpOpType,
+    convOpType,
+    doBinOp,
+    doCmpOp,
+    doConvOp,
+    doUnOp,
+    flipConvOp,
+    primFuns,
+    primValueType,
+    unOpType,
+  )
+
+-- | Used to uniquely identify values.
+newtype Counter = Counter Int
+  deriving (Eq, Ord, Num, Show)
+
+type ADMonad = ExceptT String (State Counter)
+
+incCounter :: ADMonad ()
+incCounter = lift $ modify $ \i -> i + 1
 
 -- Mathematical operations subject to AD.
 data Op
@@ -70,12 +107,17 @@ mulFor (FloatType t) = FMul t
 mulFor Bool = LogAnd
 mulFor t = error $ "mulFor: " ++ show t
 
+-- | An indication of the nesting depth of AD. This is used to avoid
+-- pertubation confusion.
+newtype Depth = Depth Int
+  deriving (Ord, Eq, Show)
+
 -- Types and utility functions--
 -- When taking the partial derivative of a function, we
 -- must differentiate between the values which are kept
 -- constant, and those which are not
 data ADValue
-  = Variable Int ADVariable
+  = Variable Depth ADVariable
   | Constant PrimValue
   deriving (Show)
 
@@ -88,14 +130,20 @@ data ADVariable
   | JVP JVPValue
   deriving (Show)
 
-depth :: ADValue -> Int
+depth :: ADValue -> Depth
 depth (Variable d _) = d
-depth (Constant _) = 0
+depth (Constant _) = Depth 0
 
 primal :: ADValue -> ADValue
 primal (Variable _ (VJP (VJPValue t))) = tapePrimal t
 primal (Variable _ (JVP (JVPValue v _))) = primal v
 primal (Constant v) = Constant v
+
+primalFor :: Depth -> ADValue -> ADValue
+primalFor cur v@(Variable tag _) | cur /= tag = v
+primalFor _ (Variable _ (VJP (VJPValue t))) = tapePrimal t
+primalFor cur (Variable _ (JVP (JVPValue v _))) = primalFor cur v
+primalFor _ (Constant v) = Constant v
 
 primitive :: ADValue -> PrimValue
 primitive (Variable _ v) = varPrimal v
@@ -105,27 +153,29 @@ varPrimal :: ADVariable -> PrimValue
 varPrimal (VJP (VJPValue t)) = primitive $ tapePrimal t
 varPrimal (JVP (JVPValue v _)) = primitive $ primal v
 
--- Evaluates a PrimExp using doOp
-evalPrimExp :: M.Map VName ADValue -> PrimExp VName -> Maybe ADValue
-evalPrimExp m (LeafExp n _) = M.lookup n m
-evalPrimExp _ (ValueExp pv) = Just $ Constant pv
+-- Evaluates a PrimExp using doOp'
+evalPrimExp :: M.Map VName ADValue -> PrimExp VName -> ADMonad ADValue
+evalPrimExp m (LeafExp n _) =
+  maybe (throwE $ "Unknown variable " <> show n) pure $ M.lookup n m
+evalPrimExp _ (ValueExp pv) =
+  pure $ Constant pv
 evalPrimExp m (BinOpExp op x y) = do
   x' <- evalPrimExp m x
   y' <- evalPrimExp m y
-  doOp (OpBin op) [x', y']
+  doOp' (OpBin op) [x', y']
 evalPrimExp m (CmpOpExp op x y) = do
   x' <- evalPrimExp m x
   y' <- evalPrimExp m y
-  doOp (OpCmp op) [x', y']
+  doOp' (OpCmp op) [x', y']
 evalPrimExp m (UnOpExp op x) = do
   x' <- evalPrimExp m x
-  doOp (OpUn op) [x']
+  doOp' (OpUn op) [x']
 evalPrimExp m (ConvOpExp op x) = do
   x' <- evalPrimExp m x
-  doOp (OpConv op) [x']
+  doOp' (OpConv op) [x']
 evalPrimExp m (FunExp fn p _) = do
   p' <- mapM (evalPrimExp m) p
-  doOp (OpFn fn) p'
+  doOp' (OpFn fn) p'
 
 -- Returns a list of PrimExps calculating the partial
 -- derivative of each operands of a given operation
@@ -141,23 +191,30 @@ lookupPDs _ _ = Nothing
 -- This function performs a mathematical operation on a
 -- list of operands, performing automatic differentiation
 -- if one or more operands is a Variable (of depth > 0)
-doOp :: Op -> [ADValue] -> Maybe ADValue
-doOp op o
+doOp :: Op -> [ADValue] -> Counter -> Either String (ADValue, Counter)
+doOp op o uid = case runState (runExceptT $ doOp' op o) uid of
+  (Left s, _) -> Left s
+  (Right v, uid') -> Right (v, uid')
+
+doOp' :: Op -> [ADValue] -> ADMonad ADValue
+doOp' op o
   | not $ opTypeMatch op (map primValueType pv) =
       -- This function may be called with arguments of invalid types,
       -- because it is used as part of an overloaded operator.
-      Nothing
+      throwE $ unwords ["invalid types for op", show op, "and operands", show o]
   | otherwise = do
       let dep = case op of
-            OpCmp _ -> 0 -- AD is not well-defined for comparason operations
+            OpCmp _ -> Depth 0 -- AD is not well-defined for comparason operations
             -- There are no derivatives for those written in
             -- PrimExp (check lookupPDs)
             _ -> maximum (map depth o)
-      if dep == 0 then constCase else nonconstCase dep
+      if dep == Depth 0
+        then maybe (throwE "failed to evaluate const") pure constCase <* incCounter
+        else nonconstCase dep
   where
     pv = map primitive o
 
-    divideDepths :: Int -> ADValue -> Either ADValue ADVariable
+    divideDepths :: Depth -> ADValue -> Either ADValue ADVariable
     divideDepths _ v@(Constant {}) = Left v
     divideDepths d v@(Variable d' v') = if d' < d then Left v else Right v'
 
@@ -191,15 +248,15 @@ doOp op o
         (OpFn fn, _) -> do
           (_, _, f) <- M.lookup fn primFuns
           f pv
-        _ -> error "doOp: opTypeMatch"
+        _ -> error "doOp': opTypeMatch"
 
     nonconstCase dep = do
       -- In this case, some values are variables. We therefore
       -- have to perform the necessary steps for AD
 
       -- First, we calculate the value for the previous depth
-      let oprev = map primal o
-      vprev <- doOp op oprev
+      let oprev = map (primalFor dep) o
+      vprev <- doOp' op oprev
 
       -- Then we separate the values of the maximum depth from
       -- those of a lower depth
@@ -209,28 +266,31 @@ doOp op o
         -- Finally, we perform the necessary steps for the given
         -- type of AD
         Just (Right (VJP {})) ->
-          Just . Variable dep . VJP . VJPValue $ vjpHandleOp op (map extractVJP o') vprev
+          Variable dep . VJP . VJPValue
+            <$> vjpHandleOp op (map extractVJP o') vprev
         Just (Right (JVP {})) ->
-          Variable dep . JVP . JVPValue vprev <$> jvpHandleFn op (map extractJVP o')
+          Variable dep . JVP . JVPValue vprev
+            <$> jvpHandleOp op (map extractJVP o')
         _ ->
           -- Since the maximum depth is non-zero, there must be at
           -- least one variable of depth > 0
           error "find isRight"
 
-calculatePDs :: Op -> [ADValue] -> [ADValue]
-calculatePDs op p =
+calculatePDs :: Op -> [ADValue] -> ADMonad [ADValue]
+calculatePDs op args =
   -- Create a unique VName for each operand
-  let n = map (\i -> VName (nameFromString $ "x" ++ show i) i) [1 .. length p]
+  let n = map (\i -> VName (nameFromString $ "x" ++ show i) i) [1 .. length args]
       -- Put the operands in the environment
-      m = M.fromList $ zip n p
+      m = M.fromList $ zip n args
 
       -- Look up, and calculate the partial derivative
       -- of the operation with respect to each operand
       pde =
         fromMaybe (error "lookupPDs failed") $
           lookupPDs op $
-            map (`LeafExp` opReturnType op) n
-   in map (fromMaybe (error "evalPrimExp failed") . evalPrimExp m) pde
+            zipWith (\v val -> LeafExp v $ primValueType $ primitive val) n args
+      res = mapM (\x -> catchE (evalPrimExp m x) $ error . ("evalPrimExp failed: " <>)) pde
+   in res
 
 -- VJP / Reverse mode automatic differentiation--
 -- In reverse mode AD, the entire computation
@@ -240,62 +300,106 @@ newtype VJPValue = VJPValue Tape
   deriving (Show)
 
 -- | Represents a computation tree, as well as every intermediate
--- value in its evaluation. TODO: make this a graph.
+-- value in its evaluation.
 data Tape
   = -- | This represents a variable. Each variable is given a unique ID,
     -- and has an initial value
-    TapeID Int ADValue
+    TapeID Counter ADValue
   | -- | This represents a constant.
     TapeConst ADValue
   | -- | This represents the application of a mathematical operation.
     -- Each parameter is given by its Tape, and the return value of
     -- the operation is saved
-    TapeOp Op [Tape] ADValue
+    TapeOp Op [Tape] Counter ADValue
   deriving (Show)
 
 -- | Returns the primal value of a Tape.
 tapePrimal :: Tape -> ADValue
 tapePrimal (TapeID _ v) = v
 tapePrimal (TapeConst v) = v
-tapePrimal (TapeOp _ _ v) = v
+tapePrimal (TapeOp _ _ _ v) = v
 
 -- This updates Tape of a VJPValue with a new operation,
 -- treating all operands of a lower depth as constants
-vjpHandleOp :: Op -> [Either ADValue VJPValue] -> ADValue -> Tape
+vjpHandleOp :: Op -> [Either ADValue VJPValue] -> ADValue -> ADMonad Tape
 vjpHandleOp op p v = do
-  TapeOp op (map toTape p) v
+  i <- lift get
+  pure $ TapeOp op (map toTape p) i v
   where
     toTape (Left v') = TapeConst v'
     toTape (Right (VJPValue t)) = t
 
+unionWithM :: (Monad m, Ord k) => (a -> a -> m a) -> M.Map k a -> M.Map k a -> m (M.Map k a)
+unionWithM f m1 m2 = do
+  let m = M.union (M.difference m1 m2) (M.difference m2 m1)
+  let k = M.keys $ M.intersection m1 m2
+  v <- mapM (\k' -> f (fromJust $ M.lookup k' m1) (fromJust $ M.lookup k' m2)) k
+  pure $ foldl (\m' (k', v') -> M.insert k' v' m') m (zip k v)
+
+unionsWithM :: (Foldable f, Monad m, Ord k) => (a -> a -> m a) -> f (M.Map k a) -> m (M.Map k a)
+unionsWithM f = foldM (unionWithM f) M.empty
+
 -- | This calculates every partial derivative of a 'Tape'. The result
 -- is a map of the partial derivatives, each key corresponding to the
 -- ID of a free variable (see TapeID).
-deriveTape :: Tape -> ADValue -> M.Map Int ADValue
-deriveTape (TapeID i _) s = M.fromList [(i, s)]
-deriveTape (TapeConst _) _ = M.empty
-deriveTape (TapeOp op p _) s =
-  -- Calculate the new sensitivities
-  let s'' = case op of
-        OpConv op' ->
-          -- In case of type conversion, simply convert the sensitivity
-          [ fromMaybe (error "deriveTape: doOp failed") $
-              doOp (OpConv $ flipConvOp op') [s]
-          ]
-        _ ->
-          map (mul s) $ calculatePDs op $ map tapePrimal p
+deriveTape :: Tape -> ADValue -> Counter -> Either String (M.Map Counter ADValue, Counter)
+deriveTape tp s uid = case runState (runExceptT $ deriveTape' tp s) uid of
+  (Left e, _) -> Left e
+  (Right v, uid') -> Right (v, uid')
 
-      -- Propagate the new sensitivities
-      pd = zipWith deriveTape p s''
-   in -- Add up the results
-      foldl' (M.unionWith add) M.empty pd
+deriveTape' :: Tape -> ADValue -> ADMonad (M.Map Counter ADValue)
+deriveTape' (TapeID i _) s = pure $ M.singleton i s
+deriveTape' (TapeConst _) _ = pure M.empty
+deriveTape' tp@(TapeOp op p uid _) s =
+  fst <$> derive tp s M.empty (countReferences p $ M.singleton (-uid - 1) 1)
   where
-    add x y =
-      fromMaybe (error "deriveTape: add failed") $
-        doOp (OpBin $ addFor $ opReturnType op) [x, y]
-    mul x y =
-      fromMaybe (error "deriveTape: mul failed") $
-        doOp (OpBin $ mulFor $ opReturnType op) [x, y]
+    add x y = doOp' (OpBin $ addFor $ opReturnType op) [x, y]
+    mul x y = doOp' (OpBin $ mulFor $ opReturnType op) [x, y]
+    madd :: Counter -> ADValue -> M.Map Counter ADValue -> ADMonad (M.Map Counter ADValue)
+    madd i a m = case M.lookup i m of
+      Just b -> add a b <&> (\x -> M.insert i x m)
+      Nothing -> pure $ M.insert i a m
+    derive ::
+      Tape ->
+      ADValue ->
+      M.Map Counter ADValue ->
+      M.Map Counter Int ->
+      ADMonad (M.Map Counter ADValue, M.Map Counter Int)
+    derive (TapeID i _) s' ss rs = madd i s' ss <&> (,rs)
+    derive (TapeConst _) _ ss rs = pure (ss, rs)
+    derive (TapeOp op' p' uid' _) s' ss rs = do
+      -- Decrease the reference counter
+      let r = fromJust (M.lookup (-uid' - 1) rs) - 1
+          rs' = M.insert (-uid' - 1) r rs
+      -- Add the sensitivity
+      ss' <- madd (-uid' - 1) s' ss
+      -- If there are still more references left, do nothing
+      if r > 0
+        then pure (ss', rs')
+        else -- Otherwise, derive the tape
+
+          if r == 0
+            then do
+              let s'' = fromJust (M.lookup (-uid' - 1) ss')
+
+              -- Calculate the new sensitivities
+              s''' <- case op' of
+                OpConv op'' ->
+                  -- In case of type conversion, simply convert the sensitivity
+                  sequence [doOp' (OpConv $ flipConvOp op'') [s'']]
+                _ -> calculatePDs op' (map tapePrimal p') >>= mapM (mul s'')
+
+              -- Propagate the new sensitivities
+              foldlM (\(ss'', rs'') (p'', s'''') -> derive p'' s'''' ss'' rs'') (ss', rs') $ zip p' s'''
+            else error "TODO: This branch is unreachable unless `countReferences` undercounts"
+    countReferences :: [Tape] -> M.Map Counter Int -> M.Map Counter Int
+    countReferences p' d' = foldl f d' p'
+    f d'' x =
+      case x of
+        (TapeOp _ p'' uid'' _) -> case M.lookup (-uid'' - 1) d'' of
+          Just v -> M.insert (-uid'' - 1) (v + 1) d''
+          Nothing -> countReferences p'' $ M.insert (-uid'' - 1) 1 d''
+        _ -> d''
 
 -- JVP / Forward mode automatic differentiation--
 
@@ -304,27 +408,26 @@ deriveTape (TapeOp op p _) s =
 data JVPValue = JVPValue ADValue ADValue
   deriving (Show)
 
--- | This calculates the derivative part of the JVPValue resulting
+-- | This calculates the tangent part of the JVPValue resulting
 -- from the application of a mathematical operation on one or more
 -- JVPValues.
-jvpHandleFn :: Op -> [Either ADValue JVPValue] -> Maybe ADValue
-jvpHandleFn op p = do
+jvpHandleOp :: Op -> [Either ADValue JVPValue] -> ADMonad ADValue
+jvpHandleOp op p = do
   case op of
     OpConv _ ->
       -- In case of type conversion, simply convert
-      -- the old derivative
-      doOp op [derivative $ head p]
+      -- the old tangent
+      doOp' op [tangent $ head p]
     _ -> do
-      -- Calculate the new derivative using the chain
-      -- rule
-      let pds = calculatePDs op $ map primal' p
-      vs <- zipWithM mul pds $ map derivative p
-      foldM add (Constant $ blankPrimValue $ opReturnType op) vs
+      -- Calculate the new tangent using the chain rule
+      pds <- calculatePDs op $ map primal' p
+      vs <- zipWithM mul pds $ map tangent p
+      foldM add (Constant $ blankPrimValue op_t) vs
   where
+    op_t = opReturnType op
     primal' (Left v) = v
     primal' (Right (JVPValue v _)) = v
-    derivative (Left v) = Constant $ blankPrimValue $ primValueType $ primitive v
-    derivative (Right (JVPValue _ d)) = d
-
-    add x y = doOp (OpBin $ addFor $ opReturnType op) [x, y]
-    mul x y = doOp (OpBin $ mulFor $ opReturnType op) [x, y]
+    tangent (Left _) = Constant $ blankPrimValue $ opReturnType op
+    tangent (Right (JVPValue _ d)) = d
+    add x y = doOp' (OpBin $ addFor $ opReturnType op) [x, y]
+    mul x y = doOp' (OpBin $ mulFor $ opReturnType op) [x, y]
