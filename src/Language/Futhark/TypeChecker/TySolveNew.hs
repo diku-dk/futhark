@@ -667,9 +667,10 @@ substTyVar' m v =
     Just (Right (Unsolved {})) -> Nothing
     Nothing -> Nothing
 
-solution :: SolverState s -> SolveM s ([UnconTyVar], Solution)
-solution st = do
-  mappings <- convertUF' $ solverTyVars st
+solution :: SolveM s ([UnconTyVar], Solution)
+solution = do
+  s <- get
+  mappings <- convertUF' $ solverTyVars s
   let unconstrained = mapMaybe unconstr $ M.toList mappings
   let sol = M.mapMaybe (mkSubst mappings) mappings
   pure (unconstrained, sol)
@@ -701,6 +702,5 @@ solve constraints typarams tyvars =
       initialState typarams tyvars
       mapM_ solveCt constraints
       mapM_ solveTyVar $ M.toList tyvars
-      s <- get
-      solution s
+      solution
 {-# NOINLINE solve #-}
