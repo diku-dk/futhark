@@ -268,49 +268,36 @@ simplifyAssert _ _ (Assert (Constant (BoolValue True)) _ _) =
 simplifyAssert _ _ _ =
   Nothing
 
--- No-op reshape.
-simplifyIdentityReshape :: SimpleRule rep
-simplifyIdentityReshape _ seType (Reshape newshape v)
+simplifyReshape :: SimpleRule rep
+simplifyReshape defOf seType (Reshape newshape v)
+  -- No-op reshape
   | Just t <- seType $ Var v,
     newShape newshape == arrayShape t =
       resIsSubExp $ Var v
-simplifyIdentityReshape _ _ _ = Nothing
-
-simplifyReshapeReshape :: SimpleRule rep
-simplifyReshapeReshape defOf seType (Reshape newshape v)
-  | Just (BasicOp (Reshape oldnewshape v2), v_cs) <- defOf v,
-    Just v2_shape <- fmap arrayShape . seType $ Var v2 =
-      Just (Reshape (fuseReshape v2_shape oldnewshape newshape) v2, v_cs)
-simplifyReshapeReshape _ _ _ = Nothing
-
-simplifyReshapeScratch :: SimpleRule rep
-simplifyReshapeScratch defOf _ (Reshape newshape v)
+  -- Simplifying a reshape
+  | Just shape <- arrayShape <$> seType (Var v),
+    Just newshape' <- simplifyNewShape shape newshape =
+      Just (Reshape newshape' v, mempty)
+  -- Reshape-of-reshape
+  | Just (BasicOp (Reshape oldnewshape v2), v_cs) <- defOf v =
+      Just (Reshape (oldnewshape <> newshape) v2, v_cs)
+  -- Reshape-of-scratch
   | Just (BasicOp (Scratch bt _), v_cs) <- defOf v =
       Just (Scratch bt $ shapeDims $ newShape newshape, v_cs)
-simplifyReshapeScratch _ _ _ = Nothing
-
-simplifyReshapeReplicate :: SimpleRule rep
-simplifyReshapeReplicate defOf seType (Reshape newshape v)
+  -- Reshape-of-replicate
   | Just (BasicOp (Replicate _ se), v_cs) <- defOf v,
     Just oldshape <- arrayShape <$> seType se,
+    newshape' <- newShape newshape,
     shapeDims oldshape `isSuffixOf` shapeDims newshape' =
       let new =
             take (shapeRank newshape' - shapeRank oldshape) $
               shapeDims newshape'
        in Just (Replicate (Shape new) se, v_cs)
-  where
-    newshape' = newShape newshape
-simplifyReshapeReplicate _ _ _ = Nothing
-
-simplifyReshapeIota :: SimpleRule rep
-simplifyReshapeIota defOf _ (Reshape newshape v)
+  -- Reshape-of-iota
   | Just (BasicOp (Iota _ offset stride it), v_cs) <- defOf v,
     [n] <- shapeDims (newShape newshape) =
       Just (Iota n offset stride it, v_cs)
-simplifyReshapeIota _ _ _ = Nothing
-
-simplifyReshapeConcat :: SimpleRule rep
-simplifyReshapeConcat defOf seType (Reshape newshape v)
+  -- Reshape-of-concat
   | ReshapeCoerce <- reshapeKind newshape = do
       (BasicOp (Concat d arrs _), v_cs) <- defOf v
       (bef, w', aft) <- focusNth d $ shapeDims $ newShape newshape
@@ -319,7 +306,7 @@ simplifyReshapeConcat defOf seType (Reshape newshape v)
       guard $ arr_bef == bef
       guard $ arr_aft == aft
       Just (Concat d arrs w', v_cs)
-simplifyReshapeConcat _ _ _ = Nothing
+simplifyReshape _ _ _ = Nothing
 
 reshapeSlice :: [DimIndex d] -> [d] -> [DimIndex d]
 reshapeSlice (DimFix i : slice') scs =
@@ -379,12 +366,7 @@ simpleRules =
     simplifyConvOp,
     simplifyAssert,
     repScratchToScratch,
-    simplifyIdentityReshape,
-    simplifyReshapeReshape,
-    simplifyReshapeScratch,
-    simplifyReshapeReplicate,
-    simplifyReshapeIota,
-    simplifyReshapeConcat,
+    simplifyReshape,
     simplifyReshapeIndex,
     simplifyUpdateReshape
   ]
