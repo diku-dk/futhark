@@ -14,7 +14,6 @@ where
 import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
-import Futhark.IR.Prop.Reshape (ReshapeKind (..), reshapeKind)
 import Futhark.IR.Syntax
 import Futhark.Util.Pretty
 
@@ -233,11 +232,7 @@ instance Pretty BasicOp where
   pretty (Scratch t shape) =
     "scratch" <> apply (pretty t : map pretty shape)
   pretty (Reshape reshape e) =
-    case reshapeKind reshape of
-      ReshapeArbitrary ->
-        "reshape" <> apply [pretty reshape, pretty e]
-      ReshapeCoerce ->
-        "coerce" <> apply [pretty (newShape reshape), pretty e]
+    "reshape" <> apply [pretty (newShape reshape), pretty e]
   pretty (Rearrange perm e) =
     "rearrange" <> apply [apply (map pretty perm), pretty e]
   pretty (Concat i (x :| xs) w) =

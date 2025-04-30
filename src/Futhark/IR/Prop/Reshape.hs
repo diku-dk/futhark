@@ -26,7 +26,6 @@ module Futhark.IR.Prop.Reshape
     ReshapeKind (..),
     reshapeKind,
     newShape,
-    fuseReshape,
   )
 where
 
@@ -232,6 +231,11 @@ move ::
   [DimSplice d] ->
   Maybe [DimSplice d]
 move _ [] = Nothing
+--
+-- A coercion that does not do anything.
+move (_, DimSplice i1 1 shape) ss
+  | dimSpan i1 1 shape == shape =
+      Just ss
 --
 -- A coercion can be fused with anything.
 move (_, DimSplice i1 1 (Shape [_])) (DimSplice i2 n2 s2 : ss)

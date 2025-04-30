@@ -117,6 +117,13 @@ simplifyTests =
             (["A", "B", "C"], [dimSplit 0 ["A", "BC"], dimSplit 1 ["B", "C"]]),
             Just [dimSplit 0 ["A", "B", "C"]]
           ),
+          -- Identity coerce (with non-identity stuff afterwards)
+          ( ["A", "CD"],
+            ( ["B", "C", "D"],
+              [dimCoerce 0 "B", dimSplit 1 ["C", "D"]]
+            ),
+            Just [dimSplit 1 ["C", "D"]]
+          ),
           -- Get rid of a coerce.
           ( ["CD"],
             ( ["A", "B"],
