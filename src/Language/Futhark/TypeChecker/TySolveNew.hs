@@ -23,6 +23,7 @@ import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
 import Language.Futhark.TypeChecker.Types (substTyVars)
 import Language.Futhark.TypeChecker.UnionFind
+import Debug.Trace (traceM)
 
 -- | The type representation used by the constraint solver. Agnostic
 -- to sizes and uniqueness.
@@ -207,13 +208,15 @@ bindTyVar :: Reason Type -> BreadCrumbs -> VName -> Type -> SolveM s ()
 bindTyVar reason bcs v t = do
   occursCheck reason v t
   v_node <- lookupUF v
+  v_info <- liftST $ getDescr v_node
 
   setInfo v_node (Solved t)
 
-  v_info <- liftST $ getDescr v_node
-
   case (v_info, t) of
-    ( Unsolved TyVarFree {}, _ ) -> pure ()
+    ( Unsolved TyVarFree {}, _ ) -> do
+      traceM "YUPPA"
+      pure ()
+
     ( Unsolved (TyVarPrim _ v_pts), _ ) ->
         if t `elem` map (Scalar . Prim) v_pts
           then pure ()
@@ -447,12 +450,12 @@ unionTyVars :: Reason Type -> BreadCrumbs -> VName -> VName -> SolveM s ()
 unionTyVars reason bcs v t = do
   v_node <- lookupUF v
   t_node <- lookupUF t
+  v_sol <- liftST $ getDescr v_node
+  t_info <- lookupTyVarInfo t
 
   -- Unify the equivalence classes of v and t.
   liftST $ union v_node t_node
 
-  v_sol <- liftST $ getDescr v_node
-  t_info <- lookupTyVarInfo t
   case (v_sol, t_info) of
     (Unsolved (TyVarFree _ v_l), TyVarFree t_loc t_l)
       | v_l /= t_l ->
@@ -647,8 +650,32 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
               </> "which is not possible."
     _ -> pure ()
 
+convertUF' :: UF s -> SolveM s (M.Map TyVar TyVarSol)
+convertUF' uf = do
+  mappings <- mapM lookupSol $ M.toList uf
+  pure $ M.fromList mappings
+  where
+    lookupSol :: (TyVar, TyVarNode s) -> SolveM s (TyVar, TyVarSol)
+    lookupSol (tv, node) = do
+      descr <- liftST $ getDescr node
+      pure (tv, descr)
+
 solution :: SolverState s -> SolveM s ([UnconTyVar], Solution)
-solution st = undefined
+solution st = do
+  mappings <- convertUF' $ solverTyVars st
+  let unconstrained = mapMaybe unconstr $ M.toList mappings
+  let sol = M.mapMaybe (mkSubst mappings) mappings 
+  
+  pure (unconstrained, sol)
+  where
+    unconstr :: (TyVar, TyVarSol) -> Maybe UnconTyVar
+    unconstr (v, Unsolved (TyVarFree _ l)) = Just (v, l)
+    unconstr _ = Nothing
+
+    mkSubst m (Solved t) =
+      Just $ Right $ first (const ()) $ substTyVars (substTyVar m) t
+    mkSubst _ (Unsolved (TyVarPrim _ pts)) = Just $ Left pts
+    mkSubst _ _ = Nothing
 
 -- | Solve type constraints, producing either an error or a solution,
 -- alongside a list of unconstrained type variables.
