@@ -4,7 +4,7 @@
 module Futhark.Analysis.Properties.Substitute ((@), subst) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, when)
+import Control.Monad (foldM, when, (<=<))
 import Control.Monad.RWS (lift)
 import Control.Monad.Trans.Maybe (hoistMaybe, runMaybeT)
 import Data.Functor ((<&>))
@@ -31,7 +31,7 @@ import Language.Futhark (VName)
 -- into quantified symbols (e.g., Sum j a b f(e(j))).
 legalArg :: VName -> IndexFn -> IndexFn -> Symbol -> [SoP Symbol] -> Bool
 legalArg k g f e args =
-  let notQuantifier vn = vn < k || Just vn == catVar (iterator g)
+  let notQuantifier vn = vn < k || or [Just vn == catVar it | it <- shape g]
    in (hasSingleCase f || all (all notQuantifier . fv) args)
         || warning
   where
@@ -100,9 +100,10 @@ subst indexfn = do
 -- Are you substituting xs[i] for xs = for i < e . true => xs[i]?
 -- This happens when xs is a formal argument.
 trivialSub :: (ReplacementBuilder v Symbol) => IndexFn -> Symbol -> [v] -> Bool
-trivialSub (IndexFn (Forall i _) gs) e [arg] =
+trivialSub (IndexFn [] _) _ _ = False
+trivialSub (IndexFn [Forall i _] gs) e [arg] =
   repCases (mkRep i arg) gs == cases [(Bool True, sym2SoP e)]
-trivialSub _ _ _ = False
+trivialSub _ _ _ = error "trivialSub: multi-dim not implemented yet"
 
 subber :: (IndexFn -> Symbol -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
 subber argCheck g = do
@@ -142,11 +143,7 @@ subber argCheck g = do
           pure $ Just (e, vn, [arg])
     getApply_ _ acc _ = pure acc
 
-shape :: IndexFn -> [Iterator]
-shape f = [iterator f]
-
 getQuantifier :: Iterator -> VName
-getQuantifier Empty = undefined
 getQuantifier (Forall i _) = i
 
 {-
@@ -160,36 +157,32 @@ substituteOnce f g_presub (f_apply, actual_args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
   g <- repApply vn g_presub
 
-  let new_body = cases $ do
-        (p_f, e_f) <- guards f
-        (p_g, e_g) <- guards g
-        let s = mkRep vn (rep args e_f)
-        pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep args p_f), rep s e_g)
-
-  let new_iter_ =
-        shape g <&> \case
-          Empty -> Empty
-          Forall j dg
-            | vn `notElem` fv dg -> Forall j dg
-            | Just e_f <- justSingleCase f ->
-                Forall j $ repDomain (mkRep vn (rep args e_f)) dg
-          _ -> error "Not implemented yet: multi-case domain."
-
-  let new_iter = head new_iter_
-
-  g' <- subRules (IndexFn new_iter new_body)
-  traverse simplify g'
+  traverse simplify <=< subRules $
+    g
+      { shape =
+          shape g <&> \case
+            Forall j dg
+              | vn `notElem` fv dg -> Forall j dg
+              | Just e_f <- justSingleCase f ->
+                  Forall j $ repDomain (mkRep vn (rep args e_f)) dg
+            _ -> error "Not implemented yet: multi-case domain.",
+        body = cases $ do
+          (p_f, e_f) <- guards f
+          (p_g, e_g) <- guards g
+          let s = mkRep vn (rep args e_f)
+          pure (sop2Symbol (rep s p_g) :&& sop2Symbol (rep args p_f), rep s e_g)
+      }
   where
     -- Construct replacement from formal arguments of f to actual arguments.
     -- (`actual_args` may be empty for convience; used internally in Convert).
     args :: Replacement Symbol =
       case actual_args of
         []
-          | [Empty] <- shape f ->
+          | [] <- shape f ->
               -- All source-program variable references should hit this case.
               mempty
-          | [Empty] <- shape g_presub ->
-              -- This case is a HACK to allow substitution into preconditions:
+          | [] <- shape g_presub ->
+              -- This case is a HACK to allow substitution into preconditions.
               --   Checking precondition ((shape: [m]{i64| (>= 0)}): [m]nat_i64) for mk_flag_array_4631
               --   • | True ⇒    shape₄₆₁₉ ≥ 0
               --   	@
@@ -219,7 +212,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
 
     -- Side condition for Sub 2 and Sub 3:
     -- If f has a segmented domain, is f(arg) inside the k'th segment?
-    arg_in_segment_of_f = case (iterator f, iterator g_presub) of
+    arg_in_segment_of_f n = case (shape f !! n, shape g_presub !! n) of
       (Forall i df, Forall j _) -> do
         let arg_eq_j = pure . answerFromBool $ args M.! i == sym2SoP (Var j)
         let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
@@ -228,7 +221,6 @@ substituteOnce f g_presub (f_apply, actual_args) = do
                 (CaseCheck (\_ -> bounds $ args M.! i))
                 g_presub
         arg_eq_j `orM` arg_in_segment_bounds
-      _ -> pure Unknown
 
     -- Apply first matching rule for each dimension in g.
     -- XXX for now, this assumes g and f dims align;
@@ -240,23 +232,23 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           sub1 n g' <|> sub2 n g' <|> sub3 n g' <|> sub4 n g' <|> subX n g'
 
     sub1 n g = case shape f !! n of
-      Empty -> pure g
       Forall _ Iota {} -> pure g
       _ -> fail "No match."
 
     sub2 n g = case (shape f !! n, shape g !! n) of
       (Forall i df@Cat {}, Forall j dg@Iota {}) -> do
-        Yes <- lift arg_in_segment_of_f
-        True <- lift $ rewrite (domainEnd df) >>= unifiesWith (domainEnd dg)
-        let new_iter' = Forall j $ repDomain (mkRep i $ Var j) df
-        pure $ g {iterator = new_iter'} -- XXX update `n`th iter
+        True <- lift (rewrite (domainEnd df) >>= unifiesWith (domainEnd dg))
+        Yes <- lift (arg_in_segment_of_f n)
+        pure $ g {shape = l <> [Forall j (repDomain (mkRep i $ Var j) df)] <> r}
+        where
+          (l, _old_iter : r) = splitAt n (shape g)
       _ -> fail "No match."
 
     sub3 n g = case (shape f !! n, shape g !! n) of
       (Forall _ df@(Cat k _ _), Forall _ dg@(Cat k' _ _))
         | k `S.member` fv (body g) -> do
-            Yes <- lift arg_in_segment_of_f
-            True <- lift $ df `unifiesWith` dg
+            True <- lift (df `unifiesWith` dg)
+            Yes <- lift (arg_in_segment_of_f n)
             pure $ repIndexFn (mkRep k (sym2SoP $ Var k')) g
       _ -> fail "No match."
 
@@ -276,7 +268,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
       Forall i df@(Cat k _ _) | k `S.member` fv (body g) -> do
         Just arg <- hoistMaybe . pure $ args M.!? i
         -- Create/lookup II array.
-        let def_II = IndexFn (shape f !! n) (cases [(Bool True, sym2SoP (Var k))])
+        let def_II = f {body = cases [(Bool True, sym2SoP (Var k))]}
         -- Check that f is not already this II array (e.g., defined by the user).
         Nothing :: Maybe (Substitution Symbol) <- lift $ unify f def_II
         (vn_II, f_II) <- lift $ lookupII df def_II
