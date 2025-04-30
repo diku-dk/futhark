@@ -643,8 +643,9 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
               </> "which is not possible."
     _ -> pure ()
 
-convertUF' :: UF s -> SolveM s (M.Map TyVar (Either VName TyVarSol))
-convertUF' uf = do
+convertUF' :: SolveM s (M.Map TyVar (Either VName TyVarSol))
+convertUF' = do
+  uf <- gets solverTyVars
   M.traverseWithKey lookupSol uf
   where
     lookupSol :: TyVar -> TyVarNode s -> SolveM s (Either VName TyVarSol)
@@ -670,8 +671,7 @@ substTyVar' m v =
 
 solution :: SolveM s ([UnconTyVar], Solution)
 solution = do
-  s <- get
-  mappings <- convertUF' $ solverTyVars s
+  mappings <- convertUF'
   let unconstrained = mapMaybe unconstr $ M.toList mappings
   let sol = M.mapMaybe (mkSubst mappings) mappings
   pure (unconstrained, sol)
