@@ -650,31 +650,46 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
               </> "which is not possible."
     _ -> pure ()
 
-convertUF' :: UF s -> SolveM s (M.Map TyVar TyVarSol)
+convertUF' :: UF s -> SolveM s (M.Map TyVar (Either VName TyVarSol))
 convertUF' uf = do
   mappings <- mapM lookupSol $ M.toList uf
   pure $ M.fromList mappings
   where
-    lookupSol :: (TyVar, TyVarNode s) -> SolveM s (TyVar, TyVarSol)
+    lookupSol :: (TyVar, TyVarNode s) -> SolveM s (TyVar, Either VName TyVarSol)
     lookupSol (tv, node) = do
+      k <- liftST $ getKey node
       descr <- liftST $ getDescr node
-      pure (tv, descr)
+      pure (tv, if k /= tv
+                  then case descr of
+                    Solved _ -> Right descr
+                    _        -> Left k
+                  else Right descr)
+
+substTyVar' :: (Monoid u) => M.Map TyVar (Either VName TyVarSol) -> VName -> Maybe (TypeBase () u)
+substTyVar' m v =
+  case M.lookup v m of
+    Just (Left v') -> substTyVar' m v'
+    Just (Right (Solved t')) -> Just $ second (const mempty) $ substTyVars (substTyVar' m) t'
+    Just (Right Param {}) -> Nothing
+    Just (Right (Unsolved {})) -> Nothing
+    Nothing -> Nothing
 
 solution :: SolverState s -> SolveM s ([UnconTyVar], Solution)
 solution st = do
   mappings <- convertUF' $ solverTyVars st
   let unconstrained = mapMaybe unconstr $ M.toList mappings
-  let sol = M.mapMaybe (mkSubst mappings) mappings 
-  
+  let sol = M.mapMaybe (mkSubst mappings) mappings
   pure (unconstrained, sol)
   where
-    unconstr :: (TyVar, TyVarSol) -> Maybe UnconTyVar
-    unconstr (v, Unsolved (TyVarFree _ l)) = Just (v, l)
+    unconstr :: (TyVar, Either VName TyVarSol) -> Maybe UnconTyVar
+    unconstr (v, Right (Unsolved (TyVarFree _ l))) = Just (v, l)
     unconstr _ = Nothing
 
-    mkSubst m (Solved t) =
-      Just $ Right $ first (const ()) $ substTyVars (substTyVar m) t
-    mkSubst _ (Unsolved (TyVarPrim _ pts)) = Just $ Left pts
+    mkSubst m (Right (Solved t)) =
+      Just $ Right $ first (const ()) $ substTyVars (substTyVar' m) t
+    mkSubst _ (Right (Unsolved (TyVarPrim _ pts))) = Just $ Left pts
+    mkSubst _ (Left v) =
+      Just $ Right $ Scalar $ TypeVar mempty (qualName v) []
     mkSubst _ _ = Nothing
 
 -- | Solve type constraints, producing either an error or a solution,
