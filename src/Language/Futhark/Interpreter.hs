@@ -176,7 +176,7 @@ instance Pretty SizeClosure where
   pretty (SizeClosure _ e) = pretty e
 
 instance Pretty (F.Shape SizeClosure) where
-  pretty = mconcat . map (braces . pretty) . shapeDims
+  pretty = mconcat . map (brackets . pretty) . shapeDims
 
 -- | A type where the sizes are unevaluated expressions.
 type EvalType = TypeBase SizeClosure NoUniqueness
