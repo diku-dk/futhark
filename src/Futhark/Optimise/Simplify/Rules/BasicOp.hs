@@ -377,8 +377,9 @@ ruleBasicOp vtable pat aux (Reshape v3_shape v2)
       flipReshapeRearrange (shapeDims v0_shape) (shapeDims (newShape v1_shape)) perm =
       Simplify $ do
         v1' <- letExp (baseString v1) $ BasicOp $ Rearrange perm' v0
+        v1_shape' <- arrayShape <$> lookupType v1'
         auxing aux . certifying (v1_cs <> v2_cs) . letBind pat $
-          BasicOp (Reshape v3_shape v1')
+          BasicOp (Reshape (reshapeAll v1_shape' (newShape v3_shape)) v1')
 ruleBasicOp _ _ _ _ =
   Skip
 
