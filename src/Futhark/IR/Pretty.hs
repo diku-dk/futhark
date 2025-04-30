@@ -232,7 +232,7 @@ instance Pretty BasicOp where
   pretty (Scratch t shape) =
     "scratch" <> apply (pretty t : map pretty shape)
   pretty (Reshape reshape e) =
-    "reshape" <> apply [pretty (newShape reshape), pretty e]
+    "reshape" <> apply [pretty reshape, pretty e]
   pretty (Rearrange perm e) =
     "rearrange" <> apply [apply (map pretty perm), pretty e]
   pretty (Concat i (x :| xs) w) =
