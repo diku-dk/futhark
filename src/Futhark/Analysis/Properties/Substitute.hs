@@ -4,19 +4,19 @@
 module Futhark.Analysis.Properties.Substitute ((@), subst) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, msum, unless, when)
+import Control.Monad (foldM, when)
 import Control.Monad.RWS (lift)
-import Control.Monad.Trans.Maybe (MaybeT, hoistMaybe, runMaybeT)
+import Control.Monad.Trans.Maybe (hoistMaybe, runMaybeT)
 import Data.Functor ((<&>))
 import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
-import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, answerFromBool, isYes, orM, simplify)
+import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify)
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
+import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
-import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ, foreachCase, queryCase)
+import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ)
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Traversals
@@ -120,18 +120,12 @@ subber argCheck g = do
           | Just [f] <- ixfns M.!? vn,
             not (trivialSub f e args),
             argCheck f e args -> do
-              printM 10 . warningString $
-                "Checking indexing within bounds " <> prettyString e
-              c <- checkBounds f g (e, args)
-              if c
-                then do
-                  g' <- substituteOnce f g (e, args)
-                  case g' of
-                    Just new_fn | new_fn /= g -> do
-                      subst =<< rewriteWithoutRules new_fn
-                    _ ->
-                      go (S.insert (vn, args) seen)
-                else go (S.insert (vn, args) seen)
+              g' <- substituteOnce f g (e, args)
+              case g' of
+                Just new_fn | new_fn /= g -> do
+                  subst =<< rewriteWithoutRules new_fn
+                _ ->
+                  go (S.insert (vn, args) seen)
         Just (_, vn, args)
           | otherwise ->
               go (S.insert (vn, args) seen)
@@ -310,69 +304,6 @@ firstAlt (m : ms) = do
   case x of
     Just y -> pure (Just y)
     Nothing -> firstAlt ms
-
-checkBounds :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM Bool
-checkBounds (IndexFn Empty _) _ (_, []) = pure True
-checkBounds (IndexFn Empty _) _ _ = error "checkBounds: indexing into scalar"
-checkBounds f@(IndexFn (Forall _ df) _) g (f_apply, [f_arg]) = algebraContext g $ do
-  beg <- rewrite $ domainStart df
-  end <- rewrite $ domainEnd df
-  case df of
-    Iota {} -> do
-      (&&)
-        <$> doCheck (\_ -> beg :<= f_arg)
-        <*> doCheck (\_ -> f_arg :<= end)
-    Cat {} -> do
-      interval_beg <- rewrite $ intervalStart df
-      interval_end <- rewrite $ intervalEnd df
-      (&&)
-        <$> doCheck (\_ -> beg :<= f_arg :|| interval_beg :<= f_arg)
-        <*> doCheck (\_ -> f_arg :<= end :|| interval_end :<= f_arg)
-  where
-    applyIn =
-      astFold
-        -- (ASTFolder { foldOnSymbol = \acc e -> (acc ||) <$> equiv e f_apply })
-        (ASTFolder {foldOnSymbol = \acc e -> pure (acc || e == f_apply)})
-        False
-
-    doCheck :: (SoP Symbol -> Symbol) -> IndexFnM Bool
-    doCheck bound =
-      fmap and . foreachCase g $ \n -> do
-        let (p_idx, e_idx) = getCase n $ body g
-        need_to_check <- (||) <$> applyIn (sym2SoP p_idx) <*> applyIn e_idx
-        if need_to_check
-          then do
-            c <- queryCase (CaseCheck bound) g n
-            unless (isYes c) $ do
-              printExtraDebugInfo n
-              -- error $
-              printM 10 . warningString $
-                "Unsafe indexing: "
-                  <> prettyString f_apply
-                  <> " (failed to show: "
-                  <> prettyString p_idx
-                  <> " => "
-                  <> prettyString (bound e_idx)
-                  <> ")."
-            pure (isYes c)
-          else do
-            printM 1337 $
-              "doCheck skip case: apply not in " <> prettyString (p_idx, e_idx)
-            pure True
-      where
-        printExtraDebugInfo n = do
-          env <- getAlgEnv
-          printM 1337 $
-            "Failed bounds-checking:"
-              <> "\nf:"
-              <> prettyString f
-              <> "\ng: "
-              <> prettyString g
-              <> "\nCASE g: "
-              <> show n
-              <> "\nUnder AlgEnv:"
-              <> prettyString env
-checkBounds _ _ _ = error "checkBounds: multi-dim not implemented yet"
 
 gray :: String -> String
 gray s = "\ESC[2m" <> s <> "\ESC[0m"
