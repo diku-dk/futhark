@@ -683,8 +683,6 @@ solution = do
     mkSubst m (Right (Solved t)) =
       Just $ Right $ first (const ()) $ substTyVars (substTyVar' m) t
     mkSubst _ (Right (Unsolved (TyVarPrim _ pts))) = Just $ Left pts
-    -- mkSubst _ (Left v) =
-      -- Just $ Right $ Scalar $ TypeVar mempty (qualName v) []
     mkSubst m (Left v') =
       Just . fromMaybe (Right $ Scalar $ TypeVar mempty (qualName v') []) $
         mkSubst m =<< M.lookup v' m 
