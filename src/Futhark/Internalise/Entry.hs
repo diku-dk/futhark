@@ -185,6 +185,12 @@ entryPointTypeName :: I.EntryPointType -> Name
 entryPointTypeName (I.TypeOpaque v) = v
 entryPointTypeName (I.TypeTransparent {}) = error "entryPointTypeName: TypeTransparent"
 
+elemTypeExp :: E.TypeExp E.Exp VName -> Maybe (E.TypeExp E.Exp VName)
+elemTypeExp (E.TEArray _ te _) = Just te
+elemTypeExp (E.TEUnique te _) = elemTypeExp te
+elemTypeExp (E.TEParens te _) = elemTypeExp te
+elemTypeExp _ = Nothing
+
 entryPointType ::
   VisibleTypes ->
   E.EntryType ->
@@ -221,17 +227,13 @@ entryPointType types t ts
                   rank = E.shapeRank shape
                   ts' = map (strip rank) ts
                   record_t = E.Scalar (E.Record fs)
-                  record_te = case E.entryAscribed t of
-                    Just (E.TEArray _ te _) -> Just te
-                    _ -> Nothing
+                  record_te = elemTypeExp =<< E.entryAscribed t
               ept <- snd <$> entryPointType types (E.EntryType record_t record_te) ts'
               addType desc . I.OpaqueRecordArray rank (entryPointTypeName ept)
                 =<< opaqueRecordArray types rank fs' ts
         E.Array _ shape et -> do
           let ts' = map (strip (E.shapeRank shape)) ts
-              elem_te = case E.entryAscribed t of
-                Just (E.TEArray _ te _) -> Just te
-                _ -> Nothing
+              elem_te = elemTypeExp =<< E.entryAscribed t
           ept <- snd <$> entryPointType types (E.EntryType (E.Scalar et) elem_te) ts'
           addType desc . I.OpaqueArray (E.shapeRank shape) (entryPointTypeName ept) $
             map valueType ts
@@ -265,9 +267,15 @@ entryPoint types name params (eret, crets) =
                          E.entryAscribed eret
                        ) of
                 (Just ts, Just (E.TETuple e_ts _)) ->
-                  zipWithM (entryPointType types) (zipWith E.EntryType ts (map Just e_ts)) crets
+                  zipWithM
+                    (entryPointType types)
+                    (zipWith E.EntryType ts (map Just e_ts))
+                    crets
                 (Just ts, Nothing) ->
-                  zipWithM (entryPointType types) (map (`E.EntryType` Nothing) ts) crets
+                  zipWithM
+                    (entryPointType types)
+                    (map (`E.EntryType` Nothing) ts)
+                    crets
                 _ ->
                   pure <$> entryPointType types eret (concat crets)
           )

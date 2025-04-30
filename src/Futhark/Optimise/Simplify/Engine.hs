@@ -589,8 +589,15 @@ andAlso p1 p2 body vtable need = p1 body vtable need && p2 body vtable need
 isConsumed :: BlockPred rep
 isConsumed _ utable = any (`UT.isConsumed` utable) . patNames . stmPat
 
+-- The main purpose of this rule is to avoid hoisting 'inblock' SegOps
+-- out of their enclosing SegOp, *including* when those are present in
+-- nested Bodies.
 isOp :: BlockPred rep
 isOp _ _ (Let _ _ Op {}) = True
+isOp vtable utable (Let _ _ (Match _ cs def_body _)) =
+  any (any (isOp vtable utable) . bodyStms) $ def_body : map caseBody cs
+isOp vtable utable (Let _ _ (Loop _ _ body)) =
+  any (isOp vtable utable) $ bodyStms body
 isOp _ _ _ = False
 
 constructBody ::

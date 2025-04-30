@@ -163,7 +163,7 @@ You can set the level of debug verbosity via the environment variable
   + All of the effects of `FUTHARK_COMPILER_DEBUGGING=1`.
   + The frontend prints explicit type annotations.
 
-## Running compiler pipelines
+### Running compiler pipelines
 
 You can run the various compiler passes in whatever order you wish.
 There are also various shorthands for running entire standard pipelines:
@@ -200,6 +200,39 @@ You can also use e.g. `--backend=c` to run the same code generation
 and compilation as `futhark c`.  This is useful for experimenting with
 other compiler pipelines, but still producing an executable or
 library.
+
+### IR as input
+
+The `futhark dev` command also accepts the textual IR format as input.
+This is done by passing it a file with one of the following
+extensions:
+
+* `.fut_soacs`
+* `.fut_seq`
+* `.fut_seq_mem`
+* `.fut_gpu`
+* `.fut_gpu_mem`
+* `.fut_mc`
+* `.fut_mc_mem`
+
+The extension must match the expected representation (e.g. `.fut_gpu`
+is for the `GPU` representation). The files are most easily produced
+by `futhark dev` itself (e.g. `futhark dev --gpu`, or whatever other
+sequence of passes you desire), but can be modified by hand before
+loading them into `futhark dev` again. Be very careful when doing so -
+in particular, make sure that all the numeric variable tags you add
+are distinct, and make sure they start at a reasonably high number.
+
+After loading the program, `futhark dev` behaves as otherwise
+indicated, e.g. running pipeline passes and actions. For example, this
+is how we may run half a pipeline, dump the result to a file, and then
+load it back in and run the rest of a pipeline followed by code
+generation:
+
+```
+$ futhark dev --seq foo.fut > foo.fut_seq
+$ futhark dev -a --backend=c tmp.fut_seq
+```
 
 ## When you are about to have a bad day
 

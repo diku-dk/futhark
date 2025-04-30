@@ -1210,6 +1210,10 @@ primFuns =
       f32 "sqrt32" sqrt,
       f64 "sqrt64" sqrt,
       --
+      f16 "rsqrt16" $ recip . sqrt,
+      f32 "rsqrt32" $ recip . sqrt,
+      f64 "rsqrt64" $ recip . sqrt,
+      --
       f16 "cbrt16" $ convFloat . cbrtf . convFloat,
       f32 "cbrt32" cbrtf,
       f64 "cbrt64" cbrt,
@@ -1238,6 +1242,10 @@ primFuns =
       f32 "sin32" sin,
       f64 "sin64" sin,
       --
+      f16 "sinpi16" $ sin . (pi *),
+      f32 "sinpi32" $ sin . (pi *),
+      f64 "sinpi64" $ sin . (pi *),
+      --
       f16 "sinh16" sinh,
       f32 "sinh32" sinh,
       f64 "sinh64" sinh,
@@ -1245,6 +1253,10 @@ primFuns =
       f16 "cos16" cos,
       f32 "cos32" cos,
       f64 "cos64" cos,
+      --
+      f16 "cospi16" $ cos . (pi *),
+      f32 "cospi32" $ cos . (pi *),
+      f64 "cospi64" $ cos . (pi *),
       --
       f16 "cosh16" cosh,
       f32 "cosh32" cosh,
@@ -1254,6 +1266,10 @@ primFuns =
       f32 "tan32" tan,
       f64 "tan64" tan,
       --
+      f16 "tanpi16" $ tan . (pi *),
+      f32 "tanpi32" $ tan . (pi *),
+      f64 "tanpi64" $ tan . (pi *),
+      --
       f16 "tanh16" tanh,
       f32 "tanh32" tanh,
       f64 "tanh64" tanh,
@@ -1261,6 +1277,10 @@ primFuns =
       f16 "asin16" asin,
       f32 "asin32" asin,
       f64 "asin64" asin,
+      --
+      f16 "asinpi16" $ (/ pi) . asin,
+      f32 "asinpi32" $ (/ pi) . asin,
+      f64 "asinpi64" $ (/ pi) . asin,
       --
       f16 "asinh16" asinh,
       f32 "asinh32" asinh,
@@ -1270,6 +1290,10 @@ primFuns =
       f32 "acos32" acos,
       f64 "acos64" acos,
       --
+      f16 "acospi16" $ (/ pi) . acos,
+      f32 "acospi32" $ (/ pi) . acos,
+      f64 "acospi64" $ (/ pi) . acos,
+      --
       f16 "acosh16" acosh,
       f32 "acosh32" acosh,
       f64 "acosh64" acosh,
@@ -1277,6 +1301,10 @@ primFuns =
       f16 "atan16" atan,
       f32 "atan32" atan,
       f64 "atan64" atan,
+      --
+      f16 "atanpi16" $ (/ pi) . atan,
+      f32 "atanpi32" $ (/ pi) . atan,
+      f64 "atanpi64" $ (/ pi) . atan,
       --
       f16 "atanh16" atanh,
       f32 "atanh32" atanh,
@@ -1400,6 +1428,33 @@ primFuns =
           \case
             [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
               Just $ FloatValue $ Float64Value $ atan2 x y
+            _ -> Nothing
+        )
+      ),
+      ( "atan2pi_16",
+        ( [FloatType Float16, FloatType Float16],
+          FloatType Float16,
+          \case
+            [FloatValue (Float16Value x), FloatValue (Float16Value y)] ->
+              Just $ FloatValue $ Float16Value $ atan2 x y / pi
+            _ -> Nothing
+        )
+      ),
+      ( "atan2pi_32",
+        ( [FloatType Float32, FloatType Float32],
+          FloatType Float32,
+          \case
+            [FloatValue (Float32Value x), FloatValue (Float32Value y)] ->
+              Just $ FloatValue $ Float32Value $ atan2 x y / pi
+            _ -> Nothing
+        )
+      ),
+      ( "atan2pi_64",
+        ( [FloatType Float64, FloatType Float64],
+          FloatType Float64,
+          \case
+            [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
+              Just $ FloatValue $ Float64Value $ atan2 x y / pi
             _ -> Nothing
         )
       ),

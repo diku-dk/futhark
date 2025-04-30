@@ -173,6 +173,7 @@ simplifyBinOp defOf _ (BinOp LogAnd e1 e2)
   | isCt0 e2 = constRes $ BoolValue False
   | isCt1 e1 = resIsSubExp e2
   | isCt1 e2 = resIsSubExp e1
+  | e1 == e2 = resIsSubExp e1
   | Var v <- e1,
     Just (BasicOp (UnOp (Neg Bool) e1'), v_cs) <- defOf v,
     e1' == e2 =

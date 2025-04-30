@@ -122,8 +122,10 @@ mapResultHint _lvl space = hint
   where
     -- Heuristic: do not rearrange for returned arrays that are
     -- sufficiently small.
+    thresholdBytes = 8
+
     coalesceReturnOfShape _ [] = False
-    coalesceReturnOfShape bs [Constant (IntValue (Int64Value d))] = bs * d > 4
+    coalesceReturnOfShape bs [Constant (IntValue (Int64Value d))] = bs * d > thresholdBytes
     coalesceReturnOfShape _ _ = True
 
     hint t Returns {}

@@ -1,9 +1,10 @@
 module Language.Futhark.TypeChecker.TySolveTests (tests) where
 
+import Data.Loc (Loc (NoLoc))
 import Data.Map qualified as M
 import Data.Loc ( Loc, noLoc )
 import Futhark.Util.Pretty (docString)
-import Language.Futhark.Syntax (Liftedness (..), NoUniqueness, TypeBase, VName)
+import Language.Futhark.Syntax
 import Language.Futhark.SyntaxTests ()
 import Language.Futhark.TypeChecker.Constraints
   ( CtTy (..),
@@ -63,7 +64,28 @@ tests :: TestTree
 tests =
   testGroup
     "Unsized constraint solver"
-    [ testCase "empty" $
+    [ testCase "infer unlifted" $
+        testSolve
+          [ "t\8320_9896" ~ "if_t\8322_9898",
+            "t\8321_9897" ~ "if_t\8322_9898",
+            "t\8323_9899" ~ "if_t\8322_9898"
+          ]
+          mempty
+          ( M.fromList
+              [ ("t\8320_9896", (2, TyVarFree NoLoc Lifted)),
+                ("t\8321_9897", (3, TyVarFree NoLoc Lifted)),
+                ("if_t\8322_9898", (4, TyVarFree NoLoc SizeLifted)),
+                ("t\8323_9899", (5, TyVarFree NoLoc Lifted))
+              ]
+          )
+          ( [("if_t\8322_9898", SizeLifted)],
+            M.fromList
+              [ ("t\8320_9896", Right "if_t\8322_9898"),
+                ("t\8321_9897", Right "if_t\8322_9898"),
+                ("t\8323_9899", Right "if_t\8322_9898")
+              ]
+          ),
+      testCase "empty" $
         testSolve [] mempty mempty ([], mempty),
 
       testCase "a_0 ~ b_1" $
