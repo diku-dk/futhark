@@ -2,7 +2,6 @@ module Language.Futhark.TypeChecker.TySolveTests (tests) where
 
 import Data.Loc (Loc (NoLoc))
 import Data.Map qualified as M
-import Data.Loc ( Loc, noLoc )
 import Futhark.Util.Pretty (docString)
 import Language.Futhark.Syntax
 import Language.Futhark.SyntaxTests ()
@@ -15,7 +14,7 @@ import Language.Futhark.TypeChecker.Constraints
     TyVars,
   )
 import Language.Futhark.TypeChecker.Monad (prettyTypeError, TypeError(TypeError))
-import Language.Futhark.TypeChecker.TySolve
+import Language.Futhark.TypeChecker.TySolveNew
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=), assertBool)
 import Text.Regex.TDFA ( (=~) )
@@ -54,8 +53,8 @@ t1 ~ t2 = CtEq (Reason mempty) t1 t2
 tv :: VName -> Level -> (VName, (Level, TyVarInfo ()))
 tv v lvl = (v, (lvl, TyVarFree mempty Unlifted))
 
-tvWithInfo :: VName -> Level -> TyVarInfo () -> (VName, (Level, TyVarInfo ()))
-tvWithInfo v lvl info = (v, (lvl, info))
+-- tvWithInfo :: VName -> Level -> TyVarInfo () -> (VName, (Level, TyVarInfo ()))
+-- tvWithInfo v lvl info = (v, (lvl, info))
 
 typaram :: VName -> Level -> Liftedness -> (VName, (Level, Liftedness, Loc))
 typaram v lvl liftedness = (v, (lvl, liftedness, noLoc))
@@ -64,7 +63,8 @@ tests :: TestTree
 tests =
   testGroup
     "Unsized constraint solver"
-    [ testCase "infer unlifted" $
+    [ 
+      testCase "infer unlifted" $
         testSolve
           [ "t\8320_9896" ~ "if_t\8322_9898",
             "t\8321_9897" ~ "if_t\8322_9898",
@@ -85,15 +85,30 @@ tests =
                 ("t\8323_9899", Right "if_t\8322_9898")
               ]
           ),
+
       testCase "empty" $
         testSolve [] mempty mempty ([], mempty),
 
       testCase "a_0 ~ b_1" $
         testSolve
+          ["b_1" ~ "a_0"]
+          mempty
+          (M.fromList [tv "b_1" 0])
+          ([], M.fromList [("b_1", Right "a_0")]),
+
+      testCase "b_1 ~ a_0" $
+        testSolve
           ["a_0" ~ "b_1"]
           mempty
-          (M.fromList [tv "a_0" 0])
-          ([], M.fromList [("a_0", Right "b_1")]),
+          (M.fromList [tv "a_0" 0, tv "b_1" 0])
+          ([("b_1", Unlifted)], M.fromList [("a_0", Right "b_1")]),
+
+      testCase "multiple" $
+        testSolve
+          ["b_1" ~ "a_0", "d_3" ~ "c_2", "e_4" ~ "c_2", "c_2" ~ "a_0"]
+          mempty
+          (M.fromList [tv "a_0" 0, tv "b_1" 0, tv "c_2" 0, tv "d_3" 0, tv "e_4" 0])
+          ([("a_0", Unlifted)], M.fromList [("b_1", Right "a_0"), ("c_2", Right "a_0"), ("d_3", Right "a_0"), ("e_4", Right "a_0")]),
           
       testCase "Two variables" $
         testSolve 

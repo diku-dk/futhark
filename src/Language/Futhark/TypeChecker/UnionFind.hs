@@ -8,7 +8,8 @@ module Language.Futhark.TypeChecker.UnionFind
     getDescr,
     getKey,
     assignNewSol,
-    union
+    union,
+    isRepr
   )
 where
 
@@ -127,6 +128,14 @@ descrRef node@(Node link_ref) = do
         Repr info -> pure info
         _ -> descrRef =<< find node
 
+-- | Check if the input node is a representative.
+isRepr :: TyVarNode s -> ST s Bool
+isRepr (Node link_ref) = do
+  link <- readSTRef link_ref
+  case link of
+    Repr _ -> pure True
+    Link _ -> pure False
+
 -- | Return the descriptor associated with the argument node's
 -- equivalence class.
 getDescr :: TyVarNode s -> ST s TyVarSol
@@ -164,12 +173,12 @@ union n1 n2 = do
     link2 <- readSTRef link_ref2
     case (link1, link2) of
       (Repr info_ref1, Repr info_ref2) -> do
-        (MkInfo w1 _   k1) <- readSTRef info_ref1
+        (MkInfo w1 _   _) <- readSTRef info_ref1
         (MkInfo w2 sol k2) <- readSTRef info_ref2
         -- let min_lvl = min l1 l2
         if w1 >= w2 then do
           writeSTRef link_ref2 (Link root1)
-          writeSTRef info_ref1 (MkInfo (w1 + w2) sol k1)
+          writeSTRef info_ref1 (MkInfo (w1 + w2) sol k2)
         else do
           writeSTRef link_ref1 (Link root2)
           writeSTRef info_ref2 (MkInfo (w1 + w2) sol k2)

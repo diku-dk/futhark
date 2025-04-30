@@ -207,10 +207,9 @@ bindTyVar :: Reason Type -> BreadCrumbs -> VName -> Type -> SolveM s ()
 bindTyVar reason bcs v t = do
   occursCheck reason v t
   v_node <- lookupUF v
+  v_info <- liftST $ getDescr v_node
 
   setInfo v_node (Solved t)
-
-  v_info <- liftST $ getDescr v_node
 
   case (v_info, t) of
     ( Unsolved TyVarFree {}, _ ) -> pure ()
@@ -447,12 +446,12 @@ unionTyVars :: Reason Type -> BreadCrumbs -> VName -> VName -> SolveM s ()
 unionTyVars reason bcs v t = do
   v_node <- lookupUF v
   t_node <- lookupUF t
+  v_sol <- liftST $ getDescr v_node
+  t_info <- lookupTyVarInfo t
 
   -- Unify the equivalence classes of v and t.
   liftST $ union v_node t_node
 
-  v_sol <- liftST $ getDescr v_node
-  t_info <- lookupTyVarInfo t
   case (v_sol, t_info) of
     (Unsolved (TyVarFree _ v_l), TyVarFree t_loc t_l)
       | v_l /= t_l ->
@@ -553,25 +552,22 @@ scopeViolation reason v1 ty v2 =
       <+> dquotes (prettyName v2)
       <+> "is rigidly bound in a deeper scope."
 
-getTyVarSol :: TyVar -> SolveM s TyVarSol
-getTyVarSol tv = do
-  node <- gets $ fromMaybe unknown . M.lookup tv . solverTyVars
-  liftST $ getDescr node
-  where
-    unknown = error $ "Unknown tyvar: " <> prettyNameString tv
-
 scopeCheck :: Reason Type -> TyVar -> Int -> Type -> SolveM s ()
 scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
   where
     check :: TyVar -> SolveM s ()
     check ty_v = do
-      ty_v_info <- getTyVarSol ty_v
-      case ty_v_info of
-        Param ty_v_lvl _ _
-          -- Type parameter has a higher level than the (free) type variable.
-          | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
-        Solved ty' ->
-          mapM_ check $ typeVars ty'
+      mb_node <- gets $ M.lookup ty_v . solverTyVars
+      case mb_node of
+        Just node -> do
+          descr <- liftST $ getDescr node
+          case descr of
+            Param ty_v_lvl _ _
+              -- Type parameter has a higher level than the (free) type variable.
+              | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
+            Solved ty' ->
+              mapM_ check $ typeVars ty'
+            _ -> pure ()
         _ -> pure ()
 
 -- If a type variable has a liftedness constraint, we propagate that
@@ -637,7 +633,7 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
     Right (Scalar (Prim ty))
       | [ty] == pts -> do
           node <- lookupUF tv
-          setInfo node $ Solved $ Scalar $ Prim ty
+          setInfo node (Solved $ Scalar $ Prim ty)
     Right ty
       | ty `elem` map (Scalar . Prim) pts -> pure ()
       | otherwise ->
@@ -647,8 +643,47 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
               </> "which is not possible."
     _ -> pure ()
 
+convertUF' :: UF s -> SolveM s (M.Map TyVar (Either VName TyVarSol))
+convertUF' uf = do
+  mappings <- mapM lookupSol $ M.toList uf
+  pure $ M.fromList mappings
+  where
+    lookupSol :: (TyVar, TyVarNode s) -> SolveM s (TyVar, Either VName TyVarSol)
+    lookupSol (tv, node) = do
+      k <- liftST $ getKey node
+      descr <- liftST $ getDescr node
+      pure (tv, if k /= tv
+                  then case descr of
+                    Solved _ -> Right descr
+                    _        -> Left k
+                  else Right descr)
+
+substTyVar' :: (Monoid u) => M.Map TyVar (Either VName TyVarSol) -> VName -> Maybe (TypeBase () u)
+substTyVar' m v =
+  case M.lookup v m of
+    Just (Left v') -> substTyVar' m v'
+    Just (Right (Solved t')) -> Just $ second (const mempty) $ substTyVars (substTyVar' m) t'
+    Just (Right Param {}) -> Nothing
+    Just (Right (Unsolved {})) -> Nothing
+    Nothing -> Nothing
+
 solution :: SolverState s -> SolveM s ([UnconTyVar], Solution)
-solution st = undefined
+solution st = do
+  mappings <- convertUF' $ solverTyVars st
+  let unconstrained = mapMaybe unconstr $ M.toList mappings
+  let sol = M.mapMaybe (mkSubst mappings) mappings
+  pure (unconstrained, sol)
+  where
+    unconstr :: (TyVar, Either VName TyVarSol) -> Maybe UnconTyVar
+    unconstr (v, Right (Unsolved (TyVarFree _ l))) = Just (v, l)
+    unconstr _ = Nothing
+
+    mkSubst m (Right (Solved t)) =
+      Just $ Right $ first (const ()) $ substTyVars (substTyVar' m) t
+    mkSubst _ (Right (Unsolved (TyVarPrim _ pts))) = Just $ Left pts
+    mkSubst _ (Left v) =
+      Just $ Right $ Scalar $ TypeVar mempty (qualName v) []
+    mkSubst _ _ = Nothing
 
 -- | Solve type constraints, producing either an error or a solution,
 -- alongside a list of unconstrained type variables.
@@ -658,14 +693,14 @@ solve ::
   TyVars () ->
   Either TypeError ([UnconTyVar], Solution)
 solve constraints typarams tyvars =
-  runST 
-    $ runExceptT 
-    . flip evalStateT (SolverState M.empty) 
-    . runSolveM 
+  runST
+    $ runExceptT
+    . flip evalStateT (SolverState M.empty)
+    . runSolveM
     $ do
       initialState typarams tyvars
       mapM_ solveCt constraints
-      mapM_ solveTyVar (M.toList tyvars)
+      mapM_ solveTyVar $ M.toList tyvars
       s <- get
       solution s
 {-# NOINLINE solve #-}
