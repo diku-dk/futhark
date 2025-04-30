@@ -17,6 +17,7 @@ module Futhark.Analysis.Properties.AlgebraBridge.Util
     allM,
     isUnknown,
     isYes,
+    addRelShape,
   )
 where
 
@@ -26,9 +27,9 @@ import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Properties.IndexFn (Domain (..), Iterator (..))
+import Futhark.Analysis.Properties.IndexFn (Domain (..), Quantified (..), Iterator)
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd)
-import Futhark.Analysis.Properties.Monad (IndexFnM, rollbackAlgEnv, printAlgEnv)
+import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (Property (..), nameAffectedBy)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
@@ -158,6 +159,9 @@ addRelSymbol p = do
     addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
 
 -- | Add relations derived from the iterator to the algebraic environment.
+addRelShape :: [Iterator] -> IndexFnM ()
+addRelShape = mapM_ addRelIterator
+
 addRelIterator :: Iterator -> IndexFnM ()
 addRelIterator (Forall i dom) = case dom of
   Iota n -> do
@@ -196,7 +200,6 @@ addRelIterator (Forall i dom) = case dom of
     addRel (interval_size :>: int2SoP 0)
   where
     sVar = sym2SoP . Algebra.Var
-addRelIterator _ = pure ()
 
 answerFromBool :: Bool -> Answer
 answerFromBool True = Yes

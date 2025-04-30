@@ -17,7 +17,7 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Properties.IndexFn (IndexFn (iterator), Iterator (..), getPredicates)
+import Futhark.Analysis.Properties.IndexFn (IndexFn (shape), getPredicates, Quantified (..))
 import Futhark.Analysis.Properties.Monad (IndexFnM, printM, rollbackAlgEnv, prettyStr)
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus ()
@@ -113,7 +113,7 @@ algebraContext :: IndexFn -> IndexFnM b -> IndexFnM b
 algebraContext fn m = rollbackAlgEnv $ do
   let ps = getPredicates fn
   mapM_ trackBooleanNames ps
-  case getIterName (iterator fn) of
+  case getIterName (shape fn) of
     [] -> pure ()
     is -> do
       mapM_ (handlePreds is) ps
@@ -121,8 +121,9 @@ algebraContext fn m = rollbackAlgEnv $ do
   _ <- handleQuantifiers fn
   m
   where
-    getIterName Empty = []
-    getIterName (Forall i _) = [i]
+    getIterName [] = []
+    getIterName [Forall i _] = [i]
+    getIterName _ = error "Not implemented yet"
 
     -- c[i] == y && d[i] => {c[i] == y: p[hole1], d[i]: q[hole2]}
     handlePreds is (x :&& y) = handlePreds is x >> handlePreds is y

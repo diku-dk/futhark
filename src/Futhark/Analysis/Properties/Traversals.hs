@@ -11,7 +11,7 @@ where
 
 import Control.Monad (foldM)
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Properties.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator (..), cases, casesToList)
+import Futhark.Analysis.Properties.IndexFn (Cases (..), Domain (..), IndexFn (..), Iterator, cases, casesToList, Quantified (..))
 import Futhark.Analysis.Properties.Property (Predicate (..), Property (..))
 import Futhark.Analysis.Properties.Symbol
 import Futhark.SoP.SoP (SoP, int2SoP, sopToLists, sym2SoP, (.*.), (.+.))
@@ -86,9 +86,11 @@ instance ASTMappable Symbol Symbol where
 instance ASTMappable Symbol IndexFn where
   astMap m (IndexFn dom body) = IndexFn <$> astMap m dom <*> astMap m body
 
+instance ASTMappable Symbol [Iterator] where
+  astMap m = mapM (astMap m)
+
 instance ASTMappable Symbol Iterator where
   astMap m (Forall i dom) = Forall i <$> astMap m dom
-  astMap _ Empty = pure Empty
 
 instance ASTMappable Symbol Domain where
   astMap m (Iota n) = Iota <$> astMap m n
@@ -177,9 +179,11 @@ instance ASTFoldable Symbol Symbol where
 instance ASTFoldable Symbol IndexFn where
   astFold m acc (IndexFn dom body) = astFold m acc dom >>= astFoldF m body
 
+instance ASTFoldable Symbol [Iterator] where
+  astFold m = foldM (astFold m)
+
 instance ASTFoldable Symbol Iterator where
   astFold m acc (Forall _ dom) = astFold m acc dom
-  astFold _ acc Empty = pure acc
 
 instance ASTFoldable Symbol Domain where
   astFold m acc (Iota n) = astFold m acc n
