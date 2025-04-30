@@ -214,7 +214,7 @@ move (DimSplice i1 1 (Shape [_])) (DimSplice i2 n2 s2 : ss)
   | i1 == i2 =
       Just $ DimSplice i2 n2 s2 : ss
 --
--- A join with a matching split turns into nothing.pna
+-- A join with a matching split turns into nothing.
 move (DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i1 == i2,
     length s1 == 1,
@@ -254,8 +254,8 @@ improveOne [] = Nothing
 improveOne (s : ss) =
   move s ss `mplus` ((s :) <$> improveOne ss)
 
--- | Try to simplify the given 'NewShape'. Returns 'Nothing' if no improvement is
--- possible.
+-- | Try to simplify the given 'NewShape'. Returns 'Nothing' if no improvement
+-- is possible.
 simplifyNewShape :: NewShape d -> Maybe (NewShape d)
 simplifyNewShape (NewShape shape ss) =
   NewShape shape . improve <$> improveOne ss

@@ -79,8 +79,8 @@ flipTests =
         ]
   ]
 
-fuseTests :: [TestTree]
-fuseTests =
+simplifyTests :: [TestTree]
+simplifyTests =
   [ testCase (unwords ["simplifyNewShape", prettyString input]) $
       simplifyNewShape (uncurry (NewShape . Shape) input)
         @?= uncurry (NewShape . Shape) <$> expected
@@ -90,6 +90,24 @@ fuseTests =
         [ -- Inverse flatten and unflatten - simple case.
           ( (["A", "B"], [dimJoin 0 2 "AB", dimSplit 0 ["A", "B"]]),
             Just (["A", "B"], [])
+          ),
+          -- Non-inverse flatten and unflatten - simple case.
+          ( (["C", "D"], [dimJoin 0 2 "AB", dimSplit 0 ["C", "D"]]),
+            Just (["C", "D"], [dimJoin 0 2 "AB", dimSplit 0 ["C", "D"]])
+          ),
+          -- Inverse flatten and unflatten - separated by coercion.
+          ( ( ["C", "D"],
+              [ dimJoin 0 2 "AB",
+                dimCoerce 0 "CD",
+                dimSplit 0 ["C", "D"]
+              ]
+            ),
+            Just
+              ( ["C", "D"],
+                [ dimJoin 0 2 "AB",
+                  dimSplit 0 ["C", "D"]
+                ]
+              )
           ),
           -- Two unflattens - simple case.
           ( (["A", "B", "C"], [dimSplit 0 ["A", "BC"], dimSplit 1 ["B", "C"]]),
@@ -115,5 +133,5 @@ tests =
     [ reshapeOuterTests,
       reshapeInnerTests,
       flipTests,
-      fuseTests
+      simplifyTests
     ]
