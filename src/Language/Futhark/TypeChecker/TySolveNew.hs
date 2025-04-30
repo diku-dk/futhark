@@ -685,14 +685,14 @@ solve ::
   TyVars () ->
   Either TypeError ([UnconTyVar], Solution)
 solve constraints typarams tyvars =
-  runST 
-    $ runExceptT 
-    . flip evalStateT (SolverState M.empty) 
-    . runSolveM 
+  runST
+    $ runExceptT
+    . flip evalStateT (SolverState M.empty)
+    . runSolveM
     $ do
       initialState typarams tyvars
       mapM_ solveCt constraints
-      mapM_ solveTyVar (M.toList tyvars)
+      mapM_ solveTyVar $ M.toList tyvars
       s <- get
       solution s
 {-# NOINLINE solve #-}
