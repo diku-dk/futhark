@@ -15,7 +15,7 @@ import Language.Futhark.TypeChecker.Constraints
     TyVars,
   )
 import Language.Futhark.TypeChecker.Monad (prettyTypeError, TypeError(TypeError))
-import Language.Futhark.TypeChecker.TySolve
+import Language.Futhark.TypeChecker.TySolveNew
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=), assertBool)
 import Text.Regex.TDFA ( (=~) )
