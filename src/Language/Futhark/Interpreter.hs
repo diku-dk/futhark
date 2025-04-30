@@ -750,7 +750,7 @@ evalFunction env missing_sizes [] body rettype =
         env'' <- linkMissingSizes missing_sizes p v <$> matchPat env' p v
         etaExpand (v : vs) env'' rt
     etaExpand vs env' _ = do
-      f <- localExts $ eval env' body
+      f <- eval env' body
       foldM (apply noLoc mempty) f $ reverse vs
 evalFunction env missing_sizes (p : ps) body rettype =
   pure . ValueFun $ \v -> do
