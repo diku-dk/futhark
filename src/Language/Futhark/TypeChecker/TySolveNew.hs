@@ -645,20 +645,19 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
 
 convertUF' :: UF s -> SolveM s (M.Map TyVar (Either VName TyVarSol))
 convertUF' uf = do
-  mappings <- mapM lookupSol $ M.toList uf
-  pure $ M.fromList mappings
+  M.traverseWithKey lookupSol uf
   where
-    lookupSol :: (TyVar, TyVarNode s) -> SolveM s (TyVar, Either VName TyVarSol)
-    lookupSol (tv, node) = do
+    lookupSol :: TyVar -> TyVarNode s -> SolveM s (Either VName TyVarSol)
+    lookupSol tv node = do
       k <- liftST $ getKey node
       descr <- liftST $ getDescr node
-      pure (tv, if k /= tv
+      pure $ if k /= tv
                   then 
                     case descr of
                       Solved _ -> Right descr
                       _        -> Left k
                   else 
-                    Right descr)
+                    Right descr
 
 substTyVar' :: (Monoid u) => M.Map TyVar (Either VName TyVarSol) -> VName -> Maybe (TypeBase () u)
 substTyVar' m v =
