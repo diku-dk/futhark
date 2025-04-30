@@ -23,7 +23,6 @@ import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
 import Language.Futhark.TypeChecker.Types (substTyVars)
 import Language.Futhark.TypeChecker.UnionFind
-import Debug.Trace (traceM)
 
 -- | The type representation used by the constraint solver. Agnostic
 -- to sizes and uniqueness.
@@ -213,10 +212,7 @@ bindTyVar reason bcs v t = do
   setInfo v_node (Solved t)
 
   case (v_info, t) of
-    ( Unsolved TyVarFree {}, _ ) -> do
-      traceM "YUPPA"
-      pure ()
-
+    ( Unsolved TyVarFree {}, _ ) -> pure ()
     ( Unsolved (TyVarPrim _ v_pts), _ ) ->
         if t `elem` map (Scalar . Prim) v_pts
           then pure ()
