@@ -640,7 +640,7 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
     Right (Scalar (Prim ty))
       | [ty] == pts -> do
           node <- lookupUF tv
-          setInfo node $ Solved $ Scalar $ Prim ty
+          setInfo node (Solved $ Scalar $ Prim ty)
     Right ty
       | ty `elem` map (Scalar . Prim) pts -> pure ()
       | otherwise ->
