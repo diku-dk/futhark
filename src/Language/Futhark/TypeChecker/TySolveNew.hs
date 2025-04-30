@@ -30,8 +30,6 @@ type Type = CtType ()
 
 type UF s = M.Map TyVar (TyVarNode s)
 
-type Unifier s = (UF s, [CtTy ()])
-
 newtype SolverState s = SolverState { solverTyVars :: UF s }
 
 newtype SolveM s a = SolveM { runSolveM :: StateT (SolverState s) (ExceptT TypeError (ST s)) a }
