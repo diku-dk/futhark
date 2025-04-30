@@ -161,12 +161,7 @@ localExts m = do
   pure x
 
 extEnv :: EvalM Env
-extEnv = valEnv . M.map f <$> getExts
-  where
-    f v =
-      ( Nothing,
-        v
-      )
+extEnv = valEnv . M.map (Nothing,) <$> getExts
 
 valueStructType :: ValueType -> StructType
 valueStructType = first $ flip sizeFromInteger mempty . toInteger
@@ -705,7 +700,7 @@ evalType outer_bound t = do
       let free = fvVars $ freeInExp e
        in not $ any (`S.member` bound) free || any (`S.member` outer_bound) free
 
--- | Evaluate all sizes, and it better work. This implies it must be a
+-- | Evaluate all sizes, and it better work. This implies it must not be a
 -- size-dependent function type, or one that has existentials.
 evalTypeFully :: EvalType -> EvalM ValueType
 evalTypeFully t = do
