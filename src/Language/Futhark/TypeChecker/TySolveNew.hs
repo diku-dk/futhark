@@ -556,25 +556,22 @@ scopeViolation reason v1 ty v2 =
       <+> dquotes (prettyName v2)
       <+> "is rigidly bound in a deeper scope."
 
-getTyVarSol :: TyVar -> SolveM s TyVarSol
-getTyVarSol tv = do
-  node <- gets $ fromMaybe unknown . M.lookup tv . solverTyVars
-  liftST $ getDescr node
-  where
-    unknown = error $ "Unknown tyvar: " <> prettyNameString tv
-
 scopeCheck :: Reason Type -> TyVar -> Int -> Type -> SolveM s ()
 scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
   where
     check :: TyVar -> SolveM s ()
     check ty_v = do
-      ty_v_info <- getTyVarSol ty_v
-      case ty_v_info of
-        Param ty_v_lvl _ _
-          -- Type parameter has a higher level than the (free) type variable.
-          | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
-        Solved ty' ->
-          mapM_ check $ typeVars ty'
+      mb_node <- gets $ M.lookup ty_v . solverTyVars
+      case mb_node of
+        Just node -> do
+          descr <- liftST $ getDescr node
+          case descr of
+            Param ty_v_lvl _ _
+              -- Type parameter has a higher level than the (free) type variable.
+              | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
+            Solved ty' ->
+              mapM_ check $ typeVars ty'
+            _ -> pure ()
         _ -> pure ()
 
 -- If a type variable has a liftedness constraint, we propagate that
