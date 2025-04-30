@@ -212,8 +212,17 @@ applySplice :: ShapeBase d -> DimSplice d -> ShapeBase d
 applySplice shape_bef (DimSplice i k shape) =
   takeDims i shape_bef <> shape <> stripDims (i + k) shape_bef
 
+-- | @dimSpan i n s@ gets @n@ dimensions starting from @i@ from @s@.
+dimSpan :: Int -> Int -> ShapeBase d -> ShapeBase d
 dimSpan i n = takeDims n . dropDims i
 
+next ::
+  (Eq d) =>
+  ShapeBase d ->
+  DimSplice d ->
+  DimSplice d ->
+  [DimSplice d] ->
+  Maybe [DimSplice d]
 next shape x y ss =
   (x :) <$> move (applySplice shape x, y) ss
 
@@ -225,18 +234,18 @@ move ::
 move _ [] = Nothing
 --
 -- A coercion can be fused with anything.
-move (shape_bef, DimSplice i1 1 (Shape [_])) (DimSplice i2 n2 s2 : ss)
+move (_, DimSplice i1 1 (Shape [_])) (DimSplice i2 n2 s2 : ss)
   | i1 == i2 =
       Just $ DimSplice i2 n2 s2 : ss
 --
 -- A flatten with an inverse unflatten turns into nothing.
-move (shape_bef, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
+move (shape_bef, DimSplice i1 n1 _s1) (DimSplice i2 _n2 s2 : ss)
   | i1 == i2,
     dimSpan i1 n1 shape_bef == s2 =
       Just ss
 --
 -- A split where one of the dimensions is then further split.
-move (shape_bef, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
+move (_, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i2 >= i1,
     i2 < i1 + length s1,
     n1 == 1,
@@ -273,15 +282,7 @@ simplifyNewShape shape_bef (NewShape shape ss) =
   where
     improve ss' = maybe ss' improve $ improveOne shape_bef ss'
 
--- | Combine two reshape operations without loss of information.
-fuseReshape :: (Eq d) => ShapeBase d -> NewShape d -> NewShape d -> NewShape d
-fuseReshape shape_bef x y = fromMaybe z $ simplifyNewShape shape_bef z
-  where
-    z = NewShape (newShape y) (dimSplices x <> dimSplices y)
-
 {-# NOINLINE flipReshapeRearrange #-}
-
-{-# NOINLINE fuseReshape #-}
 
 {-# NOINLINE reshapeKind #-}
 
