@@ -32,6 +32,7 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
+import Futhark.Analysis.Properties.AlgebraBridge.Util
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -292,13 +293,9 @@ forward (E.IntLit x _ _) =
   pure . fromScalar $ int2SoP x
 forward (E.Negate x _) = do
   -- Numeric negation.
-  fns <- forward x
-  forM fns $ \fn -> do
-    pure $
-      IndexFn
-        { iterator = iterator fn,
-          body = cases [(p, negSoP v) | (p, v) <- casesToList (body fn)]
-        }
+  map negf <$> forward x
+  where
+    negf f = f {body = cases [(p, negSoP v) | (p, v) <- casesToList (body f)]}
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   bindings <- getIndexFns
   case M.lookup vn bindings of
@@ -312,13 +309,13 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
           i <- newVName "i"
           pure
             [ IndexFn
-                { iterator = Forall i (Iota sz),
+                { shape = [Forall i (Iota sz)],
                   body = singleCase . sym2SoP $ Idx (Var vn) (sVar i)
                 }
             ]
         Nothing ->
           -- Canonical scalar representation.
-          pure [IndexFn Empty (singleCase $ sVar vn)]
+          pure [IndexFn [] (singleCase $ sVar vn)]
       insertIndexFn vn f
       pure f
 forward (E.TupLit xs _) = do
@@ -340,17 +337,16 @@ forward expr@(E.AppExp (E.Index e_xs slice _loc) _)
         -- We don't use substParams on f_xs because the substitution
         -- might fail here (e.g., if we are inside a map lambda).
         -- Lift idx.
-        unless (iterator f_idx == Empty) $ error "E.Index: internal error"
+        unless (null $ shape f_idx) $ error "E.Index: internal error"
         i <- newVName "i"
-        insertIndexFn idx [IndexFn (Forall i (Iota $ int2SoP 1)) (body f_idx)]
+        insertIndexFn idx [IndexFn [Forall i (Iota $ int2SoP 1)] (body f_idx)]
         subst
-          (IndexFn Empty $ singleCase . sym2SoP $ Idx (Var xs) (sym2SoP $ Idx (Var idx) (int2SoP 0)))
+          (IndexFn [] $ singleCase . sym2SoP $ Idx (Var xs) (sym2SoP $ Idx (Var idx) (int2SoP 0)))
 forward (E.Not e _) = do
-  fns <- forward e
-  forM fns $ \fn -> do
-    rewrite $
-      IndexFn (iterator fn) $
-        cmapValues (mapSymSoP (sym2SoP . neg)) (body fn)
+  mapM negf =<< forward e
+  where
+    negf f =
+      rewrite $ f {body = cmapValues (mapSymSoP (sym2SoP . neg)) (body f)}
 forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
   | E.baseTag (E.qualLeaf op') <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op',
@@ -362,7 +358,7 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
         b <- newVName "#b"
         let doOp op =
               substParams
-                (IndexFn Empty (singleCase $ op (Var a) (Var b)))
+                (IndexFn [] (singleCase $ op (Var a) (Var b)))
                 [(a, vx), (b, vy)]
         case bop of
           E.Plus -> doOp (~+~)
@@ -382,7 +378,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   let f_c = case cs of
         [v] -> v
         _ -> error "If on tuple?"
-  unless (iterator f_c == Empty) $ error "Condition in if-statement is an array?"
+  unless (null $ shape f_c) $ error "Condition in if-statement is an array?"
 
   -- Create boolean expression for true and false branches.
   c_t_branch <-
@@ -402,7 +398,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   f_branch <- newVName "f_branch"
   let fn_if =
         IndexFn
-          (iterator f_c)
+          (shape f_c)
           ( cases
               [ (Var cond, sVar t_branch),
                 (neg $ Var cond, sVar f_branch)
@@ -424,9 +420,8 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         addRelIterator iter
         forward lam_body
 
-      forM bodies $ \body_fn -> do
-        subst (IndexFn iter (body body_fn))
-          >>= rewrite
+      forM bodies $ \body_fn ->
+        subst (body_fn {shape = [iter]}) >>= rewrite
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
@@ -440,11 +435,11 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       forM (zip ns xs) $ \(n, x) -> do
         i <- newVName "i"
         case x of
-          IndexFn Empty body -> do
+          IndexFn [] body -> do
             case n of
-              IndexFn Empty cs -> do
+              IndexFn [] cs -> do
                 m <- rewrite $ flattenCases cs
-                rewrite $ IndexFn (Forall i (Iota m)) body
+                rewrite $ IndexFn [Forall i (Iota m)] body
               _ ->
                 error $ errorMsg loc "type error"
           _ -> do
@@ -455,9 +450,9 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       forM ns $ \n -> do
         i <- newVName "i"
         case n of
-          IndexFn Empty cs -> do
+          IndexFn [] cs -> do
             m <- rewrite $ flattenCases cs
-            rewrite $ IndexFn (Forall i (Iota m)) (singleCase $ sVar i)
+            rewrite $ IndexFn [Forall i (Iota m)] (singleCase $ sVar i)
           _ ->
             error $ errorMsg loc "type error"
   | Just fname <- getFun f,
@@ -473,9 +468,9 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       -- Scan with basic operator.
       fns <- forward xs'
       forM fns $ \fn -> do
-        let i = case iterator fn of
-              (Forall i' _) -> i'
-              Empty -> error "scan array is empty?"
+        let i = case shape fn of
+              [] -> error "scan array is empty?"
+              [Forall i' _] -> i'
         -- TODO should we verify that _ne matches op?
         op <-
           case E.baseString vn of
@@ -488,7 +483,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         x <- newVName "a"
         let y =
               IndexFn
-                (iterator fn)
+                (shape fn)
                 ( cases
                     [ (base_case, sym2SoP (Idx (Var x) (sVar i))),
                       (neg base_case, Recurrence `op` Idx (Var x) (sVar i))
@@ -512,8 +507,8 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         addRelIterator iter
         map (repIndexFn accToRec) <$> forward lam_body
 
-      forM bodies $ \body_fn -> do
-        subst (IndexFn iter (body body_fn))
+      forM bodies $ \body_fn ->
+        subst (IndexFn [iter] (body body_fn))
           >>= rewrite
   | Just "scatter" <- getFun f,
     [e_dest, e_inds, e_vals] <- getArgs args = do
@@ -551,13 +546,13 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
       -- TODO remove this. It's only here to infer the size of the output hist.
       f_ks <- forward e_k
       case f_ks of
-        [IndexFn Empty cs] | [(Bool True, k)] <- casesToList cs -> do
+        [IndexFn [] cs] | [(Bool True, k)] <- casesToList cs -> do
           arg_fns <- mconcat <$> mapM forward (getArgs args) -- redundant forward on e_k again.
           i <- newNameFromString "i"
           arg_names <- forM arg_fns (const $ newVName "x")
           let g_fn =
                 IndexFn
-                  { iterator = Forall i (Iota k),
+                  { shape = [Forall i (Iota k)],
                     body =
                       singleCase . sym2SoP $
                         Apply (Var hist_vn) (map sVar arg_names)
@@ -594,14 +589,14 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
           arg_names <- forM arg_fns (const $ newVName "x")
           iter <- case size of
             Just sz ->
-              flip Forall (Iota sz) <$> newVName "i"
+              (:[]) . flip Forall (Iota sz) <$> newVName "i"
             Nothing ->
-              pure Empty
+              pure []
           when (typeIsBool return_type) $ addProperty (Algebra.Var g) Property.Boolean
 
           let g_fn =
                 IndexFn
-                  { iterator = iter,
+                  { shape = iter,
                     body =
                       singleCase . sym2SoP $
                         Apply (Var g) (map sVar arg_names)
@@ -618,7 +613,7 @@ forward e@(E.AppExp (E.Loop _sz _init_pat _init (E.For ident e_sz) e_body loc) _
         warningMsg loc "Analyzing loop body, but resulting index function will be uninterpreted."
       _ <- forward e_body
       vn <- newVName $ "untrans(" <> prettyStr e <> ")"
-      pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
+      pure [IndexFn [] (cases [(Bool True, sVar vn)])]
     _ -> error "not implemented yet"
 forward (E.Coerce e _ _ _) = do
   -- No-op; I've only seen coercions that are hints for array sizes.
@@ -626,7 +621,7 @@ forward (E.Coerce e _ _ _) = do
 forward e = do
   printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
   vn <- newVName $ "untrans(" <> prettyStr e <> ")"
-  pure [IndexFn Empty (cases [(Bool True, sVar vn)])]
+  pure [IndexFn [] (cases [(Bool True, sVar vn)])]
 
 -- Applying top-level definitions of functions.
 -- Returns nothing if the function is not defined at top-level.
@@ -749,7 +744,7 @@ bindLambdaBodyParams [] = error "Internal error: are you mapping with wildcard o
 bindLambdaBodyParams params = do
   -- Make sure all Cat k bound in iterators are identical by renaming.
   fns <- renamesM (map snd params)
-  let iter@(Forall i _) = maximum (map iterator fns)
+  let iter@(Forall i _) = maximum (map ((\case [it] -> it) . shape) fns)
   -- forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
   --   vn <- newVName ("#lam_" <> E.baseString paramName)
   --   insertIndexFn vn [f_xs]
@@ -759,12 +754,13 @@ bindLambdaBodyParams params = do
   -- pure iter
   forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
     vn <- newVName "tmp_fn"
-    IndexFn tmp_iter cs <-
-      IndexFn iter (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
+    IndexFn tmp_shape cs <-
+      IndexFn [iter] (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
+    let [tmp_iter] = tmp_shape
     -- Renaming k bound in `tmp_iter` to k bound in `iter`.
     let k_rep =
           fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
-    insertIndexFn paramName [repIndexFn k_rep $ IndexFn Empty cs]
+    insertIndexFn paramName [repIndexFn k_rep $ IndexFn [] cs]
   pure iter
 
 -- Align parameters and arguments. Each parameter is a pattern.
@@ -806,8 +802,8 @@ zipArgs loc formal_args actual_args = do
     getVName x | Just (Var vn) <- justSym x = Just vn
     getVName _ = Nothing
 
-    sizeOfDomain (IndexFn Empty _) = pure Nothing
-    sizeOfDomain (IndexFn (Forall _ d) _) =
+    sizeOfDomain (IndexFn [] _) = pure Nothing
+    sizeOfDomain (IndexFn [Forall _ d] _) =
       Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
 
     zipMaybes = zipWith (liftA2 (,))
@@ -822,7 +818,7 @@ substParams = foldM substParam
 
 -- Scatter with injective indices (result is uninterpreted, but safe):
 scatterInj :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
-scatterInj (IndexFn (Forall i dom_dest) _) inds _vals e_inds = do
+scatterInj (IndexFn [Forall i dom_dest] _) inds _vals e_inds = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
   inj <- lift $ case justVName e_inds of
     Just vn_inds -> do
@@ -836,19 +832,19 @@ scatterInj (IndexFn (Forall i dom_dest) _) inds _vals e_inds = do
       uninterpreted <- newNameFromString "scatter_inj"
       lift . pure $
         IndexFn
-          { iterator = Forall i dom_dest,
+          { shape = [Forall i dom_dest],
             body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
           }
 scatterInj _ _ _ _ = fail ""
 
 -- Scatter replicated value (result is uninterpreted, but safe):
 scatterRep :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterRep (IndexFn (Forall _ dom_dest) _) _ vals@(IndexFn (Forall i (Iota _)) _)
+scatterRep (IndexFn [Forall _ dom_dest] _) _ vals@(IndexFn [Forall i (Iota _)] _)
   | i `S.notMember` fv (body vals) = do
       uninterpreted <- newNameFromString "scatter_rep"
       lift . pure $
         IndexFn
-          { iterator = Forall i dom_dest,
+          { shape = [Forall i dom_dest],
             body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
           }
 scatterRep _ _ _ = fail ""
@@ -865,7 +861,7 @@ scatterRep _ _ _ = fail ""
 --     ___________________________________________________
 --     y = ∀i ∈ 0 .. length dest . vs[is^(-1)(i)]
 scatterPerm :: IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
-scatterPerm (IndexFn (Forall _ dom_dest) _) vals e_inds = do
+scatterPerm (IndexFn [Forall _ dom_dest] _) vals e_inds = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
   printM 1337 $ "scatterPerm: dest_size" <> prettyStr dest_size
   vn_inds <- warningInds
@@ -893,7 +889,7 @@ scatterPerm (IndexFn (Forall _ dom_dest) _) vals e_inds = do
       let inv_ind = Idx (Var vn_inv) (sVar i)
       lift $
         IndexFn
-          { iterator = Forall i (Iota $ dest_size .+. int2SoP 1),
+          { shape = [Forall i (Iota $ dest_size .+. int2SoP 1)],
             body = cases [(Bool True, sym2SoP $ Idx (Var vn_vals) (sym2SoP inv_ind))]
           }
           @ (vn_vals, vals)
@@ -941,7 +937,7 @@ scatterPerm _ _ _ = fail ""
 --         | i /= seg(k) => dest[i]
 --     which simplifies to what we wanted to show.
 scatterMono :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterMono dest@(IndexFn (Forall _ dom_dest) _) inds@(IndexFn inds_iter@(Forall k (Iota m)) _) vals = do
+scatterMono dest@(IndexFn [Forall _ dom_dest] _) inds@(IndexFn inds_iter@[Forall k (Iota m)] _) vals = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
   -- Match rule.
   vn_k <- newVName "k"
@@ -952,7 +948,7 @@ scatterMono dest@(IndexFn (Forall _ dom_dest) _) inds@(IndexFn inds_iter@(Forall
   vn_f1 <- newVName "f1"
   let inds_template =
         IndexFn
-          { iterator = Forall vn_k (Iota $ sym2SoP $ Hole vn_m),
+          { shape = [Forall vn_k (Iota $ sym2SoP $ Hole vn_m)],
             body =
               cases
                 [ (Hole vn_p0, sym2SoP $ Hole vn_f0),
@@ -975,14 +971,14 @@ scatterMono dest@(IndexFn (Forall _ dom_dest) _) inds@(IndexFn inds_iter@(Forall
   let f_seg = mapping s M.! vn_f_seg
   -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
   s_p :: Maybe (Substitution Symbol) <- lift $ algebraContext inds $ do
-    addRelIterator inds_iter
+    addRelShape inds_iter
     seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
     unify p_seg (seg_delta :> int2SoP 0)
   when (isNothing s_p) (failMsg "scatterMono: predicate not on desired form")
   -- Check that seg is monotonically increasing. (Essentially checking
   -- that OOB branch is never taken in inds.)
   mono <- lift $ algebraContext inds $ do
-    addRelIterator inds_iter
+    addRelShape inds_iter
     seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
     seg_delta $>= int2SoP 0
   when (isUnknown mono) (failMsg "scatterMono: unable to show monotonicity")
@@ -1005,7 +1001,7 @@ scatterMono dest@(IndexFn (Forall _ dom_dest) _) inds@(IndexFn inds_iter@(Forall
   let p = sVar i :== f_seg
   let fn =
         IndexFn
-          { iterator = Forall i (Cat k m f_seg),
+          { shape = [Forall i (Cat k m f_seg)],
             body =
               cases
                 [ (p, sym2SoP $ Apply (Var vals_hole) [sVar k]),
@@ -1138,7 +1134,7 @@ mkRef vns wrap refexp = case refexp of
     -- are substituted correctly at the evaluation site.
     -- (renaming_rep used only by postcondition effects; see forwardApplyDef).
     inContext f e (size_rep, args, renaming_rep) = do
-      fn <- substParams (repIndexFn size_rep (IndexFn Empty e)) args
+      fn <- substParams (repIndexFn size_rep (IndexFn [] e)) args
       f (repIndexFn renaming_rep fn)
 
 -- Tags formal arguments that are booleans or arrays of booleans as such.
@@ -1175,8 +1171,8 @@ forwardPropertyPrelude f args =
       | [E.OpSection (E.QualName [] vn_op) _ _, e_X] <- getArgs args,
         Just x <- justVName e_X,
         Just dir <- opToMonDir (E.baseString vn_op) -> do
-          printM 1 $ prettyStr (IndexFn Empty $ cases [(Bool True, pr $ Property.Monotonic x dir)])
-          pure (IndexFn Empty $ cases [(Bool True, pr $ Property.Monotonic x dir)])
+          printM 1 $ prettyStr (IndexFn [] $ cases [(Bool True, pr $ Property.Monotonic x dir)])
+          pure (IndexFn [] $ cases [(Bool True, pr $ Property.Monotonic x dir)])
       where
         opToMonDir ">" = pure DecS
         opToMonDir ">=" = pure Dec
@@ -1188,8 +1184,8 @@ forwardPropertyPrelude f args =
         Just x <- justVName e_X -> do
           f_rng <- forward e_rng
           case f_rng of
-            [IndexFn Empty g_a, IndexFn Empty g_b] ->
-              fmap (IndexFn Empty) . simplify . cases $ do
+            [IndexFn [] g_a, IndexFn [] g_b] ->
+              fmap (IndexFn []) . simplify . cases $ do
                 (p_a, a) <- casesToList g_a
                 (p_b, b) <- casesToList g_b
                 pure (p_a :&& p_b, pr $ Property.Rng x (a, b))
@@ -1200,7 +1196,7 @@ forwardPropertyPrelude f args =
         Just x <- justVName e_X -> do
           pure $
             IndexFn
-              { iterator = Empty,
+              { shape = [],
                 body = cases [(Bool True, pr $ Property.Injective x Nothing)]
               }
     "InjectiveRCD"
@@ -1208,8 +1204,8 @@ forwardPropertyPrelude f args =
         Just x <- justVName e_X -> do
           f_RCD <- forward e_RCD
           case f_RCD of
-            [IndexFn Empty g_a, IndexFn Empty g_b] ->
-              fmap (IndexFn Empty) . simplify . cases $ do
+            [IndexFn [] g_a, IndexFn [] g_b] ->
+              fmap (IndexFn []) . simplify . cases $ do
                 (p_a, a) <- casesToList g_a
                 (p_b, b) <- casesToList g_b
                 pure (p_a :&& p_b, pr $ Property.Injective x $ Just (a, b))
@@ -1221,12 +1217,12 @@ forwardPropertyPrelude f args =
           f_RCD <- forward e_RCD
           f_ImgRCD <- forward e_ImgRCD
           case f_RCD <> f_ImgRCD of
-            [ IndexFn Empty g_a,
-              IndexFn Empty g_b,
-              IndexFn Empty g_c,
-              IndexFn Empty g_d
+            [ IndexFn [] g_a,
+              IndexFn [] g_b,
+              IndexFn [] g_c,
+              IndexFn [] g_d
               ] ->
-                fmap (IndexFn Empty) . simplify . cases $ do
+                fmap (IndexFn []) . simplify . cases $ do
                   (p_a, a) <- casesToList g_a
                   (p_b, b) <- casesToList g_b
                   (p_c, c) <- casesToList g_c
@@ -1241,7 +1237,7 @@ forwardPropertyPrelude f args =
         Just parts <- mapM parsePredicate e_parts,
         Just x <- justVName e_X -> do
           propArgs <- commonFiltPart x (param_filt, lam_filt) parts
-          fmap (IndexFn Empty) . simplify . cases $ do
+          fmap (IndexFn []) . simplify . cases $ do
             (c, pf, pps) <- propArgs
             pure (c, pr $ Property.FiltPartInv x pf pps)
     "FiltPart"
@@ -1252,7 +1248,7 @@ forwardPropertyPrelude f args =
         Just x <- justVName e_X -> rollbackAlgEnv $ do
           -- HINT make sure in \i -> pf, i gets the iterator of e_Y not e_X.
           propArgs <- commonFiltPart x (param_filt, lam_filt) parts
-          fmap (IndexFn Empty) . simplify . cases $ do
+          fmap (IndexFn []) . simplify . cases $ do
             (c, pf, pps) <- propArgs
             pure (c, pr $ Property.FiltPart y x pf pps)
     "FiltPart2" -> forwardPropertyPrelude "FiltPart" args
@@ -1285,15 +1281,15 @@ forwardPropertyPrelude f args =
       -- f_X could simply be the trivial function: for i < n . true => X[i].)
       res <- lookupIndexFn x
       case res of
-        Just [f_X] | Forall i _ <- iterator f_X -> rollbackAlgEnv $ do
-          let iota = IndexFn (iterator f_X) (cases [(Bool True, sVar i)])
+        Just [f_X] | [Forall i _] <- shape f_X -> rollbackAlgEnv $ do
+          let iota = IndexFn (shape f_X) (cases [(Bool True, sVar i)])
           _ <-
             bindLambdaBodyParams $
               (param_filt, iota) : map ((,iota) . fst) parts
-          addRelIterator (iterator f_X)
-          f_filt <- forward lam_filt >>= subst . IndexFn (iterator f_X) . body . head
+          addRelShape (shape f_X)
+          f_filt <- forward lam_filt >>= subst . IndexFn (shape f_X) . body . head
           f_parts <- forM parts $ \(_, lam_part) ->
-            forward lam_part >>= subst . IndexFn (iterator f_X) . body . head
+            forward lam_part >>= subst . IndexFn (shape f_X) . body . head
 
           let g_parts = [g | f_part <- f_parts, g <- guards f_part]
           unless (all ((== Bool True) . fst) g_parts) $
@@ -1324,9 +1320,9 @@ parseOpVName vn =
     _ -> Nothing
 
 checkBounds :: E.Exp -> IndexFn -> IndexFn -> IndexFnM ()
-checkBounds _ (IndexFn Empty _) _ =
+checkBounds _ (IndexFn [] _) _ =
   error "E.Index: Indexing into scalar"
-checkBounds e f_xs@(IndexFn (Forall _ df) _) f_idx = algebraContext f_idx $ do
+checkBounds e f_xs@(IndexFn [Forall _ df] _) f_idx = algebraContext f_idx $ do
   c <- getCheckBounds
   when c $ do
     df_start <- rewrite $ domainStart df
