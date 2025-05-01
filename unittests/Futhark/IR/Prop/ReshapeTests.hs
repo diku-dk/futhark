@@ -39,8 +39,17 @@ reshapeInnerTests =
         ]
   ]
 
-flipTests :: [TestTree]
-flipTests =
+dimJoin :: Int -> Int -> d -> DimSplice d
+dimJoin i k w = DimSplice i k (Shape [w])
+
+dimSplit :: Int -> [d] -> DimSplice d
+dimSplit i ws = DimSplice i 1 (Shape ws)
+
+dimCoerce :: Int -> d -> DimSplice d
+dimCoerce i w = DimSplice i 1 (Shape [w])
+
+flipReshapeRearrangeTests :: [TestTree]
+flipReshapeRearrangeTests =
   [ testCase
       ( unwords
           [ "flipReshapeRearrange",
@@ -75,6 +84,37 @@ flipTests =
             ["ABC", "D"],
             [1, 0],
             Just [3, 0, 1, 2]
+          )
+        ]
+  ]
+
+flipRearrangeReshapeTests :: [TestTree]
+flipRearrangeReshapeTests =
+  [ testCase
+      ( unwords
+          [ "flipRearrangeReshape",
+            show perm,
+            prettyString newshape
+          ]
+      )
+      $ flipRearrangeReshape perm newshape @?= res
+    | (perm, newshape :: NewShape String, res) <-
+        [ ( [1, 0],
+            NewShape
+              (Shape ["A", "B", "C"])
+              [dimSplit 1 ["B", "C"]],
+            Just
+              ( NewShape
+                  (Shape ["B", "C", "A"])
+                  [DimSplice 0 2 (Shape ["B", "C", "A"])],
+                [2, 0, 1]
+              )
+          ),
+          ( [1, 0],
+            NewShape
+              (Shape ["AB"])
+              [dimJoin 0 2 "AB"],
+            Nothing
           )
         ]
   ]
@@ -133,16 +173,13 @@ simplifyTests =
           )
         ]
   ]
-  where
-    dimJoin i k w = DimSplice i k (Shape [w])
-    dimSplit i ws = DimSplice i 1 (Shape ws)
-    dimCoerce i w = DimSplice i 1 (Shape [w])
 
 tests :: TestTree
 tests =
   testGroup "ReshapeTests" . mconcat $
     [ reshapeOuterTests,
       reshapeInnerTests,
-      flipTests,
+      flipReshapeRearrangeTests,
+      flipRearrangeReshapeTests,
       simplifyTests
     ]

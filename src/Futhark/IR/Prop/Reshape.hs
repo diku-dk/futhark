@@ -14,6 +14,7 @@ module Futhark.IR.Prop.Reshape
 
     -- * Simplification
     flipReshapeRearrange,
+    flipRearrangeReshape,
     simplifyNewShape,
 
     -- * Shape calculations
@@ -29,14 +30,14 @@ module Futhark.IR.Prop.Reshape
   )
 where
 
-import Control.Monad (guard, mplus)
+import Control.Monad (foldM, guard, mplus)
 import Data.Foldable
 import Data.List qualified as L
 import Data.Maybe
 import Data.Ord (comparing)
-import Futhark.IR.Prop.Rearrange (isMapTranspose)
+import Futhark.IR.Prop.Rearrange (isMapTranspose, rearrangeInverse, rearrangeShape)
 import Futhark.IR.Syntax
-import Futhark.Util (takeLast)
+import Futhark.Util (focusNth, takeLast)
 import Futhark.Util.IntegralExp
 import Prelude hiding (product, quot, sum)
 
@@ -189,6 +190,23 @@ flipReshapeRearrange v0_shape v1_shape perm = do
 
   caseA `mplus` caseB
 
+flipRearrangeReshape :: [Int] -> NewShape d -> Maybe (NewShape d, [Int])
+flipRearrangeReshape orig_perm (NewShape shape ss) = do
+  perm' <- foldM f orig_perm ss
+  Just
+    ( reshapeAll (Rank (length orig_perm)) . Shape $
+        rearrangeShape
+          (rearrangeInverse perm')
+          (shapeDims shape),
+      perm'
+    )
+  where
+    f perm (DimSplice i 1 s) = do
+      (perm_bef, j, perm_aft) <- focusNth i perm
+      let adj l = if l > j then l + length s - 1 else l
+      Just $ map adj perm_bef ++ [j .. j + length s - 1] ++ map adj perm_aft
+    f _ _ = Nothing
+
 -- | Which kind of reshape is this?
 data ReshapeKind
   = -- | New shape is dynamically same as original.
@@ -287,6 +305,8 @@ simplifyNewShape shape_bef (NewShape shape ss) =
     improve ss' = maybe ss' improve $ improveOne shape_bef ss'
 
 {-# NOINLINE flipReshapeRearrange #-}
+
+{-# NOINLINE flipRearrangeReshape #-}
 
 {-# NOINLINE reshapeKind #-}
 

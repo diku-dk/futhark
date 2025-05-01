@@ -372,14 +372,22 @@ ruleBasicOp vtable pat aux (Reshape v3_shape v2)
     Just (Rearrange perm v1, v2_cs) <- ST.lookupBasicOp v2 vtable,
     Just (Reshape v1_shape v0, v1_cs) <- ST.lookupBasicOp v1 vtable,
     ReshapeArbitrary <- reshapeKind v1_shape,
-    Just v0_shape <- arrayShape <$> ST.lookupType v0 vtable,
-    Just perm' <-
-      flipReshapeRearrange (shapeDims v0_shape) (shapeDims (newShape v1_shape)) perm =
-      Simplify $ do
-        v1' <- letExp (baseString v1) $ BasicOp $ Rearrange perm' v0
-        v1_shape' <- arrayShape <$> lookupType v1'
-        auxing aux . certifying (v1_cs <> v2_cs) . letBind pat $
-          BasicOp (Reshape (reshapeAll v1_shape' (newShape v3_shape)) v1')
+    Just v0_shape <- arrayShape <$> ST.lookupType v0 vtable =
+      case ( flipReshapeRearrange (shapeDims v0_shape) (shapeDims (newShape v1_shape)) perm,
+             flipRearrangeReshape perm v3_shape
+           ) of
+        (Just perm', _) -> Simplify $ do
+          v1' <- letExp (baseString v1) $ BasicOp $ Rearrange perm' v0
+          v1_shape' <- arrayShape <$> lookupType v1'
+          auxing aux . certifying (v1_cs <> v2_cs) . letBind pat $
+            BasicOp (Reshape (reshapeAll v1_shape' (newShape v3_shape)) v1')
+        (_, Just (v3_shape', perm')) -> Simplify $ do
+          v2' <-
+            auxing aux . certifying (v1_cs <> v2_cs) . letExp (baseString v2) $
+              BasicOp (Reshape v3_shape' v1)
+          letBind pat $ BasicOp (Rearrange perm' v2')
+        _ ->
+          Skip
 ruleBasicOp _ _ _ _ =
   Skip
 
