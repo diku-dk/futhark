@@ -50,8 +50,8 @@ testSolveFail constraints typarams tyvars expected =
 (~) :: TypeBase () NoUniqueness -> TypeBase () NoUniqueness -> CtTy ()
 t1 ~ t2 = CtEq (Reason mempty) t1 t2
 
-tv :: VName -> Level -> (VName, (Level, TyVarInfo ()))
-tv v lvl = (v, (lvl, TyVarFree mempty Unlifted))
+tvFree :: VName -> Level -> (VName, (Level, TyVarInfo ()))
+tvFree v lvl = (v, (lvl, TyVarFree mempty Unlifted))
 
 -- tvWithInfo :: VName -> Level -> TyVarInfo () -> (VName, (Level, TyVarInfo ()))
 -- tvWithInfo v lvl info = (v, (lvl, info))
@@ -93,28 +93,28 @@ tests =
         testSolve
           ["b_1" ~ "a_0"]
           mempty
-          (M.fromList [tv "b_1" 0])
+          (M.fromList [tvFree "b_1" 0])
           ([], M.fromList [("b_1", Right "a_0")]),
 
       testCase "b_1 ~ a_0" $
         testSolve
           ["a_0" ~ "b_1"]
           mempty
-          (M.fromList [tv "a_0" 0, tv "b_1" 0])
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0])
           ([("b_1", Unlifted)], M.fromList [("a_0", Right "b_1")]),
 
       testCase "multiple" $
         testSolve
           ["b_1" ~ "a_0", "d_3" ~ "c_2", "e_4" ~ "c_2", "c_2" ~ "a_0"]
           mempty
-          (M.fromList [tv "a_0" 0, tv "b_1" 0, tv "c_2" 0, tv "d_3" 0, tv "e_4" 0])
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0, tvFree "e_4" 0])
           ([("a_0", Unlifted)], M.fromList [("b_1", Right "a_0"), ("c_2", Right "a_0"), ("d_3", Right "a_0"), ("e_4", Right "a_0")]),
           
       testCase "Two variables" $
         testSolve 
           ["a_0" ~ "b_1", "c_2" ~ "d_3"]
           mempty
-          (M.fromList [tv "a_0" 0, tv "c_2" 0])
+          (M.fromList [tvFree "a_0" 0, tvFree "c_2" 0])
           ([], M.fromList [("a_0", Right "b_1"), ("c_2", Right "d_3")]),
 
       testCase "i32 + (i32 + i32)" $
@@ -122,7 +122,7 @@ tests =
           ["i32 -> i32 -> a_0" ~ "i32 -> i32 -> i32",
            "i32 -> a_0 -> b_1" ~ "i32 -> i32 -> i32"]
           mempty
-          (M.fromList [tv "a_0" 0, tv "b_1" 0])
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0])
           ([], M.fromList [("a_0", Right "i32"), ("b_1", Right "i32")]),
 
       testCase "((λx -> λy -> x * y) i32) i32" $
@@ -131,7 +131,7 @@ tests =
            "a_0 -> b_1 -> c_2" ~ "i32 -> d_3",
            "d_3" ~ "i32 -> e_4"]
           mempty
-          (M.fromList [tv "a_0" 0, tv "b_1" 0, tv "c_2" 0, tv "d_3" 0, tv "e_4" 0])
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0, tvFree "e_4" 0])
           ([], M.fromList [
                            ("a_0", Right "i32"),
                            ("b_1", Right "i32"),
@@ -150,7 +150,7 @@ tests =
            "i32" ~ "f_5",
            "g_6 -> g_6" ~ "a_0 -> b_1 -> i32"] 
           mempty
-          (M.fromList [tv "a_0" 0, tv "b_1" 0, tv "c_2" 0, tv "d_3" 0, tv "e_4" 0, tv "f_5" 0, tv "g_6" 0])
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0, tvFree "e_4" 0, tvFree "f_5" 0, tvFree "g_6" 0])
           ([], M.fromList [
                   ("a_0", Right "i32 -> i32"),
                   ("b_1", Right "i32"),
@@ -164,7 +164,7 @@ tests =
         testSolve
           ["b_1 -> b_1" ~ "(c_2 -> c_2) -> d_3"]
           mempty
-          (M.fromList [tv "b_1" 0, tv "c_2" 0, tv "d_3" 0])
+          (M.fromList [tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
           ([("c_2", Unlifted)], M.fromList [
             ("b_1", Right "c_2 -> c_2"),
             ("d_3", Right "c_2 -> c_2")
@@ -174,91 +174,91 @@ tests =
         testSolve
           ["a_0" ~ "i32"]
           mempty
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ([], M.fromList [("a_0", Right "i32")]),
 
       testCase "a_0 ~ a_0" $
         testSolve
           ["a_0" ~ "a_0"]
           mempty
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ([("a_0", Unlifted)], mempty),
 
       testCase "non-unifiable types" $
         testSolveFail
           ["a_0" ~ "i32", "a_0" ~ "bool"] 
           mempty 
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ".?([Cc]annot unify).?",
       
       testCase "infinite type (function)" $
         testSolveFail
           ["a_0" ~ "a_0 -> b_1"]
           mempty
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
 
       testCase "infinite type (list)" $
         testSolveFail
           ["a_0" ~ "[]a_0"]
           mempty
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
 
       testCase "infinite type (tuple)" $
         testSolveFail
           ["a_0" ~ "(a_0, bool)"]
           mempty
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
 
       testCase "infinite type (record)" $
         testSolveFail
           ["a_0" ~ "{foo: a_0, bar: f32}"]
           mempty
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
 
       -- testCase "infinite type (sum type)" $
       --   testSolveFail
       --     ["a_0" ~ "#foo: a_0"]
       --     mempty
-      --     (M.fromList [tv "a_0" 0])
+      --     (M.fromList [tvFree "a_0" 0])
       --     ".?([Oo]ccurs check).?",
 
       testCase "infinite type (consuming array param)" $
         testSolveFail
           ["a_0" ~ "*[]a_0"]
           mempty
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
 
       testCase "vector and 2D matrix" $
         testSolveFail
           ["a_0" ~ "[]i32", "a_0" ~ "[][]i32"]
           mempty
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ".?([Cc]annot unify).?",
 
       testCase "different array types" $
         testSolveFail
           ["a_0" ~ "[]f64", "a_0" ~ "[]i64"]
           mempty
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ".?([Cc]annot unify).?",
 
       testCase "simple record" $
         testSolve
           ["a_0" ~ "{foo: i32, bar: bool}"]
           mempty
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ([], M.fromList [("a_0", Right "{foo: i32, bar: bool}")]),
 
       testCase "record 2" $
         testSolve
           ["a_0" ~ "{foo: b_1, bar: c_2}", "b_1" ~ "c_2", "c_2" ~ "i64"]
           mempty
-          (M.fromList [tv "a_0" 0, tv "b_1" 0, tv "c_2" 0])
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0])
           ([], M.fromList 
                 [("a_0", Right "{foo: i64, bar: i64}"), 
                  ("b_1", Right "i64"),
@@ -270,7 +270,7 @@ tests =
         testSolve
           ["a_0" ~ "{foo: b_1, bar: c_2}", "b_1" ~ "c_2"]
           (M.fromList [typaram "c_2" 0 Lifted])
-          (M.fromList [tv "a_0" 0, tv "b_1" 0])
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0])
           ([], M.fromList 
                 [("a_0", Right "{foo: c_2, bar: c_2}"), 
                  ("b_1", Right "c_2")
@@ -281,7 +281,7 @@ tests =
         testSolve
           ["a_0" ~ "(b_1, c_2, d_3)", "c_2" ~ "d_3"]
           mempty
-          (M.fromList [tv "a_0" 0, tv "b_1" 0, tv "c_2" 0, tv "d_3" 0])
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
           ([("b_1", Unlifted), ("d_3", Unlifted)], 
            M.fromList 
             [("a_0", Right "(b_1, c_2, d_3)"),
@@ -293,21 +293,21 @@ tests =
         testSolve
           ["a_0" ~ "b_1"]
           (M.fromList [typaram "a_0" 0 Unlifted])
-          (M.fromList [tv "b_1" 1])
+          (M.fromList [tvFree "b_1" 1])
           ([], M.fromList [("b_1", Right "a_0")]),
 
       testCase "incompatible levels" $
         testSolveFail
           ["a_0" ~ "b_1"]
           (M.fromList [typaram "b_1" 1 Unlifted])
-          (M.fromList [tv "a_0" 0])
+          (M.fromList [tvFree "a_0" 0])
           ".?(scope violation).?",
 
       testCase "differently sized tuples" $
         testSolveFail
           ["a_0" ~ "(i32, c_2)", "b_1" ~ "(i32, c_2, bool)", "a_0" ~ "b_1"]
           mempty
-          (M.fromList [tv "a_0" 0, tv "b_1" 0])
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0])
           ".?([Cc]annot unify).?",
 
       testCase "Prim type last substitution" $
