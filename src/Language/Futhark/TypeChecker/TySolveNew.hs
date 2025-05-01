@@ -174,15 +174,14 @@ unsharedConstructorsMsg cs1 cs2 =
 
 convertUF :: UF s -> SolveM s (M.Map TyVar TyVarSol)
 convertUF uf = do
-  mappings <- mapM maybeLookupSol (M.toList uf)
-  pure $ M.fromList $ catMaybes mappings
+  M.traverseMaybeWithKey maybeLookupSol uf
   where
-    maybeLookupSol :: (TyVar, TyVarNode s) -> SolveM s (Maybe (TyVar, TyVarSol))
-    maybeLookupSol (tv, node) = do
+    maybeLookupSol :: TyVar ->TyVarNode s -> SolveM s (Maybe TyVarSol)
+    maybeLookupSol _ node = do
       root <- liftST $ find node
       descr <- liftST $ getDescr root
       pure $ case descr of
-        t@(Solved _) -> Just (tv, t)
+        t@(Solved _) -> Just t
         _ -> Nothing
 
 substTyVar :: (Monoid u) => M.Map TyVar TyVarSol -> VName -> Maybe (TypeBase () u)
