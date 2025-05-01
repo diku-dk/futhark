@@ -161,12 +161,7 @@ localExts m = do
   pure x
 
 extEnv :: EvalM Env
-extEnv = valEnv . M.map f <$> getExts
-  where
-    f v =
-      ( Nothing,
-        v
-      )
+extEnv = valEnv . M.map (Nothing,) <$> getExts
 
 valueStructType :: ValueType -> StructType
 valueStructType = first $ flip sizeFromInteger mempty . toInteger
@@ -181,7 +176,7 @@ instance Pretty SizeClosure where
   pretty (SizeClosure _ e) = pretty e
 
 instance Pretty (F.Shape SizeClosure) where
-  pretty = mconcat . map (braces . pretty) . shapeDims
+  pretty = mconcat . map (brackets . pretty) . shapeDims
 
 -- | A type where the sizes are unevaluated expressions.
 type EvalType = TypeBase SizeClosure NoUniqueness
@@ -705,7 +700,7 @@ evalType outer_bound t = do
       let free = fvVars $ freeInExp e
        in not $ any (`S.member` bound) free || any (`S.member` outer_bound) free
 
--- | Evaluate all sizes, and it better work. This implies it must be a
+-- | Evaluate all sizes, and it better work. This implies it must not be a
 -- size-dependent function type, or one that has existentials.
 evalTypeFully :: EvalType -> EvalM ValueType
 evalTypeFully t = do
@@ -755,7 +750,7 @@ evalFunction env missing_sizes [] body rettype =
         env'' <- linkMissingSizes missing_sizes p v <$> matchPat env' p v
         etaExpand (v : vs) env'' rt
     etaExpand vs env' _ = do
-      f <- localExts $ eval env' body
+      f <- eval env' body
       foldM (apply noLoc mempty) f $ reverse vs
 evalFunction env missing_sizes (p : ps) body rettype =
   pure . ValueFun $ \v -> do
