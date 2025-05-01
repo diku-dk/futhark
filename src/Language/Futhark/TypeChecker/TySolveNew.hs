@@ -194,8 +194,8 @@ substTyVar m v =
 occursCheck :: Reason Type -> VName -> Type -> SolveM s ()
 occursCheck reason v tp = do
   vars <- gets solverTyVars
-  vars' <- convertUF vars
-  let tp' = substTyVars (substTyVar vars') tp
+  subst <- convertUF vars
+  let tp' = substTyVars (substTyVar subst) tp
   when (v `S.member` typeVars tp') . typeError (locOf reason) mempty $
     "Occurs check: cannot instantiate"
       <+> prettyName v
