@@ -539,6 +539,17 @@ tests =
                       [(Bool True, sym2SoP (Sum k (int2SoP 1) (sHole j) (Hole k)))]
                 }
             ]
+        ),
+      mkTest
+        "tests/indexfn/nd_expansion.fut"
+        ( newNameFromString "j" >>= \j -> pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [Forall i (Iota $ sHole n), Forall j (Iota $ int2SoP 2)],
+                  body =
+                    cases
+                      [(Bool True, int2SoP 2 .*. sym2SoP (Idx (Hole xs) (sVar i)) .+. sHole j)]
+                }
+            ]
         )
     ]
   where
