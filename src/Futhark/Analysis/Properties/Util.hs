@@ -40,7 +40,7 @@ prettyBinding vn e =
       <> align (ppTupleLines' $ map pretty e)
 
 prettyIndent :: (Pretty a) => Int -> a -> String
-prettyIndent n e = docStringW 80 $ indent n (pretty e)
+prettyIndent n e = docStringW 80 $ indent n (hang n $ pretty e)
 
 -- Generate all partitions of `xs` into `k` sublists.
 -- Includes sublists that are permutations of other sublists.
