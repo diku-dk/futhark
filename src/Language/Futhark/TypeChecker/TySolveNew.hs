@@ -65,8 +65,7 @@ typeVar v = Scalar $ TypeVar mempty (qualName v) []
 
 enrichType :: Type -> SolveM s Type
 enrichType t = do
-  s <- get
-  uf <- convertUF (solverTyVars s)
+  uf <- convertUF
   pure $ substTyVars (substTyVar uf) t
 
 cannotUnify ::
@@ -172,8 +171,9 @@ unsharedConstructorsMsg cs1 cs2 =
       filter (`notElem` M.keys cs1) (M.keys cs2)
         ++ filter (`notElem` M.keys cs2) (M.keys cs1)
 
-convertUF :: UF s -> SolveM s (M.Map TyVar TyVarSol)
-convertUF uf = do
+convertUF :: SolveM s (M.Map TyVar TyVarSol)
+convertUF = do
+  uf <- gets solverTyVars
   M.traverseMaybeWithKey maybeLookupSol uf
   where
     maybeLookupSol :: TyVar ->TyVarNode s -> SolveM s (Maybe TyVarSol)
@@ -192,8 +192,7 @@ substTyVar m v =
 
 occursCheck :: Reason Type -> VName -> Type -> SolveM s ()
 occursCheck reason v tp = do
-  vars <- gets solverTyVars
-  subst <- convertUF vars
+  subst <- convertUF
   let tp' = substTyVars (substTyVar subst) tp
   when (v `S.member` typeVars tp') . typeError (locOf reason) mempty $
     "Occurs check: cannot instantiate"
