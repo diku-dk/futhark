@@ -62,20 +62,21 @@ let part2indicesL 't [m][n]
           -- 
           -- Proof.
           --   (1) A bijection from X to X is a permutation of X.
-          let step1 = BijectiveRCD inds (0, n-1) (0, n-1)
-          let step2 =
-            map2 (\i k ->
-              let seg_start = seg_ends[k] - shape[k]
-              in seg_start <= i && i < seg_start + shape[k]
-            ) inds seg_ids
-          --   (3) Use num_trues to show partition point for each segment.
-          let seg_starts = map (\k -> seg_ends[k] - shape[k]) seg_ids
-          let seg_parts = map (\k -> num_trues[k]) seg_ids
-          let seg_inds = map2 (\i seg_start -> i - seg_start) inds seg_starts
-          let step3 = map3 (\c j p ->
-              if c then j < p else j >= p
-            ) csL seg_inds seg_parts
-          in step1 && and step2 && and step3
+          -- let step1 = BijectiveRCD inds (0, n-1) (0, n-1)
+          -- let step2 =
+          --   map2 (\i k ->
+          --     let seg_start = seg_ends[k] - shape[k]
+          --     in seg_start <= i && i < seg_start + shape[k]
+          --   ) inds seg_ids
+          -- --   (3) Use num_trues to show partition point for each segment.
+          -- let seg_starts = map (\k -> seg_ends[k] - shape[k]) seg_ids
+          -- let seg_parts = map (\k -> num_trues[k]) seg_ids
+          -- let seg_inds = map2 (\i seg_start -> i - seg_start) inds seg_starts
+          -- let step3 = map3 (\c j p ->
+          --     if c then j < p else j >= p
+          --   ) csL seg_inds seg_parts
+          -- in step1 && and step2 && and step3
+          FiltPartInv inds (\_i -> true) (\i -> csL[i])
         } =
   let (seg_ids, flags) = segment_ids shape
 
