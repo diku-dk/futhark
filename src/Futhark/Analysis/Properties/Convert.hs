@@ -12,7 +12,8 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing)
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.AlgebraBridge (addRelIterator, addRelSymbol, algebraContext, assume, fromAlgebra, isUnknown, isYes, orM, paramToAlgebra, simplify, toAlgebra, ($==), ($>=))
+import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, fromAlgebra, paramToAlgebra, simplify, toAlgebra)
+import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn)
@@ -32,7 +33,6 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
-import Futhark.Analysis.Properties.AlgebraBridge.Util
 
 --------------------------------------------------------------
 -- Extracting information from E.Exp.
@@ -589,7 +589,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
           arg_names <- forM arg_fns (const $ newVName "x")
           iter <- case size of
             Just sz ->
-              (:[]) . flip Forall (Iota sz) <$> newVName "i"
+              (: []) . flip Forall (Iota sz) <$> newVName "i"
             Nothing ->
               pure []
           when (typeIsBool return_type) $ addProperty (Algebra.Var g) Property.Boolean
