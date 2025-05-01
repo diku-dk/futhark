@@ -47,8 +47,8 @@ type UnconTyVar = (VName, Liftedness)
 liftST :: ST s a -> SolveM s a
 liftST = SolveM . lift . lift
 
-initialState :: TyParams -> TyVars () -> SolveM s ()
-initialState typarams tyvars = do
+initializeState :: TyParams -> TyVars () -> SolveM s ()
+initializeState typarams tyvars = do
   tyvars' <- M.traverseWithKey f tyvars
   typarams' <- M.traverseWithKey g typarams
   put $ SolverState $ typarams' <> tyvars'
@@ -699,7 +699,7 @@ solve constraints typarams tyvars =
     . flip evalStateT (SolverState M.empty)
     . runSolveM
     $ do
-      initialState typarams tyvars
+      initializeState typarams tyvars
       mapM_ solveCt constraints
       mapM_ solveTyVar $ M.toList tyvars
       solution
