@@ -13,6 +13,7 @@ module Futhark.Analysis.Properties.IndexFnPlus
   )
 where
 
+import Control.Monad (foldM)
 import Control.Monad.Trans.Maybe (MaybeT)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
@@ -22,13 +23,9 @@ import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (repVName)
 import Futhark.Analysis.Properties.Unify (FreeVariables (..), Renameable (..), Rep (..), Replacement, ReplacementBuilder (..), Substitution (..), Unify (..), freshNameFromString, unifies_)
 import Futhark.Analysis.Properties.Util (prettyName)
-import Futhark.FreshNames (VNameSource)
-import Futhark.MonadFreshNames (MonadFreshNames)
 import Futhark.SoP.SoP (SoP (SoP), int2SoP, isConstTerm, sym2SoP, (.+.), (.-.))
 import Futhark.Util.Pretty (Pretty (pretty), align, comma, commastack, hang, indent, line, parens, punctuate, sep, softline, stack, (<+>))
 import Language.Futhark (VName)
-import Control.Monad (foldM)
-import qualified Data.Set as S
 
 domainStart :: Domain -> SoP Symbol
 domainStart (Iota _) = int2SoP 0
@@ -82,25 +79,22 @@ instance Pretty Domain where
 
 instance Pretty Iterator where
   pretty (Forall i (Iota n)) =
-    prettyName i <+> ":: 0 .." <+> pretty n
-      <> line
-      <> "forall "
-      <> prettyName i <+> "."
+    "for " <> prettyName i <+> "<" <+> pretty n <+> "."
   pretty (Forall i dom@(Cat k m seg)) =
-    prettyName k <+> ":: 0 .." <+> pretty m
-      <> line
-      <> prettyName i <+> "::" <+> "⊎"
-      <> prettyName k
+    "for "
+      <> prettyName i
+        <+> "∈"
+        <+> "⊎"
+      <> parens (prettyName k <+> "<" <+> pretty m)
         <+> "["
       <> commastack [pretty seg, "...", pretty (intervalEnd dom)]
       <> "]"
+        <+> "."
       <> line
-      <> "forall "
-      <> prettyName i <+> "."
 
 instance Pretty IndexFn where
   pretty (IndexFn [] e) = "•" <+> pretty e
-  pretty (IndexFn iter e) = pretty iter <+> pretty e
+  pretty (IndexFn iter e) = stack (map pretty iter) <+> pretty e
 
 instance FreeVariables Domain where
   fv (Iota n) = fv n
@@ -155,20 +149,19 @@ instance Renameable Iterator where
 
 instance Renameable IndexFn where
   rename_ vns tau (IndexFn dims body) = do
-      (vns', tau', xs) <- foldM (\(v,t,ds) d -> append3rd ds <$> renameIter v t d) (vns, tau, []) dims
-      let dims' = reverse xs
-      IndexFn dims' <$> rename_ vns' tau' body
+    (vns', tau', xs) <- foldM (\(v, t, ds) d -> append3rd ds <$> renameIter v t d) (vns, tau, []) dims
+    let dims' = reverse xs
+    IndexFn dims' <$> rename_ vns' tau' body
     where
-    append3rd cs (a,b,c) = (a,b,c:cs)
-    -- Wraps rename_ on Iterator to also return new state for renaming k in body.
-    renameIter v t (Forall i (Cat xn m b)) = do
-      (xm, v') <- freshNameFromString v "k"
-      let t' = M.insert xn xm t
-      dom <- Cat xm <$> rename_ v' t' m <*> rename_ v' t' b
-      pure (v', t', Forall i dom)
-    renameIter v t it =
-      (v, t,) <$> rename_ v t it
-
+      append3rd cs (a, b, c) = (a, b, c : cs)
+      -- Wraps rename_ on Iterator to also return new state for renaming k in body.
+      renameIter v t (Forall i (Cat xn m b)) = do
+        (xm, v') <- freshNameFromString v "k"
+        let t' = M.insert xn xm t
+        dom <- Cat xm <$> rename_ v' t' m <*> rename_ v' t' b
+        pure (v', t', Forall i dom)
+      renameIter v t it =
+        (v,t,) <$> rename_ v t it
 
 instance Unify Domain Symbol where
   unify_ k (Iota n) (Iota m) = unify_ k n m
