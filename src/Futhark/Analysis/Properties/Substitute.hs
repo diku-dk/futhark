@@ -157,7 +157,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
   g <- repApply vn g_presub
 
-  traverse simplify <=< subRules $
+  traverse simplify <=< applySubRules $
     g
       { shape =
           shape g <&> \case
@@ -223,13 +223,17 @@ substituteOnce f g_presub (f_apply, actual_args) = do
         arg_eq_j `orM` arg_in_segment_bounds
 
     -- Apply first matching rule for each dimension in g.
-    -- XXX for now, this assumes g and f dims align;
+    -- XXX for now, this assumes g and f each have at most one dimension;
     -- need to consider each dimension in f always to make sure
     -- all Cat k's are handled.
-    subRules g = runMaybeT $ foldM rules g [0 .. length (shape g) - 1]
-      where
-        rules g' n =
-          sub0 g <|> sub1 n g' <|> sub2 n g' <|> sub3 n g' <|> sub4 n g' <|> subX n g'
+    applySubRules g =
+      runMaybeT $
+        if null (shape g)
+          then subRules g 0
+          else foldM subRules g [0 .. length (shape g) - 1]
+
+    subRules g n =
+      sub0 g <|> sub1 n g <|> sub2 n g <|> sub3 n g <|> sub4 n g <|> subX n g
 
     -- This is rule is needed because we represent scalars as empty shapes rather
     -- than `for i < 1`, as is done in the paper.
@@ -241,6 +245,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
       Forall _ Iota {} -> pure g
       _ -> fail "No match."
 
+    sub2 n g | n >= length (shape g) = fail "No match."
     sub2 n g = case (shape f !! n, shape g !! n) of
       (Forall i df@Cat {}, Forall j dg@Iota {}) -> do
         Yes <- lift (rewrite (domainEnd df) >>= ($== domainEnd dg))
@@ -250,6 +255,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           (l, _old_iter : r) = splitAt n (shape g)
       _ -> fail "No match."
 
+    sub3 n g | n >= length (shape g) = fail "No match."
     sub3 n g = case (shape f !! n, shape g !! n) of
       (Forall _ df@(Cat k _ _), Forall _ dg@(Cat k' _ _))
         | k `S.member` fv (body g) -> do
