@@ -113,7 +113,7 @@ algebraContext :: IndexFn -> IndexFnM b -> IndexFnM b
 algebraContext fn m = rollbackAlgEnv $ do
   let ps = getPredicates fn
   mapM_ trackBooleanNames ps
-  case getIterName (shape fn) of
+  case map boundVar (shape fn) of
     [] -> pure ()
     is -> do
       mapM_ (handlePreds is) ps
@@ -121,10 +121,6 @@ algebraContext fn m = rollbackAlgEnv $ do
   _ <- handleQuantifiers fn
   m
   where
-    getIterName [] = []
-    getIterName [Forall i _] = [i]
-    getIterName _ = error "Not implemented yet"
-
     -- c[i] == y && d[i] => {c[i] == y: p[hole1], d[i]: q[hole2]}
     handlePreds is (x :&& y) = handlePreds is x >> handlePreds is y
     handlePreds is (x :|| y) = handlePreds is x >> handlePreds is y

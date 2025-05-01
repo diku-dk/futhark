@@ -517,6 +517,28 @@ tests =
                       [(Bool True, sHole anything)]
                 }
             ]
+        ),
+      mkTest
+        "tests/indexfn/nd_map-map.fut"
+        ( newNameFromString "j" >>= \j -> pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [Forall i (Iota $ sHole n), Forall j (Iota $ int2SoP 2)],
+                  body =
+                    cases
+                      [(Bool True, sym2SoP (Idx (Hole xs) (sHole i)) .+. sHole j)]
+                }
+            ]
+        ),
+      mkTest
+        "tests/indexfn/nd_map-scan.fut"
+        ( newNameFromString "j" >>= \j -> pure $ \(i, n, _, k) ->
+            [ IndexFn
+                { shape = [Forall i (Iota $ sHole n), Forall j (Iota $ int2SoP 2)],
+                  body =
+                    cases
+                      [(Bool True, sym2SoP (Sum k (int2SoP 1) (sHole j) (Hole k)))]
+                }
+            ]
         )
     ]
   where

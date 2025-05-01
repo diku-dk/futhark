@@ -42,7 +42,7 @@ instance Ord Domain where
   Cat {} <= Iota {} = False
   _ <= _ = True
 
-data Quantified a = Forall VName a
+data Quantified a = Forall { boundVar :: VName, formula :: a }
   deriving (Show)
 
 instance Ord a => Ord (Quantified a) where

@@ -420,8 +420,10 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         addRelIterator iter
         forward lam_body
 
-      forM bodies $ \body_fn ->
-        subst (body_fn {shape = [iter]}) >>= rewrite
+      printM 1 $ "E.map bodies " <> prettyStr bodies
+
+      forM bodies $ \f_body ->
+        subst (f_body {shape = [iter] <> shape f_body}) >>= rewrite
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
@@ -507,9 +509,8 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         addRelIterator iter
         map (repIndexFn accToRec) <$> forward lam_body
 
-      forM bodies $ \body_fn ->
-        subst (IndexFn [iter] (body body_fn))
-          >>= rewrite
+      forM bodies $ \f_body ->
+        subst (f_body {shape = [iter] <> shape f_body}) >>= rewrite
   | Just "scatter" <- getFun f,
     [e_dest, e_inds, e_vals] <- getArgs args = do
       -- `scatter dest is vs` calculates the equivalent of this imperative code:

@@ -143,9 +143,6 @@ subber argCheck g = do
           pure $ Just (e, vn, [arg])
     getApply_ _ acc _ = pure acc
 
-getQuantifier :: Iterator -> VName
-getQuantifier (Forall i _) = i
-
 {-
               Substitution rules
 -}
@@ -192,7 +189,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
               mempty
           | length (shape f) == length (shape g_presub) ->
               -- Case used internally in Convert (empty args for convenience).
-              map_formal_args_to (shape g_presub <&> sym2SoP . Var . getQuantifier)
+              map_formal_args_to (shape g_presub <&> sym2SoP . Var . boundVar)
         _
           | length (shape f) == length actual_args ->
               -- All source-program indexing should hit this case.
@@ -200,7 +197,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           | otherwise ->
               error "Argument mismatch."
       where
-        map_formal_args_to = mconcat . zipWith (mkRep . getQuantifier) (shape f)
+        map_formal_args_to = mconcat . zipWith (mkRep . boundVar) (shape f)
 
     repApply vn =
       astMap
