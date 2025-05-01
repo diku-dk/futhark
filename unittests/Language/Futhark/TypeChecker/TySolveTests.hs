@@ -38,7 +38,7 @@ testSolveFail ::
   Assertion
 testSolveFail constraints typarams tyvars expected =
   case solve constraints typarams tyvars of
-    Left (TypeError _ _ actualMsg) -> 
+    Left (TypeError _ _ actualMsg) ->
       let regexMatch :: Bool = docString actualMsg =~ expected
       in assertBool "Regex doesn't match" regexMatch
     Right _ -> assertFailure "Expected type error, but got a solution"
@@ -53,6 +53,15 @@ t1 ~ t2 = CtEq (Reason mempty) t1 t2
 tvFree :: VName -> Level -> (VName, (Level, TyVarInfo ()))
 tvFree v lvl = (v, (lvl, TyVarFree mempty Unlifted))
 
+tvPrim :: VName -> Level -> [PrimType] -> (VName, (Level, TyVarInfo ()))
+tvPrim v lvl types = (v, (lvl, TyVarPrim mempty types))
+
+tvRecord :: VName -> Level -> M.Map Name (TypeBase () NoUniqueness) -> (VName, (Level, TyVarInfo ()))
+tvRecord v lvl fields = (v, (lvl, TyVarRecord mempty fields))
+
+tvSum :: VName -> Level -> M.Map Name [TypeBase () NoUniqueness] -> (VName, (Level, TyVarInfo ()))
+tvSum v lvl fields = (v, (lvl, TyVarSum mempty fields)) 
+
 typaram :: VName -> Level -> Liftedness -> (VName, (Level, Liftedness, Loc))
 typaram v lvl liftedness = (v, (lvl, liftedness, noLoc))
 
@@ -60,7 +69,7 @@ tests :: TestTree
 tests =
   testGroup
     "Unsized constraint solver"
-    [ 
+    [
       testCase "infer unlifted" $
         testSolve
           [ "t\8320_9896" ~ "if_t\8322_9898",
@@ -106,9 +115,9 @@ tests =
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0, tvFree "e_4" 0])
           ([("a_0", Unlifted)], M.fromList [("b_1", Right "a_0"), ("c_2", Right "a_0"), ("d_3", Right "a_0"), ("e_4", Right "a_0")]),
-          
+
       testCase "Two variables" $
-        testSolve 
+        testSolve
           ["a_0" ~ "b_1", "c_2" ~ "d_3"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "c_2" 0])
@@ -145,7 +154,7 @@ tests =
            "b_1 -> e_4 -> f_5" ~ "i32 -> i32 -> i32",
            "c_2" ~ "bool",
            "i32" ~ "f_5",
-           "g_6 -> g_6" ~ "a_0 -> b_1 -> i32"] 
+           "g_6 -> g_6" ~ "a_0 -> b_1 -> i32"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0, tvFree "e_4" 0, tvFree "f_5" 0, tvFree "g_6" 0])
           ([], M.fromList [
@@ -183,11 +192,11 @@ tests =
 
       testCase "non-unifiable types" $
         testSolveFail
-          ["a_0" ~ "i32", "a_0" ~ "bool"] 
-          mempty 
+          ["a_0" ~ "i32", "a_0" ~ "bool"]
+          mempty
           (M.fromList [tvFree "a_0" 0])
           ".?([Cc]annot unify).?",
-      
+
       testCase "infinite type (function)" $
         testSolveFail
           ["a_0" ~ "a_0 -> b_1"]
@@ -256,8 +265,8 @@ tests =
           ["a_0" ~ "{foo: b_1, bar: c_2}", "b_1" ~ "c_2", "c_2" ~ "i64"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0])
-          ([], M.fromList 
-                [("a_0", Right "{foo: i64, bar: i64}"), 
+          ([], M.fromList
+                [("a_0", Right "{foo: i64, bar: i64}"),
                  ("b_1", Right "i64"),
                  ("c_2", Right "i64")
                 ]
@@ -268,8 +277,8 @@ tests =
           ["a_0" ~ "{foo: b_1, bar: c_2}", "b_1" ~ "c_2"]
           (M.fromList [typaram "c_2" 0 Lifted])
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0])
-          ([], M.fromList 
-                [("a_0", Right "{foo: c_2, bar: c_2}"), 
+          ([], M.fromList
+                [("a_0", Right "{foo: c_2, bar: c_2}"),
                  ("b_1", Right "c_2")
                 ]
           ),
@@ -279,8 +288,8 @@ tests =
           ["a_0" ~ "(b_1, c_2, d_3)", "c_2" ~ "d_3"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
-          ([("b_1", Unlifted), ("d_3", Unlifted)], 
-           M.fromList 
+          ([("b_1", Unlifted), ("d_3", Unlifted)],
+           M.fromList
             [("a_0", Right "(b_1, c_2, d_3)"),
              ("c_2", Right "d_3")
             ]
@@ -326,5 +335,5 @@ tests =
             ("t\8321_8321", Left [Signed Int8,Signed Int16,Signed Int32,Signed Int64]),
             ("index\8322_8322",Right "t_0"),
             ("index_elem\8323_8323",Right "t_0")
-          ])          
+          ])
     ]
