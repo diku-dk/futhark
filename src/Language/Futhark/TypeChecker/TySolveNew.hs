@@ -653,12 +653,12 @@ convertUF' = do
       k <- liftST $ getKey node
       descr <- liftST $ getDescr node
       pure $ if k /= tv
-                  then 
-                    case descr of
-                      Solved _ -> Right descr
-                      _        -> Left k
-                  else 
-                    Right descr
+                then 
+                  case descr of
+                    Solved _ -> Right descr
+                    _        -> Left k
+                else 
+                  Right descr
 
 substTyVar' :: (Monoid u) => M.Map TyVar (Either VName TyVarSol) -> VName -> Maybe (TypeBase () u)
 substTyVar' m v =
