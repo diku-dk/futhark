@@ -106,7 +106,7 @@ flipRearrangeReshapeTests =
             Just
               ( NewShape
                   (Shape ["B", "C", "A"])
-                  [DimSplice 0 2 (Shape ["B", "C", "A"])],
+                  [dimSplit 0 ["B", "C"]],
                 [2, 0, 1]
               )
           ),
