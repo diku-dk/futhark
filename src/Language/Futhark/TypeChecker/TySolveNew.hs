@@ -176,7 +176,7 @@ convertUF = do
   uf <- gets solverTyVars
   M.traverseMaybeWithKey maybeLookupSol uf
   where
-    maybeLookupSol :: TyVar ->TyVarNode s -> SolveM s (Maybe TyVarSol)
+    maybeLookupSol :: TyVar -> TyVarNode s -> SolveM s (Maybe TyVarSol)
     maybeLookupSol _ node = do
       root <- liftST $ find node
       descr <- liftST $ getDescr root
