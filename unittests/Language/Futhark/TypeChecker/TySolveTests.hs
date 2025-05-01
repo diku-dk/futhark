@@ -53,9 +53,6 @@ t1 ~ t2 = CtEq (Reason mempty) t1 t2
 tvFree :: VName -> Level -> (VName, (Level, TyVarInfo ()))
 tvFree v lvl = (v, (lvl, TyVarFree mempty Unlifted))
 
--- tvWithInfo :: VName -> Level -> TyVarInfo () -> (VName, (Level, TyVarInfo ()))
--- tvWithInfo v lvl info = (v, (lvl, info))
-
 typaram :: VName -> Level -> Liftedness -> (VName, (Level, Liftedness, Loc))
 typaram v lvl liftedness = (v, (lvl, liftedness, noLoc))
 
