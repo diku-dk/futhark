@@ -12,7 +12,7 @@ import Data.Map qualified as M
 import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
-import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify)
+import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==))
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
@@ -229,7 +229,13 @@ substituteOnce f g_presub (f_apply, actual_args) = do
     subRules g = runMaybeT $ foldM rules g [0 .. length (shape g) - 1]
       where
         rules g' n =
-          sub1 n g' <|> sub2 n g' <|> sub3 n g' <|> sub4 n g' <|> subX n g'
+          sub0 g <|> sub1 n g' <|> sub2 n g' <|> sub3 n g' <|> sub4 n g' <|> subX n g'
+
+    -- This is rule is needed because we represent scalars as empty shapes rather
+    -- than `for i < 1`, as is done in the paper.
+    sub0 g = case shape f of
+      [] -> pure g
+      _ -> fail "No match."
 
     sub1 n g = case shape f !! n of
       Forall _ Iota {} -> pure g
@@ -237,7 +243,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
 
     sub2 n g = case (shape f !! n, shape g !! n) of
       (Forall i df@Cat {}, Forall j dg@Iota {}) -> do
-        True <- lift (rewrite (domainEnd df) >>= unifiesWith (domainEnd dg))
+        Yes <- lift (rewrite (domainEnd df) >>= ($== domainEnd dg))
         Yes <- lift (arg_in_segment_of_f n)
         pure $ g {shape = l <> [Forall j (repDomain (mkRep i $ Var j) df)] <> r}
         where
@@ -280,7 +286,6 @@ substituteOnce f g_presub (f_apply, actual_args) = do
               Utilities
 -}
 -- Solve for x in e(x) = e'.
--- solveFor :: (Replaceable p Symbol) => VName -> p -> SoP Symbol -> IndexFnM (Maybe (SoP Symbol))
 solveFor :: VName -> SoP Symbol -> SoP Symbol -> IndexFnM (Maybe (SoP Symbol))
 solveFor x e1 e2 = do
   x_hole <- newVName "x_hole"
