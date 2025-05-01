@@ -121,8 +121,14 @@ flipRearrangeReshapeTests =
 
 simplifyTests :: [TestTree]
 simplifyTests =
-  [ testCase (unwords ["simplifyNewShape", prettyString input]) $
-      simplifyNewShape (Shape orig_shape) (uncurry (NewShape . Shape) input)
+  [ testCase
+      ( unwords
+          [ "simplifyNewShape",
+            prettyString orig_shape,
+            prettyString input
+          ]
+      )
+      $ simplifyNewShape (Shape orig_shape) (uncurry (NewShape . Shape) input)
         @?= uncurry (NewShape . Shape) . (fst input,) <$> expected
     | (orig_shape :: [String], input, expected) <-
         [ -- Inverse flatten and unflatten - simple case.
@@ -158,7 +164,7 @@ simplifyTests =
             Just [dimSplit 0 ["A", "B", "C"]]
           ),
           -- Identity coerce (with non-identity stuff afterwards)
-          ( ["A", "CD"],
+          ( ["B", "CD"],
             ( ["B", "C", "D"],
               [dimCoerce 0 "B", dimSplit 1 ["C", "D"]]
             ),
@@ -170,6 +176,13 @@ simplifyTests =
               [dimCoerce 0 "AB", dimSplit 0 ["A", "B"]]
             ),
             Just [dimSplit 0 ["A", "B"]]
+          ),
+          -- Don't get rid of anything here.
+          ( ["A", "B"],
+            ( ["C", "D"],
+              [dimCoerce 0 "C", dimCoerce 1 "D"]
+            ),
+            Nothing
           )
         ]
   ]

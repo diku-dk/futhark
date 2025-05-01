@@ -249,8 +249,8 @@ move ::
 move _ [] = Nothing
 --
 -- A coercion that does not do anything.
-move (_, DimSplice i1 1 shape) ss
-  | dimSpan i1 1 shape == shape =
+move (shape_bef, DimSplice i1 1 shape) ss
+  | dimSpan i1 1 shape_bef == shape =
       Just ss
 --
 -- A coercion can be fused with anything.
