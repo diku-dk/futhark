@@ -36,10 +36,17 @@ data Domain
       VName -- k
       (SoP Symbol) -- m
       (SoP Symbol) -- b
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq)
+
+instance Ord Domain where
+  Cat {} <= Iota {} = False
+  _ <= _ = True
 
 data Quantified a = Forall VName a
-  deriving (Show, Ord)
+  deriving (Show)
+
+instance Ord a => Ord (Quantified a) where
+  Forall _ x <= Forall _ y = x <= y
 
 instance Eq a => Eq (Quantified a) where
   (Forall _ u) == (Forall _ v) = u == v
