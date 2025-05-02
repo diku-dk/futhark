@@ -48,6 +48,9 @@ dimSplit i ws = DimSplice i 1 (Shape ws)
 dimCoerce :: Int -> d -> DimSplice d
 dimCoerce i w = DimSplice i 1 (Shape [w])
 
+dimSplice :: Int -> Int -> [d] -> DimSplice d
+dimSplice i n s = DimSplice i n $ Shape s
+
 flipReshapeRearrangeTests :: [TestTree]
 flipReshapeRearrangeTests =
   [ testCase
@@ -143,7 +146,7 @@ simplifyTests =
             ( [dimJoin 0 2 "AB", dimSplit 0 ["C", "D"]],
               ["C", "D"]
             ),
-            Nothing
+            Just [dimSplice 0 2 ["C", "D"]]
           ),
           -- Inverse flatten and unflatten - separated by coercion.
           ( ["A", "B"],
@@ -154,8 +157,7 @@ simplifyTests =
               ["C", "D"]
             ),
             Just
-              [ dimJoin 0 2 "AB",
-                dimSplit 0 ["C", "D"]
+              [ dimSplice 0 2 ["C", "D"]
               ]
           ),
           -- Two unflattens - simple case.
@@ -185,6 +187,20 @@ simplifyTests =
               ["C", "D"]
             ),
             Nothing
+          ),
+          -- Flatten and unflatten, but a suffix of it is actually invariant.
+          ( ["A", "B", "C"],
+            ( [dimJoin 0 3 "ABC", dimSplit 0 ["D", "E", "C"]],
+              ["D", "E", "C"]
+            ),
+            Just [dimSplice 0 2 ["D", "E"]]
+          ),
+          -- Flatten and unflatten, but a prefix of it is actually invariant.
+          ( ["A", "B", "C"],
+            ( [dimJoin 0 3 "ABC", dimSplit 0 ["A", "D", "E"]],
+              ["A", "D", "E"]
+            ),
+            Just [dimSplice 1 2 ["D", "E"]]
           )
         ]
   ]

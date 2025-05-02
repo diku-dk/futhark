@@ -246,6 +246,22 @@ move ::
   (ShapeBase d, DimSplice d) ->
   [DimSplice d] ->
   Maybe [DimSplice d]
+-- If we get the slice all the way to the end, see if we can find some
+-- redundancy.
+move (shape, DimSplice i1 n1 s1) []
+  | match <- takeWhile (uncurry (==)) $ zip (shapeDims shape) (shapeDims s1),
+    not $ null match =
+      let k = length match
+       in Just [DimSplice (i1 + k) (n1 - k) (dropDims k s1)]
+  | match <-
+      takeWhile (uncurry (==)) $
+        reverse $
+          zip (shapeDims shape) (shapeDims s1),
+    not $ null match =
+      let k = length match
+       in Just [DimSplice i1 (n1 - k) (takeDims (length s1 - k) s1)]
+--
+-- Base case.
 move _ [] = Nothing
 --
 -- A coercion that does not do anything.
@@ -276,6 +292,11 @@ move (_, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
     s1_aft = dropDims (i2 - i1 + 1) s1
 
 --
+-- Flatten into an unflatten.
+move (_, DimSplice i1 n1 _) (DimSplice i2 1 s2 : ss)
+  | i1 == i2 =
+      Just $ DimSplice i1 n1 s2 : ss
+--
 -- These cases are for updating dimensions as we move across intervening
 -- operations.
 move (shape, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
@@ -292,7 +313,7 @@ move (shape, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
 improveOne :: (Eq d) => ShapeBase d -> [DimSplice d] -> Maybe [DimSplice d]
 improveOne _ [] = Nothing
 improveOne shape (s : ss) =
-  move (shape, s) ss `mplus` ((s :) <$> improveOne shape ss)
+  move (shape, s) ss `mplus` ((s :) <$> improveOne (applySplice shape s) ss)
 
 -- | Try to simplify the given 'NewShape'. Returns 'Nothing' if no improvement
 -- is possible.
@@ -307,5 +328,7 @@ simplifyNewShape shape_bef (NewShape ss shape) =
 {-# NOINLINE flipRearrangeReshape #-}
 
 {-# NOINLINE reshapeKind #-}
+
+{-# NOINLINE simplifyNewShape #-}
 
 {-# NOINLINE newshapeInner #-}
