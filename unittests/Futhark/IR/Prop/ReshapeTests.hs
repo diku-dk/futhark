@@ -39,11 +39,11 @@ reshapeInnerTests =
         ]
   ]
 
-dimJoin :: Int -> Int -> d -> DimSplice d
-dimJoin i k w = DimSplice i k (Shape [w])
+dimFlatten :: Int -> Int -> d -> DimSplice d
+dimFlatten i k w = DimSplice i k (Shape [w])
 
-dimSplit :: Int -> [d] -> DimSplice d
-dimSplit i ws = DimSplice i 1 (Shape ws)
+dimUnflatten :: Int -> [d] -> DimSplice d
+dimUnflatten i ws = DimSplice i 1 (Shape ws)
 
 dimCoerce :: Int -> d -> DimSplice d
 dimCoerce i w = DimSplice i 1 (Shape [w])
@@ -104,18 +104,18 @@ flipRearrangeReshapeTests =
     | (perm, newshape :: NewShape String, res) <-
         [ ( [1, 0],
             NewShape
-              [dimSplit 1 ["B", "C"]]
+              [dimUnflatten 1 ["B", "C"]]
               (Shape ["A", "B", "C"]),
             Just
               ( NewShape
-                  [dimSplit 0 ["B", "C"]]
+                  [dimUnflatten 0 ["B", "C"]]
                   (Shape ["B", "C", "A"]),
                 [2, 0, 1]
               )
           ),
           ( [1, 0],
             NewShape
-              [dimJoin 0 2 "AB"]
+              [dimFlatten 0 2 "AB"]
               (Shape ["AB"]),
             Nothing
           )
@@ -136,23 +136,23 @@ simplifyTests =
     | (orig_shape :: [String], input, expected) <-
         [ -- Inverse flatten and unflatten - simple case.
           ( ["A", "B"],
-            ( [dimJoin 0 2 "AB", dimSplit 0 ["A", "B"]],
+            ( [dimFlatten 0 2 "AB", dimUnflatten 0 ["A", "B"]],
               ["A", "B"]
             ),
             Just []
           ),
           -- Non-inverse flatten and unflatten - simple case.
           ( ["A", "B"],
-            ( [dimJoin 0 2 "AB", dimSplit 0 ["C", "D"]],
+            ( [dimFlatten 0 2 "AB", dimUnflatten 0 ["C", "D"]],
               ["C", "D"]
             ),
             Just [dimSplice 0 2 ["C", "D"]]
           ),
           -- Inverse flatten and unflatten - separated by coercion.
           ( ["A", "B"],
-            ( [ dimJoin 0 2 "AB",
+            ( [ dimFlatten 0 2 "AB",
                 dimCoerce 0 "CD",
-                dimSplit 0 ["C", "D"]
+                dimUnflatten 0 ["C", "D"]
               ],
               ["C", "D"]
             ),
@@ -162,31 +162,31 @@ simplifyTests =
           ),
           -- Two unflattens - simple case.
           ( ["ABC"],
-            ( [dimSplit 0 ["A", "BC"], dimSplit 1 ["B", "C"]],
+            ( [dimUnflatten 0 ["A", "BC"], dimUnflatten 1 ["B", "C"]],
               ["A", "B", "C"]
             ),
-            Just [dimSplit 0 ["A", "B", "C"]]
+            Just [dimUnflatten 0 ["A", "B", "C"]]
           ),
           -- Identity coerce (with non-identity stuff afterwards)
           ( ["B", "CD"],
-            ( [dimCoerce 0 "B", dimSplit 1 ["C", "D"]],
+            ( [dimCoerce 0 "B", dimUnflatten 1 ["C", "D"]],
               ["B", "C", "D"]
             ),
-            Just [dimSplit 1 ["C", "D"]]
+            Just [dimUnflatten 1 ["C", "D"]]
           ),
           -- Get rid of a coerce before an unflatten.
           ( ["CD"],
-            ( [dimCoerce 0 "AB", dimSplit 0 ["A", "B"]],
+            ( [dimCoerce 0 "AB", dimUnflatten 0 ["A", "B"]],
               ["A", "B"]
             ),
-            Just [dimSplit 0 ["A", "B"]]
+            Just [dimUnflatten 0 ["A", "B"]]
           ),
           -- Get rid of a coerce after a flatten.
           ( ["A", "B", "C"],
-            ( [dimJoin 0 2 "ABC", dimCoerce 0 "K"],
+            ( [dimFlatten 0 2 "ABC", dimCoerce 0 "K"],
               ["K"]
             ),
-            Just [dimJoin 0 2 "K"]
+            Just [dimFlatten 0 2 "K"]
           ),
           -- Don't get rid of anything here.
           ( ["A", "B"],
@@ -197,14 +197,14 @@ simplifyTests =
           ),
           -- Flatten and unflatten, but a suffix of it is actually invariant.
           ( ["A", "B", "C"],
-            ( [dimJoin 0 3 "ABC", dimSplit 0 ["D", "E", "C"]],
+            ( [dimFlatten 0 3 "ABC", dimUnflatten 0 ["D", "E", "C"]],
               ["D", "E", "C"]
             ),
             Just [dimSplice 0 2 ["D", "E"]]
           ),
           -- Flatten and unflatten, but a prefix of it is actually invariant.
           ( ["A", "B", "C"],
-            ( [dimJoin 0 3 "ABC", dimSplit 0 ["A", "D", "E"]],
+            ( [dimFlatten 0 3 "ABC", dimUnflatten 0 ["A", "D", "E"]],
               ["A", "D", "E"]
             ),
             Just [dimSplice 1 2 ["D", "E"]]
