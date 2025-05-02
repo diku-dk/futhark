@@ -409,8 +409,8 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
       >>= rewrite
 forward (E.Lambda _ _ _ _ loc) =
   error $ errorMsg loc "Cannot create index function for unapplied lambda."
-forward expr@(E.AppExp (E.Apply f args loc) _)
-  | Just fname <- getFun f,
+forward expr@(E.AppExp (E.Apply e_f args loc) _)
+  | Just fname <- getFun e_f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params lam_body _ _ _ : _args <- getArgs args,
     Just arrays <- NE.nonEmpty (NE.tail args) = do
@@ -424,13 +424,13 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
 
       forM bodies $ \f_body ->
         subst (f_body {shape = [iter] <> shape f_body}) >>= rewrite
-  | Just fname <- getFun f,
+  | Just fname <- getFun e_f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
       error . errorMsg loc $
         "map takes lambda as first argument. Perhaps you want to eta-expand: "
           <> prettyStr (head $ getArgs args)
-  | Just "replicate" <- getFun f,
+  | Just "replicate" <- getFun e_f,
     [e_n, e_x] <- getArgs args = do
       ns <- forward e_n
       xs <- forward e_x
@@ -446,7 +446,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
                 error $ errorMsg loc "type error"
           _ -> do
             error $ errorMsg loc "Multi-dimensional arrays not supported yet."
-  | Just "iota" <- getFun f,
+  | Just "iota" <- getFun e_f,
     [e_n] <- getArgs args = do
       ns <- forward e_n
       forM ns $ \n -> do
@@ -457,15 +457,15 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
             rewrite $ IndexFn [Forall i (Iota m)] (singleCase $ sVar i)
           _ ->
             error $ errorMsg loc "type error"
-  | Just fname <- getFun f,
+  | Just fname <- getFun e_f,
     "zip" `L.isPrefixOf` fname = do
       mconcat <$> mapM forward (getArgs args)
-  | Just fname <- getFun f,
+  | Just fname <- getFun e_f,
     "unzip" `L.isPrefixOf` fname,
     [xs'] <- getArgs args =
       -- XXX unzip is a no-op.
       forward xs'
-  | Just "scan" <- getFun f,
+  | Just "scan" <- getFun e_f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       -- Scan with basic operator.
       fns <- forward xs'
@@ -494,7 +494,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
         -- tell ["Using scan rule ", toLaTeX y]
         y @ (x, fn)
           >>= rewrite
-  | Just "scan" <- getFun f,
+  | Just "scan" <- getFun e_f,
     [E.Lambda params lam_body _ _ _, _ne, _xs] <- getArgs args,
     xs <- NE.fromList [NE.last args],
     [pat_acc, pat_x] <- params = do
@@ -511,7 +511,7 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
 
       forM bodies $ \f_body ->
         subst (f_body {shape = [iter] <> shape f_body}) >>= rewrite
-  | Just "scatter" <- getFun f,
+  | Just "scatter" <- getFun e_f,
     [e_dest, e_inds, e_vals] <- getArgs args = do
       -- `scatter dest is vs` calculates the equivalent of this imperative code:
       --
@@ -541,8 +541,8 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
           (error $ errorMsg loc "Failed to infer index function for scatter.")
           pure
           (rule1 <|> rule2 <|> rule3 <|> rule4)
-  | Just "hist" <- getFun f,
-    Just hist_vn <- justVName f,
+  | Just "hist" <- getFun e_f,
+    Just hist_vn <- justVName e_f,
     [_, _, e_k, _, _] <- getArgs args = do
       -- TODO remove this. It's only here to infer the size of the output hist.
       f_ks <- forward e_k
@@ -562,15 +562,15 @@ forward expr@(E.AppExp (E.Apply f args loc) _)
           pure [fn]
         _ ->
           undefined
-  | Just "sized" <- getFun f,
+  | Just "sized" <- getFun e_f,
     [_, e] <- getArgs args = do
       -- No-op.
       forward e
-  | Just vn <- getFun f,
+  | Just vn <- getFun e_f,
     vn `S.member` propertyPrelude = do
       (: []) <$> forwardPropertyPrelude vn args
   -- Applying other functions, for instance, user-defined ones.
-  | (E.Var (E.QualName [] g) info _) <- f,
+  | (E.Var (E.QualName [] g) info _) <- e_f,
     E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
       toplevel_fns <- getTopLevelIndexFns
       defs <- getTopLevelDefs
