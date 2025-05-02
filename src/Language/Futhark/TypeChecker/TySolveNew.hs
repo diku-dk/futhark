@@ -667,6 +667,8 @@ substTyVar' m v =
     Just (Right (Unsolved {})) -> Nothing
     Nothing -> Nothing
 
+-- TODO: Instead of "freezing" the state in convertUF', generate the
+-- TODO: substitutions inside of here.
 solution :: SolveM s ([UnconTyVar], Solution)
 solution = do
   mappings <- convertUF'
