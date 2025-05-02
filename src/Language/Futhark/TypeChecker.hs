@@ -337,19 +337,13 @@ checkModTypeExp (ModTypeWith s (TypeRef tname ps te trloc) loc) = do
     pure (abs, MTy s_abs' $ ModEnv s_env', ModTypeWith s' (TypeRef tname' ps' te' trloc) loc)
 checkModTypeExp (ModTypeArrow maybe_pname e1 e2 loc) = do
   (e1_abs, MTy s_abs e1_mod, e1') <- checkModTypeExp e1
-  (env_for_e2, maybe_pname') <-
+  (maybe_pname', (e2_abs, e2_mod, e2')) <-
     case maybe_pname of
       Just pname -> bindSpaced1 Term pname loc $ \pname' ->
-        pure
-          ( mempty
-              { envNameMap = M.singleton (Term, pname) $ qualName pname',
-                envModTable = M.singleton pname' e1_mod
-              },
-            Just pname'
-          )
+        localEnv (mempty {envModTable = M.singleton pname' e1_mod}) $
+          (Just pname',) <$> checkModTypeExp e2
       Nothing ->
-        pure (mempty, Nothing)
-  (e2_abs, e2_mod, e2') <- localEnv env_for_e2 $ checkModTypeExp e2
+        (Nothing,) <$> checkModTypeExp e2
   pure
     ( e1_abs <> e2_abs,
       MTy mempty $ ModFun $ FunModType s_abs e1_mod e2_mod,
