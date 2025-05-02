@@ -101,19 +101,19 @@ flipRearrangeReshapeTests =
     | (perm, newshape :: NewShape String, res) <-
         [ ( [1, 0],
             NewShape
-              (Shape ["A", "B", "C"])
-              [dimSplit 1 ["B", "C"]],
+              [dimSplit 1 ["B", "C"]]
+              (Shape ["A", "B", "C"]),
             Just
               ( NewShape
-                  (Shape ["B", "C", "A"])
-                  [dimSplit 0 ["B", "C"]],
+                  [dimSplit 0 ["B", "C"]]
+                  (Shape ["B", "C", "A"]),
                 [2, 0, 1]
               )
           ),
           ( [1, 0],
             NewShape
-              (Shape ["AB"])
-              [dimJoin 0 2 "AB"],
+              [dimJoin 0 2 "AB"]
+              (Shape ["AB"]),
             Nothing
           )
         ]
@@ -128,30 +128,30 @@ simplifyTests =
             prettyString input
           ]
       )
-      $ simplifyNewShape (Shape orig_shape) (uncurry (NewShape . Shape) input)
-        @?= uncurry (NewShape . Shape) . (fst input,) <$> expected
+      $ simplifyNewShape (Shape orig_shape) (NewShape (fst input) (Shape (snd input)))
+        @?= uncurry NewShape . (,Shape (snd input)) <$> expected
     | (orig_shape :: [String], input, expected) <-
         [ -- Inverse flatten and unflatten - simple case.
           ( ["A", "B"],
-            ( ["A", "B"],
-              [dimJoin 0 2 "AB", dimSplit 0 ["A", "B"]]
+            ( [dimJoin 0 2 "AB", dimSplit 0 ["A", "B"]],
+              ["A", "B"]
             ),
             Just []
           ),
           -- Non-inverse flatten and unflatten - simple case.
           ( ["A", "B"],
-            ( ["C", "D"],
-              [dimJoin 0 2 "AB", dimSplit 0 ["C", "D"]]
+            ( [dimJoin 0 2 "AB", dimSplit 0 ["C", "D"]],
+              ["C", "D"]
             ),
             Nothing
           ),
           -- Inverse flatten and unflatten - separated by coercion.
           ( ["A", "B"],
-            ( ["C", "D"],
-              [ dimJoin 0 2 "AB",
+            ( [ dimJoin 0 2 "AB",
                 dimCoerce 0 "CD",
                 dimSplit 0 ["C", "D"]
-              ]
+              ],
+              ["C", "D"]
             ),
             Just
               [ dimJoin 0 2 "AB",
@@ -160,27 +160,29 @@ simplifyTests =
           ),
           -- Two unflattens - simple case.
           ( ["ABC"],
-            (["A", "B", "C"], [dimSplit 0 ["A", "BC"], dimSplit 1 ["B", "C"]]),
+            ( [dimSplit 0 ["A", "BC"], dimSplit 1 ["B", "C"]],
+              ["A", "B", "C"]
+            ),
             Just [dimSplit 0 ["A", "B", "C"]]
           ),
           -- Identity coerce (with non-identity stuff afterwards)
           ( ["B", "CD"],
-            ( ["B", "C", "D"],
-              [dimCoerce 0 "B", dimSplit 1 ["C", "D"]]
+            ( [dimCoerce 0 "B", dimSplit 1 ["C", "D"]],
+              ["B", "C", "D"]
             ),
             Just [dimSplit 1 ["C", "D"]]
           ),
           -- Get rid of a coerce.
           ( ["CD"],
-            ( ["A", "B"],
-              [dimCoerce 0 "AB", dimSplit 0 ["A", "B"]]
+            ( [dimCoerce 0 "AB", dimSplit 0 ["A", "B"]],
+              ["A", "B"]
             ),
             Just [dimSplit 0 ["A", "B"]]
           ),
           -- Don't get rid of anything here.
           ( ["A", "B"],
-            ( ["C", "D"],
-              [dimCoerce 0 "C", dimCoerce 1 "D"]
+            ( [dimCoerce 0 "C", dimCoerce 1 "D"],
+              ["C", "D"]
             ),
             Nothing
           )

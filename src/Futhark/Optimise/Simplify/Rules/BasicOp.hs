@@ -194,7 +194,8 @@ ruleBasicOp vtable pat aux (Update Unsafe dest is se)
           v_t <- lookupType v
           v_reshaped <-
             letSubExp (baseString v ++ "_reshaped") . BasicOp $
-              Reshape (reshapeAll (arrayShape v_t) (arrayShape dest_t)) v
+              Reshape v $
+                reshapeAll (arrayShape v_t) (arrayShape dest_t)
           letBind pat $ BasicOp $ Replicate mempty v_reshaped
         _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
 ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update safety1 dest1 is1 (Var v1))
@@ -255,7 +256,7 @@ ruleBasicOp _ pat _ (ArrayLit (se : ses) _)
          in letBind pat $ BasicOp $ Replicate (Shape [n]) se
 ruleBasicOp vtable pat aux (Index idd slice)
   | Just inds <- sliceIndices slice,
-    Just (BasicOp (Reshape newshape idd2), idd_cs) <- ST.lookupExp idd vtable,
+    Just (BasicOp (Reshape idd2 newshape), idd_cs) <- ST.lookupExp idd vtable,
     length newshape == length inds =
       Simplify $
         case reshapeKind newshape of
@@ -367,10 +368,10 @@ ruleBasicOp vtable pat aux (Manifest perm v1)
     ST.available v2 vtable =
       Simplify . auxing aux . certifying cs . letBind pat . BasicOp $
         Manifest perm v2
-ruleBasicOp vtable pat aux (Reshape v3_shape v2)
+ruleBasicOp vtable pat aux (Reshape v2 v3_shape)
   | ReshapeArbitrary <- reshapeKind v3_shape,
     Just (Rearrange perm v1, v2_cs) <- ST.lookupBasicOp v2 vtable,
-    Just (Reshape v1_shape v0, v1_cs) <- ST.lookupBasicOp v1 vtable,
+    Just (Reshape v0 v1_shape, v1_cs) <- ST.lookupBasicOp v1 vtable,
     ReshapeArbitrary <- reshapeKind v1_shape,
     Just v0_shape <- arrayShape <$> ST.lookupType v0 vtable =
       case ( flipReshapeRearrange (shapeDims v0_shape) (shapeDims (newShape v1_shape)) perm,
@@ -380,11 +381,11 @@ ruleBasicOp vtable pat aux (Reshape v3_shape v2)
           v1' <- letExp (baseString v1) $ BasicOp $ Rearrange perm' v0
           v1_shape' <- arrayShape <$> lookupType v1'
           auxing aux . certifying (v1_cs <> v2_cs) . letBind pat $
-            BasicOp (Reshape (reshapeAll v1_shape' (newShape v3_shape)) v1')
+            BasicOp (Reshape v1' (reshapeAll v1_shape' (newShape v3_shape)))
         (_, Just (v3_shape', perm')) -> Simplify $ do
           v2' <-
             auxing aux . certifying (v1_cs <> v2_cs) . letExp (baseString v2) $
-              BasicOp (Reshape v3_shape' v1)
+              BasicOp (Reshape v1 v3_shape')
           letBind pat $ BasicOp (Rearrange perm' v2')
         _ ->
           Skip

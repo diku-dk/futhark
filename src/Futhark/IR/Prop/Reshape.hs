@@ -43,18 +43,18 @@ import Prelude hiding (product, quot, sum)
 
 -- | Construct a 'NewShape' that completely reshapes the initial shape.
 reshapeAll :: (ArrayShape old) => old -> ShapeBase new -> NewShape new
-reshapeAll old new = NewShape new [DimSplice 0 (shapeRank old) new]
+reshapeAll old new = NewShape [DimSplice 0 (shapeRank old) new] new
 
 -- | Construct a 'NewShape' that coerces the shape.
 reshapeCoerce :: ShapeBase new -> NewShape new
-reshapeCoerce shape = NewShape shape $ zipWith dim (shapeDims shape) [0 ..]
+reshapeCoerce shape = NewShape (zipWith dim (shapeDims shape) [0 ..]) shape
   where
     dim x i = DimSplice i 1 $ Shape [x]
 
 -- | Construct a 'Reshape' that is a 'ReshapeCoerce'.
 shapeCoerce :: [SubExp] -> VName -> Exp rep
 shapeCoerce newdims arr =
-  BasicOp $ Reshape (reshapeCoerce (Shape newdims)) arr
+  BasicOp $ Reshape arr (reshapeCoerce (Shape newdims))
 
 -- | @reshapeOuter newshape n oldshape@ returns a 'Reshape' expression
 -- that replaces the outer @n@ dimensions of @oldshape@ with @newshape@.
@@ -74,8 +74,8 @@ reshapeInner newshape n oldshape =
 -- dimensions of a larger array, and also updates the shape of @newshape@ to
 -- have @outershape@ outermost.
 newshapeInner :: Shape -> NewShape SubExp -> NewShape SubExp
-newshapeInner outershape (NewShape oldshape ss) =
-  NewShape (outershape <> oldshape) (map f ss)
+newshapeInner outershape (NewShape ss oldshape) =
+  NewShape (map f ss) (outershape <> oldshape)
   where
     r = shapeRank outershape
     f (DimSplice i k shape) = DimSplice (r + i) k shape
@@ -191,10 +191,10 @@ flipReshapeRearrange v0_shape v1_shape perm = do
   caseA `mplus` caseB
 
 flipRearrangeReshape :: [Int] -> NewShape d -> Maybe (NewShape d, [Int])
-flipRearrangeReshape orig_perm (NewShape shape ss) = do
+flipRearrangeReshape orig_perm (NewShape ss shape) = do
   (perm', ss') <- mapAccumLM f orig_perm ss
   let shape' = Shape $ rearrangeShape (rearrangeInverse perm') (shapeDims shape)
-  Just (NewShape shape' ss', perm')
+  Just (NewShape ss' shape', perm')
   where
     f perm (DimSplice i 1 s) = do
       (perm_bef, j, perm_aft) <- focusNth i perm
@@ -214,7 +214,7 @@ data ReshapeKind
   deriving (Eq, Ord, Show)
 
 reshapeKind :: NewShape SubExp -> ReshapeKind
-reshapeKind (NewShape _ ss)
+reshapeKind (NewShape ss _)
   | all unit $ zip (L.sortBy (comparing dim) ss) [0 ..] = ReshapeCoerce
   | otherwise = ReshapeArbitrary
   where
@@ -297,8 +297,8 @@ improveOne shape (s : ss) =
 -- | Try to simplify the given 'NewShape'. Returns 'Nothing' if no improvement
 -- is possible.
 simplifyNewShape :: (Eq d) => ShapeBase d -> NewShape d -> Maybe (NewShape d)
-simplifyNewShape shape_bef (NewShape shape ss) =
-  NewShape shape . improve <$> improveOne shape_bef ss
+simplifyNewShape shape_bef (NewShape ss shape) =
+  NewShape <$> (improve <$> improveOne shape_bef ss) <*> pure shape
   where
     improve ss' = maybe ss' improve $ improveOne shape_bef ss'
 

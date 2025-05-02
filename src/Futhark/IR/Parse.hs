@@ -264,7 +264,7 @@ pDimSplice :: Parser (DimSplice SubExp)
 pDimSplice = DimSplice <$> pInt <* lexeme "::" <*> pInt <* lexeme "=>" <*> pShape
 
 pNewShape :: Parser (NewShape SubExp)
-pNewShape = parens $ NewShape <$> pShape <* pSemi <*> (pDimSplice `sepBy` pComma)
+pNewShape = parens $ NewShape <$> (pDimSplice `sepBy` pComma) <* pSemi <*> pShape
 
 pBasicOp :: Parser BasicOp
 pBasicOp =
@@ -286,7 +286,7 @@ pBasicOp =
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
       keyword "reshape"
-        *> parens (Reshape <$> pNewShape <* pComma <*> pVName),
+        *> parens (Reshape <$> pVName <* pComma <*> pNewShape),
       keyword "scratch"
         *> parens (Scratch <$> pPrimType <*> many (pComma *> pSubExp)),
       keyword "rearrange"

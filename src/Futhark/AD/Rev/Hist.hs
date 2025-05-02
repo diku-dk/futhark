@@ -306,8 +306,8 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
     -- ToDo: Cosmin asks: is the below the correct translation of the line above?
     forM (inds ++ [vs_bar_p]) $ \v -> do
       v_t <- lookupType v
-      letExp "flat" . BasicOp $
-        Reshape (reshapeAll (arrayShape v_t) (Shape [q])) v
+      letExp "flat" . BasicOp . Reshape v $
+        reshapeAll (arrayShape v_t) (Shape [q])
 
   f'' <- mkIdentityLambda $ replicate nr_dims (Prim int64) ++ [Prim t]
   vs_bar' <-

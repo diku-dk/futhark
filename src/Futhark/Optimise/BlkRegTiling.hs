@@ -626,7 +626,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                   ones = map (const $ intConst Int64 1) rem_outer_dims
                   new_shape = Shape $ concat [ones, block_dims, ones, rest_dims]
               letExp "res_reshaped" . BasicOp $
-                Reshape (reshapeAll (arrayShape epilogue_t) new_shape) epilogue_res
+                Reshape epilogue_res (reshapeAll (arrayShape epilogue_t) new_shape)
         pure [RegTileReturns mempty regtile_ret_dims epilogue_res']
 mmBlkRegTilingNrm _ _ = pure Nothing
 
@@ -1278,7 +1278,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                     ones = map (const se1) rem_outer_dims
                     new_shape = Shape $ concat [ones, block_dims, ones, rest_dims]
                 letExp "res_reshaped" . BasicOp $
-                  Reshape (reshapeAll (arrayShape res_tp') new_shape) res
+                  Reshape res (reshapeAll (arrayShape res_tp') new_shape)
 
           pure $ map (RegTileReturns mempty regtile_ret_dims) epilogue_res'
         -- END (ret_seggroup, stms_seggroup) <- runBuilder $ do

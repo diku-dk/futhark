@@ -71,7 +71,7 @@ isInScope td_env m = m `M.member` scope td_env
 getDirAliasFromExp :: Exp (Aliases rep) -> Maybe (VName, DirAlias)
 getDirAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, Just)
 getDirAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, Just)
-getDirAliasFromExp (BasicOp (Reshape shp x)) =
+getDirAliasFromExp (BasicOp (Reshape x shp)) =
   case reshapeKind shp of
     ReshapeCoerce ->
       Just (x, Just . (`LMAD.coerce` fmap pe64 (shapeDims $ newShape shp)))

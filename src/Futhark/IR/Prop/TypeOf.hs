@@ -101,7 +101,7 @@ basicOpType (Replicate shape e) =
   pure . flip arrayOfShape shape <$> subExpType e
 basicOpType (Scratch t shape) =
   pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
-basicOpType (Reshape shape e) =
+basicOpType (Reshape e shape) =
   result <$> lookupType e
   where
     result t = [t `setArrayShape` newShape shape]

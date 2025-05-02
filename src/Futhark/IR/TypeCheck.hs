@@ -909,7 +909,7 @@ checkBasicOp (Replicate (Shape dims) valexp) = do
   void $ checkSubExp valexp
 checkBasicOp (Scratch _ shape) =
   checkShape $ Shape shape
-checkBasicOp (Reshape newshape arrexp) = do
+checkBasicOp (Reshape arrexp newshape) = do
   (arr_shape, _) <- checkArrIdent arrexp
   checkShape $ newShape newshape
   spliced_shape <- foldM checkSplice arr_shape $ dimSplices newshape

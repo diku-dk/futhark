@@ -149,11 +149,11 @@ mapExpM tv (BasicOp (Replicate shape vexp)) =
   BasicOp <$> (Replicate <$> mapOnShape tv shape <*> mapOnSubExp tv vexp)
 mapExpM tv (BasicOp (Scratch t shape)) =
   BasicOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
-mapExpM tv (BasicOp (Reshape newshape arrexp)) =
+mapExpM tv (BasicOp (Reshape arrexp newshape)) =
   BasicOp
     <$> ( Reshape
-            <$> mapM (mapOnSubExp tv) newshape
-            <*> mapOnVName tv arrexp
+            <$> mapOnVName tv arrexp
+            <*> mapM (mapOnSubExp tv) newshape
         )
 mapExpM tv (BasicOp (Rearrange perm e)) =
   BasicOp <$> (Rearrange perm <$> mapOnVName tv e)
@@ -319,7 +319,7 @@ walkExpM tv (BasicOp (Replicate shape vexp)) =
   walkOnShape tv shape >> walkOnSubExp tv vexp
 walkExpM tv (BasicOp (Scratch _ shape)) =
   mapM_ (walkOnSubExp tv) shape
-walkExpM tv (BasicOp (Reshape shape arrexp)) =
+walkExpM tv (BasicOp (Reshape arrexp shape)) =
   mapM_ (walkOnSubExp tv) shape >> walkOnVName tv arrexp
 walkExpM tv (BasicOp (Rearrange _ e)) =
   walkOnVName tv e

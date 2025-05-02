@@ -1046,7 +1046,7 @@ expReturns (BasicOp (SubExp se)) =
   Just . pure <$> subExpReturns se
 expReturns (BasicOp (Opaque _ (Var v))) =
   Just . pure <$> varReturns v
-expReturns (BasicOp (Reshape newshape v)) = do
+expReturns (BasicOp (Reshape v newshape)) = do
   (et, _, mem, lmad) <- arrayVarReturns v
   case reshaper (reshapeKind newshape) lmad $ map pe64 $ shapeDims $ newShape newshape of
     Just lmad' ->

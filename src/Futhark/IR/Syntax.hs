@@ -331,13 +331,13 @@ data DimSplice d
 -- | A reshaping operation consists of a sequence of splices, as well as an
 -- annotation indicating the final shape.
 data NewShape d = NewShape
-  { newShape :: ShapeBase d,
-    dimSplices :: [DimSplice d]
+  { dimSplices :: [DimSplice d],
+    newShape :: ShapeBase d
   }
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
 instance Semigroup (NewShape d) where
-  NewShape _ ss1 <> NewShape shape ss2 = NewShape shape $ ss1 <> ss2
+  NewShape ss1 _ <> NewShape ss2 shape = NewShape (ss1 <> ss2) shape
 
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.
@@ -404,8 +404,8 @@ data BasicOp
     Replicate Shape SubExp
   | -- | Create array of given type and shape, with undefined elements.
     Scratch PrimType [SubExp]
-  | -- | 1st arg is the new shape, 2nd arg is the input array.
-    Reshape (NewShape SubExp) VName
+  | -- | 1st arg is the input array, 2nd arg is new shape.
+    Reshape VName (NewShape SubExp)
   | -- | Permute the dimensions of the input array.  The list
     -- of integers is a list of dimensions (0-indexed), which
     -- must be a permutation of @[0,n-1]@, where @n@ is the

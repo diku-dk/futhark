@@ -480,12 +480,12 @@ reshapeInner w new_shape =
 -- Mapping some operations becomes an extension of that operation.
 mapOpToOp :: BottomUpRuleOp (Wise SOACS)
 mapOpToOp (_, used) pat aux1 e
-  | Just (map_pe, cs, w, BasicOp (Reshape newshape reshape_arr), [p], [arr]) <-
+  | Just (map_pe, cs, w, BasicOp (Reshape reshape_arr newshape), [p], [arr]) <-
       isMapWithOp pat e,
     paramName p == reshape_arr,
     not $ UT.isConsumed (patElemName map_pe) used = Simplify $ do
       certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
-        Reshape (reshapeInner w newshape) arr
+        Reshape arr (reshapeInner w newshape)
   | Just (_, cs, _, BasicOp (Concat d (arr :| arrs) dw), ps, outer_arr : outer_arrs) <-
       isMapWithOp pat e,
     (arr : arrs) == map paramName ps =
@@ -631,7 +631,7 @@ fuseConcatScatter vtable pat _ (Scatter _ arrs dests fun)
         y_ws <- mapM sizeOf ys
         guard $ all (x_w ==) y_ws
         pure (x_w, x : ys, cs)
-      Just (BasicOp (Reshape newshape arr), cs)
+      Just (BasicOp (Reshape arr newshape), cs)
         | ReshapeCoerce <- reshapeKind newshape -> do
             (a, b, cs') <- isConcat arr
             pure (a, b, cs <> cs')
@@ -750,7 +750,7 @@ isArrayOp cs (BasicOp (Index arr slice)) =
   Just $ ArrayIndexing cs arr slice
 isArrayOp cs (BasicOp (Rearrange perm arr)) =
   Just $ ArrayRearrange cs arr perm
-isArrayOp cs (BasicOp (Reshape new_shape arr)) =
+isArrayOp cs (BasicOp (Reshape arr new_shape)) =
   Just $ ArrayReshape cs arr new_shape
 isArrayOp cs (BasicOp (Replicate (Shape []) (Var arr))) =
   Just $ ArrayCopy cs arr
@@ -760,7 +760,7 @@ isArrayOp _ _ =
 fromArrayOp :: ArrayOp -> (Certs, Exp rep)
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
 fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
-fromArrayOp (ArrayReshape cs arr new_shape) = (cs, BasicOp $ Reshape new_shape arr)
+fromArrayOp (ArrayReshape cs arr new_shape) = (cs, BasicOp $ Reshape arr new_shape)
 fromArrayOp (ArrayCopy cs arr) = (cs, BasicOp $ Replicate mempty $ Var arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 
@@ -982,7 +982,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
                 ArrayRearrange _ _ perm ->
                   BasicOp $ Rearrange (0 : map (+ 1) perm) arr
                 ArrayReshape _ _ new_shape ->
-                  BasicOp $ Reshape (reshapeInner w new_shape) arr
+                  BasicOp $ Reshape arr $ reshapeInner w new_shape
                 ArrayCopy {} ->
                   BasicOp $ Replicate mempty $ Var arr
                 ArrayVar {} ->
@@ -1053,12 +1053,12 @@ moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm ma
 
     invariantToMap = all (`ST.elem` vtable) . namesToList . freeIn
 
-    onStm (transformed, map_infos, stms) (Let (Pat [pe]) aux (BasicOp (Reshape new_shape arr)))
+    onStm (transformed, map_infos, stms) (Let (Pat [pe]) aux (BasicOp (Reshape arr new_shape)))
       | ([(res, _, screma_pe)], map_pesres') <- partition matches map_infos,
         Just t <- typeOf <$> M.lookup arr scope,
         invariantToMap (t, new_shape) =
           let cs = stmAuxCerts aux <> resCerts res
-              transform = (arr, cs, BasicOp . Reshape (reshapeInner w new_shape))
+              transform = (arr, cs, BasicOp . flip Reshape (reshapeInner w new_shape))
            in ((t, screma_pe, transform) : transformed, map_pesres', stms)
       where
         matches (r, _, _) = resSubExp r == Var (patElemName pe)

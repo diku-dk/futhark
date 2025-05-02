@@ -187,8 +187,8 @@ instance (Pretty d) => Pretty (DimSplice d) where
   pretty (DimSplice i k shape) = pretty i <> "::" <> pretty k <> "=>" <> pretty shape
 
 instance (Pretty d) => Pretty (NewShape d) where
-  pretty (NewShape shape ds) =
-    parens $ align $ pretty shape <> semi </> commastack (map pretty ds)
+  pretty (NewShape ds shape) =
+    parens $ align $ commastack (map pretty ds) <> semi </> pretty shape
 
 instance Pretty BasicOp where
   pretty (SubExp se) = pretty se

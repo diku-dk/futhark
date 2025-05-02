@@ -302,7 +302,7 @@ composeIxfuns env y x ixf_fun =
         _ -> env
 
 changeIxFnEnv :: IxFnEnv -> VName -> Exp GPU -> TileM IxFnEnv
-changeIxFnEnv env y (BasicOp (Reshape shp_chg x)) =
+changeIxFnEnv env y (BasicOp (Reshape x shp_chg)) =
   case reshapeKind shp_chg of
     ReshapeCoerce ->
       composeIxfuns env y x (Just . (`LMAD.coerce` fmap ExpMem.pe64 (shapeDims $ newShape shp_chg)))

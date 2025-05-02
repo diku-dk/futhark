@@ -184,7 +184,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         not consuming,
         ST.available src vtable ->
           Just $ pure $ IndexResult cs src $ Slice inds
-    Just (Reshape newshape src, cs)
+    Just (Reshape src newshape, cs)
       | ReshapeCoerce <- reshapeKind newshape,
         Just olddims <- arrayDims <$> seType (Var src),
         changed_dims <- zipWith (/=) (shapeDims (newShape newshape)) olddims,
@@ -194,7 +194,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         length newshape == length inds,
         length olddims == length (shapeDims (newShape newshape)) ->
           Just $ pure $ IndexResult cs src $ Slice inds
-    Just (Reshape newshape v2, cs)
+    Just (Reshape v2 newshape, cs)
       | Shape [_] <- newShape newshape,
         Just [_] <- arrayDims <$> seType (Var v2) ->
           Just $ pure $ IndexResult cs v2 $ Slice inds

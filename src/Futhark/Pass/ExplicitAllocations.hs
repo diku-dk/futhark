@@ -177,11 +177,11 @@ repairExpression ::
   (Allocable fromrep torep inner) =>
   Exp torep ->
   AllocM fromrep torep (Exp torep)
-repairExpression (BasicOp (Reshape shape v)) = do
+repairExpression (BasicOp (Reshape v shape)) = do
   v_mem <- fst <$> lookupArraySummary v
   space <- lookupMemSpace v_mem
   v' <- snd <$> ensureDirectArray (Just space) v
-  pure $ BasicOp $ Reshape shape v'
+  pure $ BasicOp $ Reshape v' shape
 repairExpression e =
   error $ "repairExpression:\n" <> prettyString e
 

@@ -269,7 +269,7 @@ simplifyAssert _ _ _ =
   Nothing
 
 simplifyReshape :: SimpleRule rep
-simplifyReshape defOf seType (Reshape newshape v)
+simplifyReshape defOf seType (Reshape v newshape)
   -- No-op reshape
   | Just t <- seType $ Var v,
     newShape newshape == arrayShape t =
@@ -277,10 +277,10 @@ simplifyReshape defOf seType (Reshape newshape v)
   -- Simplifying a reshape
   | Just shape <- arrayShape <$> seType (Var v),
     Just newshape' <- simplifyNewShape shape newshape =
-      Just (Reshape newshape' v, mempty)
+      Just (Reshape v newshape', mempty)
   -- Reshape-of-reshape
-  | Just (BasicOp (Reshape oldnewshape v2), v_cs) <- defOf v =
-      Just (Reshape (oldnewshape <> newshape) v2, v_cs)
+  | Just (BasicOp (Reshape v2 oldnewshape), v_cs) <- defOf v =
+      Just (Reshape v2 (oldnewshape <> newshape), v_cs)
   -- Reshape-of-scratch
   | Just (BasicOp (Scratch bt _), v_cs) <- defOf v =
       Just (Scratch bt $ shapeDims $ newShape newshape, v_cs)
@@ -318,7 +318,7 @@ reshapeSlice _ _ = []
 -- If we are size-coercing a slice, then we might as well just use a
 -- different slice instead.
 simplifyReshapeIndex :: SimpleRule rep
-simplifyReshapeIndex defOf _ (Reshape newshape v)
+simplifyReshapeIndex defOf _ (Reshape v newshape)
   | ReshapeCoerce <- reshapeKind newshape,
     Just (BasicOp (Index v' slice), v_cs) <- defOf v,
     slice' <- Slice $ reshapeSlice (unSlice slice) $ shapeDims $ newShape newshape,
@@ -330,7 +330,7 @@ simplifyReshapeIndex _ _ _ = Nothing
 -- instead use the original array and update the slice dimensions.
 simplifyUpdateReshape :: SimpleRule rep
 simplifyUpdateReshape defOf seType (Update safety dest slice (Var v))
-  | Just (BasicOp (Reshape newshape v'), v_cs) <- defOf v,
+  | Just (BasicOp (Reshape v' newshape), v_cs) <- defOf v,
     ReshapeCoerce <- reshapeKind newshape,
     Just ds <- arrayDims <$> seType (Var v'),
     slice' <- Slice $ reshapeSlice (unSlice slice) ds,
@@ -352,7 +352,7 @@ repScratchToScratch defOf seType (Replicate shape (Var src)) = do
           Just cs
         Just (BasicOp (Rearrange _ v'), cs) ->
           (cs <>) <$> isActuallyScratch v'
-        Just (BasicOp (Reshape _ v'), cs) ->
+        Just (BasicOp (Reshape v' _), cs) ->
           (cs <>) <$> isActuallyScratch v'
         _ -> Nothing
 repScratchToScratch _ _ _ =

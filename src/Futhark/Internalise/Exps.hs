@@ -665,7 +665,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
                 (I.Shape $ map (intConst Int64 . toInteger) new_shape)
                 1
                 $ I.arrayShape flat_arr_t
-        letSubExp desc $ I.BasicOp $ I.Reshape (reshapeAll (I.arrayShape flat_arr_t) new_shape') flat_arr
+        letSubExp desc $ I.BasicOp $ I.Reshape flat_arr (reshapeAll (I.arrayShape flat_arr_t) new_shape')
   | otherwise = do
       es' <- mapM (internaliseExp "arr_elem") es
       let arr_t_ext = foldMap toList $ internaliseType $ E.toStruct arr_t
@@ -1581,10 +1581,10 @@ isOverloadedFunction qname desc loc = do
                     y' <- letExp "x" $ I.BasicOp $ I.SubExp y
                     x_flat <-
                       letExp "x_flat" . I.BasicOp $
-                        I.Reshape (reshapeAll (I.arrayShape x_t) (I.Shape [x_num_elems])) x'
+                        I.Reshape x' (reshapeAll (I.arrayShape x_t) (I.Shape [x_num_elems]))
                     y_flat <-
                       letExp "y_flat" . I.BasicOp $
-                        I.Reshape (reshapeAll (I.arrayShape x_t) (I.Shape [x_num_elems])) y'
+                        I.Reshape y' (reshapeAll (I.arrayShape x_t) (I.Shape [x_num_elems]))
 
                     -- Compare the elements.
                     cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
@@ -1760,12 +1760,10 @@ isIntrinsicFunction qname args loc = do
         forM arrs $ \arr' -> do
           arr_t <- lookupType arr'
           letSubExp desc . I.BasicOp $
-            I.Reshape
-              ( reshapeAll (I.arrayShape arr_t) $
-                  reshapeOuter (I.Shape [n', m']) 1 $
-                    I.arrayShape arr_t
-              )
-              arr'
+            I.Reshape arr' $
+              reshapeAll (I.arrayShape arr_t) $
+                reshapeOuter (I.Shape [n', m']) 1 $
+                  I.arrayShape arr_t
     handleRest [arr] "manifest" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
       forM arrs $ \arr' -> do
@@ -1781,12 +1779,10 @@ isIntrinsicFunction qname args loc = do
             m = arraySize 1 arr_t
         k <- letSubExp "flat_dim" $ I.BasicOp $ I.BinOp (Mul Int64 I.OverflowUndef) n m
         letSubExp desc . I.BasicOp $
-          I.Reshape
-            ( reshapeAll (I.arrayShape arr_t) $
-                reshapeOuter (I.Shape [k]) 2 $
-                  I.arrayShape arr_t
-            )
-            arr'
+          I.Reshape arr' $
+            reshapeAll (I.arrayShape arr_t) $
+              reshapeOuter (I.Shape [k]) 2 $
+                I.arrayShape arr_t
     handleRest [x, y] "concat" = Just $ \desc -> do
       xs <- internaliseExpToVars "concat_x" x
       ys <- internaliseExpToVars "concat_y" y

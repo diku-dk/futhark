@@ -236,9 +236,9 @@ basicFwd pat aux op = do
       addStm $ Let pat_tan aux $ BasicOp $ Replicate n x_tan
     Scratch t shape ->
       addStm $ Let pat_tan aux $ BasicOp $ Scratch t shape
-    Reshape reshape arr -> do
+    Reshape arr reshape -> do
       arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Reshape reshape arr_tan
+      addStm $ Let pat_tan aux $ BasicOp $ Reshape arr_tan reshape
     Rearrange perm arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Rearrange perm arr_tan
