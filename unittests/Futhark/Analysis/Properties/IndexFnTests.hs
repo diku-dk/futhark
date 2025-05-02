@@ -507,6 +507,17 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/maxMatch_2d.fut"
+        ( pure $ \(i, n, is_inv, _) ->
+            [ IndexFn
+                { shape = [Forall i (Iota (sHole n))],
+                  body =
+                    cases
+                      [(Bool True, sym2SoP $ Idx (Hole is_inv) (sHole i))]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/kmeans_kernel.fut"
         ( pure $ \(anything, _, _, _) ->
             -- Match anything here; this test merely checks bounds in the program.
