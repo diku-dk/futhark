@@ -465,6 +465,24 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
     [xs'] <- getArgs args =
       -- XXX unzip is a no-op.
       forward xs'
+  | Just fname <- getFun e_f,
+    "flatten" `L.isPrefixOf` fname,
+    [e_x] <- getArgs args = do
+      fs <- forward e_x
+      forM fs $ \f ->
+        case shape f of
+            ds | length ds <= 1 -> error "Flatten on less-than-2d array."
+            Forall i (Iota n) : Forall j (Iota m) : shp -> do
+              -- j === (i' mod n), but we don't have modulo, so we convert to Cat domain.
+              -- i' <- newNameFromString "i"
+              -- f { shape = Forall i' (Iota (n .*. m)) : shp,
+              --     body = repCases (mkRep 
+              -- TODO define dual view and use for the first time here.
+              --   Once everything works, try for Union?
+              --   Alternatively, try using Cat to see if it just werks. (There are probably
+              --   other implementation things lurking around in maxMatch_2d.)
+              undefined
+            _ -> error "Not implemented yet."
   | Just "scan" <- getFun e_f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       -- Scan with basic operator.
