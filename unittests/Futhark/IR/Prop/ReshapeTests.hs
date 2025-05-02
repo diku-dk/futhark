@@ -174,12 +174,19 @@ simplifyTests =
             ),
             Just [dimSplit 1 ["C", "D"]]
           ),
-          -- Get rid of a coerce.
+          -- Get rid of a coerce before an unflatten.
           ( ["CD"],
             ( [dimCoerce 0 "AB", dimSplit 0 ["A", "B"]],
               ["A", "B"]
             ),
             Just [dimSplit 0 ["A", "B"]]
+          ),
+          -- Get rid of a coerce after a flatten.
+          ( ["A", "B", "C"],
+            ( [dimJoin 0 2 "ABC", dimCoerce 0 "K"],
+              ["K"]
+            ),
+            Just [dimJoin 0 2 "K"]
           ),
           -- Don't get rid of anything here.
           ( ["A", "B"],
