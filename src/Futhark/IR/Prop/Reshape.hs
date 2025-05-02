@@ -276,7 +276,7 @@ move (_, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
     s1_aft = dropDims (i2 - i1 + 1) s1
 
 --
--- These cases is for updating dimensions as we move across intervening
+-- These cases are for updating dimensions as we move across intervening
 -- operations.
 move (shape, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i1 > i2 + n2 =
