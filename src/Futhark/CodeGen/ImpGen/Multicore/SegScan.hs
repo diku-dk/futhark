@@ -98,14 +98,13 @@ nonsegmentedScan pat space ts kbody scan_ops post_op nsubtasks = do
     emit $ Imp.DebugPrint "Scan stage 1" Nothing
     scanStage1 space kbody scan_ops scan_out map_out
 
-    let nsubtasks' = tvExp nsubtasks
-    sWhen (nsubtasks' .>. 1) $ do
-      scan_ops2 <- renameSegBinOp scan_ops
-      emit $ Imp.DebugPrint "Scan stage 2" Nothing
-      carries <- scanStage2 nsubtasks space scan_ops2 scan_out
-      scan_ops3 <- renameSegBinOp scan_ops
-      emit $ Imp.DebugPrint "Scan stage 3" Nothing
-      scanStage3 pat space scan_ops3 carries post_op scan_out map_out
+    -- let nsubtasks' = tvExp nsubtasks
+    scan_ops2 <- renameSegBinOp scan_ops
+    emit $ Imp.DebugPrint "Scan stage 2" Nothing
+    carries <- scanStage2 nsubtasks space scan_ops2 scan_out
+    scan_ops3 <- renameSegBinOp scan_ops
+    emit $ Imp.DebugPrint "Scan stage 3" Nothing
+    scanStage3 pat space scan_ops3 carries post_op scan_out map_out
 
 -- Different ways to generate code for a scan loop
 data ScanLoopType

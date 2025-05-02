@@ -626,16 +626,22 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
             let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
             success (fsOutNames ker ++ extra_nms) $
               SOAC.ScanScatter w new_inp res_lam' scan dests lam
-    ( SOAC.Screma _ _inp_c form_c,
+    ( SOAC.Screma _ inp_c form_c,
       SOAC.Screma _ inp_p form_p,
       Vertical
       )
-        | Just (scans, lam_p') <- isScanomapSOAC form_p,
-          Just lam_c' <- isMapSOAC form_c,
-          all (`notNameIn` unfus_set) outVars -> do
+        | Just (scans, lam) <- isScanomapSOAC form_p,
+          Just lam_c' <- isMapSOAC form_c -> do
             let scan = singleScan scans
-            success (fsOutNames ker) $
-              SOAC.ScanScatter w inp_p lam_p' scan [] lam_c'
+            let (_, extra_out) = fusability unfus_set outVars
+            ( new_inp,
+              new_map_lam,
+              new_scatter_inp
+              ) <-
+              scanScatterMapLambda inp_p lam outVars inp_c
+            new_scatter_lam <- scanScatterPostLambda new_scatter_inp extra_out inp_c lam_c'
+            success (fsOutNames ker <> extra_out) $
+              SOAC.ScanScatter w new_inp new_map_lam scan [] new_scatter_lam
     ( SOAC.Scatter _len inp_c dests lam_c',
       SOAC.Screma _ inp_p form,
       Vertical
