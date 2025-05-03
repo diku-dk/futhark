@@ -668,7 +668,8 @@ solution = do
         Unsolved (TyVarFree _ l) -> do
           k <- liftST $ getKey node
           -- This type variable is only unconstrained if it's also the
-          -- representative; otherwise, it must be a link.
+          -- representative; otherwise, it must be linked to the type
+          -- variable 'k'.
           pure $ if k == tv
             then Just (tv, l)
             else Nothing
