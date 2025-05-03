@@ -159,6 +159,16 @@ simplifyTests =
             [dimUnflatten 0 ["A", "BC"], dimUnflatten 1 ["B", "C"]],
             Just [dimUnflatten 0 ["A", "B", "C"]]
           ),
+          -- Identity coerce.
+          ( ["A", "B", "C"],
+            [dimCoerce 1 "B", dimCoerce 2 "C"],
+            Just []
+          ),
+          -- Identity coerce (multiple dimensions).
+          ( ["A", "B", "C"],
+            [DimSplice 1 2 (Shape ["B", "C"])],
+            Just []
+          ),
           -- Identity coerce (with non-identity stuff afterwards)
           ( ["B", "CD"],
             [dimCoerce 0 "B", dimUnflatten 1 ["C", "D"]],
@@ -174,11 +184,6 @@ simplifyTests =
             [dimFlatten 0 2 "ABC", dimCoerce 0 "K"],
             Just [dimFlatten 0 2 "K"]
           ),
-          -- Don't get rid of anything here.
-          ( ["A", "B"],
-            [dimCoerce 0 "C", dimCoerce 1 "D"],
-            Nothing
-          ),
           -- Flatten and unflatten, but a suffix of it is actually invariant.
           ( ["A", "B", "C"],
             [dimFlatten 0 3 "ABC", dimUnflatten 0 ["D", "E", "C"]],
@@ -188,6 +193,27 @@ simplifyTests =
           ( ["A", "B", "C"],
             [dimFlatten 0 3 "ABC", dimUnflatten 0 ["A", "D", "E"]],
             Just [dimSplice 1 2 ["D", "E"]]
+          ),
+          --
+          -- Some coercions that should not be modified.
+          ( ["A", "B"],
+            [dimCoerce 0 "C", dimCoerce 1 "D"],
+            Nothing
+          ),
+          ( ["A", "B", "C"],
+            [dimCoerce 0 "A'", dimCoerce 1 "A'", dimCoerce 2 "A'"],
+            Nothing
+          ),
+          -- Long and complicated.
+          ( ["A", "B", "C", "D"],
+            [ dimCoerce 0 "A",
+              DimSplice 1 3 $ Shape ["BC", "D"],
+              dimCoerce 1 "BC",
+              dimCoerce 2 "D",
+              dimFlatten 1 2 "BCD",
+              dimFlatten 0 2 "ABCD"
+            ],
+            Just [dimFlatten 0 4 "ABCD"]
           )
         ]
   ]

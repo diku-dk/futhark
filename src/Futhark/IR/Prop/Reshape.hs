@@ -246,28 +246,35 @@ move ::
   (ShapeBase d, DimSplice d) ->
   [DimSplice d] ->
   Maybe [DimSplice d]
--- If we get the slice all the way to the end, see if we can find some
+--
+-- A coercion that does not do anything.
+move (shape_bef, DimSplice i1 n1 shape) ss
+  | dimSpan i1 n1 shape_bef == shape =
+      Just ss
+--
+-- If we get the splice all the way to the end, see if we can find some
 -- redundancy.
 move (shape, DimSplice i1 n1 s1) []
-  | match <- takeWhile (uncurry (==)) $ zip (shapeDims shape) (shapeDims s1),
-    not $ null match =
+  | n1 == length s1,
+    match <-
+      takeWhile (uncurry (==)) $
+        zip (shapeDims (dimSpan i1 n1 shape)) (shapeDims s1),
+    not $ null match,
+    length match /= n1 =
       let k = length match
        in Just [DimSplice (i1 + k) (n1 - k) (dropDims k s1)]
-  | match <-
+  | n1 == length s1,
+    match <-
       takeWhile (uncurry (==)) $
         reverse $
-          zip (shapeDims shape) (shapeDims s1),
-    not $ null match =
+          zip (shapeDims (dimSpan i1 n1 shape)) (shapeDims s1),
+    not $ null match,
+    length match /= n1 =
       let k = length match
        in Just [DimSplice i1 (n1 - k) (takeDims (length s1 - k) s1)]
 --
 -- Base case.
 move _ [] = Nothing
---
--- A coercion that does not do anything.
-move (shape_bef, DimSplice i1 1 shape) ss
-  | dimSpan i1 1 shape_bef == shape =
-      Just ss
 --
 -- A coercion can be fused with anything.
 move (_, DimSplice i1 1 (Shape [_])) (DimSplice i2 n2 s2 : ss)
@@ -318,7 +325,7 @@ improveOne shape (s : ss) =
 -- | Try to simplify the given 'NewShape'. Returns 'Nothing' if no improvement
 -- is possible.
 simplifyNewShape :: (Eq d) => ShapeBase d -> NewShape d -> Maybe (NewShape d)
-simplifyNewShape shape_bef (NewShape ss shape) =
+simplifyNewShape shape_bef (NewShape ss shape) = do
   NewShape <$> (improve <$> improveOne shape_bef ss) <*> pure shape
   where
     improve ss' = maybe ss' improve $ improveOne shape_bef ss'
