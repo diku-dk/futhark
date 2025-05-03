@@ -170,19 +170,6 @@ unsharedConstructorsMsg cs1 cs2 =
       filter (`notElem` M.keys cs1) (M.keys cs2)
         ++ filter (`notElem` M.keys cs2) (M.keys cs1)
 
-convertUF :: SolveM s (M.Map TyVar TyVarSol)
-convertUF = do
-  uf <- gets solverTyVars
-  M.traverseMaybeWithKey maybeLookupSol uf
-  where
-    maybeLookupSol :: TyVar -> TyVarNode s -> SolveM s (Maybe TyVarSol)
-    maybeLookupSol _ node = do
-      root <- liftST $ find node
-      descr <- liftST $ getDescr root
-      pure $ case descr of
-        t@(Solved _) -> Just t
-        _ -> Nothing
-
 substTyVars :: (Monoid u) => TypeBase () u -> SolveM s (TypeBase () u)
 substTyVars (Scalar (TypeVar u qn args)) = do
   mb_node <- maybeLookupUF $ qualLeaf qn
