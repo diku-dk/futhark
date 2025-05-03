@@ -46,6 +46,15 @@ type UnconTyVar = (VName, Liftedness)
 liftST :: ST s a -> SolveM s a
 liftST = SolveM . lift . lift
 
+getDescr' :: TyVarNode s -> SolveM s TyVarSol
+getDescr' = liftST . getDescr
+
+union' :: TyVarNode s -> TyVarNode s -> SolveM s ()
+union' tv1 tv2 = liftST $ union tv1 tv2
+
+getKey' :: TyVarNode s -> SolveM s TyVar
+getKey' = liftST . getKey
+
 initializeState :: TyParams -> TyVars () -> SolveM s ()
 initializeState typarams tyvars = do
   tyvars' <- M.traverseWithKey f tyvars
@@ -170,7 +179,7 @@ substTyVars (Scalar (TypeVar u qn args)) = do
   mb_node <- maybeLookupUF $ qualLeaf qn
   case mb_node of
     Just node -> do
-      descr <- liftST $ getDescr node
+      descr <- getDescr' node
       case descr of
         Solved t -> do
           t' <- substTyVars t
@@ -212,7 +221,7 @@ bindTyVar :: Reason Type -> BreadCrumbs -> VName -> Type -> SolveM s ()
 bindTyVar reason bcs v t = do
   occursCheck reason v t
   v_node <- lookupUF v
-  v_info <- liftST $ getDescr v_node
+  v_info <- getDescr' v_node
 
   setInfo v_node (Solved t)
 
@@ -285,7 +294,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
       uf <- gets solverTyVars
       case M.lookup v uf of
         Just node -> do
-          sol <- liftST $ getDescr node
+          sol <- getDescr' node
           pure $ case sol of
             Unsolved _ -> True
             _ -> False
@@ -296,7 +305,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
       uf <- gets solverTyVars
       case M.lookup v uf of
         Just node -> do
-          descr <- liftST $ getDescr node
+          descr <- getDescr' node
           case descr of
             Solved t' -> sub t'
             _ -> pure t
@@ -390,7 +399,7 @@ maybeLookupTyVarSol tv = do
   case M.lookup tv tyvars of
     Nothing -> pure Nothing
     Just node -> do
-      sol <- liftST $ getDescr node
+      sol <- getDescr' node
       pure $ Just sol
 
 lookupTyVar :: TyVar -> SolveM s (Either (TyVarInfo ()) Type)
@@ -451,11 +460,11 @@ unionTyVars :: Reason Type -> BreadCrumbs -> VName -> VName -> SolveM s ()
 unionTyVars reason bcs v t = do
   v_node <- lookupUF v
   t_node <- lookupUF t
-  v_sol <- liftST $ getDescr v_node
+  v_sol <- getDescr' v_node
   t_info <- lookupTyVarInfo t
 
   -- Unify the equivalence classes of v and t.
-  liftST $ union v_node t_node
+  union' v_node t_node
 
   case (v_sol, t_info) of
     (Unsolved (TyVarFree _ v_l), TyVarFree t_loc t_l)
@@ -565,7 +574,7 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
       mb_node <- gets $ M.lookup ty_v . solverTyVars
       case mb_node of
         Just node -> do
-          descr <- liftST $ getDescr node
+          descr <- getDescr' node
           case descr of
             Param ty_v_lvl _ _
               | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
@@ -662,10 +671,10 @@ solution = do
   where
     unconstr :: TyVar -> TyVarNode s -> SolveM s (Maybe UnconTyVar)
     unconstr tv node = do
-      descr <- liftST $ getDescr node
+      descr <- getDescr' node
       case descr of
         Unsolved (TyVarFree _ l) -> do
-          k <- liftST $ getKey node
+          k <- getKey' node
           -- This type variable is only unconstrained if it's also the
           -- representative; otherwise, it must be linked to the type
           -- variable 'k'.
@@ -679,14 +688,14 @@ solution = do
       TyVarNode s ->
       SolveM s (Maybe (Either [PrimType] (TypeBase () NoUniqueness)))
     mkSubst tv node = do
-      descr <- liftST $ getDescr node
+      descr <- getDescr' node
       case descr of
         Solved t -> do
           t' <- substTyVars t
           pure . Just . Right $ first (const ()) t'
         Unsolved (TyVarPrim _ pts) -> pure $ Just $ Left pts
         _ -> do
-          k <- liftST $ getKey node
+          k <- getKey' node
           pure $ if tv /= k
             then Just . Right $ typeVar k
             else Nothing
