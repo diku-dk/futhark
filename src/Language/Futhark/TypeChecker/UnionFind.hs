@@ -99,21 +99,21 @@ makeTyParamNode tv lvl lft loc = do
 --
 -- This method performs the path compresssion.
 find :: TyVarNode s -> ST s (TyVarNode s)
-find node@(Node l) = do
-  link <- readSTRef l
+find node@(Node link_ref) = do
+  link <- readSTRef link_ref
   case link of
     -- Input node is representative.
     Repr _ -> pure node
 
     -- Input node's parent is another node.
-    Link node'@(Node l') -> do
-      node'' <- find node'
-      when (node' /= node'') $ do
+    Link parent@(Node link_ref') -> do
+      repr <- find parent
+      when (parent /= repr) $ do
         -- Input node's parent isn't representative;
         -- performing path compression.
-        link' <- readSTRef l'
-        writeSTRef l link'
-      pure node''
+        link' <- readSTRef link_ref'
+        writeSTRef link_ref link'
+      pure repr
 
 -- | Return the reference to the descriptor of the node's
 -- equivalence class.
