@@ -50,5 +50,8 @@ unittest:
 test-oclgrind:
 	cabal run -- futhark test tests -c --backend=opencl --exclude=compiled --exclude=no_oclgrind --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
+test-c:
+	cabal run -- futhark test tests -c --backend=c --no-tuning
+
 clean:
 	cabal clean
