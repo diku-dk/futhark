@@ -568,7 +568,6 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
           descr <- liftST $ getDescr node
           case descr of
             Param ty_v_lvl _ _
-              -- Type parameter has a higher level than the (free) type variable.
               | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
             Solved ty' ->
               mapM_ check $ typeVars ty'
