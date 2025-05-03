@@ -21,7 +21,7 @@ import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
-import Language.Futhark.TypeChecker.Types (substTyVars)
+-- import Language.Futhark.TypeChecker.Types (substTyVars)
 import Language.Futhark.TypeChecker.UnionFind
 
 -- | The type representation used by the constraint solver. Agnostic
@@ -65,8 +65,7 @@ typeVar v = Scalar $ TypeVar mempty (qualName v) []
 
 enrichType :: Type -> SolveM s Type
 enrichType t = do
-  uf <- convertUF
-  pure $ substTyVars (substTyVar uf) t
+  substTyVars t
 
 cannotUnify ::
   Reason Type ->
@@ -184,16 +183,42 @@ convertUF = do
         t@(Solved _) -> Just t
         _ -> Nothing
 
-substTyVar :: (Monoid u) => M.Map TyVar TyVarSol -> VName -> Maybe (TypeBase () u)
-substTyVar m v =
-  case M.lookup v m of
-    Just (Solved t') -> Just $ second (const mempty) $ substTyVars (substTyVar m) t'
-    _ -> Nothing
+substTyVars :: (Monoid u) => TypeBase () u -> SolveM s (TypeBase () u)
+substTyVars (Scalar (TypeVar u qn args)) = do
+  mb_node <- maybeLookupUF $ qualLeaf qn
+  case mb_node of
+    Just node -> do
+      descr <- liftST $ getDescr node
+      case descr of
+        Solved t' -> do
+          t'' <- substTyVars t'
+          pure $ second (const mempty) t''
+        _ -> do
+          args' <- mapM onArg args
+          pure $ Scalar (TypeVar u qn args')
+    _ -> do
+      args' <- mapM onArg args
+      pure $ Scalar (TypeVar u qn args')
+  where
+    onArg (TypeArgType t) = TypeArgType <$> substTyVars t
+    onArg (TypeArgDim e) = pure $ TypeArgDim e
+substTyVars (Scalar (Prim pt)) =
+  pure $ Scalar $ Prim pt
+substTyVars (Scalar (Record fs)) =
+  Scalar . Record <$> traverse substTyVars fs
+substTyVars (Scalar (Sum cs)) =
+  Scalar . Sum <$> traverse (mapM substTyVars) cs
+substTyVars (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
+  t1' <- substTyVars t1
+  t2' <- substTyVars t2
+  pure $ Scalar $ Arrow u pname d t1' $ RetType ext $ t2' `setUniqueness` uniqueness t2
+substTyVars (Array u shape elemt) = do
+  elemt' <- substTyVars $ Scalar elemt
+  pure $ arrayOfWithAliases u shape elemt'
 
 occursCheck :: Reason Type -> VName -> Type -> SolveM s ()
 occursCheck reason v tp = do
-  subst <- convertUF
-  let tp' = substTyVars (substTyVar subst) tp
+  tp' <- substTyVars tp
   when (v `S.member` typeVars tp') . typeError (locOf reason) mempty $
     "Occurs check: cannot instantiate"
       <+> prettyName v
@@ -641,22 +666,10 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
               </> "which is not possible."
     _ -> pure ()
 
-convertUF' :: SolveM s (M.Map TyVar (Either VName TyVarSol))
-convertUF' = do
+maybeLookupUF :: TyVar -> SolveM s (Maybe (TyVarNode s))
+maybeLookupUF tv = do
   uf <- gets solverTyVars
-  M.traverseWithKey lookupSol uf
-  where
-    lookupSol :: TyVar -> TyVarNode s -> SolveM s (Either VName TyVarSol)
-    lookupSol tv node = do
-      k <- liftST $ getKey node
-      descr <- liftST $ getDescr node
-      pure $ if k /= tv
-                then 
-                  case descr of
-                    Solved _ -> Right descr
-                    _        -> Left k
-                else 
-                  Right descr
+  pure $ M.lookup tv uf
 
 substTyVar' :: (Monoid u) => M.Map TyVar (Either VName TyVarSol) -> VName -> Maybe (TypeBase () u)
 substTyVar' m v =
