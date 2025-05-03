@@ -678,7 +678,10 @@ solution = do
             else Just (tv, l)
         _ -> pure Nothing
 
-    mkSubst :: TyVar -> TyVarNode s -> SolveM s (Maybe (Either [PrimType] (TypeBase () NoUniqueness)))
+    mkSubst :: 
+      TyVar ->
+      TyVarNode s ->
+      SolveM s (Maybe (Either [PrimType] (TypeBase () NoUniqueness)))
     mkSubst tv node = do
       descr <- liftST $ getDescr node
       k <- liftST $ getKey node
