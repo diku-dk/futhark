@@ -5,6 +5,7 @@ module Futhark.IR.Prop.ReshapeTests
   )
 where
 
+import Data.List qualified as L
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Syntax
@@ -131,82 +132,61 @@ simplifyTests =
             prettyString input
           ]
       )
-      $ simplifyNewShape (Shape orig_shape) (NewShape (fst input) (Shape (snd input)))
-        @?= uncurry NewShape . (,Shape (snd input)) <$> expected
+      $ let res_shape = L.foldl' applySplice (Shape orig_shape) input
+         in simplifyNewShape (Shape orig_shape) (NewShape input res_shape)
+              @?= uncurry NewShape . (,res_shape) <$> expected
     | (orig_shape :: [String], input, expected) <-
         [ -- Inverse flatten and unflatten - simple case.
           ( ["A", "B"],
-            ( [dimFlatten 0 2 "AB", dimUnflatten 0 ["A", "B"]],
-              ["A", "B"]
-            ),
+            [dimFlatten 0 2 "AB", dimUnflatten 0 ["A", "B"]],
             Just []
           ),
           -- Non-inverse flatten and unflatten - simple case.
           ( ["A", "B"],
-            ( [dimFlatten 0 2 "AB", dimUnflatten 0 ["C", "D"]],
-              ["C", "D"]
-            ),
+            [dimFlatten 0 2 "AB", dimUnflatten 0 ["C", "D"]],
             Just [dimSplice 0 2 ["C", "D"]]
           ),
           -- Inverse flatten and unflatten - separated by coercion.
           ( ["A", "B"],
-            ( [ dimFlatten 0 2 "AB",
-                dimCoerce 0 "CD",
-                dimUnflatten 0 ["C", "D"]
-              ],
-              ["C", "D"]
-            ),
-            Just
-              [ dimSplice 0 2 ["C", "D"]
-              ]
+            [ dimFlatten 0 2 "AB",
+              dimCoerce 0 "CD",
+              dimUnflatten 0 ["C", "D"]
+            ],
+            Just [dimSplice 0 2 ["C", "D"]]
           ),
           -- Two unflattens - simple case.
           ( ["ABC"],
-            ( [dimUnflatten 0 ["A", "BC"], dimUnflatten 1 ["B", "C"]],
-              ["A", "B", "C"]
-            ),
+            [dimUnflatten 0 ["A", "BC"], dimUnflatten 1 ["B", "C"]],
             Just [dimUnflatten 0 ["A", "B", "C"]]
           ),
           -- Identity coerce (with non-identity stuff afterwards)
           ( ["B", "CD"],
-            ( [dimCoerce 0 "B", dimUnflatten 1 ["C", "D"]],
-              ["B", "C", "D"]
-            ),
+            [dimCoerce 0 "B", dimUnflatten 1 ["C", "D"]],
             Just [dimUnflatten 1 ["C", "D"]]
           ),
           -- Get rid of a coerce before an unflatten.
           ( ["CD"],
-            ( [dimCoerce 0 "AB", dimUnflatten 0 ["A", "B"]],
-              ["A", "B"]
-            ),
+            [dimCoerce 0 "AB", dimUnflatten 0 ["A", "B"]],
             Just [dimUnflatten 0 ["A", "B"]]
           ),
           -- Get rid of a coerce after a flatten.
           ( ["A", "B", "C"],
-            ( [dimFlatten 0 2 "ABC", dimCoerce 0 "K"],
-              ["K"]
-            ),
+            [dimFlatten 0 2 "ABC", dimCoerce 0 "K"],
             Just [dimFlatten 0 2 "K"]
           ),
           -- Don't get rid of anything here.
           ( ["A", "B"],
-            ( [dimCoerce 0 "C", dimCoerce 1 "D"],
-              ["C", "D"]
-            ),
+            [dimCoerce 0 "C", dimCoerce 1 "D"],
             Nothing
           ),
           -- Flatten and unflatten, but a suffix of it is actually invariant.
           ( ["A", "B", "C"],
-            ( [dimFlatten 0 3 "ABC", dimUnflatten 0 ["D", "E", "C"]],
-              ["D", "E", "C"]
-            ),
+            [dimFlatten 0 3 "ABC", dimUnflatten 0 ["D", "E", "C"]],
             Just [dimSplice 0 2 ["D", "E"]]
           ),
           -- Flatten and unflatten, but a prefix of it is actually invariant.
           ( ["A", "B", "C"],
-            ( [dimFlatten 0 3 "ABC", dimUnflatten 0 ["A", "D", "E"]],
-              ["A", "D", "E"]
-            ),
+            [dimFlatten 0 3 "ABC", dimUnflatten 0 ["A", "D", "E"]],
             Just [dimSplice 1 2 ["D", "E"]]
           )
         ]
