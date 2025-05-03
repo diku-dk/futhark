@@ -99,7 +99,9 @@
 module Futhark.IR.Syntax
   ( module Language.Futhark.Core,
     prettyString,
+    prettyStringOneLine,
     prettyText,
+    prettyTextOneLine,
     Pretty,
     module Futhark.IR.Rep,
     module Futhark.IR.Syntax.Core,
@@ -174,7 +176,7 @@ import Data.Text qualified as T
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Rep
 import Futhark.IR.Syntax.Core
-import Futhark.Util.Pretty (Pretty, prettyString, prettyText)
+import Futhark.Util.Pretty (Pretty, prettyString, prettyStringOneLine, prettyText, prettyTextOneLine)
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
 

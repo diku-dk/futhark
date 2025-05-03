@@ -98,7 +98,7 @@ flipRearrangeReshapeTests =
       ( unwords
           [ "flipRearrangeReshape",
             show perm,
-            prettyString newshape
+            prettyStringOneLine newshape
           ]
       )
       $ flipRearrangeReshape perm newshape @?= res
@@ -123,100 +123,100 @@ flipRearrangeReshapeTests =
         ]
   ]
 
-simplifyTests :: [TestTree]
+simplifyTests :: TestTree
 simplifyTests =
-  [ testCase
-      ( unwords
-          [ "simplifyNewShape",
-            prettyString orig_shape,
-            prettyString input
+  testGroup
+    "simplifyNewShape"
+    [ testCase "Inverse flatten and unflatten - simple case" $
+        lhs
+          ["A", "B"]
+          [dimFlatten 0 2 "AB", dimUnflatten 0 ["A", "B"]]
+          @?= Just [],
+      testCase "Non-inverse flatten and unflatten - simple case" $
+        lhs
+          ["A", "B"]
+          [dimFlatten 0 2 "AB", dimUnflatten 0 ["C", "D"]]
+          @?= Just [dimSplice 0 2 ["C", "D"]],
+      testCase "Inverse flatten and unflatten - separated by coercion" $
+        lhs
+          ["A", "B"]
+          [ dimFlatten 0 2 "AB",
+            dimCoerce 0 "CD",
+            dimUnflatten 0 ["C", "D"]
           ]
-      )
-      $ let res_shape = L.foldl' applySplice (Shape orig_shape) input
-         in simplifyNewShape (Shape orig_shape) (NewShape input res_shape)
-              @?= uncurry NewShape . (,res_shape) <$> expected
-    | (orig_shape :: [String], input, expected) <-
-        [ -- Inverse flatten and unflatten - simple case.
-          ( ["A", "B"],
-            [dimFlatten 0 2 "AB", dimUnflatten 0 ["A", "B"]],
-            Just []
-          ),
-          -- Non-inverse flatten and unflatten - simple case.
-          ( ["A", "B"],
-            [dimFlatten 0 2 "AB", dimUnflatten 0 ["C", "D"]],
-            Just [dimSplice 0 2 ["C", "D"]]
-          ),
-          -- Inverse flatten and unflatten - separated by coercion.
-          ( ["A", "B"],
-            [ dimFlatten 0 2 "AB",
-              dimCoerce 0 "CD",
-              dimUnflatten 0 ["C", "D"]
-            ],
-            Just [dimSplice 0 2 ["C", "D"]]
-          ),
-          -- Two unflattens - simple case.
-          ( ["ABC"],
-            [dimUnflatten 0 ["A", "BC"], dimUnflatten 1 ["B", "C"]],
-            Just [dimUnflatten 0 ["A", "B", "C"]]
-          ),
-          -- Identity coerce.
-          ( ["A", "B", "C"],
-            [dimCoerce 1 "B", dimCoerce 2 "C"],
-            Just []
-          ),
-          -- Identity coerce (multiple dimensions).
-          ( ["A", "B", "C"],
-            [DimSplice 1 2 (Shape ["B", "C"])],
-            Just []
-          ),
-          -- Identity coerce (with non-identity stuff afterwards)
-          ( ["B", "CD"],
-            [dimCoerce 0 "B", dimUnflatten 1 ["C", "D"]],
-            Just [dimUnflatten 1 ["C", "D"]]
-          ),
-          -- Get rid of a coerce before an unflatten.
-          ( ["CD"],
-            [dimCoerce 0 "AB", dimUnflatten 0 ["A", "B"]],
-            Just [dimUnflatten 0 ["A", "B"]]
-          ),
-          -- Get rid of a coerce after a flatten.
-          ( ["A", "B", "C"],
-            [dimFlatten 0 2 "ABC", dimCoerce 0 "K"],
-            Just [dimFlatten 0 2 "K"]
-          ),
-          -- Flatten and unflatten, but a suffix of it is actually invariant.
-          ( ["A", "B", "C"],
-            [dimFlatten 0 3 "ABC", dimUnflatten 0 ["D", "E", "C"]],
-            Just [dimSplice 0 2 ["D", "E"]]
-          ),
-          -- Flatten and unflatten, but a prefix of it is actually invariant.
-          ( ["A", "B", "C"],
-            [dimFlatten 0 3 "ABC", dimUnflatten 0 ["A", "D", "E"]],
-            Just [dimSplice 1 2 ["D", "E"]]
-          ),
-          --
-          -- Some coercions that should not be modified.
-          ( ["A", "B"],
-            [dimCoerce 0 "C", dimCoerce 1 "D"],
-            Nothing
-          ),
-          ( ["A", "B", "C"],
-            [dimCoerce 0 "A'", dimCoerce 1 "A'", dimCoerce 2 "A'"],
-            Nothing
-          ),
-          -- Long and complicated.
-          ( ["A", "B", "C", "D"],
-            [ dimCoerce 0 "A",
-              DimSplice 1 3 $ Shape ["BC", "D"],
-              dimCoerce 1 "BC",
-              dimCoerce 2 "D",
-              dimFlatten 1 2 "BCD",
-              dimFlatten 0 2 "ABCD"
-            ],
-            Just [dimFlatten 0 4 "ABCD"]
-          )
-        ]
-  ]
+          @?= Just [dimSplice 0 2 ["C", "D"]],
+      testCase "Two unflattens - simple case" $
+        lhs
+          ["ABC"]
+          [dimUnflatten 0 ["A", "BC"], dimUnflatten 1 ["B", "C"]]
+          @?= Just [dimUnflatten 0 ["A", "B", "C"]],
+      testCase "Identity coerce" $
+        lhs
+          ["A", "B", "C"]
+          [dimCoerce 1 "B", dimCoerce 2 "C"]
+          @?= Just [],
+      testCase "Identity coerce (multiple dimensions)" $
+        lhs
+          ["A", "B", "C"]
+          [DimSplice 1 2 (Shape ["B", "C"])]
+          @?= Just [],
+      testCase "Identity coerce (with non-identity stuff afterwards)" $
+        lhs
+          ["B", "CD"]
+          [dimCoerce 0 "B", dimUnflatten 1 ["C", "D"]]
+          @?= Just [dimUnflatten 1 ["C", "D"]],
+      testCase "Get rid of a coerce before an unflatten" $
+        lhs
+          ["CD"]
+          [dimCoerce 0 "AB", dimUnflatten 0 ["A", "B"]]
+          @?= Just [dimUnflatten 0 ["A", "B"]],
+      testCase "Get rid of a coerce after a flatten" $
+        lhs
+          ["A", "B", "C"]
+          [dimFlatten 0 2 "ABC", dimCoerce 0 "K"]
+          @?= Just [dimFlatten 0 2 "K"],
+      testCase "Flatten and unflatten (invariant suffix)" $
+        lhs
+          ["A", "B", "C"]
+          [dimFlatten 0 3 "ABC", dimUnflatten 0 ["D", "E", "C"]]
+          @?= Just [dimSplice 0 2 ["D", "E"]],
+      testCase "Flatten and unflatten (invariant prefix)" $
+        lhs
+          ["A", "B", "C"]
+          [dimFlatten 0 3 "ABC", dimUnflatten 0 ["A", "D", "E"]]
+          @?= Just [dimSplice 1 2 ["D", "E"]],
+      testCase "Invariant part of splice" $
+        lhs
+          ["A", "B", "C", "D"]
+          [DimSplice 1 3 $ Shape ["BC", "D"]]
+          @?= Just [DimSplice 1 2 $ Shape ["BC"]],
+      testCase "Necessary coercion" $
+        lhs
+          ["A", "B"]
+          [dimCoerce 0 "C", dimCoerce 1 "D"]
+          @?= Nothing,
+      testCase "Another necessary coercion" $
+        lhs
+          ["A", "B", "C"]
+          [dimCoerce 0 "A'", dimCoerce 1 "A'", dimCoerce 2 "A'"]
+          @?= Nothing,
+      testCase "Long with redundancies" $
+        lhs
+          ["A", "B", "C", "D"]
+          [ DimSplice 1 3 $ Shape ["BC", "D"],
+            dimCoerce 1 "BC",
+            dimCoerce 2 "D",
+            dimFlatten 1 2 "BCD",
+            dimFlatten 0 2 "ABCD"
+          ]
+          @?= Just [dimFlatten 0 4 "ABCD"]
+    ]
+  where
+    lhs orig_shape ss =
+      let res_shape :: ShapeBase String =
+            L.foldl' applySplice (Shape orig_shape) ss
+       in dimSplices
+            <$> simplifyNewShape (Shape orig_shape) (NewShape ss res_shape)
 
 tests :: TestTree
 tests =
@@ -225,5 +225,5 @@ tests =
       reshapeInnerTests,
       flipReshapeRearrangeTests,
       flipRearrangeReshapeTests,
-      simplifyTests
+      [simplifyTests]
     ]

@@ -255,19 +255,20 @@ move (shape_bef, DimSplice i1 n1 shape) ss
 -- If we get the splice all the way to the end, see if we can find some
 -- redundancy.
 move (shape, DimSplice i1 n1 s1) []
-  | n1 == length s1,
-    match <-
+  -- Check for redundant prefix.
+  | match <-
       takeWhile (uncurry (==)) $
         zip (shapeDims (dimSpan i1 n1 shape)) (shapeDims s1),
     not $ null match,
     length match /= n1 =
       let k = length match
        in Just [DimSplice (i1 + k) (n1 - k) (dropDims k s1)]
-  | n1 == length s1,
-    match <-
+  -- Check for redundant suffix.
+  | match <-
       takeWhile (uncurry (==)) $
-        reverse $
-          zip (shapeDims (dimSpan i1 n1 shape)) (shapeDims s1),
+        zip
+          (reverse (shapeDims (dimSpan i1 n1 shape)))
+          (reverse (shapeDims s1)),
     not $ null match,
     length match /= n1 =
       let k = length match
@@ -287,7 +288,7 @@ move (shape_bef, DimSplice i1 n1 _s1) (DimSplice i2 _n2 s2 : ss)
     dimSpan i1 n1 shape_bef == s2 =
       Just ss
 --
--- A split where one of the dimensions is then further split.
+-- An unflatten where one of the dimensions is then further unflattened.
 move (_, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i2 >= i1,
     i2 < i1 + length s1,
@@ -299,8 +300,16 @@ move (_, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
     s1_aft = dropDims (i2 - i1 + 1) s1
 
 --
+-- Flatten followed by a flattening of overlapping dimensions.
+move (_, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
+  | length s1 == 1,
+    length s2 == 1,
+    i1 == i2 + 1,
+    n2 > 1 =
+      Just $ DimSplice i2 (n1 + n1) s2 : ss
+--
 -- Flatten into an unflatten.
-move (_, DimSplice i1 n1 _) (DimSplice i2 1 s2 : ss)
+move (_, DimSplice i1 n1 (Shape [_])) (DimSplice i2 1 s2 : ss)
   | i1 == i2 =
       Just $ DimSplice i1 n1 s2 : ss
 --
