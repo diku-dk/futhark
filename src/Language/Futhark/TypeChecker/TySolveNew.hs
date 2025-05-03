@@ -198,7 +198,8 @@ substTyVars (Scalar (Sum cs)) =
 substTyVars (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
   t1' <- substTyVars t1
   t2' <- substTyVars t2
-  pure $ Scalar $ Arrow u pname d t1' $ RetType ext $ t2' `setUniqueness` uniqueness t2
+  pure $ Scalar $ Arrow u pname d t1' $ RetType ext $ 
+    t2' `setUniqueness` uniqueness t2
 substTyVars (Array u shape elemt) = do
   elemt' <- substTyVars $ Scalar elemt
   pure $ arrayOfWithAliases u shape elemt'
