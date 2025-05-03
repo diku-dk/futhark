@@ -180,13 +180,12 @@ substTyVars (Scalar (TypeVar u qn args)) = do
         Solved t -> do
           t' <- substTyVars t
           pure $ second (const mempty) t'
-        _ -> do
-          args' <- mapM onArg args
-          pure $ Scalar (TypeVar u qn args')
-    _ -> do
-      args' <- mapM onArg args
-      pure $ Scalar (TypeVar u qn args')
+        _ -> makeTyVar
+    _ -> makeTyVar
   where
+    makeTyVar = do
+      args' <- mapM onArg args
+      pure $ Scalar $ TypeVar u qn args'
     onArg (TypeArgType t) = TypeArgType <$> substTyVars t
     onArg (TypeArgDim e) = pure $ TypeArgDim e
 substTyVars (Scalar (Prim pt)) =
