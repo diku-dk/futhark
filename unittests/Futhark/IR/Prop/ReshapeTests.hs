@@ -150,6 +150,13 @@ simplifyTests =
           ["ABC"]
           [dimUnflatten 0 ["A", "BC"], dimUnflatten 1 ["B", "C"]]
           @?= Just [dimUnflatten 0 ["A", "B", "C"]],
+      testCase "Two unflattens with unchanged prefix" $
+        lhs
+          ["A", "B", "C", "D", "E"]
+          [ DimSplice 3 2 $ Shape ["DE"],
+            DimSplice 2 2 $ Shape ["CDE"]
+          ]
+          @?= Just [dimFlatten 2 3 "CDE"],
       testCase "Identity coerce" $
         lhs
           ["A", "B", "C"]

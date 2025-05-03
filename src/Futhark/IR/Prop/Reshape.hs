@@ -305,7 +305,7 @@ move (_, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
     length s2 == 1,
     i1 == i2 + 1,
     n2 > 1 =
-      Just $ DimSplice i2 (n1 + n1) s2 : ss
+      Just $ DimSplice i2 (n2 + n1 - length s1) s2 : ss
 --
 -- Flatten into an unflatten.
 move (_, DimSplice i1 n1 (Shape [_])) (DimSplice i2 1 s2 : ss)
@@ -333,7 +333,7 @@ improveOne shape (s : ss) =
 -- | Try to simplify the given 'NewShape'. Returns 'Nothing' if no improvement
 -- is possible.
 simplifyNewShape :: (Eq d) => ShapeBase d -> NewShape d -> Maybe (NewShape d)
-simplifyNewShape shape_bef (NewShape ss shape) = do
+simplifyNewShape shape_bef (NewShape ss shape) =
   NewShape <$> (improve <$> improveOne shape_bef ss) <*> pure shape
   where
     improve ss' = maybe ss' improve $ improveOne shape_bef ss'
