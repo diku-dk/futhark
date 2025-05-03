@@ -667,9 +667,9 @@ solution = do
       case descr of
         Unsolved (TyVarFree _ l) -> do
           k <- liftST $ getKey node
-          pure $ if k /= tv
-            then Nothing
-            else Just (tv, l)
+          pure $ if k == tv
+            then Just (tv, l)
+            else Nothing
         _ -> pure Nothing
 
     mkSubst :: 
