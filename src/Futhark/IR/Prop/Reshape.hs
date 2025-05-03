@@ -252,9 +252,8 @@ move (shape_bef, DimSplice i1 n1 shape) ss
   | dimSpan i1 n1 shape_bef == shape =
       Just ss
 --
--- If we get the splice all the way to the end, see if we can find some
--- redundancy.
-move (shape, DimSplice i1 n1 s1) []
+-- See if we can find some redundancy.
+move (shape, DimSplice i1 n1 s1) ss
   -- Check for redundant prefix.
   | match <-
       takeWhile (uncurry (==)) $
@@ -262,7 +261,7 @@ move (shape, DimSplice i1 n1 s1) []
     not $ null match,
     length match /= n1 =
       let k = length match
-       in Just [DimSplice (i1 + k) (n1 - k) (dropDims k s1)]
+       in Just $ DimSplice (i1 + k) (n1 - k) (dropDims k s1) : ss
   -- Check for redundant suffix.
   | match <-
       takeWhile (uncurry (==)) $
@@ -272,7 +271,7 @@ move (shape, DimSplice i1 n1 s1) []
     not $ null match,
     length match /= n1 =
       let k = length match
-       in Just [DimSplice i1 (n1 - k) (takeDims (length s1 - k) s1)]
+       in Just $ DimSplice i1 (n1 - k) (takeDims (length s1 - k) s1) : ss
 --
 -- Base case.
 move _ [] = Nothing
