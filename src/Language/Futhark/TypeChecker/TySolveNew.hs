@@ -680,13 +680,13 @@ solution = do
       SolveM s (Maybe (Either [PrimType] (TypeBase () NoUniqueness)))
     mkSubst tv node = do
       descr <- liftST $ getDescr node
-      k <- liftST $ getKey node
       case descr of
         Solved t -> do
           t' <- substTyVars t
           pure $ Just $ Right $ first (const ()) t'
         Unsolved (TyVarPrim _ pts) -> pure $ Just $ Left pts
-        _ ->
+        _ -> do
+          k <- liftST $ getKey node
           pure $ if tv /= k
             then Just $ Right $ typeVar k
             else Nothing
