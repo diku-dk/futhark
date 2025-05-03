@@ -177,9 +177,9 @@ substTyVars (Scalar (TypeVar u qn args)) = do
     Just node -> do
       descr <- liftST $ getDescr node
       case descr of
-        Solved t' -> do
-          t'' <- substTyVars t'
-          pure $ second (const mempty) t''
+        Solved t -> do
+          t' <- substTyVars t
+          pure $ second (const mempty) t'
         _ -> do
           args' <- mapM onArg args
           pure $ Scalar (TypeVar u qn args')
