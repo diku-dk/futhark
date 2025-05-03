@@ -671,35 +671,44 @@ maybeLookupUF tv = do
   uf <- gets solverTyVars
   pure $ M.lookup tv uf
 
-substTyVar' :: (Monoid u) => M.Map TyVar (Either VName TyVarSol) -> VName -> Maybe (TypeBase () u)
-substTyVar' m v =
-  case M.lookup v m of
-    Just (Left v') -> substTyVar' m v'
-    Just (Right (Solved t')) -> Just $ second (const mempty) $ substTyVars (substTyVar' m) t'
-    Just (Right Param {}) -> Nothing
-    Just (Right (Unsolved {})) -> Nothing
-    Nothing -> Nothing
-
--- TODO: Instead of "freezing" the state in convertUF', generate the
--- TODO: substitutions inside of here.
 solution :: SolveM s ([UnconTyVar], Solution)
 solution = do
-  mappings <- convertUF'
-  let unconstrained = mapMaybe unconstr $ M.toList mappings
-  let sol = M.mapMaybe (mkSubst mappings) mappings
-  pure (unconstrained, sol)
-  where
-    unconstr :: (TyVar, Either VName TyVarSol) -> Maybe UnconTyVar
-    unconstr (v, Right (Unsolved (TyVarFree _ l))) = Just (v, l)
-    unconstr _ = Nothing
+  uf <- gets solverTyVars
+  unconstrained <- M.traverseMaybeWithKey unconstr uf
+  sol <- M.traverseMaybeWithKey mkSubst uf
+  pure (M.elems unconstrained, sol)
 
-    mkSubst m (Right (Solved t)) =
-      Just $ Right $ first (const ()) $ substTyVars (substTyVar' m) t
-    mkSubst _ (Right (Unsolved (TyVarPrim _ pts))) = Just $ Left pts
-    mkSubst m (Left v') =
-      Just . fromMaybe (Right $ Scalar $ TypeVar mempty (qualName v') []) $
-        mkSubst m =<< M.lookup v' m 
-    mkSubst _ _ = Nothing
+  where
+    unconstr :: TyVar -> TyVarNode s -> SolveM s (Maybe UnconTyVar)
+    unconstr tv node = do
+      descr <- liftST $ getDescr node
+      case descr of
+        Unsolved (TyVarFree _ l) -> do
+          k <- liftST $ getKey node
+          pure $ if k /= tv
+            then Nothing
+            else Just (tv, l)
+        _ -> pure Nothing
+
+    mkSubst :: TyVar -> TyVarNode s -> SolveM s (Maybe (Either [PrimType] (TypeBase () NoUniqueness)))
+    mkSubst tv node = do
+      descr <- liftST $ getDescr node
+      k <- liftST $ getKey node
+      case descr of
+        Solved t -> do
+          t' <- substTyVars t
+          pure $ Just $ Right $ first (const ()) t'
+        Unsolved (TyVarPrim _ pts) -> pure $ Just $ Left pts
+        _ ->
+          if tv /= k
+            then do
+              mb_node' <- maybeLookupUF k
+              case mb_node' of
+                Just node' -> do
+                  s <- mkSubst k node'
+                  pure $ Just $ fromMaybe (Right $ typeVar k) s 
+                _ -> pure $ Just $ Right $ typeVar k
+            else pure Nothing
 
 -- | Solve type constraints, producing either an error or a solution,
 -- alongside a list of unconstrained type variables.
