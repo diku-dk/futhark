@@ -683,12 +683,12 @@ solution = do
       case descr of
         Solved t -> do
           t' <- substTyVars t
-          pure $ Just $ Right $ first (const ()) t'
+          pure . Just . Right $ first (const ()) t'
         Unsolved (TyVarPrim _ pts) -> pure $ Just $ Left pts
         _ -> do
           k <- liftST $ getKey node
           pure $ if tv /= k
-            then Just $ Right $ typeVar k
+            then Just . Right $ typeVar k
             else Nothing
 
 -- | Solve type constraints, producing either an error or a solution,
