@@ -685,15 +685,9 @@ solution = do
           pure $ Just $ Right $ first (const ()) t'
         Unsolved (TyVarPrim _ pts) -> pure $ Just $ Left pts
         _ ->
-          if tv /= k
-            then do
-              mb_node' <- maybeLookupUF k
-              case mb_node' of
-                Just node' -> do
-                  s <- mkSubst k node'
-                  pure $ Just $ fromMaybe (Right $ typeVar k) s 
-                _ -> pure $ Just $ Right $ typeVar k
-            else pure Nothing
+          pure $ if tv /= k
+            then Just $ Right $ typeVar k
+            else Nothing
 
 -- | Solve type constraints, producing either an error or a solution,
 -- alongside a list of unconstrained type variables.
