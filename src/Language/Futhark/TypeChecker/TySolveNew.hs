@@ -390,8 +390,8 @@ unify t1 t2
       Right [(mempty, (t1', t2'))]
 unify _ _ = Left mempty
 
-maybeLookupTyVar :: TyVar -> SolveM s (Maybe TyVarSol)
-maybeLookupTyVar tv = do
+maybeLookupTyVarSol :: TyVar -> SolveM s (Maybe TyVarSol)
+maybeLookupTyVarSol tv = do
   tyvars <- gets solverTyVars
   case M.lookup tv tyvars of
     Nothing -> pure Nothing
@@ -401,7 +401,7 @@ maybeLookupTyVar tv = do
 
 lookupTyVar :: TyVar -> SolveM s (Either (TyVarInfo ()) Type)
 lookupTyVar tv =
-  maybe bad unpack <$> maybeLookupTyVar tv
+  maybe bad unpack <$> maybeLookupTyVarSol tv
   where
     bad = error $ "Unknown tyvar: " <> prettyNameString tv
     unpack (Param {}) = error $ "Is a type param: " <> prettyNameString tv
@@ -586,7 +586,7 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
 -- is done later.
 liftednessCheck :: Liftedness -> Type -> SolveM s ()
 liftednessCheck l (Scalar (TypeVar _ (QualName [] v) _)) = do
-  v_info <- maybeLookupTyVar v
+  v_info <- maybeLookupTyVarSol v
   case v_info of
     Nothing ->
       -- Is an opaque type.
