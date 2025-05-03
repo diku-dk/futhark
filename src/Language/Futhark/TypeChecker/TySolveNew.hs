@@ -62,10 +62,6 @@ typeError loc notes msg =
 typeVar :: (Monoid u) => VName -> TypeBase dim u
 typeVar v = Scalar $ TypeVar mempty (qualName v) []
 
-enrichType :: Type -> SolveM s Type
-enrichType t = do
-  substTyVars t
-
 cannotUnify ::
   Reason Type ->
   Notes ->
@@ -74,8 +70,8 @@ cannotUnify ::
   Type ->
   SolveM s ()
 cannotUnify reason notes bcs t1 t2 = do
-  t1' <- enrichType t1
-  t2' <- enrichType t2
+  t1' <- substTyVars t1
+  t2' <- substTyVars t2
   case reason of
     Reason loc ->
       typeError loc notes . stack $
@@ -101,8 +97,8 @@ cannotUnify reason notes bcs t1 t2 = do
         ]
           <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
     ReasonRetType loc expected actual -> do
-      expected' <- enrichType expected
-      actual' <- enrichType actual
+      expected' <- substTyVars expected
+      actual' <- substTyVars actual
       typeError loc notes . stack $
         [ "Function body does not have expected type.",
           "Expected:" <+> align (pretty expected'),
@@ -110,8 +106,8 @@ cannotUnify reason notes bcs t1 t2 = do
         ]
           <> [pretty bcs | not $ hasNoBreadCrumbs bcs]
     ReasonApply loc f e expected actual -> do
-      expected' <- enrichType expected
-      actual' <- enrichType actual
+      expected' <- substTyVars expected
+      actual' <- substTyVars actual
       typeError loc notes . stack $
         [ header,
           "Expected:" <+> align (pretty expected'),
@@ -153,8 +149,8 @@ cannotUnify reason notes bcs t1 t2 = do
       where
         fname' = maybe "expression" (dquotes . pretty) fname
     ReasonBranches loc former latter -> do
-      former' <- enrichType former
-      latter' <- enrichType latter
+      former' <- substTyVars former
+      latter' <- substTyVars latter
       typeError loc notes . stack $
         [ "Branches differ in type.",
           "Former:" <+> pretty former',
