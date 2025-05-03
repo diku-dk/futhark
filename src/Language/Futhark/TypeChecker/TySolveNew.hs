@@ -31,7 +31,6 @@ type Type = CtType ()
 type UF s = M.Map TyVar (TyVarNode s)
 
 newtype SolverState s = SolverState { solverTyVars :: UF s }
-
 newtype SolveM s a = SolveM { runSolveM :: StateT (SolverState s) (ExceptT TypeError (ST s)) a }
   deriving (Functor, Applicative, Monad, MonadError TypeError, MonadState (SolverState s))
 
