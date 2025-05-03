@@ -650,7 +650,7 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
 maybeLookupUF :: TyVar -> SolveM s (Maybe (TyVarNode s))
 maybeLookupUF tv = do
   uf <- gets solverTyVars
-  pure $ M.lookup tv uf
+  pure . M.lookup tv $ uf
 
 solution :: SolveM s ([UnconTyVar], Solution)
 solution = do
