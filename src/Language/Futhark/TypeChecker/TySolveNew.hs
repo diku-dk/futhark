@@ -16,15 +16,16 @@ import Data.Loc
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Debug.Trace (trace)
+import Futhark.Util (isEnvVarAtLeast)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Error
-import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
+import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote, prettyTypeError)
 -- import Language.Futhark.TypeChecker.Types (substTyVars)
 import Language.Futhark.TypeChecker.UnionFind
 
-import Debug.Trace
 
 -- | The type representation used by the constraint solver. Agnostic
 -- to sizes and uniqueness.
@@ -711,6 +712,41 @@ solution = do
             then Just . Right $ typeVar k
             else Nothing
 
+-- | Print in a way helpful for writing a test case for TySolveTests.
+logSolution ::
+  [CtTy ()] ->
+  TyParams ->
+  TyVars () ->
+  Either TypeError ([UnconTyVar], Solution) ->
+  String
+logSolution constraints typarams tyvars s =
+  unlines $
+    ["# TySolve.solve", "## constraints"]
+      <> map ppConstraint constraints
+      <> [ "## typarams",
+           if typarams == mempty then "mempty" else show $ map ppTyParam (M.toList typarams)
+         ]
+      <> [ "## tyvars",
+           show $ map (bimap prettyNameString (second onTyVar)) $ M.toList tyvars,
+           either
+             (("## error\n" <>) . docString . prettyTypeError)
+             ( ("## solution\n" <>)
+                 . show
+                 . bimap
+                   (map (first prettyNameString))
+                   (map (bimap prettyNameString $ bimap prettyString prettyString) . M.toList)
+             )
+             s
+         ]
+  where
+    ppConstraint (CtEq _ t1 t2) =
+      unwords [show (prettyString t1), "~", show (prettyString t2)]
+    ppTyParam (p, (lvl, info, _)) = show (prettyNameString p, (lvl, info, NoLoc))
+    onTyVar (TyVarFree _ l) = TyVarFree NoLoc l
+    onTyVar (TyVarPrim _ pts) = TyVarPrim NoLoc pts
+    onTyVar (TyVarRecord _ ts) = TyVarRecord NoLoc ts
+    onTyVar (TyVarSum _ ts) = TyVarSum NoLoc ts
+
 -- | Solve type constraints, producing either an error or a solution,
 -- alongside a list of unconstrained type variables.
 solve ::
@@ -719,7 +755,8 @@ solve ::
   TyVars () ->
   Either TypeError ([UnconTyVar], Solution)
 solve constraints typarams tyvars =
-  runST
+  maybeLog
+    $ runST
     $ runExceptT
     . flip evalStateT (SolverState M.empty)
     . runSolveM
@@ -728,4 +765,9 @@ solve constraints typarams tyvars =
       mapM_ solveCt constraints
       mapM_ solveTyVar $ M.toList tyvars
       solution
+  where
+    maybeLog
+      | isEnvVarAtLeast "FUTHARK_LOG_TYSOLVE" 0 = \s ->
+          trace (logSolution constraints typarams tyvars s) s
+      | otherwise = id      
 {-# NOINLINE solve #-}
