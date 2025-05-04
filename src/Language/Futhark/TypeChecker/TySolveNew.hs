@@ -311,7 +311,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
           case sol of
             Solved t' -> sub t'
             _ -> pure t
-        _ -> pure t
+        Nothing -> pure t
     sub t = pure t
 
     solveCt' :: (BreadCrumbs, (Type, Type)) -> SolveM s ()
