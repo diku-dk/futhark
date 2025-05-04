@@ -191,7 +191,7 @@ substTyVars (Scalar (TypeVar u qn args)) = do
       args' <- mapM onArg args
       pure $ Scalar $ TypeVar u qn args'
     onArg (TypeArgType t) = TypeArgType <$> substTyVars t
-    onArg (TypeArgDim e) = pure $ TypeArgDim e
+    onArg d@(TypeArgDim _) = pure d
 substTyVars (Scalar (Prim pt)) =
   pure $ Scalar $ Prim pt
 substTyVars (Scalar (Record fs)) =
