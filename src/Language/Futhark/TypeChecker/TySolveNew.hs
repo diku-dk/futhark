@@ -192,8 +192,7 @@ substTyVars (Scalar (TypeVar u qn args)) = do
       pure $ Scalar $ TypeVar u qn args'
     onArg (TypeArgType t) = TypeArgType <$> substTyVars t
     onArg d@(TypeArgDim _) = pure d
-substTyVars (Scalar (Prim pt)) =
-  pure $ Scalar $ Prim pt
+substTyVars p@(Scalar (Prim _)) = pure p
 substTyVars (Scalar (Record fs)) =
   Scalar . Record <$> traverse substTyVars fs
 substTyVars (Scalar (Sum cs)) =
