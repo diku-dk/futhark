@@ -335,5 +335,33 @@ tests =
             ("t\8321_8321", Left [Signed Int8,Signed Int16,Signed Int32,Signed Int64]),
             ("index\8322_8322",Right "t_0"),
             ("index_elem\8323_8323",Right "t_0")
+          ]),
+      
+      testCase "record with polymorphic fields" $
+        testSolve
+          ["d_3" ~ "{foo: e_4, bar: f_5}",
+           "e_4" ~ "i32",
+           "f64" ~ "f_5",
+           "a_0" ~ "d_3"
+          ]
+          mempty
+          (M.fromList [
+            tvRecord "a_0" 0 $ M.fromList [("foo", Scalar (Prim (Signed Int32))), ("bar", Scalar (Prim (FloatType Float64)))], 
+            tvFree "d_3" 0,
+            tvFree "e_4" 0,
+            tvFree "f_5" 0
           ])
+          ([], M.fromList [
+            ("a_0", Right "{foo: i32, bar: f64}"),
+            ("d_3", Right "{foo: i32, bar: f64}"),
+            ("e_4", Right "i32"),
+            ("f_5", Right "f64")
+          ]),
+
+      testCase "opaque type" $ 
+        testSolveFail
+          ["a_0" ~ "i32"]
+          mempty
+          mempty
+          ".?([Cc]annot unify).?"
     ]
