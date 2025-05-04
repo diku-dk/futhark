@@ -172,7 +172,7 @@ def wrap_store_resp(fname, resp):
 
 
 async def handle_ws(request):
-    ws = web.WebSocketResponse()
+    ws = web.WebSocketResponse(max_msg_size=2**30)
     await ws.prepare(request)
 
     toWS = request.app["toWS"]
