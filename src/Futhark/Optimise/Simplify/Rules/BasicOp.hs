@@ -389,6 +389,25 @@ ruleBasicOp vtable pat aux (Reshape v2 v3_shape)
           letBind pat $ BasicOp (Rearrange perm' v2')
         _ ->
           Skip
+-- Reshaping or transposing a copy is almost always better done by copying the
+-- result instead, because that improves the likelihood that the copy will be
+-- eliminated.
+ruleBasicOp vtable pat aux (Reshape v2 newshape)
+  | Just (Replicate (Shape []) (Var v1), cs) <- ST.lookupBasicOp v2 vtable,
+    ST.available v1 vtable =
+      Simplify $ do
+        v1' <-
+          certifying cs . auxing aux . letExp (baseString v1) . BasicOp $
+            Reshape v1 newshape
+        letBind pat $ BasicOp $ Replicate (Shape []) (Var v1')
+ruleBasicOp vtable pat aux (Rearrange perm v2)
+  | Just (Replicate (Shape []) (Var v1), cs) <- ST.lookupBasicOp v2 vtable,
+    ST.available v1 vtable =
+      Simplify $ do
+        v1' <-
+          certifying cs . auxing aux . letExp (baseString v1) . BasicOp $
+            Rearrange perm v1
+        letBind pat $ BasicOp $ Replicate (Shape []) (Var v1')
 ruleBasicOp _ _ _ _ =
   Skip
 
