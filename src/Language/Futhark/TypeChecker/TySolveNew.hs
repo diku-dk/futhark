@@ -24,6 +24,8 @@ import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote)
 -- import Language.Futhark.TypeChecker.Types (substTyVars)
 import Language.Futhark.TypeChecker.UnionFind
 
+import Debug.Trace
+
 -- | The type representation used by the constraint solver. Agnostic
 -- to sizes and uniqueness.
 type Type = CtType ()
@@ -328,15 +330,23 @@ solveEq reason obcs orig_t1 orig_t2 = do
                   (True, False) -> bindTyVar reason bcs v1 t2'
                   (False, True) -> bindTyVar reason bcs v2 t1'
                   (True, True) -> unionTyVars reason bcs v1 v2
-        (Scalar (TypeVar _ (QualName [] v1) []), t2') -> do
+        (t1'@(Scalar (TypeVar _ (QualName [] v1) [])), t2') -> do
           v1_flexible <- flexible v1
-          when v1_flexible $ bindTyVar reason bcs v1 t2'
-        (t1', Scalar (TypeVar _ (QualName [] v2) [])) -> do
+          if v1_flexible
+            then bindTyVar reason bcs v1 t2'
+            else tryUnify t1' t2' reason bcs
+        (t1', t2'@(Scalar (TypeVar _ (QualName [] v2) []))) -> do
           v2_flexible <- flexible v2
-          when v2_flexible $ bindTyVar reason bcs v2 t1'
-        (t1', t2') -> case unify t1' t2' of
-          Left details -> cannotUnify reason (aNote details) bcs t1' t2'
-          Right eqs -> mapM_ solveCt' eqs
+          if v2_flexible 
+            then bindTyVar reason bcs v2 t1'
+            else tryUnify t1' t2' reason bcs
+        (t1', t2') -> tryUnify t1' t2' reason bcs
+
+    tryUnify :: Type -> Type -> Reason Type -> BreadCrumbs -> SolveM s ()
+    tryUnify t1' t2' r bcs = 
+      case unify t1' t2' of
+        Left details -> cannotUnify r (aNote details) bcs t1' t2'
+        Right eqs -> mapM_ solveCt' eqs        
 
 -- Unify at the root, emitting new equalities that must hold.
 unify :: Type -> Type -> Either (Doc a) [(BreadCrumbs, (Type, Type))]
