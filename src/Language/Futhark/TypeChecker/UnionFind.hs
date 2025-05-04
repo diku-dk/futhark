@@ -5,7 +5,7 @@ module Language.Futhark.TypeChecker.UnionFind
     makeTyVarNode,
     makeTyParamNode,
     find,
-    getDescr,
+    getSol,
     getKey,
     assignNewSol,
     union,
@@ -58,7 +58,7 @@ data Link s
 data ReprInfo = MkInfo
   { weight :: {-# UNPACK #-} !Int
     -- ^ The size of the equivalence class, used by 'union'. 
-  , descr  :: {-# UNPACK #-} !TyVarSol
+  , solution  :: {-# UNPACK #-} !TyVarSol
     -- ^ The "type" of the equivalence class.
   , key :: {-# UNPACK #-} !TyVar
     -- ^ The name of the type variable representing the equivalence class.
@@ -74,7 +74,7 @@ makeTyVarNode :: TyVar -> Level -> TyVarInfo () -> ST s (TyVarNode s)
 makeTyVarNode tv _lvl constraint = do
   info <- newSTRef (MkInfo {
       weight = 1
-    , descr = Unsolved constraint
+    , solution = Unsolved constraint
     , key = tv
     -- , level = lvl
   })
@@ -87,7 +87,7 @@ makeTyParamNode :: TyVar -> Level -> Liftedness -> Loc -> ST s (TyVarNode s)
 makeTyParamNode tv lvl lft loc = do
   info <- newSTRef (MkInfo {
       weight = 1
-    , descr = Param lvl lft loc
+    , solution = Param lvl lft loc
     , key = tv
     -- , level = lvl
   })
@@ -136,11 +136,11 @@ isRepr (Node link_ref) = do
     Repr _ -> pure True
     Link _ -> pure False
 
--- | Return the descriptor associated with the argument node's
+-- | Return the solution associated with the argument node's
 -- equivalence class.
-getDescr :: TyVarNode s -> ST s TyVarSol
-getDescr node = do
-  descr <$> (readSTRef =<< descrRef node)
+getSol :: TyVarNode s -> ST s TyVarSol
+getSol node = do
+  solution <$> (readSTRef =<< descrRef node)
 
 getKey :: TyVarNode s -> ST s TyVar
 getKey node = do
@@ -154,8 +154,8 @@ assignNewSol :: TyVarNode s -> TyVarSol -> ST s ()
 assignNewSol node sol = do
   ref <- descrRef node
   info <- readSTRef ref
-  case descr info of
-    Unsolved _ -> modifySTRef ref $ \i -> i { descr = sol }
+  case solution info of
+    Unsolved _ -> modifySTRef ref $ \i -> i { solution = sol }
     _          -> pure () -- This would be an error.
 
 -- TODO: Make sure we correctly handle level, liftedness, and if 
