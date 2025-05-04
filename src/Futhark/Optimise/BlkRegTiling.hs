@@ -1312,7 +1312,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
               arr_tp <- lookupType arr_nm
               let perm = [i + 1 .. arrayRank arr_tp - 1] ++ [0 .. i]
               let arr_tr_str = baseString arr_nm ++ "_transp"
-              arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest perm arr_nm
+              arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest arr_nm perm
               let e_ind' = BasicOp $ Index arr_tr_nm slc
               let stm' = Let patt yy e_ind'
               pure (tab_inn, M.insert p_nm (ptp, stm') tab_out)

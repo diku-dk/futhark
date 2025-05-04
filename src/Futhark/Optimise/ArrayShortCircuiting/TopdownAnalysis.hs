@@ -111,7 +111,7 @@ getInvAliasFromExp :: Exp (Aliases rep) -> InvAlias
 getInvAliasFromExp (BasicOp (SubExp (Var _))) = Just id
 getInvAliasFromExp (BasicOp (Opaque _ (Var _))) = Just id
 getInvAliasFromExp (BasicOp Update {}) = Just id
-getInvAliasFromExp (BasicOp (Rearrange perm _)) =
+getInvAliasFromExp (BasicOp (Rearrange _ perm)) =
   Just (`LMAD.permute` rearrangeInverse perm)
 getInvAliasFromExp _ = Nothing
 

@@ -233,7 +233,7 @@ combineTransforms _ _ = Nothing
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
 transformFromExp :: Certs -> Exp rep -> Maybe (VName, ArrayTransform)
-transformFromExp cs (BasicOp (Futhark.Rearrange perm v)) =
+transformFromExp cs (BasicOp (Futhark.Rearrange v perm)) =
   Just (v, Rearrange cs perm)
 transformFromExp cs (BasicOp (Futhark.Reshape v shape)) =
   Just (v, Reshape cs shape)
@@ -249,7 +249,7 @@ transformToExp (Replicate cs n) ia =
   pure (cs, BasicOp $ Futhark.Replicate n (Var ia))
 transformToExp (Rearrange cs perm) ia = do
   r <- arrayRank <$> lookupType ia
-  pure (cs, BasicOp $ Futhark.Rearrange (perm ++ [length perm .. r - 1]) ia)
+  pure (cs, BasicOp $ Futhark.Rearrange ia (perm ++ [length perm .. r - 1]))
 transformToExp (Reshape cs shape) ia = do
   pure (cs, BasicOp $ Futhark.Reshape ia shape)
 transformToExp (Index cs slice) ia = do

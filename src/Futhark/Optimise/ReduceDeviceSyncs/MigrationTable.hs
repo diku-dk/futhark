@@ -466,7 +466,7 @@ graphStm stm = do
     BasicOp (Reshape arr s) -> do
       graphInefficientReturn (shapeDims $ newShape s) e
       one bs `reuses` arr
-    BasicOp (Rearrange _ arr) -> do
+    BasicOp (Rearrange arr _) -> do
       graphInefficientReturn [] e
       one bs `reuses` arr
     -- Expressions with a cost linear to the size of their result arrays are

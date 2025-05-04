@@ -226,9 +226,9 @@ basicFwd pat aux op = do
       arr_tan <- tangent arr
       arrs_tans <- mapM tangent arrs
       addStm $ Let pat_tan aux $ BasicOp $ Concat d (arr_tan :| arrs_tans) w
-    Manifest ds arr -> do
+    Manifest arr ds -> do
       arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Manifest ds arr_tan
+      addStm $ Let pat_tan aux $ BasicOp $ Manifest arr_tan ds
     Iota n _ _ it -> do
       addStm $ Let pat_tan aux $ BasicOp $ Replicate (Shape [n]) (intConst it 0)
     Replicate n x -> do
@@ -239,9 +239,9 @@ basicFwd pat aux op = do
     Reshape arr reshape -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Reshape arr_tan reshape
-    Rearrange perm arr -> do
+    Rearrange arr perm -> do
       arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Rearrange perm arr_tan
+      addStm $ Let pat_tan aux $ BasicOp $ Rearrange arr_tan perm
     _ -> error $ "basicFwd: Unsupported op " ++ prettyString op
 
 fwdLambda :: Lambda SOACS -> ADM (Lambda SOACS)

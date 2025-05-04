@@ -535,7 +535,7 @@ allocPermArray space perm s v = do
             MemArray pt shape u . ArrayIn mem $
               LMAD.permute (LMAD.iota 0 $ map pe64 $ arrayDims t) perm
           pat = Pat [PatElem v' info]
-      addStm $ Let pat (defAux ()) $ BasicOp $ Manifest perm v
+      addStm $ Let pat (defAux ()) $ BasicOp $ Manifest v perm
       pure (mem, v')
     _ ->
       error $ "allocPermArray: " ++ prettyString t

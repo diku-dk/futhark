@@ -1060,7 +1060,7 @@ expReturns (BasicOp (Reshape v newshape)) = do
       LMAD.reshape lmad
     reshaper ReshapeCoerce lmad =
       Just . LMAD.coerce lmad
-expReturns (BasicOp (Rearrange perm v)) = do
+expReturns (BasicOp (Rearrange v perm)) = do
   (et, Shape dims, mem, lmad) <- arrayVarReturns v
   let lmad' = LMAD.permute lmad perm
       dims' = rearrangeShape perm dims

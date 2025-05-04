@@ -291,10 +291,10 @@ pBasicOp =
         *> parens (Scratch <$> pPrimType <*> many (pComma *> pSubExp)),
       keyword "rearrange"
         *> parens
-          (Rearrange <$> parens (pInt `sepBy` pComma) <* pComma <*> pVName),
+          (Rearrange <$> pVName <* pComma <*> parens (pInt `sepBy` pComma)),
       keyword "manifest"
         *> parens
-          (Manifest <$> parens (pInt `sepBy` pComma) <* pComma <*> pVName),
+          (Manifest <$> pVName <* pComma <*> parens (pInt `sepBy` pComma)),
       keyword "concat" *> do
         d <- "@" *> L.decimal
         parens $ do

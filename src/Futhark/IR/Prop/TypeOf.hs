@@ -105,15 +105,15 @@ basicOpType (Reshape e shape) =
   result <$> lookupType e
   where
     result t = [t `setArrayShape` newShape shape]
-basicOpType (Rearrange perm e) =
-  result <$> lookupType e
+basicOpType (Rearrange v perm) =
+  result <$> lookupType v
   where
     result t = [rearrangeType perm t]
 basicOpType (Concat i (x :| _) ressize) =
   result <$> lookupType x
   where
     result xt = [setDimSize i xt ressize]
-basicOpType (Manifest _ v) =
+basicOpType (Manifest v _) =
   pure <$> lookupType v
 basicOpType Assert {} =
   pure [Prim Unit]

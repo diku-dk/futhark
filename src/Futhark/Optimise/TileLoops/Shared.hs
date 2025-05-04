@@ -308,7 +308,7 @@ changeIxFnEnv env y (BasicOp (Reshape x shp_chg)) =
       composeIxfuns env y x (Just . (`LMAD.coerce` fmap ExpMem.pe64 (shapeDims $ newShape shp_chg)))
     ReshapeArbitrary ->
       composeIxfuns env y x (`LMAD.reshape` fmap ExpMem.pe64 (shapeDims $ newShape shp_chg))
-changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
+changeIxFnEnv env y (BasicOp (Manifest x perm)) = do
   tp <- lookupType x
   case tp of
     Array _ptp shp _u -> do
@@ -316,7 +316,7 @@ changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
       let ixfn = LMAD.permute (LMAD.iota 0 shp') perm
       pure $ M.insert y ixfn env
     _ -> error "In TileLoops/Shared.hs, changeIxFnEnv: manifest applied to a non-array!"
-changeIxFnEnv env y (BasicOp (Rearrange perm x)) =
+changeIxFnEnv env y (BasicOp (Rearrange x perm)) =
   composeIxfuns env y x (Just . (`LMAD.permute` perm))
 changeIxFnEnv env y (BasicOp (Index x slc)) =
   composeIxfuns env y x (Just . (`LMAD.slice` Slice (map (fmap ExpMem.pe64) $ unSlice slc)))

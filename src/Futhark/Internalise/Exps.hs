@@ -1770,7 +1770,7 @@ isIntrinsicFunction qname args loc = do
         r <- I.arrayRank <$> lookupType arr'
         if r == 0
           then pure $ I.Var arr'
-          else letSubExp desc $ I.BasicOp $ I.Manifest [0 .. r - 1] arr'
+          else letSubExp desc $ I.BasicOp $ I.Manifest arr' [0 .. r - 1]
     handleRest [arr] "flatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
       forM arrs $ \arr' -> do
@@ -1801,7 +1801,7 @@ isIntrinsicFunction qname args loc = do
     handleRest [e] "transpose" = Just $ \desc ->
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
-        pure $ I.Rearrange ([1, 0] ++ [2 .. r - 1]) v
+        pure $ I.Rearrange v ([1, 0] ++ [2 .. r - 1])
     handleRest [x, y] "zip" = Just $ \desc ->
       mapM (letSubExp "zip_copy" . BasicOp . Replicate mempty . I.Var)
         =<< ( (++)

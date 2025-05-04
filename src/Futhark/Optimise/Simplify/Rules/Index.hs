@@ -92,7 +92,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
                     =<< sequence inds'''
               arr_sliced_tr <-
                 letSubExp (baseString arr_sliced <> "_tr") $
-                  BasicOp (Rearrange perm arr_sliced)
+                  BasicOp (Rearrange arr_sliced perm)
               pure $ SubExpResult mempty arr_sliced_tr
       where
         matches = zip fakeIndices $ zip [0 :: Int ..] $ sliceDims $ Slice inds
@@ -164,7 +164,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
       where
         index DimFix {} = Nothing
         index (DimSlice _ n s) = Just (n, DimSlice (constant (0 :: Int64)) n s)
-    Just (Rearrange perm src, cs)
+    Just (Rearrange src perm, cs)
       | rearrangeReach perm <= length (takeWhile isIndex inds) ->
           let inds' = rearrangeShape (rearrangeInverse perm) inds
            in Just $ pure $ IndexResult cs src $ Slice inds'

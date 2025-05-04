@@ -86,11 +86,11 @@ simplifyConcat (vtable, _) pat _ (Concat i (x :| xs) new_d)
           letExp "concat_rearrange" $
             BasicOp $
               Concat 0 (x' :| xs') new_d
-      letBind pat $ BasicOp $ Rearrange perm concat_rearrange
+      letBind pat $ BasicOp $ Rearrange concat_rearrange perm
   where
     transposedBy perm1 v =
       case ST.lookupExp v vtable of
-        Just (BasicOp (Rearrange perm2 v'), vcs)
+        Just (BasicOp (Rearrange v' perm2), vcs)
           | perm1 == perm2 -> Just (v', vcs)
         _ -> Nothing
 
@@ -288,18 +288,16 @@ ruleBasicOp vtable pat aux (Replicate (Shape []) (Var v))
           BasicOp $
             Iota n x s it
 -- Handle identity permutation.
-ruleBasicOp _ pat _ (Rearrange perm v)
+ruleBasicOp _ pat _ (Rearrange v perm)
   | sort perm == perm =
       Simplify $ letBind pat $ BasicOp $ SubExp $ Var v
-ruleBasicOp vtable pat aux (Rearrange perm v)
-  | Just (BasicOp (Rearrange perm2 e), v_cs) <- ST.lookupExp v vtable =
+ruleBasicOp vtable pat aux (Rearrange v perm)
+  | Just (BasicOp (Rearrange e perm2), v_cs) <- ST.lookupExp v vtable =
       -- Rearranging a rearranging: compose the permutations.
-      Simplify . certifying v_cs . auxing aux $
-        letBind pat $
-          BasicOp $
-            Rearrange (perm `rearrangeCompose` perm2) e
+      Simplify . certifying v_cs . auxing aux . letBind pat . BasicOp $
+        Rearrange e (perm `rearrangeCompose` perm2)
 -- Rearranging a replicate where the outer dimension is left untouched.
-ruleBasicOp vtable pat aux (Rearrange perm v1)
+ruleBasicOp vtable pat aux (Rearrange v1 perm)
   | Just (BasicOp (Replicate dims (Var v2)), v1_cs) <- ST.lookupExp v1 vtable,
     num_dims <- shapeRank dims,
     (rep_perm, rest_perm) <- splitAt num_dims perm,
@@ -309,9 +307,8 @@ ruleBasicOp vtable pat aux (Rearrange perm v1)
         certifying v1_cs $
           auxing aux $ do
             v <-
-              letSubExp "rearrange_replicate" $
-                BasicOp $
-                  Rearrange (map (subtract num_dims) rest_perm) v2
+              letSubExp "rearrange_replicate" . BasicOp $
+                Rearrange v2 (map (subtract num_dims) rest_perm)
             letBind pat $ BasicOp $ Replicate dims v
 
 -- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
@@ -359,18 +356,18 @@ ruleBasicOp vtable pat aux (UpdateAcc _ acc _ vs)
       Simplify . auxing aux $ letBind pat $ BasicOp $ SubExp $ Var acc
 -- Manifest of a a copy (or another Manifest) can be simplified to
 -- manifesting the original array, if it is still available.
-ruleBasicOp vtable pat aux (Manifest perm v1)
+ruleBasicOp vtable pat aux (Manifest v1 perm)
   | Just (Replicate (Shape []) (Var v2), cs) <- ST.lookupBasicOp v1 vtable,
     ST.available v2 vtable =
       Simplify . auxing aux . certifying cs . letBind pat . BasicOp $
-        Manifest perm v2
-  | Just (Manifest _ v2, cs) <- ST.lookupBasicOp v1 vtable,
+        Manifest v2 perm
+  | Just (Manifest v2 _, cs) <- ST.lookupBasicOp v1 vtable,
     ST.available v2 vtable =
       Simplify . auxing aux . certifying cs . letBind pat . BasicOp $
-        Manifest perm v2
+        Manifest v2 perm
 ruleBasicOp vtable pat aux (Reshape v2 v3_shape)
   | ReshapeArbitrary <- reshapeKind v3_shape,
-    Just (Rearrange perm v1, v2_cs) <- ST.lookupBasicOp v2 vtable,
+    Just (Rearrange v1 perm, v2_cs) <- ST.lookupBasicOp v2 vtable,
     Just (Reshape v0 v1_shape, v1_cs) <- ST.lookupBasicOp v1 vtable,
     ReshapeArbitrary <- reshapeKind v1_shape,
     Just v0_shape <- arrayShape <$> ST.lookupType v0 vtable =
@@ -378,7 +375,7 @@ ruleBasicOp vtable pat aux (Reshape v2 v3_shape)
              flipRearrangeReshape perm v3_shape
            ) of
         (Just perm', _) -> Simplify $ do
-          v1' <- letExp (baseString v1) $ BasicOp $ Rearrange perm' v0
+          v1' <- letExp (baseString v1) $ BasicOp $ Rearrange v0 perm'
           v1_shape' <- arrayShape <$> lookupType v1'
           auxing aux . certifying (v1_cs <> v2_cs) . letBind pat $
             BasicOp (Reshape v1' (reshapeAll v1_shape' (newShape v3_shape)))
@@ -386,7 +383,7 @@ ruleBasicOp vtable pat aux (Reshape v2 v3_shape)
           v2' <-
             auxing aux . certifying (v1_cs <> v2_cs) . letExp (baseString v2) $
               BasicOp (Reshape v1 v3_shape')
-          letBind pat $ BasicOp (Rearrange perm' v2')
+          letBind pat $ BasicOp (Rearrange v2' perm')
         _ ->
           Skip
 -- Reshaping or transposing a copy is almost always better done by copying the
@@ -400,13 +397,13 @@ ruleBasicOp vtable pat aux (Reshape v2 newshape)
           certifying cs . auxing aux . letExp (baseString v1) . BasicOp $
             Reshape v1 newshape
         letBind pat $ BasicOp $ Replicate (Shape []) (Var v1')
-ruleBasicOp vtable pat aux (Rearrange perm v2)
+ruleBasicOp vtable pat aux (Rearrange v2 perm)
   | Just (Replicate (Shape []) (Var v1), cs) <- ST.lookupBasicOp v2 vtable,
     ST.available v1 vtable =
       Simplify $ do
         v1' <-
           certifying cs . auxing aux . letExp (baseString v1) . BasicOp $
-            Rearrange perm v1
+            Rearrange v1 perm
         letBind pat $ BasicOp $ Replicate (Shape []) (Var v1')
 ruleBasicOp _ _ _ _ =
   Skip

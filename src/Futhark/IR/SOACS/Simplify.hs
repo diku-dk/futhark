@@ -492,12 +492,12 @@ mapOpToOp (_, used) pat aux1 e
       Simplify . certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
         Concat (d + 1) (outer_arr :| outer_arrs) dw
   | Just
-      (map_pe, cs, _, BasicOp (Rearrange perm rearrange_arr), [p], [arr]) <-
+      (map_pe, cs, _, BasicOp (Rearrange rearrange_arr perm), [p], [arr]) <-
       isMapWithOp pat e,
     paramName p == rearrange_arr,
     not $ UT.isConsumed (patElemName map_pe) used =
       Simplify . certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
-        Rearrange (0 : map (1 +) perm) arr
+        Rearrange arr (0 : map (1 +) perm)
 mapOpToOp _ _ _ _ = Skip
 
 isMapWithOp ::
@@ -748,7 +748,7 @@ arrayOpCerts (ArrayVar cs _) = cs
 isArrayOp :: Certs -> Exp rep -> Maybe ArrayOp
 isArrayOp cs (BasicOp (Index arr slice)) =
   Just $ ArrayIndexing cs arr slice
-isArrayOp cs (BasicOp (Rearrange perm arr)) =
+isArrayOp cs (BasicOp (Rearrange arr perm)) =
   Just $ ArrayRearrange cs arr perm
 isArrayOp cs (BasicOp (Reshape arr new_shape)) =
   Just $ ArrayReshape cs arr new_shape
@@ -759,7 +759,7 @@ isArrayOp _ _ =
 
 fromArrayOp :: ArrayOp -> (Certs, Exp rep)
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
-fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
+fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange arr perm)
 fromArrayOp (ArrayReshape cs arr new_shape) = (cs, BasicOp $ Reshape arr new_shape)
 fromArrayOp (ArrayCopy cs arr) = (cs, BasicOp $ Replicate mempty $ Var arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
@@ -980,7 +980,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
                 ArrayIndexing _ _ (Slice slice) ->
                   BasicOp $ Index arr $ Slice $ whole_dim : slice
                 ArrayRearrange _ _ perm ->
-                  BasicOp $ Rearrange (0 : map (+ 1) perm) arr
+                  BasicOp $ Rearrange arr (0 : map (+ 1) perm)
                 ArrayReshape _ _ new_shape ->
                   BasicOp $ Reshape arr $ reshapeInner w new_shape
                 ArrayCopy {} ->

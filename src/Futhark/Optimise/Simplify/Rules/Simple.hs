@@ -350,7 +350,7 @@ repScratchToScratch defOf seType (Replicate shape (Var src)) = do
       case defOf v of
         Just (BasicOp Scratch {}, cs) ->
           Just cs
-        Just (BasicOp (Rearrange _ v'), cs) ->
+        Just (BasicOp (Rearrange v' _), cs) ->
           (cs <>) <$> isActuallyScratch v'
         Just (BasicOp (Reshape v' _), cs) ->
           (cs <>) <$> isActuallyScratch v'

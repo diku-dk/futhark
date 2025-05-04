@@ -127,7 +127,7 @@ getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Concat _i (a :| bs) _
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
       rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) (a : bs)
    in Just (ws, ws ++ rs)
-getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Manifest _perm x))) =
+getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Manifest x _perm))) =
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
       rs = mapMaybe (getDirAliasedIxfn td_env coal_tab) [x]
    in Just (ws, ws ++ rs)

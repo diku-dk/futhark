@@ -393,7 +393,7 @@ data BasicOp
     Concat Int (NonEmpty VName) SubExp
   | -- | Manifest an array with dimensions represented in the given
     -- order.  The result will not alias anything.
-    Manifest [Int] VName
+    Manifest VName [Int]
   | -- Array construction.
 
     -- | @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@.
@@ -412,7 +412,7 @@ data BasicOp
     -- of integers is a list of dimensions (0-indexed), which
     -- must be a permutation of @[0,n-1]@, where @n@ is the
     -- number of dimensions in the input array.
-    Rearrange [Int] VName
+    Rearrange VName [Int]
   | -- | Update an accumulator at the given index with the given
     -- value. Consumes the accumulator and produces a new one. If
     -- 'Safe', perform a run-time bounds check and ignore the write if

@@ -125,12 +125,12 @@ diffBasicOp pat aux e m =
           updateAdj arr <=< letExp "adj_reshape" . BasicOp $
             Reshape pat_adj (reshapeAll (newShape newshape) arr_shape)
     --
-    Rearrange perm arr -> do
+    Rearrange arr perm -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $
         void $
           updateAdj arr <=< letExp "adj_rearrange" . BasicOp $
-            Rearrange (rearrangeInverse perm) pat_adj
+            Rearrange pat_adj (rearrangeInverse perm)
     --
     Replicate (Shape []) (Var se) -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
@@ -170,7 +170,7 @@ diffBasicOp pat aux e m =
 
         zipWithM_ updateAdj (arr : arrs) slices
     --
-    Manifest _ se -> do
+    Manifest se _ -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ void $ updateAdj se pat_adj
     --

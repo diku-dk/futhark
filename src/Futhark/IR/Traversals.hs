@@ -155,15 +155,15 @@ mapExpM tv (BasicOp (Reshape arrexp newshape)) =
             <$> mapOnVName tv arrexp
             <*> mapM (mapOnSubExp tv) newshape
         )
-mapExpM tv (BasicOp (Rearrange perm e)) =
-  BasicOp <$> (Rearrange perm <$> mapOnVName tv e)
+mapExpM tv (BasicOp (Rearrange e perm)) =
+  BasicOp <$> (Rearrange <$> mapOnVName tv e <*> pure perm)
 mapExpM tv (BasicOp (Concat i (x :| ys) size)) = do
   x' <- mapOnVName tv x
   ys' <- mapM (mapOnVName tv) ys
   size' <- mapOnSubExp tv size
   pure $ BasicOp $ Concat i (x' :| ys') size'
-mapExpM tv (BasicOp (Manifest perm e)) =
-  BasicOp <$> (Manifest perm <$> mapOnVName tv e)
+mapExpM tv (BasicOp (Manifest v perm)) =
+  BasicOp <$> (Manifest <$> mapOnVName tv v <*> pure perm)
 mapExpM tv (BasicOp (Assert e msg loc)) =
   BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
 mapExpM tv (BasicOp (Opaque op e)) =
@@ -321,12 +321,12 @@ walkExpM tv (BasicOp (Scratch _ shape)) =
   mapM_ (walkOnSubExp tv) shape
 walkExpM tv (BasicOp (Reshape arrexp shape)) =
   mapM_ (walkOnSubExp tv) shape >> walkOnVName tv arrexp
-walkExpM tv (BasicOp (Rearrange _ e)) =
-  walkOnVName tv e
+walkExpM tv (BasicOp (Rearrange v _)) =
+  walkOnVName tv v
 walkExpM tv (BasicOp (Concat _ (x :| ys) size)) =
   walkOnVName tv x >> mapM_ (walkOnVName tv) ys >> walkOnSubExp tv size
-walkExpM tv (BasicOp (Manifest _ e)) =
-  walkOnVName tv e
+walkExpM tv (BasicOp (Manifest v _)) =
+  walkOnVName tv v
 walkExpM tv (BasicOp (Assert e msg _)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
 walkExpM tv (BasicOp (Opaque _ e)) =

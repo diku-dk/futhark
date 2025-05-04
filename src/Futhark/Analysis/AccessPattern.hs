@@ -478,13 +478,13 @@ analyseBasicOp ctx expression pats =
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
         Concat _ _ length_subexp -> varInfoFromSubExp length_subexp
-        Manifest _dim name -> varInfoFromNames ctx $ oneName name
+        Manifest name _dim -> varInfoFromNames ctx $ oneName name
         Iota end start stride _ -> concatVariableInfos mempty [end, start, stride]
         Replicate (Shape shape) value' -> concatVariableInfos mempty (value' : shape)
         Scratch _ sers -> concatVariableInfos mempty sers
         Reshape name newshape ->
           concatVariableInfos (oneName name) (shapeDims (newShape newshape))
-        Rearrange _ name -> varInfoFromNames ctx $ oneName name
+        Rearrange name _ -> varInfoFromNames ctx $ oneName name
         UpdateAcc _ name lsubexprs rsubexprs ->
           concatVariableInfos (oneName name) (lsubexprs ++ rsubexprs)
         FlatIndex name _ -> varInfoFromNames ctx $ oneName name

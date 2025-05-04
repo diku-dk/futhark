@@ -924,7 +924,7 @@ checkBasicOp (Reshape arrexp newshape) = do
       when (i < 0 || i + k > shapeRank arr_shape) . bad . TypeError $
         "Splice " <> prettyText sp <> " cannot be applied to shape " <> prettyText arr_shape
       pure $ applySplice arr_shape sp
-checkBasicOp (Rearrange perm arr) = do
+checkBasicOp (Rearrange arr perm) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt
   when (length perm /= rank || sort perm /= [0 .. rank - 1]) $
@@ -938,8 +938,8 @@ checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
     bad $
       TypeError "Types of arguments to concat do not match."
   require [Prim int64] ressize
-checkBasicOp (Manifest perm arr) =
-  checkBasicOp $ Rearrange perm arr -- Basically same thing!
+checkBasicOp (Manifest arr perm) =
+  checkBasicOp $ Rearrange arr perm -- Basically same thing!
 checkBasicOp (Assert e (ErrorMsg parts) _) = do
   require [Prim Bool] e
   mapM_ checkPart parts

@@ -233,11 +233,12 @@ instance Pretty BasicOp where
     "scratch" <> apply (pretty t : map pretty shape)
   pretty (Reshape reshape e) =
     "reshape" <> parens (align $ commastack [pretty reshape, pretty e])
-  pretty (Rearrange perm e) =
-    "rearrange" <> apply [apply (map pretty perm), pretty e]
+  pretty (Rearrange v perm) =
+    "rearrange" <> apply [pretty v, apply (map pretty perm)]
   pretty (Concat i (x :| xs) w) =
     "concat" <> "@" <> pretty i <> apply (pretty w : pretty x : map pretty xs)
-  pretty (Manifest perm e) = "manifest" <> apply [apply (map pretty perm), pretty e]
+  pretty (Manifest v perm) =
+    "manifest" <> apply [pretty v, apply (map pretty perm)]
   pretty (Assert e msg (loc, _)) =
     "assert" <> apply [pretty e, pretty msg, pretty $ show $ locStr loc]
   pretty (UpdateAcc safety acc is v) =
