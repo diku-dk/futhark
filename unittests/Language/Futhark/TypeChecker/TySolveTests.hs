@@ -363,5 +363,26 @@ tests =
           ["a_0" ~ "i32"]
           mempty
           mempty
-          ".?([Cc]annot unify).?"
+          ".?([Cc]annot unify).?",
+
+      testCase "liftedness propagation (Lifted -> SizeLifted)" $ 
+        testSolve
+          ["a_0" ~ "b_1"]
+          mempty
+          (M.fromList [("a_0", (0, TyVarFree mempty SizeLifted)), ("b_1", (0, TyVarFree mempty Lifted))])
+          ([("b_1", SizeLifted)], M.fromList [("a_0", Right "b_1")]),
+
+      testCase "liftedness propagation (Lifted -> Unlifted)" $ 
+        testSolve
+          ["a_0" ~ "b_1"]
+          mempty
+          (M.fromList [("a_0", (0, TyVarFree mempty Unlifted)), ("b_1", (0, TyVarFree mempty Lifted))])
+          ([("b_1", Unlifted)], M.fromList [("a_0", Right "b_1")]),
+
+      testCase "liftedness propagation (SizeLifted -> Unlifted)" $ 
+        testSolve
+          ["a_0" ~ "b_1"]
+          mempty
+          (M.fromList [("a_0", (0, TyVarFree mempty Unlifted)), ("b_1", (0, TyVarFree mempty SizeLifted))])
+          ([("b_1", Unlifted)], M.fromList [("a_0", Right "b_1")])
     ]
