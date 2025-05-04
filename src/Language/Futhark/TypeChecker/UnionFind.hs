@@ -142,6 +142,7 @@ getSol :: TyVarNode s -> ST s TyVarSol
 getSol node = do
   solution <$> (readSTRef =<< descrRef node)
 
+-- | Return the name of the representative type variable.
 getKey :: TyVarNode s -> ST s TyVar
 getKey node = do
   key <$> (readSTRef =<< descrRef node)
