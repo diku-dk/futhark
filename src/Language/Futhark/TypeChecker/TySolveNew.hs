@@ -349,7 +349,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
         Left details -> cannotUnify r (aNote details) bcs t1' t2'
         Right eqs -> mapM_ solveCt' eqs        
 
--- Unify at the root, emitting new equalities that must hold.
+-- | Unify at the root, emitting new equalities that must hold.
 unify :: Type -> Type -> Either (Doc a) [(BreadCrumbs, (Type, Type))]
 unify (Scalar (Prim pt1)) (Scalar (Prim pt2))
   | pt1 == pt2 = Right []
@@ -595,7 +595,7 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
             _ -> pure ()
         _ -> pure ()
 
--- If a type variable has a liftedness constraint, we propagate that
+-- | If a type variable has a liftedness constraint, we propagate that
 -- constraint to its solution. The actual checking for correct usage
 -- is done later.
 liftednessCheck :: Liftedness -> Type -> SolveM s ()
