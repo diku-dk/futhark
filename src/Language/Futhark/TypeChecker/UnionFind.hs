@@ -146,17 +146,14 @@ getKey :: TyVarNode s -> ST s TyVar
 getKey node = do
   key <$> (readSTRef =<< descrRef node)
 
--- TODO: Determine if it should be a precondition that the input
--- TODO: node is in an "unsolved" equivalence class.
--- | Replace the type of the node's equivalence class
--- with the second argument.
+-- | Assign a new solution/type to the node's equivalence class.
+--
+-- Precondition: The node is in an equivalence class representing an
+-- unsolved/flexible type variable.
 assignNewSol :: TyVarNode s -> TyVarSol -> ST s ()
-assignNewSol node sol = do
+assignNewSol node new_sol = do
   ref <- descrRef node
-  info <- readSTRef ref
-  case solution info of
-    Unsolved _ -> modifySTRef ref $ \i -> i { solution = sol }
-    _          -> pure () -- This would be an error.
+  modifySTRef ref $ \i -> i { solution = new_sol }  
 
 -- TODO: Make sure we correctly handle level, liftedness, and if 
 -- TODO: type parameters are involved.
