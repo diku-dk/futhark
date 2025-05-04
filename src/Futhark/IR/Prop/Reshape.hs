@@ -32,9 +32,7 @@ where
 
 import Control.Monad (guard, mplus)
 import Data.Foldable
-import Data.List qualified as L
 import Data.Maybe
-import Data.Ord (comparing)
 import Futhark.IR.Prop.Rearrange (isMapTranspose, rearrangeInverse, rearrangeShape)
 import Futhark.IR.Syntax
 import Futhark.Util (focusNth, mapAccumLM, takeLast)
@@ -215,12 +213,11 @@ data ReshapeKind
 
 reshapeKind :: NewShape SubExp -> ReshapeKind
 reshapeKind (NewShape ss _)
-  | all unit $ zip (L.sortBy (comparing dim) ss) [0 ..] = ReshapeCoerce
+  | all unit ss = ReshapeCoerce
   | otherwise = ReshapeArbitrary
   where
-    unit (DimSplice j 1 (Shape [_]), i) = i == j
+    unit (DimSplice _ 1 (Shape [_])) = True
     unit _ = False
-    dim (DimSplice j _ _) = j
 
 -- | Apply the splice to a shape.
 applySplice :: ShapeBase d -> DimSplice d -> ShapeBase d
