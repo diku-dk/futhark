@@ -590,10 +590,20 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
           case sol of
             Param ty_v_lvl _ _
               | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
-            Solved ty' ->
+            Solved ty' -> do
+              occursCheck' reason ty_v ty'
               mapM_ check $ typeVars ty'
             _ -> pure ()
         _ -> pure ()
+
+    occursCheck' :: Reason Type -> VName -> Type -> SolveM s ()
+    occursCheck' reason' v' tp' = do
+      when (v' `S.member` typeVars tp') . typeError (locOf reason') mempty $
+        "Occurs check: cannot instantiate"
+          <+> prettyName v'
+          <+> "with"
+          <+> pretty tp'
+          <> "."        
 
 -- | If a type variable has a liftedness constraint, we propagate that
 -- constraint to its solution. The actual checking for correct usage
