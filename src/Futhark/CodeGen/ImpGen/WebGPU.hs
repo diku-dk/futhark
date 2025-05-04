@@ -366,6 +366,7 @@ wgslSharedBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
 packedElemIndex :: PrimType -> WGSL.Exp -> WGSL.Exp
 packedElemIndex t i = case t of
+    Bool -> WGSL.BinOpExp "/" i (WGSL.IntExp 4)
     IntType Int8 -> WGSL.BinOpExp "/" i (WGSL.IntExp 4)
     IntType Int16 -> WGSL.BinOpExp "/" i (WGSL.IntExp 2)
     IntType Int32 -> i
@@ -375,6 +376,7 @@ packedElemIndex t i = case t of
 
 packedElemOffset :: PrimType -> WGSL.Exp -> WGSL.Exp
 packedElemOffset t i = case t of
+    Bool -> WGSL.BinOpExp "%" i (WGSL.IntExp 4)
     IntType Int8 -> WGSL.BinOpExp "%" i (WGSL.IntExp 4)
     IntType Int16 -> WGSL.BinOpExp "%" i (WGSL.IntExp 2)
     IntType Int32 -> WGSL.IntExp 0
@@ -957,13 +959,15 @@ findSingleMemoryType name = do
               if all (\(_, _, s) -> s == sgn) types
                 then pure $ Just (prim, True, sgn)
                 else error "Atomic type used at multiple signednesses"
-        Just _ -> error "Non i32 or u32 used atomically"
+        Just (t, _, _) ->
+          error $ "Atomics not supported for values of type " <> show t
         Nothing -> pure $ Just (prim, False, Signed)
     _tooMany -> error "Buffer used at multiple types"
   where
     canBeAtomic (IntType Int64) = False
     canBeAtomic (IntType _) = True
     canBeAtomic (FloatType Float32) = True
+    canBeAtomic (Bool) = True
     canBeAtomic _ = False
 
 -- | Generate binding declarations for memory buffers used by kernel. Produces
