@@ -9,7 +9,6 @@ module Language.Futhark.TypeChecker.UnionFind
     getKey,
     assignNewSol,
     union,
-    isRepr
   )
 where
 
@@ -127,14 +126,6 @@ descrRef node@(Node link_ref) = do
       case link' of
         Repr info -> pure info
         _ -> descrRef =<< find node
-
--- | Check if the input node is a representative.
-isRepr :: TyVarNode s -> ST s Bool
-isRepr (Node link_ref) = do
-  link <- readSTRef link_ref
-  case link of
-    Repr _ -> pure True
-    Link _ -> pure False
 
 -- | Return the solution associated with the argument node's
 -- equivalence class.
