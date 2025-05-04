@@ -302,12 +302,19 @@ tests =
           (M.fromList [tvFree "b_1" 1])
           ([], M.fromList [("b_1", Right "a_0")]),
 
-      testCase "incompatible levels" $
+      testCase "scope violation 1" $
         testSolveFail
           ["a_0" ~ "b_1"]
           (M.fromList [typaram "b_1" 1 Unlifted])
           (M.fromList [tvFree "a_0" 0])
           ".?(scope violation).?",
+
+      testCase "scope violation 2" $
+        testSolveFail
+          ["a_0" ~ "b_1", "b_1" ~ "c_2"]
+          (M.fromList [typaram "c_2" 1 Unlifted])
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 1])
+          ".?(scope violation).?",          
 
       testCase "differently sized tuples" $
         testSolveFail
