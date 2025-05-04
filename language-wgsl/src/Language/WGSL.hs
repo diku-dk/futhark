@@ -197,7 +197,7 @@ instance Pretty Exp where
 
 instance Pretty Stmt where
   pretty Skip = ";"
-  pretty (Comment c) = "//" <+> pretty c
+  pretty (Comment c) = vsep (map ("//" <+>) (pretty <$> T.lines c))
   pretty (Seq s1 s2) = semistack [pretty s1, pretty s2]
   pretty (Let x e) = "let" <+> pretty x <+> "=" <+> pretty e
   pretty (DeclareVar x t) = "var" <+> pretty x <+> ":" <+> pretty t
