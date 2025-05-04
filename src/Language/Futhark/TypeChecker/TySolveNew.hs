@@ -228,12 +228,14 @@ occursCheck reason v tp = do
       Nothing -> pure ()
       Just t_node -> do
         t_repr <- getKey' t_node
-        when (v_repr == t_repr) $ typeError (locOf reason) mempty $
+        when (v_repr == t_repr) . typeError (locOf reason) mempty $
           "Occurs check: cannot instantiate"
             <+> prettyName v
             <+> "with"
             <+> pretty tp
-            <> ". Here for days."
+            <> "."
+            -- TODO: Add more useful error information here since this 
+            -- TODO: message alone likely will be confusing to the user.
 
 bindTyVar :: Reason Type -> BreadCrumbs -> VName -> Type -> SolveM s ()
 bindTyVar reason bcs v t = do
