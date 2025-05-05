@@ -8,42 +8,45 @@ SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_global(volatile __global int16_t *p,
 SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_shared(volatile __local int16_t *p,
                                                   int16_t cmp, int16_t val);
 
-
-SCALAR_FUN_ATTR int16_t atomic_add_i16_global(volatile __global int16_t *p, int16_t val) {
-  int offset = ((uintptr_t)p >> 1 & 1);
-  volatile __global int32_t *p32 = (volatile __global int32_t*)((uintptr_t)p & ~0x3);
-
-  int shift = offset * 16;
-  int32_t mask = 0xffff << shift;
-  int32_t shifted_val = val << shift;
-
-  int32_t old = *p32;
-  int32_t upd = (old & ~mask) | mask & (((old >> shift) + val) << shift);
-
-  while (atomic_cmpxchg_i32_global(p32, old, upd) != old) {
-    old = *p32;
-    upd = (old & ~mask) | (((old >> shift) + val) << shift);
+#define DEFINE_16BIT_ATOMIC(name, op)                                   \
+  SCALAR_FUN_ATTR int16_t                                               \
+  atomic_##name##_i16_global(volatile __global int16_t *p, int16_t val) { \
+    int offset = ((uintptr_t)p >> 1 & 1);                               \
+    volatile __global int32_t *p32 = (volatile __global int32_t*)((uintptr_t)p & ~0x3); \
+    int shift = offset * 16;                                            \
+    int32_t mask = 0xffff << shift;                                     \
+    int32_t shifted_val = val << shift;                                 \
+    int32_t old = 0;                                                    \
+    int32_t upd = (old & ~mask) | mask & (op(old >> shift, val) << shift); \
+    int32_t saw;                                                        \
+    while ((saw=atomic_cmpxchg_i32_global(p32, old, upd)) != old) {     \
+      old = saw;                                                        \
+      upd = (old & ~mask) | ((op(old >> shift, val)) << shift);         \
+    }                                                                   \
+    return old >> shift;                                                \
+  }                                                                     \
+  SCALAR_FUN_ATTR int16_t                                               \
+  atomic_##name##_i16_shared(volatile __local int16_t *p, int16_t val) { \
+    int offset = ((uintptr_t)p >> 1 & 1);                               \
+    volatile __local int32_t *p32 = (volatile __local int32_t*)((uintptr_t)p & ~0x3); \
+    int shift = offset * 16;                                            \
+    int32_t mask = 0xffff << shift;                                     \
+    int32_t shifted_val = val << shift;                                 \
+    int32_t old = 0;                                                    \
+    int32_t upd = (old & ~mask) | mask & ((op(old >> shift, val)) << shift); \
+    int32_t saw;                                                        \
+    while ((saw=atomic_cmpxchg_i32_shared(p32, old, upd)) != old) {     \
+      old = saw;                                                        \
+      upd = (old & ~mask) | ((op(old >> shift, val)) << shift);         \
+    }                                                                   \
+    return old >> shift;                                                \
   }
-  return old >> shift;
-}
 
-SCALAR_FUN_ATTR int16_t atomic_add_i16_shared(volatile __local int16_t *p, int16_t val) {
-  int offset = ((uintptr_t)p >> 1 & 1);
-  volatile __local int32_t *p32 = (volatile __local int32_t*)((uintptr_t)p & ~0x3);
-
-  int shift = offset * 16;
-  int32_t mask = 0xffff << shift;
-  int32_t shifted_val = val << shift;
-
-  int32_t old = *p32;
-  int32_t upd = (old & ~mask) | mask & (((old >> shift) + val) << shift);
-
-  while (atomic_cmpxchg_i32_shared(p32, old, upd) != old) {
-    old = *p32;
-    upd = (old & ~mask) | (((old >> shift) + val) << shift);
-  }
-  return old >> shift;
-}
+DEFINE_16BIT_ATOMIC(add, add16);
+DEFINE_16BIT_ATOMIC(smax, smax16);
+DEFINE_16BIT_ATOMIC(smin, smin16);
+DEFINE_16BIT_ATOMIC(umax, umax16);
+DEFINE_16BIT_ATOMIC(umin, umin16);
 
 SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_global(volatile __global int16_t *p,
                                                   int16_t cmp, int16_t val) {
@@ -55,13 +58,15 @@ SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_global(volatile __global int16_t *p,
   int32_t shifted_val = val << shift;
   int32_t shifted_cmp = cmp << shift;
 
-  uint32_t old = (*p32 & ~mask) | shifted_cmp;
-  uint32_t upd = (old & ~mask) | shifted_val;
+  uint32_t old = shifted_cmp;
+  uint32_t upd = shifted_val;
+  uint32_t got;
 
-  while (atomic_cmpxchg_i32_global(p32, old, upd) != old) {
-    old = (*p32 & ~mask) | shifted_cmp;
+  while ((got=atomic_cmpxchg_i32_global(p32, old, upd)) != old) {
+    old = got;
     upd = (old & ~mask) | shifted_val;
   }
+
   return old >> shift;
 }
 
@@ -75,13 +80,15 @@ SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_shared(volatile __local int16_t *p,
   int32_t shifted_val = val << shift;
   int32_t shifted_cmp = cmp << shift;
 
-  uint32_t old = (*p32 & ~mask) | shifted_cmp;
-  uint32_t upd = (old & ~mask) | shifted_val;
+  uint32_t old = shifted_cmp;
+  uint32_t upd = shifted_val;
+  uint32_t got;
 
-  while (atomic_cmpxchg_i32_shared(p32, old, upd) != old) {
-    old = (*p32 & ~mask) | shifted_cmp;
+  while ((got=atomic_cmpxchg_i32_shared(p32, old, upd)) != old) {
+    old = got;
     upd = (old & ~mask) | shifted_val;
   }
+
   return old >> shift;
 }
 

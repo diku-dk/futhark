@@ -744,7 +744,7 @@ atomicUpdateLocking ::
   AtomicUpdate GPUMem KernelEnv
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
-    all (\(_, t, _, _) -> primBitSize t `elem` [32, 64]) ops_and_ts =
+    all (\(_, t, _, _) -> primBitSize t `elem` [16, 32, 64]) ops_and_ts =
       primOrCas ops_and_ts $ \space arrs bucket ->
         -- If the operator is a vectorised binary operator on 32/64-bit
         -- values, we can use a particularly efficient
@@ -773,13 +773,13 @@ atomicUpdateLocking atomicBinOp lam
 
     isPrim (op, _, _, _) = isJust $ atomicBinOp op
 
--- If the operator functions purely on single 32/64-bit values, we can
+-- If the operator functions purely on single 16/32/64-bit values, we can
 -- use an implementation based on CAS, no matter what the operator
 -- does.
 atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
-    primBitSize t `elem` [32, 64] = AtomicCAS $ \space [arr] bucket -> do
+    primBitSize t `elem` [16, 32, 64] = AtomicCAS $ \space [arr] bucket -> do
       old <- dPrimS "old" t
       atomicUpdateCAS space t arr old bucket (paramName xp) $
         compileBody' [xp] (lambdaBody op)
