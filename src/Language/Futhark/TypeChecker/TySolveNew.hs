@@ -236,8 +236,13 @@ occursCheck reason v tp = do
             <+> "with"
             <+> pretty tp
             <> "."
-            -- TODO: Add more useful error information here since this 
-            -- TODO: message alone likely will be confusing to the user.
+            </> "This is because both"
+            <+> prettyName v 
+            <+> "and"
+            <+> prettyName tv
+            <+> "are bound to"
+            <+> prettyName v_repr
+            <> "."
 
 bindTyVar :: Reason Type -> BreadCrumbs -> VName -> Type -> SolveM s ()
 bindTyVar reason bcs v t = do
