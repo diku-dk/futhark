@@ -41,7 +41,14 @@ import Data.Text qualified as T
 
 -- | @rts/c/atomics.h@
 atomicsH :: T.Text
-atomicsH = $(embedStringFile "rts/c/atomics.h")
+atomicsH =
+  -- The order matters, as e.g. atomics16.h is implemented in terms of 32-bit
+  -- atomics.
+  mconcat
+    [ $(embedStringFile "rts/c/atomics64.h"),
+      $(embedStringFile "rts/c/atomics32.h"),
+      $(embedStringFile "rts/c/atomics16.h")
+    ]
 {-# NOINLINE atomicsH #-}
 
 -- | @rts/c/uniform.h@
