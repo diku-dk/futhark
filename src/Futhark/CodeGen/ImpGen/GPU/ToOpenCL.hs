@@ -113,7 +113,7 @@ cleanSizes m = M.map clean m
 
 findParamUsers ::
   Env ->
-  Definitions ImpOpenCL.OpenCL ->
+  Definitions ImpOpenCL.HostOp ->
   M.Map Name SizeClass ->
   ParamMap
 findParamUsers env defs = M.mapWithKey onParam
@@ -219,7 +219,7 @@ envFromProg prog = Env funs (funsMayFail cg funs) cg
     funs = defFuns prog
     cg = ImpGPU.callGraph calledInHostOp funs
 
-lookupFunction :: Name -> Env -> Maybe (ImpGPU.Function HostOp)
+lookupFunction :: Name -> Env -> Maybe (ImpGPU.Function ImpGPU.HostOp)
 lookupFunction fname = lookup fname . unFunctions . envFuns
 
 functionMayFail :: Name -> Env -> Bool
@@ -231,8 +231,8 @@ addSize :: Name -> SizeClass -> OnKernelM ()
 addSize key sclass =
   modify $ \s -> s {clSizes = M.insert key sclass $ clSizes s}
 
-onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
-onHostOp target (CallKernel k) = onKernel target k
+onHostOp :: KernelTarget -> ImpGPU.HostOp -> OnKernelM ImpOpenCL.HostOp
+onHostOp target (ImpGPU.CallKernel k) = onKernel target k
 onHostOp _ (ImpGPU.GetSize v key size_class) = do
   addSize key size_class
   pure $ ImpOpenCL.GetSize v key
@@ -304,7 +304,7 @@ ensureDeviceFun fname host_func = do
   exists <- gets $ M.member fname . clDevFuns
   unless exists $ generateDeviceFun fname host_func
 
-calledInHostOp :: HostOp -> S.Set Name
+calledInHostOp :: ImpGPU.HostOp -> S.Set Name
 calledInHostOp (CallKernel k) = calledFuncs calledInKernelOp $ kernelBody k
 calledInHostOp _ = mempty
 
@@ -328,7 +328,7 @@ ensureDeviceFuns code = do
       Nothing -> pure Nothing
   where
     bad = compilerLimitationS "Cannot generate GPU functions that contain parallelism."
-    toDevice :: HostOp -> KernelOp
+    toDevice :: ImpGPU.HostOp -> KernelOp
     toDevice _ = bad
 
 isConst :: BlockDim -> Maybe KernelConstExp
@@ -338,7 +338,7 @@ isConst (Right e) =
   Just e
 isConst _ = Nothing
 
-onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
+onKernel :: KernelTarget -> Kernel -> OnKernelM ImpOpenCL.HostOp
 onKernel target kernel = do
   called <- ensureDeviceFuns $ kernelBody kernel
 
@@ -643,6 +643,8 @@ inKernelOperations env mode body =
       GC.modifyUserState $ \s ->
         s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
+    kernelOps (UniformRead dest src i typ space) =
+      GC.compileCode (Read dest src i typ space Nonvolatile)
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
       pending <- kernelSyncPending <$> GC.getUserState
@@ -688,7 +690,7 @@ inKernelOperations env mode body =
       GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
       where
         op = "atomic_chg_" ++ prettyString t ++ "_" ++ atomicSpace s
-    -- First the 64-bit operations.
+    -- 64-bit operations
     atomicOps s (AtomicAdd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_add" [C.cty|typename int64_t|]
     atomicOps s (AtomicFAdd Float64 old arr ind val) =
@@ -711,6 +713,15 @@ inKernelOperations env mode body =
       doAtomicCmpXchg s (IntType Int64) old arr ind cmp val [C.cty|typename int64_t|]
     atomicOps s (AtomicXchg (IntType Int64) old arr ind val) =
       doAtomicXchg s (IntType Int64) old arr ind val [C.cty|typename int64_t|]
+    -- 16 bit operations
+    atomicOps s (AtomicAdd Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_add" [C.cty|typename int16_t|]
+    atomicOps s (AtomicFAdd Float16 old arr ind val) =
+      doAtomic s Float16 old arr ind val "atomic_fadd" [C.cty|typename f16|]
+    atomicOps s (AtomicCmpXchg (IntType Int16) old arr ind cmp val) =
+      doAtomicCmpXchg s Int16 old arr ind cmp val [C.cty|typename int16_t|]
+    atomicOps s (AtomicXchg (IntType Int16) old arr ind val) =
+      doAtomicXchg s Int16 old arr ind val [C.cty|typename int16_t|]
     --
     atomicOps s (AtomicAdd t old arr ind val) =
       doAtomic s t old arr ind val "atomic_add" [C.cty|int|]

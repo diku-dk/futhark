@@ -29,6 +29,7 @@ module Futhark.CodeGen.RTS.C
     backendsHipH,
     backendsCH,
     backendsMulticoreH,
+    backendsWebGPUH,
   )
 where
 
@@ -40,7 +41,14 @@ import Data.Text qualified as T
 
 -- | @rts/c/atomics.h@
 atomicsH :: T.Text
-atomicsH = $(embedStringFile "rts/c/atomics.h")
+atomicsH =
+  -- The order matters, as e.g. atomics16.h is implemented in terms of 32-bit
+  -- atomics.
+  mconcat
+    [ $(embedStringFile "rts/c/atomics64.h"),
+      $(embedStringFile "rts/c/atomics32.h"),
+      $(embedStringFile "rts/c/atomics16.h")
+    ]
 {-# NOINLINE atomicsH #-}
 
 -- | @rts/c/uniform.h@
@@ -167,6 +175,11 @@ backendsCH = $(embedStringFile "rts/c/backends/c.h")
 backendsMulticoreH :: T.Text
 backendsMulticoreH = $(embedStringFile "rts/c/backends/multicore.h")
 {-# NOINLINE backendsMulticoreH #-}
+
+-- | @rts/c/backends/webgpu.h@
+backendsWebGPUH :: T.Text
+backendsWebGPUH = $(embedStringFile "rts/c/backends/webgpu.h")
+{-# NOINLINE backendsWebGPUH #-}
 
 -- | @rts/c/copy.h@
 copyH :: T.Text
