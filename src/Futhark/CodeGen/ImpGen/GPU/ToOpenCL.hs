@@ -688,7 +688,7 @@ inKernelOperations env mode body =
       GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
       where
         op = "atomic_chg_" ++ prettyString t ++ "_" ++ atomicSpace s
-    -- First the 64-bit operations.
+    -- 64-bit operations
     atomicOps s (AtomicAdd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_add" [C.cty|typename int64_t|]
     atomicOps s (AtomicFAdd Float64 old arr ind val) =
@@ -711,6 +711,15 @@ inKernelOperations env mode body =
       doAtomicCmpXchg s (IntType Int64) old arr ind cmp val [C.cty|typename int64_t|]
     atomicOps s (AtomicXchg (IntType Int64) old arr ind val) =
       doAtomicXchg s (IntType Int64) old arr ind val [C.cty|typename int64_t|]
+    -- 16 bit operations
+    atomicOps s (AtomicAdd Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_add" [C.cty|typename int16_t|]
+    atomicOps s (AtomicFAdd Float16 old arr ind val) =
+      doAtomic s Float16 old arr ind val "atomic_fadd" [C.cty|typename f16|]
+    atomicOps s (AtomicCmpXchg (IntType Int16) old arr ind cmp val) =
+      doAtomicCmpXchg s Int16 old arr ind cmp val [C.cty|typename int16_t|]
+    atomicOps s (AtomicXchg (IntType Int16) old arr ind val) =
+      doAtomicXchg s Int16 old arr ind val [C.cty|typename int16_t|]
     --
     atomicOps s (AtomicAdd t old arr ind val) =
       doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
