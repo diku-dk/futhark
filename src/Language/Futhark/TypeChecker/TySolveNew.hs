@@ -213,6 +213,8 @@ occursCheck :: Reason Type -> VName -> Type -> SolveM s ()
 occursCheck reason v tp = do
   tp' <- substTyVars tp
   let vars = typeVars tp'
+  -- TODO: This isn't necessary but it might be faster to keep it;
+  -- TODO: determine whether it should be kept or not.
   when (v `S.member` vars) . typeError (locOf reason) mempty $
     "Occurs check: cannot instantiate"
       <+> prettyName v
