@@ -18,11 +18,11 @@ SCALAR_FUN_ATTR int16_t atomic_add_i16_global(volatile __global int16_t *p, int1
   int32_t shifted_val = val << shift;
 
   int32_t old = *p32;
-  int32_t new = (old & ~mask) | mask & (((old >> shift) + val) << shift);
+  int32_t upd = (old & ~mask) | mask & (((old >> shift) + val) << shift);
 
-  while (atomic_cmpxchg_i32_global(p32, old, new) != old) {
+  while (atomic_cmpxchg_i32_global(p32, old, upd) != old) {
     old = *p32;
-    new = (old & ~mask) | (((old >> shift) + val) << shift);
+    upd = (old & ~mask) | (((old >> shift) + val) << shift);
   }
   return old >> shift;
 }
@@ -36,11 +36,11 @@ SCALAR_FUN_ATTR int16_t atomic_add_i16_shared(volatile __local int16_t *p, int16
   int32_t shifted_val = val << shift;
 
   int32_t old = *p32;
-  int32_t new = (old & ~mask) | mask & (((old >> shift) + val) << shift);
+  int32_t upd = (old & ~mask) | mask & (((old >> shift) + val) << shift);
 
-  while (atomic_cmpxchg_i32_shared(p32, old, new) != old) {
+  while (atomic_cmpxchg_i32_shared(p32, old, upd) != old) {
     old = *p32;
-    new = (old & ~mask) | (((old >> shift) + val) << shift);
+    upd = (old & ~mask) | (((old >> shift) + val) << shift);
   }
   return old >> shift;
 }
@@ -56,11 +56,11 @@ SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_global(volatile __global int16_t *p,
   int32_t shifted_cmp = cmp << shift;
 
   uint32_t old = (*p32 & ~mask) | shifted_cmp;
-  uint32_t new = (old & ~mask) | shifted_val;
+  uint32_t upd = (old & ~mask) | shifted_val;
 
-  while (atomic_cmpxchg_i32_global(p32, old, new) != old) {
+  while (atomic_cmpxchg_i32_global(p32, old, upd) != old) {
     old = (*p32 & ~mask) | shifted_cmp;
-    new = (old & ~mask) | shifted_val;
+    upd = (old & ~mask) | shifted_val;
   }
   return old >> shift;
 }
@@ -76,11 +76,11 @@ SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_shared(volatile __local int16_t *p,
   int32_t shifted_cmp = cmp << shift;
 
   uint32_t old = (*p32 & ~mask) | shifted_cmp;
-  uint32_t new = (old & ~mask) | shifted_val;
+  uint32_t upd = (old & ~mask) | shifted_val;
 
-  while (atomic_cmpxchg_i32_shared(p32, old, new) != old) {
+  while (atomic_cmpxchg_i32_shared(p32, old, upd) != old) {
     old = (*p32 & ~mask) | shifted_cmp;
-    new = (old & ~mask) | shifted_val;
+    upd = (old & ~mask) | shifted_val;
   }
   return old >> shift;
 }
