@@ -197,11 +197,19 @@ tests =
           (M.fromList [tvFree "a_0" 0])
           ".?([Cc]annot unify).?",
 
-      testCase "infinite type (function)" $
+      testCase "infinite type (function) 1" $
         testSolveFail
           ["a_0" ~ "a_0 -> b_1"]
           mempty
           (M.fromList [tvFree "a_0" 0])
+          ".?([Oo]ccurs check).?",
+
+      -- ! This case acts weird for the original implementation.
+      testCase "infinite type (function) 2" $
+        testSolveFail
+          ["a_0" ~ "b_1 -> i32", "b_1" ~ "c_2", "b_1" ~ "d_3", "a_0" ~ "d_3"]
+          mempty
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
           ".?([Oo]ccurs check).?",
 
       testCase "infinite type (list)" $
@@ -218,11 +226,33 @@ tests =
           (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
 
-      testCase "infinite type (record)" $
+      testCase "infinite type (record) 1" $
         testSolveFail
           ["a_0" ~ "{foo: a_0, bar: f32}"]
           mempty
           (M.fromList [tvFree "a_0" 0])
+          ".?([Oo]ccurs check).?",
+
+      -- ! This case never finishes for the original implementation.
+      testCase "infinite type (record) 2" $
+        testSolveFail
+          ["a_0" ~ "{foo: b_1}", "b_1" ~ "c_2", "a_0" ~ "c_2"]
+          mempty
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0])
+          ".?([Oo]ccurs check).?",
+
+      testCase "infinite type (record) 3" $
+        testSolveFail
+          ["a_0" ~ "{foo: b_1}", "c_2" ~ "b_1", "a_0" ~ "c_2"]
+          mempty
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0])
+          ".?([Oo]ccurs check).?",
+
+      testCase "infinite type (record) 4" $
+        testSolveFail
+          ["a_0" ~ "{foo: b_1}", "c_2" ~ "b_1", "d_3" ~ "c_2", "a_0" ~ "c_2"]
+          mempty
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
           ".?([Oo]ccurs check).?",
 
       -- testCase "infinite type (sum type)" $
@@ -237,6 +267,14 @@ tests =
           ["a_0" ~ "*[]a_0"]
           mempty
           (M.fromList [tvFree "a_0" 0])
+          ".?([Oo]ccurs check).?",
+
+      -- ! This case acts weird for the original implementation.
+      testCase "infinite type (nested)" $
+        testSolveFail
+          ["a_0" ~ "{foo: i32, bar: b_1}", "b_1" ~ "c_2", "c_2" ~ "i32 -> []a_0"]
+          mempty
+          (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0])
           ".?([Oo]ccurs check).?",
 
       testCase "vector and 2D matrix" $
