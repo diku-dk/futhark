@@ -72,9 +72,9 @@ SCALAR_FUN_ATTR int8_t atomic_cmpxchg_i8_shared(volatile __local int8_t *p,
     int offset = ((uintptr_t)p & 3);                                    \
     volatile __global int32_t *p32 = (volatile __global int32_t*)((uintptr_t)p & ~0x3); \
     int shift = offset * 8;                                             \
-    int32_t mask = 0xff << shift;                                     \
+    int32_t mask = 0xff << shift;                                       \
     int32_t old = 0;                                                    \
-    int32_t upd = (old & ~mask) | mask & (op(old >> shift, val) << shift); \
+    int32_t upd = mask & (op(old >> shift, val) << shift);              \
     int32_t saw;                                                        \
     while ((saw=atomic_cmpxchg_i32_global(p32, old, upd)) != old) {     \
       old = saw;                                                        \
@@ -87,9 +87,9 @@ SCALAR_FUN_ATTR int8_t atomic_cmpxchg_i8_shared(volatile __local int8_t *p,
     int offset = ((uintptr_t)p & 3);                                    \
     volatile __local int32_t *p32 = (volatile __local int32_t*)((uintptr_t)p & ~0x3); \
     int shift = offset * 8;                                             \
-    int32_t mask = 0xff << shift;                                     \
+    int32_t mask = 0xff << shift;                                       \
     int32_t old = 0;                                                    \
-    int32_t upd = (old & ~mask) | mask & ((op(old >> shift, val)) << shift); \
+    int32_t upd = mask & ((op(old >> shift, val)) << shift);            \
     int32_t saw;                                                        \
     while ((saw=atomic_cmpxchg_i32_shared(p32, old, upd)) != old) {     \
       old = saw;                                                        \

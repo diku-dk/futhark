@@ -76,7 +76,7 @@ SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_shared(volatile __local int16_t *p,
     int shift = offset * 16;                                            \
     int32_t mask = 0xffff << shift;                                     \
     int32_t old = 0;                                                    \
-    int32_t upd = (old & ~mask) | mask & (op(old >> shift, val) << shift); \
+    int32_t upd = mask & (op(old >> shift, val) << shift);              \
     int32_t saw;                                                        \
     while ((saw=atomic_cmpxchg_i32_global(p32, old, upd)) != old) {     \
       old = saw;                                                        \
@@ -91,7 +91,7 @@ SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_shared(volatile __local int16_t *p,
     int shift = offset * 16;                                            \
     int32_t mask = 0xffff << shift;                                     \
     int32_t old = 0;                                                    \
-    int32_t upd = (old & ~mask) | mask & ((op(old >> shift, val)) << shift); \
+    int32_t upd = mask & ((op(old >> shift, val)) << shift);            \
     int32_t saw;                                                        \
     while ((saw=atomic_cmpxchg_i32_shared(p32, old, upd)) != old) {     \
       old = saw;                                                        \
