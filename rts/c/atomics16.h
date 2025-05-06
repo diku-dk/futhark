@@ -6,8 +6,8 @@ SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_shared(volatile __local int16_t *p,
                                                   int16_t cmp, int16_t val);
 SCALAR_FUN_ATTR int16_t atomic_add_i16_global(volatile __global int16_t *p, int16_t x);
 SCALAR_FUN_ATTR int16_t atomic_add_i16_shared(volatile __local int16_t *p, int16_t x);
-SCALAR_FUN_ATTR f16 atomic_fadd_f16_global(volatile __global f16 *p, f16 x);
-SCALAR_FUN_ATTR f16 atomic_fadd_f16_shared(volatile __local f16 *p, f16 x);
+SCALAR_FUN_ATTR f16 atomic_fadd_f16_global(volatile __global uint16_t *p, f16 x);
+SCALAR_FUN_ATTR f16 atomic_fadd_f16_shared(volatile __local uint16_t *p, f16 x);
 SCALAR_FUN_ATTR int16_t atomic_smax_i16_global(volatile __global int16_t *p, int16_t x);
 SCALAR_FUN_ATTR int16_t atomic_smax_i16_shared(volatile __local int16_t *p, int16_t x);
 SCALAR_FUN_ATTR int16_t atomic_smin_i16_global(volatile __global int16_t *p, int16_t x);
@@ -144,7 +144,7 @@ SCALAR_FUN_ATTR int16_t atomic_xor_i16_shared(volatile __local int16_t *p, int16
   return atomic_xor_i32_shared(p32, (uint16_t)val<<shift) >> shift;
 }
 
-SCALAR_FUN_ATTR f16 atomic_fadd_f16_global(volatile __global f16 *p, f16 val) {
+SCALAR_FUN_ATTR f16 atomic_fadd_f16_global(volatile __global uint16_t *p, f16 val) {
   int offset = ((uintptr_t)p >> 1 & 1);
   volatile __global int32_t *p32 = (volatile __global int32_t*)((uintptr_t)p & ~0x3);
   int shift = offset * 16;
@@ -154,12 +154,24 @@ SCALAR_FUN_ATTR f16 atomic_fadd_f16_global(volatile __global f16 *p, f16 val) {
   int32_t saw;
   while ((saw=atomic_cmpxchg_i32_global(p32, old, upd)) != old) {
     old = saw;
-    upd = (old & ~mask) | (int32_t)futrts_to_bits16(futrts_from_bits16(old >> shift) + val) << shift;
+    upd = (old & ~mask) | (int32_t)futrts_to_bits16(futrts_from_bits16((uint32_t)old >> shift) + val) << shift;
   }
-  return futrts_from_bits16(old >> shift);
+  return futrts_from_bits16((uint32_t)old >> shift);
 }
 
-SCALAR_FUN_ATTR f16 atomic_fadd_f16_shared(volatile __local f16 *p, f16 val) {
+SCALAR_FUN_ATTR f16 atomic_fadd_f16_shared(volatile __local uint16_t *p, f16 val) {
+  int offset = ((uintptr_t)p >> 1 & 1);
+  volatile __local int32_t *p32 = (volatile __local int32_t*)((uintptr_t)p & ~0x3);
+  int shift = offset * 16;
+  int32_t mask = 0xffff << shift;
+  int32_t old = 0;
+  int32_t upd = mask & ((int32_t)futrts_to_bits16(val) << shift);
+  int32_t saw;
+  while ((saw=atomic_cmpxchg_i32_shared(p32, old, upd)) != old) {
+    old = saw;
+    upd = (old & ~mask) | (int32_t)futrts_to_bits16(futrts_from_bits16((uint32_t)old >> shift) + val) << shift;
+  }
+  return futrts_from_bits16((uint32_t)old >> shift);
 }
 
 

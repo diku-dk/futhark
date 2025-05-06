@@ -669,7 +669,7 @@ inKernelOperations env mode body =
       ind' <- GC.compileExp $ untyped $ unCount ind
       val' <- GC.compileExp val
       cast <- atomicCast s ty
-      GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+      GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
       where
         op' = op ++ "_" ++ prettyString t ++ "_" ++ atomicSpace s
 
@@ -715,7 +715,7 @@ inKernelOperations env mode body =
     atomicOps s (AtomicAdd Int16 old arr ind val) =
       doAtomic s Int16 old arr ind val "atomic_add" [C.cty|typename int16_t|]
     atomicOps s (AtomicFAdd Float16 old arr ind val) =
-      doAtomic s Float16 old arr ind val "atomic_fadd" [C.cty|typename f16|]
+      doAtomic s Float16 old arr ind val "atomic_fadd" [C.cty|typename uint16_t|]
     atomicOps s (AtomicSMax Int16 old arr ind val) =
       doAtomic s Int16 old arr ind val "atomic_smax" [C.cty|typename int16_t|]
     atomicOps s (AtomicSMin Int16 old arr ind val) =
