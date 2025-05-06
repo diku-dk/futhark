@@ -593,8 +593,9 @@ instance AliasedOp SOAC where
     namesFromList $ map (\(_, _, a) -> a) spec
   consumedInOp (Hist _ _ ops _) =
     namesFromList $ concatMap histDest ops
-  consumedInOp (ScanScatter _ arrs map_lam _ _ _) =
-    mapNames consumedArray $ consumedByLambda map_lam
+  consumedInOp (ScanScatter _ arrs map_lam _ spec _) =
+    mapNames consumedArray (consumedByLambda map_lam)
+      <> namesFromList (map (\(_, _, a) -> a) spec)
     where
       consumedArray v = fromMaybe v $ lookup v params_to_arrs
       params_to_arrs = zip (map paramName $ lambdaParams map_lam) arrs
