@@ -714,6 +714,8 @@ inKernelOperations env mode body =
     -- 16 bit operations
     atomicOps s (AtomicAdd Int16 old arr ind val) =
       doAtomic s Int16 old arr ind val "atomic_add" [C.cty|typename int16_t|]
+    atomicOps s (AtomicFAdd Float16 old arr ind val) =
+      doAtomic s Float16 old arr ind val "atomic_fadd" [C.cty|typename f16|]
     atomicOps s (AtomicSMax Int16 old arr ind val) =
       doAtomic s Int16 old arr ind val "atomic_smax" [C.cty|typename int16_t|]
     atomicOps s (AtomicSMin Int16 old arr ind val) =

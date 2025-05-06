@@ -6,6 +6,8 @@ SCALAR_FUN_ATTR int16_t atomic_cmpxchg_i16_shared(volatile __local int16_t *p,
                                                   int16_t cmp, int16_t val);
 SCALAR_FUN_ATTR int16_t atomic_add_i16_global(volatile __global int16_t *p, int16_t x);
 SCALAR_FUN_ATTR int16_t atomic_add_i16_shared(volatile __local int16_t *p, int16_t x);
+SCALAR_FUN_ATTR f16 atomic_fadd_f32_global(volatile __global f16 *p, f16 x);
+SCALAR_FUN_ATTR f16 atomic_fadd_f32_shared(volatile __local f16 *p, f16 x);
 SCALAR_FUN_ATTR int16_t atomic_smax_i16_global(volatile __global int16_t *p, int16_t x);
 SCALAR_FUN_ATTR int16_t atomic_smax_i16_shared(volatile __local int16_t *p, int16_t x);
 SCALAR_FUN_ATTR int16_t atomic_smin_i16_global(volatile __global int16_t *p, int16_t x);
