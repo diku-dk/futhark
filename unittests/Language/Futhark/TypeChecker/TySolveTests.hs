@@ -391,7 +391,8 @@ tests =
           ]
           mempty
           (M.fromList [
-            tvRecord "a_0" 0 $ M.fromList [("foo", Scalar (Prim (Signed Int32))), ("bar", Scalar (Prim (FloatType Float64)))], 
+            tvRecord "a_0" 0 $ M.fromList [("foo", Scalar (Prim (Signed Int32))),
+                                           ("bar", Scalar (Prim (FloatType Float64)))], 
             tvFree "d_3" 0,
             tvFree "e_4" 0,
             tvFree "f_5" 0
