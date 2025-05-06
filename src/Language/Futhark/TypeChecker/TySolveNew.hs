@@ -183,16 +183,17 @@ substTyVars (Scalar (TypeVar u qn args)) = do
   case mb_node of
     Just node -> do
       sol <- getSol' node
+      qn_k <- qualName <$> getKey' node
       case sol of
         Solved t -> do
           t' <- substTyVars t
           pure $ second (const mempty) t'
-        _ -> makeTyVar
-    _ -> makeTyVar
+        _ -> makeTyVar qn_k
+    _ -> makeTyVar qn
   where
-    makeTyVar = do
+    makeTyVar qn' = do
       args' <- mapM onArg args
-      pure $ Scalar $ TypeVar u qn args'
+      pure $ Scalar $ TypeVar u qn' args'
     onArg (TypeArgType t) = TypeArgType <$> substTyVars t
     onArg d@(TypeArgDim _) = pure d
 substTyVars p@(Scalar (Prim _)) = pure p
@@ -209,45 +210,23 @@ substTyVars (Array u shape elemt) = do
   elemt' <- substTyVars $ Scalar elemt
   pure $ arrayOfWithAliases u shape elemt'
 
-occursCheck :: Reason Type -> VName -> Type -> SolveM s ()
-occursCheck reason v tp = do
+occursCheck :: Reason Type -> VName -> VName -> Type -> SolveM s ()
+occursCheck reason v k tp = do
   tp' <- substTyVars tp
   let vars = typeVars tp'
-  -- TODO: This isn't necessary but it might be faster to keep it;
-  -- TODO: determine whether it should be kept or not.
-  when (v `S.member` vars) . typeError (locOf reason) mempty $
+  when (k `S.member` vars) . typeError (locOf reason) mempty $
     "Occurs check: cannot instantiate"
       <+> prettyName v
       <+> "with"
       <+> pretty tp
       <> "."
 
-  v_node <- lookupUF v
-  v_repr <- getKey' v_node
-  forM_ vars $ \tv -> do
-    mb_node <- maybeLookupUF tv
-    case mb_node of
-      Nothing -> pure ()
-      Just t_node -> do
-        t_repr <- getKey' t_node
-        when (v_repr == t_repr) . typeError (locOf reason) mempty $
-          "Occurs check: cannot instantiate"
-            <+> prettyName v
-            <+> "with"
-            <+> pretty tp
-            <> "."
-            </> "This is because both"
-            <+> prettyName v 
-            <+> "and"
-            <+> prettyName tv
-            <+> "are bound to"
-            <+> prettyName v_repr
-            <> "."
-
 bindTyVar :: Reason Type -> BreadCrumbs -> VName -> Type -> SolveM s ()
 bindTyVar reason bcs v t = do
-  occursCheck reason v t
   v_node <- lookupUF v
+  k <- getKey' v_node
+  occursCheck reason v k t
+
   v_info <- getSol' v_node
 
   setInfo v_node (Solved t)
