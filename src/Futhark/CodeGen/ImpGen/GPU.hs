@@ -76,7 +76,17 @@ openclAtomics, cudaAtomics :: AtomicBinOp
         (Or Int16, Imp.AtomicOr Int16),
         (Xor Int16, Imp.AtomicXor Int16)
       ]
-    opencl = opencl16 ++ opencl32 ++ opencl64
+    opencl8 =
+      [ (Add Int8 OverflowUndef, Imp.AtomicAdd Int8),
+        (SMax Int8, Imp.AtomicSMax Int8),
+        (SMin Int8, Imp.AtomicSMin Int8),
+        (UMax Int8, Imp.AtomicUMax Int8),
+        (UMin Int8, Imp.AtomicUMin Int8),
+        (And Int8, Imp.AtomicAnd Int8),
+        (Or Int8, Imp.AtomicOr Int8),
+        (Xor Int8, Imp.AtomicXor Int8)
+      ]
+    opencl = opencl8 <> opencl16 <> opencl32 <> opencl64
     cuda = opencl
 
 compileProg ::

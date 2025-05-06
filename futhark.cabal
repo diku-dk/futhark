@@ -36,6 +36,7 @@ build-type:     Simple
 extra-source-files:
 -- Cabal's recompilation tracking doesn't work when we use wildcards
 -- here, so for now we spell out every single file.
+    rts/c/atomics8.h
     rts/c/atomics16.h
     rts/c/atomics32.h
     rts/c/atomics64.h

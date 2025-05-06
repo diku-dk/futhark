@@ -46,7 +46,8 @@ atomicsH =
   mconcat
     [ $(embedStringFile "rts/c/atomics64.h"),
       $(embedStringFile "rts/c/atomics32.h"),
-      $(embedStringFile "rts/c/atomics16.h")
+      $(embedStringFile "rts/c/atomics16.h"),
+      $(embedStringFile "rts/c/atomics8.h")
     ]
 {-# NOINLINE atomicsH #-}
 
