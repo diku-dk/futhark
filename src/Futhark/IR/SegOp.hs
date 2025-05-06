@@ -1557,7 +1557,12 @@ segOpReturns k@(SegMap _ _ _ kbody) =
   kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns k@(SegRed _ _ _ kbody _) =
   kernelBodyReturns kbody . extReturns =<< opType k
-segOpReturns k@(SegScan _ _ _ kbody _ _) =
-  kernelBodyReturns kbody . extReturns =<< opType k
+segOpReturns k@(SegScan _ _ _ _ _ post_op) =
+  zipWithM correct maybe_dest . extReturns =<< opType k
+  where
+    dest = segPostOpScatterSpec post_op
+    maybe_dest = fmap (\(_, _, n) -> Just n) dest <> repeat Nothing
+    correct (Just arr) _ = varReturns arr
+    correct _ ret = pure ret
 segOpReturns (SegHist _ _ _ _ ops) =
   concat <$> mapM (mapM varReturns . histDest) ops
