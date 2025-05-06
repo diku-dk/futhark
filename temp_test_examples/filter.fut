@@ -1,13 +1,18 @@
-entry main [n] (as: [n]i32): *[]i32 =
-  if n != 0 then
-    let flags = map (\x -> if x i32.% 2 |> bool.i32 then 1 else 0) as
+def filter' [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
+  if n == 0
+  then []
+  else
+    let flags = map (\x -> if p x then 1 else 0) as
     let offsets = scan (+) 0 flags
     let result =
-      scatter (replicate n 0)
-            (map2 (\f o -> if f==1 then o-1 else -1) flags offsets)
-            as
-    in result[:last offsets]
-  else []
+      scatter (map (\_ -> as[0]) (0..1..<n))
+              (map2 (\f o -> if f==1 then o-1 else -1) flags offsets)
+              as
+    in result[:offsets[n - 1]]
+
+
+entry main [n] (as: [n]i32): *[]i32 =
+  filter' ((i32.% 2) >-> bool.i32) as
 
 -- ==
 -- entry: test
