@@ -244,7 +244,7 @@ static int gpu_alloc(struct futhark_context *ctx, FILE *log,
 
   // Round up the allocation to be at least divisible by 4, because that is
   // assumed by the code generator.
-  min_size += (min_size+3) & ~3;
+  min_size = (min_size+3) & ~3;
 
   gpu_mem* memptr;
   if (free_list_find(&ctx->gpu_free_list, min_size, tag, size_out, (fl_mem*)&memptr) == 0) {
