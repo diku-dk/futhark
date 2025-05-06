@@ -174,5 +174,4 @@ SCALAR_FUN_ATTR f16 atomic_fadd_f16_shared(volatile __local uint16_t *p, f16 val
   return futrts_from_bits16((uint32_t)old >> shift);
 }
 
-
 // End of atomics16.h
