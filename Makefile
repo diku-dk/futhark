@@ -53,6 +53,9 @@ test-oclgrind:
 test-c:
 	cabal run -- futhark test tests -c --backend=c --no-tuning
 
+test-multicore:
+	cabal run -- futhark test tests -c --backend=multicore --no-tuning
+
 test-interpreter:
 	cabal run -- futhark test tests -i
 
