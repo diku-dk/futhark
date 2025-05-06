@@ -25,6 +25,14 @@ typedef unsigned int uint32_t;
 typedef unsigned long uint64_t;
 #endif
 
+#if defined(__CUDACC_RTC__)
+typedef uint64_t uintptr_t;
+#endif
+
+#if defined(__HIPCC_RTC__)
+typedef uint64_t uintptr_t;
+#endif
+
 #define __global
 #define __local
 #define __private
