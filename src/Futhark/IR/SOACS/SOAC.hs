@@ -700,8 +700,12 @@ instance IsOp SOAC where
         reductionDependencies mempty lam nes deps_in
       depsOfRed (Reduce _ lam nes, deps_in) =
         reductionDependencies mempty lam nes deps_in
-  opDependencies (ScanScatter w arrs map_lam _scan _dests _scatter_lam) =
-    lambdaDependencies mempty map_lam (depsOfArrays w arrs)
+  opDependencies (ScanScatter w arrs map_lam _scan dests _scatter_lam) =
+    let deps = lambdaDependencies mempty map_lam (depsOfArrays w arrs)
+     in map flattenBlocks (groupScatterResults dests deps)
+    where
+      flattenBlocks (_, arr, ivs) =
+        oneName arr <> mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t
