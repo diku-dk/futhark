@@ -698,9 +698,9 @@ inKernelOperations env mode body =
     atomicOps s (AtomicSMin Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_smin" [C.cty|typename int64_t|]
     atomicOps s (AtomicUMax Int64 old arr ind val) =
-      doAtomic s Int64 old arr ind val "atomic_umax" [C.cty|unsigned int64_t|]
+      doAtomic s Int64 old arr ind val "atomic_umax" [C.cty|typename uint64_t|]
     atomicOps s (AtomicUMin Int64 old arr ind val) =
-      doAtomic s Int64 old arr ind val "atomic_umin" [C.cty|unsigned int64_t|]
+      doAtomic s Int64 old arr ind val "atomic_umin" [C.cty|typename uint64_t|]
     atomicOps s (AtomicAnd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_and" [C.cty|typename int64_t|]
     atomicOps s (AtomicOr Int64 old arr ind val) =
@@ -719,9 +719,9 @@ inKernelOperations env mode body =
     atomicOps s (AtomicSMin Int16 old arr ind val) =
       doAtomic s Int16 old arr ind val "atomic_smin" [C.cty|typename int16_t|]
     atomicOps s (AtomicUMax Int16 old arr ind val) =
-      doAtomic s Int16 old arr ind val "atomic_umax" [C.cty|unsigned int16_t|]
+      doAtomic s Int16 old arr ind val "atomic_umax" [C.cty|typename uint16_t|]
     atomicOps s (AtomicUMin Int16 old arr ind val) =
-      doAtomic s Int16 old arr ind val "atomic_umin" [C.cty|unsigned int16_t|]
+      doAtomic s Int16 old arr ind val "atomic_umin" [C.cty|typename uint16_t|]
     atomicOps s (AtomicAnd Int16 old arr ind val) =
       doAtomic s Int16 old arr ind val "atomic_and" [C.cty|typename int16_t|]
     atomicOps s (AtomicOr Int16 old arr ind val) =
