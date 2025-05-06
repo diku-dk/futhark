@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* GPU backends: more efficient atomic operations on 8-bit and 16-bit quantities.
+  This helps histograms on these types, as well as AD on programs that use
+  `f16`.
+
 ### Removed
 
 ### Changed
