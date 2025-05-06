@@ -714,6 +714,20 @@ inKernelOperations env mode body =
     -- 16 bit operations
     atomicOps s (AtomicAdd Int16 old arr ind val) =
       doAtomic s Int16 old arr ind val "atomic_add" [C.cty|typename int16_t|]
+    atomicOps s (AtomicSMax Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_smax" [C.cty|typename int16_t|]
+    atomicOps s (AtomicSMin Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_smin" [C.cty|typename int16_t|]
+    atomicOps s (AtomicUMax Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_umax" [C.cty|unsigned int16_t|]
+    atomicOps s (AtomicUMin Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_umin" [C.cty|unsigned int16_t|]
+    atomicOps s (AtomicAnd Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_and" [C.cty|typename int16_t|]
+    atomicOps s (AtomicOr Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_or" [C.cty|typename int16_t|]
+    atomicOps s (AtomicXor Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_xor" [C.cty|typename int16_t|]
     atomicOps s (AtomicCmpXchg (IntType Int16) old arr ind cmp val) =
       doAtomicCmpXchg s Int16 old arr ind cmp val [C.cty|typename int16_t|]
     atomicOps s (AtomicXchg (IntType Int16) old arr ind val) =
