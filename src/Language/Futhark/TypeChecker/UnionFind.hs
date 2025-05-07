@@ -63,7 +63,6 @@ data ReprInfo = MkInfo
   , key :: {-# UNPACK #-} !TyVar
     -- ^ The name of the type variable representing the equivalence class.
 
-  --   -- TODO: Should we have this "permanent" level field?
   , level :: {-# UNPACK #-} !Level
   --   -- ^ The level of the representative type variable.
   } deriving Eq
@@ -142,7 +141,6 @@ getKey node = do
 getLvl :: TyVarNode s -> ST s Level
 getLvl node = do
   level <$> (readSTRef =<< descrRef node)
-
 
 -- | Assign a new solution/type to the node's equivalence class.
 --
