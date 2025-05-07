@@ -91,7 +91,7 @@ nonsegmentedScan pat space ts kbody scan_ops post_op nsubtasks = do
 
     let nsubtasks' = tvExp nsubtasks
     sIf
-      (nsubtasks' .>. -1)
+      (nsubtasks' .>. 1)
       ( do
           scan_out <- forM scan_ts $ \(s, t) ->
             sAllocArray "scan_out" (elemType t) (shpOfT t s) DefaultSpace
@@ -109,9 +109,10 @@ nonsegmentedScan pat space ts kbody scan_ops post_op nsubtasks = do
           scanStage3 pat space scan_ops3 carries post_op scan_out map_out
       )
       ( do
-          pure ()
-          -- emit $ Imp.DebugPrint "Scan 1 subtask" Nothing
-          -- scan1Subtask pat space kbody scan_ops post_op
+          scan_ops_1_subtask <- renameSegBinOp scan_ops
+          post_op_1_subntask <- renameSegPostOp post_op
+          emit $ Imp.DebugPrint "Scan 1 subtask" Nothing
+          scan1Subtask pat space kbody scan_ops_1_subtask post_op_1_subntask
       )
 
 -- Different ways to generate code for a scan loop
@@ -225,14 +226,14 @@ applyScanOpsAndMap1Subtask typ pat space all_scan_res all_map_res scan_ops post_
       groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
       (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
 
+  dScope Nothing $
+    scopeOfLParams $
+      lambdaParams $
+        segPostOpLambda post_op
+
   -- Potential vector load and then do sequential scan
   getScanLoop typ $ \j -> do
-    dScope Nothing $
-      scopeOfLParams $
-        lambdaParams $
-          segPostOpLambda post_op
-
-    forM_ (zip4 per_scan_pars scan_ops per_scan_res local_accs) $ \(pars, scan_op, scan_res, accs) ->
+    forM_ (zip3 scan_ops per_scan_res local_accs) $ \(scan_op, scan_res, accs) ->
       getNestLoop typ (segBinOpShape scan_op) $ \vec_is -> do
         sComment "Read accumulator" $
           forM_ (zip (xParams scan_op) accs) $ \(p, acc) -> do
@@ -245,15 +246,18 @@ applyScanOpsAndMap1Subtask typ pat space all_scan_res all_map_res scan_ops post_
         -- Scan body
         sComment "Scan op body" $
           compileStms mempty (bodyStms $ lamBody scan_op) $
-            forM_ (zip3 pars accs $ map resSubExp $ bodyResult $ lamBody scan_op) $
-              \(par, acc, se) -> do
+            forM_ (zip accs $ map resSubExp $ bodyResult $ lamBody scan_op) $
+              \(acc, se) -> do
                 copyDWIMFix acc vec_is se []
-                copyDWIMFix (paramName par) vec_is se []
+
+    sComment "bind scan results to post lambda params" $ do
+      forM_ (zip local_accs per_scan_pars) $ \(accs, pars) ->
+        forM_ (zip accs pars) $ \(acc, par) ->
+          copyDWIMFix (paramName par) [] (Var acc) []
 
     sComment "bind map results to post lamda params" $
       forM_ (zip map_pars all_map_res) $ \(par, subexp) -> do
-        let is' = map (Imp.le64 . fst) $ unSegSpace space
-        copyDWIMFix (paramName par) is' subexp []
+        copyDWIMFix (paramName par) [] subexp []
 
     sComment "compute post op." $
       compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do

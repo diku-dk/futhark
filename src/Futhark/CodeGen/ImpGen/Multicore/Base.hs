@@ -26,6 +26,7 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     inISPC,
     toParam,
     sLoopNestVectorized,
+    renameSegPostOp,
   )
 where
 
@@ -125,6 +126,11 @@ renameSegBinOp segbinops =
   forM segbinops $ \(SegBinOp comm lam ne shape) -> do
     lam' <- renameLambda lam
     pure $ SegBinOp comm lam' ne shape
+
+renameSegPostOp :: SegPostOp MCMem -> MulticoreGen (SegPostOp MCMem)
+renameSegPostOp (SegPostOp lam spec) = do
+  lam' <- renameLambda lam
+  pure $ SegPostOp lam spec
 
 compileThreadResult ::
   SegSpace ->
