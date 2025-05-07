@@ -8,18 +8,13 @@ import Language.Futhark.Deps
 import Language.Futhark.Syntax
 import Text.Read (readMaybe)
 
-containingModule :: Imports -> Pos -> Maybe FileModule
-containingModule imports (Pos file _ _ _) =
-  snd <$> find ((== file') . fst) imports
-  where
-    file' = mkInitialImport $ fst $ Posix.splitExtension file
-
 -- | Run @futhark deps@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions () [] "program" $ \args () ->
   case args of
     [file] -> do
-      (_, imports, _) <- readProgramOrDie
-      prog <- fileProg <$> containingModule imports pos
-      Just $ putStrLn printDeps file 
+      Just $ do
+        (_, imports, _) <- readProgramOrDie file
+        let fm = snd $ last imports
+          in putStrLn $ deps (fileProg fm)
     _ -> Nothing
