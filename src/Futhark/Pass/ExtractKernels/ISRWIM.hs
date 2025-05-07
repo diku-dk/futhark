@@ -24,7 +24,7 @@ iswim ::
   [(SubExp, VName)] ->
   Maybe (m ())
 iswim res_pat w scan_fun scan_input
-  | Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun = Just $ do
+  | Just (map_pat, map_aux, map_w, map_fun) <- rwimPossible scan_fun = Just $ do
       let (accs, arrs) = unzip scan_input
       arrs' <- transposedArrays arrs
       accs' <- mapM (letExp "acc" . BasicOp . SubExp) accs
@@ -65,10 +65,8 @@ iswim res_pat w scan_fun scan_input
           mapM (newIdent' (<> "_transposed") . transposeIdentType) $
             patIdents res_pat
 
-      addStm $
-        Let res_pat' (StmAux map_cs mempty ()) $
-          Op $
-            Screma map_w map_arrs' (mapSOAC map_fun')
+      addStm . Let res_pat' map_aux . Op $
+        Screma map_w map_arrs' (mapSOAC map_fun')
 
       forM_ (zip (patIdents res_pat) (patIdents res_pat')) $ \(to, from) -> do
         let perm = [1, 0] ++ [2 .. arrayRank (identType from) - 1]
@@ -88,7 +86,7 @@ irwim ::
   [(SubExp, VName)] ->
   Maybe (m ())
 irwim res_pat w comm red_fun red_input
-  | Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible red_fun = Just $ do
+  | Just (map_pat, map_aux, map_w, map_fun) <- rwimPossible red_fun = Just $ do
       let (accs, arrs) = unzip red_input
       arrs' <- transposedArrays arrs
       -- FIXME?  Can we reasonably assume that the accumulator is a
@@ -134,18 +132,15 @@ irwim res_pat w comm red_fun red_input
 
       let map_fun' = Lambda map_params map_rettype map_body
 
-      addStm $
-        Let res_pat (StmAux map_cs mempty ()) $
-          Op $
-            Screma map_w arrs' $
-              mapSOAC map_fun'
+      addStm . Let res_pat map_aux . Op . Screma map_w arrs' $
+        mapSOAC map_fun'
   | otherwise = Nothing
 
 -- | Does this reduce operator contain an inner map, and if so, what
 -- does that map look like?
 rwimPossible ::
   Lambda SOACS ->
-  Maybe (Pat Type, Certs, SubExp, Lambda SOACS)
+  Maybe (Pat Type, StmAux (), SubExp, Lambda SOACS)
 rwimPossible fun
   | Body _ stms res <- lambdaBody fun,
     [stm] <- stmsToList stms, -- Body has a single binding
@@ -154,7 +149,7 @@ rwimPossible fun
     Op (Screma map_w map_arrs form) <- stmExp stm,
     Just map_fun <- isMapSOAC form,
     map paramName (lambdaParams fun) == map_arrs =
-      Just (map_pat, stmCerts stm, map_w, map_fun)
+      Just (map_pat, stmAux stm, map_w, map_fun)
   | otherwise =
       Nothing
 

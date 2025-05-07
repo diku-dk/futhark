@@ -148,6 +148,10 @@ stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 instance Pretty Attrs where
   pretty = hsep . attrAnnots
 
+instance (Pretty dec) => Pretty (StmAux dec) where
+  pretty (StmAux cs attrs dec) =
+    braces $ mconcat $ punctuate semi [pretty cs, pretty attrs, pretty dec]
+
 instance (Pretty t) => Pretty (Pat t) where
   pretty (Pat xs) = braces $ commastack $ map pretty xs
 

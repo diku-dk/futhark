@@ -215,15 +215,15 @@ fixInputs w ourInps = mapM inspect
 -- | Reshape a map nest. It is assumed that any validity tests have
 -- already been done. Will automatically reshape the inputs
 -- appropriately.
-reshape :: (MonadFreshNames m) => Certs -> Shape -> MapNest -> m MapNest
-reshape cs shape (MapNest _ map_lam _ inps) =
+reshape :: (MonadFreshNames m) => StmAux () -> Shape -> MapNest -> m MapNest
+reshape aux shape (MapNest _ map_lam _ inps) =
   descend [] $ stripDims 1 shape
   where
     w = shapeSize 0 shape
     transform p inp =
       let shape' = shape <> arrayShape p
           inp_shape = arrayShape (SOAC.inputType inp)
-          tr = SOAC.Reshape cs $ reshapeAll inp_shape shape'
+          tr = SOAC.Reshape aux $ reshapeAll inp_shape shape'
        in SOAC.addTransform tr inp
     inps' = zipWith transform (map paramType $ lambdaParams map_lam) inps
 

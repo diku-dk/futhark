@@ -100,13 +100,13 @@ import Futhark.Util.Pretty qualified as PP
 -- create a list, use 'ArrayTransforms' instead.
 data ArrayTransform
   = -- | A permutation of an otherwise valid input.
-    Rearrange Certs [Int]
+    Rearrange (StmAux ()) [Int]
   | -- | A reshaping of an otherwise valid input.
-    Reshape Certs (NewShape SubExp)
+    Reshape (StmAux ()) (NewShape SubExp)
   | -- | Replicate the rows of the array a number of times.
-    Replicate Certs Shape
+    Replicate (StmAux ()) Shape
   | -- | An array indexing operation.
-    Index Certs (Slice SubExp)
+    Index (StmAux ()) (Slice SubExp)
   deriving (Show, Eq, Ord)
 
 instance FreeIn ArrayTransform where
@@ -232,7 +232,7 @@ combineTransforms _ _ = Nothing
 -- an input transformation of an array variable.  If so, return the
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
-transformFromExp :: Certs -> Exp rep -> Maybe (VName, ArrayTransform)
+transformFromExp :: StmAux () -> Exp rep -> Maybe (VName, ArrayTransform)
 transformFromExp cs (BasicOp (Futhark.Rearrange v perm)) =
   Just (v, Rearrange cs perm)
 transformFromExp cs (BasicOp (Futhark.Reshape v shape)) =
@@ -244,7 +244,7 @@ transformFromExp cs (BasicOp (Futhark.Index v slice)) =
 transformFromExp _ _ = Nothing
 
 -- | Turn an array transform on an array back into an expression.
-transformToExp :: (Monad m, HasScope rep m) => ArrayTransform -> VName -> m (Certs, Exp rep)
+transformToExp :: (Monad m, HasScope rep m) => ArrayTransform -> VName -> m (StmAux (), Exp rep)
 transformToExp (Replicate cs n) ia =
   pure (cs, BasicOp $ Futhark.Replicate n (Var ia))
 transformToExp (Rearrange cs perm) ia = do
@@ -294,10 +294,10 @@ isVarInput _ = Nothing
 isVarishInput :: Input -> Maybe VName
 isVarishInput (Input ts v t)
   | nullTransforms ts = Just v
-  | Reshape cs newshape :< ts' <- viewf ts,
+  | Reshape aux newshape :< ts' <- viewf ts,
     ReshapeCoerce <- reshapeKind newshape,
     1 <- shapeRank $ newShape newshape,
-    cs == mempty =
+    stmAuxCerts aux == mempty =
       isVarishInput $ Input ts' v t
 isVarishInput _ = Nothing
 
@@ -313,8 +313,8 @@ addInitialTransforms ts (Input ots a t) = Input (ts <> ots) a t
 
 applyTransform :: (MonadBuilder m) => ArrayTransform -> VName -> m VName
 applyTransform tr ia = do
-  (cs, e) <- transformToExp tr ia
-  certifying cs $ letExp s e
+  (aux, e) <- transformToExp tr ia
+  auxing aux $ letExp s e
   where
     s = case tr of
       Replicate {} -> "replicate"
