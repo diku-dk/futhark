@@ -21,8 +21,6 @@ import Control.Monad.State
 import Data.List (find, partition, (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Data.Text qualified as T
-import Debug.Trace
 import Futhark.Analysis.HORep.MapNest (MapNest)
 import Futhark.Analysis.HORep.MapNest qualified as MapNest
 import Futhark.Analysis.HORep.SOAC qualified as SOAC
@@ -199,12 +197,6 @@ mapWriteFusionOK :: [VName] -> FusedSOAC -> Bool
 mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
   where
     inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
-
-debug :: (Show a) => a -> a
-debug = traceShowWith id
-
-prettyDebug :: (Pretty a) => a -> a
-prettyDebug = traceWith (T.unpack . prettyText)
 
 scanScatterMapLambda ::
   [SOAC.Input] ->

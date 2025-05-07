@@ -5,19 +5,14 @@ where
 
 import Control.Monad
 import Data.List (zip4)
-import Debug.Trace
 import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.Construct (fullSlice)
 import Futhark.IR.MCMem
 import Futhark.IR.SOACS.SOAC (groupScatterResults)
-import Futhark.IR.SegOp (splitPostOpResults)
 import Futhark.Util.IntegralExp (quot, rem)
 import Prelude hiding (quot, rem)
-
-debug :: (Show a) => a -> a
-debug x = traceShow x x
 
 -- Compile a SegScan construct
 compileSegScan ::
@@ -110,9 +105,9 @@ nonsegmentedScan pat space ts kbody scan_ops post_op nsubtasks = do
       )
       ( do
           scan_ops_1_subtask <- renameSegBinOp scan_ops
-          post_op_1_subntask <- renameSegPostOp post_op
+          post_op_1_subtask <- renameSegPostOp post_op
           emit $ Imp.DebugPrint "Scan 1 subtask" Nothing
-          scan1Subtask pat space kbody scan_ops_1_subtask post_op_1_subntask
+          scan1Subtask pat space kbody scan_ops_1_subtask post_op_1_subtask
       )
 
 -- Different ways to generate code for a scan loop
@@ -436,10 +431,10 @@ scanFallback1Subtask pat space kbody scan_ops post_op = do
     dPrim_ (segFlat space) int64
     sOp $ Imp.GetTaskId (segFlat space)
 
+    genBinOpParams scan_ops
     local_accs <- genLocalAccsStage1 scan_ops
 
     inISPC $ do
-      genBinOpParams scan_ops
       generateChunkLoop "SegScan" Scalar $
         genScanLoop1Subtask ScanSeq pat space kbody scan_ops post_op local_accs
   free_params <- freeParams fbody
@@ -716,6 +711,8 @@ segmentedScan pat space kbody scan_ops post_op = do
     free_params <- freeParams body
     emit $ Imp.Op $ Imp.ParLoop "seg_scan" body free_params
 
+-- Note: This should use the post op but it is not
+-- used so it is therefore not implemented.
 compileSegScanBody ::
   Pat LetDecMem ->
   SegSpace ->
@@ -723,7 +720,7 @@ compileSegScanBody ::
   [SegBinOp MCMem] ->
   SegPostOp MCMem ->
   MulticoreGen Imp.MCCode
-compileSegScanBody pat space kbody scan_ops post_op = collect $ do
+compileSegScanBody pat space kbody scan_ops _ = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns_64 = map pe64 ns
 

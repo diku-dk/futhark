@@ -10,7 +10,6 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bitraversable
-import Debug.Trace
 import Futhark.IR
 import Futhark.IR.MC
 import Futhark.IR.MC qualified as MC
@@ -174,9 +173,6 @@ transformMap rename onBody w map_lam arrs = do
   kbody <- mapLambdaToKernelBody onBody gtid map_lam arrs
   renameIfNeeded rename $
     SegMap () space (lambdaReturnType map_lam) kbody
-
-debug :: (Show a) => a -> a
-debug x = traceShow x x
 
 transformRedomap ::
   NeedsRename ->

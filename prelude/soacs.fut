@@ -230,14 +230,13 @@ def scatter_3d 't [k] [n] [o] [l] (dest: *[k][n][o]t) (is: [l](i64, i64, i64)) (
 def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
   if n == 0
   then []
-  else
-    let flags = map (\x -> if p x then 1 else 0) as
-    let offsets = scan (+) 0 flags
-    let result =
-      scatter (map (\_ -> as[0]) (0..1..<n))
-              (map2 (\f o -> if f==1 then o-1 else -1) flags offsets)
-              as
-    in result[:offsets[n - 1]]
+  else let flags = map (\x -> if p x then 1 else 0) as
+       let offsets = scan (+) 0 flags
+       let result =
+         scatter (#[scratch] [as][0])
+                 (map2 (\f o -> if f == 1 then o - 1 else -1) flags offsets)
+                 as
+       in result[:offsets[n - 1]]
 
 -- | Split an array into those elements that satisfy the given
 -- predicate, and those that do not.
@@ -252,13 +251,13 @@ def partition [n] 'a (p: a -> bool) (as: [n]a) : ?[k].([k]a, [n - k]a) =
     else let flags = map (\x -> if p x then (1, 0) else (0, 1)) as
          let offset = reduce_comm (+) 0 (map (.0) flags)
          let add2 (a0, b0) (a1, b1) = (a0 + a1, b0 + b1)
-         let to_index (f, _) (o0, o1) =
-           if f == 1i64 then o0 - 1i64 else offset + o1 - 1
+         let to_index (f, _) (o0, o1) = if f == 1i64 then o0 - 1i64 else offset + o1 - 1
          let offsets = scan add2 (0, 0) flags
          let idxs = map2 to_index flags offsets
-         let res = scatter (map (\_ -> as[0]) (0..1..<n))
-                           idxs
-                           as
+         let res =
+           scatter (#[scratch] [as][0])
+                   idxs
+                   as
          in (res, offset)
   in (res[0:offset], res[offset:n])
 
@@ -283,9 +282,10 @@ def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a) : ?[k][l].([k]a
            else offset0 + offset1 + o2 - 1
          let offsets = scan add2 (0, 0, 0) flags
          let idxs = map2 to_index flags offsets
-         let res = scatter (map (\_ -> as[0]) (0..1..<n))
-                           idxs
-                           as
+         let res =
+           scatter (#[scratch] [as][0])
+                   idxs
+                   as
          in (res, offset0, offset1)
   in ( res[0:offset0]
      , res[offset0:offset0 + offset1] :> [offset1]a
