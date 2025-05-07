@@ -792,6 +792,25 @@ internaliseExp desc (E.Attr attr e loc) = do
       traceRes (nameToText tag) e'
     "opaque" ->
       mapM (letSubExp desc . BasicOp . Opaque OpaqueNil) e'
+    "scratch" -> do
+      ts <- mapM subExpType e'
+      forM (zip ts e') $ \(t, se) ->
+        case t of
+          I.Array pt shape _ ->
+            letSubExp desc $ I.BasicOp $ I.Scratch pt $ I.shapeDims shape
+          I.Prim pt ->
+            pure $ constant $ blankPrimValue pt
+          _ -> pure se
+    "blank" -> do
+      ts <- mapM subExpType e'
+      forM (zip ts e') $ \(t, se) ->
+        case t of
+          I.Array pt shape _ ->
+            letSubExp desc . I.BasicOp . I.Replicate shape . constant $
+              blankPrimValue pt
+          I.Prim pt ->
+            pure $ constant $ blankPrimValue pt
+          _ -> pure se
     _ ->
       pure e'
   where
