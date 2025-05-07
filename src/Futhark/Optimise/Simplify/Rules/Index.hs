@@ -92,7 +92,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
                     =<< sequence inds'''
               arr_sliced_tr <-
                 letSubExp (baseString arr_sliced <> "_tr") $
-                  BasicOp (Rearrange perm arr_sliced)
+                  BasicOp (Rearrange arr_sliced perm)
               pure $ SubExpResult mempty arr_sliced_tr
       where
         matches = zip fakeIndices $ zip [0 :: Int ..] $ sliceDims $ Slice inds
@@ -164,7 +164,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
       where
         index DimFix {} = Nothing
         index (DimSlice _ n s) = Just (n, DimSlice (constant (0 :: Int64)) n s)
-    Just (Rearrange perm src, cs)
+    Just (Rearrange src perm, cs)
       | rearrangeReach perm <= length (takeWhile isIndex inds) ->
           let inds' = rearrangeShape (rearrangeInverse perm) inds
            in Just $ pure $ IndexResult cs src $ Slice inds'
@@ -184,17 +184,19 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         not consuming,
         ST.available src vtable ->
           Just $ pure $ IndexResult cs src $ Slice inds
-    Just (Reshape ReshapeCoerce newshape src, cs)
-      | Just olddims <- arrayDims <$> seType (Var src),
-        changed_dims <- zipWith (/=) (shapeDims newshape) olddims,
+    Just (Reshape src newshape, cs)
+      | ReshapeCoerce <- reshapeKind newshape,
+        Just olddims <- arrayDims <$> seType (Var src),
+        changed_dims <- zipWith (/=) (shapeDims (newShape newshape)) olddims,
         not $ or $ drop (length inds) changed_dims ->
           Just $ pure $ IndexResult cs src $ Slice inds
       | Just olddims <- arrayDims <$> seType (Var src),
         length newshape == length inds,
-        length olddims == length (shapeDims newshape) ->
+        length olddims == length (shapeDims (newShape newshape)) ->
           Just $ pure $ IndexResult cs src $ Slice inds
-    Just (Reshape _ (Shape [_]) v2, cs)
-      | Just [_] <- arrayDims <$> seType (Var v2) ->
+    Just (Reshape v2 newshape, cs)
+      | Shape [_] <- newShape newshape,
+        Just [_] <- arrayDims <$> seType (Var v2) ->
           Just $ pure $ IndexResult cs v2 $ Slice inds
     Just (Concat d (x :| xs) _, cs)
       | -- HACK: simplifying the indexing of an N-array concatenation

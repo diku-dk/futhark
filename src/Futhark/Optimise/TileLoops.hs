@@ -741,7 +741,7 @@ tileReturns dims_on_top dims arr = do
       else do
         let new_shape = Shape $ unit_dims ++ arrayDims arr_t
         letExp (baseString arr) . BasicOp $
-          Reshape ReshapeArbitrary new_shape arr
+          Reshape arr (reshapeAll (arrayShape arr_t) new_shape)
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
   pure $ TileReturns mempty tile_dims arr'
 

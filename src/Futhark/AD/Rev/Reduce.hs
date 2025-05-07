@@ -208,7 +208,7 @@ diffVecReduce ops x aux w iscomm lam ne as m = do
     rank <- arrayRank <$> lookupType as
     let rear = [1, 0] ++ drop 2 [0 .. rank - 1]
 
-    tran_as <- letExp "tran_as" $ BasicOp $ Rearrange rear as
+    tran_as <- letExp "tran_as" $ BasicOp $ Rearrange as rear
     ts <- lookupType tran_as
     t_ne <- lookupType ne
 

@@ -73,10 +73,8 @@ iswim res_pat w scan_fun scan_input
       forM_ (zip (patIdents res_pat) (patIdents res_pat')) $ \(to, from) -> do
         let perm = [1, 0] ++ [2 .. arrayRank (identType from) - 1]
         addStm $
-          Let (basicPat [to]) (defAux ()) $
-            BasicOp $
-              Rearrange perm $
-                identName from
+          Let (basicPat [to]) (defAux ()) . BasicOp $
+            Rearrange (identName from) perm
   | otherwise = Nothing
 
 -- | Interchange Reduce With Inner Map. Tries to turn a @reduce(map)@ into a
@@ -164,7 +162,7 @@ transposedArrays :: (MonadBuilder m) => [VName] -> m [VName]
 transposedArrays arrs = forM arrs $ \arr -> do
   t <- lookupType arr
   let perm = [1, 0] ++ [2 .. arrayRank t - 1]
-  letExp (baseString arr) $ BasicOp $ Rearrange perm arr
+  letExp (baseString arr) $ BasicOp $ Rearrange arr perm
 
 removeParamOuterDim :: LParam SOACS -> LParam SOACS
 removeParamOuterDim param =

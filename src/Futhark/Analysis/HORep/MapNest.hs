@@ -222,7 +222,8 @@ reshape cs shape (MapNest _ map_lam _ inps) =
     w = shapeSize 0 shape
     transform p inp =
       let shape' = shape <> arrayShape p
-          tr = SOAC.Reshape cs ReshapeArbitrary shape'
+          inp_shape = arrayShape (SOAC.inputType inp)
+          tr = SOAC.Reshape cs $ reshapeAll inp_shape shape'
        in SOAC.addTransform tr inp
     inps' = zipWith transform (map paramType $ lambdaParams map_lam) inps
 

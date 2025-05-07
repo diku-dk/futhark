@@ -1046,12 +1046,12 @@ expReturns (BasicOp (SubExp se)) =
   Just . pure <$> subExpReturns se
 expReturns (BasicOp (Opaque _ (Var v))) =
   Just . pure <$> varReturns v
-expReturns (BasicOp (Reshape k newshape v)) = do
+expReturns (BasicOp (Reshape v newshape)) = do
   (et, _, mem, lmad) <- arrayVarReturns v
-  case reshaper k lmad $ map pe64 $ shapeDims newshape of
+  case reshaper (reshapeKind newshape) lmad $ map pe64 $ shapeDims $ newShape newshape of
     Just lmad' ->
       pure . Just $
-        [ MemArray et (fmap Free newshape) NoUniqueness . Just $
+        [ MemArray et (Free <$> newShape newshape) NoUniqueness . Just $
             ReturnsInBlock mem (existentialiseLMAD [] lmad')
         ]
     Nothing -> pure Nothing
@@ -1060,7 +1060,7 @@ expReturns (BasicOp (Reshape k newshape v)) = do
       LMAD.reshape lmad
     reshaper ReshapeCoerce lmad =
       Just . LMAD.coerce lmad
-expReturns (BasicOp (Rearrange perm v)) = do
+expReturns (BasicOp (Rearrange v perm)) = do
   (et, Shape dims, mem, lmad) <- arrayVarReturns v
   let lmad' = LMAD.permute lmad perm
       dims' = rearrangeShape perm dims

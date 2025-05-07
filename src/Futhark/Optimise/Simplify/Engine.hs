@@ -1039,7 +1039,7 @@ instance Simplifiable VName where
       _ -> pure v
 
 instance (Simplifiable d) => Simplifiable (ShapeBase d) where
-  simplify = fmap Shape . simplify . shapeDims
+  simplify = traverse simplify
 
 instance Simplifiable ExtSize where
   simplify (Free se) = Free <$> simplify se

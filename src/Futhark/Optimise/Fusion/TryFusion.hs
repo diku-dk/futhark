@@ -768,7 +768,7 @@ fixupInputs inpIds inps =
 pullReshape :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
 pullReshape soac ots = do
   Just mapnest <- MapNest.fromSOAC soac
-  SOAC.Reshape cs _kind newshape SOAC.:< ots' <- pure $ SOAC.viewf ots
+  SOAC.Reshape cs newshape SOAC.:< ots' <- pure $ SOAC.viewf ots
   -- This handles only the easy case where the underlying lambda is
   -- scalar. The more complicated cases could also be handled, but
   -- requires more tricky checks.
@@ -776,7 +776,7 @@ pullReshape soac ots = do
     all
       ((== MapNest.depth mapnest) . arrayRank)
       (MapNest.typeOf mapnest)
-  mapnest' <- MapNest.reshape cs newshape mapnest
+  mapnest' <- MapNest.reshape cs (newShape newshape) mapnest
   soac' <- MapNest.toSOAC mapnest'
   pure (soac', ots')
 

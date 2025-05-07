@@ -261,7 +261,7 @@ transposeFVs fvs variance gid stms = do
         ii /= length dims - 1,
         perm <- [0 .. ii - 1] ++ [ii + 1 .. length dims - 1] ++ [ii] = do
           (arr_tr, stms_tr) <- runBuilderT' $ do
-            arr' <- letExp (baseString arr ++ "_trsp") $ BasicOp $ Rearrange perm arr -- Manifest [1,0] arr
+            arr' <- letExp (baseString arr ++ "_trsp") $ BasicOp $ Rearrange arr perm
             letExp (baseString arr' ++ "_opaque") $ BasicOp $ Opaque OpaqueNil $ Var arr'
           let tab' = M.insert arr (perm, arr_tr, stms_tr) tab
               slc' = Slice $ map (dims !!) perm

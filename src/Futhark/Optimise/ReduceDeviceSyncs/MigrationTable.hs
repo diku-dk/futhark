@@ -463,10 +463,10 @@ graphStm stm = do
       -- Can be replaced with 'graphHostOnly e' to disable migration.
       -- A fix can be verified by enabling tests/migration/reuse4_scratch.fut
       graphInefficientReturn s e
-    BasicOp (Reshape _ s arr) -> do
-      graphInefficientReturn (shapeDims s) e
+    BasicOp (Reshape arr s) -> do
+      graphInefficientReturn (shapeDims $ newShape s) e
       one bs `reuses` arr
-    BasicOp (Rearrange _ arr) -> do
+    BasicOp (Rearrange arr _) -> do
       graphInefficientReturn [] e
       one bs `reuses` arr
     -- Expressions with a cost linear to the size of their result arrays are

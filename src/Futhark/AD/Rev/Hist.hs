@@ -304,8 +304,10 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
   scatter_inps <- do
     -- traverse (letExp "flat" . BasicOp . Reshape [DimNew q]) $ inds ++ [vs_bar_p]
     -- ToDo: Cosmin asks: is the below the correct translation of the line above?
-    traverse (letExp "flat" . BasicOp . Reshape ReshapeArbitrary (Shape [q])) $
-      inds ++ [vs_bar_p]
+    forM (inds ++ [vs_bar_p]) $ \v -> do
+      v_t <- lookupType v
+      letExp "flat" . BasicOp . Reshape v $
+        reshapeAll (arrayShape v_t) (Shape [q])
 
   f'' <- mkIdentityLambda $ replicate nr_dims (Prim int64) ++ [Prim t]
   vs_bar' <-
@@ -553,8 +555,8 @@ diffVecHist ops x aux n op nes is vss w rf dst m = do
     rank <- arrayRank <$> lookupType vss
     let dims = [1, 0] ++ drop 2 [0 .. rank - 1]
 
-    dstT <- letExp "dstT" $ BasicOp $ Rearrange dims dst
-    vssT <- letExp "vssT" $ BasicOp $ Rearrange dims vss
+    dstT <- letExp "dstT" $ BasicOp $ Rearrange dst dims
+    vssT <- letExp "vssT" $ BasicOp $ Rearrange vss dims
     t_dstT <- lookupType dstT
     t_vssT <- lookupType vssT
     t_nes <- lookupType nes
@@ -578,11 +580,10 @@ diffVecHist ops x aux n op nes is vss w rf dst m = do
               [HistOp (Shape [w]) rf [dst_col_cpy] [Var $ paramName ne] op]
               f
     histT <-
-      letExp "histT" $
-        Op $
-          Screma (arraySize 0 t_dstT) [dstT, vssT, nes] $
-            mapSOAC map_lam
-    auxing aux . letBindNames [x] . BasicOp $ Rearrange dims histT
+      letExp "histT" . Op $
+        Screma (arraySize 0 t_dstT) [dstT, vssT, nes] $
+          mapSOAC map_lam
+    auxing aux . letBindNames [x] . BasicOp $ Rearrange histT dims
   foldr (vjpStm ops) m stms
 
 --
