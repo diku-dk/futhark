@@ -295,12 +295,10 @@ liftIdentityMapping _ pat aux op
                   { lambdaBody = (lambdaBody fun) {bodyResult = subExpsRes ses'},
                     lambdaReturnType = rettype'
                   }
-          mapM_ (uncurry letBind) invariant
-          auxing aux $
-            letBindNames (map patElemName pat') $
-              Op $
-                soacOp $
-                  Screma w arrs (mapSOAC fun')
+          auxing aux $ do
+            mapM_ (uncurry letBind) invariant
+            letBindNames (map patElemName pat') . Op $
+              soacOp (Screma w arrs (mapSOAC fun'))
 liftIdentityMapping _ _ _ _ = Skip
 
 liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
@@ -459,9 +457,10 @@ removeDuplicateMapOutput _ (Pat pes) aux (Screma w arrs form)
                       { lambdaBody = (lambdaBody fun) {bodyResult = ses'},
                         lambdaReturnType = ts'
                       }
-              auxing aux $ letBind (Pat pes') $ Op $ Screma w arrs $ mapSOAC fun'
-              forM_ copies $ \(from, to) ->
-                letBind (Pat [to]) $ BasicOp $ Replicate mempty $ Var $ patElemName from
+              auxing aux $ do
+                letBind (Pat pes') $ Op $ Screma w arrs $ mapSOAC fun'
+                forM_ copies $ \(from, to) ->
+                  letBind (Pat [to]) $ BasicOp $ Replicate mempty $ Var $ patElemName from
   where
     checkForDuplicates (ses_ts_pes', copies) (se, t, pe)
       | Just (_, _, pe') <- find (\(x, _, _) -> resSubExp x == resSubExp se) ses_ts_pes' =
