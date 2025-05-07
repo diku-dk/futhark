@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Improved handling of long chains of `flatten`/`unflatten`/`transpose`
   operations.
 
+* New attributes: `#[blank]` and `#[scratch]`.
+
 ### Removed
 
 ### Changed
