@@ -71,10 +71,12 @@ isInScope td_env m = m `M.member` scope td_env
 getDirAliasFromExp :: Exp (Aliases rep) -> Maybe (VName, DirAlias)
 getDirAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, Just)
 getDirAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, Just)
-getDirAliasFromExp (BasicOp (Reshape ReshapeCoerce shp x)) =
-  Just (x, Just . (`LMAD.coerce` shapeDims (fmap pe64 shp)))
-getDirAliasFromExp (BasicOp (Reshape ReshapeArbitrary shp x)) =
-  Just (x, (`LMAD.reshape` shapeDims (fmap pe64 shp)))
+getDirAliasFromExp (BasicOp (Reshape x shp)) =
+  case reshapeKind shp of
+    ReshapeCoerce ->
+      Just (x, Just . (`LMAD.coerce` fmap pe64 (shapeDims $ newShape shp)))
+    ReshapeArbitrary ->
+      Just (x, (`LMAD.reshape` fmap pe64 (shapeDims $ newShape shp)))
 getDirAliasFromExp (BasicOp (Rearrange _ _)) =
   Nothing
 getDirAliasFromExp (BasicOp (Index x slc)) =
@@ -109,7 +111,7 @@ getInvAliasFromExp :: Exp (Aliases rep) -> InvAlias
 getInvAliasFromExp (BasicOp (SubExp (Var _))) = Just id
 getInvAliasFromExp (BasicOp (Opaque _ (Var _))) = Just id
 getInvAliasFromExp (BasicOp Update {}) = Just id
-getInvAliasFromExp (BasicOp (Rearrange perm _)) =
+getInvAliasFromExp (BasicOp (Rearrange _ perm)) =
   Just (`LMAD.permute` rearrangeInverse perm)
 getInvAliasFromExp _ = Nothing
 

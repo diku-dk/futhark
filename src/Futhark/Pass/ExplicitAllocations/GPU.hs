@@ -100,7 +100,7 @@ handleHostOp _ (GPUBody ts (Body _ stms res)) =
   fmap (Inner . GPUBody ts) . buildBody_ . allocInStms stms $ pure res
 
 kernelExpHints :: Exp GPUMem -> AllocM GPU GPUMem [ExpHint]
-kernelExpHints (BasicOp (Manifest perm v)) = do
+kernelExpHints (BasicOp (Manifest v perm)) = do
   dims <- arrayDims <$> lookupType v
   let perm_inv = rearrangeInverse perm
       dims' = rearrangeShape perm dims
