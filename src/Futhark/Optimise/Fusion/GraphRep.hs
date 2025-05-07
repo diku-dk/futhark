@@ -297,7 +297,7 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
     pure $ MatchNode s []
   e
     | [output] <- patNames pat,
-      Just (ia, tr) <- H.transformFromExp (stmAuxCerts aux) e ->
+      Just (ia, tr) <- H.transformFromExp aux e ->
         pure $ TransNode output tr ia
   _ -> pure n
 nodeToSoacNode n = pure n

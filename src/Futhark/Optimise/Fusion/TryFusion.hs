@@ -558,7 +558,7 @@ iswim ::
   TryFusion (SOAC, SOAC.ArrayTransforms)
 iswim _ (SOAC.Screma w arrs form) ots
   | Just [Futhark.Scan scan_fun nes] <- Futhark.isScanSOAC form,
-    Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun,
+    Just (map_pat, map_aux, map_w, map_fun) <- rwimPossible scan_fun,
     Just nes_names <- mapM subExpVar nes = do
       let nes_idents = zipWith Ident nes_names $ lambdaReturnType scan_fun
           map_nes = map SOAC.identInput nes_idents
@@ -594,7 +594,7 @@ iswim _ (SOAC.Screma w arrs form) ots
 
       pure
         ( SOAC.Screma map_w map_arrs' (mapSOAC map_fun'),
-          ots SOAC.|> SOAC.Rearrange map_cs perm
+          ots SOAC.|> SOAC.Rearrange map_aux perm
         )
 iswim _ _ _ =
   fail "ISWIM does not apply."

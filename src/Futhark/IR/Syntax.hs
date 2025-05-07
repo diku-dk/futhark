@@ -208,6 +208,9 @@ data StmAux dec = StmAux
   }
   deriving (Ord, Show, Eq)
 
+instance (Monoid dec) => Monoid (StmAux dec) where
+  mempty = StmAux mempty mempty mempty
+
 instance (Semigroup dec) => Semigroup (StmAux dec) where
   StmAux cs1 attrs1 dec1 <> StmAux cs2 attrs2 dec2 =
     StmAux (cs1 <> cs2) (attrs1 <> attrs2) (dec1 <> dec2)

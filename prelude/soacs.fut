@@ -255,6 +255,6 @@ def filter [n] 'a (p: a -> bool) (as: [n]a) : *[]a =
   let flags = map (\x -> if p x then 1 else 0) as
   let offsets = scan (+) 0 flags
   let m = if n == 0 then 0 else offsets[n - 1]
-  in scatter (map (\x -> x) as[:m])
+  in scatter (#[scratch] map (\x -> x) as[:m])
              (map2 (\f o -> if f == 1 then o - 1 else -1) flags offsets)
              as
