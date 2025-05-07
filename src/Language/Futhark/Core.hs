@@ -29,6 +29,7 @@ module Language.Futhark.Core
     baseTag,
     baseName,
     baseString,
+    baseText,
     quote,
 
     -- * Number re-export
@@ -195,6 +196,10 @@ baseName (VName vn _) = vn
 -- | Return the base 'Name' converted to a string.
 baseString :: VName -> String
 baseString = nameToString . baseName
+
+-- | Return the base 'Name' converted to a text.
+baseText :: VName -> T.Text
+baseText = nameToText . baseName
 
 instance Eq VName where
   VName _ x == VName _ y = x == y

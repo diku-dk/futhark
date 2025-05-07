@@ -60,7 +60,7 @@ genScanomap desc segments lam nes m = do
     pure (map (Returns ResultMaySimplify mempty) res, res_t)
   let kbody = KernelBody () stms res
       op = SegBinOp Commutative lam nes mempty
-  letTupExp desc $ Op $ SegOp $ SegScan lvl space [op] res_t kbody
+  letTupExp desc $ Op $ SegOp $ SegScan lvl space res_t kbody [op]
   where
     lvl = SegThread SegVirt Nothing
 

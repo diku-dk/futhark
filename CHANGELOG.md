@@ -9,13 +9,154 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* GPU backends: more efficient atomic operations on 8-bit and 16-bit quantities.
+  This helps histograms on these types, as well as AD on programs that use
+  `f16`.
+
+* Improved handling of long chains of `flatten`/`unflatten`/`transpose`
+  operations.
+
+* New attributes: `#[blank]` and `#[scratch]`.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
 
+* Interpreter: some tricky aspects of size-lifted types (#2258).
+
+* Incorrect unused-name warning for named parameters in module types.
+
+## [0.25.30]
+
+### Added
+
+* New math functions: `f16.rsqrt`, `f32.rsqrt`, `f64.rsqrt`.
+
+* New math functions: `cospi`, `sinpi`, `tanpi`, `acospi`, `asinpi`,
+  `atanpi`, `atan2pi`, in each of the `f16`/`f32`/`f64` modules. (#2243)
+
+* Slight improvements in the ability of the fusion engine to fuse
+  across `map` nests separated by `reshape` operations. Only works if
+  the innermost return type is purely scalar.
+
+* `futhark pkg` now allows underscores in package paths.
+
+### Fixed
+
+* The interpreter no longer crashes when passing a sum-typed value
+  into AD, but it is unlikely to produce a usable result (#2238).
+
+* The partial derivatives of comparisons are now always zero.
+  Previously we had some code that made an attempt at giving these
+  another interpretation, but it was never mathematically sound, not
+  useful, and sometimes buggy. (#2239).
+
+* Out-of-bounds reads in GPU backends when transposing a great many
+  matrices in parallel (#2241).
+
+* `vjp` in the interpreter is now asymptotically efficient (#2187,
+  #2240). Work by Marcus Jensen.
+
+* The interpreter did not handle `open` correctly.
+
+* Incorrect handling of some size inference edge cases during
+  monomorphisation (#2252).
+
+* Incorrect registration of entry point types when mixing type
+  abbreviations and arrays (#2253).
+
+* Reverse mode AD now handles sequential streams. (#2256)
+
+## [0.25.29]
+
+### Fixed
+
+* AD would in some cases produce code that would cause a compiler
+  crash (#2228).
+
+* Slight error in the definition of the partial derivatives for the
+  `**` operator could cause NaNs in the interpreter when using
+  forward-mode AD (#2229).
+
+* The magical machinery for inferring external API types did not
+  handle arrays with uniqueness annotations consistently, resulting in
+  incompatible entry point types being generated, leading to a
+  compiler crash. (#2231)
+
+* A simplification rule for array slices would in some cases produce
+  type-incorrect code. (#2232)
+
+* A bug in the defunctionaliser could cause a compiler crash in code
+  that used both higher order functions and size expressions in clever
+  ways (#2234).
+
+* Fusion could crash after AD in some circumstances (#2236).
+
+* Under very unlikely circumstances, an "intrablock" flat parallel
+  operation could be hoisted out of its enclosing GPU kernel, causing
+  a compiler crash.
+
+## [0.25.28]
+
+### Fixed
+
+* Compiler crash for intrablock scatters that write to
+  multidimensional arrays. (#2218)
+
+* Handling of size expressions in abstract types in the interpreter (#2222).
+
+* GPU code generation of segmented reductions with array operands. (#2227)
+
+* Server-mode timing is now done with a monotonic clock.
+
+* `futhark test` now respects `notest`, similar to `nobench` for `futhark bench`.
+
+## [0.25.27]
+
+### Added
+
+* Improved reverse-mode AD of `scan` with complicated operators. Work
+  by Peter Adema and Sophus Valentin Willumsgaard.
+
+### Fixed
+
+* `futhark eval`: any errors in the provided .fut file would cause a
+  "file not found" error message.
+
+* Handling of module-dependent size expressions in type abbreviations
+  (#2209).
+
+* A `let`-bound size would mistakenly be in scope of the bound
+  expression (#2210).
+
+* An overzealous floating-point simplification rule.
+
+* Corrected AD of `x**y` where `x==0` (#2216).
+
+* `futhark fmt`: correct file name in parse errors.
+
+* A bug in the "sink" optimisation pass could cause compiler crashes.
+
+* Compile errors with newer versions of `ispc`.
+
+## [0.25.26]
+
+### Fixed
+
 * Some Windows compatibility quirks (#2200, #2201).
+
+* `futhark pkg`: fixed parsing of Git timestamps in Z time zone.
+
+* GPU backends did not handle array constants correctly in some cases.
+
+* `futhark fmt`: do not throw away doc comments for `local`
+  definitions.
+
+* `futhark fmt`: improve formatting of value specs.
+
+* `futhark fmt`: add `--check` option.
 
 ## [0.25.25]
 

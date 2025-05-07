@@ -170,15 +170,16 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
     getRepRshpArr :: ((H.Input, NodeT), LParam SOACS) -> Maybe (RshpInp, Certs)
     getRepRshpArr ((H.Input outtrsf arr_nm arr_tp, _nt), farg)
       | rshp_trsfm H.:< other_trsfms <- H.viewf outtrsf,
-        (H.Reshape c ReshapeArbitrary shp_flat) <- rshp_trsfm,
+        H.Reshape aux shp_flat <- rshp_trsfm,
+        ReshapeArbitrary <- reshapeKind shp_flat,
         other_trsfms == mempty,
         eltp <- paramDec farg,
-        Just shp_flat' <- checkShp eltp shp_flat,
+        Just shp_flat' <- checkShp eltp $ newShape shp_flat,
         Array _ptp shp_unflat _ <- arr_tp,
         Just shp_unflat' <- checkShp eltp shp_unflat,
         shapeRank shp_flat' == 1,
         shapeRank shp_flat' < shapeRank shp_unflat' =
-          Just (((arr_nm, farg), (shp_flat', shp_unflat', eltp)), c)
+          Just (((arr_nm, farg), (shp_flat', shp_unflat', eltp)), stmAuxCerts aux)
     getRepRshpArr _ = Nothing
     --
     checkShp (Prim _) shp_arr = Just shp_arr
@@ -400,7 +401,7 @@ tryFuseWithAccs ::
   [VName] ->
   Stm SOACS ->
   Stm SOACS ->
-  m (Maybe (Stm SOACS))
+  Maybe (m (Stm SOACS))
 tryFuseWithAccs
   infusible
   (Let pat1 aux1 (WithAcc w_inps1 lam1))
@@ -424,7 +425,7 @@ tryFuseWithAccs
       all (`notElem` infusible) bs,
       -- safety 3:
       cs <- namesFromList $ concatMap ((\(_, xs, _) -> xs) . accTup2) acc_tup2,
-      all ((`notNameIn` cs) . patElemName . fst) other_pr1 = do
+      all ((`notNameIn` cs) . patElemName . fst) other_pr1 = Just $ do
         let getCertPairs (t1, t2) = (paramName (accTup3 t2), paramName (accTup3 t1))
             tab_certs = M.fromList $ map getCertPairs tup_common
             lam2_bdy' = substituteNames tab_certs (lambdaBody lam2)
@@ -472,8 +473,7 @@ tryFuseWithAccs
                 ++ map fst (other_pr1 ++ other_pr2)
             res_w_inps = map (accTup2 . fst) tup_common ++ map accTup2 (acc_tup1' ++ acc_tup2')
         res_w_inps' <- mapM renameLamInWAccInp res_w_inps
-        let stm_res = Let (Pat res_pat) (aux1 <> aux2) $ WithAcc res_w_inps' res_lam'
-        pure $ Just stm_res
+        pure $ Let (Pat res_pat) (aux1 <> aux2) $ WithAcc res_w_inps' res_lam'
     where
       -- local helpers:
 
@@ -535,7 +535,7 @@ tryFuseWithAccs
       renameLamInWAccInp winp = pure winp
 --
 tryFuseWithAccs _ _ _ =
-  pure Nothing
+  Nothing
 
 -------------------------------
 --- simple helper functions ---

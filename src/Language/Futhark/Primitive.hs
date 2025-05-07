@@ -92,6 +92,8 @@ module Language.Futhark.Primitive
 
     -- * Primitive functions
     primFuns,
+    condFun,
+    isCondFun,
 
     -- * Utility
     zeroIsh,
@@ -128,6 +130,7 @@ import Data.Bits
   )
 import Data.Fixed (mod') -- Weird location.
 import Data.Int (Int16, Int32, Int64, Int8)
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Word (Word16, Word32, Word64, Word8)
@@ -1181,20 +1184,35 @@ doubleToWord = G.runGet G.getWord64le . P.runPut . P.putDoublele
 wordToDouble :: Word64 -> Double
 wordToDouble = G.runGet G.getDoublele . P.runPut . P.putWord64le
 
+-- | @condFun t@ is the name of the ternary conditional function that
+-- accepts operands of type @[Bool, t, t]@, and returns either the
+-- first or second @t@ based on the truth value of the @Bool@.
+condFun :: PrimType -> T.Text
+condFun t = "cond_" <> prettyText t
+
+-- | Is this the name of a condition function as per 'condFun', and
+-- for which type?
+isCondFun :: T.Text -> Maybe PrimType
+isCondFun v = L.find (\t -> condFun t == v) allPrimTypes
+
 -- | A mapping from names of primitive functions to their parameter
 -- types, their result type, and a function for evaluating them.
 primFuns ::
   M.Map
-    String
+    T.Text
     ( [PrimType],
       PrimType,
       [PrimValue] -> Maybe PrimValue
     )
 primFuns =
-  M.fromList
+  M.fromList $
     [ f16 "sqrt16" sqrt,
       f32 "sqrt32" sqrt,
       f64 "sqrt64" sqrt,
+      --
+      f16 "rsqrt16" $ recip . sqrt,
+      f32 "rsqrt32" $ recip . sqrt,
+      f64 "rsqrt64" $ recip . sqrt,
       --
       f16 "cbrt16" $ convFloat . cbrtf . convFloat,
       f32 "cbrt32" cbrtf,
@@ -1224,6 +1242,10 @@ primFuns =
       f32 "sin32" sin,
       f64 "sin64" sin,
       --
+      f16 "sinpi16" $ sin . (pi *),
+      f32 "sinpi32" $ sin . (pi *),
+      f64 "sinpi64" $ sin . (pi *),
+      --
       f16 "sinh16" sinh,
       f32 "sinh32" sinh,
       f64 "sinh64" sinh,
@@ -1231,6 +1253,10 @@ primFuns =
       f16 "cos16" cos,
       f32 "cos32" cos,
       f64 "cos64" cos,
+      --
+      f16 "cospi16" $ cos . (pi *),
+      f32 "cospi32" $ cos . (pi *),
+      f64 "cospi64" $ cos . (pi *),
       --
       f16 "cosh16" cosh,
       f32 "cosh32" cosh,
@@ -1240,6 +1266,10 @@ primFuns =
       f32 "tan32" tan,
       f64 "tan64" tan,
       --
+      f16 "tanpi16" $ tan . (pi *),
+      f32 "tanpi32" $ tan . (pi *),
+      f64 "tanpi64" $ tan . (pi *),
+      --
       f16 "tanh16" tanh,
       f32 "tanh32" tanh,
       f64 "tanh64" tanh,
@@ -1247,6 +1277,10 @@ primFuns =
       f16 "asin16" asin,
       f32 "asin32" asin,
       f64 "asin64" asin,
+      --
+      f16 "asinpi16" $ (/ pi) . asin,
+      f32 "asinpi32" $ (/ pi) . asin,
+      f64 "asinpi64" $ (/ pi) . asin,
       --
       f16 "asinh16" asinh,
       f32 "asinh32" asinh,
@@ -1256,6 +1290,10 @@ primFuns =
       f32 "acos32" acos,
       f64 "acos64" acos,
       --
+      f16 "acospi16" $ (/ pi) . acos,
+      f32 "acospi32" $ (/ pi) . acos,
+      f64 "acospi64" $ (/ pi) . acos,
+      --
       f16 "acosh16" acosh,
       f32 "acosh32" acosh,
       f64 "acosh64" acosh,
@@ -1263,6 +1301,10 @@ primFuns =
       f16 "atan16" atan,
       f32 "atan32" atan,
       f64 "atan64" atan,
+      --
+      f16 "atanpi16" $ (/ pi) . atan,
+      f32 "atanpi32" $ (/ pi) . atan,
+      f64 "atanpi64" $ (/ pi) . atan,
       --
       f16 "atanh16" atanh,
       f32 "atanh32" atanh,
@@ -1386,6 +1428,33 @@ primFuns =
           \case
             [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
               Just $ FloatValue $ Float64Value $ atan2 x y
+            _ -> Nothing
+        )
+      ),
+      ( "atan2pi_16",
+        ( [FloatType Float16, FloatType Float16],
+          FloatType Float16,
+          \case
+            [FloatValue (Float16Value x), FloatValue (Float16Value y)] ->
+              Just $ FloatValue $ Float16Value $ atan2 x y / pi
+            _ -> Nothing
+        )
+      ),
+      ( "atan2pi_32",
+        ( [FloatType Float32, FloatType Float32],
+          FloatType Float32,
+          \case
+            [FloatValue (Float32Value x), FloatValue (Float32Value y)] ->
+              Just $ FloatValue $ Float32Value $ atan2 x y / pi
+            _ -> Nothing
+        )
+      ),
+      ( "atan2pi_64",
+        ( [FloatType Float64, FloatType Float64],
+          FloatType Float64,
+          \case
+            [FloatValue (Float64Value x), FloatValue (Float64Value y)] ->
+              Just $ FloatValue $ Float64Value $ atan2 x y / pi
             _ -> Nothing
         )
       ),
@@ -1529,6 +1598,17 @@ primFuns =
       f32_3 "fma32" (\a b c -> a * b + c),
       f64_3 "fma64" (\a b c -> a * b + c)
     ]
+      <> [ ( condFun t,
+             ( [Bool, t, t],
+               t,
+               \case
+                 [BoolValue b, tv, fv] ->
+                   Just $ if b then tv else fv
+                 _ -> Nothing
+             )
+           )
+           | t <- allPrimTypes
+         ]
   where
     i8 s f = (s, ([IntType Int8], IntType Int32, i8PrimFun f))
     i16 s f = (s, ([IntType Int16], IntType Int32, i16PrimFun f))

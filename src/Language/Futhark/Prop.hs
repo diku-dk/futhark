@@ -140,6 +140,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Util (maxinum)
 import Futhark.Util.Pretty
 import Language.Futhark.Primitive qualified as Primitive
@@ -1095,7 +1096,7 @@ intrinsics =
 
     intrinsicStart = 1 + baseTag (fst $ last primOp)
 
-    [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
+    [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromText ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
 
     t_a u = TypeVar u (qualName a) []
     array_a u s = Array u s $ t_a mempty
@@ -1121,37 +1122,37 @@ intrinsics =
     accType u t =
       TypeVar u (qualName (fst intrinsicAcc)) [TypeArgType t]
 
-    namify i (x, y) = (VName (nameFromString x) i, y)
+    namify i (x, y) = (VName (nameFromText x) i, y)
 
     primFun (name, (ts, t, _)) =
       (name, IntrinsicMonoFun (map unPrim ts) $ unPrim t)
 
-    unOpFun bop = (prettyString bop, IntrinsicMonoFun [t] t)
+    unOpFun bop = (prettyText bop, IntrinsicMonoFun [t] t)
       where
         t = unPrim $ Primitive.unOpType bop
 
-    binOpFun bop = (prettyString bop, IntrinsicMonoFun [t, t] t)
+    binOpFun bop = (prettyText bop, IntrinsicMonoFun [t, t] t)
       where
         t = unPrim $ Primitive.binOpType bop
 
-    cmpOpFun bop = (prettyString bop, IntrinsicMonoFun [t, t] Bool)
+    cmpOpFun bop = (prettyText bop, IntrinsicMonoFun [t, t] Bool)
       where
         t = unPrim $ Primitive.cmpOpType bop
 
-    convOpFun cop = (prettyString cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
+    convOpFun cop = (prettyText cop, IntrinsicMonoFun [unPrim ft] $ unPrim tt)
       where
         (ft, tt) = Primitive.convOpType cop
 
-    signFun t = ("sign_" ++ prettyString t, IntrinsicMonoFun [Unsigned t] $ Signed t)
+    signFun t = ("sign_" <> prettyText t, IntrinsicMonoFun [Unsigned t] $ Signed t)
 
-    unsignFun t = ("unsign_" ++ prettyString t, IntrinsicMonoFun [Signed t] $ Unsigned t)
+    unsignFun t = ("unsign_" <> prettyText t, IntrinsicMonoFun [Signed t] $ Unsigned t)
 
     unPrim (Primitive.IntType t) = Signed t
     unPrim (Primitive.FloatType t) = FloatType t
     unPrim Primitive.Bool = Bool
     unPrim Primitive.Unit = Bool
 
-    intrinsicPrim t = (prettyString t, IntrinsicType Unlifted [] $ Scalar $ Prim t)
+    intrinsicPrim t = (prettyText t, IntrinsicType Unlifted [] $ Scalar $ Prim t)
 
     anyIntType =
       map Signed [minBound .. maxBound]
@@ -1161,10 +1162,10 @@ intrinsics =
         ++ map FloatType [minBound .. maxBound]
     anyPrimType = Bool : anyNumberType
 
-    mkIntrinsicBinOp :: BinOp -> Maybe (String, Intrinsic)
+    mkIntrinsicBinOp :: BinOp -> Maybe (T.Text, Intrinsic)
     mkIntrinsicBinOp op = do
       op' <- intrinsicBinOp op
-      pure (prettyString op, op')
+      pure (prettyText op, op')
 
     binOp ts = Just $ IntrinsicOverloadedFun ts [Nothing, Nothing] Nothing
     ordering = Just $ IntrinsicOverloadedFun anyPrimType [Nothing, Nothing] (Just Bool)

@@ -8,7 +8,7 @@ where
 
 import Data.Bifunctor (bimap)
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.Syntax.Core (Name, VName)
+import Futhark.IR.Syntax.Core (Name, VName, nameToText)
 import Futhark.Util.IntegralExp
 import Prelude hiding (quot)
 
@@ -134,7 +134,10 @@ pdBinOp (FDiv ft) a b =
 pdBinOp (FPow ft) a b =
   floatBinOp derivs derivs derivs ft a b
   where
-    derivs x y = (y * (x ** (y - 1)), (x ** y) * log x)
+    derivs x y =
+      ( y * (x ** (y - 1)),
+        (x ** y) * condExp (x .<=. 0) 0 (log x)
+      )
 pdBinOp (FMax ft) a b =
   floatBinOp derivs derivs derivs ft a b
   where
@@ -156,6 +159,12 @@ pdBuiltin "sqrt32" [x] =
   Just [untyped $ 1 / (2 * sqrt (isF32 x))]
 pdBuiltin "sqrt64" [x] =
   Just [untyped $ 1 / (2 * sqrt (isF64 x))]
+pdBuiltin "rsqrt16" [x] =
+  Just [untyped $ -1 / (2 * (isF16 x ** (3 / 2)))]
+pdBuiltin "rsqrt32" [x] =
+  Just [untyped $ -1 / (2 * (isF32 x ** (3 / 2)))]
+pdBuiltin "rsqrt64" [x] =
+  Just [untyped $ -1 / (2 * (isF64 x ** (3 / 2)))]
 pdBuiltin "cbrt16" [x] =
   Just [untyped $ 1 / (3 * cbrt16 (isF16 x) * cbrt16 (isF16 x))]
   where
@@ -204,6 +213,12 @@ pdBuiltin "sin32" [x] =
   Just [untyped $ cos (isF32 x)]
 pdBuiltin "sin64" [x] =
   Just [untyped $ cos (isF64 x)]
+pdBuiltin "sinpi16" [x] =
+  Just [untyped $ pi * cos (pi * isF16 x)]
+pdBuiltin "sinpi32" [x] =
+  Just [untyped $ pi * cos (pi * isF32 x)]
+pdBuiltin "sinpi64" [x] =
+  Just [untyped $ pi * cos (pi * isF64 x)]
 pdBuiltin "sinh16" [x] =
   Just [untyped $ cosh (isF16 x)]
 pdBuiltin "sinh32" [x] =
@@ -216,6 +231,12 @@ pdBuiltin "cos32" [x] =
   Just [untyped $ -sin (isF32 x)]
 pdBuiltin "cos64" [x] =
   Just [untyped $ -sin (isF64 x)]
+pdBuiltin "cospi16" [x] =
+  Just [untyped $ -pi * sin (pi * isF16 x)]
+pdBuiltin "cospi32" [x] =
+  Just [untyped $ -pi * sin (pi * isF32 x)]
+pdBuiltin "cospi64" [x] =
+  Just [untyped $ -pi * sin (pi * isF64 x)]
 pdBuiltin "cosh16" [x] =
   Just [untyped $ sinh (isF16 x)]
 pdBuiltin "cosh32" [x] =
@@ -228,12 +249,24 @@ pdBuiltin "tan32" [x] =
   Just [untyped $ 1 / (cos (isF32 x) * cos (isF32 x))]
 pdBuiltin "tan64" [x] =
   Just [untyped $ 1 / (cos (isF64 x) * cos (isF64 x))]
+pdBuiltin "tanpi16" [x] =
+  Just [untyped $ pi * (1 / (cos (pi * isF16 x) * cos (pi * isF16 x)))]
+pdBuiltin "tanpi32" [x] =
+  Just [untyped $ pi * (1 / (cos (pi * isF32 x) * cos (pi * isF32 x)))]
+pdBuiltin "tanpi64" [x] =
+  Just [untyped $ pi * (1 / (cos (pi * isF64 x) * cos (pi * isF64 x)))]
 pdBuiltin "asin16" [x] =
   Just [untyped $ 1 / sqrt (1 - isF16 x * isF16 x)]
 pdBuiltin "asin32" [x] =
   Just [untyped $ 1 / sqrt (1 - isF32 x * isF32 x)]
 pdBuiltin "asin64" [x] =
   Just [untyped $ 1 / sqrt (1 - isF64 x * isF64 x)]
+pdBuiltin "asinpi16" [x] =
+  Just [untyped $ 1 / (pi * sqrt (1 - isF16 x * isF16 x))]
+pdBuiltin "asinpi32" [x] =
+  Just [untyped $ 1 / (pi * sqrt (1 - isF32 x * isF32 x))]
+pdBuiltin "asinpi64" [x] =
+  Just [untyped $ 1 / (pi * sqrt (1 - isF64 x * isF64 x))]
 pdBuiltin "asinh16" [x] =
   Just [untyped $ 1 / sqrt (1 + isF16 x * isF16 x)]
 pdBuiltin "asinh32" [x] =
@@ -246,6 +279,12 @@ pdBuiltin "acos32" [x] =
   Just [untyped $ -1 / sqrt (1 - isF32 x * isF32 x)]
 pdBuiltin "acos64" [x] =
   Just [untyped $ -1 / sqrt (1 - isF64 x * isF64 x)]
+pdBuiltin "acospi16" [x] =
+  Just [untyped $ -1 / (pi * sqrt (1 - isF16 x * isF16 x))]
+pdBuiltin "acospi32" [x] =
+  Just [untyped $ -1 / (pi * sqrt (1 - isF32 x * isF32 x))]
+pdBuiltin "acospi64" [x] =
+  Just [untyped $ -1 / (pi * sqrt (1 - isF64 x * isF64 x))]
 pdBuiltin "acosh16" [x] =
   Just [untyped $ 1 / sqrt (isF16 x * isF16 x - 1)]
 pdBuiltin "acosh32" [x] =
@@ -257,6 +296,12 @@ pdBuiltin "atan16" [x] =
 pdBuiltin "atan32" [x] =
   Just [untyped $ 1 / (1 + isF32 x * isF32 x)]
 pdBuiltin "atan64" [x] =
+  Just [untyped $ 1 / (pi * (1 + isF64 x * isF64 x))]
+pdBuiltin "atanpi16" [x] =
+  Just [untyped $ 1 / (pi * (1 + isF16 x * isF16 x))]
+pdBuiltin "atanpi32" [x] =
+  Just [untyped $ 1 / (pi * (1 + isF32 x * isF32 x))]
+pdBuiltin "atanpi64" [x] =
   Just [untyped $ 1 / (1 + isF64 x * isF64 x)]
 pdBuiltin "atanh16" [x] =
   Just [untyped $ cosh (isF16 x) * cosh (isF16 x)]
@@ -278,6 +323,21 @@ pdBuiltin "atan2_64" [x, y] =
   Just
     [ untyped $ -isF64 y / (isF64 x * isF64 x + isF64 y * isF64 y),
       untyped $ -isF64 x / (isF64 x * isF64 x + isF64 y * isF64 y)
+    ]
+pdBuiltin "atan2pi_16" [x, y] =
+  Just
+    [ untyped $ -isF16 y / (pi * (isF16 x * isF16 x + isF16 y * isF16 y)),
+      untyped $ -isF16 x / (pi * (isF16 x * isF16 x + isF16 y * isF16 y))
+    ]
+pdBuiltin "atan2pi_32" [x, y] =
+  Just
+    [ untyped $ -isF32 y / (pi * (isF32 x * isF32 x + isF32 y * isF32 y)),
+      untyped $ -isF32 x / (pi * (isF32 x * isF32 x + isF32 y * isF32 y))
+    ]
+pdBuiltin "atan2pi_64" [x, y] =
+  Just
+    [ untyped $ -isF64 y / (pi * (isF64 x * isF64 x + isF64 y * isF64 y)),
+      untyped $ -isF64 x / (pi * (isF64 x * isF64 x + isF64 y * isF64 y))
     ]
 pdBuiltin "tanh16" [x] =
   Just [untyped $ 1 - tanh (isF16 x) * tanh (isF16 x)]
@@ -375,6 +435,21 @@ pdBuiltin "copysign32" [_x, y] =
   Just [untyped $ 1 * isF32 (UnOpExp (FSignum Float32) y), fConst Float32 0]
 pdBuiltin "copysign64" [_x, y] =
   Just [untyped $ 1 * isF64 (UnOpExp (FSignum Float64) y), fConst Float64 0]
+pdBuiltin h [x, _y, _z]
+  | Just t <- isCondFun $ nameToText h =
+      Just
+        [ boolToT t false,
+          boolToT t $ isBool x,
+          boolToT t $ bNot $ isBool x
+        ]
+  where
+    boolToT t = case t of
+      IntType it ->
+        ConvOpExp (BToI it) . untyped
+      FloatType ft ->
+        ConvOpExp (SIToFP Int32 ft) . ConvOpExp (BToI Int32) . untyped
+      Bool -> untyped
+      Unit -> const $ ValueExp UnitValue
 -- More problematic derivatives follow below.
 pdBuiltin "umul_hi8" [x, y] = Just [y, x]
 pdBuiltin "umul_hi16" [x, y] = Just [y, x]

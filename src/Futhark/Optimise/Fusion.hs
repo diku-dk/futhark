@@ -92,8 +92,8 @@ finalizeNode nt = case nt of
       letBindNames [output] . BasicOp . SubExp . Var =<< H.applyTransforms ots v
   ResNode _ -> pure mempty
   TransNode output tr ia -> do
-    (cs, e) <- H.transformToExp tr ia
-    runBuilder_ $ certifying cs $ letBindNames [output] e
+    (aux, e) <- H.transformToExp tr ia
+    runBuilder_ $ auxing aux $ letBindNames [output] e
   FreeNode _ -> pure mempty
   DoNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
@@ -387,18 +387,19 @@ vFuseNodeT
     | wacc2_cons_nms <- namesFromList $ concatMap (\(_, nms, _) -> nms) w2_inps,
       wacc1_indep_nms <- map getName is1,
       all (`notNameIn` wacc2_cons_nms) wacc1_indep_nms = do
-        -- \^ the other safety checks are done inside `tryFuseWithAccs`
+        -- the other safety checks are done inside `tryFuseWithAccs`
         lam1' <- fst <$> doFusionInLambda lam1
         lam2' <- fst <$> doFusionInLambda lam2
         let stm1 = Let pat1 aux1 (WithAcc w1_inps lam1')
             stm2 = Let pat2 aux2 (WithAcc w2_inps lam2')
-        mstm <- SF.tryFuseWithAccs infusible stm1 stm2
+        mstm <- sequence $ SF.tryFuseWithAccs infusible stm1 stm2
         case mstm of
+          Nothing -> pure Nothing
           Just (Let pat aux (WithAcc w_inps wlam)) -> do
             (wlam', success) <- doFusionInLambda wlam
             let new_stm = Let pat aux (WithAcc w_inps wlam')
             if success then fusedSomething (StmNode new_stm) else pure Nothing
-          _ -> error "Illegal result of tryFuseWithAccs called from vFuseNodeT."
+          Just _ -> error "Illegal result of tryFuseWithAccs called from vFuseNodeT."
 --
 vFuseNodeT _ _ _ _ = pure Nothing
 

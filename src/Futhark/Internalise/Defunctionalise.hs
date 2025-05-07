@@ -310,8 +310,11 @@ dimMapping' t1 t2 = M.mapMaybe f $ dimMapping t1 t2
     f _ = Nothing
 
 sizesToRename :: StaticVal -> S.Set VName
-sizesToRename (DynamicFun (_, sv1) sv2) =
-  sizesToRename sv1 <> sizesToRename sv2
+sizesToRename (DynamicFun (_, sv1) _sv2) =
+  -- It is intentional that we do not look at sv2 here, as some names
+  -- that are free in sv2 are actually bound by the parameters in sv1.
+  -- See #2234.
+  sizesToRename sv1
 sizesToRename IntrinsicSV =
   mempty
 sizesToRename HoleSV {} =
@@ -882,8 +885,9 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
           globals <- asks fst
           let bound_sizes = S.fromList dims' <> globals
           pats' <- instAnySizes pats
+          let dims'' = dims' ++ unboundSizes bound_sizes pats'
 
-          liftValDec fname (RetType [] rettype') (dims' ++ unboundSizes bound_sizes pats') pats' e0
+          liftValDec fname (RetType [] rettype') dims'' pats' e0
           pure
             ( Var
                 (qualName fname)

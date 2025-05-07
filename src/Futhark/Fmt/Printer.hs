@@ -511,7 +511,7 @@ instance Format UncheckedSpec where
     where
       sub
         | null ps = fmtName bindingStyle name
-        | otherwise = fmtName bindingStyle name <+> align (sep line $ map fmt ps)
+        | otherwise = fmtName bindingStyle name <+> align (sep space $ map fmt ps)
   fmt (ModSpec name mte doc loc) =
     addComments loc $ fmt doc <> "module" <+> fmtName bindingStyle name <> ":" <+> fmt mte
   fmt (IncludeSpec mte loc) = addComments loc $ "include" <+> fmt mte
@@ -533,7 +533,7 @@ instance Format UncheckedModTypeExp where
     let (root, withs) = typeWiths mte
      in addComments loc . localLayout loc $
           fmt root
-            </> sep line (map fmtWith (withs ++ [tr]))
+            </> sep line (map fmtWith (reverse $ tr : withs))
     where
       fmtWith (TypeRef v ps td _) =
         "with"
@@ -614,11 +614,12 @@ instance Format UncheckedDec where
   fmt (ModTypeDec tb) = fmt tb
   fmt (ModDec tb) = fmt tb
   fmt (OpenDec tb loc) = addComments loc $ "open" <+> fmt tb
-  fmt (LocalDec tb loc) = addComments loc $ "local" <+> fmt tb
+  fmt (LocalDec tb loc) = addComments loc $ "local" </> fmt tb
   fmt (ImportDec path _tb loc) =
     addComments loc $ "import" <+> "\"" <> fmtPretty path <> "\""
 
 instance Format UncheckedProg where
+  fmt (Prog Nothing []) = popComments
   fmt (Prog Nothing decs) = sepDecs fmt decs </> popComments
   fmt (Prog (Just dc) decs) = fmt dc </> sepDecs fmt decs </> popComments
 

@@ -26,7 +26,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Either
 import Data.Foldable
-import Data.List (partition, transpose, unzip6, zip6)
+import Data.List (partition, transpose, unzip4, unzip6, zip6)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -35,7 +35,7 @@ import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Prop.Aliases
-import Futhark.IR.SOACS
+import Futhark.IR.SOACS hiding (reshapeInner)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify qualified as Simplify
 import Futhark.Optimise.Simplify.Engine qualified as Engine
@@ -206,7 +206,8 @@ topDownRules =
     RuleOp removeDuplicateMapOutput,
     RuleOp fuseConcatScatter,
     RuleOp simplifyMapIota,
-    RuleOp moveTransformToInput
+    RuleOp moveTransformToInput,
+    RuleOp moveTransformToOutput
   ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -294,12 +295,10 @@ liftIdentityMapping _ pat aux op
                   { lambdaBody = (lambdaBody fun) {bodyResult = subExpsRes ses'},
                     lambdaReturnType = rettype'
                   }
-          mapM_ (uncurry letBind) invariant
-          auxing aux $
-            letBindNames (map patElemName pat') $
-              Op $
-                soacOp $
-                  Screma w arrs (mapSOAC fun')
+          auxing aux $ do
+            mapM_ (uncurry letBind) invariant
+            letBindNames (map patElemName pat') . Op $
+              soacOp (Screma w arrs (mapSOAC fun'))
 liftIdentityMapping _ _ _ _ = Skip
 
 liftIdentityStreaming :: BottomUpRuleOp (Wise SOACS)
@@ -458,9 +457,10 @@ removeDuplicateMapOutput _ (Pat pes) aux (Screma w arrs form)
                       { lambdaBody = (lambdaBody fun) {bodyResult = ses'},
                         lambdaReturnType = ts'
                       }
-              auxing aux $ letBind (Pat pes') $ Op $ Screma w arrs $ mapSOAC fun'
-              forM_ copies $ \(from, to) ->
-                letBind (Pat [to]) $ BasicOp $ Replicate mempty $ Var $ patElemName from
+              auxing aux $ do
+                letBind (Pat pes') $ Op $ Screma w arrs $ mapSOAC fun'
+                forM_ copies $ \(from, to) ->
+                  letBind (Pat [to]) $ BasicOp $ Replicate mempty $ Var $ patElemName from
   where
     checkForDuplicates (ses_ts_pes', copies) (se, t, pe)
       | Just (_, _, pe') <- find (\(x, _, _) -> resSubExp x == resSubExp se) ses_ts_pes' =
@@ -470,27 +470,33 @@ removeDuplicateMapOutput _ (Pat pes) aux (Screma w arrs form)
       | otherwise = (ses_ts_pes' ++ [(se, t, pe)], copies)
 removeDuplicateMapOutput _ _ _ _ = Skip
 
+reshapeInner :: SubExp -> NewShape SubExp -> NewShape SubExp
+reshapeInner w new_shape =
+  reshapeCoerce outer <> newshapeInner outer new_shape
+  where
+    outer = Shape [w]
+
 -- Mapping some operations becomes an extension of that operation.
 mapOpToOp :: BottomUpRuleOp (Wise SOACS)
 mapOpToOp (_, used) pat aux1 e
-  | Just (map_pe, cs, w, BasicOp (Reshape k newshape reshape_arr), [p], [arr]) <-
+  | Just (map_pe, cs, w, BasicOp (Reshape reshape_arr newshape), [p], [arr]) <-
       isMapWithOp pat e,
     paramName p == reshape_arr,
     not $ UT.isConsumed (patElemName map_pe) used = Simplify $ do
       certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
-        Reshape k (Shape [w] <> newshape) arr
+        Reshape arr (reshapeInner w newshape)
   | Just (_, cs, _, BasicOp (Concat d (arr :| arrs) dw), ps, outer_arr : outer_arrs) <-
       isMapWithOp pat e,
     (arr : arrs) == map paramName ps =
       Simplify . certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
         Concat (d + 1) (outer_arr :| outer_arrs) dw
   | Just
-      (map_pe, cs, _, BasicOp (Rearrange perm rearrange_arr), [p], [arr]) <-
+      (map_pe, cs, _, BasicOp (Rearrange rearrange_arr perm), [p], [arr]) <-
       isMapWithOp pat e,
     paramName p == rearrange_arr,
     not $ UT.isConsumed (patElemName map_pe) used =
       Simplify . certifying (stmAuxCerts aux1 <> cs) . letBind pat . BasicOp $
-        Rearrange (0 : map (1 +) perm) arr
+        Rearrange arr (0 : map (1 +) perm)
 mapOpToOp _ _ _ _ = Skip
 
 isMapWithOp ::
@@ -537,30 +543,36 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form) =
         let redlam_deps = dataDependencies $ lambdaBody redlam,
         let redlam_res = bodyResult $ lambdaBody redlam,
         let redlam_params = lambdaParams redlam,
+        let (redlam_xparams, redlam_yparams) =
+              splitAt (length nes) redlam_params,
         let used_after =
               map snd . filter ((`UT.used` used) . patElemName . fst) $
-                zip red_pes redlam_params,
+                zip (red_pes <> red_pes) redlam_params,
         let necessary =
               findNecessaryForReturned
                 (`elem` used_after)
                 (zip redlam_params $ map resSubExp $ redlam_res <> redlam_res)
                 redlam_deps,
-        let alive_mask = map ((`nameIn` necessary) . paramName) redlam_params,
-        not $ and (take (length nes) alive_mask) = Simplify $ do
+        let alive_mask =
+              zipWith
+                (||)
+                (map ((`nameIn` necessary) . paramName) redlam_xparams)
+                (map ((`nameIn` necessary) . paramName) redlam_yparams),
+        not $ and alive_mask = Simplify $ do
           let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
               dead_fix = zipWith fixDeadToNeutral alive_mask nes
-              (used_red_pes, _, used_nes) =
-                unzip3 . filter (\(_, x, _) -> paramName x `nameIn` necessary) $
-                  zip3 red_pes redlam_params nes
+              (used_red_pes, used_nes) =
+                unzip . map snd . filter fst $ zip alive_mask $ zip red_pes nes
 
-          let maplam' = removeLambdaResults (take (length nes) alive_mask) maplam
-          redlam' <- removeLambdaResults (take (length nes) alive_mask) <$> fixLambdaParams redlam (dead_fix ++ dead_fix)
+          when (used_nes == nes) cannotSimplify
 
-          auxing aux $
-            letBind (Pat $ used_red_pes ++ map_pes) $
-              Op $
-                Screma w arrs $
-                  mkOp redlam' used_nes maplam'
+          let maplam' = removeLambdaResults alive_mask maplam
+          redlam' <-
+            removeLambdaResults alive_mask
+              <$> fixLambdaParams redlam (dead_fix ++ dead_fix)
+
+          auxing aux . letBind (Pat $ used_red_pes ++ map_pes) . Op $
+            Screma w arrs (mkOp redlam' used_nes maplam')
     removeDeadReduction' _ _ _ _ = Skip
 removeDeadReduction _ _ _ _ = Skip
 
@@ -618,9 +630,10 @@ fuseConcatScatter vtable pat _ (Scatter _ arrs dests fun)
         y_ws <- mapM sizeOf ys
         guard $ all (x_w ==) y_ws
         pure (x_w, x : ys, cs)
-      Just (BasicOp (Reshape ReshapeCoerce _ arr), cs) -> do
-        (a, b, cs') <- isConcat arr
-        pure (a, b, cs <> cs')
+      Just (BasicOp (Reshape arr newshape), cs)
+        | ReshapeCoerce <- reshapeKind newshape -> do
+            (a, b, cs') <- isConcat arr
+            pure (a, b, cs <> cs')
       _ -> Nothing
 fuseConcatScatter _ _ _ _ = Skip
 
@@ -711,7 +724,7 @@ simplifyKnownIterationSOAC _ _ _ _ = Skip
 data ArrayOp
   = ArrayIndexing Certs VName (Slice SubExp)
   | ArrayRearrange Certs VName [Int]
-  | ArrayReshape Certs VName ReshapeKind Shape
+  | ArrayReshape Certs VName (NewShape SubExp)
   | ArrayCopy Certs VName
   | -- | Never constructed.
     ArrayVar Certs VName
@@ -720,24 +733,24 @@ data ArrayOp
 arrayOpArr :: ArrayOp -> VName
 arrayOpArr (ArrayIndexing _ arr _) = arr
 arrayOpArr (ArrayRearrange _ arr _) = arr
-arrayOpArr (ArrayReshape _ arr _ _) = arr
+arrayOpArr (ArrayReshape _ arr _) = arr
 arrayOpArr (ArrayCopy _ arr) = arr
 arrayOpArr (ArrayVar _ arr) = arr
 
 arrayOpCerts :: ArrayOp -> Certs
 arrayOpCerts (ArrayIndexing cs _ _) = cs
 arrayOpCerts (ArrayRearrange cs _ _) = cs
-arrayOpCerts (ArrayReshape cs _ _ _) = cs
+arrayOpCerts (ArrayReshape cs _ _) = cs
 arrayOpCerts (ArrayCopy cs _) = cs
 arrayOpCerts (ArrayVar cs _) = cs
 
 isArrayOp :: Certs -> Exp rep -> Maybe ArrayOp
 isArrayOp cs (BasicOp (Index arr slice)) =
   Just $ ArrayIndexing cs arr slice
-isArrayOp cs (BasicOp (Rearrange perm arr)) =
+isArrayOp cs (BasicOp (Rearrange arr perm)) =
   Just $ ArrayRearrange cs arr perm
-isArrayOp cs (BasicOp (Reshape k new_shape arr)) =
-  Just $ ArrayReshape cs arr k new_shape
+isArrayOp cs (BasicOp (Reshape arr new_shape)) =
+  Just $ ArrayReshape cs arr new_shape
 isArrayOp cs (BasicOp (Replicate (Shape []) (Var arr))) =
   Just $ ArrayCopy cs arr
 isArrayOp _ _ =
@@ -745,8 +758,8 @@ isArrayOp _ _ =
 
 fromArrayOp :: ArrayOp -> (Certs, Exp rep)
 fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
-fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
-fromArrayOp (ArrayReshape cs arr k new_shape) = (cs, BasicOp $ Reshape k new_shape arr)
+fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange arr perm)
+fromArrayOp (ArrayReshape cs arr new_shape) = (cs, BasicOp $ Reshape arr new_shape)
 fromArrayOp (ArrayCopy cs arr) = (cs, BasicOp $ Replicate mempty $ Var arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 
@@ -946,7 +959,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
       arr `elem` map_param_names
         && all (`ST.elem` vtable) (namesToList $ freeIn cs)
         && not (null perm)
-    arrayIsMapParam (_, ArrayReshape cs arr _ new_shape) =
+    arrayIsMapParam (_, ArrayReshape cs arr new_shape) =
       arr `elem` map_param_names
         && all (`ST.elem` vtable) (namesToList $ freeIn cs <> freeIn new_shape)
     arrayIsMapParam (_, ArrayCopy cs arr) =
@@ -966,9 +979,9 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
                 ArrayIndexing _ _ (Slice slice) ->
                   BasicOp $ Index arr $ Slice $ whole_dim : slice
                 ArrayRearrange _ _ perm ->
-                  BasicOp $ Rearrange (0 : map (+ 1) perm) arr
-                ArrayReshape _ _ k new_shape ->
-                  BasicOp $ Reshape k (Shape [w] <> new_shape) arr
+                  BasicOp $ Rearrange arr (0 : map (+ 1) perm)
+                ArrayReshape _ _ new_shape ->
+                  BasicOp $ Reshape arr $ reshapeInner w new_shape
                 ArrayCopy {} ->
                   BasicOp $ Replicate mempty $ Var arr
                 ArrayVar {} ->
@@ -983,4 +996,77 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm map_l
               )
     mapOverArr _ = pure Nothing
 moveTransformToInput _ _ _ _ =
+  Skip
+
+-- The idea behidn this rule is to tak cases such as
+--
+--   let ...A... =
+--     map (\x -> ...
+--              let x = ...
+--              ...
+--              let y = f(x)
+--              ...
+--              in ...y ...)
+--
+-- where 'f' is some transformation like a reshape, and move it out
+-- such that we get
+--
+--   let ...A'... =
+--     map (\x -> ...
+--              let x = ...
+--              ...
+--              in ...x ...)
+--   let A' = f'(A')
+--
+-- This can improve simplification in case A' fuses or simplifies with
+-- something else.
+--
+-- TODO: currently we only handle reshapes here, but the principle
+-- should actually hold for any ArrayTransform.
+moveTransformToOutput :: TopDownRuleOp (Wise SOACS)
+moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm map_lam scan reduce))
+  | (transformed, map_infos, stms') <-
+      foldl' onStm ([], zip3 map_res map_rets map_pes, mempty) $ bodyStms $ lambdaBody map_lam,
+    (map_res', map_rets', map_pes') <- unzip3 map_infos,
+    not $ null transformed = Simplify $ do
+      (tr_res, tr_rets, tr_names, post) <- unzip4 <$> mapM mkTransformed transformed
+      let map_lam' =
+            map_lam
+              { lambdaBody = mkBody stms' $ nonmap_res <> map_res' <> tr_res,
+                lambdaReturnType = nonmap_rets <> map_rets' <> tr_rets
+              }
+          pat_names = map patElemName (nonmap_pes <> map_pes') <> tr_names
+      auxing screma_aux . letBindNames pat_names . Op $
+        Screma w arrs (ScremaForm map_lam' scan reduce)
+      sequence_ post
+  where
+    num_nonmap_res = scanResults scan + redResults reduce
+    (nonmap_pes, map_pes) =
+      splitAt num_nonmap_res $ patElems screma_pat
+    (nonmap_rets, map_rets) =
+      splitAt num_nonmap_res $ lambdaReturnType map_lam
+    (nonmap_res, map_res) =
+      splitAt num_nonmap_res $ bodyResult $ lambdaBody map_lam
+
+    scope = scopeOf $ bodyStms $ lambdaBody map_lam
+
+    invariantToMap = all (`ST.elem` vtable) . namesToList . freeIn
+
+    onStm (transformed, map_infos, stms) (Let (Pat [pe]) aux (BasicOp (Reshape arr new_shape)))
+      | ([(res, _, screma_pe)], map_pesres') <- partition matches map_infos,
+        Just t <- typeOf <$> M.lookup arr scope,
+        invariantToMap (t, new_shape) =
+          let cs = stmAuxCerts aux <> resCerts res
+              transform = (arr, cs, BasicOp . flip Reshape (reshapeInner w new_shape))
+           in ((t, screma_pe, transform) : transformed, map_pesres', stms)
+      where
+        matches (r, _, _) = resSubExp r == Var (patElemName pe)
+    onStm (transformed, map_infos, stms) stm =
+      (transformed, map_infos, stms <> oneStm stm)
+
+    mkTransformed (t, pe, (arr, cs, f)) = do
+      v <- newVName (baseString (patElemName pe) <> "_pretr")
+      let bind = letBindNames [patElemName pe] $ f v
+      pure (SubExpRes cs (Var arr), t, v, bind)
+moveTransformToOutput _ _ _ _ =
   Skip

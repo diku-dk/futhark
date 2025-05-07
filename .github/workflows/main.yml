@@ -411,7 +411,7 @@ jobs:
             --backend=opencl \
             --cache-extension=cache
           FUTHARK_BACKEND=opencl make -C tests_lib/c -j
-        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --time=0-02:00:00 --gres=gpu:a100:1 --job-name=fut-opencl-test
 
   test-pyopencl:
     runs-on: hendrix
@@ -430,7 +430,7 @@ jobs:
           module unload cuda
           module load cuda/11.8
           futhark test tests --no-terminal --backend=pyopencl
-        slurm-options: -p gpu --time=0-02:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --time=0-02:00:00 --gres=gpu:a100:1 --job-name=fut-pyopencl-test
 
   test-cuda:
     runs-on: cuda
@@ -483,10 +483,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - uses: mymindstorm/setup-emsdk@v12
+    - uses: mymindstorm/setup-emsdk@v14
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
+        cache-key: emsdk-wasm
 
     - uses: actions/setup-node@v3.5.1
       with:
@@ -520,10 +521,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - uses: mymindstorm/setup-emsdk@v12
+    - uses: mymindstorm/setup-emsdk@v14
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-mc-cache'
+        cache-key: emsdk-wasm-multicore
 
     - uses: actions/setup-node@v3.5.1
       with:
@@ -552,10 +554,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - uses: mymindstorm/setup-emsdk@v12
+    - uses: mymindstorm/setup-emsdk@v14
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
+        cache-key: emsdk-wasm-lib
 
     - uses: actions/setup-node@v3.5.1
       with:
@@ -702,7 +705,7 @@ jobs:
         rsync -rv -e 'ssh -o "StrictHostKeyChecking no"' prelude-docs/* futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/docs/prelude/
 
     - name: make nightly release
-      uses: "marvinpinto/action-automatic-releases@latest"
+      uses: "mathieucarbou/marvinpinto-action-automatic-releases@latest"
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
         automatic_release_tag: "nightly"

@@ -214,8 +214,9 @@ readInputs _segments env is = mapM_ onInput
               let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
               v_flat <-
                 letExp (baseString v <> "_flat") $ BasicOp $ Index v_D slice
+              v_flat_t <- lookupType v_flat
               letBindNames [v] . BasicOp $
-                Reshape ReshapeArbitrary (arrayShape t) v_flat
+                Reshape v_flat (reshapeAll (arrayShape v_flat_t) (arrayShape t))
 
 transformScalarStms ::
   Segments ->
@@ -264,12 +265,13 @@ dataArr segments env inps (Var v)
           Regular vs -> irregularD <$> mkIrregFromReg segments vs
 dataArr segments _ _ se = do
   rep <- letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
-  dims <- arrayDims <$> lookupType rep
+  rep_t <- lookupType rep
+  let dims = arrayDims rep_t
   if length dims == 1
     then pure rep
     else do
       n <- toSubExp "n" $ product $ map pe64 dims
-      letExp "reshape" $ BasicOp $ Reshape ReshapeArbitrary (Shape [n]) rep
+      letExp "reshape" $ BasicOp $ Reshape rep $ reshapeAll (arrayShape rep_t) (Shape [n])
 
 mkIrregFromReg ::
   Segments ->
@@ -287,7 +289,7 @@ mkIrregFromReg segments arr = do
     letSubExp "reg_num_elems" <=< toExp $ product $ map pe64 $ arrayDims arr_t
   arr_D <-
     letExp "reg_D" . BasicOp $
-      Reshape ReshapeArbitrary (Shape [num_elems]) arr
+      Reshape arr (reshapeAll (arrayShape arr_t) (Shape [num_elems]))
   arr_F <- letExp "reg_F" <=< segMap (MkSolo num_elems) $ \(MkSolo i) -> do
     flag <- letSubExp "flag" <=< toExp $ (pe64 i `rem` pe64 segment_size) .==. 0
     pure [subExpRes flag]
@@ -391,9 +393,8 @@ flattenIrregularRep ir@(IrregularRep shape flags offsets elems) = do
       n <- arraySize 0 <$> lookupType shape
       m' <- letSubExp "flat_m" <=< toExp $ product $ map pe64 $ arrayDims elems_t
       elems' <-
-        letExp (baseString elems <> "_flat") $
-          BasicOp $
-            Reshape ReshapeArbitrary (Shape [m']) elems
+        letExp (baseString elems <> "_flat") . BasicOp $
+          Reshape elems (reshapeAll (arrayShape elems_t) (Shape [m']))
 
       shape' <- letExp (baseString shape <> "_flat") <=< renameExp <=< segMap (MkSolo n) $
         \(MkSolo i) -> do
@@ -485,7 +486,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           pure $ insertRep (distResTag res) (resVar rt_in env) env
       | otherwise ->
           scalarCase
-    Reshape _ _ arr
+    Reshape arr _
       | Just (DistInput rt_in _) <- lookup arr inps ->
           pure $ insertRep (distResTag res) (resVar rt_in env) env
     Index arr slice
@@ -612,12 +613,12 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           pure $ insertIrregular shape flags offsets (distResTag res) elems' env
       | otherwise ->
           error "Flattening update: destination is not input."
-    Rearrange perm v -> do
+    Rearrange v perm -> do
       case lookup v inps of
         Just (DistInputFree v' _) -> do
           v'' <-
             letExp (baseString v' <> "_tr") . BasicOp $
-              Rearrange perm v'
+              Rearrange v' perm
           pure $ insertRegulars [distResTag res] [v''] env
         Just (DistInput rt v_t) -> do
           case resVar rt env of
@@ -630,13 +631,13 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
               let r = segmentsRank segments
               v'' <-
                 letExp (baseString v' <> "_tr") . BasicOp $
-                  Rearrange ([0 .. r - 1] ++ map (+ r) perm) v'
+                  Rearrange v' ([0 .. r - 1] ++ map (+ r) perm)
               pure $ insertRegulars [distResTag res] [v''] env
         Nothing -> do
           let r = segmentsRank segments
           v' <-
             letExp (baseString v <> "_tr") . BasicOp $
-              Rearrange ([0 .. r - 1] ++ map (+ r) perm) v
+              Rearrange v ([0 .. r - 1] ++ map (+ r) perm)
           pure $ insertRegulars [distResTag res] [v'] env
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
@@ -704,9 +705,10 @@ onMapInputArr segments env inps ii2 p arr = do
       case v_inp of
         DistInputFree vs t -> do
           let inner_shape = arrayShape $ paramType p
+          vs_t <- lookupType vs
           v <-
-            letExp (baseString vs <> "_flat") . BasicOp $
-              Reshape ReshapeArbitrary (Shape [ws_prod] <> inner_shape) vs
+            letExp (baseString vs <> "_flat") . BasicOp . Reshape vs $
+              reshapeAll (arrayShape vs_t) (Shape [ws_prod] <> inner_shape)
           pure $ MapArray v t
         DistInput rt _ ->
           case resVar rt env of
@@ -745,9 +747,10 @@ onMapInputArr segments env inps ii2 p arr = do
       arr_rep <-
         letExp (baseString arr <> "_inp_rep") . BasicOp $
           Replicate (segmentsShape segments) (Var arr)
+      arr_rep_t <- lookupType arr_rep
       v <-
-        letExp (baseString arr <> "_inp_rep_flat") . BasicOp $
-          Reshape ReshapeArbitrary (Shape [ws_prod] <> arrayShape arr_row_t) arr_rep
+        letExp (baseString arr <> "_inp_rep_flat") . BasicOp . Reshape arr_rep $
+          reshapeAll (arrayShape arr_rep_t) (Shape [ws_prod] <> arrayShape arr_row_t)
       pure $ MapArray v arr_row_t
 
 scopeOfDistInputs :: DistInputs -> Scope GPU
@@ -1093,7 +1096,7 @@ transformDistributed irregs segments dist = do
             letExp (baseString v) . BasicOp $
               Replicate mempty (Var $ irregularD irreg)
           letBindNames [v] $
-            BasicOp (Reshape ReshapeArbitrary shape v_copy)
+            BasicOp (Reshape v_copy (reshapeCoerce shape))
   forM_ reps $ \(v, r) ->
     case r of
       Left se ->
@@ -1205,9 +1208,11 @@ liftArg segments inps env (se, d) = do
           }
         ) = do
         t <- lookupType elems
+        flags_t <- lookupType flags
         num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
-        flags' <- letExp "flags" $ BasicOp $ Reshape ReshapeArbitrary (Shape [Var num_data]) flags
-        elems' <- letExp "elems" $ BasicOp $ Reshape ReshapeArbitrary (Shape [Var num_data]) elems
+        let shape = Shape [Var num_data]
+        flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
+        elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
         -- Only apply the original diet to the 'elems' array
         let diets = replicate 4 Observe ++ [d]
         pure $ zipWith (curry (first Var)) [num_data, segs, flags', offsets, elems'] diets
@@ -1247,10 +1252,12 @@ liftResult segments inps env res = map (SubExpRes mempty . Var) <$> vs
             irregularD = elems
           }
         ) = do
+        flags_t <- lookupType flags
         t <- lookupType elems
         num_data <- letExp "num_data" =<< toExp (product $ map pe64 $ arrayDims t)
-        flags' <- letExp "flags" $ BasicOp $ Reshape ReshapeArbitrary (Shape [Var num_data]) flags
-        elems' <- letExp "elems" $ BasicOp $ Reshape ReshapeArbitrary (Shape [Var num_data]) elems
+        let shape = Shape [Var num_data]
+        flags' <- letExp "flags" $ BasicOp $ Reshape flags $ reshapeAll (arrayShape flags_t) shape
+        elems' <- letExp "elems" $ BasicOp $ Reshape elems $ reshapeAll (arrayShape t) shape
         pure [num_data, segs, flags', offsets, elems']
 
 liftBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result

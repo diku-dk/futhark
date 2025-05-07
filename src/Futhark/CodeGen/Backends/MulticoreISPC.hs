@@ -467,7 +467,7 @@ compileExp (BinOpExp bop x y) = do
     _ -> [C.cexp|$id:(prettyString bop)($exp:x', $exp:y')|]
 compileExp (FunExp h args _) = do
   args' <- mapM compileExp args
-  pure [C.cexp|$id:(funName (nameFromString h))($args:args')|]
+  pure [C.cexp|$id:(funName (nameFromText h))($args:args')|]
 
 -- | Compile a block of code with ISPC specific semantics, falling back
 -- to generic C when this semantics is not needed.
@@ -803,7 +803,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
   aos_name <- newVName "aos"
   GC.items
     [C.citems|
-    $escstm:("#if ISPC")
+    $escstm:("#if defined(ISPC)")
     $tyqual:uniform struct $id:fstruct $id:aos_name[programCount];
     $id:aos_name[programIndex] = $id:(fstruct <> "_");
     $escstm:("foreach_active (i)")
