@@ -178,8 +178,3 @@ union n1 n2 = do
 
       -- This shouldn't be possible.       
       _ -> error "'find' somehow didn't return a Repr"
-
--- | Return @True@ if both nodes belong to the same
--- equivalence class.
--- equivalent :: TyVarNode s -> TyVarNode s -> ST s Bool
--- equivalent n1 n2 = (==) <$> find n1 <*> find n2
