@@ -215,8 +215,7 @@ substTyVars (Array u shape elemt) = do
 
 occursCheck :: Reason Type -> VName -> VName -> Type -> SolveM s ()
 occursCheck reason v k tp = do
-  tp' <- substTyVars tp
-  let vars = typeVars tp'
+  let vars = typeVars tp
   when (k `S.member` vars) . typeError (locOf reason) mempty $
     "Occurs check: cannot instantiate"
       <+> prettyName v
