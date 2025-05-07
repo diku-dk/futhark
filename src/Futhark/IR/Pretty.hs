@@ -1,9 +1,8 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
--- | Futhark prettyprinter.  This module defines 'Pretty' instances
--- for the AST defined in "Futhark.IR.Syntax",
--- but also a number of convenience functions if you don't want to use
--- the interface from 'Pretty'.
+-- | Futhark prettyprinter. This module defines 'Pretty' instances for the AST
+-- defined in "Futhark.IR.Syntax", but also a number of convenience functions if
+-- you don't want to use the interface from 'Pretty'.
 module Futhark.IR.Pretty
   ( prettyTuple,
     prettyTupleLines,
@@ -43,7 +42,7 @@ instance Pretty Commutativity where
   pretty Commutative = "commutative"
   pretty Noncommutative = "noncommutative"
 
-instance Pretty Shape where
+instance (Pretty d) => Pretty (ShapeBase d) where
   pretty = mconcat . map (brackets . pretty) . shapeDims
 
 instance Pretty Rank where
@@ -52,9 +51,6 @@ instance Pretty Rank where
 instance (Pretty a) => Pretty (Ext a) where
   pretty (Free e) = pretty e
   pretty (Ext x) = "?" <> pretty (show x)
-
-instance Pretty ExtShape where
-  pretty = mconcat . map (brackets . pretty) . shapeDims
 
 instance Pretty Space where
   pretty DefaultSpace = mempty
@@ -187,6 +183,13 @@ instance (Pretty d) => Pretty (FlatDimIndex d) where
 instance (Pretty a) => Pretty (FlatSlice a) where
   pretty (FlatSlice offset xs) = brackets (pretty offset <> ";" <+> commasep (map pretty xs))
 
+instance (Pretty d) => Pretty (DimSplice d) where
+  pretty (DimSplice i k shape) = pretty i <> "::" <> pretty k <> "=>" <> pretty shape
+
+instance (Pretty d) => Pretty (NewShape d) where
+  pretty (NewShape ds shape) =
+    parens $ align $ commastack (map pretty ds) <> semi </> pretty shape
+
 instance Pretty BasicOp where
   pretty (SubExp se) = pretty se
   pretty (Opaque OpaqueNil e) = "opaque" <> apply [pretty e]
@@ -228,15 +231,14 @@ instance Pretty BasicOp where
     "replicate" <> apply [pretty ne, align (pretty ve)]
   pretty (Scratch t shape) =
     "scratch" <> apply (pretty t : map pretty shape)
-  pretty (Reshape ReshapeArbitrary shape e) =
-    "reshape" <> apply [pretty shape, pretty e]
-  pretty (Reshape ReshapeCoerce shape e) =
-    "coerce" <> apply [pretty shape, pretty e]
-  pretty (Rearrange perm e) =
-    "rearrange" <> apply [apply (map pretty perm), pretty e]
+  pretty (Reshape reshape e) =
+    "reshape" <> parens (align $ commastack [pretty reshape, pretty e])
+  pretty (Rearrange v perm) =
+    "rearrange" <> apply [pretty v, apply (map pretty perm)]
   pretty (Concat i (x :| xs) w) =
     "concat" <> "@" <> pretty i <> apply (pretty w : pretty x : map pretty xs)
-  pretty (Manifest perm e) = "manifest" <> apply [apply (map pretty perm), pretty e]
+  pretty (Manifest v perm) =
+    "manifest" <> apply [pretty v, apply (map pretty perm)]
   pretty (Assert e msg (loc, _)) =
     "assert" <> apply [pretty e, pretty msg, pretty $ show $ locStr loc]
   pretty (UpdateAcc safety acc is v) =

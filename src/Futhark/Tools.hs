@@ -146,8 +146,8 @@ sequentialStreamWholeArray pat w nes lam arrs = do
   -- Finally, the array parameters are set to the arrays (but reshaped
   -- to make the types work out; this will be simplified rapidly).
   forM_ (zip arr_params arrs) $ \(p, arr) ->
-    letBindNames [paramName p] . BasicOp $
-      Reshape ReshapeCoerce (arrayShape $ paramType p) arr
+    letBindNames [paramName p] $
+      shapeCoerce (arrayDims $ paramType p) arr
 
   -- Then we just inline the lambda body.
   mapM_ addStm $ bodyStms $ lambdaBody lam
@@ -159,7 +159,7 @@ sequentialStreamWholeArray pat w nes lam arrs = do
     certifying cs $ case (arrayDims $ patElemType pe, se) of
       (dims, Var v)
         | not $ null dims ->
-            letBindNames [patElemName pe] $ BasicOp $ Reshape ReshapeCoerce (Shape dims) v
+            letBindNames [patElemName pe] $ shapeCoerce dims v
       _ -> letBindNames [patElemName pe] $ BasicOp $ SubExp se
 
 -- | Split the parameters of a stream reduction lambda into the chunk

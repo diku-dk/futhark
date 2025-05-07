@@ -102,7 +102,7 @@ data ArrayTransform
   = -- | A permutation of an otherwise valid input.
     Rearrange Certs [Int]
   | -- | A reshaping of an otherwise valid input.
-    Reshape Certs ReshapeKind Shape
+    Reshape Certs (NewShape SubExp)
   | -- | Replicate the rows of the array a number of times.
     Replicate Certs Shape
   | -- | An array indexing operation.
@@ -111,15 +111,15 @@ data ArrayTransform
 
 instance FreeIn ArrayTransform where
   freeIn' (Rearrange cs _) = freeIn' cs
-  freeIn' (Reshape cs _ shape) = freeIn' cs <> freeIn' shape
+  freeIn' (Reshape cs shape) = freeIn' cs <> freeIn' shape
   freeIn' (Replicate cs shape) = freeIn' cs <> freeIn' shape
   freeIn' (Index cs slice) = freeIn' cs <> freeIn' slice
 
 instance Substitute ArrayTransform where
   substituteNames substs (Rearrange cs xs) =
     Rearrange (substituteNames substs cs) xs
-  substituteNames substs (Reshape cs k ses) =
-    Reshape (substituteNames substs cs) k (substituteNames substs ses)
+  substituteNames substs (Reshape cs newshape) =
+    Reshape (substituteNames substs cs) (substituteNames substs newshape)
   substituteNames substs (Replicate cs se) =
     Replicate (substituteNames substs cs) (substituteNames substs se)
   substituteNames substs (Index cs slice) =
@@ -233,10 +233,10 @@ combineTransforms _ _ = Nothing
 -- variable and the transformation.  Only 'Rearrange' and 'Reshape'
 -- are possible to express this way.
 transformFromExp :: Certs -> Exp rep -> Maybe (VName, ArrayTransform)
-transformFromExp cs (BasicOp (Futhark.Rearrange perm v)) =
+transformFromExp cs (BasicOp (Futhark.Rearrange v perm)) =
   Just (v, Rearrange cs perm)
-transformFromExp cs (BasicOp (Futhark.Reshape k shape v)) =
-  Just (v, Reshape cs k shape)
+transformFromExp cs (BasicOp (Futhark.Reshape v shape)) =
+  Just (v, Reshape cs shape)
 transformFromExp cs (BasicOp (Futhark.Replicate shape (Var v))) =
   Just (v, Replicate cs shape)
 transformFromExp cs (BasicOp (Futhark.Index v slice)) =
@@ -249,9 +249,9 @@ transformToExp (Replicate cs n) ia =
   pure (cs, BasicOp $ Futhark.Replicate n (Var ia))
 transformToExp (Rearrange cs perm) ia = do
   r <- arrayRank <$> lookupType ia
-  pure (cs, BasicOp $ Futhark.Rearrange (perm ++ [length perm .. r - 1]) ia)
-transformToExp (Reshape cs k shape) ia = do
-  pure (cs, BasicOp $ Futhark.Reshape k shape ia)
+  pure (cs, BasicOp $ Futhark.Rearrange ia (perm ++ [length perm .. r - 1]))
+transformToExp (Reshape cs shape) ia = do
+  pure (cs, BasicOp $ Futhark.Reshape ia shape)
 transformToExp (Index cs slice) ia = do
   pure (cs, BasicOp $ Futhark.Index ia slice)
 
@@ -294,7 +294,9 @@ isVarInput _ = Nothing
 isVarishInput :: Input -> Maybe VName
 isVarishInput (Input ts v t)
   | nullTransforms ts = Just v
-  | Reshape cs ReshapeCoerce (Shape [_]) :< ts' <- viewf ts,
+  | Reshape cs newshape :< ts' <- viewf ts,
+    ReshapeCoerce <- reshapeKind newshape,
+    1 <- shapeRank $ newShape newshape,
     cs == mempty =
       isVarishInput $ Input ts' v t
 isVarishInput _ = Nothing
@@ -349,8 +351,8 @@ inputType (Input (ArrayTransforms ts) _ at) =
       arrayOfShape t shape
     transformType t (Rearrange _ perm) =
       rearrangeType perm t
-    transformType t (Reshape _ _ shape) =
-      t `setArrayShape` shape
+    transformType t (Reshape _ shape) =
+      t `setArrayShape` newShape shape
     transformType t (Index _ slice) =
       t `setArrayShape` sliceShape slice
 
@@ -370,8 +372,11 @@ transformRows (ArrayTransforms ts) =
   where
     transformRows' inp (Rearrange cs perm) =
       addTransform (Rearrange cs (0 : map (+ 1) perm)) inp
-    transformRows' inp (Reshape cs k shape) =
-      addTransform (Reshape cs k (Shape [arraySize 0 (inputType inp)] <> shape)) inp
+    transformRows' inp (Reshape cs shape) =
+      addTransform (Reshape cs newshape) inp
+      where
+        newshape = reshapeAll inp_shape $ Shape [shapeSize 0 inp_shape] <> newShape shape
+        inp_shape = arrayShape $ inputType inp
     transformRows' inp (Replicate cs n)
       | inputRank inp == 1 =
           Rearrange mempty [1, 0]
@@ -690,10 +695,8 @@ soacToStream soac = do
 ppArrayTransform :: PP.Doc a -> ArrayTransform -> PP.Doc a
 ppArrayTransform e (Rearrange cs perm) =
   "rearrange" <> pretty cs <> PP.apply [PP.apply (map pretty perm), e]
-ppArrayTransform e (Reshape cs ReshapeArbitrary shape) =
+ppArrayTransform e (Reshape cs shape) =
   "reshape" <> pretty cs <> PP.apply [pretty shape, e]
-ppArrayTransform e (Reshape cs ReshapeCoerce shape) =
-  "coerce" <> pretty cs <> PP.apply [pretty shape, e]
 ppArrayTransform e (Replicate cs ne) =
   "replicate" <> pretty cs <> PP.apply [pretty ne, e]
 ppArrayTransform e (Index cs slice) =
