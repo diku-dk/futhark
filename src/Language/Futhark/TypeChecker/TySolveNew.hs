@@ -653,7 +653,6 @@ solveTyVar (tv, (lvl, TyVarFree loc l)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
     Right ty -> do
-      -- traceM $ "tyvar\n  " ++ show tv ++ "\nhas type\n  " ++ show ty
       scopeCheck (Reason loc) tv lvl ty
       liftednessCheck l ty
     _ -> pure ()
