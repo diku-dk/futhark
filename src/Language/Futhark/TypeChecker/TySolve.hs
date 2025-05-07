@@ -655,11 +655,10 @@ solveTyVar (tv, (_, TyVarSum loc cs1)) = do
           </> "Must be a sum type with constructors"
           </> indent 2 (pretty (Scalar (Sum cs1)))
     Right _ -> pure ()
-solveTyVar (tv, (lvl, TyVarFree loc l)) = do
+solveTyVar (tv, (_, TyVarFree _ l)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
     Right ty -> do
-      -- scopeCheck (Reason loc) tv lvl ty
       liftednessCheck l ty
     _ -> pure ()
 solveTyVar (tv, (_, TyVarPrim loc pts)) = do
