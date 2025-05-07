@@ -151,8 +151,6 @@ assignNewSol node new_sol = do
   ref <- descrRef node
   modifySTRef ref $ \i -> i { solution = new_sol }  
 
--- TODO: Make sure we correctly handle level, liftedness, and if 
--- TODO: type parameters are involved.
 -- | Join the equivalence classes of the nodes. The resulting equivalence
 -- class has the same solution and key as the second argument.
 union :: TyVarNode s -> TyVarNode s -> ST s ()
