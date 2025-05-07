@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   This helps histograms on these types, as well as AD on programs that use
   `f16`.
 
+* Improved handling of long chains of `flatten`/`unflatten`/`transpose`
+  operations.
+
 ### Removed
 
 ### Changed
