@@ -700,12 +700,21 @@ instance IsOp SOAC where
         reductionDependencies mempty lam nes deps_in
       depsOfRed (Reduce _ lam nes, deps_in) =
         reductionDependencies mempty lam nes deps_in
-  opDependencies (ScanScatter w arrs map_lam _scan dests _scatter_lam) =
-    let deps = lambdaDependencies mempty map_lam (depsOfArrays w arrs)
-     in map flattenBlocks (groupScatterResults dests deps)
+  opDependencies (ScanScatter w arrs map_lam scan spec scatter_lam) =
+    let (scan_in, map_deps) =
+          splitAt (length $ scanNeutral scan) $
+            lambdaDependencies mempty map_lam (depsOfArrays w arrs)
+        scan_deps = depsOfScan scan scan_in
+        (is_deps, vs_and_id_deps) =
+          splitScatterResults spec $
+            lambdaDependencies mempty scatter_lam (scan_deps <> map_deps)
+        (vs_deps, id_map) = splitAt (length spec) vs_and_id_deps
+     in map flattenBlocks (groupScatterResults spec (is_deps <> vs_deps))
+          <> id_map
     where
       flattenBlocks (_, arr, ivs) =
         oneName arr <> mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
+      depsOfScan (Scan lam nes) = reductionDependencies mempty lam nes
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t
