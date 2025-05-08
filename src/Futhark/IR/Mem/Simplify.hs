@@ -101,16 +101,6 @@ blockers =
       Engine.isAllocation = isAlloc mempty mempty
     }
 
--- | Standard collection of simplification rules for representations
--- with memory.
-memRuleBook :: (SimplifyMemory rep inner) => RuleBook (Wise rep)
-memRuleBook =
-  standardRules
-    <> ruleBook
-      [ RuleOp decertifySafeAlloc
-      ]
-      []
-
 -- If an allocation is statically known to be safe, then we can remove
 -- the certificates on it.  This can help hoist things that would
 -- otherwise be stuck inside loops or branches.
@@ -121,3 +111,36 @@ decertifySafeAlloc _ pat (StmAux cs attrs _) op
     safeOp op =
       Simplify $ attributing attrs $ letBind pat $ Op op
 decertifySafeAlloc _ _ _ _ = Skip
+
+--
+-- copy(reshape(manifest(v0),s)) can be rewritten to just reshape(manifest(v0),s).
+--
+-- This is a pattern that can be produced by ExplicitAllocations when the
+-- reshape would otherwise produce a layout that is not representable as an
+-- LMAD. We have to be careful that the manifest writes to the same memory that
+-- the original copy put it in.
+copyManifest :: (SimplifyMemory rep inner) => TopDownRuleBasicOp (Wise rep)
+copyManifest vtable pat aux (Replicate (Shape []) (Var v2))
+  | Just (Reshape v1 s, v2_cs) <- ST.lookupBasicOp v2 vtable,
+    Just (Manifest v0 perm, v1_cs) <- ST.lookupBasicOp v1 vtable,
+    Pat [PatElem _ (_, MemArray _ _ _ (ArrayIn mem _))] <- pat =
+      Simplify $ do
+        ~(MemArray pt shape u (ArrayIn _ v1_lmad)) <- lookupMemInfo v1
+        v0' <- newVName (baseString v1 <> "_manifest")
+        let manifest_pat =
+              Pat [PatElem v0' $ MemArray pt shape u $ ArrayIn mem v1_lmad]
+            stm = mkWiseStm manifest_pat mempty $ BasicOp $ Manifest v0 perm
+        certifying (v1_cs <> v2_cs) $ addStm stm
+        auxing aux $ letBind pat $ BasicOp $ Reshape v0' s
+copyManifest _ _ _ _ = Skip
+
+-- | Standard collection of simplification rules for representations
+-- with memory.
+memRuleBook :: (SimplifyMemory rep inner) => RuleBook (Wise rep)
+memRuleBook =
+  standardRules
+    <> ruleBook
+      [ RuleOp decertifySafeAlloc,
+        RuleBasicOp copyManifest
+      ]
+      []
