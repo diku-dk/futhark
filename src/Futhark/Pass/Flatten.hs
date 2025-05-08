@@ -1201,8 +1201,8 @@ transformDistributed irregs segments dist = do
           v_copy <-
             letExp (baseString v) . BasicOp $
               Replicate mempty (Var $ irregularD irreg)
-          letBindNames [v] $
-            BasicOp (Reshape v_copy (reshapeCoerce shape))
+          v_copy_shape <- arrayShape <$> lookupType v_copy
+          letBindNames [v] $ BasicOp $ Reshape v_copy $ reshapeAll v_copy_shape shape
   forM_ reps $ \(v, r) ->
     case r of
       Left se ->
