@@ -287,6 +287,26 @@ subExpAvailable :: SubExp -> SymbolTable rep -> Bool
 subExpAvailable (Var name) = available name
 subExpAvailable Constant {} = const True
 
+index' ::
+  VName ->
+  [TPrimExp Int64 VName] ->
+  SymbolTable rep ->
+  Maybe Indexed
+index' name is vtable = do
+  entry <- lookup name vtable
+  case entryType entry of
+    LetBound entry'
+      | Just k <-
+          elemIndex name . patNames . stmPat $ letBoundStm entry' ->
+          letBoundIndex entry' k is
+    FreeVar entry' ->
+      freeVarIndex entry' name is
+    LParam entry' -> lparamIndex entry' is
+    _ -> Nothing
+
+-- | @index arr is vtable@ fully indexes the array @arr@ at position @is@ using
+-- information in @vtable@, and produces the symbolic result of the indexing if
+-- it can be expressed. This is essentially a form of pull-array indexing.
 index ::
   (ASTRep rep) =>
   VName ->
@@ -300,24 +320,6 @@ index name is table = do
     asPrimExp i = do
       Prim t <- lookupSubExpType i table
       pure $ TPrimExp $ primExpFromSubExp t i
-
-index' ::
-  VName ->
-  [TPrimExp Int64 VName] ->
-  SymbolTable rep ->
-  Maybe Indexed
-index' name is vtable = do
-  entry <- lookup name vtable
-  case entryType entry of
-    LetBound entry'
-      | Just k <-
-          elemIndex name . patNames . stmPat $
-            letBoundStm entry' ->
-          letBoundIndex entry' k is
-    FreeVar entry' ->
-      freeVarIndex entry' name is
-    LParam entry' -> lparamIndex entry' is
-    _ -> Nothing
 
 class IndexOp op where
   indexOp ::
@@ -335,6 +337,8 @@ indexExp ::
   (IndexOp (Op rep), ASTRep rep) =>
   SymbolTable rep ->
   Exp rep ->
+  -- | Index of result being indexed in case the expression produces more than
+  -- one.
   Int ->
   IndexArray
 indexExp vtable (Op op) k is =
