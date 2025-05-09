@@ -30,7 +30,7 @@ import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~), (.*.))
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
@@ -303,8 +303,15 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
       pure indexfns
     _ -> do
       size <- getSize e
-      f <- case size of
-        Just sz -> do
+      printM 1 $ "### e " <> prettyStr e
+      printM 1 $ "### getSize " <> prettyStr size
+      printM 1 $ "### arrayShape " <> prettyStr (E.arrayShape (E.typeOf e))
+      -- mconcat should be safe? how would a Size be a tuple?
+      dims <- mconcat <$> mapM forward (E.shapeDims (E.arrayShape (E.typeOf e)))
+      printM 1 $ "### dims " <> prettyStr dims
+      -- TODO define getSize in terms of arrayShape instead.
+      f <- case map justSingleCase dims of
+        [Just sz] -> do
           -- Canonical array representation.
           i <- newVName "i"
           pure
@@ -313,9 +320,11 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
                   body = singleCase . sym2SoP $ Idx (Var vn) (sVar i)
                 }
             ]
-        Nothing ->
+        -- [Just sz, Just sz2] -> do --
+        xs | all isNothing xs ->
           -- Canonical scalar representation.
           pure [IndexFn [] (singleCase $ sVar vn)]
+        _ -> error "multi dim not implemented yet"
       insertIndexFn vn f
       pure f
 forward (E.TupLit xs _) = do
@@ -471,8 +480,8 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
       fs <- forward e_x
       forM fs $ \f ->
         case shape f of
-            ds | length ds <= 1 -> error "Flatten on less-than-2d array."
-            Forall i (Iota n) : Forall j (Iota m) : shp -> do
+            ds | length ds <= 1 -> error $ "Flatten on less-than-2d array." <> prettyStr f
+            Forall k (Iota m) : Forall j (Iota n) : shp -> do
               -- j === (i' mod n), but we don't have modulo, so we convert to Cat domain.
               -- i' <- newNameFromString "i"
               -- f { shape = Forall i' (Iota (n .*. m)) : shp,
@@ -481,7 +490,14 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
               --   Once everything works, try for Union?
               --   Alternatively, try using Cat to see if it just werks. (There are probably
               --   other implementation things lurking around in maxMatch_2d.)
-              undefined
+              i <- newNameFromString "i"
+              k' <- newNameFromString "k"
+              let e_k = sVar k' .*. n
+              let j' = sVar i .-. e_k
+              pure $
+                f { shape = Forall i (Cat k' m e_k) : shp,
+                    body = repCases (addRep j j' $ mkRep k (sVar k')) (body f)
+                  }
             _ -> error "Not implemented yet."
   | Just "scan" <- getFun e_f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
