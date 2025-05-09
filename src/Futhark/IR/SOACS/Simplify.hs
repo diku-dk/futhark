@@ -207,7 +207,8 @@ topDownRules =
     RuleOp fuseConcatScatter,
     RuleOp simplifyMapIota,
     RuleOp moveTransformToInput,
-    RuleOp moveTransformToOutput
+    RuleOp moveTransformToOutput,
+    RuleBasicOp copyToMap
   ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -1070,3 +1071,29 @@ moveTransformToOutput vtable screma_pat screma_aux (Screma w arrs (ScremaForm ma
       pure (SubExpRes cs (Var arr), t, v, bind)
 moveTransformToOutput _ _ _ _ =
   Skip
+
+copyToMap :: TopDownRuleBasicOp (Wise SOACS)
+copyToMap vtable pat aux (Replicate (Shape []) (Var v2))
+  | Just (Reshape v1 newshape, _) <- ST.lookupBasicOp v2 vtable,
+    Just (Rearrange _ perm, _) <- ST.lookupBasicOp v1 vtable,
+    length perm /= shapeRank (newShape newshape) = Simplify $ do
+      let dims64 = map pe64 $ shapeDims $ newShape newshape
+      w <- letSubExp "w" <=< toExp $ product dims64
+      is <-
+        letExp "is" . BasicOp $
+          Iota w (intConst Int64 0) (intConst Int64 1) Int64
+      i <- newParam "i" $ Prim int64
+      lam <- mkLambda [i] $ do
+        js <-
+          mapM (letSubExp "j" <=< toExp) $
+            unflattenIndex dims64 (le64 $ paramName i)
+        case ST.index v2 js vtable of
+          Nothing -> cannotSimplify
+          Just (ST.Indexed cs pe) ->
+            pure . SubExpRes cs
+              <$> (letSubExp "elem" =<< toExp pe)
+          Just (ST.IndexedArray cs v2' js') ->
+            pure . SubExpRes cs
+              <$> (letSubExp "elem" =<< eIndex v2' (map toExp js'))
+      auxing aux $ letBind pat $ Op $ Screma w [is] $ mapSOAC lam
+copyToMap _ _ _ _ = Skip

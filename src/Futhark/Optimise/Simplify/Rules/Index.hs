@@ -68,6 +68,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
       -- For the two cases below, see Note [Simplifying a Slice].
       | Just inds' <- sliceIndices (Slice inds),
         Just (ST.IndexedArray cs arr inds'') <- ST.index idd inds' vtable,
+        length inds' == length inds'',
         all (worthInlining . untyped) inds'',
         arr `ST.available` vtable,
         all (`ST.elem` vtable) (unCerts cs) ->
@@ -76,6 +77,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
               <$> mapM (toSubExp "index_primexp") inds''
       | Just (ST.IndexedArray cs arr inds'') <-
           ST.index' idd (fixSlice (pe64 <$> Slice inds) (map fst matches)) vtable,
+        length inds == length inds'',
         all (worthInlining . untyped) inds'',
         arr `ST.available` vtable,
         all (`ST.elem` vtable) (unCerts cs),

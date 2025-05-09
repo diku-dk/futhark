@@ -54,6 +54,7 @@ module Futhark.Optimise.Simplify.Rule
 where
 
 import Control.Monad.State
+import Debug.Trace
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Builder
