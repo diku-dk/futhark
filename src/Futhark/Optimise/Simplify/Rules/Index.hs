@@ -56,6 +56,18 @@ simplifyIndexing ::
   Maybe (m IndexResult)
 simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
   case defOf idd of
+    -- FIXME: This is a special case to avoid simplifying away a slice of a
+    -- rearrange. This is because register tiling cannot otherwise properly
+    -- detect what is going on.
+    Just (Rearrange src perm, cs)
+      | rearrangeReach perm <= length (takeWhile isIndex inds) ->
+          let inds' = rearrangeShape (rearrangeInverse perm) inds
+           in Just $ pure $ IndexResult cs src $ Slice inds'
+      | any isIndex inds ->
+          Nothing
+      where
+        isIndex DimFix {} = True
+        isIndex _ = False
     _
       | Just t <- seType (Var idd),
         Slice inds == fullSlice t [] ->
@@ -166,13 +178,6 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
       where
         index DimFix {} = Nothing
         index (DimSlice _ n s) = Just (n, DimSlice (constant (0 :: Int64)) n s)
-    Just (Rearrange src perm, cs)
-      | rearrangeReach perm <= length (takeWhile isIndex inds) ->
-          let inds' = rearrangeShape (rearrangeInverse perm) inds
-           in Just $ pure $ IndexResult cs src $ Slice inds'
-      where
-        isIndex DimFix {} = True
-        isIndex _ = False
     Just (Replicate (Shape []) (Var src), cs)
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,

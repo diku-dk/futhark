@@ -1,3 +1,4 @@
+-- | The actual implementation of @futhark fmt@.
 module Futhark.Fmt.Printer
   ( fmtToText,
     fmtToDoc,

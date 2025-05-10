@@ -312,7 +312,7 @@ index ::
   [SubExp] ->
   SymbolTable rep ->
   Maybe Indexed
-index name is table = index' name (map pe64 is) table
+index name = index' name . map pe64
 
 -- | Like 'index'', but always succeeds, simply returning an 'IndexedArray' of
 -- the input if nothing else is possible.
