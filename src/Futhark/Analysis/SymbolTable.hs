@@ -308,18 +308,21 @@ index' name is vtable = do
 -- information in @vtable@, and produces the symbolic result of the indexing if
 -- it can be expressed. This is essentially a form of pull-array indexing.
 index ::
-  (ASTRep rep) =>
   VName ->
   [SubExp] ->
   SymbolTable rep ->
   Maybe Indexed
-index name is table = do
-  is' <- mapM asPrimExp is
-  index' name is' table
-  where
-    asPrimExp i = do
-      Prim t <- lookupSubExpType i table
-      pure $ TPrimExp $ primExpFromSubExp t i
+index name = index' name . map pe64
+
+-- | Like 'index'', but always succeeds, simply returning an 'IndexedArray' of
+-- the input if nothing else is possible.
+indexNext ::
+  VName ->
+  [TPrimExp Int64 VName] ->
+  SymbolTable rep ->
+  Indexed
+indexNext name is vtable =
+  fromMaybe (IndexedArray mempty name is) $ index' name is vtable
 
 class IndexOp op where
   indexOp ::
@@ -344,12 +347,9 @@ indexExp ::
 indexExp vtable (Op op) k is =
   indexOp vtable k op is
 indexExp _ (BasicOp (Iota _ x s to_it)) _ [i] =
-  Just $
-    Indexed mempty $
-      ( sExt to_it (untyped i)
-          `mul` primExpFromSubExp (IntType to_it) s
-      )
-        `add` primExpFromSubExp (IntType to_it) x
+  Just . Indexed mempty $
+    (sExt to_it (untyped i) `mul` primExpFromSubExp (IntType to_it) s)
+      `add` primExpFromSubExp (IntType to_it) x
   where
     mul = BinOpExp (Mul to_it OverflowWrap)
     add = BinOpExp (Add to_it OverflowWrap)
@@ -359,8 +359,7 @@ indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
       Just $ Indexed mempty $ primExpFromSubExp t v
 indexExp table (BasicOp (Replicate s (Var v))) _ is = do
   guard $ v `available` table
-  guard $ s /= mempty
-  index' v (drop (shapeRank s) is) table
+  Just $ indexNext v (drop (shapeRank s) is) table
 indexExp table (BasicOp (Reshape v newshape)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
       -- TODO: handle coercions more efficiently.
@@ -369,10 +368,12 @@ indexExp table (BasicOp (Reshape v newshape)) _ is
               (map pe64 oldshape)
               (map pe64 $ shapeDims $ newShape newshape)
               is
-       in index' v is' table
+       in Just $ indexNext v is' table
+indexExp table (BasicOp (Rearrange v perm)) _ is =
+  Just $ indexNext v (rearrangeShape (rearrangeInverse perm) is) table
 indexExp table (BasicOp (Index v slice)) _ is = do
   guard $ v `available` table
-  index' v (adjust (unSlice slice) is) table
+  Just $ indexNext v (adjust (unSlice slice) is) table
   where
     adjust (DimFix j : js') is' =
       pe64 j : adjust js' is'
