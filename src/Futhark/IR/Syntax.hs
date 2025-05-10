@@ -336,7 +336,9 @@ data DimSplice d
 -- | A reshaping operation consists of a sequence of splices, as well as an
 -- annotation indicating the final shape.
 data NewShape d = NewShape
-  { dimSplices :: [DimSplice d],
+  { -- | The changes to perform.
+    dimSplices :: [DimSplice d],
+    -- | The resulting shape.
     newShape :: ShapeBase d
   }
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)

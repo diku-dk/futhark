@@ -142,15 +142,16 @@ sliceSizes (n : ns) =
 -- | Interchange a reshape and rearrange. Essentially, rewrite composition
 --
 -- @
--- let v1 = reshape(v1_shape, v0)
--- let v2 = rearrange(perm, v1)
+-- let v1 = reshape(v0, v1_shape)
+-- let v2 = rearrange(v1, perm)
 -- @
 --
 -- into
 --
 -- @
--- let v1' = rearrange(perm', v0)
--- let v2' = reshape(v1_shape', v1')
+-- let v1' = rearrange(v0, perm')
+-- let v2' = reshape(v1', v1_shape')
+-- @
 --
 -- The function is given the shape of @v0@, @v1@, and the @perm@, and returns
 -- @perm'@. This is a meaningful operation when @v2@ is itself reshaped, as the
@@ -188,6 +189,23 @@ flipReshapeRearrange v0_shape v1_shape perm = do
 
   caseA `mplus` caseB
 
+-- | Interchange a reshape and rearrange. Essentially, rewrite composition
+--
+-- @
+-- let v1 = rearrange(v0, perm)
+-- let v2 = reshape(v1, v1_shape)
+-- @
+--
+-- into
+--
+-- @
+-- let v1' = reshape(v0, v1_shape')
+-- let v2' = rearrange(v1', perm')
+-- @
+--
+-- The function is given @perm@ and @v1_shape@, and returns @perm'@ and
+-- @v1_shape'@. This is a meaningful operation when @v2@ is itself rearranged
+-- (or @v0@ the result of a reshape), as this enables fusion.
 flipRearrangeReshape :: [Int] -> NewShape d -> Maybe (NewShape d, [Int])
 flipRearrangeReshape orig_perm (NewShape ss shape) = do
   (perm', ss') <- mapAccumLM f orig_perm ss
@@ -211,6 +229,7 @@ data ReshapeKind
     ReshapeArbitrary
   deriving (Eq, Ord, Show)
 
+-- | Determine whether this might be a coercion.
 reshapeKind :: NewShape SubExp -> ReshapeKind
 reshapeKind (NewShape ss _)
   | all unit ss = ReshapeCoerce
@@ -318,7 +337,7 @@ move (shape, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
       next shape (DimSplice (i2 - n1 + length s1) n2 s2) (DimSplice i1 n2 s1) ss
   | otherwise = Nothing
 
--- | This is a quadratic-time function that looks for a DimSplice that can be
+-- This is a quadratic-time function that looks for a DimSplice that can be
 -- combined with a move DimSlice (and then does so). Since these lists are
 -- usually small, this should not be a problem. It is called to convergence by
 -- 'improve'.
