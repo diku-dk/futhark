@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect unused-name warning for named parameters in module types.
 
+* Size-lifted abstract types with hidden sizes could result in different sizes
+  being incorrectly treated as the same size.
+
 ## [0.25.30]
 
 ### Added
