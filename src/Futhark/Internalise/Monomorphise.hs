@@ -322,7 +322,8 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
         Just prev ->
           pure $ MonoKnown prev
         Nothing -> do
-          put (i + 1, M.insert d i m)
+          -- Ensure that each instance of anySize is treated distinctly.
+          put (i + 1, if d == anySize then m else M.insert d i m)
           pure $ MonoKnown i
 
 -- Mapping from function name and instance list to a new function name in case
