@@ -95,14 +95,14 @@ tests =
       testCase "empty" $
         testSolve [] mempty mempty ([], mempty),
 
-      testCase "a_0 ~ b_1" $
+      testCase "b_1 ~ a_0" $
         testSolve
           ["b_1" ~ "a_0"]
           mempty
           (M.fromList [tvFree "b_1" 0])
           ([], M.fromList [("b_1", Right "a_0")]),
 
-      testCase "b_1 ~ a_0" $
+      testCase "a_0 ~ b_1" $
         testSolve
           ["a_0" ~ "b_1"]
           mempty
