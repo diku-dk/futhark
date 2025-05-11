@@ -384,33 +384,40 @@ packedElemOffset t i = case t of
     FloatType Float32 -> WGSL.IntExp 0
     _ -> error "CodeGen.ImpGen.WebGPU:packedElemOffset: Unsupported Type"
 
-genArrayWrite ::
+nativeAccess :: PrimType -> KernelM Bool
+nativeAccess t = case t of
+  IntType Int32 -> pure True
+  FloatType Float32 -> pure True
+  FloatType Float16 -> pure True
+  _ -> pure False
+
+genReadIndexExp ::
   PrimType ->
   VName ->
   Count Elements (TExp Int64) ->
-  Exp ->
-  KernelM WGSL.Stmt
-genArrayWrite t mem i v = do
+  KernelM WGSL.Exp
+genReadIndexExp t mem i = do
   mem' <- getIdent mem
   shared <- isShared mem'
   atomic <- isAtomic mem'
   i' <- indexExp i
+  native <- nativeAccess t
 
   if atomic
     then
       if shared
         then
           let ptr = WGSL.UnOpExp "&" . WGSL.IndexExp mem' <$> indexExp i
-          in WGSL.Call ("atomic_write_" <> prettyText t <> "_shared") <$> sequence [ptr, genWGSLExp v]
+          in WGSL.CallExp ("atomic_read_" <> prettyText t <> "_shared") <$> sequence [ptr]
         else
-          let ptr = WGSL.UnOpExp "&" . WGSL.IndexExp mem' <$> pure (packedElemIndex t i')
-          in WGSL.Call ("atomic_write_" <> prettyText t <> "_global") <$> sequence [ptr, pure $ packedElemOffset t i', genWGSLExp v]
+          let ptr = pure ((WGSL.UnOpExp "&" . WGSL.IndexExp mem') (packedElemIndex t i'))
+          in WGSL.CallExp ("atomic_read_" <> prettyText t <> "_global") <$> sequence [ptr, pure $ packedElemOffset t i']
     else
-      if not shared
-        then
+      if native || shared
+        then WGSL.IndexExp mem' <$> indexExp i
+        else
           let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
-          in WGSL.Call ("write_" <> prettyText t) <$> sequence [buf, indexExp i, genWGSLExp v]
-        else WGSL.AssignIndex mem' <$> indexExp i <*> genWGSLExp v
+          in WGSL.CallExp ("read_" <> prettyText t) <$> sequence [buf, indexExp i]
 
 genArrayRead ::
   PrimType ->
@@ -420,43 +427,41 @@ genArrayRead ::
   KernelM WGSL.Stmt
 genArrayRead t tgt mem i = do
   tgt' <- getIdent tgt
+  read' <- genReadIndexExp t mem i
+  pure $ WGSL.Assign tgt' read'
+
+genArrayWrite ::
+  PrimType ->
+  VName ->
+  Count Elements (TExp Int64) ->
+  KernelM WGSL.Exp ->
+  KernelM WGSL.Stmt
+genArrayWrite t mem i v = do
   mem' <- getIdent mem
   shared <- isShared mem'
   atomic <- isAtomic mem'
   i' <- indexExp i
+  native <- nativeAccess t
 
   if atomic
     then
       if shared
         then
           let ptr = WGSL.UnOpExp "&" . WGSL.IndexExp mem' <$> indexExp i
-          in WGSL.Assign tgt' . WGSL.CallExp ("atomic_read_" <> prettyText t <> "_shared") <$> sequence [ptr]
+          in WGSL.Call ("atomic_write_" <> prettyText t <> "_shared") <$> sequence [ptr, v]
         else
-          let ptr = WGSL.UnOpExp "&" . WGSL.IndexExp mem' <$> pure (packedElemIndex t i')
-          in WGSL.Assign tgt' . WGSL.CallExp ("atomic_read_" <> prettyText t <> "_global") <$> sequence [ptr, pure $ packedElemOffset t i']
+          let ptr = pure ((WGSL.UnOpExp "&" . WGSL.IndexExp mem') (packedElemIndex t i'))
+          in WGSL.Call ("atomic_write_" <> prettyText t <> "_global") <$> sequence [ptr, pure $ packedElemOffset t i', v]
     else
-      if not shared
-        then
+      if native || shared
+        then WGSL.AssignIndex mem' <$> indexExp i <*> v
+        else
           let buf = pure $ WGSL.UnOpExp "&" (WGSL.VarExp mem')
-          in WGSL.Assign tgt' . WGSL.CallExp ("read_" <> prettyText t) <$> sequence [buf, indexExp i]
-        else WGSL.Assign tgt' . WGSL.IndexExp mem' <$> indexExp i
-
-genIntAtomicOp ::
-  WGSL.Ident ->
-  VName ->
-  VName ->
-  Count Elements (TExp Int64) ->
-  Exp ->
-  KernelM WGSL.Stmt
-genIntAtomicOp fun dest mem i e = do
-  idx <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
-  val <- genWGSLExp e
-  let call = WGSL.CallExp fun [WGSL.UnOpExp "&" idx, val]
-  WGSL.Assign <$> getIdent dest <*> pure call
+          in WGSL.Call ("write_" <> prettyText t) <$> sequence [buf, indexExp i, v]
 
 genAtomicOp ::
   WGSL.Ident ->
-  IntType ->
+  PrimType ->
   VName ->
   VName ->
   Count Elements (TExp Int64) ->
@@ -468,11 +473,50 @@ genAtomicOp f t dest mem i e = do
   i' <- indexExp i
   shared <- isShared mem'
 
-  let ptr = WGSL.UnOpExp "&" . WGSL.IndexExp mem' $ packedElemIndex (IntType t) i'
+  let ptr = WGSL.UnOpExp "&" . WGSL.IndexExp mem' $ packedElemIndex t i'
   let fun = f <> "_" <> prettyText t <> if shared then "_shared" else "_global"
-  let args = if shared then [ptr, val] else [ptr, packedElemOffset (IntType t) i', val]
+  let args = if shared then [ptr, val] else [ptr, packedElemOffset t i', val]
     in
       WGSL.Assign <$> getIdent dest <*> pure (WGSL.CallExp fun args)
+
+genCopy ::
+  PrimType ->
+  [Count Elements (TExp Int64)] ->
+  (VName, Space) ->
+  ( Count Elements (TExp Int64),
+    [Count Elements (TExp Int64)]
+  ) ->
+  (VName, Space) ->
+  ( Count Elements (TExp Int64),
+    [Count Elements (TExp Int64)]
+  ) ->
+  KernelM WGSL.Stmt
+genCopy pt shape (dst, _) (dst_offset, dst_strides) (src, _) (src_offset, src_strides) = do
+  shape' <- mapM (genWGSLExp . untyped . unCount) shape
+  body <- do
+    let dst_i = dst_offset + sum (zipWith (*) is' dst_strides)
+    let src_i = src_offset + sum (zipWith (*) is' src_strides)
+    let read' = genReadIndexExp pt src src_i
+    genArrayWrite pt dst dst_i read'
+
+  pure $ loops (zip iis shape') body
+
+  where
+    (zero, one) = (WGSL.VarExp "zero_i64", WGSL.VarExp "one_i64")
+    is = map (VName "i") [0 .. length shape - 1]
+    is' :: [Count Elements (TExp Int64)]
+    is' = map (elements . le64) is
+    iis = map nameToIdent is
+
+    loops :: [(WGSL.Ident, WGSL.Exp)] -> WGSL.Stmt -> WGSL.Stmt
+    loops [] body = body
+    loops ((i, n) : ins) body =
+      WGSL.For
+        i
+        zero
+        (wgslCmpOp (CmpUlt Int64) (WGSL.VarExp i) n)
+        (WGSL.Assign i $ wgslBinOp (Add Int64 OverflowWrap) (WGSL.VarExp i) one)
+        (loops ins body)
 
 unsupported :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
 unsupported stmt = pure $ WGSL.Comment $ "Unsupported stmt: " <> prettyText stmt
@@ -525,6 +569,10 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
       pure $ WGSL.Comment $ "declare_shared: " <> name'
     Nothing ->
       pure $ WGSL.Comment $ "discard declare_shared: " <> name'
+genWGSLStm (DeclareMem name (ScalarSpace [Constant (IntValue v)] pt)) =
+  let size = WGSL.IntExp $ valueIntegral v
+    in pure $
+      WGSL.DeclareVar (nameToIdent name) (WGSL.Array (wgslPrimType pt) (Just size))
 genWGSLStm s@(DeclareMem _ _) = unsupported s
 genWGSLStm (DeclareScalar name _ typ) =
   pure $
@@ -532,17 +580,17 @@ genWGSLStm (DeclareScalar name _ typ) =
 genWGSLStm s@(DeclareArray {}) = unsupported s
 genWGSLStm s@(Allocate {}) = unsupported s
 genWGSLStm s@(Free _ _) = unsupported s
-genWGSLStm s@(Copy {}) = unsupported s
-genWGSLStm (Write mem i Bool _ _ v) = genArrayWrite Bool mem i v
-genWGSLStm (Write mem i (IntType Int8) _ _ v) = genArrayWrite (IntType Int8) mem i v
-genWGSLStm (Write mem i (IntType Int16) _ _ v) = genArrayWrite (IntType Int16) mem i v
+genWGSLStm (Copy pt shape dst dst_lmad src src_lmad) = genCopy pt shape dst dst_lmad src src_lmad
+genWGSLStm (Write mem i Bool _ _ v) = genArrayWrite Bool mem i (genWGSLExp v)
+genWGSLStm (Write mem i (IntType Int8) _ _ v) = genArrayWrite (IntType Int8) mem i (genWGSLExp v)
+genWGSLStm (Write mem i (IntType Int16) _ _ v) = genArrayWrite (IntType Int16) mem i (genWGSLExp v)
 genWGSLStm (Write mem i t _ _ v) = do
   mem' <- getIdent mem
   i' <- indexExp i
   v' <- genWGSLExp v
   atomic <- isAtomic mem'
   if atomic
-    then genArrayWrite t mem i v
+    then genArrayWrite t mem i (genWGSLExp v)
     else pure $ WGSL.AssignIndex mem' i' v'
 genWGSLStm (SetScalar name e) =
   liftM2 WGSL.Assign (getIdent name) (genWGSLExp e)
@@ -594,34 +642,33 @@ genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = do
   destId <- getIdent dest
   WGSL.Assign destId . WGSL.VarExp <$> builtinLockstepWidth
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAdd t dest mem i e))) =
-  genAtomicOp "atomic_add" t dest mem i e
+  genAtomicOp "atomic_add" (IntType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicSMax t dest mem i e))) =
-  genAtomicOp "atomic_smax" t dest mem i e
+  genAtomicOp "atomic_smax" (IntType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicSMin t dest mem i e))) =
-  genAtomicOp "atomic_smin" t dest mem i e
+  genAtomicOp "atomic_smin" (IntType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicUMax t dest mem i e))) =
-  genAtomicOp "atomic_umax" t dest mem i e
+  genAtomicOp "atomic_umax" (IntType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicUMin t dest mem i e))) =
-  genAtomicOp "atomic_umin" t dest mem i e
+  genAtomicOp "atomic_umin" (IntType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAnd t dest mem i e))) =
-  genAtomicOp "atomic_and" t dest mem i e
+  genAtomicOp "atomic_and" (IntType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicOr t dest mem i e))) =
-  genAtomicOp "atomic_or" t dest mem i e
+  genAtomicOp "atomic_or" (IntType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXor t dest mem i e))) =
-  genAtomicOp "atomic_xor" t dest mem i e
+  genAtomicOp "atomic_xor" (IntType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg _ dest mem i cmp val))) = do
   val' <- genWGSLExp val
   cmp' <- genWGSLExp cmp
   i' <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
   liftM2 WGSL.Assign (getIdent dest) (pure $ WGSL.FieldExp (WGSL.CallExp "atomicCompareExchangeWeak" [WGSL.UnOpExp "&" i', cmp', val']) "old_value")
-genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = genIntAtomicOp "atomicExchange" dest mem i e
-genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicWrite t mem i v))) = genArrayWrite t mem i v
-genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd _ dest mem i e))) = do
-  mem' <- getIdent mem
-  shared <- isShared mem'
-  if shared
-    then genIntAtomicOp "atomic_fadd_f32_shared" dest mem i e
-    else genIntAtomicOp "atomic_fadd_f32_global" dest mem i e
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = do
+  idx <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
+  val <- genWGSLExp e
+  let call = WGSL.CallExp "atomicExchange" [WGSL.UnOpExp "&" idx, val]
+  WGSL.Assign <$> getIdent dest <*> pure call
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicWrite t mem i v))) = genArrayWrite t mem i (genWGSLExp v)
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd t dest mem i e))) = genAtomicOp "atomic_fadd" (FloatType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceLocal)) =
   pure $ WGSL.Call "workgroupBarrier" []
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceGlobal)) =
@@ -729,6 +776,7 @@ wgslCmpOp CmpLle = call2 "lle"
 -- Similarly to CmpOps above, the defaults work for smaller integers already
 -- given our representation.
 wgslUnOp :: UnOp -> WGSL.Exp -> WGSL.Exp
+wgslUnOp (Neg (FloatType _)) = WGSL.UnOpExp "-"
 wgslUnOp (Neg _) = WGSL.UnOpExp "!"
 wgslUnOp (Complement _) = WGSL.UnOpExp "~"
 wgslUnOp (Abs Int64) = call1 "abs_i64"
@@ -931,6 +979,8 @@ findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
   where
     find (ImpGPU.Write n _ t _ _ _) | n == name = S.singleton (t, False, Signed)
     find (ImpGPU.Read _ n _ t _ _) | n == name = S.singleton (t, False, Signed)
+    find (ImpGPU.Copy t _ (n, _) _ _ _) | n == name = S.singleton (t, False, Signed)
+    find (ImpGPU.Copy t _ _ _ (n, _) _) | n == name = S.singleton (t, False, Signed)
     find (Op (ImpGPU.Atomic _ op))
       | atomicOpArray op == name =
           let (t, sgn) = atomicOpType op
