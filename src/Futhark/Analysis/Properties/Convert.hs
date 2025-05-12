@@ -3,7 +3,7 @@
 module Futhark.Analysis.Properties.Convert (mkIndexFnProg, mkIndexFnValBind) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, (<=<))
+import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT (runMaybeT), hoistMaybe)
 import Data.Bifunctor
@@ -30,7 +30,7 @@ import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~), (.*.))
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.*.), (.+.), (.-.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
@@ -180,20 +180,20 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
     _ -> do
       dims <- shapeOfTypeBase (E.typeOf e)
       f <- case dims of
-        [sz] -> do
-          -- Canonical array representation.
-          i <- newVName "i"
-          pure
-            [ IndexFn
-                { shape = [Forall i (Iota sz)],
-                  body = singleCase . sym2SoP $ Idx (Var vn) (sVar i)
-                }
-            ]
-        -- [Just sz, Just sz2] -> do --
         [] ->
           -- Canonical scalar representation.
           pure [IndexFn [] (singleCase $ sVar vn)]
-        _ -> error "multi dim not implemented yet"
+        shape -> do
+          -- Canonical array representation.
+          ids <-
+            zipWithM (\_ i -> newVName i) shape $
+              mconcat (repeat ["i", "j", "k"])
+          pure
+            [ IndexFn
+                { shape = zipWith (\sz i -> Forall i (Iota sz)) shape ids,
+                  body = singleCase . sym2SoP $ Apply (Var vn) (map sVar ids)
+                }
+            ]
       insertIndexFn vn f
       pure f
 forward (E.TupLit xs _) = do
