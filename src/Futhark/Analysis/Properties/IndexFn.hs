@@ -16,6 +16,7 @@ module Futhark.Analysis.Properties.IndexFn
     singleCase,
     fromScalar,
     Iterator,
+    cmapValues,
   )
 where
 
@@ -23,6 +24,7 @@ import Data.List.NonEmpty qualified as NE
 import Futhark.Analysis.Properties.Symbol
 import Futhark.SoP.SoP (SoP, sym2SoP, (.*.), (.+.))
 import Language.Futhark (VName)
+import Data.Bifunctor (second)
 
 data IndexFn = IndexFn
   { shape :: [Quantified Domain],
@@ -99,3 +101,9 @@ singleCase e = cases [(Bool True, e)]
 
 fromScalar :: SoP Symbol -> [IndexFn]
 fromScalar e = [IndexFn [] (singleCase e)]
+
+cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
+cmap f (Cases xs) = Cases (fmap f xs)
+
+cmapValues :: (b -> c) -> Cases a b -> Cases a c
+cmapValues f = cmap (second f)

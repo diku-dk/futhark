@@ -34,9 +34,6 @@ import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
---------------------------------------------------------------
--- Extracting information from E.Exp.
---------------------------------------------------------------
 propertyPrelude :: S.Set String
 propertyPrelude =
   S.fromList
@@ -51,53 +48,6 @@ propertyPrelude =
       "FiltPart2",
       "and"
     ]
-
-justVName :: E.Exp -> Maybe E.VName
-justVName (E.Var (E.QualName [] vn) _ _) = Just vn
-justVName _ = Nothing
-
-getFun :: E.Exp -> Maybe String
-getFun e = E.baseString <$> justVName e
-
-typeIsBool :: E.TypeBase E.Exp as -> Bool
-typeIsBool (E.Scalar (E.Prim E.Bool)) = True
-typeIsBool _ = False
-
--- Strip unused information.
-getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
-getArgs = map (stripExp . snd) . NE.toList
-  where
-    stripExp x = fromMaybe x (E.stripExp x)
-
--- Like patternMap, but doesn't discard information about wildcards.
-patternMapAligned :: E.Pat t -> [(Maybe E.VName, t)]
-patternMapAligned = map f . patIdentsAligned
-  where
-    f (v, E.Info t) = (v, t)
-
-    patIdentsAligned (E.Id v t _) = [(Just v, t)]
-    patIdentsAligned (E.PatParens p _) = patIdentsAligned p
-    patIdentsAligned (E.TuplePat pats _) = foldMap patIdentsAligned pats
-    patIdentsAligned (E.RecordPat fs _) = foldMap (patIdentsAligned . snd) fs
-    patIdentsAligned (E.Wildcard t _) = [(Nothing, t)]
-    patIdentsAligned (E.PatAscription p _ _) = patIdentsAligned p
-    patIdentsAligned (E.PatLit _ t _) = [(Nothing, t)]
-    patIdentsAligned (E.PatConstr _ _ ps _) = foldMap patIdentsAligned ps
-    patIdentsAligned (E.PatAttr _ p _) = patIdentsAligned p
-
-getTERefine :: E.TypeExp E.Exp E.VName -> [E.Exp]
-getTERefine (E.TEParens te _) = getTERefine te
-getTERefine (E.TETuple tes _) = do
-  te <- tes
-  getTERefine te
-getTERefine (E.TERefine _ e@(E.Lambda {}) _) =
-  pure e
-getTERefine (E.TERefine _ _ loc) =
-  error $ errorMsg loc "Only lambda postconditions are currently supported."
-getTERefine _ = []
-
-hasRefinement :: E.TypeExp E.Exp E.VName -> Bool
-hasRefinement = not . null . getTERefine
 
 {-
     Construct index function for source program
@@ -194,59 +144,6 @@ checkPostcondition vn indexfns te = do
 {-
     Construct index function for source expression.
 -}
-
-shapeOfTypeBase :: E.TypeBase E.Exp as -> IndexFnM [SoP Symbol]
-shapeOfTypeBase e = do
-  dims <- mapM forward (E.shapeDims (E.arrayShape e))
-  unless (all ((<= 1) . length) dims) $ error "Size of array dimension is a tuple?"
-  pure $ map getScalar (mconcat dims)
-  where
-    getScalar (IndexFn [] cs) | [(Bool True, x)] <- casesToList cs = x
-    getScalar f = error ("getScalar on " <> prettyStr f)
-
--- Propagate postcondition effects, such as adding properties.
--- Fires binding applications of top-level defs to names.
-forwardLetEffects :: [Maybe E.VName] -> E.Exp -> IndexFnM [IndexFn]
-forwardLetEffects [Just _] e@(E.Var (E.QualName _ _) _ loc) = do
-  printM 0 . warningMsg loc $
-    "Warning: Aliasing " <> prettyStr e <> " strips property information."
-  forward e
-forwardLetEffects bound_names x = do
-  toplevel_fns <- getTopLevelIndexFns
-  defs <- getTopLevelDefs
-  case forwardApplyDef toplevel_fns defs x of
-    Just effect_and_fns -> do
-      (effect, fns) <- effect_and_fns
-      bound_names' <- forM bound_names $ \case
-        Just vn -> pure vn
-        Nothing -> newNameFromString "_" -- HACK Apply effects to unusable wildcard.
-      effect bound_names'
-      printM 3 $ "Propating effects on " <> prettyStr bound_names'
-      printAlgEnv 3
-      pure fns
-    Nothing -> forward x
-
--- HACK this lets us propagate any properties on the output names
--- to the postcondition. For example, in the below we want to
--- know that y' = y (the name, because y' = indexfn of y).
---
--- def f x : {\y' -> property y} =
---   let y = ...
---   let z = funWithPostCond y
---   in y
---
--- A more elegant solution would change the return type of forward...
-trackNamesOfFinalLetBody :: E.Exp -> IndexFnM ()
-trackNamesOfFinalLetBody (E.TupLit es _)
-  | Just vns <- mapM (justVName . stripCoerce) es =
-      setOutputNames vns
-trackNamesOfFinalLetBody e
-  | Just vn <- justVName (stripCoerce e) = setOutputNames [vn]
-  | otherwise = pure ()
-
-stripCoerce :: E.Exp -> E.Exp
-stripCoerce (E.Coerce e _ _ _) = e
-stripCoerce e = e
 
 forward :: E.Exp -> IndexFnM [IndexFn]
 forward (E.Parens e _) = forward e
@@ -632,6 +529,28 @@ forward e = do
   vn <- newVName $ "untrans(" <> prettyStr e <> ")"
   pure [IndexFn [] (cases [(Bool True, sVar vn)])]
 
+-- Propagate postcondition effects, such as adding properties.
+-- Fires binding applications of top-level defs to names.
+forwardLetEffects :: [Maybe E.VName] -> E.Exp -> IndexFnM [IndexFn]
+forwardLetEffects [Just _] e@(E.Var (E.QualName _ _) _ loc) = do
+  printM 0 . warningMsg loc $
+    "Warning: Aliasing " <> prettyStr e <> " strips property information."
+  forward e
+forwardLetEffects bound_names x = do
+  toplevel_fns <- getTopLevelIndexFns
+  defs <- getTopLevelDefs
+  case forwardApplyDef toplevel_fns defs x of
+    Just effect_and_fns -> do
+      (effect, fns) <- effect_and_fns
+      bound_names' <- forM bound_names $ \case
+        Just vn -> pure vn
+        Nothing -> newNameFromString "_" -- HACK Apply effects to unusable wildcard.
+      effect bound_names'
+      printM 3 $ "Propating effects on " <> prettyStr bound_names'
+      printAlgEnv 3
+      pure fns
+    Nothing -> forward x
+
 -- Applying top-level definitions of functions.
 -- Returns nothing if the function is not defined at top-level.
 forwardApplyDef ::
@@ -740,443 +659,7 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
 forwardApplyDef _ _ _ = Nothing
 
--- Binds names of scalar parameters to scalar values of corresponding
--- index functions. Assumes that domains are equivalent across index
--- functions. Returns the most "complex" iterator over these domains.
--- For example, this would transform the lambda body of the following
---   map (\x y z -> x + y + z) xs ys zs
--- into
---   map (\i -> xs[i] + ys[i] + zs[i]) (indices xs)
--- where xs is the index function with the most "complex" iterator.
-bindLambdaBodyParams :: [(E.VName, IndexFn)] -> IndexFnM Iterator
-bindLambdaBodyParams [] = error "Internal error: are you mapping with wildcard only?"
-bindLambdaBodyParams params = do
-  -- Make sure all Cat k bound in iterators are identical by renaming.
-  fns <- renamesM (map snd params)
-  let iter@(Forall i _) = maximum (map ((\case [it] -> it) . shape) fns)
-  -- forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
-  --   vn <- newVName ("#lam_" <> E.baseString paramName)
-  --   insertIndexFn vn [f_xs]
-  --   insertIndexFn
-  --     paramName
-  --     [IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i)]
-  -- pure iter
-  forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
-    vn <- newVName "tmp_fn"
-    IndexFn tmp_shape cs <-
-      IndexFn [iter] (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
-    let [tmp_iter] = tmp_shape
-    -- Renaming k bound in `tmp_iter` to k bound in `iter`.
-    let k_rep =
-          fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
-    insertIndexFn paramName [repIndexFn k_rep $ IndexFn [] cs]
-  pure iter
-
--- Align parameters and arguments. Each parameter is a pattern.
--- A pattern unpacks to a list of (optional) names with type information.
--- An argument is an expression, which `forward` will, correspondingly,
--- return a list of index functions for.
--- Patterns and arguments must align---otherwise an error is raised.
-zipArgs ::
-  E.SrcLoc ->
-  [E.Pat E.ParamType] ->
-  NE.NonEmpty (a, E.Exp) ->
-  IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
-zipArgs loc formal_args actual_args = do
-  let pats = map patternMapAligned formal_args
-  args <- mapM forward (getArgs actual_args)
-  unless (length pats == length args) . error $
-    errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
-  unless (map length pats == map length args) . error $
-    errorMsg loc "Internal error: actual argument does not match parameter pattern."
-
-  -- Discard unused parameters such as wildcards while maintaining alignment.
-  let aligned_args = do
-        (pat, arg) <- zip pats args
-        pure . catMaybes $ zipWith (\vn fn -> (,fn) <$> vn) (map fst pat) arg
-
-  -- When applying bound functions size parameters must be replaced as well.
-  -- (E.g., if we are zipping index functions with use of a top-level definition.)
-  aligned_sizes <- forM (zip pats args) $ \(pat, arg) -> do
-    let types = map snd pat
-    size_names <- mapM (fmap getVName . shapeOfTypeBase) types
-    arg_sizes <- mapM sizeOfDomain arg
-    -- Assert that if there is a size parameter, then we have a size to bind it to.
-    when (any (\(vn, sz) -> isJust vn && isNothing sz) (zip size_names arg_sizes)) . error $
-      errorMsg loc "Internal error: sizes don't align."
-    pure $ catMaybes $ zipMaybes size_names arg_sizes
-
-  pure (aligned_args, aligned_sizes)
-  where
-    getVName [] = Nothing
-    getVName [x]
-      | Just (Var vn) <- justSym x = Just vn
-      | otherwise = Nothing
-    getVName _ = error "multi-dim not implemented yet"
-
-    sizeOfDomain (IndexFn [] _) = pure Nothing
-    sizeOfDomain (IndexFn [Forall _ d] _) =
-      Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
-
-    zipMaybes = zipWith (liftA2 (,))
-
-substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
-substParams = foldM substParam
-  where
-    -- We want to simplify, but avoid rewriting recurrences during
-    -- paramter-substitution.
-    substParam fn (paramName, paramIndexFn) =
-      (fn @ (paramName, paramIndexFn)) >>= rewriteWithoutRules
-
--- Scatter with injective indices (result is uninterpreted, but safe):
-scatterInj :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
-scatterInj (IndexFn [Forall i dom_dest] _) inds _vals e_inds = do
-  dest_size <- lift $ rewrite $ domainEnd dom_dest
-  inj <- lift $ case justVName e_inds of
-    Just vn_inds -> do
-      prove (Property.Injective vn_inds $ Just (int2SoP 0, dest_size))
-        `orM` prove (Property.Injective vn_inds Nothing)
-    Nothing ->
-      proveFn (PInjective $ Just (int2SoP 0, dest_size)) inds
-  case inj of
-    Unknown -> failMsg "scatterInj: no match"
-    Yes -> do
-      uninterpreted <- newNameFromString "scatter_inj"
-      lift . pure $
-        IndexFn
-          { shape = [Forall i dom_dest],
-            body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
-          }
-scatterInj _ _ _ _ = fail ""
-
--- Scatter replicated value (result is uninterpreted, but safe):
-scatterRep :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterRep (IndexFn [Forall _ dom_dest] _) _ vals@(IndexFn [Forall i (Iota _)] _)
-  | i `S.notMember` fv (body vals) = do
-      uninterpreted <- newNameFromString "scatter_rep"
-      lift . pure $
-        IndexFn
-          { shape = [Forall i dom_dest],
-            body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
-          }
-scatterRep _ _ _ = fail ""
-
---   - If `is` is a permutation of (0 .. length dst), then the
---     inverse of `is` exists and the scatter is equivalent to a gather:
---     ```
---     for i in 0 .. length dest:
---         k = is^(-1)(i)
---         dest[i] = vs[k]
---     ```
---   - Rule:
---     (`is` is a permutation of (0 .. length dst))
---     ___________________________________________________
---     y = ∀i ∈ 0 .. length dest . vs[is^(-1)(i)]
-scatterPerm :: IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
-scatterPerm (IndexFn [Forall _ dom_dest] _) vals e_inds = do
-  dest_size <- lift $ rewrite $ domainEnd dom_dest
-  printM 1337 $ "scatterPerm: dest_size" <> prettyStr dest_size
-  vn_inds <- warningInds
-  perm <- lift $ prove (Property.BijectiveRCD vn_inds (int2SoP 0, dest_size) (int2SoP 0, dest_size))
-  case perm of
-    Unknown -> failMsg "scatterPerm: no match"
-    Yes -> do
-      -- `inds` is invertible on the whole domain.
-      vn_vals <- newVName "vals"
-      i <- newVName "i"
-      vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
-
-      lift $ addInvAlias vn_inv vn_inds
-      lift $ addRelSymbol (Prop $ Property.BijectiveRCD vn_inv (int2SoP 0, dest_size) (int2SoP 0, dest_size))
-      -- TODO make bijective cover injective also!
-      lift $ addRelSymbol (Prop $ Property.Injective vn_inv $ Just (int2SoP 0, dest_size))
-      -- TODO add these ranges when needed using the property table.
-      -- Here we add them as a special case because we know is^(-1) will
-      -- be used for indirect indexing.
-      hole <- sym2SoP . Hole <$> newVName "h"
-      let wrap = (`Idx` hole) . Var
-      alg_vn <- lift $ paramToAlgebra vn_inv wrap
-      lift $ addRelSymbol (Prop $ Property.Rng alg_vn (int2SoP 0, dest_size))
-
-      let inv_ind = Idx (Var vn_inv) (sVar i)
-      lift $
-        IndexFn
-          { shape = [Forall i (Iota $ dest_size .+. int2SoP 1)],
-            body = cases [(Bool True, sym2SoP $ Idx (Var vn_vals) (sym2SoP inv_ind))]
-          }
-          @ (vn_vals, vals)
-  where
-    warningInds
-      | Just vn <- justVName e_inds = pure vn
-      | otherwise = do
-          printM 1 . warningMsg (E.locOf e_inds) $
-            "You might want to bind scattered indices to a name to aid"
-              <> " index function inference: "
-              <> prettyStr e_inds
-          fail ""
-scatterPerm _ _ _ = fail ""
-
--- Scatter in-bounds-monotonic indices:
---   - If `is` is a monotonically increasing sequence of values
---     that starts at 0 and ends at length dest-1, we can express
---     the scatter as an index function by the following rule:
---
---     is = ∀k ∈ [0, ..., m-1] .
---         | seg(k+1) - seg(k) > 0  => seg(k)
---         | seg(k+1) - seg(k) <= 0 => OOB
---     seg(0) is 0
---     seg(k) is monotonically increasing
---     dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
---     OOB < 0 or OOB >= seg(m) - 1
---     _________________________________________________
---     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
---         | i == seg(k) => vals[k]
---         | i /= seg(k) => dest[i]
---
---   - By the semantics of scatter, the conclusion is:
---     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
---         | i == is[k] => vals[k]
---         | i /= is[k] => dest[i]
---     Substituting is[k]
---     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
---         | i == seg(k) ^ seg(k+1) - seg(k) > 0 => vals[k]
---         | i == seg(k) ^ seg(k+1) - seg(k) <= 0 => vals[k]
---         | i /= seg(k) => dest[i]
---     Since i ∈ [seg(k), ..., seg(k+1) - 1], we have
---     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
---         | i == seg(k) ^ True => vals[k]
---         | i == seg(k) ^ False => vals[k]
---         | i /= seg(k) => dest[i]
---     which simplifies to what we wanted to show.
-scatterMono :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterMono dest@(IndexFn [Forall _ dom_dest] _) inds@(IndexFn inds_iter@[Forall k (Iota m)] _) vals = do
-  dest_size <- lift $ rewrite $ domainEnd dom_dest
-  -- Match rule.
-  vn_k <- newVName "k"
-  vn_m <- newVName "m"
-  vn_p0 <- newVName "p0"
-  vn_f0 <- newVName "f0"
-  vn_p1 <- newVName "p1"
-  vn_f1 <- newVName "f1"
-  let inds_template =
-        IndexFn
-          { shape = [Forall vn_k (Iota $ sym2SoP $ Hole vn_m)],
-            body =
-              cases
-                [ (Hole vn_p0, sym2SoP $ Hole vn_f0),
-                  (Hole vn_p1, sym2SoP $ Hole vn_f1)
-                ]
-          }
-  s <- hoistMaybe =<< lift (unify inds_template inds)
-  -- Determine which is OOB and which is e1.
-  let isOOB ub = CaseCheck (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
-  (vn_p_seg, vn_f_seg) <- do
-    case0_is_OOB <- lift $ queryCase (isOOB vn_f1) inds 0
-    case case0_is_OOB of
-      Yes -> pure (vn_p1, vn_f1)
-      Unknown -> do
-        case1_is_OOB <- lift $ queryCase (isOOB vn_f0) inds 1
-        case case1_is_OOB of
-          Yes -> pure (vn_p0, vn_f0)
-          Unknown -> failMsg "scatterMono: unable to determine OOB branch"
-  let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
-  let f_seg = mapping s M.! vn_f_seg
-  -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
-  s_p :: Answer <- lift $ algebraContext inds $ do
-    addRelShape inds_iter
-    seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
-    printM 1337 ("p_seg     " <> prettyStr p_seg)
-    printM 1337 ("seg_delta " <> prettyStr seg_delta)
-    p_seg =>? (seg_delta :> int2SoP 0)
-  when (isUnknown s_p) (failMsg "scatterMono: predicate not on desired form")
-  -- Check that seg is monotonically increasing. (Essentially checking
-  -- that OOB branch is never taken in inds.)
-  mono <- lift $ algebraContext inds $ do
-    addRelShape inds_iter
-    seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
-    seg_delta $>= int2SoP 0
-  when (isUnknown mono) (failMsg "scatterMono: unable to show monotonicity")
-  -- Check that seg(0) = 0.
-  -- (Not using CaseCheck as it has to hold outside case predicate.)
-  let x `at_k` i = rep (mkRep k i) x
-  let zero :: SoP Symbol = int2SoP 0
-  eq0 <- lift $ f_seg `at_k` zero $== int2SoP 0
-  when (isUnknown eq0) (failMsg "scatterMono: unable to determine segment start")
-
-  -- Check that the proposed end of segments seg(m) - 1 equals the size of dest.
-  -- (Note that has to hold outside the context of inds, so we cannot assume p_seg.)
-  domain_covered <- lift $ f_seg `at_k` m .-. int2SoP 1 $== dest_size
-  when (isUnknown domain_covered) $
-    fail "scatter: segments do not cover iterator domain"
-
-  i <- newVName "i"
-  dest_hole <- newVName "dest_hole"
-  vals_hole <- newVName "vals_hole"
-  let p = sVar i :== f_seg
-  let fn =
-        IndexFn
-          { shape = [Forall i (Cat k m f_seg)],
-            body =
-              cases
-                [ (p, sym2SoP $ Apply (Var vals_hole) [sVar k]),
-                  (neg p, sym2SoP $ Apply (Var dest_hole) [sVar i])
-                ]
-          }
-  lift $ substParams fn [(vals_hole, vals), (dest_hole, dest)]
-scatterMono _ _ _ = fail ""
-
-failMsg :: (MonadFail m) => String -> m b
-failMsg msg = do
-  printM 1337 msg
-  fail msg
-
-cmap :: ((a, b) -> (c, d)) -> Cases a b -> Cases c d
-cmap f (Cases xs) = Cases (fmap f xs)
-
-cmapValues :: (b -> c) -> Cases a b -> Cases a c
-cmapValues f = cmap (second f)
-
-sVar :: E.VName -> SoP Symbol
-sVar = sym2SoP . Var
-
--- TODO eh bad
-(~==~) :: Symbol -> Symbol -> SoP Symbol
-x ~==~ y = sym2SoP $ sym2SoP x :== sym2SoP y
-
-(~/=~) :: Symbol -> Symbol -> SoP Symbol
-x ~/=~ y = sym2SoP $ sym2SoP x :/= sym2SoP y
-
-(~<~) :: Symbol -> Symbol -> SoP Symbol
-x ~<~ y = sym2SoP $ sym2SoP x :< sym2SoP y
-
-(~>~) :: Symbol -> Symbol -> SoP Symbol
-x ~>~ y = sym2SoP $ sym2SoP x :> sym2SoP y
-
-(~<=~) :: Symbol -> Symbol -> SoP Symbol
-x ~<=~ y = sym2SoP $ sym2SoP x :<= sym2SoP y
-
-(~>=~) :: Symbol -> Symbol -> SoP Symbol
-x ~>=~ y = sym2SoP $ sym2SoP x :>= sym2SoP y
-
-(~&&~) :: Symbol -> Symbol -> SoP Symbol
-x ~&&~ y = sym2SoP $ x :&& y
-
-(~||~) :: Symbol -> Symbol -> SoP Symbol
-x ~||~ y = sym2SoP $ x :|| y
-
---------------------------------------------------------------
--- Handling refinement types.
---------------------------------------------------------------
-type CheckContext = (Replacement Symbol, [(E.VName, IndexFn)], Replacement Symbol)
-
-emptyCheckContext :: CheckContext
-emptyCheckContext = (mempty, mempty, mempty)
-
-type Check = CheckContext -> IndexFnM Answer
-
-type Effect = CheckContext -> IndexFnM ()
-
--- Extract the Check to verify a formal argument's precondition, if it exists.
-getPrecondition :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM [Check]
-getPrecondition = fmap (fmap fst) . getRefinement
-
--- Extract the Check to verify, and the Effect of, a formal argument's refinement, if it exists.
-getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM [(Check, Effect)]
-getRefinement (E.PatParens pat _) = getRefinement pat
-getRefinement (E.PatAscription pat _ _) = getRefinement pat
-getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc) = getRefinementFromType [param] info
-getRefinement _ = pure []
-
--- Associates any refinement in `ty` with the name `vn`.
-getRefinementFromType :: [E.VName] -> E.TypeBase dim u -> IndexFnM [(Check, Effect)]
-getRefinementFromType vns ty = case ty of
-  E.Array _ _ (E.Refinement _ ref) -> do
-    hole <- sym2SoP . Hole <$> newVName "h"
-    pure <$> mkRef vns ((`Idx` hole) . Var) ref
-  E.Scalar (E.Refinement _ ref) ->
-    pure <$> mkRef vns Var ref
-  _ -> pure []
-
-mkRef :: [E.VName] -> (E.VName -> Symbol) -> E.Exp -> IndexFnM (Check, Effect)
-mkRef vns wrap refexp = case refexp of
-  E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _
-    | [name] <- vns -> do
-        let rel = fromJust $ parseOpVName vn_op
-        g <- forwardRefinementExp e_y
-        -- Create check as an index function whose cases contain the refinement.
-        let check =
-              inContext
-                askRefinement
-                (cases $ map (second (sym2SoP . (sVar name `rel`))) (casesToList g))
-        let effect =
-              inContext
-                ( \f -> do
-                    -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
-                    alg_vn <- paramToAlgebra name wrap
-                    y <- rewrite $ flattenCases (body f)
-                    addRelSymbol $ sVar alg_vn `rel` y
-                )
-                g
-        pure (check, effect)
-  E.Lambda lam_params lam_body _ _ loc -> do
-    let param_names = map fst $ mconcat $ map patternMapAligned lam_params
-    ref <- forwardRefinementExp lam_body
-    unless (length vns >= length (catMaybes param_names)) . error $
-      errorMsg loc ("Internal error: mkRef: " <> prettyStr refexp)
-    let ref' = foldl repParam ref (zip param_names vns)
-    let check = inContext askRefinement ref'
-    let effect =
-          inContext
-            ( \f -> do
-                y <- rewrite $ flattenCases (body f)
-                addRelSymbol (sop2Symbol y)
-            )
-            ref'
-    pure (check, effect)
-  x -> error $ "Unhandled refinement predicate " <> show x
-  where
-    forwardRefinementExp e = do
-      fns <- forward e
-      case fns of
-        [fn] -> body <$> rewrite fn
-        _ -> error "Impossible: Refinements have return type bool."
-
-    repParam g (Just param_name, vn) = repCases (mkRep param_name $ sym2SoP (Var vn)) g
-    repParam g (Nothing, _) = g
-
-    -- This wraps a Check or an Effect, making sure that parameters/names/sizes
-    -- are substituted correctly at the evaluation site.
-    -- (renaming_rep used only by postcondition effects; see forwardApplyDef).
-    inContext f e (size_rep, args, renaming_rep) = do
-      fn <- substParams (repIndexFn size_rep (IndexFn [] e)) args
-      f (repIndexFn renaming_rep fn)
-
--- Tags formal arguments that are booleans or arrays of booleans as such.
-addBooleanNames :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
-addBooleanNames (E.PatParens pat _) = addBooleanNames pat
-addBooleanNames (E.PatAscription pat _ _) = addBooleanNames pat
-addBooleanNames (E.Id param (E.Info {E.unInfo = E.Array _ _ t}) _) = do
-  when (typeIsBool $ E.Scalar t) $ addProperty (Algebra.Var param) Property.Boolean
-addBooleanNames (E.Id param (E.Info {E.unInfo = t}) _) = do
-  when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
-addBooleanNames _ = pure ()
-
--- Automatically refines size variables to be non-negative.
-addSizeVariables :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
-addSizeVariables (E.PatParens pat _) = addSizeVariables pat
-addSizeVariables (E.PatAscription pat _ _) = addSizeVariables pat
-addSizeVariables (E.Id _ (E.Info {E.unInfo = E.Array _ shp _}) _) = do
-  mapM_ addSize (E.shapeDims shp)
-  where
-    addSize (E.Var (E.QualName _ d) _ _) = do
-      alg_d <- toAlgebra (sym2SoP $ Var d)
-      addRel (alg_d :>=: int2SoP 0)
-    addSize _ = pure ()
-addSizeVariables (E.Id param (E.Info {E.unInfo = t}) _) = do
-  when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
-addSizeVariables _ = pure ()
-
--- TODO make it return a lsit of functions just to remove the many undefined cases
+-- TODO make it return a list of functions just to remove the many undefined cases
 -- (it should never happen in practice as these functions are type checked).
 forwardPropertyPrelude :: String -> NE.NonEmpty (a, E.Exp) -> IndexFnM IndexFn
 forwardPropertyPrelude f args =
@@ -1321,6 +804,502 @@ forwardPropertyPrelude f args =
         _ -> do
           error "Applying property to name bound to tuple?"
 
+-- Scatter with injective indices (result is uninterpreted, but safe):
+scatterInj :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
+scatterInj (IndexFn [Forall i dom_dest] _) inds _vals e_inds = do
+  dest_size <- lift $ rewrite $ domainEnd dom_dest
+  inj <- lift $ case justVName e_inds of
+    Just vn_inds -> do
+      prove (Property.Injective vn_inds $ Just (int2SoP 0, dest_size))
+        `orM` prove (Property.Injective vn_inds Nothing)
+    Nothing ->
+      proveFn (PInjective $ Just (int2SoP 0, dest_size)) inds
+  case inj of
+    Unknown -> failMsg "scatterInj: no match"
+    Yes -> do
+      uninterpreted <- newNameFromString "scatter_inj"
+      lift . pure $
+        IndexFn
+          { shape = [Forall i dom_dest],
+            body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
+          }
+scatterInj _ _ _ _ = fail ""
+
+-- Scatter replicated value (result is uninterpreted, but safe):
+scatterRep :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterRep (IndexFn [Forall _ dom_dest] _) _ vals@(IndexFn [Forall i (Iota _)] _)
+  | i `S.notMember` fv (body vals) = do
+      uninterpreted <- newNameFromString "scatter_rep"
+      lift . pure $
+        IndexFn
+          { shape = [Forall i dom_dest],
+            body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
+          }
+scatterRep _ _ _ = fail ""
+
+--   - If `is` is a permutation of (0 .. length dst), then the
+--     inverse of `is` exists and the scatter is equivalent to a gather:
+--     ```
+--     for i in 0 .. length dest:
+--         k = is^(-1)(i)
+--         dest[i] = vs[k]
+--     ```
+--   - Rule:
+--     (`is` is a permutation of (0 .. length dst))
+--     ___________________________________________________
+--     y = ∀i ∈ 0 .. length dest . vs[is^(-1)(i)]
+scatterPerm :: IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
+scatterPerm (IndexFn [Forall _ dom_dest] _) vals e_inds = do
+  dest_size <- lift $ rewrite $ domainEnd dom_dest
+  printM 1337 $ "scatterPerm: dest_size" <> prettyStr dest_size
+  vn_inds <- warningInds
+  perm <- lift $ prove (Property.BijectiveRCD vn_inds (int2SoP 0, dest_size) (int2SoP 0, dest_size))
+  case perm of
+    Unknown -> failMsg "scatterPerm: no match"
+    Yes -> do
+      -- `inds` is invertible on the whole domain.
+      vn_vals <- newVName "vals"
+      i <- newVName "i"
+      vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
+
+      lift $ addInvAlias vn_inv vn_inds
+      lift $ addRelSymbol (Prop $ Property.BijectiveRCD vn_inv (int2SoP 0, dest_size) (int2SoP 0, dest_size))
+      -- TODO make bijective cover injective also!
+      lift $ addRelSymbol (Prop $ Property.Injective vn_inv $ Just (int2SoP 0, dest_size))
+      -- TODO add these ranges when needed using the property table.
+      -- Here we add them as a special case because we know is^(-1) will
+      -- be used for indirect indexing.
+      hole <- sym2SoP . Hole <$> newVName "h"
+      let wrap = (`Idx` hole) . Var
+      alg_vn <- lift $ paramToAlgebra vn_inv wrap
+      lift $ addRelSymbol (Prop $ Property.Rng alg_vn (int2SoP 0, dest_size))
+
+      let inv_ind = Idx (Var vn_inv) (sVar i)
+      lift $
+        IndexFn
+          { shape = [Forall i (Iota $ dest_size .+. int2SoP 1)],
+            body = cases [(Bool True, sym2SoP $ Idx (Var vn_vals) (sym2SoP inv_ind))]
+          }
+          @ (vn_vals, vals)
+  where
+    warningInds
+      | Just vn <- justVName e_inds = pure vn
+      | otherwise = do
+          printM 1 . warningMsg (E.locOf e_inds) $
+            "You might want to bind scattered indices to a name to aid"
+              <> " index function inference: "
+              <> prettyStr e_inds
+          fail ""
+scatterPerm _ _ _ = fail ""
+
+-- Scatter in-bounds-monotonic indices:
+--   - If `is` is a monotonically increasing sequence of values
+--     that starts at 0 and ends at length dest-1, we can express
+--     the scatter as an index function by the following rule:
+--
+--     is = ∀k ∈ [0, ..., m-1] .
+--         | seg(k+1) - seg(k) > 0  => seg(k)
+--         | seg(k+1) - seg(k) <= 0 => OOB
+--     seg(0) is 0
+--     seg(k) is monotonically increasing
+--     dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
+--     OOB < 0 or OOB >= seg(m) - 1
+--     _________________________________________________
+--     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
+--         | i == seg(k) => vals[k]
+--         | i /= seg(k) => dest[i]
+scatterMono :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterMono dest@(IndexFn [Forall _ dom_dest] _) inds@(IndexFn inds_iter@[Forall k (Iota m)] _) vals = do
+  dest_size <- lift $ rewrite $ domainEnd dom_dest
+  -- Match rule.
+  vn_k <- newVName "k"
+  vn_m <- newVName "m"
+  vn_p0 <- newVName "p0"
+  vn_f0 <- newVName "f0"
+  vn_p1 <- newVName "p1"
+  vn_f1 <- newVName "f1"
+  let inds_template =
+        IndexFn
+          { shape = [Forall vn_k (Iota $ sym2SoP $ Hole vn_m)],
+            body =
+              cases
+                [ (Hole vn_p0, sym2SoP $ Hole vn_f0),
+                  (Hole vn_p1, sym2SoP $ Hole vn_f1)
+                ]
+          }
+  s <- hoistMaybe =<< lift (unify inds_template inds)
+  -- Determine which is OOB and which is e1.
+  let isOOB ub = CaseCheck (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
+  (vn_p_seg, vn_f_seg) <- do
+    case0_is_OOB <- lift $ queryCase (isOOB vn_f1) inds 0
+    case case0_is_OOB of
+      Yes -> pure (vn_p1, vn_f1)
+      Unknown -> do
+        case1_is_OOB <- lift $ queryCase (isOOB vn_f0) inds 1
+        case case1_is_OOB of
+          Yes -> pure (vn_p0, vn_f0)
+          Unknown -> failMsg "scatterMono: unable to determine OOB branch"
+  let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
+  let f_seg = mapping s M.! vn_f_seg
+  -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
+  s_p :: Answer <- lift $ algebraContext inds $ do
+    addRelShape inds_iter
+    seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
+    printM 1337 ("p_seg     " <> prettyStr p_seg)
+    printM 1337 ("seg_delta " <> prettyStr seg_delta)
+    p_seg =>? (seg_delta :> int2SoP 0)
+  when (isUnknown s_p) (failMsg "scatterMono: predicate not on desired form")
+  -- Check that seg is monotonically increasing. (Essentially checking
+  -- that OOB branch is never taken in inds.)
+  mono <- lift $ algebraContext inds $ do
+    addRelShape inds_iter
+    seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
+    seg_delta $>= int2SoP 0
+  when (isUnknown mono) (failMsg "scatterMono: unable to show monotonicity")
+  -- Check that seg(0) = 0.
+  -- (Not using CaseCheck as it has to hold outside case predicate.)
+  let x `at_k` i = rep (mkRep k i) x
+  let zero :: SoP Symbol = int2SoP 0
+  eq0 <- lift $ f_seg `at_k` zero $== int2SoP 0
+  when (isUnknown eq0) (failMsg "scatterMono: unable to determine segment start")
+
+  -- Check that the proposed end of segments seg(m) - 1 equals the size of dest.
+  -- (Note that has to hold outside the context of inds, so we cannot assume p_seg.)
+  domain_covered <- lift $ f_seg `at_k` m .-. int2SoP 1 $== dest_size
+  when (isUnknown domain_covered) $
+    fail "scatter: segments do not cover iterator domain"
+
+  i <- newVName "i"
+  dest_hole <- newVName "dest_hole"
+  vals_hole <- newVName "vals_hole"
+  let p = sVar i :== f_seg
+  let fn =
+        IndexFn
+          { shape = [Forall i (Cat k m f_seg)],
+            body =
+              cases
+                [ (p, sym2SoP $ Apply (Var vals_hole) [sVar k]),
+                  (neg p, sym2SoP $ Apply (Var dest_hole) [sVar i])
+                ]
+          }
+  lift $ substParams fn [(vals_hole, vals), (dest_hole, dest)]
+scatterMono _ _ _ = fail ""
+
+{-
+    Utilities.
+-}
+
+justVName :: E.Exp -> Maybe E.VName
+justVName (E.Var (E.QualName [] vn) _ _) = Just vn
+justVName _ = Nothing
+
+getFun :: E.Exp -> Maybe String
+getFun e = E.baseString <$> justVName e
+
+typeIsBool :: E.TypeBase E.Exp as -> Bool
+typeIsBool (E.Scalar (E.Prim E.Bool)) = True
+typeIsBool _ = False
+
+-- Strip unused information.
+getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
+getArgs = map (stripExp . snd) . NE.toList
+  where
+    stripExp x = fromMaybe x (E.stripExp x)
+
+-- Like patternMap, but doesn't discard information about wildcards.
+patternMapAligned :: E.Pat t -> [(Maybe E.VName, t)]
+patternMapAligned = map f . patIdentsAligned
+  where
+    f (v, E.Info t) = (v, t)
+
+    patIdentsAligned (E.Id v t _) = [(Just v, t)]
+    patIdentsAligned (E.PatParens p _) = patIdentsAligned p
+    patIdentsAligned (E.TuplePat pats _) = foldMap patIdentsAligned pats
+    patIdentsAligned (E.RecordPat fs _) = foldMap (patIdentsAligned . snd) fs
+    patIdentsAligned (E.Wildcard t _) = [(Nothing, t)]
+    patIdentsAligned (E.PatAscription p _ _) = patIdentsAligned p
+    patIdentsAligned (E.PatLit _ t _) = [(Nothing, t)]
+    patIdentsAligned (E.PatConstr _ _ ps _) = foldMap patIdentsAligned ps
+    patIdentsAligned (E.PatAttr _ p _) = patIdentsAligned p
+
+getTERefine :: E.TypeExp E.Exp E.VName -> [E.Exp]
+getTERefine (E.TEParens te _) = getTERefine te
+getTERefine (E.TETuple tes _) = do
+  te <- tes
+  getTERefine te
+getTERefine (E.TERefine _ e@(E.Lambda {}) _) =
+  pure e
+getTERefine (E.TERefine _ _ loc) =
+  error $ errorMsg loc "Only lambda postconditions are currently supported."
+getTERefine _ = []
+
+hasRefinement :: E.TypeExp E.Exp E.VName -> Bool
+hasRefinement = not . null . getTERefine
+
+shapeOfTypeBase :: E.TypeBase E.Exp as -> IndexFnM [SoP Symbol]
+shapeOfTypeBase e = do
+  dims <- mapM forward (E.shapeDims (E.arrayShape e))
+  unless (all ((<= 1) . length) dims) $ error "Size of array dimension is a tuple?"
+  pure $ map getScalar (mconcat dims)
+  where
+    getScalar (IndexFn [] cs) | [(Bool True, x)] <- casesToList cs = x
+    getScalar f = error ("getScalar on " <> prettyStr f)
+
+-- HACK this lets us propagate any properties on the output names
+-- to the postcondition. For example, in the below we want to
+-- know that y' = y (the name, because y' = indexfn of y).
+--
+-- def f x : {\y' -> property y} =
+--   let y = ...
+--   let z = funWithPostCond y
+--   in y
+--
+-- A more elegant solution would change the return type of forward...
+trackNamesOfFinalLetBody :: E.Exp -> IndexFnM ()
+trackNamesOfFinalLetBody (E.TupLit es _)
+  | Just vns <- mapM (justVName . stripCoerce) es =
+      setOutputNames vns
+trackNamesOfFinalLetBody e
+  | Just vn <- justVName (stripCoerce e) = setOutputNames [vn]
+  | otherwise = pure ()
+
+stripCoerce :: E.Exp -> E.Exp
+stripCoerce (E.Coerce e _ _ _) = e
+stripCoerce e = e
+
+-- Binds names of scalar parameters to scalar values of corresponding
+-- index functions. Assumes that domains are equivalent across index
+-- functions. Returns the most "complex" iterator over these domains.
+-- For example, this would transform the lambda body of the following
+--   map (\x y z -> x + y + z) xs ys zs
+-- into
+--   map (\i -> xs[i] + ys[i] + zs[i]) (indices xs)
+-- where xs is the index function with the most "complex" iterator.
+bindLambdaBodyParams :: [(E.VName, IndexFn)] -> IndexFnM Iterator
+bindLambdaBodyParams [] = error "Internal error: are you mapping with wildcard only?"
+bindLambdaBodyParams params = do
+  -- Make sure all Cat k bound in iterators are identical by renaming.
+  fns <- renamesM (map snd params)
+  let iter@(Forall i _) = maximum (map ((\case [it] -> it) . shape) fns)
+  -- forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
+  --   vn <- newVName ("#lam_" <> E.baseString paramName)
+  --   insertIndexFn vn [f_xs]
+  --   insertIndexFn
+  --     paramName
+  --     [IndexFn Empty $ singleCase . sym2SoP $ Idx (Var vn) (sVar i)]
+  -- pure iter
+  forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
+    vn <- newVName "tmp_fn"
+    IndexFn tmp_shape cs <-
+      IndexFn [iter] (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
+    let [tmp_iter] = tmp_shape
+    -- Renaming k bound in `tmp_iter` to k bound in `iter`.
+    let k_rep =
+          fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
+    insertIndexFn paramName [repIndexFn k_rep $ IndexFn [] cs]
+  pure iter
+
+-- Align parameters and arguments. Each parameter is a pattern.
+-- A pattern unpacks to a list of (optional) names with type information.
+-- An argument is an expression, which `forward` will, correspondingly,
+-- return a list of index functions for.
+-- Patterns and arguments must align---otherwise an error is raised.
+zipArgs ::
+  E.SrcLoc ->
+  [E.Pat E.ParamType] ->
+  NE.NonEmpty (a, E.Exp) ->
+  IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
+zipArgs loc formal_args actual_args = do
+  let pats = map patternMapAligned formal_args
+  args <- mapM forward (getArgs actual_args)
+  unless (length pats == length args) . error $
+    errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
+  unless (map length pats == map length args) . error $
+    errorMsg loc "Internal error: actual argument does not match parameter pattern."
+
+  -- Discard unused parameters such as wildcards while maintaining alignment.
+  let aligned_args = do
+        (pat, arg) <- zip pats args
+        pure . catMaybes $ zipWith (\vn fn -> (,fn) <$> vn) (map fst pat) arg
+
+  -- When applying bound functions size parameters must be replaced as well.
+  -- (E.g., if we are zipping index functions with use of a top-level definition.)
+  aligned_sizes <- forM (zip pats args) $ \(pat, arg) -> do
+    let types = map snd pat
+    size_names <- mapM (fmap getVName . shapeOfTypeBase) types
+    arg_sizes <- mapM sizeOfDomain arg
+    -- Assert that if there is a size parameter, then we have a size to bind it to.
+    when (any (\(vn, sz) -> isJust vn && isNothing sz) (zip size_names arg_sizes)) . error $
+      errorMsg loc "Internal error: sizes don't align."
+    pure $ catMaybes $ zipMaybes size_names arg_sizes
+
+  pure (aligned_args, aligned_sizes)
+  where
+    getVName [] = Nothing
+    getVName [x]
+      | Just (Var vn) <- justSym x = Just vn
+      | otherwise = Nothing
+    getVName _ = error "multi-dim not implemented yet"
+
+    sizeOfDomain (IndexFn [] _) = pure Nothing
+    sizeOfDomain (IndexFn [Forall _ d] _) =
+      Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
+
+    zipMaybes = zipWith (liftA2 (,))
+
+substParams :: (Foldable t) => IndexFn -> t (E.VName, IndexFn) -> IndexFnM IndexFn
+substParams = foldM substParam
+  where
+    -- We want to simplify, but avoid rewriting recurrences during
+    -- paramter-substitution.
+    substParam fn (paramName, paramIndexFn) =
+      (fn @ (paramName, paramIndexFn)) >>= rewriteWithoutRules
+
+failMsg :: (MonadFail m) => String -> m b
+failMsg msg = do
+  printM 1337 msg
+  fail msg
+
+sVar :: E.VName -> SoP Symbol
+sVar = sym2SoP . Var
+
+-- TODO eh bad
+(~==~) :: Symbol -> Symbol -> SoP Symbol
+x ~==~ y = sym2SoP $ sym2SoP x :== sym2SoP y
+
+(~/=~) :: Symbol -> Symbol -> SoP Symbol
+x ~/=~ y = sym2SoP $ sym2SoP x :/= sym2SoP y
+
+(~<~) :: Symbol -> Symbol -> SoP Symbol
+x ~<~ y = sym2SoP $ sym2SoP x :< sym2SoP y
+
+(~>~) :: Symbol -> Symbol -> SoP Symbol
+x ~>~ y = sym2SoP $ sym2SoP x :> sym2SoP y
+
+(~<=~) :: Symbol -> Symbol -> SoP Symbol
+x ~<=~ y = sym2SoP $ sym2SoP x :<= sym2SoP y
+
+(~>=~) :: Symbol -> Symbol -> SoP Symbol
+x ~>=~ y = sym2SoP $ sym2SoP x :>= sym2SoP y
+
+(~&&~) :: Symbol -> Symbol -> SoP Symbol
+x ~&&~ y = sym2SoP $ x :&& y
+
+(~||~) :: Symbol -> Symbol -> SoP Symbol
+x ~||~ y = sym2SoP $ x :|| y
+
+{-
+    Handling pre- and postconditions.
+-}
+type CheckContext = (Replacement Symbol, [(E.VName, IndexFn)], Replacement Symbol)
+
+emptyCheckContext :: CheckContext
+emptyCheckContext = (mempty, mempty, mempty)
+
+type Check = CheckContext -> IndexFnM Answer
+
+type Effect = CheckContext -> IndexFnM ()
+
+-- Extract the Check to verify a formal argument's precondition, if it exists.
+getPrecondition :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM [Check]
+getPrecondition = fmap (fmap fst) . getRefinement
+
+-- Extract the Check to verify, and the Effect of, a formal argument's refinement, if it exists.
+getRefinement :: E.PatBase E.Info E.VName (E.TypeBase dim u) -> IndexFnM [(Check, Effect)]
+getRefinement (E.PatParens pat _) = getRefinement pat
+getRefinement (E.PatAscription pat _ _) = getRefinement pat
+getRefinement (E.Id param (E.Info {E.unInfo = info}) _loc) = getRefinementFromType [param] info
+getRefinement _ = pure []
+
+-- Associates any refinement in `ty` with the name `vn`.
+getRefinementFromType :: [E.VName] -> E.TypeBase dim u -> IndexFnM [(Check, Effect)]
+getRefinementFromType vns ty = case ty of
+  E.Array _ _ (E.Refinement _ ref) -> do
+    hole <- sym2SoP . Hole <$> newVName "h"
+    pure <$> mkRef vns ((`Idx` hole) . Var) ref
+  E.Scalar (E.Refinement _ ref) ->
+    pure <$> mkRef vns Var ref
+  _ -> pure []
+
+mkRef :: [E.VName] -> (E.VName -> Symbol) -> E.Exp -> IndexFnM (Check, Effect)
+mkRef vns wrap refexp = case refexp of
+  E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _
+    | [name] <- vns -> do
+        let rel = fromJust $ parseOpVName vn_op
+        g <- forwardRefinementExp e_y
+        -- Create check as an index function whose cases contain the refinement.
+        let check =
+              inContext
+                askRefinement
+                (cases $ map (second (sym2SoP . (sVar name `rel`))) (casesToList g))
+        let effect =
+              inContext
+                ( \f -> do
+                    -- (We allow Holes in wrap and toAlgebra cannot be called on symbols with Holes.)
+                    alg_vn <- paramToAlgebra name wrap
+                    y <- rewrite $ flattenCases (body f)
+                    addRelSymbol $ sVar alg_vn `rel` y
+                )
+                g
+        pure (check, effect)
+  E.Lambda lam_params lam_body _ _ loc -> do
+    let param_names = map fst $ mconcat $ map patternMapAligned lam_params
+    ref <- forwardRefinementExp lam_body
+    unless (length vns >= length (catMaybes param_names)) . error $
+      errorMsg loc ("Internal error: mkRef: " <> prettyStr refexp)
+    let ref' = foldl repParam ref (zip param_names vns)
+    let check = inContext askRefinement ref'
+    let effect =
+          inContext
+            ( \f -> do
+                y <- rewrite $ flattenCases (body f)
+                addRelSymbol (sop2Symbol y)
+            )
+            ref'
+    pure (check, effect)
+  x -> error $ "Unhandled refinement predicate " <> show x
+  where
+    forwardRefinementExp e = do
+      fns <- forward e
+      case fns of
+        [fn] -> body <$> rewrite fn
+        _ -> error "Impossible: Refinements have return type bool."
+
+    repParam g (Just param_name, vn) = repCases (mkRep param_name $ sym2SoP (Var vn)) g
+    repParam g (Nothing, _) = g
+
+    -- This wraps a Check or an Effect, making sure that parameters/names/sizes
+    -- are substituted correctly at the evaluation site.
+    -- (renaming_rep used only by postcondition effects; see forwardApplyDef).
+    inContext f e (size_rep, args, renaming_rep) = do
+      fn <- substParams (repIndexFn size_rep (IndexFn [] e)) args
+      f (repIndexFn renaming_rep fn)
+
+-- Tags formal arguments that are booleans or arrays of booleans as such.
+addBooleanNames :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
+addBooleanNames (E.PatParens pat _) = addBooleanNames pat
+addBooleanNames (E.PatAscription pat _ _) = addBooleanNames pat
+addBooleanNames (E.Id param (E.Info {E.unInfo = E.Array _ _ t}) _) = do
+  when (typeIsBool $ E.Scalar t) $ addProperty (Algebra.Var param) Property.Boolean
+addBooleanNames (E.Id param (E.Info {E.unInfo = t}) _) = do
+  when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
+addBooleanNames _ = pure ()
+
+-- Automatically refines size variables to be non-negative.
+addSizeVariables :: E.PatBase E.Info E.VName E.ParamType -> IndexFnM ()
+addSizeVariables (E.PatParens pat _) = addSizeVariables pat
+addSizeVariables (E.PatAscription pat _ _) = addSizeVariables pat
+addSizeVariables (E.Id _ (E.Info {E.unInfo = E.Array _ shp _}) _) = do
+  mapM_ addSize (E.shapeDims shp)
+  where
+    addSize (E.Var (E.QualName _ d) _ _) = do
+      alg_d <- toAlgebra (sym2SoP $ Var d)
+      addRel (alg_d :>=: int2SoP 0)
+    addSize _ = pure ()
+addSizeVariables (E.Id param (E.Info {E.unInfo = t}) _) = do
+  when (typeIsBool t) $ addProperty (Algebra.Var param) Property.Boolean
+addSizeVariables _ = pure ()
+
 parseOpVName :: E.VName -> Maybe (SoP Symbol -> SoP Symbol -> Symbol)
 parseOpVName vn =
   case E.baseString vn of
@@ -1333,6 +1312,9 @@ parseOpVName vn =
     "+<" -> Just (\x y -> int2SoP 0 :<= x :&& x :< y)
     _ -> Nothing
 
+{-
+    Bounds checking.
+-}
 checkBounds :: E.Exp -> IndexFn -> IndexFn -> IndexFnM ()
 checkBounds _ (IndexFn [] _) _ =
   error "E.Index: Indexing into scalar"
