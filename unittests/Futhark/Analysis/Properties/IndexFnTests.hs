@@ -342,6 +342,27 @@ tests =
                     ]
         ),
       mkTest
+        "tests/indexfn/mk_flag_array_exclusive.fut"
+        ( newNameFromString "k" >>= \k ->
+            newNameFromString "j" >>= \j ->
+              newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
+                let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Idx (Hole shape) (sVar j))
+                    sum_mm1 = sym2SoP $ Sum j (int2SoP 0) (sHole m .-. int2SoP 1) (Idx (Hole shape) (sVar j))
+                 in [ IndexFn
+                        { shape = [],
+                          body = cases [(Bool True, sum_mm1)]
+                        },
+                      IndexFn
+                        { shape = [Forall i (Cat k (sHole m) sum_km1)],
+                          body =
+                            cases
+                              [ (sVar i :== sum_km1, sym2SoP $ Idx (Hole xs) (sVar k)),
+                                (sVar i :/= sum_km1, sHole zero)
+                              ]
+                        }
+                    ]
+        ),
+      mkTest
         "tests/indexfn/segment_sum.fut"
         ( pure $ \(i, n, xs, flags) ->
             let xs_i = sym2SoP $ Idx (Hole xs) (sHole i)
