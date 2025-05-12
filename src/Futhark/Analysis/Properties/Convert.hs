@@ -60,11 +60,7 @@ getFun :: E.Exp -> Maybe String
 getFun e = E.baseString <$> justVName e
 
 getSize :: E.Exp -> IndexFnM (Maybe (SoP Symbol))
-getSize (E.Var _ (E.Info {E.unInfo = (E.Scalar (E.Record _))}) loc) =
-  error $ errorMsg loc "Record-type variables must be unpacked."
-getSize (E.Var _ (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
-getSize (E.ArrayLit [] (E.Info {E.unInfo = ty}) _) = sizeOfTypeBase ty
-getSize e = error $ "getSize: " <> prettyStr e <> "\n" <> show e
+getSize = sizeOfTypeBase . E.typeOf
 
 sizeOfTypeBase :: E.TypeBase E.Size as -> IndexFnM (Maybe (SoP Symbol))
 sizeOfTypeBase (E.Scalar (E.Refinement ty _)) =
