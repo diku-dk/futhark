@@ -521,6 +521,13 @@ genCopy pt shape (dst, _) (dst_offset, dst_strides) (src, _) (src_offset, src_st
 unsupported :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
 unsupported stmt = pure $ WGSL.Comment $ "Unsupported stmt: " <> prettyText stmt
 
+wgslProduct :: [SubExp] -> WGSL.Exp
+wgslProduct [] = WGSL.IntExp 1
+wgslProduct [Constant (IntValue v)] = WGSL.IntExp $ valueIntegral v
+wgslProduct ((Constant (IntValue v)) : vs) =
+  wgslBinOp (Mul Int32 OverflowWrap) (WGSL.IntExp $ valueIntegral v) (wgslProduct vs)
+wgslProduct _ = error "wgslProduct: non-constant product"
+
 genWGSLStm :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
 genWGSLStm Skip = pure WGSL.Skip
 genWGSLStm (s1 :>>: s2) = liftM2 WGSL.Seq (genWGSLStm s1) (genWGSLStm s2)
@@ -569,10 +576,9 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
       pure $ WGSL.Comment $ "declare_shared: " <> name'
     Nothing ->
       pure $ WGSL.Comment $ "discard declare_shared: " <> name'
-genWGSLStm (DeclareMem name (ScalarSpace [Constant (IntValue v)] pt)) =
-  let size = WGSL.IntExp $ valueIntegral v
-    in pure $
-      WGSL.DeclareVar (nameToIdent name) (WGSL.Array (wgslPrimType pt) (Just size))
+genWGSLStm (DeclareMem name (ScalarSpace vs pt)) =
+  pure $
+    WGSL.DeclareVar (nameToIdent name) (WGSL.Array (wgslPrimType pt) (Just $ wgslProduct vs))
 genWGSLStm s@(DeclareMem _ _) = unsupported s
 genWGSLStm (DeclareScalar name _ typ) =
   pure $
