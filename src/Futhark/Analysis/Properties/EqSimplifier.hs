@@ -20,6 +20,7 @@ import Futhark.Analysis.Properties.Unify
 import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP
 import Futhark.Util (nubOrd)
+import Futhark.Util.Pretty
 
 type Equality a = (a, a)
 
@@ -50,6 +51,9 @@ transitiveEqs (Node root trees) = go [root] trees
     go _ [] = []
     go visited (Node v vs : ts) =
       [(v,v') | v' <- visited] ++ go (v:visited) (vs ++ ts)
+
+instance Pretty a => Pretty (Tree a) where
+  pretty (Node root trees) = "Node" <+> pretty root <+> stack (map (\t -> "->" <+> pretty t) trees)
 
 {-
               Solver for Symbol.
