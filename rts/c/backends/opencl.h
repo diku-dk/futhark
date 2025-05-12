@@ -1358,7 +1358,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 // will go through the free list).
 static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *mem_out) {
   int error;
-  *mem_out = clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE, size, NULL, &error);
+  *mem_out = clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE, size+1024, NULL, &error);
 
   OPENCL_SUCCEED_OR_RETURN(error);
 

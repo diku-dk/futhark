@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Interpreter: some tricky aspects of size-lifted types (#2258).
+
+* Incorrect unused-name warning for named parameters in module types.
+
 ## [0.25.30]
 
 ### Added
