@@ -39,14 +39,17 @@ equivST eqs =
     dec = M.fromList $ zip [0 ..] nodes
     decoder (Node v trees) = Node (dec M.! v) (map decoder trees)
 
--- Returns the transitive equalities defined by the edges in the Tree.
+-- Returns the transitive equalities defined by the edges in the Tree (via
+-- a preorder traversal that connects each node to all previously visited nodes).
+--
+-- TODO If tree is output by equivST, aren't direct ancestors in the original equality
+-- that constructed the tree? In that case we could discard those.
 transitiveEqs :: Tree a -> [Equality a]
-transitiveEqs (Node root trees) = concatMap go (skipDirectSucc trees)
+transitiveEqs (Node root trees) = go [root] trees
   where
-    -- Skip equalities that are already in the expression that produced the Tree.
-    skipDirectSucc = concatMap (\(Node _ ts) -> ts)
-    go (Node v []) = [(root, v)]
-    go (Node v ts) = (root, v) : concatMap go ts ++ concatMap transitiveEqs ts
+    go _ [] = []
+    go visited (Node v vs : ts) =
+      [(v,v') | v' <- visited] ++ go (v:visited) (vs ++ ts)
 
 {-
               Solver for Symbol.
