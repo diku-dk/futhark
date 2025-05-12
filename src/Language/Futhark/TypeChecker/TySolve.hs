@@ -231,7 +231,7 @@ bindTyVar reason bcs v t' = do
   occursCheck reason v k t
 
   lvl <- getLvl' v_node
-  scopeCheck reason v lvl t
+  scopeCheck reason k lvl t
 
   v_info <- getSol' v_node
 
