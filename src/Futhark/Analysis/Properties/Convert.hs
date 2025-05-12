@@ -59,32 +59,6 @@ justVName _ = Nothing
 getFun :: E.Exp -> Maybe String
 getFun e = E.baseString <$> justVName e
 
-getSize :: E.Exp -> IndexFnM (Maybe (SoP Symbol))
-getSize = sizeOfTypeBase . E.typeOf
-
-sizeOfTypeBase :: E.TypeBase E.Size as -> IndexFnM (Maybe (SoP Symbol))
-sizeOfTypeBase (E.Scalar (E.Refinement ty _)) =
-  sizeOfTypeBase ty
-sizeOfTypeBase (E.Scalar (E.Arrow _ _ _ _ return_type)) =
-  sizeOfTypeBase (E.retType return_type)
-sizeOfTypeBase (E.Array _ shape _)
-  | dim : _ <- E.shapeDims shape = do
-      -- FIXME Only supporting one dimensional arrays.
-      ds <- forward dim
-      case ds of
-        [f_d]
-          | Just d <- justSingleCase f_d ->
-              pure $ Just d
-        [_] ->
-          -- FIXME Pretty sure all branches would have the same size?
-          -- So could we just pick one?
-          error "sizeOfTypBase on multiple case function"
-        _ ->
-          error "Currently only has support for one dimensional arrays."
-sizeOfTypeBase (E.Scalar (E.Record _)) =
-  error "Run E.patternMap first"
-sizeOfTypeBase _ = pure Nothing
-
 typeIsBool :: E.TypeBase E.Exp as -> Bool
 typeIsBool (E.Scalar (E.Prim E.Bool)) = True
 typeIsBool _ = False
@@ -221,6 +195,15 @@ checkPostcondition vn indexfns te = do
     Construct index function for source expression.
 -}
 
+shapeOfTypeBase :: E.TypeBase E.Exp as -> IndexFnM [SoP Symbol]
+shapeOfTypeBase e = do
+  dims <- mapM forward (E.shapeDims (E.arrayShape e))
+  unless (all ((<= 1) . length) dims) $ error "Size of array dimension is a tuple?"
+  pure $ map getScalar (mconcat dims)
+  where
+    getScalar (IndexFn [] cs) | [(Bool True, x)] <- casesToList cs = x
+    getScalar f = error ("getScalar on " <> prettyStr f)
+
 -- Propagate postcondition effects, such as adding properties.
 -- Fires binding applications of top-level defs to names.
 forwardLetEffects :: [Maybe E.VName] -> E.Exp -> IndexFnM [IndexFn]
@@ -298,16 +281,9 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
     Just indexfns -> do
       pure indexfns
     _ -> do
-      size <- getSize e
-      printM 1 $ "### e " <> prettyStr e
-      printM 1 $ "### getSize " <> prettyStr size
-      printM 1 $ "### arrayShape " <> prettyStr (E.arrayShape (E.typeOf e))
-      -- mconcat should be safe? how would a Size be a tuple?
-      dims <- mconcat <$> mapM forward (E.shapeDims (E.arrayShape (E.typeOf e)))
-      printM 1 $ "### dims " <> prettyStr dims
-      -- TODO define getSize in terms of arrayShape instead.
-      f <- case map justSingleCase dims of
-        [Just sz] -> do
+      dims <- shapeOfTypeBase (E.typeOf e)
+      f <- case dims of
+        [sz] -> do
           -- Canonical array representation.
           i <- newVName "i"
           pure
@@ -317,7 +293,7 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
                 }
             ]
         -- [Just sz, Just sz2] -> do --
-        xs | all isNothing xs ->
+        [] ->
           -- Canonical scalar representation.
           pure [IndexFn [] (singleCase $ sVar vn)]
         _ -> error "multi dim not implemented yet"
@@ -616,13 +592,15 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
           -- lets us check equality on g regardless:
           --   forall i,j . i = j => g(i) = g(j).
           arg_fns <- mconcat <$> mapM forward (getArgs args)
-          size <- sizeOfTypeBase return_type
+          size <- shapeOfTypeBase return_type
           arg_names <- forM arg_fns (const $ newVName "x")
           iter <- case size of
-            Just sz ->
-              (: []) . flip Forall (Iota sz) <$> newVName "i"
-            Nothing ->
+            [] ->
               pure []
+            [sz] ->
+              (: []) . flip Forall (Iota sz) <$> newVName "i"
+            _ ->
+              error "multi-dim not implemented yet"
           when (typeIsBool return_type) $ addProperty (Algebra.Var g) Property.Boolean
 
           let g_fn =
@@ -821,7 +799,7 @@ zipArgs loc formal_args actual_args = do
   -- (E.g., if we are zipping index functions with use of a top-level definition.)
   aligned_sizes <- forM (zip pats args) $ \(pat, arg) -> do
     let types = map snd pat
-    size_names <- mapM (fmap (>>= getVName) . sizeOfTypeBase) types
+    size_names <- mapM (fmap getVName . shapeOfTypeBase) types
     arg_sizes <- mapM sizeOfDomain arg
     -- Assert that if there is a size parameter, then we have a size to bind it to.
     when (any (\(vn, sz) -> isJust vn && isNothing sz) (zip size_names arg_sizes)) . error $
@@ -830,8 +808,11 @@ zipArgs loc formal_args actual_args = do
 
   pure (aligned_args, aligned_sizes)
   where
-    getVName x | Just (Var vn) <- justSym x = Just vn
-    getVName _ = Nothing
+    getVName [] = Nothing
+    getVName [x]
+      | Just (Var vn) <- justSym x = Just vn
+      | otherwise = Nothing
+    getVName _ = error "multi-dim not implemented yet"
 
     sizeOfDomain (IndexFn [] _) = pure Nothing
     sizeOfDomain (IndexFn [Forall _ d] _) =
