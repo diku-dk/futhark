@@ -958,10 +958,11 @@ checkApply loc (fname, prev_applied) ftype argexp = do
 checkOneExp :: ExpBase NoInfo VName -> TypeM ([TypeParam], Exp)
 checkOneExp e = runTermTypeM checkExp $ do
   e' <- checkExp e
-  let t = typeOf e'
-  (tparams, _, _) <-
-    letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
-  fixOverloadedTypes $ typeVars t
+  (tparams, _, RetType _ t') <-
+    letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $
+      toRes Nonunique $
+        typeOf e'
+  fixOverloadedTypes $ typeVars t'
   e'' <- normTypeFully e'
   localChecks e''
   causalityCheck e''
