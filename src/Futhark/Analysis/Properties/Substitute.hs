@@ -81,10 +81,6 @@ dest_fn @ (f_name, f) = do
       | vn == f_name,
         argCheck e args =
           pure $ Just (e, args)
-    getApply_ argCheck Nothing e@(Idx (Var vn) arg)
-      | vn == f_name,
-        argCheck e [arg] = do
-          pure $ Just (e, [arg])
     getApply_ _ acc _ = pure acc
 
 -- Substitution as defined in the paper.
@@ -138,9 +134,6 @@ subber argCheck g = do
     getApply_ seen Nothing e@(Apply (Var vn) args)
       | (vn, args) `S.notMember` seen =
           pure $ Just (e, vn, args)
-    getApply_ seen Nothing e@(Idx (Var vn) arg)
-      | (vn, [arg]) `S.notMember` seen =
-          pure $ Just (e, vn, [arg])
     getApply_ _ acc _ = pure acc
 
 {-
@@ -282,7 +275,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
         Nothing :: Maybe (Substitution Symbol) <- lift $ unify f def_II
         (vn_II, f_II) <- lift $ lookupII df def_II
         lift $ insertIndexFn vn_II [f_II]
-        pure (repIndexFn (mkRep k (sym2SoP (Idx (Var vn_II) arg))) g)
+        pure (repIndexFn (mkRep k (sym2SoP (Apply (Var vn_II) [arg]))) g)
       _ -> fail "No match."
 
 {-

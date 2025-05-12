@@ -49,7 +49,7 @@ tests =
                       IndexFn
                         { shape = [Forall i (Iota (sVar n))],
                           body =
-                            cases [(Bool True, sym2SoP $ Idx (Var x) (sVar i))]
+                            cases [(Bool True, sym2SoP $ Apply (Var x) [sVar i])]
                         }
                 queryCase (CaseIsMonotonic Inc) fn 0
             )
@@ -81,8 +81,8 @@ tests =
         testCase "Permutation of domain" $
           run
             ( \(i, j, _, n, x, _, _) -> do
-                let xs_i = Idx (Var x) (sVar i)
-                let xs_j = Idx (Var x) (sVar j)
+                let xs_i = Apply (Var x) [sVar i]
+                let xs_j = Apply (Var x) [sVar j]
                 let fn =
                       IndexFn
                         { shape = [Forall i (Iota (sVar n))],

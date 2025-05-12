@@ -138,8 +138,6 @@ algebraContext fn m = rollbackAlgEnv $ do
     -- Add boolean tag to IndexFn layer names where applicable.
     trackBooleanNames (Var vn) = do
       addProperty (Algebra.Var vn) Boolean
-    trackBooleanNames (Idx (Var vn) _) = do
-      addProperty (Algebra.Var vn) Boolean
     trackBooleanNames (Apply (Var vn) _) = do
       addProperty (Algebra.Var vn) Boolean
     trackBooleanNames (Not x) = trackBooleanNames x
@@ -173,7 +171,7 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) i) = do
   idx <- fromAlgebra i
   case x of
     Just x' -> sym2SoP <$> repHoles x' idx
-    Nothing -> pure . sym2SoP $ Idx (Var vn) idx
+    Nothing -> pure . sym2SoP $ Apply (Var vn) [idx]
 fromAlgebra_ (Algebra.Idx (Algebra.POR vns) i) = do
   foldr1 (.+.)
     <$> mapM
@@ -328,8 +326,6 @@ search x = do
 isBooleanM :: Symbol -> IndexFnM Bool
 isBooleanM (Var vn) = do
   askProperty (Algebra.Var vn) Boolean
-isBooleanM (Idx (Var vn) _) = do
-  askProperty (Algebra.Var vn) Boolean
 isBooleanM (Apply (Var vn) _) = do
   askProperty (Algebra.Var vn) Boolean
 isBooleanM x = pure $ isBoolean x
@@ -378,21 +374,11 @@ toAlgebra_ (Sum j lb ub x) = do
       -- to know why it would happen.
       printM 2000 $ "toAlgebra_: " <> prettyString (Sum j lb ub x)
       error "handleQuantifiers need to be run"
-toAlgebra_ sym@(Idx (Var xs) i) = do
-  res <- search sym
-  vn <- case fst <$> res of
-    Just vn -> pure vn
-    Nothing -> addUntrans (Var xs)
-  let idx = fromMaybe i (snd =<< res)
-  idx' <- mapSymM toAlgebra_ idx
-  booltype <- askProperty (Algebra.Var vn) Boolean
-  pure $ Algebra.Idx (idxSym booltype vn) idx'
-toAlgebra_ (Idx {}) = undefined
 toAlgebra_ sym@(Apply (Var f) [x]) = do
   res <- search sym
   vn <- case fst <$> res of
     Just vn -> pure vn
-    Nothing -> addUntrans sym
+    Nothing -> addUntrans (Var f)
   let idx = fromMaybe x (snd =<< res)
   idx' <- mapSymM toAlgebra_ idx
   f_is_bool <- askProperty (Algebra.Var f) Boolean

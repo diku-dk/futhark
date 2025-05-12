@@ -89,13 +89,13 @@ tests =
       testCase "Indexing" $
         run
           ( \(x, y, z, w, _, _, _, _, _) ->
-              unify (Idx (Hole x) (hole y .+. int2SoP 1)) (Idx (Var z) (name2SoP w .+. int2SoP 1))
+              unify (Apply (Hole x) [hole y .+. int2SoP 1]) (Apply (Var z) [name2SoP w .+. int2SoP 1])
           )
           @??= x2z_y2w,
       testCase "Indexing different constant" $
         run
           ( \(x, y, z, w, _, _, _, _, _) ->
-              unify (Idx (Hole x) (hole y .+. int2SoP 1)) (Idx (Var z) (name2SoP w .+. int2SoP 2))
+              unify (Apply (Hole x) [hole y .+. int2SoP 1]) (Apply (Var z) [name2SoP w .+. int2SoP 2])
           )
           @??= Nothing,
       -- Substituting with quantifiers.
@@ -121,8 +121,8 @@ tests =
         run
           ( \(x, y, z, w, a, b, c, d, _) ->
               unify
-                (Idx (Hole z) (hole x) ~+~ Sum d (hole x) (hole y) (Hole z))
-                (Idx (Var c) (name2SoP w) ~+~ Sum d (name2SoP a) (name2SoP b) (Var c))
+                (Apply (Hole z) [hole x] ~+~ Sum d (hole x) (hole y) (Hole z))
+                (Apply (Var c) [name2SoP w] ~+~ Sum d (name2SoP a) (name2SoP b) (Var c))
           )
           @??= Nothing,
       -- TODO This test shouldn't be allowed since we assume VNames in first argument are holes?

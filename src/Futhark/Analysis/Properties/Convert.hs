@@ -219,7 +219,7 @@ forward expr@(E.AppExp (E.Index e_xs slice _loc) _)
         i <- newVName "i"
         insertIndexFn idx [IndexFn [Forall i (Iota $ int2SoP 1)] (body f_idx)]
         subst
-          (IndexFn [] $ singleCase . sym2SoP $ Idx (Var xs) (sym2SoP $ Idx (Var idx) (int2SoP 0)))
+          (IndexFn [] $ singleCase . sym2SoP $ Apply (Var xs) [sym2SoP (Apply (Var idx) [int2SoP 0])])
 forward (E.Not e _) = do
   mapM negf =<< forward e
   where
@@ -349,25 +349,26 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
       fs <- forward e_x
       forM fs $ \f ->
         case shape f of
-            ds | length ds <= 1 -> error $ "Flatten on less-than-2d array." <> prettyStr f
-            Forall k (Iota m) : Forall j (Iota n) : shp -> do
-              -- j === (i' mod n), but we don't have modulo, so we convert to Cat domain.
-              -- i' <- newNameFromString "i"
-              -- f { shape = Forall i' (Iota (n .*. m)) : shp,
-              --     body = repCases (mkRep 
-              -- TODO define dual view and use for the first time here.
-              --   Once everything works, try for Union?
-              --   Alternatively, try using Cat to see if it just werks. (There are probably
-              --   other implementation things lurking around in maxMatch_2d.)
-              i <- newNameFromString "i"
-              k' <- newNameFromString "k"
-              let e_k = sVar k' .*. n
-              let j' = sVar i .-. e_k
-              pure $
-                f { shape = Forall i (Cat k' m e_k) : shp,
-                    body = repCases (addRep j j' $ mkRep k (sVar k')) (body f)
-                  }
-            _ -> error "Not implemented yet."
+          ds | length ds <= 1 -> error $ "Flatten on less-than-2d array." <> prettyStr f
+          Forall k (Iota m) : Forall j (Iota n) : shp -> do
+            -- j === (i' mod n), but we don't have modulo, so we convert to Cat domain.
+            -- i' <- newNameFromString "i"
+            -- f { shape = Forall i' (Iota (n .*. m)) : shp,
+            --     body = repCases (mkRep
+            -- TODO define dual view and use for the first time here.
+            --   Once everything works, try for Union?
+            --   Alternatively, try using Cat to see if it just werks. (There are probably
+            --   other implementation things lurking around in maxMatch_2d.)
+            i <- newNameFromString "i"
+            k' <- newNameFromString "k"
+            let e_k = sVar k' .*. n
+            let j' = sVar i .-. e_k
+            pure $
+              f
+                { shape = Forall i (Cat k' m e_k) : shp,
+                  body = repCases (addRep j j' $ mkRep k (sVar k')) (body f)
+                }
+          _ -> error "Not implemented yet."
   | Just "scan" <- getFun e_f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       -- Scan with basic operator.
@@ -390,8 +391,8 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
               IndexFn
                 (shape fn)
                 ( cases
-                    [ (base_case, sym2SoP (Idx (Var x) (sVar i))),
-                      (neg base_case, Recurrence `op` Idx (Var x) (sVar i))
+                    [ (base_case, sym2SoP (Apply (Var x) [sVar i])),
+                      (neg base_case, Recurrence `op` Apply (Var x) [sVar i])
                     ]
                 )
         -- tell ["Using scan rule ", toLaTeX y]
@@ -870,15 +871,15 @@ scatterPerm (IndexFn [Forall _ dom_dest] _) vals e_inds = do
       -- Here we add them as a special case because we know is^(-1) will
       -- be used for indirect indexing.
       hole <- sym2SoP . Hole <$> newVName "h"
-      let wrap = (`Idx` hole) . Var
+      let wrap = (`Apply` [hole]) . Var
       alg_vn <- lift $ paramToAlgebra vn_inv wrap
       lift $ addRelSymbol (Prop $ Property.Rng alg_vn (int2SoP 0, dest_size))
 
-      let inv_ind = Idx (Var vn_inv) (sVar i)
+      let inv_ind = Apply (Var vn_inv) [sVar i]
       lift $
         IndexFn
           { shape = [Forall i (Iota $ dest_size .+. int2SoP 1)],
-            body = cases [(Bool True, sym2SoP $ Idx (Var vn_vals) (sym2SoP inv_ind))]
+            body = cases [(Bool True, sym2SoP $ Apply (Var vn_vals) [sym2SoP inv_ind])]
           }
           @ (vn_vals, vals)
   where
@@ -1091,7 +1092,7 @@ bindLambdaBodyParams params = do
   forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
     vn <- newVName "tmp_fn"
     IndexFn tmp_shape cs <-
-      IndexFn [iter] (singleCase . sym2SoP $ Idx (Var vn) (sVar i)) @ (vn, fn)
+      IndexFn [iter] (singleCase . sym2SoP $ Apply (Var vn) [sVar i]) @ (vn, fn)
     let [tmp_iter] = tmp_shape
     -- Renaming k bound in `tmp_iter` to k bound in `iter`.
     let k_rep =
@@ -1216,7 +1217,7 @@ getRefinementFromType :: [E.VName] -> E.TypeBase dim u -> IndexFnM [(Check, Effe
 getRefinementFromType vns ty = case ty of
   E.Array _ _ (E.Refinement _ ref) -> do
     hole <- sym2SoP . Hole <$> newVName "h"
-    pure <$> mkRef vns ((`Idx` hole) . Var) ref
+    pure <$> mkRef vns ((`Apply` [hole]) . Var) ref
   E.Scalar (E.Refinement _ ref) ->
     pure <$> mkRef vns Var ref
   _ -> pure []

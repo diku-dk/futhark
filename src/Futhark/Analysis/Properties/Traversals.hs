@@ -68,7 +68,6 @@ instance ASTMappable Symbol Symbol where
   astMap m (Hole x) = mapOnSymbol m $ Hole x
   astMap m (Sum vn lb ub x) =
     mapOnSymbol m =<< Sum vn <$> astMap m lb <*> astMap m ub <*> astMap m x
-  astMap m (Idx xs i) = mapOnSymbol m =<< Idx <$> astMap m xs <*> astMap m i
   astMap m (Apply f xs) =
     mapOnSymbol m =<< Apply <$> astMap m f <*> mapM (astMap m) xs
   astMap _ x@(Bool {}) = pure x
@@ -148,8 +147,6 @@ instance ASTFoldable Symbol (Property Symbol) where
 instance ASTFoldable Symbol Symbol where
   astFold m acc e@(Sum _ lb ub x) =
     astFold m acc lb >>= astFoldF m ub >>= astFoldF m x >>= flip (foldOnSymbol m) e
-  astFold m acc e@(Idx xs i) =
-    astFold m acc xs >>= astFoldF m i >>= flip (foldOnSymbol m) e
   astFold m acc e@(Apply f xs) =
     astFold m acc f >>= \a -> foldM (astFold m) a xs >>= flip (foldOnSymbol m) e
   astFold m acc e@(Not x) =

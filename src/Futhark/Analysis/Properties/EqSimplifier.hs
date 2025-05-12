@@ -79,6 +79,9 @@ eqSolver (a :== b) p = do
   -- Make sure we don't lose the original equality. (E.g., if p = (a == b).)
   let p'' = p' :&& a :== b
   printM 10 $ "     --> " <> prettyStr p''
+  printM 10 $ "     --> EQS   " <> prettyStr (getEqualities p'')
+  printM 10 $ "     --> EQST  " <> prettyStr (equivST $ getEqualities p'')
+  printM 10 $ "     --> TRANS " <> prettyStr (getTransitiveEqs p'')
   -- TODO change this to also include the equalities transformed by astMap m?
   -- For example, x[i] = x[j] => i = j, returns only i = j, replacing x[i] = x[j].
   fixPointM (astMap rules) (foldl (:&&) p'' (getTransitiveEqs p''))
@@ -109,7 +112,7 @@ eqSolverRules = do
   pure
     [ Rule
         { name = "For injective x: x[i] = x[j] => i = j",
-          from = idx x i :== idx x j,
+          from = sym2SoP (Apply (Hole x) [hole i]) :== sym2SoP (Apply (Hole x) [hole j]),
           to = \s -> do
             e_i <- sub s (hole i)
             e_j <- sub s (hole j)
@@ -130,8 +133,6 @@ eqSolverRules = do
     ]
   where
     hole = sym2SoP . Hole
-
-    idx x i = sym2SoP (Idx (Hole x) (hole i))
 
     toAlgVar e | Just (Var vn) <- justSym e = Just (Algebra.Var vn)
     toAlgVar _ = Nothing

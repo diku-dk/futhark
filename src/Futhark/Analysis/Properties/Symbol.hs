@@ -12,16 +12,13 @@ where
 
 import Futhark.Analysis.Properties.Util (prettyHole, prettyName)
 import Futhark.SoP.SoP (SoP, justConstant, justSym, justAffine)
-import Futhark.Util.Pretty (Pretty, apply, brackets, parens, pretty, prettyString, softline, (<+>))
+import Futhark.Util.Pretty (Pretty, apply, parens, pretty, prettyString, softline, (<+>))
 import Language.Futhark (VName)
 import Futhark.Analysis.Properties.Property (Property)
 
 data Symbol
   = Var VName
   | Hole VName
-  | Idx
-      Symbol -- array
-      (SoP Symbol) -- index
   | Sum
       VName -- binder
       (SoP Symbol) -- lower bound
@@ -118,7 +115,6 @@ instance Pretty Symbol where
   pretty symbol = case symbol of
     (Var x) -> prettyName x
     (Hole x) -> prettyHole x
-    (Idx x i) -> autoParens x <> brackets (pretty i)
     -- (Sum i lb ub e)
     --   | Idx (Var x) j <- e,
     --     Just (Var j') <- justSym j,

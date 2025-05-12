@@ -304,7 +304,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
               let strat2 = algebraContext f_x $ do
                     j <- newNameFromString "j"
                     gs <- simplify $ cases [(c :&& predToFun pf i, e) | (c, e) <- guards f_x]
-                    let x_at ident = sym2SoP $ Idx (Var x) (sym2SoP (Var ident))
+                    let x_at ident = sym2SoP $ Apply (Var x) [sym2SoP (Var ident)]
                     nextGenProver (InjGe i j d gs rcd (x_at i :== x_at j))
               strat1 `orM` strat2
         _ -> do
@@ -314,7 +314,7 @@ prove prop = alreadyKnown prop `orM` matchProof prop
                 IndexFn [] _ -> pure Yes
                 IndexFn [Forall i d] gs -> algebraContext f_y $ do
                   j <- newNameFromString "j"
-                  let y_at ident = sym2SoP $ Idx (Var y) (sym2SoP (Var ident))
+                  let y_at ident = sym2SoP $ Apply (Var y) [sym2SoP (Var ident)]
                   nextGenProver (InjGe i j d gs rcd (y_at i :== y_at j))
           strat1 `orM` strat2
     matchProof (BijectiveRCD x rcd img) =
@@ -422,7 +422,7 @@ nextGenProver (FPV2 f_Y x pf pps) = do
             body =
               cases
                 [ ( Bool True,
-                    sym2SoP $ Idx (Var x) (sym2SoP $ Idx (Hole is_inv_hole) (sym2SoP $ Hole i))
+                    sym2SoP $ Apply (Var x) [sym2SoP $ Apply (Hole is_inv_hole) [sym2SoP (Hole i)]]
                   )
                 ]
           }

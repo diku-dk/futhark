@@ -26,7 +26,6 @@ instance FreeVariables Symbol where
   fv sym = case sym of
     Var vn -> fv vn
     Hole vn -> fv vn
-    Idx xs i -> fv xs <> fv i
     Sum i lb ub x -> fv lb <> fv ub <> fv x S.\\ S.singleton i
     Apply f xs -> fv f <> mconcat (map fv xs)
     Bool _ -> mempty
@@ -49,7 +48,6 @@ instance Renameable Symbol where
       x' <- rename_ vns tau x
       -- The Hole might be a quantifier index.
       pure $ if x' /= x then Var x' else Hole x'
-    Idx xs i -> Idx <$> rename_ vns tau xs <*> rename_ vns tau i
     Sum xn lb ub e -> do
       (xm, vns') <- freshName vns
       let tau' = M.insert xn xm tau
@@ -83,8 +81,6 @@ instance Rep Symbol Symbol where
   rep s symbol = case symbol of
     Var x -> M.findWithDefault (sym2SoP $ Var x) x s
     Hole x -> M.findWithDefault (sym2SoP $ Hole x) x s
-    Idx xs i ->
-      sym2SoP $ Idx (sop2Symbol $ rep s xs) (rep s i)
     Sum i lb ub t ->
       -- NOTE we can avoid this rewrite here if we change the Sum expression
       -- from Symbol to SoP Symbol.
@@ -165,9 +161,6 @@ instance Unify Symbol Symbol where
     s2 <- unify_ k (rep s1 b1) (rep s1 b2)
     s3 <- unify_ k (rep (s1 <> s2) e1) (rep (s1 <> s2) e2)
     pure $ s1 <> s2 <> s3
-  unify_ k (Idx xs i) (Idx ys j) = do
-    s <- unify_ k xs ys
-    (s <>) <$> unify_ k (rep s i) (rep s j)
   unify_ k (Apply f xs) (Apply g ys) = do
     s <- unifies_ k xs ys
     (s <>) <$> unify_ k (rep s f) (rep s g)
