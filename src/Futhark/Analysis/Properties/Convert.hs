@@ -1005,11 +1005,13 @@ scatterMono dest@(IndexFn [Forall _ dom_dest] _) inds@(IndexFn inds_iter@[Forall
   let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
   let f_seg = mapping s M.! vn_f_seg
   -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
-  s_p :: Maybe (Substitution Symbol) <- lift $ algebraContext inds $ do
+  s_p :: Answer <- lift $ algebraContext inds $ do
     addRelShape inds_iter
     seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
-    unify p_seg (seg_delta :> int2SoP 0)
-  when (isNothing s_p) (failMsg "scatterMono: predicate not on desired form")
+    printM 1337 ("p_seg     " <> prettyStr p_seg)
+    printM 1337 ("seg_delta " <> prettyStr seg_delta)
+    p_seg =>? (seg_delta :> int2SoP 0)
+  when (isUnknown s_p) (failMsg "scatterMono: predicate not on desired form")
   -- Check that seg is monotonically increasing. (Essentially checking
   -- that OOB branch is never taken in inds.)
   mono <- lift $ algebraContext inds $ do
