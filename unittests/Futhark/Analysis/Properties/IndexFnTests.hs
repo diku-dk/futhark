@@ -25,7 +25,7 @@ tests =
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
                 { shape = [Forall i (Iota (sHole n))],
-                  body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Idx (Hole xs) (sHole i)))]
+                  body = cases [(Bool True, int2SoP 2 .*. sym2SoP (Apply (Hole xs) [sHole i]))]
                 }
             ]
         ),
@@ -42,38 +42,24 @@ tests =
                 }
             ]
         ),
-      -- mkTest
-      --   "tests/indexfn/rotate.fut"
-      --   ( pure $ \(i, r, a, n) ->
-      --       let shift = sHole r .+. sHole i
-      --        in [ IndexFn
-      --               { shape = [Forall i (Iota (sHole n))],
-      --                 body =
-      --                   cases
-      --                     [ (shift :< sHole n, sym2SoP $ Idx (Hole a) shift),
-      --                       (shift :>= sHole n, sym2SoP $ Idx (Hole a) (shift .-. sHole n))
-      --                     ]
-      --               }
-      --           ]
-      --   ),
       mkTest
         "tests/indexfn/map-tuple.fut"
         ( pure $ \(i, n, xs, ys) ->
             [ IndexFn
                 { shape = [Forall i (Iota (sHole n))],
-                  body = cases [(Bool True, int2SoP 2 .+. sym2SoP (Idx (Hole xs) (sHole i)))]
+                  body = cases [(Bool True, int2SoP 2 .+. sym2SoP (Apply (Hole xs) [sHole i]))]
                 },
               IndexFn
                 { shape = [Forall i (Iota (sHole n))],
-                  body = cases [(Bool True, int2SoP 3 .+. sym2SoP (Idx (Hole ys) (sHole i)))]
+                  body = cases [(Bool True, int2SoP 3 .+. sym2SoP (Apply (Hole ys) [sHole i]))]
                 }
             ]
         ),
       mkTest
         "tests/indexfn/map-tuple2.fut"
         ( pure $ \(i, n, xs, ys) ->
-            let xs_i = sym2SoP $ Idx (Hole xs) (sHole i)
-                ys_i = sym2SoP $ Idx (Hole ys) (sHole i)
+            let xs_i = sym2SoP $ Apply (Hole xs) [sHole i]
+                ys_i = sym2SoP $ Apply (Hole ys) [sHole i]
              in [ IndexFn
                     { shape = [Forall i (Iota (sHole n))],
                       body = cases [(Bool True, xs_i .*. ys_i)]
@@ -87,7 +73,7 @@ tests =
       mkTest
         "tests/indexfn/map-if.fut"
         ( pure $ \(i, n, xs, _) ->
-            let xs_i = sym2SoP (Idx (Hole xs) (sHole i))
+            let xs_i = sym2SoP (Apply (Hole xs) [sHole i])
              in [ IndexFn
                     { shape = [Forall i (Iota (sHole n))],
                       body =
@@ -101,7 +87,7 @@ tests =
       mkTest
         "tests/indexfn/map-if-nested.fut"
         ( pure $ \(i, n, xs, _) ->
-            let xs_i = sym2SoP (Idx (Hole xs) (sHole i))
+            let xs_i = sym2SoP (Apply (Hole xs) [sHole i])
              in [ IndexFn
                     { shape = [Forall i (Iota (sHole n))],
                       body =
@@ -115,7 +101,7 @@ tests =
       mkTest
         "tests/indexfn/map-if-elim.fut"
         ( pure $ \(i, n, xs, _) ->
-            let xs_i = sym2SoP (Idx (Hole xs) (sHole i))
+            let xs_i = sym2SoP (Apply (Hole xs) [sHole i])
              in [ IndexFn
                     { shape = [Forall i (Iota (sHole n))],
                       body = cases [(Bool True, int2SoP 2 .*. xs_i)]
@@ -140,7 +126,7 @@ tests =
                     cases
                       [ ( Bool True,
                           sym2SoP $
-                            Sum j (int2SoP 0) (sHole i) (Idx (Hole xs) (sHole j))
+                            Sum j (int2SoP 0) (sHole i) (Apply (Hole xs) [sHole j])
                         )
                       ]
                 }
@@ -154,7 +140,7 @@ tests =
                   body =
                     cases
                       [ ( Bool True,
-                          int2SoP 1 .+. sHole i .-. sym2SoP (Sum j (int2SoP 0) (sHole i) (Idx (Hole xs) (sHole j)))
+                          int2SoP 1 .+. sHole i .-. sym2SoP (Sum j (int2SoP 0) (sHole i) (Apply (Hole xs) [sHole j]))
                         )
                       ]
                 }
@@ -169,7 +155,7 @@ tests =
                     cases
                       [ ( Bool True,
                           sym2SoP $
-                            Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (Idx (Hole xs) (sHole j))
+                            Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (Apply (Hole xs) [sHole j])
                         )
                       ]
                 }
@@ -178,13 +164,13 @@ tests =
       mkTest
         "tests/indexfn/part2indices.fut"
         ( pure $ \(i, n, xs, j) ->
-            let xs_i = Idx (Hole xs) (sHole i)
+            let xs_i = Apply (Hole xs) [sHole i]
              in [ IndexFn
                     { shape = [],
                       body =
                         cases
                           [ ( Bool True,
-                              sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (Idx (Hole xs) (sHole j)))
+                              sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (Apply (Hole xs) [sHole j]))
                             )
                           ]
                     },
@@ -193,10 +179,10 @@ tests =
                       body =
                         cases
                           [ ( xs_i,
-                              sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (Idx (Hole xs) (sHole j)))
+                              sym2SoP (Sum j (int2SoP 0) (sHole i .-. int2SoP 1) (Apply (Hole xs) [sHole j]))
                             ),
                             ( neg xs_i,
-                              sHole i .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Idx (Hole xs) (sHole j)))
+                              sHole i .+. sym2SoP (Sum j (sHole i .+. int2SoP 1) (sHole n .-. int2SoP 1) (Apply (Hole xs) [sHole j]))
                             )
                           ]
                     }
@@ -205,13 +191,13 @@ tests =
       mkTest
         "tests/indexfn/map2.fut"
         ( pure $ \(i, n, h1, h2) ->
-            let inds_i = sym2SoP $ Idx (Hole h2) (sHole i)
+            let inds_i = sym2SoP $ Apply (Hole h2) [sHole i]
                 p = int2SoP 0 :< inds_i :&& inds_i :<= sHole n
              in [ IndexFn
                     { shape = [Forall i (Iota (sHole n))],
                       body =
                         cases
-                          [ (p, sym2SoP $ Idx (Hole h1) (inds_i .-. int2SoP 1)),
+                          [ (p, sym2SoP $ Apply (Hole h1) [inds_i .-. int2SoP 1]),
                             (neg p, int2SoP 0)
                           ]
                     }
@@ -220,8 +206,8 @@ tests =
       mkTest
         "tests/indexfn/part2indices_numeric_conds.fut"
         ( pure $ \(i, n, xs, j) ->
-            let xs_i = sym2SoP $ Idx (Hole xs) (sHole i)
-                xs_j = sym2SoP $ Idx (Hole xs) (sHole j)
+            let xs_i = sym2SoP $ Apply (Hole xs) [sHole i]
+                xs_j = sym2SoP $ Apply (Hole xs) [sHole j]
              in [ IndexFn
                     { shape = [Forall i (Iota (sHole n))],
                       body =
@@ -239,8 +225,8 @@ tests =
       mkTest
         "tests/indexfn/part2indices_predicatefn.fut"
         ( newNameFromString "p" >>= \p -> pure $ \(i, n, xs, j) ->
-            let xs_i = Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole i)]
-                xs_j = Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole j)]
+            let xs_i = Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole i]]
+                xs_j = Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole j]]
              in [ IndexFn
                     { shape = [Forall i (Iota (sHole n))],
                       body =
@@ -258,8 +244,8 @@ tests =
       mkTest
         "tests/indexfn/part2indices_predicatefn2.fut"
         ( newNameFromString "p" >>= \p -> pure $ \(i, n, xs, j) ->
-            let xs_i = Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole i)]
-                xs_j = Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole j)]
+            let xs_i = Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole i]]
+                xs_j = Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole j]]
              in [ IndexFn
                     { shape = [Forall i (Iota (sHole n))],
                       body =
@@ -277,8 +263,8 @@ tests =
       mkTest
         "tests/indexfn/part3indices.fut"
         ( pure $ \(i, n, cs, j) ->
-            let cs_i = sym2SoP $ Idx (Hole cs) (sHole i)
-                cs_j = sym2SoP $ Idx (Hole cs) (sHole j)
+            let cs_i = sym2SoP $ Apply (Hole cs) [sHole i]
+                cs_j = sym2SoP $ Apply (Hole cs) [sHole j]
              in [ IndexFn
                     { shape = [],
                       body =
@@ -325,8 +311,8 @@ tests =
         ( newNameFromString "k" >>= \k ->
             newNameFromString "j" >>= \j ->
               newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
-                let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Idx (Hole shape) (sVar j))
-                    sum_mm1 = sym2SoP $ Sum j (int2SoP 0) (sHole m .-. int2SoP 1) (Idx (Hole shape) (sVar j))
+                let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Apply (Hole shape) [sVar j])
+                    sum_mm1 = sym2SoP $ Sum j (int2SoP 0) (sHole m .-. int2SoP 1) (Apply (Hole shape) [sVar j])
                  in [ IndexFn
                         { shape = [],
                           body = cases [(Bool True, sum_mm1)]
@@ -335,7 +321,7 @@ tests =
                         { shape = [Forall i (Cat k (sHole m) sum_km1)],
                           body =
                             cases
-                              [ (sVar i :== sum_km1, sym2SoP $ Idx (Hole xs) (sVar k)),
+                              [ (sVar i :== sum_km1, sym2SoP $ Apply (Hole xs) [sVar k]),
                                 (sVar i :/= sum_km1, sHole zero)
                               ]
                         }
@@ -346,8 +332,8 @@ tests =
         ( newNameFromString "k" >>= \k ->
             newNameFromString "j" >>= \j ->
               newNameFromString "zero" >>= \zero -> pure $ \(i, m, xs, shape) ->
-                let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Idx (Hole shape) (sVar j))
-                    sum_mm1 = sym2SoP $ Sum j (int2SoP 0) (sHole m .-. int2SoP 1) (Idx (Hole shape) (sVar j))
+                let sum_km1 = sym2SoP $ Sum j (int2SoP 0) (sVar k .-. int2SoP 1) (Apply (Hole shape) [sVar j])
+                    sum_mm1 = sym2SoP $ Sum j (int2SoP 0) (sHole m .-. int2SoP 1) (Apply (Hole shape) [sVar j])
                  in [ IndexFn
                         { shape = [],
                           body = cases [(Bool True, sum_mm1)]
@@ -356,7 +342,7 @@ tests =
                         { shape = [Forall i (Cat k (sHole m) sum_km1)],
                           body =
                             cases
-                              [ (sVar i :== sum_km1, sym2SoP $ Idx (Hole xs) (sVar k)),
+                              [ (sVar i :== sum_km1, sym2SoP $ Apply (Hole xs) [sVar k]),
                                 (sVar i :/= sum_km1, sHole zero)
                               ]
                         }
@@ -365,8 +351,8 @@ tests =
       mkTest
         "tests/indexfn/segment_sum.fut"
         ( pure $ \(i, n, xs, flags) ->
-            let xs_i = sym2SoP $ Idx (Hole xs) (sHole i)
-                flags_i = Idx (Hole flags) (sHole i)
+            let xs_i = sym2SoP $ Apply (Hole xs) [sHole i]
+                flags_i = Apply (Hole flags) [sHole i]
              in [ IndexFn
                     { shape = [Forall i (Iota (sHole n))],
                       body = cases [(flags_i, xs_i), (Not flags_i, xs_i .+. sym2SoP Recurrence)]
@@ -388,9 +374,9 @@ tests =
             newNameFromString "shape" >>= \shape ->
               newNameFromString "j" >>= \j -> pure $ \(i, m, k, b) ->
                 let int = int2SoP
-                    csL_i = Idx (Hole csL) (sHole i)
-                    seg_k_start = sym2SoP $ Sum j (int 0) (sHole k .-. int 1) (Idx (Hole shape) (sHole j))
-                    seg_k_end = int (-1) .+. sym2SoP (Sum j (int 0) (sHole k) (Idx (Hole shape) (sHole j)))
+                    csL_i = Apply (Hole csL) [sHole i]
+                    seg_k_start = sym2SoP $ Sum j (int 0) (sHole k .-. int 1) (Apply (Hole shape) [sHole j])
+                    seg_k_end = int (-1) .+. sym2SoP (Sum j (int 0) (sHole k) (Apply (Hole shape) [sHole j]))
                  in [ IndexFn
                         { shape = [Forall i (Cat k (sHole m) (sHole b))],
                           body =
@@ -399,13 +385,13 @@ tests =
                                   -- offset at segment k
                                   seg_k_start
                                     -- number of trues in this segment up to and including current index
-                                    .+. sym2SoP (Sum j seg_k_start (sHole i .-. int 1) (Idx (Hole csL) (sHole j)))
+                                    .+. sym2SoP (Sum j seg_k_start (sHole i .-. int 1) (Apply (Hole csL) [sHole j]))
                                 ),
                                 ( neg csL_i,
                                   -- global index
                                   sHole i
                                     -- plus number of trues that come after this index in the current segment
-                                    .+. sym2SoP (Sum j (sHole i .+. int 1) seg_k_end (Idx (Hole csL) (sHole j)))
+                                    .+. sym2SoP (Sum j (sHole i .+. int 1) seg_k_end (Apply (Hole csL) [sHole j]))
                                 )
                               ]
                         }
@@ -416,7 +402,7 @@ tests =
         ( newNameFromString "xs" >>= \xs ->
             newNameFromString "n" >>= \n ->
               newNameFromString "p" >>= \p -> pure $ \(i, _, _, j) ->
-                let p_xs arg = Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole arg)]
+                let p_xs arg = Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole arg]]
                  in [ IndexFn
                         { shape = [],
                           body =
@@ -449,7 +435,7 @@ tests =
                     body =
                       cases
                         [ ( Bool True,
-                            sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (Apply (Hole p) [sym2SoP $ Idx (Hole xs) (sHole j)]))
+                            sym2SoP (Sum j (int2SoP 0) (sHole n .-. int2SoP 1) (Apply (Hole p) [sym2SoP $ Apply (Hole xs) [sHole j]]))
                           )
                         ]
                   },
@@ -457,7 +443,7 @@ tests =
                   { shape = [Forall i (Iota (sHole n))],
                     body =
                       cases
-                        [(Bool True, sym2SoP $ Idx (Hole xs) (sym2SoP $ Idx (Hole is_inv) (sHole i)))]
+                        [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
                   }
               ]
         ),
@@ -468,7 +454,7 @@ tests =
                 { shape = [Forall i (Iota (sHole n))],
                   body =
                     cases
-                      [(Bool True, sym2SoP $ Idx (Hole xs) (sym2SoP $ Idx (Hole is_inv) (sHole i)))]
+                      [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
                 }
             ]
         ),
@@ -479,7 +465,7 @@ tests =
                 { shape = [Forall i (Iota (sHole n))],
                   body =
                     cases
-                      [(Bool True, sym2SoP $ Idx (Hole xs) (sym2SoP $ Idx (Hole is_inv) (sHole i)))]
+                      [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
                 }
             ]
         ),
@@ -490,7 +476,7 @@ tests =
                 { shape = [Forall i (Iota (sHole n))],
                   body =
                     cases
-                      [(Bool True, sym2SoP $ Idx (Hole xs) (sym2SoP $ Idx (Hole is_inv) (sHole i)))]
+                      [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
                 }
             ]
         ),
@@ -501,7 +487,7 @@ tests =
                 { shape = [Forall i (Iota (sHole n))],
                   body =
                     cases
-                      [(Bool True, sym2SoP $ Idx (Hole xs) (sym2SoP $ Idx (Hole is_inv) (sHole i)))]
+                      [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
                 }
             ]
         ),
@@ -512,7 +498,7 @@ tests =
                 { shape = [Forall i (Iota (sHole n))],
                   body =
                     cases
-                      [(Bool True, sym2SoP $ Idx (Hole xs) (sym2SoP $ Idx (Hole is_inv) (sHole i)))]
+                      [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole is_inv) [sHole i]])]
                 }
             ]
         ),
@@ -523,7 +509,7 @@ tests =
                 { shape = [Forall i (Iota (sHole n))],
                   body =
                     cases
-                      [(Bool True, sym2SoP $ Idx (Hole is_inv) (sHole i))]
+                      [(Bool True, sym2SoP $ Apply (Hole is_inv) [sHole i])]
                 }
             ]
         ),
@@ -534,7 +520,7 @@ tests =
                 { shape = [Forall i (Iota (sHole n))],
                   body =
                     cases
-                      [(Bool True, sym2SoP $ Idx (Hole is_inv) (sHole i))]
+                      [(Bool True, sym2SoP $ Apply (Hole is_inv) [sHole i])]
                 }
             ]
         ),
@@ -557,7 +543,7 @@ tests =
                 { shape = [Forall i (Iota $ sHole n), Forall j (Iota $ int2SoP 2)],
                   body =
                     cases
-                      [(Bool True, sym2SoP (Idx (Hole xs) (sHole i)) .+. sHole j)]
+                      [(Bool True, sym2SoP (Apply (Hole xs) [sHole i]) .+. sHole j)]
                 }
             ]
         ),
@@ -579,7 +565,7 @@ tests =
                 { shape = [Forall i (Iota $ sHole n), Forall j (Iota $ int2SoP 2)],
                   body =
                     cases
-                      [(Bool True, int2SoP 2 .*. sym2SoP (Idx (Hole xs) (sVar i)) .+. sHole j)]
+                      [(Bool True, int2SoP 2 .*. sym2SoP (Apply (Hole xs) [sVar i]) .+. sHole j)]
                 }
             ]
         )
