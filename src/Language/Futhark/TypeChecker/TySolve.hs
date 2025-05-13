@@ -588,7 +588,7 @@ scopeViolation reason v1 ty v2 =
       <+> dquotes (prettyName v2)
       <+> "is rigidly bound in a deeper scope."
 
-scopeCheck :: Reason Type -> TyVar -> Int -> Type -> SolveM s ()
+scopeCheck :: Reason Type -> TyVar -> Level -> Type -> SolveM s ()
 scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
   where
     check :: TyVar -> SolveM s ()
