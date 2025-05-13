@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* GPU backends: more efficient atomic operations on 8-bit and 16-bit quantities.
+  This helps histograms on these types, as well as AD on programs that use
+  `f16`.
+
+* Improved handling of long chains of `flatten`/`unflatten`/`transpose`
+  operations.
+
+* New attributes: `#[blank]` and `#[scratch]`.
+
+* A module type `with`-refinement may now have an existentially quantified size
+  on its right-hand side.
+
+* Value specs in module types can now use section binding notation for symbolic
+  names, and in fact this is the preferred form that is also used by `futhark
+  fmt`. (#2266)
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* Interpreter: some tricky aspects of size-lifted types (#2258).
+
+* Incorrect unused-name warning for named parameters in module types.
+
+* Size-lifted abstract types with hidden sizes could result in different sizes
+  being incorrectly treated as the same size.
+
+* It was possible to make size-lifted types appear unlifted by using parametric
+  types (#2268).
+
+## [0.25.30]
+
+### Added
+
 * New math functions: `f16.rsqrt`, `f32.rsqrt`, `f64.rsqrt`.
 
 * New math functions: `cospi`, `sinpi`, `tanpi`, `acospi`, `asinpi`,
@@ -18,9 +54,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   across `map` nests separated by `reshape` operations. Only works if
   the innermost return type is purely scalar.
 
-### Removed
-
-### Changed
+* `futhark pkg` now allows underscores in package paths.
 
 ### Fixed
 
@@ -37,6 +71,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `vjp` in the interpreter is now asymptotically efficient (#2187,
   #2240). Work by Marcus Jensen.
+
+* The interpreter did not handle `open` correctly.
+
+* Incorrect handling of some size inference edge cases during
+  monomorphisation (#2252).
+
+* Incorrect registration of entry point types when mixing type
+  abbreviations and arrays (#2253).
+
+* Reverse mode AD now handles sequential streams. (#2256)
 
 ## [0.25.29]
 

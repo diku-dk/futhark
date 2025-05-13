@@ -260,6 +260,12 @@ pIota =
               <*> pure t
           )
 
+pDimSplice :: Parser (DimSplice SubExp)
+pDimSplice = DimSplice <$> pInt <* lexeme "::" <*> pInt <* lexeme "=>" <*> pShape
+
+pNewShape :: Parser (NewShape SubExp)
+pNewShape = parens $ NewShape <$> (pDimSplice `sepBy` pComma) <* pSemi <*> pShape
+
 pBasicOp :: Parser BasicOp
 pBasicOp =
   choice
@@ -280,17 +286,15 @@ pBasicOp =
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
       keyword "reshape"
-        *> parens (Reshape ReshapeArbitrary <$> pShape <* pComma <*> pVName),
-      keyword "coerce"
-        *> parens (Reshape ReshapeCoerce <$> pShape <* pComma <*> pVName),
+        *> parens (Reshape <$> pVName <* pComma <*> pNewShape),
       keyword "scratch"
         *> parens (Scratch <$> pPrimType <*> many (pComma *> pSubExp)),
       keyword "rearrange"
         *> parens
-          (Rearrange <$> parens (pInt `sepBy` pComma) <* pComma <*> pVName),
+          (Rearrange <$> pVName <* pComma <*> parens (pInt `sepBy` pComma)),
       keyword "manifest"
         *> parens
-          (Manifest <$> parens (pInt `sepBy` pComma) <* pComma <*> pVName),
+          (Manifest <$> pVName <* pComma <*> parens (pInt `sepBy` pComma)),
       keyword "concat" *> do
         d <- "@" *> L.decimal
         parens $ do

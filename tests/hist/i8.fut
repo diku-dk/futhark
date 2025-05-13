@@ -1,0 +1,50 @@
+-- Can we do operations on i8s, even though these are not natively supported?
+-- ==
+--
+-- input  {
+--   [0i8, 0i8, 0i8, 0i8, 0i8]
+--   [1i8, 1i8, 1i8, 1i8, 1i8]
+--   [1i8, 1i8, 1i8, 1i8, 1i8]
+-- }
+-- output {
+--   [0i8, 5i8, 0i8, 0i8, 0i8]
+-- }
+--
+-- input  {
+--   [0i8, 0i8, 0i8, 0i8, 0i8]
+--   [0i8, 0i8, 0i8, 0i8, 1i8]
+--   [1i8, 1i8, 1i8, 1i8, 1i8]
+-- }
+-- output {
+--   [4i8, 1i8, 0i8, 0i8, 0i8]
+-- }
+--
+-- input  {
+--   [0i8, 0i8, 0i8, 0i8, 0i8]
+--   [1i8, 1i8, 4i8, 4i8, 4i8]
+--   [1i8, 1i8, 4i8, 4i8, 4i8]
+-- }
+-- output {
+--   [0i8, 2i8, 0i8, 0i8, 12i8]
+-- }
+--
+-- input  {
+--   [1i8, 2i8, 3i8, 4i8, 5i8]
+--   [1i8, 1i8, 4i8, 4i8, 4i8]
+--   [1i8, 1i8, 4i8, 4i8, 4i8]
+-- }
+-- output {
+--   [1i8, 4i8, 3i8, 4i8, 17i8]
+-- }
+--
+-- input  {
+--   [1i8, 1i8, 3i8, 4i8, 5i8]
+--   [1i8, 1i8, 0i8, 0i8, 4i8]
+--   [-1i8, 1i8, -1i8, 4i8, 4i8]
+-- }
+-- output {
+--   [4i8, 1i8, 3i8, 4i8, 9i8]
+-- }
+
+def main [m] [n] (hist: *[n]i8) (is: [m]i8) (image: [m]i8) : [n]i8 =
+  reduce_by_index hist (+) 0i8 (map i64.i8 is) image

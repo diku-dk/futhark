@@ -322,7 +322,8 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
         Just prev ->
           pure $ MonoKnown prev
         Nothing -> do
-          put (i + 1, M.insert d i m)
+          -- Ensure that each instance of anySize is treated distinctly.
+          put (i + 1, if d == anySize then m else M.insert d i m)
           pure $ MonoKnown i
 
 -- Mapping from function name and instance list to a new function name in case
@@ -865,9 +866,14 @@ inferSizeArgs tparams bind_t bind_r t = do
   where
     tparamArg dinst tp =
       case M.lookup (typeParamName tp) dinst of
-        Just e ->
-          replaceExp e
-        Nothing ->
+        Just e
+          -- In some cases we infer anySizes for size arguments. This
+          -- only occurs when those sizes don't actually matter (knock
+          -- on wood...), but we should never actually insert anySize
+          -- as a concrete argument.
+          | e /= anySize ->
+              replaceExp e
+        _ ->
           pure $ sizeFromInteger 0 mempty
 
 -- Monomorphising higher-order functions can result in function types

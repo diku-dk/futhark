@@ -92,8 +92,8 @@ finalizeNode nt = case nt of
       letBindNames [output] . BasicOp . SubExp . Var =<< H.applyTransforms ots v
   ResNode _ -> pure mempty
   TransNode output tr ia -> do
-    (cs, e) <- H.transformToExp tr ia
-    runBuilder_ $ certifying cs $ letBindNames [output] e
+    (aux, e) <- H.transformToExp tr ia
+    runBuilder_ $ auxing aux $ letBindNames [output] e
   FreeNode _ -> pure mempty
   DoNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst

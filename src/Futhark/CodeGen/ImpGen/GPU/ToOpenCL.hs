@@ -669,7 +669,7 @@ inKernelOperations env mode body =
       ind' <- GC.compileExp $ untyped $ unCount ind
       val' <- GC.compileExp val
       cast <- atomicCast s ty
-      GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], ($ty:ty) $exp:val');|]
+      GC.stm [C.cstm|$id:old = $id:op'(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
       where
         op' = op ++ "_" ++ prettyString t ++ "_" ++ atomicSpace s
 
@@ -688,7 +688,7 @@ inKernelOperations env mode body =
       GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast *)$id:arr)[$exp:ind'], $exp:val');|]
       where
         op = "atomic_chg_" ++ prettyString t ++ "_" ++ atomicSpace s
-    -- First the 64-bit operations.
+    -- 64-bit operations
     atomicOps s (AtomicAdd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_add" [C.cty|typename int64_t|]
     atomicOps s (AtomicFAdd Float64 old arr ind val) =
@@ -698,9 +698,9 @@ inKernelOperations env mode body =
     atomicOps s (AtomicSMin Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_smin" [C.cty|typename int64_t|]
     atomicOps s (AtomicUMax Int64 old arr ind val) =
-      doAtomic s Int64 old arr ind val "atomic_umax" [C.cty|unsigned int64_t|]
+      doAtomic s Int64 old arr ind val "atomic_umax" [C.cty|typename uint64_t|]
     atomicOps s (AtomicUMin Int64 old arr ind val) =
-      doAtomic s Int64 old arr ind val "atomic_umin" [C.cty|unsigned int64_t|]
+      doAtomic s Int64 old arr ind val "atomic_umin" [C.cty|typename uint64_t|]
     atomicOps s (AtomicAnd Int64 old arr ind val) =
       doAtomic s Int64 old arr ind val "atomic_and" [C.cty|typename int64_t|]
     atomicOps s (AtomicOr Int64 old arr ind val) =
@@ -711,29 +711,74 @@ inKernelOperations env mode body =
       doAtomicCmpXchg s (IntType Int64) old arr ind cmp val [C.cty|typename int64_t|]
     atomicOps s (AtomicXchg (IntType Int64) old arr ind val) =
       doAtomicXchg s (IntType Int64) old arr ind val [C.cty|typename int64_t|]
-    --
-    atomicOps s (AtomicAdd t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_add" [C.cty|int|]
-    atomicOps s (AtomicFAdd t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_fadd" [C.cty|float|]
-    atomicOps s (AtomicSMax t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_smax" [C.cty|int|]
-    atomicOps s (AtomicSMin t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_smin" [C.cty|int|]
-    atomicOps s (AtomicUMax t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_umax" [C.cty|unsigned int|]
-    atomicOps s (AtomicUMin t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_umin" [C.cty|unsigned int|]
-    atomicOps s (AtomicAnd t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_and" [C.cty|int|]
-    atomicOps s (AtomicOr t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_or" [C.cty|int|]
-    atomicOps s (AtomicXor t old arr ind val) =
-      doAtomic s t old arr ind val "atomic_xor" [C.cty|int|]
-    atomicOps s (AtomicCmpXchg t old arr ind cmp val) =
-      doAtomicCmpXchg s t old arr ind cmp val [C.cty|int|]
-    atomicOps s (AtomicXchg t old arr ind val) =
-      doAtomicXchg s t old arr ind val [C.cty|int|]
+    -- 32 bit operations
+    atomicOps s (AtomicAdd Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_add" [C.cty|int|]
+    atomicOps s (AtomicFAdd Float32 old arr ind val) =
+      doAtomic s Float32 old arr ind val "atomic_fadd" [C.cty|float|]
+    atomicOps s (AtomicSMax Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_smax" [C.cty|int|]
+    atomicOps s (AtomicSMin Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_smin" [C.cty|int|]
+    atomicOps s (AtomicUMax Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_umax" [C.cty|unsigned int|]
+    atomicOps s (AtomicUMin Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_umin" [C.cty|unsigned int|]
+    atomicOps s (AtomicAnd Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_and" [C.cty|int|]
+    atomicOps s (AtomicOr Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_or" [C.cty|int|]
+    atomicOps s (AtomicXor Int32 old arr ind val) =
+      doAtomic s Int32 old arr ind val "atomic_xor" [C.cty|int|]
+    atomicOps s (AtomicCmpXchg (IntType Int32) old arr ind cmp val) =
+      doAtomicCmpXchg s Int32 old arr ind cmp val [C.cty|int|]
+    atomicOps s (AtomicXchg (IntType Int32) old arr ind val) =
+      doAtomicXchg s Int32 old arr ind val [C.cty|int|]
+    -- 16 bit operations
+    atomicOps s (AtomicAdd Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_add" [C.cty|typename int16_t|]
+    atomicOps s (AtomicFAdd Float16 old arr ind val) =
+      doAtomic s Float16 old arr ind val "atomic_fadd" [C.cty|typename uint16_t|]
+    atomicOps s (AtomicSMax Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_smax" [C.cty|typename int16_t|]
+    atomicOps s (AtomicSMin Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_smin" [C.cty|typename int16_t|]
+    atomicOps s (AtomicUMax Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_umax" [C.cty|typename uint16_t|]
+    atomicOps s (AtomicUMin Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_umin" [C.cty|typename uint16_t|]
+    atomicOps s (AtomicAnd Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_and" [C.cty|typename int16_t|]
+    atomicOps s (AtomicOr Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_or" [C.cty|typename int16_t|]
+    atomicOps s (AtomicXor Int16 old arr ind val) =
+      doAtomic s Int16 old arr ind val "atomic_xor" [C.cty|typename int16_t|]
+    atomicOps s (AtomicCmpXchg (IntType Int16) old arr ind cmp val) =
+      doAtomicCmpXchg s Int16 old arr ind cmp val [C.cty|typename int16_t|]
+    atomicOps s (AtomicXchg (IntType Int16) old arr ind val) =
+      doAtomicXchg s Int16 old arr ind val [C.cty|typename int16_t|]
+    -- 8 bit operations
+    atomicOps s (AtomicAdd Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_add" [C.cty|typename int8_t|]
+    atomicOps s (AtomicSMax Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_smax" [C.cty|typename int8_t|]
+    atomicOps s (AtomicSMin Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_smin" [C.cty|typename int8_t|]
+    atomicOps s (AtomicUMax Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_umax" [C.cty|typename uint8_t|]
+    atomicOps s (AtomicUMin Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_umin" [C.cty|typename uint8_t|]
+    atomicOps s (AtomicAnd Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_and" [C.cty|typename int8_t|]
+    atomicOps s (AtomicOr Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_or" [C.cty|typename int8_t|]
+    atomicOps s (AtomicXor Int8 old arr ind val) =
+      doAtomic s Int8 old arr ind val "atomic_xor" [C.cty|typename int8_t|]
+    atomicOps s (AtomicCmpXchg (IntType Int8) old arr ind cmp val) =
+      doAtomicCmpXchg s Int8 old arr ind cmp val [C.cty|typename int8_t|]
+    atomicOps s (AtomicXchg (IntType Int8) old arr ind val) =
+      doAtomicXchg s Int8 old arr ind val [C.cty|typename int8_t|]
+    -- General
     atomicOps s (AtomicWrite t arr ind val) = do
       ind' <- GC.compileExp $ untyped $ unCount ind
       val' <- toStorage t <$> GC.compileExp val
@@ -745,6 +790,8 @@ inKernelOperations env mode body =
         case s of
           Space "shared" -> [C.cstm|mem_fence_local();|]
           _ -> [C.cstm|mem_fence_global();|]
+    atomicOps _ op =
+      error $ "atomicOp: unsupported " <> show op
 
     cannotAllocate :: GC.Allocate KernelOp KernelState
     cannotAllocate _ =
