@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Size-lifted abstract types with hidden sizes could result in different sizes
   being incorrectly treated as the same size.
 
+* It was possible to make size-lifted types appear unlifted by using parametric
+  types (#2268).
+
 ## [0.25.30]
 
 ### Added
