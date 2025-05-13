@@ -5,11 +5,11 @@ module Language.Futhark.TypeChecker.UnionFind
     makeTyVarNode,
     makeTyParamNode,
     find,
-    getDescr,
+    getSol,
     getKey,
+    getLvl,
     assignNewSol,
     union,
-    isRepr
   )
 where
 
@@ -58,25 +58,25 @@ data Link s
 data ReprInfo = MkInfo
   { weight :: {-# UNPACK #-} !Int
     -- ^ The size of the equivalence class, used by 'union'. 
-  , descr  :: {-# UNPACK #-} !TyVarSol
+  , solution  :: {-# UNPACK #-} !TyVarSol
     -- ^ The "type" of the equivalence class.
   , key :: {-# UNPACK #-} !TyVar
     -- ^ The name of the type variable representing the equivalence class.
 
   --   -- TODO: Should we have this "permanent" level field?
-  -- , level :: {-# UNPACK #-} !Level
+  , level :: {-# UNPACK #-} !Level
   --   -- ^ The level of the representative type variable.
   } deriving Eq
 
 -- | Create a fresh node of a type variable and return it. A fresh node
 -- is in the equivalence class that contains only itself.
 makeTyVarNode :: TyVar -> Level -> TyVarInfo () -> ST s (TyVarNode s)
-makeTyVarNode tv _lvl constraint = do
+makeTyVarNode tv lvl constraint = do
   info <- newSTRef (MkInfo {
       weight = 1
-    , descr = Unsolved constraint
+    , solution = Unsolved constraint
     , key = tv
-    -- , level = lvl
+    , level = lvl
   })
   l <- newSTRef $ Repr info
   pure $ Node l
@@ -87,9 +87,9 @@ makeTyParamNode :: TyVar -> Level -> Liftedness -> Loc -> ST s (TyVarNode s)
 makeTyParamNode tv lvl lft loc = do
   info <- newSTRef (MkInfo {
       weight = 1
-    , descr = Param lvl lft loc
+    , solution = Param lvl lft loc
     , key = tv
-    -- , level = lvl
+    , level = lvl
   })
   l <- newSTRef $ Repr info
   pure $ Node l
@@ -99,21 +99,21 @@ makeTyParamNode tv lvl lft loc = do
 --
 -- This method performs the path compresssion.
 find :: TyVarNode s -> ST s (TyVarNode s)
-find node@(Node l) = do
-  link <- readSTRef l
+find node@(Node link_ref) = do
+  link <- readSTRef link_ref
   case link of
     -- Input node is representative.
     Repr _ -> pure node
 
     -- Input node's parent is another node.
-    Link node'@(Node l') -> do
-      node'' <- find node'
-      when (node' /= node'') $ do
+    Link parent@(Node link_ref') -> do
+      repr <- find parent
+      when (parent /= repr) $ do
         -- Input node's parent isn't representative;
         -- performing path compression.
-        link' <- readSTRef l'
-        writeSTRef l link'
-      pure node''
+        link' <- readSTRef link_ref'
+        writeSTRef link_ref link'
+      pure repr
 
 -- | Return the reference to the descriptor of the node's
 -- equivalence class.
@@ -128,35 +128,30 @@ descrRef node@(Node link_ref) = do
         Repr info -> pure info
         _ -> descrRef =<< find node
 
--- | Check if the input node is a representative.
-isRepr :: TyVarNode s -> ST s Bool
-isRepr (Node link_ref) = do
-  link <- readSTRef link_ref
-  case link of
-    Repr _ -> pure True
-    Link _ -> pure False
-
--- | Return the descriptor associated with the argument node's
+-- | Return the solution associated with the argument node's
 -- equivalence class.
-getDescr :: TyVarNode s -> ST s TyVarSol
-getDescr node = do
-  descr <$> (readSTRef =<< descrRef node)
+getSol :: TyVarNode s -> ST s TyVarSol
+getSol node = do
+  solution <$> (readSTRef =<< descrRef node)
 
+-- | Return the name of the representative type variable.
 getKey :: TyVarNode s -> ST s TyVar
 getKey node = do
   key <$> (readSTRef =<< descrRef node)
 
--- TODO: Determine if it should be a precondition that the input
--- TODO: node is in an "unsolved" equivalence class.
--- | Replace the type of the node's equivalence class
--- with the second argument.
+getLvl :: TyVarNode s -> ST s Level
+getLvl node = do
+  level <$> (readSTRef =<< descrRef node)
+
+
+-- | Assign a new solution/type to the node's equivalence class.
+--
+-- Precondition: The node is in an equivalence class representing an
+-- unsolved/flexible type variable.
 assignNewSol :: TyVarNode s -> TyVarSol -> ST s ()
-assignNewSol node sol = do
+assignNewSol node new_sol = do
   ref <- descrRef node
-  info <- readSTRef ref
-  case descr info of
-    Unsolved _ -> modifySTRef ref $ \i -> i { descr = sol }
-    _          -> pure () -- This would be an error.
+  modifySTRef ref $ \i -> i { solution = new_sol }  
 
 -- TODO: Make sure we correctly handle level, liftedness, and if 
 -- TODO: type parameters are involved.
@@ -173,15 +168,17 @@ union n1 n2 = do
     link2 <- readSTRef link_ref2
     case (link1, link2) of
       (Repr info_ref1, Repr info_ref2) -> do
-        (MkInfo w1 _   _) <- readSTRef info_ref1
-        (MkInfo w2 sol k2) <- readSTRef info_ref2
-        -- let min_lvl = min l1 l2
-        if w1 >= w2 then do
-          writeSTRef link_ref2 (Link root1)
-          writeSTRef info_ref1 (MkInfo (w1 + w2) sol k2)
-        else do
-          writeSTRef link_ref1 (Link root2)
-          writeSTRef info_ref2 (MkInfo (w1 + w2) sol k2)
+        (MkInfo w1 _   _  l1) <- readSTRef info_ref1
+        (MkInfo w2 sol k2 l2) <- readSTRef info_ref2
+        let min_lvl = min l1 l2
+            w' = w1 + w2
+        if w1 >= w2 
+          then do
+            writeSTRef link_ref2 $ Link root1
+            writeSTRef info_ref1 $ MkInfo w' sol k2 min_lvl
+          else do
+            writeSTRef link_ref1 $ Link root2
+            writeSTRef info_ref2 $ MkInfo w' sol k2 min_lvl
 
       -- This shouldn't be possible.       
       _ -> error "'find' somehow didn't return a Repr"
