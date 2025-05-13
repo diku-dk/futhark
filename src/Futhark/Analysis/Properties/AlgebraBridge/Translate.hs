@@ -1,5 +1,6 @@
 -- Translation between Algebra and IndexFn layers.
 {-# LANGUAGE LambdaCase #-}
+
 module Futhark.Analysis.Properties.AlgebraBridge.Translate
   ( toAlgebra,
     fromAlgebra,
@@ -17,13 +18,14 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
-import Futhark.Analysis.Properties.IndexFn (IndexFn (shape), getPredicates, Quantified (..))
-import Futhark.Analysis.Properties.Monad (IndexFnM, printM, rollbackAlgEnv, prettyStr)
+import Futhark.Analysis.Properties.IndexFn
+import Futhark.Analysis.Properties.Monad
+import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Symbol
-import Futhark.Analysis.Properties.SymbolPlus ()
+import Futhark.Analysis.Properties.SymbolPlus (toSumOfSums)
 import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMappable, ASTMapper (..), astFold, astMap, identityMapper)
 import Futhark.Analysis.Properties.Unify (Substitution (mapping), mkRep, rep, unify)
-import Futhark.MonadFreshNames (newVName)
+import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym)
 import Futhark.SoP.Monad qualified as SoPM (addUntrans)
@@ -31,17 +33,16 @@ import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, hasConstant, int2SoP, justSym, mapSymM, mapSymSoPM, sym2SoP, (.+.), (~-~))
 import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName, baseString)
-import Futhark.Analysis.Properties.Property
 
 class AlgTranslatable u v where
   fromAlgebra :: u -> IndexFnM v
   toAlgebra :: v -> IndexFnM u
 
-instance (AlgTranslatable u v, AlgTranslatable a b) => AlgTranslatable (u,a) (v,b) where
-  fromAlgebra (x,y) = (,) <$> fromAlgebra x <*> fromAlgebra y
-  toAlgebra (x,y) = (,) <$> toAlgebra x <*> toAlgebra y
+instance (AlgTranslatable u v, AlgTranslatable a b) => AlgTranslatable (u, a) (v, b) where
+  fromAlgebra (x, y) = (,) <$> fromAlgebra x <*> fromAlgebra y
+  toAlgebra (x, y) = (,) <$> toAlgebra x <*> toAlgebra y
 
--- Do not implement this instance; loads of places assume that toAlgebra must be called on SoPs.
+-- NOTE Do not implement this instance; loads of places assume that toAlgebra must be called on SoPs.
 -- instance AlgTranslatable Algebra.Symbol Symbol where
 --   fromAlgebra = fmap fromSoP . fromAlgebra_
 --   toAlgebra = undefined
@@ -85,12 +86,11 @@ instance AlgTranslatable (Property Algebra.Symbol) (Property Symbol) where
     (FiltPartInv x pf pps) -> FiltPartInv x <$> toAlgebra pf <*> mapM toAlgebra pps
     (FiltPart y x pf pps) -> FiltPart y x <$> toAlgebra pf <*> mapM toAlgebra pps
 
-
 -- HINT currently unused constraint from addRel/MonadSoP.
 instance ToSoP Algebra.Symbol Symbol where
   toSoPNum symbol = error $ "toSoPNum used on " <> prettyString symbol
 
--- Do this action inside an Algebra "context" created for an IndexFn, ensuring:
+-- Do action `m` inside an index-function-dependant Algebra context ensuring:
 -- (1) Modifications to the Algebra environment are ephemeral; they are
 -- rolled back once the action is done.
 -- (2) Translations of symbols in the AST are idempotent across environment
@@ -103,7 +103,7 @@ instance ToSoP Algebra.Symbol Symbol where
 -- ```
 -- x and y may be different (e.g., sums over different fresh names). But in
 -- ```
---   algebraContext (Sum xs[a:b]) $ do
+--   algebraContext (... Sum xs[a:b]) $ do
 --     x <- rollbackAlgEnv $ toAlgebra (Sum xs[a:b])
 --     y <- rollbackAlgEnv $ toAlgebra (Sum xs[a:b])
 --     ...
@@ -145,7 +145,7 @@ algebraContext fn m = rollbackAlgEnv $ do
     trackBooleanNames (x :|| y) = trackBooleanNames x >> trackBooleanNames y
     trackBooleanNames _ = pure ()
 
-lookupUntransBool :: Foldable t => t VName -> Symbol -> IndexFnM VName
+lookupUntransBool :: (Foldable t) => t VName -> Symbol -> IndexFnM VName
 lookupUntransBool is x = do
   res <- search x
   vn <- case fst <$> res of
@@ -374,6 +374,18 @@ toAlgebra_ (Sum j lb ub x) = do
       -- to know why it would happen.
       printM 2000 $ "toAlgebra_: " <> prettyString (Sum j lb ub x)
       error "handleQuantifiers need to be run"
+
+
+       -- edges : Range [0,n)
+       -- 0 <= edges[i,j]
+       --
+       -- edges[i*m + j]
+       -- edges[e_1]
+       -- edges = for i < n . for j < m . g
+       --
+       -- prove all terms without (* m) is (< m); gives you terms that add up to j
+       --
+       -- j = e_1 - i? * m
 toAlgebra_ sym@(Apply (Var f) [x]) = do
   res <- search sym
   vn <- case fst <$> res of
@@ -385,7 +397,26 @@ toAlgebra_ sym@(Apply (Var f) [x]) = do
   when f_is_bool $ addProperty (Algebra.Var vn) Boolean
   booltype <- askProperty (Algebra.Var vn) Boolean
   pure $ Algebra.Idx (idxSym booltype vn) idx'
-toAlgebra_ x@(Apply {}) = lookupUntransPE x
+toAlgebra_ sym@(Apply (Var f) [e_i, e_j]) = do
+  -- HACK to support 2D arrays in Algebra layer. Tries to translate sym to 1D.
+  fns <- lookupIndexFn f
+  case fns of
+    Just [IndexFn [Forall i (Iota {}), Forall _ (Iota m)] _] -> do
+      j' <- newNameFromString "j"
+      let i_to_j' = rep (mkRep i (sym2SoP $ Var j'))
+      let arg1d = e_j .+. toSumOfSums j' (int2SoP 0) (i_to_j' e_i) (i_to_j' m)
+      res <- search (Apply (Var f) [arg1d])
+      vn <- case fst <$> res of
+        Just vn -> pure vn
+        Nothing -> addUntrans (Var f)
+      let idx = fromMaybe arg1d (snd =<< res)
+      idx' <- mapSymM toAlgebra_ idx
+      f_is_bool <- askProperty (Algebra.Var f) Boolean
+      when f_is_bool $ addProperty (Algebra.Var vn) Boolean
+      booltype <- askProperty (Algebra.Var vn) Boolean
+      pure $ Algebra.Idx (idxSym booltype vn) idx'
+    _ -> lookupUntransPE sym
+toAlgebra_ x@(Apply {}) = printM 1 ("### " <> prettyStr x) >> lookupUntransPE x
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
 -- The rest are boolean statements.
 toAlgebra_ x = handleBoolean x

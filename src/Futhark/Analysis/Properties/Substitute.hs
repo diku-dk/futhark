@@ -99,6 +99,8 @@ trivialSub :: (ReplacementBuilder v Symbol) => IndexFn -> Symbol -> [v] -> Bool
 trivialSub (IndexFn [] _) _ _ = False
 trivialSub (IndexFn [Forall i _] gs) e [arg] =
   repCases (mkRep i arg) gs == cases [(Bool True, sym2SoP e)]
+trivialSub (IndexFn [Forall i _, Forall j _] gs) e [arg_i, arg_j] =
+  repCases (addRep j arg_j $ mkRep i arg_i) gs == cases [(Bool True, sym2SoP e)]
 trivialSub _ _ _ = error "trivialSub: multi-dim not implemented yet"
 
 subber :: (IndexFn -> Symbol -> [SoP Symbol] -> Bool) -> IndexFn -> IndexFnM IndexFn
