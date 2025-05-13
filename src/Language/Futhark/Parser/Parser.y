@@ -301,6 +301,8 @@ Spec :: { SpecBase NoInfo Name }
           in ValSpec name $3 $5 NoInfo Nothing (srcspan $1 $>) }
       | val BindingBinOp TypeParams ':' TypeExp
         { ValSpec $2 $3 $5 NoInfo Nothing (srcspan $1 $>) }
+      | val '(' BindingBinOp ')' TypeParams ':' TypeExp
+        { ValSpec $3 $5 $7 NoInfo Nothing (srcspan $1 $>) }
       | TypeAbbr
         { TypeAbbrSpec $1 }
 

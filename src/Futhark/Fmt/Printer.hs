@@ -511,8 +511,12 @@ instance Format UncheckedSpec where
     addComments loc $ fmt doc <> "val" <+> sub <+> ":" </> stdIndent (fmt te)
     where
       sub
-        | null ps = fmtName bindingStyle name
-        | otherwise = fmtName bindingStyle name <+> align (sep space $ map fmt ps)
+        | null ps = name'
+        | otherwise = name' <+> align (sep space $ map fmt ps)
+      name' =
+        if symbolName name
+          then parens $ fmtName bindingStyle name
+          else fmtName bindingStyle name
   fmt (ModSpec name mte doc loc) =
     addComments loc $ fmt doc <> "module" <+> fmtName bindingStyle name <> ":" <+> fmt mte
   fmt (IncludeSpec mte loc) = addComments loc $ "include" <+> fmt mte

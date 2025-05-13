@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A module type `with`-refinement may now have an existentially quantified size
   on its right-hand side.
 
+* Value specs in module types can now use section binding notation for symbolic
+  names, and in fact this is the preferred form that is also used by `futhark
+  fmt`. (#2266)
+
 ### Removed
 
 ### Changed
