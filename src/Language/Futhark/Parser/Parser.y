@@ -239,7 +239,7 @@ ModTypeExp :: { UncheckedModTypeExp }
         | ModTypeExp '->' ModTypeExp  { ModTypeArrow Nothing $1 $3 (srcspan $1 $>) }
 
 TypeRef :: { TypeRefBase NoInfo Name }
-         : QualName TypeParams '=' TypeExpTerm
+         : QualName TypeParams '=' TypeExp
            { TypeRef (fst $1) $2 $4 (srcspan (snd $1) $>) }
 
 ModTypeBind :: { ModTypeBindBase NoInfo Name }

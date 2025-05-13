@@ -182,13 +182,19 @@ envTypeAbbrs env =
     <> (mconcat . map modTypeAbbrs . M.elems . envModTable) env
 
 -- | Refine the given type name in the given env.
+--
+-- XXX: we do not check whether this results in a meaningful module type. In
+-- particular, we may refine a nonlifted type to contain a function or
+-- existentially quantified sizes. However, it is still not possible to
+-- construct a module that matches such malformed module types, so this is not a
+-- soundness issue, merely an ergonomic issue.
 refineEnv ::
   SrcLoc ->
   TySet ->
   Env ->
   QualName Name ->
   [TypeParam] ->
-  StructType ->
+  StructRetType ->
   TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
   | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar _ (QualName qs v) _)))) <-
@@ -202,8 +208,8 @@ refineEnv loc tset env tname ps t
               substituteTypesInEnv
                 ( flip M.lookup $
                     M.fromList
-                      [ (qualLeaf tname', Subst cur_ps $ RetType [] t),
-                        (v, Subst ps $ RetType [] t)
+                      [ (qualLeaf tname', Subst cur_ps t),
+                        (v, Subst ps t)
                       ]
                 )
                 env
