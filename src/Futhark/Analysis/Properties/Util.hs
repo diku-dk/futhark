@@ -16,15 +16,23 @@ where
 
 import Control.Monad (guard)
 import Data.List (subsequences, (\\))
-import Data.Maybe (fromJust)
+import Data.String (IsString)
 import Futhark.Util.Pretty
 import Language.Futhark (Located, VName (VName), locText, srclocOf)
-import Data.String (IsString)
 
 prettyName :: VName -> Doc ann
-prettyName (VName vn i) = pretty vn <> pretty (map (fromJust . subscript) (show i))
+prettyName (VName vn i) = pretty vn <> pretty (subscript i) -- <> pretty (map (fromJust . subscript) (show i))
   where
-    subscript = flip lookup $ zip "-0123456789" "₋₀₁₂₃₄₅₆₇₈₉"
+    subscript n
+      | n < 0 = undefined
+      | otherwise = reverse $ encode n
+
+    chars = ['ₐ', 'ₑ', 'ₕ', 'ᵢ', 'ₖ', 'ₗ', 'ₘ', 'ₙ', 'ₒ', 'ₚ', 'ᵣ', 'ₛ', 'ᵤ', 'ᵥ', 'ₓ', 'ᵦ', 'ᵧ', 'ᵨ', 'ᵩ', 'ᵪ', 'ₔ', '₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉']
+
+    encode 0 = []
+    encode x =
+      let (q, r) = x `divMod` length chars
+       in chars !! fromIntegral r : encode q
 
 prettyHole :: VName -> Doc ann
 prettyHole x = "\ESC[4m•" <> prettyName x <> "\ESC[24m"
