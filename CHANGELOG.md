@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * New attributes: `#[blank]` and `#[scratch]`.
 
+* A module type `with`-refinement may now have an existentially quantified size
+  on its right-hand side.
+
 ### Removed
 
 ### Changed
