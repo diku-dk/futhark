@@ -17,6 +17,7 @@ import Language.Futhark.Core
 import Language.Futhark.Traversals
 import Language.Futhark.FreeVars
 import System.FilePath.Posix qualified as Posix
+import Data.List.NonEmpty qualified as NE
 
 type Error = String
 
@@ -31,10 +32,14 @@ type Deps = Ids
 data DepVal
   = DepVal Deps
   | DepTuple [DepVal]
-  | DepFun DepsEnv VName Exp
+  | DepFun DepsEnv [VName] (ExpBase Info VName )
   deriving (Eq, Show)
   -- Evt. DepTop
 
+data NestedVName
+  = Name VName
+  | Nested [NestedVName]
+  | WildcardName
 -- type Env a = M.Map VName a
 
 
@@ -42,17 +47,20 @@ data DepVal
 type DepsEnv = M.Map VName DepVal
 
 depsEnvEmpty :: M.Map VName DepVal
-depsEnvEmpty = M.singleton (VName "a" 0) (DepVal mempty)
+depsEnvEmpty = M.empty
 
 envExtend :: VName -> DepVal -> DepsEnv -> DepsEnv
 envExtend key val env = M.insert key val env 
 -- envExtend v val env = (v, val) : filter ((/=v).fst) env
 
-envLookup :: VName -> DepsEnv -> DepVal
-envLookup key env =
+envLookup :: VName -> DepsEnv -> EvalM DepVal
+envLookup key env = do
   case M.lookup key env of
-    Just x -> x
-    Nothing -> DepVal mempty
+    Just x -> pure x
+    Nothing -> failure $ "Unknown variable: " <> (show key) 
+
+envUnion :: DepsEnv -> DepsEnv -> DepsEnv
+envUnion = M.union
 
 newtype EvalM a = EvalM (DepsEnv -> Either Error a)
 
@@ -95,14 +103,14 @@ instance Semigroup Ids where
 instance Monoid Ids where
   mempty = Ids mempty
 
-idsSingle :: VName -> Ids
-idsSingle v = Ids [v]
+-- idsSingle :: VName -> Ids
+-- idsSingle v = Ids [v]
 
-idsWithout :: Ids -> VName -> Ids
-idsWithout (Ids xs) x = Ids $ filter (/=x) xs
+-- idsWithout :: Ids -> VName -> Ids
+-- idsWithout (Ids xs) x = Ids $ filter (/=x) xs
 
-unIds :: Ids -> [VName]
-unIds (Ids xs) = xs
+-- unIds :: Ids -> [VName]
+-- unIds (Ids xs) = xs
 
 -- type DepsBase a = a Info VName
 
@@ -111,7 +119,7 @@ unIds (Ids xs) = xs
 depValDeps :: DepVal -> Deps
 depValDeps (DepVal x) = x
 depValDeps (DepTuple x) = foldMap depValDeps x
-depValDeps (DepFun _ p body) = mempty -- OBS
+depValDeps (DepFun _ p body) = Ids $ freeVarsList body  -- OBS
 -- depValDeps (DepFun _ p body) = freeIds (Lambda p body)
 
 depValJoin :: DepVal -> DepVal -> DepVal
@@ -127,27 +135,56 @@ depValInj x v = DepVal $ x <> depValDeps v
 ----
 
 deps :: Prog -> String
-deps prog = show $ (depsFreeVars prog)
-  -- case runDeps depsEnvEmpty (depsProgBase prog) of
-  --   Left a -> a
-  --   Right a -> show a 
+deps prog =
+  case runDeps (depsFreeVarsInProgBase prog) (depsProgBase prog) of
+    Left a -> (show prog) ++ "\nERROR: " ++ a 
+    Right a -> (show prog) ++ "\nRIGHT: " ++ show a
 -- (env `envIntersect` freeVNames e)
+
 runDeps :: DepsEnv -> EvalM a -> Either Error a
 runDeps env (EvalM m) = m env
 
-depsFreeVars :: ProgBase Info VName -> DepsEnv
-depsFreeVars base =
+depsFreeVarsInProgBase :: ProgBase Info VName -> DepsEnv
+depsFreeVarsInProgBase base =
   case last $ progDecs base of -- Last progDec is main
-    ValDec valbind -> M.fromList $ map (\x -> (x, DepVal mempty)) (S.toList $ fvVars $ freeInExp $ valBindBody valbind)
+    ValDec valbind -> depsFreeVarsInExpBase $ valBindBody valbind
     _ -> depsEnvEmpty -- OBS
 
+depsFreeVarsInExpBase :: ExpBase Info VName -> DepsEnv
+depsFreeVarsInExpBase eb = M.fromList $ map (\x -> (x, DepVal mempty)) $ freeVarsList eb
+
+freeVarsList :: ExpBase Info VName -> [Id]
+freeVarsList eb = S.toList $ fvVars $ freeInExp eb
+
+-- Converts pattern bases to pure NestedVNames
+stripPatBase :: PatBase Info VName t -> NestedVName
+stripPatBase (TuplePat pb_n _) = Nested $ map stripPatBase pb_n
+-- stripPatBase (RecordPat (pb_n) _) = Nested $ map stripPatBase pb_n
+stripPatBase (PatParens pb _) = stripPatBase pb
+stripPatBase (Id vn _ _) = Name vn
+stripPatBase (Wildcard _ _) = WildcardName
+stripPatBase (PatAscription pb te _) = stripPatBase pb -- forkast te ???? kommer i "arg : i32" exps og ikke "arg" ? 
+stripPatBase (PatLit _ _ _) = WildcardName
+-- stripPatBase (PatConstr)
+-- stripPatBase (PatAttr)
+
+nestedNamesToSelfEnv :: NestedVName -> DepsEnv
+nestedNamesToSelfEnv (Name vn) = M.singleton vn (DepVal $ Ids [vn])
+nestedNamesToSelfEnv (Nested nvn) = foldr M.union depsEnvEmpty (map nestedNamesToSelfEnv nvn) -- OBS
+nestedNamesToSelfEnv WildcardName = depsEnvEmpty
+
+
 depsProgBase :: ProgBase Info VName -> EvalM DepVal 
-depsProgBase _ = pure $ DepVal mempty
 depsProgBase base = depsDecBase $ last $ progDecs base -- obs
+depsProgBase _ = failure "Unrecognized program base"
 
 depsDecBase :: DecBase Info VName-> EvalM DepVal
-depsDecBase (ValDec valbind) = depsExpBase $ valBindBody valbind
-depsDecBase _ = pure $ DepVal mempty
+depsDecBase (ValDec bindings) = do
+  env <- askEnv
+  let env' = nestedNamesToSelfEnv $ Nested (map stripPatBase (valBindParams bindings)) 
+    in localEnv (const $ env' `M.union` env) (depsExpBase $ valBindBody bindings)
+    -- ^^ M.union above might be dangerous (prefers env' over env in duplicates)
+depsDecBase _ = failure "Unrecognized declaration base"
 
 depsExpBase :: ExpBase Info VName -> EvalM DepVal
 depsExpBase (Literal _ _) = pure $ DepVal mempty
@@ -157,39 +194,58 @@ depsExpBase (StringLit _ _) = pure $ DepVal mempty
 depsExpBase (Hole _ _) = pure $ DepVal mempty
 depsExpBase (Var qn _ _) = do
   env <- askEnv
-  case envLookup (qualLeaf qn) env of
-    DepVal mempty -> failure $ "Unknown variable" <> (show $ qualLeaf qn) --
-    a -> pure a 
+  envLookup (qualLeaf qn) env
+  -- If variable depends on other variables these can maybe be reported instead
 depsExpBase (Parens eb _) = depsExpBase eb
 depsExpBase (QualParens qn eb _) = depsExpBase eb -- OBS
 depsExpBase (TupLit eb sl) =
   case eb of
-  [] -> pure $ DepVal mempty
-  (h:t) -> do
-    v1 <- depsExpBase $ h
-    v2 <- depsExpBase $ TupLit t sl
-    case v2 of
-      DepVal mempty -> pure $ DepTuple [v1]
-      DepTuple tpl -> pure $ DepTuple (v1 : tpl)
-      _ -> failure "Tuple type malformed" -- Should not be possible
+    [] -> do pure $ DepVal mempty
+    (h:t) -> do
+      v1 <- depsExpBase $ h
+      v2 <- depsExpBase $ TupLit t sl
+      case v2 of
+        DepVal mempty -> pure $ DepTuple [v1]
+        DepTuple tpl -> pure $ DepTuple (v1 : tpl)
+        _ -> failure "Tuple type malformed" -- Should not be possible
 depsExpBase (RecordLit fb sl) = pure $ DepVal mempty -- OBS
+depsExpBase (Lambda pb_n eb _ _ _) = do
+  env <- askEnv
+  pure $ DepFun env (map stripID pb_n) eb 
+  where stripID id = case id of
+                        Id vn _ _ -> vn
+                        _ -> VName "a" 0 -- OBS
 depsExpBase (AppExp base _) = depsAppExpBase base
 
 depsFieldBase :: FieldBase Info VName -> EvalM DepVal
 depsFieldBase (RecordFieldExplicit _ _ _) = pure $ DepVal mempty -- 
 depsFieldBase (RecordFieldImplicit _ _ _) = pure $ DepVal mempty -- 
 
+
+apply :: DepVal -> [ExpBase Info VName] -> EvalM DepVal
+apply (DepFun env (p:p_n) body) (eb:eb_n)
+  | length p_n == 0 && length eb_n == 0 = do
+    d <- depsExpBase eb 
+    localEnv (const $ M.singleton p d `M.union` env) (depsExpBase body)
+  | otherwise = do
+    d <- depsExpBase eb
+    apply (DepFun (M.singleton p d `M.union` env) p_n body) eb_n
+apply _ _ = failure $ "Apply failure" --OBS
+-- OBS test om p og eb er tom
+
 depsAppExpBase :: AppExpBase Info VName -> EvalM DepVal
-depsAppExpBase (Apply eb1 ne _) = do
-  let eb2 = ne -- OBS
-    in pure $ DepVal mempty --
+depsAppExpBase (Apply eb1 lst _) = do
+  d1 <- depsExpBase eb1
+  case d1 of 
+    DepFun env p_n body -> apply (DepFun env p_n body) $ map snd (NE.toList lst)
+    deps -> pure $ DepVal mempty -- OBS $ måske envUnion deps d2_n
 depsAppExpBase (Range eb1 eb2 _ _) = pure $ DepVal mempty --
 depsAppExpBase (LetPat _ pb eb1 eb2 _) = do
-  d1 <- depsPatBase pb
-  d2 <- depsExpBase eb1
-  d3 <- depsExpBase eb2
-  let deps_let = depValDeps d2 `depValInj` d1
-    in pure $ depValDeps deps_let `depValInj` d3 
+  d1 <- depsExpBase eb1
+  env <- askEnv
+  case stripPatBase pb of
+    Name vn -> localEnv (const $ env `M.union` M.singleton vn d1) $ depsExpBase eb2
+    a -> failure $ "Unknown variable: " <> (show pb)
 depsAppExpBase (LetFun vn _ _ _) = pure $ DepVal mempty --
 depsAppExpBase (If eb1 eb2 eb3 _) = do
   d1 <- depsExpBase eb1
@@ -208,14 +264,14 @@ depsAppExpBase (Match _ _ _) = pure $ DepVal mempty --
 depsPatBase :: PatBase Info VName t -> EvalM DepVal
 depsPatBase (TuplePat pb sl) =
   case pb of
-  [] -> pure $ DepVal mempty
-  (h:t) -> do
-    v1 <- depsPatBase $ h
-    v2 <- depsPatBase $ TuplePat t sl
-    case v2 of
-      DepVal mempty -> pure $ DepTuple [v1]
-      DepTuple tpl -> pure $ DepTuple (v1 : tpl)
-      _ -> failure "Tuple type malformed" -- Should not be possible
+    [] -> do pure $ DepVal mempty
+    (h:t) -> do
+      v1 <- depsPatBase $ h
+      v2 <- depsPatBase $ TuplePat t sl
+      case v2 of
+        DepVal mempty -> pure $ DepTuple [v1]
+        DepTuple tpl -> pure $ DepTuple (v1 : tpl)
+        _ -> failure "Tuple type malformed" -- Should not be possible
 -- depsPatBase (RecordPat lnpb _) =
 --   case lnpb of
 --   [] -> pure $ DepVal mempty
