@@ -137,9 +137,8 @@ depValInj x v = DepVal $ x <> depValDeps v
 deps :: Prog -> String
 deps prog =
   case runDeps (depsFreeVarsInProgBase prog) (depsProgBase prog) of
-    Left a -> (show prog) ++ "\nERROR: " ++ a 
-    Right a -> (show prog) ++ "\nRIGHT: " ++ show a
--- (env `envIntersect` freeVNames e)
+    Left a -> "ERROR: " ++ a 
+    Right a -> show a
 
 runDeps :: DepsEnv -> EvalM a -> Either Error a
 runDeps env (EvalM m) = m env
@@ -195,21 +194,11 @@ depsExpBase (Hole _ _) = pure $ DepVal mempty
 depsExpBase (Var qn _ _) = do
   env <- askEnv
   envLookup (qualLeaf qn) env
-  -- If variable depends on other variables these can maybe be reported instead
 depsExpBase (Parens eb _) = depsExpBase eb
 depsExpBase (QualParens qn eb _) = depsExpBase eb -- OBS
 depsExpBase (TupLit ebn _) = do
-  dn <- mapM depsExpBase ebn
-  pure $ DepTuple dn
-  -- case eb of
-  --   [] -> do pure $ DepVal mempty
-  --   (h:t) -> do
-  --     v1 <- depsExpBase $ h
-  --     v2 <- depsExpBase $ TupLit t sl
-  --     case v2 of
-  --       DepVal mempty -> pure $ DepTuple [v1]
-  --       DepTuple tpl -> pure $ DepTuple (v1 : tpl)
-  --       _ -> failure "Tuple type malformed" -- Should not be possible
+  d_n <- mapM depsExpBase ebn
+  pure $ DepTuple d_n
 depsExpBase (RecordLit fb sl) = pure $ DepVal mempty -- OBS
 depsExpBase (Lambda pb_n eb _ _ _) = do
   env <- askEnv
@@ -223,24 +212,14 @@ depsFieldBase :: FieldBase Info VName -> EvalM DepVal
 depsFieldBase (RecordFieldExplicit _ _ _) = pure $ DepVal mempty -- 
 depsFieldBase (RecordFieldImplicit _ _ _) = pure $ DepVal mempty -- 
 
-
-apply :: DepVal -> [ExpBase Info VName] -> EvalM DepVal
-apply (DepFun env (p:p_n) body) (eb:eb_n)
-  | length p_n == 0 && length eb_n == 0 = do
-    d <- depsExpBase eb 
-    localEnv (const $ M.singleton p d `M.union` env) (depsExpBase body)
-  | otherwise = do
-    d <- depsExpBase eb
-    apply (DepFun (M.singleton p d `M.union` env) p_n body) eb_n
-apply _ _ = failure $ "Apply failure" --OBS
--- OBS test om p og eb er tom
-
 depsAppExpBase :: AppExpBase Info VName -> EvalM DepVal
 depsAppExpBase (Apply eb1 lst _) = do
   d1 <- depsExpBase eb1
   case d1 of 
-    DepFun env p_n body -> apply (DepFun env p_n body) $ map snd (NE.toList lst)
-    deps -> pure $ DepVal mempty -- OBS $ måske envUnion deps d2_n
+    DepFun env p_n body -> do
+      d_n <- mapM depsExpBase $ map snd (NE.toList lst)
+      localEnv (const $ foldr M.union depsEnvEmpty $ zipWith M.singleton p_n d_n) $ depsExpBase body
+    deps -> pure $ DepVal mempty -- OBS $ Maybe envUnion deps d2_n
 depsAppExpBase (Range eb1 maybe_eb2 _ _) = do
   d1 <- depsExpBase eb1
   d2 <- maybe (pure $ DepVal mempty) depsExpBase maybe_eb2
@@ -265,9 +244,18 @@ depsAppExpBase (BinOp _ _ eb1 eb2 _) = do
 depsAppExpBase (LetWith _ _ _ _ _ _) = pure $ DepVal mempty -- Not sure what this is ????
 depsAppExpBase (Index eb sb _) = do
   d <- depsExpBase eb 
-  dn <- mapM depsDimIndexBase sb
-  pure $ foldr depValJoin d dn 
-depsAppExpBase (Match _ _ _) = pure $ DepVal mempty
+  d_n <- mapM depsDimIndexBase sb
+  pure $ foldr depValJoin d d_n 
+depsAppExpBase (Match eb ne_cb _) = do
+  d1 <- depsExpBase eb
+  d_n <- mapM depsCaseBase (NE.toList ne_cb)
+  pure $ foldr depValJoin d1 d_n
+
+depsCaseBase :: CaseBase Info VName -> EvalM DepVal
+depsCaseBase (CasePat pb eb _) = do
+  d1 <- depsPatBase pb
+  d2 <- depsExpBase eb
+  pure $ d1 `depValJoin` d2
 
 depsDimIndexBase :: DimIndexBase Info VName -> EvalM DepVal
 depsDimIndexBase (DimFix eb) = depsExpBase eb
@@ -278,28 +266,12 @@ depsDimIndexBase (DimSlice maybe_eb1 maybe_eb2 maybe_eb3) = do
   pure $ d1 `depValJoin` d2 `depValJoin` d3
 
 depsPatBase :: PatBase Info VName t -> EvalM DepVal
-depsPatBase (TuplePat pbn _) = do
-  dn <- mapM depsPatBase pbn
-  pure $ DepTuple dn 
-  -- case pb of
-  --   [] -> do pure $ DepVal mempty
-  --   (h:t) -> do
-  --     v1 <- depsPatBase $ h
-  --     v2 <- depsPatBase $ TuplePat t sl
-  --     case v2 of
-  --       DepVal mempty -> pure $ DepTuple [v1]
-  --       DepTuple tpl -> pure $ DepTuple (v1 : tpl)
-  --       _ -> failure "Tuple type malformed" -- Should not be possible
--- depsPatBase (RecordPat lnpb _) =
---   case lnpb of
---   [] -> pure $ DepVal mempty
---   (h:t) -> do
---     v1 <- depsPatBase $ h
---     v2 <- depsPatBase $ TuplePat t sl
---     case v2 of
---       DepVal mempty -> pure $ DepTuple [v1]
---       DepTuple tpl -> pure $ DepTuple (v1 : tpl)
---       _ -> failure "Tuple type malformed" -- Should not be possible
+depsPatBase (TuplePat pb_n _) = do
+  d_n <- mapM depsPatBase pb_n
+  pure $ DepTuple d_n 
+depsPatBase (RecordPat rcrd _) = do
+  d_n <- mapM (depsPatBase . snd) rcrd
+  pure $ foldr depValJoin (DepVal mempty) d_n
 depsPatBase (Id vn _ _) = pure $ DepVal $ Ids [vn]
 depsPatBase _ = pure $ DepVal mempty --
 -- depsPatBase (RecordPat)
@@ -309,8 +281,3 @@ depsPatBase _ = pure $ DepVal mempty --
 -- depsPatBase (PatLit)
 -- depsPatBase (PatConstr)
 -- depsPatBase (PatAttr)
-
-
-printDeps :: String -> String
-printDeps file = "Hey, you!"
-
