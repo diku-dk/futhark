@@ -198,16 +198,18 @@ depsExpBase (Var qn _ _) = do
   -- If variable depends on other variables these can maybe be reported instead
 depsExpBase (Parens eb _) = depsExpBase eb
 depsExpBase (QualParens qn eb _) = depsExpBase eb -- OBS
-depsExpBase (TupLit eb sl) =
-  case eb of
-    [] -> do pure $ DepVal mempty
-    (h:t) -> do
-      v1 <- depsExpBase $ h
-      v2 <- depsExpBase $ TupLit t sl
-      case v2 of
-        DepVal mempty -> pure $ DepTuple [v1]
-        DepTuple tpl -> pure $ DepTuple (v1 : tpl)
-        _ -> failure "Tuple type malformed" -- Should not be possible
+depsExpBase (TupLit ebn _) = do
+  dn <- mapM depsExpBase ebn
+  pure $ DepTuple dn
+  -- case eb of
+  --   [] -> do pure $ DepVal mempty
+  --   (h:t) -> do
+  --     v1 <- depsExpBase $ h
+  --     v2 <- depsExpBase $ TupLit t sl
+  --     case v2 of
+  --       DepVal mempty -> pure $ DepTuple [v1]
+  --       DepTuple tpl -> pure $ DepTuple (v1 : tpl)
+  --       _ -> failure "Tuple type malformed" -- Should not be possible
 depsExpBase (RecordLit fb sl) = pure $ DepVal mempty -- OBS
 depsExpBase (Lambda pb_n eb _ _ _) = do
   env <- askEnv
@@ -239,39 +241,55 @@ depsAppExpBase (Apply eb1 lst _) = do
   case d1 of 
     DepFun env p_n body -> apply (DepFun env p_n body) $ map snd (NE.toList lst)
     deps -> pure $ DepVal mempty -- OBS $ måske envUnion deps d2_n
-depsAppExpBase (Range eb1 eb2 _ _) = pure $ DepVal mempty --
+depsAppExpBase (Range eb1 maybe_eb2 _ _) = do
+  d1 <- depsExpBase eb1
+  d2 <- maybe (pure $ DepVal mempty) depsExpBase maybe_eb2
+  pure $ d1 `depValJoin` d2
 depsAppExpBase (LetPat _ pb eb1 eb2 _) = do
   d1 <- depsExpBase eb1
   env <- askEnv
   case stripPatBase pb of
     Name vn -> localEnv (const $ env `M.union` M.singleton vn d1) $ depsExpBase eb2
     a -> failure $ "Unknown variable: " <> (show pb)
-depsAppExpBase (LetFun vn _ _ _) = pure $ DepVal mempty --
+depsAppExpBase (LetFun vn _ _ _) = pure $ DepVal mempty -- Not quite sure what LetFun is ????
 depsAppExpBase (If eb1 eb2 eb3 _) = do
   d1 <- depsExpBase eb1
   d2 <- depsExpBase eb2
   d3 <- depsExpBase eb3
   pure $ depValDeps d1 `depValInj` (d2 `depValJoin` d3)
-depsAppExpBase (Loop _ _ _ _ _ _) = pure $ DepVal mempty --
+depsAppExpBase (Loop _ _ _ _ _ _) = pure $ DepVal mempty -- 
 depsAppExpBase (BinOp _ _ eb1 eb2 _) = do
   d1 <- depsExpBase $ fst eb1
   d2 <- depsExpBase $ fst eb2
   pure $ d1 `depValJoin` d2
-depsAppExpBase (LetWith _ _ _ _ _ _) = pure $ DepVal mempty -- 
-depsAppExpBase (Index _ _ _) = pure $ DepVal mempty --
-depsAppExpBase (Match _ _ _) = pure $ DepVal mempty --
+depsAppExpBase (LetWith _ _ _ _ _ _) = pure $ DepVal mempty -- Not sure what this is ????
+depsAppExpBase (Index eb sb _) = do
+  d <- depsExpBase eb 
+  dn <- mapM depsDimIndexBase sb
+  pure $ foldr depValJoin d dn 
+depsAppExpBase (Match _ _ _) = pure $ DepVal mempty
+
+depsDimIndexBase :: DimIndexBase Info VName -> EvalM DepVal
+depsDimIndexBase (DimFix eb) = depsExpBase eb
+depsDimIndexBase (DimSlice maybe_eb1 maybe_eb2 maybe_eb3) = do
+  d1 <- maybe (pure $ DepVal mempty) depsExpBase maybe_eb1
+  d2 <- maybe (pure $ DepVal mempty) depsExpBase maybe_eb2
+  d3 <- maybe (pure $ DepVal mempty) depsExpBase maybe_eb3
+  pure $ d1 `depValJoin` d2 `depValJoin` d3
 
 depsPatBase :: PatBase Info VName t -> EvalM DepVal
-depsPatBase (TuplePat pb sl) =
-  case pb of
-    [] -> do pure $ DepVal mempty
-    (h:t) -> do
-      v1 <- depsPatBase $ h
-      v2 <- depsPatBase $ TuplePat t sl
-      case v2 of
-        DepVal mempty -> pure $ DepTuple [v1]
-        DepTuple tpl -> pure $ DepTuple (v1 : tpl)
-        _ -> failure "Tuple type malformed" -- Should not be possible
+depsPatBase (TuplePat pbn _) = do
+  dn <- mapM depsPatBase pbn
+  pure $ DepTuple dn 
+  -- case pb of
+  --   [] -> do pure $ DepVal mempty
+  --   (h:t) -> do
+  --     v1 <- depsPatBase $ h
+  --     v2 <- depsPatBase $ TuplePat t sl
+  --     case v2 of
+  --       DepVal mempty -> pure $ DepTuple [v1]
+  --       DepTuple tpl -> pure $ DepTuple (v1 : tpl)
+  --       _ -> failure "Tuple type malformed" -- Should not be possible
 -- depsPatBase (RecordPat lnpb _) =
 --   case lnpb of
 --   [] -> pure $ DepVal mempty
