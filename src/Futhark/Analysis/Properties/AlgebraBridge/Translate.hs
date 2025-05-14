@@ -15,23 +15,24 @@ import Control.Monad (foldM, forM_, when, (<=<))
 import Data.Function (on)
 import Data.List (sortBy)
 import Data.Map qualified as M
-import Data.Maybe (catMaybes, fromJust, fromMaybe)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn
+import Futhark.Analysis.Properties.IndexFnPlus ()
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (toSumOfSums)
 import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMappable, ASTMapper (..), astFold, astMap, identityMapper)
-import Futhark.Analysis.Properties.Unify (Substitution (mapping), mkRep, rep, unify)
+import Futhark.Analysis.Properties.Unify (Substitution (mapping), Unify, mkRep, rep, unify)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym)
 import Futhark.SoP.Monad qualified as SoPM (addUntrans)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, hasConstant, int2SoP, justSym, mapSymM, mapSymSoPM, sym2SoP, (.+.), (~-~))
-import Futhark.Util.Pretty (prettyString)
+import Futhark.SoP.SoP (Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~))
+import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName, baseString)
 
 class AlgTranslatable u v where
@@ -171,7 +172,33 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) i) = do
   idx <- fromAlgebra i
   case x of
     Just x' -> sym2SoP <$> repHoles x' idx
-    Nothing -> pure . sym2SoP $ Apply (Var vn) [idx]
+    Nothing -> do
+      -- Corresponding back-translation for 2D-as-1D HACK in toAlgebra_.
+      fs <- lookupIndexFn vn
+      idx' <- case fs of
+        Just [IndexFn [Forall _ (Iota n), Forall _ (Iota m)] _] -> do
+          -- printM 1 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
+          -- printM 1 ("(ﾉ◕ヮ◕)ﾉ  idx " <> prettyStr idx)
+          case filterSoP (\t c -> isJust (term2SoP t c ./. m)) idx of
+            offset
+              | isZero offset -> do
+                  -- Information about offset was destroyed; use II array.
+                  k <- newNameFromString "k"
+                  let flat_dims = Cat k n (sym2SoP (Var k) .*. m)
+                  ii <- Var . fst . fromJust <$> (unisearch flat_dims =<< getII)
+                  -- printM 1 ("(ﾉ◕ヮ◕)ﾉ  II " <> prettyStr ii)
+                  pure [sym2SoP (Apply ii [idx]), idx .-. (sym2SoP (Apply ii [idx]) .*. m)]
+              | otherwise -> do
+                  -- let e_j = filterSoP (\t c -> isNothing (term2SoP t c ./. m)) idx
+                  let e_i = offset ./. m
+                  let e_j = idx .-. offset
+                  printM 1 ("(ﾉ◕ヮ◕)ﾉ  (e_i, e_j) " <> prettyStr (e_i, e_j))
+                  -- check e_j in [0, m)
+                  -- check e_i in [0, n)
+                  undefined -- not implemented yet (this is the case where we should actually be able to get i and j)
+        _ ->
+          pure [idx]
+      pure . sym2SoP $ Apply (Var vn) idx'
 fromAlgebra_ (Algebra.Idx (Algebra.POR vns) i) = do
   foldr1 (.+.)
     <$> mapM
@@ -374,18 +401,6 @@ toAlgebra_ (Sum j lb ub x) = do
       -- to know why it would happen.
       printM 2000 $ "toAlgebra_: " <> prettyString (Sum j lb ub x)
       error "handleQuantifiers need to be run"
-
-
-       -- edges : Range [0,n)
-       -- 0 <= edges[i,j]
-       --
-       -- edges[i*m + j]
-       -- edges[e_1]
-       -- edges = for i < n . for j < m . g
-       --
-       -- prove all terms without (* m) is (< m); gives you terms that add up to j
-       --
-       -- j = e_1 - i? * m
 toAlgebra_ sym@(Apply (Var f) [x]) = do
   res <- search sym
   vn <- case fst <$> res of
@@ -404,7 +419,12 @@ toAlgebra_ sym@(Apply (Var f) [e_i, e_j]) = do
     Just [IndexFn [Forall i (Iota {}), Forall _ (Iota m)] _] -> do
       j' <- newNameFromString "j"
       let i_to_j' = rep (mkRep i (sym2SoP $ Var j'))
-      let arg1d = e_j .+. toSumOfSums j' (int2SoP 0) (i_to_j' e_i) (i_to_j' m)
+      let offset = toSumOfSums j' (int2SoP 0) (i_to_j' e_i .-. int2SoP 1) (i_to_j' m)
+      let arg1d = e_j .+. offset
+      -- printM 1 ("💩" <> prettyStr sym)
+      -- printM 1 ("💩m " <> prettyStr m)
+      -- printM 1 ("💩offset " <> prettyStr offset)
+      -- printM 1 ("💩arg1d: j + offset " <> prettyStr arg1d)
       res <- search (Apply (Var f) [arg1d])
       vn <- case fst <$> res of
         Just vn -> pure vn
@@ -416,7 +436,7 @@ toAlgebra_ sym@(Apply (Var f) [e_i, e_j]) = do
       booltype <- askProperty (Algebra.Var vn) Boolean
       pure $ Algebra.Idx (idxSym booltype vn) idx'
     _ -> lookupUntransPE sym
-toAlgebra_ x@(Apply {}) = printM 1 ("### " <> prettyStr x) >> lookupUntransPE x
+toAlgebra_ x@(Apply {}) = lookupUntransPE x
 toAlgebra_ Recurrence = lookupUntransPE Recurrence
 -- The rest are boolean statements.
 toAlgebra_ x = handleBoolean x
@@ -446,3 +466,20 @@ handleBoolean p = do
 addUntrans :: Symbol -> IndexFnM VName
 addUntrans (Var vn) = pure vn
 addUntrans sym = Algebra.getVName <$> lookupUntransPE sym
+
+-- Search a mapping using unification for equality checks.
+unisearch :: (Ord v, Unify v Symbol, Pretty v) => v -> M.Map v a -> IndexFnM (Maybe a)
+unisearch x mapping = do
+  case mapping M.!? x of
+    Just v ->
+      -- Exact match.
+      pure (Just v)
+    Nothing -> do
+      -- Search for matches using unification.
+      matches :: [(a, Maybe (Substitution Symbol))] <-
+        mapM (\(k, v) -> (v,) <$> unify k x) (M.toList mapping)
+      case matches of
+        [] -> pure Nothing
+        [(v, _)] ->
+          pure (Just v)
+        _ -> error "unisearch: multiple matches"

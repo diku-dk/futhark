@@ -351,14 +351,8 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
         case shape f of
           ds | length ds <= 1 -> error $ "Flatten on less-than-2d array." <> prettyStr f
           Forall k (Iota m) : Forall j (Iota n) : shp -> do
-            -- j === (i' mod n), but we don't have modulo, so we convert to Cat domain.
-            -- i' <- newNameFromString "i"
-            -- f { shape = Forall i' (Iota (n .*. m)) : shp,
-            --     body = repCases (mkRep
-            -- TODO define dual view and use for the first time here.
-            --   Once everything works, try for Union?
-            --   Alternatively, try using Cat to see if it just werks. (There are probably
-            --   other implementation things lurking around in maxMatch_2d.)
+            -- HACK j === (i' mod n), but we don't have modulo, so we convert to Cat domain.
+            -- TODO use the multi-dim theory instead.
             i <- newNameFromString "i"
             k' <- newNameFromString "k"
             let e_k = sVar k' .*. n
@@ -943,13 +937,15 @@ scatterMono dest@(IndexFn [Forall _ dom_dest] _) inds@(IndexFn inds_iter@[Forall
   let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
   let f_seg = mapping s M.! vn_f_seg
   -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
-  s_p :: Answer <- lift $ algebraContext inds $ do
+  s_p <- lift $ algebraContext inds $ do
     addRelShape inds_iter
     seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
     printM 1337 ("p_seg     " <> prettyStr p_seg)
     printM 1337 ("seg_delta " <> prettyStr seg_delta)
-    p_seg =>? (seg_delta :> int2SoP 0)
-  when (isUnknown s_p) (failMsg "scatterMono: predicate not on desired form")
+    ans <- p_seg =>? (seg_delta :> int2SoP 0)
+    case ans of
+      Yes -> pure (Bool True)
+      Unknown -> pure p_seg
   -- Check that seg is monotonically increasing. (Essentially checking
   -- that OOB branch is never taken in inds.)
   mono <- lift $ algebraContext inds $ do
@@ -973,7 +969,7 @@ scatterMono dest@(IndexFn [Forall _ dom_dest] _) inds@(IndexFn inds_iter@[Forall
   i <- newVName "i"
   dest_hole <- newVName "dest_hole"
   vals_hole <- newVName "vals_hole"
-  let p = sVar i :== f_seg
+  let p = sVar i :== f_seg :&& s_p
   let fn =
         IndexFn
           { shape = [Forall i (Cat k m f_seg)],

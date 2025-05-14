@@ -305,8 +305,7 @@ gray s = "\ESC[2m" <> s <> "\ESC[0m"
 
 lookupII :: Domain -> IndexFn -> IndexFnM (VName, IndexFn)
 lookupII dom def = do
-  mapping <- getII
-  v <- unisearch dom mapping
+  v <- unisearch dom =<< getII
   case v of
     Just res -> pure res
     Nothing -> do
