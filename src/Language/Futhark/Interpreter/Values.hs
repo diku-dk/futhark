@@ -35,7 +35,6 @@ where
 
 import Control.Monad.Identity
 import Data.Array
-import Data.Bifunctor (Bifunctor (second))
 import Data.List (genericLength, genericReplicate)
 import Data.Map qualified as M
 import Data.Maybe

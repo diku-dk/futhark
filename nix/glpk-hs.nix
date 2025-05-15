@@ -5,9 +5,9 @@ mkDerivation {
   pname = "glpk-hs";
   version = "0.8";
   src = fetchgit {
-    url = "https://github.com/ludat/glpk-hs.git";
-    sha256 = "0nly5nifdb93f739vr3jzgi16fccqw5l0aabf5lglsdkdad713q1";
-    rev = "efcb8354daa1205de2b862898353da2e4beb76b2";
+    url = "https://github.com/jyp/glpk-hs.git";
+    sha256 = "sha256-AY9wmmqzafpocUspQAvHjDkT4vty5J3GcSOt5qItnlo=";
+    rev = "1f276aa19861203ea8367dc27a6ad4c8a31c9062";
     fetchSubmodules = true;
   };
   isLibrary = true;
