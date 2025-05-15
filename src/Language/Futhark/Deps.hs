@@ -18,6 +18,7 @@ import Language.Futhark.Traversals
 import Language.Futhark.FreeVars
 import System.FilePath.Posix qualified as Posix
 import Data.List.NonEmpty qualified as NE
+import Text.Read
 
 type Error = String
 
@@ -132,8 +133,6 @@ depValInj x (DepVal y) = DepVal $ x <> y
 depValInj x (DepTuple ys) = DepTuple $ map (depValInj x) ys
 depValInj x v = DepVal $ x <> depValDeps v
 
-----
-
 deps :: Prog -> String
 deps prog =
   case runDeps (depsFreeVarsInProgBase prog) (depsProgBase prog) of
@@ -194,22 +193,87 @@ depsExpBase (Var qn _ _) = do
   env <- askEnv
   envLookup (qualLeaf qn) env
 depsExpBase (Parens eb _) = depsExpBase eb
-depsExpBase (QualParens qn eb _) = depsExpBase eb -- OBS
+depsExpBase (QualParens qn eb _) = do
+  env <- askEnv
+  d1 <- envLookup (qualLeaf $ fst qn) env
+  d2 <- depsExpBase eb
+  pure $ d1 `depValJoin` d2
 depsExpBase (TupLit ebn _) = do
   d_n <- mapM depsExpBase ebn
   pure $ DepTuple d_n
-depsExpBase (RecordLit fb sl) = pure $ DepVal mempty -- OBS
+depsExpBase (RecordLit fb_n _) = do
+  d_n <- mapM depsFieldBase fb_n
+  pure $ foldr depValJoin (DepVal mempty) d_n
+depsExpBase (ArrayLit eb_n _ _) = do
+  d_n <- mapM depsExpBase eb_n
+  pure $ foldr depValJoin (DepVal mempty) d_n
+depsExpBase (ArrayVal _ _ _) = pure $ DepVal mempty
+depsExpBase (Attr _ eb _) = pure $ DepVal mempty
+depsExpBase (Project name eb _ _) = do -- ???? name has to be integer
+  d1 <- depsExpBase eb
+  pure $
+    case (d1, readMaybe (nameToString name) :: Maybe Int) of
+      (DepTuple x, Just i) | i < length x -> x !! i
+      (x, _) -> x 
+depsExpBase (Negate eb _) = depsExpBase eb
+depsExpBase (Assert eb1 eb2 _ _) = do
+  d1 <- depsExpBase eb1
+  d2 <- depsExpBase eb2
+  pure $ d1 `depValJoin` d2
+depsExpBase (Constr _ eb_n _ _) = do  -- ????
+  d_n <- mapM depsExpBase eb_n
+  pure $ foldr depValJoin (DepVal mempty) d_n
+depsExpBase (Update eb1 sb eb2 _) = do
+  d1 <- depsExpBase eb1
+  d2 <- depsExpBase eb2
+  d_n <- depsSliceBase sb
+  pure $ foldr depValJoin (d1 `depValJoin` d2) d_n
+depsExpBase (RecordUpdate eb1 _ eb2 _ _) = do
+  d1 <- depsExpBase eb1
+  d2 <- depsExpBase eb2
+  pure $ d1 `depValJoin` d2
+depsExpBase (OpSection qn _ _) = do -- ????
+  env <- askEnv
+  envLookup (qualLeaf qn) env
+depsExpBase (OpSectionLeft qn _ eb _ _ _) = do
+  env <- askEnv
+  d1 <- envLookup (qualLeaf qn) env
+  d2 <- depsExpBase eb
+  pure $ d1 `depValJoin` d2
+depsExpBase (OpSectionRight qn _ eb _ _ _) = do
+  env <- askEnv
+  d1 <- envLookup (qualLeaf qn) env
+  d2 <- depsExpBase eb
+  pure $ d1 `depValJoin` d2
+depsExpBase (ProjectSection _ _ _) = pure $ DepVal mempty -- ???? I don't know what this does or how to handle it
+depsExpBase (IndexSection sb _ _) = do
+  d_n <- depsSliceBase sb
+  pure $ foldr depValJoin (DepVal mempty) d_n
+depsExpBase (Ascript eb te _) = do
+  d1 <- depsExpBase eb
+  d2 <- depsTypeExp te
+  pure $ d1 `depValJoin` d2
+depsExpBase (Coerce eb te _ _) = do
+  d1 <- depsExpBase eb
+  d2 <- depsTypeExp te
+  pure $ d1 `depValJoin` d2  
 depsExpBase (Lambda pb_n eb _ _ _) = do
   env <- askEnv
-  pure $ DepFun env (map stripID pb_n) eb 
+  names <- mapM stripID pb_n
+  pure $ DepFun env names eb 
   where stripID id = case id of
-                        Id vn _ _ -> vn
-                        _ -> VName "a" 0 -- OBS
-depsExpBase (AppExp base _) = depsAppExpBase base
+                        Id vn _ _ -> pure vn
+                        _ -> failure $ "Impossible pattern base for function declaration" <> (show pb_n)
+                        -- Might certainly need more cases 
+depsExpBase (AppExp aeb _) = depsAppExpBase aeb
+
+
 
 depsFieldBase :: FieldBase Info VName -> EvalM DepVal
-depsFieldBase (RecordFieldExplicit _ _ _) = pure $ DepVal mempty -- 
-depsFieldBase (RecordFieldImplicit _ _ _) = pure $ DepVal mempty -- 
+depsFieldBase (RecordFieldExplicit _ eb _) = depsExpBase eb
+depsFieldBase (RecordFieldImplicit (L _ vn) _ _) = do
+  env <- askEnv
+  envLookup vn env  
 
 depsAppExpBase :: AppExpBase Info VName -> EvalM DepVal
 depsAppExpBase (Apply eb1 lst _) = do
@@ -243,7 +307,7 @@ depsAppExpBase (BinOp _ _ eb1 eb2 _) = do
 depsAppExpBase (LetWith _ _ _ _ _ _) = pure $ DepVal mempty -- Not sure what this is ????
 depsAppExpBase (Index eb sb _) = do
   d <- depsExpBase eb 
-  d_n <- mapM depsDimIndexBase sb
+  d_n <- depsSliceBase sb
   pure $ foldr depValJoin d d_n 
 depsAppExpBase (Match eb ne_cb _) = do
   d1 <- depsExpBase eb
@@ -332,3 +396,6 @@ depsTypeArgExp (TypeArgExpType te) = depsTypeExp te
 depsSizeExp :: SizeExp (ExpBase Info VName) -> EvalM DepVal -- OBS use of ExpBase here 
 depsSizeExp (SizeExp eb _) = depsExpBase eb
 depsSizeExp (SizeExpAny _) = pure $ DepVal mempty
+
+depsSliceBase :: SliceBase Info VName -> EvalM [DepVal]
+depsSliceBase = mapM depsDimIndexBase
