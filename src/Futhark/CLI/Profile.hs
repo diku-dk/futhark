@@ -54,18 +54,19 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
     numpad = 15
     mkRows rows =
       let longest = foldl max numpad $ map (T.length . fst) rows
+          total = sum $ map (evSum . snd) rows
           header = headerRow longest
           splitter = T.map (const '-') header
           bottom =
             T.unwords
               [ showText (sum (map (evCount . snd) rows)),
                 "events with a total runtime of",
-                T.pack $ printf "%.2fμs" $ sum $ map (evSum . snd) rows
+                T.pack $ printf "%.2fμs" total
               ]
        in T.unlines $
             header
               : splitter
-              : map (mkRow longest) rows
+              : map (mkRow longest total) rows
                 <> [splitter, bottom]
     headerRow longest =
       T.unwords
@@ -74,16 +75,18 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
           padLeft numpad "sum",
           padLeft numpad "avg",
           padLeft numpad "min",
-          padLeft numpad "max"
+          padLeft numpad "max",
+          padLeft numpad "fraction"
         ]
-    mkRow longest (name, ev) =
+    mkRow longest total (name, ev) =
       T.unwords
         [ padRight longest name,
           padLeft numpad (showText (evCount ev)),
           padLeft numpad $ T.pack $ printf "%.2fμs" (evSum ev),
           padLeft numpad $ T.pack $ printf "%.2fμs" $ evSum ev / fromInteger (evCount ev),
           padLeft numpad $ T.pack $ printf "%.2fμs" (evMin ev),
-          padLeft numpad $ T.pack $ printf "%.2fμs" (evMax ev)
+          padLeft numpad $ T.pack $ printf "%.2fμs" (evMax ev),
+          padLeft numpad $ T.pack $ printf "%.4f" (evSum ev / total)
         ]
 
 timeline :: [ProfilingEvent] -> T.Text
