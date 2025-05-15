@@ -503,12 +503,11 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody loc) = 
           forM_ (zip mergepat' mergeinit) $ \(p, se) ->
             unless (se == I.Var (I.paramName p)) $
               letBindNames [I.paramName p] $
-                BasicOp $
-                  case se of
-                    I.Var v
-                      | not $ primType $ paramType p ->
-                          Reshape I.ReshapeCoerce (I.arrayShape $ paramType p) v
-                    _ -> SubExp se
+                case se of
+                  I.Var v
+                    | not $ primType $ paramType p ->
+                        shapeCoerce (I.arrayDims $ paramType p) v
+                  _ -> BasicOp $ SubExp se
 
           -- As the condition expression is inserted twice, we have to
           -- avoid shadowing (#1935).
@@ -536,12 +535,11 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody loc) = 
             forM_ (zip mergepat' ses) $ \(p, se) ->
               unless (se == I.Var (I.paramName p)) $
                 letBindNames [I.paramName p] $
-                  BasicOp $
-                    case se of
-                      I.Var v
-                        | not $ primType $ paramType p ->
-                            Reshape I.ReshapeCoerce (I.arrayShape $ paramType p) v
-                      _ -> SubExp se
+                  case se of
+                    I.Var v
+                      | not $ primType $ paramType p ->
+                          shapeCoerce (I.arrayDims $ paramType p) v
+                    _ -> BasicOp $ SubExp se
             subExpsRes <$> internaliseExp "loop_cond" cond
           loop_end_cond <- bodyBind loop_end_cond_body
 
@@ -652,7 +650,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
                 (I.Shape $ map (intConst Int64 . toInteger) new_shape)
                 1
                 $ I.arrayShape flat_arr_t
-        letSubExp desc $ I.BasicOp $ I.Reshape I.ReshapeArbitrary new_shape' flat_arr
+        letSubExp desc $ I.BasicOp $ I.Reshape flat_arr (reshapeAll (I.arrayShape flat_arr_t) new_shape')
   | otherwise = do
       es' <- mapM (internaliseExp "arr_elem") es
       let arr_t_ext = foldMap toList $ internaliseType $ E.toStruct arr_t
@@ -779,6 +777,25 @@ internaliseExp desc (E.Attr attr e loc) = do
       traceRes (nameToText tag) e'
     "opaque" ->
       mapM (letSubExp desc . BasicOp . Opaque OpaqueNil) e'
+    "scratch" -> do
+      ts <- mapM subExpType e'
+      forM (zip ts e') $ \(t, se) ->
+        case t of
+          I.Array pt shape _ ->
+            letSubExp desc $ I.BasicOp $ I.Scratch pt $ I.shapeDims shape
+          I.Prim pt ->
+            pure $ constant $ blankPrimValue pt
+          _ -> pure se
+    "blank" -> do
+      ts <- mapM subExpType e'
+      forM (zip ts e') $ \(t, se) ->
+        case t of
+          I.Array pt shape _ ->
+            letSubExp desc . I.BasicOp . I.Replicate shape . constant $
+              blankPrimValue pt
+          I.Prim pt ->
+            pure $ constant $ blankPrimValue pt
+          _ -> pure se
     _ ->
       pure e'
   where
@@ -1567,9 +1584,11 @@ isOverloadedFunction qname desc loc = do
                     x' <- letExp "x" $ I.BasicOp $ I.SubExp x
                     y' <- letExp "x" $ I.BasicOp $ I.SubExp y
                     x_flat <-
-                      letExp "x_flat" $ I.BasicOp $ I.Reshape I.ReshapeArbitrary (I.Shape [x_num_elems]) x'
+                      letExp "x_flat" . I.BasicOp $
+                        I.Reshape x' (reshapeAll (I.arrayShape x_t) (I.Shape [x_num_elems]))
                     y_flat <-
-                      letExp "y_flat" $ I.BasicOp $ I.Reshape I.ReshapeArbitrary (I.Shape [x_num_elems]) y'
+                      letExp "y_flat" . I.BasicOp $
+                        I.Reshape y' (reshapeAll (I.arrayShape x_t) (I.Shape [x_num_elems]))
 
                     -- Compare the elements.
                     cmp_lam <- cmpOpLambda $ I.CmpEq (elemType x_t)
@@ -1765,17 +1784,17 @@ isIntrinsicFunction qname all_args loc = do
         forM arrs $ \arr' -> do
           arr_t <- lookupType arr'
           letSubExp desc . I.BasicOp $
-            I.Reshape
-              I.ReshapeArbitrary
-              (reshapeOuter (I.Shape [n', m']) 1 $ I.arrayShape arr_t)
-              arr'
+            I.Reshape arr' $
+              reshapeAll (I.arrayShape arr_t) $
+                reshapeOuter (I.Shape [n', m']) 1 $
+                  I.arrayShape arr_t
     handleRest [arr] "manifest" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
       forM arrs $ \arr' -> do
         r <- I.arrayRank <$> lookupType arr'
         if r == 0
           then pure $ I.Var arr'
-          else letSubExp desc $ I.BasicOp $ I.Manifest [0 .. r - 1] arr'
+          else letSubExp desc $ I.BasicOp $ I.Manifest arr' [0 .. r - 1]
     handleRest [arr] "flatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
       forM arrs $ \arr' -> do
@@ -1784,10 +1803,10 @@ isIntrinsicFunction qname all_args loc = do
             m = arraySize 1 arr_t
         k <- letSubExp "flat_dim" $ I.BasicOp $ I.BinOp (Mul Int64 I.OverflowUndef) n m
         letSubExp desc . I.BasicOp $
-          I.Reshape
-            I.ReshapeArbitrary
-            (reshapeOuter (I.Shape [k]) 2 $ I.arrayShape arr_t)
-            arr'
+          I.Reshape arr' $
+            reshapeAll (I.arrayShape arr_t) $
+              reshapeOuter (I.Shape [k]) 2 $
+                I.arrayShape arr_t
     handleRest [x, y] "concat" = Just $ \desc -> do
       xs <- internaliseExpToVars "concat_x" x
       ys <- internaliseExpToVars "concat_y" y
@@ -1806,7 +1825,7 @@ isIntrinsicFunction qname all_args loc = do
     handleRest [e] "transpose" = Just $ \desc ->
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
-        pure $ I.Rearrange ([1, 0] ++ [2 .. r - 1]) v
+        pure $ I.Rearrange v ([1, 0] ++ [2 .. r - 1])
     handleRest [x, y] "zip" = Just $ \desc ->
       mapM (letSubExp "zip_copy" . BasicOp . Replicate mempty . I.Var)
         =<< ( (++)
@@ -1889,8 +1908,8 @@ isIntrinsicFunction qname all_args loc = do
             "length of index and value array does not match"
             loc
         certifying c $
-          letExp (baseString sv ++ "_write_sv") . I.BasicOp $
-            I.Reshape I.ReshapeCoerce (reshapeOuter (I.Shape [si_w]) 1 sv_shape) sv
+          letExp (baseString sv ++ "_write_sv") $
+            shapeCoerce (I.shapeDims (reshapeOuter (I.Shape [si_w]) 1 sv_shape)) sv
 
       indexType <- fmap rowType <$> mapM lookupType si'
       indexName <- mapM (\_ -> newVName "write_index") indexType

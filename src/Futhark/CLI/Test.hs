@@ -194,7 +194,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
     maybePipeline SeqMemPipeline = "(seq-mem) "
     maybePipeline GpuMemPipeline = "(gpu-mem) "
     maybePipeline MCMemPipeline = "(mc-mem) "
-    maybePipeline NoPipeline = ""
+    maybePipeline NoPipeline = " "
 
     ok (AstMetrics metrics) (name, expected_occurences) =
       case M.lookup name metrics of
@@ -203,7 +203,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
               throwError $
                 name
                   <> maybePipeline pipeline
-                  <> " should have occurred "
+                  <> "should have occurred "
                   <> showText expected_occurences
                   <> " times, but did not occur at all in optimised program."
         Just actual_occurences
@@ -211,7 +211,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
               throwError $
                 name
                   <> maybePipeline pipeline
-                  <> " should have occurred "
+                  <> "should have occurred "
                   <> showText expected_occurences
                   <> " times, but occurred "
                   <> showText actual_occurences

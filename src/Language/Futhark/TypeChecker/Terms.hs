@@ -986,9 +986,9 @@ checkOneExp e = do
     Right (_generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       let t = typeOf e''
-      (tparams, _, _) <-
+      (tparams, _, RetType _ t') <-
         letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
-      fixOverloadedTypes $ typeVars t
+      fixOverloadedTypes $ typeVars t'
       e''' <- normTypeFully e''
       localChecks e'''
       causalityCheck e'''
