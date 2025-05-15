@@ -369,6 +369,15 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/segment_ids2.fut"
+        ( pure $ \(i, m, k, b) ->
+            [ IndexFn
+                { shape = [Forall i (Cat k (sHole m) (sHole b))],
+                  body = cases [(Bool False, sHole k)] --- XXX dummy
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/part2indicesL.fut"
         ( newNameFromString "csL" >>= \csL ->
             newNameFromString "shape" >>= \shape ->
