@@ -519,12 +519,10 @@ executable futhark
   ghc-options: -threaded -rtsopts "-with-rtsopts=-maxN16 -qg1 -A16M"
   build-depends: base, futhark
 
-test-suite unit
+library futhark-testing
   import: common
-  type: exitcode-stdio-1.0
-  main-is: futhark_tests.hs
   hs-source-dirs: unittests
-  other-modules:
+  exposed-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
@@ -558,7 +556,7 @@ test-suite unit
       Language.Futhark.TypeCheckerTests
   build-depends:
       QuickCheck >=2.8
-      , mtl >=2.2.1
+    , mtl >=2.2.1
     , base
     , containers
     , free
@@ -570,3 +568,27 @@ test-suite unit
     , tasty-quickcheck
     , text
     , vector >=0.12
+
+test-suite unit
+  import: common
+  type: exitcode-stdio-1.0
+  main-is: unittests/futhark_tests.hs
+  build-depends:
+      base
+    , futhark-testing
+    , tasty
+
+benchmark benchmarks
+  import: common
+  type: exitcode-stdio-1.0
+  main-is: futhark_benchmarks.hs
+  hs-source-dirs: benchmarks
+  other-modules:
+        Language.Futhark.TypeChecker.TySolveBenchmarks
+
+  build-depends:
+      base
+    , containers
+    , criterion
+    , futhark
+    , futhark-testing
