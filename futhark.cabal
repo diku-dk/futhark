@@ -382,6 +382,11 @@ library
       Futhark.Pkg.Types
       Futhark.Profile
       Futhark.Script
+      Futhark.Solve.GLPK
+      Futhark.Solve.LP
+      Futhark.Solve.Matrix
+      Futhark.Solve.Simplex
+      Futhark.Solve.BranchAndBound
       Futhark.Test
       Futhark.Test.Spec
       Futhark.Test.Values
@@ -422,14 +427,19 @@ library
       Language.Futhark.Tuple
       Language.Futhark.TypeChecker
       Language.Futhark.TypeChecker.Consumption
+      Language.Futhark.TypeChecker.Constraints
+      Language.Futhark.TypeChecker.TySolve
+      Language.Futhark.TypeChecker.Error
       Language.Futhark.TypeChecker.Names
       Language.Futhark.TypeChecker.Match
       Language.Futhark.TypeChecker.Modules
       Language.Futhark.TypeChecker.Monad
+      Language.Futhark.TypeChecker.Rank
       Language.Futhark.TypeChecker.Terms
       Language.Futhark.TypeChecker.Terms.Loop
       Language.Futhark.TypeChecker.Terms.Monad
       Language.Futhark.TypeChecker.Terms.Pat
+      Language.Futhark.TypeChecker.Terms.Unsized
       Language.Futhark.TypeChecker.Types
       Language.Futhark.TypeChecker.Unify
       Language.Futhark.Warnings
@@ -499,6 +509,9 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
+     -- remove me later
+    , glpk-hs
+    , silently
 
 executable futhark
   import: common
@@ -506,12 +519,10 @@ executable futhark
   ghc-options: -threaded -rtsopts "-with-rtsopts=-maxN16 -qg1 -A16M"
   build-depends: base, futhark
 
-test-suite unit
+library futhark-testing
   import: common
-  type: exitcode-stdio-1.0
-  main-is: futhark_tests.hs
   hs-source-dirs: unittests
-  other-modules:
+  exposed-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
@@ -534,21 +545,50 @@ test-suite unit
       Futhark.Optimise.ArrayLayoutTests
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
+      Futhark.Solve.BranchAndBoundTests
+      Futhark.Solve.SimplexTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
+      Language.Futhark.TypeChecker.TySolveTests
       Language.Futhark.TypeCheckerTests
   build-depends:
       QuickCheck >=2.8
-      , mtl >=2.2.1
+    , mtl >=2.2.1
     , base
     , containers
     , free
     , futhark
     , megaparsec
+    , srcloc >=0.4
     , tasty
     , tasty-hunit
     , tasty-quickcheck
     , text
+    , vector >=0.12
+
+test-suite unit
+  import: common
+  type: exitcode-stdio-1.0
+  main-is: unittests/futhark_tests.hs
+  build-depends:
+      base
+    , futhark-testing
+    , tasty
+
+benchmark benchmarks
+  import: common
+  type: exitcode-stdio-1.0
+  main-is: futhark_benchmarks.hs
+  hs-source-dirs: benchmarks
+  other-modules:
+        Language.Futhark.TypeChecker.TySolveBenchmarks
+
+  build-depends:
+      base
+    , containers
+    , criterion
+    , futhark
+    , futhark-testing
