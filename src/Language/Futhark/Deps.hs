@@ -120,7 +120,7 @@ depsFreeVarsInProgBase base =
     _ -> envEmpty -- OBS
 
 depsFreeVarsInExpBase :: ExpBase Info VName -> DepsEnv
-depsFreeVarsInExpBase eb = M.fromList $ map (\x -> (x, DepVal mempty)) $ freeVarsList eb
+depsFreeVarsInExpBase eb = M.fromList $ map (\x -> (x, DepVal $ idsSingle x)) $ freeVarsList eb
 
 freeVarsList :: ExpBase Info VName -> [VName]
 freeVarsList eb = S.toList $ FV.fvVars $ freeInExp eb
@@ -172,7 +172,7 @@ depsExpBase (ArrayLit eb_n _ _) = do
   d_n <- mapM depsExpBase eb_n
   pure $ foldr depValJoin (DepVal mempty) d_n
 depsExpBase (ArrayVal _ _ _) = pure $ DepVal mempty
-depsExpBase (Attr _ eb _) = pure $ DepVal mempty
+depsExpBase (Attr _ eb _) = depsExpBase eb -- OBS
 depsExpBase (Project name eb _ _) = do -- ???? name has to be integer?
   d1 <- depsExpBase eb
   pure $
@@ -180,6 +180,7 @@ depsExpBase (Project name eb _ _) = do -- ???? name has to be integer?
       (DepTuple x, Just i) | i < length x -> x !! i
       (x, _) -> x 
 depsExpBase (Negate eb _) = depsExpBase eb
+depsExpBase (Not eb _) = depsExpBase eb
 depsExpBase (Assert eb1 eb2 _ _) = do
   d1 <- depsExpBase eb1
   d2 <- depsExpBase eb2
@@ -243,8 +244,8 @@ depsAppExpBase (Apply eb1 lst _) = do
   d_n <- mapM depsExpBase $ map snd (NE.toList lst)
   case d1 of 
     DepFun env p_n body -> do
-      localEnv (const $ foldr envUnion envEmpty $ zipWith envSingle p_n d_n) $ depsExpBase body
-    deps -> pure $ foldr depValJoin d1 d_n
+      localEnv (const $ foldr envUnion env $ zipWith envSingle p_n d_n) $ depsExpBase body
+    _ -> pure $ foldr depValJoin d1 d_n
 depsAppExpBase (Range eb1 maybe_eb2 _ _) = do
   d1 <- depsExpBase eb1
   d2 <- maybe (pure $ DepVal mempty) depsExpBase maybe_eb2
@@ -261,7 +262,28 @@ depsAppExpBase (If eb1 eb2 eb3 _) = do
   d2 <- depsExpBase eb2
   d3 <- depsExpBase eb3
   pure $ depValDeps d1 `depValInj` (d2 `depValJoin` d3)
-depsAppExpBase (Loop _ _ _ _ _ _) = pure $ DepVal mempty -- OBS not implemented
+depsAppExpBase (Loop vn_n (Id vn _ _) lib lfb eb  _) = do -- OBS only works for pattern bases of Id .. currently
+  d1 <- depsLoopInitBase lib
+  case lfb of
+    For ib' eb' -> do
+      d2 <- depsExpBase eb'
+      env <- askEnv
+      d3 <- loop (identName ib') d1
+      pure $ depValDeps d2 `depValInj` d3
+    ForIn (Id vn' _ _) eb' -> do -- OBS Does not cover all patterns
+      d2 <- depsExpBase eb'
+      d3 <- loop vn' d1
+      pure $ depValDeps d2 `depValInj` d3
+    While eb' -> depsExpBase eb' -- OBS wrong
+  where loop i deps = do
+              env <- askEnv
+              let env' = envExtend i (DepVal mempty) $ envExtend vn deps env
+                in do
+                  deps' <- localEnv (const env') (depsExpBase eb)
+                  if deps == deps'
+                    then pure deps'
+                    else loop i $ deps `depValJoin` deps' 
+
 depsAppExpBase (BinOp _ _ eb1 eb2 _) = do
   d1 <- depsExpBase $ fst eb1
   d2 <- depsExpBase $ fst eb2
@@ -277,25 +299,25 @@ depsAppExpBase (Match eb ne_cb _) = do
   pure $ foldr depValJoin (DepVal mempty) $ map (\x -> depValInj (depValDeps x) d1) d_n
   -- OBS use of injection (might need to be removed)
 
-depsLoopInitBase :: LoopInitBase f VName -> EvalM DepVal
+depsLoopInitBase :: LoopInitBase Info  VName -> EvalM DepVal
 depsLoopInitBase (LoopInitExplicit eb) = depsExpBase eb
-depsLoopInitBase (LoopInitImplicit (f eb)) = depsExpBase eb
+depsLoopInitBase (LoopInitImplicit (Info eb)) = depsExpBase eb
 
-depsLoopFormBase :: LoopFormBase f VName -> EvalM DepVal
-depsLoopFormBase (For ib eb) = do
-  d1 <- depsIdentBase ib
-  d2 <- depsExpBase eb
-  pure $ d1 `depValJoin` d2
-depsLoopFormBase (ForIn pb eb) = do
-  d1 <- depsPatBase pb
-  d2 <- depsExpBase eb
-  pure $ d1 `depValJoin` d2
-depsLoopFormBase (While eb) = depsExpBase eb
+-- depsLoopFormBase :: LoopFormBase f VName -> EvalM DepVal
+-- depsLoopFormBase (For ib eb) = do
+--   d1 <- depsIdentBase ib
+--   d2 <- depsExpBase eb
+--   pure $ d1 `depValJoin` d2
+-- depsLoopFormBase (ForIn pb eb) = do
+--   d1 <- depsPatBase pb
+--   d2 <- depsExpBase eb
+--   pure $ d1 `depValJoin` d2
+-- depsLoopFormBase (While eb) = depsExpBase eb
 
-depsIdentBase :: Identbase f VName -> EvalM DepVal 
-depsIdentBase ident = do
-  env <- askEnv
-  envLookup (identName ident) env
+-- depsIdentBase :: IdentBase f VName -> EvalM DepVal 
+-- depsIdentBase ident = do
+--   env <- askEnv
+--   envLookup (identName ident) env
 
 depsCaseBase :: CaseBase Info VName -> EvalM DepVal
 depsCaseBase (CasePat pb eb _) = do 
