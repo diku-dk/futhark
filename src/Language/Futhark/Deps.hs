@@ -172,7 +172,6 @@ nestedNamesToSelfEnv (Name vn) = M.singleton vn (DepVal $ Ids [vn])
 nestedNamesToSelfEnv (Nested nvn) = foldr M.union depsEnvEmpty (map nestedNamesToSelfEnv nvn) -- OBS
 nestedNamesToSelfEnv WildcardName = depsEnvEmpty
 
-
 depsProgBase :: ProgBase Info VName -> EvalM DepVal 
 depsProgBase base = depsDecBase $ last $ progDecs base -- obs
 depsProgBase _ = failure "Unrecognized program base"
@@ -272,12 +271,64 @@ depsPatBase (TuplePat pb_n _) = do
 depsPatBase (RecordPat rcrd _) = do
   d_n <- mapM (depsPatBase . snd) rcrd
   pure $ foldr depValJoin (DepVal mempty) d_n
+depsPatBase (PatParens pb _) = depsPatBase pb
 depsPatBase (Id vn _ _) = pure $ DepVal $ Ids [vn]
-depsPatBase _ = pure $ DepVal mempty --
--- depsPatBase (RecordPat)
--- depsPatBase (PatParens)
--- depsPatBase (Wildcard)
--- depsPatBase (PatAscription)
--- depsPatBase (PatLit)
--- depsPatBase (PatConstr)
--- depsPatBase (PatAttr)
+depsPatBase (Wildcard _ _) = pure $ DepVal mempty
+depsPatBase (PatAscription pb te _) = do
+  d1 <- depsPatBase pb
+  d2 <- depsTypeExp te
+  pure $ d1 `depValJoin` d2
+depsPatBase (PatLit _ _ _) = pure $ DepVal mempty
+depsPatBase (PatConstr _ _ pb_n _) = do
+  d_n <- mapM depsPatBase pb_n
+  pure $ foldr depValJoin (DepVal mempty) d_n
+depsPatBase (PatAttr _ pb _) = depsPatBase pb
+
+depsTypeExp :: TypeExp (ExpBase Info VName) VName -> EvalM DepVal -- OBS use of ExpBase here 
+depsTypeExp (TEVar qn _) = do
+  env <- askEnv
+  envLookup (qualLeaf qn) env
+depsTypeExp (TEParens te _) = depsTypeExp te
+depsTypeExp (TETuple te_n _) = do -- OBS
+  d_n <- mapM depsTypeExp te_n
+  pure $ DepTuple d_n
+depsTypeExp (TERecord lst _) = do
+  d_n <- mapM (depsTypeExp . snd) lst
+  pure $ foldr depValJoin (DepVal mempty) d_n
+depsTypeExp (TEArray se te _ ) = do
+   d1 <- depsSizeExp se
+   d2 <- depsTypeExp te
+   pure $ d1 `depValJoin` d2
+depsTypeExp (TEUnique te _) = depsTypeExp te
+depsTypeExp (TEApply te tae _) = do -- ????
+  d1 <- depsTypeExp te
+  d2 <- depsTypeArgExp tae
+  pure $ d1 `depValJoin` d2
+depsTypeExp (TEArrow maybe_vn te1 te2 _) = do
+  d1 <- depsTypeExp te1
+  d2 <- depsTypeExp te2
+  case maybe_vn of
+    Just x -> do
+      env <- askEnv
+      d3 <- envLookup x env
+      pure $ d1 `depValJoin` d2 `depValJoin` d3
+    Nothing -> pure $ d1 `depValJoin` d2
+depsTypeExp (TESum lst _) = do
+  d_n <- mapM inner (map snd lst) -- List of lists of type expressions
+  pure $ foldr depValJoin (DepVal mempty) d_n
+  where inner x_n = do
+                      d_n' <- mapM depsTypeExp x_n
+                      pure $ foldr depValJoin (DepVal mempty) d_n'  
+depsTypeExp (TEDim vn_n te _) = do
+  env <- askEnv
+  d_n <- mapM (\x -> envLookup x env) vn_n
+  d1 <- depsTypeExp te
+  pure $ foldr depValJoin d1 d_n
+
+depsTypeArgExp :: TypeArgExp (ExpBase Info VName) VName -> EvalM DepVal  -- OBS use of ExpBase here 
+depsTypeArgExp (TypeArgExpSize se) = depsSizeExp se
+depsTypeArgExp (TypeArgExpType te) = depsTypeExp te
+
+depsSizeExp :: SizeExp (ExpBase Info VName) -> EvalM DepVal -- OBS use of ExpBase here 
+depsSizeExp (SizeExp eb _) = depsExpBase eb
+depsSizeExp (SizeExpAny _) = pure $ DepVal mempty
