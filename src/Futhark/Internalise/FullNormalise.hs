@@ -1,10 +1,15 @@
--- | This full normalisation module converts a well-typed, polymorphic,
--- module-free Futhark program into an equivalent with only simple expresssions.
--- Notably, all non-trivial expression are converted into a list of
--- let-bindings to make them simpler, with no nested apply, nested lets...
+-- | This full normalisation module converts a well-typed,
+-- polymorphic, module-free Futhark program into an equivalent with
+-- only simple subexpresssions. Notably, all non-trivial expression
+-- are converted into a list of let-bindings to make them simpler,
+-- with no nested applications, nested lets, etc. The result is
+-- similar to Administrative Normal Form.
+--
 -- This module only performs syntactic operations.
 --
 -- Also, it performs various kinds of desugaring:
+--
+-- * Removes all parentheses.
 --
 -- * Turns operator sections into explicit lambdas.
 --
@@ -20,9 +25,9 @@
 -- still needed in monomorphisation for now.
 module Futhark.Internalise.FullNormalise (transformProg) where
 
+import Control.Monad (zipWithM)
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.Bifunctor
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Text qualified as T
@@ -31,12 +36,14 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
--- Modifier to apply on binding, this is used to propagate attributes and move assertions
+-- Modifier to apply on binding, this is used to propagate attributes
+-- and move assertions
 data BindModifier
   = Ass Exp (Info T.Text) SrcLoc
   | Att (AttrInfo VName)
 
--- Apply a list of modifiers, removing the assertions as it is not needed to check them multiple times
+-- Apply a list of modifiers, removing the assertions as it is not
+-- needed to check them multiple times
 applyModifiers :: Exp -> [BindModifier] -> (Exp, [BindModifier])
 applyModifiers =
   foldr f . (,[])
@@ -51,59 +58,73 @@ data Binding
   = PatBind [SizeBinder VName] (Pat StructType) Exp
   | FunBind VName ([TypeParam], [Pat ParamType], Maybe (TypeExp Exp VName), Info ResRetType, Exp)
 
-type NormState = (([Binding], [BindModifier]), VNameSource)
+data NormState = NormState
+  { stateBindings :: [Binding],
+    stateMods :: [BindModifier],
+    stateNameSource :: VNameSource
+  }
 
--- | Main monad of this module, the state as 3 parts:
+-- | Main monad of this module, the state has 3 parts:
+--
 -- * the VNameSource to produce new names
+--
 -- * the [Binding] is the accumulator for the result
 --   It behave a bit like a writer
--- * the [BindModifier] is the current list of modifiers to apply to the introduced bindings
+--
+-- * the [BindModifier] is the current list of modifiers to apply to
+--   the introduced bindings
+--
 --   It behave like a reader for attributes modifier, and as a state for assertion,
 --   they have to be in the same list to conserve their order
--- Direct interaction with the inside state should be done with caution, that's why their
--- no instance of `MonadState`.
 newtype OrderingM a = OrderingM (StateT NormState (Reader String) a)
   deriving
     (Functor, Applicative, Monad, MonadReader String, MonadState NormState)
 
 instance MonadFreshNames OrderingM where
-  getNameSource = OrderingM $ gets snd
-  putNameSource = OrderingM . modify . second . const
+  getNameSource = OrderingM $ gets stateNameSource
+  putNameSource src = OrderingM $ modify $ \s -> s {stateNameSource = src}
 
 addModifier :: BindModifier -> OrderingM ()
-addModifier = OrderingM . modify . first . second . (:)
+addModifier m = modify $ \s -> s {stateMods = m : stateMods s}
 
 rmModifier :: OrderingM ()
-rmModifier = OrderingM $ modify $ first $ second tail
+rmModifier = modify $ \s -> s {stateMods = tail $ stateMods s}
 
 addBind :: Binding -> OrderingM ()
-addBind (PatBind s p e) = do
-  modifs <- gets $ snd . fst
+addBind (PatBind sz p e) = do
+  modifs <- gets stateMods
   let (e', modifs') = applyModifiers e modifs
-  modify $ first $ bimap (PatBind (s <> implicit) p e' :) (const modifs')
+  modify $ \s ->
+    s
+      { stateBindings = PatBind (sz <> implicit) p e' : stateBindings s,
+        stateMods = modifs'
+      }
   where
     implicit = case e of
       (AppExp _ (Info (AppRes _ ext))) -> map (`SizeBinder` mempty) ext
       _ -> []
 addBind b@FunBind {} =
-  OrderingM $ modify $ first $ first (b :)
+  OrderingM $ modify $ \s -> s {stateBindings = b : stateBindings s}
 
 runOrdering :: (MonadFreshNames m) => OrderingM a -> m (a, [Binding])
 runOrdering (OrderingM m) =
-  modifyNameSource $ mod_tup . flip runReader "tmp" . runStateT m . (([], []),)
+  modifyNameSource $
+    mod_tup
+      . flip runReader "tmp"
+      . runStateT m
+      . NormState mempty mempty
   where
-    mod_tup (a, ((binds, modifs), src)) =
-      if null modifs
-        then ((a, binds), src)
-        else error "not all bind modifiers were freed"
+    mod_tup (a, NormState binds [] src) = ((a, binds), src)
+    mod_tup _ = error "not all bind modifiers were freed"
 
 naming :: String -> OrderingM a -> OrderingM a
 naming s = local (const s)
 
--- | From now, we say an expression is "final" if it's going to be stored in a let-bind
--- or is at the end of the body e.g. after all lets
+-- From now, we say an expression is "final" if it's going to be
+-- stored in a let-bind or is at the end of the body e.g. after all
+-- lets
 
--- Replace a non-final expression by a let-binded variable
+-- | Replace a non-final expression by a let-bound variable
 nameExp :: Bool -> Exp -> OrderingM Exp
 nameExp True e = pure e
 nameExp False e = do
@@ -118,6 +139,7 @@ nameExp False e = do
 -- expression bound to this pattern.
 patRepName :: Pat t -> String
 patRepName (PatAscription p _ _) = patRepName p
+patRepName (PatParens p _) = patRepName p
 patRepName (Id v _ _) = baseString v
 patRepName _ = "tmp"
 
@@ -134,10 +156,10 @@ argRepName e i = expRepName e <> "_arg" <> show i
 getOrdering :: Bool -> Exp -> OrderingM Exp
 getOrdering final (Assert ass e txt loc) = do
   ass' <- getOrdering False ass
-  l_prev <- OrderingM $ gets $ length . snd . fst
+  l_prev <- gets $ length . stateMods
   addModifier $ Ass ass' txt loc
   e' <- getOrdering final e
-  l_after <- OrderingM $ gets $ length . snd . fst
+  l_after <- gets $ length . stateMods
   -- if the list of modifier has reduced in size, that means that
   -- all assertions as been inserted,
   -- else, we have to introduce the assertion ourself
@@ -156,13 +178,15 @@ getOrdering _ e@Literal {} = pure e
 getOrdering _ e@IntLit {} = pure e
 getOrdering _ e@FloatLit {} = pure e
 getOrdering _ e@StringLit {} = pure e
-getOrdering _ e@Hole {} = pure e -- can we still have some ?
+getOrdering _ e@Hole {} = pure e
 getOrdering _ e@Var {} = pure e
 getOrdering final (Parens e _) = getOrdering final e
 getOrdering final (QualParens _ e _) = getOrdering final e
 getOrdering _ (TupLit es loc) = do
-  es' <- mapM (getOrdering False) es
+  es' <- zipWithM f [0 :: Int ..] es
   pure $ TupLit es' loc
+  where
+    f i = naming ("tup" <> show i) . getOrdering False
 getOrdering _ (RecordLit fs loc) = do
   fs' <- mapM f fs
   pure $ RecordLit fs' loc
@@ -188,10 +212,10 @@ getOrdering _ (Project n e ty loc) = do
   e' <- getOrdering False e
   pure $ Project n e' ty loc
 getOrdering _ (Negate e loc) = do
-  e' <- getOrdering False e
+  e' <- naming "neg_arg" $ getOrdering False e
   pure $ Negate e' loc
 getOrdering _ (Not e loc) = do
-  e' <- getOrdering False e
+  e' <- naming "not_arg" $ getOrdering False e
   pure $ Not e' loc
 getOrdering final (Constr n es ty loc) = do
   es' <- mapM (getOrdering False) es
@@ -327,19 +351,19 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
     isAnd = baseName (qualLeaf op) == "&&"
 getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
   e' <- getOrdering False e
-  slice' <- astMap mapper slice
+  slice' <- naming "idx" $ astMap mapper slice
   addBind $ PatBind [] (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc)
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
 getOrdering final (AppExp (Index e slice loc) resT) = do
   e' <- getOrdering False e
-  slice' <- astMap mapper slice
+  slice' <- naming "idx" $ astMap mapper slice
   nameExp final $ AppExp (Index e' slice' loc) resT
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
 getOrdering final (AppExp (Match expr cs loc) resT) = do
-  expr' <- getOrdering False expr
+  expr' <- naming "match_on" $ getOrdering False expr
   cs' <- mapM f cs
   nameExp final $ AppExp (Match expr' cs' loc) resT
   where
