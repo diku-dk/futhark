@@ -40,8 +40,8 @@ import Futhark.Util.Pretty (Pretty (pretty), viaShow)
 
 -- Fourer Motzkin Elimination solver may return True or False.
 -- True means the query holds. False means "I don't know".
-data Answer = Yes | Unknown
-  deriving (Show, Eq)
+data Answer = Unknown | Yes
+  deriving (Show, Eq, Ord)
 
 instance Pretty Answer where
   pretty = viaShow
