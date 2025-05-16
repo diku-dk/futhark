@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark profile` now also prints proportion of total runtime for each cost centre.
 
+* Futhark no longer warns about entry points with opaque types.
+
+* Types such as `foo.bar` are now turned into `foo_bar` in the C API, rather
+  than an ugly hash.
+
 ### Removed
 
 ### Changed
