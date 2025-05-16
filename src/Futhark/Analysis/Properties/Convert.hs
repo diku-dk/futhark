@@ -431,14 +431,12 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
 
       forM (zip3 dests indss valss) $ \(dest, inds, vals) -> do
         -- 1. Scatter in-bounds-monotonic indices:
-        rule1 <- runMaybeT $ scatterMono dest inds vals
-        rule2 <- runMaybeT $ scatterPerm dest vals e_inds
-        rule3 <- runMaybeT $ scatterRep dest inds vals
-        rule4 <- runMaybeT $ scatterInj dest inds vals e_inds
+        rule1 <- runMaybeT $ scatterSc1 dest (e_inds, inds) vals
+        rule2 <- runMaybeT $ scatterSc2 dest (e_inds, inds) vals
         maybe
           (error $ errorMsg loc "Failed to infer index function for scatter.")
           pure
-          (rule1 <|> rule2 <|> rule3 <|> rule4)
+          (rule1 <|> rule2)
   | Just "hist" <- getFun e_f,
     Just hist_vn <- justVName e_f,
     [_, _, e_k, _, _] <- getArgs args = do
@@ -832,25 +830,116 @@ scatterRep (IndexFn [Forall _ dom_dest] _) _ vals@(IndexFn [Forall i (Iota _)] _
           }
 scatterRep _ _ _ = fail ""
 
---   - If `is` is a permutation of (0 .. length dst), then the
---     inverse of `is` exists and the scatter is equivalent to a gather:
---     ```
---     for i in 0 .. length dest:
---         k = is^(-1)(i)
---         dest[i] = vs[k]
---     ```
---   - Rule:
---     (`is` is a permutation of (0 .. length dst))
---     ___________________________________________________
---     y = ∀i ∈ 0 .. length dest . vs[is^(-1)(i)]
-scatterPerm :: IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
-scatterPerm (IndexFn [Forall _ dom_dest] _) vals e_inds = do
+scatterSs1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFnM Answer
+scatterSs1 (IndexFn [Forall _ d_xs] _) (e_is, is) = do
+  dest_size <- rewrite $ domainEnd d_xs
+  case justVName e_is of
+    Just vn_is -> do
+      prove (Property.Injective vn_is $ Just (int2SoP 0, dest_size))
+        `orM` prove (Property.Injective vn_is Nothing)
+    Nothing ->
+      proveFn (PInjective $ Just (int2SoP 0, dest_size)) is
+scatterSs1 _ _ = pure Unknown
+
+scatterSs2 :: IndexFn -> Answer
+scatterSs2 vs@(IndexFn [Forall i (Iota _)] _) =
+  answerFromBool (i `S.notMember` fv (body vs))
+scatterSs2 _ = Unknown
+
+-- TODO implement (extract vn for values and lookup Range property).
+scatterSs3 :: (Applicative f) => p -> f Answer
+scatterSs3 _ = pure Unknown
+
+scatterSafe :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> IndexFnM Answer
+scatterSafe xs is vs = scatterSs1 xs is `orM` pure (scatterSs2 vs) `orM` scatterSs3 vs
+
+scatterSc1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterSc1 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)] _)) vs = do
+  safe <- lift $ scatterSafe xs (e_is, is) vs
+  when (isUnknown safe) (failMsg "scatterSc1: unable to show safety")
+  n <- lift $ rewrite $ domainEnd d_xs .+. int2SoP 1
+  -- Check that we can show whether each case is in domain of xs or not.
+  let in_dom_xs y = int2SoP 0 :<= y :&& y :< n
+  in_bounds <- lift $ mapM (queryCase (CaseCheck in_dom_xs) is) [0 .. length (guards is) - 1]
+  sanity_check <-
+    lift . allM $
+      zipWith
+        (\j ans -> pure ans `orM` queryCase (CaseCheck (neg . in_dom_xs)) is j)
+        [0 ..]
+        in_bounds
+  printM 1337 $ "answers " <> prettyStr in_bounds
+  printM 1337 $ "sanity  " <> prettyStr sanity_check
+  -- is' <-
+  --   lift $
+  --     rewrite
+  --       =<< is {body = cases [(in_dom_xs (sym2SoP $ Var vn_is), is_at_k), (neg $ in_dom_xs (sym2SoP $ Var vn_is), sym2SoP oob)]}
+  --         @ (vn_is, is)
+  printM 1337 $ "scatterSc1: is " <> prettyStr is
+  -- Sort branches so that indices in the domain of xs come before out-of-bounds indices.
+  let gs = L.sortOn fst $ zip in_bounds (guards is)
+  printM 1337 $ "scatterSc1: gs " <> prettyStr (map snd gs)
+  case gs of
+    [(Unknown, _), (Yes, (c, e))] -> do
+      Yes <- lift $ algebraContext is $ do
+        addRelShape (shape is)
+        neg c =>? (e :>= rep (mkRep k (sVar k .+. int2SoP 1)) e)
+      Yes <- lift $ algebraContext is $ do
+        addRelShape (shape is)
+        k' <- newNameFromString "k"
+        k +< k'
+        c =>? (e :<= rep (mkRep k (sVar k')) e)
+
+      -- TODO relax this one (requires support for union of index functions to handle initial linear segment)
+      Yes <- lift $ do
+        Bool True =>? (rep (mkRep k (int2SoP 0 :: SoP Symbol)) e :== int2SoP 0)
+      -- TODO relax this one (requires support for union of index functions to handle final linear segment)
+      Yes <- lift $ do
+        Bool True =>? (rep (mkRep k m) e .-. int2SoP 1 :== n .-. int2SoP 1)
+
+      -- Attempt to simplify c away.
+      c' <- lift $ algebraContext is $ do
+        addRelShape (shape is)
+        let c'' = case c of
+              Apply {} -> sym2SoP c :> int2SoP 0 -- (c is application of a boolean function.)
+              _ -> c
+        let ans1 = (rep (mkRep k (sVar k .+. int2SoP 1)) e .-. e :> int2SoP 0) =>? c''
+        let ans2 = (n .-. rep (mkRep k m) e :> int2SoP 0) =>? sop2Symbol (rep (mkRep k m) c'')
+        ans <- ans1 `andM` ans2
+        case ans of
+          Yes -> pure (Bool True)
+          Unknown -> pure c
+
+      i <- newVName "i"
+      hole_xs <- newVName "hole_xs"
+      hole_vs <- newVName "hole_vs"
+      let p = sVar i :== e :&& c'
+      let f =
+            IndexFn
+              { shape = [Forall i (Cat k m e)],
+                body =
+                  cases
+                    [ (p, sym2SoP $ Apply (Var hole_vs) [sVar k]),
+                      (neg p, sym2SoP $ Apply (Var hole_xs) [sVar i])
+                    ]
+              }
+      f' <- lift $ substParams f [(hole_vs, vs), (hole_xs, xs)]
+      printM 1 $ "f " <> prettyStr f
+      printM 1 $ "xs " <> prettyStr xs
+      printM 1 $ "vs " <> prettyStr vs
+      printM 1 $ "f' " <> prettyStr f'
+      pure f'
+    _ -> failMsg "scatterSc1: unable to determine OOB branch"
+scatterSc1 _ _ _ = fail ""
+
+-- TODO also look up in env to see if there is a `Bij is Y Z` property with Z <= (0, dest_size) <= Y.
+scatterSc2 :: IndexFn -> (E.Exp, b) -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterSc2 (IndexFn [Forall _ dom_dest] _) (e_inds, _) vals = do
   dest_size <- lift $ rewrite $ domainEnd dom_dest
-  printM 1337 $ "scatterPerm: dest_size" <> prettyStr dest_size
+  printM 1337 $ "scatterSc2: dest_size" <> prettyStr dest_size
   vn_inds <- warningInds
   perm <- lift $ prove (Property.BijectiveRCD vn_inds (int2SoP 0, dest_size) (int2SoP 0, dest_size))
   case perm of
-    Unknown -> failMsg "scatterPerm: no match"
+    Unknown -> failMsg "scatterSc2: no match"
     Yes -> do
       -- `inds` is invertible on the whole domain.
       vn_vals <- newVName "vals"
@@ -885,102 +974,7 @@ scatterPerm (IndexFn [Forall _ dom_dest] _) vals e_inds = do
               <> " index function inference: "
               <> prettyStr e_inds
           fail ""
-scatterPerm _ _ _ = fail ""
-
--- Scatter in-bounds-monotonic indices:
---   - If `is` is a monotonically increasing sequence of values
---     that starts at 0 and ends at length dest-1, we can express
---     the scatter as an index function by the following rule:
---
---     is = ∀k ∈ [0, ..., m-1] .
---         | seg(k+1) - seg(k) > 0  => seg(k)
---         | seg(k+1) - seg(k) <= 0 => OOB
---     seg(0) is 0
---     seg(k) is monotonically increasing
---     dest has size seg(m) - 1         (to ensure conclusion covers all of dest)
---     OOB < 0 or OOB >= seg(m) - 1
---     _________________________________________________
---     y = ∀i ∈ ⊎k=iota m [seg(k), ..., seg(k+1) - 1] .
---         | i == seg(k) => vals[k]
---         | i /= seg(k) => dest[i]
-scatterMono :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterMono dest@(IndexFn [Forall _ dom_dest] _) inds@(IndexFn inds_iter@[Forall k (Iota m)] _) vals = do
-  dest_size <- lift $ rewrite $ domainEnd dom_dest
-  -- Match rule.
-  vn_k <- newVName "k"
-  vn_m <- newVName "m"
-  vn_p0 <- newVName "p0"
-  vn_f0 <- newVName "f0"
-  vn_p1 <- newVName "p1"
-  vn_f1 <- newVName "f1"
-  let inds_template =
-        IndexFn
-          { shape = [Forall vn_k (Iota $ sym2SoP $ Hole vn_m)],
-            body =
-              cases
-                [ (Hole vn_p0, sym2SoP $ Hole vn_f0),
-                  (Hole vn_p1, sym2SoP $ Hole vn_f1)
-                ]
-          }
-  s <- hoistMaybe =<< lift (unify inds_template inds)
-  -- Determine which is OOB and which is e1.
-  let isOOB ub = CaseCheck (\c -> c :< int2SoP 0 :|| (mapping s M.! ub) :<= c)
-  (vn_p_seg, vn_f_seg) <- do
-    case0_is_OOB <- lift $ queryCase (isOOB vn_f1) inds 0
-    case case0_is_OOB of
-      Yes -> pure (vn_p1, vn_f1)
-      Unknown -> do
-        case1_is_OOB <- lift $ queryCase (isOOB vn_f0) inds 1
-        case case1_is_OOB of
-          Yes -> pure (vn_p0, vn_f0)
-          Unknown -> failMsg "scatterMono: unable to determine OOB branch"
-  let p_seg = sop2Symbol $ mapping s M.! vn_p_seg
-  let f_seg = mapping s M.! vn_f_seg
-  -- Check that p_seg = f_seg(k+1) - f_seg(k) > 0.
-  s_p <- lift $ algebraContext inds $ do
-    addRelShape inds_iter
-    seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
-    printM 1337 ("p_seg     " <> prettyStr p_seg)
-    printM 1337 ("seg_delta " <> prettyStr seg_delta)
-    ans <- p_seg =>? (seg_delta :> int2SoP 0)
-    case ans of
-      Yes -> pure (Bool True)
-      Unknown -> pure p_seg
-  -- Check that seg is monotonically increasing. (Essentially checking
-  -- that OOB branch is never taken in inds.)
-  mono <- lift $ algebraContext inds $ do
-    addRelShape inds_iter
-    seg_delta <- rewrite $ rep (mkRep k (sVar k .+. int2SoP 1)) f_seg .-. f_seg
-    seg_delta $>= int2SoP 0
-  when (isUnknown mono) (failMsg "scatterMono: unable to show monotonicity")
-  -- Check that seg(0) = 0.
-  -- (Not using CaseCheck as it has to hold outside case predicate.)
-  let x `at_k` i = rep (mkRep k i) x
-  let zero :: SoP Symbol = int2SoP 0
-  eq0 <- lift $ f_seg `at_k` zero $== int2SoP 0
-  when (isUnknown eq0) (failMsg "scatterMono: unable to determine segment start")
-
-  -- Check that the proposed end of segments seg(m) - 1 equals the size of dest.
-  -- (Note that has to hold outside the context of inds, so we cannot assume p_seg.)
-  domain_covered <- lift $ f_seg `at_k` m .-. int2SoP 1 $== dest_size
-  when (isUnknown domain_covered) $
-    fail "scatter: segments do not cover iterator domain"
-
-  i <- newVName "i"
-  dest_hole <- newVName "dest_hole"
-  vals_hole <- newVName "vals_hole"
-  let p = sVar i :== f_seg :&& s_p
-  let fn =
-        IndexFn
-          { shape = [Forall i (Cat k m f_seg)],
-            body =
-              cases
-                [ (p, sym2SoP $ Apply (Var vals_hole) [sVar k]),
-                  (neg p, sym2SoP $ Apply (Var dest_hole) [sVar i])
-                ]
-          }
-  lift $ substParams fn [(vals_hole, vals), (dest_hole, dest)]
-scatterMono _ _ _ = fail ""
+scatterSc2 _ _ _ = fail ""
 
 {-
     Utilities.

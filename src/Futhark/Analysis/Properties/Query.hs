@@ -122,7 +122,9 @@ p =>? q | p == q = pure Yes
 p =>? q = do
   p' <- simplify p
   printTrace 1337 (prettyIndent 2 p' <> " =>?\n" <> prettyIndent 4 q) $
-    isFalse p' `orM` dnfQuery p (check q) -- NOTE uses unsimplified p in query.
+    pure (answerFromBool $ p' == q)
+      `orM` isFalse p'
+      `orM` dnfQuery p (check q) -- NOTE uses unsimplified p in query.
 
 infixl 8 =>?
 
