@@ -585,7 +585,7 @@ genWGSLStm (DeclareScalar name _ typ) =
     WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ wgslPrimType typ)
 genWGSLStm s@(DeclareArray {}) = unsupported s
 genWGSLStm s@(Allocate {}) = unsupported s
-genWGSLStm s@(Free _ _) = unsupported s
+genWGSLStm s@(Free _ _) = pure $ WGSL.Comment $ "free: " <> prettyText s
 genWGSLStm (Copy pt shape dst dst_lmad src src_lmad) = genCopy pt shape dst dst_lmad src src_lmad
 genWGSLStm (Write mem i Bool _ _ v) = genArrayWrite Bool mem i (genWGSLExp v)
 genWGSLStm (Write mem i (IntType Int8) _ _ v) = genArrayWrite (IntType Int8) mem i (genWGSLExp v)
@@ -611,7 +611,7 @@ genWGSLStm (Read tgt mem i t _ _) = do
   if atomic
     then genArrayRead t tgt mem i
     else pure $ WGSL.Assign tgt' (WGSL.IndexExp mem' i')
-genWGSLStm s@(SetMem {}) = unsupported s
+genWGSLStm (SetMem {}) = error "SetMem statements not supported on WebGPU!"
 genWGSLStm (Call [dest] f args) = do
   fun <- WGSL.CallExp . ("futrts_" <>) <$> getIdent f
   let getArg (ExpArg e) = genWGSLExp e
@@ -627,7 +627,7 @@ genWGSLStm (If cond cThen cElse) =
     (genWGSLExp $ untyped cond)
     (genWGSLStm cThen)
     (genWGSLStm cElse)
-genWGSLStm s@(Assert {}) = unsupported s
+genWGSLStm s@(Assert {}) = pure $ WGSL.Comment $ "assert: " <> prettyText s
 genWGSLStm (Comment c s) = WGSL.Seq (WGSL.Comment c) <$> genWGSLStm s
 genWGSLStm (DebugPrint _ _) = pure WGSL.Skip
 genWGSLStm (TracePrint _) = pure WGSL.Skip
@@ -783,6 +783,7 @@ wgslCmpOp CmpLle = call2 "lle"
 -- given our representation.
 wgslUnOp :: UnOp -> WGSL.Exp -> WGSL.Exp
 wgslUnOp (Neg (FloatType _)) = WGSL.UnOpExp "-"
+wgslUnOp (Neg (IntType _)) = WGSL.UnOpExp "-"
 wgslUnOp (Neg _) = WGSL.UnOpExp "!"
 wgslUnOp (Complement _) = WGSL.UnOpExp "~"
 wgslUnOp (Abs Int64) = call1 "abs_i64"
