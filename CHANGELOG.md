@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * It was possible to make size-lifted types appear unlifted by using parametric
   types (#2268).
 
+* The same type would be mentioned twice in some type errors.
+
 ## [0.25.30]
 
 ### Added
