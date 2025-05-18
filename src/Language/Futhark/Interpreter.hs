@@ -641,7 +641,7 @@ evalIndex loc env is arr = do
           "Index ["
             <> T.intercalate ", " (map prettyText is)
             <> "] out of bounds for array of shape "
-            <> prettyText (valueShape arr)
+            <> prettyText (arrayValueShape arr)
             <> "."
   maybe oob pure $ indexArray is arr
 
