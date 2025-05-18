@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The same type would be mentioned twice in some type errors.
 
+* The type checker neglected to detect some cases of invalid references from
+  return types to names bound in parameter patterns. (#2271)
+
 ## [0.25.30]
 
 ### Added
