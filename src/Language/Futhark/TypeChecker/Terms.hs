@@ -1607,10 +1607,18 @@ checkFunBody params body maybe_rettype loc = do
           loc
           (filter (`elem` hidden) $ foldMap patNames params)
           body_t
-
-      let usage = mkUsage body "return type annotation"
-      onFailure (CheckingReturn rettype body_t') $
-        unify usage (toStruct rettype) body_t'
+      case find (`elem` hidden) $ fvVars $ freeInType rettype of
+        Just v ->
+          typeError loc mempty $
+            "The return type annotation"
+              </> indent 2 (align (pretty rettype))
+              </> "refers to the name"
+              <+> dquotes (prettyName v)
+              <+> "which is bound to an inner component of a function parameter."
+        Nothing -> do
+          let usage = mkUsage body "return type annotation"
+          onFailure (CheckingReturn rettype body_t') $
+            unify usage (toStruct rettype) body_t'
     Nothing -> pure ()
 
   pure body'
