@@ -853,10 +853,55 @@ scatterSs3 _ = pure Unknown
 scatterSafe :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> IndexFnM Answer
 scatterSafe xs is vs = scatterSs1 xs is `orM` pure (scatterSs2 vs) `orM` scatterSs3 vs
 
-scatterSc1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc1 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)] _)) vs = do
+-- TODO also look up in env to see if there is a `Bij is Y Z` property with Z <= (0, dest_size) <= Y.
+scatterSc1 :: IndexFn -> (E.Exp, b) -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterSc1 (IndexFn [Forall _ dom_dest] _) (e_inds, _) vals = do
+  dest_size <- lift $ rewrite $ domainEnd dom_dest
+  printM 1337 $ "scatterSc1: dest_size" <> prettyStr dest_size
+  vn_inds <- warningInds
+  perm <- lift $ prove (Property.BijectiveRCD vn_inds (int2SoP 0, dest_size) (int2SoP 0, dest_size))
+  case perm of
+    Unknown -> failMsg ""
+    Yes -> do
+      -- `inds` is invertible on the whole domain.
+      vn_vals <- newVName "vals"
+      i <- newVName "i"
+      vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
+
+      lift $ addInvAlias vn_inv vn_inds
+      lift $ addRelSymbol (Prop $ Property.BijectiveRCD vn_inv (int2SoP 0, dest_size) (int2SoP 0, dest_size))
+      -- TODO make bijective cover injective also!
+      lift $ addRelSymbol (Prop $ Property.Injective vn_inv $ Just (int2SoP 0, dest_size))
+      -- TODO add these ranges when needed using the property table.
+      -- Here we add them as a special case because we know is^(-1) will
+      -- be used for indirect indexing.
+      hole <- sym2SoP . Hole <$> newVName "h"
+      let wrap = (`Apply` [hole]) . Var
+      alg_vn <- lift $ paramToAlgebra vn_inv wrap
+      lift $ addRelSymbol (Prop $ Property.Rng alg_vn (int2SoP 0, dest_size))
+
+      let inv_ind = Apply (Var vn_inv) [sVar i]
+      lift $
+        IndexFn
+          { shape = [Forall i (Iota $ dest_size .+. int2SoP 1)],
+            body = cases [(Bool True, sym2SoP $ Apply (Var vn_vals) [sym2SoP inv_ind])]
+          }
+          @ (vn_vals, vals)
+  where
+    warningInds
+      | Just vn <- justVName e_inds = pure vn
+      | otherwise = do
+          printM 1 . warningMsg (E.locOf e_inds) $
+            "You might want to bind scattered indices to a name to aid"
+              <> " index function inference: "
+              <> prettyStr e_inds
+          fail ""
+scatterSc1 _ _ _ = fail ""
+
+scatterSc2 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterSc2 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)] _)) vs = do
   safe <- lift $ scatterSafe xs (e_is, is) vs
-  when (isUnknown safe) (failMsg "scatterSc1: unable to show safety")
+  when (isUnknown safe) (failMsg "scatterSc2: unable to show safety")
   n <- lift $ rewrite $ domainEnd d_xs .+. int2SoP 1
   -- Check that we can show whether each case is in domain of xs or not.
   let in_dom_xs y = int2SoP 0 :<= y :&& y :< n
@@ -869,15 +914,10 @@ scatterSc1 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)]
         in_bounds
   printM 1337 $ "answers " <> prettyStr in_bounds
   printM 1337 $ "sanity  " <> prettyStr sanity_check
-  -- is' <-
-  --   lift $
-  --     rewrite
-  --       =<< is {body = cases [(in_dom_xs (sym2SoP $ Var vn_is), is_at_k), (neg $ in_dom_xs (sym2SoP $ Var vn_is), sym2SoP oob)]}
-  --         @ (vn_is, is)
-  printM 1337 $ "scatterSc1: is " <> prettyStr is
+  printM 1337 $ "scatterSc2: is " <> prettyStr is
   -- Sort branches so that indices in the domain of xs come before out-of-bounds indices.
   let gs = L.sortOn fst $ zip in_bounds (guards is)
-  printM 1337 $ "scatterSc1: gs " <> prettyStr (map snd gs)
+  printM 1337 $ "scatterSc2: gs " <> prettyStr (map snd gs)
   case gs of
     [(Unknown, _), (Yes, (c, e))] -> do
       Yes <- lift $ algebraContext is $ do
@@ -928,52 +968,7 @@ scatterSc1 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)]
       printM 1 $ "vs " <> prettyStr vs
       printM 1 $ "f' " <> prettyStr f'
       pure f'
-    _ -> failMsg "scatterSc1: unable to determine OOB branch"
-scatterSc1 _ _ _ = fail ""
-
--- TODO also look up in env to see if there is a `Bij is Y Z` property with Z <= (0, dest_size) <= Y.
-scatterSc2 :: IndexFn -> (E.Exp, b) -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc2 (IndexFn [Forall _ dom_dest] _) (e_inds, _) vals = do
-  dest_size <- lift $ rewrite $ domainEnd dom_dest
-  printM 1337 $ "scatterSc2: dest_size" <> prettyStr dest_size
-  vn_inds <- warningInds
-  perm <- lift $ prove (Property.BijectiveRCD vn_inds (int2SoP 0, dest_size) (int2SoP 0, dest_size))
-  case perm of
-    Unknown -> failMsg "scatterSc2: no match"
-    Yes -> do
-      -- `inds` is invertible on the whole domain.
-      vn_vals <- newVName "vals"
-      i <- newVName "i"
-      vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
-
-      lift $ addInvAlias vn_inv vn_inds
-      lift $ addRelSymbol (Prop $ Property.BijectiveRCD vn_inv (int2SoP 0, dest_size) (int2SoP 0, dest_size))
-      -- TODO make bijective cover injective also!
-      lift $ addRelSymbol (Prop $ Property.Injective vn_inv $ Just (int2SoP 0, dest_size))
-      -- TODO add these ranges when needed using the property table.
-      -- Here we add them as a special case because we know is^(-1) will
-      -- be used for indirect indexing.
-      hole <- sym2SoP . Hole <$> newVName "h"
-      let wrap = (`Apply` [hole]) . Var
-      alg_vn <- lift $ paramToAlgebra vn_inv wrap
-      lift $ addRelSymbol (Prop $ Property.Rng alg_vn (int2SoP 0, dest_size))
-
-      let inv_ind = Apply (Var vn_inv) [sVar i]
-      lift $
-        IndexFn
-          { shape = [Forall i (Iota $ dest_size .+. int2SoP 1)],
-            body = cases [(Bool True, sym2SoP $ Apply (Var vn_vals) [sym2SoP inv_ind])]
-          }
-          @ (vn_vals, vals)
-  where
-    warningInds
-      | Just vn <- justVName e_inds = pure vn
-      | otherwise = do
-          printM 1 . warningMsg (E.locOf e_inds) $
-            "You might want to bind scattered indices to a name to aid"
-              <> " index function inference: "
-              <> prettyStr e_inds
-          fail ""
+    _ -> failMsg "scatterSc2: unable to determine OOB branch"
 scatterSc2 _ _ _ = fail ""
 
 {-
