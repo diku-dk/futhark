@@ -1,7 +1,7 @@
 -- Index function substitution.
 {-# LANGUAGE LambdaCase #-}
 
-module Futhark.Analysis.Properties.Substitute ((@), subst) where
+module Futhark.Analysis.Properties.Substitute ((@), subst, lookupII) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (foldM, when, (<=<))

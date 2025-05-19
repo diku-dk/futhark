@@ -22,7 +22,7 @@ import Futhark.Analysis.Properties.Property (MonDir (..))
 import Futhark.Analysis.Properties.Property qualified as Property
 import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
-import Futhark.Analysis.Properties.Substitute (subst, (@))
+import Futhark.Analysis.Properties.Substitute (subst, (@), lookupII)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 import Futhark.Analysis.Properties.Unify
@@ -357,9 +357,19 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
             k' <- newNameFromString "k"
             let e_k = sVar k' .*. n
             let j' = sVar i .-. e_k
+            let flat_dim = Cat k' m e_k
+            -- Also add II array; if this flattened array is substituted into a
+            -- top-level definition it will be needed during substitution:
+            --   def f flat_x =
+            --     ...
+            --   def g x =
+            --     f (flatten x)
+            -- because flat_x[i] gets substituted for, e.g., x(II(i), i - II(i) * n).
+            let f_II = IndexFn [Forall i flat_dim] (cases [(Bool True, sym2SoP (Var k))])
+            _ <- lookupII flat_dim f_II
             pure $
               f
-                { shape = Forall i (Cat k' m e_k) : shp,
+                { shape = Forall i flat_dim : shp,
                   body = repCases (addRep j j' $ mkRep k (sVar k')) (body f)
                 }
           _ -> error "Not implemented yet."

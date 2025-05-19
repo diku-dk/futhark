@@ -351,10 +351,14 @@ data PRule
     FPV2 IndexFn VName (Predicate Symbol) [Predicate Symbol]
 
 nextGenProver :: PRule -> IndexFnM Answer
+nextGenProver (InjGe _ _ Cat {} _ _ _) =
+  -- TODO The case below needs to consider also across segments
+  -- for Cat domain (see PInjective)
+  error "InjGe not implemented for Cat domain."
 nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
+  printM 1337 $ "InjGe " <> prettyStr (i, j) <> " " <> prettyStr d <> " " <> prettyStr ges <> " " <> prettyStr rcd <> " " <> prettyStr guide
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
-  -- TODO needs to consider also across segments for Cat domain (see PInjective)
-  -- TODO need to substitute guide and combine it with ges (as shown in paper)
+  -- TODO should substitute guide and combine with cases in case it is a vname for a known function
   addRelIterator (Forall i d)
   addRelIterator (Forall j d)
   allM [no_dups (g @ i) (g' @ j) | g <- casesToList ges, g' <- casesToList ges]

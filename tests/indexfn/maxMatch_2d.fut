@@ -74,9 +74,32 @@ def filter_by [n] 't (cs: [n]bool) (xs: [n]t) (dummy: t)
   let xs' = scatter scratch is xs
   in (new_n, xs')
 
+-- XXX only needed if we have opaque flatten
+-- def mkEdge2Ids [arraySize]
+--     (edgeIds: {[arraySize]i64 | \x -> Injective x})
+--     : {[arraySize*2]i64 | \ys -> Injective ys } =
+--     let ys = map (\i -> map (\j -> 2*i + j) (iota 2)) edgeIds
+--     in flatten ys
+
 -- 
 --            Program
 --
+def getSmallestPairs_core [arraySize]
+    (nVerts: i64)
+    (nEdges: i64)
+    (flat_edges: {[arraySize*2]i64 | \x -> Range x (0, nVerts)})
+    (flat_edge2Ids: {[arraySize*2]i64 | \x -> Injective x})
+    : {([]i64, []i64) | \(new_edges, new_edgeIds) ->
+         Injective new_edges && Injective new_edgeIds
+      }
+    =
+    let H = hist i64.min (nEdges*2) nVerts flat_edges flat_edge2Ids
+    let cs = map2 (\i j -> H[i] == j) flat_edges flat_edge2Ids
+    let dummy = 0i64
+    let (newSize, ys) = filter_by cs flat_edges dummy
+    let (_, zs) = filter_by cs flat_edge2Ids dummy
+    in (ys :> [newSize]i64, zs :> [newSize]i64)
+
 -- Return the edge-id pairs with the smallest edge id
 def getSmallestPairs [arraySize]
     (nVerts: i64)
@@ -87,22 +110,15 @@ def getSmallestPairs [arraySize]
          Injective new_edges && Injective new_edgeIds
       }
     =
-    -- The original program transforms edgeIds as follows:
+    -- Transforms edgeIds as follows:
     --      0,  1,  2,  3,  4,  5
     --      |   |   |   |   |   |
     --      0,1 2,3 4,5 6,7 8,9 10,11
-    -- But this is already the form of the pre-expanded edgeIds here.
-
     let edge2Ids = map (\i -> map (\j -> 2*i + j) (iota 2)) edgeIds
     let flat_edges = flatten edges
     let flat_edge2Ids = flatten edge2Ids
-
-    let H = hist i64.min (nEdges*2) nVerts flat_edges flat_edge2Ids
-    let cs = map2 (\i j -> H[i] == j) flat_edges flat_edge2Ids
-    let dummy = 0i64
-    let (newSize, ys) = filter_by cs flat_edges dummy
-    let (_, zs) = filter_by cs flat_edge2Ids dummy
-    in (ys :> [newSize]i64, zs :> [newSize]i64)
+    let (ys,zs) = getSmallestPairs_core nVerts nEdges flat_edges flat_edge2Ids
+    in (ys, zs)
 
 -- Return the edge if its ID is the smallest, else return placeholder
 def getMMEdges [nVerts] (smallestEdgeId: [nVerts]i64) (e: [2]{i64 | (>= 0)}) (i: i64): ([2]i64, [2]i64) =
