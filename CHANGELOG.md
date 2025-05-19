@@ -53,6 +53,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The type checker neglected to detect some cases of invalid references from
   return types to names bound in parameter patterns. (#2271)
 
+* Incorrect handling of projections used in size expressions.
+
 ## [0.25.30]
 
 ### Added

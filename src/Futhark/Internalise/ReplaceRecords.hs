@@ -182,7 +182,12 @@ transformExp (Lambda params body retdecl ret loc) = do
   pure $ Lambda params' body' retdecl ret loc
 transformExp e = astMap m e
   where
-    m = identityMapper {mapOnExp = transformExp}
+    m =
+      identityMapper
+        { mapOnExp = transformExp,
+          mapOnStructType = transformStructType,
+          mapOnParamType = transformParamType
+        }
 
 onValBind :: ValBind -> RecordM ValBind
 onValBind vb = do
