@@ -354,20 +354,21 @@ nextGenProver :: PRule -> IndexFnM Answer
 nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
   -- TODO needs to consider also across segments for Cat domain (see PInjective)
+  -- TODO need to substitute guide and combine it with ges (as shown in paper)
   addRelIterator (Forall i d)
   addRelIterator (Forall j d)
-  allM [no_dups g | g <- casesToList ges]
+  allM [no_dups (g @ i) (g' @ j) | g <- casesToList ges, g' <- casesToList ges]
   where
-    e @ arg = rep (mkRep i (Var arg)) e
+    e @ arg = repTuple (mkRep i (Var arg)) e
 
-    no_dups (c, e) = rollbackAlgEnv $ do
-      -- PROOF of e(i) = e(j) => i = j.
-      p <- simplify =<< eqSolver guide (sop2Symbol (c @ i) :&& sop2Symbol (c @ j) :&& (e @ i) :== (e @ j))
+    no_dups (c_i, e_i) (c_j, e_j) = rollbackAlgEnv $ do
+      -- PROOF of e(i) = e'(j) ^ c(i) ^ c'(j) => i = j.
+      p <- simplify =<< eqSolver guide (sop2Symbol c_i :&& sop2Symbol c_j :&& e_i :== e_j)
       printM 10 $ "     --> " <> prettyStr p
       let oob = case rcd of
             Just (a, b) ->
-              (sop2Symbol (c @ i) :&& sop2Symbol (c @ j))
-                =>? (out_of_range (e @ i) :|| out_of_range (e @ j))
+              (sop2Symbol c_i :&& sop2Symbol c_j)
+                =>? (out_of_range e_i :|| out_of_range e_j)
               where
                 out_of_range x = x :< a :|| b :< x
             Nothing -> pure Unknown
