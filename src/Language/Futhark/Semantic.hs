@@ -190,7 +190,7 @@ instance Pretty Env where
         "val"
           <+> prettyName name
           <> mconcat (map ((" " <>) . pretty) tps)
-          <> " ="
+            <+> ":"
             <+> pretty t
       renderModType (name, _sig) =
         "module type" <+> prettyName name
