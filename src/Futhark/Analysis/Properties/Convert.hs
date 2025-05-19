@@ -5,7 +5,7 @@ module Futhark.Analysis.Properties.Convert (mkIndexFnProg, mkIndexFnValBind) whe
 import Control.Applicative ((<|>))
 import Control.Monad (foldM, foldM_, forM, forM_, unless, void, when, zipWithM, (<=<))
 import Control.Monad.Trans (lift)
-import Control.Monad.Trans.Maybe (MaybeT (runMaybeT), hoistMaybe)
+import Control.Monad.Trans.Maybe (MaybeT (runMaybeT))
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
@@ -433,10 +433,11 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
         -- 1. Scatter in-bounds-monotonic indices:
         rule1 <- runMaybeT $ scatterSc1 dest (e_inds, inds) vals
         rule2 <- runMaybeT $ scatterSc2 dest (e_inds, inds) vals
+        rule3 <- runMaybeT $ scatterSc3 dest (e_inds, inds) vals
         maybe
           (error $ errorMsg loc "Failed to infer index function for scatter.")
           pure
-          (rule1 <|> rule2)
+          (rule1 <|> rule2 <|> rule3)
   | Just "hist" <- getFun e_f,
     Just hist_vn <- justVName e_f,
     [_, _, e_k, _, _] <- getArgs args = do
@@ -797,39 +798,6 @@ forwardPropertyPrelude f args =
         _ -> do
           error "Applying property to name bound to tuple?"
 
--- Scatter with injective indices (result is uninterpreted, but safe):
-scatterInj :: IndexFn -> IndexFn -> IndexFn -> E.Exp -> MaybeT IndexFnM IndexFn
-scatterInj (IndexFn [Forall i dom_dest] _) inds _vals e_inds = do
-  dest_size <- lift $ rewrite $ domainEnd dom_dest
-  inj <- lift $ case justVName e_inds of
-    Just vn_inds -> do
-      prove (Property.Injective vn_inds $ Just (int2SoP 0, dest_size))
-        `orM` prove (Property.Injective vn_inds Nothing)
-    Nothing ->
-      proveFn (PInjective $ Just (int2SoP 0, dest_size)) inds
-  case inj of
-    Unknown -> failMsg "scatterInj: no match"
-    Yes -> do
-      uninterpreted <- newNameFromString "scatter_inj"
-      lift . pure $
-        IndexFn
-          { shape = [Forall i dom_dest],
-            body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
-          }
-scatterInj _ _ _ _ = fail ""
-
--- Scatter replicated value (result is uninterpreted, but safe):
-scatterRep :: IndexFn -> IndexFn -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterRep (IndexFn [Forall _ dom_dest] _) _ vals@(IndexFn [Forall i (Iota _)] _)
-  | i `S.notMember` fv (body vals) = do
-      uninterpreted <- newNameFromString "scatter_rep"
-      lift . pure $
-        IndexFn
-          { shape = [Forall i dom_dest],
-            body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
-          }
-scatterRep _ _ _ = fail ""
-
 scatterSs1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFnM Answer
 scatterSs1 (IndexFn [Forall _ d_xs] _) (e_is, is) = do
   dest_size <- rewrite $ domainEnd d_xs
@@ -854,8 +822,10 @@ scatterSafe :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> IndexFnM Answer
 scatterSafe xs is vs = scatterSs1 xs is `orM` pure (scatterSs2 vs) `orM` scatterSs3 vs
 
 -- TODO also look up in env to see if there is a `Bij is Y Z` property with Z <= (0, dest_size) <= Y.
-scatterSc1 :: IndexFn -> (E.Exp, b) -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc1 (IndexFn [Forall _ dom_dest] _) (e_inds, _) vals = do
+scatterSc1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterSc1 xs@(IndexFn [Forall _ dom_dest] _) (e_is, is) vs = do
+  safe <- lift $ scatterSafe xs (e_is, is) vs
+  when (isUnknown safe) (failMsg "scatterSc1: unable to show safety")
   dest_size <- lift $ rewrite $ domainEnd dom_dest
   printM 1337 $ "scatterSc1: dest_size" <> prettyStr dest_size
   vn_inds <- warningInds
@@ -886,15 +856,15 @@ scatterSc1 (IndexFn [Forall _ dom_dest] _) (e_inds, _) vals = do
           { shape = [Forall i (Iota $ dest_size .+. int2SoP 1)],
             body = cases [(Bool True, sym2SoP $ Apply (Var vn_vals) [sym2SoP inv_ind])]
           }
-          @ (vn_vals, vals)
+          @ (vn_vals, vs)
   where
     warningInds
-      | Just vn <- justVName e_inds = pure vn
+      | Just vn <- justVName e_is = pure vn
       | otherwise = do
-          printM 1 . warningMsg (E.locOf e_inds) $
+          printM 1 . warningMsg (E.locOf e_is) $
             "You might want to bind scattered indices to a name to aid"
               <> " index function inference: "
-              <> prettyStr e_inds
+              <> prettyStr e_is
           fail ""
 scatterSc1 _ _ _ = fail ""
 
@@ -970,6 +940,19 @@ scatterSc2 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)]
       pure f'
     _ -> failMsg "scatterSc2: unable to determine OOB branch"
 scatterSc2 _ _ _ = fail ""
+
+-- Scatter fallback: result is uninterpreted, but safe.
+scatterSc3 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
+scatterSc3 xs@(IndexFn [Forall i dom_dest] _) (e_is, is) vs = do
+  safe <- lift $ scatterSafe xs (e_is, is) vs
+  when (isUnknown safe) (failMsg "scatterSc3: unable to show safety")
+  uninterpreted <- newNameFromString "scatter"
+  lift . pure $
+    IndexFn
+      { shape = [Forall i dom_dest],
+        body = cases [(Bool True, sym2SoP $ Apply (Var uninterpreted) [sVar i])]
+      }
+scatterSc3 _ _ _ = fail ""
 
 {-
     Utilities.
