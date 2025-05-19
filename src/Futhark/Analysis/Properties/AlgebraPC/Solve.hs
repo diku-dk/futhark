@@ -227,9 +227,10 @@ getRangeOfSym (Idx (POR {}) _) =
 --
 getRangeOfSym idxsym@(Idx (One arr_nm) _) = do
   ranges <- getRanges
+  arr_rg <- getRangeOfSym $ Var arr_nm
   case M.lookup idxsym ranges of
-    Nothing -> getRangeOfSym $ Var arr_nm
-    Just rg -> pure rg
+    Nothing -> pure arr_rg
+    Just rg -> pure (rg <> arr_rg)
 --
 getRangeOfSym (Pow{}) = do
   pure $ Range sop1s 1 S.empty
