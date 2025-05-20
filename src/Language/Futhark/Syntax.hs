@@ -23,6 +23,10 @@ module Language.Futhark.Syntax
     Shape (..),
     shapeRank,
     stripDims,
+    AutoMap (..),
+    autoRepRank,
+    autoMapRank,
+    autoFrameRank,
     TypeBase (..),
     TypeArg (..),
     SizeExp (..),
@@ -262,6 +266,28 @@ stripDims :: Int -> Shape dim -> Maybe (Shape dim)
 stripDims i (Shape l)
   | i < length l = Just $ Shape $ drop i l
   | otherwise = Nothing
+
+data AutoMap = AutoMap
+  { autoRep :: Shape Size,
+    autoMap :: Shape Size,
+    autoFrame :: Shape Size
+  }
+  deriving (Eq, Show, Ord)
+
+autoRepRank :: AutoMap -> Int
+autoRepRank = shapeRank . autoRep
+
+autoMapRank :: AutoMap -> Int
+autoMapRank = shapeRank . autoMap
+
+autoFrameRank :: AutoMap -> Int
+autoFrameRank = shapeRank . autoFrame
+
+instance Semigroup AutoMap where
+  (AutoMap r1 m1 f1) <> (AutoMap r2 m2 f2) = AutoMap (r1 <> r2) (m1 <> m2) (f1 <> f2)
+
+instance Monoid AutoMap where
+  mempty = AutoMap mempty mempty mempty
 
 -- | The name (if any) of a function parameter.  The 'Eq' and 'Ord'
 -- instances always compare values of this type equal.
@@ -699,7 +725,7 @@ data AppExpBase f vn
     -- identical).
     Apply
       (ExpBase f vn)
-      (NE.NonEmpty (f (Maybe VName), ExpBase f vn))
+      (NE.NonEmpty (f (Maybe VName, AutoMap), ExpBase f vn))
       SrcLoc
   | Range
       (ExpBase f vn)
@@ -733,8 +759,8 @@ data AppExpBase f vn
   | BinOp
       (QualName vn, SrcLoc)
       (f StructType)
-      (ExpBase f vn, f (Maybe VName))
-      (ExpBase f vn, f (Maybe VName))
+      (ExpBase f vn, f (Maybe VName, AutoMap))
+      (ExpBase f vn, f (Maybe VName, AutoMap))
       SrcLoc
   | LetWith
       (IdentBase f vn StructType)
@@ -843,7 +869,7 @@ data ExpBase f vn
       (QualName vn)
       (f StructType)
       (ExpBase f vn)
-      (f (PName, ParamType, Maybe VName), f (PName, ParamType))
+      (f (PName, ParamType, Maybe VName, AutoMap), f (PName, ParamType))
       (f ResRetType, f [VName])
       SrcLoc
   | -- | @+2@; first type is operand, second is result.
@@ -851,7 +877,7 @@ data ExpBase f vn
       (QualName vn)
       (f StructType)
       (ExpBase f vn)
-      (f (PName, ParamType), f (PName, ParamType, Maybe VName))
+      (f (PName, ParamType), f (PName, ParamType, Maybe VName, AutoMap))
       (f ResRetType)
       SrcLoc
   | -- | Field projection as a section: @(.x.y.z)@.
@@ -1356,7 +1382,7 @@ deriving instance Show (ProgBase Info VName)
 deriving instance Show (ProgBase NoInfo Name)
 
 -- | Construct an 'Apply' node, with type information.
-mkApply :: ExpBase Info vn -> [(Maybe VName, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
+mkApply :: ExpBase Info vn -> [(Maybe VName, AutoMap, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
 mkApply f args (AppRes t ext)
   | Just args' <- NE.nonEmpty $ map onArg args =
       case f of
@@ -1368,7 +1394,7 @@ mkApply f args (AppRes t ext)
           AppExp (Apply f args' (srcspan f $ snd $ NE.last args')) (Info (AppRes t ext))
   | otherwise = f
   where
-    onArg (v, x) = (Info v, x)
+    onArg (v, am, x) = (Info (v, am), x)
 
 -- | Construct an 'Apply' node, without type information.
 mkApplyUT :: ExpBase NoInfo vn -> ExpBase NoInfo vn -> ExpBase NoInfo vn
