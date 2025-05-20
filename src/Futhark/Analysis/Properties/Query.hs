@@ -281,7 +281,13 @@ prove prop = alreadyKnown prop `orM` matchProof prop
 
     matchProof Boolean = error "prove called on Boolean property (nothing to prove)"
     matchProof Disjoint {} = error "prove called on Disjoint property (nothing to prove)"
-    matchProof Monotonic {} = error "Not implemented yet"
+    matchProof (Monotonic x dir) = do
+      f <- getFn x
+      case f of
+        IndexFn [Forall i d] ges -> do
+          j <- newNameFromString "j"
+          nextGenProver (MonGe (fromMonDir dir) i j d ges)
+        _ -> error "Not implemented yet."
     matchProof (Rng x (a, b)) =
       askQ (CaseCheck (\e -> a :<= e :&& e :< b)) =<< getFn x
     matchProof (Injective y rcd) = do
@@ -423,7 +429,7 @@ nextGenProver (MonGe order i j d ges') = do
     rel = case order of
       LT -> (:<)
       GT -> (:>)
-      _ -> error "MonGe not implemented yet for non-strict relation"
+      _ -> error "Not implemented yet."
 nextGenProver (FPV2 f_Y x pf pps) = do
   i <- newNameFromString "i"
   n <- sym2SoP . Hole <$> newNameFromString "n"
@@ -712,6 +718,11 @@ prove_ _ _ _ = error "Not implemented yet."
 
 data Order = LT | GT | Undefined
   deriving (Eq, Show)
+
+fromMonDir :: MonDir -> Order
+fromMonDir IncS = LT
+fromMonDir DecS = GT
+fromMonDir _ = error "Not implemented yet."
 
 -- Strict sorting.
 sorted :: (t -> t -> IndexFnM Order) -> [t] -> IndexFnM (Maybe [t])
