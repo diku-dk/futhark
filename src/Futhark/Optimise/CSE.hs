@@ -319,7 +319,7 @@ instance
   cseInOp =
     subCSE
       . GPU.mapSegOpM
-        (GPU.SegOpMapper pure cseInLambda cseInKernelBody pure pure)
+        (GPU.SegOpMapper pure cseInLambda cseInLambda cseInKernelBody pure pure)
 
 cseInKernelBody ::
   (Aliased rep, CSEInOp (Op rep)) =>
