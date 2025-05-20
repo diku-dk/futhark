@@ -27,7 +27,7 @@ import Futhark.Analysis.Properties.AlgebraBridge
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
 import Futhark.Analysis.Properties.EqSimplifier
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repDomain)
+import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, intervalStart, repCases, repDomain)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Symbol
@@ -351,17 +351,22 @@ data PRule
     FPV2 IndexFn VName (Predicate Symbol) [Predicate Symbol]
 
 nextGenProver :: PRule -> IndexFnM Answer
-nextGenProver (InjGe _ _ Cat {} _ _ _) =
-  -- TODO The case below needs to consider also across segments
-  -- for Cat domain (see PInjective)
-  error "InjGe not implemented for Cat domain."
 nextGenProver (InjGe i j d ges rcd guide) = rollbackAlgEnv $ do
-  printM 1337 $ "InjGe " <> prettyStr (i, j) <> " " <> prettyStr d <> " " <> prettyStr ges <> " " <> prettyStr rcd <> " " <> prettyStr guide
+  printM 10 $ title "InjGe " <> prettyStr (i, j) <> " " <> prettyStr d <> " " <> prettyStr ges <> " " <> prettyStr rcd <> " " <> prettyStr guide
+
+  -- If the domain is segmented, make sure there are two distinct `k`s.
+  (d', ges') <- case d of
+    Iota {} -> pure (d, ges)
+    Cat k m b -> do
+      k' <- newNameFromString "k'"
+      let rep_k = mkRep k $ sym2SoP (Var k')
+      pure (Cat k' m (rep rep_k b), repCases rep_k ges)
+
   -- WTS: e(i) = e(j) ^ c(i) ^ c(j) ^ a <= e(i) <= b ^ a <= e(j) <= b => i = j.
   -- TODO should substitute guide and combine with cases in case it is a vname for a known function
   addRelIterator (Forall i d)
-  addRelIterator (Forall j d)
-  allM [no_dups (g @ i) (g' @ j) | g <- casesToList ges, g' <- casesToList ges]
+  addRelIterator (Forall j d')
+  allM [no_dups (g @ i) (g' @ j) | g <- casesToList ges, g' <- casesToList ges']
   where
     e @ arg = repTuple (mkRep i (Var arg)) e
 
@@ -443,7 +448,7 @@ nextGenProver (FPV2 f_Y x pf pps) = do
 
 prove_ :: Bool -> Statement -> IndexFn -> IndexFnM Answer
 prove_ _ (PInjective rcd) fn@(IndexFn [Forall i0 dom] _) = algebraContext fn $ do
-  printM 1000 $
+  printM 10 $
     title "Proving InjectiveRCD "
       <> "\n  RCD = "
       <> prettyStr rcd
