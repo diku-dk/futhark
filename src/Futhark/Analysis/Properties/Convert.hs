@@ -1082,8 +1082,9 @@ bindLambdaBodyParams params = do
   -- Make sure all Cat k bound in iterators are identical by renaming.
   fns <- renamesM (map snd params)
   printM 1 $ "bindLambdaBodyParams " <> prettyStr params
-  TODO: generalize this function to multiple dimensions
-  let iter@(Forall i _) = maximum (map ((\case [it] -> it) . shape) fns)
+  let new_shape = map maximum . L.transpose $ map shape fns
+  let bound_vars = map boundVar new_shape
+  -- let iter@(Forall i _) = maximum (map ((\case [it] -> it) . shape) fns)
   -- forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
   --   vn <- newVName ("#lam_" <> E.baseString paramName)
   --   insertIndexFn vn [f_xs]
@@ -1093,14 +1094,20 @@ bindLambdaBodyParams params = do
   -- pure iter
   forM_ (zip (map fst params) fns) $ \(paramName, fn) -> do
     vn <- newVName "tmp_fn"
+    printM 1 $ "# hm " <> prettyStr bound_vars
     IndexFn tmp_shape cs <-
-      IndexFn [iter] (singleCase . sym2SoP $ Apply (Var vn) [sVar i]) @ (vn, fn)
-    let [tmp_iter] = tmp_shape
+      IndexFn new_shape (singleCase . sym2SoP $ Apply (Var vn) (map sVar bound_vars)) @ (vn, fn)
     -- Renaming k bound in `tmp_iter` to k bound in `iter`.
-    let k_rep =
-          fromMaybe mempty $ mkRep <$> catVar tmp_iter <*> (sVar <$> catVar iter)
+    printM 1 $ "# hm " <> prettyStr tmp_shape
+    let lulz =
+         mconcat $
+          zipWith
+          (\t n -> fromMaybe mempty $ mkRep <$> catVar t <*> (sVar <$> catVar n))
+          tmp_shape new_shape
+    printM 1 $ "# lulz " <> prettyStr lulz
+    let k_rep = lulz
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn [] cs]
-  pure iter
+  pure undefined
 
 -- Align parameter patterns with their arguments---or raise an error.
 -- A parameter pattern reduces to a list of (optional) names with type information.

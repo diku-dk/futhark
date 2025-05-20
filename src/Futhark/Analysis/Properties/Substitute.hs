@@ -166,7 +166,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
   g <- repApply vn g_presub
 
-  traverse simplify <=< applySubRules $
+  printTrace 1 "#simplified " . traverse simplify <=< applySubRules $
     g
       { shape =
           shape g <&> \case
@@ -236,6 +236,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
     -- need to consider each dimension in f always to make sure
     -- all Cat k's are handled.
     applySubRules g =
+      printTrace 1 "#app " .
       runMaybeT $
         if null (shape g)
           then subRules g 0

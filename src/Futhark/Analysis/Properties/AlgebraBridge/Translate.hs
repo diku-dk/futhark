@@ -25,7 +25,7 @@ import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (toSumOfSums)
 import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMappable, ASTMapper (..), astFold, astMap, identityMapper)
-import Futhark.Analysis.Properties.Unify (Substitution (mapping), Unify, mkRep, rep, unify)
+import Futhark.Analysis.Properties.Unify (Substitution (mapping), Unify, fv, mkRep, rep, unify)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym)
@@ -418,13 +418,13 @@ toAlgebra_ sym@(Apply (Var f) [e_i, e_j]) = do
   case fns of
     Just [IndexFn [Forall i (Iota {}), Forall _ (Iota m)] _] -> do
       j' <- newNameFromString "j"
-      let i_to_j' = rep (mkRep i (sym2SoP $ Var j'))
-      let offset = toSumOfSums j' (int2SoP 0) (i_to_j' e_i .-. int2SoP 1) (i_to_j' m)
-      let arg1d = e_j .+. offset
-      -- printM 1 ("💩" <> prettyStr sym)
-      -- printM 1 ("💩m " <> prettyStr m)
-      -- printM 1 ("💩offset " <> prettyStr offset)
-      -- printM 1 ("💩arg1d: j + offset " <> prettyStr arg1d)
+      let arg1d =
+            if i `S.member` fv m
+              then e_j .+. toSumOfSums j' (int2SoP 0) (e_i .-. int2SoP 1) (rep (mkRep i (sym2SoP $ Var j')) m)
+              else e_j .+. e_i .*. m
+      printM 1 ("💩" <> prettyStr sym)
+      printM 1 ("💩arg1d: " <> prettyStr arg1d)
+      _ <- handleQuantifiers arg1d
       res <- search (Apply (Var f) [arg1d])
       vn <- case fst <$> res of
         Just vn -> pure vn
