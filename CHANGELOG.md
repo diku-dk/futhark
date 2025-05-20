@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect handling of projections used in size expressions.
 
+* Subtle interactions of modules and sizes in the interpreter and compiler
+  (#2273).
+
 ## [0.25.30]
 
 ### Added
