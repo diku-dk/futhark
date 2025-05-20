@@ -577,6 +577,17 @@ tests =
                       [(Bool True, int2SoP 2 .*. sym2SoP (Apply (Hole xs) [sVar i]) .+. sHole j)]
                 }
             ]
+        ),
+      mkTest
+        "tests/indexfn/zipArgs2d.fut"
+        ( newNameFromString "j" >>= \j -> pure $ \(i, n, m, _) ->
+            [ IndexFn
+                { shape = [Forall i (Iota $ sHole n), Forall j (Iota $ sHole m)],
+                  body =
+                    cases
+                      [(Bool True, sHole i .+. sHole j .+. int2SoP 1)]
+                }
+            ]
         )
     ]
   where
