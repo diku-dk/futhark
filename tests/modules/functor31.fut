@@ -1,7 +1,7 @@
 -- Distilled from #2273. The problem was that we destroyed type annotations when
 -- generating new names for the result of applying a parameterised module.
 -- ==
--- input {}
+-- input {} output { 0i64 1i64 }
 
 module fraction = {
   type t = (i64, i64)
@@ -28,4 +28,4 @@ module SI (_v: {}) = {
 
 module M = SI {}
 
-entry main = M.div M.m M.m
+entry main = let [x][y] (_: [0][x][y]()) = M.div M.m M.m in (x, y)
