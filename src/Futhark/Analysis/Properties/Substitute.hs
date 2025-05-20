@@ -161,9 +161,6 @@ eliminateII f = pure f
 {-
               Substitution rules
 -}
--- Basic support for multiple arguments is done.
--- (We should reconsider the Cat k abstraction before adding proper support.)
--- TODO git revert 31d79980a270d30a1c3183aafef1bcbb42ae8e3f
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
 substituteOnce f g_presub (f_apply, actual_args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
