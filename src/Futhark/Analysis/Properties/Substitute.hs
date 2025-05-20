@@ -138,6 +138,26 @@ subber argCheck g = do
           pure $ Just (e, vn, args)
     getApply_ _ acc _ = pure acc
 
+-- TODO not sure this is useful
+eliminateII :: IndexFn -> IndexFnM IndexFn
+eliminateII f@(IndexFn [Forall i d@(Cat k _ _)] _) = do
+  res <- unisearch d =<< getII
+  case res of
+    Just (ii, _) -> do
+      printM 1 ("eliminateII: " <> prettyStr f)
+      -- TODO replace any II(e) where e is provably in `k`th segment.
+      -- For now, just replace II(i).
+      cs <- astMap (identityMapper {mapOnSymbol = repII ii}) (body f)
+      pure (f {body = cs})
+    Nothing -> pure f
+  where
+    repII vn (Apply (Var x) [arg])
+      | vn == x,
+        arg == sym2SoP (Var i) =
+          pure (Var k)
+    repII _ e = pure e
+eliminateII f = pure f
+
 {-
               Substitution rules
 -}
