@@ -22,7 +22,7 @@ import Futhark.Analysis.Properties.Property (MonDir (..))
 import Futhark.Analysis.Properties.Property qualified as Property
 import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
-import Futhark.Analysis.Properties.Substitute (subst, (@), lookupII)
+import Futhark.Analysis.Properties.Substitute (lookupII, subst, (@))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 import Futhark.Analysis.Properties.Unify
@@ -372,6 +372,28 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
                 { shape = Forall i flat_dim : shp,
                   body = repCases (addRep j j' $ mkRep k (sVar k')) (body f)
                 }
+          -- ALTERNATIVE: using II(i) with domain Iota (m * n).
+          -- k' <- newNameFromString "k"
+          -- let b i = i .*. n
+          -- let flat_dim = Cat k' m (b (sVar k'))
+          -- -- Also add II array; if this flattened array is substituted into a
+          -- -- top-level definition it will be needed during substitution:
+          -- --   def f flat_x =
+          -- --     ...
+          -- --   def g x =
+          -- --     f (flatten x)
+          -- -- because flat_x[i] gets substituted for, e.g., x(II(i), i - II(i) * n).
+          -- i <- newNameFromString "i"
+          -- let f_II = IndexFn [Forall i flat_dim] (cases [(Bool True, sym2SoP (Var k))])
+          -- (vn_II, _) <- lookupII flat_dim f_II
+          -- addRelSymbol (Prop (Property.Monotonic vn_II Inc))
+          -- let ii = sym2SoP (Apply (Var vn_II) [sVar i])
+          -- let j' = sVar i .-. b ii
+          -- pure $
+          --   f
+          --     { shape = Forall i (Iota $ m .*. n) : shp,
+          --       body = repCases (addRep j j' $ mkRep k ii) (body f)
+          --     }
           _ -> error "Not implemented yet."
   | Just "scan" <- getFun e_f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
