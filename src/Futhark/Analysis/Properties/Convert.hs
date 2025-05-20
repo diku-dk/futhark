@@ -292,7 +292,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
     "map" `L.isPrefixOf` fname,
     E.Lambda params lam_body _ _ _ : _args <- getArgs args,
     Just arrays <- NE.nonEmpty (NE.tail args) = do
-      (aligned_args, _aligned_sizes) <- zipArgs loc params arrays
+      aligned_args <- zipArgs loc params arrays
       iter <- bindLambdaBodyParams (mconcat aligned_args)
       bodies <- rollbackAlgEnv $ do
         addRelIterator iter
@@ -431,7 +431,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
       -- We pick the first argument of the lambda to be the accumulator
       -- and the second argument to be an element of the input array.
       -- (The lambda is associative, so we are free to pick.)
-      (aligned_args, _) <- zipArgs loc [pat_x] xs
+      aligned_args <- zipArgs loc [pat_x] xs
 
       iter <- bindLambdaBodyParams (mconcat aligned_args)
       let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
@@ -591,7 +591,7 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       -- A top-level definition with an index function.
       printM 5 $ "✨ Using index fn " <> prettyStr g
 
-      (actual_args, actual_sizes) <- zipArgs loc' pats args
+      (actual_args, actual_sizes) <- zipArgsTopLevel loc' pats args
 
       -- Application is in ANF; rename formal arguments to actual arguments
       -- to check preconditions.
@@ -613,7 +613,7 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
       -- index function. (Less work, but more likely to fail.
       -- For example, substituting into a Sum fails in some cases.)
       printM 5 $ "✨ Using top-level def " <> prettyStr g
-      (actual_args, actual_sizes) <- zipArgs loc' pats args
+      (actual_args, actual_sizes) <- zipArgsTopLevel loc' pats args
       let name_rep = renamingRep (mconcat actual_args)
       _ <- checkPreconditions g pats (actual_args, actual_sizes) name_rep
 
@@ -1081,6 +1081,8 @@ bindLambdaBodyParams [] = error "Internal error: are you mapping with wildcard o
 bindLambdaBodyParams params = do
   -- Make sure all Cat k bound in iterators are identical by renaming.
   fns <- renamesM (map snd params)
+  printM 1 $ "bindLambdaBodyParams " <> prettyStr params
+  TODO: generalize this function to multiple dimensions
   let iter@(Forall i _) = maximum (map ((\case [it] -> it) . shape) fns)
   -- forM_ (zip (map fst params) fns) $ \(paramName, f_xs) -> do
   --   vn <- newVName ("#lam_" <> E.baseString paramName)
@@ -1100,17 +1102,34 @@ bindLambdaBodyParams params = do
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn [] cs]
   pure iter
 
--- Align parameters and arguments. Each parameter is a pattern.
--- A pattern unpacks to a list of (optional) names with type information.
--- An argument is an expression, which `forward` will, correspondingly,
--- return a list of index functions for.
--- Patterns and arguments must align---otherwise an error is raised.
+-- Align parameter patterns with their arguments---or raise an error.
+-- A parameter pattern reduces to a list of (optional) names with type information.
+-- An argument is a source expression, which `forward` will return a list
+-- of index functions for.
+-- For each pattern and argument, the two lists must correspond.
 zipArgs ::
   E.SrcLoc ->
   [E.Pat E.ParamType] ->
   NE.NonEmpty (a, E.Exp) ->
+  IndexFnM [[(E.VName, IndexFn)]]
+zipArgs loc formal_args actual_args =
+  fst <$> zipArgs' False loc formal_args actual_args
+
+-- Like zipArgs but also aligns size variables with size expressions.
+zipArgsTopLevel ::
+  E.SrcLoc ->
+  [E.Pat E.ParamType] ->
+  NE.NonEmpty (a, E.Exp) ->
   IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
-zipArgs loc formal_args actual_args = do
+zipArgsTopLevel = zipArgs' True
+
+zipArgs' ::
+  Bool ->
+  E.SrcLoc ->
+  [E.Pat E.ParamType] ->
+  NE.NonEmpty (a, E.Exp) ->
+  IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
+zipArgs' toplevel loc formal_args actual_args = do
   let pats = map patternMapAligned formal_args
   args <- mapM forward (getArgs actual_args)
   unless (length pats == length args) . error $
@@ -1123,16 +1142,21 @@ zipArgs loc formal_args actual_args = do
         (pat, arg) <- zip pats args
         pure . catMaybes $ zipWith (\vn fn -> (,fn) <$> vn) (map fst pat) arg
 
-  -- When applying bound functions size parameters must be replaced as well.
-  -- (E.g., if we are zipping index functions with use of a top-level definition.)
-  aligned_sizes <- forM (zip pats args) $ \(pat, arg) -> do
-    let types = map snd pat
-    size_names <- mapM (fmap getVName . shapeOfTypeBase) types
-    arg_sizes <- mapM sizeOfDomain arg
-    -- Assert that if there is a size parameter, then we have a size to bind it to.
-    when (any (\(vn, sz) -> isJust vn && isNothing sz) (zip size_names arg_sizes)) . error $
-      errorMsg loc "Internal error: sizes don't align."
-    pure $ catMaybes $ zipMaybes size_names arg_sizes
+  -- When applying top-level functions size parameters must be replaced as well.
+  aligned_sizes <-
+    if toplevel
+      then forM (zip pats args) $ \(pat, arg) -> do
+        let types = map snd pat
+        size_names <- mapM (fmap getVName . shapeOfTypeBase) types
+        printM 1 $ "## pats " <> prettyStr pats
+        printM 1 $ "## types " <> prettyStr types
+        printM 1 $ "## size_names " <> prettyStr size_names
+        arg_sizes <- mapM sizeOfDomain arg
+        -- Assert that if there is a size parameter, then we have a size to bind it to.
+        when (any (\(vn, sz) -> isJust vn && isNothing sz) (zip size_names arg_sizes)) . error $
+          errorMsg loc "Internal error: sizes don't align."
+        pure $ catMaybes $ zipMaybes size_names arg_sizes
+      else pure []
 
   pure (aligned_args, aligned_sizes)
   where
@@ -1145,6 +1169,7 @@ zipArgs loc formal_args actual_args = do
     sizeOfDomain (IndexFn [] _) = pure Nothing
     sizeOfDomain (IndexFn [Forall _ d] _) =
       Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
+    sizeOfDomain f = error $ errorMsg loc ("sizeOfDomain: " <> prettyStr f)
 
     zipMaybes = zipWith (liftA2 (,))
 
