@@ -399,7 +399,7 @@ toAlgebra_ (Sum j lb ub x) = do
       -- Either handle quantifiers needs to be run on the symbol first
       -- or x did not depend j. Both cases would be odd, and I'd like
       -- to know why it would happen.
-      printM 2000 $ "toAlgebra_: " <> prettyString (Sum j lb ub x)
+      printM 1337 $ "toAlgebra_: " <> prettyString (Sum j lb ub x)
       error "handleQuantifiers need to be run"
 toAlgebra_ sym@(Apply (Var f) [x]) = do
   res <- search sym
