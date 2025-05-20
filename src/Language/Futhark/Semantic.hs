@@ -28,7 +28,7 @@ import Futhark.Util.Pretty
 import Language.Futhark
 import System.FilePath qualified as Native
 import System.FilePath.Posix qualified as Posix
-import Prelude hiding (mod)
+import Prelude hiding (abs, mod)
 
 -- | Create an import name immediately from a file path specified by
 -- the user.
@@ -158,7 +158,10 @@ instance Monoid Env where
   mempty = Env mempty mempty mempty mempty mempty
 
 instance Pretty MTy where
-  pretty = pretty . mtyMod
+  pretty (MTy abs mod) =
+    "abstract" <> parens (hsep $ map p $ M.toList abs) </> pretty mod
+    where
+      p (v, l) = pretty l <> pretty v
 
 instance Pretty Mod where
   pretty (ModEnv e) = pretty e
