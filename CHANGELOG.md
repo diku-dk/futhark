@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* GPU backends: more efficient atomic operations on 8-bit and 16-bit quantities.
+  This helps histograms on these types, as well as AD on programs that use
+  `f16`.
+
+* Improved handling of long chains of `flatten`/`unflatten`/`transpose`
+  operations.
+
+* New attributes: `#[blank]` and `#[scratch]`.
+
+* A module type `with`-refinement may now have an existentially quantified size
+  on its right-hand side.
+
+* Value specs in module types can now use section binding notation for symbolic
+  names, and in fact this is the preferred form that is also used by `futhark
+  fmt`. (#2266)
+
+* `futhark profile` now also prints proportion of total runtime for each cost centre.
+
+* Futhark no longer warns about entry points with opaque types.
+
+* Types such as `foo.bar` are now turned into `foo_bar` in the C API, rather
+  than an ugly hash.
+
 ### Removed
 
 ### Changed
@@ -18,6 +41,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Interpreter: some tricky aspects of size-lifted types (#2258).
 
 * Incorrect unused-name warning for named parameters in module types.
+
+* Size-lifted abstract types with hidden sizes could result in different sizes
+  being incorrectly treated as the same size.
+
+* It was possible to make size-lifted types appear unlifted by using parametric
+  types (#2268).
+
+* The same type would be mentioned twice in some type errors.
+
+* The type checker neglected to detect some cases of invalid references from
+  return types to names bound in parameter patterns. (#2271)
+
+* Incorrect handling of projections used in size expressions.
+
+* Subtle interactions of modules and sizes in the interpreter and compiler
+  (#2273).
 
 ## [0.25.30]
 

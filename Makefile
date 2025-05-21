@@ -53,8 +53,14 @@ test-oclgrind:
 test-webgpu:
 	cabal run -- futhark test tests -c --backend=webgpu --runner tools/browser_test.py --no-tuning
 
+test-t:
+	cabal run -- futhark test tests -t
+
 test-c:
 	cabal run -- futhark test tests -c --backend=c --no-tuning
+
+test-multicore:
+	cabal run -- futhark test tests -c --backend=multicore --no-tuning
 
 test-interpreter:
 	cabal run -- futhark test tests -i

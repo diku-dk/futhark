@@ -1645,6 +1645,7 @@ Module Type Expressions
 
 .. productionlist::
    spec:   "val" `name` `type_param`* ":" `type`
+       : | "val" "(" `symbol` ")" ":" `type`
        : | "val" `symbol` `type_param`* ":" `type`
        : | ("type" | "type^" | "type~") `name` `type_param`* "=" `type`
        : | ("type" | "type^" | "type~") `name` `type_param`*
@@ -1742,6 +1743,16 @@ unspecified which attributes take precedence.
 
 The following expression attributes are supported.
 
+``blank``
+.........
+
+Indicates that the value computed by the expression does not matter, and that
+the expression can be replaced with an arbitrary other expression of the same
+type. This is useful for constructing arrays that will eventually be filled with
+``scatter`` or similar operations. Note that this can subvert type-based
+invariants safety if the blank value is used, but it cannot subvert memory
+safety.
+
 ``trace``
 .........
 
@@ -1801,6 +1812,13 @@ to multiple versions at deeper levels).
 Do not inline the attributed function application.  If used within a
 parallel construct (e.g. ``map``), this will likely prevent the GPU
 backends from generating working code.
+
+``scratch``
+...........
+
+Like ``blank``, but the resulting values (if arrays) will comprise initialised
+memory. Reading from such arrays is potentially dangerous, as the elements are
+completely undefined until they are updated with a ``scatter`` or similar.
 
 ``sequential``
 ..............

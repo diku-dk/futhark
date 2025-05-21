@@ -516,7 +516,7 @@ $entry_point_decls
 
       headerDecl InitDecl [C.cedecl|struct futhark_context;|]
       headerDecl InitDecl [C.cedecl|struct futhark_context* futhark_context_new(struct futhark_context_config* cfg);|]
-      headerDecl InitDecl [C.cedecl|void futhark_context_free(struct futhark_context* cfg);|]
+      headerDecl InitDecl [C.cedecl|void futhark_context_free(struct futhark_context* ctx);|]
       headerDecl MiscDecl [C.cedecl|int futhark_context_sync(struct futhark_context* ctx);|]
 
       generateTuningParams params

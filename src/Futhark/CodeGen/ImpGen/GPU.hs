@@ -85,7 +85,7 @@ openclAtomics, cudaAtomics :: AtomicBinOp
         (Or Int8, Imp.AtomicOr Int8),
         (Xor Int8, Imp.AtomicXor Int8)
       ]
-    opencl = opencl8 ++ opencl16 ++ opencl32 ++ opencl64
+    opencl = opencl8 <> opencl16 <> opencl32 <> opencl64
     cuda = opencl
 
 compileProg ::

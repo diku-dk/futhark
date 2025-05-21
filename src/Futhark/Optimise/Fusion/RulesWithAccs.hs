@@ -170,15 +170,16 @@ ruleMFScat node_to_fuse dg@DepGraph {dgGraph = g}
     getRepRshpArr :: ((H.Input, NodeT), LParam SOACS) -> Maybe (RshpInp, Certs)
     getRepRshpArr ((H.Input outtrsf arr_nm arr_tp, _nt), farg)
       | rshp_trsfm H.:< other_trsfms <- H.viewf outtrsf,
-        (H.Reshape c ReshapeArbitrary shp_flat) <- rshp_trsfm,
+        H.Reshape aux shp_flat <- rshp_trsfm,
+        ReshapeArbitrary <- reshapeKind shp_flat,
         other_trsfms == mempty,
         eltp <- paramDec farg,
-        Just shp_flat' <- checkShp eltp shp_flat,
+        Just shp_flat' <- checkShp eltp $ newShape shp_flat,
         Array _ptp shp_unflat _ <- arr_tp,
         Just shp_unflat' <- checkShp eltp shp_unflat,
         shapeRank shp_flat' == 1,
         shapeRank shp_flat' < shapeRank shp_unflat' =
-          Just (((arr_nm, farg), (shp_flat', shp_unflat', eltp)), c)
+          Just (((arr_nm, farg), (shp_flat', shp_unflat', eltp)), stmAuxCerts aux)
     getRepRshpArr _ = Nothing
     --
     checkShp (Prim _) shp_arr = Just shp_arr

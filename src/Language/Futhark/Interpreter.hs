@@ -332,8 +332,9 @@ lookupInEnv ::
 lookupInEnv onEnv qv env = f env $ qualQuals qv
   where
     f m (q : qs) =
-      case M.lookup q $ envTerm m of
-        Just (TermModule (Module mod)) -> f mod qs
+      case (M.lookup (qualLeaf qv) $ onEnv m, M.lookup q $ envTerm m) of
+        (Just x, _) -> Just x
+        (Nothing, Just (TermModule (Module mod))) -> f mod qs
         _ -> Nothing
     f m [] = M.lookup (qualLeaf qv) $ onEnv m
 
@@ -641,7 +642,7 @@ evalIndex loc env is arr = do
           "Index ["
             <> T.intercalate ", " (map prettyText is)
             <> "] out of bounds for array of shape "
-            <> prettyText (valueShape arr)
+            <> prettyText (arrayValueShape arr)
             <> "."
   maybe oob pure $ indexArray is arr
 
@@ -1202,7 +1203,14 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
       let res_env = case res_mod of
             Module x -> x
             _ -> mempty
-      pure (f_env <> e_env <> res_env, res_mod)
+      -- The following environment handles the case where rsubst refers to names
+      -- that are not actually defined in the module itself, but merely
+      -- inherited from an outer environment (see #2273).
+      let env_substs = (`Env` mempty) $ M.fromList $ do
+            (to, from) <- M.toList rsubst
+            x <- maybeToList $ M.lookup from $ envTerm env
+            pure (to, x)
+      pure (f_env <> e_env <> res_env <> env_substs, res_mod)
     _ -> error "Expected ModuleFun."
 
 evalDec :: Env -> Dec -> EvalM Env
