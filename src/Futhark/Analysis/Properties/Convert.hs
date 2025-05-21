@@ -293,15 +293,15 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
     E.Lambda params lam_body _ _ _ : _args <- getArgs args,
     Just arrays <- NE.nonEmpty (NE.tail args) = do
       aligned_args <- zipArgs loc params arrays
-      iter <- bindLambdaBodyParams (mconcat aligned_args)
+      shp <- bindLambdaBodyParams (mconcat aligned_args)
       bodies <- rollbackAlgEnv $ do
-        addRelIterator iter
+        addRelShape shp
         forward lam_body
 
       printM 1 $ "E.map bodies " <> prettyStr bodies
 
       forM bodies $ \f_body ->
-        subst (f_body {shape = [iter] <> shape f_body}) >>= rewrite
+        subst (f_body {shape = shp <> shape f_body}) >>= rewrite
   | Just fname <- getFun e_f,
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
@@ -433,14 +433,14 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
       -- (The lambda is associative, so we are free to pick.)
       aligned_args <- zipArgs loc [pat_x] xs
 
-      iter <- bindLambdaBodyParams (mconcat aligned_args)
+      shp <- bindLambdaBodyParams (mconcat aligned_args)
       let accToRec = M.fromList (map (,sym2SoP Recurrence) $ E.patNames pat_acc)
       bodies <- rollbackAlgEnv $ do
-        addRelIterator iter
+        addRelShape shp
         map (repIndexFn accToRec) <$> forward lam_body
 
       forM bodies $ \f_body ->
-        subst (f_body {shape = [iter] <> shape f_body}) >>= rewrite
+        subst (f_body {shape = shp <> shape f_body}) >>= rewrite
   | Just "scatter" <- getFun e_f,
     [e_dest, e_inds, e_vals] <- getArgs args = do
       -- `scatter dest is vs` calculates the equivalent of this imperative code:
@@ -1076,7 +1076,9 @@ stripCoerce e = e
 -- into
 --   map (\i -> xs[i] + ys[i] + zs[i]) (indices xs)
 -- where xs is the index function with the most "complex" iterator.
-bindLambdaBodyParams :: [(E.VName, IndexFn)] -> IndexFnM Iterator
+-- For multiple dimensions, the most complex iterator is chosen for
+-- each dimension.
+bindLambdaBodyParams :: [(E.VName, IndexFn)] -> IndexFnM [Iterator]
 bindLambdaBodyParams [] = error "Internal error: are you mapping with wildcard only?"
 bindLambdaBodyParams params = do
   -- Make sure all Cat k bound in iterators are identical by renaming.
@@ -1100,14 +1102,15 @@ bindLambdaBodyParams params = do
     -- Renaming k bound in `tmp_iter` to k bound in `iter`.
     printM 1 $ "# hm " <> prettyStr tmp_shape
     let lulz =
-         mconcat $
-          zipWith
-          (\t n -> fromMaybe mempty $ mkRep <$> catVar t <*> (sVar <$> catVar n))
-          tmp_shape new_shape
+          mconcat $
+            zipWith
+              (\t n -> fromMaybe mempty $ mkRep <$> catVar t <*> (sVar <$> catVar n))
+              tmp_shape
+              new_shape
     printM 1 $ "# lulz " <> prettyStr lulz
     let k_rep = lulz
     insertIndexFn paramName [repIndexFn k_rep $ IndexFn [] cs]
-  pure undefined
+  pure new_shape
 
 -- Align parameter patterns with their arguments---or raise an error.
 -- A parameter pattern reduces to a list of (optional) names with type information.
