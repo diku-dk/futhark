@@ -21,7 +21,7 @@ module Futhark.Analysis.Properties.Unify
     unifies,
     renameAnd,
     renameM,
-    renamesM,
+    renameSameL,
     repTuple,
     repPredicate,
   )
@@ -100,9 +100,10 @@ instance (Ord u, Renameable u) => Renameable (SoP u) where
 renameM :: (MonadFreshNames m, Renameable u) => u -> m u
 renameM x = getNameSource >>= flip rename x
 
--- Renames any number of renameables using the same name source for each.
-renamesM :: (MonadFreshNames m, Traversable t, Renameable b) => t b -> m (t b)
-renamesM xs = getNameSource >>= \vns -> mapM (rename vns) xs
+-- Renames any number of renameables using the same name source for each
+-- via `f`. For example, `renameSameL mapM` renames a list of renameables.
+renameSameL :: (Renameable u, MonadFreshNames m) => ((u -> m u) -> t -> m b) -> t -> m b
+renameSameL f xs = getNameSource >>= \vns -> f (rename vns) xs
 
 -- Rename bound variables in `a` and `b`. Renamed variables are
 -- identical, if `a` and `b` are syntactically equivalent.
