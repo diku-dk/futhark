@@ -17,6 +17,7 @@ module Futhark.Analysis.Properties.IndexFn
     fromScalar,
     Iterator,
     cmapValues,
+    rank,
   )
 where
 
@@ -66,6 +67,9 @@ type Iterator = Quantified Domain
 
 newtype Cases a b = Cases (NE.NonEmpty (a, b))
   deriving (Show, Eq, Ord)
+
+rank :: IndexFn -> Int
+rank = length . shape
 
 cases :: [(a, b)] -> Cases a b
 cases = Cases . NE.fromList
