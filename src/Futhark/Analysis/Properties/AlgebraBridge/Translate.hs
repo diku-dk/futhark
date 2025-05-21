@@ -178,7 +178,7 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
       fs <- lookupIndexFn vn
       idx' <- case fs of
         Just [IndexFn [Forall i (Iota n), Forall j (Iota m)] _] -> do
-          printM 1 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
+          -- printM 1 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
           case filterSoP (\t c -> isJust (term2SoP t c ./. m)) idx of
             offset
               -- Information about offset was destroyed.
@@ -187,7 +187,7 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
               | otherwise -> do
                   let e_i = fromJust (offset ./. m)
                   let e_j = idx .-. offset
-                  printM 1337 ("(ﾉ◕ヮ◕)ﾉ  (e_i, e_j) " <> prettyStr (e_i, e_j))
+                  -- printM 1337 ("(ﾉ◕ヮ◕)ﾉ  (e_i, e_j) " <> prettyStr (e_i, e_j))
                   valid <- (&&) <$> checkRange e_i i n <*> checkRange e_j j m
                   if valid then pure [e_i, e_j] else useII
           where
@@ -195,7 +195,7 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
               k <- newNameFromString "k"
               let flat_dims = Cat k n (sym2SoP (Var k) .*. m)
               ii <- Var . fst . fromJust <$> (unisearch flat_dims =<< getII)
-              printM 1337 ("(ﾉ◕ヮ◕)ﾉ  II " <> prettyStr ii)
+              -- printM 1337 ("(ﾉ◕ヮ◕)ﾉ  II " <> prettyStr ii)
               pure [sym2SoP (Apply ii [idx]), idx .-. (sym2SoP (Apply ii [idx]) .*. m)]
 
             checkRange e k ub
@@ -407,7 +407,7 @@ toAlgebra_ (Sum j lb ub x) = do
       -- Either handle quantifiers needs to be run on the symbol first
       -- or x did not depend j. Both cases would be odd, and I'd like
       -- to know why it would happen.
-      printM 1337 $ "toAlgebra_: " <> prettyString (Sum j lb ub x)
+      -- printM 1337 $ "toAlgebra_: " <> prettyString (Sum j lb ub x)
       error "handleQuantifiers need to be run"
 toAlgebra_ sym@(Apply (Var f) [x]) = do
   res <- search sym
@@ -430,8 +430,8 @@ toAlgebra_ sym@(Apply (Var f) [e_i, e_j]) = do
             if i `S.member` fv m
               then e_j .+. toSumOfSums j' (int2SoP 0) (e_i .-. int2SoP 1) (rep (mkRep i (sym2SoP $ Var j')) m)
               else e_j .+. e_i .*. m
-      printM 1 ("💩" <> prettyStr sym)
-      printM 1 ("💩arg1d: " <> prettyStr arg1d)
+      -- printM 1 ("💩" <> prettyStr sym)
+      -- printM 1 ("💩arg1d: " <> prettyStr arg1d)
       _ <- handleQuantifiers arg1d
       res <- search (Apply (Var f) [arg1d])
       vn <- case fst <$> res of
