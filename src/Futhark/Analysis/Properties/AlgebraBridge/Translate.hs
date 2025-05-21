@@ -28,6 +28,7 @@ import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMappable, ASTM
 import Futhark.Analysis.Properties.Unify (Substitution (mapping), Unify, fv, mkRep, rep, unify)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
+import Futhark.SoP.FourierMotzkin (($<$), ($<=$))
 import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntransPE, lookupUntransSym)
 import Futhark.SoP.Monad qualified as SoPM (addUntrans)
 import Futhark.SoP.Refine (addRel)
@@ -167,35 +168,42 @@ fromAlgebra_ (Algebra.Var vn) = do
   case x of
     Just x' -> pure . sym2SoP $ x'
     Nothing -> pure . sym2SoP $ Var vn
-fromAlgebra_ (Algebra.Idx (Algebra.One vn) i) = do
+fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
   x <- lookupUntransSym (Algebra.Var vn)
-  idx <- fromAlgebra i
+  idx <- fromAlgebra alg_idx
   case x of
     Just x' -> sym2SoP <$> repHoles x' idx
     Nothing -> do
       -- Corresponding back-translation for 2D-as-1D HACK in toAlgebra_.
       fs <- lookupIndexFn vn
       idx' <- case fs of
-        Just [IndexFn [Forall _ (Iota n), Forall _ (Iota m)] _] -> do
-          -- printM 1 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
-          -- printM 1 ("(ﾉ◕ヮ◕)ﾉ  idx " <> prettyStr idx)
+        Just [IndexFn [Forall i (Iota n), Forall j (Iota m)] _] -> do
+          printM 1 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
           case filterSoP (\t c -> isJust (term2SoP t c ./. m)) idx of
             offset
-              | isZero offset -> do
-                  -- Information about offset was destroyed; use II array.
-                  k <- newNameFromString "k"
-                  let flat_dims = Cat k n (sym2SoP (Var k) .*. m)
-                  ii <- Var . fst . fromJust <$> (unisearch flat_dims =<< getII)
-                  -- printM 1 ("(ﾉ◕ヮ◕)ﾉ  II " <> prettyStr ii)
-                  pure [sym2SoP (Apply ii [idx]), idx .-. (sym2SoP (Apply ii [idx]) .*. m)]
+              -- Information about offset was destroyed.
+              | isZero offset -> useII
+              -- Try to determine i and j from offset.
               | otherwise -> do
-                  -- let e_j = filterSoP (\t c -> isNothing (term2SoP t c ./. m)) idx
-                  let e_i = offset ./. m
+                  let e_i = fromJust (offset ./. m)
                   let e_j = idx .-. offset
-                  printM 1 ("(ﾉ◕ヮ◕)ﾉ  (e_i, e_j) " <> prettyStr (e_i, e_j))
-                  -- check e_j in [0, m)
-                  -- check e_i in [0, n)
-                  undefined -- not implemented yet (this is the case where we should actually be able to get i and j)
+                  printM 1337 ("(ﾉ◕ヮ◕)ﾉ  (e_i, e_j) " <> prettyStr (e_i, e_j))
+                  valid <- (&&) <$> checkRange e_i i n <*> checkRange e_j j m
+                  if valid then pure [e_i, e_j] else useII
+          where
+            useII = do
+              k <- newNameFromString "k"
+              let flat_dims = Cat k n (sym2SoP (Var k) .*. m)
+              ii <- Var . fst . fromJust <$> (unisearch flat_dims =<< getII)
+              printM 1337 ("(ﾉ◕ヮ◕)ﾉ  II " <> prettyStr ii)
+              pure [sym2SoP (Apply ii [idx]), idx .-. (sym2SoP (Apply ii [idx]) .*. m)]
+
+            checkRange e k ub
+              | justSym e == Just (Var k) = pure True
+              | otherwise = do
+                  ub' <- toAlgebra ub
+                  e' <- toAlgebra e
+                  (&&) <$> (int2SoP 0 $<=$ e') <*> (e' $<$ ub')
         _ ->
           pure [idx]
       pure . sym2SoP $ Apply (Var vn) idx'
