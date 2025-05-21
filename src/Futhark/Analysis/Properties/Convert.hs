@@ -1157,11 +1157,12 @@ zipArgs' toplevel loc formal_args actual_args = do
     if toplevel
       then forM (zip pats args) $ \(pat, arg) -> do
         let types = map snd pat
-        size_names <- mapM (fmap getVName . shapeOfTypeBase) types
-        printM 1 $ "## pats " <> prettyStr pats
-        printM 1 $ "## types " <> prettyStr types
-        printM 1 $ "## size_names " <> prettyStr size_names
-        arg_sizes <- mapM sizeOfDomain arg
+        size_names' <- mapM (fmap getVName . shapeOfTypeBase) types
+        arg_sizes' <- mapM (domainSizes . shape) arg
+        unless (length size_names' == length arg_sizes' && map length size_names' == map length arg_sizes') . error $
+          errorMsg loc "Internal error: parameter and argument sizes do not align."
+        let size_names = mconcat size_names'
+        let arg_sizes = mconcat arg_sizes'
         -- Assert that if there is a size parameter, then we have a size to bind it to.
         when (any (\(vn, sz) -> isJust vn && isNothing sz) (zip size_names arg_sizes)) . error $
           errorMsg loc "Internal error: sizes don't align."
@@ -1170,16 +1171,15 @@ zipArgs' toplevel loc formal_args actual_args = do
 
   pure (aligned_args, aligned_sizes)
   where
-    getVName [] = Nothing
-    getVName [x]
-      | Just (Var vn) <- justSym x = Just vn
-      | otherwise = Nothing
-    getVName _ = error "multi-dim not implemented yet"
+    getVName [] = [Nothing]
+    getVName (x : xs)
+      | Just (Var vn) <- justSym x = Just vn : getVName xs
+      | otherwise = Nothing : getVName xs
 
-    sizeOfDomain (IndexFn [] _) = pure Nothing
-    sizeOfDomain (IndexFn [Forall _ d] _) =
-      Just <$> rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
-    sizeOfDomain f = error $ errorMsg loc ("sizeOfDomain: " <> prettyStr f)
+    domainSizes [] = pure [Nothing]
+    domainSizes (Forall _ d : ds) = do
+      sz <- rewrite (domainEnd d .-. domainStart d .+. int2SoP 1)
+      (Just sz :) <$> domainSizes ds
 
     zipMaybes = zipWith (liftA2 (,))
 
