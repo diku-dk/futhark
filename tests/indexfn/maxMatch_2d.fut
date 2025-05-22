@@ -178,7 +178,7 @@ def removeMarked [arraySize] [nVerts]
     let cs = map (\v -> !markedVerts[v[0]] || !markedVerts[v[1]]) edges
     let (new_n, is) = filter_indices cs
 
-    let scratch = replicate new_n [0i64, 0i64]
+    let scratch = replicate new_n (map (\_ -> 0i64) (iota 2))
     let edges' = scatter scratch is edges
 
     let scratch = replicate new_n 0i64
