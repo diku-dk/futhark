@@ -292,14 +292,11 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
     "map" `L.isPrefixOf` fname,
     E.Lambda params lam_body _ _ _ : _args <- getArgs args,
     Just arrays <- NE.nonEmpty (NE.tail args) = do
-      printM 1 $ "E.map " <> show loc
       (outer_dim, aligned_args) <- zipArgsSOAC loc params arrays
       bindLambdaBodyParams (mconcat aligned_args)
       bodies <- rollbackAlgEnv $ do
         addRelIterator outer_dim
         forward lam_body
-
-      printM 1 $ "E.map bodies " <> prettyStr bodies
 
       forM bodies $ \f_body ->
         subst (f_body {shape = outer_dim : shape f_body}) >>= rewrite
@@ -964,10 +961,6 @@ scatterSc2 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)]
                     ]
               }
       f' <- lift $ substParams f [(hole_vs, vs), (hole_xs, xs)]
-      printM 1 $ "f " <> prettyStr f
-      printM 1 $ "xs " <> prettyStr xs
-      printM 1 $ "vs " <> prettyStr vs
-      printM 1 $ "f' " <> prettyStr f'
       pure f'
     _ -> failMsg "scatterSc2: unable to determine OOB branch"
 scatterSc2 _ _ _ = fail ""
@@ -1109,10 +1102,10 @@ zipArgsSOAC loc formal_args actual_args = do
         body = singleCase . sym2SoP $ Apply (Var vn) (iters new_shape)
       }
       @ (vn, f)
-    -- let k_rep = case formula new_outer_dim of
-    --       Iota {} -> mempty
-    --       Cat k _ _ -> maybe mempty (`mkRep` sVar k) (catVar . head $ shape f')
-    -- pure $ repIndexFn k_rep f'
+  -- let k_rep = case formula new_outer_dim of
+  --       Iota {} -> mempty
+  --       Cat k _ _ -> maybe mempty (`mkRep` sVar k) (catVar . head $ shape f')
+  -- pure $ repIndexFn k_rep f'
   -- Substitutions may have renamed Cat `k`s; do a common rename again.
   args'' <- renameSameL (mapM . mapM) args'
   -- Drop the new outer dim, aligning arguments with parameters.
@@ -1155,12 +1148,8 @@ zipArgs' loc formal_args actual_args = do
   -- When applying top-level functions size parameters must be replaced as well.
   aligned_sizes <-
     forM (zip pats actual_args) $ \(pat, arg) -> do
-      printM 1 $ "#pat " <> prettyStr pat
       fmap mconcat . forM (zip (map snd pat) arg) $ \(pat_type, f) -> do
         type_shape <- shapeOfTypeBase pat_type
-        printM 1 $ "#pat_type " <> prettyStr pat_type
-        printM 1 $ "#f " <> prettyStr f
-        printM 1 $ "#type_shape " <> prettyStr type_shape
         unless (length type_shape == rank f) . error $
           errorMsg loc "Internal error: parameter and argument sizes do not align."
         let size_vars = map getVName type_shape
