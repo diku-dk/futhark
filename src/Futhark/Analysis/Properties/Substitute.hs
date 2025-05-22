@@ -13,6 +13,7 @@ import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as S
 import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==))
+import Futhark.Analysis.Properties.Flatten (lookupII)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
 import Futhark.Analysis.Properties.Monad
@@ -26,7 +27,6 @@ import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, sym2SoP)
 import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName)
-import Futhark.Analysis.Properties.Flatten (lookupII)
 
 -- If f has multiple cases, we would not know which case to substitute
 -- into quantified symbols (e.g., Sum j a b f(e(j))).
@@ -232,15 +232,12 @@ substituteOnce f g_presub (f_apply, actual_args) = do
                 g_presub
         arg_eq_j `orM` arg_in_segment_bounds
 
-    -- Apply first matching rule for each dimension in g.
-    -- XXX for now, this assumes g and f each have at most one dimension;
-    -- need to consider each dimension in f always to make sure
-    -- all Cat k's are handled.
+    -- Apply first matching rule for each dimension in f.
     applySubRules g =
       runMaybeT $
         if null (shape g)
           then subRules g 0
-          else foldM subRules g [0 .. length (shape g) - 1]
+          else foldM subRules g [0 .. rank f - 1]
 
     subRules g n =
       sub0 g <|> sub1 n g <|> sub2 n g <|> sub3 n g <|> sub4 n g <|> subX n g
@@ -255,7 +252,10 @@ substituteOnce f g_presub (f_apply, actual_args) = do
       Forall _ Iota {} -> pure g
       _ -> fail "No match."
 
-    sub2 n g | n >= length (shape g) = fail "No match."
+    -- TODO this only tries to align the n'th
+    -- dimension of f with the n'th dimension of g.
+    -- But we could try any dimension in g.
+    sub2 n g | n >= rank g = fail "No match."
     sub2 n g = case (shape f !! n, shape g !! n) of
       (Forall i df@Cat {}, Forall j dg@Iota {}) -> do
         Yes <- lift (rewrite (domainEnd df) >>= ($== domainEnd dg))
@@ -265,7 +265,10 @@ substituteOnce f g_presub (f_apply, actual_args) = do
           (l, _old_iter : r) = splitAt n (shape g)
       _ -> fail "No match."
 
-    sub3 n g | n >= length (shape g) = fail "No match."
+    -- TODO this only tries to align the n'th
+    -- dimension of f with the n'th dimension of g.
+    -- But we could try any dimension in g.
+    sub3 n g | n >= rank g = fail "No match."
     sub3 n g = case (shape f !! n, shape g !! n) of
       (Forall _ df@(Cat k _ _), Forall _ dg@(Cat k' _ _))
         | k `S.member` fv (body g) -> do
