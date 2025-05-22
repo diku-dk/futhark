@@ -131,8 +131,14 @@ def getSmallestPairs [arraySize]
     in (ys, zs)
 
 -- Return the edge if its ID is the smallest, else return placeholder
-def getMMEdges [nVerts] (smallestEdgeId: [nVerts]i64) (e: [2]{i64 | (>= 0)}) (i: i64): ([2]i64, [2]i64) =
-    if smallestEdgeId[e[0]] == i && smallestEdgeId[e[1]] == i then (e, [i,i]) else ([-1, -1], [-1, -1])
+def getMMEdges [nVerts]
+    (smallestEdgeId: [nVerts]i64)
+    (e: {[2]i64 | \x -> Range x (0, nVerts)})
+    (i: i64)
+    : {([2]i64, [2]i64) | \_ -> true} =
+    if smallestEdgeId[e[0]] == i && smallestEdgeId[e[1]] == i
+    then (e, replicate 2 i)
+    else (replicate 2 (-1), replicate 2 (-1))
 
 -- Update the marked vertexes and included edges
 def update [arraySize] [nVerts]
