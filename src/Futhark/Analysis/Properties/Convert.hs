@@ -15,6 +15,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, fromAlgebra, paramToAlgebra, simplify, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
+import Futhark.Analysis.Properties.Flatten (flatten2d)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd, repCases, repIndexFn)
 import Futhark.Analysis.Properties.Monad
@@ -22,7 +23,7 @@ import Futhark.Analysis.Properties.Property (MonDir (..))
 import Futhark.Analysis.Properties.Property qualified as Property
 import Futhark.Analysis.Properties.Query
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
-import Futhark.Analysis.Properties.Substitute (lookupII, subst, (@))
+import Futhark.Analysis.Properties.Substitute (subst, (@))
 import Futhark.Analysis.Properties.Symbol (Symbol (..), neg, sop2Symbol)
 import Futhark.Analysis.Properties.SymbolPlus (repProperty)
 import Futhark.Analysis.Properties.Unify
@@ -30,7 +31,7 @@ import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.*.), (.+.), (.-.), (~*~), (~+~), (~-~))
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
@@ -344,23 +345,13 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
           Forall k (Iota m) : Forall j (Iota n) : shp -> do
             -- HACK j === (i' mod n), but we don't have modulo, so we convert to Cat domain.
             -- TODO use the multi-dim theory instead.
-            i <- newNameFromString "i"
             k' <- newNameFromString "k"
-            let e_k = sVar k' .*. n
+            (_, flat_dim) <- flatten2d k' m n
+            let Forall i (Cat _ _ e_k) = flat_dim
             let j' = sVar i .-. e_k
-            let flat_dim = Cat k' m e_k
-            -- Also add II array; if this flattened array is substituted into a
-            -- top-level definition it will be needed during substitution:
-            --   def f flat_x =
-            --     ...
-            --   def g x =
-            --     f (flatten x)
-            -- because flat_x[i] gets substituted for, e.g., x(II(i), i - II(i) * n).
-            let f_II = IndexFn [Forall i flat_dim] (cases [(Bool True, sym2SoP (Var k))])
-            _ <- lookupII flat_dim f_II
             pure $
               f
-                { shape = Forall i flat_dim : shp,
+                { shape = flat_dim : shp,
                   body = repCases (addRep j j' $ mkRep k (sVar k')) (body f)
                 }
           -- ALTERNATIVE: using II(i) with domain Iota (m * n).

@@ -18,6 +18,7 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
+import Futhark.Analysis.Properties.Flatten (flatten2d)
 import Futhark.Analysis.Properties.IndexFn
 import Futhark.Analysis.Properties.IndexFnPlus ()
 import Futhark.Analysis.Properties.Monad
@@ -25,7 +26,7 @@ import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.SymbolPlus (toSumOfSums)
 import Futhark.Analysis.Properties.Traversals (ASTFolder (..), ASTMappable, ASTMapper (..), astFold, astMap, identityMapper)
-import Futhark.Analysis.Properties.Unify (Substitution (mapping), Unify, fv, mkRep, rep, unify)
+import Futhark.Analysis.Properties.Unify (Substitution (mapping), fv, mkRep, rep, unify)
 import Futhark.MonadFreshNames (newNameFromString, newVName)
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
 import Futhark.SoP.FourierMotzkin (($<$), ($<=$))
@@ -33,7 +34,7 @@ import Futhark.SoP.Monad (addProperty, askProperty, getUntrans, inv, lookupUntra
 import Futhark.SoP.Monad qualified as SoPM (addUntrans)
 import Futhark.SoP.Refine (addRel)
 import Futhark.SoP.SoP (Rel (..), SoP, filterSoP, hasConstant, int2SoP, isZero, justSym, mapSymM, mapSymSoPM, sym2SoP, term2SoP, (.*.), (.+.), (.-.), (./.), (~-~))
-import Futhark.Util.Pretty (Pretty, prettyString)
+import Futhark.Util.Pretty (prettyString)
 import Language.Futhark (VName, baseString)
 
 class AlgTranslatable u v where
@@ -178,7 +179,7 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
       fs <- lookupIndexFn vn
       idx' <- case fs of
         Just [IndexFn [Forall i (Iota n), Forall j (Iota m)] _] -> do
-          -- printM 1 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
+          printM 1337 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
           case filterSoP (\t c -> isJust (term2SoP t c ./. m)) idx of
             offset
               -- Information about offset was destroyed.
@@ -193,9 +194,7 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
           where
             useII = do
               k <- newNameFromString "k"
-              let flat_dims = Cat k n (sym2SoP (Var k) .*. m)
-              ii <- Var . fst . fromJust <$> (unisearch flat_dims =<< getII)
-              -- printM 1337 ("(ﾉ◕ヮ◕)ﾉ  II " <> prettyStr ii)
+              ii <- Var . fst <$> flatten2d k n m
               pure [sym2SoP (Apply ii [idx]), idx .-. (sym2SoP (Apply ii [idx]) .*. m)]
 
             checkRange e k ub
@@ -474,20 +473,3 @@ handleBoolean p = do
 addUntrans :: Symbol -> IndexFnM VName
 addUntrans (Var vn) = pure vn
 addUntrans sym = Algebra.getVName <$> lookupUntransPE sym
-
--- Search a mapping using unification for equality checks.
-unisearch :: (Ord v, Unify v Symbol, Pretty v) => v -> M.Map v a -> IndexFnM (Maybe a)
-unisearch x mapping = do
-  case mapping M.!? x of
-    Just v ->
-      -- Exact match.
-      pure (Just v)
-    Nothing -> do
-      -- Search for matches using unification.
-      matches :: [(a, Maybe (Substitution Symbol))] <-
-        mapM (\(k, v) -> (v,) <$> unify k x) (M.toList mapping)
-      case matches of
-        [] -> pure Nothing
-        [(v, _)] ->
-          pure (Just v)
-        _ -> error "unisearch: multiple matches"

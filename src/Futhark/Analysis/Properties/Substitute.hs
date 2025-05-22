@@ -1,7 +1,7 @@
 -- Index function substitution.
 {-# LANGUAGE LambdaCase #-}
 
-module Futhark.Analysis.Properties.Substitute ((@), subst, lookupII) where
+module Futhark.Analysis.Properties.Substitute ((@), subst) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (foldM, when, (<=<))
@@ -26,6 +26,7 @@ import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.SoP (SoP, sym2SoP)
 import Futhark.Util.Pretty (Pretty, prettyString)
 import Language.Futhark (VName)
+import Futhark.Analysis.Properties.Flatten (lookupII)
 
 -- If f has multiple cases, we would not know which case to substitute
 -- into quantified symbols (e.g., Sum j a b f(e(j))).
@@ -139,24 +140,24 @@ subber argCheck g = do
     getApply_ _ acc _ = pure acc
 
 -- TODO not sure this is useful
-eliminateII :: IndexFn -> IndexFnM IndexFn
-eliminateII f@(IndexFn [Forall i d@(Cat k _ _)] _) = do
-  res <- unisearch d =<< getII
-  case res of
-    Just (ii, _) -> do
-      printM 1 ("eliminateII: " <> prettyStr f)
-      -- TODO replace any II(e) where e is provably in `k`th segment.
-      -- For now, just replace II(i).
-      cs <- astMap (identityMapper {mapOnSymbol = repII ii}) (body f)
-      pure (f {body = cs})
-    Nothing -> pure f
-  where
-    repII vn (Apply (Var x) [arg])
-      | vn == x,
-        arg == sym2SoP (Var i) =
-          pure (Var k)
-    repII _ e = pure e
-eliminateII f = pure f
+-- eliminateII :: IndexFn -> IndexFnM IndexFn
+-- eliminateII f@(IndexFn [Forall i d@(Cat k _ _)] _) = do
+--   res <- unisearch d =<< getII
+--   case res of
+--     Just (ii, _) -> do
+--       printM 1 ("eliminateII: " <> prettyStr f)
+--       -- TODO replace any II(e) where e is provably in `k`th segment.
+--       -- For now, just replace II(i).
+--       cs <- astMap (identityMapper {mapOnSymbol = repII ii}) (body f)
+--       pure (f {body = cs})
+--     Nothing -> pure f
+--   where
+--     repII vn (Apply (Var x) [arg])
+--       | vn == x,
+--         arg == sym2SoP (Var i) =
+--           pure (Var k)
+--     repII _ e = pure e
+-- eliminateII f = pure f
 
 {-
               Substitution rules
@@ -319,33 +320,6 @@ firstAlt (m : ms) = do
 
 gray :: String -> String
 gray s = "\ESC[2m" <> s <> "\ESC[0m"
-
-lookupII :: Domain -> IndexFn -> IndexFnM (VName, IndexFn)
-lookupII dom def = do
-  v <- unisearch dom =<< getII
-  case v of
-    Just res -> pure res
-    Nothing -> do
-      vn <- newVName "II"
-      insertII dom (vn, def)
-      pure (vn, def)
-
--- Search a mapping using unification for equality checks.
-unisearch :: (Ord v, Unify v Symbol, Pretty v) => v -> M.Map v a -> IndexFnM (Maybe a)
-unisearch x mapping = do
-  case mapping M.!? x of
-    Just v ->
-      -- Exact match.
-      pure (Just v)
-    Nothing -> do
-      -- Search for matches using unification.
-      matches :: [(a, Maybe (Substitution Symbol))] <-
-        mapM (\(k, v) -> (v,) <$> unify k x) (M.toList mapping)
-      case matches of
-        [] -> pure Nothing
-        [(v, _)] ->
-          pure (Just v)
-        _ -> error "unisearch: multiple matches"
 
 unifiesWith :: (Unify v Symbol, Pretty v) => v -> v -> IndexFnM Bool
 unifiesWith a b = do
