@@ -963,7 +963,7 @@ scatterSc3 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
 scatterSc3 xs@(IndexFn [Forall i dom_dest] _) (e_is, is) vs = do
   safe <- lift $ scatterSafe xs (e_is, is) vs
   when (isUnknown safe) (failMsg "scatterSc3: unable to show safety")
-  uninterpreted <- newNameFromString "scatter"
+  uninterpreted <- newNameFromString "safe_scatter"
   lift . pure $
     IndexFn
       { shape = [Forall i dom_dest],
