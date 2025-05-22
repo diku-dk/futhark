@@ -820,7 +820,7 @@ forwardPropertyPrelude f args =
           error "Applying property to name bound to tuple?"
 
 scatterSs1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFnM Answer
-scatterSs1 (IndexFn [Forall _ d_xs] _) (e_is, is) = do
+scatterSs1 (IndexFn (Forall _ d_xs : _) _) (e_is, is) = do
   dest_size <- rewrite $ domainEnd d_xs
   case justVName e_is of
     Just vn_is -> do
@@ -831,9 +831,8 @@ scatterSs1 (IndexFn [Forall _ d_xs] _) (e_is, is) = do
 scatterSs1 _ _ = pure Unknown
 
 scatterSs2 :: IndexFn -> Answer
-scatterSs2 vs@(IndexFn [Forall i (Iota _)] _) =
-  answerFromBool (i `S.notMember` fv (body vs))
-scatterSs2 _ = Unknown
+scatterSs2 vs =
+  answerFromBool $ all ((`S.notMember` fv (body vs)) . boundVar) (shape vs)
 
 -- TODO implement (extract vn for values and lookup Range property).
 scatterSs3 :: (Applicative f) => p -> f Answer
@@ -844,40 +843,40 @@ scatterSafe xs is vs = scatterSs1 xs is `orM` pure (scatterSs2 vs) `orM` scatter
 
 -- TODO also look up in env to see if there is a `Bij is Y Z` property with Z <= (0, dest_size) <= Y.
 scatterSc1 :: IndexFn -> (E.Exp, IndexFn) -> IndexFn -> MaybeT IndexFnM IndexFn
-scatterSc1 xs@(IndexFn [Forall _ dom_dest] _) (e_is, is) vs = do
-  safe <- lift $ scatterSafe xs (e_is, is) vs
-  when (isUnknown safe) (failMsg "scatterSc1: unable to show safety")
-  dest_size <- lift $ rewrite $ domainEnd dom_dest
-  printM 1337 $ "scatterSc1: dest_size" <> prettyStr dest_size
-  vn_inds <- warningInds
-  perm <- lift $ prove (Property.BijectiveRCD vn_inds (int2SoP 0, dest_size) (int2SoP 0, dest_size))
-  case perm of
-    Unknown -> failMsg ""
-    Yes -> do
-      -- `inds` is invertible on the whole domain.
-      vn_vals <- newVName "vals"
-      i <- newVName "i"
-      vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
+scatterSc1 xs@(IndexFn (Forall i dom_dest : _) _) (e_is, is) vs
+  | rank is == 1,
+    rank xs == rank vs = do
+      safe <- lift $ scatterSafe xs (e_is, is) vs
+      when (isUnknown safe) (failMsg "scatterSc1: unable to show safety")
+      dest_size <- lift $ rewrite $ domainEnd dom_dest
+      printM 1337 $ "scatterSc1: dest_size " <> prettyStr dest_size
+      vn_inds <- warningInds
+      perm <- lift $ prove (Property.BijectiveRCD vn_inds (int2SoP 0, dest_size) (int2SoP 0, dest_size))
+      case perm of
+        Unknown -> failMsg ""
+        Yes -> do
+          -- `inds` is invertible on the whole domain.
+          vn_vs <- newVName "#vs"
+          vn_inv <- newVName (E.baseString vn_inds <> "⁻¹")
 
-      lift $ addInvAlias vn_inv vn_inds
-      lift $ addRelSymbol (Prop $ Property.BijectiveRCD vn_inv (int2SoP 0, dest_size) (int2SoP 0, dest_size))
-      -- TODO make bijective cover injective also!
-      lift $ addRelSymbol (Prop $ Property.Injective vn_inv $ Just (int2SoP 0, dest_size))
-      -- TODO add these ranges when needed using the property table.
-      -- Here we add them as a special case because we know is^(-1) will
-      -- be used for indirect indexing.
-      hole <- sym2SoP . Hole <$> newVName "h"
-      let wrap = (`Apply` [hole]) . Var
-      alg_vn <- lift $ paramToAlgebra vn_inv wrap
-      lift $ addRelSymbol (Prop $ Property.Rng alg_vn (int2SoP 0, dest_size))
+          lift $ addInvAlias vn_inv vn_inds
+          lift $ addRelSymbol (Prop $ Property.BijectiveRCD vn_inv (int2SoP 0, dest_size) (int2SoP 0, dest_size))
+          -- TODO make bijective cover injective also!
+          lift $ addRelSymbol (Prop $ Property.Injective vn_inv $ Just (int2SoP 0, dest_size))
+          -- TODO add these ranges when needed using the property table.
+          -- Here we add them as a special case because we know is^(-1) will
+          -- be used for indirect indexing.
+          hole <- sym2SoP . Hole <$> newVName "h"
+          let wrap = (`Apply` [hole]) . Var
+          alg_vn <- lift $ paramToAlgebra vn_inv wrap
+          lift $ addRelSymbol (Prop $ Property.Rng alg_vn (int2SoP 0, dest_size))
 
-      let inv_ind = Apply (Var vn_inv) [sVar i]
-      lift $
-        IndexFn
-          { shape = [Forall i (Iota $ dest_size .+. int2SoP 1)],
-            body = cases [(Bool True, sym2SoP $ Apply (Var vn_vals) [sym2SoP inv_ind])]
-          }
-          @ (vn_vals, vs)
+          -- let inv_i = Apply (Var vn_inv) (sVar . boundVar <$> shape xs)
+          let inv_i = sym2SoP (Apply (Var vn_inv) [sVar i])
+          let inner_dims = drop 1 (sVar . boundVar <$> shape xs)
+          lift $
+            xs {body = singleCase (sym2SoP (Apply (Var vn_vs) $ inv_i : inner_dims))}
+              @ (vn_vs, vs)
   where
     warningInds
       | Just vn <- justVName e_is = pure vn
