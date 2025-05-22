@@ -271,19 +271,19 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
     assume c_f_branch
     forward e_f
 
-  cond <- newVName "if-condition"
+  unless (map rank ts == map rank fs) $ error "Branch types differ?"
+  -- TODO support branches of same rank (type), but different dimensions.
+  -- (E.g., use "outer" guards or bool-multiplication tricks on domain sizes.)
+  let eq x y = isJust <$> (unify x y :: IndexFnM (Maybe (Substitution Symbol)))
+  dims_eq <- and <$> zipWithM eq (concatMap shape ts) (concatMap shape fs)
+  unless dims_eq $ error "Branches with different dimensions not supported yet."
+
+  c <- newVName "if-condition"
   t_branch <- newVName "t_branch"
   f_branch <- newVName "f_branch"
-  let fn_if =
-        IndexFn
-          (shape f_c)
-          ( cases
-              [ (Var cond, sVar t_branch),
-                (neg $ Var cond, sVar f_branch)
-              ]
-          )
+  let gs = cases [(Var c, sVar t_branch), (neg $ Var c, sVar f_branch)]
   forM (zip ts fs) $ \(t, f) -> do
-    substParams fn_if [(cond, f_c), (t_branch, t), (f_branch, f)]
+    substParams (IndexFn (shape t) gs) [(c, f_c), (t_branch, t), (f_branch, f)]
       >>= rewrite
 forward (E.Lambda _ _ _ _ loc) =
   error $ errorMsg loc "Cannot create index function for unapplied lambda."

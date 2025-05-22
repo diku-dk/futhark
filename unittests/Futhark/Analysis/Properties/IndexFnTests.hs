@@ -579,6 +579,23 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/if-array-type.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [Forall i (Iota $ sHole n)],
+                  body =
+                    cases
+                      [(Bool True, sym2SoP (Apply (Hole xs) [sVar i]))]
+                },
+              IndexFn
+                { shape = [Forall i (Iota $ sHole n)],
+                  body =
+                    cases
+                      [(Bool True, sym2SoP (Apply (Hole xs) [sVar i]))]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/zipArgs2d.fut"
         ( newNameFromString "j" >>= \j -> pure $ \(i, n, m, _) ->
             [ IndexFn
