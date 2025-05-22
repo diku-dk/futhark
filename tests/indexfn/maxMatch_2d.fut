@@ -192,7 +192,7 @@ def resetsmallestEdgeId [n] (_smallestEdgeId: [n]i64): {*[n]i64 | \_ -> true} =
 
 def loopBody [nEdges] [nVerts]
     (edges: {[][2]i64 | \x -> Range x (0,nVerts)})
-    (edgeIds: {[nEdges]i64 | \x -> Injective x})
+    (edgeIds: {[nEdges]i64 | \x -> Monotonic (<) x})
     (markedVerts: *[nVerts]bool)
     (smallestEdgeId: *[nVerts]i64)
     (includedEdges: *[nEdges]bool)
@@ -212,18 +212,13 @@ def loopBody [nEdges] [nVerts]
     let smallestEdgeId = resetsmallestEdgeId smallestEdgeId
     in (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges)
 
-def i64_maximum xs = i64.maximum xs
+def i64_maximum xs = i64.maximum (flatten xs)
 
 def main [nEdges]
-    (edges_enc: *[nEdges][2]i64)
-    -- (nVerts: i64)
-    -- (edges: {*[nEdges][2]i64 | \x -> Range x (0, nVerts) && nVerts == i64_maximum x + 1})
+    (nVerts: i64)
+    (edges_enc: {*[nEdges][2]i64 | \x -> Range x (0, nVerts) && nVerts == i64_maximum x + 1})
     : {[]i64 | \edgeIds' -> Injective edgeIds' }
     =
-    let flat_edges = flatten edges_enc
-    let max_edge = i64.maximum flat_edges
-    let nVerts = max_edge + 1
-
     let edgeIds = iota nEdges
 
     let markedVerts = replicate nVerts false
