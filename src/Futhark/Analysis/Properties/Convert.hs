@@ -953,8 +953,7 @@ scatterSc2 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)]
                       (neg p, sym2SoP $ Apply (Var hole_xs) [sVar i])
                     ]
               }
-      f' <- lift $ substParams f [(hole_vs, vs), (hole_xs, xs)]
-      pure f'
+      lift $ substParams f [(hole_vs, vs), (hole_xs, xs)]
     _ -> failMsg "scatterSc2: unable to determine OOB branch"
 scatterSc2 _ _ _ = fail ""
 
