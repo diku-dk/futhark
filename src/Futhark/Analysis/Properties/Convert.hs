@@ -1089,8 +1089,8 @@ zipArgsSOAC ::
   NE.NonEmpty (a, E.Exp) ->
   IndexFnM (Iterator, [[(E.VName, IndexFn)]])
 zipArgsSOAC loc formal_args actual_args = do
-  -- Renaming makes sure all Cat k bound in iterators are identical---this
-  -- matters for the new common outer iterator.
+  -- Renaming makes sure all Cat k bound in iterators are identical, so that
+  -- a new common outer iterator can be used.
   args <- renameSameL (mapM . mapM) =<< mapM forward (getArgs actual_args)
   let new_outer_dim = maximum $ map (head . shape) (mconcat args)
   -- Transform each arg to use the new common outer iterator.
@@ -1102,15 +1102,12 @@ zipArgsSOAC loc formal_args actual_args = do
         body = singleCase . sym2SoP $ Apply (Var vn) (iters new_shape)
       }
       @ (vn, f)
-  -- let k_rep = case formula new_outer_dim of
-  --       Iota {} -> mempty
-  --       Cat k _ _ -> maybe mempty (`mkRep` sVar k) (catVar . head $ shape f')
-  -- pure $ repIndexFn k_rep f'
   -- Substitutions may have renamed Cat `k`s; do a common rename again.
   args'' <- renameSameL (mapM . mapM) args'
+  let new_outer_dim' = head (shape (head (head args'')))
   -- Drop the new outer dim, aligning arguments with parameters.
   (aligned_args, _) <- zipArgs' loc formal_args (map (map dropOuterDim) args'')
-  pure (new_outer_dim, aligned_args)
+  pure (new_outer_dim', aligned_args)
   where
     dropOuterDim f = f {shape = drop 1 (shape f)}
     iters = map (sVar . boundVar)
