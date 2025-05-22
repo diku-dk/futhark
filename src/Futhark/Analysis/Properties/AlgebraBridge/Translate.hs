@@ -179,7 +179,7 @@ fromAlgebra_ (Algebra.Idx (Algebra.One vn) alg_idx) = do
       fs <- lookupIndexFn vn
       idx' <- case fs of
         Just [IndexFn [Forall i (Iota n), Forall j (Iota m)] _] -> do
-          printM 1337 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
+          -- printM 1337 ("(ﾉ◕ヮ◕)ﾉ  " <> prettyStr (Apply (Var vn) [idx]))
           case filterSoP (\t c -> isJust (term2SoP t c ./. m)) idx of
             offset
               -- Information about offset was destroyed.
