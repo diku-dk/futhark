@@ -806,10 +806,8 @@ forwardPropertyPrelude f args =
       res <- lookupIndexFn x
       case res of
         Just [f_X] | [Forall i _] <- shape f_X -> rollbackAlgEnv $ do
-          let iota = IndexFn (shape f_X) (cases [(Bool True, sVar i)])
-          _ <-
-            bindLambdaBodyParams $
-              (param_filt, iota) : map ((,iota) . fst) parts
+          let idx = IndexFn [] (cases [(Bool True, sVar i)])
+          bindLambdaBodyParams $ (param_filt, idx) : map ((,idx) . fst) parts
           addRelShape (shape f_X)
           f_filt <- forward lam_filt >>= subst . IndexFn (shape f_X) . body . head
           f_parts <- forM parts $ \(_, lam_part) ->
