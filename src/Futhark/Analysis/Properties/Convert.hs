@@ -312,16 +312,9 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
       xs <- forward e_x
       forM (zip ns xs) $ \(n, x) -> do
         i <- newVName "i"
-        case x of
-          IndexFn [] body -> do
-            case n of
-              IndexFn [] cs -> do
-                m <- rewrite $ flattenCases cs
-                rewrite $ IndexFn [Forall i (Iota m)] body
-              _ ->
-                error $ errorMsg loc "type error"
-          _ -> do
-            error $ errorMsg loc "Multi-dimensional arrays not supported yet."
+        unless (rank n == 0) . error $ errorMsg loc "type error"
+        m <- rewrite $ flattenCases (body n)
+        rewrite $ IndexFn (Forall i (Iota m) : shape x) (body x)
   | Just "iota" <- getFun e_f,
     [e_n] <- getArgs args = do
       ns <- forward e_n
