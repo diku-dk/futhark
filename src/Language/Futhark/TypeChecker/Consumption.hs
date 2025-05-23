@@ -213,6 +213,7 @@ checkReturnAlias loc params rettp =
     consumableParamType (Scalar (Record fs)) = all consumableParamType fs
     consumableParamType (Scalar (Sum fs)) = all (all consumableParamType) fs
     consumableParamType (Scalar Arrow {}) = False
+    consumableParamType (Scalar (Refinement t _)) = consumableParamType t
 
 unscope :: [VName] -> Aliases -> Aliases
 unscope bound = S.map f

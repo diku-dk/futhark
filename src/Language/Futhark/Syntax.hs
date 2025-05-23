@@ -322,9 +322,14 @@ instance Bitraversable ScalarTypeBase where
   bitraverse f g (Arrow u v d t1 t2) =
     Arrow <$> g u <*> pure v <*> pure d <*> bitraverse f pure t1 <*> bitraverse f pure t2
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
-  bitraverse f g (Refinement t predicate) =
-    Refinement <$> bitraverse f g t <*> pure predicate
-
+  -- Cannot do this because params contain types and these are not generic
+  -- dim and u but are concrete: Size and Diet.
+  -- bitraverse f g (Refinement t (Lambda params body maybe_type_exp rettype loc)) = do
+  --   params' <- mapM (\hm -> traverse (bitraverse f g) hm) params
+  --   rettype' <- bitraverse f g rettype
+  --   Refinement <$> bitraverse f g t <*> pure (Lambda params' body maybe_type_exp rettype' loc)
+  bitraverse f g (Refinement t e) =
+    Refinement <$> bitraverse f g t <*> pure e -- XXX essentially wrong; e will contain types.
 
 instance Functor (ScalarTypeBase dim) where
   fmap = fmapDefault

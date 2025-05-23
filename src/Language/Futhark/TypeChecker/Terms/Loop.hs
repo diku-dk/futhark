@@ -26,6 +26,7 @@ import Language.Futhark.TypeChecker.Terms.Pat
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
+import Debug.Trace (traceM)
 
 -- | Retrieve an oracle that can be used to decide whether two are in
 -- the same equivalence class (i.e. have been unified).  This is an
@@ -70,6 +71,7 @@ freshDimsInType ::
   TypeBase Size u ->
   TermTypeM (TypeBase Size u, [VName])
 freshDimsInType usage r desc fresh t = do
+  traceM $ "freshDimsInType " <> show fresh
   areSameSize <- getAreSame
   second (map snd) <$> runStateT (bitraverse (onDim areSameSize) pure t) mempty
   where
@@ -85,13 +87,20 @@ freshDimsInType usage r desc fresh t = do
     onDim _ d = pure d
 
 data ArgSource = Initial | BodyResult
+  deriving Show
 
 wellTypedLoopArg :: ArgSource -> [VName] -> Pat ParamType -> Exp -> TermTypeM ()
 wellTypedLoopArg src sparams pat arg = do
+  traceM $ "================wellTypedLoopArg================\nargsrc  " <> show src <> "\n"
+  traceM $ "pat     " <> prettyString pat <> "\n"
+  traceM $ "arg     " <> prettyString arg <> "\n"
+  traceM $ "sparams " <> show sparams <> "\n"
   (merge_t, _) <-
     freshDimsInType (mkUsage arg desc) Nonrigid "loop" sparams $
       toStruct (patternType pat)
   arg_t <- toStruct <$> expTypeFully arg
+  traceM $ "merge_t " <> prettyString merge_t <> "\n"
+  traceM $ "arg_t   " <> prettyString arg_t <> "\n"
   onFailure (checking merge_t arg_t) $
     unify (mkUsage arg desc) merge_t arg_t
   where
@@ -166,18 +175,28 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
   -- (4) Similarly to (3), we check that the "function" can be
   -- called with the initial merge values as argument.  The result
   -- of this is the type of the loop as a whole.
-
+  traceM $ "~~~~~~~~~~~~~~~ checkLoop ~~~~~~~~~~~~~~~\n loopinit " <> prettyString loopinit
+  traceM $ "loopinit' " <> prettyString loopinit'
   (merge_t, new_dims_map) <-
     -- dim handling (1)
     allDimsFreshInType (mkUsage loc "loop parameter type inference") Nonrigid "loop_d"
       =<< expTypeFully loopinit'
+  traceM $ "merge_t " <> prettyString merge_t
   let new_dims_to_initial_dim = M.toList new_dims_map
       new_dims = map fst new_dims_to_initial_dim
+  traceM $ "new_dims_map " <> show (map (\(k,v)-> prettyName k <> " : " <> pretty v) $ M.toList new_dims_map)
 
   -- dim handling (2)
   let checkLoopReturnSize mergepat' loopbody' = do
         loopbody_t <- expTypeFully loopbody'
         mergepat_t <- normTypeFully (patternType mergepat')
+        traceM $ "#loopbody_t " <> prettyString loopbody_t
+        -- #loopbody_t ({[d₂₁][2]i64| \(x: [d₃₄][2]i64) ->   Range x (0, loop_d₁₂)}, {[d₂₁]i64| \(x: [d₃₄]i64) ->   Monotonic (<) x}, [loop_d₁₂]bool, [loop_d₁₂]i64, [loop_d₁₃]bool)
+        traceM $ "#mergepat_t " <> prettyString mergepat_t
+        -- without bitraver:
+        -- #mergepat_t ({[loop_d₁₀][2]i64| \(x: [nEdges][2]i64) ->   Range x (0, nVerts)}, {[loop_d₁₀]i64| \(x: [nEdges]i64) ->   Monotonic (<) x}, [loop_d₁₂]bool, [loop_d₁₂]i64, [loop_d₁₃]bool)
+        -- with bitraver:
+        -- refinement params' sizes are also replaced
 
         let ok_names = known_before <> S.fromList new_dims
         checkForImpossible (locOf mergepat) ok_names mergepat_t
@@ -212,6 +231,8 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
               pure e
         loopbody_t' <- normTypeFully loopbody_t
         merge_t' <- normTypeFully merge_t
+        traceM $ "#loopbody_t'" <> prettyString loopbody_t'
+        traceM $ "#merge_t'" <> prettyString merge_t'
 
         let (init_substs, sparams) =
               execState (matchDims onDims merge_t' loopbody_t') mempty
@@ -226,7 +247,11 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
               pure ()
         mapM_ dimToInit $ M.toList init_substs
 
+        traceM $ "#sparams" <> show sparams
+        traceM $ "#init_substs" <> show (M.keys init_substs)
+
         mergepat'' <- applySubst (`M.lookup` init_substs) <$> updateTypes mergepat'
+        traceM $ "#mergepat''" <> prettyString mergepat''
 
         -- Eliminate those new_dims that turned into sparams so it won't
         -- look like we have ambiguous sizes lying around.
@@ -286,6 +311,7 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
             cond' <-
               checkExp cond
                 >>= unifies "being the condition of a 'while' loop" (Scalar $ Prim Bool)
+            traceM $ "🤠  loopbody " <> prettyString loopbody
             loopbody' <- checkExp loopbody
             (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
             pure
@@ -295,6 +321,8 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
                 loopbody'
               )
 
+  traceM $ "🤠  mergepat' " <> prettyString mergepat'
+  traceM $ "🤠  loopinit' " <> prettyString loopinit'
   -- dim handling (4)
   wellTypedLoopArg Initial sparams mergepat' loopinit'
 

@@ -66,6 +66,7 @@ import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
+import Debug.Trace (traceM)
 
 type Names = S.Set VName
 
@@ -528,15 +529,27 @@ newArrayType usage desc r = do
 
 -- | Replace *all* dimensions with distinct fresh size variables.
 allDimsFreshInType ::
+  Pretty als =>
   Usage ->
   Rigidity ->
   Name ->
   TypeBase Size als ->
   TermTypeM (TypeBase Size als, M.Map VName Size)
 allDimsFreshInType usage r desc t =
-  runStateT (bitraverse onDim pure t) mempty
+  runStateT (bitraver t) mempty
+  -- runStateT (bitraverse onDim pure t) mempty
   where
+    bitraver (Scalar (Refinement ty e@(Lambda params body te rettype loc))) = do
+      traceM $ "bitraver " <> prettyString e
+      ty' <- bitraverse onDim pure ty
+      params' <- mapM (traverse (bitraverse onDim pure)) params
+      pure . Scalar $ Refinement ty' (Lambda params' body te rettype loc)
+    bitraver (Scalar (Record fs)) = Scalar . Record <$> traverse bitraver fs
+    bitraver ty = traceM ("bitraver " <> prettyString ty) >> bitraverse onDim pure ty
+  
+    onDim :: Size -> StateT (M.Map VName Size) TermTypeM Size
     onDim d = do
+      traceM $ "allDimsFreshInType onDim " <> prettyString d
       v <- lift $ newDimVar usage r desc
       modify $ M.insert v d
       pure $ sizeFromName (qualName v) $ srclocOf usage
@@ -581,9 +594,14 @@ checkExpForPred ty e = do
   checker <- asks termChecker
   e' <- checker e
   let t = toStruct $ typeOf e'
-  let p = Arrow mempty Unnamed Observe ty (RetType [] $ Scalar $ Prim Bool)
-  -- XXX NoUniqueness?
-  unify (mkUsage (locOf e') "Refinement predicate expression") t (Scalar p)
+  -- Allow boolean-typed applications or lambdas as refinement expressions.
+  case e of
+    AppExp {} ->
+      unify (mkUsage (locOf e') "Refinement app-expression") t (Scalar $ Prim Bool)
+    _ ->
+      let p = Arrow mempty Unnamed Observe ty (RetType [] $ Scalar $ Prim Bool)
+      -- XXX NoUniqueness?
+      in unify (mkUsage (locOf e') "Refinement lambda-expression") t (Scalar p)
   updateTypes e'
 
 checkTypeExpNonrigid ::

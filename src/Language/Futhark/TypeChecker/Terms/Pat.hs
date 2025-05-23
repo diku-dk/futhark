@@ -23,6 +23,7 @@ import Language.Futhark.TypeChecker.Terms.Monad
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import Prelude hiding (mod)
+import Debug.Trace (trace)
 
 nonrigidFor :: [(SizeBinder VName, QualName VName)] -> StructType -> StructType
 nonrigidFor [] = id -- Minor optimisation.
