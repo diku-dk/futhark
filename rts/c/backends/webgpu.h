@@ -560,6 +560,27 @@ struct wgpu_kernel {
 typedef struct wgpu_kernel* gpu_kernel;
 typedef WGPUBuffer gpu_mem;
 
+static int gpu_alloc_actual(struct futhark_context *ctx,
+  size_t size, gpu_mem *mem_out) {
+  // Storage buffers bindings must have an effective size that is amultiple of
+  // 4, so we round up all allocations.
+  size = ((size + 4 - 1) / 4) * 4;
+  WGPUBufferDescriptor desc = {
+    .size = size,
+    .usage = WGPUBufferUsage_CopySrc
+    | WGPUBufferUsage_CopyDst
+    | WGPUBufferUsage_Storage,
+  };
+  *mem_out = wgpuDeviceCreateBuffer(ctx->device, &desc);
+  return FUTHARK_SUCCESS;
+  }
+
+  static int gpu_free_actual(struct futhark_context *ctx, gpu_mem mem) {
+  (void)ctx;
+  wgpuBufferDestroy(mem);
+  return FUTHARK_SUCCESS;
+}
+
 static void gpu_create_kernel(struct futhark_context *ctx,
                               gpu_kernel *kernel_out,
                               const char *name) {
@@ -715,33 +736,6 @@ static int gpu_scalar_from_device(struct futhark_context *ctx,
   return FUTHARK_SUCCESS;
 }
 
-static int gpu_memcpy(struct futhark_context *ctx,
-                      gpu_mem dst, int64_t dst_offset,
-                      gpu_mem src, int64_t src_offset,
-                      int64_t nbytes) {
-  // Bound storage buffers and copy operations must have sizes multiple of 4.
-  // Note that copying more than `nbytes` is memory-safe because we also pad all
-  // buffers when allocating them.
-  // It could however corrupt data if the copy is in the middle of the buffer,
-  // like in host2gpu.
-  int64_t copy_size = ((nbytes + 4 - 1) / 4) * 4;
-  if (copy_size > nbytes) {
-    // Potential for an issue if we're not at the end of the destination buffer.
-    // Find its size to make sure.
-    uint64_t dst_size = wgpuBufferGetSize(dst);
-    if (dst_offset + copy_size != dst_size) {
-      futhark_panic(-1, "gpu_memcpy: Would corrupt data due to padding!\n");
-    }
-  }
-
-  WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
-  wgpuCommandEncoderCopyBufferToBuffer(encoder,
-      src, src_offset, dst, dst_offset, copy_size);
-  WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
-  wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
-  return FUTHARK_SUCCESS;
-}
-
 static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
                            gpu_mem dst, int64_t dst_offset,
                            const unsigned char *src, int64_t src_offset,
@@ -830,6 +824,71 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
 
   wgpuBufferUnmap(readback);
   wgpuBufferDestroy(readback);
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_memcpy(struct futhark_context *ctx,
+  gpu_mem dst, int64_t dst_offset,
+  gpu_mem src, int64_t src_offset,
+  int64_t nbytes) {
+  // Bound storage buffers and copy operations must have sizes multiple of 4.
+  // Note that copying more than `nbytes` is memory-safe because we also pad all
+  // buffers when allocating them.
+  // It could however corrupt data if the copy is in the middle of the buffer,
+  // like in host2gpu.
+  int64_t copy_size = ((nbytes + 4 - 1) / 4) * 4;
+  if (copy_size > nbytes) {
+    // Potential for an issue if we're not at the end of the destination buffer.
+    // Find its size to make sure.
+    uint64_t dst_size = wgpuBufferGetSize(dst);
+    if (dst_offset + copy_size != dst_size) {
+      printf("\tPotentially could corrupt data due to padding!\n");
+      //futhark_panic(-1, "gpu_memcpy: Would corrupt data due to padding!\n");
+    }
+  }
+  WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
+
+  if (dst == src) {
+/* ~~ Temporary debug workaround to print buffer contents. ~~ */
+    printf("Cannot gpu_memcpy to/from the same buffer. Have to copy to temporary buffer first.\n");
+    printf("\tnbytes: %lld, src_offset: %lld, dst_offset: %lld, copy_size: %lld, dst_size: %lld, src_size: %lld\n",
+      (long long)nbytes, (long long)src_offset, (long long)dst_offset, (long long)copy_size, (long long)wgpuBufferGetSize(dst), (long long)wgpuBufferGetSize(src));
+
+    unsigned char* buf = malloc(copy_size);
+    memcpy_gpu2host(ctx, true, buf, 0, src, src_offset, nbytes);
+    printf("\tBuffer contents: ");
+    for (int i = 0; i < copy_size; i++) {
+      printf("%02x ", buf[i]);
+    }
+    printf("\n");
+    memcpy_host2gpu(ctx, true, dst, dst_offset, buf, 0, nbytes);
+    free(buf);
+
+/* ~~ Better version w/o host roundtrip ~~
+    // Allocate temporary buffer.
+    gpu_mem tmp;
+    gpu_alloc_actual(ctx, copy_size, &tmp);
+
+    // Copy data to temporary buffer and then to the destination.
+    wgpuCommandEncoderCopyBufferToBuffer(encoder,
+      src, src_offset, tmp, 0, copy_size);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder,
+      tmp, 0, dst, dst_offset, copy_size);
+    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
+    wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
+
+    // Free the temporary buffer once we have finished copying.
+    futhark_context_sync(ctx);
+    gpu_free_actual(ctx, tmp);
+*/
+  }
+  else {
+    wgpuCommandEncoderCopyBufferToBuffer(encoder,
+      src, src_offset, dst, dst_offset, copy_size);
+    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
+    wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
+  }
+
   return FUTHARK_SUCCESS;
 }
 
@@ -937,27 +996,6 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 
   free(scalars);
 
-  return FUTHARK_SUCCESS;
-}
-
-static int gpu_alloc_actual(struct futhark_context *ctx,
-                            size_t size, gpu_mem *mem_out) {
-  // Storage buffers bindings must have an effective size that is amultiple of
-  // 4, so we round up all allocations.
-  size = ((size + 4 - 1) / 4) * 4;
-  WGPUBufferDescriptor desc = {
-    .size = size,
-    .usage = WGPUBufferUsage_CopySrc
-           | WGPUBufferUsage_CopyDst
-           | WGPUBufferUsage_Storage,
-  };
-  *mem_out = wgpuDeviceCreateBuffer(ctx->device, &desc);
-  return FUTHARK_SUCCESS;
-}
-
-static int gpu_free_actual(struct futhark_context *ctx, gpu_mem mem) {
-  (void)ctx;
-  wgpuBufferDestroy(mem);
   return FUTHARK_SUCCESS;
 }
 
