@@ -81,12 +81,12 @@ module type numeric = {
 module type integral = {
   include numeric
 
-  -- | Like `/`@term, but rounds towards zero.  This only matters when
-  -- one of the operands is negative.  May be more efficient.
+  -- | Like `/`, but rounds towards zero. This only matters when one of the
+  -- operands is negative. May be more efficient.
   val (//) : t -> t -> t
 
-  -- | Like `%`@term, but rounds towards zero.  This only matters when
-  -- one of the operands is negative.  May be more efficient.
+  -- | Like `%`, but rounds towards zero. This only matters when one of the
+  -- operands is negative. May be more efficient.
   val (%%) : t -> t -> t
 
   -- | Bitwise and.
@@ -204,7 +204,7 @@ module type real = {
   -- | The true Gamma function.
   val gamma : t -> t
 
-  -- | The natural logarithm of the absolute value of `gamma`@term.
+  -- | The natural logarithm of the absolute value of `gamma`.
   val lgamma : t -> t
 
   -- | The error function.
@@ -245,7 +245,7 @@ module type real = {
 
   -- | Computes `a*b+c`.  Depending on the compiler backend, this may
   -- be fused into a single operation that is faster but less
-  -- accurate.  Do not confuse it with `fma`@term.
+  -- accurate.  Do not confuse it with `fma`.
   val mad : (a: t) -> (b: t) -> (c: t) -> t
 
   -- | Computes `a*b+c`, with `a*b` being rounded with infinite
