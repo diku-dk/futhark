@@ -27,6 +27,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     allDimsFreshInType,
     updateTypes,
     Names,
+    dobbelttraver,
 
     -- * Primitive checking
     unifies,
@@ -56,6 +57,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Debug.Trace (traceM)
 import Futhark.FreshNames hiding (newName)
 import Futhark.FreshNames qualified
 import Futhark.Util.Pretty hiding (space)
@@ -66,7 +68,7 @@ import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
-import Debug.Trace (traceM)
+import Futhark.Util (invertMap)
 
 type Names = S.Set VName
 
@@ -527,32 +529,49 @@ newArrayType usage desc r = do
       Scalar rowt
     )
 
+dobbelttraver :: (Monad m) => (Size -> m Size) -> TypeBase Size u -> m (TypeBase Size u)
+dobbelttraver f (Scalar (Refinement ty (Lambda params body te rettype loc))) = do
+  ty' <- bitraverse f pure ty
+  params' <- mapM (traverse (bitraverse f pure)) params
+  pure . Scalar $ Refinement ty' (Lambda params' body te rettype loc)
+dobbelttraver f (Scalar (Record fs)) = Scalar . Record <$> traverse (dobbelttraver f) fs
+dobbelttraver f ty = bitraverse f pure ty
+
 -- | Replace *all* dimensions with distinct fresh size variables.
 allDimsFreshInType ::
-  Pretty als =>
   Usage ->
   Rigidity ->
   Name ->
   TypeBase Size als ->
   TermTypeM (TypeBase Size als, M.Map VName Size)
 allDimsFreshInType usage r desc t =
-  runStateT (bitraver t) mempty
-  -- runStateT (bitraverse onDim pure t) mempty
+  runStateT (bt t) mempty
+  -- runStateT (dobbelttraver onDim t) mempty
   where
-    bitraver (Scalar (Refinement ty e@(Lambda params body te rettype loc))) = do
-      traceM $ "bitraver " <> prettyString e
+    -- runStateT (bitraverse onDim pure t) mempty
+    bt (Scalar (Refinement ty (Lambda params body te rettype loc))) = do
+      -- HACK Any replaced sizes in ty must be identically replaced in params.
+      -- s <- get
       ty' <- bitraverse onDim pure ty
-      params' <- mapM (traverse (bitraverse onDim pure)) params
+      new_dims_inv <- invertMap <$> get
+      traceM $ "# allDimsFreshInType " <> show new_dims_inv
+      params' <- mapM (traverse (bitraverse (onParamDim new_dims_inv) pure)) params
       pure . Scalar $ Refinement ty' (Lambda params' body te rettype loc)
-    bitraver (Scalar (Record fs)) = Scalar . Record <$> traverse bitraver fs
-    bitraver ty = traceM ("bitraver " <> prettyString ty) >> bitraverse onDim pure ty
-  
+    bt (Scalar (Record fs)) = Scalar . Record <$> traverse bt fs
+    bt ty = bitraverse onDim pure ty
+
     onDim :: Size -> StateT (M.Map VName Size) TermTypeM Size
     onDim d = do
-      traceM $ "allDimsFreshInType onDim " <> prettyString d
       v <- lift $ newDimVar usage r desc
       modify $ M.insert v d
       pure $ sizeFromName (qualName v) $ srclocOf usage
+
+    -- onParamDim :: Size -> StateT (M.Map VName Size) TermTypeM Size
+    onParamDim s d | [v] <- S.toList $ s M.! d= do
+      -- v <- lift $ newDimVar usage r desc
+      -- modify $ M.insert v d
+      pure $ sizeFromName (qualName v) $ srclocOf usage
+    onParamDim _ _ = error "hack insufficient"
 
 -- | Replace all type variables with their concrete types.
 updateTypes :: (ASTMappable e) => e -> TermTypeM e
@@ -600,8 +619,8 @@ checkExpForPred ty e = do
       unify (mkUsage (locOf e') "Refinement app-expression") t (Scalar $ Prim Bool)
     _ ->
       let p = Arrow mempty Unnamed Observe ty (RetType [] $ Scalar $ Prim Bool)
-      -- XXX NoUniqueness?
-      in unify (mkUsage (locOf e') "Refinement lambda-expression") t (Scalar p)
+       in -- XXX NoUniqueness?
+          unify (mkUsage (locOf e') "Refinement lambda-expression") t (Scalar p)
   updateTypes e'
 
 checkTypeExpNonrigid ::
