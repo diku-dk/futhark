@@ -16,8 +16,10 @@ import Futhark.Doc.Generator
 import Futhark.Pipeline (FutharkM, Verbosity (..), runFutharkM)
 import Futhark.Util (directoryContents)
 import Futhark.Util.Options
+import Futhark.Util.Pretty (hPutDoc)
 import Language.Futhark.Semantic (mkInitialImport)
 import Language.Futhark.Syntax (DocComment (..), progDoc)
+import Language.Futhark.Warnings (prettyWarnings)
 import System.Directory (createDirectoryIfMissing)
 import System.Exit
 import System.FilePath
@@ -43,9 +45,10 @@ printDecs :: DocConfig -> FilePath -> [FilePath] -> Imports -> IO ()
 printDecs cfg dir files imports = do
   let direct_imports =
         map (mkInitialImport . normalise . dropExtension) files
-      (file_htmls, _warnings) =
+      (file_htmls, warnings) = do
         renderFiles direct_imports $
           filter (not . ignored) imports
+  hPutDoc stderr $ prettyWarnings warnings
   mapM_ (write . fmap (LT.toStrict . renderHtml)) file_htmls
   write ("style.css", cssFile)
   where
