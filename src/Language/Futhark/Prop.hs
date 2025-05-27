@@ -420,8 +420,6 @@ matchDims onDims = matchDims' mempty
           ) ->
             Scalar . TypeVar (als1 <> als2) v
               <$> zipWithM (matchTypeArg bound) targs1 targs2
-        (Scalar (Refinement t1' _), t2') -> matchDims' bound t1' t2' -- XXX type in e
-        (t1', Scalar (Refinement t2' _)) -> matchDims' bound t1' t2'
         _ -> pure t1
 
     matchTypeArg bound (TypeArgType t1) (TypeArgType t2) =
