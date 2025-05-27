@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Infinite loop in fusion (#2276).
+
 ## [0.25.31]
 
 ### Added
