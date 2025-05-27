@@ -536,6 +536,7 @@ test-suite unit
       Futhark.ProfileTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
+      Language.Futhark.PrettyTests
       Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
