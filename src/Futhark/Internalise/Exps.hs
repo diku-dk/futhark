@@ -2220,9 +2220,11 @@ partitionWithSOACS k lam arrs = do
           (resultBodyM [next_one])
 
 sizeExpForError :: E.Size -> InternaliseM [ErrorMsgPart SubExp]
-sizeExpForError e = do
-  e' <- internaliseExp1 "size" e
-  pure ["[", ErrorVal int64 e', "]"]
+sizeExpForError e
+  | e == anySize = pure ["[]"]
+  | otherwise = do
+      e' <- internaliseExp1 "size" e
+      pure ["[", ErrorVal int64 e', "]"]
 
 typeExpForError :: E.TypeBase Size u -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.Scalar (E.Prim t)) = pure [ErrorString $ prettyText t]
