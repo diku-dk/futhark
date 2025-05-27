@@ -141,13 +141,13 @@ def getMMEdges [nVerts]
     else (replicate 2 (-1), replicate 2 (-1))
 
 -- Update the marked vertexes and included edges
-def update [arraySize] [nVerts] [nEdges]
+def update [arraySize] [nVerts]
     (smallestEdgeId: [nVerts]i64)
     (edges: {[arraySize][2]i64 | \x -> Range x (0,nVerts)})
     (edgeIds: [arraySize]i64)
-    (markedVerts: *[nVerts]bool)
-    (includedEdges: *[nEdges]bool)
-    : {(*[nVerts]bool, *[nEdges]bool) | \_ -> true}
+    (markedVerts: *[]bool)
+    (includedEdges: *[]bool)
+    : {(*[]bool, *[]bool) | \_ -> true}
     =
     -- The length of the flattened arrays
     let arraySizeFlat = arraySize*2
@@ -191,42 +191,28 @@ def resetsmallestEdgeId [n] (_smallestEdgeId: [n]i64): {*[n]i64 | \_ -> true} =
     in replicate n i64_highest
 
 def loopBody [nEdges] [nVerts]
-    (edges: {[][2]i64 | \x -> Range x (0, nVerts)})
-    (edgeIds: {[]i64 | \x -> Monotonic (<) x})
+    (edges: {[][2]i64 | \x -> Range x (0,nVerts)})
+    (edgeIds: {[nEdges]i64 | \x -> Monotonic (<) x})
     (markedVerts: *[nVerts]bool)
     (smallestEdgeId: *[nVerts]i64)
     (includedEdges: *[nEdges]bool)
-    : ({[][2]i64 | \x -> Range x (0, nVerts)},
-       {[]i64 | \x -> Monotonic (<) x},
-       *[nVerts]bool,
-       *[nVerts]i64,
-       *[nEdges]bool)
+    : { ([][2]i64, []i64, *[]bool, *[nVerts]i64, *[]bool) |
+          \(_, new_edgeIds, _, _, _) ->
+            Injective new_edgeIds
+      }
     =
-    let (smallestTargets, smallestValues) =
-      getSmallestPairs nVerts nEdges edges edgeIds
-    let smallestEdgeId =
-      scatter smallestEdgeId smallestTargets smallestValues
-    let (markedVerts, includedEdges) =
-      update smallestEdgeId edges edgeIds markedVerts includedEdges
+    let (smallestTargets, smallestValues) = getSmallestPairs nVerts nEdges edges edgeIds
+
+    let smallestEdgeId = scatter smallestEdgeId smallestTargets smallestValues
+
+    let (markedVerts, includedEdges) = update smallestEdgeId edges edgeIds markedVerts includedEdges
+
     let (edges, edgeIds) = removeMarked markedVerts edges edgeIds
+
     let smallestEdgeId = resetsmallestEdgeId smallestEdgeId
     in (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges)
 
 def i64_maximum xs = i64.maximum (flatten xs)
-
-def MM [nEdges] [nVerts]
-    (edges: {[nEdges][2]i64 | \x -> Range x (0,nVerts)})
-    (edgeIds: {[nEdges]i64 | \x -> Monotonic (<) x})
-    (markedVerts: *[nVerts]bool)
-    (smallestEdgeId: *[nVerts]i64)
-    (includedEdges: *[nEdges]bool) =
-  let (_, _, _, _, includedEdges) = loop (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges) while (length edges > 0) do
-      loopBody edges edgeIds markedVerts smallestEdgeId includedEdges
-  -- in filter (.1) (zip edgeIds_all includedEdges) |> map (.0)
-  let zipped = zip edgeIds includedEdges
-  let dummy = -1i64
-  let (n, edgeIds') = filter_by includedEdges edgeIds dummy
-  in edgeIds'
 
 def main [nEdges]
     (nVerts: i64)
@@ -240,7 +226,33 @@ def main [nEdges]
 
     let includedEdges = replicate nEdges false
 
-    in MM edges edgeIds markedVerts smallestEdgeId includedEdges
+    -- Skipping loop; pre- and postconditions on each loop iteration
+    -- is shown by loopBody.
+    let (_, edgeIds', _, _, _) = loopBody edges_enc edgeIds markedVerts smallestEdgeId includedEdges
+    -- NOTE this is _one_ iteration of the loop, because I removed the loop construct.
+    -- Hence the index function resulting below is not correct if the loop was there.
+    in edgeIds'
+
+-- def MM [nVerts] [nEdges_2] (edges: [nEdges_2]i64) (edgeIds_all: [nEdges_2]i64) (markedVerts: *[nVerts]bool)
+--                          (smallestEdgeId: *[nVerts]i64) (includedEdges: *[nEdges_2]bool) =
+--     let edgeIds = edgeIds_all
+--     let (_, _, _, _, includedEdges) = loop (edges, edgeIds, markedVerts, smallestEdgeId, includedEdges) while (length edges > 0) do
+--         let loopres = loopBody edges edgeIds markedVerts smallestEdgeId includedEdges
+--         in loopres
+--     in filter (.1) (zip edgeIds_all includedEdges) |> map (.0)
+
+-- def main [nEdges] (edges_enc: *[nEdges][2]i64) =
+--     let edges = flatten edges_enc
+--     let nVerts = edges |> i64.maximum |> (+1)
+
+--     let edgeIds = iota (nEdges*2)
+
+--     let markedVerts = replicate nVerts false
+--     let smallestEdgeId = replicate nVerts i64.highest
+
+--     let includedEdges = replicate (nEdges*2) false
+
+--     in MM edges edgeIds markedVerts smallestEdgeId includedEdges
 
 -- ==
 -- mem_16gb input @ data/randLocalGraph_E_10_20000000.in
