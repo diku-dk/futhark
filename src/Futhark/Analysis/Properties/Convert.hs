@@ -529,7 +529,6 @@ forward e@(E.AppExp (E.Loop _sz _init_pat _init (E.For ident e_sz) e_body loc) _
       vn <- newVName $ "untrans(" <> prettyStr e <> ")"
       pure [IndexFn [] (cases [(Bool True, sVar vn)])]
     _ -> error "not implemented yet"
-forward e@(E.AppExp (E.Loop {}) _) = error $ "new loop who dis? " <> prettyStr e
 forward (E.Coerce e _ _ _) = do
   -- No-op; I've only seen coercions that are hints for array sizes.
   forward e
