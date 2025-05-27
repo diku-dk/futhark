@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Infinite loop in fusion (#2276).
 
+* Rare compiler crash during internalisation code that does size coercions on
+  opaque size-lifted types.
+
 ## [0.25.31]
 
 ### Added
