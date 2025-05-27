@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `f64` atomics on NVIDIA GPUs with less than CC 6.0 (Maxwell and older).
+
 ## [0.25.31]
 
 ### Added
