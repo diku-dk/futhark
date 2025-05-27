@@ -718,9 +718,9 @@ internaliseExp desc (E.Coerce e _ (Info et) loc) = do
     let parts =
           ["Value of (desugared) shape ["]
             ++ intersperse "][" (map (ErrorVal int64) dims)
-            ++ ["] cannot match shape of type `"]
+            ++ ["] cannot match shape of type \""]
             ++ dt'
-            ++ ["`."]
+            ++ ["\"."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
 internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
