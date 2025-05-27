@@ -162,13 +162,7 @@ inBraces sep = between (lexeme sep "{") (lexeme sep "}")
 parseExp :: Parsec Void T.Text () -> Parsec Void T.Text Exp
 parseExp sep =
   choice
-    [ lexeme sep "let"
-        $> Let
-        <*> pPat
-        <* lexeme sep "="
-        <*> parseExp sep
-        <* lexeme sep "in"
-        <*> parseExp sep,
+    [ pLet,
       try $ Call <$> parseFunc <*> many pAtom,
       pAtom
     ]
@@ -179,6 +173,17 @@ parseExp sep =
     pComma = lexeme sep ","
     mkTuple [v] = v
     mkTuple vs = Tuple vs
+
+    pLet =
+      lexeme sep "let"
+        $> Let
+        <*> pPat
+        <* lexeme sep "="
+        <*> parseExp sep
+        <*> choice
+          [ lexeme sep "in" *> parseExp sep,
+            pLet
+          ]
 
     pAtom =
       choice
