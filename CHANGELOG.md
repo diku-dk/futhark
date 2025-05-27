@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark doc` now prints warnings about errors in doc comments (mostly
   references to unknown names).
 
+* FutharkScript now permits chained `let` without `in`, just as in Futhark.
+
 ### Removed
 
 ### Changed
@@ -19,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Fixed
 
 * `f64` atomics on NVIDIA GPUs with less than CC 6.0 (Maxwell and older).
+
+* Infinite loop in fusion (#2276).
 
 ## [0.25.31]
 
