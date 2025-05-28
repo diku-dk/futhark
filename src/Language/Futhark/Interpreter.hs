@@ -1017,15 +1017,13 @@ eval env (Coerce e te (Info t) loc) = do
     Just _ -> pure v
     Nothing ->
       bad loc env . docText $
-        "Value `"
-          <> prettyValue v
-          <> "` of shape `"
-          <> pretty (valueShape v)
-          <> "` cannot match shape of type `"
-          <> pretty te
-          <> "` (`"
-          <> pretty t'
-          <> "`)"
+        "Value"
+          <+> dquotes (prettyValue v)
+          <+> "of shape"
+          <+> dquotes (pretty (valueShape v))
+          <+> "cannot match shape of type"
+          <+> dquotes (pretty te)
+          <+> parens (dquotes (pretty t'))
 eval _ (IntLit v (Info t) _) =
   case t of
     Scalar (Prim (Signed it)) ->
