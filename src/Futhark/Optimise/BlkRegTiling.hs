@@ -48,13 +48,9 @@ se8 = intConst Int64 8
 
 isInnerCoal :: Env -> VName -> Stm GPU -> Bool
 isInnerCoal (_, ixfn_env) slc_X (Let (Pat [pe]) _ (BasicOp (Index x _)))
-  | slc_X == patElemName pe,
-    Nothing <- M.lookup x ixfn_env =
-      True -- if not in the table, we assume not-transposed!
-isInnerCoal (_, ixfn_env) slc_X (Let (Pat [pe]) _ (BasicOp (Index x _)))
-  | slc_X == patElemName pe,
-    Just lmad <- M.lookup x ixfn_env =
-      innerHasStride1 lmad
+  | slc_X == patElemName pe =
+      -- if not in the table, we assume not-transposed!
+      maybe True innerHasStride1 $ M.lookup x ixfn_env
   where
     innerHasStride1 lmad =
       let lmad_dims = LMAD.dims lmad
@@ -626,7 +622,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                   ones = map (const $ intConst Int64 1) rem_outer_dims
                   new_shape = Shape $ concat [ones, block_dims, ones, rest_dims]
               letExp "res_reshaped" . BasicOp $
-                Reshape ReshapeArbitrary new_shape epilogue_res
+                Reshape epilogue_res (reshapeAll (arrayShape epilogue_t) new_shape)
         pure [RegTileReturns mempty regtile_ret_dims epilogue_res']
 mmBlkRegTilingNrm _ _ = pure Nothing
 
@@ -1278,7 +1274,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                     ones = map (const se1) rem_outer_dims
                     new_shape = Shape $ concat [ones, block_dims, ones, rest_dims]
                 letExp "res_reshaped" . BasicOp $
-                  Reshape ReshapeArbitrary new_shape res
+                  Reshape res (reshapeAll (arrayShape res_tp') new_shape)
 
           pure $ map (RegTileReturns mempty regtile_ret_dims) epilogue_res'
         -- END (ret_seggroup, stms_seggroup) <- runBuilder $ do
@@ -1312,7 +1308,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
               arr_tp <- lookupType arr_nm
               let perm = [i + 1 .. arrayRank arr_tp - 1] ++ [0 .. i]
               let arr_tr_str = baseString arr_nm ++ "_transp"
-              arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest perm arr_nm
+              arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest arr_nm perm
               let e_ind' = BasicOp $ Index arr_tr_nm slc
               let stm' = Let patt yy e_ind'
               pure (tab_inn, M.insert p_nm (ptp, stm') tab_out)

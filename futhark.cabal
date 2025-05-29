@@ -36,7 +36,10 @@ build-type:     Simple
 extra-source-files:
 -- Cabal's recompilation tracking doesn't work when we use wildcards
 -- here, so for now we spell out every single file.
-    rts/c/atomics.h
+    rts/c/atomics8.h
+    rts/c/atomics16.h
+    rts/c/atomics32.h
+    rts/c/atomics64.h
     rts/c/context.h
     rts/c/context_prototypes.h
     rts/c/backends/c.h
@@ -426,7 +429,7 @@ library
       Language.Futhark.TypeChecker.Consumption
       Language.Futhark.TypeChecker.Constraints
       Language.Futhark.TypeChecker.TySolve
-      Language.Futhark.TypeChecker.TySolveNew
+      Language.Futhark.TypeChecker.TySolveOld
       Language.Futhark.TypeChecker.UnionFind
       Language.Futhark.TypeChecker.Error
       Language.Futhark.TypeChecker.Names
@@ -518,12 +521,10 @@ executable futhark
   ghc-options: -threaded -rtsopts "-with-rtsopts=-maxN16 -qg1 -A16M"
   build-depends: base, futhark
 
-test-suite unit
+library futhark-testing
   import: common
-  type: exitcode-stdio-1.0
-  main-is: futhark_tests.hs
   hs-source-dirs: unittests
-  other-modules:
+  exposed-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
@@ -557,7 +558,7 @@ test-suite unit
       Language.Futhark.TypeCheckerTests
   build-depends:
       QuickCheck >=2.8
-      , mtl >=2.2.1
+    , mtl >=2.2.1
     , base
     , containers
     , free
@@ -571,3 +572,27 @@ test-suite unit
     , vector >=0.12
     , srcloc
     , regex-tdfa ^>= 1.3.2
+
+test-suite unit
+  import: common
+  type: exitcode-stdio-1.0
+  main-is: unittests/futhark_tests.hs
+  build-depends:
+      base
+    , futhark-testing
+    , tasty
+
+benchmark benchmarks
+  import: common
+  type: exitcode-stdio-1.0
+  main-is: futhark_benchmarks.hs
+  hs-source-dirs: benchmarks
+  other-modules:
+        Language.Futhark.TypeChecker.TySolveBenchmarks
+
+  build-depends:
+      base
+    , containers
+    , criterion
+    , futhark
+    , futhark-testing

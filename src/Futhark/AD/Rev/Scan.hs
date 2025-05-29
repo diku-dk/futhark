@@ -446,7 +446,7 @@ diffScanVec ops ys aux w lam ne as m = do
 
     transp_as <-
       forM as $ \a ->
-        letExp (baseString a ++ "_transp") $ BasicOp $ Rearrange rear a
+        letExp (baseString a ++ "_transp") $ BasicOp $ Rearrange a rear
 
     ts <- traverse lookupType transp_as
     let n = arraysSize 0 ts
@@ -465,7 +465,7 @@ diffScanVec ops ys aux w lam ne as m = do
         Screma n (transp_as ++ subExpVars ne) (mapSOAC map_lam)
 
     forM (zip ys transp_ys) $ \(y, x) ->
-      auxing aux $ letBindNames [y] $ BasicOp $ Rearrange rear x
+      auxing aux $ letBindNames [y] $ BasicOp $ Rearrange x rear
 
   foldr (vjpStm ops) m stmts
 
