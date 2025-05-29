@@ -344,6 +344,8 @@ wgslBufferType (IntType Int32, True, Unsigned) =
   WGSL.Array $ WGSL.Atomic WGSL.UInt32
 wgslBufferType (FloatType Float32, True, _) =
   WGSL.Array $ WGSL.Atomic WGSL.Int32
+wgslBufferType (FloatType Float16, True, _) =
+  WGSL.Array $ WGSL.Atomic WGSL.Int32
 wgslBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
 wgslSharedBufferType ::
@@ -361,6 +363,8 @@ wgslSharedBufferType (IntType Int32, True, Signed) =
 wgslSharedBufferType (IntType Int32, True, Unsigned) =
   WGSL.Array $ WGSL.Atomic WGSL.UInt32
 wgslSharedBufferType (FloatType Float32, True, _) =
+  WGSL.Array $ WGSL.Atomic WGSL.Int32
+wgslSharedBufferType (FloatType Float16, True, _) =
   WGSL.Array $ WGSL.Atomic WGSL.Int32
 wgslSharedBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
@@ -1023,8 +1027,8 @@ findSingleMemoryType name = do
   where
     canBeAtomic (IntType Int64) = False
     canBeAtomic (IntType _) = True
-    canBeAtomic (FloatType Float32) = True
-    canBeAtomic (Bool) = True
+    canBeAtomic (FloatType _) = True
+    canBeAtomic Bool = True
     canBeAtomic _ = False
 
 -- | Generate binding declarations for memory buffers used by kernel. Produces
