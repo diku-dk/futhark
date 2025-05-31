@@ -14,6 +14,7 @@ module Language.Futhark.Interpreter.Values
     -- * Values
     Value (..),
     valueShape,
+    arrayValueShape,
     prettyValue,
     valueText,
     valueAccum,
@@ -198,6 +199,15 @@ valueShape (ValueAcc shape _ _) = shape
 valueShape (ValueRecord fs) = ShapeRecord $ M.map valueShape fs
 valueShape (ValueSum shape _ _) = shape
 valueShape _ = ShapeLeaf
+
+-- | Retrieve the part of the value shape that corresponds to outer array
+-- dimensions. This is used for reporting shapes in those cases where the full
+-- shape is not important, namely in indexing errors.
+arrayValueShape :: Value m -> ValueShape
+arrayValueShape = outer . valueShape
+  where
+    outer (ShapeDim d s) = ShapeDim d $ outer s
+    outer _ = ShapeLeaf
 
 -- TODO: Perhaps there is some clever way to reuse the code between
 -- valueAccum and valueAccumLM

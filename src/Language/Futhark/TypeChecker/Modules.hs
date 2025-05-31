@@ -9,6 +9,7 @@ module Language.Futhark.TypeChecker.Modules
 where
 
 import Control.Monad
+import Control.Monad.Identity
 import Data.Either
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -17,6 +18,7 @@ import Data.Set qualified as S
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Semantic
+import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify (doUnification)
@@ -109,9 +111,20 @@ newNamesForMTy orig_mty = do
         substitute v =
           fromMaybe v $ M.lookup v substs
 
-        -- For applySubst and friends.
-        subst v =
-          ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v substs
+        substituteInExp :: Exp -> Exp
+        substituteInExp = runIdentity . astMap mapper
+          where
+            mapper =
+              ASTMapper
+                { mapOnExp = pure . substituteInExp,
+                  mapOnName = pure . substituteInQualName,
+                  mapOnStructType = pure . substituteInType,
+                  mapOnParamType = pure . substituteInType,
+                  mapOnResRetType = pure . substituteInRetType
+                }
+
+        substituteInQualName (QualName qs v) =
+          QualName (map substitute qs) (substitute v)
 
         substituteInMap f m =
           let (ks, vs) = unzip $ M.toList m
@@ -143,9 +156,8 @@ newNamesForMTy orig_mty = do
           TypeParamType l (substitute p) loc
 
         substituteInScalarType :: ScalarTypeBase Size u -> ScalarTypeBase Size u
-        substituteInScalarType (TypeVar u (QualName qs v) targs) =
-          TypeVar u (QualName (map substitute qs) $ substitute v) $
-            map substituteInTypeArg targs
+        substituteInScalarType (TypeVar u v targs) =
+          TypeVar u (substituteInQualName v) $ map substituteInTypeArg targs
         substituteInScalarType (Prim t) =
           Prim t
         substituteInScalarType (Record ts) =
@@ -155,15 +167,18 @@ newNamesForMTy orig_mty = do
         substituteInScalarType (Arrow als v d1 t1 (RetType dims t2)) =
           Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
 
+        substituteInRetType :: RetTypeBase Size u -> RetTypeBase Size u
+        substituteInRetType (RetType ext t) = RetType ext $ substituteInType t
+
         substituteInType :: TypeBase Size u -> TypeBase Size u
         substituteInType (Scalar t) = Scalar $ substituteInScalarType t
         substituteInType (Array u shape t) =
           Array u (substituteInShape shape) $ substituteInScalarType t
 
-        substituteInShape (Shape ds) = Shape $ map (applySubst subst) ds
+        substituteInShape (Shape ds) = Shape $ map substituteInExp ds
 
         substituteInTypeArg (TypeArgDim e) =
-          TypeArgDim $ applySubst subst e
+          TypeArgDim $ substituteInExp e
         substituteInTypeArg (TypeArgType t) =
           TypeArgType $ substituteInType t
 

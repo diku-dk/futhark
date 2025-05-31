@@ -13,6 +13,7 @@ import Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests qualified
 import Futhark.Pkg.SolveTests qualified
 import Futhark.Solve.BranchAndBoundTests qualified
 import Futhark.Solve.SimplexTests qualified
+import Language.Futhark.PrettyTests qualified
 import Language.Futhark.PrimitiveTests qualified
 import Language.Futhark.SemanticTests qualified
 import Language.Futhark.SyntaxTests qualified
@@ -24,6 +25,7 @@ allTests =
   testGroup
     ""
     [ Language.Futhark.SyntaxTests.tests,
+      Language.Futhark.PrettyTests.tests,
       Futhark.AD.DerivativesTests.tests,
       Futhark.BenchTests.tests,
       Futhark.IR.PropTests.tests,

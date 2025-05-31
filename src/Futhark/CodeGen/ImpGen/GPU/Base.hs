@@ -771,7 +771,12 @@ atomicUpdateLocking atomicBinOp lam
       | all isPrim ops = AtomicPrim
       | otherwise = AtomicCAS
 
-    isPrim (op, _, _, _) = isJust $ atomicBinOp op
+    -- Only operators of at least 32-bit integers are actually truly atomic with
+    -- our current GPU backends - the rest are emulated with CAS-loops in their
+    -- implementation.
+    isPrim (op, _, _, _) =
+      isJust (atomicBinOp op)
+        && primByteSize (binOpType op) >= (4 :: Int)
 
 -- If the operator functions purely on single single values, we can use an
 -- implementation based on CAS, no matter what the operator does.

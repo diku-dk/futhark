@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark doc` now prints warnings about errors in doc comments (mostly
+  references to unknown names).
+
+* FutharkScript now permits chained `let` without `in`, just as in Futhark.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `f64` atomics on NVIDIA GPUs with less than CC 6.0 (Maxwell and older).
+
+* Infinite loop in fusion (#2276).
+
+* Rare compiler crash during internalisation code that does size coercions on
+  opaque size-lifted types.
+
+## [0.25.31]
+
+### Added
+
 * GPU backends: more efficient atomic operations on 8-bit and 16-bit quantities.
   This helps histograms on these types, as well as AD on programs that use
   `f16`.
@@ -27,9 +49,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark profile` now also prints proportion of total runtime for each cost centre.
 
-### Removed
+* Futhark no longer warns about entry points with opaque types.
 
-### Changed
+* Types such as `foo.bar` are now turned into `foo_bar` in the C API, rather
+  than an ugly hash.
 
 ### Fixed
 
@@ -42,6 +65,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * It was possible to make size-lifted types appear unlifted by using parametric
   types (#2268).
+
+* The same type would be mentioned twice in some type errors.
+
+* The type checker neglected to detect some cases of invalid references from
+  return types to names bound in parameter patterns. (#2271)
+
+* Incorrect handling of projections used in size expressions.
+
+* Subtle interactions of modules and sizes in the interpreter and compiler
+  (#2273).
 
 ## [0.25.30]
 
