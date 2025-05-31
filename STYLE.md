@@ -50,7 +50,7 @@ This command can be used to format all Haskell files in Futhark, while
 checking that the formatting is idempotent:
 
 ```
-./tools/run-formatter.sh src unittests
+./tools/run-formatter.sh src src-testing
 ```
 
 The idempotence check is mostly done to make sure Ormolu (which is still a young
