@@ -39,7 +39,7 @@ docs:
 		--haddock-options=--hyperlinked-source
 
 check:
-	tools/style-check.sh src unittests
+	tools/style-check.sh src src-testing
 
 check-commit:
 	tools/style-check.sh $$(git diff-index --cached --ignore-submodules=all --name-status HEAD | awk '$$1 != "D" { print $$2 }')
