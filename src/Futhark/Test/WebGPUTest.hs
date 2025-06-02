@@ -15,6 +15,7 @@ import Futhark.MonadFreshNames
 import Futhark.Test.Spec
 import Futhark.Test.Values qualified as V
 import Futhark.Util.Pretty
+import Futhark.Util
 
 generateTests ::
   (MonadFreshNames m, MonadIO m) =>
@@ -54,7 +55,7 @@ kernelInfoLiteral prog = "window.kernels = " <> docText fmtInfos <> ";"
         </> indent
           2
           ( "name: '"
-              <> pretty name
+              <> pretty (zEncodeText (nameToText name))
               <> "',"
                 </> "overrides: ["
               <> commasep

@@ -67,6 +67,7 @@ openclAtomics, cudaAtomics :: AtomicBinOp
       ]
     opencl16 =
       [ (Add Int16 OverflowUndef, Imp.AtomicAdd Int16),
+        (FAdd Float16, Imp.AtomicFAdd Float16),
         (SMax Int16, Imp.AtomicSMax Int16),
         (SMin Int16, Imp.AtomicSMin Int16),
         (UMax Int16, Imp.AtomicUMax Int16),

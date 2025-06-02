@@ -114,7 +114,7 @@ fn atomic_write_f32_shared(p: ptr<workgroup, atomic<i32>>, x: f32) {
     atomicStore(p, bitcast<i32>(x));
 }
 
-fn atomic_fadd_f32_global(p: ptr<storage, atomic<i32>, read_write>, x: f32) -> f32 {
+fn atomic_fadd_f32_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: f32) -> f32 {
     var old: f32 = x;
     var ret: f32;
 
@@ -136,6 +136,50 @@ fn atomic_fadd_f32_shared(p: ptr<workgroup, atomic<i32>>, x: f32) -> f32 {
     }
 
     return ret;
+}
+
+/// f16 atomics ///
+
+// TODO: Should just be packing f16's in shared memory as well
+fn atomic_read_f16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32) -> f16 {
+    return bitcast<vec2<f16>>(atomicLoad(p))[offset];
+}
+
+fn atomic_read_f16_shared(p: ptr<workgroup, atomic<i32>>) -> f16 {
+    return bitcast<vec2<f16>>(atomicLoad(p))[0];
+}
+
+fn atomic_write_f16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, val: f16) {
+    var x = bitcast<vec2<f16>>(atomicLoad(p));
+    var y = x; y[offset] = val;
+    while (!atomicCompareExchangeWeak(p, bitcast<i32>(x), bitcast<i32>(y)).exchanged) {
+        x = bitcast<vec2<f16>>(atomicLoad(p));
+        y = x; y[offset] = val;;
+    }
+}
+
+fn atomic_write_f16_shared(p: ptr<workgroup, atomic<i32>>, x: f16) {
+    atomicStore(p, bitcast<i32>(vec2<f16>(x)));
+}
+
+fn atomic_fadd_f16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: f16) -> f16 {
+    var val = vec2<f16>(0.0); val[offset] = x;
+    var old = bitcast<vec2<f16>>(atomicLoad(p));
+    while (!atomicCompareExchangeWeak(p, bitcast<i32>(old), bitcast<i32>(old + val)).exchanged) {
+        old = bitcast<vec2<f16>>(atomicLoad(p));
+    }
+
+    return old[offset];
+}
+
+fn atomic_fadd_f16_shared(p: ptr<workgroup, atomic<i32>>, x: f16) -> f16 {
+    var val = vec2<f16>(0.0); val[0] = x;
+    var old = bitcast<vec2<f16>>(atomicLoad(p));
+    while (!atomicCompareExchangeWeak(p, bitcast<i32>(old), bitcast<i32>(old + val)).exchanged) {
+        old = bitcast<vec2<f16>>(atomicLoad(p));
+    }
+
+    return old[0];
 }
 
 //// i32 atomics ////

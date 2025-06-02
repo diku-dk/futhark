@@ -3,7 +3,6 @@ fn log_or(a: bool, b: bool) -> bool { return a || b; }
 fn llt(a: bool, b: bool) -> bool { return a == false && b == true; }
 fn lle(a: bool, b: bool) -> bool { return a == b || llt(a, b); }
 
-
 fn futrts_sqrt32(a: f32) -> f32 { return sqrt(a); }
 fn futrts_sqrt16(a: f16) -> f16 { return sqrt(a); }
 
@@ -94,23 +93,21 @@ fn futrts_floor16(a: f16) -> f16 { return floor(a); }
 fn futrts_ldexp32(a: f32, b: i32) -> f32 { return ldexp(a, b); }
 fn futrts_ldexp16(a: f16, b: i32) -> f16 { return ldexp(a, b); }
 
-fn futrts_clz32(a: i32) -> i32 { return countLeadingZeros(a); }
-fn futrts_ctz32(a: i32) -> i32 { return countTrailingZeros(a); }
-fn futrts_popc32(a: i32) -> i32 { return countOneBits(a); }
-
-// TODO: umad, umul, smad, smul
-
 fn futrts_atan2_32(a: f32, b: f32) -> f32 { if (a == 0 && b == 0) { return 0; } return atan2(a, b); }
 fn futrts_atan2_16(a: f16, b: f16) -> f16 { if (a == 0 && b == 0) { return 0; } return atan2(a, b); }
 
 fn futrts_atan2pi_32(a: f32, b: f32) -> f32 { return futrts_atan2_32(a, b) / 3.14159265358979323846; }
 fn futrts_atan2pi_16(a: f16, b: f16) -> f16 { return futrts_atan2_16(a, b) / 3.14159265358979323846; }
 
-// TODO: f16 -> i16, i16 -> f16
+fn futrts_to_bits16(a: f16) -> i16 { return bitcast<i32>(vec2<f16>(a, 0.0)); }
+fn futrts_from_bits16(a: i16) -> f16 { return bitcast<vec2<f16>>(a)[0]; }
+
 fn futrts_to_bits32(a: f32) -> i32 { return bitcast<i32>(a); }
 fn futrts_from_bits32(a: i32) -> f32 { return bitcast<f32>(a); }
 
-// TODO: are these equivalent to the Futhark definitions?
+fn futrts_round32(x: f32) -> f32 { return round(x); }
+fn futrts_round16(x: f16) -> f16 { return round(x); }
+
 fn futrts_lerp32(a: f32, b: f32, t: f32) -> f32 { return mix(a, b, t); }
 fn futrts_lerp16(a: f16, b: f16, t: f16) -> f16 { return mix(a, b, t); }
 
@@ -119,3 +116,51 @@ fn futrts_mad16(a: f16, b: f16, c: f16) -> f16 { return a * b + c; }
 
 fn futrts_fma32(a: f32, b: f32, c: f32) -> f32 { return fma(a, b, c); }
 fn futrts_fma16(a: f16, b: f16, c: f16) -> f16 { return fma(a, b, c); }
+
+fn futrts_popc64(a: i64) -> i32 { return countOneBits(a.x) + countOneBits(a.y); }
+fn futrts_popc32(a: i32) -> i32 { return countOneBits(a); }
+fn futrts_popc16(a: i16) -> i32 { return countOneBits(a & 0xffff); }
+fn futrts_popc8(a: i8)  -> i32 { return countOneBits(a & 0xff); }
+
+// TODO: mul_hi32 and 64 cannot currently be implemented properly.
+fn futrts_umul_hi8(a: i8, b: i8) -> i8 { return norm_u8((norm_u8(a) * norm_u8(b)) >> 8); }
+fn futrts_umul_hi16(a: i16, b: i16) -> i16 { return norm_u16((norm_u16(a) * norm_u16(b)) >> 16); }
+fn futrts_umul_hi32(a: i32, b: i32) -> i32 { return bitcast<i32>(bitcast<u32>(a) * bitcast<u32>(b)); }
+fn futrts_umul_hi64(a: i64, b: i64) -> i64 { return i64(mul_i64(a, b)[1]); }
+fn futrts_smul_hi8(a: i8, b: i8) -> i8 { return norm_i8((a * b) >> 8); }
+fn futrts_smul_hi16(a: i16, b: i16) -> i16 { return norm_i16((a * b) >> 16); }
+fn futrts_smul_hi32(a: i32, b: i32) -> i32 { return a * b; }
+fn futrts_smul_hi64(a: i64, b: i64) -> i64 { return i64(mul_i64(a, b)[1]); }
+
+fn futrts_umad_hi8(a: i8, b: i8, c: i8) -> i8 { return norm_u8(futrts_umul_hi8(a, b) + norm_u8(c)); }
+fn futrts_umad_hi16(a: i16, b: i16, c: i16) -> i16 { return norm_u16(futrts_umul_hi16(a, b) + norm_u16(c)); }
+fn futrts_umad_hi32(a: i32, b: i32, c: i32) -> i32 { return bitcast<i32>(bitcast<u32>(futrts_umul_hi32(a, b)) + bitcast<u32>(c)); }
+fn futrts_umad_hi64(a: i64, b: i64, c: i64) -> i64 { return add_i64(futrts_umul_hi64(a, b), c); }
+fn futrts_smad_hi8(a: i8, b: i8, c: i8) -> i8 { return norm_i8(futrts_smul_hi8(a, b) + c); }
+fn futrts_smad_hi16(a: i16, b: i16, c: i16) -> i16 { return norm_i16(futrts_smul_hi16(a, b) + c); }
+fn futrts_smad_hi32(a: i32, b: i32, c: i32) -> i32 { return futrts_smul_hi32(a, b) + c; }
+fn futrts_smad_hi64(a: i64, b: i64, c: i64) -> i64 { return add_i64(futrts_smul_hi64(a, b), c); }
+
+fn futrts_clzz8(x: i8) -> i32 { return countLeadingZeros(x & 0xff) - 24; }
+fn futrts_clzz16(x: i16) -> i32 { return countLeadingZeros(x & 0xffff) - 16; }
+fn futrts_clzz32(x: i32) -> i32 { return countLeadingZeros(x); }
+fn futrts_clzz64(x: i64) -> i32 { 
+    if (x[1] == 0) {
+        return countLeadingZeros(x[0]) + 32;
+    }
+    else {
+        return countLeadingZeros(x[1]);
+    }
+}
+
+fn futrts_ctzz8(x: i8) -> i32 { return min(8, countTrailingZeros(x & 0xff)); }
+fn futrts_ctzz16(x: i16) -> i32 { return min(16, countTrailingZeros(x & 0xffff)); }
+fn futrts_ctzz32(x: i32) -> i32 { return countTrailingZeros(x); }
+fn futrts_ctzz64(x: i64) -> i32 { 
+    if (x[0] == 0) {
+        return countTrailingZeros(x[1]) + 32;
+    }
+    else {
+        return countTrailingZeros(x[0]);
+    }
+}

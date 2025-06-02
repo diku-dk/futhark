@@ -46,7 +46,7 @@ function make_array_class(fut, name) {
       }
 
       if (data instanceof Array) {
-        data = new prim_info.array_type(data);
+        data = prim_info.create_array(data);
       }
       futhark_assert(data instanceof prim_info.array_type,
         "expected Array or correct TypedArray");
@@ -77,7 +77,7 @@ function make_array_class(fut, name) {
         [fut.ctx, this.arr, wasm_data],
         {async: true});
 
-      const data = new prim_info.array_type(
+      const data = prim_info.create_array(
         prim_info.get_heap(fut.m)
           .subarray(wasm_data / prim_info.size,
                     wasm_data / prim_info.size + flat_len)
