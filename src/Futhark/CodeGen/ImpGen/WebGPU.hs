@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Code generation for ImpCode with WebGPU.
 module Futhark.CodeGen.ImpGen.WebGPU
   ( compileProg,
@@ -268,12 +270,12 @@ functionMayFail :: Name -> WebGPUS -> Bool
 functionMayFail fname = S.member fname . wsFunsMayFail
 
 genFunParams :: [Param] -> KernelM [WGSL.Param]
-genFunParams = mapM
-    (\p -> case p of
-      MemParam _ _ -> error ""
-      ScalarParam name tp -> do
-        ident <- getIdent name
-        pure $ WGSL.Param ident (WGSL.Prim $ wgslPrimType tp) [])
+genFunParams =
+  mapM $ \case
+    MemParam _ _ -> error ""
+    ScalarParam name tp -> do
+      ident <- getIdent name
+      pure $ WGSL.Param ident (WGSL.Prim $ wgslPrimType tp) []
 
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> KernelM ()
 generateDeviceFun fname device_func = do
@@ -302,7 +304,7 @@ generateDeviceFun fname device_func = do
                 WGSL.funOutput = output,
                 WGSL.funBody = body
               }
-        in prependDecl $ WGSL.FunDecl wgslFun
+       in prependDecl $ WGSL.FunDecl wgslFun
 
   lift $ State.modify $ \s ->
     s
@@ -500,8 +502,7 @@ genArrayAccess atomic t mem i packed = do
           let packedIndex = packedElemIndex t i
               packedOffset = packedElemOffset t i
            in [WGSL.UnOpExp "&" (WGSL.IndexExp mem packedIndex), packedOffset]
-        else
-          [WGSL.UnOpExp "&" (WGSL.IndexExp mem i)]
+        else [WGSL.UnOpExp "&" (WGSL.IndexExp mem i)]
 
 genArrayFun :: WGSL.Ident -> PrimType -> Bool -> Bool -> WGSL.Ident
 genArrayFun fun t atomic shared =
@@ -510,8 +511,7 @@ genArrayFun fun t atomic shared =
       let scope = if shared then "_shared" else "_global"
           prefix = if atomic then "atomic_" else ""
        in prefix <> fun <> "_" <> prettyText t <> scope
-    else
-      fun <> "_" <> prettyText t
+    else fun <> "_" <> prettyText t
 
 genReadExp ::
   PrimType ->
@@ -525,8 +525,7 @@ genReadExp t mem i = do
   i' <- indexExp i
 
   if (nativeAccess t || shared) && not atomic
-    then
-      pure $ WGSL.IndexExp mem' i'
+    then pure $ WGSL.IndexExp mem' i'
     else
       let access = genArrayAccess atomic t mem' i' (not shared)
           fun = genArrayFun "read" t atomic shared
@@ -557,8 +556,7 @@ genArrayWrite t mem i v = do
   v' <- v
 
   if (nativeAccess t || shared) && not atomic
-    then
-      pure $ WGSL.AssignIndex mem' i' v'
+    then pure $ WGSL.AssignIndex mem' i' v'
     else
       let access = genArrayAccess atomic t mem' i' (not shared) ++ [v']
           fun = genArrayFun "write" t atomic shared
@@ -603,7 +601,6 @@ genCopy pt shape (dst, _) (dst_offset, dst_strides) (src, _) (src_offset, src_st
      in genArrayWrite pt dst dst_i read'
 
   pure $ loops (zip iis shape') body
-
   where
     (zero, one) = (WGSL.VarExp "zero_i64", WGSL.VarExp "one_i64")
     is = map (VName "i") [0 .. length shape - 1]
