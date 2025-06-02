@@ -5,7 +5,7 @@ module Futhark.CodeGen.ImpGen.WebGPU
   )
 where
 
-import Control.Monad (forM, forM_, liftM2, liftM3, when, unless)
+import Control.Monad (forM, forM_, liftM2, liftM3, unless, when)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.RWS
 import Control.Monad.Trans.State qualified as State
@@ -20,10 +20,11 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.GPU qualified as ImpGPU
 import Futhark.CodeGen.RTS.WGSL qualified as RTS
+import Futhark.Error (compilerLimitation)
 import Futhark.IR.GPUMem qualified as F
 import Futhark.MonadFreshNames
 import Futhark.Util (convFloat, nubOrd, zEncodeText)
-import Futhark.Util.Pretty (docText)
+import Futhark.Util.Pretty (align, docText, indent, pretty, (</>))
 import Language.Futhark.Warnings (Warnings)
 import Language.WGSL qualified as WGSL
 
@@ -276,15 +277,15 @@ genFunParams = mapM
 
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> KernelM ()
 generateDeviceFun fname device_func = do
-  when (any memParam $ functionInput device_func) (error "Cannot generate GPU functions that use arrays.")
+  when (any memParam $ functionInput device_func) $
+    compilerLimitation "WebGPU backend cannot generate GPU functions that use arrays."
   ws <- lift State.get
   ks <- get
   r <- ask
   (body, _, _) <- lift $ runRWST (genWGSLStm (functionBody device_func)) r ks
 
   if functionMayFail fname ws
-    then
-      error "Cannot generate GPU functions that may fail."
+    then compilerLimitation "WebGPU backend Cannot handle GPU functions that may fail."
     else do
       params <- genFunParams (functionInput device_func)
       output <- case functionOutput device_func of
@@ -292,7 +293,7 @@ generateDeviceFun fname device_func = do
         [ScalarParam name tp] -> do
           ident <- getIdent name
           pure $ Just (ident, WGSL.Prim $ wgslPrimType tp)
-        _ -> error "Cannot generate GPU functions that return memory parameters."
+        _ -> compilerLimitation "WebGPU backend cannot generate GPU functions that return memory parameters."
       let wgslFun =
             WGSL.Function
               { WGSL.funName = "futrts_" <> nameToText fname,
@@ -332,7 +333,7 @@ genDeviceFuns code = do
       Nothing -> pure ()
   where
     toDevice :: ImpGPU.HostOp -> ImpGPU.KernelOp
-    toDevice _ = error "Cannot generate GPU functions that contain parallelism."
+    toDevice _ = compilerLimitation "WebGPU backend cannot handle GPU functions that contain parallelism."
 
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
@@ -418,7 +419,7 @@ wgslPrimType (IntType Int32) = WGSL.Int32
 wgslPrimType (IntType Int64) = wgslInt64
 wgslPrimType (FloatType Float16) = WGSL.Float16
 wgslPrimType (FloatType Float32) = WGSL.Float32
-wgslPrimType (FloatType Float64) = error "TODO: WGSL has no f64"
+wgslPrimType (FloatType Float64) = compilerLimitation "WebGPU backend does not support f64."
 wgslPrimType Bool = WGSL.Bool
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
 wgslPrimType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
@@ -713,7 +714,11 @@ genWGSLStm (Read tgt mem i t _ _) = do
   if atomic
     then genArrayRead t tgt mem i
     else pure $ WGSL.Assign tgt' (WGSL.IndexExp mem' i')
-genWGSLStm (SetMem {}) = error "SetMem statements not supported on WebGPU!"
+genWGSLStm stm@(SetMem {}) =
+  compilerLimitation . docText $
+    "WebGPU backend Cannot handle SetMem statement"
+      </> indent 2 (align (pretty stm))
+      </> "in GPU kernel."
 genWGSLStm (Call [dest] f args) = do
   fun <- WGSL.CallExp . ("futrts_" <>) <$> getIdent f
   let getArg (ExpArg e) = genWGSLExp e
