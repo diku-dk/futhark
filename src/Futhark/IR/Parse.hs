@@ -239,7 +239,11 @@ pErrorMsg :: Parser (ErrorMsg SubExp)
 pErrorMsg = ErrorMsg <$> braces (pErrorMsgPart `sepBy` pComma)
 
 pLoc :: Parser Loc
-pLoc = pStringLiteral $> mempty -- FIXME
+pLoc =
+  choice
+    [ pStringLiteral $> mempty, -- FIXME
+      pure mempty
+    ]
 
 pSrcLoc :: Parser SrcLoc
 pSrcLoc = srclocOf <$> pLoc
