@@ -11,7 +11,7 @@ import Data.String
 import Data.Text qualified as T
 import Data.Void
 import Language.Futhark
-import Language.Futhark.Parser
+import Language.Futhark.Parser (SyntaxError (syntaxErrorMsg), parseExp, parseType)
 import Language.Futhark.Primitive.Parse (constituent, keyword, lexeme)
 import Language.Futhark.PrimitiveTests ()
 import Test.QuickCheck
@@ -206,3 +206,6 @@ instance IsString StructRetType where
 
 instance IsString ResRetType where
   fromString = fromStringParse pRetType "ResRetType"
+
+instance IsString UncheckedExp where
+  fromString = either (error . T.unpack . syntaxErrorMsg) id . parseExp "string literal" . T.pack

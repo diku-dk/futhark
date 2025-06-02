@@ -59,7 +59,7 @@ let
                            "^docs.*"
                            "^prelude.*"
                            "^assets.*"
-                           "^unittests.*"
+                           "^src-testing.*"
                           ];
                 cleanSource = src: pkgs.lib.sourceByRegex src sources;
             in

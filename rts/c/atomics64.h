@@ -34,7 +34,7 @@ SCALAR_FUN_ATTR int64_t atomic_xchg_i64_global(volatile __global int64_t *p, int
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicExch((unsigned long long*)p, x);
 #else
-  return atom_xor(p, x);
+  return atom_xchg(p, x);
 #endif
 }
 
@@ -42,7 +42,7 @@ SCALAR_FUN_ATTR int64_t atomic_xchg_i64_shared(volatile __local int64_t *p, int6
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicExch((unsigned long long*)p, x);
 #else
-  return atom_xor(p, x);
+  return atom_xchg(p, x);
 #endif
 }
 
@@ -103,9 +103,9 @@ SCALAR_FUN_ATTR double atomic_fadd_f64_global(volatile __global double *p, doubl
   union {int64_t i; double f;} ret;
   old.f = x;
   while (1) {
-    ret.i = atom_xchg((volatile __global int64_t*)p, (int64_t)0);
+    ret.i = atomic_xchg_i64_global((volatile __global int64_t*)p, (int64_t)0);
     ret.f += old.f;
-    old.i = atom_xchg((volatile __global int64_t*)p, ret.i);
+    old.i = atomic_xchg_i64_global((volatile __global int64_t*)p, ret.i);
     if (old.i == 0) {
       break;
     }

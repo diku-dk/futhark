@@ -492,7 +492,7 @@ library
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
     , free >=5.1.10
-    , futhark-data >= 1.1.1.0
+    , futhark-data >= 1.1.2.0
     , futhark-server >= 1.2.3.0
     , futhark-manifest >= 1.5.0.0
     , githash >=0.1.6.1
@@ -533,12 +533,10 @@ executable futhark
   ghc-options: -threaded -rtsopts "-with-rtsopts=-maxN16 -qg1 -A16M"
   build-depends: base, futhark
 
-test-suite unit
+library futhark-testing
   import: common
-  type: exitcode-stdio-1.0
-  main-is: futhark_tests.hs
-  hs-source-dirs: unittests
-  other-modules:
+  hs-source-dirs: src-testing
+  exposed-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
@@ -562,6 +560,8 @@ test-suite unit
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
       Language.Futhark.CoreTests
+      Language.Futhark.PrettyTests
+      Language.Futhark.ParserBenchmarks
       Language.Futhark.PrimitiveTests
       Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
@@ -569,7 +569,8 @@ test-suite unit
       Language.Futhark.TypeCheckerTests
   build-depends:
       QuickCheck >=2.8
-      , mtl >=2.2.1
+    , criterion
+    , mtl >=2.2.1
     , base
     , containers
     , free
@@ -579,3 +580,21 @@ test-suite unit
     , tasty-hunit
     , tasty-quickcheck
     , text
+
+test-suite unit
+  import: common
+  type: exitcode-stdio-1.0
+  main-is: src-testing/futhark_tests.hs
+  build-depends:
+      base
+    , futhark-testing
+    , tasty
+
+benchmark benchmarks
+  import: common
+  type: exitcode-stdio-1.0
+  main-is: src-testing/futhark_benchmarks.hs
+  build-depends:
+      base
+    , criterion
+    , futhark-testing
