@@ -295,7 +295,7 @@ generateDeviceFun fname device_func = do
         [ScalarParam name tp] -> do
           ident <- getIdent name
           pure $ Just (ident, WGSL.Prim $ wgslPrimType tp)
-        _ -> compilerLimitation "WebGPU backend cannot generate GPU functions that return memory parameters."
+        ps -> compilerLimitation $ "WebGPU backend cannot generate GPU functions that return multiple values:\n" <> prettyText ps
       let wgslFun =
             WGSL.Function
               { WGSL.funName = "futrts_" <> nameToText fname,
