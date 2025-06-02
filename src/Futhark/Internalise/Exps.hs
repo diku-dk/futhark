@@ -612,8 +612,8 @@ internaliseExp desc (E.Hole (Info t) loc) = do
       certifying c $ mapM (fmap I.Var . letExp desc <=< eBlank . I.fromDecl) ts'
 internaliseExp desc (E.QualParens _ e _) =
   internaliseExp desc e
-internaliseExp desc (E.StringLit vs _) =
-  fmap pure . letSubExp desc $
+internaliseExp desc (E.StringLit vs loc) =
+  locating loc . fmap pure . letSubExp desc $
     I.BasicOp $
       I.ArrayLit (map constant vs) $
         I.Prim int8
@@ -623,7 +623,7 @@ internaliseExp _ (E.Var (E.QualName _ name) _ _) = do
     Just substs -> pure substs
     Nothing -> pure [I.Var name]
 internaliseExp desc (E.AppExp e (Info appres)) = do
-  ses <- internaliseAppExp desc appres e
+  ses <- locating e $ internaliseAppExp desc appres e
   bindExtSizes appres ses
   pure ses
 internaliseExp _ (E.TupLit [] _) =
@@ -642,9 +642,10 @@ internaliseExp desc (E.RecordLit orig_fields _) =
           (L noLoc (baseName name))
           (E.Var (E.qualName name) t loc)
           loc
-internaliseExp desc (E.ArrayVal vs t _) =
-  fmap pure . letSubExp desc . I.BasicOp $
-    I.ArrayVal (map internalisePrimValue vs) (internalisePrimType t)
+internaliseExp desc (E.ArrayVal vs t loc) =
+  locating loc $
+    fmap pure . letSubExp desc . I.BasicOp $
+      I.ArrayVal (map internalisePrimValue vs) (internalisePrimType t)
 internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
   -- If this is a multidimensional array literal of primitives, we
   -- treat it specially by flattening it out followed by a reshape.
@@ -722,14 +723,14 @@ internaliseExp desc (E.Coerce e _ (Info et) loc) = do
             ++ dt'
             ++ ["\"."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
-internaliseExp desc (E.Negate e _) = do
+internaliseExp desc (E.Negate e loc) = locating loc $ do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
   case et of
     I.Prim pt ->
       letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg pt) e'
     _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in Negate"
-internaliseExp desc (E.Not e _) = do
+internaliseExp desc (E.Not e loc) = locating loc $ do
   e' <- internaliseExp1 "not_arg" e
   et <- subExpType e'
   case et of
@@ -739,7 +740,7 @@ internaliseExp desc (E.Not e _) = do
       letTupExp' desc $ I.BasicOp $ I.UnOp (I.Neg I.Bool) e'
     _ ->
       error "Futhark.Internalise.internaliseExp: non-int/bool type in Not"
-internaliseExp desc (E.Update src slice ve loc) = do
+internaliseExp desc (E.Update src slice ve loc) = locating loc $ do
   ves <- internaliseExp "lw_val" ve
   srcs <- internaliseExpToVars "src" src
   (src_dims, ve_dims) <- case (srcs, ves) of
@@ -766,7 +767,7 @@ internaliseExp desc (E.Update src slice ve loc) = do
           ensureShape errormsg loc rowtype "lw_val_correct_shape" ve'
         letInPlace desc sname full_slice $ BasicOp $ SubExp ve''
   certifying cs $ map I.Var <$> zipWithM comb srcs ves
-internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
+internaliseExp desc (E.RecordUpdate src fields ve _ loc) = locating loc $ do
   src' <- internaliseExp desc src
   ve' <- internaliseExp desc ve
   replace (E.typeOf src) fields ve' src'
@@ -832,7 +833,7 @@ internaliseExp desc (E.Assert e1 e2 (Info check) loc) = do
       v' <- newVName "assert_res"
       letBindNames [v'] $ I.BasicOp $ I.SubExp v
       pure $ I.Var v'
-internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) _) = do
+internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) loc) = locating loc $ do
   (ts, constr_map) <- internaliseSumType $ M.map (map E.toStruct) fs
   es' <- concat <$> mapM (internaliseExp "payload") es
 

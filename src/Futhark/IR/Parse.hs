@@ -238,8 +238,11 @@ pErrorMsgPart =
 pErrorMsg :: Parser (ErrorMsg SubExp)
 pErrorMsg = ErrorMsg <$> braces (pErrorMsgPart `sepBy` pComma)
 
+pLoc :: Parser Loc
+pLoc = pStringLiteral $> mempty -- FIXME
+
 pSrcLoc :: Parser SrcLoc
-pSrcLoc = pStringLiteral $> mempty -- FIXME
+pSrcLoc = srclocOf <$> pLoc
 
 pErrorLoc :: Parser (SrcLoc, [SrcLoc])
 pErrorLoc = (,mempty) <$> pSrcLoc
@@ -587,11 +590,15 @@ pCerts =
 pSubExpRes :: Parser SubExpRes
 pSubExpRes = SubExpRes <$> pCerts <*> pSubExp
 
+pProvenance :: Parser Provenance
+pProvenance = Provenance <$> pLoc
+
 pStm :: PR rep -> Parser (Stm rep)
-pStm pr =
-  keyword "let" $> Let <*> pPat pr <* pEqual <*> pStmAux <*> pExp pr
+pStm pr = do
+  loc <- pProvenance
+  keyword "let" $> Let <*> pPat pr <* pEqual <*> pStmAux loc <*> pExp pr
   where
-    pStmAux = flip StmAux <$> pAttrs <*> pCerts <*> pure (pExpDec pr)
+    pStmAux loc = flip StmAux <$> pAttrs <*> pCerts <*> pure loc <*> pure (pExpDec pr)
 
 pStms :: PR rep -> Parser (Stms rep)
 pStms pr = stmsFromList <$> many (pStm pr)

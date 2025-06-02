@@ -423,11 +423,11 @@ nonrecSimplifyStm ::
   (SimplifiableRep rep) =>
   Stm (Wise rep) ->
   SimpleM rep (Stm (Wise rep))
-nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
+nonrecSimplifyStm (Let pat (StmAux cs attrs loc (_, dec)) e) = do
   cs' <- simplify cs
   e' <- simplifyExpBase e
   (pat', pat_cs) <- collectCerts $ traverse simplify $ removePatWisdom pat
-  let aux' = StmAux (cs' <> pat_cs) attrs dec
+  let aux' = StmAux (cs' <> pat_cs) attrs loc dec
   pure $ mkWiseStm pat' aux' e'
 
 -- Bottom-up simplify a statement.  Recurses into sub-Bodies and Ops.
@@ -439,9 +439,9 @@ recSimplifyStm ::
   Stm (Wise rep) ->
   UT.UsageTable ->
   SimpleM rep (Stms (Wise rep), Stm (Wise rep))
-recSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) usage = do
+recSimplifyStm (Let pat (StmAux cs attrs loc (_, dec)) e) usage = do
   ((e', e_hoisted), e_cs) <- collectCerts $ simplifyExp (usage <> UT.usageInPat pat) pat e
-  let aux' = StmAux (cs <> e_cs) attrs dec
+  let aux' = StmAux (cs <> e_cs) attrs loc dec
   pure (e_hoisted, mkWiseStm (removePatWisdom pat) aux' e')
 
 hoistStms ::
