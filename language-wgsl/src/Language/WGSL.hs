@@ -114,6 +114,7 @@ data Function = Function
   { funName :: Ident,
     funAttribs :: [Attrib],
     funParams :: [Param],
+    funOutput :: Maybe (Ident, Typ),
     funBody :: Stmt
   }
 
@@ -255,22 +256,28 @@ instance Pretty Attrib where
     "@" <> pretty name <> parens (commasep $ map pretty args)
 
 instance Pretty Param where
-  pretty (Param name typ attribs) =
-    stack
-      [ hsep (map pretty attribs),
-        pretty name <+> ":" <+> pretty typ
-      ]
+  pretty (Param name typ attribs)
+    | null attribs = pretty name <+> ":" <+> pretty typ
+    | otherwise =
+        stack
+          [ hsep (map pretty attribs),
+            pretty name <+> ":" <+> pretty typ
+          ]
 
 prettyParams :: [Param] -> Doc a
 prettyParams [] = "()"
 prettyParams params = "(" </> indent 2 (commastack (map pretty params)) </> ")"
 
 instance Pretty Function where
-  pretty (Function name attribs params body) =
+  pretty (Function name attribs params output body) =
     stack
       [ hsep (map pretty attribs),
-        "fn" <+> pretty name <> prettyParams params <+> "{",
-        indent 2 (pretty body) <> ";",
+        "fn" <+> pretty name <> prettyParams params
+          <+> maybe "" (\(_, t) -> "->" <+> pretty t) output
+          <+> "{",
+        maybe "" (\(n, t) -> indent 2 (pretty (DeclareVar n t) <> ";")) output,
+        indent 2 (pretty body) <> ";"
+          </> maybe "" (\(n, _) -> indent 2 ("return" <+> pretty n <> ";")) output,
         "}"
       ]
 

@@ -5,7 +5,7 @@ module Futhark.CodeGen.ImpGen.WebGPU
   )
 where
 
-import Control.Monad (forM, forM_, liftM2, liftM3, when)
+import Control.Monad (forM, forM_, liftM2, liftM3, when, unless)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.RWS
 import Control.Monad.Trans.State qualified as State
@@ -35,7 +35,11 @@ data WebGPUS = WebGPUS
     wsMacroDefs :: [(Name, KernelConstExp)],
     -- | Interface of kernels already generated into wsCode.
     wsKernels :: [(WGSL.Ident, KernelInterface)],
-    wsNextBindSlot :: Int
+    wsNextBindSlot :: Int,
+    -- | TODO comment on this
+    wsDevFuns :: S.Set Name,
+    wsFuns :: ImpGPU.Functions ImpGPU.HostOp,
+    wsFunsMayFail :: S.Set Name
   }
 
 -- The monad in which we perform the overall translation.
@@ -91,6 +95,9 @@ mkGlobalIdent ident = do
 
 addDecl :: WGSL.Declaration -> KernelM ()
 addDecl decl = modify $ \s -> s {ksDecls = ksDecls s ++ [decl]}
+
+prependDecl :: WGSL.Declaration -> KernelM ()
+prependDecl decl = modify $ \s -> s {ksDecls = decl : ksDecls s}
 
 addInitStmt :: WGSL.Stmt -> KernelM ()
 addInitStmt stmt = modify $ \s -> s {ksInits = ksInits s ++ [stmt]}
@@ -205,6 +212,7 @@ genKernel kernel = do
           { WGSL.funName = textToIdent name,
             WGSL.funAttribs = attribs,
             WGSL.funParams = entryParams,
+            WGSL.funOutput = Nothing,
             WGSL.funBody = WGSL.stmts (ksInits s ++ ksBody s)
           }
   addCode $ prettyText wgslFun
@@ -234,6 +242,8 @@ genKernel kernel = do
       genScalarDecls
       genMemoryDecls
 
+      genDeviceFuns $ ImpGPU.kernelBody kernel
+
       -- FIXME: This is only required to work around a Chrome bug that otherwise
       -- causes the shader to fail compilation if the kernel never accesses the
       -- lockstep width. See `gpu_create_kernel` in `rts/c/backends/webgpu.h`
@@ -246,6 +256,83 @@ genKernel kernel = do
       addBodyStmt wgslBody
 
       pure ()
+
+calledInKernelOp :: ImpGPU.KernelOp -> S.Set Name
+calledInKernelOp = const mempty
+
+lookupFunction :: Name -> WebGPUS -> Maybe (ImpGPU.Function ImpGPU.HostOp)
+lookupFunction fname = lookup fname . unFunctions . wsFuns
+
+functionMayFail :: Name -> WebGPUS -> Bool
+functionMayFail fname = S.member fname . wsFunsMayFail
+
+genFunParams :: [Param] -> KernelM [WGSL.Param]
+genFunParams = mapM
+    (\p -> case p of
+      MemParam _ _ -> error ""
+      ScalarParam name tp -> do
+        ident <- getIdent name
+        pure $ WGSL.Param ident (WGSL.Prim $ wgslPrimType tp) [])
+
+generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> KernelM ()
+generateDeviceFun fname device_func = do
+  when (any memParam $ functionInput device_func) (error "Cannot generate GPU functions that use arrays.")
+  ws <- lift State.get
+  ks <- get
+  r <- ask
+  (body, _, _) <- lift $ runRWST (genWGSLStm (functionBody device_func)) r ks
+
+  if functionMayFail fname ws
+    then
+      error "Cannot generate GPU functions that may fail."
+    else do
+      params <- genFunParams (functionInput device_func)
+      output <- case functionOutput device_func of
+        [] -> pure Nothing
+        [ScalarParam name tp] -> do
+          ident <- getIdent name
+          pure $ Just (ident, WGSL.Prim $ wgslPrimType tp)
+        _ -> error "Cannot generate GPU functions that return memory parameters."
+      let wgslFun =
+            WGSL.Function
+              { WGSL.funName = "futrts_" <> nameToText fname,
+                WGSL.funAttribs = mempty,
+                WGSL.funParams = params,
+                WGSL.funOutput = output,
+                WGSL.funBody = body
+              }
+        in prependDecl $ WGSL.FunDecl wgslFun
+
+  lift $ State.modify $ \s ->
+    s
+      { wsDevFuns = S.insert fname $ wsDevFuns s
+      }
+
+  genDeviceFuns $ functionBody device_func
+  where
+    memParam MemParam {} = True
+    memParam ScalarParam {} = False
+
+-- Ensure that this device function is available, but don't regenerate
+-- it if it already exists.
+ensureDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> KernelM ()
+ensureDeviceFun fname host_func = do
+  exists <- lift $ State.gets $ S.member fname . wsDevFuns
+  unless exists $ generateDeviceFun fname host_func
+
+genDeviceFuns :: ImpGPU.KernelCode -> KernelM ()
+genDeviceFuns code = do
+  let called = calledFuncs calledInKernelOp code
+  forM_ (S.toList called) $ \fname -> do
+    def <- lift $ State.gets $ lookupFunction fname
+    case def of
+      Just host_func -> do
+        let device_func = fmap toDevice host_func
+        ensureDeviceFun fname device_func
+      Nothing -> pure ()
+  where
+    toDevice :: ImpGPU.HostOp -> ImpGPU.KernelOp
+    toDevice _ = error "Cannot generate GPU functions that contain parallelism."
 
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
@@ -287,7 +374,10 @@ kernelsToWebGPU prog =
             wsSizes = mempty,
             wsMacroDefs = mempty,
             wsKernels = mempty,
-            wsNextBindSlot = 0
+            wsNextBindSlot = 0,
+            wsDevFuns = mempty,
+            wsFuns = defFuns prog,
+            wsFunsMayFail = S.empty
           }
 
       ((consts', funs'), translation) =
@@ -795,7 +885,7 @@ wgslCmpOp CmpLle = call2 "lle"
 -- given our representation.
 wgslUnOp :: UnOp -> WGSL.Exp -> WGSL.Exp
 wgslUnOp (Neg (FloatType _)) = WGSL.UnOpExp "-"
-wgslUnOp (Neg (IntType _)) = WGSL.UnOpExp "-"
+wgslUnOp (Neg (IntType t)) = call1 $ "neg_" <> prettyText t
 wgslUnOp (Neg _) = WGSL.UnOpExp "!"
 wgslUnOp (Complement _) = WGSL.UnOpExp "~"
 wgslUnOp (Abs Int64) = call1 "abs_i64"
@@ -1049,6 +1139,7 @@ genMemoryDecls :: KernelM ()
 genMemoryDecls = do
   uses <- asks (ImpGPU.kernelUses . krKernel)
   memUses <- catMaybes <$> sequence [withType n | ImpGPU.MemoryUse n <- uses]
+  when (length memUses > 8) $ error "WeBGPU does not support binding more than 8 storage buffers!"
   mapM_ moduleDecl memUses
   mapM_ rename memUses
   where
