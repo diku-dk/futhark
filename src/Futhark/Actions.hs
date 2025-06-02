@@ -560,6 +560,8 @@ compileWebGPUAction fcfg mode tgtpath =
               "-sASYNCIFY",
               "-sMODULARIZE",
               "-sWASM_BIGINT",
+              "-sASSERTIONS",
+              "-sALLOW_MEMORY_GROWTH",
               "-sEXPORTED_RUNTIME_METHODS=cwrap,ccall,Asyncify",
               "--extern-post-js",
               jslibpath
