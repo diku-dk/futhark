@@ -596,7 +596,7 @@ static void gpu_create_kernel(struct futhark_context *ctx,
   if (kernel_info->gpu_program[0]) {
     const char* wgsl = strconcat(kernel_info->gpu_program);
     wgpu_module_setup(ctx, wgsl, &kernel->module, name);
-    free(wgsl);
+    free((void*)wgsl);
   }
   else {
     kernel->module = ctx->module;
@@ -711,25 +711,27 @@ static int gpu_scalar_from_device(struct futhark_context *ctx,
                   size);
   }
 
+  size_t copy_size = ((size + 4 - 1) / 4) * 4;
+
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
   wgpuCommandEncoderCopyBufferToBuffer(encoder,
     src, offset,
     ctx->scalar_readback_buffer, 0,
-    size);
+    copy_size);
 
   WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
 
   WGPUBufferMapAsyncStatus status =
     wgpu_map_buffer_sync(ctx->instance, ctx->scalar_readback_buffer,
-                         WGPUMapMode_Read, 0, size);
+                         WGPUMapMode_Read, 0, copy_size);
   if (status != WGPUBufferMapAsyncStatus_Success) {
-    futhark_panic(-1, "Failed to read scalar from device memory with error %d\n",
+    futhark_panic(-1, "gpu_scalar_from_device: Failed to read scalar from device memory with error %d\n",
                   status);
   }
 
   const void *mapped = wgpuBufferGetConstMappedRange(ctx->scalar_readback_buffer,
-                                                     0, size);
+                                                     0, copy_size);
   memcpy(dst, mapped, size);
 
   wgpuBufferUnmap(ctx->scalar_readback_buffer);
@@ -759,7 +761,8 @@ static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
     // Find its size to make sure.
     uint64_t dst_size = wgpuBufferGetSize(dst);
     if (dst_offset + copy_size != dst_size) {
-      futhark_panic(-1, "memcpy_host2gpu: Would corrupt data due to padding!\n");
+      printf("memcpy_host2gpu: Potentially could corrupt data due to padding!\n");
+      //futhark_panic(-1, "memcpy_host2gpu: Would corrupt data due to padding!\n");
     }
   }
 
@@ -815,7 +818,7 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
   WGPUBufferMapAsyncStatus status =
     wgpu_map_buffer_sync(ctx->instance, readback, WGPUMapMode_Read, 0, buf_size);
   if (status != WGPUBufferMapAsyncStatus_Success) {
-    futhark_panic(-1, "Failed to copy from device memory with error %d\n",
+    futhark_panic(-1, "memcpy_gpu2host: Failed to copy from device memory with error %d\n",
                   status);
   }
 
@@ -842,29 +845,14 @@ static int gpu_memcpy(struct futhark_context *ctx,
     // Find its size to make sure.
     uint64_t dst_size = wgpuBufferGetSize(dst);
     if (dst_offset + copy_size != dst_size) {
-      printf("\tPotentially could corrupt data due to padding!\n");
+      printf("gpu_memcpy: Potentially could corrupt data due to padding!\n");
       //futhark_panic(-1, "gpu_memcpy: Would corrupt data due to padding!\n");
     }
   }
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
 
   if (dst == src) {
-/* ~~ Temporary debug workaround to print buffer contents. ~~ */
-    printf("Cannot gpu_memcpy to/from the same buffer. Have to copy to temporary buffer first.\n");
-    printf("\tnbytes: %lld, src_offset: %lld, dst_offset: %lld, copy_size: %lld, dst_size: %lld, src_size: %lld\n",
-      (long long)nbytes, (long long)src_offset, (long long)dst_offset, (long long)copy_size, (long long)wgpuBufferGetSize(dst), (long long)wgpuBufferGetSize(src));
-
-    unsigned char* buf = malloc(copy_size);
-    memcpy_gpu2host(ctx, true, buf, 0, src, src_offset, nbytes);
-    printf("\tBuffer contents: ");
-    for (int i = 0; i < copy_size; i++) {
-      printf("%02x ", buf[i]);
-    }
-    printf("\n");
-    memcpy_host2gpu(ctx, true, dst, dst_offset, buf, 0, nbytes);
-    free(buf);
-
-/* ~~ Better version w/o host roundtrip ~~
+    printf("gpu_memcpy: Cannot memcpy to/from the same buffer. Copying to temporary buffer first.\n");
     // Allocate temporary buffer.
     gpu_mem tmp;
     gpu_alloc_actual(ctx, copy_size, &tmp);
@@ -880,7 +868,6 @@ static int gpu_memcpy(struct futhark_context *ctx,
     // Free the temporary buffer once we have finished copying.
     futhark_context_sync(ctx);
     gpu_free_actual(ctx, tmp);
-*/
   }
   else {
     wgpuCommandEncoderCopyBufferToBuffer(encoder,
@@ -901,8 +888,6 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              void* args[num_args],
                              size_t args_sizes[num_args]) {
   struct wgpu_kernel_info *kernel_info = kernel->info;
-
-  printf("Launching kernel %s\n", kernel_info->name);
 
   if (num_args !=
       kernel_info->num_shared_mem_overrides
