@@ -738,7 +738,7 @@ defuncSoacExp e
       (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonunique $ typeOf e) e
       let env = foldMap envFromPat pats
       body' <- localEnv env $ defuncExp' body
-      pure $ Lambda pats body' Nothing (Info tp) mempty
+      pure $ Lambda pats body' Nothing (Info tp) (srclocOf e)
   | otherwise = defuncExp' e
 
 etaExpand :: ResRetType -> Exp -> DefM ([Pat ParamType], Exp, ResRetType)

@@ -102,14 +102,12 @@ simplifyConcat (vtable, _) pat aux (Concat _ (x :| []) w)
       -- Still need a copy because Concat produces a fresh array.
       Simplify $ auxing aux $ letBind pat $ BasicOp $ Replicate mempty $ Var x
 -- concat xs (concat ys zs) == concat xs ys zs
-simplifyConcat (vtable, _) pat (StmAux cs attrs _) (Concat i (x :| xs) new_d)
+simplifyConcat (vtable, _) pat aux (Concat i (x :| xs) new_d)
   | x' /= x || concat xs' /= xs =
-      Simplify $
-        certifying (cs <> x_cs <> mconcat xs_cs) $
-          attributing attrs $
-            letBind pat $
-              BasicOp $
-                Concat i (x' :| zs ++ concat xs') new_d
+      Simplify . auxing aux . certifying (x_cs <> mconcat xs_cs) $
+        letBind pat $
+          BasicOp $
+            Concat i (x' :| zs ++ concat xs') new_d
   where
     (x' : zs, x_cs) = isConcat x
     (xs', xs_cs) = unzip $ map isConcat xs
@@ -198,16 +196,16 @@ ruleBasicOp vtable pat aux (Update Unsafe dest is se)
                 reshapeAll (arrayShape v_t) (arrayShape dest_t)
           letBind pat $ BasicOp $ Replicate mempty v_reshaped
         _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
-ruleBasicOp vtable pat (StmAux cs1 attrs _) (Update safety1 dest1 is1 (Var v1))
+ruleBasicOp vtable pat aux (Update safety1 dest1 is1 (Var v1))
   | Just (Update safety2 dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
     Just (Replicate (Shape []) (Var v3), cs3) <- ST.lookupBasicOp dest2 vtable,
     Just (Index v4 is4, cs4) <- ST.lookupBasicOp v3 vtable,
     is4 == is1,
     v4 == dest1 =
-      Simplify $
-        certifying (cs1 <> cs2 <> cs3 <> cs4) $ do
+      Simplify . auxing aux $
+        certifying (cs2 <> cs3 <> cs4) $ do
           is5 <- subExpSlice $ sliceSlice (primExpSlice is1) (primExpSlice is2)
-          attributing attrs $ letBind pat $ BasicOp $ Update (max safety1 safety2) dest1 is5 se2
+          letBind pat $ BasicOp $ Update (max safety1 safety2) dest1 is5 se2
 ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
   | Just m <- simplifyWith se1 se2 = Simplify m
   | Just m <- simplifyWith se2 se1 = Simplify m

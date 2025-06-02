@@ -11,6 +11,7 @@ module Futhark.Builder.Class
     MonadBuilder (..),
     insertStms,
     insertStm,
+    censorStms,
     letBind,
     letBindNames,
     collectStms_,
@@ -111,15 +112,21 @@ attributing attrs = censorStms $ fmap onStm
 -- | Add the certificates and attributes to any statements added by
 -- this action.
 auxing :: (MonadBuilder m) => StmAux anyrep -> m a -> m a
-auxing (StmAux cs attrs _) = censorStms $ fmap onStm
+auxing outer
+  | stmAuxCerts outer == mempty && stmAuxAttrs outer == mempty = id
+  | otherwise = censorStms $ fmap onStm
   where
     onStm (Let pat aux e) =
       Let pat aux' e
       where
         aux' =
           aux
-            { stmAuxAttrs = attrs <> stmAuxAttrs aux,
-              stmAuxCerts = cs <> stmAuxCerts aux
+            { stmAuxAttrs = stmAuxAttrs outer <> stmAuxAttrs aux,
+              stmAuxCerts = stmAuxCerts outer <> stmAuxCerts aux,
+              stmAuxLoc =
+                if stmAuxLoc aux == mempty
+                  then stmAuxLoc outer
+                  else stmAuxLoc aux
             }
 
 -- | Add a statement with the given pattern and expression.
@@ -142,10 +149,10 @@ mkLet ids e =
 -- | Like mkLet, but also take attributes and certificates from the
 -- given 'StmAux'.
 mkLet' :: (Buildable rep) => [Ident] -> StmAux a -> Exp rep -> Stm rep
-mkLet' ids (StmAux cs attrs _) e =
+mkLet' ids (StmAux cs attrs loc _) e =
   let pat = mkExpPat ids e
       dec = mkExpDec pat e
-   in Let pat (StmAux cs attrs dec) e
+   in Let pat (StmAux cs attrs loc dec) e
 
 -- | Add a statement with the given pattern element names and
 -- expression.
