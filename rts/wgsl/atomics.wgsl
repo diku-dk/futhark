@@ -114,7 +114,7 @@ fn atomic_write_f32_shared(p: ptr<workgroup, atomic<i32>>, x: f32) {
     atomicStore(p, bitcast<i32>(x));
 }
 
-fn atomic_fadd_f32_global(p: ptr<storage, atomic<i32>, read_write>, x: f32) -> f32 {
+fn atomic_fadd_f32_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: f32) -> f32 {
     var old: f32 = x;
     var ret: f32;
 

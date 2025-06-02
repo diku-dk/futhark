@@ -11,7 +11,7 @@ fn norm_u16(a: i16) -> i32 {
   return a & 0x0000ffff;
 }
 
-fn read_i16(buffer: ptr<storage, array<atomic<i16>>, read_write>, i: i32) -> i16 {
+fn read_i16(buffer: ptr<storage, array<atomic<i32>>, read_write>, i: i32) -> i16 {
   let elem_idx = i / 2;
   let idx_in_elem = i % 2;
 
@@ -19,7 +19,7 @@ fn read_i16(buffer: ptr<storage, array<atomic<i16>>, read_write>, i: i32) -> i16
   return norm_i16(v >> bitcast<u32>(idx_in_elem * 16));
 }
 
-fn write_i16(buffer: ptr<storage, array<atomic<i16>>, read_write>,
+fn write_i16(buffer: ptr<storage, array<atomic<i32>>, read_write>,
              i: i32,
              val: i16
 ) {
