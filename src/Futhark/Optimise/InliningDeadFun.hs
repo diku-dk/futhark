@@ -174,7 +174,6 @@ inlineBecauseSOACs cg prog =
     inline fd InSOAC =
       any (isArray . paramType) (funDefParams fd)
         || any (isArray . fst) (funDefRetType fd)
-        || length (funDefRetType fd) /= 1 -- FIXME: webgpu hack
         || arrayInBody (funDefBody fd)
     onFunDef fd = do
       guard $ maybe False (inline fd) $ M.lookup (funDefName fd) called

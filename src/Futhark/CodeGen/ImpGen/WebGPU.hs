@@ -215,7 +215,7 @@ genKernel kernel = do
           { WGSL.funName = textToIdent name,
             WGSL.funAttribs = attribs,
             WGSL.funParams = entryParams,
-            WGSL.funOutput = Nothing,
+            WGSL.funOutput = [],
             WGSL.funBody = WGSL.stmts (ksInits s ++ ksBody s)
           }
   addCode $ prettyText wgslFun
@@ -272,7 +272,7 @@ functionMayFail fname = S.member fname . wsFunsMayFail
 genFunParams :: [Param] -> KernelM [WGSL.Param]
 genFunParams =
   mapM $ \case
-    MemParam _ _ -> error ""
+    MemParam _ _ -> compilerLimitation "WebGPU backend cannot handle GPU functions with memory parameters."
     ScalarParam name tp -> do
       ident <- getIdent name
       pure $ WGSL.Param ident (WGSL.Prim $ wgslPrimType tp) []
@@ -289,19 +289,17 @@ generateDeviceFun fname device_func = do
   if functionMayFail fname ws
     then compilerLimitation "WebGPU backend Cannot handle GPU functions that may fail."
     else do
-      params <- genFunParams (functionInput device_func)
-      output <- case functionOutput device_func of
-        [] -> pure Nothing
-        [ScalarParam name tp] -> do
-          ident <- getIdent name
-          pure $ Just (ident, WGSL.Prim $ wgslPrimType tp)
-        ps -> compilerLimitation $ "WebGPU backend cannot generate GPU functions that return multiple values:\n" <> prettyText ps
+      in_params <- genFunParams (functionInput device_func)
+      out_params <- genFunParams (functionOutput device_func)
+      let out_ptr_params =
+            map (\(WGSL.Param name (WGSL.Prim t) a) ->
+              WGSL.Param (name <> "_out") (WGSL.Pointer t WGSL.FunctionSpace Nothing) a) out_params
       let wgslFun =
             WGSL.Function
               { WGSL.funName = "futrts_" <> nameToText fname,
                 WGSL.funAttribs = mempty,
-                WGSL.funParams = params,
-                WGSL.funOutput = output,
+                WGSL.funParams = in_params,
+                WGSL.funOutput = out_ptr_params,
                 WGSL.funBody = body
               }
        in prependDecl $ WGSL.FunDecl wgslFun
@@ -720,9 +718,17 @@ genWGSLStm (Call [dest] f args) = do
       getArg (MemArg n) = WGSL.VarExp <$> getIdent n
   argExps <- mapM getArg args
   WGSL.Assign <$> getIdent dest <*> pure (fun argExps)
-genWGSLStm (Call {}) =
-  pure $
-    WGSL.Comment "TODO: Multi-destination calls not supported"
+genWGSLStm (Call dests f args) = do
+  fname <- ("futrts_" <>) <$> getIdent f
+  outIdents <- mapM getIdent dests
+
+  let getArg (ExpArg e) = genWGSLExp e
+      getArg (MemArg n) = WGSL.VarExp <$> getIdent n
+
+  argExps <- mapM getArg args
+  outExps <- mapM (pure . WGSL.UnOpExp "&" . WGSL.VarExp) outIdents
+
+  pure $ WGSL.Call fname (argExps ++ outExps)
 genWGSLStm (If cond cThen cElse) =
   liftM3
     WGSL.If
