@@ -108,16 +108,20 @@ fn u32_to_f32(a: i32) -> f32 {
   return f32(bitcast<u32>(a));
 }
 
+fn f32_inf_helper() -> u32 { return 0x7f800000u; }
+fn f32_neg_inf_helper() -> u32 { return 0xff800000u; }
+fn f32_nan_helper() -> u32 { return 0xffffffffu; }
+
 fn f32_inf() -> f32 {
-  return f32(bitcast<u32>(0x7f800000));
+  return bitcast<f32>(f32_inf_helper());
 }
 
 fn f32_neg_inf() -> f32 {
-  return f32(bitcast<u32>(0xff800000));
+  return bitcast<f32>(f32_neg_inf_helper());
 }
 
 fn f32_nan() -> f32 {
-  return f32(bitcast<u32>(0x7fc00000));
+  return bitcast<f32>(f32_nan_helper());
 }
 
 // End of scalar32.wgsl

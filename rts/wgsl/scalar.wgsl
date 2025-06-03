@@ -164,3 +164,37 @@ fn futrts_ctzz64(x: i64) -> i32 {
         return countTrailingZeros(x[0]);
     }
 }
+
+fn futrts_isnan32(x: f32) -> bool {
+    let exponent = (bitcast<u32>(x) >> 23) & 0xFF;
+    let mantissa = bitcast<u32>(x) & 0x7fffff;
+
+    // If the exponent field is all 1s, and mantissa is nonzero, x is a NaN.
+    return (exponent == 0xff && mantissa != 0);
+}
+
+fn futrts_isinf32(x: f32) -> bool {
+    let exponent = (bitcast<u32>(x) >> 23) & 0xFF;
+    let mantissa = bitcast<u32>(x) & 0x7fffff;
+
+    // If the exponent field is all 1s, and mantissa is zero, x is an infinity.
+    return (exponent == 0xff && mantissa == 0);
+}
+
+fn futrts_isnan16(x: f16) -> bool {
+    let bits = bitcast<u32>(vec2<f16>(x, 0.0));
+    let exponent = (bits >> 10) & 0x1F;
+    let mantissa = bits & 0x3ff;
+
+    // If the exponent field is all 1s, and mantissa is nonzero, x is a NaN.
+    return (exponent == 0x1f && mantissa != 0);
+}
+
+fn futrts_isinf16(x: f16) -> bool {
+    let bits = bitcast<u32>(vec2<f16>(x, 0.0));
+    let exponent = (bits >> 10) & 0x1F;
+    let mantissa = bits & 0x3ff;
+
+    // If the exponent field is all 1s, and mantissa is zero, x is an infinity.
+    return (exponent == 0x1f && mantissa == 0);
+}

@@ -166,16 +166,20 @@ fn bool_to_i16(a: bool) -> i16 {
   if a { return 1; } else { return 0; }
 }
 
+fn f16_inf_helper() -> u32 { return 0x7c00u; }
+fn f16_neg_inf_helper() -> u32 { return 0xfc00u; }
+fn f16_nan_helper() -> u32 { return 0xffffu; }
+
 fn f16_inf() -> f16 {
-  return f16(bitcast<u32>(0x7c00));
+  return bitcast<vec2<f16>>(f16_inf_helper())[0];
 }
 
 fn f16_neg_inf() -> f16 {
-  return f16(bitcast<u32>(0xfc00));
+  return bitcast<vec2<f16>>(f16_neg_inf_helper())[0];
 }
 
 fn f16_nan() -> f16 {
-  return f16(bitcast<u32>(0x7e00));
+  return bitcast<vec2<f16>>(f16_nan_helper())[0];
 }
 
 // End of scalar16.wgsl
