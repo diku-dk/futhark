@@ -426,10 +426,40 @@ int backend_context_setup(struct futhark_context *ctx) {
   }
   ctx->adapter = adapter_result.adapter;
 
+  // We want to request the max limits possible.
+  // Some limits, like maxStorageBuffersPerShaderStage has a huge impact
+  // on what programs we can run, so we need to request the maximum possible.
+  WGPUSupportedLimits supported;
+  WGPUBool res = wgpuAdapterGetLimits(ctx->adapter, &supported);
+  if (!res) {
+    futhark_panic(-1, "Could not get WebGPU adapter limits\n", res);
+  }
+  WGPURequiredLimits required_limits;
+  // If we just zero this memory, stuff crashes in the generated empscripten js.
+  // For some reason, we have to set it to all 1s?
+  memset((void*)&required_limits.limits, 0xff, sizeof(required_limits.limits));
+  required_limits.limits.maxBindGroups = supported.limits.maxBindGroups;
+  required_limits.limits.maxBindingsPerBindGroup = supported.limits.maxBindingsPerBindGroup;
+  required_limits.limits.maxDynamicUniformBuffersPerPipelineLayout = supported.limits.maxDynamicUniformBuffersPerPipelineLayout;
+  required_limits.limits.maxDynamicStorageBuffersPerPipelineLayout = supported.limits.maxDynamicStorageBuffersPerPipelineLayout;
+  required_limits.limits.maxStorageBuffersPerShaderStage = supported.limits.maxStorageBuffersPerShaderStage;
+  required_limits.limits.maxUniformBuffersPerShaderStage = supported.limits.maxUniformBuffersPerShaderStage;
+  required_limits.limits.maxUniformBufferBindingSize = supported.limits.maxUniformBufferBindingSize;
+  required_limits.limits.maxStorageBufferBindingSize = supported.limits.maxStorageBufferBindingSize;
+  required_limits.limits.maxBufferSize = supported.limits.maxBufferSize;
+  required_limits.limits.maxComputeWorkgroupStorageSize = supported.limits.maxComputeWorkgroupStorageSize;
+  required_limits.limits.maxComputeInvocationsPerWorkgroup = supported.limits.maxComputeInvocationsPerWorkgroup;
+  required_limits.limits.maxComputeWorkgroupSizeX = supported.limits.maxComputeWorkgroupSizeX;
+  required_limits.limits.maxComputeWorkgroupSizeY = supported.limits.maxComputeWorkgroupSizeY;
+  required_limits.limits.maxComputeWorkgroupSizeZ = supported.limits.maxComputeWorkgroupSizeZ;
+  required_limits.limits.maxComputeWorkgroupsPerDimension = supported.limits.maxComputeWorkgroupsPerDimension;
+
+  // Require support for 16-bit floats
   WGPUFeatureName required_features[] = { WGPUFeatureName_ShaderF16 };
   WGPUDeviceDescriptor device_desc = {
     .requiredFeatureCount = 1,
     .requiredFeatures = required_features,
+    .requiredLimits = &required_limits
   };
   wgpu_request_device_result device_result
     = wgpu_request_device_sync(ctx->instance, ctx->adapter, &device_desc);

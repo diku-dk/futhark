@@ -1134,7 +1134,6 @@ genMemoryDecls :: KernelM ()
 genMemoryDecls = do
   uses <- asks (ImpGPU.kernelUses . krKernel)
   memUses <- catMaybes <$> sequence [withType n | ImpGPU.MemoryUse n <- uses]
-  when (length memUses > 8) $ error "WeBGPU does not support binding more than 8 storage buffers!"
   mapM_ moduleDecl memUses
   mapM_ rename memUses
   where
