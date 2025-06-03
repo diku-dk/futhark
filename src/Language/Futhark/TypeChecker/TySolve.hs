@@ -286,10 +286,6 @@ bindTyVar reason bcs v t' = do
       error $ "Type variable already solved: " <> prettyNameString v
     (Param {}, _) ->
       error $ "Cannot substitute type parameter: " <> prettyNameString v
-    -- ({}, _) ->
-    --   error $ "Type variable already linked: " <> prettyNameString v
-    -- (Nothing, _) ->
-    --   error $ "subTyVar: Nothing v: " <> prettyNameString v
 
 solveCt :: CtTy () -> SolveM s ()
 solveCt (CtEq reason t1 t2) = solveEq reason mempty t1 t2
