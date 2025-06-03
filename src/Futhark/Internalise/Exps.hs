@@ -718,9 +718,9 @@ internaliseExp desc (E.Coerce e _ (Info et) loc) = do
     let parts =
           ["Value of (desugared) shape ["]
             ++ intersperse "][" (map (ErrorVal int64) dims)
-            ++ ["] cannot match shape of type `"]
+            ++ ["] cannot match shape of type \""]
             ++ dt'
-            ++ ["`."]
+            ++ ["\"."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
 internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
@@ -2220,9 +2220,11 @@ partitionWithSOACS k lam arrs = do
           (resultBodyM [next_one])
 
 sizeExpForError :: E.Size -> InternaliseM [ErrorMsgPart SubExp]
-sizeExpForError e = do
-  e' <- internaliseExp1 "size" e
-  pure ["[", ErrorVal int64 e', "]"]
+sizeExpForError e
+  | e == anySize = pure ["[]"]
+  | otherwise = do
+      e' <- internaliseExp1 "size" e
+      pure ["[", ErrorVal int64 e', "]"]
 
 typeExpForError :: E.TypeBase Size u -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.Scalar (E.Prim t)) = pure [ErrorString $ prettyText t]

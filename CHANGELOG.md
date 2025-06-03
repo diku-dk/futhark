@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark doc` now prints warnings about errors in doc comments (mostly
+  references to unknown names).
+
+* FutharkScript now permits chained `let` without `in`, just as in Futhark.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `f64` atomics on NVIDIA GPUs with less than CC 6.0 (Maxwell and older).
+
+* Infinite loop in fusion (#2276).
+
+* Rare compiler crash during internalisation code that does size coercions on
+  opaque size-lifted types.
+
+## [0.25.31]
+
+### Added
+
 * GPU backends: more efficient atomic operations on 8-bit and 16-bit quantities.
   This helps histograms on these types, as well as AD on programs that use
   `f16`.
@@ -31,10 +53,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Types such as `foo.bar` are now turned into `foo_bar` in the C API, rather
   than an ugly hash.
-
-### Removed
-
-### Changed
 
 ### Fixed
 

@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Code generation for ImpCode with WebGPU.
 module Futhark.CodeGen.ImpGen.WebGPU
   ( compileProg,
@@ -5,7 +7,7 @@ module Futhark.CodeGen.ImpGen.WebGPU
   )
 where
 
-import Control.Monad (forM, forM_, liftM2, liftM3, when, unless)
+import Control.Monad (forM, forM_, liftM2, liftM3, unless, when)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.RWS
 import Control.Monad.Trans.State qualified as State
@@ -20,10 +22,11 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.GPU qualified as ImpGPU
 import Futhark.CodeGen.RTS.WGSL qualified as RTS
+import Futhark.Error (compilerLimitation)
 import Futhark.IR.GPUMem qualified as F
 import Futhark.MonadFreshNames
 import Futhark.Util (convFloat, nubOrd, zEncodeText)
-import Futhark.Util.Pretty (docText)
+import Futhark.Util.Pretty (align, docText, indent, pretty, (</>))
 import Language.Futhark.Warnings (Warnings)
 import Language.WGSL qualified as WGSL
 
@@ -267,24 +270,24 @@ functionMayFail :: Name -> WebGPUS -> Bool
 functionMayFail fname = S.member fname . wsFunsMayFail
 
 genFunParams :: [Param] -> KernelM [WGSL.Param]
-genFunParams = mapM
-    (\p -> case p of
-      MemParam _ _ -> error ""
-      ScalarParam name tp -> do
-        ident <- getIdent name
-        pure $ WGSL.Param ident (WGSL.Prim $ wgslPrimType tp) [])
+genFunParams =
+  mapM $ \case
+    MemParam _ _ -> error ""
+    ScalarParam name tp -> do
+      ident <- getIdent name
+      pure $ WGSL.Param ident (WGSL.Prim $ wgslPrimType tp) []
 
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> KernelM ()
 generateDeviceFun fname device_func = do
-  when (any memParam $ functionInput device_func) (error "Cannot generate GPU functions that use arrays.")
+  when (any memParam $ functionInput device_func) $
+    compilerLimitation "WebGPU backend cannot generate GPU functions that use arrays."
   ws <- lift State.get
   ks <- get
   r <- ask
   (body, _, _) <- lift $ runRWST (genWGSLStm (functionBody device_func)) r ks
 
   if functionMayFail fname ws
-    then
-      error "Cannot generate GPU functions that may fail."
+    then compilerLimitation "WebGPU backend Cannot handle GPU functions that may fail."
     else do
       params <- genFunParams (functionInput device_func)
       output <- case functionOutput device_func of
@@ -292,7 +295,7 @@ generateDeviceFun fname device_func = do
         [ScalarParam name tp] -> do
           ident <- getIdent name
           pure $ Just (ident, WGSL.Prim $ wgslPrimType tp)
-        _ -> error "Cannot generate GPU functions that return memory parameters."
+        ps -> compilerLimitation $ "WebGPU backend cannot generate GPU functions that return multiple values:\n" <> prettyText ps
       let wgslFun =
             WGSL.Function
               { WGSL.funName = "futrts_" <> nameToText fname,
@@ -301,7 +304,7 @@ generateDeviceFun fname device_func = do
                 WGSL.funOutput = output,
                 WGSL.funBody = body
               }
-        in prependDecl $ WGSL.FunDecl wgslFun
+       in prependDecl $ WGSL.FunDecl wgslFun
 
   lift $ State.modify $ \s ->
     s
@@ -332,7 +335,7 @@ genDeviceFuns code = do
       Nothing -> pure ()
   where
     toDevice :: ImpGPU.HostOp -> ImpGPU.KernelOp
-    toDevice _ = error "Cannot generate GPU functions that contain parallelism."
+    toDevice _ = compilerLimitation "WebGPU backend cannot handle GPU functions that contain parallelism."
 
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
@@ -418,7 +421,7 @@ wgslPrimType (IntType Int32) = WGSL.Int32
 wgslPrimType (IntType Int64) = wgslInt64
 wgslPrimType (FloatType Float16) = WGSL.Float16
 wgslPrimType (FloatType Float32) = WGSL.Float32
-wgslPrimType (FloatType Float64) = error "TODO: WGSL has no f64"
+wgslPrimType (FloatType Float64) = compilerLimitation "WebGPU backend does not support f64."
 wgslPrimType Bool = WGSL.Bool
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
 wgslPrimType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
@@ -499,8 +502,7 @@ genArrayAccess atomic t mem i packed = do
           let packedIndex = packedElemIndex t i
               packedOffset = packedElemOffset t i
            in [WGSL.UnOpExp "&" (WGSL.IndexExp mem packedIndex), packedOffset]
-        else
-          [WGSL.UnOpExp "&" (WGSL.IndexExp mem i)]
+        else [WGSL.UnOpExp "&" (WGSL.IndexExp mem i)]
 
 genArrayFun :: WGSL.Ident -> PrimType -> Bool -> Bool -> WGSL.Ident
 genArrayFun fun t atomic shared =
@@ -509,8 +511,7 @@ genArrayFun fun t atomic shared =
       let scope = if shared then "_shared" else "_global"
           prefix = if atomic then "atomic_" else ""
        in prefix <> fun <> "_" <> prettyText t <> scope
-    else
-      fun <> "_" <> prettyText t
+    else fun <> "_" <> prettyText t
 
 genReadExp ::
   PrimType ->
@@ -524,8 +525,7 @@ genReadExp t mem i = do
   i' <- indexExp i
 
   if (nativeAccess t || shared) && not atomic
-    then
-      pure $ WGSL.IndexExp mem' i'
+    then pure $ WGSL.IndexExp mem' i'
     else
       let access = genArrayAccess atomic t mem' i' (not shared)
           fun = genArrayFun "read" t atomic shared
@@ -556,8 +556,7 @@ genArrayWrite t mem i v = do
   v' <- v
 
   if (nativeAccess t || shared) && not atomic
-    then
-      pure $ WGSL.AssignIndex mem' i' v'
+    then pure $ WGSL.AssignIndex mem' i' v'
     else
       let access = genArrayAccess atomic t mem' i' (not shared) ++ [v']
           fun = genArrayFun "write" t atomic shared
@@ -602,7 +601,6 @@ genCopy pt shape (dst, _) (dst_offset, dst_strides) (src, _) (src_offset, src_st
      in genArrayWrite pt dst dst_i read'
 
   pure $ loops (zip iis shape') body
-
   where
     (zero, one) = (WGSL.VarExp "zero_i64", WGSL.VarExp "one_i64")
     is = map (VName "i") [0 .. length shape - 1]
@@ -713,7 +711,11 @@ genWGSLStm (Read tgt mem i t _ _) = do
   if atomic
     then genArrayRead t tgt mem i
     else pure $ WGSL.Assign tgt' (WGSL.IndexExp mem' i')
-genWGSLStm (SetMem {}) = error "SetMem statements not supported on WebGPU!"
+genWGSLStm stm@(SetMem {}) =
+  compilerLimitation . docText $
+    "WebGPU backend Cannot handle SetMem statement"
+      </> indent 2 (align (pretty stm))
+      </> "in GPU kernel."
 genWGSLStm (Call [dest] f args) = do
   fun <- WGSL.CallExp . ("futrts_" <>) <$> getIdent f
   let getArg (ExpArg e) = genWGSLExp e
