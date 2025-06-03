@@ -230,9 +230,6 @@ bindTyVar reason bcs v t' = do
   k <- getKey' v_node
   occursCheck reason v k t
 
-  -- lvl <- getLvl' v_node
-  -- scopeCheck reason k lvl t
-
   v_info <- getSol' v_node
 
   setInfo v_node (Solved t)
