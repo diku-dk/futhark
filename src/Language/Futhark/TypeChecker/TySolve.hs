@@ -16,7 +16,7 @@ import Data.Loc
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Debug.Trace (trace, traceM)
+import Debug.Trace (trace)
 import Futhark.Util (isEnvVarAtLeast)
 import Futhark.Util.Pretty
 import Language.Futhark
