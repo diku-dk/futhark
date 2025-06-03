@@ -517,11 +517,11 @@ fn atomic_umin_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
 }
 
 fn atomic_and_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i8) -> i8 {
-    return norm_i8(atomicAnd(p, norm_u8(x) << bitcast<u32>(offset * 8)) >> bitcast<u32>(offset * 8));
+    return norm_u8(atomicAnd(p, norm_u8(x) << bitcast<u32>(offset * 8)) >> bitcast<u32>(offset * 8));
 }
 
 fn atomic_and_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
-    return norm_i8(atomicAnd(p, norm_u8(x)));
+    return norm_u8(atomicAnd(p, norm_u8(x)));
 }
 
 fn atomic_or_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i8) -> i8 {
