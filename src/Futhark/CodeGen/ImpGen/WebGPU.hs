@@ -431,10 +431,8 @@ wgslBufferType (Bool, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int8, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int16, _, _) = WGSL.Array $ WGSL.Atomic wgslInt16
 wgslBufferType (IntType Int32, False, _) = WGSL.Array WGSL.Int32
-wgslBufferType (IntType Int32, True, Signed) =
+wgslBufferType (IntType Int32, True, _) =
   WGSL.Array $ WGSL.Atomic WGSL.Int32
-wgslBufferType (IntType Int32, True, Unsigned) =
-  WGSL.Array $ WGSL.Atomic WGSL.UInt32
 wgslBufferType (FloatType Float32, True, _) =
   WGSL.Array $ WGSL.Atomic WGSL.Int32
 wgslBufferType (FloatType Float16, True, _) =
@@ -1059,20 +1057,15 @@ atomicOpArray (ImpGPU.AtomicCmpXchg _ _ n _ _ _) = n
 atomicOpArray (ImpGPU.AtomicXchg _ _ n _ _) = n
 atomicOpArray (ImpGPU.AtomicWrite _ n _ _) = n
 
--- Usually we declare all our variables as the signed type and re-interpret when
--- necessary for operations. We can't do an AtomicU{Min,Max} on an `atomic<i32>`
--- however. If the only atomic op is a UMin/UMax, we thus declare the buffer
--- unsigned. Otherwise, we have no chance.
--- TODO: This is actually not right. Most of these should have an
--- "indeterminate" signedness, so that any combination of those and one of
--- s{min,max} and u{min,max} is valid.
+-- We declare all our variables as the signed type and re-interpret when
+-- necessary for operations.
 atomicOpType :: ImpGPU.AtomicOp -> (PrimType, Signedness)
 atomicOpType (ImpGPU.AtomicAdd t _ _ _ _) = (IntType t, Signed)
 atomicOpType (ImpGPU.AtomicFAdd t _ _ _ _) = (FloatType t, Signed)
 atomicOpType (ImpGPU.AtomicSMax t _ _ _ _) = (IntType t, Signed)
 atomicOpType (ImpGPU.AtomicSMin t _ _ _ _) = (IntType t, Signed)
-atomicOpType (ImpGPU.AtomicUMax t _ _ _ _) = (IntType t, Unsigned)
-atomicOpType (ImpGPU.AtomicUMin t _ _ _ _) = (IntType t, Unsigned)
+atomicOpType (ImpGPU.AtomicUMax t _ _ _ _) = (IntType t, Signed)
+atomicOpType (ImpGPU.AtomicUMin t _ _ _ _) = (IntType t, Signed)
 atomicOpType (ImpGPU.AtomicAnd t _ _ _ _) = (IntType t, Signed)
 atomicOpType (ImpGPU.AtomicOr t _ _ _ _) = (IntType t, Signed)
 atomicOpType (ImpGPU.AtomicXor t _ _ _ _) = (IntType t, Signed)
