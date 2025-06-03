@@ -101,10 +101,16 @@ find :: TyVarNode s -> ST s (TyVarNode s)
 find node@(Node link_ref) = do
   link <- readSTRef link_ref
   case link of
+    -- Input node is representative.
     Repr _ -> pure node
+
+    -- Input node's parent is another node.
     Link parent -> do
       repr <- find parent
-      writeSTRef link_ref $ Link repr
+      when (parent /= repr) $
+        -- Input node's parent isn't representative;
+        -- performing path compression.
+        writeSTRef link_ref $ Link repr
       pure repr
 
 -- | Return the reference to the descriptor of the node's
