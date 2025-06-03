@@ -58,9 +58,9 @@ data Link s
 data ReprInfo = MkInfo
   { weight :: {-# UNPACK #-} !Int
     -- ^ The size of the equivalence class, used by 'union'. 
-  , solution  :: {-# UNPACK #-} !TyVarSol
+  , solution  :: TyVarSol
     -- ^ The "type" of the equivalence class.
-  , key :: {-# UNPACK #-} !TyVar
+  , key :: TyVar
     -- ^ The name of the type variable representing the equivalence class.
 
   , level :: {-# UNPACK #-} !Level
