@@ -8,7 +8,7 @@ fn atomic_read_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32) 
 }
 
 fn atomic_read_i8_shared(p: ptr<workgroup, atomic<i32>>) -> i8 {
-    return atomicLoad(p);
+    return norm_i8(atomicLoad(p));
 }
 
 fn atomic_write_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, val: i8) {
@@ -26,7 +26,7 @@ fn atomic_write_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32,
 }
 
 fn atomic_write_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) {
-    atomicStore(p, x);
+    atomicStore(p, norm_u8(x));
 }
 
 fn atomic_read_bool_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32) -> bool {
@@ -59,14 +59,14 @@ fn atomic_read_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32)
 }
 
 fn atomic_read_i16_shared(p: ptr<workgroup, atomic<i32>>) -> i16 {
-    return atomicLoad(p);
+    return norm_i16(atomicLoad(p));
 }
 
 fn atomic_write_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, val: i16) {
     let shift_amt = bitcast<u32>(offset * 16);
 
     let mask = 0xffff << shift_amt;
-    let shifted_val = val << shift_amt;
+    let shifted_val = (val << shift_amt) & mask;
 
     // Note: Despite relaxed semantics, this CAS loop is safe, since we are still
     //       sequentially consistent since all ops are operating on the same address.
@@ -77,7 +77,7 @@ fn atomic_write_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32
 }
 
 fn atomic_write_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) {
-    atomicStore(p, x);
+    atomicStore(p, norm_u16(x));
 }
 
 fn atomic_read_i32_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32) -> i32 {
@@ -253,18 +253,19 @@ fn atomic_xor_i32_shared(p: ptr<workgroup, atomic<i32>>, x: i32) -> i32 {
 fn atomic_add_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i16) -> i16 {
     loop {
         let old = atomicLoad(p);
-        let val = i32(add_i16(norm_i16(old >> bitcast<u32>(offset * 16)), x)) << bitcast<u32>(offset * 16);
+        let old_i16 = norm_i16(old >> bitcast<u32>(offset * 16));
+        let val = i32(add_i16(old_i16, norm_i16(x))) << bitcast<u32>(offset * 16);
         let rest = old & ~(0xffff << bitcast<u32>(offset * 16));
 
         if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
-            return norm_i16(old >> bitcast<u32>(offset * 16));
+            return old_i16;
         }
     }
 }
 
 fn atomic_add_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
     var old = atomicLoad(p);
-    while (!atomicCompareExchangeWeak(p, old, add_i16(norm_i16(old), x)).exchanged) {
+    while (!atomicCompareExchangeWeak(p, old, add_i16(norm_i16(old), norm_i16(x))).exchanged) {
         old = atomicLoad(p);
     }
 
@@ -274,18 +275,19 @@ fn atomic_add_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
 fn atomic_smax_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i16) -> i16 {
     loop {
         let old = atomicLoad(p);
-        let val = i32(max(norm_i16(old >> bitcast<u32>(offset * 16)), x)) << bitcast<u32>(offset * 16);
+        let old_i16 = norm_i16(old >> bitcast<u32>(offset * 16));
+        let val = i32(max(old_i16, norm_i16(x))) << bitcast<u32>(offset * 16);
         let rest = old & ~(0xffff << bitcast<u32>(offset * 16));
 
         if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
-            return norm_i16(old >> bitcast<u32>(offset * 16));
+            return old_i16;
         }
     }
 }
 
 fn atomic_smax_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
     var old = atomicLoad(p);
-    while (!atomicCompareExchangeWeak(p, old, max(norm_i16(old), x)).exchanged) {
+    while (!atomicCompareExchangeWeak(p, old, max(norm_i16(old), norm_i16(x))).exchanged) {
         old = atomicLoad(p);
     }
 
@@ -295,18 +297,19 @@ fn atomic_smax_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
 fn atomic_smin_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i16) -> i16 {
     loop {
         let old = atomicLoad(p);
-        let val = i32(min(norm_i16(old >> bitcast<u32>(offset * 16)), x)) << bitcast<u32>(offset * 16);
+        let old_i16 = norm_i16(old >> bitcast<u32>(offset * 16));
+        let val = i32(min(old_i16, norm_i16(x))) << bitcast<u32>(offset * 16);
         let rest = old & ~(0xffff << bitcast<u32>(offset * 16));
 
         if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
-            return norm_i16(old >> bitcast<u32>(offset * 16));
+            return old_i16;
         }
     }
 }
 
 fn atomic_smin_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
     var old = atomicLoad(p);
-    while (!atomicCompareExchangeWeak(p, old, min(norm_i16(old), x)).exchanged) {
+    while (!atomicCompareExchangeWeak(p, old, min(norm_i16(old), norm_i16(x))).exchanged) {
         old = atomicLoad(p);
     }
 
@@ -316,57 +319,59 @@ fn atomic_smin_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
 fn atomic_umax_i16_global(p: ptr<storage, atomic<u32>, read_write>, offset: i32, x: i16) -> i16 {
     loop {
         let old = atomicLoad(p);
-        let val = u32(umax_i16(norm_u16(bitcast<i32>(old >> bitcast<u32>(offset * 16))), x)) << bitcast<u32>(offset * 16);
+        let old_u16 = norm_u16(bitcast<i32>(old >> bitcast<u32>(offset * 16)));
+        let val = u32(umax_i16(old_u16, norm_u16(x))) << bitcast<u32>(offset * 16);
         let rest = old & ~(0xffffu << bitcast<u32>(offset * 16));
 
         if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
-            return norm_u16(bitcast<i32>(old >> bitcast<u32>(offset * 16)));
+            return old_u16;
         }
     }
 }
 
 fn atomic_umax_i16_shared(p: ptr<workgroup, atomic<u32>>, x: i16) -> i16 {
-    return norm_u16(bitcast<i32>(atomicMax(p, bitcast<u32>(x))));
+    return norm_u16(bitcast<i32>(atomicMax(p, bitcast<u32>(norm_u16(x)))));
 }
 
 fn atomic_umin_i16_global(p: ptr<storage, atomic<u32>, read_write>, offset: i32, x: i16) -> i16 {
     loop {
         let old = atomicLoad(p);
-        let val = u32(umin_i16(norm_u16(bitcast<i32>(old >> bitcast<u32>(offset * 16))), x)) << bitcast<u32>(offset * 16);
+        let old_u16 = norm_u16(bitcast<i32>(old >> bitcast<u32>(offset * 16)));
+        let val = u32(umin_i16(old_u16, norm_u16(x))) << bitcast<u32>(offset * 16);
         let rest = old & ~(0xffffu << bitcast<u32>(offset * 16));
 
         if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
-            return norm_u16(bitcast<i32>(old >> bitcast<u32>(offset * 16)));
+            return old_u16;
         }
     }
 }
 
 fn atomic_umin_i16_shared(p: ptr<workgroup, atomic<u32>>, x: i16) -> i16 {
-    return norm_u16(bitcast<i32>(atomicMin(p, bitcast<u32>(x))));
+    return norm_u16(bitcast<i32>(atomicMin(p, bitcast<u32>(norm_u16(x)))));
 }
 
 fn atomic_and_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i16) -> i16 {
-    return norm_u16(atomicAnd(p, x << bitcast<u32>(offset * 16)) >> bitcast<u32>(offset * 16));
+    return norm_u16(atomicAnd(p, norm_u16(x) << bitcast<u32>(offset * 16)) >> bitcast<u32>(offset * 16));
 }
 
 fn atomic_and_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
-    return norm_u16(atomicAnd(p, x));
+    return norm_u16(atomicAnd(p, norm_u16(x)));
 }
 
 fn atomic_or_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i16) -> i16 {
-    return norm_u16(atomicOr(p, x << bitcast<u32>(offset * 16)) >> bitcast<u32>(offset * 16));
+    return norm_u16(atomicOr(p, norm_u16(x) << bitcast<u32>(offset * 16)) >> bitcast<u32>(offset * 16));
 }
 
 fn atomic_or_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
-    return norm_u16(atomicOr(p, x));
+    return norm_u16(atomicOr(p, norm_u16(x)));
 }
 
 fn atomic_xor_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i16) -> i16 {
-    return norm_u16(atomicXor(p, x << bitcast<u32>(offset * 16)) >> bitcast<u32>(offset * 16));
+    return norm_u16(atomicXor(p, norm_u16(x) << bitcast<u32>(offset * 16)) >> bitcast<u32>(offset * 16));
 }
 
 fn atomic_xor_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
-    return norm_u16(atomicXor(p, x));
+    return norm_u16(atomicXor(p, norm_u16(x)));
 }
 
 //// i8 atomics ////
@@ -374,18 +379,19 @@ fn atomic_xor_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
 fn atomic_add_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i8) -> i8 {
     loop {
         let old = atomicLoad(p);
-        let val = i32(add_i8(norm_i8(old >> bitcast<u32>(offset * 8)), x)) << bitcast<u32>(offset * 8);
+        let old_i8 = norm_i8(old >> bitcast<u32>(offset * 8));
+        let val = i32(add_i8(old_i8, norm_i8(x))) << bitcast<u32>(offset * 8);
         let rest = old & ~(0xff << bitcast<u32>(offset * 8));
 
         if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
-            return norm_i8(old >> bitcast<u32>(offset * 8));
+            return old_i8;
         }
     }
 }
 
 fn atomic_add_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
     var old = atomicLoad(p);
-    while (!atomicCompareExchangeWeak(p, old, add_i8(norm_i8(old), x)).exchanged) {
+    while (!atomicCompareExchangeWeak(p, old, add_i8(norm_i8(old), norm_i8(x))).exchanged) {
         old = atomicLoad(p);
     }
 
@@ -395,18 +401,19 @@ fn atomic_add_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
 fn atomic_smax_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i8) -> i8 {
     loop {
         let old = atomicLoad(p);
-        let val = i32(max(norm_i8(old >> bitcast<u32>(offset * 8)), x)) << bitcast<u32>(offset * 8);
+        let old_i8 = norm_i8(old >> bitcast<u32>(offset * 8));
+        let val = i32(max(old_i8, norm_i8(x))) << bitcast<u32>(offset * 8);
         let rest = old & ~(0xff << bitcast<u32>(offset * 8));
 
         if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
-            return norm_i8(old >> bitcast<u32>(offset * 8));
+            return old_i8;
         }
     }
 }
 
 fn atomic_smax_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
     var old = atomicLoad(p);
-    while (!atomicCompareExchangeWeak(p, old, max(norm_i8(old), x)).exchanged) {
+    while (!atomicCompareExchangeWeak(p, old, max(norm_i8(old), norm_i8(x))).exchanged) {
         old = atomicLoad(p);
     }
 
@@ -416,18 +423,19 @@ fn atomic_smax_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
 fn atomic_smin_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i8) -> i8 {
     loop {
         let old = atomicLoad(p);
-        let val = i32(min(norm_i8(old >> bitcast<u32>(offset * 8)), x)) << bitcast<u32>(offset * 8);
+        let old_i8 = norm_i8(old >> bitcast<u32>(offset * 8));
+        let val = i32(min(old_i8, norm_i8(x))) << bitcast<u32>(offset * 8);
         let rest = old & ~(0xff << bitcast<u32>(offset * 8));
 
         if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
-            return norm_i8(old >> bitcast<u32>(offset * 8));
+            return old_i8;
         }
     }
 }
 
 fn atomic_smin_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
     var old = atomicLoad(p);
-    while (!atomicCompareExchangeWeak(p, old, min(norm_i8(old), x)).exchanged) {
+    while (!atomicCompareExchangeWeak(p, old, min(norm_i8(old), norm_i8(x))).exchanged) {
         old = atomicLoad(p);
     }
 
@@ -437,57 +445,59 @@ fn atomic_smin_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
 fn atomic_umax_i8_global(p: ptr<storage, atomic<u32>, read_write>, offset: i32, x: i8) -> i8 {
     loop {
         let old = atomicLoad(p);
-        let val = u32(umax_i8(norm_u8(bitcast<i32>(old >> bitcast<u32>(offset * 8))), x)) << bitcast<u32>(offset * 8);
+        let old_u8 = norm_u8(bitcast<i32>(old >> bitcast<u32>(offset * 8)));
+        let val = u32(umax_i8(old_u8, norm_u8(x))) << bitcast<u32>(offset * 8);
         let rest = old & ~(0xffu << bitcast<u32>(offset * 8));
 
         if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
-            return norm_u8(bitcast<i32>(old >> bitcast<u32>(offset * 8)));
+            return old_u8;
         }
     }
 }
 
 fn atomic_umax_i8_shared(p: ptr<workgroup, atomic<u32>>, x: i8) -> i8 {
-    return norm_u8(bitcast<i32>(atomicMax(p, bitcast<u32>(x))));
+    return norm_u8(bitcast<i32>(atomicMax(p, bitcast<u32>(norm_u8(x)))));
 }
 
 fn atomic_umin_i8_global(p: ptr<storage, atomic<u32>, read_write>, offset: i32, x: i8) -> i8 {
     loop {
         let old = atomicLoad(p);
-        let val = u32(umin_i8(norm_u8(bitcast<i32>(old >> bitcast<u32>(offset * 8))), x)) << bitcast<u32>(offset * 8);
+        let old_u8 = norm_u8(bitcast<i32>(old >> bitcast<u32>(offset * 8)));
+        let val = u32(umin_i8(old_u8, norm_u8(x))) << bitcast<u32>(offset * 8);
         let rest = old & ~(0xffu << bitcast<u32>(offset * 8));
 
         if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
-            return norm_u8(bitcast<i32>(old >> bitcast<u32>(offset * 8)));
+            return old_u8;
         }
     }
 }
 
 fn atomic_umin_i8_shared(p: ptr<workgroup, atomic<u32>>, x: i8) -> i8 {
-    return norm_u8(bitcast<i32>(atomicMin(p, bitcast<u32>(x))));
+    return norm_u8(bitcast<i32>(atomicMin(p, bitcast<u32>(norm_u8(x)))));
 }
 
 fn atomic_and_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i8) -> i8 {
-    return norm_u8(atomicAnd(p, x << bitcast<u32>(offset * 8)) >> bitcast<u32>(offset * 8));
+    return norm_i8(atomicAnd(p, norm_u8(x) << bitcast<u32>(offset * 8)) >> bitcast<u32>(offset * 8));
 }
 
 fn atomic_and_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
-    return norm_u8(atomicAnd(p, x));
+    return norm_i8(atomicAnd(p, norm_u8(x)));
 }
 
 fn atomic_or_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i8) -> i8 {
-    return norm_u8(atomicOr(p, x << bitcast<u32>(offset * 8)) >> bitcast<u32>(offset * 8));
+    return norm_u8(atomicOr(p, norm_u8(x) << bitcast<u32>(offset * 8)) >> bitcast<u32>(offset * 8));
 }
 
 fn atomic_or_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
-    return norm_u8(atomicOr(p, x));
+    return norm_u8(atomicOr(p, norm_u8(x)));
 }
 
 fn atomic_xor_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i8) -> i8 {
-    return norm_u8(atomicXor(p, x << bitcast<u32>(offset * 8)) >> bitcast<u32>(offset * 8));
+    return norm_u8(atomicXor(p, norm_u8(x) << bitcast<u32>(offset * 8)) >> bitcast<u32>(offset * 8));
 }
 
 fn atomic_xor_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
-    return norm_u8(atomicXor(p, x));
+    return norm_u8(atomicXor(p, norm_u8(x)));
 }
 
 // End of atomics.wgsl
