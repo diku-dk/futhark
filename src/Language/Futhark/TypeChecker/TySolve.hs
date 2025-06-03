@@ -58,9 +58,6 @@ union' tv1 tv2 = liftST $ union tv1 tv2
 getKey' :: TyVarNode s -> SolveM s TyVar
 getKey' = liftST . getKey
 
-getLvl' :: TyVarNode s -> SolveM s Level
-getLvl' = liftST . getLvl
-
 initializeState :: TyParams -> TyVars () -> SolveM s ()
 initializeState typarams tyvars = do
   tyvars' <- M.traverseWithKey f tyvars
