@@ -37,7 +37,7 @@ newtype SolverState s = SolverState { solverTyVars :: UF s }
 newtype SolveM s a = SolveM { runSolveM :: StateT (SolverState s) (ExceptT TypeError (ST s)) a }
   deriving (Functor, Applicative, Monad, MonadError TypeError, MonadState (SolverState s))
 
--- | A solution maps a type variable to its substitution. This
+-- | A getSolution maps a type variable to its substitution. This
 -- substitution is complete, in the sense there are no right-hand
 -- sides that contain a type variable.
 type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
@@ -596,7 +596,7 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
         _ -> pure ()
 
 -- | If a type variable has a liftedness constraint, we propagate that
--- constraint to its solution. The actual checking for correct usage
+-- constraint to its getSolution. The actual checking for correct usage
 -- is done later.
 liftednessCheck :: Liftedness -> Type -> SolveM s ()
 liftednessCheck l (Scalar (TypeVar _ (QualName [] v) _)) = do
@@ -673,8 +673,8 @@ maybeLookupUF tv = do
   uf <- gets solverTyVars
   pure . M.lookup tv $ uf
 
-solution :: SolveM s ([UnconTyVar], Solution)
-solution = do
+getSolution :: SolveM s ([UnconTyVar], Solution)
+getSolution = do
   uf <- gets solverTyVars
   unconstrained <- M.traverseMaybeWithKey unconstr uf
   sol <- M.traverseMaybeWithKey mkSubst uf
@@ -730,7 +730,7 @@ logSolution constraints typarams tyvars s =
            show $ map (bimap prettyNameString (second onTyVar)) $ M.toList tyvars,
            either
              (("## error\n" <>) . docString . prettyTypeError)
-             ( ("## solution\n" <>)
+             ( ("## getSolution\n" <>)
                  . show
                  . bimap
                    (map (first prettyNameString))
@@ -747,7 +747,7 @@ logSolution constraints typarams tyvars s =
     onTyVar (TyVarRecord _ ts) = TyVarRecord NoLoc ts
     onTyVar (TyVarSum _ ts) = TyVarSum NoLoc ts
 
--- | Solve type constraints, producing either an error or a solution,
+-- | Solve type constraints, producing either an error or a getSolution,
 -- alongside a list of unconstrained type variables.
 solve ::
   [CtTy ()] ->
@@ -764,7 +764,7 @@ solve constraints typarams tyvars =
       initializeState typarams tyvars
       mapM_ solveCt constraints
       mapM_ solveTyVar $ M.toList tyvars
-      solution
+      getSolution
   where
     maybeLog
       | isEnvVarAtLeast "FUTHARK_LOG_TYSOLVE" 0 = \s ->
