@@ -24,6 +24,7 @@ module Language.WGSL
 where
 
 import Data.Text qualified as T
+import Data.Maybe (fromMaybe)
 import Prettyprinter
 
 type Ident = T.Text
@@ -75,7 +76,7 @@ structLayout fields = do
   where
     roundUp k n = ceiling ((fromIntegral n :: Double) / fromIntegral k) * k
 
-data Typ = Prim PrimType | Array PrimType (Maybe Exp) | Named Ident
+data Typ = Prim PrimType | Array PrimType (Maybe Exp) | Named Ident | Pointer PrimType AddressSpace (Maybe AccessMode)
 
 type BinOp = T.Text
 
@@ -114,7 +115,7 @@ data Function = Function
   { funName :: Ident,
     funAttribs :: [Attrib],
     funParams :: [Param],
-    funOutput :: Maybe (Ident, Typ),
+    funOutput :: [Param],
     funBody :: Stmt
   }
 
@@ -125,7 +126,7 @@ data Struct = Struct Ident [Field]
 data AccessMode = ReadOnly | ReadWrite
 
 -- Uniform buffers are always read-only.
-data AddressSpace = Storage AccessMode | Uniform | Workgroup
+data AddressSpace = Storage AccessMode | Uniform | Workgroup | FunctionSpace
 
 data Declaration
   = FunDecl Function
@@ -182,6 +183,7 @@ instance Pretty Typ where
   pretty (Array t Nothing) = "array<" <> pretty t <> ">"
   pretty (Array t sz) = "array<" <> pretty t <> ", " <> pretty sz <> ">"
   pretty (Named t) = pretty t
+  pretty (Pointer t as am) = "ptr<" <> pretty as <> ", " <> pretty t <> maybe "" pretty am <> ">"
 
 instance Pretty Exp where
   pretty (BoolExp True) = "true"
@@ -266,18 +268,26 @@ instance Pretty Param where
 
 prettyParams :: [Param] -> Doc a
 prettyParams [] = "()"
-prettyParams params = "(" </> indent 2 (commastack (map pretty params)) </> ")"
+prettyParams params = "" </> indent 2 (commastack (map pretty params)) </> ")"
+
+prettyAssignOutParams :: [Param] -> Doc a
+prettyAssignOutParams [] = ""
+prettyAssignOutParams params = stack (map prettyAssign params)
+  where
+    prettyAssign (Param name _ _) =
+      indent 2 "*" <> pretty name <> " = " <> pretty (T.stripSuffix "_out" name) <> ";"
 
 instance Pretty Function where
-  pretty (Function name attribs params output body) =
+  pretty (Function name attribs in_params out_params body) = do
+    let local_decls = map (\(Param v typ _) -> case typ of
+                      Pointer t _ _ -> DeclareVar (fromMaybe v (T.stripSuffix "_out" v)) (Prim t)
+                      _             -> error "Can only return primitive types!") out_params
     stack
       [ hsep (map pretty attribs),
-        "fn" <+> pretty name <> prettyParams params
-          <+> maybe "" (\(_, t) -> "->" <+> pretty t) output
-          <+> "{",
-        maybe "" (\(n, t) -> indent 2 (pretty (DeclareVar n t) <> ";")) output,
-        indent 2 (pretty body) <> ";"
-          </> maybe "" (\(n, _) -> indent 2 ("return" <+> pretty n <> ";")) output,
+        "fn" <+> pretty name <> "(" <> prettyParams (in_params ++ out_params) <+> "{",
+        stack (map (\decl -> indent 2 (pretty decl) <> ";") local_decls),
+        indent 2 (pretty body) <> ";",
+        prettyAssignOutParams out_params,
         "}"
       ]
 
@@ -300,6 +310,7 @@ instance Pretty AddressSpace where
   pretty (Storage am) = "storage" <> "," <> pretty am
   pretty Uniform = "uniform"
   pretty Workgroup = "workgroup"
+  pretty FunctionSpace = "function"
 
 instance Pretty Declaration where
   pretty (FunDecl fun) = pretty fun
