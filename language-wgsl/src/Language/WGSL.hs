@@ -268,7 +268,7 @@ instance Pretty Param where
 
 prettyParams :: [Param] -> Doc a
 prettyParams [] = "()"
-prettyParams params = "" </> indent 2 (commastack (map pretty params)) </> ")"
+prettyParams params = "(" </> indent 2 (commastack (map pretty params)) </> ")"
 
 prettyAssignOutParams :: [Param] -> Doc a
 prettyAssignOutParams [] = ""
@@ -278,18 +278,19 @@ prettyAssignOutParams params = stack (map prettyAssign params)
       indent 2 "*" <> pretty name <> " = " <> pretty (T.stripSuffix "_out" name) <> ";"
 
 instance Pretty Function where
-  pretty (Function name attribs in_params out_params body) = do
-    let local_decls = map (\(Param v typ _) -> case typ of
-                      Pointer t _ _ -> DeclareVar (fromMaybe v (T.stripSuffix "_out" v)) (Prim t)
-                      _             -> error "Can only return primitive types!") out_params
-    stack
-      [ hsep (map pretty attribs),
-        "fn" <+> pretty name <> "(" <> prettyParams (in_params ++ out_params) <+> "{",
-        stack (map (\decl -> indent 2 (pretty decl) <> ";") local_decls),
-        indent 2 (pretty body) <> ";",
-        prettyAssignOutParams out_params,
-        "}"
-      ]
+  pretty (Function name attribs in_params out_params body) =
+    stack $ hsep (map pretty attribs) : function
+    where
+      funParams = in_params ++ out_params
+      funSignature = "fn" <+> pretty name <> prettyParams funParams
+      funBody = indent 2 (pretty body) <> ";"
+      function = if null out_params
+        then [funSignature <+> "{", funBody, "}"]
+        else let local_decls = map (\(Param v typ _) -> case typ of
+                              Pointer t _ _ -> DeclareVar (fromMaybe v (T.stripSuffix "_out" v)) (Prim t)
+                              _             -> error "Can only return primitive types!") out_params
+                 funDecls = stack (map (\decl -> indent 2 (pretty decl) <> ";") local_decls)
+             in [funSignature <+> "{", funDecls, funBody, prettyAssignOutParams out_params, "}"]
 
 instance Pretty Field where
   pretty (Field name typ) = pretty name <+> ":" <+> pretty typ
