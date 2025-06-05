@@ -107,10 +107,8 @@ find node@(Node link_ref) = do
     -- Input node's parent is another node.
     Link parent -> do
       repr <- find parent
-      when (parent /= repr) $
-        -- Input node's parent isn't representative;
-        -- performing path compression.
-        writeSTRef link_ref $ Link repr
+      -- Performing path compression.
+      writeSTRef link_ref $ Link repr
       pure repr
 
 -- | Return the reference to the descriptor of the node's
