@@ -278,19 +278,29 @@ prettyAssignOutParams params = stack (map prettyAssign params)
       indent 2 "*" <> pretty name <> " = " <> pretty (T.stripSuffix "_out" name) <> ";"
 
 instance Pretty Function where
-  pretty (Function name attribs in_params out_params body) =
+  pretty (Function name attribs in_params out_params body) = do
     stack $ hsep (map pretty attribs) : function
     where
-      funParams = in_params ++ out_params
-      funSignature = "fn" <+> pretty name <> prettyParams funParams
       funBody = indent 2 (pretty body) <> ";"
-      function = if null out_params
-        then [funSignature <+> "{", funBody, "}"]
-        else let local_decls = map (\(Param v typ _) -> case typ of
+      funDecls = let local_decls = map (\(Param v typ _) -> case typ of
                               Pointer t _ _ -> DeclareVar (fromMaybe v (T.stripSuffix "_out" v)) (Prim t)
                               _             -> error "Can only return primitive types!") out_params
-                 funDecls = stack (map (\decl -> indent 2 (pretty decl) <> ";") local_decls)
-             in [funSignature <+> "{", funDecls, funBody, prettyAssignOutParams out_params, "}"]
+                 in stack (map (\decl -> indent 2 (pretty decl) <> ";") local_decls)
+      function = case out_params of
+        [] ->
+          ["fn" <+> pretty name <> prettyParams in_params <+> "{", funBody, "}"]
+        [Param ret_id (Pointer t _ _) _] ->
+          ["fn" <+> pretty name <> prettyParams in_params <+> "->" <+> pretty t <+> "{",
+          funDecls,
+          funBody,
+          indent 2 "return " <> pretty (T.stripSuffix "_out" ret_id) <> ";", 
+          "}"]
+        _ ->
+          ["fn" <+> pretty name <> prettyParams (in_params ++ out_params) <+> "{", 
+           funDecls,
+           funBody, 
+           prettyAssignOutParams out_params,
+           "}"]
 
 instance Pretty Field where
   pretty (Field name typ) = pretty name <+> ":" <+> pretty typ
