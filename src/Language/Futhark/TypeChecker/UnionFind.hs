@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -funbox-strict-fields #-}
+{-# OPTIONS_GHC -funbox-strict-fields -fprof-auto #-}
 module Language.Futhark.TypeChecker.UnionFind
   ( TyVarNode,
     TyVarSol(..),
@@ -106,13 +106,9 @@ find node@(Node link_ref) = do
     Repr _ -> pure node
 
     -- Input node's parent is another node.
-    Link parent@(Node link_ref') -> do
+    Link parent -> do
       repr <- find parent
-      when (parent /= repr) $ do
-        -- Input node's parent isn't representative;
-        -- performing path compression.
-        link' <- readSTRef link_ref'
-        writeSTRef link_ref link'
+      writeSTRef link_ref $ Link repr
       pure repr
 
 -- | Return the reference to the descriptor of the node's

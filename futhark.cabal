@@ -586,9 +586,13 @@ benchmark benchmarks
   import: common
   type: exitcode-stdio-1.0
   main-is: futhark_benchmarks.hs
-  hs-source-dirs: benchmarks
+  hs-source-dirs: 
+        benchmarks
+        benchmarks/Generated/
   other-modules:
         Language.Futhark.TypeChecker.TySolveBenchmarks
+        Language.Futhark.TypeChecker.TySolveBenchmarks
+        Generated.AllFutBenchmarks
 
   build-depends:
       base

@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fprof-auto #-}
 module Language.Futhark.TypeChecker.TySolve
   ( Type,
     Solution,
@@ -320,7 +321,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
           sol <- getSol' node
           case sol of
             Solved t' -> sub t'
-            _ -> pure t
+            _ -> typeVar <$> getKey' node
         Nothing -> pure t
     sub t = pure t
 
