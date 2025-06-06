@@ -53,14 +53,14 @@ t1 ~ t2 = CtEq (Reason mempty) t1 t2
 tvFree :: VName -> Level -> (VName, (Level, TyVarInfo ()))
 tvFree v lvl = (v, (lvl, TyVarFree mempty Unlifted))
 
-tvPrim :: VName -> Level -> [PrimType] -> (VName, (Level, TyVarInfo ()))
-tvPrim v lvl types = (v, (lvl, TyVarPrim mempty types))
+-- tvPrim :: VName -> Level -> [PrimType] -> (VName, (Level, TyVarInfo ()))
+-- tvPrim v lvl types = (v, (lvl, TyVarPrim mempty types))
 
 tvRecord :: VName -> Level -> M.Map Name (TypeBase () NoUniqueness) -> (VName, (Level, TyVarInfo ()))
 tvRecord v lvl fields = (v, (lvl, TyVarRecord mempty fields))
 
-tvSum :: VName -> Level -> M.Map Name [TypeBase () NoUniqueness] -> (VName, (Level, TyVarInfo ()))
-tvSum v lvl fields = (v, (lvl, TyVarSum mempty fields)) 
+-- tvSum :: VName -> Level -> M.Map Name [TypeBase () NoUniqueness] -> (VName, (Level, TyVarInfo ()))
+-- tvSum v lvl fields = (v, (lvl, TyVarSum mempty fields)) 
 
 typaram :: VName -> Level -> Liftedness -> (VName, (Level, Liftedness, Loc))
 typaram v lvl liftedness = (v, (lvl, liftedness, noLoc))
@@ -95,14 +95,14 @@ tests =
       testCase "empty" $
         testSolve [] mempty mempty ([], mempty),
 
-      testCase "a_0 ~ b_1" $
+      testCase "b_1 ~ a_0" $
         testSolve
           ["b_1" ~ "a_0"]
           mempty
           (M.fromList [tvFree "b_1" 0])
           ([], M.fromList [("b_1", Right "a_0")]),
 
-      testCase "b_1 ~ a_0" $
+      testCase "a_0 ~ b_1" $
         testSolve
           ["a_0" ~ "b_1"]
           mempty
@@ -328,7 +328,7 @@ tests =
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
           ([("b_1", Unlifted), ("d_3", Unlifted)],
            M.fromList
-            [("a_0", Right "(b_1, c_2, d_3)"),
+            [("a_0", Right "(b_1, d_3, d_3)"),
              ("c_2", Right "d_3")
             ]
           ),

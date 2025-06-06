@@ -8,7 +8,7 @@ where
 
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.State
+import Control.Monad.Reader
 import Control.Monad.ST
 import Data.Bifunctor
 import Data.List qualified as L
@@ -34,10 +34,11 @@ type Type = CtType ()
 type UF s = M.Map TyVar (TyVarNode s)
 
 newtype SolverState s = SolverState { solverTyVars :: UF s }
-newtype SolveM s a = SolveM { runSolveM :: StateT (SolverState s) (ExceptT TypeError (ST s)) a }
-  deriving (Functor, Applicative, Monad, MonadError TypeError, MonadState (SolverState s))
 
--- | A solution maps a type variable to its substitution. This
+newtype SolveM s a = SolveM { runSolveM :: ExceptT TypeError (ReaderT (SolverState s) (ST s)) a }
+ deriving (Functor, Applicative, Monad, MonadError TypeError, MonadReader (SolverState s))
+
+-- | A getSolution maps a type variable to its substitution. This
 -- substitution is complete, in the sense there are no right-hand
 -- sides that contain a type variable.
 type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
@@ -58,17 +59,14 @@ union' tv1 tv2 = liftST $ union tv1 tv2
 getKey' :: TyVarNode s -> SolveM s TyVar
 getKey' = liftST . getKey
 
-getLvl' :: TyVarNode s -> SolveM s Level
-getLvl' = liftST . getLvl
-
-initializeState :: TyParams -> TyVars () -> SolveM s ()
+initializeState :: TyParams -> TyVars () -> ST s (SolverState s)
 initializeState typarams tyvars = do
   tyvars' <- M.traverseWithKey f tyvars
   typarams' <- M.traverseWithKey g typarams
-  put $ SolverState $ typarams' <> tyvars'
+  pure $ SolverState $ typarams' <> tyvars'
   where
-    f tv (lvl, info) = liftST $ makeTyVarNode tv lvl info
-    g tv (lvl, lft, loc) = liftST $ makeTyParamNode tv lvl lft loc
+    f tv (lvl, info) = makeTyVarNode tv lvl info
+    g tv (lvl, lft, loc) = makeTyParamNode tv lvl lft loc
 
 typeError :: Loc -> Notes -> Doc () -> SolveM s ()
 typeError loc notes msg =
@@ -230,9 +228,6 @@ bindTyVar reason bcs v t' = do
   k <- getKey' v_node
   occursCheck reason v k t
 
-  lvl <- getLvl' v_node
-  scopeCheck reason v lvl t
-
   v_info <- getSol' v_node
 
   setInfo v_node (Solved t)
@@ -289,10 +284,6 @@ bindTyVar reason bcs v t' = do
       error $ "Type variable already solved: " <> prettyNameString v
     (Param {}, _) ->
       error $ "Cannot substitute type parameter: " <> prettyNameString v
-    -- ({}, _) ->
-    --   error $ "Type variable already linked: " <> prettyNameString v
-    -- (Nothing, _) ->
-    --   error $ "subTyVar: Nothing v: " <> prettyNameString v
 
 solveCt :: CtTy () -> SolveM s ()
 solveCt (CtEq reason t1 t2) = solveEq reason mempty t1 t2
@@ -303,7 +294,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
   where
     flexible :: VName -> SolveM s Bool
     flexible v = do
-      uf <- gets solverTyVars
+      uf <- asks solverTyVars
       case M.lookup v uf of
         Just node -> do
           sol <- getSol' node
@@ -314,13 +305,13 @@ solveEq reason obcs orig_t1 orig_t2 = do
 
     sub :: TypeBase () NoUniqueness -> SolveM s (TypeBase () NoUniqueness)
     sub t@(Scalar (TypeVar _ (QualName [] v) [])) = do
-      uf <- gets solverTyVars
+      uf <- asks solverTyVars
       case M.lookup v uf of
         Just node -> do
           sol <- getSol' node
           case sol of
             Solved t' -> sub t'
-            _ -> pure t
+            _ -> typeVar <$> getKey' node
         Nothing -> pure t
     sub t = pure t
 
@@ -415,7 +406,7 @@ unify _ _ = Left mempty
 
 maybeLookupTyVarSol :: TyVar -> SolveM s (Maybe TyVarSol)
 maybeLookupTyVarSol tv = do
-  tyvars <- gets solverTyVars
+  tyvars <- asks solverTyVars
   case M.lookup tv tyvars of
     Nothing -> pure Nothing
     Just node -> do
@@ -440,7 +431,7 @@ lookupTyVarInfo v = do
 
 lookupUF :: TyVar -> SolveM s (TyVarNode s)
 lookupUF tv = do
-  uf <- gets solverTyVars
+  uf <- asks solverTyVars
   case M.lookup tv uf of
     Nothing -> error $ "Unknown tyvar: " <> prettyNameString tv
     Just node -> pure node
@@ -588,12 +579,12 @@ scopeViolation reason v1 ty v2 =
       <+> dquotes (prettyName v2)
       <+> "is rigidly bound in a deeper scope."
 
-scopeCheck :: Reason Type -> TyVar -> Int -> Type -> SolveM s ()
+scopeCheck :: Reason Type -> TyVar -> Level -> Type -> SolveM s ()
 scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
   where
     check :: TyVar -> SolveM s ()
     check ty_v = do
-      mb_node <- gets $ M.lookup ty_v . solverTyVars
+      mb_node <- asks $ M.lookup ty_v . solverTyVars
       case mb_node of
         Just node -> do
           sol <- getSol' node
@@ -606,7 +597,7 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
         _ -> pure ()
 
 -- | If a type variable has a liftedness constraint, we propagate that
--- constraint to its solution. The actual checking for correct usage
+-- constraint to its getSolution. The actual checking for correct usage
 -- is done later.
 liftednessCheck :: Liftedness -> Type -> SolveM s ()
 liftednessCheck l (Scalar (TypeVar _ (QualName [] v) _)) = do
@@ -680,12 +671,12 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
 
 maybeLookupUF :: TyVar -> SolveM s (Maybe (TyVarNode s))
 maybeLookupUF tv = do
-  uf <- gets solverTyVars
+  uf <- asks solverTyVars
   pure . M.lookup tv $ uf
 
-solution :: SolveM s ([UnconTyVar], Solution)
-solution = do
-  uf <- gets solverTyVars
+getSolution :: SolveM s ([UnconTyVar], Solution)
+getSolution = do
+  uf <- asks solverTyVars
   unconstrained <- M.traverseMaybeWithKey unconstr uf
   sol <- M.traverseMaybeWithKey mkSubst uf
   pure (M.elems unconstrained, sol)
@@ -740,7 +731,7 @@ logSolution constraints typarams tyvars s =
            show $ map (bimap prettyNameString (second onTyVar)) $ M.toList tyvars,
            either
              (("## error\n" <>) . docString . prettyTypeError)
-             ( ("## solution\n" <>)
+             ( ("## getSolution\n" <>)
                  . show
                  . bimap
                    (map (first prettyNameString))
@@ -757,7 +748,7 @@ logSolution constraints typarams tyvars s =
     onTyVar (TyVarRecord _ ts) = TyVarRecord NoLoc ts
     onTyVar (TyVarSum _ ts) = TyVarSum NoLoc ts
 
--- | Solve type constraints, producing either an error or a solution,
+-- | Solve type constraints, producing either an error or a getSolution,
 -- alongside a list of unconstrained type variables.
 solve ::
   [CtTy ()] ->
@@ -765,19 +756,15 @@ solve ::
   TyVars () ->
   Either TypeError ([UnconTyVar], Solution)
 solve constraints typarams tyvars =
-  maybeLog
-    $ runST
-    $ runExceptT
-    . flip evalStateT (SolverState M.empty)
-    . runSolveM
-    $ do
-      initializeState typarams tyvars
+  maybeLog $ runST $ do
+    r <- initializeState typarams tyvars
+    flip runReaderT r $ runExceptT $ runSolveM $ do
       mapM_ solveCt constraints
       mapM_ solveTyVar $ M.toList tyvars
-      solution
+      getSolution
   where
     maybeLog
       | isEnvVarAtLeast "FUTHARK_LOG_TYSOLVE" 0 = \s ->
           trace (logSolution constraints typarams tyvars s) s
-      | otherwise = id      
+      | otherwise = id
 {-# NOINLINE solve #-}
