@@ -58,12 +58,11 @@ data Link s
 data ReprInfo = MkInfo
   { weight :: {-# UNPACK #-} !Int
     -- ^ The size of the equivalence class, used by 'union'. 
-  , solution  :: {-# UNPACK #-} !TyVarSol
+  , solution  :: TyVarSol
     -- ^ The "type" of the equivalence class.
-  , key :: {-# UNPACK #-} !TyVar
+  , key :: TyVar
     -- ^ The name of the type variable representing the equivalence class.
 
-  --   -- TODO: Should we have this "permanent" level field?
   , level :: {-# UNPACK #-} !Level
   --   -- ^ The level of the representative type variable.
   } deriving Eq
@@ -108,6 +107,7 @@ find node@(Node link_ref) = do
     -- Input node's parent is another node.
     Link parent -> do
       repr <- find parent
+      -- Performing path compression.
       writeSTRef link_ref $ Link repr
       pure repr
 
@@ -139,7 +139,6 @@ getLvl :: TyVarNode s -> ST s Level
 getLvl node = do
   level <$> (readSTRef =<< descrRef node)
 
-
 -- | Assign a new solution/type to the node's equivalence class.
 --
 -- Precondition: The node is in an equivalence class representing an
@@ -149,8 +148,6 @@ assignNewSol node new_sol = do
   ref <- descrRef node
   modifySTRef ref $ \i -> i { solution = new_sol }  
 
--- TODO: Make sure we correctly handle level, liftedness, and if 
--- TODO: type parameters are involved.
 -- | Join the equivalence classes of the nodes. The resulting equivalence
 -- class has the same solution and key as the second argument.
 union :: TyVarNode s -> TyVarNode s -> ST s ()
@@ -178,8 +175,3 @@ union n1 n2 = do
 
       -- This shouldn't be possible.       
       _ -> error "'find' somehow didn't return a Repr"
-
--- | Return @True@ if both nodes belong to the same
--- equivalence class.
--- equivalent :: TyVarNode s -> TyVarNode s -> ST s Bool
--- equivalent n1 n2 = (==) <$> find n1 <*> find n2
