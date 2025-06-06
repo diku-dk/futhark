@@ -161,12 +161,7 @@ localExts m = do
   pure x
 
 extEnv :: EvalM Env
-extEnv = valEnv . M.map f <$> getExts
-  where
-    f v =
-      ( Nothing,
-        v
-      )
+extEnv = valEnv . M.map (Nothing,) <$> getExts
 
 valueStructType :: ValueType -> StructType
 valueStructType = first $ flip sizeFromInteger mempty . toInteger
@@ -181,7 +176,7 @@ instance Pretty SizeClosure where
   pretty (SizeClosure _ e) = pretty e
 
 instance Pretty (F.Shape SizeClosure) where
-  pretty = mconcat . map (braces . pretty) . shapeDims
+  pretty = mconcat . map (brackets . pretty) . shapeDims
 
 -- | A type where the sizes are unevaluated expressions.
 type EvalType = TypeBase SizeClosure NoUniqueness
@@ -738,7 +733,7 @@ evalType outer_bound t = do
       let free = fvVars $ freeInExp e
        in not $ any (`S.member` bound) free || any (`S.member` outer_bound) free
 
--- | Evaluate all sizes, and it better work. This implies it must be a
+-- | Evaluate all sizes, and it better work. This implies it must not be a
 -- size-dependent function type, or one that has existentials.
 evalTypeFully :: EvalType -> EvalM ValueType
 evalTypeFully t = do
@@ -788,7 +783,7 @@ evalFunction env missing_sizes [] body rettype =
         env'' <- linkMissingSizes missing_sizes p v <$> matchPat env' p v
         etaExpand (v : vs) env'' rt
     etaExpand vs env' _ = do
-      f <- localExts $ eval env' body
+      f <- eval env' body
       foldM (apply noLoc mempty) f $ reverse vs
 evalFunction env missing_sizes (p : ps) body rettype =
   pure . ValueFun $ \v -> do
@@ -1228,13 +1223,8 @@ evalModExp _ (ModImport _ (Info f) _) = do
           ]
     Just m -> pure (mempty, Module m)
 evalModExp env (ModDecs ds _) = do
-  Env terms types <- foldM evalDec env ds
-  -- Remove everything that was present in the original Env.
-  let env' =
-        Env
-          (terms `M.difference` envTerm env)
-          (types `M.difference` envType env)
-  pure (env', Module env')
+  (_, built_env) <- evalDecs env ds
+  pure (built_env, Module built_env)
 evalModExp env (ModVar qv _) =
   (mempty,) <$> evalModuleVar env qv
 evalModExp env (ModAscript me _ (Info substs) _) =
@@ -1269,28 +1259,35 @@ evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalFunctionBinding env tparams ps ret fbody
   sizes <- extEnv
-  pure $ env {envTerm = M.insert v binding $ envTerm env} <> sizes
+  pure $ mempty {envTerm = M.singleton v binding} <> sizes
 evalDec env (OpenDec me _) = do
   (me_env, me') <- evalModExp env me
   case me' of
-    Module me'' -> pure $ me'' <> me_env <> env
+    Module me'' -> pure $ me'' <> me_env
     _ -> error "Expected Module"
 evalDec env (ImportDec name name' loc) =
   evalDec env $ LocalDec (OpenDec (ModImport name name' loc) loc) loc
 evalDec env (LocalDec d _) = evalDec env d
-evalDec env ModTypeDec {} = pure env
+evalDec _env ModTypeDec {} = pure mempty
 evalDec env (TypeDec (TypeBind v _ ps _ (Info (RetType dims t)) _ _)) = do
   let abbr = TypeBinding env ps $ RetType dims t
-  pure env {envType = M.insert v abbr $ envType env}
+  pure mempty {envType = M.singleton v abbr}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
   (mod_env, mod) <- evalModExp env $ wrapInLambda ps
-  pure $ modEnv (M.singleton v mod) <> mod_env <> env
+  pure $ modEnv (M.singleton v mod) <> mod_env
   where
     wrapInLambda [] = case ret of
       Just (se, substs) -> ModAscript body se substs loc
       Nothing -> body
     wrapInLambda [p] = ModLambda p ret body loc
     wrapInLambda (p : ps') = ModLambda p Nothing (wrapInLambda ps') loc
+
+evalDecs :: Env -> [Dec] -> EvalM (Env, Env)
+evalDecs env = foldM evalDec' (env, mempty)
+  where
+    evalDec' (env', built_env) dec = do
+      dec_env <- evalDec env' dec
+      pure (dec_env <> env', dec_env <> built_env)
 
 -- | The interpreter context.  All evaluation takes place with respect
 -- to a context, and it can be extended with more definitions, which
@@ -2189,7 +2186,7 @@ interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e
 interpretDecs :: Ctx -> [Dec] -> F ExtOp Env
 interpretDecs ctx decs =
   runEvalM (ctxImports ctx) $ do
-    env <- foldM evalDec (ctxEnv ctx) decs
+    (env, _) <- evalDecs (ctxEnv ctx) decs
     -- We need to extract any new existential sizes and add them as
     -- ordinary bindings to the context, or we will not be able to
     -- look up their values later.

@@ -42,7 +42,7 @@ optimiseFun consts_table fd =
   where
     table = consts_table <> mkTable (bodyStms (funDefBody fd))
     mkSubst (Var v0)
-      | Just (MemArray _ _ _ (ArrayIn mem0 lmad0), BasicOp (Manifest _ v1)) <-
+      | Just (MemArray _ _ _ (ArrayIn mem0 lmad0), BasicOp (Manifest v1 _)) <-
           varInfo v0 table,
         Just (MemArray _ _ _ (ArrayIn mem1 lmad1), _) <-
           varInfo v1 table,
