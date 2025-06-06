@@ -544,6 +544,32 @@ unifyWith onDims usage = subunify False
 anyBound :: [VName] -> ExpBase Info VName -> Bool
 anyBound bound e = any (`S.member` fvVars (freeInExp e)) bound
 
+isInteger :: Exp -> Maybe Integer
+isInteger (IntLit x _ _) = Just x
+isInteger (Literal (SignedValue (Int64Value x)) _) = Just $ toInteger x
+isInteger _ = Nothing
+
+knownIntegerOp :: VName -> Maybe (Integer -> Integer -> Integer)
+knownIntegerOp op
+  | op == intrinsicVar "+" = Just (+)
+  | op == intrinsicVar "-" = Just (-)
+  | op == intrinsicVar "*" = Just (*)
+  | op == intrinsicVar "/" = Just div
+  | otherwise = Nothing
+
+-- | Perform extremely simple normalisation of size expressions. This is
+-- extremely limited because the type checker does not have access to the full
+-- evaluation machinary, and also because Troels is unsure of the implications
+-- of arbitrary evaluation of sizes.
+normSize :: Exp -> Maybe Exp
+-- Handle overloaded arithmetic of integer constants.
+normSize (AppExp (BinOp (op, _) _ (x, _) (y, _) loc) (Info rt))
+  | Just x' <- isInteger x,
+    Just y' <- isInteger y,
+    Just op' <- knownIntegerOp $ qualLeaf op =
+      Just $ IntLit (x' `op'` y') (Info (appResType rt)) loc
+normSize _ = Nothing
+
 unifySizes :: (MonadUnify m) => Usage -> UnifySizes m
 unifySizes usage bcs bound nonrigid e1 e2
   | Just es <- similarExps e1 e2 =
@@ -556,14 +582,19 @@ unifySizes usage bcs bound nonrigid e1 (Var v2 _ _)
   | Just lvl2 <- nonrigid (qualLeaf v2),
     not (anyBound bound e1) || (qualLeaf v2 `elem` bound) =
       linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
-unifySizes usage bcs _ _ e1 e2 = do
-  notes <- (<>) <$> dimNotes usage e1 <*> dimNotes usage e2
-  unifyError usage notes bcs $
-    "Sizes"
-      <+> dquotes (pretty e1)
-      <+> "and"
-      <+> dquotes (pretty e2)
-      <+> "do not match."
+unifySizes usage bcs bound nonrigid e1 e2
+  | Just e1' <- normSize e1 =
+      unifySizes usage bcs bound nonrigid e1' e2
+  | Just e2' <- normSize e2 =
+      unifySizes usage bcs bound nonrigid e1 e2'
+  | otherwise = do
+      notes <- (<>) <$> dimNotes usage e1 <*> dimNotes usage e2
+      unifyError usage notes bcs $
+        "Sizes"
+          <+> dquotes (pretty e1)
+          <+> "and"
+          <+> dquotes (pretty e2)
+          <+> "do not match."
 
 -- | Unifies two types.
 unify :: (MonadUnify m) => Usage -> StructType -> StructType -> m ()
