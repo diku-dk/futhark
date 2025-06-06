@@ -8,7 +8,7 @@ where
 
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.State
+import Control.Monad.Reader
 import Control.Monad.ST
 import Data.Bifunctor
 import Data.List qualified as L
@@ -34,8 +34,9 @@ type Type = CtType ()
 type UF s = M.Map TyVar (TyVarNode s)
 
 newtype SolverState s = SolverState { solverTyVars :: UF s }
-newtype SolveM s a = SolveM { runSolveM :: StateT (SolverState s) (ExceptT TypeError (ST s)) a }
-  deriving (Functor, Applicative, Monad, MonadError TypeError, MonadState (SolverState s))
+
+newtype SolveM s a = SolveM { runSolveM :: ExceptT TypeError (ReaderT (SolverState s) (ST s)) a }
+ deriving (Functor, Applicative, Monad, MonadError TypeError, MonadReader (SolverState s))
 
 -- | A getSolution maps a type variable to its substitution. This
 -- substitution is complete, in the sense there are no right-hand
@@ -58,14 +59,14 @@ union' tv1 tv2 = liftST $ union tv1 tv2
 getKey' :: TyVarNode s -> SolveM s TyVar
 getKey' = liftST . getKey
 
-initializeState :: TyParams -> TyVars () -> SolveM s ()
+initializeState :: TyParams -> TyVars () -> ST s (SolverState s)
 initializeState typarams tyvars = do
   tyvars' <- M.traverseWithKey f tyvars
   typarams' <- M.traverseWithKey g typarams
-  put $ SolverState $ typarams' <> tyvars'
+  pure $ SolverState $ typarams' <> tyvars'
   where
-    f tv (lvl, info) = liftST $ makeTyVarNode tv lvl info
-    g tv (lvl, lft, loc) = liftST $ makeTyParamNode tv lvl lft loc
+    f tv (lvl, info) = makeTyVarNode tv lvl info
+    g tv (lvl, lft, loc) = makeTyParamNode tv lvl lft loc
 
 typeError :: Loc -> Notes -> Doc () -> SolveM s ()
 typeError loc notes msg =
@@ -293,7 +294,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
   where
     flexible :: VName -> SolveM s Bool
     flexible v = do
-      uf <- gets solverTyVars
+      uf <- asks solverTyVars
       case M.lookup v uf of
         Just node -> do
           sol <- getSol' node
@@ -304,7 +305,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
 
     sub :: TypeBase () NoUniqueness -> SolveM s (TypeBase () NoUniqueness)
     sub t@(Scalar (TypeVar _ (QualName [] v) [])) = do
-      uf <- gets solverTyVars
+      uf <- asks solverTyVars
       case M.lookup v uf of
         Just node -> do
           sol <- getSol' node
@@ -405,7 +406,7 @@ unify _ _ = Left mempty
 
 maybeLookupTyVarSol :: TyVar -> SolveM s (Maybe TyVarSol)
 maybeLookupTyVarSol tv = do
-  tyvars <- gets solverTyVars
+  tyvars <- asks solverTyVars
   case M.lookup tv tyvars of
     Nothing -> pure Nothing
     Just node -> do
@@ -430,7 +431,7 @@ lookupTyVarInfo v = do
 
 lookupUF :: TyVar -> SolveM s (TyVarNode s)
 lookupUF tv = do
-  uf <- gets solverTyVars
+  uf <- asks solverTyVars
   case M.lookup tv uf of
     Nothing -> error $ "Unknown tyvar: " <> prettyNameString tv
     Just node -> pure node
@@ -583,7 +584,7 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
   where
     check :: TyVar -> SolveM s ()
     check ty_v = do
-      mb_node <- gets $ M.lookup ty_v . solverTyVars
+      mb_node <- asks $ M.lookup ty_v . solverTyVars
       case mb_node of
         Just node -> do
           sol <- getSol' node
@@ -670,12 +671,12 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
 
 maybeLookupUF :: TyVar -> SolveM s (Maybe (TyVarNode s))
 maybeLookupUF tv = do
-  uf <- gets solverTyVars
+  uf <- asks solverTyVars
   pure . M.lookup tv $ uf
 
 getSolution :: SolveM s ([UnconTyVar], Solution)
 getSolution = do
-  uf <- gets solverTyVars
+  uf <- asks solverTyVars
   unconstrained <- M.traverseMaybeWithKey unconstr uf
   sol <- M.traverseMaybeWithKey mkSubst uf
   pure (M.elems unconstrained, sol)
@@ -755,13 +756,9 @@ solve ::
   TyVars () ->
   Either TypeError ([UnconTyVar], Solution)
 solve constraints typarams tyvars =
-  maybeLog
-    $ runST
-    $ runExceptT
-    . flip evalStateT (SolverState M.empty)
-    . runSolveM
-    $ do
-      initializeState typarams tyvars
+  maybeLog $ runST $ do
+    r <- initializeState typarams tyvars
+    flip runReaderT r $ runExceptT $ runSolveM $ do
       mapM_ solveCt constraints
       mapM_ solveTyVar $ M.toList tyvars
       getSolution
@@ -769,5 +766,5 @@ solve constraints typarams tyvars =
     maybeLog
       | isEnvVarAtLeast "FUTHARK_LOG_TYSOLVE" 0 = \s ->
           trace (logSolution constraints typarams tyvars s) s
-      | otherwise = id      
+      | otherwise = id
 {-# NOINLINE solve #-}
