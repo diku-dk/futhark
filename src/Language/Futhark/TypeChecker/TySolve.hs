@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fprof-auto #-}
 module Language.Futhark.TypeChecker.TySolve
   ( Type,
     Solution,
