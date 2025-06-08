@@ -19,10 +19,7 @@ struct MapTransposeParameters {
     repeat_2: i32       // 40
 }
 
-var<workgroup> shared_memory_i8: array<i32, TR_TILE_DIM*(TR_TILE_DIM+1)>;
-var<workgroup> shared_memory_i16: array<i32, TR_TILE_DIM*(TR_TILE_DIM+1)>;
-var<workgroup> shared_memory_i32: array<i32, TR_TILE_DIM*(TR_TILE_DIM+1)>;
-var<workgroup> shared_memory_i64: array<i64, TR_TILE_DIM*(TR_TILE_DIM+1)>;
+var<workgroup> shared_memory_ELEM_TYPE: array<ELEM_TYPE, TR_TILE_DIM*(TR_TILE_DIM+1)>;
 
 @group(0) @binding(0) var<uniform> args: MapTransposeParameters;
 @group(0) @binding(1) var<storage, read_write> dst_mem: array<ELEM_TYPE>;
