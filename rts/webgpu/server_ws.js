@@ -124,8 +124,15 @@ class BrowserServer {
     return outputs.join("\n");
   }
 
-  async cmd_restore(data_b64, ...varsAndTypes) {
-    const data = Uint8Array.from(atob(data_b64), c => c.charCodeAt(0));
+  async cmd_restore(file, ...varsAndTypes) {
+    // Request file from the server.
+    const data = await fetch(file).then((response) => {
+      if (!response.ok) {
+        throw "Failed to fetch file: " + response.statusText;
+      }
+      return response.bytes();
+    });
+
     const reader = new FutharkReader(data);
 
     for (let i = 0; i < varsAndTypes.length; i += 2) {

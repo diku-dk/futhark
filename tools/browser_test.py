@@ -134,7 +134,9 @@ async def handle_index(request):
 
 
 async def handle_file(request):
-    file = request.rel_url.path.lstrip("/")
+    file = request.rel_url.path
+    if not request.path.startswith("/tmp/"):
+        file = file.lstrip("/")
 
     content_type = "text/plain"
     if file.endswith(".js"):
@@ -151,17 +153,6 @@ async def handle_file(request):
     return web.Response(
         body=contents, content_type=content_type, headers=default_headers
     )
-
-
-def wrap_restore(args):
-    fname = args[0]
-
-    with open(fname, "rb") as f:
-        data = f.read()
-
-    data = base64.b64encode(data).decode("utf-8")
-
-    return [data] + args[1:]
 
 
 def wrap_store_resp(fname, resp):
@@ -188,9 +179,7 @@ async def handle_ws(request):
             break
 
         orig_args = args
-        if cmd == "restore":
-            args = wrap_restore(args)
-        elif cmd == "store":
+        if cmd == "store":
             args = args[1:]
 
         await ws.send_json({"cmd": cmd, "args": args})
@@ -284,11 +273,8 @@ app.add_routes(
     [
         web.get("/", handle_index),
         web.get("/index.html", handle_index),
-        web.get(f"/{script_name}", handle_file),
-        web.get(f"/{wasm_name}", handle_file),
-        web.get(f"/{wasm_map_name}", handle_file),
-        web.get(f"/{source_name}", handle_file),
         web.get("/ws", handle_ws),
+        web.get("/{file:.*}", handle_file)      # Catch-all for serving input files from /tmp/ or data/ directories
     ]
 )
 
