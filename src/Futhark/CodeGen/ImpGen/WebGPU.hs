@@ -969,8 +969,13 @@ intLiteral (Int16Value v) =
   WGSL.CallExp "norm_i16" [WGSL.IntExp $ fromIntegral v]
 intLiteral (Int64Value v) = WGSL.CallExp "i64" [low, high]
   where
-    low = WGSL.IntExp $ fromIntegral $ v Bits..&. 0xffffff
-    high = WGSL.IntExp $ fromIntegral $ (v `Bits.shift` (-32)) Bits..&. 0xffffff
+    -- Helper function transforming a Int64 -> Int32 -> WGSL.Exp.
+    -- If we just do Int64 -> WGSL.Exp directly, low/high can end
+    -- up being larger than what fits in an i32.
+    toWGSLInt :: Int64 -> WGSL.Exp
+    toWGSLInt x = WGSL.IntExp $ fromIntegral (fromIntegral x :: Int32)
+    low = toWGSLInt $ v Bits..&. 0xffffffff
+    high = toWGSLInt $ (v `Bits.shift` (-32)) Bits..&. 0xffffffff
 intLiteral v = WGSL.IntExp (valueIntegral v)
 
 handleSpecialFloats :: T.Text -> Double -> WGSL.Exp
