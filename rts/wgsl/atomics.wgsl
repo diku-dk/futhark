@@ -381,11 +381,13 @@ fn atomic_umin_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
 }
 
 fn atomic_and_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i16) -> i16 {
-    return norm_u16(atomicAnd(p, norm_u16(x) << bitcast<u32>(offset * 16)) >> bitcast<u32>(offset * 16));
+    let shift = bitcast<u32>(offset * 8);
+    let mask = 0xffff << shift;
+    return norm_u16(atomicAnd(p, ~mask | (norm_u16(x) << shift)) >> shift);
 }
 
 fn atomic_and_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
-    return norm_u16(atomicAnd(p, norm_u16(x)));
+    return norm_u16(atomicAnd(p, ~0xffff | norm_u16(x)));
 }
 
 fn atomic_or_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i16) -> i16 {
@@ -517,11 +519,13 @@ fn atomic_umin_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
 }
 
 fn atomic_and_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i8) -> i8 {
-    return norm_u8(atomicAnd(p, norm_u8(x) << bitcast<u32>(offset * 8)) >> bitcast<u32>(offset * 8));
+    let shift = bitcast<u32>(offset * 8);
+    let mask = 0xff << shift;
+    return norm_u8(atomicAnd(p, ~mask | (norm_u8(x) << shift)) >> shift);
 }
 
 fn atomic_and_i8_shared(p: ptr<workgroup, atomic<i32>>, x: i8) -> i8 {
-    return norm_u8(atomicAnd(p, norm_u8(x)));
+    return norm_u8(atomicAnd(p, ~0xff | norm_u8(x)));
 }
 
 fn atomic_or_i8_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i8) -> i8 {
