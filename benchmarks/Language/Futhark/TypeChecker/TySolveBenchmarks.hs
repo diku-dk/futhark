@@ -84,22 +84,22 @@ benchmarks =
   in
   [ 
     bgroup "TySolveNewSynthetic" $
-     map (\n -> bench ("solveNew: " ++ show n ++ " variables") $ whnf solveNew (generateContraints n)) sizes
+      map (\n -> bench ("solveNew: " ++ show n ++ " variables") $ whnf solveNew (generateContraints n)) sizes
 
   , bgroup "TySolveNewConverted" $
       map (\(name, dataCase) -> bench name $ whnf solveNew dataCase) allFutBenchmarkCases
 
   , bgroup "TySolveNewMisc" [
-    bench "Trivial" $ whnf solveNew trivial
+      bench "Trivial" $ whnf solveNew trivial
   ]
 
   , bgroup "TySolveOldSynthetic" $
       map (\n -> bench ("solveOld: " ++ show n ++ " variables") $ whnf solveOld (generateContraints n)) sizes
 
   , bgroup "TySolveOldConverted" $
-        map (\(name, dataCase) -> bench name $ whnf solveOld dataCase) allFutBenchmarkCases
+      map (\(name, dataCase) -> bench name $ whnf solveOld dataCase) allFutBenchmarkCases
 
   , bgroup "TySolveOldMisc" [
-    bench "Trivial" $ whnf solveOld trivial
+      bench "Trivial" $ whnf solveOld trivial
   ]
   ]
