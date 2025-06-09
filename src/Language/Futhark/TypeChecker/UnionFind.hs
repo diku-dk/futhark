@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -funbox-strict-fields -fprof-auto #-}
 module Language.Futhark.TypeChecker.UnionFind
   ( TyVarNode,
     TyVarSol(..),
