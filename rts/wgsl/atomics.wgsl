@@ -381,7 +381,7 @@ fn atomic_umin_i16_shared(p: ptr<workgroup, atomic<i32>>, x: i16) -> i16 {
 }
 
 fn atomic_and_i16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: i16) -> i16 {
-    let shift = bitcast<u32>(offset * 8);
+    let shift = bitcast<u32>(offset * 16);
     let mask = 0xffff << shift;
     return norm_u16(atomicAnd(p, ~mask | (norm_u16(x) << shift)) >> shift);
 }
