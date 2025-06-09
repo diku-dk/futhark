@@ -66,7 +66,7 @@ initializeState typarams tyvars = do
   typarams' <- M.traverseWithKey g typarams
   pure $ SolverState $ typarams' <> tyvars'
   where
-    f tv (lvl, info) = makeTyVarNode tv lvl info
+    f tv (_lvl, info) = makeTyVarNode tv info
     g tv (lvl, lft, loc) = makeTyParamNode tv lvl lft loc
 
 typeError :: Loc -> Notes -> Doc () -> SolveM s ()

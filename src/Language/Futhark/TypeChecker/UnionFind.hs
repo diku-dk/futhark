@@ -7,7 +7,6 @@ module Language.Futhark.TypeChecker.UnionFind
     find,
     getSol,
     getKey,
-    getLvl,
     assignNewSol,
     union,
   )
@@ -62,20 +61,16 @@ data ReprInfo = MkInfo
     -- ^ The "type" of the equivalence class.
   , key :: TyVar
     -- ^ The name of the type variable representing the equivalence class.
-
-  , level :: {-# UNPACK #-} !Level
-  --   -- ^ The level of the representative type variable.
   } deriving Eq
 
 -- | Create a fresh node of a type variable and return it. A fresh node
 -- is in the equivalence class that contains only itself.
-makeTyVarNode :: TyVar -> Level -> TyVarInfo () -> ST s (TyVarNode s)
-makeTyVarNode tv lvl constraint = do
+makeTyVarNode :: TyVar -> TyVarInfo () -> ST s (TyVarNode s)
+makeTyVarNode tv constraint = do
   info <- newSTRef (MkInfo {
       weight = 1
     , solution = Unsolved constraint
     , key = tv
-    , level = lvl
   })
   l <- newSTRef $ Repr info
   pure $ Node l
@@ -88,7 +83,6 @@ makeTyParamNode tv lvl lft loc = do
       weight = 1
     , solution = Param lvl lft loc
     , key = tv
-    , level = lvl
   })
   l <- newSTRef $ Repr info
   pure $ Node l
@@ -135,10 +129,6 @@ getKey :: TyVarNode s -> ST s TyVar
 getKey node = do
   key <$> (readSTRef =<< descrRef node)
 
-getLvl :: TyVarNode s -> ST s Level
-getLvl node = do
-  level <$> (readSTRef =<< descrRef node)
-
 -- | Assign a new solution/type to the node's equivalence class.
 --
 -- Precondition: The node is in an equivalence class representing an
@@ -161,17 +151,16 @@ union n1 n2 = do
     link2 <- readSTRef link_ref2
     case (link1, link2) of
       (Repr info_ref1, Repr info_ref2) -> do
-        (MkInfo w1 _   _  l1) <- readSTRef info_ref1
-        (MkInfo w2 sol k2 l2) <- readSTRef info_ref2
-        let min_lvl = min l1 l2
-            w' = w1 + w2
+        (MkInfo w1 _   _ ) <- readSTRef info_ref1
+        (MkInfo w2 sol k2) <- readSTRef info_ref2
+        let w' = w1 + w2
         if w1 >= w2 
           then do
             writeSTRef link_ref2 $ Link root1
-            writeSTRef info_ref1 $ MkInfo w' sol k2 min_lvl
+            writeSTRef info_ref1 $ MkInfo w' sol k2
           else do
             writeSTRef link_ref1 $ Link root2
-            writeSTRef info_ref2 $ MkInfo w' sol k2 min_lvl
+            writeSTRef info_ref2 $ MkInfo w' sol k2
 
       -- This shouldn't be possible.       
       _ -> error "'find' somehow didn't return a Repr"
