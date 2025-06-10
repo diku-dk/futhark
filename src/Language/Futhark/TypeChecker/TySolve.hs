@@ -12,6 +12,8 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.ST
 import Data.Bifunctor
+import Data.HashTable.Class qualified as H
+import Data.HashTable.ST.Cuckoo qualified as C
 import Data.List qualified as L
 import Data.Loc
 import Data.Map qualified as M
@@ -26,6 +28,7 @@ import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote, prettyTypeError)
 import Language.Futhark.TypeChecker.UnionFind
 
+type HashTable s k v = C.HashTable s k v
 
 -- | The type representation used by the constraint solver. Agnostic
 -- to sizes and uniqueness.
