@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Rare compiler crash during internalisation code that does size coercions on
   opaque size-lifted types.
 
+* Missing fusion inside reduction and scan operators (#2283).
+
 ## [0.25.31]
 
 ### Added
