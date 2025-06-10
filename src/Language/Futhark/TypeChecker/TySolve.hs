@@ -24,7 +24,6 @@ import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Error
 import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote, prettyTypeError)
--- import Language.Futhark.TypeChecker.Types (substTyVars)
 import Language.Futhark.TypeChecker.UnionFind
 
 
