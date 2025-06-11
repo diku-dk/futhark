@@ -89,7 +89,8 @@ find node@(Node link_ref) = do
     Link parent -> do
       repr <- find parent
       -- Performing path compression.
-      writeSTRef link_ref $ Link repr
+      when (repr /= parent) $ do
+        writeSTRef link_ref $ Link repr
       pure repr
 
 -- | Return the reference to the descriptor of the node's
