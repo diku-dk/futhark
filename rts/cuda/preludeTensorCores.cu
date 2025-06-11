@@ -87,10 +87,10 @@ futrts_copyGlobalShared(unsigned char** mem_out_p, unsigned char* global_mem,
 {
   *mem_out_p = shared_mem;
 
-  int flatThreadIdx = threadIdx.z * blockDim.y * blockDim.x +
+  int flat_thrd_idx = threadIdx.z * blockDim.y * blockDim.x +
                       threadIdx.y * blockDim.x + threadIdx.x;
 
-  if (flatThreadIdx < WarpsM{} * WarpsN{} * 32)
+  if (flat_thrd_idx < WarpsM{} * WarpsN{} * 32)
   {
     using ElmType = typename convert_type<ElmTypeIn>::TypeOut;
 
@@ -121,7 +121,7 @@ futrts_copyGlobalShared(unsigned char** mem_out_p, unsigned char* global_mem,
         g_layout);
 
     ThrCopy thr_copy_global_shared =
-        copy_global_shared.get_slice(flatThreadIdx);
+        copy_global_shared.get_slice(flat_thrd_idx);
     Tensor tAgA = thr_copy_global_shared.partition_S(g);
     Tensor tAsA = thr_copy_global_shared.partition_D(s);
 
@@ -145,10 +145,10 @@ futrts_copyRegistersShared(unsigned char** mem_out_p,
 {
   *mem_out_p = shared_mem;
 
-  int flatThreadIdx = threadIdx.z * blockDim.y * blockDim.x +
+  int flat_thrd_idx = threadIdx.z * blockDim.y * blockDim.x +
                       threadIdx.y * blockDim.x + threadIdx.x;
 
-  if (flatThreadIdx < WarpsM{} * WarpsN{} * 32)
+  if (flat_thrd_idx < WarpsM{} * WarpsN{} * 32)
   {
     using ElmTypeA = typename convert_type<ElmTypeAIn>::TypeOut;
     using ElmTypeB = typename convert_type<ElmTypeBIn>::TypeOut;
@@ -160,7 +160,7 @@ futrts_copyRegistersShared(unsigned char** mem_out_p,
 
     auto s_layout = make_layout(Shape<SizeM, SizeN>{}, LayoutRight{});
 
-    ThrMMA thr_mma = tiled_mma.get_slice(flatThreadIdx);
+    ThrMMA thr_mma = tiled_mma.get_slice(flat_thrd_idx);
 
     auto r_layout = partition_shape_C(thr_mma, s_layout.shape());
     Tensor tCrC = make_tensor(
@@ -184,7 +184,7 @@ futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigned char* A_mem,
                  ElmTypeBIn, SizeM, SizeN, SizeK, WarpsM, WarpsN, ASwizzled,
                  BSwizzled)
 {
-  int flatThreadIdx = threadIdx.z * blockDim.y * blockDim.x +
+  int flat_thrd_idx = threadIdx.z * blockDim.y * blockDim.x +
                       threadIdx.y * blockDim.x + threadIdx.x;
 
   using ElmTypeA = typename convert_type<ElmTypeAIn>::TypeOut;
@@ -210,7 +210,7 @@ futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigned char* A_mem,
 
   auto sC_layout = make_layout(Shape<SizeM, SizeN>{}, LayoutRight{});
 
-  ThrMMA thr_mma = tiled_mma.get_slice(flatThreadIdx);
+  ThrMMA thr_mma = tiled_mma.get_slice(flat_thrd_idx);
 
   auto rC_layout = partition_shape_C(thr_mma, sC_layout.shape());
   Tensor tCrC =
