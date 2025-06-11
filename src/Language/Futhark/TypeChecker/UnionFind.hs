@@ -42,11 +42,9 @@ data Link s
 
 -- | Information about an equivalence class.
 data ReprInfo = MkInfo
-  { weight :: {-# UNPACK #-} !Int
-    -- ^ The size of the equivalence class, used by 'union'. 
-  , solution  :: TyVarSol
+  { solution  :: TyVarSol
     -- ^ The "type" of the equivalence class.
-  , key :: TyVar
+  , key :: {-# UNPACK #-} !TyVar
     -- ^ The name of the type variable representing the equivalence class.
   } deriving Eq
 
@@ -55,8 +53,7 @@ data ReprInfo = MkInfo
 makeTyVarNode :: TyVar -> TyVarInfo () -> ST s (TyVarNode s)
 makeTyVarNode tv constraint = do
   info <- newSTRef (MkInfo {
-      weight = 1
-    , solution = Unsolved constraint
+      solution = Unsolved constraint
     , key = tv
   })
   l <- newSTRef $ Repr info
@@ -67,8 +64,7 @@ makeTyVarNode tv constraint = do
 makeTyParamNode :: TyVar -> Level -> Liftedness -> Loc -> ST s (TyVarNode s)
 makeTyParamNode tv lvl lft loc = do
   info <- newSTRef (MkInfo {
-      weight = 1
-    , solution = Param lvl lft loc
+      solution = Param lvl lft loc
     , key = tv
   })
   l <- newSTRef $ Repr info
@@ -131,24 +127,8 @@ assignNewSol node new_sol = do
 union :: TyVarNode s -> TyVarNode s -> ST s ()
 union n1 n2 = do
   root1@(Node link_ref1) <- find n1
-  root2@(Node link_ref2) <- find n2
+  root2 <- find n2
 
   -- Ensure that nodes aren't in the same equivalence class. 
   when (root1 /= root2) $ do
-    link1 <- readSTRef link_ref1
-    link2 <- readSTRef link_ref2
-    case (link1, link2) of
-      (Repr info_ref1, Repr info_ref2) -> do
-        (MkInfo w1 _   _ ) <- readSTRef info_ref1
-        (MkInfo w2 sol k2) <- readSTRef info_ref2
-        let w' = w1 + w2
-        if w1 >= w2 
-          then do
-            writeSTRef link_ref2 $ Link root1
-            writeSTRef info_ref1 $ MkInfo w' sol k2
-          else do
-            writeSTRef link_ref1 $ Link root2
-            writeSTRef info_ref2 $ MkInfo w' sol k2
-
-      -- This shouldn't be possible.       
-      _ -> error "'find' somehow didn't return a Repr"
+    writeSTRef link_ref1 $ Link root2  
