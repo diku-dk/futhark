@@ -40,9 +40,9 @@ ruleMatch _ pat _ (cond, cases, _, ifdec)
     new_default : _ <- reverse always_matches =
       Simplify $ letBind pat $ Match cond cases' (caseBody new_default) ifdec
 -- Remove caseless match.
-ruleMatch _ pat (StmAux cs _ _) (_, [], defbody, _) = Simplify $ do
+ruleMatch _ pat aux (_, [], defbody, _) = Simplify $ do
   defbody_res <- bodyBind defbody
-  certifying cs $ forM_ (zip (patElems pat) defbody_res) $ \(pe, res) ->
+  certifying (stmAuxCerts aux) $ forM_ (zip (patElems pat) defbody_res) $ \(pe, res) ->
     certifying (resCerts res) . letBind (Pat [pe]) $
       BasicOp (SubExp $ resSubExp res)
 -- IMPROVE: the following two rules can be generalised to work in more
