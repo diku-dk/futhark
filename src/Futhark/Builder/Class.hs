@@ -113,7 +113,10 @@ attributing attrs = censorStms $ fmap onStm
 -- this action.
 auxing :: (MonadBuilder m) => StmAux anyrep -> m a -> m a
 auxing outer
-  | stmAuxCerts outer == mempty && stmAuxAttrs outer == mempty = id
+  | stmAuxCerts outer == mempty,
+    stmAuxAttrs outer == mempty,
+    stmAuxLoc outer == mempty =
+      id
   | otherwise = censorStms $ fmap onStm
   where
     onStm (Let pat aux e) =
