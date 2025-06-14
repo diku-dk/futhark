@@ -229,7 +229,7 @@ bindTyVar reason bcs v t' = do
 
   v_info <- getSol' v_node
 
-  setInfo v_node (Solved t)
+  setInfo v_node $ Solved t
 
   case (v_info, t) of
     ( Unsolved TyVarFree {}, _ ) -> pure ()
