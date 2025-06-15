@@ -38,7 +38,6 @@ data LinkInfo s
   | Repr
       { solution :: {-# UNPACK #-} !TyVarSol
       , key      :: {-# UNPACK #-} !TyVar
-      , weight   :: {-# UNPACK #-} !Int
       }
 
 -- | Create a fresh node of a type variable and return it. A fresh node
@@ -48,7 +47,6 @@ makeTyVarNode tv constraint = do
   let r = Repr {
       solution = Unsolved constraint
     , key = tv
-    , weight = 1
   }
   l <- newSTRef r
   pure $ Node l
@@ -60,7 +58,6 @@ makeTyParamNode tv lvl lft loc = do
   let r = Repr {
       solution = Param lvl lft loc
     , key = tv
-    , weight = 1
   }
   l <- newSTRef r
   pure $ Node l
@@ -104,7 +101,7 @@ getKey node = do
 assignNewSol :: TyVarNode s -> TyVarSol -> ST s ()
 assignNewSol node new_sol = do
   Node ref <- find node
-  modifySTRef' ref $ \l -> 
+  modifySTRef' ref $ \l ->
     case l of
       Repr {} ->
         l { solution = new_sol }
