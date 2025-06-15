@@ -48,8 +48,7 @@ makeTyVarNode tv constraint = do
       solution = Unsolved constraint
     , key = tv
   }
-  l <- newSTRef r
-  pure $ Node l
+  Node <$> newSTRef r
 
 -- | Create a fresh node of a type parameter and return it. A fresh node
 -- is in the equivalence class that contains only itself.
@@ -59,9 +58,8 @@ makeTyParamNode tv lvl lft loc = do
       solution = Param lvl lft loc
     , key = tv
   }
-  l <- newSTRef r
-  pure $ Node l
-
+  Node <$> newSTRef r
+  
 -- | @find node@ returns the representative of
 -- @node@'s equivalence class.
 --
