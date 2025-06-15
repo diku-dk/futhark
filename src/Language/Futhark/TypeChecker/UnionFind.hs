@@ -34,9 +34,9 @@ data TyVarSol
 newtype TyVarNode s = Node (STRef s (LinkInfo s)) deriving Eq
 
 data LinkInfo s
-  = Link !(TyVarNode s)
+  = Link (TyVarNode s)
   | Repr
-      { solution :: {-# UNPACK #-} !TyVarSol
+      { solution :: TyVarSol
       , key      :: {-# UNPACK #-} !TyVar
       }
 
