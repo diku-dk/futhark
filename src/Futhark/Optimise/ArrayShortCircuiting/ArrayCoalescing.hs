@@ -252,9 +252,9 @@ shortCircuitSegOp lvlOK lutab pat pat_certs (SegHist lvl space _ kernel_body his
             Nothing -> acc
         _ -> acc
 
--- | Short-circuit handler for 'GPUMem' 'Op'.
+-- | Short-circuit handler for t'GPUMem' t'Op'.
 --
--- When the 'Op' is a 'SegOp', we handle it accordingly, otherwise we do
+-- When the t'Op' is a t'SegOp', we handle it accordingly, otherwise we do
 -- nothing.
 shortCircuitGPUMem ::
   LUTabFun ->
