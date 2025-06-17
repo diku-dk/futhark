@@ -228,7 +228,7 @@ class Analyse rep where
   -- | Analyse the op for this representation.
   analyseOp :: Op rep -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 
--- | Analyse each `entry` and accumulate the results.
+-- | Analyse each entry and accumulate the results.
 analyseDimAccesses :: (Analyse rep) => Prog rep -> IndexTable rep
 analyseDimAccesses = foldMap' analyseFunction . progFuns
 

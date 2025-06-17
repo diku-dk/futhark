@@ -578,6 +578,7 @@ compileBlockOp pat (Inner (SegOp (SegHist lvl space _ kbody ops))) = do
 compileBlockOp pat _ =
   compilerBugS $ "compileBlockOp: cannot compile rhs of binding " ++ prettyString pat
 
+-- | The operations for block-level kernels.
 blockOperations :: Operations GPUMem KernelEnv Imp.KernelOp
 blockOperations =
   (defaultOperations compileBlockOp)
@@ -598,6 +599,7 @@ arrayInSharedMemory (Var name) = do
     _ -> pure False
 arrayInSharedMemory Constant {} = pure False
 
+-- | Create a kernel with GPU operations at the block level.
 sKernelBlock ::
   String ->
   VName ->
@@ -606,6 +608,8 @@ sKernelBlock ::
   CallKernelGen ()
 sKernelBlock = sKernel blockOperations $ sExt64 . kernelBlockId
 
+-- | Generate code for writing this result of a block-level kernel. The
+-- 'PatElem' and 'KernelResult' must be matched as in the original segop.
 compileBlockResult ::
   SegSpace ->
   PatElem LetDecMem ->
