@@ -104,6 +104,25 @@ cliOptions =
            }
        ]
 
+tensorCoreOptions :: [Option]
+tensorCoreOptions =
+  [ Option
+      { optionLongName = "cutlass-include",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "FILE",
+        optionDescription = "Include path of cutlass/include",
+        optionAction =
+          [C.cstm|{
+            size_t len = strlen(optarg);          
+            size_t needed = len + 2;
+            char *include_path = strdup("-I");
+            include_path = (char *)realloc(include_path, needed + 1);
+            strncat(include_path, optarg, needed);      
+            futhark_context_config_add_nvrtc_option(cfg, include_path);
+          }|]
+      }
+  ]
+
 cudaMemoryType :: GC.MemoryType OpenCL ()
 cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
 cudaMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
@@ -159,7 +178,8 @@ compileProgWithTC version prog = do
       (mkBoilerplate (cuda_prelude <> cuda_code) macros kernels types failures)
       cuda_includes
       (Space "device", [Space "device", DefaultSpace])
-      cliOptions
+      -- TODO(k): Option specifically for cutlass include path?
+      (tensorCoreOptions ++ cliOptions)
       prog'
   where
     operations :: GC.Operations OpenCL ()

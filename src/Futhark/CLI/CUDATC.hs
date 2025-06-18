@@ -5,7 +5,7 @@ import Futhark.Actions (compileCUDATCAction)
 import Futhark.Compiler.CLI
 import Futhark.Passes (gpumemtcPipeline)
 
--- | Run @futhark cuda@.
+-- | Run @futhark cudatc@.
 main :: String -> [String] -> IO ()
 main = compilerMain
   ()
