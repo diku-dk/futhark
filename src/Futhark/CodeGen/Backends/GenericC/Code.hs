@@ -221,7 +221,7 @@ compileCode :: Code op -> CompilerM op s ()
 compileCode (Op op) =
   join $ asks (opsCompiler . envOperations) <*> pure op
 compileCode Skip = pure ()
-compileCode (Comment s code) = do
+compileCode (Meta (MetaComment s) code) = do
   xs <- collect $ compileCode code
   let comment = "// " ++ T.unpack s
   stm

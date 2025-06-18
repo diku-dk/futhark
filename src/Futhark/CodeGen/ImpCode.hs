@@ -64,6 +64,7 @@ module Futhark.CodeGen.ImpCode
     MemSize,
     DimSize,
     Code (..),
+    Metadata (..),
     PrimValue (..),
     Exp,
     TExp,
@@ -241,6 +242,13 @@ data ArrayContents
     ArrayZeros Int
   deriving (Show)
 
+-- | A piece of additional information attached to a piece of code, which should
+-- not have any effect on how it is executed.
+newtype Metadata
+  = -- | An informative comment that can be inserted into generated code.
+    MetaComment T.Text
+  deriving (Eq, Ord, Show)
+
 -- | A block of imperative code.  Parameterised by an 'Op', which
 -- allows extensibility.  Concrete uses of this type will instantiate
 -- the type parameter with e.g. a construct for launching GPU kernels.
@@ -314,10 +322,9 @@ data Code a
     -- out not to be true, then report a failure along with
     -- the given error message.
     Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
-  | -- | Has the same semantics as the contained code, but
-    -- the comment should show up in generated code for ease
-    -- of inspection.
-    Comment T.Text (Code a)
+  | -- | Has the same semantics as the contained code, but attach some
+    -- nonsemantic metadata.
+    Meta Metadata (Code a)
   | -- | Print the given value to the screen, somehow
     -- annotated with the given string as a description.  If
     -- no type/value pair, just print the string.  This has
@@ -369,7 +376,7 @@ lexicalMemoryUsage func =
     go f (If _ x y) = f x <> f y
     go f (For _ _ x) = f x
     go f (While _ x) = f x
-    go f (Comment _ x) = f x
+    go f (Meta _ x) = f x
     go _ _ = mempty
 
     declared (DeclareMem mem space) =
@@ -409,7 +416,7 @@ calledFuncs f (x :>>: y) = calledFuncs f x <> calledFuncs f y
 calledFuncs f (If _ x y) = calledFuncs f x <> calledFuncs f y
 calledFuncs f (For _ _ x) = calledFuncs f x
 calledFuncs f (While _ x) = calledFuncs f x
-calledFuncs f (Comment _ x) = calledFuncs f x
+calledFuncs f (Meta _ x) = calledFuncs f x
 calledFuncs _ _ = mempty
 
 -- | Compute call graph, as per 'calledFuncs', but also include
@@ -643,7 +650,7 @@ instance (Pretty op) => Pretty (Code op) where
       <+> "<-"
       <+> pretty fname
       <> parens (commasep $ map pretty args)
-  pretty (Comment s code) =
+  pretty (Meta (MetaComment s) code) =
     "--" <+> pretty s </> pretty code
   pretty (DebugPrint desc (Just e)) =
     "debug" <+> parens (commasep [pretty (show desc), pretty e])
@@ -721,8 +728,8 @@ instance Traversable Code where
     pure $ Assert e msg loc
   traverse _ (Call dests fname args) =
     pure $ Call dests fname args
-  traverse f (Comment s code) =
-    Comment s <$> traverse f code
+  traverse f (Meta s code) =
+    Meta s <$> traverse f code
   traverse _ (DebugPrint s v) =
     pure $ DebugPrint s v
   traverse _ (TracePrint msg) =
@@ -738,7 +745,7 @@ declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
 declaredIn (For i _ body) = oneName i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
-declaredIn (Comment _ body) = declaredIn body
+declaredIn (Meta _ body) = declaredIn body
 declaredIn _ = mempty
 
 instance FreeIn EntryPoint where
@@ -799,7 +806,7 @@ instance (FreeIn a) => FreeIn (Code a) where
     freeIn' e <> foldMap freeIn' msg
   freeIn' (Op op) =
     freeIn' op
-  freeIn' (Comment _ code) =
+  freeIn' (Meta _ code) =
     freeIn' code
   freeIn' (DebugPrint _ v) =
     maybe mempty freeIn' v

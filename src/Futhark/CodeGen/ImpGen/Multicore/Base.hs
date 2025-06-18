@@ -151,7 +151,7 @@ isLoadBalanced :: Imp.MCCode -> Bool
 isLoadBalanced (a Imp.:>>: b) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.For _ _ a) = isLoadBalanced a
 isLoadBalanced (Imp.If _ a b) = isLoadBalanced a && isLoadBalanced b
-isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
+isLoadBalanced (Imp.Meta _ a) = isLoadBalanced a
 isLoadBalanced Imp.While {} = False
 isLoadBalanced (Imp.Op (Imp.ParLoop _ code _)) = isLoadBalanced code
 isLoadBalanced (Imp.Op (Imp.ForEachActive _ a)) = isLoadBalanced a
@@ -189,8 +189,8 @@ extractAllocations segop_code = f segop_code
       (mempty, Imp.While cond body)
     f (Imp.For i bound body) =
       (mempty, Imp.For i bound body)
-    f (Imp.Comment s code) =
-      second (Imp.Comment s) (f code)
+    f (Imp.Meta s code) =
+      second (Imp.Meta s) (f code)
     f Imp.Free {} =
       mempty
     f (Imp.If cond tcode fcode) =

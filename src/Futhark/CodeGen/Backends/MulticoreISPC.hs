@@ -474,7 +474,7 @@ compileExp (FunExp h args _) = do
 -- All recursive constructors are duplicated here, since not doing so
 -- would cause use to enter regular generic C codegen with no escape.
 compileCode :: MCCode -> ISPCCompilerM ()
-compileCode (Comment s code) = do
+compileCode (Meta (MetaComment s) code) = do
   xs <- GC.collect $ compileCode code
   let comment = "// " ++ T.unpack s
   GC.stm
@@ -729,7 +729,7 @@ mayProduceError (x :>>: y) = mayProduceError x || mayProduceError y
 mayProduceError (If _ x y) = mayProduceError x || mayProduceError y
 mayProduceError (For _ _ x) = mayProduceError x
 mayProduceError (While _ x) = mayProduceError x
-mayProduceError (Comment _ x) = mayProduceError x
+mayProduceError (Meta _ x) = mayProduceError x
 mayProduceError (Op (ForEachActive _ body)) = mayProduceError body
 mayProduceError (Op (ForEach _ _ _ body)) = mayProduceError body
 mayProduceError (Op SegOp {}) = True
@@ -1015,7 +1015,7 @@ findDeps (For idx bound x) = do
     free = freeIn bound
 findDeps (While cond x) = do
   local (<> freeIn cond) $ findDeps x
-findDeps (Comment _ x) =
+findDeps (Meta _ x) =
   findDeps x
 findDeps (Op (SegOp _ free _ _ retvals _)) =
   mapM_
@@ -1064,7 +1064,7 @@ findVarying (x :>>: y) = findVarying x ++ findVarying y
 findVarying (If _ x y) = findVarying x ++ findVarying y
 findVarying (For _ _ x) = findVarying x
 findVarying (While _ x) = findVarying x
-findVarying (Comment _ x) = findVarying x
+findVarying (Meta _ x) = findVarying x
 findVarying (Op (ForEachActive _ body)) = findVarying body
 findVarying (Op (ForEach idx _ _ body)) = idx : findVarying body
 findVarying (DeclareMem mem _) = [mem]

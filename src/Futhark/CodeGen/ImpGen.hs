@@ -1733,11 +1733,11 @@ sWhile cond body = do
   emit $ Imp.While cond body'
 
 -- | Execute a code generation action, wrapping the generated code
--- within a 'Imp.Comment' with the given description.
+-- within a 'Imp.MetaComment' with the given description.
 sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code
-  emit $ Imp.Comment s code'
+  emit $ Imp.Meta (Imp.MetaComment s) code'
 
 sIf :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op () -> ImpM rep r op ()
 sIf cond tbranch fbranch = do
