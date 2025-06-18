@@ -19,11 +19,12 @@ import Data.Text.Encoding (encodeUtf8Builder)
 
 -- | A thing that has occurred during execution.
 data ProfilingEvent = ProfilingEvent
-  { -- | Short, single line.
+  { -- | Short, single line, not instance-specific.
     eventName :: T.Text,
     -- | In microseconds.
     eventDuration :: Double,
-    -- | Long, may be multiple lines.
+    -- | Long, may be multiple lines, contains information about the specific
+    -- arguments and parameters.
     eventDescription :: T.Text
   }
   deriving (Eq, Ord, Show)
@@ -49,15 +50,22 @@ instance JSON.FromJSON ProfilingEvent where
 data ProfilingReport = ProfilingReport
   { profilingEvents :: [ProfilingEvent],
     -- | Mapping memory spaces to bytes.
-    profilingMemory :: M.Map T.Text Integer
+    profilingMemory :: M.Map T.Text Integer,
+    -- | Information about the names that can occur in 'eventName', which may
+    -- relate them to the source program.
+    profilingProvenance :: M.Map T.Text T.Text
   }
   deriving (Eq, Ord, Show)
 
+mapToJSON :: (JSON.ToJSON v) => M.Map T.Text v -> JSON.Value
+mapToJSON = JSON.object . map (bimap JSON.fromText JSON.toJSON) . M.toList
+
 instance JSON.ToJSON ProfilingReport where
-  toJSON (ProfilingReport events memory) =
+  toJSON (ProfilingReport events memory provenance) =
     JSON.object
       [ ("events", JSON.toJSON events),
-        ("memory", JSON.object $ map (bimap JSON.fromText JSON.toJSON) $ M.toList memory)
+        ("memory", mapToJSON memory),
+        ("provenance", mapToJSON provenance)
       ]
 
 instance JSON.FromJSON ProfilingReport where
@@ -65,6 +73,7 @@ instance JSON.FromJSON ProfilingReport where
     ProfilingReport
       <$> o JSON..: "events"
       <*> (JSON.toMapText <$> o JSON..: "memory")
+      <*> (JSON.toMapText <$> o JSON..: "provenance")
 
 -- | Read a profiling report from a bytestring containing JSON.
 decodeProfilingReport :: LBS.ByteString -> Maybe ProfilingReport

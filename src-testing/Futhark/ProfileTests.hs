@@ -21,3 +21,4 @@ instance Arbitrary ProfilingReport where
     ProfilingReport
       <$> arbitrary
       <*> (M.fromList <$> listOf ((,) <$> arbText <*> arbitrary))
+      <*> (M.fromList <$> listOf ((,) <$> arbText <*> arbText))
