@@ -731,6 +731,9 @@ compileStms alive_after_stms all_stms m = do
   cb <- asks envStmsCompiler
   cb alive_after_stms all_stms m
 
+attachProvenance :: Provenance -> Imp.Code op -> Imp.Code op
+attachProvenance p = if p == mempty then id else Imp.Meta (Imp.MetaProvenance p)
+
 defCompileStms ::
   (Mem rep inner, FreeIn op) =>
   Names ->
@@ -748,7 +751,7 @@ defCompileStms alive_after_stms all_stms m =
       dVars (Just e) (patElems pat)
 
       e_code <-
-        localAttrs (stmAuxAttrs aux) $
+        localAttrs (stmAuxAttrs aux) . fmap (attachProvenance (stmAuxLoc aux)) $
           collect $
             compileExp pat e
       (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs

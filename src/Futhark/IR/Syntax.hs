@@ -121,7 +121,6 @@ module Futhark.IR.Syntax
     PatElem (..),
     Pat (..),
     StmAux (..),
-    Provenance (..),
     Stm (..),
     Stms,
     SubExpRes (..),
@@ -200,17 +199,6 @@ instance Foldable Pat where
 instance Traversable Pat where
   traverse f (Pat xs) =
     Pat <$> traverse (traverse f) xs
-
--- | Information about what in the original program a given IR statement
--- corresponds to. See Note [Tracking Source Locations].
-newtype Provenance = Provenance Loc
-  deriving (Eq, Ord, Show)
-
-instance Semigroup Provenance where
-  Provenance x <> Provenance y = Provenance $ x <> y
-
-instance Monoid Provenance where
-  mempty = Provenance mempty
 
 -- | Auxilliary Information associated with a statement.
 data StmAux dec = StmAux

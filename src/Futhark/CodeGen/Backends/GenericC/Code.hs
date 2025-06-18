@@ -224,10 +224,11 @@ compileCode Skip = pure ()
 compileCode (Meta (MetaComment s) code) = do
   xs <- collect $ compileCode code
   let comment = "// " ++ T.unpack s
-  stm
-    [C.cstm|$comment:comment
-              { $items:xs }
-             |]
+  stm [C.cstm|$comment:comment { $items:xs } |]
+compileCode (Meta (MetaProvenance l) code) = do
+  xs <- collect $ compileCode code
+  let comment = T.unpack $ "// " <> prettyText l
+  stm [C.cstm|$comment:comment { $items:xs } |]
 compileCode (TracePrint msg) = do
   (formatstr, formatargs) <- errorMsgString msg
   stm [C.cstm|fprintf(ctx->log, $string:formatstr, $args:formatargs);|]

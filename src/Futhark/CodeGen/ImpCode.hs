@@ -117,6 +117,7 @@ import Futhark.IR.Syntax.Core
     ErrorMsgPart (..),
     OpaqueType (..),
     OpaqueTypes (..),
+    Provenance (..),
     Rank (..),
     Signedness (..),
     Space (..),
@@ -244,9 +245,11 @@ data ArrayContents
 
 -- | A piece of additional information attached to a piece of code, which should
 -- not have any effect on how it is executed.
-newtype Metadata
+data Metadata
   = -- | An informative comment that can be inserted into generated code.
     MetaComment T.Text
+  | -- | Where this bit of code came from.
+    MetaProvenance Provenance
   deriving (Eq, Ord, Show)
 
 -- | A block of imperative code.  Parameterised by an 'Op', which
@@ -652,6 +655,8 @@ instance (Pretty op) => Pretty (Code op) where
       <> parens (commasep $ map pretty args)
   pretty (Meta (MetaComment s) code) =
     "--" <+> pretty s </> pretty code
+  pretty (Meta (MetaProvenance l) code) =
+    "@" <+> align (pretty l) </> pretty code
   pretty (DebugPrint desc (Just e)) =
     "debug" <+> parens (commasep [pretty (show desc), pretty e])
   pretty (DebugPrint desc Nothing) =

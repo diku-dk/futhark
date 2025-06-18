@@ -1309,6 +1309,8 @@ compileCode (Imp.DeclareArray name t vs) = do
 compileCode (Imp.Meta (Imp.MetaComment s) code) = do
   code' <- collect $ compileCode code
   stm $ Comment (T.unpack s) code'
+compileCode (Imp.Meta _ code) =
+  compileCode code
 compileCode (Imp.Assert e msg (loc, locs)) = do
   e' <- compileExp e
   (formatstr, formatargs) <- errorMsgString msg
