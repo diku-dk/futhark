@@ -12,7 +12,7 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Parallel.Strategies
 import Data.Functor (($>))
-import Data.List (partition)
+import Data.List (partition, isPrefixOf)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -33,6 +33,11 @@ import Futhark.Transform.CopyPropagate
     copyPropagateInProg,
   )
 import Futhark.Transform.Rename
+
+-- cosmin changed: special functions not inlined
+do_not_inline :: S.Set Name
+do_not_inline = S.fromList $ map nameFromString 
+                  ["strip1", "strip2", "pad1D", "hlSched2D", "fuseSched2D"]
 
 parMapM :: (MonadFreshNames m) => (a -> State VNameSource b) -> [a] -> m [b]
 -- The special-casing of [] is quite important here!  If 'as' is
@@ -58,14 +63,17 @@ inlineFunctions ::
   S.Set Name ->
   Prog SOACS ->
   m (Prog SOACS)
-inlineFunctions simplify_rate cg what_should_be_inlined prog = do
-  let consts = progConsts prog
+inlineFunctions simplify_rate cg what_should_be_inlined0 prog = do
+  let what_should_be_inlined = S.filter canInline what_should_be_inlined0
+      consts = progConsts prog
       funs = progFuns prog
       vtable = ST.fromScope (addScopeWisdom (scopeOf consts))
 
   (consts', funs') <- recurse (1, vtable) (consts, funs) what_should_be_inlined
   pure $ prog {progConsts = consts', progFuns = funs'}
   where
+    canInline fnm = null $ S.filter (`isPrefixOf` (nameToString fnm))
+                         $ S.map nameToString do_not_inline
     fdmap fds = M.fromList $ zip (map funDefName fds) fds
 
     noCallsTo which from = S.null $ allCalledBy from cg `S.intersection` which

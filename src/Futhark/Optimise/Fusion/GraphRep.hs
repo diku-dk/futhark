@@ -41,6 +41,7 @@ module Futhark.Optimise.Fusion.GraphRep
     mkDepGraph,
     mkDepGraphForFun,
     pprg,
+    isHLschedNodeT,
     isWithAccNodeT,
     isWithAccNodeId,
     vFusionFeasability,
@@ -435,6 +436,14 @@ isInf (_, _, e) = case e of
 isCons :: EdgeT -> Bool
 isCons (Cons _) = True
 isCons _ = False
+
+-- | Is this a high-level schedule?
+isHLschedNodeT :: NodeT -> Bool
+isHLschedNodeT (StmNode (Let _ _ (Apply fnm _ _ _))) =
+  any (`L.isPrefixOf` (nameToString fnm)) hl_sched_prefixes
+  where
+    hl_sched_prefixes = ["hlSched2D", "fuseSched2D"]
+isHLschedNodeT _ = False
 
 -- | Is this a withAcc?
 isWithAccNodeT :: NodeT -> Bool

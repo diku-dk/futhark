@@ -28,6 +28,7 @@ module Futhark.Optimise.Simplify.Engine
     emptyEnv,
     HoistBlockers (..),
     neverBlocks,
+    alwaysBlocks,
     noExtraHoistBlockers,
     neverHoist,
     BlockPred,

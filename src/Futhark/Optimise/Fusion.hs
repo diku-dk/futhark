@@ -23,6 +23,7 @@ import Futhark.IR.SOACS qualified as Futhark
 import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion.GraphRep
 import Futhark.Optimise.Fusion.RulesWithAccs qualified as SF
+import Futhark.Optimise.Fusion.HLsched qualified as HLS
 import Futhark.Optimise.Fusion.TryFusion qualified as TF
 import Futhark.Pass
 import Futhark.Transform.Rename
@@ -473,9 +474,11 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
   spec_rule_res <- SF.ruleMFScat node_to_fuse dg
   -- \^ specialized fusion rules such as the one
   --   enabling map-flatten-scatter fusion
-  case spec_rule_res of
-    Just dg' -> pure dg'
-    Nothing -> applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
+  test_hl_sched <- HLS.applyHLsched node_to_fuse dg
+  case (spec_rule_res, test_hl_sched) of
+    (_, Just dg') -> pure dg' 
+    (Just dg', _) -> pure dg'
+    (Nothing,  _) -> applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
   where
     node_to_fuse_id = nodeFromLNode node_to_fuse
     relevant (n, InfDep _) = isWithAccNodeId n dg
@@ -485,7 +488,7 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
 doVerticalFusion :: DepGraphAug FusionM
 doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relevant $ G.labNodes (dgGraph dg)) dg
   where
-    relevant (_, n@(StmNode {})) = isWithAccNodeT n
+    relevant (_, n@(StmNode {})) = isWithAccNodeT n || isHLschedNodeT n
     relevant (_, ResNode {}) = False
     relevant _ = True
 

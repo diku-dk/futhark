@@ -51,9 +51,14 @@ import Futhark.Util
 simpleSOACS :: Simplify.SimpleOps SOACS
 simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
 
+dont_hoist_from_par :: Engine.HoistBlockers SOACS
+dont_hoist_from_par = Engine.HoistBlockers Engine.alwaysBlocks Engine.neverBlocks Engine.neverBlocks (const False)
+
 simplifySOACS :: Prog SOACS -> PassM (Prog SOACS)
 simplifySOACS =
-  Simplify.simplifyProg simpleSOACS soacRules Engine.noExtraHoistBlockers
+--  Simplify.simplifyProg simpleSOACS soacRules Engine.noExtraHoistBlockers
+  -- cosmin changed such that nothing is hoisted from maps
+  Simplify.simplifyProg simpleSOACS soacRules dont_hoist_from_par
 
 simplifyFun ::
   (MonadFreshNames m) =>
@@ -61,12 +66,16 @@ simplifyFun ::
   FunDef SOACS ->
   m (FunDef SOACS)
 simplifyFun =
-  Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
+--  Simplify.simplifyFun simpleSOACS soacRules Engine.noExtraHoistBlockers
+  -- cosmin changed such that nothing is hoisted from maps
+  Simplify.simplifyFun simpleSOACS soacRules dont_hoist_from_par
 
 simplifyLambda ::
   (HasScope SOACS m, MonadFreshNames m) => Lambda SOACS -> m (Lambda SOACS)
 simplifyLambda =
-  Simplify.simplifyLambda simpleSOACS soacRules Engine.noExtraHoistBlockers
+--  Simplify.simplifyLambda simpleSOACS soacRules Engine.noExtraHoistBlockers
+  -- cosmin changed such that nothing is hoisted from maps
+  Simplify.simplifyLambda simpleSOACS soacRules dont_hoist_from_par
 
 simplifyStms ::
   (HasScope SOACS m, MonadFreshNames m) => Stms SOACS -> m (Stms SOACS)
@@ -205,7 +214,7 @@ topDownRules =
     RuleOp liftIdentityMapping,
     RuleOp removeDuplicateMapOutput,
     RuleOp fuseConcatScatter,
-    RuleOp simplifyMapIota,
+    -- RuleOp simplifyMapIota, -- cosmin disabled
     RuleOp moveTransformToInput,
     RuleOp moveTransformToOutput
   ]
