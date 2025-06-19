@@ -124,7 +124,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Parallel.Strategies
-import Data.Bifunctor (first)
+import Data.Bifunctor (first, second)
 import Data.DList qualified as DL
 import Data.Either
 import Data.List (find)
@@ -1889,6 +1889,8 @@ function fname outputs inputs m = local newFunction $ do
 constParams :: Names -> Imp.Code a -> (DL.DList Imp.Param, Imp.Code a)
 constParams used (x Imp.:>>: y) =
   constParams used x <> constParams used y
+constParams used (Imp.Meta s x) =
+  second (Imp.Meta s) $ constParams used x
 constParams used (Imp.DeclareMem name space)
   | name `nameIn` used =
       ( DL.singleton $ Imp.MemParam name space,
