@@ -36,6 +36,7 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     items,
     stm,
     stms,
+    comment,
     decl,
     headerDecl,
     publicDef,
@@ -358,11 +359,19 @@ inNewFunction m = do
   where
     noCached env = env {envCachedMem = mempty}
 
+-- | Insert a block item in the generated code at this point.
 item :: C.BlockItem -> CompilerM op s ()
 item x = modify $ \s -> s {compItems = DL.snoc (compItems s) x}
 
 items :: [C.BlockItem] -> CompilerM op s ()
 items xs = modify $ \s -> s {compItems = DL.append (compItems s) (DL.fromList xs)}
+
+-- | Insert a comment in the generated code at this point. The comment may
+-- contain linebreaks, and must not contain any comment markers.
+comment :: T.Text -> CompilerM op s ()
+comment = mapM_ (f . ("// " <>)) . T.lines
+  where
+    f s = stm [C.cstm|$escstm:(T.unpack s)|]
 
 fatMemory :: Space -> CompilerM op s Bool
 fatMemory ScalarSpace {} = pure False
@@ -425,6 +434,7 @@ onClear :: C.BlockItem -> CompilerM op s ()
 onClear x = modify $ \s ->
   s {compClearItems = compClearItems s <> DL.singleton x}
 
+-- | Insert a statement in the generated code at this point.
 stm :: C.Stm -> CompilerM op s ()
 stm s = item [C.citem|$stm:s|]
 

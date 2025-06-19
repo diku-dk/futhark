@@ -748,12 +748,12 @@ defCompileStms alive_after_stms all_stms m =
   void $ compileStms' mempty $ stmsToList all_stms
   where
     compileStms' allocs (Let pat aux e : bs) = do
-      dVars (Just e) (patElems pat)
-
-      e_code <-
-        localAttrs (stmAuxAttrs aux) . fmap (attachProvenance (stmAuxLoc aux)) $
-          collect $
-            compileExp pat e
+      e_code <- fmap (attachProvenance (stmAuxLoc aux))
+        . localAttrs (stmAuxAttrs aux)
+        . collect
+        $ do
+          dVars (Just e) (patElems pat)
+          compileExp pat e
       (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
       let dies_here v =
             (v `notNameIn` live_after) && (v `nameIn` freeIn e_code)
