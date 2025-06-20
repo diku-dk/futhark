@@ -424,12 +424,14 @@ lookupTyVar tv =
     unpack (Solved t) = Right t
     unpack (Unsolved info) = Left info
 
-lookupTyVarInfo :: TyVar -> SolveM s (TyVarInfo ())
-lookupTyVarInfo v = do
-  r <- lookupTyVar v
+lookupTyVarInfo :: TyVarNode s -> SolveM s (TyVarInfo ())
+lookupTyVarInfo v_node = do
+  r <- getSol' v_node
   case r of
-    Left info -> pure info
-    Right _ -> error $ "Tyvar is nonflexible: " <> prettyNameString v
+    Unsolved info -> pure info
+    _ -> do
+      v <- getKey' v_node
+      error $ "Tyvar is nonflexible: " <> prettyNameString v
 
 lookupUF :: TyVar -> SolveM s (TyVarNode s)
 lookupUF tv = do
