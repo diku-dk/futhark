@@ -19,11 +19,12 @@ import Data.Text.Encoding (encodeUtf8Builder)
 
 -- | A thing that has occurred during execution.
 data ProfilingEvent = ProfilingEvent
-  { -- | Short, single line.
+  { -- | Short, single line, not instance-specific.
     eventName :: T.Text,
     -- | In microseconds.
     eventDuration :: Double,
-    -- | Long, may be multiple lines.
+    -- | Long, may be multiple lines, contains information about the specific
+    -- arguments and parameters.
     eventDescription :: T.Text
   }
   deriving (Eq, Ord, Show)
@@ -53,11 +54,14 @@ data ProfilingReport = ProfilingReport
   }
   deriving (Eq, Ord, Show)
 
+mapToJSON :: (JSON.ToJSON v) => M.Map T.Text v -> JSON.Value
+mapToJSON = JSON.object . map (bimap JSON.fromText JSON.toJSON) . M.toList
+
 instance JSON.ToJSON ProfilingReport where
   toJSON (ProfilingReport events memory) =
     JSON.object
       [ ("events", JSON.toJSON events),
-        ("memory", JSON.object $ map (bimap JSON.fromText JSON.toJSON) $ M.toList memory)
+        ("memory", mapToJSON memory)
       ]
 
 instance JSON.FromJSON ProfilingReport where

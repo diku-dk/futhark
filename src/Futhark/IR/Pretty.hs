@@ -148,9 +148,15 @@ stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 instance Pretty Attrs where
   pretty = hsep . attrAnnots
 
+prettyLoc :: Loc -> Doc a
+prettyLoc = pretty . locText
+
+instance Pretty Provenance where
+  pretty (Provenance loc) = prettyLoc loc
+
 instance (Pretty dec) => Pretty (StmAux dec) where
-  pretty (StmAux cs attrs dec) =
-    braces $ mconcat $ punctuate semi [pretty cs, pretty attrs, pretty dec]
+  pretty (StmAux cs attrs p dec) =
+    braces $ mconcat $ punctuate semi [pretty cs, pretty attrs, pretty p, pretty dec]
 
 instance (Pretty t) => Pretty (Pat t) where
   pretty (Pat xs) = braces $ commastack $ map pretty xs
@@ -164,13 +170,18 @@ instance (Pretty t) => Pretty (Param t) where
 
 instance (PrettyRep rep) => Pretty (Stm rep) where
   pretty stm@(Let pat aux e) =
-    align . hang 2 $
+    (locstr <>) . align . hang 2 $
       "let"
         <+> align (pretty pat)
         <+> case stmannot of
           [] -> equals </> pretty e
           _ -> equals </> (stack stmannot </> pretty e)
     where
+      locstr =
+        if stmAuxLoc aux == mempty
+          then mempty
+          else dquotes (pretty (stmAuxLoc aux)) <> line
+
       stmannot =
         concat
           [ maybeToList (ppExpDec (stmAuxDec aux) e),

@@ -56,10 +56,10 @@ rephraseExp = mapExpM . mapper
 
 -- | Rephrase a statement.
 rephraseStm :: (Monad m) => Rephraser m from to -> Stm from -> m (Stm to)
-rephraseStm rephraser (Let pat (StmAux cs attrs dec) e) =
+rephraseStm rephraser (Let pat aux e) =
   Let
     <$> rephrasePat (rephraseLetBoundDec rephraser) pat
-    <*> (StmAux cs attrs <$> rephraseExpDec rephraser dec)
+    <*> traverse (rephraseExpDec rephraser) aux
     <*> rephraseExp rephraser e
 
 -- | Rephrase a pattern.

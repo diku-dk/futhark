@@ -28,6 +28,14 @@ import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
+provenanceExp :: GC.CompilerM op s C.Exp
+provenanceExp = do
+  p <- GC.askProvenance
+  pure $
+    if p == mempty
+      then [C.cexp|NULL|]
+      else [C.cexp|$string:(prettyString p)|]
+
 genKernelFunction ::
   KernelName ->
   KernelSafety ->
@@ -36,6 +44,7 @@ genKernelFunction ::
   GC.CompilerM op s Name
 genKernelFunction kernel_name safety arg_params arg_set = do
   let kernel_fname = "gpu_kernel_" <> kernel_name
+  provenance <- provenanceExp
   GC.libDecl
     [C.cedecl|static int $id:kernel_fname
                (struct futhark_context* ctx,
@@ -46,7 +55,7 @@ genKernelFunction kernel_name safety arg_params arg_set = do
       void* args[$int:num_args] = { $inits:(failure_inits<>args_inits) };
       size_t args_sizes[$int:num_args] = { $inits:(failure_sizes<>args_sizes) };
       return gpu_launch_kernel(ctx, ctx->program->$id:kernel_name,
-                               $string:(prettyString kernel_name),
+                               $string:(prettyString kernel_name), $exp:provenance,
                                (const typename int32_t[]){grid_x, grid_y, grid_z},
                                (const typename int32_t[]){block_x, block_y, block_z},
                                shared_bytes,
@@ -162,10 +171,13 @@ copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
       srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
       shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
+
+  provenance <- provenanceExp
+
   GC.stm
     [C.cstm|
          if ((err =
-                $id:fname(ctx, $int:r,
+                $id:fname(ctx, $exp:provenance, $int:r,
                           $exp:dst, $exp:(unCount dstoffset),
                           (typename int64_t[]){ $inits:dststride_inits },
                           $exp:src, $exp:(unCount srcoffset),

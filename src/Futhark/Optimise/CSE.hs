@@ -209,28 +209,28 @@ cseInStm ::
   Stm rep ->
   ([Stm rep] -> CSEM rep a) ->
   CSEM rep a
-cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
+cseInStm consumed (Let pat aux e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = normExp $ substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
   if not (alreadyAliases e) && any (bad cse_arrays) (patElems pat)
-    then m [Let pat' (StmAux cs attrs edec) e']
-    else case M.lookup (edec, e') esubsts of
+    then m [Let pat' aux e']
+    else case M.lookup (stmAuxDec aux, e') esubsts of
       Just (subcs, subpat) -> do
-        let subsumes = all (`elem` unCerts subcs) (unCerts cs)
+        let subsumes = all (`elem` unCerts subcs) (unCerts (stmAuxCerts aux))
         -- We can only do a plain name substitution if it doesn't
         -- violate any certificate dependencies.
         local (if subsumes then addNameSubst pat' subpat else id) $ do
           let lets =
-                [ Let (Pat [patElem']) (StmAux cs attrs edec) $
+                [ Let (Pat [patElem']) aux $
                     BasicOp (SubExp $ Var $ patElemName patElem)
                   | (name, patElem) <- zip (patNames pat') $ patElems subpat,
                     let patElem' = patElem {patElemName = name}
                 ]
           m lets
       _ ->
-        local (addExpSubst pat' edec cs e') $
-          m [Let pat' (StmAux cs attrs edec) e']
+        local (addExpSubst pat' (stmAuxDec aux) (stmAuxCerts aux) e') $
+          m [Let pat' aux e']
   where
     alreadyAliases (BasicOp Index {}) = True
     alreadyAliases (BasicOp Reshape {}) = True

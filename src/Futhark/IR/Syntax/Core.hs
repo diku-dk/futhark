@@ -73,6 +73,9 @@ module Futhark.IR.Syntax.Core
     FlatDimIndex (..),
     flatSliceDims,
     flatSliceStrides,
+
+    -- * Provenance
+    Provenance (..),
   )
 where
 
@@ -642,3 +645,14 @@ instance Monoid OpaqueTypes where
 instance Semigroup OpaqueTypes where
   OpaqueTypes x <> OpaqueTypes y =
     OpaqueTypes $ x <> filter ((`notElem` map fst x) . fst) y
+
+-- | Information about what in the original program a given IR statement
+-- corresponds to. See Note [Tracking Source Locations].
+newtype Provenance = Provenance Loc
+  deriving (Eq, Ord, Show)
+
+instance Semigroup Provenance where
+  Provenance x <> Provenance y = Provenance $ x <> y
+
+instance Monoid Provenance where
+  mempty = Provenance mempty

@@ -48,6 +48,7 @@ module Futhark.CodeGen.ImpGen
     lookupMemory,
     lookupAcc,
     askAttrs,
+    askProvenance,
 
     -- * Building Blocks
     TV,
@@ -124,7 +125,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Parallel.Strategies
-import Data.Bifunctor (first)
+import Data.Bifunctor (first, second)
 import Data.DList qualified as DL
 import Data.Either
 import Data.List (find)
@@ -257,7 +258,10 @@ data Env rep r op = Env
     envFunction :: Maybe Name,
     -- | The set of attributes that are active on the enclosing
     -- statements (including the one we are currently compiling).
-    envAttrs :: Attrs
+    envAttrs :: Attrs,
+    -- | The provenance of whatever we are currently generating code for. This
+    -- can be used to insert information in the generated code.
+    envProvenance :: Provenance
   }
 
 newEnv :: r -> Operations rep r op -> Imp.Space -> Env rep r op
@@ -272,7 +276,8 @@ newEnv r ops ds =
       envVolatility = Imp.Nonvolatile,
       envEnv = r,
       envFunction = Nothing,
-      envAttrs = mempty
+      envAttrs = mempty,
+      envProvenance = mempty
     }
 
 -- | The symbol table used during compilation.
@@ -731,6 +736,9 @@ compileStms alive_after_stms all_stms m = do
   cb <- asks envStmsCompiler
   cb alive_after_stms all_stms m
 
+attachProvenance :: Provenance -> Imp.Code op -> Imp.Code op
+attachProvenance p = if p == mempty then id else Imp.Meta (Imp.MetaProvenance p)
+
 defCompileStms ::
   (Mem rep inner, FreeIn op) =>
   Names ->
@@ -745,12 +753,13 @@ defCompileStms alive_after_stms all_stms m =
   void $ compileStms' mempty $ stmsToList all_stms
   where
     compileStms' allocs (Let pat aux e : bs) = do
-      dVars (Just e) (patElems pat)
-
-      e_code <-
-        localAttrs (stmAuxAttrs aux) $
-          collect $
-            compileExp pat e
+      e_code <- fmap (attachProvenance (stmAuxLoc aux))
+        . localAttrs (stmAuxAttrs aux)
+        . collect
+        . localProvenance (stmAuxLoc aux)
+        $ do
+          dVars (Just e) (patElems pat)
+          compileExp pat e
       (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
       let dies_here v =
             (v `notNameIn` live_after) && (v `nameIn` freeIn e_code)
@@ -1326,6 +1335,25 @@ askAttrs = asks envAttrs
 localAttrs :: Attrs -> ImpM rep r op a -> ImpM rep r op a
 localAttrs attrs = local $ \env -> env {envAttrs = attrs <> envAttrs env}
 
+-- | The provenance of whatever we are currently generating code for.
+askProvenance :: ImpM rep r op Provenance
+askProvenance = asks envProvenance
+
+-- | Wrap any code emitted in the enclosed section with the current provenance,
+-- if any.
+withProvenance :: ImpM rep r op () -> ImpM rep r op ()
+withProvenance m = do
+  p <- askProvenance
+  if p == mempty
+    then m
+    else do
+      c <- collect m
+      emit $ Imp.Meta (Imp.MetaProvenance p) c
+
+-- | Replace (*not* extend) the provenance while executing some action.
+localProvenance :: Provenance -> ImpM rep r op a -> ImpM rep r op a
+localProvenance p = local $ \env -> env {envProvenance = p}
+
 localOps :: Operations rep r op -> ImpM rep r op a -> ImpM rep r op a
 localOps ops = local $ \env ->
   env
@@ -1478,7 +1506,7 @@ lmadCopy t dstloc srcloc = do
       srclmad = memLocLMAD srcloc
   srcspace <- entryMemSpace <$> lookupMemory srcmem
   dstspace <- entryMemSpace <$> lookupMemory dstmem
-  emit $
+  withProvenance . emit $
     Imp.Copy
       t
       (elements <$> LMAD.shape dstlmad)
@@ -1733,11 +1761,11 @@ sWhile cond body = do
   emit $ Imp.While cond body'
 
 -- | Execute a code generation action, wrapping the generated code
--- within a 'Imp.Comment' with the given description.
+-- within a 'Imp.MetaComment' with the given description.
 sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code
-  emit $ Imp.Comment s code'
+  emit $ Imp.Meta (Imp.MetaComment s) code'
 
 sIf :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op () -> ImpM rep r op ()
 sIf cond tbranch fbranch = do
@@ -1886,6 +1914,8 @@ function fname outputs inputs m = local newFunction $ do
 constParams :: Names -> Imp.Code a -> (DL.DList Imp.Param, Imp.Code a)
 constParams used (x Imp.:>>: y) =
   constParams used x <> constParams used y
+constParams used (Imp.Meta s x) =
+  second (Imp.Meta s) $ constParams used x
 constParams used (Imp.DeclareMem name space)
   | name `nameIn` used =
       ( DL.singleton $ Imp.MemParam name space,

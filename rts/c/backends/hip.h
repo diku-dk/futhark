@@ -847,7 +847,8 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
 }
 
 static int gpu_launch_kernel(struct futhark_context* ctx,
-                             gpu_kernel kernel, const char *name,
+                             gpu_kernel kernel,
+                             const char *name, const char *provenance,
                              const int32_t grid[3],
                              const int32_t block[3],
                              unsigned int shared_mem_bytes,
@@ -873,10 +874,12 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
     add_event(ctx,
               name,
-              msgprintf("Kernel %s with\n"
+              msgprintf("At: %s\n"
+                        "Kernel %s with\n"
                         "  grid=(%d,%d,%d)\n"
                         "  block=(%d,%d,%d)\n"
                         "  shared memory=%d",
+                        provenance ? provenance : "unknown",
                         name,
                         grid[0], grid[1], grid[2],
                         block[0], block[1], block[2],
