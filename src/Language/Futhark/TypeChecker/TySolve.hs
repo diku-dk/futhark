@@ -204,7 +204,7 @@ substTyVars (Scalar (Sum cs)) =
 substTyVars (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
   t1' <- substTyVars t1
   t2' <- substTyVars t2
-  pure $ Scalar $ Arrow u pname d t1' $ RetType ext $ 
+  pure $ Scalar $ Arrow u pname d t1' $ RetType ext $
     t2' `setUniqueness` uniqueness t2
 substTyVars (Array u shape elemt) = do
   elemt' <- substTyVars $ Scalar elemt
@@ -341,7 +341,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
             else tryUnify t1' t2' reason bcs
         (_, Scalar (TypeVar _ (QualName [] v2) [])) -> do
           (v2_flexible, mb_node) <- flexible v2
-          if v2_flexible 
+          if v2_flexible
             then bindTyVar reason bcs v2 (fromJust mb_node) t1'
             else tryUnify t1' t2' reason bcs
         (_, _) -> tryUnify t1' t2' reason bcs
@@ -350,7 +350,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
     tryUnify t1 t2 r bcs =
       case unify t1 t2 of
         Left details -> cannotUnify r (aNote details) bcs t1 t2
-        Right eqs -> mapM_ solveCt' eqs        
+        Right eqs -> mapM_ solveCt' eqs
 
 -- | Unify at the root, emitting new equalities that must hold.
 unify :: Type -> Type -> Either (Doc a) [(BreadCrumbs, (Type, Type))]
@@ -673,41 +673,47 @@ maybeLookupUF tv = do
 getSolution :: SolveM s ([UnconTyVar], Solution)
 getSolution = do
   uf <- asks solverTyVars
-  unconstrained <- M.traverseMaybeWithKey unconstr uf
-  sol <- M.traverseMaybeWithKey mkSubst uf
-  pure (M.elems unconstrained, sol)
+  resolved <- M.traverseWithKey resolve uf
+  let unconstrained = M.foldrWithKey' unconstr [] resolved
+      sol = M.mapMaybeWithKey mkSubst resolved
+  pure (unconstrained, sol)
 
   where
-    unconstr :: TyVar -> TyVarNode s -> SolveM s (Maybe UnconTyVar)
-    unconstr tv node = do
+    resolve :: TyVar -> TyVarNode s -> SolveM s (Either [PrimType] (TypeBase () NoUniqueness), Maybe Liftedness)
+    resolve tv node = do
       sol <- getSol' node
       case sol of
         Unsolved (TyVarFree _ l) -> do
           k <- getKey' node
-          -- This type variable is only unconstrained if it's also the
-          -- representative; otherwise, it must be linked to the type
-          -- variable 'k'.
-          pure $ if k == tv
-            then Just (tv, l)
-            else Nothing
-        _ -> pure Nothing
+          let tv' = typeVar k
+          pure (Right tv', if k == tv then Just l else Nothing)
 
-    mkSubst :: 
-      TyVar ->
-      TyVarNode s ->
-      SolveM s (Maybe (Either [PrimType] (TypeBase () NoUniqueness)))
-    mkSubst tv node = do
-      sol <- getSol' node
-      case sol of
+        Unsolved (TyVarPrim _ pts) -> pure (Left pts, Nothing)
+
         Solved t -> do
           t' <- substTyVars t
-          pure . Just . Right $ first (const ()) t'
-        Unsolved (TyVarPrim _ pts) -> pure $ Just $ Left pts
+          pure (Right $ first (const ()) t', Nothing)
+
         _ -> do
           k <- getKey' node
-          pure $ if tv /= k
-            then Just . Right $ typeVar k
-            else Nothing
+          pure (Right $ typeVar k, Nothing)
+
+    unconstr :: 
+      TyVar ->
+      (Either [PrimType] (TypeBase () NoUniqueness), Maybe Liftedness) ->
+      [UnconTyVar] ->
+      [UnconTyVar]
+    unconstr tv (_, Just l) acc = (tv, l) : acc
+    unconstr _ _ acc = acc
+
+    mkSubst ::
+      TyVar ->
+      (Either [PrimType] (TypeBase () NoUniqueness), Maybe Liftedness) -> 
+      Maybe (Either [PrimType] (TypeBase () NoUniqueness))
+    mkSubst _ (_, Just _) = Nothing
+    mkSubst tv (s@(Right (Scalar (TypeVar _ (QualName [] tv') _))), _) =
+      if tv == tv' then Nothing else Just s
+    mkSubst _ (s, _) = Just s
 
 -- | Print in a way helpful for writing a test case for TySolveTests.
 logSolution ::
