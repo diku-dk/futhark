@@ -471,12 +471,10 @@ unifySharedConstructors reason bcs cs1 cs2 =
 setInfo :: TyVarNode s -> TyVarSol -> SolveM s ()
 setInfo node sol = liftST $ assignNewSol node sol
 
-unionTyVars :: Reason Type -> BreadCrumbs -> VName -> VName -> SolveM s ()
-unionTyVars reason bcs v t = do
-  v_node <- lookupUF v
-  t_node <- lookupUF t
+unionTyVars :: Reason Type -> BreadCrumbs -> VName -> TyVarNode s -> TyVarNode s -> SolveM s ()
+unionTyVars reason bcs v v_node t_node = do
   v_sol <- getSol' v_node
-  t_info <- lookupTyVarInfo t
+  t_info <- lookupTyVarInfo t_node
 
   -- Unify the equivalence classes of v and t.
   union' v_node t_node
