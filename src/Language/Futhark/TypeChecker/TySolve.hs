@@ -656,10 +656,6 @@ solveTyVar (tv, (lvl, TyVarFree loc l)) = do
 solveTyVar (tv, (_, TyVarPrim loc pts)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
-    Right t@(Scalar (Prim ty))
-      | [ty] == pts -> do
-          node <- lookupUF tv
-          setInfo node $ Solved t
     Right ty
       | ty `elem` map (Scalar . Prim) pts -> pure ()
       | otherwise ->
