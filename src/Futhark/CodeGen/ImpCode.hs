@@ -78,6 +78,7 @@ module Futhark.CodeGen.ImpCode
     calledFuncs,
     callGraph,
     ParamMap,
+    foldProvenances,
 
     -- * Typed enumerations
     Bytes,
@@ -268,6 +269,11 @@ data Code a
   | -- | While loop.  The conditional is (of course)
     -- re-evaluated before every iteration of the loop.
     While (TExp Bool) (Code a)
+  | -- | Conditional execution.
+    If (TExp Bool) (Code a) (Code a)
+  | -- | Has the same semantics as the contained code, but attach some
+    -- nonsemantic metadata.
+    Meta Metadata (Code a)
   | -- | Declare a memory block variable that will point to
     -- memory in the given memory space.  Note that this is
     -- distinct from allocation.  The memory block must be the
@@ -319,15 +325,10 @@ data Code a
   | -- | Function call.  The results are written to the
     -- provided 'VName' variables.
     Call [VName] Name [Arg]
-  | -- | Conditional execution.
-    If (TExp Bool) (Code a) (Code a)
   | -- | Assert that something must be true.  Should it turn
     -- out not to be true, then report a failure along with
     -- the given error message.
     Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
-  | -- | Has the same semantics as the contained code, but attach some
-    -- nonsemantic metadata.
-    Meta Metadata (Code a)
   | -- | Print the given value to the screen, somehow
     -- annotated with the given string as a description.  If
     -- no type/value pair, just print the string.  This has
@@ -432,6 +433,17 @@ callGraph f (Functions funs) =
       let grow v = maybe (S.singleton v) (S.insert v) (M.lookup v cur)
           next = M.map (foldMap grow) cur
        in if next == cur then cur else loop next
+
+-- | Combine the provenances of all the 'Imp.MetaProvenance' in the provided code.
+foldProvenances :: (op -> Provenance) -> Code op -> Provenance
+foldProvenances f (Meta (MetaProvenance p) c) = p <> foldProvenances f c
+foldProvenances f (Meta _ c) = foldProvenances f c
+foldProvenances f (x :>>: y) = foldProvenances f x <> foldProvenances f y
+foldProvenances f (For _ _ c) = foldProvenances f c
+foldProvenances f (While _ c) = foldProvenances f c
+foldProvenances f (If _ x y) = foldProvenances f x <> foldProvenances f y
+foldProvenances f (Op x) = f x
+foldProvenances _ _ = mempty
 
 -- | A mapping from names of tuning parameters to their class, as well
 -- as which functions make use of them (including transitively).

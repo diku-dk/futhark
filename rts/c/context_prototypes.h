@@ -20,9 +20,11 @@ static void host_alloc(struct futhark_context* ctx, size_t size, const char* tag
 // Allocate memory allocated with host_alloc().
 static void host_free(struct futhark_context* ctx, size_t size, const char* tag, void* mem);
 
-// Log that a copy has occurred.
+// Log that a copy has occurred. The provenance may be NULL, if we do not know
+// where this came from.
 static void log_copy(struct futhark_context* ctx,
-                     const char *kind, int r,
+                     const char *kind, const char *provenance,
+                     int r,
                      int64_t dst_offset, int64_t dst_strides[r],
                      int64_t src_offset, int64_t src_strides[r],
                      int64_t shape[r]);

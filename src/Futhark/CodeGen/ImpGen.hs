@@ -48,6 +48,7 @@ module Futhark.CodeGen.ImpGen
     lookupMemory,
     lookupAcc,
     askAttrs,
+    askProvenance,
 
     -- * Building Blocks
     TV,
@@ -257,7 +258,10 @@ data Env rep r op = Env
     envFunction :: Maybe Name,
     -- | The set of attributes that are active on the enclosing
     -- statements (including the one we are currently compiling).
-    envAttrs :: Attrs
+    envAttrs :: Attrs,
+    -- | The provenance of whatever we are currently generating code for. This
+    -- can be used to insert information in the generated code.
+    envProvenance :: Provenance
   }
 
 newEnv :: r -> Operations rep r op -> Imp.Space -> Env rep r op
@@ -272,7 +276,8 @@ newEnv r ops ds =
       envVolatility = Imp.Nonvolatile,
       envEnv = r,
       envFunction = Nothing,
-      envAttrs = mempty
+      envAttrs = mempty,
+      envProvenance = mempty
     }
 
 -- | The symbol table used during compilation.
@@ -751,6 +756,7 @@ defCompileStms alive_after_stms all_stms m =
       e_code <- fmap (attachProvenance (stmAuxLoc aux))
         . localAttrs (stmAuxAttrs aux)
         . collect
+        . localProvenance (stmAuxLoc aux)
         $ do
           dVars (Just e) (patElems pat)
           compileExp pat e
@@ -1329,6 +1335,25 @@ askAttrs = asks envAttrs
 localAttrs :: Attrs -> ImpM rep r op a -> ImpM rep r op a
 localAttrs attrs = local $ \env -> env {envAttrs = attrs <> envAttrs env}
 
+-- | The provenance of whatever we are currently generating code for.
+askProvenance :: ImpM rep r op Provenance
+askProvenance = asks envProvenance
+
+-- | Wrap any code emitted in the enclosed section with the current provenance,
+-- if any.
+withProvenance :: ImpM rep r op () -> ImpM rep r op ()
+withProvenance m = do
+  p <- askProvenance
+  if p == mempty
+    then m
+    else do
+      c <- collect m
+      emit $ Imp.Meta (Imp.MetaProvenance p) c
+
+-- | Replace (*not* extend) the provenance while executing some action.
+localProvenance :: Provenance -> ImpM rep r op a -> ImpM rep r op a
+localProvenance p = local $ \env -> env {envProvenance = p}
+
 localOps :: Operations rep r op -> ImpM rep r op a -> ImpM rep r op a
 localOps ops = local $ \env ->
   env
@@ -1481,7 +1506,7 @@ lmadCopy t dstloc srcloc = do
       srclmad = memLocLMAD srcloc
   srcspace <- entryMemSpace <$> lookupMemory srcmem
   dstspace <- entryMemSpace <$> lookupMemory dstmem
-  emit $
+  withProvenance . emit $
     Imp.Copy
       t
       (elements <$> LMAD.shape dstlmad)

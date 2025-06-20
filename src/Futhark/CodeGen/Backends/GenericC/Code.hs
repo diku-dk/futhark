@@ -227,7 +227,7 @@ compileCode (Meta (MetaComment s) code) = do
   stm [C.cstm|$comment:s' { $items:xs } |]
 compileCode (Meta (MetaProvenance l) code) = do
   comment $ prettyText l
-  compileCode code
+  localProvenance l $ compileCode code
 compileCode (TracePrint msg) = do
   (formatstr, formatargs) <- errorMsgString msg
   stm [C.cstm|fprintf(ctx->log, $string:formatstr, $args:formatargs);|]

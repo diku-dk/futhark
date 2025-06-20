@@ -61,6 +61,8 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     collect',
     contextType,
     configType,
+    localProvenance,
+    askProvenance,
 
     -- * Building Blocks
     copyMemoryDefaultSpace,
@@ -259,7 +261,9 @@ data CompilerEnv op s = CompilerEnv
     -- pressure, we keep these allocations around for a long time, and
     -- record their sizes so we can reuse them if possible (and
     -- realloc() when needed).
-    envCachedMem :: M.Map C.Exp VName
+    envCachedMem :: M.Map C.Exp VName,
+    -- | The provenance of an enclosing 'Imp.MetaProvenance', if any.
+    envProvenance :: Provenance
   }
 
 contextContents :: CompilerM op s ([C.FieldGroup], [C.Stm], [C.Stm])
@@ -323,7 +327,7 @@ runCompilerM ::
   (a, CompilerState s)
 runCompilerM ops src userstate (CompilerM m) =
   runState
-    (runReaderT m (CompilerEnv ops mempty))
+    (runReaderT m (CompilerEnv ops mempty mempty))
     (newCompilerState src userstate)
 
 getUserState :: CompilerM op s s
@@ -344,6 +348,14 @@ collect' m = do
   new <- gets compItems
   modify $ \s -> s {compItems = old}
   pure (x, DL.toList new)
+
+-- | Locally replace (not extend!) the provenance.
+localProvenance :: Provenance -> CompilerM op s a -> CompilerM op s a
+localProvenance p = local $ \env -> env {envProvenance = p}
+
+-- | The provenance of the closest enclosing 'Imp.MetaProvenance'.
+askProvenance :: CompilerM op s Provenance
+askProvenance = asks envProvenance
 
 -- | Used when we, inside an existing 'CompilerM' action, want to
 -- generate code for a new function.  Use this so that the compiler

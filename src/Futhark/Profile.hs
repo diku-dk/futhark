@@ -50,10 +50,7 @@ instance JSON.FromJSON ProfilingEvent where
 data ProfilingReport = ProfilingReport
   { profilingEvents :: [ProfilingEvent],
     -- | Mapping memory spaces to bytes.
-    profilingMemory :: M.Map T.Text Integer,
-    -- | Information about the names that can occur in 'eventName', which may
-    -- relate them to the source program.
-    profilingProvenance :: M.Map T.Text T.Text
+    profilingMemory :: M.Map T.Text Integer
   }
   deriving (Eq, Ord, Show)
 
@@ -61,11 +58,10 @@ mapToJSON :: (JSON.ToJSON v) => M.Map T.Text v -> JSON.Value
 mapToJSON = JSON.object . map (bimap JSON.fromText JSON.toJSON) . M.toList
 
 instance JSON.ToJSON ProfilingReport where
-  toJSON (ProfilingReport events memory provenance) =
+  toJSON (ProfilingReport events memory) =
     JSON.object
       [ ("events", JSON.toJSON events),
-        ("memory", mapToJSON memory),
-        ("provenance", mapToJSON provenance)
+        ("memory", mapToJSON memory)
       ]
 
 instance JSON.FromJSON ProfilingReport where
@@ -73,7 +69,6 @@ instance JSON.FromJSON ProfilingReport where
     ProfilingReport
       <$> o JSON..: "events"
       <*> (JSON.toMapText <$> o JSON..: "memory")
-      <*> (JSON.toMapText <$> o JSON..: "provenance")
 
 -- | Read a profiling report from a bytestring containing JSON.
 decodeProfilingReport :: LBS.ByteString -> Maybe ProfilingReport
