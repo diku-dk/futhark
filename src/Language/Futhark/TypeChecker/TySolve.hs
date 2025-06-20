@@ -674,7 +674,7 @@ getSolution :: SolveM s ([UnconTyVar], Solution)
 getSolution = do
   uf <- asks solverTyVars
   resolved <- M.traverseWithKey resolve uf
-  let unconstrained = M.foldrWithKey' unconstr [] resolved
+  let unconstrained = M.foldrWithKey unconstr [] resolved
       sol = M.mapMaybeWithKey mkSubst resolved
   pure (unconstrained, sol)
 
