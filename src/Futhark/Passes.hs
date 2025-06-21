@@ -201,7 +201,7 @@ mcmemPipeline =
         performCSE False,
         LiftAllocations.liftAllocationsMCMem,
         simplifyMCMem,
-        ArrayShortCircuiting.optimiseMCMem,
+        -- ArrayShortCircuiting.optimiseMCMem,
         simplifyMCMem,
         performCSE False,
         simplifyMCMem,

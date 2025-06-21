@@ -714,6 +714,7 @@ pSOAC pr =
       keyword "redomap" *> pScrema pRedomapForm,
       keyword "scanomap" *> pScrema pScanomapForm,
       keyword "screma" *> pScrema pScremaForm,
+      pScanScatter,
       keyword "vjp" *> pVJP,
       keyword "jvp" *> pJVP,
       pScatter,
@@ -761,9 +762,8 @@ pSOAC pr =
               <*> many (pDest <* pComma)
               <*> pLambda pr
           )
-      where
-        pDest =
-          parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
+    pDest =
+      parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
     pHist =
       keyword "hist"
         *> parens
@@ -815,6 +815,21 @@ pSOAC pr =
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> pLambda pr
+    pScanScatter =
+      keyword "scanscatter"
+        *> parens
+          ( SOAC.ScanScatter
+              <$> pSubExp
+              <* pComma
+              <*> braces (pVName `sepBy` pComma)
+              <* pComma
+              <*> pLambda pr
+              <* pComma
+              <*> pScan pr
+              <* pComma
+              <*> many (pDest <* pComma)
+              <*> pLambda pr
+          )
 
 pSizeClass :: Parser GPU.SizeClass
 pSizeClass =
@@ -936,6 +951,13 @@ pSegOp pr pLvl =
       comm <- pComm
       lam <- pLambda pr
       pure $ SegOp.SegBinOp comm lam nes shape
+    pDest =
+      parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
+    pSegPostOp =
+      SegOp.SegPostOp
+        <$> pLambda pr
+        <* pComma
+        <*> many (pDest <* pComma)
     pHistOp =
       SegOp.HistOp
         <$> pShape
@@ -951,7 +973,7 @@ pSegOp pr pLvl =
         <*> pLambda pr
     pSegMap = pSegOp' SegOp.SegMap
     pSegRed = pSegOp' SegOp.SegRed <*> parens (pSegBinOp `sepBy` pComma)
-    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma)
+    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma) <*> pSegPostOp
     pSegHist = pSegOp' SegOp.SegHist <*> parens (pHistOp `sepBy` pComma)
 
 pSegLevel :: Parser GPU.SegLevel
