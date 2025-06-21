@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * FutharkScript now permits chained `let` without `in`, just as in Futhark.
 
+* `futhark pkg` now allows the `~` character in package paths.
+
 ### Removed
 
 ### Changed
