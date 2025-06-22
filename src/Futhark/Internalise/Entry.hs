@@ -8,6 +8,7 @@ where
 
 import Control.Monad
 import Control.Monad.State.Strict
+import Data.Bifunctor (first)
 import Data.List (find, intersperse)
 import Data.Map qualified as M
 import Futhark.IR qualified as I
@@ -15,7 +16,7 @@ import Futhark.Internalise.TypesValues (internaliseSumTypeRep, internalisedTypeS
 import Futhark.Util (chunks)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.Futhark qualified as E hiding (TypeArg)
-import Language.Futhark.Core (Name, Uniqueness (..), VName, nameFromText)
+import Language.Futhark.Core (L (..), Name, Uniqueness (..), VName, nameFromText, unLoc)
 import Language.Futhark.Semantic qualified as E
 
 -- | The types that are visible to the outside world.
@@ -66,7 +67,7 @@ typeExpOpaqueName = nameFromText . f
     g (E.TERecord tes _) =
       "{" <> mconcat (intersperse ", " (map onField tes)) <> "}"
       where
-        onField (k, te) = E.nameToText k <> ":" <> f te
+        onField (L _ k, te) = E.nameToText k <> ":" <> f te
     g (E.TESum cs _) =
       mconcat (intersperse " | " (map onConstr cs))
       where
@@ -96,7 +97,7 @@ isRecord ::
   VisibleTypes ->
   E.TypeExp E.Exp VName ->
   Maybe (M.Map Name (E.TypeExp E.Exp VName))
-isRecord _ (E.TERecord fs _) = Just $ M.fromList fs
+isRecord _ (E.TERecord fs _) = Just $ M.fromList $ map (first unLoc) fs
 isRecord _ (E.TETuple fs _) = Just $ E.tupleFields fs
 isRecord types (E.TEVar v _) = isRecord types =<< findType (E.qualLeaf v) types
 isRecord _ _ = Nothing
@@ -184,6 +185,16 @@ entryPointTypeName :: I.EntryPointType -> Name
 entryPointTypeName (I.TypeOpaque v) = v
 entryPointTypeName (I.TypeTransparent {}) = error "entryPointTypeName: TypeTransparent"
 
+elemTypeExp :: E.TypeExp E.Exp VName -> Maybe (E.TypeExp E.Exp VName)
+elemTypeExp (E.TEArray _ te _) = Just te
+elemTypeExp (E.TEUnique te _) = elemTypeExp te
+elemTypeExp (E.TEParens te _) = elemTypeExp te
+elemTypeExp _ = Nothing
+
+rowTypeExp :: Int -> E.TypeExp E.Exp VName -> Maybe (E.TypeExp E.Exp VName)
+rowTypeExp 0 te = Just te
+rowTypeExp r te = rowTypeExp (r - 1) =<< elemTypeExp te
+
 entryPointType ::
   VisibleTypes ->
   E.EntryType ->
@@ -220,17 +231,14 @@ entryPointType types t ts
                   rank = E.shapeRank shape
                   ts' = map (strip rank) ts
                   record_t = E.Scalar (E.Record fs)
-                  record_te = case E.entryAscribed t of
-                    Just (E.TEArray _ te _) -> Just te
-                    _ -> Nothing
+                  record_te = rowTypeExp rank =<< E.entryAscribed t
               ept <- snd <$> entryPointType types (E.EntryType record_t record_te) ts'
               addType desc . I.OpaqueRecordArray rank (entryPointTypeName ept)
                 =<< opaqueRecordArray types rank fs' ts
         E.Array _ shape et -> do
           let ts' = map (strip (E.shapeRank shape)) ts
-              elem_te = case E.entryAscribed t of
-                Just (E.TEArray _ te _) -> Just te
-                _ -> Nothing
+              rank = E.shapeRank shape
+              elem_te = rowTypeExp rank =<< E.entryAscribed t
           ept <- snd <$> entryPointType types (E.EntryType (E.Scalar et) elem_te) ts'
           addType desc . I.OpaqueArray (E.shapeRank shape) (entryPointTypeName ept) $
             map valueType ts
@@ -264,9 +272,15 @@ entryPoint types name params (eret, crets) =
                          E.entryAscribed eret
                        ) of
                 (Just ts, Just (E.TETuple e_ts _)) ->
-                  zipWithM (entryPointType types) (zipWith E.EntryType ts (map Just e_ts)) crets
+                  zipWithM
+                    (entryPointType types)
+                    (zipWith E.EntryType ts (map Just e_ts))
+                    crets
                 (Just ts, Nothing) ->
-                  zipWithM (entryPointType types) (map (`E.EntryType` Nothing) ts) crets
+                  zipWithM
+                    (entryPointType types)
+                    (map (`E.EntryType` Nothing) ts)
+                    crets
                 _ ->
                   pure <$> entryPointType types eret (concat crets)
           )

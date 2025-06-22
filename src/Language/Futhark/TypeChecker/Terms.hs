@@ -15,7 +15,6 @@ where
 
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor
@@ -27,7 +26,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Futhark.Util (mapAccumLM, nubOrd, topologicalSort)
+import Futhark.Util (mapAccumLM, nubOrd)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
@@ -230,92 +229,6 @@ checkCoerce loc te e = do
               "a size coercion where the underlying expression size cannot be determined"
           pure $ sizeFromName (qualName v) (srclocOf d)
 
-sameExp :: Exp -> Exp -> Bool
-sameExp e1 e2
-  | Just es <- similarExps e1 e2 =
-      all (uncurry sameExp) es
-  | otherwise = False
-
--- All non-trivial subexpressions (as by stripExp) of some expression,
--- not including the expression itself.
-subExps :: Exp -> [Exp]
-subExps e
-  | Just e' <- stripExp e = subExps e'
-  | otherwise = astMap mapper e `execState` mempty
-  where
-    mapOnExp e'
-      | Just e'' <- stripExp e' = mapOnExp e''
-      | otherwise = do
-          modify (e' :)
-          astMap mapper e'
-    mapper = identityMapper {mapOnExp}
-
--- Expressions witnessed by type, topologically sorted.
-topWit :: TypeBase Exp u -> [Exp]
-topWit = topologicalSort depends . witnessedExps
-  where
-    witnessedExps t = execState (traverseDims onDim t) mempty
-      where
-        onDim _ PosImmediate e = modify (e :)
-        onDim _ _ _ = pure ()
-    depends a b = any (sameExp b) $ subExps a
-
-sizeFree ::
-  SrcLoc ->
-  (Exp -> Maybe VName) ->
-  TypeBase Size u ->
-  TermTypeM (TypeBase Size u, [VName])
-sizeFree tloc expKiller orig_t = do
-  runReaderT (toBeReplaced orig_t $ onType orig_t) mempty `runStateT` mempty
-  where
-    lookReplacement e repl = snd <$> find (sameExp e . fst) repl
-    expReplace mapping e
-      | Just e' <- lookReplacement e mapping = e'
-      | otherwise = runIdentity $ astMap mapper e
-      where
-        mapper = identityMapper {mapOnExp = pure . expReplace mapping}
-
-    replacing e = do
-      e' <- asks (`expReplace` e)
-      case expKiller e' of
-        Nothing -> pure e'
-        Just cause -> do
-          vn <- lift $ lift $ newRigidDim tloc (RigidOutOfScope (locOf e) cause) "d"
-          modify (vn :)
-          pure $ sizeFromName (qualName vn) (srclocOf e)
-
-    toBeReplaced t m' = foldl f m' $ topWit t
-      where
-        f m e = do
-          e' <- replacing e
-          local ((e, e') :) m
-
-    onScalar (Record fs) =
-      Record <$> traverse onType fs
-    onScalar (Sum cs) =
-      Sum <$> (traverse . traverse) onType cs
-    onScalar (Arrow as pn d argT (RetType dims retT)) = do
-      argT' <- onType argT
-      old_bound <- get
-      retT' <- toBeReplaced retT $ onType retT
-      rl <- state $ partition (`notElem` old_bound)
-      let dims' = dims <> rl
-      pure $ Arrow as pn d argT' (RetType dims' retT')
-    onScalar (TypeVar u v args) =
-      TypeVar u v <$> mapM onTypeArg args
-      where
-        onTypeArg (TypeArgDim d) = TypeArgDim <$> replacing d
-        onTypeArg (TypeArgType ty) = TypeArgType <$> onType ty
-    onScalar (Prim pt) = pure $ Prim pt
-
-    onType ::
-      TypeBase Size u ->
-      ReaderT [(Exp, Exp)] (StateT [VName] TermTypeM) (TypeBase Size u)
-    onType (Array u shape scalar) =
-      Array u <$> traverse replacing shape <*> onScalar scalar
-    onType (Scalar ty) =
-      Scalar <$> onScalar ty
-
 -- Used to remove unknown sizes from function body types before we
 -- perform let-generalisation.  This is because if a function is
 -- inferred to return something of type '[x+y]t' where 'x' or 'y' are
@@ -369,13 +282,13 @@ checkExp (RecordLit fs loc) =
   RecordLit <$> evalStateT (mapM checkField fs) mempty <*> pure loc
   where
     checkField (RecordFieldExplicit f e rloc) = do
-      errIfAlreadySet f rloc
-      modify $ M.insert f rloc
+      errIfAlreadySet (unLoc f) rloc
+      modify $ M.insert (unLoc f) rloc
       RecordFieldExplicit f <$> lift (checkExp e) <*> pure rloc
     checkField (RecordFieldImplicit name NoInfo rloc) = do
-      errIfAlreadySet (baseName name) rloc
-      t <- lift $ lookupVar rloc $ qualName name
-      modify $ M.insert (baseName name) rloc
+      errIfAlreadySet (baseName (unLoc name)) rloc
+      t <- lift $ lookupVar rloc $ qualName $ unLoc name
+      modify $ M.insert (baseName (unLoc name)) rloc
       pure $ RecordFieldImplicit name (Info t) rloc
 
     errIfAlreadySet f rloc = do
@@ -798,12 +711,12 @@ checkExp (IndexSection slice NoInfo loc) = do
   (t', retext) <- sliceShape Nothing slice' t
   let ft = Scalar $ Arrow mempty Unnamed Observe t $ RetType retext $ toRes Nonunique t'
   pure $ IndexSection slice' (Info ft) loc
-checkExp (AppExp (Loop _ mergepat mergeexp form loopbody loc) _) = do
-  ((sparams, mergepat', mergeexp', form', loopbody'), appres) <-
-    checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc
+checkExp (AppExp (Loop _ mergepat loopinit form loopbody loc) _) = do
+  ((sparams, mergepat', loopinit', form', loopbody'), appres) <-
+    checkLoop checkExp (mergepat, loopinit, form, loopbody) loc
   pure $
     AppExp
-      (Loop sparams mergepat' mergeexp' form' loopbody' loc)
+      (Loop sparams mergepat' loopinit' form' loopbody' loc)
       (Info appres)
 checkExp (Constr name es NoInfo loc) = do
   t <- newTypeVar loc "t"
@@ -872,7 +785,7 @@ instance Pretty (Unmatched (Pat StructType)) where
       pretty' (TuplePat pats _) = parens $ commasep $ map pretty' pats
       pretty' (RecordPat fs _) = braces $ commasep $ map ppField fs
         where
-          ppField (name, t) = pretty (nameToString name) <> equals <> pretty' t
+          ppField (L _ name, t) = pretty (nameToString name) <> equals <> pretty' t
       pretty' Wildcard {} = "_"
       pretty' (PatLit e _ _) = pretty e
       pretty' (PatConstr n _ ps _) = "#" <> pretty n <+> sep (map pretty' ps)
@@ -1045,10 +958,11 @@ checkApply loc (fname, prev_applied) ftype argexp = do
 checkOneExp :: ExpBase NoInfo VName -> TypeM ([TypeParam], Exp)
 checkOneExp e = runTermTypeM checkExp $ do
   e' <- checkExp e
-  let t = typeOf e'
-  (tparams, _, _) <-
-    letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
-  fixOverloadedTypes $ typeVars t
+  (tparams, _, RetType _ t') <-
+    letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $
+      toRes Nonunique $
+        typeOf e'
+  fixOverloadedTypes $ typeVars t'
   e'' <- normTypeFully e'
   localChecks e''
   causalityCheck e''
@@ -1693,10 +1607,18 @@ checkFunBody params body maybe_rettype loc = do
           loc
           (filter (`elem` hidden) $ foldMap patNames params)
           body_t
-
-      let usage = mkUsage body "return type annotation"
-      onFailure (CheckingReturn rettype body_t') $
-        unify usage (toStruct rettype) body_t'
+      case find (`elem` hidden) $ fvVars $ freeInType rettype of
+        Just v ->
+          typeError loc mempty $
+            "The return type annotation"
+              </> indent 2 (align (pretty rettype))
+              </> "refers to the name"
+              <+> dquotes (prettyName v)
+              <+> "which is bound to an inner component of a function parameter."
+        Nothing -> do
+          let usage = mkUsage body "return type annotation"
+          onFailure (CheckingReturn rettype body_t') $
+            unify usage (toStruct rettype) body_t'
     Nothing -> pure ()
 
   pure body'

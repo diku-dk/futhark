@@ -31,7 +31,7 @@ tileLoops =
     onStms scope stms =
       modifyNameSource $
         runState $
-          runReaderT (optimiseStms (M.empty, M.empty) stms) scope
+          runReaderT (optimiseStms (M.empty, initialIxFnEnv scope) stms) scope
 
 optimiseBody :: Env -> Body GPU -> TileM (Body GPU)
 optimiseBody env (Body () stms res) =
@@ -429,7 +429,7 @@ tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBo
 
         loopbody' <-
           localScope (scopeOfFParams mergeparams') . runBodyBuilder $
-            resultBody . map Var <$> tiledBody private' privstms'
+            varsRes <$> tiledBody private' privstms'
         accs' <-
           letTupExp "tiled_inside_loop" $
             Loop merge' (ForLoop i it bound) loopbody'
@@ -711,7 +711,7 @@ tileGeneric doTiling res_ts pat gtids kdims w form inputs poststms poststms_res 
                 map (paramName . fst) merge
               tile_args =
                 ProcessTileArgs privstms red_comm red_lam map_lam tile accs (Var tile_id)
-          resultBody . map Var <$> tilingProcessTile tiling tile_args
+          varsRes <$> tilingProcessTile tiling tile_args
 
       accs <- letTupExp "accs" $ Loop merge loopform loopbody
 
@@ -741,7 +741,7 @@ tileReturns dims_on_top dims arr = do
       else do
         let new_shape = Shape $ unit_dims ++ arrayDims arr_t
         letExp (baseString arr) . BasicOp $
-          Reshape ReshapeArbitrary new_shape arr
+          Reshape arr (reshapeAll (arrayShape arr_t) new_shape)
   let tile_dims = zip (map snd dims_on_top) unit_dims ++ dims
   pure $ TileReturns mempty tile_dims arr'
 
@@ -906,8 +906,7 @@ processResidualTile1D gid gtid kdim tile_size grid args = do
       -- updates its accumulator.
       let tile_args =
             ProcessTileArgs privstms red_comm red_lam map_lam tiles accs num_whole_tiles
-      resultBody . map Var
-        <$> processTile1D gid gtid kdim residual_input grid tile_args
+      varsRes <$> processTile1D gid gtid kdim residual_input grid tile_args
 
 tiling1d :: [(VName, SubExp)] -> DoTiling VName SubExp
 tiling1d dims_on_top gtid kdim w = do
@@ -1172,13 +1171,7 @@ processResidualTile2D gids gtids kdims tile_size args = do
 
       -- Now each thread performs a traversal of the tile and
       -- updates its accumulator.
-      resultBody . map Var
-        <$> processTile2D
-          gids
-          gtids
-          kdims
-          tile_size
-          tile_args
+      varsRes <$> processTile2D gids gtids kdims tile_size tile_args
 
 tiling2d :: [(VName, SubExp)] -> DoTiling (VName, VName) (SubExp, SubExp)
 tiling2d dims_on_top (gtid_x, gtid_y) (kdim_x, kdim_y) w = do

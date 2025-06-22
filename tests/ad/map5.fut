@@ -1,7 +1,7 @@
 -- Map with free array variable.
 -- ==
 -- entry: fwd_J rev_J
--- compiled input { [[1,2,3],[4,5,6]] [0,0] }
+-- input { [[1,2,3],[4,5,6]] [0,0] }
 -- output { [[1, 0], [0, 1]] }
 
 def onehot n i : [n]i32 =

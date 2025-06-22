@@ -184,6 +184,9 @@ compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =
   -- Cannot print in GPU code.
   copyDWIM (patElemName pe) [] se []
+-- The static arrays stuff does not work inside kernels.
+compileThreadExp (Pat [dest]) (BasicOp (ArrayVal vs t)) =
+  compileThreadExp (Pat [dest]) (BasicOp (ArrayLit (map Constant vs) (Prim t)))
 compileThreadExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
@@ -741,13 +744,13 @@ atomicUpdateLocking ::
   AtomicUpdate GPUMem KernelEnv
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
-    all (\(_, t, _, _) -> primBitSize t `elem` [32, 64]) ops_and_ts =
+    all (\(_, t, _, _) -> primBitSize t `elem` [8, 16, 32, 64]) ops_and_ts =
       primOrCas ops_and_ts $ \space arrs bucket ->
-        -- If the operator is a vectorised binary operator on 32/64-bit
-        -- values, we can use a particularly efficient
-        -- implementation. If the operator has an atomic implementation
-        -- we use that, otherwise it is still a binary operator which
-        -- can be implemented by atomic compare-and-swap if 32/64 bits.
+        -- If the operator is a vectorised binary operator on single values, we
+        -- can use a particularly efficient implementation. If the operator has
+        -- an atomic implementation we use that, otherwise it is still a binary
+        -- operator which can be implemented by atomic compare-and-swap if 32/64
+        -- bits.
         forM_ (zip arrs ops_and_ts) $ \(a, (op, t, x, y)) -> do
           -- Common variables.
           old <- dPrimS "old" t
@@ -768,15 +771,19 @@ atomicUpdateLocking atomicBinOp lam
       | all isPrim ops = AtomicPrim
       | otherwise = AtomicCAS
 
-    isPrim (op, _, _, _) = isJust $ atomicBinOp op
+    -- Only operators of at least 32-bit integers are actually truly atomic with
+    -- our current GPU backends - the rest are emulated with CAS-loops in their
+    -- implementation.
+    isPrim (op, _, _, _) =
+      isJust (atomicBinOp op)
+        && primByteSize (binOpType op) >= (4 :: Int)
 
--- If the operator functions purely on single 32/64-bit values, we can
--- use an implementation based on CAS, no matter what the operator
--- does.
+-- If the operator functions purely on single single values, we can use an
+-- implementation based on CAS, no matter what the operator does.
 atomicUpdateLocking _ op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
-    primBitSize t `elem` [32, 64] = AtomicCAS $ \space [arr] bucket -> do
+    primBitSize t `elem` [8, 16, 32, 64] = AtomicCAS $ \space [arr] bucket -> do
       old <- dPrimS "old" t
       atomicUpdateCAS space t arr old bucket (paramName xp) $
         compileBody' [xp] (lambdaBody op)

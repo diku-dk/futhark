@@ -992,7 +992,8 @@ toMicroseconds x =
 compileUnOp :: Imp.UnOp -> String
 compileUnOp op =
   case op of
-    Not -> "not"
+    Neg Imp.Bool -> "not"
+    Neg _ -> "-"
     Complement {} -> "~"
     Abs {} -> "abs"
     FAbs {} -> "abs"

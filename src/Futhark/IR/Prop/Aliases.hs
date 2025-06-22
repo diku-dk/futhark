@@ -30,7 +30,8 @@ where
 
 import Data.Bifunctor (first, second)
 import Data.List (find, transpose)
-import Data.Map qualified as M
+import Data.Map.Strict qualified as M
+import Data.Maybe (mapMaybe)
 import Futhark.IR.Prop (ASTRep, IsOp, NameInfo (..), Scope)
 import Futhark.IR.Prop.Names
 import Futhark.IR.Prop.Pat
@@ -70,8 +71,8 @@ basicOpAliases FlatUpdate {} = [mempty]
 basicOpAliases Iota {} = [mempty]
 basicOpAliases Replicate {} = [mempty]
 basicOpAliases Scratch {} = [mempty]
-basicOpAliases (Reshape _ _ e) = [vnameAliases e]
-basicOpAliases (Rearrange _ e) = [vnameAliases e]
+basicOpAliases (Reshape v _) = [vnameAliases v]
+basicOpAliases (Rearrange v _) = [vnameAliases v]
 basicOpAliases Concat {} = [mempty]
 basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]
@@ -90,9 +91,18 @@ funcallAliases ::
   [Names]
 funcallAliases pes args = map onType
   where
-    getAls als is = mconcat $ map fst $ filter ((`elem` is) . snd) $ zip als [0 ..]
-    arg_als = map (subExpAliases . fst) args
-    res_als = map (oneName . patElemName) pes
+    -- We assumes that the pals/rals lists are sorted, as this allows
+    -- us to compute the intersections much more efficiently.
+    argAls (i, (Var v, Observe)) = Just (i, v)
+    argAls _ = Nothing
+    arg_als = mapMaybe argAls $ zip [0 ..] args
+    res_als = zip [0 ..] $ map patElemName pes
+    pick (i : is) ((j, v) : jvs)
+      | i == j = v : pick is jvs
+      | i > j = pick (i : is) jvs
+      | otherwise = pick is ((j, v) : jvs)
+    pick _ _ = []
+    getAls als is = namesFromList $ pick is als
     onType (_t, RetAls pals rals) = getAls arg_als pals <> getAls res_als rals
 
 mutualAliases :: Names -> [PatElem dec] -> [Names] -> [Names]

@@ -126,7 +126,9 @@ evalTypeExp df t@(TERecord fs loc) = do
   pure
     ( TERecord (M.toList fs') loc,
       fs_svars,
-      RetType (foldMap retDims ts_s) $ Scalar $ Record $ M.map retType ts_s,
+      RetType (foldMap retDims ts_s) . Scalar . Record $
+        M.mapKeys unLoc $
+          M.map retType ts_s,
       L.foldl' max Unlifted ls
     )
 --
@@ -256,13 +258,16 @@ evalTypeExp df ote@TEApply {} = do
           <+> pretty (length targs)
           <> "."
     else do
-      (targs', dims, substs) <- unzip3 <$> zipWithM checkArgApply ps targs
+      (targs', dims, substs, targs_ls) <-
+        L.unzip4 <$> zipWithM checkArgApply ps targs
       pure
         ( foldl (\x y -> TEApply x y tloc) (TEVar tname tname_loc) targs',
           [],
           RetType (t_dims ++ mconcat dims) $
             applySubst (`M.lookup` mconcat substs) t,
-          l
+          -- XXX: this is an overapproximation of the liftedness in case one of
+          -- these type parameters is a phantom type.
+          maximum $ l : targs_ls
         )
   where
     tloc = srclocOf ote
@@ -292,13 +297,14 @@ evalTypeExp df ote@TEApply {} = do
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpSize d) = do
       (d', svars, subst) <- checkSizeExp d
-      pure (d', svars, M.singleton pv subst)
+      pure (d', svars, M.singleton pv subst, Unlifted)
     checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
-      (te', svars, RetType dims st, _) <- evalTypeExp df te
+      (te', svars, RetType dims st, te_l) <- evalTypeExp df te
       pure
         ( TypeArgExpType te',
           svars ++ dims,
-          M.singleton pv $ Subst [] $ RetType [] $ toStruct st
+          M.singleton pv $ Subst [] $ RetType [] $ toStruct st,
+          te_l
         )
     checkArgApply p a =
       typeError tloc mempty $

@@ -164,11 +164,11 @@ compileSegOp ::
   SegOp () MCMem ->
   TV Int32 ->
   ImpM MCMem HostEnv Imp.Multicore Imp.MCCode
-compileSegOp pat (SegHist _ space histops _ kbody) ntasks =
+compileSegOp pat (SegHist _ space _ kbody histops) ntasks =
   compileSegHist pat space histops kbody ntasks
-compileSegOp pat (SegScan _ space scans _ kbody) ntasks =
+compileSegOp pat (SegScan _ space _ kbody scans) ntasks =
   compileSegScan pat space scans kbody ntasks
-compileSegOp pat (SegRed _ space reds _ kbody) ntasks =
+compileSegOp pat (SegRed _ space _ kbody reds) ntasks =
   compileSegRed pat space reds kbody ntasks
 compileSegOp pat (SegMap _ space _ kbody) _ =
   compileSegMap pat space kbody

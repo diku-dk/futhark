@@ -576,14 +576,14 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate shape (Var stm_arr)))) acc
         -- Move the to-be-replicated dimensions outermost.
         arr_tr <-
           letExp (baseString arr <> "_tr") . BasicOp $
-            Rearrange ([nest_r .. arr_r - 1] ++ [0 .. nest_r - 1]) arr
+            Rearrange arr ([nest_r .. arr_r - 1] ++ [0 .. nest_r - 1])
         -- Replicate the now-outermost dimensions appropriately.
         arr_tr_rep <-
           letExp (baseString arr <> "_tr_rep") . BasicOp $
             Replicate shape (Var arr_tr)
         -- Move the replicated dimensions back where they belong.
         letBind outerpat . BasicOp $
-          Rearrange ([res_r - nest_r .. res_r - 1] ++ [0 .. res_r - nest_r - 1]) arr_tr_rep
+          Rearrange arr_tr_rep ([res_r - nest_r .. res_r - 1] ++ [0 .. res_r - nest_r - 1])
 maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate shape v))) acc = do
   distributeSingleStm acc stm >>= \case
     Just (kernels, _, nest, acc')
@@ -602,7 +602,7 @@ maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Opaque _ (Var stm_arr)))) a
   | not $ primType $ typeOf pe =
       distributeSingleUnaryStm acc stm stm_arr $ \_ outerpat arr ->
         pure $ oneStm $ Let outerpat aux $ BasicOp $ Replicate mempty $ Var arr
-maybeDistributeStm stm@(Let _ aux (BasicOp (Rearrange perm stm_arr))) acc =
+maybeDistributeStm stm@(Let _ aux (BasicOp (Rearrange stm_arr perm))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let r = length (snd nest) + 1
         perm' = [0 .. r - 1] ++ map (+ r) perm
@@ -613,12 +613,13 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Rearrange perm stm_arr))) acc =
     pure $
       stmsFromList
         [ Let (Pat [PatElem arr' arr_t]) aux $ BasicOp $ Replicate mempty $ Var arr,
-          Let outerpat aux $ BasicOp $ Rearrange perm' arr'
+          Let outerpat aux $ BasicOp $ Rearrange arr' perm'
         ]
-maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape k reshape stm_arr))) acc =
+maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape stm_arr reshape))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
-    let reshape' = Shape (kernelNestWidths nest) <> reshape
-    pure $ oneStm $ Let outerpat aux $ BasicOp $ Reshape k reshape' arr
+    let outer = Shape (kernelNestWidths nest)
+        reshape' = reshapeCoerce outer <> newshapeInner outer reshape
+    pure $ oneStm $ Let outerpat aux $ BasicOp $ Reshape arr reshape'
 maybeDistributeStm stm@(Let pat aux (BasicOp (Update _ arr slice (Var v)))) acc
   | not $ null $ sliceDims slice =
       distributeSingleStm acc stm >>= \case
@@ -795,7 +796,9 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
   dest_arrs_ts <- mapM (lookupType . kernelInputArray) dest_arrs
 
-  let k_body = KernelBody () k_body_stms (zipWith (inPlaceReturn ispace) dest_arrs_ts grouped)
+  let k_body =
+        KernelBody () k_body_stms $
+          zipWith (inPlaceReturn ispace) dest_arrs_ts grouped
       -- Remove unused kernel inputs, since some of these might
       -- reference the array we are scattering into.
       kernel_inps' =
@@ -806,12 +809,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   traverse renameStm <=< runBuilder_ $ do
     addStms k_stms
 
-    let pat =
-          Pat . rearrangeShape perm $
-            patElems $
-              loopNestingPat $
-                fst nest
-
+    let pat = Pat . rearrangeShape perm $ patElems $ loopNestingPat $ fst nest
     letBind pat $ Op $ segOp k
   where
     findInput kernel_inps a =
@@ -819,15 +817,17 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
     bad = error "Ill-typed nested scatter encountered."
 
     inPlaceReturn ispace arr_t (_, inp, is_vs) =
-      WriteReturns
-        ( foldMap (foldMap resCerts . fst) is_vs
-            <> foldMap (resCerts . snd) is_vs
-        )
-        (kernelInputArray inp)
-        [ (fullSlice arr_t $ map DimFix $ map Var (init gtids) ++ map resSubExp is, resSubExp v)
-          | (is, v) <- is_vs
-        ]
+      WriteReturns write_cs (kernelInputArray inp) $ do
+        (is, v) <- is_vs
+        pure
+          ( fullSlice arr_t . map DimFix $
+              map Var (init gtids) ++ map resSubExp is,
+            resSubExp v
+          )
       where
+        write_cs =
+          foldMap (foldMap resCerts . fst) is_vs
+            <> foldMap (resCerts . snd) is_vs
         (gtids, _ws) = unzip ispace
 
 segmentedUpdateKernel ::

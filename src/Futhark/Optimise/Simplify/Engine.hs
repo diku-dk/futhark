@@ -297,7 +297,7 @@ protectIf _ _ taken (Let pat aux (Match [cond] [Case [Just (BoolValue True)] tak
     Match [cond'] [Case [Just (BoolValue True)] taken_body] untaken_body $
       MatchDec if_ts MatchFallback
 protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
-  not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp Not taken
+  not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp (Neg Bool) taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
   auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
 protectIf protect _ taken (Let pat aux (Op op))
@@ -380,7 +380,7 @@ matchingExactlyThis ses prior this = do
   letSubExp "matching_just_this"
     =<< eBinOp
       LogAnd
-      (eUnOp Not (eAny prior_matches))
+      (eUnOp (Neg Bool) (eAny prior_matches))
       (eSubExp =<< matching (zip ses this))
 
 -- | We are willing to hoist potentially unsafe statements out of
@@ -589,8 +589,15 @@ andAlso p1 p2 body vtable need = p1 body vtable need && p2 body vtable need
 isConsumed :: BlockPred rep
 isConsumed _ utable = any (`UT.isConsumed` utable) . patNames . stmPat
 
+-- The main purpose of this rule is to avoid hoisting 'inblock' SegOps
+-- out of their enclosing SegOp, *including* when those are present in
+-- nested Bodies.
 isOp :: BlockPred rep
 isOp _ _ (Let _ _ Op {}) = True
+isOp vtable utable (Let _ _ (Match _ cs def_body _)) =
+  any (any (isOp vtable utable) . bodyStms) $ def_body : map caseBody cs
+isOp vtable utable (Let _ _ (Loop _ _ body)) =
+  any (isOp vtable utable) $ bodyStms body
 isOp _ _ _ = False
 
 constructBody ::
@@ -1032,7 +1039,7 @@ instance Simplifiable VName where
       _ -> pure v
 
 instance (Simplifiable d) => Simplifiable (ShapeBase d) where
-  simplify = fmap Shape . simplify . shapeDims
+  simplify = traverse simplify
 
 instance Simplifiable ExtSize where
   simplify (Free se) = Free <$> simplify se

@@ -4,6 +4,10 @@ import numpy as np
 import math
 import struct
 
+pi16 = np.float16(np.pi)
+pi32 = np.float32(np.pi)
+pi64 = np.float64(np.pi)
+
 
 def intlit(t, x):
     if t == np.int8:
@@ -596,6 +600,10 @@ def futhark_sqrt64(x):
     return np.sqrt(x)
 
 
+def futhark_rsqrt64(x):
+    return 1 / np.sqrt(x)
+
+
 def futhark_cbrt64(x):
     return np.cbrt(x)
 
@@ -608,24 +616,48 @@ def futhark_cos64(x):
     return np.cos(x)
 
 
+def futhark_cospi64(x):
+    return np.cos(pi64 * x)
+
+
 def futhark_sin64(x):
     return np.sin(x)
+
+
+def futhark_sinpi64(x):
+    return np.sin(pi64 * x)
 
 
 def futhark_tan64(x):
     return np.tan(x)
 
 
+def futhark_tanpi64(x):
+    return np.tan(pi64 * x)
+
+
 def futhark_acos64(x):
     return np.arccos(x)
+
+
+def futhark_acospi64(x):
+    return np.arccos(x) / pi64
 
 
 def futhark_asin64(x):
     return np.arcsin(x)
 
 
+def futhark_asinpi64(x):
+    return np.arcsin(x) / pi64
+
+
 def futhark_atan64(x):
     return np.arctan(x)
+
+
+def futhark_atanpi64(x):
+    return np.arctan(x) / pi64
 
 
 def futhark_cosh64(x):
@@ -654,6 +686,10 @@ def futhark_atanh64(x):
 
 def futhark_atan2_64(x, y):
     return np.arctan2(x, y)
+
+
+def futhark_atan2pi_64(x, y):
+    return np.arctan2(x, y) / pi64
 
 
 def futhark_hypot64(x, y):
@@ -730,6 +766,10 @@ def futhark_sqrt32(x):
     return np.float32(np.sqrt(x))
 
 
+def futhark_rsqrt32(x):
+    return np.float32(1 / np.sqrt(x))
+
+
 def futhark_cbrt32(x):
     return np.float32(np.cbrt(x))
 
@@ -742,24 +782,48 @@ def futhark_cos32(x):
     return np.cos(x)
 
 
+def futhark_cospi32(x):
+    return np.cos(pi32 * x)
+
+
 def futhark_sin32(x):
     return np.sin(x)
+
+
+def futhark_sinpi32(x):
+    return np.sin(pi32 * x)
 
 
 def futhark_tan32(x):
     return np.tan(x)
 
 
+def futhark_tanpi32(x):
+    return np.tan(pi32 * x)
+
+
 def futhark_acos32(x):
     return np.arccos(x)
+
+
+def futhark_acospi32(x):
+    return np.arccos(x) / pi32
 
 
 def futhark_asin32(x):
     return np.arcsin(x)
 
 
+def futhark_asinpi32(x):
+    return np.arcsin(x) / pi32
+
+
 def futhark_atan32(x):
     return np.arctan(x)
+
+
+def futhark_atanpi32(x):
+    return np.arctan(x) / pi32
 
 
 def futhark_cosh32(x):
@@ -788,6 +852,10 @@ def futhark_atanh32(x):
 
 def futhark_atan2_32(x, y):
     return np.arctan2(x, y)
+
+
+def futhark_atan2pi_32(x, y):
+    return np.arctan2(x, y) / pi32
 
 
 def futhark_hypot32(x, y):
@@ -864,6 +932,10 @@ def futhark_sqrt16(x):
     return np.float16(np.sqrt(x))
 
 
+def futhark_rsqrt16(x):
+    return np.float16(1 / np.sqrt(x))
+
+
 def futhark_cbrt16(x):
     return np.float16(np.cbrt(x))
 
@@ -876,24 +948,48 @@ def futhark_cos16(x):
     return np.cos(x)
 
 
+def futhark_cospi16(x):
+    return np.cos(pi16 * x)
+
+
 def futhark_sin16(x):
     return np.sin(x)
+
+
+def futhark_sinpi16(x):
+    return np.sin(pi16 * x)
 
 
 def futhark_tan16(x):
     return np.tan(x)
 
 
+def futhark_tanpi16(x):
+    return np.tan(pi16 * x)
+
+
 def futhark_acos16(x):
     return np.arccos(x)
+
+
+def futhark_acospi16(x):
+    return np.arccos(x) / pi16
 
 
 def futhark_asin16(x):
     return np.arcsin(x)
 
 
+def futhark_asinpi16(x):
+    return np.arcsin(x) / pi16
+
+
 def futhark_atan16(x):
     return np.arctan(x)
+
+
+def futhark_atanpi16(x):
+    return np.arctan(x) / pi16
 
 
 def futhark_cosh16(x):
@@ -922,6 +1018,10 @@ def futhark_atanh16(x):
 
 def futhark_atan2_16(x, y):
     return np.arctan2(x, y)
+
+
+def futhark_atan2pi_16(x, y):
+    return np.arctan2(x, y) / pi16
 
 
 def futhark_hypot16(x, y):
@@ -1027,5 +1127,17 @@ def futhark_fma64(a, b, c):
 
 
 futhark_copysign16 = futhark_copysign32 = futhark_copysign64 = np.copysign
+
+
+def futhark_cond(x, y, z):
+    return y if x else z
+
+
+futhark_cond_f16 = futhark_cond_f32 = futhark_cond_f64 = futhark_cond
+futhark_cond_i18 = futhark_cond_i16 = futhark_cond_i32 = futhark_cond_i64 = (
+    futhark_cond
+)
+futhark_cond_bool = futhark_cond_unit = futhark_cond
+
 
 # End of scalar.py.

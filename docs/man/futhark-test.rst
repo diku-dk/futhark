@@ -37,7 +37,8 @@ as follows::
 
   [tags { tags... }]
   [entry: names...]
-  ["name..."] [compiled|nobench|random|script] input ({ values... } | @ filename)
+  ["name..."] [ tags... ]
+  random input { types ... } | script input { ... } | input ({ values... } | @ filename)
   output { values... } | auto output | error: regex
 
 If a test case begins with a quoted string, that string is reported as
@@ -95,11 +96,6 @@ simply be a description of an expected compile time type error::
 
 This is used to test the type checker.
 
-Tuple syntax is not supported when specifying input and output values.
-Instead, you can write an N-tuple as its constituent N values.  Beware
-of syntax errors in the values - the errors reported by
-``futhark test`` are very poor.
-
 An optional tags specification is permitted in the first test block.
 This section can contain arbitrary tags that classify the benchmark::
 
@@ -122,6 +118,23 @@ See below for an example.
 For many usage examples, see the ``tests`` directory in the
 Futhark source directory.  A simple example can be found in
 ``EXAMPLES`` below.
+
+VALUES
+------
+
+The notation used for specifying values in ``input`` and ``output`` blocks is a
+small subset of Futhark syntax.
+
+Tuple syntax is not supported. Instead, you can write an *N*-tuple as its
+constituent *N* values. Beware of syntax errors in the values - the errors
+reported by ``futhark test`` are very poor. When comparing the output of an
+entry point with the values in an ``output`` block, the tuple is implicitly
+unpacked and compared to the expected values.
+
+The element type of an array value is determined by the first primitive element
+of the array. You therefore only need to provide a type suffix on the first
+element. If no suffix is provided, integer arrays have element type ``i32`` and
+decimal arrays have type ``f64``.
 
 OPTIONS
 =======
@@ -151,8 +164,8 @@ OPTIONS
 --exclude=tag
 
   Do not run test cases that contain the given tag.  Cases marked with
-  "disable" are ignored by default, as are cases marked "no_foo",
-  where *foo* is the backend used.
+  "notest", "disable", or "no_foo" (where *foo* is the backend used)
+  are ignored by default.
 
 -i
   Test with the interpreter.

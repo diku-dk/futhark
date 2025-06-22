@@ -54,18 +54,19 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
     numpad = 15
     mkRows rows =
       let longest = foldl max numpad $ map (T.length . fst) rows
+          total = sum $ map (evSum . snd) rows
           header = headerRow longest
           splitter = T.map (const '-') header
           bottom =
             T.unwords
               [ showText (sum (map (evCount . snd) rows)),
                 "events with a total runtime of",
-                T.pack $ printf "%.2fμs" $ sum $ map (evSum . snd) rows
+                T.pack $ printf "%.2fμs" total
               ]
        in T.unlines $
             header
               : splitter
-              : map (mkRow longest) rows
+              : map (mkRow longest total) rows
                 <> [splitter, bottom]
     headerRow longest =
       T.unwords
@@ -74,16 +75,18 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
           padLeft numpad "sum",
           padLeft numpad "avg",
           padLeft numpad "min",
-          padLeft numpad "max"
+          padLeft numpad "max",
+          padLeft numpad "fraction"
         ]
-    mkRow longest (name, ev) =
+    mkRow longest total (name, ev) =
       T.unwords
         [ padRight longest name,
           padLeft numpad (showText (evCount ev)),
           padLeft numpad $ T.pack $ printf "%.2fμs" (evSum ev),
           padLeft numpad $ T.pack $ printf "%.2fμs" $ evSum ev / fromInteger (evCount ev),
           padLeft numpad $ T.pack $ printf "%.2fμs" (evMin ev),
-          padLeft numpad $ T.pack $ printf "%.2fμs" (evMax ev)
+          padLeft numpad $ T.pack $ printf "%.2fμs" (evMax ev),
+          padLeft numpad $ T.pack $ printf "%.4f" (evSum ev / total)
         ]
 
 timeline :: [ProfilingEvent] -> T.Text
@@ -169,24 +172,26 @@ readFileSafely filepath =
   where
     couldNotRead e = pure $ Left $ show (e :: IOError)
 
+onFile :: FilePath -> IO ()
+onFile json_path = do
+  s <- readFileSafely json_path
+  case s of
+    Left a -> do
+      hPutStrLn stderr a
+      exitWith $ ExitFailure 2
+    Right s' ->
+      case decodeBenchResults s' of
+        Left _ ->
+          case decodeProfilingReport s' of
+            Nothing -> do
+              hPutStrLn stderr $
+                "Cannot recognise " <> json_path <> " as benchmark results or a profiling report."
+            Just pr ->
+              analyseProfilingReport json_path pr
+        Right br -> analyseBenchResults json_path br
+
 -- | Run @futhark profile@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions () [] "<file>" f
+main = mainWithOptions () [] "[files]" f
   where
-    f [json_path] () = Just $ do
-      s <- readFileSafely json_path
-      case s of
-        Left a -> do
-          hPutStrLn stderr a
-          exitWith $ ExitFailure 2
-        Right s' ->
-          case decodeBenchResults s' of
-            Left _ ->
-              case decodeProfilingReport s' of
-                Nothing -> do
-                  hPutStrLn stderr $
-                    "Cannot recognise " <> json_path <> " as benchmark results or a profiling report."
-                Just pr ->
-                  analyseProfilingReport json_path pr
-            Right br -> analyseBenchResults json_path br
-    f _ _ = Nothing
+    f files () = Just $ mapM_ onFile files

@@ -463,10 +463,10 @@ graphStm stm = do
       -- Can be replaced with 'graphHostOnly e' to disable migration.
       -- A fix can be verified by enabling tests/migration/reuse4_scratch.fut
       graphInefficientReturn s e
-    BasicOp (Reshape _ s arr) -> do
-      graphInefficientReturn (shapeDims s) e
+    BasicOp (Reshape arr s) -> do
+      graphInefficientReturn (shapeDims $ newShape s) e
       one bs `reuses` arr
-    BasicOp (Rearrange _ arr) -> do
+    BasicOp (Rearrange arr _) -> do
       graphInefficientReturn [] e
       one bs `reuses` arr
     -- Expressions with a cost linear to the size of their result arrays are
@@ -1074,15 +1074,15 @@ graphedScalarOperands e =
     collectHostOp (SegOp (SegMap lvl sp _ _)) = do
       collectSegLevel lvl
       collectSegSpace sp
-    collectHostOp (SegOp (SegRed lvl sp ops _ _)) = do
+    collectHostOp (SegOp (SegRed lvl sp _ _ ops)) = do
       collectSegLevel lvl
       collectSegSpace sp
       mapM_ collectSegBinOp ops
-    collectHostOp (SegOp (SegScan lvl sp ops _ _)) = do
+    collectHostOp (SegOp (SegScan lvl sp _ _ ops)) = do
       collectSegLevel lvl
       collectSegSpace sp
       mapM_ collectSegBinOp ops
-    collectHostOp (SegOp (SegHist lvl sp ops _ _)) = do
+    collectHostOp (SegOp (SegHist lvl sp _ _ ops)) = do
       collectSegLevel lvl
       collectSegSpace sp
       mapM_ collectHistOp ops

@@ -3,6 +3,7 @@ module Futhark.CLI.Main (main) where
 
 import Control.Exception
 import Data.List (sortOn)
+import Data.List qualified as L
 import Data.Maybe
 import Data.Text.IO qualified as T
 import Futhark.CLI.Autotune qualified as Autotune
@@ -18,6 +19,7 @@ import Futhark.CLI.Defs qualified as Defs
 import Futhark.CLI.Dev qualified as Dev
 import Futhark.CLI.Doc qualified as Doc
 import Futhark.CLI.Eval qualified as Eval
+import Futhark.CLI.Fmt qualified as Fmt
 import Futhark.CLI.HIP qualified as HIP
 import Futhark.CLI.LSP qualified as LSP
 import Futhark.CLI.Literate qualified as Literate
@@ -87,7 +89,8 @@ commands =
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
       ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
       ("benchcmp", (Benchcmp.main, "Compare two benchmark results.")),
-      ("profile", (Profile.main, "Analyse profiling data."))
+      ("profile", (Profile.main, "Analyse profiling data.")),
+      ("fmt", (Fmt.main, "Reformat Futhark source file."))
     ]
 
 msg :: String
@@ -154,4 +157,6 @@ main = reportingIOErrors $ do
   case args of
     cmd : args'
       | Just (m, _) <- lookup cmd commands -> m (unwords [prog, cmd]) args'
+      | not $ "-" `L.isPrefixOf` cmd ->
+          optionsError $ "unknown subcommand \"" <> cmd <> "\"."
     _ -> mainWithOptions () [] msg (const . const Nothing) prog args

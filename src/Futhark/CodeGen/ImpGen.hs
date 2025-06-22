@@ -147,7 +147,6 @@ import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
 import Futhark.Util.IntegralExp
-import Futhark.Util.Loc (noLoc)
 import Futhark.Util.Pretty hiding (nest, space)
 import Language.Futhark.Warnings
 import Prelude hiding (mod, quot)
@@ -942,7 +941,7 @@ defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
         BinOpExp (Add it OverflowUndef) e' $
           BinOpExp (Mul it OverflowUndef) i' s'
     copyDWIMFix (patElemName pe) [i] (Var (tvVar x)) []
-defCompileBasicOp (Pat [pe]) (Manifest _ src) =
+defCompileBasicOp (Pat [pe]) (Manifest src _) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
   offs_glb <- dPrimV "tmp_offs" 0

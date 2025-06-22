@@ -99,7 +99,9 @@
 module Futhark.IR.Syntax
   ( module Language.Futhark.Core,
     prettyString,
+    prettyStringOneLine,
     prettyText,
+    prettyTextOneLine,
     Pretty,
     module Futhark.IR.Rep,
     module Futhark.IR.Syntax.Core,
@@ -130,7 +132,8 @@ module Futhark.IR.Syntax
     CmpOp (..),
     ConvOp (..),
     OpaqueOp (..),
-    ReshapeKind (..),
+    DimSplice (..),
+    NewShape (..),
     WithAccInput,
     Exp (..),
     Case (..),
@@ -173,7 +176,7 @@ import Data.Text qualified as T
 import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Rep
 import Futhark.IR.Syntax.Core
-import Futhark.Util.Pretty (Pretty, prettyString, prettyText)
+import Futhark.Util.Pretty (Pretty, prettyString, prettyStringOneLine, prettyText, prettyTextOneLine)
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
 
@@ -204,6 +207,9 @@ data StmAux dec = StmAux
     stmAuxDec :: dec
   }
   deriving (Ord, Show, Eq)
+
+instance (Monoid dec) => Monoid (StmAux dec) where
+  mempty = StmAux mempty mempty mempty
 
 instance (Semigroup dec) => Semigroup (StmAux dec) where
   StmAux cs1 attrs1 dec1 <> StmAux cs2 attrs2 dec2 =
@@ -305,13 +311,40 @@ data OpaqueOp
     OpaqueTrace T.Text
   deriving (Eq, Ord, Show)
 
--- | Which kind of reshape is this?
-data ReshapeKind
-  = -- | New shape is dynamically same as original.
-    ReshapeCoerce
-  | -- | Any kind of reshaping.
-    ReshapeArbitrary
-  deriving (Eq, Ord, Show)
+-- | Split or join a range of dimensions. A reshaping operation consists of a
+-- sequence of these. The purpose is to maintain information about the original
+-- operations (flatten/unflatten), which can then be used for algebraic
+-- optimisations.
+data DimSplice d
+  = -- | @DimSplice i k s@ modifies dimensions @i@ to @i+k-1@ to instead have
+    -- shape @s@.
+    --
+    -- If @k@ is 1 and the rank of @s@ is greater than 1, then this is
+    -- equivalent to unflattening a dimension.
+    --
+    -- If @k@ is greater than 1 and the rank of @s@ is 1, then this is
+    -- equivalent to flattening adjacent dimensions.
+    --
+    -- If @k@ is 1 and the rank of @s@ is 1, then it is a coercion - a change
+    -- that only affects the type, but does not have any semantic effect.
+    --
+    -- Other cases can do arbitrary changes, but are harder for the compiler to
+    -- analyse.
+    DimSplice Int Int (ShapeBase d)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+-- | A reshaping operation consists of a sequence of splices, as well as an
+-- annotation indicating the final shape.
+data NewShape d = NewShape
+  { -- | The changes to perform.
+    dimSplices :: [DimSplice d],
+    -- | The resulting shape.
+    newShape :: ShapeBase d
+  }
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+instance Semigroup (NewShape d) where
+  NewShape ss1 _ <> NewShape ss2 shape = NewShape (ss1 <> ss2) shape
 
 -- | A primitive operation that returns something of known size and
 -- does not itself contain any bindings.
@@ -365,7 +398,7 @@ data BasicOp
     Concat Int (NonEmpty VName) SubExp
   | -- | Manifest an array with dimensions represented in the given
     -- order.  The result will not alias anything.
-    Manifest [Int] VName
+    Manifest VName [Int]
   | -- Array construction.
 
     -- | @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@.
@@ -378,13 +411,13 @@ data BasicOp
     Replicate Shape SubExp
   | -- | Create array of given type and shape, with undefined elements.
     Scratch PrimType [SubExp]
-  | -- | 1st arg is the new shape, 2nd arg is the input array.
-    Reshape ReshapeKind Shape VName
+  | -- | 1st arg is the input array, 2nd arg is new shape.
+    Reshape VName (NewShape SubExp)
   | -- | Permute the dimensions of the input array.  The list
     -- of integers is a list of dimensions (0-indexed), which
     -- must be a permutation of @[0,n-1]@, where @n@ is the
     -- number of dimensions in the input array.
-    Rearrange [Int] VName
+    Rearrange VName [Int]
   | -- | Update an accumulator at the given index with the given
     -- value. Consumes the accumulator and produces a new one. If
     -- 'Safe', perform a run-time bounds check and ignore the write if
@@ -417,9 +450,11 @@ instance Traversable Case where
 -- | Information about the possible aliases of a function result.
 data RetAls = RetAls
   { -- | Which of the parameters may be aliased, numbered from zero.
+    -- Must be sorted in increasing order.
     paramAls :: [Int],
     -- | Which of the other results may be aliased, numbered from
-    -- zero.  This must be a reflexive relation.
+    -- zero. This must be a reflexive relation. Must be sorted in
+    -- increasing order.
     otherAls :: [Int]
   }
   deriving (Eq, Ord, Show)
@@ -448,7 +483,9 @@ data Exp rep
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
-    -- accumulators are turned back into arrays.  The t'Shape' is the
+    -- accumulators are turned back into arrays.  In the lambda, the result
+    -- accumulators come first, and are ordered in a manner consistent with
+    -- that of the input (accumulator) arguments. The t'Shape' is the
     -- write index space.  The corresponding arrays must all have this
     -- shape outermost.  This construct is not part of t'BasicOp'
     -- because we need the @rep@ parameter.

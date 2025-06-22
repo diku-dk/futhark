@@ -3,7 +3,7 @@
 
 -- ==
 -- entry: f_jvp
--- compiled input { 3i64 2i64 }
+-- input { 3i64 2i64 }
 -- output { [0i64,0i64,0i64] }
 
 entry f_jvp n x =
@@ -11,7 +11,7 @@ entry f_jvp n x =
 
 -- ==
 -- entry: f_vjp
--- compiled input { 3i64 2i64 }
+-- input { 3i64 2i64 }
 -- output { 0i64 }
 
 entry f_vjp n x =

@@ -106,18 +106,16 @@ dissectScrema ::
   ScremaForm (Rep m) ->
   [VName] ->
   m ()
-dissectScrema pat w (ScremaForm scans reds map_lam) arrs = do
+dissectScrema pat w (ScremaForm map_lam scans reds) arrs = do
   let num_reds = redResults reds
       num_scans = scanResults scans
-      (scan_res, red_res, map_res) =
-        splitAt3 num_scans num_reds $ patNames pat
+      (scan_res, red_res, map_res) = splitAt3 num_scans num_reds $ patNames pat
 
   to_red <- replicateM num_reds $ newVName "to_red"
 
   let scanomap = scanomapSOAC scans map_lam
   letBindNames (scan_res <> to_red <> map_res) $
-    Op $
-      Screma w arrs scanomap
+    Op (Screma w arrs scanomap)
 
   reduce <- reduceSOAC reds
   letBindNames red_res $ Op $ Screma w to_red reduce
@@ -148,8 +146,8 @@ sequentialStreamWholeArray pat w nes lam arrs = do
   -- Finally, the array parameters are set to the arrays (but reshaped
   -- to make the types work out; this will be simplified rapidly).
   forM_ (zip arr_params arrs) $ \(p, arr) ->
-    letBindNames [paramName p] . BasicOp $
-      Reshape ReshapeCoerce (arrayShape $ paramType p) arr
+    letBindNames [paramName p] $
+      shapeCoerce (arrayDims $ paramType p) arr
 
   -- Then we just inline the lambda body.
   mapM_ addStm $ bodyStms $ lambdaBody lam
@@ -161,7 +159,7 @@ sequentialStreamWholeArray pat w nes lam arrs = do
     certifying cs $ case (arrayDims $ patElemType pe, se) of
       (dims, Var v)
         | not $ null dims ->
-            letBindNames [patElemName pe] $ BasicOp $ Reshape ReshapeCoerce (Shape dims) v
+            letBindNames [patElemName pe] $ shapeCoerce dims v
       _ -> letBindNames [patElemName pe] $ BasicOp $ SubExp se
 
 -- | Split the parameters of a stream reduction lambda into the chunk

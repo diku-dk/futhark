@@ -179,11 +179,11 @@ repairExpression ::
   (Allocable fromrep torep inner) =>
   Exp torep ->
   AllocM fromrep torep (Exp torep)
-repairExpression (BasicOp (Reshape k shape v)) = do
+repairExpression (BasicOp (Reshape v shape)) = do
   v_mem <- fst <$> lookupArraySummary v
   space <- lookupMemSpace v_mem
   v' <- snd <$> ensureDirectArray (Just space) v
-  pure $ BasicOp $ Reshape k shape v'
+  pure $ BasicOp $ Reshape v' shape
 repairExpression e =
   error $ "repairExpression:\n" <> prettyString e
 
@@ -537,7 +537,7 @@ allocPermArray space perm s v = do
             MemArray pt shape u . ArrayIn mem $
               LMAD.permute (LMAD.iota 0 $ map pe64 $ arrayDims t) perm
           pat = Pat [PatElem v' info]
-      addStm $ Let pat (defAux ()) $ BasicOp $ Manifest perm v
+      addStm $ Let pat (defAux ()) $ BasicOp $ Manifest v perm
       pure (mem, v')
     _ ->
       error $ "allocPermArray: " ++ prettyString t

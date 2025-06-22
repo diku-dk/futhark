@@ -260,6 +260,12 @@ pIota =
               <*> pure t
           )
 
+pDimSplice :: Parser (DimSplice SubExp)
+pDimSplice = DimSplice <$> pInt <* lexeme "::" <*> pInt <* lexeme "=>" <*> pShape
+
+pNewShape :: Parser (NewShape SubExp)
+pNewShape = parens $ NewShape <$> (pDimSplice `sepBy` pComma) <* pSemi <*> pShape
+
 pBasicOp :: Parser BasicOp
 pBasicOp =
   choice
@@ -280,17 +286,15 @@ pBasicOp =
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
       keyword "reshape"
-        *> parens (Reshape ReshapeArbitrary <$> pShape <* pComma <*> pVName),
-      keyword "coerce"
-        *> parens (Reshape ReshapeCoerce <$> pShape <* pComma <*> pVName),
+        *> parens (Reshape <$> pVName <* pComma <*> pNewShape),
       keyword "scratch"
         *> parens (Scratch <$> pPrimType <*> many (pComma *> pSubExp)),
       keyword "rearrange"
         *> parens
-          (Rearrange <$> parens (pInt `sepBy` pComma) <* pComma <*> pVName),
+          (Rearrange <$> pVName <* pComma <*> parens (pInt `sepBy` pComma)),
       keyword "manifest"
         *> parens
-          (Manifest <$> parens (pInt `sepBy` pComma) <* pComma <*> pVName),
+          (Manifest <$> pVName <* pComma <*> parens (pInt `sepBy` pComma)),
       keyword "concat" *> do
         d <- "@" *> L.decimal
         parens $ do
@@ -727,24 +731,25 @@ pSOAC pr =
           <*> p
     pScremaForm =
       SOAC.ScremaForm
-        <$> braces (pScan pr `sepBy` pComma)
+        <$> pLambda pr
+        <* pComma
+        <*> braces (pScan pr `sepBy` pComma)
         <* pComma
         <*> braces (pReduce pr `sepBy` pComma)
-        <* pComma
-        <*> pLambda pr
     pRedomapForm =
-      SOAC.ScremaForm mempty
-        <$> braces (pReduce pr `sepBy` pComma)
+      SOAC.ScremaForm
+        <$> pLambda pr
+        <*> pure []
         <* pComma
-        <*> pLambda pr
+        <*> braces (pReduce pr `sepBy` pComma)
     pScanomapForm =
       SOAC.ScremaForm
-        <$> braces (pScan pr `sepBy` pComma)
+        <$> pLambda pr
         <* pComma
-        <*> pure mempty
-        <*> pLambda pr
+        <*> braces (pScan pr `sepBy` pComma)
+        <*> pure []
     pMapForm =
-      SOAC.ScremaForm mempty mempty <$> pLambda pr
+      SOAC.ScremaForm <$> pLambda pr <*> pure mempty <*> pure mempty
     pScatter =
       keyword "scatter"
         *> parens
@@ -797,19 +802,19 @@ pSOAC pr =
     pVJP =
       parens $
         SOAC.VJP
-          <$> pLambda pr
+          <$> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
+          <*> pLambda pr
     pJVP =
       parens $
         SOAC.JVP
-          <$> pLambda pr
+          <$> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
-          <*> braces (pSubExp `sepBy` pComma)
+          <*> pLambda pr
 
 pSizeClass :: Parser GPU.SizeClass
 pSizeClass =
@@ -918,18 +923,10 @@ pSegOp pr pLvl =
       keyword "seghist" *> pSegHist
     ]
   where
-    pSegMap =
-      SegOp.SegMap
-        <$> pLvl
-        <*> pSegSpace
-        <* pColon
-        <*> pTypes
-        <*> braces (pKernelBody pr)
-    pSegOp' f p =
+    pSegOp' f =
       f
         <$> pLvl
         <*> pSegSpace
-        <*> parens (p `sepBy` pComma)
         <* pColon
         <*> pTypes
         <*> braces (pKernelBody pr)
@@ -952,9 +949,10 @@ pSegOp pr pLvl =
         <*> pShape
         <* pComma
         <*> pLambda pr
-    pSegRed = pSegOp' SegOp.SegRed pSegBinOp
-    pSegScan = pSegOp' SegOp.SegScan pSegBinOp
-    pSegHist = pSegOp' SegOp.SegHist pHistOp
+    pSegMap = pSegOp' SegOp.SegMap
+    pSegRed = pSegOp' SegOp.SegRed <*> parens (pSegBinOp `sepBy` pComma)
+    pSegScan = pSegOp' SegOp.SegScan <*> parens (pSegBinOp `sepBy` pComma)
+    pSegHist = pSegOp' SegOp.SegHist <*> parens (pHistOp `sepBy` pComma)
 
 pSegLevel :: Parser GPU.SegLevel
 pSegLevel =

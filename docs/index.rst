@@ -51,6 +51,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-cuda.rst
    man/futhark-dataset.rst
    man/futhark-doc.rst
+   man/futhark-fmt.rst
    man/futhark-hip.rst
    man/futhark-ispc.rst
    man/futhark-literate.rst

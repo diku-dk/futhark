@@ -5,6 +5,7 @@ module Futhark.CLI.Test (main) where
 
 import Control.Applicative.Lift (Errors, Lift (..), failure, runErrors)
 import Control.Concurrent
+import Control.Concurrent.Async
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except (ExceptT (..), MonadError, runExceptT, withExceptT)
@@ -87,6 +88,10 @@ pureTestResults m = do
     collectErrors Success errs = errs
     collectErrors (Failure err) errs = err : errs
 
+-- | The longest we are willing to wait for a test, in microseconds.
+timeout :: Int
+timeout = 5 * 60 * 1000000
+
 withProgramServer :: FilePath -> FilePath -> [String] -> (Server -> IO [TestResult]) -> TestM ()
 withProgramServer program runner extra_options f = do
   -- Explicitly prefixing the current directory is necessary for
@@ -102,10 +107,13 @@ withProgramServer program runner extra_options f = do
       prog_ctx =
         "Running " <> T.pack (unwords $ binpath : extra_options)
 
-  context prog_ctx $
-    pureTestResults $
-      liftIO $
-        withServer (futharkServerCfg to_run to_run_args) f
+  context prog_ctx . pureTestResults . liftIO $
+    withServer (futharkServerCfg to_run to_run_args) $ \server ->
+      race (threadDelay timeout) (f server) >>= \case
+        Left _ -> do
+          abortServer server
+          fail $ "test timeout after " <> show timeout <> " microseconds"
+        Right r -> pure r
 
 data TestMode
   = -- | Only type check.
@@ -186,7 +194,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
     maybePipeline SeqMemPipeline = "(seq-mem) "
     maybePipeline GpuMemPipeline = "(gpu-mem) "
     maybePipeline MCMemPipeline = "(mc-mem) "
-    maybePipeline NoPipeline = ""
+    maybePipeline NoPipeline = " "
 
     ok (AstMetrics metrics) (name, expected_occurences) =
       case M.lookup name metrics of
@@ -195,7 +203,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
               throwError $
                 name
                   <> maybePipeline pipeline
-                  <> " should have occurred "
+                  <> "should have occurred "
                   <> showText expected_occurences
                   <> " times, but did not occur at all in optimised program."
         Just actual_occurences
@@ -203,7 +211,7 @@ testMetrics programs program (StructureTest pipeline (AstMetrics expected)) =
               throwError $
                 name
                   <> maybePipeline pipeline
-                  <> " should have occurred "
+                  <> "should have occurred "
                   <> showText expected_occurences
                   <> " times, but occurred "
                   <> showText actual_occurences
@@ -452,7 +460,7 @@ doTest = catching . runTestM . runTestCase
 
 makeTestCase :: TestConfig -> TestMode -> (FilePath, ProgramTest) -> TestCase
 makeTestCase config mode (file, spec) =
-  TestCase mode file spec $ configPrograms config
+  excludeCases config $ TestCase mode file spec $ configPrograms config
 
 data ReportMsg
   = TestStarted TestCase
@@ -481,7 +489,7 @@ excludeCases config tcase =
     onAction action = action
     onIOs (InputOutputs entry runs) =
       InputOutputs entry $ filter (not . any excluded . runTags) runs
-    excluded = (`elem` configExclude config) . T.pack
+    excluded = (`elem` configExclude config)
 
 putStatusTable :: TestStatus -> IO ()
 putStatusTable ts = hPutTable stdout rows 1
@@ -528,13 +536,12 @@ reportLine time_mvar ts =
     if systemSeconds time_now - systemSeconds time >= period
       then do
         T.putStrLn $
-          "("
-            <> showText (testStatusFail ts)
+          showText (testStatusFail ts)
             <> " failed, "
             <> showText (testStatusPass ts)
             <> " passed, "
             <> showText num_remain
-            <> " to go)."
+            <> " to go."
         pure time_now
       else pure time
   where
@@ -670,7 +677,7 @@ defaultConfig :: TestConfig
 defaultConfig =
   TestConfig
     { configTestMode = Compiled,
-      configExclude = ["disable"],
+      configExclude = ["disable", "notest"],
       configPrograms =
         ProgConfig
           { configBackend = "c",

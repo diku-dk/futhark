@@ -10,7 +10,7 @@ import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Either
 import Data.Function ((&))
 import Data.IORef
-import Data.List (sortBy)
+import Data.List (intersect, sortBy)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Ord
@@ -57,7 +57,7 @@ data BenchOptions = BenchOptions
     optJSON :: Maybe FilePath,
     optTimeout :: Int,
     optSkipCompilation :: Bool,
-    optExcludeCase :: [String],
+    optExcludeCase :: [T.Text],
     optIgnoreFiles :: [Regex],
     optEntryPoint :: Maybe String,
     optTuning :: Maybe String,
@@ -171,8 +171,10 @@ compileBenchmark opts (program, program_spec) = do
   spec <- maybe (pure program_spec) testSpecFromFileOrDie $ optTestSpec opts
   case testAction spec of
     RunCases cases _ _
-      | "nobench" `notElem` testTags spec,
-        "disable" `notElem` testTags spec,
+      | null $
+          optExcludeCase opts
+            `intersect` testTags spec
+            <> testTags program_spec,
         any hasRuns cases ->
           if optSkipCompilation opts
             then do
@@ -533,7 +535,7 @@ commandLineOptions =
       ["exclude-case"]
       ( ReqArg
           ( \s -> Right $ \config ->
-              config {optExcludeCase = s : optExcludeCase config}
+              config {optExcludeCase = T.pack s : optExcludeCase config}
           )
           "TAG"
       )
@@ -636,7 +638,11 @@ commandLineOptions =
 
 excludeBackend :: BenchOptions -> BenchOptions
 excludeBackend config =
-  config {optExcludeCase = "no_" <> optBackend config : optExcludeCase config}
+  config
+    { optExcludeCase =
+        "no_" <> T.pack (optBackend config)
+          : optExcludeCase config
+    }
 
 -- | Run @futhark bench@.
 main :: String -> [String] -> IO ()

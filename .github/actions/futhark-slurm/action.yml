@@ -36,6 +36,6 @@ runs:
         printf '#!/bin/bash
         ${{inputs.script}}' > temp.sh
         chmod +x temp.sh
-        export TMPDIR=/scratch
-        srun ${{inputs.slurm-options}} temp.sh
+        [ -d /scratch ] && export TMPDIR=/scratch
+        srun ${{inputs.slurm-options}} --exclude=hendrixgpu05fl,hendrixgpu23fl,hendrixgpu24fl,hendrixgpu25fl,hendrixgpu26fl temp.sh
         rm temp.sh

@@ -1,7 +1,16 @@
 // start of prelude.cu
+
 #define SCALAR_FUN_ATTR __device__ static inline
 #define FUTHARK_FUN_ATTR __device__ static
 #define FUTHARK_F64_ENABLED
+
+#if defined(__CUDACC_RTC__)
+typedef uint64_t uintptr_t;
+#endif
+
+#if defined(__HIPCC_RTC__)
+typedef uint64_t uintptr_t;
+#endif
 
 #define __global
 #define __local
@@ -81,13 +90,15 @@ static inline __device__ void barrier_local() {
   __syncthreads();
 }
 
+#if defined(__CUDACC_RTC__) || defined(__HIPCC_RTC__)
 #define NAN (0.0/0.0)
 #define INFINITY (1.0/0.0)
+#endif
+
 extern volatile __shared__ unsigned char shared_mem[];
 
 #define SHARED_MEM_PARAM
 #define FUTHARK_KERNEL extern "C" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)
 #define FUTHARK_KERNEL_SIZED(a,b,c) extern "C" __global__ __launch_bounds__(a*b*c)
-
 
 // End of prelude.cu

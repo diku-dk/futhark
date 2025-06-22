@@ -41,6 +41,10 @@ module Futhark.Optimise.Fusion.GraphRep
     mkDepGraph,
     mkDepGraphForFun,
     pprg,
+    isWithAccNodeT,
+    isWithAccNodeId,
+    vFusionFeasability,
+    hFusionFeasability,
   )
 where
 
@@ -293,7 +297,7 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
     pure $ MatchNode s []
   e
     | [output] <- patNames pat,
-      Just (ia, tr) <- H.transformFromExp (stmAuxCerts aux) e ->
+      Just (ia, tr) <- H.transformFromExp aux e ->
         pure $ TransNode output tr ia
   _ -> pure n
 nodeToSoacNode n = pure n
@@ -431,3 +435,25 @@ isInf (_, _, e) = case e of
 isCons :: EdgeT -> Bool
 isCons (Cons _) = True
 isCons _ = False
+
+-- | Is this a withAcc?
+isWithAccNodeT :: NodeT -> Bool
+isWithAccNodeT (StmNode (Let _ _ (WithAcc _ _))) = True
+isWithAccNodeT _ = False
+
+isWithAccNodeId :: G.Node -> DepGraph -> Bool
+isWithAccNodeId node_id (DepGraph {dgGraph = g}) =
+  let (_, _, nT, _) = G.context g node_id
+   in isWithAccNodeT nT
+
+unreachableEitherDir :: DepGraph -> G.Node -> G.Node -> Bool
+unreachableEitherDir g a b =
+  not (reachable g a b || reachable g b a)
+
+vFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
+vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
+  (isWithAccNodeId n2 dg || not (any isInf (edgesBetween dg n1 n2)))
+    && not (any (reachable dg n2) (filter (/= n2) (G.pre g n1)))
+
+hFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
+hFusionFeasability = unreachableEitherDir

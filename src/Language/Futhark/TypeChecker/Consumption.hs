@@ -229,7 +229,7 @@ matchPat (RecordPat fs1 _) (Scalar (Record fs2)) =
   mconcat $
     zipWith
       matchPat
-      (map snd (sortFields (M.fromList fs1)))
+      (map snd (sortFields (M.fromList (map (first unLoc) fs1))))
       (map snd (sortFields fs2))
 matchPat (Id v (Info t) _) als = DL.singleton (v, (t, als))
 matchPat (PatAscription p _ _) t = matchPat p t
@@ -557,7 +557,7 @@ boundFreeInExp e = do
 -- Loops are tricky because we want to infer the uniqueness of their
 -- parameters.  This is pretty unusual: we do not do this for ordinary
 -- functions.
-type Loop = (Pat ParamType, Exp, LoopFormBase Info VName, Exp)
+type Loop = (Pat ParamType, LoopInitBase Info VName, LoopFormBase Info VName, Exp)
 
 -- | Mark bindings of consumed names as Consume, except those under a
 -- 'PatAscription', which are left unchanged.
@@ -616,6 +616,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
               && not (S.null (aliases t `S.intersection` (cons <> obs)))
           )
           $ lift . addError loop_loc mempty
+          $ withIndexLink "aliases-previously-returned"
           $ "Return value for consuming loop parameter"
             <+> dquotes (prettyName pat_v)
             <+> "aliases previously returned value."
@@ -631,9 +632,12 @@ convergeLoopParam loop_loc param body_cons body_als = do
       checkMergeReturn (PatAscription p _ _) t =
         checkMergeReturn p t
       checkMergeReturn (RecordPat pfs patloc) (Scalar (Record tfs)) =
-        RecordPat . M.toList <$> sequence pfs' <*> pure patloc
+        RecordPat . map unshuffle . M.toList <$> sequence pfs' <*> pure patloc
         where
-          pfs' = M.intersectionWith checkMergeReturn (M.fromList pfs) tfs
+          pfs' = M.intersectionWith check (M.fromList (map shuffle pfs)) tfs
+          check (loc, x) y = (loc,) <$> checkMergeReturn x y
+          shuffle (L loc v, t) = (v, (loc, t))
+          unshuffle (v, (loc, t)) = (L loc v, t)
       checkMergeReturn (TuplePat pats patloc) t
         | Just ts <- isTupleRecord t =
             TuplePat <$> zipWithM checkMergeReturn pats ts <*> pure patloc
@@ -664,7 +668,11 @@ checkLoop loop_loc (param, arg, form, body) = do
   param' <- convergeLoopParam loop_loc param (M.keysSet body_cons) body_als
 
   let param_t = patternType param'
-  ((arg', arg_als), arg_cons) <- contain $ checkArg [] param_t arg
+  ((arg', arg_als), arg_cons) <- case arg of
+    LoopInitImplicit (Info e) ->
+      contain $ first (LoopInitImplicit . Info) <$> checkArg [] param_t e
+    LoopInitExplicit e ->
+      contain $ first LoopInitExplicit <$> checkArg [] param_t e
   consumed arg_cons
   free_bound <- boundFreeInExp body
 
@@ -726,10 +734,11 @@ checkExp (AppExp (Apply f args loc) appres) = do
       error $ "checkArgs: " <> prettyString t
 
 --
-checkExp (AppExp (Loop sparams pat args form body loc) appres) = do
-  ((pat', args', form', body'), als) <- checkLoop (locOf loc) (pat, args, form, body)
+checkExp (AppExp (Loop sparams pat loopinit form body loc) appres) = do
+  ((pat', loopinit', form', body'), als) <-
+    checkLoop (locOf loc) (pat, loopinit, form, body)
   pure
-    ( AppExp (Loop sparams pat' args' form' body' loc) appres,
+    ( AppExp (Loop sparams pat' loopinit' form' body' loc) appres,
       als
     )
 
@@ -943,10 +952,10 @@ checkExp (RecordLit fs loc) = do
   where
     checkField (RecordFieldExplicit name e floc) = do
       (e', e_als) <- checkExp e
-      pure (RecordFieldExplicit name e' floc, (name, e_als))
+      pure (RecordFieldExplicit name e' floc, (unLoc name, e_als))
     checkField (RecordFieldImplicit name t floc) = do
-      name_als <- observeVar (locOf floc) name $ unInfo t
-      pure (RecordFieldImplicit name t floc, (baseName name, name_als))
+      name_als <- observeVar (locOf floc) (unLoc name) $ unInfo t
+      pure (RecordFieldImplicit name t floc, (baseName (unLoc name), name_als))
 
 -- Cases that create alias-free values.
 checkExp e@(AppExp Range {} _) = noAliases e
