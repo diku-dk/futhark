@@ -3,21 +3,6 @@
 #define FUTHARK_FUN_ATTR __device__ static
 #define FUTHARK_F64_ENABLED
 
-// TODO(k): We need to find a way to avoid this.
-// Currently I have moved the include to preludeTensorCores.cu
-// Maybe it just works now?
-
-#ifndef FUTHARK_CUDATC
-typedef char int8_t;
-typedef short int16_t;
-typedef int int32_t;
-typedef long long int64_t;
-typedef unsigned char uint8_t;
-typedef unsigned short uint16_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
-#endif
-
 #define __global
 #define __local
 #define __private
