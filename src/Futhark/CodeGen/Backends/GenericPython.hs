@@ -1306,11 +1306,10 @@ compileCode (Imp.DeclareArray name t vs) = do
         ]
   name' <- compileVar name
   stm $ Assign name' $ simpleCall "unwrapArray" [Var arr_name]
-compileCode (Imp.Meta (Imp.MetaComment s) code) = do
-  code' <- collect $ compileCode code
-  stm $ Comment (T.unpack s) code'
-compileCode (Imp.Meta _ code) =
-  compileCode code
+compileCode (Imp.Meta (Imp.MetaComment s)) =
+  stm $ Comment (T.unpack s) []
+compileCode (Imp.Meta {}) =
+  pure ()
 compileCode (Imp.Assert e msg (loc, locs)) = do
   e' <- compileExp e
   (formatstr, formatargs) <- errorMsgString msg

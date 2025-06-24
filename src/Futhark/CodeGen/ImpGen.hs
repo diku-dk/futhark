@@ -125,7 +125,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Parallel.Strategies
-import Data.Bifunctor (first, second)
+import Data.Bifunctor (first)
 import Data.DList qualified as DL
 import Data.Either
 import Data.List (find)
@@ -737,7 +737,7 @@ compileStms alive_after_stms all_stms m = do
   cb alive_after_stms all_stms m
 
 attachProvenance :: Provenance -> Imp.Code op -> Imp.Code op
-attachProvenance p = if p == mempty then id else Imp.Meta (Imp.MetaProvenance p)
+attachProvenance p = if p == mempty then id else (Imp.Meta (Imp.MetaProvenance p) <>)
 
 defCompileStms ::
   (Mem rep inner, FreeIn op) =>
@@ -1349,7 +1349,7 @@ withProvenance m = do
     then m
     else do
       c <- collect m
-      emit $ Imp.Meta (Imp.MetaProvenance p) c
+      emit $ Imp.Meta (Imp.MetaProvenance p) <> c
 
 -- | Replace (*not* extend) the provenance while executing some action.
 localProvenance :: Provenance -> ImpM rep r op a -> ImpM rep r op a
@@ -1766,7 +1766,7 @@ sWhile cond body = do
 sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code
-  emit $ Imp.Meta (Imp.MetaComment s) code'
+  emit $ Imp.Meta (Imp.MetaComment s) <> code'
 
 sIf :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op () -> ImpM rep r op ()
 sIf cond tbranch fbranch = do
@@ -1915,8 +1915,6 @@ function fname outputs inputs m = local newFunction $ do
 constParams :: Names -> Imp.Code a -> (DL.DList Imp.Param, Imp.Code a)
 constParams used (x Imp.:>>: y) =
   constParams used x <> constParams used y
-constParams used (Imp.Meta s x) =
-  second (Imp.Meta s) $ constParams used x
 constParams used (Imp.DeclareMem name space)
   | name `nameIn` used =
       ( DL.singleton $ Imp.MemParam name space,

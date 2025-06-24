@@ -271,9 +271,9 @@ data Code a
     While (TExp Bool) (Code a)
   | -- | Conditional execution.
     If (TExp Bool) (Code a) (Code a)
-  | -- | Has the same semantics as the contained code, but attach some
-    -- nonsemantic metadata.
-    Meta Metadata (Code a)
+  | -- | No semantics; just some information about what code is being generated
+    -- here.
+    Meta Metadata
   | -- | Declare a memory block variable that will point to
     -- memory in the given memory space.  Note that this is
     -- distinct from allocation.  The memory block must be the
@@ -380,7 +380,6 @@ lexicalMemoryUsage func =
     go f (If _ x y) = f x <> f y
     go f (For _ _ x) = f x
     go f (While _ x) = f x
-    go f (Meta _ x) = f x
     go _ _ = mempty
 
     declared (DeclareMem mem space) =
@@ -420,7 +419,6 @@ calledFuncs f (x :>>: y) = calledFuncs f x <> calledFuncs f y
 calledFuncs f (If _ x y) = calledFuncs f x <> calledFuncs f y
 calledFuncs f (For _ _ x) = calledFuncs f x
 calledFuncs f (While _ x) = calledFuncs f x
-calledFuncs f (Meta _ x) = calledFuncs f x
 calledFuncs _ _ = mempty
 
 -- | Compute call graph, as per 'calledFuncs', but also include
@@ -436,8 +434,7 @@ callGraph f (Functions funs) =
 
 -- | Combine the provenances of all the 'Imp.MetaProvenance' in the provided code.
 foldProvenances :: (op -> Provenance) -> Code op -> Provenance
-foldProvenances f (Meta (MetaProvenance p) c) = p <> foldProvenances f c
-foldProvenances f (Meta _ c) = foldProvenances f c
+foldProvenances _ (Meta (MetaProvenance p)) = p
 foldProvenances f (x :>>: y) = foldProvenances f x <> foldProvenances f y
 foldProvenances f (For _ _ c) = foldProvenances f c
 foldProvenances f (While _ c) = foldProvenances f c
@@ -665,10 +662,10 @@ instance (Pretty op) => Pretty (Code op) where
       <+> "<-"
       <+> pretty fname
       <> parens (commasep $ map pretty args)
-  pretty (Meta (MetaComment s) code) =
-    "--" <+> pretty s </> pretty code
-  pretty (Meta (MetaProvenance l) code) =
-    "@" <+> align (pretty l) </> pretty code
+  pretty (Meta (MetaComment s)) =
+    "--" <+> pretty s
+  pretty (Meta (MetaProvenance l)) =
+    "@" <+> align (pretty l)
   pretty (DebugPrint desc (Just e)) =
     "debug" <+> parens (commasep [pretty (show desc), pretty e])
   pretty (DebugPrint desc Nothing) =
@@ -745,8 +742,8 @@ instance Traversable Code where
     pure $ Assert e msg loc
   traverse _ (Call dests fname args) =
     pure $ Call dests fname args
-  traverse f (Meta s code) =
-    Meta s <$> traverse f code
+  traverse _ (Meta s) =
+    pure $ Meta s
   traverse _ (DebugPrint s v) =
     pure $ DebugPrint s v
   traverse _ (TracePrint msg) =
@@ -762,7 +759,6 @@ declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
 declaredIn (For i _ body) = oneName i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
-declaredIn (Meta _ body) = declaredIn body
 declaredIn _ = mempty
 
 instance FreeIn EntryPoint where
@@ -823,8 +819,8 @@ instance (FreeIn a) => FreeIn (Code a) where
     freeIn' e <> foldMap freeIn' msg
   freeIn' (Op op) =
     freeIn' op
-  freeIn' (Meta _ code) =
-    freeIn' code
+  freeIn' (Meta {}) =
+    mempty
   freeIn' (DebugPrint _ v) =
     maybe mempty freeIn' v
   freeIn' (TracePrint msg) =

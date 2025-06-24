@@ -221,13 +221,10 @@ compileCode :: Code op -> CompilerM op s ()
 compileCode (Op op) =
   join $ asks (opsCompiler . envOperations) <*> pure op
 compileCode Skip = pure ()
-compileCode (Meta (MetaComment s) code) = do
-  xs <- collect $ compileCode code
-  let s' = "// " ++ T.unpack s
-  stm [C.cstm|$comment:s' { $items:xs } |]
-compileCode (Meta (MetaProvenance l) code) = do
+compileCode (Meta (MetaComment s)) = do
+  comment s
+compileCode (Meta (MetaProvenance l)) =
   comment $ prettyText l
-  localProvenance l $ compileCode code
 compileCode (TracePrint msg) = do
   (formatstr, formatargs) <- errorMsgString msg
   stm [C.cstm|fprintf(ctx->log, $string:formatstr, $args:formatargs);|]
