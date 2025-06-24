@@ -328,7 +328,7 @@ data Code a
   | -- | Assert that something must be true.  Should it turn
     -- out not to be true, then report a failure along with
     -- the given error message.
-    Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
+    Assert Exp (ErrorMsg Exp) (Loc, [Loc])
   | -- | Print the given value to the screen, somehow
     -- annotated with the given string as a description.  If
     -- no type/value pair, just print the string.  This has

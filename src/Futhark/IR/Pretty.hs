@@ -152,7 +152,7 @@ prettyLoc :: Loc -> Doc a
 prettyLoc = pretty . locText
 
 instance Pretty Provenance where
-  pretty (Provenance loc) = prettyLoc loc
+  pretty (Provenance locs loc) = mconcat $ punctuate "->" $ map prettyLoc $ locs ++ [loc]
 
 instance (Pretty dec) => Pretty (StmAux dec) where
   pretty (StmAux cs attrs p dec) =
@@ -254,8 +254,8 @@ instance Pretty BasicOp where
     "concat" <> "@" <> pretty i <> apply (pretty w : pretty x : map pretty xs)
   pretty (Manifest v perm) =
     "manifest" <> apply [pretty v, apply (map pretty perm)]
-  pretty (Assert e msg (loc, _)) =
-    "assert" <> apply [pretty e, pretty msg, pretty $ show $ locStr loc]
+  pretty (Assert e msg) =
+    "assert" <> apply [pretty e, pretty msg]
   pretty (UpdateAcc safety acc is v) =
     update_acc_str
       <> apply
@@ -323,7 +323,7 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
         MatchFallback -> " <fallback>"
         MatchEquiv -> " <equiv>"
   pretty (BasicOp op) = pretty op
-  pretty (Apply fname args ret (safety, _, _)) =
+  pretty (Apply fname args ret safety) =
     applykw
       <+> pretty (nameToString fname)
       <> apply (map (align . prettyArg) args)

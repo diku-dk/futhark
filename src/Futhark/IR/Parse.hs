@@ -245,12 +245,6 @@ pLoc =
       pure mempty
     ]
 
-pSrcLoc :: Parser SrcLoc
-pSrcLoc = srclocOf <$> pLoc
-
-pErrorLoc :: Parser (SrcLoc, [SrcLoc])
-pErrorLoc = (,mempty) <$> pSrcLoc
-
 pIota :: Parser BasicOp
 pIota =
   choice $ map p allIntTypes
@@ -281,15 +275,7 @@ pBasicOp =
         $> uncurry (Opaque . OpaqueTrace)
         <*> parens ((,) <$> pStringLiteral <* pComma <*> pSubExp),
       keyword "copy" $> Replicate mempty . Var <*> parens pVName,
-      keyword "assert"
-        *> parens
-          ( Assert
-              <$> pSubExp
-              <* pComma
-              <*> pErrorMsg
-              <* pComma
-              <*> pErrorLoc
-          ),
+      keyword "assert" *> parens (Assert <$> pSubExp <* pComma <*> pErrorMsg),
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
       keyword "reshape"
@@ -492,7 +478,7 @@ pApply pr =
         <*> parens (pArg `sepBy` pComma)
         <* pColon
         <*> pRetTypes pr
-        <*> pure (safety, mempty, mempty)
+        <*> pure safety
 
     pArg =
       choice
@@ -595,7 +581,7 @@ pSubExpRes :: Parser SubExpRes
 pSubExpRes = SubExpRes <$> pCerts <*> pSubExp
 
 pProvenance :: Parser Provenance
-pProvenance = Provenance <$> pLoc
+pProvenance = Provenance mempty <$> pLoc
 
 pStm :: PR rep -> Parser (Stm rep)
 pStm pr = do

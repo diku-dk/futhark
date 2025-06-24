@@ -76,6 +76,7 @@ module Futhark.IR.Syntax.Core
 
     -- * Provenance
     Provenance (..),
+    stackProvenance,
   )
 where
 
@@ -91,6 +92,7 @@ import Data.Set qualified as S
 import Data.String
 import Data.Text qualified as T
 import Data.Traversable (fmapDefault, foldMapDefault)
+import Futhark.Util (splitFromEnd)
 import Language.Futhark.Core
 import Language.Futhark.Primitive
 import Prelude hiding (id, (.))
@@ -648,11 +650,21 @@ instance Semigroup OpaqueTypes where
 
 -- | Information about what in the original program a given IR statement
 -- corresponds to. See Note [Tracking Source Locations].
-newtype Provenance = Provenance Loc
+data Provenance = Provenance [Loc] Loc
   deriving (Eq, Ord, Show)
 
-instance Semigroup Provenance where
-  Provenance x <> Provenance y = Provenance $ x <> y
+stackProvenance :: Provenance -> Provenance -> Provenance
+stackProvenance (Provenance xs x) (Provenance ys y) =
+  case splitFromEnd 1 $ xs <> [x | x /= mempty] <> ys <> [y | y /= mempty] of
+    (zs', [z']) -> Provenance zs' z'
+    _ -> mempty -- Zero-information case.
 
 instance Monoid Provenance where
-  mempty = Provenance mempty
+  mempty = Provenance mempty mempty
+
+instance Semigroup Provenance where
+  Provenance xs x <> Provenance ys y
+    | y == mempty = Provenance xs x
+    | x == mempty = Provenance ys y
+    | xs == ys = Provenance xs (x <> y)
+    | otherwise = Provenance ys y

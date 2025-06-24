@@ -296,10 +296,10 @@ protectIf _ _ taken (Let pat aux (Match [cond] [Case [Just (BoolValue True)] tak
   auxing aux . letBind pat $
     Match [cond'] [Case [Just (BoolValue True)] taken_body] untaken_body $
       MatchDec if_ts MatchFallback
-protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg loc))) = do
+protectIf _ _ taken (Let pat aux (BasicOp (Assert cond msg))) = do
   not_taken <- letSubExp "loop_not_taken" $ BasicOp $ UnOp (Neg Bool) taken
   cond' <- letSubExp "protect_assert_disj" $ BasicOp $ BinOp LogOr not_taken cond
-  auxing aux $ letBind pat $ BasicOp $ Assert cond' msg loc
+  auxing aux $ letBind pat $ BasicOp $ Assert cond' msg
 protectIf protect _ taken (Let pat aux (Op op))
   | Just m <- protect taken pat op =
       auxing aux m

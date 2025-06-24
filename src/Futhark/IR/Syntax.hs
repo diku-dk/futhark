@@ -387,9 +387,10 @@ data BasicOp
     CmpOp CmpOp SubExp SubExp
   | -- | Conversion "casting".
     ConvOp ConvOp SubExp
-  | -- | Turn a boolean into a certificate, halting the program with the
-    -- given error message if the boolean is false.
-    Assert SubExp (ErrorMsg SubExp) (SrcLoc, [SrcLoc])
+  | -- | Turn a boolean into a certificate, halting the program with the given
+    -- error message if the boolean is false. The error location comes from the
+    -- provenance of the statement.
+    Assert SubExp (ErrorMsg SubExp)
   | -- | The certificates for bounds-checking are part of the 'Stm'.
     Index VName (Slice SubExp)
   | -- | An in-place update of the given array at the given position.
@@ -483,7 +484,7 @@ instance Semigroup RetAls where
 data Exp rep
   = -- | A simple (non-recursive) operation.
     BasicOp BasicOp
-  | Apply Name [(SubExp, Diet)] [(RetType rep, RetAls)] (Safety, SrcLoc, [SrcLoc])
+  | Apply Name [(SubExp, Diet)] [(RetType rep, RetAls)] Safety
   | -- | A match statement picks a branch by comparing the given
     -- subexpressions (called the /scrutinee/) with the pattern in
     -- each of the cases.  If none of the cases match, the /default

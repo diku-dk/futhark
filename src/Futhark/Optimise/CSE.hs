@@ -196,13 +196,6 @@ cseInStms consumed (stm : stms) m =
       | patElemName pe `nameIn` consumed = Consume
       | otherwise = Observe
 
--- A small amount of normalisation of expressions that otherwise would
--- be different for pointless reasons.
-normExp :: Exp lore -> Exp lore
-normExp (Apply fname args ret (safety, _, _)) =
-  Apply fname args ret (safety, mempty, mempty)
-normExp e = e
-
 cseInStm ::
   (ASTRep rep) =>
   Names ->
@@ -211,7 +204,7 @@ cseInStm ::
   CSEM rep a
 cseInStm consumed (Let pat aux e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
-  let e' = normExp $ substituteNames nsubsts e
+  let e' = substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
   if not (alreadyAliases e) && any (bad cse_arrays) (patElems pat)
     then m [Let pat' aux e']

@@ -940,7 +940,7 @@ checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
   require [Prim int64] ressize
 checkBasicOp (Manifest arr perm) =
   checkBasicOp $ Rearrange arr perm -- Basically same thing!
-checkBasicOp (Assert e (ErrorMsg parts) _) = do
+checkBasicOp (Assert e (ErrorMsg parts)) = do
   require [Prim Bool] e
   mapM_ checkPart parts
   where
