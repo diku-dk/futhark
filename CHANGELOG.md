@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark pkg` now allows the `~` character in package paths.
 
+* `cuda` backend: explicitly support CC 8.9, 9.0, 10.0, 10.1, and 12.0.
+
 ### Removed
 
 ### Changed
