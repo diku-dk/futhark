@@ -908,11 +908,11 @@ defCompileBasicOp _ (Assert e msg) = do
   e' <- toExp e
   msg' <- traverse toExp msg
   Imp.Provenance locs loc <- askProvenance
-  emit $ Imp.Assert e' msg' (loc, locs)
+  emit $ Imp.Assert e' msg' (loc, reverse locs)
 
   attrs <- askAttrs
   when (AttrComp "warn" ["safety_checks"] `inAttrs` attrs) $
-    warn loc locs "Safety check required at run-time."
+    warn loc (reverse locs) "Safety check required at run-time."
 defCompileBasicOp (Pat [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
       copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . pe64) idxs
