@@ -3,6 +3,7 @@
 module Futhark.IR.Syntax.CoreTests (tests) where
 
 import Control.Applicative
+import Data.Loc (Loc (..), Pos (..))
 import Futhark.IR.Pretty (prettyString)
 import Futhark.IR.Syntax.Core
 import Language.Futhark.CoreTests ()
@@ -12,8 +13,26 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Prelude
 
-tests :: TestTree
-tests = testGroup "Internal CoreTests" subShapeTests
+instance Arbitrary NoUniqueness where
+  arbitrary = pure NoUniqueness
+
+instance (Arbitrary shape, Arbitrary u) => Arbitrary (TypeBase shape u) where
+  arbitrary =
+    oneof
+      [ Prim <$> arbitrary,
+        Array <$> arbitrary <*> arbitrary <*> arbitrary
+      ]
+
+instance Arbitrary Ident where
+  arbitrary = Ident <$> arbitrary <*> arbitrary
+
+instance Arbitrary Rank where
+  arbitrary = Rank <$> elements [1 .. 9]
+
+instance Arbitrary Shape where
+  arbitrary = Shape . map intconst <$> listOf1 (elements [1 .. 9])
+    where
+      intconst = Constant . IntValue . Int32Value
 
 subShapeTests :: [TestTree]
 subShapeTests =
@@ -48,23 +67,24 @@ subShapeTests =
         )
         $ shape1 `subShapeOf` shape2 @?= expected
 
-instance Arbitrary NoUniqueness where
-  arbitrary = pure NoUniqueness
+provenanceTests :: [TestTree]
+provenanceTests =
+  [ testCase "simple" $
+      (Provenance [] line1 <> Provenance [] line0) @?= Provenance [] lines01,
+    testCase "mempty left" $
+      (Provenance [] mempty <> Provenance [] line0) @?= Provenance [] line0,
+    testCase "mempty right" $
+      (Provenance [] line1 <> Provenance [] mempty) @?= Provenance [] line1
+  ]
+  where
+    line0 = Loc (Pos "" 0 1 0) (Pos "" 0 10 10)
+    line1 = Loc (Pos "" 1 1 0) (Pos "" 1 10 20)
+    lines01 = Loc (Pos "" 0 1 0) (Pos "" 1 10 20)
 
-instance (Arbitrary shape, Arbitrary u) => Arbitrary (TypeBase shape u) where
-  arbitrary =
-    oneof
-      [ Prim <$> arbitrary,
-        Array <$> arbitrary <*> arbitrary <*> arbitrary
-      ]
-
-instance Arbitrary Ident where
-  arbitrary = Ident <$> arbitrary <*> arbitrary
-
-instance Arbitrary Rank where
-  arbitrary = Rank <$> elements [1 .. 9]
-
-instance Arbitrary Shape where
-  arbitrary = Shape . map intconst <$> listOf1 (elements [1 .. 9])
-    where
-      intconst = Constant . IntValue . Int32Value
+tests :: TestTree
+tests =
+  testGroup
+    "Internal CoreTests"
+    [ testGroup "subShape" subShapeTests,
+      testGroup "Provenance" provenanceTests
+    ]
