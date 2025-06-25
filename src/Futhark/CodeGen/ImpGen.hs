@@ -146,6 +146,7 @@ import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
+import Futhark.Transform.Rename (renameLambda)
 import Futhark.Util
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty hiding (nest, space)
@@ -991,11 +992,6 @@ defCompileBasicOp _ Rearrange {} =
 defCompileBasicOp _ Reshape {} =
   pure ()
 defCompileBasicOp _ (UpdateAcc safety acc is vs) = sComment "UpdateAcc" $ do
-  -- We are abusing the comment mechanism to wrap the operator in
-  -- braces when we end up generating code.  This is necessary because
-  -- we might otherwise end up declaring lambda parameters (if any)
-  -- multiple times, as they are duplicated every time we do an
-  -- UpdateAcc for the same accumulator.
   let is' = map pe64 is
 
   -- We need to figure out whether we are updating a scatter-like
@@ -1412,6 +1408,7 @@ lookupArraySpace =
 -- | In the case of a histogram-like accumulator, also sets the index
 -- parameters.
 lookupAcc ::
+  (Mem rep inner) =>
   VName ->
   [Imp.TExp Int64] ->
   ImpM rep r op (VName, Space, [VName], [Imp.TExp Int64], Maybe (Lambda rep))
@@ -1423,8 +1420,11 @@ lookupAcc name is = do
       case acc' of
         Just ([], _) ->
           error $ "Accumulator with no arrays: " ++ prettyString name
-        Just (arrs@(arr : _), Just (op, _)) -> do
+        Just (arrs@(arr : _), Just (op_orig, _)) -> do
           space <- lookupArraySpace arr
+          -- We must rename the lambda in order to avoid duplicate names in the
+          -- likely case where the accumulator is used multiple times.
+          op <- renameLambda op_orig
           let (i_params, ps) = splitAt (length is) $ lambdaParams op
           zipWithM_ dPrimV_ (map paramName i_params) is
           pure
