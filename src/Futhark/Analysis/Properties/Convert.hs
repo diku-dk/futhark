@@ -410,9 +410,8 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
     [E.Lambda params lam_body _ _ _, _ne, _xs] <- getArgs args,
     xs <- NE.fromList [NE.last args],
     [pat_acc, pat_x] <- params = do
-      -- We pick the first argument of the lambda to be the accumulator
-      -- and the second argument to be an element of the input array.
-      -- (The lambda is associative, so we are free to pick.)
+      -- The first argument of the lambda is the accumulator
+      -- and the second argument is an element of the input array.
       (outer_dim, aligned_args) <- zipArgsSOAC loc [pat_x] xs
 
       bindLambdaBodyParams (mconcat aligned_args)
