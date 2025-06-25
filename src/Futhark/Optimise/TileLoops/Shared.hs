@@ -13,6 +13,7 @@ module Futhark.Optimise.TileLoops.Shared
     varianceInStms,
     isTileableRedomap,
     changeEnv,
+    initialIxFnEnv,
     TileKind (..),
   )
 where
@@ -274,6 +275,16 @@ changeEnv (with_env, ixfn_env) y e = do
   with_env' <- changeWithEnv with_env e
   ixfn_env' <- changeIxFnEnv ixfn_env y e
   pure (with_env', ixfn_env')
+
+-- | Construct an initial 'IxFnEnv' where it is assumed that every array
+-- parameter in the scope has a row-major index function.
+initialIxFnEnv :: Scope GPU -> IxFnEnv
+initialIxFnEnv = M.mapMaybe f
+  where
+    f info =
+      case typeOf info of
+        Array _ shape _ -> Just $ LMAD.iota 0 $ map pe64 $ shapeDims shape
+        _ -> Nothing
 
 changeWithEnv :: WithEnv -> Exp GPU -> TileM WithEnv
 changeWithEnv with_env (WithAcc accum_decs inner_lam) = do

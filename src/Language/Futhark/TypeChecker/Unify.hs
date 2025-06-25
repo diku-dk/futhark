@@ -557,7 +557,7 @@ unifySizes usage bcs bound nonrigid e1 (Var v2 _ _)
     not (anyBound bound e1) || (qualLeaf v2 `elem` bound) =
       linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
 unifySizes usage bcs _ _ e1 e2 = do
-  notes <- (<>) <$> dimNotes usage e2 <*> dimNotes usage e2
+  notes <- (<>) <$> dimNotes usage e1 <*> dimNotes usage e2
   unifyError usage notes bcs $
     "Sizes"
       <+> dquotes (pretty e1)

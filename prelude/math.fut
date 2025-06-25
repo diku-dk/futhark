@@ -29,21 +29,21 @@ module type from_prim = {
 module type numeric = {
   include from_prim
 
-  val + : t -> t -> t
-  val - : t -> t -> t
-  val * : t -> t -> t
-  val / : t -> t -> t
-  val % : t -> t -> t
-  val ** : t -> t -> t
+  val (+) : t -> t -> t
+  val (-) : t -> t -> t
+  val (*) : t -> t -> t
+  val (/) : t -> t -> t
+  val (%) : t -> t -> t
+  val (**) : t -> t -> t
 
   val to_i64 : t -> i64
 
-  val == : t -> t -> bool
-  val < : t -> t -> bool
-  val > : t -> t -> bool
-  val <= : t -> t -> bool
-  val >= : t -> t -> bool
-  val != : t -> t -> bool
+  val (==) : t -> t -> bool
+  val (<) : t -> t -> bool
+  val (>) : t -> t -> bool
+  val (<=) : t -> t -> bool
+  val (>=) : t -> t -> bool
+  val (!=) : t -> t -> bool
 
   -- | Arithmetic negation (use `!` for bitwise negation).
   val neg : t -> t
@@ -81,34 +81,34 @@ module type numeric = {
 module type integral = {
   include numeric
 
-  -- | Like `/`@term, but rounds towards zero.  This only matters when
-  -- one of the operands is negative.  May be more efficient.
-  val // : t -> t -> t
+  -- | Like `/`, but rounds towards zero. This only matters when one of the
+  -- operands is negative. May be more efficient.
+  val (//) : t -> t -> t
 
-  -- | Like `%`@term, but rounds towards zero.  This only matters when
-  -- one of the operands is negative.  May be more efficient.
-  val %% : t -> t -> t
+  -- | Like `%`, but rounds towards zero. This only matters when one of the
+  -- operands is negative. May be more efficient.
+  val (%%) : t -> t -> t
 
   -- | Bitwise and.
-  val & : t -> t -> t
+  val (&) : t -> t -> t
 
   -- | Bitwise or.
-  val | : t -> t -> t
+  val (|) : t -> t -> t
 
   -- | Bitwise xor.
-  val ^ : t -> t -> t
+  val (^) : t -> t -> t
 
   -- | Bitwise negation.
   val not : t -> t
 
   -- | Left shift; inserting zeroes.
-  val << : t -> t -> t
+  val (<<) : t -> t -> t
 
   -- | Arithmetic right shift, using sign extension for the leftmost bits.
-  val >> : t -> t -> t
+  val (>>) : t -> t -> t
 
   -- | Logical right shift, inserting zeroes for the leftmost bits.
-  val >>> : t -> t -> t
+  val (>>>) : t -> t -> t
 
   val num_bits : i32
   val get_bit : i32 -> t -> i32
@@ -204,7 +204,7 @@ module type real = {
   -- | The true Gamma function.
   val gamma : t -> t
 
-  -- | The natural logarithm of the absolute value of `gamma`@term.
+  -- | The natural logarithm of the absolute value of `gamma`.
   val lgamma : t -> t
 
   -- | The error function.
@@ -245,7 +245,7 @@ module type real = {
 
   -- | Computes `a*b+c`.  Depending on the compiler backend, this may
   -- be fused into a single operation that is faster but less
-  -- accurate.  Do not confuse it with `fma`@term.
+  -- accurate.  Do not confuse it with `fma`.
   val mad : (a: t) -> (b: t) -> (c: t) -> t
 
   -- | Computes `a*b+c`, with `a*b` being rounded with infinite

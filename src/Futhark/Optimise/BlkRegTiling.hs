@@ -48,13 +48,9 @@ se8 = intConst Int64 8
 
 isInnerCoal :: Env -> VName -> Stm GPU -> Bool
 isInnerCoal (_, ixfn_env) slc_X (Let (Pat [pe]) _ (BasicOp (Index x _)))
-  | slc_X == patElemName pe,
-    Nothing <- M.lookup x ixfn_env =
-      True -- if not in the table, we assume not-transposed!
-isInnerCoal (_, ixfn_env) slc_X (Let (Pat [pe]) _ (BasicOp (Index x _)))
-  | slc_X == patElemName pe,
-    Just lmad <- M.lookup x ixfn_env =
-      innerHasStride1 lmad
+  | slc_X == patElemName pe =
+      -- if not in the table, we assume not-transposed!
+      maybe True innerHasStride1 $ M.lookup x ixfn_env
   where
     innerHasStride1 lmad =
       let lmad_dims = LMAD.dims lmad

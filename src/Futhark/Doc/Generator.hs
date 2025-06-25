@@ -372,7 +372,9 @@ vnameSynopsisDef vname = do
   pure $
     H.span ! A.id (fromString ("synopsis:" <> vname_id)) $
       H.a ! A.href (fromString ("#" ++ vname_id)) $
-        renderName (baseName vname)
+        if symbolName (baseName vname)
+          then parens (renderName (baseName vname))
+          else renderName (baseName vname)
 
 synopsisValBind :: ValBind -> Maybe (DocM Html)
 synopsisValBind vb = Just $ do

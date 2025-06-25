@@ -444,7 +444,7 @@ aliasTransitiveClosure args = do
     else aliasTransitiveClosure res
 
 -- | For each 'PatElem' in the 'Pat', add its aliases to the 'AliasTab' in
--- 'LastUseM'. Additionally, 'Names' are added as aliases of all the 'PatElemT'.
+-- 'LastUseM'. Additionally, 'Names' are added as aliases of all the 'PatElem'.
 updateAliasing ::
   (AliasesOf dec) =>
   -- | Extra names that all 'PatElem' should alias.

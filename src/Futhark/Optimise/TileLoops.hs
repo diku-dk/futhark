@@ -31,7 +31,7 @@ tileLoops =
     onStms scope stms =
       modifyNameSource $
         runState $
-          runReaderT (optimiseStms (M.empty, M.empty) stms) scope
+          runReaderT (optimiseStms (M.empty, initialIxFnEnv scope) stms) scope
 
 optimiseBody :: Env -> Body GPU -> TileM (Body GPU)
 optimiseBody env (Body () stms res) =
