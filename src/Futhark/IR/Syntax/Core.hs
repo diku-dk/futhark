@@ -86,6 +86,7 @@ import Control.Monad.State
 import Data.Bifoldable
 import Data.Bifunctor
 import Data.Bitraversable
+import Data.Loc (locEnd, locStart)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -653,9 +654,22 @@ instance Semigroup OpaqueTypes where
 data Provenance = Provenance [Loc] Loc
   deriving (Eq, Ord, Show)
 
+contains :: Loc -> Loc -> Bool
+contains l1 l2 = locStart l1 <= locStart l2 && locEnd l1 >= locEnd l2
+
+clean :: [Loc] -> [Loc]
+clean (l : ls) | l == mempty = clean ls
+clean (l1 : l2 : ls)
+  -- Remove locations that completely enclose a successive location. This is to
+  -- remove locations that correspond to lambdas that are immediately applied -
+  -- they are pretty boring and just add clutter.
+  | l1 `contains` l2 = clean $ l2 : ls
+  | otherwise = l1 : clean (l2 : ls)
+clean ls = ls
+
 stackProvenance :: Provenance -> Provenance -> Provenance
 stackProvenance (Provenance xs x) (Provenance ys y) =
-  case splitFromEnd 1 $ xs <> [x | x /= mempty] <> ys <> [y | y /= mempty] of
+  case splitFromEnd 1 $ clean $ xs <> [x] <> ys <> [y] of
     (zs', [z']) -> Provenance zs' z'
     _ -> mempty -- Zero-information case.
 
