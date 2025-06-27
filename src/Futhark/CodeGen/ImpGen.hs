@@ -738,7 +738,10 @@ compileStms alive_after_stms all_stms m = do
   cb alive_after_stms all_stms m
 
 attachProvenance :: Provenance -> Imp.Code op -> Imp.Code op
-attachProvenance p = if p == mempty then id else (Imp.Meta (Imp.MetaProvenance p) <>)
+attachProvenance _ Imp.Skip = Imp.Skip
+attachProvenance p c
+  | p == mempty = c
+  | otherwise = Imp.Meta (Imp.MetaProvenance p) <> c
 
 defCompileStms ::
   (Mem rep inner, FreeIn op) =>
