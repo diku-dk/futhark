@@ -268,6 +268,9 @@ compileCode (c1 :>>: c2) = go (linearCode (c1 :>>: c2))
           args' <- mapM compileArg args
           item [C.citem|$tyquals:(volQuals vol) $ty:ct $id:name = $id:(funName fname)($args:args');|]
           go code
+    go (x@(Meta (MetaProvenance p)) : xs) = do
+      compileCode x
+      localProvenance p $ go xs
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
 compileCode (Assert e msg (loc, locs)) = do
