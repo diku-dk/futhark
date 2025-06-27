@@ -223,8 +223,8 @@ compileCode (Op op) =
 compileCode Skip = pure ()
 compileCode (Meta (MetaComment s)) = do
   comment s
-compileCode (Meta (MetaProvenance l)) =
-  comment $ prettyText l
+compileCode (Meta (MetaProvenance (Provenance _ l))) =
+  unless (l == mempty) $ comment $ locText l
 compileCode (TracePrint msg) = do
   (formatstr, formatargs) <- errorMsgString msg
   stm [C.cstm|fprintf(ctx->log, $string:formatstr, $args:formatargs);|]
