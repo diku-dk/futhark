@@ -3,8 +3,10 @@ module Futhark.Passes
   ( standardPipeline,
     seqPipeline,
     gpuPipeline,
+    gputcPipeline,
     seqmemPipeline,
     gpumemPipeline,
+    gpumemtcPipeline,
     mcPipeline,
     mcmemPipeline,
   )
@@ -31,6 +33,7 @@ import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
 import Futhark.Optimise.MergeGPUBodies
 import Futhark.Optimise.ReduceDeviceSyncs
 import Futhark.Optimise.Sink
+import Futhark.Optimise.TensorCores
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.AD
@@ -79,6 +82,38 @@ adPipeline =
       simplifySOACS
     ]
 
+-- | The pipeline used by the CUDA backends with tensore core support,
+-- but before adding memory information.  Includes 'standardPipeline'.
+gputcPipeline :: Pipeline SOACS GPU
+gputcPipeline =
+  standardPipeline
+    >>> onePass extractKernels
+    >>> passes
+      [ simplifyGPU,
+        optimiseGenRed,
+        simplifyGPU,
+        extractTensorCores,
+        simplifyGPU,
+        tileLoops,
+        simplifyGPU,
+        histAccsGPU,
+        unstreamGPU,
+        performCSE True,
+        simplifyGPU,
+        sinkGPU, -- Sink reads before migrating them.
+        reduceDeviceSyncs,
+        simplifyGPU, -- Simplify and hoist storages.
+        performCSE True, -- Eliminate duplicate storages.
+        mergeGPUBodies,
+        simplifyGPU, -- Cleanup merged GPUBody kernels.
+        sinkGPU, -- Sink reads within GPUBody kernels.
+        optimiseArrayLayoutGPU,
+        -- Important to simplify after coalescing in order to fix up
+        -- redundant manifests.
+        simplifyGPU,
+        performCSE True
+      ]
+
 -- | The pipeline used by the CUDA, HIP, and OpenCL backends, but before
 -- adding memory information.  Includes 'standardPipeline'.
 gpuPipeline :: Pipeline SOACS GPU
@@ -88,6 +123,7 @@ gpuPipeline =
     >>> passes
       [ simplifyGPU,
         optimiseGenRed,
+        simplifyGPU,
         simplifyGPU,
         tileLoops,
         simplifyGPU,
@@ -138,6 +174,36 @@ seqmemPipeline =
         simplifySeqMem,
         LowerAllocations.lowerAllocationsSeqMem,
         simplifySeqMem
+      ]
+
+-- | Run 'gpuPipeline', then add memory information (and optimise
+-- it a lot).
+gpumemtcPipeline :: Pipeline SOACS GPUMem
+gpumemtcPipeline =
+  gputcPipeline
+    >>> onePass GPU.explicitAllocations
+    >>> passes
+      [ tensorCoreMemFixup,
+        simplifyGPUMem,
+        performCSE False,
+        simplifyGPUMem,
+        entryPointMemGPU,
+        doubleBufferGPU,
+        simplifyGPUMem,
+        performCSE False,
+        LiftAllocations.liftAllocationsGPUMem,
+        simplifyGPUMem,
+        ArrayShortCircuiting.optimiseGPUMem,
+        simplifyGPUMem,
+        performCSE False,
+        simplifyGPUMem,
+        LowerAllocations.lowerAllocationsGPUMem,
+        performCSE False,
+        simplifyGPUMem,
+        MemoryBlockMerging.optimise,
+        simplifyGPUMem,
+        expandAllocations,
+        simplifyGPUMem
       ]
 
 -- | Run 'gpuPipeline', then add memory information (and optimise
