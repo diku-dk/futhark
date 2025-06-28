@@ -132,7 +132,7 @@ fixStmt
   stm@( Let
           (Pat [PatElem resName (MemArray _ _ _ (ArrayIn resMem _))])
           _
-          (BasicOp (Manifest _ inputName))
+          (BasicOp (Manifest inputName _))
         ) = do
     info <- lookupInfo inputName
     case info of
@@ -293,12 +293,12 @@ fixHostOp op = pure op
 fixSegOp :: SegOp SegLevel GPUMem -> FixM (SegOp SegLevel GPUMem)
 fixSegOp (SegMap level space ts body) =
   SegMap level space ts <$> fixKernelBody body
-fixSegOp (SegRed level space ops ts body) =
-  SegRed level space ops ts <$> fixKernelBody body
-fixSegOp (SegScan level space ops ts body) =
-  SegScan level space ops ts <$> fixKernelBody body
-fixSegOp (SegHist level space ops hist body) =
-  SegHist level space ops hist <$> fixKernelBody body
+fixSegOp (SegRed level space ts body ops) =
+  SegRed level space ts <$> (fixKernelBody body) <*> pure ops
+fixSegOp (SegScan level space ts body ops) =
+  SegScan level space ts <$> (fixKernelBody body) <*> pure ops
+fixSegOp (SegHist level space ts body histOps) =
+  SegHist level space ts <$> (fixKernelBody body) <*> pure histOps
 
 fixKernelBody :: KernelBody GPUMem -> FixM (KernelBody GPUMem)
 fixKernelBody (KernelBody desc stms res) =

@@ -543,15 +543,12 @@ transformSegOpDefault :: SegOp SegLevel GPU -> TensorCoreM (SegOp SegLevel GPU)
 transformSegOpDefault (SegMap level space ts body) =
   SegMap level space ts
     <$> transformKernelBody body
-transformSegOpDefault (SegRed level space ops ts body) =
-  SegRed level space ops ts
-    <$> transformKernelBody body
-transformSegOpDefault (SegScan level space ops ts body) =
-  SegScan level space ops ts
-    <$> transformKernelBody body
-transformSegOpDefault (SegHist level space ops hist body) =
-  SegHist level space ops hist
-    <$> transformKernelBody body
+transformSegOpDefault (SegRed level space ts body ops) =
+  SegRed level space ts <$> (transformKernelBody body) <*> pure ops
+transformSegOpDefault (SegScan level space ts body ops) =
+  SegScan level space ts <$> (transformKernelBody body) <*> pure ops
+transformSegOpDefault (SegHist level space ts body histOps) =
+  SegHist level space ts <$> (transformKernelBody body) <*> pure histOps
 
 transformKernelBody :: KernelBody GPU -> TensorCoreM (KernelBody GPU)
 transformKernelBody (KernelBody desc stms res) =
@@ -696,7 +693,7 @@ innerOpMatch :: Scope GPU -> Op GPU -> Maybe TensorCoreMatch
 innerOpMatch
   scope
   ( SegOp
-      segRed@(SegRed (SegThreadInBlock _) space segBinOps _ts body)
+      segRed@(SegRed (SegThreadInBlock _) space _ts body segBinOps)
     )
     | Just ne <- segBinOpsMatch segBinOps =
         do
