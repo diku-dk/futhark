@@ -7,7 +7,7 @@ module Futhark.Optimise.TensorCores.Utils
     getTCName,
     MMMSignature (..),
     mkInt64Const,
-    mapStmsWithScope
+    mapStmsWithScope,
   )
 where
 
@@ -58,7 +58,6 @@ isTCName name = any (`isPrefixOfName` name) funNames
 
 getTCName :: Name -> Maybe Name
 getTCName name = find (`isPrefixOfName` name) funNames
-
 
 -- Helper functions
 

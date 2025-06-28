@@ -1,18 +1,15 @@
-module Futhark.Optimise.TensorCores
-  (tensorCoreMemFixup, extractTensorCores)
-where
+module Futhark.Optimise.TensorCores (tensorCoreMemFixup, extractTensorCores) where
 
 import Control.Monad
+import Futhark.IR.GPU
+import Futhark.IR.GPUMem
+import Futhark.Optimise.TensorCores.ExtractTensorCores (transformProg)
+import Futhark.Optimise.TensorCores.TensorCoreMemFixup (fixFuns)
 import Futhark.Pass
   ( Pass (..),
     intraproceduralTransformationWithConsts,
   )
-import Futhark.IR.GPU
-import Futhark.IR.GPUMem
 import Futhark.Pass.Simplify
-import Futhark.Optimise.TensorCores.ExtractTensorCores (transformProg)
-import Futhark.Optimise.TensorCores.TensorCoreMemFixup (fixFuns)
-
 
 -- | Transforms intragroup kernels corresponding to matrix multiplication into
 -- function calls that use the Tensor Cores.

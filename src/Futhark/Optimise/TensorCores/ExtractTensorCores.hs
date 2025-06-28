@@ -1,6 +1,4 @@
-module Futhark.Optimise.TensorCores.ExtractTensorCores
-  (transformProg)
-where
+module Futhark.Optimise.TensorCores.ExtractTensorCores (transformProg) where
 
 import Control.Monad
 import Control.Monad.RWS.Strict
@@ -25,13 +23,9 @@ import Futhark.Optimise.TileLoops.Shared
 import Futhark.Pass (PassM)
 import Prelude hiding (lookup)
 
-
 -- | Divide and round up.
 divUp :: Int -> Int -> Int
 divUp x y = (x + y - 1) `div` y
-
-
-
 
 -- Tensor core functions emitted (gemm, copy global shared, copy registers shared)
 type TcFunDef = (MMMSignature, FunDef GPU)
@@ -62,7 +56,6 @@ localBlockSize f = local $ \env -> env {envBlockSize = f $ envBlockSize env}
 runBuilderMMM :: Builder GPU a -> Scope GPU -> TensorCoreM (a, Stms GPU)
 runBuilderMMM m s =
   modifyNameSource $ runState $ runBuilderT m s
-
 
 -- | Create the gemm function defintion.
 mkGemmFun ::

@@ -36,18 +36,18 @@ import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
-import Futhark.Optimise.MergeGPUBodies
+import Futhark.Optimise.EntryPointMem
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
+import Futhark.Optimise.MergeGPUBodies
 import Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs)
 import Futhark.Optimise.Sink
+import Futhark.Optimise.TensorCores
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
-import Futhark.Optimise.EntryPointMem
-import Futhark.Optimise.TensorCores
 import Futhark.Pass
 import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
@@ -57,10 +57,10 @@ import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
+import Futhark.Pass.InitNames
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
-import Futhark.Pass.InitNames
 import Futhark.Passes
 import Futhark.Util.Log
 import Futhark.Util.Options
@@ -378,19 +378,19 @@ initNamesOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where
     perform (SOACS prog) config =
-        SOACS <$> runPipeline (onePass initNamesPass) config prog
+      SOACS <$> runPipeline (onePass initNamesPass) config prog
     perform (GPU prog) config =
-        GPU <$> runPipeline (onePass initNamesPass) config prog
+      GPU <$> runPipeline (onePass initNamesPass) config prog
     perform (MC prog) config =
-        MC <$> runPipeline (onePass initNamesPass) config prog
+      MC <$> runPipeline (onePass initNamesPass) config prog
     perform (Seq prog) config =
-        Seq <$> runPipeline (onePass initNamesPass) config prog
+      Seq <$> runPipeline (onePass initNamesPass) config prog
     perform (SeqMem prog) config =
-        SeqMem <$> runPipeline (onePass initNamesPass) config prog
+      SeqMem <$> runPipeline (onePass initNamesPass) config prog
     perform (GPUMem prog) config =
-        GPUMem <$> runPipeline (onePass initNamesPass) config prog
+      GPUMem <$> runPipeline (onePass initNamesPass) config prog
     perform (MCMem prog) config =
-        MCMem <$> runPipeline (onePass initNamesPass) config prog
+      MCMem <$> runPipeline (onePass initNamesPass) config prog
 
     long = [passLongOption pass]
     pass = initNamesPass :: Pass SOACS.SOACS SOACS.SOACS

@@ -1,6 +1,4 @@
-module Futhark.Optimise.TensorCores.TensorCoreMemFixup
-  (fixFuns)
-where
+module Futhark.Optimise.TensorCores.TensorCoreMemFixup (fixFuns) where
 
 import Control.Monad
 import Control.Monad.RWS.Strict
@@ -11,7 +9,6 @@ import Futhark.IR.GPUMem
 import Futhark.Optimise.TensorCores.Utils
 import Futhark.Pass (PassM)
 import Prelude hiding (lookup)
-
 
 type FixEnv = Scope GPUMem
 

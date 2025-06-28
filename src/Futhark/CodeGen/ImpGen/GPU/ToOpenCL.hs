@@ -28,7 +28,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
-import Futhark.CodeGen.RTS.CUDA (preludeCU, preludeTensorCores, intTypesCU)
+import Futhark.CodeGen.RTS.CUDA (intTypesCU, preludeCU, preludeTensorCores)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
@@ -39,7 +39,7 @@ import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 import Text.PrettyPrint.Mainland (prettyCompact)
-import Text.PrettyPrint.Mainland.Class (Pretty(ppr))
+import Text.PrettyPrint.Mainland.Class (Pretty (ppr))
 import Prelude hiding (rem)
 
 -- | Generate HIP host and device code.
@@ -267,9 +267,10 @@ genGPUCode env mode body failures =
 -- Compilation of a device function that is not not invoked from the
 -- host, but is invoked by (perhaps multiple) kernels.
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> OnKernelM ()
-generateDeviceFun fname _ | TC.isTCName fname =
---  Don't compile Tensor Core functions
-  pure ()
+generateDeviceFun fname _
+  | TC.isTCName fname =
+      --  Don't compile Tensor Core functions
+      pure ()
 generateDeviceFun fname device_func = do
   when (any memParam $ functionInput device_func) bad
 
@@ -394,7 +395,6 @@ onKernel target kernel = do
               then (SafetyNone, [])
               else -- No possible failures in this kernel, so if we make
               -- it past an initial check, then we are good to go.
-
                 ( SafetyCheap,
                   [C.citems|if (*global_failure >= 0) { return; }|]
                 )
