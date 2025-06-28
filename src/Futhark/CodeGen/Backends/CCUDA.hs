@@ -110,7 +110,7 @@ tensorCoreOptions =
       { optionLongName = "cutlass-include",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "FILE",
-        optionDescription = "Include path of cutlass/include",
+        optionDescription = "Include path for cutlass/include",
         optionAction =
           [C.cstm|{
             size_t len = strlen(optarg);          
