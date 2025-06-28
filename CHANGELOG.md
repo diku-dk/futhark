@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Missing fusion inside reduction and scan operators (#2283).
 
+* Incorrect aliasing for memory blocks could cause some optimisations to be
+  misapplied. (#2288)
+
 ## [0.25.31]
 
 ### Added
