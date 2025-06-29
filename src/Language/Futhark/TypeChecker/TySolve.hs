@@ -715,7 +715,7 @@ getSolution = do
       Maybe (Either [PrimType] (TypeBase () NoUniqueness))
     mkSubst _ (_, Just _) = Nothing
     mkSubst tv (s@(Right (Scalar (TypeVar _ (QualName [] tv') _))), _) =
-      if tv == tv' then Nothing else Just s
+      if tv /= tv' then Just s else Nothing
     mkSubst _ (s, _) = Just s
 
 -- | Print in a way helpful for writing a test case for TySolveTests.
