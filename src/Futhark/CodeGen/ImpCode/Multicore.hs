@@ -194,7 +194,6 @@ lexicalMemoryUsageMC gokernel func =
     go f (If _ x y) = f x <> f y
     go f (For _ _ x) = f x
     go f (While _ x) = f x
-    go f (Comment _ x) = f x
     go f (Op op) = goOp f op
     go _ _ = mempty
 

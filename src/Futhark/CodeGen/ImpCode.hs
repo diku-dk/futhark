@@ -64,6 +64,7 @@ module Futhark.CodeGen.ImpCode
     MemSize,
     DimSize,
     Code (..),
+    Metadata (..),
     PrimValue (..),
     Exp,
     TExp,
@@ -77,6 +78,7 @@ module Futhark.CodeGen.ImpCode
     calledFuncs,
     callGraph,
     ParamMap,
+    foldProvenances,
 
     -- * Typed enumerations
     Bytes,
@@ -116,6 +118,7 @@ import Futhark.IR.Syntax.Core
     ErrorMsgPart (..),
     OpaqueType (..),
     OpaqueTypes (..),
+    Provenance (..),
     Rank (..),
     Signedness (..),
     Space (..),
@@ -241,6 +244,15 @@ data ArrayContents
     ArrayZeros Int
   deriving (Show)
 
+-- | A piece of additional information attached to a piece of code, which should
+-- not have any effect on how it is executed.
+data Metadata
+  = -- | An informative comment that can be inserted into generated code.
+    MetaComment T.Text
+  | -- | Where this bit of code came from.
+    MetaProvenance Provenance
+  deriving (Eq, Ord, Show)
+
 -- | A block of imperative code.  Parameterised by an 'Op', which
 -- allows extensibility.  Concrete uses of this type will instantiate
 -- the type parameter with e.g. a construct for launching GPU kernels.
@@ -257,6 +269,11 @@ data Code a
   | -- | While loop.  The conditional is (of course)
     -- re-evaluated before every iteration of the loop.
     While (TExp Bool) (Code a)
+  | -- | Conditional execution.
+    If (TExp Bool) (Code a) (Code a)
+  | -- | No semantics; just some information about what code is being generated
+    -- here.
+    Meta Metadata
   | -- | Declare a memory block variable that will point to
     -- memory in the given memory space.  Note that this is
     -- distinct from allocation.  The memory block must be the
@@ -308,16 +325,10 @@ data Code a
   | -- | Function call.  The results are written to the
     -- provided 'VName' variables.
     Call [VName] Name [Arg]
-  | -- | Conditional execution.
-    If (TExp Bool) (Code a) (Code a)
   | -- | Assert that something must be true.  Should it turn
     -- out not to be true, then report a failure along with
     -- the given error message.
-    Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
-  | -- | Has the same semantics as the contained code, but
-    -- the comment should show up in generated code for ease
-    -- of inspection.
-    Comment T.Text (Code a)
+    Assert Exp (ErrorMsg Exp) (Loc, [Loc])
   | -- | Print the given value to the screen, somehow
     -- annotated with the given string as a description.  If
     -- no type/value pair, just print the string.  This has
@@ -369,7 +380,6 @@ lexicalMemoryUsage func =
     go f (If _ x y) = f x <> f y
     go f (For _ _ x) = f x
     go f (While _ x) = f x
-    go f (Comment _ x) = f x
     go _ _ = mempty
 
     declared (DeclareMem mem space) =
@@ -409,7 +419,6 @@ calledFuncs f (x :>>: y) = calledFuncs f x <> calledFuncs f y
 calledFuncs f (If _ x y) = calledFuncs f x <> calledFuncs f y
 calledFuncs f (For _ _ x) = calledFuncs f x
 calledFuncs f (While _ x) = calledFuncs f x
-calledFuncs f (Comment _ x) = calledFuncs f x
 calledFuncs _ _ = mempty
 
 -- | Compute call graph, as per 'calledFuncs', but also include
@@ -422,6 +431,16 @@ callGraph f (Functions funs) =
       let grow v = maybe (S.singleton v) (S.insert v) (M.lookup v cur)
           next = M.map (foldMap grow) cur
        in if next == cur then cur else loop next
+
+-- | Combine the provenances of all the 'Imp.MetaProvenance' in the provided code.
+foldProvenances :: (op -> Provenance) -> Code op -> Provenance
+foldProvenances _ (Meta (MetaProvenance p)) = p
+foldProvenances f (x :>>: y) = foldProvenances f x <> foldProvenances f y
+foldProvenances f (For _ _ c) = foldProvenances f c
+foldProvenances f (While _ c) = foldProvenances f c
+foldProvenances f (If _ x y) = foldProvenances f x <> foldProvenances f y
+foldProvenances f (Op x) = f x
+foldProvenances _ _ = mempty
 
 -- | A mapping from names of tuning parameters to their class, as well
 -- as which functions make use of them (including transitively).
@@ -643,8 +662,10 @@ instance (Pretty op) => Pretty (Code op) where
       <+> "<-"
       <+> pretty fname
       <> parens (commasep $ map pretty args)
-  pretty (Comment s code) =
-    "--" <+> pretty s </> pretty code
+  pretty (Meta (MetaComment s)) =
+    "--" <+> pretty s
+  pretty (Meta (MetaProvenance l)) =
+    "@" <+> align (pretty l)
   pretty (DebugPrint desc (Just e)) =
     "debug" <+> parens (commasep [pretty (show desc), pretty e])
   pretty (DebugPrint desc Nothing) =
@@ -721,8 +742,8 @@ instance Traversable Code where
     pure $ Assert e msg loc
   traverse _ (Call dests fname args) =
     pure $ Call dests fname args
-  traverse f (Comment s code) =
-    Comment s <$> traverse f code
+  traverse _ (Meta s) =
+    pure $ Meta s
   traverse _ (DebugPrint s v) =
     pure $ DebugPrint s v
   traverse _ (TracePrint msg) =
@@ -738,7 +759,6 @@ declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
 declaredIn (For i _ body) = oneName i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
-declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
 
 instance FreeIn EntryPoint where
@@ -799,8 +819,8 @@ instance (FreeIn a) => FreeIn (Code a) where
     freeIn' e <> foldMap freeIn' msg
   freeIn' (Op op) =
     freeIn' op
-  freeIn' (Comment _ code) =
-    freeIn' code
+  freeIn' (Meta {}) =
+    mempty
   freeIn' (DebugPrint _ v) =
     maybe mempty freeIn' v
   freeIn' (TracePrint msg) =

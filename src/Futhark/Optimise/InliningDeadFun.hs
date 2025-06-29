@@ -220,10 +220,11 @@ inlineFunction ::
   Pat Type ->
   StmAux dec ->
   [(SubExp, Diet)] ->
-  (Safety, SrcLoc, [SrcLoc]) ->
+  Safety ->
+  Provenance ->
   FunDef SOACS ->
   m (Stms SOACS)
-inlineFunction pat aux args (safety, loc, locs) fun = do
+inlineFunction pat aux args safety p fun = do
   Body _ stms res <-
     renameBody $ mkBody (param_stms <> body_stms) (bodyResult (funDefBody fun))
   pure $ stms <> stmsFromList (zipWith bindSubExpRes (patIdents pat) res)
@@ -234,9 +235,7 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
           <$> zipWith bindSubExp (map paramIdent $ funDefParams fun) (map fst args)
 
     body_stms =
-      addLocations (stmAuxAttrs aux) safety (filter notmempty (loc : locs)) $
-        bodyStms $
-          funDefBody fun
+      addLocations (stmAuxAttrs aux) safety p $ bodyStms $ funDefBody fun
 
     -- Note that the sizes of arrays may not be correct at this
     -- point - it is crucial that we run copy propagation before
@@ -246,8 +245,6 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
 
     bindSubExpRes ident (SubExpRes cs se) =
       certify cs $ bindSubExp ident se
-
-    notmempty = (/= mempty) . locOf
 
 inlineInStms ::
   (MonadFreshNames m) =>
@@ -264,11 +261,11 @@ inlineInBody ::
   m (Body SOACS)
 inlineInBody fdmap = onBody
   where
-    inline (Let pat aux (Apply fname args _ what) : rest)
+    inline (Let pat aux (Apply fname args _ safety) : rest)
       | Just fd <- M.lookup fname fdmap,
         not $ "noinline" `inAttrs` funDefAttrs fd,
         not $ "noinline" `inAttrs` stmAuxAttrs aux =
-          (<>) <$> inlineFunction pat aux args what fd <*> inline rest
+          (<>) <$> inlineFunction pat aux args safety (stmAuxLoc aux) fd <*> inline rest
     inline (stm@(Let _ _ BasicOp {}) : rest) =
       (oneStm stm <>) <$> inline rest
     inline (stm : rest) =
@@ -292,39 +289,43 @@ inlineInBody fdmap = onBody
     onLambda (Lambda params ret body) =
       Lambda params ret <$> onBody body
 
--- Propagate source locations and attributes to the inlined
--- statements.  Attributes are propagated only when applicable (this
--- probably means that every supported attribute needs to be handled
--- specially here).
-addLocations :: Attrs -> Safety -> [SrcLoc] -> Stms SOACS -> Stms SOACS
-addLocations attrs caller_safety more_locs = fmap onStm
+traceLocs :: Provenance -> StmAux () -> StmAux ()
+traceLocs p aux =
+  aux {stmAuxLoc = stackProvenance p $ stmAuxLoc aux}
+
+-- Propagate source locations and attributes to the inlined statements.
+-- Attributes are propagated only when applicable (this probably means that
+-- every supported attribute needs to be handled specially here).
+addLocations :: Attrs -> Safety -> Provenance -> Stms SOACS -> Stms SOACS
+addLocations attrs caller_safety p = fmap onStm
   where
-    onStm (Let pat aux (Apply fname args t (safety, loc, locs))) =
+    onStm (Let pat aux (BasicOp (Assert cond desc))) =
       Let pat aux' $
-        Apply fname args t (min caller_safety safety, loc, locs ++ more_locs)
-      where
-        aux' = aux {stmAuxAttrs = attrs <> stmAuxAttrs aux}
-    onStm (Let pat aux (BasicOp (Assert cond desc (loc, locs)))) =
-      Let pat (withAttrs (attrsForAssert attrs) aux) $
         case caller_safety of
-          Safe -> BasicOp $ Assert cond desc (loc, locs ++ more_locs)
+          Safe -> BasicOp $ Assert cond desc
           Unsafe -> BasicOp $ SubExp $ Constant UnitValue
-    onStm (Let pat aux (Op soac)) =
-      Let pat (withAttrs attrs' aux) $
-        Op $
-          runIdentity $
-            mapSOACM
-              identitySOACMapper
-                { mapOnSOACLambda = pure . onLambda
-                }
-              soac
       where
+        aux' = traceLocs p (withAttrs (attrsForAssert attrs) aux)
+    onStm (Let pat aux (Apply fname args t safety)) =
+      Let pat aux' $ Apply fname args t $ min caller_safety safety
+      where
+        aux' = traceLocs p $ aux {stmAuxAttrs = attrs <> stmAuxAttrs aux}
+    onStm (Let pat aux (Op soac)) =
+      Let pat aux' . Op $
+        runIdentity $
+          mapSOACM
+            identitySOACMapper
+              { mapOnSOACLambda = pure . onLambda
+              }
+            soac
+      where
+        aux' = traceLocs p $ withAttrs attrs' aux
         attrs' = attrs `withoutAttrs` for_assert
         for_assert = attrsForAssert attrs
         onLambda lam =
           lam {lambdaBody = onBody for_assert $ lambdaBody lam}
     onStm (Let pat aux e) =
-      Let pat aux $ onExp e
+      Let pat (traceLocs p aux) $ onExp e
 
     onExp =
       mapExp
@@ -336,9 +337,7 @@ addLocations attrs caller_safety more_locs = fmap onStm
 
     onBody attrs' body =
       body
-        { bodyStms =
-            addLocations attrs' caller_safety more_locs $
-              bodyStms body
+        { bodyStms = addLocations attrs' caller_safety p $ bodyStms body
         }
 
 -- | Remove functions not ultimately called from an entry point or a

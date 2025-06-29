@@ -48,6 +48,7 @@ module Futhark.CodeGen.ImpGen
     lookupMemory,
     lookupAcc,
     askAttrs,
+    askProvenance,
 
     -- * Building Blocks
     TV,
@@ -145,6 +146,7 @@ import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
+import Futhark.Transform.Rename (renameLambda)
 import Futhark.Util
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty hiding (nest, space)
@@ -257,7 +259,10 @@ data Env rep r op = Env
     envFunction :: Maybe Name,
     -- | The set of attributes that are active on the enclosing
     -- statements (including the one we are currently compiling).
-    envAttrs :: Attrs
+    envAttrs :: Attrs,
+    -- | The provenance of whatever we are currently generating code for. This
+    -- can be used to insert information in the generated code.
+    envProvenance :: Provenance
   }
 
 newEnv :: r -> Operations rep r op -> Imp.Space -> Env rep r op
@@ -272,7 +277,8 @@ newEnv r ops ds =
       envVolatility = Imp.Nonvolatile,
       envEnv = r,
       envFunction = Nothing,
-      envAttrs = mempty
+      envAttrs = mempty,
+      envProvenance = mempty
     }
 
 -- | The symbol table used during compilation.
@@ -731,6 +737,12 @@ compileStms alive_after_stms all_stms m = do
   cb <- asks envStmsCompiler
   cb alive_after_stms all_stms m
 
+attachProvenance :: Provenance -> Imp.Code op -> Imp.Code op
+attachProvenance _ Imp.Skip = Imp.Skip
+attachProvenance p c
+  | p == mempty = c
+  | otherwise = Imp.Meta (Imp.MetaProvenance p) <> c
+
 defCompileStms ::
   (Mem rep inner, FreeIn op) =>
   Names ->
@@ -745,12 +757,13 @@ defCompileStms alive_after_stms all_stms m =
   void $ compileStms' mempty $ stmsToList all_stms
   where
     compileStms' allocs (Let pat aux e : bs) = do
-      dVars (Just e) (patElems pat)
-
-      e_code <-
-        localAttrs (stmAuxAttrs aux) $
-          collect $
-            compileExp pat e
+      e_code <- fmap (attachProvenance (stmAuxLoc aux))
+        . localAttrs (stmAuxAttrs aux)
+        . collect
+        . localProvenance (stmAuxLoc aux)
+        $ do
+          dVars (Just e) (patElems pat)
+          compileExp pat e
       (live_after, bs_code) <- collect' $ compileStms' (patternAllocs pat <> allocs) bs
       let dies_here v =
             (v `notNameIn` live_after) && (v `nameIn` freeIn e_code)
@@ -895,14 +908,15 @@ defCompileBasicOp (Pat [pe]) (CmpOp bop x y) = do
   x' <- toExp x
   y' <- toExp y
   patElemName pe <~~ Imp.CmpOpExp bop x' y'
-defCompileBasicOp _ (Assert e msg loc) = do
+defCompileBasicOp _ (Assert e msg) = do
   e' <- toExp e
   msg' <- traverse toExp msg
-  emit $ Imp.Assert e' msg' loc
+  Imp.Provenance locs loc <- askProvenance
+  emit $ Imp.Assert e' msg' (loc, reverse locs)
 
   attrs <- askAttrs
   when (AttrComp "warn" ["safety_checks"] `inAttrs` attrs) $
-    uncurry warn loc "Safety check required at run-time."
+    warn loc (reverse locs) "Safety check required at run-time."
 defCompileBasicOp (Pat [pe]) (Index src slice)
   | Just idxs <- sliceIndices slice =
       copyDWIM (patElemName pe) [] (Var src) $ map (DimFix . pe64) idxs
@@ -981,11 +995,6 @@ defCompileBasicOp _ Rearrange {} =
 defCompileBasicOp _ Reshape {} =
   pure ()
 defCompileBasicOp _ (UpdateAcc safety acc is vs) = sComment "UpdateAcc" $ do
-  -- We are abusing the comment mechanism to wrap the operator in
-  -- braces when we end up generating code.  This is necessary because
-  -- we might otherwise end up declaring lambda parameters (if any)
-  -- multiple times, as they are duplicated every time we do an
-  -- UpdateAcc for the same accumulator.
   let is' = map pe64 is
 
   -- We need to figure out whether we are updating a scatter-like
@@ -1326,6 +1335,25 @@ askAttrs = asks envAttrs
 localAttrs :: Attrs -> ImpM rep r op a -> ImpM rep r op a
 localAttrs attrs = local $ \env -> env {envAttrs = attrs <> envAttrs env}
 
+-- | The provenance of whatever we are currently generating code for.
+askProvenance :: ImpM rep r op Provenance
+askProvenance = asks envProvenance
+
+-- | Wrap any code emitted in the enclosed section with the current provenance,
+-- if any.
+withProvenance :: ImpM rep r op () -> ImpM rep r op ()
+withProvenance m = do
+  p <- askProvenance
+  if p == mempty
+    then m
+    else do
+      c <- collect m
+      emit $ Imp.Meta (Imp.MetaProvenance p) <> c
+
+-- | Replace (*not* extend) the provenance while executing some action.
+localProvenance :: Provenance -> ImpM rep r op a -> ImpM rep r op a
+localProvenance p = local $ \env -> env {envProvenance = p}
+
 localOps :: Operations rep r op -> ImpM rep r op a -> ImpM rep r op a
 localOps ops = local $ \env ->
   env
@@ -1383,6 +1411,7 @@ lookupArraySpace =
 -- | In the case of a histogram-like accumulator, also sets the index
 -- parameters.
 lookupAcc ::
+  (Mem rep inner) =>
   VName ->
   [Imp.TExp Int64] ->
   ImpM rep r op (VName, Space, [VName], [Imp.TExp Int64], Maybe (Lambda rep))
@@ -1394,8 +1423,11 @@ lookupAcc name is = do
       case acc' of
         Just ([], _) ->
           error $ "Accumulator with no arrays: " ++ prettyString name
-        Just (arrs@(arr : _), Just (op, _)) -> do
+        Just (arrs@(arr : _), Just (op_orig, _)) -> do
           space <- lookupArraySpace arr
+          -- We must rename the lambda in order to avoid duplicate names in the
+          -- likely case where the accumulator is used multiple times.
+          op <- renameLambda op_orig
           let (i_params, ps) = splitAt (length is) $ lambdaParams op
           zipWithM_ dPrimV_ (map paramName i_params) is
           pure
@@ -1478,7 +1510,7 @@ lmadCopy t dstloc srcloc = do
       srclmad = memLocLMAD srcloc
   srcspace <- entryMemSpace <$> lookupMemory srcmem
   dstspace <- entryMemSpace <$> lookupMemory dstmem
-  emit $
+  withProvenance . emit $
     Imp.Copy
       t
       (elements <$> LMAD.shape dstlmad)
@@ -1733,11 +1765,11 @@ sWhile cond body = do
   emit $ Imp.While cond body'
 
 -- | Execute a code generation action, wrapping the generated code
--- within a 'Imp.Comment' with the given description.
+-- within a 'Imp.MetaComment' with the given description.
 sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code
-  emit $ Imp.Comment s code'
+  emit $ Imp.Meta (Imp.MetaComment s) <> code'
 
 sIf :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op () -> ImpM rep r op ()
 sIf cond tbranch fbranch = do

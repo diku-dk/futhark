@@ -307,7 +307,7 @@ instance
   ) =>
   FreeIn (Stm rep)
   where
-  freeIn' (Let pat (StmAux cs attrs dec) e) =
+  freeIn' (Let pat (StmAux cs attrs _ dec) e) =
     freeIn' cs
       <> freeIn' attrs
       <> precomputed dec (freeIn' dec <> freeIn' e <> freeIn' pat)
@@ -399,7 +399,7 @@ instance FreeIn Attrs where
   freeIn' (Attrs _) = mempty
 
 instance (FreeIn dec) => FreeIn (StmAux dec) where
-  freeIn' (StmAux cs attrs dec) = freeIn' cs <> freeIn' attrs <> freeIn' dec
+  freeIn' (StmAux cs attrs _ dec) = freeIn' cs <> freeIn' attrs <> freeIn' dec
 
 instance (FreeIn a) => FreeIn (MatchDec a) where
   freeIn' (MatchDec r _) = freeIn' r

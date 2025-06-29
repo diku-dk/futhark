@@ -16,6 +16,7 @@ module Futhark.Internalise.Monad
     bindFunction,
     bindConstant,
     assert,
+    locating,
 
     -- * Convenient reexports
     module Futhark.Tools,
@@ -49,7 +50,8 @@ data InternaliseEnv = InternaliseEnv
   { envSubsts :: VarSubsts,
     envDoBoundsChecks :: Bool,
     envSafe :: Bool,
-    envAttrs :: Attrs
+    envAttrs :: Attrs,
+    envLoc :: Loc
   }
 
 data InternaliseState = InternaliseState
@@ -115,7 +117,8 @@ runInternaliseM safe (InternaliseM m) =
         { envSubsts = mempty,
           envDoBoundsChecks = True,
           envSafe = safe,
-          envAttrs = mempty
+          envAttrs = mempty,
+          envLoc = mempty
         }
     newState src =
       InternaliseState
@@ -185,18 +188,16 @@ bindConstant cname fd = do
           { stateConstSubsts = M.insert cname substs $ stateConstSubsts s
           }
 
--- | Construct an 'Assert' statement, but taking attributes into
--- account.  Always use this function, and never construct 'Assert'
--- directly in the internaliser!
+-- | Construct an 'Assert' statement, but taking attributes into account. Always
+-- use this function, and never construct 'Assert' directly in the internaliser!
 assert ::
   String ->
   SubExp ->
   ErrorMsg SubExp ->
-  SrcLoc ->
   InternaliseM Certs
-assert desc se msg loc = assertingOne $ do
+assert desc se msg = assertingOne $ do
   attrs <- asks $ attrsForAssert . envAttrs
-  attributing attrs $ letExp desc $ BasicOp $ Assert se msg (loc, mempty)
+  attributing attrs $ letExp desc $ BasicOp $ Assert se msg
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
@@ -215,3 +216,13 @@ assertingOne ::
   InternaliseM VName ->
   InternaliseM Certs
 assertingOne m = asserting $ Certs . pure <$> m
+
+-- | Attach the provided location to all statements produced during execution of
+-- this action.
+locating :: (Located a) => a -> InternaliseM b -> InternaliseM b
+locating a
+  | loc == mempty || isBuiltinLoc loc = id
+  | otherwise = censorStms $ fmap onStm
+  where
+    loc = locOf a
+    onStm (Let pat aux e) = Let pat (aux {stmAuxLoc = Provenance mempty loc}) e

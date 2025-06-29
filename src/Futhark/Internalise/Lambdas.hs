@@ -33,7 +33,6 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   mkLambda params $
     ensureResultShape
       (ErrorMsg [ErrorString "shape of result does not match shape of initial value"])
-      (srclocOf lam)
       rettype'
       =<< bodyBind body
 
