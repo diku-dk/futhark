@@ -682,7 +682,10 @@ getSolution = do
   pure (unconstrained, sol)
 
   where
-    resolve :: TyVar -> TyVarNode s -> SolveM s (Either [PrimType] (TypeBase () NoUniqueness), Maybe Liftedness)
+    resolve :: 
+      TyVar ->
+      TyVarNode s ->
+      SolveM s (Either [PrimType] (TypeBase () NoUniqueness), Maybe Liftedness)
     resolve tv node = do
       sol <- getSol' node
       case sol of
