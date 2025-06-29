@@ -105,7 +105,7 @@ assignNewSol node new_sol = do
         l { solution = new_sol }
 
       -- This case will (or, at least, should) never be reached.
-      _ -> error ""
+      _ -> error "tried to assign new solution to non-representative node"
 
 -- | Join the equivalence classes of the nodes. The resulting equivalence
 -- class has the same solution and key as the second argument.
