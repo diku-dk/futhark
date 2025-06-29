@@ -692,6 +692,8 @@ getSolution = do
         Unsolved (TyVarFree _ l) -> do
           k <- getKey' node
           let tv' = typeVar k
+          -- If the current type variable and root type variable are
+          -- different, save the liftedness constraint for later.
           pure (Right tv', if k == tv then Just l else Nothing)
 
         Unsolved (TyVarPrim _ pts) -> pure (Left pts, Nothing)
