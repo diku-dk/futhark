@@ -290,16 +290,16 @@ solveEq :: Reason Type -> BreadCrumbs -> Type -> Type -> SolveM s ()
 solveEq reason obcs orig_t1 orig_t2 = do
   solveCt' (obcs, (orig_t1, orig_t2))
   where
-    flexible :: VName -> SolveM s (Bool, Maybe (TyVarNode s))
+    flexible :: VName -> SolveM s (Maybe (TyVarNode s))
     flexible v = do
       uf <- asks solverTyVars
       case M.lookup v uf of
-        Just node -> do
+        n@(Just node) -> do
           sol <- getSol' node
           pure $ case sol of
-            Unsolved _ -> (True, Just node)
-            _ -> (False, Nothing)
-        Nothing -> pure (False, Nothing)
+            Unsolved _ -> n
+            _ -> Nothing
+        Nothing -> pure Nothing
 
     normalize :: TypeBase () NoUniqueness -> SolveM s (TypeBase () NoUniqueness)
     normalize t@(Scalar (TypeVar _ (QualName [] v) [])) = do
@@ -323,27 +323,27 @@ solveEq reason obcs orig_t1 orig_t2 = do
           )
             | v1 == v2 -> pure ()
             | otherwise -> do
-                (v1_flexible, mb_node1) <- flexible v1
-                (v2_flexible, mb_node2) <- flexible v2
-                case (v1_flexible, v2_flexible) of
-                  (False, False) -> 
+                mb_node1 <- flexible v1
+                mb_node2 <- flexible v2
+                case (mb_node1, mb_node2) of
+                  (Nothing, Nothing) -> 
                     cannotUnify reason mempty bcs t1 t2
-                  (True, False) ->
-                    bindTyVar reason bcs v1 (fromJust mb_node1) t2'
-                  (False, True) ->
-                    bindTyVar reason bcs v2 (fromJust mb_node2) t1'
-                  (True, True) ->
-                    unionTyVars reason bcs v1 (fromJust mb_node1) (fromJust mb_node2)
+                  (Just v1_node, Nothing) ->
+                    bindTyVar reason bcs v1 v1_node t2'
+                  (Nothing, Just v2_node) ->
+                    bindTyVar reason bcs v2 v2_node t1'
+                  (Just v1_node, Just v2_node) ->
+                    unionTyVars reason bcs v1 v1_node v2_node
         (Scalar (TypeVar _ (QualName [] v1) []), _) -> do
-          (v1_flexible, mb_node) <- flexible v1
-          if v1_flexible
-            then bindTyVar reason bcs v1 (fromJust mb_node) t2'
-            else tryUnify t1' t2' reason bcs
+          mb_node <- flexible v1
+          case mb_node of
+            Just node -> bindTyVar reason bcs v1 node t2'
+            Nothing -> tryUnify t1' t2' reason bcs
         (_, Scalar (TypeVar _ (QualName [] v2) [])) -> do
-          (v2_flexible, mb_node) <- flexible v2
-          if v2_flexible
-            then bindTyVar reason bcs v2 (fromJust mb_node) t1'
-            else tryUnify t1' t2' reason bcs
+          mb_node <- flexible v2
+          case mb_node of
+            Just node -> bindTyVar reason bcs v2 node t1'
+            Nothing -> tryUnify t1' t2' reason bcs
         (_, _) -> tryUnify t1' t2' reason bcs
 
     tryUnify :: Type -> Type -> Reason Type -> BreadCrumbs -> SolveM s ()
