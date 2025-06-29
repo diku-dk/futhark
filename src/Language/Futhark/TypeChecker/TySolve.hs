@@ -584,7 +584,7 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
   where
     check :: TyVar -> SolveM s ()
     check ty_v = do
-      mb_node <- asks $ M.lookup ty_v . solverTyVars
+      mb_node <- maybeLookupUF ty_v
       case mb_node of
         Just node -> do
           sol <- getSol' node
