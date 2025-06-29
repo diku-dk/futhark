@@ -584,16 +584,19 @@ scopeCheck reason v v_lvl ty = mapM_ check $ typeVars ty
   where
     check :: TyVar -> SolveM s ()
     check ty_v = do
-      mb_node <- maybeLookupUF ty_v
-      case mb_node of
-        Just node -> do
-          sol <- getSol' node
-          case sol of
-            Param ty_v_lvl _ _
-              | ty_v_lvl > v_lvl -> scopeViolation reason v ty ty_v
-            Solved ty' -> do
-              mapM_ check $ typeVars ty'
-            _ -> pure ()
+      maybe (pure ()) checkNode =<< maybeLookupUF ty_v
+
+    checkNode :: TyVarNode s -> SolveM s ()
+    checkNode n = do
+      sol <- getSol' n
+      case sol of
+        Param ty_v_lvl _ _
+          | ty_v_lvl > v_lvl -> do
+            k <- getKey' n
+            ty' <- substTyVars ty
+            scopeViolation reason v ty' k
+        Solved ty' -> do
+          mapM_ check $ typeVars ty'
         _ -> pure ()
 
 -- | If a type variable has a liftedness constraint, we propagate that
