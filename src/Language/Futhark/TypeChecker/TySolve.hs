@@ -364,8 +364,10 @@ unify
     where
       f (TypeArgType t1, TypeArgType t2) = Just (mempty, (t1, t2))
       f _ = Nothing
-unify (Scalar (Arrow _ _ _ t1a (RetType _ t1r))) (Scalar (Arrow _ _ _ t2a (RetType _ t2r))) =
-  Right [(mempty, (t1a, t2a)), (mempty, (t1r', t2r'))]
+unify 
+  (Scalar (Arrow _ _ _ t1a (RetType _ t1r))) 
+  (Scalar (Arrow _ _ _ t2a (RetType _ t2r))) 
+    = Right [(mempty, (t1a, t2a)), (mempty, (t1r', t2r'))]
   where
     t1r' = t1r `setUniqueness` NoUniqueness
     t2r' = t2r `setUniqueness` NoUniqueness
