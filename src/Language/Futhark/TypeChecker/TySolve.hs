@@ -294,10 +294,10 @@ solveEq reason obcs orig_t1 orig_t2 = do
     flexible v = do
       uf <- asks solverTyVars
       case M.lookup v uf of
-        n@(Just node) -> do
+        j_n@(Just node) -> do
           sol <- getSol' node
           pure $ case sol of
-            Unsolved _ -> n
+            Unsolved _ -> j_n
             _ -> Nothing
         Nothing -> pure Nothing
 
