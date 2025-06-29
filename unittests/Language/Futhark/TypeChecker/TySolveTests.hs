@@ -257,7 +257,7 @@ tests =
 
       -- testCase "infinite type (sum type)" $
       --   testSolveFail
-      --     ["a_0" ~ "#foo: a_0"]
+      --     ["a_0" ~ "#foo a_0"]
       --     mempty
       --     (M.fromList [tvFree "a_0" 0])
       --     ".?([Oo]ccurs check).?",
