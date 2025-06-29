@@ -103,6 +103,8 @@ assignNewSol node new_sol = do
     case l of
       Repr {} ->
         l { solution = new_sol }
+
+      -- This case will (or, at least, should) never be reached.
       _ -> error ""
 
 -- | Join the equivalence classes of the nodes. The resulting equivalence
