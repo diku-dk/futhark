@@ -481,8 +481,8 @@ unionTyVars reason bcs v v_node t_node = do
 
   case (v_sol, t_info) of
     (Unsolved (TyVarFree _ v_l), TyVarFree t_loc t_l)
-      | v_l /= t_l ->
-        setInfo t_node $ Unsolved $ TyVarFree t_loc (min v_l t_l)
+      | v_l < t_l ->
+        setInfo t_node $ Unsolved $ TyVarFree t_loc v_l
     (Unsolved TyVarFree {}, _) -> pure ()
     (Unsolved info, TyVarFree {}) -> do
       setInfo t_node $ Unsolved info
@@ -613,9 +613,9 @@ liftednessCheck l (Scalar (TypeVar _ (QualName [] v) _)) = do
       liftednessCheck l v_ty
     Just Param {} -> pure ()
     Just (Unsolved (TyVarFree loc v_l))
-      | l /= v_l -> do
+      | l < v_l -> do
           node <- lookupUF v
-          setInfo node $ Unsolved $ TyVarFree loc (min l v_l)
+          setInfo node $ Unsolved $ TyVarFree loc l
     Just Unsolved {} -> pure ()
 liftednessCheck _ (Scalar Prim {}) = pure ()
 liftednessCheck Lifted _ = pure ()
