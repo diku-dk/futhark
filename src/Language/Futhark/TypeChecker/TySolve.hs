@@ -476,7 +476,7 @@ unionTyVars reason bcs v v_node t_node = do
   v_sol <- getSol' v_node
   t_info <- lookupTyVarInfo t_node
 
-  -- Unify the equivalence classes of v and t.
+  -- Union the equivalence classes of v and t.
   union' v_node t_node
 
   case (v_sol, t_info) of
