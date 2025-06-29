@@ -642,6 +642,24 @@ liftednessCheck l (Scalar (Sum cs)) =
 liftednessCheck _ (Scalar TypeVar {}) = pure ()
 
 solveTyVar :: (VName, (Level, TyVarInfo ())) -> SolveM s ()
+solveTyVar (tv, (lvl, TyVarFree loc l)) = do
+  tv_t <- lookupTyVar tv
+  case tv_t of
+    Right ty -> do
+      scopeCheck (Reason loc) tv lvl ty
+      liftednessCheck l ty
+    _ -> pure ()
+solveTyVar (tv, (_, TyVarPrim loc pts)) = do
+  tv_t <- lookupTyVar tv
+  case tv_t of
+    Right ty
+      | ty `elem` map (Scalar . Prim) pts -> pure ()
+      | otherwise ->
+          typeError loc mempty $
+            "Numeric constant inferred to be of type"
+              </> indent 2 (align (pretty ty))
+              </> "which is not possible."
+    _ -> pure ()
 solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
@@ -663,24 +681,6 @@ solveTyVar (tv, (_, TyVarSum loc cs1)) = do
           </> "Must be a sum type with constructors"
           </> indent 2 (pretty (Scalar (Sum cs1)))
     Right _ -> pure ()
-solveTyVar (tv, (lvl, TyVarFree loc l)) = do
-  tv_t <- lookupTyVar tv
-  case tv_t of
-    Right ty -> do
-      scopeCheck (Reason loc) tv lvl ty
-      liftednessCheck l ty
-    _ -> pure ()
-solveTyVar (tv, (_, TyVarPrim loc pts)) = do
-  tv_t <- lookupTyVar tv
-  case tv_t of
-    Right ty
-      | ty `elem` map (Scalar . Prim) pts -> pure ()
-      | otherwise ->
-          typeError loc mempty $
-            "Numeric constant inferred to be of type"
-              </> indent 2 (align (pretty ty))
-              </> "which is not possible."
-    _ -> pure ()
 
 maybeLookupUF :: TyVar -> SolveM s (Maybe (TyVarNode s))
 maybeLookupUF tv = do
