@@ -220,7 +220,13 @@ occursCheck reason v k tp = do
       <+> pretty tp
       <> "."
 
-bindTyVar :: Reason Type -> BreadCrumbs -> VName -> TyVarNode s -> Type -> SolveM s ()
+bindTyVar :: 
+  Reason Type ->
+  BreadCrumbs ->
+  VName ->
+  TyVarNode s ->
+  Type ->
+  SolveM s ()
 bindTyVar reason bcs v v_node t' = do
   t <- substTyVars t'
   k <- getKey' v_node
