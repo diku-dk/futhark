@@ -54,6 +54,9 @@ getSol' = liftST . getSol
 union' :: TyVarNode s -> TyVarNode s -> SolveM s ()
 union' tv1 tv2 = liftST $ union tv1 tv2
 
+unionNewSol' tv1 tv2 new_sol = liftST $ unionNewSol tv1 tv2 new_sol
+unionNewSol' :: TyVarNode s -> TyVarNode s -> TyVarSol -> SolveM s ()
+
 getKey' :: TyVarNode s -> SolveM s TyVar
 getKey' = liftST . getKey
 

@@ -8,6 +8,7 @@ module Language.Futhark.TypeChecker.UnionFind
     getKey,
     assignNewSol,
     union,
+    unionNewSol
   )
 where
 
@@ -110,3 +111,14 @@ union n1 n2 = do
   root2 <- fst <$> find n2
 
   writeSTRef ref $ Link root2
+
+-- | Join the equivalence classes of the nodes. The resulting equivalence
+-- class has the same key as the second argument while @new_sol@ is the
+-- new solution.
+unionNewSol :: TyVarNode s -> TyVarNode s -> TyVarSol -> ST s ()
+unionNewSol n1 n2 new_sol = do
+  Node ref1 <- fst <$> find n1
+  (root2@(Node ref2), repr_info) <- find n2
+
+  modifySTRef' ref2 $ const . Repr $ repr_info { solution = new_sol }
+  writeSTRef ref1 $ Link root2
