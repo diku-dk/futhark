@@ -86,15 +86,11 @@ find node@(Node info_ref) = do
 -- | Return the solution associated with the argument node's
 -- equivalence class.
 getSol :: TyVarNode s -> ST s TyVarSol
-getSol node = do
-  (_, info) <- find node
-  pure $ solution info
+getSol node = solution . snd <$> find node
 
 -- | Return the name of the representative type variable.
 getKey :: TyVarNode s -> ST s TyVar
-getKey node = do
-  (_, info) <- find node
-  pure $ key info
+getKey node = key . snd <$> find node
 
 -- | Assign a new solution/type to the node's equivalence class.
 --
@@ -109,7 +105,7 @@ assignNewSol node new_sol = do
 -- class has the same solution and key as the second argument.
 union :: TyVarNode s -> TyVarNode s -> ST s ()
 union n1 n2 = do
-  (Node info_ref, _) <- find n1
-  (root2, _) <- find n2
+  Node info_ref <- fst <$> find n1
+  root2 <- fst <$> find n2
 
   writeSTRef info_ref $ Link root2
