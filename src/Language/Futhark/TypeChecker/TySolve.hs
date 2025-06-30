@@ -675,8 +675,7 @@ solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
           <+> "is ambiguous."
           </> "Must be a record with fields"
           </> indent 2 (pretty (Scalar (Record fs1)))
-    Right _ ->
-      pure ()
+    Right _ -> pure ()
 solveTyVar (tv, (_, TyVarSum loc cs1)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
