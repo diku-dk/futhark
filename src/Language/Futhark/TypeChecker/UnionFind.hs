@@ -100,7 +100,7 @@ getKey node = key . snd <$> find node
 assignNewSol :: TyVarNode s -> TyVarSol -> ST s ()
 assignNewSol node new_sol = do
   (Node ref, repr_info) <- find node
-  modifySTRef' ref $ const $ Repr $ repr_info { solution = new_sol }
+  modifySTRef' ref $ const . Repr $ repr_info { solution = new_sol }
 
 -- | Join the equivalence classes of the nodes. The resulting equivalence
 -- class has the same solution and key as the second argument.
