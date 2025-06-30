@@ -65,9 +65,9 @@ makeTyParamNode tv lvl lft loc = do
 --
 -- This method performs the path compresssion.
 find :: TyVarNode s -> ST s (TyVarNode s)
-find node@(Node link_ref) = do
-  link <- readSTRef link_ref
-  case link of
+find node@(Node info_ref) = do
+  info <- readSTRef info_ref
+  case info of
     -- Input node is representative.
     Repr {} -> pure node
 
@@ -76,7 +76,7 @@ find node@(Node link_ref) = do
       repr <- find parent
       when (repr /= parent) $
         -- Performing path compression.
-        writeSTRef link_ref $ Link repr
+        writeSTRef info_ref $ Link repr
       pure repr
 
 -- | Return the solution associated with the argument node's
@@ -99,10 +99,10 @@ getKey node = do
 assignNewSol :: TyVarNode s -> TyVarSol -> ST s ()
 assignNewSol node new_sol = do
   Node ref <- find node
-  modifySTRef' ref $ \l ->
-    case l of
+  modifySTRef' ref $ \info ->
+    case info of
       Repr {} ->
-        l { solution = new_sol }
+        info { solution = new_sol }
 
       -- This case will (or, at least, should) never be reached.
       _ -> error "tried to assign new solution to non-representative node"
@@ -111,7 +111,7 @@ assignNewSol node new_sol = do
 -- class has the same solution and key as the second argument.
 union :: TyVarNode s -> TyVarNode s -> ST s ()
 union n1 n2 = do
-  Node link_ref1 <- find n1
+  Node info_ref <- find n1
   root2 <- find n2
 
-  writeSTRef link_ref1 $ Link root2
+  writeSTRef info_ref $ Link root2
