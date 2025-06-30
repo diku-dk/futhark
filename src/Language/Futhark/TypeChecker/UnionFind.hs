@@ -64,8 +64,9 @@ makeTyParamNode tv lvl lft loc = do
   ref <- newSTRef $ Repr r
   pure $ Node ref
   
--- | @find node@ returns the representative of
--- @node@'s equivalence class.
+-- | @find node@ returns the representative of @node@'s
+-- equivalence class and the information associated with
+-- this equivalence class.
 --
 -- This method performs the path compresssion.
 find :: TyVarNode s -> ST s (TyVarNode s, ReprInfo)
