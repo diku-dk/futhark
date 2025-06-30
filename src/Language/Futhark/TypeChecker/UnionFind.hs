@@ -31,9 +31,9 @@ data TyVarSol
     -- ^ Is unsolved but has this constraint.
   deriving (Show, Eq)
 
-newtype TyVarNode s = Node (STRef s (LinkInfo s)) deriving Eq
+newtype TyVarNode s = Node (STRef s (NodeInfo s)) deriving Eq
 
-data LinkInfo s
+data NodeInfo s
   = Link (TyVarNode s)
   | Repr
       { solution :: TyVarSol
