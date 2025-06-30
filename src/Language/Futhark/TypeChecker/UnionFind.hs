@@ -34,63 +34,67 @@ data TyVarSol
 newtype TyVarNode s = Node (STRef s (NodeInfo s)) deriving Eq
 
 data NodeInfo s
-  = Link (TyVarNode s)
-  | Repr
-      { solution :: TyVarSol
-      , key      :: {-# UNPACK #-} !TyVar
-      }
+  = Link !(TyVarNode s)
+  | Repr !ReprInfo
+
+data ReprInfo = ReprInfo 
+  { solution :: !TyVarSol
+  , key      :: !TyVar
+  }
 
 -- | Create a fresh node of a type variable and return it. A fresh node
 -- is in the equivalence class that contains only itself.
 makeTyVarNode :: TyVar -> TyVarInfo () -> ST s (TyVarNode s)
 makeTyVarNode tv constraint = do
-  let r = Repr {
+  let r = ReprInfo {
       solution = Unsolved constraint
     , key = tv
   }
-  Node <$> newSTRef r
+  ref <- newSTRef $ Repr r
+  pure $ Node ref
 
 -- | Create a fresh node of a type parameter and return it. A fresh node
 -- is in the equivalence class that contains only itself.
 makeTyParamNode :: TyVar -> Level -> Liftedness -> Loc -> ST s (TyVarNode s)
 makeTyParamNode tv lvl lft loc = do
-  let r = Repr {
+  let r = ReprInfo {
       solution = Param lvl lft loc
     , key = tv
   }
-  Node <$> newSTRef r
+  ref <- newSTRef $ Repr r
+  pure $ Node ref
   
 -- | @find node@ returns the representative of
 -- @node@'s equivalence class.
 --
 -- This method performs the path compresssion.
-find :: TyVarNode s -> ST s (TyVarNode s)
+find :: TyVarNode s -> ST s (TyVarNode s, ReprInfo)
 find node@(Node info_ref) = do
   info <- readSTRef info_ref
   case info of
     -- Input node is representative.
-    Repr {} -> pure node
+    Repr repr_info -> pure (node, repr_info)
 
     -- Input node's parent is another node.
     Link parent -> do
-      repr <- find parent
+      a@(repr, _) <- find parent
       when (repr /= parent) $
         -- Performing path compression.
         writeSTRef info_ref $ Link repr
-      pure repr
+      pure a
 
 -- | Return the solution associated with the argument node's
 -- equivalence class.
 getSol :: TyVarNode s -> ST s TyVarSol
 getSol node = do
-  Node ref <- find node
-  solution <$> readSTRef ref
+  (_, info) <- find node
+  pure $ solution info
 
 -- | Return the name of the representative type variable.
 getKey :: TyVarNode s -> ST s TyVar
 getKey node = do
-  Node ref <- find node
-  key <$> readSTRef ref
+  (_, info) <- find node
+  pure $ key info
 
 -- | Assign a new solution/type to the node's equivalence class.
 --
@@ -98,20 +102,14 @@ getKey node = do
 -- unsolved/flexible type variable.
 assignNewSol :: TyVarNode s -> TyVarSol -> ST s ()
 assignNewSol node new_sol = do
-  Node ref <- find node
-  modifySTRef' ref $ \info ->
-    case info of
-      Repr {} ->
-        info { solution = new_sol }
-
-      -- This case will (or, at least, should) never be reached.
-      _ -> error "tried to assign new solution to non-representative node"
+  (Node ref, info) <- find node
+  modifySTRef' ref $ const $ Repr $ info { solution = new_sol }
 
 -- | Join the equivalence classes of the nodes. The resulting equivalence
 -- class has the same solution and key as the second argument.
 union :: TyVarNode s -> TyVarNode s -> ST s ()
 union n1 n2 = do
-  Node info_ref <- find n1
-  root2 <- find n2
+  (Node info_ref, _) <- find n1
+  (root2, _) <- find n2
 
   writeSTRef info_ref $ Link root2
