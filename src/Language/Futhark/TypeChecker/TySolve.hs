@@ -491,95 +491,98 @@ unionTyVars ::
 unionTyVars reason bcs v v_node t_node = do
   v_sol <- getSol' v_node
   t_info <- lookupTyVarInfo t_node
-
-  -- Union the equivalence classes of v and t.
-  union' v_node t_node
-
-  case (v_sol, t_info) of
-    (Unsolved (TyVarFree _ v_l), TyVarFree t_loc t_l)
-      | v_l < t_l ->
-        setInfo t_node $ Unsolved $ TyVarFree t_loc v_l
-    (Unsolved TyVarFree {}, _) -> pure ()
-    (Unsolved info, TyVarFree {}) -> do
-      setInfo t_node $ Unsolved info
-    --
-    -- TyVarPrim cases
-    ( Unsolved (TyVarPrim _ v_pts),
-      TyVarPrim t_loc t_pts
-      ) ->
-        let pts = L.intersect v_pts t_pts
-         in if null pts
-              then
-                typeError (locOf reason) mempty $
-                  "Cannot unify type that must be one of"
-                    </> indent 2 (pretty v_pts)
-                    </> "with type that must be one of"
-                    </> indent 2 (pretty t_pts)
-              else setInfo t_node (Unsolved (TyVarPrim t_loc pts))
-    ( Unsolved (TyVarPrim _ v_pts),
-      TyVarRecord {}
-      ) ->
-        typeError (locOf reason) mempty $
-          "Cannot unify type that must be one of"
-            </> indent 2 (pretty v_pts)
-            </> "with type that must be a record."
-    ( Unsolved (TyVarPrim _ v_pts),
-      TyVarSum {}
-      ) ->
-        typeError (locOf reason) mempty $
-          "Cannot unify type that must be one of"
-            </> indent 2 (pretty v_pts)
-            </> "with type that must be sum."
-    --
-    -- TyVarSum cases
-    ( Unsolved (TyVarSum _ cs1),
-      TyVarSum loc cs2
-      ) -> do
-        unifySharedConstructors reason bcs cs1 cs2
-        let cs3 = cs1 <> cs2
-        setInfo t_node $ Unsolved $ TyVarSum loc cs3
-    ( Unsolved TyVarSum {},
-      TyVarPrim _ pts
-      ) ->
-        typeError (locOf reason) mempty $
-          "A sum type cannot be one of"
-            </> indent 2 (pretty pts)
-    ( Unsolved (TyVarSum _ cs1),
-      TyVarRecord _ fs
-      ) ->
-        typeError (locOf reason) mempty $
-          "Cannot unify type with constructors"
-            </> indent 2 (pretty (Sum cs1))
-            </> "with type"
-            </> indent 2 (pretty (Scalar (Record fs)))
-    --
-    -- TyVarRecord cases
-    ( Unsolved (TyVarRecord _ fs1),
-      TyVarRecord loc fs2
-      ) -> do
-        unifySharedFields reason bcs fs1 fs2
-        let fs3 = fs1 <> fs2
-        setInfo t_node (Unsolved (TyVarRecord loc fs3))
-    ( Unsolved TyVarRecord {},
-      TyVarPrim _ pts
-      ) ->
-        typeError (locOf reason) mempty $
-          "A record type cannot be one of"
-            </> indent 2 (pretty pts)
-    ( Unsolved (TyVarRecord _ fs1),
-      TyVarSum _ cs
-      ) ->
-        typeError (locOf reason) mempty $
-          "Cannot unify record type"
-            </> indent 2 (pretty (Record fs1))
-            </> "with type"
-            </> indent 2 (pretty (Scalar (Sum cs)))
-    --
-    -- Internal error cases
-    (Solved {}, _) -> alreadySolved
-    (Param {}, _) -> isParam
+  c <- check v_sol t_info  
+  case c of
+    Left (loc, notes, msg) -> typeError loc notes msg
+    Right (Just new_sol) -> unionNewSol' v_node t_node new_sol
+    Right Nothing -> union' v_node t_node
 
   where
+    check :: 
+      TyVarSol ->
+      TyVarInfo () ->
+      SolveM s (Either (Loc, Notes, Doc ()) (Maybe TyVarSol))
+    check v_sol t_info =
+      case (v_sol, t_info) of
+        (Unsolved (TyVarFree _ v_l), TyVarFree t_loc t_l)
+          | v_l /= t_l ->
+            pure $ Right $ Just $ Unsolved $ TyVarFree t_loc (min v_l t_l)
+        (Unsolved info, TyVarFree {}) -> do
+          pure $ Right $ Just $ Unsolved info
+        --
+        -- TyVarPrim cases
+        ( Unsolved (TyVarPrim _ v_pts),
+          TyVarPrim t_loc t_pts
+          ) ->
+            let pts = L.intersect v_pts t_pts
+            in if null pts
+                  then pure $ Left (locOf reason, mempty,
+                        "Cannot unify type that must be one of"
+                          </> indent 2 (pretty v_pts)
+                          </> "with type that must be one of"
+                          </> indent 2 (pretty t_pts))
+                  else pure $ Right $ Just $ Unsolved $ TyVarPrim t_loc pts
+        (Unsolved (TyVarPrim _ v_pts), TyVarRecord {}) ->
+          pure $ Left (locOf reason, mempty,
+            "Cannot unify type that must be one of"
+              </> indent 2 (pretty v_pts)
+              </> "with type that must be a record.")
+        (Unsolved (TyVarPrim _ v_pts), TyVarSum {}) ->
+          pure $ Left (locOf reason, mempty,
+            "Cannot unify type that must be one of"
+              </> indent 2 (pretty v_pts)
+              </> "with type that must be sum.")
+        --
+        -- TyVarSum cases
+        ( Unsolved (TyVarSum _ cs1),
+          TyVarSum loc cs2
+          ) -> do
+            unifySharedConstructors reason bcs cs1 cs2
+            let cs3 = cs1 <> cs2
+            pure $ Right $ Just $ Unsolved $ TyVarSum loc cs3
+        ( Unsolved TyVarSum {},
+          TyVarPrim _ pts
+          ) ->
+            pure $ Left (locOf reason, mempty,
+              "A sum type cannot be one of"
+                </> indent 2 (pretty pts))
+        ( Unsolved (TyVarSum _ cs1),
+          TyVarRecord _ fs
+          ) ->
+            pure $ Left (locOf reason, mempty,
+              "Cannot unify type with constructors"
+                </> indent 2 (pretty (Sum cs1))
+                </> "with type"
+                </> indent 2 (pretty (Scalar (Record fs))))
+        --
+        -- TyVarRecord cases
+        ( Unsolved (TyVarRecord _ fs1),
+          TyVarRecord loc fs2
+          ) -> do
+            unifySharedFields reason bcs fs1 fs2
+            let fs3 = fs1 <> fs2
+            pure $ Right $ Just $ Unsolved $ TyVarRecord loc fs3
+        ( Unsolved TyVarRecord {},
+          TyVarPrim _ pts
+          ) ->
+            pure $ Left (locOf reason, mempty,
+              "A record type cannot be one of"
+                </> indent 2 (pretty pts))
+        ( Unsolved (TyVarRecord _ fs1),
+          TyVarSum _ cs
+          ) ->
+            pure $ Left (locOf reason, mempty,
+              "Cannot unify record type"
+                </> indent 2 (pretty (Record fs1))
+                </> "with type"
+                </> indent 2 (pretty (Scalar (Sum cs))))
+        --
+        -- Internal error cases
+        (Solved {}, _) -> alreadySolved
+        (Param {}, _) -> isParam
+
+        _ -> pure $ Right Nothing
+
     alreadySolved = error $ "Type variable already solved: " <> prettyNameString v
     isParam = error $ "Type name is a type parameter: " <> prettyNameString v
 
