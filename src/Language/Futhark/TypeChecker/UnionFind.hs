@@ -70,9 +70,9 @@ makeTyParamNode tv lvl lft loc = do
 --
 -- This method performs the path compresssion.
 find :: TyVarNode s -> ST s (TyVarNode s, ReprInfo)
-find node@(Node info_ref) = do
-  info <- readSTRef info_ref
-  case info of
+find node@(Node ref) = do
+  node_info <- readSTRef ref
+  case node_info of
     -- Input node is representative.
     Repr repr_info -> pure (node, repr_info)
 
@@ -81,7 +81,7 @@ find node@(Node info_ref) = do
       a@(repr, _) <- find parent
       when (repr /= parent) $
         -- Performing path compression.
-        writeSTRef info_ref $ Link repr
+        writeSTRef ref $ Link repr
       pure a
 
 -- | Return the solution associated with the argument node's
@@ -99,14 +99,14 @@ getKey node = key . snd <$> find node
 -- unsolved/flexible type variable.
 assignNewSol :: TyVarNode s -> TyVarSol -> ST s ()
 assignNewSol node new_sol = do
-  (Node ref, info) <- find node
-  modifySTRef' ref $ const $ Repr $ info { solution = new_sol }
+  (Node ref, repr_info) <- find node
+  modifySTRef' ref $ const $ Repr $ repr_info { solution = new_sol }
 
 -- | Join the equivalence classes of the nodes. The resulting equivalence
 -- class has the same solution and key as the second argument.
 union :: TyVarNode s -> TyVarNode s -> ST s ()
 union n1 n2 = do
-  Node info_ref <- fst <$> find n1
+  Node ref <- fst <$> find n1
   root2 <- fst <$> find n2
 
-  writeSTRef info_ref $ Link root2
+  writeSTRef ref $ Link root2
