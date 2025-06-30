@@ -74,7 +74,7 @@ find node@(Node link_ref) = do
     -- Input node's parent is another node.
     Link parent -> do
       repr <- find parent
-      when (repr /= parent) $ do
+      when (repr /= parent) $
         -- Performing path compression.
         writeSTRef link_ref $ Link repr
       pure repr
