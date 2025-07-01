@@ -357,18 +357,6 @@ pdBuiltin "mad32" [a, b, _c] =
   Just [b, a, fConst Float32 1]
 pdBuiltin "mad64" [a, b, _c] =
   Just [b, a, fConst Float64 1]
-pdBuiltin "from_bits16" [_] =
-  Just [fConst Float16 1]
-pdBuiltin "from_bits32" [_] =
-  Just [fConst Float32 1]
-pdBuiltin "from_bits64" [_] =
-  Just [fConst Float64 1]
-pdBuiltin "to_bits16" [_] =
-  Just [iConst Int16 1]
-pdBuiltin "to_bits32" [_] =
-  Just [iConst Int32 1]
-pdBuiltin "to_bits64" [_] =
-  Just [iConst Int64 1]
 pdBuiltin "hypot16" [x, y] =
   Just
     [ untyped $ isF16 x / isF16 (FunExp "hypot16" [x, y] $ FloatType Float16),
