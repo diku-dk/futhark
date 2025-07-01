@@ -566,6 +566,10 @@ data ConvOp
     UIToFP IntType FloatType
   | -- | Convert a signed integer to a floating-point value.
     SIToFP IntType FloatType
+  | -- | Convert floating point number to its bitwise representation.
+    FPToBits FloatType
+  | -- | Convert bitwise representation to a floating point number.
+    BitsToFP FloatType
   | -- | Convert an integer to a boolean value.  Zero
     -- becomes false; anything else is true.
     IToB IntType
@@ -653,6 +657,8 @@ allConvOps =
       FPToSI <$> allFloatTypes <*> allIntTypes,
       UIToFP <$> allIntTypes <*> allFloatTypes,
       SIToFP <$> allIntTypes <*> allFloatTypes,
+      FPToBits <$> allFloatTypes,
+      BitsToFP <$> allFloatTypes,
       IToB <$> allIntTypes,
       BToI <$> allIntTypes,
       FToB <$> allFloatTypes,
@@ -930,11 +936,29 @@ doConvOp (FPToUI _ to) (FloatValue v) = Just $ IntValue $ doFPToUI v to
 doConvOp (FPToSI _ to) (FloatValue v) = Just $ IntValue $ doFPToSI v to
 doConvOp (UIToFP _ to) (IntValue v) = Just $ FloatValue $ doUIToFP v to
 doConvOp (SIToFP _ to) (IntValue v) = Just $ FloatValue $ doSIToFP v to
+doConvOp FPToBits {} (FloatValue (Float16Value x)) =
+  Just $ IntValue $ Int16Value $ fromIntegral $ halfToWord x
+doConvOp FPToBits {} (FloatValue (Float32Value x)) =
+  Just $ IntValue $ Int32Value $ fromIntegral $ floatToWord x
+doConvOp FPToBits {} (FloatValue (Float64Value x)) =
+  Just $ IntValue $ Int64Value $ fromIntegral $ doubleToWord x
+doConvOp BitsToFP {} (IntValue (Int16Value x)) =
+  Just $ FloatValue $ Float16Value $ wordToHalf $ fromIntegral x
+doConvOp BitsToFP {} (IntValue (Int32Value x)) =
+  Just $ FloatValue $ Float32Value $ wordToFloat $ fromIntegral x
+doConvOp BitsToFP {} (IntValue (Int64Value x)) =
+  Just $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x
 doConvOp (IToB _) (IntValue v) = Just $ BoolValue $ intToInt64 v /= 0
 doConvOp (BToI to) (BoolValue v) = Just $ IntValue $ intValue to $ if v then 1 else 0 :: Int
 doConvOp (FToB _) (FloatValue v) = Just $ BoolValue $ floatToDouble v /= 0
 doConvOp (BToF to) (BoolValue v) = Just $ FloatValue $ floatValue to $ if v then 1 else 0 :: Double
 doConvOp _ _ = Nothing
+
+-- | The integer type with the same size as the given floating point type.
+matchingInt :: FloatType -> IntType
+matchingInt Float16 = Int16
+matchingInt Float32 = Int32
+matchingInt Float64 = Int64
 
 -- | Turn the conversion the other way around.  Note that most
 -- conversions are lossy, so there is no guarantee the value will
@@ -947,6 +971,8 @@ flipConvOp (FPToUI from to) = UIToFP to from
 flipConvOp (FPToSI from to) = SIToFP to from
 flipConvOp (UIToFP from to) = FPToSI to from
 flipConvOp (SIToFP from to) = FPToSI to from
+flipConvOp (FPToBits from) = BitsToFP from
+flipConvOp (BitsToFP to) = FPToBits to
 flipConvOp (IToB from) = BToI from
 flipConvOp (BToI to) = IToB to
 flipConvOp (FToB from) = BToF from
@@ -1161,6 +1187,8 @@ convOpType (FPToUI from to) = (FloatType from, IntType to)
 convOpType (FPToSI from to) = (FloatType from, IntType to)
 convOpType (UIToFP from to) = (IntType from, FloatType to)
 convOpType (SIToFP from to) = (IntType from, FloatType to)
+convOpType (FPToBits from) = (FloatType from, IntType $ matchingInt from)
+convOpType (BitsToFP to) = (IntType $ matchingInt to, FloatType to)
 convOpType (IToB from) = (IntType from, Bool)
 convOpType (BToI to) = (Bool, IntType to)
 convOpType (FToB from) = (FloatType from, Bool)
@@ -1534,60 +1562,6 @@ primFuns =
             _ -> Nothing
         )
       ),
-      ( "to_bits16",
-        ( [FloatType Float16],
-          IntType Int16,
-          \case
-            [FloatValue (Float16Value x)] ->
-              Just $ IntValue $ Int16Value $ fromIntegral $ halfToWord x
-            _ -> Nothing
-        )
-      ),
-      ( "to_bits32",
-        ( [FloatType Float32],
-          IntType Int32,
-          \case
-            [FloatValue (Float32Value x)] ->
-              Just $ IntValue $ Int32Value $ fromIntegral $ floatToWord x
-            _ -> Nothing
-        )
-      ),
-      ( "to_bits64",
-        ( [FloatType Float64],
-          IntType Int64,
-          \case
-            [FloatValue (Float64Value x)] ->
-              Just $ IntValue $ Int64Value $ fromIntegral $ doubleToWord x
-            _ -> Nothing
-        )
-      ),
-      ( "from_bits16",
-        ( [IntType Int16],
-          FloatType Float16,
-          \case
-            [IntValue (Int16Value x)] ->
-              Just $ FloatValue $ Float16Value $ wordToHalf $ fromIntegral x
-            _ -> Nothing
-        )
-      ),
-      ( "from_bits32",
-        ( [IntType Int32],
-          FloatType Float32,
-          \case
-            [IntValue (Int32Value x)] ->
-              Just $ FloatValue $ Float32Value $ wordToFloat $ fromIntegral x
-            _ -> Nothing
-        )
-      ),
-      ( "from_bits64",
-        ( [IntType Int64],
-          FloatType Float64,
-          \case
-            [IntValue (Int64Value x)] ->
-              Just $ FloatValue $ Float64Value $ wordToDouble $ fromIntegral x
-            _ -> Nothing
-        )
-      ),
       f16_3 "lerp16" (\v0 v1 t -> v0 + (v1 - v0) * max 0 (min 1 t)),
       f32_3 "lerp32" (\v0 v1 t -> v0 + (v1 - v0) * max 0 (min 1 t)),
       f64_3 "lerp64" (\v0 v1 t -> v0 + (v1 - v0) * max 0 (min 1 t)),
@@ -1950,6 +1924,8 @@ convOpFun FPToUI {} = "fptoui"
 convOpFun FPToSI {} = "fptosi"
 convOpFun UIToFP {} = "uitofp"
 convOpFun SIToFP {} = "sitofp"
+convOpFun FPToBits {} = "fptobits"
+convOpFun BitsToFP {} = "bitstofp"
 convOpFun IToB {} = "itob"
 convOpFun BToI {} = "btoi"
 convOpFun FToB {} = "ftob"

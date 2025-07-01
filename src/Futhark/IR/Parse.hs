@@ -341,6 +341,8 @@ pBasicOp =
       pConvOp "btoi" (const BToI) (keyword "bool") pIntType,
       pConvOp "ftob" (const . FToB) pFloatType (keyword "bool"),
       pConvOp "btof" (const BToF) (keyword "bool") pFloatType,
+      pConvOp "fptobits" (const . FPToBits) pFloatType pIntType,
+      pConvOp "bitstofp" (const BitsToFP) pIntType pFloatType,
       --
       pIndex,
       pFlatIndex,

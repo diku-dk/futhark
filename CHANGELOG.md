@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Incorrect aliasing for memory blocks could cause some optimisations to be
   misapplied. (#2288)
 
+* `to_bits`/`from_bits` not handled by AD (#2292).
+
 ## [0.25.31]
 
 ### Added
