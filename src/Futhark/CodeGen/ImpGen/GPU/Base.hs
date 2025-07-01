@@ -893,17 +893,9 @@ atomicUpdateCAS space t arr old bucket x do_op = do
   -- While-loop: Try to insert your value
   let (toBits, fromBits) =
         case t of
-          FloatType Float16 ->
-            ( \v -> Imp.FunExp "to_bits16" [v] int16,
-              \v -> Imp.FunExp "from_bits16" [v] t
-            )
-          FloatType Float32 ->
-            ( \v -> Imp.FunExp "to_bits32" [v] int32,
-              \v -> Imp.FunExp "from_bits32" [v] t
-            )
-          FloatType Float64 ->
-            ( \v -> Imp.FunExp "to_bits64" [v] int64,
-              \v -> Imp.FunExp "from_bits64" [v] t
+          FloatType ft ->
+            ( Imp.ConvOpExp (FPToBits ft),
+              Imp.ConvOpExp (BitsToFP ft)
             )
           _ -> (id, id)
 
