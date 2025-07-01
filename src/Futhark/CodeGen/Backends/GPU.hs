@@ -28,14 +28,6 @@ import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
-provenanceExp :: GC.CompilerM op s C.Exp
-provenanceExp = do
-  p <- GC.askProvenance
-  pure $
-    if p == mempty
-      then [C.cexp|NULL|]
-      else [C.cexp|$string:(prettyString p)|]
-
 genKernelFunction ::
   KernelName ->
   KernelSafety ->
@@ -44,7 +36,7 @@ genKernelFunction ::
   GC.CompilerM op s Name
 genKernelFunction kernel_name safety arg_params arg_set = do
   let kernel_fname = "gpu_kernel_" <> kernel_name
-  provenance <- provenanceExp
+  provenance <- GC.provenanceExp
   GC.libDecl
     [C.cedecl|static int $id:kernel_fname
                (struct futhark_context* ctx,
@@ -171,7 +163,7 @@ copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
       srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
       shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
-  provenance <- provenanceExp
+  provenance <- GC.provenanceExp
   GC.stm
     [C.cstm|
          if ((err =
@@ -191,7 +183,7 @@ copyhost2gpu sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) 
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
       srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
       shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
-  provenance <- provenanceExp
+  provenance <- GC.provenanceExp
   GC.stm
     [C.cstm|
          if ((err =

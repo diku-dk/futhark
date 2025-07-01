@@ -23,18 +23,22 @@ data ProfilingEvent = ProfilingEvent
     eventName :: T.Text,
     -- | In microseconds.
     eventDuration :: Double,
-    -- | Long, may be multiple lines, contains information about the specific
-    -- arguments and parameters.
-    eventDescription :: T.Text
+    -- | The provenance of the event - that is, from where in the original
+    -- program it originates.
+    eventProvenance :: [T.Text],
+    -- | Arbitrary additional information, probably in the form of a dictionary,
+    -- but that depends on the backend.
+    eventDetails :: JSON.Value
   }
   deriving (Eq, Ord, Show)
 
 instance JSON.ToJSON ProfilingEvent where
-  toJSON (ProfilingEvent name duration description) =
+  toJSON (ProfilingEvent name duration provenance details) =
     JSON.object
       [ ("name", JSON.toJSON name),
         ("duration", JSON.toJSON duration),
-        ("description", JSON.toJSON description)
+        ("provenance", JSON.toJSON provenance),
+        ("details", details)
       ]
 
 instance JSON.FromJSON ProfilingEvent where
@@ -42,7 +46,8 @@ instance JSON.FromJSON ProfilingEvent where
     ProfilingEvent
       <$> o JSON..: "name"
       <*> o JSON..: "duration"
-      <*> o JSON..: "description"
+      <*> o JSON..: "provenance"
+      <*> o JSON..: "details"
 
 -- | A profiling report contains all profiling information for a
 -- single benchmark (meaning a single invocation on an entry point on

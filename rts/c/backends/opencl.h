@@ -1163,7 +1163,7 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
   if (event != NULL) {
     add_event(ctx,
               "copy_scalar_to_dev",
-              strdup(""),
+              NULL,
               event,
               (event_report_fn)opencl_event_report);
   }
@@ -1181,7 +1181,7 @@ static int gpu_scalar_from_device(struct futhark_context* ctx,
   if (event != NULL) {
     add_event(ctx,
               "copy_scalar_from_dev",
-              strdup(""),
+              NULL,
               event,
               (event_report_fn)opencl_event_report);
   }
@@ -1201,7 +1201,7 @@ static int gpu_memcpy(struct futhark_context* ctx,
     if (event != NULL) {
       add_event(ctx,
                 "copy_dev_to_dev",
-                strdup(""),
+                NULL,
                 event,
                 (event_report_fn)opencl_event_report);
     }
@@ -1227,7 +1227,7 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
     if (event != NULL) {
       add_event(ctx,
                 "copy_host_to_dev",
-                strdup(""),
+                NULL,
                 event,
                 (event_report_fn)opencl_event_report);
     }
@@ -1254,7 +1254,7 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
     if (event != NULL) {
       add_event(ctx,
                 "copy_dev_to_host",
-                strdup(""),
+                NULL,
                 event,
                 (event_report_fn)opencl_event_report);
     }
@@ -1296,16 +1296,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
   if (event != NULL) {
     add_event(ctx,
               name,
-              msgprintf("At: %s\n"
-                        "Kernel %s with\n"
-                        "  grid=(%d,%d,%d)\n"
-                        "  block=(%d,%d,%d)\n"
-                        "  shared memory=%d",
-                        provenance ? provenance : "unknown",
-                        name,
-                        grid[0], grid[1], grid[2],
-                        block[0], block[1], block[2],
-                        shared_mem_bytes),
+              provenance,
               event,
               (event_report_fn)opencl_event_report);
   }

@@ -63,6 +63,7 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     configType,
     localProvenance,
     askProvenance,
+    provenanceExp,
 
     -- * Building Blocks
     copyMemoryDefaultSpace,
@@ -356,6 +357,15 @@ localProvenance p = local $ \env -> env {envProvenance = p}
 -- | The provenance of the closest enclosing 'Imp.MetaProvenance'.
 askProvenance :: CompilerM op s Provenance
 askProvenance = asks envProvenance
+
+-- | A C expression corresponding to the current provenance.
+provenanceExp :: CompilerM op s C.Exp
+provenanceExp = do
+  p <- askProvenance
+  pure $
+    if p == mempty
+      then [C.cexp|NULL|]
+      else [C.cexp|$string:(prettyString p)|]
 
 -- | Used when we, inside an existing 'CompilerM' action, want to
 -- generate code for a new function.  Use this so that the compiler

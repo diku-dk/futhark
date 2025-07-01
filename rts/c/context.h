@@ -70,13 +70,13 @@ static void host_free(struct futhark_context* ctx,
 
 static void add_event(struct futhark_context* ctx,
                       const char* name,
-                      char* description,
+                      const char* provenance,
                       void* data,
                       event_report_fn f) {
   if (ctx->logging) {
-    fprintf(ctx->log, "Event: %s\n%s\n", name, description);
+    fprintf(ctx->log, "Event: %s\n  %s\n", name, provenance);
   }
-  add_event_to_list(&ctx->event_list, name, description, data, f);
+  add_event_to_list(&ctx->event_list, name, provenance, data, f);
 }
 
 char *futhark_context_get_error(struct futhark_context *ctx) {

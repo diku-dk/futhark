@@ -6,7 +6,7 @@ struct event {
   void* data;
   event_report_fn f;
   const char* name;
-  char *description;
+  const char *provenance;
 };
 
 struct event_list {
@@ -27,7 +27,7 @@ static void event_list_free(struct event_list *l) {
 
 static void add_event_to_list(struct event_list *l,
                               const char* name,
-                              char* description,
+                              const char* provenance,
                               void* data,
                               event_report_fn f) {
   if (l->num_events == l->capacity) {
@@ -35,7 +35,7 @@ static void add_event_to_list(struct event_list *l,
     l->events = realloc(l->events, l->capacity * sizeof(struct event));
   }
   l->events[l->num_events].name = name;
-  l->events[l->num_events].description = description;
+  l->events[l->num_events].provenance = provenance ? provenance : "unknown";
   l->events[l->num_events].data = data;
   l->events[l->num_events].f = f;
   l->num_events++;
@@ -50,13 +50,13 @@ static int report_events_in_list(struct event_list *l,
     }
     str_builder_str(sb, "{\"name\":");
     str_builder_json_str(sb, l->events[i].name);
-    str_builder_str(sb, ",\"description\":");
-    str_builder_json_str(sb, l->events[i].description);
-    free(l->events[i].description);
+    str_builder_str(sb, ",\"provenance\":");
+    str_builder_str(sb, l->events[i].provenance);
     if (l->events[i].f(sb, l->events[i].data) != 0) {
       ret = 1;
       break;
     }
+
     str_builder(sb, "}");
   }
   event_list_free(l);

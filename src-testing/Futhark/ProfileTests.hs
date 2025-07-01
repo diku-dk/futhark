@@ -14,7 +14,7 @@ arbText :: Gen T.Text
 arbText = T.pack <$> printable
 
 instance Arbitrary ProfilingEvent where
-  arbitrary = ProfilingEvent <$> arbText <*> arbitrary <*> arbText
+  arbitrary = ProfilingEvent <$> arbText <*> arbitrary <*> listOf arbText <*> arbitrary
 
 instance Arbitrary ProfilingReport where
   arbitrary =

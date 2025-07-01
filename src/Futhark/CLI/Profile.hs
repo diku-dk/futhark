@@ -48,7 +48,7 @@ data EvSummary = EvSummary
 tabulateEvents :: [ProfilingEvent] -> T.Text
 tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
   where
-    pair (ProfilingEvent name dur _) = (name, EvSummary 1 dur dur dur)
+    pair (ProfilingEvent name dur _ _details) = (name, EvSummary 1 dur dur dur)
     comb (EvSummary xn xdur xmin xmax) (EvSummary yn ydur ymin ymax) =
       EvSummary (xn + yn) (xdur + ydur) (min xmin ymin) (max xmax ymax)
     numpad = 15
@@ -92,8 +92,11 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
 timeline :: [ProfilingEvent] -> T.Text
 timeline = T.unlines . L.intercalate [""] . map onEvent
   where
-    onEvent (ProfilingEvent name duration description) =
-      [name, "Duration: " <> showText duration <> " μs"] <> T.lines description
+    onEvent (ProfilingEvent name duration provenance _details) =
+      [ name,
+        "Duration: " <> showText duration <> " μs",
+        "At: " <> T.intercalate "->" provenance
+      ]
 
 data TargetFiles = TargetFiles
   { summaryFile :: FilePath,
