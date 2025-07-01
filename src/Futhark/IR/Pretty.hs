@@ -328,7 +328,7 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
       <+> pretty (nameToString fname)
       <> apply (map (align . prettyArg) args)
         </> colon
-        <+> braces (commasep $ map prettyRet ret)
+        <+> braces (align $ commasep $ map prettyRet ret)
     where
       prettyArg (arg, Consume) = "*" <> pretty arg
       prettyArg (arg, _) = pretty arg
