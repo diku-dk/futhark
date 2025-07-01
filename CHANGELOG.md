@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `to_bits`/`from_bits` not handled by AD (#2292).
 
+* For GPU backends, incorrect code generation for accumulator updates (produced
+  by AD) for thread-local arrays (#2294).
+
 ## [0.25.31]
 
 ### Added
