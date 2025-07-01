@@ -663,7 +663,8 @@ inKernelOperations env mode body =
       pure [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
     atomicSpace (Space sid) = sid
-    atomicSpace _ = "global"
+    atomicSpace ScalarSpace {} = error "atomicSpace: cannot do atomics on ScalarSpace"
+    atomicSpace DefaultSpace = "global"
 
     doAtomic s t old arr ind val op ty = do
       ind' <- GC.compileExp $ untyped $ unCount ind
