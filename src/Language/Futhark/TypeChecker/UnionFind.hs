@@ -8,13 +8,14 @@ module Language.Futhark.TypeChecker.UnionFind
     getKey,
     assignNewSol,
     union,
+    unionNewSol
   )
 where
 
 import Control.Monad ( when )
 import Control.Monad.ST ( ST )
 import Data.STRef
-    ( STRef, modifySTRef, newSTRef, readSTRef, writeSTRef )
+    ( STRef, modifySTRef', newSTRef, readSTRef, writeSTRef )
 import Language.Futhark ( Loc, Liftedness )
 import Language.Futhark.TypeChecker.Constraints
     ( CtType, Level, TyVar, TyVarInfo )
@@ -31,90 +32,67 @@ data TyVarSol
     -- ^ Is unsolved but has this constraint.
   deriving (Show, Eq)
 
-newtype TyVarNode s = Node (STRef s (Link s)) deriving Eq
+newtype TyVarNode s = Node (STRef s (NodeInfo s)) deriving Eq
 
-data Link s
-  = Repr {-# UNPACK #-} !(STRef s ReprInfo)
-    -- ^ The representative of an equivalence class.
-  | Link {-# UNPACK #-} !(TyVarNode s)
-    -- ^ Pointer to some other element of the equivalence class.
-    deriving Eq
+data NodeInfo s
+  = Link !(TyVarNode s)
+  | Repr !ReprInfo
 
--- | Information about an equivalence class.
-data ReprInfo = MkInfo
-  { weight :: {-# UNPACK #-} !Int
-    -- ^ The size of the equivalence class, used by 'union'. 
-  , solution  :: TyVarSol
-    -- ^ The "type" of the equivalence class.
-  , key :: TyVar
-    -- ^ The name of the type variable representing the equivalence class.
-  } deriving Eq
+data ReprInfo = ReprInfo 
+  { solution :: !TyVarSol
+  , key      :: !TyVar
+  }
 
 -- | Create a fresh node of a type variable and return it. A fresh node
 -- is in the equivalence class that contains only itself.
 makeTyVarNode :: TyVar -> TyVarInfo () -> ST s (TyVarNode s)
 makeTyVarNode tv constraint = do
-  info <- newSTRef (MkInfo {
-      weight = 1
-    , solution = Unsolved constraint
+  let r = ReprInfo {
+      solution = Unsolved constraint
     , key = tv
-  })
-  l <- newSTRef $ Repr info
-  pure $ Node l
+  }
+  ref <- newSTRef $ Repr r
+  pure $ Node ref
 
 -- | Create a fresh node of a type parameter and return it. A fresh node
 -- is in the equivalence class that contains only itself.
 makeTyParamNode :: TyVar -> Level -> Liftedness -> Loc -> ST s (TyVarNode s)
 makeTyParamNode tv lvl lft loc = do
-  info <- newSTRef (MkInfo {
-      weight = 1
-    , solution = Param lvl lft loc
+  let r = ReprInfo {
+      solution = Param lvl lft loc
     , key = tv
-  })
-  l <- newSTRef $ Repr info
-  pure $ Node l
-
--- | @find node@ returns the representative of
--- @node@'s equivalence class.
+  }
+  ref <- newSTRef $ Repr r
+  pure $ Node ref
+  
+-- | @find node@ returns the representative of @node@'s
+-- equivalence class and the information associated with
+-- this equivalence class.
 --
 -- This method performs the path compresssion.
-find :: TyVarNode s -> ST s (TyVarNode s)
-find node@(Node link_ref) = do
-  link <- readSTRef link_ref
-  case link of
+find :: TyVarNode s -> ST s (TyVarNode s, ReprInfo)
+find node@(Node ref) = do
+  node_info <- readSTRef ref
+  case node_info of
     -- Input node is representative.
-    Repr _ -> pure node
+    Repr repr_info -> pure (node, repr_info)
 
     -- Input node's parent is another node.
     Link parent -> do
-      repr <- find parent
-      -- Performing path compression.
-      writeSTRef link_ref $ Link repr
-      pure repr
-
--- | Return the reference to the descriptor of the node's
--- equivalence class.
-descrRef :: TyVarNode s -> ST s (STRef s ReprInfo)
-descrRef node@(Node link_ref) = do
-  link <- readSTRef link_ref
-  case link of
-    Repr info -> pure info
-    Link (Node link'_ref) -> do
-      link' <- readSTRef link'_ref
-      case link' of
-        Repr info -> pure info
-        _ -> descrRef =<< find node
+      a@(repr, _) <- find parent
+      when (repr /= parent) $
+        -- Performing path compression.
+        writeSTRef ref $ Link repr
+      pure a
 
 -- | Return the solution associated with the argument node's
 -- equivalence class.
 getSol :: TyVarNode s -> ST s TyVarSol
-getSol node = do
-  solution <$> (readSTRef =<< descrRef node)
+getSol node = solution . snd <$> find node
 
 -- | Return the name of the representative type variable.
 getKey :: TyVarNode s -> ST s TyVar
-getKey node = do
-  key <$> (readSTRef =<< descrRef node)
+getKey node = key . snd <$> find node
 
 -- | Assign a new solution/type to the node's equivalence class.
 --
@@ -122,32 +100,25 @@ getKey node = do
 -- unsolved/flexible type variable.
 assignNewSol :: TyVarNode s -> TyVarSol -> ST s ()
 assignNewSol node new_sol = do
-  ref <- descrRef node
-  modifySTRef ref $ \i -> i { solution = new_sol }  
+  (Node ref, repr_info) <- find node
+  modifySTRef' ref $ const . Repr $ repr_info { solution = new_sol }
 
 -- | Join the equivalence classes of the nodes. The resulting equivalence
 -- class has the same solution and key as the second argument.
 union :: TyVarNode s -> TyVarNode s -> ST s ()
 union n1 n2 = do
-  root1@(Node link_ref1) <- find n1
-  root2@(Node link_ref2) <- find n2
+  Node ref <- fst <$> find n1
+  root2 <- fst <$> find n2
 
-  -- Ensure that nodes aren't in the same equivalence class. 
-  when (root1 /= root2) $ do
-    link1 <- readSTRef link_ref1
-    link2 <- readSTRef link_ref2
-    case (link1, link2) of
-      (Repr info_ref1, Repr info_ref2) -> do
-        (MkInfo w1 _   _ ) <- readSTRef info_ref1
-        (MkInfo w2 sol k2) <- readSTRef info_ref2
-        let w' = w1 + w2
-        if w1 >= w2 
-          then do
-            writeSTRef link_ref2 $ Link root1
-            writeSTRef info_ref1 $ MkInfo w' sol k2
-          else do
-            writeSTRef link_ref1 $ Link root2
-            writeSTRef info_ref2 $ MkInfo w' sol k2
+  writeSTRef ref $ Link root2
 
-      -- This shouldn't be possible.       
-      _ -> error "'find' somehow didn't return a Repr"
+-- | Join the equivalence classes of the nodes. The resulting equivalence
+-- class has the same key as the second argument while @new_sol@ is the
+-- new solution.
+unionNewSol :: TyVarNode s -> TyVarNode s -> TyVarSol -> ST s ()
+unionNewSol n1 n2 new_sol = do
+  Node ref1 <- fst <$> find n1
+  (root2@(Node ref2), repr_info) <- find n2
+
+  modifySTRef' ref2 $ const . Repr $ repr_info { solution = new_sol }
+  writeSTRef ref1 $ Link root2
