@@ -1302,6 +1302,8 @@ SCALAR_FUN_ATTR float futrts_fma32(float a, float b, float c) { return fmaf(a, b
 
 SCALAR_FUN_ATTR int32_t fptobits_f32_i32(float x) { return intbits(x); }
 SCALAR_FUN_ATTR float bitstofp_i32_f32(int32_t x) { return floatbits(x); }
+SCALAR_FUN_ATTR uniform int32_t fptobits_f32_i32(uniform float x) { return intbits(x); }
+SCALAR_FUN_ATTR uniform float bitstofp_i32_f32(uniform int32_t x) { return floatbits(x); }
 
 #else
 
@@ -1578,6 +1580,14 @@ SCALAR_FUN_ATTR double bitstofp_i64_f64(int64_t x) {
     res = insert(res, i, r);
   }
   return res;
+}
+
+SCALAR_FUN_ATTR uniform int64_t fptobits_f64_i64(uniform double x) {
+  return intbits(x);
+}
+
+SCALAR_FUN_ATTR uniform double bitstofp_i64_f64(uniform int64_t x) {
+  return doublebits(x);
 }
 
 SCALAR_FUN_ATTR double fmod64(double x, double y) {
