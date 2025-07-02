@@ -478,7 +478,7 @@ library
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
     , free >=5.1.10
-    , futhark-data >= 1.1.1.0
+    , futhark-data >= 1.1.2.0
     , futhark-server >= 1.2.3.0
     , futhark-manifest >= 1.5.0.0
     , githash >=0.1.6.1
@@ -523,7 +523,7 @@ executable futhark
 
 library futhark-testing
   import: common
-  hs-source-dirs: unittests
+  hs-source-dirs: src-testing
   exposed-modules:
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
@@ -550,14 +550,18 @@ library futhark-testing
       Futhark.Solve.BranchAndBoundTests
       Futhark.Solve.SimplexTests
       Language.Futhark.CoreTests
+      Language.Futhark.PrettyTests
+      Language.Futhark.ParserBenchmarks
       Language.Futhark.PrimitiveTests
       Language.Futhark.SemanticTests
       Language.Futhark.SyntaxTests
       Language.Futhark.TypeChecker.TypesTests
+      Language.Futhark.TypeChecker.TySolveBenchmarks
       Language.Futhark.TypeChecker.TySolveTests
       Language.Futhark.TypeCheckerTests
   build-depends:
       QuickCheck >=2.8
+    , criterion
     , mtl >=2.2.1
     , base
     , containers
@@ -576,7 +580,7 @@ library futhark-testing
 test-suite unit
   import: common
   type: exitcode-stdio-1.0
-  main-is: unittests/futhark_tests.hs
+  main-is: src-testing/futhark_tests.hs
   build-depends:
       base
     , futhark-testing
@@ -585,18 +589,8 @@ test-suite unit
 benchmark benchmarks
   import: common
   type: exitcode-stdio-1.0
-  main-is: futhark_benchmarks.hs
-  hs-source-dirs: 
-        benchmarks
-        benchmarks/Generated/
-  other-modules:
-        Language.Futhark.TypeChecker.TySolveBenchmarks
-        Language.Futhark.TypeChecker.TySolveBenchmarks
-        Generated.AllFutBenchmarks
-
+  main-is: src-testing/futhark_benchmarks.hs
   build-depends:
       base
-    , containers
     , criterion
-    , futhark
     , futhark-testing

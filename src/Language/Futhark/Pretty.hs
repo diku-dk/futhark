@@ -382,7 +382,7 @@ prettyExp _ (ArrayLit es t _) =
   brackets (commasep $ map pretty es) <> prettyInst t
 prettyExp _ (StringLit s _) =
   pretty $ show $ map (chr . fromIntegral) s
-prettyExp _ (Project k e _ _) = pretty e <> "." <> pretty k
+prettyExp _ (Project k e _ _) = prettyExp 11 e <> "." <> pretty k
 prettyExp _ (Negate e _) = "-" <> pretty e
 prettyExp _ (Not e _) = "!" <> pretty e
 prettyExp _ (Update src idxs ve _) =

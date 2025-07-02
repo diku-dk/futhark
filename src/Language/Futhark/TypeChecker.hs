@@ -638,10 +638,9 @@ checkEntryPoint ::
   SrcLoc ->
   [TypeParam] ->
   [Pat ParamType] ->
-  Maybe (TypeExp Exp VName) ->
   ResRetType ->
   TypeM ()
-checkEntryPoint loc tparams params maybe_tdecl rettype
+checkEntryPoint loc tparams params rettype
   | any isTypeParam tparams =
       typeError loc mempty $
         withIndexLink
@@ -668,16 +667,6 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
         "Entry point size parameter "
           <> pretty p
           <> " only used non-constructively."
-  | p : _ <- filter nastyParameter params =
-      warn p $
-        "Entry point parameter\n"
-          </> indent 2 (pretty p)
-          </> "\nwill have an opaque type, so the entry point will likely not be callable."
-  | nastyReturnType maybe_tdecl rettype_t =
-      warn loc $
-        "Entry point return type\n"
-          </> indent 2 (pretty rettype)
-          </> "\nwill have an opaque type, so the result will likely not be usable."
   | otherwise =
       pure ()
   where
@@ -706,7 +695,7 @@ checkValBind vb = do
   debugTraceM 3 $ unlines ["# Inferred:", prettyString vb']
 
   case entry' of
-    Just _ -> checkEntryPoint loc tparams' params' maybe_tdecl' rettype
+    Just _ -> checkEntryPoint loc tparams' params' rettype
     _ -> pure ()
 
   pure
@@ -718,44 +707,6 @@ checkValBind vb = do
         },
       vb'
     )
-
-nastyType :: (Monoid als) => TypeBase dim als -> Bool
-nastyType (Scalar Prim {}) = False
-nastyType t@Array {} = nastyType $ stripArray 1 t
-nastyType _ = True
-
-nastyReturnType :: (Monoid als) => Maybe (TypeExp Exp VName) -> TypeBase dim als -> Bool
-nastyReturnType Nothing (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
-  nastyType t1 || nastyReturnType Nothing t2
-nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
-  (not (niceTypeExp te1) && nastyType t1)
-    || nastyReturnType (Just te2) t2
-nastyReturnType (Just te) _
-  | niceTypeExp te = False
-nastyReturnType te t
-  | Just ts <- isTupleRecord t =
-      case te of
-        Just (TETuple tes _) -> or $ zipWith nastyType' (map Just tes) ts
-        _ -> any nastyType ts
-  | otherwise = nastyType' te t
-  where
-    nastyType' (Just te') _ | niceTypeExp te' = False
-    nastyType' _ t' = nastyType t'
-
-nastyParameter :: Pat ParamType -> Bool
-nastyParameter p = nastyType (patternType p) && not (ascripted p)
-  where
-    ascripted (PatAscription _ te _) = niceTypeExp te
-    ascripted (PatParens p' _) = ascripted p'
-    ascripted _ = False
-
-niceTypeExp :: TypeExp Exp VName -> Bool
-niceTypeExp (TEVar (QualName [] _) _) = True
-niceTypeExp (TEApply te TypeArgExpSize {} _) = niceTypeExp te
-niceTypeExp (TEArray _ te _) = niceTypeExp te
-niceTypeExp (TEUnique te _) = niceTypeExp te
-niceTypeExp (TEDim _ te _) = niceTypeExp te
-niceTypeExp _ = False
 
 checkOneDec :: DecBase NoInfo Name -> TypeM (TySet, Env, DecBase Info VName)
 checkOneDec (ModDec struct) = do
