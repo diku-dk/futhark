@@ -1243,7 +1243,8 @@ sKernelOp attrs constants ops name m = do
   -- to somewhere in /prelude), so try to synthesize it from the body instead.
   -- It may be that we should do this earlier in the compiler.
   let p = Imp.foldProvenances (const mempty) body
-  emit . mappend (Imp.Meta (Imp.MetaProvenance p)) . Imp.Op . Imp.CallKernel $
+  emit $ Imp.Meta $ Imp.MetaProvenance p
+  emit . Imp.Op . Imp.CallKernel $
     Imp.Kernel
       { Imp.kernelBody = body,
         Imp.kernelUses = uses <> map constToUse (M.toList (kAttrConstExps attrs)),
