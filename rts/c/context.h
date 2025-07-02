@@ -74,6 +74,9 @@ static void add_event(struct futhark_context* ctx,
                       struct kvs *kvs,
                       void* data,
                       event_report_fn f) {
+  if (provenance == NULL) {
+    provenance = "unknown";
+  }
   if (ctx->logging) {
     fprintf(ctx->log, "Event: %s\n  at: %s\n", name, provenance);
     if (kvs) {

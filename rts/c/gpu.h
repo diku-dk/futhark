@@ -15,14 +15,14 @@ int gpu_launch_kernel(struct futhark_context* ctx,
                       int num_args,
                       void* args[num_args],
                       size_t args_sizes[num_args]);
-int gpu_memcpy(struct futhark_context* ctx,
+int gpu_memcpy(struct futhark_context* ctx, const char* provenance,
                gpu_mem dst, int64_t dst_offset,
                gpu_mem src, int64_t src_offset,
                int64_t nbytes);
-int gpu_scalar_from_device(struct futhark_context* ctx,
+int gpu_scalar_from_device(struct futhark_context* ctx, const char* provenance,
                            void *dst,
                            gpu_mem src, size_t offset, size_t size);
-int gpu_scalar_to_device(struct futhark_context* ctx,
+int gpu_scalar_to_device(struct futhark_context* ctx, const char* provenance,
                          gpu_mem dst, size_t offset, size_t size,
                          void *src);
 void gpu_create_kernel(struct futhark_context *ctx,
@@ -562,13 +562,14 @@ static int gpu_lmad_copy(struct futhark_context* ctx, const char* provenance,
     if (size == 0) { return FUTHARK_SUCCESS; }                          \
     int64_t k, n, m;                                                    \
     if (lmad_map_tr(&k, &n, &m,                                         \
-                       r, dst_strides, src_strides, shape)) {           \
+                    r, dst_strides, src_strides, shape)) {              \
       log_transpose(ctx, k, n, m);                                      \
       return map_transpose_gpu2gpu_##NAME                               \
         (ctx, provenance, dst, dst_offset, src, src_offset, k, n, m);   \
     } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {   \
       if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n\n");}        \
       return gpu_memcpy(ctx,                                            \
+                        provenance,                                     \
                         dst, dst_offset*sizeof(ELEM_TYPE),              \
                         src, src_offset*sizeof(ELEM_TYPE),              \
                         size * sizeof(ELEM_TYPE));                      \
@@ -584,12 +585,13 @@ static int gpu_lmad_copy(struct futhark_context* ctx, const char* provenance,
   }
 
 static int
-lmad_copy_elements_host2gpu(struct futhark_context *ctx, size_t elem_size,
+lmad_copy_elements_host2gpu(struct futhark_context *ctx, const char *provenance,
+                            size_t elem_size,
                             int r,
                             gpu_mem dst, int64_t dst_offset, int64_t dst_strides[r],
                             unsigned char* src, int64_t src_offset, int64_t src_strides[r],
                             int64_t shape[r]) {
-  (void)ctx; (void)elem_size; (void)r;
+  (void)ctx; (void)provenance; (void)elem_size; (void)r;
   (void)dst; (void)dst_offset; (void)dst_strides;
   (void)src; (void)src_offset; (void)src_strides;
   (void)shape;
@@ -598,12 +600,13 @@ lmad_copy_elements_host2gpu(struct futhark_context *ctx, size_t elem_size,
 }
 
 static int
-lmad_copy_elements_gpu2host (struct futhark_context *ctx, size_t elem_size,
+lmad_copy_elements_gpu2host (struct futhark_context *ctx, const char *provenance,
+                             size_t elem_size,
                              int r,
                              unsigned char* dst, int64_t dst_offset, int64_t dst_strides[r],
                              gpu_mem src, int64_t src_offset, int64_t src_strides[r],
                              int64_t shape[r]) {
-  (void)ctx; (void)elem_size; (void)r;
+  (void)ctx; (void)provenance; (void)elem_size; (void)r;
   (void)dst; (void)dst_offset; (void)dst_strides;
   (void)src; (void)src_offset; (void)src_strides;
   (void)shape;
@@ -625,7 +628,8 @@ static int lmad_copy_host2gpu(struct futhark_context* ctx, const char* provenanc
   int64_t k, n, m;
   if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {
     if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n\n");}
-    return memcpy_host2gpu(ctx, sync,
+    return memcpy_host2gpu(ctx, provenance,
+                           sync,
                            dst, dst_offset*elem_size,
                            src, src_offset*elem_size,
                            size);
@@ -633,7 +637,8 @@ static int lmad_copy_host2gpu(struct futhark_context* ctx, const char* provenanc
     if (ctx->logging) {fprintf(ctx->log, "## General copy\n\n");}
     int error;
     error = lmad_copy_elements_host2gpu
-      (ctx, elem_size, r,
+      (ctx, provenance,
+       elem_size, r,
        dst, dst_offset, dst_strides,
        src, src_offset, src_strides,
        shape);
@@ -658,7 +663,8 @@ static int lmad_copy_gpu2host(struct futhark_context* ctx, const char* provenanc
   int64_t k, n, m;
   if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {
     if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n\n");}
-    return memcpy_gpu2host(ctx, sync,
+    return memcpy_gpu2host(ctx, provenance,
+                           sync,
                            dst, dst_offset*elem_size,
                            src, src_offset*elem_size,
                            size);
@@ -666,7 +672,7 @@ static int lmad_copy_gpu2host(struct futhark_context* ctx, const char* provenanc
     if (ctx->logging) {fprintf(ctx->log, "## General copy\n\n");}
     int error;
     error = lmad_copy_elements_gpu2host
-      (ctx, elem_size, r,
+      (ctx, provenance, elem_size, r,
        dst, dst_offset, dst_strides,
        src, src_offset, src_strides,
        shape);

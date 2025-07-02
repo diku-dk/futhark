@@ -266,8 +266,11 @@ readScalarGPU :: GC.ReadScalar op ()
 readScalarGPU mem i t "device" _ = do
   val <- newVName "read_res"
   GC.decl [C.cdecl|$ty:t $id:val;|]
+  p <- GC.provenanceExp
   GC.stm
-    [C.cstm|if ((err = gpu_scalar_from_device(ctx, &$id:val, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0) { goto cleanup; }|]
+    [C.cstm|if ((err = gpu_scalar_from_device(ctx, $exp:p, &$id:val, $exp:mem,
+                                              $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0)
+            { goto cleanup; }|]
   GC.stm
     [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
             { err = 1; goto cleanup; }|]
@@ -281,8 +284,11 @@ writeScalarGPU :: GC.WriteScalar op ()
 writeScalarGPU mem i t "device" _ val = do
   val' <- newVName "write_tmp"
   GC.item [C.citem|$ty:t $id:val' = $exp:val;|]
+  p <- GC.provenanceExp
   GC.stm
-    [C.cstm|if ((err = gpu_scalar_to_device(ctx, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0) { goto cleanup; }|]
+    [C.cstm|if ((err = gpu_scalar_to_device(ctx, $exp:p, $exp:mem,
+                                            $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0)
+            { goto cleanup; }|]
 writeScalarGPU _ _ _ space _ _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
@@ -291,15 +297,18 @@ syncArg GC.CopyBarrier = [C.cexp|true|]
 syncArg GC.CopyNoBarrier = [C.cexp|false|]
 
 copyGPU :: GC.Copy OpenCL ()
-copyGPU _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes =
+copyGPU _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes = do
+  p <- GC.provenanceExp
   GC.stm
-    [C.cstm|err = gpu_memcpy(ctx, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
-copyGPU b dstmem dstidx DefaultSpace srcmem srcidx (Space "device") nbytes =
+    [C.cstm|err = gpu_memcpy(ctx, $exp:p, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
+copyGPU b dstmem dstidx DefaultSpace srcmem srcidx (Space "device") nbytes = do
+  p <- GC.provenanceExp
   GC.stm
-    [C.cstm|err = memcpy_gpu2host(ctx, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
-copyGPU b dstmem dstidx (Space "device") srcmem srcidx DefaultSpace nbytes =
+    [C.cstm|err = memcpy_gpu2host(ctx, $exp:p, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
+copyGPU b dstmem dstidx (Space "device") srcmem srcidx DefaultSpace nbytes = do
+  p <- GC.provenanceExp
   GC.stm
-    [C.cstm|err = memcpy_host2gpu(ctx, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
+    [C.cstm|err = memcpy_host2gpu(ctx, $exp:p, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
 copyGPU _ _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 

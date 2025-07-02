@@ -882,13 +882,14 @@ static void gpu_free_kernel(struct futhark_context *ctx,
 }
 
 static int gpu_scalar_to_device(struct futhark_context* ctx,
+                                const char *provenance,
                                 gpu_mem dst, size_t offset, size_t size,
                                 void *src) {
   struct cuda_event *event = cuda_event_new(ctx);
   if (event != NULL) {
     add_event(ctx,
               "copy_scalar_to_dev",
-              NULL,
+              provenance,
               NULL,
               event,
               (event_report_fn)cuda_event_report);
@@ -902,13 +903,14 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
 }
 
 static int gpu_scalar_from_device(struct futhark_context* ctx,
+                                  const char *provenance,
                                   void *dst,
                                   gpu_mem src, size_t offset, size_t size) {
   struct cuda_event *event = cuda_event_new(ctx);
   if (event != NULL) {
     add_event(ctx,
               "copy_scalar_from_dev",
-              NULL,
+              provenance,
               NULL,
               event,
               (event_report_fn)cuda_event_report);
@@ -922,6 +924,7 @@ static int gpu_scalar_from_device(struct futhark_context* ctx,
 }
 
 static int gpu_memcpy(struct futhark_context* ctx,
+                      const char *provenance,
                       gpu_mem dst, int64_t dst_offset,
                       gpu_mem src, int64_t src_offset,
                       int64_t nbytes) {
@@ -929,7 +932,7 @@ static int gpu_memcpy(struct futhark_context* ctx,
   if (event != NULL) {
     add_event(ctx,
               "copy_dev_to_dev",
-              NULL,
+              provenance,
               NULL,
               event,
               (event_report_fn)cuda_event_report);
@@ -942,7 +945,9 @@ static int gpu_memcpy(struct futhark_context* ctx,
   return FUTHARK_SUCCESS;
 }
 
-static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
+static int memcpy_host2gpu(struct futhark_context* ctx,
+                           const char *provenance,
+                           bool sync,
                            gpu_mem dst, int64_t dst_offset,
                            const unsigned char* src, int64_t src_offset,
                            int64_t nbytes) {
@@ -951,7 +956,7 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
     if (event != NULL) {
       add_event(ctx,
                 "copy_host_to_dev",
-                NULL,
+                provenance,
                 NULL,
                 event,
                 (event_report_fn)cuda_event_report);
@@ -971,7 +976,9 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
   return FUTHARK_SUCCESS;
 }
 
-static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
+static int memcpy_gpu2host(struct futhark_context* ctx,
+                           const char *provenance,
+                           bool sync,
                            unsigned char* dst, int64_t dst_offset,
                            gpu_mem src, int64_t src_offset,
                            int64_t nbytes) {
@@ -980,7 +987,7 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
     if (event != NULL) {
       add_event(ctx,
                 "copy_dev_to_host",
-                NULL,
+                provenance,
                 NULL,
                 event,
                 (event_report_fn)cuda_event_report);
