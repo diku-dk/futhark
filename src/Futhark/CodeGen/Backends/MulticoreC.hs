@@ -217,6 +217,7 @@ benchmarkCode name code = do
        add_event(ctx,
                  $string:(nameToString name),
                  $exp:provenance,
+                 NULL,
                  $id:event,
                  (typename event_report_fn)mc_event_report);
        lock_unlock(&ctx->event_list_lock);

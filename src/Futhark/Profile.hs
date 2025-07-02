@@ -25,7 +25,7 @@ data ProfilingEvent = ProfilingEvent
     eventDuration :: Double,
     -- | The provenance of the event - that is, from where in the original
     -- program it originates.
-    eventProvenance :: [T.Text],
+    eventProvenance :: T.Text,
     -- | Arbitrary additional information, probably in the form of a dictionary,
     -- but that depends on the backend.
     eventDetails :: JSON.Value

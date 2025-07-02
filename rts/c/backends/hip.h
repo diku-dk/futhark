@@ -727,6 +727,7 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
     add_event(ctx,
               "copy_scalar_to_dev",
               NULL,
+              NULL,
               event,
               (event_report_fn)hip_event_report);
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
@@ -745,6 +746,7 @@ static int gpu_scalar_from_device(struct futhark_context* ctx,
   if (event != NULL) {
     add_event(ctx,
               "copy_scalar_from_dev",
+              NULL,
               NULL,
               event,
               (event_report_fn)hip_event_report);
@@ -765,6 +767,7 @@ static int gpu_memcpy(struct futhark_context* ctx,
   if (event != NULL) {
     add_event(ctx,
               "copy_dev_to_dev",
+              NULL,
               NULL,
               event,
               (event_report_fn)hip_event_report);
@@ -787,6 +790,7 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
     if (event != NULL) {
       add_event(ctx,
                 "copy_host_to_dev",
+                NULL,
                 NULL,
                 event,
                 (event_report_fn)hip_event_report);
@@ -818,6 +822,7 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
     if (event != NULL) {
       add_event(ctx,
                 "copy_dev_to_host",
+                NULL,
                 NULL,
                 event,
                 (event_report_fn)hip_event_report);
@@ -872,9 +877,17 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 
   if (event != NULL) {
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
+
+    struct kvs *kvs = kvs_new();
+    kvs_printf(kvs, "kernel", "%s", name);
+    kvs_printf(kvs, "grid", "[%d,%d,%d]", grid[0], grid[1], grid[2]);
+    kvs_printf(kvs, "block", "[%d,%d,%d]", block[0], block[1], block[2]);
+    kvs_printf(kvs, "shared memory", "%d", shared_mem_bytes);
+
     add_event(ctx,
               name,
-              NULL,
+              provenance,
+              kvs,
               event,
               (event_report_fn)hip_event_report);
   }

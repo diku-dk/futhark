@@ -95,7 +95,7 @@ timeline = T.unlines . L.intercalate [""] . map onEvent
     onEvent (ProfilingEvent name duration provenance _details) =
       [ name,
         "Duration: " <> showText duration <> " μs",
-        "At: " <> T.intercalate "->" provenance
+        "At: " <> provenance
       ]
 
 data TargetFiles = TargetFiles

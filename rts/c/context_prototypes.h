@@ -46,6 +46,7 @@ static bool lmad_memcpyable(int r,
 static void add_event(struct futhark_context* ctx,
                       const char* name,
                       const char* provenance,
+                      struct kvs *kvs,
                       void* data,
                       event_report_fn f);
 
