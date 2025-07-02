@@ -35,7 +35,8 @@ static void add_event_to_list(struct event_list *l,
     l->events = realloc(l->events, l->capacity * sizeof(struct event));
   }
   l->events[l->num_events].name = name;
-  l->events[l->num_events].provenance = provenance ? provenance : "unknown";
+  l->events[l->num_events].provenance =
+    provenance ? provenance : "\"unknown\"";
   l->events[l->num_events].data = data;
   l->events[l->num_events].f = f;
   l->num_events++;
