@@ -886,7 +886,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
 
     struct kvs *kvs = kvs_new();
-    kvs_printf(kvs, "kernel", "%s", name);
+    kvs_printf(kvs, "kernel", "\"%s\"", name);
     kvs_printf(kvs, "grid", "[%d,%d,%d]", grid[0], grid[1], grid[2]);
     kvs_printf(kvs, "block", "[%d,%d,%d]", block[0], block[1], block[2]);
     kvs_printf(kvs, "shared memory", "%d", shared_mem_bytes);
