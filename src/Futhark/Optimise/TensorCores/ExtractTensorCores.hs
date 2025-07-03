@@ -8,7 +8,6 @@ import Control.Monad.Writer
 import Data.Bits
 import Data.Foldable (toList)
 import Data.List (elemIndex, intersect, partition)
-import Data.Loc (Loc (NoLoc), SrcLoc (SrcLoc))
 import Data.Map.Strict qualified as M
 import Data.Semigroup
 import Data.Set (difference, fromList)
