@@ -421,7 +421,7 @@ doSegIota ns = do
       (funDefName segIotaBuiltin)
       [(n, Observe), (Var ns, Observe)]
       (map (,mempty) restype)
-      (Safe, mempty, mempty)
+      Safe
   pure (flags, offsets, elems)
 
 -- | Produces @[0,0,0,1,1,2,2,2,...]@.  Returns @(flags, offsets,
@@ -446,7 +446,7 @@ doRepIota ns = do
       (funDefName repIotaBuiltin)
       [(n, Observe), (Var ns, Observe)]
       (map (,mempty) restype)
-      (Safe, mempty, mempty)
+      Safe
   pure (flags, offsets, elems)
 
 doPrefixSum :: VName -> Builder GPU VName
@@ -458,7 +458,7 @@ doPrefixSum ns = do
       (funDefName prefixSumBuiltin)
       [(n, Observe), (Var ns, Observe)]
       [(toDecl (staticShapes1 ns_t) Unique, mempty)]
-      (Safe, mempty, mempty)
+      Safe
 
 doPartition :: VName -> VName -> Builder GPU (VName, VName, VName)
 doPartition k cs = do
@@ -479,5 +479,5 @@ doPartition k cs = do
       (funDefName partitionBuiltin)
       [(n, Observe), (Var k, Observe), (Var cs, Observe)]
       (map (,mempty) restype)
-      (Safe, mempty, mempty)
+      Safe
   pure (counts, offsets, res)

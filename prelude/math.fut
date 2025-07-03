@@ -29,21 +29,21 @@ module type from_prim = {
 module type numeric = {
   include from_prim
 
-  val + : t -> t -> t
-  val - : t -> t -> t
-  val * : t -> t -> t
-  val / : t -> t -> t
-  val % : t -> t -> t
-  val ** : t -> t -> t
+  val (+) : t -> t -> t
+  val (-) : t -> t -> t
+  val (*) : t -> t -> t
+  val (/) : t -> t -> t
+  val (%) : t -> t -> t
+  val (**) : t -> t -> t
 
   val to_i64 : t -> i64
 
-  val == : t -> t -> bool
-  val < : t -> t -> bool
-  val > : t -> t -> bool
-  val <= : t -> t -> bool
-  val >= : t -> t -> bool
-  val != : t -> t -> bool
+  val (==) : t -> t -> bool
+  val (<) : t -> t -> bool
+  val (>) : t -> t -> bool
+  val (<=) : t -> t -> bool
+  val (>=) : t -> t -> bool
+  val (!=) : t -> t -> bool
 
   -- | Arithmetic negation (use `!` for bitwise negation).
   val neg : t -> t
@@ -81,34 +81,34 @@ module type numeric = {
 module type integral = {
   include numeric
 
-  -- | Like `/`@term, but rounds towards zero.  This only matters when
-  -- one of the operands is negative.  May be more efficient.
-  val // : t -> t -> t
+  -- | Like `/`, but rounds towards zero. This only matters when one of the
+  -- operands is negative. May be more efficient.
+  val (//) : t -> t -> t
 
-  -- | Like `%`@term, but rounds towards zero.  This only matters when
-  -- one of the operands is negative.  May be more efficient.
-  val %% : t -> t -> t
+  -- | Like `%`, but rounds towards zero. This only matters when one of the
+  -- operands is negative. May be more efficient.
+  val (%%) : t -> t -> t
 
   -- | Bitwise and.
-  val & : t -> t -> t
+  val (&) : t -> t -> t
 
   -- | Bitwise or.
-  val | : t -> t -> t
+  val (|) : t -> t -> t
 
   -- | Bitwise xor.
-  val ^ : t -> t -> t
+  val (^) : t -> t -> t
 
   -- | Bitwise negation.
   val not : t -> t
 
   -- | Left shift; inserting zeroes.
-  val << : t -> t -> t
+  val (<<) : t -> t -> t
 
   -- | Arithmetic right shift, using sign extension for the leftmost bits.
-  val >> : t -> t -> t
+  val (>>) : t -> t -> t
 
   -- | Logical right shift, inserting zeroes for the leftmost bits.
-  val >>> : t -> t -> t
+  val (>>>) : t -> t -> t
 
   val num_bits : i32
   val get_bit : i32 -> t -> i32
@@ -204,7 +204,7 @@ module type real = {
   -- | The true Gamma function.
   val gamma : t -> t
 
-  -- | The natural logarithm of the absolute value of `gamma`@term.
+  -- | The natural logarithm of the absolute value of `gamma`.
   val lgamma : t -> t
 
   -- | The error function.
@@ -245,7 +245,7 @@ module type real = {
 
   -- | Computes `a*b+c`.  Depending on the compiler backend, this may
   -- be fused into a single operation that is faster but less
-  -- accurate.  Do not confuse it with `fma`@term.
+  -- accurate.  Do not confuse it with `fma`.
   val mad : (a: t) -> (b: t) -> (c: t) -> t
 
   -- | Computes `a*b+c`, with `a*b` being rounded with infinite
@@ -1036,8 +1036,8 @@ module f64 : (float with t = f64 with int_t = u64) = {
   def ldexp x y = intrinsics.ldexp64 (x, y)
   def copysign x y = intrinsics.copysign64 (x, y)
 
-  def to_bits (x: f64) : u64 = u64m.i64 (intrinsics.to_bits64 x)
-  def from_bits (x: u64) : f64 = intrinsics.from_bits64 (intrinsics.sign_i64 x)
+  def to_bits (x: f64) : u64 = u64m.i64 (intrinsics.fptobits_f64_i64 x)
+  def from_bits (x: u64) : f64 = intrinsics.bitstofp_i64_f64 (intrinsics.sign_i64 x)
 
   def num_bits = 64i32
   def get_bit (bit: i32) (x: t) = u64m.get_bit bit (to_bits x)
@@ -1161,8 +1161,8 @@ module f32 : (float with t = f32 with int_t = u32) = {
   def ldexp x y = intrinsics.ldexp32 (x, y)
   def copysign x y = intrinsics.copysign32 (x, y)
 
-  def to_bits (x: f32) : u32 = u32m.i32 (intrinsics.to_bits32 x)
-  def from_bits (x: u32) : f32 = intrinsics.from_bits32 (intrinsics.sign_i32 x)
+  def to_bits (x: f32) : u32 = u32m.i32 (intrinsics.fptobits_f32_i32 x)
+  def from_bits (x: u32) : f32 = intrinsics.bitstofp_i32_f32 (intrinsics.sign_i32 x)
 
   def num_bits = 32i32
   def get_bit (bit: i32) (x: t) = u32m.get_bit bit (to_bits x)
@@ -1290,8 +1290,8 @@ module f16 : (float with t = f16 with int_t = u16) = {
   def ldexp x y = intrinsics.ldexp16 (x, y)
   def copysign x y = intrinsics.copysign16 (x, y)
 
-  def to_bits (x: f16) : u16 = u16m.i16 (intrinsics.to_bits16 x)
-  def from_bits (x: u16) : f16 = intrinsics.from_bits16 (intrinsics.sign_i16 x)
+  def to_bits (x: f16) : u16 = u16m.i16 (intrinsics.fptobits_f16_i16 x)
+  def from_bits (x: u16) : f16 = intrinsics.bitstofp_i16_f16 (intrinsics.sign_i16 x)
 
   def num_bits = 16i32
   def get_bit (bit: i32) (x: t) = u16m.get_bit bit (to_bits x)

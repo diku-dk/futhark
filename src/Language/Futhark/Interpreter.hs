@@ -332,8 +332,9 @@ lookupInEnv ::
 lookupInEnv onEnv qv env = f env $ qualQuals qv
   where
     f m (q : qs) =
-      case M.lookup q $ envTerm m of
-        Just (TermModule (Module mod)) -> f mod qs
+      case (M.lookup (qualLeaf qv) $ onEnv m, M.lookup q $ envTerm m) of
+        (Just x, _) -> Just x
+        (Nothing, Just (TermModule (Module mod))) -> f mod qs
         _ -> Nothing
     f m [] = M.lookup (qualLeaf qv) $ onEnv m
 
@@ -641,7 +642,7 @@ evalIndex loc env is arr = do
           "Index ["
             <> T.intercalate ", " (map prettyText is)
             <> "] out of bounds for array of shape "
-            <> prettyText (valueShape arr)
+            <> prettyText (arrayValueShape arr)
             <> "."
   maybe oob pure $ indexArray is arr
 
@@ -1016,15 +1017,13 @@ eval env (Coerce e te (Info t) loc) = do
     Just _ -> pure v
     Nothing ->
       bad loc env . docText $
-        "Value `"
-          <> prettyValue v
-          <> "` of shape `"
-          <> pretty (valueShape v)
-          <> "` cannot match shape of type `"
-          <> pretty te
-          <> "` (`"
-          <> pretty t'
-          <> "`)"
+        "Value"
+          <+> dquotes (prettyValue v)
+          <+> "of shape"
+          <+> dquotes (pretty (valueShape v))
+          <+> "cannot match shape of type"
+          <+> dquotes (pretty te)
+          <+> parens (dquotes (pretty t'))
 eval _ (IntLit v (Info t) _) =
   case t of
     Scalar (Prim (Signed it)) ->
@@ -1202,7 +1201,14 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
       let res_env = case res_mod of
             Module x -> x
             _ -> mempty
-      pure (f_env <> e_env <> res_env, res_mod)
+      -- The following environment handles the case where rsubst refers to names
+      -- that are not actually defined in the module itself, but merely
+      -- inherited from an outer environment (see #2273).
+      let env_substs = (`Env` mempty) $ M.fromList $ do
+            (to, from) <- M.toList rsubst
+            x <- maybeToList $ M.lookup from $ envTerm env
+            pure (to, x)
+      pure (f_env <> e_env <> res_env <> env_substs, res_mod)
     _ -> error "Expected ModuleFun."
 
 evalDec :: Env -> Dec -> EvalM Env
@@ -1632,6 +1638,7 @@ initialCtx =
               case x of
                 (ValuePrim (UnsignedValue x')) ->
                   pure $ ValuePrim $ SignedValue x'
+                ValueAD {} -> pure x -- FIXME: these do not carry signs.
                 _ -> error $ "Cannot sign: " <> show x
       | "unsign_" `T.isPrefixOf` s =
           Just $
@@ -1639,6 +1646,7 @@ initialCtx =
               case x of
                 (ValuePrim (SignedValue x')) ->
                   pure $ ValuePrim $ UnsignedValue x'
+                ValueAD {} -> pure x -- FIXME: these do not carry signs.
                 _ -> error $ "Cannot unsign: " <> show x
     def "map" = Just $
       TermPoly Nothing $ \t -> do
@@ -2093,11 +2101,19 @@ initialCtx =
               expectJust "jvp: differentiation failed" $
                 mapM
                   ( \on -> case on of
-                      -- If it is a JVP variable of the correct depth, return its primal and derivative
+                      -- If it is a JVP variable of the correct depth, return
+                      -- its primal and derivative
                       (ValueAD d (AD.JVP (AD.JVPValue pv dv)))
                         | d == depth -> Just (putAD pv, putAD dv)
                       -- Otherwise, its partial derivatives are all 0
-                      _ -> (on,) . ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD on
+                      _ ->
+                        (on,)
+                          . ValuePrim
+                          . putV
+                          . P.blankPrimValue
+                          . P.primValueType
+                          . AD.primitive
+                          <$> getAD on
                   )
                   o'
 
@@ -2109,15 +2125,11 @@ initialCtx =
         pure $ toTuple [ov, od]
       where
         modifyValue f v = snd $ valueAccum (\a b -> (a + 1, f a b)) 0 v
-        modifyValueM f v =
-          snd
-            <$> valueAccumLM
-              ( \a b -> do
-                  b' <- f a b
-                  pure (a + 1, b')
-              )
-              0
-              v
+        modifyValueM f v = snd <$> valueAccumLM step 0 v
+          where
+            step a b = do
+              b' <- f a b
+              pure (a + 1, b')
 
         expectJust _ (Just v) = v
         expectJust s Nothing = error s

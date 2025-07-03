@@ -1062,13 +1062,13 @@ compilePrimToExtNp bt ept =
 -- | Convert from scalar to storage representation for the given type.
 toStorage :: PrimType -> PyExp -> PyExp
 toStorage (FloatType Float16) e =
-  simpleCall "ct.c_int16" [simpleCall "futhark_to_bits16" [e]]
+  simpleCall "ct.c_int16" [simpleCall "fptobits_f16_i16" [e]]
 toStorage t e = simpleCall (compilePrimType t) [e]
 
 -- | Convert from storage to scalar representation for the given type.
 fromStorage :: PrimType -> PyExp -> PyExp
 fromStorage (FloatType Float16) e =
-  simpleCall "futhark_from_bits16" [simpleCall "np.int16" [e]]
+  simpleCall "bitstofp_i16_f16" [simpleCall "np.int16" [e]]
 fromStorage t e = simpleCall (compilePrimToNp t) [e]
 
 compilePrimValue :: Imp.PrimValue -> PyExp
@@ -1306,9 +1306,10 @@ compileCode (Imp.DeclareArray name t vs) = do
         ]
   name' <- compileVar name
   stm $ Assign name' $ simpleCall "unwrapArray" [Var arr_name]
-compileCode (Imp.Comment s code) = do
-  code' <- collect $ compileCode code
-  stm $ Comment (T.unpack s) code'
+compileCode (Imp.Meta (Imp.MetaComment s)) =
+  stm $ Comment (T.unpack s) []
+compileCode (Imp.Meta {}) =
+  pure ()
 compileCode (Imp.Assert e msg (loc, locs)) = do
   e' <- compileExp e
   (formatstr, formatargs) <- errorMsgString msg

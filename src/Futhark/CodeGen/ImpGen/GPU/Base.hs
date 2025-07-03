@@ -146,29 +146,37 @@ updateAcc safety acc is vs = sComment "UpdateAcc" $ do
         case safety of
           Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
           _ -> id
-  boundsCheck $
-    case op of
-      Nothing ->
-        forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
-      Just lam -> do
-        dLParams $ lambdaParams lam
-        let (_x_params, y_params) =
-              splitAt (length vs) $ map paramName $ lambdaParams lam
-        forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp [] v []
-        atomics <- kernelAtomics <$> askEnv
-        case atomicUpdateLocking atomics lam of
-          AtomicPrim f -> f space arrs is'
-          AtomicCAS f -> f space arrs is'
-          AtomicLocking f -> do
-            c_locks <- M.lookup c . kernelLocks <$> askEnv
-            case c_locks of
-              Just (Locks locks num_locks) -> do
-                let locking =
-                      Locking locks 0 1 0 $
-                        pure . (`rem` fromIntegral num_locks) . flattenIndex dims
-                f locking space arrs is'
-              Nothing ->
-                error $ "Missing locks for " ++ prettyString acc
+  boundsCheck $ case op of
+    Nothing ->
+      forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
+    Just lam -> do
+      dLParams $ lambdaParams lam
+      let (x_params, y_params) =
+            splitAt (length vs) $ map paramName $ lambdaParams lam
+      forM_ (zip y_params vs) $ \(yp, v) -> copyDWIM yp [] v []
+
+      atomics <- kernelAtomics <$> askEnv
+      case (space, atomicUpdateLocking atomics lam) of
+        (ScalarSpace {}, _) -> do
+          -- In this case we are dealing with an array that simply cannot be
+          -- shared, and so we do not (and should not) use an atomic. Ideally,
+          -- such cases are optimised away before code generation.
+          forM_ (zip x_params arrs) $ \(xp, arr) -> copyDWIMFix xp [] (Var arr) is'
+          compileBody' mempty $ lambdaBody lam
+          forM_ (zip arrs $ bodyResult $ lambdaBody lam) $ \(arr, r) ->
+            copyDWIMFix arr is' (resSubExp r) []
+        (_, AtomicPrim f) -> f space arrs is'
+        (_, AtomicCAS f) -> f space arrs is'
+        (_, AtomicLocking f) -> do
+          c_locks <- M.lookup c . kernelLocks <$> askEnv
+          case c_locks of
+            Just (Locks locks num_locks) -> do
+              let locking =
+                    Locking locks 0 1 0 $
+                      pure . (`rem` fromIntegral num_locks) . flattenIndex dims
+              f locking space arrs is'
+            Nothing ->
+              error $ "Missing locks for " ++ prettyString acc
 
 -- | Generate a constant device array of 32-bit integer zeroes with
 -- the given number of elements.  Initialised with a replicate.
@@ -771,7 +779,12 @@ atomicUpdateLocking atomicBinOp lam
       | all isPrim ops = AtomicPrim
       | otherwise = AtomicCAS
 
-    isPrim (op, _, _, _) = isJust $ atomicBinOp op
+    -- Only operators of at least 32-bit integers are actually truly atomic with
+    -- our current GPU backends - the rest are emulated with CAS-loops in their
+    -- implementation.
+    isPrim (op, _, _, _) =
+      isJust (atomicBinOp op)
+        && primByteSize (binOpType op) >= (4 :: Int)
 
 -- If the operator functions purely on single single values, we can use an
 -- implementation based on CAS, no matter what the operator does.
@@ -888,17 +901,9 @@ atomicUpdateCAS space t arr old bucket x do_op = do
   -- While-loop: Try to insert your value
   let (toBits, fromBits) =
         case t of
-          FloatType Float16 ->
-            ( \v -> Imp.FunExp "to_bits16" [v] int16,
-              \v -> Imp.FunExp "from_bits16" [v] t
-            )
-          FloatType Float32 ->
-            ( \v -> Imp.FunExp "to_bits32" [v] int32,
-              \v -> Imp.FunExp "from_bits32" [v] t
-            )
-          FloatType Float64 ->
-            ( \v -> Imp.FunExp "to_bits64" [v] int64,
-              \v -> Imp.FunExp "from_bits64" [v] t
+          FloatType ft ->
+            ( Imp.ConvOpExp (FPToBits ft),
+              Imp.ConvOpExp (BitsToFP ft)
             )
           _ -> (id, id)
 
@@ -1234,6 +1239,11 @@ sKernelOp attrs constants ops name m = do
   body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
   uses <- computeKernelUses body $ M.keys $ kAttrConstExps attrs
   tblock_size <- onBlockSize $ kernelBlockSize constants
+  -- XXX: the provenance of the kernel itself is usually boring (it just points
+  -- to somewhere in /prelude), so try to synthesize it from the body instead.
+  -- It may be that we should do this earlier in the compiler.
+  let p = Imp.foldProvenances (const mempty) body
+  when (p /= mempty) $ emit $ Imp.Meta $ Imp.MetaProvenance p
   emit . Imp.Op . Imp.CallKernel $
     Imp.Kernel
       { Imp.kernelBody = body,

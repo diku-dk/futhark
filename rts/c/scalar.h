@@ -21,8 +21,8 @@
 #define M_PI 3.141592653589793
 #endif
 
-SCALAR_FUN_ATTR int32_t futrts_to_bits32(float x);
-SCALAR_FUN_ATTR float futrts_from_bits32(int32_t x);
+SCALAR_FUN_ATTR int32_t fptobits_f32_i32(float x);
+SCALAR_FUN_ATTR float bitstofp_i32_f32(int32_t x);
 
 SCALAR_FUN_ATTR uint8_t   add8(uint8_t x, uint8_t y)   { return x + y; }
 SCALAR_FUN_ATTR uint16_t add16(uint16_t x, uint16_t y) { return x + y; }
@@ -1222,9 +1222,9 @@ SCALAR_FUN_ATTR float futrts_ldexp32(float x, int32_t y) {
 }
 
 SCALAR_FUN_ATTR float futrts_copysign32(float x, float y) {
-  int32_t xb = futrts_to_bits32(x);
-  int32_t yb = futrts_to_bits32(y);
-  return futrts_from_bits32((xb & ~(1<<31)) | (yb & (1<<31)));
+  int32_t xb = fptobits_f32_i32(x);
+  int32_t yb = fptobits_f32_i32(y);
+  return bitstofp_i32_f32((xb & ~(1<<31)) | (yb & (1<<31)));
 }
 
 SCALAR_FUN_ATTR float futrts_mad32(float a, float b, float c) {
@@ -1300,12 +1300,14 @@ SCALAR_FUN_ATTR float futrts_fma32(float a, float b, float c) { return fmaf(a, b
 
 #if defined(ISPC)
 
-SCALAR_FUN_ATTR int32_t futrts_to_bits32(float x) { return intbits(x); }
-SCALAR_FUN_ATTR float futrts_from_bits32(int32_t x) { return floatbits(x); }
+SCALAR_FUN_ATTR int32_t fptobits_f32_i32(float x) { return intbits(x); }
+SCALAR_FUN_ATTR float bitstofp_i32_f32(int32_t x) { return floatbits(x); }
+SCALAR_FUN_ATTR uniform int32_t fptobits_f32_i32(uniform float x) { return intbits(x); }
+SCALAR_FUN_ATTR uniform float bitstofp_i32_f32(uniform int32_t x) { return floatbits(x); }
 
 #else
 
-SCALAR_FUN_ATTR int32_t futrts_to_bits32(float x) {
+SCALAR_FUN_ATTR int32_t fptobits_f32_i32(float x) {
   union {
     float f;
     int32_t t;
@@ -1315,7 +1317,7 @@ SCALAR_FUN_ATTR int32_t futrts_to_bits32(float x) {
   return p.t;
 }
 
-SCALAR_FUN_ATTR float futrts_from_bits32(int32_t x) {
+SCALAR_FUN_ATTR float bitstofp_i32_f32(int32_t x) {
   union {
     int32_t f;
     float t;
@@ -1332,8 +1334,8 @@ SCALAR_FUN_ATTR float fsignum32(float x) {
 
 #ifdef FUTHARK_F64_ENABLED
 
-SCALAR_FUN_ATTR double futrts_from_bits64(int64_t x);
-SCALAR_FUN_ATTR int64_t futrts_to_bits64(double x);
+SCALAR_FUN_ATTR double bitstofp_i64_f64(int64_t x);
+SCALAR_FUN_ATTR int64_t fptobits_f64_i64(double x);
 
 #if defined(ISPC)
 
@@ -1560,7 +1562,7 @@ SCALAR_FUN_ATTR uint64_t fptoui_f64_i64(double x) {
 SCALAR_FUN_ATTR bool ftob_f64_bool(double x) { return x != 0.0; }
 SCALAR_FUN_ATTR double btof_bool_f64(bool x) { return x ? 1.0 : 0.0; }
 
-SCALAR_FUN_ATTR int64_t futrts_to_bits64(double x) {
+SCALAR_FUN_ATTR int64_t fptobits_f64_i64(double x) {
   int64_t res;
   foreach_active (i) {
     uniform double tmp = extract(x, i);
@@ -1570,7 +1572,7 @@ SCALAR_FUN_ATTR int64_t futrts_to_bits64(double x) {
   return res;
 }
 
-SCALAR_FUN_ATTR double futrts_from_bits64(int64_t x) {
+SCALAR_FUN_ATTR double bitstofp_i64_f64(int64_t x) {
   double res;
   foreach_active (i) {
     uniform int64_t tmp = extract(x, i);
@@ -1578,6 +1580,14 @@ SCALAR_FUN_ATTR double futrts_from_bits64(int64_t x) {
     res = insert(res, i, r);
   }
   return res;
+}
+
+SCALAR_FUN_ATTR uniform int64_t fptobits_f64_i64(uniform double x) {
+  return intbits(x);
+}
+
+SCALAR_FUN_ATTR uniform double bitstofp_i64_f64(uniform int64_t x) {
+  return doublebits(x);
 }
 
 SCALAR_FUN_ATTR double fmod64(double x, double y) {
@@ -1597,9 +1607,9 @@ SCALAR_FUN_ATTR double futrts_ldexp64(double x, int32_t y) {
 }
 
 SCALAR_FUN_ATTR double futrts_copysign64(double x, double y) {
-  int64_t xb = futrts_to_bits64(x);
-  int64_t yb = futrts_to_bits64(y);
-  return futrts_from_bits64((xb & ~(((int64_t)1)<<63)) | (yb & (((int64_t)1)<<63)));
+  int64_t xb = fptobits_f64_i64(x);
+  int64_t yb = fptobits_f64_i64(y);
+  return bitstofp_i64_f64((xb & ~(((int64_t)1)<<63)) | (yb & (((int64_t)1)<<63)));
 }
 
 SCALAR_FUN_ATTR double futrts_mad64(double a, double b, double c) { return a * b + c; }
@@ -1806,7 +1816,7 @@ SCALAR_FUN_ATTR uint64_t fptoui_f64_i64(double x) {
 SCALAR_FUN_ATTR bool ftob_f64_bool(double x) { return x != 0; }
 SCALAR_FUN_ATTR double btof_bool_f64(bool x) { return x ? 1 : 0; }
 
-SCALAR_FUN_ATTR int64_t futrts_to_bits64(double x) {
+SCALAR_FUN_ATTR int64_t fptobits_f64_i64(double x) {
   union {
     double f;
     int64_t t;
@@ -1816,7 +1826,7 @@ SCALAR_FUN_ATTR int64_t futrts_to_bits64(double x) {
   return p.t;
 }
 
-SCALAR_FUN_ATTR double futrts_from_bits64(int64_t x) {
+SCALAR_FUN_ATTR double bitstofp_i64_f64(int64_t x) {
   union {
     int64_t f;
     double t;

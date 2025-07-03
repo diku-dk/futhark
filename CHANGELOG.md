@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark doc` now prints warnings about errors in doc comments (mostly
+  references to unknown names).
+
+* FutharkScript now permits chained `let` without `in`, just as in Futhark.
+
+* `futhark pkg` now allows the `~` character in package paths.
+
+* `cuda` backend: explicitly support CC 8.9, 9.0, 10.0, 10.1, and 12.0.
+
+* Profiling now provides source locations for the profiled events. Some things
+  are not yet accurately tracked, and only the static location is reported
+  (i.e., no full call stack).
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `f64` atomics on NVIDIA GPUs with less than CC 6.0 (Maxwell and older).
+
+* Infinite loop in fusion (#2276).
+
+* Rare compiler crash during internalisation code that does size coercions on
+  opaque size-lifted types.
+
+* Missing fusion inside reduction and scan operators (#2283).
+
+* Incorrect aliasing for memory blocks could cause some optimisations to be
+  misapplied. (#2288)
+
+* `to_bits`/`from_bits` not handled by AD (#2292).
+
+* For GPU backends, incorrect code generation for accumulator updates (produced
+  by AD) for thread-local arrays (#2294).
+
+## [0.25.31]
+
+### Added
+
 * GPU backends: more efficient atomic operations on 8-bit and 16-bit quantities.
   This helps histograms on these types, as well as AD on programs that use
   `f16`.
@@ -18,15 +58,41 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * New attributes: `#[blank]` and `#[scratch]`.
 
-### Removed
+* A module type `with`-refinement may now have an existentially quantified size
+  on its right-hand side.
 
-### Changed
+* Value specs in module types can now use section binding notation for symbolic
+  names, and in fact this is the preferred form that is also used by `futhark
+  fmt`. (#2266)
+
+* `futhark profile` now also prints proportion of total runtime for each cost centre.
+
+* Futhark no longer warns about entry points with opaque types.
+
+* Types such as `foo.bar` are now turned into `foo_bar` in the C API, rather
+  than an ugly hash.
 
 ### Fixed
 
 * Interpreter: some tricky aspects of size-lifted types (#2258).
 
 * Incorrect unused-name warning for named parameters in module types.
+
+* Size-lifted abstract types with hidden sizes could result in different sizes
+  being incorrectly treated as the same size.
+
+* It was possible to make size-lifted types appear unlifted by using parametric
+  types (#2268).
+
+* The same type would be mentioned twice in some type errors.
+
+* The type checker neglected to detect some cases of invalid references from
+  return types to names bound in parameter patterns. (#2271)
+
+* Incorrect handling of projections used in size expressions.
+
+* Subtle interactions of modules and sizes in the interpreter and compiler
+  (#2273).
 
 ## [0.25.30]
 

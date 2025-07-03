@@ -408,6 +408,10 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       fail "Cannot fuse a scatter with anything else than a scatter or a map"
     (_, SOAC.Scatter {}, _) ->
       fail "Cannot fuse a scatter with anything else than a scatter or a map"
+    (_, SOAC.Hist {}, _) ->
+      fail "Cannot fuse a Hist with anything else than a Hist or a Map"
+    (SOAC.Hist {}, _, _) ->
+      fail "Cannot fuse a Hist with anything else than a Hist or a Map"
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------

@@ -167,7 +167,7 @@ commutativeLambda lam =
 
 -- | A 'StmAux' with empty 'Certs'.
 defAux :: dec -> StmAux dec
-defAux = StmAux mempty mempty
+defAux = StmAux mempty mempty mempty
 
 -- | The certificates associated with a statement.
 stmCerts :: Stm rep -> Certs
@@ -175,8 +175,8 @@ stmCerts = stmAuxCerts . stmAux
 
 -- | Add certificates to a statement.
 certify :: Certs -> Stm rep -> Stm rep
-certify cs1 (Let pat (StmAux cs2 attrs dec) e) =
-  Let pat (StmAux (cs2 <> cs1) attrs dec) e
+certify cs1 (Let pat aux e) =
+  Let pat (aux {stmAuxCerts = stmAuxCerts aux <> cs1}) e
 
 -- | A handy shorthand for properties that we usually want for things
 -- we stuff into ASTs.

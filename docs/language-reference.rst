@@ -1645,6 +1645,7 @@ Module Type Expressions
 
 .. productionlist::
    spec:   "val" `name` `type_param`* ":" `type`
+       : | "val" "(" `symbol` ")" ":" `type`
        : | "val" `symbol` `type_param`* ":" `type`
        : | ("type" | "type^" | "type~") `name` `type_param`* "=" `type`
        : | ("type" | "type^" | "type~") `name` `type_param`*

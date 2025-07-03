@@ -239,7 +239,7 @@ ModTypeExp :: { UncheckedModTypeExp }
         | ModTypeExp '->' ModTypeExp  { ModTypeArrow Nothing $1 $3 (srcspan $1 $>) }
 
 TypeRef :: { TypeRefBase NoInfo Name }
-         : QualName TypeParams '=' TypeExpTerm
+         : QualName TypeParams '=' TypeExp
            { TypeRef (fst $1) $2 $4 (srcspan (snd $1) $>) }
 
 ModTypeBind :: { ModTypeBindBase NoInfo Name }
@@ -301,6 +301,8 @@ Spec :: { SpecBase NoInfo Name }
           in ValSpec name $3 $5 NoInfo Nothing (srcspan $1 $>) }
       | val BindingBinOp TypeParams ':' TypeExp
         { ValSpec $2 $3 $5 NoInfo Nothing (srcspan $1 $>) }
+      | val '(' BindingBinOp ')' TypeParams ':' TypeExp
+        { ValSpec $3 $5 $7 NoInfo Nothing (srcspan $1 $>) }
       | TypeAbbr
         { TypeAbbrSpec $1 }
 

@@ -194,7 +194,6 @@ codeMayFail f (x :>>: y) = codeMayFail f x || codeMayFail f y
 codeMayFail f (For _ _ x) = codeMayFail f x
 codeMayFail f (While _ x) = codeMayFail f x
 codeMayFail f (If _ x y) = codeMayFail f x || codeMayFail f y
-codeMayFail f (Comment _ x) = codeMayFail f x
 codeMayFail _ _ = False
 
 hostOpMayFail :: ImpGPU.HostOp -> Bool
@@ -663,7 +662,8 @@ inKernelOperations env mode body =
       pure [C.cty|$tyquals:(volatile++quals) $ty:t|]
 
     atomicSpace (Space sid) = sid
-    atomicSpace _ = "global"
+    atomicSpace ScalarSpace {} = error "atomicSpace: cannot do atomics on ScalarSpace"
+    atomicSpace DefaultSpace = "global"
 
     doAtomic s t old arr ind val op ty = do
       ind' <- GC.compileExp $ untyped $ unCount ind
@@ -896,7 +896,7 @@ typesInCode (Call _ _ es) = mconcat $ map typesInArg es
 typesInCode (If (TPrimExp e) c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
 typesInCode (Assert e _ _) = typesInExp e
-typesInCode (Comment _ c) = typesInCode c
+typesInCode (Meta _) = mempty
 typesInCode (DebugPrint _ v) = maybe mempty typesInExp v
 typesInCode (TracePrint msg) = foldMap typesInExp msg
 typesInCode Op {} = mempty

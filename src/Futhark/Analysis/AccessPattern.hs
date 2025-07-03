@@ -228,7 +228,7 @@ class Analyse rep where
   -- | Analyse the op for this representation.
   analyseOp :: Op rep -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 
--- | Analyse each `entry` and accumulate the results.
+-- | Analyse each entry and accumulate the results.
 analyseDimAccesses :: (Analyse rep) => Prog rep -> IndexTable rep
 analyseDimAccesses = foldMap' analyseFunction . progFuns
 
@@ -471,7 +471,7 @@ analyseBasicOp ctx expression pats =
         BinOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
         CmpOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
         ConvOp _ se -> varInfoFromSubExp se
-        Assert se _ _ -> varInfoFromSubExp se
+        Assert se _ -> varInfoFromSubExp se
         Index name _ ->
           error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
         Update _ name _slice _subexp ->

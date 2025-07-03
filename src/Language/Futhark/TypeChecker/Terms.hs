@@ -958,10 +958,11 @@ checkApply loc (fname, prev_applied) ftype argexp = do
 checkOneExp :: ExpBase NoInfo VName -> TypeM ([TypeParam], Exp)
 checkOneExp e = runTermTypeM checkExp $ do
   e' <- checkExp e
-  let t = typeOf e'
-  (tparams, _, _) <-
-    letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
-  fixOverloadedTypes $ typeVars t
+  (tparams, _, RetType _ t') <-
+    letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $
+      toRes Nonunique $
+        typeOf e'
+  fixOverloadedTypes $ typeVars t'
   e'' <- normTypeFully e'
   localChecks e''
   causalityCheck e''
@@ -1606,10 +1607,18 @@ checkFunBody params body maybe_rettype loc = do
           loc
           (filter (`elem` hidden) $ foldMap patNames params)
           body_t
-
-      let usage = mkUsage body "return type annotation"
-      onFailure (CheckingReturn rettype body_t') $
-        unify usage (toStruct rettype) body_t'
+      case find (`elem` hidden) $ fvVars $ freeInType rettype of
+        Just v ->
+          typeError loc mempty $
+            "The return type annotation"
+              </> indent 2 (align (pretty rettype))
+              </> "refers to the name"
+              <+> dquotes (prettyName v)
+              <+> "which is bound to an inner component of a function parameter."
+        Nothing -> do
+          let usage = mkUsage body "return type annotation"
+          onFailure (CheckingReturn rettype body_t') $
+            unify usage (toStruct rettype) body_t'
     Nothing -> pure ()
 
   pure body'
