@@ -104,10 +104,7 @@ censorStms f m = do
 
 -- | Add the given attributes to any statements added by this action.
 attributing :: (MonadBuilder m) => Attrs -> m a -> m a
-attributing attrs = censorStms $ fmap onStm
-  where
-    onStm (Let pat aux e) =
-      Let pat aux {stmAuxAttrs = attrs <> stmAuxAttrs aux} e
+attributing attrs = censorStms $ fmap $ attribute attrs
 
 -- | Add the certificates and attributes to any statements added by
 -- this action.

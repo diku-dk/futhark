@@ -264,7 +264,14 @@ diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
     forM_ (zip branches_free branches_free_adj) $ \(v, v_adj) ->
       insAdj v =<< copyIfArray v_adj
 diffStm (Let pat aux (Op soac)) m =
-  vjpSOAC vjpOps pat aux soac m
+  -- We add the attributes from 'aux' to every SOAC (but only SOAC) produced. We
+  -- could do this on *every* stm, but it would be very verbose.
+  censorStms (fmap addAttrs) $ vjpSOAC vjpOps pat aux soac m
+  where
+    addAttrs stm
+      | Op _ <- stmExp stm =
+          attribute (stmAuxAttrs aux) stm
+      | otherwise = stm
 diffStm (Let pat aux loop@Loop {}) m =
   diffLoop diffStms pat aux loop m
 -- See Note [Adjoints of accumulators]
