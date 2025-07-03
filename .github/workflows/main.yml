@@ -627,7 +627,7 @@ jobs:
     - name: Install OS dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg oclgrind
+        sudo apt-get install -y ffmpeg oclgrind opencl-headers
 
     - uses: actions/checkout@v4
 
