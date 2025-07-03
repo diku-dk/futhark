@@ -56,6 +56,9 @@ test-t:
 test-c:
 	cabal run -- futhark test tests -c --backend=c --no-tuning
 
+test-ispc:
+	cabal run -- futhark test -c --backend=ispc tests --no-tuning
+
 test-multicore:
 	cabal run -- futhark test tests -c --backend=multicore --no-tuning
 
