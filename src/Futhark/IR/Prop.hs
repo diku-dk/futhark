@@ -28,6 +28,7 @@ module Futhark.IR.Prop
     defAux,
     stmCerts,
     certify,
+    attribute,
     expExtTypesFromPat,
     attrsForAssert,
     lamIsBinOp,
@@ -177,6 +178,11 @@ stmCerts = stmAuxCerts . stmAux
 certify :: Certs -> Stm rep -> Stm rep
 certify cs1 (Let pat aux e) =
   Let pat (aux {stmAuxCerts = stmAuxCerts aux <> cs1}) e
+
+-- | Add attributes to a statement.
+attribute :: Attrs -> Stm rep -> Stm rep
+attribute attrs (Let pat aux e) =
+  Let pat (aux {stmAuxAttrs = stmAuxAttrs aux <> attrs}) e
 
 -- | A handy shorthand for properties that we usually want for things
 -- we stuff into ASTs.

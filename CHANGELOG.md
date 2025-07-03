@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   are not yet accurately tracked, and only the static location is reported
   (i.e., no full call stack).
 
+* The AD transformation is now more diligent about propagating attributes from
+  SOACs in the primal code to SOACs in the differentiated code.
+
 ### Removed
 
 ### Changed
