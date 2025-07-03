@@ -611,37 +611,47 @@ explicitAllocationsGeneric space handleOp hints =
     onStms stms =
       runAllocM space handleOp hints $ collectStms_ $ allocInStms stms $ pure ()
 
-    allocInFun consts (FunDef entry attrs fname rettype params fbody) =
-      let (paramSpaces, bodySpace, retSpace) =
-            if TC.gemmName `TC.isPrefixOfName` fname
-              then
+    allocInFun consts (FunDef entry attrs fname rettype params fbody) = do
+      let (paramSpaces, bodySpace, retSpace)
+            | TC.gemmName `TC.isPrefixOfName` fname =
                 let _ : _ : (Param _ _ (Array t shp _)) : _ = params
                  in let regsSpace = ScalarSpace (shapeDims shp) t
-                     in ([Space "shared", Space "shared", regsSpace] <> replicate (length params - 3) space, regsSpace, regsSpace)
-              else
-                if TC.copyRegistersSharedName `TC.isPrefixOfName` fname
-                  then
-                    let (Param _ _ (Array t shp _)) : _ = params
-                     in let regsSpace = ScalarSpace (drop 1 $ shapeDims shp) t
-                         in ([regsSpace, Space "shared"] <> replicate (length params - 2) space, Space "shared", Space "shared")
-                  else
-                    if TC.copyGlobalSharedName `TC.isPrefixOfName` fname
-                      then
-                        ([Space "device", Space "shared"] <> replicate (length params - 2) space, Space "shared", Space "shared")
-                      else
-                        (replicate (length params) space, space, space)
-       in runAllocM space handleOp hints . inScopeOf consts $
-            allocInFParams (zip params paramSpaces) $ \params' -> do
-              (fbody', mem_rets) <-
-                allocInFunBody (map (const $ Just bodySpace) rettype) fbody
-              let num_extra_params = length params' - length params
-                  num_extra_rets = length mem_rets
-                  rettype' =
-                    map (,RetAls mempty mempty) mem_rets
-                      ++ zip
-                        (memoryInDeclExtType retSpace (length mem_rets) (map fst rettype))
-                        (map (shiftRetAls num_extra_params num_extra_rets . snd) rettype)
-              pure $ FunDef entry attrs fname rettype' params' fbody'
+                     in ( [Space "shared", Space "shared", regsSpace]
+                            <> replicate (length params - 3) space,
+                          regsSpace,
+                          regsSpace
+                        )
+            | TC.copyRegistersSharedName `TC.isPrefixOfName` fname =
+                let (Param _ _ (Array t shp _)) : _ = params
+                 in let regsSpace = ScalarSpace (drop 1 $ shapeDims shp) t
+                     in ( [regsSpace, Space "shared"]
+                            <> replicate (length params - 2) space,
+                          Space "shared",
+                          Space "shared"
+                        )
+            | TC.copyGlobalSharedName `TC.isPrefixOfName` fname =
+                ( [Space "device", Space "shared"]
+                    <> replicate (length params - 2) space,
+                  Space "shared",
+                  Space "shared"
+                )
+            | otherwise =
+                (replicate (length params) space, space, space)
+      runAllocM space handleOp hints . inScopeOf consts $
+        allocInFParams (zip params paramSpaces) $ \params' -> do
+          (fbody', mem_rets) <-
+            allocInFunBody (map (const $ Just bodySpace) rettype) fbody
+          let num_extra_params = length params' - length params
+              num_extra_rets = length mem_rets
+              -- The mem_pals is an over-approximation, like in the case for Apply.
+              mem_pals = map fst $ filter (isMem . paramType . snd) $ zip [0 ..] params'
+              mem_als = RetAls mem_pals mempty
+              rettype' =
+                map (,mem_als) mem_rets
+                  ++ zip
+                    (memoryInDeclExtType retSpace (length mem_rets) (map fst rettype))
+                    (map (shiftRetAls num_extra_params num_extra_rets . snd) rettype)
+          pure $ FunDef entry attrs fname rettype' params' fbody'
 
 explicitAllocationsInStmsGeneric ::
   ( MonadFreshNames m,
@@ -964,21 +974,23 @@ allocInExp (Apply fname args rettype loc) = do
               _ -> pure (replicate (length args) Nothing, space)
           else
             if TC.copyGlobalSharedName `TC.isPrefixOfName` fname
-              then
-                pure ([Just $ Space "device", Just $ Space "shared"] <> replicate (length args - 2) Nothing, Space "shared")
-              else
-                pure (replicate (length args) Nothing, space)
+              then pure ([Just $ Space "device", Just $ Space "shared"] <> replicate (length args - 2) Nothing, Space "shared")
+              else pure (replicate (length args) Nothing, space)
   args' <- funcallArgs args forced_arg_spaces
-  -- We assume that every array is going to be in its own memory.
-  let num_extra_args = length args' - length args
+  args_ts <- mapM (subExpType . fst) args'
+  -- We assume that every array is going to be in its own memory. Further, we
+  -- assume that every result memory block can alias any argument memory block.
+  -- This is an overapproximation that can be loosened in the future.
+  let mem_als = RetAls (map fst $ filter (isMem . snd) $ zip [0 ..] args_ts) mempty
+      mems = replicate num_arrays (MemMem retSpace, mem_als)
+      num_extra_args = length args' - length args
       rettype' =
-        mems retSpace
+        mems
           ++ zip
             (memoryInDeclExtType retSpace num_arrays (map fst rettype))
             (map (shiftRetAls num_extra_args num_arrays . snd) rettype)
   pure $ Apply fname args' rettype' loc
   where
-    mems space = replicate num_arrays (MemMem space, RetAls mempty mempty)
     num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf . fst) rettype
 allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   (defbody', def_reqs) <- allocInMatchBody rets defbody

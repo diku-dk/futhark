@@ -51,61 +51,56 @@ argShapes shapes all_params valargts = do
 
 ensureResultShape ::
   ErrorMsg SubExp ->
-  SrcLoc ->
   [Type] ->
   Result ->
   InternaliseM Result
-ensureResultShape msg loc =
-  ensureResultExtShape msg loc . staticShapes
+ensureResultShape msg =
+  ensureResultExtShape msg . staticShapes
 
 ensureResultExtShape ::
   ErrorMsg SubExp ->
-  SrcLoc ->
   [ExtType] ->
   Result ->
   InternaliseM Result
-ensureResultExtShape msg loc rettype res = do
-  res' <- ensureResultExtShapeNoCtx msg loc rettype res
+ensureResultExtShape msg rettype res = do
+  res' <- ensureResultExtShapeNoCtx msg rettype res
   ts <- mapM subExpResType res'
   let ctx = extractShapeContext rettype $ map arrayDims ts
   pure $ subExpsRes ctx ++ res'
 
 ensureResultExtShapeNoCtx ::
   ErrorMsg SubExp ->
-  SrcLoc ->
   [ExtType] ->
   Result ->
   InternaliseM Result
-ensureResultExtShapeNoCtx msg loc rettype es = do
+ensureResultExtShapeNoCtx msg rettype es = do
   es_ts <- mapM subExpResType es
   let ext_mapping = shapeExtMapping rettype es_ts
       rettype' = foldr (uncurry fixExt) rettype $ M.toList ext_mapping
       assertProperShape t (SubExpRes cs se) =
         let name = "result_proper_shape"
-         in SubExpRes cs <$> ensureExtShape msg loc t name se
+         in SubExpRes cs <$> ensureExtShape msg t name se
   zipWithM assertProperShape rettype' es
 
 ensureExtShape ::
   ErrorMsg SubExp ->
-  SrcLoc ->
   ExtType ->
   String ->
   SubExp ->
   InternaliseM SubExp
-ensureExtShape msg loc t name orig
+ensureExtShape msg t name orig
   | Array {} <- t,
     Var v <- orig =
-      Var <$> ensureShapeVar msg loc t name v
+      Var <$> ensureShapeVar msg t name v
   | otherwise = pure orig
 
 ensureShape ::
   ErrorMsg SubExp ->
-  SrcLoc ->
   Type ->
   String ->
   SubExp ->
   InternaliseM SubExp
-ensureShape msg loc = ensureExtShape msg loc . staticShapes1
+ensureShape msg = ensureExtShape msg . staticShapes1
 
 -- | Reshape the arguments to a function so that they fit the expected
 -- shape declarations.  Not used to change rank of arguments.  Assumes
@@ -113,28 +108,26 @@ ensureShape msg loc = ensureExtShape msg loc . staticShapes1
 ensureArgShapes ::
   (Typed (TypeBase Shape u)) =>
   ErrorMsg SubExp ->
-  SrcLoc ->
   [VName] ->
   [TypeBase Shape u] ->
   [SubExp] ->
   InternaliseM [SubExp]
-ensureArgShapes msg loc shapes paramts args =
+ensureArgShapes msg shapes paramts args =
   zipWithM ensureArgShape (expectedTypes shapes paramts args) args
   where
     ensureArgShape _ (Constant v) = pure $ Constant v
     ensureArgShape t (Var v)
       | arrayRank t < 1 = pure $ Var v
       | otherwise =
-          ensureShape msg loc t (baseString v) $ Var v
+          ensureShape msg t (baseString v) $ Var v
 
 ensureShapeVar ::
   ErrorMsg SubExp ->
-  SrcLoc ->
   ExtType ->
   String ->
   VName ->
   InternaliseM VName
-ensureShapeVar msg loc t name v
+ensureShapeVar msg t name v
   | Array {} <- t = do
       newdims <- arrayDims . removeExistentials t <$> lookupType v
       olddims <- arrayDims <$> lookupType v
@@ -143,7 +136,7 @@ ensureShapeVar msg loc t name v
         else do
           matches <- zipWithM checkDim newdims olddims
           all_match <- letSubExp "match" =<< eAll matches
-          cs <- assert "empty_or_match_cert" all_match msg loc
+          cs <- assert "empty_or_match_cert" all_match msg
           certifying cs $ letExp name $ shapeCoerce newdims v
   | otherwise = pure v
   where

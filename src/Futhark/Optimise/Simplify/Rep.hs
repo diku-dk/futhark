@@ -252,9 +252,9 @@ mkWiseStm ::
   StmAux (ExpDec rep) ->
   Exp (Wise rep) ->
   Stm (Wise rep)
-mkWiseStm pat (StmAux cs attrs dec) e =
+mkWiseStm pat aux e =
   let pat' = addWisdomToPat pat e
-   in Let pat' (StmAux cs attrs $ mkWiseExpDec pat' dec e) e
+   in Let pat' (flip (mkWiseExpDec pat') e <$> aux) e
 
 -- | Produce simplifier information for an expression.
 mkWiseExpDec ::

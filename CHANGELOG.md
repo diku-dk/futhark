@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * FutharkScript now permits chained `let` without `in`, just as in Futhark.
 
+* `futhark pkg` now allows the `~` character in package paths.
+
+* `cuda` backend: explicitly support CC 8.9, 9.0, 10.0, 10.1, and 12.0.
+
+* Profiling now provides source locations for the profiled events. Some things
+  are not yet accurately tracked, and only the static location is reported
+  (i.e., no full call stack).
+
 ### Removed
 
 ### Changed
@@ -28,6 +36,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   opaque size-lifted types.
 
 * Missing fusion inside reduction and scan operators (#2283).
+
+* Incorrect aliasing for memory blocks could cause some optimisations to be
+  misapplied. (#2288)
+
+* `to_bits`/`from_bits` not handled by AD (#2292).
+
+* For GPU backends, incorrect code generation for accumulator updates (produced
+  by AD) for thread-local arrays (#2294).
 
 ## [0.25.31]
 

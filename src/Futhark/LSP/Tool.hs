@@ -20,7 +20,7 @@ import Futhark.LSP.PositionMapping
 import Futhark.LSP.State (State (..), getStaleContent, getStaleMapping)
 import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos))
 import Futhark.Util.Pretty (prettyText)
-import Language.Futhark.Prop (isBuiltinLoc)
+import Language.Futhark.Core (isBuiltinLoc)
 import Language.Futhark.Query
   ( AtPos (AtName),
     BoundTo (..),

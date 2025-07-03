@@ -366,7 +366,7 @@ buildMMM
           (funDefName $ snd copyGlobalSharedFunA)
           copyArgsA
           copyRetsA
-          (Safe, SrcLoc NoLoc, [])
+          Safe
 
     bCopied <-
       letExp "bCopied" $
@@ -374,7 +374,7 @@ buildMMM
           (funDefName $ snd copyGlobalSharedFunB)
           copyArgsB
           copyRetsB
-          (Safe, SrcLoc NoLoc, [])
+          Safe
 
     let blksize = mkInt64Const blockSize
     inBlockMMAres_list <-
@@ -408,7 +408,7 @@ buildMMM
               (funDefName $ snd gemmFun)
               mmmArgs
               mmmRets
-              (Safe, SrcLoc NoLoc, [])
+              Safe
         pure [varRes threadMMAres]
     let [inBlockMMAres] = inBlockMMAres_list
 
@@ -437,7 +437,7 @@ buildMMM
           (funDefName $ snd copyRegistersSharedFun)
           copyArgsC
           copyRetsC
-          (Safe, SrcLoc NoLoc, [])
+          Safe
 
     letBindNames [resName] $ BasicOp $ SubExp $ Var cCopied
     pure addedFuns
@@ -537,11 +537,11 @@ transformSegOpDefault (SegMap level space ts body) =
   SegMap level space ts
     <$> transformKernelBody body
 transformSegOpDefault (SegRed level space ts body ops) =
-  SegRed level space ts <$> (transformKernelBody body) <*> pure ops
+  SegRed level space ts <$> transformKernelBody body <*> pure ops
 transformSegOpDefault (SegScan level space ts body ops) =
-  SegScan level space ts <$> (transformKernelBody body) <*> pure ops
+  SegScan level space ts <$> transformKernelBody body <*> pure ops
 transformSegOpDefault (SegHist level space ts body histOps) =
-  SegHist level space ts <$> (transformKernelBody body) <*> pure histOps
+  SegHist level space ts <$> transformKernelBody body <*> pure histOps
 
 transformKernelBody :: KernelBody GPU -> TensorCoreM (KernelBody GPU)
 transformKernelBody (KernelBody desc stms res) =
@@ -632,10 +632,8 @@ getOptimalWarps blockSize (TensorCoreMatch _ _ sizeM sizeN _) =
     helper numwarps =
       let factorPairs = getFactorPairs numwarps
        in if not $ any (\(x, y) -> (sizeM `div` 16) `mod` x == 0 && (sizeN `div` 16) `mod` y == 0) factorPairs
-            then
-              helper $ numwarps - 1
-            else
-              factorPairs
+            then helper $ numwarps - 1
+            else factorPairs
 
 -- NOTE: In the future the optimal block size should depend on:
 --  1. The array element type (f16 or f64)
