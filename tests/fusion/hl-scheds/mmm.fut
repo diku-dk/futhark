@@ -39,7 +39,7 @@ def mmm [M][N][Q] (A: [M][Q]real) (B: [Q][N]real) : [M][N]real =
   let (n, Tn, Rn) = strip2 N
   let (q, Tq)     = strip1 Q
   let C = imap A (\Arow -> imap (transpose B) (\Bcol -> padDotProd (q*Tq) 0 Arow Bcol )) 
-  in  hlSched2D C ( 0
+  in  hlSched2D C ( Rm*Tn*Rn
                   , [m, Tm, Rm, n, Tn, Rn, q, Tq]  -- dims length
                   , [0,  0,  0, 1,  1,  1, 2,  2]  -- orig dimensions
                   , [0,  3,  6, 1,  4,  7, 2,  5]  -- dims permutation

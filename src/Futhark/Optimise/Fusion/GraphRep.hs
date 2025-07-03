@@ -36,11 +36,14 @@ module Futhark.Optimise.Fusion.GraphRep
     isCons,
     isDep,
     isInf,
+    isAlias,
+    isInd,
 
     -- * Construction
     mkDepGraph,
     mkDepGraphForFun,
     pprg,
+    isSOACNodeT,
     isHLschedNodeT,
     isWithAccNodeT,
     isWithAccNodeId,
@@ -436,6 +439,21 @@ isInf (_, _, e) = case e of
 isCons :: EdgeT -> Bool
 isCons (Cons _) = True
 isCons _ = False
+
+-- | Is this an 'Alias' edge?
+isInd :: EdgeT -> Bool
+isInd (InfDep _) = True
+isInd _ = False
+
+-- | Is this an 'Alias' edge?
+isAlias :: EdgeT -> Bool
+isAlias (Alias _) = True
+isAlias _ = False
+
+-- | Is this a SOAC node?
+isSOACNodeT :: NodeT -> Bool
+isSOACNodeT (SoacNode{}) = True
+isSOACNodeT _ = False
 
 -- | Is this a high-level schedule?
 isHLschedNodeT :: NodeT -> Bool
