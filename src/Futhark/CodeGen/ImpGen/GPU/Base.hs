@@ -1239,6 +1239,11 @@ sKernelOp attrs constants ops name m = do
   body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
   uses <- computeKernelUses body $ M.keys $ kAttrConstExps attrs
   tblock_size <- onBlockSize $ kernelBlockSize constants
+  -- XXX: the provenance of the kernel itself is usually boring (it just points
+  -- to somewhere in /prelude), so try to synthesize it from the body instead.
+  -- It may be that we should do this earlier in the compiler.
+  let p = Imp.foldProvenances (const mempty) body
+  when (p /= mempty) $ emit $ Imp.Meta $ Imp.MetaProvenance p
   emit . Imp.Op . Imp.CallKernel $
     Imp.Kernel
       { Imp.kernelBody = body,

@@ -105,7 +105,7 @@ blockers =
 -- the certificates on it.  This can help hoist things that would
 -- otherwise be stuck inside loops or branches.
 decertifySafeAlloc :: (SimplifyMemory rep inner) => TopDownRuleOp (Wise rep)
-decertifySafeAlloc _ pat (StmAux cs attrs _) op
+decertifySafeAlloc _ pat (StmAux cs attrs _ _) op
   | cs /= mempty,
     [Mem _] <- patTypes pat,
     safeOp op =

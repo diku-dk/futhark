@@ -26,11 +26,11 @@ module Futhark.CodeGen.ImpGen.Multicore.Base
     inISPC,
     toParam,
     sLoopNestVectorized,
+    taskProvenance,
   )
 where
 
 import Control.Monad
-import Data.Bifunctor
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
@@ -151,7 +151,6 @@ isLoadBalanced :: Imp.MCCode -> Bool
 isLoadBalanced (a Imp.:>>: b) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced (Imp.For _ _ a) = isLoadBalanced a
 isLoadBalanced (Imp.If _ a b) = isLoadBalanced a && isLoadBalanced b
-isLoadBalanced (Imp.Comment _ a) = isLoadBalanced a
 isLoadBalanced Imp.While {} = False
 isLoadBalanced (Imp.Op (Imp.ParLoop _ code _)) = isLoadBalanced code
 isLoadBalanced (Imp.Op (Imp.ForEachActive _ a)) = isLoadBalanced a
@@ -189,8 +188,6 @@ extractAllocations segop_code = f segop_code
       (mempty, Imp.While cond body)
     f (Imp.For i bound body) =
       (mempty, Imp.For i bound body)
-    f (Imp.Comment s code) =
-      second (Imp.Comment s) (f code)
     f Imp.Free {} =
       mempty
     f (Imp.If cond tcode fcode) =
@@ -536,3 +533,17 @@ toIntegral 16 = pure int16
 toIntegral 32 = pure int32
 toIntegral 64 = pure int64
 toIntegral b = error $ "number of bytes is not supported for CAS - " ++ prettyString b
+
+-- | Find the provenance of a task given its body. This is done by folding the
+-- provenance of the code in the body.
+taskProvenance :: Imp.MCCode -> Provenance
+taskProvenance = Imp.foldProvenances onOp
+  where
+    onOp (Imp.ParLoop _ code _) = taskProvenance code
+    onOp (Imp.SegOp _ _ task1 task2 _ _) =
+      onTask task1 <> maybe mempty onTask task2
+    onOp (Imp.ISPCKernel code _) = taskProvenance code
+    onOp (Imp.ForEach _ _ _ code) = taskProvenance code
+    onOp (Imp.ForEachActive _ code) = taskProvenance code
+    onOp _ = mempty
+    onTask (Imp.ParallelTask code) = taskProvenance code
