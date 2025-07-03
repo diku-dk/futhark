@@ -180,7 +180,7 @@ updateTopdownEnv env stm@(Let pat _ (Op (Inner inner))) =
       nonNegatives = nonNegatives env <> innerNonNegatives (patNames pat) inner,
       knownLessThan = knownLessThan env <> innerKnownLessThan inner
     }
-updateTopdownEnv env stm@(Let (Pat _) _ (BasicOp (Assert se _ _))) =
+updateTopdownEnv env stm@(Let (Pat _) _ (BasicOp (Assert se _))) =
   env
     { scope = scope env <> scopeOf stm,
       td_asserts = se : td_asserts env

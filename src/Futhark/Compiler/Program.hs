@@ -46,9 +46,9 @@ import Futhark.FreshNames
 import Futhark.Util (interactWithFileSafely, nubOrd, startupTime)
 import Futhark.Util.Pretty (Doc, align, pretty)
 import Language.Futhark qualified as E
+import Language.Futhark.Core (isBuiltin)
 import Language.Futhark.Parser (SyntaxError (..), parseFuthark)
 import Language.Futhark.Prelude
-import Language.Futhark.Prop (isBuiltin)
 import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker qualified as E
 import Language.Futhark.Warnings

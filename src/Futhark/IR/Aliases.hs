@@ -380,10 +380,10 @@ mkAliasedStm ::
   StmAux (ExpDec rep) ->
   Exp (Aliases rep) ->
   Stm (Aliases rep)
-mkAliasedStm pat (StmAux cs attrs dec) e =
+mkAliasedStm pat aux e =
   Let
     (mkAliasedPat pat e)
-    (StmAux cs attrs (AliasDec $ consumedInExp e, dec))
+    (fmap (AliasDec (consumedInExp e),) aux)
     e
 
 instance

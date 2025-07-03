@@ -188,12 +188,14 @@ static bool lmad_memcpyable(int r,
 
 
 static void log_copy(struct futhark_context* ctx,
-                     const char *kind, int r,
+                     const char *kind, const char *provenance,
+                     int r,
                      int64_t dst_offset, int64_t dst_strides[r],
                      int64_t src_offset, int64_t src_strides[r],
                      int64_t shape[r]) {
   if (ctx->logging) {
     fprintf(ctx->log, "\n# Copy %s\n", kind);
+    if (provenance) { fprintf(ctx->log, "At: %s\n", provenance); }
     fprintf(ctx->log, "Shape: ");
     for (int i = 0; i < r; i++) { fprintf(ctx->log, "[%ld]", (long int)shape[i]); }
     fprintf(ctx->log, "\n");
@@ -225,7 +227,7 @@ static void log_transpose(struct futhark_context* ctx,
    ELEM_TYPE* dst, int64_t dst_offset, int64_t dst_strides[r],          \
    ELEM_TYPE *src, int64_t src_offset, int64_t src_strides[r],          \
    int64_t shape[r]) {                                                  \
-    log_copy(ctx, "CPU to CPU", r, dst_offset, dst_strides,             \
+    log_copy(ctx, "CPU to CPU", NULL, r, dst_offset, dst_strides,       \
              src_offset, src_strides, shape);                           \
     int64_t size = 1;                                                   \
     for (int i = 0; i < r; i++) { size *= shape[i]; }                   \

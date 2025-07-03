@@ -36,6 +36,7 @@ genKernelFunction ::
   GC.CompilerM op s Name
 genKernelFunction kernel_name safety arg_params arg_set = do
   let kernel_fname = "gpu_kernel_" <> kernel_name
+  provenance <- GC.provenanceExp
   GC.libDecl
     [C.cedecl|static int $id:kernel_fname
                (struct futhark_context* ctx,
@@ -46,7 +47,7 @@ genKernelFunction kernel_name safety arg_params arg_set = do
       void* args[$int:num_args] = { $inits:(failure_inits<>args_inits) };
       size_t args_sizes[$int:num_args] = { $inits:(failure_sizes<>args_sizes) };
       return gpu_launch_kernel(ctx, ctx->program->$id:kernel_name,
-                               $string:(prettyString kernel_name),
+                               $string:(prettyString kernel_name), $exp:provenance,
                                (const typename int32_t[]){grid_x, grid_y, grid_z},
                                (const typename int32_t[]){block_x, block_y, block_z},
                                shared_bytes,
@@ -162,10 +163,11 @@ copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
       srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
       shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
+  provenance <- GC.provenanceExp
   GC.stm
     [C.cstm|
          if ((err =
-                $id:fname(ctx, $int:r,
+                $id:fname(ctx, $exp:provenance, $int:r,
                           $exp:dst, $exp:(unCount dstoffset),
                           (typename int64_t[]){ $inits:dststride_inits },
                           $exp:src, $exp:(unCount srcoffset),
@@ -181,11 +183,13 @@ copyhost2gpu sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) 
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
       srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
       shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
+  provenance <- GC.provenanceExp
   GC.stm
     [C.cstm|
          if ((err =
                 lmad_copy_host2gpu
-                         (ctx, $int:(primByteSize t::Int), $exp:sync', $int:r,
+                         (ctx, $exp:provenance,
+                         $int:(primByteSize t::Int), $exp:sync', $int:r,
                           $exp:dst, $exp:(unCount dstoffset),
                           (typename int64_t[]){ $inits:dststride_inits },
                           $exp:src, $exp:(unCount srcoffset),
@@ -262,8 +266,11 @@ readScalarGPU :: GC.ReadScalar op ()
 readScalarGPU mem i t "device" _ = do
   val <- newVName "read_res"
   GC.decl [C.cdecl|$ty:t $id:val;|]
+  p <- GC.provenanceExp
   GC.stm
-    [C.cstm|if ((err = gpu_scalar_from_device(ctx, &$id:val, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0) { goto cleanup; }|]
+    [C.cstm|if ((err = gpu_scalar_from_device(ctx, $exp:p, &$id:val, $exp:mem,
+                                              $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0)
+            { goto cleanup; }|]
   GC.stm
     [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
             { err = 1; goto cleanup; }|]
@@ -277,8 +284,11 @@ writeScalarGPU :: GC.WriteScalar op ()
 writeScalarGPU mem i t "device" _ val = do
   val' <- newVName "write_tmp"
   GC.item [C.citem|$ty:t $id:val' = $exp:val;|]
+  p <- GC.provenanceExp
   GC.stm
-    [C.cstm|if ((err = gpu_scalar_to_device(ctx, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0) { goto cleanup; }|]
+    [C.cstm|if ((err = gpu_scalar_to_device(ctx, $exp:p, $exp:mem,
+                                            $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0)
+            { goto cleanup; }|]
 writeScalarGPU _ _ _ space _ _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
@@ -287,15 +297,18 @@ syncArg GC.CopyBarrier = [C.cexp|true|]
 syncArg GC.CopyNoBarrier = [C.cexp|false|]
 
 copyGPU :: GC.Copy OpenCL ()
-copyGPU _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes =
+copyGPU _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes = do
+  p <- GC.provenanceExp
   GC.stm
-    [C.cstm|err = gpu_memcpy(ctx, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
-copyGPU b dstmem dstidx DefaultSpace srcmem srcidx (Space "device") nbytes =
+    [C.cstm|err = gpu_memcpy(ctx, $exp:p, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
+copyGPU b dstmem dstidx DefaultSpace srcmem srcidx (Space "device") nbytes = do
+  p <- GC.provenanceExp
   GC.stm
-    [C.cstm|err = memcpy_gpu2host(ctx, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
-copyGPU b dstmem dstidx (Space "device") srcmem srcidx DefaultSpace nbytes =
+    [C.cstm|err = memcpy_gpu2host(ctx, $exp:p, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
+copyGPU b dstmem dstidx (Space "device") srcmem srcidx DefaultSpace nbytes = do
+  p <- GC.provenanceExp
   GC.stm
-    [C.cstm|err = memcpy_host2gpu(ctx, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
+    [C.cstm|err = memcpy_host2gpu(ctx, $exp:p, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
 copyGPU _ _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 

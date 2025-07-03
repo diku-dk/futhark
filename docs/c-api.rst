@@ -206,12 +206,14 @@ Context
 .. c:function:: char *futhark_context_report(struct futhark_context *ctx)
 
    Produce a C string encoding a JSON object with debug and profiling
-   information collected during program runtime.  It is the caller's
-   responsibility to free the returned string.  It is likely to only
-   contain interesting information if
+   information collected during program runtime. It is the caller's
+   responsibility to free the returned string. The format of the string is
+   intentionally undocumented and is not a stable format, but can be passed to
+   ``futhark profile`` to produce human-readable information. The report is
+   likely to only contain interesting information if
    :c:func:`futhark_context_config_set_debugging` or
-   :c:func:`futhark_context_config_set_profiling` has been called
-   previously.  Returns ``NULL`` on failure.
+   :c:func:`futhark_context_config_set_profiling` has been called previously.
+   Returns ``NULL`` on failure.
 
 .. c:function:: int futhark_context_clear_caches(struct futhark_context *ctx)
 

@@ -14,13 +14,13 @@ futhark profile JSONFILES
 DESCRIPTION
 ===========
 
-This tool produces human-readable profiling information based on
-information collected with :ref:`futhark bench<futhark-bench(1)>`.
-Futhark has only rudimentary support for profiling.  While the system
-can collect information about the run-time behaviour of the program,
-there is currently no automatic way to connect the information to the
-program source code.  However, the collected information can still be
-useful for estimating the source of inefficiencies.
+This tool produces human-readable profiling information based on information
+collected with :ref:`futhark bench<futhark-bench(1)>`. Futhark has basic support
+for profiling. The system can collect information about the run-time behaviour
+of the program, and connects it as best it is able to the program source code.
+This works best for the GPU backends, and not at all for the sequential
+backends. The collected information can then be used to estimate the source of
+inefficiencies.
 
 USAGE
 =====
@@ -49,16 +49,18 @@ Files produced
 Supposing a dataset ``foo``, ``futhark profile`` will produce the
 following files in the top level directory.
 
-* ``foo.log``: the running log produced during execution.  Contains
-  many details on dynamic behaviour, depending on the exact backend.
+* ``foo.log``: the running log produced during execution. Contains many details
+  on dynamic behaviour, depending on the exact backend.
 
-* ``foo.summary``: a summary of memory usage and cost centres.  For
-  the GPU backends, the cost centres are kernel executions and memory
-  copies.
+* ``foo.summary``: a summary of memory usage and cost centres. For the GPU
+  backends, the cost centres are kernel executions and memory copies.
 
-* ``foo.timeline``: a list of all recorded profiling events, in the
-  order in which they occurred, along with their runtime and other
-  available information
+* ``foo.timeline``: a list of all recorded profiling events, in the order in
+  which they occurred, along with their runtime and other available information,
+  most importantly the source locations.
+
+The log file is often too verbose to be useful, but the summary and timeline
+should be inspected, even if the latter is sometimes fairly large.
 
 Technicalities
 --------------
@@ -73,10 +75,10 @@ behaviour of the run time system.
 Raw reports
 -----------
 
-Alternatively, the JSON can also contain a raw profiling report as
-produced by the C API function ``futhark_context_report()``. A
-directory is still created, but it will only contain a single set of
-files, and it will not contain a log.
+Alternatively, the JSON file passed to ``futhark profile`` may also be a raw
+profiling report as produced by the C API function ``futhark_context_report()``.
+A directory is still created, but it will only contain a single set of files,
+and it will not contain a log.
 
 EXAMPLES
 ========

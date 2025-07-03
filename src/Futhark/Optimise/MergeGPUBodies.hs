@@ -111,10 +111,10 @@ transformStms aliases stms = do
 -- This creates sequences of GPUBody statements that can be merged into single
 -- kernels.
 reorderStm :: AliasTable -> Stm (Aliases GPU) -> ReorderM AliasTable
-reorderStm aliases (Let pat (StmAux cs attrs _) e) = do
+reorderStm aliases (Let pat (StmAux cs attrs loc _) e) = do
   (e', deps) <- lift (transformExp aliases e)
   let pat' = removePatAliases pat
-  let stm' = Let pat' (StmAux cs attrs ()) e'
+  let stm' = Let pat' (StmAux cs attrs loc ()) e'
   let pes' = patElems pat'
 
   -- Array aliases can be seen as a directed graph where vertices are arrays
@@ -489,19 +489,19 @@ mergeKernels stms
   | otherwise =
       SQ.singleton <$> foldrM merge empty stms
   where
-    empty = Let mempty (StmAux mempty mempty ()) noop
+    empty = Let mempty (defAux ()) noop
     noop = Op (GPUBody [] (Body () SQ.empty []))
 
     merge :: Stm GPU -> Stm GPU -> ReorderM (Stm GPU)
     merge stm0 stm1
-      | Let pat0 (StmAux cs0 attrs0 _) (Op (GPUBody types0 body)) <- stm0,
-        Let pat1 (StmAux cs1 attrs1 _) (Op (GPUBody types1 body1)) <- stm1 =
+      | Let pat0 (StmAux cs0 attrs0 _ _) (Op (GPUBody types0 body)) <- stm0,
+        Let pat1 (StmAux cs1 attrs1 _ _) (Op (GPUBody types1 body1)) <- stm1 =
           do
             Body _ stms0 res0 <- execRewrite (rewriteBody body)
             let Body _ stms1 res1 = body1
 
                 pat' = pat0 <> pat1
-                aux' = StmAux (cs0 <> cs1) (attrs0 <> attrs1) ()
+                aux' = StmAux (cs0 <> cs1) (attrs0 <> attrs1) mempty ()
                 types' = types0 ++ types1
                 body' = Body () (stms0 <> stms1) (res0 <> res1)
              in pure (Let pat' aux' (Op (GPUBody types' body')))
@@ -530,11 +530,11 @@ rewriteStms :: Stms GPU -> RewriteM (Stms GPU)
 rewriteStms = mapM rewriteStm
 
 rewriteStm :: Stm GPU -> RewriteM (Stm GPU)
-rewriteStm (Let (Pat pes) (StmAux cs attrs _) e) = do
+rewriteStm (Let (Pat pes) (StmAux cs attrs loc _) e) = do
   pat' <- Pat <$> mapM rewritePatElem pes
   cs' <- rewriteCerts cs
   e' <- rewriteExp e
-  pure $ Let pat' (StmAux cs' attrs ()) e'
+  pure $ Let pat' (StmAux cs' attrs loc ()) e'
 
 rewritePatElem :: PatElem Type -> RewriteM (PatElem Type)
 rewritePatElem (PatElem n t) =
@@ -616,10 +616,9 @@ asArray se row_t = do
   let t = row_t `arrayOfRow` intConst Int64 1
 
   let pat = Pat [PatElem name t]
-  let aux = StmAux mempty mempty ()
   let e = BasicOp (ArrayLit [se] row_t)
 
-  modify (|> Let pat aux e)
+  modify (|> Let pat (defAux ()) e)
   pure name
 
 -- | @referConst c@ adds @let x = c@ to the rewrite prologue and returns the
@@ -630,10 +629,9 @@ referConst c = do
   let t = Prim (primValueType c)
 
   let pat = Pat [PatElem name t]
-  let aux = StmAux mempty mempty ()
   let e = BasicOp (SubExp $ Constant c)
 
-  modify (|> Let pat aux e)
+  modify (|> Let pat (defAux ()) e)
   pure name
 
 -- | Produce a fresh name, using the given string as a template.

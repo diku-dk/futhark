@@ -113,10 +113,10 @@ mapExpM tv (Match ses cases defbody (MatchDec ts s)) =
     <*> (MatchDec <$> mapM (mapOnBranchType tv) ts <*> pure s)
   where
     mapOnCase (Case vs body) = Case vs <$> mapOnBody tv mempty body
-mapExpM tv (Apply fname args ret loc) = do
+mapExpM tv (Apply fname args ret safety) = do
   args' <- forM args $ \(arg, d) ->
     (,) <$> mapOnSubExp tv arg <*> pure d
-  Apply fname args' <$> mapM (bitraverse (mapOnRetType tv) pure) ret <*> pure loc
+  Apply fname args' <$> mapM (bitraverse (mapOnRetType tv) pure) ret <*> pure safety
 mapExpM tv (BasicOp (Index arr slice)) =
   BasicOp
     <$> ( Index
@@ -164,8 +164,8 @@ mapExpM tv (BasicOp (Concat i (x :| ys) size)) = do
   pure $ BasicOp $ Concat i (x' :| ys') size'
 mapExpM tv (BasicOp (Manifest v perm)) =
   BasicOp <$> (Manifest <$> mapOnVName tv v <*> pure perm)
-mapExpM tv (BasicOp (Assert e msg loc)) =
-  BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg <*> pure loc)
+mapExpM tv (BasicOp (Assert e msg)) =
+  BasicOp <$> (Assert <$> mapOnSubExp tv e <*> traverse (mapOnSubExp tv) msg)
 mapExpM tv (BasicOp (Opaque op e)) =
   BasicOp <$> (Opaque op <$> mapOnSubExp tv e)
 mapExpM tv (BasicOp (UpdateAcc safety v is ses)) =
@@ -327,7 +327,7 @@ walkExpM tv (BasicOp (Concat _ (x :| ys) size)) =
   walkOnVName tv x >> mapM_ (walkOnVName tv) ys >> walkOnSubExp tv size
 walkExpM tv (BasicOp (Manifest v _)) =
   walkOnVName tv v
-walkExpM tv (BasicOp (Assert e msg _)) =
+walkExpM tv (BasicOp (Assert e msg)) =
   walkOnSubExp tv e >> traverse_ (walkOnSubExp tv) msg
 walkExpM tv (BasicOp (Opaque _ e)) =
   walkOnSubExp tv e

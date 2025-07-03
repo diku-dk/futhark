@@ -82,11 +82,11 @@ analyseStm ::
   AliasTable ->
   Stm rep ->
   Stm (Aliases rep)
-analyseStm aliases (Let pat (StmAux cs attrs dec) e) =
+analyseStm aliases (Let pat aux e) =
   let e' = analyseExp aliases e
       pat' = mkAliasedPat pat e'
-      rep' = (AliasDec $ consumedInExp e', dec)
-   in Let pat' (StmAux cs attrs rep') e'
+      aux' = (AliasDec (consumedInExp e'),) <$> aux
+   in Let pat' aux' e'
 
 -- | Perform alias analysis on expression.
 analyseExp ::

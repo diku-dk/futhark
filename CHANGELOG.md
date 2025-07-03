@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `cuda` backend: explicitly support CC 8.9, 9.0, 10.0, 10.1, and 12.0.
 
+* Profiling now provides source locations for the profiled events. Some things
+  are not yet accurately tracked, and only the static location is reported
+  (i.e., no full call stack).
+
 ### Removed
 
 ### Changed

@@ -738,7 +738,7 @@ defuncSoacExp e
       (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonunique $ typeOf e) e
       let env = foldMap envFromPat pats
       body' <- localEnv env $ defuncExp' body
-      pure $ Lambda pats body' Nothing (Info tp) mempty
+      pure $ Lambda pats body' Nothing (Info tp) (srclocOf e)
   | otherwise = defuncExp' e
 
 etaExpand :: ResRetType -> Exp -> DefM ([Pat ParamType], Exp, ResRetType)
@@ -910,11 +910,11 @@ liftedName i (AppExp (Apply f _ _) _) =
 liftedName _ _ = "defunc"
 
 defuncApplyArg ::
-  String ->
+  (String, SrcLoc) ->
   (Exp, StaticVal) ->
   ((Maybe VName, Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
-defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) ((argext, arg), _) = do
+defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) ((argext, arg), _) = do
   (arg', arg_sv) <- defuncExp arg
   let env' = alwaysMatchPatSV pat arg_sv
       dims = mempty
@@ -961,7 +961,7 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) ((argext, ar
   let f_t = toStruct $ typeOf f'
       arg_t = toStruct $ typeOf arg'
       fname_t = foldFunType [toParam Observe f_t, toParam (diet (patternType pat)) arg_t] lifted_rettype
-      fname' = Var (qualName fname) (Info fname_t) (srclocOf arg)
+      fname' = Var (qualName fname) (Info fname_t) floc
   callret <- unRetType lifted_rettype
 
   pure
@@ -979,7 +979,7 @@ defuncApplyArg _ (f', DynamicFun _ sv) ((argext, arg), argtypes) = do
       apply_e = mkApply f' [(argext, arg')] callret
   pure (apply_e, sv)
 --
-defuncApplyArg fname_s (_, sv) ((_, arg), _) =
+defuncApplyArg (fname_s, _) (_, sv) ((_, arg), _) =
   error $
     "defuncApplyArg: cannot apply StaticVal\n"
       <> show sv
@@ -1009,7 +1009,7 @@ defuncApply f args appres loc = do
       let fname = liftedName 0 f
           (argtypes, _) = unfoldFunType $ typeOf f
       fmap (first $ updateReturn appres) $
-        foldM (defuncApplyArg fname) (f', f_sv) $
+        foldM (defuncApplyArg (fname, loc)) (f', f_sv) $
           NE.zip args $
             NE.tails argtypes
   where

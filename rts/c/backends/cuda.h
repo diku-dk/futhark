@@ -882,13 +882,15 @@ static void gpu_free_kernel(struct futhark_context *ctx,
 }
 
 static int gpu_scalar_to_device(struct futhark_context* ctx,
+                                const char *provenance,
                                 gpu_mem dst, size_t offset, size_t size,
                                 void *src) {
   struct cuda_event *event = cuda_event_new(ctx);
   if (event != NULL) {
     add_event(ctx,
               "copy_scalar_to_dev",
-              strdup(""),
+              provenance,
+              NULL,
               event,
               (event_report_fn)cuda_event_report);
     CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
@@ -901,13 +903,15 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
 }
 
 static int gpu_scalar_from_device(struct futhark_context* ctx,
+                                  const char *provenance,
                                   void *dst,
                                   gpu_mem src, size_t offset, size_t size) {
   struct cuda_event *event = cuda_event_new(ctx);
   if (event != NULL) {
     add_event(ctx,
               "copy_scalar_from_dev",
-              strdup(""),
+              provenance,
+              NULL,
               event,
               (event_report_fn)cuda_event_report);
     CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
@@ -920,6 +924,7 @@ static int gpu_scalar_from_device(struct futhark_context* ctx,
 }
 
 static int gpu_memcpy(struct futhark_context* ctx,
+                      const char *provenance,
                       gpu_mem dst, int64_t dst_offset,
                       gpu_mem src, int64_t src_offset,
                       int64_t nbytes) {
@@ -927,7 +932,8 @@ static int gpu_memcpy(struct futhark_context* ctx,
   if (event != NULL) {
     add_event(ctx,
               "copy_dev_to_dev",
-              strdup(""),
+              provenance,
+              NULL,
               event,
               (event_report_fn)cuda_event_report);
     CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
@@ -939,7 +945,9 @@ static int gpu_memcpy(struct futhark_context* ctx,
   return FUTHARK_SUCCESS;
 }
 
-static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
+static int memcpy_host2gpu(struct futhark_context* ctx,
+                           const char *provenance,
+                           bool sync,
                            gpu_mem dst, int64_t dst_offset,
                            const unsigned char* src, int64_t src_offset,
                            int64_t nbytes) {
@@ -948,7 +956,8 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
     if (event != NULL) {
       add_event(ctx,
                 "copy_host_to_dev",
-                strdup(""),
+                provenance,
+                NULL,
                 event,
                 (event_report_fn)cuda_event_report);
       CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
@@ -967,7 +976,9 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
   return FUTHARK_SUCCESS;
 }
 
-static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
+static int memcpy_gpu2host(struct futhark_context* ctx,
+                           const char *provenance,
+                           bool sync,
                            unsigned char* dst, int64_t dst_offset,
                            gpu_mem src, int64_t src_offset,
                            int64_t nbytes) {
@@ -976,7 +987,8 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
     if (event != NULL) {
       add_event(ctx,
                 "copy_dev_to_host",
-                strdup(""),
+                provenance,
+                NULL,
                 event,
                 (event_report_fn)cuda_event_report);
       CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
@@ -1001,7 +1013,8 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
 }
 
 static int gpu_launch_kernel(struct futhark_context* ctx,
-                             gpu_kernel kernel, const char *name,
+                             gpu_kernel kernel,
+                             const char *name, const char *provenance,
                              const int32_t grid[3],
                              const int32_t block[3],
                              unsigned int shared_mem_bytes,
@@ -1025,16 +1038,17 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 
   if (event != NULL) {
     CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
+
+    struct kvs *kvs = kvs_new();
+    kvs_printf(kvs, "kernel", "\"%s\"", name);
+    kvs_printf(kvs, "grid", "[%d,%d,%d]", grid[0], grid[1], grid[2]);
+    kvs_printf(kvs, "block", "[%d,%d,%d]", block[0], block[1], block[2]);
+    kvs_printf(kvs, "shared memory", "%d", shared_mem_bytes);
+
     add_event(ctx,
               name,
-              msgprintf("Kernel %s with\n"
-                        "  grid=(%d,%d,%d)\n"
-                        "  block=(%d,%d,%d)\n"
-                        "  shared memory=%d",
-                        name,
-                        grid[0], grid[1], grid[2],
-                        block[0], block[1], block[2],
-                        shared_mem_bytes),
+              provenance,
+              kvs,
               event,
               (event_report_fn)cuda_event_report);
   }

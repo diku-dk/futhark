@@ -940,7 +940,7 @@ checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
   require [Prim int64] ressize
 checkBasicOp (Manifest arr perm) =
   checkBasicOp $ Rearrange arr perm -- Basically same thing!
-checkBasicOp (Assert e (ErrorMsg parts) _) = do
+checkBasicOp (Assert e (ErrorMsg parts)) = do
   require [Prim Bool] e
   mapM_ checkPart parts
   where
@@ -1257,7 +1257,9 @@ checkStm ::
   Stm (Aliases rep) ->
   TypeM rep a ->
   TypeM rep a
-checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
+checkStm stm@(Let pat aux e) m = do
+  let Certs cs = stmAuxCerts aux
+      (_, dec) = stmAuxDec aux
   context "When checking certificates" $ mapM_ (requireI [Prim Unit]) cs
   context "When checking expression annotation" $ checkExpDec dec
   context ("When matching\n" <> message "  " pat <> "\nwith\n" <> message "  " e) $

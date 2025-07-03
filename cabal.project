@@ -6,3 +6,5 @@ package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
 
 allow-newer: base, template-haskell, ghc-prim
+
+multi-repl: True

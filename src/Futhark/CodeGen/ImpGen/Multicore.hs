@@ -155,9 +155,12 @@ compileMCOp pat (ParOp par_op op) = do
   s <- segOpString op
   let seq_task = Imp.ParallelTask seq_code
   free_params <- filter (`notElem` retvals) <$> freeParams (par_task, seq_task)
-  emit . Imp.Op $
-    Imp.SegOp s free_params seq_task par_task retvals $
-      scheduling_info (decideScheduling' op seq_code)
+  let code =
+        Imp.Op $
+          Imp.SegOp s free_params seq_task par_task retvals $
+            scheduling_info (decideScheduling' op seq_code)
+  emit $ Imp.Meta $ Imp.MetaProvenance $ taskProvenance code
+  emit code
 
 compileSegOp ::
   Pat LetDecMem ->

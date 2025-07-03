@@ -17,7 +17,7 @@ import Futhark.IR.GPU
 import Futhark.IR.MC
 import Futhark.Optimise.ArrayLayout.Layout (Layout, LayoutTable, Permutation)
 
-class (Layout rep, PrimExpAnalysis rep) => Transform rep where
+class (Layout rep, ExpDec rep ~ (), PrimExpAnalysis rep) => Transform rep where
   onOp ::
     (Monad m) =>
     SOACMapper rep rep m ->
@@ -60,7 +60,7 @@ transformSegOpGPU :: LayoutTable -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU 
 transformSegOpGPU perm_table expmap stm@(Let pat aux _) op =
   -- Optimization: Only traverse the body of the SegOp if it is
   -- represented in the layout table
-  case M.lookup patternName (M.mapKeys vnameFromSegOp perm_table) of
+  case M.lookup pat_name (M.mapKeys vnameFromSegOp perm_table) of
     Nothing -> do
       addStm stm
       pure (perm_table, M.fromList [(name, stm) | name <- patNames pat] <> expmap)
@@ -69,14 +69,14 @@ transformSegOpGPU perm_table expmap stm@(Let pat aux _) op =
             identitySegOpMapper
               { mapOnSegOpBody = case segLevel op of
                   SegBlock {} -> transformSegGroupKernelBody perm_table expmap
-                  _ -> transformSegThreadKernelBody perm_table patternName
+                  _ -> transformSegThreadKernelBody perm_table (stmAuxLoc aux) pat_name
               }
       op' <- mapSegOpM mapper op
       let stm' = Let pat aux $ Op $ SegOp op'
       addStm stm'
       pure (perm_table, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
   where
-    patternName = patElemName . head $ patElems pat
+    pat_name = patElemName . head $ patElems pat
 
 transformSegOpMC :: LayoutTable -> ExpMap MC -> Stm MC -> Maybe (SegOp () MC) -> SegOp () MC -> TransformM MC (LayoutTable, ExpMap MC)
 transformSegOpMC perm_table expmap (Let pat aux _) maybe_par_segop seqSegOp
@@ -84,7 +84,7 @@ transformSegOpMC perm_table expmap (Let pat aux _) maybe_par_segop seqSegOp
   | Just par_segop <- maybe_par_segop =
       -- Optimization: Only traverse the body of the SegOp if it is
       -- represented in the layout table
-      case M.lookup patternName (M.mapKeys vnameFromSegOp perm_table) of
+      case M.lookup pat_name (M.mapKeys vnameFromSegOp perm_table) of
         Nothing -> add $ Just par_segop
         Just _ -> add . Just =<< mapSegOpM mapper par_segop
   where
@@ -94,8 +94,12 @@ transformSegOpMC perm_table expmap (Let pat aux _) maybe_par_segop seqSegOp
       let stm' = Let pat aux $ Op $ ParOp maybe_par_segop' seqSegOp'
       addStm stm'
       pure (perm_table, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
-    mapper = identitySegOpMapper {mapOnSegOpBody = transformKernelBody perm_table expmap patternName}
-    patternName = patElemName . head $ patElems pat
+    mapper =
+      identitySegOpMapper
+        { mapOnSegOpBody =
+            transformKernelBody perm_table expmap (stmAuxLoc aux) pat_name
+        }
+    pat_name = patElemName . head $ patElems pat
 
 transformRestOp :: (Transform rep, BuilderOps rep) => LayoutTable -> ExpMap rep -> Stm rep -> TransformM rep (LayoutTable, ExpMap rep)
 transformRestOp perm_table expmap (Let pat aux e) = do
@@ -127,14 +131,15 @@ transformSegGroupKernelBody perm_table expmap (KernelBody b stms res) =
 transformSegThreadKernelBody ::
   (Transform rep, BuilderOps rep) =>
   LayoutTable ->
+  Provenance ->
   VName ->
   KernelBody rep ->
   TransformM rep (KernelBody rep)
-transformSegThreadKernelBody perm_table seg_name kbody = do
+transformSegThreadKernelBody perm_table p seg_name kbody = do
   evalStateT
     ( traverseKernelBodyArrayIndexes
         seg_name
-        (ensureTransformedAccess perm_table)
+        (ensureTransformedAccess perm_table p)
         kbody
     )
     mempty
@@ -143,15 +148,16 @@ transformKernelBody ::
   (Transform rep, BuilderOps rep) =>
   LayoutTable ->
   ExpMap rep ->
+  Provenance ->
   VName ->
   KernelBody rep ->
   TransformM rep (KernelBody rep)
-transformKernelBody perm_table expmap seg_name (KernelBody b stms res) = do
+transformKernelBody perm_table expmap p seg_name (KernelBody b stms res) = do
   stms' <- transformStms perm_table expmap stms
   evalStateT
     ( traverseKernelBodyArrayIndexes
         seg_name
-        (ensureTransformedAccess perm_table)
+        (ensureTransformedAccess perm_table p)
         (KernelBody b stms' res)
     )
     mempty
@@ -176,14 +182,14 @@ traverseKernelBodyArrayIndexes seg_name coalesce (KernelBody b kstms kres) =
       stms' <- stmsFromList <$> mapM onStm (stmsToList stms)
       pure $ Body bdec stms' bres
 
-    onStm (Let pat dec (BasicOp (Index arr is))) =
-      Let pat dec . oldOrNew <$> coalesce seg_name patternName arr is
+    onStm (Let pat aux (BasicOp (Index arr is))) =
+      Let pat aux . oldOrNew <$> coalesce seg_name pat_name arr is
       where
         oldOrNew Nothing =
           BasicOp $ Index arr is
         oldOrNew (Just (arr', is')) =
           BasicOp $ Index arr' is'
-        patternName = patElemName . head $ patElems pat
+        pat_name = patElemName . head $ patElems pat
     onStm (Let pat dec e) =
       Let pat dec <$> mapExpM mapper e
 
@@ -212,8 +218,9 @@ type ArrayIndexTransform m =
 ensureTransformedAccess ::
   (MonadBuilder m) =>
   LayoutTable ->
+  Provenance ->
   ArrayIndexTransform (StateT Replacements m)
-ensureTransformedAccess perm_table seg_name idx_name arr slice = do
+ensureTransformedAccess perm_table p seg_name idx_name arr slice = do
   -- Check if the array has the optimal layout in memory.
   -- If it does not, replace it with a manifest to allocate
   -- it with the optimal layout
@@ -227,6 +234,8 @@ ensureTransformedAccess perm_table seg_name idx_name arr slice = do
         Just arr' -> pure $ Just (arr', slice)
         Nothing -> replace perm =<< lift (manifest perm arr)
   where
+    aux = (defAux ()) {stmAuxLoc = p}
+
     replace perm arr' = do
       -- Store the fact that we have seen this array + permutation
       -- so we don't make duplicate manifests
@@ -235,7 +244,7 @@ ensureTransformedAccess perm_table seg_name idx_name arr slice = do
       pure $ Just (arr', slice)
 
     manifest perm array =
-      letExp (baseString array ++ "_coalesced") $
+      auxing aux . letExp (baseString array ++ "_coalesced") $
         BasicOp (Manifest array perm)
 
 lookupPermutation :: LayoutTable -> VName -> IndexExprName -> VName -> Maybe Permutation
