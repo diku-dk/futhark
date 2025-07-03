@@ -20,7 +20,7 @@ import Data.List qualified as L
 import Control.Monad
 import Data.Graph.Inductive.Graph qualified as G
 import Data.Map.Strict qualified as M
-import Data.Maybe
+--import Data.Maybe
 import Futhark.Analysis.HORep.SOAC qualified as H
 -- import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
@@ -33,7 +33,7 @@ import Futhark.Tools
 import Futhark.Util.Pretty hiding (line, sep, (</>))
 -- import Futhark.Analysis.PrimExp.Convert
 
-import Debug.Trace
+--import Debug.Trace
 
 -----------------------------------
 --- names of special functions
@@ -216,37 +216,41 @@ parseHLSched ::
   (HasScope SOACS m, Monad m) =>
   DepNode ->
   DepGraph ->
-  m (Maybe (NodeT, HLSched))
+  m (Maybe (Env, NodeT, HLSched, PatElem (LetDec SOACS)))
 parseHLSched node_to_fuse dg@DepGraph {dgGraph = g}
   | sched_nodeT <- snd node_to_fuse,
     sched_node_id <- nodeFromLNode node_to_fuse,
     StmNode stmt <- sched_nodeT,
     Let pat _aux e <- stmt,
-    [pat_el] <- patElems pat, 
+    [pat_el] <- patElems pat,
     Apply fnm args_diet _rtp _ <- e,
+    L.isPrefixOf "hlSched2D" $ nameToString fnm,
     (args, _diet) <- unzip args_diet,
     strides_arg : signals_arg : sigma_arg : orig_arg : ns_arg : offs : soac_res : _ <- L.reverse args,
-    trace ("Debug HLSched: "++ prettyString fnm ++
-           "\n\t res-arr:  "++ prettyString (patElemName pat_el) ++
-           "\n\t res_type: "++ prettyString (patElemDec  pat_el) ++
-           "\n\targs: "++prettyString args ++ 
-           "\n\t stmt: "++prettyString stmt ++
-           "\n\t soac res name: "++ prettyString soac_res
-          ) True,
+--    trace ("Debug HLSched: "++ prettyString fnm ++
+--           "\n\t res-arr:  "++ prettyString (patElemName pat_el) ++
+--           "\n\t res_type: "++ prettyString (patElemDec  pat_el) ++
+--           "\n\targs: "++prettyString args ++ 
+--           "\n\t stmt: "++prettyString stmt ++
+--           "\n\t soac res name: "++ prettyString soac_res
+--          ) True,
     --
     sched_ctx <- G.context g sched_node_id,
-    (out_deps, _, _, inp_deps) <- sched_ctx,
+    (_out_deps, _, _, inp_deps) <- sched_ctx,
     indrc_deps <- filter (isInd   . fst) inp_deps,
     indrc_ctxs <- map (G.context g . snd) indrc_deps,
     indrc_ndTs <- map getNodeTfromCtx indrc_ctxs,
-    ([soac_nT], arrlit_nTs) <- L.partition isSOACNodeT indrc_ndTs,
-    SoacNode node_out_trsfs soac_pat soac _soac_aux <- soac_nT,
+    ([soac_nT], _arrlit_nTs) <- L.partition isSOACNodeT indrc_ndTs,
+    SoacNode node_out_trsfs soac_pat _soac _soac_aux <- soac_nT,
     H.nullTransforms node_out_trsfs,
+    -- ^ simplification: no out-transform supported so far
     [soac_patel] <- patElems soac_pat,
-    soac_res == Var (patElemName soac_patel),
-    stmts <- mapMaybe getStmNode arrlit_nTs,
-    trace ("soac:\nlet " ++ prettyString soac_pat ++ " inp-deps: "++show inp_deps) True,
-    trace ("other " ++ show (length stmts) ++ " stms:\n" ++ prettyString stmts) True
+    -- ^ simplification: soac must return one result
+    soac_res == Var (patElemName soac_patel)
+    -- ^ the argument of the HL-Sched must be the SOAC's result
+--    stmts <- mapMaybe getStmNode arrlit_nTs
+--    trace ("soac:\nlet " ++ prettyString soac_pat ++ " inp-deps: "++show inp_deps) True,
+--    trace ("other " ++ show (length stmts) ++ " stms:\n" ++ prettyString stmts) True
     -- trace("indrct-deps: "++show indrc_deps) True
     --trace("graph: "++show g) True
   = do
@@ -266,13 +270,13 @@ parseHLSched node_to_fuse dg@DepGraph {dgGraph = g}
                   , sigma   = toArrInt   sigma_pes
                   , signals = toArrInt signals_pes
                   }
-  trace ("\nFwdTileTab: " ++ prettyString (appTilesFwd env) ++ 
-         "\nInvTileTab: " ++ prettyString (appTilesInv env) ++
-         "\nHLSchedule: " ++ prettyString sched
---         "\n\t Dimlens: " ++ prettyString dimlens_pes ++
---         "\n\t Strides: " ++ prettyString strides_pes
-        ) $
-    pure $ Just (soac_nT, sched)
+--  trace ("\nFwdTileTab: " ++ prettyString (appTilesFwd env) ++ 
+--         "\nInvTileTab: " ++ prettyString (appTilesInv env) ++
+--         "\nHLSchedule: " ++ prettyString sched
+----         "\n\t Dimlens: " ++ prettyString dimlens_pes ++
+----         "\n\t Strides: " ++ prettyString strides_pes
+--        ) $
+  pure $ Just (env, soac_nT, sched, pat_el)
   where
     getNodeTfromCtx (_, _, nT, _) = nT
     toArrInt ct_pes = map toInt ct_pes
