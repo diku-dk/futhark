@@ -381,7 +381,6 @@ onKernel target kernel = do
               then (SafetyNone, [])
               else -- No possible failures in this kernel, so if we make
               -- it past an initial check, then we are good to go.
-
                 ( SafetyCheap,
                   [C.citems|if (*global_failure >= 0) { return; }|]
                 )

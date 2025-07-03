@@ -59,10 +59,10 @@ isInscrutable :: PrimExp VName -> Bool -> Bool
 isInscrutable op@(BinOpExp {}) counter =
   if counter
     then -- Calculate stride and offset for loop-counters and thread-IDs
-    case reduceStrideAndOffset op of
-      -- Maximum allowable stride, might need tuning.
-      Just (s, _) -> s > 8
-      Nothing -> isInscrutableExp op
+      case reduceStrideAndOffset op of
+        -- Maximum allowable stride, might need tuning.
+        Just (s, _) -> s > 8
+        Nothing -> isInscrutableExp op
     else isInscrutableExp op
 isInscrutable op _ = isInscrutableExp op
 

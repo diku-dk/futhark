@@ -136,7 +136,6 @@ kkLoopBody
                       -- if i and j are out of range than css[i,j]
                       -- is garbage anyways and should not be written.
                       -- so fits_ij should be always true!!!
-
                         (le64 iii + le64 i + pe64 ry * le64 ltid_y .<. pe64 height_A)
                           .&&. (le64 jjj + le64 j + pe64 rx * le64 ltid_x .<. pe64 width_B)
                 )
