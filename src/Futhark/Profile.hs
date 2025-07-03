@@ -19,21 +19,26 @@ import Data.Text.Encoding (encodeUtf8Builder)
 
 -- | A thing that has occurred during execution.
 data ProfilingEvent = ProfilingEvent
-  { -- | Short, single line.
+  { -- | Short, single line, not instance-specific.
     eventName :: T.Text,
     -- | In microseconds.
     eventDuration :: Double,
-    -- | Long, may be multiple lines.
-    eventDescription :: T.Text
+    -- | The provenance of the event - that is, from where in the original
+    -- program it originates.
+    eventProvenance :: T.Text,
+    -- | Arbitrary additional information, probably in the form of a dictionary,
+    -- but that depends on the backend.
+    eventDetails :: JSON.Value
   }
   deriving (Eq, Ord, Show)
 
 instance JSON.ToJSON ProfilingEvent where
-  toJSON (ProfilingEvent name duration description) =
+  toJSON (ProfilingEvent name duration provenance details) =
     JSON.object
       [ ("name", JSON.toJSON name),
         ("duration", JSON.toJSON duration),
-        ("description", JSON.toJSON description)
+        ("provenance", JSON.toJSON provenance),
+        ("details", details)
       ]
 
 instance JSON.FromJSON ProfilingEvent where
@@ -41,7 +46,8 @@ instance JSON.FromJSON ProfilingEvent where
     ProfilingEvent
       <$> o JSON..: "name"
       <*> o JSON..: "duration"
-      <*> o JSON..: "description"
+      <*> o JSON..: "provenance"
+      <*> o JSON..: "details"
 
 -- | A profiling report contains all profiling information for a
 -- single benchmark (meaning a single invocation on an entry point on
@@ -53,11 +59,14 @@ data ProfilingReport = ProfilingReport
   }
   deriving (Eq, Ord, Show)
 
+mapToJSON :: (JSON.ToJSON v) => M.Map T.Text v -> JSON.Value
+mapToJSON = JSON.object . map (bimap JSON.fromText JSON.toJSON) . M.toList
+
 instance JSON.ToJSON ProfilingReport where
   toJSON (ProfilingReport events memory) =
     JSON.object
       [ ("events", JSON.toJSON events),
-        ("memory", JSON.object $ map (bimap JSON.fromText JSON.toJSON) $ M.toList memory)
+        ("memory", mapToJSON memory)
       ]
 
 instance JSON.FromJSON ProfilingReport where

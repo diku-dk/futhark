@@ -576,6 +576,7 @@ library futhark-testing
     , free
     , futhark
     , megaparsec
+    , srcloc
     , tasty
     , tasty-hunit
     , tasty-quickcheck

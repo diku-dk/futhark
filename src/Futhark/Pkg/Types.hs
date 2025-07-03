@@ -282,7 +282,7 @@ pPkgManifest = do
 
     pPkgPath =
       T.pack
-        <$> some (alphaNumChar <|> oneOf ("@-/.:_" :: String))
+        <$> some (alphaNumChar <|> oneOf ("@-/.:_~" :: String))
         <?> "package path"
 
     pRequired =

@@ -18,6 +18,7 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Debug.Trace (traceM)
 import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.GPU qualified as ImpGPU
@@ -29,7 +30,6 @@ import Futhark.Util (convFloat, nubOrd, zEncodeText)
 import Futhark.Util.Pretty (align, docText, indent, pretty, (</>))
 import Language.Futhark.Warnings (Warnings)
 import Language.WGSL qualified as WGSL
-import Debug.Trace (traceM)
 
 -- State carried during WebGPU translation.
 data WebGPUS = WebGPUS
@@ -293,8 +293,11 @@ generateDeviceFun fname device_func = do
       in_params <- genFunParams (functionInput device_func)
       out_params <- genFunParams (functionOutput device_func)
       let out_ptr_params =
-            map (\(WGSL.Param name (WGSL.Prim t) a) ->
-              WGSL.Param (name <> "_out") (WGSL.Pointer t WGSL.FunctionSpace Nothing) a) out_params
+            map
+              ( \(WGSL.Param name (WGSL.Prim t) a) ->
+                  WGSL.Param (name <> "_out") (WGSL.Pointer t WGSL.FunctionSpace Nothing) a
+              )
+              out_params
       let wgslFun =
             WGSL.Function
               { WGSL.funName = "futrts_" <> nameToText fname,
@@ -746,7 +749,10 @@ genWGSLStm (If cond cThen cElse) =
     (genWGSLStm cThen)
     (genWGSLStm cElse)
 genWGSLStm s@(Assert {}) = pure $ WGSL.Comment $ "assert: " <> prettyText s
-genWGSLStm (Comment c s) = WGSL.Seq (WGSL.Comment c) <$> genWGSLStm s
+genWGSLStm (Meta (MetaComment c)) =
+  pure $ WGSL.Comment c
+genWGSLStm (Meta (MetaProvenance (Provenance _ l))) =
+  pure $ WGSL.Comment $ locText l
 genWGSLStm (DebugPrint _ _) = pure WGSL.Skip
 genWGSLStm (TracePrint _) = pure WGSL.Skip
 genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = do
@@ -1114,7 +1120,6 @@ findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
     find (For _ _ body) = find body
     find (While _ body) = find body
     find (If _ s1 s2) = find s1 <> find s2
-    find (Comment _ s) = find s
     find _ = S.empty
 
 findSingleMemoryType :: VName -> KernelM (Maybe (PrimType, Bool, Signedness))
