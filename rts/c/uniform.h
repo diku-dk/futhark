@@ -1206,7 +1206,6 @@ static inline uniform double futrts_sqrt64(uniform double x) {
   return sqrt(x);
 }
 
-extern "C" unmasked uniform double cbrt(uniform double);
 static inline uniform double futrts_cbrt64(uniform double x) {
   return cbrt(x);
 }
@@ -1704,11 +1703,11 @@ static inline uniform f16 futrts_fma16(uniform f16 a, uniform f16 b, uniform f16
   return a * b + c;
 }
 
-static inline uniform int16_t futrts_to_bits16(uniform f16 x) {
+static inline uniform int16_t fptobits_f16_i16(uniform f16 x) {
   return *((uniform int16_t *)&x);
 }
 
-static inline uniform f16 futrts_from_bits16(uniform int16_t x) {
+static inline uniform f16 bitstofp_i16_f16(uniform int16_t x) {
   return *((uniform f16 *)&x);
 }
 

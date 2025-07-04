@@ -263,7 +263,7 @@ simplifyConvOp _ _ _ =
 
 -- If expression is true then just replace assertion.
 simplifyAssert :: SimpleRule rep
-simplifyAssert _ _ (Assert (Constant (BoolValue True)) _ _) =
+simplifyAssert _ _ (Assert (Constant (BoolValue True)) _) =
   constRes UnitValue
 simplifyAssert _ _ _ =
   Nothing

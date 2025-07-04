@@ -2,7 +2,7 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
-  python = pkgs.python312.withPackages (ps: with ps; [
+  python = pkgs.python313.withPackages (ps: with ps; [
     ps.mypy
     black
     cycler
@@ -13,7 +13,7 @@ let
     sphinx
     sphinxcontrib-bibtex
   ]);
-  haskell = pkgs.haskell.packages.ghc96;
+  haskell = pkgs.haskell.packages.ghc98;
 in
 pkgs.stdenv.mkDerivation {
   name = "futhark";

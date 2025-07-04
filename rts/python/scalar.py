@@ -736,14 +736,12 @@ def futhark_isinf64(x):
     return np.isinf(x)
 
 
-def futhark_to_bits64(x):
-    s = struct.pack(">d", x)
-    return np.int64(struct.unpack(">q", s)[0])
+def fptobits_f64_i64(x):
+    return x.view(np.int64)
 
 
-def futhark_from_bits64(x):
-    s = struct.pack(">q", x)
-    return np.float64(struct.unpack(">d", s)[0])
+def bitstofp_i64_f64(x):
+    return x.view(np.float64)
 
 
 def futhark_log32(x):
@@ -902,14 +900,12 @@ def futhark_isinf32(x):
     return np.isinf(x)
 
 
-def futhark_to_bits32(x):
-    s = struct.pack(">f", x)
-    return np.int32(struct.unpack(">l", s)[0])
+def fptobits_f32_i32(x):
+    return x.view(np.int32)
 
 
-def futhark_from_bits32(x):
-    s = struct.pack(">l", x)
-    return np.float32(struct.unpack(">f", s)[0])
+def bitstofp_i32_f32(x):
+    return x.view(np.float32)
 
 
 def futhark_log16(x):
@@ -1068,14 +1064,12 @@ def futhark_isinf16(x):
     return np.isinf(x)
 
 
-def futhark_to_bits16(x):
-    s = struct.pack(">e", x)
-    return np.int16(struct.unpack(">H", s)[0])
+def fptobits_f16_i16(x):
+    return x.view(np.int16)
 
 
-def futhark_from_bits16(x):
-    s = struct.pack(">H", np.uint16(x))
-    return np.float16(struct.unpack(">e", s)[0])
+def bitstofp_i16_f16(x):
+    return x.view(np.float16)
 
 
 def futhark_lerp16(v0, v1, t):

@@ -1403,6 +1403,7 @@ mkApplyUT (AppExp (Apply f args loc) _) x =
 mkApplyUT f x =
   AppExp (Apply f (NE.singleton (NoInfo, x)) (srcspan f x)) NoInfo
 
+-- | Retrieve the expression for the initial values of loop parameters.
 loopInitExp :: LoopInitBase Info VName -> ExpBase Info VName
 loopInitExp (LoopInitExplicit e) = e
 loopInitExp (LoopInitImplicit (Info e)) = e
