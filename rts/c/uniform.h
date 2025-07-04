@@ -1206,7 +1206,6 @@ static inline uniform double futrts_sqrt64(uniform double x) {
   return sqrt(x);
 }
 
-extern "C" unmasked uniform double cbrt(uniform double);
 static inline uniform double futrts_cbrt64(uniform double x) {
   return cbrt(x);
 }
