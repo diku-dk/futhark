@@ -9,6 +9,7 @@ module Futhark.Optimise.Fusion.HLsched.Utils
   , InvTileTab
   , Env (..)
   , HLSched (..)
+  , splitAtSched
   , addTileBinding
   , getStmNode
   , expandScalar
@@ -64,7 +65,9 @@ type InvTileTab = M.Map VName (PrimExp VName, Names)
 
 data Env = Env
   { appTilesFwd :: FwdTileTab,
-    appTilesInv :: InvTileTab
+    appTilesInv :: InvTileTab,
+    iotas       :: M.Map VName (PrimExp VName, SubExp, Stms SOACS)
+    -- ^ binds the name of an iota array to its size
   } deriving Show
 
 addTileBinding :: Env -> PrimExp VName -> [VName] -> Env
@@ -72,7 +75,7 @@ addTileBinding env pe tile_nms =
   let nms = namesFromList tile_nms
       fwdenv = M.insert pe nms $ appTilesFwd env
       bwdenv = foldl (foldfun nms) (appTilesInv env) tile_nms
-  in  Env { appTilesFwd = fwdenv, appTilesInv = bwdenv }
+  in  Env { appTilesFwd = fwdenv, appTilesInv = bwdenv, iotas = iotas env }
   where
     foldfun nms env_cur nm = M.insert nm (pe, nms) env_cur
 
@@ -94,6 +97,17 @@ data HLSched = HLS
   , sigma   :: [Int]
   , signals :: [Int]
   }
+
+splitAtSched :: Int -> HLSched -> (HLSched, HLSched)
+splitAtSched k sched =
+  let (dimlens', dimlens'') = splitAt k (dimlens sched)
+      (strides', strides'') = splitAt k (strides sched)
+      (origids', origids'') = splitAt k (origids sched)
+      (signals', signals'') = splitAt k (signals sched)
+      (sigma',   sigma''  ) = splitAt k (sigma   sched)
+  in ( HLS (offset sched) dimlens'  strides'  origids'  sigma'  signals'
+     , HLS (offset sched) dimlens'' strides'' origids'' sigma'' signals''
+     )
 
 instance Pretty HLSched where
   pretty sched =
@@ -127,7 +141,7 @@ findPType se = do
 
 --------------------------------------------------
 --- Parsing Scalars, i.e., creating PrimExp for
---    them by following the program dependencies
+--     them by following the program dependencies
 --  Similar for array literals.
 --------------------------------------------------
 
@@ -255,7 +269,7 @@ parseHLSched node_to_fuse dg@DepGraph {dgGraph = g}
     --trace("graph: "++show g) True
   = do
   -- scope <- askScope
-  let env0 = Env mempty mempty
+  let env0 = Env mempty mempty mempty
   (_,    signals_pes) <- expandSymArrLit env0 dg inp_deps signals_arg
   (_,    origids_pes) <- expandSymArrLit env0 dg inp_deps orig_arg
   (_,    sigma_pes  ) <- expandSymArrLit env0 dg inp_deps sigma_arg

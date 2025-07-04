@@ -24,6 +24,7 @@ import Futhark.Optimise.Fusion.GraphRep
 --import Futhark.Transform.Substitute
 --import Futhark.Analysis.PrimExp
 import Futhark.Optimise.Fusion.HLsched.Utils
+import Futhark.Optimise.Fusion.HLsched.Stripmine
 --import Futhark.Util.Pretty hiding (line, sep, (</>))
 -- import Futhark.Analysis.PrimExp.Convert
 
@@ -42,10 +43,10 @@ applyHLsched node_to_fuse dg = do
   mb_sched <- parseHLSched node_to_fuse dg
   case mb_sched of
     Just (env, SoacNode out_trsfs soac_pat soac _soac_aux, sched, patel_sched) -> do
-      let (valid_soac, exact_result) = isSupportedSOAC soac
-      stripmined_soac  <- applyStripmining sched soac
-      rescheduled_soac <- applyPermutation sched soac
-      (prologue, epilogue) <-
+      let (_valid_soac, exact_result) = isSupportedSOAC soac
+      stripmined_soac  <- applyStripmining env sched soac
+      _rescheduled_soac <- applyPermutation sched stripmined_soac
+      (_prologue, _epilogue) <-
         if exact_result
         then pure (mempty,mempty)
         else do
@@ -69,17 +70,11 @@ isSupportedSOAC soac
     (True, False)
 isSupportedSOAC _ = (False, False)
 
-applyStripmining :: 
-    (HasScope SOACS m, MonadFreshNames m) =>
-    HLSched -> H.SOAC SOACS -> m (H.SOAC SOACS)
-applyStripmining _sched soac =
-  pure soac
-
 applyPermutation :: 
     (HasScope SOACS m, MonadFreshNames m) =>
-    HLSched -> H.SOAC SOACS -> m (H.SOAC SOACS)
-applyPermutation _sched soac =
-  pure soac
+    HLSched -> Maybe (H.SOAC SOACS) -> m (Maybe (H.SOAC SOACS))
+applyPermutation _sched Nothing     = pure Nothing
+applyPermutation _sched (Just soac) = pure $ Just soac
 
 mkProEpilogue ::
     (HasScope SOACS m, MonadFreshNames m) =>
@@ -90,6 +85,7 @@ mkProEpilogue ::
     m (Stms SOACS, Stms SOACS)
 mkProEpilogue _patel_res _out_trsfs _sched _patel_sched = do
   pure (mempty, mempty)
+
 
 
 -------------------------------------------------------------------------
