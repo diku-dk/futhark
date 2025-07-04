@@ -13,11 +13,11 @@ import Language.Futhark.TypeChecker.Constraints
     TyVarInfo (..),
     TyVars,
   )
-import Language.Futhark.TypeChecker.Monad (prettyTypeError, TypeError(TypeError))
+import Language.Futhark.TypeChecker.Monad (TypeError (TypeError), prettyTypeError)
 import Language.Futhark.TypeChecker.TySolve
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=), assertBool)
-import Text.Regex.TDFA ( (=~) )
+import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
+import Text.Regex.TDFA ((=~))
 
 testSolve ::
   [CtTy ()] ->
@@ -40,7 +40,7 @@ testSolveFail constraints typarams tyvars expected =
   case solve constraints typarams tyvars of
     Left (TypeError _ _ actualMsg) ->
       let regexMatch :: Bool = docString actualMsg =~ expected
-      in assertBool "Regex doesn't match" regexMatch
+       in assertBool "Regex doesn't match" regexMatch
     Right _ -> assertFailure "Expected type error, but got a solution"
 
 -- When writing type variables/names here (a_0, b_1), make *sure* that
@@ -60,7 +60,7 @@ tvRecord :: VName -> Level -> M.Map Name (TypeBase () NoUniqueness) -> (VName, (
 tvRecord v lvl fields = (v, (lvl, TyVarRecord mempty fields))
 
 -- tvSum :: VName -> Level -> M.Map Name [TypeBase () NoUniqueness] -> (VName, (Level, TyVarInfo ()))
--- tvSum v lvl fields = (v, (lvl, TyVarSum mempty fields)) 
+-- tvSum v lvl fields = (v, (lvl, TyVarSum mempty fields))
 
 typaram :: VName -> Level -> Liftedness -> (VName, (Level, Liftedness, Loc))
 typaram v lvl liftedness = (v, (lvl, liftedness, noLoc))
@@ -69,8 +69,7 @@ tests :: TestTree
 tests =
   testGroup
     "Unsized constraint solver"
-    [
-      testCase "infer unlifted" $
+    [ testCase "infer unlifted" $
         testSolve
           [ "t\8320_9896" ~ "if_t\8322_9898",
             "t\8321_9897" ~ "if_t\8322_9898",
@@ -91,119 +90,115 @@ tests =
                 ("t\8323_9899", Right "if_t\8322_9898")
               ]
           ),
-
       testCase "empty" $
         testSolve [] mempty mempty ([], mempty),
-
       testCase "b_1 ~ a_0" $
         testSolve
           ["b_1" ~ "a_0"]
           mempty
           (M.fromList [tvFree "b_1" 0])
           ([], M.fromList [("b_1", Right "a_0")]),
-
       testCase "a_0 ~ b_1" $
         testSolve
           ["a_0" ~ "b_1"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0])
           ([("b_1", Unlifted)], M.fromList [("a_0", Right "b_1")]),
-
       testCase "multiple" $
         testSolve
           ["b_1" ~ "a_0", "d_3" ~ "c_2", "e_4" ~ "c_2", "c_2" ~ "a_0"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0, tvFree "e_4" 0])
           ([("a_0", Unlifted)], M.fromList [("b_1", Right "a_0"), ("c_2", Right "a_0"), ("d_3", Right "a_0"), ("e_4", Right "a_0")]),
-
       testCase "Two variables" $
         testSolve
           ["a_0" ~ "b_1", "c_2" ~ "d_3"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "c_2" 0])
           ([], M.fromList [("a_0", Right "b_1"), ("c_2", Right "d_3")]),
-
       testCase "i32 + (i32 + i32)" $
         testSolve
-          ["i32 -> i32 -> a_0" ~ "i32 -> i32 -> i32",
-           "i32 -> a_0 -> b_1" ~ "i32 -> i32 -> i32"]
+          [ "i32 -> i32 -> a_0" ~ "i32 -> i32 -> i32",
+            "i32 -> a_0 -> b_1" ~ "i32 -> i32 -> i32"
+          ]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0])
           ([], M.fromList [("a_0", Right "i32"), ("b_1", Right "i32")]),
-
       testCase "((λx -> λy -> x * y) i32) i32" $
         testSolve
-          ["a_0 -> b_1 -> c_2" ~ "i32 -> i32 -> i32",
-           "a_0 -> b_1 -> c_2" ~ "i32 -> d_3",
-           "d_3" ~ "i32 -> e_4"]
+          [ "a_0 -> b_1 -> c_2" ~ "i32 -> i32 -> i32",
+            "a_0 -> b_1 -> c_2" ~ "i32 -> d_3",
+            "d_3" ~ "i32 -> e_4"
+          ]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0, tvFree "e_4" 0])
-          ([], M.fromList [
-                           ("a_0", Right "i32"),
-                           ("b_1", Right "i32"),
-                           ("c_2", Right "i32"),
-                           ("d_3", Right "i32 -> i32"),
-                           ("e_4", Right "i32")
-                          ]),
-
+          ( [],
+            M.fromList
+              [ ("a_0", Right "i32"),
+                ("b_1", Right "i32"),
+                ("c_2", Right "i32"),
+                ("d_3", Right "i32 -> i32"),
+                ("e_4", Right "i32")
+              ]
+          ),
       testCase "rec λf -> λn -> if n == 0 then 1 else n * (f (n - 1))" $
         testSolve
-          ["b_1 -> i32 -> c_2" ~ "i32 -> i32 -> bool",
-           "b_1 -> i32 -> d_3" ~ "i32 -> i32 -> i32",
-           "a_0" ~ "d_3 -> e_4",
-           "b_1 -> e_4 -> f_5" ~ "i32 -> i32 -> i32",
-           "c_2" ~ "bool",
-           "i32" ~ "f_5",
-           "g_6 -> g_6" ~ "a_0 -> b_1 -> i32"]
+          [ "b_1 -> i32 -> c_2" ~ "i32 -> i32 -> bool",
+            "b_1 -> i32 -> d_3" ~ "i32 -> i32 -> i32",
+            "a_0" ~ "d_3 -> e_4",
+            "b_1 -> e_4 -> f_5" ~ "i32 -> i32 -> i32",
+            "c_2" ~ "bool",
+            "i32" ~ "f_5",
+            "g_6 -> g_6" ~ "a_0 -> b_1 -> i32"
+          ]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0, tvFree "e_4" 0, tvFree "f_5" 0, tvFree "g_6" 0])
-          ([], M.fromList [
-                  ("a_0", Right "i32 -> i32"),
-                  ("b_1", Right "i32"),
-                  ("c_2", Right "bool"),
-                  ("d_3", Right "i32"),
-                  ("e_4", Right "i32"),
-                  ("f_5", Right "i32"),
-                  ("g_6", Right "i32 -> i32")
-                ]),
+          ( [],
+            M.fromList
+              [ ("a_0", Right "i32 -> i32"),
+                ("b_1", Right "i32"),
+                ("c_2", Right "bool"),
+                ("d_3", Right "i32"),
+                ("e_4", Right "i32"),
+                ("f_5", Right "i32"),
+                ("g_6", Right "i32 -> i32")
+              ]
+          ),
       testCase "let id = λx -> x in id id" $
         testSolve
           ["b_1 -> b_1" ~ "(c_2 -> c_2) -> d_3"]
           mempty
           (M.fromList [tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
-          ([("c_2", Unlifted)], M.fromList [
-            ("b_1", Right "c_2 -> c_2"),
-            ("d_3", Right "c_2 -> c_2")
-          ]),
-
+          ( [("c_2", Unlifted)],
+            M.fromList
+              [ ("b_1", Right "c_2 -> c_2"),
+                ("d_3", Right "c_2 -> c_2")
+              ]
+          ),
       testCase "a_0 ~ i32" $
         testSolve
           ["a_0" ~ "i32"]
           mempty
           (M.fromList [tvFree "a_0" 0])
           ([], M.fromList [("a_0", Right "i32")]),
-
       testCase "a_0 ~ a_0" $
         testSolve
           ["a_0" ~ "a_0"]
           mempty
           (M.fromList [tvFree "a_0" 0])
           ([("a_0", Unlifted)], mempty),
-
       testCase "non-unifiable types" $
         testSolveFail
           ["a_0" ~ "i32", "a_0" ~ "bool"]
           mempty
           (M.fromList [tvFree "a_0" 0])
           ".?([Cc]annot unify).?",
-
       testCase "infinite type (function) 1" $
         testSolveFail
           ["a_0" ~ "a_0 -> b_1"]
           mempty
           (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
-
       -- ! This case acts weird for the original implementation.
       testCase "infinite type (function) 2" $
         testSolveFail
@@ -211,28 +206,24 @@ tests =
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
           ".?([Oo]ccurs check).?",
-
       testCase "infinite type (list)" $
         testSolveFail
           ["a_0" ~ "[]a_0"]
           mempty
           (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
-
       testCase "infinite type (tuple)" $
         testSolveFail
           ["a_0" ~ "(a_0, bool)"]
           mempty
           (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
-
       testCase "infinite type (record) 1" $
         testSolveFail
           ["a_0" ~ "{foo: a_0, bar: f32}"]
           mempty
           (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
-
       -- ! This case never finishes for the original implementation.
       testCase "infinite type (record) 2" $
         testSolveFail
@@ -240,21 +231,18 @@ tests =
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0])
           ".?([Oo]ccurs check).?",
-
       testCase "infinite type (record) 3" $
         testSolveFail
           ["a_0" ~ "{foo: b_1}", "c_2" ~ "b_1", "a_0" ~ "c_2"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0])
           ".?([Oo]ccurs check).?",
-
       testCase "infinite type (record) 4" $
         testSolveFail
           ["a_0" ~ "{foo: b_1}", "c_2" ~ "b_1", "d_3" ~ "c_2", "a_0" ~ "c_2"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
           ".?([Oo]ccurs check).?",
-
       -- testCase "infinite type (sum type)" $
       --   testSolveFail
       --     ["a_0" ~ "#foo a_0"]
@@ -268,7 +256,6 @@ tests =
           mempty
           (M.fromList [tvFree "a_0" 0])
           ".?([Oo]ccurs check).?",
-
       -- ! This case acts weird for the original implementation.
       testCase "infinite type (nested)" $
         testSolveFail
@@ -276,156 +263,150 @@ tests =
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0])
           ".?([Oo]ccurs check).?",
-
       testCase "vector and 2D matrix" $
         testSolveFail
           ["a_0" ~ "[]i32", "a_0" ~ "[][]i32"]
           mempty
           (M.fromList [tvFree "a_0" 0])
           ".?([Cc]annot unify).?",
-
       testCase "different array types" $
         testSolveFail
           ["a_0" ~ "[]f64", "a_0" ~ "[]i64"]
           mempty
           (M.fromList [tvFree "a_0" 0])
           ".?([Cc]annot unify).?",
-
       testCase "simple record" $
         testSolve
           ["a_0" ~ "{foo: i32, bar: bool}"]
           mempty
           (M.fromList [tvFree "a_0" 0])
           ([], M.fromList [("a_0", Right "{foo: i32, bar: bool}")]),
-
       testCase "record 2" $
         testSolve
           ["a_0" ~ "{foo: b_1, bar: c_2}", "b_1" ~ "c_2", "c_2" ~ "i64"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0])
-          ([], M.fromList
-                [("a_0", Right "{foo: i64, bar: i64}"),
-                 ("b_1", Right "i64"),
-                 ("c_2", Right "i64")
-                ]
+          ( [],
+            M.fromList
+              [ ("a_0", Right "{foo: i64, bar: i64}"),
+                ("b_1", Right "i64"),
+                ("c_2", Right "i64")
+              ]
           ),
-
       testCase "record 3" $
         testSolve
           ["a_0" ~ "{foo: b_1, bar: c_2}", "b_1" ~ "c_2"]
           (M.fromList [typaram "c_2" 0 Lifted])
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0])
-          ([], M.fromList
-                [("a_0", Right "{foo: c_2, bar: c_2}"),
-                 ("b_1", Right "c_2")
-                ]
+          ( [],
+            M.fromList
+              [ ("a_0", Right "{foo: c_2, bar: c_2}"),
+                ("b_1", Right "c_2")
+              ]
           ),
-
       testCase "tuple" $
         testSolve
           ["a_0" ~ "(b_1, c_2, d_3)", "c_2" ~ "d_3"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0, tvFree "c_2" 0, tvFree "d_3" 0])
-          ([("b_1", Unlifted), ("d_3", Unlifted)],
-           M.fromList
-            [("a_0", Right "(b_1, d_3, d_3)"),
-             ("c_2", Right "d_3")
-            ]
+          ( [("b_1", Unlifted), ("d_3", Unlifted)],
+            M.fromList
+              [ ("a_0", Right "(b_1, d_3, d_3)"),
+                ("c_2", Right "d_3")
+              ]
           ),
-
       testCase "compatible levels" $
         testSolve
           ["a_0" ~ "b_1"]
           (M.fromList [typaram "a_0" 0 Unlifted])
           (M.fromList [tvFree "b_1" 1])
           ([], M.fromList [("b_1", Right "a_0")]),
-
       testCase "scope violation 1" $
         testSolveFail
           ["a_0" ~ "b_1"]
           (M.fromList [typaram "b_1" 1 Unlifted])
           (M.fromList [tvFree "a_0" 0])
           ".?(scope violation).?",
-
       testCase "scope violation 2" $
         testSolveFail
           ["a_0" ~ "b_1", "b_1" ~ "c_2"]
           (M.fromList [typaram "c_2" 1 Unlifted])
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 1])
-          ".?(scope violation).?",          
-
+          ".?(scope violation).?",
       testCase "differently sized tuples" $
         testSolveFail
           ["a_0" ~ "(i32, c_2)", "b_1" ~ "(i32, c_2, bool)", "a_0" ~ "b_1"]
           mempty
           (M.fromList [tvFree "a_0" 0, tvFree "b_1" 0])
           ".?([Cc]annot unify).?",
-
       testCase "Prim type last substitution" $
         testSolve
-          [
-            "t\8321_8321" ~ "num\8320_8320",
+          [ "t\8321_8321" ~ "num\8320_8320",
             "index\8322_8322" ~ "index_elem\8323_8323",
             "[]t_0" ~ "[]index_elem\8323_8323"
           ]
           (M.fromList [typaram "t_0" 0 Unlifted])
-          (M.fromList [
-            ("num\8320_8320", (2,TyVarPrim NoLoc [Signed Int8,Signed Int16,Signed Int32,Signed Int64,Unsigned Int8,Unsigned Int16,Unsigned Int32,Unsigned Int64,FloatType Float16,FloatType Float32,FloatType Float64])),
-            ("t\8321_8321",(2, TyVarPrim NoLoc [Signed Int8,Signed Int16,Signed Int32,Signed Int64])),
-            ("index\8322_8322", (2,TyVarFree NoLoc Unlifted)),
-            ("index_elem\8323_8323", (2,TyVarFree NoLoc Unlifted))
-          ])
-          ([], M.fromList [
-            ("num\8320_8320", Left [Signed Int8,Signed Int16,Signed Int32,Signed Int64]),
-            ("t\8321_8321", Left [Signed Int8,Signed Int16,Signed Int32,Signed Int64]),
-            ("index\8322_8322",Right "t_0"),
-            ("index_elem\8323_8323",Right "t_0")
-          ]),
-      
+          ( M.fromList
+              [ ("num\8320_8320", (2, TyVarPrim NoLoc [Signed Int8, Signed Int16, Signed Int32, Signed Int64, Unsigned Int8, Unsigned Int16, Unsigned Int32, Unsigned Int64, FloatType Float16, FloatType Float32, FloatType Float64])),
+                ("t\8321_8321", (2, TyVarPrim NoLoc [Signed Int8, Signed Int16, Signed Int32, Signed Int64])),
+                ("index\8322_8322", (2, TyVarFree NoLoc Unlifted)),
+                ("index_elem\8323_8323", (2, TyVarFree NoLoc Unlifted))
+              ]
+          )
+          ( [],
+            M.fromList
+              [ ("num\8320_8320", Left [Signed Int8, Signed Int16, Signed Int32, Signed Int64]),
+                ("t\8321_8321", Left [Signed Int8, Signed Int16, Signed Int32, Signed Int64]),
+                ("index\8322_8322", Right "t_0"),
+                ("index_elem\8323_8323", Right "t_0")
+              ]
+          ),
       testCase "record with polymorphic fields" $
         testSolve
-          ["d_3" ~ "{foo: e_4, bar: f_5}",
-           "e_4" ~ "i32",
-           "f64" ~ "f_5",
-           "a_0" ~ "d_3"
+          [ "d_3" ~ "{foo: e_4, bar: f_5}",
+            "e_4" ~ "i32",
+            "f64" ~ "f_5",
+            "a_0" ~ "d_3"
           ]
           mempty
-          (M.fromList [
-            tvRecord "a_0" 0 $ M.fromList [("foo", Scalar (Prim (Signed Int32))),
-                                           ("bar", Scalar (Prim (FloatType Float64)))], 
-            tvFree "d_3" 0,
-            tvFree "e_4" 0,
-            tvFree "f_5" 0
-          ])
-          ([], M.fromList [
-            ("a_0", Right "{foo: i32, bar: f64}"),
-            ("d_3", Right "{foo: i32, bar: f64}"),
-            ("e_4", Right "i32"),
-            ("f_5", Right "f64")
-          ]),
-
-      testCase "opaque type" $ 
+          ( M.fromList
+              [ tvRecord "a_0" 0 $
+                  M.fromList
+                    [ ("foo", Scalar (Prim (Signed Int32))),
+                      ("bar", Scalar (Prim (FloatType Float64)))
+                    ],
+                tvFree "d_3" 0,
+                tvFree "e_4" 0,
+                tvFree "f_5" 0
+              ]
+          )
+          ( [],
+            M.fromList
+              [ ("a_0", Right "{foo: i32, bar: f64}"),
+                ("d_3", Right "{foo: i32, bar: f64}"),
+                ("e_4", Right "i32"),
+                ("f_5", Right "f64")
+              ]
+          ),
+      testCase "opaque type" $
         testSolveFail
           ["a_0" ~ "i32"]
           mempty
           mempty
           ".?([Cc]annot unify).?",
-
-      testCase "liftedness propagation (Lifted -> SizeLifted)" $ 
+      testCase "liftedness propagation (Lifted -> SizeLifted)" $
         testSolve
           ["a_0" ~ "b_1"]
           mempty
           (M.fromList [("a_0", (0, TyVarFree mempty SizeLifted)), ("b_1", (0, TyVarFree mempty Lifted))])
           ([("b_1", SizeLifted)], M.fromList [("a_0", Right "b_1")]),
-
-      testCase "liftedness propagation (Lifted -> Unlifted)" $ 
+      testCase "liftedness propagation (Lifted -> Unlifted)" $
         testSolve
           ["a_0" ~ "b_1"]
           mempty
           (M.fromList [("a_0", (0, TyVarFree mempty Unlifted)), ("b_1", (0, TyVarFree mempty Lifted))])
           ([("b_1", Unlifted)], M.fromList [("a_0", Right "b_1")]),
-
-      testCase "liftedness propagation (SizeLifted -> Unlifted)" $ 
+      testCase "liftedness propagation (SizeLifted -> Unlifted)" $
         testSolve
           ["a_0" ~ "b_1"]
           mempty

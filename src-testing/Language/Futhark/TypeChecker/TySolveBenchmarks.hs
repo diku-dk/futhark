@@ -2,6 +2,8 @@ module Language.Futhark.TypeChecker.TySolveBenchmarks (benchmarks) where
 
 import Criterion (Benchmark, bench, bgroup, whnf)
 import Data.Map qualified as M
+import Generated.AllFutBenchmarks (allFutBenchmarkCases)
+import Language.Futhark (qualName)
 import Language.Futhark.Syntax
 import Language.Futhark.SyntaxTests ()
 import Language.Futhark.TypeChecker.Constraints
@@ -10,13 +12,11 @@ import Language.Futhark.TypeChecker.Constraints
     Reason (..),
     TyParams,
     TyVarInfo (..),
-    TyVars
+    TyVars,
   )
 import Language.Futhark.TypeChecker.Monad (TypeError (..))
 import Language.Futhark.TypeChecker.TySolve as N (Solution, UnconTyVar, solve)
 import Language.Futhark.TypeChecker.TySolveOld as O (solve)
-import Language.Futhark (qualName)
-import Generated.AllFutBenchmarks (allFutBenchmarkCases)
 
 (~) :: TypeBase () NoUniqueness -> TypeBase () NoUniqueness -> CtTy ()
 t1 ~ t2 = CtEq (Reason mempty) t1 t2
@@ -40,66 +40,64 @@ solveOld ::
   Either TypeError ([UnconTyVar], Solution)
 solveOld (constraints, typarams, tyvars) = O.solve constraints typarams tyvars
 
-              
 generateContraints :: Int -> ([CtTy ()], TyParams, TyVars ())
 generateContraints num_vars
   | num_vars <= 0 =
-    ([], mempty, mempty)
+      ([], mempty, mempty)
   | num_vars == 1 =
-    let v0_name = VName (nameFromString "v_0") 0
-        ty_vars = M.fromList [tv v0_name 0]
-     in ([], mempty, ty_vars)
-  | otherwise = 
-    let var_names =
-          [ VName (nameFromString ("v_" ++ show i)) i
-            | i <- [0 .. num_vars - 1]
-          ]
+      let v0_name = VName (nameFromString "v_0") 0
+          ty_vars = M.fromList [tv v0_name 0]
+       in ([], mempty, ty_vars)
+  | otherwise =
+      let var_names =
+            [ VName (nameFromString ("v_" ++ show i)) i
+              | i <- [0 .. num_vars - 1]
+            ]
 
-        ty_vars = M.fromList $ map (`tv` 0) var_names
+          ty_vars = M.fromList $ map (`tv` 0) var_names
 
-        mkTy :: VName -> TypeBase () NoUniqueness
-        mkTy v = Scalar (TypeVar NoUniqueness (qualName v) [])
+          mkTy :: VName -> TypeBase () NoUniqueness
+          mkTy v = Scalar (TypeVar NoUniqueness (qualName v) [])
 
-        cts = zipWith (\v_i v_j -> mkTy v_i ~ mkTy v_j)
-                      (init var_names)
-                      (tail var_names)
-                      ++ ["v_0" ~ "i32"]
+          cts =
+            zipWith
+              (\v_i v_j -> mkTy v_i ~ mkTy v_j)
+              (init var_names)
+              (tail var_names)
+              ++ ["v_0" ~ "i32"]
 
-        ty_params = mempty
-     in 
-      (cts, ty_params, ty_vars)
+          ty_params = mempty
+       in (cts, ty_params, ty_vars)
 
 trivial :: ([CtTy ()], TyParams, TyVars ())
-trivial = ( ["a_0" ~ "b_1"],
-                mempty,
-                M.fromList [tv "a_0" 0]
-          )
-  
-benchmarks :: [Benchmark]
-benchmarks = 
+trivial =
+  ( ["a_0" ~ "b_1"],
+    mempty,
+    M.fromList [tv "a_0" 0]
+  )
+
+benchmarks :: Benchmark
+benchmarks =
   let start = 20
       end = 1000
       i = 20
       sizes = [start, start + i .. end]
-  in
-  [ 
-    bgroup "TySolveNewSynthetic" $
-      map (\n -> bench ("solveNew: " ++ show n ++ " variables") $ whnf solveNew (generateContraints n)) sizes
-
-  , bgroup "TySolveNewConverted" $
-      map (\(name, dataCase) -> bench name $ whnf solveNew dataCase) allFutBenchmarkCases
-
-  , bgroup "TySolveNewMisc" [
-      bench "Trivial" $ whnf solveNew trivial
-  ]
-
-  , bgroup "TySolveOldSynthetic" $
-      map (\n -> bench ("solveOld: " ++ show n ++ " variables") $ whnf solveOld (generateContraints n)) sizes
-
-  , bgroup "TySolveOldConverted" $
-      map (\(name, dataCase) -> bench name $ whnf solveOld dataCase) allFutBenchmarkCases
-
-  , bgroup "TySolveOldMisc" [
-      bench "Trivial" $ whnf solveOld trivial
-  ]
-  ]
+   in bgroup
+        "TySolve"
+        [ bgroup "TySolveNewSynthetic" $
+            map (\n -> bench ("solveNew: " ++ show n ++ " variables") $ whnf solveNew (generateContraints n)) sizes,
+          bgroup "TySolveNewConverted" $
+            map (\(name, dataCase) -> bench name $ whnf solveNew dataCase) allFutBenchmarkCases,
+          bgroup
+            "TySolveNewMisc"
+            [ bench "Trivial" $ whnf solveNew trivial
+            ],
+          bgroup "TySolveOldSynthetic" $
+            map (\n -> bench ("solveOld: " ++ show n ++ " variables") $ whnf solveOld (generateContraints n)) sizes,
+          bgroup "TySolveOldConverted" $
+            map (\(name, dataCase) -> bench name $ whnf solveOld dataCase) allFutBenchmarkCases,
+          bgroup
+            "TySolveOldMisc"
+            [ bench "Trivial" $ whnf solveOld trivial
+            ]
+        ]
