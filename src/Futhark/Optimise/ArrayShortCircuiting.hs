@@ -118,14 +118,14 @@ replaceInStm ::
   (Mem rep inner, LetDec rep ~ LetDecMem) =>
   Stm rep ->
   UpdateM (inner rep) (Stm rep)
-replaceInStm (Let (Pat elems) (StmAux c a d) e) = do
+replaceInStm (Let (Pat elems) (StmAux c a loc d) e) = do
   elems' <- mapM replaceInPatElem elems
   e' <- replaceInExp elems' e
   entries <- asks (M.elems . envCoalesceTab)
   let c' = case filter (\entry -> (map patElemName elems `L.intersect` M.keys (vartab entry)) /= []) entries of
         [] -> c
         entries' -> c <> foldMap certs entries'
-  pure $ Let (Pat elems') (StmAux c' a d) e'
+  pure $ Let (Pat elems') (StmAux c' a loc d) e'
   where
     replaceInPatElem :: PatElem LetDecMem -> UpdateM inner (PatElem LetDecMem)
     replaceInPatElem p@(PatElem vname (MemArray _ _ u _)) =

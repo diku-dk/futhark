@@ -1,3 +1,5 @@
+-- | Multicore code generation for SegScan. Uses a fairly naive multipass
+-- algorithm, with no particular locality optimisations.
 module Futhark.CodeGen.ImpGen.Multicore.SegScan
   ( compileSegScan,
   )
@@ -12,7 +14,7 @@ import Futhark.IR.MCMem
 import Futhark.Util.IntegralExp (quot, rem)
 import Prelude hiding (quot, rem)
 
--- Compile a SegScan construct
+-- | Compile a SegScan construct.
 compileSegScan ::
   Pat LetDecMem ->
   SegSpace ->

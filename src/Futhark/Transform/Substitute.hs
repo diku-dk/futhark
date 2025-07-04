@@ -80,10 +80,11 @@ instance Substitute Attrs where
   substituteNames _ attrs = attrs
 
 instance (Substitute dec) => Substitute (StmAux dec) where
-  substituteNames substs (StmAux cs attrs dec) =
+  substituteNames substs (StmAux cs attrs loc dec) =
     StmAux
       (substituteNames substs cs)
       (substituteNames substs attrs)
+      loc
       (substituteNames substs dec)
 
 instance (Substitute dec) => Substitute (Param dec) where

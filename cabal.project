@@ -1,5 +1,6 @@
 packages: futhark.cabal
-index-state: 2025-05-28T09:14:26Z
+index-state: 2025-07-03T02:06:05Z
+multi-repl: True
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
@@ -10,3 +11,5 @@ source-repository-package
     tag: 1f276aa19861203ea8367dc27a6ad4c8a31c9062
 
 allow-newer: base, template-haskell, ghc-prim
+
+multi-repl: True

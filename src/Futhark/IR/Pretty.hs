@@ -148,9 +148,15 @@ stmCertAnnots = certAnnots . stmAuxCerts . stmAux
 instance Pretty Attrs where
   pretty = hsep . attrAnnots
 
+prettyLoc :: Loc -> Doc a
+prettyLoc = pretty . locText
+
+instance Pretty Provenance where
+  pretty (Provenance locs loc) = mconcat $ punctuate "->" $ map prettyLoc $ locs ++ [loc]
+
 instance (Pretty dec) => Pretty (StmAux dec) where
-  pretty (StmAux cs attrs dec) =
-    braces $ mconcat $ punctuate semi [pretty cs, pretty attrs, pretty dec]
+  pretty (StmAux cs attrs p dec) =
+    braces $ mconcat $ punctuate semi [pretty cs, pretty attrs, pretty p, pretty dec]
 
 instance (Pretty t) => Pretty (Pat t) where
   pretty (Pat xs) = braces $ commastack $ map pretty xs
@@ -164,13 +170,18 @@ instance (Pretty t) => Pretty (Param t) where
 
 instance (PrettyRep rep) => Pretty (Stm rep) where
   pretty stm@(Let pat aux e) =
-    align . hang 2 $
+    (locstr <>) . align . hang 2 $
       "let"
         <+> align (pretty pat)
         <+> case stmannot of
           [] -> equals </> pretty e
           _ -> equals </> (stack stmannot </> pretty e)
     where
+      locstr =
+        if stmAuxLoc aux == mempty
+          then mempty
+          else dquotes (pretty (stmAuxLoc aux)) <> line
+
       stmannot =
         concat
           [ maybeToList (ppExpDec (stmAuxDec aux) e),
@@ -243,8 +254,8 @@ instance Pretty BasicOp where
     "concat" <> "@" <> pretty i <> apply (pretty w : pretty x : map pretty xs)
   pretty (Manifest v perm) =
     "manifest" <> apply [pretty v, apply (map pretty perm)]
-  pretty (Assert e msg (loc, _)) =
-    "assert" <> apply [pretty e, pretty msg, pretty $ show $ locStr loc]
+  pretty (Assert e msg) =
+    "assert" <> apply [pretty e, pretty msg]
   pretty (UpdateAcc safety acc is v) =
     update_acc_str
       <> apply
@@ -312,12 +323,12 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
         MatchFallback -> " <fallback>"
         MatchEquiv -> " <equiv>"
   pretty (BasicOp op) = pretty op
-  pretty (Apply fname args ret (safety, _, _)) =
+  pretty (Apply fname args ret safety) =
     applykw
       <+> pretty (nameToString fname)
       <> apply (map (align . prettyArg) args)
         </> colon
-        <+> braces (commasep $ map prettyRet ret)
+        <+> braces (align $ commasep $ map prettyRet ret)
     where
       prettyArg (arg, Consume) = "*" <> pretty arg
       prettyArg (arg, _) = pretty arg

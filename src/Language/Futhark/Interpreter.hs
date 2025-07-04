@@ -1688,6 +1688,7 @@ initialCtx =
               case x of
                 (ValuePrim (UnsignedValue x')) ->
                   pure $ ValuePrim $ SignedValue x'
+                ValueAD {} -> pure x -- FIXME: these do not carry signs.
                 _ -> error $ "Cannot sign: " <> show x
       | "unsign_" `T.isPrefixOf` s =
           Just $
@@ -1695,6 +1696,7 @@ initialCtx =
               case x of
                 (ValuePrim (SignedValue x')) ->
                   pure $ ValuePrim $ UnsignedValue x'
+                ValueAD {} -> pure x -- FIXME: these do not carry signs.
                 _ -> error $ "Cannot unsign: " <> show x
     def s | "reduce" `T.isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
@@ -2137,11 +2139,19 @@ initialCtx =
               expectJust "jvp: differentiation failed" $
                 mapM
                   ( \on -> case on of
-                      -- If it is a JVP variable of the correct depth, return its primal and derivative
+                      -- If it is a JVP variable of the correct depth, return
+                      -- its primal and derivative
                       (ValueAD d (AD.JVP (AD.JVPValue pv dv)))
                         | d == depth -> Just (putAD pv, putAD dv)
                       -- Otherwise, its partial derivatives are all 0
-                      _ -> (on,) . ValuePrim . putV . P.blankPrimValue . P.primValueType . AD.primitive <$> getAD on
+                      _ ->
+                        (on,)
+                          . ValuePrim
+                          . putV
+                          . P.blankPrimValue
+                          . P.primValueType
+                          . AD.primitive
+                          <$> getAD on
                   )
                   o'
 
@@ -2153,15 +2163,11 @@ initialCtx =
         pure $ toTuple [ov, od]
       where
         modifyValue f v = snd $ valueAccum (\a b -> (a + 1, f a b)) 0 v
-        modifyValueM f v =
-          snd
-            <$> valueAccumLM
-              ( \a b -> do
-                  b' <- f a b
-                  pure (a + 1, b')
-              )
-              0
-              v
+        modifyValueM f v = snd <$> valueAccumLM step 0 v
+          where
+            step a b = do
+              b' <- f a b
+              pure (a + 1, b')
 
         expectJust _ (Just v) = v
         expectJust s Nothing = error s
