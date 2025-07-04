@@ -3,6 +3,7 @@
 -- | Code generation for CUDA.
 module Futhark.CodeGen.Backends.CCUDA
   ( compileProg,
+    compileProgWithTC,
     GC.CParts (..),
     GC.asLibrary,
     GC.asExecutable,
@@ -17,6 +18,7 @@ import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.ImpGen.CUDA qualified as ImpGen
+import Futhark.CodeGen.ImpGen.CUDATC qualified as ImpGenTC
 import Futhark.CodeGen.RTS.C (backendsCudaH)
 import Futhark.IR.GPUMem hiding
   ( CmpSizeLe,
@@ -102,6 +104,25 @@ cliOptions =
            }
        ]
 
+tensorCoreOptions :: [Option]
+tensorCoreOptions =
+  [ Option
+      { optionLongName = "cutlass-include",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "FILE",
+        optionDescription = "Include path for cutlass/include",
+        optionAction =
+          [C.cstm|{
+            size_t len = strlen(optarg);          
+            size_t needed = len + 2;
+            char *include_path = strdup("-I");
+            include_path = (char *)realloc(include_path, needed + 1);
+            strncat(include_path, optarg, needed);      
+            futhark_context_config_add_nvrtc_option(cfg, include_path);
+          }|]
+      }
+  ]
+
 cudaMemoryType :: GC.MemoryType OpenCL ()
 cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
 cudaMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
@@ -123,6 +144,42 @@ compileProg version prog = do
       cuda_includes
       (Space "device", [Space "device", DefaultSpace])
       cliOptions
+      prog'
+  where
+    operations :: GC.Operations OpenCL ()
+    operations =
+      gpuOperations
+        { GC.opsMemoryType = cudaMemoryType,
+          GC.opsCritical =
+            ( [C.citems|CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cu_ctx));|],
+              [C.citems|CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cu_ctx));|]
+            )
+        }
+    cuda_includes =
+      [untrimming|
+       #include <cuda.h>
+       #include <cuda_runtime.h>
+       #include <nvrtc.h>
+      |]
+
+-- | Like @compileProg@ but adds tensor core support.
+compileProgWithTC :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
+compileProgWithTC version prog = do
+  ( ws,
+    Program cuda_code cuda_prelude macros kernels types params failures prog'
+    ) <-
+    ImpGenTC.compileProg prog
+  (ws,)
+    <$> GC.compileProg
+      "cudatc"
+      version
+      params
+      operations
+      (mkBoilerplate (cuda_prelude <> cuda_code) macros kernels types failures)
+      cuda_includes
+      (Space "device", [Space "device", DefaultSpace])
+      -- TODO(k): Option specifically for cutlass include path?
+      (tensorCoreOptions ++ cliOptions)
       prog'
   where
     operations :: GC.Operations OpenCL ()
