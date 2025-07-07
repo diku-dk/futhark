@@ -84,6 +84,6 @@ compileSegScan pat lvl space map_kbody scan_ops post_op =
     emit $ Imp.DebugPrint "" Nothing
   where
     n = product $ map pe64 $ segSpaceDims space
-    targetSupportsSinglePass CUDA = True
-    targetSupportsSinglePass HIP = True
+    targetSupportsSinglePass CUDA = False -- True
+    targetSupportsSinglePass HIP = False -- True
     targetSupportsSinglePass _ = False

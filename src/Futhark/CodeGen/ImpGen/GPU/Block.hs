@@ -395,8 +395,7 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space ts body scans post_op))) = d
           (kernelResultSubExp res)
           []
 
-  fence <- fenceForArrays $ patNames pat
-  sOp $ Imp.ErrorSync fence
+  sOp . Imp.Barrier =<< fenceForArrays scan_out
 
   let segment_size = last dims'
       crossesSegment from to =
@@ -432,6 +431,8 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space ts body scans post_op))) = d
     scopeOfLParams $
       lambdaParams $
         segPostOpLambda post_op
+
+  sOp . Imp.Barrier =<< fenceForArrays (scan_out ++ map_out)
 
   blockCoverSegSpace (segVirt lvl) space $ do
     sComment "bind scan results to post lambda params" $ do
