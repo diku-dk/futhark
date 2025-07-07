@@ -23,10 +23,11 @@ import Data.Set qualified as S
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
-import Futhark.Construct (fullSliceNum)
+import Futhark.Construct (fullSlice, fullSliceNum)
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
+import Futhark.IR.SOACS.SOAC (groupScatterResults)
 import Futhark.Transform.Rename
 import Futhark.Util (chunks, mapAccumLM, takeLast)
 import Futhark.Util.IntegralExp (divUp, rem)
@@ -365,15 +366,29 @@ compileBlockOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
       zipWithM_ (compileThreadResult space) (patElems pat) $
         kernelBodyResult body
   sOp $ Imp.ErrorSync Imp.FenceLocal
-compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
+compileBlockOp pat (Inner (SegOp (SegScan lvl space ts body scans post_op))) = do
   compileFlatId space
 
   let (ltids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
+      scan = head scans
+      shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
+      scan_ts = concatMap shpT scans
+      shpOfT t s =
+        arrayShape $
+          foldr (flip arrayOfRow) (arrayOfShape t s) $
+            segSpaceDims space
+      (scan_pars, map_pars) = splitAt (length $ segBinOpNeutral scan) $ lambdaParams $ segPostOpLambda post_op
+
+  scan_out <- forM scan_ts $ \(s, t) ->
+    sAllocArray "scan_out" (elemType t) (shpOfT t s) $ Space "shared"
+
+  map_out <- forM (drop (segBinOpResults scans) ts) $ \t ->
+    sAllocArray "map_out" (elemType t) (shpOfT t mempty) $ Space "shared"
 
   blockCoverSegSpace (segVirt lvl) space $
     compileStms mempty (kernelBodyStms body) $
-      forM_ (zip (patNames pat) $ kernelBodyResult body) $ \(dest, res) ->
+      forM_ (zip (scan_out ++ map_out) $ kernelBodyResult body) $ \(dest, res) ->
         copyDWIMFix
           dest
           (map Imp.le64 ltids)
@@ -391,12 +406,8 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
   -- array of scan elements, so we invent some new flattened arrays
   -- here.
   dims_flat <- dPrimV "dims_flat" $ product dims'
-  let scan = head scans
-      num_scan_results = length $ segBinOpNeutral scan
   arrs_flat <-
-    mapM (flattenArray (length dims') dims_flat) $
-      take num_scan_results $
-        patNames pat
+    mapM (flattenArray (length dims') dims_flat) scan_out
 
   case segVirt lvl of
     SegVirt ->
@@ -412,6 +423,37 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
         (product dims')
         (segBinOpLambda scan)
         arrs_flat
+
+  let (idxs, vals, map_res) = splitPostOpResults post_op $ fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+      groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
+      (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
+
+  dScope Nothing $
+    scopeOfLParams $
+      lambdaParams $
+        segPostOpLambda post_op
+
+  blockCoverSegSpace (segVirt lvl) space $ do
+    sComment "bind scan results to post lambda params" $ do
+      forM_ (zip scan_pars scan_out) $ \(par, acc) ->
+        copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 ltids)
+
+    sComment "bind map results to post lamda params" $
+      forM_ (zip map_pars map_out) $ \(par, out) -> do
+        copyDWIMFix (paramName par) [] (Var out) (map Imp.le64 ltids)
+
+    compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+      sComment "write scatter values." $
+        forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
+          forM_ idxs_vals $ \(is', val) -> do
+            arr_t <- lookupType arr
+            let rws' = map pe64 $ arrayDims arr_t
+                slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
+            sWhen (inBounds slice' rws') $
+              copyDWIM (patElemName pe) (unSlice slice') val []
+      sComment "write mapped values" $
+        forM_ (zip pat_map map_res) $ \(pe, res) ->
+          copyDWIMFix (patElemName pe) (map le64 ltids) res []
 compileBlockOp pat (Inner (SegOp (SegRed lvl space _ body ops))) = do
   compileFlatId space
 
