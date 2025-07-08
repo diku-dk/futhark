@@ -429,6 +429,8 @@ library
       Language.Futhark.TypeChecker.Consumption
       Language.Futhark.TypeChecker.Constraints
       Language.Futhark.TypeChecker.TySolve
+      Language.Futhark.TypeChecker.TySolveOld
+      Language.Futhark.TypeChecker.UnionFind
       Language.Futhark.TypeChecker.Error
       Language.Futhark.TypeChecker.Names
       Language.Futhark.TypeChecker.Match
@@ -523,6 +525,8 @@ library futhark-testing
   import: common
   hs-source-dirs: src-testing
   exposed-modules:
+      Generated.AllFutBenchmarks
+      Generated.AllFutBenchmarks.Accelerate.Nbody.Nbodybh
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
@@ -572,6 +576,8 @@ library futhark-testing
     , tasty-quickcheck
     , text
     , vector >=0.12
+    , srcloc
+    , regex-tdfa ^>= 1.3.2
 
 test-suite unit
   import: common
