@@ -77,22 +77,28 @@ trivial =
 
 benchmarks :: Benchmark
 benchmarks =
-  let start = 20
+  let start = 100
       end = 1000
-      i = 20
+      i = 100
       sizes = [start, start + i .. end]
    in bgroup
         "TySolve"
-        [ bgroup "TySolveNewSynthetic" $
-            map (\n -> bench ("solveNew: " ++ show n ++ " variables") $ whnf solveNew (generateContraints n)) sizes,
-          bgroup
-            "TySolveNewMisc"
-            [ bench "Trivial" $ whnf solveNew trivial
+        [ bgroup
+            "New"
+            [ bgroup "Synthetic" $
+                map (\n -> bench ("solveNew: " ++ show n ++ " variables") $ whnf solveNew (generateContraints n)) sizes,
+              bgroup
+                "Misc"
+                [ bench "Trivial" $ whnf solveNew trivial
+                ]
             ],
-          bgroup "TySolveOldSynthetic" $
-            map (\n -> bench ("solveOld: " ++ show n ++ " variables") $ whnf solveOld (generateContraints n)) sizes,
           bgroup
-            "TySolveOldMisc"
-            [ bench "Trivial" $ whnf solveOld trivial
+            "Old"
+            [ bgroup "Synthetic" $
+                map (\n -> bench ("solveOld: " ++ show n ++ " variables") $ whnf solveOld (generateContraints n)) sizes,
+              bgroup
+                "Misc"
+                [ bench "Trivial" $ whnf solveOld trivial
+                ]
             ]
         ]
