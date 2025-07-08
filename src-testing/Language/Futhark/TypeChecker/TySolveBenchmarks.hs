@@ -71,34 +71,29 @@ generateContraints num_vars
 
 benchmarks :: Benchmark
 benchmarks =
-  let start = 100
-      end = 1000
-      i = 100
-      sizes = [start, start + i .. end]
-   in bgroup
-        "TySolve"
-        [ bgroup
-            "New"
-            [ bgroup "Synthetic" $
-                map
-                  ( \n ->
-                      bench ("solveNew: " ++ show n ++ " variables") $
-                        whnf solveNew (generateContraints n)
-                  )
-                  sizes,
-              bgroup "Converted" $
-                map (\(name, dataCase) -> bench name $ whnf solveNew dataCase) allFutBenchmarkCases
-            ],
-          bgroup
-            "Old"
-            [ bgroup "Synthetic" $
-                map
-                  ( \n ->
-                      bench ("solveOld: " ++ show n ++ " variables") $
-                        whnf solveOld (generateContraints n)
-                  )
-                  sizes,
-              bgroup "Converted" $
-                map (\(name, dataCase) -> bench name $ whnf solveOld dataCase) allFutBenchmarkCases
-            ]
-        ]
+  bgroup
+    "TySolve"
+    [ bgroup "Synthetic" $
+        concatMap
+          ( \n ->
+              [ bench (show n ++ " variables (new)") $
+                  whnf solveNew (generateContraints n),
+                bench (show n ++ " variables (old)") $
+                  whnf solveOld (generateContraints n)
+              ]
+          )
+          sizes,
+      bgroup "Converted" $
+        concatMap
+          ( \(name, dataCase) ->
+              [ bench (name <> " (new)") $ whnf solveNew dataCase,
+                bench (name <> " (old)") $ whnf solveOld dataCase
+              ]
+          )
+          allFutBenchmarkCases
+    ]
+  where
+    start = 100
+    end = 1000
+    i = 100
+    sizes = [start, start + i .. end]
