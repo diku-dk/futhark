@@ -34,17 +34,19 @@ import Debug.Trace
 --- core function
 -----------------------------------
 
+-- Redundant: HasScope SOACS m, 
+
 applyHLsched ::
-  (HasScope SOACS m, MonadFreshNames m) =>
+  (LocalScope SOACS m, MonadFreshNames m) =>
   DepNode ->
   DepGraph ->
   m (Maybe DepGraph)
 applyHLsched node_to_fuse dg = do
   mb_sched <- parseHLSched node_to_fuse dg
   case mb_sched of
-    Just (env, SoacNode out_trsfs soac_pat soac _soac_aux, sched, patel_sched) -> do
+    Just (env, SoacNode out_trsfs soac_pat soac soac_aux, sched, patel_sched) -> do
       let (_valid_soac, exact_result) = isSupportedSOAC soac
-      stripmined_soac  <- applyStripmining env sched soac
+      stripmined_soac  <- applyStripmining env sched (soac_pat, soac_aux, soac)
       _rescheduled_soac <- applyPermutation sched stripmined_soac
       (_prologue, _epilogue) <-
         if exact_result
@@ -71,13 +73,13 @@ isSupportedSOAC soac
 isSupportedSOAC _ = (False, False)
 
 applyPermutation :: 
-    (HasScope SOACS m, MonadFreshNames m) =>
+    (LocalScope SOACS m, MonadFreshNames m) =>
     HLSched -> Maybe (H.SOAC SOACS) -> m (Maybe (H.SOAC SOACS))
 applyPermutation _sched Nothing     = pure Nothing
 applyPermutation _sched (Just soac) = pure $ Just soac
 
 mkProEpilogue ::
-    (HasScope SOACS m, MonadFreshNames m) =>
+    (LocalScope SOACS m, MonadFreshNames m) =>
     PatElem (LetDec SOACS) ->
     H.ArrayTransforms ->
     HLSched ->

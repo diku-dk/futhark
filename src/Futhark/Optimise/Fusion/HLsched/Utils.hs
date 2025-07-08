@@ -8,9 +8,11 @@ module Futhark.Optimise.Fusion.HLsched.Utils
   ( FwdTileTab
   , InvTileTab
   , Env (..)
+--  , emptyEnv
   , HLSched (..)
   , splitAtSched
   , addTileBinding
+  , addTransf2Env
   , getStmNode
   , expandScalar
   , parseHLSched
@@ -66,16 +68,23 @@ type InvTileTab = M.Map VName (PrimExp VName, Names)
 data Env = Env
   { appTilesFwd :: FwdTileTab,
     appTilesInv :: InvTileTab,
-    iotas       :: M.Map VName (PrimExp VName, SubExp, Stms SOACS)
+    iotas       :: M.Map VName (PrimExp VName, SubExp, Stms SOACS),
     -- ^ binds the name of an iota array to its size
+    scalars     :: M.Map VName (PrimExp VName),
+    -- ^ binds the name of a scalar var to its value expression
+    arrTransf   :: M.Map VName (VName, H.ArrayTransforms)
+    -- ^ binds the name of an array to its transformations
   } deriving Show
+
+emptyEnv :: Env
+emptyEnv = Env mempty mempty mempty mempty mempty
 
 addTileBinding :: Env -> PrimExp VName -> [VName] -> Env
 addTileBinding env pe tile_nms =
   let nms = namesFromList tile_nms
       fwdenv = M.insert pe nms $ appTilesFwd env
       bwdenv = foldl (foldfun nms) (appTilesInv env) tile_nms
-  in  Env { appTilesFwd = fwdenv, appTilesInv = bwdenv, iotas = iotas env }
+  in  Env { appTilesFwd = fwdenv, appTilesInv = bwdenv, iotas = iotas env, scalars = mempty, arrTransf = mempty }
   where
     foldfun nms env_cur nm = M.insert nm (pe, nms) env_cur
 
@@ -84,6 +93,14 @@ instance Pretty FwdTileTab where
 
 instance Pretty InvTileTab where
   pretty = pretty . M.toList
+
+addTransf2Env :: Env -> VName -> VName -> H.ArrayTransforms -> Env
+addTransf2Env env nm_new nm_old trsfs =
+  let (nm_old', trsfs') =
+       case M.lookup nm_old (arrTransf env) of
+         Nothing -> (nm_old, H.noTransforms)
+         Just (nm', trsf') -> (nm', trsf')
+  in env { arrTransf = M.insert nm_new (nm_old', trsfs' <> trsfs) (arrTransf env) }
 
 -------------------------------------------------------
 --- LMAD-Like Representation of a High-Level Schedule
@@ -269,7 +286,7 @@ parseHLSched node_to_fuse dg@DepGraph {dgGraph = g}
     --trace("graph: "++show g) True
   = do
   -- scope <- askScope
-  let env0 = Env mempty mempty mempty
+  let env0 = emptyEnv
   (_,    signals_pes) <- expandSymArrLit env0 dg inp_deps signals_arg
   (_,    origids_pes) <- expandSymArrLit env0 dg inp_deps orig_arg
   (_,    sigma_pes  ) <- expandSymArrLit env0 dg inp_deps sigma_arg
