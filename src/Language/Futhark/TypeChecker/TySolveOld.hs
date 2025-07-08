@@ -290,51 +290,51 @@ subTyVar reason bcs v t = do
   setInfo v (TyVarSol t)
 
   case (v_info, t) of
-    ( Just (Right (TyVarUnsol TyVarFree {})), _ ) -> pure ()
-    ( Just (Right (TyVarUnsol (TyVarPrim _ v_pts))), _ ) ->
-        if t `elem` map (Scalar . Prim) v_pts
-          then pure ()
-          else cannotUnify reason notes bcs (typeVar v) t
-        where
-          notes =
-            aNote $
-              "Cannot instantiate type that must be one of"
-                </> indent 2 (pretty v_pts)
-                </> "with"
-                </> indent 2 (pretty t)
-    ( Just (Right (TyVarUnsol (TyVarSum _ cs1))), Scalar (Sum cs2) ) ->
-        if all (`elem` M.keys cs2) (M.keys cs1)
-          then unifySharedConstructors reason bcs cs1 cs2
-          else cannotUnify reason notes bcs (typeVar v) t
-        where
-          notes =
-            aNote $
-              "Cannot match type with constructors"
-                </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs1)))
-                </> "with type with constructors"
-                </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs2)))
-                </> unsharedConstructorsMsg cs1 cs2
-    ( Just (Right (TyVarUnsol (TyVarSum _ cs1))), _ ) ->
-        typeError (locOf reason) mempty $
-          "Cannot unify type with constructors"
-            </> indent 2 (pretty (Sum cs1))
-            </> "with type"
-            </> indent 2 (pretty t)
-    ( Just (Right (TyVarUnsol (TyVarRecord _ fs1))), Scalar (Record fs2) ) ->
-        if all (`elem` M.keys fs2) (M.keys fs1)
-          then unifySharedFields reason bcs fs1 fs2
-          else
-            typeError (locOf reason) mempty $
-              "Cannot unify record type with fields"
-                </> indent 2 (pretty (Record fs1))
-                </> "with record type"
-                </> indent 2 (pretty (Record fs2))
-    ( Just (Right (TyVarUnsol (TyVarRecord _ fs1))), _ ) ->
-        typeError (locOf reason) mempty $
-          "Cannot unify record type with fields"
-            </> indent 2 (pretty (Record fs1))
-            </> "with type"
-            </> indent 2 (pretty t)
+    (Just (Right (TyVarUnsol TyVarFree {})), _) -> pure ()
+    (Just (Right (TyVarUnsol (TyVarPrim _ v_pts))), _) ->
+      if t `elem` map (Scalar . Prim) v_pts
+        then pure ()
+        else cannotUnify reason notes bcs (typeVar v) t
+      where
+        notes =
+          aNote $
+            "Cannot instantiate type that must be one of"
+              </> indent 2 (pretty v_pts)
+              </> "with"
+              </> indent 2 (pretty t)
+    (Just (Right (TyVarUnsol (TyVarSum _ cs1))), Scalar (Sum cs2)) ->
+      if all (`elem` M.keys cs2) (M.keys cs1)
+        then unifySharedConstructors reason bcs cs1 cs2
+        else cannotUnify reason notes bcs (typeVar v) t
+      where
+        notes =
+          aNote $
+            "Cannot match type with constructors"
+              </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs1)))
+              </> "with type with constructors"
+              </> indent 2 (stack (map (("#" <>) . pretty) (M.keys cs2)))
+              </> unsharedConstructorsMsg cs1 cs2
+    (Just (Right (TyVarUnsol (TyVarSum _ cs1))), _) ->
+      typeError (locOf reason) mempty $
+        "Cannot unify type with constructors"
+          </> indent 2 (pretty (Sum cs1))
+          </> "with type"
+          </> indent 2 (pretty t)
+    (Just (Right (TyVarUnsol (TyVarRecord _ fs1))), Scalar (Record fs2)) ->
+      if all (`elem` M.keys fs2) (M.keys fs1)
+        then unifySharedFields reason bcs fs1 fs2
+        else
+          typeError (locOf reason) mempty $
+            "Cannot unify record type with fields"
+              </> indent 2 (pretty (Record fs1))
+              </> "with record type"
+              </> indent 2 (pretty (Record fs2))
+    (Just (Right (TyVarUnsol (TyVarRecord _ fs1))), _) ->
+      typeError (locOf reason) mempty $
+        "Cannot unify record type with fields"
+          </> indent 2 (pretty (Record fs1))
+          </> "with type"
+          </> indent 2 (pretty t)
     --
     -- Internal error cases
     (Just (Right TyVarSol {}), _) ->
