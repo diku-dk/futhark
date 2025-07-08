@@ -2,6 +2,7 @@ module Language.Futhark.TypeChecker.TySolveBenchmarks (benchmarks) where
 
 import Criterion (Benchmark, bench, bgroup, whnf)
 import Data.Map qualified as M
+import Generated.AllFutBenchmarks
 import Language.Futhark (qualName)
 import Language.Futhark.Syntax
 import Language.Futhark.SyntaxTests ()
@@ -68,13 +69,6 @@ generateContraints num_vars
           ty_params = mempty
        in (cts, ty_params, ty_vars)
 
-trivial :: ([CtTy ()], TyParams, TyVars ())
-trivial =
-  ( ["a_0" ~ "b_1"],
-    mempty,
-    M.fromList [tv "a_0" 0]
-  )
-
 benchmarks :: Benchmark
 benchmarks =
   let start = 100
@@ -86,19 +80,25 @@ benchmarks =
         [ bgroup
             "New"
             [ bgroup "Synthetic" $
-                map (\n -> bench ("solveNew: " ++ show n ++ " variables") $ whnf solveNew (generateContraints n)) sizes,
-              bgroup
-                "Misc"
-                [ bench "Trivial" $ whnf solveNew trivial
-                ]
+                map
+                  ( \n ->
+                      bench ("solveNew: " ++ show n ++ " variables") $
+                        whnf solveNew (generateContraints n)
+                  )
+                  sizes,
+              bgroup "Converted" $
+                map (\(name, dataCase) -> bench name $ whnf solveNew dataCase) allFutBenchmarkCases
             ],
           bgroup
             "Old"
             [ bgroup "Synthetic" $
-                map (\n -> bench ("solveOld: " ++ show n ++ " variables") $ whnf solveOld (generateContraints n)) sizes,
-              bgroup
-                "Misc"
-                [ bench "Trivial" $ whnf solveOld trivial
-                ]
+                map
+                  ( \n ->
+                      bench ("solveOld: " ++ show n ++ " variables") $
+                        whnf solveOld (generateContraints n)
+                  )
+                  sizes,
+              bgroup "Converted" $
+                map (\(name, dataCase) -> bench name $ whnf solveOld dataCase) allFutBenchmarkCases
             ]
         ]

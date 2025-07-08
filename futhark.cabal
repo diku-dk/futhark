@@ -525,6 +525,8 @@ library futhark-testing
   import: common
   hs-source-dirs: src-testing
   exposed-modules:
+      Generated.AllFutBenchmarks
+      Generated.AllFutBenchmarks.Accelerate.Nbody.Nbodybh
       Futhark.AD.DerivativesTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Analysis.PrimExp.TableTests
