@@ -11,8 +11,10 @@ import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
+import Futhark.Construct (fullSlice)
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
+import Futhark.IR.SOACS.SOAC (groupScatterResults)
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
@@ -91,13 +93,13 @@ yParams scan =
 
 writeToScanValues ::
   [VName] ->
-  ([PatElem LetDecMem], SegBinOp GPUMem, [KernelResult]) ->
+  ([VName], SegBinOp GPUMem, [KernelResult]) ->
   InKernelGen ()
 writeToScanValues gtids (pes, scan, scan_res)
   | shapeRank (segBinOpShape scan) > 0 =
       forM_ (zip pes scan_res) $ \(pe, res) ->
         copyDWIMFix
-          (patElemName pe)
+          pe
           (map Imp.le64 gtids)
           (kernelResultSubExp res)
           []
@@ -107,13 +109,13 @@ writeToScanValues gtids (pes, scan, scan_res)
 
 readToScanValues ::
   [Imp.TExp Int64] ->
-  [PatElem LetDecMem] ->
+  [VName] ->
   SegBinOp GPUMem ->
   InKernelGen ()
 readToScanValues is pes scan
   | shapeRank (segBinOpShape scan) > 0 =
       forM_ (zip (yParams scan) pes) $ \(p, pe) ->
-        copyDWIMFix (paramName p) [] (Var (patElemName pe)) is
+        copyDWIMFix (paramName p) [] (Var pe) is
   | otherwise =
       pure ()
 
@@ -122,7 +124,7 @@ readCarries ::
   Imp.TExp Int64 ->
   [Imp.TExp Int64] ->
   [Imp.TExp Int64] ->
-  [PatElem LetDecMem] ->
+  [VName] ->
   SegBinOp GPUMem ->
   InKernelGen ()
 readCarries chunk_id chunk_offset dims' vec_is pes scan
@@ -135,7 +137,7 @@ readCarries chunk_id chunk_offset dims' vec_is pes scan
         ( do
             let is = unflattenIndex dims' $ chunk_offset - 1
             forM_ (zip (xParams scan) pes) $ \(p, pe) ->
-              copyDWIMFix (paramName p) [] (Var (patElemName pe)) (is ++ vec_is)
+              copyDWIMFix (paramName p) [] (Var pe) (is ++ vec_is)
         )
         ( forM_ (zip (xParams scan) (segBinOpNeutral scan)) $ \(p, ne) ->
             copyDWIMFix (paramName p) [] ne []
@@ -145,14 +147,14 @@ readCarries chunk_id chunk_offset dims' vec_is pes scan
 
 -- | Produce partially scanned intervals; one per threadblock.
 scanStage1 ::
-  Pat LetDecMem ->
+  [VName] ->
   Count NumBlocks SubExp ->
   Count BlockSize SubExp ->
   SegSpace ->
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen (TV Int32, Imp.TExp Int64, CrossesSegment)
-scanStage1 (Pat all_pes) num_tblocks tblock_size space scans kbody = do
+scanStage1 all_pes num_tblocks tblock_size space scans kbody = do
   let num_tblocks' = fmap pe64 num_tblocks
       tblock_size' = fmap pe64 tblock_size
   num_threads <- dPrimV "num_threads" $ sExt32 $ unCount num_tblocks' * unCount tblock_size'
@@ -196,23 +198,24 @@ scanStage1 (Pat all_pes) num_tblocks tblock_size space scans kbody = do
           in_bounds =
             foldl1 (.&&.) $ zipWith (.<.) (map Imp.le64 gtids) dims'
 
-          when_in_bounds = compileStms mempty (kernelBodyStms kbody) $ do
-            let (all_scan_res, map_res) =
-                  splitAt (segBinOpResults scans) $ kernelBodyResult kbody
-                per_scan_res =
-                  segBinOpChunks scans all_scan_res
+          when_in_bounds =
+            compileStms mempty (kernelBodyStms kbody) $ do
+              let (all_scan_res, map_res) =
+                    splitAt (segBinOpResults scans) $ kernelBodyResult kbody
+                  per_scan_res =
+                    segBinOpChunks scans all_scan_res
 
-            sComment "write to-scan values to parameters" $
-              mapM_ (writeToScanValues gtids) $
-                zip3 per_scan_pes scans per_scan_res
+              sComment "write to-scan values to parameters" $
+                mapM_ (writeToScanValues gtids) $
+                  zip3 per_scan_pes scans per_scan_res
 
-            sComment "write mapped values results to global memory" $
-              forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(pe, se) ->
-                copyDWIMFix
-                  (patElemName pe)
-                  (map Imp.le64 gtids)
-                  (kernelResultSubExp se)
-                  []
+              sComment "write mapped values results to global memory" $
+                forM_ (zip (takeLast (length map_res) all_pes) map_res) $ \(pe, se) ->
+                  copyDWIMFix
+                    pe
+                    (map Imp.le64 gtids)
+                    (kernelResultSubExp se)
+                    []
 
       sComment "threads in bounds read input" $
         sWhen in_bounds when_in_bounds
@@ -270,7 +273,7 @@ scanStage1 (Pat all_pes) num_tblocks tblock_size space scans kbody = do
                 sWhen in_bounds $
                   forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
                     copyDWIMFix
-                      (patElemName pe)
+                      pe
                       (map Imp.le64 gtids ++ vec_is)
                       (Var arr)
                       [localArrayIndex constants t]
@@ -319,7 +322,7 @@ scanStage1 (Pat all_pes) num_tblocks tblock_size space scans kbody = do
   pure (num_threads, elems_per_group, crossesSegment)
 
 scanStage2 ::
-  Pat LetDecMem ->
+  [VName] ->
   TV Int32 ->
   Imp.TExp Int64 ->
   Count NumBlocks SubExp ->
@@ -327,7 +330,7 @@ scanStage2 ::
   SegSpace ->
   [SegBinOp GPUMem] ->
   CallKernelGen ()
-scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_tblocks crossesSegment space scans = do
+scanStage2 all_pes stage1_num_threads elems_per_group num_tblocks crossesSegment space scans = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
 
@@ -365,7 +368,7 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_tblocks crossesS
                 copyDWIMFix
                   arr
                   [localArrayIndex constants t]
-                  (Var $ patElemName pe)
+                  (Var pe)
                   glob_is
 
               when_out_of_bounds = forM_ (zip3 rets local_arrs nes) $ \(t, arr, ne) ->
@@ -389,21 +392,23 @@ scanStage2 (Pat all_pes) stage1_num_threads elems_per_group num_tblocks crossesS
             sWhen in_bounds $
               forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
                 copyDWIMFix
-                  (patElemName pe)
+                  pe
                   glob_is
                   (Var arr)
                   [localArrayIndex constants t]
 
 scanStage3 ::
   Pat LetDecMem ->
+  [VName] ->
   Count NumBlocks SubExp ->
   Count BlockSize SubExp ->
   Imp.TExp Int64 ->
   CrossesSegment ->
   SegSpace ->
   [SegBinOp GPUMem] ->
+  SegPostOp GPUMem ->
   CallKernelGen ()
-scanStage3 (Pat all_pes) num_tblocks tblock_size elems_per_group crossesSegment space scans = do
+scanStage3 pat all_pes num_tblocks tblock_size elems_per_group crossesSegment space scans post_op = do
   let tblock_size' = fmap pe64 tblock_size
       (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
@@ -447,7 +452,7 @@ scanStage3 (Pat all_pes) num_tblocks tblock_size elems_per_group crossesSegment 
           no_carry_in = tvExp orig_group .==. 0 .||. is_a_carry .||. crosses_segment
 
       let per_scan_pes = segBinOpChunks scans all_pes
-      sWhen in_bounds $
+      sWhen in_bounds $ do
         sUnless no_carry_in $
           forM_ (zip per_scan_pes scans) $
             \(pes, SegBinOp _ scan_op nes vec_shape) -> do
@@ -460,24 +465,59 @@ scanStage3 (Pat all_pes) num_tblocks tblock_size elems_per_group crossesSegment 
                   copyDWIMFix
                     (paramName p)
                     []
-                    (Var $ patElemName pe)
+                    (Var pe)
                     (carry_in_idx ++ vec_is)
 
                 forM_ (zip scan_y_params pes) $ \(p, pe) ->
                   copyDWIMFix
                     (paramName p)
                     []
-                    (Var $ patElemName pe)
+                    (Var pe)
                     (map Imp.le64 gtids ++ vec_is)
 
                 compileBody' scan_x_params $ lambdaBody scan_op
 
                 forM_ (zip scan_x_params pes) $ \(p, pe) ->
                   copyDWIMFix
-                    (patElemName pe)
+                    pe
                     (map Imp.le64 gtids ++ vec_is)
                     (Var $ paramName p)
                     []
+
+        sOp $
+          Imp.Barrier Imp.FenceGlobal
+
+        let (scan_pars, map_pars) = splitAt (segBinOpResults scans) $ lambdaParams $ segPostOpLambda post_op
+            (scan_out, map_out) = splitAt (segBinOpResults scans) all_pes
+            (idxs, vals, map_res) = splitPostOpResults post_op $ fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+            groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
+            (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
+
+        dScope Nothing $
+          scopeOfLParams $
+            lambdaParams $
+              segPostOpLambda post_op
+
+        sComment "bind scan results to post lambda params" $ do
+          forM_ (zip scan_pars scan_out) $ \(par, acc) ->
+            copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 gtids)
+
+        sComment "bind map results to post lamda params" $
+          forM_ (zip map_pars map_out) $ \(par, out) -> do
+            copyDWIMFix (paramName par) [] (Var out) (map Imp.le64 gtids)
+
+        compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+          sComment "write scatter values." $
+            forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
+              forM_ idxs_vals $ \(is', val) -> do
+                arr_t <- lookupType arr
+                let rws' = map pe64 $ arrayDims arr_t
+                    slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
+                sWhen (inBounds slice' rws') $
+                  copyDWIM (patElemName pe) (unSlice slice') val []
+          sComment "write mapped values" $
+            forM_ (zip pat_map map_res) $ \(pe, res) ->
+              copyDWIMFix (patElemName pe) (map Imp.le64 gtids) res []
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
@@ -485,11 +525,12 @@ compileSegScan ::
   Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
+  [Type] ->
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
   SegPostOp GPUMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scans kbody post_op = do
+compileSegScan pat lvl space ts scans kbody post_op = do
   attrs <- lvlKernelAttrs lvl
 
   -- Since stage 2 involves a group size equal to the number of groups
@@ -505,10 +546,25 @@ compileSegScan pat lvl space scans kbody post_op = do
           pe64 . Imp.unCount . kAttrNumBlocks $
             attrs
 
+  let shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
+      scan_ts = concatMap shpT scans
+      shpOfT t s =
+        arrayShape $
+          foldr (flip arrayOfRow) (arrayOfShape t s) $
+            segSpaceDims space
+
+  scan_out <- forM scan_ts $ \(s, t) ->
+    sAllocArray "scan_out" (elemType t) (shpOfT t s) DefaultSpace
+
+  map_out <- forM (drop (segBinOpResults scans) ts) $ \t ->
+    sAllocArray "map_out" (elemType t) (shpOfT t mempty) DefaultSpace
+
+  let outs = scan_out ++ map_out
+
   (stage1_num_threads, elems_per_group, crossesSegment) <-
-    scanStage1 pat stage1_num_tblocks (kAttrBlockSize attrs) space scans kbody
+    scanStage1 outs stage1_num_tblocks (kAttrBlockSize attrs) space scans kbody
 
   emit $ Imp.DebugPrint "elems_per_group" $ Just $ untyped elems_per_group
 
-  scanStage2 pat stage1_num_threads elems_per_group stage1_num_tblocks crossesSegment space scans
-  scanStage3 pat (kAttrNumBlocks attrs) (kAttrBlockSize attrs) elems_per_group crossesSegment space scans
+  scanStage2 outs stage1_num_threads elems_per_group stage1_num_tblocks crossesSegment space scans
+  scanStage3 pat outs (kAttrNumBlocks attrs) (kAttrBlockSize attrs) elems_per_group crossesSegment space scans post_op

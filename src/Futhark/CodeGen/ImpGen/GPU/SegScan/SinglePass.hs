@@ -217,11 +217,12 @@ compileSegScan ::
   Pat LetDecMem ->
   SegLevel ->
   SegSpace ->
+  [Type] ->
   SegBinOp GPUMem ->
   KernelBody GPUMem ->
   SegPostOp GPUMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scan_op map_kbody post_op = do
+compileSegScan pat lvl space ts scan_op map_kbody post_op = do
   attrs <- lvlKernelAttrs lvl
   let Pat all_pes = pat
 
