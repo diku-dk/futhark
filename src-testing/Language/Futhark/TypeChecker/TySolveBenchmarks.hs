@@ -2,7 +2,6 @@ module Language.Futhark.TypeChecker.TySolveBenchmarks (benchmarks) where
 
 import Criterion (Benchmark, bench, bgroup, whnf)
 import Data.Map qualified as M
-import Generated.AllFutBenchmarks (allFutBenchmarkCases)
 import Language.Futhark (qualName)
 import Language.Futhark.Syntax
 import Language.Futhark.SyntaxTests ()
@@ -86,16 +85,12 @@ benchmarks =
         "TySolve"
         [ bgroup "TySolveNewSynthetic" $
             map (\n -> bench ("solveNew: " ++ show n ++ " variables") $ whnf solveNew (generateContraints n)) sizes,
-          bgroup "TySolveNewConverted" $
-            map (\(name, dataCase) -> bench name $ whnf solveNew dataCase) allFutBenchmarkCases,
           bgroup
             "TySolveNewMisc"
             [ bench "Trivial" $ whnf solveNew trivial
             ],
           bgroup "TySolveOldSynthetic" $
             map (\n -> bench ("solveOld: " ++ show n ++ " variables") $ whnf solveOld (generateContraints n)) sizes,
-          bgroup "TySolveOldConverted" $
-            map (\(name, dataCase) -> bench name $ whnf solveOld dataCase) allFutBenchmarkCases,
           bgroup
             "TySolveOldMisc"
             [ bench "Trivial" $ whnf solveOld trivial
