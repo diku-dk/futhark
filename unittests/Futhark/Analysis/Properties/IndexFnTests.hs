@@ -30,6 +30,17 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/scatter_perm.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [Forall i (Iota (sHole n))],
+                  body =
+                    cases
+                      [(Bool True, sym2SoP $ Apply (Hole xs) [sHole i])]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/abs.fut"
         ( pure $ \(_, _, x, _) ->
             [ IndexFn
