@@ -484,15 +484,15 @@ scanStage3 pat all_pes num_tblocks tblock_size elems_per_group crossesSegment sp
                     (Var $ paramName p)
                     []
 
-        sOp $
-          Imp.Barrier Imp.FenceGlobal
+      sOp $
+        Imp.Barrier Imp.FenceLocal
 
+      sWhen in_bounds $ do
         let (scan_pars, map_pars) = splitAt (segBinOpResults scans) $ lambdaParams $ segPostOpLambda post_op
             (scan_out, map_out) = splitAt (segBinOpResults scans) all_pes
             (idxs, vals, map_res) = splitPostOpResults post_op $ fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
             groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
             (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
-
         dScope Nothing $
           scopeOfLParams $
             lambdaParams $
@@ -518,6 +518,9 @@ scanStage3 pat all_pes num_tblocks tblock_size elems_per_group crossesSegment sp
           sComment "write mapped values" $
             forM_ (zip pat_map map_res) $ \(pe, res) ->
               copyDWIMFix (patElemName pe) (map Imp.le64 gtids) res []
+
+      sOp $
+        Imp.Barrier Imp.FenceGlobal
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
