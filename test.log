@@ -1,7 +1,6 @@
-0 failed, 0 passed, 2362 to go.
 tests/distribution/distribution3.fut:
 Command failed with ExitFailure 1:
-./tests/distribution/distribution3 --cache-file tests/distribution/distribution3.fut.cache --tuning tests/distribution/distribution3.fut.tuning
+./tests/distribution/distribution3 --cache-file tests/distribution/distribution3.fut.cache
 Stderr:
 ./tests/distribution/distribution3: During CUDA initialisation:
 NVRTC compilation failed.
@@ -79,8 +78,6 @@ CallStack (from -prof):
   Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
   Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-2 failed, 182 passed, 2178 to go.
-2 failed, 381 passed, 1979 to go.
 tests/existential-ifs/partition.fut:
 Compiling with --backend=cuda:
 Running compiled program:
@@ -89,10 +86,8 @@ Entry point: main; dataset: #0 ("[1i32, 1i32, 1i32, 1i32, 1i32]"):
 tests/existential-ifs/partition.fut.main.0.actual and tests/existential-ifs/partition.fut.main.0.expected do not match:
 Value #0 index [1]: expected 1, got 0
 ...and 3 other mismatches.
-3 failed, 617 passed, 1742 to go.
-3 failed, 811 passed, 1548 to go.
 tests/tokens.fut:
-After sending command "call" to server process:fd:29: hGetLine: end of file
+After sending command "call" to server process:fd:14: hGetLine: end of file
 Server stderr:
 
 CallStack (from HasCallStack):
@@ -120,6 +115,14 @@ CallStack (from -prof):
   Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
   Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
+tests/soacs/partition2.fut:
+Compiling with --backend=cuda:
+Running compiled program:
+Running ./tests/soacs/partition2 --cache-file tests/soacs/partition2.fut.cache:
+Entry point: main; dataset: #0 ("[2i32, 7i32, 1i32, 2i32, 8i32, 9i32, 1i32, 5i32, 0..."):
+tests/soacs/partition2.fut.main.0.actual and tests/soacs/partition2.fut.main.0.expected do not match:
+Value #2 index [0]: expected 8, got 32639
+...and 10 other mismatches.
 tests/soacs/filter3.fut:
 Compiling with --backend=cuda:
 Warning at tests/soacs/filter3.fut:12:27-28:
@@ -139,28 +142,17 @@ But result returns type
   {i32}
 
 
-tests/soacs/partition2.fut:
-Compiling with --backend=cuda:
-Running compiled program:
-Running ./tests/soacs/partition2 --cache-file tests/soacs/partition2.fut.cache:
-Entry point: main; dataset: #0 ("[2i32, 7i32, 1i32, 2i32, 8i32, 9i32, 1i32, 5i32, 0..."):
-tests/soacs/partition2.fut.main.0.actual and tests/soacs/partition2.fut.main.0.expected do not match:
-Value #2 index [0]: expected 8, got 32703
-...and 10 other mismatches.
 tests/soacs/partition1.fut:
 Compiling with --backend=cuda:
 Running compiled program:
 Running ./tests/soacs/partition1 --cache-file tests/soacs/partition1.fut.cache:
 Entry point: main; dataset: #0 ("[0i32, 1i32, 2i32, 3i32, 4i32, 5i32, 6i32, 7i32, 8..."):
 tests/soacs/partition1.fut.main.0.actual and tests/soacs/partition1.fut.main.0.expected do not match:
-Value #1 index [0]: expected 3, got 32550
+Value #1 index [0]: expected 3, got 32699
 ...and 4 other mismatches.
-7 failed, 1000 passed, 1355 to go.
-tests/flattening/HighlyNestedMap.fut:
+tests/issue1753.fut:
 Compiling with --backend=cuda:
 
-8 failed, 1171 passed, 1183 to go.
-8 failed, 1339 passed, 1015 to go.
 tests/rosettacode/filter.fut:
 Compiling with --backend=cuda:
 Running compiled program:
@@ -190,13 +182,6 @@ Anonymous function defined with 4 parameters:
 [eta_p_7778 : i64, eta_p_7777 : i64, write_value_7779 : i32, write_value_7780 : i32]
 but expected to take 2 arguments.
 
-tests/quickmedian.fut:
-Compiling with --backend=cuda:
-Running compiled program:
-Running ./tests/quickmedian --cache-file tests/quickmedian.fut.cache:
-Entry point: main; dataset: #1 ("[4i32, -8i32, 2i32, 2i32, 0i32, 0i32, 5i32, 9i32, ..."):
-tests/quickmedian.fut.main.1.actual and tests/quickmedian.fut.main.1.expected do not match:
-Value #0: expected 0, got 224
 tests/issue1435.fut:
 Command failed with ExitFailure 1:
 ./tests/issue1435 --cache-file tests/issue1435.fut.cache
@@ -224,43 +209,13 @@ CallStack (from -prof):
   Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
   Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/primitive/i64_cmpop.fut:
+tests/quickmedian.fut:
 Compiling with --backend=cuda:
-futhark: internal error: PAP object (0x420124a690) entered!
-Stack trace:
-futhark: Failed to get stack frames of current process: No DWARF information found: Success
-                 0xbb64310    set_initial_registers (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-            0x7f11b8787168    dwfl_thread_getframes (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-            0x7f11b8786b9b    get_one_thread_cb (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-            0x7f11b8786f6a    dwfl_getthreads (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-            0x7f11b87874d4    dwfl_getthread_frames (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-                 0xbb64a51    libdwGetBacktrace (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-                 0xbb21a06    rtsFatalInternalErrorFn (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-                 0xbb21c3a    barf (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-                 0xbb4d265    stg_PAP_info (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-
-    (GHC version 9.6.6 for x86_64_unknown_linux)
-    Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug
-
-13 failed, 1495 passed, 854 to go.
-tests/primitive/u64_cmpop.fut:
-Compiling with --backend=cuda:
-futhark: internal error: PAP object (0x4201651690) entered!
-Stack trace:
-futhark: Failed to get stack frames of current process: No DWARF information found: Success
-                 0xbb64310    set_initial_registers (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-            0x7f99691bf168    dwfl_thread_getframes (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-            0x7f99691beb9b    get_one_thread_cb (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-            0x7f99691bef6a    dwfl_getthreads (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-            0x7f99691bf4d4    dwfl_getthread_frames (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-                 0xbb64a51    libdwGetBacktrace (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-                 0xbb21a06    rtsFatalInternalErrorFn (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-                 0xbb21c3a    barf (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-                 0xbb4d265    stg_PAP_info (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-
-    (GHC version 9.6.6 for x86_64_unknown_linux)
-    Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug
-
+Running compiled program:
+Running ./tests/quickmedian --cache-file tests/quickmedian.fut.cache:
+Entry point: main; dataset: #1 ("[4i32, -8i32, 2i32, 2i32, 0i32, 0i32, 5i32, 9i32, ..."):
+tests/quickmedian.fut.main.1.actual and tests/quickmedian.fut.main.1.expected do not match:
+Value #0: expected 0, got 224
 tests/psums.fut:
 Command failed with ExitFailure 1:
 ./tests/psums --cache-file tests/psums.fut.cache
@@ -303,929 +258,6 @@ CallStack (from -prof):
   Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
   Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-15 failed, 1702 passed, 645 to go.
-15 failed, 1894 passed, 453 to go.
-tests/ad/issue1879.fut:
-Compiling with --backend=cuda:
-Warning at tests/ad/issue1879.fut:10:13-18:
-  Unused name "sizes".
-Internal compiler error (unhandled IO exception).
-Please report this at https://github.com/diku-dk/futhark/issues
-vjpSOAC unhandled:
-scanscatter(n₃_6420,
-            {defunc_0_map_res_7026, defunc_0_map_res_7027, eta_p_6922},
-            \ {x_6998 : i64,
-               x_6999 : i64,
-               x_7000 : [3i64]f64}
-              : {i64,
-                 i64,
-                 i64,
-                 [3i64]f64} ->
-              {x_6998, x_6999, x_6998, x_7000},
-            \ {eta_p_6944 : i64,
-               eta_p_6945 : i64,
-               eta_p_6946 : i64,
-               eta_p_6947 : i64}
-              : {i64,
-                 i64} ->
-              let {tmp_6948 : i64} =
-                add64(eta_p_6944, eta_p_6946)
-              let {tmp_6949 : i64} =
-                add64(eta_p_6945, eta_p_6947)
-              in {tmp_6948, tmp_6949},
-            {0i64, 0i64},
-            ([n₃_6420], 1, scatter_arg_ad_copy_7066),
-            \ {eta_p_6986 : i64,
-               eta_p_6987 : i64,
-               eta_p_6985 : i64,
-               write_value_6988 : [3i64]f64}
-              : {i64,
-                 [3i64]f64} ->
-              let {cond_6989 : bool} =
-                eq_i64(eta_p_6985, 1i64)
-              let {lifted_to_index_res_6990 : i64} =
-                if cond_6989
-                then {
-                  let {lifted_to_index_res_t_res_6991 : i64} =
-                    sub64(eta_p_6986, 1i64)
-                  in {lifted_to_index_res_t_res_6991}
-                } else {
-                  let {-_lhs_6992 : i64} =
-                    add64(eta_p_6987, defunc_0_reduce_comm_res_7025)
-                  let {lifted_to_index_res_f_res_6993 : i64} =
-                    sub64(-_lhs_6992, 1i64)
-                  in {lifted_to_index_res_f_res_6993}
-                }
-                : {i64}
-              in {lifted_to_index_res_6990, write_value_6988})
-CallStack (from HasCallStack):
-  error, called at src/Futhark/AD/Rev/SOAC.hs:199:3 in futhark-0.26.0-inplace:Futhark.AD.Rev.SOAC
-CallStack (from -prof):
-  Futhark.AD.Rev.SOAC.vjpSOAC (src/Futhark/AD/Rev/SOAC.hs:(74,1)-(199,53))
-  Futhark.AD.Rev.diffStm (src/Futhark/AD/Rev.hs:(217,1)-(296,66))
-  Futhark.AD.Rev.diffStms (src/Futhark/AD/Rev.hs:(299,1)-(307,13))
-  Futhark.AD.Rev.Monad.>> (src/Futhark/AD/Rev/Monad.hs:201:7-11)
-  Futhark.Builder.>> (src/Futhark/Builder.hs:86:22-26)
-  Futhark.Builder.>>= (src/Futhark/Builder.hs:86:22-26)
-  Futhark.Builder.collectStms (src/Futhark/Builder.hs:(133,3)-(139,22))
-  Futhark.AD.Rev.Monad.collectStms (src/Futhark/AD/Rev/Monad.hs:215:3-43)
-  Futhark.AD.Rev.Monad.subSubsts (src/Futhark/AD/Rev/Monad.hs:(503,1)-(507,8))
-  Futhark.AD.Rev.Monad.subAD (src/Futhark/AD/Rev/Monad.hs:(496,1)-(500,8))
-  Futhark.AD.Rev.diffBody (src/Futhark/AD/Rev.hs:(315,1)-(323,46))
-  Futhark.AD.Rev.Monad.>>= (src/Futhark/AD/Rev/Monad.hs:201:7-11)
-  Futhark.Builder.localScope (src/Futhark/Builder.hs:(113,3)-(117,10))
-  Futhark.AD.Rev.Monad.localScope (src/Futhark/AD/Rev/Monad.hs:205:7-22)
-  Futhark.Builder.runBuilderT (src/Futhark/Builder.hs:(148,1)-(150,16))
-  Futhark.AD.Rev.Monad.runADM (src/Futhark/AD/Rev/Monad.hs:(222,1)-(227,40))
-  Futhark.AD.Rev.revVJP (src/Futhark/AD/Rev.hs:(334,1)-(346,75))
-  Futhark.Pass.AD.onStm (src/Futhark/Pass/AD.hs:(39,1)-(60,76))
-  Futhark.Pass.liftA2 (src/Futhark/Pass.hs:27:22-32)
-  Futhark.Pass.AD.onStms (src/Futhark/Pass/AD.hs:(63,1)-(65,34))
-  Futhark.Pass.AD.onBody (src/Futhark/Pass/AD.hs:(68,1)-(70,31))
-  Futhark.Pass.AD.onFun (src/Futhark/Pass/AD.hs:(78,1)-(80,31))
-  Futhark.MonadFreshNames.modifyNameSource (src/Futhark/MonadFreshNames.hs:(73,1)-(77,8))
-  Futhark.Pass.parPass (src/Futhark/Pass.hs:(69,1)-(79,25))
-  Futhark.Pass.intraproceduralTransformationWithConsts (src/Futhark/Pass.hs:(91,1)-(94,54))
-  Futhark.Pass.AD.applyAD (src/Futhark/Pass/AD.hs:(83,1)-(91,5))
-  Futhark.Pass.passFunction (src/Futhark/Pass.hs:54:5-16)
-  Futhark.Pass.runPassM (src/Futhark/Pass.hs:42:1-63)
-  Futhark.Pipeline.runPass (src/Futhark/Pipeline.hs:(216,1)-(220,12))
-  Futhark.Pipeline.onePass (src/Futhark/Pipeline.hs:(159,1)-(183,28))
-  Futhark.Pipeline.passes (src/Futhark/Pipeline.hs:199:1-37)
-  Futhark.Passes.standardPipeline (src/Futhark/Passes.hs:(53,1)-(67,38))
-  Futhark.Pipeline.id (src/Futhark/Pipeline.hs:137:3-48)
-  Futhark.Pipeline.. (src/Futhark/Pipeline.hs:(138,3)-(142,30))
-  Futhark.Passes.gpumemPipeline (src/Futhark/Passes.hs:(146,1)-(170,7))
-  Futhark.Pipeline.runPipeline (src/Futhark/Pipeline.hs:(150,1)-(152,9))
-  Futhark.Compiler.runPipelineOnProgram (src/Futhark/Compiler.hs:(107,1)-(126,9))
-  Futhark.Pipeline.runFutharkM (src/Futhark/Pipeline.hs:(95,1)-(97,47))
-  Futhark.Compiler.runCompilerOnProgram (src/Futhark/Compiler.hs:(82,1)-(98,34))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.Compiler.CLI.compilerMain (src/Futhark/Compiler/CLI.hs:(49,1)-(76,9))
-  Futhark.CLI.CUDA.main (src/Futhark/CLI/CUDA.hs:(10,1)-(17,62))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-
-tests/ad/issue2256.fut:
-Command failed with ExitFailure 1:
-./tests/ad/issue2256 --cache-file tests/ad/issue2256.fut.cache
-Stderr:
-./tests/ad/issue2256: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(4045): error: "gtid_6517" has already been declared in the current scope
-      int64_t gtid_6517;
-              ^
-
-1 error detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/scan0.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scan0 --cache-file tests/ad/scan0.fut.cache
-Stderr:
-./tests/ad/scan0: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(4862): error: "gtid_6664" has already been declared in the current scope
-      int64_t gtid_6664;
-              ^
-
-1 error detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/scan5.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scan5 --cache-file tests/ad/scan5.fut.cache
-Stderr:
-./tests/ad/scan5: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(5222): error: "gtid_7250" has already been declared in the current scope
-      int64_t gtid_7250;
-              ^
-
-futhark-cuda(5223): error: "gtid_7251" has already been declared in the current scope
-      int64_t gtid_7251;
-              ^
-
-futhark-cuda(5243): error: "gtid_7261" has already been declared in the current scope
-      int64_t gtid_7261;
-              ^
-
-futhark-cuda(5244): error: "gtid_7262" has already been declared in the current scope
-      int64_t gtid_7262;
-              ^
-
-futhark-cuda(5835): error: "gtid_7785" has already been declared in the current scope
-      int64_t gtid_7785;
-              ^
-
-futhark-cuda(5857): error: "gtid_7794" has already been declared in the current scope
-      int64_t gtid_7794;
-              ^
-
-6 errors detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/reducebyindex5.fut:
-Command failed with ExitFailure 1:
-./tests/ad/reducebyindex5 --cache-file tests/ad/reducebyindex5.fut.cache
-Stderr:
-./tests/ad/reducebyindex5: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(8347): error: "gtid_7601" has already been declared in the current scope
-      int64_t gtid_7601;
-              ^
-
-1 error detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/scan3.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scan3 --cache-file tests/ad/scan3.fut.cache
-Stderr:
-./tests/ad/scan3: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(4630): error: "gtid_11417" has already been declared in the current scope
-      int64_t gtid_11417;
-              ^
-
-1 error detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/scan1.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scan1 --cache-file tests/ad/scan1.fut.cache
-Stderr:
-./tests/ad/scan1: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(4684): error: "gtid_6578" has already been declared in the current scope
-      int64_t gtid_6578;
-              ^
-
-1 error detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-22 failed, 1986 passed, 354 to go.
-tests/ad/scan4.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scan4 --cache-file tests/ad/scan4.fut.cache
-Stderr:
-./tests/ad/scan4: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(4430): error: "gtid_8822" has already been declared in the current scope
-      int64_t gtid_8822;
-              ^
-
-1 error detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/scan7.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scan7 --cache-file tests/ad/scan7.fut.cache
-Stderr:
-./tests/ad/scan7: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(6279): error: "gtid_22629" has already been declared in the current scope
-      int64_t gtid_22629;
-              ^
-
-futhark-cuda(6280): error: "gtid_22630" has already been declared in the current scope
-      int64_t gtid_22630;
-              ^
-
-futhark-cuda(6281): error: "gtid_22631" has already been declared in the current scope
-      int64_t gtid_22631;
-              ^
-
-futhark-cuda(6282): error: "gtid_22632" has already been declared in the current scope
-      int64_t gtid_22632;
-              ^
-
-futhark-cuda(6283): error: "gtid_22633" has already been declared in the current scope
-      int64_t gtid_22633;
-              ^
-
-futhark-cuda(6306): error: "gtid_22644" has already been declared in the current scope
-      int64_t gtid_22644;
-              ^
-
-futhark-cuda(6307): error: "gtid_22645" has already been declared in the current scope
-      int64_t gtid_22645;
-              ^
-
-futhark-cuda(6308): error: "gtid_22646" has already been declared in the current scope
-      int64_t gtid_22646;
-              ^
-
-futhark-cuda(6309): error: "gtid_22647" has already been declared in the current scope
-      int64_t gtid_22647;
-              ^
-
-futhark-cuda(6310): error: "gtid_22648" has already been declared in the current scope
-      int64_t gtid_22648;
-              ^
-
-futhark-cuda(7098): error: "gtid_25597" has already been declared in the current scope
-      int64_t gtid_25597;
-              ^
-
-futhark-cuda(7099): error: "gtid_25598" has already been declared in the current scope
-      int64_t gtid_25598;
-              ^
-
-futhark-cuda(7100): error: "gtid_25599" has already been declared in the current scope
-      int64_t gtid_25599;
-              ^
-
-futhark-cuda(7101): error: "gtid_25600" has already been declared in the current scope
-      int64_t gtid_25600;
-              ^
-
-futhark-cuda(7123): error: "gtid_25611" has already been declared in the current scope
-      int64_t gtid_25611;
-              ^
-
-futhark-cuda(7124): error: "gtid_25612" has already been declared in the current scope
-      int64_t gtid_25612;
-              ^
-
-futhark-cuda(7125): error: "gtid_25613" has already been declared in the current scope
-      int64_t gtid_25613;
-              ^
-
-futhark-cuda(7126): error: "gtid_25614" has already been declared in the current scope
-      int64_t gtid_25614;
-              ^
-
-futhark-cuda(7857): error: "gtid_25793" has already been declared in the current scope
-      int64_t gtid_25793;
-              ^
-
-futhark-cuda(7858): error: "gtid_25794" has already been declared in the current scope
-      int64_t gtid_25794;
-              ^
-
-futhark-cuda(7859): error: "gtid_25795" has already been declared in the current scope
-      int64_t gtid_25795;
-              ^
-
-futhark-cuda(7880): error: "gtid_25806" has already been declared in the current scope
-      int64_t gtid_25806;
-              ^
-
-futhark-cuda(7881): error: "gtid_25807" has already been declared in the current scope
-      int64_t gtid_25807;
-              ^
-
-futhark-cuda(7882): error: "gtid_25808" has already been declared in the current scope
-      int64_t gtid_25808;
-              ^
-
-futhark-cuda(8565): error: "gtid_26001" has already been declared in the current scope
-      int64_t gtid_26001;
-              ^
-
-futhark-cuda(8566): error: "gtid_26002" has already been declared in the current scope
-      int64_t gtid_26002;
-              ^
-
-futhark-cuda(8586): error: "gtid_26012" has already been declared in the current scope
-      int64_t gtid_26012;
-              ^
-
-futhark-cuda(8587): error: "gtid_26013" has already been declared in the current scope
-      int64_t gtid_26013;
-              ^
-
-futhark-cuda(9160): error: "gtid_26138" has already been declared in the current scope
-      int64_t gtid_26138;
-              ^
-
-futhark-cuda(9182): error: "gtid_26147" has already been declared in the current scope
-      int64_t gtid_26147;
-              ^
-
-futhark-cuda(12052): error: "gtid_18624" has already been declared in the current scope
-      int64_t gtid_18624;
-              ^
-
-futhark-cuda(12053): error: "gtid_18625" has already been declared in the current scope
-      int64_t gtid_18625;
-              ^
-
-futhark-cuda(12054): error: "gtid_18626" has already been declared in the current scope
-      int64_t gtid_18626;
-              ^
-
-futhark-cuda(12055): error: "gtid_18627" has already been declared in the current scope
-      int64_t gtid_18627;
-              ^
-
-futhark-cuda(12056): error: "gtid_18628" has already been declared in the current scope
-      int64_t gtid_18628;
-              ^
-
-futhark-cuda(12079): error: "gtid_18639" has already been declared in the current scope
-      int64_t gtid_18639;
-              ^
-
-futhark-cuda(12080): error: "gtid_18640" has already been declared in the current scope
-      int64_t gtid_18640;
-              ^
-
-futhark-cuda(12081): error: "gtid_18641" has already been declared in the current scope
-      int64_t gtid_18641;
-              ^
-
-futhark-cuda(12082): error: "gtid_18642" has already been declared in the current scope
-      int64_t gtid_18642;
-              ^
-
-futhark-cuda(12083): error: "gtid_18643" has already been declared in the current scope
-      int64_t gtid_18643;
-              ^
-
-futhark-cuda(12683): error: "gtid_21103" has already been declared in the current scope
-      int64_t gtid_21103;
-              ^
-
-futhark-cuda(12684): error: "gtid_21104" has already been declared in the current scope
-      int64_t gtid_21104;
-              ^
-
-futhark-cuda(12685): error: "gtid_21105" has already been declared in the current scope
-      int64_t gtid_21105;
-              ^
-
-futhark-cuda(12686): error: "gtid_21106" has already been declared in the current scope
-      int64_t gtid_21106;
-              ^
-
-futhark-cuda(12708): error: "gtid_21117" has already been declared in the current scope
-      int64_t gtid_21117;
-              ^
-
-futhark-cuda(12709): error: "gtid_21118" has already been declared in the current scope
-      int64_t gtid_21118;
-              ^
-
-futhark-cuda(12710): error: "gtid_21119" has already been declared in the current scope
-      int64_t gtid_21119;
-              ^
-
-futhark-cuda(12711): error: "gtid_21120" has already been declared in the current scope
-      int64_t gtid_21120;
-              ^
-
-futhark-cuda(13297): error: "gtid_21257" has already been declared in the current scope
-      int64_t gtid_21257;
-              ^
-
-futhark-cuda(13298): error: "gtid_21258" has already been declared in the current scope
-      int64_t gtid_21258;
-              ^
-
-futhark-cuda(13299): error: "gtid_21259" has already been declared in the current scope
-      int64_t gtid_21259;
-              ^
-
-futhark-cuda(13320): error: "gtid_21270" has already been declared in the current scope
-      int64_t gtid_21270;
-              ^
-
-futhark-cuda(13321): error: "gtid_21271" has already been declared in the current scope
-      int64_t gtid_21271;
-              ^
-
-futhark-cuda(13322): error: "gtid_21272" has already been declared in the current scope
-      int64_t gtid_21272;
-              ^
-
-futhark-cuda(13901): error: "gtid_21406" has already been declared in the current scope
-      int64_t gtid_21406;
-              ^
-
-futhark-cuda(13902): error: "gtid_21407" has already been declared in the current scope
-      int64_t gtid_21407;
-              ^
-
-futhark-cuda(13922): error: "gtid_21417" has already been declared in the current scope
-      int64_t gtid_21417;
-              ^
-
-futhark-cuda(13923): error: "gtid_21418" has already been declared in the current scope
-      int64_t gtid_21418;
-              ^
-
-futhark-cuda(14496): error: "gtid_21543" has already been declared in the current scope
-      int64_t gtid_21543;
-              ^
-
-futhark-cuda(14518): error: "gtid_21552" has already been declared in the current scope
-      int64_t gtid_21552;
-              ^
-
-60 errors detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/genred-opt/matvec-simple.fut:
-Compiling with --backend=cuda:
-futhark: internal error: PAP object (0x4202a48000) entered!
-Stack trace:
-futhark: Failed to get stack frames of current process: No DWARF information found: Success
-                 0xbb64310    set_initial_registers (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-            0x7f6d839bf168    dwfl_thread_getframes (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-            0x7f6d839beb9b    get_one_thread_cb (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-            0x7f6d839bef6a    dwfl_getthreads (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-            0x7f6d839bf4d4    dwfl_getthread_frames (/nix/store/qsfx2pvlcapk6aiw3jf21crdx82izd6r-elfutils-0.192/lib/libdw-0.192.so)
-                 0xbb64a51    libdwGetBacktrace (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-                 0xbb21a06    rtsFatalInternalErrorFn (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-                 0xbb21c3a    barf (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-                 0xbb4d265    stg_PAP_info (/home/due/git/diku-dk/futhark/dist-newstyle/build/x86_64-linux/ghc-9.6.6/futhark-0.26.0/x/futhark/build/futhark/futhark)
-
-    (GHC version 9.6.6 for x86_64_unknown_linux)
-    Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug
-
-tests/ad/scan2.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scan2 --cache-file tests/ad/scan2.fut.cache
-Stderr:
-./tests/ad/scan2: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(4773): error: "gtid_7027" has already been declared in the current scope
-      int64_t gtid_7027;
-              ^
-
-futhark-cuda(4774): error: "gtid_7028" has already been declared in the current scope
-      int64_t gtid_7028;
-              ^
-
-futhark-cuda(5098): error: "gtid_7306" has already been declared in the current scope
-      int64_t gtid_7306;
-              ^
-
-3 errors detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/scangenbenchtests.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scangenbenchtests --cache-file tests/ad/scangenbenchtests.fut.cache
-Stderr:
-./tests/ad/scangenbenchtests: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(4708): error: "gtid_70712" has already been declared in the current scope
-      int64_t gtid_70712;
-              ^
-
-futhark-cuda(10232): error: "gtid_72099" has already been declared in the current scope
-      int64_t gtid_72099;
-              ^
-
-futhark-cuda(17701): error: "gtid_60749" has already been declared in the current scope
-      int64_t gtid_60749;
-              ^
-
-futhark-cuda(25098): error: "gtid_62643" has already been declared in the current scope
-      int64_t gtid_62643;
-              ^
-
-futhark-cuda(37393): error: "gtid_66085" has already been declared in the current scope
-      int64_t gtid_66085;
-              ^
-
-5 errors detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-den smith  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/scan8.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scan8 --cache-file tests/ad/scan8.fut.cache
-Stderr:
-./tests/ad/scan8: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(5324): error: "gtid_17998" has already been declared in the current scope
-      int64_t gtid_17998;
-              ^
-
-1 error detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/scan6.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scan6 --cache-file tests/ad/scan6.fut.cache
-Stderr:
-./tests/ad/scan6: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(4685): error: "gtid_15620" has already been declared in the current scope
-      int64_t gtid_15620;
-              ^
-
-futhark-cuda(7041): error: "gtid_16460" has already been declared in the current scope
-      int64_t gtid_16460;
-              ^
-
-2 errors detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/scanvecbenchtests.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scanvecbenchtests --cache-file tests/ad/scanvecbenchtests.fut.cache
-Stderr:
-./tests/ad/scanvecbenchtests: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(4060): error: "gtid_13113" has already been declared in the current scope
-      int64_t gtid_13113;
-              ^
-
-futhark-cuda(7107): error: "gtid_13789" has already been declared in the current scope
-      int64_t gtid_13789;
-              ^
-
-futhark-cuda(11921): error: "gtid_14822" has already been declared in the current scope
-      int64_t gtid_14822;
-              ^
-
-futhark-cuda(11922): error: "gtid_14823" has already been declared in the current scope
-      int64_t gtid_14823;
-              ^
-
-futhark-cuda(12319): error: "gtid_14906" has already been declared in the current scope
-      int64_t gtid_14906;
-              ^
-
-futhark-cuda(16135): error: "gtid_16418" has already been declared in the current scope
-      int64_t gtid_16418;
-              ^
-
-futhark-cuda(16136): error: "gtid_16419" has already been declared in the current scope
-      int64_t gtid_16419;
-              ^
-
-futhark-cuda(16156): error: "gtid_16429" has already been declared in the current scope
-      int64_t gtid_16429;
-              ^
-
-futhark-cuda(16157): error: "gtid_16430" has already been declared in the current scope
-      int64_t gtid_16430;
-              ^
-
-futhark-cuda(16833): error: "gtid_16581" has already been declared in the current scope
-      int64_t gtid_16581;
-              ^
-
-futhark-cuda(16855): error: "gtid_16590" has already been declared in the current scope
-      int64_t gtid_16590;
-              ^
-
-11 errors detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/ad/scan9.fut:
-Command failed with ExitFailure 1:
-./tests/ad/scan9 --cache-file tests/ad/scan9.fut.cache
-Stderr:
-./tests/ad/scan9: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(6462): error: "gtid_31829" has already been declared in the current scope
-      int64_t gtid_31829;
-              ^
-
-1 error detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
 tests/fusion/fuseFilter1.fut:
 Compiling with --backend=cuda:
 Running compiled program:
@@ -1233,7 +265,6 @@ Running ./tests/fusion/fuseFilter1 --cache-file tests/fusion/fuseFilter1.fut.cac
 Entry point: main; dataset: #0 ("[3i32, 5i32, -2i32, 3i32, 4i32, -30i32] [-4i32, 10..."):
 tests/fusion/fuseFilter1.fut.main.0.actual and tests/fusion/fuseFilter1.fut.main.0.expected do not match:
 Value #0 index [1]: expected 4, got 0
-32 failed, 2062 passed, 268 to go.
 tests/fusion/WithAccs/ker2-radix.fut:
 Command failed with ExitFailure 1:
 ./tests/fusion/WithAccs/ker2-radix --cache-file tests/fusion/WithAccs/ker2-radix.fut.cache
@@ -1468,7 +499,6 @@ CallStack (from -prof):
   Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
   Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-41 failed, 2221 passed, 100 to go.
 tests/memory-block-merging/coalescing/issue-2010.fut:
 Compiling with --backend=cuda:
 Running compiled program:
@@ -1477,6 +507,13 @@ Entry point: main; dataset: #0 ("[1i32, 2i32, 3i32, 4i32, 5i32, 6i32, 7i32]"):
 tests/memory-block-merging/coalescing/issue-2010.fut.main.0.actual and tests/memory-block-merging/coalescing/issue-2010.fut.main.0.expected do not match:
 Value #1 index [2]: expected 6, got 96
 ...and 4 other mismatches.
+tests/quickselect.fut:
+Compiling with --backend=cuda:
+Running compiled program:
+Running ./tests/quickselect --cache-file tests/quickselect.fut.cache:
+Entry point: main; dataset: #1 ("[4i32, -8i32, 2i32, 2i32, 0i32, 0i32, 5i32, 9i32, ..."):
+tests/quickselect.fut.main.1.actual and tests/quickselect.fut.main.1.expected do not match:
+Value #0: expected 4, got -603973376
 tests/intragroup/expansion0.fut:
 Command failed with ExitFailure 1:
 ./tests/intragroup/expansion0 --cache-file tests/intragroup/expansion0.fut.cache
@@ -1551,7 +588,7 @@ CallStack (from -prof):
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
 tests/intragroup/scan0.fut:
 Command failed with ExitFailure 1:
-./tests/intragroup/scan0 --cache-file tests/intragroup/scan0.fut.cache --tuning tests/intragroup/scan0.fut.tuning
+./tests/intragroup/scan0 --cache-file tests/intragroup/scan0.fut.cache
 Stderr:
 ./tests/intragroup/scan0: During CUDA initialisation:
 NVRTC compilation failed.
@@ -1583,13 +620,6 @@ CallStack (from -prof):
   Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
   Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/quickselect.fut:
-Compiling with --backend=cuda:
-Running compiled program:
-Running ./tests/quickselect --cache-file tests/quickselect.fut.cache:
-Entry point: main; dataset: #1 ("[4i32, -8i32, 2i32, 2i32, 0i32, 0i32, 5i32, 9i32, ..."):
-tests/quickselect.fut.main.1.actual and tests/quickselect.fut.main.1.expected do not match:
-Value #0: expected 4, got 5
 tests/intragroup/complex-screma.fut:
 Command failed with ExitFailure 1:
 ./tests/intragroup/complex-screma --cache-file tests/intragroup/complex-screma.fut.cache
@@ -1662,6 +692,40 @@ CallStack (from -prof):
   Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
   Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
+tests/intragroup/scan3.fut:
+Command failed with ExitFailure 1:
+./tests/intragroup/scan3 --cache-file tests/intragroup/scan3.fut.cache
+Stderr:
+./tests/intragroup/scan3: During CUDA initialisation:
+NVRTC compilation failed.
+
+futhark-cuda(3910): error: "gtid_5886" has already been declared in the current scope
+      int64_t gtid_5886;
+              ^
+
+1 error detected in the compilation of "futhark-cuda".
+
+
+
+CallStack (from HasCallStack):
+  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
+CallStack (from -prof):
+  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
+  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
+  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
+  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
+  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
+  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
+  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
+  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
+  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
+  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
+  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
+  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
+  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
+  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
+  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
+  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
 tests/intragroup/inplace0.fut:
 Command failed with ExitFailure 1:
 ./tests/intragroup/inplace0 --cache-file tests/intragroup/inplace0.fut.cache
@@ -1700,43 +764,9 @@ CallStack (from -prof):
   Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
   Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/intragroup/scan3.fut:
-Command failed with ExitFailure 1:
-./tests/intragroup/scan3 --cache-file tests/intragroup/scan3.fut.cache
-Stderr:
-./tests/intragroup/scan3: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(3910): error: "gtid_5886" has already been declared in the current scope
-      int64_t gtid_5886;
-              ^
-
-1 error detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
 tests/intragroup/scan1.fut:
 Command failed with ExitFailure 1:
-./tests/intragroup/scan1 --cache-file tests/intragroup/scan1.fut.cache --tuning tests/intragroup/scan1.fut.tuning
+./tests/intragroup/scan1 --cache-file tests/intragroup/scan1.fut.cache
 Stderr:
 ./tests/intragroup/scan1: During CUDA initialisation:
 NVRTC compilation failed.
@@ -1802,9 +832,75 @@ CallStack (from -prof):
   Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
   Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
+tests/intragroup/toomuch.fut:
+Command failed with ExitFailure 1:
+./tests/intragroup/toomuch --cache-file tests/intragroup/toomuch.fut.cache
+Stderr:
+./tests/intragroup/toomuch: During CUDA initialisation:
+NVRTC compilation failed.
+
+futhark-cuda(4088): error: "gtid_16930" has already been declared in the current scope
+      int64_t gtid_16930;
+              ^
+
+futhark-cuda(4123): error: "gtid_16966" has already been declared in the current scope
+      int64_t gtid_16966;
+              ^
+
+futhark-cuda(4158): error: "gtid_17008" has already been declared in the current scope
+      int64_t gtid_17008;
+              ^
+
+futhark-cuda(4193): error: "gtid_17050" has already been declared in the current scope
+      int64_t gtid_17050;
+              ^
+
+futhark-cuda(4228): error: "gtid_17092" has already been declared in the current scope
+      int64_t gtid_17092;
+              ^
+
+futhark-cuda(4263): error: "gtid_17134" has already been declared in the current scope
+      int64_t gtid_17134;
+              ^
+
+futhark-cuda(4298): error: "gtid_17176" has already been declared in the current scope
+      int64_t gtid_17176;
+              ^
+
+futhark-cuda(4333): error: "gtid_17218" has already been declared in the current scope
+      int64_t gtid_17218;
+              ^
+
+futhark-cuda(4368): error: "gtid_17260" has already been declared in the current scope
+      int64_t gtid_17260;
+              ^
+
+9 errors detected in the compilation of "futhark-cuda".
+
+
+
+CallStack (from HasCallStack):
+  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
+CallStack (from -prof):
+  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
+  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
+  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
+  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
+  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
+  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
+  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
+  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
+  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
+  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
+  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
+  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
+  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
+  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
+  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
+  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
 tests/intragroup/scan2.fut:
 Command failed with ExitFailure 1:
-./tests/intragroup/scan2 --cache-file tests/intragroup/scan2.fut.cache --tuning tests/intragroup/scan2.fut.tuning
+./tests/intragroup/scan2 --cache-file tests/intragroup/scan2.fut.cache
 Stderr:
 ./tests/intragroup/scan2: During CUDA initialisation:
 NVRTC compilation failed.
@@ -1874,72 +970,6 @@ CallStack (from -prof):
   Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
   Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
   Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
-tests/intragroup/toomuch.fut:
-Command failed with ExitFailure 1:
-./tests/intragroup/toomuch --cache-file tests/intragroup/toomuch.fut.cache --tuning tests/intragroup/toomuch.fut.tuning
-Stderr:
-./tests/intragroup/toomuch: During CUDA initialisation:
-NVRTC compilation failed.
-
-futhark-cuda(4088): error: "gtid_16930" has already been declared in the current scope
-      int64_t gtid_16930;
-              ^
-
-futhark-cuda(4123): error: "gtid_16966" has already been declared in the current scope
-      int64_t gtid_16966;
-              ^
-
-futhark-cuda(4158): error: "gtid_17008" has already been declared in the current scope
-      int64_t gtid_17008;
-              ^
-
-futhark-cuda(4193): error: "gtid_17050" has already been declared in the current scope
-      int64_t gtid_17050;
-              ^
-
-futhark-cuda(4228): error: "gtid_17092" has already been declared in the current scope
-      int64_t gtid_17092;
-              ^
-
-futhark-cuda(4263): error: "gtid_17134" has already been declared in the current scope
-      int64_t gtid_17134;
-              ^
-
-futhark-cuda(4298): error: "gtid_17176" has already been declared in the current scope
-      int64_t gtid_17176;
-              ^
-
-futhark-cuda(4333): error: "gtid_17218" has already been declared in the current scope
-      int64_t gtid_17218;
-              ^
-
-futhark-cuda(4368): error: "gtid_17260" has already been declared in the current scope
-      int64_t gtid_17260;
-              ^
-
-9 errors detected in the compilation of "futhark-cuda".
-
-
-
-CallStack (from HasCallStack):
-  error, called at src/Futhark/Server.hs:172:7 in futhark-server-1.2.3.0-7250c2740dc4c0abcfeb7145d73e8ff6bb7391dc27d7fb42db00f3b3fed324ff:Futhark.Server
-CallStack (from -prof):
-  Futhark.Server.startServer (src/Futhark/Server.hs:(136,1)-(178,21))
-  Futhark.Server.withServer (src/Futhark/Server.hs:(202,1)-(214,37))
-  Futhark.CLI.Test.pureTestResults (src/Futhark/CLI/Test.hs:(84,1)-(89,49))
-  Futhark.CLI.Test.withProgramServer (src/Futhark/CLI/Test.hs:(96,1)-(116,25))
-  Futhark.CLI.Test.context (src/Futhark/CLI/Test.hs:(61,1)-(64,40))
-  Futhark.CLI.Test.runTestCase (src/Futhark/CLI/Test.hs:(255,1)-(326,70))
-  Futhark.CLI.Test.runTestM (src/Futhark/CLI/Test.hs:55:1-61)
-  Futhark.CLI.Test.catching (src/Futhark/CLI/Test.hs:(453,1)-(456,40))
-  Futhark.CLI.Test.doTest (src/Futhark/CLI/Test.hs:459:1-42)
-  Futhark.CLI.Test.runTest (src/Futhark/CLI/Test.hs:(470,1)-(474,37))
-  Futhark.CLI.Test.runTests (src/Futhark/CLI/Test.hs:(555,1)-(662,22))
-  Futhark.Util.Options.mainWithOptions (src/Futhark/Util/Options.hs:(34,1)-(53,71))
-  Futhark.CLI.Test.main (src/Futhark/CLI/Test.hs:(843,1)-(846,54))
-  Futhark.CLI.Main.commands (src/Futhark/CLI/Main.hs:(53,1)-(92,5))
-  Futhark.CLI.Main.reportingIOErrors (src/Futhark/CLI/Main.hs:(107,1)-(145,27))
-  Futhark.CLI.Main.main (src/Futhark/CLI/Main.hs:(149,1)-(160,68))
 tests/localfunction11.fut:
 Compiling with --backend=cuda:
 Internal compiler error.  Please report this:
@@ -1981,6 +1011,3 @@ Pat
 {scatter_res_6455 : ({}, [d₀_5972]i32)}
 cannot match value of type
 {[d₀_5972]i64}.
-
-2306/2362 passed.
-7 program(s) excluded.
