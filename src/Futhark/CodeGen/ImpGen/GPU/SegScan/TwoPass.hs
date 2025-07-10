@@ -487,45 +487,37 @@ scanStage3 pat all_pes num_tblocks tblock_size elems_per_group crossesSegment sp
         sOp $
           Imp.Barrier Imp.FenceGlobal
 
-        -- let (scan_pars, map_pars) = splitAt (segBinOpResults scans) $ lambdaParams $ segPostOpLambda post_op
-        --     (scan_out, map_out) = splitAt (segBinOpResults scans) all_pes
-        --     (idxs, vals, map_res) = splitPostOpResults post_op $ fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
-        --     groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
-        --     (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
+        let (scan_pars, map_pars) = splitAt (segBinOpResults scans) $ lambdaParams $ segPostOpLambda post_op
+            (scan_out, map_out) = splitAt (segBinOpResults scans) all_pes
+            (idxs, vals, map_res) = splitPostOpResults post_op $ fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+            groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
+            (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
 
-        pure ()
+        dScope Nothing $
+          scopeOfLParams $
+            lambdaParams $
+              segPostOpLambda post_op
 
--- dScope Nothing $
---  scopeOfLParams $
---    lambdaParams $
---      segPostOpLambda post_op
+        sComment "bind scan results to post lambda params" $ do
+          forM_ (zip scan_pars scan_out) $ \(par, acc) ->
+            copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 gtids)
 
--- sComment "bind scan results to post lambda params" $ do
---   forM_ (zip scan_pars scan_out) $ \(par, acc) ->
---     copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 gtids)
+        sComment "bind map results to post lamda params" $
+          forM_ (zip map_pars map_out) $ \(par, out) -> do
+            copyDWIMFix (paramName par) [] (Var out) (map Imp.le64 gtids)
 
--- sComment "bind map results to post lamda params" $
---   forM_ (zip map_pars map_out) $ \(par, out) -> do
---     copyDWIMFix (paramName par) [] (Var out) (map Imp.le64 gtids)
-
--- sOp $
---   Imp.Barrier Imp.FenceGlobal
-
--- compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
---   sComment "write scatter values." $
---     forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
---       forM_ idxs_vals $ \(is', val) -> do
---         arr_t <- lookupType arr
---         let rws' = map pe64 $ arrayDims arr_t
---             slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
---         sWhen (inBounds slice' rws') $
---           copyDWIM (patElemName pe) (unSlice slice') val []
---   sComment "write mapped values" $
---     forM_ (zip pat_map map_res) $ \(pe, res) ->
---       copyDWIMFix (patElemName pe) (map Imp.le64 gtids) res []
-
--- sOp $
---   Imp.Barrier Imp.FenceGlobal
+        compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+          sComment "write scatter values." $
+            forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
+              forM_ idxs_vals $ \(is', val) -> do
+                arr_t <- lookupType arr
+                let rws' = map pe64 $ arrayDims arr_t
+                    slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
+                sWhen (inBounds slice' rws') $
+                  copyDWIM (patElemName pe) (unSlice slice') val []
+          sComment "write mapped values" $
+            forM_ (zip pat_map map_res) $ \(pe, res) ->
+              copyDWIMFix (patElemName pe) (map Imp.le64 gtids) res []
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
@@ -575,5 +567,4 @@ compileSegScan pat lvl space ts scans kbody post_op = do
   emit $ Imp.DebugPrint "elems_per_group" $ Just $ untyped elems_per_group
 
   scanStage2 outs stage1_num_threads elems_per_group stage1_num_tblocks crossesSegment space scans
-
   scanStage3 pat outs (kAttrNumBlocks attrs) (kAttrBlockSize attrs) elems_per_group crossesSegment space scans post_op
