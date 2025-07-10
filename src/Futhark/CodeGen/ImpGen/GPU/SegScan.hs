@@ -29,7 +29,13 @@ combineScanOps ops =
     lam' =
       Lambda
         { lambdaParams = concatMap xParams lams ++ concatMap yParams lams,
- 
+          lambdaReturnType = concatMap lambdaReturnType lams,
+          lambdaBody =
+            Body
+              ()
+              (mconcat (map (bodyStms . lambdaBody) lams))
+              (concatMap (bodyResult . lambdaBody) lams)
+        }
 
 bodyHas :: (Exp GPUMem -> Bool) -> Body GPUMem -> Bool
 bodyHas f = any (f' . stmExp) . bodyStms
