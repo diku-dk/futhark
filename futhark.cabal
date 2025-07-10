@@ -321,7 +321,8 @@ library
       Futhark.Optimise.Fusion.GraphRep
       Futhark.Optimise.Fusion.RulesWithAccs
       Futhark.Optimise.Fusion.HLsched
-      Futhark.Optimise.Fusion.HLsched.Utils
+      Futhark.Optimise.Fusion.HLsched.Env
+      Futhark.Optimise.Fusion.HLsched.SchedUtils
       Futhark.Optimise.Fusion.HLsched.Stripmine
       Futhark.Optimise.Fusion.TryFusion
       Futhark.Optimise.GenRedOpt

@@ -23,7 +23,8 @@ import Futhark.Optimise.Fusion.GraphRep
 --import Futhark.Transform.Rename
 --import Futhark.Transform.Substitute
 --import Futhark.Analysis.PrimExp
-import Futhark.Optimise.Fusion.HLsched.Utils
+import Futhark.Optimise.Fusion.HLsched.Env
+import Futhark.Optimise.Fusion.HLsched.SchedUtils
 import Futhark.Optimise.Fusion.HLsched.Stripmine
 --import Futhark.Util.Pretty hiding (line, sep, (</>))
 -- import Futhark.Analysis.PrimExp.Convert

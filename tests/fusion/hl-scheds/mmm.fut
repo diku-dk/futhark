@@ -43,7 +43,7 @@ def mmm [M][N][Q] (A: [M][Q]real) (B: [Q][N]real) : [M][N]real =
                   , [m, Tm, Rm, n, Tn, Rn, q, Tq]  -- dims length
                   , [0,  0,  0, 1,  1,  1, 2,  2]  -- orig dimensions
                   , [0,  3,  6, 1,  4,  7, 2,  5]  -- dims permutation
-                  , [0,  0,  3, 0,  0,  3, 0,  0]  -- signals, e.g., 3 means "seq+reg"
+                  , [0,  0,  3, 0,  0,  3, 3,  3]  -- signals, e.g., 3 means "seq+reg"
                   , [Tm*Rm*n*Tn*Rn, Rm*n*Tn*Rn, n*Tn*Rn, Tn*Rn, Rn, 1, 0, 0] -- strides
                   )
 
