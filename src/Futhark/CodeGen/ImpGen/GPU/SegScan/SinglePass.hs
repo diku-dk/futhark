@@ -12,10 +12,12 @@ import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
+import Futhark.Construct (fullSlice)
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
+import Futhark.IR.SOACS.SOAC (groupScatterResults)
 import Futhark.Transform.Rename
-import Futhark.Util (mapAccumLM, takeLast)
+import Futhark.Util (mapAccumLM)
 import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, nextMul, quot)
 import Prelude hiding (mod, quot, rem)
 
@@ -224,9 +226,7 @@ compileSegScan ::
   CallKernelGen ()
 compileSegScan pat lvl space ts scan_op map_kbody post_op = do
   attrs <- lvlKernelAttrs lvl
-  let Pat all_pes = pat
-
-      scanop_nes = segBinOpNeutral scan_op
+  let scanop_nes = segBinOpNeutral scan_op
 
       n = product $ map pe64 $ segSpaceDims space
 
@@ -645,7 +645,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                 \(dest, res) ->
                   copyDWIMFix dest [i] res []
 
-      sComment "Transpose scan output and Write it to global memory in coalesced fashion" $ do
+      sComment "Transpose scan output and to write it later in coalesced fashion to global memory" $ do
         forM_ (zip transposedArrays scan_private_chunks) $ \(locmem, priv) -> do
           -- sOp local_barrier
           sFor "i" chunk $ \i -> do
@@ -664,4 +664,45 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                 (Var locmem)
                 [sExt64 $ flat_idx - block_offset]
           sOp local_barrier
+
+      let (scan_pars, map_pars) =
+            splitAt (length $ segBinOpNeutral scan_op) $
+              map paramName $
+                lambdaParams $
+                  segPostOpLambda post_op
+          (idxs, vals, map_res) = splitPostOpResults post_op $ fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
+          groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
+          (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
+
+      sComment "Compute post op and write to global memory." $ do
+        dScope Nothing $
+          scopeOfLParams $
+            lambdaParams $
+              segPostOpLambda post_op
+
+        sFor "i" chunk $ \i -> do
+          sComment "bind scan results to post lambda params" $ do
+            forM_ (zip scan_pars scan_private_chunks) $ \(par, priv) ->
+              copyDWIMFix par [] (Var priv) [i]
+
+          sComment "bind map results to post lamda params" $
+            forM_ (zip map_pars map_private_chunks) $ \(par, priv) -> do
+              copyDWIMFix par [] (Var priv) [i]
+
+          sComment "compute post op." $
+            compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+              sComment "write scatter values." $
+                forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
+                  forM_ idxs_vals $ \(is', val) -> do
+                    arr_t <- lookupType arr
+                    let rws' = map pe64 $ arrayDims arr_t
+                        slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
+                    sWhen (inBounds slice' rws') $
+                      copyDWIM (patElemName pe) (unSlice slice') val []
+              sComment "write mapped values" $ do
+                flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * tblock_size_e
+                dIndexSpace (zip gtids dims') flat_idx
+                sWhen (flat_idx .<. n) $ do
+                  forM_ (zip pat_map map_res) $ \(pe, res) ->
+                    copyDWIMFix (patElemName pe) (map le64 gtids) res []
 {-# NOINLINE compileSegScan #-}
