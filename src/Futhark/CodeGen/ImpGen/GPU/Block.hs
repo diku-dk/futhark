@@ -432,27 +432,28 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space ts body scans post_op))) = d
       lambdaParams $
         segPostOpLambda post_op
 
-  blockCoverSegSpace (segVirt lvl) space $ do
-    sComment "bind scan results to post lambda params" $ do
-      forM_ (zip scan_pars scan_out) $ \(par, acc) ->
-        copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 ltids)
+  sComment "bind scan results to post lambda params" $ do
+    forM_ (zip scan_pars scan_out) $ \(par, acc) ->
+      copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 ltids)
 
-    sComment "bind map results to post lamda params" $
-      forM_ (zip map_pars map_out) $ \(par, out) -> do
-        copyDWIMFix (paramName par) [] (Var out) (map Imp.le64 ltids)
+  sComment "bind map results to post lamda params" $
+    forM_ (zip map_pars map_out) $ \(par, out) -> do
+      copyDWIMFix (paramName par) [] (Var out) (map Imp.le64 ltids)
 
-    compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
-      sComment "write scatter values." $
-        forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
-          forM_ idxs_vals $ \(is', val) -> do
-            arr_t <- lookupType arr
-            let rws' = map pe64 $ arrayDims arr_t
-                slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
-            sWhen (inBounds slice' rws') $
-              copyDWIM (patElemName pe) (unSlice slice') val []
-      sComment "write mapped values" $
-        forM_ (zip pat_map map_res) $ \(pe, res) ->
-          copyDWIMFix (patElemName pe) (map le64 ltids) res []
+  compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
+    sComment "write scatter values." $
+      forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
+        forM_ idxs_vals $ \(is', val) -> do
+          arr_t <- lookupType arr
+          let rws' = map pe64 $ arrayDims arr_t
+              slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
+          sWhen (inBounds slice' rws') $
+            copyDWIM (patElemName pe) (unSlice slice') val []
+    sComment "write mapped values" $
+      forM_ (zip pat_map map_res) $ \(pe, res) ->
+        copyDWIMFix (patElemName pe) (map le64 ltids) res []
+
+  sOp $ Imp.Barrier Imp.FenceGlobal
 compileBlockOp pat (Inner (SegOp (SegRed lvl space _ body ops))) = do
   compileFlatId space
 
