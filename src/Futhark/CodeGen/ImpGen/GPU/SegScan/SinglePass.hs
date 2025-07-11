@@ -9,6 +9,7 @@ import Control.Monad
 import Data.List (zip4, zip7)
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
@@ -674,6 +675,11 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
           (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
 
+      sComment
+        ( T.pack $ concatMap show $ map patElemName $ patElems pat
+        )
+        $ pure ()
+
       sOp local_barrier
       sComment "Compute post op and write to global memory." $ do
         sFor "i" chunk $ \i -> do
@@ -692,18 +698,18 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
           sComment "compute post op." $
             compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
-              sComment "write scatter values." $
-                forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
-                  forM_ idxs_vals $ \(is', val) -> do
-                    arr_t <- lookupType arr
-                    let rws' = map pe64 $ arrayDims arr_t
-                        slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
-                    sWhen (inBounds slice' rws') $
-                      copyDWIM (patElemName pe) (unSlice slice') val []
-              sComment "write mapped values" $ do
-                flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * tblock_size_e
-                dIndexSpace (zip gtids dims') flat_idx
-                sWhen (flat_idx .<. n) $ do
+              flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * tblock_size_e
+              dIndexSpace (zip gtids dims') flat_idx
+              sWhen (flat_idx .<. n) $ do
+                sComment "write scatter values." $
+                  forM_ (zip pat_scatter groups) $ \(pe, (_, arr, idxs_vals)) ->
+                    forM_ idxs_vals $ \(is', val) -> do
+                      arr_t <- lookupType arr
+                      let rws' = map pe64 $ arrayDims arr_t
+                          slice' = fmap pe64 $ fullSlice arr_t $ map DimFix is'
+                      sWhen (inBounds slice' rws') $
+                        copyDWIM (patElemName pe) (unSlice slice') val []
+                sComment "write mapped values" $
                   forM_ (zip pat_map map_res) $ \(pe, res) ->
                     copyDWIMFix (patElemName pe) (map le64 gtids) res []
           sOp $ local_barrier
