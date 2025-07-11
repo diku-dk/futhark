@@ -674,13 +674,14 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
           (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
 
+      sOp local_barrier
       sComment "Compute post op and write to global memory." $ do
-        dScope Nothing $
-          scopeOfLParams $
-            lambdaParams $
-              segPostOpLambda post_op
-
         sFor "i" chunk $ \i -> do
+          dScope Nothing $
+            scopeOfLParams $
+              lambdaParams $
+                segPostOpLambda post_op
+
           sComment "bind scan results to post lambda params" $ do
             forM_ (zip scan_pars scan_private_chunks) $ \(par, priv) ->
               copyDWIMFix par [] (Var priv) [i]
@@ -705,4 +706,5 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                 sWhen (flat_idx .<. n) $ do
                   forM_ (zip pat_map map_res) $ \(pe, res) ->
                     copyDWIMFix (patElemName pe) (map le64 gtids) res []
+          sOp $ local_barrier
 {-# NOINLINE compileSegScan #-}
