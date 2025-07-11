@@ -7,7 +7,6 @@ module Futhark.Optimise.Fusion.HLsched.Stripmine
   )
 where
 
-import Data.List qualified as L
 import Control.Monad
 --import Data.Graph.Inductive.Graph qualified as G
 import Data.Sequence qualified as Sq
@@ -23,6 +22,7 @@ import Futhark.IR.SOACS qualified as F
 --import Futhark.Transform.Rename
 --import Futhark.Transform.Substitute
 --import Futhark.Analysis.PrimExp
+import Futhark.Transform.Rename (renameLambda)
 import Futhark.Optimise.Fusion.HLsched.Env
 import Futhark.Optimise.Fusion.HLsched.SchedUtils
 --import Futhark.Util.Pretty hiding (line, sep, (</>))
@@ -77,7 +77,10 @@ validStripForDim env k m sched
         penms <- S.fromList $ map (`LeafExp` i64ptp) $ namesToList nms,
         length dims == S.size penms,
         penms == S.fromList dims = True
-    validSize dims = expandSE env m i64ptp == foldl mulPes pe1 dims
+    validSize dims =
+      if eqPEs (expandSE env m i64ptp) (foldl mulPes pe1 dims)
+      then True
+      else error ("\n\n\nvalidSize FAILS\n\n\n")
 --
 validStripForDim _ _ _ _ = Nothing
 
@@ -107,11 +110,7 @@ stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
       cur_ind' = addPes cur_ind i_mul_ns
   -- build the iota for this screma
   scope <- askScope
-  iota_info <-
-    runBuilder $ localScope scope $ do
-      w <- letSubExp ("w"++show k) =<< toExp n
-      iotnm <- letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
-      pure (w, iotnm)
+  iota_info <- mkIota k n
   if null ns
   then baseCase scope i_p cur_ind' iota_info
   else recuCase scope i_p cur_ind' iota_info
@@ -119,7 +118,7 @@ stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
     baseCase scope i_p cur_ind' ((w,iotnm), prologue_stms) = do
       new_lam <-
         runLambdaBuilder [i_p] $ localScope scope $ do
-          let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowUndef) (peFromSeI64 mm) pe1 
+          let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSeI64 mm) pe1 
           i_flat <- letSubExp ("i"++show k++"flat") =<< toExp i_flat_pe
           forM_ (zip (lambdaParams lam) inp_nm_tps) $ \ (lp, (inp_nm, inp_tp)) -> do
             let index_e = mkArrIndexingExp env inp_nm inp_tp i_flat
@@ -232,14 +231,17 @@ stripmineStmt k env sched (Let pat aux
 --              i.e., loop-mapaccum-loop is ilegal as it would
 --                    need lifting the computation for the top loop.
 stripmineStmt k env sched (Let pat aux
-    (Op (F.Screma mm inp_nms (ScremaForm map_lam [] [Reduce _ red_lam nes]))))
+    (Op (F.Screma mm inp_nms (ScremaForm map_lam [] [Reduce com red_lam nes]))))
   |  Just (sched', sched'') <- validStripForDim env k mm sched,
-     sig_lens <- zip (signals sched') (dimlens sched') = do
+     -- The index strides are needed for the Transposed-Reduce case which is to-be-implemented!!!
+     strides  <- mkRegIndStrides sched',
+     sig_lens <- zip3 (signals sched') (dimlens sched') strides = do
   stripmineLambda (k+1) env sched'' map_lam >>=
     maybe (pure Nothing) (mkResFromMLam sig_lens)
   where
     mkResFromMLam sig_lens (prologue_stms1, env1, map_lam1) = do
-      mres <- recStripRedomap env1 sig_lens map_lam1 (pat,nes) pe0
+      let pat_nms = map patElemName $ patElems pat
+      mres <- recStripRedomap env1 sig_lens map_lam1 (pat_nms,nes) pe0
       maybe (pure Nothing) (joinMbRes prologue_stms1) mres
     -- Core Function for Stripmining a Red o Map: Base Case
     recStripRedomap env1 [] map_lam1 _ cur_ind = do
@@ -248,7 +250,7 @@ stripmineStmt k env sched (Let pat aux
       inp_tps <- mapM lookupType inp_nms
       loop_body <-
         runBodyBuilder $ localScope (scope <> scopeOfLParams red_acc) $ do
-          -- let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowUndef) (peFromSeI64 mm) pe1 
+          -- let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSeI64 mm) pe1 
           i_flat <- letSubExp ("i"++show k++"flat") =<< toExp cur_ind
           forM_ (zip3 inp_nms inp_tps (lambdaParams map_lam1)) $ \ (arr, tp, arg) ->
             -- codegen of map's lambda arguments
@@ -264,31 +266,65 @@ stripmineStmt k env sched (Let pat aux
       pure $ Just (Sq.empty, env1, bodyStms loop_body)
     --
     -- Core Function for Stripmining a Red o Map: Recursive Case
-    recStripRedomap env1 ((sig,dlen): schd') map_lam1 (pat_res, acc_ini) cur_ind = do
+    recStripRedomap env1 ((sig,dlen,_strd): schd') map_lam1 (pat_nms, acc_ini) cur_ind = do
       scope <- askScope
       i_p <- newParam ("i"++show k) $ Prim i64ptp
-      pat_ps  <- mapM (newParam ("stripRedpat"++show k) . patElemDec) $ patElems pat
-      let pat_res' = Pat $ zipWith PatElem (map paramName pat_ps) (map paramDec pat_ps)
-          cur_ind' = addPes cur_ind $ mulPes (LeafExp (paramName i_p) i64ptp) $ foldl mulPes pe1 $ map snd schd'
-      red_acc' <- if null schd'
-                  then pure $ take (length (lambdaReturnType red_lam)) $ lambdaParams red_lam
-                  else mapM (newParam ("stripacc"++show k) . patElemDec) $ patElems pat
-      rec_res <- recStripRedomap env1 schd' map_lam1 (pat_res', map (Var . paramName) red_acc') cur_ind'
-      case (sig, rec_res) of
-        (3, Just (rec_prologue, rec_env, rec_stms)) -> do
-        -- ^ the case of a sequential subdimension, i.e., generating a loop
+      pat_nms' <- forM (patElems pat) $ \_ -> newVName ("stripRedpat"++show k) 
+--      pat_ps  <- mapM (newParam ("stripRedpat"++show k) . patElemDec) $ patElems pat
+--      let pat_res' = Pat $ zipWith PatElem (map paramName pat_ps) (map paramDec pat_ps)
+      let cur_ind' = addPes cur_ind $ mulPes (LeafExp (paramName i_p) i64ptp) $ foldl mulPes pe1 $ map (\(_,x,_)->x) schd'
+          num_vars = length $ lambdaReturnType red_lam
+      -- the innermost level uses the two halves of reduce's lambda args as loop accumulator and
+      --   array elements, respectively && also uses the vars of reduce's lambda result as result.
+      -- the other levels use fresh names for accumulators && the previous level result as result.
+      (red_acc', rec_res') <-
+        if null schd'
+        then pure (take num_vars $ lambdaParams red_lam, bodyResult $ lambdaBody red_lam)
+        else do acc' <- mapM (newParam ("stripacc"++show k) . patElemDec) $ patElems pat
+                pure (acc', map (subExpRes . Var) pat_nms')
+      let next_inis = if parMode sig == Seq then map (Var . paramName) red_acc' else nes
+      rec_res <- recStripRedomap env1 schd' map_lam1 (pat_nms', next_inis) cur_ind'
+      case (parMode sig, rec_res) of
+        -- The case of a sequential subdimension, i.e., generating a loop:
+        (Seq, Just (rec_prologue, rec_env, rec_stms)) -> do
           (w, w_stms) <- runBuilder $ localScope scope $ letSubExp ("w"++show k) =<< toExp dlen
           loop_body <-
             runBodyBuilder $ localScope (scope <> scopeOfLParams (i_p: red_acc')) $ do
-              addStms rec_stms
-              pure $ if null schd' then bodyResult $ lambdaBody red_lam
-                     else map (subExpRes . Var . patElemName) $ patElems pat_res'
+              addStms rec_stms; pure rec_res'
           let loop_form  = ForLoop (paramName i_p) Int64 w
               loop_fargs = map toFParam red_acc'
+              pat_res    = Pat $ zipWith PatElem pat_nms $ lambdaReturnType red_lam
               loop_stm   = Let pat_res aux $ Loop (zip loop_fargs acc_ini) loop_form loop_body
-          pure $ Just (rec_prologue, rec_env, w_stms Sq.|> loop_stm)
+          pure $ Just (w_stms <> rec_prologue, rec_env, Sq.singleton loop_stm)
+        -- The case of a mapaccum subdimension, i.e., generating a map:
+        (Macc, Just (rec_prologue, rec_env, rec_stms)) -> do
+          ((w,iotnm), new_prologue) <- mkIota k dlen
+          new_lam <-
+            runLambdaBuilder [i_p] $ localScope (scope <> scopeOfLParams red_acc') $ do
+              addStms rec_stms; pure rec_res'
+          let map_stm = soacStm (pat_nms, map (`arrayOfRow` w) $ lambdaReturnType red_lam)
+                (w,iotnm) $ ScremaForm new_lam [] []
+          pure $ Just (new_prologue <> rec_prologue, rec_env, Sq.singleton map_stm)
+        -- The case of a parallel dimension, i.e., generating a redomap
+        (Par, Just (rec_prologue, rec_env, rec_stms)) -> do
+          ((w,iotnm), new_prologue) <- mkIota k dlen
+          new_lam <-
+            runLambdaBuilder [i_p] $ localScope (scope <> scopeOfLParams red_acc') $ do
+              addStms rec_stms; pure rec_res'
+          red_lam' <- renameLambda red_lam
+          new_stms <- flip runBuilderT_ scope $ do
+              soac_res <- forM pat_nms $ \_ -> newVName $ "redomap_res" ++ show k
+              addStm $ soacStm (soac_res, lambdaReturnType red_lam) (w,iotnm) $
+                ScremaForm new_lam [] [Reduce com red_lam' nes]
+              applyRedLam (red_lam, nes) acc_ini (map Var soac_res) pat_nms >>= addStms
+--          let redomap_stm = soacStm (pat_nms, lambdaReturnType red_lam) (w,iotnm) $
+--                ScremaForm new_lam [] [Reduce com red_lam' nes]
+          pure $ Just (new_prologue <> rec_prologue, rec_env, new_stms)
+        -- ToDo: we need another one that uses commutativity to interchange the order of reduce
         _ -> pure Nothing
-
+    soacStm (pat_nms,tps) (w, iotnm) form =
+      let pat_res = Pat $ zipWith PatElem pat_nms tps
+      in  Let pat_res aux $ Op $ F.Screma w [iotnm] form
 --------------------------------------------------------------------------
 --- Stripmining Other Statements
 --------------------------------------------------------------------------
@@ -311,7 +347,6 @@ stripmineStmt _k env _sched stm@(Let pat aux e) = do
 
 --emptyCerts :: Certs
 --emptyCerts = Certs []
-
 se0 :: SubExp
 se0 = Constant $ IntValue $ Int64Value 0
 
@@ -327,33 +362,12 @@ pe1 = ValueExp $ IntValue $ Int64Value 1
 i64ptp :: PrimType
 i64ptp = IntType Int64
 
-toFParam :: LParam SOACS -> FParam SOACS
-toFParam p = Param (paramAttrs p) (paramName p) $ toDecl (paramDec p) Unique
-
 peFromSeI64 :: SubExp -> PrimExp VName
 peFromSeI64 (Constant pv) = ValueExp pv
 peFromSeI64 (Var vnm) = LeafExp vnm i64ptp
 
-addPes :: PrimExp VName -> PrimExp VName -> PrimExp VName
-addPes e1 e2 | e1 == pe0 = e2
-addPes e1 e2 | e2 == pe0 = e1
-addPes e1 e2 = BinOpExp (Add Int64 OverflowUndef) e1 e2
-
-mulPes :: PrimExp VName -> PrimExp VName -> PrimExp VName
-mulPes e1 e2 | e1 == pe1 = e2
-mulPes e1 e2 | e2 == pe1 = e1
-mulPes e1 e2 = BinOpExp (Mul Int64 OverflowUndef) e1 e2 
-
-minPes :: PrimExp VName -> PrimExp VName -> PrimExp VName
-minPes e1 e2 | e1 == e2 = e1
-minPes e1 e2 = BinOpExp (SMin Int64) e1 e2
-
-invPerm :: [Int] -> [Int]
-invPerm xs =
-  map f [0..length xs-1]
-  where
-    f i | Just ind <- L.elemIndex i xs = ind
-    f _ = error "Violation of assumed permutation semantics"
+toFParam :: LParam SOACS -> FParam SOACS
+toFParam p = Param (paramAttrs p) (paramName p) $ toDecl (paramDec p) Unique
 
 mkArrIndexingExp :: Env -> VName -> Type -> SubExp -> Exp SOACS
 mkArrIndexingExp env inp_nm inp_tp i_flat
@@ -373,6 +387,37 @@ joinMbRes :: (Applicative m) =>
   Stms SOACS -> (Stms SOACS, a, b) -> m (Maybe (Stms SOACS, a, b))
 joinMbRes stms1 (stms2, x, y) = pure $ Just (stms1 <> stms2, x, y)
 
+mkIota :: (HasScope SOACS m, MonadFreshNames m) =>
+    Int -> PrimExp VName -> m ((SubExp, VName), Stms SOACS)
+mkIota k n = do
+  scope <- askScope
+  runBuilder $ localScope scope $ do
+    w <- letSubExp ("w"++show k) =<< toExp n
+    iotnm <- letExp "iota" $ BasicOp $ Iota w (intConst Int64 0) (intConst Int64 1) Int64
+    pure (w, iotnm)
+
+mkCopyStms :: (LocalScope SOACS m, MonadFreshNames m) =>
+    [VName] -> [SubExp] -> [Type] -> m (Stms SOACS)
+mkCopyStms res_nms ses tps = do
+  scope <- askScope 
+  flip runBuilderT_ scope $ do
+    forM_ (zip3 ses res_nms tps) $ \ (se, nm, tp) ->
+      letBind (Pat [PatElem nm tp]) $ BasicOp $ SubExp se
+
+applyRedLam :: (LocalScope SOACS m, MonadFreshNames m) =>
+    (Lambda SOACS, [SubExp]) -> [SubExp] -> [SubExp] -> [VName] -> m (Stms SOACS)
+applyRedLam (lam, nes) ses1 ses2 res
+  | nes == ses1 = mkCopyStms res ses2 $ lambdaReturnType lam
+  | nes == ses2 = mkCopyStms res ses1 $ lambdaReturnType lam
+applyRedLam (lam, _) ses1 ses2 res = do
+  scope <- askScope
+  lam' <- renameLambda lam
+  let (lam_pars, lam_rtps) = (lambdaParams lam', lambdaReturnType lam')
+      lam_res_ses = map resSubExp $ bodyResult $ lambdaBody lam'
+  flip runBuilderT_ (scope <> scopeOfLParams lam_pars) $ do
+    mkCopyStms (map paramName lam_pars) (ses1 ++ ses2) (lam_rtps++lam_rtps) >>= addStms
+    addStms $ bodyStms $ lambdaBody lam'
+    mkCopyStms res lam_res_ses lam_rtps >>= addStms
 
 --------------------------------------------------------------------------
 --- GARBAGE CODE
@@ -464,7 +509,7 @@ buildMapNest (k, inp_nm_tps, mm) env [n] cur_ind lam = do
       -- 1. build a body that calls the screma
   lam_bdy <-
     runBodyBuilder $ localScope (scope <> scopeOfLParams [i_p]) $ do
-      let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowUndef) (peFromSeI64 mm) pe1 
+      let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSeI64 mm) pe1 
       i_flat <- letSubExp ("i"++show k++"flat") =<< toExp i_flat_pe
       forM_ (zip (lambdaParams lam) inp_nm_tps) $ \ (lp, (inp_nm, _inp_tp)) -> do
         letBind (Pat [PatElem (paramName lp) (paramDec lp)]) $
@@ -532,7 +577,7 @@ buildMapNest _ _ [] _ _ =
       -- 1. adjust the lambda body
       lam_bdy <-
         runBodyBuilder $ localScope (scope <> scopeOfLParams [i_p]) $ do
-          let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowUndef) (peFromSeI64 mm) pe1 
+          let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSeI64 mm) pe1 
           i_flat <- letSubExp ("i"++show k++"flat") =<< toExp i_flat_pe
           forM_ (zip (lambdaParams lam) inp_nm_tps) $ \ (lp, (inp_nm, _inp_tp)) -> do
             letBind (Pat [PatElem (paramName lp) (paramDec lp)]) $
@@ -583,7 +628,7 @@ applyStripmining env sched (pat, aux, H.Screma mm inps (H.ScremaForm map_lam [] 
       inp_tps <- mapM lookupType inp_nms
       loop_body <-
         runBodyBuilder $ localScope (scope <> scopeOfLParams (i_p: red_accs)) $ do
---          let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowUndef) (peFromSeI64 mm) pe1 
+--          let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSeI64 mm) pe1 
 --          i_flat <- letSubExp ("i"++show k++"flat") =<< toExp i_flat_pe
           forM_ (zip3 inp_nms inp_tps (lambdaParams map_lam1)) $ \ (arr, tp, arg) ->
             -- codegen of map's lambda arguments

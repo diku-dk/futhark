@@ -84,7 +84,7 @@ addTransf2Env env nm_new nm_old trsfs =
 
 expandSE :: Env -> SubExp -> PrimType -> PrimExp  VName
 expandSE _ (Constant pval) _ = ValueExp pval
-expandSE env (Var vnm) ptp = fromMaybe (LeafExp vnm ptp) $ M.lookup vnm $ scalars env 
+expandSE env (Var vnm) ptp = fromMaybe (LeafExp vnm ptp) $ M.lookup vnm $ scalars env
 
 addBinOp2Env :: Env -> (VName, Type) -> BinOp -> SubExp -> SubExp -> Env
 addBinOp2Env env (nm,tp) bop s1 s2 =
