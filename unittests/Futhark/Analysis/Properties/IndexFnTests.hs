@@ -41,6 +41,17 @@ tests =
             ]
         ),
       mkTest
+        "tests/indexfn/reverse.fut"
+        ( pure $ \(i, n, xs, sigma) ->
+            [ IndexFn
+                { shape = [Forall i (Iota (sHole n))],
+                  body =
+                    cases
+                      [(Bool True, sym2SoP $ Apply (Hole xs) [sym2SoP $ Apply (Hole sigma) [sHole i]])]
+                }
+            ]
+        ),
+      mkTest
         "tests/indexfn/abs.fut"
         ( pure $ \(_, _, x, _) ->
             [ IndexFn
