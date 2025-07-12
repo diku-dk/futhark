@@ -156,7 +156,7 @@ gpumemPipeline =
         performCSE False,
         LiftAllocations.liftAllocationsGPUMem,
         simplifyGPUMem,
-        ArrayShortCircuiting.optimiseGPUMem,
+        -- ArrayShortCircuiting.optimiseGPUMem,
         simplifyGPUMem,
         performCSE False,
         simplifyGPUMem,

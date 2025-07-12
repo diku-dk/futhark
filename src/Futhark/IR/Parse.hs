@@ -955,9 +955,13 @@ pSegOp pr pLvl =
       parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
     pSegPostOp =
       SegOp.SegPostOp
-        <$> pLambda pr
-        <* pComma
-        <*> many (pDest <* pComma)
+        <$> (pLambda pr <* pComma)
+        <*> choice
+          [ (:)
+              <$> pDest
+              <*> many (pComma *> pDest),
+            pure []
+          ]
     pHistOp =
       SegOp.HistOp
         <$> pShape

@@ -1447,6 +1447,7 @@ bottomUpSegOp ::
   Rule rep
 -- Some SegOp results can be moved outside the SegOp, which can
 -- simplify further analysis.
+bottomUpSegOp _ _ _ (SegScan {}) = Skip
 bottomUpSegOp (_vtable, used) (Pat kpes) dec segop
   -- Remove dead results. This is a bit tricky to do with scan/red
   -- results, so we only deal with map results for now.

@@ -366,7 +366,7 @@ compileBlockOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
       zipWithM_ (compileThreadResult space) (patElems pat) $
         kernelBodyResult body
   sOp $ Imp.ErrorSync Imp.FenceLocal
-compileBlockOp pat (Inner (SegOp (SegScan lvl space ts body scans post_op))) = do
+compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
   compileFlatId space
 
   let (ltids, dims) = unzip $ unSegSpace space
@@ -379,21 +379,32 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space ts body scans post_op))) = d
           foldr (flip arrayOfRow) (arrayOfShape t s) $
             segSpaceDims space
       (scan_pars, map_pars) = splitAt (length $ segBinOpNeutral scan) $ lambdaParams $ segPostOpLambda post_op
+      (body_scan_res, body_map_res) = splitAt (length $ segBinOpNeutral scan) $ kernelBodyResult body
 
   scan_out <- forM scan_ts $ \(s, t) ->
     sAllocArray "scan_out" (elemType t) (shpOfT t s) $ Space "shared"
 
-  map_out <- forM (drop (segBinOpResults scans) ts) $ \t ->
-    sAllocArray "map_out" (elemType t) (shpOfT t mempty) $ Space "shared"
+  dScope Nothing $
+    scopeOfLParams $
+      lambdaParams $
+        segPostOpLambda post_op
 
   blockCoverSegSpace (segVirt lvl) space $
-    compileStms mempty (kernelBodyStms body) $
-      forM_ (zip (scan_out ++ map_out) $ kernelBodyResult body) $ \(dest, res) ->
+    compileStms mempty (kernelBodyStms body) $ do
+      forM_ (zip scan_out body_scan_res) $ \(dest, res) ->
         copyDWIMFix
           dest
           (map Imp.le64 ltids)
           (kernelResultSubExp res)
           []
+
+      sComment "bind map results to post lambda params" $
+        forM_ (zip map_pars body_map_res) $ \(par, res) ->
+          copyDWIMFix
+            (paramName par)
+            []
+            (kernelResultSubExp res)
+            []
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
 
@@ -427,18 +438,9 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space ts body scans post_op))) = d
       groups = groupScatterResults (segPostOpScatterSpec post_op) (idxs <> vals)
       (pat_scatter, pat_map) = splitAt (length groups) $ patElems pat
 
-  dScope Nothing $
-    scopeOfLParams $
-      lambdaParams $
-        segPostOpLambda post_op
-
-  sComment "bind scan results to post lambda params" $ do
+  sComment "bind scan results to post lambda params" $
     forM_ (zip scan_pars scan_out) $ \(par, acc) ->
       copyDWIMFix (paramName par) [] (Var acc) (map Imp.le64 ltids)
-
-  sComment "bind map results to post lamda params" $
-    forM_ (zip map_pars map_out) $ \(par, out) -> do
-      copyDWIMFix (paramName par) [] (Var out) (map Imp.le64 ltids)
 
   compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $ do
     sComment "write scatter values." $
