@@ -150,13 +150,13 @@ SCALAR_FUN_ATTR f16 atomic_fadd_f16_global(volatile __global uint16_t *p, f16 va
   int shift = offset * 16;
   int32_t mask = 0xffff << shift;
   int32_t old = 0;
-  int32_t upd = mask & ((int32_t)futrts_to_bits16(val) << shift);
+  int32_t upd = mask & ((int32_t)fptobits_f16_i16(val) << shift);
   int32_t saw;
   while ((saw=atomic_cmpxchg_i32_global(p32, old, upd)) != old) {
     old = saw;
-    upd = (old & ~mask) | (int32_t)futrts_to_bits16(futrts_from_bits16((uint32_t)old >> shift) + val) << shift;
+    upd = (old & ~mask) | (int32_t)fptobits_f16_i16(bitstofp_i16_f16((uint32_t)old >> shift) + val) << shift;
   }
-  return futrts_from_bits16((uint32_t)old >> shift);
+  return bitstofp_i16_f16((uint32_t)old >> shift);
 }
 
 SCALAR_FUN_ATTR f16 atomic_fadd_f16_shared(volatile __local uint16_t *p, f16 val) {
@@ -165,13 +165,13 @@ SCALAR_FUN_ATTR f16 atomic_fadd_f16_shared(volatile __local uint16_t *p, f16 val
   int shift = offset * 16;
   int32_t mask = 0xffff << shift;
   int32_t old = 0;
-  int32_t upd = mask & ((int32_t)futrts_to_bits16(val) << shift);
+  int32_t upd = mask & ((int32_t)fptobits_f16_i16(val) << shift);
   int32_t saw;
   while ((saw=atomic_cmpxchg_i32_shared(p32, old, upd)) != old) {
     old = saw;
-    upd = (old & ~mask) | (int32_t)futrts_to_bits16(futrts_from_bits16((uint32_t)old >> shift) + val) << shift;
+    upd = (old & ~mask) | (int32_t)fptobits_f16_i16(bitstofp_i16_f16((uint32_t)old >> shift) + val) << shift;
   }
-  return futrts_from_bits16((uint32_t)old >> shift);
+  return bitstofp_i16_f16((uint32_t)old >> shift);
 }
 
 // End of atomics16.h

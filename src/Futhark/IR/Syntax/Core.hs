@@ -73,6 +73,10 @@ module Futhark.IR.Syntax.Core
     FlatDimIndex (..),
     flatSliceDims,
     flatSliceStrides,
+
+    -- * Provenance
+    Provenance (..),
+    stackProvenance,
   )
 where
 
@@ -82,12 +86,14 @@ import Control.Monad.State
 import Data.Bifoldable
 import Data.Bifunctor
 import Data.Bitraversable
+import Data.Loc (locEnd, locStart)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.String
 import Data.Text qualified as T
 import Data.Traversable (fmapDefault, foldMapDefault)
+import Futhark.Util (splitFromEnd)
 import Language.Futhark.Core
 import Language.Futhark.Primitive
 import Prelude hiding (id, (.))
@@ -642,3 +648,37 @@ instance Monoid OpaqueTypes where
 instance Semigroup OpaqueTypes where
   OpaqueTypes x <> OpaqueTypes y =
     OpaqueTypes $ x <> filter ((`notElem` map fst x) . fst) y
+
+-- | Information about what in the original program a given IR statement
+-- corresponds to. See Note [Tracking Source Locations].
+data Provenance = Provenance [Loc] Loc
+  deriving (Eq, Ord, Show)
+
+contains :: Loc -> Loc -> Bool
+contains l1 l2 = locStart l1 <= locStart l2 && locEnd l1 >= locEnd l2
+
+clean :: [Loc] -> [Loc]
+clean (l : ls) | l == mempty = clean ls
+clean (l1 : l2 : ls)
+  -- Remove locations that completely enclose a successive location. This is to
+  -- remove locations that correspond to lambdas that are immediately applied -
+  -- they are pretty boring and just add clutter.
+  | l1 `contains` l2 = clean $ l2 : ls
+  | otherwise = l1 : clean (l2 : ls)
+clean ls = ls
+
+stackProvenance :: Provenance -> Provenance -> Provenance
+stackProvenance (Provenance xs x) (Provenance ys y) =
+  case splitFromEnd 1 $ clean $ xs <> [x] <> ys <> [y] of
+    (zs', [z']) -> Provenance zs' z'
+    _ -> mempty -- Zero-information case.
+
+instance Monoid Provenance where
+  mempty = Provenance mempty mempty
+
+instance Semigroup Provenance where
+  Provenance xs x <> Provenance ys y
+    | y == mempty = Provenance xs x
+    | x == mempty = Provenance ys y
+    | xs == ys = Provenance xs (x <> y)
+    | otherwise = Provenance ys y

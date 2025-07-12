@@ -273,14 +273,14 @@ SCALAR_FUN_ATTR f16 futrts_fma16(f16 a, f16 b, f16 c) { return fmaf(a, b, c); }
 // The CUDA __half type cannot be put in unions for some reason, so we
 // use bespoke conversion functions instead.
 #ifdef __CUDA_ARCH__
-SCALAR_FUN_ATTR int16_t futrts_to_bits16(f16 x) { return __half_as_ushort(x); }
-SCALAR_FUN_ATTR f16 futrts_from_bits16(int16_t x) { return __ushort_as_half(x); }
+SCALAR_FUN_ATTR int16_t fptobits_f16_i16(f16 x) { return __half_as_ushort(x); }
+SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) { return __ushort_as_half(x); }
 #elif defined(ISPC)
-SCALAR_FUN_ATTR int16_t futrts_to_bits16(f16 x) { varying int16_t y = *((varying int16_t * uniform)&x); return y;
+SCALAR_FUN_ATTR int16_t fptobits_f16_i16(f16 x) { varying int16_t y = *((varying int16_t * uniform)&x); return y;
 }
-SCALAR_FUN_ATTR f16 futrts_from_bits16(int16_t x) { varying f16 y = *((varying f16 * uniform)&x); return y; }
+SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) { varying f16 y = *((varying f16 * uniform)&x); return y; }
 #else
-SCALAR_FUN_ATTR int16_t futrts_to_bits16(f16 x) {
+SCALAR_FUN_ATTR int16_t fptobits_f16_i16(f16 x) {
   union {
     f16 f;
     int16_t t;
@@ -290,7 +290,7 @@ SCALAR_FUN_ATTR int16_t futrts_to_bits16(f16 x) {
   return p.t;
 }
 
-SCALAR_FUN_ATTR f16 futrts_from_bits16(int16_t x) {
+SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) {
   union {
     int16_t f;
     f16 t;
@@ -359,20 +359,20 @@ SCALAR_FUN_ATTR f16 futrts_fma16(f16 a, f16 b, f16 c) { return futrts_fma32(a, b
 // float.  Similarly for vstore_half.
 #ifdef __OPENCL_VERSION__
 
-SCALAR_FUN_ATTR int16_t futrts_to_bits16(f16 x) {
+SCALAR_FUN_ATTR int16_t fptobits_f16_i16(f16 x) {
   int16_t y;
   // Violating strict aliasing here.
   vstore_half((float)x, 0, (half*)&y);
   return y;
 }
 
-SCALAR_FUN_ATTR f16 futrts_from_bits16(int16_t x) {
+SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) {
   return (f16)vload_half(0, (half*)&x);
 }
 
 #else
-SCALAR_FUN_ATTR int16_t futrts_to_bits16(f16 x) { return (int16_t)float2halfbits(x); }
-SCALAR_FUN_ATTR f16 futrts_from_bits16(int16_t x) { return halfbits2float((uint16_t)x); }
+SCALAR_FUN_ATTR int16_t fptobits_f16_i16(f16 x) { return (int16_t)float2halfbits(x); }
+SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) { return halfbits2float((uint16_t)x); }
 SCALAR_FUN_ATTR f16 fsignum16(f16 x) { return futrts_isnan16(x) ? x : (x > 0 ? 1 : 0) - (x < 0 ? 1 : 0); }
 
 #endif

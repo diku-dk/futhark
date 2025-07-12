@@ -397,7 +397,7 @@ transformStm path (Let pat aux (Loop merge form body)) =
 transformStm path (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form =
       onMap path $ MapLoop pat aux w lam arrs
-transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
+transformStm path (Let pat aux (Op (Screma w arrs form)))
   | Just scans <- isScanSOAC form,
     Scan scan_lam nes <- singleScan scans,
     Just do_iswim <- iswim pat w scan_lam $ zip nes arrs = do
@@ -433,6 +433,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
               =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
       versionScanRed path pat aux w map_lam Nothing paralleliseOuter outerParallelBody innerParallelBody
+  where
+    cs = stmAuxCerts aux
 transformStm path (Let res_pat aux (Op (Screma w arrs form)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm'
@@ -442,7 +444,7 @@ transformStm path (Let res_pat aux (Op (Screma w arrs form)))
       types <- asksScope scopeForSOACs
       stms <- fst <$> runBuilderT (simplifyStms =<< collectStms_ (auxing aux do_irwim)) types
       transformStms path $ stmsToList stms
-transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
+transformStm path (Let pat aux (Op (Screma w arrs form)))
   | Just (reds, map_lam) <- isRedomapSOAC form = do
       let paralleliseOuter = runBuilder_ $ do
             red_ops <- forM reds $ \(Reduce comm red_lam nes) -> do
@@ -473,11 +475,13 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
               =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
       versionScanRed path pat aux w map_lam Nothing paralleliseOuter outerParallelBody innerParallelBody
-transformStm path (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) = do
+  where
+    cs = stmAuxCerts aux
+transformStm path (Let pat aux (Op (Screma w arrs form))) = do
   -- This screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
-  transformStms path . map (certify cs) . stmsToList . snd
+  transformStms path . map (certify (stmAuxCerts aux)) . stmsToList . snd
     =<< runBuilderT (dissectScrema pat w form arrs) scope
 transformStm path (Let pat _ (Op (Stream w arrs nes fold_fun))) = do
   -- Remove the stream and leave the body parallel.  It will be
@@ -534,7 +538,7 @@ transformStm path (Let pat aux (Op (Scatter w arrs as lam)))
       addStms stms
       letBind (Pat [res_pe]) $ Op $ SegOp kernel
 --
-transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs as lam))) = runBuilder_ $ do
+transformStm _ (Let pat aux (Op (Scatter w ivs as lam))) = runBuilder_ $ do
   let lam' = soacsLambdaToGPU lam
   write_i <- newVName "write_i"
   let krets = do
@@ -555,10 +559,10 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs as lam))) = runBuilde
       inputs
       (patTypes pat)
       body
-  certifying cs $ do
+  certifying (stmAuxCerts aux) $ do
     addStms stms
     letBind pat $ Op $ SegOp kernel
-transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w imgs ops bucket_fun))) = do
+transformStm _ (Let orig_pat aux (Op (Hist w imgs ops bucket_fun))) = do
   let bfun' = soacsLambdaToGPU bucket_fun
 
   -- It is important not to launch unnecessarily many threads for
@@ -566,10 +570,10 @@ transformStm _ (Let orig_pat (StmAux cs _ _) (Op (Hist w imgs ops bucket_fun))) 
   -- subhistograms as well.
   runBuilder_ $ do
     lvl <- segThreadCapped [w] "seghist" $ NoRecommendation SegNoVirt
-    addStms =<< histKernel onLambda lvl orig_pat [] [] cs w ops bfun' imgs
+    addStms =<< histKernel onLambda lvl orig_pat [] [] (stmAuxCerts aux) w ops bfun' imgs
   where
     onLambda = pure . soacsLambdaToGPU
-transformStm path (Let pat aux@(StmAux cs _ _) (Op (ScanScatter w arrs map_lam scan dests scatter_lam))) = do
+transformStm path (Let pat aux (Op (ScanScatter w arrs map_lam scan dests scatter_lam))) = do
   let paralleliseOuter = runBuilder_ $ do
         scan_ops <- do
           let Scan scan_lam nes = scan
@@ -599,6 +603,8 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (ScanScatter w arrs map_lam s
           =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
   versionScanRed path pat aux w map_lam (Just scatter_lam) paralleliseOuter outerParallelBody innerParallelBody
+  where
+    cs = stmAuxCerts aux
 transformStm _ stm =
   runBuilder_ $ FOT.transformStmRecursively stm
 

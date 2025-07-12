@@ -350,7 +350,6 @@ vFuseNodeT
       pat1_acc_nms <- namesFromList $ take n $ map patElemName $ patElems pat1,
       -- not $ namesIntersect (freeIn soac) pat1_acc_nms
       all ((`notNameIn` pat1_acc_nms) . getName) edges = do
-        let empty_aux = StmAux mempty mempty mempty
         wlam <- fst <$> doFusionInLambda wlam0
         bdy' <-
           runBodyBuilder $ inScopeOf wlam $ do
@@ -360,7 +359,7 @@ vFuseNodeT
             let other_pr1 = drop n $ zip (patElems pat1) wlam_res
             forM_ other_pr1 $ \(pat_elm, bdy_res) -> do
               let (nm, se, tp) = (patElemName pat_elm, resSubExp bdy_res, patElemType pat_elm)
-                  aux = empty_aux {stmAuxCerts = resCerts bdy_res}
+                  aux = (defAux ()) {stmAuxCerts = resCerts bdy_res}
               addStm $ Let (Pat [PatElem nm tp]) aux $ BasicOp $ SubExp se
             -- add the soac stmt
             soac' <- H.toExp soac

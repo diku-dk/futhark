@@ -334,13 +334,13 @@ distributeMapBodyStms ::
 distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
   where
     onStms acc [] = pure acc
-    onStms acc (Let pat (StmAux cs _ _) (Op (Stream w arrs accs lam)) : stms) = do
+    onStms acc (Let pat aux (Op (Stream w arrs accs lam)) : stms) = do
       types <- asksScope scopeForSOACs
       stream_stms <-
         snd <$> runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
       stream_stms' <-
         runReaderT (copyPropagateInStms simpleSOACS types stream_stms) types
-      onStms acc $ stmsToList (fmap (certify cs) stream_stms') ++ stms
+      onStms acc $ stmsToList (fmap (certify (stmAuxCerts aux)) stream_stms') ++ stms
     onStms acc (stm : stms) =
       -- It is important that stm is in scope if 'maybeDistributeStm'
       -- wants to distribute, even if this causes the slightly silly
@@ -463,7 +463,7 @@ maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc
       distributeMapBodyStms acc stms
 
 -- Parallelise segmented scatters.
-maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Scatter w ivs as lam))) acc =
+maybeDistributeStm stm@(Let pat aux (Op (Scatter w ivs as lam))) acc =
   distributeSingleStm acc stm >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -471,12 +471,12 @@ maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Scatter w ivs as lam))) acc
             nest' <- expandKernelNest pat_unused nest
             lam' <- soacsLambda lam
             addPostStms kernels
-            postStm =<< segmentedScatterKernel nest' perm pat cs w lam' ivs as
+            postStm =<< segmentedScatterKernel nest' perm pat (stmAuxCerts aux) w lam' ivs as
             pure acc'
     _ ->
       addStmToAcc stm acc
 -- Parallelise segmented Hist.
-maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Hist w as ops lam))) acc =
+maybeDistributeStm stm@(Let pat aux (Op (Hist w as ops lam))) acc =
   distributeSingleStm acc stm >>= \case
     Just (kernels, res, nest, acc')
       | Just (perm, pat_unused) <- permutationAndMissing pat res ->
@@ -484,7 +484,7 @@ maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Hist w as ops lam))) acc =
             lam' <- soacsLambda lam
             nest' <- expandKernelNest pat_unused nest
             addPostStms kernels
-            postStm =<< segmentedHistKernel nest' perm cs w ops lam' as
+            postStm =<< segmentedHistKernel nest' perm (stmAuxCerts aux) w ops lam' as
             pure acc'
     _ ->
       addStmToAcc stm acc
@@ -507,7 +507,7 @@ maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Index arr slice))) acc
 --
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
+maybeDistributeStm stm@(Let pat aux (Op (Screma w arrs form))) acc
   | Just (scans, map_lam) <- isScanomapSOAC form,
     Scan lam nes <- singleScan scans =
       distributeSingleStm acc stm >>= \case
@@ -520,7 +520,7 @@ maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
                 map_lam' <- soacsLambda map_lam
                 post_lam <- mkIdentityLambda $ lambdaReturnType lam
                 localScope (typeEnvFromDistAcc acc') $
-                  segmentedScanomapKernel nest' perm cs w lam post_lam [] map_lam' nes arrs
+                  segmentedScanomapKernel nest' perm (stmAuxCerts aux) w lam post_lam [] map_lam' nes arrs
                     >>= kernelOrNot mempty stm acc kernels acc'
         _ ->
           addStmToAcc stm acc
@@ -537,7 +537,7 @@ maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
+maybeDistributeStm stm@(Let pat aux (Op (Screma w arrs form))) acc
   | Just (reds, map_lam) <- isRedomapSOAC form,
     Reduce comm lam nes <- singleReduce reds =
       distributeSingleStm acc stm >>= \case
@@ -555,15 +555,15 @@ maybeDistributeStm stm@(Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc
                       | commutativeLambda lam = Commutative
                       | otherwise = comm
 
-                regularSegmentedRedomapKernel nest' perm cs w comm' lam' map_lam' nes arrs
+                regularSegmentedRedomapKernel nest' perm (stmAuxCerts aux) w comm' lam' map_lam' nes arrs
                   >>= kernelOrNot mempty stm acc kernels acc'
         _ ->
           addStmToAcc stm acc
-maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc = do
+maybeDistributeStm (Let pat aux (Op (Screma w arrs form))) acc = do
   -- This Screma is too complicated for us to immediately do
   -- anything, so split it up and try again.
   scope <- asksScope scopeForSOACs
-  distributeMapBodyStms acc . fmap (certify cs) . snd
+  distributeMapBodyStms acc . fmap (certify (stmAuxCerts aux)) . snd
     =<< runBuilderT (dissectScrema pat w form arrs) scope
 maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate shape (Var stm_arr)))) acc = do
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr ->
@@ -772,7 +772,7 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
   -- KernelNest we produce here is technically not sensible, but it's
   -- good enough for flatKernel to work.
   let nesting =
-        MapNesting scatter_pat (StmAux cs mempty ()) scatter_w $ zip (lambdaParams lam) ivs
+        MapNesting scatter_pat (StmAux cs mempty mempty ()) scatter_w $ zip (lambdaParams lam) ivs
       nest' =
         pushInnerKernelNesting (scatter_pat, bodyResult $ lambdaBody lam) nesting nest
   (ispace, kernel_inps) <- flatKernel nest'

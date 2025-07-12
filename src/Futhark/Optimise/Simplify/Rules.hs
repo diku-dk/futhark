@@ -95,17 +95,12 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Replicate (Shape []) (Var v)
 removeUnnecessaryCopy _ _ _ _ = Skip
 
 constantFoldPrimFun :: (BuilderOps rep) => TopDownRuleGeneric rep
-constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
+constantFoldPrimFun _ (Let pat aux (Apply fname args _ _))
   | Just args' <- mapM (isConst . fst) args,
     Just (_, _, fun) <- M.lookup (nameToText fname) primFuns,
     Just result <- fun args' =
-      Simplify $
-        certifying cs $
-          attributing attrs $
-            letBind pat $
-              BasicOp $
-                SubExp $
-                  Constant result
+      Simplify . auxing aux . letBind pat $
+        BasicOp (SubExp $ Constant result)
   where
     isConst (Constant v) = Just v
     isConst _ = Nothing
@@ -124,11 +119,11 @@ emptyArrayToScratch _ (Let pat@(Pat [pe]) aux e)
 emptyArrayToScratch _ _ = Skip
 
 simplifyIndex :: (BuilderOps rep) => BottomUpRuleBasicOp rep
-simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
+simplifyIndex (vtable, used) pat@(Pat [pe]) aux (Index idd inds)
   | Just m <- simplifyIndexing vtable seType idd inds consumed consuming =
-      Simplify $ certifying cs $ do
+      Simplify $ certifying (stmAuxCerts aux) $ do
         res <- m
-        attributing attrs $ case res of
+        attributing (stmAuxAttrs aux) $ case res of
           SubExpResult cs' se ->
             certifying cs' $ letBindNames (patNames pat) $ BasicOp $ SubExp se
           IndexResult extra_cs idd' inds' ->

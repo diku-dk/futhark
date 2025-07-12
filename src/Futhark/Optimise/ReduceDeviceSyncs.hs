@@ -136,11 +136,10 @@ optimizeStm out stm = do
                 let e' = BasicOp $ Replicate (Shape dims) (Var v')
                 let repl = Let pat' (stmAux stm) e'
 
-                let aux = StmAux mempty mempty ()
                 let slice = map sliceDim (arrayDims arr_t)
                 let slice' = slice ++ [DimFix $ intConst Int64 0]
                 let idx = BasicOp $ Index n' (Slice slice')
-                let index = Let (stmPat stm) aux idx
+                let index = Let (stmPat stm) (defAux ()) idx
 
                 pure (out |> repl |> index)
       BasicOp {} ->
@@ -480,7 +479,7 @@ eIndex arr = BasicOp $ Index arr (Slice [DimFix $ intConst Int64 0])
 
 -- | A shorthand for binding a single variable to an expression.
 bind :: PatElem Type -> Exp GPU -> Stm GPU
-bind pe = Let (Pat [pe]) (StmAux mempty mempty ())
+bind pe = Let (Pat [pe]) (defAux ())
 
 -- | Returns the array alias of @se@ if it is a variable that has been migrated
 -- to device. Otherwise returns @Nothing@.
@@ -607,7 +606,7 @@ inGPUBody m = do
 
   let pes = patElems (stmPat stm)
   pat <- Pat <$> mapM arrayizePatElem pes
-  let aux = StmAux mempty mempty ()
+  let aux = defAux ()
   let types = map patElemType pes
   let res = map (SubExpRes mempty . Var . patElemName) pes
   let body = Body () (prologue |> stm) res
@@ -718,9 +717,9 @@ rewriteStms = foldM rewriteTo mempty
     bnd :: Stms GPU -> (PatElem Type, SubExpRes) -> Stms GPU
     bnd out (pe, SubExpRes cs se)
       | Just t' <- peelArray 1 (typeOf pe) =
-          out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ ArrayLit [se] t')
+          out |> Let (Pat [pe]) (StmAux cs mempty mempty ()) (BasicOp $ ArrayLit [se] t')
       | otherwise =
-          out |> Let (Pat [pe]) (StmAux cs mempty ()) (BasicOp $ SubExp se)
+          out |> Let (Pat [pe]) (StmAux cs mempty mempty ()) (BasicOp $ SubExp se)
 
 -- | Rewrite all bindings introduced by a single statement (to ensure they are
 -- unique) and fix any dependencies that are broken as a result of migration or
@@ -752,9 +751,9 @@ rewritePatElem (PatElem n t) = do
 -- | Fix any 'StmAux' certificate references that are broken as a result of
 -- migration or rewriting.
 rewriteStmAux :: StmAux () -> RewriteM (StmAux ())
-rewriteStmAux (StmAux certs attrs _) = do
-  certs' <- renameCerts certs
-  pure (StmAux certs' attrs ())
+rewriteStmAux aux = do
+  certs' <- renameCerts $ stmAuxCerts aux
+  pure $ aux {stmAuxCerts = certs'}
 
 -- | Rewrite the bindings introduced by an expression (to ensure they are
 -- unique) and fix any dependencies that are broken as a result of migration or

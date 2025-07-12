@@ -1251,14 +1251,12 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
                                   info' = info {vartab = M.insert b mem_info vtab}
                                in if safe_4
                                     then -- array creation point, successful coalescing verified!
-
                                       let (a_acc', s_acc') = markSuccessCoal (a_acc, s_acc) mb info'
                                        in ((a_acc', inhb), s_acc')
                                     else -- this is an invertible alias case of the kind
                                     -- @ let b    = alias a @
                                     -- @ let x[i] = b @
                                     -- do not promote, but update the index function
-
                                       ((M.insert mb info' a_acc, inhb), s_acc)
                         _ -> (failed, s_acc) -- fail!
 
@@ -1675,7 +1673,6 @@ transferCoalsToBody exist_subs activeCoals_tab (MemBodyResult m_b b r m_r)
                       }
                in M.insert m_r etry' activeCoals_tab
             else -- make them both optimistically depend on each other
-
               let opts_x_new = M.insert r m_r (optdeps etry)
                   -- Here we should translate the @ind_b@ field of @mem_info@
                   -- across the existential introduced by the if-then-else

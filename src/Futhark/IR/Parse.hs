@@ -238,11 +238,12 @@ pErrorMsgPart =
 pErrorMsg :: Parser (ErrorMsg SubExp)
 pErrorMsg = ErrorMsg <$> braces (pErrorMsgPart `sepBy` pComma)
 
-pSrcLoc :: Parser SrcLoc
-pSrcLoc = pStringLiteral $> mempty -- FIXME
-
-pErrorLoc :: Parser (SrcLoc, [SrcLoc])
-pErrorLoc = (,mempty) <$> pSrcLoc
+pLoc :: Parser Loc
+pLoc =
+  choice
+    [ pStringLiteral $> mempty, -- FIXME
+      pure mempty
+    ]
 
 pIota :: Parser BasicOp
 pIota =
@@ -274,15 +275,7 @@ pBasicOp =
         $> uncurry (Opaque . OpaqueTrace)
         <*> parens ((,) <$> pStringLiteral <* pComma <*> pSubExp),
       keyword "copy" $> Replicate mempty . Var <*> parens pVName,
-      keyword "assert"
-        *> parens
-          ( Assert
-              <$> pSubExp
-              <* pComma
-              <*> pErrorMsg
-              <* pComma
-              <*> pErrorLoc
-          ),
+      keyword "assert" *> parens (Assert <$> pSubExp <* pComma <*> pErrorMsg),
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
       keyword "reshape"
@@ -341,6 +334,8 @@ pBasicOp =
       pConvOp "btoi" (const BToI) (keyword "bool") pIntType,
       pConvOp "ftob" (const . FToB) pFloatType (keyword "bool"),
       pConvOp "btof" (const BToF) (keyword "bool") pFloatType,
+      pConvOp "fptobits" (const . FPToBits) pFloatType pIntType,
+      pConvOp "bitstofp" (const BitsToFP) pIntType pFloatType,
       --
       pIndex,
       pFlatIndex,
@@ -485,7 +480,7 @@ pApply pr =
         <*> parens (pArg `sepBy` pComma)
         <* pColon
         <*> pRetTypes pr
-        <*> pure (safety, mempty, mempty)
+        <*> pure safety
 
     pArg =
       choice
@@ -587,11 +582,15 @@ pCerts =
 pSubExpRes :: Parser SubExpRes
 pSubExpRes = SubExpRes <$> pCerts <*> pSubExp
 
+pProvenance :: Parser Provenance
+pProvenance = Provenance mempty <$> pLoc
+
 pStm :: PR rep -> Parser (Stm rep)
-pStm pr =
-  keyword "let" $> Let <*> pPat pr <* pEqual <*> pStmAux <*> pExp pr
+pStm pr = do
+  loc <- pProvenance
+  keyword "let" $> Let <*> pPat pr <* pEqual <*> pStmAux loc <*> pExp pr
   where
-    pStmAux = flip StmAux <$> pAttrs <*> pCerts <*> pure (pExpDec pr)
+    pStmAux loc = flip StmAux <$> pAttrs <*> pCerts <*> pure loc <*> pure (pExpDec pr)
 
 pStms :: PR rep -> Parser (Stms rep)
 pStms pr = stmsFromList <$> many (pStm pr)

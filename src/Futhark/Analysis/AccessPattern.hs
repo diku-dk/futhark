@@ -308,7 +308,6 @@ analyseStms ctx body_constructor pats body = do
               then result <> oneName a
               else -- Otherwise, recurse on its dependencies;
               -- 0. Add dependencies in ctx to result
-
                 let (deps_in_ctx, deps_not_in_ctx) =
                       L.partition (`M.member` local_assignments) $
                         namesToList (deps var_info)
@@ -471,7 +470,7 @@ analyseBasicOp ctx expression pats =
         BinOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
         CmpOp _ lsubexp rsubexp -> concatVariableInfos mempty [lsubexp, rsubexp]
         ConvOp _ se -> varInfoFromSubExp se
-        Assert se _ _ -> varInfoFromSubExp se
+        Assert se _ -> varInfoFromSubExp se
         Index name _ ->
           error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
         Update _ name _slice _subexp ->
