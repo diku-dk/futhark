@@ -36,13 +36,16 @@ import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
+import Futhark.Optimise.EntryPointMem
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
+import Futhark.Optimise.MergeGPUBodies
 import Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs)
 import Futhark.Optimise.Sink
+import Futhark.Optimise.TensorCores
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass
@@ -54,6 +57,7 @@ import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
+import Futhark.Pass.InitNames
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
@@ -369,6 +373,28 @@ cseOption short =
     long = [passLongOption pass]
     pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
 
+initNamesOption :: String -> FutharkOption
+initNamesOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where
+    perform (SOACS prog) config =
+      SOACS <$> runPipeline (onePass initNamesPass) config prog
+    perform (GPU prog) config =
+      GPU <$> runPipeline (onePass initNamesPass) config prog
+    perform (MC prog) config =
+      MC <$> runPipeline (onePass initNamesPass) config prog
+    perform (Seq prog) config =
+      Seq <$> runPipeline (onePass initNamesPass) config prog
+    perform (SeqMem prog) config =
+      SeqMem <$> runPipeline (onePass initNamesPass) config prog
+    perform (GPUMem prog) config =
+      GPUMem <$> runPipeline (onePass initNamesPass) config prog
+    perform (MCMem prog) config =
+      MCMem <$> runPipeline (onePass initNamesPass) config prog
+
+    long = [passLongOption pass]
+    pass = initNamesPass :: Pass SOACS.SOACS SOACS.SOACS
+
 sinkOption :: String -> FutharkOption
 sinkOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
@@ -656,6 +682,10 @@ commandLineOptions =
     typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],
     allocateOption "a",
+    kernelsMemPassOption entryPointMemGPU [],
+    kernelsMemPassOption tensorCoreMemFixup [],
+    kernelsPassOption extractTensorCores [],
+    kernelsPassOption mergeGPUBodies [],
     kernelsMemPassOption doubleBufferGPU [],
     mcMemPassOption doubleBufferMC [],
     kernelsMemPassOption expandAllocations [],
@@ -668,6 +698,7 @@ commandLineOptions =
     mcMemPassOption ArrayShortCircuiting.optimiseMCMem [],
     kernelsMemPassOption ArrayShortCircuiting.optimiseGPUMem [],
     cseOption [],
+    initNamesOption "n",
     simplifyOption "e",
     soacsPipelineOption
       "Run the default optimised pipeline"
@@ -684,12 +715,28 @@ commandLineOptions =
       ["gpu"],
     pipelineOption
       getSOACSProg
+      "GPU"
+      GPU
+      "Run the default optimised kernels pipeline with tensor cores"
+      gputcPipeline
+      []
+      ["gputc"],
+    pipelineOption
+      getSOACSProg
       "GPUMem"
       GPUMem
       "Run the full GPU compilation pipeline"
       gpumemPipeline
       []
       ["gpu-mem"],
+    pipelineOption
+      getSOACSProg
+      "GPUMem"
+      GPUMem
+      "Run the full GPU with tensor cores compilation pipeline"
+      gpumemtcPipeline
+      []
+      ["gputc-mem"],
     pipelineOption
       getSOACSProg
       "Seq"
