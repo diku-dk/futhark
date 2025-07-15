@@ -11,11 +11,17 @@ module Futhark.Optimise.Fusion.HLsched.Env
   , emptyEnv
   , addTileBinding
   , addTransf2Env
-  , expandSE
   , addBinOp2Env
+  , expandSE
+  , eqPEs
+  , addPes
+  , mulPes
+  , minPes
+  , invPerm
   )
 where
 
+import Data.List qualified as L
 import Data.Maybe
 import Data.Map.Strict qualified as M
 import Futhark.Analysis.HORep.SOAC qualified as H
@@ -90,4 +96,45 @@ addBinOp2Env :: Env -> (VName, Type) -> BinOp -> SubExp -> SubExp -> Env
 addBinOp2Env env (nm,tp) bop s1 s2 =
   env { scalars = M.insert nm (BinOpExp bop (expSE s1) (expSE s2)) (scalars env) }
   where expSE se = expandSE env se $ elemType tp
+
+eqPEs :: PrimExp VName -> PrimExp VName -> Bool
+eqPEs p1 p2 | p1 == p2 = True
+eqPEs (BinOpExp bop1 pe11 pe12) ((BinOpExp bop2 pe21 pe22))
+  | pe11 == pe22 && pe12 == pe21 && bop1 == bop2 = isCommBop bop1
+  where
+    isCommBop Add{} = True
+    isCommBop Mul{} = True
+    isCommBop SMax{}= True
+    isCommBop SMin{}= True
+    isCommBop UMin{}= True
+    isCommBop UMax{}= True
+    isCommBop _     = False
+eqPEs _ _ = False
+
+pe0 :: PrimExp VName
+pe0 = ValueExp $ IntValue $ Int64Value 0
+
+pe1 :: PrimExp VName
+pe1 = ValueExp $ IntValue $ Int64Value 1
+
+addPes :: PrimExp VName -> PrimExp VName -> PrimExp VName
+addPes e1 e2 | e1 == pe0 = e2
+addPes e1 e2 | e2 == pe0 = e1
+addPes e1 e2 = BinOpExp (Add Int64 OverflowWrap) e1 e2  -- OverflowUndef
+
+mulPes :: PrimExp VName -> PrimExp VName -> PrimExp VName
+mulPes e1 e2 | e1 == pe1 = e2
+mulPes e1 e2 | e2 == pe1 = e1
+mulPes e1 e2 = BinOpExp (Mul Int64 OverflowWrap) e1 e2  -- OverflowUndef
+
+minPes :: PrimExp VName -> PrimExp VName -> PrimExp VName
+minPes e1 e2 | e1 == e2 = e1
+minPes e1 e2 = BinOpExp (SMin Int64) e1 e2
+
+invPerm :: [Int] -> [Int]
+invPerm xs =
+  map f [0..length xs-1]
+  where
+    f i | Just ind <- L.elemIndex i xs = ind
+    f _ = error "Violation of assumed permutation semantics"
 
