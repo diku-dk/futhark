@@ -5,35 +5,59 @@
 --     by means of high-level schedules.
 --   ... more explanation is comming ...
 module Futhark.Optimise.Fusion.HLsched.Env
-  ( FwdTileTab
+  ( FuseEnv (..)
+  , FwdTileTab
   , InvTileTab
   , Env (..)
   , emptyEnv
   , addTileBinding
   , addTransf2Env
   , addBinOp2Env
+  , tileFuns
   , expandSE
   , eqPEs
   , addPes
   , mulPes
   , minPes
   , invPerm
+  , getStmNode
+  , findType
+  , findPType
+  , peFromSe
+  , addInpDeps2Env
   )
 where
 
+--import Control.Monad
 import Data.List qualified as L
 import Data.Maybe
 import Data.Map.Strict qualified as M
+import Data.Graph.Inductive.Graph qualified as G
 import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.Tools
 import Futhark.Util.Pretty hiding (line, sep, (</>))
+import Futhark.Optimise.Fusion.GraphRep
 
 --import Debug.Trace
 
 -----------------------------------
+--- names of special functions
+-----------------------------------
+
+tileFuns :: [String]
+tileFuns = ["strip1", "strip2"]
+
+
+-----------------------------------
 --- Environment
 -----------------------------------
+
+data FuseEnv m = FEnv
+  {  fuseInLambda:: (LocalScope SOACS m, MonadFreshNames m) =>
+                     Lambda SOACS -> m (Lambda SOACS, Bool)
+  }
+-- dummy is: (\lam -> pure (lam, False))
 
 -- | Binds a size expression to its tiled
 --     approximation: `e -> [t1,...,tm]`,
@@ -51,10 +75,16 @@ type FwdTileTab = M.Map (PrimExp VName) Names
 --     produces `m -> (2*M, [m, t1, t2])`
 type InvTileTab = M.Map VName (PrimExp VName, Names)
 
+instance Pretty FwdTileTab where
+  pretty = pretty . M.toList
+
+instance Pretty InvTileTab where
+  pretty = pretty . M.toList
+
 data Env = Env
   { appTilesFwd :: FwdTileTab,
     appTilesInv :: InvTileTab,
-    iotas       :: M.Map VName (PrimExp VName, SubExp, Stms SOACS),
+    iotas       :: M.Map VName (SubExp, PrimExp VName), -- , Stms SOACS
     -- ^ binds the name of an iota array to its size
     scalars     :: M.Map VName (PrimExp VName),
     -- ^ binds the name of a scalar var to its value expression
@@ -74,12 +104,6 @@ addTileBinding env pe tile_nms =
   where
     foldfun nms env_cur nm = M.insert nm (pe, nms) env_cur
 
-instance Pretty FwdTileTab where
-  pretty = pretty . M.toList
-
-instance Pretty InvTileTab where
-  pretty = pretty . M.toList
-
 addTransf2Env :: Env -> VName -> VName -> H.ArrayTransforms -> Env
 addTransf2Env env nm_new nm_old trsfs =
   let (nm_old', trsfs') =
@@ -96,6 +120,10 @@ addBinOp2Env :: Env -> (VName, Type) -> BinOp -> SubExp -> SubExp -> Env
 addBinOp2Env env (nm,tp) bop s1 s2 =
   env { scalars = M.insert nm (BinOpExp bop (expSE s1) (expSE s2)) (scalars env) }
   where expSE se = expandSE env se $ elemType tp
+
+-------------------------------------------------------
+--- Simple Utilities
+-------------------------------------------------------
 
 eqPEs :: PrimExp VName -> PrimExp VName -> Bool
 eqPEs p1 p2 | p1 == p2 = True
@@ -137,4 +165,76 @@ invPerm xs =
   where
     f i | Just ind <- L.elemIndex i xs = ind
     f _ = error "Violation of assumed permutation semantics"
+
+getStmNode :: NodeT -> Maybe (Stm SOACS)
+getStmNode (StmNode stm) = Just stm
+getStmNode _ = Nothing
+
+findType :: (HasScope SOACS m) => SubExp -> m Type
+findType (Constant pval) = pure $ Prim $ primValueType pval
+findType (Var vnm) = lookupType vnm
+
+findPType :: (HasScope SOACS m, Monad m) => SubExp -> m PrimType
+findPType se = do
+  tp <- findType se
+  case tp of
+    Prim ptp -> pure ptp
+    _ -> error ("In findPType subexp: " ++ prettyString se ++
+                " has type "++prettyString tp++", which is not PrimType")
+
+peFromSe :: Env -> PrimType -> SubExp -> PrimExp VName
+peFromSe _ _ (Constant pv) = ValueExp pv
+peFromSe env ptp (Var vnm) =
+  case M.lookup vnm (scalars env) of
+    Just pe -> pe
+    Nothing -> LeafExp vnm ptp
+
+-------------------------------------------------------------------------
+--- Adding bindings to env for SOAC deps caused by iotas and scalars
+-------------------------------------------------------------------------
+
+addInpDeps2Env ::
+  Env ->
+  DepNode ->
+  DepGraph ->
+  Env
+addInpDeps2Env env0 (nId, _nT) DepGraph{dgGraph = g} = do
+  -- SoacNode{} <- soac_nT,
+  let (_out_deps, _, _, inp_deps) = G.context g nId
+  foldl addInpDep env0 inp_deps
+  where
+    se0 = Constant $ IntValue $ Int64Value 0
+    se1 = Constant $ IntValue $ Int64Value 1
+    i64ptp = IntType Int64
+    --
+    addInpDep env edgeid =
+      let (_, _, node, inp_deps0) = G.context g (snd edgeid)
+          inp_deps = filter (isInd . fst) inp_deps0
+          env' = foldl addInpDep env inp_deps
+      in case getStmNode node of
+           Just (Let pat _aux (Apply fnm arg_diets _ _)) ->
+             processTileFCall env' (pat, fnm, arg_diets)
+           Just (Let (Pat [pat_el]) _aux e) ->
+             processExp env' (patElemName pat_el, patElemDec pat_el) e
+           _ -> env'
+    --
+    processTileFCall env (pat, fnm, arg_diets)
+      | any (`L.isPrefixOf` (nameToString fnm)) tileFuns,
+        [(size_se, _)] <- arg_diets,
+        ptp:_ <- map (elemType . patElemDec)  $ patElems pat =
+      addTileBinding env (peFromSe env ptp size_se) $
+        map patElemName $ patElems pat
+    processTileFCall env _ = env
+    --
+    processExp env (pat_nm, _) (BasicOp (Iota w start stride Int64))
+      | start == se0 && stride == se1 =
+      let pe_w = peFromSe env i64ptp w
+      in  env { iotas = M.insert pat_nm (w, pe_w) (iotas env) }
+    processExp env (pat_nm, Prim ptp) (BasicOp (BinOp bop s1 s2)) =
+      let (p1, p2) = (peFromSe env ptp s1, peFromSe env ptp s2)
+      in  env { scalars = M.insert pat_nm (BinOpExp bop p1 p2) (scalars env) }
+    processExp env (pat_nm, Prim ptp) (BasicOp (UnOp unop se)) =
+      let pe = peFromSe env ptp se
+      in  env { scalars = M.insert pat_nm (UnOpExp unop pe) (scalars env) }
+    processExp env _ _ = env
 

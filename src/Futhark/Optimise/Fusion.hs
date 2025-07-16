@@ -474,7 +474,7 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
   spec_rule_res <- SF.ruleMFScat node_to_fuse dg
   -- \^ specialized fusion rules such as the one
   --   enabling map-flatten-scatter fusion
-  test_hl_sched <- HLS.applyHLsched node_to_fuse dg
+  test_hl_sched <- HLS.applyHLsched doFusionInLambda node_to_fuse dg
   case (spec_rule_res, test_hl_sched) of
     (_, Just dg') -> pure dg' 
     (Just dg', _) -> pure dg'

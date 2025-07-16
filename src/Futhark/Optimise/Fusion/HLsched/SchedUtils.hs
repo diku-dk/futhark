@@ -9,15 +9,13 @@ module Futhark.Optimise.Fusion.HLsched.SchedUtils
   , ParMode (..)
   , splitAtSched
   , parseHLSched
-  , expandScalar
   , parMode
   , mkRegIndStrides
---  , getStmNode
   )
 where
 
 import Data.List qualified as L
-import Control.Monad
+--import Control.Monad
 import Data.Graph.Inductive.Graph qualified as G
 --import Data.Map.Strict qualified as M
 --import Data.Maybe
@@ -35,13 +33,6 @@ import Futhark.Util.Pretty hiding (line, sep, (</>))
 import Futhark.Optimise.Fusion.HLsched.Env
 
 --import Debug.Trace
-
------------------------------------
---- names of special functions
------------------------------------
-
-tileFuns :: [String]
-tileFuns = ["strip1", "strip2"]
 
 -------------------------------------------------------
 --- LMAD-Like Representation of a High-Level Schedule
@@ -69,7 +60,7 @@ splitAtSched k sched =
 
 instance Pretty HLSched where
   pretty sched =
-    "{\n\tOffest: " <+> pretty (offset  sched) <> 
+    "{\n\tOffest: " <+> pretty (offset  sched) <>
     "\n\tDimLens: " <+> pretty (dimlens sched) <>
     "\n\tOrigIds: " <+> pretty (origids sched) <>
     "\n\tDimPerm: " <+> pretty (sigma   sched) <>
@@ -111,11 +102,9 @@ parseHLSched ::
   (HasScope SOACS m, Monad m) =>
   DepNode ->
   DepGraph ->
-  m (Maybe (Env, NodeT, HLSched, PatElem (LetDec SOACS)))
-parseHLSched node_to_fuse dg@DepGraph {dgGraph = g}
-  | sched_nodeT <- snd node_to_fuse,
-    sched_node_id <- nodeFromLNode node_to_fuse,
-    StmNode stmt <- sched_nodeT,
+  m (Maybe (Env, (Int, NodeT), HLSched, PatElem (LetDec SOACS)))
+parseHLSched (sched_nId, sched_nT) dg@DepGraph {dgGraph = g}
+  | StmNode stmt <- sched_nT,
     Let pat _aux e <- stmt,
     [pat_el] <- patElems pat,
     Apply fnm args_diet _rtp _ <- e,
@@ -130,12 +119,12 @@ parseHLSched node_to_fuse dg@DepGraph {dgGraph = g}
 --           "\n\t soac res name: "++ prettyString soac_res
 --          ) True,
     --
-    sched_ctx <- G.context g sched_node_id,
+    sched_ctx <- G.context g sched_nId,
     (_out_deps, _, _, inp_deps) <- sched_ctx,
-    indrc_deps <- filter (isInd   . fst) inp_deps,
+    indrc_deps <- filter (isInd . fst) inp_deps,
     indrc_ctxs <- map (G.context g . snd) indrc_deps,
-    indrc_ndTs <- map getNodeTfromCtx indrc_ctxs,
-    ([soac_nT], _arrlit_nTs) <- L.partition isSOACNodeT indrc_ndTs,
+    indrc_ndTs <- map getNodeIdTfromCtx indrc_ctxs,
+    ([(soac_nId, soac_nT)], _arrlit_nTs) <- L.partition (isSOACNodeT . snd) indrc_ndTs,
     SoacNode node_out_trsfs soac_pat _soac _soac_aux <- soac_nT,
     H.nullTransforms node_out_trsfs,
     -- ^ simplification: no out-transform supported so far
@@ -143,22 +132,17 @@ parseHLSched node_to_fuse dg@DepGraph {dgGraph = g}
     -- ^ simplification: soac must return one result
     soac_res == Var (patElemName soac_patel)
     -- ^ the argument of the HL-Sched must be the SOAC's result
---    stmts <- mapMaybe getStmNode arrlit_nTs
---    trace ("soac:\nlet " ++ prettyString soac_pat ++ " inp-deps: "++show inp_deps) True,
---    trace ("other " ++ show (length stmts) ++ " stms:\n" ++ prettyString stmts) True
-    -- trace("indrct-deps: "++show indrc_deps) True
-    --trace("graph: "++show g) True
   = do
-  -- scope <- askScope
-  let env0 = emptyEnv
-  (_,    signals_pes) <- expandSymArrLit env0 dg inp_deps signals_arg
-  (_,    origids_pes) <- expandSymArrLit env0 dg inp_deps orig_arg
-  (_,    sigma_pes  ) <- expandSymArrLit env0 dg inp_deps sigma_arg
-  -- 
-  (env1, lmad_off_pe) <- expandScalar env0 dg inp_deps offs
-  (env2, strides_pes) <- expandSymArrLit env1 dg inp_deps strides_arg
-  (env , dimlens_pes) <- expandSymArrLit env2 dg inp_deps ns_arg
-  let sched = HLS { offset  = lmad_off_pe
+  ptp_offs <- findPType offs
+  let env = addInpDeps2Env emptyEnv (sched_nId, sched_nT) dg
+      lmad_off_pe = peFromSe env ptp_offs offs
+      signals_pes = parseArrLitEdge env dg inp_deps signals_arg
+      origids_pes = parseArrLitEdge env dg inp_deps orig_arg
+      sigma_pes   = parseArrLitEdge env dg inp_deps sigma_arg
+      dimlens_pes = parseArrLitEdge env dg inp_deps ns_arg
+      strides_pes = parseArrLitEdge env dg inp_deps strides_arg
+      --
+      sched = HLS { offset  = lmad_off_pe
                   , dimlens = dimlens_pes
                   , strides = strides_pes
                   , origids = toArrInt origids_pes
@@ -171,24 +155,52 @@ parseHLSched node_to_fuse dg@DepGraph {dgGraph = g}
 ----         "\n\t Dimlens: " ++ prettyString dimlens_pes ++
 ----         "\n\t Strides: " ++ prettyString strides_pes
 --        ) $
-  pure $ Just (env, soac_nT, sched, pat_el)
+  pure $ Just (env, (soac_nId, soac_nT), sched, pat_el)
   where
-    getNodeTfromCtx (_, _, nT, _) = nT
+    getNodeIdTfromCtx (_, nId, nT, _) = (nId, nT)
     toArrInt ct_pes = map toInt ct_pes
     toInt :: PrimExp VName -> Int
     toInt (ValueExp (IntValue iv)) = valueIntegral iv
-    toInt pe =
-      error ("This was supposed to be a constant int value; instead is "++prettyString pe)
-      
+    toInt pe = error ("This was supposed to be a constant int value; instead is "++prettyString pe)
+--
 parseHLSched _ _ = do
   pure Nothing
 
---------------------------------------------------
---- Parsing Scalars, i.e., creating PrimExp for
+
+parseArrLitEdge :: Env -> DepGraph -> [(EdgeT,Int)] -> SubExp -> [PrimExp VName]
+parseArrLitEdge env DepGraph{dgGraph = g} inp_deps (Var arr_nm)
+  | Just edgeid <- L.find (\e -> arr_nm == getName (fst e)) inp_deps,
+    edge_ctx  <- G.context g (snd edgeid),
+    (_, _, node, _inp_deps') <- edge_ctx,
+    Just stm <- getStmNode node,
+    Let pat _aux (BasicOp (ArrayLit arg_ses _arr_tp)) <- stm,
+    [pat_el] <- patElems pat = do
+  map (peFromSe env (elemType $ patElemDec pat_el)) arg_ses
+--
+parseArrLitEdge _ _ _ _ =
+  error "Something went wrong in parsing an array literal (part of HLsched)"
+
+-----------------------------------------------------------
+--  GARBAGE CODE BELOW, i.e., replaced with simpler one
+-----------------------------------------------------------
+--  Parsing Scalars, i.e., creating PrimExp for
 --     them by following the program dependencies
 --  Similar for array literals.
---------------------------------------------------
+-----------------------------------------------------------
 
+{-- -- from the implem of `parseHLSched`
+  let env0 = emptyEnv
+  (_,    signals_pes) <- expandSymArrLit env0 dg inp_deps signals_arg
+  (_,    origids_pes) <- expandSymArrLit env0 dg inp_deps orig_arg
+  (_,    sigma_pes  ) <- expandSymArrLit env0 dg inp_deps sigma_arg
+  -- 
+  (env1, lmad_off_pe) <- expandScalar env0 dg inp_deps offs
+  (env2, strides_pes) <- expandSymArrLit env1 dg inp_deps strides_arg
+  (env , dimlens_pes) <- expandSymArrLit env2 dg inp_deps ns_arg
+--}
+
+
+{--
 expandScalar :: (HasScope SOACS m, Monad m) =>
     Env -> DepGraph -> [(EdgeT,Int)] -> SubExp -> m (Env, PrimExp VName)
 expandScalar env _ _ (Constant pval) =
@@ -262,24 +274,4 @@ expandSymArrLit env dg@DepGraph{dgGraph = g} inp_deps (Var arr_nm)
 --
 expandSymArrLit _ _ _ _ =
   error "Something went wrong in parsing an array literal (part of HLsched)"
-
--------------------------------------------------------
---- Simple Utilities
--------------------------------------------
-
-getStmNode :: NodeT -> Maybe (Stm SOACS)
-getStmNode (StmNode stm) = Just stm
-getStmNode _ = Nothing
-
-findType :: (HasScope SOACS m) => SubExp -> m Type
-findType (Constant pval) = pure $ Prim $ primValueType pval
-findType (Var vnm) = lookupType vnm
-
-findPType :: (HasScope SOACS m, Monad m) => SubExp -> m PrimType
-findPType se = do
-  tp <- findType se
-  case tp of
-    Prim ptp -> pure ptp
-    _ -> error ("In findPType subexp: " ++ prettyString se ++
-                " has type "++prettyString tp++", which is not PrimType")
-
+--}

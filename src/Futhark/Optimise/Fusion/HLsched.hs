@@ -39,15 +39,18 @@ import Debug.Trace
 
 applyHLsched ::
   (LocalScope SOACS m, MonadFreshNames m) =>
+  (Lambda SOACS -> m (Lambda SOACS, Bool)) ->
   DepNode ->
   DepGraph ->
   m (Maybe DepGraph)
-applyHLsched node_to_fuse dg = do
+applyHLsched fuseInLam node_to_fuse dg = do
+  let fenv = FEnv fuseInLam
   mb_sched <- parseHLSched node_to_fuse dg
   case mb_sched of
-    Just (env, SoacNode out_trsfs soac_pat soac soac_aux, sched, patel_sched) -> do
+    Just (env0, soac_node@(_, SoacNode out_trsfs soac_pat soac soac_aux), sched, patel_sched) -> do
       let (_valid_soac, exact_result) = isSupportedSOAC soac
-      stripmined_soac  <- applyStripmining env sched (soac_pat, soac_aux, soac)
+          env = addInpDeps2Env env0 soac_node dg
+      stripmined_soac  <- applyStripmining fenv env sched (soac_pat, soac_aux, soac)
       _rescheduled_soac <- applyPermutation sched stripmined_soac
       (_prologue, _epilogue) <-
         if exact_result
