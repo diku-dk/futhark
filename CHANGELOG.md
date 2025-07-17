@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * For GPU backends, incorrect code generation for accumulator updates (produced
   by AD) for thread-local arrays (#2294).
 
+* Missing consumption check in the termination condition for `while` loops (#2300).
+
 ## [0.25.31]
 
 ### Added
