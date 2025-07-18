@@ -161,8 +161,10 @@ analyseSegOp lumap inuse (SegMap _ _ _ body) =
   analyseKernelBody lumap inuse body
 analyseSegOp lumap inuse (SegRed _ _ _ body binops) =
   segWithBinOps lumap inuse binops body
-analyseSegOp lumap inuse (SegScan _ _ _ body binops) = do
-  segWithBinOps lumap inuse binops body
+analyseSegOp lumap inuse (SegScan _ _ _ body binops post_op) = do
+  (inuse', lus', graph') <- segWithBinOps lumap inuse binops body
+  (inuse'', lus'', graph'') <- analyseSegPostOp lumap inuse' post_op
+  pure (inuse'', lus' <> lus'', graph' <> graph'')
 analyseSegOp lumap inuse (SegHist _ _ _ body histops) = do
   (inuse', lus', graph) <- analyseKernelBody lumap inuse body
   (inuse'', lus'', graph') <- mconcat <$> mapM (analyseHistOp lumap inuse') histops
@@ -191,6 +193,15 @@ analyseSegBinOp ::
   SegBinOp GPUMem ->
   m (InUse, LastUsed, Graph VName)
 analyseSegBinOp lumap inuse (SegBinOp _ lambda _ _) =
+  analyseLambda lumap inuse lambda
+
+analyseSegPostOp ::
+  (LocalScope GPUMem m) =>
+  LUTabFun ->
+  InUse ->
+  SegPostOp GPUMem ->
+  m (InUse, LastUsed, Graph VName)
+analyseSegPostOp lumap inuse (SegPostOp lambda _) =
   analyseLambda lumap inuse lambda
 
 analyseHistOp ::
