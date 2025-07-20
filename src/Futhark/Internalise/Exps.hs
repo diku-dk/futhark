@@ -351,7 +351,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       -- application.  One caveat is that we need to replace any
       -- existential sizes, too (with zeroes, because they don't
       -- matter).
-      let subst = map (,E.ExpSubst (E.sizeFromInteger 0 mempty)) ext
+      let subst = map (,E.ExpSubst [] (E.sizeFromInteger 0 mempty)) ext
           et' = E.applySubst (`lookup` subst) et
       internaliseExp desc (E.Hole (Info et') loc)
     (FunctionName qfname, args) -> do

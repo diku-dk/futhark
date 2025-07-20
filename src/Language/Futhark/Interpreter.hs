@@ -711,7 +711,7 @@ expandType env (Scalar (TypeVar u tn args)) =
       Scalar (TypeVar u tn $ map expandArg args)
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim e) =
-      (M.singleton p $ ExpSubst e, mempty)
+      (M.singleton p $ ExpSubst [] e, mempty)
     matchPtoA (TypeParamType _ p _) (TypeArgType t') =
       let t'' = evalToStruct $ expandType env t' -- FIXME, we are throwing away the closure here.
        in (mempty, M.singleton p (TypeBinding mempty [] $ RetType [] t''))

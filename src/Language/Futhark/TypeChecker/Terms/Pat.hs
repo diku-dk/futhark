@@ -243,7 +243,7 @@ bindingPat sizes p t m = do
   where
     mkSizeSubst v = do
       v' <- newID $ baseName $ sizeName v
-      constrain v' . Size Nothing $
+      constrain v' . Size (Left Unlifted) $
         mkUsage v "ambiguous size of bound expression"
       pure (v, qualName v')
 

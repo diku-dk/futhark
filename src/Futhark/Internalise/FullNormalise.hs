@@ -228,8 +228,8 @@ getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext, _), Info (yp, yty))
   nameExp final $ Lambda [Id yn (Info yty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
     pSubst x y vn
-      | Named p <- xp, p == vn = Just $ ExpSubst x
-      | Named p <- yp, p == vn = Just $ ExpSubst y
+      | Named p <- xp, p == vn = Just $ ExpSubst [] x
+      | Named p <- yp, p == vn = Just $ ExpSubst [] y
       | otherwise = Nothing
 getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext, _)) (Info (RetType dims ret)) loc) = do
   xn <- newNameFromString "x"
@@ -240,8 +240,8 @@ getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext, _)
   nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
     pSubst x y vn
-      | Named p <- xp, p == vn = Just $ ExpSubst x
-      | Named p <- yp, p == vn = Just $ ExpSubst y
+      | Named p <- xp, p == vn = Just $ ExpSubst [] x
+      | Named p <- yp, p == vn = Just $ ExpSubst [] y
       | otherwise = Nothing
 getOrdering final (ProjectSection names (Info ty) loc) = do
   xn <- newNameFromString "x"
@@ -546,7 +546,7 @@ expandAMAnnotations e =
     _ -> astMap identityMapper {mapOnExp = expandAMAnnotations} e
   where
     parSub ((Named v, Scalar (Prim (Signed Int64))), arg) =
-      Just (v, ExpSubst arg)
+      Just (v, ExpSubst [] arg)
     parSub _ = Nothing
 
     funDiets :: TypeBase dim as -> [Diet]

@@ -564,7 +564,7 @@ defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   -- old size substitution induced by retext and also apply it to the
   -- newly computed body type.
   let mapping = dimMapping' (typeOf e2) t
-      subst v = ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v mapping
+      subst v = ExpSubst [] . flip sizeFromName mempty . qualName <$> M.lookup v mapping
       t' = applySubst subst $ typeOf e2'
   pure (AppExp (LetPat sizes (fmap toStruct pat') e1' e2' loc) (Info (AppRes t' retext)), sv2)
 defuncExp (AppExp (LetFun vn _ _ _) _) =
@@ -751,7 +751,7 @@ etaExpand e_t e = do
   ext' <- mapM newName $ retDims ret
   let extsubst =
         M.fromList . zip (retDims ret) $
-          map (ExpSubst . flip sizeFromName mempty . qualName) ext'
+          map (ExpSubst [] . flip sizeFromName mempty . qualName) ext'
       ret' = applySubst (`M.lookup` extsubst) ret
       e' = mkApply e (map (\v -> (Nothing, mempty, v)) vars) $ AppRes (toStruct $ retType ret') ext'
   pure (params, e', ret)
@@ -854,7 +854,7 @@ unRetType (RetType ext t) = do
   ext' <- mapM newName ext
   let extsubst =
         M.fromList . zip ext $
-          map (ExpSubst . flip sizeFromName mempty . qualName) ext'
+          map (ExpSubst [] . flip sizeFromName mempty . qualName) ext'
   pure $ AppRes (applySubst (`M.lookup` extsubst) $ toStruct t) ext'
 
 defuncApplyFunction :: Exp -> Int -> DefM (Exp, StaticVal)

@@ -430,6 +430,7 @@ prettyExp i (AppExp e res)
       parens (prettyAppExp i e)
         </> "@"
         <> parens (pretty t <> "," <+> brackets (commasep $ map prettyName ext))
+        <> line
   | otherwise = prettyAppExp i e
 
 instance (IsName vn, Annot f) => Pretty (ExpBase f vn) where

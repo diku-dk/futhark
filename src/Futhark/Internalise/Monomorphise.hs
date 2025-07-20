@@ -246,7 +246,7 @@ calculateDims body repl =
       let expr = expReplace repls $ unReplaced dim
           subst vn' =
             if vn' == vn
-              then Just $ ExpSubst $ sizeFromName (qualName reName) mempty
+              then Just $ ExpSubst [] $ sizeFromName (qualName reName) mempty
               else Nothing
           appRes = case body' of
             (AppExp _ (Info (AppRes ty ext))) -> Info $ AppRes (applySubst subst ty) (reName : ext)

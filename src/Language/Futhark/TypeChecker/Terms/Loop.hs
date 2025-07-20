@@ -27,17 +27,16 @@ import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
 
--- | Retrieve an oracle that can be used to decide whether two are in
--- the same equivalence class (i.e. have been unified).  This is an
--- exotic operation.
+-- | Retrieve an oracle that can be used to decide whether two are in the same
+-- equivalence class (i.e. have been unified). This is an exotic operation.
 getAreSame :: (MonadUnify m) => m (VName -> VName -> Bool)
 getAreSame = check <$> getConstraints
   where
     check constraints x y =
       case (M.lookup x constraints, M.lookup y constraints) of
-        (Just (_, Size (Just (Var x' _ _)) _), _) ->
+        (Just (_, Size (Right ([], Var x' _ _)) _), _) ->
           check constraints (qualLeaf x') y
-        (_, Just (_, Size (Just (Var y' _ _)) _)) ->
+        (_, Just (_, Size (Right ([], Var y' _ _)) _)) ->
           check constraints x (qualLeaf y')
         _ ->
           x == y
@@ -56,7 +55,7 @@ someDimsFreshInType loc desc fresh t = do
   where
     onDim freshen (Var d _ _)
       | freshen $ qualLeaf d = do
-          v <- newFlexibleDim (mkUsage' loc) desc
+          v <- newFlexibleDim Unlifted (mkUsage' loc) desc
           pure $ sizeFromName (qualName v) loc
     onDim _ d = pure d
 
@@ -89,7 +88,7 @@ data ArgSource = Initial | BodyResult
 wellTypedLoopArg :: ArgSource -> [VName] -> Pat ParamType -> Exp -> TermTypeM ()
 wellTypedLoopArg src sparams pat arg = do
   (merge_t, _) <-
-    freshDimsInType (mkUsage arg desc) Nonrigid "loop" sparams $
+    freshDimsInType (mkUsage arg desc) (Nonrigid Unlifted) "loop" sparams $
       toStruct (patternType pat)
   arg_t <- toStruct <$> expTypeFully arg
   onFailure (checking merge_t arg_t) $
@@ -161,7 +160,7 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
 
   (merge_t, new_dims_map) <-
     -- dim handling (1)
-    allDimsFreshInType (mkUsage loc "loop parameter type inference") Nonrigid "loop_d"
+    allDimsFreshInType (mkUsage loc "loop parameter type inference") (Nonrigid Unlifted) "loop_d"
       =<< expTypeFully loopinit'
   let new_dims_to_initial_dim = M.toList new_dims_map
       new_dims = map fst new_dims_to_initial_dim
@@ -195,7 +194,7 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
                 case L.find (areSameSize v . fst) new_dims_to_initial_dim of
                   Just (_, e') ->
                     if e' == d
-                      then modify $ first $ M.insert v $ ExpSubst e'
+                      then modify $ first $ M.insert v $ ExpSubst [] e'
                       else
                         unless (v `S.member` known_before) $
                           modify (second (v :))
@@ -212,8 +211,8 @@ checkLoop checkExp (mergepat, loopinit, form, loopbody) loc = do
         -- replaced with the invariant size in the loop body.  Failure
         -- to do this can cause type annotations to still refer to
         -- new_dims.
-        let dimToInit (v, ExpSubst e) =
-              constrain v $ Size (Just e) (mkUsage loc "size of loop parameter")
+        let dimToInit (v, ExpSubst [] e) =
+              constrain v $ Size (Right ([], e)) (mkUsage loc "size of loop parameter")
             dimToInit _ =
               pure ()
         mapM_ dimToInit $ M.toList init_substs

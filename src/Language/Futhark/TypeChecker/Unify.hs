@@ -32,6 +32,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Debug.Trace
 import Futhark.Util (topologicalSort)
 import Futhark.Util.Pretty
 import Language.Futhark
@@ -67,13 +68,12 @@ data Constraint
   | ParamType Liftedness Loc
   | Constraint StructRetType Usage
   | ParamSize Loc
-  | -- | Is not actually a type, but a term-level size,
-    -- possibly already set to something specific.
-    Size (Maybe Exp) Usage
-  | -- | A size that does not unify with anything -
-    -- created from the result of applying a function
-    -- whose return size is existential, or otherwise
-    -- hiding a size.
+  | -- | Is not actually a type, but a term-level size, possibly already set to
+    -- something specific.
+    Size (Either Liftedness ([VName], Exp)) Usage
+  | -- | A size that does not unify with anything - created from the result of
+    -- applying a function whose return size is existential, or otherwise hiding
+    -- a size.
     UnknownSize Loc RigidSource
   deriving (Show)
 
@@ -94,8 +94,8 @@ type Constraints = M.Map VName (Level, Constraint)
 lookupSubst :: VName -> Constraints -> Maybe (Subst StructRetType)
 lookupSubst v constraints = case snd <$> M.lookup v constraints of
   Just (Constraint t _) -> Just $ Subst [] $ applySubst (`lookupSubst` constraints) t
-  Just (Size (Just d) _) ->
-    Just $ ExpSubst $ applySubst (`lookupSubst` constraints) d
+  Just (Size (Right (ext, d)) _) ->
+    Just $ ExpSubst ext $ applySubst (`lookupSubst` constraints) d
   _ -> Nothing
 
 -- | The source of a rigid size.
@@ -120,7 +120,7 @@ data RigidSource
 
 -- | The ridigity of a size variable.  All rigid sizes are tagged with
 -- information about how they were generated.
-data Rigidity = Rigid RigidSource | Nonrigid
+data Rigidity = Rigid RigidSource | Nonrigid Liftedness
   deriving (Eq, Ord, Show)
 
 prettySource :: Loc -> Loc -> RigidSource -> Doc ()
@@ -169,7 +169,7 @@ prettySource ctx loc (RigidOutOfScope boundloc v) =
     <> pretty (locStrRel ctx boundloc)
     <> "."
 prettySource _ _ RigidUnify =
-  textwrap "is an artificial size invented during unification of functions with anonymous sizes."
+  "is an artificial size invented during unification of functions with anonymous sizes."
 prettySource ctx loc (RigidCond t1 t2) =
   "is unknown due to conditional expression at "
     <> pretty (locStrRel ctx loc)
@@ -214,8 +214,8 @@ class (Monad m) => MonadUnify m where
   newDimVar :: Usage -> Rigidity -> Name -> m VName
   newRigidDim :: (Located a) => a -> RigidSource -> Name -> m VName
   newRigidDim loc = newDimVar (mkUsage' loc) . Rigid
-  newFlexibleDim :: Usage -> Name -> m VName
-  newFlexibleDim usage = newDimVar usage Nonrigid
+  newFlexibleDim :: Liftedness -> Usage -> Name -> m VName
+  newFlexibleDim l usage = newDimVar usage $ Nonrigid l
 
   curLevel :: m Level
 
@@ -272,8 +272,14 @@ isNonRigid v constraints = do
   guard $ not $ rigidConstraint c
   pure lvl
 
+-- | If the given type variable is nonrigid, what is its level?
+isNonRigidSize :: VName -> Constraints -> Maybe (Liftedness, Level)
+isNonRigidSize v constraints = do
+  (lvl, Size (Left l) _) <- M.lookup v constraints
+  Just (l, lvl)
+
 type UnifySizes m =
-  BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> Exp -> Exp -> m ()
+  BreadCrumbs -> [VName] -> (VName -> Maybe (Liftedness, Int)) -> Exp -> Exp -> m ()
 
 unifyWith ::
   (MonadUnify m) =>
@@ -316,7 +322,7 @@ unifyWith onDims usage = subunify False
             onDims
               bcs'
               bound
-              nonrigid
+              (flip isNonRigidSize constraints)
               (applySubst (`lookupSubst` constraints) d1)
               (applySubst (`lookupSubst` constraints) d2)
 
@@ -381,7 +387,7 @@ unifyWith onDims usage = subunify False
                 let (r1, r2) =
                       swap
                         ord
-                        (Size Nothing $ Usage Nothing mempty)
+                        (Size (Left undefined) $ Usage Nothing mempty)
                         (UnknownSize mempty RigidUnify)
                 lvl <- curLevel
                 modifyConstraints (M.fromList (map (,(lvl, r1)) b1_dims) <>)
@@ -413,7 +419,7 @@ unifyWith onDims usage = subunify False
                 case (p1, p2) of
                   (Named p1', Named p2') ->
                     let f v
-                          | v == p2' = Just $ ExpSubst $ sizeFromName (qualName p1') mempty
+                          | v == p2' = Just $ ExpSubst [] $ sizeFromName (qualName p1') mempty
                           | otherwise = Nothing
                      in (b1, applySubst f b2)
                   (_, _) ->
@@ -437,21 +443,29 @@ unifyWith onDims usage = subunify False
                 unifyError usage mempty bcs $ unsharedConstructorsMsg arg_cs cs
         _ -> failure
 
-anyBound :: [VName] -> ExpBase Info VName -> Bool
-anyBound bound e = any (`S.member` fvVars (freeInExp e)) bound
+theBound :: [VName] -> ExpBase Info VName -> [VName]
+theBound bound e = filter (`S.member` fvVars (freeInExp e)) bound
 
 unifySizes :: (MonadUnify m) => Usage -> UnifySizes m
 unifySizes usage bcs bound nonrigid e1 e2
   | Just es <- similarExps e1 e2 =
       mapM_ (uncurry $ unifySizes usage bcs bound nonrigid) es
 unifySizes usage bcs bound nonrigid (Var v1 _ _) e2
-  | Just lvl1 <- nonrigid (qualLeaf v1),
-    not (anyBound bound e2) || (qualLeaf v1 `elem` bound) =
-      linkVarToDim usage bcs (qualLeaf v1) lvl1 e2
+  | Just (l, lvl1) <- nonrigid (qualLeaf v1),
+    ext <- theBound bound e2,
+    null ext
+      || (qualLeaf v1 `elem` bound)
+      || l /= Unlifted =
+      trace (unlines [prettyNameString (qualLeaf v1), prettyString $ map prettyNameString bound, prettyString $ map prettyNameString ext, prettyString e2]) $
+        linkVarToDim usage bcs (qualLeaf v1) lvl1 (ext, e2)
 unifySizes usage bcs bound nonrigid e1 (Var v2 _ _)
-  | Just lvl2 <- nonrigid (qualLeaf v2),
-    not (anyBound bound e1) || (qualLeaf v2 `elem` bound) =
-      linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
+  | Just (l, lvl2) <- nonrigid (qualLeaf v2),
+    ext <- theBound bound e1,
+    null ext
+      || (qualLeaf v2 `elem` bound)
+      || l /= Unlifted =
+      trace (unlines [prettyNameString (qualLeaf v2), prettyString $ map prettyNameString bound, prettyString $ map prettyNameString ext, prettyString e1]) $
+        linkVarToDim usage bcs (qualLeaf v2) lvl2 (ext, e1)
 unifySizes usage bcs _ _ e1 e2 = do
   notes <- (<>) <$> dimNotes usage e1 <*> dimNotes usage e2
   unifyError usage notes bcs $
@@ -650,14 +664,14 @@ linkVarToDim ::
   BreadCrumbs ->
   VName ->
   Level ->
-  Exp ->
+  ([VName], Exp) ->
   m ()
-linkVarToDim usage bcs vn lvl e = do
+linkVarToDim usage bcs vn lvl (ext, e) = do
   constraints <- getConstraints
 
   mapM_ (checkVar constraints) $ fvVars $ freeInExp e
 
-  modifyConstraints $ M.insert vn (lvl, Size (Just e) usage)
+  modifyConstraints $ M.insert vn (lvl, Size (Right (ext, e)) usage)
   where
     checkVar _ dim'
       | vn == dim' = do
@@ -809,13 +823,13 @@ unifyMostCommon usage t1 t2 = do
         | Just es <- similarExps e1 e2 =
             mapM_ (uncurry $ onDims bcs bound nonrigid) es
       onDims bcs _ nonrigid (Var v1 _ _) e2
-        | Just lvl1 <- nonrigid (qualLeaf v1),
+        | Just (_, lvl1) <- nonrigid (qualLeaf v1),
           expLevel e2 < lvl1 =
-            linkVarToDim usage bcs (qualLeaf v1) lvl1 e2
+            linkVarToDim usage bcs (qualLeaf v1) lvl1 ([], e2)
       onDims bcs _ nonrigid e1 (Var v2 _ _)
-        | Just lvl2 <- nonrigid (qualLeaf v2),
+        | Just (_, lvl2) <- nonrigid (qualLeaf v2),
           expLevel e1 < lvl2 =
-            linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
+            linkVarToDim usage bcs (qualLeaf v2) lvl2 ([], e1)
       onDims _ _ _ _ _ = pure ()
 
   unifyWith onDims usage mempty mempty t1 t2
@@ -857,9 +871,9 @@ instance MonadUnify UnifyM where
       Rigid src ->
         modifyConstraints $
           M.insert dim (0, UnknownSize (locOf usage) src)
-      Nonrigid ->
+      Nonrigid l ->
         modifyConstraints $
-          M.insert dim (0, Size Nothing usage)
+          M.insert dim (0, Size (Left l) usage)
     pure dim
 
   curLevel = pure 1
@@ -884,7 +898,7 @@ runUnifyM rigid_tparams nonrigid_tparams (UnifyM m) =
     constraints =
       M.fromList $
         map nonrigid nonrigid_tparams <> map rigid rigid_tparams
-    nonrigid (TypeParamDim p loc) = (p, (1, Size Nothing $ Usage Nothing $ locOf loc))
+    nonrigid (TypeParamDim p loc) = (p, (1, Size (Left Unlifted) $ Usage Nothing $ locOf loc))
     nonrigid (TypeParamType l p loc) = (p, (1, NoConstraint l $ Usage Nothing $ locOf loc))
     rigid (TypeParamDim p loc) = (p, (0, ParamSize $ locOf loc))
     rigid (TypeParamType l p loc) = (p, (0, ParamType l $ locOf loc))

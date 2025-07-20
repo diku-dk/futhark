@@ -113,10 +113,10 @@ sliceShape r slice t@(Array u (Shape orig_dims) et) =
               SourceSlice orig_d' (bareExp <$> i) (bareExp <$> j) (bareExp <$> stride)
           modify (maybeToList ext ++)
           pure d
-        Just (loc, Nonrigid) ->
+        Just (loc, Nonrigid l) ->
           lift $
             flip sizeFromName loc . qualName
-              <$> newFlexibleDim (mkUsage loc "size of slice") "slice_dim"
+              <$> newFlexibleDim l (mkUsage loc "size of slice") "slice_dim"
         Nothing -> do
           v <- lift $ newID "slice_anydim"
           modify (v :)
@@ -233,7 +233,7 @@ checkCoerce loc te e = do
           | qualLeaf v `elem` ext = pure d
         onDim d = do
           v <- newTypeName "coerce"
-          constrain v . Size Nothing $
+          constrain v . Size (Left Unlifted) $
             mkUsage
               loc
               "a size coercion where the underlying expression size cannot be determined"
@@ -485,7 +485,7 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
       case (t', patNames pat') of
         (Scalar (Prim (Signed Int64)), [v])
           | not $ hasBinding e' -> do
-              let f x = if x == v then Just (ExpSubst e') else Nothing
+              let f x = if x == v then Just (ExpSubst [] e') else Nothing
               pure (applySubst f body_t, [])
         _ ->
           unscopeType loc (map sizeName sizes <> patNames pat') body_t
@@ -524,7 +524,7 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
   (t, _) <- newArrayType (mkUsage src' "type of source array") "src" $ sliceDims slice'
   unify (mkUsage loc "type of target array") t $ unInfo $ identType src'
 
-  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
+  (elemt, _) <- sliceShape (Just (loc, Nonrigid Unlifted)) slice' =<< normTypeFully t
 
   ve' <- unifies "type of target array" elemt =<< checkExp ve
 
@@ -535,7 +535,7 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
 checkExp (Update src slice ve loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage' src) "src" $ sliceDims slice'
-  (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
+  (elemt, _) <- sliceShape (Just (loc, Nonrigid Unlifted)) slice' =<< normTypeFully t
   ve' <- unifies "type of target array" elemt =<< checkExp ve
   src' <- unifies "type of target array" t =<< checkExp src
   pure $ Update src' slice' ve' loc
@@ -552,7 +552,7 @@ checkExp (RecordUpdate src fields ve _ loc) = do
   where
     usage = mkUsage loc "record update"
     updateField [] ve_t src_t = do
-      (src_t', _) <- allDimsFreshInType usage Nonrigid "any" src_t
+      (src_t', _) <- allDimsFreshInType usage (Nonrigid Unlifted) "any" src_t
       onFailure (CheckingRecordUpdate fields src_t' ve_t) $
         unify usage src_t' ve_t
       pure ve_t
@@ -819,7 +819,7 @@ instantiateDimsInReturnType loc fname (RetType dims t)
       pure (t, mempty)
   | otherwise = do
       dims' <- mapM new dims
-      pure (first (onDim $ zip dims $ map (ExpSubst . (`sizeFromName` loc) . qualName) dims') t, dims')
+      pure (first (onDim $ zip dims $ map (ExpSubst [] . (`sizeFromName` loc) . qualName) dims') t, dims')
   where
     new =
       newRigidDim loc (RigidRet fname)
@@ -916,6 +916,7 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
     unify (mkUsage argexp "use as function argument") tp1_with_frame argtype_with_frame
 
     -- Perform substitutions of instantiated variables in the types.
+    tp2_norm <- normTypeFully tp2
     (tp2', ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
     argtype' <- normTypeFully argtype
 
@@ -928,6 +929,8 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
         "Existential size would appear in function parameter of return type:"
           </> indent 2 (pretty (RetType ext tp2'))
           </> textwrap "This is usually because a higher-order function is used with functional arguments that return existential sizes or locally named sizes, which are then used as parameters of other function arguments."
+          </> "debug"
+          </> pretty tp2_norm
 
     (argext, tp2'') <-
       case pname of
@@ -942,13 +945,13 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
                   d <- newRigidDim argexp (RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
                   let parsubst v =
                         if v == pname'
-                          then Just $ ExpSubst $ sizeFromName (qualName d) $ srclocOf argexp
+                          then Just $ ExpSubst [] $ sizeFromName (qualName d) $ srclocOf argexp
                           else Nothing
                   pure (Just d, applySubst parsubst $ toStruct tp2')
                 else
                   let parsubst v =
                         if v == pname'
-                          then Just $ ExpSubst $ fromMaybe argexp $ stripExp argexp
+                          then Just $ ExpSubst [] $ fromMaybe argexp $ stripExp argexp
                           else Nothing
                    in pure (Nothing, applySubst parsubst $ toStruct tp2')
         _ -> pure (Nothing, toStruct tp2')
@@ -1257,10 +1260,10 @@ fixOverloadedTypes tyvars_at_toplevel =
         Scalar (tupleRecord [])
       when (v `S.member` tyvars_at_toplevel) $
         warn usage "Defaulting ambiguous type to ()."
-    fixOverloaded (v, Size Nothing (Usage Nothing loc)) =
+    fixOverloaded (v, Size (Left _) (Usage Nothing loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
         "Ambiguous size" <+> dquotes (prettyName v) <> "."
-    fixOverloaded (v, Size Nothing (Usage (Just u) loc)) =
+    fixOverloaded (v, Size (Left _) (Usage (Just u) loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
         "Ambiguous size" <+> dquotes (prettyName v) <+> "arising from" <+> pretty u <> "."
     fixOverloaded _ = pure ()
@@ -1469,7 +1472,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
       pure $ Just $ Left $ TypeParamType l k $ srclocOf usage
     closeOver (k, ParamType l loc) =
       pure $ Just $ Left $ TypeParamType l k $ srclocOf loc
-    closeOver (k, Size Nothing usage) =
+    closeOver (k, Size (Left _) usage) =
       pure $ Just $ Left $ TypeParamDim k $ srclocOf usage
     closeOver (k, UnknownSize _ _)
       | k `S.member` param_sizes,

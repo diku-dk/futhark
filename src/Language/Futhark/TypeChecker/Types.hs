@@ -76,7 +76,7 @@ renameRetType :: (MonadTypeChecker m) => ResRetType -> m ResRetType
 renameRetType (RetType dims st)
   | dims /= mempty = do
       dims' <- mapM newName dims
-      let mkSubst = ExpSubst . flip sizeFromName mempty . qualName
+      let mkSubst = ExpSubst [] . flip sizeFromName mempty . qualName
           m = M.fromList . zip dims $ map mkSubst dims'
           st' = applySubst (`M.lookup` m) st
       pure $ RetType dims' st'
@@ -286,14 +286,14 @@ evalTypeExp df ote@TEApply {} = do
       pure
         ( TypeArgExpSize (SizeExp e' dloc),
           [],
-          ExpSubst e'
+          ExpSubst [] e'
         )
     checkSizeExp (SizeExpAny loc) = do
       d <- newTypeName "d"
       pure
         ( TypeArgExpSize (SizeExpAny loc),
           [d],
-          ExpSubst $ sizeFromName (qualName d) loc
+          ExpSubst [] $ sizeFromName (qualName d) loc
         )
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpSize d) = do
@@ -338,17 +338,19 @@ typeParamToArg (TypeParamType _ v _) =
 -- | A type substitution may be a substitution or a yet-unknown
 -- substitution (but which is certainly an overloaded primitive
 -- type!).
-data Subst t = Subst [TypeParam] t | ExpSubst Exp
+data Subst t = Subst [TypeParam] t | ExpSubst [VName] Exp
   deriving (Show)
 
 instance (Pretty t) => Pretty (Subst t) where
   pretty (Subst [] t) = pretty t
   pretty (Subst tps t) = mconcat (map pretty tps) <> colon <+> pretty t
-  pretty (ExpSubst e) = pretty e
+  pretty (ExpSubst [] e) = pretty e
+  pretty (ExpSubst ext e) =
+    "?" <> mconcat (map (braces . prettyName) ext) <> "." <> pretty e
 
 instance Functor Subst where
   fmap f (Subst ps t) = Subst ps $ f t
-  fmap _ (ExpSubst e) = ExpSubst e
+  fmap _ (ExpSubst ext e) = ExpSubst ext e
 
 -- | Create a type substitution corresponding to a type binding.
 substFromAbbr :: TypeBinding -> Subst StructRetType
@@ -387,7 +389,7 @@ instance Substitutable Exp where
   applySubst f = runIdentity . mapOnExp
     where
       mapOnExp (Var (QualName _ v) _ _)
-        | Just (ExpSubst e') <- f v = pure e'
+        | Just (ExpSubst [] e') <- f v = pure e'
       mapOnExp e' = astMap mapper e'
 
       mapper =
@@ -437,7 +439,7 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
     substs = M.fromList $ zipWith mkSubst ps args
     -- We are assuming everything has already been type-checked for correctness.
     mkSubst (TypeParamDim pv _) (TypeArgDim e) =
-      (pv, ExpSubst e)
+      (pv, ExpSubst [] e)
     mkSubst (TypeParamType _ pv _) (TypeArgType at) =
       (pv, Subst [] $ RetType [] $ second mempty at)
     mkSubst p a =
@@ -464,7 +466,7 @@ freshDims (RetType ext t) = do
     else do
       let start = maximum $ map baseTag seen_ext
           ext' = zipWith VName (map baseName ext) [start + 1 ..]
-          mkSubst = ExpSubst . flip sizeFromName mempty . qualName
+          mkSubst = ExpSubst [] . flip sizeFromName mempty . qualName
           extsubsts = M.fromList $ zip ext $ map mkSubst ext'
           RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
       pure $ RetType ext' t'
@@ -483,9 +485,25 @@ substTypesRet lookupSubst ot =
       TypeBase Size as ->
       State [VName] (TypeBase Size as)
 
+    onDim = mapOnExp
+      where
+        mapOnExp (Var (QualName _ v) _ _)
+          | Just (ExpSubst ext e') <- lookupSubst' v = do
+              modify (ext <>)
+              pure e'
+        mapOnExp e' = astMap mapper e'
+
+        mapper =
+          ASTMapper
+            { mapOnExp,
+              mapOnName = pure,
+              mapOnStructType = pure . applySubst lookupSubst',
+              mapOnParamType = pure . applySubst lookupSubst',
+              mapOnResRetType = pure . applySubst lookupSubst'
+            }
+
     onType (Array u shape et) =
-      arrayOfWithAliases u (applySubst lookupSubst' shape)
-        <$> onType (Scalar et)
+      arrayOfWithAliases u <$> traverse onDim shape <*> onType (Scalar et)
     onType (Scalar (Prim t)) = pure $ Scalar $ Prim t
     onType (Scalar (TypeVar u v targs)) = do
       targs' <- mapM subsTypeArg targs

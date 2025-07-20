@@ -318,7 +318,7 @@ instance MonadUnify TermTypeM where
     dim <- newTypeName name
     case rigidity of
       Rigid rsrc -> constrain dim $ UnknownSize (locOf usage) rsrc
-      Nonrigid -> constrain dim $ Size Nothing usage
+      Nonrigid l -> constrain dim $ Size (Left l) usage
     pure dim
 
   unifyError loc notes bcs doc = do
@@ -361,7 +361,12 @@ replaceTyVars loc orig_t = do
       f
         (Scalar (TypeVar u (QualName [] v) []))
           | Just t <- M.lookup v tyvars =
-              fst <$> allDimsFreshInType (mkUsage loc "replaceTyVars") Nonrigid "dv" (second (const u) t)
+              fst
+                <$> allDimsFreshInType
+                  (mkUsage loc "replaceTyVars")
+                  (Nonrigid Unlifted)
+                  "dv"
+                  (second (const u) t)
           | otherwise =
               pure $ Scalar (TypeVar u (QualName [] v) [])
       f (Scalar (TypeVar u qn targs)) =
@@ -384,7 +389,7 @@ replaceTyVars loc orig_t = do
 
 instTyVars ::
   SrcLoc ->
-  [VName] ->
+  [(VName, Liftedness)] ->
   TypeBase () u ->
   TypeBase Size u ->
   TermTypeM (TypeBase Size u)
@@ -424,49 +429,51 @@ instTyVars loc names orig_t1 orig_t2 = do
               TypeArgType <$> f t1 t2
             g _ targ = pure targ
       f t1 t2 = do
-        let mkNew =
-              fst <$> lift (allDimsFreshInType (mkUsage loc "instantiation") Nonrigid "dv" t1)
+        let mkNew l =
+              fst <$> lift (allDimsFreshInType (mkUsage loc "instantiation") (Nonrigid l) "dv" t1)
         case t2 of
           Scalar (TypeVar u (QualName [] v2) [])
-            | v2 `elem` names -> do
+            | Just l <- lookup v2 names -> do
                 seen <- get
                 case M.lookup v2 seen of
                   Nothing -> do
-                    t <- mkNew
+                    t <- mkNew l
                     modify $ M.insert v2 $ second (const NoUniqueness) t
                     pure t
                   Just t ->
                     pure $ second (const u) t
-          _ -> mkNew
+          _ -> mkNew Unlifted
 
   evalStateT (f orig_t1 orig_t2) mempty
 
--- | Instantiate a type scheme with fresh variables for its size and
--- type parameters. Returns the names of the fresh size and type
--- variables and the instantiated type.
+-- | Instantiate a type scheme with fresh size variables for its size
+-- parameters. Replaces type parameters with their known
+-- instantiations. Returns the names of the fresh size variables and
+-- the instantiated type.
 instTypeScheme ::
   QualName VName ->
   SrcLoc ->
   [TypeParam] ->
   StructType ->
+  TypeBase () NoUniqueness ->
   TermTypeM ([VName], StructType)
-instTypeScheme qn loc tparams scheme_t = do
-  (names, substs) <- fmap unzip . forM tparams $ \tparam -> do
+instTypeScheme qn loc tparams scheme_t inferred = do
+  (names, substs) <- fmap (unzip . catMaybes) . forM tparams $ \tparam -> do
     case tparam of
-      TypeParamType l v _ -> do
-        i <- incCounter
-        v' <- newID $ mkTypeVarName (baseName v) i
-        constrain v' . NoConstraint l . mkUsage loc . docText $
-          "instantiated type parameter of " <> dquotes (pretty qn)
-        pure (v', (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty (qualName v') []))
+      TypeParamType {} -> pure Nothing
       TypeParamDim v _ -> do
         i <- incCounter
         v' <- newID $ mkTypeVarName (baseName v) i
-        constrain v' . Size Nothing . mkUsage loc . docText $
+        constrain v' . Size (Left Unlifted) . mkUsage loc . docText $
           "instantiated size parameter of " <> dquotes (pretty qn)
-        pure (v', (v, ExpSubst $ sizeFromName (qualName v') loc))
+        pure $ Just (v', (v, ExpSubst [] $ sizeFromName (qualName v') loc))
 
-  pure (names, applySubst (`lookup` substs) scheme_t)
+  let tp_names = mapMaybe typeParamPair tparams
+  t' <- instTyVars loc tp_names inferred $ applySubst (`lookup` substs) scheme_t
+  pure (names, t')
+  where
+    typeParamPair (TypeParamType l v _) = Just (v, l)
+    typeParamPair _ = Nothing
 
 lookupQualNameEnv :: QualName VName -> TermTypeM TermScope
 lookupQualNameEnv (QualName [q] _)
@@ -541,7 +548,7 @@ lookupVar loc qn@(QualName qs name) inst_t = do
       if null tparams && null qs
         then pure bound_t
         else do
-          (tnames, t) <- instTypeScheme qn loc tparams bound_t
+          (tnames, t) <- instTypeScheme qn loc tparams bound_t $ first (const ()) inst_t
           outer_env <- asks termOuterEnv
           pure $ qualifyTypeVars outer_env tnames qs t
     Just EqualityF ->
@@ -585,7 +592,7 @@ newArrayType :: Usage -> Name -> Int -> TermTypeM (StructType, StructType)
 newArrayType usage desc r = do
   v <- newTypeName desc
   constrain v $ NoConstraint Unlifted usage
-  dims <- replicateM r $ newDimVar usage Nonrigid "dim"
+  dims <- replicateM r $ newDimVar usage (Nonrigid Unlifted) "dim"
   let rowt = TypeVar mempty (qualName v) []
       mkSize = flip sizeFromName (srclocOf usage) . qualName
   pure
@@ -673,7 +680,7 @@ checkTypeExpNonrigid te = do
   RetType dims st <- renameRetType rettype
 
   forM_ (svars ++ dims) $ \v ->
-    constrain v $ Size Nothing $ mkUsage (srclocOf te) "anonymous size in type expression"
+    constrain v $ Size (Left Unlifted) $ mkUsage (srclocOf te) "anonymous size in type expression"
   pure (te', st, svars ++ dims)
 
 --- Sizes

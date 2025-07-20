@@ -422,7 +422,7 @@ matchMTys ::
   Either TypeError (M.Map VName VName)
 matchMTys orig_mty orig_mty_sig =
   matchMTys'
-    (M.map (ExpSubst . flip sizeFromName mempty) $ resolveMTyNames orig_mty orig_mty_sig)
+    (M.map (ExpSubst [] . flip sizeFromName mempty) $ resolveMTyNames orig_mty orig_mty_sig)
     []
     orig_mty
     orig_mty_sig
@@ -650,7 +650,7 @@ applyFunctor applyloc (FunModType p_abs p_mod body_mty) a_mty = do
   let a_abbrs = mtyTypeAbbrs a_mty
       isSub v = case M.lookup v a_abbrs of
         Just abbr -> Just $ substFromAbbr abbr
-        _ -> Just $ ExpSubst $ sizeFromName (qualName v) mempty
+        _ -> Just $ ExpSubst [] $ sizeFromName (qualName v) mempty
       type_subst = M.mapMaybe isSub p_subst
       body_mty' = substituteTypesInMTy (`M.lookup` type_subst) body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'
