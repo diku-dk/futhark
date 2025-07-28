@@ -251,6 +251,8 @@ forward (E.AppExp (E.BinOp (op', _) _ (x', _) (y', _) _) _)
           E.Geq -> doOp (~>=~)
           E.LogAnd -> doOp (~&&~)
           E.LogOr -> doOp (~||~)
+          E.Divide ->
+            doOp $ \a' b' -> sym2SoP $ Apply (Var $ E.qualLeaf op') [sym2SoP a', sym2SoP b']
           _ -> error ("forward not implemented for bin op: " <> show bop)
 forward (E.AppExp (E.If e_c e_t e_f _) _) = do
   cs <- forward e_c
@@ -288,7 +290,7 @@ forward (E.AppExp (E.If e_c e_t e_f _) _) = do
       >>= rewrite
 forward (E.Lambda _ _ _ _ loc) =
   error $ errorMsg loc "Cannot create index function for unapplied lambda."
-forward expr@(E.AppExp (E.Apply e_f args loc) _)
+forward expr@(E.AppExp (E.Apply e_f args loc) appres)
   | Just fname <- getFun e_f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params lam_body _ _ _ : _args <- getArgs args,
@@ -480,22 +482,21 @@ forward expr@(E.AppExp (E.Apply e_f args loc) _)
     vn `S.member` propertyPrelude = do
       (: []) <$> forwardPropertyPrelude vn args
   -- Applying other functions, for instance, user-defined ones.
-  | (E.Var (E.QualName [] g) info _) <- e_f,
-    E.Scalar (E.Arrow _ _ _ _ (E.RetType _ return_type)) <- E.unInfo info = do
+  | otherwise = do
       toplevel_fns <- getTopLevelIndexFns
       defs <- getTopLevelDefs
       case forwardApplyDef toplevel_fns defs expr of
         Just effect_and_fs ->
-          -- g is a top-level definition.
+          -- e_f is a top-level definition; we "inline" it.
           snd <$> effect_and_fs
         Nothing -> do
-          -- g is a free variable in this expression (probably a parameter
-          -- to the top-level function currently being analyzed).
-          --
-          -- We treat it as an uninterpreted function. Function congruence
+          g <- lookupUninterpreted e_f
+          -- We treat g as an uninterpreted function. Function congruence
           -- lets us check equality on g regardless:
           --   forall i,j . i = j => g(i) = g(j).
+          printM 1 $ warningMsg loc ("g: " <> prettyStr g)
           arg_fns <- mconcat <$> mapM forward (getArgs args)
+          let return_type = E.appResType (E.unInfo appres)
           size <- shapeOfTypeBase return_type
           arg_names <- forM arg_fns (const $ newVName "x")
           iter <- case size of
@@ -532,6 +533,7 @@ forward (E.Coerce e _ _ _) = do
   -- No-op; I've only seen coercions that are hints for array sizes.
   forward e
 forward e = do
+  -- This is untranslatable; not even uninterpreted.
   printM 1337 $ warningString "forward on unimplemented source expression: " <> prettyStr e <> "\n" <> show e
   vn <- newVName $ "untrans(" <> prettyStr e <> ")"
   pure [IndexFn [] (cases [(Bool True, sVar vn)])]

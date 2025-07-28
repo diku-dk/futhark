@@ -35,6 +35,7 @@ module Futhark.Analysis.Properties.Monad
     getOutputNames,
     getCheckBounds,
     withoutBoundsChecks,
+    lookupUninterpreted,
   )
 where
 
@@ -62,6 +63,7 @@ data VEnv = VEnv
     defs :: M.Map VName ([E.Pat E.ParamType], E.Exp),
     ii :: M.Map Domain (VName, IndexFn),
     invalias :: M.Map VName VName,
+    uninterpreted :: M.Map E.Exp VName,
     outputNames :: [VName],
     checkBounds :: Bool,
     debug :: Bool
@@ -80,7 +82,7 @@ runIndexFnM :: IndexFnM a -> VNameSource -> (a, M.Map VName [IndexFn])
 runIndexFnM (IndexFnM m) vns = getRes $ runRWS m () s
   where
     getRes (x, env, _) = (x, indexfns env)
-    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty False False
+    s = VEnv vns mempty mempty mempty mempty mempty mempty mempty mempty False False
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -173,6 +175,16 @@ withoutBoundsChecks m = do
   res <- m
   modify $ \env -> env {checkBounds = True}
   pure res
+
+lookupUninterpreted :: (MonadState VEnv m, MonadFreshNames m) => E.Exp -> m VName
+lookupUninterpreted e = do
+  unint <- gets uninterpreted
+  case M.lookup e unint of
+    Just vn -> pure vn
+    Nothing -> do
+      vn <- newVName $ "#" <> prettyStr e
+      modify $ \env -> env {uninterpreted = M.insert e vn $ uninterpreted env}
+      pure vn
 
 --------------------------------------------------------------
 -- Utilities

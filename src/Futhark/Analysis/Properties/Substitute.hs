@@ -9,7 +9,7 @@ import Control.Monad.RWS (lift)
 import Control.Monad.Trans.Maybe (hoistMaybe, runMaybeT)
 import Data.Functor ((<&>))
 import Data.Map qualified as M
-import Data.Maybe (fromJust, isJust)
+import Data.Maybe (fromJust, isJust, fromMaybe)
 import Data.Set qualified as S
 import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==))
@@ -74,7 +74,8 @@ dest_fn @ (f_name, f) = do
       pure h'
     Nothing ->
       -- When converting expressions a function may be substituted without arguments.
-      fromJust <$> substituteOnce f g (Var f_name, [])
+      -- This may fail when substituting into an uninterpreted function.
+      fromMaybe dest_fn <$> substituteOnce f g (Var f_name, [])
   where
     getApply argCheck = astFold (ASTFolder {foldOnSymbol = getApply_ argCheck}) Nothing
 
