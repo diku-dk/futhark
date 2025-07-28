@@ -40,6 +40,7 @@ instance FreeVariables Symbol where
     x :|| y -> fv x <> fv y
     Recurrence -> mempty
     Prop p -> fv p
+    Assume p -> fv p
 
 instance Renameable Symbol where
   rename_ vns tau sym = case sym of
@@ -65,6 +66,7 @@ instance Renameable Symbol where
     x :|| y -> g (:||) x y
     Recurrence -> pure Recurrence
     Prop p -> Prop <$> rename_ vns tau p
+    Assume p -> Assume <$> rename_ vns tau p
     where
       g op x y = op <$> rename_ vns tau x <*> rename_ vns tau y
 
@@ -99,6 +101,7 @@ instance Rep Symbol Symbol where
     x :|| y -> binopS (:||) x y
     Recurrence -> sym2SoP Recurrence
     Prop p -> sym2SoP $ Prop (repProperty s p)
+    Assume p -> sym2SoP $ Assume (sop2Symbol $ rep s p)
     where
       binop op x y = sym2SoP $ rep s x `op` rep s y
       binopS op x y = sym2SoP $ sop2Symbol (rep s x) `op` sop2Symbol (rep s y)
@@ -109,8 +112,8 @@ repProperty :: Replacement Symbol -> Property Symbol -> Property Symbol
 repProperty _ Boolean = Boolean
 repProperty s (Disjoint x) = Disjoint $ S.map (repVName s) x
 repProperty s (Monotonic x dir) = Monotonic (repVName s x) dir
-repProperty s (Rng x rng) =
-  Rng (repVName s x) (repTuple s rng)
+repProperty s (Rng x (a,b)) =
+  Rng (repVName s x) (rep s <$> a, rep s <$> b)
 repProperty s (Injective x (Just rcd)) =
   Injective (repVName s x) (Just $ repTuple s rcd)
 repProperty s (Injective x Nothing) =
@@ -168,6 +171,7 @@ instance Unify Symbol Symbol where
   unify_ k (Not x) (Not y) = unify_ k x y
   unify_ _ Recurrence Recurrence = pure mempty
   unify_ k (Prop p) (Prop q) = unify_ k p q
+  unify_ k (Assume p) (Assume q) = unify_ k p q
   unify_ k a b = case (a, b) of
     (x1 :< y1, x2 :< y2) -> unifies_ k [x1, y1] [x2, y2]
     (x1 :<= y1, x2 :<= y2) -> unifies_ k [x1, y1] [x2, y2]

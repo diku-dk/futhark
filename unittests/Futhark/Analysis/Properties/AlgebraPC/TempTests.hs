@@ -89,14 +89,14 @@ tests =
               -- max{0} <= shapeª₃₃₇₈₀ <= min{}
               addRange (Var vn_shp) $ mkRangeLB (int 0)
               -- max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈}
-              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
+              addRange (Var k) $ mkRange (Just $ int 0) (Just $ sVar m .-. int 1)
               -- max{0} <= cª₄₉₈₉₅ <= min{1}
-              addRange (Var c0) $ mkRange (int 0) (int 1)
+              addRange (Var c0) $ mkRange (Just $ int 0) (Just $ int 1)
               -- max{0, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
               --   <= i₉₆₆₄
               --   <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
-              addRange (Var i) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
-              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              addRange (Var i) $ mkRange (Just $ int 0) (Just $ shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var i) $ mkRange (Just $ shp_sum (sVar k .-. int 1)) (Just $ shp_sum (sVar k) .-. int 1)
               -- c is disjoint with some other predicate d.
               addProperty (Var c0) (Disjoint $ S.singleton d0)
               addProperty (Var c0) Boolean

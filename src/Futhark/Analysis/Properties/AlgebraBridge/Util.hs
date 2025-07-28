@@ -25,7 +25,7 @@ import Control.Monad (forM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, toAlgebra)
+import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, toAlgebra, paramToAlgebra)
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
 import Futhark.Analysis.Properties.IndexFn (Domain (..), Quantified (..), Iterator)
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd)
@@ -149,12 +149,17 @@ addRelSymbol p = do
     toProps sym = mapM toAlgebra (getProps $ toCNF sym)
       where
         getProps :: Symbol -> [Property Symbol]
+        getProps (Assume prop) = getProps prop
         getProps (Prop prop) = [prop]
         getProps (a :&& b) = getProps a <> getProps b
         getProps _ = []
 
     addProperty_ (Rng x (a, b)) = do
-      addRange (Algebra.Var x) (mkRange a (b .-. int2SoP 1))
+      hole <- sym2SoP . Hole <$> newVName "h"
+      let wrap = (`Apply` [hole]) . Var
+      alg_x <- lift $ paramToAlgebra x wrap
+      lift $ addRelSymbol (Prop $ Property.Rng alg_x (mkRange a ((.-. int2SoP 1) <$> b)))
+      -- addRange (Algebra.Var x) (mkRange a ((.-. int2SoP 1) <$> b))
       addProperty (Algebra.Var x) (Rng x (a,b))
     addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
 

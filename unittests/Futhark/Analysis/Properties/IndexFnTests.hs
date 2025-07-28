@@ -616,6 +616,17 @@ tests =
                       [(Bool True, sHole i .+. sHole j .+. int2SoP 1)]
                 }
             ]
+        ),
+      mkTest
+        "tests/indexfn/primes.fut"
+        ( pure $ \(i, n, xs, _) ->
+            [ IndexFn
+                { shape = [Forall i (Iota (sHole n))],
+                  body =
+                    cases
+                      [(Bool True, sym2SoP $ Apply (Hole xs) [sHole i])]
+                }
+            ]
         )
     ]
   where

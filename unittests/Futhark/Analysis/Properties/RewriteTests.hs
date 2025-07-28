@@ -481,4 +481,4 @@ tests =
     addAlgRange vn x y = do
       a <- toAlgebra x
       b <- toAlgebra y
-      addRange (Algebra.Var vn) (mkRange a b)
+      addRange (Algebra.Var vn) (mkRange (Just a) (Just b))

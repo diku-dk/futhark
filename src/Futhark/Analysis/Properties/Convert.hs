@@ -478,6 +478,12 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
     [_, e] <- getArgs args = do
       -- No-op.
       forward e
+  | Just "Assume" <- getFun e_f,
+    [e] <- getArgs args = do
+      forward e
+        >>= mapM (\f ->
+          rewrite $ f {body = cmapValues (mapSymSoP (sym2SoP . Assume)) (body f)}
+        )
   | Just vn <- getFun e_f,
     vn `S.member` propertyPrelude = do
       (: []) <$> forwardPropertyPrelude vn args
@@ -522,7 +528,10 @@ forward e@(E.AppExp (E.Loop _sz _init_pat _init (E.For ident e_sz) e_body loc) _
   f_szs <- forward e_sz
   case map justSingleCase f_szs of
     [Just sz] -> do
-      addRelSymbol (Prop $ Property.Rng i (int2SoP 0, sz))
+      addRelSymbol (Prop $ Property.Rng i (Just $ int2SoP 0, Just $ sz))
+      XXX ^ use assume to add range like what is done in an index function? then roll back
+          Next, make it so taht addRelSymbol on Property.Rng correctly adds the paramToAlgebra version!
+          One problem seems to be that paramToAlgebra is made for arrays....
       printM 1 $
         warningMsg loc "Analyzing loop body, but resulting index function will be uninterpreted."
       _ <- forward e_body
@@ -664,6 +673,7 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
             printM 1 $
               "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
             check (size_rep, scope, name_rep)
+          printAlgEnv 3
           unless (all isYes answers) . error . errorMsg loc $
             "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
 forwardApplyDef _ _ _ = Nothing
@@ -689,12 +699,16 @@ forwardPropertyPrelude f args =
       | [e_X, e_rng] <- getArgs args,
         Just x <- justVName e_X -> do
           f_rng <- forward e_rng
+          printM 0 $ prettyStr e_rng
+          printM 0 $ prettyStr f_rng
           case f_rng of
             [IndexFn [] g_a, IndexFn [] g_b] ->
               fmap (IndexFn []) . simplify . cases $ do
                 (p_a, a) <- casesToList g_a
                 (p_b, b) <- casesToList g_b
-                pure (p_a :&& p_b, pr $ Property.Rng x (a, b))
+                printM 0 $ prettyStr $ show (inf2Nothing a)
+                printM 0 $ prettyStr $ show (inf2Nothing b)
+                pure (p_a :&& p_b, pr $ Property.Rng x (inf2Nothing a, inf2Nothing b))
             _ ->
               undefined
     "Injective"
@@ -776,6 +790,9 @@ forwardPropertyPrelude f args =
       | [[(Just param, _)]] <- map patternMapAligned params =
           Just (param, lam)
     parsePredicate _ = Nothing
+
+    inf2Nothing x | Just (Var vn) <- justSym x, E.baseString vn == "inf" = Nothing
+    inf2Nothing x = Just x
 
     -- Map filter and partition lambdas over indices of X to infer their
     -- index functions.
@@ -861,7 +878,7 @@ scatterSc1 xs@(IndexFn (Forall i dom_dest : _) _) (e_is, is) vs
           hole <- sym2SoP . Hole <$> newVName "h"
           let wrap = (`Apply` [hole]) . Var
           alg_vn <- lift $ paramToAlgebra vn_inv wrap
-          lift $ addRelSymbol (Prop $ Property.Rng alg_vn (int2SoP 0, dest_size))
+          lift $ addRelSymbol (Prop $ Property.Rng alg_vn (Just $ int2SoP 0, Just $ dest_size))
 
           -- let inv_i = Apply (Var vn_inv) (sVar . boundVar <$> shape xs)
           let inv_i = sym2SoP (Apply (Var vn_inv) [sVar i])

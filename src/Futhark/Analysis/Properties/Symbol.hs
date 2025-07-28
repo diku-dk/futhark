@@ -38,6 +38,7 @@ data Symbol
   | Recurrence
   | -- Properties are used only in index functions for pre-/post-conditions.
     Prop (Property Symbol)
+  | Assume Symbol
   deriving (Show, Eq, Ord)
 
 infixr 4 :<
@@ -143,6 +144,7 @@ instance Pretty Symbol where
     x :|| y -> prettyOp "∨" x y
     Recurrence -> "↺ "
     Prop p -> pretty p
+    Assume p -> "Assume" <+> autoParens p
     where
       autoParens x@(Var _) = pretty x
       autoParens x@(Hole _) = pretty x

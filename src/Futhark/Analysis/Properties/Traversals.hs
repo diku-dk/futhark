@@ -42,6 +42,10 @@ instance (Ord a, ASTMappable a a) => ASTMappable a (SoP a) where
 instance (Ord a, ASTMappable a a) => ASTMappable a (Predicate a) where
   astMap m (Predicate vn e) = Predicate vn <$> astMap m e
 
+instance (Ord a, ASTMappable a a) => ASTMappable a (Maybe (SoP a)) where
+  astMap m (Just x) = Just <$> astMap m x
+  astMap _ Nothing = pure Nothing
+
 instance (Ord a, ASTMappable a a) => ASTMappable a (Property a) where
   astMap _ Boolean = pure Boolean
   astMap _ (Disjoint vns) = pure (Disjoint vns)
@@ -81,6 +85,7 @@ instance ASTMappable Symbol Symbol where
   astMap m (x :&& y) = mapOnSymbol m =<< (:&&) <$> astMap m x <*> astMap m y
   astMap m (x :|| y) = mapOnSymbol m =<< (:||) <$> astMap m x <*> astMap m y
   astMap m (Prop p) = Prop <$> astMap m p
+  astMap m (Assume p) = Assume <$> astMap m p
 
 instance ASTMappable Symbol IndexFn where
   astMap m (IndexFn dom body) = IndexFn <$> astMap m dom <*> astMap m body
@@ -127,6 +132,10 @@ instance ASTFoldable Symbol (SoP Symbol) where
 instance ASTFoldable Symbol (Predicate Symbol) where
   astFold m acc (Predicate _ e) = astFold m acc e
 
+instance ASTFoldable Symbol (Maybe (SoP Symbol)) where
+  astFold m acc (Just x) = astFold m acc x
+  astFold _ acc Nothing = pure acc
+
 instance ASTFoldable Symbol (Property Symbol) where
   -- astFold _m _acc = undefined
   astFold _ acc Boolean = pure acc
@@ -172,6 +181,7 @@ instance ASTFoldable Symbol Symbol where
   astFold m acc (Hole x) = foldOnSymbol m acc (Hole x)
   astFold m acc (Bool x) = foldOnSymbol m acc (Bool x)
   astFold m acc (Prop p) = astFold m acc p
+  astFold m acc (Assume p) = astFold m acc p
 
 instance ASTFoldable Symbol IndexFn where
   astFold m acc (IndexFn dom body) = astFold m acc dom >>= astFoldF m body

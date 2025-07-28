@@ -343,10 +343,18 @@ instance Unify VName a where
 repTuple :: (Rep v1 u, Rep v2 u) => Replacement u -> (v1, v2) -> (SoP u, SoP u)
 repTuple s (a, b) = (rep s a, rep s b)
 
+repTupleMaybe :: (Rep v1 u, Rep v2 u) => Replacement u -> (Maybe v1, Maybe v2) -> (Maybe (SoP u), Maybe (SoP u))
+repTupleMaybe s (a, b) = (rep s <$> a, rep s <$> b)
+
 unifyTuple :: (Unify v1 u, Unify u u, Ord u, Hole u, Rep u u, Rep v2 u, Rep v3 u) => VName -> (v1, v2) -> (v1, v3) -> MaybeT IndexFnM (Replacement u)
 unifyTuple k (a, b) (a', b') = do
   s <- unify_ k a a'
   (s <>) <$> unify_ k (rep s b) (rep s b')
+
+unifyTupleMaybe :: (Unify v u, Unify (f (SoP u)) u, Functor f, Rep a1 u, Rep a2 u) => VName -> (v, f a1) -> (v, f a2) -> MaybeT IndexFnM (Replacement u)
+unifyTupleMaybe k (a, b) (a', b') = do
+  s <- unify_ k a a'
+  (s <>) <$> unify_ k (rep s <$> b) (rep s <$> b')
 
 repPredicate :: (Rep u u) => Replacement u -> Predicate u -> Predicate u
 repPredicate s (Predicate vn e) =
@@ -357,13 +365,18 @@ instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Predicate a
   unify_ k (Predicate _ e_x) (Predicate _ e_y) = do
     unify_ k e_x e_y
 
+instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Maybe (SoP a)) a where
+  unify_ k (Just a) (Just b) = unify_ k a b
+  unify_ _ Nothing Nothing = pure mempty
+  unify_ _ _ _ = fail "no unify"
+
 instance (Ord a, Renameable a, Rep a a, Unify a a, Hole a) => Unify (Property a) a where
   unify_ _ Boolean Boolean = pure mempty
   unify_ _ (Disjoint x) (Disjoint y) | x == y = pure mempty
   unify_ _ x@(Monotonic {}) y@(Monotonic {}) | x == y = pure mempty
   unify_ k (Rng x rng1) (Rng y rng2) = do
     s <- unify_ k x y
-    (s <>) <$> unifyTuple k (repTuple s rng1) (repTuple s rng2)
+    (s <>) <$> unifyTupleMaybe k (repTupleMaybe s rng1) (repTupleMaybe s rng2)
   unify_ k (Injective x (Just rcd1)) (Injective y (Just rcd2)) = do
     s <- unify_ k x y
     (s <>) <$> unifyTuple k (repTuple s rcd1) (repTuple s rcd2)
@@ -391,6 +404,10 @@ instance (FreeVariables u, FreeVariables v) => FreeVariables (u, v) where
 
 instance (FreeVariables u) => FreeVariables (Predicate u) where
   fv (Predicate vn e) = fv vn <> fv e
+
+instance (FreeVariables u) => FreeVariables (Maybe u) where
+  fv (Just x) = fv x
+  fv Nothing = mempty
 
 instance (FreeVariables u, Ord u) => FreeVariables (Property u) where
   fv Boolean = mempty

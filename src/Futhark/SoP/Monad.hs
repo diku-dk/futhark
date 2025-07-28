@@ -259,8 +259,11 @@ addRange sym r =
   modifyEnv $ \env ->
     env {ranges = M.insertWith (<>) sym r (ranges env)}
 
-mkRange :: SoP u -> SoP u -> Range u
-mkRange lb ub = Range (S.singleton lb) 1 (S.singleton ub)
+mkRange :: Ord u => Maybe (SoP u) -> Maybe (SoP u) -> Range u
+mkRange lb ub = Range (setFromMaybe lb) 1 (setFromMaybe ub)
+  where
+    setFromMaybe (Just x) = S.singleton x
+    setFromMaybe Nothing = mempty
 
 mkRangeLB :: (Ord u) => SoP u -> Range u
 mkRangeLB n = Range (S.singleton n) 1 mempty

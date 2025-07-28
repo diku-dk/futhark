@@ -150,6 +150,7 @@ check (Prop prop) = do
       printAlgEnv 10
       error $ "Failed to verify " <> prettyStr prop
     failOnUnknown Yes = pure Yes
+check (Assume _) = pure Yes
 check a = isTrue a
 
 foreachCase :: IndexFn -> (Int -> IndexFnM a) -> IndexFnM [a]
@@ -288,8 +289,14 @@ prove prop = alreadyKnown prop `orM` matchProof prop
           j <- newNameFromString "j"
           nextGenProver (MonGe (fromMonDir dir) i j d ges)
         _ -> error "Not implemented yet."
-    matchProof (Rng x (a, b)) =
+    matchProof (Rng x (Just a, Just b)) =
       askQ (CaseCheck (\e -> a :<= e :&& e :< b)) =<< getFn x
+    matchProof (Rng x (Nothing, Just b)) =
+      askQ (CaseCheck (:< b)) =<< getFn x
+    matchProof (Rng x (Just a , Nothing)) =
+      askQ (CaseCheck (a :<=)) =<< getFn x
+    matchProof (Rng _ (Nothing , Nothing)) =
+      pure Yes
     matchProof (Injective y rcd) = do
       -- InjV2
       indexfns <- getIndexFns

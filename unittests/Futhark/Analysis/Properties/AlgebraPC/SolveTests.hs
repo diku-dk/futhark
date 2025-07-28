@@ -20,6 +20,7 @@ import qualified Data.Map as M
 import Futhark.SoP.Refine (addRel)
 import Futhark.Analysis.Properties.Property
 import Futhark.Analysis.Properties.Monad (printAlgEnv)
+import Futhark.SoP.SoP (SoP)
 -------------------------------------
 -- Run with:
 --  $ cabal test --test-show-details=always  --test-option="--pattern=Proofs.AlgebraPC.SolveTests"
@@ -37,6 +38,8 @@ num_tests_sum_sub = 1 -- 1000
 instance ToSoP Symbol IndexFn.Symbol where
   toSoPNum _ = undefined
 
+mkRange' :: Ord u => SoP u -> SoP u -> Range u
+mkRange' x y = mkRange (Just x) (Just y)
 
 tests :: TestTree
 tests =
@@ -66,9 +69,9 @@ tests =
       testCase "FFT bounds-check queries" $
         run
           ( do
-              addRange (Var q) $ mkRange (int 1) (sVar n)
-              addRange (Var j) $ mkRange (int 0) (pow2 (sVar q .-. int  1) .-. int 1)
-              addRange (Var k) $ mkRange (int 0) (pow2 (sVar n .-. sVar q) .-. int 1)
+              addRange (Var q) $ mkRange' (int 1) (sVar n)
+              addRange (Var j) $ mkRange' (int 0) (pow2 (sVar q .-. int  1) .-. int 1)
+              addRange (Var k) $ mkRange' (int 0) (pow2 (sVar n .-. sVar q) .-. int 1)
               let kLj = sVar k .*. pow2 (sVar q) .+. sVar j
               succ_lb <- (int 0) FM.$<=$ (kLj)
               succ_ub1 <- (kLj .+. pow2 (sVar q .-. int 1)) FM.$<$ pow2 (sVar n)
@@ -84,8 +87,8 @@ tests =
         run
           ( do
               addRange (Var n) $ mkRangeLB (int 0)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
-              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar i1 .-. int 1)
               addEquiv (Idx a (sVar i2)) (int 0)
               let sum1 = sym2SoP $ Sum a (int 0) $ sVar i1
                   sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar n .+. int (-1)
@@ -99,10 +102,10 @@ tests =
         run
           ( do
               addRange (Var n) $ mkRangeLB (int 0)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
-              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
-              -- addRange (Var z) $ mkRange (int 0) (sVar n)
-              addRange (Var y) $ mkRange (int 0) (sVar z)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar i1 .-. int 1)
+              -- addRange (Var z) $ mkRange' (int 0) (sVar n)
+              addRange (Var y) $ mkRange' (int 0) (sVar z)
               let sum1 = sym2SoP $ Sum b (sVar y .+. int 1) $ sVar z
                   idx1 = sym2SoP $ Idx b $ sVar y
                   sum2 = sym2SoP $ Sum a (sVar i2 .+. int 1) $ sVar i1 .-. int 1
@@ -117,8 +120,8 @@ tests =
         run
           ( do
               addRange (Var n) $ mkRangeLB (int 1)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
-              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar i1 .-. int 1)
               addRange (Var i3) $ Range (S.singleton $ int 2 .*. sVar i1 .-. int 1) 3 mempty
               forM [1..num_tests_sum_sub] $ \i -> do
                 let sum1 = sym2SoP $ Sum a (int 2 .*. sVar i2) $ int 3 .*. sVar i3
@@ -138,8 +141,8 @@ tests =
         run
           ( do
               addRange (Var  n) $ mkRangeLB (int 0)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
-              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar i1 .-. int 1)
               addEquiv (Idx c (sVar i1)) (int 1)
               addEquiv (Idx c (sVar i2)) (int 0)
               let sum1 = sym2SoP $ Sum c (sVar i2 .+. int 1) $ sVar n .-. int 1
@@ -152,8 +155,8 @@ tests =
         run
           ( do
               addRange (Var  n) $ mkRangeLB (int 0)
-              addRange (Var i2) $ mkRange (int 0) (sVar n .-. int 1)
-              addRange (Var i1) $ mkRange (int 0) (sVar i2 .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar n .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar i2 .-. int 1)
               addEquiv (Idx c (sVar i1)) (int 1)
               addEquiv (Idx c (sVar i2)) (int 0)
               let sum1 = sym2SoP $ Sum c (sVar i2 .+. int 1) $ sVar n .-. int 1
@@ -165,8 +168,8 @@ tests =
         run
           ( do
               addRange (Var  n) $ mkRangeLB (int 0)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
-              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar i1 .-. int 1)
               addEquiv (Idx c (sVar i1)) (int 1)
               addEquiv (Idx c (sVar i2)) (int 0)
               let sum1 = sym2SoP $ Sum c (sVar i2 .+. int 1) $ sVar n .-. int 1
@@ -177,7 +180,7 @@ tests =
       testCase "Partition3 within bounds: case2 < n" $
         run
           ( do
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
               let pc = POR $ S.singleton c0 -- conds[i] == 1
               let pd = POR $ S.singleton d0 -- conds[i] == 2
               -- We are in the case for conds[i] == 2.
@@ -194,7 +197,7 @@ tests =
         run
           ( do
               -- n >  i₁₈₀₉₀ + ∑j₁₈₀₀₂∈(i₁₈₀₉₀ .. -1 + n₄₅₄₃) (conds₄₅₄₅[j₁₈₀₀₂] = 1) + ∑j₁₈₀₀₂∈(i₁₈₀₉₀ .. -1 + n₄₅₄₃) (conds₄₅₄₅[j₁₈₀₀₂] = 2)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
               let pc = POR $ S.singleton c0 -- conds[i] == 1
               let pd = POR $ S.singleton d0 -- conds[i] == 2
               -- We are in the case for conds[i] /= 1 ^ conds[i] /= 2.
@@ -210,7 +213,7 @@ tests =
       testCase "Partition3 within bounds: case >= 0" $
         run
           ( do
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
               let pc = POR $ S.singleton c0 -- conds[i] == 1
               let pd = POR $ S.singleton d0 -- conds[i] == 2
               -- We are in the case for conds[i] == 2.
@@ -228,8 +231,8 @@ tests =
           ( do
               -- 0 <= i2 < i1 < n
               addRange (Var  n) $ mkRangeLB (int 1)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
-              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar i1 .-. int 1)
               -- Assume predicates of cases:
               let pc = POR $ S.singleton c0 -- conds[i1] == 1
               let pd = POR $ S.singleton d0 -- conds[i2] == 2
@@ -248,8 +251,8 @@ tests =
           ( do
               -- 0 <= i2 < i1 < n
               addRange (Var  n) $ mkRangeLB (int 1)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
-              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar i1 .-. int 1)
               -- Assume predicates of cases:
               let pc = POR $ S.singleton c0 -- conds[i1] == 1
               let pd = POR $ S.singleton d0 -- conds[i2] == 2
@@ -272,7 +275,7 @@ tests =
           ( do
               -- 0 <= i1 < n
               addRange (Var  n) $ mkRangeLB (int 1)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
               let pc = POR $ S.singleton c0
               let sum1 = sym2SoP . Sum pc (int 0)
               sum1 (sVar i1 .-. int 1) FM.$<=$ sum1 (sVar n .-. int 1)
@@ -283,8 +286,8 @@ tests =
           ( do
               -- 0 <= i2 < i1 < n
               addRange (Var  n) $ mkRangeLB (int 1)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
-              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar i1 .-. int 1)
               addRange (Var c0) $ mkRangeLB (int 0)
               let sum0to = sym2SoP . Sum (One c0) (int 0)
               debugPrettyM "" (sum0to (sVar i2 .-. int 1), sum0to (sVar i1 .-. int 1))
@@ -296,8 +299,8 @@ tests =
           ( do
               -- 0 <= i2 < i1 < n
               addRange (Var  n) $ mkRangeLB (int 1)
-              addRange (Var i1) $ mkRange (int 1) (sVar n .-. int 1)
-              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var i1) $ mkRange' (int 1) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar i1 .-. int 1)
               addRange (Var c0) $ mkRangeLB (int 0)
               let sum0to = sym2SoP . Sum (One c0) (int 0)
               simplify $ sum0to (sVar i2) .-. sum0to (sVar i1)
@@ -308,8 +311,8 @@ tests =
           ( do
               -- 0 <= i2 < i1 < n
               addRange (Var  n) $ mkRangeLB (int 1)
-              addRange (Var i1) $ mkRange (int 1) (sVar n .-. int 1)
-              addRange (Var i2) $ mkRange (int 0) (sVar i1 .-. int 1)
+              addRange (Var i1) $ mkRange' (int 1) (sVar n .-. int 1)
+              addRange (Var i2) $ mkRange' (int 0) (sVar i1 .-. int 1)
               addRange (Var c0) $ mkRangeLB (int 0)
               let sum0to = sym2SoP . Sum (One c0) (int 0)
               simplify $ sum0to (sVar i2 .-. int 1) .-. sum0to (sVar i1 .-. int 1)
@@ -319,7 +322,7 @@ tests =
         run
           ( do
               -- addRange (Var  n) $ mkRangeLB (int 0)
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
               let c_sum1 = sym2SoP $ Sum (One c0) (int 0) (sVar i1)
               let c_sum2 = sym2SoP $ Sum (One c0) (sVar i1 .+. int 1) (sVar n .-. int 1)
               simplify $ c_sum1 .+. c_sum2
@@ -328,7 +331,7 @@ tests =
       testCase "Sum no-op" $
         run
           ( do
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
               let c_sum = sym2SoP $ Sum (One c0) (int 0) (sVar n .-. int 1)
               simplify c_sum
           )
@@ -336,7 +339,7 @@ tests =
       testCase "Peel off one" $
         run
           ( do
-              addRange (Var i1) $ mkRange (int 0) (sVar n .-. int 1)
+              addRange (Var i1) $ mkRange' (int 0) (sVar n .-. int 1)
               let pd = POR $ S.singleton d0
               addEquiv (Idx pd $ sVar i1) (int 1)
               let d_sum = sym2SoP $ Sum pd (int 0) (sVar i1)
@@ -379,19 +382,19 @@ tests =
               -- max{0} <= shapeª₃₃₇₈₀ <= min{}
               addRange (Var vn_shp) $ mkRangeLB (int 0)
               -- max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈}
-              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
+              addRange (Var k) $ mkRange' (int 0) (sVar m .-. int 1)
               -- max{0, 1, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
               --   <= i₉₆₆₄
               --   <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
-              addRange (Var i) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
-              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              addRange (Var i) $ mkRange' (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var i) $ mkRange' (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
               -- max{0, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]} <= j₅₀₁₃₁ <= min{-1 + i₉₆₆₄}
-              addRange (Var j) $ mkRange (int 0) (sVar i .-. int 1)
-              addRange (Var j) $ mkRange (shp_sum (sVar k .-. int 1)) (sVar i .-. int 1)
+              addRange (Var j) $ mkRange' (int 0) (sVar i .-. int 1)
+              addRange (Var j) $ mkRange' (shp_sum (sVar k .-. int 1)) (sVar i .-. int 1)
               -- c is disjoint with some other predicate d.
               addProperty (Var c0) (Disjoint $ S.singleton d0)
               addProperty (Var c0) Boolean
-              addRange (Var c0) $ mkRange (int 0) (int 1)
+              addRange (Var c0) $ mkRange' (int 0) (int 1)
               -- Add equivalences.
               addEquiv (Idx c (sVar i)) (int 1)
               addEquiv (Idx c (sVar j)) (int 1)
@@ -435,19 +438,19 @@ tests =
               -- max{0} <= shapeª₃₃₇₈₀ <= min{}
               addRange (Var vn_shp) $ mkRangeLB (int 0)
               -- max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈}
-              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
+              addRange (Var k) $ mkRange' (int 0) (sVar m .-. int 1)
               -- max{0, 1, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
               --   <= i₉₆₆₄
               --   <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
-              addRange (Var i) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
-              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              addRange (Var i) $ mkRange' (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var i) $ mkRange' (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
               -- max{0, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]} <= j₅₀₁₃₁ <= min{-1 + i₉₆₆₄}
-              addRange (Var j) $ mkRange (int 0) (sVar i .-. int 1)
-              addRange (Var j) $ mkRange (shp_sum (sVar k .-. int 1)) (sVar i .-. int 1)
+              addRange (Var j) $ mkRange' (int 0) (sVar i .-. int 1)
+              addRange (Var j) $ mkRange' (shp_sum (sVar k .-. int 1)) (sVar i .-. int 1)
               -- c is disjoint with some other predicate d.
               addProperty (Var c0) (Disjoint $ S.singleton d0)
               addProperty (Var c0) Boolean
-              addRange (Var c0) $ mkRange (int 0) (int 1)
+              addRange (Var c0) $ mkRange' (int 0) (int 1)
               -- Add equivalences.
               addEquiv (Idx c (sVar i)) (int 0)
               addEquiv (Idx c (sVar j)) (int 0)
@@ -478,14 +481,14 @@ tests =
               -- max{0} <= shapeª₃₃₇₈₀ <= min{}
               addRange (Var vn_shp) $ mkRangeLB (int 0)
               -- max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈}
-              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
+              addRange (Var k) $ mkRange' (int 0) (sVar m .-. int 1)
               -- max{0} <= cª₄₉₈₉₅ <= min{1}
-              addRange (Var c0) $ mkRange (int 0) (int 1)
+              addRange (Var c0) $ mkRange' (int 0) (int 1)
               -- max{0, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
               --   <= i₉₆₆₄
               --   <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
-              addRange (Var i) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
-              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              addRange (Var i) $ mkRange' (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var i) $ mkRange' (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
               -- c is disjoint with some other predicate d.
               addProperty (Var c0) (Disjoint $ S.singleton d0)
               addProperty (Var c0) Boolean
@@ -532,14 +535,14 @@ tests =
               -- max{0} <= shapeª₃₃₇₈₀ <= min{}
               addRange (Var vn_shp) $ mkRangeLB (int 0)
               -- max{0} <= k₄₉₈₄₈ <= min{-1 + m₄₆₇₈}
-              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
+              addRange (Var k) $ mkRange' (int 0) (sVar m .-. int 1)
               -- max{0} <= cª₄₉₈₉₅ <= min{1}
-              addRange (Var c0) $ mkRange (int 0) (int 1)
+              addRange (Var c0) $ mkRange' (int 0) (int 1)
               -- max{0, ∑shapeª₃₃₇₈₀[0 : -1 + k₄₉₈₄₈]}
               --   <= i₉₆₆₄
               --   <= min{-1 + ∑shapeª₃₃₇₈₀[0 : -1 + m₄₆₇₈], -1 + ∑shapeª₃₃₇₈₀[0 : k₄₉₈₄₈]}
-              addRange (Var i) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
-              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              addRange (Var i) $ mkRange' (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var i) $ mkRange' (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
               -- c is disjoint with some other predicate d.
               addProperty (Var c0) (Disjoint $ S.singleton d0)
               addProperty (Var c0) Boolean
@@ -584,13 +587,13 @@ tests =
               -- Ranges (in order)
               addRange (Var m) $ mkRangeLB (int 1)
               addRange (Var vn_shp) $ mkRangeLB (int 0)
-              addRange (Var k) $ mkRange (int 0) (sVar m .-. int 1)
-              addRange (Var c0) $ mkRange (int 0) (int 1)
-              addRange (Var d0) $ mkRange (int 0) (int 1)
-              addRange (Var i) $ mkRange (int 0) (sVar j .-. int 1)
-              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (sVar j .-. int 1)
-              addRange (Var j) $ mkRange (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
-              addRange (Var j) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              addRange (Var k) $ mkRange' (int 0) (sVar m .-. int 1)
+              addRange (Var c0) $ mkRange' (int 0) (int 1)
+              addRange (Var d0) $ mkRange' (int 0) (int 1)
+              addRange (Var i) $ mkRange' (int 0) (sVar j .-. int 1)
+              addRange (Var i) $ mkRange' (shp_sum (sVar k .-. int 1)) (sVar j .-. int 1)
+              addRange (Var j) $ mkRange' (int 0) (shp_sum (sVar m .-. int 1) .-. int 1)
+              addRange (Var j) $ mkRange' (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
               -- Add equivalences.
               addEquiv (Idx c (sVar i)) (int 0)
               addEquiv (Idx c (sVar j)) (int 1)
@@ -643,7 +646,7 @@ tests =
               let shp_sum s = sym2SoP $ Sum shp (int 0) s
               -- Ranges (in order)
               addRange (Var vn_shp) $ mkRangeLB (int 1)
-              addRange (Var i) $ mkRange (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
+              addRange (Var i) $ mkRange' (shp_sum (sVar k .-. int 1)) (shp_sum (sVar k) .-. int 1)
               getRanges
           ),
       testCase "Bounds-check (part2indices)" $
