@@ -163,6 +163,7 @@ subber argCheck g = do
 {-
               Substitution rules
 -}
+-- Substitute `f(args)` for its value in `g`.
 substituteOnce :: IndexFn -> IndexFn -> (Symbol, [SoP Symbol]) -> IndexFnM (Maybe IndexFn)
 substituteOnce f g_presub (f_apply, actual_args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
@@ -173,10 +174,14 @@ substituteOnce f g_presub (f_apply, actual_args) = do
       { shape =
           shape g <&> \case
             Forall j dg
+              -- f(args) is not in dom(g).
               | vn `notElem` fv dg -> Forall j dg
+              -- f(args) is in dom(g) and f has only one case.
               | Just e_f <- justSingleCase f ->
                   Forall j $ repDomain (mkRep vn (rep args e_f)) dg
-            _ -> error "Not implemented yet: multi-case domain.",
+              -- f(args) is in dom(g) and f has multiple cases.
+              | e_f <- flattenCases (body f) ->
+                  Forall j $ repDomain (mkRep vn (rep args e_f)) dg,
         body = cases $ do
           (p_f, e_f) <- guards f
           (p_g, e_g) <- guards g

@@ -50,6 +50,26 @@ propertyPrelude =
       "and"
     ]
 
+createUninterpretedIndexFn :: E.VName -> [SoP Symbol] -> IndexFnM [IndexFn]
+createUninterpretedIndexFn vn dims = do
+  f <- case dims of
+    [] ->
+      -- Canonical scalar representation.
+      pure [IndexFn [] (singleCase $ sVar vn)]
+    shape -> do
+      -- Canonical array representation.
+      ids <-
+        zipWithM (\_ i -> newVName i) shape $
+          mconcat (repeat ["i", "j", "k"])
+      pure
+        [ IndexFn
+            { shape = zipWith (\sz i -> Forall i (Iota sz)) shape ids,
+              body = singleCase . sym2SoP $ Apply (Var vn) (map sVar ids)
+            }
+        ]
+  insertIndexFn vn f
+  pure f
+
 {-
     Construct index function for source program
 -}
@@ -76,6 +96,8 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
       printM 1 $
         emphString ("Analyzing " <> prettyStr (E.locText (E.srclocOf val_loc)))
           <> prettyStr val
+      forM_ (concatMap E.patternMap params) $ \(param, t) ->
+        createUninterpretedIndexFn param =<< shapeOfTypeBase t
       forM_ params addPreconditions
       forM_ params addBooleanNames
       forM_ params addSizeVariables
@@ -149,6 +171,9 @@ checkPostcondition vn indexfns te = do
 forward :: E.Exp -> IndexFnM [IndexFn]
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
+forward (E.AppExp e@(E.LetFun {}) _) =
+  error $
+    errorMsg (E.locOf e) "Only top-level function definitions are supported."
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x in_body _) _) = do
   trackNamesOfFinalLetBody in_body
   fs <- forwardLetEffects [Just vn] x
@@ -176,27 +201,8 @@ forward (E.Negate x _) = do
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   bindings <- getIndexFns
   case M.lookup vn bindings of
-    Just indexfns -> do
-      pure indexfns
-    _ -> do
-      dims <- shapeOfTypeBase (E.typeOf e)
-      f <- case dims of
-        [] ->
-          -- Canonical scalar representation.
-          pure [IndexFn [] (singleCase $ sVar vn)]
-        shape -> do
-          -- Canonical array representation.
-          ids <-
-            zipWithM (\_ i -> newVName i) shape $
-              mconcat (repeat ["i", "j", "k"])
-          pure
-            [ IndexFn
-                { shape = zipWith (\sz i -> Forall i (Iota sz)) shape ids,
-                  body = singleCase . sym2SoP $ Apply (Var vn) (map sVar ids)
-                }
-            ]
-      insertIndexFn vn f
-      pure f
+    Just indexfns -> pure indexfns
+    _ -> createUninterpretedIndexFn vn =<< shapeOfTypeBase (E.typeOf e)
 forward (E.TupLit xs _) = do
   mconcat <$> mapM forward xs
 forward expr@(E.AppExp (E.Index e_xs slice _loc) _)
@@ -307,8 +313,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
     "map" `L.isPrefixOf` fname = do
       -- No need to handle map non-lambda yet as program can just be rewritten.
       error . errorMsg loc $
-        "map takes lambda as first argument. Perhaps you want to eta-expand: "
-          <> prettyStr (head $ getArgs args)
+        "Eta-expand map's first argument: " <> prettyStr (head $ getArgs args)
   | Just "replicate" <- getFun e_f,
     [e_n, e_x] <- getArgs args = do
       ns <- forward e_n
@@ -481,9 +486,10 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
   | Just "Assume" <- getFun e_f,
     [e] <- getArgs args = do
       forward e
-        >>= mapM (\f ->
-          rewrite $ f {body = cmapValues (mapSymSoP (sym2SoP . Assume)) (body f)}
-        )
+        >>= mapM
+          ( \f ->
+              rewrite $ f {body = cmapValues (mapSymSoP (sym2SoP . Assume)) (body f)}
+          )
   | Just vn <- getFun e_f,
     vn `S.member` propertyPrelude = do
       (: []) <$> forwardPropertyPrelude vn args
@@ -528,10 +534,7 @@ forward e@(E.AppExp (E.Loop _sz _init_pat _init (E.For ident e_sz) e_body loc) _
   f_szs <- forward e_sz
   case map justSingleCase f_szs of
     [Just sz] -> do
-      addRelSymbol (Prop $ Property.Rng i (Just $ int2SoP 0, Just $ sz))
-      XXX ^ use assume to add range like what is done in an index function? then roll back
-          Next, make it so taht addRelSymbol on Property.Rng correctly adds the paramToAlgebra version!
-          One problem seems to be that paramToAlgebra is made for arrays....
+      assume (int2SoP 0 :<= sVar i :&& sVar i :< sz)
       printM 1 $
         warningMsg loc "Analyzing loop body, but resulting index function will be uninterpreted."
       _ <- forward e_body
@@ -673,9 +676,13 @@ forwardApplyDef toplevel_fns defs (E.AppExp (E.Apply f args loc) _)
             printM 1 $
               "Checking precondition " <> prettyStr pat <> " for " <> prettyStr g
             check (size_rep, scope, name_rep)
-          printAlgEnv 3
-          unless (all isYes answers) . error . errorMsg loc $
-            "Failed to show precondition " <> prettyStr pat <> " in context: " <> prettyStr scope
+          unless (all isYes answers) $ do
+            printAlgEnv 3
+            error . errorMsg loc $
+              "Failed to show precondition "
+                <> prettyStr pat
+                <> " in context: "
+                <> prettyStr scope
 forwardApplyDef _ _ _ = Nothing
 
 -- TODO make it return a list of functions just to remove the many undefined cases
@@ -699,15 +706,11 @@ forwardPropertyPrelude f args =
       | [e_X, e_rng] <- getArgs args,
         Just x <- justVName e_X -> do
           f_rng <- forward e_rng
-          printM 0 $ prettyStr e_rng
-          printM 0 $ prettyStr f_rng
           case f_rng of
             [IndexFn [] g_a, IndexFn [] g_b] ->
               fmap (IndexFn []) . simplify . cases $ do
                 (p_a, a) <- casesToList g_a
                 (p_b, b) <- casesToList g_b
-                printM 0 $ prettyStr $ show (inf2Nothing a)
-                printM 0 $ prettyStr $ show (inf2Nothing b)
                 pure (p_a :&& p_b, pr $ Property.Rng x (inf2Nothing a, inf2Nothing b))
             _ ->
               undefined
@@ -875,10 +878,7 @@ scatterSc1 xs@(IndexFn (Forall i dom_dest : _) _) (e_is, is) vs
           -- TODO add these ranges when needed using the property table.
           -- Here we add them as a special case because we know is^(-1) will
           -- be used for indirect indexing.
-          hole <- sym2SoP . Hole <$> newVName "h"
-          let wrap = (`Apply` [hole]) . Var
-          alg_vn <- lift $ paramToAlgebra vn_inv wrap
-          lift $ addRelSymbol (Prop $ Property.Rng alg_vn (Just $ int2SoP 0, Just $ dest_size))
+          lift $ addRelSymbol (Prop $ Property.Rng vn_inv (Just $ int2SoP 0, Just dest_size))
 
           -- let inv_i = Apply (Var vn_inv) (sVar . boundVar <$> shape xs)
           let inv_i = sym2SoP (Apply (Var vn_inv) [sVar i])
@@ -911,12 +911,12 @@ scatterSc2 xs@(IndexFn [Forall _ d_xs] _) (e_is, is@(IndexFn [Forall k (Iota m)]
         (\j ans -> pure ans `orM` queryCase (CaseCheck (neg . in_dom_xs)) is j)
         [0 ..]
         in_bounds
-  printM 1337 $ "answers " <> prettyStr in_bounds
-  printM 1337 $ "sanity  " <> prettyStr sanity_check
-  printM 1337 $ "scatterSc2: is " <> prettyStr is
+  printM 3 $ "answers " <> prettyStr in_bounds
+  printM 3 $ "sanity  " <> prettyStr sanity_check
+  printM 3 $ "scatterSc2: is " <> prettyStr is
   -- Sort branches so that indices in the domain of xs come before out-of-bounds indices.
   let gs = L.sortOn fst $ zip in_bounds (guards is)
-  printM 1337 $ "scatterSc2: gs " <> prettyStr (map snd gs)
+  printM 3 $ "scatterSc2: gs " <> prettyStr (map snd gs)
   case gs of
     [(Unknown, _), (Yes, (c, e))] -> do
       Yes <- lift $ algebraContext is $ do
@@ -1171,7 +1171,7 @@ substParams = foldM substParam
 
 failMsg :: (MonadFail m) => String -> m b
 failMsg msg = do
-  printM 1337 msg
+  printM 3 msg
   fail msg
 
 sVar :: E.VName -> SoP Symbol
@@ -1237,6 +1237,7 @@ getRefinementFromType vns ty = case ty of
 
 mkRef :: [E.VName] -> (E.VName -> Symbol) -> E.Exp -> IndexFnM (Check, Effect)
 mkRef vns wrap refexp = case refexp of
+  --- XXX delete this case
   E.OpSectionRight (E.QualName [] vn_op) _ e_y _ _ _
     | [name] <- vns -> do
         let rel = fromJust $ parseOpVName vn_op

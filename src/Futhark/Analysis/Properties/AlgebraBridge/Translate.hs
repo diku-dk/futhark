@@ -280,6 +280,20 @@ paramToAlgebra vn wrapper = do
   SoPM.addUntrans (Algebra.Var alg_vn) (wrapper vn)
   pure alg_vn
 
+-- A variation on lookupUntransPE used to add refinements to the algebra
+-- environment in Convert.hs. (The secret is that it allows adding symbols with
+-- holes in the environment.)
+-- paramToAlgebra :: VName -> IndexFnM VName
+-- paramToAlgebra vn = do
+--   inv_map <- inv <$> SoPM.getUntrans
+--   let pe = wrapper vn
+--   case inv_map M.!? pe of
+--     Nothing -> do
+--       alg_vn <- newVName (baseString vn <> "ª")
+--       SoPM.addUntrans (Algebra.Var alg_vn) pe
+--       pure alg_vn
+--     Just alg_vn -> pure alg_vn
+
 -- Replace bound variable `k` in `e` by Hole.
 removeQuantifier :: Symbol -> VName -> IndexFnM Symbol
 e `removeQuantifier` k = do

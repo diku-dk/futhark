@@ -25,13 +25,14 @@ import Control.Monad (forM_)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Set qualified as S
-import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, toAlgebra, paramToAlgebra)
+import Futhark.Analysis.Properties.AlgebraBridge.Translate (getDisjoint, paramToAlgebra, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraPC.Algebra qualified as Algebra
-import Futhark.Analysis.Properties.IndexFn (Domain (..), Quantified (..), Iterator)
+import Futhark.Analysis.Properties.IndexFn (Domain (..), Iterator, Quantified (..), rank)
 import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, domainStart, intervalEnd)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Property (Property (..), nameAffectedBy)
 import Futhark.Analysis.Properties.Symbol (Symbol (..), toCNF)
+import Futhark.MonadFreshNames (newVName)
 import Futhark.SoP.FourierMotzkin (($/=$), ($<$), ($<=$), ($==$), ($>$), ($>=$))
 import Futhark.SoP.Monad (addProperty, addRange, mkRange)
 import Futhark.SoP.Refine (addRel, addRels)
@@ -155,12 +156,21 @@ addRelSymbol p = do
         getProps _ = []
 
     addProperty_ (Rng x (a, b)) = do
-      hole <- sym2SoP . Hole <$> newVName "h"
-      let wrap = (`Apply` [hole]) . Var
-      alg_x <- lift $ paramToAlgebra x wrap
-      lift $ addRelSymbol (Prop $ Property.Rng alg_x (mkRange a ((.-. int2SoP 1) <$> b)))
-      -- addRange (Algebra.Var x) (mkRange a ((.-. int2SoP 1) <$> b))
-      addProperty (Algebra.Var x) (Rng x (a,b))
+      addRange (Algebra.Var x) (mkRange a ((.-. int2SoP 1) <$> b))
+      -- If x is an array, also add range on x[hole] due to the way sums and
+      -- predicates are handled in toAlgebra.
+      fs <- lookupIndexFn x
+      case fs of
+        Just [f]
+          | rank f == 0 -> pure ()
+          | rank f == 1 -> do
+              hole <- sym2SoP . Hole <$> newVName "h"
+              alg_x <- paramToAlgebra x ((`Apply` [hole]) . Var)
+              addRange (Algebra.Var alg_x) (mkRange a ((.-. int2SoP 1) <$> b))
+          | rank f > 1 -> pure () -- Not implemented yet; skipping is safe.
+        Nothing -> pure () -- We don't know whether x is an array.
+        _ -> error "Range on tuple type"
+      addProperty (Algebra.Var x) (Rng x (a, b))
     addProperty_ prop = addProperty (Algebra.Var (nameAffectedBy prop)) prop
 
 -- | Add relations derived from the iterator to the algebraic environment.
@@ -180,7 +190,7 @@ addRelIterator (Forall i dom) = case dom of
     -- TODO why do I have to add the range in two steps?
     -- Want to enforce range on i without causing cycles---not move lb/ub around
     -- using heuristics.
-    addRels $ S.fromList [ int2SoP 0 :<=: sVar i ]
+    addRels $ S.fromList [int2SoP 0 :<=: sVar i]
   Cat k m b -> do
     m' <- toAlgebra m
     dom_start <- Algebra.simplify =<< toAlgebra (domainStart dom)
