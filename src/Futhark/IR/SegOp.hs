@@ -55,6 +55,7 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Data.Bifunctor (first)
 import Data.Bitraversable
+import Data.Either
 import Data.List
   ( elemIndex,
     foldl',
@@ -79,7 +80,11 @@ import Futhark.IR.Aliases
   )
 import Futhark.IR.Mem
 import Futhark.IR.Prop.Aliases
-import Futhark.IR.SOACS.SOAC (ScatterSpec, splitScatterResults)
+import Futhark.IR.SOACS.SOAC
+  ( ScatterSpec,
+    groupScatterResults,
+    splitScatterResults,
+  )
 import Futhark.IR.TypeCheck qualified as TC
 import Futhark.Optimise.Simplify.Engine qualified as Engine
 import Futhark.Optimise.Simplify.Rep
@@ -1432,7 +1437,7 @@ segOpGuts ::
 segOpGuts (SegMap lvl space kts body) =
   (kts, body, 0, SegMap lvl space)
 segOpGuts (SegScan lvl space kts body ops post_op) =
-  (kts, body, segBinOpResults ops, \t b -> SegScan lvl space t b ops post_op)
+  (kts, body, 0, \t b -> SegScan lvl space t b ops post_op)
 segOpGuts (SegRed lvl space kts body ops) =
   (kts, body, segBinOpResults ops, \t b -> SegRed lvl space t b ops)
 segOpGuts (SegHist lvl space kts body ops) =
@@ -1447,7 +1452,44 @@ bottomUpSegOp ::
   Rule rep
 -- Some SegOp results can be moved outside the SegOp, which can
 -- simplify further analysis.
-bottomUpSegOp _ _ _ (SegScan {}) = Skip
+bottomUpSegOp (_vtable, used) (Pat pes) dec (SegScan lvl space ts kbody scan_ops post_op)
+  -- Remove dead results. This is a bit tricky to do with scan/red
+  -- results, so we only deal with map results for now.
+  | (pes', lres', ts') <- unzip3 $ filter keep $ zip3 pes lres ts,
+    pes' /= pes = Simplify $ do
+      let (scatter_lres', noscatter_lres') = partitionEithers lres'
+          spec' = (\(s, n, xs) -> (s, length xs, n)) <$> scatter_lres'
+          (idxs_ts', idxs_res') =
+            unzip $
+              concatMap (\(_, _, xs) -> concatMap fst xs) scatter_lres'
+          (vs_ts', vs_res') =
+            unzip $
+              concatMap (\(_, _, xs) -> map snd xs) scatter_lres'
+          (as_ts', as_res') = unzip noscatter_lres'
+          lts' = idxs_ts' <> vs_ts' <> as_ts'
+          res' = idxs_res' <> vs_res' <> as_res'
+          lbody' = lbody {bodyResult = res'}
+          lam' = lam {lambdaReturnType = lts', lambdaBody = lbody'}
+          post_op' = SegPostOp lam' spec'
+
+      addStm $ Let (Pat pes') dec $ Op $ segOp $ SegScan lvl space ts' kbody scan_ops post_op'
+  where
+    spec = segPostOpScatterSpec post_op
+    lam = segPostOpLambda post_op
+    lts = lambdaReturnType lam
+    lbody = lambdaBody lam
+    res = bodyResult lbody
+    (as_ws, as_ns, _as_vs) = unzip3 spec
+    num_idxs = sum $ zipWith (*) as_ns $ map length as_ws
+    num_vs = sum as_ns
+    num_scatter_rts = num_idxs + num_vs
+    (scatter_res, noscatter_res) = splitAt num_scatter_rts (zip lts res)
+    lres =
+      map Left (groupScatterResults spec scatter_res)
+        <> map Right noscatter_res
+
+    keep (pe, _, _) = patElemName pe `UT.used` used
+bottomUpSegOp (_vtable, _used) (Pat _kpes) _dec (SegScan {}) = Skip
 bottomUpSegOp (_vtable, used) (Pat kpes) dec segop
   -- Remove dead results. This is a bit tricky to do with scan/red
   -- results, so we only deal with map results for now.
