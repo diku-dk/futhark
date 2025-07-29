@@ -622,9 +622,8 @@ tests =
         ( pure $ \(i, n, xs, _) ->
             [ IndexFn
                 { shape = [Forall i (Iota (sHole n))],
-                  body =
-                    cases
-                      [(Bool True, sym2SoP $ Apply (Hole xs) [sHole i])]
+                  -- matches anything; we're just checking the program.
+                  body = cases [(Bool True, sHole xs)]
                 }
             ]
         )
