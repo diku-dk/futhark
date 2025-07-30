@@ -1,5 +1,5 @@
 -- ==
--- error: cannot unify type with constructors
+-- error: Cannot unify type with constructors
 
 type found = #found i32 | #not_found
 
