@@ -43,6 +43,7 @@ pkgs.stdenv.mkDerivation {
       niv
       ispc
       imagemagick # needed for literate tests
+      glpk
     ]
     ++ lib.optionals (stdenv.isLinux)
       [ opencl-headers

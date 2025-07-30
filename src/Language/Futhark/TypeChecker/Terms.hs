@@ -1214,14 +1214,6 @@ localChecks = void . check
       e <$ case ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
         _ -> error "Inferred type of int literal is not a number"
-    check e@(AppExp (BinOp (QualName [] v, _) _ (x, _) _ loc) _)
-      | baseName v == "==",
-        Array {} <- typeOf x,
-        baseTag v <= maxIntrinsicTag = do
-          warn loc $
-            textwrap
-              "Comparing arrays with \"==\" is deprecated and will stop working in a future revision of the language."
-          recurse e
     check e = recurse e
     recurse = astMap identityMapper {mapOnExp = check}
 

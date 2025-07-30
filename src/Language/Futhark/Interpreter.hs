@@ -1698,18 +1698,6 @@ initialCtx =
                   pure $ ValuePrim $ UnsignedValue x'
                 ValueAD {} -> pure x -- FIXME: these do not carry signs.
                 _ -> error $ "Cannot unsign: " <> show x
-    def "map" = Just $
-      TermPoly Nothing $ \t -> do
-        t' <- evalTypeFully t
-        pure $ ValueFun $ \f -> pure . ValueFun $ \xs ->
-          case unfoldFunType t' of
-            ([_, _], ret_t)
-              | rowshape <- typeShape $ stripArray 1 ret_t ->
-                  toArray' rowshape <$> mapM (apply noLoc mempty f) (snd $ fromArray xs)
-            _ ->
-              error $
-                "Invalid arguments to map intrinsic:\n"
-                  ++ unlines [prettyString t, show f, show xs]
     def s | "reduce" `T.isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs

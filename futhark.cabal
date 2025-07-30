@@ -382,6 +382,11 @@ library
       Futhark.Pkg.Types
       Futhark.Profile
       Futhark.Script
+      Futhark.Solve.GLPK
+      Futhark.Solve.LP
+      Futhark.Solve.Matrix
+      Futhark.Solve.Simplex
+      Futhark.Solve.BranchAndBound
       Futhark.Test
       Futhark.Test.Spec
       Futhark.Test.Values
@@ -506,6 +511,9 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
+     -- remove me later
+    , glpk-hs
+    , silently
 
 executable futhark
   import: common
@@ -541,6 +549,8 @@ library futhark-testing
       Futhark.Optimise.ArrayLayoutTests
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
+      Futhark.Solve.BranchAndBoundTests
+      Futhark.Solve.SimplexTests
       Language.Futhark.CoreTests
       Language.Futhark.PrettyTests
       Language.Futhark.ParserBenchmarks
@@ -565,6 +575,7 @@ library futhark-testing
     , tasty-hunit
     , tasty-quickcheck
     , text
+    , vector >=0.12
     , srcloc
     , regex-tdfa ^>= 1.3.2
 

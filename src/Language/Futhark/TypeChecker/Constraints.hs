@@ -14,7 +14,6 @@ module Language.Futhark.TypeChecker.Constraints
   )
 where
 
-import Data.Bifunctor
 import Data.Loc
 import Data.Map qualified as M
 import Futhark.Util.Pretty
@@ -73,9 +72,6 @@ instance Located (Reason t) where
 data CtTy d = CtEq (Reason (CtType d)) (TypeBase d NoUniqueness) (TypeBase d NoUniqueness)
   deriving (Show)
 
-instance Functor CtTy where
-  fmap f (CtEq r x y) = CtEq (fmap (first f) r) (first f x) (first f y)
-
 ctReason :: CtTy d -> Reason (CtType d)
 ctReason (CtEq r _ _) = r
 
@@ -104,12 +100,6 @@ data TyVarInfo d
   | -- | Must be a sum type with these fields.
     TyVarSum Loc (M.Map Name [CtType d])
   deriving (Show, Eq)
-
-instance Functor TyVarInfo where
-  fmap _ (TyVarFree loc l) = TyVarFree loc l
-  fmap _ (TyVarPrim loc ts) = TyVarPrim loc ts
-  fmap f (TyVarRecord loc m) = TyVarRecord loc $ M.map (first f) m
-  fmap f (TyVarSum loc m) = TyVarSum loc $ M.map (map (first f)) m
 
 prettyTyVarInfo :: (Pretty (Shape d)) => TyVarInfo d -> Doc a
 prettyTyVarInfo (TyVarFree _ l) = "free" <+> pretty l
