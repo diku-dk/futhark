@@ -233,11 +233,6 @@ newTypeOverloaded :: SrcLoc -> Name -> [PrimType] -> TermM (TypeBase d NoUniquen
 newTypeOverloaded loc name pts =
   tyVarType NoUniqueness <$> newTyVarWith name (TyVarPrim (locOf loc) pts)
 
-newSVar :: loc -> Name -> TermM SVar
-newSVar _loc desc = do
-  i <- incCounter
-  newID $ mkTypeVarName desc i
-
 newArtificial :: u -> TypeBase SComp u -> TermM (TypeBase Size u)
 newArtificial u t = do
   v <- newID "artificial"
@@ -285,12 +280,6 @@ ctEq reason t1 t2 =
   where
     t1' = t1 `setUniqueness` NoUniqueness
     t2' = t2 `setUniqueness` NoUniqueness
-
-ctAM :: Reason (CtType SComp) -> SVar -> SVar -> Shape SComp -> TermM ()
-ctAM reason r m f =
-  modify $ \s -> s {termAM = ct : termAM s}
-  where
-    ct = CtAM reason r m f
 
 localScope :: (TermScope -> TermScope) -> TermM a -> TermM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
@@ -658,52 +647,23 @@ checkApplyOne ::
   (Shape Size, Type) ->
   (Maybe Exp, Shape Size, Type) ->
   TermM (Type, AutoMap)
-checkApplyOne loc fname (fframe, ftype) (arg, argframe, argtype) = do
+checkApplyOne loc fname (_fframe, ftype) (arg, _argframe, argtype) = do
   (a, b) <- split ftype
-  r <- newSVar loc "R"
-  m <- newSVar loc "M"
-  let unit_info = Info $ Scalar $ Prim Bool
-      r_var = Var (QualName [] r) unit_info mempty
-      m_var = Var (QualName [] m) unit_info mempty
-      lhs = arrayOf (toShape (SVar r)) argtype
-      rhs = arrayOf (toShape (SVar m)) a
-  ctAM (Reason (locOf loc)) r m $ fmap toSComp (toShape m_var <> fframe)
+  let lhs = argtype
+      rhs = a
   let reason = case arg of
         Just arg' -> ReasonApply (locOf arg) fname arg' lhs rhs
         Nothing -> Reason (locOf loc)
   ctEq reason lhs rhs
-  debugTraceM 3 $
-    unlines
-      [ "## checkApplyOne",
-        "## fname",
-        prettyString fname,
-        "## (fframe, ftype)",
-        prettyString (fframe, ftype),
-        "## (argframe, argtype)",
-        prettyString (argframe, argtype),
-        "## r",
-        prettyString r,
-        "## m",
-        prettyString m,
-        "## lhs",
-        prettyString lhs,
-        "## rhs",
-        prettyString rhs,
-        "## ret",
-        prettyString $ arrayOf (toShape (SVar m)) b
-      ]
   pure
-    ( arrayOf (toShape (SVar m)) b,
+    ( b,
       AutoMap
-        { autoRep = toShape r_var,
-          autoMap = toShape m_var,
-          autoFrame = toShape m_var <> fframe
+        { autoRep = mempty,
+          autoMap = mempty,
+          autoFrame = mempty
         }
     )
   where
-    toSComp (Var (QualName [] x) _ _) = SVar x
-    toSComp _ = error ""
-    toShape = Shape . pure
     split (Scalar (Arrow _ _ _ a (RetType _ b))) =
       pure (a, b `setUniqueness` NoUniqueness)
     split (Array _u s t) = do
@@ -1255,6 +1215,8 @@ doDefault ::
   Either [PrimType] (TypeBase () NoUniqueness) ->
   TermM (TypeBase () NoUniqueness)
 doDefault tyvars_at_toplevel v (Left pts)
+  | [pt] <- pts =
+      pure $ Scalar $ Prim pt
   | Signed Int32 `elem` pts = do
       when (v `elem` tyvars_at_toplevel) $
         warn usage "Defaulting ambiguous type to i32."

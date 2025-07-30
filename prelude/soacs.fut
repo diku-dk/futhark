@@ -48,7 +48,7 @@ import "zip"
 --
 -- **Span:** *O(S(f))*
 def map 'a [n] 'x (f: a -> x) (as: [n]a) : *[n]x =
-  f as
+  intrinsics.map f as
 
 -- | Apply the given function to each element of a single array.
 --

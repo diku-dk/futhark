@@ -519,8 +519,8 @@ unionTyVars reason bcs v v_node t_node = do
           TyVarPrim t_loc t_pts
           ) ->
             let pts = L.intersect v_pts t_pts
-             in if null pts
-                  then
+             in case pts of
+                  [] ->
                     pure $
                       Left
                         ( locOf reason,
@@ -530,7 +530,7 @@ unionTyVars reason bcs v v_node t_node = do
                             </> "with type that must be one of"
                             </> indent 2 (pretty t_pts)
                         )
-                  else pure $ Right $ Just $ Unsolved $ TyVarPrim t_loc pts
+                  _ -> pure $ Right $ Just $ Unsolved $ TyVarPrim t_loc pts
         (Unsolved (TyVarPrim _ v_pts), TyVarRecord {}) ->
           pure $
             Left
