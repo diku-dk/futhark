@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.25.32]
+
+### Added
+
 * `futhark doc` now prints warnings about errors in doc comments (mostly
   references to unknown names).
 
@@ -24,10 +34,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The AD transformation is now more diligent about propagating attributes from
   SOACs in the primal code to SOACs in the differentiated code.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
@@ -47,6 +53,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * For GPU backends, incorrect code generation for accumulator updates (produced
   by AD) for thread-local arrays (#2294).
+
+* Missing consumption check in the termination condition for `while` loops (#2300).
 
 ## [0.25.31]
 
