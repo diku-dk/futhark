@@ -1455,7 +1455,7 @@ bottomUpSegOp ::
 bottomUpSegOp (_vtable, used) (Pat pes) dec (SegScan lvl space ts kbody scan_ops post_op)
   -- Remove dead results. This is a bit tricky to do with scan/red
   -- results, so we only deal with map results for now.
-  | (pes', lres', ts') <- unzip3 $ filter keep $ zip3 pes lres ts,
+  | (pes', lres') <- unzip $ filter keep $ zip pes lres,
     pes' /= pes = Simplify $ do
       let (scatter_lres', noscatter_lres') = partitionEithers lres'
           spec' = (\(s, n, xs) -> (s, length xs, n)) <$> scatter_lres'
@@ -1472,7 +1472,7 @@ bottomUpSegOp (_vtable, used) (Pat pes) dec (SegScan lvl space ts kbody scan_ops
           lam' = lam {lambdaReturnType = lts', lambdaBody = lbody'}
           post_op' = SegPostOp lam' spec'
 
-      addStm $ Let (Pat pes') dec $ Op $ segOp $ SegScan lvl space ts' kbody scan_ops post_op'
+      addStm $ Let (Pat pes') dec $ Op $ segOp $ SegScan lvl space ts kbody scan_ops post_op'
   where
     spec = segPostOpScatterSpec post_op
     lam = segPostOpLambda post_op
@@ -1488,7 +1488,7 @@ bottomUpSegOp (_vtable, used) (Pat pes) dec (SegScan lvl space ts kbody scan_ops
       map Left (groupScatterResults spec scatter_res)
         <> map Right noscatter_res
 
-    keep (pe, _, _) = patElemName pe `UT.used` used
+    keep (pe, _) = patElemName pe `UT.used` used
 bottomUpSegOp (_vtable, _used) (Pat _kpes) _dec (SegScan {}) = Skip
 bottomUpSegOp (_vtable, used) (Pat kpes) dec segop
   -- Remove dead results. This is a bit tricky to do with scan/red
