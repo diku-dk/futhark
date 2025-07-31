@@ -58,7 +58,6 @@ import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
-import Futhark.Pass.InitNames
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
@@ -374,28 +373,6 @@ cseOption short =
     long = [passLongOption pass]
     pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
 
-initNamesOption :: String -> FutharkOption
-initNamesOption short =
-  passOption (passDescription pass) (UntypedPass perform) short long
-  where
-    perform (SOACS prog) config =
-      SOACS <$> runPipeline (onePass initNamesPass) config prog
-    perform (GPU prog) config =
-      GPU <$> runPipeline (onePass initNamesPass) config prog
-    perform (MC prog) config =
-      MC <$> runPipeline (onePass initNamesPass) config prog
-    perform (Seq prog) config =
-      Seq <$> runPipeline (onePass initNamesPass) config prog
-    perform (SeqMem prog) config =
-      SeqMem <$> runPipeline (onePass initNamesPass) config prog
-    perform (GPUMem prog) config =
-      GPUMem <$> runPipeline (onePass initNamesPass) config prog
-    perform (MCMem prog) config =
-      MCMem <$> runPipeline (onePass initNamesPass) config prog
-
-    long = [passLongOption pass]
-    pass = initNamesPass :: Pass SOACS.SOACS SOACS.SOACS
-
 sinkOption :: String -> FutharkOption
 sinkOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
@@ -699,7 +676,6 @@ commandLineOptions =
     mcMemPassOption ArrayShortCircuiting.optimiseMCMem [],
     kernelsMemPassOption ArrayShortCircuiting.optimiseGPUMem [],
     cseOption [],
-    initNamesOption "n",
     simplifyOption "e",
     soacsPipelineOption
       "Run the default optimised pipeline"
