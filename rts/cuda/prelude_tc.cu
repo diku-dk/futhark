@@ -1,4 +1,4 @@
-// Start of preludeTensorCores.cu
+// Start of preludeTC.cu
 
 using namespace cute;
 
@@ -261,4 +261,4 @@ futrts_tensorMMM(ElmTypeCIn (*mem_out_p)[numRegs], unsigned char* A_mem,
   for (int32_t i = 0; i < numRegs; i++)
     (*mem_out_p)[i] = C_mem[i];
 }
-// End of preludeTensorCores.cu
+// End of preludeTC.cu

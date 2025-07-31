@@ -28,7 +28,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
-import Futhark.CodeGen.RTS.CUDA (intTypesCU, preludeCU, preludeTensorCores)
+import Futhark.CodeGen.RTS.CUDA (intTypesCU, preludeCU, preludeTC)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
@@ -579,7 +579,7 @@ genCUDATCPrelude =
     <> "#include <cute/tensor.hpp>\n"
     <> preludeCU
     <> commonPrelude
-    <> preludeTensorCores
+    <> preludeTC
 
 genHIPPrelude :: T.Text
 genHIPPrelude =
