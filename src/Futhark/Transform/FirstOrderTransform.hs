@@ -230,7 +230,7 @@ transformSOAC pat (Stream w arrs nes lam) = do
   -- Create a loop that repeatedly applies the lambda body to a
   -- chunksize of 1.  Hopefully this will lead to this outer loop
   -- being the only one, as all the innermost one can be simplified
-  -- array (as they will have one iteration each).
+  -- away (as they will have one iteration each).
   let (chunk_size_param, fold_params, chunk_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams lam
 
