@@ -59,6 +59,12 @@ test-c:
 test-ispc:
 	cabal run -- futhark test -c --backend=ispc tests --no-tuning
 
+test-cuda:
+	cabal run -- futhark test tests -c --backend=cuda
+
+test-cudatc:
+	cabal run -- futhark test tests -c --backend=cudatc --pass-option=--cutlass-include=$(CUTLASS)/include
+
 test-multicore:
 	cabal run -- futhark test tests -c --backend=multicore --no-tuning
 
