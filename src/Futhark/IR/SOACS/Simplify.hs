@@ -662,10 +662,10 @@ simplifyKnownIterationSOAC _ pat _ op
               patElems pat
           bindMapParam p a = do
             a_t <- lookupType a
-            letBindNames [paramName p] $
-              BasicOp $
-                Index a $
-                  fullSlice a_t [DimFix $ constant (0 :: Int64)]
+            letBindNames [paramName p] . BasicOp $
+              if isAcc a_t
+                then SubExp $ Var a
+                else Index a $ fullSlice a_t [DimFix $ constant (0 :: Int64)]
           bindArrayResult pe (SubExpRes cs se) =
             certifying cs . letBindNames [patElemName pe] $
               BasicOp $
