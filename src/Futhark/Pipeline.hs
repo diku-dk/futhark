@@ -14,6 +14,7 @@ module Futhark.Pipeline
     FutharkM,
     runFutharkM,
     Verbosity (..),
+    FutharkState (..),
     module Futhark.Error,
     onePass,
     passes,
@@ -40,17 +41,22 @@ import Futhark.IR.TypeCheck
 import Futhark.MonadFreshNames
 import Futhark.Pass
 import Futhark.Util.Log
-import Futhark.Util.Pretty (prettyText)
+import Futhark.Util.Pretty
 import System.IO
 import Text.Printf
 import Prelude hiding (id, (.))
 
 newtype FutharkEnv = FutharkEnv {futharkVerbose :: Verbosity}
 
+-- | The overall compiler state.
 data FutharkState = FutharkState
   { futharkPrevLog :: UTCTime,
     futharkNameSource :: VNameSource
   }
+
+instance Pretty FutharkState where
+  pretty (FutharkState _ (VNameSource counter)) =
+    "name_source" <+> braces (pretty counter)
 
 -- | The main Futhark compiler driver monad - basically some state
 -- tracking on top if 'IO'.
