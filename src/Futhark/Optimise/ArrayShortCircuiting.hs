@@ -169,9 +169,9 @@ replaceInSegOp (SegMap lvl sp tps body) = do
 replaceInSegOp (SegRed lvl sp tps body binops) = do
   stms <- updateStms $ kernelBodyStms body
   pure $ SegRed lvl sp tps (body {kernelBodyStms = stms}) binops
-replaceInSegOp (SegScan lvl sp tps body binops) = do
+replaceInSegOp (SegScan lvl sp tps body binops post_op) = do
   stms <- updateStms $ kernelBodyStms body
-  pure $ SegScan lvl sp tps (body {kernelBodyStms = stms}) binops
+  pure $ SegScan lvl sp tps (body {kernelBodyStms = stms}) binops post_op
 replaceInSegOp (SegHist lvl sp tps body hist_ops) = do
   stms <- updateStms $ kernelBodyStms body
   pure $ SegHist lvl sp tps (body {kernelBodyStms = stms}) hist_ops
