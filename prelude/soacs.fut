@@ -204,6 +204,31 @@ def all [n] 'a (f: a -> bool) (as: [n]a) : bool =
 def any [n] 'a (f: a -> bool) (as: [n]a) : bool =
   reduce (||) false (map f as)
 
+local type~ acc 't = intrinsics.acc t
+
+local
+def scatter_stream [k] 'a 'b
+                   (dest: *[k]a)
+                   (f: *acc ([k]a) -> b -> acc ([k]a))
+                   (bs: []b) : *[k]a =
+  intrinsics.scatter_stream dest f bs :> *[k]a
+
+local
+def write [n] 't (acc: *acc ([n]t)) (i: i64) (v: t) : *acc ([n]t) =
+  intrinsics.acc_write acc i v
+
+-- | Like `spread`, but takes an array indicating the initial values,
+-- and has different work complexity.
+--
+-- **Work:** *O(n)*
+--
+-- **Span:** *O(1)*
+def scatter 't [k] [n] (dest: *[k]t) (is: [n]i64) (vs: [n]t) : *[k]t =
+  scatter_stream dest
+                 (\(acc: *acc ([k]t)) (i, v) ->
+                    write acc i v)
+                 (zip is vs)
+
 -- | `r = spread k x is vs` produces an array `r` such that `r[i] =
 -- vs[j]` where `is[j] == i`, or `x` if no such `j` exists.
 -- Intuitively, `is` is an array indicating where the corresponding
@@ -216,16 +241,7 @@ def any [n] 'a (f: a -> bool) (as: [n]a) : bool =
 --
 -- **Span:** *O(1)*
 def spread 't [n] (k: i64) (x: t) (is: [n]i64) (vs: [n]t) : *[k]t =
-  intrinsics.scatter (map (\_ -> x) (0..1..<k)) is vs
-
--- | Like `spread`, but takes an array indicating the initial values,
--- and has different work complexity.
---
--- **Work:** *O(n)*
---
--- **Span:** *O(1)*
-def scatter 't [k] [n] (dest: *[k]t) (is: [n]i64) (vs: [n]t) : *[k]t =
-  intrinsics.scatter dest is vs
+  scatter (map (\_ -> x) (0..1..<k)) is vs
 
 -- | `scatter_2d as is vs` is the equivalent of a `scatter` on a 2-dimensional
 -- array.
