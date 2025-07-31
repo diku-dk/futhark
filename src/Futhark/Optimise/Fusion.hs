@@ -304,12 +304,12 @@ vFuseNodeT
 vFuseNodeT
   _edges
   _infusible
-  (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, is1, _os1)
+  (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, _is1, os1)
   (StmNode (Let pat2 aux2 (WithAcc w_inps lam0)), _os2)
     | ots1 == mempty,
       wacc_cons_nms <- namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps,
       soac_prod_nms <- map patElemName $ patElems pat1,
-      soac_indep_nms <- map getName is1,
+      soac_indep_nms <- map getName os1,
       all (`notNameIn` wacc_cons_nms) (soac_indep_nms ++ soac_prod_nms) =
         do
           lam <- fst <$> doFusionInLambda lam0
