@@ -860,9 +860,10 @@ inKernelOperations env mode body =
           GC.item [C.citem|if ($id:(funName fname)($args:args') != 0) { $items:what_next; }|]
       | Just mmmName <- TC.getTCName fname = do
           let numStaticArgs = if mmmName == TC.gemmName then 7 else 4
-          let (dynamicArgs, staticArgs) = splitAt (length args - numStaticArgs) args
-          let convertedArgs = dynamicArgs <> fmap templateStatic staticArgs
-          let out_args = [[C.cexp|&$id:d|] | d <- dests]
+              (dynamicArgs, staticArgs) =
+                splitAt (length args - numStaticArgs) args
+              convertedArgs = dynamicArgs <> fmap templateStatic staticArgs
+              out_args = [[C.cexp|&$id:d|] | d <- dests]
               args' = out_args ++ convertedArgs
           GC.item [C.citem|$id:(funName mmmName)($args:args');|]
       | otherwise = do
