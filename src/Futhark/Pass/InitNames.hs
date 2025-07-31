@@ -29,7 +29,7 @@ initNames p = do
 
 maxNameProg :: (MaxNames rep) => Prog rep -> MaxMonad ()
 maxNameProg (Prog _ts consts funs) = do
-  tell $ Max $ maxIntrinsicTag
+  tell $ Max maxIntrinsicTag
   maxNameStms $ informStms consts
   mapM_ (maxNameFun . informFunDef) funs
 
@@ -61,7 +61,7 @@ maxNameWalker =
     }
 
 maxNameOp :: (TraverseOpStms rep) => Op rep -> MaxMonad ()
-maxNameOp op = void $ traverseOpStms (maxNameOpStms) op
+maxNameOp op = void $ traverseOpStms maxNameOpStms op
 
 maxNameOpStms ::
   (TraverseOpStms rep) =>

@@ -291,11 +291,11 @@ fixSegOp :: SegOp SegLevel GPUMem -> FixM (SegOp SegLevel GPUMem)
 fixSegOp (SegMap level space ts body) =
   SegMap level space ts <$> fixKernelBody body
 fixSegOp (SegRed level space ts body ops) =
-  SegRed level space ts <$> (fixKernelBody body) <*> pure ops
+  SegRed level space ts <$> fixKernelBody body <*> pure ops
 fixSegOp (SegScan level space ts body ops) =
-  SegScan level space ts <$> (fixKernelBody body) <*> pure ops
+  SegScan level space ts <$> fixKernelBody body <*> pure ops
 fixSegOp (SegHist level space ts body histOps) =
-  SegHist level space ts <$> (fixKernelBody body) <*> pure histOps
+  SegHist level space ts <$> fixKernelBody body <*> pure histOps
 
 fixKernelBody :: KernelBody GPUMem -> FixM (KernelBody GPUMem)
 fixKernelBody (KernelBody desc stms res) =
