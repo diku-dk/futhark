@@ -1489,7 +1489,9 @@ bottomUpSegOp (_vtable, used) (Pat pes) dec (SegScan lvl space ts kbody scan_ops
         <> map Right noscatter_res
 
     keep (pe, _) = patElemName pe `UT.used` used
-bottomUpSegOp (_vtable, _used) (Pat _kpes) _dec (SegScan {}) = Skip
+bottomUpSegOp (_vtable, _used) (Pat _kpes) _dec (SegScan {}) =
+  -- FIX ME
+  Skip
 bottomUpSegOp (_vtable, used) (Pat kpes) dec segop
   -- Remove dead results. This is a bit tricky to do with scan/red
   -- results, so we only deal with map results for now.
