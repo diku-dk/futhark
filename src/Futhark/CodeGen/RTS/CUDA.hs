@@ -11,9 +11,7 @@ preludeCU :: T.Text
 preludeCU = $(embedStringFile "rts/cuda/prelude.cu")
 {-# NOINLINE preludeCU #-}
 
--- TODO: Maybe its own file
-
--- | @rts/cuda/preludeTC.cu@
+-- | @rts/cuda/prelude_tc.cu@
 preludeTC :: T.Text
 preludeTC = $(embedStringFile "rts/cuda/prelude_tc.cu")
 {-# NOINLINE preludeTC #-}
