@@ -63,7 +63,7 @@ test-cuda:
 	cabal run -- futhark test tests -c --backend=cuda
 
 test-cudatc:
-	cabal run -- futhark test tests -c --backend=cudatc --pass-option=--cutlass-include=$(CUTLASS)/include
+	cabal run -- futhark test tests -c --backend=cudatc --pass-option=--cutlass=$(CUTLASS)
 
 test-multicore:
 	cabal run -- futhark test tests -c --backend=multicore --no-tuning

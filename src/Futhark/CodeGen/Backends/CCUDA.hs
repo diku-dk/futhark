@@ -107,18 +107,16 @@ cliOptions =
 tensorCoreOptions :: [Option]
 tensorCoreOptions =
   [ Option
-      { optionLongName = "cutlass-include",
+      { optionLongName = "cutlass",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "FILE",
-        optionDescription = "Include path for cutlass/include",
+        optionDescription = "Path to CUTLASS",
         optionAction =
           [C.cstm|{
             size_t len = strlen(optarg);
-            size_t needed = len + 2;
-            char *include_path = strdup("-I");
-            include_path = (char *)realloc(include_path, needed + 1);
-            strncat(include_path, optarg, needed);
-            futhark_context_config_add_nvrtc_option(cfg, include_path);
+            char *opt = msgprintf("-I%s/include", optarg);
+            futhark_context_config_add_nvrtc_option(cfg, opt);
+            free(opt);
           }|]
       }
   ]

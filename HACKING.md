@@ -361,12 +361,12 @@ facilities (in particular, tensor cores). It requires
 used as follows:
 
 ```
-$ futhark cudatc program.fut && ./program --cutlass-include=<path to cutlass include dir>
-$ futhark test --backend=cudatc --pass-option=--cutlass-include=<path to cutlass include dir> program.fut
+$ futhark cudatc program.fut && ./program --cutlass=<path to cutlass dir>
+$ futhark test --backend=cudatc --pass-option=--cutlass=<path to cutlass dir> program.fut
 ```
 
 Run tests with:
 
 ```
-$ make test-cudatc CUTLASS=<path to cutlass>
+$ make test-cudatc CUTLASS=<path to cutlass dir>
 ```
