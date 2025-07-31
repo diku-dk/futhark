@@ -28,7 +28,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
-import Futhark.CodeGen.RTS.CUDA (intTypesCU, preludeCU, preludeTC)
+import Futhark.CodeGen.RTS.CUDA (preludeCU, preludeTC)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
@@ -568,7 +568,6 @@ genOpenClPrelude ts =
 genCUDAPrelude :: T.Text
 genCUDAPrelude =
   "#define FUTHARK_CUDA\n"
-    <> intTypesCU
     <> preludeCU
     <> commonPrelude
 
@@ -584,7 +583,6 @@ genCUDATCPrelude =
 genHIPPrelude :: T.Text
 genHIPPrelude =
   "#define FUTHARK_HIP\n"
-    <> intTypesCU
     <> preludeCU
     <> commonPrelude
 

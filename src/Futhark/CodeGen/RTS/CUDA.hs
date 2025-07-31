@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 -- | Code snippets used by the CUDA backend.
-module Futhark.CodeGen.RTS.CUDA (preludeCU, preludeTC, intTypesCU) where
+module Futhark.CodeGen.RTS.CUDA (preludeCU, preludeTC) where
 
 import Data.FileEmbed
 import Data.Text qualified as T
@@ -17,7 +17,3 @@ preludeCU = $(embedStringFile "rts/cuda/prelude.cu")
 preludeTC :: T.Text
 preludeTC = $(embedStringFile "rts/cuda/prelude_tc.cu")
 {-# NOINLINE preludeTC #-}
-
-intTypesCU :: T.Text
-intTypesCU = $(embedStringFile "rts/cuda/int_types.cu")
-{-# NOINLINE intTypesCU #-}
