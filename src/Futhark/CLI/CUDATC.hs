@@ -10,7 +10,7 @@ main :: String -> [String] -> IO ()
 main = compilerMain
   ()
   []
-  "Compile CUDA with support for tensor cores"
+  "Compile CUDA with support for tensor cores (EXPERIMENTAL!)"
   "Generate CUDA/C code with tensor core operations from optimised Futhark program."
   gpumemtcPipeline
   $ \fcfg () mode outpath prog ->
