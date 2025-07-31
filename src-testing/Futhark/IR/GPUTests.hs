@@ -17,4 +17,4 @@ instance IsString (Body GPU) where
   fromString = parseString "Body GPU" parseBodyGPU
 
 instance IsString (Prog GPU) where
-  fromString = parseString "Prog GPU" parseGPU
+  fromString = snd . parseString "Prog GPU" parseGPU
