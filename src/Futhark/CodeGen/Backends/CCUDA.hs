@@ -113,11 +113,11 @@ tensorCoreOptions =
         optionDescription = "Include path for cutlass/include",
         optionAction =
           [C.cstm|{
-            size_t len = strlen(optarg);          
+            size_t len = strlen(optarg);
             size_t needed = len + 2;
             char *include_path = strdup("-I");
             include_path = (char *)realloc(include_path, needed + 1);
-            strncat(include_path, optarg, needed);      
+            strncat(include_path, optarg, needed);
             futhark_context_config_add_nvrtc_option(cfg, include_path);
           }|]
       }
@@ -178,7 +178,6 @@ compileProgWithTC version prog = do
       (mkBoilerplate (cuda_prelude <> cuda_code) macros kernels types failures)
       cuda_includes
       (Space "device", [Space "device", DefaultSpace])
-      -- TODO(k): Option specifically for cutlass include path?
       (tensorCoreOptions ++ cliOptions)
       prog'
   where
