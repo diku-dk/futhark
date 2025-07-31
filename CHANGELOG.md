@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Futhark now implements the cachedir specification, such that e.g. the `data`
+  directories created by `futhark test` and `futhark bench` contain a
+  `CACHEDIR.TAG` file.
+
 ### Removed
 
 ### Changed

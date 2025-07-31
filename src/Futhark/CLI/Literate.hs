@@ -40,6 +40,7 @@ import Futhark.Test
 import Futhark.Test.Values
 import Futhark.Util
   ( directoryContents,
+    ensureCacheDirectory,
     fancyTerminal,
     hashText,
     nubOrd,
@@ -52,7 +53,6 @@ import Futhark.Util.Pretty qualified as PP
 import Futhark.Util.ProgressBar
 import System.Directory
   ( copyFile,
-    createDirectoryIfMissing,
     doesFileExist,
     getCurrentDirectory,
     removePathForcibly,
@@ -703,7 +703,7 @@ newFile env (fname_desired, template) m = do
   let fname_base = fromMaybe (T.unpack (envHash env) <> "-" <> template) fname_desired
       fname = envImgDir env </> fname_base
   exists <- liftIO $ doesFileExist fname
-  liftIO $ createDirectoryIfMissing True $ envImgDir env
+  liftIO $ ensureCacheDirectory $ envImgDir env
   when (exists && scriptVerbose (envOpts env) > 0) $
     liftIO . T.hPutStrLn stderr $
       "Using existing file: " <> T.pack fname

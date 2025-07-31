@@ -46,7 +46,7 @@ import Futhark.Server
 import Futhark.Server.Values
 import Futhark.Test.Spec
 import Futhark.Test.Values qualified as V
-import Futhark.Util (isEnvVarAtLeast, pmapIO, showText)
+import Futhark.Util (ensureCacheDirectory, isEnvVarAtLeast, pmapIO, showText)
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import System.Directory
 import System.Exit
@@ -236,7 +236,7 @@ valuesAsVars server names_and_types futhark dir (ScriptFile f) = do
 -- result in duplicate work, not crashes or data corruption.
 getGenFile :: (MonadIO m) => FutharkExe -> FilePath -> GenValue -> m FilePath
 getGenFile futhark dir gen = do
-  liftIO $ createDirectoryIfMissing True $ dir </> "data"
+  liftIO $ ensureCacheDirectory $ dir </> "data"
   exists_and_proper_size <-
     liftIO $
       withFile (dir </> file) ReadMode (fmap (== genFileSize gen) . hFileSize)
@@ -413,7 +413,7 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
       withServer server_cfg $ \server -> runExceptT $ do
         outs <- callEntry futhark server prog entry $ runInput tr
         let f = file entry tr
-        liftIO $ createDirectoryIfMissing True $ takeDirectory f
+        liftIO $ ensureCacheDirectory $ takeDirectory f
         cmdMaybe $ cmdStore server f outs
         cmdMaybe $ cmdFree server outs
     either throwError (const (pure ())) (sequence_ res)
