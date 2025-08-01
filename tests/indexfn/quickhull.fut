@@ -8,11 +8,11 @@ def to_i64 c : i64 = if c then 1 else 0
 
 def filter_indices [n]
   (cs: [n]bool)
-  -- : {(i64, [n]i64) | \(m, is) ->
-  --     FiltPartInv is (\i -> cs[i]) (\_i -> true)
-  --       && (m == sum (map (\x -> to_i64 x) cs))
-  --   } =
-  : (i64, [n]i64) =
+  -- : (i64, [n]i64) =
+  : {(i64, [n]i64) | \(m, is) ->
+      FiltPartInv is (\i -> cs[i]) (\_i -> true)
+        && (m == sum (map (\x -> to_i64 x) cs))
+    } =
   let num_trues = scan (+) 0 (map (\c -> to_i64 c) cs)
   let new_size = if n > 0 then num_trues[n-1] else 0
   let is = map2 (\c i -> if c then i-1 else -1) cs num_trues
@@ -20,11 +20,11 @@ def filter_indices [n]
 
 def partition_indices [n]
   (conds: [n]bool)
-  : (i64, [n]i64) =
-  -- : {(i64, [n]i64) | \(split, inds) ->
-  --     FiltPartInv inds (\_i -> true) (\i -> conds[i])
-  --       && split == sum (map (\c -> if c then 1 else 0) conds)
-  --   } =
+  -- : (i64, [n]i64) =
+  : {(i64, [n]i64) | \(split, inds) ->
+      FiltPartInv inds (\_i -> true) (\i -> conds[i])
+        && split == sum (map (\c -> if c then 1 else 0) conds)
+    } =
   let tflgs = map (\c -> if c then 1 else 0) conds
   let fflgs = map (\ b -> 1 - b) tflgs
   let indsT = scan (+) 0 tflgs
@@ -34,11 +34,9 @@ def partition_indices [n]
   let inds  = map3 (\ c indT indF -> if c then indT-1 else indF-1) conds indsT indsF
   in  (lst, inds)
 
-def partition3_indices [n] 't (conds: [n]i8)
-    : (i64, i64, [n]i64) =
-    -- : {[n]i64 | \is ->
-    --    FiltPartInv2 is (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
-    -- } =
+def partition3_indices [n] 't (conds: [n]i8) : {(i64,i64,[n]i64) | \(_,_,is) ->
+       FiltPartInv2 is (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
+    } =
   let tflags = map (\c -> if c == 1 then 1 else 0 ) conds
   let eflags = map (\c -> if c == 2 then 1 else 0 ) conds
 
@@ -53,19 +51,20 @@ def partition3_indices [n] 't (conds: [n]i8)
                         else if c == 2 then s1 + indE - 1
                         else s1 + s2 + i - indsL[i] - indsE[i]
                    ) conds indsL indsE (iota n)
-  in  (s1, s2, inds)
+  in  (s1, s1+s2, inds)
 
-def partition3 't (p: t -> bool) (q: t -> bool) (zero: t) (xs: []t)
-    : ([]t,[]t,[]t) =
-    -- : {[n]t | \ys ->
-    --   let conds = map (\x -> p x) xs
-    --   in FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
-    -- } =
-  let conds = map (\x -> if p x then 1 else if q x then 2 else 0) xs
+def partition3 't [n] (p: t -> i8) (xs: [n]t)
+    : {(i64,i64,[]t) | \(_, _, ys) ->
+      let conds = map (\x -> p x) xs
+      in FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
+    } =
+  let conds = map (\x -> p x) xs
+
   let (a, b, inds) = partition3_indices conds
-  let zeros = replicate (length xs) zero
+
+  let zeros = if n > 0 then replicate n xs[0] else []
   let ys = scatter zeros inds xs
-  in (ys[:a], ys[a:b], ys[b:])
+  in  (a, b, ys)
 
 
 -- Based on work by Frederik Berthelsen, Kasper Erik
@@ -249,24 +248,23 @@ def compute (ps : []point) =
   if length ps <= 3 then (ps, []) else
   let leftmost = reduce (\p q -> if point_less p q then p else q) ps[0] ps
   let rightmost = reduce (\p q -> if point_less p q then q else p) ps[0] ps
-  let zero = tabulate 2 (\_ -> 0)
-  let (_, upper_points, lower_points) =
+  -- let (_, upper_points, lower_points) =
+  let (a, b, points_parted) =
     partition3
-    (\p -> point_eq p leftmost || point_eq p rightmost)
-    (\p -> dist_less zero_dist (signed_dist_to_line leftmost rightmost p))
-    zero
+    (\p -> if point_eq p leftmost || point_eq p rightmost then 1 else if dist_less zero_dist (signed_dist_to_line leftmost rightmost p) then 2 else 0)
     ps
+  let (_, upper_points, lower_points) = (points_parted[:a], points_parted[a:b], points_parted[b:])
   let upper_hull = semihull leftmost rightmost upper_points
   let lower_hull = semihull rightmost leftmost lower_points
   in (upper_hull, lower_hull)
 
 
-import "lib/github.com/diku-dk/sorts/radix_sort"
-def sort_by f = radix_sort_float_by_key f f64.num_bits f64.get_bit
+-- import "lib/github.com/diku-dk/sorts/radix_sort"
+def sort_by [n] 't (_f: t -> f64) (_xs: [n]t): [n]t = ??? -- radix_sort_float_by_key f f64.num_bits f64.get_bit
 
 def clockwise (convex_upper: []point) (convex_lower: []point) =
-  let sorted_upper = convex_upper |> sort_by (\p -> p[1]) |> sort_by (\p -> p[0])
-  let sorted_lower = convex_lower |> sort_by (\p -> p[1]) |> sort_by (\p -> p[0])
+  let sorted_upper = sort_by (\p -> p[0]) (sort_by (\p -> p[1]) convex_upper)
+  let sorted_lower = sort_by (\p -> p[0]) (sort_by (\p -> p[1]) convex_lower)
   let upper_is = sorted_upper
   let lower_is = (reverse sorted_lower)
   in upper_is++lower_is
