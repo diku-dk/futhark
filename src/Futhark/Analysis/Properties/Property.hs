@@ -33,7 +33,8 @@ data Property u
   | -- These predicates are pairwise disjoint and collectively exhaustive.
     Disjoint (S.Set VName)
   | Monotonic VName MonDir
-  | Rng VName (Maybe (SoP u), Maybe (SoP u))
+  | -- Rng x (0, n) means x[i] is in [0, ..., n-1].
+    Rng VName (Maybe (SoP u), Maybe (SoP u))
   | -- The restriction of f to the preimage of [a,b] is injective.
     Injective VName (Maybe (SoP u, SoP u))
   | -- The restriction of f to the preimage of [a,b] is bijective.

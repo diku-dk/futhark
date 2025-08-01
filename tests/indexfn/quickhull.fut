@@ -59,11 +59,9 @@ def partition3 't [n] (p: t -> i8) (xs: [n]t)
       in FiltPart2 ys xs (\_i -> true) (\i -> conds[i] == 1) (\i -> conds[i] == 2)
     } =
   let conds = map (\x -> p x) xs
-
   let (a, b, inds) = partition3_indices conds
-
-  let zeros = if n > 0 then replicate n xs[0] else []
-  let ys = scatter zeros inds xs
+  let scratch = map (\x -> x) xs -- copy xs.
+  let ys = scatter scratch inds xs
   in  (a, b, ys)
 
 
@@ -111,14 +109,19 @@ def tabulate 't (n: i64) (f: i64 -> t): *[n]t =
 --                              Filt ys.1 points.1 (\_ -> false)
 --                  -- ^ meaning some filtering with unknown pred
 def expand_hull [num_segs] [num_points]
-                (segs : [num_segs](point, point))
-                (points : [num_points](i64, point))
-              : ([](point, point), [](i64, point)) =
+                (segs0 : [num_segs]point)
+                (segs1 : [num_segs]point)
+                (points0 : {[num_points]i64 | \x -> Range x (0, num_segs)})
+                (points1 : [num_points]point)
+              : {([](point, point), [](i64, point)) | \_ -> true} =
   --
   -- bounds checks of array `segs` are verifiable by precondition
+  let segs = zip segs0 segs1
+  let points = zip points0 points1
   let dists = map
               (\(seg_ix, p) ->
-                 let (a, b) = segs[seg_ix]
+                 let a = segs0[seg_ix]
+                 let b = segs1[seg_ix]
                  in signed_dist_to_line a b p)
               points
   
@@ -235,7 +238,9 @@ def semihull (start : point) (end : point) (points : []point) =
     (loop (hull, segs, points) =
        ([], [(start, end)], map (\p -> (0, p)) points)
      while !null points do
-     let (segs', points') = expand_hull segs points
+     let (segs0, segs1) = unzip segs       -- Workaround: implementation doesn't support tuple projection.
+     let (points0, points1) = unzip points -- Workaround: implementation doesn't support tuple projection.
+     let (segs', points') = expand_hull segs0 segs1 points0 points1
      let (seg_inds', only_points') = unzip points'
      let (hull', segs'', sgm_inds'') = extract_empty_segments hull segs' seg_inds'
      in  (hull', segs'', zip sgm_inds'' only_points')

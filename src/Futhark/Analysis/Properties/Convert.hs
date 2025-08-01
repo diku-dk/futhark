@@ -210,7 +210,7 @@ forward expr@(E.AppExp (E.Index e_xs slice _loc) _)
       f_xss <- forward e_xs
       f_idxs <- forward e_idx
       forM (zip f_xss f_idxs) $ \(f_xs, f_idx) -> do
-        checkBounds expr f_xs f_idx
+        checkBounds expr f_xs [f_idx]
         xs <- case justVName e_xs of
           Just vn -> pure vn
           Nothing -> do
@@ -227,6 +227,7 @@ forward expr@(E.AppExp (E.Index e_xs slice _loc) _)
         insertIndexFn idx [IndexFn [Forall i (Iota $ int2SoP 1)] (body f_idx)]
         subst
           (IndexFn [] $ singleCase . sym2SoP $ Apply (Var xs) [sym2SoP (Apply (Var idx) [int2SoP 0])])
+  | _ <- slice = error $ "Not implemented yet: " <> prettyStr expr
 forward (E.Not e _) = do
   mapM negf =<< forward e
   where
@@ -1330,10 +1331,10 @@ parseOpVName vn =
 {-
     Bounds checking.
 -}
-checkBounds :: E.Exp -> IndexFn -> IndexFn -> IndexFnM ()
+checkBounds :: E.Exp -> IndexFn -> [IndexFn] -> IndexFnM ()
 checkBounds _ (IndexFn [] _) _ =
   error "E.Index: Indexing into scalar"
-checkBounds e f_xs@(IndexFn [Forall _ df] _) f_idx = algebraContext f_idx $ do
+checkBounds e f_xs@(IndexFn [Forall _ df] _) [f_idx] = algebraContext f_idx $ do
   c <- getCheckBounds
   when c $ do
     df_start <- rewrite $ domainStart df
@@ -1377,3 +1378,4 @@ checkBounds e f_xs@(IndexFn [Forall _ df] _) f_idx = algebraContext f_idx $ do
               <> show n
               <> "\nUnder AlgEnv:"
               <> prettyStr env
+checkBounds e _ f_idx = error $ "checkBounds: " <> prettyStr e <> " ; " <> prettyStr f_idx
