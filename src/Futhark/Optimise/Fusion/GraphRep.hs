@@ -36,6 +36,7 @@ module Futhark.Optimise.Fusion.GraphRep
     isCons,
     isDep,
     isInf,
+    isFake,
 
     -- * Construction
     mkDepGraph,
@@ -430,6 +431,10 @@ isInf (_, _, e) = case e of
   InfDep _ -> True
   Fake _ -> True -- this is infusible to avoid simultaneous cons/dep edges
   _ -> False
+
+isFake :: EdgeT -> Bool
+isFake (Fake _) = True
+isFake _ = False
 
 -- | Is this a 'Cons' edge?
 isCons :: EdgeT -> Bool
