@@ -111,6 +111,12 @@ simplify = astMap m
           (_, Bool True) -> Bool True
           (_, _) | p == q -> p -- Idempotence.
           (_, _) | p == neg q -> Bool True -- A tautology.
+          -- Check for factoring opportunity, e.g., (a ^ b) v (a ^ !b).
+          (a :&& b, c :&& d)
+            | a == c && b == neg d -> a
+            | a == d && b == neg c -> a
+            | b == c && a == neg d -> b
+            | b == d && a == neg c -> b
           (_, _) -> p :|| q
       x -> pure x
 

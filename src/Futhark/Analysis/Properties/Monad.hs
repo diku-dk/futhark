@@ -182,7 +182,7 @@ lookupUninterpreted e = do
   case M.lookup e unint of
     Just vn -> pure vn
     Nothing -> do
-      vn <- newVName $ "#" <> prettyStr e
+      vn <- newVName $ prettyStr e
       modify $ \env -> env {uninterpreted = M.insert e vn $ uninterpreted env}
       pure vn
 
