@@ -8,7 +8,6 @@ import Futhark.AD.Rev.Map
 import Futhark.AD.Rev.Monad
 import Futhark.AD.Rev.Reduce
 import Futhark.AD.Rev.Scan
-import Futhark.AD.Rev.Scatter
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.SOACS
@@ -137,17 +136,6 @@ vjpSOAC ops pat _aux (Screma w as form) m
       (mapstm, scanstm) <-
         scanomapToMapAndScan pat (w, scans, map_lam, as)
       vjpStm ops mapstm $ vjpStm ops scanstm m
-
--- Differentiating Scatter
-vjpSOAC ops pat aux (Scatter w ass written_info lam) m
-  | isIdentityLambda lam =
-      vjpScatter ops pat aux (w, ass, lam, written_info) m
-  | otherwise = do
-      map_idents <- mapM (\t -> newIdent "map_res" (arrayOfRow t w)) $ lambdaReturnType lam
-      let map_stm = mkLet map_idents $ Op $ Screma w ass $ mapSOAC lam
-      lam_id <- mkIdentityLambda $ lambdaReturnType lam
-      let scatter_stm = Let pat aux $ Op $ Scatter w (map identName map_idents) written_info lam_id
-      vjpStm ops map_stm $ vjpStm ops scatter_stm m
 
 -- Differentiating Histograms
 vjpSOAC ops pat aux (Hist n as histops f) m

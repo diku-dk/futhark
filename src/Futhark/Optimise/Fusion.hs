@@ -475,13 +475,8 @@ tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
 tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g}
   | not (G.gelem (nodeFromLNode node_to_fuse) g) = pure dg
 -- \^ Node might have been fused away since.
-tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
-  spec_rule_res <- SF.ruleMFScat node_to_fuse dg
-  -- \^ specialized fusion rules such as the one
-  --   enabling map-flatten-scatter fusion
-  case spec_rule_res of
-    Just dg' -> pure dg'
-    Nothing -> applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
+tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} =
+  applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
   where
     node_to_fuse_id = nodeFromLNode node_to_fuse
     relevant (n, InfDep _) = isWithAccNodeId n dg

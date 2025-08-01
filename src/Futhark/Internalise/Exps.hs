@@ -1616,29 +1616,6 @@ isOverloadedFunction qname desc = do
               _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
     handle _ = Nothing
 
-doScatter :: String -> Int -> [VName] -> [VName] -> ([I.LParam SOACS] -> InternaliseM [SubExp]) -> InternaliseM [VName]
-doScatter desc rank dest arrs mk = do
-  acc_cert_v <- newVName "acc_cert"
-  dest_ts <- mapM lookupType dest
-  let acc_shape = I.Shape $ take rank $ arrayDims $ head dest_ts
-      elem_ts = map (I.stripArray rank) dest_ts
-      acc_t = Acc acc_cert_v acc_shape elem_ts NoUniqueness
-  acc_p <- newParam "acc_p" acc_t
-  arrs_ts <- mapM lookupType arrs
-  withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
-    acc_p_inner <- newParam "acc_p" acc_t
-    params <- mapM (newParam "v" . I.stripArray 1) arrs_ts
-    map_lam <-
-      mkLambda (acc_p_inner : params) $ do
-        (is, vs) <- splitAt rank <$> mk params
-        fmap (pure . subExpRes) . letSubExp "scatter_acc" . BasicOp $
-          UpdateAcc Safe (I.paramName acc_p_inner) is vs
-    let w = arraysSize 0 arrs_ts
-    fmap subExpsRes . letValExp' "acc_res" . I.Op $
-      I.Screma w (I.paramName acc_p : arrs) (mapSOAC map_lam)
-
-  letTupExp desc $ WithAcc [(acc_shape, dest, Nothing)] withacc_lam
-
 scatterF :: Int -> E.Exp -> E.Exp -> E.Exp -> String -> InternaliseM [SubExp]
 scatterF rank dest is v desc = do
   is' <- internaliseExpToVars "write_arg_i" is
