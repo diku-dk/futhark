@@ -1616,6 +1616,29 @@ isOverloadedFunction qname desc = do
               _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
     handle _ = Nothing
 
+doScatter :: String -> Int -> [VName] -> [VName] -> ([I.LParam SOACS] -> InternaliseM [SubExp]) -> InternaliseM [VName]
+doScatter desc rank dest arrs mk = do
+  acc_cert_v <- newVName "acc_cert"
+  dest_ts <- mapM lookupType dest
+  let acc_shape = I.Shape $ take rank $ arrayDims $ head dest_ts
+      elem_ts = map (I.stripArray rank) dest_ts
+      acc_t = Acc acc_cert_v acc_shape elem_ts NoUniqueness
+  acc_p <- newParam "acc_p" acc_t
+  arrs_ts <- mapM lookupType arrs
+  withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
+    acc_p_inner <- newParam "acc_p" acc_t
+    params <- mapM (newParam "v" . I.stripArray 1) arrs_ts
+    map_lam <-
+      mkLambda (acc_p_inner : params) $ do
+        (is, vs) <- splitAt rank <$> mk params
+        fmap (pure . subExpRes) . letSubExp "scatter_acc" . BasicOp $
+          UpdateAcc Safe (I.paramName acc_p_inner) is vs
+    let w = arraysSize 0 arrs_ts
+    fmap subExpsRes . letValExp' "acc_res" . I.Op $
+      I.Screma w (I.paramName acc_p : arrs) (mapSOAC map_lam)
+
+  letTupExp desc $ WithAcc [(acc_shape, dest, Nothing)] withacc_lam
+
 scatterF :: Int -> E.Exp -> E.Exp -> E.Exp -> String -> InternaliseM [SubExp]
 scatterF rank dest is v desc = do
   is' <- internaliseExpToVars "write_arg_i" is
@@ -2110,32 +2133,17 @@ partitionWithSOACS k lam arrs = do
         Scratch (I.elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
 
   -- Now write into the result.
-  write_lam <- do
-    c_param <- newParam "c" (I.Prim int64)
-    offset_params <- replicateM k $ newParam "offset" (I.Prim int64)
-    value_params <- mapM (newParam "v" . I.rowType) arr_ts
-    (offset, offset_stms) <-
-      collectStms $
+  results <-
+    doScatter "partition_res" 1 blanks (classes : all_offsets ++ arrs) $ \params -> do
+      let ([c_param], offset_params, value_params) =
+            splitAt3 1 (length all_offsets) params
+      offset <-
         mkOffsetLambdaBody
           (map I.Var sizes)
           (I.Var $ I.paramName c_param)
           0
           offset_params
-    pure
-      I.Lambda
-        { I.lambdaParams = c_param : offset_params ++ value_params,
-          I.lambdaReturnType =
-            replicate (length arr_ts) (I.Prim int64)
-              ++ map I.rowType arr_ts,
-          I.lambdaBody =
-            mkBody offset_stms $
-              replicate (length arr_ts) (subExpRes offset)
-                ++ I.varsRes (map I.paramName value_params)
-        }
-  let spec = zip3 (repeat $ I.Shape [w]) (repeat 1) blanks
-  results <-
-    letTupExp "partition_res" . I.Op $
-      I.Scatter w (classes : all_offsets ++ arrs) spec write_lam
+      pure $ offset : map (I.Var . I.paramName) value_params
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $
