@@ -385,11 +385,12 @@ vFuseNodeT
             fusedSomething $ StmNode $ Let pat aux1 $ WithAcc w_inps wlam''
 -- the case of fusing two withaccs
 vFuseNodeT
-  _edges
+  edges
   infusible
   (StmNode (Let pat1 aux1 (WithAcc w1_inps lam1)), is1, _os1)
   (StmNode (Let pat2 aux2 (WithAcc w2_inps lam2)), _os2)
-    | wacc2_cons_nms <- namesFromList $ concatMap (\(_, nms, _) -> nms) w2_inps,
+    | not $ any isFake edges,
+      wacc2_cons_nms <- namesFromList $ concatMap (\(_, nms, _) -> nms) w2_inps,
       wacc1_indep_nms <- map getName is1,
       all (`notNameIn` wacc2_cons_nms) wacc1_indep_nms = do
         -- the other safety checks are done inside `tryFuseWithAccs`
