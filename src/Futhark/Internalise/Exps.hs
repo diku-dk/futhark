@@ -1616,6 +1616,36 @@ isOverloadedFunction qname desc = do
               _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
     handle _ = Nothing
 
+scatterF :: Int -> E.Exp -> E.Exp -> E.Exp -> String -> InternaliseM [SubExp]
+scatterF rank dest is v desc = do
+  is' <- internaliseExpToVars "write_arg_i" is
+  v' <- internaliseExpToVars "write_arg_v" v
+  dest' <- internaliseExpToVars "write_arg_a" dest
+  acc_cert_v <- newVName "acc_cert"
+  dest_ts <- mapM lookupType dest'
+  let acc_shape = I.Shape $ take rank $ arrayDims $ head dest_ts
+      elem_ts = map (I.stripArray rank) dest_ts
+      acc_t = Acc acc_cert_v acc_shape elem_ts NoUniqueness
+  acc_p <- newParam "acc_p" acc_t
+  withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
+    v_ts <- mapM lookupType v'
+    acc_p_inner <- newParam "acc_p" acc_t
+    is_params <- replicateM (length is') $ I.newParam "i" $ I.Prim int64
+    v_params <- mapM (newParam "v" . I.stripArray rank) dest_ts
+    map_lam <-
+      mkLambda (acc_p_inner : is_params <> v_params) $
+        fmap (pure . subExpRes) . letSubExp "scatter_acc" . BasicOp $
+          UpdateAcc
+            Safe
+            (I.paramName acc_p_inner)
+            (map (I.Var . I.paramName) is_params)
+            (map (I.Var . I.paramName) v_params)
+    let w = arraysSize 0 v_ts
+    fmap subExpsRes . letValExp' "acc_res" . I.Op $
+      I.Screma w (I.paramName acc_p : is' <> v') (mapSOAC map_lam)
+
+  letTupExp' desc $ WithAcc [(acc_shape, dest', Nothing)] withacc_lam
+
 -- | Handle intrinsic functions.  These are only allowed to be called
 -- in the prelude, and their internalisation may involve inspecting
 -- the AST.
@@ -1859,66 +1889,6 @@ isIntrinsicFunction qname args = do
         E.Scalar (E.Prim (E.FloatType float_from)) ->
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
         _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
-
-    scatterF dim a si v desc = do
-      si' <- internaliseExpToVars "write_arg_i" si
-      svs <- internaliseExpToVars "write_arg_v" v
-      sas <- internaliseExpToVars "write_arg_a" a
-
-      si_w <- I.arraysSize 0 <$> mapM lookupType si'
-      sv_ts <- mapM lookupType svs
-
-      svs' <- forM (zip svs sv_ts) $ \(sv, sv_t) -> do
-        let sv_shape = I.arrayShape sv_t
-            sv_w = arraySize 0 sv_t
-
-        -- Generate an assertion and reshapes to ensure that sv and si' are the same
-        -- size.
-        cmp <-
-          letSubExp "write_cmp" $
-            I.BasicOp $
-              I.CmpOp (I.CmpEq I.int64) si_w sv_w
-        c <-
-          assert
-            "write_cert"
-            cmp
-            "length of index and value array does not match"
-        certifying c $
-          letExp (baseString sv ++ "_write_sv") $
-            shapeCoerce (I.shapeDims (reshapeOuter (I.Shape [si_w]) 1 sv_shape)) sv
-
-      indexType <- fmap rowType <$> mapM lookupType si'
-      indexName <- mapM (\_ -> newVName "write_index") indexType
-      valueNames <- replicateM (length sv_ts) $ newVName "write_value"
-
-      sa_ts <- mapM lookupType sas
-      let bodyTypes = concat (replicate (length sv_ts) indexType) ++ map (I.stripArray dim) sa_ts
-          paramTypes = indexType <> map rowType sv_ts
-          bodyNames = indexName <> valueNames
-          bodyParams = zipWith (I.Param mempty) bodyNames paramTypes
-
-      -- This body is boring right now, as every input is exactly the output.
-      -- But it can get funky later on if fused with something else.
-      body <- localScope (scopeOfLParams bodyParams) . buildBody_ $ do
-        let outs = concat (replicate (length valueNames) indexName) ++ valueNames
-        results <- forM outs $ \name ->
-          letSubExp "write_res" $ I.BasicOp $ I.SubExp $ I.Var name
-        ensureResultShape
-          "scatter value has wrong size"
-          bodyTypes
-          (subExpsRes results)
-
-      let lam =
-            I.Lambda
-              { I.lambdaParams = bodyParams,
-                I.lambdaReturnType = bodyTypes,
-                I.lambdaBody = body
-              }
-          sivs = si' <> svs'
-
-      let sa_ws = map (I.Shape . take dim . arrayDims) sa_ts
-          spec = zip3 sa_ws (repeat 1) sas
-      letTupExp' desc $ I.Op $ I.Scatter si_w sivs spec lam
 
 flatIndexHelper :: String -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
 flatIndexHelper desc arr offset slices = do
