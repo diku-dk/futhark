@@ -385,7 +385,7 @@ revVJP scope (Lambda params ts body) =
 --   can assume that '⊕' actually behaves like addition - that is, has
 --   unit partial derivatives.  So the return sweep is
 --
---     v += acc_adj[i]
+--     v_adj += acc_adj[i]
 --
 -- # Adjoint of Map
 --
