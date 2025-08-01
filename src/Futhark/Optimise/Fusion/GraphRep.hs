@@ -75,7 +75,7 @@ data EdgeT
   | Cons VName
   | Fake VName
   | Res VName
-  deriving (Eq, Ord)
+  deriving (Show, Eq, Ord)
 
 -- | Information associated with a node in the graph.
 data NodeT
@@ -94,24 +94,7 @@ data NodeT
     FreeNode VName
   | MatchNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
-  deriving (Eq)
-
-instance Show EdgeT where
-  show (Dep vName) = "Dep " <> prettyString vName
-  show (InfDep vName) = "iDep " <> prettyString vName
-  show (Cons _) = "Cons"
-  show (Fake _) = "Fake"
-  show (Res _) = "Res"
-  show (Alias _) = "Alias"
-
-instance Show NodeT where
-  show (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
-  show (SoacNode _ pat _ _) = prettyString pat
-  show (TransNode _ tr _) = prettyString tr
-  show (ResNode name) = prettyString $ "Res: " ++ prettyString name
-  show (FreeNode name) = prettyString $ "Input: " ++ prettyString name
-  show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
-  show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
+  deriving (Show, Eq)
 
 -- | The name that this edge depends on.
 getName :: EdgeT -> VName
@@ -133,7 +116,22 @@ isRealNode _ = True
 
 -- | Prettyprint dependency graph.
 pprg :: DepGraph -> String
-pprg = G.showDot . G.fglToDotString . G.nemap show show . dgGraph
+pprg = G.showDot . G.fglToDotString . G.nemap onNode onEdge . dgGraph
+  where
+    onEdge (Dep vName) = "Dep " <> prettyString vName
+    onEdge (InfDep vName) = "iDep " <> prettyString vName
+    onEdge (Cons _) = "Cons"
+    onEdge (Fake _) = "Fake"
+    onEdge (Res _) = "Res"
+    onEdge (Alias _) = "Alias"
+
+    onNode (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
+    onNode (SoacNode _ pat _ _) = prettyString pat
+    onNode (TransNode _ tr _) = prettyString tr
+    onNode (ResNode name) = prettyString $ "Res: " ++ prettyString name
+    onNode (FreeNode name) = prettyString $ "Input: " ++ prettyString name
+    onNode (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
+    onNode (DoNode stm _) = "Do: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
 
 -- | A pair of a 'G.Node' and the node label.
 type DepNode = G.LNode NodeT
