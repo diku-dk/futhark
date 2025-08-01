@@ -79,25 +79,25 @@ def partition3 't [n] (p: t -> i8) (xs: [n]t)
 -- output @ out.out
 
 type dist = f64
-type point = [2]f64
+type point = (f64, f64)
 
 def zero_dist = 0f64
 def dist_less (x : dist) (y : dist) = x < y
 
 def point_eq (p : point) (q : point) =
-  p[0] == q[0] && p[1] == q[1]
+  p.0 == q.0 && p.1 == q.1
 
 def point_less (p : point) (q : point) =
-  p[0] < q[0] || (p[0] == q[0] && p[1] < q[1])
+  p.0 < q.0 || (p.0 == q.0 && p.1 < q.1)
 
 def sqr (x : f64) = x * x
 def ssqr (x : f64) = f64.abs x * x
 
 def signed_dist_to_line (p : point) (q : point) (r : point) : dist =
-  let ax = q[0] - p[0]
-  let ay = q[1] - p[1]
-  let bx = r[0] - p[0]
-  let by = r[1] - p[1]
+  let ax = q.0 - p.0
+  let ay = q.1 - p.1
+  let bx = r.0 - p.0
+  let by = r.1 - p.1
   in ssqr (ax * by - ay * bx) / (sqr ax + sqr ay)
 
 def tabulate 't (n: i64) (f: i64 -> t): *[n]t =
@@ -109,19 +109,14 @@ def tabulate 't (n: i64) (f: i64 -> t): *[n]t =
 --                              Filt ys.1 points.1 (\_ -> false)
 --                  -- ^ meaning some filtering with unknown pred
 def expand_hull [num_segs] [num_points]
-                (segs0 : [num_segs]point)
-                (segs1 : [num_segs]point)
-                (points0 : {[num_points]i64 | \x -> Range x (0, num_segs)})
-                (points1 : [num_points]point)
+                (segs : [num_segs](point, point))
+                (points : [num_points](i64, point))
               : {([](point, point), [](i64, point)) | \_ -> true} =
   --
   -- bounds checks of array `segs` are verifiable by precondition
-  let segs = zip segs0 segs1
-  let points = zip points0 points1
   let dists = map
               (\(seg_ix, p) ->
-                 let a = segs0[seg_ix]
-                 let b = segs1[seg_ix]
+                 let (a, b) = segs[seg_ix]
                  in signed_dist_to_line a b p)
               points
   
@@ -177,7 +172,7 @@ def expand_hull [num_segs] [num_points]
   let (n, is) = filter_indices (map (\i -> i >= 0) new_seg_inds)
   let zeros = replicate n 0i64
   let ids = scatter zeros is new_seg_inds
-  let zeros = replicate n (map (\_ -> 0f64) (iota 2))
+  let zeros = replicate n (0,0)
   let only_points' = scatter zeros is only_points
   let points' = zip ids only_points'
   in (segs', points')
@@ -202,7 +197,7 @@ def extract_empty_segments [num_segs] [num_points]
   let segs_inhabited = map (\i -> i > 0) segs_inhabited'
   
   let (n, inds) = partition_indices segs_inhabited
-  let zeros = replicate num_segs (map (\_ -> 0f64) (iota 2), map (\_ -> 0f64) (iota 2))
+  let zeros = replicate num_segs ((0,0),(0,0))
   let segs_parted = scatter zeros inds segs
   let segs_true = segs_parted[:n]
   let segs_false = segs_parted[n:]
@@ -238,9 +233,7 @@ def semihull (start : point) (end : point) (points : []point) =
     (loop (hull, segs, points) =
        ([], [(start, end)], map (\p -> (0, p)) points)
      while !null points do
-     let (segs0, segs1) = unzip segs       -- Workaround: implementation doesn't support tuple projection.
-     let (points0, points1) = unzip points -- Workaround: implementation doesn't support tuple projection.
-     let (segs', points') = expand_hull segs0 segs1 points0 points1
+     let (segs', points') = expand_hull segs points
      let (seg_inds', only_points') = unzip points'
      let (hull', segs'', sgm_inds'') = extract_empty_segments hull segs' seg_inds'
      in  (hull', segs'', zip sgm_inds'' only_points')
@@ -268,12 +261,14 @@ def compute (ps : []point) =
 def sort_by [n] 't (_f: t -> f64) (_xs: [n]t): [n]t = ??? -- radix_sort_float_by_key f f64.num_bits f64.get_bit
 
 def clockwise (convex_upper: []point) (convex_lower: []point) =
-  let sorted_upper = sort_by (\p -> p[0]) (sort_by (\p -> p[1]) convex_upper)
-  let sorted_lower = sort_by (\p -> p[0]) (sort_by (\p -> p[1]) convex_lower)
+  let sorted_upper = sort_by (\p -> p.0) (sort_by (\p -> p.1) convex_upper)
+  let sorted_lower = sort_by (\p -> p.0) (sort_by (\p -> p.1) convex_lower)
   let upper_is = sorted_upper
   let lower_is = (reverse sorted_lower)
   in upper_is++lower_is
 
 entry main [k] (ps : [k][2]f64) : [][2]f64 =
-  let (convex_upper, convex_lower) = compute ps
-  in clockwise convex_upper convex_lower
+  let ps' = map (\p -> (p[0], p[1])) ps
+  let (convex_upper, convex_lower) = compute ps'
+  let res = clockwise convex_upper convex_lower
+  in map (\(x,y) -> map (\i -> if i == 0 then x else y) (iota 2)) res

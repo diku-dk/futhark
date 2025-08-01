@@ -12,6 +12,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
+import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge (algebraContext, fromAlgebra, paramToAlgebra, simplify, toAlgebra)
 import Futhark.Analysis.Properties.AlgebraBridge.Util
 import Futhark.Analysis.Properties.AlgebraPC.Symbol qualified as Algebra
@@ -97,7 +98,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
         emphString ("Analyzing " <> prettyStr (E.locText (E.srclocOf val_loc)))
           <> prettyStr val
       forM_ (concatMap E.patternMap params) $ \(param, t) ->
-        createUninterpretedIndexFn param =<< shapeOfTypeBase t
+        createUninterpretedIndexFn param =<< arrayShapeOf t
       forM_ params addPreconditions
       forM_ params addBooleanNames
       forM_ params addSizeVariables
@@ -202,7 +203,7 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
   bindings <- getIndexFns
   case M.lookup vn bindings of
     Just indexfns -> pure indexfns
-    _ -> createUninterpretedIndexFn vn =<< shapeOfTypeBase (E.typeOf e)
+    _ -> createUninterpretedIndexFn vn =<< arrayShapeOf (E.typeOf e)
 forward (E.TupLit xs _) = do
   mconcat <$> mapM forward xs
 forward expr@(E.AppExp (E.Index e_xs slice _loc) _)
@@ -510,7 +511,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
           printM 1 $ warningMsg loc ("g: " <> prettyStr g)
           arg_fns <- mconcat <$> mapM forward (getArgs args)
           let return_type = E.appResType (E.unInfo appres)
-          size <- shapeOfTypeBase return_type
+          size <- arrayShapeOf return_type
           arg_names <- forM arg_fns (const $ newVName "x")
           iter <- case size of
             [] ->
@@ -1030,8 +1031,9 @@ getTERefine _ = []
 hasRefinement :: E.TypeExp E.Exp E.VName -> Bool
 hasRefinement = not . null . getTERefine
 
-shapeOfTypeBase :: E.TypeBase E.Exp as -> IndexFnM [SoP Symbol]
-shapeOfTypeBase e = do
+-- Returns the array shape of a type. E.g., [n](f32, [m]f32) returns [n].
+arrayShapeOf :: E.TypeBase E.Exp as -> IndexFnM [SoP Symbol]
+arrayShapeOf e = do
   dims <- mapM forward (E.shapeDims (E.arrayShape e))
   unless (all ((<= 1) . length) dims) $ error "Size of array dimension is a tuple?"
   pure $ map getScalar (mconcat dims)
@@ -1061,22 +1063,12 @@ stripCoerce :: E.Exp -> E.Exp
 stripCoerce (E.Coerce e _ _ _) = e
 stripCoerce e = e
 
--- Given names of lambda parameters and rank-`n` index functions whose
--- outer dimension is being iterated over (e.g., in a map or scan),
--- bind those names to corresponding index functions of rank `n - 1`.
---
--- Assumes that outer dimensions are equivalent across index functions.
--- Returns the most "complex" iterator over these domains.
--- For example, this would transform the lambda body of the following
---   map (\x y z -> x + y + z) xs ys zs
--- into
---   map (\i -> xs[i] + ys[i] + zs[i]) (indices xs)
--- where xs is the index function with the most "complex" iterator.
--- For multiple dimensions, the most complex iterator is chosen for
--- each dimension. And the parameters are not scalar; the outer
--- dimension is just dropped.
+-- Binds names to index functions.
 bindLambdaBodyParams :: [(E.VName, IndexFn)] -> IndexFnM ()
 bindLambdaBodyParams = mapM_ (\(vn, f) -> insertIndexFn vn [f])
+
+traceFun name args =
+  trace (mconcat [prettyStr x <> " " | x <- name : args]) False
 
 -- Like zipArgs, but for zipping parameters of SOAC's lambda with its
 -- array arguments:
@@ -1089,6 +1081,7 @@ zipArgsSOAC ::
   [E.Pat E.ParamType] ->
   NE.NonEmpty (a, E.Exp) ->
   IndexFnM (Iterator, [[(E.VName, IndexFn)]])
+zipArgsSOAC loc formal_args actual_args | traceFun "zipArgsSOAC" [show loc, prettyStr formal_args, prettyStr $ getArgs actual_args] = undefined
 zipArgsSOAC loc formal_args actual_args = do
   -- Renaming makes sure all Cat k bound in iterators are identical, so that
   -- a new common outer iterator can be used.
@@ -1107,11 +1100,20 @@ zipArgsSOAC loc formal_args actual_args = do
   args'' <- renameSameL (mapM . mapM) args'
   let new_outer_dim' = head (shape (head (head args'')))
   -- Drop the new outer dim, aligning arguments with parameters.
-  (aligned_args, _) <- zipArgs' loc formal_args (map (map dropOuterDim) args'')
+  hm <- mapM (arrayShapeOf . E.typeOf) (getArgs actual_args) -- What is the shape of [](f32, [2]f32)?
+  printM 0 $ "hm: " <> prettyStr hm
+  let types_rank_one_less = map (dropOuterDimType . E.typeOf) (getArgs actual_args)
+  (aligned_args, _) <-
+    zipArgs' loc formal_args types_rank_one_less (map (map dropOuterDim) args'')
   pure (new_outer_dim', aligned_args)
   where
     dropOuterDim f = f {shape = drop 1 (shape f)}
     iters = map (sVar . boundVar)
+
+    dropOuterDimType E.Scalar {} = error "zipArgsSOAC: argument is not an array?"
+    dropOuterDimType (E.Array u shp basety)
+      | Just shp' <- E.stripDims 1 shp = E.Array u shp' basety
+      | otherwise = E.Scalar basety
 
 -- Align parameter patterns with their arguments---or raise an error.
 -- A parameter pattern reduces to a list of (optional) names with type information.
@@ -1123,18 +1125,23 @@ zipArgs ::
   [E.Pat E.ParamType] ->
   NE.NonEmpty (a, E.Exp) ->
   IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
-zipArgs loc formal_args actual_args =
-  zipArgs' loc formal_args =<< mapM forward (getArgs actual_args)
+zipArgs loc formal_args actual_args = do
+  let as = getArgs actual_args
+  zipArgs' loc formal_args (map E.typeOf as) =<< mapM forward as
 
 zipArgs' ::
   E.SrcLoc ->
   [E.Pat E.ParamType] ->
+  [E.StructType] ->
   [[IndexFn]] ->
   IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
-zipArgs' loc formal_args actual_args = do
+zipArgs' loc formal_args actual_types actual_args = do
   let pats = map patternMapAligned formal_args
   unless (length pats == length actual_args) . error $
     errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
+  printM 0 $ prettyStr pats
+  printM 0 $ prettyStr actual_types
+  printM 0 $ prettyStr actual_args
   unless (map length pats == map length actual_args) . error $
     errorMsg loc "Internal error: actual argument does not match parameter pattern."
 
@@ -1147,7 +1154,7 @@ zipArgs' loc formal_args actual_args = do
   aligned_sizes <-
     forM (zip pats actual_args) $ \(pat, arg) -> do
       fmap mconcat . forM (zip (map snd pat) arg) $ \(pat_type, f) -> do
-        type_shape <- shapeOfTypeBase pat_type
+        type_shape <- arrayShapeOf pat_type
         unless (length type_shape == rank f) . error $
           errorMsg loc "Internal error: parameter and argument sizes do not align."
         let size_vars = map getVName type_shape
