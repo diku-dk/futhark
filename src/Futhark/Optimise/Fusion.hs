@@ -220,7 +220,12 @@ okToFuseProducer (H.Screma _ _ form) = do
 okToFuseProducer _ = pure True
 
 -- First node is producer, second is consumer.
-vFuseNodeT :: [EdgeT] -> [VName] -> (NodeT, [EdgeT], [EdgeT]) -> (NodeT, [EdgeT]) -> FusionM (Maybe NodeT)
+vFuseNodeT ::
+  [EdgeT] ->
+  [VName] ->
+  (NodeT, [EdgeT], [EdgeT]) ->
+  (NodeT, [EdgeT]) ->
+  FusionM (Maybe NodeT)
 vFuseNodeT _ infusible (s1, _, e1s) (MatchNode stm2 dfused, _)
   | isRealNode s1,
     null infusible =
@@ -302,35 +307,36 @@ vFuseNodeT
 --    for as long as it is returned by the withAcc. If `infusible` is empty
 --    then the extranous result will be simplified away.
 vFuseNodeT
-  _edges
+  edges
   _infusible
   (SoacNode ots1 pat1 soac@(H.Screma _w _form _s_inps) aux1, _is1, os1)
   (StmNode (Let pat2 aux2 (WithAcc w_inps lam0)), _os2)
     | ots1 == mempty,
+      not $ any isFake edges,
       wacc_cons_nms <- namesFromList $ concatMap (\(_, nms, _) -> nms) w_inps,
       soac_prod_nms <- map patElemName $ patElems pat1,
       soac_indep_nms <- map getName os1,
-      all (`notNameIn` wacc_cons_nms) (soac_indep_nms ++ soac_prod_nms) =
-        do
-          lam <- fst <$> doFusionInLambda lam0
-          bdy' <-
-            runBodyBuilder $ inScopeOf lam $ do
-              soac' <- H.toExp soac
-              addStm $ Let pat1 aux1 soac'
-              lam_res <- bodyBind $ lambdaBody lam
-              let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms
-              pure $ lam_res ++ pat1_res
-          let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
-              pat = Pat $ patElems pat2 ++ patElems pat1
-          lam' <- renameLambda $ lam {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
-          -- see if bringing the map inside the scatter has actually benefitted fusion
-          (lam'', success) <- doFusionInLambda lam'
-          if not success
-            then pure Nothing
-            else do
-              -- `aux1` already appear in the moved SOAC stm; is there
-              -- any need to add it to the enclosing withAcc stm as well?
-              fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
+      all (`notNameIn` wacc_cons_nms) (soac_indep_nms ++ soac_prod_nms) = do
+        lam <- fst <$> doFusionInLambda lam0
+        bdy' <-
+          runBodyBuilder $ inScopeOf lam $ do
+            soac' <- H.toExp soac
+            addStm $ Let pat1 aux1 soac'
+            lam_res <- bodyBind $ lambdaBody lam
+            let pat1_res = map (SubExpRes (Certs []) . Var) soac_prod_nms
+            pure $ lam_res ++ pat1_res
+        let lam_ret_tp = lambdaReturnType lam ++ map patElemType (patElems pat1)
+            pat = Pat $ patElems pat2 ++ patElems pat1
+        lam' <- renameLambda $ lam {lambdaBody = bdy', lambdaReturnType = lam_ret_tp}
+        -- see if bringing the map inside the scatter has actually benefitted fusion
+        (lam'', success) <- doFusionInLambda lam'
+        if not success
+          then pure Nothing
+          else do
+            -- `aux1` already appear in the moved SOAC stm; is there
+            -- any need to add it to the enclosing withAcc stm as well?
+            fusedSomething $ StmNode $ Let pat aux2 $ WithAcc w_inps lam''
+
 --
 -- The reverse of the case above, i.e., fusing a screma at the back of an
 --   WithAcc such as to (hopefully) enable more fusion there.
