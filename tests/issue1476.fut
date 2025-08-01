@@ -1,5 +1,5 @@
 -- ==
--- tags { no_opencl no_cuda no_hip no_pyopencl }
+-- tags { no_opencl no_cuda no_cudatc no_hip no_pyopencl }
 
 let Lmx [nlat] (m:i64) (n:i64) (amm:f32) (cx:[nlat]f32) (x:[nlat]f32) =
   let X = replicate n 0

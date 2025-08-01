@@ -37,13 +37,16 @@ import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
+import Futhark.Optimise.EntryPointMem
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
+import Futhark.Optimise.MergeGPUBodies
 import Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs)
 import Futhark.Optimise.Sink
+import Futhark.Optimise.TensorCores
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass
@@ -657,6 +660,10 @@ commandLineOptions =
     typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],
     allocateOption "a",
+    kernelsMemPassOption entryPointMemGPU [],
+    kernelsMemPassOption tensorCoreMemFixup [],
+    kernelsPassOption extractTensorCores [],
+    kernelsPassOption mergeGPUBodies [],
     kernelsMemPassOption doubleBufferGPU [],
     mcMemPassOption doubleBufferMC [],
     kernelsMemPassOption expandAllocations [],
@@ -685,12 +692,28 @@ commandLineOptions =
       ["gpu"],
     pipelineOption
       getSOACSProg
+      "GPU"
+      GPU
+      "Run the default optimised kernels pipeline with tensor cores"
+      gputcPipeline
+      []
+      ["gputc"],
+    pipelineOption
+      getSOACSProg
       "GPUMem"
       GPUMem
       "Run the full GPU compilation pipeline"
       gpumemPipeline
       []
       ["gpu-mem"],
+    pipelineOption
+      getSOACSProg
+      "GPUMem"
+      GPUMem
+      "Run the full GPU with tensor cores compilation pipeline"
+      gpumemtcPipeline
+      []
+      ["gputc-mem"],
     pipelineOption
       getSOACSProg
       "Seq"

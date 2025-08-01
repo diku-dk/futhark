@@ -1,5 +1,5 @@
 -- ==
--- tags { no_opencl no_cuda no_hip no_pyopencl }
+-- tags { no_opencl no_cuda no_cudatc no_hip no_pyopencl }
 -- structure gpu { SegMap 3 }
 
 def foo [h][w] (seam_energy: [h][w]i64): [h]i64 =

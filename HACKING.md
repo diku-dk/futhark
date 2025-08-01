@@ -352,3 +352,21 @@ different backend, or pass an already compiled program instead of a
 
 See the manpages for `futhark script` and `futhark literate` for more
 information.
+
+## Using the `cudatc` backend
+
+This is the undocumented and experimental backend that uses more advanced CUDA
+facilities (in particular, tensor cores). It requires
+[cutlass](https://github.com/NVIDIA/cutlass) to be available. The backend can be
+used as follows:
+
+```
+$ futhark cudatc program.fut && ./program --cutlass=<path to cutlass dir>
+$ futhark test --backend=cudatc --pass-option=--cutlass=<path to cutlass dir> program.fut
+```
+
+Run tests with:
+
+```
+$ make test-cudatc CUTLASS=<path to cutlass dir>
+```
