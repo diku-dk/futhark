@@ -93,8 +93,8 @@ def argmax_rev [n] [m] (is: [n]i64) (dst_a: [m]i32) (dst_b: [m]i32) (vs_a: [n]i3
 
 entry argmax [n] [m] (is': [n]u64) (dst_a: [m]i32) (dst_b: [m]i32) (vs_a: [n]i32) (vs_b: [n]i32) =
   let is = map (\i -> i64.u64 (i %% u64.i64 m)) is'
-  let (f1, f2, f3, f4, f5, f6, f7, f8) = argmax_fwd is dst_a dst_b vs_a vs_b
-  let (r1, r2, r3, r4, r5, r6, r7, r8) = argmax_rev is dst_a dst_b vs_a vs_b
+  let (f1, f2, f3, f4, f5, f6, f7, f8) = #[noinline] argmax_fwd is dst_a dst_b vs_a vs_b
+  let (r1, r2, r3, r4, r5, r6, r7, r8) = #[noinline] argmax_rev is dst_a dst_b vs_a vs_b
   let t1 = map2 (map2 (==)) f1 r1 |> map and |> and
   let t2 = map2 (map2 (==)) f2 r2 |> map and |> and
   let t3 = map2 (map2 (==)) f3 r3 |> map and |> and
