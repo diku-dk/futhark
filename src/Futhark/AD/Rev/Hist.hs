@@ -130,20 +130,9 @@ mapout is n w = do
 
   letExp "is'" $ Op $ Screma n (pure is) $ mapSOAC is'_lam
 
-multiScatter :: SubExp -> [VName] -> VName -> [VName] -> ADM [VName]
-multiScatter n dst is vs = do
-  tps <- traverse lookupType vs
-  par_i <- newParam "i" $ Prim int64
-  scatter_params <- traverse (newParam "scatter_param" . rowType) tps
-  scatter_lam <-
-    mkLambda (par_i : scatter_params) $
-      fmap subExpsRes . mapM (letSubExp "scatter_map_res") =<< do
-        p1 <- replicateM (length scatter_params) $ eParam par_i
-        p2 <- traverse eParam scatter_params
-        pure $ p1 <> p2
-
-  let spec = zipWith (\t -> (,,) (Shape $ pure $ arraySize 0 t) 1) tps dst
-  letTupExp "scatter_res" . Op $ Scatter n (is : vs) spec scatter_lam
+multiScatter :: [VName] -> VName -> [VName] -> ADM [VName]
+multiScatter dst is vs =
+  doScatter "scatter_res" 1 dst (is : vs) $ pure . map (Var . paramName)
 
 multiIndex :: [VName] -> [DimIndex SubExp] -> ADM [VName]
 multiIndex vs s = do
@@ -309,10 +298,10 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
       letExp "flat" . BasicOp . Reshape v $
         reshapeAll (arrayShape v_t) (Shape [q])
 
-  f'' <- mkIdentityLambda $ replicate nr_dims (Prim int64) ++ [Prim t]
   vs_bar' <-
-    letExp (baseString vs <> "_bar") . Op $
-      Scatter q scatter_inps [(Shape vs_dims, 1, vs_bar)] f''
+    fmap head $
+      doScatter (baseString vs <> "_bar") nr_dims [vs_bar] scatter_inps $
+        pure . map (Var . paramName)
   insAdj vs vs_bar'
   where
     mk_indices :: [SubExp] -> [SubExp] -> ADM [VName]
@@ -684,7 +673,7 @@ radixSortStep xs tps bit n w = do
   nis <- letExp "nis" $ Op $ Screma n (bins : offsets) $ mapSOAC map_lam
 
   scatter_dst <- traverse (\t -> letExp "scatter_dst" $ BasicOp $ Scratch (elemType t) (arrayDims t)) tps
-  multiScatter n scatter_dst nis xs
+  multiScatter scatter_dst nis xs
   where
     iConst c = eSubExp $ intConst Int64 c
 
@@ -935,7 +924,7 @@ diffHist ops xs aux n lam0 ne as w rf dst m = do
       =<< eLambda f_adj (map (eSubExp . Var) $ ls_arr <> sas <> rs_arr)
 
   scatter_dst <- traverse (\t -> letExp "scatter_dst" $ BasicOp $ Scratch (elemType t) (arrayDims t)) as_type
-  as_bar <- multiScatter n scatter_dst siota sas_bar
+  as_bar <- multiScatter scatter_dst siota sas_bar
 
   zipWithM_ updateAdj (tail as) as_bar
   where

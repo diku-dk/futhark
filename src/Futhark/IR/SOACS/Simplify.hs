@@ -26,7 +26,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Either
 import Data.Foldable
-import Data.List (partition, transpose, unzip4, unzip6, zip6)
+import Data.List (partition, transpose, unzip4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -98,12 +98,6 @@ simplifySOAC (Stream outerdim arr nes lam) = do
   arr' <- mapM Engine.simplify arr
   (lam', lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
   pure (Stream outerdim' arr' nes' lam', lam_hoisted)
-simplifySOAC (Scatter w ivs as lam) = do
-  w' <- Engine.simplify w
-  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
-  ivs' <- mapM Engine.simplify ivs
-  as' <- mapM Engine.simplify as
-  pure (Scatter w' ivs' as' lam', hoisted)
 simplifySOAC (Hist w imgs ops bfun) = do
   w' <- Engine.simplify w
   (ops', hoisted) <- fmap unzip $
@@ -198,13 +192,11 @@ topDownRules :: [TopDownRule (Wise SOACS)]
 topDownRules =
   [ RuleOp hoistCerts,
     RuleOp removeReplicateMapping,
-    RuleOp removeReplicateWrite,
     RuleOp removeUnusedSOACInput,
     RuleOp simplifyClosedFormReduce,
     RuleOp simplifyKnownIterationSOAC,
     RuleOp liftIdentityMapping,
     RuleOp removeDuplicateMapOutput,
-    RuleOp fuseConcatScatter,
     RuleOp simplifyMapIota,
     RuleOp moveTransformToInput,
     RuleOp moveTransformToOutput
@@ -214,7 +206,6 @@ bottomUpRules :: [BottomUpRule (Wise SOACS)]
 bottomUpRules =
   [ RuleOp removeDeadMapping,
     RuleOp removeDeadReduction,
-    RuleOp removeDeadWrite,
     RuleBasicOp removeUnnecessaryCopy,
     RuleOp liftIdentityStreaming,
     RuleOp mapOpToOp
@@ -346,14 +337,6 @@ removeReplicateMapping vtable pat aux op
       auxing aux $ letBind pat $ Op $ soacOp $ Screma w arrs' $ mapSOAC fun'
 removeReplicateMapping _ _ _ _ = Skip
 
--- | Like 'removeReplicateMapping', but for 'Scatter'.
-removeReplicateWrite :: TopDownRuleOp (Wise SOACS)
-removeReplicateWrite vtable pat aux (Scatter w ivs as lam)
-  | Just (stms, lam', ivs') <- removeReplicateInput vtable lam ivs = Simplify $ do
-      forM_ stms $ \(vs, cs, e) -> certifying cs $ letBindNames vs e
-      auxing aux $ letBind pat $ Op $ Scatter w ivs' as lam'
-removeReplicateWrite _ _ _ _ = Skip
-
 removeReplicateInput ::
   (Aliased rep) =>
   ST.SymbolTable rep ->
@@ -402,10 +385,6 @@ removeUnusedSOACInput _ pat aux op
     Just (used_arrs, map_lam') <- remove map_lam arrs =
       Simplify . auxing aux . letBind pat . Op $
         soacOp (Screma w used_arrs (ScremaForm map_lam' scan reduce))
-  | Just (Scatter w arrs dests map_lam :: SOAC rep) <- asSOAC op,
-    Just (used_arrs, map_lam') <- remove map_lam arrs =
-      Simplify . auxing aux . letBind pat . Op $
-        soacOp (Scatter w used_arrs dests map_lam')
   where
     used_in_body map_lam = freeIn $ lambdaBody map_lam
     usedInput map_lam (param, _) = paramName param `nameIn` used_in_body map_lam
@@ -575,67 +554,6 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form) =
             Screma w arrs (mkOp redlam' used_nes maplam')
     removeDeadReduction' _ _ _ _ = Skip
 removeDeadReduction _ _ _ _ = Skip
-
--- | If we are writing to an array that is never used, get rid of it.
-removeDeadWrite :: BottomUpRuleOp (Wise SOACS)
-removeDeadWrite (_, used) pat aux (Scatter w arrs dests fun) =
-  let (i_ses, v_ses) = unzip $ groupScatterResults' dests $ bodyResult $ lambdaBody fun
-      (i_ts, v_ts) = unzip $ groupScatterResults' dests $ lambdaReturnType fun
-      isUsed (bindee, _, _, _, _, _) = (`UT.used` used) $ patElemName bindee
-      (pat', i_ses', v_ses', i_ts', v_ts', dests') =
-        unzip6 $ filter isUsed $ zip6 (patElems pat) i_ses v_ses i_ts v_ts dests
-      fun' =
-        fun
-          { lambdaBody =
-              mkBody (bodyStms (lambdaBody fun)) (concat i_ses' ++ v_ses'),
-            lambdaReturnType = concat i_ts' ++ v_ts'
-          }
-   in if pat /= Pat pat'
-        then
-          Simplify . auxing aux . letBind (Pat pat') $
-            Op (Scatter w arrs dests' fun')
-        else Skip
-removeDeadWrite _ _ _ _ = Skip
-
--- handles now concatenation of more than two arrays
-fuseConcatScatter :: TopDownRuleOp (Wise SOACS)
-fuseConcatScatter vtable pat _ (Scatter _ arrs dests fun)
-  | Just (ws@(w' : _), xss, css) <- unzip3 <$> mapM isConcat arrs,
-    xivs <- transpose xss,
-    all (w' ==) ws = Simplify $ do
-      let r = length xivs
-      fun2s <- replicateM (r - 1) (renameLambda fun)
-      let (fun_is, fun_vs) =
-            unzip . map (splitScatterResults dests . bodyResult . lambdaBody) $
-              fun : fun2s
-          (its, vts) =
-            unzip . replicate r . splitScatterResults dests $ lambdaReturnType fun
-          new_stmts = mconcat $ map (bodyStms . lambdaBody) (fun : fun2s)
-      let fun' =
-            Lambda
-              { lambdaParams = mconcat $ map lambdaParams (fun : fun2s),
-                lambdaBody = mkBody new_stmts $ mix fun_is <> mix fun_vs,
-                lambdaReturnType = mix its <> mix vts
-              }
-      certifying (mconcat css) . letBind pat . Op $
-        Scatter w' (concat xivs) (map (incWrites r) dests) fun'
-  where
-    sizeOf :: VName -> Maybe SubExp
-    sizeOf x = arraySize 0 . typeOf <$> ST.lookup x vtable
-    mix = concat . transpose
-    incWrites r (w, n, a) = (w, n * r, a) -- ToDO: is it (n*r) or (n+r-1)??
-    isConcat v = case ST.lookupExp v vtable of
-      Just (BasicOp (Concat 0 (x :| ys) _), cs) -> do
-        x_w <- sizeOf x
-        y_ws <- mapM sizeOf ys
-        guard $ all (x_w ==) y_ws
-        pure (x_w, x : ys, cs)
-      Just (BasicOp (Reshape arr newshape), cs)
-        | ReshapeCoerce <- reshapeKind newshape -> do
-            (a, b, cs') <- isConcat arr
-            pure (a, b, cs <> cs')
-      _ -> Nothing
-fuseConcatScatter _ _ _ _ = Skip
 
 simplifyClosedFormReduce :: TopDownRuleOp (Wise SOACS)
 simplifyClosedFormReduce _ pat _ (Screma (Constant w) _ form)

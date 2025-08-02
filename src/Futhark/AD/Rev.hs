@@ -203,7 +203,8 @@ diffBasicOp pat aux e m =
       pat_adjs <- mapM lookupAdjVal (patNames pat)
       returnSweepCode $ do
         forM_ (zip pat_adjs vs) $ \(adj, v) -> do
-          adj_i <- letExp "updateacc_val_adj" $ BasicOp $ Index adj $ Slice $ map DimFix is
+          adj_t <- lookupType adj
+          adj_i <- letExp "updateacc_val_adj" $ BasicOp $ Index adj $ fullSlice adj_t $ map DimFix is
           updateSubExpAdj v adj_i
 
 vjpOps :: VjpOps
