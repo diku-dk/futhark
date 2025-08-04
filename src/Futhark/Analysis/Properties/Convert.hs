@@ -51,17 +51,48 @@ propertyPrelude =
       "and"
     ]
 
-createUninterpretedIndexFn :: E.VName -> [SoP Symbol] -> IndexFnM [IndexFn]
-createUninterpretedIndexFn vn dims = do
-  f <- case dims of
+newIndexFn :: E.VName -> E.TypeBase E.Exp u -> IndexFnM [IndexFn]
+newIndexFn vn t = do
+  -- x :: [n](t, (t, t))
+  --  -->
+  --  x = for i < n . for j < 2 . for k < tshape(j) . x(i,j,k)
+  (array_shape, tuple_shape) <- shapeOf t
+  let (regular, irregular) = part [] tuple_shape
+  printM 2 $ "tuple_shape " <> prettyStr tuple_shape
+  printM 2 $ "regular " <> prettyStr regular
+  printM 2 $ "irregular " <> prettyStr irregular
+  let dims = array_shape <> map (int2SoP . toInteger) regular
+  createUninterpretedIndexFn vn dims (map (map (int2SoP . toInteger)) irregular)
+  where
+    part regular (shape : shapes)
+      | all (== head shape) shape = part (regular <> shape) shapes
+      | otherwise = (regular, shape : shapes)
+    part regular [] = (regular, [])
+
+createUninterpretedIndexFn :: E.VName -> [SoP Symbol] -> [[SoP Symbol]] -> IndexFnM [IndexFn]
+createUninterpretedIndexFn vn regular_dims irregular_shape = do
+  f <- case regular_dims <> mconcat irregular_shape of
     [] ->
       -- Canonical scalar representation.
       pure [IndexFn [] (singleCase $ sVar vn)]
-    shape -> do
+    _ -> do
       -- Canonical array representation.
-      ids <-
-        zipWithM (\_ i -> newVName i) shape $
+      regular_ids <-
+        zipWithM (\_ i -> newVName i) regular_dims $
           mconcat (repeat ["i", "j", "k"])
+      irregular_ids <-
+        zipWithM (\_ i -> newVName i) irregular_shape $
+          mconcat (repeat [".i", ".j", ".k"])
+      irregular_names <- mapM (\_ -> newVName "d") irregular_shape
+      let irregular_dims =
+            zipWith
+              (\d i -> sym2SoP $ Apply (Var d) [sVar i])
+              irregular_names
+              (last regular_ids : irregular_ids)
+      let ids = regular_ids <> irregular_ids
+      let shape = regular_dims <> irregular_dims
+      printM 2 $ "ids " <> prettyStr ids
+      printM 2 $ "shape " <> prettyStr shape
       pure
         [ IndexFn
             { shape = zipWith (\sz i -> Forall i (Iota sz)) shape ids,
@@ -98,7 +129,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
         emphString ("Analyzing " <> prettyStr (E.locText (E.srclocOf val_loc)))
           <> prettyStr val
       forM_ (concatMap E.patternMap params) $ \(param, t) ->
-        createUninterpretedIndexFn param =<< arrayShapeOf t
+        newIndexFn param t
       forM_ params addPreconditions
       forM_ params addBooleanNames
       forM_ params addSizeVariables
@@ -203,7 +234,7 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
   bindings <- getIndexFns
   case M.lookup vn bindings of
     Just indexfns -> pure indexfns
-    _ -> createUninterpretedIndexFn vn =<< arrayShapeOf (E.typeOf e)
+    _ -> newIndexFn vn (E.typeOf e)
 forward (E.TupLit xs _) = do
   mconcat <$> mapM forward xs
 forward expr@(E.AppExp (E.Index e_xs slice _loc) _)
@@ -511,7 +542,7 @@ forward expr@(E.AppExp (E.Apply e_f args loc) appres)
           printM 1 $ warningMsg loc ("g: " <> prettyStr g)
           arg_fns <- mconcat <$> mapM forward (getArgs args)
           let return_type = E.appResType (E.unInfo appres)
-          size <- arrayShapeOf return_type
+          size <- fst <$> shapeOf return_type
           arg_names <- forM arg_fns (const $ newVName "x")
           iter <- case size of
             [] ->
@@ -556,7 +587,7 @@ forward e = do
 -- Fires binding applications of top-level defs to names.
 forwardLetEffects :: [Maybe E.VName] -> E.Exp -> IndexFnM [IndexFn]
 forwardLetEffects [Just _] e@(E.Var (E.QualName _ _) _ loc) = do
-  printM 0 . warningMsg loc $
+  printM 2 . warningMsg loc $
     "Warning: Aliasing " <> prettyStr e <> " strips property information."
   forward e
 forwardLetEffects bound_names x = do
@@ -1031,15 +1062,37 @@ getTERefine _ = []
 hasRefinement :: E.TypeExp E.Exp E.VName -> Bool
 hasRefinement = not . null . getTERefine
 
--- Returns the array shape of a type. E.g., [n](f32, [m]f32) returns [n].
-arrayShapeOf :: E.TypeBase E.Exp as -> IndexFnM [SoP Symbol]
-arrayShapeOf e = do
-  dims <- mapM forward (E.shapeDims (E.arrayShape e))
-  unless (all ((<= 1) . length) dims) $ error "Size of array dimension is a tuple?"
-  pure $ map getScalar (mconcat dims)
+shapeOf :: E.TypeBase E.Exp as -> IndexFnM ([SoP Symbol], [[Int]])
+shapeOf (E.Scalar (E.Refinement t _)) = shapeOf t
+shapeOf (E.Scalar t) = pure (mempty, tupleToShape t)
+shapeOf (E.Array _ shp t) = do
+  (,tupleToShape t) <$> shapeToSoP shp
   where
+    shapeToSoP s = do
+      dims <- mapM forward (E.shapeDims s)
+      unless (all ((<= 1) . length) dims) $ error "Size of array dimension is a tuple?"
+      pure $ map getScalar (mconcat dims)
+
     getScalar (IndexFn [] cs) | [(Bool True, x)] <- casesToList cs = x
     getScalar f = error ("getScalar on " <> prettyStr f)
+
+newtype Tree a = Node [Tree a]
+  deriving (Show)
+
+tupleToShape :: E.ScalarTypeBase dim u -> [[Int]]
+tupleToShape = count . Node . (: []) . toTree
+  where
+    count (Node xs)
+      | all (\(Node x) -> null x) xs = []
+      | otherwise =
+          let shape = map (\case Node [] -> 1; Node ys -> length ys) xs
+           in shape : concatMap count xs
+
+    toTree (E.Record ts) = Node (map unpack (M.elems ts))
+    toTree _ = Node []
+
+    unpack E.Array {} = error "Arrays of structures is not supported."
+    unpack (E.Scalar t) = toTree t
 
 -- HACK this lets us propagate any properties on the output names
 -- to the postcondition. For example, in the below we want to
@@ -1100,8 +1153,8 @@ zipArgsSOAC loc formal_args actual_args = do
   args'' <- renameSameL (mapM . mapM) args'
   let new_outer_dim' = head (shape (head (head args'')))
   -- Drop the new outer dim, aligning arguments with parameters.
-  hm <- mapM (arrayShapeOf . E.typeOf) (getArgs actual_args) -- What is the shape of [](f32, [2]f32)?
-  printM 0 $ "hm: " <> prettyStr hm
+  hm <- mapM (shapeOf . E.typeOf) (getArgs actual_args) -- What is the shape of [](f32, [2]f32)?
+  printM 2 $ "hm: " <> prettyStr hm
   let types_rank_one_less = map (dropOuterDimType . E.typeOf) (getArgs actual_args)
   (aligned_args, _) <-
     zipArgs' loc formal_args types_rank_one_less (map (map dropOuterDim) args'')
@@ -1139,9 +1192,9 @@ zipArgs' loc formal_args actual_types actual_args = do
   let pats = map patternMapAligned formal_args
   unless (length pats == length actual_args) . error $
     errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
-  printM 0 $ prettyStr pats
-  printM 0 $ prettyStr actual_types
-  printM 0 $ prettyStr actual_args
+  printM 2 $ prettyStr pats
+  printM 2 $ prettyStr actual_types
+  printM 2 $ prettyStr actual_args
   unless (map length pats == map length actual_args) . error $
     errorMsg loc "Internal error: actual argument does not match parameter pattern."
 
@@ -1154,7 +1207,7 @@ zipArgs' loc formal_args actual_types actual_args = do
   aligned_sizes <-
     forM (zip pats actual_args) $ \(pat, arg) -> do
       fmap mconcat . forM (zip (map snd pat) arg) $ \(pat_type, f) -> do
-        type_shape <- arrayShapeOf pat_type
+        type_shape <- fst <$> shapeOf pat_type
         unless (length type_shape == rank f) . error $
           errorMsg loc "Internal error: parameter and argument sizes do not align."
         let size_vars = map getVName type_shape
