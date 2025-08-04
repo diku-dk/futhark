@@ -9,11 +9,11 @@ module Futhark.Optimise.Fusion.HLsched
   )
 where
 
-import Data.List qualified as L
+--import Data.List qualified as L
 --import Control.Monad
-import Data.Graph.Inductive.Graph qualified as G
+--import Data.Graph.Inductive.Graph qualified as G
 --import Data.Map.Strict qualified as M
-import Data.Maybe
+--import Data.Maybe
 import Futhark.Analysis.HORep.SOAC qualified as H
 import Futhark.Construct
 import Futhark.IR.SOACS hiding (SOAC (..))
@@ -23,7 +23,9 @@ import Futhark.Optimise.Fusion.GraphRep
 --import Futhark.Transform.Rename
 --import Futhark.Transform.Substitute
 --import Futhark.Analysis.PrimExp
-import Futhark.Optimise.Fusion.HLsched.Utils
+import Futhark.Optimise.Fusion.HLsched.Env
+import Futhark.Optimise.Fusion.HLsched.SchedUtils
+import Futhark.Optimise.Fusion.HLsched.Stripmine
 --import Futhark.Util.Pretty hiding (line, sep, (</>))
 -- import Futhark.Analysis.PrimExp.Convert
 
@@ -33,16 +35,69 @@ import Debug.Trace
 --- core function
 -----------------------------------
 
+-- Redundant: HasScope SOACS m, 
+
 applyHLsched ::
-  (HasScope SOACS m, MonadFreshNames m) =>
+  (LocalScope SOACS m, MonadFreshNames m) =>
+  (Lambda SOACS -> m (Lambda SOACS, Bool)) ->
   DepNode ->
   DepGraph ->
   m (Maybe DepGraph)
-applyHLsched node_to_fuse dg@DepGraph {dgGraph = g} = do
+applyHLsched fuseInLam node_to_fuse dg = do
+  let fenv = FEnv fuseInLam
   mb_sched <- parseHLSched node_to_fuse dg
   case mb_sched of
-    Just _  -> pure Nothing
-    Nothing -> pure Nothing
+    Just (env0, soac_node@(_, SoacNode out_trsfs soac_pat soac soac_aux), sched, patel_sched) -> do
+      let (_valid_soac, exact_result) = isSupportedSOAC soac
+          env = addInpDeps2Env env0 soac_node dg
+      stripmined_soac  <- applyStripmining fenv env sched (soac_pat, soac_aux, soac)
+      _rescheduled_soac <- applyPermutation sched stripmined_soac
+      (_prologue, _epilogue) <-
+        if exact_result
+        then pure (mempty,mempty)
+        else do
+          let [soac_res] = patElems soac_pat
+          mkProEpilogue soac_res out_trsfs sched patel_sched
+      --
+      trace ("\nFwdTileTab: " ++ prettyString (appTilesFwd env) ++ 
+             "\nInvTileTab: " ++ prettyString (appTilesInv env) ++
+             "\nHL-Sched: "++prettyString sched++
+             "\nSOAC: out-transfs: "++show out_trsfs++
+             " pattern: "++prettyString soac_pat++" = "++
+             "\n" ++ prettyString soac
+            ) $ pure Nothing
+    _ -> pure Nothing
+
+
+isSupportedSOAC :: H.SOAC SOACS -> (Bool, Bool)
+isSupportedSOAC soac
+  | H.Screma _ _ form <- soac,
+    ScremaForm _ [] [] <- form = do
+    (True, False)
+isSupportedSOAC _ = (False, False)
+
+applyPermutation :: 
+    (LocalScope SOACS m, MonadFreshNames m) =>
+    HLSched -> Maybe (H.SOAC SOACS) -> m (Maybe (H.SOAC SOACS))
+applyPermutation _sched Nothing     = pure Nothing
+applyPermutation _sched (Just soac) = pure $ Just soac
+
+mkProEpilogue ::
+    (LocalScope SOACS m, MonadFreshNames m) =>
+    PatElem (LetDec SOACS) ->
+    H.ArrayTransforms ->
+    HLSched ->
+    PatElem (LetDec SOACS) ->
+    m (Stms SOACS, Stms SOACS)
+mkProEpilogue _patel_res _out_trsfs _sched _patel_sched = do
+  pure (mempty, mempty)
+
+
+
+-------------------------------------------------------------------------
+--- Previous code
+-------------------------------------------------------------------------
+
 {--  
     sched_nodeT <- snd node_to_fuse,
     sched_node_id <- nodeFromLNode node_to_fuse,

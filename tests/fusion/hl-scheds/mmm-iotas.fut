@@ -1,6 +1,7 @@
 ----------------------------------------------------------------------
 -- High-Level Schedule for "traditional" dense matrix multiplication
--- that is not aimed at tensor cores, e.g., element type: f32 / f64
+--  that is not aimed at tensor cores, e.g., element type: f32 / f64
+-- Tests the use of iotas.
 ----------------------------------------------------------------------
 
 import "utils"
@@ -12,7 +13,7 @@ def mmm [M][N][Q] (A: [M][Q]real) (B: [Q][N]real) : [M][N]real =
   let (m, Tm, Rm) = strip2 M
   let (n, Tn, Rn) = strip2 N
   let (q, Tq)     = strip1 Q
-  let C = imap A (\Arow -> imap (transpose B) (\Bcol -> padDotProd (q*Tq) 0 Arow Bcol )) 
+  let C = imap (iota M) (\i -> imap (iota N) (\j -> #[unsafe] padDotProd (q*Tq) 0 A[i] B[:,j] )) 
   in  hlSched2D C ( Rm*Tn*Rn
                   , [m, Tm, Rm, n, Tn, Rn, q, Tq]  -- dims length
                   , [0,  0,  0, 1,  1,  1, 2,  2]  -- orig dimensions

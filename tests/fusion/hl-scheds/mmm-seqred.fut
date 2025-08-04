@@ -1,12 +1,16 @@
 ----------------------------------------------------------------------
 -- High-Level Schedule for "traditional" dense matrix multiplication
--- that is not aimed at tensor cores, e.g., element type: f32 / f64
+--  that is not aimed at tensor cores, e.g., element type: f32 / f64
+-- The reduce o map is written as a loop
 ----------------------------------------------------------------------
 
 import "utils"
 
 def padDotProd [M] (N: i64) (v: real) (xs: [M]real) (ys: [M]real) : real =
-  map2 (*) (pad1D xs N v) (pad1D ys N v) |> reduce (+) 0
+  let xs' = pad1D xs N v
+  let ys' = pad1D ys N v
+  in  loop s = 0 for i < N do
+        s + xs'[i] * ys'[i]
 
 def mmm [M][N][Q] (A: [M][Q]real) (B: [Q][N]real) : [M][N]real =
   let (m, Tm, Rm) = strip2 M
