@@ -1,0 +1,34 @@
+The intent is to provide a list of changes w.r.t. master.
+If I forget something, in principle, changes have comments 
+that include the word "cosmin", so you can grep for them.
+
+1. In `src/Futhark/IR/SOACS/Simplify.hs` -> 
+
+   (a) Have disabled rule `RuleOp simplifyMapIota` from `topDownRules`
+   (b) have disabled hoisting out of parallel constructs in 
+         `simplifySOACS`, `simplifyFun` and `simplifyLambda` using
+         the newly defined `dont_hoist_from_par`
+
+2. In `Futhark.Optimise.Simplify.Engine` ->
+    -  added `alwaysBlocks` to the list of exports
+
+3. In `src/Futhark/Optimise/InliningDeadFun.hs` ->
+   Added treatment for special functions, such as
+     `pad1D`, `strip1`, `strip2`, `hlSched2D`, `fuseSched2D`.
+   These are included in global variable `do_not_inline` and
+     prevented from being inlined, so we can find them and use
+     their intended semantics.
+
+4. In `Futhark.Optimise.Fusion.GraphRep`
+   Added and exported function `isHLschedNodeT`, which identifies schedules
+   and various other modifications.
+   
+5. In `Futhark.Optimise.Fusion`
+   - modified `relevant` nodes for vertical fusion in `doVerticalFusion`
+   - function `tryFuseNodeInGraph` is the entry point for applying HL-Schedules,
+       i.e., calls `HLS.applyHLsched`
+
+6. High-Level Schedules are implemented starting with new source file
+     `Futhark.Optimise.Fusion.HLsched`, which exports `applyHLsched`
+
+7. ,,,
