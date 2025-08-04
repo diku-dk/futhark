@@ -22,4 +22,3 @@ let matmat [m][n][q] (mat1: [m][q]real, mat2: [n][q]real) : [m][n]real =
 
 entry rev_J [m][n][q] (mat1: [m][q]real) (mat2: [n][q]real) (res_adj: [m][n]real) =
   vjp matmat (mat1, mat2) res_adj
-
