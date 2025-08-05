@@ -148,7 +148,9 @@ sequentialStreamWholeArray pat w nes lam arrs = do
   -- to make the types work out; this will be simplified rapidly).
   forM_ (zip arr_params arrs) $ \(p, arr) ->
     letBindNames [paramName p] $
-      shapeCoerce (arrayDims $ paramType p) arr
+      if null (arrayDims $ paramType p)
+        then BasicOp $ SubExp $ Var arr
+        else shapeCoerce (arrayDims $ paramType p) arr
 
   -- Then we just inline the lambda body.
   mapM_ addStm $ bodyStms $ lambdaBody lam
