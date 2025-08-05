@@ -32,7 +32,7 @@ import Futhark.Analysis.Properties.Util
 import Futhark.MonadFreshNames (VNameSource, newNameFromString, newVName)
 import Futhark.SoP.Monad (addEquiv, addProperty, getProperties)
 import Futhark.SoP.Refine (addRel)
-import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.+.), (.-.), (~*~), (~+~), (~-~))
+import Futhark.SoP.SoP (Rel (..), SoP, int2SoP, justSym, mapSymSoP, negSoP, sym2SoP, (.*.), (.+.), (.-.), (~*~), (~+~), (~-~))
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic (FileModule (fileProg), ImportName, Imports)
 
@@ -55,52 +55,41 @@ newIndexFn :: E.VName -> E.TypeBase E.Exp u -> IndexFnM [IndexFn]
 newIndexFn vn t = do
   -- x :: [n](t, (t, t))
   --  -->
-  --  x = for i < n . for j < 2 . for k < tshape(j) . x(i,j,k)
+  --  x = for i < n . for j < 2 . for k < j=0 + j=1 * 2 . x(i,j,k)
   (array_shape, tuple_shape) <- shapeOf t
   let (regular, irregular) = part [] tuple_shape
-  printM 2 $ "tuple_shape " <> prettyStr tuple_shape
-  printM 2 $ "regular " <> prettyStr regular
-  printM 2 $ "irregular " <> prettyStr irregular
-  let dims = array_shape <> map (int2SoP . toInteger) regular
-  createUninterpretedIndexFn vn dims (map (map (int2SoP . toInteger)) irregular)
+  let regular_dims = array_shape <> map (int2SoP . toInteger) regular
+  f <- createUninterpretedIndexFn vn regular_dims irregular
+  insertIndexFn vn f
+  pure f
   where
     part regular (shape : shapes)
       | all (== head shape) shape = part (regular <> shape) shapes
       | otherwise = (regular, shape : shapes)
     part regular [] = (regular, [])
 
-createUninterpretedIndexFn :: E.VName -> [SoP Symbol] -> [[SoP Symbol]] -> IndexFnM [IndexFn]
-createUninterpretedIndexFn vn regular_dims irregular_shape = do
-  f <- case regular_dims <> mconcat irregular_shape of
-    [] ->
-      -- Canonical scalar representation.
-      pure [IndexFn [] (singleCase $ sVar vn)]
-    _ -> do
-      -- Canonical array representation.
-      regular_ids <-
-        zipWithM (\_ i -> newVName i) regular_dims $
-          mconcat (repeat ["i", "j", "k"])
-      irregular_ids <-
-        zipWithM (\_ i -> newVName i) irregular_shape $
-          mconcat (repeat [".i", ".j", ".k"])
-      irregular_names <- mapM (\_ -> newVName "d") irregular_shape
-      let irregular_dims =
-            zipWith
-              (\d i -> sym2SoP $ Apply (Var d) [sVar i])
-              irregular_names
-              (last regular_ids : irregular_ids)
-      let ids = regular_ids <> irregular_ids
-      let shape = regular_dims <> irregular_dims
-      printM 2 $ "ids " <> prettyStr ids
-      printM 2 $ "shape " <> prettyStr shape
-      pure
-        [ IndexFn
-            { shape = zipWith (\sz i -> Forall i (Iota sz)) shape ids,
-              body = singleCase . sym2SoP $ Apply (Var vn) (map sVar ids)
-            }
-        ]
-  insertIndexFn vn f
-  pure f
+createUninterpretedIndexFn :: E.VName -> [SoP Symbol] -> [[Integer]] -> IndexFnM [IndexFn]
+createUninterpretedIndexFn vn [] [] = do
+  -- Uninterpreted scalar.
+  pure [IndexFn [] (singleCase $ sVar vn)]
+createUninterpretedIndexFn vn regular_dims irregular_shapes = do
+  -- Uinterpreted array/tuple.
+  ids <- mapM newVName (take num_dims $ cycle ["i", "j", "k"])
+  let irregular_dims =
+        zipWith mkIrregDim (drop (length regular_dims - 1) ids) irregular_shapes
+  let shape = regular_dims <> irregular_dims
+  pure
+    [ IndexFn
+        { shape = zipWith (\sz i -> Forall i (Iota sz)) shape ids,
+          body = singleCase . sym2SoP $ Apply (Var vn) (map sVar ids)
+        }
+    ]
+  where
+    num_dims = length regular_dims + length irregular_shapes
+    mkIrregDim i shape =
+      foldl1 (.+.) $
+        zipWith (\idx sz -> i `equals` idx .*. int2SoP sz) [0 ..] shape
+    equals a b = sym2SoP (sVar a :== int2SoP b)
 
 {-
     Construct index function for source program
@@ -128,8 +117,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ _ params body _ _ val_loc)
       printM 1 $
         emphString ("Analyzing " <> prettyStr (E.locText (E.srclocOf val_loc)))
           <> prettyStr val
-      forM_ (concatMap E.patternMap params) $ \(param, t) ->
-        newIndexFn param t
+      forM_ (concatMap E.patternMap params) (uncurry newIndexFn)
       forM_ params addPreconditions
       forM_ params addBooleanNames
       forM_ params addSizeVariables
@@ -1062,7 +1050,7 @@ getTERefine _ = []
 hasRefinement :: E.TypeExp E.Exp E.VName -> Bool
 hasRefinement = not . null . getTERefine
 
-shapeOf :: E.TypeBase E.Exp as -> IndexFnM ([SoP Symbol], [[Int]])
+shapeOf :: E.TypeBase E.Exp as -> IndexFnM ([SoP Symbol], [[Integer]])
 shapeOf (E.Scalar (E.Refinement t _)) = shapeOf t
 shapeOf (E.Scalar t) = pure (mempty, tupleToShape t)
 shapeOf (E.Array _ shp t) = do
@@ -1079,8 +1067,8 @@ shapeOf (E.Array _ shp t) = do
 newtype Tree a = Node [Tree a]
   deriving (Show)
 
-tupleToShape :: E.ScalarTypeBase dim u -> [[Int]]
-tupleToShape = count . Node . (: []) . toTree
+tupleToShape :: E.ScalarTypeBase dim u -> [[Integer]]
+tupleToShape = map (map toInteger) . count . Node . (: []) . toTree
   where
     count (Node xs)
       | all (\(Node x) -> null x) xs = []
