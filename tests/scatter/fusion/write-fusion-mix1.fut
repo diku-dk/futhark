@@ -9,15 +9,16 @@
 --   [3i64, 3i64, 4i64, 6i64, 6i64, 14i64]
 --   [13i64, 12i64, 4i64, 5i64, 19i64, 7i64]
 -- }
--- structure { Scatter 1 }
+-- structure { Screma 2 }
 
-def main [k][n] (numbers: [k]i64)
-                (array0: *[n]i64)
-                (array1: *[n]i64): ([n]i64, [n]i64) =
-  let indexes0 = map (+1) numbers
-  let indexes1 = map (+2) numbers
-  let values0 = map (+3) numbers
-  let values1 = map (+4) numbers
+def main [k] [n]
+         (numbers: [k]i64)
+         (array0: *[n]i64)
+         (array1: *[n]i64) : ([n]i64, [n]i64) =
+  let indexes0 = map (+ 1) numbers
+  let indexes1 = map (+ 2) numbers
+  let values0 = map (+ 3) numbers
+  let values1 = map (+ 4) numbers
   let array0' = scatter array0 indexes0 values0
   let array1' = scatter array1 indexes1 values1
   in (array0', array1')
