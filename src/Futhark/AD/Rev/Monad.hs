@@ -265,8 +265,11 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
                 addSubstitution v' v
                 pure [(v, v')]
               _ -> pure mempty
-       in M.fromList . mconcat
-            <$> mapM onConsumed (namesToList $ consumedInStms $ fst (Alias.analyseStms mempty (oneStm stm)))
+
+          consumed =
+            namesToList . consumedInStms $
+              fst (Alias.analyseStms mempty (oneStm stm))
+       in M.fromList . mconcat <$> mapM onConsumed consumed
 
 copyConsumedArrsInBody :: [VName] -> Body SOACS -> ADM Substitutions
 copyConsumedArrsInBody dontCopy b =
