@@ -19,7 +19,7 @@ import Futhark.Analysis.Properties.Symbol
 import Futhark.Analysis.Properties.Traversals (ASTMappable (..), ASTMapper (..))
 import Futhark.Analysis.Properties.Unify (Substitution, sub, unify)
 import Futhark.MonadFreshNames (newVName)
-import Futhark.SoP.SoP (SoP, int2SoP, sym2SoP, (.+.), (.-.))
+import Futhark.SoP.SoP (SoP, int2SoP, justConstant, sym2SoP, (.+.), (.-.))
 
 -- | Simplify symbols using algebraic solver.
 simplify :: (ASTMappable Symbol a) => a -> IndexFnM a
@@ -65,7 +65,11 @@ simplify = astMap m
 
     simplifySymbol :: Symbol -> IndexFnM Symbol
     simplifySymbol symbol = case symbol of
-      _ :== _ -> refine symbol
+      a :== b
+        | Just c <- justConstant a,
+          Just d <- justConstant b ->
+            pure (Bool $ c == d)
+        | otherwise -> refine symbol
       _ :/= _ -> refine symbol
       _ :> _ -> refine symbol
       _ :>= _ -> refine symbol
@@ -129,14 +133,21 @@ simplify = astMap m
     -- Use Fourier-Motzkin elimination to determine the truth value
     -- of an expresion, if it can be determined in the given environment.
     -- If the truth value cannot be determined, False is also returned.
-    solve (Bool True) = pure Yes
-    solve (a :== b) = a $== b
-    solve (a :/= b) = a $/= b
-    solve (a :> b) = a $> b
-    solve (a :>= b) = a $>= b
-    solve (a :< b) = a $< b
-    solve (a :<= b) = a $<= b
-    solve _ = pure Unknown
+    solve expr = case expr of
+      Bool True -> pure Yes
+      a :== b -> solveBinOp (==) ($==) a b
+      a :/= b -> solveBinOp (/=) ($/=) a b
+      a :> b -> solveBinOp (>) ($>) a b
+      a :>= b -> solveBinOp (>=) ($>=) a b
+      a :< b -> solveBinOp (<) ($<) a b
+      a :<= b -> solveBinOp (<=) ($<=) a b
+      _ -> pure Unknown
+
+    solveBinOp op solver a b
+      | Just c <- justConstant a,
+        Just d <- justConstant b =
+          pure (answerFromBool $ op c d)
+      | otherwise = solver a b
 
 -- | Does this symbol simplify to true?
 isTrue :: Symbol -> IndexFnM Answer
@@ -170,5 +181,6 @@ printAlgM :: Int -> SoP Symbol -> IndexFnM ()
 printAlgM level x = rollbackAlgEnv $ do
   alg_x :: SoP Algebra.Symbol <- toAlgebra x
   printM level (prettyStr alg_x)
-  -- env <- getAlgEnv
-  -- printM level $ "under alg env " <> prettyStr env
+
+-- env <- getAlgEnv
+-- printM level $ "under alg env " <> prettyStr env
