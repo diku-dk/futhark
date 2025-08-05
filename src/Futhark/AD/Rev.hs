@@ -9,6 +9,7 @@
 module Futhark.AD.Rev (revVJP) where
 
 import Control.Monad
+import Control.Monad.Identity
 import Data.List ((\\))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map qualified as M
@@ -214,6 +215,27 @@ vjpOps =
       vjpStm = diffStm
     }
 
+-- | Transform updates on accumulators matching the given certificates into
+-- updates that write provided zero values.
+zeroOutUpdates :: [(VName, [SubExp])] -> Lambda SOACS -> Lambda SOACS
+zeroOutUpdates certs_to_zeroes lam = lam {lambdaBody = onBody $ lambdaBody lam}
+  where
+    onExp = runIdentity . mapExpM mapper
+      where
+        mapper =
+          (identityMapper :: (Monad m) => Mapper SOACS SOACS m)
+            { mapOnOp = traverseSOACStms (\_ stms -> pure $ onStms stms),
+              mapOnBody = \_ body -> pure $ onBody body
+            }
+    onStms = fmap onStm
+    onStm (Let (Pat [pe]) aux (BasicOp (UpdateAcc safety acc is _)))
+      | Acc c _ _ _ <- patElemType pe,
+        Just zero <- lookup c certs_to_zeroes =
+          Let (Pat [pe]) aux (BasicOp (UpdateAcc safety acc is zero))
+    onStm (Let pat aux e) = Let pat aux $ onExp e
+
+    onBody body = body {bodyStms = onStms $ bodyStms body}
+
 diffStm :: Stm SOACS -> ADM () -> ADM ()
 diffStm (Let pat aux (BasicOp e)) m =
   diffBasicOp pat aux e m
@@ -286,21 +308,19 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
     free_accs <- filterM (fmap isAcc . lookupType) free_vars
     let free_vars' = free_vars \\ free_accs
     lam'' <- diffLambda' adjs free_vars' lam'
-    inputs' <- zipWithM renameInputLambda (chunks lengths adjs) inputs
-    free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' lam''
+    (inputs_zeroes, inputs') <-
+      unzip <$> zipWithM renameInputLambda (chunks lengths adjs) inputs
+    let certs = map paramName $ take (length inputs) $ lambdaParams lam''
+    free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' $ zeroOutUpdates (zip certs inputs_zeroes) lam''
     zipWithM_ insAdj (arrs <> free_vars') free_adjs
   where
     lengths = map (\(_, as, _) -> length as) inputs
     arrs = concatMap (\(_, as, _) -> as) inputs
     renameInputLambda as_adj (shape, as, _) = do
       nes_ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) as
-      i <- newParam "i" $ Prim int64
-      xs <- mapM (newParam "x") nes_ts
-      ys <- mapM (newParam "y") nes_ts
       zeroes <- mapM (zeroArray mempty) nes_ts
-      f' <- mkLambda (i : xs <> ys) $ pure $ varsRes zeroes
       as' <- mapM adjVal as_adj
-      pure (shape, as', Just (f', map Var zeroes))
+      pure (map Var zeroes, (shape, as', Nothing))
     diffLambda' res_adjs get_adjs_for (Lambda params ts body) = do
       localScope (scopeOfLParams params) $ do
         Body () stms res <- diffBody res_adjs get_adjs_for body
@@ -382,23 +402,38 @@ revVJP scope (Lambda params ts body) =
 -- '[]f64', '[]f32'.  Our current design assumes that adjoints are
 -- single variables.  This is fixable.
 --
+-- In the return sweep, when inserting the with_acc, we still compute the
+-- "original" accumulator result, but modified such that its initial value is
+-- the adjoint of the result of the accumulator. We also modify the update_accs
+-- of these accumulators to be with zero values. This means that the array that
+-- is produced will be equal to the adjoint of the result, except for those
+-- places that have been updated, where it will be zero. This is intuitively
+-- sensible - values that have been overwritten (and so do not contribute to the
+-- result) should obviously have zero sensitivity.
+--
 -- # Adjoint of UpdateAcc
 --
---   Consider primal code
+-- Consider primal code
 --
 --     update_acc(acc, i, v)
 --
---   Interpreted as an imperative statement, this means
+-- Interpreted as an imperative statement, this means
 --
 --     acc[i] ⊕= v
 --
---   for some '⊕'.  Normally all the compiler knows of '⊕' is that it
---   is associative and commutative, but because we assume that all
---   accumulators are the result of previous AD transformations, we
---   can assume that '⊕' actually behaves like addition - that is, has
---   unit partial derivatives.  So the return sweep is
+-- for some '⊕'.  Normally all the compiler knows of '⊕' is that it
+-- is associative and commutative, but because we assume that all
+-- accumulators are the result of previous AD transformations, we
+-- can assume that '⊕' actually behaves like addition - that is, has
+-- unit partial derivatives.  So the return sweep is
 --
 --     v_adj += acc_adj[i]
+--
+-- Further, we modify the primal code so that it becomes
+--
+--     update_acc(acc, i, 0)
+--
+-- for some appropriate notion of zero.
 --
 -- # Adjoint of Map
 --
@@ -433,18 +468,6 @@ revVJP scope (Lambda params ts body) =
 -- entirely.)  Perhaps a better solution is to treat
 -- accumulator-inputs in the primal code as we do free variables, and
 -- create accumulators for them in the return sweep.
---
--- # Adjoint of scatter
---
--- For taking the adjoint of WithAccs formed by scatter, we use a hack. When
--- generating code for the return sweep, we use the primal WithAcc, but modify
--- the operator to be one that always returns zero. (Note that this violates the
--- requirement that a neutral element exists.) We also use the adjoint of the
--- result as the initial value of the accumulator. This means that the array
--- that is produced will be equal to the adjoint, except for those places that
--- have been updated, where it will be zero. This is intuitively sensible -
--- values that have been overwritten (and so do not contribute to the result)
--- should obviously have zero sensitivity.
 --
 -- # Consumption
 --
