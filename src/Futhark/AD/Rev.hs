@@ -22,7 +22,7 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (takeLast)
+import Futhark.Util (chunks, takeLast)
 
 patName :: Pat Type -> ADM VName
 patName (Pat [pe]) = pure $ patElemName pe
@@ -286,16 +286,22 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
     free_accs <- filterM (fmap isAcc . lookupType) free_vars
     let free_vars' = free_vars \\ free_accs
     lam'' <- diffLambda' adjs free_vars' lam'
-    inputs' <- mapM renameInputLambda inputs
+    inputs' <- zipWithM renameInputLambda (chunks lengths adjs) inputs
     free_adjs <- letTupExp "with_acc_contrib" $ WithAcc inputs' lam''
     zipWithM_ insAdj (arrs <> free_vars') free_adjs
   where
+    lengths = map (\(_, as, _) -> length as) inputs
     arrs = concatMap (\(_, as, _) -> as) inputs
-    renameInputLambda (shape, as, Just (f, nes)) = do
-      f' <- renameLambda f
-      pure (shape, as, Just (f', nes))
-    renameInputLambda input = pure input
-    diffLambda' res_adjs get_adjs_for (Lambda params ts body) =
+    renameInputLambda as_adj (shape, as, _) = do
+      nes_ts <- mapM (fmap (stripArray (shapeRank shape)) . lookupType) as
+      i <- newParam "i" $ Prim int64
+      xs <- mapM (newParam "x") nes_ts
+      ys <- mapM (newParam "y") nes_ts
+      zeroes <- mapM (zeroArray mempty) nes_ts
+      f' <- mkLambda (i : xs <> ys) $ pure $ varsRes zeroes
+      as' <- mapM adjVal as_adj
+      pure (shape, as', Just (f', map Var zeroes))
+    diffLambda' res_adjs get_adjs_for (Lambda params ts body) = do
       localScope (scopeOfLParams params) $ do
         Body () stms res <- diffBody res_adjs get_adjs_for body
         let body' = Body () stms $ take (length inputs) res <> takeLast (length get_adjs_for) res
@@ -359,9 +365,15 @@ revVJP scope (Lambda params ts body) =
 -- some assumptions and lay down a basic design.
 --
 -- First, we assume that any WithAccs that occur in the program are
--- the result of previous invocations of VJP.  This means we can rely
--- on the operator having a constant adjoint (it's some kind of
--- addition).
+-- come from one of these sources:
+--
+-- - A previous instance of VJP, which means we can rely on the operator having
+--   a constant adjoint (it's addition as appropriate to the type).
+--
+-- - A scatter, meaning there is no operator.
+--
+-- (These can actually be distinguished by the presence of an operator, although
+-- we do not currently bother.)
 --
 -- Second, the adjoint of an accumulator is an array of the same type
 -- as the underlying array.  For example, the adjoint type of the
@@ -421,6 +433,18 @@ revVJP scope (Lambda params ts body) =
 -- entirely.)  Perhaps a better solution is to treat
 -- accumulator-inputs in the primal code as we do free variables, and
 -- create accumulators for them in the return sweep.
+--
+-- # Adjoint of scatter
+--
+-- For taking the adjoint of WithAccs formed by scatter, we use a hack. When
+-- generating code for the return sweep, we use the primal WithAcc, but modify
+-- the operator to be one that always returns zero. (Note that this violates the
+-- requirement that a neutral element exists.) We also use the adjoint of the
+-- result as the initial value of the accumulator. This means that the array
+-- that is produced will be equal to the adjoint, except for those places that
+-- have been updated, where it will be zero. This is intuitively sensible -
+-- values that have been overwritten (and so do not contribute to the result)
+-- should obviously have zero sensitivity.
 --
 -- # Consumption
 --

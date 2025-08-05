@@ -40,6 +40,7 @@ module Futhark.AD.Rev.Monad
     tabNest,
     oneExp,
     zeroExp,
+    zeroArray,
     unitAdjOfType,
     addLambda,
     --
@@ -126,6 +127,9 @@ instance Substitute Adj where
   substituteNames m (AdjVal (Var v)) = AdjVal $ Var $ substituteNames m v
   substituteNames _ adj = adj
 
+-- | Create an array of the given shape and element type consisting of zeroes.
+-- The shape may be empty, meaning this function can (despite its name) also
+-- create non-arrays.
 zeroArray :: (MonadBuilder m) => Shape -> Type -> m VName
 zeroArray shape t
   | shapeRank shape == 0 =
