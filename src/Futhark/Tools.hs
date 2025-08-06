@@ -189,23 +189,27 @@ doScatter ::
   ([LParam (Rep m)] -> m [SubExp]) ->
   m [VName]
 doScatter desc rank dest arrs mk = do
-  acc_cert_v <- newVName "acc_cert"
+  cert_ps <- replicateM (length dest) $ newParam "acc_cert" $ Prim Unit
   dest_ts <- mapM lookupType dest
   let acc_shape = Shape $ take rank $ arrayDims $ head dest_ts
-      elem_ts = map (stripArray rank) dest_ts
-      acc_t = Acc acc_cert_v acc_shape elem_ts NoUniqueness
-  acc_p <- newParam "acc_p" acc_t
+      mkT cert elem_t = Acc cert acc_shape [elem_t] NoUniqueness
+      acc_ts =
+        zipWith mkT (map paramName cert_ps) $
+          map (stripArray rank) dest_ts
+  acc_ps <- mapM (newParam "acc_p") acc_ts
   arrs_ts <- mapM lookupType arrs
-  withacc_lam <- mkLambda [Param mempty acc_cert_v (Prim Unit), acc_p] $ do
-    acc_p_inner <- newParam "acc_p" acc_t
+
+  withacc_lam <- mkLambda (cert_ps <> acc_ps) $ do
+    acc_ps_inner <- mapM (newParam "acc_p") acc_ts
     params <- mapM (newParam "v" . stripArray 1) arrs_ts
     map_lam <-
-      mkLambda (acc_p_inner : params) $ do
+      mkLambda (acc_ps_inner <> params) $ do
         (is, vs) <- splitAt rank <$> mk params
-        fmap (pure . subExpRes) . letSubExp "scatter_acc" . BasicOp $
-          UpdateAcc Safe (paramName acc_p_inner) is vs
+        fmap subExpsRes $ forM (zip acc_ps_inner vs) $ \(acc_p_inner, v) ->
+          letSubExp "scatter_acc" . BasicOp $
+            UpdateAcc Safe (paramName acc_p_inner) is [v]
     let w = arraysSize 0 arrs_ts
     fmap varsRes . letTupExp "acc_res" . Op $
-      Screma w (paramName acc_p : arrs) (mapSOAC map_lam)
+      Screma w (map paramName acc_ps <> arrs) (mapSOAC map_lam)
 
-  letTupExp desc $ WithAcc [(acc_shape, dest, Nothing)] withacc_lam
+  letTupExp desc $ WithAcc [(acc_shape, [v], Nothing) | v <- dest] withacc_lam

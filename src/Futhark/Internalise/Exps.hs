@@ -1621,30 +1621,8 @@ scatterF rank dest is v desc = do
   is' <- internaliseExpToVars "write_arg_i" is
   v' <- internaliseExpToVars "write_arg_v" v
   dest' <- internaliseExpToVars "write_arg_a" dest
-  acc_cert_v <- newVName "acc_cert"
-  dest_ts <- mapM lookupType dest'
-  let acc_shape = I.Shape $ take rank $ arrayDims $ head dest_ts
-      elem_ts = map (I.stripArray rank) dest_ts
-      acc_t = Acc acc_cert_v acc_shape elem_ts NoUniqueness
-  acc_p <- newParam "acc_p" acc_t
-  withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
-    v_ts <- mapM lookupType v'
-    acc_p_inner <- newParam "acc_p" acc_t
-    is_params <- replicateM (length is') $ I.newParam "i" $ I.Prim int64
-    v_params <- mapM (newParam "v" . I.stripArray rank) dest_ts
-    map_lam <-
-      mkLambda (acc_p_inner : is_params <> v_params) $
-        fmap (pure . subExpRes) . letSubExp "scatter_acc" . BasicOp $
-          UpdateAcc
-            Safe
-            (I.paramName acc_p_inner)
-            (map (I.Var . I.paramName) is_params)
-            (map (I.Var . I.paramName) v_params)
-    let w = arraysSize 0 v_ts
-    fmap subExpsRes . letValExp' "acc_res" . I.Op $
-      I.Screma w (I.paramName acc_p : is' <> v') (mapSOAC map_lam)
-
-  letTupExp' desc $ WithAcc [(acc_shape, dest', Nothing)] withacc_lam
+  map I.Var
+    <$> doScatter desc rank dest' (is' <> v') (pure . map (I.Var . I.paramName))
 
 -- | Handle intrinsic functions.  These are only allowed to be called
 -- in the prelude, and their internalisation may involve inspecting
