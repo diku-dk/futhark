@@ -4,4 +4,4 @@
 -- structure gpu { SegMap/Loop/SegMap 2 }
 
 def main (xs: []i32) =
-  map (\x -> #[sequential] i32.sum (map (+x) xs)) xs
+  map (\x -> #[sequential] i32.sum (map (+ x) xs)) xs

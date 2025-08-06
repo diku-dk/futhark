@@ -2,4 +2,4 @@
 -- ==
 -- error: aliased to "x"
 
-def main (x: []i32) : *[]i32 = let y : *[]i32 = x in y
+def main (x: []i32) : *[]i32 = let y: *[]i32 = x in y

@@ -30,9 +30,9 @@
 -- input { [0u16, 0x8000u16] }
 -- output { [0x8000u16, 0u16] }
 
-entry testInf (xs: []f16) (ys: []f16) = map2 (\x y -> f16.isinf(x/y)) xs ys
-entry testNaN (xs: []f16) = map (\x -> f16.isnan(f16.sqrt(x))) xs
+entry testInf (xs: []f16) (ys: []f16) = map2 (\x y -> f16.isinf (x / y)) xs ys
+entry testNaN (xs: []f16) = map (\x -> f16.isnan (f16.sqrt (x))) xs
 entry testToBits (xs: []f16) = map f16.to_bits xs
-entry testFromBits (xs: []f16) = map (\x -> f16.from_bits(f16.to_bits(x))) xs
+entry testFromBits (xs: []f16) = map (\x -> f16.from_bits (f16.to_bits (x))) xs
 entry testNeg = map f16.neg
 entry testNegBits = map (f16.from_bits >-> f16.neg >-> f16.to_bits)

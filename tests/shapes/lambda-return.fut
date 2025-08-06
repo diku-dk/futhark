@@ -15,10 +15,11 @@
 --    [7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9]]
 -- }
 
-def multiply (a: []i32) (x: i64) (n: i64): [n]i32 =
-  (loop (a) for i < x-1 do concat a a) :> [n]i32
+def multiply (a: []i32) (x: i64) (n: i64) : [n]i32 =
+  (loop (a) for i < x - 1 do concat a a) :> [n]i32
 
-def main [m] (a: [m][]i32) (x: i64): [][]i32 =
-  let n = m * (2 ** (x-1))
-  in map (\(r: []i32): [n]i32  ->
-           multiply r x n) a
+def main [m] (a: [m][]i32) (x: i64) : [][]i32 =
+  let n = m * (2 ** (x - 1))
+  in map (\(r: []i32) : [n]i32 ->
+            multiply r x n)
+         a

@@ -8,10 +8,10 @@
 -- input { false 3i64 }
 -- output { [1337i64,1337i64,1337i64] }
 
-def f [n] (a: [n]i64): []i64 = a
+def f [n] (a: [n]i64) : []i64 = a
 
-def g(n: i64): []i64 = replicate n 1337
+def g (n: i64) : []i64 = replicate n 1337
 
-def main (b: bool) (n: i64): []i64 =
-  let a = iota(n) in
-  if b then f(a) else g(n)
+def main (b: bool) (n: i64) : []i64 =
+  let a = iota (n)
+  in if b then f (a) else g (n)

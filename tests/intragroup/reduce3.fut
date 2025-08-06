@@ -6,4 +6,4 @@
 
 def main xsss =
   #[incremental_flattening(only_intra)]
-  map (map (i32.sum >-> (*2))) xsss
+  map (map (i32.sum >-> (* 2))) xsss

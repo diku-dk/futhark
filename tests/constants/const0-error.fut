@@ -2,6 +2,6 @@
 -- ==
 -- error: i32
 
-def x: i32 = 2.0
+def x : i32 = 2.0
 
-def main(): i32 = 2
+def main () : i32 = 2

@@ -2,5 +2,6 @@
 -- ==
 -- error: expected type
 
-def f r = let y = r.l2
-          in (r: {l1: i32})
+def f r =
+  let y = r.l2
+  in (r : {l1: i32})

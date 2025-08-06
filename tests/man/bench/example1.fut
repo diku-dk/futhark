@@ -10,5 +10,5 @@
 -- compiled input { 1000000i64 }
 -- output { 499999500000i64 }
 
-def main(n: i64): i64 =
+def main (n: i64) : i64 =
   reduce (+) 0 (iota n)

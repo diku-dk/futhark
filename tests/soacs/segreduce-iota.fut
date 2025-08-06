@@ -8,4 +8,4 @@
 
 def array n m = map (\i -> replicate m (i32.i64 i)) (iota n)
 
-entry main n m: []i32 = array n m |> map i32.sum
+entry main n m : []i32 = array n m |> map i32.sum

@@ -2,8 +2,8 @@
 -- causes the 'n' name to disappear.
 -- ==
 
-module sobol_dir = { def n: i32 = 1 }
+module sobol_dir = {def n : i32 = 1}
 
 module type sobol_dir = {}
 
-module A: {val n: i32} = sobol_dir
+module A : {val n : i32} = sobol_dir

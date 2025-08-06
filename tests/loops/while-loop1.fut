@@ -10,5 +10,5 @@
 --   [7, 8, 9, 10, 11, 12]
 -- }
 
-def main (a: []i32) (i: i32) (bound: i32): []i32 =
-  loop (a) while a[i] < bound do map (+1) a
+def main (a: []i32) (i: i32) (bound: i32) : []i32 =
+  loop (a) while a[i] < bound do map (+ 1) a

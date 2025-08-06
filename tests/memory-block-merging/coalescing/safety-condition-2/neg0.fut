@@ -12,7 +12,7 @@
 -- structure seq-mem { Alloc 1 }
 -- structure gpu-mem { Alloc 1 }
 
-let main [n] (i: i64) (ys: [n]i64): [n][n]i64 =
+def main [n] (i: i64) (ys: [n]i64) : [n][n]i64 =
   let xs = tabulate_2d n n (\i j -> i * n + j)
   let xs[i] = ys
   in xs
