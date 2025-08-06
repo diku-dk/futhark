@@ -436,6 +436,31 @@ hFuseNodeT (SoacNode ots1 pats1 soac1 aux1) (SoacNode ots2 pats2 soac2 aux2)
                 zipWith PatElem (TF.fsOutNames ker') (H.typeOf (TF.fsSOAC ker'))
           fusedSomething $ SoacNode mempty (Pat pats2') (TF.fsSOAC ker') (aux1 <> aux2)
         Nothing -> pure Nothing
+hFuseNodeT
+  (StmNode (Let pat1 aux1 (WithAcc w1_inps lam1)))
+  (StmNode (Let pat2 aux2 (WithAcc w2_inps lam2))) = do
+    -- The only tricky thing here is that we have to put all the
+    -- accumulator-based results first.
+    let num_inputs1 = length w1_inps
+        num_inputs2 = length w2_inps
+        num_arrs1 = sum $ map (\(_, as, _) -> length as) w1_inps
+        num_arrs2 = sum $ map (\(_, as, _) -> length as) w2_inps
+        w3_inps = w1_inps <> w2_inps
+        reorder f n a m b =
+          let (a_xs, a_ys) = splitAt n $ f a
+              (b_xs, b_ys) = splitAt m $ f b
+           in a_xs <> b_xs <> a_ys <> b_ys
+        lam3 =
+          Lambda
+            (reorder lambdaParams num_inputs1 lam1 num_inputs2 lam2)
+            (reorder lambdaReturnType num_inputs1 lam1 num_inputs2 lam2)
+            $ mkBody
+              (bodyStms (lambdaBody lam1) <> bodyStms (lambdaBody lam2))
+              (reorder (bodyResult . lambdaBody) num_inputs1 lam1 num_inputs2 lam2)
+    fusedSomething $
+      StmNode $
+        Let (Pat $ reorder patElems num_arrs1 pat1 num_arrs2 pat2) (aux1 <> aux2) $
+          WithAcc w3_inps lam3
 hFuseNodeT _ _ = pure Nothing
 
 removeOutputsExcept :: [VName] -> NodeT -> NodeT
@@ -490,13 +515,13 @@ doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relev
     relevant (_, ResNode {}) = False
     relevant _ = True
 
--- | For each pair of SOAC nodes that share an input, attempt to fuse
--- them horizontally.
+-- | For each pair of SOAC nodes that share an input, or any WithAcc nodes,
+-- attempt to fuse them horizontally.
 doHorizontalFusion :: DepGraphAug FusionM
-doHorizontalFusion dg = applyAugs pairs dg
+doHorizontalFusion dg = applyAugs (soac_pairs <> withacc_pairs) dg
   where
-    pairs :: [DepGraphAug FusionM]
-    pairs = do
+    soac_pairs, withacc_pairs :: [DepGraphAug FusionM]
+    soac_pairs = do
       (x, SoacNode _ _ soac_x _) <- G.labNodes $ dgGraph dg
       (y, SoacNode _ _ soac_y _) <- G.labNodes $ dgGraph dg
       guard $ x < y
@@ -505,6 +530,16 @@ doHorizontalFusion dg = applyAugs pairs dg
         any
           ((`elem` map H.inputArray (H.inputs soac_x)) . H.inputArray)
           (H.inputs soac_y)
+      pure $ \dg' -> do
+        -- Nodes might have been fused away by now.
+        if G.gelem x (dgGraph dg') && G.gelem y (dgGraph dg')
+          then hTryFuseNodesInGraph x y dg'
+          else pure dg'
+
+    withacc_pairs = do
+      (x, StmNode (Let _ _ (WithAcc {}))) <- G.labNodes $ dgGraph dg
+      (y, StmNode (Let _ _ (WithAcc {}))) <- G.labNodes $ dgGraph dg
+      guard $ x < y
       pure $ \dg' -> do
         -- Nodes might have been fused away by now.
         if G.gelem x (dgGraph dg') && G.gelem y (dgGraph dg')

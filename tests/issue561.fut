@@ -1,5 +1,5 @@
 -- ==
--- structure { Screma 4 }
+-- structure { Screma 2 }
 
 def main [n_indices]
          ( scan_num_edges: [n_indices]i64

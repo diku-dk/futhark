@@ -1,7 +1,7 @@
 -- Test that write-write fusion is *not* applied when one write uses the output
 -- of another write.
 -- ==
--- structure { Screma 2 }
+-- structure { Screma 1 }
 
 def main [k] [n]
          ( indexes: [k]i64

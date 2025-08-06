@@ -9,7 +9,7 @@
 --   [3i64, 3i64, 4i64, 6i64, 6i64, 14i64]
 --   [13i64, 12i64, 4i64, 5i64, 19i64, 7i64]
 -- }
--- structure { Screma 2 }
+-- structure { Screma 1 }
 
 def main [k] [n]
          (numbers: [k]i64)

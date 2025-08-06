@@ -1,7 +1,7 @@
 -- Test that map-write fusion is *not* applied when not all of the map outputs
 -- are used in the write.
 -- ==
--- structure { Screma 2 }
+-- structure { Screma 1 }
 
 def main [k] [n]
          ( indexes: [k]i64
