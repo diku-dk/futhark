@@ -24,6 +24,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
+import Data.Bifunctor
 import Data.Either
 import Data.Foldable
 import Data.List (partition, transpose, unzip4)
@@ -197,6 +198,7 @@ topDownRules =
     RuleOp simplifyKnownIterationSOAC,
     RuleOp liftIdentityMapping,
     RuleOp removeDuplicateMapOutput,
+    RuleOp fuseConcatScatter,
     RuleOp simplifyMapIota,
     RuleOp moveTransformToInput,
     RuleOp moveTransformToOutput
@@ -554,6 +556,53 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form) =
             Screma w arrs (mkOp redlam' used_nes maplam')
     removeDeadReduction' _ _ _ _ = Skip
 removeDeadReduction _ _ _ _ = Skip
+
+{-# NOINLINE fuseConcatScatter #-}
+fuseConcatScatter :: TopDownRuleOp (Wise SOACS)
+fuseConcatScatter vtable pat aux (Screma _ arrs form)
+  | Just lam <- isMapSOAC form,
+    all isAcc $ lambdaReturnType lam,
+    Just (accs, (ws@(w' : _), ps, xss, css)) <-
+      second unzip4 . partitionEithers
+        <$> mapM isConcatOrAcc (zip (lambdaParams lam) arrs),
+    xivs <- transpose xss,
+    all (w' ==) ws = Simplify $ auxing aux $ certifying (mconcat css) $ do
+      -- r is the amount of arrays being concatenated.
+      let r = length xivs
+          num_accs = length accs
+      lams <- replicateM r (renameLambda lam {lambdaParams = map fst accs <> ps})
+      let acc_params = map fst accs
+          input_params = concatMap (drop num_accs . lambdaParams) lams
+      lam' <-
+        mkLambda (acc_params <> input_params) $
+          subExpsRes <$> recurse (map (Var . paramName) acc_params) lams
+      letBind pat $ Op $ Screma w' (map snd accs <> concat xivs) (mapSOAC lam')
+  where
+    recurse accs [] = pure accs
+    recurse accs (lam : lams) = do
+      -- We know that the accumulators are the first params and that the rest are
+      -- already bound.
+      forM_ (zip accs (lambdaParams lam)) $ \(acc, p) ->
+        letBindNames [paramName p] $ BasicOp $ SubExp acc
+      accs' <- map resSubExp <$> bodyBind (lambdaBody lam)
+      recurse accs' lams
+
+    sizeOf :: VName -> Maybe SubExp
+    sizeOf x = arraySize 0 . typeOf <$> ST.lookup x vtable
+    isConcatOrAcc (p@(Param _ _ Acc {}), v) =
+      pure (Left (p, v))
+    isConcatOrAcc (p, v) = case ST.lookupExp v vtable of
+      Just (BasicOp (Concat 0 (x :| ys) _), cs) -> do
+        x_w <- sizeOf x
+        y_ws <- mapM sizeOf ys
+        guard $ all (x_w ==) y_ws
+        pure (Right (x_w, p, x : ys, cs))
+      Just (BasicOp (Reshape arr newshape), cs)
+        | ReshapeCoerce <- reshapeKind newshape -> do
+            Right (a, _, b, cs') <- isConcatOrAcc (p, arr)
+            pure (Right (a, p, b, cs <> cs'))
+      _ -> Nothing
+fuseConcatScatter _ _ _ _ = Skip
 
 simplifyClosedFormReduce :: TopDownRuleOp (Wise SOACS)
 simplifyClosedFormReduce _ pat _ (Screma (Constant w) _ form)
