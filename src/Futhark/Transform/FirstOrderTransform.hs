@@ -293,34 +293,6 @@ transformSOAC pat (Stream w arrs nes lam) = do
       pure $ subExpsRes $ res' ++ mapout_res'
 
   letBind pat $ Loop merge loop_form loop_body
-transformSOAC pat (Scatter len ivs as lam) = do
-  iter <- newVName "write_iter"
-
-  let (as_ws, as_ns, as_vs) = unzip3 as
-  ts <- mapM lookupType as_vs
-  asOuts <- mapM (newIdent "write_out") ts
-
-  -- Scatter is in-place, so we use the input array as the output array.
-  let merge = loopMerge asOuts $ map Var as_vs
-  loopBody <- runBodyBuilder $
-    localScope (M.insert iter (IndexName Int64) $ scopeOfFParams $ map fst merge) $ do
-      ivs' <- forM ivs $ \iv -> do
-        iv_t <- lookupType iv
-        letSubExp "write_iv" $ BasicOp $ Index iv $ fullSlice iv_t [DimFix $ Var iter]
-      ivs'' <- bindLambda lam (map (BasicOp . SubExp) ivs')
-
-      let indexes = groupScatterResults (zip3 as_ws as_ns $ map identName asOuts) ivs''
-
-      ress <- forM indexes $ \(_, arr, indexes') -> do
-        arr_t <- lookupType arr
-        let saveInArray arr' (indexCur, SubExpRes value_cs valueCur) =
-              certifying (foldMap resCerts indexCur <> value_cs) . letExp "write_out" $
-                BasicOp $
-                  Update Safe arr' (fullSlice arr_t $ map (DimFix . resSubExp) indexCur) valueCur
-
-        foldM saveInArray arr indexes'
-      pure $ varsRes ress
-  letBind pat $ Loop merge (ForLoop iter Int64 len) loopBody
 transformSOAC pat (Hist len imgs ops bucket_fun) = do
   iter <- newVName "iter"
 

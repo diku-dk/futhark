@@ -126,7 +126,11 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     --   memory accesses: if more than two are re-executed, then we
     --   should abort.
     cost <- costRedundantExecution variance pat_acc_nm r_ses kstms,
-    maxCost cost (Small 2) == Small 2 = do
+    maxCost cost (Small 2) == Small 2,
+    -- HACK: if any of the indexes depend on names that will not be in scope in
+    -- the generated kernel, then we do not do the transformation. A better
+    -- solution would be to actually put the necessary statements in the kernel.
+    not $ freeIn acc_inds `namesIntersect` namesFromList (concatMap (patNames . stmPat) kstms) = do
       -- 1. create the first kernel
       acc_tp <- lookupType acc_nm
       let inv_dim_len = segSpaceDims seg_space !! gid_ind

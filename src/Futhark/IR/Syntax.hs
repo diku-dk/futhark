@@ -395,7 +395,7 @@ data BasicOp
     Index VName (Slice SubExp)
   | -- | An in-place update of the given array at the given position.
     -- Consumes the array.  If 'Safe', perform a run-time bounds check
-    -- and ignore the write if out of bounds (like @Scatter@).
+    -- and ignore the write if out of bounds (scatter-like).
     Update Safety VName (Slice SubExp) SubExp
   | FlatIndex VName (FlatSlice SubExp)
   | FlatUpdate VName (FlatSlice SubExp) VName
@@ -433,7 +433,7 @@ data BasicOp
   | -- | Update an accumulator at the given index with the given
     -- value. Consumes the accumulator and produces a new one. If
     -- 'Safe', perform a run-time bounds check and ignore the write if
-    -- out of bounds (like @Scatter@).
+    -- out of bounds (scatter-like).
     UpdateAcc Safety VName [SubExp] [SubExp]
   deriving (Eq, Ord, Show)
 
