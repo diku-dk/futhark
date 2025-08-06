@@ -1616,6 +1616,14 @@ isOverloadedFunction qname desc = do
               _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
     handle _ = Nothing
 
+scatterF :: Int -> E.Exp -> E.Exp -> E.Exp -> String -> InternaliseM [SubExp]
+scatterF rank dest is v desc = do
+  is' <- internaliseExpToVars "write_arg_i" is
+  v' <- internaliseExpToVars "write_arg_v" v
+  dest' <- internaliseExpToVars "write_arg_a" dest
+  map I.Var
+    <$> doScatter desc rank dest' (is' <> v') (pure . map (I.Var . I.paramName))
+
 -- | Handle intrinsic functions.  These are only allowed to be called
 -- in the prelude, and their internalisation may involve inspecting
 -- the AST.
@@ -1860,66 +1868,6 @@ isIntrinsicFunction qname args = do
           letTupExp' desc $ I.BasicOp $ I.ConvOp (I.FPToUI float_from int_to) e'
         _ -> error "Futhark.Internalise.internaliseExp: non-numeric type in ToUnsigned"
 
-    scatterF dim a si v desc = do
-      si' <- internaliseExpToVars "write_arg_i" si
-      svs <- internaliseExpToVars "write_arg_v" v
-      sas <- internaliseExpToVars "write_arg_a" a
-
-      si_w <- I.arraysSize 0 <$> mapM lookupType si'
-      sv_ts <- mapM lookupType svs
-
-      svs' <- forM (zip svs sv_ts) $ \(sv, sv_t) -> do
-        let sv_shape = I.arrayShape sv_t
-            sv_w = arraySize 0 sv_t
-
-        -- Generate an assertion and reshapes to ensure that sv and si' are the same
-        -- size.
-        cmp <-
-          letSubExp "write_cmp" $
-            I.BasicOp $
-              I.CmpOp (I.CmpEq I.int64) si_w sv_w
-        c <-
-          assert
-            "write_cert"
-            cmp
-            "length of index and value array does not match"
-        certifying c $
-          letExp (baseString sv ++ "_write_sv") $
-            shapeCoerce (I.shapeDims (reshapeOuter (I.Shape [si_w]) 1 sv_shape)) sv
-
-      indexType <- fmap rowType <$> mapM lookupType si'
-      indexName <- mapM (\_ -> newVName "write_index") indexType
-      valueNames <- replicateM (length sv_ts) $ newVName "write_value"
-
-      sa_ts <- mapM lookupType sas
-      let bodyTypes = concat (replicate (length sv_ts) indexType) ++ map (I.stripArray dim) sa_ts
-          paramTypes = indexType <> map rowType sv_ts
-          bodyNames = indexName <> valueNames
-          bodyParams = zipWith (I.Param mempty) bodyNames paramTypes
-
-      -- This body is boring right now, as every input is exactly the output.
-      -- But it can get funky later on if fused with something else.
-      body <- localScope (scopeOfLParams bodyParams) . buildBody_ $ do
-        let outs = concat (replicate (length valueNames) indexName) ++ valueNames
-        results <- forM outs $ \name ->
-          letSubExp "write_res" $ I.BasicOp $ I.SubExp $ I.Var name
-        ensureResultShape
-          "scatter value has wrong size"
-          bodyTypes
-          (subExpsRes results)
-
-      let lam =
-            I.Lambda
-              { I.lambdaParams = bodyParams,
-                I.lambdaReturnType = bodyTypes,
-                I.lambdaBody = body
-              }
-          sivs = si' <> svs'
-
-      let sa_ws = map (I.Shape . take dim . arrayDims) sa_ts
-          spec = zip3 sa_ws (repeat 1) sas
-      letTupExp' desc $ I.Op $ I.Scatter si_w sivs spec lam
-
 flatIndexHelper :: String -> E.Exp -> E.Exp -> [(E.Exp, E.Exp)] -> InternaliseM [SubExp]
 flatIndexHelper desc arr offset slices = do
   arrs <- internaliseExpToVars "arr" arr
@@ -2140,32 +2088,17 @@ partitionWithSOACS k lam arrs = do
         Scratch (I.elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
 
   -- Now write into the result.
-  write_lam <- do
-    c_param <- newParam "c" (I.Prim int64)
-    offset_params <- replicateM k $ newParam "offset" (I.Prim int64)
-    value_params <- mapM (newParam "v" . I.rowType) arr_ts
-    (offset, offset_stms) <-
-      collectStms $
+  results <-
+    doScatter "partition_res" 1 blanks (classes : all_offsets ++ arrs) $ \params -> do
+      let ([c_param], offset_params, value_params) =
+            splitAt3 1 (length all_offsets) params
+      offset <-
         mkOffsetLambdaBody
           (map I.Var sizes)
           (I.Var $ I.paramName c_param)
           0
           offset_params
-    pure
-      I.Lambda
-        { I.lambdaParams = c_param : offset_params ++ value_params,
-          I.lambdaReturnType =
-            replicate (length arr_ts) (I.Prim int64)
-              ++ map I.rowType arr_ts,
-          I.lambdaBody =
-            mkBody offset_stms $
-              replicate (length arr_ts) (subExpRes offset)
-                ++ I.varsRes (map I.paramName value_params)
-        }
-  let spec = zip3 (repeat $ I.Shape [w]) (repeat 1) blanks
-  results <-
-    letTupExp "partition_res" . I.Op $
-      I.Scatter w (classes : all_offsets ++ arrs) spec write_lam
+      pure $ offset : map (I.Var . I.paramName) value_params
   sizes' <-
     letSubExp "partition_sizes" $
       I.BasicOp $

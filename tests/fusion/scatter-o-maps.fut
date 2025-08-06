@@ -10,13 +10,13 @@
 -- }
 --
 -- structure {
---   /Scatter 1
+--   /WithAcc/Screma 1
 -- }
 
-def main [n][m] (is: [n]i64) (vs: [n]f32) (xs: *[m]f32) =
-  let is' = map (+5) is
-  let vs' = map2 (\ i v -> v * f32.i64 i) is vs
+def main [n] [m] (is: [n]i64) (vs: [n]f32) (xs: *[m]f32) =
+  let is' = map (+ 5) is
+  let vs' = map2 (\i v -> v * f32.i64 i) is vs
   let res1 = scatter xs is' vs'
-  let vs'' = map2 (\ i v -> (v * v) / f32.i64 i) is vs'
+  let vs'' = map2 (\i v -> (v * v) / f32.i64 i) is vs'
   let res2 = scatter (replicate m 0.0f32) is' vs''
-  in  (res1, res2)
+  in (res1, res2)

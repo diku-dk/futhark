@@ -8,7 +8,7 @@
 -- output {
 --   [-9, -8, -7, -6, -5, 30]
 -- }
--- structure { Scatter 1 }
+-- structure { Screma 1 }
 
-def main [n] (k: i64) (array: *[n]i32): [n]i32 =
-  scatter array (iota k) (map (\x -> i32.i64 x-9) (iota k))
+def main [n] (k: i64) (array: *[n]i32) : [n]i32 =
+  scatter array (iota k) (map (\x -> i32.i64 x - 9) (iota k))
