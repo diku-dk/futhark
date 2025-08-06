@@ -1461,4 +1461,4 @@ checkBounds e f_xs@(IndexFn [Forall _ df] _) [f_idx] = algebraContext f_idx $ do
               <> show n
               <> "\nUnder AlgEnv:"
               <> prettyStr env
-checkBounds e _ f_idx = error $ "checkBounds: " <> prettyStr e <> " ; " <> prettyStr f_idx
+checkBounds e f_xs f_idx = error $ "checkBounds: " <> prettyStr e <> " ; " <> prettyStr f_xs <> " ; " <> prettyStr f_idx
