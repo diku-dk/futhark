@@ -3,7 +3,7 @@
 -- ==
 -- input { [-1i64, 0i64] [0i64,1i64] [1,1] [2,2] [0] }
 -- output { [2] }
--- structure { Screma 1 }
+-- structure { Screma 2 }
 
 def main [k] [n]
          (indexes1: [k]i64)

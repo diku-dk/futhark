@@ -255,8 +255,15 @@ vFuseNodeT
         preserveEdge e = isDep e
         preserve = namesFromList $ map getName $ filter preserveEdge i1s
     ok <- okToFuseProducer soac1
+    -- It is not safe to fuse if any accumulators are updated by both, as the
+    -- semantics require that any updates done by the consumer take precedence
+    -- over those in the producer. This is implemented with a manual check here
+    -- for convenience, but it could be argued that this should really be a Fake
+    -- edge in the graph.
+    let isProducedAcc (H.Input _ v Acc {}) = v `elem` patNames pats1
+        isProducedAcc _ = False
     r <-
-      if ok && ots1 == mempty
+      if ok && ots1 == mempty && not (any isProducedAcc (H.inputs soac2))
         then TF.attemptFusion TF.Vertical preserve (patNames pats1) soac1 ker
         else pure Nothing
     case r of
