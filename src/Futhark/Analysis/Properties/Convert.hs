@@ -56,25 +56,29 @@ newIndexFn vn t = do
   -- x :: [n](t, (t, t))
   --  -->
   --  x = for i < n . for j < 2 . for k < j=0 + j=1 * 2 . x(i,j,k)
-  (array_shape, tuple_shape) <- shapeOf t
-  let (regular, irregular) = part [] tuple_shape
-  let regular_dims = array_shape <> map (int2SoP . toInteger) regular
-  f <- createUninterpretedIndexFn vn regular_dims irregular
+  (array_dims, tuple_shapes) <- shapeOf t
+  -- Nested tuples form regular and irregular array dimensions.
+  -- Subtuples of equal arity can be described as a regular array dimension.
+  -- Subtuples with different arity become irregular dimensions.
+  -- We convert the longest prefix of "regular" tuples into regular dimensions.
+  let (regular, irregular) = L.span shapeIsRegular tuple_shapes
+  let regular_dims = array_dims <> map (int2SoP . head) regular
+  unless (null regular && null irregular) $
+    printM 2 $ warningString "newIndexFn " <> prettyStr vn <> " " <> prettyStr (array_dims, regular, irregular)
+  f <- createUninterpretedIndexFn vn regular_dims (map (map int2SoP) irregular)
   insertIndexFn vn f
   pure f
   where
-    part regular (shape : shapes)
-      | all (== head shape) shape = part (regular <> shape) shapes
-      | otherwise = (regular, shape : shapes)
-    part regular [] = (regular, [])
+    shapeIsRegular shape = all (== head shape) shape
 
-createUninterpretedIndexFn :: E.VName -> [SoP Symbol] -> [[Integer]] -> IndexFnM [IndexFn]
+createUninterpretedIndexFn :: E.VName -> [SoP Symbol] -> [[SoP Symbol]] -> IndexFnM [IndexFn]
 createUninterpretedIndexFn vn [] [] = do
   -- Uninterpreted scalar.
   pure [IndexFn [] (singleCase $ sVar vn)]
 createUninterpretedIndexFn vn regular_dims irregular_shapes = do
   -- Uinterpreted array/tuple.
   ids <- mapM newVName (take num_dims $ cycle ["i", "j", "k"])
+  -- An irregular dim depends on the previous dimensions' iterator variable.
   let irregular_dims =
         zipWith mkIrregDim (drop (length regular_dims - 1) ids) irregular_shapes
   let shape = regular_dims <> irregular_dims
@@ -87,8 +91,7 @@ createUninterpretedIndexFn vn regular_dims irregular_shapes = do
   where
     num_dims = length regular_dims + length irregular_shapes
     mkIrregDim i shape =
-      foldl1 (.+.) $
-        zipWith (\idx sz -> i `equals` idx .*. int2SoP sz) [0 ..] shape
+      foldl1 (.+.) $ zipWith (\idx sz -> i `equals` idx .*. sz) [0 ..] shape
     equals a b = sym2SoP (sVar a :== int2SoP b)
 
 {-
@@ -1068,7 +1071,7 @@ newtype Tree a = Node [Tree a]
   deriving (Show)
 
 tupleToShape :: E.ScalarTypeBase dim u -> [[Integer]]
-tupleToShape = map (map toInteger) . count . Node . (: []) . toTree
+tupleToShape = map (map toInteger) . count . Node . (:[]) . toTree
   where
     count (Node xs)
       | all (\(Node x) -> null x) xs = []
@@ -1182,6 +1185,7 @@ zipArgs' ::
   [[IndexFn]] ->
   IndexFnM ([[(E.VName, IndexFn)]], [[(E.VName, SoP Symbol)]])
 zipArgs' loc formal_args actual_args = do
+  printM 2 $ "zipArgs (formal_args, actual_args) \n" <> prettyStr formal_args <> "\n" <> prettyStr actual_args
   let pats = map patternMapAligned formal_args
   unless (length pats == length actual_args) . error $
     errorMsg loc "Functions must be fully applied. Maybe you want to eta-expand?"
