@@ -21,11 +21,11 @@ module Futhark.Analysis.Properties.IndexFn
   )
 where
 
+import Data.Bifunctor (second)
 import Data.List.NonEmpty qualified as NE
 import Futhark.Analysis.Properties.Symbol
 import Futhark.SoP.SoP (SoP, sym2SoP, (.*.), (.+.))
 import Language.Futhark (VName)
-import Data.Bifunctor (second)
 
 data IndexFn = IndexFn
   { shape :: [Quantified Domain],
@@ -45,13 +45,13 @@ instance Ord Domain where
   Cat {} <= Iota {} = False
   _ <= _ = True
 
-data Quantified a = Forall { boundVar :: VName, formula :: a }
+data Quantified a = Forall {boundVar :: VName, formula :: a}
   deriving (Show)
 
-instance Ord a => Ord (Quantified a) where
+instance (Ord a) => Ord (Quantified a) where
   Forall _ x <= Forall _ y = x <= y
 
-instance Eq a => Eq (Quantified a) where
+instance (Eq a) => Eq (Quantified a) where
   (Forall _ u) == (Forall _ v) = u == v
 
 type Iterator = Quantified Domain
@@ -98,7 +98,9 @@ catVar (Forall _ (Cat k _ _)) = Just k
 catVar _ = Nothing
 
 flattenCases :: (Ord u) => Cases u (SoP u) -> SoP u
-flattenCases cs = foldl1 (.+.) [sym2SoP p .*. q | (p, q) <- casesToList cs]
+flattenCases cs = case casesToList cs of
+  [(_, q)] -> q
+  cs' -> foldl1 (.+.) [sym2SoP p .*. q | (p, q) <- cs']
 
 singleCase :: a -> Cases Symbol a
 singleCase e = cases [(Bool True, e)]

@@ -8,6 +8,7 @@ module Futhark.Analysis.Properties.IndexFnPlus
     repCases,
     intervalEnd,
     repDomain,
+    repIterator,
     unifyIndexFnWith,
     intervalStart,
   )

@@ -4,7 +4,7 @@
 module Futhark.Analysis.Properties.Substitute ((@), subst) where
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, when, (<=<))
+import Control.Monad (foldM, forM, when, zipWithM, (<=<))
 import Control.Monad.RWS (lift)
 import Control.Monad.Trans.Maybe (hoistMaybe, runMaybeT)
 import Data.Functor ((<&>))
@@ -15,7 +15,7 @@ import Debug.Trace (trace)
 import Futhark.Analysis.Properties.AlgebraBridge (answerFromBool, orM, simplify, ($==))
 import Futhark.Analysis.Properties.Flatten (lookupII)
 import Futhark.Analysis.Properties.IndexFn
-import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn)
+import Futhark.Analysis.Properties.IndexFnPlus (domainEnd, intervalEnd, intervalStart, repCases, repDomain, repIndexFn, repIterator)
 import Futhark.Analysis.Properties.Monad
 import Futhark.Analysis.Properties.Query (Answer (..), Query (CaseCheck), askQ)
 import Futhark.Analysis.Properties.Rewrite (rewrite, rewriteWithoutRules)
@@ -171,19 +171,31 @@ substituteOnce f g_presub (f_apply, actual_args) = do
   vn <- newVName ("<" <> prettyString f_apply <> ">")
   g <- repApply vn g_presub
 
+  -- Indexing may leave dimensions implicit; for a 2d array xs[i] is
+  -- equivalent to forall j . xs[i,j].
+  let implicit_dims = drop (length actual_args) (shape f)
+  implicit_args <-
+    mkRepFromList
+      <$> zipWithM
+        (\(Forall i _) j -> (i,) . sym2SoP . Var <$> newVName j)
+        implicit_dims
+        variableStream
+  let new_dims = map (repIterator implicit_args) implicit_dims
+
+  let args = explicit_args <> implicit_args
+
   traverse simplify <=< applySubRules $
     g
       { shape =
-          shape g <&> \case
-            Forall j dg
-              -- f(args) is not in dom(g).
-              | vn `notElem` fv dg -> Forall j dg
-              -- f(args) is in dom(g) and f has only one case.
-              | Just e_f <- justSingleCase f ->
-                  Forall j $ repDomain (mkRep vn (rep args e_f)) dg
-              -- f(args) is in dom(g) and f has multiple cases.
-              | e_f <- flattenCases (body f) ->
-                  Forall j $ repDomain (mkRep vn (rep args e_f)) dg,
+          ( shape g <&> \case
+              Forall j dg
+                -- f(args) is not in dom(g).
+                | vn `notElem` fv dg -> Forall j dg
+                -- f(args) is in dom(g).
+                | e_f <- flattenCases (body f) ->
+                    Forall j $ repDomain (mkRep vn (rep args e_f)) dg
+          )
+            <> new_dims,
         body = cases $ do
           (p_f, e_f) <- guards f
           (p_g, e_g) <- guards g
@@ -192,8 +204,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
       }
   where
     -- Construct replacement from formal arguments of f to actual arguments.
-    -- (`actual_args` may be empty for convience; used internally in Convert).
-    args :: Replacement Symbol =
+    explicit_args :: Replacement Symbol =
       case actual_args of
         []
           | [] <- shape f ->
@@ -212,13 +223,15 @@ substituteOnce f g_presub (f_apply, actual_args) = do
               -- Case used internally in Convert (empty args for convenience).
               map_formal_args_to (shape g_presub <&> sym2SoP . Var . boundVar)
         _
-          | length (shape f) == length actual_args ->
+          | length (shape f) >= length actual_args ->
               -- All source-program indexing should hit this case.
               map_formal_args_to actual_args
           | otherwise ->
-              error "Argument mismatch."
+              error "Too many arguments."
       where
         map_formal_args_to = mconcat . zipWith (mkRep . boundVar) (shape f)
+
+    variableStream = drop (rank g_presub) $ cycle ["i", "j", "k"]
 
     repApply vn =
       astMap
@@ -232,11 +245,11 @@ substituteOnce f g_presub (f_apply, actual_args) = do
     -- If f has a segmented domain, is f(arg) inside the k'th segment?
     arg_in_segment_of_f n = case (shape f !! n, shape g_presub !! n) of
       (Forall i df, Forall j _) -> do
-        let arg_eq_j = pure . answerFromBool $ args M.! i == sym2SoP (Var j)
+        let arg_eq_j = pure . answerFromBool $ explicit_args M.! i == sym2SoP (Var j)
         let bounds e = intervalStart df :<= e :&& e :<= intervalEnd df
         let arg_in_segment_bounds =
               askQ
-                (CaseCheck (\_ -> bounds $ args M.! i))
+                (CaseCheck (\_ -> bounds $ explicit_args M.! i))
                 g_presub
         arg_eq_j `orM` arg_in_segment_bounds
 
@@ -289,7 +302,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
       Forall i df@(Cat k _ _) -> do
         if k `S.member` fv (body g)
           then do
-            Just arg <- hoistMaybe . pure $ args M.!? i
+            Just arg <- hoistMaybe . pure $ explicit_args M.!? i
             Just solution <-
               lift . firstAlt . map (\e_k -> solveFor k e_k arg) $
                 [intervalStart df, intervalEnd df]
@@ -299,7 +312,7 @@ substituteOnce f g_presub (f_apply, actual_args) = do
 
     subX n g = case shape f !! n of
       Forall i df@(Cat k _ _) | k `S.member` fv (body g) -> do
-        Just arg <- hoistMaybe . pure $ args M.!? i
+        Just arg <- hoistMaybe . pure $ explicit_args M.!? i
         -- Create/lookup II array.
         let def_II = f {body = cases [(Bool True, sym2SoP (Var k))]}
         -- Check that f is not already this II array (e.g., defined by the user).
