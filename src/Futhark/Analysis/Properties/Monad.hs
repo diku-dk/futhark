@@ -33,9 +33,9 @@ module Futhark.Analysis.Properties.Monad
     getInvAlias,
     setOutputNames,
     getOutputNames,
-    getCheckBounds,
     withoutBoundsChecks,
     lookupUninterpreted,
+    whenBoundsChecking,
   )
 where
 
@@ -166,8 +166,10 @@ setOutputNames vns =
 getOutputNames :: MonadState VEnv m => m [VName]
 getOutputNames = gets outputNames
 
-getCheckBounds :: IndexFnM Bool
-getCheckBounds = gets checkBounds
+whenBoundsChecking :: MonadState VEnv m => m () -> m ()
+whenBoundsChecking m = do
+  c <- gets checkBounds
+  when c m
 
 withoutBoundsChecks :: IndexFnM a -> IndexFnM a
 withoutBoundsChecks m = do

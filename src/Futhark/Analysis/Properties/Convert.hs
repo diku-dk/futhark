@@ -64,7 +64,8 @@ newIndexFn vn t = do
   let (regular, irregular) = L.span shapeIsRegular tuple_shapes
   let regular_dims = array_dims <> map (int2SoP . head) regular
   unless (null regular && null irregular) $
-    printM 2 $ warningString "newIndexFn " <> prettyStr vn <> " " <> prettyStr (array_dims, regular, irregular)
+    printM 2 $
+      warningString "newIndexFn " <> prettyStr vn <> " " <> prettyStr (array_dims, regular, irregular)
   f <- createUninterpretedIndexFn vn regular_dims (map (map int2SoP) irregular)
   insertIndexFn vn f
   pure f
@@ -1071,7 +1072,7 @@ newtype Tree a = Node [Tree a]
   deriving (Show)
 
 tupleToShape :: E.ScalarTypeBase dim u -> [[Integer]]
-tupleToShape = map (map toInteger) . count . Node . (:[]) . toTree
+tupleToShape = map (map toInteger) . count . Node . (: []) . toTree
   where
     count (Node xs)
       | all (\(Node x) -> null x) xs = []
@@ -1421,28 +1422,35 @@ parseOpVName vn =
 checkBounds :: E.Exp -> IndexFn -> [IndexFn] -> IndexFnM ()
 checkBounds _ (IndexFn [] _) _ =
   error "E.Index: Indexing into scalar"
-checkBounds e f_xs@(IndexFn [Forall _ df] _) [f_idx] = algebraContext f_idx $ do
-  c <- getCheckBounds
-  when c $ do
-    df_start <- rewrite $ domainStart df
-    df_end <- rewrite $ domainEnd df
-    case df of
-      Cat _ _ b -> do
-        doCheck (\idx -> b :<= idx :|| df_start :<= idx)
-        doCheck (\idx -> idx :<= intervalEnd df :|| idx :<= df_end)
-      Iota _ -> do
-        doCheck (df_start :<=)
-        doCheck (:<= df_end)
+checkBounds e f_xs idxs =
+  whenBoundsChecking $ do
+    forM_ (zip (shape f_xs) idxs) checkIndexInDomain
     printM 1 . locMsg (E.locOf e) $ prettyStr e <> greenString " OK"
   where
-    doCheck :: (SoP Symbol -> Symbol) -> IndexFnM ()
-    doCheck bound = do
-      _ <- foreachCase f_idx $ \n -> do
-        c <- isYes <$> queryCase (CaseCheck bound) f_idx n
-        unless c $ do
-          printExtraDebugInfo n
-          let (p_idx, e_idx) = getCase n $ body f_idx
-          error . errorMsg (E.locOf e) $
+    checkIndexInDomain (Forall _ d, f_idx) =
+      algebraContext f_idx $ do
+        bounds <- getBounds d
+        foreachCase f_idx $ \n -> do
+          forM_ bounds $ \bound -> do
+            c <- isYes <$> queryCase (CaseCheck bound) f_idx n
+            unless c $ emitFailure n bound f_idx
+
+    getBounds d = do
+      d_start <- rewrite $ domainStart d
+      d_end <- rewrite $ domainEnd d
+      pure $ case d of
+        Cat _ _ b ->
+          [ \idx -> b :<= idx :|| d_start :<= idx,
+            \idx -> idx :<= intervalEnd d :|| idx :<= d_end
+          ]
+        Iota _ ->
+          [ (d_start :<=),
+            (:<= d_end)
+          ]
+
+    emitFailure n bound f_idx =
+      let (p_idx, e_idx) = getCase n $ body f_idx
+       in error . errorMsg (E.locOf e) $
             "Unsafe indexing: "
               <> prettyStr e
               <> " (failed to show: "
@@ -1450,19 +1458,3 @@ checkBounds e f_xs@(IndexFn [Forall _ df] _) [f_idx] = algebraContext f_idx $ do
               <> " => "
               <> prettyStr (bound e_idx)
               <> ")."
-      pure ()
-      where
-        -- TODO remove this.
-        printExtraDebugInfo n = do
-          env <- getAlgEnv
-          printM 100 $
-            "Failed bounds-checking:"
-              <> "\nf_xs:"
-              <> prettyStr f_xs
-              <> "\nf_idx: "
-              <> prettyStr f_idx
-              <> "\nCASE f_idx: "
-              <> show n
-              <> "\nUnder AlgEnv:"
-              <> prettyStr env
-checkBounds e f_xs f_idx = error $ "checkBounds: " <> prettyStr e <> " ; " <> prettyStr f_xs <> " ; " <> prettyStr f_idx
