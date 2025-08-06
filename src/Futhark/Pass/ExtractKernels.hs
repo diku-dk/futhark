@@ -529,6 +529,8 @@ worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
           zeroIfTooSmall w + bodyInterest (lambdaBody lam')
       | Op (Stream _ _ _ lam') <- stmExp stm =
           bodyInterest $ lambdaBody lam'
+      | WithAcc _ lam' <- stmExp stm =
+          bodyInterest $ lambdaBody lam'
       | otherwise =
           0
       where
