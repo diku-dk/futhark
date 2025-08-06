@@ -11,9 +11,10 @@
 -- structure seq-mem { Alloc 2 }
 -- structure gpu-mem { Alloc 2 }
 
-let main [n] (i: i64) (ns: [n]i64): [n][n]i64 =
+def main [n] (i: i64) (ns: [n]i64) : [n][n]i64 =
   let t1 = replicate n (iota n)
-  let t0 = map (+ 1) ns -- Will use the memory of t1[i].
+  let t0 = map (+ 1) ns
+  -- Will use the memory of t1[i].
 
   -- This is the basis array in which everything will be put.  Its creation uses
   -- two allocations.

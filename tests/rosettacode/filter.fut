@@ -10,5 +10,5 @@
 -- input { [1,3] }
 -- output { empty([0]i32) }
 
-def main(as: []i32): []i32 =
-  filter (\x -> x%2 == 0) as
+def main (as: []i32) : []i32 =
+  filter (\x -> x % 2 == 0) as

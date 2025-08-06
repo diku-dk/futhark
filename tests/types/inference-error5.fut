@@ -2,4 +2,4 @@
 -- ==
 -- error: does not have expected type
 
-def f 't (x: i32): t = x
+def f 't (x: i32) : t = x

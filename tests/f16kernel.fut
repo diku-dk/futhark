@@ -3,4 +3,4 @@
 -- ==
 -- input { [1f16,2f16] 3f16} auto output
 
-def main (xs: []f16) (y: f16) = map (+y) xs
+def main (xs: []f16) (y: f16) = map (+ y) xs

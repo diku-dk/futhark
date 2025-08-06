@@ -2,4 +2,4 @@
 -- ==
 -- error: Cannot .* array with elements of lifted type .* -> .*
 
-def f (arr : [](i32->i32)) = arr
+def f (arr: [](i32 -> i32)) = arr

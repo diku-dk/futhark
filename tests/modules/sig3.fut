@@ -3,11 +3,11 @@
 -- output { [true,true] }
 
 module type mt = {
-  val replicate 't: (n: i64) -> t -> [n]t
+  val replicate 't : (n: i64) -> t -> [n]t
 }
 
-module m: mt = {
-  def replicate 't (n: i64) (x: t): [n]t =
+module m : mt = {
+  def replicate 't (n: i64) (x: t) : [n]t =
     map (\_ -> x) (iota n)
 }
 

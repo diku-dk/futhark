@@ -3,4 +3,4 @@
 -- ==
 -- error: f64.*i32
 
-def main(x: i32) = x : f64
+def main (x: i32) = x : f64

@@ -3,5 +3,5 @@
 -- input { [[1,2],[3,4],[5,6]] }
 -- output { [9, 12] }
 
-def main [n][m] (as: [n][m]i32): []i32 =
+def main [n] [m] (as: [n][m]i32) : []i32 =
   reduce_comm (map2 (+)) (replicate m 0) as

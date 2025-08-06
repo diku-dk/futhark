@@ -9,7 +9,7 @@
 -- }
 
 module F = {
-  def plus(a: i32) (b: i32): i32 = a+b
+  def plus (a: i32) (b: i32) : i32 = a + b
 }
 
-def main(a: []i32): i32 = reduce F.plus 0 a
+def main (a: []i32) : i32 = reduce F.plus 0 a

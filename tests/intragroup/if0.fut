@@ -6,6 +6,9 @@
 -- }
 
 def main (bs: []bool) (xss: [][]i32) =
-  map2 (\b xs -> if b
-                 then map (+2) xs
-                 else map (+3) (scan (+) 0 xs)) bs xss
+  map2 (\b xs ->
+          if b
+          then map (+ 2) xs
+          else map (+ 3) (scan (+) 0 xs))
+       bs
+       xss

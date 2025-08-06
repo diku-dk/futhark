@@ -38,4 +38,3 @@ entry clzu8 = map (\x -> u8.clz (u8.u64 x))
 entry clzu16 = map (\x -> u16.clz (u16.u64 x))
 entry clzu32 = map (\x -> u32.clz (u32.u64 x))
 entry clzu64 = map (\x -> u64.clz (u64.u64 x))
-

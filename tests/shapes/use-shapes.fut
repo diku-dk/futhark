@@ -7,5 +7,5 @@
 --   [49i64,1344i64,12i64,11i64,10i64,9i64,8i64]
 -- }
 
-def main [n] (a: [n]i64): []i64 =
-  map (+n) a
+def main [n] (a: [n]i64) : []i64 =
+  map (+ n) a

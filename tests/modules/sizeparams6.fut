@@ -5,6 +5,7 @@ module type lys = {
 
 module lys : lys = {
   type~ state = {arr: []i64}
+
   def event x (s: state) =
     s with arr = iota x
 }

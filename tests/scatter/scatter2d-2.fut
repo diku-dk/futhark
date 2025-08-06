@@ -22,11 +22,10 @@
 --   let flattened = flatten_to len dest
 --   in scatter flattened is' vs |> unflatten h w
 
-
-def main [k][n][m]
-        (indexes1: [k]i32)
-        (indexes2: [k]i32)
-        (values: [k]i32)
-        (array1: *[n][m]i32)
-        (array2: *[n][m]i32): ([n][m]i32, [n][m]i32) =
+def main [k] [n] [m]
+         (indexes1: [k]i32)
+         (indexes2: [k]i32)
+         (values: [k]i32)
+         (array1: *[n][m]i32)
+         (array2: *[n][m]i32) : ([n][m]i32, [n][m]i32) =
   unzip (map unzip (scatter_2d (copy (map2 zip array1 array2)) (zip (map i64.i32 indexes1) (map i64.i32 indexes2)) (zip values values)))

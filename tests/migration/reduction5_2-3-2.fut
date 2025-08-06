@@ -7,5 +7,5 @@
 
 def main (arr: [3]f32) : (f32, f32) =
   let (a, b) = (arr[0], arr[1])
-  let (x, y, z) = (a*b, a+b, a-b)
-  in (x*y, y*z)
+  let (x, y, z) = (a * b, a + b, a - b)
+  in (x * y, y * z)

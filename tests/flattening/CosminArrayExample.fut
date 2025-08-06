@@ -9,9 +9,9 @@
 -- output {
 --   [1i64, 6i64, 15i64, 28i64]
 -- }
-def main (xs: []i64): []i64 =
-  map (\(x: i64)  ->
-        let arr = #[unsafe] 0..<(2 * x)
-        let arr' = #[unsafe] unflatten arr in
-            reduce (+) 0 (arr'[0]) + reduce (+) 0 (arr'[1])
-     ) xs
+def main (xs: []i64) : []i64 =
+  map (\(x: i64) ->
+         let arr = #[unsafe] 0..<(2 * x)
+         let arr' = #[unsafe] unflatten arr
+         in reduce (+) 0 (arr'[0]) + reduce (+) 0 (arr'[1]))
+      xs

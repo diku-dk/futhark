@@ -431,44 +431,45 @@
 -- 0f32, 0f32, 0f32, 13976f32, 0f32, 0f32, 0f32, 15868f32, 0f32, 0f32,
 -- 0f32, 17760f32]]]] }
 
-def mm4by4  (a0,b0,c0,d0,e0,f0,g0,h0,i0,j0,k0,l0,m0,n0,o0,p0)
-            (a1,b1,c1,d1,e1,f1,g1,h1,i1,j1,k1,l1,m1,n1,o1,p1:f32) =
-  ( a0*a1 + b0*e1 + c0*i1 + d0*m1
-  , a0*b1 + b0*f1 + c0*j1 + d0*n1
-  , a0*c1 + b0*g1 + c0*k1 + d0*o1
-  , a0*d1 + b0*h1 + c0*l1 + d0*p1
-
-  , e0*a1 + f0*e1 + g0*i1 + h0*m1
-  , e0*b1 + f0*f1 + g0*j1 + h0*n1
-  , e0*c1 + f0*g1 + g0*k1 + h0*o1
-  , e0*d1 + f0*h1 + g0*l1 + h0*p1
-
-  , i0*a1 + j0*e1 + k0*i1 + l0*m1
-  , i0*b1 + j0*f1 + k0*j1 + l0*n1
-  , i0*c1 + j0*g1 + k0*k1 + l0*o1
-  , i0*d1 + j0*h1 + k0*l1 + l0*p1
-
-  , m0*a1 + n0*e1 + o0*i1 + p0*m1
-  , m0*b1 + n0*f1 + o0*j1 + p0*n1
-  , m0*c1 + n0*g1 + o0*k1 + p0*o1
-  , m0*d1 + n0*h1 + o0*l1 + p0*p1
+def mm4by4 (a0, b0, c0, d0, e0, f0, g0, h0, i0, j0, k0, l0, m0, n0, o0, p0)
+           (a1, b1, c1, d1, e1, f1, g1, h1, i1, j1, k1, l1, m1, n1, o1, p1: f32) =
+  ( a0 * a1 + b0 * e1 + c0 * i1 + d0 * m1
+  , a0 * b1 + b0 * f1 + c0 * j1 + d0 * n1
+  , a0 * c1 + b0 * g1 + c0 * k1 + d0 * o1
+  , a0 * d1 + b0 * h1 + c0 * l1 + d0 * p1
+  , e0 * a1 + f0 * e1 + g0 * i1 + h0 * m1
+  , e0 * b1 + f0 * f1 + g0 * j1 + h0 * n1
+  , e0 * c1 + f0 * g1 + g0 * k1 + h0 * o1
+  , e0 * d1 + f0 * h1 + g0 * l1 + h0 * p1
+  , i0 * a1 + j0 * e1 + k0 * i1 + l0 * m1
+  , i0 * b1 + j0 * f1 + k0 * j1 + l0 * n1
+  , i0 * c1 + j0 * g1 + k0 * k1 + l0 * o1
+  , i0 * d1 + j0 * h1 + k0 * l1 + l0 * p1
+  , m0 * a1 + n0 * e1 + o0 * i1 + p0 * m1
+  , m0 * b1 + n0 * f1 + o0 * j1 + p0 * n1
+  , m0 * c1 + n0 * g1 + o0 * k1 + p0 * o1
+  , m0 * d1 + n0 * h1 + o0 * l1 + p0 * p1
   )
 
-def primal2 [n] (xs: [n](f32,f32,f32,f32,f32,f32,f32,f32,f32,f32,f32,f32,f32,f32,f32,f32)) =
-  scan mm4by4 (1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1) xs
+def primal2 [n] (xs: [n](f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32)) =
+  scan mm4by4 (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1) xs
 
-def fromarrs2 = map (\(x: [16]f32) -> (x[0],x[1],x[2],x[3],x[4],x[5],x[6],x[7],x[8],x[9],x[10],x[11],x[12],x[13],x[14],x[15]))
-def toarrs2 = map (\(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p) -> [a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p])
+def fromarrs2 = map (\(x: [16]f32) -> (x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11], x[12], x[13], x[14], x[15]))
+def toarrs2 = map (\(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) -> [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p])
 
 def onehot_2d n m x y =
-  tabulate_2d n m (\i j -> f32.bool((i,j) == (x,y)))
+  tabulate_2d n m (\i j -> f32.bool ((i, j) == (x, y)))
 
 entry fwd [n] (input: [n][16]f32) : [n][16][n][16]f32 =
   let input = fromarrs2 input
-  in tabulate (n*16) (\i -> jvp primal2 input (fromarrs2 (onehot_2d n 16 (i/16) (i%16))))
-     |> map toarrs2 |> transpose |> map transpose |> map (map unflatten)
+  in tabulate (n * 16) (\i -> jvp primal2 input (fromarrs2 (onehot_2d n 16 (i / 16) (i % 16))))
+     |> map toarrs2
+     |> transpose
+     |> map transpose
+     |> map (map unflatten)
 
 entry rev [n] (input: [n][16]f32) : [n][16][n][16]f32 =
   let input = fromarrs2 input
-  in tabulate (n*16) (\i -> vjp primal2 input (fromarrs2 (onehot_2d n 16 (i/16) (i%16))))
-     |> unflatten |> map (map toarrs2)
+  in tabulate (n * 16) (\i -> vjp primal2 input (fromarrs2 (onehot_2d n 16 (i / 16) (i % 16))))
+     |> unflatten
+     |> map (map toarrs2)

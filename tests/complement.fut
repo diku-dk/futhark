@@ -6,5 +6,5 @@
 -- output {
 --   [-2, -256, -1]
 -- }
-def main(a: []i32): []i32 =
-    map (\x -> !x) a
+def main (a: []i32) : []i32 =
+  map (\x -> !x) a

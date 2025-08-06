@@ -12,4 +12,4 @@
 
 def main [n] (A: *[n]i64) : *[n]i64 =
   let i = A[4]
-   in A with [i] = 42
+  in A with [i] = 42

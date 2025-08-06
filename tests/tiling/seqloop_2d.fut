@@ -5,8 +5,12 @@
 -- structure gpu { SegMap/Loop/Loop/SegMap 2 }
 
 def main [k] (ns: []i32) (xss: [][k]i32) (yss: [][k]i32) =
-  map (\n -> map (\xs' -> map (\ys' -> loop z = 0 for _p < n do
-                                         #[sequential] i32.sum (map (+z) (map2 (*) xs' ys')))
-                              yss)
-                 xss)
-       ns
+  map (\n ->
+         map (\xs' ->
+                map (\ys' ->
+                       loop z = 0
+                       for _p < n do
+                         #[sequential] i32.sum (map (+ z) (map2 (*) xs' ys')))
+                    yss)
+             xss)
+      ns

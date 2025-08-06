@@ -12,4 +12,4 @@ entry rev [n] (xs: [n]f64) =
   vjp f xs 1
 
 entry fwd [n] (xs: [n]f64) =
-  tabulate n (\i -> jvp f xs (tabulate n ((==i) >-> f64.bool)))
+  tabulate n (\i -> jvp f xs (tabulate n ((== i) >-> f64.bool)))

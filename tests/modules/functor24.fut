@@ -1,12 +1,12 @@
 module type abs = {
-    type abs
+  type abs
 }
 
 module abs = {
-    type abs = i32
+  type abs = i32
 }
 
-module fieldtype (P: abs): abs = {
+module fieldtype (P: abs) : abs = {
   type abs = i32
 }
 

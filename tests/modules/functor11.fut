@@ -5,22 +5,23 @@
 module type mt = {
   type cell
 
-  val init: bool -> cell
+  val init : bool -> cell
 }
 
-module f1(R: mt) = {
+module f1 (R: mt) = {
   type cell = R.cell
 
-  def init [n] (bs: [n]bool): [n]cell =
+  def init [n] (bs: [n]bool) : [n]cell =
     map R.init bs
 }
 
-module f2(R: mt) = {
+module f2 (R: mt) = {
   module m = {
     type cell = (R.cell, i32)
     def init (b: bool) = (R.init b, 0)
   }
-  module m' = f1(m)
+
+  module m' = f1 (m)
   open m'
 }
 
@@ -29,7 +30,7 @@ module m1 = {
   def init (b: bool) = b
 }
 
-module m2 = f2(m1)
+module m2 = f2 (m1)
 
 def main [n] (bs: [n]bool) =
   unzip (m2.init bs)

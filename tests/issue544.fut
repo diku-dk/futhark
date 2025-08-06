@@ -2,4 +2,4 @@
 -- lifted function.
 
 def main =
-  ((\x -> x) <-< (\x -> x)) [1,2,3]
+  ((\x -> x) <-< (\x -> x)) [1, 2, 3]

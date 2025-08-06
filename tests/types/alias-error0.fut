@@ -5,4 +5,4 @@
 
 type t = t
 
-def main(x: t): t = x
+def main (x: t) : t = x

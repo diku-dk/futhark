@@ -20,9 +20,9 @@
 
 import "intrinsics"
 
-entry index_antidiag [n] (xs: [n]i64): [][]i64 =
+entry index_antidiag [n] (xs: [n]i64) : [][]i64 =
   flat_index_2d xs 5 2 9 2 1
 
-entry update_antidiag [n] (xs: *[n]i64): *[n]i64 =
+entry update_antidiag [n] (xs: *[n]i64) : *[n]i64 =
   let vs = iota (2 * 2) |> unflatten
   in flat_update_2d xs 3 6 4 vs

@@ -9,7 +9,7 @@
 -- structure seq-mem { Alloc 1 }
 -- structure gpu-mem { Alloc 1 }
 
-let main (xs: []i32): []i32 =
+def main (xs: []i32) : []i32 =
   let ys = map (* 10) xs
   let zs = concat ys ys
   in zs

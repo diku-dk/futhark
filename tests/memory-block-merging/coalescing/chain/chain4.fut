@@ -22,16 +22,15 @@
 -- structure seq-mem { Alloc 5 }
 -- structure gpu-mem { Alloc 5 }
 
-let main [n] (wsss0: [n][n][n]i32)
-             (ns: [n]i32)
-             (i: i32)
-             (j: i32): ([n][n][n]i32, [n][n][n]i32) =
+def main [n]
+         (wsss0: [n][n][n]i32)
+         (ns: [n]i32)
+         (i: i32)
+         (j: i32) : ([n][n][n]i32, [n][n][n]i32) =
   -- Create an array into which other arrays can be coalesced.
   let wsss = map (\wss -> map (\ws -> map (+ 1) ws) wss) wsss0
-
   -- Create the "base" array.
   let xs = map (+ 1) ns
-
   -- Use wsss after the creation of xs, but *before* the creation of vss.  We
   -- want to consider the case where either xs can be coalesced into vss[j],
   -- *or* vss can be coalesced into wsss[i], but that both are not possible, so
@@ -43,10 +42,8 @@ let main [n] (wsss0: [n][n][n]i32)
   -- of vss will occur *after* use_wsss.
   let k = xs[0]
   let use_wsss = map (\wss -> map (\ws -> map (+ k) ws) wss) wsss
-
   -- Create another coalescing-enabling array.
   let vss = replicate n (replicate n 2)
-
   -- xs cannot be coalesced into vss[j], since vss is used (in the previous
   -- statement) after the creation of xs.  This is where we see that we cannot
   -- end up with the ambigious case that we were trying to provoke: Since we
@@ -55,10 +52,8 @@ let main [n] (wsss0: [n][n][n]i32)
   -- vss, in which case vss will be created (and thus used) after xs, which
   -- means that xs cannot even be coalesced into vss[j] in the first place.
   let vss[j] = xs
-
   -- vss can be coalesced into wsss[i].
   let wsss[i] = vss
-
   in (wsss, use_wsss)
 
 -- For safety condition 3: This shows that it is always okay (FIXME: proper

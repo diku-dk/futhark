@@ -7,4 +7,4 @@
 
 def main (n: i64) (m: i64) (i: i32) (j: i32) =
   -- The opaque is just to force manifestation.
-  (opaque (tabulate_2d n m (\i j -> i8.i64 (i ^ j))))[i,j]
+  (opaque (tabulate_2d n m (\i j -> i8.i64 (i ^ j))))[i, j]

@@ -6,7 +6,8 @@
 
 def main (xss: [][]f32) =
   #[incremental_flattening(only_intra)]
-  map (\xs -> let ys = scan (+) 0 xs
-              let ys[0] = ys[0] + 1
-              in scan (+) 0 ys)
+  map (\xs ->
+         let ys = scan (+) 0 xs
+         let ys[0] = ys[0] + 1
+         in scan (+) 0 ys)
       xss

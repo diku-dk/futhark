@@ -2,7 +2,7 @@
 -- ==
 -- input { 2 } output { 2 }
 
-module type has_t = { type t 'a }
-module id : (has_t with t 'a = a) = { type t 'a = a }
+module type has_t = {type t 'a}
+module id : (has_t with t 'a = a) = {type t 'a = a}
 
-def main (x: i32): id.t i32 = x
+def main (x: i32) : id.t i32 = x

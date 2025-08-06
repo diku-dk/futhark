@@ -6,7 +6,7 @@
 -- input { [2,3,5,1] [6,5,2,6] } output { [8,8,7,7] 4i64 }
 
 def map2 [n] (f: i32 -> i32 -> i32) (xs: [n]i32) =
-  let g (ys: [n]i32) = (map (\(x,y) -> f x y) (zip xs ys), n)
+  let g (ys: [n]i32) = (map (\(x, y) -> f x y) (zip xs ys), n)
   in g
 
 def add (x: i32) (y: i32) = x + y

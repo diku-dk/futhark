@@ -7,6 +7,6 @@
 -- input { [1,2,3] [4,5,6] [7,8,9] -1 } error: .*
 -- structure { Concat 0 }
 
-def main(as: []i32) (bs: []i32) (cs: []i32) (i: i32): i32 =
+def main (as: []i32) (bs: []i32) (cs: []i32) (i: i32) : i32 =
   let ds = concat (concat as bs) cs
   in ds[i]

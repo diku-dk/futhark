@@ -12,11 +12,14 @@
 -- input { 0i64 1i64 }
 -- output { empty([0][1]i32) true }
 
-def main (n: i64) (m: i64): ([][]i32, bool) =
-  let ass = map  (\l: [m]i32  ->
-                    map i32.i64 (map (+l*m) (iota(m))))
-                 (iota(n))
-  let ps = map2 (\(as: []i32) (i: i32): bool  ->
-                   as[i] % 2 == 0)
-                ass (map i32.i64 (map (%m) (iota(n))))
+def main (n: i64) (m: i64) : ([][]i32, bool) =
+  let ass =
+    map (\l : [m]i32 ->
+           map i32.i64 (map (+ l * m) (iota (m))))
+        (iota (n))
+  let ps =
+    map2 (\(as: []i32) (i: i32) : bool ->
+            as[i] % 2 == 0)
+         ass
+         (map i32.i64 (map (% m) (iota (n))))
   in (ass, reduce (&&) true ps)

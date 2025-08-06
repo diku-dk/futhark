@@ -4,7 +4,7 @@
 
 def fun [n] (as: [n]f32) =
   let x = reduce (*) 1 as
-  in map (*x) as
+  in map (* x) as
 
 entry fwd [n] (as: [n]f32) =
   tabulate n (\i -> jvp fun as (replicate n 0 with [i] = 1))

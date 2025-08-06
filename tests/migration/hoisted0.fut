@@ -10,4 +10,4 @@ def main [n] (A: *[n]i64) (x: i64) : *[n]i64 =
   loop A for i < n do
     -- Storage of x should be hoisted.
     let sum = loop x for y in #[unsafe] A[i:] do x + y
-     in A with [i] = sum
+    in A with [i] = sum

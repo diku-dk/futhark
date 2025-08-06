@@ -22,7 +22,7 @@
 -- structure seq-mem { Alloc 1 }
 -- structure gpu-mem { Alloc 1 }
 
-let main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32): [n][n]i32 =
+def main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32) : [n][n]i32 =
   -- For the CPU pipeline, t1 and t0 can be fused into a single outer map.  This
   -- makes it impossible to coalesce, since mem_t1 is used after the creation of
   -- t0 through its use in the same map body as t0.
@@ -30,9 +30,7 @@ let main [n] (i: i64) (ns: [n]i32) (mss: [n][n]i32): [n][n]i32 =
   -- The fusion does not happen in the GPU pipeline, so in that case it is the
   -- same as pos3.fut, meaning it gets a coalescing.
   let t1 = map (map (+ 1)) mss
-
   let k = 1
   let t0 = map (+ k) ns
-
   let t1[i] = t0
   in t1

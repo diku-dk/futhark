@@ -8,16 +8,17 @@
 --    [0f32,1f32,0f32,1f32,0f32]
 --    [0f32,1f32,0f32,1f32,0f32,1f32,0f32,1f32] }
 
-let sat_add_u4 (x: f32) (y: f32): f32 =
+def sat_add_u4 (x: f32) (y: f32) : f32 =
   let sat_val = f32.i32 ((1 << 4) - 1)
   in if sat_val - x < y
-     then sat_val else x + y
+     then sat_val
+     else x + y
 
-def f [n][m] (is: [n]i64) (dst: [m]f32, as: [n]f32) =
+def f [n] [m] (is: [n]i64) (dst: [m]f32, as: [n]f32) =
   reduce_by_index (copy dst) sat_add_u4 0 is as
 
-entry rev [n][m] (is: [n]i64) (dst: [m]f32) (as: [n]f32) =
-  vjp (f is) (dst,as) (replicate m 1)
+entry rev [n] [m] (is: [n]i64) (dst: [m]f32) (as: [n]f32) =
+  vjp (f is) (dst, as) (replicate m 1)
 
 -- ==
 --  entry: revvec
@@ -29,8 +30,8 @@ entry rev [n][m] (is: [n]i64) (dst: [m]f32) (as: [n]f32) =
 --    [[0f32,1f32,0f32],[1f32,0f32,1f32],[1f32,1f32,0f32]]
 --    [[0f32,1f32,0f32],[1f32,0f32,1f32],[1f32,1f32,0f32],[1f32,0f32,1f32],[0f32,1f32,0f32]] }
 
-def fvec [k][n][m] (is: [n]i64) (dst: [k][m]f32, as: [n][m]f32) =
+def fvec [k] [n] [m] (is: [n]i64) (dst: [k][m]f32, as: [n][m]f32) =
   reduce_by_index (copy dst) (map2 sat_add_u4) (replicate m 0) is as
 
-entry revvec [k][n][m] (is: [n]i64) (dst: [k][m]f32) (as: [n][m]f32) =
-  vjp (fvec is) (dst,as) (replicate k (replicate m 1))
+entry revvec [k] [n] [m] (is: [n]i64) (dst: [k][m]f32) (as: [n][m]f32) =
+  vjp (fvec is) (dst, as) (replicate k (replicate m 1))

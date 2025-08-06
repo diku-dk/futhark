@@ -3,5 +3,5 @@
 -- error: "n".*scope violation
 
 def main (xs: []i32) =
-  let n = 2+3
+  let n = 2 + 3
   in zip (iota n) xs

@@ -19,8 +19,8 @@ module newi32 : newint with t = i32 = {
 }
 
 module type mixture = {
-    module V : newreal
-    module I : newint
+  module V: newreal
+  module I: newint
 }
 
 module em (P: mixture) = {
@@ -28,8 +28,8 @@ module em (P: mixture) = {
 }
 
 module k_means_mixture (P: mixture) = {
-    module V = P.V
-    module I = P.I
+  module V = P.V
+  module I = P.I
 }
 
 module foo = {
@@ -38,7 +38,7 @@ module foo = {
 }
 
 module bar = k_means_mixture foo
-module baz = bar : mixture
+module baz = bar: mixture
 module k_means_em = em baz
 
 def main (x: k_means_em.mixture.V.t) = x

@@ -10,14 +10,13 @@ module type same_cell_twice = {
   include has_cell with cell = cell
 }
 
-module functor (V: {type cell}): same_cell_twice =
-{
+module functor (V: {type cell}) : same_cell_twice = {
   type cell = V.cell
 }
 
-module applied = functor { type cell = bool }
+module applied = functor {type cell = bool}
 
 -- We can't create a value of this type, but let's just refer to it.
 entry quux (x: applied.cell) = x
 
-def main(x: i32) = x
+def main (x: i32) = x

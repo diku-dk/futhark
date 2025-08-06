@@ -1,6 +1,6 @@
 module type dict = {
   type~ dict
-  val mk : () -> (dict,dict)
+  val mk : () -> (dict, dict)
 }
 
 module naive_dict : dict = {

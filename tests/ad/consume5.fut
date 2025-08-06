@@ -1,7 +1,7 @@
 def test [n] (xs: [n]i32) =
   let xs' = copy xs
-  let foo = xs' with [1] =  i32.sum xs'
-  in map (*2) foo
+  let foo = xs' with [1] = i32.sum xs'
+  in map (* 2) foo
 
 -- ==
 -- entry: f_vjp

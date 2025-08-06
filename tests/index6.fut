@@ -8,5 +8,5 @@
 --   3i8
 -- }
 
-def main (a: []i8) (i: i32): i8 =
+def main (a: []i8) (i: i32) : i8 =
   a[i]

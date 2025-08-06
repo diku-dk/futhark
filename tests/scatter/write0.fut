@@ -46,5 +46,5 @@
 --   [8, -4, 9, 1, 77, 100]
 -- }
 
-def main [k][n] (indexes: [k]i32) (values: [k]i32) (array: *[n]i32): [n]i32 =
+def main [k] [n] (indexes: [k]i32) (values: [k]i32) (array: *[n]i32) : [n]i32 =
   scatter array (map i64.i32 indexes) values

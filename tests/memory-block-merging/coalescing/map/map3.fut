@@ -9,7 +9,7 @@
 -- structure gpu-mem { Alloc 1 }
 -- structure seq-mem { Alloc 0 }
 
-let main [n] (xsss: *[n][n][n]i32) (i: i64) =
+def main [n] (xsss: *[n][n][n]i32) (i: i64) =
   let xss = map (map (+ 1)) xsss[i]
   let xsss[i] = xss
   in xsss

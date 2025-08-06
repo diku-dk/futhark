@@ -8,15 +8,17 @@
 --   [21.0f32, 0.0f32, 0.0f32, 0.0f32, 36.0f32, 0.0f32, 0.0f32, 0.0f32]
 -- }
 
-def main [n] (is : [n]i64) (ys_bar: *[n]f32) =
+def main [n] (is: [n]i64) (ys_bar: *[n]f32) =
   let scatter_res_adj_gather =
-    map (\ is_elem -> if is_elem >= 0 && is_elem < n
-               then ys_bar[is_elem] else 0
-      ) is
+    map (\is_elem ->
+           if is_elem >= 0 && is_elem < n
+           then ys_bar[is_elem]
+           else 0)
+        is
   let zeros = replicate n 0.0f32
   let map_res_bar = scatter ys_bar is zeros
   let map_adjs_1 =
-    map (\ lam_adj -> 5.0f32 * lam_adj ) scatter_res_adj_gather
+    map (\lam_adj -> 5.0f32 * lam_adj) scatter_res_adj_gather
   let map_adjs_2 =
-    map (\ lam_adj -> 3.0f32 * lam_adj ) map_res_bar
+    map (\lam_adj -> 3.0f32 * lam_adj) map_res_bar
   in (map_adjs_1, map_adjs_2)

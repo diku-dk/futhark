@@ -13,7 +13,7 @@ module type vspace = {
   val zero : vector
   val scale : scalar -> vector -> vector
   val dot : vector -> vector -> scalar
-  val + : vector -> vector -> vector
+  val (+) : vector -> vector -> vector
   val neg : vector -> vector
   val to_array : vector -> []scalar
 }

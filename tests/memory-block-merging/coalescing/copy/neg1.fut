@@ -14,8 +14,9 @@
 -- structure seq-mem { Alloc 1 }
 -- structure gpu-mem { Alloc 1 }
 
-let main [n] (t1: *[n][n]i32) (i: i64) (ns: [n]i32): [n][n]i32 =
-  let t0 = map3 (\x y z -> x + y + z) t1[i] ns (rotate 1 t1[i])  -- Will use the memory of t1[i].
+def main [n] (t1: *[n][n]i32) (i: i64) (ns: [n]i32) : [n][n]i32 =
+  let t0 = map3 (\x y z -> x + y + z) t1[i] ns (rotate 1 t1[i])
+  -- Will use the memory of t1[i].
 
   -- This is the basis array in which everything will be put.
   let t1[i] = t0

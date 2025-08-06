@@ -3,8 +3,8 @@
 module type MONOID = {
   type t
 
-  val neutral: t
-  val op: t -> t -> t
+  val neutral : t
+  val op : t -> t -> t
 }
 
-def main(): i32 = 0
+def main () : i32 = 0

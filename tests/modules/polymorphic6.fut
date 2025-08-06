@@ -2,10 +2,11 @@
 -- ==
 -- input { 2 } output { 2 }
 
-module mk_m (P: {
-  type t
-  val f: t -> i32
-}) = {
+module mk_m
+  (P: {
+    type t
+    val f : t -> i32
+  }) = {
   def g (x: P.t) = P.f x
 }
 
@@ -15,4 +16,4 @@ module m = mk_m {
 }
 
 def main (x: i32) =
-  m.g (x,x)
+  m.g (x, x)

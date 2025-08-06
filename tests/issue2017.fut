@@ -1,4 +1,4 @@
 -- ==
 -- error: Refutable
 
-def a - 1 = 2
+def (-) a 1 = 2

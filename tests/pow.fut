@@ -31,5 +31,5 @@
 --   65536
 -- }
 
-def main (x: i32) (y: i32): i32 =
-    x ** y
+def main (x: i32) (y: i32) : i32 =
+  x ** y

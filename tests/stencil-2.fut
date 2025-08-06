@@ -35,20 +35,20 @@
 --  [6.280000000000001, 6.920000000000001, 7.56]]
 -- }
 
-def main [n][m] (num_iterations: i32) (a: [n][m]f64): [][]f64 =
+def main [n] [m] (num_iterations: i32) (a: [n][m]f64) : [][]f64 =
   loop (a) for i < num_iterations do
     map (\i ->
-          map (\j ->
-                let center = a[i,j]
-                let north = if i == 0 then center else a[i-1,j]
-                let east = if j == m-1 then center else a[i,j+1]
-                let south = if i == n-1 then center else a[i+1,j]
-                let west = if j == 0 then center else a[i,j-1]
-                let factor = 1.0/5.0 in
-                factor*center +
-                factor*north +
-                factor*east +
-                factor*south +
-                factor*west
-             ) (iota(m))
-       ) (iota(n))
+           map (\j ->
+                  let center = a[i, j]
+                  let north = if i == 0 then center else a[i - 1, j]
+                  let east = if j == m - 1 then center else a[i, j + 1]
+                  let south = if i == n - 1 then center else a[i + 1, j]
+                  let west = if j == 0 then center else a[i, j - 1]
+                  let factor = 1.0 / 5.0
+                  in factor * center
+                     + factor * north
+                     + factor * east
+                     + factor * south
+                     + factor * west)
+               (iota (m)))
+        (iota (n))

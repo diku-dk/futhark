@@ -39,20 +39,21 @@
 --    [[0f32, 0f32], [0f32, 0f32]], [[0f32, 0f32], [0f32, 60f32]]]]]]
 -- }
 
-def primal [n][m][k] (xs: [n][m][k]f32) =
+def primal [n] [m] [k] (xs: [n][m][k]f32) =
   scan (map2 (map2 (*))) (replicate m (replicate k 1)) xs
 
-entry fwd_J [n][m][k] (input: [n][m][k]f32) =
-  tabulate_3d n m k (\i j q -> jvp primal input
-  (replicate n (replicate m (replicate k 0))
-    with [i] = (replicate m (replicate k 0)
-      with [j] = (replicate k 0 with [q] = 1))))
+entry fwd_J [n] [m] [k] (input: [n][m][k]f32) =
+  tabulate_3d n m k (\i j q ->
+                       jvp primal
+                           input
+                           (replicate n (replicate m (replicate k 0)) with [i] = (replicate m (replicate k 0) with [j] = (replicate k 0 with [q] = 1))))
 
-entry rev_J [n][m][k] (input: [n][m][k]f32) =
-  let res = tabulate_3d n m k (\i j q -> vjp primal input
-   (replicate n (replicate m (replicate k 0))
-      with [i] = (replicate m (replicate k 0)
-        with [j] = (replicate k 0 with [q] = 1))))
+entry rev_J [n] [m] [k] (input: [n][m][k]f32) =
+  let res =
+    tabulate_3d n m k (\i j q ->
+                         vjp primal
+                             input
+                             (replicate n (replicate m (replicate k 0)) with [i] = (replicate m (replicate k 0) with [j] = (replicate k 0 with [q] = 1))))
   let a = res |> map (map transpose) |> map (map (map transpose)) |> map (map (map (map transpose)))
   let a2 = a |> map transpose |> map (map transpose) |> map (map (map transpose))
   in a2 |> transpose |> map transpose |> (map (map transpose))
@@ -97,7 +98,7 @@ entry rev_J [n][m][k] (input: [n][m][k]f32) =
 --   [[[0f32, 0f32], [0f32, 0f32]], [[0f32, 0f32], [0f32, 0f32]],
 --    [[0f32, 0f32], [0f32, 0f32]], [[0f32, 0f32], [0f32, 60f32]]]]]]
 -- }
-entry test [n][m][k] (input: [n][m][k]f32) bar =
+entry test [n] [m] [k] (input: [n][m][k]f32) bar =
   let res = map (map (map (vjp primal input))) bar
   let a = res |> map (map transpose) |> map (map (map transpose)) |> map (map (map (map transpose)))
   let a2 = a |> map transpose |> map (map transpose) |> map (map (map transpose))

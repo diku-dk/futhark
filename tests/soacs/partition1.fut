@@ -9,9 +9,9 @@
 --   [1, 5, 7]
 -- }
 
-def divisible_by_two(x: i32): bool = x % 2 == 0
+def divisible_by_two (x: i32) : bool = x % 2 == 0
 
-def divisible_by_three(x: i32): bool = x % 3 == 0
+def divisible_by_three (x: i32) : bool = x % 3 == 0
 
-def main(a: []i32): ([]i32, []i32, []i32) =
+def main (a: []i32) : ([]i32, []i32, []i32) =
   partition2 divisible_by_two divisible_by_three a

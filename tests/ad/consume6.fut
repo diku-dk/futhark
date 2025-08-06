@@ -1,9 +1,10 @@
 def test [n] (xs: [n]i32) =
   let xs' = copy xs
-  in loop xs'' = xs' for i < n do
+  in loop xs'' = xs'
+     for i < n do
        let foo = xs'' with [i] = 1
        let m = map (\x -> x) foo
-       in foo with [i] =  m[i]
+       in foo with [i] = m[i]
 
 -- ==
 -- entry: prim

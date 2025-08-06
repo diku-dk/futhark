@@ -2,6 +2,6 @@
 -- ==
 -- warning: ^$
 
-type opaque = {x:i32}
+type opaque = {x: i32}
 
-def main (x: i32): [1]opaque = [{x}]
+def main (x: i32) : [1]opaque = [{x}]

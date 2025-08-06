@@ -5,4 +5,4 @@
 -- output { [3, 4] }
 
 def main (xs: []i32) (ys: []i32) (n: i32) =
-  map (\(x,y) -> (loop (x,y) for _i < n do (y,x)).0) (zip xs ys)
+  map (\(x, y) -> (loop (x, y) for _i < n do (y, x)).0) (zip xs ys)

@@ -6,5 +6,5 @@
 --   Iota 1
 -- }
 
-def main  (A: [5]i64) : []i64 =
+def main (A: [5]i64) : []i64 =
   iota A[0]

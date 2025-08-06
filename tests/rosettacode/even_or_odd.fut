@@ -7,4 +7,4 @@
 -- input { 10 } output { true }
 -- input { 11 } output { false }
 
-def main(x: i32): bool = (x & 1) == 0
+def main (x: i32) : bool = (x & 1) == 0

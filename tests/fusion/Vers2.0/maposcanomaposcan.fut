@@ -14,11 +14,10 @@
 --    /Screma 0
 -- }
 --
-def main(arr: []f64): (f64,[]f64,[]f64,[]f64,[]f64) =
-    let sa = scan (+) (0.0) arr
-    let b  = map  (*2.0) sa
-    let sb = scan (+) (0.0) b
-    let c  = map  (+5.0) sb
-    let r  = reduce (*) (1.0) b in
-    (r, sa, b, sb, c)
-
+def main (arr: []f64) : (f64, []f64, []f64, []f64, []f64) =
+  let sa = scan (+) (0.0) arr
+  let b = map (* 2.0) sa
+  let sb = scan (+) (0.0) b
+  let c = map (+ 5.0) sb
+  let r = reduce (*) (1.0) b
+  in (r, sa, b, sb, c)

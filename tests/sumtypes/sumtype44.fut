@@ -1,9 +1,10 @@
 -- ==
 -- error: Unmatched
 
-type inst = #foo
-          | #bar
-          | #baz
+type inst =
+    #foo
+  | #bar
+  | #baz
 
 def exec (inst: inst) =
   #[unsafe]

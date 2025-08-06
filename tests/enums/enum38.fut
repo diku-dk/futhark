@@ -4,4 +4,4 @@
 
 def f : bool =
   match (true, false)
-    case (false, true) -> false
+  case (false, true) -> false

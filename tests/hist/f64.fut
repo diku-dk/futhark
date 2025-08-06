@@ -38,5 +38,5 @@
 --   [1f64, f64.nan, 3f64, 4f64, 17f64]
 -- }
 
-def main [m][n] (hist : *[n]f64) (is: [m]i32) (image : [m]f64) : [n]f64 =
+def main [m] [n] (hist: *[n]f64) (is: [m]i32) (image: [m]f64) : [n]f64 =
   reduce_by_index hist (+) 0f64 (map i64.i32 is) image

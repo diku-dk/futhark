@@ -10,6 +10,6 @@
 --   2.000000
 -- }
 
-def main (a: []i32) (b: []f64) (i: i32): (i32,f64) =
+def main (a: []i32) (b: []f64) (i: i32) : (i32, f64) =
   let c = zip a b
   in c[i]

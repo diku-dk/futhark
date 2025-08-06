@@ -3,5 +3,5 @@
 -- ==
 -- structure { Assert 0 }
 
-def main [n][m] (a: [n]i32, b: [m]i32): ([n]i32,[n]i32) =
-  unzip(#[unsafe] zip a (b :> [n]i32))
+def main [n] [m] (a: [n]i32, b: [m]i32) : ([n]i32, [n]i32) =
+  unzip (#[unsafe] zip a (b :> [n]i32))

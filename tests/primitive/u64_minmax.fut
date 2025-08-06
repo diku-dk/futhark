@@ -12,5 +12,3 @@
 
 entry testMax = map2 u64.max
 entry testMin = map2 u64.min
-
-

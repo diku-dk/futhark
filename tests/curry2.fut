@@ -7,7 +7,7 @@
 --   [9,6,5,4,3,2]
 -- }
 
-def add(x: i32) (y: i32): i32 = x + y
+def add (x: i32) (y: i32) : i32 = x + y
 
-def main(a: []i32): []i32 =
-  map (add(1)) a
+def main (a: []i32) : []i32 =
+  map (add (1)) a

@@ -15,7 +15,9 @@ def hostonly 'a (x: a) : i32 =
   in arr[0]
 
 def main (A: [5](i32, i32)) (x: i32) : (i32, i32) =
-  loop (res, c) = (0, x) for (y, z) in A do
+  loop (res, c) = (0, x)
+  for (y, z) in A do
     if c == 3
-       then (y+1, hostonly z) -- reads of y and z should be sunk here
-       else (res, c+1)
+    then (y + 1, hostonly z)
+    else -- reads of y and z should be sunk here
+         (res, c + 1)

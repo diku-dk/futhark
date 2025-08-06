@@ -1,7 +1,8 @@
 def pow y x =
   let (_, res) =
     #[bound(1000)]
-    loop (i, acc) = (0, 1) while i < y do
+    loop (i, acc) = (0, 1)
+    while i < y do
       (i + 1, acc * x)
   in res
 

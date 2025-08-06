@@ -6,7 +6,7 @@
 -- structure seq-mem { Alloc 2 }
 -- structure gpu-mem { Alloc 1 }
 
-let main (ns: []i32): []i32 =
+def main (ns: []i32) : []i32 =
   let t0 = map (+ 1) ns
   let t1 = map (* 2) ns
   let t2 = concat t1 t0

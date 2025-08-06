@@ -5,4 +5,4 @@
 -- input  { false 20i64 }
 -- output { empty([0]i64) }
 def main (b: bool) (n: i64) =
-    if b then filter (>10) (iota n) else []
+  if b then filter (> 10) (iota n) else []

@@ -3,7 +3,7 @@
 -- ==
 -- input { 2i64 } output { [0i64,1i64] }
 
-def arr : []i64 = iota (10+2)
+def arr : []i64 = iota (10 + 2)
 
 def main (n: i64) =
   copy (take n arr)

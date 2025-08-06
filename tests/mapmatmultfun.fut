@@ -19,12 +19,11 @@
 -- compiled random input { [4][128][17]i32 [4][17][128]i32 } auto output
 -- structure { /Screma 1 /Screma/Screma 1 /Screma/Screma/Screma 1 /Screma/Screma/Screma/Screma 1 }
 
-def matmult [n][m][p] (x: [n][m]i32) (y: [m][p]i32): [n][p]i32 =
+def matmult [n] [m] [p] (x: [n][m]i32) (y: [m][p]i32) : [n][p]i32 =
   map (\xr ->
          map (\yc -> reduce (+) 0 (map2 (*) xr yc))
-       (transpose y))
-  x
+             (transpose y))
+      x
 
-
-def main [k][n][m][p] (xs: [k][n][m]i32) (ys: [k][m][p]i32): [k][n][p]i32 =
+def main [k] [n] [m] [p] (xs: [k][n][m]i32) (ys: [k][m][p]i32) : [k][n][p]i32 =
   map2 matmult xs ys

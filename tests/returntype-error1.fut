@@ -2,8 +2,12 @@
 -- ==
 -- error:
 
-def f(a: *[]i32): []i32 = a -- OK, because unique is a subtype of nonunique
+def f (a: *[]i32) : []i32 = a
 
-def g(a: []i32): *[]i32 = a -- Wrong!
+-- OK, because unique is a subtype of nonunique
 
-def main(): i32 = 0
+def g (a: []i32) : *[]i32 = a
+
+-- Wrong!
+
+def main () : i32 = 0

@@ -4,4 +4,4 @@
 
 type t 'int = int
 
-def main (x: f64): t f64 = x
+def main (x: f64) : t f64 = x

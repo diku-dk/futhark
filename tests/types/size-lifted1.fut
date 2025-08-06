@@ -7,4 +7,4 @@
 def iterate '~a (n: i32) (f: (() -> a) -> a) (x: () -> a) =
   loop x = x () for _i < n do f (\() -> x)
 
-def main n (xs: []i32) = iterate n (\(p : () -> []i32) -> p () ++ p ()) (\() -> xs)
+def main n (xs: []i32) = iterate n (\(p: () -> []i32) -> p () ++ p ()) (\() -> xs)

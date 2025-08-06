@@ -256,44 +256,44 @@
 --    24.862296]
 -- }
 
+def horner (x: f64) : f64 =
+  let (c1, c2, c3, c4, c5) = (0.31938153, -0.356563782, 1.781477937, -1.821255978, 1.330274429)
+  in x * (c1 + x * (c2 + x * (c3 + x * (c4 + x * c5))))
 
-def horner (x: f64): f64 =
-   let (c1,c2,c3,c4,c5) = (0.31938153,-0.356563782,1.781477937,-1.821255978,1.330274429)
-   in x * (c1 + x * (c2 + x * (c3 + x * (c4 + x * c5))))
+def fabs (x: f64) : f64 = if x < 0.0 then -x else x
 
-def fabs (x: f64): f64 = if x < 0.0 then -x else x
+def cnd0 (d: f64) : f64 =
+  let k = 1.0 / (1.0 + 0.2316419 * fabs (d))
+  let p = horner (k)
+  let rsqrt2pi = 0.39894228040143267793994605993438
+  in rsqrt2pi * f64.exp (-0.5 * d * d) * p
 
-def cnd0 (d: f64): f64 =
-   let k        = 1.0 / (1.0 + 0.2316419 * fabs(d))
-   let p        = horner(k)
-   let rsqrt2pi = 0.39894228040143267793994605993438 in
-   rsqrt2pi * f64.exp(-0.5*d*d) * p
+def cnd (d: f64) : f64 =
+  let c = cnd0 (d)
+  in if 0.0 < d then 1.0 - c else c
 
-def cnd (d: f64): f64 =
-   let c = cnd0(d)
-   in if 0.0 < d then 1.0 - c else c
+def go (x: (bool, f64, f64, f64)) : f64 =
+  let (call, price, strike, years) = x
+  let r = 0.08
+  -- riskfree
+  let v = 0.30
+  -- volatility
+  let v_sqrtT = v * f64.sqrt (years)
+  let d1 = (f64.log (price / strike) + (r + 0.5 * v * v) * years) / v_sqrtT
+  let d2 = d1 - v_sqrtT
+  let cndD1 = cnd (d1)
+  let cndD2 = cnd (d2)
+  let x_expRT = strike * f64.exp (-r * years)
+  in if call
+     then price * cndD1 - x_expRT * cndD2
+     else x_expRT * (1.0 - cndD2) - price * (1.0 - cndD1)
 
-def go (x: (bool,f64,f64,f64)): f64 =
-   let (call, price, strike, years) = x
-   let r       = 0.08  -- riskfree
-   let v       = 0.30  -- volatility
-   let v_sqrtT = v * f64.sqrt(years)
-   let d1      = (f64.log(price / strike) + (r + 0.5 * v * v) * years) / v_sqrtT
-   let d2      = d1 - v_sqrtT
-   let cndD1   = cnd(d1)
-   let cndD2   = cnd(d2)
-   let x_expRT = strike * f64.exp(-r * years) in
-   if call then
-     price * cndD1 - x_expRT * cndD2
-   else
-     x_expRT * (1.0 - cndD2) - price * (1.0 - cndD1)
+def blackscholes (xs: [](bool, f64, f64, f64)) : []f64 =
+  map go xs
 
-def blackscholes (xs: [](bool,f64,f64,f64)): []f64 =
-   map  go xs
-
-def main (years: i64): []f64 =
-  let days = years*365
-  let a = map (+1) (iota(days))
+def main (years: i64) : []f64 =
+  let days = years * 365
+  let a = map (+ 1) (iota (days))
   let a = map f64.i64 a
-  let a = map (\x -> (true, 58.0 + 4.0 * x / f64.i64(days), 65.0, x / 365.0)) a in
-  blackscholes(a)
+  let a = map (\x -> (true, 58.0 + 4.0 * x / f64.i64 (days), 65.0, x / 365.0)) a
+  in blackscholes (a)

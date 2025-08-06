@@ -8,5 +8,5 @@ type point = #twod twod | #threed threed
 
 def main (p: point) : point =
   match p
-  case #twod ds -> #threed {x=ds.x, y=ds.y, z=0}
-  case #threed {x, y, z=_} -> #twod {x, y}
+  case #twod ds -> #threed {x = ds.x, y = ds.y, z = 0}
+  case #threed {x, y, z = _} -> #twod {x, y}

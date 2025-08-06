@@ -15,24 +15,34 @@ def main [n] (is: [n]i64) (vs: [n]f32) (xs: [n]f32) (ys_bar: *[n]f32) =
   let zip_copy = copy map_res_1
   let map_res_2 = map2 (*) vs zip_copy
   let scatter_res_1 = scatter map_res_1 is map_res_2
-  let (map_adjs_1, map_adjs_2) = unzip <|
-    map3 (\ x y lam_adj -> (y * lam_adj, x * lam_adj)
-         ) map_res_2 scatter_res_1 ys_bar
+  let (map_adjs_1, map_adjs_2) =
+    unzip
+    <| map3 (\x y lam_adj -> (y * lam_adj, x * lam_adj))
+            map_res_2
+            scatter_res_1
+            ys_bar
   let scatter_res_adj_gather =
-    map (\ is_elem -> if is_elem >= 0 && is_elem < n
-                      then map_adjs_2[is_elem] else 0.0f32
-        ) is
+    map (\is_elem ->
+           if is_elem >= 0 && is_elem < n
+           then map_adjs_2[is_elem]
+           else 0.0f32)
+        is
   let map_res_adj_1 =
     map2 (+) map_adjs_1 scatter_res_adj_gather
   let map_res_bar =
     scatter map_adjs_2 is (replicate n 0.0f32)
-  let (map_adjs_3, map_adjs_4) = unzip <|
-    map3 (\ x y lam_adj -> (y * lam_adj, x * lam_adj)
-         ) vs zip_copy map_res_adj_1
+  let (map_adjs_3, map_adjs_4) =
+    unzip
+    <| map3 (\x y lam_adj -> (y * lam_adj, x * lam_adj))
+            vs
+            zip_copy
+            map_res_adj_1
   let map_res_adj_2 = map2 (+) map_res_bar map_adjs_4
-  let (map_adjs_5, map_adjs_6) = unzip <|
-    map3 (\ x y lam_adj -> (y * lam_adj, x * lam_adj)
-         ) xs vs map_res_adj_2
+  let (map_adjs_5, map_adjs_6) =
+    unzip
+    <| map3 (\x y lam_adj -> (y * lam_adj, x * lam_adj))
+            xs
+            vs
+            map_res_adj_2
   let x_adj = map2 (+) map_adjs_3 map_adjs_6
   in (x_adj, map_adjs_5)
-

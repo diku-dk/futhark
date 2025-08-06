@@ -4,4 +4,4 @@
 -- input { -2i64 -2i64 }
 -- error: Cannot unflatten.*\[-2\]\[-2\]
 
-def main n m = unflatten (iota (n*m))
+def main n m = unflatten (iota (n * m))

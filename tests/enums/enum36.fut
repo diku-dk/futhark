@@ -4,5 +4,5 @@
 
 def f : f32 =
   match (1.5 : f32)
-    case 1.1 -> 1
-    case 2   -> 2
+  case 1.1 -> 1
+  case 2 -> 2

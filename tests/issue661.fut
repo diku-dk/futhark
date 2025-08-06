@@ -1,4 +1,4 @@
-def f (b: f32): (i32, []f32) =
+def f (b: f32) : (i32, []f32) =
   (0, [b])
 
 def main (i: i32) =

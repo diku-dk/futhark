@@ -5,7 +5,7 @@
 
 module type to_i32 = {
   type t
-  val to_i32: t -> i32
+  val to_i32 : t -> i32
 }
 
 module i32 = {
@@ -15,7 +15,7 @@ module i32 = {
 
 module type engine = {
   module int: to_i32
-  val min: int.t
+  val min : int.t
 }
 
 module an_engine = {

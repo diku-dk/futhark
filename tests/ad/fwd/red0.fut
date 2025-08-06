@@ -1,4 +1,4 @@
-def f x = reduce (*) 1 [1,2,x,4]
+def f x = reduce (*) 1 [1, 2, x, 4]
 
 -- ==
 -- entry: f_jvp

@@ -9,6 +9,7 @@
 
 def main [n] (A: [n]i64) : i64 =
   let sum =
-    loop x = 0 for y in A do
+    loop x = 0
+    for y in A do
       x + y
-   in sum + A[sum % n]
+  in sum + A[sum % n]

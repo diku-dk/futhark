@@ -7,5 +7,6 @@
 -- }
 
 def main [n] (A: [n]f32) : f32 =
-  loop x = 0 for i < n do
+  loop x = 0
+  for i < n do
     x + A[i]

@@ -4,11 +4,11 @@
 -- ==
 -- error: functional
 
-def compose 'a 'b 'c (f : b -> c) (g : a -> b) : a -> c =
-  \(x : a) -> f (g x)
+def compose 'a 'b 'c (f: b -> c) (g: a -> b) : a -> c =
+  \(x: a) -> f (g x)
 
-def add (x : i32) (y : i32) : i32 = x+y
-def double (x : i32) : i32 = x+x
+def add (x: i32) (y: i32) : i32 = x + y
+def double (x: i32) : i32 = x + x
 
-def main (x : i32) (y : i32) : i32 =
+def main (x: i32) (y: i32) : i32 =
   compose add double 3 5

@@ -16,8 +16,8 @@
 -- The GPU pipeline has additional allocations for the two 'replicate'
 -- expressions.
 
-let main [n] (a: [n]i32): [][n]i32 =
-  let x    = map (\i -> replicate n (i + 10)) a |> opaque
-  let a2   = map (\i -> replicate n (2 * i)) a
-  let y    = concat a2 x
-  in  y
+def main [n] (a: [n]i32) : [][n]i32 =
+  let x = map (\i -> replicate n (i + 10)) a |> opaque
+  let a2 = map (\i -> replicate n (2 * i)) a
+  let y = concat a2 x
+  in y

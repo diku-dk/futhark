@@ -14,31 +14,37 @@
 -- input { 4 1.0 1.0 3.14159 1.2 }
 -- output { 1.0f64 -1.0f64 }
 
+type complex = (f64, f64)
 
-type complex = (f64,f64)
+def complexAdd ((a, b): complex) ((c, d): complex) : complex =
+  ( a + c
+  , b + d
+  )
 
-def complexAdd((a,b): complex) ((c,d): complex): complex =
-  (a + c,
-   b + d)
+def complexMult ((a, b): complex) ((c, d): complex) : complex =
+  ( a * c - b * d
+  , a * d + b * c
+  )
 
-def complexMult((a,b): complex) ((c,d): complex): complex =
- (a*c - b * d,
-  a*d + b * c)
+def complexInv ((r, i): complex) : complex =
+  let denom = r * r + i * i
+  in ( r / denom
+     , -i / denom
+     )
 
-def complexInv((r,i): complex): complex =
-  let denom = r*r + i * i
-  in (r / denom,
-      -i / denom)
-
-def complexNeg((r,i): complex): complex =
+def complexNeg ((r, i): complex) : complex =
   (-r, -i)
 
-def complexConj((r,i): complex): complex =
+def complexConj ((r, i): complex) : complex =
   (r, -i)
 
-def main (o: i32) (a: complex) (b: complex): complex =
-  if      o == 0 then complexAdd a b
-  else if o == 1 then complexMult a b
-  else if o == 2 then complexInv a
-  else if o == 3 then complexNeg a
-  else                complexConj a
+def main (o: i32) (a: complex) (b: complex) : complex =
+  if o == 0
+  then complexAdd a b
+  else if o == 1
+  then complexMult a b
+  else if o == 2
+  then complexInv a
+  else if o == 3
+  then complexNeg a
+  else complexConj a

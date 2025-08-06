@@ -2,8 +2,9 @@
 -- ==
 -- error: used as loop variable
 
-def id 'a (x : a) : a = x
+def id 'a (x: a) : a = x
 
-def main (n : i32) =
-  loop f = id for i < n do
-    \(y:i32) -> f y
+def main (n: i32) =
+  loop f = id
+  for i < n do
+    \(y: i32) -> f y

@@ -7,7 +7,6 @@
 
 entry case_if (A: *[5]i64) (x: i64) : i64 =
   if A[0] == 0
-     then let B = A with [0:2] = [4, 2]
-           in #[unsafe] (opaque B)[x % length B]
-     else A[1]
-
+  then let B = A with [0:2] = [4, 2]
+       in #[unsafe] (opaque B)[x % length B]
+  else A[1]

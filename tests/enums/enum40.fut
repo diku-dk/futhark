@@ -7,4 +7,4 @@ type foobar = #foo | #bar
 
 def f : bool =
   match (true, 10, {f1 = #foo : foobar, f2 = 1.2})
-    case (true, 10, {f1 = #foo, f2 = 1.2}) -> true
+  case (true, 10, {f1 = #foo, f2 = 1.2}) -> true

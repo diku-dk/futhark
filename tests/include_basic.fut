@@ -9,4 +9,4 @@
 
 import "include_basic_includee"
 
-def main(s: i32): i32 = importe_function(s) + 1
+def main (s: i32) : i32 = importe_function (s) + 1

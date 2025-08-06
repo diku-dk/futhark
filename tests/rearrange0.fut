@@ -46,5 +46,5 @@
 -- compiled random input { [64][64][2]i32 } auto output
 -- compiled random input { [128][128][128]i32 } auto output
 
-def main xss: [][][]i32 =
+def main xss : [][][]i32 =
   xss |> map transpose |> transpose

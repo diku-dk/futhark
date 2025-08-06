@@ -6,7 +6,7 @@ import "intrinsics"
 
 def f (acc: *acc ([]i32)) i =
   let acc = write acc i 1
-  let acc = write acc (i+1) 1
+  let acc = write acc (i + 1) 1
   in acc
 
 def main (xs: *[]i32) =

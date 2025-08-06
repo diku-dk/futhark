@@ -28,5 +28,5 @@
 --           [0i32, 0i32, 0i32, 0i32, 0i32],
 --           [1i32, 0i32, 1i32, 0i32, 0i32]] }
 
-entry vecmin [n][d][bins] (is: [n]i64) (vs: [n][d]i32) (adj_out: [bins][d]i32) =
+entry vecmin [n] [d] [bins] (is: [n]i64) (vs: [n][d]i32) (adj_out: [bins][d]i32) =
   vjp (hist (map2 i32.min) (replicate d i32.highest) bins is) vs adj_out

@@ -10,4 +10,3 @@
 
 entry lgammaf32 = map f32.lgamma
 entry lgammaf64 = map f64.lgamma
-

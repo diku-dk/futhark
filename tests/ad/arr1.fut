@@ -1,4 +1,4 @@
-def f (x, y) : [2]f64 = [x+y, x*y]
+def f (x, y) : [2]f64 = [x + y, x * y]
 
 -- ==
 -- entry: f_vjp f_jvp
@@ -6,11 +6,11 @@ def f (x, y) : [2]f64 = [x+y, x*y]
 -- output { [1.0,7.0] [1.0, 5.0] }
 
 entry f_jvp x y =
- (jvp f (x,y) (1,0),
-  jvp f (x,y) (0,1))
-
+  ( jvp f (x, y) (1, 0)
+  , jvp f (x, y) (0, 1)
+  )
 
 entry f_vjp x y =
-  let (dx1,dx2) = vjp f (x,y) [1,0]
-  let (dy1,dy2) = vjp f (x,y) [0,1]
+  let (dx1, dx2) = vjp f (x, y) [1, 0]
+  let (dy1, dy2) = vjp f (x, y) [0, 1]
   in ([dx1, dy1], [dx2, dy2])

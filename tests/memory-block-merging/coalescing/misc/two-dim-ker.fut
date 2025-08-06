@@ -11,17 +11,18 @@
 -- structure seq-mem { Alloc 2 }
 -- structure gpu-mem { Alloc 3 }
 
-let main [n] (xsss: [n][n][n]i64): [][n][n]i64 =
+def main [n] (xsss: [n][n][n]i64) : [][n][n]i64 =
   let asss = drop 1 xsss
-  in  map (\ass ->
-                map (\as ->
-                        let r = loop r = 0 for i < n do
-                            let r = r + as[i]
-                            in  r
-                        in
-                        loop bs = iota n for j < n do
-                            let bs[j] = bs[j]*r
-                            in bs
-                    )
-                    ass
-          ) asss
+  in map (\ass ->
+            map (\as ->
+                   let r =
+                     loop r = 0
+                     for i < n do
+                       let r = r + as[i]
+                       in r
+                   in loop bs = iota n
+                      for j < n do
+                        let bs[j] = bs[j] * r
+                        in bs)
+                ass)
+         asss

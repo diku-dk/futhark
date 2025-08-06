@@ -2,4 +2,4 @@
 -- ==
 -- input { [0] } error:
 
-def main (xs: []i32) = map (2/) xs
+def main (xs: []i32) = map (2 /) xs

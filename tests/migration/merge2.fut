@@ -17,9 +17,14 @@ def hostonly 'a (x: a) : i32 =
 def id 'a (x: a) : a = x
 
 def main (A: *[4]i32) : *[4]i32 =
-  let (a, b) = id (A[0], A[1])  -- gpu
-  let c = hostonly a            -- host
-  let (x, y) = id (A[2], A[3])  -- gpu
-  let z = hostonly y            -- host
-  let B = A with [0] = b+x      -- gpu
-   in map (+c+z) B
+  let (a, b) = id (A[0], A[1])
+  -- gpu
+  let c = hostonly a
+  -- host
+  let (x, y) = id (A[2], A[3])
+  -- gpu
+  let z = hostonly y
+  -- host
+  let B = A with [0] = b + x
+  -- gpu
+  in map (+ c + z) B

@@ -25,24 +25,30 @@
 --   SegRed 1
 -- }
 
-def main [n][m] (pss: [n][m]i32): ([n][m][m]i32, [n][m]i32) =
+def main [n] [m] (pss: [n][m]i32) : ([n][m][m]i32, [n][m]i32) =
   let (asss, bss) =
     #[incremental_flattening(only_inner)]
-    unzip(map (\(ps: []i32): ([m][m]i32, [m]i32)  ->
-                #[incremental_flattening(only_inner)]
-                let ass = map (\(p: i32): [m]i32  ->
-                                let cs = scan (+) 0 (0..1..<p)
-                                let f = reduce (+) 0 cs
-                                let as = map (+f) ps
-                                in as) ps
-                let bs' = loop bs=ps for i < n do
+    unzip (map (\(ps: []i32) : ([m][m]i32, [m]i32) ->
                   #[incremental_flattening(only_inner)]
-                  let bs' = map (\(as: []i32, b: i32): i32  ->
-                                  let d = reduce (+) 0 as
-                                  let e = d + b
-                                  let b' = 2 * e
-                                  in b') (
-                                zip ass bs)
-                  in bs'
-                in (ass, bs')) pss)
+                  let ass =
+                    map (\(p: i32) : [m]i32 ->
+                           let cs = scan (+) 0 (0..1..<p)
+                           let f = reduce (+) 0 cs
+                           let as = map (+ f) ps
+                           in as)
+                        ps
+                  let bs' =
+                    loop bs = ps
+                    for i < n do
+                      #[incremental_flattening(only_inner)]
+                      let bs' =
+                        map (\(as: []i32, b: i32) : i32 ->
+                               let d = reduce (+) 0 as
+                               let e = d + b
+                               let b' = 2 * e
+                               in b')
+                            (zip ass bs)
+                      in bs'
+                  in (ass, bs'))
+               pss)
   in (asss, bss)

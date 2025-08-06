@@ -2,8 +2,8 @@
 -- ==
 -- error: Consuming.*"xs"
 
-def f {xs: []i32} : {xs: []i32} = {xs}
+def f {xs = xs: []i32} : {xs: []i32} = {xs}
 
 def main xs =
-  let {xs=ys} = f {xs}
+  let {xs = ys} = f {xs}
   in ys with [0] = 0

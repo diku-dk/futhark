@@ -16,6 +16,9 @@
 -- }
 
 def main (n: i64) (m: i64) =
-  map2 (\xs ys -> reduce_by_index_2d (replicate n (replicate m 0)) (+) 0
-                                     (zip (map i64.i32 xs) (map i64.i32 ys))
-                                     (map (const 1) xs))
+  map2 (\xs ys ->
+          reduce_by_index_2d (replicate n (replicate m 0))
+                             (+)
+                             0
+                             (zip (map i64.i32 xs) (map i64.i32 ys))
+                             (map (const 1) xs))

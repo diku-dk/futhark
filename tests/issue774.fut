@@ -3,10 +3,11 @@
 
 type t = [8]u32
 
-def pack [n] (zero: t) (xs: [n]bool): t =
-  loop ret = zero for i in 0..<n do
+def pack [n] (zero: t) (xs: [n]bool) : t =
+  loop ret = zero
+  for i in 0..<n do
     if xs[i]
-    then map1 (+1) ret
+    then map1 (+ 1) ret
     else ret
 
 def main =

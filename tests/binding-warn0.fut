@@ -3,4 +3,4 @@
 -- ==
 -- warning: with binding
 
-def f [n] (ns: *[n]i64) = iota (let m = n+2 in m*m)
+def f [n] (ns: *[n]i64) = iota (let m = n + 2 in m * m)

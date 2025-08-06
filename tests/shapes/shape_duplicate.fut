@@ -4,7 +4,7 @@
 -- ==
 -- error: do not match
 
-def f [n][m] ((_, elems: [n]i32): (i32,[m]i32)): i32 =
+def f [n] [m] ((_, elems: [n]i32): (i32, [m]i32)) : i32 =
   n + m + elems[0]
 
-def main (x: i32, y: []i32): i32 = f (x, y)
+def main (x: i32, y: []i32) : i32 = f (x, y)

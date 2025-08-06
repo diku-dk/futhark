@@ -11,15 +11,17 @@ module type foobar_mod = {
 
 module enum_module : foobar_mod = {
   type foobar = #foo | #bar
-  def f (x : foobar) : i32 =
-    match x
-      case #foo -> 1
-      case #bar -> 2
-  def foo = #foo : foobar
 
+  def f (x: foobar) : i32 =
+    match x
+    case #foo -> 1
+    case #bar -> 2
+
+  def foo = #foo : foobar
 }
 
-def main : i32 = match (enum_module.f enum_module.foo)
-                  case 1 -> 3
-                  case 2 -> 4
-                  case _ -> 5
+def main : i32 =
+  match (enum_module.f enum_module.foo)
+  case 1 -> 3
+  case 2 -> 4
+  case _ -> 5

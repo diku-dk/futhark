@@ -2,6 +2,6 @@
 -- ==
 -- error: field.*c
 
-def main() =
-  let r = {a=1,b=2}
+def main () =
+  let r = {a = 1, b = 2}
   in r.c

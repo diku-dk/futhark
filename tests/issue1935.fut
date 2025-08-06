@@ -5,5 +5,5 @@ def get_name (i: i64) =
 
 entry main =
   loop i = 0
-  while length (get_name i) != 0
-  do i + 1
+  while length (get_name i) != 0 do
+    i + 1

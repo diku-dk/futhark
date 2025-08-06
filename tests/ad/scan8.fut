@@ -140,36 +140,38 @@
 -- [0f32, 0f32, 1224f32, 0f32, 0f32, 1566f32, 0f32, 0f32, 1908f32]]]]
 -- }
 
-def mm3by3  (a1: f32, b1: f32, c1: f32, d1: f32, e1: f32, f1: f32, g1: f32, h1: f32, i1: f32)
-            (a2: f32, b2: f32, c2: f32, d2: f32, e2: f32, f2: f32, g2: f32, h2: f32, i2: f32) =
-  ( a1*a2 + b1*d2 + c1*g2
-  , a1*b2 + b1*e2 + c1*h2
-  , a1*c2 + b1*f2 + c1*i2
-
-  , d1*a2 + e1*d2 + f1*g2
-  , d1*b2 + e1*e2 + f1*h2
-  , d1*c2 + e1*f2 + f1*i2
-
-  , g1*a2 + h1*d2 + i1*g2
-  , g1*b2 + h1*e2 + i1*h2
-  , g1*c2 + h1*f2 + i1*i2
+def mm3by3 (a1: f32, b1: f32, c1: f32, d1: f32, e1: f32, f1: f32, g1: f32, h1: f32, i1: f32)
+           (a2: f32, b2: f32, c2: f32, d2: f32, e2: f32, f2: f32, g2: f32, h2: f32, i2: f32) =
+  ( a1 * a2 + b1 * d2 + c1 * g2
+  , a1 * b2 + b1 * e2 + c1 * h2
+  , a1 * c2 + b1 * f2 + c1 * i2
+  , d1 * a2 + e1 * d2 + f1 * g2
+  , d1 * b2 + e1 * e2 + f1 * h2
+  , d1 * c2 + e1 * f2 + f1 * i2
+  , g1 * a2 + h1 * d2 + i1 * g2
+  , g1 * b2 + h1 * e2 + i1 * h2
+  , g1 * c2 + h1 * f2 + i1 * i2
   )
 
-def primal3 [n] (xs: [n](f32,f32,f32,f32,f32,f32,f32,f32,f32)) =
-  scan mm3by3 (1,0,0, 0,1,0, 0,0,1) xs
+def primal3 [n] (xs: [n](f32, f32, f32, f32, f32, f32, f32, f32, f32)) =
+  scan mm3by3 (1, 0, 0, 0, 1, 0, 0, 0, 1) xs
 
-def fromarrs3 = map (\(x: [9]f32) -> (x[0],x[1],x[2],x[3],x[4],x[5],x[6],x[7],x[8]))
-def toarrs3 = map (\(a,b,c,d,e,f,g,h,i) -> [a,b,c,d,e,f,g,h,i])
+def fromarrs3 = map (\(x: [9]f32) -> (x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8]))
+def toarrs3 = map (\(a, b, c, d, e, f, g, h, i) -> [a, b, c, d, e, f, g, h, i])
 
 def onehot_2d n m x y =
-  tabulate_2d n m (\i j -> f32.bool((i,j) == (x,y)))
+  tabulate_2d n m (\i j -> f32.bool ((i, j) == (x, y)))
 
 entry fwd [n] (input: [n][9]f32) : [n][9][n][9]f32 =
   let input = fromarrs3 input
-  in tabulate (n*9) (\i -> jvp primal3 input (fromarrs3 (onehot_2d n 9 (i/9) (i%9))))
-     |> map toarrs3 |> transpose |> map transpose |> map (map unflatten)
+  in tabulate (n * 9) (\i -> jvp primal3 input (fromarrs3 (onehot_2d n 9 (i / 9) (i % 9))))
+     |> map toarrs3
+     |> transpose
+     |> map transpose
+     |> map (map unflatten)
 
 entry rev [n] (input: [n][9]f32) : [n][9][n][9]f32 =
   let input = fromarrs3 input
-  in tabulate (n*9) (\i -> vjp primal3 input (fromarrs3 (onehot_2d n 9 (i/9) (i%9))))
-     |> unflatten |> map (map toarrs3)
+  in tabulate (n * 9) (\i -> vjp primal3 input (fromarrs3 (onehot_2d n 9 (i / 9) (i % 9))))
+     |> unflatten
+     |> map (map toarrs3)

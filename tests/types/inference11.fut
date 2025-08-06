@@ -1,3 +1,3 @@
 -- An empty array literal is fine!
 
-def main: []i32 = []
+def main : []i32 = []

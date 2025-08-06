@@ -7,10 +7,11 @@
 -- }
 
 def main [n] [m] (A: *[n][m]f32) : *[n][m]f32 =
-  loop A = A for i < n do
+  loop A = A
+  for i < n do
     let B = A[i, :]
-    let B' = map (\x -> x*x) B
+    let B' = map (\x -> x * x) B
     let len = reduce (+) 0 B' |> f32.sqrt
-    let B' = map (/len) B'
+    let B' = map (/ len) B'
     let A' = A with [i, :] = B'
-     in A'
+    in A'

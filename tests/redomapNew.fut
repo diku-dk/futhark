@@ -21,16 +21,19 @@
 --       [20, 20, 20, 20, 20]]]
 -- }
 
-def main(arr: []i32): ([]i32,[][][]i32) =
-  let vs = map (\(a: i32) ->
-                  map (\x: i32  -> 2*i32.i64 x*a
-                     ) (iota(3) )
-              ) arr
-  in (reduce (\a b -> map2 (+) a b) (
-             replicate 3 0) vs,
-      map (\(r: []i32)  ->
-             transpose (replicate 5 r)) vs)
+def main (arr: []i32) : ([]i32, [][][]i32) =
+  let vs =
+    map (\(a: i32) ->
+           map (\x : i32 -> 2 * i32.i64 x * a)
+               (iota (3)))
+        arr
+  in ( reduce (\a b -> map2 (+) a b)
+              (replicate 3 0)
+              vs
+     , map (\(r: []i32) ->
+              transpose (replicate 5 r))
+           vs
+     )
 
-
-def main0(arr: []i32): i32 =
-  reduce (+) 0 (map (2*) arr)
+def main0 (arr: []i32) : i32 =
+  reduce (+) 0 (map (2 *) arr)

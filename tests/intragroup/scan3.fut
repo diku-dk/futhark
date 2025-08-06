@@ -4,5 +4,5 @@
 
 def main xss =
   #[incremental_flattening(only_intra)]
-  map (\xs -> (scan (+) 0f32 xs, map (+2) xs)) xss
+  map (\xs -> (scan (+) 0f32 xs, map (+ 2) xs)) xss
   |> unzip

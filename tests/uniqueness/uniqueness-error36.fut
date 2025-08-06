@@ -8,4 +8,4 @@ def apply 'a 'b (f: a -> b) (x: a) = (f x, f x)
 def consume (xs: *[]i32) = 0
 
 def main (arr: *[]i32) =
- apply consume arr
+  apply consume arr

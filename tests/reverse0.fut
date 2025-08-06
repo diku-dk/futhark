@@ -5,4 +5,4 @@
 -- input { empty([0]i32) } output { empty([0]i32) }
 -- structure { Assert 0 }
 
-def main(as: []i32): []i32 = as[::-1]
+def main (as: []i32) : []i32 = as[::-1]

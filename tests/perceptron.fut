@@ -38,33 +38,36 @@
 -- 1.000000f32
 -- }
 
-def dotV [d] (x: [d]f32) (y: [d]f32): f32 =
+def dotV [d] (x: [d]f32) (y: [d]f32) : f32 =
   reduce (+) 0.0 (map2 (*) x y)
 
-def addV [d] (x: [d]f32) (y: [d]f32): [d]f32 =
+def addV [d] (x: [d]f32) (y: [d]f32) : [d]f32 =
   map2 (+) x y
 
-def scaleV [d] (x: [d]f32) (a: f32): [d]f32 =
-  map (*a) x
+def scaleV [d] (x: [d]f32) (a: f32) : [d]f32 =
+  map (* a) x
 
-def checkClass [d] (w: [d]f32) (x: [d]f32): f32 =
+def checkClass [d] (w: [d]f32) (x: [d]f32) : f32 =
   if dotV x w > 0.0 then 1.0 else -1.0
 
-def checkList [d][m] (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32): bool =
+def checkList [d] [m] (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32) : bool =
   reduce (&&) true (map2 (\x y -> checkClass w x * y != -1.0) xs ys)
 
-def accuracy [d][m] (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32): f32 =
+def accuracy [d] [m] (w: [d]f32) (xs: [m][d]f32) (ys: [m]f32) : f32 =
   reduce (+) 0.0 (map2 (\x y -> f32.bool (checkClass w x * y != -1.0)) xs ys)
 
-def train [d] (w: [d]f32) (x: [d]f32) (y: f32) (eta: f32): [d]f32 =
-  if checkClass w x == y then w
+def train [d] (w: [d]f32) (x: [d]f32) (y: f32) (eta: f32) : [d]f32 =
+  if checkClass w x == y
+  then w
   else addV w (scaleV (scaleV x eta) y)
 
 -- Returns: #iterations, final 'w', accuracy from 0-1.
-def main [d][m] (w: [d]f32) (xd: [m][d]f32) (yd: [m]f32) (limit: i32) (eta: f32): (i32, [d]f32, f32) =
-  let (w,i) = loop (w, i) = (w, 0) while i < limit && !(checkList w xd yd) do
-    -- Find data for this iteration.
-    let x = xd[i%i32.i64 m]
-    let y = yd[i%i32.i64 m]
-    in (train w x y eta, i+1)
-  in (i, w, accuracy w xd yd / f32.i64(m))
+def main [d] [m] (w: [d]f32) (xd: [m][d]f32) (yd: [m]f32) (limit: i32) (eta: f32) : (i32, [d]f32, f32) =
+  let (w, i) =
+    loop (w, i) = (w, 0)
+    while i < limit && !(checkList w xd yd) do
+      -- Find data for this iteration.
+      let x = xd[i % i32.i64 m]
+      let y = yd[i % i32.i64 m]
+      in (train w x y eta, i + 1)
+  in (i, w, accuracy w xd yd / f32.i64 (m))

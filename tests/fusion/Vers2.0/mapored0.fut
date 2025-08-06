@@ -10,7 +10,7 @@
 --      Screma 1
 -- }
 --
-def main(arr: []f64): (f64,[]f64) =
-    let r = reduce (+) (0.0) arr
-    let x = map    (+1.0) arr in
-    (r,x)
+def main (arr: []f64) : (f64, []f64) =
+  let r = reduce (+) (0.0) arr
+  let x = map (+ 1.0) arr
+  in (r, x)

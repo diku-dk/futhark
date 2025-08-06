@@ -15,5 +15,5 @@
 -- compiled random input { [1024][4]i32 } auto output
 -- compiled random input { [4][1024]i32 } auto output
 -- compiled random input { [1024][1024]i32 } auto output
-def main [n][m] (a: [n][m]i32): [m][n]i32 =
+def main [n] [m] (a: [n][m]i32) : [m][n]i32 =
   transpose a

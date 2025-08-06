@@ -4,6 +4,6 @@
 
 def x = 1
 
-open { local def x = 2 }
+open {local def x = 2}
 
 def main = x

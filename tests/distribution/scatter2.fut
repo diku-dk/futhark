@@ -6,4 +6,4 @@
 -- structure gpu { SegMap 2 }
 
 entry main (xss: *[][]i32) (is: []i64) (ys: [][]i32) =
-  scatter xss is (map (map (+2)) ys)
+  scatter xss is (map (map (+ 2)) ys)

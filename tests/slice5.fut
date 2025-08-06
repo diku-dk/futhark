@@ -2,4 +2,4 @@
 -- ==
 -- input { [[1, 2], [3, 4]] } output { [[1, 2], [3, 4]] }
 
-entry main [n][m] (A: [n][m]i32) : [m][n]i32 = A[0:m,0:n]
+entry main [n] [m] (A: [n][m]i32) : [m][n]i32 = A[0:m, 0:n]

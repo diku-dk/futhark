@@ -2,8 +2,8 @@
 -- ==
 -- input { 1 2 } output { [[0,0]] }
 
-module PM(P: { type vec [n] val mk_a: (n: i64) -> vec [n] }) = {
- def mk_b (m: i64) (n: i64): [m](P.vec [n]) = replicate m (P.mk_a n)
+module PM (P: {type vec [n] val mk_a : (n: i64) -> vec [n]}) = {
+  def mk_b (m: i64) (n: i64) : [m](P.vec [n]) = replicate m (P.mk_a n)
 }
 
 module intmat = PM {

@@ -6,4 +6,4 @@ def red_mult [n] (xs: [n]f32, c: f32) : f32 =
   reduce (*) 1 xs * c
 
 entry rev [n] (xs: [n]f32) (c: f32) =
-  vjp red_mult (xs,c) 1
+  vjp red_mult (xs, c) 1

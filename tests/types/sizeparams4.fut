@@ -7,4 +7,4 @@ def n = 2i64
 
 type ints [n] = [n]i64
 
-def main(n: i64): ints [n] = iota n
+def main (n: i64) : ints [n] = iota n

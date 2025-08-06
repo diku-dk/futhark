@@ -1,6 +1,6 @@
 def f x =
-  let vs = [x, x*x, x*x*x]
-  in spread 5 1 [0,1,2] vs
+  let vs = [x, x * x, x * x * x]
+  in spread 5 1 [0, 1, 2] vs
 
 -- ==
 -- entry: f_jvp

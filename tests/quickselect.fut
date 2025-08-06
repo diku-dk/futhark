@@ -10,14 +10,16 @@
 -- input { [1] 0i64 } output { 1 }
 -- input { [4, -8, 2, 2, 0, 0, 5, 9, -6, 2] 7i64 } output { 4 }
 
-def quickselect [n] (s: [n]i32) (k:i64): i32 =
+def quickselect [n] (s: [n]i32) (k: i64) : i32 =
   let (_, s) =
     loop (k, s) while length s > 1 do
-      let pivot = s[length s/2]
-      let (lt, gt, _) = partition2 (<pivot) (>pivot) s
-      in if k < length lt then (k, lt)
-         else if k >= length s - length gt then (k - (length s - length gt), gt)
-         else (0,[pivot])
+      let pivot = s[length s / 2]
+      let (lt, gt, _) = partition2 (< pivot) (> pivot) s
+      in if k < length lt
+         then (k, lt)
+         else if k >= length s - length gt
+         then (k - (length s - length gt), gt)
+         else (0, [pivot])
   in s[0]
 
-def main (s:[]i32) (k:i64) : i32 = quickselect s k
+def main (s: []i32) (k: i64) : i32 = quickselect s k

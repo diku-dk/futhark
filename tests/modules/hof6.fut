@@ -2,6 +2,6 @@
 -- ==
 -- error: Cannot create array
 
-module m = { type^ t = i32 -> i32 } : { type ^t }
+module m = {type^ t = i32 -> i32}: {type^ t}
 
-def x: []m.t = []
+def x : []m.t = []

@@ -8,9 +8,9 @@
 --   true
 -- }
 
-def main(n: i64): bool =
-  let indexes = iota(n)
-  let values = map (+2) indexes
-  let array = map (+5) indexes
+def main (n: i64) : bool =
+  let indexes = iota (n)
+  let values = map (+ 2) indexes
+  let array = map (+ 5) indexes
   let array' = scatter array indexes values
   in reduce (&&) true (map2 (==) array' values)

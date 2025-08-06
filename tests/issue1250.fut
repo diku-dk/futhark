@@ -12,17 +12,17 @@ module i8mt = {
 }
 
 module type a = {
-    module b: mt
-    module c: mt
+  module b: mt
+  module c: mt
 }
 
 module a_impl = {
-    module b = i8mt
-    module c = i8mt
+  module b = i8mt
+  module c = i8mt
 }
 
 module use_a (d: a) = {
-    def b_to_i64 (b: d.b.t) = d.b.to_i64 b
+  def b_to_i64 (b: d.b.t) = d.b.to_i64 b
 }
 
 module f = use_a a_impl

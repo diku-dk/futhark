@@ -45,18 +45,21 @@
 -- 0.5782306456739441f64, 0.290580297318634f64, 0.14532974216231054f64]
 -- }
 
-def analytic(t0: f64) (time: f64): f64 =
-  20.0 + (t0 - 20.0) * f64.exp(-0.07*time)
+def analytic (t0: f64) (time: f64) : f64 =
+  20.0 + (t0 - 20.0) * f64.exp (-0.07 * time)
 
-def cooling(_time: f64) (temperature: f64): f64 =
-  -0.07 * (temperature-20.0)
+def cooling (_time: f64) (temperature: f64) : f64 =
+  -0.07 * (temperature - 20.0)
 
-def main(t0: f64) (a: f64) (b: f64) (h: f64): []f64 =
-  let steps = i64.f64 ((b-a)/h)
+def main (t0: f64) (a: f64) (b: f64) (h: f64) : []f64 =
+  let steps = i64.f64 ((b - a) / h)
   let temps = replicate steps 0.0
-  let (_,temps) = loop (t,temps)=(t0,temps) for i < steps do
-    let x = a + f64.i64 i * h
-    let temps[i] = f64.abs(t-analytic t0 x)
-    in (t + h * cooling x t,
-        temps)
- in temps
+  let (_, temps) =
+    loop (t, temps) = (t0, temps)
+    for i < steps do
+      let x = a + f64.i64 i * h
+      let temps[i] = f64.abs (t - analytic t0 x)
+      in ( t + h * cooling x t
+         , temps
+         )
+  in temps

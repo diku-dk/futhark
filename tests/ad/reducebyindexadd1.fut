@@ -7,8 +7,8 @@
 --  output {
 --    [1f32,1f32,1f32,1f32,1f32,1f32,1f32,1f32]
 --    [1f32,1f32,1f32,1f32,1f32,1f32,1f32,1f32,1f32,1f32,1f32,1f32,1f32,1f32,1f32,1f32,0f32,0f32] }
-def f [n][m] (is: [n]i64) (dst: [m]f32,vs: [n]f32) =
+def f [n] [m] (is: [n]i64) (dst: [m]f32, vs: [n]f32) =
   reduce_by_index (copy dst) (+) 0 is vs
 
-def main [n][m] (is: [n]i64) (dst: [m]f32) (vs: [n]f32) =
-  vjp (f is) (dst,vs) (replicate m 1)
+def main [n] [m] (is: [n]i64) (dst: [m]f32) (vs: [n]f32) =
+  vjp (f is) (dst, vs) (replicate m 1)

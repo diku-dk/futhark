@@ -5,4 +5,4 @@
 
 entry main (xs: [][]i32) =
   let ys = manifest (transpose xs)
-  in ys[1,2]
+  in ys[1, 2]

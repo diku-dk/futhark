@@ -3,7 +3,7 @@ module newf32 = {
 }
 
 module type mixture = {
-  module V : {type t}
+  module V: {type t}
 }
 
 module pm (P: mixture) = {
@@ -14,6 +14,6 @@ module foo = {
   module V = newf32
 }
 
-module k_means_em = pm (pm foo : mixture)
+module k_means_em = pm (pm foo: mixture)
 
 def main (x: k_means_em.V.t) = x

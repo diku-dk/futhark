@@ -4,4 +4,4 @@
 
 def id 't (x: t) = x
 
-def main(xs: []i32) = map id xs
+def main (xs: []i32) = map id xs

@@ -2,7 +2,7 @@
 -- ==
 -- input { 2 } output { 2 }
 
-module m: { val id : i32 -> i32 } = {
+module m : {val id : i32 -> i32} = {
   def id x = x
 }
 
