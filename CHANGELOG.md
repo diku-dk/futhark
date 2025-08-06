@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark fmt --check` no longer prints the program on failure.
+
 ## [0.25.32]
 
 ### Added
