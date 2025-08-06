@@ -59,14 +59,12 @@ usesAD prog = any stmUsesAD (progConsts prog) || any funUsesAD (progFuns prog)
       lamUsesAD lam
         || any (lamUsesAD . scanLambda) scans
         || any (lamUsesAD . redLambda) reds
-    expUsesAD (Op (ScanScatter _ _ map_lam scan _ scatter_lam)) =
+    expUsesAD (Op (ScanScatter _ _ map_lam scan scatter_lam)) =
       lamUsesAD map_lam
         || (lamUsesAD . scanLambda) scan
         || lamUsesAD scatter_lam
     expUsesAD (Op (Hist _ _ ops lam)) =
       lamUsesAD lam || any (lamUsesAD . histOp) ops
-    expUsesAD (Op (Scatter _ _ _ lam)) =
-      lamUsesAD lam
     expUsesAD (Match _ cases def_case _) =
       any (bodyUsesAD . caseBody) cases || bodyUsesAD def_case
     expUsesAD (Loop _ _ body) = bodyUsesAD body

@@ -27,11 +27,13 @@ import Data.Char (isAlpha)
 import Data.Functor
 import Data.List (singleton)
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Loc qualified as L
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Void
 import Futhark.Analysis.PrimExp.Parse
+import Futhark.FreshNames (VNameSource (..))
 import Futhark.IR
 import Futhark.IR.GPU (GPU)
 import Futhark.IR.GPU.Op qualified as GPU
@@ -238,12 +240,30 @@ pErrorMsgPart =
 pErrorMsg :: Parser (ErrorMsg SubExp)
 pErrorMsg = ErrorMsg <$> braces (pErrorMsgPart `sepBy` pComma)
 
-pLoc :: Parser Loc
-pLoc =
-  choice
-    [ pStringLiteral $> mempty, -- FIXME
-      pure mempty
-    ]
+lInt :: Parser Int
+lInt = lexeme L.decimal
+
+pPos :: Parser L.Pos
+pPos =
+  L.Pos
+    <$> manyTill L.charLiteral (char ':')
+    <*> lInt
+    <*> (char ':' *> lInt)
+    <*> pure (-1) -- Cannot recover offset.
+
+pLocStr :: Parser Loc
+pLocStr = do
+  start <- pPos
+  void $ char '-'
+  end <- do
+    x <- lInt
+    choice
+      [ do
+          y <- char ':' *> lInt
+          pure $ L.Pos (L.posFile start) x y (-1),
+        pure $ L.Pos (L.posFile start) (L.posLine start) x (-1)
+      ]
+  pure $ L.Loc start end
 
 pIota :: Parser BasicOp
 pIota =
@@ -583,7 +603,13 @@ pSubExpRes :: Parser SubExpRes
 pSubExpRes = SubExpRes <$> pCerts <*> pSubExp
 
 pProvenance :: Parser Provenance
-pProvenance = Provenance mempty <$> pLoc
+pProvenance =
+  choice
+    [ lexeme $ between (char '"') (char '"') $ do
+        l <- pLocStr `sepBy1` "->"
+        pure $ Provenance (init l) (last l),
+      pure mempty
+    ]
 
 pStm :: PR rep -> Parser (Stm rep)
 pStm pr = do
@@ -697,6 +723,9 @@ pOpaqueType =
 pOpaqueTypes :: Parser OpaqueTypes
 pOpaqueTypes = keyword "types" $> OpaqueTypes <*> braces (many pOpaqueType)
 
+pVNameSource :: Parser VNameSource
+pVNameSource = keyword "name_source" *> (VNameSource <$> braces pInt)
+
 pProg :: PR rep -> Parser (Prog rep)
 pProg pr =
   Prog
@@ -705,6 +734,9 @@ pProg pr =
     <*> many (pFunDef pr)
   where
     noTypes = OpaqueTypes mempty
+
+pStateAndProg :: PR rep -> Parser (VNameSource, Prog rep)
+pStateAndProg pr = (,) <$> (pVNameSource <|> pure (VNameSource 0)) <*> pProg pr
 
 pSOAC :: PR rep -> Parser (SOAC.SOAC rep)
 pSOAC pr =
@@ -716,7 +748,6 @@ pSOAC pr =
       pScanScatter,
       keyword "vjp" *> pVJP,
       keyword "jvp" *> pJVP,
-      pScatter,
       pHist,
       pStream
     ]
@@ -750,19 +781,6 @@ pSOAC pr =
         <*> pure []
     pMapForm =
       SOAC.ScremaForm <$> pLambda pr <*> pure mempty <*> pure mempty
-    pScatter =
-      keyword "scatter"
-        *> parens
-          ( SOAC.Scatter
-              <$> pSubExp
-              <* pComma
-              <*> braces (pVName `sepBy` pComma)
-              <* pComma
-              <*> many (pDest <* pComma)
-              <*> pLambda pr
-          )
-    pDest =
-      parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
     pHist =
       keyword "hist"
         *> parens
@@ -1169,28 +1187,28 @@ parseFull p fname s =
   either (Left . T.pack . errorBundlePretty) Right $
     parse (whitespace *> p <* eof) fname s
 
-parseRep :: PR rep -> FilePath -> T.Text -> Either T.Text (Prog rep)
-parseRep = parseFull . pProg
+parseRep :: PR rep -> FilePath -> T.Text -> Either T.Text (VNameSource, Prog rep)
+parseRep = parseFull . pStateAndProg
 
-parseSOACS :: FilePath -> T.Text -> Either T.Text (Prog SOACS)
+parseSOACS :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog SOACS)
 parseSOACS = parseRep prSOACS
 
-parseSeq :: FilePath -> T.Text -> Either T.Text (Prog Seq)
+parseSeq :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog Seq)
 parseSeq = parseRep prSeq
 
-parseSeqMem :: FilePath -> T.Text -> Either T.Text (Prog SeqMem)
+parseSeqMem :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog SeqMem)
 parseSeqMem = parseRep prSeqMem
 
-parseGPU :: FilePath -> T.Text -> Either T.Text (Prog GPU)
+parseGPU :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog GPU)
 parseGPU = parseRep prGPU
 
-parseGPUMem :: FilePath -> T.Text -> Either T.Text (Prog GPUMem)
+parseGPUMem :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog GPUMem)
 parseGPUMem = parseRep prGPUMem
 
-parseMC :: FilePath -> T.Text -> Either T.Text (Prog MC)
+parseMC :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog MC)
 parseMC = parseRep prMC
 
-parseMCMem :: FilePath -> T.Text -> Either T.Text (Prog MCMem)
+parseMCMem :: FilePath -> T.Text -> Either T.Text (VNameSource, Prog MCMem)
 parseMCMem = parseRep prMCMem
 
 --- Fragment parsers

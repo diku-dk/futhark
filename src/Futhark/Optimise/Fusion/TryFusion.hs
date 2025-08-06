@@ -491,29 +491,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                 new_inp
                 (ScremaForm res_lam' (scans_p ++ scans_c) (reds_p ++ reds_c))
 
-    ------------------
-    -- Scatter fusion --
-    ------------------
-
-    -- Map-Scatter fusion.
-    --
-    -- The 'inplace' mechanism for kernels already takes care of
-    -- checking that the Scatter is not writing to any array used in
-    -- the Map.
-    ( SOAC.Scatter _len _ivs dests _lam,
-      SOAC.Screma _ _ form,
-      _
-      )
-        | isJust $ isMapSOAC form,
-          -- 1. all arrays produced by the map are ONLY used (consumed)
-          --    by the scatter, i.e., not used elsewhere.
-          all (`notNameIn` unfus_set) outVars,
-          -- 2. all arrays produced by the map are input to the scatter.
-          mapWriteFusionOK outVars ker -> do
-            let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
-            success (fsOutNames ker ++ extra_nms) $
-              SOAC.Scatter w new_inp dests res_lam'
-
     -- Map-Hist fusion.
     --
     -- The 'inplace' mechanism for kernels already takes care of
@@ -562,31 +539,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
                 }
         success (fsOutNames ker ++ returned_outvars) $
           SOAC.Hist w (inp_c_arr <> inp_p_arr) (ops_c <> ops_p) lam'
-
-    -- Scatter-write fusion.
-    ( SOAC.Scatter _w_c ivs_c as_c _lam_c,
-      SOAC.Scatter _w_p ivs_p as_p _lam_p,
-      Horizontal
-      ) -> do
-        let zipW as_xs xs as_ys ys = xs_indices ++ ys_indices ++ xs_vals ++ ys_vals
-              where
-                (xs_indices, xs_vals) = splitScatterResults as_xs xs
-                (ys_indices, ys_vals) = splitScatterResults as_ys ys
-        let (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
-        let body' =
-              Body
-                { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
-                  bodyStms = bodyStms body_p <> bodyStms body_c,
-                  bodyResult = zipW as_c (bodyResult body_c) as_p (bodyResult body_p)
-                }
-        let lam' =
-              Lambda
-                { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
-                  lambdaBody = body',
-                  lambdaReturnType = zipW as_c (lambdaReturnType lam_c) as_p (lambdaReturnType lam_p)
-                }
-        success (fsOutNames ker ++ returned_outvars) $
-          SOAC.Scatter w (ivs_c ++ ivs_p) (as_c ++ as_p) lam'
     ( SOAC.ScanScatter _w_c inp_c lam_c' scan_c dest_c scatter_lam_c,
       SOAC.ScanScatter _w_p inp_p lam_p' scan_p dest_p scatter_lam_p,
       Horizontal
@@ -634,25 +586,6 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
             new_scatter_lam <- scanScatterPostLambda new_scatter_inp extra_out inp_c lam_c'
             success (fsOutNames ker <> extra_out) $
               SOAC.ScanScatter w new_inp new_map_lam scan [] new_scatter_lam
-    ( SOAC.Scatter _len inp_c dests lam_c',
-      SOAC.Screma _ inp_p form,
-      Vertical
-      )
-        | Just (scans, lam) <- isScanomapSOAC form -> do
-            let scan = singleScan scans
-            let (_, extra_out) = fusability unfus_set outVars
-            ( new_inp,
-              new_map_lam,
-              new_scatter_inp
-              ) <-
-              scanScatterMapLambda inp_p lam outVars inp_c
-            new_scatter_lam <- scanScatterPostLambda new_scatter_inp extra_out inp_c lam_c'
-            success (fsOutNames ker <> extra_out) $
-              SOAC.ScanScatter w new_inp new_map_lam scan dests new_scatter_lam
-    (SOAC.Scatter {}, _, _) ->
-      fail "Cannot fuse a scatter with anything else than a scatter or a map"
-    (_, SOAC.Scatter {}, _) ->
-      fail "Cannot fuse a scatter with anything else than a scatter or a map"
     (_, SOAC.Hist {}, _) ->
       fail "Cannot fuse a Hist with anything else than a Hist or a Map"
     (SOAC.Hist {}, _, _) ->
