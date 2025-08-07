@@ -259,7 +259,7 @@ intrablockStm stm@(Let pat aux e) = do
           let scanfun' = soacsLambdaToGPU scanfun
               mapfun' = soacsLambdaToGPU mapfun
           identity <- mkIdentityLambda (lambdaReturnType mapfun)
-          let post_op = SegPostOp identity []
+          let post_op = SegPostOp identity
           certifying (stmAuxCerts aux) $
             addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] post_op mapfun' arrs [] []
           parallelMin [w]

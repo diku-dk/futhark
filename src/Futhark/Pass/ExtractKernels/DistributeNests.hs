@@ -507,7 +507,7 @@ maybeDistributeStm stm@(Let pat aux (Op (Screma w arrs form))) acc
                 map_lam' <- soacsLambda map_lam
                 post_lam <- mkIdentityLambda $ lambdaReturnType lam
                 localScope (typeEnvFromDistAcc acc') $
-                  segmentedScanomapKernel nest' perm (stmAuxCerts aux) w lam post_lam [] map_lam' nes arrs
+                  segmentedScanomapKernel nest' perm (stmAuxCerts aux) w lam post_lam map_lam' nes arrs
                     >>= kernelOrNot mempty stm acc kernels acc'
         _ ->
           addStmToAcc stm acc
@@ -943,12 +943,11 @@ segmentedScanomapKernel ::
   SubExp ->
   Lambda SOACS ->
   Lambda SOACS ->
-  ScatterSpec VName ->
   Lambda rep ->
   [SubExp] ->
   [VName] ->
   DistNestT rep m (Maybe (Stms rep))
-segmentedScanomapKernel nest perm cs segment_size lam post_lam spec map_lam nes arrs = do
+segmentedScanomapKernel nest perm cs segment_size lam post_lam map_lam nes arrs = do
   mk_lvl <- asks distSegLevel
   onLambda <- asks distOnSOACSLambda
   let onLambda' = fmap fst . runBuilder . onLambda
@@ -959,7 +958,7 @@ segmentedScanomapKernel nest perm cs segment_size lam post_lam spec map_lam nes 
       let scan_op = SegBinOp Noncommutative lam'' nes'' shape
       let (_, scatter_op') = isVectorMap post_lam
       scatter_op'' <- onLambda' scatter_op'
-      let post_op = SegPostOp scatter_op'' spec
+      let post_op = SegPostOp scatter_op''
       lvl <- mk_lvl (segment_size : map snd ispace) "segscan" $ NoRecommendation SegNoVirt
       addStms
         =<< traverse renameStm

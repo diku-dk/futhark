@@ -745,7 +745,6 @@ pSOAC pr =
       keyword "redomap" *> pScrema pRedomapForm,
       keyword "scanomap" *> pScrema pScanomapForm,
       keyword "screma" *> pScrema pScremaForm,
-      pScanScatter,
       keyword "vjp" *> pVJP,
       keyword "jvp" *> pJVP,
       pHist,
@@ -832,21 +831,6 @@ pSOAC pr =
           <*> braces (pSubExp `sepBy` pComma)
           <* pComma
           <*> pLambda pr
-    pScanScatter =
-      keyword "scanscatter"
-        *> parens
-          ( SOAC.ScanScatter
-              <$> pSubExp
-              <* pComma
-              <*> braces (pVName `sepBy` pComma)
-              <* pComma
-              <*> pLambda pr
-              <* pComma
-              <*> pScan pr
-              <* pComma
-              <*> many (pDest <* pComma)
-              <*> pLambda pr
-          )
 
 pSizeClass :: Parser GPU.SizeClass
 pSizeClass =
@@ -968,17 +952,9 @@ pSegOp pr pLvl =
       comm <- pComm
       lam <- pLambda pr
       pure $ SegOp.SegBinOp comm lam nes shape
-    pDest =
-      parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
     pSegPostOp =
       SegOp.SegPostOp
-        <$> (pLambda pr <* pComma)
-        <*> choice
-          [ (:)
-              <$> pDest
-              <*> many (pComma *> pDest),
-            pure []
-          ]
+        <$> pLambda pr
     pHistOp =
       SegOp.HistOp
         <$> pShape

@@ -390,14 +390,11 @@ lastUseSegPostOp ::
   SegPostOp (Aliases rep) ->
   Names ->
   LastUseM rep (LUTabFun, Names, Names)
-lastUseSegPostOp (SegPostOp l@(Lambda _ _ body) dests) used_nms =
+lastUseSegPostOp (SegPostOp l@(Lambda _ _ body)) used_nms =
   inScopeOf l $ do
-    (used_nms', lu_vars) <- bimap mconcat mconcat . unzip <$> mapM helper dests
-    (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
-    pure (body_lutab, lu_vars, used_nms'')
-  where
-    helper (shape, _, dest) =
-      lastUsedInNames used_nms $ freeIn shape <> freeIn dest
+    (body_lutab, used_nms') <- lastUseBody body (mempty, used_nms)
+    -- NOTE: Assume this should be mempty?
+    pure (body_lutab, mempty, used_nms')
 
 lastUseSeqOp :: Op (Aliases SeqMem) -> Names -> LastUseM SeqMem (LUTabFun, Names, Names)
 lastUseSeqOp (Alloc se sp) used_nms = do

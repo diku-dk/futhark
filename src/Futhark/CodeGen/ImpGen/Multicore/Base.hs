@@ -128,9 +128,9 @@ renameSegBinOp segbinops =
     pure $ SegBinOp comm lam' ne shape
 
 renameSegPostOp :: SegPostOp MCMem -> MulticoreGen (SegPostOp MCMem)
-renameSegPostOp (SegPostOp lam spec) = do
+renameSegPostOp (SegPostOp lam) = do
   lam' <- renameLambda lam
-  pure $ SegPostOp lam' spec
+  pure $ SegPostOp lam'
 
 compileThreadResult ::
   SegSpace ->

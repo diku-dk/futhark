@@ -412,7 +412,7 @@ transformStm path (Let pat aux (Op (Screma w arrs form)))
             let map_lam_sequential = soacsLambdaToGPU map_lam
             let ret = lambdaReturnType map_lam
             identity <- mkIdentityLambda ret
-            let post_op = SegPostOp identity []
+            let post_op = SegPostOp identity
             lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
             addStms . fmap (certify cs)
               =<< segScan lvl pat mempty w scan_ops post_op map_lam_sequential arrs [] []
@@ -500,39 +500,6 @@ transformStm _ (Let orig_pat aux (Op (Hist w imgs ops bucket_fun))) = do
     addStms =<< histKernel onLambda lvl orig_pat [] [] (stmAuxCerts aux) w ops bfun' imgs
   where
     onLambda = pure . soacsLambdaToGPU
-transformStm path (Let pat aux (Op (ScanScatter w arrs map_lam scan dests scatter_lam))) = do
-  let map_lam_sequential = soacsLambdaToGPU map_lam
-      map_res = bodyResult $ lambdaBody $ map_lam_sequential
-      paralleliseOuter = runBuilder_ $ do
-        scan_ops <- do
-          let Scan scan_lam nes = scan
-          (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
-          let scan_lam'' = soacsLambdaToGPU scan_lam'
-          pure $ SegBinOp Noncommutative scan_lam'' nes' shape
-        let scatter_lam_sequential = soacsLambdaToGPU scatter_lam
-            post_op = SegPostOp scatter_lam_sequential dests
-        lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
-        addStms . fmap (certify cs)
-          =<< segScan lvl pat mempty w [scan_ops] post_op map_lam_sequential arrs [] []
-
-      outerParallelBody =
-        renameBody
-          =<< (mkBody <$> paralleliseOuter <*> pure map_res)
-
-      paralleliseInner path' = do
-        (mapstm, scanstm) <-
-          scanomapToMapAndScan pat (w, [scan], map_lam, arrs)
-        types <- asksScope scopeForSOACs
-        transformStms path' . stmsToList <=< (`runBuilderT_` types) $
-          addStms =<< simplifyStms (stmsFromList [certify cs mapstm, certify cs scanstm])
-
-      innerParallelBody path' =
-        renameBody
-          =<< (mkBody <$> paralleliseInner path' <*> pure map_res)
-
-  versionScanRed path pat aux w map_lam (Just scatter_lam) paralleliseOuter outerParallelBody innerParallelBody
-  where
-    cs = stmAuxCerts aux
 transformStm _ stm =
   runBuilder_ $ FOT.transformStmRecursively stm
 

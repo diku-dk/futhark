@@ -201,7 +201,7 @@ analyseSegPostOp ::
   InUse ->
   SegPostOp GPUMem ->
   m (InUse, LastUsed, Graph VName)
-analyseSegPostOp lumap inuse (SegPostOp lambda _) =
+analyseSegPostOp lumap inuse (SegPostOp lambda) =
   analyseLambda lumap inuse lambda
 
 analyseHistOp ::

@@ -393,10 +393,6 @@ expInputs (Op soac) = case soac of
   Futhark.Hist w is ops lam -> inputs is <> freeClassifications (w, ops, lam)
   Futhark.Stream w is nes lam ->
     inputs is <> freeClassifications (w, nes, lam)
-  Futhark.ScanScatter w arrs map_lam scan dests scatter_lam ->
-    inputs arrs
-      <> freeClassifications (w, map_lam, scan)
-      <> freeClassifications (dests, scatter_lam)
   Futhark.JVP {} -> freeClassifications soac
   Futhark.VJP {} -> freeClassifications soac
   where

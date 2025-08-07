@@ -83,17 +83,6 @@ data SOAC rep
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
-  | -- | @ScanScatter <width> <arrays> <map-lambda> <scan>
-    -- <dest-arrays> <scatter-lambda>
-    --
-    -- This SOAC has <width> for the input arrays which are mapped
-    -- over with <map-lambda> given to the <scan>. The result of the
-    -- scan is then mapped using the <scatter-lambda> and written to
-    -- the destination arrays <dest-arrays>. Here <map-lambda> and
-    -- <scan> will not produce any sub results and write them. All the
-    -- sub results will not be written anywhere and will be passed
-    -- directly to the <scatter-lambda> and written to <dest-arrays>.
-    ScanScatter SubExp [VName] (Lambda rep) (Scan rep) (Lambda rep)
   deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
@@ -352,13 +341,6 @@ mapSOACM tv (Screma w arrs (ScremaForm map_lam scans reds)) =
             <*> mapM (mapOnSOACScan tv) scans
             <*> mapM (mapOnSOACReduce tv) reds
         )
-mapSOACM tv (ScanScatter w arrs map_lam scan scatter_lam) =
-  ScanScatter
-    <$> mapOnSOACSubExp tv w
-    <*> mapM (mapOnSOACVName tv) arrs
-    <*> mapOnSOACLambda tv map_lam
-    <*> mapOnSOACScan tv scan
-    <*> mapOnSOACLambda tv scatter_lam
 
 mapOnSOACScan :: (Monad m) => SOACMapper frep trep m -> Scan frep -> m (Scan trep)
 mapOnSOACScan tv (Scan red_lam red_nes) =
@@ -436,8 +418,6 @@ soacType (Hist _ _ ops _bucket_fun) = do
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
 soacType (Screma w _arrs form) =
   scremaType w form
-soacType (ScanScatter w _arrs _map_lam _scan scatter_lam) =
-  map (`arrayOfRow` w) (lambdaReturnType scatter_lam)
 
 instance TypedOp SOAC where
   opType = pure . staticShapes . soacType
@@ -463,11 +443,6 @@ instance AliasedOp SOAC where
         zip (map paramName $ drop 1 $ lambdaParams lam) (accs ++ map Var arrs)
   consumedInOp (Hist _ _ ops _) =
     namesFromList $ concatMap histDest ops
-  consumedInOp (ScanScatter _ arrs map_lam _ _) =
-    mapNames consumedArray (consumedByLambda map_lam)
-    where
-      consumedArray v = fromMaybe v $ lookup v params_to_arrs
-      params_to_arrs = zip (map paramName $ lambdaParams map_lam) arrs
 
 mapHistOp ::
   (Lambda frep -> Lambda trep) ->
@@ -498,13 +473,6 @@ instance CanBeAliased SOAC where
     where
       onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
       onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
-  addOpAliases aliases (ScanScatter w arrs map_lam scan scatter_lam) =
-    ScanScatter
-      w
-      arrs
-      (Alias.analyseLambda aliases map_lam)
-      (scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan})
-      (Alias.analyseLambda aliases scatter_lam)
 
 instance IsOp SOAC where
   safeOp _ = False
@@ -560,16 +528,6 @@ instance IsOp SOAC where
         reductionDependencies mempty lam nes deps_in
       depsOfRed (Reduce _ lam nes, deps_in) =
         reductionDependencies mempty lam nes deps_in
-  opDependencies (ScanScatter w arrs map_lam scan scatter_lam) =
-    let (scan_in, map_deps) =
-          splitAt (length $ scanNeutral scan) $
-            lambdaDependencies mempty map_lam (depsOfArrays w arrs)
-        scan_deps = depsOfScan scan scan_in
-     in lambdaDependencies mempty scatter_lam (scan_deps <> map_deps)
-    where
-      flattenBlocks (_, arr, ivs) =
-        oneName arr <> mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
-      depsOfScan (Scan lam nes) = reductionDependencies mempty lam nes
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t
@@ -723,22 +681,6 @@ typeCheckSOAC (Screma w arrs (ScremaForm map_lam scans reds)) = do
     $ "Map function return type "
       <> prettyTuple map_lam_ts
       <> " wrong for given scan and reduction functions."
-typeCheckSOAC (ScanScatter w arrs map_lam scan scatter_lam) = do
-  TC.require [Prim int64] w
-  arrs' <- TC.checkSOACArrayArgs w arrs
-  TC.checkLambda map_lam arrs'
-  scan_nes' <- typeCheckScan scan
-  let map_lam_ts = lambdaReturnType map_lam
-  unless
-    ( take (length scan_nes') map_lam_ts == map TC.argType scan_nes'
-    )
-    . TC.bad
-    . TC.TypeError
-    $ "Map function return type "
-      <> prettyTuple map_lam_ts
-      <> " wrong for given the scan functions."
-  let map_args = (,mempty) <$> drop (length scan_nes') map_lam_ts
-  TC.checkLambda scatter_lam (scan_nes' <> map_args)
 
 typeCheckScan :: (TC.Checkable rep) => Scan (Aliases rep) -> TC.TypeM rep [(Type, Names)]
 typeCheckScan (Scan scan_lam scan_nes) = do
@@ -785,11 +727,6 @@ instance RephraseOp SOAC where
               <*> mapM (rephraseScan r) scans
               <*> mapM (rephraseRed r) red
           )
-  rephraseInOp r (ScanScatter w arrs map_lam scan scatter_lam) =
-    ScanScatter w arrs
-      <$> rephraseLambda r map_lam
-      <*> rephraseScan r scan
-      <*> rephraseLambda r scatter_lam
 
 rephraseRed :: (Monad m) => Rephraser m from to -> Reduce from -> m (Reduce to)
 rephraseRed r (Reduce comm op nes) =
@@ -813,11 +750,6 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
       lambdaMetrics map_lam
       mapM_ (lambdaMetrics . scanLambda) scans
       mapM_ (lambdaMetrics . redLambda) reds
-  opMetrics (ScanScatter _ _ map_lam scan scatter_lam) =
-    inside "ScanScatter" $ do
-      lambdaMetrics map_lam
-      lambdaMetrics $ scanLambda scan
-      lambdaMetrics scatter_lam
 
 instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
   pretty (VJP args vec lam) =
@@ -869,26 +801,6 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
                     (mconcat $ intersperse (comma <> PP.line) $ map pretty scans)
             )
   pretty (Screma w arrs form) = ppScrema w arrs form
-  pretty (ScanScatter w arrs map_lam scan scatter_lam) =
-    ppScanScatter w arrs map_lam scan scatter_lam
-
-ppScanScatter ::
-  (PrettyRep rep, Pretty inp) =>
-  SubExp ->
-  [inp] ->
-  Lambda rep ->
-  Scan rep ->
-  Lambda rep ->
-  Doc ann
-ppScanScatter w arrs map_lam scan scatter_lam =
-  "scanscatter"
-    <> (parens . align)
-      ( pretty w
-          <> comma </> ppTuple' (map pretty arrs)
-          <> comma </> pretty map_lam
-          <> comma </> pretty scan
-          <> comma </> pretty scatter_lam
-      )
 
 -- | Prettyprint the given Screma.
 ppScrema ::
