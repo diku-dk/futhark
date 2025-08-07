@@ -54,7 +54,6 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Data.Bifunctor (first)
 import Data.Bitraversable
-import Data.Either
 import Data.List
   ( elemIndex,
     foldl',
@@ -514,9 +513,10 @@ segOpType (SegRed _ space ts kbody reds) =
       let shape = Shape segment_dims <> segBinOpShape op
       map (`arrayOfShape` shape) (lambdaReturnType $ segBinOpLambda op)
 segOpType (SegScan _ space _ts _kbody _scans post_op) =
-  undefined
--- FIXME
--- map (`arrayOfShape` shape) $ lambdaReturnType $ segPostOpLambda post_op
+  flip (foldr (flip arrayOfRow)) segment_dims <$> lam_ts
+  where
+    lam_ts = lambdaReturnType $ segPostOpLambda post_op
+    segment_dims = segSpaceDims space
 segOpType (SegHist _ space _ _ ops) = do
   op <- ops
   let shape = Shape segment_dims <> histShape op <> histOpShape op
@@ -536,8 +536,9 @@ instance (ASTConstraints lvl) => AliasedOp (SegOp lvl) where
   consumedInOp (SegRed _ _ _ kbody _) =
     consumedInKernelBody kbody
   consumedInOp (SegScan _ _ _ kbody _ post_op) =
-    consumedInKernelBody kbody
-      <> undefined -- FIXME consider consumed Accs in post op?
+    consumedInKernelBody kbody <> consumed_lam
+    where
+      consumed_lam = consumedByLambda $ segPostOpLambda post_op
   consumedInOp (SegHist _ _ _ kbody ops) =
     namesFromList (concatMap histDest ops) <> consumedInKernelBody kbody
 
@@ -628,7 +629,7 @@ checkSegPostOp ::
   [(Lambda (Aliases rep), [SubExp], Shape)] ->
   [Type] ->
   TC.TypeM rep ()
-checkSegPostOp op@(SegPostOp lam) ops ts = do
+checkSegPostOp (SegPostOp lam) ops ts = do
   let (shps, nes) = unzip $ concatMap (\(_, a, shp) -> (shp,) <$> a) ops
   nes' <- mapM TC.checkArg nes
   let kbody' = (,mempty) <$> drop (length nes') ts
@@ -719,10 +720,7 @@ mapSegPostOp ::
   SegPostOp frep ->
   m (SegPostOp trep)
 mapSegPostOp tv (SegPostOp lam) =
-  SegPostOp
-    <$> mapOnSegPostOpLambda tv lam
-  where
-    mapShape shp = Shape <$> mapM (mapOnSegOpSubExp tv) (shapeDims shp)
+  SegPostOp <$> mapOnSegPostOpLambda tv lam
 
 -- | Apply a 'SegOpMapper' to the given 'SegOp'.
 mapSegOpM ::
@@ -1506,8 +1504,7 @@ segOpReturns k@(SegMap _ _ _ kbody) =
   kernelBodyReturns kbody . extReturns =<< opType k
 segOpReturns k@(SegRed _ _ _ kbody _) =
   kernelBodyReturns kbody . extReturns =<< opType k
-segOpReturns k@(SegScan _ _ _ kbody _ post_op) = undefined
-  where
-    rets = bodyResult $ lambdaBody $ segPostOpLambda post_op
+segOpReturns k@(SegScan {}) =
+  mapM pure . extReturns =<< opType k
 segOpReturns (SegHist _ _ _ _ ops) =
   concat <$> mapM (mapM varReturns . histDest) ops
