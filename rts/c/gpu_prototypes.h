@@ -1,5 +1,10 @@
 // Start of gpu_prototypes.h
 
+// Dummy definitions for Tensor Core functions in C code
+#define memblock_shared memblock_device
+#define memblock_set_shared memblock_set_device
+#define memblock_unref_shared memblock_unref_device
+
 // Constants used for transpositions.  In principle these should be configurable.
 #define TR_BLOCK_DIM 16
 #define TR_TILE_DIM (TR_BLOCK_DIM*2)
