@@ -10,4 +10,4 @@ def f 't (x: t) (acc: *acc ([]t)) (is: []i32) =
     write acc (i64.i32 i) x
 
 def main (xs: *[][]i32) is =
-  scatter_stream xs (f [1,2,3]) is
+  scatter_stream xs (f [1, 2, 3]) is

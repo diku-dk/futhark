@@ -1,5 +1,5 @@
 module type Size = {
-  val n: i64
+  val n : i64
 }
 
 module SizeOps (size: Size) = {
@@ -7,10 +7,11 @@ module SizeOps (size: Size) = {
 }
 
 module mySize = {
-  def n = 4i64
-} : Size
+                  def n = 4i64
+                }:
+                Size
 
 module mySizeOps = SizeOps mySize
 
 entry main (arr: []i64) =
-    mySizeOps.test arr
+  mySizeOps.test arr

@@ -11,16 +11,18 @@ module type foobar_mod = {
 }
 
 module sum (M: foobar_mod) = {
-  def sum (a: []M.foobar): i32 =
+  def sum (a: []M.foobar) : i32 =
     reduce (+) 0 (map M.f a)
 }
 
 module enum_module : foobar_mod = {
   type foobar = #foo | #bar
-  def f (x : foobar) : i32 =
+
+  def f (x: foobar) : i32 =
     match x
-      case #foo -> 1
-      case #bar -> 2
+    case #foo -> 1
+    case #bar -> 2
+
   def foo = #foo : foobar
   def bar = #bar : foobar
 }

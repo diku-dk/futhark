@@ -747,7 +747,6 @@ pSOAC pr =
       keyword "screma" *> pScrema pScremaForm,
       keyword "vjp" *> pVJP,
       keyword "jvp" *> pJVP,
-      pScatter,
       pHist,
       pStream
     ]
@@ -781,20 +780,6 @@ pSOAC pr =
         <*> pure []
     pMapForm =
       SOAC.ScremaForm <$> pLambda pr <*> pure mempty <*> pure mempty
-    pScatter =
-      keyword "scatter"
-        *> parens
-          ( SOAC.Scatter
-              <$> pSubExp
-              <* pComma
-              <*> braces (pVName `sepBy` pComma)
-              <* pComma
-              <*> many (pDest <* pComma)
-              <*> pLambda pr
-          )
-      where
-        pDest =
-          parens $ (,,) <$> pShape <* pComma <*> pInt <* pComma <*> pVName
     pHist =
       keyword "hist"
         *> parens

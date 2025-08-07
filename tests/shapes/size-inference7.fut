@@ -6,4 +6,4 @@
 
 def iiota [n] : [n]i64 = iota n
 
-def main x = unzip (zip iiota (replicate (2*x) 2i32))
+def main x = unzip (zip iiota (replicate (2 * x) 2i32))

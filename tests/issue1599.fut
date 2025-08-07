@@ -1,4 +1,4 @@
 -- ==
 -- error: Occurs
 
-let bad a f = f a f
+def bad a f = f a f

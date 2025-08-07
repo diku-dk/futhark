@@ -10,8 +10,8 @@
 -- structure {
 --   Screma 1
 -- }
-def main(inp: []i32): ([]i32, []i32, []i32) =
-  let a = map (+1) inp
+def main (inp: []i32) : ([]i32, []i32, []i32) =
+  let a = map (+ 1) inp
   let b = scan (+) 0 a
-  let c = scan (*) 1 a in
-  (a, b, c)
+  let c = scan (*) 1 a
+  in (a, b, c)

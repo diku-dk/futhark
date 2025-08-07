@@ -7,7 +7,7 @@
 -- output { [0i64,0i64,0i64] }
 
 entry f_jvp n x =
- jvp (\n' -> replicate n' x :> [n]i64) n 1
+  jvp (\n' -> replicate n' x :> [n]i64) n 1
 
 -- ==
 -- entry: f_vjp

@@ -86,7 +86,6 @@ import Futhark.IR hiding
 import Futhark.IR qualified as Futhark
 import Futhark.IR.SOACS.SOAC
   ( HistOp (..),
-    ScatterSpec,
     ScremaForm (..),
     scremaType,
   )
@@ -399,7 +398,6 @@ transposeInput k n inp =
 -- | A definite representation of a SOAC expression.
 data SOAC rep
   = Stream SubExp [Input] [SubExp] (Lambda rep)
-  | Scatter SubExp [Input] (ScatterSpec VName) (Lambda rep)
   | Screma SubExp [Input] (ScremaForm rep)
   | Hist SubExp [Input] [HistOp rep] (Lambda rep)
   deriving (Eq, Show)
@@ -407,7 +405,6 @@ data SOAC rep
 -- | Returns the inputs used in a SOAC.
 inputs :: SOAC rep -> [Input]
 inputs (Stream _ arrs _ _) = arrs
-inputs (Scatter _ arrs _lam _spec) = arrs
 inputs (Screma _ arrs _) = arrs
 inputs (Hist _ inps _ _) = inps
 
@@ -415,8 +412,6 @@ inputs (Hist _ inps _ _) = inps
 setInputs :: [Input] -> SOAC rep -> SOAC rep
 setInputs arrs (Stream w _ nes lam) =
   Stream (newWidth arrs w) arrs nes lam
-setInputs arrs (Scatter w _ lam spec) =
-  Scatter (newWidth arrs w) arrs lam spec
 setInputs arrs (Screma w _ form) =
   Screma w arrs form
 setInputs inps (Hist w _ ops lam) =
@@ -429,7 +424,6 @@ newWidth (inp : _) _ = arraySize 0 $ inputType inp
 -- | The lambda used in a given SOAC.
 lambda :: SOAC rep -> Lambda rep
 lambda (Stream _ _ _ lam) = lam
-lambda (Scatter _len _ivs _spec lam) = lam
 lambda (Screma _ _ (ScremaForm lam _ _)) = lam
 lambda (Hist _ _ _ lam) = lam
 
@@ -437,8 +431,6 @@ lambda (Hist _ _ _ lam) = lam
 setLambda :: Lambda rep -> SOAC rep -> SOAC rep
 setLambda lam (Stream w arrs nes _) =
   Stream w arrs nes lam
-setLambda lam (Scatter len arrs spec _lam) =
-  Scatter len arrs spec lam
 setLambda lam (Screma w arrs (ScremaForm _ scan red)) =
   Screma w arrs (ScremaForm lam scan red)
 setLambda lam (Hist w ops inps _) =
@@ -453,12 +445,6 @@ typeOf (Stream w _ nes lam) =
           | t <- drop (length nes) (lambdaReturnType lam)
         ]
    in accrtps ++ arrtps
-typeOf (Scatter _w _ivs dests lam) =
-  zipWith arrayOfShape val_ts ws
-  where
-    indexes = sum $ zipWith (*) ns $ map length ws
-    val_ts = drop indexes $ lambdaReturnType lam
-    (ws, ns, _) = unzip3 dests
 typeOf (Screma w _ form) =
   scremaType w form
 typeOf (Hist _ _ ops _) = do
@@ -469,7 +455,6 @@ typeOf (Hist _ _ ops _) = do
 -- inputs _after_ input-transforms have been carried out.
 width :: SOAC rep -> SubExp
 width (Stream w _ _ _) = w
-width (Scatter len _lam _ivs _as) = len
 width (Screma w _ _) = w
 width (Hist w _ _ _) = w
 
@@ -484,8 +469,6 @@ toExp soac = Op <$> toSOAC soac
 toSOAC :: (MonadBuilder m) => SOAC (Rep m) -> m (Futhark.SOAC (Rep m))
 toSOAC (Stream w inps nes lam) =
   Futhark.Stream w <$> inputsToSubExps inps <*> pure nes <*> pure lam
-toSOAC (Scatter w ivs dests lam) =
-  Futhark.Scatter w <$> inputsToSubExps ivs <*> pure dests <*> pure lam
 toSOAC (Screma w arrs form) =
   Futhark.Screma w <$> inputsToSubExps arrs <*> pure form
 toSOAC (Hist w arrs ops lam) =
@@ -507,8 +490,6 @@ fromExp ::
   m (Either NotSOAC (SOAC rep))
 fromExp (Op (Futhark.Stream w as nes lam)) =
   Right <$> (Stream w <$> traverse varInput as <*> pure nes <*> pure lam)
-fromExp (Op (Futhark.Scatter w arrs spec lam)) =
-  Right <$> (Scatter w <$> traverse varInput arrs <*> pure spec <*> pure lam)
 fromExp (Op (Futhark.Screma w arrs form)) =
   Right <$> (Screma w <$> traverse varInput arrs <*> pure form)
 fromExp (Op (Futhark.Hist w arrs ops lam)) =
@@ -712,4 +693,3 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
   pretty (Screma w arrs form) = Futhark.ppScrema w arrs form
   pretty (Hist len imgs ops bucket_fun) = Futhark.ppHist len imgs ops bucket_fun
   pretty (Stream w arrs nes lam) = Futhark.ppStream w arrs nes lam
-  pretty (Scatter w arrs dests lam) = Futhark.ppScatter w arrs dests lam

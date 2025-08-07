@@ -11,18 +11,22 @@
 
 import "intrinsics"
 
-def f n (acc: *acc ([](f32,i64))) (i, x) =
-  write acc (i%n) (x, i)
+def f n (acc: *acc ([](f32, i64))) (i, x) =
+  write acc (i % n) (x, i)
 
 def main n (xs: []f32) =
-  let op = (\(a,i) (b,j) ->
-              if a < b
-              then (b,j)
-              else if b < a then (a,i)
-              else if j < i then (b,j)
-              else (a, i))
-  in reduce_by_index_stream
-     (replicate n (0,0))
-     op (f32.lowest,-1)
-     (f n) (zip (indices xs) xs)
+  let op =
+    (\(a, i) (b, j) ->
+       if a < b
+       then (b, j)
+       else if b < a
+       then (a, i)
+       else if j < i
+       then (b, j)
+       else (a, i))
+  in reduce_by_index_stream (replicate n (0, 0))
+                            op
+                            (f32.lowest, -1)
+                            (f n)
+                            (zip (indices xs) xs)
      |> unzip

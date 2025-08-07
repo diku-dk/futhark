@@ -4,5 +4,5 @@
 -- structure gpu { SegMap 1 }
 
 def main (n: i64) (accs: []i64) =
-  let ys = map (2**) (iota n)
+  let ys = map (2 **) (iota n)
   in map (\acc -> loop acc for y in ys do acc * y) accs

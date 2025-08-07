@@ -8,11 +8,12 @@
 -- output {
 --   [0i64, 200i64, 4i64, 100i64, 9i64]
 -- }
--- structure { Screma 0 Scatter 1 }
+-- structure { Screma 1 }
 
-def main [k][n] (indexes: [k]i64)
-                (values: [k]i64)
-                (array: *[n]i64): [n]i64 =
-  let indexes' = map (+1) indexes
+def main [k] [n]
+         (indexes: [k]i64)
+         (values: [k]i64)
+         (array: *[n]i64) : [n]i64 =
+  let indexes' = map (+ 1) indexes
   let array' = scatter array indexes' values
   in array'

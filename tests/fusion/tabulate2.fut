@@ -4,4 +4,4 @@
 -- structure { Iota 0 }
 
 def main [n] (j: i64) (xs: [][n]i32) =
-  map (\i -> #[unsafe] xs[j,i]*2) (iota n)
+  map (\i -> #[unsafe] xs[j, i] * 2) (iota n)

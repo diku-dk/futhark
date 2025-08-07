@@ -5,17 +5,14 @@
 -- structure seq-mem { Alloc 2 }
 -- structure gpu-mem { Alloc 2 }
 
-let main [n] (ns: [n]i64): []i64 =
+def main [n] (ns: [n]i64) : []i64 =
   let t0 = map (+ 1) ns
-
   -- Create an array whose memory block allocation depends on the *value* of t0,
   -- not the *shape* of t0.  This makes it impossible to hoist the alloc up
   -- before the t0 creation.
   let annoying = iota t0[0]
-
   -- Either coalesce t0 into t1...
   let t1 = copy t0
-
   -- ... or coalesce t1 into t2.  Both will not work:
   --
   --  + If t0 is coalesced into t1, the allocation of t2 needs to be hoisted way
