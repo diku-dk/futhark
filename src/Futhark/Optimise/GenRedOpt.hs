@@ -94,7 +94,7 @@ genRed2Tile2d :: Env -> Stm GPU -> GenRedM (Maybe (Stms GPU, Stm GPU))
 genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space kres_tps old_kbody))))
   | SegThread _novirt _ <- seg_thd,
     -- novirt == SegNoVirtFull || novirt == SegNoVirt,
-    KernelBody () kstms kres <- old_kbody,
+    Body () kstms kres <- old_kbody,
     Just (css, r_ses) <- allGoodReturns kres,
     null css,
     -- build the variance table, that records, for
@@ -164,18 +164,17 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       let space1 = SegSpace gid_flat_1 gid_dims_new
 
       let level1 = SegThread (SegNoVirtFull (SegSeqDims [])) Nothing -- novirt ?
-          kbody1 = KernelBody () ker1_stms [Returns ResultMaySimplify (Certs []) k1_res]
+          kbody1 = Body () ker1_stms [Returns ResultMaySimplify (Certs []) k1_res]
 
       -- is it OK here to use the "aux" from the parrent kernel?
       ker_exp <- renameExp $ Op (SegOp (SegMap level1 space1 [acc_tp] kbody1))
       let ker1 = Let pat_accum aux ker_exp
 
       -- 2 build the second kernel
-      let ker2_body = old_kbody {kernelBodyStms = code1 <> code2}
+      let ker2_body = old_kbody {bodyStms = code1 <> code2}
       ker2_exp <- renameExp $ Op (SegOp (SegMap seg_thd seg_space kres_tps ker2_body))
       let ker2 = Let pat_ker aux ker2_exp
-      pure $
-        Just (code1_tr_host <> oneStm ker1, ker2)
+      pure $ Just (code1_tr_host <> oneStm ker1, ker2)
   where
     isIndVarToParDim _ (Constant _) _ = False
     isIndVarToParDim variance (Var acc_ind) par_dim =

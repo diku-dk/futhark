@@ -70,7 +70,7 @@ mapLambdaToKernelBody ::
 mapLambdaToKernelBody onBody i lam arrs = do
   Body () stms res <- mapLambdaToBody onBody i lam arrs
   let ret (SubExpRes cs se) = Returns ResultMaySimplify cs se
-  pure $ KernelBody () stms $ map ret res
+  pure $ Body () stms $ map ret res
 
 reduceToSegBinOp :: Reduce SOACS -> ExtractM (Stms MC, SegBinOp MC)
 reduceToSegBinOp (Reduce comm lam nes) = do

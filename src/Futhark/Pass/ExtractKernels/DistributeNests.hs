@@ -782,7 +782,7 @@ segmentedUpdateKernel nest perm cs arr slice v = do
   mk_lvl <- mkSegLevel
   (k, prestms) <-
     mapKernel mk_lvl ispace kernel_inps' [dest_t] $
-      KernelBody () kstms [res]
+      Body () kstms [res]
 
   traverse renameStm <=< runBuilder_ $ do
     addStms prestms
@@ -817,7 +817,7 @@ segmentedGatherKernel nest cs arr slice = do
   mk_lvl <- mkSegLevel
   (k, prestms) <-
     mapKernel mk_lvl ispace kernel_inps [res_t] $
-      KernelBody () kstms [res]
+      Body () kstms [res]
 
   traverse renameStm <=< runBuilder_ $ do
     addStms prestms

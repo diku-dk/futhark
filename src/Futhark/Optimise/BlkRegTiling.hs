@@ -267,7 +267,7 @@ mmBlkRegTiling env stm = do
 
 mmBlkRegTilingAcc :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
-  | KernelBody () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
+  | Body () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
     cs == mempty,
     -- check kernel has one result of primitive type
     [res_tp] <- ts,
@@ -389,7 +389,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         let grid = KernelGrid (Count grid_size) (Count tblock_size)
             level' = SegBlock SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_t, gridDim_t), (gid_y, gridDim_y), (gid_x, gridDim_x)])
-            kbody' = KernelBody () stms_seggroup ret_seggroup
+            kbody' = Body () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
       pure $ Just (host_stms, new_kernel)
   where
@@ -462,7 +462,7 @@ mmBlkRegTilingAcc _ _ = pure Nothing
 
 mmBlkRegTilingNrm :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
-  | KernelBody () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
+  | Body () kstms [Returns ResultMaySimplify cs (Var res_nm)] <- old_kbody,
     cs == mempty,
     -- check kernel has one result of primitive type
     [res_tp] <- ts,
@@ -562,7 +562,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         let grid = KernelGrid (Count grid_size) (Count tblock_size)
             level' = SegBlock SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
-            kbody' = KernelBody () stms_seggroup ret_seggroup
+            kbody' = Body () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
       pure $ Just (host_stms, new_kernel)
   where
@@ -992,7 +992,7 @@ isInvarTo2of3InnerDims branch_variant kspace variance arrs =
 -- mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
 doRegTiling3D :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
-  | SegMap SegThread {} space kertp (KernelBody () kstms kres) <- old_kernel,
+  | SegMap SegThread {} space kertp (Body () kstms kres) <- old_kernel,
     -- build the variance table, that records, for
     -- each variable name, the variables it depends on
     initial_variance <- M.map mempty $ scopeOfSegSpace space,
@@ -1141,7 +1141,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                           pure (y_elm, y_ind)
 
                         let ret = WriteReturns mempty loc_Y_nm [(Slice [DimFix res_i], res_v)]
-                        let body = KernelBody () stms [ret]
+                        let body = Body () stms [ret]
                         loc_Y_nm_t <- lookupType loc_Y_nm
 
                         res_nms <-
@@ -1280,7 +1280,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         let grid = KernelGrid (Count grid_size) (Count tblock_size)
             level' = SegBlock SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z, gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
-            kbody' = KernelBody () stms_seggroup ret_seggroup
+            kbody' = Body () stms_seggroup ret_seggroup
 
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' kertp kbody'
       -- END (new_kernel, host_stms) <- runBuilder $ do

@@ -124,8 +124,8 @@ transformSegGroupKernelBody ::
   ExpMap rep ->
   KernelBody rep ->
   TransformM rep (KernelBody rep)
-transformSegGroupKernelBody perm_table expmap (KernelBody b stms res) =
-  KernelBody b <$> transformStms perm_table expmap stms <*> pure res
+transformSegGroupKernelBody perm_table expmap (Body b stms res) =
+  Body b <$> transformStms perm_table expmap stms <*> pure res
 
 -- | Transform the statements in the body of a SegThread kernel.
 transformSegThreadKernelBody ::
@@ -152,15 +152,13 @@ transformKernelBody ::
   VName ->
   KernelBody rep ->
   TransformM rep (KernelBody rep)
-transformKernelBody perm_table expmap p seg_name (KernelBody b stms res) = do
+transformKernelBody perm_table expmap p seg_name (Body b stms res) = do
   stms' <- transformStms perm_table expmap stms
-  evalStateT
-    ( traverseKernelBodyArrayIndexes
-        seg_name
-        (ensureTransformedAccess perm_table p)
-        (KernelBody b stms' res)
-    )
-    mempty
+  flip evalStateT mempty $
+    traverseKernelBodyArrayIndexes
+      seg_name
+      (ensureTransformedAccess perm_table p)
+      (Body b stms' res)
 
 traverseKernelBodyArrayIndexes ::
   forall m rep.
@@ -169,10 +167,8 @@ traverseKernelBodyArrayIndexes ::
   ArrayIndexTransform m ->
   KernelBody rep ->
   m (KernelBody rep)
-traverseKernelBodyArrayIndexes seg_name coalesce (KernelBody b kstms kres) =
-  KernelBody b . stmsFromList
-    <$> mapM onStm (stmsToList kstms)
-    <*> pure kres
+traverseKernelBodyArrayIndexes seg_name coalesce (Body b kstms kres) =
+  Body b <$> traverse onStm kstms <*> pure kres
   where
     onLambda lam =
       (\body' -> lam {lambdaBody = body'})

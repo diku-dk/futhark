@@ -9,6 +9,7 @@ module Futhark.Tools
     dissectScrema,
     sequentialStreamWholeArray,
     partitionChunkedFoldParameters,
+    withAcc,
     doScatter,
 
     -- * Primitive expressions
@@ -178,6 +179,29 @@ partitionChunkedFoldParameters _ [] =
 partitionChunkedFoldParameters num_accs (chunk_param : params) =
   let (acc_params, arr_params) = splitAt num_accs params
    in (chunk_param, acc_params, arr_params)
+
+-- | Construct a one-dimensional scatter-like 'WithAcc'. The closure is invoked
+-- with the accumulators.
+withAcc ::
+  (MonadBuilder m, LParam (Rep m) ~ Param Type) =>
+  [VName] ->
+  ([VName] -> m [SubExp]) ->
+  m (Exp (Rep m))
+withAcc dest mk = do
+  cert_ps <- replicateM (length dest) $ newParam "acc_cert" $ Prim Unit
+  dest_ts <- mapM lookupType dest
+  let acc_shape = Shape $ take rank $ arrayDims $ head dest_ts
+      mkT cert elem_t = Acc cert acc_shape [elem_t] NoUniqueness
+      acc_ts =
+        zipWith mkT (map paramName cert_ps) $
+          map (stripArray rank) dest_ts
+  acc_ps <- mapM (newParam "acc_p") acc_ts
+
+  withacc_lam <- mkLambda (cert_ps <> acc_ps) $ subExpsRes <$> mk (map paramName acc_ps)
+
+  pure $ WithAcc [(acc_shape, [v], Nothing) | v <- dest] withacc_lam
+  where
+    rank = 1
 
 -- | Perform a scatter-like operation using accumulators and map.
 doScatter ::

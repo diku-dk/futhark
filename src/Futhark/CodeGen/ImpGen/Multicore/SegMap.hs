@@ -34,7 +34,7 @@ compileSegMapBody ::
   SegSpace ->
   KernelBody MCMem ->
   MulticoreGen Imp.MCCode
-compileSegMapBody pat space (KernelBody _ kstms kres) = collect $ do
+compileSegMapBody pat space (Body _ kstms kres) = collect $ do
   let (is, ns) = unzip $ unSegSpace space
       ns' = map pe64 ns
   dPrim_ (segFlat space) int64

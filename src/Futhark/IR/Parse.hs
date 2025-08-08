@@ -925,7 +925,7 @@ pKernelResult = do
 
 pKernelBody :: PR rep -> Parser (SegOp.KernelBody rep)
 pKernelBody pr =
-  SegOp.KernelBody (pBodyDec pr)
+  Body (pBodyDec pr)
     <$> pStms pr
     <* keyword "return"
     <*> braces (pKernelResult `sepBy` pComma)
