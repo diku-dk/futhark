@@ -109,17 +109,17 @@ lowerAllocationsInSegOp ::
   SegOp lvl rep ->
   LowerM (inner rep) (SegOp lvl rep)
 lowerAllocationsInSegOp (SegMap lvl sp tps body) = do
-  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
+  stms <- lowerAllocationsInStms (bodyStms body) mempty mempty
+  pure $ SegMap lvl sp tps $ body {bodyStms = stms}
 lowerAllocationsInSegOp (SegRed lvl sp tps body binops) = do
-  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegRed lvl sp tps (body {kernelBodyStms = stms}) binops
+  stms <- lowerAllocationsInStms (bodyStms body) mempty mempty
+  pure $ SegRed lvl sp tps (body {bodyStms = stms}) binops
 lowerAllocationsInSegOp (SegScan lvl sp tps body binops) = do
-  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegScan lvl sp tps (body {kernelBodyStms = stms}) binops
+  stms <- lowerAllocationsInStms (bodyStms body) mempty mempty
+  pure $ SegScan lvl sp tps (body {bodyStms = stms}) binops
 lowerAllocationsInSegOp (SegHist lvl sp tps body histops) = do
-  stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
-  pure $ SegHist lvl sp tps (body {kernelBodyStms = stms}) histops
+  stms <- lowerAllocationsInStms (bodyStms body) mempty mempty
+  pure $ SegHist lvl sp tps (body {bodyStms = stms}) histops
 
 lowerAllocationsInHostOp :: HostOp NoOp GPUMem -> LowerM (HostOp NoOp GPUMem) (HostOp NoOp GPUMem)
 lowerAllocationsInHostOp (SegOp op) = SegOp <$> lowerAllocationsInSegOp op

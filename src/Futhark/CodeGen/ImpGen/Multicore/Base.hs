@@ -134,8 +134,6 @@ compileThreadResult ::
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ _ WriteReturns {} =
-  compilerBugS "compileThreadResult: WriteReturns unhandled."
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
 compileThreadResult _ _ RegTileReturns {} =

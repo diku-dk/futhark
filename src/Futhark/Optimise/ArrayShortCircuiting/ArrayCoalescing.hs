@@ -336,7 +336,7 @@ threadSlice _ _ = Nothing
 
 bodyToKernelBody :: Body (Aliases GPUMem) -> KernelBody (Aliases GPUMem)
 bodyToKernelBody (Body dec stms res) =
-  KernelBody dec stms $ map (\(SubExpRes cert subexps) -> Returns ResultNoSimplify cert subexps) res
+  Body dec stms $ map (\(SubExpRes cert subexps) -> Returns ResultNoSimplify cert subexps) res
 
 -- | A helper for all the different kinds of 'SegOp'.
 --
@@ -371,7 +371,7 @@ shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 
   -- that correspond to reductions.
   let ps_space_and_res =
         zip3 ps0 (replicate num_reds (dropLastSegSpace space0) <> repeat space0) $
-          kernelBodyResult kernel_body
+          bodyResult kernel_body
   -- Create coalescing relations between pattern elements and kernel body
   -- results
   let (actv0, inhibit0) =
@@ -390,7 +390,7 @@ shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 
   let actv0' = M.map (\etry -> etry {memrefs = mempty}) $ actv0 <> actv_return
   -- Process kernel body statements
   bu_env' <-
-    mkCoalsTabStms lutab (kernelBodyStms kernel_body) td_env $
+    mkCoalsTabStms lutab (bodyStms kernel_body) td_env $
       bu_env {activeCoals = actv0', inhibit = inhibit_return}
 
   let actv_coals_after =
@@ -522,11 +522,11 @@ makeSegMapCoals ::
   (CoalsTab, InhibitTab)
 makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), space, Returns _ _ (Var return_name))
   | Just (MemBlock tp return_shp return_mem _) <-
-      getScopeMemInfo return_name $ scope td_env <> scopeOf (kernelBodyStms kernel_body),
+      getScopeMemInfo return_name $ scope td_env <> scopeOf (bodyStms kernel_body),
     lvlOK lvl,
     MemMem pat_space <- runReader (lookupMemInfo pat_mem) $ removeScopeAliases $ scope td_env,
     MemMem return_space <-
-      scope td_env <> scopeOf (kernelBodyStms kernel_body) <> scopeOfSegSpace space
+      scope td_env <> scopeOf (bodyStms kernel_body) <> scopeOfSegSpace space
         & removeScopeAliases
         & runReader (lookupMemInfo return_mem),
     pat_space == return_space =
@@ -586,10 +586,6 @@ makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem p
         & map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst)
         & Slice
     resultSlice ixf = LMAD.slice ixf $ fullSlice (LMAD.shape ixf) thread_slice
-makeSegMapCoals _ _ td_env _ _ x (_, _, WriteReturns _ return_name _) =
-  case getScopeMemInfo return_name $ scope td_env of
-    Just (MemBlock _ _ return_mem _) -> markFailedCoal x return_mem
-    Nothing -> error "Should not happen?"
 makeSegMapCoals _ _ td_env _ _ x (_, _, result) =
   freeIn result
     & namesToList
@@ -1467,11 +1463,9 @@ genSSPointInfoSegOp
   scopetab
   (Pat [PatElem dst (_, MemArray dst_pt _ _ (ArrayIn dst_mem dst_ixf))])
   certs
-  (SegMap _ space _ kernel_body@KernelBody {kernelBodyResult = [Returns {}]})
+  (SegMap _ space _ kernel_body@Body {bodyResult = [Returns {}]})
     | (src, MemBlock src_pt shp src_mem src_ixf) : _ <-
-        mapMaybe getPotentialMapShortCircuit $
-          stmsToList $
-            kernelBodyStms kernel_body =
+        mapMaybe getPotentialMapShortCircuit $ stmsToList $ bodyStms kernel_body =
         Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, src_pt, shp, certs)]
     where
       iterators = map fst $ unSegSpace space
@@ -1744,10 +1738,10 @@ computeScalarTableSegOp scope_table segop = do
   concatMapM
     ( computeScalarTable $
         scope_table
-          <> scopeOf (kernelBodyStms $ segBody segop)
+          <> scopeOf (bodyStms $ segBody segop)
           <> scopeOfSegSpace (segSpace segop)
     )
-    (stmsToList $ kernelBodyStms $ segBody segop)
+    (stmsToList $ bodyStms $ segBody segop)
 
 computeScalarTableGPUMem ::
   ComputeScalarTable GPUMem (GPU.HostOp NoOp (Aliases GPUMem))

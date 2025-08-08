@@ -125,7 +125,8 @@ module Futhark.IR.Syntax
     Stms,
     SubExpRes (..),
     Result,
-    Body (..),
+    GBody (..),
+    Body,
     BasicOp (..),
     UnOp (..),
     BinOp (..),
@@ -300,19 +301,23 @@ subExpResVName _ = Nothing
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExpRes]
 
--- | A body consists of a sequence of statements, terminating in a
--- list of result values.
-data Body rep = Body
+-- | A generalised body consists of a sequence of statements, terminated in some
+-- kind of result.
+data GBody rep res = Body
   { bodyDec :: BodyDec rep,
     bodyStms :: Stms rep,
-    bodyResult :: Result
+    bodyResult :: [res]
   }
 
-deriving instance (RepTypes rep) => Ord (Body rep)
+-- | A body consists of a sequence of statements, terminating in a
+-- list of result values.
+type Body rep = GBody rep SubExpRes
 
-deriving instance (RepTypes rep) => Show (Body rep)
+deriving instance (RepTypes rep, Ord res) => Ord (GBody rep res)
 
-deriving instance (RepTypes rep) => Eq (Body rep)
+deriving instance (RepTypes rep, Show res) => Show (GBody rep res)
+
+deriving instance (RepTypes rep, Eq res) => Eq (GBody rep res)
 
 -- | Apart from being Opaque, what else is going on here?
 data OpaqueOp

@@ -113,8 +113,8 @@ compileSegRed pat lvl space segbinops map_kbody = do
 
   compileSegRed' pat grid space segbinops $ \red_cont ->
     sComment "apply map function" $
-      compileStms mempty (kernelBodyStms map_kbody) $ do
-        let (red_res, map_res) = splitAt (segBinOpResults segbinops) $ kernelBodyResult map_kbody
+      compileStms mempty (bodyStms map_kbody) $ do
+        let (red_res, map_res) = splitAt (segBinOpResults segbinops) $ bodyResult map_kbody
 
         let mapout_arrs = drop (segBinOpResults segbinops) $ patElems pat
         unless (null mapout_arrs) $
