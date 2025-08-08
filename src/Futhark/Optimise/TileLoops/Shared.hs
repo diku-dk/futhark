@@ -23,6 +23,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (foldl', zip4)
 import Data.Map qualified as M
+import Data.Maybe
 import Futhark.IR.GPU
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SeqMem qualified as ExpMem
@@ -181,9 +182,9 @@ segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f =
       acc' <- letExp "acc" $ BasicOp $ UpdateAcc Safe acc [res_i] [res_v]
       pure [Returns ResultMaySimplify mempty $ Var acc']
 
-    updt_arr_t <- lookupType updt_arr
+    acc_t <- lookupType acc
     fmap pure . letSubExp desc <=< renameExp $
-      Op (SegOp $ SegMap lvl segspace [updt_arr_t] body)
+      Op (SegOp $ SegMap lvl segspace [acc_t] body)
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices
@@ -283,16 +284,16 @@ initialIxFnEnv = M.mapMaybe f
 
 changeWithEnv :: WithEnv -> Exp GPU -> TileM WithEnv
 changeWithEnv with_env (WithAcc accum_decs inner_lam) = do
-  let bindings = map mapfun accum_decs
+  let bindings = mapMaybe mapfun accum_decs
       par_tps = take (length bindings) $ map paramName $ lambdaParams inner_lam
       with_env' = M.union with_env $ M.fromList $ zip par_tps bindings
   pure with_env'
   where
-    mapfun (_, _, Nothing) = error "What the hack is an accumulator without operator?"
+    mapfun (_, _, Nothing) = Nothing
     mapfun (shp, _, Just (lam_inds, ne)) =
       let len_inds = length $ shapeDims shp
           lam_op = lam_inds {lambdaParams = drop len_inds $ lambdaParams lam_inds}
-       in (lam_op, ne)
+       in Just (lam_op, ne)
 changeWithEnv with_env _ = pure with_env
 
 composeIxfuns :: IxFnEnv -> VName -> VName -> (LMAD -> Maybe LMAD) -> TileM IxFnEnv

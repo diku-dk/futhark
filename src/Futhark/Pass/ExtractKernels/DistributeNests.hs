@@ -753,11 +753,20 @@ segmentedUpdateKernel nest perm cs arr slice v = runBuilderT'_ $ do
       arr' =
         maybe (error "incorrectly typed Update") kernelInputArray $
           find ((== arr) . kernelInputName) kernel_inps
-  e <- withAcc [arr'] rank $ \ ~[acc] -> do
+
+  arr_t <- lookupType arr'
+  let arr_rank = arrayRank arr_t
+      remnant_dims = drop rank $ arrayDims arr_t
+
+  e <- withAcc [arr'] arr_rank $ \ ~[acc] -> do
     let slice_dims = sliceDims slice
     slice_gtids <- replicateM (length slice_dims) (newVName "gtid_slice")
+    remnant_gtids <- replicateM (length remnant_dims) $ newVName "gtid_remnant"
 
-    let ispace = base_ispace ++ zip slice_gtids slice_dims
+    let ispace =
+          base_ispace
+            <> zip slice_gtids slice_dims
+            <> zip remnant_gtids remnant_dims
 
     body <- runBodyBuilder $ do
       -- Compute indexes into full array.

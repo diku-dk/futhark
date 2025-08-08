@@ -105,8 +105,11 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     -- some `code1`, followed by one accumulation, followed by some `code2`
     -- UpdateAcc VName [SubExp] [SubExp]
     (code1, Just accum_stmt, code2) <- matchCodeAccumCode kstms,
-    Let pat_accum _aux_acc (BasicOp (UpdateAcc safety acc_nm acc_inds acc_vals)) <- accum_stmt,
-    [pat_acc_nm] <- patNames pat_accum,
+    Let
+      pat_accum@(Pat [PatElem pat_acc_nm acc_tp])
+      _aux_acc
+      (BasicOp (UpdateAcc safety acc_nm acc_inds acc_vals)) <-
+      accum_stmt,
     -- check that the `acc_inds` are invariant to at least one
     -- parallel kernel dimensions, and return the innermost such one:
     Just (invar_gid, gid_ind) <- isInvarToParDim mempty seg_space variance acc_inds,
@@ -127,15 +130,17 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     --   should abort.
     cost <- costRedundantExecution variance pat_acc_nm r_ses kstms,
     maxCost cost (Small 2) == Small 2,
+    -- Must hav eaccumulation operator.
+    Just ((redop0, neutral), el_tps) <- getAccLambda acc_tp,
     -- HACK: if any of the indexes depend on names that will not be in scope in
     -- the generated kernel, then we do not do the transformation. A better
     -- solution would be to actually put the necessary statements in the kernel.
-    not $ freeIn acc_inds `namesIntersect` namesFromList (concatMap (patNames . stmPat) kstms) = do
+    not $
+      freeIn acc_inds
+        `namesIntersect` namesFromList (concatMap (patNames . stmPat) kstms) = do
       -- 1. create the first kernel
-      acc_tp <- lookupType acc_nm
       let inv_dim_len = segSpaceDims seg_space !! gid_ind
-          -- 1.1. get the accumulation operator
-          ((redop0, neutral), el_tps) = getAccLambda acc_tp
+      -- 1.1. get the accumulation operator
       redop <- renameLambda redop0
       let red =
             Reduce
@@ -199,8 +204,8 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
       case acc_tp of
         (Acc tp_id _shp el_tps _) ->
           case M.lookup tp_id (fst env) of
-            Just lam -> (lam, el_tps)
-            _ -> error $ "Lookup in environment failed! " ++ prettyString tp_id ++ " env: " ++ show (fst env)
+            Just lam -> Just (lam, el_tps)
+            _ -> Nothing
         _ -> error "Illegal accumulator type!"
     -- is a subexp invariant to a gid of a parallel dimension?
     isSeInvar2 variance gid (Var x) =
