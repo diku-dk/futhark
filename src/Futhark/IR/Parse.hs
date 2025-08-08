@@ -901,11 +901,6 @@ pKernelResult = do
           ]
         <*> pure cs
         <*> pSubExp,
-      try $
-        SegOp.WriteReturns cs
-          <$> pVName
-          <* keyword "with"
-          <*> parens (pWrite `sepBy` pComma),
       try "tile"
         *> parens (SegOp.TileReturns cs <$> (pTile `sepBy` pComma))
         <*> pVName,
@@ -921,7 +916,6 @@ pKernelResult = do
         blk_tile <- pSubExp <* pAsterisk
         reg_tile <- pSubExp
         pure (dim, blk_tile, reg_tile)
-    pWrite = (,) <$> pSlice <* pEqual <*> pSubExp
 
 pKernelBody :: PR rep -> Parser (SegOp.KernelBody rep)
 pKernelBody pr =

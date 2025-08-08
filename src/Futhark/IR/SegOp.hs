@@ -22,7 +22,6 @@ module Futhark.IR.SegOp
     segBinOpResults,
     segBinOpChunks,
     KernelBody,
-    consumedInKernelBody,
     ResultManifest (..),
     KernelResult (..),
     kernelResultCerts,
@@ -182,10 +181,6 @@ data KernelResult
     -- Whether this is a result-per-thread or a
     -- result-per-block depends on where the 'SegOp' occurs.
     Returns ResultManifest Certs SubExp
-  | WriteReturns
-      Certs
-      VName -- Destination array
-      [(Slice SubExp, SubExp)]
   | TileReturns
       Certs
       [(SubExp, SubExp)] -- Total/tile for each dimension
@@ -206,20 +201,17 @@ data KernelResult
 -- | Get the certs for this 'KernelResult'.
 kernelResultCerts :: KernelResult -> Certs
 kernelResultCerts (Returns _ cs _) = cs
-kernelResultCerts (WriteReturns cs _ _) = cs
 kernelResultCerts (TileReturns cs _ _) = cs
 kernelResultCerts (RegTileReturns cs _ _) = cs
 
 -- | Get the root t'SubExp' corresponding values for a 'KernelResult'.
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (Returns _ _ se) = se
-kernelResultSubExp (WriteReturns _ arr _) = Var arr
 kernelResultSubExp (TileReturns _ _ v) = Var v
 kernelResultSubExp (RegTileReturns _ _ v) = Var v
 
 instance FreeIn KernelResult where
   freeIn' (Returns _ cs what) = freeIn' cs <> freeIn' what
-  freeIn' (WriteReturns cs arr res) = freeIn' cs <> freeIn' arr <> freeIn' res
   freeIn' (TileReturns cs dims v) =
     freeIn' cs <> freeIn' dims <> freeIn' v
   freeIn' (RegTileReturns cs dims_n_tiles v) =
@@ -228,11 +220,6 @@ instance FreeIn KernelResult where
 instance Substitute KernelResult where
   substituteNames subst (Returns manifest cs se) =
     Returns manifest (substituteNames subst cs) (substituteNames subst se)
-  substituteNames subst (WriteReturns cs arr res) =
-    WriteReturns
-      (substituteNames subst cs)
-      (substituteNames subst arr)
-      (substituteNames subst res)
   substituteNames subst (TileReturns cs dims v) =
     TileReturns
       (substituteNames subst cs)
@@ -247,17 +234,6 @@ instance Substitute KernelResult where
 instance Rename KernelResult where
   rename = substituteRename
 
--- | The variables consumed in the kernel body.
-consumedInKernelBody ::
-  (Aliased rep) =>
-  KernelBody rep ->
-  Names
-consumedInKernelBody (Body dec stms res) =
-  consumedInBody (Body dec stms []) <> mconcat (map consumedByReturn res)
-  where
-    consumedByReturn (WriteReturns _ a _) = oneName a
-    consumedByReturn _ = mempty
-
 checkKernelResult ::
   (TC.Checkable rep) =>
   KernelResult ->
@@ -266,20 +242,6 @@ checkKernelResult ::
 checkKernelResult (Returns _ cs what) t = do
   TC.checkCerts cs
   TC.require [t] what
-checkKernelResult (WriteReturns cs arr res) t = do
-  TC.checkCerts cs
-  arr_t <- lookupType arr
-  unless (arr_t == t) $
-    TC.bad . TC.TypeError $
-      "WriteReturns result type annotation for "
-        <> prettyText arr
-        <> " is "
-        <> prettyText t
-        <> ", but inferred as"
-        <> prettyText arr_t
-  forM_ res $ \(slice, e) -> do
-    TC.checkSlice arr_t slice
-    TC.require [t `setArrayShape` sliceShape slice] e
 checkKernelResult (TileReturns cs dims v) t = do
   TC.checkCerts cs
   forM_ dims $ \(dim, tile) -> do
@@ -315,10 +277,6 @@ checkKernelBody ::
   TC.TypeM rep ()
 checkKernelBody ts (Body (_, dec) stms kres) = do
   TC.checkBodyDec dec
-  -- We consume the kernel results (when applicable) before
-  -- type-checking the stms, so we will get an error if a statement
-  -- uses an array that is written to in a result.
-  mapM_ consumeKernelResult kres
   TC.checkStms stms $ do
     unless (length ts == length kres) $
       TC.bad . TC.TypeError $
@@ -328,11 +286,6 @@ checkKernelBody ts (Body (_, dec) stms kres) = do
           <> prettyText (length kres)
           <> " values."
     zipWithM_ checkKernelResult kres ts
-  where
-    consumeKernelResult (WriteReturns _ arr _) =
-      TC.consume =<< TC.lookupAliases arr
-    consumeKernelResult _ =
-      pure ()
 
 instance (PrettyRep rep) => Pretty (KernelBody rep) where
   pretty (Body _ stms res) =
@@ -352,12 +305,6 @@ instance Pretty KernelResult where
     hsep $ certAnnots cs <> ["returns (private)" <+> pretty what]
   pretty (Returns ResultMaySimplify cs what) =
     hsep $ certAnnots cs <> ["returns" <+> pretty what]
-  pretty (WriteReturns cs arr res) =
-    hsep $
-      certAnnots cs
-        <> [pretty arr </> "with" <+> PP.apply (map ppRes res)]
-    where
-      ppRes (slice, e) = pretty slice <+> "=" <+> pretty e
   pretty (TileReturns cs dims v) =
     hsep $ certAnnots cs <> ["tile" <> apply (map onDim dims) <+> pretty v]
     where
@@ -405,9 +352,7 @@ checkSegSpace (SegSpace _ dims) =
 --
 -- The type list is usually the type of the element returned by a
 -- single thread. The result of the SegOp is then an array of that
--- type, with the shape of the 'SegSpace' prepended. One exception is
--- for 'WriteReturns', where the type annotation is the /full/ type of
--- the result.
+-- type, with the shape of the 'SegSpace' prepended.
 data SegOp lvl rep
   = SegMap lvl SegSpace [Type] (KernelBody rep)
   | -- | The KernelSpace must always have at least two dimensions,
@@ -441,8 +386,6 @@ segBody segop =
     SegHist _ _ _ body _ -> body
 
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
-segResultShape _ t (WriteReturns {}) =
-  t
 segResultShape space t Returns {} =
   foldr (flip arrayOfRow) t $ segSpaceDims space
 segResultShape _ t (TileReturns _ dims _) =
@@ -494,13 +437,13 @@ instance (ASTConstraints lvl) => AliasedOp (SegOp lvl) where
   opAliases = map (const mempty) . segOpType
 
   consumedInOp (SegMap _ _ _ kbody) =
-    consumedInKernelBody kbody
+    consumedInBody kbody
   consumedInOp (SegRed _ _ _ kbody _) =
-    consumedInKernelBody kbody
+    consumedInBody kbody
   consumedInOp (SegScan _ _ _ kbody _) =
-    consumedInKernelBody kbody
+    consumedInBody kbody
   consumedInOp (SegHist _ _ _ kbody ops) =
-    namesFromList (concatMap histDest ops) <> consumedInKernelBody kbody
+    namesFromList (concatMap histDest ops) <> consumedInBody kbody
 
 -- | Type check a 'SegOp', given a checker for its level.
 typeCheckSegOp ::
@@ -951,11 +894,6 @@ instance Engine.Simplifiable SegSpace where
 instance Engine.Simplifiable KernelResult where
   simplify (Returns manifest cs what) =
     Returns manifest <$> Engine.simplify cs <*> Engine.simplify what
-  simplify (WriteReturns cs a res) =
-    WriteReturns
-      <$> Engine.simplify cs
-      <*> Engine.simplify a
-      <*> Engine.simplify res
   simplify (TileReturns cs dims what) =
     TileReturns <$> Engine.simplify cs <*> Engine.simplify dims <*> Engine.simplify what
   simplify (RegTileReturns cs dims_n_tiles what) =
@@ -982,8 +920,7 @@ simplifyKernelBody space (Body _ stms res) = do
 
   -- Ensure we do not try to use anything that is consumed in the result.
   (body_res, body_stms, hoisted) <-
-    Engine.localVtable (flip (foldl' (flip ST.consume)) (foldMap consumedInResult res))
-      . Engine.localVtable (<> scope_vtable)
+    Engine.localVtable (<> scope_vtable)
       . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
       . Engine.enterLoop
       $ Engine.blockIf blocker stms
@@ -997,11 +934,6 @@ simplifyKernelBody space (Body _ stms res) = do
   where
     scope_vtable = segSpaceSymbolTable space
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
-
-    consumedInResult (WriteReturns _ arr _) =
-      [arr]
-    consumedInResult _ =
-      []
 
 simplifyLambda ::
   (Engine.SimplifiableRep rep) =>
@@ -1343,26 +1275,16 @@ bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
 
 --- Memory
 
-kernelBodyReturns ::
-  (Mem rep inner, HasScope rep m, Monad m) =>
-  KernelBody somerep ->
-  [ExpReturns] ->
-  m [ExpReturns]
-kernelBodyReturns = zipWithM correct . bodyResult
-  where
-    correct (WriteReturns _ arr _) _ = varReturns arr
-    correct _ ret = pure ret
-
 -- | Like 'segOpType', but for memory representations.
 segOpReturns ::
   (Mem rep inner, Monad m, HasScope rep m) =>
   SegOp lvl rep ->
   m [ExpReturns]
-segOpReturns k@(SegMap _ _ _ kbody) =
-  kernelBodyReturns kbody . extReturns =<< opType k
-segOpReturns k@(SegRed _ _ _ kbody _) =
-  kernelBodyReturns kbody . extReturns =<< opType k
-segOpReturns k@(SegScan _ _ _ kbody _) =
-  kernelBodyReturns kbody . extReturns =<< opType k
+segOpReturns k@(SegMap {}) =
+  extReturns <$> opType k
+segOpReturns k@(SegRed {}) =
+  extReturns <$> opType k
+segOpReturns k@(SegScan {}) =
+  extReturns <$> opType k
 segOpReturns (SegHist _ _ _ _ ops) =
   concat <$> mapM (mapM varReturns . histDest) ops

@@ -47,6 +47,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.CodeGen.ImpGen.GPU.SegRed (compileSegRed')
 import Futhark.Construct (fullSliceNum)
+import Futhark.IR.Aliases (consumedInBody)
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Pass.ExplicitAllocations ()
@@ -198,7 +199,7 @@ data Passage = MustBeSinglePass | MayBeMultiPass deriving (Eq, Ord)
 
 bodyPassage :: KernelBody GPUMem -> Passage
 bodyPassage kbody
-  | mempty == consumedInKernelBody (Alias.analyseBody mempty kbody) =
+  | mempty == consumedInBody (Alias.analyseBody mempty kbody) =
       MayBeMultiPass
   | otherwise =
       MustBeSinglePass

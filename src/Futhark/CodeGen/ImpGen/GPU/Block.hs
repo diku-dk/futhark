@@ -698,8 +698,6 @@ compileBlockResult space pe (Returns _ _ what) = do
     -- block.  TODO: also do this if the array is in global memory
     -- (but this is a bit more tricky, synchronisation-wise).
       copyDWIMFix (patElemName pe) gids what []
-compileBlockResult _ _ WriteReturns {} =
-  compilerLimitationS "compileBlockResult: WriteReturns not handled yet."
 
 -- | The sizes of nested iteration spaces in the kernel.
 type SegOpSizes = S.Set [SubExp]

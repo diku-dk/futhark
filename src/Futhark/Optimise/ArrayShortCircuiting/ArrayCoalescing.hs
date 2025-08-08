@@ -586,10 +586,6 @@ makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem p
         & map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst)
         & Slice
     resultSlice ixf = LMAD.slice ixf $ fullSlice (LMAD.shape ixf) thread_slice
-makeSegMapCoals _ _ td_env _ _ x (_, _, WriteReturns _ return_name _) =
-  case getScopeMemInfo return_name $ scope td_env of
-    Just (MemBlock _ _ return_mem _) -> markFailedCoal x return_mem
-    Nothing -> error "Should not happen?"
 makeSegMapCoals _ _ td_env _ _ x (_, _, result) =
   freeIn result
     & namesToList
