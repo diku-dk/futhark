@@ -688,9 +688,12 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           let res = fmap resSubExp $ bodyResult $ lambdaBody $ segPostOpLambda post_op
           sComment "compute post op." $
             compileStms mempty (bodyStms $ lambdaBody $ segPostOpLambda post_op) $
-              sComment "write values" $
-                forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
-                  copyDWIMFix (patElemName pe) (map le64 gtids) subexp []
+              sComment "write mapped values" $ do
+                flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * tblock_size_e
+                dIndexSpace (zip gtids dims') flat_idx
+                sWhen (flat_idx .<. n) $ do
+                  forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
+                    copyDWIMFix (patElemName pe) (map le64 gtids) subexp []
 
-          sOp $ local_barrier
+      sOp $ local_barrier
 {-# NOINLINE compileSegScan #-}
